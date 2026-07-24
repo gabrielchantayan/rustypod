@@ -192,3 +192,258 @@ functions:
     notes: NULL-guarded strlen (returns 0 for null). Classic ADS strlen is
       genuinely absent from the binary; this is what retailOS uses.
       Variants: 0x0810b610 (identical), 0x08275e20 (count+1).
+
+  # --- Batch 2: ARM ADS arithmetic / stdlib runtime ---
+  - address: 0x08031568
+    ghidra: FUN_08031568
+    name: __rt_sdiv
+    size: 356
+    sig: "i32 __rt_sdiv(i32 num, i32 den)  // rem also in r1"
+    module: rt_div
+    status: ported
+    notes: 1812 call sites. Unrolled restoring division + sign fix.
+      Truncation semantics; div0 raises via __rt_raise (stubbed).
+
+  - address: 0x08036f14
+    ghidra: FUN_08036f14
+    name: __rt_udiv
+    size: 28
+    sig: "u32 __rt_udiv(u32 num, u32 den)"
+    module: rt_div
+    status: ported
+    notes: 487 call sites; joins the sdiv core mid-stream skipping sign handling.
+
+  - address: 0x0803421c
+    name: __rt_div0
+    size: 12
+    module: rt_div
+    status: identified
+    notes: mov r0,#2; mov r1,#2; b __rt_raise(0x080320a8).
+
+  - address: 0x0802eefc
+    ghidra: FUN_0802eefc
+    name: __aeabi_uldivmod
+    size: 712
+    sig: "u64 __aeabi_uldivmod(u64 num, u64 den)  // rem in r2:r3"
+    module: aeabi_64div
+    status: ported
+    notes: clz-normalized shifting restore; 53 callers.
+
+  - address: 0x0802ee34
+    ghidra: FUN_0802ee34
+    name: __aeabi_ldivmod
+    size: 80
+    sig: "i64 __aeabi_ldivmod(i64 num, i64 den)"
+    module: aeabi_64div
+    status: ported
+    notes: Signed wrapper over the unsigned core; 52 callers.
+
+  - address: 0x0802ee84
+    ghidra: FUN_0802ee84
+    name: __aeabi_llsl
+    size: 40
+    sig: "u64 __aeabi_llsl(u64 v, u32 shift)"
+    module: aeabi_64shift
+    status: ported
+
+  - address: 0x0802eeac
+    ghidra: FUN_0802eeac
+    name: __aeabi_llsr
+    size: 40
+    sig: "u64 __aeabi_llsr(u64 v, u32 shift)"
+    module: aeabi_64shift
+    status: ported
+
+  - address: 0x0802eed4
+    ghidra: FUN_0802eed4
+    name: __aeabi_lasr
+    size: 40
+    sig: "i64 __aeabi_lasr(i64 v, u32 shift)"
+    module: aeabi_64shift
+    status: ported
+
+  - address: 0x080320d0
+    ghidra: FUN_080320d0
+    name: _ll_udiv10
+    size: 152
+    sig: "u64 _ll_udiv10(u64 num)  // rem in r2"
+    module: ll_udiv10
+    status: ported
+    notes: Shift-add magic multiply by 10; callers: dtoa, %lld, strtoull.
+
+  - address: 0x08030e7c
+    ghidra: FUN_08030e7c
+    name: srandom
+    size: 68
+    sig: "void srandom(u32 seed)"
+    module: random
+    status: ported
+    notes: Seeds 55-word table @ 0x08b2f918 (LCG *69069 + 0x66d619e1,
+      store seed+(seed>>16)); lag indices @ 0x08a0fb94 = 23/54.
+
+  - address: 0x08030ec8
+    ghidra: FUN_08030ec8
+    name: random
+    size: 84
+    sig: "i32 random()"
+    module: random
+    status: ported
+    notes: Additive lagged Fibonacci; result & 0x7fffffff.
+
+  - address: 0x08030ec0
+    name: srandom1_thunk
+    size: 8
+    module: random
+    status: ported
+    notes: srandom(1) tail call.
+
+  - address: 0x0802f1bc
+    ghidra: FUN_0802f1bc
+    name: tolower
+    size: 36
+    sig: "i32 tolower(i32 c)"
+    module: ctype
+    status: ported
+    notes: ctype table @ 0x08985f01 (EOF guard byte at -1); bit 0x10 =
+      uppercase (adds 0x20). Table embedded in ctype.rs as CTYPE_TABLE.
+
+  - address: 0x0802f1e0
+    ghidra: FUN_0802f1e0
+    name: toupper
+    size: 40
+    sig: "i32 toupper(i32 c)"
+    module: ctype
+    status: ported
+    notes: bit 0x08 = lowercase (subtracts 0x20); 0xdf guard (dead under C locale).
+
+  - address: 0x08032fec
+    ghidra: FUN_08032fec
+    name: _chval
+    size: 32
+    sig: "i32 _chval(u8 c, u32 base)"
+    module: chval
+    status: ported
+    notes: ASCII to digit, -1 if invalid for base.
+
+  - address: 0x08030e60
+    ghidra: FUN_08030e60
+    name: ldiv
+    size: 28
+    sig: "ldiv_t ldiv(i32 num, i32 den)"
+    module: chval
+    status: ported
+    notes: Tail-calls __rt_sdiv, stores {quot, rem} via hidden ptr.
+
+  - address: 0x08033088
+    ghidra: FUN_08033088
+    name: strtoul
+    size: 232
+    sig: "u32 strtoul(const char *s, char **endptr, int base)"
+    module: strtoul
+    status: ported
+    notes: Conversion core merged with ws/sign wrapper @ 0x0802f87c.
+      ADS quirk: "0x" with no hex digit = no conversion. errno skipped.
+
+  - address: 0x0802f87c
+    ghidra: FUN_0802f87c
+    name: strtol
+    size: 176
+    sig: "i32 strtol(const char *s, char **endptr, int base)"
+    module: strtol
+    status: ported
+    notes: Clamps i32::MAX/MIN (port follows ADS wrapper contract;
+      literal core wraps). errno skipped.
+
+  - address: 0x0802f990
+    ghidra: FUN_0802f990
+    name: atoi
+    size: 52
+    sig: "i32 atoi(const char *s)"
+    module: strtol
+    status: ported
+
+  - address: 0x0802fba0
+    ghidra: FUN_0802fba0
+    name: atol
+    size: 52
+    sig: "i32 atol(const char *s)"
+    module: strtol
+    status: ported
+
+  - address: 0x08034e68
+    ghidra: FUN_08034e68
+    name: __strtoull
+    size: 288
+    sig: "u64 __strtoull(const char *s, char **endptr, int base)"
+    module: strtoull
+    status: ported
+    notes: 16/32/16-bit split accumulation (umull only). No standalone
+      strtoull wrapper exists; port reconstructs it from strtoll prologue.
+
+  - address: 0x080332d0
+    ghidra: FUN_080332d0
+    name: strtoll
+    size: 248
+    module: strtoull
+    status: identified
+    notes: Signed wrapper calling __strtoull; not yet ported.
+
+  - address: 0x08031720
+    ghidra: FUN_08031720
+    name: setjmp
+    size: 40
+    sig: "i32 setjmp(JmpBuf *env)"
+    module: setjmp
+    status: ported
+    notes: EXACT MATCH (instruction-for-instruction). Saves r4-r11,sp,lr
+      in non-ascending order + unwinder self-ref slot.
+
+  - address: 0x08031748
+    ghidra: FUN_08031748
+    name: longjmp
+    size: 44
+    sig: "void longjmp(const JmpBuf *env, i32 val)"
+    module: setjmp
+    status: ported
+    notes: 10/11 instructions match (bl via relocation). val==0 -> 1.
+
+  - address: 0x080336cc
+    ghidra: FUN_080336cc
+    name: stack_switch
+    size: 12
+    module: setjmp
+    status: ported
+    notes: EXACT MATCH. push {r0,r1}; ldm sp,{sl,sp}; mov pc,lr.
+
+  - address: 0x08000020
+    name: __rt_memcpy
+    size: 180
+    sig: "void *__rt_memcpy(void *dst, const void *src, size_t len)"
+    module: rt_memcpy
+    status: ported
+    notes: THE hottest function (~620 call sites via veneer 0x08037db0).
+      dst-align prologue, funnel shifts for misaligned src, tail-branches
+      to the shared block body @ 0x08000188. Not in functions.csv.
+
+  # --- Corrections / discoveries from batch 2 ---
+  - address: 0x08030998
+    ghidra: FUN_08030998
+    name: qsort_inner
+    size: 828
+    status: identified
+    notes: Insertion sort / median-of-three quicksort with explicit
+      recursion stack. Previously misidentified as __strtoull.
+
+  - address: 0x08030cd4
+    ghidra: FUN_08030cd4
+    name: qsort
+    size: 256
+    status: identified
+    notes: Public qsort; 7 callers. Previously misidentified as strtoull.
+
+  - address: 0x08985f01
+    name: ctype_table
+    size: 256
+    status: identified
+    notes: C-locale ctype flags table (+0x10 uppercase, +0x08 lowercase);
+      EOF guard byte at 0x08985f00. Embedded in ctype.rs.
