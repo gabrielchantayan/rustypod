@@ -447,3 +447,239 @@ functions:
     status: identified
     notes: C-locale ctype flags table (+0x10 uppercase, +0x08 lowercase);
       EOF guard byte at 0x08985f00. Embedded in ctype.rs.
+
+  # --- Batch 3: stdlib control flow, time, errno, printf helpers ---
+  - address: 0x08030cd4
+    ghidra: FUN_08030cd4
+    name: qsort
+    size: 256
+    sig: "void qsort(void *base, size_t count, size_t size, cmp_fn)"
+    module: qsort
+    status: ported
+    notes: 7 callers. Always runs insertion-sort finish after qsort_inner
+      when count > 10 (repairs abandoned small partitions).
+
+  - address: 0x08030998
+    ghidra: FUN_08030998
+    name: qsort_inner
+    size: 828
+    module: qsort
+    status: ported
+    notes: Median-of-three quicksort, explicit 32-entry partition stack,
+      larger half pushed / smaller half looped.
+
+  - address: 0x080332d0
+    ghidra: FUN_080332d0
+    name: strtoll
+    size: 248
+    sig: "i64 strtoll(const char *s, char **endptr, int base)"
+    module: strtoll
+    status: ported
+    notes: Clamps i64::MAX/MIN; errno skipped.
+
+  - address: 0x08031310
+    ghidra: FUN_08031310
+    name: mktime
+    size: 584
+    sig: "i32 mktime(struct tm *tm)"
+    module: mktime
+    status: ported
+    notes: Normalizes out-of-range fields, computes wday/yday; time_t=i32.
+
+  - address: 0x080312ac
+    name: mktime_normalize
+    size: 100
+    module: mktime
+    status: ported
+    notes: 16-bit split + division carry propagation helper.
+
+  - address: 0x080312a0
+    name: localtime
+    size: 12
+    sig: "struct tm *localtime(const i32 *t)"
+    module: localtime
+    status: ported
+    notes: Veneer to core via static tm @ 0x08b2f9f4 (not thread-safe).
+      Ghidra size (256) wrong — it's a 12-byte branch.
+
+  - address: 0x08033590
+    name: gmtime_core
+    size: 260
+    module: localtime
+    status: ported
+    notes: time_t decomposition; div-by-10 magic helper @ 0x08033694.
+
+  - address: 0x08035634
+    ghidra: FUN_08035634
+    name: raise
+    size: 284
+    sig: "i32 raise(i32 sig)"
+    module: raise
+    status: ported
+    notes: ADS signal dispatcher; handler table dead-stripped in stock
+      binary (constant-folds to default handler). SIG count 14.
+
+  - address: 0x080320a8
+    ghidra: FUN_080320a8
+    name: __rt_raise
+    size: 48
+    module: raise
+    status: ported
+    notes: Calls raise then aborts via retailOS terminate @ 0x82b20a0 (stubbed).
+
+  - address: 0x08030f2c
+    ghidra: FUN_08030f2c
+    name: exit
+    size: 48
+    module: exit
+    status: ported
+    notes: Tails into __rt_sys_exit @ 0x08032084.
+
+  - address: 0x08032084
+    ghidra: FUN_08032084
+    name: __rt_sys_exit
+    size: 36
+    module: exit
+    status: ported
+    notes: stdio flush (semihost, dead) then retailOS terminate @ 0x82b20a0.
+
+  - address: 0x08032058
+    ghidra: FUN_08032058
+    name: abort
+    size: 44
+    module: exit
+    status: ported
+    notes: Message printer @ 0x08035788 then exit path.
+
+  - address: 0x08033720
+    name: __rt_exit
+    size: 56
+    module: exit
+    status: ported
+    notes: Runs the atexit handler chain.
+
+  - address: 0x080358b4
+    ghidra: FUN_080358b4
+    name: atexit
+    size: 104
+    sig: "i32 atexit(void (*f)(void))"
+    module: atexit
+    status: ported
+    notes: [libspace+0x3c] table ptr; malloc(32) on first use; LIFO run order.
+
+  - address: 0x080316cc
+    name: __cpp_initialise
+    size: 56
+    module: atexit
+    status: ported
+    notes: Walks pc-rel fn-ptr table calling each (C++ static init).
+
+  - address: 0x080336d8
+    name: __cpp_finalise
+    size: 60
+    module: atexit
+    status: ported
+    notes: mla-indexed destructor-array walk.
+
+  - address: 0x0802e94c
+    ghidra: FUN_0802e94c
+    name: block_byteswap
+    size: 844
+    sig: "void block_byteswap(void *dst, const void *src, size_t len)"
+    module: byteswap
+    status: ported
+    notes: retailOS-specific; eor/ror#16/and 0xff00 idiom, 8 words/pass.
+      Word-aligned pointers only (ldm/stm).
+
+  - address: 0x08035588
+    ghidra: FUN_08035588
+    name: wcrtomb
+    size: 112
+    sig: "i32 wcrtomb(char *s, u32 wc, void *state)"
+    module: mbrtowc
+    status: ported
+    notes: Wide->multibyte via LC_CTYPE block (libspace+0x24). Retail quirk:
+      C-locale block[0x101] reads mktime month table (29) so converter path
+      is dead; reduces to valid iff wc < 0x80. Previously called 'mbrtowc'.
+
+  - address: 0x08032f68
+    name: printf_mem_putc
+    size: 20
+    module: printf_helpers
+    status: ported
+
+  - address: 0x08032f7c
+    name: printf_bounded_putc
+    size: 20
+    module: printf_helpers
+    status: ported
+
+  - address: 0x0802f208
+    ghidra: FUN_0802f208
+    name: printf_pad_emit
+    size: 84
+    module: printf_helpers
+    status: ported
+
+  - address: 0x0802f25c
+    ghidra: FUN_0802f25c
+    name: printf_pad_emit_zero
+    size: 72
+    module: printf_helpers
+    status: ported
+
+  - address: 0x0802f2a4
+    name: printf_widen_signed
+    size: 36
+    module: printf_helpers
+    status: ported
+
+  - address: 0x0802f2c8
+    name: printf_widen_unsigned
+    size: 36
+    module: printf_helpers
+    status: ported
+    notes: h/hh length-flag argument widening.
+
+  - address: 0x0803204c
+    name: __rt_libspace
+    size: 8
+    sig: "Libspace *__rt_libspace()  // base 0x08b31774"
+    module: errno
+    status: ported
+    notes: Offsets: +0x00 errno, +0x08 heap desc, +0x14/+0x1c alloc arena,
+      +0x24 ctype/LC_CTYPE block ptr, +0x28/+0x2c lc_numeric, +0x3c atexit tbl.
+
+  - address: 0x0802ecb4
+    name: __rt_errno_addr
+    size: 12
+    sig: "i32 *__rt_errno_addr()"
+    module: errno
+    status: ported
+
+  - address: 0x08032168
+    name: errno_get
+    size: 16
+    module: errno
+    status: ported
+
+  - address: 0x08032178
+    name: errno_set
+    size: 20
+    module: errno
+    status: ported
+
+  - address: 0x0802eca0
+    name: __rt_ctype_table_addr
+    size: 16
+    module: errno
+    status: ported
+    notes: libspace+0x24 -> LC_CTYPE block (0x08985f01 for C locale).
+
+  - address: 0x0803350c
+    name: __assert_fail
+    size: 52
+    module: assert_rt
+    status: ported
+    notes: Three identical copies (also 0x080355f8, 0x08036b80). Calls
+      retailOS assert printer @ 0x8391e38 (stubbed).
