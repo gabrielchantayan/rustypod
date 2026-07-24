@@ -1,0 +1,57 @@
+# names.yaml — knowledge base for the retailOS Rust port.
+#
+# Maps osos load addresses to semantic names, signatures, variable renames
+# and notes. Addresses are load addresses (base 0x08000000); file offset in
+# osos.dec = address - 0x08000000. Sizes from Ghidra (decomp/functions.csv).
+
+base: 0x08000000
+
+functions:
+  - address: 0x080000d4
+    ghidra: FUN_080000d4
+    name: memmove
+    size: 452
+    sig: "void *memmove(void *dst, const void *src, size_t len)"
+    module: libc
+    status: ported
+    vars: {param_1: dst, param_2: src, param_3: len}
+    notes: >
+      ARM ADS runtime memmove. Backward copy on overlap from above,
+      32-byte block fast paths, funnel shifts for misaligned src.
+      Behavioral parity verified by cargo test against std.
+
+  - address: 0x08000188
+    ghidra: FUN_08000188
+    name: memcpy
+    size: 108
+    sig: "void *memcpy(void *dst, const void *src, size_t len)"
+    module: libc
+    status: identified
+    vars: {param_1: dst, param_2: src, param_3: len}
+    notes: >
+      Forward word copy, 32/16/8/4-byte blocks + tail. Assumes both
+      pointers word-aligned (called from memmove's aligned path).
+
+  - address: 0x0800027c
+    ghidra: FUN_0800027c
+    name: memzero_aligned
+    size: 88
+    sig: "void *memzero_aligned(void *dst, size_t len)"
+    module: libc
+    status: identified
+    vars: {param_1: dst, param_2: len}
+    notes: >
+      Zero-fill, word blocks; entry expects word-aligned dst.
+      Immediately precedes memzero in the image (shared tail likely).
+
+  - address: 0x080002d4
+    ghidra: FUN_080002d4
+    name: memzero
+    size: 68
+    sig: "void *memzero(void *dst, size_t len)"
+    module: libc
+    status: identified
+    vars: {param_1: dst, param_2: len}
+    notes: >
+      Zero-fill with alignment prologue (handles len < 4 and misaligned
+      dst, then the same block loop as memzero_aligned).
