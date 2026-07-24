@@ -5,6 +5,9 @@
 # osos.dec = address - 0x08000000. Sizes from Ghidra (decomp/functions.csv)
 # unless noted.
 #
+# module values are folder/file under src/ (older entries use the pre-reorg
+# flat file stems — same names, now organized into libc/, runtime/, strto/,
+# time/, printf/, scanf/, stdio/, fp/).
 # status values: identified / ported
 # "ported" means: Rust port exists in src/, behavioral tests vs a reference
 # implementation pass on host (cargo test), and a match.py mnemonic diff
