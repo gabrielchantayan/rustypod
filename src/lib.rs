@@ -34,3 +34,17 @@ pub mod strlen_safe;
 pub mod strncmp;
 pub mod strncpy;
 pub mod strstr;
+
+// Batch 2: ARM ADS arithmetic / stdlib runtime.
+pub mod aeabi_64div;
+pub mod aeabi_64shift;
+pub mod chval;
+pub mod ctype;
+pub mod ll_udiv10;
+pub mod random;
+pub mod rt_div;
+pub mod rt_memcpy;
+pub mod setjmp;
+pub mod strtol;
+pub mod strtoull;
+pub mod strtoul;
