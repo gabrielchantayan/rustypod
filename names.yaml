@@ -683,3 +683,171 @@ functions:
     status: ported
     notes: Three identical copies (also 0x080355f8, 0x08036b80). Calls
       retailOS assert printer @ 0x8391e38 (stubbed).
+
+  # --- Batch 4: printf converters, malloc veneers, scanf front-end ---
+  - address: 0x0802f2e8
+    ghidra: FUN_0802f2e8
+    name: convert_s
+    size: 156
+    sig: "void convert_s(PrintfState *state, const char *s)"
+    module: printf_s
+    status: ported
+    notes: "%s converter; takes min_len in r2 (-1=%s, 1=%c). Zero-pad NOT
+      suppressed for strings. NULL deref on device (port: empty string)."
+
+  - address: 0x0802f4b4
+    ghidra: FUN_0802f4b4
+    name: convert_d
+    size: 176
+    sig: "void convert_d(PrintfState *state, i32 value)"
+    module: printf_d
+    status: ported
+    notes: "%d/%i/%u 32-bit; dispatched on conversion char. 0 flag cleared
+      when precision given. Uses div10 helper @ 0x08033694."
+
+  - address: 0x08033694
+    name: div10_u32
+    size: 44
+    module: printf_d
+    status: ported
+    notes: Shift-add divide-by-10 (telescoping + fix-up).
+
+  - address: 0x0802f384
+    ghidra: FUN_0802f384
+    name: convert_x
+    size: 280
+    sig: "void convert_x(PrintfState *state, u32 value)"
+    module: printf_x
+    status: ported
+    notes: "%x/%X/%p; digit tables @ 0x08985be4/0x08985bf5; # prefix only
+      for nonzero after widening; %#p odd '@' prefix @ 0x0802f4a8."
+
+  - address: 0x080323ec
+    ghidra: FUN_080323ec
+    name: convert_o
+    size: 224
+    sig: "void convert_o(PrintfState *state, u32 value)"
+    module: printf_o
+    status: ported
+    notes: "%o; # alt-form '0' prefix consumes one precision unit."
+
+  - address: 0x0802f574
+    ghidra: FUN_0802f574
+    name: convert_lld
+    size: 208
+    sig: "void convert_lld(PrintfState *state, i64 value)"
+    module: printf_ll
+    status: ported
+    notes: "%lld/%llu; digit loop via _ll_udiv10 @ 0x080320d0."
+
+  - address: 0x080322cc
+    ghidra: FUN_080322cc
+    name: out_padded
+    size: 288
+    sig: "void out_padded(state, digits, num_digits, prefix, prefix_len)"
+    module: printf_out
+    status: ported
+    notes: Shared integer emitter — TRUE 5-arg ABI (prefix_len on stack);
+      prefix does NOT come from state.prefix. Order: space-pad, prefix,
+      zero-pad, precision zeros, digits, trailing pad. Other converters
+      (d/x/o/ll) currently inline private copies — dedup candidate.
+
+  - address: 0x080324d4
+    ghidra: FUN_080324d4
+    name: store_n
+    size: 60
+    sig: "void store_n(const PrintfState *state, void *dest)"
+    module: printf_out
+    status: ported
+    notes: "%n; width per flags 0x400 hh/0x100 h/0x80 ll."
+
+  - address: 0x0803218c
+    ghidra: FUN_0803218c
+    name: convert_ls
+    size: 316
+    sig: "void convert_ls(PrintfState *state, const u16 *ws)"
+    module: printf_wide
+    status: ported
+    notes: "%ls; two-pass (measure bytes via wcrtomb, then emit); precision
+      in BYTES; chars >= 0x80 silently skipped (C-locale dead path)."
+
+  - address: 0x0802edac
+    ghidra: FUN_0802edac
+    name: malloc
+    size: 40
+    sig: "void *malloc(size_t size)"
+    module: malloc_rt
+    status: ported
+    notes: 152 callers; veneer to retailOS allocator @ 0x080eb67c
+      (via 0x082ab188). Heap itself not yet ported (HEAP_OPS indirection).
+
+  - address: 0x0802edc8
+    ghidra: FUN_0802edc8
+    name: free
+    size: 52
+    sig: "void free(void *ptr)"
+    module: malloc_rt
+    status: ported
+    notes: 150 callers; NULL-guard; retailOS free @ 0x080e7970.
+
+  - address: 0x0802edec
+    ghidra: FUN_0802edec
+    name: realloc
+    size: 92
+    sig: "void *realloc(void *ptr, size_t size)"
+    module: malloc_rt
+    status: ported
+    notes: 25 callers; 0-size=free, NULL=malloc; retailOS @ 0x080edbf0.
+
+  - address: 0x0802ed14
+    ghidra: FUN_0802ed14
+    name: __rt_heap_init
+    size: 152
+    module: malloc_rt
+    status: ported
+    notes: Aligns to 8, stores heap desc [libspace+8]; grow via 0x0803571c,
+      SIGRTMEM(9) via __rt_raise on failure.
+
+  - address: 0x0803300c
+    ghidra: FUN_0803300c
+    name: string_getc
+    size: 56
+    module: scanf_helpers
+    status: ported
+    notes: Sticky EOF; count budget; no advance at EOF.
+
+  - address: 0x08033044
+    ghidra: FUN_08033044
+    name: string_ungetc
+    size: 64
+    module: scanf_helpers
+    status: ported
+    notes: No char arg — rewinds one; multi-level down to base; fails on
+      sticky EOF/count==0/ptr==base.
+
+  - address: 0x0803328c
+    name: getc_advance
+    size: 20
+    module: scanf_helpers
+    status: ported
+    notes: Returns **cursor then *cursor += delta (1=consume, 0=peek, -1=back).
+
+  - address: 0x0802f92c
+    ghidra: FUN_0802f92c
+    name: sscanf
+    size: 92
+    sig: "i32 sscanf(const char *s, const char *fmt, ...)"
+    module: scanf_helpers
+    status: ported
+    notes: Builds 52-byte ScanfState; engine via SCANF_ENGINE pointer
+      (real target: format-engine prologue @ 0x080332a4 → 0x0803484c,
+      next batch). Variadic capture deferred (stable Rust).
+
+  - address: 0x08033170
+    ghidra: FUN_08033170
+    name: vsscanf
+    size: 108
+    module: scanf_helpers
+    status: ported
+    notes: NOT ISO vsscanf — scans ONE numeric/float conversion, reports
+      consumed length; engine veneer @ 0x08036348 (next batch).
