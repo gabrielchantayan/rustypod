@@ -73,3 +73,11 @@ pub mod printf_s;
 pub mod printf_wide;
 pub mod printf_x;
 pub mod scanf_helpers;
+
+// Batch 5: printf core + API, strtod, scanf converters.
+pub mod printf_api;
+pub mod printf_core;
+pub mod scanf_float;
+pub mod scanf_int;
+pub mod scanf_str;
+pub mod strtod;
