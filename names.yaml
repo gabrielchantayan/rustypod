@@ -1021,3 +1021,262 @@ functions:
   # (-> 0x08033f40), __kernel_sin 0x0803375c, __kernel_cos 0x08033dc8,
   # __kernel_rem_pio2 0x080338f4, _dpoly 0x08035a48, libm raise wrapper
   # 0x08032178, float wrapper 0x08031f44 + decompose 0x080340fc.
+
+  # --- Batch 6: soft-float primitives (region 0x083eae74-0x083ed1ff) ---
+  - address: 0x083ece54
+    name: __ieee_status
+    size: 8
+    module: fp_scalb
+    status: ported
+    notes: ADS default stub, always returns 0.
+
+  - address: 0x083ed0dc
+    name: __dscalb
+    size: 116
+    module: fp_scalb
+    status: ported
+    notes: scalbn double; NaN -> descriptor 0x0400009b -> canonical qNaN.
+
+  - address: 0x083ed150
+    name: __fscalb
+    size: 164
+    module: fp_scalb
+    status: ported
+
+  - address: 0x083eb144
+    name: fp_exception_dispatchers
+    size: 280
+    module: fp_scalb
+    status: ported
+    notes: 0x083eb144 double NaN/err, 0x083eb154 double unordered-cmp,
+      0x083eb1d4 float NaN/err, trap decode 0x083ed080 (nibbles 8/9/10).
+      Modeled via FP_TRAP_HANDLER hook (default: canonical NaN).
+
+  - address: 0x083eb748
+    name: __dcmpeq
+    size: 260
+    module: fp_compare
+    status: ported
+    notes: Packed-CPSR return (N=8,Z=4,C=2,V=1); unordered=0xA.
+      Denormal inputs flush to signed zero (NOT IEEE). gt/ge = swapped b-vs-a.
+
+  - address: 0x083eb9c0
+    name: __dcmplt/__dcmple
+    size: 132
+    module: fp_compare
+    status: ported
+
+  - address: 0x083ebe38
+    name: __dcmpgt/__dcmpge
+    size: 156
+    module: fp_compare
+    status: ported
+
+  - address: 0x083ec820
+    name: __fcmpeq
+    size: 216
+    module: fp_compare
+    status: ported
+
+  - address: 0x083ec9a8
+    name: __fcmplt/__fcmple
+    size: 116
+    module: fp_compare
+    status: ported
+
+  - address: 0x083ecba4
+    name: __fcmpgt/__fcmpge
+    size: 128
+    module: fp_compare
+    status: ported
+
+  - address: 0x083eb7d0
+    name: __d2i
+    size: 184
+    module: fp_dconv
+    status: ported
+    notes: Truncate, saturate MIN/MAX, NaN->0 via FP_TRAP_HANDLER.
+
+  - address: 0x083eb880
+    name: __d2u
+    size: 132
+    module: fp_dconv
+    status: ported
+
+  - address: 0x083eb908
+    name: __i2d
+    size: 48
+    module: fp_dconv
+    status: ported
+
+  - address: 0x083eb9b4
+    name: __u2d
+    size: 12
+    module: fp_dconv
+    status: ported
+
+  - address: 0x083eb940
+    name: __ll2d
+    size: 116
+    module: fp_dconv
+    status: ported
+    notes: Round-to-nearest-even with sticky.
+
+  - address: 0x083eb938
+    name: __ull2d
+    size: 8
+    module: fp_dconv
+    status: ported
+
+  - address: 0x083ece5c
+    name: __d2ll
+    size: 212
+    module: fp_dconv
+    status: ported
+
+  - address: 0x083ecf34
+    name: __d2ull
+    size: 148
+    module: fp_dconv
+    status: ported
+
+  - address: 0x083ec898
+    name: __f2i
+    size: 120
+    module: fp_fconv
+    status: ported
+
+  - address: 0x083ec90c
+    name: __f2u
+    size: 92
+    module: fp_fconv
+    status: ported
+
+  - address: 0x083ec96c
+    name: __i2f
+    size: 52
+    module: fp_fconv
+    status: ported
+
+  - address: 0x083ec9a0
+    name: __u2f
+    size: 8
+    module: fp_fconv
+    status: ported
+
+  - address: 0x083ecffc
+    name: __f2ll
+    size: 204
+    module: fp_fconv
+    status: ported
+    notes: Quirks: negatives>=1 -> +0; [2^63,2^64) wraps; >=2^64/+Inf -> -1.
+
+  - address: 0x083eae74
+    name: __d2f
+    size: 180
+    module: fp_fconv
+    status: ported
+    notes: No float denormals produced (flush to +0 before rounding).
+
+  - address: 0x083ec450
+    name: __f2d
+    size: 96
+    module: fp_fconv
+    status: ported
+    notes: Float denormals flush to +0.
+
+  - address: 0x083eaf2c
+    name: __dadd
+    size: 500
+    module: fp_dadd
+    status: ported
+    notes: 70 callers. IEEE-exact core; quirks: NaN canonicalization,
+      Inf+-Inf -> 0x7ff8...0001, denormal in/out flush to +0 (sign dropped).
+
+  - address: 0x083ec09c
+    name: __dsub
+    size: 660
+    module: fp_dadd
+    status: ported
+    notes: Contains shared sub-core 0x83ec0c4 + specials 0x83ec274.
+
+  - address: 0x83ebed8
+    name: __drsb
+    size: 76
+    module: fp_dadd
+    status: ported
+    notes: Computes b-a (flips FIRST operand sign, dispatches to add/sub cores).
+
+  - address: 0x083eba48
+    name: __dmul
+    size: 448
+    module: fp_dmul
+    status: ported
+    notes: 106 callers (hottest fp op). IEEE-exact; quirks: underflow flush
+      +0 always, denormal-input sign quirk, Inf*denormal -> NaN 0x7ff8...0001.
+
+  - address: 0x083eb238
+    name: __ddiv
+    size: 516
+    module: fp_ddiv
+    status: ported
+    notes: Ported as restoring division (NR seed-table core 0x083eb45c
+      documented, not mirrored). Inf/Inf, 0/0 -> 0x7ff8...0001.
+
+  - address: 0x083ec4b4
+    name: __fadd
+    size: 308
+    module: fp_fadd
+    status: ported
+    notes: Quirk: magnitude-add no-carry path rounds ties AWAY (not RNE) —
+      verified in disassembly, pinned by tests.
+
+  - address: 0x83ecc60
+    name: __fsub
+    size: 352
+    module: fp_fadd
+    status: ported
+
+  - address: 0x83ecc28
+    name: __frsb
+    size: 56
+    module: fp_fadd
+    status: ported
+
+  - address: 0x83ecdc4
+    name: _frnd
+    size: 140
+    module: fp_fadd
+    status: ported
+    notes: DEAD-LINKED. Not a float round-to-int: treats input as fixed-point
+      scaled by 2^-43, returns sign-magnitude integer. Ported as-is.
+
+  - address: 0x083eca20
+    name: __fmul
+    size: 284
+    module: fp_fmuldiv
+    status: ported
+    notes: Port implements full IEEE gradual underflow (original flushes
+      denormals everywhere); canonical NaN 0x7fc00001.
+
+  - address: 0x083ec5fc
+    name: __fdiv
+    size: 472
+    module: fp_fmuldiv
+    status: ported
+    notes: Restoring division (seed-table NR documented, not mirrored).
+
+  - address: 0x083ebf28
+    name: _dsqrt
+    size: 348
+    module: fp_misc
+    status: ported
+    notes: Exactly rounded (host f64::sqrt oracle). Negative -> 0x7ff8...0001.
+
+  - address: 0x083ebc48
+    name: __dmod
+    size: 484
+    module: fp_misc
+    status: ported
+    notes: CORRECTION: this is IEEE remainder() (ties-to-even quotient),
+      NOT fmod. Sole caller: __kernel_rem_pio2. Verified vs libm remainder.
