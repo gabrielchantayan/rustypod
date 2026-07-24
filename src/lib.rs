@@ -22,3 +22,15 @@ fn panic(_info: &PanicInfo) -> ! {
 }
 
 pub mod libc;
+pub mod memchr;
+pub mod memcmp;
+pub mod memcpy;
+pub mod memzero;
+pub mod rt_unaligned;
+pub mod strcat;
+pub mod strchr;
+pub mod strcpy;
+pub mod strlen_safe;
+pub mod strncmp;
+pub mod strncpy;
+pub mod strstr;
