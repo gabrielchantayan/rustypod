@@ -9,3 +9,5 @@ pub mod printf_out;
 pub mod printf_s;
 pub mod printf_wide;
 pub mod printf_x;
+pub mod printf_float;
+pub mod printf_float_dtoa;
