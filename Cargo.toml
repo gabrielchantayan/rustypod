@@ -1,0 +1,15 @@
+[package]
+name = "rustypod"
+version = "0.1.0"
+edition = "2021"
+description = "Incremental Rust port of iPod Classic 6G retailOS (S5L8702, ARMv5TE)"
+
+[lib]
+crate-type = ["staticlib"]
+
+[profile.release]
+opt-level = 2
+debug = false
+lto = false
+codegen-units = 1
+panic = "abort"
