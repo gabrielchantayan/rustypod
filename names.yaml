@@ -2,11 +2,19 @@
 #
 # Maps osos load addresses to semantic names, signatures, variable renames
 # and notes. Addresses are load addresses (base 0x08000000); file offset in
-# osos.dec = address - 0x08000000. Sizes from Ghidra (decomp/functions.csv).
+# osos.dec = address - 0x08000000. Sizes from Ghidra (decomp/functions.csv)
+# unless noted.
+#
+# status values: identified / ported
+# "ported" means: Rust port exists in src/, behavioral tests vs a reference
+# implementation pass on host (cargo test), and a match.py mnemonic diff
+# report was reviewed (exact instruction matches are not expected:
+# ARM ADS 1.0.1 vs modern LLVM).
 
 base: 0x08000000
 
 functions:
+  # --- ARM ADS runtime: memory block ---
   - address: 0x080000d4
     ghidra: FUN_080000d4
     name: memmove
@@ -15,43 +23,172 @@ functions:
     module: libc
     status: ported
     vars: {param_1: dst, param_2: src, param_3: len}
-    notes: >
-      ARM ADS runtime memmove. Backward copy on overlap from above,
-      32-byte block fast paths, funnel shifts for misaligned src.
-      Behavioral parity verified by cargo test against std.
+    notes: Backward copy on overlap from above, 32-byte block fast paths,
+      funnel shifts for misaligned src.
 
   - address: 0x08000188
     ghidra: FUN_08000188
     name: memcpy
     size: 108
     sig: "void *memcpy(void *dst, const void *src, size_t len)"
-    module: libc
-    status: identified
+    module: memcpy
+    status: ported
     vars: {param_1: dst, param_2: src, param_3: len}
-    notes: >
-      Forward word copy, 32/16/8/4-byte blocks + tail. Assumes both
-      pointers word-aligned (called from memmove's aligned path).
+    notes: Forward word copy (32/16/8/4-byte blocks + tail). Assumes
+      word-aligned pointers; memmove's aligned fast path as its own entry.
+      Original advances and returns the end pointer; port returns dst.
 
   - address: 0x0800027c
     ghidra: FUN_0800027c
     name: memzero_aligned
     size: 88
     sig: "void *memzero_aligned(void *dst, size_t len)"
-    module: libc
-    status: identified
+    module: memzero
+    status: ported
     vars: {param_1: dst, param_2: len}
-    notes: >
-      Zero-fill, word blocks; entry expects word-aligned dst.
-      Immediately precedes memzero in the image (shared tail likely).
+    notes: Zero-fill block loop, entry expects aligned dst.
 
   - address: 0x080002d4
     ghidra: FUN_080002d4
     name: memzero
     size: 68
     sig: "void *memzero(void *dst, size_t len)"
-    module: libc
-    status: identified
+    module: memzero
+    status: ported
     vars: {param_1: dst, param_2: len}
-    notes: >
-      Zero-fill with alignment prologue (handles len < 4 and misaligned
-      dst, then the same block loop as memzero_aligned).
+    notes: Zero-fill with len<4 + misalignment prologue, then shared block loop.
+
+  - address: 0x08030fe4
+    ghidra: FUN_08030fe4
+    name: memset
+    size: 20
+    sig: "void *memset(void *dst, int value, size_t len)"
+    module: memzero
+    status: ported
+    notes: Broadcasts value byte to a word, tail-branches into the shared
+      fill body (via an iRAM veneer to memzero+4). Original is ADS
+      __rt_memset(dst, len, value); port uses classic memset arg order.
+
+  # --- ARM ADS runtime: string block @ 0x08030f64-0x080312a0 ---
+  - address: 0x08030f64
+    ghidra: FUN_08030f64
+    name: memcmp
+    size: 128
+    sig: "int memcmp(const void *a, const void *b, size_t len)"
+    module: memcmp
+    status: ported
+    notes: Word-at-a-time compare when aligned (re-scan mismatching word
+      byte-wise), byte tail; returns u8 difference.
+
+  - address: 0x08030ff4
+    ghidra: FUN_08030ff4
+    name: strcpy
+    size: 100
+    sig: "char *strcpy(char *dst, const char *src)"
+    module: strcpy
+    status: ported
+    notes: ADS __strcpy_arm. Word-at-a-time with 0x01010101 zero-byte-detect
+      idiom when aligned; 2x-unrolled byte loop otherwise. 116 call sites.
+
+  - address: 0x0803105c
+    ghidra: FUN_0803105c
+    name: strncmp
+    size: 116
+    sig: "int strncmp(const char *a, const char *b, size_t len)"
+    module: strncmp
+    status: ported
+    notes: Word compare + in-word NUL detect (0x01010101 idiom); byte tail
+      with ADS `cmp b,#1; cmpcs` idiom. 67 call sites. No standalone strcmp
+      exists in retailOS — it always uses strncmp.
+
+  - address: 0x080310d4
+    ghidra: FUN_080310d4
+    name: strncpy
+    size: 104
+    sig: "char *strncpy(char *dst, const char *src, size_t len)"
+    module: strncpy
+    status: ported
+    notes: Word copy + NUL idiom, then zero-pads to len (tail-calls zero
+      filler). 41 call sites.
+
+  - address: 0x08031140
+    ghidra: FUN_08031140
+    name: __rt_uread4
+    size: 32
+    sig: "u32 __rt_uread4(const void *p)"
+    module: rt_unaligned
+    status: ported
+    notes: Byte-wise little-endian unaligned u32 load (read_unaligned today).
+
+  - address: 0x08031160
+    ghidra: FUN_08031160
+    name: __rt_uwrite4
+    size: 32
+    sig: "u32 __rt_uwrite4(void *p, u32 value)"
+    module: rt_unaligned
+    status: ported
+    notes: Byte-wise LE unaligned u32 store. Original arg order (value, p).
+
+  - address: 0x08031180
+    ghidra: FUN_08031180
+    name: memchr
+    size: 52
+    sig: "const void *memchr(const void *s, int c, size_t len)"
+    module: memchr
+    status: ported
+    notes: Bounded byte scan for (c as u8).
+
+  - address: 0x080311b4
+    ghidra: FUN_080311b4
+    name: strcat
+    size: 40
+    sig: "char *strcat(char *dst, const char *src)"
+    module: strcat
+    status: ported
+
+  - address: 0x080311dc
+    ghidra: FUN_080311dc
+    name: strchr
+    size: 36
+    sig: "const char *strchr(const char *s, int c)"
+    module: strchr
+    status: ported
+    notes: Match test before NUL test, so c=='\0' returns the terminator.
+
+  - address: 0x08031200
+    ghidra: FUN_08031200
+    name: strncat
+    size: 64
+    sig: "char *strncat(char *dst, const char *src, size_t len)"
+    module: strcat
+    status: ported
+
+  - address: 0x08031240
+    ghidra: FUN_08031240
+    name: strrchr
+    size: 36
+    sig: "const char *strrchr(const char *s, int c)"
+    module: strchr
+    status: ported
+    notes: Full-string scan keeping last match.
+
+  - address: 0x08031264
+    ghidra: FUN_08031264
+    name: strstr
+    size: 60
+    sig: "const char *strstr(const char *haystack, const char *needle)"
+    module: strstr
+    status: ported
+    notes: Byte-at-a-time brute force; empty needle returns haystack.
+
+  # --- retailOS safe helpers ---
+  - address: 0x082770bc
+    ghidra: FUN_082770bc
+    name: strlen_safe
+    size: 36
+    sig: "size_t strlen_safe(const char *s)"
+    module: strlen_safe
+    status: ported
+    notes: NULL-guarded strlen (returns 0 for null). Classic ADS strlen is
+      genuinely absent from the binary; this is what retailOS uses.
+      Variants: 0x0810b610 (identical), 0x08275e20 (count+1).
