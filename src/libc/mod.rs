@@ -1,0 +1,16 @@
+//! Core C library memory/string functions (mem/str family).
+pub mod memchr;
+pub mod memcmp;
+pub mod memcpy;
+pub mod memmove;
+pub mod memzero;
+pub mod rt_memcpy;
+pub mod rt_unaligned;
+pub mod strcat;
+pub mod strchr;
+pub mod strcpy;
+pub mod strlen_safe;
+pub mod strncmp;
+pub mod strncpy;
+pub mod strstr;
+pub mod mbrtowc;
