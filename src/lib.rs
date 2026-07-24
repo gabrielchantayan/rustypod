@@ -48,3 +48,17 @@ pub mod setjmp;
 pub mod strtol;
 pub mod strtoull;
 pub mod strtoul;
+
+// Batch 3: stdlib control flow, time, errno, printf helpers.
+pub mod assert_rt;
+pub mod atexit;
+pub mod byteswap;
+pub mod errno;
+pub mod exit;
+pub mod localtime;
+pub mod mktime;
+pub mod mbrtowc;
+pub mod printf_helpers;
+pub mod qsort;
+pub mod raise;
+pub mod strtoll;
