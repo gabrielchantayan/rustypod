@@ -851,3 +851,173 @@ functions:
     status: ported
     notes: NOT ISO vsscanf — scans ONE numeric/float conversion, reports
       consumed length; engine veneer @ 0x08036348 (next batch).
+
+  # --- Batch 5: printf core/API, strtod, scanf converters ---
+  - address: 0x08034374
+    ghidra: FUN_08034374
+    name: _printf
+    size: 1164
+    sig: "i32 _printf(PrintfState *state, const char *fmt, const u32 *args)"
+    module: printf_core
+    status: ported
+    notes: Format engine. Flag table @ 0x08986234. 64-bit args fetched
+      8-aligned. Unknown chars print verbatim; %% via unknown-char path.
+      %e/%f/%g via FLOAT_CONVERTER hook (0x08032d70, next batch).
+
+  - address: 0x08032f14
+    ghidra: FUN_08032f14
+    name: _vsnprintf_dispatcher
+    size: 76
+    sig: "i32 _vsnprintf_dispatcher(fmt, putc, putc_ctx, args)"
+    module: printf_core
+    status: ported
+    notes: Builds 68-byte PrintfState, installs str_emit, tail-calls _printf.
+
+  - address: 0x08034804
+    name: str_emit
+    size: 48
+    module: printf_core
+    status: ported
+    notes: Default emit_str hook (slice -> putc loop).
+
+  - address: 0x0802f654
+    ghidra: FUN_0802f654
+    name: vsprintf
+    size: 60
+    module: printf_api
+    status: ported
+
+  - address: 0x0802f694
+    ghidra: FUN_0802f694
+    name: printf
+    size: 64
+    module: printf_api
+    status: ported
+    notes: Binds stdout FILE @ 0x08b2f864 + post-flush (semihost-dead, stubbed).
+
+  - address: 0x0802f6dc
+    ghidra: FUN_0802f6dc
+    name: fprintf
+    size: 68
+    module: printf_api
+    status: ported
+
+  - address: 0x0802f724
+    ghidra: FUN_0802f724
+    name: sprintf
+    size: 64
+    module: printf_api
+    status: ported
+
+  - address: 0x0802f768
+    ghidra: FUN_0802f768
+    name: snprintf
+    size: 88
+    module: printf_api
+    status: ported
+    notes: C99 semantics verified (bound, NUL, would-be length return).
+
+  - address: 0x08032f94
+    ghidra: FUN_08032f94
+    name: vsnprintf
+    size: 84
+    module: printf_api
+    status: ported
+
+  - address: 0x080331dc
+    ghidra: FUN_080331dc
+    name: strtod_core
+    size: 164
+    module: strtod
+    status: ported
+    notes: Two-pass (measure, convert) over vsscanf machinery; endptr via
+      consumed count; dangling-exponent EOF case re-runs bounded.
+
+  - address: 0x08031774
+    ghidra: FUN_08031774
+    name: atof
+    size: 68
+    sig: "f64 atof(const char *s)  // soft-float bits"
+    module: strtod
+    status: ported
+    notes: errno-neutral (save/restore via errno_get/errno_set).
+
+  - address: 0x08030dd4
+    ghidra: FUN_08030dd4
+    name: bsearch
+    size: 140
+    sig: "void *bsearch(key, base, nmemb, size, compar)"
+    module: strtod
+    status: ported
+    notes: Was misidentified as a strtod wrapper; it IS the ADS bsearch.
+
+  - address: 0x0802f9c4
+    ghidra: FUN_0802f9c4
+    name: scanf_convert_int
+    size: 472
+    module: scanf_int
+    status: ported
+    notes: "%d/%i/%u/%x/%o; base prefixes, width budget, wrap (no saturate),
+      -1 EOF-before-field, -2 no-digits. No ll path in this build (nop'd).
+      Real converter for the engine dispatch (assigned 0x08035d50 was a
+      CORDIC float helper)."
+
+  - address: 0x08036018
+    ghidra: FUN_08036018
+    name: scanf_float_convert
+    size: 816
+    module: scanf_float
+    status: ported
+    notes: Decimal-digits -> soft-double back-end; 12-byte extended-fp math
+      via SOFTFLOAT_OPS (pow10 0x08034228, ext_mul 0x08037534, ext_div
+      0x080374d4 — next batch). ERANGE on |exp|>500; canonical inf flatten.
+
+  - address: 0x08036348
+    ghidra: FUN_08036348
+    name: scanf_float_engine
+    size: 1052
+    status: identified
+    notes: Complete float input engine (ws skip, width-limited collection,
+      inf/nan literal match) -> calls scanf_float_convert. SCANF_ENGINE
+      target for floats; port in the engine batch.
+
+  - address: 0x0803677c
+    ghidra: FUN_0803677c
+    name: fread
+    size: 656
+    module: scanf_str
+    status: ported
+    notes: ADS stdio buffered read (48-byte stream struct; semihost SYS_READ
+      backed — dead on device). NOT a scanf converter as first assumed.
+
+  - address: 0x08036a10
+    ghidra: FUN_08036a10
+    name: stream_read_chars
+    size: 360
+    module: scanf_str
+    status: ported
+    notes: fread helper; zero callers in image (dead-linked).
+
+  # --- Soft-float / libm region map (porting queue, next batches) ---
+  # fplib region: 0x083eae74 (__d2f) -> 0x083ed1ff, ~9.1KB, the ONLY copy.
+  # __dmul 0x083eba48 (106 calls), __dadd 0x083eaf2c (70), __i2d 0x083eb908
+  # (65), __d2i 0x083eb7d0 (55), __fdiv 0x083ec5fc (44), __ddiv 0x083eb238
+  # (39), __dsub 0x083ec09c (39), __i2f 0x083ec96c (37), __u2d 0x083eb9b4
+  # (32), __fadd 0x083ec4b4 (30), __f2i 0x083ec898 (29), __u2f 0x083ec9a0
+  # (29), __fmul 0x083eca20 (28), __fscalb 0x083ed150 (26), __dcmpgt/ge
+  # 0x083ebe38 (20), __dcmplt/le 0x083eb9c0 (18), __drsb 0x83ebed8 (16),
+  # __f2d 0x083ec450 (16), __f2u 0x083ec90c (16), __dscalb 0x083ed0dc (16),
+  # __dcmpeq 0x083eb748 (10), __ll2d 0x083eb940 (10), __ull2d 0x083eb938 (7),
+  # __ieee_status 0x083ece54 (7), __frsb 0x83ecc28 (5), __d2u 0x083eb880 (4),
+  # __d2ll 0x083ece5c (4), __fsub 0x83ecc60 (3), __d2f 0x083eae74 (3),
+  # __fcmpgt/ge 0x083ecba4 (3), fmod core 0x083ebc48 (3), _dsqrt 0x083ebf28,
+  # _ddiv_core 0x083eb45c, __fcmpeq 0x083ec820, __fcmplt/le 0x083ec9a8,
+  # __d2ull 0x083ecf34, __f2ll 0x083ecffc, _frnd 0x83ecdc4,
+  # exception dispatchers 0x083eb144/0x083eb154/0x083eb1d4, trap decode
+  # 0x083ed080. ABSENT: __f2ull, __ll2f, __ull2f.
+  # libm: ceil 0x080317c4 (NOT _drnd), ceilf 0x08031914 (NOT _frnd),
+  # floor 0x08031ab8, ldexp 0x08031c10 (NOT fmod), sin 0x080319a8,
+  # cos 0x08031d24, sqrt 0x08031e44 (-> _dsqrt), sqrtf 0x08031ec8
+  # (-> 0x08033f40), __kernel_sin 0x0803375c, __kernel_cos 0x08033dc8,
+  # __kernel_rem_pio2 0x080338f4, _dpoly 0x08035a48, libm raise wrapper
+  # 0x08032178, float wrapper 0x08031f44 + decompose 0x080340fc.
