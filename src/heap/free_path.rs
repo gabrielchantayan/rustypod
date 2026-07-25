@@ -41,20 +41,21 @@
 //! (NULL when empty) and its size word is 0, so the sorted walk always
 //! steps past it.
 //!
-//! Hooks (OS-facing machinery not yet ported, per project convention):
+//! Hooks (OS-facing machinery reached through swappable fn pointers so
+//! host tests can observe/replace it):
 //! - `heap_panic` @ 0x08030f44 is exported by src/heap/veneers.rs (raise
 //!   -> exit -> terminate through its ops table). To avoid a duplicate
-//!   `#[no_mangle]` symbol and an import from that concurrently-written
-//!   module, this file routes corruption through a private stub of the
-//!   same name which dispatches to the `HEAP_PANIC_HOOK` fn pointer. The
-//!   default stub spins forever, like the original's terminate path
-//!   (0x082b20a0, semihosting SWI 0x123456 + spin). Host tests install an
-//!   unwinding hook and observe panics with `catch_unwind`.
+//!   `#[no_mangle]` symbol, this file routes corruption through a private
+//!   fn of the same name which dispatches to the `HEAP_PANIC_HOOK` fn
+//!   pointer; the default is a `C-unwind` shim over the veneers.rs port.
+//!   Host tests install an unwinding hook and observe panics with
+//!   `catch_unwind`.
 //! - The heap mutex (`heap_lock` @ 0x0819d6cc / `heap_unlock` @
 //!   0x0819cde4 — RTXC semaphore via the descriptor bytes at +0xb4/+0xb5
-//!   and handle at +0xb8) is routed through `HEAP_MUTEX_HOOKS`. The
-//!   default stubs are no-ops (single-threaded bring-up); host tests
-//!   install counting hooks.
+//!   and handle at +0xb8) is routed through `HEAP_MUTEX_HOOKS`, which
+//!   defaults to the real wrappers.rs ports (no-ops until the kernel
+//!   reports running, exactly like the originals); host tests install
+//!   counting hooks.
 //!
 //! Simplifications / deviations:
 //! - The caller tag and size class halfwords are read straight from the
@@ -98,16 +99,20 @@ struct FreeNode {
 /// spins forever.
 pub type HeapPanicHook = unsafe extern "C-unwind" fn() -> !;
 
-/// Default heap_panic stub: spin (the original's terminate path never
-/// returns either).
-unsafe extern "C-unwind" fn spin_on_panic() -> ! {
-    loop {}
+/// Default heap_panic: the real veneers.rs port (raise -> exit ->
+/// terminate), behind a `C-unwind` shim so the hook type stays
+/// test-catchable. Never returns, like the original.
+unsafe extern "C-unwind" fn heap_panic_ported() -> ! {
+    crate::heap::veneers::heap_panic()
 }
 
-/// The active heap_panic implementation. Swapped by host tests; on target
-/// this (or the whole call path) is superseded by the exported
-/// `heap_panic` in src/heap/veneers.rs once the heap core is integrated.
-pub static mut HEAP_PANIC_HOOK: HeapPanicHook = spin_on_panic;
+/// Wired default (see the module header). Host tests swap in a recording
+/// hook and restore this afterwards.
+pub(crate) const DEFAULT_HEAP_PANIC_HOOK: HeapPanicHook = heap_panic_ported;
+
+/// The active heap_panic implementation. Defaults to the real veneers.rs
+/// port; swapped by host tests.
+pub static mut HEAP_PANIC_HOOK: HeapPanicHook = DEFAULT_HEAP_PANIC_HOOK;
 
 /// Reads the hook. Volatile so LLVM cannot constant-fold the load and
 /// inline the default stub's `loop {}` (same rationale as malloc_rt.rs).
@@ -124,8 +129,8 @@ unsafe fn heap_panic() -> ! {
     panic_hook()()
 }
 
-/// Indirect dispatch for the heap mutex (not yet ported RTXC semaphore
-/// machinery). See the module header for the default-stub behavior.
+/// Indirect dispatch for the heap mutex (see the module header; defaults
+/// are the real wrappers.rs ports).
 #[derive(Clone, Copy)]
 pub struct HeapMutexHooks {
     /// `heap_lock` @ 0x0819d6cc: takes the descriptor's RTXC semaphore.
@@ -134,15 +139,16 @@ pub struct HeapMutexHooks {
     pub unlock: unsafe extern "C" fn(desc: *mut HeapDescriptor),
 }
 
-/// Default stub: no mutex machinery yet — no-op (single-threaded
-/// bring-up).
-unsafe extern "C" fn mutex_noop(_desc: *mut HeapDescriptor) {}
-
-/// The active heap mutex implementation. Swapped by host tests.
-pub static mut HEAP_MUTEX_HOOKS: HeapMutexHooks = HeapMutexHooks {
-    lock: mutex_noop,
-    unlock: mutex_noop,
+/// Wired default (see the module header). Host tests swap in counting
+/// hooks and restore this afterwards.
+pub(crate) const DEFAULT_HEAP_MUTEX_HOOKS: HeapMutexHooks = HeapMutexHooks {
+    lock: crate::heap::wrappers::heap_lock,
+    unlock: crate::heap::wrappers::heap_unlock,
 };
+
+/// The active heap mutex implementation. Defaults to the real ports;
+/// swapped by host tests.
+pub static mut HEAP_MUTEX_HOOKS: HeapMutexHooks = DEFAULT_HEAP_MUTEX_HOOKS;
 
 /// Reads the hooks (volatile; same rationale as `panic_hook`).
 #[inline(always)]

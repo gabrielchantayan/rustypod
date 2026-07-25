@@ -36,15 +36,14 @@
 //! head, not a max-size terminator; with size 0 the insert walk yields an
 //! ascending size-sorted, NULL-terminated list rooted at the sentinel.
 //!
-//! Unported machinery (deviation, by necessity): the heap lock/unlock
-//! helpers (@ 0x0819d6cc / 0x0819cde4), the free-list insert/coalesce
-//! helper (@ 0x0819d314), the noreturn heap panic (@ 0x08030f44) and the
-//! RTXC semaphore delete (@ 0x0807f650) live in sibling modules that are
-//! being ported separately. They dispatch through the `HEAP_INIT_OPS` table:
-//! lock/unlock/mutex_delete default to harmless no-ops, insert to a no-op
-//! (block stays unlinked; the descriptor bookkeeping is still exact), and
-//! panic to a spin. Once those modules land the table can point at the real
-//! ports.
+//! Dispatch (the `HEAP_INIT_OPS` table): the helpers the originals call
+//! live in sibling modules and are reached through the table so host tests
+//! can install spies. All five slots now default to the real ports —
+//! `heap_lock` @ 0x0819d6cc / `heap_unlock` @ 0x0819cde4 (wrappers.rs),
+//! the free-list insert/coalesce helper `heap_free_insert` @ 0x0819d314
+//! (free_path.rs), the noreturn `heap_panic` @ 0x08030f44 (veneers.rs)
+//! and the RTXC `mutex_delete` @ 0x0807f650 (kernel/sync_mutex.rs) —
+//! matching the original call graph on target.
 //!
 //! Simplifications:
 //! - The original guards the block-init stores with `(block + 8) & 7 == 0`,
@@ -62,15 +61,15 @@
 //!   register behavior (r0 holds the descriptor on every exit path,
 //!   including `heap_add_region`'s tail branch through the unlock helper).
 
-use crate::heap::types::{HeapDescriptor, MAX_REGIONS, NUM_BINS, NUM_CLASSES, NUM_TAGS};
+use crate::heap::types::{BlockHeader, HeapDescriptor, MAX_REGIONS, NUM_BINS, NUM_CLASSES, NUM_TAGS};
 
 /// Synthesized content of the original 16-byte free-list sentinel constant
 /// @ 0x08a77c0c (beyond the osos.dec extent — see the module header for the
 /// evidence). Zero-size head node of an initially empty free list.
 const FREE_SENTINEL_INIT: [u32; 4] = [0, 0, 0, 0];
 
-/// Indirect dispatch for the not-yet-ported cluster helpers (see the module
-/// header for the design and default-stub behavior).
+/// Indirect dispatch for the sibling cluster helpers (see the module
+/// header; defaults are the real ports, host tests install spies).
 #[derive(Clone, Copy)]
 pub struct HeapInitOps {
     /// Heap lock @ 0x0819d6cc (creates + takes the RTXC semaphore).
@@ -86,36 +85,38 @@ pub struct HeapInitOps {
     pub mutex_delete: unsafe extern "C" fn(handle: *mut u32),
 }
 
-/// Default stub: without a kernel there is nothing to lock — no-op.
-unsafe extern "C" fn missing_lock(_desc: *mut HeapDescriptor) {}
-
-/// Default stub: pairs with `missing_lock` — no-op.
-unsafe extern "C" fn missing_unlock(_desc: *mut HeapDescriptor) {}
-
-/// Default stub: the block is not linked into any free list, but the
-/// descriptor bookkeeping (regions, totals) stays exact — a harmless no-op
-/// until the real insert @ 0x0819d314 is ported and installed.
-unsafe extern "C" fn missing_insert_free_block(_desc: *mut HeapDescriptor, _block: *mut u32) {}
-
-/// Default stub: the original panic does not return; the closest stub is a
-/// spin (on target the real panic @ 0x08030f44 must be installed).
-unsafe extern "C" fn missing_panic() -> ! {
-    loop {}
+/// `insert_free_block` slot shim: the original helper @ 0x0819d314 is
+/// ported as `heap_free_insert` (free_path.rs), which takes the block as a
+/// header pointer and returns the merged header; this adapter fixes the
+/// pointer type and drops the return value, like the original call site
+/// (the veneer ignores r0).
+unsafe extern "C" fn insert_free_block_ported(desc: *mut HeapDescriptor, block: *mut u32) {
+    crate::heap::free_path::heap_free_insert(desc, block as *mut BlockHeader);
 }
 
-/// Default stub: no kernel semaphore exists — deleting it is a no-op.
-unsafe extern "C" fn missing_mutex_delete(_handle: *mut u32) {}
+/// `mutex_delete` slot shim: the hook receives `&desc->mutex_handle`
+/// (+0xb8), which on target is exactly the 8-byte RTXC `Mutex`
+/// {cell pointer, pad} that `mutex_delete` @ 0x0807f650 expects — the
+/// cast reproduces the original's register pass-through. Only
+/// layout-exact on 32-bit targets (the host `Mutex` widens); host tests
+/// install spies before exercising `heap_destroy` with a live mutex.
+unsafe extern "C" fn mutex_delete_ported(handle: *mut u32) {
+    crate::kernel::sync_mutex::mutex_delete(handle as *mut crate::kernel::sync_mutex::Mutex);
+}
 
-/// The active helper implementations. Defaults to the documented stubs;
-/// replaced by host tests (spies) and eventually by the ported heap-lock /
-/// free-list / panic / RTXC modules.
-pub static mut HEAP_INIT_OPS: HeapInitOps = HeapInitOps {
-    lock: missing_lock,
-    unlock: missing_unlock,
-    insert_free_block: missing_insert_free_block,
-    panic: missing_panic,
-    mutex_delete: missing_mutex_delete,
+/// The wired default table: every slot points at the real port (see the
+/// module header). Host tests swap in spies and restore this afterwards.
+pub(crate) const DEFAULT_HEAP_INIT_OPS: HeapInitOps = HeapInitOps {
+    lock: crate::heap::wrappers::heap_lock,
+    unlock: crate::heap::wrappers::heap_unlock,
+    insert_free_block: insert_free_block_ported,
+    panic: crate::heap::veneers::heap_panic,
+    mutex_delete: mutex_delete_ported,
 };
+
+/// The active helper implementations. Defaults to the real ports;
+/// replaced by host tests (spies).
+pub static mut HEAP_INIT_OPS: HeapInitOps = DEFAULT_HEAP_INIT_OPS;
 
 /// Reads the ops table. Volatile so LLVM cannot constant-fold the loads to
 /// the default stubs in builds where nothing has written the table yet
@@ -364,7 +365,9 @@ mod tests {
             lock: spy_lock,
             unlock: spy_unlock,
             insert_free_block: spy_insert,
-            panic: missing_panic,
+            // Never reached by these tests; a triggered panic runs the
+            // real (noreturn) port and fails the test loudly.
+            panic: DEFAULT_HEAP_INIT_OPS.panic,
             mutex_delete: spy_mutex_delete,
         });
     }
