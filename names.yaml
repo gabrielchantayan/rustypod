@@ -1283,3 +1283,209 @@ functions:
     status: ported
     notes: CORRECTION: this is IEEE remainder() (ties-to-even quotient),
       NOT fmod. Sole caller: __kernel_rem_pio2. Verified vs libm remainder.
+
+  # --- Batch 7: libm, printf float, scanf engines ---
+  - address: 0x080317c4
+    ghidra: FUN_080317c4
+    name: ceil
+    size: 304
+    module: libm/ceilfloor
+    status: ported
+    notes: fdlibm sign-magnitude bit-mask round (NOT _drnd as recon said).
+
+  - address: 0x08031ab8
+    ghidra: FUN_08031ab8
+    name: floor
+    size: 312
+    module: libm/ceilfloor
+    status: ported
+
+  - address: 0x08031914
+    ghidra: FUN_08031914
+    name: ceilf
+    size: 136
+    module: libm/ceilfloor
+    status: ported
+
+  - address: 0x08031d24
+    ghidra: FUN_08031d24
+    name: sin
+    size: 260
+    module: libm/trig
+    status: ported
+    notes: CORRECTION — recon had sin/cos wrappers swapped: 0x08031d24 is
+      sin (calls __kernel_sin), 0x080319a8 is cos.
+
+  - address: 0x080319a8
+    ghidra: FUN_080319a8
+    name: cos
+    size: 244
+    module: libm/trig
+    status: ported
+
+  - address: 0x08033dc8
+    ghidra: FUN_08033dc8
+    name: __kernel_sin
+    size: 364
+    module: libm/kernel_trig
+    status: ported
+    notes: CORRECTION — uses S2..S6 + S1 with iy tail (netlib __kernel_sin).
+      0x0803375c is __kernel_cos (C1..C6, qx tail, no iy).
+
+  - address: 0x0803375c
+    ghidra: FUN_0803375c
+    name: __kernel_cos
+    size: 384
+    module: libm/kernel_trig
+    status: ported
+
+  - address: 0x08035a48
+    ghidra: FUN_08035a48
+    name: _dpoly
+    size: 244
+    module: libm/kernel_trig
+    status: ported
+    notes: Horner evaluator (coeff*, n, x).
+
+  - address: 0x080338f4
+    ghidra: FUN_080338f4
+    name: __kernel_rem_pio2
+    size: 1136
+    module: libm/rem_pio2
+    status: ported
+    notes: pio2 hi/lo x3 pairs @ 0x089860d8-0x08986108 (textbook Sun values),
+      HUGE_SCALE[18] @ 0x08986048 (NOT powers of two — 4 negative entries,
+      |x| >= 2^106 deterministic-but-meaningless, ported bug-for-bug).
+      Calls __dmod (fp_misc) x3 for large args.
+
+  - address: 0x08031e44
+    ghidra: FUN_08031e44
+    name: sqrt
+    size: 112
+    module: libm/sqrt
+    status: ported
+    notes: NaN pre-filter + dcmp domain check, tails into _dsqrt (fp_misc);
+      EDOM via errno_set.
+
+  - address: 0x08031ec8
+    ghidra: FUN_08031ec8
+    name: sqrtf
+    size: 112
+    module: libm/sqrt
+    status: ported
+
+  - address: 0x08033f40
+    ghidra: FUN_08033f40
+    name: _fsqrt_core
+    size: 420
+    module: libm/sqrt
+    status: ported
+    notes: Newton on float via __fmul/__i2f/__f2d.
+
+  - address: 0x08031c10
+    ghidra: FUN_08031c10
+    name: ldexp
+    size: 224
+    module: libm/misc
+    status: ported
+    notes: __ieee_status save/restore + __dscalb; ERANGE on over/underflow
+      (NOT fmod as early recon said).
+
+  - address: 0x08032178
+    name: errno_set_dup
+    size: 20
+    status: duplicate
+    notes: Disassembly shows this IS errno_set (already ported in
+      runtime/errno), not a libm raise wrapper.
+
+  - address: 0x08031f44
+    name: modff_wrapper
+    size: 52
+    module: libm/misc
+    status: ported
+    notes: Calls decomposer 0x080340fc, tails into __fadd of two stack parts.
+
+  - address: 0x080340fc
+    ghidra: FUN_080340fc
+    name: frexpf_decompose
+    size: 276
+    module: libm/misc
+    status: ported
+
+  - address: 0x08032514
+    ghidra: FUN_08032514
+    name: dtoa
+    size: 724
+    module: printf/printf_float_dtoa
+    status: ported
+    notes: soft-double -> decimal digits + exponent for %e/%f/%g.
+
+  - address: 0x08034228
+    name: pow10_ext
+    size: 316
+    module: printf/printf_float_dtoa
+    status: ported
+
+  - address: 0x08037024
+    name: ext_fp_add
+    size: 712
+    module: printf/printf_float_dtoa
+    status: ported
+    notes: 12-byte extended-fp format (same as scanf_float SOFTFLOAT_OPS).
+
+  - address: 0x08037564
+    name: ext_fp_mul
+    size: 612
+    module: printf/printf_float_dtoa
+    status: ported
+
+  - address: 0x0802e118
+    ghidra: FUN_0802e118
+    name: block_sub_bytes
+    size: 60
+    module: printf/printf_float_dtoa
+    status: ported
+    notes: CORRECTION — with 0x0802e154/0x0802e190/0x0802e1f4 these are
+      SubBytes/InvSubBytes/ShiftRows/InvShiftRows of an AES-like proprietary
+      cipher (tables @ 0x0891ee4c/0x0891ef4c, NOT standard AES S-box).
+      Misidentified as dtoa helpers.
+
+  - address: 0x08032d70
+    ghidra: FUN_08032d70
+    name: convert_float
+    size: 420
+    module: printf/printf_float
+    status: ported
+    notes: "%e/%f/%g wrapper; FLOAT_CONVERTER hook in printf_core targets this."
+
+  - address: 0x0803285c
+    ghidra: FUN_0803285c
+    name: fp_format
+    size: 1264
+    module: printf/printf_float
+    status: ported
+    notes: Locale decimal_point via libspace+0x2c; precision default 6.
+
+  - address: 0x08036348
+    ghidra: FUN_08036348
+    name: scanf_float_engine
+    size: 1052
+    module: scanf/scanf_float_engine
+    status: ported
+    notes: Width-limited collection into 0xff-terminated digit buffers,
+      inf/nan literal match @ 0x08036420, calls scanf_float_convert.
+
+  - address: 0x0803484c
+    name: _scanf_engine
+    size: 1564
+    module: scanf/scanf_engine
+    status: ported
+    notes: Format walker + %s/%c/%[ handling. Ghidra wrong at 0x080363b8:
+      EOF during whitespace skip returns 0, not -1.
+
+  - address: 0x080332a4
+    name: _scanf_prologue
+    size: 84
+    module: scanf/scanf_engine
+    status: ported
+    notes: Fills fmt_cursor/fmt_getc/ctype/scanset, tail-calls engine.
