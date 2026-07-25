@@ -1,6 +1,8 @@
 # RustyPod
 A rewrite of iPod OS in Rust
 
+![transpilation progress](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fgabrielchantayan%2Frustypod%2Fbadges%2Fprogress.json)
+
 ---
 
 For funsies, this is a rewrite of a decompiled version of iPod OS 35.2.0.4 in Rust.

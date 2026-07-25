@@ -1,0 +1,26 @@
+name: progress badge
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+
+jobs:
+  badge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install pyyaml
+      - run: python3 tools/progress.py > /tmp/progress.json
+      - name: publish to badges branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan badges
+          git rm -rfq .
+          cp /tmp/progress.json progress.json
+          git add progress.json
+          git commit -m "badge: $(python3 -c 'import json;print(json.load(open("progress.json"))["message"])')"
+          git push -f origin badges
