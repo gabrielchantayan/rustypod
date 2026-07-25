@@ -1,1 +1,667 @@
-//! (stub — port assigned to swarm agent)
+//! Ports of the malloc-family veneers that sit between the C/C++ runtime
+//! and the retailOS heap core (cluster 0x0819cd5c..0x0819d9d8), plus the
+//! lazy default-heap init and the C++ `operator new`/`operator delete`
+//! front-ends:
+//!
+//! - `malloc_wrapper` — original: `FUN_080eb67c` @ 0x080eb67c (40 bytes,
+//!   96 call sites). Saves (size, tag), runs the lazy init, loads the
+//!   default-heap handle from the global @ 0x089ca638 and tail-branches to
+//!   `heap_alloc` @ 0x0819d67c with (heap, size, tag).
+//! - `free_wrapper` — original: `FUN_080e7970` @ 0x080e7970 (40 bytes,
+//!   62 call sites). Same prologue, tail-branches to `heap_free` @
+//!   0x0819d4dc with (heap, ptr, tag). No NULL guard here — `heap_free`
+//!   itself ignores NULL (and panics via `heap_panic` on a zero/free
+//!   header word).
+//! - `realloc_wrapper` — original: `FUN_080edbf0` @ 0x080edbf0 (56 bytes,
+//!   6 call sites). Lazy init, then calls (not tail-branches — a fourth
+//!   argument goes on the stack) `heap_realloc` @ 0x0819d6a0 with
+//!   (heap, ptr, size, a3, a4).
+//! - `lazy_init_default_heap` — original: `FUN_08077250` @ 0x08077250
+//!   (44 bytes). If the global @ 0x089ca638 is still NULL, creates the
+//!   default heap: `heap_create(desc = 0x08a1a710,
+//!   start = 0x08a1a710 - 0x8000 = 0x08a12710, size = 0x8000)` — a 32 KB
+//!   region sitting *immediately below* the 0x398-byte descriptor — and
+//!   stores the returned handle (the descriptor pointer; `heap_create` @
+//!   0x0819d7b4 returns its first argument) into the global.
+//! - `operator_new` / `operator_delete` — originals @ 0x082aadd4 (8 bytes,
+//!   1797 call sites — the dominant allocator in osos) and 0x082aad24
+//!   (16 bytes, 665 call sites). Tag-2 pair: new is a pure tail veneer
+//!   (`mov r1, #2; b 0x080eb67c`), delete is NULL-guarded
+//!   (`cmp r0, #0; movne r1, #2; bne 0x080e7970; bx lr`).
+//! - `operator_new_tag3` / `operator_delete_tag3` — originals @ 0x082aad74
+//!   and 0x082aad14. Identical pair with tag 3.
+//! - `operator_new_checked` — original: `FUN_08266c70` @ 0x08266c70
+//!   (48 bytes, 223 call sites). `p = operator_new(size)`; on NULL it
+//!   invokes the C++ new-handler dispatch @ 0x08266abc with code 3, then
+//!   returns `p` (still NULL if no handler freed anything — the original
+//!   does not retry at this level).
+//! - `heap_panic` — original: `FUN_08030f44` @ 0x08030f44 (32 bytes,
+//!   fatal, does not return). `__rt_raise(1, 0)` @ 0x080320a8, then the
+//!   exit path @ 0x08035878 (`_rt_exit`-ish: runs atexit handlers and
+//!   flushes stdio), then tail-branches to the final terminate stub @
+//!   0x082b20a0 with r0 = 1 (a semihosting SWI 0x123456 + spin).
+//!
+//! Heap-dispatch design (deviation, by necessity): the heap core
+//! (0x0819d67c / 0x0819d4dc / 0x0819d6a0 / 0x0819d7b4), the new-handler
+//! dispatch (0x08266abc) and the raise/exit/terminate path (0x080320a8 /
+//! 0x08035878 / 0x082b20a0) are ported in other modules / not yet ported,
+//! so these veneers cannot tail-branch to real code. Instead they dispatch
+//! indirectly through the `HEAP_OPS` function-pointer table (same pattern
+//! as src/runtime/malloc_rt.rs). The table defaults to documented stubs:
+//! `alloc`/`realloc`/`create`/`raise`/`terminate` spin forever (they
+//! cannot produce memory or a signal handler out of thin air; on real
+//! hardware the table must be installed before the heap is touched),
+//! `free`/`exit` silently do nothing (a free into a nonexistent heap is a
+//! harmless leak), and `new_handler` returns — matching the original
+//! 0x08266abc behavior when no C++ new-handler is registered. Host tests
+//! swap in a mock heap; once the heap core lands, `HEAP_OPS` is pointed at
+//! the real targets.
+//!
+//! The eventual link contract (not referenced yet — declaring without
+//! referencing emits no undefined symbols):
+//!
+//! ```text
+//! extern "C" {
+//!     fn heap_alloc(heap: *mut u8, size: usize, tag: usize) -> *mut u8; // 0x0819d67c
+//!     fn heap_free(heap: *mut u8, ptr: *mut u8, tag: usize);            // 0x0819d4dc
+//!     fn heap_realloc(heap: *mut u8, ptr: *mut u8, size: usize,         // 0x0819d6a0
+//!                     a3: usize, a4: usize) -> *mut u8;
+//!     fn heap_create(desc: *mut u8, start: *mut u8, size: usize) -> *mut u8; // 0x0819d7b4
+//!     fn new_handler_dispatch(code: usize);                             // 0x08266abc
+//!     fn __rt_raise(sig: i32, code: i32) -> i32;                        // 0x080320a8 (raise.rs)
+//!     fn rt_exit_path();                                                // 0x08035878
+//!     fn rt_terminate(code: i32);                                       // 0x082b20a0
+//! }
+//! ```
+//!
+//! Simplifications:
+//! - The default-heap region and descriptor are modeled as one
+//!   `static mut` storage block (`region` immediately followed by `desc`,
+//!   mirroring the original 0x08a12710..0x08a1a710 + 0x08a1a710 layout)
+//!   instead of living at the original load addresses; the original
+//!   addresses are documented above.
+//! - `heap_panic` keeps the original's raise -> exit -> terminate call
+//!   sequence through the ops table, with a final `loop {}` safety net in
+//!   case a swapped-in `terminate` hook returns (the original target
+//!   0x082b20a0 never does).
+//! - `operator_new_checked`'s original has two unreachable `bl`
+//!   instructions at 0x08266c84/0x08266c88 (branched over on every path;
+//!   compiler outlining residue) — not reproduced.
+
+use crate::heap::types::{HeapDescriptor, HeapDescriptorDescriptor, DEFAULT_HEAP};
+
+/// Size of the default heap region: 32 KB (original `mov r2, #0x8000`).
+const DEFAULT_HEAP_SIZE: usize = 0x8000;
+
+/// Caller tag used by the dominant `operator new`/`operator delete` pair
+/// (0x082aadd4 / 0x082aad24).
+const TAG_OPERATOR_NEW: usize = 2;
+
+/// Caller tag used by the second new/delete pair (0x082aad74 / 0x082aad14).
+const TAG_OPERATOR_NEW_TAG3: usize = 3;
+
+/// Code passed to the new-handler dispatch @ 0x08266abc when a checked
+/// allocation fails (original: `moveq r0, #3`).
+const NEW_HANDLER_CODE: usize = 3;
+
+/// Default-heap backing storage. Original layout: a 32 KB region @
+/// 0x08a12710 immediately followed by the 0x398-byte descriptor @
+/// 0x08a1a710 (`heap_create` is called with `start = desc - 0x8000`).
+/// Kept as raw byte storage so it can be const-initialized; `heap_create`
+/// lays the descriptor out in place.
+#[repr(C, align(8))]
+struct DefaultHeapStorage {
+    /// Original: 0x08a12710..0x08a1a710.
+    region: [u8; DEFAULT_HEAP_SIZE],
+    /// Original: 0x08a1a710..0x08a1aaa8 (0x398 bytes on target).
+    desc: [u8; core::mem::size_of::<HeapDescriptor>()],
+}
+
+static mut DEFAULT_HEAP_STORAGE: DefaultHeapStorage = DefaultHeapStorage {
+    region: [0; DEFAULT_HEAP_SIZE],
+    desc: [0; core::mem::size_of::<HeapDescriptor>()],
+};
+
+/// Indirect dispatch table for the heap core + new-handler + fatal path
+/// (see the module header for the design and the default-stub behavior).
+#[derive(Clone, Copy)]
+pub struct HeapVeneerOps {
+    /// `heap_alloc` @ 0x0819d67c: (heap handle, size, caller tag).
+    pub alloc: unsafe extern "C" fn(
+        heap: *mut HeapDescriptorDescriptor,
+        size: usize,
+        tag: usize,
+    ) -> *mut u8,
+    /// `heap_free` @ 0x0819d4dc: (heap handle, ptr, caller tag).
+    pub free: unsafe extern "C" fn(heap: *mut HeapDescriptorDescriptor, ptr: *mut u8, tag: usize),
+    /// `heap_realloc` @ 0x0819d6a0: (heap handle, ptr, size, a3, a4);
+    /// a3/a4 are the original's r2/stack-in arguments (observed: 1, 1 from
+    /// the ADS `realloc` veneer).
+    pub realloc: unsafe extern "C" fn(
+        heap: *mut HeapDescriptorDescriptor,
+        ptr: *mut u8,
+        size: usize,
+        a3: usize,
+        a4: usize,
+    ) -> *mut u8,
+    /// `heap_create` @ 0x0819d7b4: initializes `desc` in place over the
+    /// region [start, start + size) and returns the heap handle (the
+    /// original returns its first argument).
+    pub create: unsafe extern "C" fn(
+        desc: *mut HeapDescriptor,
+        start: *mut u8,
+        size: usize,
+    ) -> *mut HeapDescriptorDescriptor,
+    /// C++ new-handler dispatch @ 0x08266abc (code 3 = plain `operator
+    /// new` failure). No-op when no handler is registered.
+    pub new_handler: unsafe extern "C" fn(code: usize),
+    /// `__rt_raise` @ 0x080320a8 (ported in raise.rs; routed through the
+    /// table because that module is not importable from here).
+    pub raise: unsafe extern "C" fn(sig: i32, code: i32) -> i32,
+    /// Exit path @ 0x08035878 (atexit handlers + stdio flush).
+    pub exit: unsafe extern "C" fn(),
+    /// Final terminate stub @ 0x082b20a0 (semihosting SWI + spin; never
+    /// returns in the original).
+    pub terminate: unsafe extern "C" fn(code: i32),
+}
+
+/// Default stub: allocation is impossible without a heap core — spin. On
+/// real hardware `HEAP_OPS` must be installed before the heap is touched.
+unsafe extern "C" fn missing_alloc(
+    _heap: *mut HeapDescriptorDescriptor,
+    _size: usize,
+    _tag: usize,
+) -> *mut u8 {
+    loop {}
+}
+
+/// Default stub: freeing into a nonexistent heap leaks the block — a
+/// harmless no-op.
+unsafe extern "C" fn missing_free(
+    _heap: *mut HeapDescriptorDescriptor,
+    _ptr: *mut u8,
+    _tag: usize,
+) {
+}
+
+/// Default stub: like `missing_alloc`, cannot produce memory — spin.
+unsafe extern "C" fn missing_realloc(
+    _heap: *mut HeapDescriptorDescriptor,
+    _ptr: *mut u8,
+    _size: usize,
+    _a3: usize,
+    _a4: usize,
+) -> *mut u8 {
+    loop {}
+}
+
+/// Default stub: cannot initialize a heap — spin (the first allocation
+/// would spin in `missing_alloc` anyway).
+unsafe extern "C" fn missing_create(
+    _desc: *mut HeapDescriptor,
+    _start: *mut u8,
+    _size: usize,
+) -> *mut HeapDescriptorDescriptor {
+    loop {}
+}
+
+/// Default stub: matches the original 0x08266abc with no C++ new-handler
+/// registered — nothing to call, just return (the checked front-end then
+/// returns NULL).
+unsafe extern "C" fn missing_new_handler(_code: usize) {}
+
+/// Default stub: an unhandled raise in the original terminates the OS;
+/// with no signal runtime the closest safe stub is a spin.
+unsafe extern "C" fn missing_raise(_sig: i32, _code: i32) -> i32 {
+    loop {}
+}
+
+/// Default stub: nothing to flush or run down yet — no-op.
+unsafe extern "C" fn missing_exit() {}
+
+/// Default stub: the original @ 0x082b20a0 spins via semihosting SWI —
+/// spin here too.
+unsafe extern "C" fn missing_terminate(_code: i32) {
+    loop {}
+}
+
+/// The active heap-core implementation. Defaults to the documented stubs
+/// above; replaced by host tests (mock heap) and eventually by the ported
+/// heap core. Written once at init on target; tests serialize access.
+pub static mut HEAP_OPS: HeapVeneerOps = HeapVeneerOps {
+    alloc: missing_alloc,
+    free: missing_free,
+    realloc: missing_realloc,
+    create: missing_create,
+    new_handler: missing_new_handler,
+    raise: missing_raise,
+    exit: missing_exit,
+    terminate: missing_terminate,
+};
+
+/// Reads the ops table. The read is volatile: the table is meant to be
+/// swapped at runtime (heap installer, host tests), and in a build where
+/// nothing writes it yet, LLVM would otherwise constant-fold the loads to
+/// the default stubs and inline their `loop {}` bodies.
+#[inline(always)]
+fn heap_ops() -> HeapVeneerOps {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(HEAP_OPS)) }
+}
+
+/// Reads the default-heap handle (original global word @ 0x089ca638).
+#[inline(always)]
+fn default_heap() -> *mut HeapDescriptorDescriptor {
+    unsafe { core::ptr::addr_of!(DEFAULT_HEAP).read() }
+}
+
+/// lazy_init_default_heap — original: `FUN_08077250` @ 0x08077250
+/// (44 bytes).
+///
+/// Creates the 32 KB default heap on first use: `heap_create(desc, start,
+/// 0x8000)` with `start = desc - 0x8000`, storing the returned handle into
+/// the global @ 0x089ca638. Subsequent calls return immediately.
+#[no_mangle]
+pub unsafe extern "C" fn lazy_init_default_heap() {
+    if !default_heap().is_null() {
+        return;
+    }
+    let storage = core::ptr::addr_of_mut!(DEFAULT_HEAP_STORAGE);
+    let desc = core::ptr::addr_of_mut!((*storage).desc) as *mut HeapDescriptor;
+    let start = core::ptr::addr_of_mut!((*storage).region) as *mut u8;
+    let handle = (heap_ops().create)(desc, start, DEFAULT_HEAP_SIZE);
+    core::ptr::addr_of_mut!(DEFAULT_HEAP).write(handle);
+}
+
+/// malloc_wrapper — original: `FUN_080eb67c` @ 0x080eb67c (40 bytes).
+///
+/// Ensures the default heap exists, then allocates `size` bytes from it
+/// with caller tag `tag` (telemetry only; see `BlockHeader::link_or_tag`).
+#[no_mangle]
+pub unsafe extern "C" fn malloc_wrapper(size: usize, tag: usize) -> *mut u8 {
+    lazy_init_default_heap();
+    (heap_ops().alloc)(default_heap(), size, tag)
+}
+
+/// free_wrapper — original: `FUN_080e7970` @ 0x080e7970 (40 bytes).
+///
+/// Frees `ptr` back to the default heap with caller tag `tag`. No NULL
+/// guard at this level: `heap_free` @ 0x0819d4dc ignores NULL itself.
+#[no_mangle]
+pub unsafe extern "C" fn free_wrapper(ptr: *mut u8, tag: usize) {
+    lazy_init_default_heap();
+    (heap_ops().free)(default_heap(), ptr, tag)
+}
+
+/// realloc_wrapper — original: `FUN_080edbf0` @ 0x080edbf0 (56 bytes).
+///
+/// `a3`/`a4` mirror the original's r2 / stacked fourth argument (both
+/// observed as 1 from the ADS `realloc` veneer; semantics live in
+/// `heap_realloc` @ 0x0819d6a0).
+#[no_mangle]
+pub unsafe extern "C" fn realloc_wrapper(
+    ptr: *mut u8,
+    size: usize,
+    a3: usize,
+    a4: usize,
+) -> *mut u8 {
+    lazy_init_default_heap();
+    (heap_ops().realloc)(default_heap(), ptr, size, a3, a4)
+}
+
+/// operator new (tag 2) — original @ 0x082aadd4 (8 bytes, 1797 call
+/// sites — the dominant allocator in osos): `mov r1, #2; b 0x080eb67c`.
+#[no_mangle]
+pub unsafe extern "C" fn operator_new(size: usize) -> *mut u8 {
+    malloc_wrapper(size, TAG_OPERATOR_NEW)
+}
+
+/// operator delete (tag 2) — original @ 0x082aad24 (16 bytes, 665 call
+/// sites): NULL-guarded `free_wrapper` with tag 2.
+#[no_mangle]
+pub unsafe extern "C" fn operator_delete(ptr: *mut u8) {
+    if !ptr.is_null() {
+        free_wrapper(ptr, TAG_OPERATOR_NEW);
+    }
+}
+
+/// operator new (tag 3) — original @ 0x082aad74 (8 bytes):
+/// `mov r1, #3; b 0x080eb67c`.
+#[no_mangle]
+pub unsafe extern "C" fn operator_new_tag3(size: usize) -> *mut u8 {
+    malloc_wrapper(size, TAG_OPERATOR_NEW_TAG3)
+}
+
+/// operator delete (tag 3) — original @ 0x082aad14 (16 bytes):
+/// NULL-guarded `free_wrapper` with tag 3.
+#[no_mangle]
+pub unsafe extern "C" fn operator_delete_tag3(ptr: *mut u8) {
+    if !ptr.is_null() {
+        free_wrapper(ptr, TAG_OPERATOR_NEW_TAG3);
+    }
+}
+
+/// operator_new_checked — original: `FUN_08266c70` @ 0x08266c70
+/// (48 bytes, 223 call sites).
+///
+/// Allocates via the tag-2 `operator_new`; on failure invokes the C++
+/// new-handler dispatch @ 0x08266abc with code 3 and returns the result
+/// as-is (NULL when no handler freed anything — the original does not
+/// retry at this level).
+#[no_mangle]
+pub unsafe extern "C" fn operator_new_checked(size: usize) -> *mut u8 {
+    let block = operator_new(size);
+    if block.is_null() {
+        (heap_ops().new_handler)(NEW_HANDLER_CODE);
+    }
+    block
+}
+
+/// heap_panic — original: `FUN_08030f44` @ 0x08030f44 (32 bytes). Fatal,
+/// does not return.
+///
+/// Called from the heap core on a corrupt free (zero header word or a
+/// header with the free bit already set — double free). Runs the
+/// original's rundown path: `__rt_raise(1, 0)` @ 0x080320a8, the exit
+/// path @ 0x08035878, then the final terminate stub @ 0x082b20a0 with
+/// code 1.
+#[no_mangle]
+pub unsafe extern "C" fn heap_panic() -> ! {
+    let ops = heap_ops();
+    (ops.raise)(1, 0);
+    (ops.exit)();
+    (ops.terminate)(1);
+    // Safety net: the original's terminate target never returns; if a
+    // swapped-in hook does, spin rather than fall off a noreturn fn.
+    loop {}
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+    use super::*;
+    use std::sync::Mutex;
+
+    /// Serializes tests that swap the global ops table / DEFAULT_HEAP.
+    static OPS_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Fake heap handle returned by the mock `heap_create`.
+    static mut FAKE_HANDLE: HeapDescriptorDescriptor = HeapDescriptorDescriptor {
+        desc: core::ptr::null_mut(),
+    };
+
+    // Mock heap call log.
+    static mut CREATE_CALLS: usize = 0;
+    static mut LAST_CREATE_DESC: *mut HeapDescriptor = core::ptr::null_mut();
+    static mut LAST_CREATE_START: *mut u8 = core::ptr::null_mut();
+    static mut LAST_CREATE_SIZE: usize = 0;
+    static mut ALLOC_CALLS: usize = 0;
+    static mut LAST_ALLOC_HEAP: *mut HeapDescriptorDescriptor = core::ptr::null_mut();
+    static mut LAST_ALLOC_SIZE: usize = 0;
+    static mut LAST_ALLOC_TAG: usize = 0;
+    static mut ALLOC_RET: *mut u8 = core::ptr::null_mut();
+    static mut FREE_CALLS: usize = 0;
+    static mut LAST_FREE_HEAP: *mut HeapDescriptorDescriptor = core::ptr::null_mut();
+    static mut LAST_FREE_PTR: *mut u8 = core::ptr::null_mut();
+    static mut LAST_FREE_TAG: usize = 0;
+    static mut REALLOC_CALLS: usize = 0;
+    static mut LAST_REALLOC_HEAP: *mut HeapDescriptorDescriptor = core::ptr::null_mut();
+    static mut LAST_REALLOC_PTR: *mut u8 = core::ptr::null_mut();
+    static mut LAST_REALLOC_SIZE: usize = 0;
+    static mut LAST_REALLOC_A3: usize = 0;
+    static mut LAST_REALLOC_A4: usize = 0;
+    static mut NEW_HANDLER_CALLS: usize = 0;
+    static mut LAST_NEW_HANDLER_CODE: usize = 0;
+
+    const BLOCK_A: usize = 0xA110_0000;
+
+    unsafe extern "C" fn mock_create(
+        desc: *mut HeapDescriptor,
+        start: *mut u8,
+        size: usize,
+    ) -> *mut HeapDescriptorDescriptor {
+        CREATE_CALLS += 1;
+        LAST_CREATE_DESC = desc;
+        LAST_CREATE_START = start;
+        LAST_CREATE_SIZE = size;
+        core::ptr::addr_of_mut!(FAKE_HANDLE)
+    }
+
+    unsafe extern "C" fn mock_alloc(
+        heap: *mut HeapDescriptorDescriptor,
+        size: usize,
+        tag: usize,
+    ) -> *mut u8 {
+        ALLOC_CALLS += 1;
+        LAST_ALLOC_HEAP = heap;
+        LAST_ALLOC_SIZE = size;
+        LAST_ALLOC_TAG = tag;
+        ALLOC_RET
+    }
+
+    unsafe extern "C" fn mock_free(
+        heap: *mut HeapDescriptorDescriptor,
+        ptr: *mut u8,
+        tag: usize,
+    ) {
+        FREE_CALLS += 1;
+        LAST_FREE_HEAP = heap;
+        LAST_FREE_PTR = ptr;
+        LAST_FREE_TAG = tag;
+    }
+
+    unsafe extern "C" fn mock_realloc(
+        heap: *mut HeapDescriptorDescriptor,
+        ptr: *mut u8,
+        size: usize,
+        a3: usize,
+        a4: usize,
+    ) -> *mut u8 {
+        REALLOC_CALLS += 1;
+        LAST_REALLOC_HEAP = heap;
+        LAST_REALLOC_PTR = ptr;
+        LAST_REALLOC_SIZE = size;
+        LAST_REALLOC_A3 = a3;
+        LAST_REALLOC_A4 = a4;
+        ALLOC_RET
+    }
+
+    unsafe extern "C" fn mock_new_handler(code: usize) {
+        NEW_HANDLER_CALLS += 1;
+        LAST_NEW_HANDLER_CODE = code;
+    }
+
+    const MOCK_OPS: HeapVeneerOps = HeapVeneerOps {
+        alloc: mock_alloc,
+        free: mock_free,
+        realloc: mock_realloc,
+        create: mock_create,
+        new_handler: mock_new_handler,
+        raise: missing_raise,
+        exit: missing_exit,
+        terminate: missing_terminate,
+    };
+
+    /// Resets the mock log + DEFAULT_HEAP, installs the mock table,
+    /// returns the lock guard.
+    fn mock_heap() -> std::sync::MutexGuard<'static, ()> {
+        let guard = OPS_LOCK.lock().unwrap();
+        unsafe {
+            CREATE_CALLS = 0;
+            LAST_CREATE_DESC = core::ptr::null_mut();
+            LAST_CREATE_START = core::ptr::null_mut();
+            LAST_CREATE_SIZE = 0;
+            ALLOC_CALLS = 0;
+            LAST_ALLOC_HEAP = core::ptr::null_mut();
+            LAST_ALLOC_SIZE = 0;
+            LAST_ALLOC_TAG = 0;
+            ALLOC_RET = BLOCK_A as *mut u8;
+            FREE_CALLS = 0;
+            LAST_FREE_HEAP = core::ptr::null_mut();
+            LAST_FREE_PTR = core::ptr::null_mut();
+            LAST_FREE_TAG = 0;
+            REALLOC_CALLS = 0;
+            LAST_REALLOC_HEAP = core::ptr::null_mut();
+            LAST_REALLOC_PTR = core::ptr::null_mut();
+            LAST_REALLOC_SIZE = 0;
+            LAST_REALLOC_A3 = 0;
+            LAST_REALLOC_A4 = 0;
+            NEW_HANDLER_CALLS = 0;
+            LAST_NEW_HANDLER_CODE = 0;
+            core::ptr::addr_of_mut!(DEFAULT_HEAP).write(core::ptr::null_mut());
+            *core::ptr::addr_of_mut!(HEAP_OPS) = MOCK_OPS;
+        }
+        guard
+    }
+
+    #[test]
+    fn lazy_init_creates_default_heap_once() {
+        let _lock = mock_heap();
+        unsafe {
+            lazy_init_default_heap();
+            assert_eq!(CREATE_CALLS, 1);
+            assert_eq!(DEFAULT_HEAP, core::ptr::addr_of_mut!(FAKE_HANDLE));
+            lazy_init_default_heap();
+            lazy_init_default_heap();
+            assert_eq!(CREATE_CALLS, 1, "init must run exactly once");
+        }
+    }
+
+    #[test]
+    fn lazy_init_wires_descriptor_and_region_like_the_original() {
+        let _lock = mock_heap();
+        unsafe {
+            lazy_init_default_heap();
+            assert_eq!(CREATE_CALLS, 1);
+            // Original: heap_create(desc = 0x08a1a710,
+            // start = 0x08a1a710 - 0x8000 = 0x08a12710, size = 0x8000) —
+            // a 32 KB region immediately below the descriptor.
+            assert_eq!(LAST_CREATE_SIZE, 0x8000);
+            let storage = core::ptr::addr_of_mut!(DEFAULT_HEAP_STORAGE);
+            assert_eq!(
+                LAST_CREATE_DESC,
+                core::ptr::addr_of_mut!((*storage).desc) as *mut HeapDescriptor
+            );
+            assert_eq!(
+                LAST_CREATE_START,
+                core::ptr::addr_of_mut!((*storage).region) as *mut u8
+            );
+            assert_eq!(
+                LAST_CREATE_DESC as usize - LAST_CREATE_START as usize,
+                0x8000,
+                "region must end where the descriptor begins (desc = start + 0x8000)"
+            );
+        }
+    }
+
+    #[test]
+    fn malloc_wrapper_inits_and_passes_tag_through() {
+        let _lock = mock_heap();
+        unsafe {
+            let p = malloc_wrapper(0x120, 7);
+            assert_eq!(p, BLOCK_A as *mut u8);
+            assert_eq!(CREATE_CALLS, 1, "wrapper must run the lazy init");
+            assert_eq!(ALLOC_CALLS, 1);
+            assert_eq!(LAST_ALLOC_HEAP, core::ptr::addr_of_mut!(FAKE_HANDLE));
+            assert_eq!(LAST_ALLOC_SIZE, 0x120);
+            assert_eq!(LAST_ALLOC_TAG, 7);
+            malloc_wrapper(0x40, 9);
+            assert_eq!(CREATE_CALLS, 1, "second call must not re-init");
+            assert_eq!(LAST_ALLOC_TAG, 9);
+        }
+    }
+
+    #[test]
+    fn free_wrapper_passes_tag_through_without_null_guard() {
+        let _lock = mock_heap();
+        unsafe {
+            free_wrapper(BLOCK_A as *mut u8, 5);
+            assert_eq!(FREE_CALLS, 1);
+            assert_eq!(LAST_FREE_HEAP, core::ptr::addr_of_mut!(FAKE_HANDLE));
+            assert_eq!(LAST_FREE_PTR, BLOCK_A as *mut u8);
+            assert_eq!(LAST_FREE_TAG, 5);
+            // The original has no NULL guard here (heap_free ignores NULL).
+            free_wrapper(core::ptr::null_mut(), 5);
+            assert_eq!(FREE_CALLS, 2);
+            assert!(LAST_FREE_PTR.is_null());
+        }
+    }
+
+    #[test]
+    fn realloc_wrapper_forwards_all_args() {
+        let _lock = mock_heap();
+        unsafe {
+            let p = realloc_wrapper(BLOCK_A as *mut u8, 0x200, 1, 1);
+            assert_eq!(p, BLOCK_A as *mut u8);
+            assert_eq!(CREATE_CALLS, 1);
+            assert_eq!(REALLOC_CALLS, 1);
+            assert_eq!(LAST_REALLOC_HEAP, core::ptr::addr_of_mut!(FAKE_HANDLE));
+            assert_eq!(LAST_REALLOC_PTR, BLOCK_A as *mut u8);
+            assert_eq!(LAST_REALLOC_SIZE, 0x200);
+            assert_eq!(LAST_REALLOC_A3, 1);
+            assert_eq!(LAST_REALLOC_A4, 1);
+        }
+    }
+
+    #[test]
+    fn operator_new_uses_tag_2() {
+        let _lock = mock_heap();
+        unsafe {
+            let p = operator_new(24);
+            assert_eq!(p, BLOCK_A as *mut u8);
+            assert_eq!(ALLOC_CALLS, 1);
+            assert_eq!(LAST_ALLOC_SIZE, 24);
+            assert_eq!(LAST_ALLOC_TAG, 2);
+        }
+    }
+
+    #[test]
+    fn operator_delete_uses_tag_2_and_guards_null() {
+        let _lock = mock_heap();
+        unsafe {
+            operator_delete(core::ptr::null_mut());
+            assert_eq!(FREE_CALLS, 0, "delete(NULL) must not reach the heap");
+            operator_delete(BLOCK_A as *mut u8);
+            assert_eq!(FREE_CALLS, 1);
+            assert_eq!(LAST_FREE_PTR, BLOCK_A as *mut u8);
+            assert_eq!(LAST_FREE_TAG, 2);
+        }
+    }
+
+    #[test]
+    fn tag3_pair_uses_tag_3() {
+        let _lock = mock_heap();
+        unsafe {
+            let p = operator_new_tag3(48);
+            assert_eq!(p, BLOCK_A as *mut u8);
+            assert_eq!(LAST_ALLOC_TAG, 3);
+            operator_delete_tag3(core::ptr::null_mut());
+            assert_eq!(FREE_CALLS, 0, "tag-3 delete must NULL-guard too");
+            operator_delete_tag3(BLOCK_A as *mut u8);
+            assert_eq!(FREE_CALLS, 1);
+            assert_eq!(LAST_FREE_TAG, 3);
+        }
+    }
+
+    #[test]
+    fn checked_new_returns_block_without_handler_on_success() {
+        let _lock = mock_heap();
+        unsafe {
+            let p = operator_new_checked(64);
+            assert_eq!(p, BLOCK_A as *mut u8);
+            assert_eq!(LAST_ALLOC_TAG, 2, "checked new allocates with tag 2");
+            assert_eq!(NEW_HANDLER_CALLS, 0);
+        }
+    }
+
+    #[test]
+    fn checked_new_invokes_handler_code_3_on_failure() {
+        let _lock = mock_heap();
+        unsafe {
+            ALLOC_RET = core::ptr::null_mut();
+            let p = operator_new_checked(64);
+            assert!(p.is_null(), "no retry at this level: NULL propagates");
+            assert_eq!(NEW_HANDLER_CALLS, 1);
+            assert_eq!(LAST_NEW_HANDLER_CODE, 3);
+        }
+    }
+}
