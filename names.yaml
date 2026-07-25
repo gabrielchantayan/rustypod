@@ -192,7 +192,8 @@ functions:
     sig: "size_t strlen_safe(const char *s)"
     module: strlen_safe
     status: ported
-    notes: NULL-guarded strlen (returns 0 for null). Classic ADS strlen is
+    notes: >-
+      NULL-guarded strlen (returns 0 for null). Classic ADS strlen is
       genuinely absent from the binary; this is what retailOS uses.
       Variants: 0x0810b610 (identical), 0x08275e20 (count+1).
 
@@ -272,7 +273,8 @@ functions:
     sig: "u64 _ll_udiv10(u64 num)  // rem in r2"
     module: ll_udiv10
     status: ported
-    notes: Shift-add magic multiply by 10; callers: dtoa, %lld, strtoull.
+    notes: >-
+      Shift-add magic multiply by 10; callers: dtoa, %lld, strtoull.
 
   - address: 0x08030e7c
     ghidra: FUN_08030e7c
@@ -344,7 +346,8 @@ functions:
     sig: "u32 strtoul(const char *s, char **endptr, int base)"
     module: strtoul
     status: ported
-    notes: Conversion core merged with ws/sign wrapper @ 0x0802f87c.
+    notes: >-
+      Conversion core merged with ws/sign wrapper @ 0x0802f87c.
       ADS quirk: "0x" with no hex digit = no conversion. errno skipped.
 
   - address: 0x0802f87c
@@ -568,7 +571,8 @@ functions:
     sig: "i32 atexit(void (*f)(void))"
     module: atexit
     status: ported
-    notes: [libspace+0x3c] table ptr; malloc(32) on first use; LIFO run order.
+    notes: >-
+      [libspace+0x3c] table ptr; malloc(32) on first use; LIFO run order.
 
   - address: 0x080316cc
     name: __cpp_initialise
@@ -601,7 +605,8 @@ functions:
     sig: "i32 wcrtomb(char *s, u32 wc, void *state)"
     module: mbrtowc
     status: ported
-    notes: Wide->multibyte via LC_CTYPE block (libspace+0x24). Retail quirk:
+    notes: >-
+      Wide->multibyte via LC_CTYPE block (libspace+0x24). Retail quirk:
       C-locale block[0x101] reads mktime month table (29) so converter path
       is dead; reduces to valid iff wc < 0x80. Previously called 'mbrtowc'.
 
@@ -650,7 +655,8 @@ functions:
     sig: "Libspace *__rt_libspace()  // base 0x08b31774"
     module: errno
     status: ported
-    notes: Offsets: +0x00 errno, +0x08 heap desc, +0x14/+0x1c alloc arena,
+    notes: >-
+      Offsets: +0x00 errno, +0x08 heap desc, +0x14/+0x1c alloc arena,
       +0x24 ctype/LC_CTYPE block ptr, +0x28/+0x2c lc_numeric, +0x3c atexit tbl.
 
   - address: 0x0802ecb4
@@ -750,7 +756,8 @@ functions:
     sig: "void out_padded(state, digits, num_digits, prefix, prefix_len)"
     module: printf_out
     status: ported
-    notes: Shared integer emitter — TRUE 5-arg ABI (prefix_len on stack);
+    notes: >-
+      Shared integer emitter — TRUE 5-arg ABI (prefix_len on stack);
       prefix does NOT come from state.prefix. Order: space-pad, prefix,
       zero-pad, precision zeros, digits, trailing pad. Other converters
       (d/x/o/ll) currently inline private copies — dedup candidate.
@@ -842,7 +849,8 @@ functions:
     sig: "i32 sscanf(const char *s, const char *fmt, ...)"
     module: scanf_helpers
     status: ported
-    notes: Builds 52-byte ScanfState; engine via SCANF_ENGINE pointer
+    notes: >-
+      Builds 52-byte ScanfState; engine via SCANF_ENGINE pointer
       (real target: format-engine prologue @ 0x080332a4 → 0x0803484c,
       next batch). Variadic capture deferred (stable Rust).
 
@@ -1051,7 +1059,8 @@ functions:
     size: 280
     module: fp_scalb
     status: ported
-    notes: 0x083eb144 double NaN/err, 0x083eb154 double unordered-cmp,
+    notes: >-
+      0x083eb144 double NaN/err, 0x083eb154 double unordered-cmp,
       0x083eb1d4 float NaN/err, trap decode 0x083ed080 (nibbles 8/9/10).
       Modeled via FP_TRAP_HANDLER hook (default: canonical NaN).
 
@@ -1172,7 +1181,8 @@ functions:
     size: 204
     module: fp_fconv
     status: ported
-    notes: Quirks: negatives>=1 -> +0; [2^63,2^64) wraps; >=2^64/+Inf -> -1.
+    notes: >-
+      Quirks: negatives>=1 -> +0; [2^63,2^64) wraps; >=2^64/+Inf -> -1.
 
   - address: 0x083eae74
     name: __d2f
@@ -1193,7 +1203,8 @@ functions:
     size: 500
     module: fp_dadd
     status: ported
-    notes: 70 callers. IEEE-exact core; quirks: NaN canonicalization,
+    notes: >-
+      70 callers. IEEE-exact core; quirks: NaN canonicalization,
       Inf+-Inf -> 0x7ff8...0001, denormal in/out flush to +0 (sign dropped).
 
   - address: 0x083ec09c
@@ -1215,7 +1226,8 @@ functions:
     size: 448
     module: fp_dmul
     status: ported
-    notes: 106 callers (hottest fp op). IEEE-exact; quirks: underflow flush
+    notes: >-
+      106 callers (hottest fp op). IEEE-exact; quirks: underflow flush
       +0 always, denormal-input sign quirk, Inf*denormal -> NaN 0x7ff8...0001.
 
   - address: 0x083eb238
@@ -1231,7 +1243,8 @@ functions:
     size: 308
     module: fp_fadd
     status: ported
-    notes: Quirk: magnitude-add no-carry path rounds ties AWAY (not RNE) —
+    notes: >-
+      Quirk: magnitude-add no-carry path rounds ties AWAY (not RNE) —
       verified in disassembly, pinned by tests.
 
   - address: 0x83ecc60
@@ -1251,7 +1264,8 @@ functions:
     size: 140
     module: fp_fadd
     status: ported
-    notes: DEAD-LINKED. Not a float round-to-int: treats input as fixed-point
+    notes: >-
+      DEAD-LINKED. Not a float round-to-int: treats input as fixed-point
       scaled by 2^-43, returns sign-magnitude integer. Ported as-is.
 
   - address: 0x083eca20
@@ -1281,7 +1295,8 @@ functions:
     size: 484
     module: fp_misc
     status: ported
-    notes: CORRECTION: this is IEEE remainder() (ties-to-even quotient),
+    notes: >-
+      CORRECTION: this is IEEE remainder() (ties-to-even quotient),
       NOT fmod. Sole caller: __kernel_rem_pio2. Verified vs libm remainder.
 
   # --- Batch 7: libm, printf float, scanf engines ---
@@ -1313,7 +1328,8 @@ functions:
     size: 260
     module: libm/trig
     status: ported
-    notes: CORRECTION — recon had sin/cos wrappers swapped: 0x08031d24 is
+    notes: >-
+      CORRECTION — recon had sin/cos wrappers swapped: 0x08031d24 is
       sin (calls __kernel_sin), 0x080319a8 is cos.
 
   - address: 0x080319a8
@@ -1480,7 +1496,8 @@ functions:
     size: 1564
     module: scanf/scanf_engine
     status: ported
-    notes: Format walker + %s/%c/%[ handling. Ghidra wrong at 0x080363b8:
+    notes: >-
+      Format walker + %s/%c/%[ handling. Ghidra wrong at 0x080363b8:
       EOF during whitespace skip returns 0, not -1.
 
   - address: 0x080332a4
@@ -1724,7 +1741,8 @@ functions:
     size: 1024
     module: util/crc32
     status: identified
-    notes: zlib/IEEE table (entry[0x80]=0xEDB88320); dead data in osos —
+    notes: >-
+      zlib/IEEE table (entry[0x80]=0xEDB88320); dead data in osos —
       no references found. Vector: "123456789" = 0xCBF43926 (reflected),
       0xFC891918 (MSB/BZIP2 init/xorout).
 
@@ -1762,7 +1780,8 @@ functions:
     size: 52
     module: kernel/sync_sem
     status: ported
-    notes: ISR-context -> static slot, else heap slot; ROM create dispatch
+    notes: >-
+      ISR-context -> static slot, else heap slot; ROM create dispatch
       via thunk 0x08037e70 -> ROM 0x22003d70 (opcode 1 = semaphore).
       CORRECTION: only sem_delete uses the 0x08037e40/0x22003dc8 dispatcher.
 
@@ -1831,7 +1850,8 @@ functions:
     size: 372
     module: kernel/condvar
     status: ported
-    notes: Region 0x0807f5cc..0x0807f740: sleep queue over RTXC via intrusive
+    notes: >-
+      Region 0x0807f5cc..0x0807f740: sleep queue over RTXC via intrusive
       singly-linked list (head/tail anchor). condvar_broadcast (0x0807f5cc,
       FIFO drain — NO single-shot signal), mqueue_receive (0x0807f5f4),
       condvar_init/destroy/wait (0x0807f680/0x0807f650/0x0807f6ac, wait
@@ -1853,7 +1873,8 @@ functions:
     size: 32
     module: kernel/irq
     status: ported
-    notes: enter -> vic_dispatch -> exit. VIC blocks at 0x38e00000/0x38e01000
+    notes: >-
+      enter -> vic_dispatch -> exit. VIC blocks at 0x38e00000/0x38e01000
       (PL192-style: STATUS+0, INTENABLE+0x10, INTENCLEAR+0x14, VECTADDR+0x100,
       ADDRESS+0xf00), shared clear block 0x38e02008; ack = write 0x01010101.
 
@@ -1893,7 +1914,8 @@ functions:
     size: 256
     module: kernel/task_lock
     status: ported
-    notes: 32 wrappers @ 0x08037e00-0x08037f00, all ported. Identified:
+    notes: >-
+      32 wrappers @ 0x08037e00-0x08037f00, all ported. Identified:
       rom_memmove (e00), rom_sem_wait (e08), rom_sem_signal (e10),
       kernel_ticks (e20, 47 callers), kernel_op_dispatch (e40),
       task_lock/unlock (e48/e50), size_to_class (e60, UNVERIFIED),
