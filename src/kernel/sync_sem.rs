@@ -33,9 +33,11 @@
 //!
 //! ROM-dispatch design (deviation, by necessity): the ROM kernel functions
 //! (0x22003d70 / 0x22003dc8 / 0x22003fd0 / 0x220042b4) are not in osos, and
-//! the RAM-side helpers they lean on — the ISR-context check @ 0x080bead8,
-//! the heap alloc wrapper @ 0x080769b8, the free veneer @ 0x080f151c — are
-//! not yet ported. Instead of undefined `extern "C"` symbols (which would
+//! the RAM-side ISR-context check @ 0x080bead8 is not yet ported (the heap
+//! alloc/free veneers @ 0x080769b8 / 0x080f151c now are, as
+//! `os_malloc`/`os_free` in kernel/os_heap.rs — the table hooks remain
+//! until the kernel modules get wired together). Instead of undefined
+//! `extern "C"` symbols (which would
 //! break the freestanding ARM link) all seven entry points dispatch
 //! indirectly through the `ROM_KERNEL` function-pointer table. The table
 //! defaults to documented stubs (see each `missing_*`); on real hardware it
@@ -95,10 +97,11 @@ pub struct RomKernel {
     /// (reads the byte at *0x089ca638 + 0xb5). Not yet ported.
     pub in_isr_context: unsafe extern "C" fn() -> u32,
     /// RAM heap-alloc wrapper @ 0x080769b8 (retailOS heap). `sem_create`
-    /// allocates the 4-byte handle slot through it. Not yet ported.
+    /// allocates the 4-byte handle slot through it. Ported as `os_malloc`
+    /// (kernel/os_heap.rs).
     pub heap_alloc: unsafe extern "C" fn(size: usize) -> SemHandle,
     /// RAM free veneer @ 0x080f151c (retailOS free @ 0x080e7970, flag 0).
-    /// Not yet ported.
+    /// Ported as `os_free` (kernel/os_heap.rs).
     pub heap_free: unsafe extern "C" fn(ptr: SemHandle),
 }
 

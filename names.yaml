@@ -1930,3 +1930,34 @@ functions:
       task_lock/unlock (e48/e50), size_to_class (e60, UNVERIFIED),
       kernel_create_dispatch (e70), tick_elapsed (eb8), irq_fiq_disable
       (ed8), tick_delay (ef0, 23 callers).
+
+  - address: 0x080769b8
+    ghidra: FUN_080769b8
+    name: os_malloc
+    size: 8
+    sig: "void *os_malloc(u32 size)"
+    module: kernel/os_heap
+    status: ported
+    notes: >-
+      Pure tail veneer `mov r1,#0; b 0x080eb67c` (malloc_wrapper) — caller
+      tag 0 = kernel-service allocations. 4 call sites, all in the
+      kernel-object layer: sem_create 0x08056724, mailbox create 0x0805675c,
+      object create 0x080563a0 (x2). Ghidra's C is misleading (it inlines
+      the malloc_wrapper chain). match.py 0/24 by design — LLVM inlines the
+      ported malloc_wrapper body instead of tail-branching; behaviorally
+      identical.
+
+  - address: 0x080f151c
+    ghidra: FUN_080f151c
+    name: os_free
+    size: 8
+    sig: "void os_free(void *ptr)"
+    module: kernel/os_heap
+    status: ported
+    notes: >-
+      Pure tail veneer `mov r1,#0; b 0x080e7970` (free_wrapper), tag 0 =
+      kernel-service objects. Reached from sem_delete 0x0805646c (bne
+      tail), kernel-object delete 0x080564b0 (bl), queue-node free
+      0x080b4c4c (bl + tail b). Ghidra's FUN_080f151c C is misleading — it
+      inlines the whole free_wrapper/heap_free chain. match.py 0/24 by
+      design (LLVM inlines the ported free_wrapper body).
