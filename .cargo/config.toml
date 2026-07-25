@@ -1,2 +1,8 @@
 [build]
 target = "armv5te-none-eabi"
+
+# Several ported modules swap global function-pointer hooks (SCANF_ENGINE,
+# PRINTF_ENGINE, FP_TRAP_HANDLER, ...) in tests; parallel test threads race
+# on them. Tests are fast (<1s), so just run them serially.
+[env]
+RUST_TEST_THREADS = "1"
