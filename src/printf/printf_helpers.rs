@@ -111,7 +111,7 @@ impl PrintfState {
 /// `dest` points at the cursor word of the caller's output state (in the
 /// original, an on-stack `{cursor, end}` pair whose `end` this sink
 /// ignores).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn mem_putc(c: u8, dest: *mut *mut u8) {
     let cursor = *dest;
     *cursor = c;
@@ -132,7 +132,7 @@ pub struct BoundedCursor {
 /// `cursor < end` (unsigned compare); overflow characters are silently
 /// dropped so the caller's total count still reflects the untruncated
 /// length.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn bounded_putc(c: u8, bounds: *mut BoundedCursor) {
     let b = &mut *bounds;
     if (b.cursor as usize) < (b.end as usize) {
@@ -163,7 +163,7 @@ unsafe fn emit_fill(state: *mut PrintfState, fill: u8) {
 /// content. No-op when FLAG_LEFT_JUSTIFY is set (padding then belongs
 /// after the content, see [`pad_emit_zero`]). Fill is `'0'` with
 /// FLAG_ZERO_PAD, `' '` otherwise.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn pad_emit(state: *mut PrintfState) {
     let fill = (*state).fill_char();
     if (*state).is_left_justified() {
@@ -177,7 +177,7 @@ pub unsafe extern "C" fn pad_emit(state: *mut PrintfState) {
 /// Trailing field-width padding, called by the converters after the
 /// content. Emits spaces (never zeros) and only when FLAG_LEFT_JUSTIFY
 /// is set; otherwise a no-op.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn pad_emit_zero(state: *mut PrintfState) {
     if !(*state).is_left_justified() {
         return;
@@ -191,7 +191,7 @@ pub unsafe extern "C" fn pad_emit_zero(state: *mut PrintfState) {
 /// `hh` sign-extend from 8 bits, else with `h` from 16 bits, else pass
 /// through. (`hh` wins if both bits are set, matching the original's
 /// test order.)
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn widen_signed(value: i32, state: *const PrintfState) -> i32 {
     let flags = (*state).flags;
     if flags & FLAG_LEN_HH != 0 {
@@ -207,7 +207,7 @@ pub unsafe extern "C" fn widen_signed(value: i32, state: *const PrintfState) -> 
 ///
 /// Unsigned twin of [`widen_signed`]: masks to 8 bits (`hh`) or 16 bits
 /// (`h`), else passes through.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn widen_unsigned(value: u32, state: *const PrintfState) -> u32 {
     let flags = (*state).flags;
     if flags & FLAG_LEN_HH != 0 {

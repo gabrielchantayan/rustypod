@@ -154,7 +154,7 @@ unsafe fn lookup_signal_handler(sig: i32) -> isize {
 /// handler and return its result (1). Handler == -3: ignore, return 0.
 /// Otherwise call `handler(sig, code)` (`mov lr, pc; mov pc, r2`) and
 /// return 0.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn raise(sig: i32, code: i32) -> i32 {
     let handler = lookup_signal_handler(sig);
     if handler == SIGNAL_DEFAULT {
@@ -282,7 +282,7 @@ fn os_terminate() -> ! {
 /// `bl raise; cmp r0, #0; popeq {r4, pc}` — if the signal was handled
 /// (raise returned 0) return 0 to the caller; otherwise fall through to
 /// `b 0x082b20a0` (OS terminate), which never returns.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __rt_raise(sig: i32, code: i32) -> i32 {
     if raise(sig, code) == 0 {
         return 0;

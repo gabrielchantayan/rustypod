@@ -194,7 +194,7 @@ fn narrow_op() -> ScanfFloatNarrowFn {
 /// consumed (>= 0), 0 when EOF hit during the leading whitespace skip,
 /// or -2 when no valid digits were present (matching failure — this
 /// includes `inf`/`nan` input and bare `"1e"`, see module docs).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn scanf_float_engine(
     unused_r0: i32,
     input: *mut ScanfState,

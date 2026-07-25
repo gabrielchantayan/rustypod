@@ -29,7 +29,7 @@
 //! with no `__aeabi_uldivmod` libcall.
 
 /// Quotient-only entry point matching the original's r0:r1 return.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn _ll_udiv10(num: u64) -> u64 {
     ll_udiv10_full(num).0
 }

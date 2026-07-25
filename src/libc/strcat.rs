@@ -34,7 +34,7 @@ unsafe fn find_nul(dst: *mut u8) -> *mut u8 {
 }
 
 /// strcat — append `src` at `dst`'s NUL, NUL-terminate, return `dst`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn strcat(dst: *mut u8, src: *const u8) -> *mut u8 {
     let mut end = find_nul(dst);
     let mut src = src;
@@ -52,7 +52,7 @@ pub unsafe extern "C" fn strcat(dst: *mut u8, src: *const u8) -> *mut u8 {
 
 /// strncat — append at most `len` chars of `src` at `dst`'s NUL, always
 /// NUL-terminate, return `dst`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn strncat(dst: *mut u8, src: *const u8, len: usize) -> *mut u8 {
     let mut end = find_nul(dst);
     let mut src = src;

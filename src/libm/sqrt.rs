@@ -140,7 +140,7 @@ const POW_E10_NEG: [u32; 11] = [
 /// Double square root: NaN -> `_dsqrt` (canonical qNaN out), x < 0 (in the
 /// original's denormal-flushing compare against +0.0) -> EDOM and the
 /// NaN 0x7ff80000_00000001, everything else -> `_dsqrt(x)`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn sqrt(x: u64) -> u64 {
     let hi = (x >> 32) as u32;
     let lo = x as u32;
@@ -169,7 +169,7 @@ pub unsafe extern "C" fn sqrt(x: u64) -> u64 {
 /// Base-e exponential with ADS semantics: NaN -> canonical float qNaN,
 /// +Inf -> +Inf, -Inf -> +0, underflow -> ERANGE and +0, overflow ->
 /// ERANGE and +Inf.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn expf(x: u32) -> u32 {
     // Exponent field all ones (the original's `mvn r1, r0, asr #23` /
     // `tst r1, #0xff` checks exactly this, sign included).
@@ -233,7 +233,7 @@ fn expf_abort() -> ! {
 /// header.) Computes e^x * 2^exp_delta as a float bit pattern:
 /// x = e + frac with e = floor(x), local = e^frac from the kernel, scaled
 /// by e^e through the power tables and a final `__fmul` by 2^delta.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn expf_core(x: u32, exp_delta: i32) -> u32 {
     let mag = x & 0x7fff_ffff;
     // |x| < 2^-24-ish (0x33800000): e^x == 1.0f to float precision.

@@ -232,7 +232,7 @@ fn link_to_ptr(link: u32) -> *mut u8 {
 /// `desc` must point at an initialized heap descriptor whose free list is
 /// intact; the caller must hold the heap lock (the original is only ever
 /// called under `heap_lock`).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn heap_freelist_alloc(
     desc: *mut HeapDescriptor,
     size: u32,
@@ -319,7 +319,7 @@ pub unsafe extern "C" fn heap_freelist_alloc(
 /// `desc` must be a valid heap descriptor; `old_ptr`, when non-NULL, must
 /// be a live allocation from this heap. Not reentrant beyond what the
 /// installed lock hooks provide.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn heap_alloc_core(
     desc: *mut HeapDescriptor,
     size: u32,
@@ -473,12 +473,15 @@ mod tests {
     static mut PANIC_REASON: u32 = 0;
 
     extern "C" {
-        fn sigsetjmp(env: *mut i32, savesigs: i32) -> i32;
-        fn siglongjmp(env: *mut i32, val: i32) -> !;
+        // glibc exposes sigsetjmp only as the __sigsetjmp symbol (the
+        // header name is a macro); Darwin exports it directly.
+        #[cfg_attr(target_os = "linux", link_name = "__sigsetjmp")]
+        fn sigsetjmp(env: *mut usize, savesigs: i32) -> i32;
+        fn siglongjmp(env: *mut usize, val: i32) -> !;
     }
-    /// Oversized on purpose (Darwin arm64 needs far less); heap_panic
+    /// Oversized on purpose (both hosts' sigjmp_buf are smaller); heap_panic
     /// longjmps back here so corruption tests can observe the noreturn hook.
-    static mut JMP_BUF: [i32; 128] = [0; 128];
+    static mut JMP_BUF: [usize; 64] = [0; 64];
 
     unsafe extern "C" fn mock_lock(_desc: *mut HeapDescriptor) {
         LOCK_CALLS += 1;

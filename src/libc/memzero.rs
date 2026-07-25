@@ -103,7 +103,7 @@ unsafe fn fill(mut dst: *mut u8, mut len: usize, word: u32) {
 }
 
 /// Zero-fill `len` bytes at `dst`; `dst` may be misaligned. Returns `dst`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn memzero(dst: *mut u8, len: usize) -> *mut u8 {
     fill(dst, len, 0);
     dst
@@ -111,14 +111,14 @@ pub unsafe extern "C" fn memzero(dst: *mut u8, len: usize) -> *mut u8 {
 
 /// Zero-fill `len` bytes at `dst`; `dst` must be word-aligned (the original
 /// enters the shared block-fill body directly). Returns `dst`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn memzero_aligned(dst: *mut u8, len: usize) -> *mut u8 {
     fill_blocks(dst, 0, len);
     dst
 }
 
 /// Fill `len` bytes at `dst` with `value as u8`. Returns `dst`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn memset(dst: *mut u8, value: i32, len: usize) -> *mut u8 {
     // Broadcast the byte to a word, then run the memzero body (the original
     // tail-branches into memzero just past its `mov r2, #0`).

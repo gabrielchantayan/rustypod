@@ -13,7 +13,7 @@
 /// end of the source range, forward otherwise. Both paths word-align the
 /// destination, stream 32-byte blocks down to single bytes, and merge
 /// adjacent words with a funnel shift when the source is misaligned.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn memmove(dst: *mut u8, src: *const u8, len: usize) -> *mut u8 {
     if len == 0 || dst == src as *mut u8 {
         return dst;

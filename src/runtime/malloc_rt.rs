@@ -67,7 +67,7 @@
 //! - `__rt_heap_init` keeps the original's 4-argument register contract;
 //!   r2 is unused by the original and r3 only seeds the stack slot the
 //!   arena extension overwrites, so both are inert here.
-//! - Symbol exports (`#[no_mangle]`) are disabled in `cfg(test)` builds:
+//! - Symbol exports (`#[no_mangle]`) are gated to the firmware target (`target_os = "none"`):
 //!   on macOS, dyld interposes the test executable's exported
 //!   `malloc`/`free`/`realloc` over libSystem's, and std's startup
 //!   allocations would dispatch into the spin-forever default stubs.
@@ -156,12 +156,12 @@ fn heap_ops() -> HeapOps {
 /// The original loads the heap descriptor from libspace+8 purely so the
 /// tail veneer can discard it (the retailOS allocator takes only
 /// size + flag 1), so the port dispatches straight to the heap op.
-// NOTE: `#[no_mangle]` is gated to non-test builds. On macOS the dynamic
+// NOTE: `#[no_mangle]` is gated to the firmware target. On macOS the dynamic
 // linker interposes the main executable's exported `malloc`/`free`/`realloc`
 // over libSystem's, so the host test binary would route std's startup
 // allocations into the spin-forever default stubs and hang before main.
 // ARM/release builds export the symbols normally for match.py and linking.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn malloc(size: usize) -> *mut u8 {
     (heap_ops().alloc)(size)
 }
@@ -170,7 +170,7 @@ pub unsafe extern "C" fn malloc(size: usize) -> *mut u8 {
 ///
 /// NULL is a no-op (guarded twice in the original: here, and again in the
 /// tail veneer 0x082ab19c).
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn free(ptr: *mut u8) {
     if ptr.is_null() {
         return;
@@ -182,7 +182,7 @@ pub unsafe extern "C" fn free(ptr: *mut u8) {
 ///
 /// `size == 0` frees and returns NULL; `ptr == NULL` is plain malloc;
 /// anything else dispatches to the retailOS realloc.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn realloc(ptr: *mut u8, size: usize) -> *mut u8 {
     if size == 0 {
         free(ptr);
@@ -206,7 +206,7 @@ pub unsafe extern "C" fn realloc(ptr: *mut u8, size: usize) -> *mut u8 {
 ///
 /// Returns the installed descriptor (the original returns it in both
 /// exit paths).
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __rt_heap_init(
     heap_base: usize,
     heap_limit: usize,

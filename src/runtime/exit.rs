@@ -75,7 +75,7 @@ static mut ATEXIT_COUNT: usize = 0;
 /// (private) chain statics to their initializers and deletes the
 /// `__rt_exit` handler walk.
 #[doc(hidden)]
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __exit_push_handler(handler: unsafe extern "C" fn()) -> bool {
     let count = *core::ptr::addr_of!(ATEXIT_COUNT);
     if count >= ATEXIT_CAPACITY {
@@ -207,10 +207,10 @@ unsafe fn rt_exit_body(code: i32) -> i32 {
 /// The stock-ADS `__rt_exit` call is patched out (nop @ 0x08030f34), so
 /// this is a pure tail-branch into `__rt_sys_exit`.
 ///
-/// `no_mangle` is restricted to non-test builds: in host test builds an
+/// `no_mangle` is gated to the firmware target: in host builds an
 /// exported `exit` would interpose libc's `exit(3)` and send the test
 /// harness's own process teardown into the terminate stub.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn exit(code: i32) -> ! {
     // The original executes a dead `nop` @ 0x08030f34 (patched-out
     // __rt_exit call) between saving and restoring the code.
@@ -221,7 +221,7 @@ pub unsafe extern "C" fn exit(code: i32) -> ! {
 /// __rt_sys_exit — original: `FUN_08032084` @ 0x08032084.
 ///
 /// stdio cleanup, then retailOS terminate with the caller's code.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __rt_sys_exit(code: i32) -> ! {
     terminate(sys_exit_body(code))
 }
@@ -233,7 +233,7 @@ pub unsafe extern "C" fn __rt_sys_exit(code: i32) -> ! {
 ///
 /// `no_mangle` restricted like `exit` above — an exported `abort` would
 /// interpose libc's `abort(3)` in host test builds.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn abort() -> ! {
     exit(abort_body())
 }
@@ -243,7 +243,7 @@ pub unsafe extern "C" fn abort() -> ! {
 /// Runs the registered atexit handler chain (LIFO), then the
 /// fallback-terminate path. The original ignores `code` and terminates
 /// with 1.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __rt_exit(code: i32) -> ! {
     terminate(rt_exit_body(code))
 }

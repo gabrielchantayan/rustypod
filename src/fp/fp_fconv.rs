@@ -61,7 +61,7 @@ fn shr_arm(value: u32, shift: u32) -> u32 {
 /// hidden bit at bit 31. `exp >= 158` (|x| >= 2^31) takes the error path
 /// (descriptor 0x04020048): NaN decodes to +0, everything else saturates to
 /// `~(x asr 31) ^ 0x80000000` = INT_MAX / INT_MIN. Matches `f32 as i32`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __f2i(x: u32) -> i32 {
     let raw_exp = (x as i32) >> 23; // sign bit rides along, like `asrs r2, r0, #23`
     let mut mantissa = x << 8;
@@ -101,7 +101,7 @@ pub unsafe extern "C" fn __f2i(x: u32) -> i32 {
 /// fine), negative inputs with |x| < 1 truncate to +0, and the saturation
 /// is `~(x asr 31)`: u32::MAX for positive overflow/+Inf, 0 for negative
 /// overflow/-Inf. NaN -> +0 (descriptor 0x04020068). Matches `f32 as u32`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __f2u(x: u32) -> u32 {
     let raw_exp = (x as i32) >> 23;
     let mut mantissa = x << 8;
@@ -158,7 +158,7 @@ fn int_to_f32_bits(sign: u32, magnitude: u32) -> u32 {
 /// s32 -> float (u32 bits), round-to-nearest-even. Negates into a magnitude
 /// (wrapping, so INT_MIN works), keeps the sign word, and shares the
 /// normalize/round core with `__u2f`. Matches `x as f32`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __i2f(x: i32) -> u32 {
     let sign = (x as u32) & 0x8000_0000;
     let magnitude = if sign != 0 {
@@ -174,7 +174,7 @@ pub unsafe extern "C" fn __i2f(x: i32) -> u32 {
 /// u32 -> float (u32 bits). The original is just `mov r2, #0x40000000;
 /// b __i2f+12` — a zero sign word plus a tail-branch into the shared core.
 /// Matches `x as f32`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __u2f(x: u32) -> u32 {
     int_to_f32_bits(0, x)
 }
@@ -187,7 +187,7 @@ pub unsafe extern "C" fn __u2f(x: u32) -> u32 {
 /// original (`lsr`/`lsl` pair, no 64-bit shifts). Quirks (see module
 /// header): negatives with |x| >= 1 -> +0, [2^63, 2^64) wraps negative,
 /// >= 2^64 and +Inf -> -1, NaN -> +0 (descriptor 0x04020078).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __f2ll(x: u32) -> i64 {
     let raw_exp = (x as i32) >> 23;
     let mut mantissa = x << 8;
@@ -238,7 +238,7 @@ pub unsafe extern "C" fn __f2ll(x: u32) -> i64 {
 /// canonical positive qNaN 0x7fc00000 (descriptor 0x04000088, payload and
 /// sign dropped). Matches `x as f32` for every input whose result is a
 /// normal float, ±Inf, or true zero.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __d2f(x: u64) -> u32 {
     let mut lo = x as u32;
     let hi = (x >> 32) as u32;
@@ -291,7 +291,7 @@ pub unsafe extern "C" fn __d2f(x: u64) -> u32 {
 /// ±0 keeps its sign; denormals flush to +0.0; ±Inf maps to ±Inf; NaN ->
 /// the canonical double qNaN (descriptor 0x04000018, payload and sign
 /// dropped).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __f2d(x: u32) -> u64 {
     // x + 0x800000 increments the exponent field in place; zero in bits
     // 24..30 means the field was 0x00 or 0xff, and bit 23 splits the two.

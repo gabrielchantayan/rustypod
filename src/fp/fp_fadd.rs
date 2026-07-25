@@ -306,7 +306,7 @@ fn subtract_specials(a: u32, b: u32) -> u32 {
 /// __fadd — original @ 0x083ec4b4. IEEE single-precision add with
 /// flush-to-zero of denormal inputs, canonical-NaN output, and the
 /// tie-rounds-away quirk documented in the module header.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __fadd(a: u32, b: u32) -> u32 {
     if exp_is_special(a) || exp_is_special(b) {
         return add_specials(a, b);
@@ -319,7 +319,7 @@ pub unsafe extern "C" fn __fadd(a: u32, b: u32) -> u32 {
 
 /// __fsub — original @ 0x083ecc60. IEEE single-precision subtract with
 /// the same conventions as `__fadd`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __fsub(a: u32, b: u32) -> u32 {
     if exp_is_special(a) || exp_is_special(b) {
         return subtract_specials(a, b);
@@ -332,7 +332,7 @@ pub unsafe extern "C" fn __fsub(a: u32, b: u32) -> u32 {
 
 /// __frsb — original @ 0x083ecc28. Reverse subtract: `__frsb(a, b)` is
 /// `b - a`, computed by negating a and dispatching to the shared cores.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __frsb(a: u32, b: u32) -> u32 {
     if exp_is_special(a) || exp_is_special(b) {
         // The original swaps the pair with three eors, then tails the
@@ -414,7 +414,7 @@ fn frnd_tail(a: u32, sticky_word: u32) -> u32 {
 
 /// _frnd — original @ 0x83ecdc4. Dead-linked shared rounding tail; see
 /// `frnd_tail` and the module header for the actual semantics.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn _frnd(a: u32) -> u32 {
     frnd_tail(a, 0)
 }

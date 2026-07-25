@@ -137,7 +137,7 @@ unsafe extern "C" fn scanf_float_engine_stub(
 /// Float-engine entry point called by the walker for the float
 /// directives; swap in the real port of `FUN_08036348` when its batch
 /// lands. Defaults to [`scanf_float_engine_stub`].
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub static mut SCANF_FLOAT_ENGINE: ScanfFloatEngineFn = scanf_float_engine_stub;
 
 /// Whitespace test stored in `conv.ctype` by the prologue, standing in
@@ -157,7 +157,7 @@ unsafe extern "C" fn ctype_is_space(c: i32) -> i32 {
 /// The ADS `_scanf` entry: fills the conv state's format-engine fields
 /// and tail-calls [`scanf_engine_walk`]. See the module docs for the ABI
 /// and the simplifications (private ctype copy, r3 ignored).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn scanf_engine_prologue(
     input: *mut ScanfState,
     fmt: *const u8,
@@ -196,7 +196,7 @@ fn string_conversion_nopped(
 /// See the module docs for the full algorithm. Returns the number of
 /// conversions assigned (suppressed `*` conversions do not count), or
 /// -1 when EOF hit before the first field completed.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn scanf_engine_walk(
     input: *mut ScanfState,
     conv: *mut ScanfConvState,

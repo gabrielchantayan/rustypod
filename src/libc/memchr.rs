@@ -12,7 +12,7 @@
 
 /// Scan the first `len` bytes at `s` for `c as u8`; return a pointer to the
 /// first matching byte, or null if none matches (or `len == 0`).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn memchr(s: *const u8, c: i32, len: usize) -> *const u8 {
     let needle = c as u8;
     let end = s.add(len);

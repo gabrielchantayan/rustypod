@@ -176,7 +176,7 @@ unsafe extern "C" fn scanf_engine_stub(_a0: usize, _a1: usize, _a2: usize, _a3: 
 
 /// Engine entry point called by both veneers; swap in the real engine
 /// when its batch lands. Defaults to [`scanf_engine_stub`].
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub static mut SCANF_ENGINE: ScanfEngineFn = scanf_engine_stub;
 
 /// `string_getc` — original: `FUN_0803300c` @ 0x0803300c (56 bytes).
@@ -188,7 +188,7 @@ pub static mut SCANF_ENGINE: ScanfEngineFn = scanf_engine_stub;
 /// set the sticky `eof` flag and return -1 WITHOUT advancing `ptr`
 /// (the original's post-index writeback is discarded by the `strne`
 /// guard).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn string_getc(state: *mut ScanfState) -> i32 {
     let s = &mut *state;
     if s.count != 0 {
@@ -211,7 +211,7 @@ pub unsafe extern "C" fn string_getc(state: *mut ScanfState) -> i32 {
 /// end cannot be unwound), or when `ptr == base`. NOT limited to one
 /// level: repeated calls rewind down to `base`, bumping `count` each
 /// time.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn string_ungetc(state: *mut ScanfState) -> i32 {
     let s = &mut *state;
     if s.count == 0 || s.eof != 0 {
@@ -230,7 +230,7 @@ pub unsafe extern "C" fn string_ungetc(state: *mut ScanfState) -> i32 {
 /// Returns the byte at `*cursor` and then moves `*cursor` by `delta`
 /// (1 = consume, 0 = peek, -1 = step back). The engine drives the
 /// format string through this.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn getc_advance(cursor: *mut *const u8, delta: i32) -> u8 {
     let p = *cursor;
     *cursor = p.wrapping_offset(delta as isize);
@@ -250,7 +250,7 @@ pub unsafe extern "C" fn getc_advance(cursor: *mut *const u8, delta: i32) -> u8 
 /// which is AAPCS-compatible with variadic call sites — extra arguments
 /// simply land in r2/r3/stack unread) and the engine is reached through
 /// [`SCANF_ENGINE`].
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn sscanf(str: *const u8, fmt: *const u8) -> i32 {
     let mut state = ScanfState {
         ptr: str,
@@ -289,7 +289,7 @@ pub unsafe extern "C" fn sscanf(str: *const u8, fmt: *const u8) -> i32 {
 /// Register usage: r0 = `consumed_out`, r1 = `input`, r2/r3... =
 /// varargs (captured into `conv.ap`; null in this port, and the `...`
 /// omitted from the Rust signature — see module docs).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn vsscanf(consumed_out: *mut i32, input: *mut ScanfState) -> i32 {
     (*input).eof = 0;
     let mut conv = ScanfConvState {

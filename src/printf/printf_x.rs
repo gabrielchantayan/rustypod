@@ -130,14 +130,14 @@ unsafe fn emit_integer(state: *mut PrintfState, digits_rev: &[u8], prefix: &[u8]
 
 /// `convert_x` — `%x` converter. Original: `FUN_0802f384` @ 0x0802f384
 /// with spec char 'x' (lowercase digits, "0x" alternate prefix).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn convert_x(state: *mut PrintfState, value: u32) {
     convert_hex(state, value, false, false)
 }
 
 /// `convert_X` — `%X` converter: same path with the uppercase digit
 /// table and "0X" alternate prefix (original: spec char 'X').
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 #[allow(non_snake_case)]
 pub unsafe extern "C" fn convert_X(state: *mut PrintfState, value: u32) {
     convert_hex(state, value, true, false)
@@ -145,7 +145,7 @@ pub unsafe extern "C" fn convert_X(state: *mut PrintfState, value: u32) {
 
 /// `convert_p` — `%p` converter: lowercase digits, implied precision 8
 /// (original: spec char 'p').
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn convert_p(state: *mut PrintfState, value: u32) {
     convert_hex(state, value, false, true)
 }

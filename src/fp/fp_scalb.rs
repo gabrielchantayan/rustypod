@@ -128,7 +128,7 @@ unsafe fn fp_error(descriptor: u32, default_result: u64) -> u64 {
 /// stub version (`mov r0, #0; bx lr`) — no fp status is kept, so every call
 /// returns 0 and `op`/`bits` are ignored. Called around ldexp/fmod. Ported
 /// exactly as the stub.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __ieee_status(_op: u32, _bits: u32) -> u32 {
     0
 }
@@ -141,7 +141,7 @@ pub unsafe extern "C" fn __ieee_status(_op: u32, _bits: u32) -> u32 {
 /// exponent overflow and flushes to ±0 on underflow (no subnormals, no
 /// underflow trap). Subnormal inputs flush to +0.0; NaN inputs raise
 /// descriptor 0x0400009b and yield the canonical qNaN via `fp_error`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __dscalb(x: u64, n: i32) -> u64 {
     let hi = (x >> 32) as u32;
     let lo = x as u32;
@@ -195,7 +195,7 @@ pub unsafe extern "C" fn __dscalb(x: u64, n: i32) -> u64 {
 /// result is `x * 2^n` with bias 0xff. Identical structure: exponent-field
 /// add for normal results, ±Inf on overflow, ±0 on underflow, subnormal
 /// inputs flush to +0.0, NaN raises descriptor 0x0400000b via `fp_error`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __fscalb(x: u32, n: i32) -> u32 {
     let exponent = (x >> 23) & 0xff;
 

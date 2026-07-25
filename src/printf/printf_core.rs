@@ -176,7 +176,7 @@ unsafe fn float_converter() -> FloatConverterFn {
 /// [begin, end) slice through the state `putc` (original loop:
 /// `cmp begin, end; bcc body` — unsigned pointer compare). Does not
 /// touch `count`; callers account for the content themselves.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn str_emit(state: *mut PrintfState, begin: *const u8, end: *const u8) {
     let mut p = begin;
     while (p as usize) < (end as usize) {
@@ -189,7 +189,7 @@ pub unsafe extern "C" fn str_emit(state: *mut PrintfState, begin: *const u8, end
 ///
 /// The format engine; see the module header for the algorithm and the
 /// deviations. Returns the number of characters emitted (`state.count`).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn _printf(state: *mut PrintfState, fmt: *const u8, args: *const u32) -> i32 {
     let st = &mut *state;
     st.count = 0;
@@ -439,7 +439,7 @@ pub unsafe extern "C" fn _printf(state: *mut PrintfState, fmt: *const u8, args: 
 /// (see the module header). Installs [`str_emit`] as the default
 /// `emit_str` hook and zeroes the string-disable flag; returns the
 /// engine's character count (the original leaves it in r0).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn _vsnprintf(
     fmt: *const u8,
     putc: PutcFn,

@@ -44,7 +44,7 @@ use crate::chval::_chval;
 /// skips. Returns the value; `endptr`, when non-NULL, receives a pointer
 /// to the first character not consumed (`s` itself when no digit was
 /// converted — including the `"0x"`-with-no-hex-digit case above).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __strtoull(s: *const u8, endptr: *mut *mut u8, base: i32) -> u64 {
     parse(s, endptr, base).0
 }
@@ -58,7 +58,7 @@ pub unsafe extern "C" fn __strtoull(s: *const u8, endptr: *mut *mut u8, base: i3
 /// it overflowed. If no digits were converted, `endptr` is set to the
 /// original string start, not the post-sign position. errno is never
 /// touched (see module docs).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn strtoull(s: *const u8, endptr: *mut *mut u8, base: i32) -> u64 {
     let mut p = s;
     while is_c_space(*p) {

@@ -73,7 +73,7 @@ fn sdiv_core(num: i32, den: i32) -> (i32, i32) {
 }
 
 /// `__rt_sdiv` @ 0x08031568 — signed 32-bit divide, quotient only.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __rt_sdiv(num: i32, den: i32) -> i32 {
     sdiv_core(num, den).0
 }
@@ -81,7 +81,7 @@ pub unsafe extern "C" fn __rt_sdiv(num: i32, den: i32) -> i32 {
 /// `__rt_sdiv` @ 0x08031568 — signed divide, quotient returned and
 /// remainder stored through `rem` (the original returns both in r0/r1;
 /// pre-EABI C callers that want both go through this wrapper).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __rt_sdivmod(num: i32, den: i32, rem: *mut i32) -> i32 {
     let (quot, r) = sdiv_core(num, den);
     *rem = r;
@@ -89,14 +89,14 @@ pub unsafe extern "C" fn __rt_sdivmod(num: i32, den: i32, rem: *mut i32) -> i32 
 }
 
 /// `__rt_udiv` @ 0x08036f14 — unsigned 32-bit divide, quotient only.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __rt_udiv(num: u32, den: u32) -> u32 {
     udiv_entry(num, den).0
 }
 
 /// `__rt_udiv` @ 0x08036f14 — unsigned divide, quotient returned and
 /// remainder stored through `rem`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __rt_udivmod(num: u32, den: u32, rem: *mut u32) -> u32 {
     let (quot, r) = udiv_entry(num, den);
     *rem = r;

@@ -190,7 +190,7 @@ unsafe fn free_list_unlink(node: *mut FreeNode) {
 /// and inserts it into `desc`'s size-sorted free list. Returns the
 /// (possibly merged) block header. Fatal via `heap_panic` on any
 /// corruption described in the module header.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C-unwind" fn heap_free_insert(
     desc: *mut HeapDescriptor,
@@ -299,7 +299,7 @@ pub unsafe extern "C-unwind" fn heap_free_insert(
 /// Frees the user pointer `ptr` into `heap`. NULL is a no-op; a zero
 /// header word or an already-free block is a fatal double free. `_tag` is
 /// the veneer caller tag the original receives in r2 but never uses.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C-unwind" fn heap_free(heap: *mut HeapDescriptor, ptr: *mut u8, _tag: usize) {
     if ptr.is_null() {
         return;

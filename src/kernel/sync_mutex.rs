@@ -188,7 +188,7 @@ fn rom_kernel() -> RomKernelOps {
 ///
 /// Creates the semaphore cell and zeroes the padding word. The `mutex`
 /// argument is not NULL-checked, as in the original.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn mutex_create(mutex: *mut Mutex) {
     (*mutex).sem_cell = semaphore_cell_create();
     (*mutex).unused = 0;
@@ -211,7 +211,7 @@ unsafe fn semaphore_cell_create() -> *mut u32 {
 /// mutex_lock — original: `FUN_0807f5c4` @ 0x0807f5c4 (8 bytes), with
 /// the guard thunk @ 0x8056510 inlined: only a live ROM handle (cell and
 /// *cell both nonzero) reaches the ROM wait.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn mutex_lock(mutex: *mut Mutex) {
     let cell = (*mutex).sem_cell;
     if !cell.is_null() {
@@ -225,7 +225,7 @@ pub unsafe extern "C" fn mutex_lock(mutex: *mut Mutex) {
 /// mutex_unlock — original: `FUN_0807f6a0` @ 0x0807f6a0 (8 bytes), with
 /// the guard thunk @ 0x8056710 inlined. The mutexes are non-recursive
 /// counting semaphores: unlocking an unlocked mutex just signals.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn mutex_unlock(mutex: *mut Mutex) {
     let cell = (*mutex).sem_cell;
     if !cell.is_null() {
@@ -238,7 +238,7 @@ pub unsafe extern "C" fn mutex_unlock(mutex: *mut Mutex) {
 
 /// mutex_delete — original: `FUN_0807f650` @ 0x0807f650 (32 bytes).
 /// Destroys the cell if present, then NULLs the mutex's cell pointer.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn mutex_delete(mutex: *mut Mutex) {
     let cell = (*mutex).sem_cell;
     if !cell.is_null() {
@@ -268,7 +268,7 @@ unsafe fn semaphore_cell_destroy(cell: *mut u32) {
 /// by `KERNEL_STARTED`). Once started, returns the current task id; if
 /// the id is 0 but a current task exists, the task-notify helper is
 /// pinged with `KERNEL_NOTIFY_CALLBACK` first and the id re-read.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn kernel_running() -> i32 {
     let mut task_id = 0;
     // Volatile: nothing in this crate writes the flag yet, and LLVM

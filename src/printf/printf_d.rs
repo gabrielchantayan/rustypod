@@ -56,13 +56,13 @@ const FLAG_SHOW_SIGN: u32 = 0x002;
 const FLAG_SPACE_SIGN: u32 = 0x004;
 
 /// `convert_d` — port of the signed (`%d` / `%i`) path of the original.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn convert_d(state: *mut PrintfState, value: i32) {
     convert_int(state, value as u32, true);
 }
 
 /// `convert_u` — port of the unsigned (`%u`) path of the original.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn convert_u(state: *mut PrintfState, value: u32) {
     convert_int(state, value, false);
 }

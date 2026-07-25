@@ -100,7 +100,7 @@ fn round_pack(sign: u32, mut exp: i32, sig: u32, round: bool, sticky: bool) -> u
 
 /// __fmul — original: `FUN_083eca20` @ 0x083eca20 (284 bytes; sibling
 /// denormal clz helper @ 0x83ecb40). IEEE 754 binary32 multiply.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __fmul(a: u32, b: u32) -> u32 {
     let sign = (a ^ b) & SIGN_MASK;
     let exp_a = (a >> 23) & 0xff;
@@ -152,7 +152,7 @@ pub unsafe extern "C" fn __fmul(a: u32, b: u32) -> u32 {
 /// __fdiv — original: `FUN_083ec5fc` @ 0x083ec5fc (472 bytes; reciprocal
 /// seed table @ 0x83ec6e8). IEEE 754 binary32 divide, computed here with
 /// exact restoring division (see module header).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __fdiv(a: u32, b: u32) -> u32 {
     let sign = (a ^ b) & SIGN_MASK;
     let exp_a = (a >> 23) & 0xff;

@@ -73,7 +73,7 @@ unsafe fn swap_elements(a: *mut u8, b: *mut u8, size: usize) {
 /// <= 10 elements unsorted. Only called from `qsort` (with `count > 10`),
 /// which runs the finishing insertion sort; the contract is the same as
 /// `qsort`'s.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn qsort_inner(
     base: *mut u8,
     count: usize,
@@ -188,7 +188,7 @@ pub unsafe extern "C" fn qsort_inner(
 /// Sorts `count` elements of `size` bytes at `base` using `cmp`, which
 /// returns negative/zero/positive like the ARM ADS convention. Does
 /// nothing when `size == 0`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn qsort(
     base: *mut u8,
     count: usize,

@@ -53,7 +53,7 @@ const FLAG_LEN_LL: u32 = 0x080;
 /// Formats `value` as octal into the state's putc sink, honoring the `#`,
 /// `0`, `-`, `hh`/`h` flags plus field width (`pad_remaining`, pre-loaded
 /// by the printf core) and `precision`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn convert_o(state: *mut PrintfState, mut value: u32) {
     if (*state).flags & FLAG_LEN_LL == 0 {
         value = widen_unsigned(value, state);

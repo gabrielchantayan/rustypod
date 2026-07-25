@@ -44,7 +44,7 @@
 /// `endptr`, when non-NULL, receives a pointer to the first character not
 /// consumed, or `s` itself when no conversion was performed (including the
 /// `"0x"`-with-no-hex-digit case).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn strtoll(s: *const u8, endptr: *mut *mut u8, base: i32) -> i64 {
     let mut p = s;
     while is_c_space(*p) {

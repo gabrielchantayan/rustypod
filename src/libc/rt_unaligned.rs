@@ -16,7 +16,7 @@
 ///
 /// Unaligned little-endian u32 load: reads the four bytes at `p`
 /// individually and ORs them together at shifts 0/8/16/24.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __rt_uread4(p: *const u8) -> u32 {
     (*p as u32)
         | ((*p.add(1) as u32) << 8)
@@ -33,7 +33,7 @@ pub unsafe extern "C" fn __rt_uread4(p: *const u8) -> u32 {
 /// i.e. Ghidra sees `__rt_uwrite4(value, p)`. This port takes the more
 /// idiomatic Rust order `(p, value)`; the return value matches the original,
 /// which leaves `value` untouched in r0 on exit.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __rt_uwrite4(p: *mut u8, value: u32) -> u32 {
     *p = value as u8;
     *p.add(1) = (value >> 8) as u8;

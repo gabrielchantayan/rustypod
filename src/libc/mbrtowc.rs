@@ -114,7 +114,7 @@ unsafe fn convert(locale: *const u8, dst: *mut u8, wc: u32, state: *mut u32) -> 
 /// returning the number of bytes written (1) or -1 if `wc` has no
 /// single-byte representation in the active locale. `state` (mbstate_t*)
 /// is only forwarded to the locale converter in the MB_CUR_MAX == 1 path.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn wcrtomb(dst: *mut u8, wc: u32, state: *mut u32) -> i32 {
     // bl __rt_ctype_table_addr; ldr r0, [r0]
     convert(core::ptr::read_volatile(core::ptr::addr_of!(LOCALE_CTYPE_PTR)), dst, wc, state)

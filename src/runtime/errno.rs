@@ -102,7 +102,7 @@ pub unsafe fn libspace() -> *mut Libspace {
 /// __rt_libspace — original: `FUN_0803204c` @ 0x0803204c (8 bytes).
 ///
 /// `ldr r0, =0x08b31774; bx lr` — returns the libspace block address.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __rt_libspace() -> *mut Libspace {
     libspace()
 }
@@ -110,7 +110,7 @@ pub unsafe extern "C" fn __rt_libspace() -> *mut Libspace {
 /// __rt_errno_addr — original: `FUN_0802ecb4` @ 0x0802ecb4 (12 bytes).
 ///
 /// Calls __rt_libspace and returns it unchanged: errno sits at libspace+0.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __rt_errno_addr() -> *mut i32 {
     &mut (*__rt_libspace()).errno
 }
@@ -118,7 +118,7 @@ pub unsafe extern "C" fn __rt_errno_addr() -> *mut i32 {
 /// errno get — original: `FUN_08032168` @ 0x08032168 (16 bytes).
 ///
 /// `bl __rt_errno_addr; ldr r0, [r0]` — reads the errno word.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn errno_get() -> i32 {
     *__rt_errno_addr()
 }
@@ -126,7 +126,7 @@ pub unsafe extern "C" fn errno_get() -> i32 {
 /// errno set — original: `FUN_08032178` @ 0x08032178 (20 bytes).
 ///
 /// `bl __rt_errno_addr; str value, [r0]` — writes the errno word.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn errno_set(value: i32) {
     *__rt_errno_addr() = value;
 }
@@ -135,7 +135,7 @@ pub unsafe extern "C" fn errno_set(value: i32) {
 ///
 /// Returns libspace+0x24: the address of the ctype-table pointer slot
 /// (setlocale stores through it; ctype readers load the pointer from it).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __rt_ctype_table_addr() -> *mut u32 {
     &mut (*__rt_libspace()).ctype_table
 }

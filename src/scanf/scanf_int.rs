@@ -90,7 +90,7 @@ pub const SCANF_FLAG_HH: u32 = 0x800;
 /// `0`/`0x` prefixes). Returns the number of input characters consumed
 /// (>= 0), -1 when EOF hit before the field started, or -2 when no valid
 /// digits were present (matching failure).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn scanf_convert_int(
     unused_r0: i32,
     input: *mut ScanfState,

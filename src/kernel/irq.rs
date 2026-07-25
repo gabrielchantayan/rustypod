@@ -283,7 +283,7 @@ fn svc_mode_irq_open() {
 ///
 /// Enables one interrupt source: writes `1 << (irq & 31)` to the INTENABLE
 /// register of VIC0 (irq < 32) or VIC1 (irq >= 32). Irqs >= 64 are ignored.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn irq_enable(irq: u32) {
     if irq >= NUM_IRQS as u32 {
         return;
@@ -416,7 +416,7 @@ unsafe fn irq_exit(frame: *mut u32, value: u32) {
 /// pending interrupt to its registered handler, and performs the epilogue
 /// (the original tail-calls `irq_exit`). Returns `frame` in r0 — the entry
 /// stub reloads sp from it.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn irq_dispatch(frame: *mut u32) -> *mut u32 {
     rtxc_irq_enter();
     vic_dispatch();

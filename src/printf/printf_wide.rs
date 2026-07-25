@@ -54,7 +54,7 @@ const MBUF_LEN: usize = 8;
 /// FLAG_PRECISION_GIVEN (a byte budget on the converted output) and the
 /// field-width padding protocol (`pad_remaining` / [`pad_emit`] /
 /// [`pad_emit_zero`]).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn convert_ls(state: *mut PrintfState, ws: *const u16) {
     let mut mbuf = [0u8; MBUF_LEN];
     let mut byte_len: i32 = 0;

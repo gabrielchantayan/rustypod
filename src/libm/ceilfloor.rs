@@ -53,7 +53,7 @@ const D_NEG_ZERO: u64 = D_SIGN;
 /// Smallest integral value not less than `x`, per the original's
 /// bit-manipulation algorithm (see module header). NaN is returned
 /// bit-identical; ±Inf and |x| >= 2^52 pass through unchanged.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ceil(x: u64) -> u64 {
     let mut hi = (x >> 32) as u32;
     let mut lo = x as u32;
@@ -110,7 +110,7 @@ pub unsafe extern "C" fn ceil(x: u64) -> u64 {
 ///
 /// Largest integral value not greater than `x`. Same shape as `ceil` with
 /// the adjustment applied to negatives instead of positives.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn floor(x: u64) -> u64 {
     let mut hi = (x >> 32) as u32;
     let mut lo = x as u32;
@@ -163,7 +163,7 @@ pub unsafe extern "C" fn floor(x: u64) -> u64 {
 ///
 /// Single-precision `ceil`: float bit pattern in, float bit pattern out.
 /// NaN is returned bit-identical; ±Inf and |x| >= 2^23 pass through.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ceilf(x: u32) -> u32 {
     let mut bits = x;
     let exp = ((x << 1) >> 24) as i32 - 127;

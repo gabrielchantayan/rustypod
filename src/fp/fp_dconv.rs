@@ -102,7 +102,7 @@ fn mantissa_top(hi: u32, lo: u32) -> u32 {
 /// Negative inputs take the negate path (`sub r1, r1, r3, lsr r2` with the
 /// "wrapped positive" result 0 - mantissa detecting the -(2^31)-1 overflow).
 /// |x| >= 2^31, +/-Inf -> clamp to i32::MIN/MAX; NaN -> trap route (0).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __d2i(x: u64) -> i32 {
     let hi = (x >> 32) as u32;
     let lo = x as u32;
@@ -159,7 +159,7 @@ unsafe fn d2i_overflow(hi: u32, lo: u32) -> i32 {
 /// |x| >= 1.0 (test: `hi + 0x40000000 >= -0x100000` signed) falls into the
 /// overflow clamp, which for negative sign is `mvn r0, r1, asr #31` = 0.
 /// Overflow/Inf clamps to u32::MAX; NaN -> trap route (0).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __d2u(x: u64) -> u32 {
     let hi = (x >> 32) as u32;
     let lo = x as u32;
@@ -215,7 +215,7 @@ fn u32_to_d(mag: u32, sign: u32) -> u64 {
 ///
 /// i32 -> double (exact). Negates first (`ands`/`rsbne`), so i32::MIN's
 /// magnitude 0x80000000 converts fine. Returns the raw double bit pattern.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __i2d(x: i32) -> u64 {
     let sign = (x as u32) & 0x8000_0000;
     let mag = x.unsigned_abs();
@@ -226,7 +226,7 @@ pub unsafe extern "C" fn __i2d(x: i32) -> u64 {
 ///
 /// u32 -> double (exact). Three instructions: sign = +, move value, branch
 /// into the `__i2d` core. Returns the raw double bit pattern.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __u2d(x: u32) -> u64 {
     u32_to_d(x, 0)
 }
@@ -290,7 +290,7 @@ fn u64_to_d(mag: u64, sign: u32) -> u64 {
 /// i64 -> double, round-to-nearest-even. Negates first with 64-bit
 /// `rsbs`/`rsc`, so i64::MIN converts exactly to -2^63. Returns the raw
 /// double bit pattern.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __ll2d(x: i64) -> u64 {
     let sign = ((x >> 63) as u32) & 0x8000_0000;
     let mag = x.unsigned_abs();
@@ -302,7 +302,7 @@ pub unsafe extern "C" fn __ll2d(x: i64) -> u64 {
 /// u64 -> double, round-to-nearest-even. Two instructions: sign = +
 /// (`mov r2, #0x42000000`), branch into the `__ll2d` core. Returns the raw
 /// double bit pattern.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __ull2d(x: u64) -> u64 {
     u64_to_d(x, 0)
 }
@@ -336,7 +336,7 @@ fn shift_mantissa(mant: u64, shift: i32) -> u64 {
 /// `rsbs`/`rsc`; shift == 0 is allowed only for exactly -2^63 (`teq ip, #0;
 /// teqeq r3, #0x80000000`), anything larger overflows. Overflow/Inf clamps
 /// to i64::MIN/MAX; NaN -> trap route (0).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __d2ll(x: u64) -> i64 {
     let hi = (x >> 32) as u32;
     let lo = x as u32;
@@ -386,7 +386,7 @@ unsafe fn d2ll_overflow(hi: u32, lo: u32) -> i64 {
 /// |x| >= 1.0 falls into the overflow clamp, which for negative sign is
 /// `mvn r1, r1, asr #31` = 0. Overflow/+Inf clamps to u64::MAX; NaN ->
 /// trap route (0).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __d2ull(x: u64) -> u64 {
     let hi = (x >> 32) as u32;
     let lo = x as u32;

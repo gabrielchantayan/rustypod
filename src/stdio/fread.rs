@@ -176,12 +176,12 @@ unsafe extern "C" fn stream_refill_stub(_dest: *mut u8, _len: i32, _stream: *mut
 
 /// getc entry used by both readers; swap in the real `FUN_08034fec`
 /// port when it lands. Defaults to [`stream_getc_stub`].
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub static mut STREAM_GETC: StreamGetcFn = stream_getc_stub;
 
 /// Refill entry used by `fread`; swap in the real `FUN_08034f88` port
 /// when it lands. Defaults to [`stream_refill_stub`].
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub static mut STREAM_REFILL: StreamRefillFn = stream_refill_stub;
 
 /// Buffered bytes available for the fast copy path, exactly as computed
@@ -245,7 +245,7 @@ unsafe fn copy_bytes(mut dst: *mut u8, mut src: *const u8, mut len: usize) {
 ///   any refill, take the EOF exit.
 /// - on every exit out of a normal (non-string-mode) stream the computed
 ///   `remaining` is stored back into `count`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn fread(
     mut dest: *mut u8,
     size: i32,
@@ -351,7 +351,7 @@ pub unsafe extern "C" fn fread(
 /// mode) compares as huge, so all `n - 1` bytes are copied from `ptr`
 /// regardless. After the copy, `ptr` advances and — for non-string-mode
 /// streams only — `count` becomes `remaining - copied` (mod 2^32).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn stream_read_chars(
     mut dest: *mut u8,
     n: i32,

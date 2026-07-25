@@ -260,7 +260,7 @@ fn default_heap() -> *mut HeapDescriptorDescriptor {
 /// Creates the 32 KB default heap on first use: `heap_create(desc, start,
 /// 0x8000)` with `start = desc - 0x8000`, storing the returned handle into
 /// the global @ 0x089ca638. Subsequent calls return immediately.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn lazy_init_default_heap() {
     if !default_heap().is_null() {
         return;
@@ -276,7 +276,7 @@ pub unsafe extern "C" fn lazy_init_default_heap() {
 ///
 /// Ensures the default heap exists, then allocates `size` bytes from it
 /// with caller tag `tag` (telemetry only; see `BlockHeader::link_or_tag`).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn malloc_wrapper(size: usize, tag: usize) -> *mut u8 {
     lazy_init_default_heap();
     (heap_ops().alloc)(default_heap(), size, tag)
@@ -286,7 +286,7 @@ pub unsafe extern "C" fn malloc_wrapper(size: usize, tag: usize) -> *mut u8 {
 ///
 /// Frees `ptr` back to the default heap with caller tag `tag`. No NULL
 /// guard at this level: `heap_free` @ 0x0819d4dc ignores NULL itself.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn free_wrapper(ptr: *mut u8, tag: usize) {
     lazy_init_default_heap();
     (heap_ops().free)(default_heap(), ptr, tag)
@@ -297,7 +297,7 @@ pub unsafe extern "C" fn free_wrapper(ptr: *mut u8, tag: usize) {
 /// `a3`/`a4` mirror the original's r2 / stacked fourth argument (both
 /// observed as 1 from the ADS `realloc` veneer; semantics live in
 /// `heap_realloc` @ 0x0819d6a0).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn realloc_wrapper(
     ptr: *mut u8,
     size: usize,
@@ -310,14 +310,14 @@ pub unsafe extern "C" fn realloc_wrapper(
 
 /// operator new (tag 2) — original @ 0x082aadd4 (8 bytes, 1797 call
 /// sites — the dominant allocator in osos): `mov r1, #2; b 0x080eb67c`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn operator_new(size: usize) -> *mut u8 {
     malloc_wrapper(size, TAG_OPERATOR_NEW)
 }
 
 /// operator delete (tag 2) — original @ 0x082aad24 (16 bytes, 665 call
 /// sites): NULL-guarded `free_wrapper` with tag 2.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn operator_delete(ptr: *mut u8) {
     if !ptr.is_null() {
         free_wrapper(ptr, TAG_OPERATOR_NEW);
@@ -326,14 +326,14 @@ pub unsafe extern "C" fn operator_delete(ptr: *mut u8) {
 
 /// operator new (tag 3) — original @ 0x082aad74 (8 bytes):
 /// `mov r1, #3; b 0x080eb67c`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn operator_new_tag3(size: usize) -> *mut u8 {
     malloc_wrapper(size, TAG_OPERATOR_NEW_TAG3)
 }
 
 /// operator delete (tag 3) — original @ 0x082aad14 (16 bytes):
 /// NULL-guarded `free_wrapper` with tag 3.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn operator_delete_tag3(ptr: *mut u8) {
     if !ptr.is_null() {
         free_wrapper(ptr, TAG_OPERATOR_NEW_TAG3);
@@ -347,7 +347,7 @@ pub unsafe extern "C" fn operator_delete_tag3(ptr: *mut u8) {
 /// new-handler dispatch @ 0x08266abc with code 3 and returns the result
 /// as-is (NULL when no handler freed anything — the original does not
 /// retry at this level).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn operator_new_checked(size: usize) -> *mut u8 {
     let block = operator_new(size);
     if block.is_null() {
@@ -364,7 +364,7 @@ pub unsafe extern "C" fn operator_new_checked(size: usize) -> *mut u8 {
 /// original's rundown path: `__rt_raise(1, 0)` @ 0x080320a8, the exit
 /// path @ 0x08035878, then the final terminate stub @ 0x082b20a0 with
 /// code 1.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn heap_panic() -> ! {
     let ops = heap_ops();
     (ops.raise)(1, 0);

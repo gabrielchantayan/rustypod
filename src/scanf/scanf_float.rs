@@ -169,7 +169,7 @@ unsafe fn store_double(out: *mut u32, hi: u32, lo: u32) {
 ///   mantissa, with an ASCII '+'/'-' sign byte first.
 /// - `frac_adjust`: added to the parsed exponent (the engine passes the
 ///   negated count of fraction digits).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn scanf_float_convert(
     out: *mut u32,
     exp_digits: *const u8,

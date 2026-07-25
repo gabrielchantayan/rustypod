@@ -256,7 +256,7 @@ fn sub_specials(a: u64, b: u64) -> u64 {
 /// add-core, differing signs flip b's sign bit and use the sub-core;
 /// exponent fields 0x000/0x7ff go to the specials block. See the module
 /// header for the mirrored non-IEEE edge behavior.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __dadd(a: u64, b: u64) -> u64 {
     if exp_of(a) & 0x7ff == 0 || exp_of(a) == 0x7ff || exp_of(b) & 0x7ff == 0 || exp_of(b) == 0x7ff
     {
@@ -275,7 +275,7 @@ pub unsafe extern "C" fn __dadd(a: u64, b: u64) -> u64 {
 ///
 /// Doubles are u64 bit patterns (soft-float). Differing signs flip b's
 /// sign bit and use the add-core; same signs use the sub-core.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __dsub(a: u64, b: u64) -> u64 {
     if exp_of(a) & 0x7ff == 0 || exp_of(a) == 0x7ff || exp_of(b) & 0x7ff == 0 || exp_of(b) == 0x7ff
     {
@@ -293,7 +293,7 @@ pub unsafe extern "C" fn __dsub(a: u64, b: u64) -> u64 {
 /// operand's sign (`eor r1, #0x80000000`) and dispatches to the shared
 /// add-core 0x83eaf54 / sub-core 0x83ec0c4; specials swap the register
 /// pair and jump into __dsub's specials block.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __drsb(a: u64, b: u64) -> u64 {
     if exp_of(a) & 0x7ff == 0 || exp_of(a) == 0x7ff || exp_of(b) & 0x7ff == 0 || exp_of(b) == 0x7ff
     {

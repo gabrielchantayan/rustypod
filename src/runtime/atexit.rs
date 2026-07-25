@@ -81,7 +81,7 @@ static mut EXIT_HANDLER_COUNT: usize = 0;
 /// Registers `handler` to run at exit. Returns 0 on success, -1 when the
 /// table is full (the original would die in the fatal routine @
 /// 0x08030f44 on allocation failure instead).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn atexit(handler: extern "C" fn()) -> i32 {
     let count = *core::ptr::addr_of!(EXIT_HANDLER_COUNT);
     if count >= EXIT_HANDLER_CAPACITY {
@@ -117,7 +117,7 @@ pub unsafe fn run_exit_handlers() {
 /// region of self-relative offsets bounded by two pc-relative addresses;
 /// here the caller passes a plain function-pointer array (see module
 /// docs).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe fn __cpp_initialise(table: *const extern "C" fn(), count: usize) {
     for i in 0..count {
         (*table.add(i))();
@@ -130,7 +130,7 @@ pub unsafe fn __cpp_initialise(table: *const extern "C" fn(), count: usize) {
 /// with element stride `elem_size`, LAST element first, exactly once per
 /// element. Returns `base - 8` unconditionally, matching the original
 /// (ADS `__vec_delete` array-header convention).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe fn __cpp_finalise(
     base: *mut u8,
     dtor: extern "C" fn(*mut u8),

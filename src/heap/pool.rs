@@ -397,7 +397,7 @@ fn ready_flag(pool: *mut PoolControl) -> *mut u8 {
 /// the pool on success; on init failure destroys and deletes it and
 /// returns NULL. `name` is the pool name string handed to the base
 /// subobject.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn pool_create(size: usize, name: *const u8) -> *mut PoolControl {
     let mem = (op!(new_control))(POOL_CONTROL_SIZE) as *mut PoolControl;
     let pool = pool_init(mem, size, name);
@@ -418,7 +418,7 @@ pub unsafe extern "C" fn pool_create(size: usize, name: *const u8) -> *mut PoolC
 /// Constructs the base subobject, creates the empty embedded heap,
 /// clears the ready flag and seeds the regions; seed success sets the
 /// flag. Always returns the control struct.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn pool_init(
     mem: *mut PoolControl,
     size: usize,
@@ -439,7 +439,7 @@ pub unsafe extern "C" fn pool_init(
 /// Fills the block deque (cap 2000 blocks) and walks it with begin/end
 /// iterators, adding every block to the embedded heap. Returns 0 on
 /// success (setting the ready flag), 1 on failure.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn pool_seed_regions(pool: *mut PoolControl, size: usize) -> i32 {
     if ready_flag(pool).read() != 0 {
         return 1;
@@ -486,7 +486,7 @@ pub unsafe extern "C" fn pool_seed_regions(pool: *mut PoolControl, size: usize) 
 /// else = plain @ 0x0819d67c. Returns NULL when the pool is not ready or
 /// the heap is exhausted (and, as an original quirk, when the alignment
 /// delta would be 0 — dead with this table).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn pool_alloc(
     pool: *mut PoolControl,
     size: usize,
@@ -527,7 +527,7 @@ pub unsafe extern "C" fn pool_alloc(
 
 /// pool_alloc_v0 veneer — original @ 0x0826f73c (28 bytes): `pool_alloc`
 /// with variant 0 (move-preserving heap entry @ 0x0819d2f0).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn pool_alloc_v0(
     pool: *mut PoolControl,
     size: usize,
@@ -539,7 +539,7 @@ pub unsafe extern "C" fn pool_alloc_v0(
 
 /// pool_alloc_v1 veneer — original @ 0x0826f780 (28 bytes): `pool_alloc`
 /// with variant 1 (plain heap entry @ 0x0819d67c).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn pool_alloc_v1(
     pool: *mut PoolControl,
     size: usize,
@@ -553,7 +553,7 @@ pub unsafe extern "C" fn pool_alloc_v1(
 ///
 /// Recovers the heap block from the delta word at `ptr - 4` and frees it
 /// with tag 2. No-op when the pool is not ready or `ptr` is NULL.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn pool_free(pool: *mut PoolControl, ptr: *mut u8) {
     if ready_flag(pool).read() == 0 || ptr.is_null() {
         return;
@@ -572,7 +572,7 @@ pub unsafe extern "C" fn pool_free(pool: *mut PoolControl, ptr: *mut u8) {
 /// to the non-deleting base-subobject dtor chain (whose result it
 /// returns). Does NOT free the control struct — callers do that with
 /// `operator delete` (see `pool_create`'s failure path).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn pool_destroy(pool: *mut PoolControl) -> *mut PoolControl {
     ready_flag(pool).write(0);
     let desc = (op!(heap_destroy))(heap_desc(pool));
@@ -629,10 +629,6 @@ mod tests {
 
     const BLOCK_SIZE: u32 = 0x800;
 
-    #[repr(align(1024))]
-    struct Arena([u8; 0x8000]);
-    static mut ARENA: Arena = Arena([0; 0x8000]);
-
     #[repr(align(8))]
     struct ControlBuf([u8; 0x800]);
     static mut CONTROL_BUF: ControlBuf = ControlBuf([0; 0x800]);
@@ -646,8 +642,39 @@ mod tests {
         unsafe { core::ptr::addr_of_mut!(CONTROL_BUF) as *mut PoolControl }
     }
 
+    /// The pool marks uncached allocations by setting pointer bit 31
+    /// (`UNCACHED_MARK`) — fine on the 32-bit target, but an ASLR'd host
+    /// static can land with bit 31 set, and unmarking then corrupts the
+    /// address. Map the arena at a low hint instead, as on the device
+    /// (page alignment covers the 1024-byte alignment tests carve at).
     fn arena_ptr() -> *mut u8 {
-        unsafe { core::ptr::addr_of_mut!(ARENA) as *mut u8 }
+        use std::sync::OnceLock;
+        static ARENA: OnceLock<usize> = OnceLock::new();
+        *ARENA.get_or_init(|| {
+            extern "C" {
+                fn mmap(
+                    addr: usize,
+                    len: usize,
+                    prot: i32,
+                    flags: i32,
+                    fd: i32,
+                    offset: i64,
+                ) -> usize;
+            }
+            #[cfg(target_os = "macos")]
+            const MAP_PRIVATE_ANON: i32 = 0x1002;
+            #[cfg(target_os = "linux")]
+            const MAP_PRIVATE_ANON: i32 = 0x22;
+            const PROT_READ_WRITE: i32 = 3;
+            let p = unsafe {
+                mmap(0x0800_0000, 0x8000, PROT_READ_WRITE, MAP_PRIVATE_ANON, -1, 0)
+            };
+            assert!(
+                p != usize::MAX && p & UNCACHED_MARK == 0,
+                "test arena must map below bit 31 (got {p:#x})"
+            );
+            p
+        }) as *mut u8
     }
 
     /// Writes the begin/end deque iterators into the pool's deque nodes

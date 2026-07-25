@@ -35,7 +35,7 @@ const LAST_INDEX: u32 = 54;
 /// srandom — original: `FUN_08030e7c` @ 0x08030e7c (68 bytes).
 ///
 /// Seeds the 55-word state table with an LCG and resets the lag indices.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn srandom(seed: u32) {
     RAND_INDEX[0] = 23;
     RAND_INDEX[1] = 54;
@@ -49,7 +49,7 @@ pub unsafe extern "C" fn srandom(seed: u32) {
 /// srandom1_thunk — original: `FUN_08030ec0` @ 0x08030ec0 (8 bytes).
 ///
 /// `srandom(1)`; the classic ADS `srand(1)`-style reset tail call.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn srandom1_thunk() {
     srandom(1);
 }
@@ -59,7 +59,7 @@ pub unsafe extern "C" fn srandom1_thunk() {
 /// Additive lagged-Fibonacci step: add the two lagged table entries, store
 /// the sum back at the trailing position, step both indices backward
 /// (wrapping 0 -> 54), and return the sum masked to 31 bits.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn random() -> i32 {
     let back = RAND_INDEX[0] as usize;
     let front = RAND_INDEX[1] as usize;
@@ -75,13 +75,13 @@ pub unsafe extern "C" fn random() -> i32 {
 }
 
 /// rand — alias of `random` (no separate original; same generator).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rand() -> i32 {
     random()
 }
 
 /// srand — alias of `srandom` (no separate original; same seeding).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn srand(seed: u32) {
     srandom(seed);
 }

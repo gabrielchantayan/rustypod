@@ -14,7 +14,7 @@
 
 /// strcpy — copy the NUL-terminated string at `src` to `dst` (inclusive),
 /// returning `dst`. No bounds checking; buffers must not overlap.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn strcpy(dst: *mut u8, src: *const u8) -> *mut u8 {
     let mut d = dst;
     let mut s = src;

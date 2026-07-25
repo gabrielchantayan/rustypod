@@ -67,7 +67,7 @@ pub fn uldivmod_full(num: u64, den: u64) -> (u64, u64) {
 /// Unsigned 64/64 division. The original returns quotient in r0:r1 and
 /// remainder in r2:r3; the Rust ABI can only return one u64 (r0:r1), so
 /// this returns the quotient. Use `uldivmod_full` for the remainder.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __aeabi_uldivmod(num: u64, den: u64) -> u64 {
     uldivmod_core(num, den).0
 }
@@ -75,7 +75,7 @@ pub unsafe extern "C" fn __aeabi_uldivmod(num: u64, den: u64) -> u64 {
 /// Remainder-only entry point over the same core (the stock firmware has no
 /// separate __aeabi_ulmod; the compiler just ignores r2:r3 when it only
 /// needs the quotient). Provided for Rust callers / parity testing.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __aeabi_ulmod(num: u64, den: u64) -> u64 {
     uldivmod_core(num, den).1
 }
@@ -108,7 +108,7 @@ pub fn ldivmod_full(num: i64, den: i64) -> (i64, i64) {
 /// remainder in r2:r3; the Rust ABI can only return one i64 (r0:r1), so
 /// this returns the quotient and the remainder is discarded. Use
 /// `ldivmod_full` when both are needed.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __aeabi_ldivmod(num: i64, den: i64) -> i64 {
     ldivmod_full(num, den).0
 }

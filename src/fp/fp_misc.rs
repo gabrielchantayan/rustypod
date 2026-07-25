@@ -62,7 +62,7 @@ const QNAN_LO1: u64 = 0x7ff8_0000_0000_0001;
 
 /// _dsqrt — original @ 0x083ebf28. Double square root, soft-float
 /// bit pattern in/out. Correctly rounded (round-to-nearest-even).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn _dsqrt(x: u64) -> u64 {
     let hi = (x >> 32) as u32;
     let lo = x as u32;
@@ -158,7 +158,7 @@ pub unsafe extern "C" fn _dsqrt(x: u64) -> u64 {
 /// __dmod — original @ 0x083ebc48. IEEE 754 remainder core (NOT fmod:
 /// the quotient rounds to nearest, ties to even). Soft-float bit
 /// patterns in/out. Exact operation — host libm remainder() oracle.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __dmod(a: u64, b: u64) -> u64 {
     let a_hi = (a >> 32) as u32;
     let a_lo = a as u32;

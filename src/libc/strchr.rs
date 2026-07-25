@@ -13,7 +13,7 @@
 ///
 /// Returns a pointer to the first occurrence of `(c as u8)` in `s`, or null
 /// if not found. Searching for `'\0'` returns a pointer to the terminator.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn strchr(s: *const u8, c: i32) -> *const u8 {
     let target = c as u8;
     let mut p = s;
@@ -33,7 +33,7 @@ pub unsafe extern "C" fn strchr(s: *const u8, c: i32) -> *const u8 {
 ///
 /// Returns a pointer to the last occurrence of `(c as u8)` in `s`, or null
 /// if not found. Searching for `'\0'` returns a pointer to the terminator.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn strrchr(s: *const u8, c: i32) -> *const u8 {
     let target = c as u8;
     let mut last: *const u8 = core::ptr::null();

@@ -30,7 +30,7 @@ const PASSES: usize = BLOCK_BYTESWAP_LEN / 4 / WORDS_PER_PASS;
 ///
 /// Byte-reverses each of the 64 words of the 256-byte block at `src` into
 /// `dst`. Register order matches the original: `src` in r0, `dst` in r1.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn block_byteswap(src: *const u8, dst: *mut u8) {
     let mut s = src as *const u32;
     let mut d = dst as *mut u32;

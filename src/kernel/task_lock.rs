@@ -135,7 +135,7 @@
 //!   passes on the stack.
 //! - Every wrapper returns the r0 result word (`usize`) even where no
 //!   caller consumes it — the veneer physically passes r0 back.
-//! - Symbol exports (`#[no_mangle]`) are disabled in cfg(test) builds
+//! - Symbol exports (`#[no_mangle]`) are gated to the firmware target (`target_os = "none"`)
 //!   (sync_sem.rs precedent: avoids dyld interposition surprises when the
 //!   host test binary exports kernel-flavoured names); ARM/release builds
 //!   export normally for match.py and the firmware link.
@@ -353,7 +353,7 @@ macro_rules! hook {
 /// rom_memmove — original: thunk @ 0x08037e00 -> ROM 0x220000d4, the mask
 /// ROM's own copy of the ADS memmove (24 osos callers use it instead of the
 /// osos copy). (dst, src, len) -> dst.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_memmove(dst: usize, src: usize, len: usize) -> usize {
     (hook!(rom_memmove))(dst, src, len)
 }
@@ -361,14 +361,14 @@ pub unsafe extern "C" fn rom_memmove(dst: usize, src: usize, len: usize) -> usiz
 /// rom_sem_wait — original: thunk @ 0x08037e08 -> ROM 0x22003fd0, kernel
 /// semaphore wait. `sem` is the kernel semaphore id (`*slot` in RAM terms;
 /// see sync_sem.rs).
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_sem_wait(sem: usize) -> usize {
     (hook!(rom_sem_wait))(sem)
 }
 
 /// rom_sem_signal — original: thunk @ 0x08037e10 -> ROM 0x220042b4, kernel
 /// semaphore signal.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_sem_signal(sem: usize) -> usize {
     (hook!(rom_sem_signal))(sem)
 }
@@ -376,7 +376,7 @@ pub unsafe extern "C" fn rom_sem_signal(sem: usize) -> usize {
 /// rom_svc_2200418c — original: thunk @ 0x08037e18 -> ROM gateway stub,
 /// service 4. Args per call sites, e.g. (1, ptr, 5) from the create path
 /// @ 0x08047dd0.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_2200418c(a0: usize, a1: usize, a2: usize) -> usize {
     (hook!(rom_svc_2200418c))(a0, a1, a2)
 }
@@ -384,7 +384,7 @@ pub unsafe extern "C" fn rom_svc_2200418c(a0: usize, a1: usize, a2: usize) -> us
 /// kernel_ticks — original: thunk @ 0x08037e20 -> ROM 0x22001edc. Returns
 /// the kernel tick counter (kernel anchor + 0xb4). No input args: the ROM
 /// stub overwrites r0 immediately.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn kernel_ticks() -> usize {
     (hook!(kernel_ticks))()
 }
@@ -392,7 +392,7 @@ pub unsafe extern "C" fn kernel_ticks() -> usize {
 /// rom_svc_22003b6c — original: thunk @ 0x08037e28 -> ROM gateway stub,
 /// service 23. No input args; returns a result word. Called at the head of
 /// the kernel-object create helpers.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_22003b6c() -> usize {
     (hook!(rom_svc_22003b6c))()
 }
@@ -401,7 +401,7 @@ pub unsafe extern "C" fn rom_svc_22003b6c() -> usize {
 /// Aligns a2 up to 8 in the original; the ROM stub reads a fifth argument
 /// from the caller's stack, modeled here as `a4` (the ARM ABI also passes
 /// it on the stack).
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_22003c98(
     a0: usize,
     a1: usize,
@@ -414,7 +414,7 @@ pub unsafe extern "C" fn rom_svc_22003c98(
 
 /// rom_svc_22003d00 — original: thunk @ 0x08037e38 -> ROM gateway stub,
 /// service 41, (a0, a1). Object registration on the create path.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_22003d00(a0: usize, a1: usize) -> usize {
     (hook!(rom_svc_22003d00))(a0, a1)
 }
@@ -422,7 +422,7 @@ pub unsafe extern "C" fn rom_svc_22003d00(a0: usize, a1: usize) -> usize {
 /// kernel_op_dispatch — original: thunk @ 0x08037e40 -> ROM 0x22003dc8,
 /// the object-op dispatcher (mirror frame {12, 6, op, arg, 0}): r0 =
 /// object-class opcode (1 = semaphore, 2, 4 observed), r1 = handle slot.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn kernel_op_dispatch(op: usize, arg: usize) -> usize {
     (hook!(kernel_op_dispatch))(op, arg)
 }
@@ -430,7 +430,7 @@ pub unsafe extern "C" fn kernel_op_dispatch(op: usize, arg: usize) -> usize {
 /// task_lock — original: thunk @ 0x08037e48 -> ROM 0x22003ea0, the
 /// kernel-id -> object-pointer table lookup (table @ 0x08a24108; empty
 /// slots read back as 0/-1 — see the module header for the naming caveat).
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn task_lock(id: usize) -> usize {
     (hook!(task_lock))(id)
 }
@@ -438,14 +438,14 @@ pub unsafe extern "C" fn task_lock(id: usize) -> usize {
 /// task_unlock — original: thunk @ 0x08037e50 -> ROM 0x2200408c, the
 /// kernel gateway's service-3 stub with `id` as its argument (see the
 /// module header for the naming caveat).
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn task_unlock(id: usize) -> usize {
     (hook!(task_unlock))(id)
 }
 
 /// rom_svc_22003ec4 — original: thunk @ 0x08037e58 -> ROM gateway stub,
 /// service 40. Single call site passes r0 = 0; returns a result word.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_22003ec4(a0: usize) -> usize {
     (hook!(rom_svc_22003ec4))(a0)
 }
@@ -453,7 +453,7 @@ pub unsafe extern "C" fn rom_svc_22003ec4(a0: usize) -> usize {
 /// size_to_class — original: thunk @ 0x08037e60 -> ROM 0x22003eb0.
 /// UNVERIFIED (kernel/thunks.rs): the mirror is a pointer chase
 /// (`*(**0x2200acf4) + 0x20`), not an arithmetic size->class mapping.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn size_to_class() -> usize {
     (hook!(size_to_class))()
 }
@@ -461,7 +461,7 @@ pub unsafe extern "C" fn size_to_class() -> usize {
 /// rom_svc_22003be8 — original: thunk @ 0x08037e68 -> ROM gateway stub,
 /// service 46. Call sites pass (id, 4, size), e.g. (1, 4, 0x200); the ROM
 /// stub also reads a stack argument.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_22003be8(
     a0: usize,
     a1: usize,
@@ -474,14 +474,14 @@ pub unsafe extern "C" fn rom_svc_22003be8(
 /// kernel_create_dispatch — original: thunk @ 0x08037e70 -> ROM 0x22003d70,
 /// the object-create dispatcher (mirror frame {13, 7, op, slot, 0}): r0 =
 /// object-class opcode, r1 = handle slot (sync_sem's op_create).
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn kernel_create_dispatch(op: usize, slot: usize) -> usize {
     (hook!(kernel_create_dispatch))(op, slot)
 }
 
 /// rom_svc_220041cc — original: thunk @ 0x08037e78 -> ROM gateway stub,
 /// service 2. Callers pass small ids (0x2e) or pointers.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_220041cc(a0: usize) -> usize {
     (hook!(rom_svc_220041cc))(a0)
 }
@@ -489,7 +489,7 @@ pub unsafe extern "C" fn rom_svc_220041cc(a0: usize) -> usize {
 /// rom_svc_22001cbc — original: thunk @ 0x08037e80 -> ROM 0x22001cbc, a
 /// full ROM function (kernel lock, then a table walk). No callers in osos
 /// 2.0.4; signature from the mirror's prologue.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_22001cbc(a0: usize) -> usize {
     (hook!(rom_svc_22001cbc))(a0)
 }
@@ -497,7 +497,7 @@ pub unsafe extern "C" fn rom_svc_22001cbc(a0: usize) -> usize {
 /// rom_svc_22003d44 — original: thunk @ 0x08037e88 -> ROM gateway stub,
 /// service 20. All sampled call sites pass r0 = 0, r1 = a small count
 /// (1, 0x64) — delay-flavoured.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_22003d44(a0: usize, a1: usize) -> usize {
     (hook!(rom_svc_22003d44))(a0, a1)
 }
@@ -505,42 +505,42 @@ pub unsafe extern "C" fn rom_svc_22003d44(a0: usize, a1: usize) -> usize {
 /// rom_svc_220043f4 — original: thunk @ 0x08037e90 -> ROM gateway stub,
 /// service 28 sub 13. No input args; returns a result word. No callers in
 /// osos 2.0.4.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_220043f4() -> usize {
     (hook!(rom_svc_220043f4))()
 }
 
 /// rom_svc_22004260 — original: thunk @ 0x08037e98 -> ROM gateway stub,
 /// service 25. Single call site (r0 = 0) stashes SP for the ROM first.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_22004260(a0: usize) -> usize {
     (hook!(rom_svc_22004260))(a0)
 }
 
 /// rom_svc_220043c0 — original: thunk @ 0x08037ea0 -> ROM gateway stub,
 /// service 1 sub 0, (a0, a1): pointer + flag at call sites.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_220043c0(a0: usize, a1: usize) -> usize {
     (hook!(rom_svc_220043c0))(a0, a1)
 }
 
 /// rom_svc_22004368 — original: thunk @ 0x08037ea8 -> ROM gateway stub,
 /// service 1 (frame {1, 0, arg, 0}). Callers pass small ids or pointers.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_22004368(a0: usize) -> usize {
     (hook!(rom_svc_22004368))(a0)
 }
 
 /// rom_svc_22003c28 — original: thunk @ 0x08037eb0 -> ROM gateway stub,
 /// service 39. Call sites pass e.g. (3, 1) / (4, 1).
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_22003c28(a0: usize, a1: usize) -> usize {
     (hook!(rom_svc_22003c28))(a0, a1)
 }
 
 /// tick_elapsed — original: thunk @ 0x08037eb8 -> ROM 0x22001ee8. Returns
 /// 1 when `(kernel_ticks() - start) >= span`, else 0 (mirror @ 0x08001ee8).
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn tick_elapsed(start: usize, span: usize) -> usize {
     (hook!(tick_elapsed))(start, span)
 }
@@ -548,7 +548,7 @@ pub unsafe extern "C" fn tick_elapsed(start: usize, span: usize) -> usize {
 /// rom_svc_22000364 — original: thunk @ 0x08037ec0 -> ROM 0x22000364, an
 /// ADS-style error/status mapping function (cmp chain on r0). Single call
 /// site passes r0 = 0.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_22000364(a0: usize) -> usize {
     (hook!(rom_svc_22000364))(a0)
 }
@@ -556,14 +556,14 @@ pub unsafe extern "C" fn rom_svc_22000364(a0: usize) -> usize {
 /// rom_svc_22003e44 — original: thunk @ 0x08037ec8 -> ROM 0x22003e44, an
 /// object/anchor field lookup: r0 = 0 returns `anchor->field_0x24`, else
 /// `table[id * 13]->field_0x24`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_22003e44(a0: usize) -> usize {
     (hook!(rom_svc_22003e44))(a0)
 }
 
 /// rom_svc_22003bcc — original: thunk @ 0x08037ed0 -> ROM gateway stub,
 /// service 27, (a0, a1). Call sites pass r0 = 0, r1 = 2/3 or a pointer.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_22003bcc(a0: usize, a1: usize) -> usize {
     (hook!(rom_svc_22003bcc))(a0, a1)
 }
@@ -571,14 +571,14 @@ pub unsafe extern "C" fn rom_svc_22003bcc(a0: usize, a1: usize) -> usize {
 /// irq_fiq_disable — original: thunk @ 0x08037ed8 -> ROM 0x22001e70. Masks
 /// IRQ+FIQ in CPSR and returns the previous I/F bits (restore lives at ROM
 /// 0x22001e84, thunk 0x08037f00 — outside this span).
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn irq_fiq_disable() -> usize {
     (hook!(irq_fiq_disable))()
 }
 
 /// rom_svc_22003b00 — original: thunk @ 0x08037ee0 -> ROM 0x22003b00, a
 /// tail stub: `mov r0, #1; b` alternate gateway entry.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_22003b00() -> usize {
     (hook!(rom_svc_22003b00))()
 }
@@ -586,7 +586,7 @@ pub unsafe extern "C" fn rom_svc_22003b00() -> usize {
 /// rom_svc_220044c8 — original: thunk @ 0x08037ee8 -> ROM 0x220044c8, a
 /// compound ROM function (waits on kernel semaphore 22, then IRQ lockout).
 /// Single caller on an init path.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_220044c8() -> usize {
     (hook!(rom_svc_220044c8))()
 }
@@ -595,7 +595,7 @@ pub unsafe extern "C" fn rom_svc_220044c8() -> usize {
 /// until `ticks` kernel ticks have elapsed (spins on tick_elapsed; mirror
 /// @ 0x08001f78). 23 callers, typically right after hardware register
 /// pokes.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn tick_delay(ticks: usize) -> usize {
     (hook!(tick_delay))(ticks)
 }
@@ -603,7 +603,7 @@ pub unsafe extern "C" fn tick_delay(ticks: usize) -> usize {
 /// rom_svc_22003b08 — original: thunk @ 0x08037ef8 -> ROM 0x22003b08, a
 /// gateway config call with fixed arguments ((1, 500) then (1, 1)). Single
 /// caller on an init path.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_22003b08() -> usize {
     (hook!(rom_svc_22003b08))()
 }

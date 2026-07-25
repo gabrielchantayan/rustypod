@@ -69,7 +69,7 @@ static LOG2_TABLE: [u32; 10] = [
 /// `ldr`-from-table loop (behavior is identical either way).
 /// `#[inline(never)]` keeps the original's `bl` call sites in
 /// heap_stats_add / heap_stats_sub.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn log2_floor(mut value: u32) -> u32 {
     let masks = LOG2_TABLE.as_ptr();
@@ -123,7 +123,7 @@ unsafe fn debit(counter: *mut u32, amount: u32) {
 /// telemetry halfwords. `tag` indexes `bytes_per_tag` untruncated (as in the
 /// original) but is stored as a halfword. `#[inline(never)]` preserves the
 /// original's shape as the tail-call target of heap_stats_sub.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn heap_stats_add(
     heap: *mut HeapDescriptor,
@@ -159,7 +159,7 @@ pub unsafe extern "C" fn heap_stats_add(
 /// Debit `size` bytes from the tag/class recorded in `block`'s header and
 /// from the `log2_floor(size)` bin, then re-credit the header's current
 /// size under `new_tag` (the original tail-calls heap_stats_add).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn heap_stats_sub(
     heap: *mut HeapDescriptor,
     block: *mut BlockHeader,

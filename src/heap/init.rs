@@ -142,7 +142,7 @@ unsafe fn auto_init_flag(desc: *const HeapDescriptor) -> u8 {
 // `#[inline(never)]`: heap_create/heap_create_empty tail-call this in the
 // original; when inlined their bodies fold into identical machine code and
 // LLVM merges all three symbols, hiding heap_desc_init from the linker.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn heap_desc_init(
     desc: *mut HeapDescriptor,
@@ -211,7 +211,7 @@ pub unsafe extern "C" fn heap_desc_init(
 /// spanning it. With `auto_init` set, `(0, 0)` re-uses the initial region
 /// recorded by `heap_desc_init`. Beyond `MAX_REGIONS` regions the call
 /// still locks/unlocks but changes nothing. Returns `desc`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn heap_add_region(
     desc: *mut HeapDescriptor,
     mut start: usize,
@@ -265,7 +265,7 @@ pub unsafe extern "C" fn heap_add_region(
 /// heap_create — original: `FUN_0819d7b4` @ 0x0819d7b4 (20 bytes).
 ///
 /// `heap_desc_init` with the given initial region; returns `desc`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn heap_create(
     desc: *mut HeapDescriptor,
     initial_region_start: usize,
@@ -279,7 +279,7 @@ pub unsafe extern "C" fn heap_create(
 ///
 /// `heap_desc_init(desc, 0, 0)` — no initial region, no auto-init; returns
 /// `desc`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn heap_create_empty(desc: *mut HeapDescriptor) -> *mut HeapDescriptor {
     heap_desc_init(desc, 0, 0);
     desc
@@ -289,7 +289,7 @@ pub unsafe extern "C" fn heap_create_empty(desc: *mut HeapDescriptor) -> *mut He
 ///
 /// Deletes the heap's RTXC semaphore when the mutex state byte is set;
 /// returns `desc`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn heap_destroy(desc: *mut HeapDescriptor) -> *mut HeapDescriptor {
     if (*desc).mutex_state != 0 {
         (heap_init_ops().mutex_delete)(core::ptr::addr_of_mut!((*desc).mutex_handle));
@@ -470,7 +470,7 @@ mod tests {
         (header, block_size)
     }
 
-    // --- SIGSEGV capture (macOS host) -------------------------------------
+    // --- SIGSEGV capture (host) -------------------------------------------
     // The auto_init fallback round-trips the region base through the u32
     // descriptor fields (the target is a 32-bit system), so on a 64-bit host
     // the carve deliberately runs against unmapped low memory. Catching the
@@ -478,39 +478,63 @@ mod tests {
 
     extern "C" {
         fn sigaction(sig: i32, act: *const SigAction, old: *mut SigAction) -> i32;
+        // glibc exposes sigsetjmp only as the __sigsetjmp symbol (the
+        // header name is a macro); Darwin exports it directly.
+        #[cfg_attr(target_os = "linux", link_name = "__sigsetjmp")]
         fn sigsetjmp(env: *mut usize, savemask: i32) -> i32;
         fn siglongjmp(env: *mut usize, val: i32) -> !;
     }
 
     const SIGSEGV: i32 = 11;
-    const SA_SIGINFO: i32 = 0x0040;
 
-    /// macOS `struct sigaction`: handler, then mask (u32) | flags (i32).
-    #[repr(C)]
-    struct SigAction {
-        handler: usize,
-        mask_flags: usize,
+    #[cfg(target_os = "macos")]
+    mod sig_abi {
+        /// macOS `struct sigaction`: handler, then mask (u32) | flags (i32).
+        #[repr(C)]
+        pub struct SigAction {
+            pub handler: usize,
+            mask_flags: usize,
+        }
+        pub fn with_handler(handler: usize) -> SigAction {
+            SigAction { handler, mask_flags: 0x0040usize << 32 } // SA_SIGINFO
+        }
+        /// darwin siginfo_t: si_addr offset.
+        pub const SI_ADDR_OFFSET: usize = 24;
     }
+
+    #[cfg(target_os = "linux")]
+    mod sig_abi {
+        /// glibc x86_64 `struct sigaction`: handler, 1024-bit mask, flags,
+        /// restorer.
+        #[repr(C)]
+        pub struct SigAction {
+            pub handler: usize,
+            mask: [u64; 16],
+            flags: i32,
+            restorer: usize,
+        }
+        pub fn with_handler(handler: usize) -> SigAction {
+            SigAction { handler, mask: [0; 16], flags: 0x0004, restorer: 0 } // SA_SIGINFO
+        }
+        /// linux siginfo_t: si_addr offset.
+        pub const SI_ADDR_OFFSET: usize = 16;
+    }
+
+    use sig_abi::SigAction;
 
     static mut JMP_BUF: [usize; 32] = [0; 32];
     static mut FAULT_ADDR: usize = 0;
 
     unsafe extern "C" fn segv_handler(_sig: i32, info: *const u8, _ctx: *mut u8) {
-        // darwin siginfo_t: si_addr at offset 24.
-        (*core::ptr::addr_of_mut!(FAULT_ADDR)) = (info.add(24) as *const usize).read();
+        (*core::ptr::addr_of_mut!(FAULT_ADDR)) =
+            (info.add(sig_abi::SI_ADDR_OFFSET) as *const usize).read();
         siglongjmp(core::ptr::addr_of_mut!(JMP_BUF) as *mut usize, 1);
     }
 
     /// Runs `body`; returns `Some(fault_address)` if it died on SIGSEGV.
     unsafe fn catch_segv(body: impl FnOnce()) -> Option<usize> {
-        let handler = SigAction {
-            handler: segv_handler as usize,
-            mask_flags: (SA_SIGINFO as usize) << 32,
-        };
-        let mut old = SigAction {
-            handler: 0,
-            mask_flags: 0,
-        };
+        let handler = sig_abi::with_handler(segv_handler as usize);
+        let mut old: SigAction = core::mem::zeroed();
         assert_eq!(sigaction(SIGSEGV, &handler, &mut old), 0);
         let result = if sigsetjmp(core::ptr::addr_of_mut!(JMP_BUF) as *mut usize, 1) == 0 {
             body();

@@ -207,7 +207,7 @@ fn subs_forward_borrow(a: u32, b: u32, carry: u32) -> (u32, u32) {
 
 /// Split a double (as its hi/lo words) into the 12-byte extended format.
 /// Original: `FUN_08036f30` @ 0x08036f30.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub fn double_to_ext(hi: u32, lo: u32) -> Ext {
     let twice = hi << 1; // sign shifts into the ARM carry
     let sign = hi & 0x8000_0000;
@@ -249,7 +249,7 @@ pub fn double_to_ext(hi: u32, lo: u32) -> Ext {
 /// Multiply core, exact model (see the module header for the equivalence
 /// argument with the original's four paths). Original: `FUN_08037564` @
 /// 0x08037564. Returns (sign, exp, mant_hi, mant_lo, sticky).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub fn ext_fp_mul_core(a: Ext, b: Ext) -> (u32, u32, u32, u32, u32) {
     let sign = (a[0] ^ b[0]) & 0x8000_0000;
     let mut exp = (a[0] & 0x00ff_ffff)
@@ -287,7 +287,7 @@ pub fn ext_fp_mul_core(a: Ext, b: Ext) -> (u32, u32, u32, u32, u32) {
 /// bits + sticky). Original: `FUN_08037024` @ 0x08037024. Returns
 /// (sign, exp, mant_hi, mant_lo, sticky); the sticky word embeds the last
 /// quotient bits exactly like the original (see module header).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub fn ext_fp_div_core(a: Ext, b: Ext) -> (u32, u32, u32, u32, u32) {
     let sign = (a[0] ^ b[0]) & 0x8000_0000;
     let mut exp = (a[0] & 0x00ff_ffff)
@@ -482,7 +482,7 @@ pub fn ext_fp_div_core(a: Ext, b: Ext) -> (u32, u32, u32, u32, u32) {
 /// With `adj` = 0 rounds to nearest, ties to even; `adj` = -1 truncates;
 /// any other `adj` rounds up on inexact. The negative-exponent path
 /// un-normalizes the mantissa (the engine's integer extraction).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub fn ext_fp_round(
     sign: u32,
     mut exp: u32,
@@ -559,7 +559,7 @@ pub fn ext_fp_round(
 /// (hi word in bits 63..32). Original: `FUN_0803736c` @ 0x0803736c. The
 /// original drops the sign before packing (callers apply it themselves);
 /// overflow packs unsigned infinity.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub fn ext_fp_round_to_double(
     sign: u32,
     exp: u32,
@@ -611,7 +611,7 @@ fn ext_div_ext_val(a: &Ext, b: &Ext, adj: i32) -> Ext {
 
 /// `ext_mul_ext` entry — original: `FUN_08037504` @ 0x08037504. Result to
 /// `out` (the original returned it in r0/r1/r2).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ext_mul_ext(a: *const u32, b: *const u32, adj: i32, out: *mut u32) {
     let a = [a.read(), a.add(1).read(), a.add(2).read()];
     let b = [b.read(), b.add(1).read(), b.add(2).read()];
@@ -622,7 +622,7 @@ pub unsafe extern "C" fn ext_mul_ext(a: *const u32, b: *const u32, adj: i32, out
 }
 
 /// `ext_div_ext` entry — original: `FUN_080374a4` @ 0x080374a4.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ext_div_ext(a: *const u32, b: *const u32, adj: i32, out: *mut u32) {
     let a = [a.read(), a.add(1).read(), a.add(2).read()];
     let b = [b.read(), b.add(1).read(), b.add(2).read()];
@@ -635,7 +635,7 @@ pub unsafe extern "C" fn ext_div_ext(a: *const u32, b: *const u32, adj: i32, out
 /// `ext_mul_dbl` — original: `FUN_08037534` @ 0x08037534. Extended
 /// multiply rounded to a double, returned as its u64 bit pattern (hi word
 /// in bits 63..32). Matches scanf_float's `SoftfloatOps::ext_mul`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ext_mul_dbl(a: *const u32, b: *const u32, adj: i32) -> u64 {
     let a = [a.read(), a.add(1).read(), a.add(2).read()];
     let b = [b.read(), b.add(1).read(), b.add(2).read()];
@@ -651,7 +651,7 @@ pub unsafe extern "C" fn ext_mul_dbl(a: *const u32, b: *const u32, adj: i32) -> 
 /// `ext_div_dbl` — original: `FUN_080374d4` @ 0x080374d4. Extended divide
 /// rounded to a double; same contract as [`ext_mul_dbl`]. Matches
 /// scanf_float's `SoftfloatOps::ext_div`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ext_div_dbl(a: *const u32, b: *const u32, adj: i32) -> u64 {
     let a = [a.read(), a.add(1).read(), a.add(2).read()];
     let b = [b.read(), b.add(1).read(), b.add(2).read()];
@@ -668,7 +668,7 @@ pub unsafe extern "C" fn ext_div_dbl(a: *const u32, b: *const u32, adj: i32) -> 
 /// `FUN_08034228` @ 0x08034228. Matches scanf_float's `SoftfloatOps::pow10`.
 /// Table coverage: exp <= 500 (beyond that the original reads past its
 /// tables; no caller reaches it).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn dtoa_pow10(out: *mut u32, exp: u32, adj: i32) {
     let mut rem_part = EXT_ONE; // 10^|r| accumulator
     let mut grp_part = EXT_ONE; // 10^(55*q) accumulator
@@ -714,7 +714,7 @@ const LOG10_2_FIXED: i32 = 0x4d10;
 /// The dtoa back-end. Original: `FUN_08032514` @ 0x08032514; see the
 /// module header for the ABI and algorithm. Signature matches the
 /// committed `printf_float::DtoaFn` hook.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn printf_float_dtoa(
     out: *mut i32,
     digits: *mut u8,
@@ -882,7 +882,7 @@ static BLOCK_INV_SUB_TABLE: [u8; 256] = [
 
 /// SubBytes: translate every byte of a 16-byte state through
 /// [`BLOCK_SUB_TABLE`]. Original: `FUN_0802e118` @ 0x0802e118 (60 bytes).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn block_sub_bytes(state: *mut u8) {
     for word in 0..4 {
         for byte in 0..4 {
@@ -895,7 +895,7 @@ pub unsafe extern "C" fn block_sub_bytes(state: *mut u8) {
 /// InvSubBytes: translate every byte of a 16-byte state through
 /// [`BLOCK_INV_SUB_TABLE`]. Original: `FUN_0802e154` @ 0x0802e154 (60
 /// bytes).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn block_inv_sub_bytes(state: *mut u8) {
     for word in 0..4 {
         for byte in 0..4 {
@@ -908,7 +908,7 @@ pub unsafe extern "C" fn block_inv_sub_bytes(state: *mut u8) {
 /// ShiftRows on the column-major 16-byte state: row 1 (bytes 4..8) left by
 /// one, row 2 (bytes 8..12) by two, row 3 (bytes 12..16) by three.
 /// Original: `FUN_0802e190` @ 0x0802e190 (100 bytes).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn block_shift_rows(state: *mut u8) {
     let s = |i: usize| state.add(i);
     // Row 1: [4] <- [5] <- [6] <- [7] <- [4].
@@ -935,7 +935,7 @@ pub unsafe extern "C" fn block_shift_rows(state: *mut u8) {
 
 /// InvShiftRows: the inverse row rotations. Original: `FUN_0802e1f4` @
 /// 0x0802e1f4 (100 bytes).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn block_inv_shift_rows(state: *mut u8) {
     let s = |i: usize| state.add(i);
     // Row 1 right by one: [4] <- [7], [7] <- [6], [6] <- [5], [5] <- [4].

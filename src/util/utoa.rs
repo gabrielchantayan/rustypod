@@ -39,7 +39,7 @@ static DIGITS: [u8; 36] = *b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 /// utoa — original @ 0x080e799c. Writes `value` in `base` (2..=36) as a
 /// NUL-terminated string into `buf` and returns `buf`. Sign handling
 /// exists only for base 10; all other bases render the raw u32.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn utoa(value: u32, buf: *mut u8, base: u32) -> *mut u8 {
     let mut value = value;
     // Like the original, base is trusted to be in 2..=36: no zero-divisor
@@ -134,7 +134,7 @@ pub struct VariantInt {
 
 /// variant_compare — original @ 0x080eb6dc. See module docs for the
 /// per-tag comparison rules and NULL conventions.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn variant_compare(a: *const Variant, b: *const Variant) -> i32 {
     let tag_a = (*a).tag;
     let tag_b = (*b).tag;

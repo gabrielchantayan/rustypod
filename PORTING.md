@@ -25,7 +25,8 @@ runs on the iPod (tethered boot via wInd3x)
 2. **Cite the original.** Every ported function's doc header carries its
    load address, size and a one-paragraph algorithm summary, plus any
    deliberate deviations.
-3. **Prove behavior with host tests.** `cargo test --target aarch64-apple-darwin`
+3. **Prove behavior with host tests.** `cargo test --target <host-triple>`
+   (`aarch64-apple-darwin` on the Mac, `x86_64-unknown-linux-gnu` on sizipos)
    compares against a reference implementation on edge cases (alignments
    0..3, lengths 0..64, overlap, NUL placement...). Note the funnel-shift
    paths may read up to a word past the range — pad test buffers
@@ -69,3 +70,9 @@ stock `memmove` through our Rust port.
 - Don't export symbols named exactly like compiler intrinsics unless you
   mean it — the crate's exported `memmove`/`memcpy`/`memset`/`memcmp`
   shadows are intentional (that's how hooks reach them).
+- Exports are always `#[cfg_attr(target_os = "none", no_mangle)]`, never
+  bare `#[no_mangle]`: in host test builds a bare export shadows the libc/
+  libm symbol of the same name, and the soft-float bit-pattern signatures
+  (`u64` for `double`) are ABI-compatible only on 32-bit ARM. On x86-64
+  LLVM lowers `f64::ceil` & co. to libcalls, which then hit the shadow
+  with garbage arguments.

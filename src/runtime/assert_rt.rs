@@ -87,7 +87,7 @@ unsafe fn select_c_locale_block(name: *const u8, c_block: *const u8) -> *const u
 /// `unused` (r0) is ignored by the original (`movs r0, r1`); ADS callers
 /// pass NULL. Returns the C-locale ctype block for NULL/empty/"C" `name`,
 /// NULL for anything else.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn get_lc_ctype(_unused: *const u8, name: *const u8) -> *const u8 {
     select_c_locale_block(name, &LC_CTYPE_C_BLOCK)
 }
@@ -95,7 +95,7 @@ pub unsafe extern "C" fn get_lc_ctype(_unused: *const u8, name: *const u8) -> *c
 /// Alias of the same wrapper — original: `FUN_080355f8` @ 0x080355f8
 /// (52 bytes). Identical body to `get_lc_ctype`, but returns the C-locale
 /// data block @ 0x08986254 in the original.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn get_lc_c_block_080355f8(
     _unused: *const u8,
     name: *const u8,
@@ -106,7 +106,7 @@ pub unsafe extern "C" fn get_lc_c_block_080355f8(
 /// Alias of the same wrapper — original: `FUN_08036b80` @ 0x08036b80
 /// (52 bytes). Identical body to `get_lc_ctype`, but returns the C-locale
 /// data block @ 0x0898654c in the original.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn get_lc_c_block_08036b80(
     _unused: *const u8,
     name: *const u8,

@@ -67,7 +67,7 @@
 //!   are whatever fp_scalb already models; the wrappers add none of their
 //!   own.
 //!
-//! Symbol exports (`#[no_mangle]`) are disabled in `cfg(test)` builds:
+//! Symbol exports (`#[no_mangle]`) are gated to the firmware target (`target_os = "none"`):
 //! `sin`/`cos` are exported by libSystem and dyld would interpose the host
 //! test binary's symbols (same hazard as malloc/free in malloc_rt.rs).
 //! ARM/release builds export the symbols normally for match.py and linking.
@@ -172,8 +172,8 @@ fn negate(bits: u64) -> u64 {
 ///
 /// See the module header for the full algorithm and for why this address
 /// (not 0x080319a8) is the sine wrapper.
-// NOTE: `#[no_mangle]` is gated to non-test builds — see the module header.
-#[cfg_attr(not(test), no_mangle)]
+// NOTE: `#[no_mangle]` is gated to the firmware target — see the module header.
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn sin(x: u64) -> u64 {
     let ix = abs_hi(x);
     if ix <= PIO4_HI {
@@ -204,8 +204,8 @@ pub unsafe extern "C" fn sin(x: u64) -> u64 {
 ///
 /// See the module header for the full algorithm and for why this address
 /// (not 0x08031d24) is the cosine wrapper.
-// NOTE: `#[no_mangle]` is gated to non-test builds — see the module header.
-#[cfg_attr(not(test), no_mangle)]
+// NOTE: `#[no_mangle]` is gated to the firmware target — see the module header.
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn cos(x: u64) -> u64 {
     let ix = abs_hi(x);
     if ix <= PIO4_HI {

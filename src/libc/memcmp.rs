@@ -13,7 +13,7 @@
 
 /// memcmp — returns <0, 0, or >0 as the first differing byte of `a` is
 /// less than, equal to, or greater than that of `b`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn memcmp(a: *const u8, b: *const u8, len: usize) -> i32 {
     let mut a = a;
     let mut b = b;

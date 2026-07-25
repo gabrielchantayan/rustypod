@@ -120,7 +120,7 @@ unsafe extern "C" fn printf_engine_stub(
 
 /// Engine entry point called by all six veneers; swap in the real
 /// engine when its batch lands. Defaults to [`printf_engine_stub`].
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub static mut PRINTF_ENGINE: PrintfEngineFn = printf_engine_stub;
 
 /// The unbounded string sink ([`mem_putc`]) viewed as the engine's
@@ -161,7 +161,7 @@ unsafe extern "C" fn file_flush(_file: *mut File) -> i32 {
 ///
 /// Register usage: r0 = dest, r1 = fmt, r2 = ap (a real va_list — this
 /// signature is ABI-exact).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn vsprintf(dest: *mut u8, fmt: *const u8, ap: VaList) -> i32 {
     let mut cursor = dest;
     let engine = PRINTF_ENGINE;
@@ -183,7 +183,7 @@ pub unsafe extern "C" fn vsprintf(dest: *mut u8, fmt: *const u8, ap: VaList) -> 
 ///
 /// Register usage: r0 = buf, r1 = fmt, r2/r3/stack = varargs (original
 /// builds `ap` = &spilled-r2; here `args` IS that pointer).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn sprintf(buf: *mut u8, fmt: *const u8, args: VaList) -> i32 {
     let mut cursor = buf;
     let engine = PRINTF_ENGINE;
@@ -208,7 +208,7 @@ pub unsafe extern "C" fn sprintf(buf: *mut u8, fmt: *const u8, args: VaList) -> 
 ///
 /// Register usage: r0 = buf, r1 = size, r2 = fmt, r3 = ap (a real
 /// va_list — this signature is ABI-exact).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn vsnprintf(buf: *mut u8, size: usize, fmt: *const u8, ap: VaList) -> i32 {
     let mut bounds = BoundedCursor {
         cursor: buf,
@@ -236,7 +236,7 @@ pub unsafe extern "C" fn vsnprintf(buf: *mut u8, size: usize, fmt: *const u8, ap
 ///
 /// Register usage: r0 = buf, r1 = size, r2 = fmt, r3/stack = varargs
 /// (original builds `ap` = &spilled-r3; here `args` IS that pointer).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn snprintf(buf: *mut u8, size: usize, fmt: *const u8, args: VaList) -> i32 {
     let mut bounds = BoundedCursor {
         cursor: buf,
@@ -266,7 +266,7 @@ pub unsafe extern "C" fn snprintf(buf: *mut u8, size: usize, fmt: *const u8, arg
 ///
 /// Register usage: r0 = fmt, r1/r2/r3/stack = varargs (original builds
 /// `ap` = &spilled-r1; here `args` IS that pointer).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn printf(fmt: *const u8, args: VaList) -> i32 {
     let engine = PRINTF_ENGINE;
     let count = engine(fmt, file_putc, STDOUT as *mut c_void, args);
@@ -285,7 +285,7 @@ pub unsafe extern "C" fn printf(fmt: *const u8, args: VaList) -> i32 {
 ///
 /// Register usage: r0 = file, r1 = fmt, r2/r3/stack = varargs (original
 /// builds `ap` = &spilled-r2; here `args` IS that pointer).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn fprintf(file: *mut File, fmt: *const u8, args: VaList) -> i32 {
     let engine = PRINTF_ENGINE;
     let count = engine(fmt, file_putc, file as *mut c_void, args);

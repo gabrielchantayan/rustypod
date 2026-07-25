@@ -14,7 +14,7 @@
 const WORD_ONES: u32 = 0x0101_0101;
 
 /// strncmp — original @ 0x0803105c.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn strncmp(a: *const u8, b: *const u8, len: usize) -> i32 {
     let mut a = a;
     let mut b = b;

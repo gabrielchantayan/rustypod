@@ -50,7 +50,7 @@ pub const FLAG_LEN_LL: u32 = 0x080;
 /// numeric conversions) and `precision` becomes the minimum digit count;
 /// otherwise the minimum is 1, which is what prints "0" for a zero value
 /// (empty digit buffer).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn out_padded(
     state: *mut PrintfState,
     digits: *const u8,
@@ -111,7 +111,7 @@ pub unsafe extern "C" fn out_padded(
 /// original: `hh` (0x400) first, then `h` (0x100), then `ll` (0x80,
 /// stored as count plus its sign extension — the original's
 /// `asr r2, r0, #31; stm dest, {r0, r2}`), else a plain word.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn store_n(state: *const PrintfState, dest: *mut u8) {
     let flags = (*state).flags;
     let count = (*state).count;

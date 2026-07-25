@@ -10,7 +10,7 @@
 
 /// strstr — find the first occurrence of NUL-terminated `needle` in
 /// NUL-terminated `haystack`, or null if there is none.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn strstr(haystack: *const u8, needle: *const u8) -> *const u8 {
     let mut candidate = haystack;
     loop {

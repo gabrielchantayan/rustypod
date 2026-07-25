@@ -95,7 +95,7 @@ static SIN_COEFFS: [u64; 5] = [
 /// larger n by __kernel_rem_pio2); the original's unrolled structure is a
 /// plain Horner loop here (see module header). `inline(never)` keeps the
 /// shared-subroutine call the original makes from both kernels.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn _dpoly(coeff: *const u64, n: i32, x: u64) -> u64 {
     let mut i = n - 1;
@@ -116,7 +116,7 @@ pub unsafe extern "C" fn _dpoly(coeff: *const u64, n: i32, x: u64) -> u64 {
 /// (qx = 0.28125 for |x| > 0.78125, else x/4 with the low word dropped).
 /// `y` is the argument-reduction tail. See the module header for the
 /// naming swap and the tiny-x guard simplification.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __kernel_cos(x: u64, y: u64) -> u64 {
     let abs_x_hi = ((x >> 32) as u32) & 0x7fff_ffff;
     if abs_x_hi < TINY_X_HI {
@@ -155,7 +155,7 @@ pub unsafe extern "C" fn __kernel_cos(x: u64, y: u64) -> u64 {
 /// `x - ((z*(half*y - v*r) - y) - v*S1)` when `iy != 0`, where `y` is the
 /// argument-reduction tail. See the module header for the naming swap and
 /// the tiny-x guard simplification.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __kernel_sin(x: u64, y: u64, iy: i32) -> u64 {
     let abs_x_hi = ((x >> 32) as u32) & 0x7fff_ffff;
     if abs_x_hi < TINY_X_HI {

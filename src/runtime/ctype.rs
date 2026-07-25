@@ -67,7 +67,7 @@ fn ctype_flags(c: i32) -> u8 {
 ///
 /// `tst flags, #0x10; moveq r0, c; addne r0, c, #32` — uppercase letters
 /// are returned + 0x20, everything else (including EOF) unchanged.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn tolower(c: i32) -> i32 {
     if ctype_flags(c) & CTYPE_UPPER != 0 {
         c + 0x20
@@ -82,7 +82,7 @@ pub unsafe extern "C" fn tolower(c: i32) -> i32 {
 /// lowercase letters are returned - 0x20, except 0xdf (Latin-1 ß), which
 /// has no single-byte uppercase. Under the C locale table 0xdf has no
 /// flags, so the guard never fires; it is kept for fidelity.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn toupper(c: i32) -> i32 {
     if ctype_flags(c) & CTYPE_LOWER != 0 && c != 0xdf {
         c - 0x20

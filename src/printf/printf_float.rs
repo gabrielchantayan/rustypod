@@ -153,7 +153,7 @@ unsafe extern "C" fn dtoa_not_ported(
 /// Installed dtoa back-end; see [`DtoaFn`]. Defaults to
 /// [`dtoa_not_ported`]; swapped by host tests and by the real port in
 /// printf_float_dtoa.rs.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub static mut DTOA: DtoaFn = dtoa_not_ported;
 
 /// Load the installed dtoa back-end. Volatile: with a single codegen
@@ -177,14 +177,14 @@ pub type DecimalPointFn = unsafe extern "C" fn() -> u8;
 /// ldrb dec,[r0,r1]`). On target the block is installed by startup
 /// (FUN_08035788 stores the C-locale block 0x08986254 there); before
 /// that, like the original, this dereferences whatever the slot holds.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn decimal_point_from_libspace() -> u8 {
     let block = (*libspace()).lc_numeric_decimal_point[1] as *const u8;
     *block.add(*(block as *const u32) as usize)
 }
 
 /// Installed decimal-point accessor; see [`DecimalPointFn`].
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub static mut DECIMAL_POINT: DecimalPointFn = decimal_point_from_libspace;
 
 /// Load the installed decimal-point accessor (volatile — see [`dtoa`]).
@@ -260,7 +260,7 @@ unsafe fn finish_fixed(state: *mut PrintfState, flags: u32, len: i32) -> i32 {
 /// state+0x10 to the deferred zero-run counts (-1 = none) as it goes.
 /// Register-level signature matches the original: r0 = spec char,
 /// r1 = buffer, r2 = pointer to the double's 8 bytes, r3 = state.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn format_float(
     spec: u8,
     buf: *mut u8,
@@ -509,7 +509,7 @@ pub unsafe extern "C" fn format_float(
 /// precision to 6 without `.`, formats into a 32-byte scratch buffer via
 /// [`format_float`], then emits padding, sign prefix, and content with
 /// the `'<'`/`'>'` markers expanded to zero runs.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn convert_fe(state: *mut PrintfState, spec: u8, bits: *const u64) {
     *int_zeros(state) = -1;
     *frac_extra(state) = -1;

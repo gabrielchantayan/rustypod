@@ -138,7 +138,7 @@ const HUGE_SCALE: [u64; 18] = [
 /// x = y[0] + n*pi/2 (+ y[1], always +-0.0). Soft-float bit patterns
 /// in/out; n is the quadrant count (exact for |x| <= 2^20*pi/2, correct
 /// mod 4 above that).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __kernel_rem_pio2(x: u64, y: *mut u64) -> i32 {
     let x_hi = (x >> 32) as u32;
     let ix = x_hi & 0x7fff_ffff;

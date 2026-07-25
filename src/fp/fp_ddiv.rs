@@ -61,7 +61,7 @@ const EXP_MAX: i32 = 0x7FF;
 ///
 /// IEEE 754 double division, round-to-nearest-even. Arguments and result
 /// are soft-float `u64` bit patterns.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __ddiv(a: u64, b: u64) -> u64 {
     let sign = (a ^ b) & SIGN_BIT;
     let exp_a = ((a >> 52) & EXP_MASK) as i32;

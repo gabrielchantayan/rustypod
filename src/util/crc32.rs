@@ -92,7 +92,7 @@ const fn build_reflected_table() -> [u32; 256] {
 /// XORing the polynomial whenever the top bit was set. The original
 /// stores straight into RAM @ 0x08ad786c (literal pool @ 0x080751f8);
 /// here it fills `CRC32_MSB_TABLE`. Must run before `crc32_msb`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn crc32_table_gen() {
     let table = core::ptr::addr_of_mut!(CRC32_MSB_TABLE);
     // `black_box` keeps LLVM from constant-folding the whole table into a
@@ -118,7 +118,7 @@ pub unsafe extern "C" fn crc32_table_gen() {
 /// A NULL pointer or zero length folds to the identity: `seed` back
 /// unchanged (the zlib thunk @ 0x082c51cc returns 0 for NULL on a fresh
 /// CRC, which is the same rule).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn crc32_reflected(data: *const u8, len: usize, seed: u32) -> u32 {
     let mut crc = !seed;
     for i in 0..len {
@@ -144,7 +144,7 @@ pub unsafe extern "C" fn crc32_reflected(data: *const u8, len: usize, seed: u32)
 /// `seed = 0` gives CRC-32/BZIP2 parameters (init/xorout 0xFFFFFFFF).
 /// `crc32_table_gen` must have run first; a NULL pointer or zero length
 /// returns `seed` unchanged.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn crc32_msb(data: *const u8, len: usize, seed: u32) -> u32 {
     let table = core::ptr::addr_of!(CRC32_MSB_TABLE);
     let mut crc = !seed;

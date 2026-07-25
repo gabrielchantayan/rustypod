@@ -25,7 +25,7 @@
 /// 64-bit left shift, unsigned/signed identical. Shift 0..31 funnels the
 /// top bits of the low word into the high word; shift 32..63 moves the low
 /// word into the high word; shift >= 64 yields 0.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __aeabi_llsl(value: u64, shift: u32) -> u64 {
     let lo = value as u32;
     let hi = (value >> 32) as u32;
@@ -48,7 +48,7 @@ pub unsafe extern "C" fn __aeabi_llsl(value: u64, shift: u32) -> u64 {
 /// shift 0..31 funnels the bottom bits of the high word into the low word;
 /// shift 32..63 moves the high word into the low word; shift >= 64
 /// yields 0.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __aeabi_llsr(value: u64, shift: u32) -> u64 {
     let lo = value as u32;
     let hi = (value >> 32) as u32;
@@ -71,7 +71,7 @@ pub unsafe extern "C" fn __aeabi_llsr(value: u64, shift: u32) -> u64 {
 /// `__aeabi_llsr`, but the high word shifts arithmetically; at shift >= 32
 /// the high word becomes pure sign fill (`asr r1, r1, #31`), and at
 /// shift >= 64 both words do.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __aeabi_lasr(value: i64, shift: u32) -> i64 {
     let lo = value as u32;
     let hi = (value >> 32) as u32;

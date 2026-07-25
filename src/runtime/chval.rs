@@ -17,7 +17,7 @@
 /// the subtract and are rejected by the final base compare, as in the
 /// original. (Bases above 36 inherit the original's raw unsigned compare,
 /// so e.g. `':'` is not special-cased away — callers pass sane bases.)
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn _chval(c: u8, base: u32) -> i32 {
     let mut value = c as u32;
     if value < 0x3a {
@@ -56,7 +56,7 @@ pub struct LdivResult {
 /// of the dividend. Divergence: divide-by-zero returns `{0, 0}` where the
 /// original's `__rt_sdiv` raises SIGFPE via `__rt_raise`; `i32::MIN / -1`
 /// wraps to `i32::MIN` instead of overflowing.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ldiv(num: i32, den: i32) -> LdivResult {
     if den == 0 {
         return LdivResult { quot: 0, rem: 0 };

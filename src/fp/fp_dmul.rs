@@ -48,7 +48,7 @@ const QNAN_INF_TIMES_ZERO: u64 = 0x7ff8_0000_0000_0001;
 /// mantissas as a 106-bit product, normalizes, and rounds to
 /// nearest-even. See the module header for the non-IEEE edge behavior
 /// that is mirrored from the original.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __dmul(a: u64, b: u64) -> u64 {
     let a_hi = (a >> 32) as u32;
     let a_lo = a as u32;

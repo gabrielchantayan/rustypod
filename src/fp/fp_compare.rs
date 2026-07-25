@@ -185,19 +185,19 @@ fn flags_of(ord: Option<Ordering>) -> u32 {
 
 /// __dcmpeq — original @ 0x083eb748. `a`/`b` are u64 double bit patterns.
 /// Returns packed flags (see module header); only Z matters to eq callers.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub extern "C" fn __dcmpeq(a: u64, b: u64) -> u32 {
     flags_of(dcmp(a, b))
 }
 
 /// __dcmplt — original @ 0x083eb9c0 (shared with __dcmple). Flags of a vs b.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub extern "C" fn __dcmplt(a: u64, b: u64) -> u32 {
     flags_of(dcmp(a, b))
 }
 
 /// __dcmple — alias of __dcmplt in the original (same address).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub extern "C" fn __dcmple(a: u64, b: u64) -> u32 {
     flags_of(dcmp(a, b))
 }
@@ -205,44 +205,44 @@ pub extern "C" fn __dcmple(a: u64, b: u64) -> u32 {
 /// __dcmpgt — original @ 0x083ebe38 (shared with __dcmpge). Returns the
 /// flags of the *swapped* comparison b vs a, like the original bodies
 /// (`cmp r3, r1`) and the 3-eor operand swap on the NaN path.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub extern "C" fn __dcmpgt(a: u64, b: u64) -> u32 {
     flags_of(dcmp(b, a))
 }
 
 /// __dcmpge — alias of __dcmpgt in the original (same address).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub extern "C" fn __dcmpge(a: u64, b: u64) -> u32 {
     flags_of(dcmp(b, a))
 }
 
 /// __fcmpeq — original @ 0x083ec820. `a`/`b` are u32 float bit patterns.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub extern "C" fn __fcmpeq(a: u32, b: u32) -> u32 {
     flags_of(fcmp(a, b))
 }
 
 /// __fcmplt — original @ 0x083ec9a8 (shared with __fcmple).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub extern "C" fn __fcmplt(a: u32, b: u32) -> u32 {
     flags_of(fcmp(a, b))
 }
 
 /// __fcmple — alias of __fcmplt in the original (same address).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub extern "C" fn __fcmple(a: u32, b: u32) -> u32 {
     flags_of(fcmp(a, b))
 }
 
 /// __fcmpgt — original @ 0x083ecba4 (shared with __fcmpge). Swapped
 /// direction: flags of b vs a.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub extern "C" fn __fcmpgt(a: u32, b: u32) -> u32 {
     flags_of(fcmp(b, a))
 }
 
 /// __fcmpge — alias of __fcmpgt in the original (same address).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub extern "C" fn __fcmpge(a: u32, b: u32) -> u32 {
     flags_of(fcmp(b, a))
 }

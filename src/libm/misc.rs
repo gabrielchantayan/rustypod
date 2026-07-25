@@ -58,7 +58,7 @@
 //!   `__dscalb` call; retailOS ships the always-zero stub, so this is a
 //!   no-op but is mirrored anyway.
 //! - The three `pub extern "C"` functions are exported (`#[no_mangle]`)
-//!   only in non-test builds. On 64-bit test hosts a C `float`/`double`
+//!   only for the firmware target (`target_os = "none"`). On 64-bit hosts a C `float`/`double`
 //!   argument travels in FP registers (s0/d0) while these ports take the
 //!   soft-float bit patterns in general registers (w0/x0), so an exported
 //!   `log10f`/`ldexp` would ABI-incompatibly shadow the host libm symbols
@@ -124,7 +124,7 @@ fn copysign_double(magnitude: u64, sign_source: u64) -> u64 {
 /// 0xc (a no-op on the stub status word). Overflow to ±Inf or underflow to
 /// ±0 sets errno = ERANGE (2) and returns the copysign-adjusted ±Inf / ±0;
 /// normal results return directly.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ldexp(x: u64, n: i32) -> u64 {
     if is_finite_double(x) == 0 {
         // ±Inf / NaN: pass through (the `cmp r0,#0; beq` early return).
@@ -188,7 +188,7 @@ unsafe fn log_atanh_kernel(u: u32) -> u32 {
 /// ±0 -> -Inf with errno = EDOM; negative (including -Inf) -> 0x7fc00001
 /// with errno = EDOM; +Inf -> +Inf and NaN -> canonical qNaN, both via
 /// `__fscalb(x, 1)` with errno untouched.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn log_decompose(
     x: u32,
     exponent_scale: u32,
@@ -252,7 +252,7 @@ pub unsafe extern "C" fn log_decompose(
 /// (0.30103f / 0.4342945f) and returns `__fadd` of the two parts; on a
 /// decompose error the stored error value (-Inf / NaN / +Inf / qNaN) is
 /// returned directly.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn log10f(x: u32) -> u32 {
     let mut exponent_part: u32 = 0;
     let mut log_part: u32 = 0;

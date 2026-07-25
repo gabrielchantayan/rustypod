@@ -36,19 +36,19 @@
 
 /// strtol — original @ 0x0802f87c. See module header for the errno/clamping
 /// deviations from the literal binary.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn strtol(s: *const u8, endptr: *mut *mut u8, base: i32) -> i32 {
     parse_signed(s, endptr, base)
 }
 
 /// atoi — original @ 0x0802f990: base-10 strtol with a NULL endptr.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn atoi(s: *const u8) -> i32 {
     parse_signed(s, core::ptr::null_mut(), 10)
 }
 
 /// atol — original @ 0x0802fba0: identical to atoi on this 32-bit target.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn atol(s: *const u8) -> i32 {
     parse_signed(s, core::ptr::null_mut(), 10)
 }

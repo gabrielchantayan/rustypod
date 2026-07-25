@@ -109,7 +109,7 @@ unsafe fn vsscanf_to(consumed_out: *mut i32, input: *mut ScanfState, dest: *mut 
 /// machinery; see the module docs. `dest` receives the converted double
 /// as a raw 64-bit pattern (soft-float; the engine stores through
 /// `conv.ap`). Returns the last engine result, like the original's r0.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn strtod_core(
     dest: *mut u64,
     s: *const u8,
@@ -144,7 +144,7 @@ pub unsafe extern "C" fn strtod_core(
 /// original binary exposes only the core; see the module docs). Returns
 /// the double bit pattern in r0:r1 under soft-float, 0.0 when no
 /// conversion is performed.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn strtod(s: *const u8, endptr: *mut *mut u8) -> f64 {
     let mut value: u64 = 0; // 0.0, the no-conversion result
     strtod_core(&mut value, s, endptr);
@@ -158,7 +158,7 @@ pub unsafe extern "C" fn strtod(s: *const u8, endptr: *mut *mut u8) -> f64 {
 /// runs the core, puts errno back, returns the slot in r0:r1. Whatever
 /// the engine does to errno (e.g. ERANGE on overflow) is invisible to
 /// the caller.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn atof(s: *const u8) -> f64 {
     let saved_errno = errno_get();
     let mut value: u64 = 0; // DAT_080317bc/DAT_080317c0: +0.0
@@ -175,7 +175,7 @@ pub unsafe extern "C" fn atof(s: *const u8) -> f64 {
 /// through the callback. Returns the matching element or NULL. Ported
 /// here per batch assignment even though it is not part of the strtod
 /// family (see the module docs).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn bsearch(
     key: *const u8,
     mut base: *const u8,

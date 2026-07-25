@@ -15,7 +15,7 @@
 /// # Safety
 /// `dst` and `src` must both be word-aligned and valid for `len` bytes,
 /// and the ranges must not overlap.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn memcpy(dst: *mut u8, src: *const u8, len: usize) -> *mut u8 {
     let mut d32 = dst as *mut u32;
     let mut s32 = src as *const u32;

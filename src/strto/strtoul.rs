@@ -52,7 +52,7 @@ fn is_c_space(c: u8) -> bool {
     matches!(c, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r')
 }
 
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn strtoul(s: *const u8, endptr: *mut *mut u8, base: i32) -> u32 {
     // --- wrapper @ 0x0802f87c: whitespace skip and optional sign ---
     let mut p = s;

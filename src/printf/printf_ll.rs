@@ -45,7 +45,7 @@ const FLAG_SPACE_SIGN: u32 = 0x004;
 /// Signed 64-bit decimal converter. Picks the sign prefix (negative wins
 /// over the `+`/space flags), reduces to the magnitude, and defers to the
 /// shared digit loop + emitter.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn convert_lld(state: *mut PrintfState, value: i64) {
     let flags = (*state).flags;
     let (magnitude, prefix): (u64, &[u8]) = if value < 0 {
@@ -65,7 +65,7 @@ pub unsafe extern "C" fn convert_lld(state: *mut PrintfState, value: i64) {
 ///
 /// Unsigned 64-bit decimal converter: no sign handling at all — the `+` and
 /// space flags are ignored, exactly like the original's early-out on 'u'.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn convert_llu(state: *mut PrintfState, value: u64) {
     convert_magnitude(state, value, b"");
 }

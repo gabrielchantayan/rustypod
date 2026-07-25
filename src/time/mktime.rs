@@ -107,7 +107,7 @@ fn normalize(field: &mut i32, carry: i32, base: i32) -> i32 {
 
 /// mktime @ 0x08031310 — normalize `tm`, fill in wday/yday/isdst, and
 /// return seconds since 1970-01-01 00:00:00 UTC, or -1 on range error.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn mktime(tm: *mut Tm) -> i32 {
     let t = &mut *tm;
     // The original snapshots all input fields up front.

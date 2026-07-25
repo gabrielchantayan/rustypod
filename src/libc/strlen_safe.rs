@@ -13,7 +13,7 @@
 
 /// Returns 0 for a null pointer, else the number of bytes before the first
 /// NUL byte (i.e. a NULL-safe `strlen`).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn strlen_safe(s: *const u8) -> usize {
     let mut len = 0usize;
     if !s.is_null() {

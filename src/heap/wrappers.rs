@@ -307,7 +307,7 @@ fn hooks() -> HeapCoreHooks {
 ///
 /// Plain allocation veneer: `core(desc, size, zerofill=0, tag, oldptr=0,
 /// copy=0, oom=0)`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn heap_alloc(
     desc: *mut HeapDescriptor,
     size: usize,
@@ -321,7 +321,7 @@ pub unsafe extern "C" fn heap_alloc(
 ///
 /// Same as `heap_alloc` but with the seventh core argument (the
 /// OOM-report suppression byte) set to 1.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn heap_alloc_tag1(
     desc: *mut HeapDescriptor,
     size: usize,
@@ -333,7 +333,7 @@ pub unsafe extern "C" fn heap_alloc_tag1(
 /// heap_alloc_zero — original: `FUN_0819ce00` @ 0x0819ce00 (36 bytes).
 ///
 /// calloc-style veneer: `core(desc, size, zerofill=1, tag, 0, 0, 0)`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn heap_alloc_zero(
     desc: *mut HeapDescriptor,
     size: usize,
@@ -347,7 +347,7 @@ pub unsafe extern "C" fn heap_alloc_zero(
 /// Realloc veneer: `core(desc, new_size, zerofill=0, tag, oldptr,
 /// copy_on_move, 0)`. `copy_on_move` is the original's 5th (stack)
 /// argument.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn heap_realloc(
     desc: *mut HeapDescriptor,
     oldptr: *mut u8,
@@ -364,7 +364,7 @@ pub unsafe extern "C" fn heap_realloc(
 /// running. Before the kernel is up this is a no-op (pre-kernel heap
 /// access is single-threaded). The create path loops back to re-check
 /// `mutex_state`, exactly like the original, so a racing creator wins.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn heap_lock(desc: *mut HeapDescriptor) {
     let h = hooks();
     while (*desc).mutex_state != 1 {
@@ -383,7 +383,7 @@ pub unsafe extern "C" fn heap_lock(desc: *mut HeapDescriptor) {
 ///
 /// Signals the heap's RTXC semaphore when locking has engaged
 /// (`mutex_state == 1`); a plain return otherwise.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn heap_unlock(desc: *mut HeapDescriptor) {
     if (*desc).mutex_state == 1 {
         (hooks().mutex_signal)(&mut (*desc).mutex_handle);
@@ -395,7 +395,7 @@ pub unsafe extern "C" fn heap_unlock(desc: *mut HeapDescriptor) {
 /// Returns the heap descriptor registered under `index`
 /// (`table[index]->desc`). No bounds or NULL checks, as in the original
 /// (get_unchecked keeps the ARM build free of panic_bounds_check).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn named_heap_lookup(index: usize) -> *mut HeapDescriptor {
     let table = (*core::ptr::addr_of!(NAMED_HEAP_TABLE)).as_slice();
     let node = *table.get_unchecked(index);
@@ -407,7 +407,7 @@ pub unsafe extern "C" fn named_heap_lookup(index: usize) -> *mut HeapDescriptor 
 /// Drops one reference to the node in slot `index`; when the refcount
 /// reaches zero the node is destroyed (heap released, name freed),
 /// deleted and the slot cleared.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn named_heap_release(index: usize) {
     let table = (*core::ptr::addr_of_mut!(NAMED_HEAP_TABLE)).as_mut_slice();
     let node = *table.get_unchecked(index);
@@ -470,7 +470,7 @@ unsafe fn node_destroy(node: *mut NamedHeapNode) {
 /// node's refcount and returns its slot; otherwise a new node is created
 /// via the factory and installed into the first free slot. Returns -1
 /// when the factory fails or all 3 slots are taken.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn named_heap_add(name: *const u8) -> i32 {
     let h = hooks();
     // get_unchecked: indexes are bounded by NAMED_HEAP_SLOTS and the

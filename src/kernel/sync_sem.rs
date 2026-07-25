@@ -57,7 +57,7 @@
 //!   silently succeeded would hide a missing table install behind data
 //!   races, while blocking forever (like waiting on a never-signaled
 //!   semaphore) surfaces it.
-//! - Symbol exports (`#[no_mangle]`) are disabled in `cfg(test)` builds:
+//! - Symbol exports (`#[no_mangle]`) are gated to the firmware target (`target_os = "none"`):
 //!   `sem_wait` collides with the POSIX `sem_wait` in libSystem, and on
 //!   macOS dyld would interpose the test executable's export over the
 //!   system one (same failure mode as malloc/free in malloc_rt.rs).
@@ -166,11 +166,11 @@ fn rom_kernel() -> RomKernel {
 /// fresh 4-byte heap slot otherwise. The ROM create dispatcher (opcode 1)
 /// fills `*slot` with the kernel semaphore ID. A failed heap allocation is
 /// forwarded unchecked, exactly like the original.
-// NOTE: `#[no_mangle]` is gated to non-test builds — on macOS, dyld
+// NOTE: `#[no_mangle]` is gated to the firmware target — on macOS, dyld
 // interposes the test executable's exported `sem_wait` over libSystem's
 // POSIX one (see the module header). ARM/release builds export normally
 // for match.py and linking.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn sem_create() -> SemHandle {
     let ops = rom_kernel();
     let slot = if (ops.in_isr_context)() != 0 {
@@ -187,7 +187,7 @@ pub unsafe extern "C" fn sem_create() -> SemHandle {
 /// NULL slot or NULL `*slot` is a silent no-op. Otherwise dispatches the
 /// ROM delete (opcode 1), clears `*slot`, and frees the slot unless it is
 /// the shared ISR static.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn sem_delete(sem: SemHandle) {
     if sem.is_null() || *sem == 0 {
         return;
@@ -204,7 +204,7 @@ pub unsafe extern "C" fn sem_delete(sem: SemHandle) {
 ///
 /// NULL slot or NULL `*slot` returns immediately; otherwise blocks in the
 /// ROM wait on the kernel semaphore ID `*slot`.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn sem_wait(sem: SemHandle) {
     if sem.is_null() || *sem == 0 {
         return;
@@ -216,7 +216,7 @@ pub unsafe extern "C" fn sem_wait(sem: SemHandle) {
 ///
 /// NULL slot or NULL `*slot` returns immediately; otherwise signals the
 /// kernel semaphore ID `*slot` in the ROM.
-#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn sem_signal(sem: SemHandle) {
     if sem.is_null() || *sem == 0 {
         return;

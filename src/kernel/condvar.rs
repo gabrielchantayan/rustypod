@@ -211,7 +211,7 @@ fn hooks() -> CondvarHooks {
 /// Removes and returns the head node, or NULL when the list is empty.
 /// When the popped node was also the tail (single-element list) both
 /// anchor words are cleared; the popped node's `next` is always zeroed.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn list_pop_front(list: *mut ListHead) -> *mut ListNode {
     let node = (*list).head;
     if node.is_null() {
@@ -230,7 +230,7 @@ pub unsafe extern "C" fn list_pop_front(list: *mut ListHead) -> *mut ListNode {
 ///
 /// Appends `node` at the tail (or makes it the head of an empty list) and
 /// zeroes its `next`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn list_push_back(list: *mut ListHead, node: *mut ListNode) {
     if (*list).head.is_null() {
         (*list).head = node;
@@ -280,7 +280,7 @@ unsafe fn list_remove(list: *mut ListHead, node: *mut ListNode) {
 /// Pops every waiter off the queue and signals its kernel object (FIFO
 /// wake order). Does not touch the caller's mutex; the original is called
 /// with the surrounding lock already held.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn condvar_broadcast(condvar: *mut CondVar) {
     let h = hooks();
     loop {
@@ -299,7 +299,7 @@ pub unsafe extern "C" fn condvar_broadcast(condvar: *mut CondVar) {
 /// the deliver hook rejects (return 0) are skipped; the loop retries until
 /// a node is accepted (returns `CONDVAR_OK`) or the queue runs dry
 /// (returns `CONDVAR_EMPTY`).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn mqueue_receive(
     queue: *mut LockedQueue,
     out_data: *mut u32,
@@ -322,7 +322,7 @@ pub unsafe extern "C" fn mqueue_receive(
 /// condvar_destroy — original: `FUN_0807f650` @ 0x0807f650 (32 bytes).
 ///
 /// Deletes the kernel object block (if any) and clears the pointer.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn condvar_destroy(condvar: *mut CondVar) {
     let lock_obj = (*condvar).lock_obj;
     if !lock_obj.is_null() {
@@ -335,7 +335,7 @@ pub unsafe extern "C" fn condvar_destroy(condvar: *mut CondVar) {
 ///
 /// Invokes the yield-like ROM service (stock 0x80568fc -> ROM 0x22004260
 /// with r0 = 0), discards its result and returns 0.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn task_yield() -> i32 {
     (hooks().task_yield)();
     0
@@ -346,7 +346,7 @@ pub unsafe extern "C" fn task_yield() -> i32 {
 ///
 /// Naked tail branch to the same ROM service. The Rust version returns
 /// void, so the ROM result in r0 is not propagated (see module header).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn task_yield_thunk() {
     (hooks().task_yield)();
 }
@@ -354,7 +354,7 @@ pub unsafe extern "C" fn task_yield_thunk() {
 /// condvar_init — original: `FUN_0807f680` @ 0x0807f680 (32 bytes).
 ///
 /// Creates the kernel object block and empties the wait queue.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn condvar_init(condvar: *mut CondVar) {
     (*condvar).lock_obj = (hooks().object_create)();
     (*condvar).waiters.head = null_mut();
@@ -368,7 +368,7 @@ pub unsafe extern "C" fn condvar_init(condvar: *mut CondVar) {
 /// (tail branch to stock 0x08056710). This is the "mutex unlock" the heap
 /// lock path tail-calls; the name matches the link contract documented in
 /// heap/wrappers.rs.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rtxc_semaphore_signal(slot: *mut u32) {
     (hooks().sem_signal)(slot.read() as *mut u32);
 }
@@ -383,7 +383,7 @@ pub unsafe extern "C" fn rtxc_semaphore_signal(slot: *mut u32) {
 /// when signalled, `CONDVAR_TIMEOUT` when the sleep expired. The
 /// original's redundant second unlink on the timeout path is preserved
 /// (the node is already gone; the walk simply finds nothing).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn condvar_wait(condvar: *mut CondVar, timeout: u32) -> i32 {
     if timeout == 0 {
         return CONDVAR_TIMEOUT;

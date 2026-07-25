@@ -100,7 +100,7 @@ const DAYS_PER_4_YEARS: u32 = 1461;
 /// tail-call the core. Returns the shared static struct; a later call
 /// (via either entry point) overwrites it. `t` must point to a valid
 /// `time_t`.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn localtime(t: *const i32) -> *mut Tm {
     time_to_tm(t, core::ptr::addr_of_mut!(STATIC_TM))
 }
@@ -108,7 +108,7 @@ pub unsafe extern "C" fn localtime(t: *const i32) -> *mut Tm {
 /// `gmtime` — the original binary has no gmtime veneer; the localtime
 /// core applies no timezone/DST adjustment, so gmtime is the same
 /// function returning the same static struct.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn gmtime(t: *const i32) -> *mut Tm {
     time_to_tm(t, core::ptr::addr_of_mut!(STATIC_TM))
 }
@@ -189,7 +189,7 @@ unsafe fn time_to_tm(t: *const i32, tm: *mut Tm) -> *mut Tm {
 /// `__rt_udiv10` — original @ 0x08033694. Quotient-only entry point
 /// matching the original's r0 return (the remainder comes back in r1,
 /// which the plain C ABI cannot express; use [`udiv10_full`]).
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __rt_udiv10(num: u32) -> u32 {
     udiv10_full(num).0
 }

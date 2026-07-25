@@ -43,7 +43,7 @@ use crate::printf_helpers::{pad_emit, pad_emit_zero, PrintfState, FLAG_PRECISION
 ///
 /// `emit_str` must be set — the original calls through the pointer at
 /// state+0x20 unconditionally.
-#[no_mangle]
+#[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn convert_s(state: *mut PrintfState, s: *const u8) {
     // Measure: plain NUL scan, truncated to `precision` when given.
     // Original loop: `cmp precision,len; ble done` (signed), so a
