@@ -1489,3 +1489,268 @@ functions:
     module: scanf/scanf_engine
     status: ported
     notes: Fills fmt_cursor/fmt_getc/ctype/scanset, tail-calls engine.
+
+  # --- Batch 8: retailOS heap (0x0819cd5c..0x0819d9d8) + utilities ---
+  # Heap data structures: see src/heap/types.rs (block header 8B, descriptor
+  # 0x398B, size-sorted free list with boundary-tag coalescing).
+  # Default heap: 32KB @ 0x08a12710, descriptor @ 0x08a1a710 (lazy init).
+  # C++ operator new (tag 2, 1797 call sites) is the dominant consumer.
+
+  - address: 0x0819d048
+    ghidra: FUN_0819d048
+    name: heap_alloc_core
+    size: 668
+    module: heap/alloc_core
+    status: ported
+    notes: Combined alloc+realloc engine; round (n+3)&~3+8 min 16; in-place
+      merge on realloc; ROM memcpy for copies (= __rt_memcpy).
+
+  - address: 0x0819ce28
+    ghidra: FUN_0819ce28
+    name: heap_freelist_alloc
+    size: 316
+    module: heap/alloc_core
+    status: ported
+    notes: First-fit over size-sorted free list; split if remainder >= n+19&~3.
+
+  - address: 0x0819d314
+    ghidra: FUN_0819d314
+    name: heap_free_insert
+    size: 456
+    module: heap/free_path
+    status: ported
+    notes: Boundary-tag coalescing (footer copy at block_end-4), sorted insert.
+
+  - address: 0x0819d4dc
+    ghidra: FUN_0819d4dc
+    name: heap_free
+    size: 200
+    module: heap/free_path
+    status: ported
+    notes: Header validation, stats debit, coalesce+insert.
+
+  - address: 0x0819d5a4
+    ghidra: FUN_0819d5a4
+    name: heap_desc_init
+    size: 212
+    module: heap/init
+    status: ported
+    notes: Sentinel const @ 0x08a77c0c is beyond image — synthesized all-zero
+      head node (consumers require NULL-terminated ascending list).
+
+  - address: 0x0819cf68
+    ghidra: FUN_0819cf68
+    name: heap_add_region
+    size: 200
+    module: heap/init
+    status: ported
+    notes: Max 20 regions; zero-word terminator; one big free block.
+
+  - address: 0x0819d7b4
+    ghidra: FUN_0819d7b4
+    name: heap_create
+    size: 20
+    module: heap/init
+    status: ported
+
+  - address: 0x0819d7c8
+    ghidra: FUN_0819d7c8
+    name: heap_create_empty
+    size: 28
+    module: heap/init
+    status: ported
+
+  - address: 0x0819d7e4
+    ghidra: FUN_0819d7e4
+    name: heap_destroy
+    size: 32
+    module: heap/init
+    status: ported
+
+  - address: 0x0819d67c
+    ghidra: FUN_0819d67c
+    name: heap_alloc
+    size: 36
+    module: heap/wrappers
+    status: ported
+
+  - address: 0x0819d2f0
+    ghidra: FUN_0819d2f0
+    name: heap_alloc_tag1
+    size: 36
+    module: heap/wrappers
+    status: ported
+    notes: The '1' goes to the OOM-report-suppress stack arg, NOT the tag.
+
+  - address: 0x0819ce00
+    ghidra: FUN_0819ce00
+    name: heap_alloc_zero
+    size: 36
+    module: heap/wrappers
+    status: ported
+    notes: calloc-style zerofill.
+
+  - address: 0x0819d6a0
+    ghidra: FUN_0819d6a0
+    name: heap_realloc
+    size: 44
+    module: heap/wrappers
+    status: ported
+
+  - address: 0x0819d6cc
+    ghidra: FUN_0819d6cc
+    name: heap_lock
+    size: 72
+    module: heap/wrappers
+    status: ported
+    notes: Lazy RTXC mutex create (0x080744a4) once kernel is up (0x0809444c).
+
+  - address: 0x0819cde4
+    ghidra: FUN_0819cde4
+    name: heap_unlock
+    size: 16
+    module: heap/wrappers
+    status: ported
+
+  - address: 0x0819d804
+    name: named_heap_registry
+    size: 304
+    module: heap/wrappers
+    status: ported
+    notes: 3-slot table @ 0x08ad7860, refcounted 16-byte name nodes
+      (0x0819d804/0x0819d818/0x0819d858).
+
+  - address: 0x0819d714
+    ghidra: FUN_0819d714
+    name: heap_stats_add
+    size: 160
+    module: heap/stats
+    status: ported
+    notes: Tag/class halfwords in header; per-tag/class/bin counters; peak.
+
+  - address: 0x0819cd5c
+    ghidra: FUN_0819cd5c
+    name: heap_stats_sub
+    size: 136
+    module: heap/stats
+    status: ported
+
+  - address: 0x080e837c
+    ghidra: FUN_080e837c
+    name: log2_floor
+    size: 52
+    module: heap/stats
+    status: ported
+    notes: 5-step binary-search CLZ; table @ 0x083e9b60 outside image
+      (canonical table reconstructed, behavior exact). Returns 0 for input 0.
+
+  - address: 0x22003eb0
+    name: size_to_class
+    size: 0
+    module: heap/stats
+    status: ported
+    notes: ROM call (mask ROM, not in image) — reimplemented as documented
+      log2(size/8) clamped 0..79, UNVERIFIED.
+
+  - address: 0x080eb67c
+    ghidra: FUN_080eb67c
+    name: malloc_wrapper
+    size: 40
+    module: heap/veneers
+    status: ported
+    notes: 96 call sites; lazy-init + default heap, tail heap_alloc.
+
+  - address: 0x080e7970
+    ghidra: FUN_080e7970
+    name: free_wrapper
+    size: 40
+    module: heap/veneers
+    status: ported
+    notes: 62 sites; NO NULL guard here (heap_free handles NULL).
+
+  - address: 0x080edbf0
+    ghidra: FUN_080edbf0
+    name: realloc_wrapper
+    size: 56
+    module: heap/veneers
+    status: ported
+
+  - address: 0x08077250
+    ghidra: FUN_08077250
+    name: lazy_init_default_heap
+    size: 44
+    module: heap/veneers
+    status: ported
+    notes: 32KB heap @ 0x08a12710, desc @ 0x08a1a710, global @ 0x089ca638.
+
+  - address: 0x082aadd4
+    name: operator_new
+    size: 20
+    module: heap/veneers
+    status: ported
+    notes: Tag 2; 1797 call sites — the dominant allocator. delete @
+      0x082aad24 (tag 2, NULL-guarded), tag-3 pair 0x082aad74/0x82aad14,
+      checked new 0x08266c70 (new-handler code 3).
+
+  - address: 0x08030f44
+    name: heap_panic
+    size: 32
+    module: heap/veneers
+    status: ported
+    notes: raise(1,0) -> exit -> terminate @ 0x82b20a0 (non-returning).
+
+  - address: 0x0826f580
+    name: aligned_pool
+    size: 612
+    module: heap/pool
+    status: ported
+    notes: create 0x0826f658/alloc 0x0826f6a0/destroy 0x0826f7e4; 0x418-byte
+      ctl struct, embedded heap desc +0x7c; alignments 4/16/32/1024 (recovered
+      from serialized copy @ 0x089d6094); tag 0x2b; uncached path = D-cache
+      clean+invalidate + bit31 uncached alias.
+
+  - address: 0x080751a0
+    ghidra: FUN_080751a0
+    name: crc32_table_gen
+    size: 96
+    module: util/crc32
+    status: ported
+    notes: MSB-first table, poly 0x04C11DB7, into RAM @ 0x08ad786c
+      (guarded once-init @ 0x082905a4). Compute loops in image are
+      slicing-by-4 over runtime tables (0x0807badc reflected, 0x080f4428 MSB).
+
+  - address: 0x0894289c
+    name: crc32_reflected_table
+    size: 1024
+    module: util/crc32
+    status: identified
+    notes: zlib/IEEE table (entry[0x80]=0xEDB88320); dead data in osos —
+      no references found. Vector: "123456789" = 0xCBF43926 (reflected),
+      0xFC891918 (MSB/BZIP2 init/xorout).
+
+  - address: 0x080e799c
+    ghidra: FUN_080e799c
+    name: utoa
+    size: 116
+    sig: "char *utoa(u32 value, char *buf, u32 base)"
+    module: util/utoa
+    status: ported
+    notes: Bases 2..36; sign only for base 10; digit table @ 0x080e7a10.
+
+  - address: 0x080eb6dc
+    ghidra: FUN_080eb6dc
+    name: variant_compare
+    size: 164
+    module: util/utoa
+    status: ported
+    notes: C++ type-tagged union compare, tags 0-3; tag0 length-prefixed
+      string via memcmp; tag3 i32; NULL conventions documented.
+
+  # --- Corrections from batch 8 ---
+  # 0x8391e38 (names.yaml earlier said "assert printer") is actually a
+  # normalized 3-way strcmp (-1/0/+1); assert printer is elsewhere.
+  # RTXC Quadros kernel lives in the S5L8702 MASK ROM (0x22000000), reached
+  # via the thunk table 0x08037db0-0x0803829c (~124 thunks). RAM-side
+  # wrappers: sem create 0x08056724, wait 0x08056510, signal 0x08056710,
+  # mutex create 0x080744a4, lock 0x0807f5c4, unlock 0x0807f6a0,
+  # kernel-running check 0x0809444c; IRQ dispatcher 0x080080ac.
