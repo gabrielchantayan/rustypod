@@ -83,38 +83,19 @@
 //!
 //! # Hook dispatch (deviation, by necessity)
 //!
-//! The core dispatcher 0x0819d048 lives in alloc_core.rs and the free
-//! path in free_path.rs — both ported concurrently and not importable
-//! from here. The RTXC kernel (semaphore ops 0x0807f5c4/0x0807f6a0/
-//! 0x080744a4, kernel-running check 0x0809444c), the tag-2 operator
-//! new/delete veneers (0x082aadd4/0x082aad24), the heap factory global
-//! (0x089d017c via 0x0804d348), the heap release 0x0804c360 and the C++
-//! string name copy/free are likewise not yet ported. All of these are
-//! routed through the `HEAP_CORE_HOOKS` fn-pointer table (pattern from
-//! runtime/malloc_rt.rs), which defaults to documented stubs: the core
-//! dispatch and node allocator spin/return NULL (they cannot produce
-//! memory), the kernel is reported "not running" (so locking degrades to
-//! the original's pre-kernel no-op path), the mutex ops are no-ops, the
-//! factory reports failure, and the delete/free/release ops silently
-//! leak. Host tests swap in mocks; once the real pieces land the table
-//! can point at them.
-//!
-//! The eventual link contract (not referenced yet — declaring without
-//! referencing emits no undefined symbols):
-//!
-//! ```text
-//! extern "C" {
-//!     fn heap_core_dispatch(desc, size, zerofill, tag,      // 0x0819d048
-//!                           oldptr, copy, oom) -> *mut u8;  // (alloc_core.rs)
-//!     fn rtxc_kernel_running() -> u32;                      // 0x0809444c
-//!     fn rtxc_semaphore_create(slot: *mut u32);             // 0x080744a4
-//!     fn rtxc_semaphore_wait(slot: *mut u32);               // 0x0807f5c4
-//!     fn rtxc_semaphore_signal(slot: *mut u32);             // 0x0807f6a0
-//!     fn os_operator_new_tag2(size: usize) -> *mut u8;      // 0x082aadd4
-//!     fn os_operator_delete_tag2(ptr: *mut u8);             // 0x082aad24
-//!     fn os_heap_release_descriptor(desc);                  // 0x0804c360
-//! }
-//! ```
+//! Instead of the originals' direct calls, everything external goes
+//! through the `HEAP_CORE_HOOKS` fn-pointer table (pattern from
+//! runtime/malloc_rt.rs) so host tests can swap in mocks. The defaults
+//! are wired to the real ports where one exists: the core dispatcher
+//! 0x0819d048 (`heap_alloc_core`, alloc_core.rs), the RTXC layer —
+//! kernel-running check 0x0809444c, semaphore create/wait/signal
+//! 0x080744a4 / 0x0807f5c4 / 0x0807f6a0 (kernel/sync_mutex.rs, reached
+//! through slot-cast shims: the descriptor bytes at +0xb8/+0xbc are
+//! exactly the 8-byte RTXC `Mutex` on target) — and the tag-2 operator
+//! new/delete veneers 0x082aadd4/0x082aad24 (veneers.rs). Still stubbed
+//! (not yet ported): the heap factory global (0x089d017c via 0x0804d348)
+//! reports failure, the heap release 0x0804c360 is a no-op, and the C++
+//! string name copy/free return NULL / leak.
 //!
 //! # Simplifications
 //!
@@ -225,36 +206,69 @@ pub struct HeapCoreHooks {
     pub heap_release: unsafe extern "C" fn(desc: *mut HeapDescriptor),
 }
 
-/// Default stub: the core heap is not linked yet — spin (on real hardware
-/// `HEAP_CORE_HOOKS` must be installed before the heap is touched).
-unsafe extern "C" fn missing_dispatch(
-    _desc: *mut HeapDescriptor,
-    _size: usize,
-    _zerofill: u32,
-    _tag: u32,
-    _oldptr: *mut u8,
-    _copy_on_move: u32,
-    _suppress_oom_report: u32,
+/// `dispatch` slot shim over `heap_alloc_core` @ 0x0819d048
+/// (alloc_core.rs): narrows the size to the callee's u32 register width.
+unsafe extern "C" fn dispatch_ported(
+    desc: *mut HeapDescriptor,
+    size: usize,
+    zerofill: u32,
+    tag: u32,
+    oldptr: *mut u8,
+    copy_on_move: u32,
+    suppress_oom_report: u32,
 ) -> *mut u8 {
-    loop {}
+    crate::heap::alloc_core::heap_alloc_core(
+        desc,
+        size as u32,
+        zerofill,
+        tag,
+        oldptr,
+        copy_on_move,
+        suppress_oom_report,
+    )
 }
 
-/// Default stub: no kernel — `heap_lock` takes its pre-kernel no-op path.
-unsafe extern "C" fn missing_kernel_running() -> u32 {
-    0
+/// `kernel_running` slot shim over the port @ 0x0809444c
+/// (kernel/sync_mutex.rs): the task id is non-negative; reinterpret.
+unsafe extern "C" fn kernel_running_ported() -> u32 {
+    crate::kernel::sync_mutex::kernel_running() as u32
 }
 
-/// Default stub: unreachable with the default `kernel_running` (locking
-/// never engages); a no-op so a partially installed table stays harmless.
-unsafe extern "C" fn missing_mutex_op(_slot: *mut u32) {}
-
-/// Default stub: cannot allocate without the heap — report failure.
-unsafe extern "C" fn missing_node_new(_size: usize) -> *mut NamedHeapNode {
-    core::ptr::null_mut()
+/// Casts the `&desc->mutex_handle` slot to the RTXC `Mutex` the kernel
+/// layer expects — layout-exact on target (+0xb8 cell pointer, +0xbc
+/// pad), see the module header. Host tests must mock the mutex slots
+/// before engaging locking (the widened host `Mutex` misaligns).
+#[inline(always)]
+fn slot_as_mutex(slot: *mut u32) -> *mut crate::kernel::sync_mutex::Mutex {
+    slot as *mut crate::kernel::sync_mutex::Mutex
 }
 
-/// Default stub: freeing into a nonexistent heap leaks — harmless.
-unsafe extern "C" fn missing_node_delete(_node: *mut NamedHeapNode) {}
+/// `mutex_create` slot shim over `mutex_create` @ 0x080744a4.
+unsafe extern "C" fn mutex_create_ported(slot: *mut u32) {
+    crate::kernel::sync_mutex::mutex_create(slot_as_mutex(slot));
+}
+
+/// `mutex_wait` slot shim over `mutex_lock` @ 0x0807f5c4.
+unsafe extern "C" fn mutex_wait_ported(slot: *mut u32) {
+    crate::kernel::sync_mutex::mutex_lock(slot_as_mutex(slot));
+}
+
+/// `mutex_signal` slot shim over `mutex_unlock` @ 0x0807f6a0.
+unsafe extern "C" fn mutex_signal_ported(slot: *mut u32) {
+    crate::kernel::sync_mutex::mutex_unlock(slot_as_mutex(slot));
+}
+
+/// `node_new` slot shim over the tag-2 `operator_new` @ 0x082aadd4
+/// (veneers.rs).
+unsafe extern "C" fn node_new_ported(size: usize) -> *mut NamedHeapNode {
+    crate::heap::veneers::operator_new(size) as *mut NamedHeapNode
+}
+
+/// `node_delete` slot shim over the tag-2 `operator_delete` @ 0x082aad24
+/// (veneers.rs).
+unsafe extern "C" fn node_delete_ported(node: *mut NamedHeapNode) {
+    crate::heap::veneers::operator_delete(node as *mut u8);
+}
 
 /// Default stub: cannot copy the name without the heap — NULL.
 unsafe extern "C" fn missing_name_dup(_name: *const u8) -> *mut u8 {
@@ -278,22 +292,27 @@ unsafe extern "C" fn missing_heap_factory(
 /// Default stub: no heap to release — harmless no-op.
 unsafe extern "C" fn missing_heap_release(_desc: *mut HeapDescriptor) {}
 
-/// The active hooks. Defaults to the documented stubs above; replaced by
-/// host tests (mocks) and eventually by the ported core/kernel. Written
-/// once at init on target; tests serialize access.
-pub static mut HEAP_CORE_HOOKS: HeapCoreHooks = HeapCoreHooks {
-    dispatch: missing_dispatch,
-    kernel_running: missing_kernel_running,
-    mutex_create: missing_mutex_op,
-    mutex_wait: missing_mutex_op,
-    mutex_signal: missing_mutex_op,
-    node_new: missing_node_new,
-    node_delete: missing_node_delete,
+/// Wired defaults (see the module header): real ports for the core
+/// dispatch, the RTXC layer and the node new/delete; documented stubs
+/// for the unported factory/release/string machinery. Host tests swap in
+/// mocks and restore this afterwards.
+pub(crate) const DEFAULT_HEAP_CORE_HOOKS: HeapCoreHooks = HeapCoreHooks {
+    dispatch: dispatch_ported,
+    kernel_running: kernel_running_ported,
+    mutex_create: mutex_create_ported,
+    mutex_wait: mutex_wait_ported,
+    mutex_signal: mutex_signal_ported,
+    node_new: node_new_ported,
+    node_delete: node_delete_ported,
     name_dup: missing_name_dup,
     name_free: missing_name_free,
     heap_factory: missing_heap_factory,
     heap_release: missing_heap_release,
 };
+
+/// The active hooks. Defaults to the wired table above; replaced by host
+/// tests (mocks). Written once at init on target; tests serialize access.
+pub static mut HEAP_CORE_HOOKS: HeapCoreHooks = DEFAULT_HEAP_CORE_HOOKS;
 
 /// Reads the hook table. Volatile so LLVM cannot constant-fold the loads
 /// to the default stubs (see malloc_rt.rs, where folding collapsed

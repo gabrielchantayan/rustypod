@@ -32,30 +32,29 @@
 //!
 //! Locking: the originals bracket the operation with `heap_lock` @
 //! 0x0819d6cc / `heap_unlock` @ 0x0819cde4 (RTXC semaphore wrappers,
-//! another agent's module). They are exposed through `HEAP_LOCK_HOOKS`,
-//! a fn-pointer pair defaulting to no-ops — correct for the early OS
-//! (mutex_state == 0 takes the `bx lr` path in the originals too) and for
-//! host tests; on target the heap-init code points them at the real
-//! RTXC-backed ports once those land.
+//! ported in wrappers.rs). They are exposed through `HEAP_LOCK_HOOKS`, a
+//! fn-pointer pair defaulting to those ports (which take the original's
+//! `bx lr` no-op path until the kernel reports running); host tests swap
+//! in counting mocks.
 //!
 //! Other sibling machinery the originals call is likewise routed through
-//! `ALLOC_ENGINE_HOOKS` (all another agent's files, per the porting
-//! contract this module may only import `crate::heap::types` and
-//! `crate::libc::rt_memcpy`):
-//! - `freelist_insert` — original @ 0x0819d314. Default stub: no-op
-//!   (split remainders leak until the real port is wired in).
-//! - `stats_tag` — original @ 0x0819d714; `stats_retag` — original @
-//!   0x0819cd5c (subtract old tag/class bytes, tail-calls 0x0819d714).
-//!   Pure telemetry; default no-ops.
-//! - `auto_init` — original @ 0x0819cf68 (lazy heap init). Default no-op.
-//! - `free_core` — original @ 0x0819d4dc. Default no-op (realloc moves
-//!   leak the old block until wired up).
+//! `ALLOC_ENGINE_HOOKS`; every slot defaults to the real port, via thin
+//! shims where the hook signature differs:
+//! - `freelist_insert` — original @ 0x0819d314, ported as
+//!   `heap_free_insert` (free_path.rs). NOTE: only wired for the ARM
+//!   target's link representation — host `cfg(test)` builds use offset
+//!   links (see below) and must install their own mock.
+//! - `stats_tag` — original @ 0x0819d714 (`heap_stats_add`, stats.rs);
+//!   `stats_retag` — original @ 0x0819cd5c (`heap_stats_sub`, stats.rs).
+//! - `auto_init` — original @ 0x0819cf68 (`heap_add_region`, init.rs).
+//! - `free_core` — original @ 0x0819d4dc (`heap_free`, free_path.rs).
 //! - `heap_panic` — original @ 0x08030f44: `__rt_raise(1, 0)` then a tail
-//!   branch to the OS terminate path @ 0x082b20a0; it never returns. The
-//!   default stub is the documented `loop {}`. The original takes no
-//!   argument; the hook receives a `HEAP_PANIC_*` reason code (a port
-//!   addition for diagnostics) and must not return. Note the originals do
-//!   NOT unlock on the panic paths — neither does this port.
+//!   branch to the OS terminate path @ 0x082b20a0; it never returns.
+//!   Wired to the veneers.rs port. The original takes no argument; the
+//!   hook receives a `HEAP_PANIC_*` reason code (a port addition for
+//!   diagnostics, dropped by the default shim) and must not return. Note
+//!   the originals do NOT unlock on the panic paths — neither does this
+//!   port.
 //!
 //! Deviations / simplifications (documented, none observable on target):
 //! - The low-memory diagnostic trace (three `FUN_082bc4fc` calls gated by
@@ -92,26 +91,26 @@ pub const HEAP_PANIC_BAD_SPLIT: u32 = 4;
 /// heap_panic reason: realloc source header is zero or already free.
 pub const HEAP_PANIC_BAD_BLOCK: u32 = 5;
 
-/// Lock/unlock pair standing in for `heap_lock` @ 0x0819d6cc and
-/// `heap_unlock` @ 0x0819cde4 (see the module header). Defaults to no-ops.
+/// Lock/unlock pair for `heap_lock` @ 0x0819d6cc and `heap_unlock` @
+/// 0x0819cde4 (see the module header). Defaults to the wrappers.rs ports.
 #[derive(Clone, Copy)]
 pub struct HeapLockHooks {
     pub lock: unsafe extern "C" fn(desc: *mut HeapDescriptor),
     pub unlock: unsafe extern "C" fn(desc: *mut HeapDescriptor),
 }
 
-/// Default stub: the no-mutex path of the originals is a plain `bx lr`.
-unsafe extern "C" fn lock_noop(_desc: *mut HeapDescriptor) {}
-
-/// The active lock pair. Written once at heap-init time on target; host
-/// tests swap in counting mocks (serialized by their own mutex).
-pub static mut HEAP_LOCK_HOOKS: HeapLockHooks = HeapLockHooks {
-    lock: lock_noop,
-    unlock: lock_noop,
+/// Wired default. Host tests swap in counting mocks (serialized by their
+/// own mutex) and restore this afterwards.
+pub(crate) const DEFAULT_HEAP_LOCK_HOOKS: HeapLockHooks = HeapLockHooks {
+    lock: crate::heap::wrappers::heap_lock,
+    unlock: crate::heap::wrappers::heap_unlock,
 };
 
-/// Indirect dispatch for the not-yet-importable sibling machinery (see the
-/// module header for the default-stub behavior of each slot).
+/// The active lock pair. Defaults to the real ports; swapped by tests.
+pub static mut HEAP_LOCK_HOOKS: HeapLockHooks = DEFAULT_HEAP_LOCK_HOOKS;
+
+/// Indirect dispatch for the sibling machinery (see the module header;
+/// defaults are the real ports behind thin signature shims).
 #[derive(Clone, Copy)]
 pub struct AllocEngineHooks {
     /// freelist_insert @ 0x0819d314: (desc, block) — coalesce, set FREE /
@@ -138,34 +137,63 @@ pub struct AllocEngineHooks {
     pub heap_panic: unsafe extern "C" fn(reason: u32) -> !,
 }
 
-unsafe extern "C" fn insert_stub(_desc: *mut HeapDescriptor, _block: *mut u8) {}
-unsafe extern "C" fn stats_tag_stub(_desc: *mut HeapDescriptor, _block: *mut u8, _tag: u32) {}
-unsafe extern "C" fn stats_retag_stub(
-    _desc: *mut HeapDescriptor,
-    _block: *mut u8,
-    _old_size: u32,
-    _tag: u32,
-) {
+/// `freelist_insert` slot shim over `heap_free_insert` @ 0x0819d314
+/// (free_path.rs): fixes the block pointer type and drops the returned
+/// merged-header pointer, like the original call sites. Target-only for
+/// list *contents* — host `cfg(test)` builds use offset links (module
+/// header) and must mock this slot.
+unsafe extern "C" fn freelist_insert_ported(desc: *mut HeapDescriptor, block: *mut u8) {
+    crate::heap::free_path::heap_free_insert(desc, block as *mut BlockHeader);
 }
-unsafe extern "C" fn auto_init_stub(_desc: *mut HeapDescriptor, _a2: u32, _a3: u32) {}
-unsafe extern "C" fn free_core_stub(_desc: *mut HeapDescriptor, _user_ptr: *mut u8, _tag: u32) {}
 
-/// Default heap_panic stub: the original terminates the OS; with nothing
-/// ported to raise into, the closest safe stub is a spin.
-unsafe extern "C" fn heap_panic_stub(_reason: u32) -> ! {
-    loop {}
+/// `stats_tag` slot shim over `heap_stats_add` @ 0x0819d714 (stats.rs).
+unsafe extern "C" fn stats_tag_ported(desc: *mut HeapDescriptor, block: *mut u8, tag: u32) {
+    crate::heap::stats::heap_stats_add(desc, block as *mut BlockHeader, tag);
 }
+
+/// `stats_retag` slot shim over `heap_stats_sub` @ 0x0819cd5c (stats.rs).
+unsafe extern "C" fn stats_retag_ported(
+    desc: *mut HeapDescriptor,
+    block: *mut u8,
+    old_size: u32,
+    tag: u32,
+) {
+    crate::heap::stats::heap_stats_sub(desc, block as *mut BlockHeader, old_size, tag);
+}
+
+/// `auto_init` slot shim over `heap_add_region` @ 0x0819cf68 (init.rs):
+/// widens the (always-zero here) region arguments and drops the returned
+/// descriptor, like the original call site.
+unsafe extern "C" fn auto_init_ported(desc: *mut HeapDescriptor, a2: u32, a3: u32) {
+    crate::heap::init::heap_add_region(desc, a2 as usize, a3 as usize);
+}
+
+/// `free_core` slot shim over `heap_free` @ 0x0819d4dc (free_path.rs):
+/// widens the tag (the callee ignores it anyway, as in the original).
+unsafe extern "C" fn free_core_ported(desc: *mut HeapDescriptor, user_ptr: *mut u8, tag: u32) {
+    crate::heap::free_path::heap_free(desc, user_ptr, tag as usize);
+}
+
+/// `heap_panic` slot shim over the veneers.rs port @ 0x08030f44: drops
+/// the port-added reason code (the original takes no argument).
+unsafe extern "C" fn heap_panic_ported(_reason: u32) -> ! {
+    crate::heap::veneers::heap_panic()
+}
+
+/// Wired defaults (see the module header, incl. the host caveat on
+/// `freelist_insert`). Host tests swap in mocks and restore this.
+pub(crate) const DEFAULT_ALLOC_ENGINE_HOOKS: AllocEngineHooks = AllocEngineHooks {
+    freelist_insert: freelist_insert_ported,
+    stats_tag: stats_tag_ported,
+    stats_retag: stats_retag_ported,
+    auto_init: auto_init_ported,
+    free_core: free_core_ported,
+    heap_panic: heap_panic_ported,
+};
 
 /// The active engine hooks. Same install-once / test-swap contract as
 /// `HEAP_LOCK_HOOKS`.
-pub static mut ALLOC_ENGINE_HOOKS: AllocEngineHooks = AllocEngineHooks {
-    freelist_insert: insert_stub,
-    stats_tag: stats_tag_stub,
-    stats_retag: stats_retag_stub,
-    auto_init: auto_init_stub,
-    free_core: free_core_stub,
-    heap_panic: heap_panic_stub,
-};
+pub static mut ALLOC_ENGINE_HOOKS: AllocEngineHooks = DEFAULT_ALLOC_ENGINE_HOOKS;
 
 /// Volatile reads so LLVM cannot constant-fold the defaults and inline the
 /// stubs (observed in malloc_rt.rs: a folded `loop {}` collapsed an

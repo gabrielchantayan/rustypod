@@ -41,38 +41,23 @@
 //!   flushes stdio), then tail-branches to the final terminate stub @
 //!   0x082b20a0 with r0 = 1 (a semihosting SWI 0x123456 + spin).
 //!
-//! Heap-dispatch design (deviation, by necessity): the heap core
-//! (0x0819d67c / 0x0819d4dc / 0x0819d6a0 / 0x0819d7b4), the new-handler
-//! dispatch (0x08266abc) and the raise/exit/terminate path (0x080320a8 /
-//! 0x08035878 / 0x082b20a0) are ported in other modules / not yet ported,
-//! so these veneers cannot tail-branch to real code. Instead they dispatch
-//! indirectly through the `HEAP_OPS` function-pointer table (same pattern
-//! as src/runtime/malloc_rt.rs). The table defaults to documented stubs:
-//! `alloc`/`realloc`/`create`/`raise`/`terminate` spin forever (they
-//! cannot produce memory or a signal handler out of thin air; on real
-//! hardware the table must be installed before the heap is touched),
-//! `free`/`exit` silently do nothing (a free into a nonexistent heap is a
-//! harmless leak), and `new_handler` returns — matching the original
-//! 0x08266abc behavior when no C++ new-handler is registered. Host tests
-//! swap in a mock heap; once the heap core lands, `HEAP_OPS` is pointed at
-//! the real targets.
-//!
-//! The eventual link contract (not referenced yet — declaring without
-//! referencing emits no undefined symbols):
-//!
-//! ```text
-//! extern "C" {
-//!     fn heap_alloc(heap: *mut u8, size: usize, tag: usize) -> *mut u8; // 0x0819d67c
-//!     fn heap_free(heap: *mut u8, ptr: *mut u8, tag: usize);            // 0x0819d4dc
-//!     fn heap_realloc(heap: *mut u8, ptr: *mut u8, size: usize,         // 0x0819d6a0
-//!                     a3: usize, a4: usize) -> *mut u8;
-//!     fn heap_create(desc: *mut u8, start: *mut u8, size: usize) -> *mut u8; // 0x0819d7b4
-//!     fn new_handler_dispatch(code: usize);                             // 0x08266abc
-//!     fn __rt_raise(sig: i32, code: i32) -> i32;                        // 0x080320a8 (raise.rs)
-//!     fn rt_exit_path();                                                // 0x08035878
-//!     fn rt_terminate(code: i32);                                       // 0x082b20a0
-//! }
-//! ```
+//! Heap-dispatch design (deviation, by necessity): instead of the
+//! originals' tail branches, these veneers dispatch indirectly through
+//! the `HEAP_OPS` function-pointer table (same pattern as
+//! src/runtime/malloc_rt.rs) so host tests can swap in a mock heap. The
+//! defaults are wired to the real ports wherever one exists:
+//! `alloc`/`free`/`realloc`/`create` reach the heap core veneers
+//! `heap_alloc` @ 0x0819d67c / `heap_free` @ 0x0819d4dc / `heap_realloc`
+//! @ 0x0819d6a0 (wrappers.rs, free_path.rs) and `heap_create` @
+//! 0x0819d7b4 (init.rs) through thin handle-cast shims (the heap handle
+//! *is* the descriptor pointer — `heap_create` returns its first
+//! argument), and `raise` is `__rt_raise` @ 0x080320a8 (runtime/raise.rs)
+//! directly. The remaining slots keep behavior-faithful stubs:
+//! `new_handler` returns, matching the original 0x08266abc with no C++
+//! new-handler registered; `exit` is a no-op, matching the 0x08035878
+//! stdio cleanup which runtime/exit.rs ports as dead semihost code; and
+//! `terminate` spins, matching the 0x082b20a0 semihosting-SWI + spin
+//! stub in runtime/exit.rs.
 //!
 //! Simplifications:
 //! - The default-heap region and descriptor are modeled as one
@@ -155,8 +140,8 @@ pub struct HeapVeneerOps {
     /// C++ new-handler dispatch @ 0x08266abc (code 3 = plain `operator
     /// new` failure). No-op when no handler is registered.
     pub new_handler: unsafe extern "C" fn(code: usize),
-    /// `__rt_raise` @ 0x080320a8 (ported in raise.rs; routed through the
-    /// table because that module is not importable from here).
+    /// `__rt_raise` @ 0x080320a8 (runtime/raise.rs; the default is the
+    /// real port).
     pub raise: unsafe extern "C" fn(sig: i32, code: i32) -> i32,
     /// Exit path @ 0x08035878 (atexit handlers + stdio flush).
     pub exit: unsafe extern "C" fn(),
@@ -165,44 +150,43 @@ pub struct HeapVeneerOps {
     pub terminate: unsafe extern "C" fn(code: i32),
 }
 
-/// Default stub: allocation is impossible without a heap core — spin. On
-/// real hardware `HEAP_OPS` must be installed before the heap is touched.
-unsafe extern "C" fn missing_alloc(
-    _heap: *mut HeapDescriptorDescriptor,
-    _size: usize,
-    _tag: usize,
+/// `alloc` slot shim over `heap_alloc` @ 0x0819d67c (wrappers.rs): the
+/// handle value is the descriptor pointer (see the module header); the
+/// tag narrows to the u32 the callee truncates to a byte anyway.
+unsafe extern "C" fn alloc_ported(
+    heap: *mut HeapDescriptorDescriptor,
+    size: usize,
+    tag: usize,
 ) -> *mut u8 {
-    loop {}
+    crate::heap::wrappers::heap_alloc(heap as *mut HeapDescriptor, size, tag as u32)
 }
 
-/// Default stub: freeing into a nonexistent heap leaks the block — a
-/// harmless no-op.
-unsafe extern "C" fn missing_free(
-    _heap: *mut HeapDescriptorDescriptor,
-    _ptr: *mut u8,
-    _tag: usize,
-) {
+/// `free` slot shim over `heap_free` @ 0x0819d4dc (free_path.rs).
+unsafe extern "C" fn free_ported(heap: *mut HeapDescriptorDescriptor, ptr: *mut u8, tag: usize) {
+    crate::heap::free_path::heap_free(heap as *mut HeapDescriptor, ptr, tag)
 }
 
-/// Default stub: like `missing_alloc`, cannot produce memory — spin.
-unsafe extern "C" fn missing_realloc(
-    _heap: *mut HeapDescriptorDescriptor,
-    _ptr: *mut u8,
-    _size: usize,
-    _a3: usize,
-    _a4: usize,
+/// `realloc` slot shim over `heap_realloc` @ 0x0819d6a0 (wrappers.rs):
+/// a3/a4 are the tag and copy-on-move flag of the callee's contract.
+unsafe extern "C" fn realloc_ported(
+    heap: *mut HeapDescriptorDescriptor,
+    ptr: *mut u8,
+    size: usize,
+    a3: usize,
+    a4: usize,
 ) -> *mut u8 {
-    loop {}
+    crate::heap::wrappers::heap_realloc(heap as *mut HeapDescriptor, ptr, size, a3 as u32, a4 as u32)
 }
 
-/// Default stub: cannot initialize a heap — spin (the first allocation
-/// would spin in `missing_alloc` anyway).
-unsafe extern "C" fn missing_create(
-    _desc: *mut HeapDescriptor,
-    _start: *mut u8,
-    _size: usize,
+/// `create` slot shim over `heap_create` @ 0x0819d7b4 (init.rs): returns
+/// the descriptor pointer as the heap handle, exactly like the original
+/// (`heap_create` returns its first argument).
+unsafe extern "C" fn create_ported(
+    desc: *mut HeapDescriptor,
+    start: *mut u8,
+    size: usize,
 ) -> *mut HeapDescriptorDescriptor {
-    loop {}
+    crate::heap::init::heap_create(desc, start as usize, size) as *mut HeapDescriptorDescriptor
 }
 
 /// Default stub: matches the original 0x08266abc with no C++ new-handler
@@ -210,34 +194,33 @@ unsafe extern "C" fn missing_create(
 /// returns NULL).
 unsafe extern "C" fn missing_new_handler(_code: usize) {}
 
-/// Default stub: an unhandled raise in the original terminates the OS;
-/// with no signal runtime the closest safe stub is a spin.
-unsafe extern "C" fn missing_raise(_sig: i32, _code: i32) -> i32 {
-    loop {}
-}
-
-/// Default stub: nothing to flush or run down yet — no-op.
+/// Default stub: the original exit path @ 0x08035878 is the stdio cleanup
+/// that runtime/exit.rs ports as a no-op (dead semihost code) — no-op.
 unsafe extern "C" fn missing_exit() {}
 
-/// Default stub: the original @ 0x082b20a0 spins via semihosting SWI —
-/// spin here too.
+/// Default stub: the original @ 0x082b20a0 spins via semihosting SWI
+/// (runtime/exit.rs stubs it the same way) — spin here too.
 unsafe extern "C" fn missing_terminate(_code: i32) {
     loop {}
 }
 
-/// The active heap-core implementation. Defaults to the documented stubs
-/// above; replaced by host tests (mock heap) and eventually by the ported
-/// heap core. Written once at init on target; tests serialize access.
-pub static mut HEAP_OPS: HeapVeneerOps = HeapVeneerOps {
-    alloc: missing_alloc,
-    free: missing_free,
-    realloc: missing_realloc,
-    create: missing_create,
+/// Wired defaults (see the module header). Host tests swap in a mock heap
+/// and restore this afterwards.
+pub(crate) const DEFAULT_HEAP_OPS: HeapVeneerOps = HeapVeneerOps {
+    alloc: alloc_ported,
+    free: free_ported,
+    realloc: realloc_ported,
+    create: create_ported,
     new_handler: missing_new_handler,
-    raise: missing_raise,
+    raise: crate::runtime::raise::__rt_raise,
     exit: missing_exit,
     terminate: missing_terminate,
 };
+
+/// The active heap-core implementation. Defaults to the real ports plus
+/// the documented stubs above; replaced by host tests (mock heap).
+/// Written once at init on target; tests serialize access.
+pub static mut HEAP_OPS: HeapVeneerOps = DEFAULT_HEAP_OPS;
 
 /// Reads the ops table. The read is volatile: the table is meant to be
 /// swapped at runtime (heap installer, host tests), and in a build where
@@ -476,7 +459,8 @@ mod tests {
         realloc: mock_realloc,
         create: mock_create,
         new_handler: mock_new_handler,
-        raise: missing_raise,
+        // Never reached by these tests (heap_panic is not exercised).
+        raise: DEFAULT_HEAP_OPS.raise,
         exit: missing_exit,
         terminate: missing_terminate,
     };
