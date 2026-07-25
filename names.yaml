@@ -446,9 +446,17 @@ functions:
   - address: 0x08985f01
     name: ctype_table
     size: 256
-    status: identified
-    notes: C-locale ctype flags table (+0x10 uppercase, +0x08 lowercase);
-      EOF guard byte at 0x08985f00. Embedded in ctype.rs.
+    module: runtime/ctype
+    status: ported
+    notes: >-
+      C-locale ctype flags DATA (+0x10 uppercase, +0x08 lowercase, +0x20
+      digit, +0x40 control, +0x01 whitespace, +0x80 hex digit); EOF guard
+      byte 0x00 at 0x08985f00. CTYPE_TABLE in runtime/ctype.rs verified
+      byte-exact against osos.dec (file offset 0x985f01). No literal-pool
+      pointer to it exists anywhere in the image — the address is computed
+      at runtime by the locale init (LC_CTYPE block header @ 0x08985ef4,
+      size 0x110, name "C") and installed at libspace+0x24, whence
+      tolower/toupper/wcrtomb and the scanf ctype hook load it.
 
   # --- Batch 3: stdlib control flow, time, errno, printf helpers ---
   - address: 0x08030cd4
@@ -977,10 +985,13 @@ functions:
     ghidra: FUN_08036348
     name: scanf_float_engine
     size: 1052
-    status: identified
-    notes: Complete float input engine (ws skip, width-limited collection,
-      inf/nan literal match) -> calls scanf_float_convert. SCANF_ENGINE
-      target for floats; port in the engine batch.
+    status: duplicate
+    notes: >-
+      Batch-5 scouting record, superseded by the batch-7 ported entry
+      below (module scanf/scanf_float_engine) — same address, same
+      function. One correction to this scout: the inf/nan and 0x
+      hex-float matchers are NULL VENEERS in retailOS (mov pc, lr @
+      0x083ed1c0/0x083ed1bc), so no literal ever matches.
 
   - address: 0x0803677c
     ghidra: FUN_0803677c
@@ -1478,8 +1489,12 @@ functions:
     size: 1052
     module: scanf/scanf_float_engine
     status: ported
-    notes: Width-limited collection into 0xff-terminated digit buffers,
-      inf/nan literal match @ 0x08036420, calls scanf_float_convert.
+    notes: >-
+      Width-limited collection into 0xff-terminated digit buffers, calls
+      scanf_float_convert. The inf/nan (@ 0x08036420) and 0x hex-float
+      dispatches call NULL VENEERS (mov pc, lr) — literals never match
+      in retailOS; see the module docs. Ghidra mis-decompiles the
+      EOF-during-ws-skip return (0, not -1) @ 0x080363b8.
 
   - address: 0x0803484c
     name: _scanf_engine
@@ -1730,11 +1745,15 @@ functions:
     name: crc32_reflected_table
     size: 1024
     module: util/crc32
-    status: identified
+    status: ported
     notes: >-
-      zlib/IEEE table (entry[0x80]=0xEDB88320); dead data in osos —
-      no references found. Vector: "123456789" = 0xCBF43926 (reflected),
-      0xFC891918 (MSB/BZIP2 init/xorout).
+      zlib/IEEE table (entry[0x80]=0xEDB88320); dead DATA in osos —
+      zero literal-pool references to 0x0894289c in the whole image.
+      All 256 entries verified identical to the compile-time
+      CRC32_REFLECTED_TABLE in util/crc32.rs (same reflected poly
+      0xEDB88320, same bitwise generator), so the port covers it exactly.
+      Vector: "123456789" = 0xCBF43926 (reflected), 0xFC891918
+      (MSB/BZIP2 init/xorout).
 
   - address: 0x080e799c
     ghidra: FUN_080e799c
