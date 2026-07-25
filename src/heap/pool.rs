@@ -77,21 +77,22 @@
 //! equal the binary's 32-bit masks on target, and keep host 64-bit test
 //! pointers from being truncated.
 //!
-//! Heap-dispatch design (deviation, by necessity — the HEAP_OPS pattern of
-//! the other heap modules): the app-level heap core entries, the C++
-//! base-subobject ctor/dtor, the deque fill, the block-manager queries,
-//! the cache flush and `operator new`/`delete` are all not yet ported /
-//! not importable from here, so they dispatch indirectly through
-//! `POOL_OPS`. The table defaults to documented stubs: producers
-//! (`new_control`, `base_construct`, `heap_create`, the allocs) spin,
-//! consumers (`delete_control`, `heap_free`, `heap_destroy`,
-//! `heap_add_region`, `dcache_flush`) are harmless no-ops, `deque_fill`
-//! reports failure (create then cleanly returns NULL), and the
-//! non-deleting dtors return their argument. Host tests swap in mocks;
-//! once the heap core is ported the table can point at the real entries.
-//! The heap "handle" passed around is the embedded `HeapDescriptor*`
-//! itself (the `HeapDescriptorDescriptor` of types.rs is a same-layout
-//! wrapper used only for the default-heap global).
+//! Heap-dispatch design (deviation, by necessity — the HEAP_OPS pattern
+//! of the other heap modules): external callees dispatch indirectly
+//! through `POOL_OPS` so host tests can swap in mocks. The heap-facing
+//! slots default to the real ports: `operator new`/`delete` @
+//! 0x082aadd4/0x082aad24 (veneers.rs), `heap_create_empty` @ 0x0819d7c8 /
+//! `heap_destroy` @ 0x0819d7e4 / `heap_add_region` @ 0x0819cf68
+//! (init.rs), the alloc entries @ 0x0819d2f0 / 0x0819d67c (wrappers.rs)
+//! and `heap_free` @ 0x0819d4dc (free_path.rs). Still stubbed (C++/
+//! driver machinery outside the heap): `base_construct` spins,
+//! `base_destroy` returns its argument, `deque_fill` reports failure
+//! (create then cleanly returns NULL), the block-manager queries return
+//! 0/NULL, and `dcache_flush` is a no-op (memory contents unaffected,
+//! like the real cache op). The heap "handle" passed around is the
+//! embedded `HeapDescriptor*` itself (the `HeapDescriptorDescriptor` of
+//! types.rs is a same-layout wrapper used only for the default-heap
+//! global).
 //!
 //! Further simplifications (no observable behavior change):
 //! - The deque-node accessor @ 0x08214150 (`add r0, r0, #0x4c; bx lr`)
@@ -256,14 +257,6 @@ pub struct PoolOps {
     pub dcache_flush: unsafe extern "C" fn(addr: *mut u8, len: usize),
 }
 
-/// Default stub: allocation is impossible without `operator new` — spin.
-unsafe extern "C" fn missing_new_control(_size: usize) -> *mut u8 {
-    loop {}
-}
-
-/// Default stub: deleting into a nonexistent runtime leaks — no-op.
-unsafe extern "C" fn missing_delete_control(_ptr: *mut u8) {}
-
 /// Default stub: cannot construct the base subobject — spin.
 unsafe extern "C" fn missing_base_construct(
     _this: *mut PoolControl,
@@ -299,76 +292,70 @@ unsafe extern "C" fn missing_region_start(_elem: *const u8) -> *mut u8 {
     core::ptr::null_mut()
 }
 
-/// Default stub: cannot initialize a heap — spin.
-unsafe extern "C" fn missing_heap_create(_desc: *mut HeapDescriptor) -> *mut HeapDescriptor {
-    loop {}
-}
-
-/// Default stub: destroying a nonexistent heap is a no-op; returns the
-/// argument like the original.
-unsafe extern "C" fn missing_heap_destroy(desc: *mut HeapDescriptor) -> *mut HeapDescriptor {
-    desc
-}
-
-/// Default stub: allocation is impossible without a heap core — spin.
-unsafe extern "C" fn missing_heap_alloc_alt(
-    _heap: *mut HeapDescriptor,
-    _size: usize,
-    _tag: usize,
+/// `heap_alloc_alt` slot shim over `heap_alloc_tag1` @ 0x0819d2f0
+/// (wrappers.rs): narrows the tag to the callee's u32.
+unsafe extern "C" fn heap_alloc_alt_ported(
+    heap: *mut HeapDescriptor,
+    size: usize,
+    tag: usize,
 ) -> *mut u8 {
-    loop {}
+    crate::heap::wrappers::heap_alloc_tag1(heap, size, tag as u32)
 }
 
-/// Default stub: allocation is impossible without a heap core — spin.
-unsafe extern "C" fn missing_heap_alloc(
-    _heap: *mut HeapDescriptor,
-    _size: usize,
-    _tag: usize,
+/// `heap_alloc` slot shim over `heap_alloc` @ 0x0819d67c (wrappers.rs).
+unsafe extern "C" fn heap_alloc_ported(
+    heap: *mut HeapDescriptor,
+    size: usize,
+    tag: usize,
 ) -> *mut u8 {
-    loop {}
+    crate::heap::wrappers::heap_alloc(heap, size, tag as u32)
 }
 
-/// Default stub: freeing into a nonexistent heap leaks the block — a
-/// harmless no-op.
-unsafe extern "C" fn missing_heap_free(
-    _heap: *mut HeapDescriptor,
-    _ptr: *mut u8,
-    _tag: usize,
-) {
+/// `heap_free` slot shim over `heap_free` @ 0x0819d4dc (free_path.rs;
+/// the callee is `C-unwind` for its host tests, hence the shim).
+unsafe extern "C" fn heap_free_ported(heap: *mut HeapDescriptor, ptr: *mut u8, tag: usize) {
+    crate::heap::free_path::heap_free(heap, ptr, tag);
 }
 
-/// Default stub: region add on a nonexistent heap — no-op.
-unsafe extern "C" fn missing_heap_add_region(
-    _heap: *mut HeapDescriptor,
-    _start: *mut u8,
-    _size: usize,
+/// `heap_add_region` slot shim over `heap_add_region` @ 0x0819cf68
+/// (init.rs): passes the start address as the callee's integer argument
+/// and drops the returned descriptor, like the original call site.
+unsafe extern "C" fn heap_add_region_ported(
+    heap: *mut HeapDescriptor,
+    start: *mut u8,
+    size: usize,
 ) {
+    crate::heap::init::heap_add_region(heap, start as usize, size);
 }
 
 /// Default stub: no cache runtime — no-op (memory contents unaffected,
 /// exactly like the real cache maintenance op).
 unsafe extern "C" fn missing_dcache_flush(_addr: *mut u8, _len: usize) {}
 
-/// The active pool-machinery implementation. Defaults to the documented
-/// stubs above; replaced by host tests (mocks) and eventually by the
-/// ported heap core / C++ runtime. Written once at init on target; tests
-/// serialize access.
-pub static mut POOL_OPS: PoolOps = PoolOps {
-    new_control: missing_new_control,
-    delete_control: missing_delete_control,
+/// Wired defaults (see the module header): real ports for the heap-facing
+/// slots, documented stubs for the unported C++/driver machinery. Host
+/// tests swap in mocks and restore this afterwards.
+pub(crate) const DEFAULT_POOL_OPS: PoolOps = PoolOps {
+    new_control: crate::heap::veneers::operator_new,
+    delete_control: crate::heap::veneers::operator_delete,
     base_construct: missing_base_construct,
     base_destroy: missing_base_destroy,
     deque_fill: missing_deque_fill,
     region_block_size: missing_region_block_size,
     region_start: missing_region_start,
-    heap_create: missing_heap_create,
-    heap_destroy: missing_heap_destroy,
-    heap_alloc_alt: missing_heap_alloc_alt,
-    heap_alloc: missing_heap_alloc,
-    heap_free: missing_heap_free,
-    heap_add_region: missing_heap_add_region,
+    heap_create: crate::heap::init::heap_create_empty,
+    heap_destroy: crate::heap::init::heap_destroy,
+    heap_alloc_alt: heap_alloc_alt_ported,
+    heap_alloc: heap_alloc_ported,
+    heap_free: heap_free_ported,
+    heap_add_region: heap_add_region_ported,
     dcache_flush: missing_dcache_flush,
 };
+
+/// The active pool-machinery implementation. Defaults to the wired table
+/// above; replaced by host tests (mocks). Written once at init on
+/// target; tests serialize access.
+pub static mut POOL_OPS: PoolOps = DEFAULT_POOL_OPS;
 
 /// Reads one op from the table. Volatile so LLVM cannot constant-fold
 /// the loads to the default stubs and inline their `loop {}` bodies in
