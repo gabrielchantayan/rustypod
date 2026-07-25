@@ -1930,3 +1930,47 @@ functions:
       task_lock/unlock (e48/e50), size_to_class (e60, UNVERIFIED),
       kernel_create_dispatch (e70), tick_elapsed (eb8), irq_fiq_disable
       (ed8), tick_delay (ef0, 23 callers).
+
+  # --- Batch 10: ADS runtime region 0x08030000-0x08036fff gap sweep ---
+  - address: 0x08036e80
+    ghidra: FUN_08036e80
+    name: frexp
+    size: 144
+    sig: "f64 frexp(f64 x, i32 *exp)  // soft-float bits"
+    module: fp/d2f_checked
+    status: ported
+    notes: >-
+      Classic frexp (mantissa to [0.5,1), exponent field forced 0x3fe).
+      Zero/Inf/NaN return unchanged with *exp = 0. Subnormals pre-scale
+      via __dscalb(x, 54) with *exp biased -54 — retailOS __dscalb
+      flushes subnormals to +0, so subnormal input deterministically
+      yields (+0.5, -1076); ported bug-for-bug (path dead in practice).
+      Sole caller: 0x08036d7c.
+
+  - address: 0x08036d7c
+    ghidra: FUN_08036d7c
+    name: d2f_errno
+    size: 204
+    sig: "f32 d2f_errno(f64 x)  // soft-float bits"
+    module: fp/d2f_checked
+    status: ported
+    notes: >-
+      Checked double->float for scanf %f: frexp exponent + 126 selects
+      the path. 1..254 = plain __d2f (whose own rounding may still
+      overflow to Inf or flush to +0 WITHOUT errno — faithful quirk);
+      <= 0 and x != 0 = underflow (+0, ERANGE, __ieee_status 0x808
+      save/restore mirrored); >= 255 = overflow (ERANGE, +-Inf by
+      __dcmpgt sign). Inf/NaN report exp 0, so they take the in-range
+      __d2f path (canonical qNaN, no errno).
+
+  - address: 0x08036e4c
+    ghidra: FUN_08036e4c
+    name: scanf_narrow_float
+    size: 32
+    sig: "void scanf_narrow_float(u32 *out_float, const u32 *in_double)"
+    module: fp/d2f_checked
+    status: ported
+    notes: >-
+      scanf %f float-store veneer: loads the double lo-word-first, calls
+      d2f_errno, stores the float word. Now the SCANF_FLOAT_NARROW
+      default in scanf/scanf_float_engine.rs (was a spin stub).
