@@ -110,9 +110,11 @@ pub struct RomKernelOps {
     /// heap_ctx+0xb5). Nonzero selects the shared static cell.
     pub heap_early_flag: unsafe extern "C" fn() -> u32,
     /// retailOS allocator: veneer 0x080769b8 -> 0x080eb67c (flag 0);
-    /// always called with size 4 here.
+    /// always called with size 4 here. Ported as `os_malloc`
+    /// (kernel/os_heap.rs).
     pub heap_alloc: unsafe extern "C" fn(size: usize) -> *mut u8,
-    /// retailOS free: veneer 0x080f151c -> 0x080e7970 (flag 0).
+    /// retailOS free: veneer 0x080f151c -> 0x080e7970 (flag 0). Ported as
+    /// `os_free` (kernel/os_heap.rs).
     pub heap_free: unsafe extern "C" fn(ptr: *mut u8),
     /// Current-task query: thunk @ 0x80565f0 (NULL when no task).
     pub current_task: unsafe extern "C" fn() -> *const u32,
