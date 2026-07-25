@@ -290,6 +290,15 @@ pub unsafe extern "C" fn __rt_raise(sig: i32, code: i32) -> i32 {
     os_terminate();
 }
 
+#[cfg(test)]
+extern crate std;
+
+/// Test-only lock serializing every host test that touches the shared
+/// signal-handler table / TTY capture buffer — used by this module's
+/// tests and by rt_div's division-by-zero tests.
+#[cfg(test)]
+pub(crate) static TEST_SIGNAL_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Test-only capture buffer for `debug_wrch` output.
 #[cfg(test)]
 const TEST_TTY_CAP: usize = 512;
@@ -307,12 +316,12 @@ mod tests {
     extern crate std;
     use super::*;
     use std::string::String;
-    use std::sync::Mutex;
     use std::vec::Vec;
 
     /// The handler table and TTY capture buffer are global state shared
-    /// by all tests; serialize every test through this lock.
-    static LOCK: Mutex<()> = Mutex::new(());
+    /// by all tests (including rt_div's); serialize through the shared
+    /// module-level lock.
+    use super::TEST_SIGNAL_LOCK as LOCK;
 
     fn reset_state() {
         unsafe {

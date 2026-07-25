@@ -220,9 +220,15 @@ functions:
   - address: 0x0803421c
     name: __rt_div0
     size: 12
+    sig: "i32 __rt_div0(void)"
     module: rt_div
-    status: identified
-    notes: mov r0,#2; mov r1,#2; b __rt_raise(0x080320a8).
+    status: ported
+    notes: >-
+      mov r0,#2; mov r1,#2; b __rt_raise(0x080320a8) — SIGFPE with the
+      Divide By Zero reason code, through the ported __rt_raise (raise.rs).
+      Entered via plain b from both divide cores, so a survived raise
+      returns __rt_raise's 0 straight to the divide's caller (modeled as
+      quotient/remainder 0 in the rt_div funnel).
 
   - address: 0x0802eefc
     ghidra: FUN_0802eefc
