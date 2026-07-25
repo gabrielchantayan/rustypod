@@ -1999,3 +1999,27 @@ functions:
     notes: push/pop call veneer around 0x0803571c (how __rt_heap_init
       reaches the arena extension). LLVM aliases the two symbols (ICF);
       match.py must be run against heap_grow_arena_wrapper.
+
+  - address: 0x0803170c
+    ghidra: FUN_0803170c
+    name: cxx_vec_delete
+    size: 16
+    sig: "void cxx_vec_delete(void *array, void (*dtor)(void *))"
+    module: heap/veneers
+    status: ported
+    notes: >-
+      ADS C++ delete[] for arrays with destructors (4 call sites:
+      0x08267070/0x082a7164/0x082a8bec/0x083b6c10). Cookie at array-8 =
+      {elem_size, count}; runs __cpp_finalise (ported, runtime/atexit)
+      last-element-first, then tag-3 operator delete on the cookie start.
+      The null-guard veneer 0x082ab254 is inlined in the port.
+
+  - address: 0x082ab254
+    name: cpp_finalise_null_guard
+    size: 12
+    status: identified
+    notes: >-
+      cmp r0,#0; ldmdbne r0,{r2,r3}; bne __cpp_finalise(0x080336d8);
+      mov pc,lr. Null-guarded cookie-loading veneer over __cpp_finalise;
+      behavior inlined in the cxx_vec_delete port (heap/veneers), no
+      separate port needed.
