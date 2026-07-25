@@ -25,6 +25,7 @@ fn panic(_info: &PanicInfo) -> ! {
     loop {}
 }
 
+pub mod drivers;
 pub mod fp;
 pub mod heap;
 pub mod kernel;
@@ -39,6 +40,7 @@ pub mod time;
 pub mod util;
 
 // Flat re-exports: existing `crate::<module>` paths keep working.
+pub use drivers::*;
 pub use fp::*;
 pub use heap::*;
 pub use kernel::*;
