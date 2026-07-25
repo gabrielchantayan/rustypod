@@ -220,9 +220,15 @@ functions:
   - address: 0x0803421c
     name: __rt_div0
     size: 12
+    sig: "i32 __rt_div0(void)"
     module: rt_div
-    status: identified
-    notes: mov r0,#2; mov r1,#2; b __rt_raise(0x080320a8).
+    status: ported
+    notes: >-
+      mov r0,#2; mov r1,#2; b __rt_raise(0x080320a8) — SIGFPE with the
+      Divide By Zero reason code, through the ported __rt_raise (raise.rs).
+      Entered via plain b from both divide cores, so a survived raise
+      returns __rt_raise's 0 straight to the divide's caller (modeled as
+      quotient/remainder 0 in the rt_div funnel).
 
   - address: 0x0802eefc
     ghidra: FUN_0802eefc
@@ -390,9 +396,14 @@ functions:
     ghidra: FUN_080332d0
     name: strtoll
     size: 248
+    sig: "i64 strtoll(const char *s, char **endptr, int base)"
     module: strtoull
-    status: identified
-    notes: Signed wrapper calling __strtoull; not yet ported.
+    status: ported
+    notes: >-
+      Whitespace/sign prologue over __strtoull (bl 0x08034e68), then clamps
+      the magnitude to i64::MAX/MIN; errno (ERANGE) skipped like the other
+      stdlib ports. Also reached by atol @ 0x0802fba0. An earlier duplicate
+      entry (module strtoll, self-contained core) was consolidated here.
 
   - address: 0x08031720
     ghidra: FUN_08031720
@@ -461,15 +472,6 @@ functions:
     notes: Median-of-three quicksort, explicit 32-entry partition stack,
       larger half pushed / smaller half looped. Previously misidentified
       as __strtoull.
-
-  - address: 0x080332d0
-    ghidra: FUN_080332d0
-    name: strtoll
-    size: 248
-    sig: "i64 strtoll(const char *s, char **endptr, int base)"
-    module: strtoll
-    status: ported
-    notes: Clamps i64::MAX/MIN; errno skipped.
 
   - address: 0x08031310
     ghidra: FUN_08031310

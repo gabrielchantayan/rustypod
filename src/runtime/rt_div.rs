@@ -25,16 +25,33 @@
 //! original for every input; only the instruction-level shape differs
 //! (exact match against ADS machine code was never achievable anyway).
 //!
-//! Division by zero: the original raises signal 2 via `__rt_raise`; the
-//! Rust port calls `div0_raise()`, a stub that spins forever (documented
-//! stand-in for the signal path until `__rt_raise` is ported). Callers
-//! must not divide by zero; on host this path is never exercised by tests.
+//! Division by zero: both cores funnel den==0 into `__rt_div0`, ported
+//! below on top of the ported `__rt_raise` (raise.rs). With the stock
+//! all-default handler table the raise never returns (default handler ->
+//! OS terminate); if a registered handler deals with the SIGFPE, the
+//! original returns to the divide's *caller* with r0 = 0 (`__rt_raise`'s
+//! result) and r1 clobbered by the raise machinery — modeled here as a
+//! 0 quotient and 0 remainder.
 
-/// Division-by-zero stub — the original `__rt_div0` @ 0x0803421c raises
-/// signal 2 via `__rt_raise`; here we simply spin, matching the
-/// non-returning nature of the original path.
-fn div0_raise() -> ! {
-    loop {}
+use crate::raise::{SIGFPE, __rt_raise};
+
+/// __rt_div0 — original @ 0x0803421c (12 bytes): `mov r0, #2;
+/// mov r1, #2; b __rt_raise` — raises SIGFPE (2) with the Divide By Zero
+/// reason code (2, the `0x8000_0002` mask group in the default handler)
+/// via `__rt_raise` @ 0x080320a8. The original is entered with a plain
+/// `b` from the divide cores, so when a registered handler survives the
+/// raise, `__rt_raise`'s return value (0) lands directly in the divide
+/// caller's r0; the tail call is mirrored here by returning it.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn __rt_div0() -> i32 {
+    __rt_raise(SIGFPE, 2)
+}
+
+/// den == 0 funnel shared by both cores: raise through `__rt_div0`. On
+/// the survived-raise path the divide returns 0 (see module header).
+fn div0_result() -> (u32, u32) {
+    unsafe { __rt_div0() };
+    (0, 0)
 }
 
 /// Restoring long division, one quotient bit per iteration, MSB first.
@@ -60,7 +77,8 @@ fn udiv_core(num: u32, den: u32) -> (u32, u32) {
 /// differ, negate remainder when `num` was negative.
 fn sdiv_core(num: i32, den: i32) -> (i32, i32) {
     if den == 0 {
-        div0_raise();
+        let (quot, rem) = div0_result();
+        return (quot as i32, rem as i32);
     }
     let (mut quot, mut rem) = udiv_core(num.unsigned_abs(), den.unsigned_abs());
     if (num < 0) != (den < 0) {
@@ -106,7 +124,7 @@ pub unsafe extern "C" fn __rt_udivmod(num: u32, den: u32, rem: *mut u32) -> u32 
 /// Unsigned entry with the div0 funnel of the original core.
 fn udiv_entry(num: u32, den: u32) -> (u32, u32) {
     if den == 0 {
-        div0_raise();
+        return div0_result();
     }
     udiv_core(num, den)
 }
@@ -265,6 +283,43 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    /// Division by zero funnels into `__rt_div0` -> `__rt_raise(2, 2)`.
+    /// With a handler registered for SIGFPE the raise is survived: the
+    /// handler observes (sig=2, code=2) and the divide returns quotient 0
+    /// (the original returns `__rt_raise`'s r0 = 0 to the divide's
+    /// caller). The unhandled path (default handler -> OS terminate) is
+    /// not host-testable — see raise.rs's test module. Serialized with
+    /// raise.rs's tests through the shared signal-table lock.
+    #[test]
+    fn div_by_zero_raises_sigfpe() {
+        use crate::raise::{signal, SIGFPE, TEST_SIGNAL_LOCK};
+
+        static mut FPE_CALLS: Vec<(i32, i32)> = Vec::new();
+        unsafe extern "C" fn fpe_recorder(sig: i32, code: i32) {
+            unsafe { (*core::ptr::addr_of_mut!(FPE_CALLS)).push((sig, code)) };
+        }
+
+        let _guard = TEST_SIGNAL_LOCK.lock().unwrap();
+        unsafe {
+            let previous = signal(SIGFPE, fpe_recorder as *const () as isize);
+            (*core::ptr::addr_of_mut!(FPE_CALLS)).clear();
+
+            assert_eq!(__rt_div0(), 0);
+            assert_eq!(__rt_sdiv(5, 0), 0);
+            assert_eq!(__rt_udiv(7, 0), 0);
+            let mut srem = 123i32;
+            assert_eq!(__rt_sdivmod(-9, 0, &mut srem), 0);
+            assert_eq!(srem, 0);
+            let mut urem = 123u32;
+            assert_eq!(__rt_udivmod(u32::MAX, 0, &mut urem), 0);
+            assert_eq!(urem, 0);
+
+            let calls = &*core::ptr::addr_of!(FPE_CALLS);
+            assert_eq!(calls.as_slice(), &[(SIGFPE, 2); 5]);
+            signal(SIGFPE, previous);
         }
     }
 
