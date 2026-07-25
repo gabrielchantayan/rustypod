@@ -13,11 +13,16 @@
 //! - `__rt_ctype_table_addr` — original: `FUN_0802eca0` @ 0x0802eca0
 //!   (16 bytes). Returns libspace+0x24, the address of the ctype-table
 //!   pointer slot (a `*mut u32`, not the table itself).
+//! - `__rt_fp_status_addr` — original: `FUN_08036d60` @ 0x08036d60
+//!   (16 bytes). Returns libspace+4, the soft-float status word.
 //!
 //! Libspace layout (word offsets known from osos callers):
 //! - +0x00 `errno` — read/written by __rt_errno_addr and callers.
+//! - +0x04 fp status word — address returned by __rt_fp_status_addr
+//!   (sole reader: the float exception path in the fplib region).
 //! - +0x08 heap descriptor — used by the malloc family.
-//! - +0x14/+0x1c alloc arena bounds — used by the allocator.
+//! - +0x14 alloc arena break / +0x1c stack-guard reserve — used by the
+//!   allocator and the arena extension (see malloc_rt.rs).
 //! - +0x24 ctype table pointer — filled in by setlocale @ 0x08030860
 //!   (stores block+1 so index -1/EOF lands on a guard byte; see ctype.rs).
 //!   Zero-initialized: null until the first setlocale call.
@@ -44,8 +49,9 @@
 pub struct Libspace {
     /// +0x00: errno value (`__rt_errno_addr` returns a pointer to this).
     pub errno: i32,
-    /// +0x04: reserved (layout not yet recovered).
-    reserved_04: u32,
+    /// +0x04: soft-float status word (`__rt_fp_status_addr` returns a
+    /// pointer to this).
+    pub fp_status: u32,
     /// +0x08: heap descriptor, used by the malloc family.
     pub heap_desc: u32,
     /// +0x0c..+0x14: reserved (layout not yet recovered).
@@ -80,7 +86,7 @@ const _: () = assert!(core::mem::size_of::<Libspace>() == 0x40);
 /// 0x08b31774, zeroed by startup; here a zero-initialized `static mut`.
 static mut LIBSPACE: Libspace = Libspace {
     errno: 0,
-    reserved_04: 0,
+    fp_status: 0,
     heap_desc: 0,
     reserved_0c: [0; 2],
     alloc_arena_lo: 0,
@@ -113,6 +119,17 @@ pub unsafe extern "C" fn __rt_libspace() -> *mut Libspace {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn __rt_errno_addr() -> *mut i32 {
     &mut (*__rt_libspace()).errno
+}
+
+/// __rt_fp_status_addr — original: `FUN_08036d60` @ 0x08036d60 (16 bytes).
+///
+/// `bl __rt_libspace; add r0, r0, #4` — the ADS soft-float status word
+/// lives at libspace+4. Sole caller in osos: the float exception path in
+/// the fplib region (@ 0x083ecb94, unported); the `__ieee_status` entry
+/// retailOS actually ships is a stub that never touches it (fp_scalb.rs).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn __rt_fp_status_addr() -> *mut u32 {
+    &mut (*__rt_libspace()).fp_status
 }
 
 /// errno get — original: `FUN_08032168` @ 0x08032168 (16 bytes).
@@ -155,6 +172,15 @@ mod tests {
             assert_eq!(errno_get(), -1);
             errno_set(0);
             assert_eq!(errno_get(), 0);
+        }
+    }
+
+    #[test]
+    fn fp_status_addr_is_libspace_plus_4() {
+        unsafe {
+            let slot = __rt_fp_status_addr();
+            assert_eq!(slot as usize - libspace() as usize, 4);
+            assert_eq!(*slot, 0, "fp status starts zeroed");
         }
     }
 

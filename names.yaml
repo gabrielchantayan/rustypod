@@ -2023,3 +2023,16 @@ functions:
       mov pc,lr. Null-guarded cookie-loading veneer over __cpp_finalise;
       behavior inlined in the cxx_vec_delete port (heap/veneers), no
       separate port needed.
+
+  - address: 0x08036d60
+    ghidra: FUN_08036d60
+    name: __rt_fp_status_addr
+    size: 16
+    sig: "u32 *__rt_fp_status_addr()"
+    module: runtime/errno
+    status: ported
+    notes: >-
+      bl __rt_libspace; add r0,#4. DISCOVERY: libspace+0x04 is the ADS
+      soft-float status word (Libspace.fp_status now named). Sole caller:
+      float exception path @ 0x083ecb94 in the fplib gap
+      0x083ecb3c-0x083ecba4 (unported).
