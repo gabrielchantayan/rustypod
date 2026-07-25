@@ -1541,7 +1541,11 @@ functions:
     size: 456
     module: heap/free_path
     status: ported
-    notes: Boundary-tag coalescing (footer copy at block_end-4), sorted insert.
+    notes: >-
+      Boundary-tag coalescing (footer copy at block_end-4), sorted insert.
+      Single insert helper for all three call sites (heap_add_region
+      0x0819cf68, alloc split path 0x0819ce28, heap_free 0x0819d4dc); all
+      heap dispatch-table defaults are now wired to the real ports.
 
   - address: 0x0819d4dc
     ghidra: FUN_0819d4dc
