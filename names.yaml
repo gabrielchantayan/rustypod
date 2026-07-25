@@ -1754,3 +1754,148 @@ functions:
   # wrappers: sem create 0x08056724, wait 0x08056510, signal 0x08056710,
   # mutex create 0x080744a4, lock 0x0807f5c4, unlock 0x0807f6a0,
   # kernel-running check 0x0809444c; IRQ dispatcher 0x080080ac.
+
+  # --- Batch 9: kernel-service layer (RTXC lives in mask ROM 0x22000000) ---
+  - address: 0x08056724
+    ghidra: FUN_08056724
+    name: sem_create
+    size: 52
+    module: kernel/sync_sem
+    status: ported
+    notes: ISR-context -> static slot, else heap slot; ROM create dispatch
+      via thunk 0x08037e70 -> ROM 0x22003d70 (opcode 1 = semaphore).
+      CORRECTION: only sem_delete uses the 0x08037e40/0x22003dc8 dispatcher.
+
+  - address: 0x0805646c
+    ghidra: FUN_0805646c
+    name: sem_delete
+    size: 68
+    module: kernel/sync_sem
+    status: ported
+    notes: ROM delete via 0x08037e40 -> 0x22003dc8, opcode 1; frees slot.
+
+  - address: 0x08056510
+    ghidra: FUN_08056510
+    name: sem_wait
+    size: 20
+    module: kernel/sync_sem
+    status: ported
+    notes: Guard then tail -> ROM 0x22003fd0. 14 call sites.
+
+  - address: 0x08056710
+    ghidra: FUN_08056710
+    name: sem_signal
+    size: 20
+    module: kernel/sync_sem
+    status: ported
+    notes: Guard then tail -> ROM 0x220042b4. 11 call sites.
+
+  - address: 0x080744a4
+    ghidra: FUN_080744a4
+    name: mutex_create
+    size: 28
+    module: kernel/sync_mutex
+    status: ported
+    notes: 87 call sites. Plain count-1 semaphore cell — NO recursive/owner
+      state (the +4 word is write-only padding).
+
+  - address: 0x0807f5c4
+    name: mutex_lock
+    size: 8
+    module: kernel/sync_mutex
+    status: ported
+
+  - address: 0x0807f6a0
+    name: mutex_unlock
+    size: 8
+    module: kernel/sync_mutex
+    status: ported
+
+  - address: 0x0807f650
+    name: mutex_delete
+    size: 32
+    module: kernel/sync_mutex
+    status: ported
+
+  - address: 0x0809444c
+    ghidra: FUN_0809444c
+    name: kernel_running
+    size: 72
+    module: kernel/sync_mutex
+    status: ported
+    notes: flag @ 0x089ca848; returns current-task-id, calling notify helper
+      0x08060f80 with callback @ 0x083e2e38 when id==0 but a task exists.
+
+  - address: 0x0807f5cc
+    name: condvar_layer
+    size: 372
+    module: kernel/condvar
+    status: ported
+    notes: Region 0x0807f5cc..0x0807f740: sleep queue over RTXC via intrusive
+      singly-linked list (head/tail anchor). condvar_broadcast (0x0807f5cc,
+      FIFO drain — NO single-shot signal), mqueue_receive (0x0807f5f4),
+      condvar_init/destroy/wait (0x0807f680/0x0807f650/0x0807f6ac, wait
+      returns 3 on timeout), task_yield (0x0807f670 -> ROM 0x22004260).
+      List ops: list_pop_front 0x080f10b8, list_push_back 0x080f1158,
+      list_remove 0x080f10ec.
+
+  - address: 0x08003080
+    name: irq_entry
+    size: 120
+    module: kernel/irq
+    status: ported
+    notes: Naked-asm RTXC frame (IRQ stack 0x08b32b58, nesting counter
+      0x22008a50). match.py 25/30 (rest = relocations/pool words).
+
+  - address: 0x080080ac
+    ghidra: FUN_080080ac
+    name: irq_dispatch
+    size: 32
+    module: kernel/irq
+    status: ported
+    notes: enter -> vic_dispatch -> exit. VIC blocks at 0x38e00000/0x38e01000
+      (PL192-style: STATUS+0, INTENABLE+0x10, INTENCLEAR+0x14, VECTADDR+0x100,
+      ADDRESS+0xf00), shared clear block 0x38e02008; ack = write 0x01010101.
+
+  - address: 0x08004d7c
+    name: rtxc_irq_enter
+    size: 72
+    module: kernel/irq
+    status: ported
+    notes: Lazy one-time init gated on ROM flag 0x22008c70 bit 0.
+
+  - address: 0x08004dfc
+    name: vic_dispatch
+    size: 100
+    module: kernel/irq
+    status: ported
+    notes: VIC0 priority over VIC1; vic_vector_init programs each slot with
+      its own irq number (VICADDRESS reads back as index).
+
+  - address: 0x08001d10
+    name: irq_exit
+    size: 100
+    module: kernel/irq
+    status: ported
+    notes: Nesting high-water, outermost -> frame->TCB, scheduler tail.
+
+  - address: 0x08037db0
+    name: rom_thunk_table
+    size: 1264
+    module: kernel/thunks
+    status: ported
+    notes: 158 entries (NOT ~124), all `ldr pc,[pc,#-4]` (0xe51ff004),
+      targets 0x22000020..0x2200881c; exactly two duplicated targets.
+      Registry in src/kernel/thunks.rs, machine-verified against the binary.
+
+  - address: 0x08037e00
+    name: rom_gateway_wrappers
+    size: 256
+    module: kernel/task_lock
+    status: ported
+    notes: 32 wrappers @ 0x08037e00-0x08037f00, all ported. Identified:
+      rom_memmove (e00), rom_sem_wait (e08), rom_sem_signal (e10),
+      kernel_ticks (e20, 47 callers), kernel_op_dispatch (e40),
+      task_lock/unlock (e48/e50), size_to_class (e60, UNVERIFIED),
+      kernel_create_dispatch (e70), tick_elapsed (eb8), irq_fiq_disable
+      (ed8), tick_delay (ef0, 23 callers).
