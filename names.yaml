@@ -432,21 +432,6 @@ functions:
       to the shared block body @ 0x08000188. Not in functions.csv.
 
   # --- Corrections / discoveries from batch 2 ---
-  - address: 0x08030998
-    ghidra: FUN_08030998
-    name: qsort_inner
-    size: 828
-    status: identified
-    notes: Insertion sort / median-of-three quicksort with explicit
-      recursion stack. Previously misidentified as __strtoull.
-
-  - address: 0x08030cd4
-    ghidra: FUN_08030cd4
-    name: qsort
-    size: 256
-    status: identified
-    notes: Public qsort; 7 callers. Previously misidentified as strtoull.
-
   - address: 0x08985f01
     name: ctype_table
     size: 256
@@ -463,16 +448,19 @@ functions:
     module: qsort
     status: ported
     notes: 7 callers. Always runs insertion-sort finish after qsort_inner
-      when count > 10 (repairs abandoned small partitions).
+      when count > 10 (repairs abandoned small partitions). Previously
+      misidentified as strtoull.
 
   - address: 0x08030998
     ghidra: FUN_08030998
     name: qsort_inner
     size: 828
+    sig: "void qsort_inner(void *base, size_t count, size_t size, cmp_fn)"
     module: qsort
     status: ported
     notes: Median-of-three quicksort, explicit 32-entry partition stack,
-      larger half pushed / smaller half looped.
+      larger half pushed / smaller half looped. Previously misidentified
+      as __strtoull.
 
   - address: 0x080332d0
     ghidra: FUN_080332d0

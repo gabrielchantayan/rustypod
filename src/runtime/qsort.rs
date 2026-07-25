@@ -218,11 +218,15 @@ pub unsafe extern "C" fn qsort(
         let elem = cur.add(size);
         // Insertion point: walk down while the predecessor is strictly
         // greater (equal elements keep their relative order here).
+        // `wrapping_*`: when the whole prefix is greater, scan steps one
+        // element below `base` before the loop exits — plain integer
+        // arithmetic in the original, so keep it out of Rust's in-bounds
+        // pointer rules.
         let mut scan = cur;
         while scan >= base && cmp(scan, elem) > 0 {
-            scan = scan.sub(size);
+            scan = scan.wrapping_sub(size);
         }
-        let target = scan.add(size);
+        let target = scan.wrapping_add(size);
         // Shift [target, elem) up by one element and drop the saved
         // element into target, word- or byte-wise as in swap_elements.
         if (size | elem as usize) & 3 == 0 {
