@@ -27,6 +27,7 @@ fn panic(_info: &PanicInfo) -> ! {
 
 pub mod fp;
 pub mod heap;
+pub mod kernel;
 pub mod libm;
 pub mod libc;
 pub mod printf;
@@ -40,6 +41,7 @@ pub mod util;
 // Flat re-exports: existing `crate::<module>` paths keep working.
 pub use fp::*;
 pub use heap::*;
+pub use kernel::*;
 pub use libm::*;
 pub use libc::*;
 pub use printf::*;
