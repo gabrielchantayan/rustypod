@@ -684,12 +684,18 @@ functions:
     notes: libspace+0x24 -> LC_CTYPE block (0x08985f01 for C locale).
 
   - address: 0x0803350c
-    name: __assert_fail
+    name: get_lc_ctype
     size: 52
+    sig: "const void *get_lc_ctype(void *unused, const char *name)"
     module: assert_rt
     status: ported
-    notes: Three identical copies (also 0x080355f8, 0x08036b80). Calls
-      retailOS assert printer @ 0x8391e38 (stubbed).
+    notes: >-
+      CORRECTION (was '__assert_fail'): ADS C-locale getter — returns the
+      compiled-in LC_CTYPE block (0x08985f00) for name NULL/""/"C", NULL
+      otherwise; 0x08391e38 is the ADS strcmp, not an assert printer.
+      Sibling copies 0x080355f8 (block 0x08986254) and 0x08036b80 (block
+      0x0898654c) ported alongside in assert_rt.rs. All three are called
+      by the dead __rt_lib_init @ 0x08035788 to seed libspace+0x24/28/2c.
 
   # --- Batch 4: printf converters, malloc veneers, scanf front-end ---
   - address: 0x0802f2e8
@@ -1965,3 +1971,418 @@ functions:
       0x080b4c4c (bl + tail b). Ghidra's FUN_080f151c C is misleading — it
       inlines the whole free_wrapper/heap_free chain. match.py 0/24 by
       design (LLVM inlines the ported free_wrapper body).
+
+  # --- Batch 10: ADS runtime region 0x08030000-0x08036fff gap sweep ---
+  - address: 0x08036e80
+    ghidra: FUN_08036e80
+    name: frexp
+    size: 144
+    sig: "f64 frexp(f64 x, i32 *exp)  // soft-float bits"
+    module: fp/d2f_checked
+    status: ported
+    notes: >-
+      Classic frexp (mantissa to [0.5,1), exponent field forced 0x3fe).
+      Zero/Inf/NaN return unchanged with *exp = 0. Subnormals pre-scale
+      via __dscalb(x, 54) with *exp biased -54 — retailOS __dscalb
+      flushes subnormals to +0, so subnormal input deterministically
+      yields (+0.5, -1076); ported bug-for-bug (path dead in practice).
+      Sole caller: 0x08036d7c.
+
+  - address: 0x08036d7c
+    ghidra: FUN_08036d7c
+    name: d2f_errno
+    size: 204
+    sig: "f32 d2f_errno(f64 x)  // soft-float bits"
+    module: fp/d2f_checked
+    status: ported
+    notes: >-
+      Checked double->float for scanf %f: frexp exponent + 126 selects
+      the path. 1..254 = plain __d2f (whose own rounding may still
+      overflow to Inf or flush to +0 WITHOUT errno — faithful quirk);
+      <= 0 and x != 0 = underflow (+0, ERANGE, __ieee_status 0x808
+      save/restore mirrored); >= 255 = overflow (ERANGE, +-Inf by
+      __dcmpgt sign). Inf/NaN report exp 0, so they take the in-range
+      __d2f path (canonical qNaN, no errno).
+
+  - address: 0x08036e4c
+    ghidra: FUN_08036e4c
+    name: scanf_narrow_float
+    size: 32
+    sig: "void scanf_narrow_float(u32 *out_float, const u32 *in_double)"
+    module: fp/d2f_checked
+    status: ported
+    notes: >-
+      scanf %f float-store veneer: loads the double lo-word-first, calls
+      d2f_errno, stores the float word. Now the SCANF_FLOAT_NARROW
+      default in scanf/scanf_float_engine.rs (was a spin stub).
+
+  - address: 0x0803571c
+    ghidra: FUN_0803571c
+    name: os_heap_grow_arena
+    size: 108
+    sig: "usize os_heap_grow_arena(usize min_size, usize *old_top_out)"
+    module: runtime/malloc_rt
+    status: ported
+    notes: >-
+      The sbrk-like ADS alloc-arena extension (HEAP_OPS.grow contract).
+      Grows the break at libspace+0x14 toward the live sp, bounded by
+      sp - reserve (reserve at libspace+0x1c); grant = min(required +
+      0x1007 & ~7, 33-bit-average(limit, required) & ~7). Writes the
+      pre-grow break to *old_top_out on BOTH paths; returns growth or 0.
+      DISCOVERY: libspace+0x1c is a stack-guard distance below sp, not
+      an absolute arena bound.
+
+  - address: 0x080336c0
+    name: heap_grow_arena_wrapper
+    size: 12
+    module: runtime/malloc_rt
+    status: ported
+    notes: push/pop call veneer around 0x0803571c (how __rt_heap_init
+      reaches the arena extension). LLVM aliases the two symbols (ICF);
+      match.py must be run against heap_grow_arena_wrapper.
+
+  - address: 0x0803170c
+    ghidra: FUN_0803170c
+    name: cxx_vec_delete
+    size: 16
+    sig: "void cxx_vec_delete(void *array, void (*dtor)(void *))"
+    module: heap/veneers
+    status: ported
+    notes: >-
+      ADS C++ delete[] for arrays with destructors (4 call sites:
+      0x08267070/0x082a7164/0x082a8bec/0x083b6c10). Cookie at array-8 =
+      {elem_size, count}; runs __cpp_finalise (ported, runtime/atexit)
+      last-element-first, then tag-3 operator delete on the cookie start.
+      The null-guard veneer 0x082ab254 is inlined in the port.
+
+  - address: 0x082ab254
+    name: cpp_finalise_null_guard
+    size: 12
+    status: identified
+    notes: >-
+      cmp r0,#0; ldmdbne r0,{r2,r3}; bne __cpp_finalise(0x080336d8);
+      mov pc,lr. Null-guarded cookie-loading veneer over __cpp_finalise;
+      behavior inlined in the cxx_vec_delete port (heap/veneers), no
+      separate port needed.
+
+  - address: 0x08036d60
+    ghidra: FUN_08036d60
+    name: __rt_fp_status_addr
+    size: 16
+    sig: "u32 *__rt_fp_status_addr()"
+    module: runtime/errno
+    status: ported
+    notes: >-
+      bl __rt_libspace; add r0,#4. DISCOVERY: libspace+0x04 is the ADS
+      soft-float status word (Libspace.fp_status now named). Sole caller:
+      float exception path @ 0x083ecb94 in the fplib gap
+      0x083ecb3c-0x083ecba4 (unported).
+
+  # --- Batch 10 scouting: recorded-but-previously-unlisted ports ---
+  - address: 0x08036f30
+    ghidra: FUN_08036f30
+    name: double_to_ext
+    size: 244
+    module: printf/printf_float_dtoa
+    status: ported
+    notes: Double -> 12-byte extended-fp unpack for dtoa; was ported in
+      printf_float_dtoa.rs but never listed here.
+
+  - address: 0x080327e8
+    ghidra: FUN_080327e8
+    name: format_exponent
+    size: 116
+    module: printf/printf_float
+    status: ported
+    notes: "%e/%g exponent-suffix emitter; ported in printf_float.rs but
+      never listed here. Sole caller: fp_format."
+
+  - address: 0x08035994
+    ghidra: FUN_08035994
+    name: classify_double
+    size: 64
+    module: printf/printf_float
+    status: ported
+    notes: Sign extraction + NaN(1)/Inf(2)/finite(0) classification for
+      fp_format, wrapping the _fpclassify primitive @ 0x08036d0c; folded
+      into printf_float.rs's classify_double.
+
+  - address: 0x08036d0c
+    ghidra: FUN_08036d0c
+    name: fpclassify_core
+    size: 56
+    module: printf/printf_float
+    status: ported
+    notes: ADS _fpclassify primitive (classes 3=NaN, 5=zero, 7=Inf,
+      4/6=finite); folded into classify_double in printf_float.rs.
+
+  - address: 0x080359d4
+    ghidra: FUN_080359d4
+    name: dtoa_split_double
+    size: 116
+    module: printf/printf_float_dtoa
+    status: ported
+    notes: Exponent-field extract + denormal renormalize (__dscalb by
+      2^64) shared by dtoa and scanf_float_convert; folded into the
+      printf_float_dtoa.rs engine.
+
+  - address: 0x08036d70
+    ghidra: FUN_08036d70
+    name: store_double
+    size: 12
+    module: scanf/scanf_float
+    status: ported
+    notes: str hi,[r0,#4]; str lo,[r0]; result-store helper folded into
+      scanf_float.rs.
+
+  # --- Batch 10 scouting: identified only (semihosting SWI family) ---
+  # ADS semihosting wrappers, all `swi 0x123456` with an operation code —
+  # dead on device (no debugger; retailOS never traps them usefully).
+  - address: 0x08031f84
+    name: _sys_open
+    size: 32
+    status: identified
+    notes: Semihost SYS_OPEN (op 1); filename cooked via 0x08392478 first.
+
+  - address: 0x08031fa4
+    name: _sys_close
+    size: 24
+    status: identified
+    notes: Semihost SYS_CLOSE (op 2).
+
+  - address: 0x08031fbc
+    name: _sys_write
+    size: 32
+    status: identified
+    notes: Semihost SYS_WRITE (op 5).
+
+  - address: 0x08031fdc
+    name: _sys_read
+    size: 32
+    status: identified
+    notes: Semihost SYS_READ (op 6).
+
+  - address: 0x08031ffc
+    name: _sys_istty
+    size: 24
+    status: identified
+    notes: Semihost SYS_ISTTY (op 9).
+
+  - address: 0x08032014
+    name: _sys_seek
+    size: 24
+    status: identified
+    notes: Semihost SYS_SEEK (op 0xa).
+
+  - address: 0x08032034
+    name: _sys_flen
+    size: 24
+    status: identified
+    notes: Semihost SYS_FLEN (op 0xc).
+
+  - address: 0x08036d48
+    name: _sys_writec
+    size: 24
+    status: identified
+    notes: Semihost SYS_WRITEC (op 3); callers in the debug-print helper
+      region 0x08036bb4-0x08036d08 (not in functions.csv).
+
+  - address: 0x0803202c
+    name: sys_stub_ret0
+    size: 8
+    status: identified
+    notes: mov r0,#0; ret. Weak semihost stub (tmpnam/ensure family).
+
+  - address: 0x080320a0
+    name: sys_stub_ret0_2
+    size: 8
+    status: identified
+    notes: mov r0,#0; ret. Second return-0 stub, several callers.
+
+  # --- Batch 10 scouting: identified only (ADS stdio / locale block) ---
+  # The region 0x08030004-0x0803097c is the ADS buffered-stdio + setlocale
+  # cluster (FILE struct: flags @ +0xc, buffer @ +0x10, size @ +0x1c,
+  # chain link @ +0x40; the paired `mov r0,r0` sequences are patched-out
+  # lock/unlock hooks around each op). Semihost-backed, dead on device.
+  - address: 0x08030004
+    name: stdio_stream_error_reset
+    size: 64
+    status: identified
+    notes: Clears/repairs FILE flags (+0xc bic 0x200000 orr 0x80) and,
+      unless bit 0x1000000, drops the buffer pointers.
+
+  - address: 0x08030044
+    name: stdio_writeback
+    size: 152
+    status: identified
+    notes: Buffered-write flush core; seeks via _sys_seek and writes via
+      _sys_write, updating position (+0x18) and error flags; on failure
+      calls stdio_stream_error_reset.
+
+  - address: 0x080300dc
+    name: stdio_foreach_close
+    size: 92
+    status: identified
+    notes: Walks the static stream table (globals in pool @ 0x8030688-90)
+      calling the close/flush core @ 0x0802fc00 per live stream.
+
+  - address: 0x08030624
+    name: stdio_flush_all
+    size: 96
+    status: identified
+    notes: Flushes stdin/stdout/stderr statics then walks the +0x40 chain
+      calling 0x080302d0 (per-stream flush) on each; reached from the
+      exit-path cleanup 0x08035878.
+
+  - address: 0x080307bc
+    name: setlocale_core
+    size: 448
+    status: identified
+    notes: setlocale machinery (errno.rs docs reference 0x08030860, which
+      is inside this function). Installs locale block pointers into
+      libspace (+0x24 ctype, biased +1).
+
+  - address: 0x080333c8
+    name: stream_clear_error
+    size: 48
+    status: identified
+    notes: clearerr core (bic +0xc flags of 0x4000 and 0xc0) with nop'd
+      lock hooks.
+
+  - address: 0x080333f8
+    name: stream_test_eof_flag
+    size: 44
+    status: identified
+    notes: Returns FILE flags & 0x80 (the bit stdio_stream_error_reset
+      sets); feof/ferror-family accessor.
+
+  - address: 0x08033424
+    name: setvbuf_core
+    size: 164
+    status: identified
+    notes: >-
+      Validates mode in {0x100 full, 0x200 line, 0x400 none} and size-1 <
+      0x1000000; _IONBF uses the internal 1-byte buffer at FILE+0x24;
+      stores buf/+0x10, size/+0x1c, cursor/+0x4; returns 0 ok / 1 fail.
+
+  - address: 0x080334dc
+    name: localeconv
+    size: 20
+    status: identified
+    notes: Returns the static lconv @ [0x080334f0] after refilling it via
+      localeconv_fill @ 0x080354b8.
+
+  - address: 0x080354b8
+    name: localeconv_fill
+    size: 208
+    status: identified
+    notes: Fills an lconv from the LC_NUMERIC/LC_MONETARY blocks at
+      libspace+0x28/+0x2c, resolving block-relative string offsets to
+      pointers.
+
+  - address: 0x080334f4
+    name: ptr_or_deref_is_null
+    size: 24
+    status: identified
+    notes: Returns 1 if p == NULL or *p == NULL else 0; locale-block
+      presence check.
+
+  - address: 0x08035924
+    name: stdio_stream_alloc
+    size: 32
+    status: identified
+    notes: malloc(0x88) + clear first byte; fresh FILE object (0x88 = the
+      48-byte stream struct fread uses plus buffer slack). No callers
+      found in the (incomplete) osos.asm.
+
+  - address: 0x08034f88
+    name: stdio_helper_08034f88
+    size: 100
+    status: identified
+    notes: stdio internal shared by 0x080353c8 (inside 0x08034fec) and
+      fread @ 0x08036874; not yet characterized.
+
+  - address: 0x08034fec
+    name: stdio_fill_or_flush_core
+    size: 1156
+    status: identified
+    notes: Large buffered-stream core called from the fread/stream-read
+      cluster (0x08036910/0x08036aa8); __flsbuf/__filbuf-scale; not yet
+      characterized in detail.
+
+  # --- Batch 10 scouting: identified only (runtime / libm misc) ---
+  - address: 0x08035788
+    ghidra: FUN_08035788
+    name: rt_lib_init_for_abort
+    size: 240
+    status: identified
+    notes: >-
+      CORRECTION (earlier notes said "message printer"): this is the ADS
+      library (re)initialization — fp init via 0x083ecb90, stack bound
+      fetch via 0x0800af04, __rt_heap_init, 0x0802ecc4, srandom(1), seeds
+      libspace+0x20..+0x30 (ctype block+1 at +0x24 from get_lc_ctype;
+      +0x28/+0x2c from the other two locale getters), stdio init via
+      0x080304a0. Sole caller (binary-verified bl scan): abort @
+      0x0803206c, so the termination report runs on a sane runtime.
+
+  - address: 0x08035878
+    ghidra: FUN_08035878
+    name: exit_stdio_cleanup
+    size: 24
+    status: identified
+    notes: Calls 0x082ab2b0, stdio_flush_all @ 0x08030624, 0x0802ecc0.
+      Reached from __rt_sys_exit and heap_panic; stubbed no-op in the
+      exit.rs / heap veneers ports (semihost-dead).
+
+  - address: 0x08035b3c
+    ghidra: FUN_08035b3c
+    name: log_atanh_kernel
+    size: 524
+    status: identified
+    notes: >-
+      Fixed-point atanh/ln kernel (tables @ 0x08986264/0x0898630c); sole
+      caller log_decompose @ 0x080340fc. The LOG_ATANH_KERNEL hook in
+      libm/misc.rs awaits this port.
+
+  - address: 0x08035d50
+    ghidra: FUN_08035d50
+    name: exp_frac_kernel
+    size: 696
+    status: identified
+    notes: >-
+      CORDIC-style digit-recurrence e^frac kernel; sole caller
+      _fsqrt_core @ 0x08033fdc. The hook in libm/sqrt.rs awaits this
+      port.
+
+  - address: 0x0803357c
+    name: rom_memcpy_keep_dst
+    size: 12
+    status: identified
+    notes: push {r0,lr}; bl thunk 0x08037dd0 (ROM __rt_memcpy @
+      0x22000020); pop {r0,pc} — memcpy veneer that returns the original
+      dst (the ROM routine advances r0).
+
+  - address: 0x08033588
+    name: memmove_u16
+    size: 8
+    status: identified
+    notes: >-
+      mov r2,r2,lsl#1 (element count -> bytes) then b 0x08035680, the
+      dst-preserving ROM-memmove veneer (push {r0,lr}; bl thunk
+      0x08037dd8 = ROM memmove @ 0x220000d4; pop {r0,pc}) — i.e. a
+      wide-char (u16 element) memmove. 0x08035680 is an unlisted 12-byte
+      function that functions.csv folds into the preceding raise range.
+
+  - address: 0x08035680
+    name: rom_memmove_keep_dst
+    size: 12
+    status: identified
+    notes: push {r0,lr}; bl thunk 0x08037dd8 (ROM memmove); pop {r0,pc}
+      — returns the original dst. Not listed in functions.csv.
+
+  - address: 0x08036d08
+    name: nop_stub
+    size: 4
+    status: identified
+    notes: mov pc,lr. Weak hook target (reached via 0x080358a0 from the
+      abort report path).

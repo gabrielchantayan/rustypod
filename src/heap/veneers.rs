@@ -30,6 +30,9 @@
 //!   (`cmp r0, #0; movne r1, #2; bne 0x080e7970; bx lr`).
 //! - `operator_new_tag3` / `operator_delete_tag3` — originals @ 0x082aad74
 //!   and 0x082aad14. Identical pair with tag 3.
+//! - `cxx_vec_delete` — original: `FUN_0803170c` @ 0x0803170c (16 bytes).
+//!   C++ `delete[]` with destructors: cookie-driven `__cpp_finalise` walk
+//!   (null-guard veneer 0x082ab254 inlined), then the tag-3 delete.
 //! - `operator_new_checked` — original: `FUN_08266c70` @ 0x08266c70
 //!   (48 bytes, 223 call sites). `p = operator_new(size)`; on NULL it
 //!   invokes the C++ new-handler dispatch @ 0x08266abc with code 3, then
@@ -321,6 +324,37 @@ pub unsafe extern "C" fn operator_delete_tag3(ptr: *mut u8) {
     if !ptr.is_null() {
         free_wrapper(ptr, TAG_OPERATOR_NEW_TAG3);
     }
+}
+
+/// cxx_vec_delete — original: `FUN_0803170c` @ 0x0803170c (16 bytes;
+/// 4 call sites: 0x08267070, 0x082a7164, 0x082a8bec, 0x083b6c10).
+///
+/// The ADS C++ `delete[]` helper for arrays of objects with destructors:
+/// runs `dtor` over every element (via `__cpp_finalise`, LAST element
+/// first), then releases the allocation with the tag-3 `operator delete`.
+/// The array cookie at `ptr - 8` (two 32-bit words: element size @ -8,
+/// element count @ -4 — the original's single `ldmdb r0, {r2, r3}`) both
+/// parameterizes the destructor walk and marks the true block start,
+/// which `__cpp_finalise` returns (`base - 8`) for the delete.
+///
+/// The 12-byte null-guard veneer @ 0x082ab254 (`cmp r0, #0;
+/// ldmdbne r0, {r2, r3}; bne __cpp_finalise; mov pc, lr`) is inlined
+/// here: a NULL array pointer skips the walk and flows NULL into the
+/// null-guarded `operator_delete_tag3`, making the whole call a no-op.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn cxx_vec_delete(ptr: *mut u8, dtor: extern "C" fn(*mut u8)) {
+    let block = if ptr.is_null() {
+        ptr
+    } else {
+        // Cookie words are 32-bit on device; kept u32 so the -8/-4
+        // offsets stay byte-faithful on 64-bit test hosts too. Aligned
+        // loads, like the original's `ldmdb` (allocations are always
+        // word-aligned).
+        let elem_size = *(ptr.sub(8) as *const u32) as usize;
+        let count = *(ptr.sub(4) as *const u32) as usize;
+        crate::runtime::atexit::__cpp_finalise(ptr, dtor, elem_size, count)
+    };
+    operator_delete_tag3(block);
 }
 
 /// operator_new_checked — original: `FUN_08266c70` @ 0x08266c70
@@ -646,6 +680,71 @@ mod tests {
             assert!(p.is_null(), "no retry at this level: NULL propagates");
             assert_eq!(NEW_HANDLER_CALLS, 1);
             assert_eq!(LAST_NEW_HANDLER_CODE, 3);
+        }
+    }
+
+    // --- cxx_vec_delete ---
+
+    /// Destructor call log for the vec-delete tests.
+    static mut DTOR_CALLS: usize = 0;
+    static mut DTOR_SEEN: [usize; 8] = [0; 8];
+
+    extern "C" fn logging_dtor(elem: *mut u8) {
+        unsafe {
+            DTOR_SEEN[DTOR_CALLS] = elem as usize;
+            DTOR_CALLS += 1;
+        }
+    }
+
+    #[test]
+    fn vec_delete_runs_dtors_in_reverse_then_frees_the_cookie_block() {
+        let _lock = mock_heap();
+        unsafe {
+            DTOR_CALLS = 0;
+            // Block layout: 8-byte cookie (elem_size, count) + 3 elements
+            // of 4 bytes. Word storage keeps the cookie reads aligned.
+            let mut block = [0u32; 2 + 3];
+            block[0] = 4; // elem_size @ -8
+            block[1] = 3; // count @ -4
+            let base = block.as_mut_ptr() as *mut u8;
+            let array = base.add(8);
+            cxx_vec_delete(array, logging_dtor);
+            assert_eq!(DTOR_CALLS, 3);
+            // Last element first, exactly like __cpp_finalise.
+            assert_eq!(DTOR_SEEN[0], array as usize + 8);
+            assert_eq!(DTOR_SEEN[1], array as usize + 4);
+            assert_eq!(DTOR_SEEN[2], array as usize);
+            // The freed pointer is the cookie start (base - 8), tag 3.
+            assert_eq!(FREE_CALLS, 1);
+            assert_eq!(LAST_FREE_PTR, base);
+            assert_eq!(LAST_FREE_TAG, 3);
+        }
+    }
+
+    #[test]
+    fn vec_delete_zero_count_frees_without_dtor_calls() {
+        let _lock = mock_heap();
+        unsafe {
+            DTOR_CALLS = 0;
+            let mut block = [0u32; 2];
+            block[0] = 4;
+            block[1] = 0; // empty array
+            let base = block.as_mut_ptr() as *mut u8;
+            cxx_vec_delete(base.add(8), logging_dtor);
+            assert_eq!(DTOR_CALLS, 0, "no elements, no destructor calls");
+            assert_eq!(FREE_CALLS, 1, "the cookie block is still freed");
+            assert_eq!(LAST_FREE_PTR, base);
+        }
+    }
+
+    #[test]
+    fn vec_delete_null_is_a_complete_no_op() {
+        let _lock = mock_heap();
+        unsafe {
+            DTOR_CALLS = 0;
+            cxx_vec_delete(core::ptr::null_mut(), logging_dtor);
+            assert_eq!(DTOR_CALLS, 0);
+            assert_eq!(FREE_CALLS, 0, "NULL flows into the guarded delete");
         }
     }
 }

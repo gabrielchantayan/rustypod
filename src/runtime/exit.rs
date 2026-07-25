@@ -12,9 +12,10 @@
 //!   alternate `code = -1` entry into terminate, skipped by the main path.)
 //! - `abort` — original: `FUN_08032058` @ 0x08032058 (44 bytes). Runs a
 //!   report sequence (context snapshot @ 0x0803568c, arg load @ 0x08035894,
-//!   message print wrapper `FUN_08035788` @ 0x08035788, no-op @ 0x080358a0,
-//!   retailOS log call @ 0x082d8fe8) and tail-branches into `exit` with the
-//!   log call's return value as the exit code.
+//!   the ADS library (re)init `FUN_08035788` @ 0x08035788 — fp/heap/locale/
+//!   stdio setup so the termination report can run; NOT a message printer —
+//!   no-op @ 0x080358a0, retailOS log call @ 0x082d8fe8) and tail-branches
+//!   into `exit` with the log call's return value as the exit code.
 //! - `__rt_exit` — original: `FUN_08033720` @ 0x08033720 (56 bytes). Fetches
 //!   the shutdown block via `FUN_080358b4` @ 0x080358b4 (32-byte block at
 //!   libspace+0x3c: +0x08 finalizer thunk, +0x10 atexit chain-head thunk).
@@ -136,8 +137,10 @@ fn default_signal_check() {}
 
 /// abort report sequence — original calls, in order: 0x08035890 (no-op),
 /// `FUN_0803568c` @ 0x0803568c (current-context snapshot), 0x08035894
-/// (loads r0=-1, r1=-3), the message print wrapper `FUN_08035788` @
-/// 0x08035788, 0x080358a0 -> 0x08036d08 (no-op), and the retailOS log call
+/// (loads r0=-1, r1=-3), the ADS library (re)init `FUN_08035788` @
+/// 0x08035788 (fp/heap/locale/stdio setup for the termination report —
+/// abort is its only caller in the image; NOT a message printer),
+/// 0x080358a0 -> 0x08036d08 (no-op), and the retailOS log call
 /// @ 0x082d8fe8. Console/semihost-backed; stubbed as a no-op returning the
 /// stubbed log result used as abort's exit code.
 #[inline]

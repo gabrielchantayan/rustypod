@@ -93,13 +93,12 @@
 //!
 //! Simplifications / deviations vs. the original:
 //! - The double -> float narrowing veneer `FUN_08036e4c` @ 0x08036e4c
-//!   (itself a wrapper around the ADS `_d2f` with errno handling @
-//!   0x08036d7c / `__d2f` @ 0x083eae74) is not importable from this
-//!   batch, so it routes through the [`SCANF_FLOAT_NARROW`] function
-//!   pointer, mirroring the `SOFTFLOAT_OPS` pattern in scanf_float.rs.
-//!   The default stub spins; on real hardware the real veneer must be
-//!   installed before a `%f` (float, flags & 0x24 == 0) conversion
-//!   stores. The double path (vsscanf/strtod) never touches it. Like
+//!   (itself a wrapper around the ADS checked narrower @ 0x08036d7c /
+//!   `__d2f` @ 0x083eae74) routes through the [`SCANF_FLOAT_NARROW`]
+//!   function pointer, mirroring the `SOFTFLOAT_OPS` pattern in
+//!   scanf_float.rs. The default is the ported veneer
+//!   (`scanf_narrow_float` in fp/d2f_checked.rs); host tests may swap in
+//!   mocks. The double path (vsscanf/strtod) never touches it. Like
 //!   the original, the narrow runs even when assignment is suppressed.
 //! - The original keeps flags in r4 for the whole function (`bic r4, r4,
 //!   #0x680` on entry clears NEGATIVE/DIGITS_SEEN/PAST_DOT) and never
@@ -158,23 +157,17 @@ const EXP_OVERFLOW_POS: i32 = 9999;
 const EXP_OVERFLOW_NEG: i32 = -9999;
 
 /// Indirect dispatch for the double -> float narrowing veneer
-/// `FUN_08036e4c` @ 0x08036e4c (not yet ported; see the module docs for
-/// the design and the default-stub behavior). Signature mirrors the
-/// original: r0 = out float word, r1 = in double (lo word first).
+/// `FUN_08036e4c` @ 0x08036e4c (ported as `scanf_narrow_float` in
+/// fp/d2f_checked.rs, now the default). Signature mirrors the original:
+/// r0 = out float word, r1 = in double (lo word first).
 pub type ScanfFloatNarrowFn = unsafe extern "C" fn(out_float: *mut u32, in_double: *const u32);
 
-/// Default stub: narrowing needs the unported `_d2f` wrapper — spin. On
-/// real hardware [`SCANF_FLOAT_NARROW`] must be installed before a
-/// float-size conversion first stores.
-unsafe extern "C" fn missing_narrow(_out_float: *mut u32, _in_double: *const u32) {
-    loop {}
-}
-
 /// The active double -> float narrowing implementation. Defaults to the
-/// documented spin stub; replaced by host tests and eventually by the
-/// ported `FUN_08036e4c` veneer. Written once at init on target; tests
-/// serialize access.
-pub static mut SCANF_FLOAT_NARROW: ScanfFloatNarrowFn = missing_narrow;
+/// ported `FUN_08036e4c` veneer (`scanf_narrow_float`, which chains the
+/// checked `d2f_errno` narrower); host tests may temporarily swap in
+/// mocks. Written once (if at all) at init on target; tests serialize
+/// access.
+pub static mut SCANF_FLOAT_NARROW: ScanfFloatNarrowFn = crate::d2f_checked::scanf_narrow_float;
 
 /// Reads the narrow op. Volatile for the same reason as scanf_float.rs's
 /// `softfloat_ops()`: the pointer is meant to be swapped at runtime, and
