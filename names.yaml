@@ -1974,3 +1974,28 @@ functions:
       scanf %f float-store veneer: loads the double lo-word-first, calls
       d2f_errno, stores the float word. Now the SCANF_FLOAT_NARROW
       default in scanf/scanf_float_engine.rs (was a spin stub).
+
+  - address: 0x0803571c
+    ghidra: FUN_0803571c
+    name: os_heap_grow_arena
+    size: 108
+    sig: "usize os_heap_grow_arena(usize min_size, usize *old_top_out)"
+    module: runtime/malloc_rt
+    status: ported
+    notes: >-
+      The sbrk-like ADS alloc-arena extension (HEAP_OPS.grow contract).
+      Grows the break at libspace+0x14 toward the live sp, bounded by
+      sp - reserve (reserve at libspace+0x1c); grant = min(required +
+      0x1007 & ~7, 33-bit-average(limit, required) & ~7). Writes the
+      pre-grow break to *old_top_out on BOTH paths; returns growth or 0.
+      DISCOVERY: libspace+0x1c is a stack-guard distance below sp, not
+      an absolute arena bound.
+
+  - address: 0x080336c0
+    name: heap_grow_arena_wrapper
+    size: 12
+    module: runtime/malloc_rt
+    status: ported
+    notes: push/pop call veneer around 0x0803571c (how __rt_heap_init
+      reaches the arena extension). LLVM aliases the two symbols (ICF);
+      match.py must be run against heap_grow_arena_wrapper.

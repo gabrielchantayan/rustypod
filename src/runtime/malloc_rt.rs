@@ -28,9 +28,18 @@
 //!   region [base + align8(guard), limit) to the heap-extend hook veneer
 //!   0x082ab1b0 (also a `bx lr` stub in osos). Returns the descriptor.
 //!
-//! Heap-dispatch design (deviation, by necessity): the retailOS heap itself
-//! (0x080eb67c / 0x080e7970 / 0x080edbf0, the arena extension 0x0803571c
-//! and `__rt_raise` 0x080320a8) is not yet ported, so these veneers cannot
+//! Also ported here (batch 10):
+//! - `os_heap_grow_arena` — original: `FUN_0803571c` @ 0x0803571c
+//!   (108 bytes): the sbrk-like arena extension itself (see its doc
+//!   comment for the growth policy), plus its 12-byte call veneer
+//!   `heap_grow_arena_wrapper` @ 0x080336c0. `HEAP_OPS.grow` still
+//!   defaults to the fail stub — the real extension derives its limit
+//!   from the LIVE stack pointer and the libspace arena fields, which
+//!   are meaningless until startup seeds them; install it explicitly.
+//!
+//! Heap-dispatch design (deviation, by necessity): the retailOS heap
+//! (0x080eb67c / 0x080e7970 / 0x080edbf0) and `__rt_raise` @ 0x080320a8
+//! live in other modules or are not yet ported, so these veneers cannot
 //! tail-branch to real code. Instead of undefined `extern "C"` symbols —
 //! which would break the freestanding ARM link — the three heap ops plus
 //! the arena-grow and raise entry points dispatch indirectly through the
@@ -51,7 +60,7 @@
 //!     fn os_heap_free(ptr: *mut u8, flag: usize);              // 0x080e7970, flag always 1
 //!     fn os_heap_realloc(ptr: *mut u8, size: usize,            // 0x080edbf0, a3/a4 always 1
 //!                        a3: usize, a4: usize) -> *mut u8;
-//!     fn os_heap_grow_arena(min: usize, old_base: *mut usize) -> usize; // 0x0803571c
+//!     fn os_heap_grow_arena(min: usize, old_base: *mut usize) -> usize; // 0x0803571c (below!)
 //!     fn __rt_raise(sig: i32, code: i32) -> i32;               // 0x080320a8 (raise.rs)
 //! }
 //! ```
@@ -235,6 +244,86 @@ pub unsafe extern "C" fn __rt_heap_init(
     // Neither has observable behavior in osos, so nothing to do here.
     let _ = limit;
     base
+}
+
+/// Reads the live stack pointer. The original arena extension compares the
+/// prospective arena top against `sp` directly (the ADS one-region memory
+/// model: heap grows up toward the stack).
+#[inline(always)]
+fn current_sp() -> usize {
+    let sp: usize;
+    unsafe {
+        #[cfg(target_arch = "arm")]
+        core::arch::asm!("mov {}, sp", out(reg) sp, options(nomem, nostack, preserves_flags));
+        #[cfg(target_arch = "aarch64")]
+        core::arch::asm!("mov {}, sp", out(reg) sp, options(nomem, nostack, preserves_flags));
+        #[cfg(target_arch = "x86_64")]
+        core::arch::asm!("mov {}, rsp", out(reg) sp, options(nomem, nostack, preserves_flags));
+    }
+    sp
+}
+
+/// os_heap_grow_arena — original: `FUN_0803571c` @ 0x0803571c (108 bytes);
+/// the sbrk-like ADS alloc-arena extension (the `HEAP_OPS.grow` contract).
+///
+/// Grows the arena break at libspace+0x14 toward the live stack pointer,
+/// bounded by `sp - reserve` where `reserve` is the stack-guard distance at
+/// libspace+0x1c. Writes the pre-grow break (= the new region's low bound)
+/// to `*old_top_out` in BOTH exit paths, exactly like the original's
+/// unconditional `str`. On success the new break is
+/// `min((required + 0x1007) & !7, midpoint(limit, required) & !7)` — i.e.
+/// roughly 4 KiB beyond the request, but never past halfway to the stack —
+/// and the byte growth is returned. Returns 0 when even `required =
+/// break + min_size` would cross the limit (the caller then raises
+/// SIGRTMEM).
+///
+/// Deviations: the original computes the midpoint with a 33-bit
+/// `adds`+`rrx` average; here it is the overflow-free equivalent
+/// `limit/2 + required/2 + (limit & required & 1)`. Arena fields live in
+/// the u32 libspace slots (see errno.rs); host tests use small values so
+/// the u32 truncation there is invisible.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn os_heap_grow_arena(min_size: usize, old_top_out: *mut usize) -> usize {
+    let ls = libspace();
+    let top = (*ls).alloc_arena_lo as usize;
+    let reserve = (*ls).alloc_arena_hi as usize;
+    let required = top.wrapping_add(min_size);
+    let limit = current_sp().wrapping_sub(reserve);
+    *old_top_out = top;
+    match grow_policy(required, limit) {
+        None => 0,
+        Some(new_top) => {
+            (*ls).alloc_arena_lo = new_top as u32;
+            new_top.wrapping_sub(top)
+        }
+    }
+}
+
+/// The growth policy of `os_heap_grow_arena`, extracted pure so the
+/// stack-limit clamp is host-testable (on a 64-bit host the u32 libspace
+/// reserve field cannot place `limit` near a real 64-bit sp). Returns the
+/// new arena break, or None when even `required` crosses `limit`.
+fn grow_policy(required: usize, limit: usize) -> Option<usize> {
+    if required > limit {
+        return None;
+    }
+    let midpoint = (limit / 2)
+        .wrapping_add(required / 2)
+        .wrapping_add(limit & required & 1)
+        & !7;
+    let generous = required.wrapping_add(0x1007) & !7;
+    Some(if generous > midpoint { midpoint } else { generous })
+}
+
+/// heap_grow_arena_wrapper — original: `FUN_080336c0` @ 0x080336c0
+/// (12 bytes): a plain `push {r4, lr}; bl 0x0803571c; pop {r4, pc}` call
+/// veneer (how `__rt_heap_init` reaches the arena extension in osos).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn heap_grow_arena_wrapper(
+    min_size: usize,
+    old_top_out: *mut usize,
+) -> usize {
+    os_heap_grow_arena(min_size, old_top_out)
 }
 
 #[cfg(test)]
@@ -450,6 +539,89 @@ mod tests {
             assert_eq!(GROW_CALLS, 1);
             assert_eq!(desc, 0x2000);
             assert_eq!((*libspace()).heap_desc, 0x2000);
+        }
+    }
+
+    /// Seeds the libspace arena fields, runs the grow, restores them.
+    /// Returns (grow return, out-param value, post-grow arena break).
+    unsafe fn grow_with_arena(top: u32, reserve: u32, min_size: usize) -> (usize, usize, u32) {
+        let ls = libspace();
+        let (saved_top, saved_reserve) = ((*ls).alloc_arena_lo, (*ls).alloc_arena_hi);
+        (*ls).alloc_arena_lo = top;
+        (*ls).alloc_arena_hi = reserve;
+        let mut old_top = 0xdeadusize;
+        let grown = os_heap_grow_arena(min_size, &mut old_top);
+        let new_top = (*ls).alloc_arena_lo;
+        (*ls).alloc_arena_lo = saved_top;
+        (*ls).alloc_arena_hi = saved_reserve;
+        (grown, old_top, new_top)
+    }
+
+    #[test]
+    fn grow_grants_about_4k_beyond_the_request() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        unsafe {
+            // Host sp is astronomically above the tiny arena values, so
+            // the midpoint clamp never binds: exact arithmetic holds.
+            let (grown, old_top, new_top) = grow_with_arena(0x1000, 0, 0x100);
+            // new break = (0x1000 + 0x100 + 0x1007) & !7 = 0x2100.
+            assert_eq!(new_top, 0x2100);
+            assert_eq!(grown, 0x1100);
+            assert_eq!(old_top, 0x1000, "out-param gets the pre-grow break");
+        }
+    }
+
+    #[test]
+    fn grow_rounds_the_new_break_down_to_8() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        unsafe {
+            let (grown, old_top, new_top) = grow_with_arena(0x1001, 0, 1);
+            // required = 0x1002; break = (0x1002 + 0x1007) & !7 = 0x2008.
+            assert_eq!(new_top, 0x2008);
+            assert_eq!(grown, 0x1007);
+            assert_eq!(old_top, 0x1001);
+        }
+    }
+
+    #[test]
+    fn grow_fails_when_the_request_crosses_the_stack_limit() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        unsafe {
+            // required = top + huge overshoots any host sp.
+            let (grown, old_top, new_top) = grow_with_arena(0x1000, 0, usize::MAX / 2);
+            assert_eq!(grown, 0, "failure returns 0");
+            assert_eq!(old_top, 0x1000, "out-param written on failure too");
+            assert_eq!(new_top, 0x1000, "break unchanged on failure");
+        }
+    }
+
+    #[test]
+    fn grow_policy_clamps_to_the_midpoint_when_the_limit_is_near() {
+        // limit only 0x800 above the request: the generous 4 KiB grant
+        // would overshoot, so the midpoint (aligned down to 8) wins.
+        assert_eq!(grow_policy(0x1100, 0x1900), Some(0x1500));
+        // Odd sum exercises the 33-bit rrx-average carry handling.
+        assert_eq!(grow_policy(0x1101, 0x1902), Some((0x1101 + 0x400) & !7));
+        // Right at the limit: grant shrinks to the (aligned) request.
+        assert_eq!(grow_policy(0x1100, 0x1100), Some(0x1100));
+        // One byte short: refuse.
+        assert_eq!(grow_policy(0x1101, 0x1100), None);
+    }
+
+    #[test]
+    fn grow_wrapper_is_a_passthrough() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        unsafe {
+            let ls = libspace();
+            let (saved_top, saved_reserve) = ((*ls).alloc_arena_lo, (*ls).alloc_arena_hi);
+            (*ls).alloc_arena_lo = 0x1000;
+            (*ls).alloc_arena_hi = 0;
+            let mut old_top = 0usize;
+            let grown = heap_grow_arena_wrapper(0x100, &mut old_top);
+            (*ls).alloc_arena_lo = saved_top;
+            (*ls).alloc_arena_hi = saved_reserve;
+            assert_eq!(grown, 0x1100);
+            assert_eq!(old_top, 0x1000);
         }
     }
 }
