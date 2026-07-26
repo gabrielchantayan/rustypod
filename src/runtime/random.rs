@@ -87,13 +87,21 @@ pub unsafe extern "C" fn srand(seed: u32) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
     use super::*;
     use std::sync::Mutex;
 
     /// All tests share the one global generator state — serialize them.
+    /// Shared with runtime/lib_init.rs, whose init walk seeds the state.
     static LOCK: Mutex<()> = Mutex::new(());
+
+    /// Locks the generator state for a test outside this module
+    /// (lib_init.rs's full-init test; raise.rs's `TEST_SIGNAL_LOCK`
+    /// precedent).
+    pub(crate) fn lock_state() -> std::sync::MutexGuard<'static, ()> {
+        LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
 
     /// Reference implementation, re-derived independently from the ARM
     /// disassembly (not copied from the port above).

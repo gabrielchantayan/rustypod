@@ -2517,27 +2517,33 @@ functions:
     ghidra: FUN_08035788
     name: rt_lib_init_for_abort
     size: 240
-    status: identified
+    sig: "void rt_lib_init_for_abort(usize heap_base, usize heap_limit)"
+    module: runtime/lib_init
+    status: ported
     notes: >-
-      CORRECTION (earlier notes said "message printer"): this is the ADS
-      library (re)initialization (__rt_lib_init). Exact call sequence
-      (disasm-verified): fp init 0x083ecb90 (unported), 0x082ab194
-      (unported), stack-bounds fetch 0x0800af04 (unported, takes a
-      3-word block on sp, returns limits in r0/r1), __rt_heap_init
-      @ 0x0802ed14 (ported), 0x0802ecc4 (unported), srandom1_thunk
-      @ 0x08030ec0 (ported), then seeds the libspace LC slots: +0x20
-      (collate) and +0x30 (time) get ZERO — their getter calls are
-      linked out to `mov r0,r0` nops with r0=0, NOT the directory
-      pointer setlocale would install; +0x24 = get_lc_ctype(0,0)+1,
-      +0x28 = get_lc_monetary(0,0), +0x2c = get_lc_numeric(0,0) (all
-      three ported, runtime/locale). Then stdio init 0x080304a0
-      (unported; more nop'd hooks around it) and __cpp_initialise
-      @ 0x080316cc (ported). Preserves r0-r3 across the whole init
-      (stacked/restored). Sole caller (binary-verified bl scan): abort
-      @ 0x0803206c, so the termination report runs on a sane runtime.
-      NOT ported yet: blocked on 0x083ecb90 / 0x082ab194 / 0x0800af04 /
-      0x0802ecc4 / 0x080304a0. When ported, its LC seeding should write
-      runtime/locale.rs LC_SLOTS (slots 1..3; 0 and 4 stay zero).
+      The ADS library (re)initialization (__rt_lib_init). Call sequence
+      (disasm-verified): _fp_init @ 0x083ecb90, heap_guard_size
+      @ 0x082ab194 into the 3-word bounds block {base, limit, guard} on
+      sp, stackheap_bounds_fetch @ 0x0800af04 (linked out to bx lr — the
+      block comes back untouched), __rt_heap_init @ 0x0802ed14,
+      rt_lib_init_post_heap_hook @ 0x0802ecc4 (nop), srandom1_thunk
+      @ 0x08030ec0, then seeds the libspace LC slots: +0x20 (collate)
+      and +0x30 (time) get ZERO — their getter calls are linked out to
+      `mov r0,r0` nops with r0=0, NOT the directory pointer setlocale
+      would install; +0x24 = get_lc_ctype(0,0)+1, +0x28 =
+      get_lc_monetary(0,0), +0x2c = get_lc_numeric(0,0). Then
+      stdio_init @ 0x080304a0 (five nop'd hooks before the call, two
+      after) and __cpp_initialise @ 0x080316cc (self-relative ctor
+      region 0x089d4f8c..0x089d51d8, 147 entries — CPP_STATIC_INIT hook
+      in the port). r2/r3 are preserved and passed through to
+      __rt_heap_init (dead there); the r0/r1 return is the linked-out
+      bounds fetch's residue (dangling block pointer, 0) — dropped in
+      the port along with the r2/r3 plumbing. LC seeding goes through
+      runtime/locale.rs LC_SLOTS (slots 1..3 seeded; 0 and 4 written
+      zero). Sole caller (binary-verified bl scan): abort @ 0x0803206c
+      with (-1, -3) via the loader @ 0x08035894 — exit.rs's abort still
+      reaches this via its no-op abort_report stub (unification is an
+      init-time concern, see its docs).
 
   - address: 0x08035878
     ghidra: FUN_08035878
