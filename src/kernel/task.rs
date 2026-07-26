@@ -67,6 +67,25 @@
 //! returns a static dummy block so a mis-sequenced notify cannot fault,
 //! everything else no-ops.
 //!
+//! Also here — the current-task query pair:
+//!
+//! - `current_task_record` — `FUN_080565f0` @ 0x080565f0 (96 bytes).
+//!   Asks the gateway for the current task record (thunk 0x08037e58 ->
+//!   ROM 0x22003ec4, service 40, argument 0). When the kernel knows no
+//!   record (boot/foreign contexts), lazily claims a slot from a static
+//!   pool of 0x3c task records (counter @ 0x089cc8f4, pool @ 0x08ac5ccc):
+//!   `rec->id` comes from thunk 0x08037e60 called with the post-increment
+//!   counter value (the thunk 0x08037e60 target ROM 0x22003eb0 is
+//!   catalogued as the UNVERIFIED "size_to_class" — this call site is
+//!   evidence it is really an id/handle helper), `entry`/`context`/the
+//!   name's first byte are zeroed (ONLY those — no full memzero), and the
+//!   record is gateway-registered with id 0 (`mov r0, #0` before the
+//!   0x08037e38 call — faithful quirk). A full pool returns NULL.
+//! - `current_task_context_word` — `FUN_0805665c` @ 0x0805665c
+//!   (20 bytes). `current_task_record()->context` or 0 — the word
+//!   sync_mutex's `current_task_id` hook reads (the "id" is really the
+//!   caller's context record pointer).
+//!
 //! # Simplifications / deviations
 //!
 //! - The record is zeroed with the ported `memzero_aligned` over
@@ -76,6 +95,11 @@
 //!   or dereferenced here, exactly like the original.
 //! - Struct byte offsets (+0x1c in `TaskCtx`, +0x40 in `TaskRecord`) are
 //!   exact only on the 32-bit target; host tests use field accesses.
+//! - The static task-record pool and its counter live in osos RAM
+//!   (0x08ac5ccc / 0x089cc8f4); the port substitutes crate statics, like
+//!   sync_sem's `ISR_SEM_SLOT`.
+//! - `TASK_HOOKS.current_task_context` defaults to the ported
+//!   `current_task_context_word` (real wiring, not a stub).
 
 use crate::libc::memzero::memzero_aligned;
 use crate::libc::strncpy::strncpy;
@@ -158,8 +182,17 @@ pub struct TaskHooks {
     /// Kernel-started byte @ 0x089ca848 — defaults to reading
     /// sync_mutex's `KERNEL_STARTED`.
     pub kernel_started: unsafe extern "C" fn() -> u32,
+    /// Thunk 0x08037e58 -> ROM 0x22003ec4: gateway service 40 — the
+    /// kernel's current task record, NULL when it has none. The original
+    /// always passes 0.
+    pub rom_current_task: unsafe extern "C" fn(arg: u32) -> *mut TaskRecord,
+    /// Thunk 0x08037e60 -> ROM 0x22003eb0: id/handle for a freshly
+    /// claimed pool slot, called with the post-increment counter value
+    /// (catalogued as the unverified "size_to_class" in thunks.rs).
+    pub rom_slot_id: unsafe extern "C" fn(slot: u32) -> u32,
     /// `FUN_0805665c` @ 0x0805665c: the current task's context word
-    /// (record +0x08), 0 when absent.
+    /// (record +0x08), 0 when absent. Defaults to the ported
+    /// `current_task_context_word`.
     pub current_task_context: unsafe extern "C" fn() -> usize,
     /// `FUN_080865e8` @ 0x080865e8: register the current task under the
     /// given callback/name pointer.
@@ -206,7 +239,14 @@ unsafe extern "C" fn read_kernel_started() -> u32 {
     core::ptr::addr_of!(crate::kernel::sync_mutex::KERNEL_STARTED).read_volatile() as u32
 }
 
-unsafe extern "C" fn missing_current_task_context() -> usize {
+/// Default stub: the kernel knows no current task — the lazy pool path
+/// then takes over, exactly what happens pre-kernel in the original.
+unsafe extern "C" fn missing_rom_current_task(_arg: u32) -> *mut TaskRecord {
+    core::ptr::null_mut()
+}
+
+/// Default stub: no kernel, no handles — 0.
+unsafe extern "C" fn missing_rom_slot_id(_slot: u32) -> u32 {
     0
 }
 
@@ -239,7 +279,9 @@ pub const DEFAULT_TASK_HOOKS: TaskHooks = TaskHooks {
     heap_alloc: crate::kernel::os_heap::os_malloc,
     heap_free: crate::kernel::os_heap::os_free,
     kernel_started: read_kernel_started,
-    current_task_context: missing_current_task_context,
+    rom_current_task: missing_rom_current_task,
+    rom_slot_id: missing_rom_slot_id,
+    current_task_context: current_task_context_word,
     register_current_task: missing_register_current_task,
     current_task_ctx: missing_current_task_ctx,
     queue_pool_create: missing_queue_pool_create,
@@ -320,6 +362,69 @@ pub unsafe extern "C" fn task_destroy(rec: *mut TaskRecord) {
     (h.heap_free)(rec as *mut u8);
 }
 
+/// Capacity of the static current-task record pool (`cmp r0, #0x3c`).
+pub const TASK_POOL_CAP: usize = 0x3c;
+
+impl TaskRecord {
+    /// Const-init template for the static pool.
+    const ZERO: TaskRecord = TaskRecord {
+        id: 0,
+        entry: 0,
+        context: 0,
+        name: [0; TASK_NAME_CAP],
+        name_nul: 0,
+        _pad: [0; 2],
+        stack: core::ptr::null_mut(),
+    };
+}
+
+/// Original: claimed-slot counter @ 0x089cc8f4 (never decremented).
+static mut TASK_POOL_COUNT: u32 = 0;
+
+/// Original: pool of 0x3c task records @ 0x08ac5ccc (0x3c * 0x44 bytes).
+static mut TASK_POOL: [TaskRecord; TASK_POOL_CAP] = [TaskRecord::ZERO; TASK_POOL_CAP];
+
+/// current_task_record — original: `FUN_080565f0` @ 0x080565f0 (96 bytes).
+///
+/// The kernel's current task record; when the kernel has none, lazily
+/// claims a static pool slot (id from the ROM slot-id helper, only
+/// `entry`/`context`/`name[0]` cleared, gateway-registered under id 0 —
+/// all faithful). NULL once the pool is exhausted.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn current_task_record() -> *mut TaskRecord {
+    let h = hooks();
+    let rec = (h.rom_current_task)(0);
+    if !rec.is_null() {
+        return rec;
+    }
+    let count = core::ptr::addr_of!(TASK_POOL_COUNT).read();
+    if count >= TASK_POOL_CAP as u32 {
+        return core::ptr::null_mut();
+    }
+    let rec = core::ptr::addr_of_mut!(TASK_POOL[count as usize]);
+    core::ptr::addr_of_mut!(TASK_POOL_COUNT).write(count + 1);
+    (*rec).id = (h.rom_slot_id)(count + 1);
+    (*rec).entry = 0;
+    (*rec).context = 0;
+    (*rec).name[0] = 0;
+    (h.task_register)(0, rec);
+    rec
+}
+
+/// current_task_context_word — original: `FUN_0805665c` @ 0x0805665c
+/// (20 bytes).
+///
+/// `current_task_record()->context`, or 0 when there is no record.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn current_task_context_word() -> usize {
+    let rec = current_task_record();
+    if rec.is_null() {
+        0
+    } else {
+        (*rec).context
+    }
+}
+
 /// task_notify — original: `FUN_08060f80` @ 0x08060f80 (72 bytes).
 ///
 /// Returns 0 while the kernel-started byte is clear. Otherwise, when the
@@ -380,6 +485,8 @@ mod tests {
         RegisterCurrentTask(usize),
         CurrentTaskCtx,
         PoolCreate(u32),
+        RomCurrentTask(u32),
+        RomSlotId(u32),
     }
 
     static CALLS: Mutex<Vec<Call>> = Mutex::new(Vec::new());
@@ -494,6 +601,19 @@ mod tests {
         POOL_RET
     }
 
+    /// Record the rom_current_task mock returns (NULL -> lazy pool path).
+    static mut ROM_TASK_RET: *mut TaskRecord = null_mut();
+
+    unsafe extern "C" fn mock_rom_current_task(arg: u32) -> *mut TaskRecord {
+        CALLS.lock().unwrap().push(Call::RomCurrentTask(arg));
+        ROM_TASK_RET
+    }
+
+    unsafe extern "C" fn mock_rom_slot_id(slot: u32) -> u32 {
+        CALLS.lock().unwrap().push(Call::RomSlotId(slot));
+        0x9000 + slot
+    }
+
     fn mock_hooks() -> MutexGuard<'static, ()> {
         let guard = HOOKS_LOCK.lock().unwrap();
         unsafe {
@@ -506,6 +626,8 @@ mod tests {
             TASK_CONTEXT_MOCK = 0;
             CTX_BLOCK.queue_pool = null_mut();
             POOL_RET = null_mut();
+            ROM_TASK_RET = null_mut();
+            core::ptr::addr_of_mut!(TASK_POOL_COUNT).write(0);
             core::ptr::addr_of_mut!(TASK_HOOKS).write(TaskHooks {
                 task_id_alloc: mock_id_alloc,
                 map_priority: mock_map_priority,
@@ -517,6 +639,8 @@ mod tests {
                 heap_alloc: mock_alloc,
                 heap_free: mock_free,
                 kernel_started: mock_kernel_started,
+                rom_current_task: mock_rom_current_task,
+                rom_slot_id: mock_rom_slot_id,
                 current_task_context: mock_current_task_context,
                 register_current_task: mock_register_current_task,
                 current_task_ctx: mock_current_task_ctx,
@@ -681,6 +805,76 @@ mod tests {
     }
 
     #[test]
+    fn current_task_prefers_the_kernel_record() {
+        let _guard = mock_hooks();
+        unsafe {
+            let mut kernel_rec = TaskRecord::ZERO;
+            ROM_TASK_RET = &mut kernel_rec;
+            assert_eq!(current_task_record(), &mut kernel_rec as *mut TaskRecord);
+            assert_eq!(drain(), vec![Call::RomCurrentTask(0)]);
+            assert_eq!(core::ptr::addr_of!(TASK_POOL_COUNT).read(), 0, "pool untouched");
+        }
+    }
+
+    #[test]
+    fn current_task_lazily_claims_pool_slots() {
+        let _guard = mock_hooks();
+        unsafe {
+            // First claim: slot 0, id from rom_slot_id(1).
+            let rec = current_task_record();
+            assert_eq!(rec, core::ptr::addr_of_mut!(TASK_POOL[0]));
+            assert_eq!((*rec).id, 0x9001);
+            assert_eq!((*rec).entry, 0);
+            assert_eq!((*rec).context, 0);
+            assert_eq!((*rec).name[0], 0);
+            assert_eq!(
+                drain(),
+                vec![
+                    Call::RomCurrentTask(0),
+                    Call::RomSlotId(1),
+                    // Faithful quirk: registered under id 0, not rec->id.
+                    Call::Register { id: 0, rec: rec as usize },
+                ]
+            );
+            // Second claim advances to slot 1.
+            let rec2 = current_task_record();
+            assert_eq!(rec2, core::ptr::addr_of_mut!(TASK_POOL[1]));
+            assert_eq!((*rec2).id, 0x9002);
+            assert_eq!(core::ptr::addr_of!(TASK_POOL_COUNT).read(), 2);
+        }
+    }
+
+    #[test]
+    fn current_task_exhausted_pool_returns_null() {
+        let _guard = mock_hooks();
+        unsafe {
+            core::ptr::addr_of_mut!(TASK_POOL_COUNT).write(TASK_POOL_CAP as u32);
+            assert!(current_task_record().is_null());
+            // Only the gateway probe ran; nothing was claimed/registered.
+            assert_eq!(drain(), vec![Call::RomCurrentTask(0)]);
+            assert_eq!(
+                core::ptr::addr_of!(TASK_POOL_COUNT).read(),
+                TASK_POOL_CAP as u32
+            );
+        }
+    }
+
+    #[test]
+    fn context_word_comes_from_the_record() {
+        let _guard = mock_hooks();
+        unsafe {
+            let mut kernel_rec = TaskRecord::ZERO;
+            kernel_rec.context = 0xfeed;
+            ROM_TASK_RET = &mut kernel_rec;
+            assert_eq!(current_task_context_word(), 0xfeed);
+            // Exhausted pool + no kernel record -> 0.
+            ROM_TASK_RET = null_mut();
+            core::ptr::addr_of_mut!(TASK_POOL_COUNT).write(TASK_POOL_CAP as u32);
+            assert_eq!(current_task_context_word(), 0);
+        }
+    }
+
+    #[test]
     fn default_wired_slots() {
         assert_eq!(
             DEFAULT_TASK_HOOKS.heap_alloc as usize,
@@ -695,5 +889,10 @@ mod tests {
         unsafe {
             assert_eq!((DEFAULT_TASK_HOOKS.map_priority)(0x1234), 0x1234);
         }
+        // The context-word slot is wired to the ported query, not a stub.
+        assert_eq!(
+            DEFAULT_TASK_HOOKS.current_task_context as usize,
+            current_task_context_word as usize
+        );
     }
 }

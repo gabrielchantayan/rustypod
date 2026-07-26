@@ -2842,13 +2842,13 @@ functions:
     size: 20
     sig: "usize current_task_context_word(void)"
     module: kernel/task
-    status: identified
+    status: ported
     notes: >-
       task = current_task_record (0x080565f0); returns *(task+8) — the
       context word task_create stores at +0x08 — or 0. This is what
       sync_mutex's ROM_KERNEL.current_task_id hook reads ("id" is really
-      the caller-context pointer, cf. 0x080cb828 dereferencing it +0xc).
-      Not ported yet: depends on 0x080565f0.
+      the caller-context pointer, cf. 0x080cb828 dereferencing it +0xc);
+      TASK_HOOKS.current_task_context defaults to this port.
 
   - address: 0x080565f0
     ghidra: FUN_080565f0
@@ -2856,16 +2856,17 @@ functions:
     size: 96
     sig: "TaskRecord *current_task_record(void)"
     module: kernel/task
-    status: identified
+    status: ported
     notes: >-
       Thunk 0x08037e58 (ROM 0x22003ec4, gateway service 40, r0=0) returns
       the current task record; if NULL, lazily claims a slot from the
-      static pool of 0x3c 0x44-byte records (counter @ *0x08056650, base
-      @ *0x08056654), fills id via thunk 0x08037e60 (the "size_to_class"
-      ROM op — evidence it is really an id/handle helper), zeroes
-      +4/+8/byte +0xc and registers it via thunk 0x08037e38 with r0=0.
-      Portable with hooks; left for a follow-up (statics + the
-      unverified 0x22003eb0 semantics).
+      static pool of 0x3c 0x44-byte records (counter @ 0x089cc8f4, pool @
+      0x08ac5ccc — crate statics in the port), fills id via thunk
+      0x08037e60 called with the post-increment counter (the
+      "size_to_class" ROM op — this call site is evidence it is really an
+      id/handle helper), zeroes ONLY +4/+8/byte +0xc, and registers via
+      thunk 0x08037e38 with r0=0 (faithful quirk: id 0, not rec->id).
+      Full pool returns NULL.
 
   - address: 0x080865e8
     ghidra: FUN_080865e8
