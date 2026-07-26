@@ -12,6 +12,20 @@
 //!   `free_wrapper` with tag 0. Reached from `sem_delete` (0x0805646c,
 //!   conditional tail `bne`), the kernel-object delete (0x080564b0, `bl`)
 //!   and the queue-node free 0x080b4c4c (`bl` + tail `b`).
+//! - `heap_mutex_creating` — original: `FUN_080bead8` @ 0x080bead8
+//!   (24 bytes). `bl 0x08077250` (lazy_init_default_heap), then
+//!   `ldrb r0, [*0x089ca638, #0xb5]` — reads `mutex_state2` of the
+//!   default-heap descriptor (the global @ 0x089ca638 holds the
+//!   descriptor pointer; see heap/veneers.rs). That byte is `heap_lock`'s
+//!   (0x0819d6cc, heap/wrappers.rs) "mutex creation in progress" marker:
+//!   it is 1 exactly while `heap_lock` is creating the heap's own RTXC
+//!   semaphore. `sem_create` (0x08056724) uses this as a recursion guard —
+//!   while the heap is creating its own semaphore, semaphore cells must
+//!   come from the static slot @ 0x089cc8f8, not from the heap.
+//!   NAMING CORRECTION: earlier module headers (sync_sem.rs, sync_mutex.rs)
+//!   described this function as an "ISR/system-context check" or "early
+//!   boot flag" — both readings are stale; the byte is only ever written
+//!   by `heap_lock` around its `mutex_create` call.
 //!
 //! Caller-tag map (the heap telemetry keeps per-tag byte counters): tag 0 =
 //! kernel-service objects (these veneers), tag 1 = the ADS C runtime
@@ -32,7 +46,8 @@
 //! which take the wrapper as a parameter; the exported veneers pass the
 //! real wrappers.
 
-use crate::heap::veneers::{free_wrapper, malloc_wrapper};
+use crate::heap::types::{HeapDescriptor, DEFAULT_HEAP};
+use crate::heap::veneers::{free_wrapper, lazy_init_default_heap, malloc_wrapper};
 
 /// Caller tag 0: kernel-service allocations (original `mov r1, #0` in
 /// both veneers; see the tag map in the module header).
@@ -70,6 +85,36 @@ pub unsafe extern "C" fn os_malloc(size: usize) -> *mut u8 {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn os_free(ptr: *mut u8) {
     os_free_with(free_wrapper, ptr)
+}
+
+/// Forwarding core of `heap_mutex_creating`, parameterized for the
+/// host-test seam (the real path would run `HEAP_OPS.create` and race the
+/// heap module's own tests — same reasoning as `os_malloc_with`).
+/// Faithful shape: ensure the default heap exists, then read the byte.
+#[inline(always)]
+unsafe fn heap_mutex_creating_with(
+    ensure_heap: unsafe extern "C" fn(),
+    default_heap: unsafe fn() -> *mut HeapDescriptor,
+) -> u32 {
+    ensure_heap();
+    (*default_heap()).mutex_state2 as u32
+}
+
+/// Reads the default-heap descriptor pointer (original global word @
+/// 0x089ca638). The stored handle value is the descriptor pointer — see
+/// `alloc_ported` in heap/veneers.rs for the same cast.
+unsafe fn default_heap_desc() -> *mut HeapDescriptor {
+    core::ptr::addr_of!(DEFAULT_HEAP).read() as *mut HeapDescriptor
+}
+
+/// heap_mutex_creating — original: `FUN_080bead8` @ 0x080bead8 (24 bytes).
+///
+/// Ensures the default heap exists, then returns its `mutex_state2` byte
+/// (nonzero exactly while `heap_lock` is creating the heap's own RTXC
+/// semaphore). `sem_create`'s recursion guard — see the module header.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn heap_mutex_creating() -> u32 {
+    heap_mutex_creating_with(lazy_init_default_heap, default_heap_desc)
 }
 
 #[cfg(test)]
@@ -138,5 +183,61 @@ mod tests {
         // downstream by heap_free.
         unsafe { os_free_with(mock_free, core::ptr::null_mut()) };
         assert_eq!(drain(), vec![Call::Free { ptr: 0, tag: 0 }]);
+    }
+
+    // --- heap_mutex_creating (0x080bead8) ---
+
+    use crate::heap::types::HeapDescriptor;
+    use core::mem::MaybeUninit;
+
+    /// Zeroed descriptor storage + ensure-call recorder for the flag tests.
+    /// One static per concern; `FLAG_LOCK` serializes the tests using them.
+    static FLAG_LOCK: Mutex<()> = Mutex::new(());
+    static mut FLAG_DESC: MaybeUninit<HeapDescriptor> = MaybeUninit::uninit();
+    static mut ENSURE_CALLS: usize = 0;
+
+    unsafe extern "C" fn mock_ensure_heap() {
+        ENSURE_CALLS += 1;
+    }
+
+    unsafe fn mock_default_heap() -> *mut HeapDescriptor {
+        // The original reads the global only after the ensure call; assert
+        // that ordering here.
+        assert!(ENSURE_CALLS > 0, "descriptor read before lazy init");
+        core::ptr::addr_of_mut!(FLAG_DESC) as *mut HeapDescriptor
+    }
+
+    unsafe fn flag_desc_byte(value: u8) {
+        let desc = core::ptr::addr_of_mut!(FLAG_DESC) as *mut HeapDescriptor;
+        core::ptr::write_bytes(desc as *mut u8, 0, core::mem::size_of::<HeapDescriptor>());
+        (*desc).mutex_state2 = value;
+    }
+
+    #[test]
+    fn mutex_creating_reads_state2_after_init() {
+        let _guard = FLAG_LOCK.lock().unwrap();
+        unsafe {
+            ENSURE_CALLS = 0;
+            flag_desc_byte(0);
+            assert_eq!(heap_mutex_creating_with(mock_ensure_heap, mock_default_heap), 0);
+            assert_eq!(ENSURE_CALLS, 1, "lazy init runs exactly once per call");
+            flag_desc_byte(1);
+            assert_eq!(heap_mutex_creating_with(mock_ensure_heap, mock_default_heap), 1);
+            assert_eq!(ENSURE_CALLS, 2);
+        }
+    }
+
+    #[test]
+    fn mutex_creating_zero_extends_the_byte() {
+        // `ldrb` zero-extends: 0xff must come back as 0x000000ff.
+        let _guard = FLAG_LOCK.lock().unwrap();
+        unsafe {
+            ENSURE_CALLS = 0;
+            flag_desc_byte(0xff);
+            assert_eq!(
+                heap_mutex_creating_with(mock_ensure_heap, mock_default_heap),
+                0xff
+            );
+        }
     }
 }

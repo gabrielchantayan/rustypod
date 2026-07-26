@@ -2016,6 +2016,23 @@ functions:
       inlines the whole free_wrapper/heap_free chain. match.py 0/24 by
       design (LLVM inlines the ported free_wrapper body).
 
+  - address: 0x080bead8
+    ghidra: FUN_080bead8
+    name: heap_mutex_creating
+    size: 24
+    sig: "u32 heap_mutex_creating(void)"
+    module: kernel/os_heap
+    status: ported
+    notes: >-
+      bl 0x08077250 (lazy_init_default_heap) then ldrb from
+      *0x089ca638 + 0xb5 — mutex_state2 of the default-heap descriptor,
+      heap_lock's (0x0819d6cc) "RTXC mutex creation in progress" byte.
+      sem_create's recursion guard (static cell instead of heap alloc).
+      NAMING CORRECTION vs earlier notes — this is NOT an ISR-context or
+      early-boot check; the byte is written only by heap_lock around
+      mutex_create. match.py 0/20 by design (LLVM inlines the ported
+      lazy_init_default_heap; the tail ldrb pair is identical).
+
   # --- Batch 10: ADS runtime region 0x08030000-0x08036fff gap sweep ---
   - address: 0x08036e80
     ghidra: FUN_08036e80
