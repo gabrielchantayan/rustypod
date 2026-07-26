@@ -7,6 +7,7 @@ pub mod chval;
 pub mod ctype;
 pub mod errno;
 pub mod exit;
+pub mod lib_init;
 pub mod ll_udiv10;
 pub mod locale;
 pub mod malloc_rt;

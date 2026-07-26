@@ -2551,27 +2551,33 @@ functions:
     ghidra: FUN_08035788
     name: rt_lib_init_for_abort
     size: 240
-    status: identified
+    sig: "void rt_lib_init_for_abort(usize heap_base, usize heap_limit)"
+    module: runtime/lib_init
+    status: ported
     notes: >-
-      CORRECTION (earlier notes said "message printer"): this is the ADS
-      library (re)initialization (__rt_lib_init). Exact call sequence
-      (disasm-verified): fp init 0x083ecb90 (unported), 0x082ab194
-      (unported), stack-bounds fetch 0x0800af04 (unported, takes a
-      3-word block on sp, returns limits in r0/r1), __rt_heap_init
-      @ 0x0802ed14 (ported), 0x0802ecc4 (unported), srandom1_thunk
-      @ 0x08030ec0 (ported), then seeds the libspace LC slots: +0x20
-      (collate) and +0x30 (time) get ZERO — their getter calls are
-      linked out to `mov r0,r0` nops with r0=0, NOT the directory
-      pointer setlocale would install; +0x24 = get_lc_ctype(0,0)+1,
-      +0x28 = get_lc_monetary(0,0), +0x2c = get_lc_numeric(0,0) (all
-      three ported, runtime/locale). Then stdio init 0x080304a0
-      (unported; more nop'd hooks around it) and __cpp_initialise
-      @ 0x080316cc (ported). Preserves r0-r3 across the whole init
-      (stacked/restored). Sole caller (binary-verified bl scan): abort
-      @ 0x0803206c, so the termination report runs on a sane runtime.
-      NOT ported yet: blocked on 0x083ecb90 / 0x082ab194 / 0x0800af04 /
-      0x0802ecc4 / 0x080304a0. When ported, its LC seeding should write
-      runtime/locale.rs LC_SLOTS (slots 1..3; 0 and 4 stay zero).
+      The ADS library (re)initialization (__rt_lib_init). Call sequence
+      (disasm-verified): _fp_init @ 0x083ecb90, heap_guard_size
+      @ 0x082ab194 into the 3-word bounds block {base, limit, guard} on
+      sp, stackheap_bounds_fetch @ 0x0800af04 (linked out to bx lr — the
+      block comes back untouched), __rt_heap_init @ 0x0802ed14,
+      rt_lib_init_post_heap_hook @ 0x0802ecc4 (nop), srandom1_thunk
+      @ 0x08030ec0, then seeds the libspace LC slots: +0x20 (collate)
+      and +0x30 (time) get ZERO — their getter calls are linked out to
+      `mov r0,r0` nops with r0=0, NOT the directory pointer setlocale
+      would install; +0x24 = get_lc_ctype(0,0)+1, +0x28 =
+      get_lc_monetary(0,0), +0x2c = get_lc_numeric(0,0). Then
+      stdio_init @ 0x080304a0 (five nop'd hooks before the call, two
+      after) and __cpp_initialise @ 0x080316cc (self-relative ctor
+      region 0x089d4f8c..0x089d51d8, 147 entries — CPP_STATIC_INIT hook
+      in the port). r2/r3 are preserved and passed through to
+      __rt_heap_init (dead there); the r0/r1 return is the linked-out
+      bounds fetch's residue (dangling block pointer, 0) — dropped in
+      the port along with the r2/r3 plumbing. LC seeding goes through
+      runtime/locale.rs LC_SLOTS (slots 1..3 seeded; 0 and 4 written
+      zero). Sole caller (binary-verified bl scan): abort @ 0x0803206c
+      with (-1, -3) via the loader @ 0x08035894 — exit.rs's abort still
+      reaches this via its no-op abort_report stub (unification is an
+      init-time concern, see its docs).
 
   - address: 0x08035878
     ghidra: FUN_08035878
@@ -2677,3 +2683,181 @@ functions:
     status: ported
     notes: mov pc,lr. Weak hook target (reached via 0x080358a0 from the
       abort report path).
+
+  # --- Batch 12: the __rt_lib_init dependency chain (runtime/lib_init +
+  # stdio/stdio_init) ---
+  - address: 0x08030238
+    ghidra: FUN_08030238
+    name: fclose_core
+    size: 152
+    sig: "i32 fclose_core(AdsFile *file)"
+    module: stdio/stdio_init
+    status: ported
+    notes: >-
+      fclose engine minus FILE deallocation. flags&3==0 -> -1 untouched.
+      Unless flags&8 (skip-close pseudo-stream marker, producer not yet
+      identified) it syncs via 0x0802fc00 (STREAM_SYNC_CORE hook) with
+      take_lock=0, _sys_close(handle) (negative -> -1, stream NOT
+      reset), frees the buffer when flags&0x800 (heap-buffer bit), and
+      skips a linked-out post-close hook gated on flags&0xfe000000 ==
+      0xac000000 (nop'd bl @ 0x080302a4 whose r0 the original returns —
+      still 0). Reset: IRAM memclr (veneer 0x08037db8 ->
+      memzero_aligned) of the first 0x3c bytes (lock +0x3c and chain
+      link +0x40 survive), then flags = old & 0x1000000 (string-mode
+      bit only). Callers (binary-verified): the locked wrapper
+      0x080302d0 (other agent) and freopen_core @ 0x08030300.
+
+  - address: 0x0802fef0
+    ghidra: FUN_0802fef0
+    name: fseek
+    size: 72
+    sig: "i32 fseek(AdsFile *file, i32 offset, i32 whence)"
+    module: stdio/stdio_init
+    status: ported
+    notes: >-
+      Public fseek entry — the patched-out per-stream lock bracket
+      around the seek core @ 0x0802fd04 (STREAM_SEEK_CORE hook), result
+      passed through. Six callers (binary-verified) incl. scanf/C++
+      layers and freopen_core's append path.
+
+  - address: 0x0802fd04
+    ghidra: FUN_0802fd04
+    name: fseek_core
+    size: 492
+    status: identified
+    notes: >-
+      The buffered fseek engine (STREAM_SEEK_CORE hook default in
+      stdio/stdio_init.rs reports failure until ported). Callers:
+      fseek @ 0x0802fef0 and 0x0802fc7c (inside the sync core
+      0x0802fc00). Deep in the buffered-stdio cluster.
+
+  - address: 0x0802fc00
+    ghidra: FUN_0802fc00
+    name: stream_sync_core
+    size: 156
+    status: identified
+    notes: >-
+      Flush/position-sync core with a take-lock r1 flag (nonzero
+      brackets in the patched-out stream lock). Computes the logical
+      position from ptr/offset/base (or +0x28 when flags&0x20) and
+      drains/seeks accordingly; calls fseek_core @ 0x0802fd04. Callers
+      (binary-verified): 0x0802fcb0/0x0802fcd4 (fflush family),
+      0x08030118, fclose_core @ 0x08030238. Reached from ports through
+      the STREAM_SYNC_CORE hook (stdio/stdio_init.rs) and — same
+      routine — stream_file.rs's STREAM_CLOSE_CORE hook.
+
+  - address: 0x08030300
+    ghidra: FUN_08030300
+    name: freopen_core
+    size: 252
+    sig: "AdsFile *freopen_core(const u8 *name, const u8 *mode, AdsFile *file)"
+    module: stdio/stdio_init
+    status: ported
+    notes: >-
+      fclose_core(file) (result ignored), then mode-string parse: 'r' ->
+      flags 1/semihost-mode 0, 'w' -> 2/4, 'a' -> 0x8002 (literal pool
+      @ 0x08030694)/8, else NULL; any run of '+' (flags|=3, mode|=2) and
+      'b' (flags|=4, mode|=1); trailing 't' adds 0x10 to the mode. Then
+      _sys_open(name, mode) — exactly -1 -> NULL. Re-init: base/ptr
+      NULL, +0x1c = 0x200 default, handle stored, flags = (old &
+      0x1000000) | parsed; append mode seeks to the end (fseek(file, 0,
+      2), result ignored). Returns file. Callers (binary-verified):
+      fopen @ 0x080303fc (unported) and stdio_init x3.
+
+  - address: 0x08037db8
+    name: iram_memzero_aligned_veneer
+    size: 8
+    module: libc/memzero
+    status: ported
+    notes: >-
+      ldr pc,[pc,#-4] -> 0x2200027c: the IRAM-relocated copy of
+      memzero_aligned @ 0x0800027c (same mirror scheme as the ROM
+      veneers @ 0x08037dd0/0x08037dd8 — the 0x22000000 image is the
+      low-address osos libc block, offsets match). 320 bl sites
+      firmware-wide (binary-verified); ports call the Rust
+      memzero_aligned directly (stdio_init/fclose_core use typed field
+      resets — equivalent on the 32-bit layout, portable on wider
+      hosts).
+
+  - address: 0x080304a0
+    ghidra: FUN_080304a0
+    name: stdio_init
+    size: 388
+    sig: "void stdio_init()"
+    module: stdio/stdio_init
+    status: ported
+    notes: >-
+      The ADS _initio (stdio arm of __rt_lib_init; sole caller
+      rt_lib_init_for_abort @ 0x08035788). Zeroes the three static FILE
+      objects (0x08b2f820/64/a8, 0x44 bytes each via the IRAM memclr
+      veneer), chains stdin -> stdout -> stderr (+0x40 links), runs the
+      per-stream and list lock-init calls — 0x080320a0 is the ported
+      return-0 stub sys_stub_ret0_2, so the flags|=0x1000000 fallback
+      marking is dead — then freopen_core on the semihosting console
+      ":tt" (rodata copies @ 0x08985ee4/e8/ec; modes "r"/"w"/"w") and
+      setvbuf_core(NULL, 0x200 line-buffered, 0x40/0x40/0x10). Every
+      freopen NULL / setvbuf nonzero raises SIGRTRED (8, __rt_raise)
+      with the ":tt" pointer as the detail word and falls through.
+
+  - address: 0x083ecb90
+    ghidra: FUN_083ecb90
+    name: _fp_init
+    size: 20
+    sig: "void _fp_init()"
+    module: runtime/lib_init
+    status: ported
+    notes: >-
+      bl __rt_fp_status_addr (0x08036d60); mov r1,#0; str r1,[r0] —
+      zeroes the soft-float status word at libspace+4. Sole caller
+      (binary-verified): rt_lib_init_for_abort @ 0x08035788.
+
+  - address: 0x082ab194
+    ghidra: FUN_082ab194
+    name: heap_guard_size
+    size: 8
+    sig: "usize heap_guard_size(usize request)"
+    module: runtime/lib_init
+    status: ported
+    notes: >-
+      mov r0,#1; bx lr — heap guard-size veneer, a stub returning 1 for
+      any request. Callers (binary-verified): __rt_heap_init @ 0x0802ed14
+      (port folds the constant as HEAP_GUARD_SIZE, malloc_rt.rs) and
+      rt_lib_init_for_abort @ 0x08035788 (stores it into the bounds
+      block).
+
+  - address: 0x0800af04
+    ghidra: thunk_FUN_082ab11c
+    name: stackheap_bounds_fetch
+    size: 12
+    sig: "usize *stackheap_bounds_fetch(usize *bounds_block)"
+    module: runtime/lib_init
+    status: ported
+    notes: >-
+      ldr r3,[pc]; add r3,pc,r3; mov pc,r3 — pc-relative thunk (literal
+      0x2a020c) to 0x082ab11c, a bare `bx lr`. The stock-ADS stack/heap
+      bounds fetch (__user_initial_stackheap family, r0 = 3-word block
+      {heap_base, heap_limit, guard}, bounds returned in r0/r1) is
+      LINKED OUT on this build; the call returns r0 (the block pointer)
+      and leaves the block untouched. Sole caller: rt_lib_init_for_abort
+      @ 0x08035788, which propagates the residue as its own return.
+
+  - address: 0x082ab11c
+    name: linked_out_ret_stub
+    size: 4
+    status: identified
+    notes: >-
+      bx lr — the target the linked-out stackheap_bounds_fetch thunk
+      @ 0x0800af04 lands on. Nothing to port (covered by the thunk's
+      port).
+
+  - address: 0x0802ecc4
+    ghidra: FUN_0802ecc4
+    name: rt_lib_init_post_heap_hook
+    size: 4
+    sig: "void rt_lib_init_post_heap_hook()"
+    module: runtime/lib_init
+    status: ported
+    notes: >-
+      mov pc,lr — linked-out weak hook between __rt_heap_init and the
+      rand seeding in rt_lib_init_for_abort (its sole caller,
+      binary-verified). Twin of the exit-path no-op @ 0x0802ecc0.

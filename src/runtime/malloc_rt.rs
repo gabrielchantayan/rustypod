@@ -327,13 +327,21 @@ pub unsafe extern "C" fn heap_grow_arena_wrapper(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
     use super::*;
     use std::sync::Mutex;
 
     /// Serializes tests that swap the global ops table / mock state.
+    /// Shared with runtime/lib_init.rs, whose init walk installs the
+    /// heap descriptor.
     static OPS_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Locks the ops table / libspace heap fields for a test outside
+    /// this module (lib_init.rs's full-init test).
+    pub(crate) fn lock_ops() -> std::sync::MutexGuard<'static, ()> {
+        OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
 
     // Mock heap call log.
     static mut ALLOC_CALLS: usize = 0;

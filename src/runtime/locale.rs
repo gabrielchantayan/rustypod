@@ -206,13 +206,15 @@ fn locale_directory_ptr() -> *const u8 {
 /// like the zero-initialized device BSS before `__rt_lib_init` seeds it.
 static mut LC_SLOTS: [usize; LC_SLOT_COUNT] = [0; LC_SLOT_COUNT];
 
-/// Volatile slot read (see module docs).
-unsafe fn lc_slot_read(i: usize) -> usize {
+/// Volatile slot read (see module docs). Crate-visible for
+/// runtime/lib_init.rs, whose `__rt_lib_init` port seeds the slots at
+/// library init exactly like the device startup.
+pub(crate) unsafe fn lc_slot_read(i: usize) -> usize {
     core::ptr::addr_of!(LC_SLOTS[i]).read_volatile()
 }
 
-/// Volatile slot write.
-unsafe fn lc_slot_write(i: usize, value: usize) {
+/// Volatile slot write (crate-visible like [`lc_slot_read`]).
+pub(crate) unsafe fn lc_slot_write(i: usize, value: usize) {
     core::ptr::addr_of_mut!(LC_SLOTS[i]).write_volatile(value);
 }
 
@@ -542,7 +544,7 @@ pub unsafe extern "C" fn ptr_or_deref_is_null(p: *const *const u8) -> u32 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
     use super::*;
     use std::ffi::CStr;
@@ -552,8 +554,9 @@ mod tests {
 
     /// Serializes tests: LC_SLOTS / the name buffer / LCONV_STATIC are
     /// global state. Also resets the slots to the empty (device-boot)
-    /// state.
-    fn locale_state() -> MutexGuard<'static, ()> {
+    /// state. Crate-visible: lib_init.rs's full-init test seeds the same
+    /// slots.
+    pub(crate) fn locale_state() -> MutexGuard<'static, ()> {
         static LOCK: Mutex<()> = Mutex::new(());
         let guard = LOCK.lock().unwrap();
         unsafe {
