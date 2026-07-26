@@ -33,6 +33,13 @@
 //!   sites). Same task-lock/-unlock pair on the id, then ROM delete
 //!   dispatch (opcode 2, &stack copy of the id). Nothing is freed — the
 //!   id was never heap-backed.
+//! - `waiter_wait` — `FUN_0805695c` @ 0x0805695c (32 bytes). Sleeps on
+//!   the object via thunk 0x08037ea0 -> ROM 0x220043c0 with (id,
+//!   timeout), first clamping a zero timeout up to 1 tick; returns 1
+//!   exactly when the ROM reported RTXC return code 5 (timeout), else 0.
+//! - `waiter_wake` — `thunk_EXT_FUN_220041cc` @ 0x080567f8 (4 bytes:
+//!   `b 0x08037e78`). Pure tail branch onto the thunk for ROM 0x220041cc —
+//!   signal/wake the waiter object, r0 = id.
 //!
 //! On the task-lock pair: as documented in kernel/task_lock.rs, ROM
 //! 0x22003ea0 is a table-indexed id -> object-pointer load and ROM
@@ -91,7 +98,17 @@ pub struct KobjHooks {
     /// Tag-0 heap free @ 0x080f151c — ported, defaults to the real
     /// `os_free`.
     pub heap_free: unsafe extern "C" fn(ptr: *mut u8),
+    /// ROM timed sleep @ 0x220043c0 (thunk 0x08037ea0): blocks on the
+    /// object until signaled or `timeout` ticks pass; returns the RTXC
+    /// return code (5 = timeout).
+    pub rom_waiter_wait: unsafe extern "C" fn(id: u32, timeout: u32) -> u32,
+    /// ROM signal @ 0x220041cc (thunk 0x08037e78): wakes the object's
+    /// sleeper.
+    pub rom_waiter_signal: unsafe extern "C" fn(id: u32),
 }
+
+/// RTXC return code 5: the timed sleep expired (`cmp r0, #0x5`).
+pub const RTXC_RC_TIMEOUT: u32 = 5;
 
 /// Default stub: no kernel, no object ids — spin rather than hand out an
 /// uninitialized id (same contract as sync_sem's `missing_op_create`).
@@ -105,6 +122,15 @@ unsafe extern "C" fn missing_op_delete(_op: u32, _slot: *mut u32) {}
 /// Default stub: the lock/unlock pair degrades to a no-op without the ROM.
 unsafe extern "C" fn missing_task_lock(_id: u32) {}
 
+/// Default stub: a sleep with nothing to wake it behaves like a timeout
+/// (returning "signaled" would fake progress that never happened).
+unsafe extern "C" fn missing_rom_waiter_wait(_id: u32, _timeout: u32) -> u32 {
+    RTXC_RC_TIMEOUT
+}
+
+/// Default stub: waking into a nonexistent kernel is a harmless no-op.
+unsafe extern "C" fn missing_rom_waiter_signal(_id: u32) {}
+
 /// Shipped defaults: ROM slots are the documented stubs, heap slots are
 /// the real ported veneers.
 pub const DEFAULT_KOBJ_HOOKS: KobjHooks = KobjHooks {
@@ -114,6 +140,8 @@ pub const DEFAULT_KOBJ_HOOKS: KobjHooks = KobjHooks {
     task_unlock: missing_task_lock,
     heap_alloc: crate::kernel::os_heap::os_malloc,
     heap_free: crate::kernel::os_heap::os_free,
+    rom_waiter_wait: missing_rom_waiter_wait,
+    rom_waiter_signal: missing_rom_waiter_signal,
 };
 
 /// The active hook table. Written once at init on target; host tests
@@ -180,6 +208,25 @@ pub unsafe extern "C" fn waiter_delete(id: u32) {
     (h.op_delete)(KOBJ2_OP, &mut slot);
 }
 
+/// waiter_wait — original: `FUN_0805695c` @ 0x0805695c (32 bytes).
+///
+/// Timed sleep on the waiter object (zero timeout clamped to 1 tick);
+/// returns 1 on RTXC timeout (code 5), 0 when signaled.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn waiter_wait(id: u32, timeout: u32) -> u32 {
+    let ticks = if timeout == 0 { 1 } else { timeout };
+    ((hooks().rom_waiter_wait)(id, ticks) == RTXC_RC_TIMEOUT) as u32
+}
+
+/// waiter_wake — original: `thunk_EXT_FUN_220041cc` @ 0x080567f8
+/// (4 bytes).
+///
+/// Tail branch onto the ROM signal — wakes the object's sleeper.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn waiter_wake(id: u32) {
+    (hooks().rom_waiter_signal)(id);
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -199,6 +246,8 @@ mod tests {
         Unlock(u32),
         Alloc(usize),
         Free(usize),
+        Wait { id: u32, timeout: u32 },
+        Wake(u32),
     }
 
     static CALLS: Mutex<Vec<Call>> = Mutex::new(Vec::new());
@@ -245,6 +294,18 @@ mod tests {
         CALLS.lock().unwrap().push(Call::Free(ptr as usize));
     }
 
+    /// RTXC return code the mock sleep reports.
+    static mut WAIT_RC: u32 = 0;
+
+    unsafe extern "C" fn mock_wait(id: u32, timeout: u32) -> u32 {
+        CALLS.lock().unwrap().push(Call::Wait { id, timeout });
+        WAIT_RC
+    }
+
+    unsafe extern "C" fn mock_wake(id: u32) {
+        CALLS.lock().unwrap().push(Call::Wake(id));
+    }
+
     /// Installs the mock table, clears the log, returns the guard.
     fn mock_hooks() -> MutexGuard<'static, ()> {
         let guard = HOOKS_LOCK.lock().unwrap();
@@ -253,6 +314,7 @@ mod tests {
                 state: 0xdead_beef,
                 id: 0xdead_beef,
             });
+            WAIT_RC = 0;
             core::ptr::addr_of_mut!(KOBJ_HOOKS).write(KobjHooks {
                 op_create: mock_op_create,
                 op_delete: mock_op_delete,
@@ -260,6 +322,8 @@ mod tests {
                 task_unlock: mock_unlock,
                 heap_alloc: mock_alloc,
                 heap_free: mock_free,
+                rom_waiter_wait: mock_wait,
+                rom_waiter_signal: mock_wake,
             });
         }
         CALLS.lock().unwrap().clear();
@@ -367,6 +431,36 @@ mod tests {
                 }
                 ref other => panic!("expected Delete, got {other:?}"),
             }
+        }
+    }
+
+    #[test]
+    fn waiter_wait_clamps_zero_timeout_and_maps_rc5() {
+        let _guard = mock_hooks();
+        unsafe {
+            // Timeout expired -> 1; zero timeout is clamped to 1 tick.
+            WAIT_RC = RTXC_RC_TIMEOUT;
+            assert_eq!(waiter_wait(0x42, 0), 1);
+            assert_eq!(drain(), vec![Call::Wait { id: 0x42, timeout: 1 }]);
+            // Signaled (any code but 5) -> 0; nonzero timeout unchanged.
+            WAIT_RC = 0;
+            assert_eq!(waiter_wait(0x42, 250), 0);
+            assert_eq!(
+                drain(),
+                vec![Call::Wait {
+                    id: 0x42,
+                    timeout: 250
+                }]
+            );
+        }
+    }
+
+    #[test]
+    fn waiter_wake_forwards_the_id() {
+        let _guard = mock_hooks();
+        unsafe {
+            waiter_wake(0x99);
+            assert_eq!(drain(), vec![Call::Wake(0x99)]);
         }
     }
 

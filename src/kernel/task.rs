@@ -85,6 +85,11 @@
 //!   (20 bytes). `current_task_record()->context` or 0 — the word
 //!   sync_mutex's `current_task_id` hook reads (the "id" is really the
 //!   caller's context record pointer).
+//! - `kernel_yield` — `FUN_080568fc` @ 0x080568fc (8 bytes;
+//!   `mov r0, #0; b 0x08037e98` -> ROM 0x22004260). The stock yield-like
+//!   service call behind condvar.rs's `task_yield`/`task_yield_thunk`
+//!   wrappers (their `CONDVAR_HOOKS.task_yield` slot is this function);
+//!   the ROM result passes through to the caller.
 //!
 //! # Simplifications / deviations
 //!
@@ -202,6 +207,9 @@ pub struct TaskHooks {
     /// `FUN_0807a080` @ 0x0807a080: allocate a queue pool of `capacity`
     /// 20-byte entries (tag-10 heap allocation).
     pub queue_pool_create: unsafe extern "C" fn(capacity: u32) -> *mut u8,
+    /// Thunk 0x08037e98 -> ROM 0x22004260: the yield-like kernel service
+    /// (exact RTXC op unidentified; always called with 0 here).
+    pub rom_yield: unsafe extern "C" fn(arg: u32) -> i32,
 }
 
 /// Default stub: no kernel, no object ids — spin (create cannot succeed).
@@ -267,6 +275,11 @@ unsafe extern "C" fn missing_queue_pool_create(_capacity: u32) -> *mut u8 {
     core::ptr::null_mut()
 }
 
+/// Default stub: yielding without a scheduler is a no-op reporting 0.
+unsafe extern "C" fn missing_rom_yield(_arg: u32) -> i32 {
+    0
+}
+
 /// Shipped defaults — see the module header for the wiring rationale.
 pub const DEFAULT_TASK_HOOKS: TaskHooks = TaskHooks {
     task_id_alloc: missing_id_alloc,
@@ -285,6 +298,7 @@ pub const DEFAULT_TASK_HOOKS: TaskHooks = TaskHooks {
     register_current_task: missing_register_current_task,
     current_task_ctx: missing_current_task_ctx,
     queue_pool_create: missing_queue_pool_create,
+    rom_yield: missing_rom_yield,
 };
 
 /// The active hook table. Written once at init on target; host tests
@@ -425,6 +439,15 @@ pub unsafe extern "C" fn current_task_context_word() -> usize {
     }
 }
 
+/// kernel_yield — original: `FUN_080568fc` @ 0x080568fc (8 bytes).
+///
+/// The stock yield service call: ROM 0x22004260 with argument 0, result
+/// passed through. (condvar.rs's `CONDVAR_HOOKS.task_yield` routes here.)
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn kernel_yield() -> i32 {
+    (hooks().rom_yield)(0)
+}
+
 /// task_notify — original: `FUN_08060f80` @ 0x08060f80 (72 bytes).
 ///
 /// Returns 0 while the kernel-started byte is clear. Otherwise, when the
@@ -487,6 +510,7 @@ mod tests {
         PoolCreate(u32),
         RomCurrentTask(u32),
         RomSlotId(u32),
+        RomYield(u32),
     }
 
     static CALLS: Mutex<Vec<Call>> = Mutex::new(Vec::new());
@@ -614,6 +638,11 @@ mod tests {
         0x9000 + slot
     }
 
+    unsafe extern "C" fn mock_rom_yield(arg: u32) -> i32 {
+        CALLS.lock().unwrap().push(Call::RomYield(arg));
+        -3
+    }
+
     fn mock_hooks() -> MutexGuard<'static, ()> {
         let guard = HOOKS_LOCK.lock().unwrap();
         unsafe {
@@ -645,6 +674,7 @@ mod tests {
                 register_current_task: mock_register_current_task,
                 current_task_ctx: mock_current_task_ctx,
                 queue_pool_create: mock_pool_create,
+                rom_yield: mock_rom_yield,
             });
         }
         CALLS.lock().unwrap().clear();
@@ -801,6 +831,15 @@ mod tests {
                     Call::PoolCreate(100),
                 ]
             );
+        }
+    }
+
+    #[test]
+    fn yield_calls_the_rom_service_with_zero_and_passes_the_result() {
+        let _guard = mock_hooks();
+        unsafe {
+            assert_eq!(kernel_yield(), -3);
+            assert_eq!(drain(), vec![Call::RomYield(0)]);
         }
     }
 

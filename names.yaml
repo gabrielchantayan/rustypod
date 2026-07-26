@@ -2921,3 +2921,86 @@ functions:
       level, stack_size, record, name); stores the returned TaskRecord
       at record[4]. Returns 0. Out of claim range (borderline: spans
       0x0807a15c..0x0807a220).
+
+  - address: 0x0805695c
+    ghidra: FUN_0805695c
+    name: waiter_wait
+    size: 32
+    sig: "u32 waiter_wait(u32 id, u32 timeout)"
+    module: kernel/kobj
+    status: ported
+    notes: >-
+      Timed sleep on a waiter object via thunk 0x08037ea0 -> ROM
+      0x220043c0 (id, timeout); zero timeout clamped to 1 tick; returns
+      1 iff the ROM code is 5 (RTXC timeout). CONDVAR_HOOKS.waiter_wait.
+
+  - address: 0x080567f8
+    ghidra: thunk_EXT_FUN_220041cc
+    name: waiter_wake
+    size: 4
+    sig: "void waiter_wake(u32 id)"
+    module: kernel/kobj
+    status: ported
+    notes: >-
+      b 0x08037e78 — pure alias of the thunk for ROM 0x220041cc (signal/
+      wake the waiter object). CONDVAR_HOOKS.waiter_wake.
+
+  - address: 0x080568fc
+    ghidra: FUN_080568fc
+    name: kernel_yield
+    size: 8
+    sig: "i32 kernel_yield(void)"
+    module: kernel/task
+    status: ported
+    notes: >-
+      mov r0,#0; b 0x08037e98 (ROM 0x22004260, exact RTXC service
+      unidentified — yield-like). The stock target of condvar.rs's
+      task_yield/task_yield_thunk wrappers (CONDVAR_HOOKS.task_yield).
+
+  - address: 0x08056328
+    ghidra: FUN_08056328
+    name: atomic_add_irqsafe
+    size: 60
+    sig: "u32 atomic_add_irqsafe(u32 amount, u32 *ptr)"
+    module: kernel/kobj
+    status: identified
+    notes: >-
+      Saves cpsr via 0x081b02b8 (interrupts off), old = *ptr, *ptr +=
+      amount, restores the I/F bits, returns old. Twin of 0x08056364.
+      Not ported: 0x081b02b8 is outside the claim range and the pair
+      wants real cpsr access (inline asm) on target.
+
+  - address: 0x08056364
+    ghidra: FUN_08056364
+    name: atomic_sub_irqsafe
+    size: 60
+    sig: "u32 atomic_sub_irqsafe(u32 amount, u32 *ptr)"
+    module: kernel/kobj
+    status: identified
+    notes: Twin of 0x08056328 with *ptr -= amount; returns the old value.
+
+  - address: 0x08056904
+    ghidra: FUN_08056904
+    name: csem_wait
+    size: 88
+    sig: "u32 csem_wait(u32 *csem, u32 timeout)"
+    module: kernel/kobj
+    status: identified
+    notes: >-
+      Counting semaphore over a waiter object; csem[0] = count, csem[1] =
+      waiter id. old = atomic_sub_irqsafe(1, csem); if old-1 < 0, timed
+      sleep on csem[1] (thunk 0x08037ea0, zero timeout -> 1); on RTXC
+      code 5 undoes the decrement (atomic_add_irqsafe) and returns 1
+      (timeout), else 0. Caller: 0x080b4adc (queue get).
+
+  - address: 0x0805697c
+    ghidra: FUN_0805697c
+    name: csem_signal
+    size: 40
+    sig: "void csem_signal(u32 *csem)"
+    module: kernel/kobj
+    status: identified
+    notes: >-
+      old = atomic_add_irqsafe(1, csem); if old-1 < 0 (a sleeper exists)
+      tail-branches thunk 0x08037ea8 -> ROM 0x22004368 with csem[1]
+      (wake). 0x080569a4 is a bare 4-byte alias `b 0x08037ea8`.
