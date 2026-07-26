@@ -268,7 +268,9 @@ pub unsafe extern "C" fn stdio_stream_error_reset(file: *mut AdsFile) {
 ///
 /// The original also passes its (stale) flags copy as `_sys_write`'s
 /// fourth register argument; `_sys_write` never reads r3, so the port
-/// drops it.
+/// drops it. (`inline(never)` keeps the in-crate callers' — the flush
+/// core's — `bl` structure matching the original's.)
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn stdio_writeback(buf: *const u8, len: i32, file: *mut AdsFile) -> i32 {
     let mut flags = (*file).stream.flags;

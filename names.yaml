@@ -2492,14 +2492,24 @@ functions:
   - address: 0x08030138
     name: stdio_flush_buffer_core
     size: 156
-    status: identified
+    sig: "i32 stdio_flush_buffer_core(AdsFile *file)"
+    module: stdio/getc_core
+    status: ported
     notes: >-
-      Buffered flush core (called by the per-stream flush wrapper
-      0x080302d0, the getc core 0x08034fec and 0x080301d4): computes the
-      live buffer extent from +0x10 base, +0x2c lim, +0x04 ptr, clears
-      0x280000, and for write-mode streams drains via stdio_writeback @
-      0x08030044. Not yet ported (STREAM_FLUSH hook covers its locked
-      wrapper 0x080302d0).
+      Buffered flush core. Clears flags 0x280000 (0x200000 buf-dirty +
+      0x80000 ungetc-pending) up front; (flags & 3) == 1 (read-only) is a
+      clean no-op returning 0; (flags & 0x82) != 2 (not write-mode or
+      error latched) returns -1; write-mode without 0x10000
+      (FLAG_WRITE_ACTIVE) returns 0. Otherwise drains the live extent
+      max_u(ptr +0x04, lim +0x2c) - base +0x10 via stdio_writeback @
+      0x08030044 (nonzero result = -1, buffer untouched), rewinds
+      ptr/lim to base, zeroes +0x08 (write-side count) for non-string
+      streams and clears 0x10000. Binary-verified callers (bl scan):
+      fclose core 0x0802fc00 (@ 0x0802fc68), stdio_sync_alt_offset
+      0x080301d4, and the getc core 0x08034fec (x3); the per-stream
+      wrapper 0x080302d0 reaches it only indirectly (0x080302d0 ->
+      fclose engine 0x08030238 -> 0x0802fc00), so the STREAM_FLUSH hook
+      is NOT satisfied by this port.
 
   - address: 0x080301d4
     name: stdio_sync_alt_offset
