@@ -2245,32 +2245,56 @@ functions:
   - address: 0x08030004
     name: stdio_stream_error_reset
     size: 64
-    status: identified
-    notes: Clears/repairs FILE flags (+0xc bic 0x200000 orr 0x80) and,
-      unless bit 0x1000000, drops the buffer pointers.
+    sig: "void stdio_stream_error_reset(AdsFile *file)"
+    module: stdio/stream_file
+    status: ported
+    notes: >-
+      flags = (flags & ~0x200000 dirty) | 0x80 error; unless string mode
+      (0x1000000) also clears the count words +0x00/+0x08. The original
+      returns &file->lock (+0x3c) in r0 — patched-out unlock residue,
+      ignored by all callers, dropped in the port.
 
   - address: 0x08030044
     name: stdio_writeback
     size: 152
-    status: identified
-    notes: Buffered-write flush core; seeks via _sys_seek and writes via
-      _sys_write, updating position (+0x18) and error flags; on failure
-      calls stdio_stream_error_reset.
+    sig: "i32 stdio_writeback(const u8 *buf, i32 len, AdsFile *file)"
+    module: stdio/stream_file
+    status: ported
+    notes: >-
+      Physical write core. If flags & 0x20010 (mask from pool @
+      0x08030684; 0x20000 = fread's FLAG_GOT_REFILL), seeks to pos
+      (+0x18) first — failure errors out before writing, success clears
+      the bits. Then _sys_write; sets 0x40000 (last-op-write), pos +=
+      len - (result & 0x7fffffff). Returns 0 iff result == 0, else
+      error reset + -1.
 
   - address: 0x080300dc
     name: stdio_foreach_close
     size: 92
-    status: identified
-    notes: Walks the static stream table (globals in pool @ 0x8030688-90)
-      calling the close/flush core @ 0x0802fc00 per live stream.
+    sig: "void stdio_foreach_close(AdsFile *excluded)"
+    module: stdio/stream_file
+    status: ported
+    notes: >-
+      Walks the stream chain from static stdin (pool @ 0x0803068c =
+      0x08b2f820) via the +0x40 links, calling the fclose core @
+      0x0802fc00 (STREAM_CLOSE_CORE hook, unported) on every stream whose
+      flags contain all of 0x202 (pool @ 0x08030690), with arg2 = 0 for
+      `excluded`, 1 otherwise. List lock object @ 0x08a0fc04 (pool @
+      0x08030688; lock hooks patched to nops).
 
   - address: 0x08030624
     name: stdio_flush_all
     size: 96
-    status: identified
-    notes: Flushes stdin/stdout/stderr statics then walks the +0x40 chain
-      calling 0x080302d0 (per-stream flush) on each; reached from the
-      exit-path cleanup 0x08035878.
+    sig: "void stdio_flush_all()"
+    module: stdio/stream_file
+    status: ported
+    notes: >-
+      Flushes the static stdin/stdout/stderr (0x08b2f820/64/a8, pool @
+      0x0803068c/98/9c) through the per-stream flush @ 0x080302d0
+      (STREAM_FLUSH hook, unported), then walks the dynamic chain hanging
+      off stderr's +0x40 link — captured BEFORE the static flushes —
+      flushing and then FREEING (free @ 0x0802edc8) each node. Reached
+      from the exit-path cleanup 0x08035878.
 
   - address: 0x080307bc
     name: setlocale_core
@@ -2328,25 +2352,44 @@ functions:
   - address: 0x08035924
     name: stdio_stream_alloc
     size: 32
-    status: identified
-    notes: malloc(0x88) + clear first byte; fresh FILE object (0x88 = the
-      48-byte stream struct fread uses plus buffer slack). No callers
-      found in the (incomplete) osos.asm.
+    sig: "AdsFile *stdio_stream_alloc()"
+    module: stdio/stream_file
+    status: ported
+    notes: >-
+      malloc(0x88) and clear the FIRST BYTE only (low byte of count);
+      fresh FILE object (0x88 = the 0x44-byte AdsFile — 48-byte stream
+      prefix + lock @ +0x3c + chain link @ +0x40 — plus buffer slack);
+      NULL on allocation failure. No callers found in the (incomplete)
+      osos.asm. Allocator boundary via STDIO_ALLOC slot (defaults to the
+      ported malloc).
 
   - address: 0x08034f88
-    name: stdio_helper_08034f88
+    name: stream_raw_read
     size: 100
-    status: identified
-    notes: stdio internal shared by 0x080353c8 (inside 0x08034fec) and
-      fread @ 0x08036874; not yet characterized.
+    sig: "i32 stream_raw_read(u8 *dest, i32 len, AdsStream *stream)"
+    module: stdio/stream_file
+    status: ported
+    notes: >-
+      (was stdio_helper_08034f88) The raw read refill shared by the getc
+      core 0x08034fec (call site 0x080353c8) and fread's STREAM_REFILL
+      slot: _sys_read(handle +0x14, dest, len, flags +0xc as the block's
+      mode word), clears 0x40000 (last-op-write). Result decode: -1 =
+      error (stdio_stream_error_reset, return -1); bit 31 set = EOF
+      (flags |= 0x4000, remainder = result & 0x7fffffff). Returns len -
+      remainder = bytes actually read (0 = clean EOF). Type-compatible
+      with fread.rs's StreamRefillFn; installing it there is init-time.
 
   - address: 0x08034fec
     name: stdio_fill_or_flush_core
     size: 1156
     status: identified
-    notes: Large buffered-stream core called from the fread/stream-read
-      cluster (0x08036910/0x08036aa8); __flsbuf/__filbuf-scale; not yet
-      characterized in detail.
+    notes: >-
+      Large buffered-stream core called from the fread/stream-read
+      cluster (0x08036910/0x08036aa8); __flsbuf/__filbuf-scale — the
+      getc-side helper behind fread.rs's STREAM_GETC contract (returns
+      next char, -1 EOF, or -2 "do a bulk refill" when the caller set
+      flags bit 0x800000). Reads through stream_raw_read @ 0x08034f88
+      (bl @ 0x080353c8). Not yet ported.
 
   # --- Batch 10 scouting: identified only (runtime / libm misc) ---
   - address: 0x08035788
@@ -2367,10 +2410,16 @@ functions:
     ghidra: FUN_08035878
     name: exit_stdio_cleanup
     size: 24
-    status: identified
-    notes: Calls 0x082ab2b0, stdio_flush_all @ 0x08030624, 0x0802ecc0.
-      Reached from __rt_sys_exit and heap_panic; stubbed no-op in the
-      exit.rs / heap veneers ports (semihost-dead).
+    sig: "void exit_stdio_cleanup()"
+    module: stdio/stream_file
+    status: ported
+    notes: >-
+      Calls 0x082ab2b0 with 0 (the libspace+0x38 shutdown-handler chain
+      runner — walks nodes {next, arg, fn, key}, calls fn(arg), unlinks
+      and frees each; LIB_SHUTDOWN_CHAIN hook, unported), then
+      stdio_flush_all @ 0x08030624, then 0x0802ecc0 (a mov pc,lr no-op).
+      Reached from __rt_sys_exit and heap_panic; exit.rs still reaches
+      it via its own no-op stub (unification is init-time, see its docs).
 
   - address: 0x08035b3c
     ghidra: FUN_08035b3c
