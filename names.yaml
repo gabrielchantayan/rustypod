@@ -2400,12 +2400,24 @@ functions:
     status: identified
     notes: >-
       CORRECTION (earlier notes said "message printer"): this is the ADS
-      library (re)initialization — fp init via 0x083ecb90, stack bound
-      fetch via 0x0800af04, __rt_heap_init, 0x0802ecc4, srandom(1), seeds
-      libspace+0x20..+0x30 (ctype block+1 at +0x24 from get_lc_ctype;
-      +0x28/+0x2c from the other two locale getters), stdio init via
-      0x080304a0. Sole caller (binary-verified bl scan): abort @
-      0x0803206c, so the termination report runs on a sane runtime.
+      library (re)initialization (__rt_lib_init). Exact call sequence
+      (disasm-verified): fp init 0x083ecb90 (unported), 0x082ab194
+      (unported), stack-bounds fetch 0x0800af04 (unported, takes a
+      3-word block on sp, returns limits in r0/r1), __rt_heap_init
+      @ 0x0802ed14 (ported), 0x0802ecc4 (unported), srandom1_thunk
+      @ 0x08030ec0 (ported), then seeds the libspace LC slots: +0x20
+      (collate) and +0x30 (time) get ZERO — their getter calls are
+      linked out to `mov r0,r0` nops with r0=0, NOT the directory
+      pointer setlocale would install; +0x24 = get_lc_ctype(0,0)+1,
+      +0x28 = get_lc_monetary(0,0), +0x2c = get_lc_numeric(0,0) (all
+      three ported, runtime/locale). Then stdio init 0x080304a0
+      (unported; more nop'd hooks around it) and __cpp_initialise
+      @ 0x080316cc (ported). Preserves r0-r3 across the whole init
+      (stacked/restored). Sole caller (binary-verified bl scan): abort
+      @ 0x0803206c, so the termination report runs on a sane runtime.
+      NOT ported yet: blocked on 0x083ecb90 / 0x082ab194 / 0x0800af04 /
+      0x0802ecc4 / 0x080304a0. When ported, its LC seeding should write
+      runtime/locale.rs LC_SLOTS (slots 1..3; 0 and 4 stay zero).
 
   - address: 0x08035878
     ghidra: FUN_08035878
