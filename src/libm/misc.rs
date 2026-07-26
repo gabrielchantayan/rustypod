@@ -28,16 +28,15 @@
 //!   `log_scale` == 1.0f (the natural-log caller); log10f passes
 //!   log10(2)/log10(e) so that out1 + out2 = log10(x).
 //!
-//! Unported dependencies modeled here:
-//! - FUN_08035b3c (524 bytes, fixed-point atanh/log kernel with data tables
-//!   @ 0x08986264 / 0x0898630c; its sole caller is `log_decompose`) sits
-//!   behind the replaceable `LOG_ATANH_KERNEL` hook — the same pattern as
-//!   `FP_TRAP_HANDLER` in fp_scalb. The default stub is the identity, which
-//!   reproduces the original's u <= 2^-12 (0x39800000) fast path exactly
-//!   (that path returns u unchanged) but is NOT the correct logarithm for
-//!   larger u; swap in the real port when it lands. Host tests install a
-//!   mock atanh kernel, so everything outside the kernel is verified
-//!   bit-exactly.
+//! Kernel dependency:
+//! - FUN_08035b3c (524 bytes, fixed-point atanh/log kernel; sole caller is
+//!   `log_decompose`) dispatches through the replaceable `LOG_ATANH_KERNEL`
+//!   hook — the same pattern as `FP_TRAP_HANDLER` in fp_scalb. The wired
+//!   default is the real port, `crate::libm::cordic::log_atanh_kernel`.
+//!   Host tests still install a mock atanh kernel where they pin the
+//!   surrounding plumbing bit-exactly.
+//!
+//! Other dependencies modeled here:
 //! - Double "is finite" @ 0x082ab120 (32 bytes: exponent field != 0x7ff)
 //!   and double copysign @ 0x082c4f50 (44 bytes: magnitude of first, sign
 //!   of second) are called by ldexp but not yet committed as their own
@@ -150,23 +149,16 @@ pub unsafe extern "C" fn ldexp(x: u64, n: i32) -> u64 {
     result
 }
 
-/// Default atanh/log kernel — DEVIATION STUB, see module header.
-/// FUN_08035b3c is unported; its u <= 2^-12 fast path returns u unchanged,
-/// which is the behavior this stub extends (incorrectly) to all inputs.
-unsafe extern "C" fn default_log_atanh_kernel(u: u32) -> u32 {
-    u
-}
-
-/// Replaceable atanh/log kernel hook, standing in for the unported
-/// FUN_08035b3c (see module header). Called by `log_decompose` with the
-/// reduced argument u = (m²-1)/(m²+1) as a float bit pattern; must return
-/// atanh(u) = ln(m) as a float bit pattern. Default is
-/// [`default_log_atanh_kernel`] (identity). Replace it with the real port
-/// when FUN_08035b3c lands.
+/// Replaceable atanh/log kernel hook for FUN_08035b3c (see module
+/// header). Called by `log_decompose` with the reduced argument
+/// u = (m²-1)/(m²+1) as a float bit pattern; must return atanh(u) = ln(m)
+/// as a float bit pattern. The wired default is the real port,
+/// [`crate::libm::cordic::log_atanh_kernel`]; host tests swap in mocks.
 ///
 /// `static mut`, written at port/bring-up time only — same discipline as
 /// `FP_TRAP_HANDLER` in fp_scalb.
-pub static mut LOG_ATANH_KERNEL: unsafe extern "C" fn(u32) -> u32 = default_log_atanh_kernel;
+pub static mut LOG_ATANH_KERNEL: unsafe extern "C" fn(u32) -> u32 =
+    crate::libm::cordic::log_atanh_kernel;
 
 /// Dispatches through `LOG_ATANH_KERNEL`. The volatile read keeps the hook
 /// a real runtime dispatch: without it LLVM const-folds the default and
@@ -433,7 +425,7 @@ mod tests {
     }
 
     unsafe fn restore_default_kernel() {
-        LOG_ATANH_KERNEL = default_log_atanh_kernel;
+        LOG_ATANH_KERNEL = crate::libm::cordic::log_atanh_kernel;
     }
 
     /// Host mirror of the decompose main path, step by step in f32 so the
@@ -561,22 +553,42 @@ mod tests {
     }
 
     #[test]
-    fn decompose_default_kernel_stub_is_identity() {
+    fn decompose_wired_default_is_real_cordic_kernel() {
         let _g = LOCK.lock().unwrap();
         unsafe { restore_default_kernel() };
-        // Documented deviation: with the default stub the log part is the
-        // reduced argument u itself (matches the original only for
-        // u <= 2^-12, which includes m == 1.0 exactly).
+        // The wired default is the real CORDIC port: the log part must be
+        // exactly what the exported kernel returns for the reduced u.
         let (ret, _ep, lp) = decompose(3.0f32.to_bits(), FLOAT_LOG10_2, FLOAT_ONE);
         assert_eq!(ret, 0);
         let (_, want_u, _) = host_decompose(3.0, LOG10_2, 1.0);
-        assert_eq!(lp, want_u);
-        // Powers of two give m == 1.0 -> u == 0, where the stub agrees with
-        // the original kernel's fast path.
+        assert_eq!(lp, unsafe { crate::libm::cordic::log_atanh_kernel(want_u) });
+        // ... which is atanh(u) = ln(m) to within a couple ulp.
+        let want_ln = ((f32::from_bits(want_u) as f64).atanh() as f32).to_bits();
+        assert!(ulp_distance(lp, want_ln) <= 2, "lp={lp:#x} want={want_ln:#x}");
+        // Powers of two give m == 1.0 -> u == 0, the kernel's exact fast
+        // path.
         let (ret, ep, lp) = decompose(4.0f32.to_bits(), FLOAT_LOG10_2, FLOAT_LOG10_E);
         assert_eq!(ret, 0);
         assert_eq!(ep, (2.0f32 * LOG10_2).to_bits());
         assert_eq!(lp, 0.0f32.to_bits());
+    }
+
+    #[test]
+    fn log10f_end_to_end_through_wired_kernel_matches_host() {
+        let _g = LOCK.lock().unwrap();
+        unsafe { restore_default_kernel() };
+        // Full original pipeline (decompose + real CORDIC kernel + __fadd)
+        // against the host's double-precision log10.
+        for &x in &[0.5f32, 1.0, 1.5, 2.0, 3.0, 10.0, 100.0, 123.5, 0.001, 1e-10, 1e30,
+                    f32::MIN_POSITIVE, 6.02e23] {
+            let got = unsafe { log10f(x.to_bits()) };
+            let reference = ((x as f64).log10() as f32).to_bits();
+            assert!(
+                ulp_distance(got, reference) <= 4,
+                "x={x} got={got:#x} ref={reference:#x}"
+            );
+        }
+        assert_eq!(unsafe { log10f(1.0f32.to_bits()) }, 0.0f32.to_bits());
     }
 
     // ---- log10f ----
