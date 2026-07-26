@@ -2250,25 +2250,38 @@ functions:
   - address: 0x080333c8
     name: stream_clear_error
     size: 48
-    status: identified
+    sig: "u8 *stream_clear_error(AdsStream *stream)"
+    module: stdio/stream_flags
+    status: ported
     notes: clearerr core (bic +0xc flags of 0x4000 and 0xc0) with nop'd
-      lock hooks.
+      lock hooks; returns FILE+0x3c (the lock address, an artifact of the
+      nop'd unlock).
 
   - address: 0x080333f8
-    name: stream_test_eof_flag
+    name: stream_test_error_flag
     size: 44
-    status: identified
-    notes: Returns FILE flags & 0x80 (the bit stdio_stream_error_reset
-      sets); feof/ferror-family accessor.
+    sig: "u32 stream_test_error_flag(AdsStream *stream)"
+    module: stdio/stream_flags
+    status: ported
+    notes: >-
+      CORRECTION (was stream_test_eof_flag): returns FILE flags & 0x80,
+      the ERROR indicator — stdio_stream_error_reset @ 0x08030004 sets
+      0x80 on the buffered-write failure path, and the printf front-end
+      @ 0x0802f694 maps this result to printf's EOF return. ferror core;
+      the EOF indicator is 0x40.
 
   - address: 0x08033424
     name: setvbuf_core
     size: 164
-    status: identified
+    sig: "u32 setvbuf_core(AdsStream *stream, u8 *buf, u32 mode, u32 size)"
+    module: stdio/stream_flags
+    status: ported
     notes: >-
-      Validates mode in {0x100 full, 0x200 line, 0x400 none} and size-1 <
-      0x1000000; _IONBF uses the internal 1-byte buffer at FILE+0x24;
-      stores buf/+0x10, size/+0x1c, cursor/+0x4; returns 0 ok / 1 fail.
+      Validates flags&3 != 0 and !(flags & 0x400000), mode in {0x100
+      full, 0x200 line, 0x400 none} and size-1 < 0xffffff; _IONBF uses
+      the internal 1-byte buffer at FILE+0x24 with size 1; stores
+      buf/+0x10, size/+0x1c, cursor/+0x4, flags = (flags & ~0xf00) |
+      mode; returns 0 ok / 1 fail.
 
   - address: 0x080334dc
     name: localeconv
