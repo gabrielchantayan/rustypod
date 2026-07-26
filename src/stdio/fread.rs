@@ -42,12 +42,14 @@
 //! contract with the ADS stdio layer; offsets were recovered from the
 //! original machine code and must not change. See the struct docs.
 //!
-//! The getc helper (`FUN_08034fec`, 1156 bytes) and the refill helper
-//! (`FUN_08034f88`, 100 bytes) are separate future ports (the latter does
-//! semihosting I/O); both are reached through the [`STREAM_GETC`] /
-//! [`STREAM_REFILL`] function pointers, the same pattern `scanf_helpers`
-//! uses for `SCANF_ENGINE`. Default stubs report EOF/-1, which makes both
-//! readers take their early-EOF exits.
+//! The getc helper (`FUN_08034fec`, ported: `getc_core::
+//! stdio_fill_or_flush_core`) and the refill helper (`FUN_08034f88`,
+//! ported: `stream_file::stream_raw_read`) are reached through the
+//! [`STREAM_GETC`] / [`STREAM_REFILL`] function pointers, the same
+//! pattern `scanf_helpers` uses for `SCANF_ENGINE`. [`STREAM_GETC`]
+//! defaults to the real getc-core port; [`STREAM_REFILL`]'s default is
+//! still an EOF/-1 stub (installing `stream_raw_read` is an init-time
+//! concern, see `stream_file.rs`).
 //!
 //! Flag bits used here (in `flags` at +0x0c):
 //! - [`FLAG_STRING_MODE`] (0x1000000): clear = normal buffered file, the
@@ -127,8 +129,10 @@ pub struct AdsStream {
     pub count: i32,
     /// Current read pointer.
     pub ptr: *mut u8,
-    /// Not touched by these two functions.
-    pub field_08: u32,
+    /// Write-side count twin of `count` (untouched by the two readers
+    /// here; the getc/flush cores in `getc_core.rs` maintain it and it
+    /// may go negative, hence signed).
+    pub field_08: i32,
     /// Flag word (see the `FLAG_*` constants).
     pub flags: u32,
     /// Buffer base; after a direct refill, `base[0]` holds the last byte.
@@ -162,22 +166,17 @@ pub type StreamGetcFn = unsafe extern "C" fn(stream: *mut AdsStream, mode: i32) 
 /// (0 = EOF), or -1 on error.
 pub type StreamRefillFn = unsafe extern "C" fn(dest: *mut u8, len: i32, stream: *mut AdsStream) -> i32;
 
-/// Default getc stand-in: always reports EOF (the real helper,
-/// `FUN_08034fec`, is a later port).
-unsafe extern "C" fn stream_getc_stub(_stream: *mut AdsStream, _mode: i32) -> i32 {
-    -1
-}
-
 /// Default refill stand-in: always reports the error/EOF result -1 (the
 /// real helper, `FUN_08034f88`, is a later port).
 unsafe extern "C" fn stream_refill_stub(_dest: *mut u8, _len: i32, _stream: *mut AdsStream) -> i32 {
     -1
 }
 
-/// getc entry used by both readers; swap in the real `FUN_08034fec`
-/// port when it lands. Defaults to [`stream_getc_stub`].
+/// getc entry used by both readers; defaults to the real port of
+/// 0x08034fec, `getc_core::stdio_fill_or_flush_core` — the firmware
+/// build links the original call graph. Tests script it with mocks.
 #[cfg_attr(target_os = "none", no_mangle)]
-pub static mut STREAM_GETC: StreamGetcFn = stream_getc_stub;
+pub static mut STREAM_GETC: StreamGetcFn = crate::getc_core::stdio_fill_or_flush_core;
 
 /// Refill entry used by `fread`; swap in the real `FUN_08034f88` port
 /// when it lands. Defaults to [`stream_refill_stub`].
@@ -384,23 +383,38 @@ pub unsafe extern "C" fn stream_read_chars(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
     use super::*;
     use std::sync::Mutex;
     use std::vec::Vec;
 
-    /// Serializes tests that swap STREAM_GETC / STREAM_REFILL.
-    static HOOK_LOCK: Mutex<()> = Mutex::new(());
+    /// Serializes tests that swap STREAM_GETC / STREAM_REFILL (shared
+    /// with the getc_core end-to-end test).
+    pub(crate) static HOOK_LOCK: Mutex<()> = Mutex::new(());
 
     fn hook_lock() -> std::sync::MutexGuard<'static, ()> {
         HOOK_LOCK.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Restores the crate defaults: the real getc-core port and the
+    /// refill stub.
     fn reset_hooks() {
         unsafe {
-            STREAM_GETC = stream_getc_stub;
+            STREAM_GETC = crate::getc_core::stdio_fill_or_flush_core;
             STREAM_REFILL = stream_refill_stub;
+        }
+    }
+
+    #[test]
+    fn stream_getc_defaults_to_the_ported_core() {
+        let _guard = hook_lock();
+        reset_hooks();
+        unsafe {
+            assert_eq!(
+                STREAM_GETC as usize,
+                crate::getc_core::stdio_fill_or_flush_core as usize
+            );
         }
     }
 
@@ -731,6 +745,9 @@ mod tests {
 
     #[test]
     fn fread_default_hooks_hit_eof_immediately() {
+        // With the default hooks (real getc core, refill stub) a zeroed
+        // stream is not read-eligible: the core error-resets and answers
+        // -1, so fread reports EOF at once.
         let _guard = hook_lock();
         reset_hooks();
         let mut backing = *b"________";
@@ -772,7 +789,7 @@ mod tests {
     #[test]
     fn read_chars_eof_on_empty_buffer_returns_zero() {
         let _guard = hook_lock();
-        reset_hooks(); // default getc stub answers -1
+        reset_hooks(); // default getc (real core) answers -1 for a zeroed stream
         let mut buf = *b"________";
         let mut s = stream_for(&mut buf, 0);
         let mut dest = [0u8; 8];

@@ -310,7 +310,9 @@ pub unsafe extern "C" fn stdio_writeback(buf: *const u8, len: i32, file: *mut Ad
 /// function matches `fread.rs`'s `StreamRefillFn` exactly; the error
 /// reset receives the same object as a FILE (its accesses also stay
 /// within the prefix for a non-string stream... the flags path never
-/// reaches past +0x0c).
+/// reaches past +0x0c). (`inline(never)` keeps the getc core's `bl`
+/// structure matching the original's.)
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn stream_raw_read(dest: *mut u8, len: i32, stream: *mut AdsStream) -> i32 {
     let not_read = _sys_read((*stream).handle, dest, len as u32, (*stream).flags);
@@ -333,7 +335,10 @@ pub unsafe extern "C" fn stream_raw_read(dest: *mut u8, len: i32, stream: *mut A
 /// ([`STREAM_CLOSE_CORE`]) on every stream whose flags contain all of
 /// [`CLOSE_LIVE_MASK`]; the core's second argument is 0 for `excluded`
 /// and 1 for every other stream. (The original returns the list lock
-/// object in r0 — patched-out unlock residue, ignored by all callers.)
+/// object in r0 — patched-out unlock residue, ignored by all callers.
+/// `inline(never)` keeps the getc core's `bl` structure matching the
+/// original's.)
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn stdio_foreach_close(excluded: *mut AdsFile) {
     let close = hook(core::ptr::addr_of!(STREAM_CLOSE_CORE));

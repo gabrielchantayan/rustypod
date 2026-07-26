@@ -2464,30 +2464,50 @@ functions:
   - address: 0x08034fec
     name: stdio_fill_or_flush_core
     size: 1156
-    status: identified
+    sig: "i32 stdio_fill_or_flush_core(AdsStream *stream, i32 lock_mode)"
+    module: stdio/getc_core
+    status: ported
+    vars: "r4=stream, r8=lock_mode, r5=avail, r6=dest, r5'=len, r10=handle, r11=&file.lock"
     notes: >-
-      The __filbuf-scale getc core behind fread.rs's STREAM_GETC contract
-      (arg AdsFile*; returns next char, -1 EOF, -2 "do a bulk refill"
-      when the caller set flags 0x800000). Sets 0x400000 (in-getc) on
-      entry. Fast path: string-mode readable state (masked pair 0x4820e1
-      / 0x400001, pool @ 0x08035474/70 — same constants fread.rs names
-      STRING_MODE_MASK/VALUE) delivers *ptr++ directly. Slow path when
-      flags&0x80000 clear: syncs alt-offset via 0x080301d4 when flags &
-      0x20; on read-eligible state ((flags & 0x60c9 pool @ 0x0803547c)
-      == 1) lazily mallocs the buffer (size +0x1c) into +0x10/+0x04 and
-      sets 0x800 (|0x900 if no 0x300 buffering-mode bit); seeks/flushes
-      (write-mode via flush core 0x08030138, seek via _sys_seek with
-      pos rebuilt from +0x18/+0x28), flushes SHARED buffers via
-      stdio_foreach_close @ 0x080300dc(self), answers -2 for bulk
-      (0x800000) after resetting ptr/lim to base, else refills via
-      stream_raw_read @ 0x08034f88 (bl @ 0x080353c8), parking count =
-      n-1, lim = dest+n, +0x30 = size; on refill 0 sets EOF 0x40 and
-      clears 0x1000. flags&0x80000 set = the ungetc-pending variant:
-      recomputes count/+0x08 from ptr/lim/+0x30 (write mask 0x4816a2
-      pool @ 0x08035478, 0x4040 pool @ 0x08035480) and returns the
-      pushback byte at +0x25. Unported callees: 0x08030138 (buffered
-      flush core), 0x080301d4 (alt-offset sync). Not yet ported — the
-      largest remaining piece of the buffered-stdio cluster.
+      The __filbuf-scale getc core behind fread.rs's STREAM_GETC
+      contract (returns next char, -1 EOF/error, -2 "do a bulk refill"
+      when the caller set flags 0x800000); STREAM_GETC now DEFAULTS to
+      this port. Second arg (r1) only gates the nop'd per-stream
+      lock/unlock hook sites (behaviorally dead; both callers pass 0).
+      Sets 0x400000 (in-getc) on entry, never clears it. CORRECTION to
+      earlier notes (asm-verified): the entry "fast path" exists only
+      for string-mode streams (masked pair 0x4820e1/0x400001, pool @
+      0x08035474/70) and its avail comes out as min(0, ptr-lim) — never
+      positive — so it always falls through; normal streams branch
+      straight to the dispatch (beq 0x08035094) carrying count as
+      avail; the *ptr++ delivery is really reached via the negative-
+      avail ungetc walkback (count = -(count+1), flags |= 0x1000).
+      flags&0x80000 set = ungetc-pending variant: clears the bit, for
+      normal streams recomputes count from ptr/lim and +0x08 from the
+      write-state pair (0x4816a2 pool @ 0x08035478 == 0x400002: size
+      +0x30 - used if 0x2000&&0x10000 and used>=size, else used-size;
+      0 outside write state), sets 0x200000 and returns the pushback
+      byte at +0x25. Main path: drops 0x200000, syncs alt-offset via
+      0x080301d4 under flags&0x20; non-read-eligible ((flags & 0x60c9
+      pool @ 0x0803547c) != 1) zeroes count and either re-reports a
+      latched EOF (0x4040 pool @ 0x08035480; 0x5000 pair -> 0x40,
+      +0x08 = used - size+0x30) or error-resets via 0x08030004; else
+      lazily mallocs the buffer (size +0x1c, result unchecked) with
+      0x800(|0x100); seeks/flushes (0x10 pending: write-active via
+      flush core 0x08030138, else ensure-stub 0x0803202c under 0x40000
+      + _sys_seek to pos+(ptr-base)); write-active buffers drain via
+      the flush core (partial buffers restore pos, re-seek past the
+      drained bytes, set 0x20000, refill only the tail; pos advances
+      under 0x800000), read-state buffers advance pos by ptr-base and
+      refill whole; 0x600 flushes sharers via stdio_foreach_close @
+      0x080300dc(self); 0x800000 answers -2 after ptr/lim = base; else
+      stream_raw_read @ 0x08034f88 refills (count = n-1, ptr = dest+1,
+      lim = dest+n, +0x30 = size, 0x20000) — NOTE any nonzero n
+      delivers, including the raw-read error -1 (count becomes -2, a
+      stale byte returns); n == 0 = clean EOF (0x1000 off, 0x40 on,
+      count 0, ptr = dest, +0x08 = (dest-base)-size unless string mode
+      or 0x600). Port: stdio/getc_core, callees all ported (malloc via
+      the STDIO_ALLOC slot).
 
   - address: 0x08030138
     name: stdio_flush_buffer_core
