@@ -2514,13 +2514,17 @@ functions:
   - address: 0x080301d4
     name: stdio_sync_alt_offset
     size: 100
-    status: identified
+    sig: "void stdio_sync_alt_offset(AdsFile *file)"
+    module: stdio/getc_core
+    status: ported
     notes: >-
-      Clears flags 0x20 (fread.rs's FLAG_ALT_OFFSET), and when pos
-      (+0x18) != alt_offset (+0x28) flushes via 0x08030138 and clears
-      0x3000; realigns the buffered position after an fseek-style
-      offset override. Called from the getc core 0x08034fec. Not yet
-      ported.
+      Clears flags 0x20 (fread.rs's FLAG_ALT_OFFSET); when pos (+0x18)
+      != alt_offset (+0x28) — an fseek-style override — flushes via
+      0x08030138 (result IGNORED; a failed drain still repositions),
+      replaces the buffer-live pair 0x3000 with 0x10 (seek-pending),
+      adopts alt_offset as pos and rewinds ptr/lim (+0x04/+0x2c) to
+      base (+0x10). Always ends by clearing the EOF pair 0x4040.
+      Sole caller (binary-verified): the getc core 0x08034fec.
 
   # --- Batch 10 scouting: identified only (runtime / libm misc) ---
   - address: 0x08035788

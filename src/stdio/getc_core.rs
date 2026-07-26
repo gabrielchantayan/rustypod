@@ -11,6 +11,16 @@
 //!   rewinds `ptr`/`lim` to `base`. Reached from the fclose core
 //!   0x0802fc00 (bl @ 0x0802fc68), from `stdio_sync_alt_offset`
 //!   (0x080301d4) and three times from the getc core (0x08034fec).
+//! - `stdio_sync_alt_offset` @ 0x080301d4 (100 bytes) — clears
+//!   `fread.rs`'s `FLAG_ALT_OFFSET` (0x20) and, when the stream position
+//!   (+0x18) disagrees with `alt_offset` (+0x28) — an fseek-style
+//!   override happened — flushes any pending write data through the
+//!   flush core (result ignored), drops the buffer-live pair (0x3000),
+//!   raises [`FLAG_SEEK_PENDING`] (0x10) so the next physical I/O seeks
+//!   first, adopts `alt_offset` as the position and rewinds `ptr`/`lim`
+//!   to `base`. Always finishes by clearing the EOF pair 0x4040
+//!   (`FLAG_EOF_REACHED` + the sticky EOF latch `fread.rs` names
+//!   `FLAG_ERROR`). Sole caller: the getc core (0x08034fec).
 //!
 //! Flag bits recovered here (see also `fread.rs` / `stream_file.rs`):
 //! - [`MODE_READ`]/[`MODE_WRITE`] (bits 0/1): the open-mode pair. A
@@ -32,8 +42,10 @@
 //! replaced by the documented 0/-1 result (which every caller does use
 //! here, unlike the lock residues elsewhere).
 
-use crate::fread::{AdsStream, FLAG_STRING_MODE};
-use crate::stream_file::{stdio_writeback, AdsFile, FLAG_BUF_DIRTY, FLAG_ERROR_SET};
+use crate::fread::{AdsStream, FLAG_ALT_OFFSET, FLAG_ERROR, FLAG_STRING_MODE};
+use crate::stream_file::{
+    stdio_writeback, AdsFile, FLAG_BUF_DIRTY, FLAG_EOF_REACHED, FLAG_ERROR_SET,
+};
 
 /// flags bit 0: stream open for reading.
 pub const MODE_READ: u32 = 1;
@@ -45,6 +57,18 @@ pub const MODE_WRITE: u32 = 2;
 pub const FLAG_WRITE_ACTIVE: u32 = 0x0001_0000;
 /// flags bit: an ungetc pushback byte is pending at FILE +0x25.
 pub const FLAG_UNGETC_PENDING: u32 = 0x0008_0000;
+/// flags bit: the next physical read/write must reposition the handle
+/// first (raised by [`stdio_sync_alt_offset`]; 0x10 is also the
+/// unidentified half of `stream_file.rs`'s `SEEK_BEFORE_WRITE_MASK`).
+pub const FLAG_SEEK_PENDING: u32 = 0x10;
+/// flags bit: the buffer holds live (readable) data — set by the getc
+/// core after a successful refill, dropped on EOF and by
+/// [`stdio_sync_alt_offset`].
+pub const FLAG_BUF_LIVE: u32 = 0x1000;
+/// flags bit: inferred write-side twin of [`FLAG_BUF_LIVE`] (dropped
+/// together with it by the sync; tested alongside [`FLAG_WRITE_ACTIVE`]
+/// in the getc core's ungetc write-count recompute).
+pub const FLAG_WRITE_BUF_LIVE: u32 = 0x2000;
 
 /// The unsigned-higher of two buffer pointers (the originals' recurring
 /// `cmp lim, ptr; movls ..., ptr` idiom for the live buffer end).
@@ -108,6 +132,33 @@ pub unsafe extern "C" fn stdio_flush_buffer_core(file: *mut AdsFile) -> i32 {
     }
     (*s).flags = f & !FLAG_WRITE_ACTIVE;
     0
+}
+
+/// stdio_sync_alt_offset — original @ 0x080301d4 (100 bytes).
+///
+/// Reconciles the buffered position with an fseek-style override: clears
+/// [`FLAG_ALT_OFFSET`] (0x20), and when `offset_end` (+0x18) differs from
+/// `alt_offset` (+0x28) runs [`stdio_flush_buffer_core`] (result
+/// ignored — a failed drain still repositions), replaces the buffer-live
+/// pair 0x3000 with [`FLAG_SEEK_PENDING`] (0x10), adopts `alt_offset` as
+/// the position and rewinds `ptr`/`lim` to `base`. Always finishes by
+/// clearing the EOF pair 0x4040 ([`FLAG_EOF_REACHED`] | [`FLAG_ERROR`]).
+///
+/// (`inline(never)` keeps the getc core's `bl` structure matching the
+/// original's.)
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn stdio_sync_alt_offset(file: *mut AdsFile) {
+    let s: *mut AdsStream = core::ptr::addr_of_mut!((*file).stream);
+    (*s).flags &= !FLAG_ALT_OFFSET;
+    if (*s).offset_end != (*s).alt_offset {
+        stdio_flush_buffer_core(file);
+        (*s).flags = ((*s).flags & !(FLAG_BUF_LIVE | FLAG_WRITE_BUF_LIVE)) | FLAG_SEEK_PENDING;
+        (*s).offset_end = (*s).alt_offset;
+        (*s).lim = (*s).base;
+        (*s).ptr = (*s).base;
+    }
+    (*s).flags &= !(FLAG_EOF_REACHED | FLAG_ERROR);
 }
 
 #[cfg(test)]
@@ -284,6 +335,98 @@ mod tests {
                 (SYS_WRITE, std::vec![7, buf.as_mut_ptr() as usize, 2]),
             ]
         );
+        restore_swi();
+    }
+
+    // --- stdio_sync_alt_offset --------------------------------------------
+
+    #[test]
+    fn sync_aligned_position_only_drops_the_flag_bits() {
+        let _guard = lock_and_mock(&[]);
+        let mut buf = *b"abcdefgh";
+        let mut f = write_file(&mut buf, 4, FLAG_ALT_OFFSET | FLAG_EOF_REACHED | FLAG_ERROR);
+        f.stream.offset_end = 300;
+        f.stream.alt_offset = 300;
+        unsafe {
+            stdio_sync_alt_offset(&mut f);
+        }
+        assert_eq!(
+            f.stream.flags,
+            MODE_WRITE | FLAG_WRITE_ACTIVE,
+            "only 0x20 and the EOF pair 0x4040 cleared"
+        );
+        assert_eq!(f.stream.ptr, unsafe { buf.as_mut_ptr().add(4) }, "no rewind");
+        assert_eq!(f.stream.offset_end, 300);
+        assert!(swi_log().is_empty(), "no flush");
+        restore_swi();
+    }
+
+    #[test]
+    fn sync_misaligned_flushes_and_repositions() {
+        let _guard = lock_and_mock(&[0]); // drain write succeeds
+        let mut buf = *b"dirty___";
+        let mut f = write_file(
+            &mut buf,
+            5,
+            FLAG_ALT_OFFSET | FLAG_BUF_LIVE | FLAG_WRITE_BUF_LIVE | FLAG_EOF_REACHED | FLAG_ERROR,
+        );
+        f.stream.offset_end = 10;
+        f.stream.alt_offset = 200;
+        unsafe {
+            stdio_sync_alt_offset(&mut f);
+        }
+        assert_eq!(
+            swi_log(),
+            std::vec![(SYS_WRITE, std::vec![7, buf.as_mut_ptr() as usize, 5])],
+            "pending write data drained through the flush core"
+        );
+        assert_eq!(
+            f.stream.flags,
+            MODE_WRITE | FLAG_LAST_OP_WRITE | FLAG_SEEK_PENDING,
+            "buffer-live pair and EOF pair dropped, seek-pending raised"
+        );
+        assert_eq!(f.stream.offset_end, 200, "alt_offset adopted");
+        assert_eq!(f.stream.ptr, buf.as_mut_ptr());
+        assert_eq!(f.stream.lim, buf.as_mut_ptr());
+        restore_swi();
+    }
+
+    #[test]
+    fn sync_read_only_stream_repositions_without_io() {
+        let _guard = lock_and_mock(&[]);
+        let mut buf = *b"abcdefgh";
+        let mut f = ADS_FILE_ZERO;
+        f.stream.flags = MODE_READ | FLAG_BUF_LIVE;
+        f.stream.base = buf.as_mut_ptr();
+        f.stream.ptr = unsafe { buf.as_mut_ptr().add(3) };
+        f.stream.lim = unsafe { buf.as_mut_ptr().add(8) };
+        f.stream.offset_end = 8;
+        f.stream.alt_offset = 64;
+        unsafe {
+            stdio_sync_alt_offset(&mut f);
+        }
+        assert!(swi_log().is_empty(), "flush core is a no-op for read-only");
+        assert_eq!(f.stream.flags, MODE_READ | FLAG_SEEK_PENDING);
+        assert_eq!(f.stream.offset_end, 64);
+        assert_eq!(f.stream.ptr, buf.as_mut_ptr());
+        assert_eq!(f.stream.lim, buf.as_mut_ptr());
+        restore_swi();
+    }
+
+    #[test]
+    fn sync_ignores_a_failed_flush_and_still_repositions() {
+        let _guard = lock_and_mock(&[2]); // 2 bytes NOT written -> drain fails
+        let mut buf = *b"dirty___";
+        let mut f = write_file(&mut buf, 5, FLAG_ALT_OFFSET);
+        f.stream.offset_end = 10;
+        f.stream.alt_offset = 90;
+        unsafe {
+            stdio_sync_alt_offset(&mut f);
+        }
+        assert_ne!(f.stream.flags & FLAG_ERROR_SET, 0, "error latched by the drain");
+        assert_ne!(f.stream.flags & FLAG_SEEK_PENDING, 0);
+        assert_eq!(f.stream.offset_end, 90, "repositioned regardless");
+        assert_eq!(f.stream.ptr, buf.as_mut_ptr());
         restore_swi();
     }
 
