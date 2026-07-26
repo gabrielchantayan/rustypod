@@ -2748,3 +2748,175 @@ functions:
       sem_signal *(owner[8]) again. Always returns 0. MQUEUE_HOOKS
       .node_recycle stub stands in until ported (address outside the
       kobj agent's claim range).
+
+  - address: 0x080563a0
+    ghidra: FUN_080563a0
+    name: task_create
+    size: 200
+    sig: "TaskRecord *task_create(usize entry, u32 priority, usize stack_size, usize context, const char *name)"
+    module: kernel/task
+    status: ported
+    notes: >-
+      RTXC task create. Gateway id alloc (thunk 0x08037e28 -> ROM
+      0x22003b6c, service 0x17); os_malloc stack + 0x44-byte record;
+      memzero_aligned; record {id, entry, context, name[0x31] strncpy'd +
+      forced NUL at +0x3d, stack at +0x40}; priority map 0x080e4348;
+      gateway init (thunk 0x08037e30 -> 0x22003c98 with opaque literal
+      0x0809c5c8 as 5th arg); gateway register (thunk 0x08037e38 ->
+      0x22003d00, service 41); name-table insert 0x0806331c; task_start.
+      No NULL checks on the allocations. 1 caller (spawn front-end
+      0x0807a15c). match.py inflated by in-crate inlining of
+      strncpy/memzero_aligned + hook-table ldrd loads; sequence verified
+      by host tests.
+
+  - address: 0x080b4c44
+    ghidra: FUN_080b4c44
+    name: task_start
+    size: 8
+    sig: "void task_start(a1, a2, a3, a4, a5, u32 id, a7)"
+    module: kernel/task
+    status: ported
+    notes: >-
+      ldr r0,[sp,#4]; b 0x08037f78 — forwards its SIXTH argument (task
+      id) to ROM 0x22003e00 (gateway service 0x15 per the osos mirror @
+      0x08003e00), ignoring the rest. 1 caller (task_create, which
+      passes its full 7-arg frame).
+
+  - address: 0x080b4c4c
+    ghidra: FUN_080b4c4c
+    name: task_destroy
+    size: 40
+    sig: "void task_destroy(TaskRecord *rec)"
+    module: kernel/task
+    status: ported
+    notes: >-
+      NULL no-op; gateway delete on rec->id (thunk 0x08037f80 -> ROM
+      0x2200427c, service 0x18 per mirror 0x0800427c); os_free(rec->stack
+      @ +0x40); tail os_free(rec). Ghidra's C inlines the whole os_free
+      chain — trust the asm. 1 caller @ 0x080bbbd4.
+
+  - address: 0x08060f80
+    ghidra: FUN_08060f80
+    name: task_notify
+    size: 72
+    sig: "u32 task_notify(usize callback)"
+    module: kernel/task
+    status: ported
+    notes: >-
+      0 while kernel-started byte @ 0x089ca848 is clear. Else if the
+      current task's context word (0x0805665c) is 0, registers the task
+      (0x080865e8 with the callback), fetches the context block
+      (0x080cb828) and installs a 100-entry queue pool (0x0807a080) at
+      ctx+0x1c; returns 1. Sole caller: kernel_running 0x0809444c
+      (= sync_mutex ROM_KERNEL.notify — wire to this port).
+
+  - address: 0x080e4348
+    ghidra: FUN_080e4348
+    name: task_priority_map
+    size: 120
+    sig: "u32 task_priority_map(u32 level)"
+    module: kernel/task
+    status: identified
+    notes: >-
+      Pure switch, level -> RTXC priority. 0->0x7e, 1->0x3c, 2->0x34,
+      3->0x33, 4->0x31, 5->0x30, 6->10, 7->9, 8->8, default -> input
+      (identity). TASK_HOOKS.map_priority stub = identity (the default
+      arm); trivially portable but outside the kobj agent's claim range.
+
+  - address: 0x0806331c
+    ghidra: FUN_0806331c
+    name: task_name_table_insert
+    size: 60
+    sig: "u32 task_name_table_insert(u32 id, const char *name)"
+    module: kernel/task
+    status: identified
+    notes: >-
+      Linear scan of the 0x50-entry {id, name} table @ *0x08063358;
+      claims the first slot whose id matches or is 0; returns 1, or 0
+      when full. TASK_HOOKS.name_register stub returns 1. Outside the
+      claim range (0x08063xxx).
+
+  - address: 0x0805665c
+    ghidra: FUN_0805665c
+    name: current_task_context_word
+    size: 20
+    sig: "usize current_task_context_word(void)"
+    module: kernel/task
+    status: identified
+    notes: >-
+      task = current_task_record (0x080565f0); returns *(task+8) — the
+      context word task_create stores at +0x08 — or 0. This is what
+      sync_mutex's ROM_KERNEL.current_task_id hook reads ("id" is really
+      the caller-context pointer, cf. 0x080cb828 dereferencing it +0xc).
+      Not ported yet: depends on 0x080565f0.
+
+  - address: 0x080565f0
+    ghidra: FUN_080565f0
+    name: current_task_record
+    size: 96
+    sig: "TaskRecord *current_task_record(void)"
+    module: kernel/task
+    status: identified
+    notes: >-
+      Thunk 0x08037e58 (ROM 0x22003ec4, gateway service 40, r0=0) returns
+      the current task record; if NULL, lazily claims a slot from the
+      static pool of 0x3c 0x44-byte records (counter @ *0x08056650, base
+      @ *0x08056654), fills id via thunk 0x08037e60 (the "size_to_class"
+      ROM op — evidence it is really an id/handle helper), zeroes
+      +4/+8/byte +0xc and registers it via thunk 0x08037e38 with r0=0.
+      Portable with hooks; left for a follow-up (statics + the
+      unverified 0x22003eb0 semantics).
+
+  - address: 0x080865e8
+    ghidra: FUN_080865e8
+    name: register_current_task
+    size: 168
+    module: kernel/task
+    status: identified
+    notes: >-
+      TASK_HOOKS.register_current_task. Under a global lock (byte flag +
+      sem @ *0x08086690): takes or allocates a name node (0x08093870),
+      stores current_task_record (0x080565f0) at node[4], links it
+      (0x080568d0), and when the callback/name arg is nonzero duplicates
+      the string into a tag-7 heap block (strlen 0x08392478 + alloc
+      0x080eb67c + strcpy 0x08030ff4) stored at node[0]. Out of claim
+      range.
+
+  - address: 0x080cb828
+    ghidra: FUN_080cb828
+    name: current_task_ctx_block
+    size: 20
+    sig: "TaskCtx *current_task_ctx_block(void)"
+    module: kernel/task
+    status: identified
+    notes: >-
+      kernel_running() (0x0809444c) result treated as a pointer; returns
+      *(it+0xc) or 0. TASK_HOOKS.current_task_ctx. Out of claim range.
+
+  - address: 0x0807a080
+    ghidra: FUN_0807a080
+    name: queue_pool_create
+    size: 72
+    sig: "u8 *queue_pool_create(i32 capacity)"
+    module: kernel/task
+    status: identified
+    notes: >-
+      Allocates capacity*0x14+0x48 bytes (tag 10) and initializes the
+      pool via 0x0809eab8(capacity, base+0x48, base); capacity < 1
+      degrades to (0, 0, base). TASK_HOOKS.queue_pool_create. Out of
+      claim range.
+
+  - address: 0x0807a15c
+    ghidra: FUN_0807a15c
+    name: task_spawn
+    size: 196
+    module: kernel/task
+    status: identified
+    notes: >-
+      The sole task_create caller. Maps its priority-flag argument
+      (0/8/0x10/0x18/0x20/0x40/0x80/0xc0/0x100/...) to level 0..8, packs
+      the caller record {name?, entry?, flags, a5, a8-or-default} and
+      calls task_create(entry_trampoline @ *0x0807a224 = 0x08074990,
+      level, stack_size, record, name); stores the returned TaskRecord
+      at record[4]. Returns 0. Out of claim range (borderline: spans
+      0x0807a15c..0x0807a220).
