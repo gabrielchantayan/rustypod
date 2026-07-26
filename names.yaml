@@ -2362,28 +2362,38 @@ functions:
   - address: 0x0803357c
     name: rom_memcpy_keep_dst
     size: 12
-    status: identified
-    notes: push {r0,lr}; bl thunk 0x08037dd0 (ROM __rt_memcpy @
-      0x22000020); pop {r0,pc} — memcpy veneer that returns the original
-      dst (the ROM routine advances r0).
+    sig: "void *rom_memcpy_keep_dst(void *dst, const void *src, size_t len)"
+    module: libc/rom_string
+    status: ported
+    notes: >-
+      push {r0,lr}; bl thunk 0x08037dd0 (ROM __rt_memcpy @ 0x22000020);
+      pop {r0,pc} — memcpy veneer that returns the original dst (the ROM
+      routine advances r0). ROM 0x22000020 is the mirror of ported osos
+      0x08000020, so the port calls the Rust __rt_memcpy directly.
 
   - address: 0x08033588
     name: memmove_u16
     size: 8
-    status: identified
+    sig: "u16 *memmove_u16(u16 *dst, const u16 *src, size_t count)"
+    module: libc/rom_string
+    status: ported
     notes: >-
       mov r2,r2,lsl#1 (element count -> bytes) then b 0x08035680, the
-      dst-preserving ROM-memmove veneer (push {r0,lr}; bl thunk
-      0x08037dd8 = ROM memmove @ 0x220000d4; pop {r0,pc}) — i.e. a
-      wide-char (u16 element) memmove. 0x08035680 is an unlisted 12-byte
-      function that functions.csv folds into the preceding raise range.
+      dst-preserving ROM-memmove veneer — i.e. a wide-char (u16 element)
+      memmove. Caller: the wide-string helper @ 0x083d9a2c.
 
   - address: 0x08035680
     name: rom_memmove_keep_dst
     size: 12
-    status: identified
-    notes: push {r0,lr}; bl thunk 0x08037dd8 (ROM memmove); pop {r0,pc}
-      — returns the original dst. Not listed in functions.csv.
+    sig: "void *rom_memmove_keep_dst(void *dst, const void *src, size_t len)"
+    module: libc/rom_string
+    status: ported
+    notes: >-
+      push {r0,lr}; bl thunk 0x08037dd8 (ROM memmove @ 0x220000d4);
+      pop {r0,pc} — returns the original dst. Not listed in
+      functions.csv (folded into the preceding raise range). ROM
+      0x220000d4 is the mirror of ported osos 0x080000d4, so the port
+      calls the Rust memmove directly.
 
   - address: 0x08036d08
     name: nop_stub
