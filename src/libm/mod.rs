@@ -1,5 +1,6 @@
 //! libm wrappers and kernels (sin/cos/sqrt/ceil/floor/ldexp/rem_pio2).
 pub mod ceilfloor;
+pub mod cordic;
 pub mod kernel_trig;
 pub mod misc;
 pub mod rem_pio2;
