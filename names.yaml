@@ -2660,3 +2660,57 @@ functions:
     status: ported
     notes: mov pc,lr. Weak hook target (reached via 0x080358a0 from the
       abort report path).
+
+  # --- Batch: RTXC kernel-object layer (opcode-2 objects, task objects,
+  # --- message-queue nodes) ---
+  - address: 0x0805675c
+    ghidra: FUN_0805675c
+    name: mailbox_create
+    size: 44
+    sig: "Mailbox *mailbox_create(void)"
+    module: kernel/kobj
+    status: ported
+    notes: >-
+      os_malloc(8); block->state=0; ROM create dispatch (thunk 0x08037e70
+      -> ROM 0x22003d70) with opcode 2 into &block->id; returns block. No
+      NULL check on the allocation (faithful). 2 callers (0x0808e29c,
+      0x080e8760). Opcode 2 = second kernel-object class (1 = semaphore).
+
+  - address: 0x080564b0
+    ghidra: FUN_080564b0
+    name: mailbox_delete
+    size: 60
+    sig: "void mailbox_delete(Mailbox *block)"
+    module: kernel/kobj
+    status: ported
+    notes: >-
+      Copies block->id to a stack slot; task_lock/task_unlock pair (thunks
+      0x08037e48/0x08037e50) on the id; ROM delete dispatch (thunk
+      0x08037e40 -> 0x22003dc8, opcode 2) on the stack copy; zeroes
+      block->id; os_free(block). No NULL guard. 1 caller (blne @
+      0x080a6bfc). match.py structural match (blx via hook table).
+
+  - address: 0x08056788
+    ghidra: FUN_08056788
+    name: waiter_create
+    size: 32
+    sig: "u32 waiter_create(void)"
+    module: kernel/kobj
+    status: ported
+    notes: >-
+      Zeroed stack slot; ROM create dispatch opcode 2; returns the kernel
+      object id by value. Ignores its caller's r0. 4 callers, among them
+      condvar_wait @ 0x0807f6ac (CONDVAR_HOOKS.waiter_create types the id
+      as a pointer — cast at install time).
+
+  - address: 0x080564ec
+    ghidra: FUN_080564ec
+    name: waiter_delete
+    size: 36
+    sig: "void waiter_delete(u32 id)"
+    module: kernel/kobj
+    status: ported
+    notes: >-
+      task_lock/task_unlock pair on the id, ROM delete dispatch (opcode 2)
+      on a stack copy. Frees nothing. 2 callers (condvar layer's
+      waiter_delete hook @ stock 0x080564ec).
