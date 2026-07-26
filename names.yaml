@@ -2135,69 +2135,107 @@ functions:
     notes: str hi,[r0,#4]; str lo,[r0]; result-store helper folded into
       scanf_float.rs.
 
-  # --- Batch 10 scouting: identified only (semihosting SWI family) ---
+  # --- Semihosting SWI family (ported: stdio/semihost) ---
   # ADS semihosting wrappers, all `swi 0x123456` with an operation code —
   # dead on device (no debugger; retailOS never traps them usefully).
+  # Ports issue the SWI through the SEMIHOST_SWI dispatch hook (host tests
+  # mock it; the firmware default keeps the original `swi 0x123456`).
   - address: 0x08031f84
     name: _sys_open
     size: 32
-    status: identified
-    notes: Semihost SYS_OPEN (op 1); filename cooked via 0x08392478 first.
+    sig: "i32 _sys_open(const u8 *name, i32 mode)"
+    module: stdio/semihost
+    status: ported
+    notes: >-
+      Semihost SYS_OPEN (op 1); block [name, mode, strlen(name)] with the
+      length measured by the retailOS unguarded strlen @ 0x08392478
+      (inlined as strlen_raw in the port). Returns the handle or -1.
 
   - address: 0x08031fa4
     name: _sys_close
     size: 24
-    status: identified
-    notes: Semihost SYS_CLOSE (op 2).
+    sig: "i32 _sys_close(i32 handle)"
+    module: stdio/semihost
+    status: ported
+    notes: Semihost SYS_CLOSE (op 2); block [handle].
 
   - address: 0x08031fbc
     name: _sys_write
     size: 32
-    status: identified
-    notes: Semihost SYS_WRITE (op 5).
+    sig: "i32 _sys_write(i32 handle, const u8 *buf, u32 len)"
+    module: stdio/semihost
+    status: ported
+    notes: >-
+      Semihost SYS_WRITE (op 5); block [handle, buf, len]. Returns the
+      number of bytes NOT written (0 = success).
 
   - address: 0x08031fdc
     name: _sys_read
     size: 32
-    status: identified
-    notes: Semihost SYS_READ (op 6).
+    sig: "i32 _sys_read(i32 handle, u8 *buf, u32 len, u32 mode)"
+    module: stdio/semihost
+    status: ported
+    notes: >-
+      Semihost SYS_READ (op 6); block [handle, buf, len, mode] — the stdio
+      refill (0x08034f88) passes the stream flag word as mode. Returns
+      bytes NOT read; bit 31 of the result signals EOF.
 
   - address: 0x08031ffc
     name: _sys_istty
     size: 24
-    status: identified
-    notes: Semihost SYS_ISTTY (op 9).
+    sig: "i32 _sys_istty(i32 handle)"
+    module: stdio/semihost
+    status: ported
+    notes: Semihost SYS_ISTTY (op 9); block [handle].
 
   - address: 0x08032014
     name: _sys_seek
     size: 24
-    status: identified
-    notes: Semihost SYS_SEEK (op 0xa).
+    sig: "i32 _sys_seek(i32 handle, i32 pos)"
+    module: stdio/semihost
+    status: ported
+    notes: >-
+      Semihost SYS_SEEK (op 0xa); block [handle, pos] (absolute).
+      Negative result = failure (checked by stdio_writeback).
 
   - address: 0x08032034
     name: _sys_flen
     size: 24
-    status: identified
-    notes: Semihost SYS_FLEN (op 0xc).
+    sig: "i32 _sys_flen(i32 handle)"
+    module: stdio/semihost
+    status: ported
+    notes: Semihost SYS_FLEN (op 0xc); block [handle].
 
   - address: 0x08036d48
     name: _sys_writec
     size: 24
-    status: identified
-    notes: Semihost SYS_WRITEC (op 3); callers in the debug-print helper
-      region 0x08036bb4-0x08036d08 (not in functions.csv).
+    sig: "i32 _sys_writec(i32 ch)"
+    module: stdio/semihost
+    status: ported
+    notes: >-
+      Semihost SYS_WRITEC (op 3); r1 points AT the character (the arg is
+      parked in a stack word, little-endian first byte). Callers in the
+      debug-print helper region 0x08036bb4-0x08036d08 (not in
+      functions.csv).
 
   - address: 0x0803202c
     name: sys_stub_ret0
     size: 8
-    status: identified
+    sig: "i32 sys_stub_ret0()"
+    module: stdio/semihost
+    status: ported
     notes: mov r0,#0; ret. Weak semihost stub (tmpnam/ensure family).
 
   - address: 0x080320a0
     name: sys_stub_ret0_2
     size: 8
-    status: identified
-    notes: mov r0,#0; ret. Second return-0 stub, several callers.
+    sig: "i32 sys_stub_ret0_2()"
+    module: stdio/semihost
+    status: ported
+    notes: >-
+      mov r0,#0; ret. Second return-0 stub, several callers. Identical
+      body to sys_stub_ret0 — objdump shows the two ARM symbols at one
+      address (match.py finds it under sys_stub_ret0's label).
 
   # --- Batch 10 scouting: identified only (ADS stdio / locale block) ---
   # The region 0x08030004-0x0803097c is the ADS buffered-stdio + setlocale
@@ -2383,6 +2421,8 @@ functions:
   - address: 0x08036d08
     name: nop_stub
     size: 4
-    status: identified
+    sig: "void nop_stub()"
+    module: stdio/semihost
+    status: ported
     notes: mov pc,lr. Weak hook target (reached via 0x080358a0 from the
       abort report path).
