@@ -2053,17 +2053,22 @@ functions:
       0x08267070/0x082a7164/0x082a8bec/0x083b6c10). Cookie at array-8 =
       {elem_size, count}; runs __cpp_finalise (ported, runtime/atexit)
       last-element-first, then tag-3 operator delete on the cookie start.
-      The null-guard veneer 0x082ab254 is inlined in the port.
+      The cookie walk goes through cpp_finalise_null_guard @ 0x082ab254
+      (own exported port in the same module).
 
   - address: 0x082ab254
     name: cpp_finalise_null_guard
-    size: 12
-    status: identified
+    size: 16
+    sig: "void *cpp_finalise_null_guard(void *array, void (*dtor)(void *))"
+    module: heap/veneers
+    status: ported
     notes: >-
       cmp r0,#0; ldmdbne r0,{r2,r3}; bne __cpp_finalise(0x080336d8);
-      mov pc,lr. Null-guarded cookie-loading veneer over __cpp_finalise;
-      behavior inlined in the cxx_vec_delete port (heap/veneers), no
-      separate port needed.
+      mov pc,lr — 16 bytes (size was recorded as 12; the mov pc,lr @
+      0x082ab260 belongs to it). Null-guarded cookie-loading front-end of
+      __cpp_finalise; returns array-8 (block start) or NULL for a NULL
+      array. Was inlined in the first cxx_vec_delete port; now extracted
+      as its own exported function which cxx_vec_delete calls.
 
   - address: 0x08036d60
     ghidra: FUN_08036d60
