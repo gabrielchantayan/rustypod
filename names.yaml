@@ -2758,3 +2758,66 @@ functions:
       setvbuf_core(NULL, 0x200 line-buffered, 0x40/0x40/0x10). Every
       freopen NULL / setvbuf nonzero raises SIGRTRED (8, __rt_raise)
       with the ":tt" pointer as the detail word and falls through.
+
+  - address: 0x083ecb90
+    ghidra: FUN_083ecb90
+    name: _fp_init
+    size: 20
+    sig: "void _fp_init()"
+    module: runtime/lib_init
+    status: ported
+    notes: >-
+      bl __rt_fp_status_addr (0x08036d60); mov r1,#0; str r1,[r0] —
+      zeroes the soft-float status word at libspace+4. Sole caller
+      (binary-verified): rt_lib_init_for_abort @ 0x08035788.
+
+  - address: 0x082ab194
+    ghidra: FUN_082ab194
+    name: heap_guard_size
+    size: 8
+    sig: "usize heap_guard_size(usize request)"
+    module: runtime/lib_init
+    status: ported
+    notes: >-
+      mov r0,#1; bx lr — heap guard-size veneer, a stub returning 1 for
+      any request. Callers (binary-verified): __rt_heap_init @ 0x0802ed14
+      (port folds the constant as HEAP_GUARD_SIZE, malloc_rt.rs) and
+      rt_lib_init_for_abort @ 0x08035788 (stores it into the bounds
+      block).
+
+  - address: 0x0800af04
+    ghidra: thunk_FUN_082ab11c
+    name: stackheap_bounds_fetch
+    size: 12
+    sig: "usize *stackheap_bounds_fetch(usize *bounds_block)"
+    module: runtime/lib_init
+    status: ported
+    notes: >-
+      ldr r3,[pc]; add r3,pc,r3; mov pc,r3 — pc-relative thunk (literal
+      0x2a020c) to 0x082ab11c, a bare `bx lr`. The stock-ADS stack/heap
+      bounds fetch (__user_initial_stackheap family, r0 = 3-word block
+      {heap_base, heap_limit, guard}, bounds returned in r0/r1) is
+      LINKED OUT on this build; the call returns r0 (the block pointer)
+      and leaves the block untouched. Sole caller: rt_lib_init_for_abort
+      @ 0x08035788, which propagates the residue as its own return.
+
+  - address: 0x082ab11c
+    name: linked_out_ret_stub
+    size: 4
+    status: identified
+    notes: >-
+      bx lr — the target the linked-out stackheap_bounds_fetch thunk
+      @ 0x0800af04 lands on. Nothing to port (covered by the thunk's
+      port).
+
+  - address: 0x0802ecc4
+    ghidra: FUN_0802ecc4
+    name: rt_lib_init_post_heap_hook
+    size: 4
+    sig: "void rt_lib_init_post_heap_hook()"
+    module: runtime/lib_init
+    status: ported
+    notes: >-
+      mov pc,lr — linked-out weak hook between __rt_heap_init and the
+      rand seeding in rt_lib_init_for_abort (its sole caller,
+      binary-verified). Twin of the exit-path no-op @ 0x0802ecc0.
