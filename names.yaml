@@ -2714,3 +2714,37 @@ functions:
       task_lock/task_unlock pair on the id, ROM delete dispatch (opcode 2)
       on a stack copy. Frees nothing. 2 callers (condvar layer's
       waiter_delete hook @ stock 0x080564ec).
+
+  - address: 0x080b4a88
+    ghidra: FUN_080b4a88
+    name: mqueue_deliver
+    size: 84
+    sig: "u32 mqueue_deliver(QueueNode *node, u32 *out_data, QueueNode **out_node)"
+    module: kernel/mqueue
+    status: ported
+    notes: >-
+      Consumer accept step for popped queue nodes. Invalid node (+0x10
+      byte 0) -> *out_node=0, recycle (0x080ed958), return 0 without
+      touching out_data. Valid -> copy 8-byte payload (+0x8/+0xc);
+      persistent (+0x11 byte) hands the node to the consumer, transient
+      recycles it; return 1. No NULL guard on node (recycle guards its
+      own). 2 callers (mqueue_receive @ 0x0807f63c, loop @ 0x0807a330).
+      This IS CONDVAR_HOOKS.deliver. match.py 5/30 prefix, structure
+      identical.
+
+  - address: 0x080ed958
+    ghidra: FUN_080ed958
+    name: mqueue_node_recycle
+    size: 112
+    module: kernel/mqueue
+    status: identified
+    notes: >-
+      Returns a queue node to its owner pool (owner ptr at node+4). NULL
+      node is a no-op. Under the owner's lock (sem_wait on *owner via
+      0x08056510): if node->persistent (+0x11), first sem-waits on
+      *(owner[8]) and mutex-signals owner[9] (0x080744d8); push_back
+      (0x080f1158) onto the free list anchored at owner+0x14 (owner+5
+      words); 0x080744d8 on owner+2; sem_signal *owner; if persistent,
+      sem_signal *(owner[8]) again. Always returns 0. MQUEUE_HOOKS
+      .node_recycle stub stands in until ported (address outside the
+      kobj agent's claim range).
