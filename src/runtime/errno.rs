@@ -23,10 +23,13 @@
 //! - +0x08 heap descriptor — used by the malloc family.
 //! - +0x14 alloc arena break / +0x1c stack-guard reserve — used by the
 //!   allocator and the arena extension (see malloc_rt.rs).
-//! - +0x24 ctype table pointer — filled in by setlocale @ 0x08030860
-//!   (stores block+1 so index -1/EOF lands on a guard byte; see ctype.rs).
-//!   Zero-initialized: null until the first setlocale call.
-//! - +0x28/+0x2c `lc_numeric` decimal_point state — locale string storage.
+//! - +0x20..+0x34 the five LC category slots (collate, ctype, monetary,
+//!   numeric, time — one word per category bit), filled in by setlocale
+//!   (setlocale_core @ 0x080307bc, install path @ 0x08030860; ported in
+//!   runtime/locale.rs, which models these five words as `LC_SLOTS` —
+//!   host pointers don't fit the u32 words kept here for layout). The
+//!   ctype slot (+0x24) stores block+1 so index -1/EOF lands on a guard
+//!   byte (see ctype.rs). Zero-initialized: null until installed.
 //! - +0x3c atexit table pointer — used by the atexit/exit machinery.
 //!
 //! All other words are reserved (layout not yet recovered). The true extent
@@ -62,16 +65,20 @@ pub struct Libspace {
     reserved_18: u32,
     /// +0x1c: alloc arena bound (high), used by the allocator.
     pub alloc_arena_hi: u32,
-    /// +0x20: reserved (layout not yet recovered).
-    reserved_20: u32,
-    /// +0x24: ctype table pointer (raw address word), filled in by
-    /// setlocale @ 0x08030860 — stored biased by +1 so index -1/EOF reads a
-    /// guard byte. Zero (null) until the first setlocale call.
+    /// +0x20: LC_COLLATE slot (the locale directory ptr 0x08985c06 when
+    /// installed; see runtime/locale.rs).
+    pub lc_collate: u32,
+    /// +0x24: LC_CTYPE slot / ctype table pointer (raw address word),
+    /// filled in by setlocale @ 0x08030860 — stored biased by +1 so index
+    /// -1/EOF reads a guard byte. Zero (null) until the first setlocale.
     pub ctype_table: u32,
-    /// +0x28/+0x2c: lc_numeric decimal_point locale state.
-    pub lc_numeric_decimal_point: [u32; 2],
-    /// +0x30..+0x3c: reserved (layout not yet recovered).
-    reserved_30: [u32; 3],
+    /// +0x28: LC_MONETARY slot / +0x2c: LC_NUMERIC slot (block pointers
+    /// read by localeconv_fill @ 0x080354b8; runtime/locale.rs).
+    pub lc_monetary_numeric: [u32; 2],
+    /// +0x30: LC_TIME slot (directory ptr, like +0x20).
+    pub lc_time: u32,
+    /// +0x34..+0x3c: reserved (layout not yet recovered).
+    reserved_34: [u32; 2],
     /// +0x3c: atexit table pointer (raw address word), used by the
     /// atexit/exit machinery.
     pub atexit_table: u32,
@@ -92,10 +99,11 @@ static mut LIBSPACE: Libspace = Libspace {
     alloc_arena_lo: 0,
     reserved_18: 0,
     alloc_arena_hi: 0,
-    reserved_20: 0,
+    lc_collate: 0,
     ctype_table: 0,
-    lc_numeric_decimal_point: [0; 2],
-    reserved_30: [0; 3],
+    lc_monetary_numeric: [0; 2],
+    lc_time: 0,
+    reserved_34: [0; 2],
     atexit_table: 0,
 };
 
@@ -222,10 +230,12 @@ mod tests {
             assert_eq!(&(*libspace()).alloc_arena_lo as *const u32 as usize - base, 0x14);
             assert_eq!(&(*libspace()).alloc_arena_hi as *const u32 as usize - base, 0x1c);
             assert_eq!(&(*libspace()).ctype_table as *const u32 as usize - base, 0x24);
+            assert_eq!(&(*libspace()).lc_collate as *const u32 as usize - base, 0x20);
             assert_eq!(
-                (*libspace()).lc_numeric_decimal_point.as_ptr() as usize - base,
+                (*libspace()).lc_monetary_numeric.as_ptr() as usize - base,
                 0x28
             );
+            assert_eq!(&(*libspace()).lc_time as *const u32 as usize - base, 0x30);
             assert_eq!(&(*libspace()).atexit_table as *const u32 as usize - base, 0x3c);
         }
     }

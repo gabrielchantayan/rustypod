@@ -686,16 +686,60 @@ functions:
   - address: 0x0803350c
     name: get_lc_ctype
     size: 52
-    sig: "const void *get_lc_ctype(void *unused, const char *name)"
-    module: assert_rt
+    sig: "const void *get_lc_ctype(const void *locale_dir, const char *name)"
+    module: runtime/locale
     status: ported
     notes: >-
       CORRECTION (was '__assert_fail'): ADS C-locale getter — returns the
-      compiled-in LC_CTYPE block (0x08985f00) for name NULL/""/"C", NULL
-      otherwise; 0x08391e38 is the ADS strcmp, not an assert printer.
-      Sibling copies 0x080355f8 (block 0x08986254) and 0x08036b80 (block
-      0x0898654c) ported alongside in assert_rt.rs. All three are called
-      by the dead __rt_lib_init @ 0x08035788 to seed libspace+0x24/28/2c.
+      compiled-in LC_CTYPE block (0x08985f00, guard byte + 256 flags) for
+      name NULL/""/"C", NULL otherwise; 0x08391e38 is the ADS strcmp,
+      not an assert printer. r0 is the locale directory ptr 0x08985c06,
+      ignored. Moved from assert_rt.rs (deleted) to runtime/locale.rs
+      alongside setlocale_core; siblings get_lc_numeric @ 0x080355f8 and
+      get_lc_monetary @ 0x08036b80 have their own entries now. Called by
+      setlocale_core and by __rt_lib_init @ 0x08035788 to seed
+      libspace+0x24/28/2c.
+
+  - address: 0x080355f8
+    name: get_lc_numeric
+    size: 52
+    sig: "const void *get_lc_numeric(const void *locale_dir, const char *name)"
+    module: runtime/locale
+    status: ported
+    notes: >-
+      C-locale LC_NUMERIC getter (was get_lc_c_block_080355f8 in
+      assert_rt.rs) — same body as get_lc_ctype; block @ 0x08986254 (16
+      bytes; offsets 0xc/0xe/0xf -> "." "" ""). Installed at
+      libspace+0x2c by setlocale mask bit 8; localeconv_fill reads it.
+
+  - address: 0x08036b80
+    name: get_lc_monetary
+    size: 52
+    sig: "const void *get_lc_monetary(const void *locale_dir, const char *name)"
+    module: runtime/locale
+    status: ported
+    notes: >-
+      C-locale LC_MONETARY getter (was get_lc_c_block_08036b80 in
+      assert_rt.rs) — same body as get_lc_ctype; block @ 0x0898654c
+      (0x2b bytes; 8 CHAR_MAX char fields + 7 offsets 0x24..0x2a to
+      empty strings). Installed at libspace+0x28 by setlocale mask bit
+      4; localeconv_fill reads it.
+
+  - address: 0x080306cc
+    name: locale_name_for_mask
+    size: 240
+    sig: "const char *locale_name_for_mask(u32 mask)"
+    module: runtime/locale
+    status: ported
+    notes: >-
+      Sole caller: setlocale_core. Multi-bit mask -> '*' + 5x8 lowercase
+      hex digits of ALL five libspace+0x20..+0x34 words, rendered into
+      the 42-byte BSS buffer @ 0x08b2f8ec (literal @ 0x08030980).
+      Single-bit -> empty slot names "C" (@ 0x0803097c); installed slot
+      resolves name via the self-relative i32 at (block & ~3) - 4. For
+      an installed LC_COLLATE/LC_TIME slot (directory ptr 0x08985c06,
+      no name record) this computes the garbage pointer 0x08985c04 +
+      0x45444342 — returned, never dereferenced.
 
   # --- Batch 4: printf converters, malloc veneers, scanf front-end ---
   - address: 0x0802f2e8
@@ -2053,17 +2097,22 @@ functions:
       0x08267070/0x082a7164/0x082a8bec/0x083b6c10). Cookie at array-8 =
       {elem_size, count}; runs __cpp_finalise (ported, runtime/atexit)
       last-element-first, then tag-3 operator delete on the cookie start.
-      The null-guard veneer 0x082ab254 is inlined in the port.
+      The cookie walk goes through cpp_finalise_null_guard @ 0x082ab254
+      (own exported port in the same module).
 
   - address: 0x082ab254
     name: cpp_finalise_null_guard
-    size: 12
-    status: identified
+    size: 16
+    sig: "void *cpp_finalise_null_guard(void *array, void (*dtor)(void *))"
+    module: heap/veneers
+    status: ported
     notes: >-
       cmp r0,#0; ldmdbne r0,{r2,r3}; bne __cpp_finalise(0x080336d8);
-      mov pc,lr. Null-guarded cookie-loading veneer over __cpp_finalise;
-      behavior inlined in the cxx_vec_delete port (heap/veneers), no
-      separate port needed.
+      mov pc,lr — 16 bytes (size was recorded as 12; the mov pc,lr @
+      0x082ab260 belongs to it). Null-guarded cookie-loading front-end of
+      __cpp_finalise; returns array-8 (block start) or NULL for a NULL
+      array. Was inlined in the first cxx_vec_delete port; now extracted
+      as its own exported function which cxx_vec_delete calls.
 
   - address: 0x08036d60
     ghidra: FUN_08036d60
@@ -2299,55 +2348,88 @@ functions:
   - address: 0x080307bc
     name: setlocale_core
     size: 448
-    status: identified
-    notes: setlocale machinery (errno.rs docs reference 0x08030860, which
-      is inside this function). Installs locale block pointers into
-      libspace (+0x24 ctype, biased +1).
+    sig: "const char *setlocale_core(u32 mask, const char *name)"
+    module: runtime/locale
+    status: ported
+    notes: >-
+      Full ADS setlocale engine (the install path @ 0x08030860 that
+      errno.rs references is its second half). Categories are bits
+      (collate 1 / ctype 2 / monetary 4 / numeric 8 / time 0x10), state
+      is 5 words at libspace+0x20+4*i (ctype biased +1). NULL name =
+      query via locale_name_for_mask; name[0]=='*' = raw-slot restore of
+      five 8-hex-digit groups; else all-or-nothing install through the
+      get_lc_* getters (collate/time install the directory ptr
+      0x08985c06 directly, so any name succeeds for those two).
+      Callers: C++ locale layer @ 0x082670fc/0x08267130/0x08267154.
+      Port models the slots as LC_SLOTS [usize;5] (see module docs).
 
   - address: 0x080333c8
     name: stream_clear_error
     size: 48
-    status: identified
+    sig: "u8 *stream_clear_error(AdsStream *stream)"
+    module: stdio/stream_flags
+    status: ported
     notes: clearerr core (bic +0xc flags of 0x4000 and 0xc0) with nop'd
-      lock hooks.
+      lock hooks; returns FILE+0x3c (the lock address, an artifact of the
+      nop'd unlock).
 
   - address: 0x080333f8
-    name: stream_test_eof_flag
+    name: stream_test_error_flag
     size: 44
-    status: identified
-    notes: Returns FILE flags & 0x80 (the bit stdio_stream_error_reset
-      sets); feof/ferror-family accessor.
+    sig: "u32 stream_test_error_flag(AdsStream *stream)"
+    module: stdio/stream_flags
+    status: ported
+    notes: >-
+      CORRECTION (was stream_test_eof_flag): returns FILE flags & 0x80,
+      the ERROR indicator — stdio_stream_error_reset @ 0x08030004 sets
+      0x80 on the buffered-write failure path, and the printf front-end
+      @ 0x0802f694 maps this result to printf's EOF return. ferror core;
+      the EOF indicator is 0x40.
 
   - address: 0x08033424
     name: setvbuf_core
     size: 164
-    status: identified
+    sig: "u32 setvbuf_core(AdsStream *stream, u8 *buf, u32 mode, u32 size)"
+    module: stdio/stream_flags
+    status: ported
     notes: >-
-      Validates mode in {0x100 full, 0x200 line, 0x400 none} and size-1 <
-      0x1000000; _IONBF uses the internal 1-byte buffer at FILE+0x24;
-      stores buf/+0x10, size/+0x1c, cursor/+0x4; returns 0 ok / 1 fail.
+      Validates flags&3 != 0 and !(flags & 0x400000), mode in {0x100
+      full, 0x200 line, 0x400 none} and size-1 < 0xffffff; _IONBF uses
+      the internal 1-byte buffer at FILE+0x24 with size 1; stores
+      buf/+0x10, size/+0x1c, cursor/+0x4, flags = (flags & ~0xf00) |
+      mode; returns 0 ok / 1 fail.
 
   - address: 0x080334dc
     name: localeconv
     size: 20
-    status: identified
-    notes: Returns the static lconv @ [0x080334f0] after refilling it via
-      localeconv_fill @ 0x080354b8.
+    sig: "Lconv *localeconv(void)"
+    module: runtime/locale
+    status: ported
+    notes: Returns the static lconv @ 0x08b317d4 (pointer literal @
+      0x080334f0) after refilling it via localeconv_fill @ 0x080354b8.
+      Caller @ 0x082673f8 (C++ locale layer).
 
   - address: 0x080354b8
     name: localeconv_fill
     size: 208
-    status: identified
-    notes: Fills an lconv from the LC_NUMERIC/LC_MONETARY blocks at
-      libspace+0x28/+0x2c, resolving block-relative string offsets to
-      pointers.
+    sig: "void localeconv_fill(Lconv *lconv)"
+    module: runtime/locale
+    status: ported
+    notes: >-
+      Fills an lconv from the LC_MONETARY (libspace+0x28) and LC_NUMERIC
+      (libspace+0x2c) blocks, resolving block-relative i32 string
+      offsets (numeric +0/4/8 -> decimal_point/thousands_sep/grouping;
+      monetary +8..0x24 -> the 7 monetary strings; monetary bytes 0..8
+      -> the 8 char fields). No null guard — a locale must be installed.
 
   - address: 0x080334f4
     name: ptr_or_deref_is_null
     size: 24
-    status: identified
+    sig: "u32 ptr_or_deref_is_null(const void **p)"
+    module: runtime/locale
+    status: ported
     notes: Returns 1 if p == NULL or *p == NULL else 0; locale-block
-      presence check.
+      presence check (caller @ 0x083d8dec).
 
   - address: 0x08035924
     name: stdio_stream_alloc
@@ -2438,12 +2520,24 @@ functions:
     status: identified
     notes: >-
       CORRECTION (earlier notes said "message printer"): this is the ADS
-      library (re)initialization — fp init via 0x083ecb90, stack bound
-      fetch via 0x0800af04, __rt_heap_init, 0x0802ecc4, srandom(1), seeds
-      libspace+0x20..+0x30 (ctype block+1 at +0x24 from get_lc_ctype;
-      +0x28/+0x2c from the other two locale getters), stdio init via
-      0x080304a0. Sole caller (binary-verified bl scan): abort @
-      0x0803206c, so the termination report runs on a sane runtime.
+      library (re)initialization (__rt_lib_init). Exact call sequence
+      (disasm-verified): fp init 0x083ecb90 (unported), 0x082ab194
+      (unported), stack-bounds fetch 0x0800af04 (unported, takes a
+      3-word block on sp, returns limits in r0/r1), __rt_heap_init
+      @ 0x0802ed14 (ported), 0x0802ecc4 (unported), srandom1_thunk
+      @ 0x08030ec0 (ported), then seeds the libspace LC slots: +0x20
+      (collate) and +0x30 (time) get ZERO — their getter calls are
+      linked out to `mov r0,r0` nops with r0=0, NOT the directory
+      pointer setlocale would install; +0x24 = get_lc_ctype(0,0)+1,
+      +0x28 = get_lc_monetary(0,0), +0x2c = get_lc_numeric(0,0) (all
+      three ported, runtime/locale). Then stdio init 0x080304a0
+      (unported; more nop'd hooks around it) and __cpp_initialise
+      @ 0x080316cc (ported). Preserves r0-r3 across the whole init
+      (stacked/restored). Sole caller (binary-verified bl scan): abort
+      @ 0x0803206c, so the termination report runs on a sane runtime.
+      NOT ported yet: blocked on 0x083ecb90 / 0x082ab194 / 0x0800af04 /
+      0x0802ecc4 / 0x080304a0. When ported, its LC seeding should write
+      runtime/locale.rs LC_SLOTS (slots 1..3; 0 and 4 stay zero).
 
   - address: 0x08035878
     ghidra: FUN_08035878
@@ -2508,28 +2602,38 @@ functions:
   - address: 0x0803357c
     name: rom_memcpy_keep_dst
     size: 12
-    status: identified
-    notes: push {r0,lr}; bl thunk 0x08037dd0 (ROM __rt_memcpy @
-      0x22000020); pop {r0,pc} — memcpy veneer that returns the original
-      dst (the ROM routine advances r0).
+    sig: "void *rom_memcpy_keep_dst(void *dst, const void *src, size_t len)"
+    module: libc/rom_string
+    status: ported
+    notes: >-
+      push {r0,lr}; bl thunk 0x08037dd0 (ROM __rt_memcpy @ 0x22000020);
+      pop {r0,pc} — memcpy veneer that returns the original dst (the ROM
+      routine advances r0). ROM 0x22000020 is the mirror of ported osos
+      0x08000020, so the port calls the Rust __rt_memcpy directly.
 
   - address: 0x08033588
     name: memmove_u16
     size: 8
-    status: identified
+    sig: "u16 *memmove_u16(u16 *dst, const u16 *src, size_t count)"
+    module: libc/rom_string
+    status: ported
     notes: >-
       mov r2,r2,lsl#1 (element count -> bytes) then b 0x08035680, the
-      dst-preserving ROM-memmove veneer (push {r0,lr}; bl thunk
-      0x08037dd8 = ROM memmove @ 0x220000d4; pop {r0,pc}) — i.e. a
-      wide-char (u16 element) memmove. 0x08035680 is an unlisted 12-byte
-      function that functions.csv folds into the preceding raise range.
+      dst-preserving ROM-memmove veneer — i.e. a wide-char (u16 element)
+      memmove. Caller: the wide-string helper @ 0x083d9a2c.
 
   - address: 0x08035680
     name: rom_memmove_keep_dst
     size: 12
-    status: identified
-    notes: push {r0,lr}; bl thunk 0x08037dd8 (ROM memmove); pop {r0,pc}
-      — returns the original dst. Not listed in functions.csv.
+    sig: "void *rom_memmove_keep_dst(void *dst, const void *src, size_t len)"
+    module: libc/rom_string
+    status: ported
+    notes: >-
+      push {r0,lr}; bl thunk 0x08037dd8 (ROM memmove @ 0x220000d4);
+      pop {r0,pc} — returns the original dst. Not listed in
+      functions.csv (folded into the preceding raise range). ROM
+      0x220000d4 is the mirror of ported osos 0x080000d4, so the port
+      calls the Rust memmove directly.
 
   - address: 0x08036d08
     name: nop_stub

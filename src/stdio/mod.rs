@@ -2,3 +2,4 @@
 pub mod fread;
 pub mod semihost;
 pub mod stream_file;
+pub mod stream_flags;

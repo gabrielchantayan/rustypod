@@ -32,7 +32,14 @@
 //!   and 0x082aad14. Identical pair with tag 3.
 //! - `cxx_vec_delete` — original: `FUN_0803170c` @ 0x0803170c (16 bytes).
 //!   C++ `delete[]` with destructors: cookie-driven `__cpp_finalise` walk
-//!   (null-guard veneer 0x082ab254 inlined), then the tag-3 delete.
+//!   via the null-guard veneer @ 0x082ab254, then the tag-3 delete.
+//! - `cpp_finalise_null_guard` — original @ 0x082ab254 (16 bytes:
+//!   `cmp r0, #0; ldmdbne r0, {r2, r3}; bne __cpp_finalise; mov pc, lr`).
+//!   NULL-guarded cookie-loading front-end of `__cpp_finalise`
+//!   @ 0x080336d8 (runtime/atexit): loads the array cookie (elem size @
+//!   -8, count @ -4) and tail-calls the destructor walk, which returns
+//!   the true block start (`array - 8`); a NULL array skips the walk and
+//!   returns NULL (r0 unchanged). Sole osos caller: `cxx_vec_delete`.
 //! - `operator_new_checked` — original: `FUN_08266c70` @ 0x08266c70
 //!   (48 bytes, 223 call sites). `p = operator_new(size)`; on NULL it
 //!   invokes the C++ new-handler dispatch @ 0x08266abc with code 3, then
@@ -326,34 +333,43 @@ pub unsafe extern "C" fn operator_delete_tag3(ptr: *mut u8) {
     }
 }
 
+/// cpp_finalise_null_guard — original @ 0x082ab254 (16 bytes:
+/// `cmp r0, #0; ldmdbne r0, {r2, r3}; bne __cpp_finalise; mov pc, lr`).
+///
+/// NULL-guarded cookie-loading front-end of `__cpp_finalise` @ 0x080336d8
+/// (runtime/atexit): reads the array cookie at `array - 8` (two 32-bit
+/// words: element size @ -8, element count @ -4 — the original's single
+/// `ldmdb r0, {r2, r3}`) and tail-calls the destructor walk, whose return
+/// value is the true block start (`array - 8`). A NULL `array` skips the
+/// walk and returns NULL (the original falls through with r0 unchanged).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn cpp_finalise_null_guard(
+    array: *mut u8,
+    dtor: extern "C" fn(*mut u8),
+) -> *mut u8 {
+    if array.is_null() {
+        return array;
+    }
+    // Cookie words are 32-bit on device; kept u32 so the -8/-4 offsets
+    // stay byte-faithful on 64-bit test hosts too. Aligned loads, like
+    // the original's `ldmdb` (allocations are always word-aligned).
+    let elem_size = *(array.sub(8) as *const u32) as usize;
+    let count = *(array.sub(4) as *const u32) as usize;
+    crate::runtime::atexit::__cpp_finalise(array, dtor, elem_size, count)
+}
+
 /// cxx_vec_delete — original: `FUN_0803170c` @ 0x0803170c (16 bytes;
 /// 4 call sites: 0x08267070, 0x082a7164, 0x082a8bec, 0x083b6c10).
 ///
 /// The ADS C++ `delete[]` helper for arrays of objects with destructors:
-/// runs `dtor` over every element (via `__cpp_finalise`, LAST element
-/// first), then releases the allocation with the tag-3 `operator delete`.
-/// The array cookie at `ptr - 8` (two 32-bit words: element size @ -8,
-/// element count @ -4 — the original's single `ldmdb r0, {r2, r3}`) both
-/// parameterizes the destructor walk and marks the true block start,
-/// which `__cpp_finalise` returns (`base - 8`) for the delete.
-///
-/// The 12-byte null-guard veneer @ 0x082ab254 (`cmp r0, #0;
-/// ldmdbne r0, {r2, r3}; bne __cpp_finalise; mov pc, lr`) is inlined
-/// here: a NULL array pointer skips the walk and flows NULL into the
-/// null-guarded `operator_delete_tag3`, making the whole call a no-op.
+/// runs `dtor` over every element (via the null-guarded `__cpp_finalise`
+/// front-end @ 0x082ab254, LAST element first), then releases the
+/// allocation with the tag-3 `operator delete`. A NULL array pointer
+/// flows NULL through the guard into the null-guarded
+/// `operator_delete_tag3`, making the whole call a no-op.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn cxx_vec_delete(ptr: *mut u8, dtor: extern "C" fn(*mut u8)) {
-    let block = if ptr.is_null() {
-        ptr
-    } else {
-        // Cookie words are 32-bit on device; kept u32 so the -8/-4
-        // offsets stay byte-faithful on 64-bit test hosts too. Aligned
-        // loads, like the original's `ldmdb` (allocations are always
-        // word-aligned).
-        let elem_size = *(ptr.sub(8) as *const u32) as usize;
-        let count = *(ptr.sub(4) as *const u32) as usize;
-        crate::runtime::atexit::__cpp_finalise(ptr, dtor, elem_size, count)
-    };
+    let block = cpp_finalise_null_guard(ptr, dtor);
     operator_delete_tag3(block);
 }
 
@@ -734,6 +750,29 @@ mod tests {
             assert_eq!(DTOR_CALLS, 0, "no elements, no destructor calls");
             assert_eq!(FREE_CALLS, 1, "the cookie block is still freed");
             assert_eq!(LAST_FREE_PTR, base);
+        }
+    }
+
+    #[test]
+    fn finalise_null_guard_returns_cookie_start_or_null() {
+        let _lock = mock_heap();
+        unsafe {
+            DTOR_CALLS = 0;
+            // NULL passes through untouched, no destructor calls.
+            assert!(cpp_finalise_null_guard(core::ptr::null_mut(), logging_dtor).is_null());
+            assert_eq!(DTOR_CALLS, 0);
+            // Non-NULL: walks the cookie-described array (last first) and
+            // returns the cookie start (array - 8), like __cpp_finalise.
+            let mut block = [0u32; 2 + 2];
+            block[0] = 4; // elem_size @ -8
+            block[1] = 2; // count @ -4
+            let base = block.as_mut_ptr() as *mut u8;
+            let array = base.add(8);
+            assert_eq!(cpp_finalise_null_guard(array, logging_dtor), base);
+            assert_eq!(DTOR_CALLS, 2);
+            assert_eq!(DTOR_SEEN[0], array as usize + 4);
+            assert_eq!(DTOR_SEEN[1], array as usize);
+            assert_eq!(FREE_CALLS, 0, "the guard itself must not free");
         }
     }
 

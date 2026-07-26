@@ -4,6 +4,7 @@ pub mod memcmp;
 pub mod memcpy;
 pub mod memmove;
 pub mod memzero;
+pub mod rom_string;
 pub mod rt_memcpy;
 pub mod rt_unaligned;
 pub mod strcat;
