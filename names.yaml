@@ -686,16 +686,60 @@ functions:
   - address: 0x0803350c
     name: get_lc_ctype
     size: 52
-    sig: "const void *get_lc_ctype(void *unused, const char *name)"
-    module: assert_rt
+    sig: "const void *get_lc_ctype(const void *locale_dir, const char *name)"
+    module: runtime/locale
     status: ported
     notes: >-
       CORRECTION (was '__assert_fail'): ADS C-locale getter — returns the
-      compiled-in LC_CTYPE block (0x08985f00) for name NULL/""/"C", NULL
-      otherwise; 0x08391e38 is the ADS strcmp, not an assert printer.
-      Sibling copies 0x080355f8 (block 0x08986254) and 0x08036b80 (block
-      0x0898654c) ported alongside in assert_rt.rs. All three are called
-      by the dead __rt_lib_init @ 0x08035788 to seed libspace+0x24/28/2c.
+      compiled-in LC_CTYPE block (0x08985f00, guard byte + 256 flags) for
+      name NULL/""/"C", NULL otherwise; 0x08391e38 is the ADS strcmp,
+      not an assert printer. r0 is the locale directory ptr 0x08985c06,
+      ignored. Moved from assert_rt.rs (deleted) to runtime/locale.rs
+      alongside setlocale_core; siblings get_lc_numeric @ 0x080355f8 and
+      get_lc_monetary @ 0x08036b80 have their own entries now. Called by
+      setlocale_core and by __rt_lib_init @ 0x08035788 to seed
+      libspace+0x24/28/2c.
+
+  - address: 0x080355f8
+    name: get_lc_numeric
+    size: 52
+    sig: "const void *get_lc_numeric(const void *locale_dir, const char *name)"
+    module: runtime/locale
+    status: ported
+    notes: >-
+      C-locale LC_NUMERIC getter (was get_lc_c_block_080355f8 in
+      assert_rt.rs) — same body as get_lc_ctype; block @ 0x08986254 (16
+      bytes; offsets 0xc/0xe/0xf -> "." "" ""). Installed at
+      libspace+0x2c by setlocale mask bit 8; localeconv_fill reads it.
+
+  - address: 0x08036b80
+    name: get_lc_monetary
+    size: 52
+    sig: "const void *get_lc_monetary(const void *locale_dir, const char *name)"
+    module: runtime/locale
+    status: ported
+    notes: >-
+      C-locale LC_MONETARY getter (was get_lc_c_block_08036b80 in
+      assert_rt.rs) — same body as get_lc_ctype; block @ 0x0898654c
+      (0x2b bytes; 8 CHAR_MAX char fields + 7 offsets 0x24..0x2a to
+      empty strings). Installed at libspace+0x28 by setlocale mask bit
+      4; localeconv_fill reads it.
+
+  - address: 0x080306cc
+    name: locale_name_for_mask
+    size: 240
+    sig: "const char *locale_name_for_mask(u32 mask)"
+    module: runtime/locale
+    status: ported
+    notes: >-
+      Sole caller: setlocale_core. Multi-bit mask -> '*' + 5x8 lowercase
+      hex digits of ALL five libspace+0x20..+0x34 words, rendered into
+      the 42-byte BSS buffer @ 0x08b2f8ec (literal @ 0x08030980).
+      Single-bit -> empty slot names "C" (@ 0x0803097c); installed slot
+      resolves name via the self-relative i32 at (block & ~3) - 4. For
+      an installed LC_COLLATE/LC_TIME slot (directory ptr 0x08985c06,
+      no name record) this computes the garbage pointer 0x08985c04 +
+      0x45444342 — returned, never dereferenced.
 
   # --- Batch 4: printf converters, malloc veneers, scanf front-end ---
   - address: 0x0802f2e8
@@ -2242,10 +2286,20 @@ functions:
   - address: 0x080307bc
     name: setlocale_core
     size: 448
-    status: identified
-    notes: setlocale machinery (errno.rs docs reference 0x08030860, which
-      is inside this function). Installs locale block pointers into
-      libspace (+0x24 ctype, biased +1).
+    sig: "const char *setlocale_core(u32 mask, const char *name)"
+    module: runtime/locale
+    status: ported
+    notes: >-
+      Full ADS setlocale engine (the install path @ 0x08030860 that
+      errno.rs references is its second half). Categories are bits
+      (collate 1 / ctype 2 / monetary 4 / numeric 8 / time 0x10), state
+      is 5 words at libspace+0x20+4*i (ctype biased +1). NULL name =
+      query via locale_name_for_mask; name[0]=='*' = raw-slot restore of
+      five 8-hex-digit groups; else all-or-nothing install through the
+      get_lc_* getters (collate/time install the directory ptr
+      0x08985c06 directly, so any name succeeds for those two).
+      Callers: C++ locale layer @ 0x082670fc/0x08267130/0x08267154.
+      Port models the slots as LC_SLOTS [usize;5] (see module docs).
 
   - address: 0x080333c8
     name: stream_clear_error
@@ -2286,24 +2340,34 @@ functions:
   - address: 0x080334dc
     name: localeconv
     size: 20
-    status: identified
-    notes: Returns the static lconv @ [0x080334f0] after refilling it via
-      localeconv_fill @ 0x080354b8.
+    sig: "Lconv *localeconv(void)"
+    module: runtime/locale
+    status: ported
+    notes: Returns the static lconv @ 0x08b317d4 (pointer literal @
+      0x080334f0) after refilling it via localeconv_fill @ 0x080354b8.
+      Caller @ 0x082673f8 (C++ locale layer).
 
   - address: 0x080354b8
     name: localeconv_fill
     size: 208
-    status: identified
-    notes: Fills an lconv from the LC_NUMERIC/LC_MONETARY blocks at
-      libspace+0x28/+0x2c, resolving block-relative string offsets to
-      pointers.
+    sig: "void localeconv_fill(Lconv *lconv)"
+    module: runtime/locale
+    status: ported
+    notes: >-
+      Fills an lconv from the LC_MONETARY (libspace+0x28) and LC_NUMERIC
+      (libspace+0x2c) blocks, resolving block-relative i32 string
+      offsets (numeric +0/4/8 -> decimal_point/thousands_sep/grouping;
+      monetary +8..0x24 -> the 7 monetary strings; monetary bytes 0..8
+      -> the 8 char fields). No null guard — a locale must be installed.
 
   - address: 0x080334f4
     name: ptr_or_deref_is_null
     size: 24
-    status: identified
+    sig: "u32 ptr_or_deref_is_null(const void **p)"
+    module: runtime/locale
+    status: ported
     notes: Returns 1 if p == NULL or *p == NULL else 0; locale-block
-      presence check.
+      presence check (caller @ 0x083d8dec).
 
   - address: 0x08035924
     name: stdio_stream_alloc

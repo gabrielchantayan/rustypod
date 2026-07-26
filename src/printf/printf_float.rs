@@ -79,7 +79,6 @@
 use crate::printf_helpers::{
     pad_emit, pad_emit_zero, PrintfState, FLAG_PRECISION_GIVEN, FLAG_ZERO_PAD,
 };
-use crate::runtime::errno::libspace;
 
 /// Format flag: `+` — always show a sign (same bit as printf_core's
 /// private FLAG_SHOW_SIGN; re-declared here since it is not shared).
@@ -177,9 +176,12 @@ pub type DecimalPointFn = unsafe extern "C" fn() -> u8;
 /// ldrb dec,[r0,r1]`). On target the block is installed by startup
 /// (FUN_08035788 stores the C-locale block 0x08986254 there); before
 /// that, like the original, this dereferences whatever the slot holds.
+/// The libspace+0x2c word is modeled by runtime/locale.rs's LC_SLOTS
+/// (the u32 slots in `Libspace` cannot hold host pointers), so the read
+/// goes through its accessor — setlocale_core installs what this reads.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn decimal_point_from_libspace() -> u8 {
-    let block = (*libspace()).lc_numeric_decimal_point[1] as *const u8;
+    let block = crate::runtime::locale::installed_lc_numeric_block();
     *block.add(*(block as *const u32) as usize)
 }
 
