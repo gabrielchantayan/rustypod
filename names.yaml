@@ -2384,12 +2384,51 @@ functions:
     size: 1156
     status: identified
     notes: >-
-      Large buffered-stream core called from the fread/stream-read
-      cluster (0x08036910/0x08036aa8); __flsbuf/__filbuf-scale — the
-      getc-side helper behind fread.rs's STREAM_GETC contract (returns
-      next char, -1 EOF, or -2 "do a bulk refill" when the caller set
-      flags bit 0x800000). Reads through stream_raw_read @ 0x08034f88
-      (bl @ 0x080353c8). Not yet ported.
+      The __filbuf-scale getc core behind fread.rs's STREAM_GETC contract
+      (arg AdsFile*; returns next char, -1 EOF, -2 "do a bulk refill"
+      when the caller set flags 0x800000). Sets 0x400000 (in-getc) on
+      entry. Fast path: string-mode readable state (masked pair 0x4820e1
+      / 0x400001, pool @ 0x08035474/70 — same constants fread.rs names
+      STRING_MODE_MASK/VALUE) delivers *ptr++ directly. Slow path when
+      flags&0x80000 clear: syncs alt-offset via 0x080301d4 when flags &
+      0x20; on read-eligible state ((flags & 0x60c9 pool @ 0x0803547c)
+      == 1) lazily mallocs the buffer (size +0x1c) into +0x10/+0x04 and
+      sets 0x800 (|0x900 if no 0x300 buffering-mode bit); seeks/flushes
+      (write-mode via flush core 0x08030138, seek via _sys_seek with
+      pos rebuilt from +0x18/+0x28), flushes SHARED buffers via
+      stdio_foreach_close @ 0x080300dc(self), answers -2 for bulk
+      (0x800000) after resetting ptr/lim to base, else refills via
+      stream_raw_read @ 0x08034f88 (bl @ 0x080353c8), parking count =
+      n-1, lim = dest+n, +0x30 = size; on refill 0 sets EOF 0x40 and
+      clears 0x1000. flags&0x80000 set = the ungetc-pending variant:
+      recomputes count/+0x08 from ptr/lim/+0x30 (write mask 0x4816a2
+      pool @ 0x08035478, 0x4040 pool @ 0x08035480) and returns the
+      pushback byte at +0x25. Unported callees: 0x08030138 (buffered
+      flush core), 0x080301d4 (alt-offset sync). Not yet ported — the
+      largest remaining piece of the buffered-stdio cluster.
+
+  - address: 0x08030138
+    name: stdio_flush_buffer_core
+    size: 156
+    status: identified
+    notes: >-
+      Buffered flush core (called by the per-stream flush wrapper
+      0x080302d0, the getc core 0x08034fec and 0x080301d4): computes the
+      live buffer extent from +0x10 base, +0x2c lim, +0x04 ptr, clears
+      0x280000, and for write-mode streams drains via stdio_writeback @
+      0x08030044. Not yet ported (STREAM_FLUSH hook covers its locked
+      wrapper 0x080302d0).
+
+  - address: 0x080301d4
+    name: stdio_sync_alt_offset
+    size: 100
+    status: identified
+    notes: >-
+      Clears flags 0x20 (fread.rs's FLAG_ALT_OFFSET), and when pos
+      (+0x18) != alt_offset (+0x28) flushes via 0x08030138 and clears
+      0x3000; realigns the buffered position after an fseek-style
+      offset override. Called from the getc core 0x08034fec. Not yet
+      ported.
 
   # --- Batch 10 scouting: identified only (runtime / libm misc) ---
   - address: 0x08035788
