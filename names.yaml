@@ -2738,3 +2738,23 @@ functions:
       memzero_aligned directly (stdio_init/fclose_core use typed field
       resets — equivalent on the 32-bit layout, portable on wider
       hosts).
+
+  - address: 0x080304a0
+    ghidra: FUN_080304a0
+    name: stdio_init
+    size: 388
+    sig: "void stdio_init()"
+    module: stdio/stdio_init
+    status: ported
+    notes: >-
+      The ADS _initio (stdio arm of __rt_lib_init; sole caller
+      rt_lib_init_for_abort @ 0x08035788). Zeroes the three static FILE
+      objects (0x08b2f820/64/a8, 0x44 bytes each via the IRAM memclr
+      veneer), chains stdin -> stdout -> stderr (+0x40 links), runs the
+      per-stream and list lock-init calls — 0x080320a0 is the ported
+      return-0 stub sys_stub_ret0_2, so the flags|=0x1000000 fallback
+      marking is dead — then freopen_core on the semihosting console
+      ":tt" (rodata copies @ 0x08985ee4/e8/ec; modes "r"/"w"/"w") and
+      setvbuf_core(NULL, 0x200 line-buffered, 0x40/0x40/0x10). Every
+      freopen NULL / setvbuf nonzero raises SIGRTRED (8, __rt_raise)
+      with the ":tt" pointer as the detail word and falls through.

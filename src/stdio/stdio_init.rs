@@ -249,6 +249,57 @@ pub unsafe extern "C" fn freopen_core(
     file
 }
 
+/// stdio_init — original: `FUN_080304a0` @ 0x080304a0 (388 bytes); the
+/// ADS `_initio`. Sole caller: `rt_lib_init_for_abort` @ 0x08035788.
+///
+/// Zeroes the three static FILE objects (0x44 bytes each), chains
+/// stdin -> stdout -> stderr, runs the per-stream and list lock-init
+/// calls (retailOS links them to the return-0 stub @ 0x080320a0; a
+/// nonzero return would mark the stream string-mode — dead), reopens
+/// each stream on the semihosting console ":tt" ("r"/"w"/"w") and
+/// line-buffers it (`setvbuf_core`, sizes 0x40/0x40/0x10). Any freopen
+/// NULL or setvbuf nonzero raises SIGRTRED (8) with the ":tt" pointer as
+/// detail; execution continues after a handled raise, exactly like the
+/// original's fall-through.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn stdio_init() {
+    let streams = [stdin_file(), stdout_file(), stderr_file()];
+    for file in streams {
+        // Original: IRAM memclr of the full 0x44-byte FILE object — a
+        // typed reset here (module deviations).
+        *file = ADS_FILE_ZERO;
+    }
+    (*streams[0]).link = streams[1];
+    (*streams[1]).link = streams[2];
+    // Per-stream lock init (return-0 stub on this build; the original
+    // passes &file.lock, dropped by the ported stub's signature).
+    for file in streams {
+        if sys_stub_ret0_2() != 0 {
+            (*file).stream.flags |= FLAG_STRING_MODE;
+        }
+    }
+    // Stream-list lock init (original arg: the list lock @ 0x08a0fc04).
+    sys_stub_ret0_2();
+    let tt = TT_CONSOLE_NAME.as_ptr();
+    // SIGRTRED detail: the ":tt" pointer in the i32 code word (truncated
+    // on 64-bit hosts — see module docs).
+    let tt_detail = tt as usize as i32;
+    for (file, mode) in [
+        (streams[0], b"r\0".as_ptr()),
+        (streams[1], b"w\0".as_ptr()),
+        (streams[2], b"w\0".as_ptr()),
+    ] {
+        if freopen_core(tt, mode, file).is_null() {
+            __rt_raise(SIGRTRED, tt_detail);
+        }
+    }
+    for (file, size) in [(streams[0], 0x40u32), (streams[1], 0x40), (streams[2], 0x10)] {
+        if setvbuf_core(file as *mut AdsStream, core::ptr::null_mut(), IOLBF, size) != 0 {
+            __rt_raise(SIGRTRED, tt_detail);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -514,4 +565,67 @@ mod tests {
         }
     }
 
+    // --- stdio_init ------------------------------------------------------
+
+    #[test]
+    fn stdio_init_reopens_and_line_buffers_the_console_streams() {
+        let _guard = lock_and_reset(&[3, 4, 5]);
+        unsafe {
+            // Pre-poison the statics: init must fully re-establish them.
+            *stdin_file() = open_file(FLAG_SKIP_CLOSE | 1, 9);
+            *stdout_file() = open_file(FLAG_SKIP_CLOSE | 2, 9);
+            *stderr_file() = open_file(FLAG_SKIP_CLOSE | 2, 9);
+            stdio_init();
+            // Three ":tt" opens with modes r(0)/w(4)/w(4), nothing else.
+            let log = &(*core::ptr::addr_of!(SWI_LOG));
+            assert_eq!(swi_ops(), std::vec![SYS_OPEN, SYS_OPEN, SYS_OPEN]);
+            for (entry, mode) in log.iter().zip([0usize, 4, 4]) {
+                assert_eq!(entry.1[0], TT_CONSOLE_NAME.as_ptr() as usize);
+                assert_eq!(entry.1[1], mode);
+                assert_eq!(entry.1[2], 3, "strlen(\":tt\")");
+            }
+            let cases = [
+                (stdin_file(), 3, 1, 0x40),
+                (stdout_file(), 4, 2, 0x40),
+                (stderr_file(), 5, 2, 0x10),
+            ];
+            for (file, handle, rw, size) in cases {
+                assert_eq!((*file).stream.handle, handle);
+                assert_eq!((*file).stream.flags, rw | IOLBF, "open + line-buffered");
+                assert_eq!((*file).stream.bulk_threshold, size, "setvbuf size");
+                assert!((*file).stream.base.is_null(), "deferred buffer");
+            }
+            assert_eq!((*stdin_file()).link, stdout_file());
+            assert_eq!((*stdout_file()).link, stderr_file());
+            assert!((*stderr_file()).link.is_null());
+            restore_swi();
+        }
+    }
+
+    #[test]
+    fn stdio_init_raises_sigrtred_on_every_failure() {
+        // No scripted SWI results: every open fails, so each freopen
+        // raises, the streams stay closed, and each setvbuf raises too.
+        let _guard = lock_and_reset(&[]);
+        let _sig_guard = crate::raise::TEST_SIGNAL_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            static mut RAISED: Vec<i32> = Vec::new();
+            unsafe extern "C" fn log_signal(sig: i32, _code: i32) {
+                (*core::ptr::addr_of_mut!(RAISED)).push(sig);
+            }
+            (*core::ptr::addr_of_mut!(RAISED)).clear();
+            let previous = crate::raise::signal(SIGRTRED, log_signal as usize as isize);
+            stdio_init();
+            crate::raise::signal(SIGRTRED, previous);
+            assert_eq!(
+                *core::ptr::addr_of!(RAISED),
+                std::vec![SIGRTRED; 6],
+                "3 freopen + 3 setvbuf failures"
+            );
+            assert_eq!((*stdin_file()).stream.flags, 0, "stream left closed");
+            restore_swi();
+        }
+    }
 }
