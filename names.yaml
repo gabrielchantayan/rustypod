@@ -2643,3 +2643,98 @@ functions:
     status: ported
     notes: mov pc,lr. Weak hook target (reached via 0x080358a0 from the
       abort report path).
+
+  # --- Batch 12: the __rt_lib_init dependency chain (runtime/lib_init +
+  # stdio/stdio_init) ---
+  - address: 0x08030238
+    ghidra: FUN_08030238
+    name: fclose_core
+    size: 152
+    sig: "i32 fclose_core(AdsFile *file)"
+    module: stdio/stdio_init
+    status: ported
+    notes: >-
+      fclose engine minus FILE deallocation. flags&3==0 -> -1 untouched.
+      Unless flags&8 (skip-close pseudo-stream marker, producer not yet
+      identified) it syncs via 0x0802fc00 (STREAM_SYNC_CORE hook) with
+      take_lock=0, _sys_close(handle) (negative -> -1, stream NOT
+      reset), frees the buffer when flags&0x800 (heap-buffer bit), and
+      skips a linked-out post-close hook gated on flags&0xfe000000 ==
+      0xac000000 (nop'd bl @ 0x080302a4 whose r0 the original returns —
+      still 0). Reset: IRAM memclr (veneer 0x08037db8 ->
+      memzero_aligned) of the first 0x3c bytes (lock +0x3c and chain
+      link +0x40 survive), then flags = old & 0x1000000 (string-mode
+      bit only). Callers (binary-verified): the locked wrapper
+      0x080302d0 (other agent) and freopen_core @ 0x08030300.
+
+  - address: 0x0802fef0
+    ghidra: FUN_0802fef0
+    name: fseek
+    size: 72
+    sig: "i32 fseek(AdsFile *file, i32 offset, i32 whence)"
+    module: stdio/stdio_init
+    status: ported
+    notes: >-
+      Public fseek entry — the patched-out per-stream lock bracket
+      around the seek core @ 0x0802fd04 (STREAM_SEEK_CORE hook), result
+      passed through. Six callers (binary-verified) incl. scanf/C++
+      layers and freopen_core's append path.
+
+  - address: 0x0802fd04
+    ghidra: FUN_0802fd04
+    name: fseek_core
+    size: 492
+    status: identified
+    notes: >-
+      The buffered fseek engine (STREAM_SEEK_CORE hook default in
+      stdio/stdio_init.rs reports failure until ported). Callers:
+      fseek @ 0x0802fef0 and 0x0802fc7c (inside the sync core
+      0x0802fc00). Deep in the buffered-stdio cluster.
+
+  - address: 0x0802fc00
+    ghidra: FUN_0802fc00
+    name: stream_sync_core
+    size: 156
+    status: identified
+    notes: >-
+      Flush/position-sync core with a take-lock r1 flag (nonzero
+      brackets in the patched-out stream lock). Computes the logical
+      position from ptr/offset/base (or +0x28 when flags&0x20) and
+      drains/seeks accordingly; calls fseek_core @ 0x0802fd04. Callers
+      (binary-verified): 0x0802fcb0/0x0802fcd4 (fflush family),
+      0x08030118, fclose_core @ 0x08030238. Reached from ports through
+      the STREAM_SYNC_CORE hook (stdio/stdio_init.rs) and — same
+      routine — stream_file.rs's STREAM_CLOSE_CORE hook.
+
+  - address: 0x08030300
+    ghidra: FUN_08030300
+    name: freopen_core
+    size: 252
+    sig: "AdsFile *freopen_core(const u8 *name, const u8 *mode, AdsFile *file)"
+    module: stdio/stdio_init
+    status: ported
+    notes: >-
+      fclose_core(file) (result ignored), then mode-string parse: 'r' ->
+      flags 1/semihost-mode 0, 'w' -> 2/4, 'a' -> 0x8002 (literal pool
+      @ 0x08030694)/8, else NULL; any run of '+' (flags|=3, mode|=2) and
+      'b' (flags|=4, mode|=1); trailing 't' adds 0x10 to the mode. Then
+      _sys_open(name, mode) — exactly -1 -> NULL. Re-init: base/ptr
+      NULL, +0x1c = 0x200 default, handle stored, flags = (old &
+      0x1000000) | parsed; append mode seeks to the end (fseek(file, 0,
+      2), result ignored). Returns file. Callers (binary-verified):
+      fopen @ 0x080303fc (unported) and stdio_init x3.
+
+  - address: 0x08037db8
+    name: iram_memzero_aligned_veneer
+    size: 8
+    module: libc/memzero
+    status: ported
+    notes: >-
+      ldr pc,[pc,#-4] -> 0x2200027c: the IRAM-relocated copy of
+      memzero_aligned @ 0x0800027c (same mirror scheme as the ROM
+      veneers @ 0x08037dd0/0x08037dd8 — the 0x22000000 image is the
+      low-address osos libc block, offsets match). 320 bl sites
+      firmware-wide (binary-verified); ports call the Rust
+      memzero_aligned directly (stdio_init/fclose_core use typed field
+      resets — equivalent on the 32-bit layout, portable on wider
+      hosts).

@@ -1,5 +1,6 @@
 //! ADS stdio stream layer (fread et al., semihost-backed).
 pub mod fread;
 pub mod semihost;
+pub mod stdio_init;
 pub mod stream_file;
 pub mod stream_flags;
