@@ -54,15 +54,14 @@
 //! `expf_core` — original @ 0x08033f40. Second argument is an exponent
 //! delta folded into the final scale (the only caller passes 0).
 //!
-//! Unported dependency modeled here:
-//! - The e^frac kernel @ 0x08035d50 (CORDIC-style digit recurrence with a
-//!   table @ 0x08036008; writes its result through the third of three out
-//!   pointers, the other two being scratch the caller never reads) sits
-//!   behind the replaceable [`EXP_FRAC_KERNEL`] hook — the same pattern as
-//!   `LOG_ATANH_KERNEL` in crate::libm::misc. The default stub returns
-//!   `__fadd(1.0f, frac)`, which reproduces the original's
-//!   frac <= 2^-12 (0x39800000) fast path EXACTLY but is only the linear
-//!   approximation for larger frac; swap in the real port when it lands.
+//! Kernel dependency:
+//! - The e^frac kernel @ 0x08035d50 (hyperbolic CORDIC, ported as
+//!   `crate::libm::cordic::exp_frac_kernel`; writes its result through the
+//!   third of three out pointers, the other two being sinh/cosh outputs the
+//!   caller never reads) sits behind the replaceable [`EXP_FRAC_KERNEL`]
+//!   hook — the same pattern as `LOG_ATANH_KERNEL` in crate::libm::misc.
+//!   The wired default adapts the real port's out-pointer signature to the
+//!   single value the caller reads.
 //!
 //! Behavioral notes / simplifications:
 //! - The "libm raise wrapper" @ 0x08032178 is `*__rt_errno_addr() = code`,
@@ -93,7 +92,7 @@ use core::cmp::Ordering;
 use crate::fp_compare::dcmp;
 use crate::fp_dadd::__dadd;
 use crate::fp_dconv::__d2i;
-use crate::fp_fadd::{__fadd, __frsb};
+use crate::fp_fadd::__frsb;
 use crate::fp_fconv::{__f2d, __i2f};
 use crate::fp_fmuldiv::__fmul;
 use crate::fp_misc::_dsqrt;
@@ -199,15 +198,24 @@ pub unsafe extern "C" fn expf(x: u32) -> u32 {
 
 /// Replaceable hook for the e^frac kernel @ 0x08035d50 (see module
 /// header). Signature collapses the original's three out-pointers to the
-/// single result the caller reads; the default stub is the original's
-/// frac <= 2^-12 fast path, `__fadd(1.0f, frac)`.
+/// single result the caller reads; the wired default is the real CORDIC
+/// port behind a thin adapter.
 pub static mut EXP_FRAC_KERNEL: unsafe extern "C" fn(u32) -> u32 = default_exp_frac_kernel;
 
-/// Default [`EXP_FRAC_KERNEL`]: exact for frac <= 0x39800000 (2^-12),
-/// linear approximation above — documented deviation until the kernel
-/// @ 0x08035d50 is ported.
+/// Default [`EXP_FRAC_KERNEL`]: the real port,
+/// `crate::libm::cordic::exp_frac_kernel`, with the sinh/cosh outputs
+/// (scratch the original caller never reads) dropped.
 unsafe extern "C" fn default_exp_frac_kernel(frac: u32) -> u32 {
-    __fadd(ONE_F, frac)
+    let mut sinh_scratch: u32 = 0;
+    let mut cosh_scratch: u32 = 0;
+    let mut result: u32 = 0;
+    crate::libm::cordic::exp_frac_kernel(
+        frac,
+        &mut sinh_scratch,
+        &mut cosh_scratch,
+        &mut result,
+    );
+    result
 }
 
 /// Dispatches through [`EXP_FRAC_KERNEL`]. The volatile read keeps the
@@ -603,6 +611,7 @@ mod tests {
 
     #[test]
     fn expf_core_exp_delta_scales_final_result() {
+        let _g = LOCK.lock().unwrap();
         // The tiny-magnitude early exit returns 1.0f WITHOUT applying the
         // delta (the original branches out before the scale is built).
         assert_eq!(fexp_core(0, 16), ONE_F);
@@ -610,13 +619,15 @@ mod tests {
         // scale: expf_core(1, 1) = e^1 * 2.
         let e1x2 = f32::from_bits(POW_E[0]) * 2.0f32;
         assert_eq!(fexp_core(1.0f32.to_bits(), 1), e1x2.to_bits());
-        // Negative delta: 1.5 (default-stub kernel value for frac 0.5)
-        // scaled by 2^-1.
-        assert_eq!(fexp_core(0.5f32.to_bits(), -1), (1.5f32 * 0.5f32).to_bits());
+        // Negative delta: the wired kernel's e^0.5 (0x3fd3094e, pinned in
+        // libm/cordic) scaled by 2^-1 (exact).
+        let e_half = f32::from_bits(0x3fd3_094e);
+        assert_eq!(fexp_core(0.5f32.to_bits(), -1), (e_half * 0.5f32).to_bits());
     }
 
     #[test]
     fn expf_core_frac_fast_path_is_exact() {
+        let _g = LOCK.lock().unwrap();
         // frac <= 2^-12 uses the original kernel's exact fast path,
         // 1 + frac; with e = 0 no table scaling happens.
         let x = 1e-4f32; // e = 0, frac = 1e-4 <= 2^-12
@@ -625,11 +636,38 @@ mod tests {
     }
 
     #[test]
-    fn expf_core_default_kernel_stub_deviation_pinned() {
-        // frac > 2^-12: the default hook is the linear 1 + frac (NOT the
-        // true e^frac) — pin the documented stub behavior.
+    fn expf_core_wired_default_is_real_cordic_kernel() {
+        let _g = LOCK.lock().unwrap();
+        // frac > 2^-12: the wired default is the real CORDIC port — the
+        // result must be exactly what the exported kernel writes through
+        // its third out pointer.
         let x = 0.5f32; // e = 0, frac = 0.5
-        assert_eq!(fexp_core(x.to_bits(), 0), (1.0f32 + 0.5f32).to_bits());
+        let (mut s, mut c, mut r) = (0u32, 0u32, 0u32);
+        unsafe { crate::libm::cordic::exp_frac_kernel(x.to_bits(), &mut s, &mut c, &mut r) };
+        assert_eq!(fexp_core(x.to_bits(), 0), r);
+        assert_eq!(r, 0x3fd3_094e); // e^0.5, pinned in libm/cordic
+    }
+
+    #[test]
+    fn expf_end_to_end_through_wired_kernel_matches_host() {
+        let _g = LOCK.lock().unwrap();
+        // Full original pipeline (floor split + CORDIC kernel + power
+        // tables) against the host's double-precision exp. The table
+        // product stacks a few more roundings on the kernel's 2 ulp.
+        for &x in &[0.5f32, 0.75, 1.5, 2.7182818, -0.5, -2.5, 3.75, 10.1, -33.3, 60.25,
+                    88.5, -87.4, 0.001, -0.001] {
+            let got = fexp(x.to_bits());
+            let reference = ((x as f64).exp() as f32).to_bits();
+            assert!(
+                ulp_distance(got, reference) <= 8,
+                "x={x} got={got:#x} ref={reference:#x}"
+            );
+        }
+    }
+
+    /// Ordered-integer ulp distance (same-sign positive floats).
+    fn ulp_distance(a: u32, b: u32) -> i64 {
+        (a as i64 - b as i64).abs()
     }
 
     #[test]

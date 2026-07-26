@@ -2338,21 +2338,46 @@ functions:
     ghidra: FUN_08035b3c
     name: log_atanh_kernel
     size: 524
-    status: identified
+    sig: "u32 log_atanh_kernel(u32 u)"
+    module: libm/cordic
+    status: ported
+    vars: {param_1: u, uVar17: y, uVar18: x, iVar16: acc, iVar15: e then
+      loop_count, iVar3: table_index, uVar6: scale_log2, iVar14: min_shift,
+      uVar8: sh_y, uVar11: sh_x, uVar19: sh_t}
     notes: >-
-      Fixed-point atanh/ln kernel (tables @ 0x08986264/0x0898630c); sole
-      caller log_decompose @ 0x080340fc. The LOG_ATANH_KERNEL hook in
-      libm/misc.rs awaits this port.
+      Hyperbolic-CORDIC atanh, vectoring mode; u <= 2^-12 (signed)
+      returns unchanged, else 9-row seed table @ 0x0898630c pre-rotates
+      (smull + __aeabi_lasr), then 32 iterations over the Q30 atanh
+      table @ 0x08986264 (repeats at indices 3/13) gather acc, returned
+      as __fdiv(__i2f(acc), __fscalb(__i2f(1 << (scale-1)), 30)). ARM
+      register-shift semantics (>= 32 sign-fills) are load-bearing late
+      in the loop. Sole caller log_decompose @ 0x080340fc; wired as the
+      LOG_ATANH_KERNEL default in libm/misc.rs. Within 1 ulp of host
+      atanh across the caller domain u in [0, 0.6).
 
   - address: 0x08035d50
     ghidra: FUN_08035d50
     name: exp_frac_kernel
     size: 696
-    status: identified
+    sig: "void exp_frac_kernel(u32 frac, u32 *out_sinh, u32 *out_cosh,
+      u32 *out_result)"
+    module: libm/cordic
+    status: ported
+    vars: {param_1: frac, param_2: out_sinh, param_3: out_cosh, param_4:
+      out_result, iVar13: x, iVar12: y, iVar8: z, unaff_r6: start_index}
     notes: >-
-      CORDIC-style digit-recurrence e^frac kernel; sole caller
-      _fsqrt_core @ 0x08033fdc. The hook in libm/sqrt.rs awaits this
-      port.
+      Hyperbolic-CORDIC e^frac, rotation mode; writes sinh/cosh/e^frac
+      through the three out pointers (caller reads only the third).
+      frac <= 2^-12 short-cuts to (frac, 1.0f, __fadd(frac, 1.0f)); else
+      the 12-pair seed table @ 0x089864d4 (indexed -exp-1) forms the
+      residual angle, a fixed seed-rotation loop rebuilds (x, y), and 32
+      iterations over the Q30 atanh table @ 0x0898642c (byte-identical
+      to the log copy @ 0x08986264; repeats at 3/13) drive z to 0.
+      Finale scales by 1/K consts @ 0x08036010/0x08036014 and rescales
+      the sinh output by raw exponent-field subtraction. Sole caller
+      expf_core @ 0x08033f40 (recorded as _fsqrt_core; call site
+      0x08033fdc); wired as the EXP_FRAC_KERNEL default in
+      libm/sqrt.rs. e^frac within 2 ulp of host exp over frac in [0, 1).
 
   - address: 0x0803357c
     name: rom_memcpy_keep_dst
