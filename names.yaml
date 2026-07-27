@@ -3189,12 +3189,35 @@ functions:
     size: 72
     sig: "u8 *queue_pool_create(i32 capacity)"
     module: kernel/task
+    status: ported
+    notes: >-
+      Allocates capacity*0x14+0x48 bytes (tag 10, wrapping 32-bit size
+      from the raw capacity) and initializes the pool via
+      0x0809eab8(capacity, base+0x48, base); capacity < 1 degrades to
+      (0, 0, base). Returns the unchecked base. 22 bl call sites (among
+      them task_notify @ 0x08060fb8). Now the TASK_HOOKS
+      .queue_pool_create default (capacity retyped i32 to match the
+      signed compare); the initializer routes through the new TASK_HOOKS
+      .pool_init stub until ported. match.py structural (identical size
+      math/tag/degrade branch; hook-table ldrd noise).
+
+  - address: 0x0809eab8
+    ghidra: FUN_0809eab8
+    name: queue_pool_init
+    size: 160
+    sig: "u32 queue_pool_init(i32 capacity, QueueNode *nodes, QueuePool *pool)"
+    module: kernel/mqueue
     status: identified
     notes: >-
-      Allocates capacity*0x14+0x48 bytes (tag 10) and initializes the
-      pool via 0x0809eab8(capacity, base+0x48, base); capacity < 1
-      degrades to (0, 0, base). TASK_HOOKS.queue_pool_create. Out of
-      claim range.
+      Lays out the 0x48-byte QueuePool header (see kernel/mqueue.rs):
+      pool->lock = sem_create (0x08056724); condvar3-init (0x080ed9c8:
+      {backref, 0, 0}) at +0x08 backref pool; zeroes +0x14..+0x28 and
+      stores nodes at +0x1c; chains the capacity nodes (stride 0x14)
+      onto the free list at +0x14 with node->owner = pool and
+      node->valid (+0x10) = 1 (list_push_back 0x080f1158); mutex_create
+      (0x080744a4) at +0x2c; condvar3-init at +0x34 backref pool+0x2c;
+      zeroes +0x40/+0x44 (the LockedQueue anchor). Returns 0. 1 bl call
+      site (queue_pool_create). TASK_HOOKS.pool_init target.
 
   - address: 0x0807a15c
     ghidra: FUN_0807a15c

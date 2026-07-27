@@ -85,6 +85,13 @@
 //!   (20 bytes). `current_task_record()->context` or 0 — the word
 //!   sync_mutex's `current_task_id` hook reads (the "id" is really the
 //!   caller's context record pointer).
+//! - `queue_pool_create` — `FUN_0807a080` @ 0x0807a080 (72 bytes; 22 bl
+//!   call sites, among them task_notify @ 0x08060fb8). One tag-10
+//!   allocation of `capacity * 0x14 + 0x48` bytes — the 0x48-byte pool
+//!   header (kernel/mqueue.rs `QueuePool`) followed by the node array —
+//!   then the (unported) initializer `FUN_0809eab8` lays it out:
+//!   `pool_init(capacity, base + 0x48, base)`, degraded to
+//!   `(0, NULL, base)` for `capacity < 1`. Returns the base unchecked.
 //! - `register_current_task` — `FUN_080865e8` @ 0x080865e8 (168 bytes;
 //!   2 bl call sites: task_notify @ 0x08060fa8 and 0x080e873c). Attaches
 //!   a `NameNode` to the current task. The registration block @
@@ -232,7 +239,7 @@ impl NameNode {
 }
 
 /// Capacity of the queue pool `task_notify` installs (`mov r0, #0x64`).
-const NOTIFY_POOL_CAPACITY: u32 = 100;
+const NOTIFY_POOL_CAPACITY: i32 = 100;
 
 /// ROM gateway services and unported RAM helpers this module depends on.
 #[derive(Clone, Copy)]
@@ -304,8 +311,14 @@ pub struct TaskHooks {
     /// 32-bit target).
     pub kernel_running_node: unsafe extern "C" fn() -> *mut NameNode,
     /// `FUN_0807a080` @ 0x0807a080: allocate a queue pool of `capacity`
-    /// 20-byte entries (tag-10 heap allocation).
-    pub queue_pool_create: unsafe extern "C" fn(capacity: u32) -> *mut u8,
+    /// 20-byte entries (tag-10 heap allocation). Defaults to the ported
+    /// `queue_pool_create`.
+    pub queue_pool_create: unsafe extern "C" fn(capacity: i32) -> *mut u8,
+    /// Unported pool initializer `FUN_0809eab8` @ 0x0809eab8: lays out
+    /// the 0x48-byte pool header (lock semaphore, condvars, free list of
+    /// the `capacity` nodes at `nodes`) — see kernel/mqueue.rs's
+    /// `QueuePool` for the header model.
+    pub pool_init: unsafe extern "C" fn(capacity: i32, nodes: *mut u8, pool: *mut u8),
     /// Thunk 0x08037e98 -> ROM 0x22004260: the yield-like kernel service
     /// (exact RTXC op unidentified; always called with 0 here).
     pub rom_yield: unsafe extern "C" fn(arg: u32) -> i32,
@@ -429,9 +442,7 @@ unsafe extern "C" fn kernel_running_node_adapter() -> *mut NameNode {
     crate::kernel::sync_mutex::kernel_running() as usize as *mut NameNode
 }
 
-unsafe extern "C" fn missing_queue_pool_create(_capacity: u32) -> *mut u8 {
-    core::ptr::null_mut()
-}
+unsafe extern "C" fn missing_pool_init(_capacity: i32, _nodes: *mut u8, _pool: *mut u8) {}
 
 /// Default stub: yielding without a scheduler is a no-op reporting 0.
 unsafe extern "C" fn missing_rom_yield(_arg: u32) -> i32 {
@@ -460,7 +471,8 @@ pub const DEFAULT_TASK_HOOKS: TaskHooks = TaskHooks {
     sem_signal: crate::kernel::sync_sem::sem_signal,
     current_task_ctx: current_task_ctx_block,
     kernel_running_node: kernel_running_node_adapter,
-    queue_pool_create: missing_queue_pool_create,
+    queue_pool_create,
+    pool_init: missing_pool_init,
     rom_yield: missing_rom_yield,
 };
 
@@ -695,6 +707,39 @@ pub unsafe extern "C" fn register_current_task(name: *const u8) {
     (h.sem_signal)(core::ptr::addr_of!(REGISTER_LOCK_SEM).read());
 }
 
+/// Heap tag for queue pools (`mov r1, #0xa`).
+const TAG_QUEUE_POOL: usize = 10;
+
+/// Queue-pool node stride (0x14 — kernel/mqueue.rs `QueueNode`).
+const QUEUE_NODE_STRIDE: u32 = 0x14;
+
+/// Queue-pool header size (0x48; the node array follows it).
+const QUEUE_POOL_HEADER: u32 = 0x48;
+
+/// queue_pool_create — original: `FUN_0807a080` @ 0x0807a080 (72 bytes;
+/// 22 bl call sites, among them task_notify @ 0x08060fb8).
+///
+/// Allocates `capacity * 0x14 + 0x48` bytes (tag 10) — header plus node
+/// array — and initializes the pool: `pool_init(capacity, base + 0x48,
+/// base)`, degraded to `(0, NULL, base)` when `capacity < 1`. Returns
+/// the base. Faithful quirks: the size is computed from the raw
+/// (possibly negative) capacity in wrapping 32-bit arithmetic, and the
+/// allocation is not NULL-checked.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn queue_pool_create(capacity: i32) -> *mut u8 {
+    let h = hooks();
+    let size = (capacity as u32)
+        .wrapping_mul(QUEUE_NODE_STRIDE)
+        .wrapping_add(QUEUE_POOL_HEADER);
+    let base = (h.tagged_alloc)(size as usize, TAG_QUEUE_POOL);
+    if capacity > 0 {
+        (h.pool_init)(capacity, base.add(QUEUE_POOL_HEADER as usize), base);
+    } else {
+        (h.pool_init)(0, core::ptr::null_mut(), base);
+    }
+    base
+}
+
 /// kernel_yield — original: `FUN_080568fc` @ 0x080568fc (8 bytes).
 ///
 /// The stock yield service call: ROM 0x22004260 with argument 0, result
@@ -801,6 +846,7 @@ mod tests {
         NameNodeAlloc,
         SemWait(usize),
         SemSignal(usize),
+        PoolInit { capacity: i32, nodes: usize, pool: usize },
     }
 
     static CALLS: Mutex<Vec<Call>> = Mutex::new(Vec::new());
@@ -941,9 +987,17 @@ mod tests {
         core::ptr::addr_of_mut!(CTX_BLOCK)
     }
 
-    unsafe extern "C" fn mock_pool_create(capacity: u32) -> *mut u8 {
-        CALLS.lock().unwrap().push(Call::PoolCreate(capacity));
+    unsafe extern "C" fn mock_pool_create(capacity: i32) -> *mut u8 {
+        CALLS.lock().unwrap().push(Call::PoolCreate(capacity as u32));
         POOL_RET
+    }
+
+    unsafe extern "C" fn mock_pool_init(capacity: i32, nodes: *mut u8, pool: *mut u8) {
+        CALLS.lock().unwrap().push(Call::PoolInit {
+            capacity,
+            nodes: nodes as usize,
+            pool: pool as usize,
+        });
     }
 
     /// Record the rom_current_task mock returns (NULL -> lazy pool path).
@@ -1016,6 +1070,7 @@ mod tests {
                 current_task_ctx: mock_current_task_ctx,
                 kernel_running_node: mock_kernel_running_node,
                 queue_pool_create: mock_pool_create,
+                pool_init: mock_pool_init,
                 rom_yield: mock_rom_yield,
             });
         }
@@ -1455,6 +1510,81 @@ mod tests {
             core::ptr::addr_of_mut!(TASK_POOL_COUNT).write(TASK_POOL_CAP as u32);
             current_task_link_node(&mut node);
         }
+    }
+
+    // ---- queue_pool_create (0x0807a080) ------------------------------
+
+    #[test]
+    fn pool_create_allocates_header_plus_nodes_with_tag_10() {
+        let _guard = mock_hooks();
+        unsafe {
+            let base = queue_pool_create(100);
+            let buf = core::ptr::addr_of_mut!(NAME_BUF) as *mut u8;
+            assert_eq!(base, buf, "returns the allocation base");
+            assert_eq!(
+                drain(),
+                vec![
+                    Call::TaggedAlloc {
+                        size: 100 * 0x14 + 0x48,
+                        tag: 10
+                    },
+                    Call::PoolInit {
+                        capacity: 100,
+                        nodes: buf as usize + 0x48,
+                        pool: buf as usize,
+                    },
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn pool_create_zero_capacity_degrades_the_init() {
+        let _guard = mock_hooks();
+        unsafe {
+            queue_pool_create(0);
+            let buf = core::ptr::addr_of_mut!(NAME_BUF) as usize;
+            assert_eq!(
+                drain(),
+                vec![
+                    Call::TaggedAlloc { size: 0x48, tag: 10 },
+                    Call::PoolInit {
+                        capacity: 0,
+                        nodes: 0,
+                        pool: buf,
+                    },
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn pool_create_negative_capacity_wraps_like_the_original() {
+        let _guard = mock_hooks();
+        unsafe {
+            queue_pool_create(-1);
+            let buf = core::ptr::addr_of_mut!(NAME_BUF) as usize;
+            assert_eq!(
+                drain(),
+                vec![
+                    // 0xffffffff * 0x14 + 0x48 (mod 2^32) = 0x34.
+                    Call::TaggedAlloc { size: 0x34, tag: 10 },
+                    Call::PoolInit {
+                        capacity: 0,
+                        nodes: 0,
+                        pool: buf,
+                    },
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn pool_create_is_the_shipped_queue_pool_default() {
+        assert_eq!(
+            DEFAULT_TASK_HOOKS.queue_pool_create as usize,
+            queue_pool_create as usize
+        );
     }
 
     // ---- current_task_ctx_block (0x080cb828) -------------------------
