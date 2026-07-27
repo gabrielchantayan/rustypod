@@ -1908,6 +1908,22 @@ functions:
     notes: flag @ 0x089ca848; returns current-task-id, calling notify helper
       0x08060f80 with callback @ 0x083e2e38 when id==0 but a task exists.
 
+  - address: 0x080744d8
+    ghidra: FUN_080744d8
+    name: condvar_signal
+    size: 32
+    sig: "void condvar_signal(CondVar *condvar)"
+    module: kernel/condvar
+    status: ported
+    notes: >-
+      Single-shot condvar wake, next to the mutex layer: list_pop_front
+      (0x080f10b8) on the wait queue at condvar+4; if a waiter came off,
+      tail-branch waiter_wake (0x080567f8) on its object (node+4). Empty
+      queue is a no-op. 10 bl call sites (mqueue_node_recycle 0x080ed958
+      twice, pool paths 0x0809ec5c/0x8100218/0x8106698/...). Complements
+      condvar_broadcast (0x0807f5cc), which drains the whole queue.
+      match.py structural (pop inlined by LLVM; wake stays a tail call).
+
   - address: 0x0807f5cc
     name: condvar_layer
     size: 372
