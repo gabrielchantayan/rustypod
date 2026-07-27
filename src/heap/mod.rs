@@ -1,5 +1,6 @@
 //! retailOS application heap (cluster 0x0819cd5c..0x0819d9d8 + veneers).
 pub mod alloc_core;
+pub mod block_mgr;
 pub mod dcache;
 pub mod free_path;
 pub mod init;

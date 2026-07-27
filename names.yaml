@@ -1808,7 +1808,8 @@ functions:
     vars: {param_1: addr, param_2: uncached/off}
     status: ported
     notes: >-
-      22 bl call sites (DMA buffer prep in ATA/USB/LCD drivers, plus
+      24 bl call sites, binary-verified — osos.asm drops two lines (DMA
+      buffer prep in ATA/USB/LCD drivers, plus
       pool_alloc's uncached path). Bit-31 addr (uncached DRAM alias) =
       early return; else flushes line (addr+off) & ~0x1f for off = 0,
       0x20, ... < len via bl 0x08037cd0. Walk steps from addr, not the
@@ -1817,6 +1818,46 @@ functions:
       through DCACHE_LINE_OP (real mcr on target); wired as the
       POOL_OPS.dcache_flush default. A clean-only sibling loop without
       the bit-31 guard sits right after @ 0x08044c48 (not ported).
+
+  - address: 0x0818ae48
+    ghidra: FUN_0818ae48
+    name: block_manager_get
+    size: 12
+    sig: "u8 *block_manager_get(void)"
+    module: heap/block_mgr
+    status: ported
+    notes: >-
+      Returns the block-manager object pointer from the global word @
+      0x089cb1b4 (the "AMBlockManagerThread" object; the 0x089cb1xx page
+      is runtime-initialized — the image shows UI strings there). 14 bl
+      call sites, binary-verified. Port models the global as the crate
+      static BLOCK_MANAGER (same deviation as DEFAULT_HEAP for
+      0x089ca638), NULL until the manager thread is ported/installed.
+
+  - address: 0x0818a364
+    ghidra: FUN_0818a364
+    name: region_block_size
+    size: 24
+    sig: "u32 region_block_size(void)"
+    module: heap/block_mgr
+    status: ported
+    notes: >-
+      [[0x089cb1b4] + 0x30] — the block manager's per-region block size;
+      0 when the manager pointer is NULL. 16 bl call sites plus the
+      alias thunk b @ 0x081a7a9c (1 caller), binary-verified. Wired as
+      the POOL_OPS.region_block_size default (pool_seed_regions /
+      block_deque_fill sizing).
+
+  - address: 0x081a7a9c
+    ghidra: thunk_FUN_0818a364
+    name: region_block_size_thunk
+    size: 4
+    sig: "u32 region_block_size_thunk(void)"
+    module: heap/block_mgr
+    status: identified
+    notes: >-
+      b 0x0818a364 — bare alias thunk of region_block_size; 1 bl caller.
+      No separate port needed (hooks can branch to the primary symbol).
 
   - address: 0x080751a0
     ghidra: FUN_080751a0
