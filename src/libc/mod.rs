@@ -1,4 +1,5 @@
 //! Core C library memory/string functions (mem/str family).
+pub mod bzero;
 pub mod memchr;
 pub mod memcmp;
 pub mod memcpy;

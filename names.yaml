@@ -3652,3 +3652,20 @@ functions:
     status: ported
     vars: {param_1: ptr}
     notes: Swaps the 2 bytes at ptr in place via one stack byte. 27 call sites.
+
+  - address: 0x0805cfb4
+    ghidra: FUN_0805cfb4
+    name: bzero
+    size: 76
+    sig: "void bzero(u8 *dst, i32 len)"
+    module: libc/bzero
+    status: ported
+    vars: {param_1: dst, param_2: len}
+    notes: >-
+      Third zero-fill in the image, independent of the ADS runtime pair
+      0x0800027c/0x080002d4 (libc/memzero). Signed length with len<0
+      early-out; len>0x10 aligns dst byte-wise then word-fills while
+      len>=4; remainder byte-filled (subs/bpl, exactly len bytes).
+      len<=16 goes straight to the byte loop. 55 call sites,
+      binary-scanned. Port uses write_volatile against memset idiom
+      recognition; LLVM unrolls the 3-step alignment prologue.
