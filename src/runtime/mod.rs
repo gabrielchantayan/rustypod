@@ -16,3 +16,4 @@ pub mod raise;
 pub mod random;
 pub mod rt_div;
 pub mod setjmp;
+pub mod shutdown_chain;

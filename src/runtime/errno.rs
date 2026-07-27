@@ -30,6 +30,10 @@
 //!   host pointers don't fit the u32 words kept here for layout). The
 //!   ctype slot (+0x24) stores block+1 so index -1/EOF lands on a guard
 //!   byte (see ctype.rs). Zero-initialized: null until installed.
+//! - +0x38 shutdown-handler chain head — the node list
+//!   `{next, arg, fn, key}` run by 0x082ab2b0 (ported in
+//!   runtime/shutdown_chain.rs, where the head is modeled as a module
+//!   static for the same host-pointer reason as the LC slots).
 //! - +0x3c atexit table pointer — used by the atexit/exit machinery.
 //!
 //! All other words are reserved (layout not yet recovered). The true extent
@@ -77,7 +81,9 @@ pub struct Libspace {
     pub lc_monetary_numeric: [u32; 2],
     /// +0x30: LC_TIME slot (directory ptr, like +0x20).
     pub lc_time: u32,
-    /// +0x34..+0x3c: reserved (layout not yet recovered).
+    /// +0x34: reserved (layout not yet recovered). +0x38: the
+    /// shutdown-handler chain head — modeled by runtime/shutdown_chain.rs
+    /// as a module static (host pointers don't fit this u32 word).
     reserved_34: [u32; 2],
     /// +0x3c: atexit table pointer (raw address word), used by the
     /// atexit/exit machinery.

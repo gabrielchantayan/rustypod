@@ -66,8 +66,9 @@
 //!   `STREAM_GETC`/`HEAP_OPS` pattern): [`STREAM_FCLOSE`] (0x080302d0,
 //!   default = the real `fclose` port in stdio_init.rs),
 //!   [`STREAM_CLOSE_CORE`] (0x0802fc00, default = the real port in
-//!   seek_core.rs), [`LIB_SHUTDOWN_CHAIN`] (0x082ab2b0). Tests swap in
-//!   recording stubs.
+//!   seek_core.rs), [`LIB_SHUTDOWN_CHAIN`] (0x082ab2b0, default = the
+//!   real port in runtime/shutdown_chain.rs). Tests swap in recording
+//!   stubs.
 //! - malloc/free ARE ported (`malloc_rt.rs`), but they dispatch through
 //!   the global `HEAP_OPS` table, which host tests of that module swap
 //!   under a lock private to it; to keep this module's tests isolated
@@ -183,9 +184,10 @@ pub type StreamFcloseFn = unsafe extern "C" fn(file: *mut AdsFile) -> i32;
 /// fclose core — original 0x0802fc00 (not yet ported). `not_excluded` is
 /// 0 for the stream `stdio_foreach_close` was told to spare, 1 otherwise.
 pub type StreamCloseFn = unsafe extern "C" fn(file: *mut AdsFile, not_excluded: i32) -> i32;
-/// libspace+0x38 shutdown-handler chain runner — original 0x082ab2b0 (not
-/// yet ported): walks the node list `{next, arg, fn, key}`, and with
-/// `mode == 0` calls every `fn(arg)`, unlinks and frees each node.
+/// libspace+0x38 shutdown-handler chain runner — original 0x082ab2b0,
+/// ported in runtime/shutdown_chain.rs: walks the node list
+/// `{next, arg, fn, key}`, and with `mode == 0` calls every `fn(arg)`,
+/// unlinks and frees each node.
 pub type ShutdownChainFn = unsafe extern "C" fn(mode: i32);
 /// Allocator slot (see the module-docs deviation note).
 pub type AllocFn = unsafe extern "C" fn(size: usize) -> *mut u8;
@@ -206,7 +208,9 @@ unsafe extern "C" fn stream_close_stub(_file: *mut AdsFile, _not_excluded: i32) 
     0
 }
 
-/// Default shutdown-chain stand-in: no handlers registered, nothing to run.
+#[cfg(test)]
+/// Test stand-in for the shutdown chain: no handlers registered,
+/// nothing to run (the shipped default is the real port).
 unsafe extern "C" fn shutdown_chain_stub(_mode: i32) {}
 
 /// Per-stream close entry (original 0x080302d0); defaults to the real
@@ -222,10 +226,11 @@ pub static mut STREAM_FCLOSE: StreamFcloseFn = crate::stdio_init::fclose;
 #[cfg_attr(target_os = "none", no_mangle)]
 pub static mut STREAM_CLOSE_CORE: StreamCloseFn = crate::seek_core::stream_sync_core;
 
-/// Shutdown-chain entry (original 0x082ab2b0); swap in the real port when
-/// it lands.
+/// Shutdown-chain entry (original 0x082ab2b0); defaults to the real
+/// port, so the firmware build links the original call graph.
 #[cfg_attr(target_os = "none", no_mangle)]
-pub static mut LIB_SHUTDOWN_CHAIN: ShutdownChainFn = shutdown_chain_stub;
+pub static mut LIB_SHUTDOWN_CHAIN: ShutdownChainFn =
+    crate::runtime::shutdown_chain::lib_shutdown_chain;
 
 /// Allocator boundary; defaults to the ported `malloc` @ 0x0802edac.
 #[cfg_attr(target_os = "none", no_mangle)]
