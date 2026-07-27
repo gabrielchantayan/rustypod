@@ -25,8 +25,8 @@
 //! lo/hi pair into a stack slot and calls the wrapper as
 //! `(state, spec, bits_ptr)` — r1 is the conversion character, r2 a
 //! POINTER to the 8 value bytes. That is exactly the committed
-//! `printf_core::FloatConverterFn` hook signature, so `convert_fe` can be
-//! installed into `FLOAT_CONVERTER` directly. One wrapper serves all of
+//! `printf_core::FloatConverterFn` hook signature; `convert_fe` is that
+//! hook's shipped default. One wrapper serves all of
 //! %e/%E/%f/%F/%g/%G (the %a/%A veneer @ 0x083ed07c is a dead
 //! `mov pc, lr` in this build), so there are no per-spec variants.
 //!

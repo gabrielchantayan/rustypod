@@ -29,13 +29,16 @@
 //!   original 0x0802fc00) on every stream whose flags contain all of
 //!   [`CLOSE_LIVE_MASK`], with a second argument of 0 for the `excluded`
 //!   stream and 1 for every other.
-//! - `stdio_flush_all` @ 0x08030624 (96 bytes) — flushes the three static
-//!   streams (stdin, stdout, stderr) through the per-stream flush (hook
-//!   [`STREAM_FLUSH`], original 0x080302d0 — a locked wrapper around the
-//!   flush core @ 0x08030238), then walks the dynamic chain hanging off
-//!   stderr's link, flushing and then FREEING each node (`free`
-//!   @ 0x0802edc8). The chain head is captured BEFORE the static flushes,
-//!   exactly like the original's early `ldr r4, [stderr, #0x40]`.
+//! - `stdio_close_all` @ 0x08030624 (96 bytes) — the exit-path close-all
+//!   walker (previously named `stdio_flush_all`): runs the three static
+//!   streams (stdin, stdout, stderr) through hook [`STREAM_FCLOSE`]
+//!   (original 0x080302d0 — verified from the machine code to be the
+//!   locked wrapper around the FCLOSE engine @ 0x08030238, i.e. the
+//!   public `fclose`, NOT a plain buffer flush — ported in
+//!   stdio_init.rs), then walks the dynamic chain hanging off stderr's
+//!   link, closing and then FREEING each node (`free` @ 0x0802edc8).
+//!   The chain head is captured BEFORE the static closes, exactly like
+//!   the original's early `ldr r4, [stderr, #0x40]`.
 //! - `stdio_stream_alloc` @ 0x08035924 (32 bytes) — `malloc(0x88)`
 //!   (@ 0x0802edac) and clears the FIRST BYTE only; returns NULL on
 //!   allocation failure. (0x88 covers the 0x44-byte FILE object plus
@@ -43,7 +46,7 @@
 //! - `exit_stdio_cleanup` @ 0x08035878 (24 bytes) — runs the libspace+0x38
 //!   shutdown-handler chain (hook [`LIB_SHUTDOWN_CHAIN`], original
 //!   0x082ab2b0, called with 0 = run every handler and free its node),
-//!   then `stdio_flush_all`, then the no-op @ 0x0802ecc0 (`mov pc, lr` —
+//!   then `stdio_close_all`, then the no-op @ 0x0802ecc0 (`mov pc, lr` —
 //!   nothing to port). Reached from `__rt_sys_exit` and heap_panic.
 //!
 //! The paired `mov r0, r0` sequences around each operation in the
@@ -59,10 +62,13 @@
 //!   0x08b2f864 / 0x08b2f8a8 in osos DRAM; here they are zero-initialized
 //!   `static mut` blocks reached through `stdin_file()` /`stdout_file()` /
 //!   `stderr_file()` (same modeling as `errno.rs`'s libspace).
-//! - Unported callees dispatch through function-pointer hooks (the house
-//!   `STREAM_GETC`/`HEAP_OPS` pattern): [`STREAM_FLUSH`] (0x080302d0),
-//!   [`STREAM_CLOSE_CORE`] (0x0802fc00), [`LIB_SHUTDOWN_CHAIN`]
-//!   (0x082ab2b0). Defaults are documented no-ops.
+//! - Callees dispatch through function-pointer hooks (the house
+//!   `STREAM_GETC`/`HEAP_OPS` pattern): [`STREAM_FCLOSE`] (0x080302d0,
+//!   default = the real `fclose` port in stdio_init.rs),
+//!   [`STREAM_CLOSE_CORE`] (0x0802fc00, default = the real port in
+//!   seek_core.rs), [`LIB_SHUTDOWN_CHAIN`] (0x082ab2b0, default = the
+//!   real port in runtime/shutdown_chain.rs). Tests swap in recording
+//!   stubs.
 //! - malloc/free ARE ported (`malloc_rt.rs`), but they dispatch through
 //!   the global `HEAP_OPS` table, which host tests of that module swap
 //!   under a lock private to it; to keep this module's tests isolated
@@ -172,24 +178,26 @@ pub fn stderr_file() -> *mut AdsFile {
     unsafe { core::ptr::addr_of_mut!(STDERR_FILE) }
 }
 
-/// Per-stream flush — original 0x080302d0, the locked wrapper around the
-/// flush core @ 0x08030238 (not yet ported).
-pub type StreamFlushFn = unsafe extern "C" fn(file: *mut AdsFile) -> i32;
+/// Per-stream close — original 0x080302d0: `fclose`, the locked wrapper
+/// around the fclose engine @ 0x08030238 (both ported in stdio_init.rs).
+pub type StreamFcloseFn = unsafe extern "C" fn(file: *mut AdsFile) -> i32;
 /// fclose core — original 0x0802fc00 (not yet ported). `not_excluded` is
 /// 0 for the stream `stdio_foreach_close` was told to spare, 1 otherwise.
 pub type StreamCloseFn = unsafe extern "C" fn(file: *mut AdsFile, not_excluded: i32) -> i32;
-/// libspace+0x38 shutdown-handler chain runner — original 0x082ab2b0 (not
-/// yet ported): walks the node list `{next, arg, fn, key}`, and with
-/// `mode == 0` calls every `fn(arg)`, unlinks and frees each node.
+/// libspace+0x38 shutdown-handler chain runner — original 0x082ab2b0,
+/// ported in runtime/shutdown_chain.rs: walks the node list
+/// `{next, arg, fn, key}`, and with `mode == 0` calls every `fn(arg)`,
+/// unlinks and frees each node.
 pub type ShutdownChainFn = unsafe extern "C" fn(mode: i32);
 /// Allocator slot (see the module-docs deviation note).
 pub type AllocFn = unsafe extern "C" fn(size: usize) -> *mut u8;
 /// See [`AllocFn`].
 pub type FreeFn = unsafe extern "C" fn(ptr: *mut u8);
 
-/// Default flush stand-in: reports success without touching the stream
-/// (the real per-stream flush is a later port).
-unsafe extern "C" fn stream_flush_stub(_file: *mut AdsFile) -> i32 {
+#[cfg(test)]
+/// Test stand-in for the per-stream close: reports success without
+/// touching the stream (the shipped default is the real `fclose` port).
+unsafe extern "C" fn stream_fclose_stub(_file: *mut AdsFile) -> i32 {
     0
 }
 
@@ -200,13 +208,15 @@ unsafe extern "C" fn stream_close_stub(_file: *mut AdsFile, _not_excluded: i32) 
     0
 }
 
-/// Default shutdown-chain stand-in: no handlers registered, nothing to run.
+#[cfg(test)]
+/// Test stand-in for the shutdown chain: no handlers registered,
+/// nothing to run (the shipped default is the real port).
 unsafe extern "C" fn shutdown_chain_stub(_mode: i32) {}
 
-/// Per-stream flush entry (original 0x080302d0); swap in the real port
-/// when it lands.
+/// Per-stream close entry (original 0x080302d0); defaults to the real
+/// `fclose` port, so the firmware build links the original call graph.
 #[cfg_attr(target_os = "none", no_mangle)]
-pub static mut STREAM_FLUSH: StreamFlushFn = stream_flush_stub;
+pub static mut STREAM_FCLOSE: StreamFcloseFn = crate::stdio_init::fclose;
 
 /// Flush/position-sync entry (original 0x0802fc00) — the same routine
 /// `stdio_init`'s `STREAM_SYNC_CORE` dispatches to; here the second
@@ -216,10 +226,11 @@ pub static mut STREAM_FLUSH: StreamFlushFn = stream_flush_stub;
 #[cfg_attr(target_os = "none", no_mangle)]
 pub static mut STREAM_CLOSE_CORE: StreamCloseFn = crate::seek_core::stream_sync_core;
 
-/// Shutdown-chain entry (original 0x082ab2b0); swap in the real port when
-/// it lands.
+/// Shutdown-chain entry (original 0x082ab2b0); defaults to the real
+/// port, so the firmware build links the original call graph.
 #[cfg_attr(target_os = "none", no_mangle)]
-pub static mut LIB_SHUTDOWN_CHAIN: ShutdownChainFn = shutdown_chain_stub;
+pub static mut LIB_SHUTDOWN_CHAIN: ShutdownChainFn =
+    crate::runtime::shutdown_chain::lib_shutdown_chain;
 
 /// Allocator boundary; defaults to the ported `malloc` @ 0x0802edac.
 #[cfg_attr(target_os = "none", no_mangle)]
@@ -355,27 +366,29 @@ pub unsafe extern "C" fn stdio_foreach_close(excluded: *mut AdsFile) {
     }
 }
 
-/// stdio_flush_all — original @ 0x08030624 (96 bytes).
+/// stdio_close_all — original @ 0x08030624 (96 bytes); previously named
+/// `stdio_flush_all` while 0x080302d0 was uncharacterized.
 ///
-/// Flushes stdin, stdout and stderr through the per-stream flush
-/// ([`STREAM_FLUSH`]), then walks the dynamic chain that was hanging off
-/// stderr's link — captured BEFORE the static flushes, like the
-/// original's early `ldr r4, [stderr, #0x40]` — flushing and then
-/// freeing every node. Reached from `exit_stdio_cleanup` on the
-/// termination path. (`inline(never)` keeps `exit_stdio_cleanup`'s `bl`
-/// structure matching the original's.)
+/// The exit-path close-all walker: runs stdin, stdout and stderr through
+/// the per-stream close ([`STREAM_FCLOSE`] — `fclose`, which syncs,
+/// `_sys_close`s and resets each stream), then walks the dynamic chain
+/// that was hanging off stderr's link — captured BEFORE the static
+/// closes, like the original's early `ldr r4, [stderr, #0x40]` —
+/// closing and then freeing every node. Reached from
+/// `exit_stdio_cleanup` on the termination path. (`inline(never)` keeps
+/// `exit_stdio_cleanup`'s `bl` structure matching the original's.)
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
-pub unsafe extern "C" fn stdio_flush_all() {
-    let flush = hook(core::ptr::addr_of!(STREAM_FLUSH));
+pub unsafe extern "C" fn stdio_close_all() {
+    let close = hook(core::ptr::addr_of!(STREAM_FCLOSE));
     let free = hook(core::ptr::addr_of!(STDIO_FREE));
     let mut file = (*stderr_file()).link;
-    flush(stdin_file());
-    flush(stdout_file());
-    flush(stderr_file());
+    close(stdin_file());
+    close(stdout_file());
+    close(stderr_file());
     while !file.is_null() {
         let next = (*file).link;
-        flush(file);
+        close(file);
         free(file as *mut u8);
         file = next;
     }
@@ -402,7 +415,7 @@ pub unsafe extern "C" fn stdio_stream_alloc() -> *mut AdsFile {
 /// The termination-path stdio teardown, reached from `__rt_sys_exit` and
 /// heap_panic: runs the libspace+0x38 shutdown-handler chain
 /// ([`LIB_SHUTDOWN_CHAIN`] with mode 0 = run and free every handler),
-/// then [`stdio_flush_all`], then the no-op @ 0x0802ecc0 (`mov pc, lr`).
+/// then [`stdio_close_all`], then the no-op @ 0x0802ecc0 (`mov pc, lr`).
 ///
 /// `exit.rs` currently reaches the original's behavior through its own
 /// (deliberately no-op) private stub; pointing it here is an init-time /
@@ -410,7 +423,7 @@ pub unsafe extern "C" fn stdio_stream_alloc() -> *mut AdsFile {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn exit_stdio_cleanup() {
     hook(core::ptr::addr_of!(LIB_SHUTDOWN_CHAIN))(0);
-    stdio_flush_all();
+    stdio_close_all();
     // Original tail: bl 0x0802ecc0, a `mov pc, lr` no-op.
 }
 
@@ -430,8 +443,8 @@ mod tests {
         unsafe { (*core::ptr::addr_of!(EVENTS)).clone() }
     }
 
-    unsafe extern "C" fn logging_flush(file: *mut AdsFile) -> i32 {
-        (*core::ptr::addr_of_mut!(EVENTS)).push(("flush", file as usize));
+    unsafe extern "C" fn logging_fclose(file: *mut AdsFile) -> i32 {
+        (*core::ptr::addr_of_mut!(EVENTS)).push(("fclose", file as usize));
         0
     }
 
@@ -443,6 +456,13 @@ mod tests {
 
     unsafe extern "C" fn logging_shutdown(mode: i32) {
         (*core::ptr::addr_of_mut!(EVENTS)).push(("shutdown", mode as usize));
+    }
+
+    /// Success-reporting stand-in for stdio_init's STREAM_SYNC_CORE (the
+    /// real port issues its own semihost traffic, which would tangle the
+    /// scripted SWI results in the default-hook test below).
+    unsafe extern "C" fn sync_ok_stub(_file: *mut AdsFile, _take_lock: i32) -> i32 {
+        0
     }
 
     unsafe extern "C" fn logging_free(ptr: *mut u8) {
@@ -475,7 +495,7 @@ mod tests {
             *stdin_file() = ADS_FILE_ZERO;
             *stdout_file() = ADS_FILE_ZERO;
             *stderr_file() = ADS_FILE_ZERO;
-            STREAM_FLUSH = stream_flush_stub;
+            STREAM_FCLOSE = stream_fclose_stub;
             STREAM_CLOSE_CORE = stream_close_stub;
             LIB_SHUTDOWN_CHAIN = shutdown_chain_stub;
             STDIO_ALLOC = crate::malloc_rt::malloc;
@@ -787,13 +807,13 @@ mod tests {
         );
     }
 
-    // --- stdio_flush_all -------------------------------------------------
+    // --- stdio_close_all -------------------------------------------------
 
     #[test]
-    fn flush_all_flushes_statics_then_flushes_and_frees_the_chain() {
+    fn close_all_closes_statics_then_closes_and_frees_the_chain() {
         let _guard = lock_and_reset();
         unsafe {
-            STREAM_FLUSH = logging_flush;
+            STREAM_FCLOSE = logging_fclose;
             STDIO_FREE = logging_free;
         }
         let mut dyn_a = ADS_FILE_ZERO;
@@ -801,47 +821,76 @@ mod tests {
         unsafe {
             (*stderr_file()).link = &mut dyn_a;
             dyn_a.link = &mut dyn_b;
-            stdio_flush_all();
+            stdio_close_all();
         }
         let a = core::ptr::addr_of!(dyn_a) as usize;
         let b = core::ptr::addr_of!(dyn_b) as usize;
         assert_eq!(
             events(),
             std::vec![
-                ("flush", stdin_file() as usize),
-                ("flush", stdout_file() as usize),
-                ("flush", stderr_file() as usize),
-                ("flush", a),
+                ("fclose", stdin_file() as usize),
+                ("fclose", stdout_file() as usize),
+                ("fclose", stderr_file() as usize),
+                ("fclose", a),
                 ("free", a),
-                ("flush", b),
+                ("fclose", b),
                 ("free", b),
             ]
         );
     }
 
-    /// The chain head is read BEFORE the static streams are flushed: a
-    /// flush that rewrites stderr's link must not change the walk.
+    /// The chain head is read BEFORE the static streams are closed: a
+    /// close that rewrites stderr's link must not change the walk.
     #[test]
-    fn flush_all_captures_the_chain_before_flushing() {
+    fn close_all_captures_the_chain_before_closing() {
         let _guard = lock_and_reset();
-        unsafe extern "C" fn link_clearing_flush(file: *mut AdsFile) -> i32 {
+        unsafe extern "C" fn link_clearing_fclose(file: *mut AdsFile) -> i32 {
             (*file).link = core::ptr::null_mut();
-            logging_flush(file)
+            logging_fclose(file)
         }
         unsafe {
-            STREAM_FLUSH = link_clearing_flush;
+            STREAM_FCLOSE = link_clearing_fclose;
             STDIO_FREE = logging_free;
         }
         let mut dyn_a = ADS_FILE_ZERO;
         unsafe {
             (*stderr_file()).link = &mut dyn_a;
-            stdio_flush_all();
+            stdio_close_all();
         }
         let a = core::ptr::addr_of!(dyn_a) as usize;
         assert!(
-            events().contains(&("flush", a)) && events().contains(&("free", a)),
+            events().contains(&("fclose", a)) && events().contains(&("free", a)),
             "captured chain still walked after stderr.link was cleared"
         );
+    }
+
+    /// The shipped [`STREAM_FCLOSE`] default is the real `fclose` port:
+    /// a live stream run through `stdio_close_all` with the default hook
+    /// is physically closed (`_sys_close`) and reset.
+    #[test]
+    fn close_all_default_hook_is_the_real_fclose() {
+        let _guard = lock_and_reset();
+        unsafe {
+            // Re-arm the shipped default (reset_state installs the stub).
+            STREAM_FCLOSE = crate::stdio_init::fclose;
+            crate::stdio_init::STREAM_SYNC_CORE = sync_ok_stub;
+            crate::semihost::SEMIHOST_SWI = crate::semihost::tests::recording_swi;
+            (*core::ptr::addr_of_mut!(SWI_LOG)).clear();
+            // One scripted _sys_close result: only stdin is live below
+            // (fclose on a not-open stream returns early, no SWI).
+            *core::ptr::addr_of_mut!(crate::semihost::tests::SWI_RESULTS) = std::vec![0];
+            (*stdin_file()).stream.flags = 0x1; // open for reading
+            (*stdin_file()).stream.handle = 7;
+            stdio_close_all();
+            assert_eq!((*stdin_file()).stream.flags, 0, "stream reset by fclose");
+            let log = swi_log();
+            assert_eq!(log.len(), 1, "one live stream closed");
+            assert_eq!(log[0].0, crate::semihost::SYS_CLOSE);
+            assert_eq!(log[0].1[0], 7, "handle 7 closed");
+            // Restore stdio_init's shipped default before releasing the
+            // lock (reset_state does not manage that module's hooks).
+            crate::stdio_init::STREAM_SYNC_CORE = crate::seek_core::stream_sync_core;
+        }
     }
 
     // --- stdio_stream_alloc ----------------------------------------------
@@ -873,20 +922,20 @@ mod tests {
     // --- exit_stdio_cleanup ----------------------------------------------
 
     #[test]
-    fn exit_cleanup_runs_shutdown_chain_then_flush_all() {
+    fn exit_cleanup_runs_shutdown_chain_then_close_all() {
         let _guard = lock_and_reset();
         unsafe {
             LIB_SHUTDOWN_CHAIN = logging_shutdown;
-            STREAM_FLUSH = logging_flush;
+            STREAM_FCLOSE = logging_fclose;
             exit_stdio_cleanup();
         }
         assert_eq!(
             events(),
             std::vec![
                 ("shutdown", 0), // mode 0 = run and free every handler
-                ("flush", stdin_file() as usize),
-                ("flush", stdout_file() as usize),
-                ("flush", stderr_file() as usize),
+                ("fclose", stdin_file() as usize),
+                ("fclose", stdout_file() as usize),
+                ("fclose", stderr_file() as usize),
             ]
         );
     }

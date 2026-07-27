@@ -41,12 +41,14 @@
 //!   a local cursor; state offsets 0x28/0x2c stay zero. `sgetc` is
 //!   therefore not ported.
 //! - `%e/%E/%f/%F/%g/%G` (and `%a/%A`): routed through the
-//!   [`FLOAT_CONVERTER`] hook because the float wrapper FUN_08032d70 @
-//!   0x08032d70 is not yet ported; the default is a documented no-op
-//!   stub. (`%a/%A` in the original bl's a veneer @ 0x083ed07c that is a
-//!   bare `mov pc, lr` — dead in this build — so the no-op default is
-//!   behavior-identical there.) The argument is still fetched as an
-//!   8-aligned u64 bit pattern, exactly like the original.
+//!   [`FLOAT_CONVERTER`] hook, whose default is the real float wrapper
+//!   port `convert_fe` (printf_float.rs, original @ 0x08032d70) — the
+//!   firmware build links the original call graph. (`%a/%A` in the
+//!   original bl's a veneer @ 0x083ed07c that is a bare `mov pc, lr` —
+//!   dead in this build — so routing them to the wrapper too only
+//!   affects conversions that never print in the original.) The
+//!   argument is fetched as an 8-aligned u64 bit pattern, exactly like
+//!   the original.
 //! - `%llx/%llX/%llp/%llo`: the committed hex/octal converters are
 //!   u32-only, so the high word of the fetched pair is dropped and only
 //!   the low 32 bits print (the original's converters walk all 64 bits
@@ -119,17 +121,14 @@ const FLAG_TABLE: [u8; 17] = [
 /// Float conversion hook, called for `%e/%E/%f/%F/%g/%G/%a/%A` with the
 /// conversion character and a pointer to the 8 argument bytes (the u64
 /// bit pattern of the soft-float double). Original target: the float
-/// wrapper FUN_08032d70 @ 0x08032d70 (not yet ported); `%a/%A` went to
+/// wrapper `convert_fe` @ 0x08032d70 (printf_float.rs); `%a/%A` went to
 /// the dead veneer @ 0x083ed07c.
 pub type FloatConverterFn = unsafe extern "C" fn(state: *mut PrintfState, spec: u8, bits: *const u64);
 
-/// Default [`FLOAT_CONVERTER`]: documented no-op stub standing in for
-/// the unported float wrapper @ 0x08032d70.
-unsafe extern "C" fn float_not_ported(_state: *mut PrintfState, _spec: u8, _bits: *const u64) {}
-
-/// Installed float converter; see [`FloatConverterFn`]. Replace once the
-/// float wrapper @ 0x08032d70 is ported.
-pub static mut FLOAT_CONVERTER: FloatConverterFn = float_not_ported;
+/// Installed float converter; see [`FloatConverterFn`]. Defaults to the
+/// real float wrapper port [`crate::printf_float::convert_fe`]; host
+/// tests swap in recorders.
+pub static mut FLOAT_CONVERTER: FloatConverterFn = crate::printf_float::convert_fe;
 
 /// Fetch one 32-bit varargs word (original: `ldr rX, [r4], #4`).
 #[inline(always)]
@@ -807,8 +806,8 @@ mod tests {
         unsafe {
             *core::ptr::addr_of_mut!(FLOAT_CONVERTER) = record;
         }
-        // The hook receives the spec char and the raw double bits; the
-        // default stub (and this recorder) emit nothing.
+        // The hook receives the spec char and the raw double bits; this
+        // recorder emits nothing.
         let (out, _) = run(b"%f\0", &Args::new().long(0x3ff0000000000000));
         assert_eq!(out, "");
         assert_eq!(
@@ -822,11 +821,10 @@ mod tests {
             unsafe { *core::ptr::addr_of!(SEEN) },
             Some((b'a', 0x4000000000000000))
         );
-        // Restore the documented stub for any later test.
+        // Restore the shipped default (the real convert_fe port).
         unsafe {
-            *core::ptr::addr_of_mut!(FLOAT_CONVERTER) = float_not_ported;
+            *core::ptr::addr_of_mut!(FLOAT_CONVERTER) = crate::printf_float::convert_fe;
         }
-        assert_eq!(run(b"%g\0", &Args::new().long(0)).0, "");
     }
 
     #[test]

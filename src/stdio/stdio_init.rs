@@ -4,15 +4,30 @@
 //!
 //! - `fclose_core` — original: `FUN_08030238` @ 0x08030238 (152 bytes).
 //!   The fclose engine minus FILE-object deallocation; see its docs.
-//!   Callers (binary-verified): the locked wrapper @ 0x080302d0
-//!   (another agent's port) and `freopen_core`.
+//!   Callers (binary-verified): `fclose` @ 0x080302d0 (below) and
+//!   `freopen_core`.
+//! - `fclose` — original: `FUN_080302d0` @ 0x080302d0 (48 bytes). The
+//!   public fclose entry: the (patched-out) per-stream lock bracket
+//!   around `fclose_core`, whose result passes through. Established from
+//!   the machine code: it wraps the FCLOSE engine, NOT a buffer flush —
+//!   and its only callers in the image (binary bl scan) are the four
+//!   call sites inside the exit-path walker @ 0x08030624, which
+//!   therefore CLOSES every stream (stream_file.rs's `stdio_close_all`;
+//!   its `STREAM_FCLOSE` hook targets this port).
 //! - `fseek` — original: `FUN_0802fef0` @ 0x0802fef0 (72 bytes). The
 //!   public fseek entry: a (patched-out) lock bracket around the seek
 //!   core @ 0x0802fd04 — unported, dispatched through [`STREAM_SEEK_CORE`].
 //!   Six callers (scanf/stdio/C++ layers + `freopen_core`'s append path).
 //! - `freopen_core` — original: `FUN_08030300` @ 0x08030300 (252 bytes).
 //!   fclose + mode-string parse + `_sys_open` + stream re-init; see docs.
-//!   Callers: `fopen` @ 0x080303fc (unported) and `stdio_init` (x3).
+//!   Callers: `fopen` @ 0x080303fc (below) and `stdio_init` (x3).
+//! - `fopen` — original: `FUN_080303fc` @ 0x080303fc (164 bytes). Scans
+//!   the stream chain from static stdin for the first FILE that is not
+//!   open (`flags & 3 == 0` — the closed statics included), appending a
+//!   fresh `malloc(0x44)`-and-zeroed node when every slot is live, then
+//!   hands the slot to `freopen_core`. NO callers in the image (binary
+//!   bl + literal-pool scan): linked-in ADS library dead code, ported
+//!   for cluster completeness.
 //! - `stdio_init` — original: `FUN_080304a0` @ 0x080304a0 (388 bytes);
 //!   the ADS `_initio`. Sole caller: `rt_lib_init_for_abort` @ 0x08035788.
 //!   Zeroes the three static FILE objects, chains stdin -> stdout ->
@@ -57,12 +72,22 @@
 //!   (documented raise.rs deviation — meaningful on the 32-bit target).
 //! - The heap-allocated-buffer free goes through stream_file.rs's
 //!   [`crate::stream_file::STDIO_FREE`] slot (defaults to the ported
-//!   `free`) for the same test-isolation reason documented there.
+//!   `free`) for the same test-isolation reason documented there;
+//!   `fopen`'s FILE allocation goes through its [`STDIO_ALLOC`] twin
+//!   (defaults to the ported `malloc`).
+//! - The original `fopen` does NOT null-check its `malloc(0x44)`: on
+//!   failure it would store the null link (chain unchanged — the tail
+//!   link was already null) and then memzero 0x44 bytes AT ADDRESS 0,
+//!   clobbering the exception vectors. The port keeps the unconditional
+//!   link store but returns NULL instead of performing the wild clear
+//!   (in Rust that write is UB rather than a reliable crash).
 
 use crate::fread::{AdsStream, FLAG_STRING_MODE};
 use crate::raise::{__rt_raise, SIGRTRED};
 use crate::semihost::{_sys_close, _sys_open, sys_stub_ret0_2};
-use crate::stream_file::{stderr_file, stdin_file, stdout_file, AdsFile, ADS_FILE_ZERO, STDIO_FREE};
+use crate::stream_file::{
+    stderr_file, stdin_file, stdout_file, AdsFile, ADS_FILE_ZERO, STDIO_ALLOC, STDIO_FREE,
+};
 use crate::stream_flags::setvbuf_core;
 
 /// flags mask: stream is open for reading (0x1) and/or writing (0x2).
@@ -87,6 +112,10 @@ const CLOSE_HOOK_SIGNATURE: u32 = 0xac00_0000;
 // 48-byte stream prefix plus the three words to +0x3c, sparing lock and
 // chain link; the init-path clear covers the full 0x44 object. Both are
 // typed field resets here — see the module deviations.)
+/// `fopen`'s FILE-object allocation size: exactly the 0x44-byte device
+/// FILE layout (`mov r0, #0x44` @ 0x0803043c — unlike the 0x88 the
+/// separate allocator @ 0x08035924 reserves).
+const FOPEN_FILE_ALLOC_SIZE: usize = 0x44;
 /// setvbuf mode 0x200: line-buffered (_IOLBF), the init default.
 const IOLBF: u32 = 0x200;
 /// Default buffer size installed by `freopen_core` at +0x1c before
@@ -146,6 +175,10 @@ unsafe fn hook<T: Copy>(slot: *const T) -> T {
 /// - reset: zero the first 0x3c bytes (lock and chain link survive) and
 ///   rewrite flags as `flags & 0x1000000` (only the string-mode bit
 ///   survives). Returns 0.
+///
+/// (`inline(never)` keeps the in-crate callers' — `fclose`'s and
+/// `freopen_core`'s — `bl` structure matching the original's.)
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn fclose_core(file: *mut AdsFile) -> i32 {
     let flags = (*file).stream.flags;
@@ -173,6 +206,18 @@ pub unsafe extern "C" fn fclose_core(file: *mut AdsFile) -> i32 {
     (*file).field_38 = 0;
     (*file).stream.flags = flags & FLAG_STRING_MODE;
     0
+}
+
+/// fclose — original: `FUN_080302d0` @ 0x080302d0 (48 bytes).
+///
+/// The public fclose entry: the (patched-out) per-stream lock bracket
+/// (`mov r0, &file.lock; mov r0, r0` on both sides) around
+/// [`fclose_core`], whose result passes through. Only callers in the
+/// image (binary-verified bl scan): the four call sites of the exit-path
+/// close-all walker @ 0x08030624 (`stream_file::stdio_close_all`).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn fclose(file: *mut AdsFile) -> i32 {
+    fclose_core(file)
 }
 
 /// fseek — original: `FUN_0802fef0` @ 0x0802fef0 (72 bytes).
@@ -247,6 +292,53 @@ pub unsafe extern "C" fn freopen_core(
         fseek(file, 0, 2);
     }
     file
+}
+
+/// fopen — original: `FUN_080303fc` @ 0x080303fc (164 bytes).
+///
+/// Scans the stream chain from the static stdin for the first FILE that
+/// is not open (`flags & 3 == 0` — a closed static stream is reused
+/// like any other slot). When every slot is live, a fresh
+/// `malloc(0x44)` node is appended to the chain tail, zeroed
+/// (IRAM-memzero veneer in the original; a typed reset here — module
+/// deviations), and given the per-stream lock init (`0x080320a0`, the
+/// return-0 stub in this build; a nonzero return would mark the node
+/// string-mode — dead). The chosen slot then goes through
+/// [`freopen_core`], whose result (the FILE or NULL) passes through.
+/// The (patched-out) stream-list lock bracket around the whole body —
+/// list lock object @ 0x08a0fc04, pool @ 0x08030688 — is omitted
+/// (module docs). On allocation failure the port returns NULL instead
+/// of the original's wild memzero at address 0 (module deviations).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn fopen(name: *const u8, mode: *const u8) -> *mut AdsFile {
+    let mut file = stdin_file();
+    let slot = loop {
+        if (*file).stream.flags & FLAG_OPEN_MASK == 0 {
+            break file;
+        }
+        let next = (*file).link;
+        if next.is_null() {
+            // Chain exhausted: append a fresh node to the tail.
+            let fresh = hook(core::ptr::addr_of!(STDIO_ALLOC))(FOPEN_FILE_ALLOC_SIZE)
+                as *mut AdsFile;
+            // The original stores the link before any null check (there
+            // is none) — kept: the tail link was null, so a failed
+            // allocation leaves the chain unchanged.
+            (*file).link = fresh;
+            if fresh.is_null() {
+                return core::ptr::null_mut();
+            }
+            *fresh = ADS_FILE_ZERO;
+            // Per-stream lock init on the just-zeroed node (string-mode
+            // is never set here; the stub returns 0 — dead marking).
+            if (*fresh).stream.flags & FLAG_STRING_MODE == 0 && sys_stub_ret0_2() != 0 {
+                (*fresh).stream.flags |= FLAG_STRING_MODE;
+            }
+            break fresh;
+        }
+        file = next;
+    };
+    freopen_core(name, mode, slot)
 }
 
 /// stdio_init — original: `FUN_080304a0` @ 0x080304a0 (388 bytes); the
@@ -336,6 +428,7 @@ mod tests {
         unsafe {
             STREAM_SYNC_CORE = stream_sync_stub;
             STREAM_SEEK_CORE = stream_seek_stub;
+            crate::stream_file::STDIO_ALLOC = crate::malloc_rt::malloc;
             crate::stream_file::STDIO_FREE = crate::malloc_rt::free;
             *stdin_file() = ADS_FILE_ZERO;
             *stdout_file() = ADS_FILE_ZERO;
@@ -561,6 +654,127 @@ mod tests {
             assert_eq!(f.stream.flags, FLAG_STRING_MODE | 2);
             assert!(f.stream.base.is_null());
             assert!(f.stream.ptr.is_null());
+            restore_swi();
+        }
+    }
+
+    // --- fopen -----------------------------------------------------------
+
+    /// Backing store for the mock FILE allocator (host-sized, so the
+    /// port's typed zeroing fits even though it requests the device's
+    /// 0x44 bytes).
+    static mut FOPEN_BUF: AdsFile = ADS_FILE_ZERO;
+
+    unsafe extern "C" fn fopen_buf_alloc(size: usize) -> *mut u8 {
+        (*core::ptr::addr_of_mut!(EVENTS)).push(("alloc", size, 0));
+        core::ptr::addr_of_mut!(FOPEN_BUF) as *mut u8
+    }
+
+    unsafe extern "C" fn fopen_null_alloc(size: usize) -> *mut u8 {
+        (*core::ptr::addr_of_mut!(EVENTS)).push(("alloc", size, 0));
+        core::ptr::null_mut()
+    }
+
+    /// Marks all three static streams live so the scan must allocate.
+    unsafe fn make_statics_live() {
+        (*stdin_file()).stream.flags = 1;
+        (*stdout_file()).stream.flags = 2;
+        (*stderr_file()).stream.flags = 2;
+        (*stdin_file()).link = stdout_file();
+        (*stdout_file()).link = stderr_file();
+    }
+
+    #[test]
+    fn fopen_reuses_the_first_closed_slot() {
+        let _guard = lock_and_reset(&[9]);
+        unsafe {
+            // All statics zeroed: stdin (flags 0) is the first free slot.
+            let ret = fopen(b"x\0".as_ptr(), b"r\0".as_ptr());
+            assert_eq!(ret, stdin_file(), "closed stdin slot reused");
+            assert_eq!((*stdin_file()).stream.handle, 9);
+            assert_eq!((*stdin_file()).stream.flags, 1, "open for reading");
+            assert!(events().is_empty(), "no allocation");
+            restore_swi();
+        }
+    }
+
+    #[test]
+    fn fopen_skips_live_streams_and_reuses_a_later_slot() {
+        let _guard = lock_and_reset(&[9]);
+        unsafe {
+            make_statics_live();
+            (*stderr_file()).stream.flags = 0; // closed again
+            let ret = fopen(b"x\0".as_ptr(), b"w\0".as_ptr());
+            assert_eq!(ret, stderr_file());
+            assert_eq!((*stderr_file()).stream.handle, 9);
+            assert!(events().is_empty(), "no allocation");
+            restore_swi();
+        }
+    }
+
+    #[test]
+    fn fopen_appends_a_zeroed_node_when_every_slot_is_live() {
+        let _guard = lock_and_reset(&[9]);
+        unsafe {
+            make_statics_live();
+            crate::stream_file::STDIO_ALLOC = fopen_buf_alloc;
+            // Poison the backing node: the port must fully re-zero it.
+            *core::ptr::addr_of_mut!(FOPEN_BUF) = ADS_FILE_ZERO;
+            (*core::ptr::addr_of_mut!(FOPEN_BUF)).stream.count = 77;
+            (*core::ptr::addr_of_mut!(FOPEN_BUF)).lock = 0x55;
+            (*core::ptr::addr_of_mut!(FOPEN_BUF)).link = 0x99 as *mut AdsFile;
+            let ret = fopen(b"x\0".as_ptr(), b"r\0".as_ptr());
+            let fresh = core::ptr::addr_of_mut!(FOPEN_BUF);
+            assert_eq!(ret, fresh, "freopen result (the node) passes through");
+            assert_eq!(events(), std::vec![("alloc", FOPEN_FILE_ALLOC_SIZE, 0)]);
+            assert_eq!((*stderr_file()).link, fresh, "appended at the tail");
+            assert_eq!((*fresh).stream.count, 0, "node zeroed before reopen");
+            assert_eq!((*fresh).lock, 0, "node zeroed before reopen");
+            assert!((*fresh).link.is_null(), "node zeroed before reopen");
+            assert_eq!((*fresh).stream.handle, 9);
+            assert_eq!((*fresh).stream.flags, 1);
+            restore_swi();
+        }
+    }
+
+    #[test]
+    fn fopen_alloc_failure_returns_null_with_the_chain_intact() {
+        let _guard = lock_and_reset(&[]);
+        unsafe {
+            make_statics_live();
+            crate::stream_file::STDIO_ALLOC = fopen_null_alloc;
+            assert!(fopen(b"x\0".as_ptr(), b"r\0".as_ptr()).is_null());
+            assert!((*stderr_file()).link.is_null(), "tail link still null");
+            assert!(swi_ops().is_empty(), "no open attempted");
+            restore_swi();
+        }
+    }
+
+    #[test]
+    fn fopen_bad_mode_returns_null_but_the_fresh_node_stays_linked() {
+        let _guard = lock_and_reset(&[]);
+        unsafe {
+            make_statics_live();
+            crate::stream_file::STDIO_ALLOC = fopen_buf_alloc;
+            *core::ptr::addr_of_mut!(FOPEN_BUF) = ADS_FILE_ZERO;
+            let ret = fopen(b"x\0".as_ptr(), b"x\0".as_ptr());
+            assert!(ret.is_null(), "freopen rejects the mode string");
+            // Exactly like the original: the node was appended before the
+            // mode parse and is left linked (a reusable free slot).
+            assert_eq!((*stderr_file()).link, core::ptr::addr_of_mut!(FOPEN_BUF));
+            assert_eq!((*core::ptr::addr_of!(FOPEN_BUF)).stream.flags, 0);
+            assert!(swi_ops().is_empty(), "no open attempted");
+            restore_swi();
+        }
+    }
+
+    #[test]
+    fn fopen_open_failure_returns_null() {
+        let _guard = lock_and_reset(&[]); // every SWI -> -1
+        unsafe {
+            let ret = fopen(b"x\0".as_ptr(), b"r\0".as_ptr());
+            assert!(ret.is_null());
+            assert_eq!((*stdin_file()).stream.handle, 0, "slot not re-armed");
             restore_swi();
         }
     }

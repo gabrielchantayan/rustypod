@@ -57,7 +57,7 @@ pub type EmitStrFn = unsafe extern "C" fn(state: *mut PrintfState, begin: *const
 /// | off  | field           | evidence |
 /// |------|-----------------|----------|
 /// | 0x00 | `reserved_00`   | untouched by this cluster |
-/// | 0x08 | `prefix`        | float converter (`FUN_08032d70`) reads `**prefix` — char* of the sign/prefix string ("-", "+", "0x", ...) |
+/// | 0x08 | `prefix`        | float converter (`convert_fe` @ 0x08032d70) reads `**prefix` — char* of the sign/prefix string ("-", "+", "0x", ...) |
 /// | 0x0c | `reserved_0c`   | float converter sets 0x0c/0x10 to -1 (int/frac widths); 0x14 unseen by this cluster |
 /// | 0x18 | `flags`         | tested here: bits 0x1 / 0x10 / 0x100 / 0x400; string converter also uses 0x20 |
 /// | 0x1c | `putc`          | called by both pad emitters |
