@@ -3223,16 +3223,24 @@ functions:
     ghidra: FUN_0807a15c
     name: task_spawn
     size: 196
+    sig: >-
+      u32 task_spawn(const char *name, usize entry, usize unused, usize
+      stack_size, usize arg, u32 flags, SpawnRecord *record, usize hook)
     module: kernel/task
-    status: identified
+    status: ported
     notes: >-
-      The sole task_create caller. Maps its priority-flag argument
-      (0/8/0x10/0x18/0x20/0x40/0x80/0xc0/0x100/...) to level 0..8, packs
-      the caller record {name?, entry?, flags, a5, a8-or-default} and
-      calls task_create(entry_trampoline @ *0x0807a224 = 0x08074990,
-      level, stack_size, record, name); stores the returned TaskRecord
-      at record[4]. Returns 0. Out of claim range (borderline: spans
-      0x0807a15c..0x0807a220).
+      The sole task_create caller (2 bl call sites: 0x080e87a8 /
+      0x080e9e9c). Maps the priority-flag argument to a level (0->0,
+      8->1, 0x10->2, 0x18->3, 0x20->4, 0x40->5, 0x80->6, 0xc0->7,
+      0x100->8; other <0x10 -> 1, >=0x10 -> 3), packs the caller
+      SpawnRecord {name, entry, flags @ +8, arg @ +0xc, hook-or-default
+      @ +0x14} and calls task_create(SPAWN_TRAMPOLINE 0x08074990 (lit @
+      0x0807a224), level, stack_size, record, name); TaskRecord stored
+      at record+0x10. hook default = 0x0808327c (lit @ 0x0807a220);
+      both literals are mid-function code addresses, kept verbatim.
+      Arg 3 is dead (r2 overwritten before use). Returns 0. match.py:
+      LLVM lowers the flag switch as a jump table vs the cmp chain —
+      mapping proven by the 13-case host test.
 
   - address: 0x0805695c
     ghidra: FUN_0805695c

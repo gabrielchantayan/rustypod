@@ -85,6 +85,16 @@
 //!   (20 bytes). `current_task_record()->context` or 0 — the word
 //!   sync_mutex's `current_task_id` hook reads (the "id" is really the
 //!   caller's context record pointer).
+//! - `task_spawn` — `FUN_0807a15c` @ 0x0807a15c (196 bytes; 2 bl call
+//!   sites, 0x080e87a8 / 0x080e9e9c) — the spawn front-end and sole
+//!   task_create caller. Maps the priority-flag argument (0/8/0x10/
+//!   0x18/0x20/0x40/0x80/0xc0/0x100 -> level 0..8, other values below
+//!   0x10 -> 1, at or above -> 3), packs the caller-owned `SpawnRecord`
+//!   {name, entry, flags, arg, hook-or-default @ +0x14} and calls
+//!   `task_create(SPAWN_TRAMPOLINE, level, stack_size, record, name)`,
+//!   storing the returned `TaskRecord` at record+0x10. Its third
+//!   argument is dead (r2 is overwritten with the stack size before
+//!   use). Returns 0.
 //! - `queue_pool_create` — `FUN_0807a080` @ 0x0807a080 (72 bytes; 22 bl
 //!   call sites, among them task_notify @ 0x08060fb8). One tag-10
 //!   allocation of `capacity * 0x14 + 0x48` bytes — the 0x48-byte pool
@@ -705,6 +715,82 @@ pub unsafe extern "C" fn register_current_task(name: *const u8) {
         core::ptr::addr_of_mut!(REGISTER_NODE_CACHE).write((h.name_node_alloc)());
     }
     (h.sem_signal)(core::ptr::addr_of!(REGISTER_LOCK_SEM).read());
+}
+
+/// Entry trampoline every spawned task starts in (literal @ 0x0807a224).
+/// The address is real code but not a Ghidra function head (it falls
+/// inside the 0x08074xxx region); it presumably unpacks the
+/// `SpawnRecord` handed over as the task context. Kept verbatim, never
+/// called on host.
+pub const SPAWN_TRAMPOLINE: usize = 0x0807_4990;
+
+/// Default for the record's +0x14 word when the caller passes 0
+/// (literal @ 0x0807a220). Also mid-function code (0x0808327c inside
+/// 0x08083xxx); purpose unverified — kept verbatim, never dereferenced.
+pub const SPAWN_DEFAULT_HOOK: usize = 0x0808_327c;
+
+/// Caller-owned record `task_spawn` packs and hands to the trampoline
+/// as the task context (6 words on target).
+#[repr(C)]
+pub struct SpawnRecord {
+    /// +0x00: task name (also passed to task_create for the record and
+    /// name table).
+    pub name: *const u8,
+    /// +0x04: the caller's real entry point, run by the trampoline.
+    pub entry: usize,
+    /// +0x08: the raw priority-flag argument.
+    pub flags: u32,
+    /// +0x0c: opaque caller word (arg 5).
+    pub arg: usize,
+    /// +0x10: the created `TaskRecord`, stored after task_create.
+    pub task: *mut TaskRecord,
+    /// +0x14: opaque caller word (arg 8), `SPAWN_DEFAULT_HOOK` when 0.
+    pub hook: usize,
+}
+
+/// task_spawn — original: `FUN_0807a15c` @ 0x0807a15c (196 bytes; 2 bl
+/// call sites, 0x080e87a8 / 0x080e9e9c). The sole task_create caller.
+///
+/// Maps the priority-flag argument to a level (0->0, 8->1, 0x10->2,
+/// 0x18->3, 0x20->4, 0x40->5, 0x80->6, 0xc0->7, 0x100->8; any other
+/// value below 0x10 -> 1, at or above -> 3), packs the caller record
+/// (name, entry, flags, arg, hook-or-default) and creates the task with
+/// the trampoline as entry and the record as context. The created
+/// `TaskRecord` lands in `record->task`. `_unused` (arg 3) is ignored —
+/// the original overwrites r2 with the stack size before ever reading
+/// it. Always returns 0.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn task_spawn(
+    name: *const u8,
+    entry: usize,
+    _unused: usize,
+    stack_size: usize,
+    arg: usize,
+    flags: u32,
+    record: *mut SpawnRecord,
+    hook: usize,
+) -> u32 {
+    let hook = if hook == 0 { SPAWN_DEFAULT_HOOK } else { hook };
+    let level: u32 = match flags {
+        0 => 0,
+        8 => 1,
+        0x10 => 2,
+        0x18 => 3,
+        0x20 => 4,
+        0x40 => 5,
+        0x80 => 6,
+        0xc0 => 7,
+        0x100 => 8,
+        other if other < 0x10 => 1,
+        _ => 3,
+    };
+    (*record).name = name;
+    (*record).entry = entry;
+    (*record).flags = flags;
+    (*record).arg = arg;
+    (*record).hook = hook;
+    (*record).task = task_create(SPAWN_TRAMPOLINE, level, stack_size, record as usize, name);
+    0
 }
 
 /// Heap tag for queue pools (`mov r1, #0xa`).
@@ -1509,6 +1595,101 @@ mod tests {
             ROM_TASK_RET = null_mut();
             core::ptr::addr_of_mut!(TASK_POOL_COUNT).write(TASK_POOL_CAP as u32);
             current_task_link_node(&mut node);
+        }
+    }
+
+    // ---- task_spawn (0x0807a15c) -------------------------------------
+
+    fn zero_spawn_record() -> SpawnRecord {
+        SpawnRecord {
+            name: core::ptr::null(),
+            entry: 0,
+            flags: 0,
+            arg: 0,
+            task: null_mut(),
+            hook: 0,
+        }
+    }
+
+    #[test]
+    fn spawn_packs_the_record_and_creates_the_task() {
+        let _guard = mock_hooks();
+        let mut record = zero_spawn_record();
+        unsafe {
+            let r = task_spawn(
+                NAME.as_ptr(),
+                0x0812_3456, // real entry, run by the trampoline
+                0xbad,       // dead argument
+                0x40,
+                0xa5a5,
+                8, // -> level 1
+                &mut record,
+                0x0866_0000,
+            );
+            assert_eq!(r, 0);
+            assert_eq!(record.name, NAME.as_ptr());
+            assert_eq!(record.entry, 0x0812_3456);
+            assert_eq!(record.flags, 8);
+            assert_eq!(record.arg, 0xa5a5);
+            assert_eq!(record.hook, 0x0866_0000, "nonzero arg 8 kept");
+            assert_eq!(
+                record.task as *mut u8,
+                core::ptr::addr_of_mut!(ARENA.rec) as *mut u8,
+                "task_create's record stored at +0x10"
+            );
+            // The spawned TaskRecord got the trampoline as entry and the
+            // spawn record as context.
+            let rec = record.task;
+            assert_eq!((*rec).entry, SPAWN_TRAMPOLINE);
+            assert_eq!((*rec).context, &mut record as *mut SpawnRecord as usize);
+            let calls = drain();
+            assert_eq!(calls[0], Call::IdAlloc, "task_create ran");
+            assert!(
+                calls.contains(&Call::MapPriority(1)),
+                "flag 8 mapped to level 1 before the priority map: {calls:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn spawn_flag_to_level_table() {
+        // Every explicit arm plus both default arms.
+        const TABLE: [(u32, u32); 13] = [
+            (0, 0),
+            (8, 1),
+            (0x10, 2),
+            (0x18, 3),
+            (0x20, 4),
+            (0x40, 5),
+            (0x80, 6),
+            (0xc0, 7),
+            (0x100, 8),
+            (4, 1),      // below 0x10 -> 1
+            (0xf, 1),    // below 0x10 -> 1
+            (0x30, 3),   // at/above 0x10 -> 3
+            (0x2000, 3), // at/above 0x10 -> 3
+        ];
+        for (flags, level) in TABLE {
+            let _guard = mock_hooks();
+            let mut record = zero_spawn_record();
+            unsafe {
+                task_spawn(NAME.as_ptr(), 0, 0, 16, 0, flags, &mut record, 1);
+                let calls = drain();
+                assert!(
+                    calls.contains(&Call::MapPriority(level)),
+                    "flags {flags:#x} -> level {level}: {calls:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn spawn_zero_hook_takes_the_default() {
+        let _guard = mock_hooks();
+        let mut record = zero_spawn_record();
+        unsafe {
+            task_spawn(NAME.as_ptr(), 0, 0, 16, 0, 0, &mut record, 0);
+            assert_eq!(record.hook, SPAWN_DEFAULT_HOOK);
         }
     }
 
