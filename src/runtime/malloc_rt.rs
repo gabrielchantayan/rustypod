@@ -32,38 +32,38 @@
 //! - `os_heap_grow_arena` — original: `FUN_0803571c` @ 0x0803571c
 //!   (108 bytes): the sbrk-like arena extension itself (see its doc
 //!   comment for the growth policy), plus its 12-byte call veneer
-//!   `heap_grow_arena_wrapper` @ 0x080336c0. `HEAP_OPS.grow` still
-//!   defaults to the fail stub — the real extension derives its limit
-//!   from the LIVE stack pointer and the libspace arena fields, which
-//!   are meaningless until startup seeds them; install it explicitly.
+//!   `heap_grow_arena_wrapper` @ 0x080336c0.
 //!
-//! Heap-dispatch design (deviation, by necessity): the retailOS heap
-//! (0x080eb67c / 0x080e7970 / 0x080edbf0) and `__rt_raise` @ 0x080320a8
-//! live in other modules or are not yet ported, so these veneers cannot
-//! tail-branch to real code. Instead of undefined `extern "C"` symbols —
-//! which would break the freestanding ARM link — the three heap ops plus
-//! the arena-grow and raise entry points dispatch indirectly through the
-//! `HEAP_OPS` function-pointer table. The table defaults to documented
-//! stubs: `alloc`/`realloc`/`raise` spin forever (they cannot produce
-//! memory or a signal handler out of thin air; on real hardware the table
-//! must be installed before the heap is touched), `free` silently leaks
-//! (harmless), and `grow` reports failure (returns 0). Host tests swap in a
-//! mock heap; once the retailOS heap is ported, `HEAP_OPS` can be pointed
-//! at the real `extern "C"` targets below.
-//!
-//! The eventual link contract (not referenced yet — declaring without
-//! referencing emits no undefined symbols):
-//!
-//! ```text
-//! extern "C" {
-//!     fn os_heap_alloc(size: usize, flag: usize) -> *mut u8;   // 0x080eb67c, flag always 1
-//!     fn os_heap_free(ptr: *mut u8, flag: usize);              // 0x080e7970, flag always 1
-//!     fn os_heap_realloc(ptr: *mut u8, size: usize,            // 0x080edbf0, a3/a4 always 1
-//!                        a3: usize, a4: usize) -> *mut u8;
-//!     fn os_heap_grow_arena(min: usize, old_base: *mut usize) -> usize; // 0x0803571c (below!)
-//!     fn __rt_raise(sig: i32, code: i32) -> i32;               // 0x080320a8 (raise.rs)
-//! }
-//! ```
+//! Heap-dispatch design (deviation, by necessity): instead of the
+//! originals' tail branches, the three heap ops plus the arena-grow and
+//! raise entry points dispatch indirectly through the `HEAP_OPS`
+//! function-pointer table so host tests can swap in a mock heap (pattern
+//! shared with heap/veneers.rs and heap/wrappers.rs). Every default is
+//! the real port of the original call chain (`DEFAULT_MALLOC_RT_OPS`):
+//! - `alloc`/`free`/`realloc` reach the retailOS wrappers
+//!   `malloc_wrapper` @ 0x080eb67c / `free_wrapper` @ 0x080e7970 /
+//!   `realloc_wrapper` @ 0x080edbf0 (heap/veneers.rs — each runs
+//!   `lazy_init_default_heap` @ 0x08077250 and dispatches into the heap
+//!   core @ 0x0819d048) through thin shims folding the constants of the
+//!   ADS tail veneers, each of which has exactly one caller (the ADS
+//!   front-end above it) and therefore lives here as a `*_ported` shim
+//!   rather than an exported symbol (binary-verified):
+//!   - 0x082ab188 (12 bytes; from `malloc`): `mov r0, r1; mov r1, #1;
+//!     b 0x080eb67c` — drops the heap descriptor, tag 1;
+//!   - 0x082ab19c (16 bytes; from `free`): `movs r0, r1; movne r1, #1;
+//!     bne 0x080e7970; bx lr` — drops the descriptor, re-guards NULL,
+//!     tag 1;
+//!   - 0x082ab1b4 (20 bytes; from `realloc`): `mov r0, r1; mov r1, r2;
+//!     mov r2, #1; mov r3, #1; b 0x080edbf0` — drops the descriptor,
+//!     tag 1, copy-on-move 1.
+//! - `grow` is `heap_grow_arena_wrapper` @ 0x080336c0 — the exact `bl`
+//!   target of `__rt_heap_init` @ 0x0802ed40. The extension derives its
+//!   limit from the live stack pointer and the libspace arena fields;
+//!   the original reads the same state unconditionally and relies on
+//!   startup having seeded libspace before the heap is touched, so the
+//!   wired default is behavior-faithful.
+//! - `raise` is `__rt_raise` @ 0x080320a8 (runtime/raise.rs), the
+//!   original's `bleq 0x080320a8` SIGRTMEM path.
 //!
 //! Simplifications (all in dead or stubbed code paths of the original):
 //! - The guard size is a compile-time `1` (veneer 0x082ab194 is a
@@ -71,8 +71,9 @@
 //! - The descriptor-init and heap-extend hook veneers (0x082ab1ac /
 //!   0x082ab1b0) are `bx lr` stubs in osos — the ADS descriptor machinery
 //!   is bypassed in favor of the retailOS heap — so they are not called.
-//! - The constant `flag = 1` arguments the veneers feed the retailOS heap
-//!   are fixed inside the ops-table contract instead of being forwarded.
+//! - The constant tag/copy `1` arguments the tail veneers feed the
+//!   retailOS heap are fixed inside the default shims (`ADS_HEAP_TAG`,
+//!   `ADS_REALLOC_COPY`) instead of being forwarded.
 //! - `__rt_heap_init` keeps the original's 4-argument register contract;
 //!   r2 is unused by the original and r3 only seeds the stack slot the
 //!   arena extension overwrites, so both are inert here.
@@ -112,49 +113,62 @@ pub struct HeapOps {
     pub raise: unsafe extern "C" fn(sig: i32, code: i32) -> i32,
 }
 
-/// Default stub: allocation is impossible without a heap — spin. On real
-/// hardware `HEAP_OPS` must be installed before the heap is first used.
-unsafe extern "C" fn missing_alloc(_size: usize) -> *mut u8 {
-    loop {}
+/// Caller tag the ADS tail veneers pass to the retailOS heap (`mov r1,
+/// #1` in 0x082ab188/0x082ab19c, `mov r2, #1` in 0x082ab1b4).
+const ADS_HEAP_TAG: usize = 1;
+
+/// Copy-on-move flag the ADS realloc tail veneer 0x082ab1b4 passes
+/// (`mov r3, #1`): a relocated block keeps its contents.
+const ADS_REALLOC_COPY: usize = 1;
+
+/// `alloc` slot default — the ADS tail veneer @ 0x082ab188 (12 bytes,
+/// sole caller: `malloc`): drops the heap descriptor and tail-calls the
+/// retailOS allocator `malloc_wrapper` @ 0x080eb67c with tag 1. The
+/// descriptor drop lives in the `HeapOps` contract (the slot never
+/// receives it).
+unsafe extern "C" fn alloc_ported(size: usize) -> *mut u8 {
+    crate::heap::veneers::malloc_wrapper(size, ADS_HEAP_TAG)
 }
 
-/// Default stub: freeing into a nonexistent heap leaks the block — a
-/// harmless no-op.
-unsafe extern "C" fn missing_free(_ptr: *mut u8) {}
-
-/// Default stub: like `missing_alloc`, cannot produce memory — spin.
-unsafe extern "C" fn missing_realloc(_ptr: *mut u8, _size: usize) -> *mut u8 {
-    loop {}
+/// `free` slot default — the ADS tail veneer @ 0x082ab19c (16 bytes,
+/// sole caller: `free`): drops the descriptor, re-guards NULL (`movs r0,
+/// r1; bne ...`) and tail-calls the retailOS `free_wrapper` @ 0x080e7970
+/// with tag 1.
+unsafe extern "C" fn free_ported(ptr: *mut u8) {
+    if ptr.is_null() {
+        return; // second NULL guard, faithful to the veneer
+    }
+    crate::heap::veneers::free_wrapper(ptr, ADS_HEAP_TAG)
 }
 
-/// Default stub: report "cannot grow" (0), matching the original's
-/// failure path which falls through to the SIGRTMEM raise.
-unsafe extern "C" fn missing_grow(_min_size: usize, _old_base: *mut usize) -> usize {
-    0
+/// `realloc` slot default — the ADS tail veneer @ 0x082ab1b4 (20 bytes,
+/// sole caller: `realloc`): drops the descriptor and tail-calls the
+/// retailOS `realloc_wrapper` @ 0x080edbf0 with tag 1, copy-on-move 1.
+unsafe extern "C" fn realloc_ported(ptr: *mut u8, size: usize) -> *mut u8 {
+    crate::heap::veneers::realloc_wrapper(ptr, size, ADS_HEAP_TAG, ADS_REALLOC_COPY)
 }
 
-/// Default stub: an unhandled SIGRTMEM in the original terminates the OS
-/// (0x082b20a0); with no signal runtime the closest safe stub is a spin.
-unsafe extern "C" fn missing_raise(_sig: i32, _code: i32) -> i32 {
-    loop {}
-}
-
-/// The active heap implementation. Defaults to the documented stubs above;
-/// replaced by host tests (mock heap) and eventually by the ported
-/// retailOS heap. Written once at init on target; tests serialize access.
-pub static mut HEAP_OPS: HeapOps = HeapOps {
-    alloc: missing_alloc,
-    free: missing_free,
-    realloc: missing_realloc,
-    grow: missing_grow,
-    raise: missing_raise,
+/// Wired defaults (see the module header): every slot is the real port
+/// of the original call chain. Host tests swap in a mock heap under
+/// `OPS_LOCK` and never dispatch through these.
+pub(crate) const DEFAULT_MALLOC_RT_OPS: HeapOps = HeapOps {
+    alloc: alloc_ported,
+    free: free_ported,
+    realloc: realloc_ported,
+    grow: heap_grow_arena_wrapper,
+    raise: crate::runtime::raise::__rt_raise,
 };
 
+/// The active heap implementation. Defaults to the wired table above;
+/// host tests swap in a mock heap. Written once at init on target; tests
+/// serialize access.
+pub static mut HEAP_OPS: HeapOps = DEFAULT_MALLOC_RT_OPS;
+
 /// Reads the ops table. The read is volatile: the table is meant to be
-/// swapped at runtime (heap installer, host tests), and in a build where
-/// nothing writes it yet, LLVM would otherwise constant-fold the loads to
-/// the default stubs and inline their `loop {}` bodies (observed: `malloc`
-/// collapsed to a branch-to-self in the ARM release build).
+/// swapped at runtime (host tests, target hooks), and in a build where
+/// nothing writes it, LLVM would otherwise constant-fold the loads to the
+/// defaults and inline them (observed with the old spin-stub defaults:
+/// `malloc` collapsed to a branch-to-self in the ARM release build).
 #[inline(always)]
 fn heap_ops() -> HeapOps {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(HEAP_OPS)) }
@@ -614,6 +628,82 @@ pub(crate) mod tests {
         assert_eq!(grow_policy(0x1100, 0x1100), Some(0x1100));
         // One byte short: refuse.
         assert_eq!(grow_policy(0x1101, 0x1100), None);
+    }
+
+    /// Every shipped default is the real port of the original chain
+    /// (house precedent: kernel/task.rs `default_wired_slots`). Compares
+    /// the const table, so no lock and no restore are needed.
+    #[test]
+    fn default_wired_slots() {
+        assert_eq!(DEFAULT_MALLOC_RT_OPS.alloc as usize, alloc_ported as usize);
+        assert_eq!(DEFAULT_MALLOC_RT_OPS.free as usize, free_ported as usize);
+        assert_eq!(
+            DEFAULT_MALLOC_RT_OPS.realloc as usize,
+            realloc_ported as usize
+        );
+        assert_eq!(
+            DEFAULT_MALLOC_RT_OPS.grow as usize,
+            heap_grow_arena_wrapper as usize
+        );
+        assert_eq!(
+            DEFAULT_MALLOC_RT_OPS.raise as usize,
+            crate::runtime::raise::__rt_raise as usize
+        );
+    }
+
+    // The three default shims, driven end-to-end into the retailOS layer
+    // (heap/veneers.rs) with ITS mock heap installed — verifying the ADS
+    // tail-veneer constants (tag 1, copy-on-move 1) reach the wrappers.
+    // These take veneers' ops lock, not this module's; each test holds
+    // exactly one lock, so no ordering hazard.
+
+    #[test]
+    fn default_alloc_shim_reaches_retailos_with_tag_1() {
+        let _lock = crate::heap::veneers::tests::mock_heap();
+        unsafe {
+            let p = alloc_ported(0x40);
+            assert_eq!(p, crate::heap::veneers::tests::mock_block());
+            assert_eq!(
+                crate::heap::veneers::tests::alloc_log(),
+                (1, 0x40, 1),
+                "0x082ab188: one alloc, size through, tag 1"
+            );
+        }
+    }
+
+    #[test]
+    fn default_free_shim_guards_null_and_uses_tag_1() {
+        let _lock = crate::heap::veneers::tests::mock_heap();
+        unsafe {
+            free_ported(core::ptr::null_mut());
+            assert_eq!(
+                crate::heap::veneers::tests::free_log().0,
+                0,
+                "0x082ab19c re-guards NULL before the retailOS free"
+            );
+            let block = crate::heap::veneers::tests::mock_block();
+            free_ported(block);
+            assert_eq!(
+                crate::heap::veneers::tests::free_log(),
+                (1, block, 1),
+                "0x082ab19c: ptr through, tag 1"
+            );
+        }
+    }
+
+    #[test]
+    fn default_realloc_shim_uses_tag_1_and_copy_1() {
+        let _lock = crate::heap::veneers::tests::mock_heap();
+        unsafe {
+            let block = crate::heap::veneers::tests::mock_block();
+            let p = realloc_ported(block, 0x80);
+            assert_eq!(p, block);
+            assert_eq!(
+                crate::heap::veneers::tests::realloc_log(),
+                (1, block, 0x80, 1, 1),
+                "0x082ab1b4: ptr/size through, tag 1, copy-on-move 1"
+            );
+        }
     }
 
     #[test]

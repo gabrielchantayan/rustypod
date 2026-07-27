@@ -130,8 +130,8 @@ unsafe extern "C" fn missing_in_isr_context() -> u32 {
     0
 }
 
-/// Default stub: allocation is impossible without the heap — spin (same
-/// contract as `missing_alloc` in malloc_rt.rs).
+/// Default stub: allocation is impossible without the heap — spin (on
+/// real hardware the hook must be installed before first use).
 unsafe extern "C" fn missing_heap_alloc(_size: usize) -> SemHandle {
     loop {}
 }

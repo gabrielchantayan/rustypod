@@ -446,7 +446,7 @@ pub unsafe extern "C" fn heap_panic() -> ! {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
     use super::*;
     use std::sync::Mutex;
@@ -570,8 +570,9 @@ mod tests {
     };
 
     /// Resets the mock log + DEFAULT_HEAP, installs the mock table,
-    /// returns the lock guard.
-    fn mock_heap() -> std::sync::MutexGuard<'static, ()> {
+    /// returns the lock guard. pub(crate): malloc_rt.rs's default-shim
+    /// tests route the ADS chain through this mock too.
+    pub(crate) fn mock_heap() -> std::sync::MutexGuard<'static, ()> {
         let guard = OPS_LOCK.lock().unwrap();
         unsafe {
             CREATE_CALLS = 0;
@@ -603,6 +604,35 @@ mod tests {
             *core::ptr::addr_of_mut!(HEAP_OPS) = MOCK_OPS;
         }
         guard
+    }
+
+    /// Mock-log accessors for tests outside this module (malloc_rt.rs).
+    /// (calls, size, tag) of the last mock alloc.
+    pub(crate) fn alloc_log() -> (usize, usize, usize) {
+        unsafe { (ALLOC_CALLS, LAST_ALLOC_SIZE, LAST_ALLOC_TAG) }
+    }
+
+    /// (calls, ptr, tag) of the last mock free.
+    pub(crate) fn free_log() -> (usize, *mut u8, usize) {
+        unsafe { (FREE_CALLS, LAST_FREE_PTR, LAST_FREE_TAG) }
+    }
+
+    /// (calls, ptr, size, a3, a4) of the last mock realloc.
+    pub(crate) fn realloc_log() -> (usize, *mut u8, usize, usize, usize) {
+        unsafe {
+            (
+                REALLOC_CALLS,
+                LAST_REALLOC_PTR,
+                LAST_REALLOC_SIZE,
+                LAST_REALLOC_A3,
+                LAST_REALLOC_A4,
+            )
+        }
+    }
+
+    /// The block pointer the mock alloc/realloc return.
+    pub(crate) fn mock_block() -> *mut u8 {
+        BLOCK_A as *mut u8
     }
 
     #[test]

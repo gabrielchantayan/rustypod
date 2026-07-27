@@ -140,8 +140,8 @@ unsafe extern "C" fn missing_heap_early_flag() -> u32 {
     1
 }
 
-/// Default stub: allocation is impossible without a heap — spin (same
-/// contract as malloc_rt's missing_alloc).
+/// Default stub: allocation is impossible without a heap — spin (on real
+/// hardware the hook must be installed before first use).
 unsafe extern "C" fn missing_heap_alloc(_size: usize) -> *mut u8 {
     loop {}
 }
