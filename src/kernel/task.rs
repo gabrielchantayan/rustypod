@@ -221,6 +221,7 @@ pub struct TaskHooks {
     pub task_register: unsafe extern "C" fn(id: u32, rec: *mut TaskRecord),
     /// `FUN_0806331c` @ 0x0806331c: {id, name} table insert (0x50 slots @
     /// *0x08063358); returns 1 on success, 0 when full — discarded.
+    /// Defaults to the ported `task_name_table_insert`.
     pub name_register: unsafe extern "C" fn(id: u32, name: *const u8) -> u32,
     /// Thunk 0x08037f78 -> ROM 0x22003e00: gateway service 0x15 (start).
     pub rom_task_start: unsafe extern "C" fn(id: u32),
@@ -302,10 +303,51 @@ unsafe extern "C" fn missing_task_init(
 
 unsafe extern "C" fn missing_task_register(_id: u32, _rec: *mut TaskRecord) {}
 
-/// Default stub: report success like an insert into a non-full table
-/// (the result is discarded by the only caller anyway).
-unsafe extern "C" fn missing_name_register(_id: u32, _name: *const u8) -> u32 {
-    1
+/// Capacity of the task-name table (`cmp r2, #0x50`).
+pub const TASK_NAME_TABLE_CAP: usize = 0x50;
+
+/// Task-name table entry (8-byte stride: `lsl #0x3`). `id` 0 marks a
+/// free slot.
+#[repr(C)]
+pub struct NameEntry {
+    /// +0x00: kernel object id (0 = free).
+    pub id: u32,
+    /// +0x04: name pointer stored by the insert (NOT copied).
+    pub name: *const u8,
+}
+
+impl NameEntry {
+    const FREE: NameEntry = NameEntry {
+        id: 0,
+        name: core::ptr::null(),
+    };
+}
+
+/// Original: 0x50-entry table @ 0x08a10870 (RAM, reached through the
+/// pointer literal @ 0x08063358); crate static in the port.
+static mut TASK_NAME_TABLE: [NameEntry; TASK_NAME_TABLE_CAP] =
+    [NameEntry::FREE; TASK_NAME_TABLE_CAP];
+
+/// task_name_table_insert — original: `FUN_0806331c` @ 0x0806331c
+/// (60 bytes; 1 call site, task_create @ 0x0805643c).
+///
+/// Linear scan of the {id, name} table: the first slot whose id matches
+/// `id` (re-register) or is 0 (free) gets `{id, name}`; returns 1, or 0
+/// when the table is full. Faithful quirk: inserting id 0 stores into
+/// the first free slot but leaves it looking free (id stays 0), so the
+/// slot is reclaimed by the next insert.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn task_name_table_insert(id: u32, name: *const u8) -> u32 {
+    for i in 0..TASK_NAME_TABLE_CAP {
+        let entry = core::ptr::addr_of_mut!(TASK_NAME_TABLE[i]);
+        let slot_id = (*entry).id;
+        if slot_id == id || slot_id == 0 {
+            (*entry).id = id;
+            (*entry).name = name;
+            return 1;
+        }
+    }
+    0
 }
 
 unsafe extern "C" fn missing_rom_task_op(_id: u32) {}
@@ -350,7 +392,7 @@ pub const DEFAULT_TASK_HOOKS: TaskHooks = TaskHooks {
     map_priority: task_priority_map,
     task_init: missing_task_init,
     task_register: missing_task_register,
-    name_register: missing_name_register,
+    name_register: task_name_table_insert,
     rom_task_start: missing_rom_task_op,
     rom_task_delete: missing_rom_task_op,
     heap_alloc: crate::kernel::os_heap::os_malloc,
@@ -779,6 +821,8 @@ mod tests {
             ROM_TASK_RET = null_mut();
             RUNNING_NODE_RET = null_mut();
             core::ptr::addr_of_mut!(TASK_POOL_COUNT).write(0);
+            core::ptr::addr_of_mut!(TASK_NAME_TABLE)
+                .write([NameEntry::FREE; TASK_NAME_TABLE_CAP]);
             core::ptr::addr_of_mut!(TASK_HOOKS).write(TaskHooks {
                 task_id_alloc: mock_id_alloc,
                 map_priority: mock_map_priority,
@@ -1035,6 +1079,82 @@ mod tests {
             assert_eq!(current_task_context_word(), 0);
         }
     }
+
+    // ---- task_name_table_insert (0x0806331c) -------------------------
+
+    /// Reads slot i of the name table.
+    unsafe fn name_slot(i: usize) -> (u32, *const u8) {
+        let e = core::ptr::addr_of!(TASK_NAME_TABLE[i]);
+        ((*e).id, (*e).name)
+    }
+
+    #[test]
+    fn name_insert_claims_free_slots_in_order() {
+        let _guard = mock_hooks();
+        unsafe {
+            assert_eq!(task_name_table_insert(0x11, 0x100 as *const u8), 1);
+            assert_eq!(task_name_table_insert(0x22, 0x200 as *const u8), 1);
+            assert_eq!(name_slot(0), (0x11, 0x100 as *const u8));
+            assert_eq!(name_slot(1), (0x22, 0x200 as *const u8));
+            assert_eq!(name_slot(2), (0, core::ptr::null()));
+        }
+    }
+
+    #[test]
+    fn name_insert_reuses_the_slot_of_a_matching_id() {
+        let _guard = mock_hooks();
+        unsafe {
+            assert_eq!(task_name_table_insert(0x11, 0x100 as *const u8), 1);
+            assert_eq!(task_name_table_insert(0x22, 0x200 as *const u8), 1);
+            // Re-registering id 0x11 updates slot 0 in place.
+            assert_eq!(task_name_table_insert(0x11, 0x999 as *const u8), 1);
+            assert_eq!(name_slot(0), (0x11, 0x999 as *const u8));
+            assert_eq!(name_slot(2), (0, core::ptr::null()), "no new slot claimed");
+        }
+    }
+
+    #[test]
+    fn name_insert_full_table_returns_zero() {
+        let _guard = mock_hooks();
+        unsafe {
+            for i in 0..TASK_NAME_TABLE_CAP {
+                assert_eq!(task_name_table_insert(1 + i as u32, 0x100 as *const u8), 1);
+            }
+            assert_eq!(
+                task_name_table_insert(0x5000, 0x200 as *const u8),
+                0,
+                "0x50 distinct ids fill the table"
+            );
+            // A known id still succeeds in place.
+            assert_eq!(task_name_table_insert(1, 0x300 as *const u8), 1);
+            assert_eq!(name_slot(0), (1, 0x300 as *const u8));
+        }
+    }
+
+    #[test]
+    fn name_insert_id_zero_leaves_the_slot_free() {
+        let _guard = mock_hooks();
+        unsafe {
+            // Faithful quirk: id 0 matches the "free" test, stores the
+            // name, and leaves id 0 behind — still free.
+            assert_eq!(task_name_table_insert(0, 0x700 as *const u8), 1);
+            assert_eq!(name_slot(0), (0, 0x700 as *const u8));
+            // The next insert reclaims the very same slot.
+            assert_eq!(task_name_table_insert(0x33, 0x800 as *const u8), 1);
+            assert_eq!(name_slot(0), (0x33, 0x800 as *const u8));
+            assert_eq!(name_slot(1), (0, core::ptr::null()));
+        }
+    }
+
+    #[test]
+    fn name_insert_is_the_shipped_name_register_default() {
+        assert_eq!(
+            DEFAULT_TASK_HOOKS.name_register as usize,
+            task_name_table_insert as usize
+        );
+    }
+
+    // ---- current_task_ctx_block (0x080cb828) -------------------------
 
     #[test]
     fn ctx_block_is_null_when_the_kernel_reports_no_task() {
