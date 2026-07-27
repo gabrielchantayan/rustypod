@@ -3707,3 +3707,19 @@ functions:
       with bit-identical results (u32 division / carry add / u64
       division); those helper addresses stay unclaimed. 56 call sites,
       binary-scanned.
+
+  - address: 0x08042cbc
+    ghidra: FUN_08042cbc
+    name: bcopy
+    size: 16
+    sig: "void bcopy(const void *src, void *dst, size_t len)"
+    module: libc/bcopy
+    status: ported
+    vars: {param_1: src, param_2: dst}
+    notes: >-
+      BSD-argument-order memmove adapter - swaps r0/r1 and tail-branches
+      thunk 0x08037e00 onto ROM memmove @ 0x220000d4 (mirror of ported
+      osos 0x080000d4). 47 call sites, binary-scanned. Port calls the
+      Rust memmove (via LLVM's __aeabi_memmove lowering, whose weak
+      builtin forwards to the strong ported memmove at link - same
+      linkage shape as rom_memmove_keep_dst).
