@@ -1744,6 +1744,25 @@ functions:
     status: ported
     notes: 62 sites; NO NULL guard here (heap_free handles NULL).
 
+  - address: 0x0807b254
+    ghidra: FUN_0807b254
+    name: calloc_wrapper
+    size: 44
+    sig: "u8 *calloc_wrapper(usize size, usize tag)"
+    module: heap/veneers
+    status: ported
+    notes: >-
+      malloc_wrapper's zerofill sibling; lazy_init_default_heap
+      (0x08077250), then tail branch to heap_alloc_zero (0x0819ce00)
+      with (*0x089ca638, size, tag). No size*count multiply — callers
+      pass a byte count. 14 bl call sites (among them name_node_alloc @
+      0x0809388c, tag 8). functions.csv says 80 bytes, but that lumps in
+      the unrelated 12-byte getter @ 0x0807b280 (*0x089d03bc +4 +0x3c);
+      real extent is 40 code + 4 literal. New HEAP_OPS.alloc_zero slot
+      (default shim over the ported heap_alloc_zero). match.py
+      structural (lazy init + volatile ops-table loads inlined; tail
+      branch through the slot).
+
   - address: 0x080edbf0
     ghidra: FUN_080edbf0
     name: realloc_wrapper

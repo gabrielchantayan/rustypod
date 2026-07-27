@@ -12,6 +12,13 @@
 //!   0x0819d4dc with (heap, ptr, tag). No NULL guard here — `heap_free`
 //!   itself ignores NULL (and panics via `heap_panic` on a zero/free
 //!   header word).
+//! - `calloc_wrapper` — original: `FUN_0807b254` @ 0x0807b254 (44 bytes:
+//!   40 code + literal; 14 bl call sites, among them the name-node
+//!   allocator @ 0x0809388c). malloc_wrapper's zerofill sibling: lazy
+//!   init, then tail-branches to `heap_alloc_zero` @ 0x0819ce00 with
+//!   (heap, size, tag) — the calloc-style veneer that sets the core's
+//!   zerofill argument. No size*count multiply: callers pass a byte
+//!   count, like malloc.
 //! - `realloc_wrapper` — original: `FUN_080edbf0` @ 0x080edbf0 (56 bytes,
 //!   6 call sites). Lazy init, then calls (not tail-branches — a fourth
 //!   argument goes on the stack) `heap_realloc` @ 0x0819d6a0 with
@@ -56,8 +63,9 @@
 //! the `HEAP_OPS` function-pointer table (same pattern as
 //! src/runtime/malloc_rt.rs) so host tests can swap in a mock heap. The
 //! defaults are wired to the real ports wherever one exists:
-//! `alloc`/`free`/`realloc`/`create` reach the heap core veneers
-//! `heap_alloc` @ 0x0819d67c / `heap_free` @ 0x0819d4dc / `heap_realloc`
+//! `alloc`/`alloc_zero`/`free`/`realloc`/`create` reach the heap core
+//! veneers `heap_alloc` @ 0x0819d67c / `heap_alloc_zero` @ 0x0819ce00 /
+//! `heap_free` @ 0x0819d4dc / `heap_realloc`
 //! @ 0x0819d6a0 (wrappers.rs, free_path.rs) and `heap_create` @
 //! 0x0819d7b4 (init.rs) through thin handle-cast shims (the heap handle
 //! *is* the descriptor pointer — `heap_create` returns its first
@@ -127,6 +135,12 @@ pub struct HeapVeneerOps {
         size: usize,
         tag: usize,
     ) -> *mut u8,
+    /// `heap_alloc_zero` @ 0x0819ce00: same contract, zerofilled block.
+    pub alloc_zero: unsafe extern "C" fn(
+        heap: *mut HeapDescriptorDescriptor,
+        size: usize,
+        tag: usize,
+    ) -> *mut u8,
     /// `heap_free` @ 0x0819d4dc: (heap handle, ptr, caller tag).
     pub free: unsafe extern "C" fn(heap: *mut HeapDescriptorDescriptor, ptr: *mut u8, tag: usize),
     /// `heap_realloc` @ 0x0819d6a0: (heap handle, ptr, size, a3, a4);
@@ -169,6 +183,16 @@ unsafe extern "C" fn alloc_ported(
     tag: usize,
 ) -> *mut u8 {
     crate::heap::wrappers::heap_alloc(heap as *mut HeapDescriptor, size, tag as u32)
+}
+
+/// `alloc_zero` slot shim over `heap_alloc_zero` @ 0x0819ce00
+/// (wrappers.rs) — same handle/tag conventions as `alloc_ported`.
+unsafe extern "C" fn alloc_zero_ported(
+    heap: *mut HeapDescriptorDescriptor,
+    size: usize,
+    tag: usize,
+) -> *mut u8 {
+    crate::heap::wrappers::heap_alloc_zero(heap as *mut HeapDescriptor, size, tag as u32)
 }
 
 /// `free` slot shim over `heap_free` @ 0x0819d4dc (free_path.rs).
@@ -218,6 +242,7 @@ unsafe extern "C" fn missing_terminate(_code: i32) {
 /// and restore this afterwards.
 pub(crate) const DEFAULT_HEAP_OPS: HeapVeneerOps = HeapVeneerOps {
     alloc: alloc_ported,
+    alloc_zero: alloc_zero_ported,
     free: free_ported,
     realloc: realloc_ported,
     create: create_ported,
@@ -273,6 +298,18 @@ pub unsafe extern "C" fn lazy_init_default_heap() {
 pub unsafe extern "C" fn malloc_wrapper(size: usize, tag: usize) -> *mut u8 {
     lazy_init_default_heap();
     (heap_ops().alloc)(default_heap(), size, tag)
+}
+
+/// calloc_wrapper — original: `FUN_0807b254` @ 0x0807b254 (44 bytes;
+/// 14 bl call sites).
+///
+/// Ensures the default heap exists, then allocates `size` zerofilled
+/// bytes from it with caller tag `tag` (via `heap_alloc_zero` @
+/// 0x0819ce00 — the original's tail branch).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn calloc_wrapper(size: usize, tag: usize) -> *mut u8 {
+    lazy_init_default_heap();
+    (heap_ops().alloc_zero)(default_heap(), size, tag)
 }
 
 /// free_wrapper — original: `FUN_080e7970` @ 0x080e7970 (40 bytes).
@@ -432,6 +469,10 @@ mod tests {
     static mut LAST_ALLOC_SIZE: usize = 0;
     static mut LAST_ALLOC_TAG: usize = 0;
     static mut ALLOC_RET: *mut u8 = core::ptr::null_mut();
+    static mut ALLOC_ZERO_CALLS: usize = 0;
+    static mut LAST_ALLOC_ZERO_HEAP: *mut HeapDescriptorDescriptor = core::ptr::null_mut();
+    static mut LAST_ALLOC_ZERO_SIZE: usize = 0;
+    static mut LAST_ALLOC_ZERO_TAG: usize = 0;
     static mut FREE_CALLS: usize = 0;
     static mut LAST_FREE_HEAP: *mut HeapDescriptorDescriptor = core::ptr::null_mut();
     static mut LAST_FREE_PTR: *mut u8 = core::ptr::null_mut();
@@ -471,6 +512,18 @@ mod tests {
         ALLOC_RET
     }
 
+    unsafe extern "C" fn mock_alloc_zero(
+        heap: *mut HeapDescriptorDescriptor,
+        size: usize,
+        tag: usize,
+    ) -> *mut u8 {
+        ALLOC_ZERO_CALLS += 1;
+        LAST_ALLOC_ZERO_HEAP = heap;
+        LAST_ALLOC_ZERO_SIZE = size;
+        LAST_ALLOC_ZERO_TAG = tag;
+        ALLOC_RET
+    }
+
     unsafe extern "C" fn mock_free(
         heap: *mut HeapDescriptorDescriptor,
         ptr: *mut u8,
@@ -505,6 +558,7 @@ mod tests {
 
     const MOCK_OPS: HeapVeneerOps = HeapVeneerOps {
         alloc: mock_alloc,
+        alloc_zero: mock_alloc_zero,
         free: mock_free,
         realloc: mock_realloc,
         create: mock_create,
@@ -529,6 +583,10 @@ mod tests {
             LAST_ALLOC_SIZE = 0;
             LAST_ALLOC_TAG = 0;
             ALLOC_RET = BLOCK_A as *mut u8;
+            ALLOC_ZERO_CALLS = 0;
+            LAST_ALLOC_ZERO_HEAP = core::ptr::null_mut();
+            LAST_ALLOC_ZERO_SIZE = 0;
+            LAST_ALLOC_ZERO_TAG = 0;
             FREE_CALLS = 0;
             LAST_FREE_HEAP = core::ptr::null_mut();
             LAST_FREE_PTR = core::ptr::null_mut();
@@ -602,6 +660,32 @@ mod tests {
             assert_eq!(CREATE_CALLS, 1, "second call must not re-init");
             assert_eq!(LAST_ALLOC_TAG, 9);
         }
+    }
+
+    #[test]
+    fn calloc_wrapper_inits_and_routes_to_the_zerofill_veneer() {
+        let _lock = mock_heap();
+        unsafe {
+            let p = calloc_wrapper(0x54, 8);
+            assert_eq!(p, BLOCK_A as *mut u8);
+            assert_eq!(CREATE_CALLS, 1, "wrapper must run the lazy init");
+            assert_eq!(ALLOC_ZERO_CALLS, 1);
+            assert_eq!(LAST_ALLOC_ZERO_HEAP, core::ptr::addr_of_mut!(FAKE_HANDLE));
+            assert_eq!(LAST_ALLOC_ZERO_SIZE, 0x54);
+            assert_eq!(LAST_ALLOC_ZERO_TAG, 8);
+            assert_eq!(ALLOC_CALLS, 0, "never the plain-alloc slot");
+            calloc_wrapper(0x18, 5);
+            assert_eq!(CREATE_CALLS, 1, "second call must not re-init");
+            assert_eq!(LAST_ALLOC_ZERO_TAG, 5);
+        }
+    }
+
+    #[test]
+    fn calloc_wrapper_default_slot_is_the_zerofill_shim() {
+        assert_eq!(
+            DEFAULT_HEAP_OPS.alloc_zero as usize,
+            alloc_zero_ported as usize
+        );
     }
 
     #[test]
