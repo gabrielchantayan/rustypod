@@ -99,9 +99,10 @@
 //!   call sites, among them task_notify @ 0x08060fb8). One tag-10
 //!   allocation of `capacity * 0x14 + 0x48` bytes — the 0x48-byte pool
 //!   header (kernel/mqueue.rs `QueuePool`) followed by the node array —
-//!   then the (unported) initializer `FUN_0809eab8` lays it out:
-//!   `pool_init(capacity, base + 0x48, base)`, degraded to
-//!   `(0, NULL, base)` for `capacity < 1`. Returns the base unchecked.
+//!   then the initializer `FUN_0809eab8` (ported: kernel/mqueue.rs
+//!   `queue_pool_init`) lays it out: `pool_init(capacity, base + 0x48,
+//!   base)`, degraded to `(0, NULL, base)` for `capacity < 1`. Returns
+//!   the base unchecked.
 //! - `register_current_task` — `FUN_080865e8` @ 0x080865e8 (168 bytes;
 //!   2 bl call sites: task_notify @ 0x08060fa8 and 0x080e873c). Attaches
 //!   a `NameNode` to the current task. The registration block @
@@ -109,7 +110,7 @@
 //!   kernel-started flag — the SAME byte sync_mutex models as
 //!   `KERNEL_STARTED`; +0x08: lock semaphore slot; +0x0c: pre-allocated
 //!   node cache}. Before the kernel starts the node is freshly allocated
-//!   (0x08093870, unported) with NO locking; after, the lock is taken
+//!   (`name_node_alloc` @ 0x08093870) with NO locking; after, the lock is taken
 //!   and the cached node consumed. Then: node->task =
 //!   current_task_record(); `current_task_link_node` stores the node
 //!   into the record's context word; a nonzero `name` argument is
@@ -160,6 +161,7 @@
 //!   string pointer it is used as (`*const u8`); task_notify casts its
 //!   opaque callback word at the call.
 
+use crate::kernel::mqueue::{QueueNode, QueuePool};
 use crate::kernel::sync_sem::SemHandle;
 use crate::libc::memzero::memzero_aligned;
 use crate::libc::strcpy::strcpy;
@@ -199,25 +201,71 @@ pub struct TaskRecord {
 #[cfg(target_pointer_width = "32")]
 const _TASK_RECORD_SIZE_CHECK: [u8; 0x44] = [0; core::mem::size_of::<TaskRecord>()];
 
-/// Per-task context block (0x080cb828's result). Only the word
-/// `task_notify` writes is named; +0x00..+0x1c belong to the owner.
+/// Per-task context block (0x54 bytes on target — the tag-8 zerofilled
+/// allocation `name_node_alloc` creates alongside the node;
+/// 0x080cb828's result). Only the fields this layer touches are named;
+/// the rest belong to the owner.
 #[repr(C)]
 pub struct TaskCtx {
-    /// +0x00..+0x1c: owner fields, untouched here.
-    _pad: [usize; 7],
+    /// +0x00: set to 1 by the allocator (`strh` — live/enable marker).
+    pub live: u16,
+    /// +0x02: untouched (calloc-zeroed).
+    pub _x02: u16,
+    /// +0x04: back-reference to the owning `NameNode`.
+    pub node: *mut NameNode,
+    /// +0x08: zeroed by the allocator, untouched here.
+    pub _x08: u32,
+    /// +0x0c: zeroed by the allocator (halfword store).
+    pub _x0c: u16,
+    /// +0x0e: untouched (calloc-zeroed).
+    pub _x0e: u16,
+    /// +0x10: zeroed by the allocator, untouched here.
+    pub _x10: u32,
+    /// +0x14: zeroed by the allocator, untouched here.
+    pub _x14: u32,
+    /// +0x18: untouched (calloc-zeroed — the one word inside the
+    /// allocator's store range it skips).
+    pub _x18: u32,
     /// +0x1c: queue pool installed by `task_notify`.
     pub queue_pool: *mut u8,
+    /// +0x20..+0x3c: zeroed by the allocator, untouched here.
+    pub _x20: [u32; 7],
+    /// +0x3c..+0x54: untouched (calloc-zeroed).
+    pub _x3c: [u32; 6],
 }
 
-/// Per-task registration node (0x18 bytes, tag-5 heap allocation by the
-/// unported name-node allocator @ 0x08093870, which also creates the
-/// node's 0x54-byte context block). A task's `TaskRecord::context` word
-/// points at its node — the "current task id" the kernel_running query
-/// returns is really this pointer.
+// The original allocates exactly 0x54 bytes (`mov r0, #0x54`).
+#[cfg(target_pointer_width = "32")]
+const _TASK_CTX_SIZE_CHECK: [u8; 0x54] = [0; core::mem::size_of::<TaskCtx>()];
+
+impl TaskCtx {
+    /// Const-init template (tests).
+    pub const ZERO: TaskCtx = TaskCtx {
+        live: 0,
+        _x02: 0,
+        node: core::ptr::null_mut(),
+        _x08: 0,
+        _x0c: 0,
+        _x0e: 0,
+        _x10: 0,
+        _x14: 0,
+        _x18: 0,
+        queue_pool: core::ptr::null_mut(),
+        _x20: [0; 7],
+        _x3c: [0; 6],
+    };
+}
+
+/// Per-task registration node (0x18 bytes, tag-5 heap allocation by
+/// `name_node_alloc` @ 0x08093870, which also creates the node's
+/// 0x54-byte context block). A task's `TaskRecord::context` word points
+/// at its node — the "current task id" the kernel_running query returns
+/// is really this pointer.
 #[repr(C)]
 pub struct NameNode {
-    /// +0x00: task-name string (the allocator seeds a default pointer;
-    /// `register_current_task` overwrites it with a tag-7 heap copy).
+    /// +0x00: task-name string (the allocator seeds the empty-string
+    /// sentinel; `register_current_task` overwrites it with a tag-7
+    /// heap copy).
     pub name: *mut u8,
     /// +0x04: allocator-zeroed, untouched here.
     pub _x04: usize,
@@ -226,7 +274,9 @@ pub struct NameNode {
     /// +0x0c: the task's context block (`current_task_ctx_block`'s
     /// result; `task_notify` installs the queue pool at ctx+0x1c).
     pub ctx: *mut TaskCtx,
-    /// +0x10: `TaskRecord` installed by `register_current_task`.
+    /// +0x10: `TaskRecord` installed by `register_current_task`. The
+    /// allocator leaves this word UNINITIALIZED (faithful — the only
+    /// node word it skips).
     pub task: *mut TaskRecord,
     /// +0x14: allocator-zeroed, untouched here.
     pub _x14: usize,
@@ -302,8 +352,12 @@ pub struct TaskHooks {
     /// Tagged retailOS allocator `FUN_080eb67c` @ 0x080eb67c — defaults
     /// to the real `malloc_wrapper` (heap/veneers.rs).
     pub tagged_alloc: unsafe extern "C" fn(size: usize, tag: usize) -> *mut u8,
-    /// Unported name-node allocator `FUN_08093870` @ 0x08093870
-    /// (0x18-byte tag-5 node plus its 0x54-byte context block).
+    /// Zerofilling tagged allocator `FUN_0807b254` @ 0x0807b254 —
+    /// defaults to the real `calloc_wrapper` (heap/veneers.rs).
+    pub tagged_alloc_zero: unsafe extern "C" fn(size: usize, tag: usize) -> *mut u8,
+    /// Name-node allocator `FUN_08093870` @ 0x08093870 (0x18-byte tag-5
+    /// node plus its 0x54-byte context block). Defaults to the ported
+    /// `name_node_alloc`.
     pub name_node_alloc: unsafe extern "C" fn() -> *mut NameNode,
     /// sem_wait `FUN_08056510` @ 0x08056510 — defaults to the real port
     /// (kernel/sync_sem.rs). A slot so host tests can observe the
@@ -324,11 +378,13 @@ pub struct TaskHooks {
     /// 20-byte entries (tag-10 heap allocation). Defaults to the ported
     /// `queue_pool_create`.
     pub queue_pool_create: unsafe extern "C" fn(capacity: i32) -> *mut u8,
-    /// Unported pool initializer `FUN_0809eab8` @ 0x0809eab8: lays out
-    /// the 0x48-byte pool header (lock semaphore, condvars, free list of
-    /// the `capacity` nodes at `nodes`) — see kernel/mqueue.rs's
-    /// `QueuePool` for the header model.
-    pub pool_init: unsafe extern "C" fn(capacity: i32, nodes: *mut u8, pool: *mut u8),
+    /// Pool initializer `FUN_0809eab8` @ 0x0809eab8: lays out the
+    /// 0x48-byte pool header (lock semaphore, condvars, free list of the
+    /// `capacity` nodes at `nodes`). Defaults to the ported
+    /// `queue_pool_init` (kernel/mqueue.rs); result (always 0) discarded
+    /// by the caller, like the original.
+    pub pool_init:
+        unsafe extern "C" fn(capacity: i32, nodes: *mut QueueNode, pool: *mut QueuePool) -> u32,
     /// Thunk 0x08037e98 -> ROM 0x22004260: the yield-like kernel service
     /// (exact RTXC op unidentified; always called with 0 here).
     pub rom_yield: unsafe extern "C" fn(arg: u32) -> i32,
@@ -436,23 +492,12 @@ unsafe extern "C" fn missing_rom_slot_id(_slot: u32) -> u32 {
     0
 }
 
-/// Scratch node the default name-node-alloc stub hands out (the real
-/// allocator @ 0x08093870 is unported), so a mis-wired registration
-/// scribbles on scratch instead of faulting.
-static mut DUMMY_NAME_NODE: NameNode = NameNode::ZERO;
-
-unsafe extern "C" fn missing_name_node_alloc() -> *mut NameNode {
-    core::ptr::addr_of_mut!(DUMMY_NAME_NODE)
-}
-
 /// Default adapter for `kernel_running_node`: the ported query returns
 /// the node pointer as an `i32` "task id" — cast it back. Exact on the
 /// 32-bit target; host tests mock the slot instead of relying on it.
 unsafe extern "C" fn kernel_running_node_adapter() -> *mut NameNode {
     crate::kernel::sync_mutex::kernel_running() as usize as *mut NameNode
 }
-
-unsafe extern "C" fn missing_pool_init(_capacity: i32, _nodes: *mut u8, _pool: *mut u8) {}
 
 /// Default stub: yielding without a scheduler is a no-op reporting 0.
 unsafe extern "C" fn missing_rom_yield(_arg: u32) -> i32 {
@@ -476,13 +521,14 @@ pub const DEFAULT_TASK_HOOKS: TaskHooks = TaskHooks {
     current_task_context: current_task_context_word,
     register_current_task,
     tagged_alloc: crate::heap::veneers::malloc_wrapper,
-    name_node_alloc: missing_name_node_alloc,
+    tagged_alloc_zero: crate::heap::veneers::calloc_wrapper,
+    name_node_alloc,
     sem_wait: crate::kernel::sync_sem::sem_wait,
     sem_signal: crate::kernel::sync_sem::sem_signal,
     current_task_ctx: current_task_ctx_block,
     kernel_running_node: kernel_running_node_adapter,
     queue_pool_create,
-    pool_init: missing_pool_init,
+    pool_init: crate::kernel::mqueue::queue_pool_init,
     rom_yield: missing_rom_yield,
 };
 
@@ -665,6 +711,54 @@ unsafe fn strlen_raw(mut s: *const u8) -> usize {
     len
 }
 
+/// Heap tag for the 0x18-byte `NameNode` (`mov r1, #0x5`).
+const TAG_NAME_NODE: usize = 5;
+
+/// Heap tag for the 0x54-byte `TaskCtx` (`mov r1, #0x8`).
+const TAG_TASK_CTX: usize = 8;
+
+/// The allocator's default name: the original seeds node->name with
+/// `adr r2, 0x080938f4` — four NUL bytes tucked right after the
+/// function's `ldm` — i.e. a valid empty C string. Crate static in the
+/// port; only ever read (registration replaces the POINTER, never the
+/// bytes).
+static NAME_NODE_EMPTY_NAME: [u8; 4] = [0; 4];
+
+/// name_node_alloc — original: `FUN_08093870` @ 0x08093870 (132 bytes:
+/// 128 code + the 4-byte empty-string literal; 2 bl call sites, both in
+/// `register_current_task` @ 0x08086604/0x0808667c).
+///
+/// Allocates the 0x18-byte `NameNode` (tag 5, plain malloc) and its
+/// 0x54-byte `TaskCtx` (tag 8, zerofilling calloc), seeds node->name
+/// with the empty-string sentinel, marks the ctx live (halfword 1 at
+/// +0x00), cross-links node->ctx / ctx->node, and zeroes the individual
+/// fields in the original's store order (redundant over the zerofilled
+/// ctx — kept faithful). Faithful quirks: neither allocation is
+/// NULL-checked, and node->task (+0x10) is left UNINITIALIZED — both
+/// callers store it immediately after.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn name_node_alloc() -> *mut NameNode {
+    let h = hooks();
+    let node =
+        (h.tagged_alloc)(core::mem::size_of::<NameNode>(), TAG_NAME_NODE) as *mut NameNode;
+    let ctx =
+        (h.tagged_alloc_zero)(core::mem::size_of::<TaskCtx>(), TAG_TASK_CTX) as *mut TaskCtx;
+    (*node).name = NAME_NODE_EMPTY_NAME.as_ptr() as *mut u8;
+    (*ctx).live = 1;
+    (*ctx)._x08 = 0;
+    (*ctx).node = node;
+    (*ctx).queue_pool = core::ptr::null_mut();
+    (*ctx)._x20 = [0; 7];
+    (*ctx)._x0c = 0;
+    (*ctx)._x10 = 0;
+    (*ctx)._x14 = 0;
+    (*node)._x08 = 0;
+    (*node).ctx = ctx;
+    (*node)._x04 = 0;
+    (*node)._x14 = 0;
+    node
+}
+
 /// current_task_link_node — original: `FUN_080568d0` @ 0x080568d0
 /// (24 bytes; 2 bl call sites).
 ///
@@ -819,9 +913,13 @@ pub unsafe extern "C" fn queue_pool_create(capacity: i32) -> *mut u8 {
         .wrapping_add(QUEUE_POOL_HEADER);
     let base = (h.tagged_alloc)(size as usize, TAG_QUEUE_POOL);
     if capacity > 0 {
-        (h.pool_init)(capacity, base.add(QUEUE_POOL_HEADER as usize), base);
+        (h.pool_init)(
+            capacity,
+            base.add(QUEUE_POOL_HEADER as usize) as *mut QueueNode,
+            base as *mut QueuePool,
+        );
     } else {
-        (h.pool_init)(0, core::ptr::null_mut(), base);
+        (h.pool_init)(0, core::ptr::null_mut(), base as *mut QueuePool);
     }
     base
 }
@@ -929,6 +1027,7 @@ mod tests {
         RomYield(u32),
         KernelRunningNode,
         TaggedAlloc { size: usize, tag: usize },
+        TaggedAllocZero { size: usize, tag: usize },
         NameNodeAlloc,
         SemWait(usize),
         SemSignal(usize),
@@ -954,10 +1053,7 @@ mod tests {
 
     static mut KERNEL_STARTED_MOCK: u32 = 0;
     static mut TASK_CONTEXT_MOCK: usize = 0;
-    static mut CTX_BLOCK: TaskCtx = TaskCtx {
-        _pad: [0; 7],
-        queue_pool: null_mut(),
-    };
+    static mut CTX_BLOCK: TaskCtx = TaskCtx::ZERO;
     static mut POOL_RET: *mut u8 = null_mut();
 
     unsafe extern "C" fn mock_id_alloc() -> u32 {
@@ -1056,6 +1152,29 @@ mod tests {
         core::ptr::addr_of_mut!(NAME_BUF) as *mut u8
     }
 
+    /// Ctx arena the zerofilling-alloc mock hands out (zeroed like the
+    /// real calloc_wrapper).
+    static mut CTX_ALLOC_BUF: TaskCtx = TaskCtx::ZERO;
+
+    unsafe extern "C" fn mock_tagged_alloc_zero(size: usize, tag: usize) -> *mut u8 {
+        CALLS.lock().unwrap().push(Call::TaggedAllocZero { size, tag });
+        let p = core::ptr::addr_of_mut!(CTX_ALLOC_BUF) as *mut u8;
+        core::ptr::write_bytes(p, 0, core::mem::size_of::<TaskCtx>());
+        p
+    }
+
+    /// Node arena for the direct name_node_alloc tests: handed out
+    /// DIRTIED (0xa5), so the layout test proves which fields the
+    /// allocator writes — and which it faithfully leaves alone.
+    static mut NODE_ALLOC_BUF: NameNode = NameNode::ZERO;
+
+    unsafe extern "C" fn mock_node_alloc_dirty(size: usize, tag: usize) -> *mut u8 {
+        CALLS.lock().unwrap().push(Call::TaggedAlloc { size, tag });
+        let p = core::ptr::addr_of_mut!(NODE_ALLOC_BUF) as *mut u8;
+        core::ptr::write_bytes(p, 0xa5, core::mem::size_of::<NameNode>());
+        p
+    }
+
     unsafe extern "C" fn mock_sem_wait(sem: SemHandle) {
         CALLS.lock().unwrap().push(Call::SemWait(sem as usize));
     }
@@ -1078,12 +1197,17 @@ mod tests {
         POOL_RET
     }
 
-    unsafe extern "C" fn mock_pool_init(capacity: i32, nodes: *mut u8, pool: *mut u8) {
+    unsafe extern "C" fn mock_pool_init(
+        capacity: i32,
+        nodes: *mut QueueNode,
+        pool: *mut QueuePool,
+    ) -> u32 {
         CALLS.lock().unwrap().push(Call::PoolInit {
             capacity,
             nodes: nodes as usize,
             pool: pool as usize,
         });
+        0
     }
 
     /// Record the rom_current_task mock returns (NULL -> lazy pool path).
@@ -1150,6 +1274,7 @@ mod tests {
                 current_task_context: mock_current_task_context,
                 register_current_task: mock_register_current_task,
                 tagged_alloc: mock_tagged_alloc,
+                tagged_alloc_zero: mock_tagged_alloc_zero,
                 name_node_alloc: mock_name_node_alloc,
                 sem_wait: mock_sem_wait,
                 sem_signal: mock_sem_signal,
@@ -1768,6 +1893,73 @@ mod tests {
         );
     }
 
+    #[test]
+    fn pool_init_default_is_the_real_initializer() {
+        assert_eq!(
+            DEFAULT_TASK_HOOKS.pool_init as usize,
+            crate::kernel::mqueue::queue_pool_init as usize
+        );
+    }
+
+    // ---- name_node_alloc (0x08093870) --------------------------------
+
+    /// Both allocations use the original's sizes and tags, and the
+    /// cross-links / sentinel land where the original stores them. The
+    /// node arena is handed out dirtied (0xa5) so the one word the
+    /// original leaves UNINITIALIZED — node->task — is visibly untouched.
+    #[test]
+    fn name_node_alloc_lays_out_the_node_and_its_context() {
+        let _guard = mock_hooks();
+        unsafe {
+            core::ptr::addr_of_mut!(TASK_HOOKS.tagged_alloc).write(mock_node_alloc_dirty);
+            let node = name_node_alloc();
+
+            assert_eq!(
+                drain(),
+                vec![
+                    Call::TaggedAlloc {
+                        size: core::mem::size_of::<NameNode>(),
+                        tag: 5
+                    },
+                    Call::TaggedAllocZero {
+                        size: core::mem::size_of::<TaskCtx>(),
+                        tag: 8
+                    },
+                ],
+                "node = size_of(NameNode) tag 5, ctx = size_of(TaskCtx) tag 8"
+            );
+
+            assert_eq!(node, core::ptr::addr_of_mut!(NODE_ALLOC_BUF));
+            assert_eq!(
+                (*node).name,
+                NAME_NODE_EMPTY_NAME.as_ptr() as *mut u8,
+                "name seeded with the empty-string sentinel"
+            );
+            let ctx = (*node).ctx;
+            assert_eq!(ctx, core::ptr::addr_of_mut!(CTX_ALLOC_BUF), "node -> ctx");
+            assert_eq!((*ctx).node, node, "ctx -> node (cross-linked)");
+            assert_eq!((*ctx).live, 1, "ctx marked live");
+            assert!((*ctx).queue_pool.is_null());
+            assert_eq!((*node)._x04, 0);
+            assert_eq!((*node)._x08, 0);
+            assert_eq!((*node)._x14, 0);
+            assert_eq!(
+                (*node).task as usize,
+                usize::from_ne_bytes([0xa5; core::mem::size_of::<usize>()]),
+                "node->task is the one word the original leaves uninitialized"
+            );
+        }
+    }
+
+    /// The shipped hook default is the real port, not the scratch stub.
+    #[test]
+    fn name_node_alloc_is_the_shipped_hook_default() {
+        assert_eq!(
+            DEFAULT_TASK_HOOKS.name_node_alloc as usize,
+            name_node_alloc as usize
+        );
+    }
+
     // ---- current_task_ctx_block (0x080cb828) -------------------------
 
     #[test]
@@ -1783,10 +1975,7 @@ mod tests {
     fn ctx_block_comes_from_the_node() {
         let _guard = mock_hooks();
         unsafe {
-            let mut ctx = TaskCtx {
-                _pad: [0; 7],
-                queue_pool: null_mut(),
-            };
+            let mut ctx = TaskCtx::ZERO;
             let mut node = NameNode::ZERO;
             node.ctx = &mut ctx;
             RUNNING_NODE_RET = &mut node;
