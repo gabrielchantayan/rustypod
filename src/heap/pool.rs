@@ -83,13 +83,13 @@
 //! slots default to the real ports: `operator new`/`delete` @
 //! 0x082aadd4/0x082aad24 (veneers.rs), `heap_create_empty` @ 0x0819d7c8 /
 //! `heap_destroy` @ 0x0819d7e4 / `heap_add_region` @ 0x0819cf68
-//! (init.rs), the alloc entries @ 0x0819d2f0 / 0x0819d67c (wrappers.rs)
-//! and `heap_free` @ 0x0819d4dc (free_path.rs). Still stubbed (C++/
-//! driver machinery outside the heap): `base_construct` spins,
-//! `base_destroy` returns its argument, `deque_fill` reports failure
-//! (create then cleanly returns NULL), the block-manager queries return
-//! 0/NULL, and `dcache_flush` is a no-op (memory contents unaffected,
-//! like the real cache op). The heap "handle" passed around is the
+//! (init.rs), the alloc entries @ 0x0819d2f0 / 0x0819d67c (wrappers.rs),
+//! `heap_free` @ 0x0819d4dc (free_path.rs), and `dcache_flush` @
+//! 0x08044c10 (dcache.rs — real `mcr` loop on target, no-op line stub on
+//! host). Still stubbed (C++/driver machinery outside the heap):
+//! `base_construct` spins, `base_destroy` returns its argument,
+//! `deque_fill` reports failure (create then cleanly returns NULL), and
+//! the block-manager queries return 0/NULL. The heap "handle" passed around is the
 //! embedded `HeapDescriptor*` itself (the `HeapDescriptorDescriptor` of
 //! types.rs is a same-layout wrapper used only for the default-heap
 //! global).
@@ -328,9 +328,6 @@ unsafe extern "C" fn heap_add_region_ported(
     crate::heap::init::heap_add_region(heap, start as usize, size);
 }
 
-/// Default stub: no cache runtime — no-op (memory contents unaffected,
-/// exactly like the real cache maintenance op).
-unsafe extern "C" fn missing_dcache_flush(_addr: *mut u8, _len: usize) {}
 
 /// Wired defaults (see the module header): real ports for the heap-facing
 /// slots, documented stubs for the unported C++/driver machinery. Host
@@ -349,7 +346,7 @@ pub(crate) const DEFAULT_POOL_OPS: PoolOps = PoolOps {
     heap_alloc: heap_alloc_ported,
     heap_free: heap_free_ported,
     heap_add_region: heap_add_region_ported,
-    dcache_flush: missing_dcache_flush,
+    dcache_flush: crate::heap::dcache::dcache_clean_invalidate,
 };
 
 /// The active pool-machinery implementation. Defaults to the wired table

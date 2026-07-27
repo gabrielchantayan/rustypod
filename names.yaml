@@ -1785,6 +1785,39 @@ functions:
       from serialized copy @ 0x089d6094); tag 0x2b; uncached path = D-cache
       clean+invalidate + bit31 uncached alias.
 
+  - address: 0x08037cd0
+    ghidra: FUN_08037cd0
+    name: dcache_line_clean_invalidate
+    size: 8
+    sig: "void dcache_line_clean_invalidate(usize mva)"
+    module: heap/dcache
+    status: ported
+    notes: >-
+      mcr p15,0,r0,cr7,cr14,1; bx lr — ARM926EJ-S clean+invalidate
+      D-cache single entry by MVA. Sole bl caller 0x08044c34. Port is
+      cfg-gated real inline asm on the ARM target, no-op on host; the
+      DCACHE_LINE_OP slot (semihost.rs SEMIHOST_SWI pattern) lets host
+      tests record the flushed line addresses.
+
+  - address: 0x08044c10
+    ghidra: FUN_08044c10
+    name: dcache_clean_invalidate
+    size: 56
+    sig: "void dcache_clean_invalidate(u8 *addr, usize len)"
+    module: heap/dcache
+    vars: {param_1: addr, param_2: uncached/off}
+    status: ported
+    notes: >-
+      22 bl call sites (DMA buffer prep in ATA/USB/LCD drivers, plus
+      pool_alloc's uncached path). Bit-31 addr (uncached DRAM alias) =
+      early return; else flushes line (addr+off) & ~0x1f for off = 0,
+      0x20, ... < len via bl 0x08037cd0. Walk steps from addr, not the
+      line start, so a misaligned addr can leave the final spilled line
+      unflushed (callers pass padded lengths). Port dispatches per line
+      through DCACHE_LINE_OP (real mcr on target); wired as the
+      POOL_OPS.dcache_flush default. A clean-only sibling loop without
+      the bit-31 guard sits right after @ 0x08044c48 (not ported).
+
   - address: 0x080751a0
     ghidra: FUN_080751a0
     name: crc32_table_gen
