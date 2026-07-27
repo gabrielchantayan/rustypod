@@ -193,6 +193,7 @@ unsafe extern "C" fn stream_flush_stub(_file: *mut AdsFile) -> i32 {
     0
 }
 
+#[cfg(test)]
 /// Default close stand-in: reports success (the real fclose core is a
 /// later port).
 unsafe extern "C" fn stream_close_stub(_file: *mut AdsFile, _not_excluded: i32) -> i32 {
@@ -207,10 +208,13 @@ unsafe extern "C" fn shutdown_chain_stub(_mode: i32) {}
 #[cfg_attr(target_os = "none", no_mangle)]
 pub static mut STREAM_FLUSH: StreamFlushFn = stream_flush_stub;
 
-/// fclose-core entry (original 0x0802fc00); swap in the real port when it
-/// lands.
+/// Flush/position-sync entry (original 0x0802fc00) — the same routine
+/// `stdio_init`'s `STREAM_SYNC_CORE` dispatches to; here the second
+/// argument carries `foreach_close`'s `not_excluded` flag, which in the
+/// original only gated the patched-out lock brackets. Wired to the real
+/// port in `seek_core.rs`.
 #[cfg_attr(target_os = "none", no_mangle)]
-pub static mut STREAM_CLOSE_CORE: StreamCloseFn = stream_close_stub;
+pub static mut STREAM_CLOSE_CORE: StreamCloseFn = crate::seek_core::stream_sync_core;
 
 /// Shutdown-chain entry (original 0x082ab2b0); swap in the real port when
 /// it lands.

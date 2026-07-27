@@ -97,36 +97,36 @@ const DEFAULT_BULK_THRESHOLD: i32 = 0x200;
 /// copy here). Also the SIGRTRED detail string on init failure.
 static TT_CONSOLE_NAME: [u8; 4] = *b":tt\0";
 
-/// The flush/position-sync core — original 0x0802fc00 (not yet ported;
-/// see module docs). `take_lock` is the original's r1: nonzero brackets
+/// The flush/position-sync core — original 0x0802fc00, ported in
+/// `seek_core.rs`. `take_lock` is the original's r1: nonzero brackets
 /// the work in the (patched-out) stream lock.
 pub type StreamSyncFn = unsafe extern "C" fn(file: *mut AdsFile, take_lock: i32) -> i32;
-/// The seek core — original 0x0802fd04 (not yet ported). whence: 0 = set,
-/// 1 = cur, 2 = end (ISO C values, `freopen_core` uses 2).
+/// The seek core — original 0x0802fd04, ported in `seek_core.rs`.
+/// whence: 0 = set, 1 = cur, 2 = end (ISO C values, `freopen_core` uses 2).
 pub type StreamSeekFn = unsafe extern "C" fn(file: *mut AdsFile, offset: i32, whence: i32) -> i32;
 
-/// Default [`STREAM_SYNC_CORE`]: report success (a fresh port has no
-/// buffered data to sync).
+/// Test double: report success without touching the stream, so the
+/// `stdio_init` tests observe this module's behavior in isolation from
+/// the real sync engine.
+#[cfg(test)]
 unsafe extern "C" fn stream_sync_stub(_file: *mut AdsFile, _take_lock: i32) -> i32 {
     0
 }
 
-/// Default [`STREAM_SEEK_CORE`]: report failure — the stub cannot move a
-/// file cursor. Unreached from `stdio_init` (":tt" is never opened in
-/// append mode).
+/// Test double: report failure — cannot move a file cursor.
+#[cfg(test)]
 unsafe extern "C" fn stream_seek_stub(_file: *mut AdsFile, _offset: i32, _whence: i32) -> i32 {
     -1
 }
 
-/// Flush/position-sync entry (original 0x0802fc00); swap in the real
-/// port when it lands.
+/// Flush/position-sync entry — the real port @ 0x0802fc00, so the
+/// firmware build links the original call graph.
 #[cfg_attr(target_os = "none", no_mangle)]
-pub static mut STREAM_SYNC_CORE: StreamSyncFn = stream_sync_stub;
+pub static mut STREAM_SYNC_CORE: StreamSyncFn = crate::seek_core::stream_sync_core;
 
-/// Seek-core entry (original 0x0802fd04); swap in the real port when it
-/// lands.
+/// Seek-core entry — the real port @ 0x0802fd04.
 #[cfg_attr(target_os = "none", no_mangle)]
-pub static mut STREAM_SEEK_CORE: StreamSeekFn = stream_seek_stub;
+pub static mut STREAM_SEEK_CORE: StreamSeekFn = crate::seek_core::fseek_core;
 
 /// Volatile hook read (keeps runtime swapping alive; house pattern).
 #[inline(always)]
