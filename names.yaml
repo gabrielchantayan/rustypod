@@ -2972,18 +2972,21 @@ functions:
     ghidra: FUN_080ed958
     name: mqueue_node_recycle
     size: 112
+    sig: "u32 mqueue_node_recycle(QueueNode *node)"
     module: kernel/mqueue
-    status: identified
+    status: ported
     notes: >-
-      Returns a queue node to its owner pool (owner ptr at node+4). NULL
-      node is a no-op. Under the owner's lock (sem_wait on *owner via
-      0x08056510): if node->persistent (+0x11), first sem-waits on
-      *(owner[8]) and mutex-signals owner[9] (0x080744d8); push_back
-      (0x080f1158) onto the free list anchored at owner+0x14 (owner+5
-      words); 0x080744d8 on owner+2; sem_signal *owner; if persistent,
-      sem_signal *(owner[8]) again. Always returns 0. MQUEUE_HOOKS
-      .node_recycle stub stands in until ported (address outside the
-      kobj agent's claim range).
+      Returns a queue node to its owner pool (QueuePool ptr at node+4).
+      NULL node is a no-op. If node->persistent (+0x11), brackets the
+      return with sem_wait/sem_signal on *(pool+0x20) and one
+      condvar_signal (0x080744d8) of *(pool+0x24). Core: sem_wait
+      pool->lock (+0), list_push_back (0x080f1158) onto the free list @
+      pool+0x14, condvar_signal &pool->notify (+0x08), sem_signal
+      pool->lock. Always returns 0. 2 bl call sites (both in
+      mqueue_deliver 0x080b4a88). Now the MQUEUE_HOOKS.node_recycle
+      default; sem/cv ops route through MQUEUE_HOOKS slots whose
+      defaults are the real ports. match.py structural match (identical
+      offsets/order; push_back inlined, hooks as blx).
 
   - address: 0x080563a0
     ghidra: FUN_080563a0
