@@ -921,7 +921,8 @@ functions:
     status: ported
     notes: Format engine. Flag table @ 0x08986234. 64-bit args fetched
       8-aligned. Unknown chars print verbatim; %% via unknown-char path.
-      %e/%f/%g via FLOAT_CONVERTER hook (0x08032d70, next batch).
+      %e/%f/%g via FLOAT_CONVERTER hook, which now defaults to the real
+      convert_fe port (0x08032d70).
 
   - address: 0x08032f14
     ghidra: FUN_08032f14
