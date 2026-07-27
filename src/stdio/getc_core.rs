@@ -116,8 +116,9 @@ pub const WRITE_STATE_VALUE: u32 = 0x0040_0002;
 
 /// The unsigned-higher of two buffer pointers (the originals' recurring
 /// `cmp lim, ptr; movls ..., ptr` idiom for the live buffer end).
+/// Shared with the sync/seek engine (`seek_core.rs`).
 #[inline]
-fn max_ptr(a: *mut u8, b: *mut u8) -> *mut u8 {
+pub(crate) fn max_ptr(a: *mut u8, b: *mut u8) -> *mut u8 {
     if (a as usize) <= (b as usize) {
         b
     } else {
@@ -127,8 +128,9 @@ fn max_ptr(a: *mut u8, b: *mut u8) -> *mut u8 {
 
 /// 32-bit pointer difference, exactly as the 32-bit originals compute it
 /// (host pointers are wider; same-buffer differences still fit).
+/// Shared with the sync/seek engine (`seek_core.rs`).
 #[inline]
-fn ptr_diff(a: *mut u8, b: *mut u8) -> i32 {
+pub(crate) fn ptr_diff(a: *mut u8, b: *mut u8) -> i32 {
     (a as usize).wrapping_sub(b as usize) as u32 as i32
 }
 
@@ -207,9 +209,10 @@ pub unsafe extern "C" fn stdio_sync_alt_offset(file: *mut AdsFile) {
 
 /// Byte-offset pointer arithmetic with the original's 32-bit wrapping
 /// semantics (`n` may be negative — the raw-read error path really does
-/// compute `lim = dest - 1`).
+/// compute `lim = dest - 1`). Shared with the sync/seek engine
+/// (`seek_core.rs`).
 #[inline]
-fn ptr_add(p: *mut u8, n: i32) -> *mut u8 {
+pub(crate) fn ptr_add(p: *mut u8, n: i32) -> *mut u8 {
     (p as usize).wrapping_add(n as isize as usize) as *mut u8
 }
 

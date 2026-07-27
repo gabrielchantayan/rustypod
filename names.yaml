@@ -2741,27 +2741,29 @@ functions:
     ghidra: FUN_0802fd04
     name: fseek_core
     size: 492
-    status: identified
+    sig: "i32 fseek_core(AdsFile *file, i32 offset, i32 whence)"
+    module: stdio/seek_core
+    status: ported
     notes: >-
-      The buffered fseek engine (STREAM_SEEK_CORE hook default in
-      stdio/stdio_init.rs reports failure until ported). Callers:
-      fseek @ 0x0802fef0 and 0x0802fc7c (inside the sync core
-      0x0802fc00). Deep in the buffered-stdio cluster.
+      The buffered fseek engine. Resolves the target (SET/CUR/END, END querying _sys_flen), rejects a negative target or a tty handle with 2, then either repositions ptr inside the buffered window (updating the count/field_08 pair) or parks the target in alt_offset with FLAG_ALT_OFFSET for a lazy reposition. Clears the sticky-EOF latch. Callers: fseek @ 0x0802fef0 and 0x0802fc7c (inside the sync core 0x0802fc00). Now the STREAM_SEEK_CORE default.
 
   - address: 0x0802fc00
     ghidra: FUN_0802fc00
     name: stream_sync_core
     size: 156
-    status: identified
+    sig: "i32 stream_sync_core(AdsFile *file, i32 take_lock)"
+    module: stdio/seek_core
+    status: ported
     notes: >-
       Flush/position-sync core with a take-lock r1 flag (nonzero
       brackets in the patched-out stream lock). Computes the logical
       position from ptr/offset/base (or +0x28 when flags&0x20) and
       drains/seeks accordingly; calls fseek_core @ 0x0802fd04. Callers
       (binary-verified): 0x0802fcb0/0x0802fcd4 (fflush family),
-      0x08030118, fclose_core @ 0x08030238. Reached from ports through
-      the STREAM_SYNC_CORE hook (stdio/stdio_init.rs) and — same
-      routine — stream_file.rs's STREAM_CLOSE_CORE hook.
+      0x08030118, fclose_core @ 0x08030238. Now the default of BOTH the
+      STREAM_SYNC_CORE hook (stdio/stdio_init.rs) and — same routine,
+      second arg carrying foreach_close's not_excluded flag —
+      stream_file.rs's STREAM_CLOSE_CORE hook.
 
   - address: 0x08030300
     ghidra: FUN_08030300
