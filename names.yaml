@@ -3602,3 +3602,53 @@ functions:
       address a seeded pool heap block begins at. Host note — pointer
       fields are addressed by word index, not literal target byte
       offset, so the +0x4/+0x8 pair does not overlap on 64-bit hosts.
+
+  # --- byte-order swap cluster (0x0805dc24..0x0805dd88) ---
+  - address: 0x0805dc24
+    ghidra: FUN_0805dc24
+    name: bswap32
+    size: 48
+    sig: "u32 bswap32(u32 value)"
+    module: util/bswap
+    status: ported
+    vars: {param_1: value}
+    notes: >-
+      Byte-reverse of a 32-bit value via a stack spill/reload (store word,
+      re-read 4 bytes reversed, ldr back). 166 call sites, binary-scanned
+      b/bl words. The htonl/ntohl of retailOS's big-endian format parsers.
+
+  - address: 0x0805dd48
+    ghidra: FUN_0805dd48
+    name: bswap16
+    size: 32
+    sig: "u32 bswap16(u32 value)"
+    module: util/bswap
+    status: ported
+    vars: {param_1: value}
+    notes: >-
+      Byte-swap of the low 16 bits, zero-extended by the ldrh reload
+      (the argument's top half is discarded). 133 call sites.
+
+  - address: 0x0805dd10
+    ghidra: FUN_0805dd10
+    name: bswap32_inplace
+    size: 56
+    sig: "void bswap32_inplace(u8 *ptr)"
+    module: util/bswap
+    status: ported
+    vars: {param_1: ptr}
+    notes: >-
+      Reverses the 4 bytes at ptr in place. Original reads two ldrh
+      halfwords (so ptr must be 2-byte aligned on ARMv5); the port reads
+      byte-wise, identical for every pointer the original supported.
+      77 call sites.
+
+  - address: 0x0805dd68
+    ghidra: FUN_0805dd68
+    name: bswap16_inplace
+    size: 36
+    sig: "void bswap16_inplace(u8 *ptr)"
+    module: util/bswap
+    status: ported
+    vars: {param_1: ptr}
+    notes: Swaps the 2 bytes at ptr in place via one stack byte. 27 call sites.
