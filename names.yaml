@@ -3451,3 +3451,47 @@ functions:
       b 0x08037ea8 — bare alias of the thunk for ROM 0x22004368 (wake
       the waiter object, r0 = raw waiter id, no count bookkeeping).
       2 call sites: 0x080eda08, 0x0810789c.
+
+  # --- Block-deque element -> region accessors (heap/block_region) ---
+  - address: 0x082801f8
+    ghidra: FUN_082801f8
+    name: region_ref_lock
+    size: 20
+    sig: "u32 region_ref_lock(const void *elem)"
+    module: heap/block_region
+    status: ported
+    notes: >-
+      Loads the deque element's region object (elem + 0x4); a NULL region
+      returns 0 without touching a mutex, otherwise tail-branches to the
+      C++ mutex lock @ 0x082e8390 (alias thunk @ 0x082621a8) on the
+      region's mutex (region + 0x8). 14 bl call sites. The mutex pair is
+      unported C++ machinery — the REGION_MUTEX_OPS dispatch boundary,
+      defaulting to documented no-ops (no mutual exclusion).
+
+  - address: 0x082802cc
+    ghidra: FUN_082802cc
+    name: region_ref_unlock
+    size: 20
+    sig: "u32 region_ref_unlock(const void *elem)"
+    module: heap/block_region
+    status: ported
+    notes: >-
+      Unlock twin of region_ref_lock; tail-branches to the C++ mutex
+      unlock @ 0x082e83d8 (thunk @ 0x082621ac). 10 bl + 1 tail b sites.
+
+  - address: 0x08280430
+    ghidra: FUN_08280430
+    name: block_to_region_start
+    size: 48
+    sig: "void *block_to_region_start(const void *elem)"
+    module: heap/block_region
+    status: ported
+    notes: >-
+      Locks the element's region, reads the region start (region + 0x4),
+      substitutes the fallback address 0x089cb1b8 (the word after the
+      block-manager global) when the region or its start is NULL, then
+      unlocks and returns the start. 9 bl call sites, binary-verified —
+      osos.asm drops one. Now the POOL_OPS.region_start default: the
+      address a seeded pool heap block begins at. Host note — pointer
+      fields are addressed by word index, not literal target byte
+      offset, so the +0x4/+0x8 pair does not overlap on 64-bit hosts.

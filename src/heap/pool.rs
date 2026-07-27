@@ -86,11 +86,12 @@
 //! (init.rs), the alloc entries @ 0x0819d2f0 / 0x0819d67c (wrappers.rs),
 //! `heap_free` @ 0x0819d4dc (free_path.rs), and `dcache_flush` @
 //! 0x08044c10 (dcache.rs — real `mcr` loop on target, no-op line stub on
-//! host), and `region_block_size` @ 0x0818a364 (block_mgr.rs — still 0
-//! until a block manager is installed in its global). Still stubbed
-//! (C++/driver machinery outside the heap): `base_construct` spins,
-//! `base_destroy` returns its argument, `deque_fill` reports failure
-//! (create then cleanly returns NULL), and `region_start` returns NULL. The heap "handle" passed around is the
+//! host), `region_block_size` @ 0x0818a364 (block_mgr.rs — still 0
+//! until a block manager is installed in its global), and `region_start`
+//! @ 0x08280430 (block_region.rs). Still stubbed (C++/driver machinery
+//! outside the heap): `base_construct` spins, `base_destroy` returns its
+//! argument, and `deque_fill` reports failure (create then cleanly
+//! returns NULL). The heap "handle" passed around is the
 //! embedded `HeapDescriptor*` itself (the `HeapDescriptorDescriptor` of
 //! types.rs is a same-layout wrapper used only for the default-heap
 //! global).
@@ -283,11 +284,6 @@ unsafe extern "C" fn missing_deque_fill(
     0
 }
 
-/// Default stub: no block manager — NULL.
-unsafe extern "C" fn missing_region_start(_elem: *const u8) -> *mut u8 {
-    core::ptr::null_mut()
-}
-
 /// `heap_alloc_alt` slot shim over `heap_alloc_tag1` @ 0x0819d2f0
 /// (wrappers.rs): narrows the tag to the callee's u32.
 unsafe extern "C" fn heap_alloc_alt_ported(
@@ -335,7 +331,7 @@ pub(crate) const DEFAULT_POOL_OPS: PoolOps = PoolOps {
     base_destroy: missing_base_destroy,
     deque_fill: missing_deque_fill,
     region_block_size: crate::heap::block_mgr::region_block_size,
-    region_start: missing_region_start,
+    region_start: crate::heap::block_region::block_to_region_start,
     heap_create: crate::heap::init::heap_create_empty,
     heap_destroy: crate::heap::init::heap_destroy,
     heap_alloc_alt: heap_alloc_alt_ported,
