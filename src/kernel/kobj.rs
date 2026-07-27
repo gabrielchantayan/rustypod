@@ -228,15 +228,17 @@ pub unsafe extern "C" fn waiter_wake(id: u32) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
     use super::*;
     use std::sync::{Mutex, MutexGuard};
     use std::vec;
     use std::vec::Vec;
 
-    /// Serializes tests that swap the global hook table.
-    static HOOKS_LOCK: Mutex<()> = Mutex::new(());
+    /// Serializes tests that swap the global hook table (shared with the
+    /// csem tests, which mock the same `KOBJ_HOOKS` boundary — the same
+    /// precedent as semihost's `SWI_LOCK`).
+    pub(crate) static HOOKS_LOCK: Mutex<()> = Mutex::new(());
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     enum Call {

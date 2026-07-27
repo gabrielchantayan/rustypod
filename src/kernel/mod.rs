@@ -1,5 +1,6 @@
 //! RAM-side kernel-service layer over the RTXC mask-ROM kernel.
 pub mod condvar;
+pub mod csem;
 pub mod irq;
 pub mod kobj;
 pub mod mqueue;
