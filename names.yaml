@@ -1908,6 +1908,22 @@ functions:
     notes: flag @ 0x089ca848; returns current-task-id, calling notify helper
       0x08060f80 with callback @ 0x083e2e38 when id==0 but a task exists.
 
+  - address: 0x080744d8
+    ghidra: FUN_080744d8
+    name: condvar_signal
+    size: 32
+    sig: "void condvar_signal(CondVar *condvar)"
+    module: kernel/condvar
+    status: ported
+    notes: >-
+      Single-shot condvar wake, next to the mutex layer: list_pop_front
+      (0x080f10b8) on the wait queue at condvar+4; if a waiter came off,
+      tail-branch waiter_wake (0x080567f8) on its object (node+4). Empty
+      queue is a no-op. 10 bl call sites (mqueue_node_recycle 0x080ed958
+      twice, pool paths 0x0809ec5c/0x8100218/0x8106698/...). Complements
+      condvar_broadcast (0x0807f5cc), which drains the whole queue.
+      match.py structural (pop inlined by LLVM; wake stays a tail call).
+
   - address: 0x0807f5cc
     name: condvar_layer
     size: 372
@@ -2956,18 +2972,21 @@ functions:
     ghidra: FUN_080ed958
     name: mqueue_node_recycle
     size: 112
+    sig: "u32 mqueue_node_recycle(QueueNode *node)"
     module: kernel/mqueue
-    status: identified
+    status: ported
     notes: >-
-      Returns a queue node to its owner pool (owner ptr at node+4). NULL
-      node is a no-op. Under the owner's lock (sem_wait on *owner via
-      0x08056510): if node->persistent (+0x11), first sem-waits on
-      *(owner[8]) and mutex-signals owner[9] (0x080744d8); push_back
-      (0x080f1158) onto the free list anchored at owner+0x14 (owner+5
-      words); 0x080744d8 on owner+2; sem_signal *owner; if persistent,
-      sem_signal *(owner[8]) again. Always returns 0. MQUEUE_HOOKS
-      .node_recycle stub stands in until ported (address outside the
-      kobj agent's claim range).
+      Returns a queue node to its owner pool (QueuePool ptr at node+4).
+      NULL node is a no-op. If node->persistent (+0x11), brackets the
+      return with sem_wait/sem_signal on *(pool+0x20) and one
+      condvar_signal (0x080744d8) of *(pool+0x24). Core: sem_wait
+      pool->lock (+0), list_push_back (0x080f1158) onto the free list @
+      pool+0x14, condvar_signal &pool->notify (+0x08), sem_signal
+      pool->lock. Always returns 0. 2 bl call sites (both in
+      mqueue_deliver 0x080b4a88). Now the MQUEUE_HOOKS.node_recycle
+      default; sem/cv ops route through MQUEUE_HOOKS slots whose
+      defaults are the real ports. match.py structural match (identical
+      offsets/order; push_back inlined, hooks as blx).
 
   - address: 0x080563a0
     ghidra: FUN_080563a0
@@ -3051,12 +3070,16 @@ functions:
     size: 60
     sig: "u32 task_name_table_insert(u32 id, const char *name)"
     module: kernel/task
-    status: identified
+    status: ported
     notes: >-
-      Linear scan of the 0x50-entry {id, name} table @ *0x08063358;
-      claims the first slot whose id matches or is 0; returns 1, or 0
-      when full. TASK_HOOKS.name_register stub returns 1. Outside the
-      claim range (0x08063xxx).
+      Linear scan of the 0x50-entry {id, name} table @ 0x08a10870
+      (pointer literal @ 0x08063358; crate static in the port); claims
+      the first slot whose id matches or is 0; returns 1, or 0 when
+      full. Name pointer stored, not copied. Faithful quirk kept: id 0
+      stores the name but leaves the slot free. 1 bl call site
+      (task_create @ 0x0805643c). Now the TASK_HOOKS.name_register
+      default (stub removed). match.py structural (same scan/cmpne/dual
+      store; LLVM strides by 8 instead of lsl #3).
 
   - address: 0x0805665c
     ghidra: FUN_0805665c
@@ -3094,16 +3117,55 @@ functions:
     ghidra: FUN_080865e8
     name: register_current_task
     size: 168
+    sig: "void register_current_task(const char *name)"
+    module: kernel/task
+    status: ported
+    notes: >-
+      Attaches a NameNode to the current task. Registration block @
+      0x089ca848 (literal @ 0x08086690) = {byte +0: the kernel-started
+      flag, THE SAME byte as sync_mutex's KERNEL_STARTED; +8: lock sem
+      slot (port static REGISTER_LOCK_SEM); +0xc: node cache (port
+      static REGISTER_NODE_CACHE)}. Pre-kernel allocates a node
+      (0x08093870, hook) with no locking; post-kernel takes the lock and
+      consumes the cache. node->task (+0x10) = current_task_record
+      (0x080565f0); links via 0x080568d0; nonzero name duplicated into a
+      tag-7 heap block (strlen 0x08392478 inlined + 0x080eb67c +
+      strcpy 0x08030ff4) at node+0. Tail path locks if not yet locked,
+      refills the cache, sem_signals. 2 bl call sites (task_notify
+      0x08060fa8, 0x080e873c). Faithful oddity kept: the notify chain
+      passes CODE address 0x083e2e38 as the name. Now the TASK_HOOKS
+      .register_current_task default. match.py inflated by in-crate
+      inlining (current_task_record/link/strcpy); sequence proven by
+      host tests.
+
+  - address: 0x080568d0
+    ghidra: FUN_080568d0
+    name: current_task_link_node
+    size: 24
+    sig: "void current_task_link_node(NameNode *node)"
+    module: kernel/task
+    status: ported
+    notes: >-
+      current_task_record()->context (+0x08) = node; no record is a
+      no-op. 2 bl call sites (0x0807f870, register_current_task @
+      0x08086634). This is how the context word becomes the NameNode
+      pointer that kernel_running/current_task_context_word report.
+
+  - address: 0x08093870
+    ghidra: FUN_08093870
+    name: name_node_alloc
+    size: 132
+    sig: "NameNode *name_node_alloc(void)"
     module: kernel/task
     status: identified
     notes: >-
-      TASK_HOOKS.register_current_task. Under a global lock (byte flag +
-      sem @ *0x08086690): takes or allocates a name node (0x08093870),
-      stores current_task_record (0x080565f0) at node[4], links it
-      (0x080568d0), and when the callback/name arg is nonzero duplicates
-      the string into a tag-7 heap block (strlen 0x08392478 + alloc
-      0x080eb67c + strcpy 0x08030ff4) stored at node[0]. Out of claim
-      range.
+      Allocates the 0x18-byte NameNode (tag 5 via 0x080eb67c) plus a
+      0x54-byte context block (via allocator 0x0807b254 with tag 8);
+      seeds node+0 with the code/data address 0x080938f4, zeroes the
+      rest, cross-links node+0xc = ctx and ctx+4 = node, ctx halfword+0
+      = 1. 2 bl call sites, both in register_current_task. TASK_HOOKS
+      .name_node_alloc stub (static scratch node) stands in until
+      ported.
 
   - address: 0x080cb828
     ghidra: FUN_080cb828
@@ -3111,10 +3173,15 @@ functions:
     size: 20
     sig: "TaskCtx *current_task_ctx_block(void)"
     module: kernel/task
-    status: identified
+    status: ported
     notes: >-
-      kernel_running() (0x0809444c) result treated as a pointer; returns
-      *(it+0xc) or 0. TASK_HOOKS.current_task_ctx. Out of claim range.
+      kernel_running() (0x0809444c, ported) result is really the current
+      task's NameNode pointer (the context word); returns node->ctx
+      (+0xc) or 0. 46 bl call sites. Now the TASK_HOOKS.current_task_ctx
+      default (dummy-block stub removed); TASK_HOOKS.kernel_running_node
+      types the query result as the pointer (default adapter casts the
+      ported i32). match.py structural (cmp/ldrne tail exact; prefix is
+      the volatile hook-table ldrd noise).
 
   - address: 0x0807a080
     ghidra: FUN_0807a080
@@ -3122,27 +3189,58 @@ functions:
     size: 72
     sig: "u8 *queue_pool_create(i32 capacity)"
     module: kernel/task
+    status: ported
+    notes: >-
+      Allocates capacity*0x14+0x48 bytes (tag 10, wrapping 32-bit size
+      from the raw capacity) and initializes the pool via
+      0x0809eab8(capacity, base+0x48, base); capacity < 1 degrades to
+      (0, 0, base). Returns the unchecked base. 22 bl call sites (among
+      them task_notify @ 0x08060fb8). Now the TASK_HOOKS
+      .queue_pool_create default (capacity retyped i32 to match the
+      signed compare); the initializer routes through the new TASK_HOOKS
+      .pool_init stub until ported. match.py structural (identical size
+      math/tag/degrade branch; hook-table ldrd noise).
+
+  - address: 0x0809eab8
+    ghidra: FUN_0809eab8
+    name: queue_pool_init
+    size: 160
+    sig: "u32 queue_pool_init(i32 capacity, QueueNode *nodes, QueuePool *pool)"
+    module: kernel/mqueue
     status: identified
     notes: >-
-      Allocates capacity*0x14+0x48 bytes (tag 10) and initializes the
-      pool via 0x0809eab8(capacity, base+0x48, base); capacity < 1
-      degrades to (0, 0, base). TASK_HOOKS.queue_pool_create. Out of
-      claim range.
+      Lays out the 0x48-byte QueuePool header (see kernel/mqueue.rs):
+      pool->lock = sem_create (0x08056724); condvar3-init (0x080ed9c8:
+      {backref, 0, 0}) at +0x08 backref pool; zeroes +0x14..+0x28 and
+      stores nodes at +0x1c; chains the capacity nodes (stride 0x14)
+      onto the free list at +0x14 with node->owner = pool and
+      node->valid (+0x10) = 1 (list_push_back 0x080f1158); mutex_create
+      (0x080744a4) at +0x2c; condvar3-init at +0x34 backref pool+0x2c;
+      zeroes +0x40/+0x44 (the LockedQueue anchor). Returns 0. 1 bl call
+      site (queue_pool_create). TASK_HOOKS.pool_init target.
 
   - address: 0x0807a15c
     ghidra: FUN_0807a15c
     name: task_spawn
     size: 196
+    sig: >-
+      u32 task_spawn(const char *name, usize entry, usize unused, usize
+      stack_size, usize arg, u32 flags, SpawnRecord *record, usize hook)
     module: kernel/task
-    status: identified
+    status: ported
     notes: >-
-      The sole task_create caller. Maps its priority-flag argument
-      (0/8/0x10/0x18/0x20/0x40/0x80/0xc0/0x100/...) to level 0..8, packs
-      the caller record {name?, entry?, flags, a5, a8-or-default} and
-      calls task_create(entry_trampoline @ *0x0807a224 = 0x08074990,
-      level, stack_size, record, name); stores the returned TaskRecord
-      at record[4]. Returns 0. Out of claim range (borderline: spans
-      0x0807a15c..0x0807a220).
+      The sole task_create caller (2 bl call sites: 0x080e87a8 /
+      0x080e9e9c). Maps the priority-flag argument to a level (0->0,
+      8->1, 0x10->2, 0x18->3, 0x20->4, 0x40->5, 0x80->6, 0xc0->7,
+      0x100->8; other <0x10 -> 1, >=0x10 -> 3), packs the caller
+      SpawnRecord {name, entry, flags @ +8, arg @ +0xc, hook-or-default
+      @ +0x14} and calls task_create(SPAWN_TRAMPOLINE 0x08074990 (lit @
+      0x0807a224), level, stack_size, record, name); TaskRecord stored
+      at record+0x10. hook default = 0x0808327c (lit @ 0x0807a220);
+      both literals are mid-function code addresses, kept verbatim.
+      Arg 3 is dead (r2 overwritten before use). Returns 0. match.py:
+      LLVM lowers the flag switch as a jump table vs the cmp chain —
+      mapping proven by the 13-case host test.
 
   - address: 0x0805695c
     ghidra: FUN_0805695c

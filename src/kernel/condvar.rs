@@ -22,6 +22,13 @@
 //! 0x220041cc). There is no single-shot "signal" in this range; wakeups
 //! always drain the whole queue.
 //!
+//! The single-shot signal lives elsewhere: `condvar_signal` —
+//! `FUN_080744d8` @ 0x080744d8 (32 bytes, next to the mutex layer;
+//! 10 bl call sites, among them the queue-node recycler @ 0x080ed958
+//! twice). It pops ONE waiter off the queue at condvar+4 and signals its
+//! object (`ldr r0, [node, #4]`, tail branch to stock 0x080567f8); an
+//! empty queue is a no-op.
+//!
 //! Also in the range: `mqueue_receive` (0x0807f5f4), a locked message-queue
 //! consumer over a different struct (mutex handle @ +0x2c, queue anchor @
 //! +0x40) that pops nodes until the external deliver helper (0x080b4a88)
@@ -289,6 +296,20 @@ pub unsafe extern "C" fn condvar_broadcast(condvar: *mut CondVar) {
             break;
         }
         (h.waiter_wake)((*(node as *mut WaitNode)).object);
+    }
+}
+
+/// condvar_signal — original: `FUN_080744d8` @ 0x080744d8 (32 bytes;
+/// 10 bl call sites).
+///
+/// Single-shot wake: pops the FIRST waiter (if any) and signals its
+/// kernel object; the rest of the queue stays queued. Like the
+/// broadcast, the caller holds the surrounding lock.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn condvar_signal(condvar: *mut CondVar) {
+    let node = list_pop_front(&mut (*condvar).waiters);
+    if !node.is_null() {
+        (hooks().waiter_wake)((*(node as *mut WaitNode)).object);
     }
 }
 
@@ -835,6 +856,42 @@ mod tests {
         }
         let wakes = state().as_mut().unwrap().wakes.clone();
         assert_eq!(wakes, Vec::from([0xb000usize, 0xb001, 0xb002]));
+    }
+
+    #[test]
+    fn condvar_signal_wakes_only_the_first_waiter() {
+        let _guard = install(MockState::default());
+        let mut cv = make_condvar();
+        let mut nodes: Vec<Box<WaitNode>> = (0..3)
+            .map(|i| {
+                Box::new(WaitNode {
+                    next: null_mut(),
+                    object: (0xc000 + i) as *mut u32,
+                })
+            })
+            .collect();
+        unsafe {
+            for n in nodes.iter_mut() {
+                list_push_back(&mut cv.waiters, &mut **n as *mut WaitNode as *mut ListNode);
+            }
+            condvar_signal(&mut cv);
+            // Only the head was popped and woken; the queue keeps 2.
+            assert_eq!(cv.waiters.head, &mut *nodes[1] as *mut WaitNode as *mut ListNode);
+            assert_eq!(cv.waiters.tail, &mut *nodes[2] as *mut WaitNode as *mut ListNode);
+            assert!(nodes[0].next.is_null());
+        }
+        let wakes = state().as_mut().unwrap().wakes.clone();
+        assert_eq!(wakes, Vec::from([0xc000usize]));
+    }
+
+    #[test]
+    fn condvar_signal_empty_queue_is_noop() {
+        let _guard = install(MockState::default());
+        let mut cv = make_condvar();
+        unsafe {
+            condvar_signal(&mut cv);
+        }
+        assert!(take_events().is_empty());
     }
 
     #[test]
