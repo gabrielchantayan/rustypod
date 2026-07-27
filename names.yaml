@@ -3117,16 +3117,55 @@ functions:
     ghidra: FUN_080865e8
     name: register_current_task
     size: 168
+    sig: "void register_current_task(const char *name)"
+    module: kernel/task
+    status: ported
+    notes: >-
+      Attaches a NameNode to the current task. Registration block @
+      0x089ca848 (literal @ 0x08086690) = {byte +0: the kernel-started
+      flag, THE SAME byte as sync_mutex's KERNEL_STARTED; +8: lock sem
+      slot (port static REGISTER_LOCK_SEM); +0xc: node cache (port
+      static REGISTER_NODE_CACHE)}. Pre-kernel allocates a node
+      (0x08093870, hook) with no locking; post-kernel takes the lock and
+      consumes the cache. node->task (+0x10) = current_task_record
+      (0x080565f0); links via 0x080568d0; nonzero name duplicated into a
+      tag-7 heap block (strlen 0x08392478 inlined + 0x080eb67c +
+      strcpy 0x08030ff4) at node+0. Tail path locks if not yet locked,
+      refills the cache, sem_signals. 2 bl call sites (task_notify
+      0x08060fa8, 0x080e873c). Faithful oddity kept: the notify chain
+      passes CODE address 0x083e2e38 as the name. Now the TASK_HOOKS
+      .register_current_task default. match.py inflated by in-crate
+      inlining (current_task_record/link/strcpy); sequence proven by
+      host tests.
+
+  - address: 0x080568d0
+    ghidra: FUN_080568d0
+    name: current_task_link_node
+    size: 24
+    sig: "void current_task_link_node(NameNode *node)"
+    module: kernel/task
+    status: ported
+    notes: >-
+      current_task_record()->context (+0x08) = node; no record is a
+      no-op. 2 bl call sites (0x0807f870, register_current_task @
+      0x08086634). This is how the context word becomes the NameNode
+      pointer that kernel_running/current_task_context_word report.
+
+  - address: 0x08093870
+    ghidra: FUN_08093870
+    name: name_node_alloc
+    size: 132
+    sig: "NameNode *name_node_alloc(void)"
     module: kernel/task
     status: identified
     notes: >-
-      TASK_HOOKS.register_current_task. Under a global lock (byte flag +
-      sem @ *0x08086690): takes or allocates a name node (0x08093870),
-      stores current_task_record (0x080565f0) at node[4], links it
-      (0x080568d0), and when the callback/name arg is nonzero duplicates
-      the string into a tag-7 heap block (strlen 0x08392478 + alloc
-      0x080eb67c + strcpy 0x08030ff4) stored at node[0]. Out of claim
-      range.
+      Allocates the 0x18-byte NameNode (tag 5 via 0x080eb67c) plus a
+      0x54-byte context block (via allocator 0x0807b254 with tag 8);
+      seeds node+0 with the code/data address 0x080938f4, zeroes the
+      rest, cross-links node+0xc = ctx and ctx+4 = node, ctx halfword+0
+      = 1. 2 bl call sites, both in register_current_task. TASK_HOOKS
+      .name_node_alloc stub (static scratch node) stands in until
+      ported.
 
   - address: 0x080cb828
     ghidra: FUN_080cb828
