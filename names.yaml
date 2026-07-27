@@ -3191,7 +3191,7 @@ functions:
     size: 132
     sig: "NameNode *name_node_alloc(void)"
     module: kernel/task
-    status: identified
+    status: ported
     notes: >-
       Allocates the 0x18-byte NameNode (tag 5 via 0x080eb67c) plus a
       0x54-byte context block (via allocator 0x0807b254 with tag 8);
