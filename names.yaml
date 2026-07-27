@@ -3669,3 +3669,41 @@ functions:
       len<=16 goes straight to the byte loop. 55 call sites,
       binary-scanned. Port uses write_volatile against memset idiom
       recognition; LLVM unrolls the 3-step alignment prologue.
+
+  # --- FreeType 2 ftcalc fixed-point kernels ---
+  - address: 0x0804d2cc
+    ghidra: FUN_0804d2cc
+    name: ft_mulfix
+    size: 124
+    sig: "i32 ft_mulfix(i32 a, i32 b)"
+    module: ft/calc
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      FreeType FT_MulFix (2.1.x pre-FT_Int64 ARM build), 16.16 multiply
+      rounded half-up on magnitude. Identity fast-out returns a when
+      a==0 or b==0x10000. Abs via (x^(x>>31))-(x>>31) so i32::MIN stays
+      0x80000000. Single 32-bit mul when abs(a)<=0x800 and
+      abs(b)<=0x100000 (max intermediate 0x80008000, never wraps);
+      else three partial products, all 32-bit wrapping (big products
+      truncate, preserved). 116 call sites, binary-scanned.
+
+  - address: 0x0804c2d4
+    ghidra: FUN_0804c2d4
+    name: ft_divfix
+    size: 140
+    sig: "i32 ft_divfix(i32 a, i32 b)"
+    module: ft/calc
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      FreeType FT_DivFix. (a<<16)/b with abs(b)/2 rounding bias; b==0
+      gives 0x7fffffff (0x80000001 when a<0). abs(a)<0x10000 takes one
+      __rt_udiv (0x08036f14) of (ua<<16)+(ub asr 1) - that add wraps at
+      2^32, preserved; else 64-bit path with hi = ua asr 16
+      (arithmetic - a==i32::MIN gives hi 0xffff8000, forcing the
+      clamp), FT_Add64 (0x080ed3b4) bias add, ft_div64by32 (0x0807c5b8)
+      with 0x7fffffff clamp when hi>=ub. Port inlines all three helpers
+      with bit-identical results (u32 division / carry add / u64
+      division); those helper addresses stay unclaimed. 56 call sites,
+      binary-scanned.
