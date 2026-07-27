@@ -217,10 +217,25 @@ unsafe extern "C" fn missing_id_alloc() -> u32 {
     loop {}
 }
 
-/// Default stub: the identity map — exactly the original switch's
-/// default arm for levels outside 0..=8.
-unsafe extern "C" fn identity_priority(level: u32) -> u32 {
-    level
+/// task_priority_map — original: `FUN_080e4348` @ 0x080e4348 (120 bytes).
+///
+/// Pure jump-table switch mapping a task level 0..=8 to its RTXC
+/// priority; anything else falls through the `cmp r0, #8 / addls pc`
+/// guard and returns unchanged. 1 call site (task_create @ 0x08056404).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn task_priority_map(level: u32) -> u32 {
+    match level {
+        0 => 0x7e,
+        1 => 0x3c,
+        2 => 0x34,
+        3 => 0x33,
+        4 => 0x31,
+        5 => 0x30,
+        6 => 10,
+        7 => 9,
+        8 => 8,
+        other => other,
+    }
 }
 
 unsafe extern "C" fn missing_task_init(
@@ -283,7 +298,7 @@ unsafe extern "C" fn missing_rom_yield(_arg: u32) -> i32 {
 /// Shipped defaults — see the module header for the wiring rationale.
 pub const DEFAULT_TASK_HOOKS: TaskHooks = TaskHooks {
     task_id_alloc: missing_id_alloc,
-    map_priority: identity_priority,
+    map_priority: task_priority_map,
     task_init: missing_task_init,
     task_register: missing_task_register,
     name_register: missing_name_register,
@@ -479,6 +494,35 @@ mod tests {
 
     /// Serializes tests that swap the global hook table.
     static HOOKS_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Every arm of the original switch @ 0x080e4348, plus the default
+    /// (identity) arm for levels outside 0..=8.
+    #[test]
+    fn priority_map_matches_the_original_switch() {
+        const TABLE: [(u32, u32); 9] = [
+            (0, 0x7e),
+            (1, 0x3c),
+            (2, 0x34),
+            (3, 0x33),
+            (4, 0x31),
+            (5, 0x30),
+            (6, 10),
+            (7, 9),
+            (8, 8),
+        ];
+        for (level, priority) in TABLE {
+            assert_eq!(unsafe { task_priority_map(level) }, priority, "level {level}");
+        }
+        for level in [9, 10, 0x7e, u32::MAX] {
+            assert_eq!(unsafe { task_priority_map(level) }, level, "default arm {level}");
+        }
+    }
+
+    /// The shipped hook default is the real port, not the identity stub.
+    #[test]
+    fn priority_map_is_the_shipped_hook_default() {
+        assert_eq!(unsafe { (DEFAULT_TASK_HOOKS.map_priority)(0) }, 0x7e);
+    }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     enum Call {

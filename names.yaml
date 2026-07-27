@@ -3034,12 +3034,14 @@ functions:
     size: 120
     sig: "u32 task_priority_map(u32 level)"
     module: kernel/task
-    status: identified
+    status: ported
+    vars: {param_1: level}
     notes: >-
-      Pure switch, level -> RTXC priority. 0->0x7e, 1->0x3c, 2->0x34,
-      3->0x33, 4->0x31, 5->0x30, 6->10, 7->9, 8->8, default -> input
-      (identity). TASK_HOOKS.map_priority stub = identity (the default
-      arm); trivially portable but outside the kobj agent's claim range.
+      Pure jump-table switch, level -> RTXC priority. 0->0x7e, 1->0x3c,
+      2->0x34, 3->0x33, 4->0x31, 5->0x30, 6->10, 7->9, 8->8; levels
+      outside 0..=8 fall through the `cmp r0,#8 / addls pc` guard and
+      return unchanged. Sole caller task_create @ 0x08056404. Now the
+      TASK_HOOKS.map_priority default, replacing the identity stub.
 
   - address: 0x0806331c
     ghidra: FUN_0806331c
