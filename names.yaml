@@ -2842,7 +2842,29 @@ functions:
       NULL, +0x1c = 0x200 default, handle stored, flags = (old &
       0x1000000) | parsed; append mode seeks to the end (fseek(file, 0,
       2), result ignored). Returns file. Callers (binary-verified):
-      fopen @ 0x080303fc (unported) and stdio_init x3.
+      fopen @ 0x080303fc (ported) and stdio_init x3.
+
+  - address: 0x080303fc
+    ghidra: FUN_080303fc
+    name: fopen
+    size: 164
+    sig: "AdsFile *fopen(const char *name, const char *mode)"
+    module: stdio/stdio_init
+    status: ported
+    vars: {param_1: name, param_2: mode, iVar2/r4: file, iVar1/r5: fresh}
+    notes: >-
+      Scans the stream chain from static stdin (pool @ 0x0803068c) for
+      the first FILE with flags&3 == 0 (closed statics are reused);
+      when every slot is live, appends malloc(0x44) @ 0x0802edac to the
+      tail (link stored BEFORE any null check — the original has NONE
+      and would memzero address 0 on failure; the port returns NULL, a
+      documented deviation), zeroes it via the IRAM veneer 0x08037db8,
+      runs the per-stream lock init 0x080320a0 (return-0 stub in this
+      build; nonzero would mark string-mode — dead), then passes the
+      slot to freopen_core @ 0x08030300 and returns its result.
+      List-lock bracket (object @ 0x08a0fc04, pool @ 0x08030688)
+      patched to nops. NO callers in the image (binary bl +
+      literal-pool scan): linked-in ADS library dead code.
 
   - address: 0x08037db8
     name: iram_memzero_aligned_veneer
