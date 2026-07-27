@@ -3179,50 +3179,103 @@ functions:
       unidentified — yield-like). The stock target of condvar.rs's
       task_yield/task_yield_thunk wrappers (CONDVAR_HOOKS.task_yield).
 
+  - address: 0x081b02b8
+    ghidra: FUN_081b02b8
+    name: irq_save
+    size: 24
+    sig: "void irq_save(u32 *saved_if_bits)"
+    module: kernel/csem
+    vars: {param_1: saved_if_bits}
+    status: ported
+    notes: >-
+      mrs r1,cpsr; and r2,r1,#0xc0; orr r1,r1,#0xc0; str r2,[r0]; msr
+      cpsr_c,r1 — masks IRQ and FIQ and stores the PREVIOUS I/F bits
+      (cpsr & 0xc0) through the out-pointer (nothing returned in r0).
+      Ghidra decompiles it as `*param_1 = 0` (it cannot model cpsr).
+      2 call sites, the irqsafe atomics @ 0x08056328/0x08056364; the
+      matching restore sequence (mrs; bic #0xc0; orr saved; msr cpsr_c)
+      is inlined in each caller, not a separate function. Port is
+      cfg-gated - real mrs/msr inline asm on ARM, simulated cpsr word +
+      write log on host (host builds cannot mask real interrupts).
+
   - address: 0x08056328
     ghidra: FUN_08056328
     name: atomic_add_irqsafe
     size: 60
-    sig: "u32 atomic_add_irqsafe(u32 amount, u32 *ptr)"
-    module: kernel/kobj
-    status: identified
+    sig: "i32 atomic_add_irqsafe(i32 amount, i32 *ptr)"
+    module: kernel/csem
+    vars: {param_1: amount, param_2: ptr}
+    status: ported
     notes: >-
-      Saves cpsr via 0x081b02b8 (interrupts off), old = *ptr, *ptr +=
-      amount, restores the I/F bits, returns old. Twin of 0x08056364.
-      Not ported: 0x081b02b8 is outside the claim range and the pair
-      wants real cpsr access (inline asm) on target.
+      Saves cpsr via irq_save @ 0x081b02b8 (IRQ+FIQ off), old = *ptr,
+      *ptr += amount, restores the saved I/F bits with the inline mrs/
+      bic/orr/msr sequence, returns old. Twin of 0x08056364. 4 call
+      sites (binary scan; osos.asm drops one line): 0x080567b8,
+      0x080567e0 (unported add-and-wake ops @ 0x080567a8/0x080567d0),
+      csem_wait's timeout undo @ 0x08056948, and the bare alias thunk
+      `b` @ 0x080f041c.
 
   - address: 0x08056364
     ghidra: FUN_08056364
     name: atomic_sub_irqsafe
     size: 60
-    sig: "u32 atomic_sub_irqsafe(u32 amount, u32 *ptr)"
-    module: kernel/kobj
-    status: identified
-    notes: Twin of 0x08056328 with *ptr -= amount; returns the old value.
+    sig: "i32 atomic_sub_irqsafe(i32 amount, i32 *ptr)"
+    module: kernel/csem
+    vars: {param_1: amount, param_2: ptr}
+    status: ported
+    notes: >-
+      Twin of 0x08056328 with *ptr -= amount; returns the old value.
+      3 call sites: csem_wait @ 0x08056918, csem_signal @ 0x0805698c,
+      alias thunk `b` @ 0x080f0420 (thunk_FUN_08056364).
 
   - address: 0x08056904
     ghidra: FUN_08056904
     name: csem_wait
     size: 88
-    sig: "u32 csem_wait(u32 *csem, u32 timeout)"
-    module: kernel/kobj
-    status: identified
+    sig: "u32 csem_wait(CountingSem *csem, u32 timeout)"
+    module: kernel/csem
+    vars: {param_1: csem, param_2: timeout}
+    status: ported
     notes: >-
-      Counting semaphore over a waiter object; csem[0] = count, csem[1] =
-      waiter id. old = atomic_sub_irqsafe(1, csem); if old-1 < 0, timed
-      sleep on csem[1] (thunk 0x08037ea0, zero timeout -> 1); on RTXC
-      code 5 undoes the decrement (atomic_add_irqsafe) and returns 1
-      (timeout), else 0. Caller: 0x080b4adc (queue get).
+      Counting semaphore over a waiter object; csem[0] = signed count,
+      csem[1] = waiter id. old = atomic_sub_irqsafe(1, &count); if
+      old-1 < 0 (no token), timed sleep on csem[1] (thunk 0x08037ea0 ->
+      ROM 0x220043c0, zero timeout clamped to 1); on RTXC code 5 undoes
+      the decrement (atomic_add_irqsafe) and returns 1 (timeout), else
+      0. 1 call site: 0x080b4ae4 (queue-get wrapper 0x080b4adc). Port
+      sleeps through the ported waiter_wait @ 0x0805695c (identical
+      clamp and rc==5 mapping, same KOBJ_HOOKS.rom_waiter_wait ROM
+      boundary).
 
   - address: 0x0805697c
     ghidra: FUN_0805697c
     name: csem_signal
     size: 40
-    sig: "void csem_signal(u32 *csem)"
-    module: kernel/kobj
-    status: identified
+    sig: "void csem_signal(CountingSem *csem)"
+    module: kernel/csem
+    vars: {param_1: csem}
+    status: ported
     notes: >-
-      old = atomic_add_irqsafe(1, csem); if old-1 < 0 (a sleeper exists)
-      tail-branches thunk 0x08037ea8 -> ROM 0x22004368 with csem[1]
-      (wake). 0x080569a4 is a bare 4-byte alias `b 0x08037ea8`.
+      old = atomic_sub_irqsafe(1, &count) — DECREMENTS, binary-verified
+      (word ebfffe74 @ 0x0805698c = bl 0x08056364; an earlier note here
+      claimed atomic_add — wrong). If old-1 < 0 (a sleeper may be
+      parked) tail-branches thunk 0x08037ea8 -> ROM 0x22004368 with
+      csem[1] (wake; CSEM_ROM_WAKE slot in the port). Both halves
+      decrementing still works as a wait/notify event - positive counts
+      are a ROM-skipping fast path, and once drifted negative every
+      wait parks and every signal wakes (ROM keeps the signaled state).
+      2 call sites: tail `b` @ 0x0808e2b4 (deref wrapper FUN_0808e2b0),
+      bl @ 0x080bbb90. The classic add-and-wake V ops live at the
+      unported neighbors 0x080567a8/0x080567d0.
+
+  - address: 0x080569a4
+    ghidra: thunk_EXT_FUN_22004368
+    name: csem_wake
+    size: 4
+    sig: "void csem_wake(u32 id)"
+    module: kernel/csem
+    status: ported
+    notes: >-
+      b 0x08037ea8 — bare alias of the thunk for ROM 0x22004368 (wake
+      the waiter object, r0 = raw waiter id, no count bookkeeping).
+      2 call sites: 0x080eda08, 0x0810789c.
