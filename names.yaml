@@ -2365,18 +2365,21 @@ functions:
       0x08030688; lock hooks patched to nops).
 
   - address: 0x08030624
-    name: stdio_flush_all
+    name: stdio_close_all
     size: 96
-    sig: "void stdio_flush_all()"
+    sig: "void stdio_close_all()"
     module: stdio/stream_file
     status: ported
     notes: >-
-      Flushes the static stdin/stdout/stderr (0x08b2f820/64/a8, pool @
-      0x0803068c/98/9c) through the per-stream flush @ 0x080302d0
-      (STREAM_FLUSH hook, unported), then walks the dynamic chain hanging
-      off stderr's +0x40 link — captured BEFORE the static flushes —
-      flushing and then FREEING (free @ 0x0802edc8) each node. Reached
-      from the exit-path cleanup 0x08035878.
+      RENAMED from stdio_flush_all — 0x080302d0 turned out to be fclose
+      (the locked wrapper around the fclose engine 0x08030238), so this
+      is the exit-path CLOSE-all walker. Runs the static
+      stdin/stdout/stderr (0x08b2f820/64/a8, pool @ 0x0803068c/98/9c)
+      through fclose @ 0x080302d0 (STREAM_FCLOSE hook, ported), then
+      walks the dynamic chain hanging off stderr's +0x40 link — captured
+      BEFORE the static closes — closing and then FREEING (free @
+      0x0802edc8) each node. Reached from the exit-path cleanup
+      0x08035878.
 
   - address: 0x080307bc
     name: setlocale_core
@@ -2560,9 +2563,9 @@ functions:
       streams and clears 0x10000. Binary-verified callers (bl scan):
       fclose core 0x0802fc00 (@ 0x0802fc68), stdio_sync_alt_offset
       0x080301d4, and the getc core 0x08034fec (x3); the per-stream
-      wrapper 0x080302d0 reaches it only indirectly (0x080302d0 ->
-      fclose engine 0x08030238 -> 0x0802fc00), so the STREAM_FLUSH hook
-      is NOT satisfied by this port.
+      wrapper 0x080302d0 (fclose, ported) reaches it only indirectly
+      (0x080302d0 -> fclose engine 0x08030238 -> 0x0802fc00), so the
+      STREAM_FCLOSE hook is NOT satisfied by this port.
 
   - address: 0x080301d4
     name: stdio_sync_alt_offset
@@ -2622,8 +2625,8 @@ functions:
     notes: >-
       Calls 0x082ab2b0 with 0 (the libspace+0x38 shutdown-handler chain
       runner — walks nodes {next, arg, fn, key}, calls fn(arg), unlinks
-      and frees each; LIB_SHUTDOWN_CHAIN hook, unported), then
-      stdio_flush_all @ 0x08030624, then 0x0802ecc0 (a mov pc,lr no-op).
+      and frees each; LIB_SHUTDOWN_CHAIN hook), then
+      stdio_close_all @ 0x08030624, then 0x0802ecc0 (a mov pc,lr no-op).
       Reached from __rt_sys_exit and heap_panic; exit.rs still reaches
       it via its own no-op stub (unification is init-time, see its docs).
 
@@ -2737,8 +2740,25 @@ functions:
       still 0). Reset: IRAM memclr (veneer 0x08037db8 ->
       memzero_aligned) of the first 0x3c bytes (lock +0x3c and chain
       link +0x40 survive), then flags = old & 0x1000000 (string-mode
-      bit only). Callers (binary-verified): the locked wrapper
-      0x080302d0 (other agent) and freopen_core @ 0x08030300.
+      bit only). Callers (binary-verified): the locked wrapper fclose @
+      0x080302d0 and freopen_core @ 0x08030300.
+
+  - address: 0x080302d0
+    ghidra: FUN_080302d0
+    name: fclose
+    size: 48
+    sig: "i32 fclose(AdsFile *file)"
+    module: stdio/stdio_init
+    status: ported
+    notes: >-
+      The public fclose entry — the (patched-out) per-stream lock
+      bracket (mov r0, file+0x3c; mov r0,r0 on both sides) around
+      fclose_core @ 0x08030238, whose result passes through. Verified
+      from the machine code that it wraps the FCLOSE engine, not a
+      buffer flush; the only callers in the image (binary bl scan) are
+      the four call sites inside stdio_close_all @ 0x08030624
+      (0x08030640/48/50/60), whose STREAM_FCLOSE hook now defaults to
+      this port.
 
   - address: 0x0802fef0
     ghidra: FUN_0802fef0

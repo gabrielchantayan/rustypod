@@ -7,7 +7,7 @@
 //! - `__rt_sys_exit` — original: `FUN_08032084` @ 0x08032084 (36 bytes).
 //!   Calls the no-op weak hook @ 0x080358ac (`mov pc, lr`), runs the stdio
 //!   cleanup `FUN_08035878` @ 0x08035878 (which calls 0x082ab2b0, the
-//!   flush-all `FUN_08030624` @ 0x08030624, and 0x0802ecc0), then passes the
+//!   close-all `FUN_08030624` @ 0x08030624, and 0x0802ecc0), then passes the
 //!   preserved code to retailOS terminate @ 0x082b20a0. (0x08032098 is an
 //!   alternate `code = -1` entry into terminate, skipped by the main path.)
 //! - `abort` — original: `FUN_08032058` @ 0x08032058 (44 bytes). Runs a
@@ -122,8 +122,8 @@ unsafe fn run_exit_handlers() {
 
 /// stdio cleanup — original: `FUN_08035878` @ 0x08035878.
 ///
-/// The original calls 0x082ab2b0, the flush-all `FUN_08030624` @ 0x08030624
-/// (drains the stdio FILE list) and 0x0802ecc0. All semihost/console-backed
+/// The original calls 0x082ab2b0, the close-all `FUN_08030624` @ 0x08030624
+/// (closes and drains the stdio FILE list) and 0x0802ecc0. All semihost/console-backed
 /// dead code under retailOS; stubbed as a no-op.
 #[inline]
 fn stdio_cleanup() {}

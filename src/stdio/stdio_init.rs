@@ -4,8 +4,16 @@
 //!
 //! - `fclose_core` — original: `FUN_08030238` @ 0x08030238 (152 bytes).
 //!   The fclose engine minus FILE-object deallocation; see its docs.
-//!   Callers (binary-verified): the locked wrapper @ 0x080302d0
-//!   (another agent's port) and `freopen_core`.
+//!   Callers (binary-verified): `fclose` @ 0x080302d0 (below) and
+//!   `freopen_core`.
+//! - `fclose` — original: `FUN_080302d0` @ 0x080302d0 (48 bytes). The
+//!   public fclose entry: the (patched-out) per-stream lock bracket
+//!   around `fclose_core`, whose result passes through. Established from
+//!   the machine code: it wraps the FCLOSE engine, NOT a buffer flush —
+//!   and its only callers in the image (binary bl scan) are the four
+//!   call sites inside the exit-path walker @ 0x08030624, which
+//!   therefore CLOSES every stream (stream_file.rs's `stdio_close_all`;
+//!   its `STREAM_FCLOSE` hook targets this port).
 //! - `fseek` — original: `FUN_0802fef0` @ 0x0802fef0 (72 bytes). The
 //!   public fseek entry: a (patched-out) lock bracket around the seek
 //!   core @ 0x0802fd04 — unported, dispatched through [`STREAM_SEEK_CORE`].
@@ -146,6 +154,10 @@ unsafe fn hook<T: Copy>(slot: *const T) -> T {
 /// - reset: zero the first 0x3c bytes (lock and chain link survive) and
 ///   rewrite flags as `flags & 0x1000000` (only the string-mode bit
 ///   survives). Returns 0.
+///
+/// (`inline(never)` keeps the in-crate callers' — `fclose`'s and
+/// `freopen_core`'s — `bl` structure matching the original's.)
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn fclose_core(file: *mut AdsFile) -> i32 {
     let flags = (*file).stream.flags;
@@ -173,6 +185,18 @@ pub unsafe extern "C" fn fclose_core(file: *mut AdsFile) -> i32 {
     (*file).field_38 = 0;
     (*file).stream.flags = flags & FLAG_STRING_MODE;
     0
+}
+
+/// fclose — original: `FUN_080302d0` @ 0x080302d0 (48 bytes).
+///
+/// The public fclose entry: the (patched-out) per-stream lock bracket
+/// (`mov r0, &file.lock; mov r0, r0` on both sides) around
+/// [`fclose_core`], whose result passes through. Only callers in the
+/// image (binary-verified bl scan): the four call sites of the exit-path
+/// close-all walker @ 0x08030624 (`stream_file::stdio_close_all`).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn fclose(file: *mut AdsFile) -> i32 {
+    fclose_core(file)
 }
 
 /// fseek — original: `FUN_0802fef0` @ 0x0802fef0 (72 bytes).
