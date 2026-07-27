@@ -85,6 +85,13 @@
 //!   (20 bytes). `current_task_record()->context` or 0 — the word
 //!   sync_mutex's `current_task_id` hook reads (the "id" is really the
 //!   caller's context record pointer).
+//! - `current_task_ctx_block` — `FUN_080cb828` @ 0x080cb828 (20 bytes;
+//!   46 bl call sites). `kernel_running()` (ported, kernel/sync_mutex.rs)
+//!   returns the current task's context word — really the task's
+//!   `NameNode` pointer — and this returns the node's context block at
+//!   +0x0c, or 0 when there is no task. `TASK_HOOKS.current_task_ctx`
+//!   defaults to this port; the `kernel_running_node` slot types the
+//!   query's result as the pointer it is (cast in the default adapter).
 //! - `kernel_yield` — `FUN_080568fc` @ 0x080568fc (8 bytes;
 //!   `mov r0, #0; b 0x08037e98` -> ROM 0x22004260). The stock yield-like
 //!   service call behind condvar.rs's `task_yield`/`task_yield_thunk`
@@ -153,6 +160,45 @@ pub struct TaskCtx {
     pub queue_pool: *mut u8,
 }
 
+/// Per-task registration node (0x18 bytes, tag-5 heap allocation by the
+/// unported name-node allocator @ 0x08093870, which also creates the
+/// node's 0x54-byte context block). A task's `TaskRecord::context` word
+/// points at its node — the "current task id" the kernel_running query
+/// returns is really this pointer.
+#[repr(C)]
+pub struct NameNode {
+    /// +0x00: task-name string (the allocator seeds a default pointer;
+    /// `register_current_task` overwrites it with a tag-7 heap copy).
+    pub name: *mut u8,
+    /// +0x04: allocator-zeroed, untouched here.
+    pub _x04: usize,
+    /// +0x08: allocator-zeroed, untouched here.
+    pub _x08: usize,
+    /// +0x0c: the task's context block (`current_task_ctx_block`'s
+    /// result; `task_notify` installs the queue pool at ctx+0x1c).
+    pub ctx: *mut TaskCtx,
+    /// +0x10: `TaskRecord` installed by `register_current_task`.
+    pub task: *mut TaskRecord,
+    /// +0x14: allocator-zeroed, untouched here.
+    pub _x14: usize,
+}
+
+// The original node is 6 words (allocated as 0x18 bytes).
+#[cfg(target_pointer_width = "32")]
+const _NAME_NODE_SIZE_CHECK: [u8; 0x18] = [0; core::mem::size_of::<NameNode>()];
+
+impl NameNode {
+    /// Const-init template (tests and the default-alloc scratch node).
+    pub const ZERO: NameNode = NameNode {
+        name: core::ptr::null_mut(),
+        _x04: 0,
+        _x08: 0,
+        ctx: core::ptr::null_mut(),
+        task: core::ptr::null_mut(),
+        _x14: 0,
+    };
+}
+
 /// Capacity of the queue pool `task_notify` installs (`mov r0, #0x64`).
 const NOTIFY_POOL_CAPACITY: u32 = 100;
 
@@ -203,7 +249,14 @@ pub struct TaskHooks {
     /// given callback/name pointer.
     pub register_current_task: unsafe extern "C" fn(callback: usize),
     /// `FUN_080cb828` @ 0x080cb828: the current task's context block.
+    /// Defaults to the ported `current_task_ctx_block`.
     pub current_task_ctx: unsafe extern "C" fn() -> *mut TaskCtx,
+    /// `kernel_running` @ 0x0809444c (ported in kernel/sync_mutex.rs).
+    /// Its "current task id" result is really the task's `NameNode`
+    /// pointer (the context word), so this slot types it as the pointer;
+    /// the default adapter casts the ported query's `i32` (exact on the
+    /// 32-bit target).
+    pub kernel_running_node: unsafe extern "C" fn() -> *mut NameNode,
     /// `FUN_0807a080` @ 0x0807a080: allocate a queue pool of `capacity`
     /// 20-byte entries (tag-10 heap allocation).
     pub queue_pool_create: unsafe extern "C" fn(capacity: u32) -> *mut u8,
@@ -275,15 +328,11 @@ unsafe extern "C" fn missing_rom_slot_id(_slot: u32) -> u32 {
 
 unsafe extern "C" fn missing_register_current_task(_callback: usize) {}
 
-/// Dummy context block the default ctx getter hands out, so a notify
-/// against the unwired table stores into scratch instead of faulting.
-static mut DUMMY_TASK_CTX: TaskCtx = TaskCtx {
-    _pad: [0; 7],
-    queue_pool: core::ptr::null_mut(),
-};
-
-unsafe extern "C" fn missing_current_task_ctx() -> *mut TaskCtx {
-    core::ptr::addr_of_mut!(DUMMY_TASK_CTX)
+/// Default adapter for `kernel_running_node`: the ported query returns
+/// the node pointer as an `i32` "task id" — cast it back. Exact on the
+/// 32-bit target; host tests mock the slot instead of relying on it.
+unsafe extern "C" fn kernel_running_node_adapter() -> *mut NameNode {
+    crate::kernel::sync_mutex::kernel_running() as usize as *mut NameNode
 }
 
 unsafe extern "C" fn missing_queue_pool_create(_capacity: u32) -> *mut u8 {
@@ -311,7 +360,8 @@ pub const DEFAULT_TASK_HOOKS: TaskHooks = TaskHooks {
     rom_slot_id: missing_rom_slot_id,
     current_task_context: current_task_context_word,
     register_current_task: missing_register_current_task,
-    current_task_ctx: missing_current_task_ctx,
+    current_task_ctx: current_task_ctx_block,
+    kernel_running_node: kernel_running_node_adapter,
     queue_pool_create: missing_queue_pool_create,
     rom_yield: missing_rom_yield,
 };
@@ -454,6 +504,24 @@ pub unsafe extern "C" fn current_task_context_word() -> usize {
     }
 }
 
+/// current_task_ctx_block — original: `FUN_080cb828` @ 0x080cb828
+/// (20 bytes; 46 bl call sites).
+///
+/// `kernel_running()`'s "task id" result treated as the current task's
+/// `NameNode` pointer; returns the node's context block (+0x0c), or NULL
+/// when the kernel reports no task. This is the block `task_notify`
+/// installs the queue pool into. (`TASK_HOOKS.current_task_ctx` defaults
+/// to this port.)
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn current_task_ctx_block() -> *mut TaskCtx {
+    let node = (hooks().kernel_running_node)();
+    if node.is_null() {
+        core::ptr::null_mut()
+    } else {
+        (*node).ctx
+    }
+}
+
 /// kernel_yield — original: `FUN_080568fc` @ 0x080568fc (8 bytes).
 ///
 /// The stock yield service call: ROM 0x22004260 with argument 0, result
@@ -555,6 +623,7 @@ mod tests {
         RomCurrentTask(u32),
         RomSlotId(u32),
         RomYield(u32),
+        KernelRunningNode,
     }
 
     static CALLS: Mutex<Vec<Call>> = Mutex::new(Vec::new());
@@ -687,6 +756,14 @@ mod tests {
         -3
     }
 
+    /// Node the kernel_running_node mock returns (NULL = no task).
+    static mut RUNNING_NODE_RET: *mut NameNode = null_mut();
+
+    unsafe extern "C" fn mock_kernel_running_node() -> *mut NameNode {
+        CALLS.lock().unwrap().push(Call::KernelRunningNode);
+        RUNNING_NODE_RET
+    }
+
     fn mock_hooks() -> MutexGuard<'static, ()> {
         let guard = HOOKS_LOCK.lock().unwrap();
         unsafe {
@@ -700,6 +777,7 @@ mod tests {
             CTX_BLOCK.queue_pool = null_mut();
             POOL_RET = null_mut();
             ROM_TASK_RET = null_mut();
+            RUNNING_NODE_RET = null_mut();
             core::ptr::addr_of_mut!(TASK_POOL_COUNT).write(0);
             core::ptr::addr_of_mut!(TASK_HOOKS).write(TaskHooks {
                 task_id_alloc: mock_id_alloc,
@@ -717,6 +795,7 @@ mod tests {
                 current_task_context: mock_current_task_context,
                 register_current_task: mock_register_current_task,
                 current_task_ctx: mock_current_task_ctx,
+                kernel_running_node: mock_kernel_running_node,
                 queue_pool_create: mock_pool_create,
                 rom_yield: mock_rom_yield,
             });
@@ -958,6 +1037,31 @@ mod tests {
     }
 
     #[test]
+    fn ctx_block_is_null_when_the_kernel_reports_no_task() {
+        let _guard = mock_hooks();
+        unsafe {
+            assert!(current_task_ctx_block().is_null());
+            assert_eq!(drain(), vec![Call::KernelRunningNode]);
+        }
+    }
+
+    #[test]
+    fn ctx_block_comes_from_the_node() {
+        let _guard = mock_hooks();
+        unsafe {
+            let mut ctx = TaskCtx {
+                _pad: [0; 7],
+                queue_pool: null_mut(),
+            };
+            let mut node = NameNode::ZERO;
+            node.ctx = &mut ctx;
+            RUNNING_NODE_RET = &mut node;
+            assert_eq!(current_task_ctx_block(), &mut ctx as *mut TaskCtx);
+            assert_eq!(drain(), vec![Call::KernelRunningNode]);
+        }
+    }
+
+    #[test]
     fn default_wired_slots() {
         assert_eq!(
             DEFAULT_TASK_HOOKS.heap_alloc as usize,
@@ -976,6 +1080,11 @@ mod tests {
         assert_eq!(
             DEFAULT_TASK_HOOKS.current_task_context as usize,
             current_task_context_word as usize
+        );
+        // The ctx-block slot is wired to the ported 0x080cb828.
+        assert_eq!(
+            DEFAULT_TASK_HOOKS.current_task_ctx as usize,
+            current_task_ctx_block as usize
         );
     }
 }

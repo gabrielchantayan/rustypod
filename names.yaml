@@ -3111,10 +3111,15 @@ functions:
     size: 20
     sig: "TaskCtx *current_task_ctx_block(void)"
     module: kernel/task
-    status: identified
+    status: ported
     notes: >-
-      kernel_running() (0x0809444c) result treated as a pointer; returns
-      *(it+0xc) or 0. TASK_HOOKS.current_task_ctx. Out of claim range.
+      kernel_running() (0x0809444c, ported) result is really the current
+      task's NameNode pointer (the context word); returns node->ctx
+      (+0xc) or 0. 46 bl call sites. Now the TASK_HOOKS.current_task_ctx
+      default (dummy-block stub removed); TASK_HOOKS.kernel_running_node
+      types the query result as the pointer (default adapter casts the
+      ported i32). match.py structural (cmp/ldrne tail exact; prefix is
+      the volatile hook-table ldrd noise).
 
   - address: 0x0807a080
     ghidra: FUN_0807a080
