@@ -836,8 +836,11 @@ functions:
     sig: "void *malloc(size_t size)"
     module: malloc_rt
     status: ported
-    notes: 152 callers; veneer to retailOS allocator @ 0x080eb67c
-      (via 0x082ab188). Heap itself not yet ported (HEAP_OPS indirection).
+    notes: >-
+      152 callers; veneer to retailOS allocator @ 0x080eb67c via the
+      tail veneer 0x082ab188 (tag 1). HEAP_OPS.alloc defaults to the
+      full ported chain (alloc_ported shim over malloc_wrapper,
+      heap/veneers.rs).
 
   - address: 0x0802edc8
     ghidra: FUN_0802edc8
@@ -846,7 +849,10 @@ functions:
     sig: "void free(void *ptr)"
     module: malloc_rt
     status: ported
-    notes: 150 callers; NULL-guard; retailOS free @ 0x080e7970.
+    notes: >-
+      150 callers; NULL-guard; retailOS free @ 0x080e7970 via the tail
+      veneer 0x082ab19c (NULL re-guard, tag 1). HEAP_OPS.free defaults
+      to the full ported chain (free_ported shim over free_wrapper).
 
   - address: 0x0802edec
     ghidra: FUN_0802edec
@@ -855,7 +861,11 @@ functions:
     sig: "void *realloc(void *ptr, size_t size)"
     module: malloc_rt
     status: ported
-    notes: 25 callers; 0-size=free, NULL=malloc; retailOS @ 0x080edbf0.
+    notes: >-
+      25 callers; 0-size=free, NULL=malloc; retailOS realloc @
+      0x080edbf0 via the tail veneer 0x082ab1b4 (tag 1, copy-on-move 1).
+      HEAP_OPS.realloc defaults to the full ported chain (realloc_ported
+      shim over realloc_wrapper).
 
   - address: 0x0802ed14
     ghidra: FUN_0802ed14
@@ -863,8 +873,11 @@ functions:
     size: 152
     module: malloc_rt
     status: ported
-    notes: Aligns to 8, stores heap desc [libspace+8]; grow via 0x0803571c,
-      SIGRTMEM(9) via __rt_raise on failure.
+    notes: >-
+      Aligns to 8, stores heap desc [libspace+8]; grow via 0x080336c0
+      (wrapper over 0x0803571c), SIGRTMEM(9) via __rt_raise on failure.
+      HEAP_OPS.grow/raise default to the ported heap_grow_arena_wrapper
+      and __rt_raise @ 0x080320a8.
 
   - address: 0x0803300c
     ghidra: FUN_0803300c
@@ -3034,6 +3047,41 @@ functions:
       (port folds the constant as HEAP_GUARD_SIZE, malloc_rt.rs) and
       rt_lib_init_for_abort @ 0x08035788 (stores it into the bounds
       block).
+
+  - address: 0x082ab188
+    name: malloc_tail_veneer
+    size: 12
+    module: malloc_rt
+    status: ported
+    notes: >-
+      mov r0,r1; mov r1,#1; b 0x080eb67c — drops the ADS heap descriptor
+      and tail-calls the retailOS allocator with caller tag 1. Sole
+      caller (binary-verified): malloc @ 0x0802edac. Folded into the
+      HEAP_OPS default shim alloc_ported (malloc_rt.rs); not a separate
+      export.
+
+  - address: 0x082ab19c
+    name: free_tail_veneer
+    size: 16
+    module: malloc_rt
+    status: ported
+    notes: >-
+      movs r0,r1; movne r1,#1; bne 0x080e7970; bx lr — drops the
+      descriptor, re-guards NULL and tail-calls the retailOS free with
+      tag 1. Sole caller (binary-verified): free @ 0x0802edc8. Folded
+      into the HEAP_OPS default shim free_ported (malloc_rt.rs).
+
+  - address: 0x082ab1b4
+    name: realloc_tail_veneer
+    size: 20
+    module: malloc_rt
+    status: ported
+    notes: >-
+      mov r0,r1; mov r1,r2; mov r2,#1; mov r3,#1; b 0x080edbf0 — drops
+      the descriptor and tail-calls the retailOS realloc with tag 1 and
+      copy-on-move 1. Sole caller (binary-verified): realloc @
+      0x0802edec. Folded into the HEAP_OPS default shim realloc_ported
+      (malloc_rt.rs).
 
   - address: 0x0800af04
     ghidra: thunk_FUN_082ab11c
