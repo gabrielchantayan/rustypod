@@ -1938,6 +1938,21 @@ functions:
       List ops: list_pop_front 0x080f10b8, list_push_back 0x080f1158,
       list_remove 0x080f10ec.
 
+  - address: 0x080ed9c8
+    ghidra: FUN_080ed9c8
+    name: condvar_bind
+    size: 20
+    sig: "void condvar_bind(CondVar *condvar, u32 *lock_obj)"
+    module: kernel/condvar
+    status: ported
+    notes: >-
+      The no-allocation condvar initializer (vs condvar_init 0x0807f680,
+      which creates a fresh kernel object): stores the caller-provided
+      lock word into +0 and clears the wait queue (+4/+8). Pure stores,
+      no calls. 21 bl call sites, among them queue_pool_init twice
+      (0x0809eadc backref pool base, 0x0809eb44 backref pool+0x2c).
+      match.py exact modulo frame-pointer noise.
+
   - address: 0x08003080
     name: irq_entry
     size: 120
@@ -3207,17 +3222,23 @@ functions:
     size: 160
     sig: "u32 queue_pool_init(i32 capacity, QueueNode *nodes, QueuePool *pool)"
     module: kernel/mqueue
-    status: identified
+    status: ported
     notes: >-
-      Lays out the 0x48-byte QueuePool header (see kernel/mqueue.rs):
-      pool->lock = sem_create (0x08056724); condvar3-init (0x080ed9c8:
-      {backref, 0, 0}) at +0x08 backref pool; zeroes +0x14..+0x28 and
-      stores nodes at +0x1c; chains the capacity nodes (stride 0x14)
-      onto the free list at +0x14 with node->owner = pool and
-      node->valid (+0x10) = 1 (list_push_back 0x080f1158); mutex_create
-      (0x080744a4) at +0x2c; condvar3-init at +0x34 backref pool+0x2c;
-      zeroes +0x40/+0x44 (the LockedQueue anchor). Returns 0. 1 bl call
-      site (queue_pool_create). TASK_HOOKS.pool_init target.
+      Lays out the 0x48-byte QueuePool header (now fully modeled in
+      kernel/mqueue.rs): pool->lock = sem_create (0x08056724);
+      condvar_bind (0x080ed9c8) at +0x08 backref pool; zeroes
+      +0x14..+0x28 and stores nodes at +0x1c; chains the capacity nodes
+      (stride 0x14) onto the free list at +0x14 with node->owner = pool
+      and node->valid (+0x10) = 1 (list_push_back 0x080f1158);
+      mutex_create (0x080744a4) at +0x2c; condvar_bind at +0x34 backref
+      pool+0x2c; zeroes +0x40/+0x44 (the LockedQueue anchor). Returns 0.
+      1 bl call site (queue_pool_create @ 0x0807a0bc). Now the
+      TASK_HOOKS.pool_init default (slot retyped to the QueueNode/
+      QueuePool signature); sem_create/mutex_create route through new
+      MQUEUE_HOOKS slots defaulting to the real ports; condvar_bind and
+      list_push_back are plain calls like the original bls. match.py
+      structural (stores/offsets all present; LLVM inlines the two list/
+      bind helpers and rewrites the counted loop as a decrement).
 
   - address: 0x0807a15c
     ghidra: FUN_0807a15c

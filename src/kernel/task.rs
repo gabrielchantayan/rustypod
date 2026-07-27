@@ -99,9 +99,10 @@
 //!   call sites, among them task_notify @ 0x08060fb8). One tag-10
 //!   allocation of `capacity * 0x14 + 0x48` bytes — the 0x48-byte pool
 //!   header (kernel/mqueue.rs `QueuePool`) followed by the node array —
-//!   then the (unported) initializer `FUN_0809eab8` lays it out:
-//!   `pool_init(capacity, base + 0x48, base)`, degraded to
-//!   `(0, NULL, base)` for `capacity < 1`. Returns the base unchecked.
+//!   then the initializer `FUN_0809eab8` (ported: kernel/mqueue.rs
+//!   `queue_pool_init`) lays it out: `pool_init(capacity, base + 0x48,
+//!   base)`, degraded to `(0, NULL, base)` for `capacity < 1`. Returns
+//!   the base unchecked.
 //! - `register_current_task` — `FUN_080865e8` @ 0x080865e8 (168 bytes;
 //!   2 bl call sites: task_notify @ 0x08060fa8 and 0x080e873c). Attaches
 //!   a `NameNode` to the current task. The registration block @
@@ -160,6 +161,7 @@
 //!   string pointer it is used as (`*const u8`); task_notify casts its
 //!   opaque callback word at the call.
 
+use crate::kernel::mqueue::{QueueNode, QueuePool};
 use crate::kernel::sync_sem::SemHandle;
 use crate::libc::memzero::memzero_aligned;
 use crate::libc::strcpy::strcpy;
@@ -324,11 +326,13 @@ pub struct TaskHooks {
     /// 20-byte entries (tag-10 heap allocation). Defaults to the ported
     /// `queue_pool_create`.
     pub queue_pool_create: unsafe extern "C" fn(capacity: i32) -> *mut u8,
-    /// Unported pool initializer `FUN_0809eab8` @ 0x0809eab8: lays out
-    /// the 0x48-byte pool header (lock semaphore, condvars, free list of
-    /// the `capacity` nodes at `nodes`) — see kernel/mqueue.rs's
-    /// `QueuePool` for the header model.
-    pub pool_init: unsafe extern "C" fn(capacity: i32, nodes: *mut u8, pool: *mut u8),
+    /// Pool initializer `FUN_0809eab8` @ 0x0809eab8: lays out the
+    /// 0x48-byte pool header (lock semaphore, condvars, free list of the
+    /// `capacity` nodes at `nodes`). Defaults to the ported
+    /// `queue_pool_init` (kernel/mqueue.rs); result (always 0) discarded
+    /// by the caller, like the original.
+    pub pool_init:
+        unsafe extern "C" fn(capacity: i32, nodes: *mut QueueNode, pool: *mut QueuePool) -> u32,
     /// Thunk 0x08037e98 -> ROM 0x22004260: the yield-like kernel service
     /// (exact RTXC op unidentified; always called with 0 here).
     pub rom_yield: unsafe extern "C" fn(arg: u32) -> i32,
@@ -452,8 +456,6 @@ unsafe extern "C" fn kernel_running_node_adapter() -> *mut NameNode {
     crate::kernel::sync_mutex::kernel_running() as usize as *mut NameNode
 }
 
-unsafe extern "C" fn missing_pool_init(_capacity: i32, _nodes: *mut u8, _pool: *mut u8) {}
-
 /// Default stub: yielding without a scheduler is a no-op reporting 0.
 unsafe extern "C" fn missing_rom_yield(_arg: u32) -> i32 {
     0
@@ -482,7 +484,7 @@ pub const DEFAULT_TASK_HOOKS: TaskHooks = TaskHooks {
     current_task_ctx: current_task_ctx_block,
     kernel_running_node: kernel_running_node_adapter,
     queue_pool_create,
-    pool_init: missing_pool_init,
+    pool_init: crate::kernel::mqueue::queue_pool_init,
     rom_yield: missing_rom_yield,
 };
 
@@ -819,9 +821,13 @@ pub unsafe extern "C" fn queue_pool_create(capacity: i32) -> *mut u8 {
         .wrapping_add(QUEUE_POOL_HEADER);
     let base = (h.tagged_alloc)(size as usize, TAG_QUEUE_POOL);
     if capacity > 0 {
-        (h.pool_init)(capacity, base.add(QUEUE_POOL_HEADER as usize), base);
+        (h.pool_init)(
+            capacity,
+            base.add(QUEUE_POOL_HEADER as usize) as *mut QueueNode,
+            base as *mut QueuePool,
+        );
     } else {
-        (h.pool_init)(0, core::ptr::null_mut(), base);
+        (h.pool_init)(0, core::ptr::null_mut(), base as *mut QueuePool);
     }
     base
 }
@@ -1078,12 +1084,17 @@ mod tests {
         POOL_RET
     }
 
-    unsafe extern "C" fn mock_pool_init(capacity: i32, nodes: *mut u8, pool: *mut u8) {
+    unsafe extern "C" fn mock_pool_init(
+        capacity: i32,
+        nodes: *mut QueueNode,
+        pool: *mut QueuePool,
+    ) -> u32 {
         CALLS.lock().unwrap().push(Call::PoolInit {
             capacity,
             nodes: nodes as usize,
             pool: pool as usize,
         });
+        0
     }
 
     /// Record the rom_current_task mock returns (NULL -> lazy pool path).
@@ -1765,6 +1776,14 @@ mod tests {
         assert_eq!(
             DEFAULT_TASK_HOOKS.queue_pool_create as usize,
             queue_pool_create as usize
+        );
+    }
+
+    #[test]
+    fn pool_init_default_is_the_real_initializer() {
+        assert_eq!(
+            DEFAULT_TASK_HOOKS.pool_init as usize,
+            crate::kernel::mqueue::queue_pool_init as usize
         );
     }
 

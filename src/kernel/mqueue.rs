@@ -36,16 +36,24 @@
 //!   kernel/condvar.rs), list_push_back 0x080f1158 (ported,
 //!   kernel/condvar.rs — called directly, like the original's plain bl).
 //!
+//! Also here — the pool bring-up:
+//!
+//! - `queue_pool_init` — original: `FUN_0809eab8` @ 0x0809eab8 (160
+//!   bytes; 1 bl call site, `queue_pool_create` @ 0x0807a0bc, which
+//!   allocates `capacity * 0x14 + 0x48` bytes and hands the node array
+//!   at base+0x48 here). Lays out the full 0x48-byte header — see the
+//!   function doc for the exact store sequence.
+//!
 //! # Layout note
 //!
 //! The node's linkage word (+0) is the intrusive `ListNode` of
-//! kernel/condvar.rs; +4 holds the owner-pool pointer. The pool header is
-//! the 0x48-byte block laid out by the (unported) pool initializer @
-//! 0x0809eab8 — `QueuePool` models the first 0x28 bytes the recycler
-//! touches; +0x28..+0x48 (a mutex at +0x2c and the delivery queue at
-//! +0x40 — condvar.rs's `LockedQueue` view of the same block) belong to
-//! the other consumers. Byte offsets are exact on the 32-bit target only;
-//! host tests go through field accesses (same caveat as condvar.rs).
+//! kernel/condvar.rs; +4 holds the owner-pool pointer. `QueuePool` models
+//! the full 0x48-byte header laid out by `queue_pool_init`: the recycler
+//! touches +0x00..+0x28; the delivery side (+0x2c mutex, +0x34 condvar,
+//! +0x40 queue anchor — condvar.rs's `LockedQueue` view of the same
+//! block) belongs to the receive path. Byte offsets are exact on the
+//! 32-bit target only; host tests go through field accesses (same caveat
+//! as condvar.rs).
 //!
 //! # Dispatch design
 //!
@@ -63,8 +71,11 @@
 //! modules get wired; the hook types the node as `*mut ListNode`, cast
 //! at install time.
 
-use crate::kernel::condvar::{condvar_signal, list_push_back, CondVar, ListHead, ListNode};
-use crate::kernel::sync_sem::{sem_signal, sem_wait, SemHandle};
+use crate::kernel::condvar::{
+    condvar_bind, condvar_signal, list_push_back, CondVar, ListHead, ListNode,
+};
+use crate::kernel::sync_mutex::{mutex_create, Mutex};
+use crate::kernel::sync_sem::{sem_create, sem_signal, sem_wait, SemHandle};
 
 /// Message-queue node (20-byte pool stride; nodes come from the owner's
 /// pool array at pool+0x48).
@@ -104,7 +115,27 @@ pub struct QueuePool {
     /// +0x24: persistent-node condvar, signaled on every persistent
     /// return.
     pub persist_cv: *mut CondVar,
+    /// +0x28: init-zeroed, untouched by this module.
+    pub _x28: u32,
+    /// +0x2c: delivery-side mutex (sync_mutex.rs `Mutex`, 8 bytes on
+    /// target). condvar.rs's `LockedQueue.mutex` word at +0x2c is this
+    /// mutex's `sem_cell`.
+    pub mutex: Mutex,
+    /// +0x34: delivery-side condvar, bound to the mutex at +0x2c.
+    pub deliver_cv: CondVar,
+    /// +0x40: delivered-message queue anchor (`LockedQueue`'s +0x40 view
+    /// of the same block).
+    pub queue: ListHead,
 }
+
+// The original header is exactly 0x48 bytes (queue_pool_create allocates
+// `capacity * 0x14 + 0x48` and the node array starts at base + 0x48).
+#[cfg(target_pointer_width = "32")]
+const _QUEUE_POOL_SIZE_CHECK: [u8; 0x48] = [0; core::mem::size_of::<QueuePool>()];
+
+// Node stride: the original walks the array in 0x14-byte steps.
+#[cfg(target_pointer_width = "32")]
+const _QUEUE_NODE_SIZE_CHECK: [u8; 0x14] = [0; core::mem::size_of::<QueueNode>()];
 
 /// External services this module depends on. Every slot defaults to the
 /// real ported function (see the module header).
@@ -119,6 +150,12 @@ pub struct MqueueHooks {
     /// Stock 0x080744d8: single-shot condvar wake (kernel/condvar.rs
     /// port).
     pub cv_signal: unsafe extern "C" fn(condvar: *mut CondVar),
+    /// Stock 0x08056724: semaphore create (kernel/sync_sem.rs port) —
+    /// the pool lock the initializer installs at +0x00.
+    pub sem_create: unsafe extern "C" fn() -> SemHandle,
+    /// Stock 0x080744a4: mutex-cell create (kernel/sync_mutex.rs port) —
+    /// the delivery mutex the initializer lays out at +0x2c.
+    pub mutex_create: unsafe extern "C" fn(mutex: *mut Mutex),
 }
 
 /// Shipped defaults — all real ports; no install needed on target.
@@ -127,6 +164,8 @@ pub const DEFAULT_MQUEUE_HOOKS: MqueueHooks = MqueueHooks {
     sem_wait,
     sem_signal,
     cv_signal: condvar_signal,
+    sem_create,
+    mutex_create,
 };
 
 /// The active hook table. Written once at init on target; host tests
@@ -202,6 +241,66 @@ pub unsafe extern "C" fn mqueue_node_recycle(node: *mut QueueNode) -> u32 {
     0
 }
 
+/// queue_pool_init — original: `FUN_0809eab8` @ 0x0809eab8 (160 bytes;
+/// 1 bl call site, queue_pool_create @ 0x0807a0bc).
+///
+/// Lays out the 0x48-byte pool header over `pool` and threads the
+/// `capacity` nodes (0x14-byte stride from `nodes`) onto the free list:
+///
+/// ```text
+/// pool->lock = sem_create(); pool->_x04 = 0
+/// condvar_bind(&pool->notify, pool)          // lock word = pool base
+/// persist_sem/persist_cv/_x28 = 0; pool->nodes = nodes; free = {0, 0}
+/// for each of the capacity nodes:
+///     node->owner = pool; node->valid = 1; push_back(&pool->free, node)
+/// mutex_create(&pool->mutex)
+/// condvar_bind(&pool->deliver_cv, &pool->mutex)
+/// pool->queue = {0, 0}
+/// return 0
+/// ```
+///
+/// `capacity < 1` skips the threading loop (queue_pool_create then
+/// passes NULL nodes — never dereferenced). Store order and the
+/// signed compare follow the original; `condvar_bind` and
+/// `list_push_back` are plain calls like the original's `bl`s, while
+/// the create pair routes through `MQUEUE_HOOKS` (defaults are the real
+/// ports).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn queue_pool_init(
+    capacity: i32,
+    nodes: *mut QueueNode,
+    pool: *mut QueuePool,
+) -> u32 {
+    let h = hooks();
+    (*pool).lock = (h.sem_create)();
+    (*pool)._x04 = 0;
+    condvar_bind(core::ptr::addr_of_mut!((*pool).notify), pool as *mut u32);
+    (*pool).persist_sem = core::ptr::null_mut();
+    (*pool).persist_cv = core::ptr::null_mut();
+    (*pool).nodes = nodes;
+    (*pool)._x28 = 0;
+    (*pool).free.tail = core::ptr::null_mut();
+    (*pool).free.head = core::ptr::null_mut();
+    let mut node = nodes;
+    for _ in 0..capacity {
+        (*node).owner = pool;
+        (*node).valid = 1;
+        list_push_back(
+            core::ptr::addr_of_mut!((*pool).free),
+            node as *mut ListNode,
+        );
+        node = node.add(1);
+    }
+    (h.mutex_create)(core::ptr::addr_of_mut!((*pool).mutex));
+    condvar_bind(
+        core::ptr::addr_of_mut!((*pool).deliver_cv),
+        core::ptr::addr_of_mut!((*pool).mutex) as *mut u32,
+    );
+    (*pool).queue.tail = core::ptr::null_mut();
+    (*pool).queue.head = core::ptr::null_mut();
+    0
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -220,6 +319,8 @@ mod tests {
         SemWait(usize),
         SemSignal(usize),
         CvSignal(usize),
+        SemCreate,
+        MutexCreate(usize),
     }
 
     static CALLS: Mutex<Vec<Call>> = Mutex::new(Vec::new());
@@ -241,6 +342,26 @@ mod tests {
         CALLS.lock().unwrap().push(Call::CvSignal(condvar as usize));
     }
 
+    /// Handle the sem_create mock hands out (never dereferenced).
+    const MOCK_SEM: usize = 0xC5EA;
+
+    unsafe extern "C" fn mock_sem_create() -> SemHandle {
+        CALLS.lock().unwrap().push(Call::SemCreate);
+        MOCK_SEM as SemHandle
+    }
+
+    /// The kernel mutex type (`Mutex` is shadowed by std's in here).
+    use crate::kernel::sync_mutex::Mutex as KernelMutex;
+
+    /// Cell value the mutex_create mock installs (never dereferenced).
+    const MOCK_MUTEX_CELL: usize = 0x30C4;
+
+    unsafe extern "C" fn mock_mutex_create(mutex: *mut KernelMutex) {
+        CALLS.lock().unwrap().push(Call::MutexCreate(mutex as usize));
+        (*mutex).sem_cell = MOCK_MUTEX_CELL as *mut u32;
+        (*mutex).unused = 0;
+    }
+
     fn mock_hooks() -> MutexGuard<'static, ()> {
         let guard = HOOKS_LOCK.lock().unwrap();
         unsafe {
@@ -249,6 +370,8 @@ mod tests {
                 sem_wait: mock_sem_wait,
                 sem_signal: mock_sem_signal,
                 cv_signal: mock_cv_signal,
+                sem_create: mock_sem_create,
+                mutex_create: mock_mutex_create,
             });
         }
         CALLS.lock().unwrap().clear();
@@ -296,20 +419,34 @@ mod tests {
         persist_cv: CondVar,
     }
 
+    fn empty_pool() -> QueuePool {
+        QueuePool {
+            lock: 0x7000 as SemHandle,
+            _x04: 0,
+            notify: empty_cv(),
+            free: ListHead {
+                head: null_mut(),
+                tail: null_mut(),
+            },
+            nodes: null_mut(),
+            persist_sem: null_mut(),
+            persist_cv: null_mut(),
+            _x28: 0,
+            mutex: KernelMutex {
+                sem_cell: null_mut(),
+                unused: 0,
+            },
+            deliver_cv: empty_cv(),
+            queue: ListHead {
+                head: null_mut(),
+                tail: null_mut(),
+            },
+        }
+    }
+
     fn make_pool() -> std::boxed::Box<PoolFixture> {
         let mut f = std::boxed::Box::new(PoolFixture {
-            pool: QueuePool {
-                lock: 0x7000 as SemHandle,
-                _x04: 0,
-                notify: empty_cv(),
-                free: ListHead {
-                    head: null_mut(),
-                    tail: null_mut(),
-                },
-                nodes: null_mut(),
-                persist_sem: null_mut(),
-                persist_cv: null_mut(),
-            },
+            pool: empty_pool(),
             persist_sem_cell: 0x9990 as SemHandle,
             persist_cv: empty_cv(),
         });
@@ -468,6 +605,135 @@ mod tests {
         );
     }
 
+    // ---- queue_pool_init ---------------------------------------------
+
+    /// A header prefilled with recognizable garbage, so the layout test
+    /// proves every field is written by the initializer.
+    fn garbage_pool() -> QueuePool {
+        let mut p = empty_pool();
+        p.lock = 0xdead as SemHandle;
+        p._x04 = 0xa5a5_a5a5;
+        p.notify.lock_obj = 0xdead as *mut u32;
+        p.notify.waiters.head = 0xdead as *mut ListNode;
+        p.notify.waiters.tail = 0xdead as *mut ListNode;
+        p.free.head = 0xdead as *mut ListNode;
+        p.free.tail = 0xdead as *mut ListNode;
+        p.nodes = 0xdead as *mut QueueNode;
+        p.persist_sem = 0xdead as *mut SemHandle;
+        p.persist_cv = 0xdead as *mut CondVar;
+        p._x28 = 0xa5a5_a5a5;
+        p.deliver_cv.lock_obj = 0xdead as *mut u32;
+        p.deliver_cv.waiters.head = 0xdead as *mut ListNode;
+        p.deliver_cv.waiters.tail = 0xdead as *mut ListNode;
+        p.queue.head = 0xdead as *mut ListNode;
+        p.queue.tail = 0xdead as *mut ListNode;
+        p
+    }
+
+    #[test]
+    fn pool_init_lays_out_the_header_and_threads_the_free_list() {
+        let _guard = mock_hooks();
+        let mut pool = garbage_pool();
+        let mut nodes = [node(0xee, 7), node(0xee, 7), node(0xee, 7)];
+        let p = &mut pool as *mut QueuePool;
+        let r = unsafe { queue_pool_init(3, nodes.as_mut_ptr(), p) };
+        assert_eq!(r, 0);
+        // Header layout.
+        assert_eq!(pool.lock, MOCK_SEM as SemHandle);
+        assert_eq!(pool._x04, 0);
+        assert_eq!(
+            pool.notify.lock_obj, p as *mut u32,
+            "consumer condvar bound to the pool base (its +0 lock word)"
+        );
+        assert!(pool.notify.waiters.head.is_null());
+        assert!(pool.notify.waiters.tail.is_null());
+        assert_eq!(pool.nodes, nodes.as_mut_ptr());
+        assert!(pool.persist_sem.is_null());
+        assert!(pool.persist_cv.is_null());
+        assert_eq!(pool._x28, 0);
+        assert_eq!(
+            pool.mutex.sem_cell, MOCK_MUTEX_CELL as *mut u32,
+            "mutex_create ran over the +0x2c cell"
+        );
+        assert_eq!(
+            pool.deliver_cv.lock_obj,
+            core::ptr::addr_of_mut!(pool.mutex) as *mut u32,
+            "delivery condvar bound to the mutex at +0x2c"
+        );
+        assert!(pool.deliver_cv.waiters.head.is_null());
+        assert!(pool.deliver_cv.waiters.tail.is_null());
+        assert!(pool.queue.head.is_null());
+        assert!(pool.queue.tail.is_null());
+        // Free-list threading: all three nodes, in array order.
+        let n0 = nodes.as_mut_ptr();
+        let (n1, n2) = unsafe { (n0.add(1), n0.add(2)) };
+        assert_eq!(pool.free.head, n0 as *mut ListNode);
+        assert_eq!(pool.free.tail, n2 as *mut ListNode);
+        assert_eq!(nodes[0].next, n1);
+        assert_eq!(nodes[1].next, n2);
+        assert!(nodes[2].next.is_null());
+        for n in &nodes {
+            assert_eq!(n.owner, p);
+            assert_eq!(n.valid, 1);
+            assert_eq!(n.persistent, 7, "only owner/valid are written");
+            assert_eq!(n.data, [0x1111_2222, 0x3333_4444], "payload untouched");
+        }
+        assert_eq!(
+            drain(),
+            vec![
+                Call::SemCreate,
+                Call::MutexCreate(core::ptr::addr_of_mut!(pool.mutex) as usize),
+            ],
+            "exactly one lock and one mutex are created"
+        );
+    }
+
+    #[test]
+    fn pool_init_zero_capacity_skips_the_node_loop() {
+        let _guard = mock_hooks();
+        let mut pool = garbage_pool();
+        let r = unsafe { queue_pool_init(0, null_mut(), &mut pool) };
+        assert_eq!(r, 0);
+        assert!(pool.free.head.is_null());
+        assert!(pool.free.tail.is_null());
+        assert!(pool.nodes.is_null(), "NULL node base stored verbatim");
+        assert_eq!(drain().len(), 2, "create pair still runs");
+    }
+
+    #[test]
+    fn pool_init_negative_capacity_behaves_like_zero() {
+        let _guard = mock_hooks();
+        let mut pool = garbage_pool();
+        // The original's `ble` treats any capacity < 1 the same way.
+        let r = unsafe { queue_pool_init(-5, null_mut(), &mut pool) };
+        assert_eq!(r, 0);
+        assert!(pool.free.head.is_null());
+        assert!(pool.free.tail.is_null());
+    }
+
+    #[test]
+    fn pool_init_then_recycle_round_trips_a_node() {
+        // The initialized pool is directly consumable by the recycler.
+        let _guard = mock_hooks();
+        let mut pool = empty_pool();
+        let mut nodes = [node(0, 0), node(0, 0)];
+        let n0 = nodes.as_mut_ptr();
+        unsafe {
+            queue_pool_init(2, n0, &mut pool);
+            let popped = crate::kernel::condvar::list_pop_front(
+                core::ptr::addr_of_mut!(pool.free),
+            ) as *mut QueueNode;
+            assert_eq!(popped, n0);
+            drain();
+            mqueue_node_recycle(popped);
+        }
+        assert_eq!(
+            pool.free.tail, n0 as *mut ListNode,
+            "the popped node went back to its owner's free list"
+        );
+        assert_eq!(nodes[1].next, n0);
+    }
+
     #[test]
     fn default_slots_are_the_real_ports() {
         assert_eq!(
@@ -485,6 +751,14 @@ mod tests {
         assert_eq!(
             DEFAULT_MQUEUE_HOOKS.cv_signal as usize,
             crate::kernel::condvar::condvar_signal as usize
+        );
+        assert_eq!(
+            DEFAULT_MQUEUE_HOOKS.sem_create as usize,
+            crate::kernel::sync_sem::sem_create as usize
+        );
+        assert_eq!(
+            DEFAULT_MQUEUE_HOOKS.mutex_create as usize,
+            crate::kernel::sync_mutex::mutex_create as usize
         );
     }
 }

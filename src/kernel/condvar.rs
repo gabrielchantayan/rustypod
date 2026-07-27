@@ -38,6 +38,11 @@
 //! yield wrappers `task_yield`/`task_yield_thunk` (0x0807f670/0x0807f6a8)
 //! around stock 0x80568fc, which tail-branches ROM 0x22004260 with r0 = 0.
 //!
+//! Out-of-range but of the same family: `condvar_bind` — `FUN_080ed9c8` @
+//! 0x080ed9c8 (20 bytes, 21 bl call sites). The no-allocation initializer:
+//! stores a caller-provided lock word into `lock_obj` and clears the wait
+//! queue (the queue-pool initializer @ 0x0809eab8 calls it twice).
+//!
 //! # Hook routing
 //!
 //! Every kernel/ROM call goes through the `CONDVAR_HOOKS` fn-pointer table
@@ -378,6 +383,21 @@ pub unsafe extern "C" fn task_yield_thunk() {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn condvar_init(condvar: *mut CondVar) {
     (*condvar).lock_obj = (hooks().object_create)();
+    (*condvar).waiters.head = null_mut();
+    (*condvar).waiters.tail = null_mut();
+}
+
+/// condvar_bind — original: `FUN_080ed9c8` @ 0x080ed9c8 (20 bytes;
+/// 21 bl call sites, among them queue_pool_init @ 0x0809eadc/0x0809eb44).
+///
+/// The other condvar initializer: instead of creating a fresh kernel
+/// object (`condvar_init`), it binds the condvar to a caller-provided
+/// lock word (`lock_obj` = a pointer to the slot holding the associated
+/// semaphore/lock handle) and empties the wait queue. Three plain
+/// stores, no calls.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn condvar_bind(condvar: *mut CondVar, lock_obj: *mut u32) {
+    (*condvar).lock_obj = lock_obj;
     (*condvar).waiters.head = null_mut();
     (*condvar).waiters.tail = null_mut();
 }
@@ -729,6 +749,24 @@ mod tests {
         let events = take_events();
         assert_eq!(events.len(), 1);
         assert!(events[0].starts_with("obj_create->"));
+    }
+
+    #[test]
+    fn condvar_bind_stores_the_lock_word_and_empties_the_queue() {
+        let _guard = install(MockState::default());
+        let mut lock_word = 0u32;
+        let mut cv = make_condvar();
+        // Seed a stale wait queue to prove bind clears it.
+        let mut stale = ListNode { next: null_mut() };
+        cv.waiters.head = &mut stale;
+        cv.waiters.tail = &mut stale;
+        unsafe {
+            condvar_bind(&mut cv, &mut lock_word);
+            assert_eq!(cv.lock_obj, &mut lock_word as *mut u32);
+            assert!(cv.waiters.head.is_null());
+            assert!(cv.waiters.tail.is_null());
+        }
+        assert!(take_events().is_empty(), "pure stores — no kernel calls");
     }
 
     #[test]
