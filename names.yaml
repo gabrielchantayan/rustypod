@@ -4950,3 +4950,45 @@ functions:
       accumulated dot product (e.g. 0x082a01e4 multiplies four field pairs
       at +0/+4/+8/+0xc and sums with adds/adc, confirming the return is
       genuinely 64-bit and not a truncated mul).
+
+  - address: 0x08094404
+    ghidra: FUN_08094404
+    name: mutex_lock_counted
+    size: 32
+    sig: "void mutex_lock_counted(CountedMutex *lock)"
+    module: kernel/sync_mutex
+    status: ported
+    vars: {param_1: lock}
+    notes: >-
+      Waits on the mutex, then increments the hold counter at +8. The
+      original open-codes mutex_lock's body (ldr r0,[r0] then the guard
+      thunk 0x08056510 -> ROM sem wait 0x22003fd0) instead of calling
+      0x0807f5c4; the port calls the ported mutex_lock, whose body is
+      exactly that, and LLVM inlines it back. The object is a Mutex with
+      a counter bolted on - word 0 sem cell, word 1 the padding
+      mutex_create zeroes, word 2 the counter. The counter does NOT gate
+      the wait, so the lock is not re-entrant; it reads 1 while held and
+      0 while free, and wraps as a bare 32-bit add. 77 bl + 2 tail b call
+      sites, binary-scanned. Only known instance is the global at
+      0x08a79c68 (users 0x08124cec / 0x08124d68 / 0x08124f7c /
+      0x08124fe8); that global never reaches mutex_create, so its cell is
+      installed elsewhere. Layout modeled as a repr(C) CountedMutex so
+      the fields stay disjoint on a 64-bit test host.
+
+  - address: 0x0809449c
+    ghidra: FUN_0809449c
+    name: mutex_unlock_counted
+    size: 20
+    sig: "void mutex_unlock_counted(CountedMutex *lock)"
+    module: kernel/sync_mutex
+    status: ported
+    vars: {param_1: lock}
+    notes: >-
+      Decrements the hold counter at +8, then signals the mutex by
+      tail-branching into the release guard 0x08056710 (-> ROM sem signal
+      0x220042b4). The store lands before the branch, so the decrement is
+      observably ordered before the release - preserved and tested. 147
+      bl + 16 tail b call sites, binary-scanned; the most-called
+      unclaimed function in 0x08060000..0x08100000. Counter movement is
+      unconditional - a NULL cell or zero handle skips the ROM op but
+      still decrements, and unlocking a free lock wraps to 0xffffffff.
