@@ -4992,3 +4992,101 @@ functions:
       unclaimed function in 0x08060000..0x08100000. Counter movement is
       unconditional - a NULL cell or zero handle skips the ROM op but
       still decrements, and unlocking a free lock wraps to 0xffffffff.
+
+  - address: 0x08076154
+    ghidra: FUN_08076154
+    name: fixed16_rsqrt
+    size: 168
+    sig: "i32 fixed16_rsqrt(i32 x)"
+    module: util/fixed
+    status: identified
+    vars: {param_1: x}
+    notes: >-
+      Q16.16 inverse square root by Newton-Raphson. Fully decoded, NOT
+      ported - blocked only on a seed table whose contents cannot be
+      recovered from osos.dec (see below). Algorithm - x == 0 returns
+      0x7fffffff; x == 0x10000 (1.0) returns 1.0 unchanged; otherwise
+      lz = clz(x) (0x0824980c, a software clz that returns 31 rather than
+      32 for zero), idx = (x >> (28 - lz)) & 7 selects one of 8 u16 seeds
+      which is doubled, e = lz - 16, then y = seed << ceil(e/2) for
+      e > 0 else y = seed >> ((-e) >> 1), and if e is odd y is corrected
+      by fixed16_mul(y, 0xb504) - 0xb504 is 1/sqrt(2) in Q16.16
+      (46340 vs the exact 46340.95). Three iterations of
+      y = (y >> 1) * (3.0 - x*y*y) follow, with 3.0 appearing literally as
+      rsb r1,r1,#0x30000; the two inner multiplies are fixed16_mul
+      (0x080e9878) open-coded inline as smull/lsl/orr, the final one is a
+      real bl to it. All shift amounts are bounded by 8 so no ARM
+      register-shift >= 32 case arises. 7 bl call sites, binary-scanned
+      (0x08079a28, 0x0824c030, 0x0824c1e4, 0x0824c67c, 0x0824f3a0,
+      0x08256eac, 0x082a06d4). Blocker - the seed table pointer literal at
+      0x080761fc is 0x083f18b2, which lies in a 0x442b-byte all-zero run
+      (0x083ee1c1-0x083f25ec) in osos.dec. That run is not bss - 85
+      distinct addresses inside it are referenced as absolute literals
+      from code all over the image (e.g. 0x083f18c2/0x083f18d4 from the
+      literal pool of 0x080e76b8, a strncmp pair), so it is a read-only
+      constant/string pool that our decrypted image does not carry
+      populated (ADS compressed-RO-data image, or a decrypt gap). The
+      table is exactly 8 u16 entries - 0x083f18b2 + 0x10 = 0x083f18c2 is
+      the next referenced object. Port this once the region's contents
+      are recovered; do not guess the seeds.
+
+  - address: 0x080ed928
+    ghidra: FUN_080ed928
+    name: registry_entry_by_index
+    size: 44
+    sig: "void *registry_entry_by_index(i32 index)"
+    module: null
+    status: identified
+    vars: {param_1: index}
+    notes: >-
+      Bounds-checked table lookup off a lazily-created singleton. Calls
+      the singleton getter 0x08105ffc (allocates 0xd8 bytes on first use
+      and caches it in a global), then with ctx = result treats ctx+0x90
+      as the element array base and ctx+0x94 as the element count -
+      returns array[index] when index >= 0 and index < count (signed
+      compares, so a negative index or index == count yields 0). 64 bl
+      call sites, binary-scanned. NOT ported - identical twin at
+      0x080f1038 (see that entry) and the singleton getter 0x08105ffc
+      sits in the 0x08100000-0x081fffff range owned by another agent, so
+      the whole cluster wants doing together with a shared dispatch
+      hook. The element type is unknown without the getter's constructor.
+
+  - address: 0x080f1038
+    ghidra: FUN_080f1038
+    name: registry_entry_by_index_alt
+    size: 40
+    sig: "void *registry_entry_by_index_alt(i32 index)"
+    module: null
+    status: identified
+    vars: {param_1: index}
+    notes: >-
+      Byte-for-byte the same logic as 0x080ed928 minus one redundant
+      instruction - same singleton getter 0x08105ffc, same ctx+0x90 array
+      base / ctx+0x94 count, same signed bounds test. A second copy from
+      a different object. 47 bl call sites, binary-scanned (111 across the
+      pair). NOT ported for the same reason as its twin; note that a
+      single Rust body would be folded onto one address by LLVM, so both
+      symbols should be exported from one implementation when this lands.
+
+  - address: 0x080ed7c0
+    ghidra: FUN_080ed7c0
+    name: is_mpeg4_container_extension
+    size: 180
+    sig: "bool is_mpeg4_container_extension(const char *path)"
+    module: null
+    status: identified
+    vars: {param_1: path}
+    notes: >-
+      File-extension test for the MPEG-4 container family. Takes strlen
+      (0x08392478), copies the last 3 bytes of the string to a stack
+      buffer with strncpy (0x080310d4), ASCII-lowercases them in place
+      (the classic sub #0x41 / cmp #25 / add #32 range test), then
+      strncmp (0x0803105c, n = 3) against four literals stored inline in
+      the function's own constant pool at 0x080ed874 - "m4v", "m4p",
+      "mp4", "mov". Returns 1 on any match, 0 otherwise. NOT ported - only
+      1 bl call site (0x0803bf48), and strlen at 0x08392478 sits in the
+      0x08300000-0x083fffff range owned by another agent. Worth picking up
+      once that strlen lands; strncpy and strncmp are already ported.
+      Note the extension is taken as the last 3 characters unconditionally
+      - there is no '.' check, so a 3-character filename with no extension
+      is tested as if it were one.
