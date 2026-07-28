@@ -5667,12 +5667,19 @@ functions:
       enable them in a row (e.g. 0x080feb68). Idempotent - an already
       enabled layer is left completely alone. On a real transition it
       also sets the enable-state-changed byte (+0x43) and the dirty flag
-      (+0x1bc), and for format variant (+0x0b) 3 only, calls the
-      alternate-commit notify 0x081206c4, which is not yet ported and
-      reaches the Rust port through the LAYER_DRIVER_HOOKS dispatch
-      table (default - no-op). The original releases the mutex with a
-      tail branch. Ghidra's C for this function invents a jumptable at
-      0x08037e10 - that is just the mutex_unlock tail branch.
+      (+0x1bc), and for format variant (+0x0b) 3 only, unbinds the
+      layer's surface - layer_swap_surface(layer, NULL) @ 0x081206c4,
+      which is not yet ported and reaches the Rust port through the
+      LAYER_DRIVER_HOOKS dispatch table (default - no-op). The original
+      releases the mutex with a tail branch. Ghidra's C for this
+      function invents a jumptable at 0x08037e10 - that is just the
+      mutex_unlock tail branch.
+      CORRECTION to the first port - 0x081206c4 takes TWO arguments
+      (its second instruction is `mov r4, r1`), and layer_enable leaves
+      the `mov r1, #0` it used for the +0x41 store live across the
+      `bleq`, i.e. it passes a NULL surface. The original hook slot was
+      declared one-argument and silently dropped it; both the slot and
+      the call now carry the surface.
 
   - address: 0x081208bc
     ghidra: FUN_081208bc
@@ -5811,59 +5818,205 @@ functions:
     vars: {param_1: layer}
     notes: >-
       The render pass of the display layer - the consumer of every field
-      the ported setters write. 6 bl call sites. Returns early unless
-      the dirty byte at +0x1bc is set, swaps the active surface
-      (+0x64/+0x50 with a vtable release/retain pair), then either takes
+      the ported setters write. 5 bl call sites (binary-scanned)
+      @ 0x0811fd38, 0x08120674 (layer_force_enable), 0x081206ac
+      (layer_restore_enable), 0x081d8b3c and 0x081d8bb4. Returns early
+      unless the dirty byte at +0x1bc is set, swaps the active surface
+      (+0x64 released through its vtable slot +0x04, +0x50 stored in its
+      place and retained through slot +0x00 - with a kind-1 guard that
+      bails out when +0x34 is set and +0x60 differs), then either takes
       the short path (enable-state-changed +0x43 set while the layer is
-      enabled - driver vtable[+0x3c], clear +0x43, notify 0x081d892c)
-      or rebuilds a 0x50-byte descriptor on the stack from the layer
-      fields and pushes it through driver vtable[+0x14]. It then
-      translates the blend mode byte +0x49 into the driver's code -
-      mode 0 -> vtable[+0x40](drv, layer_id, 1); mode 1 -> code 3 then
-      vtable[+0x44](drv, layer_id, alpha @ +0x48); mode 2 -> code 2;
-      mode 3 -> code 5 then vtable[+0x44](alpha) - which is where the
-      BLEND_MODE_* table in drivers/display_layer comes from. Not
-      ported - it dispatches five driver vtable slots and calls
-      0x0828302c, 0x08120ad4, 0x081203c4 and 0x081d892c, none of them
-      ported, so the body would be almost entirely dispatch-table
-      indirection. Ghidra's C for it is badly mangled (it inlines
-      callees and invents jumptables).
+      enabled - driver vtable[+0x3c], clear +0x43, notify 0x081d892c,
+      and for a kind-5 subtype-0 layer set the byte @ 0x089ca8ac) or
+      builds a 0x50-byte descriptor on the stack (0x0828302c inits it),
+      fills it from the layer fields, refreshes the plane block through
+      0x08120ad4 and layer_query_planes @ 0x081203c4, aliases the plane
+      words by pixel format, copies the descriptor into a second stack
+      block with a class word at +0x58 and pushes it through driver
+      vtable[+0x14]. It then translates the blend mode byte +0x49 into
+      the driver's code - mode 0 -> vtable[+0x40](drv, layer_id, 1);
+      mode 1 -> code 3 then vtable[+0x44](drv, layer_id, alpha @ +0x48);
+      mode 2 -> code 2; mode 3 -> code 5 then vtable[+0x44](alpha) -
+      which is where the BLEND_MODE_* table in drivers/display_layer
+      comes from.
+      NOT PORTED, and the reason is now specific - it loads the layer's
+      stored POINTER fields (notify target +0x00, display driver +0x04,
+      surfaces +0x50/+0x60/+0x64), and drivers/display_layer addresses
+      the object by literal byte offset. On a 64-bit test host word
+      index 1 (the driver) lands on byte 8, exactly where the layer id /
+      kind / pixel-format bytes live (the heap/block_region.rs
+      word-index rule). Porting it faithfully therefore requires
+      converting the whole module to a repr(C) layer struct first, which
+      would churn eleven green ports and their tests; it is left as a
+      deliberate separate step. It reaches the port meanwhile through
+      LAYER_DRIVER_HOOKS.render (default - no-op returning the layer).
+      Ghidra's C for it is badly mangled (it inlines callees and invents
+      jumptables).
 
   - address: 0x0811fc4c
     ghidra: FUN_0811fc4c
     name: layer_reconfigure
     size: 120
-    sig: "u32 layer_reconfigure(u8 *layer, u32 arg)"
+    sig: "u32 layer_reconfigure(u8 *layer, u8 *surface)"
+    module: drivers/display_layer
+    status: ported
+    vars: {param_1: layer, param_2: surface}
+    notes: >-
+      74 call sites (57 bl + 17 tail b, 46 distinct callers, plus the
+      alias thunk @ 0x08120134) - the hottest function of the
+      display-layer cluster. Points a layer at a surface and re-derives
+      everything downstream of it. Under the layer mutex - (1)
+      layer_bind_surface @ 0x0811fe80, a no-op unless the format variant
+      (+0x0b) is 3, in which case the layer's +0x50 surface is released
+      and the argument retained in its place; (2) layer_query_planes
+      @ 0x081203c4 reads the now-current surface's four plane addresses
+      into four stack words; (3) layer_install_planes @ 0x0811feb8
+      writes those same four words into the layer plane block
+      +0x1c8..+0x1d4. Steps 2 and 3 are a pure pass-through - the i-th
+      out-parameter of the query becomes the i-th argument of the
+      install, with no inspection. Returns 0. Callers pass a stored
+      object pointer as the surface (e.g. 0x0810dcb0 - `ldr r1, [r4,
+      #28]`). The three callees dispatch through LAYER_DRIVER_HOOKS.
+
+  - address: 0x0811fe80
+    ghidra: FUN_0811fe80
+    name: layer_bind_surface
+    size: 56
+    sig: "void layer_bind_surface(u8 *layer, u8 *surface)"
+    module: drivers/display_layer
+    status: ported
+    vars: {param_1: layer, param_2: surface}
+    notes: >-
+      1 bl call site (layer_reconfigure). Re-checks the format variant
+      (+0x0b) and returns immediately for anything but 3; otherwise
+      takes the layer mutex and calls layer_swap_surface @ 0x081206c4,
+      releasing the mutex with a tail branch. Deviation kept from the
+      original - the sole caller already holds that mutex, so this
+      re-locks it. The layer mutex is a plain RTXC counting semaphore
+      (kernel/sync_mutex.rs - no recursion counter), so the nesting only
+      survives because these layers' +0x78 cell is never created; the
+      port reproduces the instruction sequence rather than fixing it.
+      #[inline(never)] - a real bl target small enough for LLVM to
+      inline away.
+
+  - address: 0x081206c4
+    ghidra: FUN_081206c4
+    name: layer_swap_surface
+    size: 60
+    sig: "void layer_swap_surface(u8 *layer, u8 *surface)"
     module: drivers/display_layer
     status: identified
-    vars: {param_1: layer, param_2: arg}
+    vars: {param_1: layer, param_2: surface}
     notes: >-
-      74 call sites (57 bl + 17 tail b, 46 distinct callers) - the
-      hottest unported function of the display-layer cluster. Under the
-      layer mutex it runs the format-variant-3 hook 0x0811fe80(layer,
-      arg), reads four words out of the layer through 0x081203c4(layer,
-      &a, &b, &c, &d) and feeds them straight back to
-      0x0811feb8(layer, a, b, c, d); returns 0. All three callees are
-      unported, so nothing but the lock and the plumbing would be real
-      Rust - deferred until 0x081203c4 / 0x0811feb8 are done.
+      2 bl call sites (layer_enable @ 0x08120944 with a NULL surface,
+      layer_bind_surface @ 0x0811fea8 with the caller's). Refcounted
+      swap of the layer's bound surface at +0x50 - releases the old one
+      through its vtable slot +0x04 (skipped when NULL), stores the new
+      pointer, and tail-dispatches its vtable slot +0x00 to retain it
+      (skipped when NULL). Not ported - +0x50 is a pointer field, which
+      the byte-offset addressing of drivers/display_layer cannot hold on
+      a 64-bit host (same blocker as layer_render). Dispatches through
+      LAYER_DRIVER_HOOKS.swap_surface (default - no-op).
+
+  - address: 0x081203c4
+    ghidra: FUN_081203c4
+    name: layer_query_planes
+    size: 224
+    sig: "u8 *layer_query_planes(u8 *layer, u8 **p0, u8 **p1, u8 **p2, u8 **p3)"
+    module: drivers/display_layer
+    status: identified
+    vars: {param_1: layer, param_2: p0, param_3: p1, param_4: p2, param_5: p3}
+    notes: >-
+      2 bl call sites (layer_reconfigure, layer_render). Reads the four
+      plane addresses of the layer's bound surface (+0x50) through the
+      surface plane accessor 0x082978bc(surface, index) and writes them
+      to the four out-pointers, selecting and aliasing by the layer's
+      pixel format (+0x0a) - format 0 - p0=plane 0, p1=plane 2,
+      p2=plane 3; format 1 - p0=p2=plane 0, p1=p3=plane 1; format 2 -
+      p0=plane 4; format 3 - p0=plane 5; anything else leaves the four
+      words alone. An unbound layer (+0x50 NULL) returns without
+      touching them at all - the four zeroing stores happen only on the
+      bound path. Returns the layer. Not ported - reads the +0x50
+      pointer field (same blocker as layer_render). Dispatches through
+      LAYER_DRIVER_HOOKS.query_planes (default - leaves the out-words
+      alone).
+
+  - address: 0x0811feb8
+    ghidra: FUN_0811feb8
+    name: layer_install_planes
+    size: 212
+    sig: "void layer_install_planes(u8 *layer, u8 *p0, u8 *p1, u8 *p2, u8 *p3)"
+    module: drivers/display_layer
+    status: identified
+    vars: {param_1: layer, param_2: p0, param_3: p1, param_4: p2, param_5: p3}
+    notes: >-
+      2 bl call sites (layer_reconfigure, and 0x0811ff8c). Disables the
+      layer first if it is not disabled yet (layer_disable @ 0x081208bc)
+      then flushes the pixel range(s) through 0x08044c48(addr, len) with
+      lengths built from height (+0x20) * buffer width (+0x30) = AREA.
+      Kind (+0x08) 5 with pixel format (+0x0a) 0 and bit 31 clear in p0
+      flushes THREE ranges - p0 for AREA, p1 for AREA/4, p2 for AREA/4,
+      i.e. planar YUV 4:2:0, which is what pins these four words as
+      component plane addresses. Any other kind flushes p0 alone, for
+      AREA*2 (format 2) or AREA*4 (format 3), and not at all for the
+      other formats. Finally stores the four plane words into
+      +0x1c8..+0x1d4 with one `stm` and raises the dirty flag (+0x1bc).
+      Not ported - writes four pointer-typed fields (same blocker as
+      layer_render). Dispatches through LAYER_DRIVER_HOOKS.install_planes
+      (default - no-op).
+
+  - address: 0x08120134
+    ghidra: thunk_FUN_0811fc4c
+    name: layer_reconfigure_thunk
+    size: 4
+    sig: "u32 layer_reconfigure_thunk(u8 *layer, u8 *surface)"
+    module: drivers/display_layer
+    status: identified
+    vars: {param_1: layer, param_2: surface}
+    notes: >-
+      A single `b 0x0811fc4c` - an ADS alias veneer for
+      layer_reconfigure, called once (bl @ 0x080f58e8). Nothing to port;
+      a hook on it should point straight at layer_reconfigure.
 
   - address: 0x08120654
     ghidra: FUN_08120654
-    name: layer_suspend
+    name: layer_force_enable
     size: 56
-    sig: "void layer_suspend(u8 *layer)"
+    sig: "u8 layer_force_enable(u8 *layer)"
     module: drivers/display_layer
-    status: identified
+    status: ported
     vars: {param_1: layer}
     notes: >-
-      Suspend half of the pair that parks a layer's enable state across
-      a mode change. 1 bl call site. If the layer is currently disabled
-      (+0x41) it enables it (layer_enable @ 0x08120908), renders
-      (0x0811f8c8), clears the dirty flag and records the parked state
-      in +0x42. Its mirror layer_resume @ 0x0812068c (56 bytes, 1 call
-      site) returns the old +0x42 and, when set, disables the layer
-      again (layer_disable @ 0x081208bc), renders, clears dirty and
-      clears +0x42. Both are blocked on the render pass 0x0811f8c8.
+      RENAMED from the earlier scouting note's `layer_suspend` - this
+      half *enables*, so "suspend" read backwards. Temporarily makes a
+      hidden layer visible and remembers to put it back. 1 bl call site
+      @ 0x081d8a20, inside a loop that walks all six layers of a display
+      object. An already-enabled layer is left completely untouched
+      (returns 0, the +0x41 byte it just read). A disabled one is
+      enabled (layer_enable @ 0x08120908), rendered at once
+      (layer_render @ 0x0811f8c8, LAYER_DRIVER_HOOKS.render), its dirty
+      flag cleared and the parked flag +0x42 raised for
+      layer_restore_enable. Returns the parked flag on both paths; the
+      sole caller ignores it.
+
+  - address: 0x0812068c
+    ghidra: FUN_0812068c
+    name: layer_restore_enable
+    size: 56
+    sig: "u8 layer_restore_enable(u8 *layer)"
+    module: drivers/display_layer
+    status: ported
+    vars: {param_1: layer}
+    notes: >-
+      RENAMED from the earlier scouting note's `layer_resume`. Mirror of
+      layer_force_enable - if the parked flag +0x42 is set, disables the
+      layer again (layer_disable @ 0x081208bc), renders, clears the
+      dirty flag and clears +0x42. Returns the parked flag as it was on
+      entry; the sole caller @ 0x081d8ac0 ORs the six layers' answers to
+      learn whether the display changed at all (and only then sets the
+      display's +0x98 byte). Asymmetry worth keeping - it reads +0x42
+      and never re-reads +0x41, so a layer someone else enabled in
+      between is still disabled here.
 
   - address: 0x081883fc
     ghidra: FUN_081883fc

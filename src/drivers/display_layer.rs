@@ -57,18 +57,23 @@
 //! +0x3c u32  (opaque)            [config +0x30]
 //! +0x40 u8   configured
 //! +0x41 u8   disabled
-//! +0x42 u8   saved-disabled (the suspend/resume pair @ 0x08120654 /
-//!            0x0812068c parks the disabled flag here)
+//! +0x42 u8   parked-enable (layer_force_enable @ 0x08120654 raises it,
+//!            layer_restore_enable @ 0x0812068c consumes it)
 //! +0x43 u8   enable-state changed since the last render
 //! +0x44 u8   geometry set
 //! +0x46 u8   flag                [config +0x2d]
 //! +0x48 u8   global alpha, 0..255
 //! +0x49 u8   blend mode, 0..3 (see BLEND_MODE_*)
+//! +0x50 ptr  bound surface (retained; swapped by 0x081206c4)
+//! +0x60 ptr  previous surface, compared by the render pass
+//! +0x64 ptr  surface the render pass last handed the driver
 //! +0x78      the layer's mutex (kernel::sync_mutex::Mutex)
 //! +0x1bc u8  dirty — every mutator raises it; the render pass
-//!            @ 0x0811f8c8 tests it and the commit @ 0x08120654 /
-//!            0x0812068c clears it
+//!            @ 0x0811f8c8 tests it and the force/restore pair
+//!            @ 0x08120654 / 0x0812068c clears it
 //! +0x1be/+0x1c0/+0x1c4                        [config +0x34/+0x38/+0x3c]
+//! +0x1c8..+0x1d4  the four surface plane addresses, filled by
+//!            0x081203c4 and installed by 0x0811feb8
 //! ```
 //!
 //! The blend mode at +0x49 is translated by the render pass into the
@@ -89,6 +94,21 @@
 //! 64-bit test host. The one address computed from the object is
 //! `layer + 0x78`, the embedded mutex, which is an *address*, not a
 //! stored pointer.
+//!
+//! That precedent is also why the render pass `FUN_0811f8c8` @
+//! 0x0811f8c8 (892 bytes, 5 call sites) is **not** ported here and stays
+//! behind [`LayerDriverHooks::render`]. It loads the layer's stored
+//! *pointer* fields — the notify target at +0x00, the display driver at
+//! +0x04, and the three surface slots at +0x50/+0x60/+0x64 — and on a
+//! 64-bit host word index 1 (the driver) lands on byte 8, exactly where
+//! the layer id / kind / pixel-format bytes live. Porting it faithfully
+//! therefore means converting this whole module from literal byte
+//! offsets to a `#[repr(C)]` layer struct first (see
+//! `heap/block_region.rs` for the word-index rule); doing that as a
+//! side effect of one 5-call-site function would churn eight green ports
+//! and their tests, so it is left as a deliberate, separate step. The
+//! pass is otherwise fully understood — see the `BLEND_MODE_*` table
+//! above, which was recovered from it.
 
 use crate::kernel::sync_mutex::{mutex_lock, mutex_unlock, Mutex};
 
@@ -130,6 +150,7 @@ const SURFACE_FLAG: usize = 0x34;
 const OPAQUE_WORD: usize = 0x3c;
 const CONFIGURED: usize = 0x40;
 const DISABLED: usize = 0x41;
+const PARKED_ENABLE: usize = 0x42;
 const ENABLE_CHANGED: usize = 0x43;
 const GEOMETRY_SET: usize = 0x44;
 const EXTRA_FLAG: usize = 0x46;
@@ -194,20 +215,84 @@ unsafe fn layer_mutex(layer: *mut u8) -> *mut Mutex {
     layer.add(MUTEX) as *mut Mutex
 }
 
-/// Indirect dispatch for the one genuinely unported callee of this
-/// cluster (the house pattern — see `heap/alloc_core.rs`).
+/// The four surface planes a layer binds: one per component for the
+/// planar pixel formats, aliased down to one or two entries for the
+/// packed ones (`layer_query_planes` @ 0x081203c4 fills them from the
+/// bound surface, `layer_install_planes` @ 0x0811feb8 consumes them).
+pub const PLANE_COUNT: usize = 4;
+
+/// Indirect dispatch for the unported callees of this cluster (the
+/// house pattern — see `heap/alloc_core.rs`).
 #[derive(Clone, Copy)]
 pub struct LayerDriverHooks {
-    /// `FUN_081206c4` @ 0x081206c4: the alternate-commit notify that
-    /// [`layer_enable`] runs when the format variant is 3. Default: no-op.
-    pub alt_commit: unsafe extern "C" fn(layer: *mut u8),
+    /// `FUN_081206c4` @ 0x081206c4 (2 call sites): swaps the layer's
+    /// bound surface (+0x50) — releases the old one through its vtable
+    /// slot +0x04, stores the new pointer, retains it through slot
+    /// +0x00. [`layer_enable`] calls it with NULL, [`layer_bind_surface`]
+    /// with the caller's surface. Default: no-op.
+    pub swap_surface: unsafe extern "C" fn(layer: *mut u8, surface: *mut u8),
+    /// `FUN_081203c4` @ 0x081203c4 (2 call sites): reads the four plane
+    /// addresses of the bound surface (+0x50) out through the surface
+    /// accessor @ 0x082978bc, selecting and aliasing them by the layer's
+    /// pixel format (+0x0a). Returns the layer. Default: leaves the four
+    /// out-words alone, the original's own answer for an unbound layer.
+    pub query_planes: unsafe extern "C" fn(
+        layer: *mut u8,
+        plane0: *mut *mut u8,
+        plane1: *mut *mut u8,
+        plane2: *mut *mut u8,
+        plane3: *mut *mut u8,
+    ) -> *mut u8,
+    /// `FUN_0811feb8` @ 0x0811feb8 (2 call sites): installs four plane
+    /// addresses into the layer's plane block (+0x1c8..+0x1d4), first
+    /// disabling a layer that is not disabled yet and flushing the
+    /// pixel range through 0x08044c48; raises the dirty flag.
+    /// Default: no-op.
+    pub install_planes: unsafe extern "C" fn(
+        layer: *mut u8,
+        plane0: *mut u8,
+        plane1: *mut u8,
+        plane2: *mut u8,
+        plane3: *mut u8,
+    ),
+    /// `FUN_0811f8c8` @ 0x0811f8c8 (5 call sites): the render pass —
+    /// the consumer of every field this module writes. Returns the
+    /// layer. Not ported (see the module header). Default: no-op.
+    pub render: unsafe extern "C" fn(layer: *mut u8) -> *mut u8,
 }
 
-unsafe extern "C" fn alt_commit_stub(_layer: *mut u8) {}
+unsafe extern "C" fn swap_surface_stub(_layer: *mut u8, _surface: *mut u8) {}
 
-/// Wired defaults (a no-op stub until 0x081206c4 is ported).
-pub(crate) const DEFAULT_LAYER_DRIVER_HOOKS: LayerDriverHooks =
-    LayerDriverHooks { alt_commit: alt_commit_stub };
+unsafe extern "C" fn query_planes_stub(
+    layer: *mut u8,
+    _plane0: *mut *mut u8,
+    _plane1: *mut *mut u8,
+    _plane2: *mut *mut u8,
+    _plane3: *mut *mut u8,
+) -> *mut u8 {
+    layer
+}
+
+unsafe extern "C" fn install_planes_stub(
+    _layer: *mut u8,
+    _plane0: *mut u8,
+    _plane1: *mut u8,
+    _plane2: *mut u8,
+    _plane3: *mut u8,
+) {
+}
+
+unsafe extern "C" fn render_stub(layer: *mut u8) -> *mut u8 {
+    layer
+}
+
+/// Wired defaults (no-op stubs until the four originals are ported).
+pub(crate) const DEFAULT_LAYER_DRIVER_HOOKS: LayerDriverHooks = LayerDriverHooks {
+    swap_surface: swap_surface_stub,
+    query_planes: query_planes_stub,
+    install_planes: install_planes_stub,
+    render: render_stub,
+};
 
 /// The active hooks. Host tests swap in recording mocks and restore.
 pub static mut LAYER_DRIVER_HOOKS: LayerDriverHooks = DEFAULT_LAYER_DRIVER_HOOKS;
@@ -360,14 +445,21 @@ pub unsafe extern "C" fn layer_set_geometry(
 /// 50 call sites from 20 distinct callers).
 ///
 /// Clears the disabled flag. Idempotent: an already-enabled layer is
-/// left alone (no dirty flag, no notify). On an actual transition it
-/// records that the enable state changed (+0x43), marks the layer dirty
-/// and — for format variant 3 only — runs the alternate-commit notify
-/// `FUN_081206c4`, which reaches this port through
-/// [`LAYER_DRIVER_HOOKS`].
+/// left alone (no dirty flag, no surface swap). On an actual transition
+/// it records that the enable state changed (+0x43), marks the layer
+/// dirty and — for format variant 3 only — **unbinds the layer's
+/// surface**: `FUN_081206c4(layer, NULL)`, which reaches this port
+/// through [`LAYER_DRIVER_HOOKS`]. The next
+/// [`layer_reconfigure`] rebinds one.
 ///
 /// The whole body runs under the layer's mutex; the original releases it
 /// with a tail branch to `mutex_unlock`.
+///
+/// Correction to the earlier port: the callee takes **two** arguments
+/// (`mov r4, r1` is its second instruction), and the original leaves the
+/// `mov r1, #0` it used for the +0x41 store live across the `bleq` —
+/// i.e. it passes a NULL surface, which the earlier one-argument hook
+/// silently dropped.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn layer_enable(layer: *mut u8) {
     mutex_lock(layer_mutex(layer));
@@ -376,10 +468,132 @@ pub unsafe extern "C" fn layer_enable(layer: *mut u8) {
         set_byte(layer, DISABLED, 0);
         set_byte(layer, DIRTY, 1);
         if byte(layer, FORMAT_VARIANT) == FORMAT_VARIANT_ALT_COMMIT {
-            (driver_hooks().alt_commit)(layer);
+            (driver_hooks().swap_surface)(layer, core::ptr::null_mut());
         }
     }
     mutex_unlock(layer_mutex(layer));
+}
+
+/// layer_bind_surface — original: `FUN_0811fe80` @ 0x0811fe80
+/// (56 bytes; 1 `bl` call site, [`layer_reconfigure`]).
+///
+/// Binds `surface` to a format-variant-3 layer: re-checks the variant
+/// (returning immediately for any other), then swaps the surface in
+/// under the layer's mutex. Every other variant keeps whatever surface
+/// it already had, which is why [`layer_reconfigure`] can call this
+/// unconditionally.
+///
+/// Deviation kept from the original: the caller already holds the same
+/// mutex, so this re-locks it. The layer mutex is a plain RTXC counting
+/// semaphore (kernel/sync_mutex.rs — no recursion counter), so the pair
+/// only survives because these layers' +0x78 cell is never created; the
+/// port reproduces the instruction sequence rather than "fixing" it.
+// A real `bl` target of `layer_reconfigure`: LLVM inlines a body this
+// small and the stock caller would then reach a different copy.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn layer_bind_surface(layer: *mut u8, surface: *mut u8) {
+    if byte(layer, FORMAT_VARIANT) != FORMAT_VARIANT_ALT_COMMIT {
+        return;
+    }
+    mutex_lock(layer_mutex(layer));
+    (driver_hooks().swap_surface)(layer, surface);
+    mutex_unlock(layer_mutex(layer));
+}
+
+/// layer_reconfigure — original: `FUN_0811fc4c` @ 0x0811fc4c (120 bytes;
+/// **74 call sites**, binary-scanned: 57 `bl` + 17 tail `b`, from 46
+/// distinct callers — the hottest function of the display-layer cluster,
+/// plus the alias thunk @ 0x08120134).
+///
+/// Points a layer at a surface and re-derives everything downstream of
+/// it. Under the layer's mutex:
+///
+/// 1. [`layer_bind_surface`] — a no-op unless the format variant is 3,
+///    in which case the layer's +0x50 surface is released and `surface`
+///    retained in its place.
+/// 2. `query_planes` reads the (now current) surface's four plane
+///    addresses, selected and aliased by the layer's pixel format.
+/// 3. `install_planes` writes those same four words into the layer's
+///    plane block at +0x1c8..+0x1d4 and raises the dirty flag.
+///
+/// Steps 2 and 3 are a pure pass-through in the original: each of the
+/// four out-parameters of the query is handed to the matching parameter
+/// of the install, in order, with no inspection.
+///
+/// Returns 0 (`mov r0, #0`), like the original.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn layer_reconfigure(layer: *mut u8, surface: *mut u8) -> u32 {
+    mutex_lock(layer_mutex(layer));
+    layer_bind_surface(layer, surface);
+
+    let mut planes: [*mut u8; PLANE_COUNT] = [core::ptr::null_mut(); PLANE_COUNT];
+    let hooks = driver_hooks();
+    (hooks.query_planes)(
+        layer,
+        &mut planes[0],
+        &mut planes[1],
+        &mut planes[2],
+        &mut planes[3],
+    );
+    (hooks.install_planes)(layer, planes[0], planes[1], planes[2], planes[3]);
+
+    mutex_unlock(layer_mutex(layer));
+    0
+}
+
+/// layer_force_enable — original: `FUN_08120654` @ 0x08120654
+/// (56 bytes; 1 `bl` call site @ 0x081d8a20).
+///
+/// Temporarily makes a hidden layer visible and remembers to put it
+/// back. A layer that is already enabled is left completely untouched.
+/// A disabled one is enabled ([`layer_enable`]), rendered at once so the
+/// change reaches the panel, its dirty flag cleared, and the parked flag
+/// at +0x42 raised for [`layer_restore_enable`].
+///
+/// The single caller walks all six layers of a display object; it
+/// ignores the return value, which is the parked flag on both paths
+/// (0 when nothing was done, 1 when the layer was forced on).
+///
+/// Renamed from the earlier scouting note's `layer_suspend`: this half
+/// *enables*, so "suspend" read backwards.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn layer_force_enable(layer: *mut u8) -> u8 {
+    if byte(layer, DISABLED) == 0 {
+        return 0;
+    }
+    layer_enable(layer);
+    (driver_hooks().render)(layer);
+    set_byte(layer, DIRTY, 0);
+    set_byte(layer, PARKED_ENABLE, 1);
+    1
+}
+
+/// layer_restore_enable — original: `FUN_0812068c` @ 0x0812068c
+/// (56 bytes; 1 `bl` call site @ 0x081d8ac0).
+///
+/// The mirror of [`layer_force_enable`]: if the parked flag at +0x42 is
+/// set, disables the layer again ([`layer_disable`]), renders, clears
+/// the dirty flag and clears the parked flag. Returns the parked flag as
+/// it was on entry — the caller ORs the six layers' answers to learn
+/// whether the display changed at all.
+///
+/// Note the asymmetry with the forcing half: it reads +0x42 and never
+/// re-reads +0x41, so a layer someone else enabled in between is still
+/// disabled here.
+///
+/// Renamed from the earlier scouting note's `layer_resume`.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn layer_restore_enable(layer: *mut u8) -> u8 {
+    let parked = byte(layer, PARKED_ENABLE);
+    if parked == 0 {
+        return parked;
+    }
+    layer_disable(layer);
+    (driver_hooks().render)(layer);
+    set_byte(layer, DIRTY, 0);
+    set_byte(layer, PARKED_ENABLE, 0);
+    parked
 }
 
 /// layer_disable — original: `FUN_081208bc` @ 0x081208bc (52 bytes;
@@ -516,7 +730,7 @@ mod tests {
     extern crate std;
     use super::*;
     use crate::kernel::sync_mutex::{RomKernelOps, ROM_KERNEL};
-    use core::sync::atomic::{AtomicU32, Ordering};
+    use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
     use std::sync::{Mutex as StdMutex, MutexGuard};
 
     /// The layer object is addressed by literal byte offset, so a plain
@@ -771,19 +985,72 @@ mod tests {
 
     /// Serializes the tests that swap [`LAYER_DRIVER_HOOKS`].
     static HOOK_LOCK: StdMutex<()> = StdMutex::new(());
-    static ALT_COMMITS: AtomicU32 = AtomicU32::new(0);
+    static SWAPS: AtomicU32 = AtomicU32::new(0);
+    static LAST_SWAPPED_SURFACE: AtomicUsize = AtomicUsize::new(usize::MAX);
+    static RENDERS: AtomicU32 = AtomicU32::new(0);
+    static QUERIES: AtomicU32 = AtomicU32::new(0);
+    /// The four words the recording `install_planes` last received.
+    static INSTALLED: [AtomicUsize; PLANE_COUNT] =
+        [const { AtomicUsize::new(0) }; PLANE_COUNT];
 
-    unsafe extern "C" fn counting_alt_commit(_layer: *mut u8) {
-        ALT_COMMITS.fetch_add(1, Ordering::SeqCst);
+    unsafe extern "C" fn recording_swap_surface(_layer: *mut u8, surface: *mut u8) {
+        SWAPS.fetch_add(1, Ordering::SeqCst);
+        LAST_SWAPPED_SURFACE.store(surface as usize, Ordering::SeqCst);
     }
 
-    /// Installs the counting notify and hands back the guard; the caller
+    /// Stands in for 0x081203c4: hands back four distinct, recognizable
+    /// plane addresses so the pass-through can be checked slot by slot.
+    unsafe extern "C" fn recording_query_planes(
+        layer: *mut u8,
+        plane0: *mut *mut u8,
+        plane1: *mut *mut u8,
+        plane2: *mut *mut u8,
+        plane3: *mut *mut u8,
+    ) -> *mut u8 {
+        QUERIES.fetch_add(1, Ordering::SeqCst);
+        for (slot, out) in [plane0, plane1, plane2, plane3].into_iter().enumerate() {
+            out.write((0x1000 + slot * 0x100) as *mut u8);
+        }
+        layer
+    }
+
+    unsafe extern "C" fn recording_install_planes(
+        _layer: *mut u8,
+        plane0: *mut u8,
+        plane1: *mut u8,
+        plane2: *mut u8,
+        plane3: *mut u8,
+    ) {
+        for (slot, plane) in [plane0, plane1, plane2, plane3].into_iter().enumerate() {
+            INSTALLED[slot].store(plane as usize, Ordering::SeqCst);
+        }
+    }
+
+    unsafe extern "C" fn recording_render(layer: *mut u8) -> *mut u8 {
+        RENDERS.fetch_add(1, Ordering::SeqCst);
+        layer
+    }
+
+    /// Installs the recording hooks and hands back the guard; the caller
     /// restores with [`restore_hooks`] (the seek_core.rs rule: never
     /// shadow a guard).
-    fn with_counting_alt_commit() -> MutexGuard<'static, ()> {
+    fn with_recording_hooks() -> MutexGuard<'static, ()> {
         let guard = HOOK_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        ALT_COMMITS.store(0, Ordering::SeqCst);
-        unsafe { LAYER_DRIVER_HOOKS = LayerDriverHooks { alt_commit: counting_alt_commit } };
+        SWAPS.store(0, Ordering::SeqCst);
+        LAST_SWAPPED_SURFACE.store(usize::MAX, Ordering::SeqCst);
+        RENDERS.store(0, Ordering::SeqCst);
+        QUERIES.store(0, Ordering::SeqCst);
+        for slot in &INSTALLED {
+            slot.store(0, Ordering::SeqCst);
+        }
+        unsafe {
+            LAYER_DRIVER_HOOKS = LayerDriverHooks {
+                swap_surface: recording_swap_surface,
+                query_planes: recording_query_planes,
+                install_planes: recording_install_planes,
+                render: recording_render,
+            }
+        };
         guard
     }
 
@@ -829,28 +1096,199 @@ mod tests {
     }
 
     #[test]
-    fn the_alternate_commit_notify_runs_only_for_format_variant_three() {
-        let guard = with_counting_alt_commit();
+    fn enabling_unbinds_the_surface_only_for_format_variant_three() {
+        let guard = with_recording_hooks();
 
         let mut plain = unarmed_layer();
         plain.0[DISABLED] = 1;
         plain.0[FORMAT_VARIANT] = 2;
         unsafe { layer_enable(plain.ptr()) };
-        assert_eq!(ALT_COMMITS.load(Ordering::SeqCst), 0);
+        assert_eq!(SWAPS.load(Ordering::SeqCst), 0);
 
         let mut alt = unarmed_layer();
         alt.0[DISABLED] = 1;
         alt.0[FORMAT_VARIANT] = FORMAT_VARIANT_ALT_COMMIT;
         unsafe { layer_enable(alt.ptr()) };
-        assert_eq!(ALT_COMMITS.load(Ordering::SeqCst), 1);
+        assert_eq!(SWAPS.load(Ordering::SeqCst), 1);
+        assert_eq!(LAST_SWAPPED_SURFACE.load(Ordering::SeqCst), 0, "a NULL surface");
 
-        // No transition, no notify.
+        // No transition, no swap.
         unsafe { layer_enable(alt.ptr()) };
-        assert_eq!(ALT_COMMITS.load(Ordering::SeqCst), 1);
+        assert_eq!(SWAPS.load(Ordering::SeqCst), 1);
 
-        // The disable side never notifies.
+        // The disable side never swaps.
         unsafe { layer_disable(alt.ptr()) };
-        assert_eq!(ALT_COMMITS.load(Ordering::SeqCst), 1);
+        assert_eq!(SWAPS.load(Ordering::SeqCst), 1);
+
+        restore_hooks(guard);
+    }
+
+    // ---- bind / reconfigure --------------------------------------------
+
+    #[test]
+    fn binding_a_surface_is_gated_on_format_variant_three() {
+        let guard = with_recording_hooks();
+
+        let mut plain = unarmed_layer();
+        plain.0[FORMAT_VARIANT] = 2;
+        unsafe { layer_bind_surface(plain.ptr(), 0x4000 as *mut u8) };
+        assert_eq!(SWAPS.load(Ordering::SeqCst), 0);
+
+        let mut alt = unarmed_layer();
+        alt.0[FORMAT_VARIANT] = FORMAT_VARIANT_ALT_COMMIT;
+        unsafe { layer_bind_surface(alt.ptr(), 0x4000 as *mut u8) };
+        assert_eq!(SWAPS.load(Ordering::SeqCst), 1);
+        assert_eq!(LAST_SWAPPED_SURFACE.load(Ordering::SeqCst), 0x4000);
+
+        restore_hooks(guard);
+    }
+
+    #[test]
+    fn reconfiguring_pipes_every_queried_plane_straight_into_the_installer() {
+        let guard = with_recording_hooks();
+
+        let mut layer = unarmed_layer();
+        layer.0[FORMAT_VARIANT] = FORMAT_VARIANT_ALT_COMMIT;
+        assert_eq!(unsafe { layer_reconfigure(layer.ptr(), 0x9000 as *mut u8) }, 0);
+
+        assert_eq!(SWAPS.load(Ordering::SeqCst), 1);
+        assert_eq!(LAST_SWAPPED_SURFACE.load(Ordering::SeqCst), 0x9000);
+        assert_eq!(QUERIES.load(Ordering::SeqCst), 1);
+        for (slot, installed) in INSTALLED.iter().enumerate() {
+            assert_eq!(
+                installed.load(Ordering::SeqCst),
+                0x1000 + slot * 0x100,
+                "plane {slot} must reach the installer in its own slot"
+            );
+        }
+
+        restore_hooks(guard);
+    }
+
+    #[test]
+    fn reconfiguring_a_plain_layer_still_queries_and_installs() {
+        // Only the bind is variant-gated; the plane round trip is not.
+        let guard = with_recording_hooks();
+
+        let mut layer = unarmed_layer();
+        layer.0[FORMAT_VARIANT] = 1;
+        unsafe { layer_reconfigure(layer.ptr(), 0x9000 as *mut u8) };
+        assert_eq!(SWAPS.load(Ordering::SeqCst), 0, "no surface swap");
+        assert_eq!(QUERIES.load(Ordering::SeqCst), 1);
+        assert_eq!(INSTALLED[3].load(Ordering::SeqCst), 0x1300);
+
+        restore_hooks(guard);
+    }
+
+    #[test]
+    fn reconfiguring_writes_nothing_into_the_layer_itself() {
+        // Every field the layer gains comes from `install_planes`; the
+        // original's own body only reads +0x0b.
+        let guard = with_recording_hooks();
+
+        let mut layer = unarmed_layer();
+        layer.0 = [0x5a; 0x200];
+        layer.0[FORMAT_VARIANT] = FORMAT_VARIANT_ALT_COMMIT;
+        // The mutex cell must stay NULL or the lock pair reaches the ROM
+        // table; +0x78..+0x80 is left as the poison would have it.
+        layer.0[MUTEX..MUTEX + core::mem::size_of::<usize>()].fill(0);
+        let before = layer.0;
+        unsafe { layer_reconfigure(layer.ptr(), core::ptr::null_mut()) };
+        assert!(layer.0 == before);
+
+        restore_hooks(guard);
+    }
+
+    // ---- force / restore enable ----------------------------------------
+
+    #[test]
+    fn forcing_an_already_enabled_layer_does_nothing_at_all() {
+        let guard = with_recording_hooks();
+
+        let mut layer = unarmed_layer();
+        let before = layer.0;
+        assert_eq!(unsafe { layer_force_enable(layer.ptr()) }, 0);
+        assert!(layer.0 == before);
+        assert_eq!(RENDERS.load(Ordering::SeqCst), 0);
+
+        restore_hooks(guard);
+    }
+
+    #[test]
+    fn forcing_a_hidden_layer_enables_renders_and_parks_it() {
+        let guard = with_recording_hooks();
+
+        let mut layer = unarmed_layer();
+        layer.0[DISABLED] = 1;
+        assert_eq!(unsafe { layer_force_enable(layer.ptr()) }, 1);
+        assert_eq!(layer.byte(DISABLED), 0);
+        assert_eq!(layer.byte(ENABLE_CHANGED), 1);
+        assert_eq!(RENDERS.load(Ordering::SeqCst), 1);
+        assert_eq!(layer.byte(DIRTY), 0, "the render consumed the dirty flag");
+        assert_eq!(layer.byte(PARKED_ENABLE), 1);
+
+        restore_hooks(guard);
+    }
+
+    #[test]
+    fn restoring_an_unparked_layer_does_nothing_at_all() {
+        let guard = with_recording_hooks();
+
+        let mut layer = unarmed_layer();
+        layer.0[DISABLED] = 0;
+        let before = layer.0;
+        assert_eq!(unsafe { layer_restore_enable(layer.ptr()) }, 0);
+        assert!(layer.0 == before);
+        assert_eq!(RENDERS.load(Ordering::SeqCst), 0);
+
+        restore_hooks(guard);
+    }
+
+    #[test]
+    fn force_then_restore_round_trips_a_hidden_layer() {
+        let guard = with_recording_hooks();
+
+        let mut layer = unarmed_layer();
+        layer.0[DISABLED] = 1;
+        unsafe { layer_force_enable(layer.ptr()) };
+        assert_eq!(unsafe { layer_restore_enable(layer.ptr()) }, 1);
+        assert_eq!(layer.byte(DISABLED), 1, "back to hidden");
+        assert_eq!(layer.byte(PARKED_ENABLE), 0);
+        assert_eq!(layer.byte(DIRTY), 0);
+        assert_eq!(RENDERS.load(Ordering::SeqCst), 2);
+
+        // Idempotent: a second restore is a no-op.
+        assert_eq!(unsafe { layer_restore_enable(layer.ptr()) }, 0);
+        assert_eq!(RENDERS.load(Ordering::SeqCst), 2);
+
+        restore_hooks(guard);
+    }
+
+    #[test]
+    fn restore_keys_off_the_parked_flag_alone_not_the_enable_state() {
+        // Someone else enabling the layer in between does not stop the
+        // restore from disabling it again.
+        let guard = with_recording_hooks();
+
+        let mut layer = unarmed_layer();
+        layer.0[PARKED_ENABLE] = 1;
+        layer.0[DISABLED] = 0;
+        assert_eq!(unsafe { layer_restore_enable(layer.ptr()) }, 1);
+        assert_eq!(layer.byte(DISABLED), 1);
+
+        restore_hooks(guard);
+    }
+
+    #[test]
+    fn forcing_an_alt_commit_layer_unbinds_its_surface_through_enable() {
+        let guard = with_recording_hooks();
+
+        let mut layer = unarmed_layer();
+        layer.0[DISABLED] = 1;
+        layer.0[FORMAT_VARIANT] = FORMAT_VARIANT_ALT_COMMIT;
+        unsafe { layer_force_enable(layer.ptr()) };
+        assert_eq!(SWAPS.load(Ordering::SeqCst), 1);
+        assert_eq!(LAST_SWAPPED_SURFACE.load(Ordering::SeqCst), 0);
 
         restore_hooks(guard);
     }
