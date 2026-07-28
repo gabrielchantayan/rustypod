@@ -27,11 +27,11 @@
 //! The C-string tags (1, 2) compare via a normalized three-way strcmp @
 //! 0x08391e38/0x08391e44 returning exactly -1/0/+1; a NULL pointer on the
 //! left returns -1 (even when both are NULL), a NULL on the right returns
-//! +1. That strcmp is not yet a committed crate module, so it is
-//! replicated here as the private `strcmp3` helper (simplification: same
-//! algorithm, inlined rather than a tail call).
+//! +1. That strcmp is now its own module (crate::libc::strcmp), so the
+//! C-string tags call it directly.
 
 use crate::libc::memcmp::memcmp;
+use crate::libc::strcmp::strcmp;
 
 /// Embedded digit table, byte-identical to the original @ 0x080e7a10.
 static DIGITS: [u8; 36] = *b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -172,29 +172,7 @@ unsafe fn compare_cstrs(a: *const u8, b: *const u8) -> i32 {
     if b.is_null() {
         return 1;
     }
-    strcmp3(a, b)
-}
-
-/// Normalized three-way strcmp — original @ 0x08391e38 (thunk) /
-/// 0x08391e44. Unsigned byte compare returning exactly -1, 0, or +1.
-unsafe fn strcmp3(a: *const u8, b: *const u8) -> i32 {
-    let mut a = a;
-    let mut b = b;
-    loop {
-        let ca = *a;
-        let cb = *b;
-        if ca != cb || ca == 0 || cb == 0 {
-            if ca > cb {
-                return 1;
-            }
-            if ca == cb {
-                return 0;
-            }
-            return -1;
-        }
-        a = a.add(1);
-        b = b.add(1);
-    }
+    strcmp(a, b)
 }
 
 #[cfg(test)]
@@ -426,18 +404,6 @@ mod tests {
         let a = variant(4, &pa);
         let b = variant(4, &pb);
         assert_eq!(unsafe { variant_compare(&a, &b) }, 0);
-    }
-
-    #[test]
-    fn strcmp3_normalized() {
-        unsafe {
-            assert_eq!(strcmp3(b"abc\0".as_ptr(), b"abc\0".as_ptr()), 0);
-            assert_eq!(strcmp3(b"abc\0".as_ptr(), b"abd\0".as_ptr()), -1);
-            assert_eq!(strcmp3(b"abd\0".as_ptr(), b"abc\0".as_ptr()), 1);
-            // Prefix sorts before the longer string; bytes compare unsigned.
-            assert_eq!(strcmp3(b"ab\0".as_ptr(), b"abc\0".as_ptr()), -1);
-            assert_eq!(strcmp3(b"\xff\0".as_ptr(), b"\x01\0".as_ptr()), 1);
-        }
     }
 
     #[test]

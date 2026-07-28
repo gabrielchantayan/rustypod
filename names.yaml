@@ -4819,3 +4819,85 @@ functions:
       There is no occupied flag, so a key of 0 matches the first zeroed
       slot - preserved. Codegen deviation - LLVM fully unrolls the
       constant 6-iteration loop (29 instructions vs the original's 13).
+
+  # --- Region survey: 0x08300000-0x083fffff (agent hi6) ---
+  # 3481 Ghidra functions, ~3439 unclaimed at survey time. Sub-blocks:
+  #   0x08300000-0x0835ffff  sparse (~200 fns) - misc app/service code.
+  #   0x08360000-0x0838ffff  (~650 fns) media/database service layer:
+  #     record containers with 20-byte elements (0x08386840 family),
+  #     NULL-guarded field accessors, RTXC mutex-guarded refcount setters.
+  #     0x0836b5b0 is an S5L8702 GPIO helper (MMIO 0x3cf00000).
+  #   0x08390000-0x083bffff  (~1130 fns) C/C++ runtime + string cluster:
+  #     plain byte-loop strcmp 0x08391e44 / strlen 0x08392478, a
+  #     table-driven string hash 0x08391dec, tagged free veneers
+  #     (0x08391d24 = free tag 0x39), array delete with byte accounting
+  #     (0x083906f4).
+  #   0x083c0000-0x083dffff  (~1000 fns) C++ standard library: a COW
+  #     (libstdc++-style) basic_string with a 12-byte _Rep header
+  #     {refcount, capacity, length} living 12 bytes below the char data,
+  #     _S_empty_rep_storage in RAM at 0x08b31804 (data 0x08b31810);
+  #     plus a deque/vector family (the 16-byte deque iterator copy
+  #     @ 0x083dd9e4 already ported) and ~60 byte-identical 16-byte
+  #     handle-deref accessors at 0x083d604c..0x083d62xx.
+  #   0x083e0000-0x083edfff  ARM ADS fplib (already largely ported).
+  #   0x083f0000-0x083fffff  (~100 fns) plus 256-byte permutation tables
+  #     at 0x083ffd5c/0x083ffe5c.
+  # Shared 256-byte byte-map at runtime address 0x088faa8b: indexed by
+  # `ldrb [tbl, c]` from 9 sites (string hash 0x08391dec, the collating
+  # compares 0x08384f14/0x08384fa8, 0x0838d874, 0x082cd880, 0x082d77ec,
+  # 0x082dfdbc, 0x0836e600, 0x0836e9cc). The decrypted image holds a
+  # 12-byte-record resource index at that vaddr, so the page is
+  # re-initialized at runtime (same situation as the pool alignment table
+  # @ 0x089cb1bc documented in heap/pool.rs) - those functions cannot be
+  # ported until the table's runtime contents are recovered.
+
+  - address: 0x08391e44
+    ghidra: FUN_08391e44
+    name: strcmp
+    size: 68
+    sig: "int strcmp(const char *a, const char *b)"
+    module: libc/strcmp
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      Normalized three-way string compare returning exactly -1/0/+1, not
+      the byte delta. Plain byte loop (ldrb, unsigned), continue test is
+      the ADS two-flag idiom `cmp a,#0; cmpne b,#0` (the second test is
+      redundant because the loop only continues when a == b, and the port
+      drops it). Reached exclusively through the 4-byte entry veneer
+      thunk_FUN_08391e44 @ 0x08391e38 (`b 0x08391e44`) - 756 bl call
+      sites target 0x08391e38 and none target 0x08391e44, making it the
+      most-called function in 0x08300000-0x083fffff. Not the ARM ADS
+      strcmp (absent from osos); it belongs to the byte-loop string
+      cluster 0x08391dec..0x083924a0. util/utoa's variant_compare
+      previously replicated it as a private `strcmp3` helper - that copy
+      is now deleted and the module calls this port directly. Hook both
+      0x08391e38 and 0x08391e44 to the one symbol.
+
+  - address: 0x08391e38
+    ghidra: thunk_FUN_08391e44
+    name: strcmp_veneer
+    size: 4
+    module: libc/strcmp
+    status: identified
+    notes: >-
+      `b 0x08391e44` - the address every one of strcmp's 756 callers
+      actually branches to. No separate port; hook it to `strcmp`.
+
+  - address: 0x08392478
+    ghidra: FUN_08392478
+    name: strlen
+    size: 32
+    sig: "size_t strlen(const char *s)"
+    module: libc/strlen
+    status: ported
+    vars: {param_1: s}
+    notes: >-
+      Unguarded strlen - byte loop, no NULL check, no word-at-a-time
+      trick, counter kept in r1 separately from the pointer walk. 419 bl
+      call sites. Distinct from the NULL-guarded strlen_safe @ 0x082770bc
+      (and its second link-time copy); the two `strlen_raw` helpers
+      already inlined in stdio/semihost.rs and kernel/task.rs are callers
+      of THIS function, so they can be redirected here later.
+      Port uses read_volatile so LLVM's loop-idiom pass cannot rewrite
+      the loop into a call to `strlen` - i.e. into itself.
