@@ -2,6 +2,7 @@
 pub mod ata_cmd;
 pub mod clock;
 pub mod clock_config;
+pub mod display_layer;
 pub mod gpio;
 pub mod gpioic;
 pub mod i2c;
