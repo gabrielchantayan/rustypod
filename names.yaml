@@ -6144,28 +6144,38 @@ functions:
 
   - address: 0x08105a34
     ghidra: FUN_08105a34
-    name: resource_id_for_kind
+    name: image_format_for_kind
     size: 196
-    sig: "u32 resource_id_for_kind(u32 kind)"
-    module: app
-    status: identified
+    sig: "u32 image_format_for_kind(u32 kind)"
+    module: app/image_format
+    status: ported
     vars: {param_1: kind}
     notes: >-
-      10 call sites (8 bl + 2 tail b, 9 distinct callers). A dense ARM
-      `addls pc, pc, r0, lsl #2` jump table over kind 0..17 that
-      returns a constant id per kind, or 0xffffffff for kinds 9, 0xb,
-      0xd and anything above 17. The values, read out of the literal
-      pool at 0x08105af8 - kind 0,1 -> 0x42a; 2 -> 0x3fd; 3 -> 0x400
-      (an immediate, `mov r0, #1024`, not a pool word - Ghidra shows it
-      as a literal while rendering the rest as DAT_ globals); 4 ->
-      0x428; 5,6 -> 0x42b; 7 -> 0x429; 8 -> 0x425; 10 -> 0x424; 12 ->
-      0x40b; 14 -> 0x41c; 15 -> 0x41f; 16 -> 0x405; 17 -> 0x41e. The
-      wrappers 0x08105b28 (kind 4 fast path) and 0x08105b38 (argument
-      swap) sit right after it and callers feed the result to
-      0x08105b58. Not ported - the id space 0x3fd..0x42b is not
-      identified, so any name for the table would be a guess; the
-      mechanical port is trivial once a caller pins down what the ids
-      index.
+      7 call sites (6 bl + 1 tail b, binary-scanned; the earlier note
+      said 8 + 2). A dense ARM `addls pc, pc, r0, lsl #2` jump table
+      over kind 0..17 - UNSIGNED bound, so everything above 17 takes the
+      default - returning a constant id per kind or 0xffffffff for kinds
+      9, 0xb, 0xd and out of range. Values from the literal pool at
+      0x08105af8 - kind 0,1 -> 0x42a; 2 -> 0x3fd; 3 -> 0x400 (the
+      immediate `mov r0, #1024`, not a pool word); 4 -> 0x428; 5,6 ->
+      0x42b; 7 -> 0x429; 8 -> 0x425; 10 -> 0x424; 12 -> 0x40b; 14 ->
+      0x41c; 15 -> 0x41f; 16 -> 0x405; 17 -> 0x41e. THE ID SPACE IS NOW
+      IDENTIFIED - the result feeds 0x08105b58, which subtracts 0x3f1
+      and switches on a 61-entry table (`cmp r6, #0x3c`, so ids
+      0x3f1..0x42d), builds a 32-byte descriptor on its stack from image
+      geometry (352, 320, 270, 220, 180, 176, 128, 100, 90, 84, 56, 41,
+      37 stored to +0x00 and +0x04, often the SAME value to both; a
+      fixed 16 at +0x18 = bit depth, i.e. RGB565; a halfword at +0x1c)
+      and memcpys it to the caller; 0x08079d38 then returns
+      `desc[0] * desc[8]`, a byte size. So these are image/artwork
+      FORMAT ids and this table says which format each kind of artwork
+      uses. The reading is an inference from the constants - nothing in
+      the image names the kinds or the formats. Neighbours left unported
+      - 0x08105b28 overrides kind 4 to 0x400 and tail-branches here,
+      0x08105b38 is an argument swap, 0x08105b58 is the descriptor
+      table itself. Deviation - LLVM emits a data table plus one indexed
+      load where the original emits a jump table; behaviourally
+      identical.
 
   - address: 0x0814d51c
     ghidra: FUN_0814d51c
