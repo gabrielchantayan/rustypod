@@ -3899,3 +3899,19 @@ functions:
       the u16 fields write_unaligned (original strh needs 2-byte
       alignment; identical for every pointer it supported). 8 call
       sites, binary-scanned, callers @ 0x0827a2f4..0x0827b09c.
+
+  - address: 0x081c8a84
+    ghidra: FUN_081c8a84
+    name: list_find_by_id16
+    size: 56
+    sig: "IdNode *list_find_by_id16(IdNode *head, u32 key)"
+    module: util/list_find
+    status: ported
+    vars: {param_1: head, param_2: key}
+    notes: >-
+      Singly-linked-list search by u16 id (node +0 next, +4 id, ldrh).
+      Miss fallback - key 0 or 0xffffffff returns head ("any/default";
+      -1 can never match a 16-bit id), other keys return NULL. 7 call
+      sites, binary-scanned, all in the MPEG-4 container parser cluster
+      @ 0x081c38e0..0x081c8a38 (owns the moov/trak/mdhd atom literals),
+      which looks up track nodes by id.
