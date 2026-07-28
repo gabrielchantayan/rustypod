@@ -3834,3 +3834,16 @@ functions:
     status: ported
     vars: {param_1: rec, param_2: offset}
     notes: Big-endian 32-bit field read. 4 call sites, binary-scanned.
+
+  - address: 0x081f3b30
+    ghidra: FUN_081f3b30
+    name: load_be32
+    size: 36
+    sig: "u32 load_be32(const u8 *p)"
+    module: util/beload
+    status: ported
+    vars: {param_1: p}
+    notes: >-
+      Alignment-free big-endian 32-bit load (4 ldrb + orr). Raw-pointer
+      twin of berec_read_u32. 4 call sites, binary-scanned, all in the
+      format-header parser cluster @ 0x081f3b54..0x081f3c80.
