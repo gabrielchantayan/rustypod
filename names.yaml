@@ -5487,43 +5487,108 @@ functions:
       the next referenced object. Port this once the region's contents
       are recovered; do not guess the seeds.
 
-  - address: 0x080ed928
-    ghidra: FUN_080ed928
-    name: registry_entry_by_index
-    size: 44
-    sig: "void *registry_entry_by_index(i32 index)"
-    module: null
-    status: identified
-    vars: {param_1: index}
+  # --- Batch: the nine-array element table (app/element_table) ---
+  # FUN_08105ffc lazily builds one 0xd8-byte object holding nine 0x18-byte
+  # container sub-objects (9 * 0x18 = 0xd8), each constructed with
+  # (0, 10, 2) by a DIFFERENT constructor - nine instantiations of one
+  # template, so nine distinct element types. Nine accessors read them,
+  # one per array: 0x080f1038 (+0x00), 0x080f0fb4 (+0x18), 0x080f108c
+  # (+0x30), 0x080f1060 (+0x48), 0x080f100c (+0x60), 0x080ed8fc (+0x78),
+  # 0x080ed928 (+0x90), 0x080ed8d0 (+0xa8), 0x080f0fe0 (+0xc0).
+  # The element types are NOT identified - the only names near the nine
+  # constructors are runtime-data pointers, not strings. Note this table
+  # has nothing to do with the by-id class registry; the earlier names
+  # (registry_entry_by_index / _alt) were wrong and have been replaced.
+
+  - address: 0x08105ffc
+    ghidra: FUN_08105ffc
+    name: element_table
+    size: 224
+    sig: "void *element_table(void)"
+    module: app/element_table
+    status: ported
     notes: >-
-      Bounds-checked table lookup off a lazily-created singleton. Calls
-      the singleton getter 0x08105ffc (allocates 0xd8 bytes on first use
-      and caches it in a global), then with ctx = result treats ctx+0x90
-      as the element array base and ctx+0x94 as the element count -
-      returns array[index] when index >= 0 and index < count (signed
-      compares, so a negative index or index == count yields 0). 64 bl
-      call sites, binary-scanned. NOT ported - identical twin at
-      0x080f1038 (see that entry) and the singleton getter 0x08105ffc
-      sits in the 0x08100000-0x081fffff range owned by another agent, so
-      the whole cluster wants doing together with a shared dispatch
-      hook. The element type is unknown without the getter's constructor.
+      38 bl call sites. `if (cache == 0) { r0 = operator_new(0xd8); r0 =
+      ctor0(r0, 0, 10, 2); r0 = ctor1(r0 + 0x18, ...); ... r0 = ctor8(r0
+      + 0x18, ...); cache = r0 - 0xc0; } return cache;` - the cursor is
+      chained through each constructor's RETURN, and the final base is
+      the ninth return minus 0xc0, not the allocated block. The nine
+      constructors in call order - 0x083d3e8c, 0x083d4354, 0x083d40f0,
+      0x083d3c28, 0x083d56b8, 0x083d51dc, 0x083d4cf4, 0x083d4a94,
+      0x083d45b4; each lays its sub-object out as {+0x00 data buffer of
+      slots*4 zeroed bytes, +0x04 slots (=10), +0x08 0, +0x0c the first
+      argument (=0), +0x10 growth (=2), +0x14 a second allocation}.
+      Deviations - the cache is the crate static ELEMENT_TABLE, not the
+      word @ 0x089ca3bc; the nine constructors sit behind the
+      ELEMENT_ARRAY_CTORS dispatch table with zeroing-stub defaults
+      (which leave slots = 0, so every accessor returns NULL), so this is
+      NOT HOOK-READY; LLVM rolls the nine dispatch-table calls into a
+      loop where the original is unrolled (behaviourally identical).
 
   - address: 0x080f1038
     ghidra: FUN_080f1038
-    name: registry_entry_by_index_alt
+    name: element_array0_at
     size: 40
-    sig: "void *registry_entry_by_index_alt(i32 index)"
-    module: null
-    status: identified
+    sig: "void *element_array0_at(i32 index)"
+    module: app/element_table
+    status: ported
     vars: {param_1: index}
     notes: >-
-      Byte-for-byte the same logic as 0x080ed928 minus one redundant
-      instruction - same singleton getter 0x08105ffc, same ctx+0x90 array
-      base / ctx+0x94 count, same signed bounds test. A second copy from
-      a different object. 47 bl call sites, binary-scanned (111 across the
-      pair). NOT ported for the same reason as its twin; note that a
-      single Rust body would be folded onto one address by LLVM, so both
-      symbols should be exported from one implementation when this lands.
+      47 bl call sites, binary-scanned. Calls element_table(), then
+      returns array0.data[index] when index >= 0 and array0.slots >
+      index, else NULL. Both compares are SIGNED (`cmp r4,#0` +
+      `ldrge/cmpge` + `movle`/`ldrgt`), so a negative index and index ==
+      slots both yield NULL, and a slot count read back with the sign
+      bit set rejects every index. The getter runs BEFORE the bounds
+      test, so even an out-of-range index builds the table.
+
+  - address: 0x080ed928
+    ghidra: FUN_080ed928
+    name: element_array6_at
+    size: 44
+    sig: "void *element_array6_at(i32 index)"
+    module: app/element_table
+    status: ported
+    vars: {param_1: index}
+    notes: >-
+      64 bl call sites, binary-scanned (111 across the pair with
+      0x080f1038). Identical to element_array0_at but reads the array at
+      +0x90; the original is the same body plus one redundant `add r0,
+      r0, #0x90`. Both are exported from one shared Rust body, which is
+      why they are separate #[inline(never)] wrappers.
+
+  - address: 0x080f0fb4
+    ghidra: FUN_080f0fb4
+    name: element_array1_at
+    size: 44
+    sig: "void *element_array1_at(i32 index)"
+    module: app/element_table
+    status: identified
+    notes: >-
+      One of the seven remaining per-array accessors off the same table
+      - same body as element_array0_at with a different array offset.
+      The set - 0x080f0fb4 (+0x18), 0x080f108c (+0x30), 0x080f1060
+      (+0x48), 0x080f100c (+0x60), 0x080ed8fc (+0x78), 0x080ed8d0
+      (+0xa8), 0x080f0fe0 (+0xc0). Not ported only because they were
+      outside the named set; each is one line against
+      app/element_table's shared body.
+
+  - address: 0x0810e64c
+    ghidra: FUN_0810e64c
+    name: class_registry_construct
+    size: null
+    sig: "void *class_registry_construct(Registry *registry)"
+    module: null
+    status: identified
+    notes: >-
+      The constructor of the global class registry @ 0x08a79ca4, called
+      from the static-init chain @ 0x082afb6c. Calls 0x08135308(this, 8,
+      4) (the container base ctor, capacity 8 / growth 4), then lazily
+      builds a second 8-byte singleton (operator_new(8) + ctor
+      0x082028a4, cached in a global) and dispatches its vtable[+0x18].
+      NOT ported - it is the missing piece that makes
+      app/registry.rs's registry_lookup_by_id hook-ready, and it pulls
+      in the whole unported container class.
 
   - address: 0x080ed7c0
     ghidra: FUN_080ed7c0
