@@ -4,6 +4,7 @@
 //! functions keep FreeType's public names in the crate's snake_case.
 pub mod calc;
 pub mod outline;
+pub mod stream;
 pub mod trace;
 pub mod trig;
 pub mod types;

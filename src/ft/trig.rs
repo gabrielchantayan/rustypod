@@ -33,10 +33,13 @@ const FT_TRIG_SAFE_MSB: i32 = 27;
 /// # Deviations
 ///
 /// The original loads the table through a pointer held in RW data at
-/// 0x089011fc (literal `DAT_080ccec0` @ 0x080ccec0); its ROM image sits
-/// at 0x0890c0dc in osos.dec — the RW image is offset +0xaee0 from the
-/// runtime address, verified by resolving the neighboring `ftstream.c`
-/// `__FILE__` pointer the same way. The 24 words there are byte-for-byte
+/// 0x089011fc (literal `DAT_080ccec0` @ 0x080ccec0). That address holds
+/// unrelated bytes in osos.dec — the RW *image* lives at a different
+/// file offset than its runtime address — but the table's ROM image is
+/// at 0x0890c0dc (runtime + 0xaee0), and the neighboring FreeType
+/// `__FILE__` pointer 0x089012e8 resolves into the very same relocated
+/// block (+0xaed7, at the `...\freetype\src\base\ftstream.c` string), so
+/// the identification is solid. The 24 words there are byte-for-byte
 /// upstream's `ft_trig_arctan_table`, so the port embeds them as `const`
 /// data instead of chasing the pointer.
 static FT_TRIG_ARCTAN_TABLE: [i32; 24] = [

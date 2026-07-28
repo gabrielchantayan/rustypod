@@ -4220,8 +4220,11 @@ functions:
       says y>=0 adds and y<0 subtracts, while the rotation direction
       also splits at y>=0. Table: 24 entries at runtime 0x089011fc via
       literal DAT_080ccec0, ROM image @ 0x0890c0dc (RW image = runtime +
-      0xaee0, confirmed by resolving the ftstream.c __FILE__ pointer the
-      same way); contents are byte-identical to upstream
+      0xaee0; the RW image is at a different file offset than its
+      runtime address, and the neighbouring FreeType __FILE__ pointer
+      0x089012e8 lands in the same relocated block at +0xaed7, on the
+      freetype/src/base/ftstream.c path string); contents are
+      byte-identical to upstream
       ft_trig_arctan_table (4157273, 2949120, 1740967, ...) so the port
       embeds them as const. The earlier note's "22-entry table @
       0x082ad54c" was a partial/aliased match. 1 call site (ft_atan2),
@@ -4263,57 +4266,119 @@ functions:
       va_list; every call site in the image passes at most two (the
       widest FreeType format is "... pos = 0x%lx, size = 0x%lx").
 
+  - address: 0x0804e154
+    ghidra: FUN_0804e154
+    name: ft_panic
+    size: 40
+    sig: "void ft_panic(const char *format, u32 arg1, u32 arg2, u32 arg3) -> !"
+    module: ft/trace
+    status: ported
+    vars: {param_1: format}
+    notes: >-
+      FreeType FT_Panic (ftdebug.c), the FT_ASSERT failure path - same
+      varargs forwarder shape as ft_error_trace but with its own logger
+      context 0x08b1e9dc (literal @ 0x0804e178) and, instead of
+      returning, exit(1) via the ported exit @ 0x08030f2c. Callers pass
+      "assertion failed on line %d of file %s" plus __LINE__/__FILE__;
+      the code after each call site is unreachable, which is why the
+      stream readers dereference the stream they just asserted on.
+      Ghidra's decompilation of this address is garbage (it runs on
+      into the next function). 28 bl + 2 b call sites, binary-scanned.
+      Port shares ft_error_trace's sink (deviation) and tail-calls the
+      ported exit.
+
   - address: 0x0804fce8
     ghidra: FUN_0804fce8
     name: ft_stream_seek
     size: 104
     sig: "i32 ft_stream_seek(FtStream *stream, u32 pos)"
-    status: identified
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream, param_2: pos, uVar2: size}
     notes: >-
-      FreeType FT_Stream_Seek - stores pos at stream+8; memory streams
-      (null read fn @ +0x14) just bound-check pos <= size (+4),
-      disk streams call the read fn (stream, pos, 0, 0). Failure
-      traces "FT_Stream_Seek: invalid i/o" (0x0804fd50) and returns
-      0x55 (FT_Err_Invalid_Stream_Operation). Struct-and-callback
-      shaped, so left for a stream-focused pass.
+      FreeType FT_Stream_Seek (ftstream.c) - stores pos at stream+8
+      unconditionally, then validates: memory streams (null read fn @
+      +0x14) require pos <= size (+4), so seeking to the first position
+      past the last byte is legal; disk streams call read(stream, pos,
+      NULL, 0) and fail on a non-zero return, with no size check at
+      all. Failure traces "FT_Stream_Seek: invalid i/o; pos = 0x%lx,
+      size = 0x%lx" (0x0804fd50) via ft_error_trace and returns 0x55
+      (FT_Err_Invalid_Stream_Operation); pos keeps the rejected value
+      either way. This build merged upstream's two FT_ERROR calls into
+      one. 65 bl + 2 b call sites, binary-scanned (one b is
+      ft_stream_skip). FtStream layout base/size/pos @ +0/+4/+8, read @
+      +0x14 (ft/stream).
 
   - address: 0x0804fd88
     ghidra: FUN_0804fd88
     name: ft_stream_skip
     size: 12
-    sig: "i32 ft_stream_skip(FtStream *stream, i32 count)"
-    status: identified
+    sig: "i32 ft_stream_skip(FtStream *stream, i32 distance)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream, param_2: distance}
     notes: >-
-      FreeType FT_Stream_Skip - loads pos (stream+8), adds count,
-      tail-branches ft_stream_seek @ 0x0804fce8. Trivial once
-      ft_stream_seek is ported.
+      FreeType FT_Stream_Skip (ftstream.c) - three instructions: load
+      pos (stream+8), add distance, tail-branch ft_stream_seek @
+      0x0804fce8. This pre-2.4 version has no distance<0 rejection, so
+      a negative distance seeks backwards and an underflow past 0
+      becomes a huge u32 that the seek's bounds check then rejects
+      (tested). 12 call sites, binary-scanned. LLVM inlines the seek
+      into the port instead of tail-branching - same behavior.
 
   - address: 0x0804f7cc
     ghidra: FUN_0804f7cc
-    name: ft_stream_read_ulong
+    name: ft_stream_read_long
     size: 204
-    sig: "u32 ft_stream_read_ulong(FtStream *stream, i32 *error)"
-    status: identified
+    sig: "i32 ft_stream_read_long(FtStream *stream, i32 *error)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream, param_2: error, pbVar2: p, uVar5: result, iVar4: pos}
     notes: >-
-      FreeType FT_Stream_ReadULong (traces as "FT_Stream_ReadLong") -
-      big-endian 4-byte read at pos with bounds check pos+3 < size,
-      via the frame buffer (+0) for memory streams or the read
-      callback for disk streams; advances pos by 4; error 0x55 on
-      overrun. Carries the FT_ASSERT(stream) path of this debug build.
+      FreeType FT_Stream_ReadLong (ftstream.c) - RENAMED from the
+      earlier ft_stream_read_ulong guess - the trace string inside the
+      function reads "FT_Stream_ReadLong: invalid i/o; pos = 0x%lx,
+      size = 0x%lx" (0x0804f8c4), and the four byte loads are plain
+      ldrb, so the assembled 32-bit pattern is identical either way
+      (FT_NEXT_LONG == FT_NEXT_ULONG at 32 bits). Clears *error, bounds
+      check pos+3 < size (unsigned, WRAPPING add - pos near 0xffffffff
+      wraps and passes, quirk pinned by a test), then base+pos for
+      memory streams or read(stream,pos,buf,4) requiring exactly 4 for
+      disk streams; big-endian assembly p[0]<<24|p[1]<<16|p[2]<<8|p[3]
+      (skipped, but pos still advanced, when the frame pointer is
+      NULL); pos += 4 re-read from the struct. Failure emits ONE trace
+      call and only then sets *error = 0x55 (the reverse of
+      ft_stream_read_short's order). Live FT_ASSERT(stream): a null
+      stream calls ft_panic (0x0804e154) with line 616 and the
+      ftstream.c __FILE__ pointer 0x089012e8, and never returns.
+      13 call sites, binary-scanned.
 
   - address: 0x0804fb88
     ghidra: FUN_0804fb88
-    name: ft_stream_read_ushort
+    name: ft_stream_read_short
     size: 188
-    sig: "u16 ft_stream_read_ushort(FtStream *stream, i32 *error)"
-    status: identified
+    sig: "i32 ft_stream_read_short(FtStream *stream, i32 *error)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream, param_2: error, puVar3: p, iVar5: result, iVar4: pos}
     notes: >-
-      FreeType FT_Stream_ReadUShort (traces as "FT_Stream_ReadShort") -
-      big-endian 2-byte sibling of ft_stream_read_ulong @ 0x0804f7cc
-      (bounds check pos+1 < size, advance by 2, error 0x55, same
-      FT_ASSERT path). The ReadChar/ReadOffset/ReadLongLE variants sit
-      nearby (their trace strings live at 0x0804f594/0x0804fb44/
-      0x0804fa04).
+      FreeType FT_Stream_ReadShort (ftstream.c) - RENAMED from the
+      earlier ft_stream_read_ushort guess - the high byte is loaded
+      with LDRSB (0x0804fc00), so the result is SIGN-EXTENDED
+      (p[1] | (i8)p[0] << 8) and this is the signed FT_Short reader,
+      matching its own trace tag "FT_Stream_ReadShort:" (0x0804fc74).
+      Port returns the sign-extended word the original leaves in r0.
+      Otherwise the 2-byte twin of ft_stream_read_long @ 0x0804f7cc:
+      bounds check pos+1 < size with the same wrapping add, memory
+      frame or read(...,2), pos += 2, and on failure *error = 0x55
+      FIRST, then TWO trace calls (tag @ 0x0804fc74, then " invalid
+      i/o; pos = 0x%lx, size = 0x%lx" @ 0x0804fc8c - upstream's two
+      FT_ERRORs both survived here). Live FT_ASSERT(stream): null
+      stream calls ft_panic (0x0804e154) with line 475 and the
+      ftstream.c __FILE__ pointer, and never returns. 17 call sites,
+      binary-scanned. The ReadChar/ReadOffset/ReadLongLE variants sit
+      nearby (trace strings @ 0x0804f594/0x0804fb44/0x0804fa04) and
+      remain unclaimed.
 
   - address: 0x08042cbc
     ghidra: FUN_08042cbc

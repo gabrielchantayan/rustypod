@@ -75,6 +75,32 @@ pub unsafe extern "C" fn ft_error_trace(format: *const u8, arg1: u32, arg2: u32,
     }
 }
 
+/// ft_panic (FreeType `FT_Panic`, ftdebug.c) — original: `FUN_0804e154`
+/// @ 0x0804e154 (40 bytes; 28 `bl` + 2 `b` call sites).
+///
+/// The `FT_ASSERT` failure path: the same varargs forwarder as
+/// [`ft_error_trace`] but with its own logger context (0x08b1e9dc, the
+/// literal @ 0x0804e178) and, instead of returning, `exit(1)`. Callers
+/// hand it `"assertion failed on line %d of file %s\n"` plus
+/// `__LINE__`/`__FILE__`, and the code after the call site is
+/// unreachable — which is why the stream readers happily dereference the
+/// stream they just asserted on.
+///
+/// # Deviations
+///
+/// Shares [`ft_error_trace`]'s sink (the two logger contexts are
+/// different objects in the original, neither ported); the terminating
+/// `exit(1)` is the real ported `exit`, which parks forever on target.
+///
+/// # Safety
+/// `format` must be a NUL-terminated string valid for the installed
+/// sink, and the arguments must match its conversions.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_panic(format: *const u8, arg1: u32, arg2: u32, arg3: u32) -> ! {
+    ft_error_trace(format, arg1, arg2, arg3);
+    crate::runtime::exit::exit(1)
+}
+
 #[cfg(test)]
 extern crate std;
 
