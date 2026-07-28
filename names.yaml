@@ -1816,7 +1816,9 @@ functions:
     notes: create 0x0826f658/alloc 0x0826f6a0/destroy 0x0826f7e4; 0x418-byte
       ctl struct, embedded heap desc +0x7c; alignments 4/16/32/1024 (recovered
       from serialized copy @ 0x089d6094); tag 0x2b; uncached path = D-cache
-      clean+invalidate + bit31 uncached alias.
+      clean+invalidate + bit31 uncached alias. POOL_OPS is now fully wired
+      to real ports, incl. the base-subobject ctor/dtor/fill and the seed
+      walk's deque accessor + iterator copies (heap/block_deque).
 
   - address: 0x082141bc
     ghidra: FUN_082141bc

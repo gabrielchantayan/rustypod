@@ -88,18 +88,20 @@
 //! 0x08044c10 (dcache.rs — real `mcr` loop on target, no-op line stub on
 //! host), `region_block_size` @ 0x0818a364 (block_mgr.rs — still 0
 //! until a block manager is installed in its global), and `region_start`
-//! @ 0x08280430 (block_region.rs). Still stubbed (C++/driver machinery
-//! outside the heap): `base_construct` spins, `base_destroy` returns its
-//! argument, and `deque_fill` reports failure (create then cleanly
-//! returns NULL). The heap "handle" passed around is the
-//! embedded `HeapDescriptor*` itself (the `HeapDescriptorDescriptor` of
-//! types.rs is a same-layout wrapper used only for the default-heap
-//! global).
+//! @ 0x08280430 (block_region.rs). The C++ base-subobject machinery is
+//! ported too (heap/block_deque.rs): `base_construct` @ 0x082141bc,
+//! `base_destroy` @ 0x08214224 and `deque_fill` @ 0x08213fc4 default to
+//! the real ports (whose own unported block-manager-client callees sit
+//! behind `POOL_BASE_OPS` over there). The heap "handle" passed around
+//! is the embedded `HeapDescriptor*` itself (the
+//! `HeapDescriptorDescriptor` of types.rs is a same-layout wrapper used
+//! only for the default-heap global).
 //!
 //! Further simplifications (no observable behavior change):
-//! - The deque-node accessor @ 0x08214150 (`add r0, r0, #0x4c; bx lr`)
-//!   and the 16-byte iterator copy @ 0x083dd9e4 are pure pointer ops —
-//!   inlined instead of routed through hooks.
+//! - The seed walk routes through the real deque-node accessor @
+//!   0x08214150 and 16-byte iterator copy @ 0x083dd9e4 (block_deque.rs),
+//!   exactly like the original call sites @ 0x0826f59c / 0x0826f5b0 /
+//!   0x0826f61c.
 //! - The delta-word store in `pool_alloc` and load in `pool_free` go
 //!   through the *unmarked* address; the original uses the bit-31-set
 //!   uncached alias, which is the same DRAM cell on target but
@@ -112,6 +114,9 @@
 //!   class (`get_unchecked`); classes 0..=3 are the only ones in the
 //!   table and the only ones used in osos.
 
+use crate::heap::block_deque::{
+    deque_iter_copy, deque_node_accessor, DequeIter, PoolBase, DEQUE_ELEM_SIZE, DEQUE_SEG_BYTES,
+};
 use crate::heap::types::HeapDescriptor;
 
 /// Size of the pool control struct (original: `ldr r0, =0x418`).
@@ -119,10 +124,6 @@ const POOL_CONTROL_SIZE: usize = 0x418;
 
 /// Byte offset of the embedded heap descriptor (0x7c on target).
 const HEAP_OFFSET: usize = core::mem::offset_of!(PoolControl, heap);
-
-/// Byte offset of the base-subobject block deque (original: 0x4c; the
-/// accessor @ 0x08214150 is `this + 0x4c`).
-const DEQUE_OFFSET: usize = 0x4c;
 
 /// Caller tag stamped on pool heap allocations (original: `mov r2, #0x2b`).
 const TAG_POOL_ALLOC: usize = 0x2b;
@@ -135,9 +136,9 @@ const TAG_POOL_FREE: usize = 2;
 const UNCACHED_MARK: usize = 0x8000_0000;
 
 /// Deque element stride (0x28) and segment stride (0x500) used by the
-/// seed walk.
-const ELEM_SIZE: usize = 0x28;
-const SEGMENT_SIZE: usize = 0x500;
+/// seed walk (block_deque.rs constants).
+const ELEM_SIZE: usize = DEQUE_ELEM_SIZE;
+const SEGMENT_SIZE: usize = DEQUE_SEG_BYTES;
 
 /// Cap on seeded blocks (original: `mov r2, #2000`).
 const MAX_SEED_BLOCKS: usize = 2000;
@@ -147,9 +148,9 @@ const MAX_SEED_BLOCKS: usize = 2000;
 /// descriptor, then the ready flag at +0x414.
 #[repr(C)]
 pub struct PoolControl {
-    /// Base subobject @ +0x000..+0x07c (opaque here; owned by the
-    /// ctor/dtor/deque hooks).
-    pub base: [u8; 0x7c],
+    /// Base subobject @ +0x000..+0x07c (typed layout in
+    /// heap/block_deque.rs; owned by the ctor/dtor/deque machinery).
+    pub base: PoolBase,
     /// Embedded heap descriptor @ +0x07c.
     pub heap: HeapDescriptor,
     /// Ready flag @ +0x414: set once the heap has been seeded.
@@ -183,17 +184,6 @@ static ALIGN_TABLE: [AlignClass; 4] = [
     AlignClass { pad: 32, mask: !31 },    // 2: cache line
     AlignClass { pad: 1024, mask: !1023 },// 3: DMA page
 ];
-
-/// 16-byte deque iterator (copied verbatim by 0x083dd9e4). The deque
-/// head at `this + 0x4c` holds the begin iterator, +0x10 the end.
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct DequeIter {
-    cur: *mut u8,
-    seg_base: *mut u8,
-    seg_end: *mut u8,
-    seg_slot: *mut *mut u8,
-}
 
 /// Indirect dispatch table for the not-yet-ported callees (see the module
 /// header for the design and the default-stub behavior).
@@ -259,29 +249,28 @@ pub struct PoolOps {
     pub dcache_flush: unsafe extern "C" fn(addr: *mut u8, len: usize),
 }
 
-/// Default stub: cannot construct the base subobject — spin.
-unsafe extern "C" fn missing_base_construct(
-    _this: *mut PoolControl,
-    _name: *const u8,
-    _flag: usize,
+/// `base_construct` slot shim over `pool_base_construct` @ 0x082141bc
+/// (block_deque.rs): the base subobject is the control struct's first
+/// field, so the casts are address-preserving.
+unsafe extern "C" fn base_construct_ported(
+    this: *mut PoolControl,
+    name: *const u8,
+    flag: usize,
 ) -> *mut PoolControl {
-    loop {}
+    crate::heap::block_deque::pool_base_construct(this as *mut PoolBase, name, flag)
+        as *mut PoolControl
 }
 
-/// Default stub: the non-deleting dtor has nothing to tear down — return
-/// the argument, mirroring the original's `this`-returning chain.
-unsafe extern "C" fn missing_base_destroy(this: *mut PoolControl) -> *mut PoolControl {
-    this
+/// `base_destroy` slot shim over `pool_base_destroy` @ 0x08214224
+/// (block_deque.rs).
+unsafe extern "C" fn base_destroy_ported(this: *mut PoolControl) -> *mut PoolControl {
+    crate::heap::block_deque::pool_base_destroy(this as *mut PoolBase) as *mut PoolControl
 }
 
-/// Default stub: no block source — report failure (0), so `pool_create`
-/// cleanly fails instead of seeding an empty heap.
-unsafe extern "C" fn missing_deque_fill(
-    _this: *mut PoolControl,
-    _size: usize,
-    _max: usize,
-) -> i32 {
-    0
+/// `deque_fill` slot shim over `block_deque_fill` @ 0x08213fc4
+/// (block_deque.rs).
+unsafe extern "C" fn deque_fill_ported(this: *mut PoolControl, size: usize, max: usize) -> i32 {
+    crate::heap::block_deque::block_deque_fill(this as *mut PoolBase, size, max)
 }
 
 /// `heap_alloc_alt` slot shim over `heap_alloc_tag1` @ 0x0819d2f0
@@ -321,15 +310,14 @@ unsafe extern "C" fn heap_add_region_ported(
 }
 
 
-/// Wired defaults (see the module header): real ports for the heap-facing
-/// slots, documented stubs for the unported C++/driver machinery. Host
-/// tests swap in mocks and restore this afterwards.
+/// Wired defaults (see the module header): every slot now points at a
+/// real port. Host tests swap in mocks and restore this afterwards.
 pub(crate) const DEFAULT_POOL_OPS: PoolOps = PoolOps {
     new_control: crate::heap::veneers::operator_new,
     delete_control: crate::heap::veneers::operator_delete,
-    base_construct: missing_base_construct,
-    base_destroy: missing_base_destroy,
-    deque_fill: missing_deque_fill,
+    base_construct: base_construct_ported,
+    base_destroy: base_destroy_ported,
+    deque_fill: deque_fill_ported,
     region_block_size: crate::heap::block_mgr::region_block_size,
     region_start: crate::heap::block_region::block_to_region_start,
     heap_create: crate::heap::init::heap_create_empty,
@@ -423,12 +411,15 @@ pub unsafe extern "C" fn pool_seed_regions(pool: *mut PoolControl, size: usize) 
     if (op!(deque_fill))(pool, size, MAX_SEED_BLOCKS) == 0 {
         return 1;
     }
-    // Original: deque node accessor 0x08214150 (this + 0x4c) and the
-    // 16-byte iterator copy 0x083dd9e4 — pure pointer ops, inlined.
-    let deque = (pool as *mut u8).add(DEQUE_OFFSET) as *const DequeIter;
-    let mut it = deque.read();
+    // Real deque node accessor @ 0x08214150 and iterator copies @
+    // 0x083dd9e4, exactly like the original call sites (which leave the
+    // deque pointer in the copy's unused r1).
+    let deque = deque_node_accessor(pool as *mut PoolBase);
+    let mut it = DequeIter::NULL;
+    deque_iter_copy(&mut it, deque as usize, core::ptr::addr_of!((*deque).begin));
     loop {
-        let end = deque.add(1).read();
+        let mut end = DequeIter::NULL;
+        deque_iter_copy(&mut end, deque as usize, core::ptr::addr_of!((*deque).end));
         // Continue while (seg_slot < end.seg_slot), or (== and cur <
         // end.cur) — the original's unsigned `bcc` pairs.
         if it.seg_slot == end.seg_slot {
@@ -606,8 +597,8 @@ mod tests {
     const BLOCK_SIZE: u32 = 0x800;
 
     #[repr(align(8))]
-    struct ControlBuf([u8; 0x800]);
-    static mut CONTROL_BUF: ControlBuf = ControlBuf([0; 0x800]);
+    struct ControlBuf([u8; 0x1000]);
+    static mut CONTROL_BUF: ControlBuf = ControlBuf([0; 0x1000]);
 
     /// Deque backing store: two segments, 32 + 8 elements of 0x28 bytes.
     static mut SEG0: [[u8; ELEM_SIZE]; 32] = [[0; ELEM_SIZE]; 32];
@@ -653,26 +644,26 @@ mod tests {
         }) as *mut u8
     }
 
-    /// Writes the begin/end deque iterators into the pool's deque nodes
-    /// (pool + 0x4c, pool + 0x5c), covering all 40 mock elements.
+    /// Writes the begin/end deque iterators into the pool's deque node
+    /// (target: pool + 0x4c / + 0x5c), covering all 40 mock elements.
     unsafe fn setup_deque(pool: *mut PoolControl) {
         let seg0 = core::ptr::addr_of_mut!(SEG0) as *mut u8;
         let seg1 = core::ptr::addr_of_mut!(SEG1) as *mut u8;
         SEG_TAB[0] = seg0;
         SEG_TAB[1] = seg1;
-        let deque = (pool as *mut u8).add(DEQUE_OFFSET) as *mut DequeIter;
-        deque.write(DequeIter {
+        let deque = deque_node_accessor(pool as *mut PoolBase);
+        (*deque).begin = DequeIter {
             cur: seg0,
             seg_base: seg0,
             seg_end: seg0.add(SEGMENT_SIZE),
             seg_slot: core::ptr::addr_of_mut!(SEG_TAB[0]),
-        });
-        deque.add(1).write(DequeIter {
+        };
+        (*deque).end = DequeIter {
             cur: seg1.add(8 * ELEM_SIZE),
             seg_base: seg1,
             seg_end: seg1.add(SEGMENT_SIZE),
             seg_slot: core::ptr::addr_of_mut!(SEG_TAB[1]),
-        });
+        };
     }
 
     // ---- mock ops -------------------------------------------------------
@@ -848,7 +839,7 @@ mod tests {
             FLUSH_CALLS = 0;
             LAST_FLUSH_ADDR = 0;
             LAST_FLUSH_LEN = 0;
-            core::ptr::write_bytes(control_ptr() as *mut u8, 0, 0x800);
+            core::ptr::write_bytes(control_ptr() as *mut u8, 0, 0x1000);
             *core::ptr::addr_of_mut!(POOL_OPS) = MOCK_OPS;
         }
         guard
