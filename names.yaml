@@ -6752,6 +6752,94 @@ functions:
       as __rt_memcpy). No NUL store here - rep_create already wrote it.
       Returns `string`.
 
+  - address: 0x083d8bac
+    ghidra: FUN_083d8bac
+    name: cxx_string_from_buffer
+    size: 108
+    sig: "char **cxx_string_from_buffer(char **string, const char *source, u32 length)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: string, param_2: source, param_3: length}
+    notes: >-
+      7 bl call sites - `basic_string(const char *s, size_type n)`, the
+      counted sibling of cxx_string_from_cstr and the constructor that
+      makes the class binary-safe (embedded NULs survive). Same shape -
+      length 0 parks on the shared empty rep with no allocation,
+      otherwise cxx_string_rep_reserve(this, 0, n, n) gives a floor of 32
+      characters. Two faithful quirks - the `cmn r2,#15 / blhi` length
+      check fires and then FALLS THROUGH (and rep_create checks again, so
+      an over-long request reports twice); and the memcpy is guarded on
+      `source != NULL`, not on `n`, so a zero-length construction from a
+      non-NULL pointer still calls memcpy with length 0, while `n != 0`
+      with a NULL source allocates a rep of length n whose bytes are
+      never written. Returns `string`.
+
+  - address: 0x083d8c20
+    ghidra: FUN_083d8c20
+    name: cxx_string_default_ctor
+    size: 12
+    sig: "char **cxx_string_default_ctor(char **string)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: string}
+    notes: >-
+      19 bl call sites - `basic_string()`. Three instructions - load the
+      literal 0x08b31810 (the shared empty rep's data pointer) and store
+      it in the one-word string object. No allocation, no refcounting.
+      Leaves `this` in r0, so the port returns it.
+
+  - address: 0x083d8c30
+    ghidra: FUN_083d8c30
+    name: cxx_string_copy_ctor
+    size: 92
+    sig: "char **cxx_string_copy_ctor(char **dst, char *const *src)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: dst, param_2: src}
+    notes: >-
+      64 bl + 6 b = 70 call sites - `basic_string(const basic_string &)`,
+      the COW grab. Shares the source rep (store the same data pointer,
+      then cxx_string_rep_add_ref @ 0x083b54f8) unless the rep is marked
+      LEAKED, which is `refcount == -1` tested as `adds r1,r1,#1; beq`.
+      A leaked rep has handed a mutable reference out, so the copy is
+      deep - cxx_string_rep_create(this, length, length) then memcpy of
+      `length` bytes, capacity exactly length (the growth policy is not
+      consulted). Note -1 is the SAME sentinel cxx_string_release treats
+      as "destroy me"; the two readings never collide because a leaked
+      rep is the sole owner by definition. Returns `dst`.
+
+  - address: 0x083d8c8c
+    ghidra: FUN_083d8c8c
+    name: cxx_string_dtor
+    size: 20
+    sig: "char **cxx_string_dtor(char **string)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: string}
+    notes: >-
+      5 bl call sites - `~basic_string()`. cxx_string_release @
+      0x083d8b04 and nothing else, with `this` restored into r0 (the ADS
+      destructor return convention). The 571 direct callers of
+      0x083d8b04 against these 5 show the compiler inlined the wrapper
+      away nearly everywhere.
+
+  - address: 0x083b54f8
+    ghidra: FUN_083b54f8
+    name: cxx_string_rep_add_ref
+    size: 24
+    sig: "void cxx_string_rep_add_ref(StringRep *rep)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: rep}
+    notes: >-
+      `_Rep::_M_add_ref` - a NON-atomic `++refcount` that skips the
+      shared empty rep by comparing against the literal 0x08b31804.
+      Exactly 2 bl call sites, both in this string class (0x083d8c54 in
+      the copy ctor, 0x083d8d3c in operator=), which is why the
+      singleton can be immutable. Sits just below the nominal
+      0x083c0000-0x083dffff sweep but is a member of this class and
+      reachable from nowhere else.
+
   # --- tag-57 tracked allocator: free side (0x083906f4..0x08390774) ---
   # Block layout built by the allocator @ 0x08390b8c (decoded, not ported):
   #   raw+0x00 i32 size, raw+0x04 i32 size>>31 (the pair is an i64),

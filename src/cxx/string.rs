@@ -38,6 +38,23 @@
 //!   `cxx_string_rep_create`; returns the *data* pointer (rep + 12).
 //! - `cxx_string_from_cstr` — original: `FUN_083d8b5c` @ 0x083d8b5c
 //!   (76 bytes, **495 call sites**). `basic_string(const char*)`.
+//! - `cxx_string_from_buffer` — original: `FUN_083d8bac` @ 0x083d8bac
+//!   (108 bytes, 7 call sites). `basic_string(const char*, size_t)`.
+//! - `cxx_string_default_ctor` — original: `FUN_083d8c20` @ 0x083d8c20
+//!   (12 bytes, 19 call sites). `basic_string()`.
+//! - `cxx_string_copy_ctor` — original: `FUN_083d8c30` @ 0x083d8c30
+//!   (92 bytes, 70 call sites). `basic_string(const basic_string&)`.
+//! - `cxx_string_dtor` — original: `FUN_083d8c8c` @ 0x083d8c8c
+//!   (20 bytes, 5 call sites). `~basic_string()`.
+//! - `cxx_string_rep_add_ref` — original: `FUN_083b54f8` @ 0x083b54f8
+//!   (24 bytes, 2 call sites). `_Rep::_M_add_ref`.
+//!
+//! `refcount == -1` carries two meanings, and both are the same
+//! `adds r, r, #1; beq` test: to the destructor it means "no owners
+//! left, destroy me", and to the copy constructor and assignment it
+//! means "leaked" — a mutable reference escaped, so sharing is unsafe
+//! and the copy must be deep. Nothing in this class ever produces a
+//! refcount below -1.
 //!
 //! Deviations:
 //! - `cxx_string_rep_create`'s header store (`stm r0, {r1, r4, r5}` @
@@ -171,7 +188,7 @@ pub unsafe extern "C" fn cxx_string_rep_create(
     length: u32,
 ) -> *mut StringRep {
     if capacity > MAX_CAPACITY {
-        report_error(capacity, 0);
+        report_error(capacity, MAX_CAPACITY);
     }
     if length > capacity {
         report_error(length, capacity);
@@ -266,6 +283,119 @@ pub unsafe extern "C" fn cxx_string_from_cstr(
     };
     *string = data;
     __rt_memcpy(data, source, length as usize);
+    string
+}
+
+/// cxx_string_rep_add_ref — original: `FUN_083b54f8` @ 0x083b54f8
+/// (24 bytes, 2 `bl` call sites — 0x083d8c54 in [`cxx_string_copy_ctor`]
+/// and 0x083d8d3c in [`cxx_string_assign`], the only two places a rep is
+/// ever shared).
+///
+/// `_Rep::_M_add_ref`: a **non-atomic** `++refcount` that skips the
+/// shared empty rep (compared against the literal 0x08b31804). The
+/// singleton is never refcounted, which is what lets it be immutable.
+///
+/// It sits a hair below this agent's 0x083c0000 sweep, but it is a
+/// member of this string class and is reachable from nowhere else.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_string_rep_add_ref(rep: *mut StringRep) {
+    if rep == empty_rep() {
+        return;
+    }
+    (*rep).refcount += 1;
+}
+
+/// cxx_string_default_ctor — original: `FUN_083d8c20` @ 0x083d8c20
+/// (12 bytes, 19 `bl` call sites).
+///
+/// `basic_string()`: parks the one-word string object on the shared
+/// empty rep's data pointer. No allocation, no refcounting. The
+/// original leaves `this` in r0, so the port returns it.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_string_default_ctor(string: *mut *mut u8) -> *mut *mut u8 {
+    *string = empty_rep_data();
+    string
+}
+
+/// cxx_string_dtor — original: `FUN_083d8c8c` @ 0x083d8c8c
+/// (20 bytes, 5 `bl` call sites).
+///
+/// `~basic_string()`: [`cxx_string_release`] and nothing else, with
+/// `this` restored into r0 (the ADS destructor return convention).
+/// Distinct from `cxx_string_release` only in that it preserves r0, and
+/// the 571 direct callers of 0x083d8b04 show the compiler inlined this
+/// wrapper away almost everywhere.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_string_dtor(string: *mut *mut u8) -> *mut *mut u8 {
+    cxx_string_release(string);
+    string
+}
+
+/// cxx_string_copy_ctor — original: `FUN_083d8c30` @ 0x083d8c30
+/// (92 bytes, 64 `bl` + 6 `b` = 70 call sites).
+///
+/// `basic_string(const basic_string &)`, the COW grab: share the
+/// source's rep by bumping its refcount, *unless* the rep is marked
+/// leaked (`refcount == -1`, the same sentinel [`cxx_string_release`]
+/// treats as "destroy me") — a leaked rep has handed a mutable
+/// reference to someone else, so the copy must be deep. The deep path
+/// allocates `length` capacity through [`cxx_string_rep_create`] and
+/// copies `length` bytes; the terminator comes from `rep_create`.
+///
+/// Returns `dst`.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn cxx_string_copy_ctor(
+    dst: *mut *mut u8,
+    src: *const *mut u8,
+) -> *mut *mut u8 {
+    let data = *src;
+    let rep = data_rep(data);
+    if (*rep).refcount != -1 {
+        *dst = data;
+        cxx_string_rep_add_ref(rep);
+        return dst;
+    }
+    let length = (*rep).length;
+    let copy = cxx_string_rep_create(dst as *mut u8, length, length);
+    let copy_data = rep_data(copy);
+    *dst = copy_data;
+    __rt_memcpy(copy_data, *src, length as usize);
+    dst
+}
+
+/// cxx_string_from_buffer — original: `FUN_083d8bac` @ 0x083d8bac
+/// (108 bytes, 7 `bl` call sites).
+///
+/// `basic_string(const char *s, size_type n)`: the counted sibling of
+/// [`cxx_string_from_cstr`]. `n == 0` parks on the shared empty rep
+/// without allocating; otherwise [`cxx_string_rep_reserve`] sizes the
+/// buffer (old capacity 0, so the floor is 32) and `n` bytes are copied.
+///
+/// Faithful quirks: the copy is guarded on `s != NULL`, not on `n`, so a
+/// zero-length construction from a non-NULL pointer still calls memcpy
+/// with length 0; and `n != 0` with a NULL `s` allocates a rep of length
+/// `n` whose bytes are never written.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn cxx_string_from_buffer(
+    string: *mut *mut u8,
+    source: *const u8,
+    length: u32,
+) -> *mut *mut u8 {
+    if length > MAX_CAPACITY {
+        report_error(length, MAX_CAPACITY);
+    }
+    let data = if length == 0 {
+        empty_rep_data()
+    } else {
+        cxx_string_rep_reserve(string as *mut u8, 0, length, length)
+    };
+    *string = data;
+    if !source.is_null() {
+        __rt_memcpy(data, source, length as usize);
+    }
     string
 }
 
@@ -509,6 +639,141 @@ mod tests {
         // `needed` overrides both when it is larger.
         assert_eq!(reference_capacity(0, 500), 500);
         assert_eq!(reference_capacity(0, 0), 32);
+    }
+
+    #[test]
+    fn default_ctor_parks_on_the_singleton() {
+        let _guard = arena();
+        unsafe {
+            let mut slot: *mut u8 = 0xdead as *mut u8;
+            let slot_ptr: *mut *mut u8 = &mut slot;
+            assert_eq!(cxx_string_default_ctor(slot_ptr), slot_ptr);
+            assert_eq!(slot, empty_rep_data());
+            assert_eq!(ARENA_USED, 0);
+        }
+    }
+
+    #[test]
+    fn dtor_releases_and_returns_this() {
+        let _guard = arena();
+        unsafe {
+            let mut slot: *mut u8 = core::ptr::null_mut();
+            let slot_ptr: *mut *mut u8 = &mut slot;
+            cxx_string_from_cstr(slot_ptr, b"bye\0".as_ptr());
+            let rep = data_rep(slot);
+            assert_eq!(cxx_string_dtor(slot_ptr), slot_ptr);
+            assert_eq!(freed(), &[rep as *mut u8]);
+        }
+    }
+
+    #[test]
+    fn add_ref_bumps_but_never_the_singleton() {
+        unsafe {
+            let mut rep = StringRep { refcount: 3, capacity: 0, length: 0 };
+            cxx_string_rep_add_ref(&mut rep);
+            assert_eq!(rep.refcount, 4);
+            cxx_string_rep_add_ref(empty_rep());
+            assert_eq!((*empty_rep()).refcount, 0);
+        }
+    }
+
+    #[test]
+    fn copy_ctor_shares_the_rep() {
+        let _guard = arena();
+        unsafe {
+            let mut src: *mut u8 = core::ptr::null_mut();
+            cxx_string_from_cstr(&mut src, b"shared\0".as_ptr());
+            let used = ARENA_USED;
+            let mut dst: *mut u8 = core::ptr::null_mut();
+            let dst_ptr: *mut *mut u8 = &mut dst;
+            assert_eq!(cxx_string_copy_ctor(dst_ptr, &src), dst_ptr);
+            assert_eq!(dst, src, "same buffer");
+            assert_eq!((*data_rep(src)).refcount, 1);
+            assert_eq!(ARENA_USED, used, "no allocation on the shared path");
+            // Two releases to unwind the two owners.
+            cxx_string_release(&mut dst);
+            assert!(freed().is_empty());
+            cxx_string_release(&mut src);
+            assert_eq!(freed().len(), 1);
+        }
+    }
+
+    /// Copying an empty string shares the singleton and leaves its
+    /// refcount alone (`_M_add_ref`'s literal compare).
+    #[test]
+    fn copy_ctor_of_empty_leaves_the_singleton_alone() {
+        let _guard = arena();
+        unsafe {
+            let mut src: *mut u8 = empty_rep_data();
+            let mut dst: *mut u8 = core::ptr::null_mut();
+            cxx_string_copy_ctor(&mut dst, &src);
+            assert_eq!(dst, empty_rep_data());
+            assert_eq!((*empty_rep()).refcount, 0);
+            assert_eq!(ARENA_USED, 0);
+            let _ = &mut src;
+        }
+    }
+
+    /// A leaked rep (-1) must be deep-copied, not shared.
+    #[test]
+    fn copy_ctor_deep_copies_a_leaked_rep() {
+        let _guard = arena();
+        unsafe {
+            let mut src: *mut u8 = core::ptr::null_mut();
+            cxx_string_from_cstr(&mut src, b"leaked\0".as_ptr());
+            (*data_rep(src)).refcount = -1;
+            let mut dst: *mut u8 = core::ptr::null_mut();
+            cxx_string_copy_ctor(&mut dst, &src);
+            assert_ne!(dst, src, "fresh buffer");
+            assert_eq!((*data_rep(src)).refcount, -1, "source untouched");
+            let rep = data_rep(dst);
+            assert_eq!((*rep).refcount, 0);
+            assert_eq!((*rep).length, 6);
+            assert_eq!((*rep).capacity, 6, "exactly length, no growth policy");
+            assert_eq!(core::slice::from_raw_parts(dst, 7), b"leaked\0");
+        }
+    }
+
+    #[test]
+    fn from_buffer_copies_exactly_n_bytes() {
+        let _guard = arena();
+        unsafe {
+            let mut slot: *mut u8 = core::ptr::null_mut();
+            let slot_ptr: *mut *mut u8 = &mut slot;
+            // No NUL in the source; `n` alone decides the length.
+            assert_eq!(cxx_string_from_buffer(slot_ptr, b"abcdefgh".as_ptr(), 3), slot_ptr);
+            let rep = data_rep(slot);
+            assert_eq!((*rep).length, 3);
+            assert_eq!((*rep).capacity, 32);
+            assert_eq!(core::slice::from_raw_parts(slot, 4), b"abc\0");
+        }
+    }
+
+    /// Embedded NULs survive — this is the constructor that makes the
+    /// class binary-safe.
+    #[test]
+    fn from_buffer_keeps_embedded_nuls() {
+        let _guard = arena();
+        unsafe {
+            let mut slot: *mut u8 = core::ptr::null_mut();
+            cxx_string_from_buffer(&mut slot, b"a\0b\0c".as_ptr(), 5);
+            assert_eq!((*data_rep(slot)).length, 5);
+            assert_eq!(core::slice::from_raw_parts(slot, 6), b"a\0b\0c\0");
+        }
+    }
+
+    #[test]
+    fn from_buffer_zero_length_uses_the_singleton() {
+        let _guard = arena();
+        unsafe {
+            let mut slot: *mut u8 = core::ptr::null_mut();
+            cxx_string_from_buffer(&mut slot, b"abc".as_ptr(), 0);
+            assert_eq!(slot, empty_rep_data());
+            assert_eq!(ARENA_USED, 0);
+            // ...and a NULL source is simply not copied.
+            cxx_string_from_buffer(&mut slot, core::ptr::null(), 0);
+            assert_eq!(slot, empty_rep_data());
+        }
     }
 
     /// `data_rep`/`rep_data` are exact inverses (the -12/+12 the original
