@@ -4574,122 +4574,248 @@ functions:
 
   - address: 0x0817ee04
     ghidra: FUN_0817ee04
-    name: singleton_get_0xe8
+    name: app_controller_get
     size: 44
-    status: identified
+    sig: "void *app_controller_get(void)"
+    module: app/singletons
+    status: ported
     notes: >-
-      Lazy singleton getter - hottest unclaimed function in the mid
-      region at 1108 call sites (binary-scanned). If global slot
-      (+8 off the object at DAT_0817ee30) is 0, allocates 0xE8 bytes
-      via FUN_082aadd4 (operator-new-like) and constructs via
-      FUN_081847fc, caches, returns the cached pointer. Not leaf -
-      needs the allocator and constructor; port once those exist and
-      the singleton's identity is known.
+      Lazy singleton getter, 1108 bl call sites - the hottest function
+      in the mid region. If the cache word @ 0x089cc648 (the +8 slot of
+      the global @ 0x089cc640) is 0, allocates 0xE8 bytes via operator
+      new @ 0x082aadd4 (already ported, called directly), constructs via
+      FUN_081847fc, caches the ctor's return and RELOADS the slot before
+      returning. The object is the application controller - views hand
+      themselves to it (0x08124af4), callers poke a mode halfword at
+      +0x80, and its ctor resolves a registry target through the manager
+      0x081883fc and vtable slot +0xe8. Deviations - the ctor is behind
+      the SINGLETON_CTORS dispatch table (house pattern) with a
+      documented zeroing stub default, and the cache is the crate static
+      APP_CONTROLLER. NOT HOOK-READY - until FUN_081847fc is ported the
+      default hands out a zeroed block with no vtable, so branching
+      stock code at 0x0817ee04 would break it.
 
   - address: 0x08173848
     ghidra: FUN_08173848
-    name: singleton_get_0x850
+    name: app_screen_get
     size: 44
-    status: identified
+    sig: "void *app_screen_get(void)"
+    module: app/singletons
+    status: ported
     notes: >-
-      Same lazy-singleton pattern as 0x0817ee04 but a 0x850-byte object
-      constructed by FUN_08177a78; cache slot is *DAT_08173874. 140
-      call sites, binary-scanned.
+      Same lazy-singleton shape as 0x0817ee04 but a 0x850-byte object
+      constructed by FUN_08177a78, cached in the word @ 0x089cc1bc. 140
+      bl call sites. The object is the screen/layout side - callers load
+      layout resources into it (0x08181110 next to the
+      "GotoExtraInfoLayout"/"GotoGenius" literals, 0x08174300 with 0x80)
+      and then hand it to the controller (0x08183950(controller,
+      screen)); its ctor chains eleven 0x0810ebbc sub-ctors and
+      registers the result with class id 0x7800. Same deviations and the
+      same NOT-HOOK-READY caveat as 0x0817ee04.
 
   - address: 0x0813b6f4
     ghidra: FUN_0813b6f4
-    name: global_ctx_get_field8
+    name: context_target_id
     size: 12
-    status: identified
+    sig: "u32 context_target_id(void)"
+    module: app/context
+    status: ported
+    vars: {DAT_0813b700: APP_CONTEXT}
     notes: >-
-      Returns *(DAT_0813b700 + 8) - a one-load global-context getter in
-      the record-parser subsystem that owns the berec_* family. 254
-      call sites, binary-scanned. Trivial but needs the global's
-      identity to name/port honestly.
+      `ldr r0, =0x089cc7ec; ldr r0, [r0, #8]; bx lr` - the word at +8 of
+      the global application context. 254 bl call sites (127 distinct
+      callers, mostly view classes @ 0x0839xxxx..0x083bxxxx), the
+      hottest function in the mid region after the two singleton
+      getters. The field is a numeric class/resource id, not a pointer,
+      and 0 means "none" - every reader has the shape `id = get(); if
+      (id) { target = manager->vtable[0xe8](manager, id); ... }`, i.e.
+      it names a pending target to resolve through the by-id registry
+      (0x081883fc fetches the manager for the sibling id 0x8080;
+      0x081d2184 is the lookup). Its one writer, 0x082028d4 @
+      0x08202904, stores 0x7a88 (an id that also appears in the table @
+      0x083f61b0 next to the "None" literal) right after raising the
+      flag byte @ 0x089d0074. Rest of the context object - +0x4 is a
+      trace nesting depth (inc @ 0x08134af8, dec + assert-nonnegative @
+      0x081e9e4c, tested @ 0x08134674 to gate the "controller_..." event
+      emit), +0xc is referenced @ 0x0829b088. Deviation - the object is
+      the crate static APP_CONTEXT rather than living at 0x089cc7ec
+      (that RW page is runtime-initialized; the image holds stale UI
+      strings there), zeroed = the pre-init state.
 
   - address: 0x081ee17c
     ghidra: FUN_081ee17c
     name: cursor_init
     size: 16
-    status: identified
+    sig: "void cursor_init(Cursor *cursor, Collection *collection)"
+    module: util/cursor
+    status: ported
+    vars: {param_1: cursor, param_2: collection}
     notes: >-
-      Iterator/cursor glue family with 0x081ee138/0x081ee18c (111/113/
-      129 call sites, binary-scanned). Init - stores the target object
-      in slot 0 and sentinel -2 ("before first") in slot 1.
+      Collection-cursor family with 0x081ee138/0x081ee18c. Init - stores
+      the collection in slot 0 and sentinel -2 ("before first") in slot
+      1. 111 bl call sites (re-scanned: the earlier note had the three
+      counts rotated - the real split is advance 113 / init 111 /
+      invalidate 129). The original leaves r0 = cursor; no caller
+      consumes it, so the port is void.
 
   - address: 0x081ee138
     ghidra: FUN_081ee138
     name: cursor_advance
     size: 68
-    status: identified
+    sig: "u32 cursor_advance(Cursor *cursor, void *out)"
+    module: util/cursor
+    status: ported
+    vars: {param_1: cursor, param_2: out}
     notes: >-
       Advance - index becomes 0 after the -2 init sentinel, else +1;
-      calls target vtable slot +0x3c with (index, out); a 0 result
-      invalidates the cursor (index = -1). Vtable dispatch blocks a
-      leaf port.
+      calls the collection's vtable slot +0x3c (item_at(index, out))
+      and invalidates the cursor (index = -1) on a 0 result. 113 bl call
+      sites. Ghidra types it void, but the original never touches r0
+      after `blx r3`, so the accessor's result IS the return value - the
+      canonical loop @ 0x0810e0ac branches on it. Dispatch goes through
+      the collection's own vtable pointer (faithful; test vtables are
+      honored). Advancing an exhausted cursor restarts at 0 (-1 + 1),
+      preserved.
 
   - address: 0x081ee18c
     ghidra: FUN_081ee18c
     name: cursor_invalidate
     size: 12
-    status: identified
-    notes: Sets the cursor index (slot 1) to -1. Pairs with 0x081ee17c/0x081ee138.
+    sig: "void cursor_invalidate(Cursor *cursor)"
+    module: util/cursor
+    status: ported
+    vars: {param_1: cursor}
+    notes: >-
+      Sets the cursor index (slot 1) to -1, leaving the collection slot
+      alone. Pairs with 0x081ee17c/0x081ee138. 129 bl call sites.
 
   - address: 0x08120604
     ghidra: FUN_08120604
-    name: storage_cmd_block_init
+    name: surface_config_init
     size: 80
-    status: identified
+    sig: "void surface_config_init(u8 *config)"
+    module: drivers/surface
+    status: ported
+    vars: {param_1: config}
     notes: >-
-      Default-initializer in the ATA command-block cluster - bytes
-      +0=2, +1=3, words +4..+0x18=0, +0x1c=-1, +0x20=-1, +0x24/+0x28=0,
-      bytes +0x2c/+0x2d=0, word +0x30=0. Pure constant stores, 15 call
-      sites (binary-scanned); skipped only because the field meanings
-      (version/format bytes 2,3 and the two -1 sentinels) are not yet
-      pinned down enough for honest field names.
+      Default constructor for the 0x40-byte display-LAYER configuration
+      descriptor - NOT storage. The earlier note filed it under the ATA
+      command-block cluster purely on address adjacency; every one of
+      the 15 bl call sites (+1 tail b) is display code, and 0x0816e500 /
+      0x0829635c both init this block then store width 0x140 = 320 and
+      height 0xf0 = 240 (the Classic 6G panel) before handing it to the
+      layer applier 0x08120978, which copies it into the layer object
+      from 0x081d9064(display, layer). Writes bytes +0=2 (pixel format;
+      the applier gives 3 special handling), +1=3 (format variant),
+      zeroes the geometry words +4/+8 (origin), +0xc/+0x10 (size),
+      +0x14/+0x18 (buffer size), +0x24/+0x28 (source offset), +0x30, and
+      the flag bytes +0x2c/+0x2d, and arms +0x1c/+0x20 with -1 = "auto"
+      (the applier resolves -1 to the clamped buffer size and writes it
+      back into the caller's block). Bytes +2/+3, +0x2e/+0x2f and
+      +0x34..+0x3f are deliberately left uninitialized. Stores are
+      write_volatile - plain writes let LLVM collapse the zero run into
+      a nonexistent __aeabi_memclr and byte-store the rest.
 
   - address: 0x08138bd0
     ghidra: FUN_08138bd0
-    name: table_find_id_and_mask
+    name: registry_find_for_slot
     size: 88
-    status: identified
+    sig: "SlotRecord *registry_find_for_slot(void *this, u32 slot, u32 id)"
+    module: util/table_find
+    status: ported
+    vars: {param_1: this, param_2: slot, param_3: id}
     notes: >-
-      Scans a global table (base DAT_08138c28, count DAT_08138c2c) of
-      12-byte records for one whose u16 at +4 equals the id argument
-      and whose mask byte at +6 has bit (1 << mode) set; returns the
-      record pointer or 0. 8 call sites, binary-scanned. Pure logic but
-      anchored to two unresolved globals.
+      Linear scan of a 275-entry table of 12-byte records for the one
+      whose u16 id (+4) equals the id argument AND whose mask byte (+6)
+      has bit (1 << slot) set; returns the record or 0. 8 bl call sites.
+      Both anchors are now resolved - the base 0x089ccc38 is a fixed
+      address (a static array in the runtime-initialized RW page, not a
+      pointer global) and the "count" DAT_08138c2c is a literal-pool
+      immediate 0x113 = 275, not a global at all. Record layout - +0
+      descriptor pointer (0x08138e94 reads a u16 at descriptor+0x3c),
+      +4 u16 id, +6 u8 slot mask, +8 opaque handle (fed to the decoder
+      0x082cdc94 by 0x08138650). `slot` is 0..2 - every caller asserts
+      it (0x0813858c, 0x08193e84) and each slot owns a 0x114-byte state
+      record in the array @ 0x08ad0f34 whose +4 field takes this
+      function's result (the slot's current descriptor); id 0 is the
+      default. param_1 is a `this` the original never reads (mov r0, #0
+      kills it before the loop) but all 8 call sites pass it. Faithful
+      details - ARM register shift (slot 32..255 gives mask 0) then
+      & 0xff so slots >= 8 never match; the ldrh id compare is
+      zero-extended against the full u32 argument; do-while, so index 0
+      is examined before the count is tested. Deviation - the table is
+      the crate static SLOT_RECORDS, zeroed (block_mgr.rs precedent).
 
   - address: 0x081fea54
     ghidra: FUN_081fea54
-    name: watermark_slot_reset
+    name: slot_table_clear
     size: 52
-    status: identified
+    sig: "u32 slot_table_clear(void *this, i32 index)"
+    module: app/slot_table
+    status: ported
+    vars: {param_1: this, param_2: index, DAT_081fea88: SLOTS}
     notes: >-
-      Bounds-checked (index <= 0x10, else returns 9) reset of a
-      16-byte slot in a global table @ DAT_081fea88 - sets +4 =
-      0x7fffffff (a min-tracker seed), +8/+0xc/+0 = 0, returns 0.
-      10 call sites, binary-scanned. Needs the global table identity.
+      Releases one entry of the 17-slot registration table @ 0x08ac8b94
+      (17 * 16 = 0x110 bytes, confirmed by the builder 0x081ff758 which
+      memsets 0x110 then seeds every +4 with 0x7fffffff). Restores +4 =
+      0x7fffffff, zeroes +8/+0xc and drops the occupied byte at +0;
+      returns 0, or 9 when index >= 17. 10 bl call sites. Slot layout -
+      +0 occupied flag, +4 kind (0..2 when registered, 0x7fffffff =
+      free), +8/+0xc payload words. The registrar 0x081fe954 is the
+      twin - it refuses index >= 17 OR kind >= 3 with the same error 9
+      and stores kind/value_a/value_b with one stmib only if the slot is
+      free. Every call site pairs them (`if (enabled) register(this,
+      SLOT, ...) else clear(this, SLOT)`) with SLOT a constant (10 and
+      16 seen), so index is a slot id. param_1 is an unread `this`. The
+      bounds test is SIGNED (cmp #17 / bxge), so a negative index would
+      write before the table - reproduced, not hardened. Deviation - the
+      table is the crate static SLOTS (0x08ac8b94 is past the end of the
+      image, pure runtime RAM); stores are write_volatile since no
+      ported code reads the table and plain stores get dropped as dead.
 
   - address: 0x0810fa90
     ghidra: FUN_0810fa90
     name: list_count_until_match
     size: 84
-    status: identified
+    sig: "u32 list_count_until_match(NodeList *list)"
+    module: app/node_list
+    status: ported
+    vars: {param_1: list}
     notes: >-
-      Walks a linked list at obj+4 counting nodes; when obj+8 is
-      nonzero, stops after the node whose vtable+0x68 call returns that
-      value (a find-position-by-key). Returns the 1-based position or
-      total count. 125 call sites, binary-scanned. Vtable dispatch
-      blocks a leaf port.
+      Walks the linked list at list+4 counting nodes; when the stop key
+      at list+8 is nonzero, stops after the node whose vtable+0x68 call
+      returns it, so the result is that node's 1-based position, else
+      the total count. 125 bl call sites. The list object is a C++
+      singleton - its accessor 0x0810fa30 is a function-local-static
+      initializer (guard word 0x089cc834, ADS guard helpers 0x082ab31c/
+      0x082ab338) returning the fixed object 0x08a79c74; 0x0810fa88
+      hands out its head. Callers are view classes @ 0x0839xxxx storing
+      the result in a field. Sibling 0x0810fb48 drains the same list
+      through the same +0x68 slot and stop key. Node layout - +0 vtable,
+      +0x14 next. Faithful details - the counter is bumped BEFORE the
+      key test so the matching node is included, and the stop key is
+      re-read after the virtual call (the original issues two
+      `ldr r0, [r5, #8]`), so a callee that rewrites it is honored.
+      Dispatch goes through the node's own vtable pointer, no hook
+      table.
 
   - address: 0x081c93fc
     ghidra: FUN_081c93fc
     name: table6_find_by_key
     size: 52
-    status: identified
+    sig: "RequestSlot *table6_find_by_key(RequestSlot **table, u32 key)"
+    module: util/table_find
+    status: ported
+    vars: {param_1: table, param_2: key}
     notes: >-
-      Scans a fixed 6-entry table of 8-byte records (base at *param_1)
-      for a record whose first word equals the key; returns the record
-      pointer or 0. Pure leaf, but only 3 call sites (binary-scanned,
-      MP4 parser cluster) - low value, easy pick for a later sweep.
+      Scans a fixed 6-slot table of 8-byte records (base at *param_1)
+      for the slot whose key word (+0) equals the key; returns the slot
+      pointer or 0. 3 bl call sites - 0x08202694 and the state accessor
+      0x0829dd30 (which returns the slot's byte at +4, or 0 when
+      unregistered). The record is a request registry - key at +0, state
+      byte at +4 driven 0 (idle) -> 1 (running) -> 2 (done) by
+      0x08202694; the table lives at owner+0x28+0x3c and every access is
+      taken under the lock at owner+0x28+0x40 (0x08094404/0x0809449c).
+      There is no occupied flag, so a key of 0 matches the first zeroed
+      slot - preserved. Codegen deviation - LLVM fully unrolls the
+      constant 6-iteration loop (29 instructions vs the original's 13).

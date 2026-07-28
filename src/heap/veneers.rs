@@ -340,6 +340,12 @@ pub unsafe extern "C" fn realloc_wrapper(
 
 /// operator new (tag 2) — original @ 0x082aadd4 (8 bytes, 1797 call
 /// sites — the dominant allocator in osos): `mov r1, #2; b 0x080eb67c`.
+///
+/// `inline(never)`: on device this is a real function every caller
+/// reaches with `bl`. Letting LLVM inline the whole lazy-heap-init path
+/// into a caller turns an 11-instruction caller into 38 and destroys
+/// the match (see app/singletons.rs).
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn operator_new(size: usize) -> *mut u8 {
     malloc_wrapper(size, TAG_OPERATOR_NEW)
