@@ -7,6 +7,7 @@ pub mod gpioic;
 pub mod i2c;
 pub mod piezo;
 pub mod pmu;
+pub mod surface;
 pub mod timer;
 pub mod uart;
 pub mod wheel;

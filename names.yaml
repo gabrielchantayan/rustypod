@@ -4523,16 +4523,30 @@ functions:
 
   - address: 0x08120604
     ghidra: FUN_08120604
-    name: storage_cmd_block_init
+    name: surface_config_init
     size: 80
-    status: identified
+    sig: "void surface_config_init(u8 *config)"
+    module: drivers/surface
+    status: ported
+    vars: {param_1: config}
     notes: >-
-      Default-initializer in the ATA command-block cluster - bytes
-      +0=2, +1=3, words +4..+0x18=0, +0x1c=-1, +0x20=-1, +0x24/+0x28=0,
-      bytes +0x2c/+0x2d=0, word +0x30=0. Pure constant stores, 15 call
-      sites (binary-scanned); skipped only because the field meanings
-      (version/format bytes 2,3 and the two -1 sentinels) are not yet
-      pinned down enough for honest field names.
+      Default constructor for the 0x40-byte display-LAYER configuration
+      descriptor - NOT storage. The earlier note filed it under the ATA
+      command-block cluster purely on address adjacency; every one of
+      the 15 bl call sites (+1 tail b) is display code, and 0x0816e500 /
+      0x0829635c both init this block then store width 0x140 = 320 and
+      height 0xf0 = 240 (the Classic 6G panel) before handing it to the
+      layer applier 0x08120978, which copies it into the layer object
+      from 0x081d9064(display, layer). Writes bytes +0=2 (pixel format;
+      the applier gives 3 special handling), +1=3 (format variant),
+      zeroes the geometry words +4/+8 (origin), +0xc/+0x10 (size),
+      +0x14/+0x18 (buffer size), +0x24/+0x28 (source offset), +0x30, and
+      the flag bytes +0x2c/+0x2d, and arms +0x1c/+0x20 with -1 = "auto"
+      (the applier resolves -1 to the clamped buffer size and writes it
+      back into the caller's block). Bytes +2/+3, +0x2e/+0x2f and
+      +0x34..+0x3f are deliberately left uninitialized. Stores are
+      write_volatile - plain writes let LLVM collapse the zero run into
+      a nonexistent __aeabi_memclr and byte-store the rest.
 
   - address: 0x08138bd0
     ghidra: FUN_08138bd0
