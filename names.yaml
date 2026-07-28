@@ -4872,3 +4872,42 @@ functions:
       shifts of bytes 1..3, which a zero-extended byte shifted left by
       less than 32 can never reach. Always zero, so the port drops them;
       returned value unchanged.
+
+  - address: 0x08076f48
+    ghidra: FUN_08076f48
+    name: byteswap16
+    size: 16
+    sig: "u32 byteswap16(u32 value)"
+    module: util/bswap
+    status: ported
+    vars: {param_1: value}
+    notes: >-
+      Register-only 16-bit byte swap - ((v << 8) | (v >> 8)) & 0xff00ffff.
+      A second implementation of bswap16 (0x0805dd48) from a different
+      object; the 0x0805dxxx pair spills through the stack, this one stays
+      in registers. Contracts differ at the edges - bswap16 reloads with
+      ldrh and zero-extends, this masks with bic #0x00ff0000 and so
+      passes the argument's top byte through (byteswap16(0xffffffff) =
+      0xff00ffff vs bswap16's 0xffff). The mask is the ADS narrowing of an
+      unsigned short - for a u16 argument the left-shifted copy cannot
+      reach bit 24, so only byte 2 needs clearing. Every observed call
+      site feeds a zero-extended ldrh and stores with strh, so the
+      difference is never visible in stock firmware. 60 bl call sites,
+      binary-scanned. Port reproduces the mask bit-for-bit; match.py is
+      instruction-for-instruction modulo the frame push.
+
+  - address: 0x08076f58
+    ghidra: FUN_08076f58
+    name: byteswap32
+    size: 28
+    sig: "u32 byteswap32(u32 value)"
+    module: util/bswap
+    status: ported
+    vars: {param_1: value}
+    notes: >-
+      Register-only 32-bit byte reverse - v << 24 | (v & 0xff00) << 8 |
+      (v & 0xff0000) >> 8 | v >> 24. Semantically identical to bswap32
+      (0x0805dc24); second copy from the same object as byteswap16
+      (0x08076f48). 23 bl call sites, binary-scanned. LLVM folds the two
+      identical bodies, so the archive exports byteswap32 and bswap32 at
+      one address - review codegen as `match.py 0x08076f58 bswap32`.
