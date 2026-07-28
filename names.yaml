@@ -3847,3 +3847,20 @@ functions:
       Alignment-free big-endian 32-bit load (4 ldrb + orr). Raw-pointer
       twin of berec_read_u32. 4 call sites, binary-scanned, all in the
       format-header parser cluster @ 0x081f3b54..0x081f3c80.
+
+  - address: 0x081bd910
+    ghidra: FUN_081bd910
+    name: path_lengths_ok
+    size: 96
+    sig: "u32 path_lengths_ok(void *this_unused, const u8 *path)"
+    module: fs/path_limits
+    status: ported
+    vars: {param_1: this_unused, param_2: path}
+    notes: >-
+      FAT/Win32-style path length validation - every component split on
+      backslash, slash or colon must be <= 255 bytes and the whole path
+      <= 259 bytes (MAX_PATH 260 incl. NUL); NULL fails. First arg is
+      an unread `this` (r0 overwritten immediately), preserved for ABI.
+      14 call sites, binary-scanned, all in the file-path cluster
+      @ 0x081bc9f8..0x081bded8 (owns the literal
+      "iPod_Control/Device/PlayCounts" @ 0x081bc840).
