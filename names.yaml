@@ -2017,39 +2017,71 @@ functions:
     ghidra: FUN_081f0050
     name: pool_parent_construct
     size: 80
-    sig: "PoolBase *pool_parent_construct(PoolBase *this, const char *name, u8 flag)"
-    module: heap/block_deque
-    status: identified
+    sig: "PoolBase *pool_parent_construct(PoolBase *this, const char *name, usize flag)"
+    module: heap/pool_client
+    vars: {param_1: this, param_2: name, param_3: flag}
+    status: ported
     notes: >-
-      Parent-class ctor of the pool base subobject (0x0814xxxx/0x081fxxxx
-      block-manager territory — POOL_BASE_OPS.parent_construct boundary).
-      Own vtable [0x081f009c] = 0x0898ff7c (stale RW data too);
-      client_ref (+0x4) = 0; C++ recursive mutex init thunk 0x082621b0 on
-      +0x8; mailbox_slot_create @ 0x0808e294 on +0x24; flag bytes +0x28=0,
-      +0x29=flag; name obj ctor 0x081eff0c at +0x2c; +0x3c/+0x40 = 0.
-      The ported default stub reproduces the one field this cluster
-      reads (client_ref = NULL) and returns this. Dtor twin @ 0x081f00a0
-      (tail target of pool_base_destroy, parent_destroy boundary).
+      Ctor of the block-manager CLIENT BASE CLASS — the parent
+      subobject of the pool base, owning bytes +0x00..+0x44 of the
+      object. 2 bl call sites @ 0x082141c0 (pool_base_construct) and
+      0x082236cc (a sibling derived class), binary-verified. Body, in
+      order: stmia r0!,{vtable,0} writes the parent vtable (literal
+      [0x081f009c] = 0x0898ff7c) and clears client_ref (+0x4); C++
+      recursive-mutex ctor 0x082621b0 on +0x8; mailbox_slot_create @
+      0x0808e294 on +0x24; strb 0 at +0x28 and strb flag at +0x29;
+      registration-node ctor 0x081eff0c(this+0x2c, name); +0x3c and
+      +0x40 = 0. Returns this (r0 is re-derived from the two callees'
+      returns — both return their argument, so the port keeps `this`
+      in hand instead of doing 64-bit-unsafe byte arithmetic). Ghidra
+      says void; the asm's closing `sub r0, r0, #0x2c` is authoritative.
+      Neighbours characterized while porting: 0x081eff0c = node ctor
+      (base ctor 0x08207674 stores name at node+0x4 and vtable
+      0x089919a8, then node vtable 0x089a74cc + node+0x8/+0xc = 0);
+      0x082621b0 = recursive mutex ctor, returns its argument. Both
+      vtable literals are stale RW data (spot-checked: their "slots"
+      land mid-function / in a jump table) — modeled as statics.
+      match.py structural: identical field offsets and instruction
+      order, ops-table blx in place of bl.
 
   - address: 0x081efc8c
     ghidra: FUN_081efc8c
     name: pool_client_attach
-    size: 176
+    size: 232
     sig: "i32 pool_client_attach(PoolBase *this)"
-    module: heap/block_deque
-    status: identified
+    module: heap/pool_client
+    vars: {param_1: this}
+    status: ported
     notes: >-
-      block_deque_fill's gate (POOL_BASE_OPS.client_attach boundary).
-      Under the base mutex: creates or joins the shared 0x170-byte
-      block-manager client object (operator new 0x082aadd4 +
-      0x081e6b34, optionally through a once-guard pair
-      0x082ab31c/0x082ab338 keyed on the +0x29 flag byte), caches it at
-      +0x3c/+0x34 with +0x38 = this, then registers via 0x081eff38
-      (which installs the two-level client ref at this+0x4). Related
-      boundaries, all unported block-manager client machinery:
-      reserve 0x081fbe4c, headroom 0x081fc3f4, populate 0x081fc298,
-      erase 0x081fc080 + commit 0x081fc884, queue-get wait 0x080b4adc
-      (wraps csem_wait 0x08056904 on the mailbox).
+      block_deque_fill's gate (POOL_BASE_OPS.client_attach slot, now
+      the real port). 232 bytes incl. the singleton literal (the
+      earlier 176 was short); 3 bl call sites @ 0x08214020
+      (block_deque_fill), 0x08223530 and 0x082236ec, binary-verified.
+      Under the base mutex (thunk 0x082621a8/0x082621ac -> 0x082e8390/
+      0x082e83d8): if the memo at +0x3c is NULL, get a client — mode
+      byte +0x29 nonzero picks the process-wide singleton behind the
+      ADS static-init guard (inline `tst *g, #1`, then acquire
+      0x082ab31c / release 0x082ab338 over the .bss pair guard@
+      0x08a09704, client@0x08a09708 — the image holds no initializer
+      there, so a zero-init static is faithful), otherwise a private
+      one. Either way: operator_new(0x170) then client ctor
+      0x081e6b34(storage, name) where name comes from the registration
+      node's vtable slot +0xc virtual on this+0x2c. Store the result at
+      +0x3c; NULL -> unlock and return 0. Otherwise node.client
+      (+0x34) = the client, node.owner (+0x38) = this, and the return
+      value is 0x081eff38(this) — the block manager's registration,
+      which installs the two-level client ref at +0x4 that
+      client_handle_get reads (it calls 0x08262b1c, a twin of
+      0x083d64f4, then 0x0818a630(mgr, this+0x2c, 0, this+0x4)).
+      Ghidra's decompile of this one is accurate and agrees. A failed
+      singleton is remembered as NULL and never retried (the guard is
+      spent) — reproduced. Still unported block-manager client
+      machinery: ctor 0x081e6b34, register 0x081eff38, reserve
+      0x081fbe4c, headroom 0x081fc3f4, populate 0x081fc298, erase
+      0x081fc080 + commit 0x081fc884, queue-get wait 0x080b4adc.
+      match.py structural: same offsets (0x3c/0x29/0x2c/+0xc/0x170),
+      same guard test and shared-vs-private split; ops-table blx in
+      place of bl.
 
   - address: 0x08037cd0
     ghidra: FUN_08037cd0

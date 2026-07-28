@@ -42,7 +42,8 @@
 //!   ported callers.
 //! - `pool_base_construct` — original: `FUN_082141bc` @ 0x082141bc
 //!   (100 bytes; 1 bl call site @ 0x0826f7ac in `pool_init`, binary-
-//!   verified). Parent-class ctor (0x081f0050, ops slot), installs the
+//!   verified). Parent-class ctor (0x081f0050, ops slot — real port in
+//!   heap/pool_client.rs), installs the
 //!   class vtable, zeroes the deque (both iterators NULL via a real
 //!   `deque_iter_init(_, 0, 0)` call, count/map/map_cap 0), creates the
 //!   +0x78 mailbox via `mailbox_slot_create` @ 0x0808e294
@@ -93,8 +94,11 @@
 //! +0x04 client_ref        (two-level block-manager client ref)
 //! +0x08 mutex             (0x1c-byte C++ recursive mutex, opaque here)
 //! +0x24 parent_mailbox    (parent-class mailbox slot)
-//! +0x28 parent_flags      (+0x28 zeroed, +0x29 = ctor flag byte)
-//! +0x2c name_state        (0x18-byte name object, opaque here)
+//! +0x28 parent_state      (parent mode byte, zeroed by the ctor)
+//! +0x29 client_shared     (ctor flag byte: share the singleton client)
+//! +0x2c node              (ClientNode: vtable, name, client, owner)
+//! +0x3c client_cache      (memoized block-manager client)
+//! +0x40 parent_reserved   (parent word the ctor zeroes)
 //! +0x44 fill_block_count  (deque_fill's computed block count)
 //! +0x48 fill_cap          (deque_fill's max/timeout argument)
 //! +0x4c deque             (BlockDeque: begin/end iters, count, map)
@@ -113,11 +117,12 @@
 //!   default; the virtual dispatch itself is faithful (through the
 //!   object's vtable pointer, so subclass/test vtables are honored).
 //! - **Ops table** ([`POOL_BASE_OPS`], house pattern): the unported
-//!   callees dispatch indirectly. Parent ctor/dtor @ 0x081f0050 /
-//!   0x081f00a0 default to faithful-subset stubs (the ctor stub zeroes
-//!   `client_ref` — the one parent field this cluster reads — and both
-//!   return `this`); the block-manager client calls (0x081efc8c,
-//!   0x081fbe4c, 0x081fc3f4, 0x081fc298, 0x081fc080, 0x081fc884)
+//!   callees dispatch indirectly. The parent ctor @ 0x081f0050 and the
+//!   client attach @ 0x081efc8c default to the real ports in
+//!   heap/pool_client.rs (which owns the +0x00..+0x44 half of the
+//!   object); the parent dtor @ 0x081f00a0 still defaults to a stub
+//!   returning `this`; the remaining block-manager client calls
+//!   (0x081fbe4c, 0x081fc3f4, 0x081fc298, 0x081fc080, 0x081fc884)
 //!   default to failure/no-op stubs matching the no-manager state;
 //!   `queue_wait` @ 0x080b4adc defaults to a no-op (its result is
 //!   discarded by the only ported caller). `seg_dealloc` @ 0x08266f2c
@@ -136,6 +141,7 @@
 //!   device the manager exists before any pool is created.
 
 use crate::heap::block_region::REGION_MUTEX_OPS;
+use crate::heap::pool_client::ClientNode;
 use crate::kernel::kobj::Mailbox;
 
 /// Deque element stride in bytes (block descriptor objects).
@@ -221,9 +227,19 @@ pub struct PoolBase {
     /// the REGION_MUTEX_OPS boundary).
     pub mutex: [u32; 7],
     pub parent_mailbox: *mut Mailbox,
-    pub parent_flags: [u8; 4],
-    /// Parent-class name object (opaque).
-    pub name_state: [u32; 6],
+    /// +0x28 — parent mode byte the ctor zeroes; unread here.
+    pub parent_state: u8,
+    /// +0x29 — nonzero when the object shares the process-wide
+    /// block-manager client (`pool_client_attach`'s mode switch).
+    pub client_shared: u8,
+    /// +0x2a..+0x2c — alignment padding the original never touches.
+    pub parent_pad: [u8; 2],
+    /// +0x2c — the block manager's client registration node.
+    pub node: ClientNode,
+    /// +0x3c — the memoized client handle (`pool_client_attach`).
+    pub client_cache: *mut u8,
+    /// +0x40 — parent word the ctor zeroes; unread here.
+    pub parent_reserved: usize,
     pub fill_block_count: u32,
     pub fill_cap: u32,
     pub deque: BlockDeque,
@@ -237,8 +253,15 @@ mod layout_checks {
     const _: [u8; 0x04] = [0; core::mem::offset_of!(PoolBase, client_ref)];
     const _: [u8; 0x08] = [0; core::mem::offset_of!(PoolBase, mutex)];
     const _: [u8; 0x24] = [0; core::mem::offset_of!(PoolBase, parent_mailbox)];
-    const _: [u8; 0x28] = [0; core::mem::offset_of!(PoolBase, parent_flags)];
-    const _: [u8; 0x2c] = [0; core::mem::offset_of!(PoolBase, name_state)];
+    const _: [u8; 0x28] = [0; core::mem::offset_of!(PoolBase, parent_state)];
+    const _: [u8; 0x29] = [0; core::mem::offset_of!(PoolBase, client_shared)];
+    const _: [u8; 0x2c] = [0; core::mem::offset_of!(PoolBase, node)];
+    const _: [u8; 0x34] = [0; core::mem::offset_of!(ClientNode, client)
+        + core::mem::offset_of!(PoolBase, node)];
+    const _: [u8; 0x38] = [0; core::mem::offset_of!(ClientNode, owner)
+        + core::mem::offset_of!(PoolBase, node)];
+    const _: [u8; 0x3c] = [0; core::mem::offset_of!(PoolBase, client_cache)];
+    const _: [u8; 0x40] = [0; core::mem::offset_of!(PoolBase, parent_reserved)];
     const _: [u8; 0x44] = [0; core::mem::offset_of!(PoolBase, fill_block_count)];
     const _: [u8; 0x48] = [0; core::mem::offset_of!(PoolBase, fill_cap)];
     const _: [u8; 0x4c] = [0; core::mem::offset_of!(PoolBase, deque)];
@@ -297,30 +320,14 @@ pub struct PoolBaseOps {
     pub seg_dealloc: unsafe extern "C" fn(ptr: *mut u8, count: usize, elem: usize),
 }
 
-/// Default parent ctor stub: faithful subset — zeroes `client_ref` (the
-/// one parent field this cluster reads; the real ctor zeroes it too)
-/// and returns `this`.
-unsafe extern "C" fn stub_parent_construct(
-    this: *mut PoolBase,
-    _name: *const u8,
-    _flag: usize,
-) -> *mut PoolBase {
-    (*this).client_ref = core::ptr::null();
-    this
-}
-
 /// Default parent dtor stub: nothing of the parent is modeled — return
 /// `this` like the original chain.
 unsafe extern "C" fn stub_parent_destroy(this: *mut PoolBase) -> *mut PoolBase {
     this
 }
 
-/// Default client stubs: no block manager — attach/reserve/avail/
-/// populate report failure, the hand-back pair is a no-op.
-unsafe extern "C" fn stub_client_attach(_this: *mut PoolBase) -> i32 {
-    0
-}
-
+/// Default client stubs: no block manager — reserve/avail/populate
+/// report failure, the hand-back pair is a no-op.
 unsafe extern "C" fn stub_client_reserve(_client: *mut u8, _bytes: usize, _zero: usize) -> i32 {
     0
 }
@@ -350,11 +357,11 @@ unsafe extern "C" fn stub_queue_wait(_slot: *mut *mut Mailbox, _timeout: u32) ->
 /// Wired defaults (real ports where they exist, documented stubs for
 /// the unported block-manager client and parent class).
 pub(crate) const DEFAULT_POOL_BASE_OPS: PoolBaseOps = PoolBaseOps {
-    parent_construct: stub_parent_construct,
+    parent_construct: crate::heap::pool_client::pool_parent_construct,
     parent_destroy: stub_parent_destroy,
     mailbox_slot_create: crate::kernel::kobj::mailbox_slot_create,
     mailbox_slot_delete: crate::kernel::kobj::mailbox_slot_delete,
-    client_attach: stub_client_attach,
+    client_attach: crate::heap::pool_client::pool_client_attach,
     client_reserve: stub_client_reserve,
     client_avail: stub_client_avail,
     client_populate: stub_client_populate,

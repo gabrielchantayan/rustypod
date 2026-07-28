@@ -7,6 +7,7 @@ pub mod dcache;
 pub mod free_path;
 pub mod init;
 pub mod pool;
+pub mod pool_client;
 pub mod stats;
 pub mod types;
 pub mod veneers;
@@ -158,7 +159,8 @@ mod wiring_tests {
 
 /// End-to-end pool lifecycle proof: `pool_create` runs the whole ported
 /// call graph — control-struct allocation, the real base-subobject ctor
-/// (block_deque.rs), the real embedded-heap create (init.rs), the real
+/// (block_deque.rs) over the real parent ctor and client attach
+/// (pool_client.rs), the real embedded-heap create (init.rs), the real
 /// `block_deque_fill`, the real seed walk (deque accessor/iterator
 /// copies, `block_to_region_start`, `heap_add_region` carving real host
 /// memory), and the full real destroy chain (release, mailbox teardown,
@@ -174,8 +176,11 @@ mod wiring_tests {
 /// - the mask-ROM kernel-object dispatchers and the mailbox block's
 ///   os-heap pair (`KOBJ_HOOKS`): the ROM is not part of osos, and the
 ///   os-heap veneers route into the same target-only engine;
+/// - `POOL_CLIENT_OPS.client_alloc` (the real `operator new` for the
+///   0x170-byte block-manager client), for the same reason;
 /// - the unported 0x081fxxxx block-manager client
-///   (`POOL_BASE_OPS.client_*`) in the success tests, whose populate
+///   (`POOL_BASE_OPS.client_attach`/`client_*`) in the success tests,
+///   which short-circuit the real attach; its populate
 ///   stand-in builds a real deque segment the drain then really pops;
 /// - `POOL_BASE_OPS.seg_dealloc` in the success tests (the segments are
 ///   host buffers, not default-heap blocks).
@@ -188,6 +193,7 @@ mod pool_integration_tests {
     use crate::heap::block_deque::{self, BlockDeque, DequeIter, PoolBase};
     use crate::heap::block_region;
     use crate::heap::pool::{self, PoolControl};
+    use crate::heap::pool_client;
     use crate::heap::types::HeapDescriptor;
     use crate::kernel::kobj::{Mailbox, KobjHooks, KOBJ_HOOKS, DEFAULT_KOBJ_HOOKS};
     use std::sync::{Mutex, MutexGuard};
@@ -200,6 +206,7 @@ mod pool_integration_tests {
 
     static mut NEW_CALLS: usize = 0;
     static mut DELETE_CALLS: usize = 0;
+    static mut CLIENT_NEW_CALLS: usize = 0;
     static mut MBOX_ALLOCS: usize = 0;
     static mut MBOX_FREES: usize = 0;
     static mut ROM_CREATES: usize = 0;
@@ -227,8 +234,12 @@ mod pool_integration_tests {
     /// Region objects, addressed by host word index like
     /// block_region.rs: [_, start, mutex].
     static mut REGIONS: [[usize; 3]; 4] = [[0; 3]; 4];
-    /// The mailbox block the kobj heap stand-in hands out.
-    static mut MBOX_CELL: Mailbox = Mailbox { state: 0, id: 0 };
+    /// The mailbox blocks the kobj heap stand-in hands out (the parent
+    /// ctor makes one at +0x24, the derived ctor one at +0x78).
+    static mut MBOX_CELLS: [Mailbox; 2] =
+        [Mailbox { state: 0, id: 0 }, Mailbox { state: 0, id: 0 }];
+    /// Backing for the 0x170-byte block-manager client object.
+    static mut CLIENT_STORAGE: Buf<0x170> = Buf([0; 0x170]);
     /// Bump arena for the pool-alloc stand-in (the alloc-engine hole).
     static mut BUMP: Buf<0x4000> = Buf([0; 0x4000]);
     static mut BUMP_AT: usize = 0;
@@ -249,6 +260,12 @@ mod pool_integration_tests {
         assert_eq!(ptr, core::ptr::addr_of_mut!(CONTROL) as *mut u8);
     }
 
+    unsafe extern "C" fn client_new(size: usize) -> *mut u8 {
+        CLIENT_NEW_CALLS += 1;
+        assert_eq!(size, 0x170, "the block-manager client object size");
+        core::ptr::addr_of_mut!(CLIENT_STORAGE) as *mut u8
+    }
+
     unsafe extern "C" fn rom_create(_op: u32, slot: *mut u32) {
         ROM_CREATES += 1;
         *slot = 0x77;
@@ -260,14 +277,17 @@ mod pool_integration_tests {
     }
 
     unsafe extern "C" fn mbox_alloc(size: usize) -> *mut u8 {
+        assert_eq!(size, core::mem::size_of::<Mailbox>());
+        let cell = core::ptr::addr_of_mut!(MBOX_CELLS[MBOX_ALLOCS]);
         MBOX_ALLOCS += 1;
-        assert_eq!(size, 8);
-        core::ptr::addr_of_mut!(MBOX_CELL) as *mut u8
+        cell as *mut u8
     }
 
     unsafe extern "C" fn mbox_free(ptr: *mut u8) {
         MBOX_FREES += 1;
-        assert_eq!(ptr, core::ptr::addr_of_mut!(MBOX_CELL) as *mut u8);
+        let cells = core::ptr::addr_of!(MBOX_CELLS) as usize;
+        let off = ptr as usize - cells;
+        assert!(off < 2 * core::mem::size_of::<Mailbox>() && off % core::mem::size_of::<Mailbox>() == 0);
     }
 
     unsafe extern "C" fn elem_dtor(_elem: *mut u8) {
@@ -371,6 +391,13 @@ mod pool_integration_tests {
                 .write(block_deque::DEFAULT_POOL_BASE_OPS);
             core::ptr::addr_of_mut!(block_region::REGION_MUTEX_OPS)
                 .write(block_region::DEFAULT_REGION_MUTEX_OPS);
+            core::ptr::addr_of_mut!(pool_client::POOL_CLIENT_OPS)
+                .write(pool_client::DEFAULT_POOL_CLIENT_OPS);
+            core::ptr::addr_of_mut!(pool_client::SHARED_CLIENT)
+                .write(pool_client::SharedClientSlot {
+                    guard: 0,
+                    client: core::ptr::null_mut(),
+                });
             core::ptr::addr_of_mut!(crate::heap::init::HEAP_INIT_OPS)
                 .write(crate::heap::init::DEFAULT_HEAP_INIT_OPS);
             core::ptr::addr_of_mut!(crate::heap::free_path::HEAP_MUTEX_HOOKS)
@@ -381,6 +408,9 @@ mod pool_integration_tests {
             let ops = &mut *core::ptr::addr_of_mut!(pool::POOL_OPS);
             ops.new_control = std_new;
             ops.delete_control = std_delete;
+            // Same alloc-engine hole: the real client allocation is
+            // `operator new` into the target-only engine.
+            (*core::ptr::addr_of_mut!(pool_client::POOL_CLIENT_OPS)).client_alloc = client_new;
             let hooks = &mut *core::ptr::addr_of_mut!(KOBJ_HOOKS);
             *hooks = KobjHooks {
                 op_create: rom_create,
@@ -423,22 +453,32 @@ mod pool_integration_tests {
     fn create_without_a_client_fails_cleanly_through_the_real_chain() {
         let _guard = setup();
         unsafe {
-            // Wired default client_attach reports no block manager client:
-            // the fill gate fails and pool_create must clean up fully.
+            // The REAL client attach runs (pool_client.rs) and finds no
+            // block manager to construct a client from: the fill gate
+            // fails and pool_create must clean up fully.
             let pool = pool::pool_create(0x2000, NAME.as_ptr());
             assert!(pool.is_null());
             assert_eq!(NEW_CALLS, 1);
             assert_eq!(DELETE_CALLS, 1, "failed create frees the control struct");
-            assert_eq!(MBOX_ALLOCS, 1, "base ctor created the +0x78 mailbox");
-            assert_eq!(MBOX_FREES, 1, "base dtor deleted it");
-            assert_eq!(ROM_CREATES, 1);
+            assert_eq!(MBOX_ALLOCS, 2, "parent ctor +0x24, base ctor +0x78");
+            assert_eq!(MBOX_FREES, 1, "only the base dtor is ported (parent dtor is a stub)");
+            assert_eq!(ROM_CREATES, 2);
             assert_eq!(ROM_DELETES, 1);
             assert_eq!(ELEM_DTORS, 0, "deque never got elements");
+            // The attach reached the client ctor before refusing.
+            assert_eq!(CLIENT_NEW_CALLS, 1, "one 0x170-byte client attempt");
+            let base = core::ptr::addr_of_mut!(CONTROL) as *mut PoolBase;
+            assert!((*base).client_cache.is_null(), "nothing memoized");
+            assert_eq!(
+                (*base).node.name,
+                NAME.as_ptr(),
+                "the real parent ctor named the registration node"
+            );
+            assert_eq!((*base).client_shared, 1, "pool_init constructs with flag 1");
             assert!((*core::ptr::addr_of!(SEG_FREES)).is_empty());
             // The real fill ran far enough to store the computed counts
             // before the attach gate refused (they survive in the buffer
             // because the base dtor's release zeroed them — check zeroed).
-            let base = core::ptr::addr_of_mut!(CONTROL) as *mut PoolBase;
             assert_eq!((*base).fill_block_count, 0, "release_blocks zeroed");
             assert_eq!((*base).fill_cap, 0);
         }
