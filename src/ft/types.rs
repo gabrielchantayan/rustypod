@@ -13,6 +13,15 @@ pub struct FtVector {
     pub y: i32,
 }
 
+/// `FT_Int64` — FreeType's software 64-bit integer (ftcalc.c) as two
+/// 32-bit halves. 8 bytes on ARM (lo @ +0, hi @ +4).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FtInt64 {
+    pub lo: u32,
+    pub hi: u32,
+}
+
 /// `FT_Matrix` — 2x2 16.16 transform. 16 bytes on ARM
 /// (xx @ +0, xy @ +4, yx @ +8, yy @ +12).
 #[repr(C)]

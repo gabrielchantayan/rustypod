@@ -4143,14 +4143,22 @@ functions:
   - address: 0x080ed3b4
     ghidra: FUN_080ed3b4
     name: ft_add64
-    size: 40
-    status: identified
+    size: 68
+    sig: "void ft_add64(const FtInt64 *x, const FtInt64 *y, FtInt64 *z)"
+    module: ft/calc
+    status: ported
+    vars: {param_1: x, param_2: y, param_3: z}
     notes: >-
-      FreeType FT_Add64 - 64-bit add of two {lo,hi} FT_Int64 structs
-      through pointers, carry = (lo_sum < x.lo). 2 bl callers, both in
-      ported code (ft_divfix @ 0x0804c33c, ft_muldiv @ 0x0804d29c)
-      where the port inlines it bit-identically; a standalone port is
-      pointless until an unported caller appears.
+      FreeType FT_Add64 (ftcalc.c) - 64-bit add of two {lo,hi} FT_Int64
+      structs through pointers. lo = x.lo+y.lo wrapping, hi =
+      x.hi+y.hi+(lo<x.lo); the original spells the carry test as lo <
+      max(x.lo,y.lo) (movhi/movls then cmp), same predicate. Both
+      halves are register-computed before either store, so z may alias
+      x or y (tested). Size is 68 bytes per functions.csv, not the 40
+      of the earlier scouting note. 2 bl callers, both in ported code
+      (ft_divfix @ 0x0804c33c, ft_muldiv @ 0x0804d29c) which keep
+      inlining it bit-identically. FtInt64 layout lo/hi @ +0/+4
+      (ft/types). Port lowers to adds/adc.
 
   - address: 0x0804c1c4
     ghidra: FUN_0804c1c4

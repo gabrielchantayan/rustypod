@@ -43,7 +43,30 @@
 //!   divisor` overflow clamp to 0x7fffffff is kept verbatim. (0x0807c5b8
 //!   itself is outside this module's claimed range and stays unclaimed.)
 
-use crate::ft::types::FtMatrix;
+use crate::ft::types::{FtInt64, FtMatrix};
+
+/// ft_add64 (FreeType `FT_Add64`) — original: `FUN_080ed3b4`
+/// @ 0x080ed3b4 (68 bytes; 2 call sites, both inside this module's
+/// `ft_divfix`/`ft_muldiv` where the port inlines it).
+///
+/// `*z = *x + *y` on the software `FT_Int64` pair: `lo = x.lo + y.lo`
+/// (wrapping), `hi = x.hi + y.hi + (lo < x.lo)`. The original spells the
+/// carry test as `lo < max(x.lo, y.lo)` (`movhi`/`movls` then `cmp`),
+/// which is the same predicate. Both halves are computed from register
+/// copies before either store, so `z` may alias `x` or `y`.
+///
+/// # Safety
+/// `x`, `y` and `z` must be valid `FtInt64` pointers (the original does
+/// not null-check them).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_add64(x: *const FtInt64, y: *const FtInt64, z: *mut FtInt64) {
+    let (x, y) = (*x, *y);
+    let (lo, carry) = x.lo.overflowing_add(y.lo);
+    *z = FtInt64 {
+        lo,
+        hi: x.hi.wrapping_add(y.hi).wrapping_add(carry as u32),
+    };
+}
 
 /// Sign-propagating absolute value as the original computes it:
 /// `(x ^ (x >> 31)) - (x >> 31)`, wrapping — `i32::MIN` maps to
@@ -253,6 +276,81 @@ pub unsafe extern "C" fn ft_matrix_invert(matrix: *mut FtMatrix) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Reference `FT_Add64`: exact 64-bit wrapping addition of the two
+    /// {lo,hi} pairs.
+    fn add64_ref(x: FtInt64, y: FtInt64) -> FtInt64 {
+        let x64 = ((x.hi as u64) << 32) | x.lo as u64;
+        let y64 = ((y.hi as u64) << 32) | y.lo as u64;
+        let s = x64.wrapping_add(y64);
+        FtInt64 { lo: s as u32, hi: (s >> 32) as u32 }
+    }
+
+    fn i64pair(lo: u32, hi: u32) -> FtInt64 {
+        FtInt64 { lo, hi }
+    }
+
+    fn add64(x: FtInt64, y: FtInt64) -> FtInt64 {
+        let mut z = i64pair(0xdead_beef, 0xfeed_face);
+        unsafe { ft_add64(&x, &y, &mut z) };
+        z
+    }
+
+    #[test]
+    fn add64_carry_boundaries() {
+        assert_eq!(add64(i64pair(1, 0), i64pair(2, 0)), i64pair(3, 0));
+        // lo sum exactly 0xffffffff: no carry.
+        assert_eq!(
+            add64(i64pair(0xffff_fffe, 5), i64pair(1, 7)),
+            i64pair(0xffff_ffff, 12)
+        );
+        // lo sum wraps to 0: carry into hi.
+        assert_eq!(add64(i64pair(0xffff_ffff, 5), i64pair(1, 7)), i64pair(0, 13));
+        // hi wraps too — the whole 64-bit sum is modular.
+        assert_eq!(
+            add64(i64pair(0xffff_ffff, 0xffff_ffff), i64pair(1, 0)),
+            i64pair(0, 0)
+        );
+    }
+
+    #[test]
+    fn add64_matches_reference_on_randomized_inputs() {
+        let mut s: u32 = 0x1357_9bdf;
+        let mut rnd = || {
+            s ^= s << 13;
+            s ^= s >> 17;
+            s ^= s << 5;
+            s
+        };
+        for _ in 0..100_000 {
+            let x = i64pair(rnd(), rnd());
+            let y = i64pair(rnd(), rnd());
+            assert_eq!(add64(x, y), add64_ref(x, y), "{x:?} + {y:?}");
+        }
+        // Plus the extremes the random sweep will not hit.
+        for &lo in &[0u32, 1, 0x7fff_ffff, 0x8000_0000, 0xffff_ffff] {
+            for &hi in &[0u32, 1, 0x8000_0000, 0xffff_ffff] {
+                let x = i64pair(lo, hi);
+                for &lo2 in &[0u32, 1, 0xffff_ffff] {
+                    let y = i64pair(lo2, hi);
+                    assert_eq!(add64(x, y), add64_ref(x, y), "{x:?} + {y:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn add64_destination_may_alias_a_source() {
+        // The original loads both operands before either store.
+        let mut a = i64pair(0xffff_ffff, 1);
+        let b = i64pair(2, 3);
+        unsafe { ft_add64(&a, &b, &mut a) };
+        assert_eq!(a, i64pair(1, 5));
+        // z == x == y: doubling.
+        let mut c = i64pair(0x8000_0000, 0x1234);
+        unsafe { ft_add64(&c, &c, &mut c) };
+        assert_eq!(c, i64pair(0, 0x2469));
+    }
 
     /// Exact i64 reference for inputs whose magnitudes stay clear of the
     /// 32-bit wrapping paths: sign * ((|a| * |b| + 0x8000) >> 16).
