@@ -5997,6 +5997,30 @@ functions:
       accessor for class id 0x6600, registered @ 0x08101aa4. CLASS NOT
       IDENTIFIED, same reason as 0x08172124.
 
+  - address: 0x08103584
+    ghidra: FUN_08103584
+    name: instance_of_class_8300
+    size: 24
+    sig: "void *instance_of_class_8300(void)"
+    module: null
+    status: identified
+    notes: >-
+      One of the ten remaining per-class instance accessors, all the
+      same six instructions as the ported 0x081883fc - `push; load id;
+      bl 0x081d2184; pop; load the SAME id into r1; b 0x08275b9c`. The
+      whole set with its class ids, function start and size - 0x08103584
+      (0x8300, 24), 0x08103b88 (0x7600, 24), 0x0812f0a4 (0x4e00, 24),
+      0x081353e8 (0x8f00, 24), 0x0815e1ac (0x5680, 28), 0x0815ff34
+      (0x8700, 28), 0x0827f218 (0x5780, 28), 0x08284e2c (0x6180, 28),
+      0x08289690 (0x3280, 24), 0x0828ae68 (0x4180, 28). Named classes
+      among them - 0x8300 TPhotosSettingsSlideshowPlaylistCntlr, 0x7600
+      TSearchCntlr, 0x4e00 TCUnsupported, 0x8f00 TCEQSetting, 0x5680
+      TCSportTimer, 0x4180 TCNotesDispatcher (each recovered from the
+      literal its constructor hands to the class-name factory @
+      0x0820b230 next to its `bl 0x081d23f8`). Not ported - they add no
+      logic over the three that are, and app/registry.rs's
+      `instance_of_class` body covers them in one line each.
+
   - address: 0x081d23f8
     ghidra: FUN_081d23f8
     name: registry_register
