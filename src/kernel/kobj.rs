@@ -40,6 +40,16 @@
 //! - `waiter_wake` — `thunk_EXT_FUN_220041cc` @ 0x080567f8 (4 bytes:
 //!   `b 0x08037e78`). Pure tail branch onto the thunk for ROM 0x220041cc —
 //!   signal/wake the waiter object, r0 = id.
+//! - `mailbox_slot_create` — `FUN_0808e294` @ 0x0808e294 (20 bytes;
+//!   46 call sites, binary-verified — among them the pool base-subobject
+//!   ctor @ 0x08214210 and the parent-class ctor @ 0x081f0074).
+//!   `*slot = mailbox_create()` — installs a fresh mailbox block into a
+//!   caller-owned pointer slot.
+//! - `mailbox_slot_delete` — `FUN_080a6bec` @ 0x080a6bec (32 bytes;
+//!   28 call sites, binary-verified — among them the pool base-subobject
+//!   dtor @ 0x08214240). NULL-guarded teardown twin: deletes `*slot` via
+//!   `mailbox_delete` (`blne` @ 0x080a6bfc — the 1 mailbox_delete call
+//!   site) when non-NULL, then zeroes the slot unconditionally.
 //!
 //! On the task-lock pair: as documented in kernel/task_lock.rs, ROM
 //! 0x22003ea0 is a table-indexed id -> object-pointer load and ROM
@@ -225,6 +235,29 @@ pub unsafe extern "C" fn waiter_wait(id: u32, timeout: u32) -> u32 {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn waiter_wake(id: u32) {
     (hooks().rom_waiter_signal)(id);
+}
+
+/// mailbox_slot_create — original: `FUN_0808e294` @ 0x0808e294
+/// (20 bytes; 46 call sites).
+///
+/// Installs a freshly created mailbox block into the caller-owned slot.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn mailbox_slot_create(slot: *mut *mut Mailbox) {
+    *slot = mailbox_create();
+}
+
+/// mailbox_slot_delete — original: `FUN_080a6bec` @ 0x080a6bec
+/// (32 bytes; 28 call sites).
+///
+/// Deletes the slot's mailbox when one is installed, then zeroes the
+/// slot unconditionally (the original's `blne` + plain store).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn mailbox_slot_delete(slot: *mut *mut Mailbox) {
+    let block = *slot;
+    if !block.is_null() {
+        mailbox_delete(block);
+    }
+    *slot = core::ptr::null_mut();
 }
 
 #[cfg(test)]
@@ -463,6 +496,46 @@ pub(crate) mod tests {
         unsafe {
             waiter_wake(0x99);
             assert_eq!(drain(), vec![Call::Wake(0x99)]);
+        }
+    }
+
+    #[test]
+    fn mailbox_slot_create_installs_a_fresh_block() {
+        let _guard = mock_hooks();
+        unsafe {
+            let mut slot: *mut Mailbox = core::ptr::null_mut();
+            mailbox_slot_create(&mut slot);
+            assert_eq!(slot, core::ptr::addr_of_mut!(ALLOC_CELL));
+            assert_eq!((*slot).state, 0);
+            assert_eq!((*slot).id, MOCK_ID);
+            let calls = drain();
+            assert_eq!(calls.len(), 2, "one alloc + one ROM create");
+        }
+    }
+
+    #[test]
+    fn mailbox_slot_delete_tears_down_and_zeroes() {
+        let _guard = mock_hooks();
+        unsafe {
+            let block = core::ptr::addr_of_mut!(ALLOC_CELL);
+            (*block).id = 0x55;
+            let mut slot: *mut Mailbox = block;
+            mailbox_slot_delete(&mut slot);
+            assert!(slot.is_null(), "slot zeroed after delete");
+            let calls = drain();
+            assert_eq!(calls.len(), 4, "lock, unlock, ROM delete, free");
+            assert_eq!(calls[3], Call::Free(block as usize));
+        }
+    }
+
+    #[test]
+    fn mailbox_slot_delete_null_slot_is_a_no_op_but_still_zeroes() {
+        let _guard = mock_hooks();
+        unsafe {
+            let mut slot: *mut Mailbox = core::ptr::null_mut();
+            mailbox_slot_delete(&mut slot);
+            assert!(slot.is_null());
+            assert!(drain().is_empty(), "NULL mailbox never reaches delete");
         }
     }
 

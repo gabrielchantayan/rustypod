@@ -1816,7 +1816,230 @@ functions:
     notes: create 0x0826f658/alloc 0x0826f6a0/destroy 0x0826f7e4; 0x418-byte
       ctl struct, embedded heap desc +0x7c; alignments 4/16/32/1024 (recovered
       from serialized copy @ 0x089d6094); tag 0x2b; uncached path = D-cache
-      clean+invalidate + bit31 uncached alias.
+      clean+invalidate + bit31 uncached alias. POOL_OPS is now fully wired
+      to real ports, incl. the base-subobject ctor/dtor/fill and the seed
+      walk's deque accessor + iterator copies (heap/block_deque).
+
+  - address: 0x082141bc
+    ghidra: FUN_082141bc
+    name: pool_base_construct
+    size: 100
+    sig: "PoolBase *pool_base_construct(PoolBase *this, const char *name, usize flag)"
+    module: heap/block_deque
+    vars: {param_1: this, param_2: name, param_3: flag}
+    status: ported
+    notes: >-
+      Base-subobject ctor of the aligned pool (1 bl call site @
+      0x0826f7ac in pool_init, flag always 1, binary-verified). Parent
+      ctor bl 0x081f0050, vtable literal [0x08214220] = 0x08993120
+      (runtime-initialized RW data — image bytes stale, slots
+      unrecoverable, no serialized copy in the image), empty deque
+      (begin = end = NULL iters via a real 0x083d9eec call,
+      count/map/map_cap = 0 covering +0x6c/+0x70/+0x74), mailbox_slot_create
+      @ 0x0808e294 on +0x78. Ghidra's decompile is garbled (it invents a
+      value-returning FUN_081f0050 and misses that r0 stays this); the
+      asm is authoritative. Base layout (0x7c bytes): vtable +0x00,
+      client_ref +0x04, C++ recursive mutex +0x08, parent mailbox +0x24,
+      flag bytes +0x28/+0x29, name obj +0x2c, fill_block_count +0x44,
+      fill_cap +0x48, deque +0x4c, mailbox +0x78.
+
+  - address: 0x08214224
+    name: pool_base_destroy
+    size: 76
+    sig: "PoolBase *pool_base_destroy(PoolBase *this)"
+    module: heap/block_deque
+    status: ported
+    notes: >-
+      Non-deleting dtor chain; NOT in Ghidra's function list (it
+      decompiled the chain inlined into pool_destroy 0x0826f7e4, whose
+      tail b @ 0x0826f800 decodes to exactly 0x08214224 from the raw
+      word — the sole call site, binary-verified). Re-installs the class
+      vtable ([0x0821426c] = 0x08993120, same as the ctor), bl
+      0x08214158 (release blocks), mailbox_slot_delete @ 0x080a6bec on
+      +0x78, drains the deque via 0x083ddbdc while [this+0x6c] != 0,
+      tail b 0x081f00a0 (parent dtor, returns this).
+
+  - address: 0x08214158
+    ghidra: FUN_08214158
+    name: pool_base_release_blocks
+    size: 100
+    sig: "void pool_base_release_blocks(PoolBase *this)"
+    module: heap/block_deque
+    vars: {param_1: this}
+    status: ported
+    notes: >-
+      1 bl call site @ 0x08214238 (the dtor), binary-verified. Locks the
+      base mutex (+0x8) via the C++ recursive mutex thunk 0x082621a8; if
+      the deque is non-empty and the client handle (0x083d64f4 on
+      this+0x4, re-read before every call) is non-NULL, hands the
+      descriptors back: 0x081fc080(client, deque) then 0x081fc884(client);
+      zeroes fill_block_count/fill_cap (+0x44/+0x48); tail b 0x082621ac
+      (unlock — its status is the return value, ignored by the only
+      caller; port returns void). Ghidra's decompile inlines the whole
+      unlock body, making it look like mutex internals belong here.
+
+  - address: 0x08213fc4
+    ghidra: FUN_08213fc4
+    name: block_deque_fill
+    size: 280
+    sig: "i32 block_deque_fill(PoolBase *this, usize size, usize max)"
+    module: heap/block_deque
+    vars: {param_1: this, param_2: size, param_3: max}
+    status: ported
+    notes: >-
+      1 bl call site @ 0x0826f580 (pool_seed_regions, max always 2000),
+      binary-verified. Under the base mutex; size compared SIGNED (ble).
+      block_manager_get 0x0818ae48 (result discarded), block count =
+      __rt_udiv(region_block_size() + size - 1, region_block_size())
+      [two separate size reads] stored at +0x44, max at +0x48 (doubles
+      as the wait timeout); gate = client attach 0x081efc8c(this);
+      reserve 0x081fbe4c(client, count * block_size [32-bit mul], 0);
+      waits at most once (queue-get 0x080b4adc on the +0x78 mailbox,
+      timeout [this+0x48]) for 0x081fc3f4(client, 0x40000) headroom;
+      populate 0x081fc298(client, count, this+0x4c) is the return value.
+      Both post-reserve failure paths virtual-call [vtable+0x10]
+      (fill_failed; target unrecoverable, stale RW data) before
+      returning 0. The client handle is re-read via 0x083d64f4 before
+      every client call.
+
+  - address: 0x08214150
+    ghidra: FUN_08214150
+    name: deque_node_accessor
+    size: 8
+    sig: "BlockDeque *deque_node_accessor(PoolBase *this)"
+    module: heap/block_deque
+    status: ported
+    notes: >-
+      add r0, r0, #0x4c; bx lr — the base subobject's block deque. 1 bl
+      call site @ 0x0826f59c (pool_seed_regions), binary-verified.
+
+  - address: 0x083dd9e4
+    ghidra: FUN_083dd9e4
+    name: deque_iter_copy
+    size: 36
+    sig: "void deque_iter_copy(DequeIter *dst, usize r1_unused, const DequeIter *src)"
+    module: heap/block_deque
+    vars: {param_1: dst, param_3: src}
+    status: ported
+    notes: >-
+      Word-by-word 16-byte iterator copy; src travels in r2, r1 is never
+      read (both call sites happen to leave the deque pointer there) —
+      the export keeps the 3-argument ABI. 2 bl call sites @ 0x0826f5b0 /
+      0x0826f61c (pool_seed_regions), binary-verified. A twin with src
+      in r1 sits at 0x083d9ec8 (not ported).
+
+  - address: 0x083d9ec0
+    ghidra: FUN_083d9ec0
+    name: deque_seg_capacity
+    size: 8
+    sig: "usize deque_seg_capacity(void)"
+    module: heap/block_deque
+    status: ported
+    notes: >-
+      mov r0, #0x20; bx lr — elements per deque segment; 0x20 * 0x28 =
+      the 0x500-byte segment stride. 7 bl call sites, binary-verified.
+
+  - address: 0x083d9eec
+    ghidra: FUN_083d9eec
+    name: deque_iter_init
+    size: 68
+    sig: "DequeIter *deque_iter_init(DequeIter *iter, u8 *cur, u8 **slot)"
+    module: heap/block_deque
+    vars: {param_1: iter, param_2: cur, param_3: slot}
+    status: ported
+    notes: >-
+      cur as given; seg_base = *slot, seg_end = *slot +
+      deque_seg_capacity() * 0x28 (real call), both NULL when slot is
+      NULL; seg_slot = slot; returns iter. 9 bl call sites,
+      binary-verified (ctor, pop_front x2, 0x083ddxxx siblings).
+
+  - address: 0x083ddbdc
+    ghidra: FUN_083ddbdc
+    name: deque_pop_front
+    size: 204
+    sig: "void deque_pop_front(BlockDeque *dq)"
+    module: heap/block_deque
+    vars: {param_1: dq}
+    status: ported
+    notes: >-
+      Pops the front element: begin.cur += 0x28, count--, virtual-calls
+      the element dtor (element vtable slot 0 — descriptors are
+      polymorphic); when the segment is spent or the deque empties,
+      frees the segment via 0x08266f2c(seg, 0x20, 0), advances the map
+      slot, and re-anchors begin (or, empty, NULL-inits both iterators
+      and frees the map via 0x08266f2c(map, map_cap, 0) — map/map_cap
+      left dangling, faithful). Returns a garbage r0/r1 pair all 4
+      callers ignore (0x0814c724, 0x081fc0c8, dtor @ 0x08214250, drain
+      helper @ 0x083ddcbc — binary-verified); port returns void.
+
+  - address: 0x083d64f4
+    ghidra: FUN_083d64f4
+    name: client_handle_get
+    size: 16
+    sig: "u8 *client_handle_get(u8 ***ref_slot)"
+    module: heap/block_deque
+    status: ported
+    notes: >-
+      ldr r0,[r0]; cmp; ldrne r0,[r0] — the block-manager client handle
+      through the base object's two-level client ref (this+0x4);
+      NULL-guarded on the middle pointer.
+
+  - address: 0x08266f2c
+    ghidra: FUN_08266f2c
+    name: cxx_array_dealloc
+    size: 220
+    sig: "void cxx_array_dealloc(u8 *ptr, usize count, usize elem)"
+    module: heap/block_deque
+    status: identified
+    notes: >-
+      The C++ array deallocator: NULL-guarded; lazy default-heap init
+      (bl 0x08077250); panics via 0x08030f44 on a zero/already-free
+      header; then re-implements heap_free's accounting (class/tag
+      shorts at ptr-4/ptr-2, bin histogram via 0x080e837c, allocated
+      bytes) inline and inserts via 0x0819d314 under the heap mutex.
+      count/elem args are ignored. 276 bl/b call sites, binary-verified
+      — the deque machinery frees segments and maps through it. Not
+      ported: behaviorally equal to a NULL-guarded free_wrapper(ptr) to
+      the default heap (heap_free ignores its tag), which is exactly the
+      POOL_BASE_OPS.seg_dealloc default shim.
+
+  - address: 0x081f0050
+    ghidra: FUN_081f0050
+    name: pool_parent_construct
+    size: 80
+    sig: "PoolBase *pool_parent_construct(PoolBase *this, const char *name, u8 flag)"
+    module: heap/block_deque
+    status: identified
+    notes: >-
+      Parent-class ctor of the pool base subobject (0x0814xxxx/0x081fxxxx
+      block-manager territory — POOL_BASE_OPS.parent_construct boundary).
+      Own vtable [0x081f009c] = 0x0898ff7c (stale RW data too);
+      client_ref (+0x4) = 0; C++ recursive mutex init thunk 0x082621b0 on
+      +0x8; mailbox_slot_create @ 0x0808e294 on +0x24; flag bytes +0x28=0,
+      +0x29=flag; name obj ctor 0x081eff0c at +0x2c; +0x3c/+0x40 = 0.
+      The ported default stub reproduces the one field this cluster
+      reads (client_ref = NULL) and returns this. Dtor twin @ 0x081f00a0
+      (tail target of pool_base_destroy, parent_destroy boundary).
+
+  - address: 0x081efc8c
+    ghidra: FUN_081efc8c
+    name: pool_client_attach
+    size: 176
+    sig: "i32 pool_client_attach(PoolBase *this)"
+    module: heap/block_deque
+    status: identified
+    notes: >-
+      block_deque_fill's gate (POOL_BASE_OPS.client_attach boundary).
+      Under the base mutex: creates or joins the shared 0x170-byte
+      block-manager client object (operator new 0x082aadd4 +
+      0x081e6b34, optionally through a once-guard pair
+      0x082ab31c/0x082ab338 keyed on the +0x29 flag byte), caches it at
+      +0x3c/+0x34 with +0x38 = this, then registers via 0x081eff38
+      (which installs the two-level client ref at this+0x4). Related
+      boundaries, all unported block-manager client machinery:
+      reserve 0x081fbe4c, headroom 0x081fc3f4, populate 0x081fc298,
+      erase 0x081fc080 + commit 0x081fc884, queue-get wait 0x080b4adc
+      (wraps csem_wait 0x08056904 on the mailbox).
 
   - address: 0x08037cd0
     ghidra: FUN_08037cd0
@@ -3148,6 +3371,34 @@ functions:
       0x08037e40 -> 0x22003dc8, opcode 2) on the stack copy; zeroes
       block->id; os_free(block). No NULL guard. 1 caller (blne @
       0x080a6bfc). match.py structural match (blx via hook table).
+
+  - address: 0x0808e294
+    ghidra: FUN_0808e294
+    name: mailbox_slot_create
+    size: 20
+    sig: "void mailbox_slot_create(Mailbox **slot)"
+    module: kernel/kobj
+    status: ported
+    notes: >-
+      *slot = mailbox_create() — installs a fresh mailbox block into a
+      caller-owned pointer slot. 46 bl/b call sites, binary-verified;
+      among them the pool base-subobject ctor (bl @ 0x08214210, slot =
+      pool + 0x78) and the pool parent-class ctor (bl @ 0x081f0074,
+      slot = parent + 0x24).
+
+  - address: 0x080a6bec
+    ghidra: FUN_080a6bec
+    name: mailbox_slot_delete
+    size: 32
+    sig: "void mailbox_slot_delete(Mailbox **slot)"
+    module: kernel/kobj
+    status: ported
+    notes: >-
+      NULL-guarded teardown twin of mailbox_slot_create; deletes *slot
+      via mailbox_delete (the blne @ 0x080a6bfc — mailbox_delete's only
+      call site) and zeroes the slot unconditionally. 28 bl/b call
+      sites, binary-verified; among them the pool base-subobject dtor
+      (bl @ 0x08214240).
 
   - address: 0x08056788
     ghidra: FUN_08056788
