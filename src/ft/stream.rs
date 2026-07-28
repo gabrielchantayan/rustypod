@@ -7,7 +7,8 @@
 //! that translation unit. Call counts are binary-scanned b/bl words.
 //!
 //! The `__LINE__` literals the asserts carry order these functions
-//! exactly as upstream `ftstream.c` lays them out — `ExitFrame` 304,
+//! exactly as upstream `ftstream.c` lays them out — `EnterFrame` 235,
+//! `ExitFrame` 304,
 //! `GetChar` 328, `GetShort` 345, `GetShortLE` 364, `GetLong` 401,
 //! `ReadChar` 437, `ReadShort` 475, `ReadOffset` 569, `ReadLong` 616,
 //! `ReadLongLE` 662 — which is the second, independent confirmation of
@@ -16,6 +17,13 @@
 //! gaps are missing from the image entirely, dead-stripped: `GetOffset`
 //! (~383), `GetLongLE` (~419) and `ReadShortLE` (~520) have no assert
 //! line and no trace string anywhere in 0x0804c000..0x08051000.
+//!
+//! Three functions here are `ftobjs.c`'s rather than `ftstream.c`'s —
+//! [`ft_stream_new`], [`ft_stream_free`] and [`ft_stream_open`], the
+//! create/destroy/attach trio the face loader calls. They are kept in
+//! this module because they exist only to drive the stream object, and
+//! `ft_stream_new`'s `mov r1, #40` is what pins `sizeof( FT_StreamRec )`
+//! and therefore the `FtStream` layout below.
 //!
 //! Two independent cursors live in an `FtStream`, and the two reader
 //! families use one each:
@@ -46,11 +54,13 @@
 //! ftstream.c path string the original passes by pointer (runtime
 //! 0x089012e8); the port passes its own copy of the same text.
 
+use crate::ft::error::{
+    FT_ERR_INVALID_ARGUMENT, FT_ERR_INVALID_LIBRARY_HANDLE, FT_ERR_OK,
+};
+use crate::ft::memory::{ft_mem_alloc, ft_mem_free, ft_mem_qalloc, FtMemory};
 use crate::ft::trace::{ft_error_trace, ft_panic};
 
-/// `FT_Err_Invalid_Stream_Operation` — the `mov r0, #85` every failure
-/// path in this module stores through `error`.
-pub const FT_ERR_INVALID_STREAM_OPERATION: i32 = 0x55;
+pub use crate::ft::error::FT_ERR_INVALID_STREAM_OPERATION;
 
 /// `FT_Stream_IoFunc` — `read(stream, offset, buffer, count)` returning
 /// the number of bytes transferred. A seek is a call with a null buffer
@@ -67,9 +77,9 @@ pub type FtStreamCloseFunc = unsafe extern "C" fn(stream: *mut FtStream);
 
 /// `FT_StreamRec` as this build lays it out: `base` @ +0, `size` @ +4,
 /// `pos` @ +8, `descriptor` @ +12, `pathname` @ +16, `read` @ +20,
-/// `close` @ +24, `memory` @ +28, `cursor` @ +32, `limit` @ +36 — the
-/// four offsets the ported functions touch (+0, +4, +8, +0x14) are
-/// confirmed by the machine code.
+/// `close` @ +24, `memory` @ +28, `cursor` @ +32, `limit` @ +36 — every
+/// one of the ten confirmed by the machine code, and the whole record
+/// pinned to 40 bytes by [`ft_stream_new`]'s allocation.
 #[repr(C)]
 pub struct FtStream {
     pub base: *mut u8,
@@ -79,10 +89,46 @@ pub struct FtStream {
     pub pathname: *mut core::ffi::c_void,
     pub read: Option<FtStreamIoFunc>,
     pub close: Option<FtStreamCloseFunc>,
-    pub memory: *mut core::ffi::c_void,
+    pub memory: *mut FtMemory,
     pub cursor: *mut u8,
     pub limit: *mut u8,
 }
+
+/// `sizeof( FT_StreamRec )` — the `mov r1, #40` [`ft_stream_new`] hands
+/// the allocator. Checked on 32-bit targets, where the port's layout
+/// must be the original's byte for byte.
+#[cfg(target_pointer_width = "32")]
+const _: () = assert!(core::mem::size_of::<FtStream>() == 40);
+
+/// `FT_LibraryRec`'s first word. [`ft_stream_new`] reads `[library, #0]`
+/// and nothing else, so only that field is modelled here.
+#[repr(C)]
+pub struct FtLibrary {
+    pub memory: *mut FtMemory,
+}
+
+/// `FT_Open_Args` — how a caller describes the font to open. 32 bytes on
+/// ARM; [`ft_stream_new`] reads `flags` @ +0, `memory_base` @ +4,
+/// `memory_size` @ +8, `pathname` @ +12 and `stream` @ +16, which is the
+/// whole dispatch.
+#[repr(C)]
+pub struct FtOpenArgs {
+    pub flags: u32,
+    pub memory_base: *const u8,
+    pub memory_size: i32,
+    pub pathname: *mut core::ffi::c_void,
+    pub stream: *mut FtStream,
+    pub driver: *mut core::ffi::c_void,
+    pub num_params: i32,
+    pub params: *mut core::ffi::c_void,
+}
+
+/// `FT_OPEN_MEMORY` — `tst r0, #1` @ 0x0804f2a8.
+pub const FT_OPEN_MEMORY: u32 = 0x1;
+/// `FT_OPEN_STREAM` — `tst r0, #2` @ 0x0804f2e4.
+pub const FT_OPEN_STREAM: u32 = 0x2;
+/// `FT_OPEN_PATHNAME` — `tst r0, #4` @ 0x0804f2c0.
+pub const FT_OPEN_PATHNAME: u32 = 0x4;
 
 /// Trace strings, byte-for-byte as they sit in the original image.
 static SEEK_INVALID_IO: &[u8] = b"FT_Stream_Seek: invalid i/o; pos = 0x%lx, size = 0x%lx\n\0";
@@ -98,6 +144,9 @@ static READ_AT_INVALID_IO: &[u8] =
     b"FT_Stream_ReadAt: invalid i/o; pos = 0x%lx, size = 0x%lx\n\0";
 static READ_AT_TAG: &[u8] = b"FT_Stream_ReadAt:\0";
 static INVALID_READ: &[u8] = b" invalid read; expected %lu bytes, got %lu\n\0";
+static ENTER_FRAME_TAG: &[u8] = b"FT_Stream_EnterFrame:\0";
+static ENTER_FRAME_INVALID_IO: &[u8] =
+    b" invalid i/o; pos = 0x%lx, count = %lu, size = 0x%lx\n\0";
 
 /// `FT_ASSERT`'s message and the `__FILE__` these two readers pass.
 static ASSERTION_FAILED: &[u8] = b"assertion failed on line %d of file %s\n\0";
@@ -106,6 +155,8 @@ static FTSTREAM_C: &[u8] =
 
 /// `FT_ASSERT` `__LINE__` literals baked into each function, read out of
 /// its literal pool or `moveq r1, #imm`.
+const ASSERT_LINE_ENTER_FRAME: u32 = 235;
+const ASSERT_LINE_EXIT_FRAME: u32 = 304;
 const ASSERT_LINE_GET_CHAR: u32 = 328;
 const ASSERT_LINE_GET_SHORT: u32 = 345;
 const ASSERT_LINE_GET_SHORT_LE: u32 = 364;
@@ -116,28 +167,15 @@ const ASSERT_LINE_READ_OFFSET: u32 = 569;
 const ASSERT_LINE_READ_LONG: u32 = 616;
 const ASSERT_LINE_READ_LONG_LE: u32 = 662;
 
-/// `FT_ASSERT( stream )` — diverges through [`ft_panic`], exactly like
-/// the original, whose code after the call is unreachable.
-///
-/// # Safety
-/// Only called with a null `stream`; never returns.
-#[inline]
-unsafe fn assert_stream_failed(line: u32) -> ! {
-    ft_panic(
-        ASSERTION_FAILED.as_ptr(),
-        line,
-        FTSTREAM_C.as_ptr() as usize as u32,
-        0,
-    )
-}
-
-/// `FT_ASSERT( stream && stream->cursor )` — the frame readers' guard.
-/// Diverges through [`ft_panic`] exactly like the original.
+/// A failed `FT_ASSERT` in this file: every one of them passes the same
+/// message and `__FILE__`, differing only in `__LINE__`. Diverges
+/// through [`ft_panic`], exactly like the original, whose code after the
+/// call is unreachable.
 ///
 /// # Safety
 /// Never returns.
 #[inline]
-unsafe fn assert_frame_failed(line: u32) -> ! {
+unsafe fn assert_failed(line: u32) -> ! {
     ft_panic(
         ASSERTION_FAILED.as_ptr(),
         line,
@@ -155,6 +193,161 @@ unsafe fn assert_frame_failed(line: u32) -> ! {
 #[inline]
 unsafe fn frame_has(stream: *const FtStream, span: usize) -> bool {
     (*stream).cursor.add(span) < (*stream).limit
+}
+
+/// ft_stream_enter_frame (FreeType `FT_Stream_EnterFrame`) — original:
+/// `FUN_0804edb0` @ 0x0804edb0 (308 bytes; 35 `bl` call sites).
+///
+/// Maps a `count`-byte window as the frame the whole `FT_Stream_Get*`
+/// family then reads out of, and leaves `pos` just past it. The two
+/// stream flavors get there differently:
+///
+/// - a **memory** stream points `cursor` straight into `base + pos`,
+///   after checking `pos < size && pos + count <= size` (an unsigned,
+///   *wrapping* add, so a `count` near 2^32 wraps and sails through —
+///   quirk preserved and pinned by a test).
+/// - a **disk** stream [`ft_mem_qalloc`]s a `count`-byte buffer into
+///   `base` and reads the whole frame into it. Note `count` is an
+///   `FT_ULong` handed to a signed `FT_Long` parameter, so a request of
+///   2^31 or more is rejected as `FT_Err_Invalid_Argument` rather than
+///   attempted.
+///
+/// A short read is reported (two trace calls) and the buffer is freed —
+/// but `cursor`, `limit` and `pos` are still assigned afterwards, from
+/// the *freed* `base`, which by then is null. That is upstream's own
+/// fall-through, kept bug for bug: a failed `EnterFrame` leaves a null
+/// `cursor` and a `limit` of `count`.
+///
+/// A null `stream`, or one whose `cursor` is already non-null (upstream's
+/// "check for nested frame access"), hits the live `FT_ASSERT` and never
+/// returns.
+///
+/// # Safety
+/// `stream` must be null or valid, and its `memory` must be a usable
+/// [`FtMemory`] whenever `read` is set.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_stream_enter_frame(stream: *mut FtStream, count: u32) -> i32 {
+    if stream.is_null() || !(*stream).cursor.is_null() {
+        assert_failed(ASSERT_LINE_ENTER_FRAME);
+    }
+
+    let mut error = FT_ERR_OK;
+
+    if let Some(read) = (*stream).read {
+        let memory = (*stream).memory;
+        (*stream).base = ft_mem_qalloc(memory, count as i32, &mut error);
+        if error != FT_ERR_OK {
+            return error;
+        }
+
+        let read_bytes = read(stream, (*stream).pos, (*stream).base, count);
+        if read_bytes < count {
+            ft_error_trace(ENTER_FRAME_TAG.as_ptr(), 0, 0, 0);
+            ft_error_trace(INVALID_READ.as_ptr(), count, read_bytes, 0);
+            ft_mem_free(memory, (*stream).base);
+            (*stream).base = core::ptr::null_mut();
+            error = FT_ERR_INVALID_STREAM_OPERATION;
+        }
+
+        (*stream).cursor = (*stream).base;
+        (*stream).limit = (*stream).cursor.wrapping_add(count as usize);
+        (*stream).pos = (*stream).pos.wrapping_add(read_bytes);
+    } else {
+        let (pos, size) = ((*stream).pos, (*stream).size);
+        if pos >= size || pos.wrapping_add(count) > size {
+            ft_error_trace(ENTER_FRAME_TAG.as_ptr(), 0, 0, 0);
+            ft_error_trace(ENTER_FRAME_INVALID_IO.as_ptr(), pos, count, size);
+            return FT_ERR_INVALID_STREAM_OPERATION;
+        }
+
+        (*stream).cursor = (*stream).base.wrapping_add(pos as usize);
+        (*stream).limit = (*stream).cursor.wrapping_add(count as usize);
+        (*stream).pos = pos.wrapping_add(count);
+    }
+
+    error
+}
+
+/// ft_stream_exit_frame (FreeType `FT_Stream_ExitFrame`) — original:
+/// `FUN_0804ef8c` @ 0x0804ef8c (68 bytes; 33 `bl` + 1 `b` call sites).
+///
+/// Releases what [`ft_stream_enter_frame`] mapped: a disk stream's frame
+/// was heap-allocated, so `base` is freed and nulled (upstream's
+/// `FT_FREE`); a memory stream's frame pointed into the file image and
+/// is simply forgotten. `cursor` and `limit` are cleared either way,
+/// which is what re-arms the nested-frame assert in `EnterFrame`.
+///
+/// A null `stream` hits the live `FT_ASSERT` and never returns.
+///
+/// # Safety
+/// `stream` must be null or valid; a disk stream's `memory` must be the
+/// allocator its `base` came from.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_stream_exit_frame(stream: *mut FtStream) {
+    if stream.is_null() {
+        assert_failed(ASSERT_LINE_EXIT_FRAME);
+    }
+
+    if (*stream).read.is_some() {
+        ft_mem_free((*stream).memory, (*stream).base);
+        (*stream).base = core::ptr::null_mut();
+    }
+
+    (*stream).cursor = core::ptr::null_mut();
+    (*stream).limit = core::ptr::null_mut();
+}
+
+/// ft_stream_extract_frame (FreeType `FT_Stream_ExtractFrame`) —
+/// original: `FUN_0804effc` @ 0x0804effc (44 bytes; 12 `bl` + 1 `b` call
+/// sites).
+///
+/// [`ft_stream_enter_frame`] followed by handing the frame to the caller:
+/// `*pbytes` takes the cursor and the stream forgets it. That is an
+/// `ExitFrame` with the free left out — ownership of a disk stream's
+/// buffer moves to the caller, who must give it back through
+/// [`ft_stream_release_frame`]. `pbytes` is untouched when the enter
+/// fails.
+///
+/// # Safety
+/// As [`ft_stream_enter_frame`]; `pbytes` must be a valid pointer slot.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_stream_extract_frame(
+    stream: *mut FtStream,
+    count: u32,
+    pbytes: *mut *mut u8,
+) -> i32 {
+    let error = ft_stream_enter_frame(stream, count);
+    if error == FT_ERR_OK {
+        *pbytes = (*stream).cursor;
+        (*stream).cursor = core::ptr::null_mut();
+        (*stream).limit = core::ptr::null_mut();
+    }
+    error
+}
+
+/// ft_stream_release_frame (FreeType `FT_Stream_ReleaseFrame`) —
+/// original: `FUN_0804fcb8` @ 0x0804fcb8 (48 bytes; 19 `bl` + 1 `b` call
+/// sites).
+///
+/// Gives back what [`ft_stream_extract_frame`] handed out: a disk
+/// stream's block goes to the allocator, a memory stream's "block" was
+/// never allocated and is only forgotten. `*pbytes` is nulled either
+/// way — twice in the original (`str r5, [r4]` at 0x0804fcdc and again
+/// at 0x0804fce0), because upstream writes `FT_FREE( *pbytes )`, whose
+/// macro already nulls it, and then `*pbytes = NULL` again.
+///
+/// Unlike its siblings this one has no `FT_ASSERT` on `stream` — the
+/// pre-2.4 body.
+///
+/// # Safety
+/// `stream` must be valid; `pbytes` must be a valid pointer slot whose
+/// block, for a disk stream, came from `stream->memory`.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_stream_release_frame(stream: *mut FtStream, pbytes: *mut *mut u8) {
+    if (*stream).read.is_some() {
+        ft_mem_free((*stream).memory, *pbytes);
+    }
+    *pbytes = core::ptr::null_mut();
 }
 
 /// ft_stream_get_char (FreeType `FT_Stream_GetChar`) — original:
@@ -175,7 +368,7 @@ unsafe fn frame_has(stream: *const FtStream, span: usize) -> bool {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ft_stream_get_char(stream: *mut FtStream) -> i32 {
     if stream.is_null() || (*stream).cursor.is_null() {
-        assert_frame_failed(ASSERT_LINE_GET_CHAR);
+        assert_failed(ASSERT_LINE_GET_CHAR);
     }
     if !frame_has(stream, 0) {
         return 0;
@@ -198,7 +391,7 @@ pub unsafe extern "C" fn ft_stream_get_char(stream: *mut FtStream) -> i32 {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ft_stream_get_short(stream: *mut FtStream) -> i32 {
     if stream.is_null() || (*stream).cursor.is_null() {
-        assert_frame_failed(ASSERT_LINE_GET_SHORT);
+        assert_failed(ASSERT_LINE_GET_SHORT);
     }
     if !frame_has(stream, 1) {
         return 0;
@@ -220,7 +413,7 @@ pub unsafe extern "C" fn ft_stream_get_short(stream: *mut FtStream) -> i32 {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ft_stream_get_short_le(stream: *mut FtStream) -> i32 {
     if stream.is_null() || (*stream).cursor.is_null() {
-        assert_frame_failed(ASSERT_LINE_GET_SHORT_LE);
+        assert_failed(ASSERT_LINE_GET_SHORT_LE);
     }
     if !frame_has(stream, 1) {
         return 0;
@@ -241,7 +434,7 @@ pub unsafe extern "C" fn ft_stream_get_short_le(stream: *mut FtStream) -> i32 {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ft_stream_get_long(stream: *mut FtStream) -> i32 {
     if stream.is_null() || (*stream).cursor.is_null() {
-        assert_frame_failed(ASSERT_LINE_GET_LONG);
+        assert_failed(ASSERT_LINE_GET_LONG);
     }
     if !frame_has(stream, 3) {
         return 0;
@@ -302,6 +495,110 @@ pub unsafe extern "C" fn ft_stream_close(stream: *mut FtStream) {
     }
 }
 
+/// ft_stream_new (FreeType `FT_Stream_New`, ftobjs.c) — original:
+/// `FUN_0804f250` @ 0x0804f250 (232 bytes; 3 `bl` call sites).
+///
+/// Allocates an `FT_StreamRec` from the library's allocator and points
+/// it at whatever `args` describes, dispatching on `args->flags`:
+///
+/// - [`FT_OPEN_MEMORY`] — [`ft_stream_open_memory`] over
+///   `memory_base`/`memory_size`.
+/// - [`FT_OPEN_PATHNAME`] — [`ft_stream_open`], then `pathname` is
+///   recorded in the stream *whether or not the open succeeded*.
+/// - [`FT_OPEN_STREAM`] with a non-null `args->stream` — the fresh
+///   allocation is thrown away again and the caller's stream adopted.
+/// - anything else — `FT_Err_Invalid_Argument`.
+///
+/// On any failure the stream is freed and `*astream` set to null; on
+/// success `memory` is re-stamped into the stream (upstream's "just to
+/// be certain", which matters for the adopted-stream case) and the
+/// stream handed back.
+///
+/// Note the two argument checks run *before* `*astream` is cleared, so a
+/// null `library` or `args` leaves the caller's handle untouched — the
+/// one place this build's source differs from the upstream text, which
+/// clears it first.
+///
+/// The `mov r1, #40` here is `sizeof( FT_StreamRec )`; the port asks for
+/// `size_of::<FtStream>()`, which is that same 40 on the target.
+///
+/// # Safety
+/// `library`, `args` and `astream` must be null or valid; the library's
+/// `memory` must be a usable [`FtMemory`].
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_stream_new(
+    library: *mut FtLibrary,
+    args: *const FtOpenArgs,
+    astream: *mut *mut FtStream,
+) -> i32 {
+    if library.is_null() {
+        return FT_ERR_INVALID_LIBRARY_HANDLE;
+    }
+    if args.is_null() {
+        return FT_ERR_INVALID_ARGUMENT;
+    }
+
+    *astream = core::ptr::null_mut();
+
+    let memory = (*library).memory;
+    let mut error = FT_ERR_OK;
+    let mut stream =
+        ft_mem_alloc(memory, core::mem::size_of::<FtStream>() as i32, &mut error) as *mut FtStream;
+    if error != FT_ERR_OK {
+        return error;
+    }
+
+    (*stream).memory = memory;
+
+    let flags = (*args).flags;
+    if flags & FT_OPEN_MEMORY != 0 {
+        ft_stream_open_memory(stream, (*args).memory_base, (*args).memory_size as u32);
+    } else if flags & FT_OPEN_PATHNAME != 0 {
+        error = ft_stream_open(stream, (*args).pathname as *const u8);
+        (*stream).pathname = (*args).pathname;
+    } else if flags & FT_OPEN_STREAM != 0 && !(*args).stream.is_null() {
+        ft_mem_free(memory, stream as *mut u8);
+        stream = (*args).stream;
+    } else {
+        error = FT_ERR_INVALID_ARGUMENT;
+    }
+
+    if error == FT_ERR_OK {
+        (*stream).memory = memory;
+    } else {
+        ft_mem_free(memory, stream as *mut u8);
+        stream = core::ptr::null_mut();
+    }
+
+    *astream = stream;
+    error
+}
+
+/// ft_stream_free (FreeType `FT_Stream_Free`, ftobjs.c) — original:
+/// `FUN_0804f028` @ 0x0804f028 (52 bytes; 3 `bl` call sites).
+///
+/// Closes the stream and, unless the caller owns it (`external`),
+/// returns the record itself to the allocator — a tail branch into
+/// [`ft_mem_free`] with `memory` snapshotted *before* the close, since
+/// the close callback may scrub the record.
+///
+/// # Safety
+/// `stream` must be null or valid; its `memory` must be the allocator it
+/// came from when `external` is 0.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_stream_free(stream: *mut FtStream, external: i32) {
+    if stream.is_null() {
+        return;
+    }
+
+    let memory = (*stream).memory;
+    ft_stream_close(stream);
+
+    if external == 0 {
+        ft_mem_free(memory, stream as *mut u8);
+    }
+}
+
 /// ft_stream_pos (FreeType `FT_Stream_Pos`) — original: `FUN_0804f370`
 /// @ 0x0804f370 (8 bytes: `ldr r0, [r0, #8]`, `bx lr`; 17 call sites).
 ///
@@ -312,6 +609,28 @@ pub unsafe extern "C" fn ft_stream_close(stream: *mut FtStream) {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ft_stream_pos(stream: *const FtStream) -> u32 {
     (*stream).pos
+}
+
+/// ft_stream_open (FreeType `FT_Stream_Open`, the ftsystem.c hook) —
+/// original: `FUN_0804f338` @ 0x0804f338 (28 bytes; 1 `bl` call site,
+/// [`ft_stream_new`]).
+///
+/// Hands `(stream, pathname)` to the firmware's file layer
+/// ([`ft_platform_stream_open`](crate::ft::system::ft_platform_stream_open)
+/// @ 0x082d3ddc) and flattens its answer to FreeType's vocabulary: any
+/// non-zero status becomes `FT_Err_Cannot_Open_Resource`, so the several
+/// distinct firmware failures all reach FreeType as the same "no".
+///
+/// # Safety
+/// `stream` must be a valid `FtStream`; `pathname` must be a
+/// NUL-terminated path the platform layer accepts.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_stream_open(stream: *mut FtStream, pathname: *const u8) -> i32 {
+    if crate::ft::system::ft_platform_stream_open(stream, pathname) != 0 {
+        crate::ft::error::FT_ERR_CANNOT_OPEN_RESOURCE
+    } else {
+        FT_ERR_OK
+    }
 }
 
 /// ft_stream_read_at (FreeType `FT_Stream_ReadAt`) — original:
@@ -527,7 +846,7 @@ unsafe fn stream_frame(
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ft_stream_read_char(stream: *mut FtStream, error: *mut i32) -> i32 {
     if stream.is_null() {
-        assert_stream_failed(ASSERT_LINE_READ_CHAR);
+        assert_failed(ASSERT_LINE_READ_CHAR);
     }
     *error = 0;
     let mut result = 0u8;
@@ -584,7 +903,7 @@ pub unsafe extern "C" fn ft_stream_read_char(stream: *mut FtStream, error: *mut 
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ft_stream_read_short(stream: *mut FtStream, error: *mut i32) -> i32 {
     if stream.is_null() {
-        assert_stream_failed(ASSERT_LINE_READ_SHORT);
+        assert_failed(ASSERT_LINE_READ_SHORT);
     }
     *error = 0;
     let pos = (*stream).pos;
@@ -628,7 +947,7 @@ pub unsafe extern "C" fn ft_stream_read_short(stream: *mut FtStream, error: *mut
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ft_stream_read_offset(stream: *mut FtStream, error: *mut i32) -> i32 {
     if stream.is_null() {
-        assert_stream_failed(ASSERT_LINE_READ_OFFSET);
+        assert_failed(ASSERT_LINE_READ_OFFSET);
     }
     *error = 0;
     let pos = (*stream).pos;
@@ -669,7 +988,7 @@ pub unsafe extern "C" fn ft_stream_read_offset(stream: *mut FtStream, error: *mu
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ft_stream_read_long(stream: *mut FtStream, error: *mut i32) -> i32 {
     if stream.is_null() {
-        assert_stream_failed(ASSERT_LINE_READ_LONG);
+        assert_failed(ASSERT_LINE_READ_LONG);
     }
     *error = 0;
     let pos = (*stream).pos;
@@ -715,7 +1034,7 @@ pub unsafe extern "C" fn ft_stream_read_long(stream: *mut FtStream, error: *mut 
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ft_stream_read_long_le(stream: *mut FtStream, error: *mut i32) -> i32 {
     if stream.is_null() {
-        assert_stream_failed(ASSERT_LINE_READ_LONG_LE);
+        assert_failed(ASSERT_LINE_READ_LONG_LE);
     }
     *error = 0;
     let pos = (*stream).pos;
@@ -1884,6 +2203,488 @@ mod tests {
         }
         assert_eq!(&buffer[..2], &[1, 2]);
         assert_eq!(stream.pos, 2);
+    }
+
+    // ------------------------------------------------------------------
+    // The frame family and the ftobjs.c create/destroy trio.
+    // ------------------------------------------------------------------
+
+    use crate::ft::memory::test_memory::{self, TEST_MEMORY_LOCK};
+
+    /// Both locks, taken in one binding so no sub-case can shadow them.
+    fn frame_guards() -> (
+        std::sync::MutexGuard<'static, ()>,
+        std::sync::MutexGuard<'static, ()>,
+    ) {
+        (
+            TEST_TRACE_LOCK.lock().unwrap(),
+            TEST_MEMORY_LOCK.lock().unwrap(),
+        )
+    }
+
+    /// Reference `FT_Stream_EnterFrame` over a memory stream, straight
+    /// from upstream: `Some((cursor offset, limit offset, new pos))`, or
+    /// `None` for the `FT_Err_Invalid_Stream_Operation` path.
+    fn enter_frame_ref(size: u32, pos: u32, count: u32) -> Option<(u32, u32, u32)> {
+        if pos >= size || pos.wrapping_add(count) > size {
+            None
+        } else {
+            Some((pos, pos + count, pos + count))
+        }
+    }
+
+    #[test]
+    fn enter_frame_memory_stream_matches_reference_over_every_position_and_count() {
+        let source = [0x10u8, 0x20, 0x30, 0x40, 0x50, 0x60];
+        for pos in 0..8u32 {
+            for count in 0..9u32 {
+                let _guard = TEST_TRACE_LOCK.lock().unwrap();
+                let mut bytes = source;
+                let base = bytes.as_mut_ptr();
+                let mut stream = memory_stream(&mut bytes);
+                stream.pos = pos;
+                let (error, calls) = unsafe {
+                    capture::start();
+                    let e = ft_stream_enter_frame(&mut stream, count);
+                    (e, capture::finish())
+                };
+                match enter_frame_ref(6, pos, count) {
+                    Some((cursor, limit, new_pos)) => {
+                        assert_eq!(error, 0, "pos {pos} count {count}");
+                        assert_eq!(stream.cursor, unsafe { base.add(cursor as usize) });
+                        assert_eq!(stream.limit, unsafe { base.add(limit as usize) });
+                        assert_eq!(stream.pos, new_pos);
+                        assert!(calls.is_empty());
+                    }
+                    None => {
+                        assert_eq!(
+                            error, FT_ERR_INVALID_STREAM_OPERATION,
+                            "pos {pos} count {count}"
+                        );
+                        // Nothing mapped, nothing moved.
+                        assert!(stream.cursor.is_null());
+                        assert_eq!(stream.pos, pos);
+                        let formats = unsafe { capture::formats(&calls) };
+                        assert_eq!(formats.len(), 2);
+                        assert_eq!(formats[0], "FT_Stream_EnterFrame:");
+                        assert!(formats[1].starts_with(" invalid i/o;"));
+                        assert_eq!(calls[1].args, [pos, count, 6]);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn enter_frame_maps_a_window_the_get_family_then_reads() {
+        let _guard = TEST_TRACE_LOCK.lock().unwrap();
+        let mut bytes = [0x00u8, 0x01, 0x00, 0x00, 0x00, 0x0c, 0x2a, 0xff];
+        let mut stream = memory_stream(&mut bytes);
+        unsafe {
+            assert_eq!(ft_stream_enter_frame(&mut stream, 7), 0);
+            assert_eq!(stream.pos, 7);
+            assert_eq!(ft_stream_get_long(&mut stream), 0x0001_0000);
+            assert_eq!(ft_stream_get_short(&mut stream), 12);
+            assert_eq!(ft_stream_get_char(&mut stream), 42);
+            // The frame ends before the last byte, so the next read
+            // silently yields 0.
+            assert_eq!(ft_stream_get_char(&mut stream), 0);
+            ft_stream_exit_frame(&mut stream);
+        }
+        assert!(stream.cursor.is_null() && stream.limit.is_null());
+        // A memory stream's frame was never allocated, so `base` stays.
+        assert_eq!(stream.base, bytes.as_mut_ptr());
+    }
+
+    #[test]
+    fn enter_frame_count_wraps_at_the_top_of_the_address_space() {
+        // `pos + count` is a 32-bit add, so a huge count wraps below
+        // `size` and the window is accepted — upstream's own quirk.
+        let _guard = TEST_TRACE_LOCK.lock().unwrap();
+        let mut bytes = [0u8; 8];
+        let mut stream = memory_stream(&mut bytes);
+        stream.pos = 4;
+        unsafe {
+            assert_eq!(ft_stream_enter_frame(&mut stream, 0xffff_fffc), 0);
+        }
+        assert_eq!(stream.pos, 0);
+    }
+
+    #[test]
+    fn enter_frame_disk_stream_allocates_and_fills_the_frame() {
+        let guards = frame_guards();
+        unsafe {
+            let mut memory = test_memory::reset(false);
+            let mut stream = disk_stream(64);
+            stream.memory = &mut memory;
+            stream.pos = 3;
+            reset_io(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+
+            assert_eq!(ft_stream_enter_frame(&mut stream, 4), 0);
+            assert_eq!(
+                io_calls(),
+                vec![IoCall { offset: 3, buffer_is_null: false, count: 4 }]
+            );
+            assert_eq!(test_memory::alloc_calls(), 1);
+            assert!(!stream.base.is_null());
+            assert_eq!(stream.cursor, stream.base);
+            assert_eq!(stream.limit, stream.base.add(4));
+            assert_eq!(stream.pos, 7);
+            assert_eq!(
+                core::slice::from_raw_parts(stream.base, 4),
+                &[3u8, 4, 5, 6]
+            );
+
+            let block = stream.base;
+            ft_stream_exit_frame(&mut stream);
+            assert_eq!(test_memory::freed(), vec![block]);
+            assert!(stream.base.is_null());
+            assert!(stream.cursor.is_null() && stream.limit.is_null());
+        }
+        drop(guards);
+    }
+
+    #[test]
+    fn enter_frame_disk_stream_short_read_frees_the_block_but_still_maps_it() {
+        // Upstream's fall-through, kept bug for bug: the error path frees
+        // and nulls `base`, then the shared tail assigns cursor = base
+        // (null), limit = base + count (i.e. `count` as a pointer) and
+        // advances pos by whatever was read.
+        let guards = frame_guards();
+        unsafe {
+            let mut memory = test_memory::reset(false);
+            let mut stream = disk_stream(64);
+            stream.memory = &mut memory;
+            reset_io(&[0xaa; 16]);
+            *core::ptr::addr_of_mut!(IO_SHORT_BY) = 1;
+
+            capture::start();
+            let error = ft_stream_enter_frame(&mut stream, 8);
+            let calls = capture::finish();
+
+            assert_eq!(error, FT_ERR_INVALID_STREAM_OPERATION);
+            assert_eq!(test_memory::free_calls(), 1);
+            assert!(stream.base.is_null());
+            assert!(stream.cursor.is_null());
+            assert_eq!(stream.limit, 8usize as *mut u8);
+            assert_eq!(stream.pos, 7);
+            let formats = capture::formats(&calls);
+            assert_eq!(formats.len(), 2);
+            assert_eq!(formats[0], "FT_Stream_EnterFrame:");
+            assert!(formats[1].starts_with(" invalid read; expected"));
+            assert_eq!(calls[1].args, [8, 7, 0]);
+        }
+        drop(guards);
+    }
+
+    #[test]
+    fn enter_frame_disk_stream_rejects_a_count_the_allocator_reads_as_negative() {
+        // `count` is an FT_ULong handed to ft_mem_qalloc's signed
+        // FT_Long, so 2^31 and up come out negative and are refused with
+        // FT_Err_Invalid_Argument before any read happens.
+        let guards = frame_guards();
+        unsafe {
+            let mut memory = test_memory::reset(false);
+            let mut stream = disk_stream(64);
+            stream.memory = &mut memory;
+            reset_io(&[0; 16]);
+            assert_eq!(
+                ft_stream_enter_frame(&mut stream, 0x8000_0000),
+                FT_ERR_INVALID_ARGUMENT
+            );
+            assert_eq!(test_memory::alloc_calls(), 0);
+            assert!(io_calls().is_empty());
+            assert_eq!(stream.pos, 0);
+        }
+        drop(guards);
+    }
+
+    #[test]
+    fn enter_frame_disk_stream_reports_an_allocation_failure_untouched() {
+        let guards = frame_guards();
+        unsafe {
+            let mut memory = test_memory::reset(true);
+            let mut stream = disk_stream(64);
+            stream.memory = &mut memory;
+            reset_io(&[0; 16]);
+            capture::start();
+            let error = ft_stream_enter_frame(&mut stream, 8);
+            let calls = capture::finish();
+            assert_eq!(error, crate::ft::error::FT_ERR_OUT_OF_MEMORY);
+            assert!(calls.is_empty());
+            assert!(io_calls().is_empty());
+            assert!(stream.cursor.is_null());
+            assert_eq!(stream.pos, 0);
+        }
+        drop(guards);
+    }
+
+    #[test]
+    fn exit_frame_only_frees_a_disk_streams_block() {
+        let guards = frame_guards();
+        unsafe {
+            let mut memory = test_memory::reset(false);
+            let mut bytes = [1u8, 2, 3, 4];
+            let mut stream = memory_stream(&mut bytes);
+            stream.memory = &mut memory;
+            assert_eq!(ft_stream_enter_frame(&mut stream, 2), 0);
+            ft_stream_exit_frame(&mut stream);
+            assert_eq!(test_memory::free_calls(), 0);
+            assert_eq!(stream.base, bytes.as_mut_ptr());
+            assert!(stream.cursor.is_null() && stream.limit.is_null());
+        }
+        drop(guards);
+    }
+
+    #[test]
+    fn extract_frame_hands_the_block_over_and_release_gives_it_back() {
+        let guards = frame_guards();
+        unsafe {
+            let mut memory = test_memory::reset(false);
+            let mut stream = disk_stream(64);
+            stream.memory = &mut memory;
+            reset_io(&[0x11, 0x22, 0x33, 0x44]);
+
+            let mut bytes: *mut u8 = 1 as *mut u8;
+            assert_eq!(ft_stream_extract_frame(&mut stream, 4, &mut bytes), 0);
+            assert!(!bytes.is_null());
+            assert_eq!(core::slice::from_raw_parts(bytes, 4), &[0x11, 0x22, 0x33, 0x44]);
+            // The stream has forgotten the frame but has NOT freed it,
+            // and `base` still points at it.
+            assert!(stream.cursor.is_null() && stream.limit.is_null());
+            assert_eq!(stream.base, bytes);
+            assert_eq!(test_memory::free_calls(), 0);
+
+            ft_stream_release_frame(&mut stream, &mut bytes);
+            assert_eq!(test_memory::freed(), vec![stream.base]);
+            assert!(bytes.is_null());
+        }
+        drop(guards);
+    }
+
+    #[test]
+    fn extract_frame_leaves_pbytes_alone_when_the_enter_fails() {
+        let _guard = TEST_TRACE_LOCK.lock().unwrap();
+        let mut bytes = [1u8, 2];
+        let mut stream = memory_stream(&mut bytes);
+        let mut out = 0x55 as *mut u8;
+        unsafe {
+            capture::start();
+            assert_eq!(
+                ft_stream_extract_frame(&mut stream, 9, &mut out),
+                FT_ERR_INVALID_STREAM_OPERATION
+            );
+            capture::finish();
+        }
+        assert_eq!(out, 0x55 as *mut u8);
+    }
+
+    #[test]
+    fn release_frame_on_a_memory_stream_only_nulls_the_pointer() {
+        let guards = frame_guards();
+        unsafe {
+            let mut memory = test_memory::reset(false);
+            let mut bytes = [1u8, 2, 3, 4];
+            let mut stream = memory_stream(&mut bytes);
+            stream.memory = &mut memory;
+            let mut out = bytes.as_mut_ptr();
+            ft_stream_release_frame(&mut stream, &mut out);
+            assert_eq!(test_memory::free_calls(), 0);
+            assert!(out.is_null());
+            // Even a null block is left null, and never reaches the
+            // allocator.
+            ft_stream_release_frame(&mut stream, &mut out);
+            assert!(out.is_null());
+        }
+        drop(guards);
+    }
+
+    /// A library whose allocator is the test arena.
+    fn library(memory: *mut FtMemory) -> FtLibrary {
+        FtLibrary { memory }
+    }
+
+    fn open_args(flags: u32) -> FtOpenArgs {
+        FtOpenArgs {
+            flags,
+            memory_base: core::ptr::null(),
+            memory_size: 0,
+            pathname: core::ptr::null_mut(),
+            stream: core::ptr::null_mut(),
+            driver: core::ptr::null_mut(),
+            num_params: 0,
+            params: core::ptr::null_mut(),
+        }
+    }
+
+    #[test]
+    fn stream_new_rejects_a_null_library_or_args_without_touching_astream() {
+        let _guard = TEST_MEMORY_LOCK.lock().unwrap();
+        unsafe {
+            let mut memory = test_memory::reset(false);
+            let mut library = library(&mut memory);
+            let args = open_args(FT_OPEN_MEMORY);
+            let mut out = 0x1234 as *mut FtStream;
+            assert_eq!(
+                ft_stream_new(core::ptr::null_mut(), &args, &mut out),
+                FT_ERR_INVALID_LIBRARY_HANDLE
+            );
+            assert_eq!(out, 0x1234 as *mut FtStream);
+            assert_eq!(
+                ft_stream_new(&mut library, core::ptr::null(), &mut out),
+                FT_ERR_INVALID_ARGUMENT
+            );
+            assert_eq!(out, 0x1234 as *mut FtStream);
+            assert_eq!(test_memory::alloc_calls(), 0);
+        }
+    }
+
+    #[test]
+    fn stream_new_open_memory_produces_a_readable_memory_stream() {
+        let _guard = TEST_MEMORY_LOCK.lock().unwrap();
+        let bytes = [0xdeu8, 0xad, 0xbe, 0xef];
+        unsafe {
+            let mut memory = test_memory::reset(false);
+            let mut library = library(&mut memory);
+            let mut args = open_args(FT_OPEN_MEMORY);
+            args.memory_base = bytes.as_ptr();
+            args.memory_size = 4;
+            let mut out = core::ptr::null_mut();
+            assert_eq!(ft_stream_new(&mut library, &args, &mut out), 0);
+            assert!(!out.is_null());
+            assert_eq!((*out).base, bytes.as_ptr() as *mut u8);
+            assert_eq!(((*out).size, (*out).pos), (4, 0));
+            assert_eq!((*out).memory, &mut memory as *mut FtMemory);
+            assert!((*out).read.is_none() && (*out).close.is_none());
+            // The record came zeroed from ft_mem_alloc, so the fields
+            // FT_Stream_OpenMemory does not write are null.
+            assert!((*out).descriptor.is_null() && (*out).limit.is_null());
+
+            let mut error = 0;
+            assert_eq!(ft_stream_read_long(out, &mut error), 0xdead_beef_u32 as i32);
+        }
+    }
+
+    #[test]
+    fn stream_new_adopts_an_existing_stream_and_frees_the_fresh_one() {
+        let _guard = TEST_MEMORY_LOCK.lock().unwrap();
+        let mut bytes = [1u8, 2, 3, 4];
+        let mut existing = memory_stream(&mut bytes);
+        unsafe {
+            let mut memory = test_memory::reset(false);
+            let mut library = library(&mut memory);
+            let mut args = open_args(FT_OPEN_STREAM);
+            args.stream = &mut existing;
+            let mut out = core::ptr::null_mut();
+            assert_eq!(ft_stream_new(&mut library, &args, &mut out), 0);
+            assert_eq!(out, &mut existing as *mut FtStream);
+            // The throwaway allocation went straight back.
+            assert_eq!(test_memory::alloc_calls(), 1);
+            assert_eq!(test_memory::free_calls(), 1);
+            // "Just to be certain": the adopted stream gets the library's
+            // allocator stamped into it.
+            assert_eq!(existing.memory, &mut memory as *mut FtMemory);
+        }
+    }
+
+    #[test]
+    fn stream_new_rejects_an_unusable_flag_set_and_frees_the_stream() {
+        let _guard = TEST_MEMORY_LOCK.lock().unwrap();
+        unsafe {
+            let mut memory = test_memory::reset(false);
+            let mut library = library(&mut memory);
+            // FT_OPEN_STREAM with a null stream, and a flag set with none
+            // of the three bits, both land on FT_Err_Invalid_Argument.
+            for flags in [FT_OPEN_STREAM, 0, 0x10] {
+                let mut memory = test_memory::reset(false);
+                library.memory = &mut memory;
+                let args = open_args(flags);
+                let mut out = 0x1234 as *mut FtStream;
+                assert_eq!(
+                    ft_stream_new(&mut library, &args, &mut out),
+                    FT_ERR_INVALID_ARGUMENT,
+                    "flags {flags:#x}"
+                );
+                assert!(out.is_null(), "flags {flags:#x}");
+                assert_eq!(test_memory::free_calls(), 1, "flags {flags:#x}");
+            }
+        }
+    }
+
+    #[test]
+    fn stream_new_reports_an_allocation_failure_and_clears_astream() {
+        let _guard = TEST_MEMORY_LOCK.lock().unwrap();
+        unsafe {
+            let mut memory = test_memory::reset(true);
+            let mut library = library(&mut memory);
+            let args = open_args(FT_OPEN_MEMORY);
+            let mut out = 0x1234 as *mut FtStream;
+            assert_eq!(
+                ft_stream_new(&mut library, &args, &mut out),
+                crate::ft::error::FT_ERR_OUT_OF_MEMORY
+            );
+            // Cleared before the allocation, and left cleared.
+            assert!(out.is_null());
+        }
+    }
+
+    #[test]
+    fn stream_new_pathname_records_the_path_even_when_the_open_fails() {
+        let _guards = (
+            TEST_MEMORY_LOCK.lock().unwrap(),
+            crate::ft::system::TEST_OPS_LOCK.lock().unwrap(),
+        );
+        let path = b"0:/nowhere\0";
+        unsafe {
+            // No platform file layer installed, so every open fails.
+            assert!(crate::ft::system::ft_set_platform_file_ops(None).is_none());
+            let mut memory = test_memory::reset(false);
+            let mut library = library(&mut memory);
+            let mut args = open_args(FT_OPEN_PATHNAME);
+            args.pathname = path.as_ptr() as *mut core::ffi::c_void;
+            let mut out = 0x1234 as *mut FtStream;
+            assert_eq!(
+                ft_stream_new(&mut library, &args, &mut out),
+                crate::ft::error::FT_ERR_CANNOT_OPEN_RESOURCE
+            );
+            // The stream was freed and the handle cleared, but the
+            // pathname store happened first — on the record that is now
+            // back with the allocator.
+            assert!(out.is_null());
+            assert_eq!(test_memory::free_calls(), 1);
+        }
+    }
+
+    #[test]
+    fn stream_free_closes_and_returns_the_record_unless_it_is_external() {
+        let _guard = TEST_MEMORY_LOCK.lock().unwrap();
+        unsafe {
+            *core::ptr::addr_of_mut!(CLOSE_CALLS) = 0;
+            let mut memory = test_memory::reset(false);
+            let mut library = library(&mut memory);
+            let mut args = open_args(FT_OPEN_MEMORY);
+            args.memory_size = 0;
+            let mut out = core::ptr::null_mut();
+            assert_eq!(ft_stream_new(&mut library, &args, &mut out), 0);
+            (*out).close = Some(record_close);
+
+            ft_stream_free(out, 0);
+            assert_eq!(*core::ptr::addr_of!(CLOSE_CALLS), 1);
+            assert_eq!(test_memory::freed(), vec![out as *mut u8]);
+
+            // `external` keeps the record; the close still runs.
+            let mut memory = test_memory::reset(false);
+            library.memory = &mut memory;
+            assert_eq!(ft_stream_new(&mut library, &args, &mut out), 0);
+            (*out).close = Some(record_close);
+            ft_stream_free(out, 1);
+            assert_eq!(*core::ptr::addr_of!(CLOSE_CALLS), 2);
+            assert_eq!(test_memory::free_calls(), 0);
+
+            // A null stream is a no-op.
+            ft_stream_free(core::ptr::null_mut(), 0);
+            assert_eq!(*core::ptr::addr_of!(CLOSE_CALLS), 2);
+        }
     }
 
     // NOT TESTED, deliberately: the null-`stream` FT_ASSERT path. It

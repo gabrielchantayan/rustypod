@@ -7,6 +7,7 @@ pub mod error;
 pub mod memory;
 pub mod outline;
 pub mod stream;
+pub mod system;
 pub mod trace;
 pub mod trig;
 pub mod types;
