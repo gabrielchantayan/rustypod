@@ -18,6 +18,12 @@
 //! (~383), `GetLongLE` (~419) and `ReadShortLE` (~520) have no assert
 //! line and no trace string anywhere in 0x0804c000..0x08051000.
 //!
+//! With `FT_Stream_ReadFields` the module is complete: the linker sorted
+//! this translation unit alphabetically, and the 25 functions from
+//! `FT_Stream_Close` @ 0x0804ed9c to `FT_Stream_TryRead` @ 0x0804fd94
+//! are contiguous with no gaps left — the only names missing from that
+//! run are the three dead-stripped ones above.
+//!
 //! Three functions here are `ftobjs.c`'s rather than `ftstream.c`'s —
 //! [`ft_stream_new`], [`ft_stream_free`] and [`ft_stream_open`], the
 //! create/destroy/attach trio the face loader calls. They are kept in
@@ -348,6 +354,232 @@ pub unsafe extern "C" fn ft_stream_release_frame(stream: *mut FtStream, pbytes: 
         ft_mem_free((*stream).memory, *pbytes);
     }
     *pbytes = core::ptr::null_mut();
+}
+
+/// `FT_Frame_Field` — one row of a frame-description table. 4 bytes on
+/// ARM (`add r4, r4, #4` walks it): `value` @ +0, `size` @ +1,
+/// `offset` @ +2.
+#[repr(C)]
+pub struct FtFrameField {
+    /// One of the `FT_FRAME_*` opcodes below.
+    pub value: u8,
+    /// Width of the destination field in bytes (1, 2 or 4), or the byte
+    /// count for [`FT_FRAME_BYTES`]/[`FT_FRAME_SKIP`].
+    pub size: u8,
+    /// Byte offset of the destination field inside `structure` — or, for
+    /// [`FT_FRAME_START`], the frame length to enter.
+    pub offset: u16,
+}
+
+/// `FT_FRAME_OP_SIGNED` — bit 0 of an opcode, tested by `tst r0, #1`
+/// @ 0x0804f794. Upstream builds every opcode as
+/// `command << 2 | little << 1 | signed`.
+pub const FT_FRAME_OP_SIGNED: u8 = 1;
+
+/// `ft_frame_end` — and, with it, every opcode the original's jump table
+/// does not list (1..3, 5..7, 10, 11 and anything above 25): they all
+/// land on the `default:` arm, which writes the cursor back and returns
+/// the error so far.
+pub const FT_FRAME_END: u8 = 0;
+/// `ft_frame_start` — enter a frame of `offset` bytes.
+pub const FT_FRAME_START: u8 = 4;
+/// `ft_frame_byte` / `ft_frame_schar`.
+pub const FT_FRAME_BYTE: u8 = 8;
+pub const FT_FRAME_SCHAR: u8 = 9;
+/// `ft_frame_ushort_be` / `short_be` / `ushort_le` / `short_le`.
+pub const FT_FRAME_USHORT_BE: u8 = 12;
+pub const FT_FRAME_SHORT_BE: u8 = 13;
+pub const FT_FRAME_USHORT_LE: u8 = 14;
+pub const FT_FRAME_SHORT_LE: u8 = 15;
+/// `ft_frame_ulong_be` / `long_be` / `ulong_le` / `long_le`.
+pub const FT_FRAME_ULONG_BE: u8 = 16;
+pub const FT_FRAME_LONG_BE: u8 = 17;
+pub const FT_FRAME_ULONG_LE: u8 = 18;
+pub const FT_FRAME_LONG_LE: u8 = 19;
+/// `ft_frame_uoff3_be` / `off3_be` / `uoff3_le` / `off3_le`.
+pub const FT_FRAME_UOFF3_BE: u8 = 20;
+pub const FT_FRAME_OFF3_BE: u8 = 21;
+pub const FT_FRAME_UOFF3_LE: u8 = 22;
+pub const FT_FRAME_OFF3_LE: u8 = 23;
+/// `ft_frame_bytes` — copy `size` bytes into the structure.
+pub const FT_FRAME_BYTES: u8 = 24;
+/// `ft_frame_skip` — advance the cursor by `size` bytes.
+pub const FT_FRAME_SKIP: u8 = 25;
+
+/// ft_stream_read_fields (FreeType `FT_Stream_ReadFields`) — original:
+/// `FUN_0804f5d0` @ 0x0804f5d0 (508 bytes; 21 `bl` + 1 `b` call sites).
+///
+/// The table-driven struct loader the sfnt/truetype/type1 drivers use
+/// instead of hand-rolling reads: it walks `fields`, decoding one value
+/// per row out of the frame cursor and storing it at
+/// `structure + offset`. Rows may also open a frame
+/// ([`FT_FRAME_START`], which makes the function responsible for the
+/// matching [`ft_stream_exit_frame`]), copy a run of raw bytes
+/// ([`FT_FRAME_BYTES`]) or skip one ([`FT_FRAME_SKIP`]).
+///
+/// The opcode encoding is upstream's `command << 2 | little << 1 |
+/// signed`, and the original's jump table over 4..=25 is the
+/// independent confirmation of that: `ft_frame_start` is 4,
+/// `ft_frame_byte`/`schar` 8/9, the shorts 12..15, the longs 16..19, the
+/// 3-byte offsets 20..23 and bytes/skip 24/25 — with 5..7 and 10..11
+/// deliberately absent, since those bit patterns name no opcode. Every
+/// value is read unsigned and then sign-extended by shifting left and
+/// arithmetic-shifting back by 24/16/8/0, so the signed and unsigned
+/// variants share one decoder.
+///
+/// Two exits, and they differ: the `default:` arm (which is where
+/// `ft_frame_end` lands) writes the cursor back into the stream before
+/// leaving, while both *error* exits — a failed `FT_FRAME_START` and a
+/// [`FT_FRAME_BYTES`] run that would pass `limit` — leave `cursor`
+/// exactly as the last successful `EnterFrame` left it. Either way a
+/// frame this call opened is closed on the way out.
+///
+/// # Deviations
+///
+/// The original loads `stream->cursor` *before* testing its arguments
+/// (`ldr r1, [r0, #32]` @ 0x0804f5e0 sits above the `bne`), so a null
+/// `stream` reads address 0x20 and throws the result away; the port
+/// checks first. `FT_MEM_COPY` is the misalignment-capable ADS forward
+/// copy at 0x08000020 (through the iRAM veneer at 0x08037db0); the port
+/// uses [`memmove`](crate::libc::memmove::memmove), which reproduces it
+/// and additionally tolerates overlap the original does not need. The
+/// stores are `strb`/`strh`/`str` in the original and unaligned writes
+/// here, which agree whenever the original does not fault.
+///
+/// # Safety
+/// `stream` and `fields` must be null or valid; `fields` must end in a
+/// row whose opcode is not one of the listed ones (`FT_FRAME_END`);
+/// `structure` must have room for every row's `offset`/`size`; and the
+/// frame must cover every value the table reads — only the
+/// `FT_FRAME_BYTES`/`FT_FRAME_SKIP` rows are bounds-checked.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_stream_read_fields(
+    stream: *mut FtStream,
+    fields: *const FtFrameField,
+    structure: *mut u8,
+) -> i32 {
+    if fields.is_null() || stream.is_null() {
+        return FT_ERR_INVALID_ARGUMENT;
+    }
+
+    let mut fields = fields;
+    let mut cursor = (*stream).cursor;
+    let mut error = FT_ERR_OK;
+    let mut frame_accessed = false;
+
+    loop {
+        let op = (*fields).value;
+
+        // `value` is always accumulated unsigned; `sign_shift` says how
+        // far to shift it left and arithmetically back for the signed
+        // variants.
+        let (value, sign_shift): (u32, u32) = match op {
+            FT_FRAME_START => {
+                error = ft_stream_enter_frame(stream, (*fields).offset as u32);
+                if error != FT_ERR_OK {
+                    break;
+                }
+                frame_accessed = true;
+                cursor = (*stream).cursor;
+                fields = fields.add(1);
+                continue;
+            }
+
+            FT_FRAME_BYTES | FT_FRAME_SKIP => {
+                let len = (*fields).size as usize;
+                if cursor.wrapping_add(len) > (*stream).limit {
+                    error = FT_ERR_INVALID_STREAM_OPERATION;
+                    break;
+                }
+                if op == FT_FRAME_BYTES {
+                    crate::libc::memmove::memmove(
+                        structure.wrapping_add((*fields).offset as usize),
+                        cursor,
+                        len,
+                    );
+                }
+                cursor = cursor.wrapping_add(len);
+                fields = fields.add(1);
+                continue;
+            }
+
+            FT_FRAME_BYTE | FT_FRAME_SCHAR => {
+                let value = *cursor as u32;
+                cursor = cursor.wrapping_add(1);
+                (value, 24)
+            }
+
+            FT_FRAME_USHORT_BE | FT_FRAME_SHORT_BE => {
+                let value = ((*cursor as u32) << 8) | *cursor.add(1) as u32;
+                cursor = cursor.wrapping_add(2);
+                (value, 16)
+            }
+            FT_FRAME_USHORT_LE | FT_FRAME_SHORT_LE => {
+                let value = (*cursor as u32) | ((*cursor.add(1) as u32) << 8);
+                cursor = cursor.wrapping_add(2);
+                (value, 16)
+            }
+
+            FT_FRAME_ULONG_BE | FT_FRAME_LONG_BE => {
+                let value = ((*cursor as u32) << 24)
+                    | ((*cursor.add(1) as u32) << 16)
+                    | ((*cursor.add(2) as u32) << 8)
+                    | *cursor.add(3) as u32;
+                cursor = cursor.wrapping_add(4);
+                (value, 0)
+            }
+            FT_FRAME_ULONG_LE | FT_FRAME_LONG_LE => {
+                let value = (*cursor as u32)
+                    | ((*cursor.add(1) as u32) << 8)
+                    | ((*cursor.add(2) as u32) << 16)
+                    | ((*cursor.add(3) as u32) << 24);
+                cursor = cursor.wrapping_add(4);
+                (value, 0)
+            }
+
+            FT_FRAME_UOFF3_BE | FT_FRAME_OFF3_BE => {
+                let value = ((*cursor as u32) << 16)
+                    | ((*cursor.add(1) as u32) << 8)
+                    | *cursor.add(2) as u32;
+                cursor = cursor.wrapping_add(3);
+                (value, 8)
+            }
+            FT_FRAME_UOFF3_LE | FT_FRAME_OFF3_LE => {
+                let value = (*cursor as u32)
+                    | ((*cursor.add(1) as u32) << 8)
+                    | ((*cursor.add(2) as u32) << 16);
+                cursor = cursor.wrapping_add(3);
+                (value, 8)
+            }
+
+            _ => {
+                (*stream).cursor = cursor;
+                break;
+            }
+        };
+
+        let value = if op & FT_FRAME_OP_SIGNED != 0 {
+            (((value << sign_shift) as i32) >> sign_shift) as u32
+        } else {
+            value
+        };
+
+        let field = structure.wrapping_add((*fields).offset as usize);
+        match (*fields).size {
+            1 => field.write_unaligned(value as u8),
+            2 => field.cast::<u16>().write_unaligned(value as u16),
+            // Upstream's `default:` — a full `FT_ULong`, one word here.
+            _ => field.cast::<u32>().write_unaligned(value),
+        }
+
+        fields = fields.add(1);
+    }
+
+    if frame_accessed {
+        ft_stream_exit_frame(stream);
+    }
+
+    error
 }
 
 /// ft_stream_get_char (FreeType `FT_Stream_GetChar`) — original:
@@ -2684,6 +2916,400 @@ mod tests {
             // A null stream is a no-op.
             ft_stream_free(core::ptr::null_mut(), 0);
             assert_eq!(*core::ptr::addr_of!(CLOSE_CALLS), 2);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // FT_Stream_ReadFields.
+    // ------------------------------------------------------------------
+
+    fn field(value: u8, size: u8, offset: u16) -> FtFrameField {
+        FtFrameField { value, size, offset }
+    }
+
+    /// Reference `FT_Stream_ReadFields` over an already-entered frame,
+    /// transcribed from upstream: returns `(error, cursor index)` and
+    /// fills `structure`. Handles every opcode except `FT_FRAME_START`,
+    /// which needs a live stream.
+    fn read_fields_ref(
+        frame: &[u8],
+        fields: &[FtFrameField],
+        structure: &mut [u8],
+    ) -> (i32, usize) {
+        let mut cursor = 0usize;
+        for f in fields {
+            let (value, sign_shift): (u32, u32) = match f.value {
+                FT_FRAME_BYTES | FT_FRAME_SKIP => {
+                    let len = f.size as usize;
+                    if cursor + len > frame.len() {
+                        return (FT_ERR_INVALID_STREAM_OPERATION, cursor);
+                    }
+                    if f.value == FT_FRAME_BYTES {
+                        let at = f.offset as usize;
+                        structure[at..at + len].copy_from_slice(&frame[cursor..cursor + len]);
+                    }
+                    cursor += len;
+                    continue;
+                }
+                FT_FRAME_BYTE | FT_FRAME_SCHAR => {
+                    cursor += 1;
+                    (frame[cursor - 1] as u32, 24)
+                }
+                FT_FRAME_USHORT_BE | FT_FRAME_SHORT_BE => {
+                    cursor += 2;
+                    (u16::from_be_bytes([frame[cursor - 2], frame[cursor - 1]]) as u32, 16)
+                }
+                FT_FRAME_USHORT_LE | FT_FRAME_SHORT_LE => {
+                    cursor += 2;
+                    (u16::from_le_bytes([frame[cursor - 2], frame[cursor - 1]]) as u32, 16)
+                }
+                FT_FRAME_ULONG_BE | FT_FRAME_LONG_BE => {
+                    cursor += 4;
+                    (
+                        u32::from_be_bytes(frame[cursor - 4..cursor].try_into().unwrap()),
+                        0,
+                    )
+                }
+                FT_FRAME_ULONG_LE | FT_FRAME_LONG_LE => {
+                    cursor += 4;
+                    (
+                        u32::from_le_bytes(frame[cursor - 4..cursor].try_into().unwrap()),
+                        0,
+                    )
+                }
+                FT_FRAME_UOFF3_BE | FT_FRAME_OFF3_BE => {
+                    cursor += 3;
+                    let p = &frame[cursor - 3..cursor];
+                    (
+                        ((p[0] as u32) << 16) | ((p[1] as u32) << 8) | p[2] as u32,
+                        8,
+                    )
+                }
+                FT_FRAME_UOFF3_LE | FT_FRAME_OFF3_LE => {
+                    cursor += 3;
+                    let p = &frame[cursor - 3..cursor];
+                    (
+                        (p[0] as u32) | ((p[1] as u32) << 8) | ((p[2] as u32) << 16),
+                        8,
+                    )
+                }
+                _ => return (0, cursor),
+            };
+
+            let value = if f.value & FT_FRAME_OP_SIGNED != 0 {
+                (((value << sign_shift) as i32) >> sign_shift) as u32
+            } else {
+                value
+            };
+            let at = f.offset as usize;
+            let bytes = value.to_le_bytes();
+            let width = if f.size == 1 {
+                1
+            } else if f.size == 2 {
+                2
+            } else {
+                4
+            };
+            structure[at..at + width].copy_from_slice(&bytes[..width]);
+        }
+        (0, cursor)
+    }
+
+    /// Runs the port over `frame` mapped as a pre-entered frame.
+    fn run_read_fields(frame: &mut [u8], fields: &[FtFrameField], structure: &mut [u8]) -> (i32, usize) {
+        let base = frame.as_mut_ptr();
+        let mut stream = framed_stream(frame);
+        stream.cursor = base;
+        let error = unsafe {
+            ft_stream_read_fields(&mut stream, fields.as_ptr(), structure.as_mut_ptr())
+        };
+        (error, unsafe { stream.cursor.offset_from(base) } as usize)
+    }
+
+    #[test]
+    fn read_fields_rejects_a_null_stream_or_table() {
+        let mut bytes = [0u8; 4];
+        let mut stream = memory_stream(&mut bytes);
+        let fields = [field(FT_FRAME_END, 0, 0)];
+        let mut out = [0u8; 4];
+        unsafe {
+            assert_eq!(
+                ft_stream_read_fields(&mut stream, core::ptr::null(), out.as_mut_ptr()),
+                FT_ERR_INVALID_ARGUMENT
+            );
+            assert_eq!(
+                ft_stream_read_fields(core::ptr::null_mut(), fields.as_ptr(), out.as_mut_ptr()),
+                FT_ERR_INVALID_ARGUMENT
+            );
+        }
+    }
+
+    #[test]
+    fn read_fields_decodes_every_opcode_like_the_reference() {
+        // One row per opcode, each into its own 4-byte slot.
+        let ops = [
+            FT_FRAME_BYTE,
+            FT_FRAME_SCHAR,
+            FT_FRAME_USHORT_BE,
+            FT_FRAME_SHORT_BE,
+            FT_FRAME_USHORT_LE,
+            FT_FRAME_SHORT_LE,
+            FT_FRAME_ULONG_BE,
+            FT_FRAME_LONG_BE,
+            FT_FRAME_ULONG_LE,
+            FT_FRAME_LONG_LE,
+            FT_FRAME_UOFF3_BE,
+            FT_FRAME_OFF3_BE,
+            FT_FRAME_UOFF3_LE,
+            FT_FRAME_OFF3_LE,
+        ];
+        let source = [0x80u8, 0xff, 0x7f, 0x01, 0xfe, 0x00, 0x91, 0xa2, 0xb3, 0xc4, 0x00, 0x00];
+        for (index, &op) in ops.iter().enumerate() {
+            for &width in &[1u8, 2, 4] {
+                let mut frame = source;
+                let fields = [field(op, width, 0), field(FT_FRAME_END, 0, 0)];
+                let mut got = [0xccu8; 8];
+                let (error, cursor) = run_read_fields(&mut frame, &fields, &mut got);
+
+                let mut want = [0xccu8; 8];
+                let (want_error, want_cursor) = read_fields_ref(&source, &fields, &mut want);
+                assert_eq!(
+                    (error, cursor, got),
+                    (want_error, want_cursor, want),
+                    "op {op} ({index}) width {width}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn read_fields_sign_extends_only_the_odd_opcodes() {
+        // 0xff as a byte: schar -> -1, byte -> 255. Same pair at every
+        // width, which is what the shared 24/16/8/0 shift buys.
+        let mut frame = [0xffu8, 0xff, 0xff, 0xff, 0, 0, 0, 0];
+        for (op, want) in [
+            (FT_FRAME_BYTE, 0x0000_00ffu32),
+            (FT_FRAME_SCHAR, 0xffff_ffff),
+            (FT_FRAME_USHORT_BE, 0x0000_ffff),
+            (FT_FRAME_SHORT_BE, 0xffff_ffff),
+            (FT_FRAME_UOFF3_BE, 0x00ff_ffff),
+            (FT_FRAME_OFF3_BE, 0xffff_ffff),
+            (FT_FRAME_ULONG_BE, 0xffff_ffff),
+            (FT_FRAME_LONG_BE, 0xffff_ffff),
+        ] {
+            let fields = [field(op, 4, 0), field(FT_FRAME_END, 0, 0)];
+            let mut got = [0u8; 4];
+            let (error, _) = run_read_fields(&mut frame, &fields, &mut got);
+            assert_eq!((error, u32::from_le_bytes(got)), (0, want), "op {op}");
+        }
+    }
+
+    #[test]
+    fn read_fields_endianness_is_the_bit_1_of_the_opcode() {
+        // Hardcoded expectations, so this does not lean on the
+        // reference implementation sharing a mistake with the port.
+        let mut frame = [0x12u8, 0x34, 0x56, 0x78, 0, 0, 0, 0];
+        for (op, want) in [
+            (FT_FRAME_USHORT_BE, 0x0000_1234u32),
+            (FT_FRAME_USHORT_LE, 0x0000_3412),
+            (FT_FRAME_UOFF3_BE, 0x0012_3456),
+            (FT_FRAME_UOFF3_LE, 0x0056_3412),
+            (FT_FRAME_ULONG_BE, 0x1234_5678),
+            (FT_FRAME_ULONG_LE, 0x7856_3412),
+        ] {
+            let fields = [field(op, 4, 0), field(FT_FRAME_END, 0, 0)];
+            let mut got = [0u8; 4];
+            let (error, _) = run_read_fields(&mut frame, &fields, &mut got);
+            assert_eq!((error, u32::from_le_bytes(got)), (0, want), "op {op}");
+        }
+    }
+
+    #[test]
+    fn read_fields_narrow_stores_truncate_the_value() {
+        // `size` picks strb/strh/str; a sign-extended value stored into
+        // one byte keeps only its low byte.
+        let mut frame = [0x12u8, 0x34, 0x56, 0x78, 0, 0, 0, 0];
+        let fields = [field(FT_FRAME_ULONG_BE, 2, 2), field(FT_FRAME_END, 0, 0)];
+        let mut got = [0xffu8; 8];
+        let (error, cursor) = run_read_fields(&mut frame, &fields, &mut got);
+        assert_eq!((error, cursor), (0, 4));
+        // Only the two bytes at offset 2 moved.
+        assert_eq!(&got, &[0xff, 0xff, 0x78, 0x56, 0xff, 0xff, 0xff, 0xff]);
+    }
+
+    #[test]
+    fn read_fields_bytes_copies_and_skip_only_advances() {
+        let mut frame = [1u8, 2, 3, 4, 5, 6, 7, 8];
+        let fields = [
+            field(FT_FRAME_SKIP, 2, 0),
+            field(FT_FRAME_BYTES, 3, 1),
+            field(FT_FRAME_END, 0, 0),
+        ];
+        let mut got = [0xccu8; 8];
+        let (error, cursor) = run_read_fields(&mut frame, &fields, &mut got);
+        assert_eq!((error, cursor), (0, 5));
+        assert_eq!(&got, &[0xcc, 3, 4, 5, 0xcc, 0xcc, 0xcc, 0xcc]);
+
+        let mut want = [0xccu8; 8];
+        let source = [1u8, 2, 3, 4, 5, 6, 7, 8];
+        assert_eq!(read_fields_ref(&source, &fields, &mut want), (0, 5));
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn read_fields_bytes_past_the_limit_fails_without_writing_the_cursor_back() {
+        // `cursor + len > limit` is the only bound this function has,
+        // and the error exit skips the `stream->cursor = cursor`
+        // writeback the default arm does.
+        let mut frame = [1u8, 2, 3, 4];
+        let base = frame.as_mut_ptr();
+        let mut stream = framed_stream(&mut frame);
+        stream.cursor = base;
+        let fields = [
+            field(FT_FRAME_SKIP, 2, 0),
+            field(FT_FRAME_BYTES, 3, 0),
+            field(FT_FRAME_END, 0, 0),
+        ];
+        let mut got = [0xccu8; 8];
+        let error = unsafe {
+            ft_stream_read_fields(&mut stream, fields.as_ptr(), got.as_mut_ptr())
+        };
+        assert_eq!(error, FT_ERR_INVALID_STREAM_OPERATION);
+        assert_eq!(stream.cursor, base); // never written back
+        assert!(got.iter().all(|&b| b == 0xcc));
+        // Exactly `len` bytes left is still legal.
+        let fields = [
+            field(FT_FRAME_SKIP, 2, 0),
+            field(FT_FRAME_BYTES, 2, 0),
+            field(FT_FRAME_END, 0, 0),
+        ];
+        let (error, cursor) = run_read_fields(&mut frame, &fields, &mut got);
+        assert_eq!((error, cursor), (0, 4));
+    }
+
+    #[test]
+    fn read_fields_unlisted_opcodes_all_end_the_walk() {
+        // The jump table covers 4..=25 with holes: 5..7 and 10..11 name
+        // no opcode and fall to `default:` exactly like ft_frame_end.
+        let mut frame = [0xaau8; 8];
+        for op in [FT_FRAME_END, 1, 2, 3, 5, 6, 7, 10, 11, 26, 255] {
+            let fields = [
+                field(FT_FRAME_BYTE, 1, 0),
+                field(op, 4, 4),
+                field(FT_FRAME_BYTE, 1, 1),
+                field(FT_FRAME_END, 0, 0),
+            ];
+            let mut got = [0u8; 8];
+            let (error, cursor) = run_read_fields(&mut frame, &fields, &mut got);
+            assert_eq!((error, cursor), (0, 1), "op {op}");
+            // The second reader never ran.
+            assert_eq!(got, [0xaa, 0, 0, 0, 0, 0, 0, 0], "op {op}");
+        }
+    }
+
+    #[test]
+    fn read_fields_start_enters_a_frame_and_always_exits_it() {
+        let guards = frame_guards();
+        unsafe {
+            let mut memory = test_memory::reset(false);
+            let mut stream = disk_stream(64);
+            stream.memory = &mut memory;
+            reset_io(&[0x00, 0x01, 0x00, 0x00, 0x00, 0x0c, 0x2a, 0x99]);
+
+            let fields = [
+                field(FT_FRAME_START, 0, 7),
+                field(FT_FRAME_ULONG_BE, 4, 0),
+                field(FT_FRAME_USHORT_BE, 2, 4),
+                field(FT_FRAME_SCHAR, 1, 6),
+                field(FT_FRAME_END, 0, 0),
+            ];
+            let mut got = [0u8; 8];
+            assert_eq!(
+                ft_stream_read_fields(&mut stream, fields.as_ptr(), got.as_mut_ptr()),
+                0
+            );
+            assert_eq!(u32::from_le_bytes(got[0..4].try_into().unwrap()), 0x0001_0000);
+            assert_eq!(u16::from_le_bytes(got[4..6].try_into().unwrap()), 12);
+            assert_eq!(got[6], 42);
+            // The frame it opened is closed and its block returned.
+            assert!(stream.cursor.is_null() && stream.limit.is_null());
+            assert_eq!(test_memory::free_calls(), 1);
+            assert_eq!(stream.pos, 7);
+        }
+        drop(guards);
+    }
+
+    #[test]
+    fn read_fields_start_that_fails_reports_it_and_opens_no_frame() {
+        let _guard = TEST_TRACE_LOCK.lock().unwrap();
+        let mut bytes = [1u8, 2, 3];
+        let mut stream = memory_stream(&mut bytes);
+        let fields = [
+            field(FT_FRAME_START, 0, 9), // longer than the stream
+            field(FT_FRAME_BYTE, 1, 0),
+            field(FT_FRAME_END, 0, 0),
+        ];
+        let mut got = [0xccu8; 4];
+        let error = unsafe {
+            capture::start();
+            let e = ft_stream_read_fields(&mut stream, fields.as_ptr(), got.as_mut_ptr());
+            capture::finish();
+            e
+        };
+        assert_eq!(error, FT_ERR_INVALID_STREAM_OPERATION);
+        assert!(got.iter().all(|&b| b == 0xcc));
+        assert!(stream.cursor.is_null());
+    }
+
+    #[test]
+    fn read_fields_matches_the_reference_over_random_tables() {
+        let mut state = 0x2468_ace0_u32;
+        let readers = [
+            FT_FRAME_BYTE,
+            FT_FRAME_SCHAR,
+            FT_FRAME_USHORT_BE,
+            FT_FRAME_SHORT_BE,
+            FT_FRAME_USHORT_LE,
+            FT_FRAME_SHORT_LE,
+            FT_FRAME_ULONG_BE,
+            FT_FRAME_LONG_BE,
+            FT_FRAME_ULONG_LE,
+            FT_FRAME_LONG_LE,
+            FT_FRAME_UOFF3_BE,
+            FT_FRAME_OFF3_BE,
+            FT_FRAME_UOFF3_LE,
+            FT_FRAME_OFF3_LE,
+            FT_FRAME_BYTES,
+            FT_FRAME_SKIP,
+        ];
+        for _ in 0..500 {
+            let mut frame = [0u8; 32];
+            for byte in frame.iter_mut() {
+                *byte = next_random(&mut state) as u8;
+            }
+            let source = frame;
+
+            // A table whose reads always fit inside the 32-byte frame.
+            let mut fields = vec![];
+            let mut consumed = 0usize;
+            while consumed + 4 <= 24 {
+                let op = readers[(next_random(&mut state) % readers.len() as u32) as usize];
+                let size = match op {
+                    FT_FRAME_BYTES | FT_FRAME_SKIP => 4,
+                    _ => [1u8, 2, 4][(next_random(&mut state) % 3) as usize],
+                };
+                let offset = (next_random(&mut state) % 12) as u16 * 4;
+                fields.push(field(op, size, offset));
+                consumed += 4;
+            }
+            fields.push(field(FT_FRAME_END, 0, 0));
+
+            let mut got = [0xccu8; 64];
+            let (error, cursor) = run_read_fields(&mut frame, &fields, &mut got);
+            let mut want = [0xccu8; 64];
+            let (want_error, want_cursor) = read_fields_ref(&source, &fields, &mut want);
+            assert_eq!((error, cursor), (want_error, want_cursor));
+            assert_eq!(got, want);
         }
     }
 
