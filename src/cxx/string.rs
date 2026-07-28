@@ -75,6 +75,7 @@
 //!   one-to-one.
 
 use crate::heap::veneers::{operator_delete, operator_new_checked};
+use crate::libc::memcmp::memcmp;
 use crate::libc::memmove::memmove;
 use crate::libc::rt_memcpy::__rt_memcpy;
 use crate::libc::strlen::strlen;
@@ -694,6 +695,43 @@ pub unsafe extern "C" fn cxx_string_append_cstr(
     let size = (*data_rep(*string)).length;
     let length = strlen(source) as u32;
     cxx_string_replace_cstr(string, size, 0, source, length)
+}
+
+/// cxx_string_less — original: `FUN_083d74f4` @ 0x083d74f4
+/// (116 bytes, 34 `bl` call sites; the only copy of this body).
+///
+/// `std::less<basic_string>::operator()(const basic_string &a, const
+/// basic_string &b)` — lexicographic `a < b`, the ordering every
+/// string-keyed container in the OS sorts on. `memcmp` over
+/// `min(a.size(), b.size())` bytes first; on a tie the shorter string
+/// wins. The original computes the full three-way result and then keeps
+/// only its sign bit (`lsr r0, r0, #31`), so the return is 0 or 1.
+///
+/// Byte-safe: the comparison is length-driven, so embedded NULs order
+/// correctly. `this` arrives in r0 and is overwritten by the first
+/// load; it is kept in the signature so call sites transcribe
+/// one-to-one. Both lengths are re-read after the `memcmp` call, as the
+/// original does.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn cxx_string_less(
+    _this: *const u8,
+    a: *const *mut u8,
+    b: *const *mut u8,
+) -> u32 {
+    let a_length = (*data_rep(*a)).length;
+    let b_length = (*data_rep(*b)).length;
+    let shortest = if b_length < a_length { b_length } else { a_length };
+    let mut ordering = memcmp(*a, *b, shortest as usize);
+    if ordering == 0 {
+        let a_length = (*data_rep(*a)).length;
+        let b_length = (*data_rep(*b)).length;
+        ordering = match a_length.cmp(&b_length) {
+            core::cmp::Ordering::Less => -1,
+            core::cmp::Ordering::Equal => 0,
+            core::cmp::Ordering::Greater => 1,
+        };
+    }
+    (ordering as u32) >> 31
 }
 
 #[cfg(test)]
@@ -1454,6 +1492,46 @@ mod tests {
             // `n` past the end of `other` is clamped, not an error.
             cxx_string_append_substr(slot_ptr, &other, 8, 99);
             assert_eq!(text(slot_ptr), b"<345689");
+        }
+    }
+
+    /// Lexicographic order, checked against Rust's own slice ordering.
+    #[test]
+    fn less_matches_lexicographic_order() {
+        let _guard = arena();
+        let samples: [&[u8]; 8] = [b"", b"a", b"ab", b"abc", b"abd", b"b", b"ba", b"\0\0"];
+        unsafe {
+            for left in samples {
+                for right in samples {
+                    ARENA_USED = 0;
+                    let mut a: *mut u8 = core::ptr::null_mut();
+                    let mut b: *mut u8 = core::ptr::null_mut();
+                    build(&mut a, left);
+                    build(&mut b, right);
+                    let want = u32::from(left < right);
+                    assert_eq!(
+                        cxx_string_less(core::ptr::null(), &a, &b),
+                        want,
+                        "{left:?} < {right:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Length-driven, so embedded NULs participate in the ordering
+    /// rather than truncating it.
+    #[test]
+    fn less_orders_past_embedded_nuls() {
+        let _guard = arena();
+        unsafe {
+            let mut a: *mut u8 = core::ptr::null_mut();
+            let mut b: *mut u8 = core::ptr::null_mut();
+            build(&mut a, b"x\0a");
+            build(&mut b, b"x\0b");
+            assert_eq!(cxx_string_less(core::ptr::null(), &a, &b), 1);
+            assert_eq!(cxx_string_less(core::ptr::null(), &b, &a), 0);
+            assert_eq!(cxx_string_less(core::ptr::null(), &a, &a), 0, "strict");
         }
     }
 

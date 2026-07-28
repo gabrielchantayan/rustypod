@@ -1925,8 +1925,10 @@ functions:
       Word-by-word 16-byte iterator copy; src travels in r2, r1 is never
       read (both call sites happen to leave the deque pointer there) —
       the export keeps the 3-argument ABI. 2 bl call sites @ 0x0826f5b0 /
-      0x0826f61c (pool_seed_regions), binary-verified. A twin with src
-      in r1 sits at 0x083d9ec8 (not ported).
+      0x0826f61c (pool_seed_regions), binary-verified. A byte-pattern
+      scan of the whole image finds this r2 form EXACTLY ONCE; the
+      src-in-r1 twin has 17 byte-identical copies and is ported
+      separately as deque_iter_assign (canonical 0x083da458).
 
   - address: 0x083d9ec0
     ghidra: FUN_083d9ec0
@@ -1938,6 +1940,16 @@ functions:
     notes: >-
       mov r0, #0x20; bx lr — elements per deque segment; 0x20 * 0x28 =
       the 0x500-byte segment stride. 7 bl call sites, binary-verified.
+      This body is one of 17 BYTE-IDENTICAL copies, one per deque
+      instantiation, each immediately followed by that instantiation's
+      deque_iter_assign (8 + 36 bytes, adjacent — which is what
+      identifies the pair as the template's out-of-line members). Hook
+      any of them to this symbol. bl counts - 0x083d9fcc 18, 0x083da344
+      13, 0x083d9f5c 12, 0x083da1a8 12, 0x083da240 12, 0x083da450 11,
+      0x083d9ec0 7, 0x083da3dc 7, 0x081a81bc 5, 0x083da2d8 5, and
+      2 each at 0x083d9e94, 0x083d9f30, 0x083da17c, 0x083da214,
+      0x083da2ac, 0x083da3b0, 0x083da424 (116 calls in total).
+      0x081a81bc is the only copy outside the C++ block.
 
   - address: 0x083d9eec
     ghidra: FUN_083d9eec
@@ -7237,3 +7249,335 @@ functions:
       mutex lock 0x0807f5c4 / unlock 0x0807f6a0, both unported and in
       another agent's range). Returns dst. Not ported - the lock pair is
       the whole point of the function, so it should wait for those.
+
+  # --- Per-instantiation template members of the C++ block (cxx/templates) ---
+  # This block is full of families the compiler emitted once per template
+  # instantiation instead of sharing. Each family needs ONE port; every
+  # copy in it can be hooked to that symbol. Families found by scanning
+  # the image for the exact byte pattern of each body (osos.asm is
+  # missing lines and undercounts, so all counts below are from decoding
+  # bl/b words in work/firmware/osos.dec):
+  #   handle_deref_or_null  22 copies  725 calls  -> cxx/handle
+  #   container_element_at  30 copies  154 calls  -> cxx/templates
+  #   deque_iter_assign     17 copies   99 calls  -> cxx/templates
+  #   deque_seg_capacity    17 copies  116 calls  -> heap/block_deque
+  #   vector_size_elem*     28 copies  276 calls  -> cxx/templates
+  #   less_unsigned         12 copies   73 calls  -> cxx/templates
+  #   container_is_empty     9 copies   92 calls  -> identified
+  #   not_equal_deref        5 copies   35 calls  -> identified
+
+  - address: 0x083da458
+    ghidra: FUN_083da458
+    name: deque_iter_assign
+    size: 36
+    sig: "u32 *deque_iter_assign(u32 *dst, const u32 *src)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: dst, param_2: src}
+    notes: >-
+      Word-by-word 16-byte deque-iterator copy (cur, seg_base, seg_end,
+      seg_slot), dst in r0 and src in r1, returning dst untouched. 17
+      BYTE-IDENTICAL copies, each sitting immediately after that
+      instantiation's deque_seg_capacity (8 + 36 bytes, adjacent - which
+      is what identifies the pair as the deque template's out-of-line
+      members). Distinct from deque_iter_copy @ 0x083dd9e4, which is the
+      same four-word copy with the source in r2 and exists exactly once.
+      bl counts (99 total) - 0x083da458 31, 0x083d9fd4 22, 0x083da34c 6,
+      0x0824c774 5, 0x083d9f64 4, 0x083da1b0 4, 0x083da248 4,
+      0x083da42c 4, 0x083d9ec8 3, and 2 each at 0x0824c734, 0x083d9e9c,
+      0x083d9f38, 0x083da184, 0x083da21c, 0x083da2b4, 0x083da2e0,
+      0x083da3b8. 0x0824c734/0x0824c774 are the only copies outside the
+      C++ block.
+
+  - address: 0x083d7580
+    ghidra: FUN_083d7580
+    name: less_signed
+    size: 24
+    sig: "u32 less_signed(void *this, const i32 *a, const i32 *b)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: this, param_2: a, param_3: b}
+    notes: >-
+      45 bl call sites; the only copy of this body in the image.
+      `std::less<int>::operator()(const int &, const int &)` - the
+      operands arrive by reference so both are dereferenced, and `this`
+      (r0) is overwritten by the first load. `movge 0 / movlt 1`.
+
+  - address: 0x083d7598
+    ghidra: FUN_083d7598
+    name: less_unsigned
+    size: 24
+    sig: "u32 less_unsigned(void *this, const u32 *a, const u32 *b)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: this, param_2: a, param_3: b}
+    notes: >-
+      less_signed with `movcs 0 / movcc 1` - an unsigned compare. That
+      the unsigned form has 12 byte-identical copies and the signed form
+      one is the only thing that distinguishes the two families in the
+      image. bl counts (73 total) - 0x083d7598 20, 0x083d7404 7, and
+      then 0x083d7434, 0x083d744c, 0x083d7464, 0x083d747c, 0x083d74ac,
+      0x083d74c4, 0x083d74dc, 0x083d7568 at 5 each, 0x083d741c and
+      0x083d7494 at 3 each.
+
+  - address: 0x083d5efc
+    ghidra: FUN_083d5efc
+    name: container_element_at
+    size: 24
+    sig: "void *container_element_at(void *this, usize index)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: this, param_2: index}
+    notes: >-
+      `T *operator[](size_t)`. Dispatches through the container's OWN
+      vtable at byte offset 0x40 (slot 16) to get the address of the
+      element slot, then loads the element pointer out of it -
+      `*(vfn40(this, index))`. Confirmed against call sites - callers
+      pass a loop counter in r1 and NULL-test the result (0x0839bdd4,
+      0x081b1564). The `push {r4, lr}` saves nothing (r4 is never
+      touched); it is stack alignment. 30 BYTE-IDENTICAL copies, 154 bl
+      sites - 0x083d5efc 13, 0x083d5f14 11, 0x083d6bc0 10, 0x083d5f44 8,
+      0x0829bac0 7, 0x083d6870 7, 0x083d6c2c 7, 0x083d5f2c 6,
+      0x083d5f74 6, 0x083d5fec 6, 0x083d689c 6, 0x083d6bec 6,
+      0x083d6908 5, 0x083d6a68 5, 0x083d6b14 5, 0x083d6b6c 5,
+      0x083d5f5c 4, 0x083d5fbc 4, 0x083d6aa8 4, 0x083d6ad4 4,
+      0x083d6b40 4, 0x083d6c6c 4, 0x083d68dc 3, 0x083d69d8 3,
+      0x083d5f8c 2, 0x083d5fa4 2, 0x083d6818 2, 0x083d6844 2,
+      0x083d6998 2, 0x083d5fd4 1. 0x0829bac0 is the only copy outside
+      the C++ block. The port reads the vtable by SLOT INDEX (0x40/4),
+      not byte offset, so it is correct on a 64-bit test host.
+
+  - address: 0x083d48dc
+    ghidra: FUN_083d48dc
+    name: array_at_checked
+    size: 28
+    sig: "void *array_at_checked(const PtrArray *array, i32 index)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: array, param_2: index}
+    notes: >-
+      `index >= 0 && index < count ? base[index] : NULL` over a
+      {base at +0, count at +4} pointer array. Both tests are SIGNED
+      (`cmp r1,#0` then `cmpge r2,r1` with a gt/le split), so a negative
+      index is rejected rather than wrapping. Fully predicated in the
+      original - `base` is loaded only on the in-range path, so an empty
+      array never touches it. 40 bl sites here plus 3 at the
+      byte-identical copy 0x083d5500.
+
+  - address: 0x083d76d8
+    ghidra: FUN_083d76d8
+    name: vector_size_elem4
+    size: 16
+    sig: "i32 vector_size_elem4(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      `vector<T>::size()` for a 4-byte element - `ldm r0,{r0,r1}; sub
+      r0,r1,r0; asr r0,r0,#2; bx lr` over the {begin, end} head. The
+      shift is ARITHMETIC, so a reversed vector yields a negative count.
+      17 BYTE-IDENTICAL copies, 140 bl sites - 0x083d76d8 20,
+      0x083d7a48 18, 0x083d7944 17, 0x083d78c4 11, 0x083d7924 10,
+      0x083d76e8 9, 0x083d77cc 7, 0x083d7904 7, 0x083d78e4 6,
+      0x083d7914 5, 0x083d78f4 5, 0x083d7a68 5, 0x083d76c8 4,
+      0x083d78d4 4, 0x083d7934 4, 0x083d7a38 4, 0x083d7a58 4.
+
+  - address: 0x083d7860
+    ghidra: FUN_083d7860
+    name: vector_size_elem8
+    size: 16
+    sig: "i32 vector_size_elem8(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      vector_size_elem4 with `asr #3`. 4 byte-identical copies, 50 bl
+      sites - 0x083d7860 14, 0x083d76a4 14, 0x083d7a88 13,
+      0x083d7664 9.
+
+  - address: 0x083d7884
+    ghidra: FUN_083d7884
+    name: vector_size_elem16
+    size: 16
+    sig: "i32 vector_size_elem16(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      vector_size_elem4 with `asr #4`. 6 byte-identical copies, 78 bl
+      sites - 0x083d7884 19, 0x083d7798 14, 0x083d7684 12,
+      0x083d7694 12, 0x083d7674 11, 0x083d78b4 10.
+
+  - address: 0x083d78a4
+    ghidra: FUN_083d78a4
+    name: vector_size_elem32
+    size: 16
+    sig: "i32 vector_size_elem32(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      vector_size_elem4 with `asr #5`. 8 bl call sites; the only copy of
+      this shift.
+
+  - address: 0x083d74f4
+    ghidra: FUN_083d74f4
+    name: cxx_string_less
+    size: 116
+    sig: "u32 cxx_string_less(void *this, char *const *a, char *const *b)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: this, param_2: a, param_3: b}
+    notes: >-
+      34 bl call sites; the only copy. `std::less<basic_string>` -
+      lexicographic `a < b`, the ordering every string-keyed container
+      in the OS sorts on. memcmp @ 0x08030f64 (ported) over
+      min(a.size(), b.size()) bytes, staged on the stack and selected
+      with `movcc/addcs` on an address (a min, transcribed as such); on
+      a tie the shorter string wins. The original computes the full
+      three-way result and then keeps only its sign bit
+      (`lsr r0,r0,#31`), so the return is 0 or 1. Length-driven, so
+      embedded NULs order correctly. `this` (r0) is overwritten by the
+      first load.
+
+  # --- scouted, not ported (0x083c0000-0x083dffff) ---
+
+  - address: 0x083d75e0
+    ghidra: FUN_083d75e0
+    name: container_is_empty
+    size: 16
+    module: null
+    status: identified
+    notes: >-
+      `ldr r0,[r0,#0x20]; rsbs r0,r0,#1; movcc r0,#0; bx lr` - returns
+      1 when the word at this+0x20 is zero, 0 otherwise (the ADS idiom
+      for `return !x`). 9 BYTE-IDENTICAL copies, 92 bl sites -
+      0x083d75e0 15, 0x083d7610 13, 0x083d75c0 13, 0x083d7630 12,
+      0x083d75f0 10, 0x083d7620 9, 0x083d7600 8, 0x083d75d0 6,
+      0x083d75b0 6. Callers use it as an emptiness predicate
+      (0x0815a8e4 does `if (!empty()) front()`, 0x083de868 does
+      `if (empty()) construct`), but whether the word at +0x20 is a
+      count or a head pointer is NOT pinned down, so the class is not
+      identified and the name is provisional. Port once the owning
+      container is known; the body itself is trivial.
+
+  - address: 0x083d6f78
+    ghidra: FUN_083d6f78
+    name: not_equal_deref
+    size: 28
+    module: null
+    status: identified
+    notes: >-
+      `*a == *b` computed into 0/1 and then XORed with 1 - i.e.
+      `*a != *b` with a redundant final `eor r0,r0,#1` the compiler
+      never folded. Same (this, const T *a, const T *b) shape as
+      less_signed/less_unsigned, so it is the matching inequality
+      functor. 5 byte-identical copies, 35 bl sites - 0x083d6f78 14,
+      0x083cf9e0 7, 0x083d6f94 6, 0x083d6f40 4, 0x083d6f5c 4. Not
+      ported only because it adds nothing the comparators do not
+      already establish; trivial when wanted.
+
+  - address: 0x083d7750
+    ghidra: FUN_083d7750
+    name: vector_size_elem24
+    size: 16
+    module: null
+    status: identified
+    notes: >-
+      The non-power-of-two half of the vector_size family - same
+      `ldm r0,{r0,r1}; sub r0,r1,r0` head, but then `mov r1,#N` and a
+      TAIL BRANCH into the ADS signed divide @ 0x08031568 instead of an
+      asr. One instantiation per element size, byte-identical within
+      each divisor - elem 12 (5 fns, 62 calls, top 0x083d76f8 18),
+      elem 20 (2 fns, 21 calls, top 0x083d7640 14), elem 24 (2 fns, 45
+      calls, 0x083d7750 31 and 0x083d77dc 14), elem 28 (1 fn, 8 calls,
+      0x083d7894), elem 40 (1 fn, 14 calls, 0x083d783c). Blocked on
+      0x08031568 (ADS signed divide) not being ported; the b-not-bl
+      tail call also means the port would have to reproduce the divide's
+      exact quotient/remainder register contract.
+
+  - address: 0x083d7760
+    ghidra: FUN_083d7760
+    name: vector_capacity
+    size: 16
+    module: null
+    status: identified
+    notes: >-
+      The capacity() sibling of the vector_size family - reads the
+      end-of-storage word at +8 instead of the end word at +4
+      (`ldr r1,[r0,#8]; ldr r0,[r0]; sub r0,r1,r0`) and then divides or
+      shifts by the element size. 13 instantiations in
+      0x083d7300-0x083d7a00, 44 bl sites in total, top 0x083d7760 6,
+      0x083d7954 4, 0x083d7870 4, 0x083d784c 4, 0x083d7828 4,
+      0x083d77ec 4, 0x083d77a8 4, 0x083d7708 4. Same blocker as
+      vector_size_elem24 for the divide-based ones; the shift-based ones
+      are one-line ports whenever they are wanted.
+
+  - address: 0x083d5ea0
+    ghidra: FUN_083d5ea0
+    name: handle_deref_field12
+    size: 20
+    module: null
+    status: identified
+    notes: >-
+      `cell = *slot; return cell ? cell[3] : NULL` - handle_deref_or_null
+      with the second load at +12 instead of +0. 11 bl call sites; the
+      only copy of this offset in the image. Not ported - it is a
+      one-off and the +12 field is unidentified.
+
+  - address: 0x083d5eb4
+    ghidra: FUN_083d5eb4
+    name: three_pointer_select
+    size: 36
+    module: null
+    status: identified
+    notes: >-
+      Reads three pointers from the object (+0, +4, +8) and returns one
+      of two dereferences - `if (a < b) return *b; c = [this+8];
+      return a <= c ? *a : *c`. 14 bl sites here plus 8 at the
+      byte-identical copy 0x083d5ed8. Shape of an iterator clamp or a
+      three-way begin/cur/end accessor, but the owning container is not
+      identified, so the semantics are not solid enough to name.
+
+  - address: 0x083dc0e0
+    ghidra: FUN_083dc0e0
+    name: pair_assign_guarded
+    size: 24
+    module: null
+    status: identified
+    notes: >-
+      8-byte (two-word) copy from r1 to r0, skipped entirely when
+      `src == dst` - the self-assignment guard of a two-word value type.
+      Returns via `mov pc, lr`, not `bx lr`. 14 bl call sites; the only
+      copy. Not ported - trivial, but nothing else in the sweep needs
+      it yet.
+
+  - address: 0x083db4c4
+    ghidra: FUN_083db4c4
+    name: string_map_lookup_or_insert
+    size: 76
+    module: null
+    status: identified
+    notes: >-
+      40 bl call sites. Copy-constructs a temporary basic_string from
+      the caller's string (real cxx_string_copy_ctor @ 0x083d8c30 call),
+      zeroes the word after it, runs the container operation
+      @ 0x083c327c(&result, key_object), releases the temporary
+      (cxx_string_release @ 0x083d8b04) and returns `result + 20`.
+      Shape of `map<string, T>::operator[]` returning the mapped value
+      inside a 20-byte node header. Not ported - 0x083c327c (the tree
+      walk) has to be scouted first.
+
+  - address: 0x083db038
+    ghidra: FUN_083db038
+    name: byte_key_map_find
+    size: 88
+    module: null
+    status: identified
+    notes: >-
+      26 bl call sites. Builds a zeroed 12-byte value on the stack,
+      stamps one byte read from *r1 into it, copies it into a second
+      stack slot and calls 0x083b867c(&result, this, &key), returning
+      the first word of the result. A find/insert on a container keyed
+      by a single byte. Not ported - 0x083b867c has to be scouted first
+      and it is below the 0x083c0000 sweep.

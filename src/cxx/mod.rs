@@ -4,3 +4,4 @@
 //! the ARM ADS C runtime.
 pub mod handle;
 pub mod string;
+pub mod templates;
