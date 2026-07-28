@@ -4465,14 +4465,32 @@ functions:
 
   - address: 0x0813b6f4
     ghidra: FUN_0813b6f4
-    name: global_ctx_get_field8
+    name: context_target_id
     size: 12
-    status: identified
+    sig: "u32 context_target_id(void)"
+    module: app/context
+    status: ported
+    vars: {DAT_0813b700: APP_CONTEXT}
     notes: >-
-      Returns *(DAT_0813b700 + 8) - a one-load global-context getter in
-      the record-parser subsystem that owns the berec_* family. 254
-      call sites, binary-scanned. Trivial but needs the global's
-      identity to name/port honestly.
+      `ldr r0, =0x089cc7ec; ldr r0, [r0, #8]; bx lr` - the word at +8 of
+      the global application context. 254 bl call sites (127 distinct
+      callers, mostly view classes @ 0x0839xxxx..0x083bxxxx), the
+      hottest function in the mid region after the two singleton
+      getters. The field is a numeric class/resource id, not a pointer,
+      and 0 means "none" - every reader has the shape `id = get(); if
+      (id) { target = manager->vtable[0xe8](manager, id); ... }`, i.e.
+      it names a pending target to resolve through the by-id registry
+      (0x081883fc fetches the manager for the sibling id 0x8080;
+      0x081d2184 is the lookup). Its one writer, 0x082028d4 @
+      0x08202904, stores 0x7a88 (an id that also appears in the table @
+      0x083f61b0 next to the "None" literal) right after raising the
+      flag byte @ 0x089d0074. Rest of the context object - +0x4 is a
+      trace nesting depth (inc @ 0x08134af8, dec + assert-nonnegative @
+      0x081e9e4c, tested @ 0x08134674 to gate the "controller_..." event
+      emit), +0xc is referenced @ 0x0829b088. Deviation - the object is
+      the crate static APP_CONTEXT rather than living at 0x089cc7ec
+      (that RW page is runtime-initialized; the image holds stale UI
+      strings there), zeroed = the pre-init state.
 
   - address: 0x081ee17c
     ghidra: FUN_081ee17c
