@@ -4165,35 +4165,67 @@ functions:
     name: ft_atan2
     size: 44
     sig: "i32 ft_atan2(i32 x, i32 y)"
-    status: identified
+    module: ft/trig
+    status: ported
+    vars: {param_1: x, param_2: y, local_c: vector.x, local_8: vector.y}
     notes: >-
-      FreeType FT_Atan2 (fttrigon.c) - returns 0 for (0,0), else builds
-      an FT_Vector on the stack, calls ft_trig_prenorm (0x080908a0)
-      then ft_trig_pseudo_polarize (0x080cce10), returns vec.y (the
-      angle, 16.16 degrees). Portable once the two CORDIC helpers are
-      ported; called from FT_Outline_Get_Orientation @ 0x0804df3c.
+      FreeType FT_Atan2 (fttrigon.c) - angle of (x,y) in 16.16 degrees,
+      range (-180,180]. orrs x,y == 0 returns 0; else the pair goes on
+      the stack as an FtVector through ft_trig_prenorm (0x080908a0,
+      shift result discarded) and ft_trig_pseudo_polarize (0x080cce10),
+      and vec.y is the answer. 7 call sites, binary-scanned (two from
+      ft_outline_get_orientation @ 0x0804df3c, the rest in 0x0808axxx /
+      0x080e1xxx). LLVM inlines both helpers into the port; they remain
+      separately exported symbols. Host tests cross-check the whole
+      chain against f64::atan2 (within 0.005 deg).
 
   - address: 0x080908a0
     ghidra: FUN_080908a0
     name: ft_trig_prenorm
     size: 140
-    status: identified
+    sig: "i32 ft_trig_prenorm(FtVector *vector)"
+    module: ft/trig
+    status: ported
+    vars: {param_1: vector, uVar1: z, uVar2: msb, uVar3: x, uVar4: y}
     notes: >-
-      FreeType ft_trig_prenorm - MSB of abs(x)|abs(y) via 16/8/4/2/1
-      binary search, then shifts the vector up (target bit 27, "0x1b")
-      or down and returns the shift count. Matches the 2.2/2.3
-      fttrigon.c shape.
+      FreeType ft_trig_prenorm (fttrigon.c, 2.2/2.3 shape) - parks the
+      MSB of abs(x)|abs(y) on bit 27 (FT_TRIG_SAFE_MSB) and returns the
+      shift applied, negated when the vector had to be scaled down
+      (msb>27 takes asr by msb-27, else lsl by 27-msb). FT_MSB is
+      inlined as the 16/8/4/2/1 binary search with SIGNED compares and
+      asr, and the magnitudes come from rsblt (wrapping negate), so
+      x==i32::MIN keeps abs negative, every compare fails, msb==0 and
+      the vector is shifted up by 27 - quirk preserved and pinned by a
+      test. Zero vector likewise returns 27. 1 call site (ft_atan2),
+      binary-scanned.
 
   - address: 0x080cce10
     ghidra: FUN_080cce10
     name: ft_trig_pseudo_polarize
     size: 176
-    status: identified
+    sig: "void ft_trig_pseudo_polarize(FtVector *vector)"
+    module: ft/trig
+    status: ported
+    vars: {param_1: vector, iVar2: x, iVar1: y, iVar7: theta, piVar3: arctan_cursor, uVar8: i}
     notes: >-
-      FreeType ft_trig_pseudo_polarize - CORDIC vector-to-polar with
-      the 0xb40000 (180deg in 16.16) quadrant bias and the 22-entry
-      arctan table (1740967, 919879, ...): table pointer DAT_080ccec0 =
-      0x089011fc (RAM .data), image copy of the table @ 0x082ad54c.
+      FreeType ft_trig_pseudo_polarize (fttrigon.c) - CORDIC
+      vector-to-polar. x<0 folds the vector (negate both, theta =
+      0xb40000 = 180deg in 16.16); y>0 then flips that seed's sign;
+      fixed pre-rotation by arctan(2) (y>=0 - x+=2y, y-=2x, theta +=
+      table[0]; y<0 the mirror), then 23 pseudo-rotations i=0..22 by
+      arctan(2^-i) accumulating table[i+1]; finally theta is
+      FT_PAD_ROUND(theta,32) on its magnitude. Writes vec.x = pseudo
+      length, vec.y = angle. CAUTION - Ghidra renders the table[0] sign
+      condition as y<=0; the asm (rsbgt/addge/sublt off one cmp lr,#0)
+      says y>=0 adds and y<0 subtracts, while the rotation direction
+      also splits at y>=0. Table: 24 entries at runtime 0x089011fc via
+      literal DAT_080ccec0, ROM image @ 0x0890c0dc (RW image = runtime +
+      0xaee0, confirmed by resolving the ftstream.c __FILE__ pointer the
+      same way); contents are byte-identical to upstream
+      ft_trig_arctan_table (4157273, 2949120, 1740967, ...) so the port
+      embeds them as const. The earlier note's "22-entry table @
+      0x082ad54c" was a partial/aliased match. 1 call site (ft_atan2),
+      binary-scanned.
 
   - address: 0x0804df3c
     ghidra: FUN_0804df3c
