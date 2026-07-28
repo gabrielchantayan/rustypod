@@ -32,16 +32,19 @@
 //!
 //! # Deviations
 //!
-//! The original reaches three helpers the port inlines with bit-identical
+//! The original reaches two helpers the port inlines with bit-identical
 //! results:
 //!
 //! - `__rt_udiv` @ 0x08036f14 (ADS unsigned divide) → Rust `u32` `/`.
 //! - `FT_Add64` @ 0x080ed3b4 → `overflowing_add` + carry into `hi`.
-//! - `ft_div64by32` @ 0x0807c5b8 → [`ft_div64by32`]: the original's
-//!   32-step restoring division equals `u64` division exactly when
-//!   `hi < divisor` (the quotient then fits 32 bits); the `hi >=
-//!   divisor` overflow clamp to 0x7fffffff is kept verbatim. (0x0807c5b8
-//!   itself is outside this module's claimed range and stays unclaimed.)
+//!
+//! Its third, `ft_div64by32` @ 0x0807c5b8, is now the real ported
+//! [`ft_div64by32`] and both callers go through it. It used to be
+//! stubbed here as `u64` division, which is *not* the same function:
+//! the original's remainder is a single 32-bit register and truncates
+//! for divisors above 0x80000000. Neither caller can produce one — they
+//! divide by an `i32` magnitude — but the symbol on its own does, so the
+//! restoring loop is what got ported.
 
 use crate::ft::types::{FtInt64, FtMatrix};
 
@@ -103,17 +106,44 @@ pub extern "C" fn ft_mulfix(a: i32, b: i32) -> i32 {
     ((r as i32) ^ s).wrapping_sub(s)
 }
 
-/// ft_div64by32 (FreeType) — original: `FUN_0807c5b8` @ 0x0807c5b8
-/// (private inline stand-in, not claimed — see the module header).
+/// ft_div64by32 (FreeType `ft_div64by32`, the static ftcalc.c helper) —
+/// original: `FUN_0807c5b8` @ 0x0807c5b8 (64 bytes; 2 call sites, both
+/// in this module — [`ft_divfix`] @ 0x0804c34c and [`ft_muldiv`]
+/// @ 0x0804d2ac).
 ///
-/// Quotient of `(hi:lo) / divisor` when it fits in 32 bits
-/// (`hi < divisor`); 0x7fffffff otherwise.
-#[inline(always)]
-fn ft_div64by32(hi: u32, lo: u32, divisor: u32) -> u32 {
+/// Quotient of the 64-bit `(hi:lo)` by `divisor`, by 32 rounds of
+/// restoring division: shift the next bit of `lo` into the remainder,
+/// shift the quotient, and subtract `divisor` when it fits. An
+/// out-of-range result — `hi >= divisor`, which includes
+/// `divisor == 0`, since every unsigned value is `>= 0` — short-circuits
+/// to 0x7fffffff (`mvncs r0, #0x80000000`) instead of overflowing or
+/// trapping.
+///
+/// The remainder lives in one 32-bit register, so `r <<= 1` drops its
+/// top bit. That is harmless exactly while `divisor <= 0x80000000`
+/// (then `r <= divisor - 1 <= 0x7fffffff` and `2r + 1` still fits), and
+/// both callers reach here with `divisor` an `i32` magnitude, so they
+/// never exceed that. Above it the truncation makes the result diverge
+/// from true 64-by-32 division — e.g. `ft_div64by32(0x90000000, 0,
+/// 0xffffffff)` is 0 where the true quotient is 0x90000000. Upstream
+/// behavior, preserved and pinned by a test; the host tests use `u64`
+/// division as the reference over the domain where the two agree.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn ft_div64by32(hi: u32, lo: u32, divisor: u32) -> u32 {
     if hi >= divisor {
         return 0x7fff_ffff;
     }
-    ((((hi as u64) << 32) | lo as u64) / divisor as u64) as u32
+    let (mut remainder, mut lo, mut quotient) = (hi, lo, 0u32);
+    for _ in 0..32 {
+        remainder = (remainder << 1) | (lo >> 31);
+        quotient <<= 1;
+        if remainder >= divisor {
+            remainder -= divisor;
+            quotient |= 1;
+        }
+        lo <<= 1;
+    }
+    quotient
 }
 
 /// ft_divfix (FreeType `FT_DivFix`) — original: `FUN_0804c2d4`
@@ -354,6 +384,83 @@ mod tests {
 
     /// Exact i64 reference for inputs whose magnitudes stay clear of the
     /// 32-bit wrapping paths: sign * ((|a| * |b| + 0x8000) >> 16).
+    /// Reference 64-by-32 division: what the restoring loop computes
+    /// wherever its 32-bit remainder cannot overflow, i.e. for every
+    /// `divisor <= 0x80000000` — which is every divisor `ft_divfix` and
+    /// `ft_muldiv` can hand it, both being `i32` magnitudes.
+    fn div64by32_ref(hi: u32, lo: u32, divisor: u32) -> u32 {
+        if hi >= divisor {
+            return 0x7fff_ffff;
+        }
+        ((((hi as u64) << 32) | lo as u64) / divisor as u64) as u32
+    }
+
+    #[test]
+    fn div64by32_matches_exact_division_over_the_callers_domain() {
+        let mut s: u32 = 0x2468_ace1;
+        let mut rnd = || {
+            s ^= s << 13;
+            s ^= s >> 17;
+            s ^= s << 5;
+            s
+        };
+        for _ in 0..200_000 {
+            // Divisors are i32 magnitudes: 1..=0x80000000.
+            let divisor = (rnd() & 0x7fff_ffff).max(1);
+            let hi = rnd() % divisor;
+            let lo = rnd();
+            assert_eq!(
+                ft_div64by32(hi, lo, divisor),
+                div64by32_ref(hi, lo, divisor),
+                "{hi:#010x}:{lo:#010x} / {divisor:#010x}"
+            );
+        }
+        // The magnitude extremes the random sweep will not hit.
+        for &divisor in &[1u32, 2, 3, 0x7fff_ffff, 0x8000_0000] {
+            for &hi in &[0u32, 1, divisor - 1, divisor / 2] {
+                for &lo in &[0u32, 1, 0x8000_0000, 0xffff_ffff] {
+                    assert_eq!(
+                        ft_div64by32(hi, lo, divisor),
+                        div64by32_ref(hi, lo, divisor),
+                        "{hi:#010x}:{lo:#010x} / {divisor:#010x}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn div64by32_clamps_when_the_quotient_would_not_fit() {
+        // hi >= divisor, including every divisor of zero.
+        assert_eq!(ft_div64by32(1, 0, 1), 0x7fff_ffff);
+        assert_eq!(ft_div64by32(0x8000_0000, 0, 0x8000_0000), 0x7fff_ffff);
+        assert_eq!(ft_div64by32(0, 0, 0), 0x7fff_ffff);
+        assert_eq!(ft_div64by32(0, 12345, 0), 0x7fff_ffff);
+        assert_eq!(ft_div64by32(0xffff_ffff, 0xffff_ffff, 0), 0x7fff_ffff);
+        // One below the clamp still divides.
+        assert_eq!(ft_div64by32(0, 0xffff_ffff, 1), 0xffff_ffff);
+        assert_eq!(ft_div64by32(0x7fff_ffff, 0xffff_ffff, 0x8000_0000), 0xffff_ffff);
+    }
+
+    #[test]
+    fn div64by32_truncates_its_remainder_above_the_i32_magnitude_range() {
+        // The quirk: the remainder is one 32-bit register, so `r <<= 1`
+        // drops a bit once `divisor > 0x80000000`. Neither caller can
+        // get here (both divide by an i32 magnitude), but the symbol
+        // does, and it is not 64-by-32 division there.
+        assert_eq!(ft_div64by32(0x9000_0000, 0, 0xffff_ffff), 0);
+        assert_ne!(
+            ft_div64by32(0x9000_0000, 0, 0xffff_ffff),
+            div64by32_ref(0x9000_0000, 0, 0xffff_ffff)
+        );
+        assert_eq!(div64by32_ref(0x9000_0000, 0, 0xffff_ffff), 0x9000_0000);
+        // Below the threshold the two agree again.
+        assert_eq!(
+            ft_div64by32(0x7fff_ffff, 0, 0x8000_0000),
+            div64by32_ref(0x7fff_ffff, 0, 0x8000_0000)
+        );
+    }
+
     fn mulfix_exact(a: i64, b: i64) -> i64 {
         let r = (a.abs() * b.abs() + 0x8000) >> 16;
         if (a < 0) != (b < 0) {

@@ -4044,10 +4044,9 @@ functions:
       2^32, preserved; else 64-bit path with hi = ua asr 16
       (arithmetic - a==i32::MIN gives hi 0xffff8000, forcing the
       clamp), FT_Add64 (0x080ed3b4) bias add, ft_div64by32 (0x0807c5b8)
-      with 0x7fffffff clamp when hi>=ub. Port inlines all three helpers
-      with bit-identical results (u32 division / carry add / u64
-      division); those helper addresses stay unclaimed. 56 call sites,
-      binary-scanned.
+      with 0x7fffffff clamp when hi>=ub. Port inlines __rt_udiv (u32
+      division) and FT_Add64 (carry add) bit-identically and calls the
+      real ported ft_div64by32. 56 call sites, binary-scanned.
 
   - address: 0x0804d1a8
     ghidra: FUN_0804d1a8
@@ -4070,9 +4069,9 @@ functions:
       (0x0807c5b8) with its 0x7fffffff hi>=c clamp; else 0x7fffffff.
       Quotient truncated to u32 then sign-restored with wrapping rsb,
       so unclamped quotients in 2^31..2^32 come back sign-flipped
-      (stock overflow behavior, preserved). Port inlines the three
-      helpers bit-identically (u64 mul+add, u64 divide). 33 call
-      sites, binary-scanned.
+      (stock overflow behavior, preserved). Port inlines ft_multo64 and
+      FT_Add64 bit-identically (one u64 mul+add) and calls the real
+      ported ft_div64by32. 33 call sites, binary-scanned.
 
   - address: 0x0804d0dc
     ghidra: FUN_0804d0dc
@@ -4201,6 +4200,36 @@ functions:
       (ft_divfix @ 0x0804c33c, ft_muldiv @ 0x0804d29c) which keep
       inlining it bit-identically. FtInt64 layout lo/hi @ +0/+4
       (ft/types). Port lowers to adds/adc.
+
+  - address: 0x0807c5b8
+    ghidra: FUN_0807c5b8
+    name: ft_div64by32
+    size: 64
+    sig: "u32 ft_div64by32(u32 hi, u32 lo, u32 divisor)"
+    module: ft/calc
+    status: ported
+    vars: {param_1: hi, param_2: lo, param_3: divisor, iVar1: remainder, uVar2: quotient}
+    notes: >-
+      FreeType ft_div64by32 (ftcalc.c, static) - 32 rounds of restoring
+      division of the 64-bit (hi:lo) by divisor. Out-of-range results
+      short-circuit to 0x7fffffff via "cmp r0,r2 / mvncs r0,#0x80000000
+      / bxcs lr"; because the compare is unsigned this also swallows
+      divisor == 0, so there is no divide-by-zero path at all. The loop
+      is r = (r<<1)|(lo>>31); q <<= 1; if (r >= divisor) { r -= divisor;
+      q |= 1; } lo <<= 1.
+      CORRECTION to the earlier scouting note, which claimed this equals
+      u64 division whenever hi < divisor - it does NOT. The remainder is
+      one 32-bit register, so r <<= 1 drops its top bit. That is
+      harmless exactly while divisor <= 0x80000000 (then r <= divisor-1
+      <= 0x7fffffff and 2r+1 still fits), and diverges above it -
+      ft_div64by32(0x90000000, 0, 0xffffffff) is 0 where the true
+      quotient is 0x90000000 (pinned by a test). Both callers divide by
+      an i32 magnitude and so stay inside the safe range, which is why
+      the previous inlined u64 stand-in in ft_divfix/ft_muldiv was
+      behaviorally right; it is nonetheless not this function, so the
+      restoring loop is what got ported and both callers now route
+      through the real symbol. 2 bl call sites, binary-scanned:
+      ft_divfix @ 0x0804c34c and ft_muldiv @ 0x0804d2ac.
 
   - address: 0x0804c1c4
     ghidra: FUN_0804c1c4
@@ -4346,6 +4375,320 @@ functions:
       Port shares ft_error_trace's sink (deviation) and tail-calls the
       ported exit.
 
+  # --- ftstream.c frame cursor (cursor @ +0x20, limit @ +0x24). The
+  # FT_Stream_Get* family reads the window FT_Stream_EnterFrame mapped,
+  # bounds-tests by POINTER compare against limit, and on overrun
+  # silently returns 0 without moving the cursor - no FT_Error, no
+  # trace. All assert FT_ASSERT(stream && stream->cursor).
+  - address: 0x0804f05c
+    ghidra: FUN_0804f05c
+    name: ft_stream_get_char
+    size: 64
+    sig: "i32 ft_stream_get_char(FtStream *stream)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream}
+    notes: >-
+      FreeType FT_Stream_GetChar (ftstream.c) - one byte from the frame,
+      cursor += 1, SIGN-EXTENDED (ldrsbcc @ 0x0804f094). Bound is
+      cursor < limit. FT_ASSERT __LINE__ 328 (moveq r1,#328 @
+      0x0804f070), which places it first in the Get family. 13 call
+      sites, binary-scanned.
+
+  - address: 0x0804f15c
+    ghidra: FUN_0804f15c
+    name: ft_stream_get_short
+    size: 76
+    sig: "i32 ft_stream_get_short(FtStream *stream)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream, puVar2: p}
+    notes: >-
+      FreeType FT_Stream_GetShort (ftstream.c) - FT_NEXT_SHORT, signed
+      big-endian 16-bit ((i8)p[0] << 8 | p[1]; the ldrsb @ 0x0804f198
+      takes the FIRST byte). Bound cursor+1 < limit, cursor += 2. Note
+      the "str r1,[r4,#32]" writing the cursor back is UNCONDITIONAL -
+      harmless, since r1 is unchanged when the bound fails, and it is
+      upstream's unconditional "stream->cursor = p". FT_ASSERT __LINE__
+      345 (literal @ 0x0804f1ac). 50 call sites, binary-scanned - the
+      busiest function in ftstream.c.
+
+  - address: 0x0804f1d8
+    ghidra: FUN_0804f1d8
+    name: ft_stream_get_short_le
+    size: 76
+    sig: "i32 ft_stream_get_short_le(FtStream *stream)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream, puVar2: p}
+    notes: >-
+      FreeType FT_Stream_GetShortLE (ftstream.c) - FT_NEXT_SHORT_LE,
+      signed LITTLE-endian 16-bit ((i8)p[1] << 8 | p[0]). Byte-for-byte
+      ft_stream_get_short with the ldrsb moved to the second byte
+      (0x0804f214 vs 0x0804f198) - that offset is the only difference.
+      FT_ASSERT __LINE__ 364 (moveq r1,#364 @ 0x0804f1ec). 5 call
+      sites, binary-scanned.
+
+  - address: 0x0804f0c8
+    ghidra: FUN_0804f0c8
+    name: ft_stream_get_long
+    size: 100
+    sig: "i32 ft_stream_get_long(FtStream *stream)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream, puVar2: p}
+    notes: >-
+      FreeType FT_Stream_GetLong (ftstream.c) - FT_NEXT_LONG, big-endian
+      32-bit, all ldrb (so identical to FT_NEXT_ULONG at this width).
+      Bound cursor+3 < limit, cursor += 4, cursor written back
+      unconditionally as in ft_stream_get_short. FT_ASSERT __LINE__ 401
+      (literal @ 0x0804f130). 10 call sites, binary-scanned.
+
+  # DEAD-STRIPPED from this build, confirmed by an exhaustive scan of
+  # 0x0804c000-0x08051000 for their assert __LINE__ values and trace
+  # strings: FT_Stream_GetOffset (~383), FT_Stream_GetLongLE (~419) and
+  # FT_Stream_ReadShortLE (~520). The surviving line numbers 304, 328,
+  # 345, 364, 401, 437, 475, 569, 616, 662 leave exactly those three
+  # gaps and match upstream ftstream.c's function order.
+
+  - address: 0x0804ed9c
+    ghidra: FUN_0804ed9c
+    name: ft_stream_close
+    size: 20
+    sig: "void ft_stream_close(FtStream *stream)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream}
+    notes: >-
+      FreeType FT_Stream_Close (ftstream.c) - "if (stream &&
+      stream->close) stream->close(stream)", a tail bxne with stream
+      still in r0. Pre-2.4 body: it does NOT clear close/base/size
+      afterwards, so calling it twice calls the callback twice (tested).
+      4 call sites, binary-scanned.
+
+  - address: 0x0804edb0
+    ghidra: FUN_0804edb0
+    name: ft_stream_enter_frame
+    size: 308
+    sig: "i32 ft_stream_enter_frame(FtStream *stream, u32 count)"
+    module: ft/stream
+    status: identified
+    vars: {param_1: stream, param_2: count}
+    notes: >-
+      FreeType FT_Stream_EnterFrame (ftstream.c) - maps a count-byte
+      window as cursor (+0x20) / limit (+0x24) for the FT_Stream_Get*
+      family: memory streams point straight into base+pos, disk streams
+      FT_QALLOC a buffer and read() into it. Owns the trace strings
+      "FT_Stream_EnterFrame:" (0x0804ef10), " invalid read; expected
+      %lu bytes, got %lu" (0x0804ef28) and " invalid i/o; pos = 0x%lx,
+      count = %lu, size = 0x%lx" (0x0804ef54). 35 call sites,
+      binary-scanned; confirmed as EnterFrame by ft_stream_extract_frame
+      @ 0x0804effc, which calls it and then harvests stream->cursor.
+      NOT PORTED: needs the FreeType ftutil.c allocator (0x082cfaa4
+      alloc / 0x082cfae8 free), out of range here.
+
+  - address: 0x0804ef8c
+    ghidra: FUN_0804ef8c
+    name: ft_stream_exit_frame
+    size: 68
+    sig: "void ft_stream_exit_frame(FtStream *stream)"
+    module: ft/stream
+    status: identified
+    vars: {param_1: stream}
+    notes: >-
+      FreeType FT_Stream_ExitFrame (ftstream.c) - if stream->read
+      (+0x14) the frame was heap-allocated, so FT_FREE(stream->base)
+      via 0x082cfae8 with memory @ +0x1c and base = 0; then cursor
+      (+0x20) = limit (+0x24) = 0 unconditionally. FT_ASSERT __LINE__
+      304 (moveq r1,#304 @ 0x0804ef98), the lowest in the file's
+      surviving set. 33 bl + 1 b call sites, binary-scanned. NOT
+      PORTED: same allocator dependency as ft_stream_enter_frame.
+
+  - address: 0x0804effc
+    ghidra: FUN_0804effc
+    name: ft_stream_extract_frame
+    size: 44
+    sig: "i32 ft_stream_extract_frame(FtStream *stream, u32 count, u8 **pbytes)"
+    module: ft/stream
+    status: identified
+    vars: {param_1: stream, param_2: count, param_3: pbytes}
+    notes: >-
+      FreeType FT_Stream_ExtractFrame (ftstream.c) - calls
+      ft_stream_enter_frame (0x0804edb0) and on success hands the frame
+      to the caller: *pbytes = stream->cursor, then cursor = limit = 0
+      (an ExitFrame that skips the free, so the caller owns the block
+      and must ft_stream_release_frame it). 12 bl + 1 b call sites,
+      binary-scanned. Portable on its own but pointless until
+      ft_stream_enter_frame exists; left identified with it.
+
+  - address: 0x0804f250
+    ghidra: FUN_0804f250
+    name: ft_stream_new
+    size: 232
+    sig: "i32 ft_stream_new(void *library, const FtOpenArgs *args, FtStream **astream)"
+    module: ft/stream
+    status: identified
+    vars: {param_1: library, param_2: args, param_3: astream}
+    notes: >-
+      FreeType FT_Stream_New (ftobjs.c, not ftstream.c) - allocates an
+      FT_StreamRec (0x28 = 40 bytes, which pins sizeof(FT_StreamRec))
+      from library->memory (+0) via 0x082cfaa4 and dispatches on
+      args->flags (+0): bit 0 FT_OPEN_MEMORY -> ft_stream_open_memory
+      (0x0804f354) with args->memory_base/+4 and memory_size/+8; bit 2
+      FT_OPEN_PATHNAME -> ft_stream_open (0x0804f338) with
+      args->pathname/+12; bit 1 FT_OPEN_STREAM -> free the fresh stream
+      and adopt args->stream/+16. Null library returns 0x21
+      (FT_Err_Invalid_Library_Handle), null args or an unusable flag
+      set returns 6 (FT_Err_Invalid_Argument). Independently confirms
+      the ft_stream_open_memory identification. 3 call sites,
+      binary-scanned. NOT PORTED: allocator dependency.
+
+  - address: 0x0804f028
+    ghidra: FUN_0804f028
+    name: ft_stream_free
+    size: 52
+    sig: "void ft_stream_free(FtStream *stream, i32 external)"
+    module: ft/stream
+    status: identified
+    vars: {param_1: stream, param_2: external}
+    notes: >-
+      FreeType FT_Stream_Free (ftobjs.c) - null stream is a no-op;
+      otherwise stash memory (+0x1c), ft_stream_close (0x0804ed9c),
+      and when external == 0 tail-branch FT_Free (0x082cfae8) on the
+      stream itself. NOT PORTED: allocator dependency.
+
+  - address: 0x0804f338
+    ghidra: FUN_0804f338
+    name: ft_stream_open
+    size: 28
+    sig: "i32 ft_stream_open(FtStream *stream, const char *pathname)"
+    module: ft/stream
+    status: identified
+    vars: {param_1: stream, param_2: pathname}
+    notes: >-
+      FreeType FT_Stream_Open (the ftsystem.c platform hook) - forwards
+      (stream, pathname) unchanged to the firmware's file opener at
+      0x082d3ddc and normalizes its answer to 0 or 1, i.e.
+      FT_Err_Cannot_Open_Resource. 1 call site (ft_stream_new @
+      0x0804f250), binary-scanned. NOT PORTED: 0x082d3ddc is unported
+      and out of range here.
+
+  - address: 0x0804f354
+    ghidra: FUN_0804f354
+    name: ft_stream_open_memory
+    size: 28
+    sig: "void ft_stream_open_memory(FtStream *stream, const u8 *base, u32 size)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream, param_2: base, param_3: size}
+    notes: >-
+      FreeType FT_Stream_OpenMemory (ftstream.c) - points a stream at an
+      in-memory image. stm r0,{r1,r2} writes base @ +0 and size @ +4,
+      then zero to pos (+8), cursor (+0x20), read (+0x14) and close
+      (+0x18); limit (+0x24) and everything else is left alone. That
+      field set in that order IS upstream's function body, so this is
+      the independent confirmation of the FtStream layout the readers
+      were reverse-engineered against. 3 call sites, binary-scanned.
+
+  - address: 0x0804f370
+    ghidra: FUN_0804f370
+    name: ft_stream_pos
+    size: 8
+    sig: "u32 ft_stream_pos(const FtStream *stream)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream}
+    notes: >-
+      FreeType FT_Stream_Pos (ftstream.c) - "ldr r0,[r0,#8]; bx lr",
+      i.e. return stream->pos. 17 call sites, binary-scanned.
+
+  - address: 0x0804f378
+    ghidra: FUN_0804f378
+    name: ft_stream_read
+    size: 20
+    sig: "i32 ft_stream_read(FtStream *stream, u8 *buffer, u32 count)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream, param_2: buffer, param_3: count}
+    notes: >-
+      FreeType FT_Stream_Read (ftstream.c) - ft_stream_read_at(stream,
+      stream->pos, buffer, count). Four register moves and a NOP that
+      falls straight through into ft_stream_read_at @ 0x0804f38c, which
+      the linker placed immediately after - there is no branch, which is
+      why a naive call-site scan of 0x0804f38c misses this caller.
+      15 call sites, binary-scanned. LLVM inlines the read_at body into
+      the port instead of falling through - same behavior.
+
+  - address: 0x0804f38c
+    ghidra: FUN_0804f38c
+    name: ft_stream_read_at
+    size: 176
+    sig: "i32 ft_stream_read_at(FtStream *stream, u32 pos, u8 *buffer, u32 count)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream, param_2: pos, param_3: buffer, param_4: count, iVar4: transferred}
+    notes: >-
+      FreeType FT_Stream_ReadAt (ftstream.c) - bulk read of count bytes
+      at pos. Two distinct failures and only the first is fatal: pos >=
+      size (checked for BOTH stream flavors, unlike the seek's bounds
+      test) traces "FT_Stream_ReadAt: invalid i/o; pos = 0x%lx, size =
+      0x%lx" (0x0804f43c, one merged FT_ERROR as in FT_Stream_Seek) and
+      returns 0x55 with nothing read and pos untouched; a SHORT transfer
+      still copies what it got, still stores pos+transferred, and only
+      then traces the tag (0x0804f478) plus " invalid read; expected
+      %lu bytes, got %lu" (0x0804f48c, args count then transferred) and
+      returns 0x55. Disk streams take whatever read() returns; memory
+      streams clamp count to size-pos (so they short-read by
+      construction near EOF) and memcpy via the ROM thunk 0x08037db0
+      (mirror of the ported __rt_memcpy). Note pos is advanced as
+      argument-pos + transferred, NOT re-read from the struct the way
+      ft_stream_try_read does it. 1 bl (0x082c3398) + 1 b (0x0809cdd4)
+      call site plus the fall-through from ft_stream_read @ 0x0804f378,
+      binary-scanned.
+
+  - address: 0x0804fd94
+    ghidra: FUN_0804fd94
+    name: ft_stream_try_read
+    size: 116
+    sig: "u32 ft_stream_try_read(FtStream *stream, u8 *buffer, u32 count)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream, param_2: buffer, param_3: count, uVar4: transferred}
+    notes: >-
+      FreeType FT_Stream_TryRead (ftstream.c) - ft_stream_read_at's
+      forgiving twin at the CURRENT pos: returns the byte count actually
+      transferred, never traces and has no error return at all. pos >=
+      size yields 0 with pos untouched; otherwise disk streams take
+      read()'s answer and memory streams clamp to size-pos and memcpy
+      (thunk 0x08037db0). The final advance RE-LOADS pos from the struct
+      (ldr/add/str @ 0x0804fdf4) rather than adding to the value it
+      captured, so a read callback that moves pos itself compounds with
+      the advance - the one behavioral difference from ft_stream_read_at
+      beyond the error reporting. 1 call site, binary-scanned. Port
+      matches instruction-for-instruction at 29 vs 29 (match.py).
+
+  - address: 0x0804fcb8
+    ghidra: FUN_0804fcb8
+    name: ft_stream_release_frame
+    size: 48
+    sig: "void ft_stream_release_frame(FtStream *stream, u8 **pbytes)"
+    module: ft/stream
+    status: identified
+    vars: {param_1: stream, param_2: pbytes}
+    notes: >-
+      FreeType FT_Stream_ReleaseFrame (ftstream.c) - if stream->read
+      (+0x14) is non-null the frame was heap-allocated, so free *pbytes
+      through FT_Free(stream->memory @ +0x1c, *pbytes) = 0x082cfae8, and
+      *pbytes = 0 either way. The doubled "str r5,[r4]" at 0x0804fcdc /
+      0x0804fce0 is the FT_MEM_FREE macro's own nulling followed by the
+      explicit one - which is exactly upstream's source. No FT_ASSERT on
+      stream (this is the pre-2.4 body). 19 bl + 1 b call sites,
+      binary-scanned. NOT PORTED: its only dependency, FreeType's
+      ft_mem_free @ 0x082cfae8 (ftutil.c, whose __FILE__ string sits at
+      0x0890c168 and whose asserts cluster at 0x082cfa68/c14/d88), is
+      outside this agent's range and unported, so the free would have to
+      be stubbed. Port it together with the ftutil.c allocator family.
+
   - address: 0x0804fce8
     ghidra: FUN_0804fce8
     name: ft_stream_seek
@@ -4435,9 +4778,78 @@ functions:
       FT_ERRORs both survived here). Live FT_ASSERT(stream): null
       stream calls ft_panic (0x0804e154) with line 475 and the
       ftstream.c __FILE__ pointer, and never returns. 17 call sites,
-      binary-scanned. The ReadChar/ReadOffset/ReadLongLE variants sit
-      nearby (trace strings @ 0x0804f594/0x0804fb44/0x0804fa04) and
-      remain unclaimed.
+      binary-scanned.
+
+  - address: 0x0804f4b8
+    ghidra: FUN_0804f4b8
+    name: ft_stream_read_char
+    size: 172
+    sig: "i32 ft_stream_read_char(FtStream *stream, i32 *error)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream, param_2: error, uVar2: result}
+    notes: >-
+      FreeType FT_Stream_ReadChar (ftstream.c) - one byte at pos,
+      pos += 1, returned SIGN-EXTENDED (lsl #24 / asr #24 @
+      0x0804f538, upstream's "return (FT_Char)result"). Named by its
+      trace string "FT_Stream_ReadChar: invalid i/o; ..." @ 0x0804f594
+      and confirmed by the FT_ASSERT __LINE__ literal 437 @ 0x0804f568,
+      which puts it first in ftstream.c ahead of ReadShort (475),
+      ReadOffset (569), ReadLong (616), ReadLongLE (662) - upstream's
+      order exactly. Unlike every other reader it has NO shared bounds
+      test: the memory path checks pos < size itself (note < , not the
+      siblings' pos+n < size) while the DISK PATH CHECKS NOTHING - a
+      read callback that returns 1 is believed arbitrarily far past
+      size. That asymmetry is upstream's and is pinned by a test.
+      Failure sets *error = 0x55 then emits ONE trace call (this build
+      merged upstream's two FT_ERRORs, as it did for FT_Stream_Seek).
+      Live FT_ASSERT(stream) -> ft_panic (0x0804e154), never returns.
+      11 call sites, binary-scanned, all in the sfnt/type1 loaders
+      @ 0x0808xxxx-0x080a1xxx.
+
+  - address: 0x0804fa48
+    ghidra: FUN_0804fa48
+    name: ft_stream_read_offset
+    size: 204
+    sig: "i32 ft_stream_read_offset(FtStream *stream, i32 *error)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream, param_2: error, pbVar2: p, uVar5: result}
+    notes: >-
+      FreeType FT_Stream_ReadOffset (ftstream.c) - the 3-byte sibling of
+      ft_stream_read_short. Trace tag "FT_Stream_ReadOffset:" @
+      0x0804fb44, FT_ASSERT __LINE__ 569 @ 0x0804fb18. Result is
+      upstream's FT_NEXT_OFF3, a SIGNED big-endian 24-bit offset -
+      ((i8)p[0] << 16) | (p[1] << 8) | p[2]; the ldrsb on the top byte
+      @ 0x0804fac0 is what makes it OFF3 rather than UOFF3. Bounds
+      check pos+2 < size with the same wrapping add as its siblings,
+      memory frame base+pos or read(stream,pos,buf,3) requiring exactly
+      3, assembly skipped (but pos still advanced) when the frame
+      pointer is NULL, pos += 3 re-read from the struct. Failure sets
+      *error = 0x55 FIRST, then two trace calls (tag, then " invalid
+      i/o; pos = 0x%lx, size = 0x%lx" @ 0x0804fb5c). 1 call site
+      (0x080a32c4), binary-scanned.
+
+  - address: 0x0804f900
+    ghidra: FUN_0804f900
+    name: ft_stream_read_long_le
+    size: 212
+    sig: "i32 ft_stream_read_long_le(FtStream *stream, i32 *error)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream, param_2: error, pbVar2: p, uVar5: result}
+    notes: >-
+      FreeType FT_Stream_ReadLongLE (ftstream.c) - ft_stream_read_long
+      @ 0x0804f7cc with the bytes the other way round: FT_NEXT_ULONG_LE,
+      p[0] | p[1]<<8 | p[2]<<16 | p[3]<<24, all ldrb. Trace tag
+      "FT_Stream_ReadLongLE:" @ 0x0804fa04, FT_ASSERT __LINE__ 662 @
+      0x0804f9d8 (last reader in the file, as upstream). Same pos+3 <
+      size wrapping bounds test, same read(...,4) exact-count
+      requirement, same pos += 4. Like ReadLong the failure path traces
+      BEFORE setting *error = 0x55; unlike ReadLong this build kept
+      both FT_ERRORs, so two trace calls fire (tag, then " invalid i/o;
+      pos = 0x%lx, size = 0x%lx" @ 0x0804fa1c). 1 call site
+      (0x0807d52c), binary-scanned.
 
   - address: 0x08042cbc
     ghidra: FUN_08042cbc
