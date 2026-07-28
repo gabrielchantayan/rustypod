@@ -7365,11 +7365,12 @@ functions:
       argument words to the object and advances, skips a third word, and
       calls 0x0810ebbc with the advanced pointer; then backs the result
       up by 12 and clears the word at +0xc4 and the byte at +0x8 of it.
-      Not ported and not confidently named - the shape (write two fields,
-      hand the interior pointer to a base-class helper, then patch two
-      fields of the returned object) is a C++ constructor, but 0x0810ebbc
-      sits just below this range in another agent's neighbourhood and has
-      not been read.
+      Not ported, and the name is STRUCTURAL rather than semantic - the
+      shape (write two header words, hand the interior pointer at +12 to
+      a base-class helper, then clear two fields of the object it
+      returns) is unmistakably a C++ constructor, but 0x0810ebbc sits
+      just below this range in another agent's neighbourhood and has not
+      been read, so the class itself is unidentified.
 
   - address: 0x08123600
     ghidra: FUN_08123600
@@ -7445,5 +7446,5 @@ functions:
       the second argument is 4, minus 8 otherwise, truncated back to 16
       bits (so it wraps rather than clamping). The shape is a width minus
       a mode-dependent inset, but neither the owning class nor the
-      meaning of mode 4 is established, so it is left unnamed rather than
-      guessed at.
+      meaning of mode 4 is established, so the name describes the
+      arithmetic rather than claiming a meaning.
