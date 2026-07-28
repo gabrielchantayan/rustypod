@@ -1,6 +1,24 @@
-//! The ADS libspace shutdown-handler chain runner.
+//! The ADS libspace shutdown-handler chain: registration and teardown.
 //!
 //! Port:
+//! - `cxa_atexit` @ 0x082ab1c8 (68 bytes; 278 `bl` + 95 tail `b` call
+//!   sites — 373 total, binary-verified) — the registration counterpart
+//!   of the runner below, and the C++ ABI's `__cxa_atexit`. Allocates a
+//!   16-byte node (`malloc` @ 0x0802edac), fills `{arg, handler, key}`
+//!   with its three arguments in one `stmib`, then pushes it onto the
+//!   libspace+0x38 head (libspace via `__rt_libspace` @ 0x0803204c).
+//!   Returns 1 on success, 0 when the allocation fails — the INVERSE of
+//!   the Itanium ABI's convention, and the arguments are permuted:
+//!   ADS passes `(object, destructor, dso_handle)` where the Itanium ABI
+//!   passes `(destructor, object, dso_handle)`.
+//!
+//!   Every call site is the tail of a function-local static's one-time
+//!   initialization, e.g. @ 0x0803c270:
+//!   `if (guard & 1) skip; if (cxa_guard_acquire(&guard)) { ctor(obj);
+//!   cxa_atexit(obj, dtor, __dso_handle); cxa_guard_release(&guard); }`
+//!   — see `runtime/cxa_guard.rs` for the guard pair. `key` is therefore
+//!   `__dso_handle` (the same literal 0x089ca09c at every site), and
+//!   `exit` running the chain with key 0 matches every node regardless.
 //! - `lib_shutdown_chain` @ 0x082ab2b0 (108 bytes) — walks the handler
 //!   node list hanging off libspace+0x38 (nodes `{next, arg, fn, key}`,
 //!   heap-allocated). With `key == 0` every node matches; with a nonzero
@@ -15,11 +33,14 @@
 //!   image registers or removes by key), but is ported faithfully.
 //!   `stream_file.rs`'s `LIB_SHUTDOWN_CHAIN` hook defaults to this port.
 //!
-//! The registration counterpart (whatever pushes nodes onto
-//! libspace+0x38) is not identified in the image; the head cell is
-//! exposed via [`shutdown_chain_head`] for a future port and for tests.
-//!
 //! Deviations:
+//! - `cxa_atexit`'s `dso_handle` is typed `i32`, matching the existing
+//!   `ShutdownNode::key` model and `lib_shutdown_chain`'s `key`
+//!   argument: on target it is a pointer-sized word either way, and
+//!   keeping it an integer avoids a truncating cast on a 64-bit host.
+//! - `cxa_atexit` allocates `size_of::<ShutdownNode>()` rather than the
+//!   original's literal 16 — the same number on target, and the only
+//!   correct one on a host where the node is 32 bytes wide.
 //! - The chain head lives at libspace+0x38 in the original (one of
 //!   errno.rs's `Libspace` reserved words). The committed libspace model
 //!   keeps its words as raw `u32`s, which cannot hold host pointers, so
@@ -58,16 +79,25 @@ pub struct ShutdownNode {
 /// See [`FreeFn`] in stream_file.rs — same shape, module-local slot.
 pub type FreeFn = unsafe extern "C" fn(ptr: *mut u8);
 
+/// Node-allocation boundary; twin of [`FreeFn`].
+pub type AllocFn = unsafe extern "C" fn(size: usize) -> *mut u8;
+
 /// Node-free boundary; defaults to the ported `free` @ 0x0802edc8.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub static mut SHUTDOWN_FREE: FreeFn = crate::malloc_rt::free;
+
+/// Node-allocation boundary; defaults to the ported `malloc` @
+/// 0x0802edac. Paired with [`SHUTDOWN_FREE`] so a test can swap in a
+/// matching allocator/deallocator.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub static mut SHUTDOWN_ALLOC: AllocFn = crate::malloc_rt::malloc;
 
 /// The chain head — original: the word at libspace+0x38 (see the module
 /// deviations for why it is a module static here).
 static mut SHUTDOWN_CHAIN_HEAD: *mut ShutdownNode = core::ptr::null_mut();
 
-/// Address of the chain-head cell (original: libspace+0x38). The future
-/// registration port pushes nodes through this; tests seed chains here.
+/// Address of the chain-head cell (original: libspace+0x38).
+/// [`cxa_atexit`] pushes nodes through this; tests seed chains here.
 pub fn shutdown_chain_head() -> *mut *mut ShutdownNode {
     unsafe { core::ptr::addr_of_mut!(SHUTDOWN_CHAIN_HEAD) }
 }
@@ -77,6 +107,35 @@ pub fn shutdown_chain_head() -> *mut *mut ShutdownNode {
 #[inline(always)]
 fn hook<T: Copy>(slot: *const T) -> T {
     unsafe { core::ptr::read_volatile(slot) }
+}
+
+/// cxa_atexit — original @ 0x082ab1c8 (68 bytes).
+///
+/// Registers `destructor(object)` to run at shutdown, pushing a fresh
+/// node onto the head of the libspace+0x38 chain (LIFO — the order C++
+/// static destruction requires). Returns 1 on success, 0 if the node
+/// allocation failed; see the module header for the argument order and
+/// the return-convention note.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn cxa_atexit(
+    object: *mut c_void,
+    destructor: ShutdownHandlerFn,
+    dso_handle: i32,
+) -> i32 {
+    let alloc = hook(core::ptr::addr_of!(SHUTDOWN_ALLOC));
+    let node = alloc(core::mem::size_of::<ShutdownNode>()) as *mut ShutdownNode;
+    if node.is_null() {
+        return 0;
+    }
+    // The original's `stmib r4, {r6, r7, r8}`: fields +4/+8/+0xc, in
+    // argument order, before the head is touched.
+    (*node).arg = object;
+    (*node).handler = destructor;
+    (*node).key = dso_handle;
+    let head = shutdown_chain_head();
+    (*node).next = *head;
+    *head = node;
+    1
 }
 
 /// lib_shutdown_chain — original @ 0x082ab2b0 (108 bytes).
@@ -287,6 +346,94 @@ mod tests {
                 std::vec![2, 9, 1],
                 "head changed -> restart from head: new node 9 runs before 1"
             );
+        }
+    }
+
+    /// Box-backed stand-in for the firmware `malloc`, paired with
+    /// [`box_free`] so the registration tests allocate and release
+    /// through the same allocator.
+    unsafe extern "C" fn box_alloc(size: usize) -> *mut u8 {
+        assert_eq!(size, core::mem::size_of::<ShutdownNode>());
+        Box::into_raw(Box::new(ShutdownNode {
+            next: core::ptr::null_mut(),
+            arg: core::ptr::null_mut(),
+            handler: logging_handler,
+            key: 0,
+        })) as *mut u8
+    }
+
+    /// Allocation failure, to exercise `cxa_atexit`'s 0 return.
+    unsafe extern "C" fn failing_alloc(_size: usize) -> *mut u8 {
+        core::ptr::null_mut()
+    }
+
+    #[test]
+    fn cxa_atexit_pushes_lifo_and_the_runner_drains_in_that_order() {
+        let _guard = lock_and_reset();
+        unsafe {
+            SHUTDOWN_ALLOC = box_alloc;
+            assert_eq!(cxa_atexit(1 as *mut c_void, logging_handler, 0x089ca09c), 1);
+            assert_eq!(cxa_atexit(2 as *mut c_void, logging_handler, 0x089ca09c), 1);
+            assert_eq!(cxa_atexit(3 as *mut c_void, logging_handler, 0x089ca09c), 1);
+
+            // Newest first: C++ destroys statics in reverse construction
+            // order, which is exactly what a head push buys.
+            let head = *shutdown_chain_head();
+            assert_eq!((*head).arg as usize, 3);
+            assert_eq!((*head).key, 0x089ca09c);
+            assert_eq!((*(*head).next).arg as usize, 2);
+
+            lib_shutdown_chain(0);
+            assert!(shutdown_chain_head().read().is_null());
+            assert_eq!(
+                events()
+                    .iter()
+                    .filter(|(k, _)| *k == "run")
+                    .map(|(_, t)| *t)
+                    .collect::<Vec<_>>(),
+                std::vec![3, 2, 1]
+            );
+            SHUTDOWN_ALLOC = crate::malloc_rt::malloc;
+        }
+    }
+
+    #[test]
+    fn cxa_atexit_reports_allocation_failure_and_leaves_the_chain_alone() {
+        let _guard = lock_and_reset();
+        unsafe {
+            SHUTDOWN_ALLOC = box_alloc;
+            cxa_atexit(7 as *mut c_void, logging_handler, 0);
+            let head = *shutdown_chain_head();
+
+            SHUTDOWN_ALLOC = failing_alloc;
+            assert_eq!(cxa_atexit(8 as *mut c_void, logging_handler, 0), 0);
+            assert_eq!(*shutdown_chain_head(), head, "chain untouched on failure");
+
+            SHUTDOWN_ALLOC = box_alloc;
+            lib_shutdown_chain(0); // drain
+            SHUTDOWN_ALLOC = crate::malloc_rt::malloc;
+        }
+    }
+
+    #[test]
+    fn cxa_atexit_keys_are_visible_to_the_runners_key_filter() {
+        let _guard = lock_and_reset();
+        unsafe {
+            SHUTDOWN_ALLOC = box_alloc;
+            cxa_atexit(1 as *mut c_void, logging_handler, 11);
+            cxa_atexit(2 as *mut c_void, logging_handler, 22);
+            lib_shutdown_chain(11);
+            assert_eq!(
+                events()
+                    .iter()
+                    .filter(|(k, _)| *k == "run")
+                    .map(|(_, t)| *t)
+                    .collect::<Vec<_>>(),
+                std::vec![1],
+                "only the key-11 registration ran"
+            );
+            lib_shutdown_chain(0); // drain
+            SHUTDOWN_ALLOC = crate::malloc_rt::malloc;
         }
     }
 

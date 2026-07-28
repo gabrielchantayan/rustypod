@@ -2995,9 +2995,12 @@ functions:
       the scan from the head, unchanged continues from the same
       predecessor link. Sole caller (binary-verified bl scan, no
       literal refs): exit_stdio_cleanup @ 0x08035880 with key 0; the
-      keyed path is dead in retailOS. Registration counterpart
-      unidentified (0x082ab31c is an unrelated test-and-set). Default
-      target of stream_file.rs's LIB_SHUTDOWN_CHAIN hook.
+      keyed path is dead in retailOS. Registration counterpart is
+      cxa_atexit @ 0x082ab1c8 (identified and ported later, same
+      module) — every registration passes the same key, the
+      __dso_handle literal 0x089ca09c, which is why key-0 teardown
+      reaches all of them. Default target of stream_file.rs's
+      LIB_SHUTDOWN_CHAIN hook.
 
   - address: 0x08035b3c
     ghidra: FUN_08035b3c
@@ -5002,3 +5005,70 @@ functions:
       26 bl + 4 tail b call sites. Void; r0 is never written, which is
       exactly why rect_intersect can tail-branch here and still look
       like it returns its destination.
+
+  # --- Batch: the ADS C++ static-initialization runtime ---
+
+  - address: 0x082ab1c8
+    ghidra: FUN_082ab1c8
+    name: cxa_atexit
+    size: 68
+    sig: "i32 cxa_atexit(void *object, ShutdownHandlerFn destructor, i32 dso_handle)"
+    module: runtime/shutdown_chain
+    status: ported
+    vars: {param_1: object, param_2: destructor, param_3: dso_handle,
+      r4: node, r5: result}
+    notes: >-
+      The C++ ABI's __cxa_atexit and the registration counterpart of
+      lib_shutdown_chain @ 0x082ab2b0. malloc(16) @ 0x0802edac, one
+      `stmib r4, {r6,r7,r8}` filling {arg +4, fn +8, key +0xc} from the
+      three arguments, then push onto the libspace+0x38 head
+      (__rt_libspace @ 0x0803204c). 278 bl + 95 tail b call sites = 373,
+      binary-verified. Two departures from the Itanium ABI - arguments
+      are permuted to (object, destructor, dso_handle), and the return
+      is 1 on success / 0 on allocation failure, the inverse of the
+      standard. Every call site is the tail of a function-local static's
+      one-time init, e.g. 0x0803c270 - guard fast path `tst g,#1`,
+      cxa_guard_acquire (0x082ab31c), ctor (returns `this` in r0),
+      cxa_atexit(this, dtor, 0x089ca09c), cxa_guard_release
+      (0x082ab338). dso_handle is therefore always the same literal,
+      0x089ca09c = __dso_handle. Deviations - node size is
+      size_of::<ShutdownNode>() (16 on target, correct on a 64-bit
+      host); allocation goes through the new SHUTDOWN_ALLOC slot
+      (default = the ported malloc), paired with the existing
+      SHUTDOWN_FREE.
+
+  - address: 0x082ab31c
+    ghidra: FUN_082ab31c
+    name: cxa_guard_acquire
+    size: 28
+    sig: "u32 cxa_guard_acquire(u32 *guard)"
+    module: runtime/cxa_guard
+    status: ported
+    vars: {param_1: guard}
+    notes: >-
+      __cxa_guard_acquire, single-threaded ADS variant. Guard word
+      nonzero -> return 0; zero -> store 1 and return 1. 172 bl call
+      sites, binary-verified. The flag is published by ACQUIRE, not by
+      release, so a constructor that re-enters its own initialization
+      is refused and sees a half-built object - preserved. The whole
+      word is tested against zero here while the inlined fast path at
+      each call site tests only bit 0. No locking, and there is no
+      __cxa_guard_abort in the image.
+
+  - address: 0x082ab338
+    ghidra: FUN_082ab338
+    name: cxa_guard_release
+    size: 4
+    sig: "void cxa_guard_release(u32 *guard)"
+    module: runtime/cxa_guard
+    status: ported
+    vars: {param_1: guard}
+    notes: >-
+      __cxa_guard_release - a bare `mov pc, lr`, no-op because acquire
+      already published the flag. 172 bl call sites, exactly matching
+      cxa_guard_acquire's 172; the body is empty, so the identification
+      rests on that 1:1 pairing plus the adjacency at every site (each
+      release immediately follows the cxa_atexit that closes the
+      static's initialization, e.g. 0x0803c2a4 after 0x0803c29c).
+      Needs #[inline(never)] - an empty Rust fn is otherwise a prime
+      candidate for elimination, and this is a real bl target.
