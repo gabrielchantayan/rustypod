@@ -4911,3 +4911,42 @@ functions:
       (0x08076f48). 23 bl call sites, binary-scanned. LLVM folds the two
       identical bodies, so the archive exports byteswap32 and bswap32 at
       one address - review codegen as `match.py 0x08076f58 bswap32`.
+
+  - address: 0x080e9878
+    ghidra: FUN_080e9878
+    name: fixed16_mul
+    size: 20
+    sig: "i32 fixed16_mul(i32 a, i32 b)"
+    module: util/fixed
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      Q16.16 fixed-point multiply - smull to the full signed 64-bit
+      product, then return bits [47:16], assembled by the original as
+      (hi << 16) | (lo >>u 16). Truncating toward negative infinity, no
+      rounding and no clamp; overflowing products wrap. This is retailOS's
+      own fixed-point multiply, NOT FreeType's - FT_MulFix/ft_muldiv bias
+      by half an ulp and saturate, so they are not interchangeable and
+      the addresses are unrelated. 94 bl call sites, binary-scanned. The
+      caller that pins the semantics is 0x08076154, a Q16.16 inverse
+      square root - 8-entry seed table indexed by three exponent bits
+      (via the clz at 0x0824980c), then Newton-Raphson y = y*(3 - x*y*y)/2
+      with rsb r1,r1,#0x30000 as the literal 3.0 in Q16.16; it open-codes
+      this same smull/lsl/orr idiom inline twice before calling out.
+
+  - address: 0x080f0fa4
+    ghidra: FUN_080f0fa4
+    name: mul_wide_i64
+    size: 12
+    sig: "i64 mul_wide_i64(i32 a, i32 b)"
+    module: util/fixed
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      Signed widening multiply - the full 64-bit product of two 32-bit
+      operands, returned in r0 (low) : r1 (high) per AAPCS. Body is a bare
+      smull plus the mov that lands the low word in r0. 49 bl call sites,
+      binary-scanned; consumers use it as the multiply of a 64-bit
+      accumulated dot product (e.g. 0x082a01e4 multiplies four field pairs
+      at +0/+4/+8/+0xc and sums with adds/adc, confirming the return is
+      genuinely 64-bit and not a truncated mul).
