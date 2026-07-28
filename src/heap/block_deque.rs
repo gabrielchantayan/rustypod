@@ -35,11 +35,11 @@
 //!   NULL and frees the segment map itself. The stale `map`/`map_cap`
 //!   words are deliberately not cleared — the original leaves them
 //!   dangling too.
-//! - `client_handle_get` — original: `FUN_083d64f4` @ 0x083d64f4
-//!   (16 bytes). `*slot ? **slot : NULL` — reads the block-manager
-//!   client handle out of the base object's two-level client ref
-//!   (+0x4). Every user re-derefs before each call, and so do the
-//!   ported callers.
+//! The block-manager client handle at +0x4 is read through
+//! `cxx::handle::handle_deref_or_null` — the original's `FUN_083d64f4`
+//! @ 0x083d64f4 is one of 22 byte-identical copies of that accessor, so
+//! the port lives there and `base_client` calls it. Every user re-derefs
+//! before each call, and so do the ported callers.
 //! - `pool_base_construct` — original: `FUN_082141bc` @ 0x082141bc
 //!   (100 bytes; 1 bl call site @ 0x0826f7ac in `pool_init`, binary-
 //!   verified). Parent-class ctor (0x081f0050, ops slot — real port in
@@ -140,6 +140,7 @@
 //!   `__rt_udiv` (block size 0) exactly like the original would; on
 //!   device the manager exists before any pool is created.
 
+use crate::cxx::handle::handle_deref_or_null;
 use crate::heap::block_region::REGION_MUTEX_OPS;
 use crate::heap::pool_client::ClientNode;
 use crate::kernel::kobj::Mailbox;
@@ -449,26 +450,11 @@ pub unsafe extern "C" fn deque_iter_init(
     iter
 }
 
-/// client_handle_get — original: `FUN_083d64f4` @ 0x083d64f4
-/// (16 bytes).
-///
-/// Reads the block-manager client handle through the base object's
-/// two-level client ref: `*slot ? **slot : NULL`.
-#[cfg_attr(target_os = "none", no_mangle)]
-#[inline(never)]
-pub unsafe extern "C" fn client_handle_get(ref_slot: *const *const *mut u8) -> *mut u8 {
-    let client_ref = ref_slot.read();
-    if client_ref.is_null() {
-        return core::ptr::null_mut();
-    }
-    client_ref.read()
-}
-
-/// The base object's client handle (`client_handle_get(this + 0x4)`,
+/// The base object's client handle (`handle_deref_or_null(this + 0x4)`,
 /// the shape every original call site uses).
 #[inline(always)]
 unsafe fn base_client(this: *mut PoolBase) -> *mut u8 {
-    client_handle_get(core::ptr::addr_of!((*this).client_ref) as *const *const *mut u8)
+    handle_deref_or_null(core::ptr::addr_of!((*this).client_ref) as *const *const *mut u8)
 }
 
 /// deque_pop_front — original: `FUN_083ddbdc` @ 0x083ddbdc (204 bytes).
@@ -923,23 +909,6 @@ mod tests {
             assert_eq!(
                 deque_node_accessor(this),
                 core::ptr::addr_of_mut!((*this).deque)
-            );
-        }
-    }
-
-    #[test]
-    fn client_handle_get_walks_the_two_level_ref() {
-        unsafe {
-            let word: *mut u8 = 0x5555 as *mut u8;
-            let obj: [*mut u8; 1] = [word];
-            let mut ref_slot: *const *mut u8 = obj.as_ptr();
-            assert_eq!(
-                client_handle_get(&mut ref_slot as *mut _ as *const *const *mut u8),
-                word
-            );
-            ref_slot = core::ptr::null();
-            assert!(
-                client_handle_get(&mut ref_slot as *mut _ as *const *const *mut u8).is_null()
             );
         }
     }

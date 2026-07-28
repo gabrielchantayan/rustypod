@@ -1974,15 +1974,21 @@ functions:
 
   - address: 0x083d64f4
     ghidra: FUN_083d64f4
-    name: client_handle_get
+    name: handle_deref_or_null_alias_64f4
     size: 16
-    sig: "u8 *client_handle_get(u8 ***ref_slot)"
-    module: heap/block_deque
+    sig: "void *handle_deref_or_null(void ***slot)"
+    module: cxx/handle
     status: ported
     notes: >-
       ldr r0,[r0]; cmp; ldrne r0,[r0] — the block-manager client handle
       through the base object's two-level client ref (this+0x4);
-      NULL-guarded on the middle pointer.
+      NULL-guarded on the middle pointer. 97 bl sites. Originally ported
+      under the deque-specific name `client_handle_get`; a byte-pattern
+      scan then showed it is one of 22 byte-identical copies of the
+      generic accessor, so the implementation moved to cxx/handle.rs as
+      `handle_deref_or_null` (canonical address 0x083d604c) and
+      block_deque's `base_client` calls it. Hook this address to that
+      symbol.
 
   - address: 0x08266f2c
     ghidra: FUN_08266f2c
@@ -6890,16 +6896,101 @@ functions:
     ghidra: FUN_083d604c
     name: handle_deref_or_null
     size: 16
-    module: null
+    sig: "void *handle_deref_or_null(void ***slot)"
+    module: cxx/handle
+    status: ported
+    vars: {param_1: slot}
+    notes: >-
+      `cell = *slot; return cell ? *cell : NULL` - the offset-0 `T **`
+      accessor of a handle wrapper, emitted once per template
+      instantiation. Four words, `ldr r0,[r0]; cmp r0,#0; ldrne r0,[r0];
+      bx lr`. NOTE the NULL test is on the INNER pointer, not on `slot`
+      - a NULL `slot` faults. The earlier scouting note here said
+      "roughly 60 copies from 0x083d604c to 0x083d62xx"; a byte-pattern
+      scan of the whole image finds exactly 22, and one of them
+      (0x08262b1c) is outside the C++ block entirely. Every one is
+      byte-identical, so a single port serves all 22; hook any address
+      that is needed to `handle_deref_or_null`. Binary-scanned bl counts
+      (no b sites anywhere, 725 total) - 0x083d604c 253, 0x083d64f4 97,
+      0x083d606c 69, 0x083d6190 69, 0x083d61d0 66, 0x083d60bc 25,
+      0x083d64c4 18, 0x083d64e4 18, 0x083d602c 17, 0x083d61a0 16,
+      0x083d6180 13, 0x083d607c 9, 0x083d64d4 9, 0x083d603c 8,
+      0x083d609c 8, 0x083d60ac 7, 0x083d61b0 7, 0x083d60cc 5,
+      0x083d608c 4, 0x083d605c 3, 0x083d61c0 2, 0x08262b1c 2. The
+      canonical port cites 0x083d604c (most call sites); the alias
+      entries below carry only their own counts. LLVM splits the
+      conditional load into two basic blocks with a frame push instead
+      of using `ldrne`; behavior is identical.
+
+  # --- byte-identical aliases of handle_deref_or_null @ 0x083d604c ---
+  # All 16 bytes, all `ldr r0,[r0]; cmp r0,#0; ldrne r0,[r0]; bx lr`,
+  # all served by the one port in cxx/handle.rs.
+  - {address: 0x083d602c, ghidra: FUN_083d602c, name: handle_deref_or_null_alias_602c,
+     size: 16, module: cxx/handle, status: identified,
+     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 17 bl sites."}
+  - {address: 0x083d603c, ghidra: FUN_083d603c, name: handle_deref_or_null_alias_603c,
+     size: 16, module: cxx/handle, status: identified,
+     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 8 bl sites."}
+  - {address: 0x083d605c, ghidra: FUN_083d605c, name: handle_deref_or_null_alias_605c,
+     size: 16, module: cxx/handle, status: identified,
+     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 3 bl sites."}
+  - {address: 0x083d606c, ghidra: FUN_083d606c, name: handle_deref_or_null_alias_606c,
+     size: 16, module: cxx/handle, status: identified,
+     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 69 bl sites."}
+  - {address: 0x083d607c, ghidra: FUN_083d607c, name: handle_deref_or_null_alias_607c,
+     size: 16, module: cxx/handle, status: identified,
+     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 9 bl sites."}
+  - {address: 0x083d608c, ghidra: FUN_083d608c, name: handle_deref_or_null_alias_608c,
+     size: 16, module: cxx/handle, status: identified,
+     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 4 bl sites."}
+  - {address: 0x083d609c, ghidra: FUN_083d609c, name: handle_deref_or_null_alias_609c,
+     size: 16, module: cxx/handle, status: identified,
+     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 8 bl sites."}
+  - {address: 0x083d60ac, ghidra: FUN_083d60ac, name: handle_deref_or_null_alias_60ac,
+     size: 16, module: cxx/handle, status: identified,
+     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 7 bl sites."}
+  - {address: 0x083d60bc, ghidra: FUN_083d60bc, name: handle_deref_or_null_alias_60bc,
+     size: 16, module: cxx/handle, status: identified,
+     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 25 bl sites."}
+  - {address: 0x083d60cc, ghidra: FUN_083d60cc, name: handle_deref_or_null_alias_60cc,
+     size: 16, module: cxx/handle, status: identified,
+     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 5 bl sites."}
+  - {address: 0x083d6180, ghidra: FUN_083d6180, name: handle_deref_or_null_alias_6180,
+     size: 16, module: cxx/handle, status: identified,
+     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 13 bl sites."}
+  - {address: 0x083d6190, ghidra: FUN_083d6190, name: handle_deref_or_null_alias_6190,
+     size: 16, module: cxx/handle, status: identified,
+     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 69 bl sites."}
+  - {address: 0x083d61a0, ghidra: FUN_083d61a0, name: handle_deref_or_null_alias_61a0,
+     size: 16, module: cxx/handle, status: identified,
+     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 16 bl sites."}
+  - {address: 0x083d61b0, ghidra: FUN_083d61b0, name: handle_deref_or_null_alias_61b0,
+     size: 16, module: cxx/handle, status: identified,
+     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 7 bl sites."}
+  - {address: 0x083d61c0, ghidra: FUN_083d61c0, name: handle_deref_or_null_alias_61c0,
+     size: 16, module: cxx/handle, status: identified,
+     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 2 bl sites."}
+  - {address: 0x083d61d0, ghidra: FUN_083d61d0, name: handle_deref_or_null_alias_61d0,
+     size: 16, module: cxx/handle, status: identified,
+     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 66 bl sites."}
+  - {address: 0x083d64c4, ghidra: FUN_083d64c4, name: handle_deref_or_null_alias_64c4,
+     size: 16, module: cxx/handle, status: identified,
+     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 18 bl sites."}
+  - {address: 0x083d64d4, ghidra: FUN_083d64d4, name: handle_deref_or_null_alias_64d4,
+     size: 16, module: cxx/handle, status: identified,
+     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 9 bl sites."}
+  - {address: 0x083d64e4, ghidra: FUN_083d64e4, name: handle_deref_or_null_alias_64e4,
+     size: 16, module: cxx/handle, status: identified,
+     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 18 bl sites."}
+  - address: 0x08262b1c
+    ghidra: FUN_08262b1c
+    name: handle_deref_or_null_alias_2b1c
+    size: 16
+    module: cxx/handle
     status: identified
     notes: >-
-      `p ? *(void **)*p : *p` - a NULL-safe double dereference
-      (`ldr r0,[r0]; cmp r0,#0; ldrne r0,[r0]; bx lr`). Roughly 60
-      BYTE-IDENTICAL copies run from 0x083d604c to about 0x083d62xx, one
-      per C++ template instantiation, each with its own callers
-      (0x083d604c 253 bl, 0x083d6190 69, 0x083d606c 69, 0x083d61d0 66,
-      0x083d60bc 25, ...). Port once and hook every copy if they are ever
-      needed; individually they carry almost no semantics.
+      byte-identical alias of handle_deref_or_null @ 0x083d604c; 2 bl
+      sites. The only copy outside the 0x083c0000-0x083dffff C++ block.
 
   - address: 0x08386840
     ghidra: FUN_08386840
