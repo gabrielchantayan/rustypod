@@ -3881,6 +3881,138 @@ functions:
       x_min/y_min/x_max/y_max @ +0/+4/+8/+12. 8 call sites,
       binary-scanned.
 
+  # --- FreeType 2: identified, not yet ported ---
+  # Version evidence: license blob @ 0x087fc3cc says "copyright
+  # 2000-2006, 2007 The FreeType Project" (a 2.3-era tree); sources
+  # compiled from "...\Firmware\Silver\3rdParty\freetype\src\..." (path
+  # strings for autofit, base, bdf, pfr, psaux, sfnt, truetype, type1,
+  # cff modules survive). Debug/assert build: FT_Stream_* trace strings
+  # @ 0x0804f43c..0x0804fd50 plus "assertion failed on line %d" FT_ASSERT
+  # strings are live in the stream readers.
+  - address: 0x080ed3b4
+    ghidra: FUN_080ed3b4
+    name: ft_add64
+    size: 40
+    status: identified
+    notes: >-
+      FreeType FT_Add64 - 64-bit add of two {lo,hi} FT_Int64 structs
+      through pointers, carry = (lo_sum < x.lo). 2 bl callers, both in
+      ported code (ft_divfix @ 0x0804c33c, ft_muldiv @ 0x0804d29c)
+      where the port inlines it bit-identically; a standalone port is
+      pointless until an unported caller appears.
+
+  - address: 0x0804c1c4
+    ghidra: FUN_0804c1c4
+    name: ft_atan2
+    size: 44
+    sig: "i32 ft_atan2(i32 x, i32 y)"
+    status: identified
+    notes: >-
+      FreeType FT_Atan2 (fttrigon.c) - returns 0 for (0,0), else builds
+      an FT_Vector on the stack, calls ft_trig_prenorm (0x080908a0)
+      then ft_trig_pseudo_polarize (0x080cce10), returns vec.y (the
+      angle, 16.16 degrees). Portable once the two CORDIC helpers are
+      ported; called from FT_Outline_Get_Orientation @ 0x0804df3c.
+
+  - address: 0x080908a0
+    ghidra: FUN_080908a0
+    name: ft_trig_prenorm
+    size: 140
+    status: identified
+    notes: >-
+      FreeType ft_trig_prenorm - MSB of abs(x)|abs(y) via 16/8/4/2/1
+      binary search, then shifts the vector up (target bit 27, "0x1b")
+      or down and returns the shift count. Matches the 2.2/2.3
+      fttrigon.c shape.
+
+  - address: 0x080cce10
+    ghidra: FUN_080cce10
+    name: ft_trig_pseudo_polarize
+    size: 176
+    status: identified
+    notes: >-
+      FreeType ft_trig_pseudo_polarize - CORDIC vector-to-polar with
+      the 0xb40000 (180deg in 16.16) quadrant bias and the 22-entry
+      arctan table (1740967, 919879, ...): table pointer DAT_080ccec0 =
+      0x089011fc (RAM .data), image copy of the table @ 0x082ad54c.
+
+  - address: 0x0804df3c
+    ghidra: FUN_0804df3c
+    name: ft_outline_get_orientation
+    size: 400
+    status: identified
+    notes: >-
+      FreeType FT_Outline_Get_Orientation (pre-2.4 FT_Atan2 flavor) -
+      per contour, finds the leftmost on-curve point (tag bit 0),
+      keeps the global leftmost with >=3 on-curve points, walks to the
+      previous/next on-curve neighbors, compares the two ft_atan2
+      (0x0804c1c4) edge angles and returns 1 (postscript/anticlockwise
+      side of the compare) else 0. Port after the fttrigon chain.
+
+  - address: 0x0804d17c
+    ghidra: FUN_0804d17c
+    name: ft_error_trace
+    size: 40
+    status: identified
+    notes: >-
+      The FT_ERROR/FT_TRACE sink of this debug build - varargs shim
+      that stacks r1-r3 and hands the format string plus va-list to the
+      firmware logger (0x0802f654 via context DAT_0804d1a4, then
+      0x08050f80). Every FT_Stream_* reader and many drivers call it
+      with the "FT_Stream_...: invalid i/o" strings.
+
+  - address: 0x0804fce8
+    ghidra: FUN_0804fce8
+    name: ft_stream_seek
+    size: 104
+    sig: "i32 ft_stream_seek(FtStream *stream, u32 pos)"
+    status: identified
+    notes: >-
+      FreeType FT_Stream_Seek - stores pos at stream+8; memory streams
+      (null read fn @ +0x14) just bound-check pos <= size (+4),
+      disk streams call the read fn (stream, pos, 0, 0). Failure
+      traces "FT_Stream_Seek: invalid i/o" (0x0804fd50) and returns
+      0x55 (FT_Err_Invalid_Stream_Operation). Struct-and-callback
+      shaped, so left for a stream-focused pass.
+
+  - address: 0x0804fd88
+    ghidra: FUN_0804fd88
+    name: ft_stream_skip
+    size: 12
+    sig: "i32 ft_stream_skip(FtStream *stream, i32 count)"
+    status: identified
+    notes: >-
+      FreeType FT_Stream_Skip - loads pos (stream+8), adds count,
+      tail-branches ft_stream_seek @ 0x0804fce8. Trivial once
+      ft_stream_seek is ported.
+
+  - address: 0x0804f7cc
+    ghidra: FUN_0804f7cc
+    name: ft_stream_read_ulong
+    size: 204
+    sig: "u32 ft_stream_read_ulong(FtStream *stream, i32 *error)"
+    status: identified
+    notes: >-
+      FreeType FT_Stream_ReadULong (traces as "FT_Stream_ReadLong") -
+      big-endian 4-byte read at pos with bounds check pos+3 < size,
+      via the frame buffer (+0) for memory streams or the read
+      callback for disk streams; advances pos by 4; error 0x55 on
+      overrun. Carries the FT_ASSERT(stream) path of this debug build.
+
+  - address: 0x0804fb88
+    ghidra: FUN_0804fb88
+    name: ft_stream_read_ushort
+    size: 188
+    sig: "u16 ft_stream_read_ushort(FtStream *stream, i32 *error)"
+    status: identified
+    notes: >-
+      FreeType FT_Stream_ReadUShort (traces as "FT_Stream_ReadShort") -
+      big-endian 2-byte sibling of ft_stream_read_ulong @ 0x0804f7cc
+      (bounds check pos+1 < size, advance by 2, error 0x55, same
+      FT_ASSERT path). The ReadChar/ReadOffset/ReadLongLE variants sit
+      nearby (their trace strings live at 0x0804f594/0x0804fb44/
+      0x0804fa04).
+
   - address: 0x08042cbc
     ghidra: FUN_08042cbc
     name: bcopy
