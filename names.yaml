@@ -4819,3 +4819,146 @@ functions:
       There is no occupied flag, so a key of 0 matches the first zeroed
       slot - preserved. Codegen deviation - LLVM fully unrolls the
       constant 6-iteration loop (29 instructions vs the original's 13).
+
+  - address: 0x0811fd98
+    ghidra: FUN_0811fd98
+    name: layer_set_alpha
+    size: 16
+    sig: "void layer_set_alpha(u8 *layer, u8 alpha)"
+    module: drivers/display_layer
+    status: ported
+    vars: {param_1: layer, param_2: alpha}
+    notes: >-
+      Global-alpha setter on the live display-LAYER object (the one
+      0x08120978 copies a surface_config block into). Stores the byte at
+      +0x48 and raises the layer dirty flag at +0x1bc. 89 call sites
+      (87 bl + 2 tail b, 45 distinct callers) - binary-scanned, the
+      hottest function in this cluster. Identified from the cross-fade
+      @ 0x0810da8c, which does `lsr r5, r0, #24` (the alpha channel of
+      an ARGB word) then calls this with `r5` on the fading-in layer and
+      `255 - r5` on the fading-out layer; other callers pass 0 or 0xff.
+      Leaf, no lock (four instructions, no call).
+
+  - address: 0x08120880
+    ghidra: FUN_08120880
+    name: layer_set_global_alpha_blend
+    size: 16
+    sig: "void layer_set_global_alpha_blend(u8 *layer)"
+    module: drivers/display_layer
+    status: ported
+    vars: {param_1: layer}
+    notes: >-
+      Sets the layer blend mode byte (+0x49) to 1 and dirties the layer.
+      17 bl call sites from 11 distinct callers. Mode 1 is the mode in
+      which the render pass 0x0811f8c8 pushes the +0x48 global alpha to
+      the driver - the full mapping it applies is mode 0 -> driver
+      vtable[+0x40] code 1, mode 1 -> code 3 then vtable[+0x44](alpha),
+      mode 2 -> code 2, mode 3 -> code 5 then vtable[+0x44](alpha).
+
+  - address: 0x08120890
+    ghidra: FUN_08120890
+    name: layer_set_pixel_alpha_blend
+    size: 20
+    sig: "void layer_set_pixel_alpha_blend(u8 *layer)"
+    module: drivers/display_layer
+    status: ported
+    vars: {param_1: layer}
+    notes: >-
+      Sets the layer blend mode byte (+0x49) to 2 and dirties the layer.
+      6 bl call sites. Mode 2 does not push the global alpha; the
+      applier 0x08120978 forces exactly this mode whenever the pixel
+      format byte (+0x0a) is 3, which is why it reads as the per-pixel
+      alpha format.
+
+  - address: 0x0811f8c0
+    ghidra: FUN_0811f8c0
+    name: layer_is_dirty
+    size: 8
+    sig: "u8 layer_is_dirty(u8 *layer)"
+    module: drivers/display_layer
+    status: ported
+    vars: {param_1: layer}
+    notes: >-
+      Reads the layer dirty byte at +0x1bc that every mutator in this
+      cluster raises and the commit pair 0x08120654 / 0x0812068c clears.
+      3 bl call sites.
+
+  - address: 0x0811fda8
+    ghidra: FUN_0811fda8
+    name: layer_set_geometry
+    size: 216
+    sig: >-
+      u8 *layer_set_geometry(u8 *layer, u32 origin_x, u32 origin_y,
+      i32 source_y, i32 source_x, i32 width, i32 height,
+      i32 display_width, i32 display_height)
+    module: drivers/display_layer
+    status: ported
+    vars:
+      param_1: layer
+      param_2: origin_x
+      param_3: origin_y
+      param_4: source_y
+      param_5: source_x
+      param_6: width
+      param_7: height
+      param_8: display_width
+      param_9: display_height
+    notes: >-
+      Installs a whole source/destination rectangle on a display layer,
+      but only if it fits the layer's frame buffer; nothing at all is
+      written when any check fails (all four comparisons happen before
+      the lock is taken). 20 bl call sites, 16 distinct callers.
+      Checks - buffer_height (+0x2c) >= source_y and buffer_width
+      (+0x30) >= source_x (one cmp/cmpge pair, so a failed first test
+      short-circuits the second), then display_width + source_x <=
+      buffer_width and display_height + source_y <= buffer_height, with
+      the plain width/height substituted whenever the corresponding
+      display size argument is negative (the -1 = auto sentinel
+      surface_config_init arms at config +0x1c/+0x20). A negative
+      display size also leaves the stored +0x24/+0x28 untouched. On
+      success it takes the layer's own mutex at +0x78 (mutex_lock @
+      0x0807f5c4 / mutex_unlock @ 0x0807f6a0, both ported) and writes
+      +0x24, +0x28, +0x44 = 1, +0x0c, +0x10, +0x18, +0x1c, +0x20, +0x14
+      and +0x1bc = 1. Returns the layer on both paths. All comparisons
+      are signed and the extent additions are plain `add`, so they wrap
+      rather than saturate. The field map is the one recovered from the
+      applier 0x08120978 (see drivers/surface).
+
+  - address: 0x08120908
+    ghidra: FUN_08120908
+    name: layer_enable
+    size: 76
+    sig: "void layer_enable(u8 *layer)"
+    module: drivers/display_layer
+    status: ported
+    vars: {param_1: layer}
+    notes: >-
+      Clears the layer disabled flag (+0x41) under the layer mutex.
+      50 call sites (49 bl + 1 tail b, 20 distinct callers) - callers
+      typically fetch several layers with 0x081d9064(display, index) and
+      enable them in a row (e.g. 0x080feb68). Idempotent - an already
+      enabled layer is left completely alone. On a real transition it
+      also sets the enable-state-changed byte (+0x43) and the dirty flag
+      (+0x1bc), and for format variant (+0x0b) 3 only, calls the
+      alternate-commit notify 0x081206c4, which is not yet ported and
+      reaches the Rust port through the LAYER_DRIVER_HOOKS dispatch
+      table (default - no-op). The original releases the mutex with a
+      tail branch. Ghidra's C for this function invents a jumptable at
+      0x08037e10 - that is just the mutex_unlock tail branch.
+
+  - address: 0x081208bc
+    ghidra: FUN_081208bc
+    name: layer_disable
+    size: 52
+    sig: "void layer_disable(u8 *layer)"
+    module: drivers/display_layer
+    status: ported
+    vars: {param_1: layer}
+    notes: >-
+      Mirror of layer_enable - sets the disabled flag (+0x41). 3 bl call
+      sites. Two asymmetries kept from the original - the disabled byte
+      and the dirty byte are set unconditionally (re-disabling an
+      already disabled layer still dirties it), while the
+      enable-state-changed byte (+0x43) is raised only on an actual
+      transition; and there is no alternate-commit notify on this side.
+      Runs under the layer mutex, released with a tail branch.
