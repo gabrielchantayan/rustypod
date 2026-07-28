@@ -4573,9 +4573,19 @@ functions:
     ghidra: FUN_081c93fc
     name: table6_find_by_key
     size: 52
-    status: identified
+    sig: "RequestSlot *table6_find_by_key(RequestSlot **table, u32 key)"
+    module: util/table_find
+    status: ported
+    vars: {param_1: table, param_2: key}
     notes: >-
-      Scans a fixed 6-entry table of 8-byte records (base at *param_1)
-      for a record whose first word equals the key; returns the record
-      pointer or 0. Pure leaf, but only 3 call sites (binary-scanned,
-      MP4 parser cluster) - low value, easy pick for a later sweep.
+      Scans a fixed 6-slot table of 8-byte records (base at *param_1)
+      for the slot whose key word (+0) equals the key; returns the slot
+      pointer or 0. 3 bl call sites - 0x08202694 and the state accessor
+      0x0829dd30 (which returns the slot's byte at +4, or 0 when
+      unregistered). The record is a request registry - key at +0, state
+      byte at +4 driven 0 (idle) -> 1 (running) -> 2 (done) by
+      0x08202694; the table lives at owner+0x28+0x3c and every access is
+      taken under the lock at owner+0x28+0x40 (0x08094404/0x0809449c).
+      There is no occupied flag, so a key of 0 matches the first zeroed
+      slot - preserved. Codegen deviation - LLVM fully unrolls the
+      constant 6-iteration loop (29 instructions vs the original's 13).

@@ -5,4 +5,5 @@ pub mod bswap;
 pub mod crc32;
 pub mod cursor;
 pub mod list_find;
+pub mod table_find;
 pub mod utoa;
