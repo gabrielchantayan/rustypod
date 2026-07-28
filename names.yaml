@@ -3149,6 +3149,34 @@ functions:
       block->id; os_free(block). No NULL guard. 1 caller (blne @
       0x080a6bfc). match.py structural match (blx via hook table).
 
+  - address: 0x0808e294
+    ghidra: FUN_0808e294
+    name: mailbox_slot_create
+    size: 20
+    sig: "void mailbox_slot_create(Mailbox **slot)"
+    module: kernel/kobj
+    status: ported
+    notes: >-
+      *slot = mailbox_create() — installs a fresh mailbox block into a
+      caller-owned pointer slot. 46 bl/b call sites, binary-verified;
+      among them the pool base-subobject ctor (bl @ 0x08214210, slot =
+      pool + 0x78) and the pool parent-class ctor (bl @ 0x081f0074,
+      slot = parent + 0x24).
+
+  - address: 0x080a6bec
+    ghidra: FUN_080a6bec
+    name: mailbox_slot_delete
+    size: 32
+    sig: "void mailbox_slot_delete(Mailbox **slot)"
+    module: kernel/kobj
+    status: ported
+    notes: >-
+      NULL-guarded teardown twin of mailbox_slot_create; deletes *slot
+      via mailbox_delete (the blne @ 0x080a6bfc — mailbox_delete's only
+      call site) and zeroes the slot unconditionally. 28 bl/b call
+      sites, binary-verified; among them the pool base-subobject dtor
+      (bl @ 0x08214240).
+
   - address: 0x08056788
     ghidra: FUN_08056788
     name: waiter_create
