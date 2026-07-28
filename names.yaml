@@ -4441,27 +4441,44 @@ functions:
 
   - address: 0x0817ee04
     ghidra: FUN_0817ee04
-    name: singleton_get_0xe8
+    name: app_controller_get
     size: 44
-    status: identified
+    sig: "void *app_controller_get(void)"
+    module: app/singletons
+    status: ported
     notes: >-
-      Lazy singleton getter - hottest unclaimed function in the mid
-      region at 1108 call sites (binary-scanned). If global slot
-      (+8 off the object at DAT_0817ee30) is 0, allocates 0xE8 bytes
-      via FUN_082aadd4 (operator-new-like) and constructs via
-      FUN_081847fc, caches, returns the cached pointer. Not leaf -
-      needs the allocator and constructor; port once those exist and
-      the singleton's identity is known.
+      Lazy singleton getter, 1108 bl call sites - the hottest function
+      in the mid region. If the cache word @ 0x089cc648 (the +8 slot of
+      the global @ 0x089cc640) is 0, allocates 0xE8 bytes via operator
+      new @ 0x082aadd4 (already ported, called directly), constructs via
+      FUN_081847fc, caches the ctor's return and RELOADS the slot before
+      returning. The object is the application controller - views hand
+      themselves to it (0x08124af4), callers poke a mode halfword at
+      +0x80, and its ctor resolves a registry target through the manager
+      0x081883fc and vtable slot +0xe8. Deviations - the ctor is behind
+      the SINGLETON_CTORS dispatch table (house pattern) with a
+      documented zeroing stub default, and the cache is the crate static
+      APP_CONTROLLER. NOT HOOK-READY - until FUN_081847fc is ported the
+      default hands out a zeroed block with no vtable, so branching
+      stock code at 0x0817ee04 would break it.
 
   - address: 0x08173848
     ghidra: FUN_08173848
-    name: singleton_get_0x850
+    name: app_screen_get
     size: 44
-    status: identified
+    sig: "void *app_screen_get(void)"
+    module: app/singletons
+    status: ported
     notes: >-
-      Same lazy-singleton pattern as 0x0817ee04 but a 0x850-byte object
-      constructed by FUN_08177a78; cache slot is *DAT_08173874. 140
-      call sites, binary-scanned.
+      Same lazy-singleton shape as 0x0817ee04 but a 0x850-byte object
+      constructed by FUN_08177a78, cached in the word @ 0x089cc1bc. 140
+      bl call sites. The object is the screen/layout side - callers load
+      layout resources into it (0x08181110 next to the
+      "GotoExtraInfoLayout"/"GotoGenius" literals, 0x08174300 with 0x80)
+      and then hand it to the controller (0x08183950(controller,
+      screen)); its ctor chains eleven 0x0810ebbc sub-ctors and
+      registers the result with class id 0x7800. Same deviations and the
+      same NOT-HOOK-READY caveat as 0x0817ee04.
 
   - address: 0x0813b6f4
     ghidra: FUN_0813b6f4
