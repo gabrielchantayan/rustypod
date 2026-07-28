@@ -112,6 +112,9 @@ pub const BLEND_MODE_PIXEL_AND_GLOBAL_ALPHA: u8 = 3;
 /// sentinel `surface_config_init` arms (`SIZE_AUTO`).
 pub const DISPLAY_SIZE_KEEP: i32 = -1;
 
+const LAYER_KIND: usize = 0x08;
+const KIND_SUBTYPE: usize = 0x09;
+const PIXEL_FORMAT: usize = 0x0a;
 const FORMAT_VARIANT: usize = 0x0b;
 const ORIGIN_X: usize = 0x0c;
 const ORIGIN_Y: usize = 0x10;
@@ -123,13 +126,47 @@ const DISPLAY_WIDTH: usize = 0x24;
 const DISPLAY_HEIGHT: usize = 0x28;
 const BUFFER_HEIGHT: usize = 0x2c;
 const BUFFER_WIDTH: usize = 0x30;
+const SURFACE_FLAG: usize = 0x34;
+const OPAQUE_WORD: usize = 0x3c;
+const CONFIGURED: usize = 0x40;
 const DISABLED: usize = 0x41;
 const ENABLE_CHANGED: usize = 0x43;
 const GEOMETRY_SET: usize = 0x44;
+const EXTRA_FLAG: usize = 0x46;
 const ALPHA: usize = 0x48;
 const BLEND_MODE: usize = 0x49;
 const MUTEX: usize = 0x78;
 const DIRTY: usize = 0x1bc;
+const TAIL_FLAG: usize = 0x1be;
+const TAIL_WORD_0: usize = 0x1c0;
+const TAIL_WORD_1: usize = 0x1c4;
+
+// The configuration block, as `drivers/surface.rs` lays it out.
+const CFG_PIXEL_FORMAT: usize = 0x00;
+const CFG_FORMAT_VARIANT: usize = 0x01;
+const CFG_ORIGIN_X: usize = 0x04;
+const CFG_ORIGIN_Y: usize = 0x08;
+const CFG_WIDTH: usize = 0x0c;
+const CFG_HEIGHT: usize = 0x10;
+const CFG_BUFFER_WIDTH: usize = 0x14;
+const CFG_BUFFER_HEIGHT: usize = 0x18;
+const CFG_DISPLAY_WIDTH: usize = 0x1c;
+const CFG_DISPLAY_HEIGHT: usize = 0x20;
+const CFG_SOURCE_Y: usize = 0x24;
+const CFG_SOURCE_X: usize = 0x28;
+const CFG_SURFACE_FLAG: usize = 0x2c;
+const CFG_EXTRA_FLAG: usize = 0x2d;
+const CFG_OPAQUE_WORD: usize = 0x30;
+const CFG_TAIL_FLAG: usize = 0x34;
+const CFG_TAIL_WORD_0: usize = 0x38;
+const CFG_TAIL_WORD_1: usize = 0x3c;
+
+/// +0x08: the layer kind that owns the [`KIND5_RENDER_SUPPRESSED`]
+/// latch.
+pub const LAYER_KIND_LATCHED: u8 = 5;
+
+/// Pixel format that forces [`BLEND_MODE_PIXEL_ALPHA`].
+pub const PIXEL_FORMAT_ALPHA: u8 = 3;
 
 #[inline(always)]
 unsafe fn byte(layer: *mut u8, offset: usize) -> u8 {
@@ -362,6 +399,116 @@ pub unsafe extern "C" fn layer_disable(layer: *mut u8) {
     set_byte(layer, DISABLED, 1);
     set_byte(layer, DIRTY, 1);
     mutex_unlock(layer_mutex(layer));
+}
+
+/// Original: the byte global @ 0x089ca8ac. Only the kind-5 layer
+/// touches it, and only three functions reference the literal:
+///
+/// - [`layer_apply_config`] and the render pass `FUN_0811f8c8` set it to
+///   `surface_flag == 0` whenever the layer is kind 5 with subtype 0;
+/// - the flush @ 0x0811fcc4 renders that layer *only* while this byte is
+///   clear — hence the name.
+///
+/// Deviation (the `app/context.rs` precedent): the latch is a crate
+/// static rather than the word at 0x089ca8ac, which is runtime-
+/// initialized RW data. It defaults to 0, the pre-init state.
+pub static mut KIND5_RENDER_SUPPRESSED: u8 = 0;
+
+/// layer_apply_config — original: `FUN_08120978` @ 0x08120978
+/// (344 bytes; 17 `bl` call sites from 12 distinct callers).
+///
+/// Copies a whole `surface_config_init`-shaped block (see
+/// `drivers/surface.rs`) into a live layer, under the layer's mutex.
+/// This is the function whose stores recovered the layer field map, and
+/// the counterpart of the piecemeal setters above.
+///
+/// What it does beyond a straight copy:
+///
+/// - **Clamps to zero.** Origin, source offset, width and height are
+///   each stored and then overwritten with 0 if negative — the original
+///   is a `str` followed by a predicated `strlt`, so the store happens
+///   twice, not once. Behaviorally a clamp.
+/// - **Clamps the buffer to the image.** Buffer height is raised to at
+///   least the (already clamped) height, buffer width to at least the
+///   width.
+/// - **Resolves the "auto" display size.** A display width of -1 makes
+///   the applier write the resolved width *and* height back into the
+///   caller's block before forwarding them, which is why callers can
+///   read their block afterwards to learn the resolved size. Any other
+///   value is taken literally, and the display *height* is never
+///   consulted for the -1 test.
+/// - **Forces per-pixel alpha** ([`BLEND_MODE_PIXEL_ALPHA`]) when the
+///   pixel format is [`PIXEL_FORMAT_ALPHA`].
+/// - **Drives the [`KIND5_RENDER_SUPPRESSED`] latch** for a kind-5,
+///   subtype-0 layer: set when the surface flag is 0, cleared otherwise.
+/// - Raises the configured flag (+0x40), the geometry flag (+0x44, set
+///   first thing, before any copying) and the dirty flag.
+///
+/// Returns 0 (`mov r0, #0`), like the original.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn layer_apply_config(layer: *mut u8, config: *mut u8) -> u32 {
+    let cfg_byte = |offset: usize| config.add(offset).read_volatile();
+    let cfg_word = |offset: usize| (config.add(offset) as *const i32).read_volatile();
+
+    mutex_lock(layer_mutex(layer));
+    set_byte(layer, GEOMETRY_SET, 1);
+
+    let pixel_format = cfg_byte(CFG_PIXEL_FORMAT);
+    set_byte(layer, PIXEL_FORMAT, pixel_format);
+    if pixel_format == PIXEL_FORMAT_ALPHA {
+        set_byte(layer, BLEND_MODE, BLEND_MODE_PIXEL_ALPHA);
+    }
+    set_byte(layer, FORMAT_VARIANT, cfg_byte(CFG_FORMAT_VARIANT));
+
+    // Each of these is "store, then store 0 again if negative".
+    for (layer_offset, config_offset) in [
+        (ORIGIN_X, CFG_ORIGIN_X),
+        (ORIGIN_Y, CFG_ORIGIN_Y),
+        (SOURCE_Y, CFG_SOURCE_Y),
+        (SOURCE_X, CFG_SOURCE_X),
+        (WIDTH, CFG_WIDTH),
+        (HEIGHT, CFG_HEIGHT),
+    ] {
+        let value = cfg_word(config_offset);
+        set_word(layer, layer_offset, if value < 0 { 0 } else { value });
+    }
+
+    let height = word(layer, HEIGHT);
+    let buffer_height = cfg_word(CFG_BUFFER_HEIGHT);
+    set_word(layer, BUFFER_HEIGHT, if buffer_height < height { height } else { buffer_height });
+
+    let buffer_width = cfg_word(CFG_BUFFER_WIDTH);
+    set_word(layer, BUFFER_WIDTH, buffer_width);
+    set_byte(layer, SURFACE_FLAG, cfg_byte(CFG_SURFACE_FLAG));
+    set_byte(layer, EXTRA_FLAG, cfg_byte(CFG_EXTRA_FLAG));
+    set_word(layer, OPAQUE_WORD, cfg_word(CFG_OPAQUE_WORD));
+
+    let width = word(layer, WIDTH);
+    if buffer_width < width {
+        set_word(layer, BUFFER_WIDTH, width);
+    }
+
+    // -1 in the display *width* alone triggers the write-back of both.
+    if cfg_word(CFG_DISPLAY_WIDTH) == DISPLAY_SIZE_KEEP {
+        (config.add(CFG_DISPLAY_WIDTH) as *mut i32).write_volatile(width);
+        (config.add(CFG_DISPLAY_HEIGHT) as *mut i32).write_volatile(word(layer, HEIGHT));
+    }
+    set_word(layer, DISPLAY_WIDTH, cfg_word(CFG_DISPLAY_WIDTH));
+    set_word(layer, DISPLAY_HEIGHT, cfg_word(CFG_DISPLAY_HEIGHT));
+
+    if byte(layer, KIND_SUBTYPE) == 0 && byte(layer, LAYER_KIND) == LAYER_KIND_LATCHED {
+        let suppressed = u8::from(byte(layer, SURFACE_FLAG) == 0);
+        core::ptr::write_volatile(core::ptr::addr_of_mut!(KIND5_RENDER_SUPPRESSED), suppressed);
+    }
+
+    set_byte(layer, TAIL_FLAG, cfg_byte(CFG_TAIL_FLAG));
+    set_word(layer, TAIL_WORD_0, cfg_word(CFG_TAIL_WORD_0));
+    set_word(layer, TAIL_WORD_1, cfg_word(CFG_TAIL_WORD_1));
+    set_byte(layer, CONFIGURED, 1);
+    set_byte(layer, DIRTY, 1);
+
+    mutex_unlock(layer_mutex(layer));
+    0
 }
 
 #[cfg(test)]
@@ -706,6 +853,232 @@ mod tests {
         assert_eq!(ALT_COMMITS.load(Ordering::SeqCst), 1);
 
         restore_hooks(guard);
+    }
+
+    // ---- apply config --------------------------------------------------
+
+    /// The 0x40-byte configuration block, as `surface_config_init`
+    /// leaves it.
+    #[repr(align(4))]
+    struct Config([u8; 0x40]);
+
+    impl Config {
+        fn fresh() -> Self {
+            let mut config = Config([0; 0x40]);
+            unsafe { crate::drivers::surface::surface_config_init(config.0.as_mut_ptr()) };
+            config
+        }
+        /// `&mut` and a writable raw pointer: the applier writes the
+        /// resolved display size back into the caller's block.
+        fn ptr(&mut self) -> *mut u8 {
+            self.0.as_mut_ptr()
+        }
+        fn word(&self, offset: usize) -> i32 {
+            i32::from_le_bytes(self.0[offset..offset + 4].try_into().unwrap())
+        }
+        fn set_word(&mut self, offset: usize, value: i32) {
+            self.0[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        }
+    }
+
+    /// A 320x240 config with a 100x50 image at (10, 20).
+    fn panel_config() -> Config {
+        let mut config = Config::fresh();
+        config.set_word(CFG_ORIGIN_X, 10);
+        config.set_word(CFG_ORIGIN_Y, 20);
+        config.set_word(CFG_WIDTH, 100);
+        config.set_word(CFG_HEIGHT, 50);
+        config.set_word(CFG_BUFFER_WIDTH, 320);
+        config.set_word(CFG_BUFFER_HEIGHT, 240);
+        config
+    }
+
+    #[test]
+    fn applying_a_config_copies_every_field_to_its_layer_slot() {
+        let mut layer = unarmed_layer();
+        let mut config = panel_config();
+        config.set_word(CFG_SOURCE_X, 4);
+        config.set_word(CFG_SOURCE_Y, 8);
+        config.set_word(CFG_DISPLAY_WIDTH, 200);
+        config.set_word(CFG_DISPLAY_HEIGHT, 150);
+        config.0[CFG_SURFACE_FLAG] = 1;
+        config.0[CFG_EXTRA_FLAG] = 2;
+        config.set_word(CFG_OPAQUE_WORD, 0x1234_5678);
+        config.0[CFG_TAIL_FLAG] = 3;
+        config.set_word(CFG_TAIL_WORD_0, 0x0bad_f00d_u32 as i32);
+        config.set_word(CFG_TAIL_WORD_1, 0x0000_0042);
+
+        assert_eq!(unsafe { layer_apply_config(layer.ptr(), config.ptr()) }, 0);
+
+        assert_eq!(layer.byte(PIXEL_FORMAT), 2);
+        assert_eq!(layer.byte(FORMAT_VARIANT), 3);
+        assert_eq!(layer.word(ORIGIN_X), 10);
+        assert_eq!(layer.word(ORIGIN_Y), 20);
+        assert_eq!(layer.word(SOURCE_X), 4);
+        assert_eq!(layer.word(SOURCE_Y), 8);
+        assert_eq!(layer.word(WIDTH), 100);
+        assert_eq!(layer.word(HEIGHT), 50);
+        assert_eq!(layer.word(BUFFER_WIDTH), 320);
+        assert_eq!(layer.word(BUFFER_HEIGHT), 240);
+        assert_eq!(layer.word(DISPLAY_WIDTH), 200);
+        assert_eq!(layer.word(DISPLAY_HEIGHT), 150);
+        assert_eq!(layer.byte(SURFACE_FLAG), 1);
+        assert_eq!(layer.byte(EXTRA_FLAG), 2);
+        assert_eq!(layer.word(OPAQUE_WORD), 0x1234_5678);
+        assert_eq!(layer.byte(TAIL_FLAG), 3);
+        assert_eq!(layer.word(TAIL_WORD_0), 0x0bad_f00d_u32 as i32);
+        assert_eq!(layer.word(TAIL_WORD_1), 0x42);
+        assert_eq!(layer.byte(CONFIGURED), 1);
+        assert_eq!(layer.byte(GEOMETRY_SET), 1);
+        assert_eq!(layer.byte(DIRTY), 1);
+    }
+
+    #[test]
+    fn every_negative_geometry_word_is_clamped_to_zero() {
+        let mut layer = unarmed_layer();
+        let mut config = panel_config();
+        for offset in [
+            CFG_ORIGIN_X,
+            CFG_ORIGIN_Y,
+            CFG_SOURCE_X,
+            CFG_SOURCE_Y,
+            CFG_WIDTH,
+            CFG_HEIGHT,
+        ] {
+            config.set_word(offset, -7);
+        }
+        unsafe { layer_apply_config(layer.ptr(), config.ptr()) };
+        for offset in [ORIGIN_X, ORIGIN_Y, SOURCE_X, SOURCE_Y, WIDTH, HEIGHT] {
+            assert_eq!(layer.word(offset), 0, "layer +{offset:#x}");
+        }
+    }
+
+    #[test]
+    fn the_buffer_size_is_raised_to_at_least_the_image_size() {
+        let mut layer = unarmed_layer();
+        let mut config = panel_config();
+        config.set_word(CFG_BUFFER_WIDTH, 10);
+        config.set_word(CFG_BUFFER_HEIGHT, 10);
+        unsafe { layer_apply_config(layer.ptr(), config.ptr()) };
+        assert_eq!(layer.word(BUFFER_WIDTH), 100, "raised to the width");
+        assert_eq!(layer.word(BUFFER_HEIGHT), 50, "raised to the height");
+
+        // A buffer that already exceeds the image is left alone.
+        let mut layer = unarmed_layer();
+        let mut config = panel_config();
+        unsafe { layer_apply_config(layer.ptr(), config.ptr()) };
+        assert_eq!(layer.word(BUFFER_WIDTH), 320);
+        assert_eq!(layer.word(BUFFER_HEIGHT), 240);
+    }
+
+    #[test]
+    fn the_clamp_uses_the_already_clamped_image_size() {
+        // A negative height becomes 0, so a negative buffer height is
+        // raised to 0 rather than to the raw -5.
+        let mut layer = unarmed_layer();
+        let mut config = panel_config();
+        config.set_word(CFG_HEIGHT, -5);
+        config.set_word(CFG_BUFFER_HEIGHT, -9);
+        unsafe { layer_apply_config(layer.ptr(), config.ptr()) };
+        assert_eq!(layer.word(HEIGHT), 0);
+        assert_eq!(layer.word(BUFFER_HEIGHT), 0);
+    }
+
+    #[test]
+    fn the_auto_display_size_is_resolved_and_written_back() {
+        let mut layer = unarmed_layer();
+        let mut config = panel_config();
+        // surface_config_init already armed both with -1.
+        assert_eq!(config.word(CFG_DISPLAY_WIDTH), -1);
+        unsafe { layer_apply_config(layer.ptr(), config.ptr()) };
+        assert_eq!(config.word(CFG_DISPLAY_WIDTH), 100, "written back");
+        assert_eq!(config.word(CFG_DISPLAY_HEIGHT), 50, "written back");
+        assert_eq!(layer.word(DISPLAY_WIDTH), 100);
+        assert_eq!(layer.word(DISPLAY_HEIGHT), 50);
+    }
+
+    #[test]
+    fn only_the_display_width_is_tested_for_the_auto_sentinel() {
+        // -1 in the height alone is taken literally and NOT resolved.
+        let mut layer = unarmed_layer();
+        let mut config = panel_config();
+        config.set_word(CFG_DISPLAY_WIDTH, 64);
+        config.set_word(CFG_DISPLAY_HEIGHT, -1);
+        unsafe { layer_apply_config(layer.ptr(), config.ptr()) };
+        assert_eq!(config.word(CFG_DISPLAY_HEIGHT), -1, "not written back");
+        assert_eq!(layer.word(DISPLAY_WIDTH), 64);
+        assert_eq!(layer.word(DISPLAY_HEIGHT), -1);
+    }
+
+    #[test]
+    fn the_alpha_pixel_format_forces_the_pixel_alpha_blend_mode() {
+        let mut layer = unarmed_layer();
+        layer.0[BLEND_MODE] = BLEND_MODE_OPAQUE;
+        let mut config = panel_config();
+        config.0[CFG_PIXEL_FORMAT] = PIXEL_FORMAT_ALPHA;
+        unsafe { layer_apply_config(layer.ptr(), config.ptr()) };
+        assert_eq!(layer.byte(PIXEL_FORMAT), PIXEL_FORMAT_ALPHA);
+        assert_eq!(layer.byte(BLEND_MODE), BLEND_MODE_PIXEL_ALPHA);
+
+        // Any other format leaves the mode alone.
+        let mut layer = unarmed_layer();
+        layer.0[BLEND_MODE] = BLEND_MODE_GLOBAL_ALPHA;
+        let mut config = panel_config();
+        unsafe { layer_apply_config(layer.ptr(), config.ptr()) };
+        assert_eq!(layer.byte(BLEND_MODE), BLEND_MODE_GLOBAL_ALPHA);
+    }
+
+    #[test]
+    fn the_kind5_latch_follows_the_surface_flag() {
+        let guard = HOOK_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let restore = |guard: MutexGuard<'static, ()>| {
+            unsafe { KIND5_RENDER_SUPPRESSED = 0 };
+            drop(guard);
+        };
+
+        // kind 5, subtype 0, surface flag 0 -> suppressed.
+        let mut layer = unarmed_layer();
+        layer.0[LAYER_KIND] = LAYER_KIND_LATCHED;
+        let mut config = panel_config();
+        unsafe { layer_apply_config(layer.ptr(), config.ptr()) };
+        assert_eq!(unsafe { KIND5_RENDER_SUPPRESSED }, 1);
+
+        // ... and a nonzero surface flag clears it again.
+        let mut config = panel_config();
+        config.0[CFG_SURFACE_FLAG] = 1;
+        unsafe { layer_apply_config(layer.ptr(), config.ptr()) };
+        assert_eq!(unsafe { KIND5_RENDER_SUPPRESSED }, 0);
+
+        restore(guard);
+    }
+
+    #[test]
+    fn any_other_layer_leaves_the_kind5_latch_alone() {
+        let guard = HOOK_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe { KIND5_RENDER_SUPPRESSED = 0xaa };
+
+        for (kind, subtype) in [(4u8, 0u8), (LAYER_KIND_LATCHED, 1), (0, 0)] {
+            let mut layer = unarmed_layer();
+            layer.0[LAYER_KIND] = kind;
+            layer.0[KIND_SUBTYPE] = subtype;
+            let mut config = panel_config();
+            unsafe { layer_apply_config(layer.ptr(), config.ptr()) };
+            assert_eq!(unsafe { KIND5_RENDER_SUPPRESSED }, 0xaa, "kind {kind}/{subtype}");
+        }
+
+        unsafe { KIND5_RENDER_SUPPRESSED = 0 };
+        drop(guard);
+    }
+
+    #[test]
+    fn applying_a_config_does_not_touch_the_enable_state_or_the_alpha() {
+        let mut layer = unarmed_layer();
+        layer.0[DISABLED] = 1;
+        layer.0[ALPHA] = 0x33;
+        let mut config = panel_config();
+        unsafe { layer_apply_config(layer.ptr(), config.ptr()) };
+        assert_eq!(layer.byte(DISABLED), 1);
+        assert_eq!(layer.byte(ALPHA), 0x33);
     }
 
     #[test]

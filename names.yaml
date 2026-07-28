@@ -5040,3 +5040,35 @@ functions:
       is empty or the index is out of range. Not ported - its size
       helper 0x083d78c4 is outside the 0x08100000-0x081fffff sweep and
       unported, so the whole body would be dispatch-table indirection.
+
+  - address: 0x08120978
+    ghidra: FUN_08120978
+    name: layer_apply_config
+    size: 344
+    sig: "u32 layer_apply_config(u8 *layer, u8 *config)"
+    module: drivers/display_layer
+    status: ported
+    vars: {param_1: layer, param_2: config}
+    notes: >-
+      Copies a surface_config_init-shaped 0x40-byte block into a live
+      display layer, under the layer mutex (+0x78). 17 bl call sites
+      from 12 distinct callers. This is the function whose stores
+      recovered the layer field map that drivers/surface documents.
+      Beyond the plain copy - every geometry word (origin x/y, source
+      x/y, width, height) is clamped to >= 0 (the original stores then
+      re-stores 0 with a predicated strlt; LLVM emits the branchless
+      `bic r0, r0, r0, asr #31`, same result); buffer height is raised
+      to at least the clamped height and buffer width to at least the
+      clamped width; a display width of -1 (and ONLY the width is
+      tested) makes it resolve both display sizes from the layer and
+      write them BACK into the caller's block before forwarding them to
+      +0x24/+0x28, which is how callers learn the resolved size; pixel
+      format 3 forces blend mode 2 at +0x49; and for a kind-5
+      (+0x08 == 5, +0x09 == 0) layer it drives the byte global
+      @ 0x089ca8ac to `surface_flag(+0x34) == 0`. That global is the
+      render-suppression latch the flush @ 0x0811fcc4 tests before
+      rendering the kind-5 layer; it is modeled as the crate static
+      KIND5_RENDER_SUPPRESSED (the app/context.rs deviation - 0x089ca8ac
+      is runtime-initialized RW data). Sets +0x44 (first thing), +0x40
+      and the dirty flag +0x1bc; returns 0. The config pointer is typed
+      *mut because of the -1 write-back.
