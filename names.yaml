@@ -5251,3 +5251,140 @@ functions:
       and ZERO b call sites in the whole image (binary-verified) - a
       linked-out empty virtual or an unreferenced inline. Nothing to
       port.
+
+  # --- Scouted in 0x08200000-0x082fffff, deliberately NOT ported ---
+  # Each is small and hot, but every one of them needs a subsystem that
+  # is not in the tree yet (a C++ vtable literal, an arena allocator, or
+  # a global object graph). Notes are the findings, not guesses.
+
+  - address: 0x082c23dc
+    ghidra: FUN_082c23dc
+    name: trace_record_append_tagged
+    size: 80
+    module: unported
+    status: identified
+    notes: >-
+      The hottest unported function in the 0x082xxxxx range - 835 bl
+      call sites, binary-verified. Allocates a 40-byte record from the
+      arena reached via this[1][0] (bump allocator 0x082c1a08 - aligns
+      the size up to 8, checks arena[2] - arena[3] against it and grows
+      through 0x082c56e4 when short), stamps the record with this[8]
+      (a monotonically increasing sequence number, post-incremented),
+      stores the r1 argument as a BYTE at record+0x20, and appends the
+      record to the singly linked list at this+0x10 (head) / this+0x14
+      (tail). Clearly a trace/event-log writer. Skipped - porting it
+      pulls in the whole arena allocator (0x082c1a08, 0x082c56e4) and
+      the record type is only legible once the readers are decoded.
+
+  - address: 0x082c17f4
+    ghidra: FUN_082c17f4
+    name: trace_record_make_kind2
+    size: 48
+    module: unported
+    status: identified
+    notes: >-
+      419 bl call sites. Calls the record factory 0x082d6c24 with
+      (this, size = 0x24, kind = 2, arg) - which itself allocates from
+      the same arena via 0x082c1a08, links the record into the list at
+      this+0xc/+0x10 and stores the kind as a BYTE at record+8 - then
+      fills record+0xc, +0x14 and +0x18 from its remaining arguments
+      (the fifth arrives on the stack). Sibling 0x082c18ec (201 bl
+      call sites, 40 bytes) is the same shape with size = 0x14 and
+      kind = 6, filling only +0xc and +0x10; 0x082c1850 / 0x082c1898 /
+      0x082c18c4 / 0x082c1914 / 0x082c1994 / 0x082c19bc are further
+      members of the same kind-tagged family. Skipped for the same
+      reason as 0x082c23dc.
+
+  - address: 0x0827233c
+    ghidra: FUN_0827233c
+    name: unported_context_field_0x30
+    size: 16
+    module: unported
+    status: identified
+    notes: >-
+      647 bl call sites - the hottest 16-byte leaf in the range.
+      `push {r4,lr}; bl 0x080cb828; ldr r0, [r0, #0x30]; pop {r4,pc}`.
+      0x080cb828 (46 bl call sites, in another agent's range) is itself
+      `x = 0x0809444c(); return x ? x[3] : x` - so the whole chain is a
+      two-level accessor onto a global object graph. Skipped - the
+      semantics of field +0x30 cannot be established without the object
+      at 0x0809444c, which lives in 0x08060000-0x080fffff.
+
+  - address: 0x08275b9c
+    ghidra: FUN_08275b9c
+    name: unported_vcall_slot5_null_guarded
+    size: 20
+    module: unported
+    status: identified
+    notes: >-
+      414 bl + 17 tail b call sites. `if (obj) tail-call
+      obj->vtable[5](obj)` - a NULL-guarded virtual-call veneer at
+      vtable byte offset 0x14, returning 0 (the NULL object itself) when
+      obj is NULL. r2 is clobbered by the vtable load, so it can forward
+      at most r0/r1/r3 - most likely a nullary virtual on `this`. Ports
+      cleanly through the object's own vtable pointer (no hook table
+      needed), but slot 5 of the base class could not be identified,
+      and a veneer this hot deserves a real name rather than
+      `vcall_slot5`. Left for whoever decodes the class hierarchy the
+      0x0827xxxx container cluster belongs to.
+
+  - address: 0x08277440
+    ghidra: FUN_08277440
+    name: unported_string_default_construct
+    size: 20
+    module: unported
+    status: identified
+    notes: >-
+      280 bl call sites. `obj[0] = 0x089a6044; obj[1] = 0` - a two-word
+      default constructor planting a vtable pointer and a NULL payload.
+      Three siblings plant the SAME vtable - 0x08277414 (ctor + a call
+      to 0x08276620), 0x08277458 (destructor - vtable, 0x08275d74,
+      then operator delete @ 0x082aad24) and 0x08277484 (990 bl call
+      sites; vtable + 0x08275d74, no delete) - so 0x089a6044 is one
+      class's vtable and this is its trivial ctor. The class sits in the
+      0x0827xxxx cluster next to the NULL-guarded strlen @ 0x082770bc,
+      i.e. it is very likely the retailOS string/buffer class. Skipped -
+      the only content of the function is a ROM vtable ADDRESS, which a
+      host test cannot reproduce and which is meaningless until the
+      vtable's six slots (0x0820c2dc, 0x0821183c, 0x082116f8,
+      0x08213bfc, 0x08213818, 0x0820c5ec) are decoded.
+
+  - address: 0x082cfae8
+    ghidra: FUN_082cfae8
+    name: unported_conditional_hook_call
+    size: 16
+    module: unported
+    status: identified
+    notes: >-
+      255 bl + 12 tail b call sites. `if (r1) tail-call *(r0 + 8)` with
+      the arguments forwarded - a guarded call through a function
+      pointer FIELD (not a vtable), returning r0 unchanged when the
+      guard argument is 0. Ports trivially, but the field's role is
+      unknown without the owning struct. Neighbours in the same unit -
+      0x082cfaa4 (68 bytes, 68 bl), 0x082cfc3c (108 bytes, 116 bl),
+      0x082cfe58 (16 bytes, 41 bl).
+
+  - address: 0x08292e6c
+    ghidra: FUN_08292e6c
+    name: unported_global_field_low12
+    size: 20
+    module: unported
+    status: identified
+    notes: >-
+      253 bl call sites. Loads the word at 0x089cc92c (= *0x089cc928
+      literal + 4) and returns its low 12 bits (`lsl #20; lsr #20`).
+      A packed-field getter on a global; the field's meaning needs the
+      writers of 0x089cc928. Sibling 0x08292e58 (16 bytes, 25 bl) reads
+      the same global.
+
+  - address: 0x08252bec
+    ghidra: FUN_08252bec
+    name: unported_singleton_getter_089ca8a8
+    size: 12
+    module: unported
+    status: identified
+    notes: >-
+      146 bl + 1 tail b call sites. `return *(void **)0x089ca8a8` - a
+      bare singleton getter. Nothing to verify behaviorally and nothing
+      to name until the singleton's type is known; recorded so the next
+      pass does not re-scout it.
