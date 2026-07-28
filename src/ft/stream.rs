@@ -6,14 +6,27 @@
 //! `...\freetype\src\base\ftstream.c`, which is how these are pinned to
 //! that translation unit. Call counts are binary-scanned b/bl words.
 //!
-//! The `__LINE__` literals the asserts carry order the readers exactly
-//! as upstream `ftstream.c` lays them out — `ReadChar` 437,
-//! `ReadShort` 475, `ReadOffset` 569, `ReadLong` 616, `ReadLongLE` 662 —
-//! which is the second, independent confirmation of each name (the first
-//! being the `"FT_Stream_ReadXxx:"` trace tag inside each function).
-//! The `ReadShortLE` that upstream puts between `ReadShort` and
-//! `ReadOffset` has no trace string anywhere in the image: this build
-//! dropped it.
+//! The `__LINE__` literals the asserts carry order these functions
+//! exactly as upstream `ftstream.c` lays them out — `ExitFrame` 304,
+//! `GetChar` 328, `GetShort` 345, `GetShortLE` 364, `GetLong` 401,
+//! `ReadChar` 437, `ReadShort` 475, `ReadOffset` 569, `ReadLong` 616,
+//! `ReadLongLE` 662 — which is the second, independent confirmation of
+//! each name (the first being the `"FT_Stream_ReadXxx:"` trace tag or
+//! the byte pattern itself). Three siblings upstream puts inside those
+//! gaps are missing from the image entirely, dead-stripped: `GetOffset`
+//! (~383), `GetLongLE` (~419) and `ReadShortLE` (~520) have no assert
+//! line and no trace string anywhere in 0x0804c000..0x08051000.
+//!
+//! Two independent cursors live in an `FtStream`, and the two reader
+//! families use one each:
+//!
+//! - `pos`/`size` — the whole-file position. The `FT_Stream_Read*`
+//!   family and the seek/skip/bulk-transfer functions use it, and they
+//!   report failures through an `FT_Error` and the trace log.
+//! - `cursor`/`limit` — a *frame*, the window `FT_Stream_EnterFrame`
+//!   maps. The `FT_Stream_Get*` family reads out of that, bounds-tests
+//!   by comparing pointers, and on overrun silently returns 0 without
+//!   moving the cursor.
 //!
 //! A stream is either a *memory* stream — `read` is null and the whole
 //! file is mapped at `base` — or a *disk* stream, whose `read` callback
@@ -91,8 +104,12 @@ static ASSERTION_FAILED: &[u8] = b"assertion failed on line %d of file %s\n\0";
 static FTSTREAM_C: &[u8] =
     b"c:\\BWA\\N25CFirmwareWin-75\\srcroot\\Firmware\\Silver\\3rdParty\\freetype\\src\\base\\ftstream.c\0";
 
-/// `FT_ASSERT( stream )` `__LINE__` literals baked into each reader,
-/// read out of its literal pool.
+/// `FT_ASSERT` `__LINE__` literals baked into each function, read out of
+/// its literal pool or `moveq r1, #imm`.
+const ASSERT_LINE_GET_CHAR: u32 = 328;
+const ASSERT_LINE_GET_SHORT: u32 = 345;
+const ASSERT_LINE_GET_SHORT_LE: u32 = 364;
+const ASSERT_LINE_GET_LONG: u32 = 401;
 const ASSERT_LINE_READ_CHAR: u32 = 437;
 const ASSERT_LINE_READ_SHORT: u32 = 475;
 const ASSERT_LINE_READ_OFFSET: u32 = 569;
@@ -112,6 +129,129 @@ unsafe fn assert_stream_failed(line: u32) -> ! {
         FTSTREAM_C.as_ptr() as usize as u32,
         0,
     )
+}
+
+/// `FT_ASSERT( stream && stream->cursor )` — the frame readers' guard.
+/// Diverges through [`ft_panic`] exactly like the original.
+///
+/// # Safety
+/// Never returns.
+#[inline]
+unsafe fn assert_frame_failed(line: u32) -> ! {
+    ft_panic(
+        ASSERTION_FAILED.as_ptr(),
+        line,
+        FTSTREAM_C.as_ptr() as usize as u32,
+        0,
+    )
+}
+
+/// The `FT_Stream_Get*` family's bounds test, `p + span < limit` — a
+/// *pointer* comparison against `limit`, not the arithmetic `pos + n <
+/// size` the `FT_Stream_Read*` family uses.
+///
+/// # Safety
+/// `stream` must be valid with a non-null `cursor`.
+#[inline]
+unsafe fn frame_has(stream: *const FtStream, span: usize) -> bool {
+    (*stream).cursor.add(span) < (*stream).limit
+}
+
+/// ft_stream_get_char (FreeType `FT_Stream_GetChar`) — original:
+/// `FUN_0804f05c` @ 0x0804f05c (64 bytes; 13 call sites).
+///
+/// The `FT_Stream_Get*` family reads out of the *frame* a preceding
+/// `FT_Stream_EnterFrame` mapped — `cursor`/`limit`, not `pos`/`size` —
+/// and reports nothing when it runs off the end: the result is simply 0
+/// and the cursor does not move. Every one of them asserts
+/// `stream && stream->cursor`.
+///
+/// This one takes a byte and sign-extends it (`ldrsbcc`), like
+/// [`ft_stream_read_char`].
+///
+/// # Safety
+/// `stream` must be null or valid; `cursor`/`limit` must delimit a
+/// readable frame.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_stream_get_char(stream: *mut FtStream) -> i32 {
+    if stream.is_null() || (*stream).cursor.is_null() {
+        assert_frame_failed(ASSERT_LINE_GET_CHAR);
+    }
+    if !frame_has(stream, 0) {
+        return 0;
+    }
+    let p = (*stream).cursor;
+    (*stream).cursor = p.add(1);
+    *p as i8 as i32
+}
+
+/// ft_stream_get_short (FreeType `FT_Stream_GetShort`) — original:
+/// `FUN_0804f15c` @ 0x0804f15c (76 bytes; 50 call sites, the busiest
+/// function in ftstream.c).
+///
+/// `FT_NEXT_SHORT`: signed big-endian 16-bit, `(i8)p[0] << 8 | p[1]`,
+/// with the frame test `p + 1 < limit`. See [`ft_stream_get_char`] for
+/// the family's shape.
+///
+/// # Safety
+/// As [`ft_stream_get_char`].
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_stream_get_short(stream: *mut FtStream) -> i32 {
+    if stream.is_null() || (*stream).cursor.is_null() {
+        assert_frame_failed(ASSERT_LINE_GET_SHORT);
+    }
+    if !frame_has(stream, 1) {
+        return 0;
+    }
+    let p = (*stream).cursor;
+    (*stream).cursor = p.add(2);
+    ((*p as i8 as i32) << 8) | (*p.add(1) as i32)
+}
+
+/// ft_stream_get_short_le (FreeType `FT_Stream_GetShortLE`) — original:
+/// `FUN_0804f1d8` @ 0x0804f1d8 (76 bytes; 5 call sites).
+///
+/// `FT_NEXT_SHORT_LE`: signed *little*-endian 16-bit,
+/// `(i8)p[1] << 8 | p[0]` — the `ldrsb` moves to the second byte, which
+/// is the only difference from [`ft_stream_get_short`].
+///
+/// # Safety
+/// As [`ft_stream_get_char`].
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_stream_get_short_le(stream: *mut FtStream) -> i32 {
+    if stream.is_null() || (*stream).cursor.is_null() {
+        assert_frame_failed(ASSERT_LINE_GET_SHORT_LE);
+    }
+    if !frame_has(stream, 1) {
+        return 0;
+    }
+    let p = (*stream).cursor;
+    (*stream).cursor = p.add(2);
+    ((*p.add(1) as i8 as i32) << 8) | (*p as i32)
+}
+
+/// ft_stream_get_long (FreeType `FT_Stream_GetLong`) — original:
+/// `FUN_0804f0c8` @ 0x0804f0c8 (100 bytes; 10 call sites).
+///
+/// `FT_NEXT_LONG`: big-endian 32-bit (all `ldrb`, so identical to
+/// `FT_NEXT_ULONG` at this width), frame test `p + 3 < limit`.
+///
+/// # Safety
+/// As [`ft_stream_get_char`].
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_stream_get_long(stream: *mut FtStream) -> i32 {
+    if stream.is_null() || (*stream).cursor.is_null() {
+        assert_frame_failed(ASSERT_LINE_GET_LONG);
+    }
+    if !frame_has(stream, 3) {
+        return 0;
+    }
+    let p = (*stream).cursor;
+    (*stream).cursor = p.add(4);
+    (((*p as u32) << 24)
+        | ((*p.add(1) as u32) << 16)
+        | ((*p.add(2) as u32) << 8)
+        | (*p.add(3) as u32)) as i32
 }
 
 /// ft_stream_open_memory (FreeType `FT_Stream_OpenMemory`) — original:
@@ -139,6 +279,27 @@ pub unsafe extern "C" fn ft_stream_open_memory(
     (*stream).cursor = core::ptr::null_mut();
     (*stream).read = None;
     (*stream).close = None;
+}
+
+/// ft_stream_close (FreeType `FT_Stream_Close`) — original:
+/// `FUN_0804ed9c` @ 0x0804ed9c (20 bytes; 4 call sites).
+///
+/// `if ( stream && stream->close ) stream->close( stream )` — a tail
+/// `bxne r1` with `stream` still in `r0`. The pre-2.4 body: it does not
+/// clear `close`, `base` or `size` afterwards, so calling it twice calls
+/// the callback twice.
+///
+/// # Safety
+/// `stream` must be null or valid, and its `close` callback must be
+/// safe to invoke.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_stream_close(stream: *mut FtStream) {
+    if stream.is_null() {
+        return;
+    }
+    if let Some(close) = (*stream).close {
+        close(stream);
+    }
 }
 
 /// ft_stream_pos (FreeType `FT_Stream_Pos`) — original: `FUN_0804f370`
@@ -1354,6 +1515,130 @@ mod tests {
         }
     }
 
+    /// A stream with `bytes` mapped as an entered frame.
+    fn framed_stream(bytes: &mut [u8]) -> FtStream {
+        let mut stream = memory_stream(bytes);
+        stream.cursor = bytes.as_mut_ptr();
+        stream.limit = unsafe { bytes.as_mut_ptr().add(bytes.len()) };
+        stream
+    }
+
+    /// Reference `FT_Stream_Get*` over a frame: `(value, cursor moved
+    /// by)`. `span` is `n - 1`, the bound upstream tests.
+    fn get_ref(bytes: &[u8], at: usize, width: usize, decode: fn(&[u8]) -> i32) -> (i32, usize) {
+        // Upstream: `if ( p + width - 1 < limit )`.
+        if at + width - 1 < bytes.len() {
+            (decode(&bytes[at..at + width]), width)
+        } else {
+            (0, 0)
+        }
+    }
+
+    fn decode_char(p: &[u8]) -> i32 {
+        p[0] as i8 as i32
+    }
+    fn decode_short(p: &[u8]) -> i32 {
+        ((p[0] as i8 as i32) << 8) | p[1] as i32
+    }
+    fn decode_short_le(p: &[u8]) -> i32 {
+        ((p[1] as i8 as i32) << 8) | p[0] as i32
+    }
+    fn decode_long(p: &[u8]) -> i32 {
+        (((p[0] as u32) << 24)
+            | ((p[1] as u32) << 16)
+            | ((p[2] as u32) << 8)
+            | p[3] as u32) as i32
+    }
+
+    #[test]
+    fn get_family_matches_reference_at_every_cursor_position() {
+        let source = [0x80u8, 0x01, 0x7f, 0xff, 0x00, 0xfe, 0x42, 0x9a];
+        for at in 0..=source.len() {
+            let mut bytes = source;
+            let base = bytes.as_mut_ptr();
+            for (name, run, width, decode) in [
+                (
+                    "char",
+                    ft_stream_get_char as unsafe extern "C" fn(*mut FtStream) -> i32,
+                    1usize,
+                    decode_char as fn(&[u8]) -> i32,
+                ),
+                ("short", ft_stream_get_short, 2, decode_short),
+                ("short_le", ft_stream_get_short_le, 2, decode_short_le),
+                ("long", ft_stream_get_long, 4, decode_long),
+            ] {
+                let mut stream = framed_stream(&mut bytes);
+                stream.cursor = unsafe { base.add(at) };
+                let value = unsafe { run(&mut stream) };
+                let (want, moved) = get_ref(&source, at, width, decode);
+                assert_eq!(value, want, "{name} at {at}");
+                assert_eq!(
+                    stream.cursor,
+                    unsafe { base.add(at + moved) },
+                    "{name} cursor at {at}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn get_family_reads_the_last_bytes_of_a_frame_but_not_past_them() {
+        // `p + n - 1 < limit` is exactly "n bytes remain": the family
+        // consumes a frame to its final byte, and one byte short of a
+        // full value silently yields 0 with the cursor parked.
+        let mut bytes = [1u8, 2, 3, 4];
+        let base = bytes.as_mut_ptr();
+        let mut stream = framed_stream(&mut bytes);
+        stream.cursor = unsafe { base.add(2) }; // exactly two left
+        assert_eq!(unsafe { ft_stream_get_short(&mut stream) }, 0x0304);
+        assert_eq!(stream.cursor, unsafe { base.add(4) });
+        stream.cursor = unsafe { base.add(3) }; // one short
+        assert_eq!(unsafe { ft_stream_get_short(&mut stream) }, 0);
+        assert_eq!(stream.cursor, unsafe { base.add(3) });
+        // Same boundary four bytes wide.
+        stream.cursor = base;
+        assert_eq!(unsafe { ft_stream_get_long(&mut stream) }, 0x0102_0304);
+        stream.cursor = unsafe { base.add(1) };
+        assert_eq!(unsafe { ft_stream_get_long(&mut stream) }, 0);
+        assert_eq!(stream.cursor, unsafe { base.add(1) });
+        // GetChar's own bound is `p < limit`.
+        stream.cursor = unsafe { base.add(3) };
+        assert_eq!(unsafe { ft_stream_get_char(&mut stream) }, 4);
+        assert_eq!(unsafe { ft_stream_get_char(&mut stream) }, 0);
+        assert_eq!(stream.cursor, unsafe { base.add(4) });
+    }
+
+    #[test]
+    fn get_family_sign_extension_and_endianness() {
+        let mut bytes = [0xffu8, 0xfe, 0x80, 0x00, 0x7f, 0xff, 0x00, 0x00, 0x00];
+        let base = bytes.as_mut_ptr();
+        let mut stream = framed_stream(&mut bytes);
+        assert_eq!(unsafe { ft_stream_get_short(&mut stream) }, -2);
+        assert_eq!(unsafe { ft_stream_get_short(&mut stream) }, -32768);
+        assert_eq!(unsafe { ft_stream_get_short(&mut stream) }, 32767);
+        // Little-endian sibling sees the same bytes the other way.
+        stream.cursor = base;
+        assert_eq!(unsafe { ft_stream_get_short_le(&mut stream) }, -257); // 0xfeff
+        stream.cursor = base;
+        assert_eq!(
+            unsafe { ft_stream_get_long(&mut stream) },
+            0xfffe_8000_u32 as i32
+        );
+        assert_eq!(unsafe { ft_stream_get_long(&mut stream) }, 0x7fff_0000);
+    }
+
+    #[test]
+    fn get_family_walks_a_record_the_way_the_sfnt_driver_does() {
+        let mut bytes = [0x00, 0x01, 0x00, 0x00, 0x00, 0x0c, 0x2a, 0x00, 0x00];
+        let mut stream = framed_stream(&mut bytes);
+        assert_eq!(unsafe { ft_stream_get_long(&mut stream) }, 0x0001_0000);
+        assert_eq!(unsafe { ft_stream_get_short(&mut stream) }, 12);
+        assert_eq!(unsafe { ft_stream_get_char(&mut stream) }, 42);
+        assert_eq!(stream.cursor, unsafe { bytes.as_mut_ptr().add(7) });
+        // pos/size are a separate cursor and stayed put throughout.
+        assert_eq!(stream.pos, 0);
+    }
+
     #[test]
     fn open_memory_initializes_exactly_the_fields_upstream_does() {
         let mut bytes = [1u8, 2, 3, 4];
@@ -1374,6 +1659,35 @@ mod tests {
         // And the stream it produces reads as a memory stream.
         let mut error = 0;
         assert_eq!(unsafe { ft_stream_read_char(&mut stream, &mut error) }, 1);
+    }
+
+    static mut CLOSE_CALLS: u32 = 0;
+
+    unsafe extern "C" fn record_close(_stream: *mut FtStream) {
+        *core::ptr::addr_of_mut!(CLOSE_CALLS) += 1;
+    }
+
+    #[test]
+    fn close_invokes_the_callback_and_tolerates_null() {
+        let mut bytes = [0u8; 2];
+        let mut stream = memory_stream(&mut bytes);
+        unsafe {
+            *core::ptr::addr_of_mut!(CLOSE_CALLS) = 0;
+            // No callback installed: nothing happens.
+            ft_stream_close(&mut stream);
+            assert_eq!(*core::ptr::addr_of!(CLOSE_CALLS), 0);
+            stream.close = Some(record_close);
+            ft_stream_close(&mut stream);
+            assert_eq!(*core::ptr::addr_of!(CLOSE_CALLS), 1);
+            // The pre-2.4 body does not clear `close`, so a second
+            // call fires the callback again.
+            ft_stream_close(&mut stream);
+            assert_eq!(*core::ptr::addr_of!(CLOSE_CALLS), 2);
+            assert!(stream.close.is_some());
+            // A null stream is explicitly allowed.
+            ft_stream_close(core::ptr::null_mut());
+            assert_eq!(*core::ptr::addr_of!(CLOSE_CALLS), 2);
+        }
     }
 
     #[test]
