@@ -4819,3 +4819,186 @@ functions:
       There is no occupied flag, so a key of 0 matches the first zeroed
       slot - preserved. Codegen deviation - LLVM fully unrolls the
       constant 6-iteration loop (29 instructions vs the original's 13).
+
+  # --- Batch: the UI rectangle primitives (ui/rect) ---
+  # Field layout recovered from the binary, QuickDraw order:
+  # +0x0 top, +0x4 left, +0x8 bottom, +0xc right, all signed 32-bit.
+
+  - address: 0x082a22d8
+    ghidra: FUN_082a22d8
+    name: rect_is_empty
+    size: 36
+    sig: "u32 rect_is_empty(const Rect *rect)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect}
+    notes: >-
+      Returns 1 when either span collapses - right <= left or
+      bottom <= top - else 0. Signed comparisons (movle/movgt). 21 bl
+      call sites, binary-verified. NOT the negation of rect_is_valid
+      (0x082a22fc) - a zero-width rectangle is both empty and valid.
+
+  - address: 0x082a22fc
+    ghidra: FUN_082a22fc
+    name: rect_is_valid
+    size: 36
+    sig: "u32 rect_is_valid(const Rect *rect)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect}
+    notes: >-
+      Returns 1 when neither span is inverted - left <= right and
+      top <= bottom. 5 bl call sites; the interesting one is the tail of
+      rect_intersect (0x0826c1c8), which uses it (not rect_is_empty) as
+      the final guard, so a degenerate zero-area clip survives.
+
+  - address: 0x082a2320
+    ghidra: FUN_082a2320
+    name: rect_width
+    size: 16
+    sig: "i32 rect_width(const Rect *rect)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect}
+    notes: >-
+      right - left (fields +0xc minus +0x4), wrapping. 38 bl call sites.
+      This is what fixes the field order - the XRGB8888 to RGB565 blit
+      loop @ 0x0816d4a0 uses the result as the pixels-per-row count
+      (source pointer advances 4 bytes per inner iteration and
+      result * 4 bytes per row) while rect_height (0x082a2330) drives
+      the outer row loop. The screen rectangle {0, 0, 0xf0, 0x140}
+      appears in the image data @ 0x0843a1f8 and 0x084e05e8 -
+      bottom = 240, right = 320, the Classic 6G's 320x240 LCD.
+
+  - address: 0x082a2330
+    ghidra: FUN_082a2330
+    name: rect_height
+    size: 16
+    sig: "i32 rect_height(const Rect *rect)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect}
+    notes: bottom - top (fields +0x8 minus +0x0), wrapping. 42 bl call sites.
+
+  - address: 0x082a2340
+    ghidra: FUN_082a2340
+    name: rect_contains
+    size: 68
+    sig: "u32 rect_contains(const Rect *outer, const Rect *inner)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: outer, param_2: inner}
+    notes: >-
+      1 iff inner.left >= outer.left and inner.top >= outer.top and
+      inner.bottom <= outer.bottom and inner.right <= outer.right.
+      4 bl call sites. A pure edge-wise comparison with no emptiness
+      test, so an inverted or empty inner still reports as contained -
+      preserved.
+
+  - address: 0x082a2384
+    ghidra: FUN_082a2384
+    name: rect_center
+    size: 56
+    sig: "Point *rect_center(const Rect *rect, Point *out)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect, param_2: out}
+    notes: >-
+      Writes the midpoint into out and returns out (closing
+      `mov r0, r1`). The horizontal midpoint goes to out+0 and the
+      vertical to out+4, so the point is {x, y} - not QuickDraw's
+      {v, h} - even though the rectangle itself is in QuickDraw field
+      order. `add rN, rN, rN, lsr #31` before `asr #1` is C's
+      truncate-toward-zero divide, so negative (inverted) spans round
+      toward zero. 2 bl call sites (0x081dd370, 0x081dd464).
+
+  - address: 0x082a23bc
+    ghidra: FUN_082a23bc
+    name: rect_equals
+    size: 64
+    sig: "u32 rect_equals(const Rect *a, const Rect *b)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: C++ operator== - all four coordinates equal. 2 bl call sites.
+
+  - address: 0x082a23fc
+    ghidra: FUN_082a23fc
+    name: rect_not_equals
+    size: 64
+    sig: "u32 rect_not_equals(const Rect *a, const Rect *b)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      C++ operator!= - emitted as its own function (identical compare
+      chain, inverted results) rather than as a negation of
+      rect_equals. 8 bl call sites.
+
+  - address: 0x082a22a0
+    ghidra: FUN_082a22a0
+    name: rects_intersect
+    size: 56
+    sig: "u32 rects_intersect(const Rect *a, const Rect *b)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      Overlap test that leaves both operands alone - copies a into a
+      16-byte stack rectangle (push {r0-r3} as the frame), calls
+      rect_intersect (0x0826c1c8) on the copy and returns
+      1 - rect_is_empty(copy). 2 bl call sites. The original's
+      `rsbs r0, r0, #1` / `movcc r0, #0` tail is a bool normalisation
+      whose cc case is unreachable (rect_is_empty only returns 0 or 1),
+      so it is dropped. LLVM inlines the whole chain and drops the
+      stack copy - same semantics, 38 instructions vs 14.
+
+  - address: 0x0826c1c8
+    ghidra: FUN_0826c1c8
+    name: rect_intersect
+    size: 132
+    sig: "void rect_intersect(Rect *dst, const Rect *src)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: dst, param_2: src}
+    notes: >-
+      Clips dst to src in place. Either operand empty (rect_is_empty @
+      0x082a22d8) clears dst outright via a tail branch to rect_clear
+      (0x0826c5a8); otherwise dst.top/left take the max and
+      dst.bottom/right the min, and the result is cleared unless
+      rect_is_valid (0x082a22fc) still holds. 45 bl call sites. Void -
+      the original leaves garbage in r0 (the constant 1 falling out of
+      the rect_is_valid call on one path, dst on the cleared path), so
+      no caller can depend on it. Because the final guard is
+      rect_is_valid and not rect_is_empty, a valid-but-degenerate
+      zero-area overlap (edge-to-edge neighbours) survives unchanged -
+      preserved, and pinned by a test.
+
+  - address: 0x0826c574
+    ghidra: FUN_0826c574
+    name: rect_offset
+    size: 52
+    sig: "void rect_offset(Rect *rect, i32 dx, i32 dy)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect, param_2: dx, param_3: dy}
+    notes: >-
+      QuickDraw OffsetRect - the first argument moves the horizontal
+      pair (+0x4 left, +0xc right) and the second the vertical pair
+      (+0x0 top, +0x8 bottom), i.e. (dh, dv). The hottest of the
+      family - 99 bl + 11 tail b call sites, binary-verified. Wrapping
+      adds (the original's bare `add` never traps).
+
+  - address: 0x0826c5a8
+    ghidra: FUN_0826c5a8
+    name: rect_clear
+    size: 24
+    sig: "void rect_clear(Rect *rect)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect}
+    notes: >-
+      Zeroes all four coordinates - the canonical empty rectangle.
+      26 bl + 4 tail b call sites. Void; r0 is never written, which is
+      exactly why rect_intersect can tail-branch here and still look
+      like it returns its destination.
