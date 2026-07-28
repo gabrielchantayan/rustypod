@@ -4234,14 +4234,31 @@ functions:
     ghidra: FUN_0804df3c
     name: ft_outline_get_orientation
     size: 400
-    status: identified
+    sig: "i32 ft_outline_get_orientation(const FtOutline *outline)"
+    module: ft/outline
+    status: ported
+    vars: {param_1: outline, local_2c: xmin, piVar9: xmin_point, piVar10: xmin_first,
+      piVar11: xmin_last, piVar7: first, piVar8: last, iVar2: on_curve_count,
+      iVar3: contour_xmin, piVar12: prev, piVar6: next}
     notes: >-
-      FreeType FT_Outline_Get_Orientation (pre-2.4 FT_Atan2 flavor) -
-      per contour, finds the leftmost on-curve point (tag bit 0),
-      keeps the global leftmost with >=3 on-curve points, walks to the
-      previous/next on-curve neighbors, compares the two ft_atan2
-      (0x0804c1c4) edge angles and returns 1 (postscript/anticlockwise
-      side of the compare) else 0. Port after the fttrigon chain.
+      FreeType FT_Outline_Get_Orientation, pre-2.4 FT_Atan2 flavor
+      (before the FT_Outline_Get_CBox/area rewrite). Null outline or
+      n_points<=0 returns 0 (FT_ORIENTATION_TRUETYPE). Per contour
+      first..=last, contours with last < first+2 points are skipped
+      (UNSIGNED pointer compare, bcc); the on-curve points (tag bit 0)
+      are counted and the leftmost one kept, seeded x<32768; a contour
+      with count>2 whose leftmost x beats the running minimum wins and
+      carries its first/last bounds. No winner -> 0. Otherwise the
+      previous/next on-curve neighbours are found by stepping within
+      the contour, wrapping first<->last (the count>2 test is what
+      guarantees termination), and the result is
+      ft_atan2(prev-point) > ft_atan2(next-point) ? 1
+      (FT_ORIENTATION_POSTSCRIPT, counter-clockwise) : 0 - a raw angle
+      compare, NOT FT_Angle_Diff. The contour cursor limit is compared
+      unsigned like the other ftoutln walkers, so negative n_contours
+      runs zero iterations. Tag index is the byte distance from points
+      arithmetic-shifted by 3 (ldrb [tags, r, asr #3]). 2 bl to
+      ft_atan2 @ 0x0804c1c4; 1 call site (0x080bf31c), binary-scanned.
 
   - address: 0x0804d17c
     ghidra: FUN_0804d17c
