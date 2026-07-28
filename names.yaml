@@ -4627,13 +4627,27 @@ functions:
     ghidra: FUN_0810fa90
     name: list_count_until_match
     size: 84
-    status: identified
+    sig: "u32 list_count_until_match(NodeList *list)"
+    module: app/node_list
+    status: ported
+    vars: {param_1: list}
     notes: >-
-      Walks a linked list at obj+4 counting nodes; when obj+8 is
-      nonzero, stops after the node whose vtable+0x68 call returns that
-      value (a find-position-by-key). Returns the 1-based position or
-      total count. 125 call sites, binary-scanned. Vtable dispatch
-      blocks a leaf port.
+      Walks the linked list at list+4 counting nodes; when the stop key
+      at list+8 is nonzero, stops after the node whose vtable+0x68 call
+      returns it, so the result is that node's 1-based position, else
+      the total count. 125 bl call sites. The list object is a C++
+      singleton - its accessor 0x0810fa30 is a function-local-static
+      initializer (guard word 0x089cc834, ADS guard helpers 0x082ab31c/
+      0x082ab338) returning the fixed object 0x08a79c74; 0x0810fa88
+      hands out its head. Callers are view classes @ 0x0839xxxx storing
+      the result in a field. Sibling 0x0810fb48 drains the same list
+      through the same +0x68 slot and stop key. Node layout - +0 vtable,
+      +0x14 next. Faithful details - the counter is bumped BEFORE the
+      key test so the matching node is included, and the stop key is
+      re-read after the virtual call (the original issues two
+      `ldr r0, [r5, #8]`), so a callee that rewrites it is honored.
+      Dispatch goes through the node's own vtable pointer, no hook
+      table.
 
   - address: 0x081c93fc
     ghidra: FUN_081c93fc
