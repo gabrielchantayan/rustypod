@@ -5018,3 +5018,106 @@ functions:
       BEFORE the copy, then __rt_memcpy @ 0x08037db0 (ROM veneer, ported
       as __rt_memcpy). No NUL store here - rep_create already wrote it.
       Returns `string`.
+
+  # --- tag-57 tracked allocator: free side (0x083906f4..0x08390774) ---
+  # Block layout built by the allocator @ 0x08390b8c (decoded, not ported):
+  #   raw+0x00 i32 size, raw+0x04 i32 size>>31 (the pair is an i64),
+  #   raw+0x08 = base, then padding so `data = (base + 36) & ~31` is
+  #   32-byte aligned, with `pad = data - base` stored at data-4.
+  # Accounting globals @ 0x08adc2c0 (9 code refs): +0x38 i64 current bytes,
+  # +0x40 i64 peak. 0x08390c30 resets peak := current, 0x08390c54 returns
+  # current. Allocator raises the peak; the free path only subtracts.
+  - address: 0x083906f4
+    ghidra: FUN_083906f4
+    name: tracked_free
+    size: 68
+    sig: "void tracked_free(void *payload)"
+    module: heap/tracked
+    status: ported
+    vars: {param_1: payload}
+    notes: >-
+      218 bl + 22 tail-b call sites. NULL-guarded. Reads the pad word at
+      payload-4, backs up to the raw block (payload - pad - 8), subtracts
+      the SIGNED 32-bit size cookie widened to 64 bits from the running
+      byte counter (`subs`/`sbc rX, rX, r2, asr #31` on the i64 at
+      0x08adc2c0+0x38), and tail-branches to the tag-57 free veneer
+      0x08391d24. Every field it touches is a 32-bit scalar, so the
+      literal byte offsets are valid on a 64-bit host too.
+
+  - address: 0x08390734
+    ghidra: FUN_08390734
+    name: tracked_free_pointer_array
+    size: 68
+    sig: "void tracked_free_pointer_array(void **elements)"
+    module: heap/tracked
+    status: ported
+    vars: {param_1: elements}
+    notes: >-
+      3 bl call sites. The block starts one word below `elements` with a
+      WORD COUNT; the remaining count-1 words are pointers to tracked
+      blocks. Frees each non-NULL element with tracked_free, then the
+      block itself. NULL-guarded. Addressed by index through a
+      `*mut *mut u8` (stride 4 on target, 8 on host) because the cookie
+      and elements are pointer-sized - the word-index rule.
+
+  - address: 0x08391d24
+    ghidra: FUN_08391d24
+    name: free_tag57
+    size: 8
+    sig: "void free_tag57(void *block)"
+    module: heap/tracked
+    status: ported
+    notes: >-
+      `mov r1, #57; b 0x080e7970` - free_wrapper with caller tag 57. One
+      tail-b call site (tracked_free).
+
+  - address: 0x08391d2c
+    ghidra: FUN_08391d2c
+    name: alloc_tag57
+    size: 8
+    sig: "void *alloc_tag57(size_t size)"
+    module: heap/tracked
+    status: ported
+    notes: >-
+      `mov r1, #57; b 0x080eb67c` - malloc_wrapper with caller tag 57.
+      2 bl call sites, one of them the tracked allocator @ 0x08390b8c.
+
+  - address: 0x08390b8c
+    ghidra: null
+    name: tracked_alloc_tail
+    size: 92
+    module: heap/tracked
+    status: identified
+    notes: >-
+      Tail of the tag-57 tracked allocator (not a functions.csv entry; the
+      enclosing function starts earlier). Decoded to recover the block
+      layout documented above - alloc_tag57, store size and size>>31 at
+      raw+0/+4, align `base + 36` down to 32, store the pad at data-4,
+      add the size to the i64 counter at 0x08adc2c0+0x38 and raise the
+      peak at +0x40 when it grew. Not ported - the enclosing function's
+      entry needs scouting first.
+
+  - address: 0x08390c30
+    ghidra: null
+    name: tracked_stats_reset_peak
+    size: 36
+    module: heap/tracked
+    status: identified
+    notes: >-
+      `peak(+0x40) := current(+0x38)` when its (register-passed, so this
+      is a tail fragment) flag is nonzero. Sibling 0x08390c54 returns the
+      current i64 after a call to 0x082ccc74. Both documented here for the
+      accounting map; neither ported.
+
+  - address: 0x0837a158
+    ghidra: FUN_0837a158
+    name: load_be32
+    size: 36
+    sig: "u32 load_be32(const u8 *p)"
+    module: util/beload
+    status: identified
+    notes: >-
+      Byte-identical second link-time copy of load_be32 @ 0x081f3b30
+      (verified: all 36 bytes match). 59 bl call sites here versus 4 at
+      the other address. No separate port - hook both addresses to the
+      one `load_be32` symbol in util/beload.rs.

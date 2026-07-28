@@ -8,6 +8,7 @@ pub mod free_path;
 pub mod init;
 pub mod pool;
 pub mod stats;
+pub mod tracked;
 pub mod types;
 pub mod veneers;
 pub mod wrappers;
