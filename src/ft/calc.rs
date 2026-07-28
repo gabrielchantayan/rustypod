@@ -43,6 +43,8 @@
 //!   divisor` overflow clamp to 0x7fffffff is kept verbatim. (0x0807c5b8
 //!   itself is outside this module's claimed range and stays unclaimed.)
 
+use crate::ft::types::FtMatrix;
+
 /// Sign-propagating absolute value as the original computes it:
 /// `(x ^ (x >> 31)) - (x >> 31)`, wrapping — `i32::MIN` maps to
 /// 0x80000000. Returns (unsigned magnitude, the `x >> 31` sign word).
@@ -193,6 +195,61 @@ fn ft_muldiv64(ua: u32, ub: u32, uc: u32) -> u32 {
     ft_div64by32((total >> 32) as u32, total as u32, uc)
 }
 
+/// ft_matrix_multiply (FreeType `FT_Matrix_Multiply`) — original:
+/// `FUN_0804d0dc` @ 0x0804d0dc (160 bytes; 1 call site).
+///
+/// `*b = *a * *b` in 16.16 fixed point: each result cell is the
+/// wrapping sum of two [`ft_mulfix`] products (`xx = a.xx*b.xx +
+/// a.xy*b.yx`, etc.). Null `a` or `b` is a no-op. The original computes
+/// all eight products before storing any cell, so `a == b` aliasing
+/// reads only pre-multiply values — preserved by snapshotting both
+/// matrices up front.
+///
+/// # Safety
+/// `a` and `b` must be null or valid `FtMatrix` pointers.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_matrix_multiply(a: *const FtMatrix, b: *mut FtMatrix) {
+    if a.is_null() || b.is_null() {
+        return;
+    }
+    let (a, bm) = (*a, *b);
+    (*b).xx = ft_mulfix(a.xx, bm.xx).wrapping_add(ft_mulfix(a.xy, bm.yx));
+    (*b).xy = ft_mulfix(a.xx, bm.xy).wrapping_add(ft_mulfix(a.xy, bm.yy));
+    (*b).yx = ft_mulfix(a.yx, bm.xx).wrapping_add(ft_mulfix(a.yy, bm.yx));
+    (*b).yy = ft_mulfix(a.yx, bm.xy).wrapping_add(ft_mulfix(a.yy, bm.yy));
+}
+
+/// ft_matrix_invert (FreeType `FT_Matrix_Invert`) — original:
+/// `FUN_0804d054` @ 0x0804d054 (136 bytes; 1 call site).
+///
+/// In-place 16.16 inverse. `delta = mulfix(xx, yy) - mulfix(xy, yx)`
+/// (wrapping sub); null matrix or `delta == 0` returns error 6
+/// (`FT_Err_Invalid_Argument`) with the matrix untouched. Otherwise
+/// `xy = -divfix(xy, delta)`, `yx = -divfix(yx, delta)` (wrapping
+/// negate), then `xx_new = divfix(yy, delta)` and `yy_new =
+/// divfix(xx_old, delta)` — the original stashes the old `xx` before
+/// overwriting it. Returns 0.
+///
+/// # Safety
+/// `matrix` must be null or a valid `FtMatrix` pointer.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_matrix_invert(matrix: *mut FtMatrix) -> i32 {
+    if matrix.is_null() {
+        return 6;
+    }
+    let m = &mut *matrix;
+    let delta = ft_mulfix(m.xx, m.yy).wrapping_sub(ft_mulfix(m.xy, m.yx));
+    if delta == 0 {
+        return 6;
+    }
+    m.xy = ft_divfix(m.xy, delta).wrapping_neg();
+    m.yx = ft_divfix(m.yx, delta).wrapping_neg();
+    let xx_old = m.xx;
+    m.xx = ft_divfix(m.yy, delta);
+    m.yy = ft_divfix(xx_old, delta);
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,6 +341,117 @@ mod tests {
         // 3 * 1.5 = 4.5 -> 5 (the +0x8000 bias), symmetric for negatives.
         assert_eq!(ft_mulfix(3, 0x18000), 5);
         assert_eq!(ft_mulfix(-3, 0x18000), -5);
+    }
+
+    const ONE: i32 = 0x10000; // 1.0 in 16.16
+
+    fn mat(xx: i32, xy: i32, yx: i32, yy: i32) -> FtMatrix {
+        FtMatrix { xx, xy, yx, yy }
+    }
+
+    /// Reference product per the documented FreeType formula, built on
+    /// the already-proven ft_mulfix.
+    fn matmul_ref(a: FtMatrix, b: FtMatrix) -> FtMatrix {
+        mat(
+            ft_mulfix(a.xx, b.xx).wrapping_add(ft_mulfix(a.xy, b.yx)),
+            ft_mulfix(a.xx, b.xy).wrapping_add(ft_mulfix(a.xy, b.yy)),
+            ft_mulfix(a.yx, b.xx).wrapping_add(ft_mulfix(a.yy, b.yx)),
+            ft_mulfix(a.yx, b.xy).wrapping_add(ft_mulfix(a.yy, b.yy)),
+        )
+    }
+
+    #[test]
+    fn matrix_multiply_identity_and_scale() {
+        let id = mat(ONE, 0, 0, ONE);
+        let mut b = mat(0x28000, -0x8000, 0x4000, 0x18000);
+        unsafe { ft_matrix_multiply(&id, &mut b) };
+        assert_eq!(b, mat(0x28000, -0x8000, 0x4000, 0x18000));
+        // 2x scale on the left doubles every cell.
+        let two = mat(2 * ONE, 0, 0, 2 * ONE);
+        unsafe { ft_matrix_multiply(&two, &mut b) };
+        assert_eq!(b, mat(0x50000, -0x10000, 0x8000, 0x30000));
+    }
+
+    #[test]
+    fn matrix_multiply_matches_reference_grid() {
+        let vals = [0, ONE, -ONE, 0x8000, -0x28000, 0x123456, 0x7fffffff];
+        for &p in &vals {
+            for &q in &vals {
+                let a = mat(p, q, q.wrapping_neg(), p);
+                let b0 = mat(q, p, p, q.wrapping_neg());
+                let mut b = b0;
+                unsafe { ft_matrix_multiply(&a, &mut b) };
+                assert_eq!(b, matmul_ref(a, b0), "a={a:?} b={b0:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn matrix_multiply_aliased_reads_premultiply_values() {
+        // a == b: the original finishes all eight products before the
+        // first store, so the result is m * m of the original cells.
+        let m0 = mat(ONE, 0x8000, -0x4000, 0x20000);
+        let mut m = m0;
+        unsafe { ft_matrix_multiply(&m, &mut m) };
+        assert_eq!(m, matmul_ref(m0, m0));
+    }
+
+    #[test]
+    fn matrix_multiply_null_is_noop() {
+        let mut b = mat(1, 2, 3, 4);
+        unsafe {
+            ft_matrix_multiply(core::ptr::null(), &mut b);
+            ft_matrix_multiply(&b, core::ptr::null_mut());
+        }
+        assert_eq!(b, mat(1, 2, 3, 4));
+    }
+
+    #[test]
+    fn matrix_invert_diagonal_and_rotation() {
+        // diag(2, 4) inverts to diag(0.5, 0.25).
+        let mut m = mat(2 * ONE, 0, 0, 4 * ONE);
+        assert_eq!(unsafe { ft_matrix_invert(&mut m) }, 0);
+        assert_eq!(m, mat(0x8000, 0, 0, 0x4000));
+        // 90-degree rotation [0,-1;1,0] inverts to [0,1;-1,0].
+        let mut r = mat(0, -ONE, ONE, 0);
+        assert_eq!(unsafe { ft_matrix_invert(&mut r) }, 0);
+        assert_eq!(r, mat(0, ONE, -ONE, 0));
+    }
+
+    #[test]
+    fn matrix_invert_roundtrip_recovers_matrix() {
+        let m0 = mat(0x18000, 0x4000, -0x8000, 0x20000);
+        let mut m = m0;
+        assert_eq!(unsafe { ft_matrix_invert(&mut m) }, 0);
+        assert_eq!(unsafe { ft_matrix_invert(&mut m) }, 0);
+        // Sanity only (exact per-cell behavior is proven elsewhere):
+        // divfix roundings compound through delta, so allow a few ulp.
+        for (got, want) in [
+            (m.xx, m0.xx),
+            (m.xy, m0.xy),
+            (m.yx, m0.yx),
+            (m.yy, m0.yy),
+        ] {
+            assert!((got - want).abs() <= 8, "{got:#x} vs {want:#x}");
+        }
+    }
+
+    #[test]
+    fn matrix_invert_singular_returns_error_untouched() {
+        // delta == 0: [1,2;2,4] scaled to 16.16.
+        let mut m = mat(ONE, 2 * ONE, 2 * ONE, 4 * ONE);
+        assert_eq!(unsafe { ft_matrix_invert(&mut m) }, 6);
+        assert_eq!(m, mat(ONE, 2 * ONE, 2 * ONE, 4 * ONE));
+        assert_eq!(unsafe { ft_matrix_invert(core::ptr::null_mut()) }, 6);
+    }
+
+    #[test]
+    fn matrix_invert_uses_old_xx_for_new_yy() {
+        // yy_new = divfix(xx_old, delta), not the freshly written xx.
+        let mut m = mat(0x30000, 0, 0, 0x10000); // delta = 3.0
+        assert_eq!(unsafe { ft_matrix_invert(&mut m) }, 0);
+        assert_eq!(m.xx, ft_divfix(0x10000, 0x30000)); // 1/3
+        assert_eq!(m.yy, ft_divfix(0x30000, 0x30000)); // 3/3 = 1.0
     }
 
     #[test]

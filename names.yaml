@@ -3781,6 +3781,39 @@ functions:
       helpers bit-identically (u64 mul+add, u64 divide). 33 call
       sites, binary-scanned.
 
+  - address: 0x0804d0dc
+    ghidra: FUN_0804d0dc
+    name: ft_matrix_multiply
+    size: 160
+    sig: "void ft_matrix_multiply(const FtMatrix *a, FtMatrix *b)"
+    module: ft/calc
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      FreeType FT_Matrix_Multiply - b = a*b in 16.16, each cell the
+      wrapping sum of two ft_mulfix (0x0804d2cc) products. Null a or b
+      is a no-op. All eight products complete before the first store
+      (stmia at the end), so a==b aliasing reads pre-multiply values -
+      port snapshots both matrices up front. FtMatrix layout
+      xx/xy/yx/yy @ +0/+4/+8/+12 (ft/types). 1 call site,
+      binary-scanned.
+
+  - address: 0x0804d054
+    ghidra: FUN_0804d054
+    name: ft_matrix_invert
+    size: 136
+    sig: "i32 ft_matrix_invert(FtMatrix *matrix)"
+    module: ft/calc
+    status: ported
+    vars: {param_1: matrix}
+    notes: >-
+      FreeType FT_Matrix_Invert - in-place 16.16 inverse. delta =
+      mulfix(xx,yy) - mulfix(xy,yx) (wrapping sub); null matrix or
+      delta==0 returns 6 (FT_Err_Invalid_Argument) untouched. Else
+      xy=-divfix(xy,delta), yx=-divfix(yx,delta) (wrapping rsb), xx_old
+      stashed, xx=divfix(yy,delta), yy=divfix(xx_old,delta); returns 0.
+      1 call site, binary-scanned.
+
   - address: 0x08042cbc
     ghidra: FUN_08042cbc
     name: bcopy
