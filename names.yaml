@@ -3915,3 +3915,140 @@ functions:
       sites, binary-scanned, all in the MPEG-4 container parser cluster
       @ 0x081c38e0..0x081c8a38 (owns the moov/trak/mdhd atom literals),
       which looks up track nodes by id.
+
+  - address: 0x0810b610
+    ghidra: FUN_0810b610
+    name: strlen_safe
+    size: 36
+    sig: "usize strlen_safe(const u8 *s)"
+    module: libc/strlen_safe
+    status: ported
+    vars: {param_1: s}
+    notes: >-
+      Byte-identical second link-time copy of the NULL-guarded strlen
+      @ 0x082770bc (verified equal). Served by the existing
+      libc/strlen_safe port - hook both addresses to the one symbol.
+      5 call sites, binary-scanned (0x0810b538, 0x081132d8, 0x0811334c,
+      0x08297d74, 0x08297d80).
+
+  - address: 0x0817ee04
+    ghidra: FUN_0817ee04
+    name: singleton_get_0xe8
+    size: 44
+    status: identified
+    notes: >-
+      Lazy singleton getter - hottest unclaimed function in the mid
+      region at 1108 call sites (binary-scanned). If global slot
+      (+8 off the object at DAT_0817ee30) is 0, allocates 0xE8 bytes
+      via FUN_082aadd4 (operator-new-like) and constructs via
+      FUN_081847fc, caches, returns the cached pointer. Not leaf -
+      needs the allocator and constructor; port once those exist and
+      the singleton's identity is known.
+
+  - address: 0x08173848
+    ghidra: FUN_08173848
+    name: singleton_get_0x850
+    size: 44
+    status: identified
+    notes: >-
+      Same lazy-singleton pattern as 0x0817ee04 but a 0x850-byte object
+      constructed by FUN_08177a78; cache slot is *DAT_08173874. 140
+      call sites, binary-scanned.
+
+  - address: 0x0813b6f4
+    ghidra: FUN_0813b6f4
+    name: global_ctx_get_field8
+    size: 12
+    status: identified
+    notes: >-
+      Returns *(DAT_0813b700 + 8) - a one-load global-context getter in
+      the record-parser subsystem that owns the berec_* family. 254
+      call sites, binary-scanned. Trivial but needs the global's
+      identity to name/port honestly.
+
+  - address: 0x081ee17c
+    ghidra: FUN_081ee17c
+    name: cursor_init
+    size: 16
+    status: identified
+    notes: >-
+      Iterator/cursor glue family with 0x081ee138/0x081ee18c (111/113/
+      129 call sites, binary-scanned). Init - stores the target object
+      in slot 0 and sentinel -2 ("before first") in slot 1.
+
+  - address: 0x081ee138
+    ghidra: FUN_081ee138
+    name: cursor_advance
+    size: 68
+    status: identified
+    notes: >-
+      Advance - index becomes 0 after the -2 init sentinel, else +1;
+      calls target vtable slot +0x3c with (index, out); a 0 result
+      invalidates the cursor (index = -1). Vtable dispatch blocks a
+      leaf port.
+
+  - address: 0x081ee18c
+    ghidra: FUN_081ee18c
+    name: cursor_invalidate
+    size: 12
+    status: identified
+    notes: Sets the cursor index (slot 1) to -1. Pairs with 0x081ee17c/0x081ee138.
+
+  - address: 0x08120604
+    ghidra: FUN_08120604
+    name: storage_cmd_block_init
+    size: 80
+    status: identified
+    notes: >-
+      Default-initializer in the ATA command-block cluster - bytes
+      +0=2, +1=3, words +4..+0x18=0, +0x1c=-1, +0x20=-1, +0x24/+0x28=0,
+      bytes +0x2c/+0x2d=0, word +0x30=0. Pure constant stores, 15 call
+      sites (binary-scanned); skipped only because the field meanings
+      (version/format bytes 2,3 and the two -1 sentinels) are not yet
+      pinned down enough for honest field names.
+
+  - address: 0x08138bd0
+    ghidra: FUN_08138bd0
+    name: table_find_id_and_mask
+    size: 88
+    status: identified
+    notes: >-
+      Scans a global table (base DAT_08138c28, count DAT_08138c2c) of
+      12-byte records for one whose u16 at +4 equals the id argument
+      and whose mask byte at +6 has bit (1 << mode) set; returns the
+      record pointer or 0. 8 call sites, binary-scanned. Pure logic but
+      anchored to two unresolved globals.
+
+  - address: 0x081fea54
+    ghidra: FUN_081fea54
+    name: watermark_slot_reset
+    size: 52
+    status: identified
+    notes: >-
+      Bounds-checked (index <= 0x10, else returns 9) reset of a
+      16-byte slot in a global table @ DAT_081fea88 - sets +4 =
+      0x7fffffff (a min-tracker seed), +8/+0xc/+0 = 0, returns 0.
+      10 call sites, binary-scanned. Needs the global table identity.
+
+  - address: 0x0810fa90
+    ghidra: FUN_0810fa90
+    name: list_count_until_match
+    size: 84
+    status: identified
+    notes: >-
+      Walks a linked list at obj+4 counting nodes; when obj+8 is
+      nonzero, stops after the node whose vtable+0x68 call returns that
+      value (a find-position-by-key). Returns the 1-based position or
+      total count. 125 call sites, binary-scanned. Vtable dispatch
+      blocks a leaf port.
+
+  - address: 0x081c93fc
+    ghidra: FUN_081c93fc
+    name: table6_find_by_key
+    size: 52
+    status: identified
+    notes: >-
+      Scans a fixed 6-entry table of 8-byte records (base at *param_1)
+      for a record whose first word equals the key; returns the record
+      pointer or 0. Pure leaf, but only 3 call sites (binary-scanned,
+      MP4 parser cluster) - low value, easy pick for a later sweep.
