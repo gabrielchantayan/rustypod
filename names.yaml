@@ -6509,18 +6509,124 @@ functions:
 
   - address: 0x082cfae8
     ghidra: FUN_082cfae8
-    name: unported_conditional_hook_call
+    name: ft_mem_free
     size: 16
-    module: unported
+    sig: void ft_mem_free(FtMemory *memory, void *block)
+    module: ft/memory
+    status: ported
+    vars:
+      param_1: memory
+      param_2: block
+    notes: >-
+      FreeType ft_mem_free (ftutil.c) - `if (block) memory->free(memory,
+      block)`, a conditional tail branch through FT_MemoryRec's free slot
+      at +8. 255 bl + 12 tail b call sites (binary-scanned), the busiest
+      FreeType routine after the trace sink. Identified by its two
+      callers inside the same translation unit - ft_mem_qrealloc @
+      0x082cfb34 calls it exactly where upstream's `new_count == 0` arm
+      does `ft_mem_free( memory, block )`, and ft_stream_exit_frame @
+      0x0804ef8c / ft_stream_release_frame @ 0x0804fcb8 call it as the
+      first half of upstream's FT_FREE macro (the macro's own nulling of
+      the caller's pointer is the `str` that follows each call site).
+      Freeing NULL never dereferences `memory`.
+
+  - address: 0x082cfaa4
+    ghidra: FUN_082cfaa4
+    name: ft_mem_alloc
+    size: 68
+    sig: void *ft_mem_alloc(FtMemory *memory, i32 size, i32 *p_error)
+    module: ft/memory
+    status: ported
+    vars:
+      param_1: memory
+      param_2: size
+      param_3: p_error
+    notes: >-
+      FreeType ft_mem_alloc (ftutil.c) - ft_mem_qalloc (0x082cfaf8)
+      followed by FT_MEM_ZERO when the allocation succeeded and size > 0.
+      68 bl call sites (binary-scanned). The zero fill is ARM ADS'
+      two-argument __rt_memclr reached through the iRAM veneer at
+      0x08037dc8 -> 0x220002d4, i.e. memzero @ 0x080002d4 copied into
+      fast memory. Confirmed by ft_mem_qrealloc @ 0x082cfb34, which calls
+      it with (memory, new_count*item_size, &error) exactly where
+      upstream's `cur_count == 0` arm does. Port deviation - LLVM inlines
+      the memzero body, so match.py shows one bl plus an inlined
+      __aeabi_memclr chain instead of the original's single bl.
+
+  - address: 0x082cfaf8
+    ghidra: FUN_082cfaf8
+    name: ft_mem_qalloc
+    size: 60
+    sig: void *ft_mem_qalloc(FtMemory *memory, i32 size, i32 *p_error)
+    module: ft/memory
+    status: ported
+    vars:
+      param_1: memory
+      param_2: size
+      param_3: p_error
+    notes: >-
+      FreeType ft_mem_qalloc (ftutil.c) - the unzeroed allocation.
+      size > 0 calls memory->alloc (FT_MemoryRec +4) and reports
+      FT_Err_Out_Of_Memory (0x40) on a NULL result; size == 0 is a
+      NULL block with FT_Err_Ok; size < 0 is FT_Err_Invalid_Argument
+      (6) without ever asking the allocator. 3 bl call sites
+      (binary-scanned) - ft_mem_alloc, ft_mem_realloc's chain and
+      ft_stream_enter_frame @ 0x0804edb0 (upstream's FT_QALLOC).
+
+  - address: 0x082cfa90
+    ghidra: FUN_082cfa90
+    name: ft_highpow2
+    size: 20
+    sig: u32 ft_highpow2(u32 value)
+    module: ft/memory
+    status: identified
+    vars:
+      param_1: value
+    notes: >-
+      FreeType ft_highpow2 (ftutil.c) verbatim - clear the lowest set bit
+      (`value & (value - 1)`) until the result is 0, then return the last
+      non-zero value, i.e. the highest power of two <= value (and 0 for
+      0). 1 bl + 1 b call sites. Not ported; recorded because it is the
+      third independent pin on this translation unit being ftutil.c,
+      alongside the __FILE__ pointer 0x08901290 (runtime; the text sits
+      at file 0x0890c168) and the ft_mem_* family itself.
+
+  - address: 0x082cfb34
+    ghidra: FUN_082cfb34
+    name: ft_mem_qrealloc
+    size: 220
+    sig: >-
+      void *ft_mem_qrealloc(FtMemory *memory, i32 item_size, i32
+      cur_count, i32 new_count, void *block, i32 *p_error)
+    module: ft/memory
     status: identified
     notes: >-
-      255 bl + 12 tail b call sites. `if (r1) tail-call *(r0 + 8)` with
-      the arguments forwarded - a guarded call through a function
-      pointer FIELD (not a vtable), returning r0 unchanged when the
-      guard argument is 0. Ports trivially, but the field's role is
-      unknown without the owning struct. Neighbours in the same unit -
-      0x082cfaa4 (68 bytes, 68 bl), 0x082cfc3c (108 bytes, 116 bl),
-      0x082cfe58 (16 bytes, 41 bl).
+      FreeType ft_mem_qrealloc (ftutil.c). Rejects cur_count < 0 ||
+      new_count < 0 || item_size <= 0 with FT_Err_Invalid_Argument (the
+      pre-2.3.5 `item_size <= 0` spelling, not the later `< 0`);
+      new_count == 0 frees the block through ft_mem_free and yields NULL;
+      new_count > FT_INT_MAX/item_size (an __rt_sdiv @ 0x08031568 against
+      0x7fffffff) is FT_Err_Array_Too_Large (10); cur_count == 0 asserts
+      block == NULL (FT_ASSERT __LINE__ 139, ftutil.c) and goes to
+      ft_mem_alloc; otherwise memory->realloc (FT_MemoryRec +12) with
+      (memory, cur_count*item_size, new_count*item_size, block) and
+      FT_Err_Out_Of_Memory on NULL. 1 bl call site. Not ported - only
+      reachable through ft_mem_realloc, which no ported caller needs yet.
+
+  - address: 0x082cfc3c
+    ghidra: FUN_082cfc3c
+    name: ft_mem_realloc
+    size: 108
+    sig: >-
+      void *ft_mem_realloc(FtMemory *memory, i32 item_size, i32
+      cur_count, i32 new_count, void *block, i32 *p_error)
+    module: ft/memory
+    status: identified
+    notes: >-
+      FreeType ft_mem_realloc (ftutil.c) - ft_mem_qrealloc (0x082cfb34)
+      followed by FT_MEM_ZERO of the grown tail when the call succeeded
+      and new_count > cur_count. 116 bl call sites (binary-scanned). Not
+      ported - no ported caller needs it yet.
 
   - address: 0x08292e6c
     ghidra: FUN_08292e6c
