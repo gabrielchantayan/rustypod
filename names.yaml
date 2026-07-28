@@ -3864,3 +3864,38 @@ functions:
       14 call sites, binary-scanned, all in the file-path cluster
       @ 0x081bc9f8..0x081bded8 (owns the literal
       "iPod_Control/Device/PlayCounts" @ 0x081bc840).
+
+  - address: 0x0812141c
+    ghidra: FUN_0812141c
+    name: ata_cmd_set_lba28
+    size: 84
+    sig: "u32 ata_cmd_set_lba28(u8 *cmd, u32 lba, u32 drive)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd, param_2: lba, param_3: drive}
+    notes: >-
+      Legacy-taskfile LBA28 packer of the ATA command-block setter
+      family @ 0x081211bc..0x08121488 (cmd byte +0x1a - the read flow
+      @ 0x082798bc stores 0xC8 READ DMA there; flags +0x10; count byte
+      +0x15; xfer bytes +0x30). Validates lba < 2^28 and drive <= 1
+      (else 0xffffffff), stores lba[0..2] at +0x16..+0x18 and device
+      byte 0x40|drive<<4|lba[24:27] at +0x19, returns 0. 7 call sites,
+      binary-scanned, callers @ 0x082799c8..0x0827a800.
+
+  - address: 0x0812134c
+    ghidra: FUN_0812134c
+    name: ata_cmd_set_lba48
+    size: 96
+    sig: "void ata_cmd_set_lba48(u8 *cmd, u32 lba_hi, u32 lba_lo, u32 drive, u32 count, u8 command)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd, param_2: lba_hi, param_3: lba_lo, param_4: drive, param_5: count, param_6: command}
+    notes: >-
+      Extended-taskfile LBA48 packer - stores (current|previous<<8)
+      register pairs +0x4c=lba[0]|lba[3]<<8, +0x4e=lba[1]|lba[4]<<8,
+      +0x50=lba[2]|lba[5]<<8 (48-bit LBA split lba_hi=bits 32..47 /
+      lba_lo=bits 0..31), count pair +0x52, command byte +0x1a, device
+      halfword +0x56=(0x40|drive<<4)&0xff. No validation. Port writes
+      the u16 fields write_unaligned (original strh needs 2-byte
+      alignment; identical for every pointer it supported). 8 call
+      sites, binary-scanned, callers @ 0x0827a2f4..0x0827b09c.
