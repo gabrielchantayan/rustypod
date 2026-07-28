@@ -4568,15 +4568,33 @@ functions:
 
   - address: 0x08138bd0
     ghidra: FUN_08138bd0
-    name: table_find_id_and_mask
+    name: registry_find_for_slot
     size: 88
-    status: identified
+    sig: "SlotRecord *registry_find_for_slot(void *this, u32 slot, u32 id)"
+    module: util/table_find
+    status: ported
+    vars: {param_1: this, param_2: slot, param_3: id}
     notes: >-
-      Scans a global table (base DAT_08138c28, count DAT_08138c2c) of
-      12-byte records for one whose u16 at +4 equals the id argument
-      and whose mask byte at +6 has bit (1 << mode) set; returns the
-      record pointer or 0. 8 call sites, binary-scanned. Pure logic but
-      anchored to two unresolved globals.
+      Linear scan of a 275-entry table of 12-byte records for the one
+      whose u16 id (+4) equals the id argument AND whose mask byte (+6)
+      has bit (1 << slot) set; returns the record or 0. 8 bl call sites.
+      Both anchors are now resolved - the base 0x089ccc38 is a fixed
+      address (a static array in the runtime-initialized RW page, not a
+      pointer global) and the "count" DAT_08138c2c is a literal-pool
+      immediate 0x113 = 275, not a global at all. Record layout - +0
+      descriptor pointer (0x08138e94 reads a u16 at descriptor+0x3c),
+      +4 u16 id, +6 u8 slot mask, +8 opaque handle (fed to the decoder
+      0x082cdc94 by 0x08138650). `slot` is 0..2 - every caller asserts
+      it (0x0813858c, 0x08193e84) and each slot owns a 0x114-byte state
+      record in the array @ 0x08ad0f34 whose +4 field takes this
+      function's result (the slot's current descriptor); id 0 is the
+      default. param_1 is a `this` the original never reads (mov r0, #0
+      kills it before the loop) but all 8 call sites pass it. Faithful
+      details - ARM register shift (slot 32..255 gives mask 0) then
+      & 0xff so slots >= 8 never match; the ldrh id compare is
+      zero-extended against the full u32 argument; do-while, so index 0
+      is examined before the count is tested. Deviation - the table is
+      the crate static SLOT_RECORDS, zeroed (block_mgr.rs precedent).
 
   - address: 0x081fea54
     ghidra: FUN_081fea54
