@@ -4,6 +4,7 @@ pub mod clock;
 pub mod clock_config;
 pub mod display_layer;
 pub mod gpio;
+pub mod gpio_cmd;
 pub mod gpioic;
 pub mod i2c;
 pub mod piezo;

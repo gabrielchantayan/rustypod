@@ -9,6 +9,7 @@ pub mod init;
 pub mod pool;
 pub mod pool_client;
 pub mod stats;
+pub mod tracked;
 pub mod types;
 pub mod veneers;
 pub mod wrappers;

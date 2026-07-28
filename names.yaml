@@ -6546,3 +6546,389 @@ functions:
       bare singleton getter. Nothing to verify behaviorally and nothing
       to name until the singleton's type is known; recorded so the next
       pass does not re-scout it.
+
+  # --- Region survey: 0x08300000-0x083fffff (agent hi6) ---
+  # 3481 Ghidra functions, ~3439 unclaimed at survey time. Sub-blocks:
+  #   0x08300000-0x0835ffff  sparse (~200 fns) - misc app/service code.
+  #   0x08360000-0x0838ffff  (~650 fns) media/database service layer:
+  #     record containers with 20-byte elements (0x08386840 family),
+  #     NULL-guarded field accessors, RTXC mutex-guarded refcount setters.
+  #     0x0836b5b0 is an S5L8702 GPIO helper (MMIO 0x3cf00000).
+  #   0x08390000-0x083bffff  (~1130 fns) C/C++ runtime + string cluster:
+  #     plain byte-loop strcmp 0x08391e44 / strlen 0x08392478, a
+  #     table-driven string hash 0x08391dec, tagged free veneers
+  #     (0x08391d24 = free tag 0x39), array delete with byte accounting
+  #     (0x083906f4).
+  #   0x083c0000-0x083dffff  (~1000 fns) C++ standard library: a COW
+  #     (libstdc++-style) basic_string with a 12-byte _Rep header
+  #     {refcount, capacity, length} living 12 bytes below the char data,
+  #     _S_empty_rep_storage in RAM at 0x08b31804 (data 0x08b31810);
+  #     plus a deque/vector family (the 16-byte deque iterator copy
+  #     @ 0x083dd9e4 already ported) and ~60 byte-identical 16-byte
+  #     handle-deref accessors at 0x083d604c..0x083d62xx.
+  #   0x083e0000-0x083edfff  ARM ADS fplib (already largely ported).
+  #   0x083f0000-0x083fffff  (~100 fns) plus 256-byte permutation tables
+  #     at 0x083ffd5c/0x083ffe5c.
+  # Shared 256-byte byte-map at runtime address 0x088faa8b: indexed by
+  # `ldrb [tbl, c]` from 9 sites (string hash 0x08391dec, the collating
+  # compares 0x08384f14/0x08384fa8, 0x0838d874, 0x082cd880, 0x082d77ec,
+  # 0x082dfdbc, 0x0836e600, 0x0836e9cc). The decrypted image holds a
+  # 12-byte-record resource index at that vaddr, so the page is
+  # re-initialized at runtime (same situation as the pool alignment table
+  # @ 0x089cb1bc documented in heap/pool.rs) - those functions cannot be
+  # ported until the table's runtime contents are recovered.
+
+  - address: 0x08391e44
+    ghidra: FUN_08391e44
+    name: strcmp
+    size: 68
+    sig: "int strcmp(const char *a, const char *b)"
+    module: libc/strcmp
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      Normalized three-way string compare returning exactly -1/0/+1, not
+      the byte delta. Plain byte loop (ldrb, unsigned), continue test is
+      the ADS two-flag idiom `cmp a,#0; cmpne b,#0` (the second test is
+      redundant because the loop only continues when a == b, and the port
+      drops it). Reached exclusively through the 4-byte entry veneer
+      thunk_FUN_08391e44 @ 0x08391e38 (`b 0x08391e44`) - 756 bl call
+      sites target 0x08391e38 and none target 0x08391e44, making it the
+      most-called function in 0x08300000-0x083fffff. Not the ARM ADS
+      strcmp (absent from osos); it belongs to the byte-loop string
+      cluster 0x08391dec..0x083924a0. util/utoa's variant_compare
+      previously replicated it as a private `strcmp3` helper - that copy
+      is now deleted and the module calls this port directly. Hook both
+      0x08391e38 and 0x08391e44 to the one symbol.
+
+  - address: 0x08391e38
+    ghidra: thunk_FUN_08391e44
+    name: strcmp_veneer
+    size: 4
+    module: libc/strcmp
+    status: identified
+    notes: >-
+      `b 0x08391e44` - the address every one of strcmp's 756 callers
+      actually branches to. No separate port; hook it to `strcmp`.
+
+  - address: 0x08392478
+    ghidra: FUN_08392478
+    name: strlen
+    size: 32
+    sig: "size_t strlen(const char *s)"
+    module: libc/strlen
+    status: ported
+    vars: {param_1: s}
+    notes: >-
+      Unguarded strlen - byte loop, no NULL check, no word-at-a-time
+      trick, counter kept in r1 separately from the pointer walk. 419 bl
+      call sites. Distinct from the NULL-guarded strlen_safe @ 0x082770bc
+      (and its second link-time copy); the two `strlen_raw` helpers
+      already inlined in stdio/semihost.rs and kernel/task.rs are callers
+      of THIS function, so they can be redirected here later.
+      Port uses read_volatile so LLVM's loop-idiom pass cannot rewrite
+      the loop into a call to `strlen` - i.e. into itself.
+
+  - address: 0x0836b5b0
+    ghidra: FUN_0836b5b0
+    name: gpio_pin_configure
+    size: 72
+    sig: "u32 gpio_pin_configure(u32 pin_id, u32 mode, int level)"
+    module: drivers/gpio_cmd
+    status: ported
+    vars: {param_1: pin_id, param_2: mode, param_3: level}
+    notes: >-
+      The single choke point through which retailOS configures S5L8702
+      GPIO pins - 100 bl + 5 tail-b call sites. Writes one packed command
+      word `port << 16 | pin << 8 | function` to GPIOCMD
+      (0x3cf00000 + 0x200); `port = pin_id >> 3`, `pin = pin_id & 7`
+      (8 pins per port). `mode` is the raw function code, passed through
+      as `mode & 0xff`, except `mode == 1` (drive as output) with
+      `level == 0` or `1`, which selects function 14 (low) / 15 (high)
+      and skips the mask. `mode == 1` with any other level falls through
+      to the mask and programs function 1 - the original's control flow,
+      preserved. Always returns 0. Observed call sites use pin ids
+      0x72/0x73/0x74 (port 14 pins 2/3/4) with mode 2 (alt function) and
+      mode 1. Port splits the packing into the pure `gpio_command_word`
+      (exhaustively tested on host) plus the register store, which is
+      mocked off-target like kernel/csem.rs mocks the cpsr. Lives in
+      drivers/gpio_cmd.rs, not drivers/gpio.rs - the latter is a stub
+      reserved for another agent. Codegen deviation - LLVM packs the port
+      field as `(pin_id << 13) & 0xffff0000` instead of
+      `(pin_id >> 3) << 16`; same bits.
+
+  # --- C++ COW basic_string<char> core (cluster 0x083d8518..0x083d8bac) ---
+  # String object = one word, the char data pointer. 12-byte _Rep header
+  # sits at data-12: {refcount i32 @0, capacity u32 @4, length u32 @8}
+  # (field order recovered from the header stores, NOT the libstdc++ order).
+  # refcount 0 = sole owner, -1 = destroy. Shared empty rep @ 0x08b31804
+  # (RAM), its data @ 0x08b31810. Allocation is capacity + 14 bytes
+  # (12 header + NUL + 1 spare) via operator_new_checked @ 0x08266c70;
+  # deallocation via the 4-byte veneer 0x08266f2c = `b 0x082aad24`
+  # (plain operator delete - the size and third argument are discarded).
+  - address: 0x083d8b04
+    ghidra: FUN_083d8b04
+    name: cxx_string_release
+    size: 80
+    sig: "void cxx_string_release(char **string)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: string}
+    notes: >-
+      571 bl call sites - the second-most-called function in
+      0x08300000-0x083fffff (the destructor half of every std::string in
+      the OS). Returns immediately when the data pointer is the shared
+      empty rep's. Otherwise: a refcount already at -1 destroys at once,
+      else decrement and destroy when the result is -1. The second
+      singleton test (`rep == 0x08b31804`) is redundant with the first
+      (`data == 0x08b31810`) - kept in the port for fidelity. Destroy
+      tail-branches to 0x08266f2c with (rep, capacity + 14, 0); that
+      veneer is `b operator_delete`, so the port calls the ported
+      heap::veneers::operator_delete directly and LLVM inlines it.
+
+  - address: 0x083d8a64
+    ghidra: FUN_083d8a64
+    name: cxx_string_rep_create
+    size: 152
+    sig: "StringRep *cxx_string_rep_create(void *unused, u32 capacity, u32 length)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: unused, param_2: capacity, param_3: length}
+    notes: >-
+      99 bl call sites. Allocates a _Rep - capacity 0 returns the shared
+      empty rep without allocating, otherwise operator_new_checked
+      (capacity + 14), refcount 0, capacity, length, NUL at data[length].
+      Two length-error reports call the C++ diagnostic/throw dispatch
+      @ 0x08266abc with code 8 and two string arguments that both point
+      at an empty string @ 0x083d8afc (diagnostics stripped from this
+      build); the original reaches them with `bl` and falls through to
+      allocate anyway, which the port reproduces via the CXX_STRING_OPS
+      hook (volatile-read, or LLVM const-folds the no-op default away).
+      Max capacity is 0xfffffff1 (`cmn r1, #15`). First argument is never
+      read. DEVIATION - the original's header store `stm r0, {r1, r4, r5}`
+      @ 0x083d8ae8 is unconditional and writes through NULL when the
+      allocation fails; the port returns NULL instead. The original's
+      redundant `stmiane` pre-zeroing of those same three words and the
+      dead `str r1, [sp, #4]` are dropped.
+
+  - address: 0x083d8518
+    ghidra: FUN_083d8518
+    name: cxx_string_rep_reserve
+    size: 76
+    sig: "char *cxx_string_rep_reserve(void *unused, u32 old_capacity, u32 needed, u32 length)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: unused, param_2: old_capacity, param_3: needed, param_4: length}
+    notes: >-
+      5 bl call sites. Growth policy in front of cxx_string_rep_create -
+      new capacity is max(old + old/2 + old/8, old + 32, needed), all
+      wrapping. The 1.625x term overtakes the +32 floor at old = 54
+      (52 and 53 tie, and `movhi` keeps the 1.625x value). Returns the
+      DATA pointer (rep + 12), not the rep. Note the original stages both
+      candidates on the stack and selects with `addcc/movcs` on an
+      address - a max, transcribed as such.
+
+  - address: 0x083d8b5c
+    ghidra: FUN_083d8b5c
+    name: cxx_string_from_cstr
+    size: 76
+    sig: "char **cxx_string_from_cstr(char **string, const char *source)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: string, param_2: source}
+    notes: >-
+      495 bl call sites - `basic_string(const char *)`. strlen @ 0x08392478
+      (ported), then either the shared empty rep data (length 0, no
+      allocation) or cxx_string_rep_reserve(this, 0, len, len), which
+      means a fresh string always gets at least 32 characters of
+      capacity. Stores the data pointer into the one-word string object
+      BEFORE the copy, then __rt_memcpy @ 0x08037db0 (ROM veneer, ported
+      as __rt_memcpy). No NUL store here - rep_create already wrote it.
+      Returns `string`.
+
+  # --- tag-57 tracked allocator: free side (0x083906f4..0x08390774) ---
+  # Block layout built by the allocator @ 0x08390b8c (decoded, not ported):
+  #   raw+0x00 i32 size, raw+0x04 i32 size>>31 (the pair is an i64),
+  #   raw+0x08 = base, then padding so `data = (base + 36) & ~31` is
+  #   32-byte aligned, with `pad = data - base` stored at data-4.
+  # Accounting globals @ 0x08adc2c0 (9 code refs): +0x38 i64 current bytes,
+  # +0x40 i64 peak. 0x08390c30 resets peak := current, 0x08390c54 returns
+  # current. Allocator raises the peak; the free path only subtracts.
+  - address: 0x083906f4
+    ghidra: FUN_083906f4
+    name: tracked_free
+    size: 68
+    sig: "void tracked_free(void *payload)"
+    module: heap/tracked
+    status: ported
+    vars: {param_1: payload}
+    notes: >-
+      218 bl + 22 tail-b call sites. NULL-guarded. Reads the pad word at
+      payload-4, backs up to the raw block (payload - pad - 8), subtracts
+      the SIGNED 32-bit size cookie widened to 64 bits from the running
+      byte counter (`subs`/`sbc rX, rX, r2, asr #31` on the i64 at
+      0x08adc2c0+0x38), and tail-branches to the tag-57 free veneer
+      0x08391d24. Every field it touches is a 32-bit scalar, so the
+      literal byte offsets are valid on a 64-bit host too.
+
+  - address: 0x08390734
+    ghidra: FUN_08390734
+    name: tracked_free_pointer_array
+    size: 68
+    sig: "void tracked_free_pointer_array(void **elements)"
+    module: heap/tracked
+    status: ported
+    vars: {param_1: elements}
+    notes: >-
+      3 bl call sites. The block starts one word below `elements` with a
+      WORD COUNT; the remaining count-1 words are pointers to tracked
+      blocks. Frees each non-NULL element with tracked_free, then the
+      block itself. NULL-guarded. Addressed by index through a
+      `*mut *mut u8` (stride 4 on target, 8 on host) because the cookie
+      and elements are pointer-sized - the word-index rule.
+
+  - address: 0x08391d24
+    ghidra: FUN_08391d24
+    name: free_tag57
+    size: 8
+    sig: "void free_tag57(void *block)"
+    module: heap/tracked
+    status: ported
+    notes: >-
+      `mov r1, #57; b 0x080e7970` - free_wrapper with caller tag 57. One
+      tail-b call site (tracked_free).
+
+  - address: 0x08391d2c
+    ghidra: FUN_08391d2c
+    name: alloc_tag57
+    size: 8
+    sig: "void *alloc_tag57(size_t size)"
+    module: heap/tracked
+    status: ported
+    notes: >-
+      `mov r1, #57; b 0x080eb67c` - malloc_wrapper with caller tag 57.
+      2 bl call sites, one of them the tracked allocator @ 0x08390b8c.
+
+  - address: 0x08390b8c
+    ghidra: null
+    name: tracked_alloc_tail
+    size: 92
+    module: heap/tracked
+    status: identified
+    notes: >-
+      Tail of the tag-57 tracked allocator (not a functions.csv entry; the
+      enclosing function starts earlier). Decoded to recover the block
+      layout documented above - alloc_tag57, store size and size>>31 at
+      raw+0/+4, align `base + 36` down to 32, store the pad at data-4,
+      add the size to the i64 counter at 0x08adc2c0+0x38 and raise the
+      peak at +0x40 when it grew. Not ported - the enclosing function's
+      entry needs scouting first.
+
+  - address: 0x08390c30
+    ghidra: null
+    name: tracked_stats_reset_peak
+    size: 36
+    module: heap/tracked
+    status: identified
+    notes: >-
+      `peak(+0x40) := current(+0x38)` when its (register-passed, so this
+      is a tail fragment) flag is nonzero. Sibling 0x08390c54 returns the
+      current i64 after a call to 0x082ccc74. Both documented here for the
+      accounting map; neither ported.
+
+  - address: 0x0837a158
+    ghidra: FUN_0837a158
+    name: load_be32
+    size: 36
+    sig: "u32 load_be32(const u8 *p)"
+    module: util/beload
+    status: identified
+    notes: >-
+      Byte-identical second link-time copy of load_be32 @ 0x081f3b30
+      (verified: all 36 bytes match). 59 bl call sites here versus 4 at
+      the other address. No separate port - hook both addresses to the
+      one `load_be32` symbol in util/beload.rs.
+
+  # --- Scouted in 0x08300000-0x083fffff, identified only ---
+  - address: 0x08391dec
+    ghidra: FUN_08391dec
+    name: string_hash_tabled
+    size: 72
+    sig: "u32 string_hash_tabled(const char *s, int len)"
+    module: null
+    status: identified
+    notes: >-
+      Table-driven byte hash - `h = table[c] ^ (h ^ (h << 3))` per byte,
+      returning `h & 0x7fffffff`. A `len <= 0` measures the string with
+      strlen @ 0x08392478 first. 3 bl call sites. BLOCKED - the 256-byte
+      table at runtime address 0x088faa8b is not in the decrypted image
+      (that vaddr holds a 12-byte-record resource index there, so the
+      page is re-initialized at runtime; same situation as the pool
+      alignment table @ 0x089cb1bc documented in heap/pool.rs). Recover
+      the table's runtime contents before porting - only 54 distinct byte
+      values appear at the image address, so it is definitely not the
+      real table.
+
+  - address: 0x08384f14
+    ghidra: FUN_08384f14
+    name: strcmp_collated
+    size: 72
+    sig: "int strcmp_collated(const char *a, const char *b)"
+    module: null
+    status: identified
+    notes: >-
+      strcmp through the same 0x088faa8b byte map - compares
+      `table[*a]` against `table[*b]` and returns their difference at the
+      first mismatch or at a's NUL. 70 bl call sites. Sibling
+      strncmp_collated @ 0x08384fa0 (96 bytes) is the length-bounded form
+      and returns 0 once the count is exhausted. Both BLOCKED on the same
+      missing table as string_hash_tabled - do not port on the assumption
+      that it is a tolower table (it is not - table['A'] != table['a']).
+      The image's only real tolower table is at 0x08905963.
+
+  - address: 0x083d604c
+    ghidra: FUN_083d604c
+    name: handle_deref_or_null
+    size: 16
+    module: null
+    status: identified
+    notes: >-
+      `p ? *(void **)*p : *p` - a NULL-safe double dereference
+      (`ldr r0,[r0]; cmp r0,#0; ldrne r0,[r0]; bx lr`). Roughly 60
+      BYTE-IDENTICAL copies run from 0x083d604c to about 0x083d62xx, one
+      per C++ template instantiation, each with its own callers
+      (0x083d604c 253 bl, 0x083d6190 69, 0x083d606c 69, 0x083d61d0 66,
+      0x083d60bc 25, ...). Port once and hook every copy if they are ever
+      needed; individually they carry almost no semantics.
+
+  - address: 0x08386840
+    ghidra: FUN_08386840
+    name: record_list_append
+    size: 132
+    module: null
+    status: identified
+    notes: >-
+      282 bl call sites (plus the 4-argument front-end @ 0x08386824,
+      126 sites, which just zeroes the 5th stack argument, and the
+      6-argument one @ 0x083868c8, 76 sites, which appends then calls
+      0x08386aa4). Appends a 20-byte record to a growing array owned by
+      the object at r0 - count at +0x0c, capacity at +0x10, base at
+      +0x14; when full it grows via 0x08367f88 with `capacity * 2` (or
+      51 when empty) and bails out if the byte at `[*this] + 0x1e` is
+      nonzero. Record layout - byte at +0, byte at +1, byte at +3, words
+      at +4/+8/+0x0c (`stmib`), word at +0x10 zeroed. Also clears the
+      byte at owner+0xff. Not ported - needs the owner class and the
+      growth helper 0x08367f88 scouted first.
+
+  - address: 0x0839eda0
+    ghidra: FUN_0839eda0
+    name: refcounted_ptr_assign
+    size: 68
+    module: null
+    status: identified
+    notes: >-
+      78 bl call sites. `*dst = *src`, and when the source object is
+      non-NULL bumps its refcount at +4 under the mutex at +8 (RTXC
+      mutex lock 0x0807f5c4 / unlock 0x0807f6a0, both unported and in
+      another agent's range). Returns dst. Not ported - the lock pair is
+      the whole point of the function, so it should wait for those.
