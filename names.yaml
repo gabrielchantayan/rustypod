@@ -4002,10 +4002,9 @@ functions:
       2^32, preserved; else 64-bit path with hi = ua asr 16
       (arithmetic - a==i32::MIN gives hi 0xffff8000, forcing the
       clamp), FT_Add64 (0x080ed3b4) bias add, ft_div64by32 (0x0807c5b8)
-      with 0x7fffffff clamp when hi>=ub. Port inlines all three helpers
-      with bit-identical results (u32 division / carry add / u64
-      division); those helper addresses stay unclaimed. 56 call sites,
-      binary-scanned.
+      with 0x7fffffff clamp when hi>=ub. Port inlines __rt_udiv (u32
+      division) and FT_Add64 (carry add) bit-identically and calls the
+      real ported ft_div64by32. 56 call sites, binary-scanned.
 
   - address: 0x0804d1a8
     ghidra: FUN_0804d1a8
@@ -4028,9 +4027,9 @@ functions:
       (0x0807c5b8) with its 0x7fffffff hi>=c clamp; else 0x7fffffff.
       Quotient truncated to u32 then sign-restored with wrapping rsb,
       so unclamped quotients in 2^31..2^32 come back sign-flipped
-      (stock overflow behavior, preserved). Port inlines the three
-      helpers bit-identically (u64 mul+add, u64 divide). 33 call
-      sites, binary-scanned.
+      (stock overflow behavior, preserved). Port inlines ft_multo64 and
+      FT_Add64 bit-identically (one u64 mul+add) and calls the real
+      ported ft_div64by32. 33 call sites, binary-scanned.
 
   - address: 0x0804d0dc
     ghidra: FUN_0804d0dc
@@ -4159,6 +4158,36 @@ functions:
       (ft_divfix @ 0x0804c33c, ft_muldiv @ 0x0804d29c) which keep
       inlining it bit-identically. FtInt64 layout lo/hi @ +0/+4
       (ft/types). Port lowers to adds/adc.
+
+  - address: 0x0807c5b8
+    ghidra: FUN_0807c5b8
+    name: ft_div64by32
+    size: 64
+    sig: "u32 ft_div64by32(u32 hi, u32 lo, u32 divisor)"
+    module: ft/calc
+    status: ported
+    vars: {param_1: hi, param_2: lo, param_3: divisor, iVar1: remainder, uVar2: quotient}
+    notes: >-
+      FreeType ft_div64by32 (ftcalc.c, static) - 32 rounds of restoring
+      division of the 64-bit (hi:lo) by divisor. Out-of-range results
+      short-circuit to 0x7fffffff via "cmp r0,r2 / mvncs r0,#0x80000000
+      / bxcs lr"; because the compare is unsigned this also swallows
+      divisor == 0, so there is no divide-by-zero path at all. The loop
+      is r = (r<<1)|(lo>>31); q <<= 1; if (r >= divisor) { r -= divisor;
+      q |= 1; } lo <<= 1.
+      CORRECTION to the earlier scouting note, which claimed this equals
+      u64 division whenever hi < divisor - it does NOT. The remainder is
+      one 32-bit register, so r <<= 1 drops its top bit. That is
+      harmless exactly while divisor <= 0x80000000 (then r <= divisor-1
+      <= 0x7fffffff and 2r+1 still fits), and diverges above it -
+      ft_div64by32(0x90000000, 0, 0xffffffff) is 0 where the true
+      quotient is 0x90000000 (pinned by a test). Both callers divide by
+      an i32 magnitude and so stay inside the safe range, which is why
+      the previous inlined u64 stand-in in ft_divfix/ft_muldiv was
+      behaviorally right; it is nonetheless not this function, so the
+      restoring loop is what got ported and both callers now route
+      through the real symbol. 2 bl call sites, binary-scanned:
+      ft_divfix @ 0x0804c34c and ft_muldiv @ 0x0804d2ac.
 
   - address: 0x0804c1c4
     ghidra: FUN_0804c1c4
