@@ -4819,3 +4819,56 @@ functions:
       There is no occupied flag, so a key of 0 matches the first zeroed
       slot - preserved. Codegen deviation - LLVM fully unrolls the
       constant 6-iteration loop (29 instructions vs the original's 13).
+
+  - address: 0x080ed738
+    ghidra: FUN_080ed738
+    name: read_u16_le
+    size: 16
+    sig: "u32 read_u16_le(const u8 *p)"
+    module: util/le_read
+    status: ported
+    vars: {param_1: p}
+    notes: >-
+      Unaligned little-endian u16 load - two post-indexed ldrb ORed at
+      shifts 0/8, zero-extended. ARM ADS __packed-dereference idiom (a
+      misaligned ldrh rotates rather than faults on ARM926EJ-S). 34 bl
+      call sites, binary-scanned; leaf, no hardware. Callers such as
+      0x0805a3ac/0x0805afd8/0x0805b0d0 walk packed on-disk records and
+      re-pack the bytes big-endian afterwards.
+
+  - address: 0x080ed748
+    ghidra: FUN_080ed748
+    name: read_u32_le
+    size: 32
+    sig: "u32 read_u32_le(const u8 *p)"
+    module: util/le_read
+    status: ported
+    vars: {param_1: p}
+    notes: >-
+      Unaligned little-endian u32 load - four post-indexed ldrb ORed at
+      shifts 0/8/16/24. Behaviorally identical to __rt_uread4
+      (0x08031140, already ported in libc/rt_unaligned); this is a second
+      copy from a different object - post-indexed loads and a bx lr
+      return instead of fixed offsets and mov pc,lr. 65 bl + 1 b call
+      sites, binary-scanned. LLVM folds the two identical bodies, so the
+      archive exports read_u32_le and __rt_uread4 at the same address -
+      review codegen as `match.py 0x080ed748 __rt_uread4`.
+
+  - address: 0x080ed768
+    ghidra: FUN_080ed768
+    name: read_u64_le
+    size: 88
+    sig: "u64 read_u64_le(const u8 *p)"
+    module: util/le_read
+    status: ported
+    vars: {param_1: p}
+    notes: >-
+      Unaligned little-endian u64 load - the eight bytes at p ORed at
+      shifts 0..56, low word returned in r0 and high word in r1. Only 2
+      bl call sites (0x080743dc, 0x081f5294) but it completes the
+      0x080ed738/748/768 family. The original's first half contains four
+      provably-dead instructions (lsr r2,r1,#24 / lsr r3,r1,#16 / orr
+      r2,r3,r2 / orr r1,r2,ip,lsr #8) - the high words of the 64-bit
+      shifts of bytes 1..3, which a zero-extended byte shifted left by
+      less than 32 can never reach. Always zero, so the port drops them;
+      returned value unchanged.
