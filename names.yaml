@@ -5121,3 +5121,87 @@ functions:
       (verified: all 36 bytes match). 59 bl call sites here versus 4 at
       the other address. No separate port - hook both addresses to the
       one `load_be32` symbol in util/beload.rs.
+
+  # --- Scouted in 0x08300000-0x083fffff, identified only ---
+  - address: 0x08391dec
+    ghidra: FUN_08391dec
+    name: string_hash_tabled
+    size: 72
+    sig: "u32 string_hash_tabled(const char *s, int len)"
+    module: null
+    status: identified
+    notes: >-
+      Table-driven byte hash - `h = table[c] ^ (h ^ (h << 3))` per byte,
+      returning `h & 0x7fffffff`. A `len <= 0` measures the string with
+      strlen @ 0x08392478 first. 3 bl call sites. BLOCKED - the 256-byte
+      table at runtime address 0x088faa8b is not in the decrypted image
+      (that vaddr holds a 12-byte-record resource index there, so the
+      page is re-initialized at runtime; same situation as the pool
+      alignment table @ 0x089cb1bc documented in heap/pool.rs). Recover
+      the table's runtime contents before porting - only 54 distinct byte
+      values appear at the image address, so it is definitely not the
+      real table.
+
+  - address: 0x08384f14
+    ghidra: FUN_08384f14
+    name: strcmp_collated
+    size: 72
+    sig: "int strcmp_collated(const char *a, const char *b)"
+    module: null
+    status: identified
+    notes: >-
+      strcmp through the same 0x088faa8b byte map - compares
+      `table[*a]` against `table[*b]` and returns their difference at the
+      first mismatch or at a's NUL. 70 bl call sites. Sibling
+      strncmp_collated @ 0x08384fa0 (96 bytes) is the length-bounded form
+      and returns 0 once the count is exhausted. Both BLOCKED on the same
+      missing table as string_hash_tabled - do not port on the assumption
+      that it is a tolower table (it is not - table['A'] != table['a']).
+      The image's only real tolower table is at 0x08905963.
+
+  - address: 0x083d604c
+    ghidra: FUN_083d604c
+    name: handle_deref_or_null
+    size: 16
+    module: null
+    status: identified
+    notes: >-
+      `p ? *(void **)*p : *p` - a NULL-safe double dereference
+      (`ldr r0,[r0]; cmp r0,#0; ldrne r0,[r0]; bx lr`). Roughly 60
+      BYTE-IDENTICAL copies run from 0x083d604c to about 0x083d62xx, one
+      per C++ template instantiation, each with its own callers
+      (0x083d604c 253 bl, 0x083d6190 69, 0x083d606c 69, 0x083d61d0 66,
+      0x083d60bc 25, ...). Port once and hook every copy if they are ever
+      needed; individually they carry almost no semantics.
+
+  - address: 0x08386840
+    ghidra: FUN_08386840
+    name: record_list_append
+    size: 132
+    module: null
+    status: identified
+    notes: >-
+      282 bl call sites (plus the 4-argument front-end @ 0x08386824,
+      126 sites, which just zeroes the 5th stack argument, and the
+      6-argument one @ 0x083868c8, 76 sites, which appends then calls
+      0x08386aa4). Appends a 20-byte record to a growing array owned by
+      the object at r0 - count at +0x0c, capacity at +0x10, base at
+      +0x14; when full it grows via 0x08367f88 with `capacity * 2` (or
+      51 when empty) and bails out if the byte at `[*this] + 0x1e` is
+      nonzero. Record layout - byte at +0, byte at +1, byte at +3, words
+      at +4/+8/+0x0c (`stmib`), word at +0x10 zeroed. Also clears the
+      byte at owner+0xff. Not ported - needs the owner class and the
+      growth helper 0x08367f88 scouted first.
+
+  - address: 0x0839eda0
+    ghidra: FUN_0839eda0
+    name: refcounted_ptr_assign
+    size: 68
+    module: null
+    status: identified
+    notes: >-
+      78 bl call sites. `*dst = *src`, and when the source object is
+      non-NULL bumps its refcount at +4 under the mutex at +8 (RTXC
+      mutex lock 0x0807f5c4 / unlock 0x0807f6a0, both unported and in
+      another agent's range). Returns dst. Not ported - the lock pair is
+      the whole point of the function, so it should wait for those.
