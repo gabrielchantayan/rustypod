@@ -6798,10 +6798,20 @@ functions:
   # --- Region survey: 0x08300000-0x083fffff (agent hi6) ---
   # 3481 Ghidra functions, ~3439 unclaimed at survey time. Sub-blocks:
   #   0x08300000-0x0835ffff  sparse (~200 fns) - misc app/service code.
-  #   0x08360000-0x0838ffff  (~650 fns) media/database service layer:
-  #     record containers with 20-byte elements (0x08386840 family),
-  #     NULL-guarded field accessors, RTXC mutex-guarded refcount setters.
-  #     0x0836b5b0 is an S5L8702 GPIO helper (MMIO 0x3cf00000).
+  #   0x08360000-0x0838ffff  (~650 fns) EMBEDDED SQLITE (~3.5.x), the
+  #     media database - see src/sqlite/mod.rs. Identified from the
+  #     string pool in the range: sqlite_master / sqlite_temp_master /
+  #     sqlite_sequence / sqlite_stat1 / sqlite_autoindex_, the whole
+  #     sqlite3ErrStr table (0x083763c4..0x083766e4), the PRAGMA name
+  #     table (0x0837f5fc..0x083811ac), the parser diagnostics and the
+  #     VACUUM script "ATTACH '' AS vacuum_db;". The "record container
+  #     with 20-byte elements" of the earlier survey is the VDBE code
+  #     builder: 20 bytes is sizeof(VdbeOp) and 0x08386840 is
+  #     sqlite3VdbeAddOp3. Two NON-SQLite islands sit inside the span:
+  #     the ATA/CE-ATA driver block ~0x08369000-0x0836c000 (strings
+  #     "IAD: failed to write ATA task file", "MMC init failed"), which
+  #     is where the S5L8702 GPIO helper 0x0836b5b0 lives, and
+  #     FreeType/UI fragments above 0x0838f000.
   #   0x08390000-0x083bffff  (~1130 fns) C/C++ runtime + string cluster:
   #     plain byte-loop strcmp 0x08391e44 / strlen 0x08392478, a
   #     table-driven string hash 0x08391dec, tagged free veneers
@@ -6818,13 +6828,29 @@ functions:
   #   0x083f0000-0x083fffff  (~100 fns) plus 256-byte permutation tables
   #     at 0x083ffd5c/0x083ffe5c.
   # Shared 256-byte byte-map at runtime address 0x088faa8b: indexed by
-  # `ldrb [tbl, c]` from 9 sites (string hash 0x08391dec, the collating
-  # compares 0x08384f14/0x08384fa8, 0x0838d874, 0x082cd880, 0x082d77ec,
-  # 0x082dfdbc, 0x0836e600, 0x0836e9cc). The decrypted image holds a
-  # 12-byte-record resource index at that vaddr, so the page is
-  # re-initialized at runtime (same situation as the pool alignment table
-  # @ 0x089cb1bc documented in heap/pool.rs) - those functions cannot be
-  # ported until the table's runtime contents are recovered.
+  # `ldrb [tbl, c]` from 9 sites (string hash 0x08391dec, sqlite3StrICmp
+  # 0x08384f14 / sqlite3StrNICmp 0x08384fa0, 0x0838d874, 0x082cd880,
+  # 0x082d77ec, 0x082dfdbc, 0x0836e600, 0x0836e9cc). RESOLVED (agent
+  # media): it is sqlite3UpperToLower - the identity map except
+  # 'A'..'Z' -> 'a'..'z'. It is NOT missing from the image; above the
+  # read-only image the decrypted body's addresses are skewed, and the
+  # datum a firmware pointer A names lives at image address A + 0xaed8.
+  # Evidence:
+  #   * 0x088faa8b + 0xaed8 = 0x08905963, which holds sqlite3UpperToLower
+  #     byte-for-byte - and that byte sequence occurs exactly ONCE in the
+  #     whole 10 MB image and is named by no pointer literal, i.e. it is
+  #     the initializer for the address these functions use.
+  #   * 0x089cb1bc + 0xaed8 = 0x089d6094, which holds the pool alignment
+  #     table {4,!3} {16,!15} {32,!31} {1024,!1023} - the exact bytes
+  #     heap/pool.rs documents as "recovered from a serialized copy @
+  #     0x089d6094". So heap/pool.rs's "the 0x089cb1xx page is
+  #     re-initialized at runtime" and this note describe ONE skew, not
+  #     two runtime-init phenomena. The same applies to
+  #     heap/block_region.rs's 0x089cb1b8 fallback.
+  #   * Every pointer literal into 0x088e0000-0x08920000 resolves to a
+  #     readable C string only at +0xaed8.
+  # Rule of thumb for anything above ~0x088e0000: read the image at
+  # `addr + 0xaed8`, not at `addr`.
 
   - address: 0x08391e44
     ghidra: FUN_08391e44
@@ -7090,12 +7116,15 @@ functions:
     size: 36
     sig: "u32 load_be32(const u8 *p)"
     module: util/beload
-    status: identified
+    status: ported
     notes: >-
-      Byte-identical second link-time copy of load_be32 @ 0x081f3b30
-      (verified: all 36 bytes match). 59 bl call sites here versus 4 at
-      the other address. No separate port - hook both addresses to the
-      one `load_be32` symbol in util/beload.rs.
+      ALIAS - re-verified byte for byte: all 36 bytes at 0x0837a158 are
+      identical to load_be32 @ 0x081f3b30, so the two are one function
+      the linker emitted into two units. This copy is SQLite's
+      sqlite3Get4byte (the b-tree page-header reader) and has 59 bl call
+      sites versus 4 at the other address. NO separate port exists - hook
+      BOTH addresses to the single `load_be32` symbol in util/beload.rs.
+      Its write twin is store_be32 @ 0x083816cc (sqlite3Put4byte).
 
   # --- Scouted in 0x08300000-0x083fffff, identified only ---
   - address: 0x08391dec
@@ -7108,31 +7137,35 @@ functions:
     notes: >-
       Table-driven byte hash - `h = table[c] ^ (h ^ (h << 3))` per byte,
       returning `h & 0x7fffffff`. A `len <= 0` measures the string with
-      strlen @ 0x08392478 first. 3 bl call sites. BLOCKED - the 256-byte
-      table at runtime address 0x088faa8b is not in the decrypted image
-      (that vaddr holds a 12-byte-record resource index there, so the
-      page is re-initialized at runtime; same situation as the pool
-      alignment table @ 0x089cb1bc documented in heap/pool.rs). Recover
-      the table's runtime contents before porting - only 54 distinct byte
-      values appear at the image address, so it is definitely not the
-      real table.
+      strlen @ 0x08392478 first. 3 bl call sites. UNBLOCKED (agent
+      media): the 256-byte table at runtime 0x088faa8b is
+      sqlite3UpperToLower - identity except 'A'..'Z' -> 'a'..'z' - and it
+      IS in the image, at 0x088faa8b + 0xaed8 = 0x08905963 (see the
+      0xaed8 image/runtime skew note in the region-survey block above,
+      and src/sqlite/stricmp.rs, which reproduces the table). This
+      function is SQLite's strHash for SQLITE_HASH_NOCASE; its sibling
+      at 0x08391df0 is the same loop without the length probe. Portable
+      now; left unported only because it is outside this sweep.
 
   - address: 0x08384f14
     ghidra: FUN_08384f14
-    name: strcmp_collated
+    name: str_icmp
     size: 72
-    sig: "int strcmp_collated(const char *a, const char *b)"
-    module: null
-    status: identified
+    sig: "int str_icmp(const char *left, const char *right)"
+    module: sqlite/stricmp
+    status: ported
+    vars: {param_1: left, param_2: right}
     notes: >-
-      strcmp through the same 0x088faa8b byte map - compares
-      `table[*a]` against `table[*b]` and returns their difference at the
-      first mismatch or at a's NUL. 70 bl call sites. Sibling
-      strncmp_collated @ 0x08384fa0 (96 bytes) is the length-bounded form
-      and returns 0 once the count is exhausted. Both BLOCKED on the same
-      missing table as string_hash_tabled - do not port on the assumption
-      that it is a tolower table (it is not - table['A'] != table['a']).
-      The image's only real tolower table is at 0x08905963.
+      SQLite's sqlite3StrICmp. 70 bl call sites. Folds each byte through
+      sqlite3UpperToLower @ runtime 0x088faa8b and returns the DIFFERENCE
+      of the folded bytes at the first mismatch or at left's NUL - not a
+      normalized -1/0/+1. Not NUL-symmetric: only the left string's
+      terminator stops the loop. The table was previously thought absent
+      from the image; it is at 0x088faa8b + 0xaed8 = 0x08905963 (see the
+      0xaed8 skew note in the region-survey block) and is plain ASCII
+      tolower - identity except 'A'..'Z'. The earlier claim
+      `table['A'] != table['a']` came from reading the image at the
+      unskewed address.
 
   - address: 0x083d604c
     ghidra: FUN_083d604c
@@ -7151,22 +7184,25 @@ functions:
 
   - address: 0x08386840
     ghidra: FUN_08386840
-    name: record_list_append
+    name: vdbe_add_op3
     size: 132
-    module: null
-    status: identified
+    sig: "int vdbe_add_op3(Vdbe *p, int opcode, int p1, int p2, int p3)"
+    module: sqlite/vdbe
+    status: ported
+    vars: {param_1: p, param_2: opcode, param_3: p1, param_4: p2}
     notes: >-
-      282 bl call sites (plus the 4-argument front-end @ 0x08386824,
-      126 sites, which just zeroes the 5th stack argument, and the
-      6-argument one @ 0x083868c8, 76 sites, which appends then calls
-      0x08386aa4). Appends a 20-byte record to a growing array owned by
-      the object at r0 - count at +0x0c, capacity at +0x10, base at
-      +0x14; when full it grows via 0x08367f88 with `capacity * 2` (or
-      51 when empty) and bails out if the byte at `[*this] + 0x1e` is
-      nonzero. Record layout - byte at +0, byte at +1, byte at +3, words
-      at +4/+8/+0x0c (`stmib`), word at +0x10 zeroed. Also clears the
-      byte at owner+0xff. Not ported - needs the owner class and the
-      growth helper 0x08367f88 scouted first.
+      SQLite's sqlite3VdbeAddOp3 - the busiest function in the database
+      engine at 282 bl call sites. The earlier survey's "record container
+      with 20-byte elements" is exactly this: 20 is sizeof(VdbeOp) and
+      the owner is a Vdbe (prepared statement). Appends one bytecode
+      instruction and returns the address it landed at (the pre-append
+      nOp). Vdbe fields - db +0x00, nOp +0x0c, nOpAlloc +0x10, aOp +0x14,
+      expired +0xff. When the array is full it resizes via 0x08367f88 to
+      `nOpAlloc * 2`, or to 51 when empty (SQLite's 1024/sizeof(Op)), and
+      returns 0 if the connection's mallocFailed byte (db +0x1e) is set
+      afterwards. VdbeOp layout - opcode +0 (u8), p4type +1 (i8),
+      opflags +2 (NEVER written), p5 +3 (u8), p1 +4, p2 +8, p3 +12
+      (`stmib`), p4 +16 (zeroed). Also clears p->expired at +0xff.
 
   - address: 0x0839eda0
     ghidra: FUN_0839eda0
@@ -7180,3 +7216,456 @@ functions:
       mutex lock 0x0807f5c4 / unlock 0x0807f6a0, both unported and in
       another agent's range). Returns dst. Not ported - the lock pair is
       the whole point of the function, so it should wait for those.
+
+  # --- Embedded SQLite, 0x08360000-0x0838ffff (agent media) ---
+  # The whole span is an amalgamated SQLite ~3.5.x - see src/sqlite/mod.rs
+  # for the identification evidence and the recovered struct layouts
+  # (sqlite3, Vdbe, VdbeOp, Btree, Parse, Token). Two non-SQLite islands
+  # sit inside it: the ATA/CE-ATA driver block ~0x08369000-0x0836c000
+  # (where the already-ported gpio_pin_configure @ 0x0836b5b0 lives) and
+  # FreeType/UI fragments above 0x0838f000. The earlier survey's
+  # "RTXC-mutex-guarded refcount setters" do NOT occur in this range -
+  # the only refcount machinery found is 0x0837ee98 (a plain u16
+  # decrement, no mutex); the mutex-guarded setter it meant is
+  # 0x0839eda0, above the range.
+  # Call-site counts below come from decoding every bl/b word in
+  # osos.dec, not from osos.asm.
+
+  # ---- VDBE code builder (src/sqlite/vdbe.rs) ----
+  - address: 0x08386824
+    ghidra: FUN_08386824
+    name: vdbe_add_op2
+    size: 28
+    sig: "int vdbe_add_op2(Vdbe *p, int opcode, int p1, int p2)"
+    module: sqlite/vdbe
+    status: ported
+    notes: >-
+      SQLite's sqlite3VdbeAddOp2. 126 bl + 1 tail b call sites. Pure
+      front-end for vdbe_add_op3 @ 0x08386840 - preserves the incoming
+      r3 (p2) through ip and zeroes the 5th (stack) argument p3.
+
+  - address: 0x08386810
+    ghidra: FUN_08386810
+    name: vdbe_add_op1
+    size: 20
+    sig: "int vdbe_add_op1(Vdbe *p, int opcode, int p1)"
+    module: sqlite/vdbe
+    status: ported
+    notes: >-
+      SQLite's sqlite3VdbeAddOp1. 56 bl + 1 tail b call sites. Front-end
+      for vdbe_add_op3 with p2 = p3 = 0.
+
+  - address: 0x083868c8
+    ghidra: FUN_083868c8
+    name: vdbe_add_op4
+    size: 68
+    sig: "int vdbe_add_op4(Vdbe *p, int opcode, int p1, int p2, int p3, const char *p4, int p4type)"
+    module: sqlite/vdbe
+    status: ported
+    notes: >-
+      SQLite's sqlite3VdbeAddOp4. 76 bl call sites. Calls vdbe_add_op3
+      with the first five arguments, then sqlite3VdbeChangeP4
+      @ 0x08386aa4 with (p, returned address, p4, p4type), and returns
+      that address. ChangeP4 is unported - it is the VDBE_P4_OPS dispatch
+      slot in src/sqlite/vdbe.rs and defaults to a documented no-op, so
+      the port still appends the opcode and returns the right address but
+      does not attach P4.
+
+  - address: 0x08367f88
+    ghidra: FUN_08367f88
+    name: vdbe_resize_op_array
+    size: 48
+    sig: "void vdbe_resize_op_array(Vdbe *p, int n_op)"
+    module: sqlite/vdbe
+    status: ported
+    notes: >-
+      SQLite's resizeOpArray. 2 bl call sites (both in vdbe_add_op3).
+      `sqlite3DbRealloc(p->db, p->aOp, 20 * n_op)`; on success writes
+      nOpAlloc (+0x10) and aOp (+0x14) with a base-writeback store pair.
+      On failure it leaves both alone and the caller learns of it through
+      db->mallocFailed. The `mov r0,#20; mul r2,r0,r1` is the literal
+      sizeof(VdbeOp) that pins the 20-byte record size.
+
+  - address: 0x08386a44
+    ghidra: FUN_08386a44
+    name: vdbe_change_p2
+    size: 48
+    sig: "void vdbe_change_p2(Vdbe *p, int addr, int value)"
+    module: sqlite/vdbe
+    status: ported
+    notes: >-
+      SQLite's sqlite3VdbeChangeP2 - back-patches a jump target. 66 bl +
+      2 tail b call sites. Four guards in order - NULL p, addr < 0,
+      p->nOp <= addr, NULL p->aOp - then `p->aOp[addr].p2 = value`
+      (`add r1,r1,r1 lsl#2` then `lsl#2` = stride 20, field at +8).
+
+  - address: 0x08386bd4
+    ghidra: FUN_08386bd4
+    name: vdbe_change_p5
+    size: 32
+    sig: "void vdbe_change_p5(Vdbe *p, u8 value)"
+    module: sqlite/vdbe
+    status: ported
+    notes: >-
+      SQLite's sqlite3VdbeChangeP5 - sets P5 on the op just emitted.
+      19 bl + 1 tail b call sites. Guards NULL p and NULL p->aOp, then
+      stores at `aOp + nOp*20 - 17`, i.e. `&aOp[nOp-1].p5`. nOp is NOT
+      checked (the original's assert(nOp>0) is compiled out); this store
+      offset is what pins both the 20-byte stride and p5 at +3.
+
+  - address: 0x0838b8fc
+    ghidra: FUN_0838b8fc
+    name: vdbe_make_label
+    size: 88
+    sig: "int vdbe_make_label(Vdbe *p)"
+    module: sqlite/vdbe
+    status: ported
+    notes: >-
+      SQLite's sqlite3VdbeMakeLabel. 30 bl call sites. Returns the
+      negative encoding `-1 - index` of a fresh forward-reference slot.
+      nLabel (+0x18) is bumped unconditionally BEFORE the capacity check,
+      so a failed growth still consumes the index. Growth is
+      `nLabelAlloc*2 + 10` (`add r0,#10,r0 lsl#1`) through
+      sqlite3DbReallocOrFree @ 0x083749f4 on 4-byte entries; the new slot
+      is seeded with -1 only when the table exists. nLabelAlloc +0x1c,
+      aLabel +0x20.
+
+  - address: 0x0838cc04
+    ghidra: FUN_0838cc04
+    name: vdbe_resolve_label
+    size: 24
+    sig: "void vdbe_resolve_label(Vdbe *p, int x)"
+    module: sqlite/vdbe
+    status: ported
+    notes: >-
+      SQLite's sqlite3VdbeResolveLabel. 32 bl call sites.
+      `if (p->aLabel) p->aLabel[-1-x] = p->nOp` (`mvn r2,r1` is the
+      -1-x). p itself is not NULL-checked. Independently confirms nOp at
+      +0x0c and aLabel at +0x20.
+
+  - address: 0x08386aa4
+    ghidra: FUN_08386aa4
+    name: vdbe_change_p4
+    size: 304
+    sig: "void vdbe_change_p4(Vdbe *p, int addr, const char *value, int n)"
+    module: null
+    status: identified
+    notes: >-
+      SQLite's sqlite3VdbeChangeP4 - attaches the fourth operand to an
+      op, copying/owning the value according to the P4_* tag in n.
+      24 bl + 2 tail b call sites. NOT ported - it is the only callee of
+      vdbe_add_op4 that is still missing, and it is the VDBE_P4_OPS
+      dispatch slot in src/sqlite/vdbe.rs (default: documented no-op).
+      Porting it needs the P4_* tag constants and the destructor
+      dispatch for P4_KEYINFO / P4_VDBEFUNC / P4_MEM.
+
+  # ---- Case-insensitive compare (src/sqlite/stricmp.rs) ----
+  - address: 0x08384fa0
+    ghidra: FUN_08384fa0
+    name: str_nicmp
+    size: 96
+    sig: "int str_nicmp(const char *left, const char *right, int n)"
+    module: sqlite/stricmp
+    status: ported
+    notes: >-
+      SQLite's sqlite3StrNICmp. 19 bl + 1 tail b call sites. str_icmp
+      @ 0x08384f14 over at most n bytes, through the same
+      sqlite3UpperToLower map. The count is decremented BEFORE the loop
+      test (`subs r3,r2,#0; sub r2,r2,#1; ble`), so after the loop a
+      negative count means the budget was exhausted, which is turned into
+      a 0 result (`movlt r0,#0`). Faithful quirk - n = INT_MIN wraps the
+      pre-decrement to INT_MAX, so that one value still compares instead
+      of returning 0.
+
+  # ---- B-tree lock counter (src/sqlite/btree_lock.rs) ----
+  - address: 0x0837118c
+    ghidra: FUN_0837118c
+    name: btree_enter
+    size: 28
+    sig: "void btree_enter(Btree *p)"
+    module: sqlite/btree_lock
+    status: ported
+    notes: >-
+      SQLite's sqlite3BtreeEnter. 36 bl call sites. Non-shared handles
+      return immediately; otherwise `p->wantToLock++`. Btree layout -
+      db +0x00, pBt +0x04, inTrans +0x08, sharable +0x09, locked +0x0a,
+      wantToLock +0x0c (SQLite's own field order). SQLITE_THREADSAFE is
+      off in this build, so the mutex acquisition is compiled away and
+      the body is only the counter. The original leaves p->locked in r0
+      on the sharable path and the untouched p on the other - an
+      inconsistent, dead value (the C function is void, and none of the
+      36 call sites consume r0); ported as void.
+
+  - address: 0x08371da4
+    ghidra: FUN_08371da4
+    name: btree_leave
+    size: 36
+    sig: "void btree_leave(Btree *p)"
+    module: sqlite/btree_lock
+    status: ported
+    notes: >-
+      SQLite's sqlite3BtreeLeave. 41 bl + 1 tail b call sites. Non-shared
+      handles return immediately; otherwise `--p->wantToLock`, and
+      p->locked (+0x0a) is cleared only when the counter reaches EXACTLY
+      zero - an over-released handle keeps counting into negatives with
+      the flag still set (the original's assert(wantToLock>0) is
+      compiled out).
+
+  # ---- Connection allocator (src/sqlite/mem.rs) ----
+  - address: 0x083749bc
+    ghidra: FUN_083749bc
+    name: db_realloc
+    size: 56
+    sig: "void *db_realloc(sqlite3 *db, void *p, int n)"
+    module: sqlite/mem
+    status: ported
+    notes: >-
+      SQLite's sqlite3DbRealloc. 9 bl call sites. Returns NULL WITHOUT
+      calling the heap when db->mallocFailed (db +0x1e) is already set;
+      otherwise sqlite3_realloc @ 0x08390eec and, on failure, sets the
+      flag. db is dereferenced unconditionally here (unlike the malloc
+      path). 0x08390eec is unported - the DB_MEM_OPS dispatch slot in
+      src/sqlite/mem.rs, default always-fails.
+
+  - address: 0x083749f4
+    ghidra: FUN_083749f4
+    name: db_realloc_or_free
+    size: 32
+    sig: "void *db_realloc_or_free(sqlite3 *db, void *p, int n)"
+    module: sqlite/mem
+    status: ported
+    notes: >-
+      SQLite's sqlite3DbReallocOrFree. 6 bl call sites. db_realloc, and
+      when it fails, sqlite3_free @ 0x083906f4 on the OLD pointer (the
+      ported heap::tracked::tracked_free, called directly).
+
+  - address: 0x08374960
+    ghidra: FUN_08374960
+    name: db_malloc_raw
+    size: 56
+    sig: "void *db_malloc_raw(sqlite3 *db, int n)"
+    module: sqlite/mem
+    status: ported
+    notes: >-
+      SQLite's sqlite3DbMallocRaw. 19 bl call sites. Same sticky
+      mallocFailed protocol as db_realloc, but guards BOTH the entry
+      check and the failure record on db != 0 - a NULL connection is
+      allowed and simply goes straight to sqlite3_malloc @ 0x08390b14
+      (unported, second DB_MEM_OPS slot).
+
+  - address: 0x08374998
+    ghidra: FUN_08374998
+    name: db_malloc_zero
+    size: 36
+    sig: "void *db_malloc_zero(sqlite3 *db, int n)"
+    module: sqlite/mem
+    status: ported
+    notes: >-
+      SQLite's sqlite3DbMallocZero. 34 bl call sites. db_malloc_raw then
+      zero-fill of the whole request through the IRAM thunk @ 0x08037dc8
+      (-> 0x220002d4 = the ported memzero @ 0x080002d4). Nothing is
+      zeroed when the allocation fails.
+
+  - address: 0x08374a14
+    ghidra: FUN_08374a14
+    name: db_str_dup
+    size: 44
+    sig: "char *db_str_dup(sqlite3 *db, const char *z)"
+    module: null
+    status: identified
+    notes: >-
+      SQLite's sqlite3DbStrDup. 22 bl call sites. Calls str_dup
+      @ 0x08384ed8 and, if z was non-NULL and the copy failed, sets
+      db->mallocFailed (+0x1e). Not ported - str_dup's own callees
+      (strlen @ 0x08392478, the __rt_memcpy veneer @ 0x08037db0) sit
+      outside this sweep, so it would need two more dispatch slots for a
+      four-line function.
+
+  - address: 0x08374a40
+    ghidra: FUN_08374a40
+    name: db_str_ndup
+    size: 48
+    sig: "char *db_str_ndup(sqlite3 *db, const char *z, int n)"
+    module: null
+    status: identified
+    notes: >-
+      SQLite's sqlite3DbStrNDup. 12 bl call sites. Same shape as
+      db_str_dup over str_ndup @ 0x08384f60. Not ported (same reason).
+
+  - address: 0x08384ed8
+    ghidra: FUN_08384ed8
+    name: str_dup
+    size: 60
+    sig: "char *str_dup(const char *z)"
+    module: null
+    status: identified
+    notes: >-
+      SQLite's sqlite3StrDup. 2 bl call sites. NULL in, NULL out;
+      otherwise strlen @ 0x08392478, sqlite3_malloc @ 0x08390b14 of
+      len + 1, and __rt_memcpy through the veneer @ 0x08037db0. Not
+      ported - trivial, but three unported callees for two call sites.
+
+  # ---- Parse context (src/sqlite/parse.rs) ----
+  - address: 0x08381f98
+    ghidra: FUN_08381f98
+    name: release_temp_reg
+    size: 32
+    sig: "void release_temp_reg(Parse *parse, int reg)"
+    module: sqlite/parse
+    status: ported
+    notes: >-
+      SQLite's sqlite3ReleaseTempReg. 36 bl + 3 tail b call sites.
+      Pushes a finished VDBE register onto the parse context's free list
+      - nTempReg (u8) at Parse +0x15, aTempReg[8] at Parse +0x18. Ignores
+      register 0 (SQLite's "no register" sentinel) and silently drops the
+      release when the list is full, leaking the register for the rest of
+      the statement. The `cmpne r1,#8` is unsigned, so a counter already
+      past the cap cannot overrun the array.
+
+  # ---- Big-endian page fields (src/util/beload.rs) ----
+  - address: 0x083816cc
+    ghidra: FUN_083816cc
+    name: store_be32
+    size: 32
+    sig: "void store_be32(u8 *p, u32 value)"
+    module: util/beload
+    status: ported
+    notes: >-
+      SQLite's sqlite3Put4byte. 38 bl call sites. Four strb, most
+      significant byte first - alignment-free. The write twin of
+      load_be32 / sqlite3Get4byte @ 0x0837a158.
+
+  # ---- Scouted in 0x08360000-0x0838ffff, identified only ----
+  - address: 0x083767a0
+    ghidra: FUN_083767a0
+    name: sqlite_error_msg
+    size: 76
+    sig: "void sqlite_error_msg(Parse *parse, const char *format, ...)"
+    module: null
+    status: identified
+    notes: >-
+      SQLite's sqlite3ErrorMsg - the engine's single error reporter, and
+      after the VDBE builders the hottest thing in the range at 86 bl +
+      4 tail b call sites. `pParse->nErr++` (+0x40); frees the old
+      zErrMsg (+0x08) through sqlite3_free @ 0x083906f4; formats a new
+      one with sqlite3VMPrintf @ 0x08386454 on pParse->db (+0x00); sets
+      pParse->rc (+0x04) to 1 (SQLITE_ERROR) if it was 0. This pins the
+      Parse layout - db +0x00, rc +0x04, zErrMsg +0x08, nErr +0x40. NOT
+      ported - C varargs (`push {r0-r3}` then a va_list pointer into the
+      home area) has no faithful Rust extern "C" spelling, and the
+      formatter behind it is unported too.
+
+  - address: 0x0837d358
+    ghidra: FUN_0837d358
+    name: sqlite_set_string_formatted
+    size: 28
+    module: null
+    status: identified
+    notes: >-
+      37 bl call sites. The same `push {r0-r3}; push {r4,lr}` varargs
+      home-area idiom as sqlite_error_msg, forwarding (arg1, arg2,
+      &arg3) to 0x08386454 (sqlite3VMPrintf) and dropping the result -
+      i.e. a `void f(X *, const char *fmt, ...)`. NOT ported (varargs).
+
+  - address: 0x0837dc18
+    ghidra: FUN_0837dc18
+    name: sqlite_forward_via_db
+    size: 32
+    module: null
+    status: identified
+    notes: >-
+      44 bl call sites. Replaces its first argument with `*arg1` (the
+      db back-pointer that starts every SQLite context struct) and
+      tail-calls 0x08376808 with the remaining four arguments, shuffling
+      the 5th through the stack. A pure adaptor; naming it properly needs
+      0x08376808 identified first. NOT ported.
+
+  - address: 0x0837acf4
+    ghidra: FUN_0837acf4
+    name: get_vdbe
+    size: 56
+    sig: "Vdbe *get_vdbe(Parse *parse)"
+    module: null
+    status: identified
+    notes: >-
+      SQLite's sqlite3GetVdbe. 46 bl call sites. Returns pParse->pVdbe
+      (+0x0c), creating it with sqlite3VdbeCreate @ 0x08386c44 on
+      pParse->db and then calling 0x083867f8(v, 20) - an AddOp0-shaped
+      helper emitting opcode 20 - when it was NULL. NOT ported: both
+      callees are unported, so the port would be two dispatch slots
+      around three instructions.
+
+  - address: 0x0837d7ac
+    ghidra: FUN_0837d7ac
+    name: name_from_token
+    size: 48
+    sig: "char *name_from_token(sqlite3 *db, Token *name)"
+    module: null
+    status: identified
+    notes: >-
+      SQLite's sqlite3NameFromToken. 27 bl call sites. NULL token -> NULL;
+      otherwise db_str_ndup(db, tok->z, tok->n) then sqlite3Dequote
+      @ 0x083753d0. Pins the Token layout - z at +0x00 and a packed
+      `dyn:1 | n:31` word at +0x04 that the code reads as `field >> 1`
+      (`lsr r2,r2,#1`). NOT ported - both callees unported.
+
+  - address: 0x0836761c
+    ghidra: FUN_0836761c
+    name: release_via_field_0x48
+    size: 16
+    module: null
+    status: identified
+    notes: >-
+      51 bl call sites. `if (p) tail-call 0x0837ee98(p->[0x48])` - a
+      NULL-guarded release forwarder. Its target 0x0837ee98 (200 bytes,
+      22 bl + 1 tail b) drops a 16-bit refcount at +0x22 and, at zero,
+      runs C++ teardown through 0x082dd3d8 / 0x082d7fdc, so this is the
+      page-cache/pager glue into retailOS' own object model rather than
+      stock SQLite. NOT ported - the teardown chain is C++ and outside
+      this sweep.
+
+  # ---- ATA/CE-ATA driver island inside the SQLite span ----
+  # ~0x08369000-0x0836c000. Not SQLite; the strings at 0x0836a004+ are
+  # the IAD/RMS/WMS ATA command logger. gpio_pin_configure @ 0x0836b5b0
+  # (already ported) belongs to this island, not to the database engine.
+  - address: 0x08369780
+    ghidra: FUN_08369780
+    name: ata_handle_first_word_or_minus1
+    size: 16
+    module: null
+    status: identified
+    notes: >-
+      106 bl + 2 tail b call sites - the most-called leaf in the ATA
+      island. `p ? p[0] : -1`. Nothing to name properly until the handle
+      type is known; recorded so the next pass does not re-scout it.
+
+  - address: 0x08369864
+    ghidra: FUN_08369864
+    name: ata_handle_table_entry
+    size: 20
+    module: null
+    status: identified
+    notes: >-
+      99 bl + 7 tail b call sites. `p ? ((u32 *)p[1])[i] : 0` - indexes
+      a table hanging off the handle's second word.
+
+  - address: 0x08369778
+    ghidra: FUN_08369778
+    name: ata_call_with_zero
+    size: 8
+    module: null
+    status: identified
+    notes: >-
+      24 bl + 1 tail b call sites. `mov r0,#0; b 0x083696f4` - a
+      zero-argument veneer over 0x083696f4.
+
+  - address: 0x083690a8
+    ghidra: FUN_083690a8
+    name: ata_report_error
+    size: 24
+    module: null
+    status: identified
+    notes: >-
+      25 bl call sites. Fetches an error-record object from 0x082d0ae8,
+      stores its argument at record +0x04 and returns -1. The error
+      shape is C++ and outside this sweep.
