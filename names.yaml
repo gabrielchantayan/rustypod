@@ -4901,3 +4901,31 @@ functions:
       of THIS function, so they can be redirected here later.
       Port uses read_volatile so LLVM's loop-idiom pass cannot rewrite
       the loop into a call to `strlen` - i.e. into itself.
+
+  - address: 0x0836b5b0
+    ghidra: FUN_0836b5b0
+    name: gpio_pin_configure
+    size: 72
+    sig: "u32 gpio_pin_configure(u32 pin_id, u32 mode, int level)"
+    module: drivers/gpio_cmd
+    status: ported
+    vars: {param_1: pin_id, param_2: mode, param_3: level}
+    notes: >-
+      The single choke point through which retailOS configures S5L8702
+      GPIO pins - 100 bl + 5 tail-b call sites. Writes one packed command
+      word `port << 16 | pin << 8 | function` to GPIOCMD
+      (0x3cf00000 + 0x200); `port = pin_id >> 3`, `pin = pin_id & 7`
+      (8 pins per port). `mode` is the raw function code, passed through
+      as `mode & 0xff`, except `mode == 1` (drive as output) with
+      `level == 0` or `1`, which selects function 14 (low) / 15 (high)
+      and skips the mask. `mode == 1` with any other level falls through
+      to the mask and programs function 1 - the original's control flow,
+      preserved. Always returns 0. Observed call sites use pin ids
+      0x72/0x73/0x74 (port 14 pins 2/3/4) with mode 2 (alt function) and
+      mode 1. Port splits the packing into the pure `gpio_command_word`
+      (exhaustively tested on host) plus the register store, which is
+      mocked off-target like kernel/csem.rs mocks the cpsr. Lives in
+      drivers/gpio_cmd.rs, not drivers/gpio.rs - the latter is a stub
+      reserved for another agent. Codegen deviation - LLVM packs the port
+      field as `(pin_id << 13) & 0xffff0000` instead of
+      `(pin_id >> 3) << 16`; same bits.
