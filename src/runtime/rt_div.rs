@@ -107,7 +107,11 @@ pub unsafe extern "C" fn __rt_sdivmod(num: i32, den: i32, rem: *mut i32) -> i32 
 }
 
 /// `__rt_udiv` @ 0x08036f14 — unsigned 32-bit divide, quotient only.
+// `#[inline(never)]`: intra-crate callers (block_deque_fill's block-count
+// division) keep the original's `bl` call boundary for match.py review
+// (free_path.rs precedent).
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn __rt_udiv(num: u32, den: u32) -> u32 {
     udiv_entry(num, den).0
 }

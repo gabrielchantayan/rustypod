@@ -400,6 +400,7 @@ unsafe fn base_mutex(this: *mut PoolBase) -> *mut u8 {
 ///
 /// The base subobject's block deque (+0x4c on target).
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn deque_node_accessor(this: *mut PoolBase) -> *mut BlockDeque {
     core::ptr::addr_of_mut!((*this).deque)
 }
@@ -409,6 +410,7 @@ pub unsafe extern "C" fn deque_node_accessor(this: *mut PoolBase) -> *mut BlockD
 /// Word-by-word 16-byte iterator copy. `_r1` preserves the original ABI
 /// (src travels in r2; r1 is never read — see the module header).
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn deque_iter_copy(dst: *mut DequeIter, _r1: usize, src: *const DequeIter) {
     dst.write(src.read());
 }
@@ -418,6 +420,7 @@ pub unsafe extern "C" fn deque_iter_copy(dst: *mut DequeIter, _r1: usize, src: *
 ///
 /// Elements per deque segment (0x20).
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn deque_seg_capacity() -> usize {
     0x20
 }
@@ -427,6 +430,7 @@ pub unsafe extern "C" fn deque_seg_capacity() -> usize {
 /// Anchors an iterator at `cur` inside the segment held by `slot`
 /// (NULL slot: NULL segment bounds). Returns `iter`.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn deque_iter_init(
     iter: *mut DequeIter,
     cur: *mut u8,
@@ -451,6 +455,7 @@ pub unsafe extern "C" fn deque_iter_init(
 /// Reads the block-manager client handle through the base object's
 /// two-level client ref: `*slot ? **slot : NULL`.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn client_handle_get(ref_slot: *const *const *mut u8) -> *mut u8 {
     let client_ref = ref_slot.read();
     if client_ref.is_null() {
@@ -472,6 +477,7 @@ unsafe fn base_client(this: *mut PoolBase) -> *mut u8 {
 /// on the last element, the segment map (see the module header). The
 /// original returns a meaningless r0/r1 pair every caller ignores.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn deque_pop_front(dq: *mut BlockDeque) {
     let d = &mut *dq;
     let elem = d.begin.cur;
@@ -532,6 +538,7 @@ pub unsafe extern "C" fn pool_base_construct(
 /// Hands the deque's block descriptors back to the attached client (if
 /// any) and zeroes the fill counters, under the base mutex.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn pool_base_release_blocks(this: *mut PoolBase) {
     let mutex = base_mutex(this);
     (mutex_op!(lock))(mutex);
