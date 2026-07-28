@@ -5634,43 +5634,108 @@ functions:
       the next referenced object. Port this once the region's contents
       are recovered; do not guess the seeds.
 
-  - address: 0x080ed928
-    ghidra: FUN_080ed928
-    name: registry_entry_by_index
-    size: 44
-    sig: "void *registry_entry_by_index(i32 index)"
-    module: null
-    status: identified
-    vars: {param_1: index}
+  # --- Batch: the nine-array element table (app/element_table) ---
+  # FUN_08105ffc lazily builds one 0xd8-byte object holding nine 0x18-byte
+  # container sub-objects (9 * 0x18 = 0xd8), each constructed with
+  # (0, 10, 2) by a DIFFERENT constructor - nine instantiations of one
+  # template, so nine distinct element types. Nine accessors read them,
+  # one per array: 0x080f1038 (+0x00), 0x080f0fb4 (+0x18), 0x080f108c
+  # (+0x30), 0x080f1060 (+0x48), 0x080f100c (+0x60), 0x080ed8fc (+0x78),
+  # 0x080ed928 (+0x90), 0x080ed8d0 (+0xa8), 0x080f0fe0 (+0xc0).
+  # The element types are NOT identified - the only names near the nine
+  # constructors are runtime-data pointers, not strings. Note this table
+  # has nothing to do with the by-id class registry; the earlier names
+  # (registry_entry_by_index / _alt) were wrong and have been replaced.
+
+  - address: 0x08105ffc
+    ghidra: FUN_08105ffc
+    name: element_table
+    size: 224
+    sig: "void *element_table(void)"
+    module: app/element_table
+    status: ported
     notes: >-
-      Bounds-checked table lookup off a lazily-created singleton. Calls
-      the singleton getter 0x08105ffc (allocates 0xd8 bytes on first use
-      and caches it in a global), then with ctx = result treats ctx+0x90
-      as the element array base and ctx+0x94 as the element count -
-      returns array[index] when index >= 0 and index < count (signed
-      compares, so a negative index or index == count yields 0). 64 bl
-      call sites, binary-scanned. NOT ported - identical twin at
-      0x080f1038 (see that entry) and the singleton getter 0x08105ffc
-      sits in the 0x08100000-0x081fffff range owned by another agent, so
-      the whole cluster wants doing together with a shared dispatch
-      hook. The element type is unknown without the getter's constructor.
+      38 bl call sites. `if (cache == 0) { r0 = operator_new(0xd8); r0 =
+      ctor0(r0, 0, 10, 2); r0 = ctor1(r0 + 0x18, ...); ... r0 = ctor8(r0
+      + 0x18, ...); cache = r0 - 0xc0; } return cache;` - the cursor is
+      chained through each constructor's RETURN, and the final base is
+      the ninth return minus 0xc0, not the allocated block. The nine
+      constructors in call order - 0x083d3e8c, 0x083d4354, 0x083d40f0,
+      0x083d3c28, 0x083d56b8, 0x083d51dc, 0x083d4cf4, 0x083d4a94,
+      0x083d45b4; each lays its sub-object out as {+0x00 data buffer of
+      slots*4 zeroed bytes, +0x04 slots (=10), +0x08 0, +0x0c the first
+      argument (=0), +0x10 growth (=2), +0x14 a second allocation}.
+      Deviations - the cache is the crate static ELEMENT_TABLE, not the
+      word @ 0x089ca3bc; the nine constructors sit behind the
+      ELEMENT_ARRAY_CTORS dispatch table with zeroing-stub defaults
+      (which leave slots = 0, so every accessor returns NULL), so this is
+      NOT HOOK-READY; LLVM rolls the nine dispatch-table calls into a
+      loop where the original is unrolled (behaviourally identical).
 
   - address: 0x080f1038
     ghidra: FUN_080f1038
-    name: registry_entry_by_index_alt
+    name: element_array0_at
     size: 40
-    sig: "void *registry_entry_by_index_alt(i32 index)"
-    module: null
-    status: identified
+    sig: "void *element_array0_at(i32 index)"
+    module: app/element_table
+    status: ported
     vars: {param_1: index}
     notes: >-
-      Byte-for-byte the same logic as 0x080ed928 minus one redundant
-      instruction - same singleton getter 0x08105ffc, same ctx+0x90 array
-      base / ctx+0x94 count, same signed bounds test. A second copy from
-      a different object. 47 bl call sites, binary-scanned (111 across the
-      pair). NOT ported for the same reason as its twin; note that a
-      single Rust body would be folded onto one address by LLVM, so both
-      symbols should be exported from one implementation when this lands.
+      47 bl call sites, binary-scanned. Calls element_table(), then
+      returns array0.data[index] when index >= 0 and array0.slots >
+      index, else NULL. Both compares are SIGNED (`cmp r4,#0` +
+      `ldrge/cmpge` + `movle`/`ldrgt`), so a negative index and index ==
+      slots both yield NULL, and a slot count read back with the sign
+      bit set rejects every index. The getter runs BEFORE the bounds
+      test, so even an out-of-range index builds the table.
+
+  - address: 0x080ed928
+    ghidra: FUN_080ed928
+    name: element_array6_at
+    size: 44
+    sig: "void *element_array6_at(i32 index)"
+    module: app/element_table
+    status: ported
+    vars: {param_1: index}
+    notes: >-
+      64 bl call sites, binary-scanned (111 across the pair with
+      0x080f1038). Identical to element_array0_at but reads the array at
+      +0x90; the original is the same body plus one redundant `add r0,
+      r0, #0x90`. Both are exported from one shared Rust body, which is
+      why they are separate #[inline(never)] wrappers.
+
+  - address: 0x080f0fb4
+    ghidra: FUN_080f0fb4
+    name: element_array1_at
+    size: 44
+    sig: "void *element_array1_at(i32 index)"
+    module: app/element_table
+    status: identified
+    notes: >-
+      One of the seven remaining per-array accessors off the same table
+      - same body as element_array0_at with a different array offset.
+      The set - 0x080f0fb4 (+0x18), 0x080f108c (+0x30), 0x080f1060
+      (+0x48), 0x080f100c (+0x60), 0x080ed8fc (+0x78), 0x080ed8d0
+      (+0xa8), 0x080f0fe0 (+0xc0). Not ported only because they were
+      outside the named set; each is one line against
+      app/element_table's shared body.
+
+  - address: 0x0810e64c
+    ghidra: FUN_0810e64c
+    name: class_registry_construct
+    size: null
+    sig: "void *class_registry_construct(Registry *registry)"
+    module: null
+    status: identified
+    notes: >-
+      The constructor of the global class registry @ 0x08a79ca4, called
+      from the static-init chain @ 0x082afb6c. Calls 0x08135308(this, 8,
+      4) (the container base ctor, capacity 8 / growth 4), then lazily
+      builds a second 8-byte singleton (operator_new(8) + ctor
+      0x082028a4, cached in a global) and dispatches its vtable[+0x18].
+      NOT ported - it is the missing piece that makes
+      app/registry.rs's registry_lookup_by_id hook-ready, and it pulls
+      in the whole unported container class.
 
   - address: 0x080ed7c0
     ghidra: FUN_080ed7c0
@@ -6012,78 +6077,276 @@ functions:
       again (layer_disable @ 0x081208bc), renders, clears dirty and
       clears +0x42. Both are blocked on the render pass 0x0811f8c8.
 
+  # --- Batch: the by-id class registry (app/registry) ---
+  # One statically-allocated associative container @ 0x08a79ca4 maps a
+  # 0x80-aligned class id to that class's single live instance; 45
+  # constructors publish themselves into it through 0x081d23f8. The same
+  # number is the runtime type id, so every per-class accessor looks the
+  # id up and then casts the result to the SAME id through 0x08275b9c.
+  # Ids identified from the class name each constructor hands to the
+  # name factory @ 0x0820b230 in the same basic block:
+  #   0x4180 TCNotesDispatcher, 0x5680 TCSportTimer, 0x5800 TRadioCntlr,
+  #   0x7600 TSearchCntlr, 0x8080 TCDemoMode.
+
   - address: 0x081883fc
     ghidra: FUN_081883fc
-    name: notify_class_8080
+    name: demo_mode_instance
     size: 28
-    sig: "void notify_class_8080(void)"
-    module: app
+    sig: "void *demo_mode_instance(void)"
+    module: app/registry
+    status: ported
+    notes: >-
+      328 bl call sites (binary-scanned; the earlier note said 312) -
+      the busiest function in 0x08100000-0x081fffff. Loads the literal
+      class id 0x8080 (the word @ 0x08188418), calls the registry
+      lookup 0x081d2184 and tail branches to the checked-downcast
+      veneer 0x08275b9c with the SAME id, i.e.
+      `object_cast_to_class(registry_lookup_by_id(0x8080), 0x8080)`.
+      Class identified as TCDemoMode - the constructor @ 0x081889c0
+      registers its `this` under 0x8080 and, in the same basic block,
+      hands the literal "TCDemoMode" (@ 0x08188af4) to the class-name
+      factory singleton @ 0x0820b230, the same register-then-name
+      pairing that identifies TCNotesDispatcher/TCSportTimer/
+      TRadioCntlr/TSearchCntlr. Caveat - the vtable pointer that ctor
+      installs (0x08989718) falls inside the C++ mangled-name blob in
+      the decrypted image instead of the vtable region above
+      0x0898a000, so that page of the image does not match the running
+      device; the identification rests on the code, not on that
+      pointer. Siblings with the same shape - 0x08172124 (id 0x6000, 72
+      bl) and 0x08100b74 (id 0x6600, 36 bl), both ported, both classes
+      unidentified (their ctors never name themselves to the factory).
+      Ghidra renders the tail veneer as a recovered-jumptable warning.
+
+  - address: 0x08172124
+    ghidra: FUN_08172124
+    name: instance_of_class_6000
+    size: 24
+    sig: "void *instance_of_class_6000(void)"
+    module: app/registry
+    status: ported
+    notes: >-
+      72 bl call sites (binary-scanned; the earlier note said 63). Same
+      lookup-then-cast accessor as 0x081883fc for class id 0x6000. The
+      class registers itself @ 0x08173774 but never hands a name to the
+      factory @ 0x0820b230, so the CLASS IS NOT IDENTIFIED - the id is
+      the only handle the firmware gives it and the symbol says so
+      rather than inventing a name.
+
+  - address: 0x08100b74
+    ghidra: FUN_08100b74
+    name: instance_of_class_6600
+    size: 24
+    sig: "void *instance_of_class_6600(void)"
+    module: app/registry
+    status: ported
+    notes: >-
+      36 bl call sites (binary-scanned; the earlier note said 38). Same
+      accessor for class id 0x6600, registered @ 0x08101aa4. CLASS NOT
+      IDENTIFIED, same reason as 0x08172124.
+
+  - address: 0x08103584
+    ghidra: FUN_08103584
+    name: instance_of_class_8300
+    size: 24
+    sig: "void *instance_of_class_8300(void)"
+    module: null
     status: identified
     notes: >-
-      312 bl call sites from 294 distinct callers - the busiest
-      unclaimed function in 0x08100000-0x081fffff. Four instructions -
-      loads the literal class id 0x8080 (the word @ 0x08188418), looks
-      the object up with the registry getter 0x081d2184, and tail
-      branches to the null-guarded dispatch veneer @ 0x08275b9c, which
-      is `if (obj) obj->vtable[+0x14](obj, 0x8080)`. Siblings with the
-      same shape and different ids - 0x08172124 (id 0x6000, 63 call
-      sites) and 0x08100b74 (id 0x6600, 38 call sites). Ghidra renders
-      the tail veneer as a recovered-jumptable warning. Not ported - the
-      veneer at 0x08275b9c is outside this sweep and the registry
-      getter chain (0x081d2184 -> 0x0810e4c8 -> 0x0810e40c) is
-      unported; porting the leaf alone would be three dispatch-table
-      hops and no recovered logic.
+      One of the ten remaining per-class instance accessors, all the
+      same six instructions as the ported 0x081883fc - `push; load id;
+      bl 0x081d2184; pop; load the SAME id into r1; b 0x08275b9c`. The
+      whole set with its class ids, function start and size - 0x08103584
+      (0x8300, 24), 0x08103b88 (0x7600, 24), 0x0812f0a4 (0x4e00, 24),
+      0x081353e8 (0x8f00, 24), 0x0815e1ac (0x5680, 28), 0x0815ff34
+      (0x8700, 28), 0x0827f218 (0x5780, 28), 0x08284e2c (0x6180, 28),
+      0x08289690 (0x3280, 24), 0x0828ae68 (0x4180, 28). Named classes
+      among them - 0x8300 TPhotosSettingsSlideshowPlaylistCntlr, 0x7600
+      TSearchCntlr, 0x4e00 TCUnsupported, 0x8f00 TCEQSetting, 0x5680
+      TCSportTimer, 0x4180 TCNotesDispatcher (each recovered from the
+      literal its constructor hands to the class-name factory @
+      0x0820b230 next to its `bl 0x081d23f8`). Not ported - they add no
+      logic over the three that are, and app/registry.rs's
+      `instance_of_class` body covers them in one line each.
+
+  - address: 0x081d23f8
+    ghidra: FUN_081d23f8
+    name: registry_register
+    size: 16
+    sig: "usize registry_register(void *instance, u32 class_id)"
+    module: app/registry
+    status: ported
+    notes: >-
+      45 bl call sites. `mov r2, r0; ldr r0, =0x08a79ca4; b 0x0810e4ac`
+      - publishes `instance` in the global class registry under
+      `class_id`. This is the call every framework singleton's ctor
+      makes; scanning its 45 sites is what recovered the class-id space
+      (0x2700, 0x2980, 0x3280, 0x3680, 0x4180, 0x4e00, 0x5680, 0x5780,
+      0x5800, 0x5a00, 0x6000, 0x6180, 0x6280, 0x6380, 0x6600, 0x6d00,
+      0x6e00, 0x6f80, 0x7600, 0x7680, 0x7800, 0x7a00, 0x7a80, 0x7f00,
+      0x7f80, 0x8080, 0x8180, 0x8300, 0x8400, 0x8480, 0x8700, 0x8780,
+      0x8900, 0x8a00, 0x8c00, 0x8c80, 0x8d00, 0x8e80, 0x8f00, 0x9280,
+      0x9300, 0x9400 plus three set out of line).
 
   - address: 0x081d2184
     ghidra: FUN_081d2184
     name: registry_lookup_by_id
     size: 36
     sig: "void *registry_lookup_by_id(u32 class_id)"
-    module: app
-    status: identified
+    module: app/registry
+    status: ported
     vars: {param_1: class_id}
     notes: >-
-      62 call sites (61 bl + 1 tail b, 54 distinct callers). Zeroes a
-      stack slot, calls 0x0810e4c8(registry @ 0x08a79ca4, class_id,
-      &slot) and returns the slot - the by-id object lookup that
-      app/context.rs already names as the resolver for the pending
-      target id. The registry accessor family behind it, all unported -
-      0x0810e40c (84 bytes, 5 sites) dispatches registry vtable[+0x4c]
-      to turn a key into an index, then vtable[+0x3c] to fetch the
-      value, returning the index and the value as a pair; 0x0810e4c8
-      (40 bytes, 15 sites) writes the value out only when the index is
-      not -1; 0x0810e4f0 (60 bytes) is the same but stores through
-      0x0810e460 on a hit; 0x0810e4ac (28 bytes, 8 sites) packs two
-      words into a stack pair and dispatches registry vtable[+0x1c].
-      Not ported - the whole family is virtual dispatch on an unported
-      registry class. NOTE - Ghidra's C for 0x0810e4ac and 0x0810e460
-      is wrong (it invents vtable chains and inlines callees); the
-      assembly above is what the words decode to.
+      62 call sites (60 bl + 2 tail b, binary-scanned; the earlier note
+      said 61+1). Zeroes a stack slot, calls 0x0810e4c8(registry @
+      0x08a79ca4, class_id, &slot) and returns the slot - the by-id
+      instance lookup that app/context.rs names as the resolver for the
+      pending target id. Deviation - the registry object is the crate
+      static CLASS_REGISTRY, not the address 0x08a79ca4 (past the end
+      of the decrypted image, pure runtime RAM), and it starts all-zero
+      i.e. with a NULL vtable, so this is NOT HOOK-READY until the
+      container ctor 0x0810e64c is ported. Ghidra's C for 0x0810e4ac
+      and 0x0810e460 is FABRICATED (it invents vtable chains and
+      inlines callees); the ports were written from the assembly.
+
+  - address: 0x0810e40c
+    ghidra: FUN_0810e40c
+    name: registry_find
+    size: 84
+    sig: "i32 registry_find(Registry *registry, u32 class_id, RegistryEntry *out)"
+    module: app/registry
+    status: ported
+    notes: >-
+      3 bl call sites. Spills the key to the stack, dispatches registry
+      vtable[+0x4c] `index_of(this, &key)` and, when that is not -1,
+      dispatches vtable[+0x3c] `entry_at(this, index, out)` to copy the
+      whole (class_id, instance) pair into the caller's buffer; returns
+      the index. The `str r0, [sp]` after the second dispatch lands in
+      the r1 spill slot and is dead (popped into a scratch register).
+      Faithful - the key is passed by pointer to a stack COPY.
+
+  - address: 0x0810e4c8
+    ghidra: FUN_0810e4c8
+    name: registry_lookup
+    size: 40
+    sig: "u32 registry_lookup(Registry *registry, u32 class_id, void **out)"
+    module: app/registry
+    status: ported
+    notes: >-
+      16 call sites (15 bl + 1 tail b). Calls 0x0810e40c with a stack
+      pair, then `adds r0, r0, #1; movne r0, #1` turns the index into a
+      found flag and, only when found, copies the pair's VALUE word
+      ([sp, #4]) to *out. Returns the flag. Deviation - the port zeroes
+      the stack pair the original leaves uninitialized; unobservable
+      (it is only read on a hit, after entry_at wrote it).
+
+  - address: 0x0810e4ac
+    ghidra: FUN_0810e4ac
+    name: registry_insert
+    size: 28
+    sig: "usize registry_insert(Registry *registry, u32 class_id, void *instance)"
+    module: app/registry
+    status: ported
+    notes: >-
+      10 call sites (8 bl + 2 tail b). `push {r2,r3,r4,lr}; stm sp,
+      {r1,r2}` builds the container's (key, value) pair on the stack and
+      dispatches registry vtable[+0x1c] `insert(this, &pair)`,
+      forwarding whatever that returns. Ghidra's C for this function is
+      FABRICATED; ported from the assembly.
+
+  - address: 0x0810e4f0
+    ghidra: FUN_0810e4f0
+    name: registry_assign
+    size: 60
+    sig: "u32 registry_assign(Registry *registry, u32 class_id, void *instance)"
+    module: app/registry
+    status: ported
+    notes: >-
+      3 call sites (2 bl + 1 tail b). registry_find into a stack pair;
+      on -1 returns 0 without touching anything; otherwise overwrites
+      only the pair's value word (`str r4, [sp, #4]`, so the EXISTING
+      key is what the container sees) and calls 0x0810e460 with the
+      index and that pair, returning 1. Never adds an entry.
+
+  - address: 0x0810e460
+    ghidra: FUN_0810e460
+    name: registry_assign_at
+    size: 76
+    sig: "void *registry_assign_at(Registry *registry, i32 index, const RegistryEntry *entry)"
+    module: app/registry
+    status: ported
+    notes: >-
+      1 bl call site (from 0x0810e4f0). Brackets one indexed write with
+      the change-notification pair - 0x08134ff8(this, 0) to switch
+      notifications off, registry vtable[+0x24] `assign_at(this, index,
+      entry)`, 0x08135038(this, 1) to raise the changed byte, then a
+      TAIL BRANCH to 0x08134ff8(this, 1) which switches them back on and
+      fires exactly one notification. Ghidra's C for this function is
+      FABRICATED; ported from the assembly.
+
+  - address: 0x08134ff8
+    ghidra: FUN_08134ff8
+    name: observable_set_notify_enabled
+    size: 64
+    sig: "void *observable_set_notify_enabled(Registry *observable, u32 enabled)"
+    module: app/registry
+    status: ported
+    notes: >-
+      6 call sites (5 bl + 1 tail b). Stores the LOW BYTE of `enabled`
+      at this+0x21 while branching on the FULL WORD (so 0x100 writes 0
+      and still takes the enable path - reproduced). Disabling returns
+      `this`; enabling dispatches vtable[+0x64] and, only when that
+      returns NULL, tail-calls vtable[+0x68]. A base-class method of the
+      framework's observable, ported against the registry layout (which
+      is that base layout). The +0x64 / +0x68 slot names
+      (notify_deferred / notify_changed) are INFERRED from the batching
+      idiom in 0x0810e460; the slot offsets are exact.
+
+  - address: 0x08135038
+    ghidra: FUN_08135038
+    name: observable_set_changed
+    size: 8
+    sig: "void observable_set_changed(Registry *observable, u32 changed)"
+    module: app/registry
+    status: ported
+    notes: >-
+      1 bl call site. `strb r1, [r0, #0x20]; bx lr` - the observable's
+      changed byte. Its neighbour 0x08135040 installs the observer at
+      this+0x24 (unported).
 
   - address: 0x08105a34
     ghidra: FUN_08105a34
-    name: resource_id_for_kind
+    name: image_format_for_kind
     size: 196
-    sig: "u32 resource_id_for_kind(u32 kind)"
-    module: app
-    status: identified
+    sig: "u32 image_format_for_kind(u32 kind)"
+    module: app/image_format
+    status: ported
     vars: {param_1: kind}
     notes: >-
-      10 call sites (8 bl + 2 tail b, 9 distinct callers). A dense ARM
-      `addls pc, pc, r0, lsl #2` jump table over kind 0..17 that
-      returns a constant id per kind, or 0xffffffff for kinds 9, 0xb,
-      0xd and anything above 17. The values, read out of the literal
-      pool at 0x08105af8 - kind 0,1 -> 0x42a; 2 -> 0x3fd; 3 -> 0x400
-      (an immediate, `mov r0, #1024`, not a pool word - Ghidra shows it
-      as a literal while rendering the rest as DAT_ globals); 4 ->
-      0x428; 5,6 -> 0x42b; 7 -> 0x429; 8 -> 0x425; 10 -> 0x424; 12 ->
-      0x40b; 14 -> 0x41c; 15 -> 0x41f; 16 -> 0x405; 17 -> 0x41e. The
-      wrappers 0x08105b28 (kind 4 fast path) and 0x08105b38 (argument
-      swap) sit right after it and callers feed the result to
-      0x08105b58. Not ported - the id space 0x3fd..0x42b is not
-      identified, so any name for the table would be a guess; the
-      mechanical port is trivial once a caller pins down what the ids
-      index.
+      7 call sites (6 bl + 1 tail b, binary-scanned; the earlier note
+      said 8 + 2). A dense ARM `addls pc, pc, r0, lsl #2` jump table
+      over kind 0..17 - UNSIGNED bound, so everything above 17 takes the
+      default - returning a constant id per kind or 0xffffffff for kinds
+      9, 0xb, 0xd and out of range. Values from the literal pool at
+      0x08105af8 - kind 0,1 -> 0x42a; 2 -> 0x3fd; 3 -> 0x400 (the
+      immediate `mov r0, #1024`, not a pool word); 4 -> 0x428; 5,6 ->
+      0x42b; 7 -> 0x429; 8 -> 0x425; 10 -> 0x424; 12 -> 0x40b; 14 ->
+      0x41c; 15 -> 0x41f; 16 -> 0x405; 17 -> 0x41e. THE ID SPACE IS NOW
+      IDENTIFIED - the result feeds 0x08105b58, which subtracts 0x3f1
+      and switches on a 61-entry table (`cmp r6, #0x3c`, so ids
+      0x3f1..0x42d), builds a 32-byte descriptor on its stack from image
+      geometry (352, 320, 270, 220, 180, 176, 128, 100, 90, 84, 56, 41,
+      37 stored to +0x00 and +0x04, often the SAME value to both; a
+      fixed 16 at +0x18 = bit depth, i.e. RGB565; a halfword at +0x1c)
+      and memcpys it to the caller; 0x08079d38 then returns
+      `desc[0] * desc[8]`, a byte size. So these are image/artwork
+      FORMAT ids and this table says which format each kind of artwork
+      uses. The reading is an inference from the constants - nothing in
+      the image names the kinds or the formats. Neighbours left unported
+      - 0x08105b28 overrides kind 4 to 0x400 and tail-branches here,
+      0x08105b38 is an argument swap, 0x08105b58 is the descriptor
+      table itself. Deviation - LLVM emits a data table plus one indexed
+      load where the original emits a jump table; behaviourally
+      identical.
 
   - address: 0x0814d51c
     ghidra: FUN_0814d51c
@@ -6109,24 +6372,74 @@ functions:
 
   - address: 0x081eb0c4
     ghidra: FUN_081eb0c4
-    name: lazy_singleton_0x380
+    name: singleton_class_8900
     size: 44
-    sig: "void *lazy_singleton_0x380(void)"
+    sig: "void *singleton_class_8900(void)"
     module: app/singletons
-    status: identified
+    status: ported
     notes: >-
-      86 bl call sites from 64 distinct callers. Exactly the idiom
-      app/singletons.rs already ports twice - `if (*slot == 0) *slot =
-      ctor(operator_new(SIZE)); return *slot;` - with SIZE 0x380, the
-      cache slot at DAT_081eb0f0 + 4 and the constructor 0x081ee0c0.
-      Siblings with the same shape - 0x0810a7b8 (size 0xd0, ctor
-      0x0810ab3c, 38 sites), 0x0816df60 (size 0x3c, ctor 0x0816e2ac,
-      slot +0xc, 36 sites), 0x081b803c (size 0x1d4, ctor 0x081b80b4,
-      37 sites). Not ported - the getter logic is fully recovered, but
-      unlike the two already-ported singletons none of these four
-      classes is identified from its call sites, so they would be
-      `lazy_singleton_<size>` names with no meaning. Port them together
-      with a naming pass over their constructors.
+      88 bl call sites from 64 distinct callers (binary-scanned; the
+      earlier note said 86). The idiom app/singletons.rs already ports -
+      `if (*slot == 0) *slot = ctor(operator_new(SIZE)); return *slot;`
+      - with SIZE 0x380, the cache slot at 0x089cc3a8 + 4 and the
+      constructor 0x081ee0c0. IDENTIFIED ONLY BY CLASS ID - that ctor
+      publishes the object in the by-id class registry under id 0x8900
+      (`bl 0x081d23f8` @ 0x081ee0f0), but unlike TCDemoMode and friends
+      it never hands a name to the class-name factory @ 0x0820b230 and
+      carries no name literal, so the CLASS COULD NOT BE NAMED and the
+      symbol says only what the firmware says. Same NOT-HOOK-READY
+      caveat as the other four getters - the ctor is a dispatch slot
+      with a zeroing stub.
+
+  - address: 0x0810a7b8
+    ghidra: FUN_0810a7b8
+    name: singleton_class_6200
+    size: 44
+    sig: "void *singleton_class_6200(void)"
+    module: app/singletons
+    status: ported
+    notes: >-
+      47 bl call sites (binary-scanned; the earlier note said 38). Same
+      getter idiom - SIZE 0xd0, cache slot 0x089cb304 + 4, ctor
+      0x0810ab3c. The ctor registers the object under class id 0x6200
+      (`mov r1, #0x6200` @ 0x0810abc4 with no intervening bl, `bl
+      0x081d23f8` @ 0x0810ac1c - the 22-instruction gap is why an
+      8-instruction backward scan reports the id as unknown). It also
+      parks the layout-resource names Menu_AboutID_Template_iPod_Layout,
+      ResetAllSettings_Language_Layout and
+      DialogNotice_InsufficientDiskSpace_Layout in the object, placing
+      it in the settings/about area - not enough to name the class.
+
+  - address: 0x081b803c
+    ghidra: FUN_081b803c
+    name: singleton_class_7f80
+    size: 44
+    sig: "void *singleton_class_7f80(void)"
+    module: app/singletons
+    status: ported
+    notes: >-
+      38 bl call sites (binary-scanned; the earlier note said 37). Same
+      getter idiom - SIZE 0x1d4, cache slot 0x089cc61c + 0, ctor
+      0x081b80b4, which registers the object under class id 0x7f80 (`bl
+      0x081d23f8` @ 0x081b8194). CLASS NOT NAMED, same reason as
+      0x081eb0c4.
+
+  - address: 0x0816df60
+    ghidra: FUN_0816df60
+    name: lazy_singleton_0x3c
+    size: 44
+    sig: "void *lazy_singleton_0x3c(void)"
+    module: app/singletons
+    status: ported
+    notes: >-
+      38 bl call sites (binary-scanned; the earlier note said 36). Same
+      getter idiom - SIZE 0x3c, cache slot 0x089d0124 + 0xc, ctor
+      0x0816e2ac. Unlike its three siblings this ctor registers NOTHING
+      in the class registry and names nothing, so the allocation size is
+      the only identifying fact the firmware offers and the symbol says
+      exactly that. The ctor builds a small object - flag byte 1 at
+      +0x10, zeroed +0x14..+0x38, a sub-object at +0x20 handed to
+      0x083c78b4.
 
   # --- Batch: the UI rectangle primitives (ui/rect) ---
   # Field layout recovered from the binary, QuickDraw order:
@@ -6865,21 +7178,31 @@ functions:
 
   - address: 0x08275b9c
     ghidra: FUN_08275b9c
-    name: unported_vcall_slot5_null_guarded
+    name: object_cast_to_class
     size: 20
-    module: unported
-    status: identified
+    sig: "void *object_cast_to_class(FrameworkObject *object, u32 class_id)"
+    module: app/registry
+    status: ported
     notes: >-
-      414 bl + 17 tail b call sites. `if (obj) tail-call
-      obj->vtable[5](obj)` - a NULL-guarded virtual-call veneer at
-      vtable byte offset 0x14, returning 0 (the NULL object itself) when
-      obj is NULL. r2 is clobbered by the vtable load, so it can forward
-      at most r0/r1/r3 - most likely a nullary virtual on `this`. Ports
-      cleanly through the object's own vtable pointer (no hook table
-      needed), but slot 5 of the base class could not be identified,
-      and a veneer this hot deserves a real name rather than
-      `vcall_slot5`. Left for whoever decodes the class hierarchy the
-      0x0827xxxx container cluster belongs to.
+      414 bl + 17 tail b call sites. `cmp r0,#0; ldrne r2,[r0]; ldrne
+      r2,[r2,#0x14]; bxne r2; bx lr` - the framework's NULL-tolerant
+      CHECKED DOWNCAST, dispatching vtable slot 5 with the wanted class
+      id and short-circuiting a NULL object to NULL. Slot 5 identified
+      as the cast operator, NOT a nullary virtual as the earlier note
+      guessed - the veneer takes a SECOND argument. Evidence - (a) the
+      13 per-class accessors that tail-branch here (0x081883fc,
+      0x08172124, 0x08100b74, 0x08103598, 0x08103b9c, 0x0812f0b8,
+      0x081353fc, 0x0815e1c4, 0x0815ff48, 0x0827f230, 0x08284e44,
+      0x082896a4, 0x0828ae80) each pass the SAME class id they just
+      looked up in the registry; (b) r1 across the 414 bl sites is a
+      0x80-aligned constant from the class-id space (0x6800 at 126
+      sites, then 0x1700, 0x1180, 0x1100, 0x0f00, 0x3500, 0x2b00,
+      0x6380 - the last two are registered class ids); (c) the two
+      functions immediately before it in the image are textbook castTo
+      bodies - 0x08275b90 `cmp r1,#1; movne r0,#0; bx lr` (root class
+      id 1) and 0x08275bcc `cmp r1,#0x5d00; cmpne r1,#1; movne r0,#0;
+      bx lr`. Ported through the object's own vtable pointer, so
+      subclass vtables work; no hook table.
 
   - address: 0x08277440
     ghidra: FUN_08277440
