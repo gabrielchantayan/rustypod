@@ -4861,3 +4861,274 @@ functions:
       There is no occupied flag, so a key of 0 matches the first zeroed
       slot - preserved. Codegen deviation - LLVM fully unrolls the
       constant 6-iteration loop (29 instructions vs the original's 13).
+
+  - address: 0x080ed738
+    ghidra: FUN_080ed738
+    name: read_u16_le
+    size: 16
+    sig: "u32 read_u16_le(const u8 *p)"
+    module: util/le_read
+    status: ported
+    vars: {param_1: p}
+    notes: >-
+      Unaligned little-endian u16 load - two post-indexed ldrb ORed at
+      shifts 0/8, zero-extended. ARM ADS __packed-dereference idiom (a
+      misaligned ldrh rotates rather than faults on ARM926EJ-S). 34 bl
+      call sites, binary-scanned; leaf, no hardware. Callers such as
+      0x0805a3ac/0x0805afd8/0x0805b0d0 walk packed on-disk records and
+      re-pack the bytes big-endian afterwards.
+
+  - address: 0x080ed748
+    ghidra: FUN_080ed748
+    name: read_u32_le
+    size: 32
+    sig: "u32 read_u32_le(const u8 *p)"
+    module: util/le_read
+    status: ported
+    vars: {param_1: p}
+    notes: >-
+      Unaligned little-endian u32 load - four post-indexed ldrb ORed at
+      shifts 0/8/16/24. Behaviorally identical to __rt_uread4
+      (0x08031140, already ported in libc/rt_unaligned); this is a second
+      copy from a different object - post-indexed loads and a bx lr
+      return instead of fixed offsets and mov pc,lr. 65 bl + 1 b call
+      sites, binary-scanned. LLVM folds the two identical bodies, so the
+      archive exports read_u32_le and __rt_uread4 at the same address -
+      review codegen as `match.py 0x080ed748 __rt_uread4`.
+
+  - address: 0x080ed768
+    ghidra: FUN_080ed768
+    name: read_u64_le
+    size: 88
+    sig: "u64 read_u64_le(const u8 *p)"
+    module: util/le_read
+    status: ported
+    vars: {param_1: p}
+    notes: >-
+      Unaligned little-endian u64 load - the eight bytes at p ORed at
+      shifts 0..56, low word returned in r0 and high word in r1. Only 2
+      bl call sites (0x080743dc, 0x081f5294) but it completes the
+      0x080ed738/748/768 family. The original's first half contains four
+      provably-dead instructions (lsr r2,r1,#24 / lsr r3,r1,#16 / orr
+      r2,r3,r2 / orr r1,r2,ip,lsr #8) - the high words of the 64-bit
+      shifts of bytes 1..3, which a zero-extended byte shifted left by
+      less than 32 can never reach. Always zero, so the port drops them;
+      returned value unchanged.
+
+  - address: 0x08076f48
+    ghidra: FUN_08076f48
+    name: byteswap16
+    size: 16
+    sig: "u32 byteswap16(u32 value)"
+    module: util/bswap
+    status: ported
+    vars: {param_1: value}
+    notes: >-
+      Register-only 16-bit byte swap - ((v << 8) | (v >> 8)) & 0xff00ffff.
+      A second implementation of bswap16 (0x0805dd48) from a different
+      object; the 0x0805dxxx pair spills through the stack, this one stays
+      in registers. Contracts differ at the edges - bswap16 reloads with
+      ldrh and zero-extends, this masks with bic #0x00ff0000 and so
+      passes the argument's top byte through (byteswap16(0xffffffff) =
+      0xff00ffff vs bswap16's 0xffff). The mask is the ADS narrowing of an
+      unsigned short - for a u16 argument the left-shifted copy cannot
+      reach bit 24, so only byte 2 needs clearing. Every observed call
+      site feeds a zero-extended ldrh and stores with strh, so the
+      difference is never visible in stock firmware. 60 bl call sites,
+      binary-scanned. Port reproduces the mask bit-for-bit; match.py is
+      instruction-for-instruction modulo the frame push.
+
+  - address: 0x08076f58
+    ghidra: FUN_08076f58
+    name: byteswap32
+    size: 28
+    sig: "u32 byteswap32(u32 value)"
+    module: util/bswap
+    status: ported
+    vars: {param_1: value}
+    notes: >-
+      Register-only 32-bit byte reverse - v << 24 | (v & 0xff00) << 8 |
+      (v & 0xff0000) >> 8 | v >> 24. Semantically identical to bswap32
+      (0x0805dc24); second copy from the same object as byteswap16
+      (0x08076f48). 23 bl call sites, binary-scanned. LLVM folds the two
+      identical bodies, so the archive exports byteswap32 and bswap32 at
+      one address - review codegen as `match.py 0x08076f58 bswap32`.
+
+  - address: 0x080e9878
+    ghidra: FUN_080e9878
+    name: fixed16_mul
+    size: 20
+    sig: "i32 fixed16_mul(i32 a, i32 b)"
+    module: util/fixed
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      Q16.16 fixed-point multiply - smull to the full signed 64-bit
+      product, then return bits [47:16], assembled by the original as
+      (hi << 16) | (lo >>u 16). Truncating toward negative infinity, no
+      rounding and no clamp; overflowing products wrap. This is retailOS's
+      own fixed-point multiply, NOT FreeType's - FT_MulFix/ft_muldiv bias
+      by half an ulp and saturate, so they are not interchangeable and
+      the addresses are unrelated. 94 bl call sites, binary-scanned. The
+      caller that pins the semantics is 0x08076154, a Q16.16 inverse
+      square root - 8-entry seed table indexed by three exponent bits
+      (via the clz at 0x0824980c), then Newton-Raphson y = y*(3 - x*y*y)/2
+      with rsb r1,r1,#0x30000 as the literal 3.0 in Q16.16; it open-codes
+      this same smull/lsl/orr idiom inline twice before calling out.
+
+  - address: 0x080f0fa4
+    ghidra: FUN_080f0fa4
+    name: mul_wide_i64
+    size: 12
+    sig: "i64 mul_wide_i64(i32 a, i32 b)"
+    module: util/fixed
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      Signed widening multiply - the full 64-bit product of two 32-bit
+      operands, returned in r0 (low) : r1 (high) per AAPCS. Body is a bare
+      smull plus the mov that lands the low word in r0. 49 bl call sites,
+      binary-scanned; consumers use it as the multiply of a 64-bit
+      accumulated dot product (e.g. 0x082a01e4 multiplies four field pairs
+      at +0/+4/+8/+0xc and sums with adds/adc, confirming the return is
+      genuinely 64-bit and not a truncated mul).
+
+  - address: 0x08094404
+    ghidra: FUN_08094404
+    name: mutex_lock_counted
+    size: 32
+    sig: "void mutex_lock_counted(CountedMutex *lock)"
+    module: kernel/sync_mutex
+    status: ported
+    vars: {param_1: lock}
+    notes: >-
+      Waits on the mutex, then increments the hold counter at +8. The
+      original open-codes mutex_lock's body (ldr r0,[r0] then the guard
+      thunk 0x08056510 -> ROM sem wait 0x22003fd0) instead of calling
+      0x0807f5c4; the port calls the ported mutex_lock, whose body is
+      exactly that, and LLVM inlines it back. The object is a Mutex with
+      a counter bolted on - word 0 sem cell, word 1 the padding
+      mutex_create zeroes, word 2 the counter. The counter does NOT gate
+      the wait, so the lock is not re-entrant; it reads 1 while held and
+      0 while free, and wraps as a bare 32-bit add. 77 bl + 2 tail b call
+      sites, binary-scanned. Only known instance is the global at
+      0x08a79c68 (users 0x08124cec / 0x08124d68 / 0x08124f7c /
+      0x08124fe8); that global never reaches mutex_create, so its cell is
+      installed elsewhere. Layout modeled as a repr(C) CountedMutex so
+      the fields stay disjoint on a 64-bit test host.
+
+  - address: 0x0809449c
+    ghidra: FUN_0809449c
+    name: mutex_unlock_counted
+    size: 20
+    sig: "void mutex_unlock_counted(CountedMutex *lock)"
+    module: kernel/sync_mutex
+    status: ported
+    vars: {param_1: lock}
+    notes: >-
+      Decrements the hold counter at +8, then signals the mutex by
+      tail-branching into the release guard 0x08056710 (-> ROM sem signal
+      0x220042b4). The store lands before the branch, so the decrement is
+      observably ordered before the release - preserved and tested. 147
+      bl + 16 tail b call sites, binary-scanned; the most-called
+      unclaimed function in 0x08060000..0x08100000. Counter movement is
+      unconditional - a NULL cell or zero handle skips the ROM op but
+      still decrements, and unlocking a free lock wraps to 0xffffffff.
+
+  - address: 0x08076154
+    ghidra: FUN_08076154
+    name: fixed16_rsqrt
+    size: 168
+    sig: "i32 fixed16_rsqrt(i32 x)"
+    module: util/fixed
+    status: identified
+    vars: {param_1: x}
+    notes: >-
+      Q16.16 inverse square root by Newton-Raphson. Fully decoded, NOT
+      ported - blocked only on a seed table whose contents cannot be
+      recovered from osos.dec (see below). Algorithm - x == 0 returns
+      0x7fffffff; x == 0x10000 (1.0) returns 1.0 unchanged; otherwise
+      lz = clz(x) (0x0824980c, a software clz that returns 31 rather than
+      32 for zero), idx = (x >> (28 - lz)) & 7 selects one of 8 u16 seeds
+      which is doubled, e = lz - 16, then y = seed << ceil(e/2) for
+      e > 0 else y = seed >> ((-e) >> 1), and if e is odd y is corrected
+      by fixed16_mul(y, 0xb504) - 0xb504 is 1/sqrt(2) in Q16.16
+      (46340 vs the exact 46340.95). Three iterations of
+      y = (y >> 1) * (3.0 - x*y*y) follow, with 3.0 appearing literally as
+      rsb r1,r1,#0x30000; the two inner multiplies are fixed16_mul
+      (0x080e9878) open-coded inline as smull/lsl/orr, the final one is a
+      real bl to it. All shift amounts are bounded by 8 so no ARM
+      register-shift >= 32 case arises. 7 bl call sites, binary-scanned
+      (0x08079a28, 0x0824c030, 0x0824c1e4, 0x0824c67c, 0x0824f3a0,
+      0x08256eac, 0x082a06d4). Blocker - the seed table pointer literal at
+      0x080761fc is 0x083f18b2, which lies in a 0x442b-byte all-zero run
+      (0x083ee1c1-0x083f25ec) in osos.dec. That run is not bss - 85
+      distinct addresses inside it are referenced as absolute literals
+      from code all over the image (e.g. 0x083f18c2/0x083f18d4 from the
+      literal pool of 0x080e76b8, a strncmp pair), so it is a read-only
+      constant/string pool that our decrypted image does not carry
+      populated (ADS compressed-RO-data image, or a decrypt gap). The
+      table is exactly 8 u16 entries - 0x083f18b2 + 0x10 = 0x083f18c2 is
+      the next referenced object. Port this once the region's contents
+      are recovered; do not guess the seeds.
+
+  - address: 0x080ed928
+    ghidra: FUN_080ed928
+    name: registry_entry_by_index
+    size: 44
+    sig: "void *registry_entry_by_index(i32 index)"
+    module: null
+    status: identified
+    vars: {param_1: index}
+    notes: >-
+      Bounds-checked table lookup off a lazily-created singleton. Calls
+      the singleton getter 0x08105ffc (allocates 0xd8 bytes on first use
+      and caches it in a global), then with ctx = result treats ctx+0x90
+      as the element array base and ctx+0x94 as the element count -
+      returns array[index] when index >= 0 and index < count (signed
+      compares, so a negative index or index == count yields 0). 64 bl
+      call sites, binary-scanned. NOT ported - identical twin at
+      0x080f1038 (see that entry) and the singleton getter 0x08105ffc
+      sits in the 0x08100000-0x081fffff range owned by another agent, so
+      the whole cluster wants doing together with a shared dispatch
+      hook. The element type is unknown without the getter's constructor.
+
+  - address: 0x080f1038
+    ghidra: FUN_080f1038
+    name: registry_entry_by_index_alt
+    size: 40
+    sig: "void *registry_entry_by_index_alt(i32 index)"
+    module: null
+    status: identified
+    vars: {param_1: index}
+    notes: >-
+      Byte-for-byte the same logic as 0x080ed928 minus one redundant
+      instruction - same singleton getter 0x08105ffc, same ctx+0x90 array
+      base / ctx+0x94 count, same signed bounds test. A second copy from
+      a different object. 47 bl call sites, binary-scanned (111 across the
+      pair). NOT ported for the same reason as its twin; note that a
+      single Rust body would be folded onto one address by LLVM, so both
+      symbols should be exported from one implementation when this lands.
+
+  - address: 0x080ed7c0
+    ghidra: FUN_080ed7c0
+    name: is_mpeg4_container_extension
+    size: 180
+    sig: "bool is_mpeg4_container_extension(const char *path)"
+    module: null
+    status: identified
+    vars: {param_1: path}
+    notes: >-
+      File-extension test for the MPEG-4 container family. Takes strlen
+      (0x08392478), copies the last 3 bytes of the string to a stack
+      buffer with strncpy (0x080310d4), ASCII-lowercases them in place
+      (the classic sub #0x41 / cmp #25 / add #32 range test), then
+      strncmp (0x0803105c, n = 3) against four literals stored inline in
+      the function's own constant pool at 0x080ed874 - "m4v", "m4p",
+      "mp4", "mov". Returns 1 on any match, 0 otherwise. NOT ported - only
+      1 bl call site (0x0803bf48), and strlen at 0x08392478 sits in the
+      0x08300000-0x083fffff range owned by another agent. Worth picking up
+      once that strlen lands; strncpy and strncmp are already ported.
+      Note the extension is taken as the last 3 characters unconditionally
+      - there is no '.' check, so a 3-character filename with no extension
+      is tested as if it were one.

@@ -286,6 +286,62 @@ pub unsafe extern "C" fn kernel_running() -> i32 {
     task_id
 }
 
+/// A [`Mutex`] with a hold counter bolted on at +8 — the object the
+/// counted lock pair below operates on.
+///
+/// Word 0 is the semaphore cell (identical to `Mutex`, and reached by the
+/// same `ldr r0, [r0]` + guard chain), word 1 is the padding `mutex_create`
+/// zeroes, and word 2 is the counter `mutex_lock_counted` bumps while the
+/// lock is held. The originals only ever see this object as a global (e.g.
+/// 0x08a79c68, used by `FUN_08124cec` / `FUN_08124d68` / `FUN_08124f7c` /
+/// `FUN_08124fe8` and nothing else), never through `mutex_create` — its
+/// cell is installed elsewhere.
+///
+/// Layout is expressed as a `repr(C)` struct rather than hand-computed byte
+/// offsets so the fields stay disjoint on a 64-bit test host; on the 32-bit
+/// target the offsets are exactly 0x0 / 0x4 / 0x8.
+#[repr(C)]
+pub struct CountedMutex {
+    /// The embedded mutex: `sem_cell` at +0, padding at +4.
+    pub mutex: Mutex,
+    /// Hold counter at +8: incremented after acquiring, decremented
+    /// before releasing.
+    pub hold_count: u32,
+}
+
+/// mutex_lock_counted — original: `FUN_08094404` @ 0x08094404 (32 bytes;
+/// 77 `bl` + 2 tail `b` call sites, binary-scanned).
+///
+/// Waits on the mutex, then increments the hold counter at +8. The
+/// original open-codes `mutex_lock`'s two instructions (`ldr r0, [r0]`
+/// then the guard thunk @ 0x8056510) rather than calling it; the port
+/// calls the ported `mutex_lock`, which has exactly that body.
+///
+/// The counter does **not** gate the wait — the lock is not re-entrant,
+/// and a second acquire on the same task blocks as it would without the
+/// counter. It is bookkeeping: 1 while held, 0 while free. It wraps as a
+/// 32-bit value, exactly like the original's `add r0, r0, #1` / `str`.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn mutex_lock_counted(lock: *mut CountedMutex) {
+    mutex_lock(core::ptr::addr_of_mut!((*lock).mutex));
+    let count = core::ptr::addr_of_mut!((*lock).hold_count);
+    count.write(count.read().wrapping_add(1));
+}
+
+/// mutex_unlock_counted — original: `FUN_0809449c` @ 0x0809449c (20 bytes;
+/// 147 `bl` + 16 tail `b` call sites, binary-scanned — the most-called
+/// unclaimed function in 0x08060000..0x08100000).
+///
+/// Decrements the hold counter at +8, then signals the mutex. The original
+/// tail-branches into the guard thunk @ 0x8056710 after the store, so the
+/// decrement is observably ordered *before* the release — preserved here.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn mutex_unlock_counted(lock: *mut CountedMutex) {
+    let count = core::ptr::addr_of_mut!((*lock).hold_count);
+    count.write(count.read().wrapping_sub(1));
+    mutex_unlock(core::ptr::addr_of_mut!((*lock).mutex));
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -631,5 +687,128 @@ mod tests {
                 Call::TaskId,
             ]
         );
+    }
+
+    // -- the counted lock pair @ 0x08094404 / 0x0809449c ------------------
+
+    /// A live counted lock: cell holds `MOCK_HANDLE`, so ROM ops fire.
+    fn live_counted_lock(cell: *mut u32, hold_count: u32) -> CountedMutex {
+        CountedMutex {
+            mutex: Mutex { sem_cell: cell, unused: 0 },
+            hold_count,
+        }
+    }
+
+    #[test]
+    fn counted_lock_waits_then_increments() {
+        let _lock = mock_kernel();
+        let mut cell = MOCK_HANDLE;
+        let mut lock = live_counted_lock(&mut cell, 0);
+        unsafe { mutex_lock_counted(&mut lock) };
+        assert_eq!(calls(), vec![Call::Wait(MOCK_HANDLE)]);
+        assert_eq!(lock.hold_count, 1, "held");
+    }
+
+    #[test]
+    fn counted_unlock_decrements_then_signals() {
+        let _lock = mock_kernel();
+        let mut cell = MOCK_HANDLE;
+        let mut lock = live_counted_lock(&mut cell, 1);
+        unsafe { mutex_unlock_counted(&mut lock) };
+        assert_eq!(calls(), vec![Call::Signal(MOCK_HANDLE)]);
+        assert_eq!(lock.hold_count, 0, "released");
+    }
+
+    /// Acquire/release around a critical section leaves the counter where
+    /// it started and issues exactly one wait and one signal.
+    #[test]
+    fn counted_pair_round_trips() {
+        let _lock = mock_kernel();
+        let mut cell = MOCK_HANDLE;
+        let mut lock = live_counted_lock(&mut cell, 0);
+        unsafe {
+            mutex_lock_counted(&mut lock);
+            assert_eq!(lock.hold_count, 1);
+            mutex_unlock_counted(&mut lock);
+        }
+        assert_eq!(lock.hold_count, 0);
+        assert_eq!(calls(), vec![Call::Wait(MOCK_HANDLE), Call::Signal(MOCK_HANDLE)]);
+    }
+
+    /// The counter is bookkeeping, not a gate: nested acquires each take
+    /// the semaphore and each bump the count (the lock is NOT re-entrant).
+    #[test]
+    fn counted_lock_does_not_short_circuit_on_a_held_lock() {
+        let _lock = mock_kernel();
+        let mut cell = MOCK_HANDLE;
+        let mut lock = live_counted_lock(&mut cell, 0);
+        unsafe {
+            mutex_lock_counted(&mut lock);
+            mutex_lock_counted(&mut lock);
+        }
+        assert_eq!(lock.hold_count, 2);
+        assert_eq!(
+            calls(),
+            vec![Call::Wait(MOCK_HANDLE), Call::Wait(MOCK_HANDLE)],
+            "second acquire still waits"
+        );
+    }
+
+    /// The guards are inherited from `mutex_lock`/`mutex_unlock`: a NULL
+    /// cell or a zero handle reaches no ROM op — but the counter still
+    /// moves, exactly as in the original (the add/sub are unconditional).
+    #[test]
+    fn counted_pair_moves_the_counter_even_when_guarded_off() {
+        let _lock = mock_kernel();
+        let mut dead_handle = 0u32;
+        for cell in [core::ptr::null_mut(), &mut dead_handle as *mut u32] {
+            let mut lock = live_counted_lock(cell, 5);
+            unsafe {
+                mutex_lock_counted(&mut lock);
+                assert_eq!(lock.hold_count, 6, "increment is unconditional");
+                mutex_unlock_counted(&mut lock);
+                assert_eq!(lock.hold_count, 5, "decrement is unconditional");
+            }
+        }
+        assert_eq!(calls(), vec![], "no ROM op behind the guards");
+    }
+
+    /// 32-bit wrap, matching the original's bare `add`/`sub` and `str`.
+    #[test]
+    fn counted_pair_wraps_as_32_bit() {
+        let _lock = mock_kernel();
+        let mut cell = MOCK_HANDLE;
+        let mut underflow = live_counted_lock(&mut cell, 0);
+        unsafe { mutex_unlock_counted(&mut underflow) };
+        assert_eq!(underflow.hold_count, u32::MAX, "unlock of a free lock wraps");
+        let mut overflow = live_counted_lock(&mut cell, u32::MAX);
+        unsafe { mutex_lock_counted(&mut overflow) };
+        assert_eq!(overflow.hold_count, 0);
+    }
+
+    /// Ordering: the original stores the decremented counter *before*
+    /// tail-branching into the release guard, so a signal handler that
+    /// inspects the lock must already see the new value.
+    #[test]
+    fn counted_unlock_decrements_before_signalling() {
+        let _lock = mock_kernel();
+        static mut PROBED_LOCK: *const CountedMutex = core::ptr::null();
+        static mut COUNT_SEEN_AT_SIGNAL: u32 = 0xffff_ffff;
+        unsafe extern "C" fn probing_signal(handle: u32) {
+            record(Call::Signal(handle));
+            unsafe { COUNT_SEEN_AT_SIGNAL = (*PROBED_LOCK).hold_count };
+        }
+        let mut cell = MOCK_HANDLE;
+        let mut lock = live_counted_lock(&mut cell, 3);
+        unsafe {
+            PROBED_LOCK = &lock;
+            let mut ops = MOCK_KERNEL;
+            ops.sema_signal = probing_signal;
+            *core::ptr::addr_of_mut!(ROM_KERNEL) = ops;
+            mutex_unlock_counted(&mut lock);
+            assert_eq!(COUNT_SEEN_AT_SIGNAL, 2, "counter already decremented");
+            assert_eq!(lock.hold_count, 2);
+        }
+        assert_eq!(calls(), vec![Call::Signal(MOCK_HANDLE)]);
     }
 }

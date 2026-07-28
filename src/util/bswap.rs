@@ -72,6 +72,54 @@ pub unsafe extern "C" fn bswap16_inplace(ptr: *mut u8) {
     ptr.add(1).write_volatile(first);
 }
 
+// ---------------------------------------------------------------------------
+// The register-only pair @ 0x08076f48 / 0x08076f58.
+//
+// A second, independent implementation of the same operation, living in the
+// general-utility block around 0x08076xxx (next to `os_malloc` @ 0x080769b8
+// and the 16.16 fixed-point helpers). Where the 0x0805dxxx pair above spills
+// through the stack, these do the swap entirely in registers — different
+// object file, different optimization level, same job.
+//
+// They are kept as distinct ports because their *contracts* differ at the
+// edges: `bswap16` above reloads through `ldrh` and so zero-extends, while
+// `byteswap16` masks with `bic #0x00ff0000` and so passes the argument's
+// top byte through. See `byteswap16`'s doc comment.
+// ---------------------------------------------------------------------------
+
+/// byteswap16 — original: `FUN_08076f48` @ 0x08076f48 (16 bytes; 60 call
+/// sites, binary-scanned).
+///
+/// Byte-swaps a 16-bit value: `((v << 8) | (v >> 8)) & 0xff00ffff`.
+///
+/// The odd mask is the ADS narrowing of an `unsigned short` result. For a
+/// genuine `u16` argument the shifted-left copy cannot reach bit 24, so the
+/// only stray term is `(v & 0xff00) << 8` in byte 2 — one `bic` clears it,
+/// which is cheaper than the `and #0xffff` a general narrowing would need.
+/// The port reproduces the mask bit-for-bit rather than the intent, so a
+/// caller that passes a full 32-bit word gets the original's exact answer;
+/// for every `v <= 0xffff` it equals `(v as u16).swap_bytes() as u32`.
+/// Every observed call site feeds it a zero-extended `ldrh` and stores the
+/// result with `strh` (e.g. `FUN_080b16f0`, `FUN_080c0468`), so the
+/// distinction never becomes visible in stock firmware.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn byteswap16(value: u32) -> u32 {
+    ((value << 8) | (value >> 8)) & 0xff00_ffff
+}
+
+/// byteswap32 — original: `FUN_08076f58` @ 0x08076f58 (28 bytes; 23 call
+/// sites, binary-scanned).
+///
+/// Full 32-bit byte reverse, assembled in registers:
+/// `v << 24 | (v & 0xff00) << 8 | (v & 0xff0000) >> 8 | v >> 24`.
+/// Semantically identical to `bswap32` above, so LLVM folds the two bodies
+/// onto one address in the archive; review its codegen through either
+/// symbol.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn byteswap32(value: u32) -> u32 {
+    value.swap_bytes()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,5 +172,51 @@ mod tests {
         let mut buf = [0x12u8, 0x34, 0x99];
         unsafe { bswap16_inplace(buf.as_mut_ptr()) };
         assert_eq!(buf, [0x34, 0x12, 0x99], "third byte untouched");
+    }
+
+    /// Over the whole 16-bit domain the 0x08076f48 form is exactly a u16
+    /// byte swap — the property its callers rely on.
+    #[test]
+    fn byteswap16_is_a_u16_swap_over_the_whole_domain() {
+        for v in 0u32..=0xffff {
+            assert_eq!(byteswap16(v), (v as u16).swap_bytes() as u32, "v={v:#06x}");
+        }
+    }
+
+    /// Above 0xffff the mask leaks the argument's top byte into the result
+    /// — the documented deviation from `bswap16`'s `ldrh` zero-extension.
+    /// Values are the exact `((v << 8) | (v >> 8)) & 0xff00ffff` reference.
+    #[test]
+    fn byteswap16_passes_the_top_byte_through() {
+        for v in [0xabcd_1234u32, 0xffff_ffff, 0x8000_0000, 0x00ff_0000, 0x1234_5678] {
+            let want = ((v << 8) | (v >> 8)) & 0xff00_ffff;
+            assert_eq!(byteswap16(v), want, "v={v:#010x}");
+        }
+        // Concretely: 0xffffffff -> 0xff00ffff, not bswap16's 0xffff.
+        assert_eq!(byteswap16(0xffff_ffff), 0xff00_ffff);
+        assert_eq!(bswap16(0xffff_ffff), 0x0000_ffff);
+    }
+
+    /// The register-only 32-bit form agrees with the stack-based one
+    /// everywhere, including the four single-byte lanes and the extremes.
+    #[test]
+    fn byteswap32_agrees_with_bswap32() {
+        for v in [
+            0u32,
+            1,
+            0xffff_ffff,
+            0x0000_00ff,
+            0x0000_ff00,
+            0x00ff_0000,
+            0xff00_0000,
+            0x1234_5678,
+            0xdead_beef,
+            0x8000_0001,
+        ] {
+            let want = v << 24 | (v & 0xff00) << 8 | (v & 0xff_0000) >> 8 | v >> 24;
+            assert_eq!(byteswap32(v), want, "v={v:#010x}");
+            assert_eq!(byteswap32(v), bswap32(v), "v={v:#010x}");
+            assert_eq!(byteswap32(byteswap32(v)), v, "involution v={v:#010x}");
+        }
     }
 }
