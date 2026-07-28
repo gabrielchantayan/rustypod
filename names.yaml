@@ -1061,7 +1061,7 @@ functions:
     ghidra: FUN_0803677c
     name: fread
     size: 656
-    module: scanf_str
+    module: stdio/fread
     status: ported
     notes: ADS stdio buffered read (48-byte stream struct; semihost SYS_READ
       backed — dead on device). NOT a scanf converter as first assumed.
@@ -1070,7 +1070,7 @@ functions:
     ghidra: FUN_08036a10
     name: stream_read_chars
     size: 360
-    module: scanf_str
+    module: stdio/fread
     status: ported
     notes: fread helper; zero callers in image (dead-linked).
 
