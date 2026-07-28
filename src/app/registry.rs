@@ -755,8 +755,8 @@ mod tests {
                 ],
                 "notifications are off across the write and fire once at the end"
             );
-            assert_eq!(CLASS_REGISTRY.changed, 1, "the changed byte is left raised");
-            assert_eq!(CLASS_REGISTRY.notify_enabled, 1);
+            assert_eq!(ptr::read_volatile(ptr::addr_of!(CLASS_REGISTRY.changed)), 1, "the changed byte is left raised");
+            assert_eq!(ptr::read_volatile(ptr::addr_of!(CLASS_REGISTRY.notify_enabled)), 1);
         }
         restore(guard);
     }
@@ -770,7 +770,7 @@ mod tests {
             CLASS_REGISTRY.notify_enabled = 1;
             let result = observable_set_notify_enabled(registry(), 0);
             assert_eq!(result, registry() as *mut u8);
-            assert_eq!(CLASS_REGISTRY.notify_enabled, 0);
+            assert_eq!(ptr::read_volatile(ptr::addr_of!(CLASS_REGISTRY.notify_enabled)), 0);
             assert!(trace().is_empty());
         }
         restore(guard);
@@ -794,7 +794,7 @@ mod tests {
             // 0x100 has a zero low byte, so the flag lands 0 — yet the
             // word is nonzero, so the notify path still runs.
             assert!(observable_set_notify_enabled(registry(), 0x100).is_null());
-            assert_eq!(CLASS_REGISTRY.notify_enabled, 0, "only the low byte is stored");
+            assert_eq!(ptr::read_volatile(ptr::addr_of!(CLASS_REGISTRY.notify_enabled)), 0, "only the low byte is stored");
             assert_eq!(*trace(), std::vec!["notify_deferred", "notify_changed"]);
         }
         restore(guard);
@@ -805,11 +805,11 @@ mod tests {
         let guard = mock();
         unsafe {
             observable_set_changed(registry(), 1);
-            assert_eq!(CLASS_REGISTRY.changed, 1);
+            assert_eq!(ptr::read_volatile(ptr::addr_of!(CLASS_REGISTRY.changed)), 1);
             observable_set_changed(registry(), 0x1ff);
-            assert_eq!(CLASS_REGISTRY.changed, 0xff);
+            assert_eq!(ptr::read_volatile(ptr::addr_of!(CLASS_REGISTRY.changed)), 0xff);
             observable_set_changed(registry(), 0x100);
-            assert_eq!(CLASS_REGISTRY.changed, 0);
+            assert_eq!(ptr::read_volatile(ptr::addr_of!(CLASS_REGISTRY.changed)), 0);
         }
         restore(guard);
     }
