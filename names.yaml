@@ -4598,14 +4598,30 @@ functions:
 
   - address: 0x081fea54
     ghidra: FUN_081fea54
-    name: watermark_slot_reset
+    name: slot_table_clear
     size: 52
-    status: identified
+    sig: "u32 slot_table_clear(void *this, i32 index)"
+    module: app/slot_table
+    status: ported
+    vars: {param_1: this, param_2: index, DAT_081fea88: SLOTS}
     notes: >-
-      Bounds-checked (index <= 0x10, else returns 9) reset of a
-      16-byte slot in a global table @ DAT_081fea88 - sets +4 =
-      0x7fffffff (a min-tracker seed), +8/+0xc/+0 = 0, returns 0.
-      10 call sites, binary-scanned. Needs the global table identity.
+      Releases one entry of the 17-slot registration table @ 0x08ac8b94
+      (17 * 16 = 0x110 bytes, confirmed by the builder 0x081ff758 which
+      memsets 0x110 then seeds every +4 with 0x7fffffff). Restores +4 =
+      0x7fffffff, zeroes +8/+0xc and drops the occupied byte at +0;
+      returns 0, or 9 when index >= 17. 10 bl call sites. Slot layout -
+      +0 occupied flag, +4 kind (0..2 when registered, 0x7fffffff =
+      free), +8/+0xc payload words. The registrar 0x081fe954 is the
+      twin - it refuses index >= 17 OR kind >= 3 with the same error 9
+      and stores kind/value_a/value_b with one stmib only if the slot is
+      free. Every call site pairs them (`if (enabled) register(this,
+      SLOT, ...) else clear(this, SLOT)`) with SLOT a constant (10 and
+      16 seen), so index is a slot id. param_1 is an unread `this`. The
+      bounds test is SIGNED (cmp #17 / bxge), so a negative index would
+      write before the table - reproduced, not hardened. Deviation - the
+      table is the crate static SLOTS (0x08ac8b94 is past the end of the
+      image, pure runtime RAM); stores are write_volatile since no
+      ported code reads the table and plain stores get dropped as dead.
 
   - address: 0x0810fa90
     ghidra: FUN_0810fa90

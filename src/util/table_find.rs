@@ -182,9 +182,15 @@ pub unsafe extern "C" fn registry_find_for_slot(
 
     let mut index = 0usize;
     loop {
+        // Volatile: the table is filled in by unported runtime
+        // initializers, so an all-zero static must not be folded in.
         let record = base.add(index);
-        if (*record).id as u32 == id && (*record).slot_mask as u32 & wanted_bit != 0 {
-            return record;
+        let record_id = core::ptr::read_volatile(core::ptr::addr_of!((*record).id));
+        if record_id as u32 == id {
+            let mask = core::ptr::read_volatile(core::ptr::addr_of!((*record).slot_mask));
+            if mask as u32 & wanted_bit != 0 {
+                return record;
+            }
         }
         index += 1;
         if index >= SLOT_RECORD_COUNT {
