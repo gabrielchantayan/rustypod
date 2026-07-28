@@ -4963,6 +4963,209 @@ functions:
       @ 0x081bc9f8..0x081bded8 (owns the literal
       "iPod_Control/Device/PlayCounts" @ 0x081bc840).
 
+  - address: 0x0812120c
+    ghidra: (absent from functions.csv)
+    name: ata_cmd_reset
+    size: 136
+    sig: "void ata_cmd_reset(u8 *cmd)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd}
+    notes: >-
+      Default constructor of the 0x58-byte ATA command block - the
+      function that pins the whole layout. MISSING from
+      decomp/functions.csv (Ghidra never made a function here); found by
+      decoding its one reference, a tail `b` @ 0x08166078. Zeroes every
+      field it owns and installs two nonzero defaults - device index
+      +0x20 = 0xff (read back with ldrsb by the consumers, so -1 = no
+      device) and block size +0x34 = 0x200 = one ATA sector. Deliberate
+      gaps - +0x00..+0x0b, +0x0d..+0x0f, +0x1b, +0x1f..+0x23 and +0x4b
+      are never written. The port stores volatile - plain stores let LLVM
+      collapse the six trailing `strh #0` into __aeabi_memclr, which does
+      not exist in osos (confirmed by reading the ARM disassembly of the
+      first attempt).
+
+  - address: 0x08121488
+    ghidra: FUN_08121488
+    name: ata_cmd_set_protocol
+    size: 8
+    sig: "void ata_cmd_set_protocol(u8 *cmd, u8 protocol)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd, param_2: protocol}
+    notes: >-
+      `strb r1, [r0, #0x0c]`. 24 bl call sites, binary-scanned - the
+      busiest member of the accessor family. Every one of the 22
+      data-transfer command builders @ 0x082794xx..0x0827b1xx passes 1;
+      the two non-data builders (0x0827b158, 0x08283490) pass 5, and
+      those two also skip the buffer/offset/length/count setters and ask
+      for a 30-second rather than a 10-second timeout. #[inline(never)] -
+      a real bl target LLVM would otherwise inline away.
+
+  - address: 0x081213ec
+    ghidra: FUN_081213ec
+    name: ata_cmd_set_device
+    size: 8
+    sig: "void ata_cmd_set_device(u8 *cmd, u8 device)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd, param_2: device}
+    notes: >-
+      `strb r1, [r0, #0x20]`. 23 bl call sites, binary-scanned. Every
+      builder feeds it the result of 0x08105a2c, which is a single
+      `ldrsb r0, [r0, #8]` - a SIGNED byte - so the field is a device
+      index whose "none" is -1, matching the 0xff ata_cmd_reset leaves.
+      The store itself is a plain strb, so the port's parameter is u8.
+      #[inline(never)].
+
+  - address: 0x081212c0
+    ghidra: FUN_081212c0
+    name: ata_cmd_set_timeout_ms
+    size: 8
+    sig: "void ata_cmd_set_timeout_ms(u8 *cmd, u32 timeout_ms)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd, param_2: timeout_ms}
+    notes: >-
+      `str r1, [r0, #0x24]`. 23 bl call sites, binary-scanned. Observed
+      arguments - 0x2710 = 10000 in every data-transfer builder, 0x7530
+      = 30000 in the non-data ones, which is what identifies the field as
+      a millisecond timeout. #[inline(never)].
+
+  - address: 0x08121414
+    ghidra: FUN_08121414
+    name: ata_cmd_set_flags
+    size: 8
+    sig: "void ata_cmd_set_flags(u8 *cmd, u32 flags)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd, param_2: flags}
+    notes: >-
+      `str r1, [r0, #0x10]`. 19 bl call sites, binary-scanned. A bit set,
+      not an enum - the builders load 0x1000, 0x1080, 0x2000, 0x2080,
+      0x40000, 0x41000 and 0x42000 as rotated immediates, and 0x08283474
+      ORs 0x80000 into a value it already holds. #[inline(never)].
+
+  - address: 0x081212e8
+    ghidra: FUN_081212e8
+    name: ata_cmd_get_lba48
+    size: 76
+    sig: "void ata_cmd_get_lba48(const u8 *cmd, u32 *lba_hi, u32 *lba_lo)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd, param_2: lba_hi, param_3: lba_lo}
+    notes: >-
+      1 bl call site. Exact inverse of ata_cmd_set_lba48 - undoes the
+      (current | previous << 8) interleave of the three extended
+      taskfile pairs +0x4c/+0x4e/+0x50 into the same (hi = bits 32..47,
+      lo = bits 0..31) split the packer takes, with the out-pointers in
+      the original's register order (r1 = hi, r2 = lo). The port reads
+      the halfwords aligned-volatile - read_unaligned lowers to pairs of
+      ldrb on ARMv5, while the original uses ldrh, and the alignment is
+      free because the same blocks receive word `str`s. LLVM finds a
+      different mask/shift sequence for the same result; proven by a
+      packer/unpacker round trip over six LBAs plus a hand-built
+      taskfile.
+
+  - address: 0x08121480
+    ghidra: FUN_08121480
+    name: ata_cmd_set_buffer
+    size: 8
+    sig: "void ata_cmd_set_buffer(u8 *cmd, void *buffer)"
+    module: drivers/ata_cmd
+    status: identified
+    vars: {param_1: cmd, param_2: buffer}
+    notes: >-
+      `str r1, [r0, #0x28]`. 16 bl call sites. Deliberately NOT ported -
+      +0x28 is the only pointer field in the block, and drivers/ata_cmd
+      addresses the block by literal byte offset, which cannot hold a
+      pointer on a 64-bit test host (it would overlap +0x2c, the buffer
+      offset, whose setter is 0x08121204). Every builder sets the three
+      as a run - buffer +0x28, offset +0x2c (usually 0), length +0x30 -
+      via `ldmib r4, {r0, r1}`.
+
+  - address: 0x081212a4
+    ghidra: FUN_081212a4
+    name: ata_cmd_set_transfer_len
+    size: 8
+    sig: "void ata_cmd_set_transfer_len(u8 *cmd, u32 length)"
+    module: drivers/ata_cmd
+    status: identified
+    vars: {param_1: cmd, param_2: length}
+    notes: >-
+      `str r1, [r0, #0x30]`. 16 bl call sites. Transfer length in bytes -
+      the builders pass `sectors * bytes-per-sector`, the product of the
+      caller's count argument and the device object's vtable slot +0x20.
+      Not ported only because it is one instruction and its family is
+      already represented; trivial to add.
+
+  - address: 0x08121204
+    ghidra: FUN_08121204
+    name: ata_cmd_set_buffer_offset
+    size: 8
+    sig: "void ata_cmd_set_buffer_offset(u8 *cmd, u32 offset)"
+    module: drivers/ata_cmd
+    status: identified
+    vars: {param_1: cmd, param_2: offset}
+    notes: >-
+      `str r1, [r0, #0x2c]`. 16 bl call sites, always immediately after
+      ata_cmd_set_buffer and immediately before ata_cmd_set_transfer_len,
+      which is what makes the triple read as (buffer, offset, length).
+      Usually 0; 0x0827a2b0 passes a caller argument.
+
+  - address: 0x081213e4
+    ghidra: FUN_081213e4
+    name: ata_cmd_set_block_size
+    size: 8
+    sig: "void ata_cmd_set_block_size(u8 *cmd, u32 block_size)"
+    module: drivers/ata_cmd
+    status: identified
+    vars: {param_1: cmd, param_2: block_size}
+    notes: >-
+      `str r1, [r0, #0x34]`. 12 bl call sites, each passing the device
+      object's bytes-per-sector (vtable slot +0x20) - the same value the
+      transfer-length computation multiplies by. ata_cmd_reset defaults
+      the field to 512.
+
+  - address: 0x081213ac
+    ghidra: FUN_081213ac
+    name: ata_cmd_set_sector_count
+    size: 8
+    sig: "void ata_cmd_set_sector_count(u8 *cmd, u8 count)"
+    module: drivers/ata_cmd
+    status: identified
+    vars: {param_1: cmd, param_2: count}
+    notes: >-
+      `strb r1, [r0, #0x15]`. 10 bl call sites, each passing the caller's
+      sector count masked to a byte (`and r1, r5, #0xff`), which is why
+      the LBA28 flows also cap the count at 0x100 (0x082798e4).
+
+  - address: 0x081211bc
+    ghidra: FUN_081211bc
+    name: ata_cmd_set_command
+    size: 8
+    sig: "void ata_cmd_set_command(u8 *cmd, u8 command)"
+    module: drivers/ata_cmd
+    status: identified
+    vars: {param_1: cmd, param_2: command}
+    notes: >-
+      `strb r1, [r0, #0x1a]`. 16 bl call sites. The ATA command register;
+      the read-DMA flow @ 0x082798bc passes 0xC8. ata_cmd_set_lba48
+      writes the same byte itself, which is why only the LBA28 flows need
+      this setter.
+
+  - address: 0x081211ec
+    ghidra: FUN_081211ec
+    name: ata_cmd_set_feature
+    size: 8
+    sig: "void ata_cmd_set_feature(u8 *cmd, u8 feature)"
+    module: drivers/ata_cmd
+    status: identified
+    vars: {param_1: cmd, param_2: feature}
+    notes: >-
+      `strb r1, [r0, #0x14]`. 4 bl call sites; 0x08279bec passes 0xD5.
+      The ATA feature register.
+
   - address: 0x0812141c
     ghidra: FUN_0812141c
     name: ata_cmd_set_lba28
