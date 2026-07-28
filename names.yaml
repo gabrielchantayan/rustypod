@@ -1987,21 +1987,31 @@ functions:
   - address: 0x08266f2c
     ghidra: FUN_08266f2c
     name: cxx_array_dealloc
-    size: 220
+    size: 4
     sig: "void cxx_array_dealloc(u8 *ptr, usize count, usize elem)"
-    module: heap/block_deque
-    status: identified
+    module: heap/veneers
+    status: ported
+    vars: {param_1: ptr, param_2: count, param_3: elem}
     notes: >-
-      The C++ array deallocator: NULL-guarded; lazy default-heap init
-      (bl 0x08077250); panics via 0x08030f44 on a zero/already-free
-      header; then re-implements heap_free's accounting (class/tag
-      shorts at ptr-4/ptr-2, bin histogram via 0x080e837c, allocated
-      bytes) inline and inserts via 0x0819d314 under the heap mutex.
-      count/elem args are ignored. 276 bl/b call sites, binary-verified
-      — the deque machinery frees segments and maps through it. Not
-      ported: behaviorally equal to a NULL-guarded free_wrapper(ptr) to
-      the default heap (heap_free ignores its tag), which is exactly the
-      POOL_BASE_OPS.seg_dealloc default shim.
+      The ADS C++ array deallocation entry (operator delete[] for
+      elements without destructors) — a SINGLE instruction, `b
+      0x082aad24`, i.e. a pure tail branch into the tag-2 operator
+      delete. The previous scouting note here (220 bytes, lazy init,
+      inline heap_free accounting, heap_panic) was wrong on every
+      count: it described a different function. functions.csv agrees
+      the extent is 4 bytes; 0x08266f30 is an unrelated `bx lr` and
+      0x08266f34 starts FUN_08266f34 (344 bytes). count/elem are dead
+      — operator delete overwrites r1 with the tag on its first
+      instruction and never reads r2 — but the call sites do pass
+      them (deque_pop_front @ 0x083ddc40/0x083ddc84 pass
+      (seg, 0x20, 0) and (map, map_cap, 0)), so the export keeps the
+      3-argument ABI. 274 bl + 2 b = 276 call sites, binary-verified.
+      Wired as the real POOL_BASE_OPS.seg_dealloc default (its slot
+      signature grew the third argument to match the original call
+      sites). match.py: `b operator_delete` behind the crate's
+      frame-pointer prologue — structurally the original's tail
+      branch. operator_delete gained #[inline(never)] so the branch
+      survives codegen (same rationale as operator_new).
 
   - address: 0x081f0050
     ghidra: FUN_081f0050

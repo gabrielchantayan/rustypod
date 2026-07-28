@@ -40,6 +40,10 @@
 //! - `cxx_vec_delete` — original: `FUN_0803170c` @ 0x0803170c (16 bytes).
 //!   C++ `delete[]` with destructors: cookie-driven `__cpp_finalise` walk
 //!   via the null-guard veneer @ 0x082ab254, then the tag-3 delete.
+//! - `cxx_array_dealloc` — original: `FUN_08266f2c` @ 0x08266f2c
+//!   (4 bytes; 276 call sites). C++ array deallocation for elements
+//!   without destructors: a bare `b 0x082aad24` into the tag-2
+//!   `operator delete`, so its `count`/`elem` arguments are dead.
 //! - `cpp_finalise_null_guard` — original @ 0x082ab254 (16 bytes:
 //!   `cmp r0, #0; ldmdbne r0, {r2, r3}; bne __cpp_finalise; mov pc, lr`).
 //!   NULL-guarded cookie-loading front-end of `__cpp_finalise`
@@ -353,6 +357,13 @@ pub unsafe extern "C" fn operator_new(size: usize) -> *mut u8 {
 
 /// operator delete (tag 2) — original @ 0x082aad24 (16 bytes, 665 call
 /// sites): NULL-guarded `free_wrapper` with tag 2.
+///
+/// `inline(never)` for the same reason as `operator_new`: on device
+/// this is a real function every caller reaches with `bl`/`b`, and
+/// letting LLVM inline the lazy-init + free path into a caller destroys
+/// that caller's match (notably `cxx_array_dealloc`, whose whole body
+/// is one tail branch here).
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn operator_delete(ptr: *mut u8) {
     if !ptr.is_null() {
@@ -414,6 +425,23 @@ pub unsafe extern "C" fn cpp_finalise_null_guard(
 pub unsafe extern "C" fn cxx_vec_delete(ptr: *mut u8, dtor: extern "C" fn(*mut u8)) {
     let block = cpp_finalise_null_guard(ptr, dtor);
     operator_delete_tag3(block);
+}
+
+/// cxx_array_dealloc — original: `FUN_08266f2c` @ 0x08266f2c (4 bytes:
+/// a single `b 0x082aad24`; 274 `bl` + 2 `b` = 276 call sites,
+/// binary-verified — the busiest deallocation entry after `operator
+/// delete` itself).
+///
+/// The ADS C++ array deallocation entry (`operator delete[]`'s
+/// cookie-free form, emitted for arrays of trivially destructible
+/// elements): a pure tail branch to the tag-2 `operator_delete`. The
+/// `count`/`elem` arguments never survive the branch — the callee's
+/// first instructions overwrite r1 with the tag and never read r2 — so
+/// they are inert here too. Every ported call site passes 0 for `elem`,
+/// like the original deque machinery does.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn cxx_array_dealloc(ptr: *mut u8, _count: usize, _elem: usize) {
+    operator_delete(ptr);
 }
 
 /// operator_new_checked — original: `FUN_08266c70` @ 0x08266c70
@@ -753,6 +781,27 @@ pub(crate) mod tests {
             assert_eq!(LAST_REALLOC_SIZE, 0x200);
             assert_eq!(LAST_REALLOC_A3, 1);
             assert_eq!(LAST_REALLOC_A4, 1);
+        }
+    }
+
+    #[test]
+    fn cxx_array_dealloc_is_the_tag_2_delete_with_dead_arguments() {
+        let _lock = mock_heap();
+        unsafe {
+            // NULL flows into the guarded delete: nothing reaches the heap.
+            cxx_array_dealloc(core::ptr::null_mut(), 0x20, 0);
+            assert_eq!(FREE_CALLS, 0);
+            // Same block freed with wildly different count/elem values must
+            // produce identical heap traffic — both arguments die at the
+            // original's tail branch.
+            cxx_array_dealloc(BLOCK_A as *mut u8, 0x20, 0);
+            assert_eq!(FREE_CALLS, 1);
+            assert_eq!(LAST_FREE_PTR, BLOCK_A as *mut u8);
+            assert_eq!(LAST_FREE_TAG, 2, "the tag-2 delete, not tag 3");
+            cxx_array_dealloc(BLOCK_A as *mut u8, 0, usize::MAX);
+            assert_eq!(FREE_CALLS, 2);
+            assert_eq!(LAST_FREE_PTR, BLOCK_A as *mut u8);
+            assert_eq!(LAST_FREE_TAG, 2);
         }
     }
 

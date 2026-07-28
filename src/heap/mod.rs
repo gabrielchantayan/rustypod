@@ -278,7 +278,7 @@ mod pool_integration_tests {
     /// dispatch shape).
     static ELEM_VTABLE: [unsafe extern "C" fn(*mut u8); 1] = [elem_dtor];
 
-    unsafe extern "C" fn seg_free_recorder(ptr: *mut u8, _count: usize) {
+    unsafe extern "C" fn seg_free_recorder(ptr: *mut u8, _count: usize, _elem: usize) {
         (*core::ptr::addr_of_mut!(SEG_FREES)).push(ptr as usize);
     }
 

@@ -120,13 +120,9 @@
 //!   0x081fbe4c, 0x081fc3f4, 0x081fc298, 0x081fc080, 0x081fc884)
 //!   default to failure/no-op stubs matching the no-manager state;
 //!   `queue_wait` @ 0x080b4adc defaults to a no-op (its result is
-//!   discarded by the only ported caller); `seg_dealloc` @ 0x08266f2c
-//!   (the C++ array deallocator: NULL-guarded lazy-init free to the
-//!   default heap with stats, 276 call sites — identified, not ported)
-//!   defaults to a behaviorally equivalent shim over the real
-//!   `free_wrapper` (heap_free ignores the tag, and the original
-//!   ignores its count argument). The mailbox slot pair defaults to the
-//!   real kernel/kobj.rs ports.
+//!   discarded by the only ported caller). `seg_dealloc` @ 0x08266f2c
+//!   and the mailbox slot pair default to the real ports
+//!   (`veneers::cxx_array_dealloc`, kernel/kobj.rs).
 //! - **Mutex**: the base mutex at +0x8 is locked/unlocked through the
 //!   same unported C++ recursive-mutex pair @ 0x082e8390 / 0x082e83d8
 //!   as the region mutexes, so this module dispatches through
@@ -295,9 +291,10 @@ pub struct PoolBaseOps {
     /// Mailbox queue-get wait @ 0x080b4adc `(slot, timeout)`; result
     /// discarded by the fill loop.
     pub queue_wait: unsafe extern "C" fn(slot: *mut *mut Mailbox, timeout: u32) -> u32,
-    /// Segment/map deallocator @ 0x08266f2c `(ptr, count)` — the count
-    /// is ignored by the original too.
-    pub seg_dealloc: unsafe extern "C" fn(ptr: *mut u8, count: usize),
+    /// Segment/map deallocator @ 0x08266f2c `(ptr, count, 0)` — the
+    /// count and the trailing zero are dead in the original too (it is
+    /// a bare tail branch into `operator delete`).
+    pub seg_dealloc: unsafe extern "C" fn(ptr: *mut u8, count: usize, elem: usize),
 }
 
 /// Default parent ctor stub: faithful subset — zeroes `client_ref` (the
@@ -350,14 +347,6 @@ unsafe extern "C" fn stub_queue_wait(_slot: *mut *mut Mailbox, _timeout: u32) ->
     0
 }
 
-/// Default `seg_dealloc`: behaviorally equivalent shim over the real
-/// default-heap free path (see the module-header ops deviation).
-unsafe extern "C" fn seg_dealloc_shim(ptr: *mut u8, _count: usize) {
-    if !ptr.is_null() {
-        crate::heap::veneers::free_wrapper(ptr, 0);
-    }
-}
-
 /// Wired defaults (real ports where they exist, documented stubs for
 /// the unported block-manager client and parent class).
 pub(crate) const DEFAULT_POOL_BASE_OPS: PoolBaseOps = PoolBaseOps {
@@ -372,7 +361,7 @@ pub(crate) const DEFAULT_POOL_BASE_OPS: PoolBaseOps = PoolBaseOps {
     client_erase: stub_client_erase,
     client_erase_commit: stub_client_erase_commit,
     queue_wait: stub_queue_wait,
-    seg_dealloc: seg_dealloc_shim,
+    seg_dealloc: crate::heap::veneers::cxx_array_dealloc,
 };
 
 /// The active implementation table. Written once at init on target;
@@ -491,7 +480,7 @@ pub unsafe extern "C" fn deque_pop_front(dq: *mut BlockDeque) {
     let slot = d.begin.seg_slot;
     d.begin.seg_slot = slot.add(1);
     let old_seg = slot.read();
-    (op!(seg_dealloc))(old_seg, deque_seg_capacity());
+    (op!(seg_dealloc))(old_seg, deque_seg_capacity(), 0);
     if d.count != 0 {
         let next_slot = d.begin.seg_slot;
         let mut it = DequeIter::NULL;
@@ -502,7 +491,7 @@ pub unsafe extern "C" fn deque_pop_front(dq: *mut BlockDeque) {
         deque_iter_init(&mut it, core::ptr::null_mut(), core::ptr::null_mut());
         d.end = it;
         d.begin = d.end;
-        (op!(seg_dealloc))(d.map as *mut u8, d.map_cap as usize);
+        (op!(seg_dealloc))(d.map as *mut u8, d.map_cap as usize, 0);
     }
 }
 
@@ -784,7 +773,7 @@ mod tests {
         0
     }
 
-    unsafe extern "C" fn mock_seg_free(ptr: *mut u8, count: usize) {
+    unsafe extern "C" fn mock_seg_free(ptr: *mut u8, count: usize, _elem: usize) {
         push(Ev::SegFree {
             ptr: ptr as usize,
             count,
