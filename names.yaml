@@ -4962,3 +4962,43 @@ functions:
       enable-state-changed byte (+0x43) is raised only on an actual
       transition; and there is no alternate-commit notify on this side.
       Runs under the layer mutex, released with a tail branch.
+
+  - address: 0x081fc3f4
+    ghidra: FUN_081fc3f4
+    name: state_flags_contain
+    size: 20
+    sig: "u32 state_flags_contain(u8 *object, u32 mask)"
+    module: util/state_flags
+    status: ported
+    vars: {param_1: object, param_2: mask}
+    notes: >-
+      Tests the state-flag word at +0x44 of the 0x081fbxxx state-machine
+      class - `bics r0, mask, flags`, so it answers "does the word hold
+      ALL bits of mask", returning 1 or 0. 34 bl call sites from 20
+      distinct callers, always with a single bit; the masks scanned out
+      of the binary are 0x40000 (20x), 0x10000 (4x), 0x1 (3x), 0x20000
+      (2x), 0x80000 (1x), 0x100000 (1x) plus 3 sites whose mask comes
+      from a register. An empty mask returns 1 (vacuous containment).
+      The owning class is not otherwise identified - it is a progress
+      state machine with a parent at +0x04 it notifies by code
+      (0x0818a41c(parent, code, self); codes 5, 7, 10) and counters at
+      +0x18 vs +0x1c / +0x50 compared as produced <= expected. Codegen
+      deviation - LLVM normalizes the 0/1 with `clz`/`lsr #5` instead of
+      the original's `movne`/`moveq`.
+
+  - address: 0x081fc524
+    ghidra: FUN_081fc524
+    name: state_flags_set
+    size: 24
+    sig: "u32 state_flags_set(u8 *object, u32 mask)"
+    module: util/state_flags
+    status: ported
+    vars: {param_1: object, param_2: mask}
+    notes: >-
+      Companion of state_flags_contain - ORs mask into the +0x44 state
+      word and returns the subset of mask that was ALREADY set, i.e. a
+      non-atomic fetch_or. 3 bl call sites; callers use a zero result as
+      "this call is the one that set the bit" (0x081fc230) or compare it
+      against the mask (0x081fc408 tests `!= 0x10000`). Plain
+      load/modify/store - no lock, no LDREX, no interrupt guard, exactly
+      as in the original.
