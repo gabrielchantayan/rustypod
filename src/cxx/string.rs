@@ -48,6 +48,21 @@
 //!   (20 bytes, 5 call sites). `~basic_string()`.
 //! - `cxx_string_rep_add_ref` — original: `FUN_083b54f8` @ 0x083b54f8
 //!   (24 bytes, 2 call sites). `_Rep::_M_add_ref`.
+//! - `cxx_string_replace_core` — original: `FUN_083d865c` @ 0x083d865c
+//!   (552 bytes, 3 call sites). The class's only splice primitive;
+//!   everything below funnels through it.
+//! - `cxx_string_replace_cstr` — original: `FUN_083d8624` @ 0x083d8624
+//!   (56 bytes, 3 call sites). `replace(pos, n1, const char*, n2)`.
+//! - `cxx_string_append_substr` — original: `FUN_083d8564` @ 0x083d8564
+//!   (188 bytes, 3 call sites). `append(const basic_string&, pos, n)`.
+//! - `cxx_string_assign_cstr` — original: `FUN_083d8ca0` @ 0x083d8ca0
+//!   (120 bytes, 24 call sites). `operator=(const char*)`.
+//! - `cxx_string_assign` — original: `FUN_083d8d1c` @ 0x083d8d1c
+//!   (104 bytes, 46 call sites). `operator=(const basic_string&)`.
+//! - `cxx_string_append_cstr` — original: `FUN_083d8d84` @ 0x083d8d84
+//!   (56 bytes, 21 call sites). `operator+=(const char*)`.
+//! - `cxx_string_less` — original: `FUN_083d74f4` @ 0x083d74f4
+//!   (116 bytes, 34 call sites). `std::less<basic_string>`.
 //!
 //! `refcount == -1` carries two meanings, and both are the same
 //! `adds r, r, #1; beq` test: to the destructor it means "no owners

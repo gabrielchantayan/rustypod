@@ -6581,9 +6581,16 @@ functions:
   #     (libstdc++-style) basic_string with a 12-byte _Rep header
   #     {refcount, capacity, length} living 12 bytes below the char data,
   #     _S_empty_rep_storage in RAM at 0x08b31804 (data 0x08b31810);
-  #     plus a deque/vector family (the 16-byte deque iterator copy
-  #     @ 0x083dd9e4 already ported) and ~60 byte-identical 16-byte
-  #     handle-deref accessors at 0x083d604c..0x083d62xx.
+  #     plus a deque/vector family and per-instantiation template member
+  #     families. SWEPT (agent cxxlib): the whole string class is ported
+  #     (construction, COW sharing, the mutation core @ 0x083d865c and
+  #     the members on it, and std::less) and six template families are
+  #     ported one canonical symbol each - see the cxx/templates block
+  #     below for the alias maps. Correction to this survey: the
+  #     "~60 byte-identical handle-deref accessors" is wrong; a
+  #     byte-pattern scan of the image finds exactly 22, one of them
+  #     outside this block, and they are all ported as
+  #     handle_deref_or_null.
   #   0x083e0000-0x083edfff  ARM ADS fplib (already largely ported).
   #   0x083f0000-0x083fffff  (~100 fns) plus 256-byte permutation tables
   #     at 0x083ffd5c/0x083ffe5c.
