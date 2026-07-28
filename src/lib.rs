@@ -26,6 +26,7 @@ fn panic(_info: &PanicInfo) -> ! {
 }
 
 pub mod app;
+pub mod cxx;
 pub mod drivers;
 pub mod fp;
 pub mod fs;
@@ -44,6 +45,7 @@ pub mod util;
 
 // Flat re-exports: existing `crate::<module>` paths keep working.
 pub use app::*;
+pub use cxx::*;
 pub use drivers::*;
 pub use fp::*;
 pub use fs::*;

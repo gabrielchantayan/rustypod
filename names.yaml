@@ -4929,3 +4929,92 @@ functions:
       reserved for another agent. Codegen deviation - LLVM packs the port
       field as `(pin_id << 13) & 0xffff0000` instead of
       `(pin_id >> 3) << 16`; same bits.
+
+  # --- C++ COW basic_string<char> core (cluster 0x083d8518..0x083d8bac) ---
+  # String object = one word, the char data pointer. 12-byte _Rep header
+  # sits at data-12: {refcount i32 @0, capacity u32 @4, length u32 @8}
+  # (field order recovered from the header stores, NOT the libstdc++ order).
+  # refcount 0 = sole owner, -1 = destroy. Shared empty rep @ 0x08b31804
+  # (RAM), its data @ 0x08b31810. Allocation is capacity + 14 bytes
+  # (12 header + NUL + 1 spare) via operator_new_checked @ 0x08266c70;
+  # deallocation via the 4-byte veneer 0x08266f2c = `b 0x082aad24`
+  # (plain operator delete - the size and third argument are discarded).
+  - address: 0x083d8b04
+    ghidra: FUN_083d8b04
+    name: cxx_string_release
+    size: 80
+    sig: "void cxx_string_release(char **string)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: string}
+    notes: >-
+      571 bl call sites - the second-most-called function in
+      0x08300000-0x083fffff (the destructor half of every std::string in
+      the OS). Returns immediately when the data pointer is the shared
+      empty rep's. Otherwise: a refcount already at -1 destroys at once,
+      else decrement and destroy when the result is -1. The second
+      singleton test (`rep == 0x08b31804`) is redundant with the first
+      (`data == 0x08b31810`) - kept in the port for fidelity. Destroy
+      tail-branches to 0x08266f2c with (rep, capacity + 14, 0); that
+      veneer is `b operator_delete`, so the port calls the ported
+      heap::veneers::operator_delete directly and LLVM inlines it.
+
+  - address: 0x083d8a64
+    ghidra: FUN_083d8a64
+    name: cxx_string_rep_create
+    size: 152
+    sig: "StringRep *cxx_string_rep_create(void *unused, u32 capacity, u32 length)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: unused, param_2: capacity, param_3: length}
+    notes: >-
+      99 bl call sites. Allocates a _Rep - capacity 0 returns the shared
+      empty rep without allocating, otherwise operator_new_checked
+      (capacity + 14), refcount 0, capacity, length, NUL at data[length].
+      Two length-error reports call the C++ diagnostic/throw dispatch
+      @ 0x08266abc with code 8 and two string arguments that both point
+      at an empty string @ 0x083d8afc (diagnostics stripped from this
+      build); the original reaches them with `bl` and falls through to
+      allocate anyway, which the port reproduces via the CXX_STRING_OPS
+      hook (volatile-read, or LLVM const-folds the no-op default away).
+      Max capacity is 0xfffffff1 (`cmn r1, #15`). First argument is never
+      read. DEVIATION - the original's header store `stm r0, {r1, r4, r5}`
+      @ 0x083d8ae8 is unconditional and writes through NULL when the
+      allocation fails; the port returns NULL instead. The original's
+      redundant `stmiane` pre-zeroing of those same three words and the
+      dead `str r1, [sp, #4]` are dropped.
+
+  - address: 0x083d8518
+    ghidra: FUN_083d8518
+    name: cxx_string_rep_reserve
+    size: 76
+    sig: "char *cxx_string_rep_reserve(void *unused, u32 old_capacity, u32 needed, u32 length)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: unused, param_2: old_capacity, param_3: needed, param_4: length}
+    notes: >-
+      5 bl call sites. Growth policy in front of cxx_string_rep_create -
+      new capacity is max(old + old/2 + old/8, old + 32, needed), all
+      wrapping. The 1.625x term overtakes the +32 floor at old = 54
+      (52 and 53 tie, and `movhi` keeps the 1.625x value). Returns the
+      DATA pointer (rep + 12), not the rep. Note the original stages both
+      candidates on the stack and selects with `addcc/movcs` on an
+      address - a max, transcribed as such.
+
+  - address: 0x083d8b5c
+    ghidra: FUN_083d8b5c
+    name: cxx_string_from_cstr
+    size: 76
+    sig: "char **cxx_string_from_cstr(char **string, const char *source)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: string, param_2: source}
+    notes: >-
+      495 bl call sites - `basic_string(const char *)`. strlen @ 0x08392478
+      (ported), then either the shared empty rep data (length 0, no
+      allocation) or cxx_string_rep_reserve(this, 0, len, len), which
+      means a fresh string always gets at least 32 characters of
+      capacity. Stores the data pointer into the one-word string object
+      BEFORE the copy, then __rt_memcpy @ 0x08037db0 (ROM veneer, ported
+      as __rt_memcpy). No NUL store here - rep_create already wrote it.
+      Returns `string`.
