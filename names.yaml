@@ -6840,6 +6840,132 @@ functions:
       0x083c0000-0x083dffff sweep but is a member of this class and
       reachable from nowhere else.
 
+  - address: 0x083d865c
+    ghidra: FUN_083d865c
+    name: cxx_string_replace_core
+    size: 552
+    sig: "char *cxx_string_replace_core(char **string, u32 pos, u32 n1, const char *source, u32 source_len, u32 source_pos, u32 n2)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: string, param_2: pos, param_3: n1, param_4: source}
+    notes: >-
+      The class's ONE mutation primitive - libstdc++'s `_M_replace`.
+      Splices n2 characters from source[source_pos..] over the n1
+      characters at string[pos..]. Seven arguments (r0-r3 plus three on
+      the stack, read with `add fp,sp,#48; ldm fp,{r6,sl,fp}` after a
+      12-register push); the source is described as
+      (base, length, offset, count) so a substring of another string
+      needs no temporary. Only 3 bl call sites - 0x083d8624,
+      0x083d8564 and their users - but every mutating member funnels
+      through those, so it carries ~90 call sites of traffic.
+      Sequence - precondition `pos <= size()` and
+      `source_pos <= source_len` (report code 9, then FALL THROUGH);
+      clamp removed = min(n1, size()-pos) and
+      inserted = min(n2, source_len-source_pos); length check
+      `size()-removed <= 0xfffffff1-inserted` (code 8, also falling
+      through); an empty result releases and parks on the shared empty
+      rep; otherwise reallocate when the rep is shared
+      (`refcount+1 > 1` unsigned, so a LEAKED -1 rep counts as unshared
+      and IS mutated in place), when `capacity < new length`, or when
+      `source` points into our own buffer (`data <= source <
+      data+size()`); else memmove in place. GROWTH DIFFERS from the
+      construction path - `max(1.625*old_LENGTH, old_LENGTH+128,
+      new_length)`, whereas cxx_string_rep_reserve @ 0x083d8518 uses
+      the old CAPACITY and a +32 floor. Returns `data + pos`, an
+      iterator to the splice point, NOT `this` - the wrappers discard
+      it. Faithful quirks - the tail copy sources from `data + pos + n1`
+      with the RAW n1, harmless because clamping can only bite when the
+      tail length is 0; falling through the code-9 report leaves
+      `source_len - source_pos` wrapped, so the `inserted` clamp becomes
+      a no-op and the splice reads past the declared end of the source;
+      and a failed allocation is not guarded (the original copies to
+      address 12).
+
+  - address: 0x083d8624
+    ghidra: FUN_083d8624
+    name: cxx_string_replace_cstr
+    size: 56
+    sig: "char **cxx_string_replace_cstr(char **string, u32 pos, u32 n1, const char *source, u32 n2)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: string, param_2: pos, param_3: n1, param_4: source}
+    notes: >-
+      3 bl call sites - `replace(pos, n1, const char *s, n2)`. Pure
+      argument shuffle onto cxx_string_replace_core with
+      source_len = n2 and source_pos = 0 (so the core's clamp is a
+      no-op), then returns `string` and discards the core's iterator.
+      The three stack words it builds are {n2, 0, n2}.
+
+  - address: 0x083d8564
+    ghidra: FUN_083d8564
+    name: cxx_string_append_substr
+    size: 188
+    sig: "char **cxx_string_append_substr(char **string, char *const *other, u32 pos, u32 n)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: string, param_2: other, param_3: pos, param_4: n}
+    notes: >-
+      3 bl call sites - `append(const basic_string &other, pos, n)`.
+      Runs its own `pos <= other.size()` (code 9) and length (code 8)
+      checks, both falling through on failure, then calls
+      cxx_string_replace_core at pos = size() with n1 = 0 and the source
+      range (other.data, other.size(), pos, n) - so `n` is clamped a
+      second time inside the core. Returns `string`.
+
+  - address: 0x083d8ca0
+    ghidra: FUN_083d8ca0
+    name: cxx_string_assign_cstr
+    size: 120
+    sig: "char **cxx_string_assign_cstr(char **string, const char *source)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: string, param_2: source}
+    notes: >-
+      20 bl + 4 b = 24 call sites - `operator=(const char *)`. strlen @
+      0x08392478 first; a non-empty source is
+      cxx_string_replace_cstr(this, 0, size(), s, len). An EMPTY source
+      never touches the mutation core - a sole owner (`refcount == 0`,
+      tested as `refcount+1 == 1`) is truncated in place, keeping its
+      buffer, with length 0 and a NUL at data[0]; anything else (shared,
+      or leaked at -1) is released and parked on the shared empty rep.
+      Returns `string`.
+
+  - address: 0x083d8d1c
+    ghidra: FUN_083d8d1c
+    name: cxx_string_assign
+    size: 104
+    sig: "char **cxx_string_assign(char **string, char *const *src)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: string, param_2: src}
+    notes: >-
+      42 bl + 4 b = 46 call sites - `operator=(const basic_string &)`.
+      A shareable source rep is grabbed outright - cxx_string_rep_add_ref
+      @ 0x083b54f8, then cxx_string_release on our own, then adopt the
+      pointer. Self-assignment survives that path unguarded precisely
+      because the bump precedes the release. A LEAKED source
+      (`refcount == -1`) cannot be shared, so it goes through
+      cxx_string_replace_cstr(this, 0, size(), src.data, src.size())
+      instead, and only that path carries the explicit `this == &src`
+      guard. Returns `string`.
+
+  - address: 0x083d8d84
+    ghidra: FUN_083d8d84
+    name: cxx_string_append_cstr
+    size: 56
+    sig: "char **cxx_string_append_cstr(char **string, const char *source)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: string, param_2: source}
+    notes: >-
+      20 bl + 1 b = 21 call sites - `operator+=(const char *)` /
+      `append(const char *)`. Captures size() BEFORE the strlen call
+      (register scheduling the port keeps), then
+      cxx_string_replace_cstr(this, size(), 0, s, len). Distinguished
+      from cxx_string_assign_cstr @ 0x083d8ca0 only by which of pos/n1
+      gets the old length - assignment passes (0, size()), append
+      passes (size(), 0). Returns `string`.
+
   # --- tag-57 tracked allocator: free side (0x083906f4..0x08390774) ---
   # Block layout built by the allocator @ 0x08390b8c (decoded, not ported):
   #   raw+0x00 i32 size, raw+0x04 i32 size>>31 (the pair is an i64),

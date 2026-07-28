@@ -75,6 +75,7 @@
 //!   one-to-one.
 
 use crate::heap::veneers::{operator_delete, operator_new_checked};
+use crate::libc::memmove::memmove;
 use crate::libc::rt_memcpy::__rt_memcpy;
 use crate::libc::strlen::strlen;
 
@@ -91,6 +92,15 @@ pub const MAX_CAPACITY: u32 = 0xffff_fff1;
 
 /// Diagnostic code the original passes for a length error (`mov r0, #8`).
 pub const LENGTH_ERROR_CODE: usize = 8;
+
+/// Diagnostic code the original passes for an out-of-range index
+/// (`mov r0, #9`), raised by the mutation core's precondition checks.
+pub const RANGE_ERROR_CODE: usize = 9;
+
+/// Capacity floor the *mutation* core adds to the old length when it has
+/// to reallocate (`add r1, r1, #128`). Note this is 128, not the 32 the
+/// construction path's [`cxx_string_rep_reserve`] uses.
+pub const MUTATE_GROWTH_FLOOR: u32 = 128;
 
 /// The 12-byte `_Rep` header. No pointer fields, so its layout is the
 /// same on the 32-bit target and a 64-bit test host.
@@ -150,13 +160,25 @@ pub static mut CXX_STRING_OPS: CxxStringOps = CxxStringOps { report_error: repor
 
 /// Dispatches through [`CXX_STRING_OPS`]. The volatile read keeps the hook
 /// a real runtime call: without it LLVM sees a `static mut` nothing in the
-/// crate writes, const-folds the no-op default, and deletes both
-/// length-error reports from the ARM build.
+/// crate writes, const-folds the no-op default, and deletes every
+/// diagnostic report from the ARM build.
 #[inline]
-unsafe fn report_error(a: u32, b: u32) {
+unsafe fn report(code: usize, a: u32, b: u32) {
     let stripped = core::ptr::addr_of!(STRIPPED_DIAGNOSTIC);
     let ops = core::ptr::read_volatile(core::ptr::addr_of!(CXX_STRING_OPS));
-    (ops.report_error)(LENGTH_ERROR_CODE, stripped, stripped, a, b);
+    (ops.report_error)(code, stripped, stripped, a, b);
+}
+
+/// `report` with the length-error code (`mov r0, #8`).
+#[inline]
+unsafe fn report_error(a: u32, b: u32) {
+    report(LENGTH_ERROR_CODE, a, b);
+}
+
+/// `report` with the out-of-range code (`mov r0, #9`).
+#[inline]
+unsafe fn report_range_error(index: u32, limit: u32) {
+    report(RANGE_ERROR_CODE, index, limit);
 }
 
 /// The stripped diagnostic string both string arguments point at
@@ -303,7 +325,7 @@ pub unsafe extern "C" fn cxx_string_rep_add_ref(rep: *mut StringRep) {
     if rep == empty_rep() {
         return;
     }
-    (*rep).refcount += 1;
+    (*rep).refcount = (*rep).refcount.wrapping_add(1);
 }
 
 /// cxx_string_default_ctor — original: `FUN_083d8c20` @ 0x083d8c20
@@ -397,6 +419,281 @@ pub unsafe extern "C" fn cxx_string_from_buffer(
         __rt_memcpy(data, source, length as usize);
     }
     string
+}
+
+/// cxx_string_replace_core — original: `FUN_083d865c` @ 0x083d865c
+/// (552 bytes, 3 `bl` call sites — [`cxx_string_replace_cstr`],
+/// [`cxx_string_append_substr`] and 0x083d8564's length-checked entry —
+/// but every mutating member of the class funnels through those, so it
+/// carries ~90 call sites of traffic).
+///
+/// The one mutation primitive: splice `n2` characters taken from
+/// `source[source_pos ..]` over the `n1` characters at `string[pos ..]`.
+/// This is libstdc++'s `_M_replace`, with the source described as
+/// (base, length, offset, count) so a substring of another string can be
+/// passed without materializing it.
+///
+/// Order of business, exactly as the original:
+/// 1. Preconditions `pos <= size()` and `source_pos <= source_len`;
+///    either violation reports code 9 and **falls through**.
+/// 2. Clamp: `removed = min(n1, size() - pos)`,
+///    `inserted = min(n2, source_len - source_pos)`.
+/// 3. Length check `size() - removed <= MAX_CAPACITY - inserted`
+///    (code 8, again falling through).
+/// 4. An empty result releases the rep and parks on the shared empty
+///    rep.
+/// 5. Otherwise reallocate when the rep is shared (`refcount >= 1`),
+///    too small (`capacity < new length`), or when `source` points
+///    *into* our own buffer; else mutate in place.
+///
+/// Reallocation grows to `max(1.625 * old_length, old_length + 128,
+/// new_length)` — a **different** policy from the construction path's
+/// [`cxx_string_rep_reserve`], which floors at `+32` and works off the
+/// old *capacity*.
+///
+/// Returns `string_data + pos`, i.e. an iterator to the splice point,
+/// not `this`.
+///
+/// Faithful quirks:
+/// - The tail copy sources from `data + pos + n1` using the **raw** `n1`,
+///   not the clamped `removed`. Harmless: clamping can only bite when
+///   `n1 >= size() - pos`, and then the tail length is 0 and no copy
+///   happens at all.
+/// - Falling through the code-9 report means `source_len - source_pos`
+///   can wrap, and then the `inserted` clamp is a no-op: the splice
+///   reads past the declared end of the source. Kept, wrapping and all.
+/// - `refcount == -1` (leaked) counts as *not* shared here, so a leaked
+///   rep is mutated in place — which is the point of leaking it.
+/// - An allocation failure inside [`cxx_string_rep_create`] leaves a
+///   NULL rep and the original then copies to address 12. The port does
+///   not add a guard the original does not have.
+/// - `size()` is re-read from the rep after each `bl` that could have
+///   returned, as the original does.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn cxx_string_replace_core(
+    string: *mut *mut u8,
+    pos: u32,
+    n1: u32,
+    source: *const u8,
+    source_len: u32,
+    source_pos: u32,
+    n2: u32,
+) -> *mut u8 {
+    let size = (*data_rep(*string)).length;
+    if size < pos || source_pos > source_len {
+        let limit = if size <= source_len { source_len } else { size };
+        let index = if size >= pos { source_pos } else { pos };
+        report_range_error(index, limit);
+    }
+
+    let size = (*data_rep(*string)).length;
+    let available = source_len.wrapping_sub(source_pos);
+    let room = size.wrapping_sub(pos);
+    let removed = if n1 < room { n1 } else { room };
+    let inserted = if n2 < available { n2 } else { available };
+    let kept = size.wrapping_sub(removed);
+    if kept > MAX_CAPACITY.wrapping_sub(inserted) {
+        report_error(kept, MAX_CAPACITY.wrapping_sub(inserted));
+    }
+
+    let data = *string;
+    let rep = data_rep(data);
+    let size = (*rep).length;
+    let kept = size.wrapping_sub(removed);
+    let new_length = kept.wrapping_add(inserted);
+    if new_length == 0 {
+        cxx_string_release(string);
+        *string = empty_rep_data();
+        return (*string).add(pos as usize);
+    }
+
+    let tail = kept.wrapping_sub(pos);
+    let insert_from = source.wrapping_add(source_pos as usize);
+    let shared = ((*rep).refcount as u32).wrapping_add(1) > 1;
+    let aliases_self = !source.is_null()
+        && data as usize <= source as usize
+        && (source as usize) < (data as usize).wrapping_add(size as usize);
+
+    if shared || (*rep).capacity < new_length || aliases_self {
+        let old_length = (*data_rep(*string)).length;
+        let grown = old_length
+            .wrapping_add(old_length >> 1)
+            .wrapping_add(old_length >> 3);
+        let floor = old_length.wrapping_add(MUTATE_GROWTH_FLOOR);
+        let grown = if floor > grown { floor } else { grown };
+        let capacity = if grown < new_length { new_length } else { grown };
+
+        let fresh = rep_data(cxx_string_rep_create(string as *mut u8, capacity, new_length));
+        if pos != 0 {
+            __rt_memcpy(fresh, *string, pos as usize);
+        }
+        if inserted != 0 {
+            __rt_memcpy(fresh.add(pos as usize), insert_from, inserted as usize);
+        }
+        if tail != 0 {
+            __rt_memcpy(
+                fresh.add(pos as usize).add(inserted as usize),
+                (*string).add(pos as usize).add(n1 as usize),
+                tail as usize,
+            );
+        }
+        cxx_string_release(string);
+        *string = fresh;
+    } else {
+        if tail != 0 {
+            memmove(
+                data.add(pos as usize).add(inserted as usize),
+                data.add(pos as usize).add(n1 as usize),
+                tail as usize,
+            );
+        }
+        if inserted != 0 {
+            memmove((*string).add(pos as usize), insert_from, inserted as usize);
+        }
+        (*data_rep(*string)).length = new_length;
+        (*string).add(new_length as usize).write(0);
+    }
+    (*string).add(pos as usize)
+}
+
+/// cxx_string_replace_cstr — original: `FUN_083d8624` @ 0x083d8624
+/// (56 bytes, 3 `bl` call sites).
+///
+/// `replace(pos, n1, const char *s, n2)`: hands
+/// [`cxx_string_replace_core`] the whole of `s` as the source range
+/// (`source_len = n2`, `source_pos = 0`), so nothing is clamped away.
+/// Returns `string`, discarding the core's iterator.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn cxx_string_replace_cstr(
+    string: *mut *mut u8,
+    pos: u32,
+    n1: u32,
+    source: *const u8,
+    n2: u32,
+) -> *mut *mut u8 {
+    cxx_string_replace_core(string, pos, n1, source, n2, 0, n2);
+    string
+}
+
+/// cxx_string_append_substr — original: `FUN_083d8564` @ 0x083d8564
+/// (188 bytes, 3 `bl` call sites).
+///
+/// `append(const basic_string &other, size_type pos, size_type n)`:
+/// checks `pos <= other.size()` (code 9) and the resulting length
+/// (code 8) itself — both falling through on failure, as everywhere else
+/// in this class — then splices at `size()` with `n1 = 0`. The source
+/// range handed to the core is `other`'s whole buffer plus the offset,
+/// so the core clamps `n` against `other.size() - pos` a second time.
+/// Returns `string`.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn cxx_string_append_substr(
+    string: *mut *mut u8,
+    other: *const *mut u8,
+    pos: u32,
+    n: u32,
+) -> *mut *mut u8 {
+    let other_length = (*data_rep(*other)).length;
+    if other_length < pos {
+        report_range_error(pos, other_length);
+    }
+    let other_length = (*data_rep(*other)).length;
+    let available = other_length.wrapping_sub(pos);
+    let appended = if n < available { n } else { available };
+    let size = (*data_rep(*string)).length;
+    if size > MAX_CAPACITY.wrapping_sub(appended) {
+        report_error(size, MAX_CAPACITY.wrapping_sub(appended));
+    }
+    let other_data = *other;
+    let size = (*data_rep(*string)).length;
+    cxx_string_replace_core(
+        string,
+        size,
+        0,
+        other_data,
+        (*data_rep(other_data)).length,
+        pos,
+        n,
+    );
+    string
+}
+
+/// cxx_string_assign_cstr — original: `FUN_083d8ca0` @ 0x083d8ca0
+/// (120 bytes, 20 `bl` + 4 `b` = 24 call sites).
+///
+/// `operator=(const char *)`. Assigning an empty string is special-cased
+/// away from the mutation core: a *sole owner* (`refcount == 0`) is
+/// truncated in place — length 0 and a NUL at `data[0]`, keeping the
+/// buffer — while anything else (shared, or leaked at -1) is released
+/// and parked on the shared empty rep. A non-empty source is
+/// `replace(0, size(), s, strlen(s))`. Returns `string`.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn cxx_string_assign_cstr(
+    string: *mut *mut u8,
+    source: *const u8,
+) -> *mut *mut u8 {
+    let length = strlen(source) as u32;
+    let data = *string;
+    if length != 0 {
+        let size = (*data_rep(data)).length;
+        return cxx_string_replace_cstr(string, 0, size, source, length);
+    }
+    if (*data_rep(data)).refcount == 0 {
+        (*data_rep(data)).length = 0;
+        (*string).write(0);
+        return string;
+    }
+    cxx_string_release(string);
+    *string = empty_rep_data();
+    string
+}
+
+/// cxx_string_assign — original: `FUN_083d8d1c` @ 0x083d8d1c
+/// (104 bytes, 42 `bl` + 4 `b` = 46 call sites).
+///
+/// `operator=(const basic_string &)`. A shareable source rep is grabbed
+/// outright: bump its refcount, release ours, adopt its pointer — and
+/// self-assignment survives that unguarded because the bump precedes the
+/// release. A *leaked* source (`refcount == -1`) cannot be shared, so it
+/// is copied through the mutation core instead, and only that path needs
+/// (and has) the `this == &src` guard. Returns `string`.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn cxx_string_assign(
+    string: *mut *mut u8,
+    src: *const *mut u8,
+) -> *mut *mut u8 {
+    let src_data = *src;
+    let src_rep = data_rep(src_data);
+    if (*src_rep).refcount != -1 {
+        cxx_string_rep_add_ref(src_rep);
+        cxx_string_release(string);
+        *string = *src;
+        return string;
+    }
+    if string as *const *mut u8 == src {
+        return string;
+    }
+    let size = (*data_rep(*string)).length;
+    let src_length = (*src_rep).length;
+    cxx_string_replace_cstr(string, 0, size, src_data, src_length);
+    string
+}
+
+/// cxx_string_append_cstr — original: `FUN_083d8d84` @ 0x083d8d84
+/// (56 bytes, 20 `bl` + 1 `b` = 21 call sites).
+///
+/// `operator+=(const char *)` / `append(const char *)`: measures the
+/// source, then `replace(size(), 0, s, len)`. `size()` is captured
+/// *before* the `strlen` call, matching the original's register
+/// scheduling. Returns `string`.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn cxx_string_append_cstr(
+    string: *mut *mut u8,
+    source: *const u8,
+) -> *mut *mut u8 {
+    let size = (*data_rep(*string)).length;
+    let length = strlen(source) as u32;
+    cxx_string_replace_cstr(string, size, 0, source, length)
 }
 
 #[cfg(test)]
@@ -773,6 +1070,390 @@ mod tests {
             // ...and a NULL source is simply not copied.
             cxx_string_from_buffer(&mut slot, core::ptr::null(), 0);
             assert_eq!(slot, empty_rep_data());
+        }
+    }
+
+    // ---- the mutation core -------------------------------------------
+
+    /// Builds a string in the arena from arbitrary bytes.
+    unsafe fn build(slot: *mut *mut u8, text: &[u8]) {
+        cxx_string_from_buffer(slot, text.as_ptr(), text.len() as u32);
+    }
+
+    /// The stored characters (length from the rep, so embedded NULs and
+    /// the terminator are both visible to the caller).
+    unsafe fn text(slot: *mut *mut u8) -> Vec<u8> {
+        let data = *slot;
+        core::slice::from_raw_parts(data, (*data_rep(data)).length as usize).to_vec()
+    }
+
+    /// Reference splice: what `replace(pos, n1, src[src_pos..], n2)`
+    /// must produce, written straight from the C++ semantics.
+    fn reference_replace(s: &[u8], pos: u32, n1: u32, src: &[u8], src_pos: u32, n2: u32) -> Vec<u8> {
+        let removed = n1.min(s.len() as u32 - pos) as usize;
+        let inserted = n2.min(src.len() as u32 - src_pos) as usize;
+        let mut out = Vec::new();
+        out.extend_from_slice(&s[..pos as usize]);
+        out.extend_from_slice(&src[src_pos as usize..src_pos as usize + inserted]);
+        out.extend_from_slice(&s[pos as usize + removed..]);
+        out
+    }
+
+    /// The mutation core's growth policy (`+128` floor, off the old
+    /// *length*), transcribed from 0x083d8794..0x083d87b8.
+    fn reference_mutate_capacity(old_length: u32, new_length: u32) -> u32 {
+        let grown = (old_length + (old_length >> 1) + (old_length >> 3))
+            .max(old_length + MUTATE_GROWTH_FLOOR);
+        grown.max(new_length)
+    }
+
+    #[test]
+    fn replace_core_matches_the_reference_in_place() {
+        let _guard = arena();
+        let base = b"0123456789";
+        let src = b"ABCDE";
+        unsafe {
+            for pos in 0..=base.len() as u32 {
+                for n1 in 0..=6u32 {
+                    for n2 in 0..=5u32 {
+                        ARENA_USED = 0;
+                        let mut slot: *mut u8 = core::ptr::null_mut();
+                        build(&mut slot, base);
+                        let want = reference_replace(base, pos, n1, src, 0, n2);
+                        let ret = cxx_string_replace_core(
+                            &mut slot,
+                            pos,
+                            n1,
+                            src.as_ptr(),
+                            src.len() as u32,
+                            0,
+                            n2,
+                        );
+                        assert_eq!(text(&mut slot), want, "pos={pos} n1={n1} n2={n2}");
+                        assert_eq!(ret, (*(&mut slot)).add(pos as usize), "returns data + pos");
+                        if !want.is_empty() {
+                            assert_eq!(
+                                slot.add(want.len()).read(),
+                                0,
+                                "NUL terminated: pos={pos} n1={n1} n2={n2}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// A substring source (`src_pos`/`n2`) is clamped against the
+    /// source's own length, not the destination's.
+    #[test]
+    fn replace_core_takes_a_substring_of_the_source() {
+        let _guard = arena();
+        let src = b"ABCDEFGH";
+        unsafe {
+            for src_pos in 0..=src.len() as u32 {
+                for n2 in 0..=9u32 {
+                    ARENA_USED = 0;
+                    let mut slot: *mut u8 = core::ptr::null_mut();
+                    build(&mut slot, b"xxxx");
+                    let want = reference_replace(b"xxxx", 1, 2, src, src_pos, n2);
+                    cxx_string_replace_core(
+                        &mut slot,
+                        1,
+                        2,
+                        src.as_ptr(),
+                        src.len() as u32,
+                        src_pos,
+                        n2,
+                    );
+                    assert_eq!(text(&mut slot), want, "src_pos={src_pos} n2={n2}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn replace_core_mutates_a_sole_owner_in_place() {
+        let _guard = arena();
+        unsafe {
+            let mut slot: *mut u8 = core::ptr::null_mut();
+            build(&mut slot, b"hello");
+            let buffer = slot;
+            let used = ARENA_USED;
+            cxx_string_replace_core(&mut slot, 5, 0, b" world".as_ptr(), 6, 0, 6);
+            assert_eq!(slot, buffer, "same buffer — capacity 32 has room");
+            assert_eq!(text(&mut slot), b"hello world");
+            assert_eq!(ARENA_USED, used, "no allocation");
+            assert_eq!((*data_rep(slot)).capacity, 32, "capacity untouched");
+        }
+    }
+
+    /// Outgrowing the capacity reallocates with the mutation core's own
+    /// growth policy — `old_length + 128`, not the constructor's `+32`.
+    #[test]
+    fn replace_core_reallocates_with_the_plus_128_policy() {
+        let _guard = arena();
+        unsafe {
+            let base = std::vec![b'x'; 100];
+            let mut slot: *mut u8 = core::ptr::null_mut();
+            build(&mut slot, &base);
+            let old = slot;
+            assert_eq!((*data_rep(slot)).capacity, 100);
+            cxx_string_replace_core(&mut slot, 100, 0, b"12345".as_ptr(), 5, 0, 5);
+            assert_ne!(slot, old, "fresh buffer");
+            assert_eq!((*data_rep(slot)).length, 105);
+            assert_eq!((*data_rep(slot)).capacity, reference_mutate_capacity(100, 105));
+            assert_eq!((*data_rep(slot)).capacity, 228);
+            assert_eq!(&text(&mut slot)[100..], b"12345");
+            assert_eq!(freed(), &[data_rep(old) as *mut u8], "old rep released");
+        }
+    }
+
+    /// A shared rep is never mutated in place — that is the whole of COW.
+    #[test]
+    fn replace_core_copies_a_shared_rep() {
+        let _guard = arena();
+        unsafe {
+            let mut a: *mut u8 = core::ptr::null_mut();
+            build(&mut a, b"shared");
+            let mut b: *mut u8 = core::ptr::null_mut();
+            cxx_string_copy_ctor(&mut b, &a);
+            assert_eq!(a, b);
+            cxx_string_replace_core(&mut b, 0, 6, b"other!".as_ptr(), 6, 0, 6);
+            assert_ne!(a, b, "the shared buffer was left alone");
+            assert_eq!(text(&mut a), b"shared");
+            assert_eq!(text(&mut b), b"other!");
+            assert_eq!((*data_rep(a)).refcount, 0, "the release dropped us back to one owner");
+        }
+    }
+
+    /// A leaked rep (-1) is *not* shared, so it is mutated in place.
+    #[test]
+    fn replace_core_mutates_a_leaked_rep_in_place() {
+        let _guard = arena();
+        unsafe {
+            let mut slot: *mut u8 = core::ptr::null_mut();
+            build(&mut slot, b"leaked");
+            let buffer = slot;
+            (*data_rep(slot)).refcount = -1;
+            cxx_string_replace_core(&mut slot, 0, 6, b"inplac".as_ptr(), 6, 0, 6);
+            assert_eq!(slot, buffer);
+            assert_eq!(text(&mut slot), b"inplac");
+        }
+    }
+
+    /// A source pointing into our own buffer forces a reallocation, so a
+    /// self-splice reads consistent bytes.
+    #[test]
+    fn replace_core_reallocates_when_the_source_aliases_the_buffer() {
+        let _guard = arena();
+        unsafe {
+            let mut slot: *mut u8 = core::ptr::null_mut();
+            build(&mut slot, b"abcdef");
+            let buffer = slot;
+            // Insert "abc" (our own first three bytes) at offset 3.
+            cxx_string_replace_core(&mut slot, 3, 0, buffer, 6, 0, 3);
+            assert_ne!(slot, buffer, "aliasing source forced a copy");
+            assert_eq!(text(&mut slot), b"abcabcdef");
+        }
+    }
+
+    /// One past the end of the buffer is *not* aliasing (`bls` on
+    /// `data + size`), so it stays on the in-place path.
+    #[test]
+    fn replace_core_source_just_past_the_buffer_is_not_aliasing() {
+        let _guard = arena();
+        unsafe {
+            let mut slot: *mut u8 = core::ptr::null_mut();
+            build(&mut slot, b"abcdef");
+            let buffer = slot;
+            let past = buffer.add(6);
+            past.add(0).write(b'Z');
+            cxx_string_replace_core(&mut slot, 0, 1, past, 1, 0, 1);
+            assert_eq!(slot, buffer, "no reallocation");
+            assert_eq!(text(&mut slot), b"Zbcdef");
+        }
+    }
+
+    #[test]
+    fn replace_core_emptying_parks_on_the_singleton() {
+        let _guard = arena();
+        unsafe {
+            let mut slot: *mut u8 = core::ptr::null_mut();
+            build(&mut slot, b"gone");
+            let rep = data_rep(slot);
+            let ret = cxx_string_replace_core(&mut slot, 0, 4, b"".as_ptr(), 0, 0, 0);
+            assert_eq!(slot, empty_rep_data());
+            assert_eq!(ret, empty_rep_data());
+            assert_eq!(freed(), &[rep as *mut u8]);
+        }
+    }
+
+    /// `source_pos > source_len` reports code 9 and then falls straight
+    /// through, like every other check in this class — and because
+    /// `source_len - source_pos` wraps, nothing is clamped and the
+    /// splice reads past the declared end of the source. The port keeps
+    /// that (the source buffer here is padded so the read is defined).
+    #[test]
+    fn replace_core_reports_out_of_range_and_falls_through() {
+        use core::sync::atomic::{AtomicUsize, Ordering};
+        static CODES: AtomicUsize = AtomicUsize::new(0);
+        unsafe extern "C" fn recording(code: usize, _: *const u8, _: *const u8, _: u32, _: u32) {
+            CODES.fetch_add(code, Ordering::SeqCst);
+        }
+        let _guard = arena();
+        unsafe {
+            let saved = CXX_STRING_OPS.report_error;
+            (*core::ptr::addr_of_mut!(CXX_STRING_OPS)).report_error = recording;
+            let mut slot: *mut u8 = core::ptr::null_mut();
+            build(&mut slot, b"abc");
+            let source = b"XY___Z__";
+            cxx_string_replace_core(&mut slot, 0, 0, source.as_ptr(), 2, 5, 1);
+            assert_eq!(CODES.load(Ordering::SeqCst), RANGE_ERROR_CODE);
+            assert_eq!(text(&mut slot), b"Zabc", "no clamp: source[5] is spliced in");
+            (*core::ptr::addr_of_mut!(CXX_STRING_OPS)).report_error = saved;
+        }
+    }
+
+    // ---- the members built on the core --------------------------------
+
+    #[test]
+    fn append_cstr_appends() {
+        let _guard = arena();
+        unsafe {
+            let mut slot: *mut u8 = core::ptr::null_mut();
+            build(&mut slot, b"foo");
+            let slot_ptr: *mut *mut u8 = &mut slot;
+            assert_eq!(cxx_string_append_cstr(slot_ptr, b"bar\0".as_ptr()), slot_ptr);
+            assert_eq!(text(slot_ptr), b"foobar");
+            cxx_string_append_cstr(slot_ptr, b"\0".as_ptr());
+            assert_eq!(text(slot_ptr), b"foobar", "appending nothing is a no-op");
+        }
+    }
+
+    #[test]
+    fn replace_cstr_returns_this_and_splices() {
+        let _guard = arena();
+        unsafe {
+            let mut slot: *mut u8 = core::ptr::null_mut();
+            build(&mut slot, b"a__d");
+            let slot_ptr: *mut *mut u8 = &mut slot;
+            assert_eq!(cxx_string_replace_cstr(slot_ptr, 1, 2, b"bc".as_ptr(), 2), slot_ptr);
+            assert_eq!(text(slot_ptr), b"abcd");
+        }
+    }
+
+    #[test]
+    fn assign_cstr_replaces_the_whole_string() {
+        let _guard = arena();
+        unsafe {
+            let mut slot: *mut u8 = core::ptr::null_mut();
+            build(&mut slot, b"old value");
+            let slot_ptr: *mut *mut u8 = &mut slot;
+            assert_eq!(cxx_string_assign_cstr(slot_ptr, b"new\0".as_ptr()), slot_ptr);
+            assert_eq!(text(slot_ptr), b"new");
+        }
+    }
+
+    /// `s = ""` on a sole owner truncates in place and keeps the buffer;
+    /// on a shared string it drops to the singleton instead.
+    #[test]
+    fn assign_empty_cstr_truncates_or_parks() {
+        let _guard = arena();
+        unsafe {
+            let mut slot: *mut u8 = core::ptr::null_mut();
+            build(&mut slot, b"content");
+            let buffer = slot;
+            cxx_string_assign_cstr(&mut slot, b"\0".as_ptr());
+            assert_eq!(slot, buffer, "sole owner keeps its buffer");
+            assert_eq!((*data_rep(slot)).length, 0);
+            assert_eq!(slot.read(), 0);
+            assert!(freed().is_empty());
+
+            let mut other: *mut u8 = core::ptr::null_mut();
+            build(&mut other, b"shared");
+            let mut copy: *mut u8 = core::ptr::null_mut();
+            cxx_string_copy_ctor(&mut copy, &other);
+            cxx_string_assign_cstr(&mut copy, b"\0".as_ptr());
+            assert_eq!(copy, empty_rep_data(), "shared drops to the singleton");
+            assert_eq!(text(&mut other), b"shared", "the other owner is intact");
+            assert_eq!((*data_rep(other)).refcount, 0);
+        }
+    }
+
+    #[test]
+    fn assign_shares_the_source_rep() {
+        let _guard = arena();
+        unsafe {
+            let mut src: *mut u8 = core::ptr::null_mut();
+            build(&mut src, b"source");
+            let mut dst: *mut u8 = core::ptr::null_mut();
+            build(&mut dst, b"dest");
+            let dst_rep = data_rep(dst);
+            let dst_ptr: *mut *mut u8 = &mut dst;
+            assert_eq!(cxx_string_assign(dst_ptr, &src), dst_ptr);
+            assert_eq!(dst, src);
+            assert_eq!((*data_rep(src)).refcount, 1);
+            assert_eq!(freed(), &[dst_rep as *mut u8], "the old rep was released");
+        }
+    }
+
+    /// Self-assignment survives without a guard on the shared path: the
+    /// refcount goes up before it comes down.
+    #[test]
+    fn assign_to_self_is_safe() {
+        let _guard = arena();
+        unsafe {
+            let mut slot: *mut u8 = core::ptr::null_mut();
+            build(&mut slot, b"itself");
+            let buffer = slot;
+            cxx_string_assign(&mut slot, &slot);
+            assert_eq!(slot, buffer);
+            assert_eq!((*data_rep(slot)).refcount, 0);
+            assert!(freed().is_empty());
+            assert_eq!(text(&mut slot), b"itself");
+            // ...and on the leaked path the explicit `this == &src` guard
+            // takes over.
+            (*data_rep(slot)).refcount = -1;
+            cxx_string_assign(&mut slot, &slot);
+            assert_eq!(slot, buffer);
+            assert_eq!(text(&mut slot), b"itself");
+            assert!(freed().is_empty());
+        }
+    }
+
+    /// A leaked source cannot be shared, so assignment copies through the
+    /// mutation core.
+    #[test]
+    fn assign_from_a_leaked_source_copies() {
+        let _guard = arena();
+        unsafe {
+            let mut src: *mut u8 = core::ptr::null_mut();
+            build(&mut src, b"leaky");
+            (*data_rep(src)).refcount = -1;
+            let mut dst: *mut u8 = core::ptr::null_mut();
+            build(&mut dst, b"dest");
+            cxx_string_assign(&mut dst, &src);
+            assert_ne!(dst, src);
+            assert_eq!(text(&mut dst), b"leaky");
+            assert_eq!((*data_rep(src)).refcount, -1, "source still leaked");
+        }
+    }
+
+    #[test]
+    fn append_substr_appends_a_clamped_slice() {
+        let _guard = arena();
+        unsafe {
+            let mut other: *mut u8 = core::ptr::null_mut();
+            build(&mut other, b"0123456789");
+            let mut slot: *mut u8 = core::ptr::null_mut();
+            build(&mut slot, b"<");
+            let slot_ptr: *mut *mut u8 = &mut slot;
+            assert_eq!(cxx_string_append_substr(slot_ptr, &other, 3, 4), slot_ptr);
+            assert_eq!(text(slot_ptr), b"<3456");
+            // `n` past the end of `other` is clamped, not an error.
+            cxx_string_append_substr(slot_ptr, &other, 8, 99);
+            assert_eq!(text(slot_ptr), b"<345689");
         }
     }
 
