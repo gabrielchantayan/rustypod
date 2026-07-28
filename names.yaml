@@ -4393,9 +4393,78 @@ functions:
       FT_ERRORs both survived here). Live FT_ASSERT(stream): null
       stream calls ft_panic (0x0804e154) with line 475 and the
       ftstream.c __FILE__ pointer, and never returns. 17 call sites,
-      binary-scanned. The ReadChar/ReadOffset/ReadLongLE variants sit
-      nearby (trace strings @ 0x0804f594/0x0804fb44/0x0804fa04) and
-      remain unclaimed.
+      binary-scanned.
+
+  - address: 0x0804f4b8
+    ghidra: FUN_0804f4b8
+    name: ft_stream_read_char
+    size: 172
+    sig: "i32 ft_stream_read_char(FtStream *stream, i32 *error)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream, param_2: error, uVar2: result}
+    notes: >-
+      FreeType FT_Stream_ReadChar (ftstream.c) - one byte at pos,
+      pos += 1, returned SIGN-EXTENDED (lsl #24 / asr #24 @
+      0x0804f538, upstream's "return (FT_Char)result"). Named by its
+      trace string "FT_Stream_ReadChar: invalid i/o; ..." @ 0x0804f594
+      and confirmed by the FT_ASSERT __LINE__ literal 437 @ 0x0804f568,
+      which puts it first in ftstream.c ahead of ReadShort (475),
+      ReadOffset (569), ReadLong (616), ReadLongLE (662) - upstream's
+      order exactly. Unlike every other reader it has NO shared bounds
+      test: the memory path checks pos < size itself (note < , not the
+      siblings' pos+n < size) while the DISK PATH CHECKS NOTHING - a
+      read callback that returns 1 is believed arbitrarily far past
+      size. That asymmetry is upstream's and is pinned by a test.
+      Failure sets *error = 0x55 then emits ONE trace call (this build
+      merged upstream's two FT_ERRORs, as it did for FT_Stream_Seek).
+      Live FT_ASSERT(stream) -> ft_panic (0x0804e154), never returns.
+      11 call sites, binary-scanned, all in the sfnt/type1 loaders
+      @ 0x0808xxxx-0x080a1xxx.
+
+  - address: 0x0804fa48
+    ghidra: FUN_0804fa48
+    name: ft_stream_read_offset
+    size: 204
+    sig: "i32 ft_stream_read_offset(FtStream *stream, i32 *error)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream, param_2: error, pbVar2: p, uVar5: result}
+    notes: >-
+      FreeType FT_Stream_ReadOffset (ftstream.c) - the 3-byte sibling of
+      ft_stream_read_short. Trace tag "FT_Stream_ReadOffset:" @
+      0x0804fb44, FT_ASSERT __LINE__ 569 @ 0x0804fb18. Result is
+      upstream's FT_NEXT_OFF3, a SIGNED big-endian 24-bit offset -
+      ((i8)p[0] << 16) | (p[1] << 8) | p[2]; the ldrsb on the top byte
+      @ 0x0804fac0 is what makes it OFF3 rather than UOFF3. Bounds
+      check pos+2 < size with the same wrapping add as its siblings,
+      memory frame base+pos or read(stream,pos,buf,3) requiring exactly
+      3, assembly skipped (but pos still advanced) when the frame
+      pointer is NULL, pos += 3 re-read from the struct. Failure sets
+      *error = 0x55 FIRST, then two trace calls (tag, then " invalid
+      i/o; pos = 0x%lx, size = 0x%lx" @ 0x0804fb5c). 1 call site
+      (0x080a32c4), binary-scanned.
+
+  - address: 0x0804f900
+    ghidra: FUN_0804f900
+    name: ft_stream_read_long_le
+    size: 212
+    sig: "i32 ft_stream_read_long_le(FtStream *stream, i32 *error)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream, param_2: error, pbVar2: p, uVar5: result}
+    notes: >-
+      FreeType FT_Stream_ReadLongLE (ftstream.c) - ft_stream_read_long
+      @ 0x0804f7cc with the bytes the other way round: FT_NEXT_ULONG_LE,
+      p[0] | p[1]<<8 | p[2]<<16 | p[3]<<24, all ldrb. Trace tag
+      "FT_Stream_ReadLongLE:" @ 0x0804fa04, FT_ASSERT __LINE__ 662 @
+      0x0804f9d8 (last reader in the file, as upstream). Same pos+3 <
+      size wrapping bounds test, same read(...,4) exact-count
+      requirement, same pos += 4. Like ReadLong the failure path traces
+      BEFORE setting *error = 0x55; unlike ReadLong this build kept
+      both FT_ERRORs, so two trace calls fire (tag, then " invalid i/o;
+      pos = 0x%lx, size = 0x%lx" @ 0x0804fa1c). 1 call site
+      (0x0807d52c), binary-scanned.
 
   - address: 0x08042cbc
     ghidra: FUN_08042cbc
