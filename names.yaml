@@ -3756,6 +3756,31 @@ functions:
       division); those helper addresses stay unclaimed. 56 call sites,
       binary-scanned.
 
+  - address: 0x0804d1a8
+    ghidra: FUN_0804d1a8
+    name: ft_muldiv
+    size: 288
+    sig: "i32 ft_muldiv(i32 a, i32 b, i32 c)"
+    module: ft/calc
+    status: ported
+    vars: {param_1: a, param_2: b, param_3: c}
+    notes: >-
+      FreeType FT_MulDiv (32-bit build). a*b/c with abs(c)/2 rounding
+      bias on the magnitude; identity fast-out when a==0 or b==c; sign
+      is (a^b^c)>>31, magnitudes via wrapping rsblt. Bound checks are
+      SIGNED on the wrapped magnitudes (upstream FT_ABS quirk, so
+      abs==0x80000000 passes the small test) - abs(a),abs(b)<=46340
+      (literal @ 0x0804d2c8) and 0<abs(c)<176096 takes one mul plus
+      __rt_sdiv (0x08031568); both small with abs(c)>=176096, or either
+      large with abs(c)>0, takes inlined ft_multo64 (exact 64-bit
+      product), FT_Add64 (0x080ed3b4) bias add, ft_div64by32
+      (0x0807c5b8) with its 0x7fffffff hi>=c clamp; else 0x7fffffff.
+      Quotient truncated to u32 then sign-restored with wrapping rsb,
+      so unclamped quotients in 2^31..2^32 come back sign-flipped
+      (stock overflow behavior, preserved). Port inlines the three
+      helpers bit-identically (u64 mul+add, u64 divide). 33 call
+      sites, binary-scanned.
+
   - address: 0x08042cbc
     ghidra: FUN_08042cbc
     name: bcopy

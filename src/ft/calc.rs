@@ -1,8 +1,10 @@
-//! FreeType `ftcalc` 16.16 fixed-point kernels — `FT_MulFix` and
-//! `FT_DivFix` as compiled into retailOS (ARM ADS build of FreeType 2.1.x,
-//! the pre-`FT_Int64` code paths). Pure integer functions — no hardware;
-//! host tests prove complete behavior, including the 32-bit wrapping
-//! quirks. Call counts are binary-scanned b/bl words.
+//! FreeType `ftcalc` kernels — `FT_MulFix`, `FT_DivFix`, `FT_MulDiv` and
+//! the `FT_Matrix` ops as compiled into retailOS (ARM ADS build of
+//! FreeType 2.x, the pre-`FT_Int64` code paths; the binary's license
+//! blob says "copyright 2000-2006, 2007 The FreeType Project", so a
+//! 2.3-era tree). Pure integer functions — no hardware; host tests prove
+//! complete behavior, including the 32-bit wrapping quirks. Call counts
+//! are binary-scanned b/bl words.
 //!
 //! - `ft_mulfix` — `FUN_0804d2cc` @ 0x0804d2cc (124 bytes; 116 call
 //!   sites). `a * b / 0x10000` rounded half-up on the magnitude.
@@ -117,6 +119,78 @@ pub extern "C" fn ft_divfix(a: i32, b: i32) -> i32 {
     } else {
         q
     }
+}
+
+/// ft_muldiv (FreeType `FT_MulDiv`) — original: `FUN_0804d1a8`
+/// @ 0x0804d1a8 (288 bytes; 33 call sites).
+///
+/// `a * b / c` with a `|c|/2` rounding bias on the magnitude. Identity
+/// fast-out returns `a` when `a == 0 || b == c`. Sign is
+/// `(a ^ b ^ c) >> 31`; magnitudes come from conditional negation
+/// (`rsblt`, wrapping — `i32::MIN` stays 0x80000000).
+///
+/// Path selection replicates the original's *signed* comparisons on the
+/// wrapped magnitudes (upstream's `FT_ABS`-then-`long`-compare behavior
+/// on a 32-bit machine, quirks included — `|a| == 0x80000000` passes the
+/// "small" test because it is negative as an `i32`):
+///
+/// - `|a| <= 46340 && |b| <= 46340` (signed) and `0 < |c| < 176096`
+///   (signed): one 32-bit `mul` plus `__rt_sdiv` @ 0x08031568 — for
+///   genuine magnitudes `46340 * 46340 + 176095/2 == 0x7fffffff`
+///   exactly, so nothing wraps; only the `i32::MIN` quirk inputs wrap
+///   the `mul` (faithfully preserved).
+/// - both small but `|c| >= 176096` (signed), or either large and
+///   `|c| > 0` (signed): the 64-bit path [`ft_muldiv64`].
+/// - otherwise (`c == 0` or `|c| == 0x80000000`): 0x7fffffff.
+///
+/// The quotient is truncated to `u32` and sign-restored with a wrapping
+/// negate, so an unclamped 64-bit-path quotient in `2^31..2^32` comes
+/// back sign-flipped (e.g. `ft_muldiv(0x7fffffff, 2, 1) == -2`) — the
+/// stock overflow behavior, kept.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn ft_muldiv(a: i32, b: i32, c: i32) -> i32 {
+    if a == 0 || b == c {
+        return a;
+    }
+    let sign = a ^ b ^ c;
+    let ua = a.wrapping_abs() as u32;
+    let ub = b.wrapping_abs() as u32;
+    let uc = c.wrapping_abs() as u32;
+    let q: u32 = if (ua as i32) <= 46340 && (ub as i32) <= 46340 {
+        if (uc as i32) >= 176_096 {
+            ft_muldiv64(ua, ub, uc)
+        } else if (uc as i32) > 0 {
+            // uc > 0 here, so the original's `asr 1` bias == `uc >> 1`.
+            let num = ua.wrapping_mul(ub).wrapping_add(uc >> 1);
+            // __rt_sdiv: signed truncating divide; uc > 0 rules out both
+            // division by zero and the i32::MIN / -1 overflow.
+            ((num as i32) / (uc as i32)) as u32
+        } else {
+            0x7fff_ffff
+        }
+    } else if (uc as i32) > 0 {
+        ft_muldiv64(ua, ub, uc)
+    } else {
+        0x7fff_ffff
+    };
+    let q = q as i32;
+    if sign < 0 {
+        q.wrapping_neg()
+    } else {
+        q
+    }
+}
+
+/// ft_muldiv's 64-bit path: the original inlines `ft_multo64` (whose
+/// four-partial-product 32-bit sequence computes the exact 64-bit
+/// product — bit-identical to a `u64` multiply), calls `FT_Add64`
+/// @ 0x080ed3b4 to add the `|c| >> 1` bias (callers guarantee `uc > 0`,
+/// so `asr` == `lsr` and the 64-bit sum cannot wrap:
+/// max `0xfffffffe00000001 + 0x3fffffff`), then [`ft_div64by32`].
+#[inline(always)]
+fn ft_muldiv64(ua: u32, ub: u32, uc: u32) -> u32 {
+    let total = (ua as u64) * (ub as u64) + (uc >> 1) as u64;
+    ft_div64by32((total >> 32) as u32, total as u32, uc)
 }
 
 #[cfg(test)]
@@ -253,6 +327,143 @@ mod tests {
         // `(ua << 16) + ub/2` add wraps at 2^32: 0xffff0000 + 0x3fffffff
         // wraps to 0x3ffeffff, quotient 0 (not the unwrapped 2).
         assert_eq!(ft_divfix(0xffff, 0x7fffffff), 0);
+    }
+
+    /// Reference FT_MulDiv from the documented FreeType semantics on a
+    /// 32-bit machine: sign * ((|a|*|b| + |c|/2) / |c|), quotient
+    /// truncated to u32 (so 2^31..2^32 flips sign), clamped to
+    /// 0x7fffffff when it needs more than 32 bits or c == 0. Exact for
+    /// every input with no i32::MIN operand (those hit the wrapped-abs
+    /// bound-check quirks, covered by the asm-model vector tests).
+    fn muldiv_ref(a: i32, b: i32, c: i32) -> i64 {
+        if a == 0 || b == c {
+            return a as i64;
+        }
+        let neg = (a ^ b ^ c) < 0;
+        let (ua, ub, uc) = ((a as i64).abs(), (b as i64).abs(), (c as i64).abs());
+        let q: i64 = if uc == 0 {
+            0x7fff_ffff
+        } else {
+            let t = (ua * ub + uc / 2) / uc;
+            if t >= 1i64 << 32 {
+                0x7fff_ffff
+            } else {
+                (t as u32) as i32 as i64
+            }
+        };
+        // Sign restore is a 32-bit rsb: negate at i32 width (q always
+        // fits — it is a u32 reinterpreted as i32, or the clamp).
+        if neg {
+            (q as i32).wrapping_neg() as i64
+        } else {
+            q
+        }
+    }
+
+    #[test]
+    fn muldiv_identity_fast_outs() {
+        assert_eq!(ft_muldiv(0, 55, 7), 0);
+        assert_eq!(ft_muldiv(123, 99, 99), 123); // b == c
+        assert_eq!(ft_muldiv(-123, 0, 0), -123); // b == c == 0 beats clamp
+        assert_eq!(ft_muldiv(i32::MIN, 7, 7), i32::MIN);
+    }
+
+    #[test]
+    fn muldiv_sign_combinations() {
+        for (a, b, c, want) in [
+            (-100, 50, 3, -0x683),
+            (100, -50, 3, -0x683),
+            (100, 50, -3, -0x683),
+            (-100, -50, -3, -0x683),
+            (100, 50, 3, 0x683),
+            (-100, -50, 3, 0x683),
+        ] {
+            assert_eq!(ft_muldiv(a, b, c), want, "ft_muldiv({a}, {b}, {c})");
+        }
+    }
+
+    #[test]
+    fn muldiv_fast_slow_boundary() {
+        // 46340*46340 + 176095/2 == 0x7fffffff exactly: the fast path's
+        // widest case, and its 176096 neighbor lands in the 64-bit path.
+        assert_eq!(ft_muldiv(46340, 46340, 176095), 0x2fa3);
+        assert_eq!(ft_muldiv(46341, 46341, 176095), 0x2fa3);
+        assert_eq!(ft_muldiv(46340, 46340, 176096), 0x2fa2);
+        assert_eq!(ft_muldiv(0x10000, 0x10000, 0x10000), 0x10000);
+    }
+
+    #[test]
+    fn muldiv_zero_divisor_clamps_with_sign() {
+        assert_eq!(ft_muldiv(1000, 2000, 0), 0x7fff_ffff);
+        assert_eq!(ft_muldiv(-1000, 2000, 0), -0x7fff_ffff);
+        // c == i32::MIN: wrapped |c| stays negative, same clamp path.
+        assert_eq!(ft_muldiv(5, 3, i32::MIN), -0x7fff_ffff);
+    }
+
+    #[test]
+    fn muldiv_overflow_behavior() {
+        // Quotient needs > 32 bits: clamp.
+        assert_eq!(ft_muldiv(0x40000000, 4, 1), 0x7fff_ffff);
+        assert_eq!(ft_muldiv(0x7fffffff, 0x7fffffff, 0x7fffffff), 0x7fff_ffff);
+        // Quotient in 2^31..2^32: truncates to u32 and flips sign (the
+        // stock unclamped overflow), asm-model verified.
+        assert_eq!(ft_muldiv(0x7fffffff, 2, 1), -2);
+    }
+
+    #[test]
+    fn muldiv_int_min_quirks_match_asm_model() {
+        // |i32::MIN| == 0x80000000 is negative as an i32, so it passes
+        // the signed "small" bound checks; expected values from an
+        // independent Python model of the disassembly.
+        assert_eq!(ft_muldiv(i32::MIN, 3, 7), 0x12492491);
+        assert_eq!(ft_muldiv(i32::MIN, 2, 0x10000), 0);
+        assert_eq!(ft_muldiv(i32::MIN, 46340, 176095), 0);
+        assert_eq!(ft_muldiv(i32::MIN, -0x7fffffff, 7), 0x7fff_ffff);
+        assert_eq!(ft_muldiv(7, i32::MIN, 3), 0x2aaa_aaaa);
+    }
+
+    #[test]
+    fn muldiv_matches_reference_on_randomized_inputs() {
+        // xorshift32 sweep; i32::MIN operands excluded (quirk tests
+        // above own those).
+        let mut x: u32 = 0x2468ace1;
+        let mut rnd = || {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            x
+        };
+        for _ in 0..200_000 {
+            let (a, b, c) = (rnd() as i32, rnd() as i32, rnd() as i32);
+            if a == i32::MIN || b == i32::MIN || c == i32::MIN {
+                continue;
+            }
+            assert_eq!(
+                ft_muldiv(a, b, c) as i64,
+                muldiv_ref(a, b, c),
+                "ft_muldiv({a:#x}, {b:#x}, {c:#x})"
+            );
+        }
+    }
+
+    #[test]
+    fn muldiv_matches_reference_on_small_grid() {
+        let vals = [
+            0, 1, -1, 2, 3, -3, 7, 46339, 46340, 46341, -46340, 0x8000,
+            0x10000, -0x10000, 176095, 176096, -176096, 0x123456,
+            0x7fffffff, -0x7fffffff,
+        ];
+        for &a in &vals {
+            for &b in &vals {
+                for &c in &vals {
+                    assert_eq!(
+                        ft_muldiv(a, b, c) as i64,
+                        muldiv_ref(a, b, c),
+                        "ft_muldiv({a:#x}, {b:#x}, {c:#x})"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
