@@ -6410,48 +6410,296 @@ functions:
       linked-out empty virtual or an unreferenced inline. Nothing to
       port.
 
-  # --- Scouted in 0x08200000-0x082fffff, deliberately NOT ported ---
-  # Each is small and hot, but every one of them needs a subsystem that
-  # is not in the tree yet (a C++ vtable literal, an arena allocator, or
-  # a global object graph). Notes are the findings, not guesses.
+  # --- Vincent 3D software JIT: IR arena + node builders -------------
+  # 0x082b0000-0x082e0000 is a mixed third-party block (SQLite, zlib,
+  # OpenSSL, RTXCbug, FreeType). The cluster below belongs to the
+  # Vincent 3D Rendering Library - the OpenGL ES 1.1 implementation
+  # Apple shipped in retailOS. Identification evidence (all strings
+  # binary-verified):
+  #   0x082559fc "Hans-Martin Will" / "Software" / "OpenGL ES-CM 1.1"
+  #              (Vincent's author; the glGetString VENDOR/RENDERER/
+  #              VERSION table)
+  #   0x082cb0f4 "1.1.0.APPLE Software JIT"
+  # Vincent compiles the rasterizer/fragment pipeline to ARM at run
+  # time; `codegen.*` builds the IR first. The pipeline generators live
+  # in 0x0823a000-0x0826f5ff and emit the IR one node at a time, which
+  # is why these builders dominate the image's call counts.
+  # The earlier scouting note called this "a trace/event-record writer
+  # and its kind-tagged factories". The mechanics it described were
+  # right; the identity was not.
+  #
+  # Recovered layouts (target byte offsets):
+  #   cg_heap_block_t  16 B  +0 next  +4 base  +8 total  +0xc current
+  #   cg_heap_t         8 B  +0 current block  +4 default block size
+  #   cg_module_t             +0 heap
+  #   cg_proc_t               +4 module  +0x10 registers  +0x14
+  #                           last_register  +0x20 num_registers
+  #   cg_block_t              +4 proc  +0xc insts  +0x10 last_inst
+  #   cg_virtual_reg_t 40 B  +0 next  +0x10 reg_no  +0x20 type (u8)
+  #   cg_inst_t (base)       +0 next  +4 block  +8 kind (u8)
+  #                          +9 opcode (u8)  +0xc first derived field
+
+  - address: 0x082c1a08
+    ghidra: FUN_082c1a08
+    name: cg_heap_alloc
+    size: 112
+    sig: "void *cg_heap_alloc(cg_heap_t *heap, size_t size)"
+    module: codegen/heap
+    status: ported
+    notes: >-
+      19 bl + 1 tail b call sites (binary-scanned). The JIT's bump
+      arena, and the blocker that kept this whole cluster unported.
+      Rounds the request up to 8 (`add r0,r1,#7` / `bic r5,r0,#7`);
+      if `block->total - block->current` is (unsigned) less than that,
+      creates a block of max(heap->block_size, rounded) via
+      cg_heap_block_create and pushes it on the front of the chain
+      (the old block's unused tail is abandoned, never revisited);
+      then carves `base + current`, advances current, and ZEROES the
+      carved range through the ROM thunk 0x08037dc8 -> memzero @
+      0x220002d4 (mirror of osos memzero @ 0x080002d4). The zero-fill
+      is load-bearing - none of the record builders write their
+      record's `next` link. No NULL checks anywhere; a failed malloc
+      faults on the first field store. Port deviation - malloc/free/
+      memzero go through the CG_HEAP_OPS dispatch table (house
+      pattern) so host tests can supply an allocator; all three
+      defaults are the real ports.
+
+  - address: 0x082c56e4
+    ghidra: FUN_082c56e4
+    name: cg_heap_block_create
+    size: 52
+    sig: "cg_heap_block_t *cg_heap_block_create(size_t size)"
+    module: codegen/heap
+    status: ported
+    notes: >-
+      2 bl call sites (cg_heap_alloc and cg_heap_create).
+      malloc(16) for the header, malloc(size) for the payload,
+      `stmib` writes base+total, then current = 0 and next = NULL.
+
+  - address: 0x082c1a78
+    ghidra: FUN_082c1a78
+    name: cg_heap_create
+    size: 40
+    sig: "cg_heap_t *cg_heap_create(size_t block_size)"
+    module: codegen/heap
+    status: ported
+    notes: >-
+      1 bl call site. malloc(8) for the arena head, one first block of
+      block_size bytes, `stm r4,{r0,r5}` stores (current, block_size).
+
+  - address: 0x082c1aa0
+    ghidra: FUN_082c1aa0
+    name: cg_heap_destroy
+    size: 60
+    sig: "void cg_heap_destroy(cg_heap_t *heap)"
+    module: codegen/heap
+    status: ported
+    notes: >-
+      1 bl call site. Walks the block chain newest-first freeing
+      payload then header, then tail-branches into free() for the
+      arena head itself.
 
   - address: 0x082c23dc
     ghidra: FUN_082c23dc
-    name: trace_record_append_tagged
+    name: cg_virtual_reg_create
     size: 80
-    module: unported
-    status: identified
+    sig: "cg_virtual_reg_t *cg_virtual_reg_create(cg_proc_t *proc, cg_virtual_reg_type_t type)"
+    module: codegen/ir
+    status: ported
     notes: >-
-      The hottest unported function in the 0x082xxxxx range - 835 bl
-      call sites, binary-verified. Allocates a 40-byte record from the
-      arena reached via this[1][0] (bump allocator 0x082c1a08 - aligns
-      the size up to 8, checks arena[2] - arena[3] against it and grows
-      through 0x082c56e4 when short), stamps the record with this[8]
-      (a monotonically increasing sequence number, post-incremented),
-      stores the r1 argument as a BYTE at record+0x20, and appends the
-      record to the singly linked list at this+0x10 (head) / this+0x14
-      (tail). Clearly a trace/event-log writer. Skipped - porting it
-      pulls in the whole arena allocator (0x082c1a08, 0x082c56e4) and
-      the record type is only legible once the readers are decoded.
+      835 bl call sites, binary-verified - THE most-called unported
+      function in the image before this port. Carves a 40-byte
+      cg_virtual_reg_t out of proc->module->heap (proc+4 -> module,
+      module+0 -> heap), writes proc->num_registers (proc+0x20) into
+      reg+0x10 and post-increments it, stores the type argument as a
+      BYTE at reg+0x20, and appends the record to the procedure's
+      register list (proc+0x10 head / proc+0x14 tail; the tail store
+      is unconditional, the head store is the `streq`). reg->next is
+      never written - it stays NULL by the arena's zero-fill.
+      match.py 20/20 instructions, every constant and offset
+      identical; the port folds the original's duplicate
+      `ldr r1,[r4,#32]` (the record cannot alias the procedure).
+
+  - address: 0x082d6c24
+    ghidra: FUN_082d6c24
+    name: cg_inst_create_base
+    size: 72
+    sig: "cg_inst_t *cg_inst_create_base(cg_block_t *block, size_t size, cg_inst_kind_t kind, cg_opcode_t opcode)"
+    module: codegen/ir
+    status: ported
+    notes: >-
+      11 bl + 1 tail b call sites - the twelve instruction factories
+      at 0x082c17f4-0x082c19b8. Carves a size-byte record out of
+      block->proc->module->heap (block+4 -> proc, proc+4 -> module,
+      module+0 -> heap), stores the owning block at inst+4, appends to
+      the block's instruction list (block+0xc head / block+0x10 tail),
+      and writes kind and opcode as BYTES at inst+8 and inst+9.
+      inst->next relies on the arena's zero-fill.
 
   - address: 0x082c17f4
     ghidra: FUN_082c17f4
-    name: trace_record_make_kind2
+    name: cg_create_inst_binary
     size: 48
-    module: unported
+    sig: "cg_inst_t *cg_create_inst_binary(cg_block_t *block, cg_opcode_t opcode, cg_virtual_reg_t *dest, cg_virtual_reg_t *source0, cg_virtual_reg_t *source1)"
+    module: codegen/ir
+    status: ported
+    notes: >-
+      419 bl call sites. cg_inst_create_base(block, 0x24, kind 2,
+      opcode), then dest -> +0xc, source0 -> +0x14, source1 -> +0x18
+      (source1 is the fifth argument, off the stack). +0x10
+      (dest_flags) is deliberately left NULL - the sibling 0x082c1824
+      is the variant that fills it.
+
+  - address: 0x082c18ec
+    ghidra: FUN_082c18ec
+    name: cg_create_inst_load_immed
+    size: 40
+    sig: "cg_inst_t *cg_create_inst_load_immed(cg_block_t *block, cg_opcode_t opcode, cg_virtual_reg_t *dest, U32 value)"
+    module: codegen/ir
+    status: ported
+    notes: >-
+      201 bl call sites. cg_inst_create_base(block, 0x14, kind 6,
+      opcode), then dest -> +0xc, value -> +0x10.
+
+  # The remaining members of the same factory family. Each is
+  # `cg_inst_create_base(block, <size>, <kind>, opcode)` followed by a
+  # handful of field stores; all are trivially portable once someone
+  # needs them, and every (kind, size) pair below is read straight off
+  # the assembly. Call counts binary-scanned.
+  - address: 0x082c1994
+    ghidra: FUN_082c1994
+    name: cg_create_inst_unary
+    size: 40
+    module: codegen/ir
     status: identified
     notes: >-
-      419 bl call sites. Calls the record factory 0x082d6c24 with
-      (this, size = 0x24, kind = 2, arg) - which itself allocates from
-      the same arena via 0x082c1a08, links the record into the list at
-      this+0xc/+0x10 and stores the kind as a BYTE at record+8 - then
-      fills record+0xc, +0x14 and +0x18 from its remaining arguments
-      (the fifth arrives on the stack). Sibling 0x082c18ec (201 bl
-      call sites, 40 bytes) is the same shape with size = 0x14 and
-      kind = 6, filling only +0xc and +0x10; 0x082c1850 / 0x082c1898 /
-      0x082c18c4 / 0x082c1914 / 0x082c1994 / 0x082c19bc are further
-      members of the same kind-tagged family. Skipped for the same
-      reason as 0x082c23dc.
+      36 bl call sites. kind 1, record size 0x20; dest -> +0xc,
+      source -> +0x14 (+0x10 dest_flags left NULL).
+
+  - address: 0x082c1824
+    ghidra: FUN_082c1824
+    name: cg_create_inst_binary_s
+    size: 44
+    module: codegen/ir
+    status: identified
+    notes: >-
+      7 bl call sites. kind 2, record size 0x24 - the flags-writing
+      twin of cg_create_inst_binary - `ldrd r6,[sp,#24]` then
+      `add r1,r0,#12` / `stm r1,{r4,r5,r6,r7}` fills +0xc, +0x10,
+      +0x14, +0x18 from four arguments.
+
+  - address: 0x082c1898
+    ghidra: FUN_082c1898
+    name: cg_create_inst_compare
+    size: 44
+    module: codegen/ir
+    status: identified
+    notes: >-
+      35 bl call sites. kind 3, record size 0x20; `stm` fills +0xc,
+      +0x10, +0x14 (the third comes off the stack).
+
+  - address: 0x082c18c4
+    ghidra: FUN_082c18c4
+    name: cg_create_inst_load
+    size: 40
+    module: codegen/ir
+    status: identified
+    notes: "34 bl call sites. kind 4, record size 0x18; +0xc and +0x10."
+
+  - address: 0x082c196c
+    ghidra: FUN_082c196c
+    name: cg_create_inst_store
+    size: 40
+    module: codegen/ir
+    status: identified
+    notes: >-
+      5 bl + 2 tail b call sites. kind 5, record size 0x18; +0xc and
+      +0x10.
+
+  - address: 0x082c1878
+    ghidra: FUN_082c1878
+    name: cg_create_inst_branch_label
+    size: 32
+    module: codegen/ir
+    status: identified
+    notes: "16 bl call sites. kind 7, record size 0x14; target -> +0xc."
+
+  - address: 0x082c1850
+    ghidra: FUN_082c1850
+    name: cg_create_inst_branch_cond
+    size: 40
+    module: codegen/ir
+    status: identified
+    notes: >-
+      41 bl call sites. kind 8, record size 0x14. NOTE the swap - the
+      third argument goes to +0x10 and the fourth to +0xc, the
+      opposite order from every other factory in the family.
+
+  - address: 0x082c1914
+    ghidra: FUN_082c1914
+    name: cg_create_inst_phi
+    size: 40
+    module: codegen/ir
+    status: identified
+    notes: >-
+      75 bl call sites. kind 9, record size 0x14; dest -> +0xc,
+      register list -> +0x10 (built by cg_virtual_reg_list_create).
+
+  - address: 0x082c193c
+    ghidra: FUN_082c193c
+    name: cg_create_inst_ret
+    size: 16
+    module: codegen/ir
+    status: identified
+    notes: >-
+      3 bl + 1 tail b call sites. kind 11, record size 0x10, no field
+      stores - `mov r3,r1; mov r1,#16; mov r2,#11; b 0x082d6c24`.
+
+  - address: 0x082c194c
+    ghidra: FUN_082c194c
+    name: cg_create_inst_ret_value
+    size: 32
+    module: codegen/ir
+    status: identified
+    notes: >-
+      2 bl call sites. kind 11, record size 0x10, one field store at
+      +0xc - the value-returning twin of 0x082c193c.
+
+  - address: 0x082c19bc
+    ghidra: FUN_082c19bc
+    name: cg_virtual_reg_list_create
+    size: 76
+    sig: "cg_virtual_reg_list_t *cg_virtual_reg_list_create(cg_heap_t *heap, ...)"
+    module: codegen/ir
+    status: identified
+    notes: >-
+      75 bl call sites. Varargs: `push {r0,r1,r2,r3}` builds the
+      argument frame, then walks the NULL-terminated list of register
+      pointers from &arg1 upward, allocating an 8-byte cell
+      {next, reg} per entry straight from the heap in arg0 (NOT from
+      a module - the caller passes the arena) and chaining them; the
+      head is returned. Ready to port - cg_heap_alloc is now in the
+      tree - but Rust cannot express the C varargs ABI on this target
+      without inline asm, so it would need a fixed-arity family or a
+      slice-taking shim, which is a deviation worth deciding
+      deliberately.
+
+  - address: 0x082c1adc
+    ghidra: FUN_082c1adc
+    name: cg_inst_visit_by_kind
+    size: 288
+    module: codegen/ir
+    status: identified
+    notes: >-
+      4 bl call sites. `ldrb r0,[r0,#8]` (the kind byte) then
+      `cmp r0,#20` / `addls pc,pc,r0,lsl #2` over a 21-entry branch
+      table - the authority for cg_inst_kind_t having exactly 21
+      values in this build, and the reason the kind numbers above can
+      be trusted as a dense enum.
+
+  # --- Scouted in 0x08200000-0x082fffff, deliberately NOT ported ---
+  # Small and hot, but needs a global object graph that is not in the
+  # tree yet. Notes are the findings, not guesses.
 
   - address: 0x0827233c
     ghidra: FUN_0827233c
