@@ -3037,9 +3037,12 @@ functions:
       the scan from the head, unchanged continues from the same
       predecessor link. Sole caller (binary-verified bl scan, no
       literal refs): exit_stdio_cleanup @ 0x08035880 with key 0; the
-      keyed path is dead in retailOS. Registration counterpart
-      unidentified (0x082ab31c is an unrelated test-and-set). Default
-      target of stream_file.rs's LIB_SHUTDOWN_CHAIN hook.
+      keyed path is dead in retailOS. Registration counterpart is
+      cxa_atexit @ 0x082ab1c8 (identified and ported later, same
+      module) — every registration passes the same key, the
+      __dso_handle literal 0x089ca09c, which is why key-0 teardown
+      reaches all of them. Default target of stream_file.rs's
+      LIB_SHUTDOWN_CHAIN hook.
 
   - address: 0x08035b3c
     ghidra: FUN_08035b3c
@@ -5977,3 +5980,569 @@ functions:
       classes is identified from its call sites, so they would be
       `lazy_singleton_<size>` names with no meaning. Port them together
       with a naming pass over their constructors.
+
+  # --- Batch: the UI rectangle primitives (ui/rect) ---
+  # Field layout recovered from the binary, QuickDraw order:
+  # +0x0 top, +0x4 left, +0x8 bottom, +0xc right, all signed 32-bit.
+
+  - address: 0x082a22d8
+    ghidra: FUN_082a22d8
+    name: rect_is_empty
+    size: 36
+    sig: "u32 rect_is_empty(const Rect *rect)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect}
+    notes: >-
+      Returns 1 when either span collapses - right <= left or
+      bottom <= top - else 0. Signed comparisons (movle/movgt). 21 bl
+      call sites, binary-verified. NOT the negation of rect_is_valid
+      (0x082a22fc) - a zero-width rectangle is both empty and valid.
+
+  - address: 0x082a22fc
+    ghidra: FUN_082a22fc
+    name: rect_is_valid
+    size: 36
+    sig: "u32 rect_is_valid(const Rect *rect)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect}
+    notes: >-
+      Returns 1 when neither span is inverted - left <= right and
+      top <= bottom. 5 bl call sites; the interesting one is the tail of
+      rect_intersect (0x0826c1c8), which uses it (not rect_is_empty) as
+      the final guard, so a degenerate zero-area clip survives.
+
+  - address: 0x082a2320
+    ghidra: FUN_082a2320
+    name: rect_width
+    size: 16
+    sig: "i32 rect_width(const Rect *rect)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect}
+    notes: >-
+      right - left (fields +0xc minus +0x4), wrapping. 38 bl call sites.
+      This is what fixes the field order - the XRGB8888 to RGB565 blit
+      loop @ 0x0816d4a0 uses the result as the pixels-per-row count
+      (source pointer advances 4 bytes per inner iteration and
+      result * 4 bytes per row) while rect_height (0x082a2330) drives
+      the outer row loop. The screen rectangle {0, 0, 0xf0, 0x140}
+      appears in the image data @ 0x0843a1f8 and 0x084e05e8 -
+      bottom = 240, right = 320, the Classic 6G's 320x240 LCD.
+
+  - address: 0x082a2330
+    ghidra: FUN_082a2330
+    name: rect_height
+    size: 16
+    sig: "i32 rect_height(const Rect *rect)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect}
+    notes: bottom - top (fields +0x8 minus +0x0), wrapping. 42 bl call sites.
+
+  - address: 0x082a2340
+    ghidra: FUN_082a2340
+    name: rect_contains
+    size: 68
+    sig: "u32 rect_contains(const Rect *outer, const Rect *inner)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: outer, param_2: inner}
+    notes: >-
+      1 iff inner.left >= outer.left and inner.top >= outer.top and
+      inner.bottom <= outer.bottom and inner.right <= outer.right.
+      4 bl call sites. A pure edge-wise comparison with no emptiness
+      test, so an inverted or empty inner still reports as contained -
+      preserved.
+
+  - address: 0x082a2384
+    ghidra: FUN_082a2384
+    name: rect_center
+    size: 56
+    sig: "Point *rect_center(const Rect *rect, Point *out)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect, param_2: out}
+    notes: >-
+      Writes the midpoint into out and returns out (closing
+      `mov r0, r1`). The horizontal midpoint goes to out+0 and the
+      vertical to out+4, so the point is {x, y} - not QuickDraw's
+      {v, h} - even though the rectangle itself is in QuickDraw field
+      order. `add rN, rN, rN, lsr #31` before `asr #1` is C's
+      truncate-toward-zero divide, so negative (inverted) spans round
+      toward zero. 2 bl call sites (0x081dd370, 0x081dd464).
+
+  - address: 0x082a23bc
+    ghidra: FUN_082a23bc
+    name: rect_equals
+    size: 64
+    sig: "u32 rect_equals(const Rect *a, const Rect *b)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: C++ operator== - all four coordinates equal. 2 bl call sites.
+
+  - address: 0x082a23fc
+    ghidra: FUN_082a23fc
+    name: rect_not_equals
+    size: 64
+    sig: "u32 rect_not_equals(const Rect *a, const Rect *b)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      C++ operator!= - emitted as its own function (identical compare
+      chain, inverted results) rather than as a negation of
+      rect_equals. 8 bl call sites.
+
+  - address: 0x082a22a0
+    ghidra: FUN_082a22a0
+    name: rects_intersect
+    size: 56
+    sig: "u32 rects_intersect(const Rect *a, const Rect *b)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      Overlap test that leaves both operands alone - copies a into a
+      16-byte stack rectangle (push {r0-r3} as the frame), calls
+      rect_intersect (0x0826c1c8) on the copy and returns
+      1 - rect_is_empty(copy). 2 bl call sites. The original's
+      `rsbs r0, r0, #1` / `movcc r0, #0` tail is a bool normalisation
+      whose cc case is unreachable (rect_is_empty only returns 0 or 1),
+      so it is dropped. LLVM inlines the whole chain and drops the
+      stack copy - same semantics, 38 instructions vs 14.
+
+  - address: 0x0826c1c8
+    ghidra: FUN_0826c1c8
+    name: rect_intersect
+    size: 132
+    sig: "void rect_intersect(Rect *dst, const Rect *src)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: dst, param_2: src}
+    notes: >-
+      Clips dst to src in place. Either operand empty (rect_is_empty @
+      0x082a22d8) clears dst outright via a tail branch to rect_clear
+      (0x0826c5a8); otherwise dst.top/left take the max and
+      dst.bottom/right the min, and the result is cleared unless
+      rect_is_valid (0x082a22fc) still holds. 45 bl call sites. Void -
+      the original leaves garbage in r0 (the constant 1 falling out of
+      the rect_is_valid call on one path, dst on the cleared path), so
+      no caller can depend on it. Because the final guard is
+      rect_is_valid and not rect_is_empty, a valid-but-degenerate
+      zero-area overlap (edge-to-edge neighbours) survives unchanged -
+      preserved, and pinned by a test.
+
+  - address: 0x0826c574
+    ghidra: FUN_0826c574
+    name: rect_offset
+    size: 52
+    sig: "void rect_offset(Rect *rect, i32 dx, i32 dy)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect, param_2: dx, param_3: dy}
+    notes: >-
+      QuickDraw OffsetRect - the first argument moves the horizontal
+      pair (+0x4 left, +0xc right) and the second the vertical pair
+      (+0x0 top, +0x8 bottom), i.e. (dh, dv). The hottest of the
+      family - 99 bl + 11 tail b call sites, binary-verified. Wrapping
+      adds (the original's bare `add` never traps).
+
+  - address: 0x0826c5a8
+    ghidra: FUN_0826c5a8
+    name: rect_clear
+    size: 24
+    sig: "void rect_clear(Rect *rect)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect}
+    notes: >-
+      Zeroes all four coordinates - the canonical empty rectangle.
+      26 bl + 4 tail b call sites. Void; r0 is never written, which is
+      exactly why rect_intersect can tail-branch here and still look
+      like it returns its destination.
+
+  # --- Batch: the ADS C++ static-initialization runtime ---
+
+  - address: 0x082ab1c8
+    ghidra: FUN_082ab1c8
+    name: cxa_atexit
+    size: 68
+    sig: "i32 cxa_atexit(void *object, ShutdownHandlerFn destructor, i32 dso_handle)"
+    module: runtime/shutdown_chain
+    status: ported
+    vars: {param_1: object, param_2: destructor, param_3: dso_handle,
+      r4: node, r5: result}
+    notes: >-
+      The C++ ABI's __cxa_atexit and the registration counterpart of
+      lib_shutdown_chain @ 0x082ab2b0. malloc(16) @ 0x0802edac, one
+      `stmib r4, {r6,r7,r8}` filling {arg +4, fn +8, key +0xc} from the
+      three arguments, then push onto the libspace+0x38 head
+      (__rt_libspace @ 0x0803204c). 278 bl + 95 tail b call sites = 373,
+      binary-verified. Two departures from the Itanium ABI - arguments
+      are permuted to (object, destructor, dso_handle), and the return
+      is 1 on success / 0 on allocation failure, the inverse of the
+      standard. Every call site is the tail of a function-local static's
+      one-time init, e.g. 0x0803c270 - guard fast path `tst g,#1`,
+      cxa_guard_acquire (0x082ab31c), ctor (returns `this` in r0),
+      cxa_atexit(this, dtor, 0x089ca09c), cxa_guard_release
+      (0x082ab338). dso_handle is therefore always the same literal,
+      0x089ca09c = __dso_handle. Deviations - node size is
+      size_of::<ShutdownNode>() (16 on target, correct on a 64-bit
+      host); allocation goes through the new SHUTDOWN_ALLOC slot
+      (default = the ported malloc), paired with the existing
+      SHUTDOWN_FREE.
+
+  - address: 0x082ab31c
+    ghidra: FUN_082ab31c
+    name: cxa_guard_acquire
+    size: 28
+    sig: "u32 cxa_guard_acquire(u32 *guard)"
+    module: runtime/cxa_guard
+    status: ported
+    vars: {param_1: guard}
+    notes: >-
+      __cxa_guard_acquire, single-threaded ADS variant. Guard word
+      nonzero -> return 0; zero -> store 1 and return 1. 172 bl call
+      sites, binary-verified. The flag is published by ACQUIRE, not by
+      release, so a constructor that re-enters its own initialization
+      is refused and sees a half-built object - preserved. The whole
+      word is tested against zero here while the inlined fast path at
+      each call site tests only bit 0. No locking, and there is no
+      __cxa_guard_abort in the image.
+
+  - address: 0x082ab338
+    ghidra: FUN_082ab338
+    name: cxa_guard_release
+    size: 4
+    sig: "void cxa_guard_release(u32 *guard)"
+    module: runtime/cxa_guard
+    status: ported
+    vars: {param_1: guard}
+    notes: >-
+      __cxa_guard_release - a bare `mov pc, lr`, no-op because acquire
+      already published the flag. 172 bl call sites, exactly matching
+      cxa_guard_acquire's 172; the body is empty, so the identification
+      rests on that 1:1 pairing plus the adjacency at every site (each
+      release immediately follows the cxa_atexit that closes the
+      static's initialization, e.g. 0x0803c2a4 after 0x0803c29c).
+      Needs #[inline(never)] - an empty Rust fn is otherwise a prime
+      candidate for elimination, and this is a real bl target.
+
+  # --- Batch: the rest of the rect compilation unit (ui/rect) ---
+
+  - address: 0x0826c24c
+    ghidra: FUN_0826c24c
+    name: rect_intersect_into
+    size: 156
+    sig: "void rect_intersect_into(Rect *out, const Rect *a, const Rect *b)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: out, param_2: a, param_3: b}
+    notes: >-
+      Three-operand rect_intersect - out = a intersect b, sources
+      untouched. Same rules as the in-place form (0x0826c1c8),
+      including the rect_is_valid final guard, so a degenerate
+      zero-area overlap survives. 18 bl call sites. Void (r0 is 1 on
+      the valid path, out on the cleared path). match.py - 39
+      instructions against the original's 39.
+
+  - address: 0x0826c2e8
+    ghidra: FUN_0826c2e8
+    name: rect_move_to_origin
+    size: 48
+    sig: "void rect_move_to_origin(Rect *rect)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect}
+    notes: >-
+      bottom -= top; right -= left; top = left = 0 - translates the
+      rectangle to (0, 0) keeping its size, so the far edges become the
+      height and width. Done by subtraction rather than through
+      rect_offset, so it is exact even where negating the corner would
+      overflow. 12 bl + 1 tail b call sites.
+
+  - address: 0x0826c318
+    name: rect_center_vertically_in
+    size: 48
+    sig: "void rect_center_vertically_in(Rect *rect, const Rect *container)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect, param_2: container}
+    notes: >-
+      MISSING FROM decomp/functions.csv - Ghidra folded it into its
+      predecessor 0x0826c2e8. Extent recovered from the binary,
+      0x0826c318..0x0826c348, ending in the tail b to rect_offset.
+      Computes dy = (container.top - rect.top) + (container.height -
+      rect.height)/2 and tail-branches to rect_offset(rect, 0, dy) -
+      the dx of 0 is a hard-coded `mov r1, #0`. 1 bl call site.
+
+  - address: 0x0826c348
+    name: rect_center_horizontally_in
+    size: 48
+    sig: "void rect_center_horizontally_in(Rect *rect, const Rect *container)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect, param_2: container}
+    notes: >-
+      Horizontal twin of 0x0826c318, also MISSING FROM functions.csv
+      (extent 0x0826c348..0x0826c378, binary-verified). Reaches the
+      horizontal fields with a pre-indexed `ldr r2, [r1, #4]!` followed
+      by `ldr r3, [r1, #8]` - i.e. container+0x4 and container+0xc.
+      1 bl call site.
+
+  - address: 0x0826c378
+    ghidra: FUN_0826c378
+    name: rect_set
+    size: 12
+    sig: "void rect_set(Rect *rect, i32 top, i32 left, i32 bottom, i32 right)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect, param_2: top, param_3: left, param_4: bottom,
+      param_5: right}
+    notes: >-
+      One `ldr ip, [sp]` + `stm r0, {r1, r2, r3, ip}` - the arguments go
+      into the fields in declaration order, which is why the signature
+      is in QuickDraw field order and not the toolbox SetRect order.
+      20 bl call sites. FUN_0826c5c0 @ 0x0826c5c0 (1 bl call site) is
+      BYTE-IDENTICAL - a duplicate emission from a second translation
+      unit - and has no separate Rust symbol; a hook can target
+      rect_set.
+
+  - address: 0x0826c384
+    ghidra: FUN_0826c384
+    name: rect_inset
+    size: 84
+    sig: "void rect_inset(Rect *rect, i32 dx, i32 dy)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect, param_2: dx, param_3: dy}
+    notes: >-
+      QuickDraw InsetRect - top += dy, left += dx, bottom -= dy,
+      right -= dx, then clear (tail b to 0x0826c5a8) unless
+      rect_is_valid still holds. Argument order matches rect_offset
+      (dx in r1, dy in r2). Negative arguments grow the rectangle;
+      inserting exactly to a point survives, overshooting clears.
+      11 bl call sites. match.py - 21 instructions against 21.
+
+  - address: 0x0826c3d8
+    ghidra: FUN_0826c3d8
+    name: rect_union
+    size: 136
+    sig: "void rect_union(Rect *dst, const Rect *src)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: dst, param_2: src}
+    notes: >-
+      Grows dst to the bounding box of dst and src (min of the near
+      edges, max of the far ones). The two emptiness tests come first
+      so a zeroed rectangle does not drag the union to the origin -
+      empty src returns with dst untouched, empty dst is overwritten by
+      a whole-struct ldm/stm copy of src. 10 bl + 1 tail b call sites.
+      Void. match.py - 34 instructions against 34.
+
+  - address: 0x0826c460
+    ghidra: FUN_0826c460
+    name: rect_union_into
+    size: 148
+    sig: "void rect_union_into(Rect *out, const Rect *a, const Rect *b)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: out, param_2: a, param_3: b}
+    notes: >-
+      Three-operand rect_union. Differs from the in-place form in what
+      an empty operand means - here EITHER empty operand makes out a
+      plain ldm/stm copy of the other, which the in-place form cannot
+      express when src is the empty one. 2 bl call sites.
+
+  - address: 0x0826c4f4
+    ghidra: FUN_0826c4f4
+    name: rect_center_in
+    size: 92
+    sig: "void rect_center_in(Rect *rect, const Rect *container)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect, param_2: container}
+    notes: >-
+      Centres rect inside container on both axes without resizing it -
+      computes dx and dy the same way as the two single-axis siblings
+      (0x0826c318, 0x0826c348) and tail-branches to rect_offset. 9 bl
+      call sites. Both halves truncate toward zero, so an odd leftover
+      lands on the near edge's side.
+
+  - address: 0x0826c550
+    ghidra: FUN_0826c550
+    name: rect_inset_vertical
+    size: 36
+    sig: "void rect_inset_vertical(Rect *rect, i32 dy)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect, param_2: dy}
+    notes: >-
+      rect_inset's vertical-only sibling - left/right are neither read
+      nor written. The overshoot guard is open-coded (`cmp top, bottom`
+      / `bgt rect_clear`) instead of going through rect_is_valid, but
+      it still clears ALL FOUR coordinates. 2 bl call sites.
+
+  - address: 0x0826c5c0
+    ghidra: FUN_0826c5c0
+    name: rect_set_duplicate
+    size: 12
+    module: ui/rect
+    status: identified
+    notes: >-
+      Byte-identical duplicate of rect_set @ 0x0826c378 (`ldr ip, [sp]`
+      / `stm r0, {r1,r2,r3,ip}` / `bx lr`), emitted a second time from
+      another translation unit. 1 bl call site. Deliberately given no
+      separate Rust symbol - point any hook at rect_set.
+
+  - address: 0x0826c5cc
+    ghidra: FUN_0826c5cc
+    name: rect_unit_dead_stub
+    size: 4
+    module: ui/rect
+    status: identified
+    notes: >-
+      A lone `bx lr` closing the rect compilation unit, with ZERO bl
+      and ZERO b call sites in the whole image (binary-verified) - a
+      linked-out empty virtual or an unreferenced inline. Nothing to
+      port.
+
+  # --- Scouted in 0x08200000-0x082fffff, deliberately NOT ported ---
+  # Each is small and hot, but every one of them needs a subsystem that
+  # is not in the tree yet (a C++ vtable literal, an arena allocator, or
+  # a global object graph). Notes are the findings, not guesses.
+
+  - address: 0x082c23dc
+    ghidra: FUN_082c23dc
+    name: trace_record_append_tagged
+    size: 80
+    module: unported
+    status: identified
+    notes: >-
+      The hottest unported function in the 0x082xxxxx range - 835 bl
+      call sites, binary-verified. Allocates a 40-byte record from the
+      arena reached via this[1][0] (bump allocator 0x082c1a08 - aligns
+      the size up to 8, checks arena[2] - arena[3] against it and grows
+      through 0x082c56e4 when short), stamps the record with this[8]
+      (a monotonically increasing sequence number, post-incremented),
+      stores the r1 argument as a BYTE at record+0x20, and appends the
+      record to the singly linked list at this+0x10 (head) / this+0x14
+      (tail). Clearly a trace/event-log writer. Skipped - porting it
+      pulls in the whole arena allocator (0x082c1a08, 0x082c56e4) and
+      the record type is only legible once the readers are decoded.
+
+  - address: 0x082c17f4
+    ghidra: FUN_082c17f4
+    name: trace_record_make_kind2
+    size: 48
+    module: unported
+    status: identified
+    notes: >-
+      419 bl call sites. Calls the record factory 0x082d6c24 with
+      (this, size = 0x24, kind = 2, arg) - which itself allocates from
+      the same arena via 0x082c1a08, links the record into the list at
+      this+0xc/+0x10 and stores the kind as a BYTE at record+8 - then
+      fills record+0xc, +0x14 and +0x18 from its remaining arguments
+      (the fifth arrives on the stack). Sibling 0x082c18ec (201 bl
+      call sites, 40 bytes) is the same shape with size = 0x14 and
+      kind = 6, filling only +0xc and +0x10; 0x082c1850 / 0x082c1898 /
+      0x082c18c4 / 0x082c1914 / 0x082c1994 / 0x082c19bc are further
+      members of the same kind-tagged family. Skipped for the same
+      reason as 0x082c23dc.
+
+  - address: 0x0827233c
+    ghidra: FUN_0827233c
+    name: unported_context_field_0x30
+    size: 16
+    module: unported
+    status: identified
+    notes: >-
+      647 bl call sites - the hottest 16-byte leaf in the range.
+      `push {r4,lr}; bl 0x080cb828; ldr r0, [r0, #0x30]; pop {r4,pc}`.
+      0x080cb828 (46 bl call sites, in another agent's range) is itself
+      `x = 0x0809444c(); return x ? x[3] : x` - so the whole chain is a
+      two-level accessor onto a global object graph. Skipped - the
+      semantics of field +0x30 cannot be established without the object
+      at 0x0809444c, which lives in 0x08060000-0x080fffff.
+
+  - address: 0x08275b9c
+    ghidra: FUN_08275b9c
+    name: unported_vcall_slot5_null_guarded
+    size: 20
+    module: unported
+    status: identified
+    notes: >-
+      414 bl + 17 tail b call sites. `if (obj) tail-call
+      obj->vtable[5](obj)` - a NULL-guarded virtual-call veneer at
+      vtable byte offset 0x14, returning 0 (the NULL object itself) when
+      obj is NULL. r2 is clobbered by the vtable load, so it can forward
+      at most r0/r1/r3 - most likely a nullary virtual on `this`. Ports
+      cleanly through the object's own vtable pointer (no hook table
+      needed), but slot 5 of the base class could not be identified,
+      and a veneer this hot deserves a real name rather than
+      `vcall_slot5`. Left for whoever decodes the class hierarchy the
+      0x0827xxxx container cluster belongs to.
+
+  - address: 0x08277440
+    ghidra: FUN_08277440
+    name: unported_string_default_construct
+    size: 20
+    module: unported
+    status: identified
+    notes: >-
+      280 bl call sites. `obj[0] = 0x089a6044; obj[1] = 0` - a two-word
+      default constructor planting a vtable pointer and a NULL payload.
+      Three siblings plant the SAME vtable - 0x08277414 (ctor + a call
+      to 0x08276620), 0x08277458 (destructor - vtable, 0x08275d74,
+      then operator delete @ 0x082aad24) and 0x08277484 (990 bl call
+      sites; vtable + 0x08275d74, no delete) - so 0x089a6044 is one
+      class's vtable and this is its trivial ctor. The class sits in the
+      0x0827xxxx cluster next to the NULL-guarded strlen @ 0x082770bc,
+      i.e. it is very likely the retailOS string/buffer class. Skipped -
+      the only content of the function is a ROM vtable ADDRESS, which a
+      host test cannot reproduce and which is meaningless until the
+      vtable's six slots (0x0820c2dc, 0x0821183c, 0x082116f8,
+      0x08213bfc, 0x08213818, 0x0820c5ec) are decoded.
+
+  - address: 0x082cfae8
+    ghidra: FUN_082cfae8
+    name: unported_conditional_hook_call
+    size: 16
+    module: unported
+    status: identified
+    notes: >-
+      255 bl + 12 tail b call sites. `if (r1) tail-call *(r0 + 8)` with
+      the arguments forwarded - a guarded call through a function
+      pointer FIELD (not a vtable), returning r0 unchanged when the
+      guard argument is 0. Ports trivially, but the field's role is
+      unknown without the owning struct. Neighbours in the same unit -
+      0x082cfaa4 (68 bytes, 68 bl), 0x082cfc3c (108 bytes, 116 bl),
+      0x082cfe58 (16 bytes, 41 bl).
+
+  - address: 0x08292e6c
+    ghidra: FUN_08292e6c
+    name: unported_global_field_low12
+    size: 20
+    module: unported
+    status: identified
+    notes: >-
+      253 bl call sites. Loads the word at 0x089cc92c (= *0x089cc928
+      literal + 4) and returns its low 12 bits (`lsl #20; lsr #20`).
+      A packed-field getter on a global; the field's meaning needs the
+      writers of 0x089cc928. Sibling 0x08292e58 (16 bytes, 25 bl) reads
+      the same global.
+
+  - address: 0x08252bec
+    ghidra: FUN_08252bec
+    name: unported_singleton_getter_089ca8a8
+    size: 12
+    module: unported
+    status: identified
+    notes: >-
+      146 bl + 1 tail b call sites. `return *(void **)0x089ca8a8` - a
+      bare singleton getter. Nothing to verify behaviorally and nothing
+      to name until the singleton's type is known; recorded so the next
+      pass does not re-scout it.

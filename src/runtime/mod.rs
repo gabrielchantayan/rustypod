@@ -5,6 +5,7 @@ pub mod atexit;
 pub mod byteswap;
 pub mod chval;
 pub mod ctype;
+pub mod cxa_guard;
 pub mod errno;
 pub mod exit;
 pub mod lib_init;

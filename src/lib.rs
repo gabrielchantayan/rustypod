@@ -40,6 +40,7 @@ pub mod scanf;
 pub mod stdio;
 pub mod strto;
 pub mod time;
+pub mod ui;
 pub mod util;
 
 // Flat re-exports: existing `crate::<module>` paths keep working.
@@ -58,4 +59,5 @@ pub use scanf::*;
 pub use stdio::*;
 pub use strto::*;
 pub use time::*;
+pub use ui::*;
 pub use util::*;
