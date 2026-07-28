@@ -62,5 +62,6 @@
 
 pub mod btree_lock;
 pub mod mem;
+pub mod parse;
 pub mod stricmp;
 pub mod vdbe;
