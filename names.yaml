@@ -3771,3 +3771,66 @@ functions:
       Rust memmove (via LLVM's __aeabi_memmove lowering, whose weak
       builtin forwards to the strong ported memmove at link - same
       linkage shape as rom_memmove_keep_dst).
+
+  - address: 0x0813b714
+    ghidra: FUN_0813b714
+    name: berec_test_bit
+    size: 24
+    sig: "u32 berec_test_bit(const u8 **rec, isize offset, u32 bit)"
+    module: util/berec
+    status: ported
+    vars: {param_1: rec, param_2: offset, param_3: bit}
+    notes: >-
+      Big-endian record accessor family head - rec is a handle whose
+      first word is the buffer base. Returns 0/1 for bit `bit` of the
+      byte at offset (ands + movne). Shift is by register, so ARM
+      register-shift rules apply (amount = bottom byte, 32..255 gives
+      0); port replicates them. 17 call sites, binary-scanned (callers
+      cluster @ 0x080f9xxx-0x080fdxxx record parsers).
+
+  - address: 0x0813b72c
+    ghidra: FUN_0813b72c
+    name: berec_extract_bits
+    size: 32
+    sig: "u32 berec_extract_bits(const u8 **rec, isize offset, u32 shift, u32 width)"
+    module: util/berec
+    status: ported
+    vars: {param_1: rec, param_2: offset, param_3: shift, param_4: width}
+    notes: >-
+      (byte-at-offset >> shift) & ((1 << width) - 1) - a bit-field from
+      one byte of the record. ARM register-shift semantics on both
+      amounts (width >= 32 wraps the mask to all-ones via sub #1),
+      replicated in the port. 8 call sites, binary-scanned.
+
+  - address: 0x0813b74c
+    ghidra: FUN_0813b74c
+    name: berec_read_u16
+    size: 24
+    sig: "u32 berec_read_u16(const u8 **rec, isize offset)"
+    module: util/berec
+    status: ported
+    vars: {param_1: rec, param_2: offset}
+    notes: >-
+      Big-endian 16-bit field read (byte at offset is the high byte).
+      Ghidra's CONCAT11 return; the asm keeps it as a 32-bit orr.
+      5 call sites, binary-scanned.
+
+  - address: 0x0813b764
+    ghidra: FUN_0813b764
+    name: berec_read_u24
+    size: 36
+    sig: "u32 berec_read_u24(const u8 **rec, isize offset)"
+    module: util/berec
+    status: ported
+    vars: {param_1: rec, param_2: offset}
+    notes: Big-endian 24-bit field read. 3 call sites, binary-scanned.
+
+  - address: 0x0813b788
+    ghidra: FUN_0813b788
+    name: berec_read_u32
+    size: 44
+    sig: "u32 berec_read_u32(const u8 **rec, isize offset)"
+    module: util/berec
+    status: ported
+    vars: {param_1: rec, param_2: offset}
+    notes: Big-endian 32-bit field read. 4 call sites, binary-scanned.
