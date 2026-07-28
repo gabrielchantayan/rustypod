@@ -23,14 +23,43 @@
 //! - `rects_intersect` — original: `FUN_082a22a0` @ 0x082a22a0 (56
 //!   bytes, 2 `bl` call sites).
 //!
-//! Mutators (`0x0826c1c8`..`0x0826c5a8`):
+//! Mutators — the whole `0x0826c1c8`..`0x0826c5cc` compilation unit:
 //!
 //! - `rect_intersect` — original: `FUN_0826c1c8` @ 0x0826c1c8 (132
 //!   bytes, 45 `bl` call sites).
+//! - `rect_intersect_into` — original: `FUN_0826c24c` @ 0x0826c24c
+//!   (156 bytes, 18 `bl` call sites).
+//! - `rect_move_to_origin` — original: `FUN_0826c2e8` @ 0x0826c2e8
+//!   (48 bytes, 12 `bl` + 1 tail `b` call sites).
+//! - `rect_center_vertically_in` — original @ 0x0826c318 (48 bytes,
+//!   1 `bl` call site). **Missing from `decomp/functions.csv`** —
+//!   Ghidra folded it into its predecessor; the extent comes from the
+//!   binary (0x0826c318..0x0826c348, ending in the tail `b` to
+//!   `rect_offset`).
+//! - `rect_center_horizontally_in` — original @ 0x0826c348 (48 bytes,
+//!   1 `bl` call site). Also missing from `functions.csv`.
+//! - `rect_set` — original: `FUN_0826c378` @ 0x0826c378 (12 bytes,
+//!   20 `bl` call sites).
+//! - `rect_inset` — original: `FUN_0826c384` @ 0x0826c384 (84 bytes,
+//!   11 `bl` call sites).
+//! - `rect_union` — original: `FUN_0826c3d8` @ 0x0826c3d8 (136 bytes,
+//!   10 `bl` + 1 tail `b` call sites).
+//! - `rect_union_into` — original: `FUN_0826c460` @ 0x0826c460 (148
+//!   bytes, 2 `bl` call sites).
+//! - `rect_center_in` — original: `FUN_0826c4f4` @ 0x0826c4f4 (92
+//!   bytes, 9 `bl` call sites).
+//! - `rect_inset_vertical` — original: `FUN_0826c550` @ 0x0826c550
+//!   (36 bytes, 2 `bl` call sites).
 //! - `rect_offset` — original: `FUN_0826c574` @ 0x0826c574 (52 bytes,
 //!   99 `bl` + 11 tail `b` call sites — the hottest of the family).
 //! - `rect_clear` — original: `FUN_0826c5a8` @ 0x0826c5a8 (24 bytes,
 //!   26 `bl` + 4 tail `b` call sites).
+//!
+//! Two functions in the unit are deliberately not given their own Rust
+//! symbol: `FUN_0826c5c0` @ 0x0826c5c0 (12 bytes, 1 `bl` call site) is
+//! byte-for-byte identical to `rect_set`, and `FUN_0826c5cc` @
+//! 0x0826c5cc is a lone `bx lr` with no callers at all. A hook for the
+//! former can point straight at [`rect_set`].
 //!
 //! # Field layout
 //!
@@ -67,13 +96,13 @@
 //! - The predicates return `u32` 0/1 rather than `bool`: ADS returns the
 //!   full register and callers such as `rect_intersect` branch on the
 //!   whole word.
-//! - `rect_intersect`, `rect_offset` and `rect_clear` are `void`. The
-//!   original `rect_intersect` leaves *garbage* in r0 — the constant 1
-//!   on the "result is valid" path (it falls out of the `rect_is_valid`
-//!   call) and the destination pointer on the "cleared" path — so no
-//!   caller can be relying on it. `rect_offset`/`rect_clear` simply
-//!   never write r0, which is why `rect_intersect` can tail-branch to
-//!   `rect_clear`.
+//! - Every mutator is `void`. Several of them leave *garbage* in r0 —
+//!   `rect_intersect`, `rect_intersect_into` and `rect_inset` return
+//!   the constant 1 falling out of their closing `rect_is_valid` call
+//!   on one path and the destination pointer on the other; `rect_union`
+//!   returns a coordinate. No caller can be relying on a value that
+//!   differs per path. The rest simply never write r0, which is why
+//!   `rect_intersect` and friends can tail-branch to `rect_clear`.
 //! - `rects_intersect` drops the original's `rsbs r0, r0, #1` /
 //!   `movcc r0, #0` bool-normalisation tail: with `rect_is_empty`
 //!   returning 0 or 1 the `cc` case is unreachable, so the pair is just
@@ -248,6 +277,186 @@ pub unsafe extern "C" fn rect_intersect(dst: *mut Rect, src: *const Rect) {
     if rect_is_valid(dst) == 0 {
         rect_clear(dst);
     }
+}
+
+/// rect_intersect_into — original: `FUN_0826c24c` @ 0x0826c24c
+/// (156 bytes).
+///
+/// [`rect_intersect`]'s three-operand form: `out = a ∩ b`, leaving both
+/// sources alone. Same rules, including the `rect_is_valid` (not
+/// `rect_is_empty`) final guard.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn rect_intersect_into(out: *mut Rect, a: *const Rect, b: *const Rect) {
+    if rect_is_empty(a) != 0 || rect_is_empty(b) != 0 {
+        rect_clear(out);
+        return;
+    }
+    let (x, y) = (*a, *b);
+    *out = Rect {
+        top: x.top.max(y.top),
+        left: x.left.max(y.left),
+        bottom: x.bottom.min(y.bottom),
+        right: x.right.min(y.right),
+    };
+    if rect_is_valid(out) == 0 {
+        rect_clear(out);
+    }
+}
+
+/// rect_union — original: `FUN_0826c3d8` @ 0x0826c3d8 (136 bytes).
+///
+/// Grows `dst` to also cover `src` (the bounding box of the two). An
+/// empty `src` leaves `dst` alone and an empty `dst` is overwritten
+/// wholesale by `src` — the emptiness tests come first precisely so a
+/// zeroed rectangle does not drag the union to the origin.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn rect_union(dst: *mut Rect, src: *const Rect) {
+    if rect_is_empty(src) != 0 {
+        return;
+    }
+    if rect_is_empty(dst) != 0 {
+        *dst = *src;
+        return;
+    }
+    let s = *src;
+    let d = &mut *dst;
+    d.top = d.top.min(s.top);
+    d.left = d.left.min(s.left);
+    d.bottom = d.bottom.max(s.bottom);
+    d.right = d.right.max(s.right);
+}
+
+/// rect_union_into — original: `FUN_0826c460` @ 0x0826c460 (148 bytes).
+///
+/// [`rect_union`]'s three-operand form: `out = a ∪ b`. An empty operand
+/// makes the result a plain copy of the other one — note this differs
+/// from the in-place version, which cannot "copy" when `src` is empty.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn rect_union_into(out: *mut Rect, a: *const Rect, b: *const Rect) {
+    if rect_is_empty(a) != 0 {
+        *out = *b;
+        return;
+    }
+    if rect_is_empty(b) != 0 {
+        *out = *a;
+        return;
+    }
+    let (x, y) = (*a, *b);
+    *out = Rect {
+        top: x.top.min(y.top),
+        left: x.left.min(y.left),
+        bottom: x.bottom.max(y.bottom),
+        right: x.right.max(y.right),
+    };
+}
+
+/// rect_set — original: `FUN_0826c378` @ 0x0826c378 (12 bytes).
+///
+/// Writes all four coordinates (one `stm`, so in field order). The
+/// fifth argument arrives on the stack on the target, matching the
+/// original's `ldr ip, [sp]`.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn rect_set(rect: *mut Rect, top: i32, left: i32, bottom: i32, right: i32) {
+    *rect = Rect {
+        top,
+        left,
+        bottom,
+        right,
+    };
+}
+
+/// rect_inset — original: `FUN_0826c384` @ 0x0826c384 (84 bytes).
+///
+/// QuickDraw's `InsetRect`: shrinks the rectangle by `dx` on each
+/// horizontal edge and `dy` on each vertical one (negative values grow
+/// it). Over-inserting past the middle inverts the rectangle, and the
+/// closing `rect_is_valid` check clears it instead.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn rect_inset(rect: *mut Rect, dx: i32, dy: i32) {
+    let r = &mut *rect;
+    r.top = r.top.wrapping_add(dy);
+    r.left = r.left.wrapping_add(dx);
+    r.bottom = r.bottom.wrapping_sub(dy);
+    r.right = r.right.wrapping_sub(dx);
+    if rect_is_valid(rect) == 0 {
+        rect_clear(rect);
+    }
+}
+
+/// rect_inset_vertical — original: `FUN_0826c550` @ 0x0826c550
+/// (36 bytes).
+///
+/// [`rect_inset`]'s vertical-only sibling — `left`/`right` are not read
+/// or written. The overshoot guard is open-coded here (`top > bottom`
+/// after the inset) rather than routed through `rect_is_valid`, but it
+/// still clears all four coordinates.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn rect_inset_vertical(rect: *mut Rect, dy: i32) {
+    let r = &mut *rect;
+    r.top = r.top.wrapping_add(dy);
+    r.bottom = r.bottom.wrapping_sub(dy);
+    if r.top > r.bottom {
+        rect_clear(rect);
+    }
+}
+
+/// rect_move_to_origin — original: `FUN_0826c2e8` @ 0x0826c2e8
+/// (48 bytes).
+///
+/// Translates the rectangle so its top-left corner sits at (0, 0),
+/// keeping its size — the far edges become the height and width. Done
+/// by subtraction rather than by calling [`rect_offset`], so it is
+/// exact even for coordinates whose negation would overflow.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn rect_move_to_origin(rect: *mut Rect) {
+    let r = &mut *rect;
+    r.bottom = r.bottom.wrapping_sub(r.top);
+    r.right = r.right.wrapping_sub(r.left);
+    r.top = 0;
+    r.left = 0;
+}
+
+/// rect_center_in — original: `FUN_0826c4f4` @ 0x0826c4f4 (92 bytes).
+///
+/// Translates `rect` so it is centred inside `container`, in both axes,
+/// without resizing it. Computed as a delta and applied through
+/// [`rect_offset`] — the size is preserved exactly even when the
+/// rectangle sticks out of the container.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn rect_center_in(rect: *mut Rect, container: *const Rect) {
+    let (r, c) = (*rect, *container);
+    let dx = c.left.wrapping_sub(r.left).wrapping_add(
+        rect_width(container).wrapping_sub(rect_width(rect)) / 2,
+    );
+    let dy = c.top.wrapping_sub(r.top).wrapping_add(
+        rect_height(container).wrapping_sub(rect_height(rect)) / 2,
+    );
+    rect_offset(rect, dx, dy);
+}
+
+/// rect_center_vertically_in — original @ 0x0826c318 (48 bytes; absent
+/// from `functions.csv`, see the module header).
+///
+/// [`rect_center_in`] restricted to the vertical axis: the horizontal
+/// delta handed to [`rect_offset`] is a hard-coded zero.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn rect_center_vertically_in(rect: *mut Rect, container: *const Rect) {
+    let dy = (*container).top.wrapping_sub((*rect).top).wrapping_add(
+        rect_height(container).wrapping_sub(rect_height(rect)) / 2,
+    );
+    rect_offset(rect, 0, dy);
+}
+
+/// rect_center_horizontally_in — original @ 0x0826c348 (48 bytes;
+/// absent from `functions.csv`, see the module header).
+///
+/// The horizontal twin of [`rect_center_vertically_in`].
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn rect_center_horizontally_in(rect: *mut Rect, container: *const Rect) {
+    let dx = (*container).left.wrapping_sub((*rect).left).wrapping_add(
+        rect_width(container).wrapping_sub(rect_width(rect)) / 2,
+    );
+    rect_offset(rect, dx, 0);
 }
 
 /// rects_intersect — original: `FUN_082a22a0` @ 0x082a22a0 (56 bytes).
@@ -564,6 +773,213 @@ mod tests {
                     assert_eq!(unsafe { rect_contains(&a, &once) }, 1, "{a:?} {b:?}");
                     assert_eq!(unsafe { rect_contains(&b, &once) }, 1, "{a:?} {b:?}");
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn intersect_into_agrees_with_the_in_place_form() {
+        for a in corpus() {
+            for b in corpus() {
+                let mut want = a;
+                unsafe { rect_intersect(&mut want, &b) };
+                let mut got = r(-7, -7, -7, -7); // pre-dirtied
+                unsafe { rect_intersect_into(&mut got, &a, &b) };
+                assert_eq!(got, want, "{a:?} {b:?}");
+                assert_eq!(a, a, "sources untouched");
+            }
+        }
+    }
+
+    #[test]
+    fn union_grows_to_the_bounding_box() {
+        let mut dst = xywh(0, 0, 10, 10);
+        unsafe { rect_union(&mut dst, &xywh(20, 20, 10, 10)) };
+        assert_eq!(dst, xywh(0, 0, 30, 30));
+    }
+
+    #[test]
+    fn union_treats_empty_operands_as_absent_not_as_the_origin() {
+        // An empty source must not drag the union to (0, 0).
+        let mut dst = xywh(50, 50, 10, 10);
+        unsafe { rect_union(&mut dst, &Rect::default()) };
+        assert_eq!(dst, xywh(50, 50, 10, 10));
+        // An empty destination is replaced outright, inverted or not.
+        let mut empty = r(30, 40, 10, 20);
+        unsafe { rect_union(&mut empty, &xywh(50, 50, 10, 10)) };
+        assert_eq!(empty, xywh(50, 50, 10, 10));
+    }
+
+    #[test]
+    fn union_matches_reference_over_the_corpus() {
+        for a in corpus() {
+            for b in corpus() {
+                let mut got = a;
+                unsafe { rect_union(&mut got, &b) };
+                let want = if unsafe { rect_is_empty(&b) } != 0 {
+                    a
+                } else if unsafe { rect_is_empty(&a) } != 0 {
+                    b
+                } else {
+                    r(
+                        a.top.min(b.top),
+                        a.left.min(b.left),
+                        a.bottom.max(b.bottom),
+                        a.right.max(b.right),
+                    )
+                };
+                assert_eq!(got, want, "{a:?} {b:?}");
+                // A non-empty union always contains both non-empty inputs.
+                if unsafe { rect_is_empty(&a) } == 0 && unsafe { rect_is_empty(&b) } == 0 {
+                    assert_eq!(unsafe { rect_contains(&got, &a) }, 1);
+                    assert_eq!(unsafe { rect_contains(&got, &b) }, 1);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn union_into_differs_from_in_place_only_by_being_able_to_copy() {
+        // Both empty-operand paths of the three-operand form copy.
+        let mut out = r(-7, -7, -7, -7);
+        unsafe { rect_union_into(&mut out, &Rect::default(), &xywh(5, 5, 2, 2)) };
+        assert_eq!(out, xywh(5, 5, 2, 2));
+        unsafe { rect_union_into(&mut out, &xywh(5, 5, 2, 2), &Rect::default()) };
+        assert_eq!(out, xywh(5, 5, 2, 2));
+
+        for a in corpus() {
+            for b in corpus() {
+                let mut got = r(-7, -7, -7, -7);
+                unsafe { rect_union_into(&mut got, &a, &b) };
+                let want = if unsafe { rect_is_empty(&a) } != 0 {
+                    b
+                } else if unsafe { rect_is_empty(&b) } != 0 {
+                    a
+                } else {
+                    let mut w = a;
+                    unsafe { rect_union(&mut w, &b) };
+                    w
+                };
+                assert_eq!(got, want, "{a:?} {b:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn set_writes_the_coordinates_in_field_order() {
+        let mut rect = r(-1, -2, -3, -4);
+        unsafe { rect_set(&mut rect, 1, 2, 3, 4) };
+        assert_eq!(rect, r(1, 2, 3, 4));
+    }
+
+    #[test]
+    fn inset_shrinks_by_dx_horizontally_and_dy_vertically() {
+        let mut rect = xywh(0, 0, 100, 100);
+        unsafe { rect_inset(&mut rect, 10, 20) };
+        assert_eq!(rect, xywh(10, 20, 80, 60));
+        // Negative values grow it.
+        unsafe { rect_inset(&mut rect, -10, -20) };
+        assert_eq!(rect, xywh(0, 0, 100, 100));
+    }
+
+    #[test]
+    fn inset_past_the_middle_clears_instead_of_inverting() {
+        let mut rect = xywh(0, 0, 10, 10);
+        unsafe { rect_inset(&mut rect, 6, 0) };
+        assert_eq!(rect, Rect::default());
+        // A degenerate-but-valid inset survives (exactly halved away).
+        let mut exact = xywh(0, 0, 10, 10);
+        unsafe { rect_inset(&mut exact, 5, 5) };
+        assert_eq!(exact, r(5, 5, 5, 5));
+    }
+
+    #[test]
+    fn inset_matches_reference_over_the_corpus() {
+        for start in corpus() {
+            for (dx, dy) in [(0, 0), (1, 1), (-3, 4), (1000, 1000)] {
+                let mut got = start;
+                unsafe { rect_inset(&mut got, dx, dy) };
+                let mut want = r(
+                    start.top.wrapping_add(dy),
+                    start.left.wrapping_add(dx),
+                    start.bottom.wrapping_sub(dy),
+                    start.right.wrapping_sub(dx),
+                );
+                if !(want.left <= want.right && want.top <= want.bottom) {
+                    want = Rect::default();
+                }
+                assert_eq!(got, want, "{start:?} {dx} {dy}");
+            }
+        }
+    }
+
+    #[test]
+    fn inset_vertical_leaves_the_horizontal_edges_alone() {
+        let mut rect = xywh(7, 0, 100, 100);
+        unsafe { rect_inset_vertical(&mut rect, 20) };
+        assert_eq!(rect, xywh(7, 20, 100, 60));
+        // Overshoot clears everything, horizontal edges included.
+        let mut small = xywh(7, 0, 100, 10);
+        unsafe { rect_inset_vertical(&mut small, 6) };
+        assert_eq!(small, Rect::default());
+        // Exactly halved away is `top == bottom`, which survives.
+        let mut exact = xywh(7, 0, 100, 10);
+        unsafe { rect_inset_vertical(&mut exact, 5) };
+        assert_eq!(exact, r(5, 7, 5, 107));
+    }
+
+    #[test]
+    fn move_to_origin_keeps_the_size_and_zeroes_the_corner() {
+        for start in corpus() {
+            let (w, h) = unsafe { (rect_width(&start), rect_height(&start)) };
+            let mut moved = start;
+            unsafe { rect_move_to_origin(&mut moved) };
+            assert_eq!(moved.top, 0);
+            assert_eq!(moved.left, 0);
+            assert_eq!(moved.bottom, h, "{start:?}");
+            assert_eq!(moved.right, w, "{start:?}");
+        }
+    }
+
+    #[test]
+    fn center_in_puts_the_rectangle_in_the_middle_of_its_container() {
+        let container = xywh(0, 0, 100, 100);
+        let mut rect = xywh(0, 0, 20, 40);
+        unsafe { rect_center_in(&mut rect, &container) };
+        assert_eq!(rect, xywh(40, 30, 20, 40));
+        let mut c = Point::default();
+        let mut cc = Point::default();
+        unsafe {
+            rect_center(&rect, &mut c);
+            rect_center(&container, &mut cc);
+        }
+        assert_eq!(c, cc, "centres coincide for even leftovers");
+    }
+
+    #[test]
+    fn center_in_preserves_size_and_splits_the_axes() {
+        for start in corpus() {
+            for container in corpus() {
+                let (w, h) = unsafe { (rect_width(&start), rect_height(&start)) };
+
+                let mut both = start;
+                let mut vertical = start;
+                let mut horizontal = start;
+                unsafe {
+                    rect_center_in(&mut both, &container);
+                    rect_center_vertically_in(&mut vertical, &container);
+                    rect_center_horizontally_in(&mut horizontal, &container);
+                }
+                assert_eq!(unsafe { rect_width(&both) }, w, "size preserved");
+                assert_eq!(unsafe { rect_height(&both) }, h);
+
+                // The single-axis forms are the two-axis form restricted.
+                assert_eq!(vertical.top, both.top, "{start:?} {container:?}");
+                assert_eq!(vertical.bottom, both.bottom);
+                assert_eq!(vertical.left, start.left, "vertical: x untouched");
+                assert_eq!(horizontal.left, both.left, "{start:?} {container:?}");
+                assert_eq!(horizontal.right, both.right);
+                assert_eq!(horizontal.top, start.top, "horizontal: y untouched");
             }
         }
     }

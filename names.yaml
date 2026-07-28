@@ -5072,3 +5072,182 @@ functions:
       static's initialization, e.g. 0x0803c2a4 after 0x0803c29c).
       Needs #[inline(never)] - an empty Rust fn is otherwise a prime
       candidate for elimination, and this is a real bl target.
+
+  # --- Batch: the rest of the rect compilation unit (ui/rect) ---
+
+  - address: 0x0826c24c
+    ghidra: FUN_0826c24c
+    name: rect_intersect_into
+    size: 156
+    sig: "void rect_intersect_into(Rect *out, const Rect *a, const Rect *b)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: out, param_2: a, param_3: b}
+    notes: >-
+      Three-operand rect_intersect - out = a intersect b, sources
+      untouched. Same rules as the in-place form (0x0826c1c8),
+      including the rect_is_valid final guard, so a degenerate
+      zero-area overlap survives. 18 bl call sites. Void (r0 is 1 on
+      the valid path, out on the cleared path). match.py - 39
+      instructions against the original's 39.
+
+  - address: 0x0826c2e8
+    ghidra: FUN_0826c2e8
+    name: rect_move_to_origin
+    size: 48
+    sig: "void rect_move_to_origin(Rect *rect)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect}
+    notes: >-
+      bottom -= top; right -= left; top = left = 0 - translates the
+      rectangle to (0, 0) keeping its size, so the far edges become the
+      height and width. Done by subtraction rather than through
+      rect_offset, so it is exact even where negating the corner would
+      overflow. 12 bl + 1 tail b call sites.
+
+  - address: 0x0826c318
+    name: rect_center_vertically_in
+    size: 48
+    sig: "void rect_center_vertically_in(Rect *rect, const Rect *container)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect, param_2: container}
+    notes: >-
+      MISSING FROM decomp/functions.csv - Ghidra folded it into its
+      predecessor 0x0826c2e8. Extent recovered from the binary,
+      0x0826c318..0x0826c348, ending in the tail b to rect_offset.
+      Computes dy = (container.top - rect.top) + (container.height -
+      rect.height)/2 and tail-branches to rect_offset(rect, 0, dy) -
+      the dx of 0 is a hard-coded `mov r1, #0`. 1 bl call site.
+
+  - address: 0x0826c348
+    name: rect_center_horizontally_in
+    size: 48
+    sig: "void rect_center_horizontally_in(Rect *rect, const Rect *container)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect, param_2: container}
+    notes: >-
+      Horizontal twin of 0x0826c318, also MISSING FROM functions.csv
+      (extent 0x0826c348..0x0826c378, binary-verified). Reaches the
+      horizontal fields with a pre-indexed `ldr r2, [r1, #4]!` followed
+      by `ldr r3, [r1, #8]` - i.e. container+0x4 and container+0xc.
+      1 bl call site.
+
+  - address: 0x0826c378
+    ghidra: FUN_0826c378
+    name: rect_set
+    size: 12
+    sig: "void rect_set(Rect *rect, i32 top, i32 left, i32 bottom, i32 right)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect, param_2: top, param_3: left, param_4: bottom,
+      param_5: right}
+    notes: >-
+      One `ldr ip, [sp]` + `stm r0, {r1, r2, r3, ip}` - the arguments go
+      into the fields in declaration order, which is why the signature
+      is in QuickDraw field order and not the toolbox SetRect order.
+      20 bl call sites. FUN_0826c5c0 @ 0x0826c5c0 (1 bl call site) is
+      BYTE-IDENTICAL - a duplicate emission from a second translation
+      unit - and has no separate Rust symbol; a hook can target
+      rect_set.
+
+  - address: 0x0826c384
+    ghidra: FUN_0826c384
+    name: rect_inset
+    size: 84
+    sig: "void rect_inset(Rect *rect, i32 dx, i32 dy)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect, param_2: dx, param_3: dy}
+    notes: >-
+      QuickDraw InsetRect - top += dy, left += dx, bottom -= dy,
+      right -= dx, then clear (tail b to 0x0826c5a8) unless
+      rect_is_valid still holds. Argument order matches rect_offset
+      (dx in r1, dy in r2). Negative arguments grow the rectangle;
+      inserting exactly to a point survives, overshooting clears.
+      11 bl call sites. match.py - 21 instructions against 21.
+
+  - address: 0x0826c3d8
+    ghidra: FUN_0826c3d8
+    name: rect_union
+    size: 136
+    sig: "void rect_union(Rect *dst, const Rect *src)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: dst, param_2: src}
+    notes: >-
+      Grows dst to the bounding box of dst and src (min of the near
+      edges, max of the far ones). The two emptiness tests come first
+      so a zeroed rectangle does not drag the union to the origin -
+      empty src returns with dst untouched, empty dst is overwritten by
+      a whole-struct ldm/stm copy of src. 10 bl + 1 tail b call sites.
+      Void. match.py - 34 instructions against 34.
+
+  - address: 0x0826c460
+    ghidra: FUN_0826c460
+    name: rect_union_into
+    size: 148
+    sig: "void rect_union_into(Rect *out, const Rect *a, const Rect *b)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: out, param_2: a, param_3: b}
+    notes: >-
+      Three-operand rect_union. Differs from the in-place form in what
+      an empty operand means - here EITHER empty operand makes out a
+      plain ldm/stm copy of the other, which the in-place form cannot
+      express when src is the empty one. 2 bl call sites.
+
+  - address: 0x0826c4f4
+    ghidra: FUN_0826c4f4
+    name: rect_center_in
+    size: 92
+    sig: "void rect_center_in(Rect *rect, const Rect *container)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect, param_2: container}
+    notes: >-
+      Centres rect inside container on both axes without resizing it -
+      computes dx and dy the same way as the two single-axis siblings
+      (0x0826c318, 0x0826c348) and tail-branches to rect_offset. 9 bl
+      call sites. Both halves truncate toward zero, so an odd leftover
+      lands on the near edge's side.
+
+  - address: 0x0826c550
+    ghidra: FUN_0826c550
+    name: rect_inset_vertical
+    size: 36
+    sig: "void rect_inset_vertical(Rect *rect, i32 dy)"
+    module: ui/rect
+    status: ported
+    vars: {param_1: rect, param_2: dy}
+    notes: >-
+      rect_inset's vertical-only sibling - left/right are neither read
+      nor written. The overshoot guard is open-coded (`cmp top, bottom`
+      / `bgt rect_clear`) instead of going through rect_is_valid, but
+      it still clears ALL FOUR coordinates. 2 bl call sites.
+
+  - address: 0x0826c5c0
+    ghidra: FUN_0826c5c0
+    name: rect_set_duplicate
+    size: 12
+    module: ui/rect
+    status: identified
+    notes: >-
+      Byte-identical duplicate of rect_set @ 0x0826c378 (`ldr ip, [sp]`
+      / `stm r0, {r1,r2,r3,ip}` / `bx lr`), emitted a second time from
+      another translation unit. 1 bl call site. Deliberately given no
+      separate Rust symbol - point any hook at rect_set.
+
+  - address: 0x0826c5cc
+    ghidra: FUN_0826c5cc
+    name: rect_unit_dead_stub
+    size: 4
+    module: ui/rect
+    status: identified
+    notes: >-
+      A lone `bx lr` closing the rect compilation unit, with ZERO bl
+      and ZERO b call sites in the whole image (binary-verified) - a
+      linked-out empty virtual or an unreferenced inline. Nothing to
+      port.
