@@ -3814,6 +3814,73 @@ functions:
       stashed, xx=divfix(yy,delta), yy=divfix(xx_old,delta); returns 0.
       1 call site, binary-scanned.
 
+  # --- FreeType 2 ftoutln outline helpers ---
+  - address: 0x0804fe08
+    ghidra: FUN_0804fe08
+    name: ft_vector_transform
+    size: 96
+    sig: "void ft_vector_transform(FtVector *vector, const FtMatrix *matrix)"
+    module: ft/outline
+    status: ported
+    vars: {param_1: vector, param_2: matrix}
+    notes: >-
+      FreeType FT_Vector_Transform - v = matrix*v in 16.16 via four
+      ft_mulfix (0x0804d2cc) products with wrapping adds; both results
+      computed before either store. Null vector or matrix is a no-op.
+      13 call sites, binary-scanned.
+
+  - address: 0x0804e0cc
+    ghidra: FUN_0804e0cc
+    name: ft_outline_transform
+    size: 64
+    sig: "void ft_outline_transform(const FtOutline *outline, const FtMatrix *matrix)"
+    module: ft/outline
+    status: ported
+    vars: {param_1: outline, param_2: matrix}
+    notes: >-
+      FreeType FT_Outline_Transform - ft_vector_transform (0x0804fe08)
+      on points..points+n_points. n_points sign-extended (ldrsh) and
+      the limit compare is unsigned (bcc), so negative n_points wraps
+      the limit below points and the loop runs zero times (preserved
+      via wrapping usize pointer math). Null outline or matrix is a
+      no-op. 4 call sites, binary-scanned.
+
+  - address: 0x0804e10c
+    ghidra: FUN_0804e10c
+    name: ft_outline_translate
+    size: 72
+    sig: "void ft_outline_translate(const FtOutline *outline, i32 x_offset, i32 y_offset)"
+    module: ft/outline
+    status: ported
+    vars: {param_1: outline, param_2: x_offset, param_3: y_offset}
+    notes: >-
+      FreeType FT_Outline_Translate - wrapping-adds the offsets to
+      every point, index counted 0..n_points with a signed compare (so
+      n_points<=0 is a no-op). The original's bic 0x10000 FT_UShort
+      counter mask can never fire (n_points is ldrsh, max 32767) and is
+      omitted. Deviation: the original loads outline->points before its
+      null check (reads NULL+4 when outline==0); port checks first -
+      identical behavior for all non-null outlines. 9 call sites,
+      binary-scanned.
+
+  - address: 0x0804deb4
+    ghidra: FUN_0804deb4
+    name: ft_outline_get_cbox
+    size: 136
+    sig: "void ft_outline_get_cbox(const FtOutline *outline, FtBBox *acbox)"
+    module: ft/outline
+    status: ported
+    vars: {param_1: outline, param_2: acbox}
+    notes: >-
+      FreeType FT_Outline_Get_CBox - signed min/max of x and y over all
+      points, seeded from points[0], scan from points[1] with the same
+      unsigned wrapped-limit compare as ft_outline_transform (negative
+      n_points still reads points[0] and returns it as all four
+      extremes - preserved). n_points==0 yields the zero box. Null
+      outline or acbox is a no-op. BBox layout
+      x_min/y_min/x_max/y_max @ +0/+4/+8/+12. 8 call sites,
+      binary-scanned.
+
   - address: 0x08042cbc
     ghidra: FUN_08042cbc
     name: bcopy

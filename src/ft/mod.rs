@@ -3,4 +3,5 @@
 //! kernels sit in the 0x0804c000..0x08051000 neighborhood). Ported
 //! functions keep FreeType's public names in the crate's snake_case.
 pub mod calc;
+pub mod outline;
 pub mod types;
