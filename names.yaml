@@ -5002,3 +5002,41 @@ functions:
       against the mask (0x081fc408 tests `!= 0x10000`). Plain
       load/modify/store - no lock, no LDREX, no interrupt guard, exactly
       as in the original.
+
+  - address: 0x08184f84
+    ghidra: FUN_08184f84
+    name: ptr_vector_count
+    size: 20
+    sig: "i32 ptr_vector_count(const u8 *owner)"
+    module: util/ptr_vector
+    status: ported
+    vars: {param_1: owner}
+    notes: >-
+      ADS-inlined std::vector<T*>::size() - `(*(end @ +0x18) -
+      *(begin @ +0x14)) asr 2`. 17 bl call sites from 10 distinct
+      callers, every one of them a loop bound over the same owner
+      (`n = count(owner); for i in 0..n { item = FUN_08184f98(owner, i) }`
+      at 0x08185398, 0x081856a0, 0x0819ed78, 0x08147340). The owner is
+      the 0x24-byte object built by FUN_08184fd4 - vtable at +0x00,
+      the container at +0x14. The shift is arithmetic, so an inverted
+      vector yields a negative count while the call sites compare
+      unsigned (bhi); reproduced, not fixed. begin/end are read as
+      32-bit words, so on a 64-bit host the function is only meaningful
+      with synthetic values (the heap/block_region link-word precedent).
+
+  - address: 0x08184f98
+    ghidra: FUN_08184f98
+    name: ptr_vector_at
+    size: 60
+    sig: "void *ptr_vector_at(u8 *owner, u32 index)"
+    module: util/ptr_vector
+    status: identified
+    vars: {param_1: owner, param_2: index}
+    notes: >-
+      Bounds-checked element accessor for the same vector at owner+0x14
+      that ptr_vector_count measures - calls FUN_083d78c4(owner + 0x14)
+      twice (once for a non-empty test, once for the index bound) and
+      returns `((void **)*(owner + 0x14))[index]`, or 0 when the vector
+      is empty or the index is out of range. Not ported - its size
+      helper 0x083d78c4 is outside the 0x08100000-0x081fffff sweep and
+      unported, so the whole body would be dispatch-table indirection.
