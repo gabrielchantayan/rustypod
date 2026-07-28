@@ -81,6 +81,10 @@ static READ_CHAR_INVALID_IO: &[u8] =
     b"FT_Stream_ReadChar: invalid i/o; pos = 0x%lx, size = 0x%lx\n\0";
 static READ_OFFSET_TAG: &[u8] = b"FT_Stream_ReadOffset:\0";
 static READ_LONG_LE_TAG: &[u8] = b"FT_Stream_ReadLongLE:\0";
+static READ_AT_INVALID_IO: &[u8] =
+    b"FT_Stream_ReadAt: invalid i/o; pos = 0x%lx, size = 0x%lx\n\0";
+static READ_AT_TAG: &[u8] = b"FT_Stream_ReadAt:\0";
+static INVALID_READ: &[u8] = b" invalid read; expected %lu bytes, got %lu\n\0";
 
 /// `FT_ASSERT`'s message and the `__FILE__` these two readers pass.
 static ASSERTION_FAILED: &[u8] = b"assertion failed on line %d of file %s\n\0";
@@ -108,6 +112,159 @@ unsafe fn assert_stream_failed(line: u32) -> ! {
         FTSTREAM_C.as_ptr() as usize as u32,
         0,
     )
+}
+
+/// ft_stream_open_memory (FreeType `FT_Stream_OpenMemory`) — original:
+/// `FUN_0804f354` @ 0x0804f354 (28 bytes; 3 call sites).
+///
+/// Points a stream at an in-memory image: `base`/`size` (stored together
+/// by one `stm r0, {r1, r2}`), then zeroes `pos`, `cursor`, `read` and
+/// `close` — that field set, in that order, is upstream's function body
+/// verbatim and is the independent confirmation of the `FtStream`
+/// layout the readers were reverse-engineered against. `limit` is
+/// deliberately left alone, as upstream leaves it.
+///
+/// # Safety
+/// `stream` must be a valid `FtStream` pointer (the original does not
+/// null-check it); `base` must be valid for `size` bytes.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_stream_open_memory(
+    stream: *mut FtStream,
+    base: *const u8,
+    size: u32,
+) {
+    (*stream).base = base as *mut u8;
+    (*stream).size = size;
+    (*stream).pos = 0;
+    (*stream).cursor = core::ptr::null_mut();
+    (*stream).read = None;
+    (*stream).close = None;
+}
+
+/// ft_stream_pos (FreeType `FT_Stream_Pos`) — original: `FUN_0804f370`
+/// @ 0x0804f370 (8 bytes: `ldr r0, [r0, #8]`, `bx lr`; 17 call sites).
+///
+/// `return stream->pos`.
+///
+/// # Safety
+/// `stream` must be a valid `FtStream` pointer.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_stream_pos(stream: *const FtStream) -> u32 {
+    (*stream).pos
+}
+
+/// ft_stream_read_at (FreeType `FT_Stream_ReadAt`) — original:
+/// `FUN_0804f38c` @ 0x0804f38c (176 bytes; 1 `bl` + 1 `b` call site,
+/// plus the fall-through from [`ft_stream_read`]).
+///
+/// Copies `count` bytes from `pos` into `buffer` and leaves `pos +
+/// transferred` in the stream. Two distinct failures, and only the first
+/// is fatal:
+///
+/// - `pos >= size` returns [`FT_ERR_INVALID_STREAM_OPERATION`]
+///   immediately, before anything is read or `pos` is touched. Note this
+///   test runs even for a disk stream, unlike the seek's.
+/// - a **short** transfer still updates `pos` and still returns the
+///   bytes it got; it merely also reports the shortfall and returns the
+///   error. A memory stream clamps `count` to `size - pos` and so short-
+///   reads by construction near the end of the file.
+///
+/// The first failure traces once (this build merged upstream's two
+/// `FT_ERROR`s, as it did for `FT_Stream_Seek`); the short-read failure
+/// kept both.
+///
+/// # Safety
+/// `stream` must be valid; `buffer` must have room for `count` bytes; a
+/// memory stream's `base` must cover `pos + count`.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_stream_read_at(
+    stream: *mut FtStream,
+    pos: u32,
+    buffer: *mut u8,
+    count: u32,
+) -> i32 {
+    let size = (*stream).size;
+    if pos >= size {
+        ft_error_trace(READ_AT_INVALID_IO.as_ptr(), pos, size, 0);
+        return FT_ERR_INVALID_STREAM_OPERATION;
+    }
+    let transferred = match (*stream).read {
+        Some(read) => read(stream, pos, buffer, count),
+        None => {
+            let available = (size - pos).min(count);
+            crate::libc::memcpy::memcpy(
+                buffer,
+                (*stream).base.add(pos as usize),
+                available as usize,
+            );
+            available
+        }
+    };
+    (*stream).pos = pos.wrapping_add(transferred);
+    if transferred < count {
+        ft_error_trace(READ_AT_TAG.as_ptr(), 0, 0, 0);
+        ft_error_trace(INVALID_READ.as_ptr(), count, transferred, 0);
+        return FT_ERR_INVALID_STREAM_OPERATION;
+    }
+    0
+}
+
+/// ft_stream_read (FreeType `FT_Stream_Read`) — original: `FUN_0804f378`
+/// @ 0x0804f378 (20 bytes; 15 call sites).
+///
+/// `ft_stream_read_at(stream, stream->pos, buffer, count)` — a register
+/// shuffle and a `nop` that falls straight through into
+/// [`ft_stream_read_at`], which the linker placed immediately after.
+///
+/// # Safety
+/// As [`ft_stream_read_at`].
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_stream_read(
+    stream: *mut FtStream,
+    buffer: *mut u8,
+    count: u32,
+) -> i32 {
+    ft_stream_read_at(stream, (*stream).pos, buffer, count)
+}
+
+/// ft_stream_try_read (FreeType `FT_Stream_TryRead`) — original:
+/// `FUN_0804fd94` @ 0x0804fd94 (116 bytes; 1 call site).
+///
+/// [`ft_stream_read_at`]'s forgiving twin: reads at the *current* `pos`,
+/// returns however many bytes it actually got and never traces or
+/// reports an error. `pos >= size` yields 0 with `pos` untouched;
+/// otherwise a memory stream clamps to `size - pos` and `pos` advances
+/// by the transferred count. Note the original re-loads `pos` from the
+/// struct for that final add (`ldr`/`add`/`str` @ 0x0804fdf4), so a
+/// `read` callback that moved `pos` itself compounds with the advance —
+/// where [`ft_stream_read_at`] instead adds to the `pos` it was handed.
+///
+/// # Safety
+/// As [`ft_stream_read_at`].
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_stream_try_read(
+    stream: *mut FtStream,
+    buffer: *mut u8,
+    count: u32,
+) -> u32 {
+    let (pos, size) = ((*stream).pos, (*stream).size);
+    if pos >= size {
+        return 0;
+    }
+    let transferred = match (*stream).read {
+        Some(read) => read(stream, pos, buffer, count),
+        None => {
+            let available = (size - pos).min(count);
+            crate::libc::memcpy::memcpy(
+                buffer,
+                (*stream).base.add(pos as usize),
+                available as usize,
+            );
+            available
+        }
+    };
+    (*stream).pos = (*stream).pos.wrapping_add(transferred);
+    transferred
 }
 
 /// ft_stream_seek (FreeType `FT_Stream_Seek`) — original:
@@ -1195,6 +1352,224 @@ mod tests {
                 unsafe { capture::finish() };
             }
         }
+    }
+
+    #[test]
+    fn open_memory_initializes_exactly_the_fields_upstream_does() {
+        let mut bytes = [1u8, 2, 3, 4];
+        let mut stream = disk_stream(99);
+        // Pre-dirty everything so the zeroing is observable.
+        stream.pos = 7;
+        stream.cursor = 1 as *mut u8;
+        stream.limit = 42 as *mut u8;
+        stream.descriptor = 43 as *mut core::ffi::c_void;
+        unsafe { ft_stream_open_memory(&mut stream, bytes.as_ptr(), 4) };
+        assert_eq!(stream.base, bytes.as_mut_ptr());
+        assert_eq!((stream.size, stream.pos), (4, 0));
+        assert!(stream.cursor.is_null());
+        assert!(stream.read.is_none() && stream.close.is_none());
+        // Untouched by upstream's body.
+        assert_eq!(stream.limit, 42 as *mut u8);
+        assert_eq!(stream.descriptor, 43 as *mut core::ffi::c_void);
+        // And the stream it produces reads as a memory stream.
+        let mut error = 0;
+        assert_eq!(unsafe { ft_stream_read_char(&mut stream, &mut error) }, 1);
+    }
+
+    #[test]
+    fn stream_pos_returns_the_cursor() {
+        let mut bytes = [0u8; 4];
+        let mut stream = memory_stream(&mut bytes);
+        for pos in [0u32, 3, 0xffff_ffff] {
+            stream.pos = pos;
+            assert_eq!(unsafe { ft_stream_pos(&stream) }, pos);
+        }
+    }
+
+    /// Reference `FT_Stream_ReadAt` over a memory stream, straight from
+    /// upstream: returns (error, bytes copied, resulting pos).
+    fn read_at_ref(size: u32, pos: u32, count: u32) -> (i32, u32, u32) {
+        if pos >= size {
+            return (FT_ERR_INVALID_STREAM_OPERATION, 0, u32::MAX);
+        }
+        let transferred = (size - pos).min(count);
+        let error = if transferred < count {
+            FT_ERR_INVALID_STREAM_OPERATION
+        } else {
+            0
+        };
+        (error, transferred, pos + transferred)
+    }
+
+    #[test]
+    fn read_at_memory_stream_matches_reference_over_every_position_and_count() {
+        let source = [0x10u8, 0x20, 0x30, 0x40, 0x50, 0x60];
+        for pos in 0..8u32 {
+            for count in 0..9u32 {
+                let _guard = TEST_TRACE_LOCK.lock().unwrap();
+                let mut bytes = source;
+                let mut stream = memory_stream(&mut bytes);
+                stream.pos = 0xdead;
+                let mut buffer = [0xccu8; 12];
+                let error = unsafe {
+                    capture::start();
+                    let e = ft_stream_read_at(&mut stream, pos, buffer.as_mut_ptr(), count);
+                    capture::finish();
+                    e
+                };
+                let (want_error, want_n, want_pos) = read_at_ref(6, pos, count);
+                assert_eq!(error, want_error, "pos {pos} count {count}");
+                if want_pos == u32::MAX {
+                    // Rejected outright: nothing copied, pos untouched.
+                    assert_eq!(stream.pos, 0xdead);
+                    assert!(buffer.iter().all(|&b| b == 0xcc));
+                } else {
+                    assert_eq!(stream.pos, want_pos, "pos {pos} count {count}");
+                    assert_eq!(
+                        &buffer[..want_n as usize],
+                        &source[pos as usize..(pos + want_n) as usize],
+                        "pos {pos} count {count}"
+                    );
+                    assert!(buffer[want_n as usize..].iter().all(|&b| b == 0xcc));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn read_at_past_the_end_traces_once_and_reads_nothing() {
+        let _guard = TEST_TRACE_LOCK.lock().unwrap();
+        let mut bytes = [1u8, 2, 3];
+        let mut stream = memory_stream(&mut bytes);
+        stream.pos = 1;
+        let mut buffer = [0u8; 4];
+        let calls = unsafe {
+            capture::start();
+            assert_eq!(
+                ft_stream_read_at(&mut stream, 3, buffer.as_mut_ptr(), 1),
+                FT_ERR_INVALID_STREAM_OPERATION
+            );
+            capture::finish()
+        };
+        assert_eq!(stream.pos, 1); // untouched
+        let formats = unsafe { capture::formats(&calls) };
+        assert_eq!(formats.len(), 1);
+        assert!(formats[0].starts_with("FT_Stream_ReadAt: invalid i/o;"));
+        assert_eq!(calls[0].args, [3, 3, 0]);
+    }
+
+    #[test]
+    fn read_at_short_read_still_advances_pos_but_reports_the_shortfall() {
+        let _guard = TEST_TRACE_LOCK.lock().unwrap();
+        let mut bytes = [1u8, 2, 3, 4];
+        let mut stream = memory_stream(&mut bytes);
+        let mut buffer = [0u8; 8];
+        let calls = unsafe {
+            capture::start();
+            // 3 bytes left, 6 asked for.
+            assert_eq!(
+                ft_stream_read_at(&mut stream, 1, buffer.as_mut_ptr(), 6),
+                FT_ERR_INVALID_STREAM_OPERATION
+            );
+            capture::finish()
+        };
+        assert_eq!(&buffer[..3], &[2, 3, 4]);
+        assert_eq!(stream.pos, 4);
+        let formats = unsafe { capture::formats(&calls) };
+        assert_eq!(formats.len(), 2);
+        assert_eq!(formats[0], "FT_Stream_ReadAt:");
+        assert!(formats[1].starts_with(" invalid read; expected"));
+        assert_eq!(calls[1].args, [6, 3, 0]); // expected, got
+    }
+
+    #[test]
+    fn read_at_disk_stream_forwards_to_the_callback_verbatim() {
+        let mut stream = disk_stream(16);
+        unsafe { reset_io(&[9, 8, 7, 6, 5]) };
+        let mut buffer = [0u8; 4];
+        assert_eq!(
+            unsafe { ft_stream_read_at(&mut stream, 1, buffer.as_mut_ptr(), 4) },
+            0
+        );
+        assert_eq!(&buffer, &[8, 7, 6, 5]);
+        assert_eq!(stream.pos, 5);
+        assert_eq!(
+            unsafe { io_calls() },
+            vec![IoCall { offset: 1, buffer_is_null: false, count: 4 }]
+        );
+        // A disk stream is not clamped to `size` the way a memory
+        // stream is — only the leading `pos >= size` test applies.
+        assert_eq!(
+            unsafe { ft_stream_read_at(&mut stream, 15, buffer.as_mut_ptr(), 4) },
+            0
+        );
+        assert_eq!(stream.pos, 19);
+    }
+
+    #[test]
+    fn read_reads_at_the_current_position() {
+        let _guard = TEST_TRACE_LOCK.lock().unwrap();
+        let mut bytes = [0xaau8, 0xbb, 0xcc, 0xdd];
+        let mut stream = memory_stream(&mut bytes);
+        stream.pos = 2;
+        let mut buffer = [0u8; 2];
+        unsafe { capture::start() };
+        assert_eq!(
+            unsafe { ft_stream_read(&mut stream, buffer.as_mut_ptr(), 2) },
+            0
+        );
+        assert_eq!(&buffer, &[0xcc, 0xdd]);
+        assert_eq!(stream.pos, 4);
+        // Now at the end: `pos >= size` rejects outright.
+        assert_eq!(
+            unsafe { ft_stream_read(&mut stream, buffer.as_mut_ptr(), 1) },
+            FT_ERR_INVALID_STREAM_OPERATION
+        );
+        assert_eq!(unsafe { capture::finish() }.len(), 1);
+        assert_eq!(stream.pos, 4);
+    }
+
+    #[test]
+    fn try_read_matches_read_at_but_never_errors_or_traces() {
+        let source = [0x10u8, 0x20, 0x30, 0x40, 0x50, 0x60];
+        for pos in 0..8u32 {
+            for count in 0..9u32 {
+                let _guard = TEST_TRACE_LOCK.lock().unwrap();
+                let mut bytes = source;
+                let mut stream = memory_stream(&mut bytes);
+                stream.pos = pos;
+                let mut buffer = [0xccu8; 12];
+                let calls = unsafe {
+                    capture::start();
+                    let n = ft_stream_try_read(&mut stream, buffer.as_mut_ptr(), count);
+                    let calls = capture::finish();
+                    assert_eq!(n, if pos >= 6 { 0 } else { (6 - pos).min(count) });
+                    calls
+                };
+                assert!(calls.is_empty(), "try_read must be silent");
+                let want_pos = if pos >= 6 { pos } else { pos + (6 - pos).min(count) };
+                assert_eq!(stream.pos, want_pos, "pos {pos} count {count}");
+                let n = (want_pos - pos) as usize;
+                if n > 0 {
+                    assert_eq!(&buffer[..n], &source[pos as usize..pos as usize + n]);
+                }
+                assert!(buffer[n..].iter().all(|&b| b == 0xcc));
+            }
+        }
+    }
+
+    #[test]
+    fn try_read_disk_stream_reports_whatever_the_callback_gave() {
+        let mut stream = disk_stream(16);
+        let mut buffer = [0u8; 4];
+        unsafe {
+            reset_io(&[1, 2, 3, 4]);
+            *core::ptr::addr_of_mut!(IO_SHORT_BY) = 2;
+            // A short read is not an error here, just a smaller count.
+            assert_eq!(ft_stream_try_read(&mut stream, buffer.as_mut_ptr(), 4), 2);
+        }
+        assert_eq!(&buffer[..2], &[1, 2]);
+        assert_eq!(stream.pos, 2);
     }
 
     // NOT TESTED, deliberately: the null-`stream` FT_ASSERT path. It

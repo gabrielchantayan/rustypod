@@ -4333,6 +4333,122 @@ functions:
       Port shares ft_error_trace's sink (deviation) and tail-calls the
       ported exit.
 
+  - address: 0x0804f354
+    ghidra: FUN_0804f354
+    name: ft_stream_open_memory
+    size: 28
+    sig: "void ft_stream_open_memory(FtStream *stream, const u8 *base, u32 size)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream, param_2: base, param_3: size}
+    notes: >-
+      FreeType FT_Stream_OpenMemory (ftstream.c) - points a stream at an
+      in-memory image. stm r0,{r1,r2} writes base @ +0 and size @ +4,
+      then zero to pos (+8), cursor (+0x20), read (+0x14) and close
+      (+0x18); limit (+0x24) and everything else is left alone. That
+      field set in that order IS upstream's function body, so this is
+      the independent confirmation of the FtStream layout the readers
+      were reverse-engineered against. 3 call sites, binary-scanned.
+
+  - address: 0x0804f370
+    ghidra: FUN_0804f370
+    name: ft_stream_pos
+    size: 8
+    sig: "u32 ft_stream_pos(const FtStream *stream)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream}
+    notes: >-
+      FreeType FT_Stream_Pos (ftstream.c) - "ldr r0,[r0,#8]; bx lr",
+      i.e. return stream->pos. 17 call sites, binary-scanned.
+
+  - address: 0x0804f378
+    ghidra: FUN_0804f378
+    name: ft_stream_read
+    size: 20
+    sig: "i32 ft_stream_read(FtStream *stream, u8 *buffer, u32 count)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream, param_2: buffer, param_3: count}
+    notes: >-
+      FreeType FT_Stream_Read (ftstream.c) - ft_stream_read_at(stream,
+      stream->pos, buffer, count). Four register moves and a NOP that
+      falls straight through into ft_stream_read_at @ 0x0804f38c, which
+      the linker placed immediately after - there is no branch, which is
+      why a naive call-site scan of 0x0804f38c misses this caller.
+      15 call sites, binary-scanned. LLVM inlines the read_at body into
+      the port instead of falling through - same behavior.
+
+  - address: 0x0804f38c
+    ghidra: FUN_0804f38c
+    name: ft_stream_read_at
+    size: 176
+    sig: "i32 ft_stream_read_at(FtStream *stream, u32 pos, u8 *buffer, u32 count)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream, param_2: pos, param_3: buffer, param_4: count, iVar4: transferred}
+    notes: >-
+      FreeType FT_Stream_ReadAt (ftstream.c) - bulk read of count bytes
+      at pos. Two distinct failures and only the first is fatal: pos >=
+      size (checked for BOTH stream flavors, unlike the seek's bounds
+      test) traces "FT_Stream_ReadAt: invalid i/o; pos = 0x%lx, size =
+      0x%lx" (0x0804f43c, one merged FT_ERROR as in FT_Stream_Seek) and
+      returns 0x55 with nothing read and pos untouched; a SHORT transfer
+      still copies what it got, still stores pos+transferred, and only
+      then traces the tag (0x0804f478) plus " invalid read; expected
+      %lu bytes, got %lu" (0x0804f48c, args count then transferred) and
+      returns 0x55. Disk streams take whatever read() returns; memory
+      streams clamp count to size-pos (so they short-read by
+      construction near EOF) and memcpy via the ROM thunk 0x08037db0
+      (mirror of the ported __rt_memcpy). Note pos is advanced as
+      argument-pos + transferred, NOT re-read from the struct the way
+      ft_stream_try_read does it. 1 bl (0x082c3398) + 1 b (0x0809cdd4)
+      call site plus the fall-through from ft_stream_read @ 0x0804f378,
+      binary-scanned.
+
+  - address: 0x0804fd94
+    ghidra: FUN_0804fd94
+    name: ft_stream_try_read
+    size: 116
+    sig: "u32 ft_stream_try_read(FtStream *stream, u8 *buffer, u32 count)"
+    module: ft/stream
+    status: ported
+    vars: {param_1: stream, param_2: buffer, param_3: count, uVar4: transferred}
+    notes: >-
+      FreeType FT_Stream_TryRead (ftstream.c) - ft_stream_read_at's
+      forgiving twin at the CURRENT pos: returns the byte count actually
+      transferred, never traces and has no error return at all. pos >=
+      size yields 0 with pos untouched; otherwise disk streams take
+      read()'s answer and memory streams clamp to size-pos and memcpy
+      (thunk 0x08037db0). The final advance RE-LOADS pos from the struct
+      (ldr/add/str @ 0x0804fdf4) rather than adding to the value it
+      captured, so a read callback that moves pos itself compounds with
+      the advance - the one behavioral difference from ft_stream_read_at
+      beyond the error reporting. 1 call site, binary-scanned. Port
+      matches instruction-for-instruction at 29 vs 29 (match.py).
+
+  - address: 0x0804fcb8
+    ghidra: FUN_0804fcb8
+    name: ft_stream_release_frame
+    size: 48
+    sig: "void ft_stream_release_frame(FtStream *stream, u8 **pbytes)"
+    module: ft/stream
+    status: identified
+    vars: {param_1: stream, param_2: pbytes}
+    notes: >-
+      FreeType FT_Stream_ReleaseFrame (ftstream.c) - if stream->read
+      (+0x14) is non-null the frame was heap-allocated, so free *pbytes
+      through FT_Free(stream->memory @ +0x1c, *pbytes) = 0x082cfae8, and
+      *pbytes = 0 either way. The doubled "str r5,[r4]" at 0x0804fcdc /
+      0x0804fce0 is the FT_MEM_FREE macro's own nulling followed by the
+      explicit one - which is exactly upstream's source. No FT_ASSERT on
+      stream (this is the pre-2.4 body). 19 bl + 1 b call sites,
+      binary-scanned. NOT PORTED: its only dependency, FreeType's
+      ft_mem_free @ 0x082cfae8 (ftutil.c, whose __FILE__ string sits at
+      0x0890c168 and whose asserts cluster at 0x082cfa68/c14/d88), is
+      outside this agent's range and unported, so the free would have to
+      be stubbed. Port it together with the ftutil.c allocator family.
+
   - address: 0x0804fce8
     ghidra: FUN_0804fce8
     name: ft_stream_seek
