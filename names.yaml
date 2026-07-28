@@ -7288,3 +7288,162 @@ functions:
       mutex lock 0x0807f5c4 / unlock 0x0807f6a0, both unported and in
       another agent's range). Returns dst. Not ported - the lock pair is
       the whole point of the function, so it should wait for those.
+
+  # --- scouted 0x08110000-0x0812ffff, not ported (display-layer sweep) ---
+
+  - address: 0x0812c6b0
+    ghidra: FUN_0812c6b0
+    name: timer_stop
+    size: 76
+    sig: "void timer_stop(u8 *timer)"
+    module: null
+    status: identified
+    notes: >-
+      144 call sites (129 bl + 15 tail b) - the busiest unclaimed
+      function in 0x08110000-0x0812ffff. Runs a trace/assert helper
+      (0x08076954, itself a locked call to 0x0809e620), takes the global
+      mutex object @ 0x089cb294, and if the object's state word at +0x20
+      equals the FourCC 'expi' (0x65787069, i.e. "expired") cancels the
+      pending callback with 0x080a6c0c(obj[+0x28], 0x081216b4, obj);
+      then writes the FourCC 'stop' (0x73746f70) to +0x20 and tail
+      branches to the unlock. Sibling 0x0812bf4c (32 bytes, 119 sites)
+      calls it and then writes 'run ' (0x72756e20) before tail branching
+      to 0x0807a228 - i.e. restart. The FourCC state words are what
+      identify the class as a timer/alarm. Not ported - needs the global
+      mutex object, the cancel helper 0x080a6c0c and the restart
+      0x0807a228 first; three dispatch slots for 76 bytes of body, but
+      the call count makes it the best next target in this range.
+
+  - address: 0x0812bf4c
+    ghidra: FUN_0812bf4c
+    name: timer_restart
+    size: 32
+    sig: "u8 *timer_restart(u8 *timer)"
+    module: null
+    status: identified
+    notes: >-
+      119 call sites (72 bl + 47 tail b). timer_stop(timer) @ 0x0812c6b0,
+      then stores the FourCC 'run ' (0x72756e20) in the state word +0x20
+      and tail branches to 0x0807a228 with the timer in r0. Blocked on
+      the same three callees as timer_stop.
+
+  - address: 0x0812c63c
+    ghidra: FUN_0812c63c
+    name: timer_start_after
+    size: 32
+    sig: "u8 *timer_start_after(u8 *timer, u32 delay)"
+    module: null
+    status: identified
+    notes: >-
+      100 call sites (98 bl + 2 tail b). timer_stop(timer) @ 0x0812c6b0,
+      then tail branches to 0x080744c0(timer, delay) - preserving the
+      second argument untouched across the stop, which is what marks it
+      as the delay/deadline. Blocked on the same callees.
+
+  - address: 0x0811108c
+    ghidra: FUN_0811108c
+    name: timer_schedule_shim
+    size: 20
+    sig: "u32 timer_schedule_shim(u32 a, u8 *timer, u32 b)"
+    module: null
+    status: identified
+    notes: >-
+      64 bl call sites, and nothing but an argument rotation - r0 -> r2,
+      r1 -> r0, r2 -> r1 - before `b 0x0812c65c`, a sibling of the timer
+      cluster above (which itself loads a global at 0x0812c6a8 and calls
+      0x08076924). Not ported - it is pure plumbing in front of an
+      unported callee, so a port would be a hook and nothing else.
+
+  - address: 0x08124a38
+    ghidra: FUN_08124a38
+    name: pair_header_construct
+    size: 36
+    module: null
+    status: identified
+    notes: >-
+      90 bl call sites. `stmia r0!, {r1, r2}` writes the first two
+      argument words to the object and advances, skips a third word, and
+      calls 0x0810ebbc with the advanced pointer; then backs the result
+      up by 12 and clears the word at +0xc4 and the byte at +0x8 of it.
+      Not ported and not confidently named - the shape (write two fields,
+      hand the interior pointer to a base-class helper, then patch two
+      fields of the returned object) is a C++ constructor, but 0x0810ebbc
+      sits just below this range in another agent's neighbourhood and has
+      not been read.
+
+  - address: 0x08123600
+    ghidra: FUN_08123600
+    name: formatted_message_emit
+    size: 80
+    module: null
+    status: identified
+    notes: >-
+      83 bl call sites. Calls 0x08123a54(obj, r3), then formats into the
+      object's inline 512-byte buffer at +0x15 with 0x0802f768(dst,
+      0x200, format, buf_end, arg) - a bounded string formatter - and
+      tail branches to 0x08123c58(obj, obj+0x15). The format string is
+      taken as `pc + 32`, i.e. a literal immediately after the code.
+      Sibling 0x0812395c (88 bytes, 58 sites) is the same function with
+      the fourth word looked up from a table @ 0x081239b4 instead of
+      passed in. Not ported - the whole body is three unported calls plus
+      a format literal.
+
+  - address: 0x0811d46c
+    ghidra: FUN_0811d46c
+    name: vtable_query_4c_kind4
+    size: 12
+    module: null
+    status: identified
+    notes: >-
+      29 bl call sites. `mov r2, r1; mov r1, #4; b 0x0811d7b0` - binds
+      the constant 4 as the middle argument of 0x0811d7b0 (28 bytes, 16
+      sites), which loads `[[*obj] + 0x4c]` and calls it with the stack
+      pointer as the fourth argument, i.e. a vtable slot +0x4c dispatch
+      with an out-parameter. Its neighbour 0x0811d7fc is the identical
+      shape on slot +0x50. Not ported - the object's vtable would have to
+      be modeled first, and this module addresses nothing by word index
+      yet.
+
+  - address: 0x0811d208
+    ghidra: FUN_0811d208
+    name: is_tagged_c0
+    size: 20
+    sig: "u32 is_tagged_c0(u32 value)"
+    module: null
+    status: identified
+    notes: >-
+      11 bl call sites, a pure leaf - returns 1 when the top byte of the
+      argument is exactly 0xc0, else 0. Trivially portable; left out only
+      because the tag's meaning (0xc0xxxxxx as an address range or as a
+      packed type tag) is not established, and a name without that would
+      be guesswork.
+
+  - address: 0x0811c564
+    ghidra: FUN_0811c564
+    name: flag_2c_is_clear
+    size: 16
+    module: null
+    status: identified
+    notes: >-
+      16 bl call sites, a pure leaf. `rsbs r0, byte[obj + 0x2c], #1;
+      movcc r0, #0` - i.e. it returns 1 when the byte at +0x2c is 0 and 0
+      for every other value (the carry-clear predicate kills the negative
+      results, so it is exactly `byte == 0`, not `1 - byte`). Trivially
+      portable; the owning class is unidentified, so the name would be
+      guesswork.
+
+  - address: 0x0811f704
+    ghidra: FUN_0811f704
+    name: width_0c_minus_inset
+    size: 28
+    module: null
+    status: identified
+    notes: >-
+      13 bl call sites, a pure leaf, all in list/text layout code
+      (0x080f6a80, 0x081396xx, 0x0819xxxx, 0x081acxx-0x081afxxx,
+      0x081fdxxx). Reads the u16 at obj+0x0c and returns it minus 9 when
+      the second argument is 4, minus 8 otherwise, truncated back to 16
+      bits (so it wraps rather than clamping). The shape is a width minus
+      a mode-dependent inset, but neither the owning class nor the
+      meaning of mode 4 is established, so it is left unnamed rather than
+      guessed at.
