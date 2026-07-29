@@ -12,10 +12,18 @@
 //!   FourCC `TIMER_STATE_STOPPED` ('stop') to +0x20 and tail-branches to
 //!   `mutex_unlock` @ 0x0807f6a0 on the same global mutex.
 //!
+//! - `timer_restart` — original: `FUN_0812bf4c` @ 0x0812bf4c (32 bytes;
+//!   119 call sites: 72 `bl` + 47 tail `b`, binary-scanned). Calls
+//!   `timer_stop` on the timer, writes the FourCC `TIMER_STATE_RUNNING`
+//!   ('run ') to the state word at +0x20, then tail-branches to the arm
+//!   helper @ 0x0807a228 with the timer still in r0, which re-queues it
+//!   onto the pending list sorted by deadline. The arm helper is not yet
+//!   ported, so it dispatches through `TimerOps::arm_timer`.
+//!
 //! The FourCC state words are what identify the class as a timer/alarm:
-//! the sibling `timer_restart` @ 0x0812bf4c calls `timer_stop` and then
-//! writes 'run ' (0x72756e20) to +0x20, and `timer_start_after` @
-//! 0x0812c63c stops the timer before re-arming it with a delay.
+//! `timer_restart` calls `timer_stop` and then writes 'run '
+//! (0x72756e20) to +0x20, and `timer_start_after` @ 0x0812c63c stops the
+//! timer before re-arming it with a delay.
 //!
 //! Timer object layout (only the words this function touches):
 //!
@@ -30,14 +38,14 @@
 //! is imposed, and nothing here shifts on a 64-bit test host.
 //!
 //! Dispatch design (deviation, by necessity — mirrors the `ROM_KERNEL`
-//! pattern in kernel/sync_mutex.rs): the trace/assert helper @ 0x08076954
-//! and the cancel helper @ 0x080a6c0c are not yet ported, so they
-//! dispatch indirectly through the `TIMER_OPS` fn-pointer table instead
-//! of undefined `extern "C"` symbols that would break the freestanding
-//! ARM link. Default stubs are harmless no-ops; on real hardware the
-//! table must be installed before `timer_stop` is hooked. The mutex pair
-//! is ported, so the global @ 0x089cb294 is modeled directly as the
-//! static `TIMER_CLASS_MUTEX`.
+//! pattern in kernel/sync_mutex.rs): the trace/assert helper @ 0x08076954,
+//! the cancel helper @ 0x080a6c0c and the arm helper @ 0x0807a228 are not
+//! yet ported, so they dispatch indirectly through the `TIMER_OPS`
+//! fn-pointer table instead of undefined `extern "C"` symbols that would
+//! break the freestanding ARM link. Default stubs are harmless no-ops; on
+//! real hardware the table must be installed before `timer_stop` or
+//! `timer_restart` is hooked. The mutex pair is ported, so the global @
+//! 0x089cb294 is modeled directly as the static `TIMER_CLASS_MUTEX`.
 //!
 //! Simplifications:
 //! - The original stores the cancel helper's return value into a dead
@@ -67,9 +75,8 @@ const CALLBACK_HANDLE: usize = 0x28;
 pub const TIMER_STATE_EXPIRED: u32 = 0x6578_7069;
 /// State FourCC @ +0x20: 'stop' — written by `timer_stop` on every path.
 pub const TIMER_STATE_STOPPED: u32 = 0x7374_6f70;
-/// State FourCC @ +0x20: 'run ' — written by the `timer_restart` sibling
-/// @ 0x0812bf4c after it calls `timer_stop`. Defined here so tests and
-/// future ports share the constant.
+/// State FourCC @ +0x20: 'run ' — written by `timer_restart` after it
+/// calls `timer_stop`, before the timer is re-armed.
 pub const TIMER_STATE_RUNNING: u32 = 0x7275_6e20;
 
 /// Original: global timer-class mutex object @ 0x089cb294, taken around
@@ -104,11 +111,17 @@ pub struct TimerOps {
         callback_id: usize,
         timer: *mut u8,
     ) -> u32,
+    /// Arm/schedule helper @ 0x0807a228(timer): no-op when the armed flag
+    /// at +0x1c is nonzero; otherwise, under the class mutex, traces the
+    /// timer, computes the deadline (+0x8 = tick() + period(+0x4) * 1000),
+    /// inserts the timer into the pending queue sorted by deadline, and
+    /// sets the armed flag. `timer_restart` tail-branches to it.
+    pub arm_timer: unsafe extern "C" fn(timer: *mut u8),
 }
 
-// Default stubs: without the trace/cancel layer these operations have no
-// meaning. On real hardware TIMER_OPS must be installed before any timer
-// is stopped through this port.
+// Default stubs: without the trace/cancel/arm layer these operations have
+// no meaning. On real hardware TIMER_OPS must be installed before any
+// timer is stopped or restarted through this port.
 unsafe extern "C" fn missing_trace_assert(_timer: *mut u8) {}
 unsafe extern "C" fn missing_cancel_callback(
     _handle: usize,
@@ -117,14 +130,16 @@ unsafe extern "C" fn missing_cancel_callback(
 ) -> u32 {
     0
 }
+unsafe extern "C" fn missing_arm_timer(_timer: *mut u8) {}
 
 /// The active timer-service dispatch table. Defaults to the documented
 /// stubs above; replaced by host tests (mocks) and eventually by the
-/// ported trace/cancel layer. Written once at init on target; tests
+/// ported trace/cancel/arm layer. Written once at init on target; tests
 /// serialize access.
 pub static mut TIMER_OPS: TimerOps = TimerOps {
     trace_assert: missing_trace_assert,
     cancel_callback: missing_cancel_callback,
+    arm_timer: missing_arm_timer,
 };
 
 /// Reads the ops table. The read is volatile: the table is meant to be
@@ -177,6 +192,26 @@ pub unsafe extern "C" fn timer_stop(timer: *mut u8) {
     mutex_unlock(&mut class_mutex);
 }
 
+/// timer_restart — original: `FUN_0812bf4c` @ 0x0812bf4c (32 bytes).
+///
+/// Restarts `timer`: stops it (the ported `timer_stop` @ 0x0812c6b0,
+/// which runs unlocked before this store), writes the
+/// `TIMER_STATE_RUNNING` ('run ') FourCC to the state word at +0x20, and
+/// tail-branches to the arm helper @ 0x0807a228 with the timer as its
+/// only argument, re-queuing it onto the pending list. The Ghidra
+/// signature is `void`: the tail call's r0 (the arm helper's leftover —
+/// the armed flag or the mutex pointer) is garbage to the caller, not
+/// the timer, so the scouted `u8 *` return is corrected to `void`. The
+/// 'run ' store is deliberately outside the class mutex, exactly as in
+/// the original (the `str` sits between the `bl timer_stop` and the
+/// tail branch).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn timer_restart(timer: *mut u8) {
+    timer_stop(timer);
+    set_word(timer, STATE, TIMER_STATE_RUNNING);
+    (timer_ops().arm_timer)(timer);
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -195,6 +230,7 @@ mod tests {
         Wait(u32),
         Signal(u32),
         Cancel(usize, usize, usize),
+        Arm(usize),
     }
 
     static CALLS: StdMutex<Vec<Call>> = StdMutex::new(Vec::new());
@@ -218,6 +254,9 @@ mod tests {
         record(Call::Cancel(handle, id, timer as usize));
         1
     }
+    unsafe extern "C" fn mock_arm(timer: *mut u8) {
+        record(Call::Arm(timer as usize));
+    }
     unsafe extern "C" fn mock_sema_wait(handle: u32) {
         record(Call::Wait(handle));
     }
@@ -228,6 +267,7 @@ mod tests {
     const MOCK_TIMER_OPS: TimerOps = TimerOps {
         trace_assert: mock_trace,
         cancel_callback: mock_cancel,
+        arm_timer: mock_arm,
     };
 
     /// A 0x30-byte timer object: state word at +0x20, handle at +0x28.
@@ -380,5 +420,70 @@ mod tests {
         let mut after_cancel = before;
         after_cancel[STATE..STATE + 4].copy_from_slice(&TIMER_STATE_STOPPED.to_le_bytes());
         assert_eq!(timer.bytes, after_cancel, "only the state word changes");
+    }
+
+    /// Expired timer: restart runs the full stop sequence (trace, lock,
+    /// cancel, unlock), then writes 'run ' and arms the timer — in that
+    /// order, matching the original's stop; str +0x20; tail-branch.
+    #[test]
+    fn restart_expired_timer_stops_marks_running_then_arms() {
+        let _lock = mock_env();
+        let mut timer = MockTimer::new(TIMER_STATE_EXPIRED, 0x08A0_1234);
+        let timer_ptr = timer.ptr();
+        unsafe { timer_restart(timer_ptr) };
+        assert_eq!(
+            calls(),
+            vec![
+                Call::Trace(timer_ptr as usize),
+                Call::Wait(MOCK_HANDLE),
+                Call::Cancel(0x08A0_1234, 0x0812_16b4, timer_ptr as usize),
+                Call::Signal(MOCK_HANDLE),
+                Call::Arm(timer_ptr as usize),
+            ]
+        );
+        assert_eq!(timer.state(), TIMER_STATE_RUNNING);
+    }
+
+    /// The 'run ' store lands between the stop's unlock and the arm call:
+    /// the original's `str` sits after `timer_stop` returns (no lock is
+    /// held) and before the tail branch.
+    #[test]
+    fn restart_marks_running_before_arming() {
+        let _lock = mock_env();
+        static mut PROBED_TIMER: *const MockTimer = core::ptr::null();
+        static mut STATE_AT_ARM: u32 = 0;
+        unsafe extern "C" fn probing_arm(timer: *mut u8) {
+            record(Call::Arm(timer as usize));
+            unsafe { STATE_AT_ARM = (*PROBED_TIMER).state() };
+        }
+        let mut timer = MockTimer::new(TIMER_STATE_STOPPED, 0);
+        unsafe {
+            PROBED_TIMER = &timer;
+            let mut ops = core::ptr::addr_of!(TIMER_OPS).read_volatile();
+            ops.arm_timer = probing_arm;
+            *core::ptr::addr_of_mut!(TIMER_OPS) = ops;
+            timer_restart(timer.ptr());
+            assert_eq!(STATE_AT_ARM, TIMER_STATE_RUNNING);
+        }
+    }
+
+    /// Restart leaves every word but the state word untouched and always
+    /// hands the same pointer to the arm helper (the original keeps the
+    /// timer in r4 across the stop and moves it back to r0 for the tail
+    /// branch).
+    #[test]
+    fn restart_touches_only_the_state_word() {
+        let _lock = mock_env();
+        let mut timer = MockTimer::new(TIMER_STATE_RUNNING, 0x08A0_7777);
+        let before = timer.bytes;
+        let timer_ptr = timer.ptr();
+        unsafe { timer_restart(timer_ptr) };
+        let mut expected = before;
+        expected[STATE..STATE + 4].copy_from_slice(&TIMER_STATE_RUNNING.to_le_bytes());
+        assert_eq!(timer.bytes, expected, "only the state word changes");
+        assert!(
+            matches!(calls().last(), Some(Call::Arm(t)) if *t == timer_ptr as usize),
+            "arm helper receives the same timer pointer"
+        );
     }
 }

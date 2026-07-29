@@ -9095,11 +9095,19 @@ functions:
     ghidra: FUN_08369864
     name: ata_handle_table_entry
     size: 20
-    module: null
-    status: identified
+    sig: "u32 ata_handle_table_entry(const u32 *handle, u32 index)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: handle, param_2: index}
     notes: >-
       99 bl + 7 tail b call sites. `p ? ((u32 *)p[1])[i] : 0` - indexes
-      a table hanging off the handle's second word.
+      a table hanging off the handle's second word. Where the sibling
+      ata_handle_first_word_or_minus1 reports "no device" as -1, this
+      one folds a missing handle into a zero entry. match.py: same
+      structure (cmp / moveq / ldr [r0,#4] / ldr [r0,r1,lsl #2]); LLVM
+      uses an early-return layout with a frame instead of predicated
+      loads. Host tests mmap a low arena so the 32-bit embedded table
+      pointer survives the u32 round-trip (heap/pool.rs precedent).
 
   - address: 0x08369778
     ghidra: FUN_08369778
@@ -9573,14 +9581,25 @@ functions:
     ghidra: FUN_0812bf4c
     name: timer_restart
     size: 32
-    sig: "u8 *timer_restart(u8 *timer)"
-    module: null
-    status: identified
+    sig: "void timer_restart(u8 *timer)"
+    module: drivers/timer
+    status: ported
+    renames:
+      param_1: timer
     notes: >-
       119 call sites (72 bl + 47 tail b). timer_stop(timer) @ 0x0812c6b0,
       then stores the FourCC 'run ' (0x72756e20) in the state word +0x20
-      and tail branches to 0x0807a228 with the timer in r0. Blocked on
-      the same three callees as timer_stop.
+      (outside the class mutex - the str sits between the stop's return
+      and the tail branch), then tail branches to the arm helper
+      0x0807a228 with the timer in r0, which re-queues it onto the
+      pending list sorted by deadline. The arm helper is not yet ported,
+      so it dispatches through the new TimerOps::arm_timer slot (default
+      no-op stub). Sig corrected from the scouted "u8 *timer_restart(u8
+      *timer)" to void: the tail call's r0 is the arm helper's leftover
+      (the armed flag on the early-return path, the mutex pointer
+      otherwise), not the timer. LLVM inlines timer_stop into the port,
+      so match.py shows the full stop sequence plus the 'run ' store and
+      the indirect tail call - structurally the original.
 
   - address: 0x0812c63c
     ghidra: FUN_0812c63c
