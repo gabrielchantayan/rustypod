@@ -7825,7 +7825,7 @@ functions:
       void *ft_mem_realloc(FtMemory *memory, i32 item_size, i32
       cur_count, i32 new_count, void *block, i32 *p_error)
     module: ft/memory
-    status: identified
+    status: ported
     notes: >-
       FreeType ft_mem_realloc (ftutil.c) - ft_mem_qrealloc (0x082cfb34)
       followed by FT_MEM_ZERO of the grown tail when the call succeeded
