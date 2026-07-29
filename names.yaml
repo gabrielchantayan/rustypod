@@ -6250,6 +6250,9 @@ functions:
       enable-state-changed byte (+0x43) is raised only on an actual
       transition; and there is no alternate-commit notify on this side.
       Runs under the layer mutex, released with a tail branch.
+      #[inline(never)] since the layer_install_planes port (the
+      layer_bind_surface precedent - a real bl target LLVM would
+      otherwise inline into its callers).
 
   - address: 0x081fc3f4
     ghidra: FUN_081fc3f4
@@ -6542,23 +6545,37 @@ functions:
     size: 212
     sig: "void layer_install_planes(u8 *layer, u8 *p0, u8 *p1, u8 *p2, u8 *p3)"
     module: drivers/display_layer
-    status: identified
+    status: ported
     vars: {param_1: layer, param_2: p0, param_3: p1, param_4: p2, param_5: p3}
     notes: >-
-      2 bl call sites (layer_reconfigure, and 0x0811ff8c). Disables the
-      layer first if it is not disabled yet (layer_disable @ 0x081208bc)
-      then flushes the pixel range(s) through 0x08044c48(addr, len) with
-      lengths built from height (+0x20) * buffer width (+0x30) = AREA.
-      Kind (+0x08) 5 with pixel format (+0x0a) 0 and bit 31 clear in p0
-      flushes THREE ranges - p0 for AREA, p1 for AREA/4, p2 for AREA/4,
-      i.e. planar YUV 4:2:0, which is what pins these four words as
-      component plane addresses. Any other kind flushes p0 alone, for
-      AREA*2 (format 2) or AREA*4 (format 3), and not at all for the
-      other formats. Finally stores the four plane words into
-      +0x1c8..+0x1d4 with one `stm` and raises the dirty flag (+0x1bc).
-      Not ported - writes four pointer-typed fields (same blocker as
-      layer_render). Dispatches through LAYER_DRIVER_HOOKS.install_planes
-      (default - no-op).
+      2 bl call sites (layer_reconfigure, and the kind-5 flush @
+      0x0811fcc4). Disables the layer first if it is not disabled yet
+      (layer_disable @ 0x081208bc) then flushes the pixel range(s)
+      through 0x08044c48(addr, len) with lengths built from height
+      (+0x20) * buffer width (+0x30) = AREA. Kind (+0x08) 5 with pixel
+      format (+0x0a) 0 and bit 31 clear in p0 flushes THREE ranges -
+      p0 for AREA, p1 for AREA/4, p2 for AREA/4, i.e. planar YUV 4:2:0,
+      which is what pins these four words as component plane addresses.
+      Any other kind flushes p0 alone, for AREA*2 (format 2) or AREA*4
+      (format 3), and not at all for the other formats. Finally stores
+      the four plane words into +0x1c8..+0x1d4 with one `stm` and raises
+      the dirty flag (+0x1bc). Ported; the earlier "writes four
+      pointer-typed fields" blocker dissolved by storing the block as
+      four u32 words - exactly what the original's stmia writes - which
+      truncates the (zero-extended u32, per the surface_plane_address
+      deviation) native pointers losslessly on a 64-bit host. The flush
+      callee 0x08044c48 (the clean-only range walk, no bit-31 guard of
+      its own - hence the caller-side tst on p0) is not ported; it
+      dispatches through a new LAYER_DRIVER_HOOKS.flush_range slot
+      (default - no-op, the heap/dcache.rs cache-op rationale), and the
+      port is now the install_planes default. layer_disable gained
+      #[inline(never)] (the layer_bind_surface precedent - a real bl
+      target LLVM would otherwise inline away). match.py - same
+      structure: predicated disable bl, kind/format dispatch, per-flush
+      AREA reload+mul with asr#2 / lsl#1 / lsl#2 lengths, four word
+      stores at +0x1c8..+0x1d4 (LLVM splits the stm), dirty store; blx
+      through the hook slot in place of bl, branches instead of
+      predication, frame-pointer setup.
 
   - address: 0x08120134
     ghidra: thunk_FUN_0811fc4c
@@ -8787,12 +8804,9 @@ functions:
     status: ported
     notes: >-
       SQLite's sqlite3VdbeAddOp4. 76 bl call sites. Calls vdbe_add_op3
-      with the first five arguments, then sqlite3VdbeChangeP4
-      @ 0x08386aa4 with (p, returned address, p4, p4type), and returns
-      that address. ChangeP4 is unported - it is the VDBE_P4_OPS dispatch
-      slot in src/sqlite/vdbe.rs and defaults to a documented no-op, so
-      the port still appends the opcode and returns the right address but
-      does not attach P4.
+      with the first five arguments, then vdbe_change_p4
+      @ 0x08386aa4 (now ported) with (p, returned address, p4, p4type),
+      and returns that address.
 
   - address: 0x08367f88
     ghidra: FUN_08367f88
@@ -8871,16 +8885,52 @@ functions:
     name: vdbe_change_p4
     size: 304
     sig: "void vdbe_change_p4(Vdbe *p, int addr, const char *value, int n)"
-    module: null
-    status: identified
+    module: sqlite/vdbe
+    status: ported
+    renames:
+      param_1: p
+      param_2: addr
+      param_3: value
+      param_4: n
     notes: >-
       SQLite's sqlite3VdbeChangeP4 - attaches the fourth operand to an
       op, copying/owning the value according to the P4_* tag in n.
-      24 bl + 2 tail b call sites. NOT ported - it is the only callee of
-      vdbe_add_op4 that is still missing, and it is the VDBE_P4_OPS
-      dispatch slot in src/sqlite/vdbe.rs (default: documented no-op).
-      Porting it needs the P4_* tag constants and the destructor
-      dispatch for P4_KEYINFO / P4_VDBEFUNC / P4_MEM.
+      24 bl + 2 tail b call sites. This build's tag numbering is NOT
+      upstream's (its KEYINFO is -6, not -5; freeP4's jump table spans
+      -13..=0): -14 stores verbatim and keeps the tag even for NULL
+      (checked first), -6 deep-copies a KeyInfo (nField word at value+8,
+      5*nField+0x10 bytes, sqlite3_malloc + __rt_memcpy; OOM sets
+      db+0x1e and tags NOTUSED), -9 stores verbatim but retags -6
+      (upstream's P4_KEYINFO_HANDOFF behavior - both branches share the
+      original's `strb r9`, r9 = -6), other negative n stores verbatim
+      with tag truncated to a byte, n==0 measures strlen first, n>0
+      duplicates via db_str_ndup and tags -1. Guards, in order: no aOp
+      or db->mallocFailed drops the INCOMING payload through freeP4
+      (unless it is a KeyInfo - the caller keeps that); a still-negative
+      addr after nOp-1 is a silent no-op. freeP4 @ 0x082cf388 is not
+      ported - it is the VDBE_P4_OPS dispatch slot (default: documented
+      no-op that leaks rather than corrupts). strlen, __rt_memcpy and
+      db_str_ndup are called through their ported twins, malloc through
+      DB_MEM_OPS. match.py structural (slot blx vs direct bl, LLVM
+      inlines the strlen, store order swapped in the n<0 branch).
+
+  - address: 0x082cf388
+    ghidra: FUN_082cf388
+    name: vdbe_free_p4
+    size: 148
+    sig: "void vdbe_free_p4(int p4type, void *p4)"
+    module: null
+    status: identified
+    notes: >-
+      SQLite's freeP4 - the tag-dispatch destructor vdbe_change_p4
+      (and the op-array teardown) call to release P4 payloads. Jump
+      table over p4type -13..=0 (`add r0,r0,#0xd; cmp r0,#0xc; addls
+      pc`): -13/-12/-11/-9/-6/-1 free the pointer raw, -10/-4/-3/-2
+      return untouched, -8 tail-calls a value destructor @ 0x08386504,
+      -7 releases an ephemeral function @ 0x082cf358(*p4) then frees,
+      -5 tail-calls 0x082cf358(p4). Anything outside -13..=0 (e.g. -14)
+      returns unfreed. Not ported - it is the VDBE_P4_OPS dispatch slot
+      in src/sqlite/vdbe.rs (default: documented no-op).
 
   # ---- Case-insensitive compare (src/sqlite/stricmp.rs) ----
   - address: 0x08384fa0

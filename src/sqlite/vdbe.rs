@@ -19,6 +19,9 @@
 //!   1 tail `b`). `sqlite3VdbeAddOp1` — `p2 = p3 = 0`.
 //! - `vdbe_add_op4` — `FUN_083868c8` @ 0x083868c8 (68 bytes; 76 `bl`).
 //!   `sqlite3VdbeAddOp4` — append, then attach the P4 operand.
+//! - `vdbe_change_p4` — `FUN_08386aa4` @ 0x08386aa4 (304 bytes;
+//!   24 `bl` + 2 tail `b`). `sqlite3VdbeChangeP4`: attach the fourth
+//!   operand to an already-emitted op, releasing the old one.
 //! - `vdbe_resize_op_array` — `FUN_08367f88` @ 0x08367f88 (48 bytes;
 //!   2 `bl`). SQLite's `resizeOpArray`.
 //! - `vdbe_change_p2` — `FUN_08386a44` @ 0x08386a44 (48 bytes; 66 `bl` +
@@ -46,11 +49,17 @@
 //!
 //! ### Deviations
 //!
-//! - `sqlite3VdbeChangeP4` @ 0x08386aa4 (304 bytes) is not ported; it is
-//!   the [`VDBE_P4_OPS`] dispatch boundary (house pattern — see
-//!   `heap/block_region.rs`). The default slot is a documented no-op:
-//!   [`vdbe_add_op4`] still appends the opcode and returns the right
-//!   address, it just does not attach P4.
+//! - `freeP4` @ 0x082cf388 (148 bytes — the tag-dispatch destructor
+//!   `vdbe_change_p4` calls to release old/dropped P4 payloads) is not
+//!   ported; it is the [`VDBE_P4_OPS`] dispatch boundary (house
+//!   pattern — see `heap/block_region.rs`). The default slot is a
+//!   documented no-op: an unconfigured build leaks P4 payloads rather
+//!   than freeing through the wrong destructor.
+//! - `strlen` @ 0x08392478, `__rt_memcpy` @ 0x08037db0 and
+//!   `db_str_ndup` @ 0x08374a40 are called directly through their
+//!   ported twins; the KeyInfo copy's `sqlite3_malloc` @ 0x08390b14
+//!   goes through the [`DB_MEM_OPS`](crate::sqlite::mem::DB_MEM_OPS)
+//!   dispatch boundary, per the porting rules.
 //! - `Vdbe` and `VdbeOp` are typed `#[repr(C)]` structs rather than raw
 //!   byte offsets, so the pointer fields stay disjoint on a 64-bit test
 //!   host. The exact original byte offsets are statically asserted on
@@ -59,7 +68,12 @@
 //!   the original relies on an `assert( p->nOp>0 )` that is compiled out
 //!   here, and every call site emits an op immediately beforehand.
 
-use crate::sqlite::mem::{db_realloc, db_realloc_or_free, malloc_failed};
+use crate::libc::rt_memcpy::__rt_memcpy;
+use crate::libc::strlen::strlen;
+use crate::sqlite::mem::{
+    db_malloc_op, db_realloc, db_realloc_or_free, malloc_failed, set_malloc_failed,
+};
+use crate::sqlite::strdup::db_str_ndup;
 
 /// One VDBE instruction — the original's 20-byte `VdbeOp`.
 #[repr(C)]
@@ -134,21 +148,51 @@ pub const INITIAL_OP_CAPACITY: i32 = 51;
 /// — `nLabelAlloc*2 + 10`).
 const LABEL_GROWTH_BIAS: i32 = 10;
 
-/// Indirect dispatch for the unported P4 setter @ 0x08386aa4.
+/// Indirect dispatch for the unported P4 destructor @ 0x082cf388.
 #[derive(Clone, Copy)]
 pub struct VdbeP4Ops {
-    /// `sqlite3VdbeChangeP4(p, addr, zP4, n)` @ 0x08386aa4.
-    pub change_p4: unsafe extern "C" fn(p: *mut Vdbe, addr: i32, value: *const u8, n: i32),
+    /// `freeP4(p4type, p4)` @ 0x082cf388: release a P4 payload
+    /// according to its tag.
+    pub free_p4: unsafe extern "C" fn(p4type: i32, p4: *mut u8),
 }
 
-/// Default stub: P4 is not attached (see the module header).
-unsafe extern "C" fn missing_change_p4(_p: *mut Vdbe, _addr: i32, _value: *const u8, _n: i32) {}
+/// Default stub: the payload is leaked, not freed (see the module
+/// header). Deliberately not a passthrough to a global free — which
+/// destructor runs depends on the tag, and guessing wrong corrupts.
+unsafe extern "C" fn missing_free_p4(_p4type: i32, _p4: *mut u8) {}
 
-/// Wired default (documented no-op until 0x08386aa4 is ported).
-pub const DEFAULT_VDBE_P4_OPS: VdbeP4Ops = VdbeP4Ops { change_p4: missing_change_p4 };
+/// Wired default (documented no-op until 0x082cf388 is ported).
+pub const DEFAULT_VDBE_P4_OPS: VdbeP4Ops = VdbeP4Ops { free_p4: missing_free_p4 };
 
-/// The active P4 setter. Host tests install recording mocks.
+/// The active P4 destructor. Host tests install recording mocks.
 pub static mut VDBE_P4_OPS: VdbeP4Ops = DEFAULT_VDBE_P4_OPS;
+
+/// Reads the freeP4 slot (volatile — the slot is meant to be swapped at
+/// runtime, and a plain read lets LLVM const-fold the default away).
+#[inline(always)]
+pub(crate) unsafe fn free_p4_op() -> unsafe extern "C" fn(i32, *mut u8) {
+    core::ptr::read_volatile(core::ptr::addr_of!(VDBE_P4_OPS.free_p4))
+}
+
+/// P4 operand tags, as numbered by THIS build. The evidence is
+/// `vdbe_change_p4`'s own `cmn` checks plus the jump table of its
+/// `freeP4` (which spans tags -13..=0): this build's KEYINFO is -6,
+/// not upstream SQLite's -5, so upstream numbers do not apply.
+/// No P4 operand attached.
+pub const P4_NOTUSED: i8 = 0;
+/// `p4` is an owned [`db_str_ndup`] duplicate; released by freeP4.
+pub const P4_DYNAMIC: i32 = -1;
+/// `p4` is a KeyInfo the statement owns (deep-copied on attach);
+/// released by freeP4.
+pub const P4_KEYINFO: i32 = -6;
+/// `value` is an already-owned KeyInfo: stored verbatim and retagged
+/// [`P4_KEYINFO`] (upstream's P4_KEYINFO_HANDOFF behavior — the
+/// original's -9 branch stores the same -6 byte as the copy path).
+pub const P4_KEYINFO_HANDOFF: i32 = -9;
+/// `value` is stored verbatim with this tag even when NULL, and is
+/// never owned or freed (outside freeP4's -13..=0 table; upstream's
+/// P4_ADVANCE role).
+pub const P4_ADVANCE: i32 = -14;
 
 /// vdbe_resize_op_array — original: `FUN_08367f88` @ 0x08367f88
 /// (48 bytes).
@@ -234,8 +278,8 @@ pub unsafe extern "C" fn vdbe_add_op1(p: *mut Vdbe, opcode: i32, p1: i32) -> i32
 /// 76 `bl` call sites).
 ///
 /// `sqlite3VdbeAddOp4`: [`vdbe_add_op3`] followed by
-/// `sqlite3VdbeChangeP4` on the address just returned. Returns that
-/// address. See the module header for the P4 dispatch deviation.
+/// [`vdbe_change_p4`] on the address just returned. Returns that
+/// address.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn vdbe_add_op4(
@@ -248,9 +292,98 @@ pub unsafe extern "C" fn vdbe_add_op4(
     p4type: i32,
 ) -> i32 {
     let addr = vdbe_add_op3(p, opcode, p1, p2, p3);
-    let change_p4 = core::ptr::read_volatile(core::ptr::addr_of!(VDBE_P4_OPS.change_p4));
-    change_p4(p, addr, p4, p4type);
+    vdbe_change_p4(p, addr, p4, p4type);
     addr
+}
+
+/// vdbe_change_p4 — original: `FUN_08386aa4` @ 0x08386aa4 (304 bytes;
+/// 24 `bl` + 2 tail `b` call sites).
+///
+/// `sqlite3VdbeChangeP4`: attach the fourth operand to the op at
+/// `addr` (a negative `addr` means the most recently emitted op),
+/// releasing whatever P4 the op held before through freeP4. How
+/// `value` is treated depends on the tag `n`:
+///
+/// - [`P4_ADVANCE`] (-14): stored verbatim with the tag, even when
+///   NULL (this check comes before the NULL check in the original).
+/// - NULL `value`: the op is tagged [`P4_NOTUSED`].
+/// - [`P4_KEYINFO`] (-6): the KeyInfo is deep-copied — `nField` is
+///   read from `value + 8` and `5*nField + 0x10` bytes are duplicated
+///   (`sqlite3_malloc`, then `__rt_memcpy`). OOM leaves the op tagged
+///   NOTUSED and sets the connection's sticky `mallocFailed` byte.
+/// - [`P4_KEYINFO_HANDOFF`] (-9): stored as-is, retagged KEYINFO.
+/// - any other negative `n`: stored as-is, tag truncated to a byte.
+/// - `n == 0`: `n` becomes `strlen(value)`, then falls through.
+/// - `n > 0`: the string is duplicated (`db_str_ndup`) and tagged
+///   [`P4_DYNAMIC`].
+///
+/// Two guards come first, in the original's order. With no op array or
+/// an already-failed connection, the *incoming* value's payload is
+/// released through freeP4 — unless it is a KeyInfo, which stays the
+/// caller's — and nothing is attached. And an `addr` that is still
+/// negative after the `nOp - 1` substitution is a silent no-op.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vdbe_change_p4(p: *mut Vdbe, addr: i32, value: *const u8, n: i32) {
+    let a_op = (*p).a_op;
+    if a_op.is_null() || malloc_failed((*p).db) {
+        // Original: `cmn r5,#0x6` / tail `bne 0x082cf388` — a KeyInfo
+        // is the caller's, every other payload is dropped here.
+        if n != P4_KEYINFO {
+            (free_p4_op())(n, value as *mut u8);
+        }
+        return;
+    }
+    let mut addr = addr;
+    if addr < 0 {
+        addr = (*p).n_op - 1;
+        if addr < 0 {
+            return;
+        }
+    }
+    let op = a_op.offset(addr as isize);
+    (free_p4_op())((*op).p4type as i32, (*op).p4);
+    (*op).p4 = core::ptr::null_mut();
+    if n == P4_ADVANCE {
+        (*op).p4 = value as *mut u8;
+        (*op).p4type = P4_ADVANCE as i8;
+        return;
+    }
+    if value.is_null() {
+        (*op).p4type = P4_NOTUSED;
+        return;
+    }
+    if n == P4_KEYINFO {
+        // Original: `ldr r0,[r6,#0x8]` (nField), `add r0,r0,r0,lsl#2`
+        // / `add r5,r0,#0x10` — 5*nField + 16 bytes duplicated.
+        let n_field = (value as *const i32).add(2).read();
+        let bytes = n_field.wrapping_mul(5).wrapping_add(0x10);
+        let copy = (db_malloc_op())(bytes);
+        (*op).p4 = copy;
+        if copy.is_null() {
+            set_malloc_failed((*p).db);
+            (*op).p4type = P4_NOTUSED;
+            return;
+        }
+        __rt_memcpy(copy, value, bytes as usize);
+        (*op).p4type = P4_KEYINFO as i8;
+        return;
+    }
+    if n == P4_KEYINFO_HANDOFF {
+        (*op).p4 = value as *mut u8;
+        // Original: the -9 branch shares the copy path's `strb r9`,
+        // so the stored tag is -6, not -9.
+        (*op).p4type = P4_KEYINFO as i8;
+        return;
+    }
+    if n < 0 {
+        (*op).p4 = value as *mut u8;
+        (*op).p4type = n as i8;
+        return;
+    }
+    let len = if n == 0 { strlen(value) as i32 } else { n };
+    (*op).p4 = db_str_ndup((*p).db, value, len);
+    (*op).p4type = P4_DYNAMIC as i8;
 }
 
 /// vdbe_change_p2 — original: `FUN_08386a44` @ 0x08386a44 (48 bytes;
@@ -525,20 +658,23 @@ mod tests {
     }
 
     #[test]
-    fn add_op4_appends_then_hands_the_address_to_the_p4_setter() {
+    fn add_op4_appends_then_attaches_the_p4_operand() {
         let _guard = quiet();
         let mut slab = op_slab(4);
         let mut stmt = preallocated(&mut slab, Connection::healthy());
         stmt.vdbe.n_op = 2;
 
-        let calls = install_p4_recorder();
+        let frees = install_free_p4_recorder();
         let text = b"idx\0";
-        let addr = unsafe { vdbe_add_op4(stmt.ptr(), 0x58, 1, 2, 3, text.as_ptr(), -4) };
-        restore_p4();
+        let addr = unsafe { vdbe_add_op4(stmt.ptr(), 0x58, 1, 2, 3, text.as_ptr(), -2) };
+        restore_free_p4();
 
         assert_eq!(addr, 2);
         assert_eq!(slab[2].opcode, 0x58);
-        assert_eq!(calls(), std::vec![(2, text.as_ptr() as usize, -4)]);
+        assert_eq!(slab[2].p4, text.as_ptr() as *mut u8);
+        assert_eq!(slab[2].p4type, -2, "a negative tag is stored verbatim");
+        // The fresh op holds nothing, so release is a (0, NULL) call.
+        assert_eq!(frees(), std::vec![(0, 0)]);
     }
 
     #[test]
@@ -684,30 +820,293 @@ mod tests {
         assert_eq!(slab[branch as usize].p2, 2);
     }
 
-    // --- P4 recorder -------------------------------------------------
+    // --- P4 destructor recorder --------------------------------------
 
-    static mut P4_CALLS: Vec<(i32, usize, i32)> = Vec::new();
+    static mut FREE_P4_CALLS: Vec<(i32, usize)> = Vec::new();
 
-    unsafe extern "C" fn recording_change_p4(_p: *mut Vdbe, addr: i32, value: *const u8, n: i32) {
-        (*core::ptr::addr_of_mut!(P4_CALLS)).push((addr, value as usize, n));
+    unsafe extern "C" fn recording_free_p4(p4type: i32, p4: *mut u8) {
+        (*core::ptr::addr_of_mut!(FREE_P4_CALLS)).push((p4type, p4 as usize));
     }
 
-    /// Installs the P4 recorder; the returned closure reads its log.
-    /// Callers already hold `OPS_LOCK` through their test guard.
-    fn install_p4_recorder() -> impl Fn() -> Vec<(i32, usize, i32)> {
+    /// Installs the freeP4 recorder; the returned closure reads its
+    /// log. Callers already hold `OPS_LOCK` through their test guard.
+    fn install_free_p4_recorder() -> impl Fn() -> Vec<(i32, usize)> {
         unsafe {
-            (*core::ptr::addr_of_mut!(P4_CALLS)).clear();
+            (*core::ptr::addr_of_mut!(FREE_P4_CALLS)).clear();
             core::ptr::write_volatile(
                 core::ptr::addr_of_mut!(VDBE_P4_OPS),
-                VdbeP4Ops { change_p4: recording_change_p4 },
+                VdbeP4Ops { free_p4: recording_free_p4 },
             );
         }
-        || unsafe { (*core::ptr::addr_of!(P4_CALLS)).clone() }
+        || unsafe { (*core::ptr::addr_of!(FREE_P4_CALLS)).clone() }
     }
 
-    fn restore_p4() {
+    fn restore_free_p4() {
         unsafe {
             core::ptr::write_volatile(core::ptr::addr_of_mut!(VDBE_P4_OPS), DEFAULT_VDBE_P4_OPS);
         }
+    }
+
+    // --- vdbe_change_p4 ------------------------------------------------
+
+    #[test]
+    fn without_an_op_array_the_incoming_payload_is_dropped() {
+        let _guard = quiet();
+        let mut stmt = Statement::new(Connection::healthy());
+        let payload = [0u8; 8];
+
+        let frees = install_free_p4_recorder();
+        unsafe { vdbe_change_p4(stmt.ptr(), 0, payload.as_ptr(), -1) };
+        assert_eq!(frees(), std::vec![(-1, payload.as_ptr() as usize)]);
+
+        // ... even when the payload pointer itself is NULL (freeP4
+        // NULL-checks, ChangeP4 does not).
+        unsafe { vdbe_change_p4(stmt.ptr(), 0, core::ptr::null(), -1) };
+        assert_eq!(frees().len(), 2);
+
+        // A KeyInfo stays the caller's: no freeP4 call for tag -6.
+        unsafe { vdbe_change_p4(stmt.ptr(), 0, payload.as_ptr(), P4_KEYINFO) };
+        assert_eq!(frees().len(), 2, "KEYINFO is not freed on the guard path");
+        restore_free_p4();
+    }
+
+    #[test]
+    fn a_failed_connection_takes_the_guard_path_even_with_an_op_array() {
+        let _guard = quiet();
+        let mut slab = op_slab(4);
+        let mut stmt = preallocated(&mut slab, Connection::failed());
+        stmt.vdbe.n_op = 2;
+        let payload = [0u8; 8];
+
+        let frees = install_free_p4_recorder();
+        unsafe { vdbe_change_p4(stmt.ptr(), 0, payload.as_ptr(), -2) };
+        restore_free_p4();
+
+        assert_eq!(frees(), std::vec![(-2, payload.as_ptr() as usize)]);
+        assert_eq!(slab[0].p4, 0x1234 as *mut u8, "the op is never touched");
+    }
+
+    #[test]
+    fn a_negative_address_targets_the_most_recent_op() {
+        let _guard = quiet();
+        let mut slab = op_slab(4);
+        let mut stmt = preallocated(&mut slab, Connection::healthy());
+        for i in 0..3 {
+            unsafe { vdbe_add_op3(stmt.ptr(), 1, i, 0, 0) };
+        }
+        let payload = [0u8; 8];
+
+        let frees = install_free_p4_recorder();
+        unsafe { vdbe_change_p4(stmt.ptr(), -1, payload.as_ptr(), -2) };
+        restore_free_p4();
+
+        assert_eq!(slab[2].p4, payload.as_ptr() as *mut u8);
+        assert_eq!(slab[2].p4type, -2);
+        assert_eq!(slab[0].p4type, 0, "earlier ops are untouched");
+        assert_eq!(frees(), std::vec![(0, 0)], "the fresh op held nothing");
+    }
+
+    #[test]
+    fn a_still_negative_address_is_a_silent_no_op() {
+        let _guard = quiet();
+        let mut slab = op_slab(4);
+        let mut stmt = preallocated(&mut slab, Connection::healthy());
+        // nOp == 0: addr -1 becomes -1, nothing is attached or freed.
+        let payload = [0u8; 8];
+
+        let frees = install_free_p4_recorder();
+        unsafe { vdbe_change_p4(stmt.ptr(), -1, payload.as_ptr(), -2) };
+        restore_free_p4();
+
+        assert!(frees().is_empty());
+        assert_eq!(slab[0].p4type, -2, "the slab is untouched"); // op_slab seeds -2
+    }
+
+    #[test]
+    fn the_old_p4_is_released_before_the_new_one_is_attached() {
+        let _guard = quiet();
+        let mut slab = op_slab(4);
+        let mut stmt = preallocated(&mut slab, Connection::healthy());
+        stmt.vdbe.n_op = 2;
+        slab[1].p4type = -1;
+        slab[1].p4 = 0xdead as *mut u8;
+        let payload = [0u8; 8];
+
+        let frees = install_free_p4_recorder();
+        unsafe { vdbe_change_p4(stmt.ptr(), 1, payload.as_ptr(), -4) };
+        restore_free_p4();
+
+        assert_eq!(frees(), std::vec![(-1, 0xdead)], "old tag and pointer");
+        assert_eq!(slab[1].p4, payload.as_ptr() as *mut u8);
+        assert_eq!(slab[1].p4type, -4);
+    }
+
+    #[test]
+    fn the_advance_tag_is_kept_even_for_a_null_value() {
+        let _guard = quiet();
+        let mut slab = op_slab(4);
+        let mut stmt = preallocated(&mut slab, Connection::healthy());
+        stmt.vdbe.n_op = 2;
+        let payload = [0u8; 8];
+
+        let frees = install_free_p4_recorder();
+        unsafe { vdbe_change_p4(stmt.ptr(), 0, core::ptr::null(), P4_ADVANCE) };
+        unsafe { vdbe_change_p4(stmt.ptr(), 1, payload.as_ptr(), P4_ADVANCE) };
+        restore_free_p4();
+
+        assert!(slab[0].p4.is_null());
+        assert_eq!(slab[0].p4type, P4_ADVANCE as i8);
+        assert_eq!(slab[1].p4, payload.as_ptr() as *mut u8);
+        assert_eq!(slab[1].p4type, P4_ADVANCE as i8);
+        assert_eq!(frees().len(), 2, "both old payloads were released");
+    }
+
+    #[test]
+    fn a_null_value_tags_the_op_notused() {
+        let _guard = quiet();
+        let mut slab = op_slab(4);
+        let mut stmt = preallocated(&mut slab, Connection::healthy());
+        stmt.vdbe.n_op = 1;
+        slab[0].p4type = -1;
+        slab[0].p4 = 0xbeef as *mut u8;
+
+        let frees = install_free_p4_recorder();
+        unsafe { vdbe_change_p4(stmt.ptr(), 0, core::ptr::null(), -2) };
+        restore_free_p4();
+
+        assert_eq!(frees(), std::vec![(-1, 0xbeef)]);
+        assert!(slab[0].p4.is_null(), "p4 is zeroed before the NULL check");
+        assert_eq!(slab[0].p4type, P4_NOTUSED);
+    }
+
+    /// A fake KeyInfo: the original reads `nField` as a word at +8 and
+    /// duplicates `5*nField + 0x10` bytes. Word-aligned, as a real
+    /// malloc'd KeyInfo is. 64 bytes holds up to nField = 9.
+    fn fake_keyinfo(storage: &mut [u32; 16], n_field: i32) -> *const u8 {
+        let bytes = storage.as_mut_ptr() as *mut u8;
+        for i in 0..64 {
+            unsafe { bytes.add(i).write((i as u16 * 29 % 251) as u8 | 1) };
+        }
+        storage[2] = n_field as u32;
+        storage.as_ptr() as *const u8
+    }
+
+    #[test]
+    fn a_keyinfo_is_deep_copied_into_owned_memory() {
+        let mut storage = [0u32; 16];
+        let keyinfo = fake_keyinfo(&mut storage, 3);
+        let mut arena = [0xa5u8; 0x40];
+        let _guard = install_recorder(arena.as_mut_ptr());
+        let mut slab = op_slab(4);
+        let mut stmt = preallocated(&mut slab, Connection::healthy());
+        stmt.vdbe.n_op = 1;
+
+        let frees = install_free_p4_recorder();
+        unsafe { vdbe_change_p4(stmt.ptr(), 0, keyinfo, P4_KEYINFO) };
+        restore_free_p4();
+
+        assert_eq!(realloc_log(), std::vec![(0, 3 * 5 + 0x10)]);
+        assert_eq!(slab[0].p4, arena.as_mut_ptr());
+        assert_eq!(
+            &arena[..0x1f],
+            unsafe { core::slice::from_raw_parts(keyinfo, 0x1f) },
+            "5*nField + 0x10 bytes copied"
+        );
+        assert_eq!(slab[0].p4type, P4_KEYINFO as i8);
+        assert_eq!(stmt.failed_flag(), 0);
+    }
+
+    #[test]
+    fn a_failed_keyinfo_copy_tags_notused_and_sets_malloc_failed() {
+        let mut storage = [0u32; 16];
+        let keyinfo = fake_keyinfo(&mut storage, 2);
+        let _guard = install_recorder(core::ptr::null_mut());
+        let mut slab = op_slab(4);
+        let mut stmt = preallocated(&mut slab, Connection::healthy());
+        stmt.vdbe.n_op = 1;
+
+        let frees = install_free_p4_recorder();
+        unsafe { vdbe_change_p4(stmt.ptr(), 0, keyinfo, P4_KEYINFO) };
+        restore_free_p4();
+
+        assert_eq!(realloc_log(), std::vec![(0, 2 * 5 + 0x10)]);
+        assert!(slab[0].p4.is_null(), "the NULL result is stored");
+        assert_eq!(slab[0].p4type, P4_NOTUSED);
+        assert_eq!(stmt.failed_flag(), 1, "the sticky byte at db+0x1e");
+    }
+
+    #[test]
+    fn a_keyinfo_handoff_is_stored_under_the_keyinfo_tag() {
+        let _guard = quiet();
+        let mut slab = op_slab(4);
+        let mut stmt = preallocated(&mut slab, Connection::healthy());
+        stmt.vdbe.n_op = 1;
+        let mut storage = [0u32; 16];
+        let keyinfo = fake_keyinfo(&mut storage, 1);
+
+        let frees = install_free_p4_recorder();
+        unsafe { vdbe_change_p4(stmt.ptr(), 0, keyinfo, P4_KEYINFO_HANDOFF) };
+        restore_free_p4();
+
+        assert_eq!(slab[0].p4, keyinfo as *mut u8, "no copy is made");
+        assert_eq!(slab[0].p4type, P4_KEYINFO as i8, "retagged -6, not -9");
+        assert_eq!(stmt.failed_flag(), 0);
+    }
+
+    #[test]
+    fn other_negative_tags_store_the_pointer_verbatim() {
+        let _guard = quiet();
+        let mut slab = op_slab(4);
+        let mut stmt = preallocated(&mut slab, Connection::healthy());
+        stmt.vdbe.n_op = 4;
+        let payload = [0u8; 8];
+
+        let frees = install_free_p4_recorder();
+        for (i, tag) in [-1i32, -2, -3, -13].iter().enumerate() {
+            unsafe { vdbe_change_p4(stmt.ptr(), i as i32, payload.as_ptr(), *tag) };
+        }
+        restore_free_p4();
+
+        for (i, tag) in [-1i32, -2, -3, -13].iter().enumerate() {
+            assert_eq!(slab[i].p4, payload.as_ptr() as *mut u8);
+            assert_eq!(slab[i].p4type, *tag as i8);
+        }
+    }
+
+    #[test]
+    fn a_zero_n_measures_the_string_then_duplicates_it() {
+        let mut arena = [0xa5u8; 16];
+        let _guard = install_recorder(arena.as_mut_ptr());
+        let mut slab = op_slab(4);
+        let mut stmt = preallocated(&mut slab, Connection::healthy());
+        stmt.vdbe.n_op = 1;
+        let text = b"idx\0";
+
+        let frees = install_free_p4_recorder();
+        unsafe { vdbe_change_p4(stmt.ptr(), 0, text.as_ptr(), 0) };
+        restore_free_p4();
+
+        assert_eq!(realloc_log(), std::vec![(0, 4)], "strlen + 1");
+        assert_eq!(&arena[..4], b"idx\0");
+        assert_eq!(slab[0].p4, arena.as_mut_ptr());
+        assert_eq!(slab[0].p4type, P4_DYNAMIC as i8);
+    }
+
+    #[test]
+    fn a_positive_n_duplicates_exactly_n_bytes() {
+        let mut arena = [0xa5u8; 16];
+        let _guard = install_recorder(arena.as_mut_ptr());
+        let mut slab = op_slab(4);
+        let mut stmt = preallocated(&mut slab, Connection::healthy());
+        stmt.vdbe.n_op = 1;
+        let text = b"collation_sequence_name\0";
+
+        let frees = install_free_p4_recorder();
+        unsafe { vdbe_change_p4(stmt.ptr(), 0, text.as_ptr(), 9) };
+        restore_free_p4();
+
+        assert_eq!(realloc_log(), std::vec![(0, 10)], "n + 1, no strlen");
+        assert_eq!(&arena[..10], b"collation\0");
+        assert_eq!(slab[0].p4type, P4_DYNAMIC as i8);
     }
 }
