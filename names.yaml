@@ -8533,10 +8533,13 @@ functions:
     name: handle_deref_or_null_alias_2b1c
     size: 16
     module: cxx/handle
-    status: identified
+    status: ported
     notes: >-
-      byte-identical alias of handle_deref_or_null @ 0x083d604c; 2 bl
-      sites. The only copy outside the 0x083c0000-0x083dffff C++ block.
+      ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c
+      (verified against osos.asm: same four instructions); 2 bl sites.
+      The only copy outside the 0x083c0000-0x083dffff C++ block. No
+      separate port exists; hook this address to the single
+      handle_deref_or_null symbol.
 
   - address: 0x08386840
     ghidra: FUN_08386840
