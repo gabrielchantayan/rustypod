@@ -9232,17 +9232,62 @@ functions:
     ghidra: FUN_083d6f78
     name: not_equal_deref
     size: 28
-    module: null
-    status: identified
+    sig: "u32 not_equal_deref(const u32 *a, const u32 *b)"
+    module: cxx/templates
+    status: ported
     notes: >-
       `*a == *b` computed into 0/1 and then XORed with 1 - i.e.
       `*a != *b` with a redundant final `eor r0,r0,#1` the compiler
-      never folded. Same (this, const T *a, const T *b) shape as
-      less_signed/less_unsigned, so it is the matching inequality
-      functor. 5 byte-identical copies, 35 bl sites - 0x083d6f78 14,
-      0x083cf9e0 7, 0x083d6f94 6, 0x083d6f40 4, 0x083d6f5c 4. Not
-      ported only because it adds nothing the comparators do not
-      already establish; trivial when wanted.
+      never folded. BINARY predicate, not the (this, const T*, const T*)
+      functor the scouting note guessed - r2 is never read and r0 is
+      dereferenced on the first instruction. 5 byte-identical copies,
+      35 bl sites - 0x083d6f78 14 (the canonical port), 0x083cf9e0 7,
+      0x083d6f94 6, 0x083d6f40 4, 0x083d6f5c 4. match.py - LLVM folds
+      the eor and emits subs/movne; same load-compare structure.
+
+  - address: 0x083cf9e0
+    ghidra: FUN_083cf9e0
+    name: not_equal_deref_alias_c9e0
+    size: 28
+    module: cxx/templates
+    status: ported
+    notes: >-
+      ALIAS - byte-identical to not_equal_deref @ 0x083d6f78; 7 bl
+      sites. No separate port; hook this address to the
+      not_equal_deref symbol.
+
+  - address: 0x083d6f94
+    ghidra: FUN_083d6f94
+    name: not_equal_deref_alias_6f94
+    size: 28
+    module: cxx/templates
+    status: ported
+    notes: >-
+      ALIAS - byte-identical to not_equal_deref @ 0x083d6f78; 6 bl
+      sites. No separate port; hook this address to the
+      not_equal_deref symbol.
+
+  - address: 0x083d6f40
+    ghidra: FUN_083d6f40
+    name: not_equal_deref_alias_6f40
+    size: 28
+    module: cxx/templates
+    status: ported
+    notes: >-
+      ALIAS - byte-identical to not_equal_deref @ 0x083d6f78; 4 bl
+      sites. No separate port; hook this address to the
+      not_equal_deref symbol.
+
+  - address: 0x083d6f5c
+    ghidra: FUN_083d6f5c
+    name: not_equal_deref_alias_6f5c
+    size: 28
+    module: cxx/templates
+    status: ported
+    notes: >-
+      ALIAS - byte-identical to not_equal_deref @ 0x083d6f78; 4 bl
+      sites. No separate port; hook this address to the
+      not_equal_deref symbol.
 
   - address: 0x083d7750
     ghidra: FUN_083d7750

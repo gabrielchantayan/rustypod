@@ -84,6 +84,30 @@ pub unsafe extern "C" fn less_unsigned(_this: *const u8, a: *const u32, b: *cons
     u32::from(a.read() < b.read())
 }
 
+/// not_equal_deref — original: `FUN_083d6f78` @ 0x083d6f78
+/// (28 bytes; 14 `bl` call sites there, 35 across all 5 byte-identical
+/// copies — 0x083d6f78 14, 0x083cf9e0 7, 0x083d6f94 6, 0x083d6f40 4,
+/// 0x083d6f5c 4).
+///
+/// `*a != *b` as 0/1 over word-sized operands taken by reference — the
+/// matching inequality functor of [`less_signed`] / [`less_unsigned`].
+/// The original computes the EQUALITY first (`movne r0, #0` / `moveq
+/// r0, #1`) and then XORs with 1 — a redundant final `eor` the compiler
+/// never folded. Kept in the port's doc, though LLVM folds it back.
+///
+/// The scouting note guessed a `(this, a, b)` functor shape like the
+/// comparators; the assembly says otherwise — r2 is never read and r0
+/// is dereferenced on the first instruction, so this is a plain binary
+/// predicate.
+///
+/// # Safety
+/// `a` and `b` must be valid, aligned `u32` pointers.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
+    u32::from(a.read() != b.read())
+}
+
 /// Signature of the container's virtual element-slot method: given an
 /// index it returns the *address of the slot* holding the element
 /// pointer, which [`container_element_at`] then loads.
@@ -281,6 +305,22 @@ mod tests {
                 1,
                 "0xffffffff < 1 signed, but not unsigned"
             );
+        }
+    }
+
+    #[test]
+    fn not_equal_deref_compares_words_by_value() {
+        unsafe {
+            let one: u32 = 1;
+            let other_one: u32 = 1;
+            let two: u32 = 2;
+            assert_eq!(not_equal_deref(&one, &two), 1);
+            assert_eq!(not_equal_deref(&two, &one), 1);
+            assert_eq!(not_equal_deref(&one, &other_one), 0, "by value, not by address");
+            assert_eq!(not_equal_deref(&one, &one), 0);
+            let min: u32 = 0;
+            let max: u32 = 0xffff_ffff;
+            assert_eq!(not_equal_deref(&min, &max), 1);
         }
     }
 
