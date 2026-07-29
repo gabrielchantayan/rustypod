@@ -9075,8 +9075,9 @@ functions:
     name: sqlite_error_msg
     size: 76
     sig: "void sqlite_error_msg(Parse *parse, const char *format, ...)"
-    module: null
-    status: identified
+    module: sqlite/error_msg
+    status: ported
+    vars: {param_1: parse, param_2: format}
     notes: >-
       SQLite's sqlite3ErrorMsg - the engine's single error reporter, and
       after the VDBE builders the hottest thing in the range at 86 bl +
@@ -9084,10 +9085,16 @@ functions:
       zErrMsg (+0x08) through sqlite3_free @ 0x083906f4; formats a new
       one with sqlite3VMPrintf @ 0x08386454 on pParse->db (+0x00); sets
       pParse->rc (+0x04) to 1 (SQLITE_ERROR) if it was 0. This pins the
-      Parse layout - db +0x00, rc +0x04, zErrMsg +0x08, nErr +0x40. NOT
-      ported - C varargs (`push {r0-r3}` then a va_list pointer into the
-      home area) has no faithful Rust extern "C" spelling, and the
-      formatter behind it is unported too.
+      Parse layout - db +0x00, rc +0x04, zErrMsg +0x08, nErr +0x40.
+      Ported with two dispatch-level deviations: the C varargs spill is
+      an explicit `args: VaList` (pointer to the first variadic word,
+      the printf/printf_api.rs convention), and the formatter is the
+      SQLITE_VM_PRINTF dispatch static (default documented always-NULL
+      stub) because sqlite3VMPrintf drags in the whole SQLite printf
+      chain (0x08384e84 / 0x0839788c / 0x08384e14) - a batch of its
+      own. sqlite3_free is the ported heap::tracked::tracked_free,
+      inlined by LLVM. Parse is a typed repr(C) struct with 32-bit
+      offset asserts.
 
   - address: 0x0837d358
     ghidra: FUN_0837d358
