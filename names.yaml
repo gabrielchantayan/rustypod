@@ -6016,9 +6016,9 @@ functions:
     ghidra: FUN_080ed7c0
     name: is_mpeg4_container_extension
     size: 180
-    sig: "bool is_mpeg4_container_extension(const char *path)"
-    module: null
-    status: identified
+    sig: "u32 is_mpeg4_container_extension(const u8 *path)"
+    module: app/media_ext
+    status: ported
     vars: {param_1: path}
     notes: >-
       File-extension test for the MPEG-4 container family. Takes strlen
@@ -6027,13 +6027,15 @@ functions:
       (the classic sub #0x41 / cmp #25 / add #32 range test), then
       strncmp (0x0803105c, n = 3) against four literals stored inline in
       the function's own constant pool at 0x080ed874 - "m4v", "m4p",
-      "mp4", "mov". Returns 1 on any match, 0 otherwise. NOT ported - only
-      1 bl call site (0x0803bf48), and strlen at 0x08392478 sits in the
-      0x08300000-0x083fffff range owned by another agent. Worth picking up
-      once that strlen lands; strncpy and strncmp are already ported.
-      Note the extension is taken as the last 3 characters unconditionally
-      - there is no '.' check, so a 3-character filename with no extension
-      is tested as if it were one.
+      "mp4", "mov" (verified against osos.dec). Returns 1 on any match,
+      0 otherwise. 1 bl call site (0x0803bf48). The extension is taken
+      as the last 3 characters unconditionally - there is no '.' check,
+      so a 3-character filename with no extension is tested as if it
+      were one, and a shorter name reads before the string start.
+      Ported once strlen @ 0x08392478 landed (the blocker the scouting
+      note recorded). Codegen deviation - LLVM inlines all three libc
+      calls and folds the four strncmp tests into a constant decision
+      tree; the behavior is proven by the host tests.
 
   - address: 0x0811fd98
     ghidra: FUN_0811fd98
