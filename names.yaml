@@ -2272,6 +2272,26 @@ functions:
     notes: 87 call sites. Plain count-1 semaphore cell — NO recursive/owner
       state (the +4 word is write-only padding).
 
+  - address: 0x080744c0
+    ghidra: FUN_080744c0
+    name: timer_set_delay
+    size: 24
+    sig: "void timer_set_delay(u8 *timer, u32 delay)"
+    module: drivers/timer
+    status: ported
+    renames:
+      param_1: timer
+      param_2: delay
+    notes: >-
+      Trace/assert helper 0x08076954(timer) (dispatched through
+      TimerOps::trace_assert, as in timer_stop), then stores delay into
+      the period word at +0x4 - the value the arm helper 0x0807a228
+      multiplies by 1000 to compute the deadline. timer_start_after
+      (0x0812c63c) tail-branches here; ported as its own function first
+      so the start_after body is real code, not another stub slot.
+      match.py structural (trace call goes through the ops table, the
+      str to +4 is verbatim).
+
   - address: 0x0807f5c4
     name: mutex_lock
     size: 8

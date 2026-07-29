@@ -12,6 +12,13 @@
 //!   FourCC `TIMER_STATE_STOPPED` ('stop') to +0x20 and tail-branches to
 //!   `mutex_unlock` @ 0x0807f6a0 on the same global mutex.
 //!
+//! - `timer_set_delay` — original: `FUN_080744c0` @ 0x080744c0 (24
+//!   bytes). Runs the trace/assert helper @ 0x08076954 on the timer
+//!   (the same `TimerOps::trace_assert` dispatch `timer_stop` uses),
+//!   then stores the delay into the period word at +0x4 — the value the
+//!   arm helper @ 0x0807a228 multiplies by 1000 to compute the deadline.
+//!   `timer_start_after` tail-branches here.
+//!
 //! - `timer_restart` — original: `FUN_0812bf4c` @ 0x0812bf4c (32 bytes;
 //!   119 call sites: 72 `bl` + 47 tail `b`, binary-scanned). Calls
 //!   `timer_stop` on the timer, writes the FourCC `TIMER_STATE_RUNNING`
@@ -28,6 +35,7 @@
 //! Timer object layout (only the words this function touches):
 //!
 //! ```text
+//! +0x04 u32  period/delay in milliseconds (deadline = tick() + this * 1000)
 //! +0x20 u32  state FourCC: 'expi' expired / 'stop' stopped / 'run ' running
 //! +0x28 u32  callback queue handle, handed to the cancel helper
 //! ```
@@ -64,6 +72,9 @@
 
 use crate::kernel::sync_mutex::{mutex_lock, mutex_unlock, Mutex};
 
+/// +0x4: period/delay in milliseconds — the arm helper @ 0x0807a228
+/// computes the deadline as tick() + period * 1000 from this word.
+const PERIOD: usize = 0x4;
 /// +0x20: state word — one of the FourCCs below.
 const STATE: usize = 0x20;
 /// +0x28: callback queue handle (a 32-bit firmware pointer), first
@@ -212,6 +223,20 @@ pub unsafe extern "C" fn timer_restart(timer: *mut u8) {
     (timer_ops().arm_timer)(timer);
 }
 
+/// timer_set_delay — original: `FUN_080744c0` @ 0x080744c0 (24 bytes).
+///
+/// Traces/asserts `timer` (the helper @ 0x08076954, dispatched through
+/// `TimerOps::trace_assert` as in `timer_stop`), then stores `delay`
+/// into the period word at +0x4 — the value the arm helper @ 0x0807a228
+/// multiplies by 1000 to compute the deadline. `timer_start_after`
+/// tail-branches here with the timer in r0 and the delay in r1. The
+/// `timer` argument is not NULL-checked, as in the original.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn timer_set_delay(timer: *mut u8, delay: u32) {
+    (timer_ops().trace_assert)(timer);
+    set_word(timer, PERIOD, delay);
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -294,6 +319,9 @@ mod tests {
         fn set_handle(&mut self, value: u32) {
             self.bytes[CALLBACK_HANDLE..CALLBACK_HANDLE + 4]
                 .copy_from_slice(&value.to_le_bytes());
+        }
+        fn period(&self) -> u32 {
+            u32::from_le_bytes(self.bytes[PERIOD..PERIOD + 4].try_into().unwrap())
         }
     }
 
@@ -465,6 +493,45 @@ mod tests {
             timer_restart(timer.ptr());
             assert_eq!(STATE_AT_ARM, TIMER_STATE_RUNNING);
         }
+    }
+
+    /// The trace runs before the delay store — the original's `bl
+    /// 0x08076954` precedes the `str r5, [r4, #0x4]`, and the helper
+    /// takes its own internal lock, so the order is observable.
+    #[test]
+    fn set_delay_traces_then_stores() {
+        let _lock = mock_env();
+        static mut PROBED_TIMER: *const MockTimer = core::ptr::null();
+        static mut PERIOD_AT_TRACE: u32 = 0xdead_beef;
+        unsafe extern "C" fn probing_trace(timer: *mut u8) {
+            record(Call::Trace(timer as usize));
+            unsafe { PERIOD_AT_TRACE = (*PROBED_TIMER).period() };
+        }
+        let mut timer = MockTimer::new(TIMER_STATE_STOPPED, 0);
+        let timer_ptr = timer.ptr();
+        unsafe {
+            PROBED_TIMER = &timer;
+            let mut ops = core::ptr::addr_of!(TIMER_OPS).read_volatile();
+            ops.trace_assert = probing_trace;
+            *core::ptr::addr_of_mut!(TIMER_OPS) = ops;
+            timer_set_delay(timer_ptr, 1000);
+            assert_eq!(PERIOD_AT_TRACE, 0, "period not yet written at trace time");
+            assert_eq!(calls(), vec![Call::Trace(timer_ptr as usize)]);
+        }
+        assert_eq!(timer.period(), 1000);
+    }
+
+    /// Only the period word changes: the trace is the whole prologue,
+    /// and every other byte (state word, handle) is untouched.
+    #[test]
+    fn set_delay_touches_only_the_period_word() {
+        let _lock = mock_env();
+        let mut timer = MockTimer::new(TIMER_STATE_RUNNING, 0x08A0_5555);
+        let before = timer.bytes;
+        unsafe { timer_set_delay(timer.ptr(), 0x7d) };
+        let mut expected = before;
+        expected[PERIOD..PERIOD + 4].copy_from_slice(&0x7du32.to_le_bytes());
+        assert_eq!(timer.bytes, expected, "only the period word changes");
     }
 
     /// Restart leaves every word but the state word untouched and always
