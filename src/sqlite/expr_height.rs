@@ -27,10 +27,12 @@
 //! 08378944:  str  r0,[r4,#0x40]       ; expr->n_height = height + 1
 //! ```
 //!
-//! The three fold helpers (all unported, all confirmed against the
-//! SQLite 3.5.x sources):
+//! The three fold helpers (all confirmed against the SQLite 3.5.x
+//! sources):
 //!
-//! - `exprHeight` @ 0x082d2a34 (24 bytes), a leaf:
+//! - `exprHeight` @ 0x082d2a34 (24 bytes), a leaf — **ported** as
+//!   [`crate::sqlite::expr_height_of::expr_height_of`] and wired as the
+//!   default of [`SQLITE_EXPR_HEIGHT_FOLD`]:
 //!   `if (child && child->nHeight > *height) *height = child->nHeight;`
 //!   — a signed `strgt` maximum fold.
 //! - `heightOfExprList` @ 0x082d2a4c (64 bytes): walks the list's
@@ -59,20 +61,24 @@
 //! ```
 //!
 //! Deviations:
-//! - None of the three fold helpers is ported, so each is a dispatch
-//!   boundary (house pattern — see `sqlite/error_msg.rs`):
-//!   [`SQLITE_EXPR_HEIGHT_FOLD`], [`SQLITE_EXPR_LIST_HEIGHT_FOLD`] and
-//!   [`SQLITE_SELECT_HEIGHT_FOLD`]. All three default slots share one
-//!   documented no-op stub — which is *exactly* the behavior the
-//!   originals have for a NULL child pointer (the `movs/ldmiaeq` early
-//!   return / `cmp r0,#0` guard), so with no helpers wired the
-//!   accumulator never moves and every node computes the leaf answer,
-//!   height 1. The match.py diff is exactly this deviation: indirect
-//!   calls through the loaded slots instead of direct `bl`s.
+//! - Two of the three fold helpers remain unported, so each is a
+//!   dispatch boundary (house pattern — see `sqlite/error_msg.rs`):
+//!   [`SQLITE_EXPR_LIST_HEIGHT_FOLD`] and [`SQLITE_SELECT_HEIGHT_FOLD`].
+//!   Both default slots share one documented no-op stub — which is
+//!   *exactly* the behavior the originals have for a NULL child pointer
+//!   (the `movs/ldmiaeq` early return / `cmp r0,#0` guard), so with no
+//!   helpers wired those folds never move the accumulator.
+//!   [`SQLITE_EXPR_HEIGHT_FOLD`] keeps the same dispatch-slot shape
+//!   (host tests swap it for recording mocks), but its default is now
+//!   the real port, [`crate::sqlite::expr_height_of::expr_height_of`].
+//!   The match.py diff is exactly this deviation: indirect calls
+//!   through the loaded slots instead of direct `bl`s.
 //! - `Expr` is a typed `#[repr(C)]` struct rather than raw byte
 //!   offsets, so the pointer fields stay disjoint on a 64-bit test
 //!   host. The original byte offsets are statically asserted on 32-bit
 //!   targets (`_EXPR_*_OFFSET`).
+
+use super::expr_height_of::expr_height_of;
 
 /// An expression node (`sqlite3Expr`), only the fields this fix-up
 /// touches. The full layout is documented in the module header.
@@ -118,16 +124,16 @@ const _EXPR_N_HEIGHT_OFFSET: [u8; 0x40] = [0; core::mem::offset_of!(Expr, n_heig
 /// 0x082d2a4c and `heightOfSelect` @ 0x082d2a8c share this shape.
 pub type HeightFoldFn = unsafe extern "C" fn(child: *mut u8, height: *mut i32);
 
-/// Default stub shared by all three slots: no fold helper wired, so
-/// the accumulator never moves — exactly what the original helpers do
-/// for a NULL child (see the module header). With all defaults in
-/// place every node computes the leaf answer, height 1.
+/// Default stub of the two slots whose originals are still unported
+/// (the operand slot now defaults to [`expr_height_of`]): no fold
+/// helper wired, so the accumulator never moves — exactly what the
+/// original helpers do for a NULL child (see the module header).
 pub(crate) unsafe extern "C" fn missing_height_fold(_child: *mut u8, _height: *mut i32) {}
 
-/// The active operand fold (`exprHeight` @ 0x082d2a34). Host tests
-/// install recording mocks; the real port replaces the default when
-/// 0x082d2a34 lands.
-pub static mut SQLITE_EXPR_HEIGHT_FOLD: HeightFoldFn = missing_height_fold;
+/// The active operand fold (`exprHeight` @ 0x082d2a34). The default is
+/// the real port, [`expr_height_of`]; host tests still install
+/// recording mocks through the slot.
+pub static mut SQLITE_EXPR_HEIGHT_FOLD: HeightFoldFn = expr_height_of;
 
 /// The active expression-list fold (`heightOfExprList` @ 0x082d2a4c).
 pub static mut SQLITE_EXPR_LIST_HEIGHT_FOLD: HeightFoldFn = missing_height_fold;
@@ -196,9 +202,11 @@ mod tests {
         SLOT_LOCK.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// The documented default configuration.
+    /// The documented default configuration: the real `exprHeight`
+    /// port on the operand slot, the no-op stub on the two slots whose
+    /// originals are still unported.
     unsafe fn restore_defaults() {
-        core::ptr::write_volatile(core::ptr::addr_of_mut!(SQLITE_EXPR_HEIGHT_FOLD), missing_height_fold);
+        core::ptr::write_volatile(core::ptr::addr_of_mut!(SQLITE_EXPR_HEIGHT_FOLD), expr_height_of);
         core::ptr::write_volatile(core::ptr::addr_of_mut!(SQLITE_EXPR_LIST_HEIGHT_FOLD), missing_height_fold);
         core::ptr::write_volatile(core::ptr::addr_of_mut!(SQLITE_SELECT_HEIGHT_FOLD), missing_height_fold);
     }
@@ -450,7 +458,8 @@ mod tests {
     fn only_the_height_word_is_written() {
         let _guard = lock();
         unsafe {
-            restore_defaults();
+            // All-stub folds: the default operand fold would
+            // dereference these bogus child pointers.
             let mut expr = node(
                 0x11111111 as *mut u8,
                 0x22222222 as *mut u8,
@@ -458,7 +467,9 @@ mod tests {
                 0x44444444 as *mut u8,
                 0,
             );
-            expr_set_height(&mut expr);
+            with_folds(missing_height_fold, missing_height_fold, missing_height_fold, || {
+                expr_set_height(&mut expr);
+            });
             assert!(expr._gap_00.iter().all(|b| *b == 0xa5), "op/flags clobbered");
             assert!(expr._gap_14.iter().all(|b| *b == 0xa5), "token span clobbered");
             assert!(expr._gap_3c.iter().all(|b| *b == 0xa5), "gap clobbered");
@@ -473,13 +484,13 @@ mod tests {
     fn the_default_stubs_behave_like_null_children() {
         let _guard = lock();
         unsafe {
-            restore_defaults();
             let mut height: i32 = 41;
             missing_height_fold(0x11111111 as *mut u8, &mut height);
             assert_eq!(height, 41, "the no-op stub never moves the accumulator");
 
-            // Unwired but non-leaf node: every child folds nothing, so
-            // the node reports the leaf answer.
+            // All-stub folds (the default operand fold would
+            // dereference these bogus child pointers): every child
+            // folds nothing, so the node reports the leaf answer.
             let mut expr = node(
                 0x11111111 as *mut u8,
                 0x22222222 as *mut u8,
@@ -487,8 +498,32 @@ mod tests {
                 0x44444444 as *mut u8,
                 0,
             );
-            expr_set_height(&mut expr);
+            with_folds(missing_height_fold, missing_height_fold, missing_height_fold, || {
+                expr_set_height(&mut expr);
+            });
             assert_eq!(expr.n_height, 1, "no folds wired: the leaf answer");
+        }
+    }
+
+    #[test]
+    fn the_default_operand_fold_is_the_real_port() {
+        let _guard = lock();
+        unsafe {
+            restore_defaults();
+            let mut left = node(core::ptr::null_mut(), core::ptr::null_mut(), core::ptr::null_mut(), core::ptr::null_mut(), 3);
+            let mut right = node(core::ptr::null_mut(), core::ptr::null_mut(), core::ptr::null_mut(), core::ptr::null_mut(), 7);
+            let mut expr = node(
+                &mut left as *mut Expr as *mut u8,
+                &mut right as *mut Expr as *mut u8,
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                0,
+            );
+            expr_set_height(&mut expr);
+            assert_eq!(
+                expr.n_height, 8,
+                "out of the box the operand slot folds real child heights: max(3, 7) + 1"
+            );
         }
     }
 }

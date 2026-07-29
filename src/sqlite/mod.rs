@@ -66,6 +66,7 @@ pub mod dequote;
 pub mod ephemeral_fn;
 pub mod error_msg;
 pub mod expr_height;
+pub mod expr_height_of;
 pub mod free_p4;
 pub mod mem;
 pub mod name_from_token;
