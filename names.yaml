@@ -10035,8 +10035,10 @@ functions:
     ghidra: FUN_0811f704
     name: width_0c_minus_inset
     size: 28
-    module: null
-    status: identified
+    sig: "u32 width_0c_minus_inset(const void *obj, u32 mode)"
+    module: ui/width_inset
+    status: ported
+    vars: {param_1: obj, param_2: mode}
     notes: >-
       13 bl call sites, a pure leaf, all in list/text layout code
       (0x080f6a80, 0x081396xx, 0x0819xxxx, 0x081acxx-0x081afxxx,
