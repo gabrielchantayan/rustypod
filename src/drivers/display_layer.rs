@@ -238,8 +238,9 @@ pub struct LayerDriverHooks {
     /// `FUN_081203c4` @ 0x081203c4 (2 call sites): reads the four plane
     /// addresses of the bound surface (+0x50) out through the surface
     /// accessor @ 0x082978bc, selecting and aliasing them by the layer's
-    /// pixel format (+0x0a). Returns the layer. Default: leaves the four
-    /// out-words alone, the original's own answer for an unbound layer.
+    /// pixel format (+0x0a). Returns the layer. Ported below as
+    /// [`layer_query_planes`]; the slot stays so tests can interpose a
+    /// recording mock. Default: the port itself.
     pub query_planes: unsafe extern "C" fn(
         layer: *mut u8,
         plane0: *mut *mut u8,
@@ -265,16 +266,6 @@ pub struct LayerDriverHooks {
     pub render: unsafe extern "C" fn(layer: *mut u8) -> *mut u8,
 }
 
-unsafe extern "C" fn query_planes_stub(
-    layer: *mut u8,
-    _plane0: *mut *mut u8,
-    _plane1: *mut *mut u8,
-    _plane2: *mut *mut u8,
-    _plane3: *mut *mut u8,
-) -> *mut u8 {
-    layer
-}
-
 unsafe extern "C" fn install_planes_stub(
     _layer: *mut u8,
     _plane0: *mut u8,
@@ -288,11 +279,11 @@ unsafe extern "C" fn render_stub(layer: *mut u8) -> *mut u8 {
     layer
 }
 
-/// Wired defaults: the ported swap plus no-op stubs for the originals
-/// not yet ported.
+/// Wired defaults: the ported swap and query plus no-op stubs for the
+/// originals not yet ported.
 pub(crate) const DEFAULT_LAYER_DRIVER_HOOKS: LayerDriverHooks = LayerDriverHooks {
     swap_surface: layer_swap_surface,
-    query_planes: query_planes_stub,
+    query_planes: layer_query_planes,
     install_planes: install_planes_stub,
     render: render_stub,
 };
@@ -590,6 +581,77 @@ pub unsafe extern "C" fn surface_plane_address(surface: *mut u8, index: u32) -> 
         6 if format == 4 => plane(SURFACE_PLANE_A),
         _ => 0,
     }
+}
+
+/// layer_query_planes — original: `FUN_081203c4` @ 0x081203c4
+/// (224 bytes; 2 `bl` call sites: [`layer_reconfigure`] and the render
+/// pass `FUN_0811f8c8`).
+///
+/// Reads the bound surface's component plane addresses into four
+/// out-slots, selecting and aliasing them by the layer's pixel format
+/// (+0x0a). Every lookup goes through [`surface_plane_address`], which
+/// re-gates on the surface's own format byte:
+///
+/// ```text
+/// layer +0x0a   *p0          *p1          *p2          *p3
+///  0 (planar)   plane 0      plane 2      plane 3      0
+///  1 (2-plane)  plane 0      plane 1      plane 0      plane 1
+///  2 (packed)   plane 4      0            0            0
+///  3 (packed)   plane 5      0            0            0
+///  else         0            0            0            0
+/// ```
+///
+/// An unbound layer (+0x50 NULL) returns immediately **without**
+/// touching the out-slots — the four zeroing stores happen only on the
+/// bound path, before the format dispatch, so any bound layer (even one
+/// with an unknown format) leaves all four slots zeroed. Returns the
+/// layer pointer (`mov r0, r4`) on both paths.
+///
+/// Deviations:
+///
+/// - +0x50 is read as a native-width pointer through the literal byte
+///   offset, the [`layer_swap_surface`] precedent: exactly the 4-byte
+///   field on target; on a 64-bit host the 8-byte read spans the
+///   unaccounted +0x54 word, which is how the tests plant fake
+///   surfaces.
+/// - The out-slots are native-width pointers; the original's `str`
+///   writes 32-bit words, and the accessor's `u32` answers are
+///   zero-extended on a 64-bit host.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn layer_query_planes(
+    layer: *mut u8,
+    plane0: *mut *mut u8,
+    plane1: *mut *mut u8,
+    plane2: *mut *mut u8,
+    plane3: *mut *mut u8,
+) -> *mut u8 {
+    let surface = (layer.add(BOUND_SURFACE) as *const *mut u8).read_volatile();
+    if surface.is_null() {
+        return layer;
+    }
+    plane0.write_volatile(core::ptr::null_mut());
+    plane1.write_volatile(core::ptr::null_mut());
+    plane2.write_volatile(core::ptr::null_mut());
+    plane3.write_volatile(core::ptr::null_mut());
+    match byte(layer, PIXEL_FORMAT) {
+        0 => {
+            plane0.write_volatile(surface_plane_address(surface, 0) as *mut u8);
+            plane1.write_volatile(surface_plane_address(surface, 2) as *mut u8);
+            plane2.write_volatile(surface_plane_address(surface, 3) as *mut u8);
+        }
+        1 => {
+            let even = surface_plane_address(surface, 0) as *mut u8;
+            plane0.write_volatile(even);
+            plane2.write_volatile(even);
+            let odd = surface_plane_address(surface, 1) as *mut u8;
+            plane1.write_volatile(odd);
+            plane3.write_volatile(odd);
+        }
+        2 => plane0.write_volatile(surface_plane_address(surface, 4) as *mut u8),
+        3 => plane0.write_volatile(surface_plane_address(surface, 5) as *mut u8),
+        _ => {}
+    }
+    layer
 }
 
 /// layer_bind_surface — original: `FUN_0811fe80` @ 0x0811fe80
@@ -1530,6 +1592,124 @@ mod tests {
             unsafe { surface_plane_address(surface.ptr(), index) };
         }
         assert!(surface.0 == before);
+    }
+
+    // ---- query planes ----------------------------------------------------
+
+    /// The four out-slots, poisoned so an untouched one is visible.
+    struct PlaneSlots([*mut u8; PLANE_COUNT]);
+
+    impl PlaneSlots {
+        fn poisoned() -> Self {
+            PlaneSlots([0xa5a5_a5a5 as *mut u8; PLANE_COUNT])
+        }
+        fn query(&mut self, layer: *mut u8) -> *mut u8 {
+            unsafe {
+                layer_query_planes(
+                    layer,
+                    &mut self.0[0],
+                    &mut self.0[1],
+                    &mut self.0[2],
+                    &mut self.0[3],
+                )
+            }
+        }
+    }
+
+    /// A layer of the given pixel format bound to a surface of the same
+    /// format (the pairing real callers always have).
+    fn bound_layer(layer_format: u8, surface: &mut PlaneSurface) -> Layer {
+        let mut layer = unarmed_layer();
+        layer.0[PIXEL_FORMAT] = layer_format;
+        layer.set_bound_surface(surface.ptr());
+        layer
+    }
+
+    #[test]
+    fn an_unbound_layer_leaves_the_out_slots_untouched() {
+        let mut layer = unarmed_layer();
+        let mut slots = PlaneSlots::poisoned();
+        let returned = slots.query(layer.ptr());
+        assert_eq!(returned, layer.ptr());
+        assert_eq!(slots.0, [0xa5a5_a5a5 as *mut u8; PLANE_COUNT]);
+    }
+
+    #[test]
+    fn a_planar_layer_gets_the_three_component_planes_in_order() {
+        let mut surface = PlaneSurface::with_format(0);
+        let mut layer = bound_layer(0, &mut surface);
+        let mut slots = PlaneSlots::poisoned();
+        let returned = slots.query(layer.ptr());
+        assert_eq!(returned, layer.ptr());
+        assert_eq!(slots.0[0], PLANE_A_WORD as *mut u8);
+        assert_eq!(slots.0[1], PLANE_B_WORD as *mut u8);
+        assert_eq!(slots.0[2], PLANE_C_WORD as *mut u8);
+        assert_eq!(slots.0[3], core::ptr::null_mut());
+    }
+
+    #[test]
+    fn a_two_plane_layer_aliases_each_plane_into_two_slots() {
+        let mut surface = PlaneSurface::with_format(1);
+        let mut layer = bound_layer(1, &mut surface);
+        let mut slots = PlaneSlots::poisoned();
+        slots.query(layer.ptr());
+        assert_eq!(slots.0[0], PLANE_A_WORD as *mut u8);
+        assert_eq!(slots.0[2], PLANE_A_WORD as *mut u8, "plane A aliased into slot 2");
+        assert_eq!(slots.0[1], PLANE_B_WORD as *mut u8);
+        assert_eq!(slots.0[3], PLANE_B_WORD as *mut u8, "plane B aliased into slot 3");
+    }
+
+    #[test]
+    fn the_packed_formats_fill_only_the_first_slot() {
+        for format in [2u8, 3] {
+            let mut surface = PlaneSurface::with_format(format);
+            let mut layer = bound_layer(format, &mut surface);
+            let mut slots = PlaneSlots::poisoned();
+            slots.query(layer.ptr());
+            assert_eq!(slots.0[0], PLANE_A_WORD as *mut u8, "format {format}");
+            assert_eq!(
+                slots.0[1..],
+                [core::ptr::null_mut(); 3],
+                "format {format} leaves the rest zeroed"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_pixel_format_still_zeroes_all_four_slots() {
+        // The zeroing stores run before the format dispatch, so even a
+        // format the dispatch rejects leaves nothing poisoned.
+        let mut surface = PlaneSurface::with_format(0);
+        let mut layer = bound_layer(9, &mut surface);
+        let mut slots = PlaneSlots::poisoned();
+        let returned = slots.query(layer.ptr());
+        assert_eq!(returned, layer.ptr());
+        assert_eq!(slots.0, [core::ptr::null_mut(); PLANE_COUNT]);
+    }
+
+    #[test]
+    fn a_format_mismatch_with_the_surface_yields_zeroed_slots() {
+        // The accessor re-gates on the surface's own format byte: a
+        // packed layer bound to a planar surface gets nothing back.
+        let mut surface = PlaneSurface::with_format(0);
+        let mut layer = bound_layer(2, &mut surface);
+        let mut slots = PlaneSlots::poisoned();
+        slots.query(layer.ptr());
+        assert_eq!(slots.0, [core::ptr::null_mut(); PLANE_COUNT]);
+    }
+
+    #[test]
+    fn the_query_writes_nothing_into_the_layer_itself() {
+        let mut surface = PlaneSurface::with_format(0);
+        let mut layer = unarmed_layer();
+        layer.0 = [0x5a; 0x200];
+        layer.0[PIXEL_FORMAT] = 0;
+        layer.set_bound_surface(surface.ptr());
+        let before = layer.0;
+        let mut slots = PlaneSlots::poisoned();
+        slots.query(layer.ptr());
+        assert!(layer.0 == before);
+        assert_eq!(slots.0[0], PLANE_A_WORD as *mut u8);
     }
 
     // ---- bind / reconfigure --------------------------------------------

@@ -6502,22 +6502,30 @@ functions:
     size: 224
     sig: "u8 *layer_query_planes(u8 *layer, u8 **p0, u8 **p1, u8 **p2, u8 **p3)"
     module: drivers/display_layer
-    status: identified
+    status: ported
     vars: {param_1: layer, param_2: p0, param_3: p1, param_4: p2, param_5: p3}
     notes: >-
       2 bl call sites (layer_reconfigure, layer_render). Reads the four
-      plane addresses of the layer's bound surface (+0x50) through the
-      surface plane accessor 0x082978bc(surface, index) and writes them
-      to the four out-pointers, selecting and aliasing by the layer's
-      pixel format (+0x0a) - format 0 - p0=plane 0, p1=plane 2,
-      p2=plane 3; format 1 - p0=p2=plane 0, p1=p3=plane 1; format 2 -
-      p0=plane 4; format 3 - p0=plane 5; anything else leaves the four
-      words alone. An unbound layer (+0x50 NULL) returns without
-      touching them at all - the four zeroing stores happen only on the
-      bound path. Returns the layer. Not ported - reads the +0x50
-      pointer field (same blocker as layer_render). Dispatches through
-      LAYER_DRIVER_HOOKS.query_planes (default - leaves the out-words
-      alone).
+      plane addresses of the layer's bound surface (+0x50) through
+      surface_plane_address @ 0x082978bc (ported in the callee-first
+      commit) and writes them to the four out-pointers, selecting and
+      aliasing by the layer's pixel format (+0x0a) - format 0 - p0=plane
+      0, p1=plane 2, p2=plane 3; format 1 - p0=p2=plane 0, p1=p3=plane
+      1; format 2 - p0=plane 4; format 3 - p0=plane 5; anything else
+      leaves the four words zeroed. An unbound layer (+0x50 NULL)
+      returns without touching them at all - the four zeroing stores
+      happen only on the bound path, before the format dispatch.
+      Returns the layer. Ported; the earlier "reads the +0x50 pointer
+      field" blocker dissolved with the layer_swap_surface precedent
+      (+0x50 has unaccounted slack up to +0x60, so a native-width
+      access at the literal byte offset fits a 64-bit host). Now the
+      default of LAYER_DRIVER_HOOKS.query_planes; tests interpose a
+      recording mock. Deviations - the accessor's u32 plane words are
+      zero-extended into native-width out-pointers on a 64-bit host;
+      LLVM inlines surface_plane_address (no bl edge remains) and uses
+      a jump table for the format dispatch. match.py - same structure:
+      NULL guard, four zeroing stores, four-arm dispatch, conditional
+      plane loads.
 
   - address: 0x0811feb8
     ghidra: FUN_0811feb8
