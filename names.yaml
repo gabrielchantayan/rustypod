@@ -5913,15 +5913,87 @@ functions:
     size: 44
     sig: "void *element_array1_at(i32 index)"
     module: app/element_table
-    status: identified
+    status: ported
+    vars: {param_1: index}
     notes: >-
-      One of the seven remaining per-array accessors off the same table
-      - same body as element_array0_at with a different array offset.
-      The set - 0x080f0fb4 (+0x18), 0x080f108c (+0x30), 0x080f1060
-      (+0x48), 0x080f100c (+0x60), 0x080ed8fc (+0x78), 0x080ed8d0
-      (+0xa8), 0x080f0fe0 (+0xc0). Not ported only because they were
-      outside the named set; each is one line against
-      app/element_table's shared body.
+      2 bl call sites, binary-scanned. One of the seven per-array
+      accessors ported as one-line wrappers against app/element_table's
+      shared body; reads the array at +0x18. The set - 0x080f0fb4
+      (+0x18), 0x080f108c (+0x30), 0x080f1060 (+0x48), 0x080f100c
+      (+0x60), 0x080ed8fc (+0x78), 0x080ed8d0 (+0xa8), 0x080f0fe0
+      (+0xc0).
+
+  - address: 0x080f108c
+    ghidra: FUN_080f108c
+    name: element_array2_at
+    size: 44
+    sig: "void *element_array2_at(i32 index)"
+    module: app/element_table
+    status: ported
+    vars: {param_1: index}
+    notes: >-
+      7 bl call sites, binary-scanned. Same body as element_array0_at;
+      reads the array at +0x30.
+
+  - address: 0x080f1060
+    ghidra: FUN_080f1060
+    name: element_array3_at
+    size: 44
+    sig: "void *element_array3_at(i32 index)"
+    module: app/element_table
+    status: ported
+    vars: {param_1: index}
+    notes: >-
+      5 bl call sites, binary-scanned. Same body as element_array0_at;
+      reads the array at +0x48.
+
+  - address: 0x080f100c
+    ghidra: FUN_080f100c
+    name: element_array4_at
+    size: 44
+    sig: "void *element_array4_at(i32 index)"
+    module: app/element_table
+    status: ported
+    vars: {param_1: index}
+    notes: >-
+      6 bl call sites, binary-scanned. Same body as element_array0_at;
+      reads the array at +0x60.
+
+  - address: 0x080ed8fc
+    ghidra: FUN_080ed8fc
+    name: element_array5_at
+    size: 44
+    sig: "void *element_array5_at(i32 index)"
+    module: app/element_table
+    status: ported
+    vars: {param_1: index}
+    notes: >-
+      9 bl call sites, binary-scanned. Same body as element_array0_at;
+      reads the array at +0x78.
+
+  - address: 0x080ed8d0
+    ghidra: FUN_080ed8d0
+    name: element_array7_at
+    size: 44
+    sig: "void *element_array7_at(i32 index)"
+    module: app/element_table
+    status: ported
+    vars: {param_1: index}
+    notes: >-
+      8 bl call sites, binary-scanned. Same body as element_array0_at;
+      reads the array at +0xa8.
+
+  - address: 0x080f0fe0
+    ghidra: FUN_080f0fe0
+    name: element_array8_at
+    size: 44
+    sig: "void *element_array8_at(i32 index)"
+    module: app/element_table
+    status: ported
+    vars: {param_1: index}
+    notes: >-
+      6 bl call sites, binary-scanned. Same body as element_array0_at;
+      reads the array at +0xc0.
 
   - address: 0x0810e64c
     ghidra: FUN_0810e64c

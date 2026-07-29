@@ -44,10 +44,10 @@
 //! | 0x080ed8d0 | 7 | +0xa8 |
 //! | 0x080f0fe0 | 8 | +0xc0 |
 //!
-//! This module ports the getter and the two busiest accessors —
-//! 0x080ed928 (64 `bl`) and 0x080f1038 (47 `bl`), 111 sites across the
-//! pair. The other seven are the same body with a different array
-//! index and are one line each when someone wants them.
+//! This module ports the getter and all nine accessors. The two
+//! busiest are 0x080ed928 (64 `bl`) and 0x080f1038 (47 `bl`), 111
+//! sites across the pair; the other seven (43 `bl` in all) are the
+//! same body with a different array index and are one line each.
 //!
 //! **What the nine arrays hold is not identified.** The element type
 //! only exists in the nine container constructors, which live at
@@ -259,6 +259,90 @@ pub unsafe extern "C" fn element_array6_at(index: i32) -> *mut u8 {
     element_array_at(6, index)
 }
 
+/// element_array1_at — original: `FUN_080f0fb4` @ 0x080f0fb4
+/// (44 bytes; 2 `bl` call sites, binary-scanned).
+///
+/// Slot `index` of the table's second array (+0x18), or NULL when
+/// `index` is negative or at/past the array's slot count. Same body as
+/// [`element_array0_at`] with a different array offset.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn element_array1_at(index: i32) -> *mut u8 {
+    element_array_at(1, index)
+}
+
+/// element_array2_at — original: `FUN_080f108c` @ 0x080f108c
+/// (44 bytes; 7 `bl` call sites, binary-scanned).
+///
+/// Slot `index` of the table's third array (+0x30), or NULL when
+/// `index` is negative or at/past the array's slot count. Same body as
+/// [`element_array0_at`] with a different array offset.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn element_array2_at(index: i32) -> *mut u8 {
+    element_array_at(2, index)
+}
+
+/// element_array3_at — original: `FUN_080f1060` @ 0x080f1060
+/// (44 bytes; 5 `bl` call sites, binary-scanned).
+///
+/// Slot `index` of the table's fourth array (+0x48), or NULL when
+/// `index` is negative or at/past the array's slot count. Same body as
+/// [`element_array0_at`] with a different array offset.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn element_array3_at(index: i32) -> *mut u8 {
+    element_array_at(3, index)
+}
+
+/// element_array4_at — original: `FUN_080f100c` @ 0x080f100c
+/// (44 bytes; 6 `bl` call sites, binary-scanned).
+///
+/// Slot `index` of the table's fifth array (+0x60), or NULL when
+/// `index` is negative or at/past the array's slot count. Same body as
+/// [`element_array0_at`] with a different array offset.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn element_array4_at(index: i32) -> *mut u8 {
+    element_array_at(4, index)
+}
+
+/// element_array5_at — original: `FUN_080ed8fc` @ 0x080ed8fc
+/// (44 bytes; 9 `bl` call sites, binary-scanned).
+///
+/// Slot `index` of the table's sixth array (+0x78), or NULL when
+/// `index` is negative or at/past the array's slot count. Same body as
+/// [`element_array0_at`] with a different array offset.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn element_array5_at(index: i32) -> *mut u8 {
+    element_array_at(5, index)
+}
+
+/// element_array7_at — original: `FUN_080ed8d0` @ 0x080ed8d0
+/// (44 bytes; 8 `bl` call sites, binary-scanned).
+///
+/// Slot `index` of the table's eighth array (+0xa8), or NULL when
+/// `index` is negative or at/past the array's slot count. Same body as
+/// [`element_array0_at`] with a different array offset.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn element_array7_at(index: i32) -> *mut u8 {
+    element_array_at(7, index)
+}
+
+/// element_array8_at — original: `FUN_080f0fe0` @ 0x080f0fe0
+/// (44 bytes; 6 `bl` call sites, binary-scanned).
+///
+/// Slot `index` of the table's ninth array (+0xc0), or NULL when
+/// `index` is negative or at/past the array's slot count. Same body as
+/// [`element_array0_at`] with a different array offset.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn element_array8_at(index: i32) -> *mut u8 {
+    element_array_at(8, index)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -435,10 +519,23 @@ mod tests {
     fn each_accessor_reads_its_own_array() {
         let guard = mock();
         unsafe {
-            assert_eq!(element_array0_at(0), expected_slot(0, 0));
-            assert_eq!(element_array0_at(3), expected_slot(0, 3));
-            assert_eq!(element_array6_at(0), expected_slot(6, 0));
-            assert_eq!(element_array6_at(2), expected_slot(6, 2));
+            let accessors: [unsafe extern "C" fn(i32) -> *mut u8; ELEMENT_ARRAY_COUNT] = [
+                element_array0_at,
+                element_array1_at,
+                element_array2_at,
+                element_array3_at,
+                element_array4_at,
+                element_array5_at,
+                element_array6_at,
+                element_array7_at,
+                element_array8_at,
+            ];
+            for (array, accessor) in accessors.iter().enumerate() {
+                assert_eq!(accessor(0), expected_slot(array, 0), "array {array} slot 0");
+                assert_eq!(accessor(3), expected_slot(array, 3), "array {array} slot 3");
+                assert!(accessor(4).is_null(), "array {array} slot == bound");
+                assert!(accessor(-1).is_null(), "array {array} negative index");
+            }
         }
         restore(guard);
     }
