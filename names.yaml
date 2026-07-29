@@ -7570,8 +7570,7 @@ functions:
     vars: {param_1: block, param_2: opcode, param_3: dest, param_4: regs}
     notes: >-
       75 bl call sites. kind 9, record size 0x14; dest -> +0xc,
-      register list -> +0x10 (built by cg_virtual_reg_list_create,
-      unported - C varargs).
+      register list -> +0x10 (built by cg_virtual_reg_list_create).
 
   - address: 0x082c193c
     ghidra: FUN_082c193c
@@ -7604,18 +7603,25 @@ functions:
     size: 76
     sig: "cg_virtual_reg_list_t *cg_virtual_reg_list_create(cg_heap_t *heap, ...)"
     module: codegen/ir
-    status: identified
+    status: ported
+    vars: {param_1: heap}
     notes: >-
-      75 bl call sites. Varargs: `push {r0,r1,r2,r3}` builds the
-      argument frame, then walks the NULL-terminated list of register
-      pointers from &arg1 upward, allocating an 8-byte cell
-      {next, reg} per entry straight from the heap in arg0 (NOT from
-      a module - the caller passes the arena) and chaining them; the
-      head is returned. Ready to port - cg_heap_alloc is now in the
-      tree - but Rust cannot express the C varargs ABI on this target
-      without inline asm, so it would need a fixed-arity family or a
-      slice-taking shim, which is a deviation worth deciding
-      deliberately.
+      75 bl call sites, every one feeding cg_create_inst_phi. Varargs:
+      `push {r0,r1,r2,r3}` builds the argument frame, then walks the
+      NULL-terminated list of register pointers from &arg1 upward,
+      allocating an 8-byte cell {next @ +0x0, reg @ +0x4} per entry
+      straight from the heap in arg0 (NOT from a module - the caller
+      passes the arena) and chaining them via a trailing link pointer
+      (r4: &head, then &prev->next); the tail cell's next stays NULL by
+      the arena's zero-fill. DEVIATION: Rust cannot express the C
+      varargs ABI on this target, so the port takes `regs`, a pointer
+      to a NULL-terminated array of register pointers - the ported
+      signature is `cg_virtual_reg_list_create(heap: *mut CgHeap, regs:
+      *const *mut CgVirtualReg) -> *mut CgVirtualRegList`. Termination
+      rule, cell layout and allocation sequence are unchanged;
+      match.py shows the same loop body (mov r1,#8; bl cg_heap_alloc;
+      str cell,[link]; str reg,[cell,#4]; advance) with only the
+      argument-frame spill replaced by LLVM's prologue.
 
   - address: 0x082c1adc
     ghidra: FUN_082c1adc
@@ -8391,13 +8397,22 @@ functions:
     ghidra: null
     name: tracked_stats_reset_peak
     size: 36
+    sig: "i64 tracked_stats_reset_peak(i32 reset)"
     module: heap/tracked
-    status: identified
+    status: ported
+    vars: {r4: reset}
     notes: >-
-      `peak(+0x40) := current(+0x38)` when its (register-passed, so this
-      is a tail fragment) flag is nonzero. Sibling 0x08390c54 returns the
-      current i64 after a call to 0x082ccc74. Both documented here for the
-      accounting map; neither ported.
+      Tail of the stats reader @ 0x08390c24 (which saves r4 and calls
+      the scheduler-flag setter @ 0x082ccc74 first). Loads peak(+0x40)
+      into the return pair, then when reset is nonzero (cmp r4,#0 +
+      ldrne/strne) copies current(+0x38) over peak; the returned peak is
+      the pre-reset value. Port deviations: reset arrives as the argument
+      (was r4 - the port IS the tail fragment), reads the ALLOC_STATS
+      static instead of literal 0x08adc2c0, and drops the envelope's
+      lock call @ 0x082ccc74 (module simplification, same as
+      tracked_alloc_tail). match.py: same structure - LLVM uses a beq
+      instead of predication and splits the ldrd. Sibling 0x08390c54
+      (returns current after the lock call) not ported.
 
   - address: 0x0837a158
     ghidra: FUN_0837a158

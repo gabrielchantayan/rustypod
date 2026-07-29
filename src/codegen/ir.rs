@@ -28,6 +28,10 @@
 //!   `cg_create_inst_phi` @ 0x082c1914 (kind 9, 20 bytes),
 //!   `cg_create_inst_ret` @ 0x082c193c (kind 11, 16 bytes),
 //!   `cg_create_inst_ret_value` @ 0x082c194c (kind 11, 16 bytes).
+//! - `cg_virtual_reg_list_create` — original: `FUN_082c19bc` @
+//!   0x082c19bc (76 bytes; 75 `bl` call sites — every one feeding a
+//!   phi). Chains a NULL-terminated run of registers into 8-byte
+//!   `{next, reg}` list cells carved from the caller-supplied arena.
 //!
 //! Layouts recovered from the assembly (byte offsets are the target's;
 //! the port addresses every pointer field by WORD INDEX so the records
@@ -70,6 +74,12 @@
 //!   [`record_size`] so the ports work on a 64-bit host; on target the
 //!   scale is 1 and the constants fold to the originals' `mov r1, #36` /
 //!   `mov r1, #20` / `mov r1, #40`.
+//! - `cg_virtual_reg_list_create` is variadic in the original
+//!   (`stmdb sp!, {r0-r3}` builds the argument frame and the walk reads
+//!   upward from `&arg1`), an ABI Rust cannot express on this target.
+//!   The port takes a pointer to a NULL-terminated array of register
+//!   pointers instead — same termination rule, same cell layout, same
+//!   allocation sequence; only the argument marshalling differs.
 
 use super::heap::{cg_heap_alloc, CgHeap};
 
@@ -119,7 +129,7 @@ pub struct CgInst {
 }
 
 /// `cg_virtual_reg_list_t` — one cell of a NULL-terminated register
-/// list, built by `cg_virtual_reg_list_create` (unported: C varargs).
+/// list, built by [`cg_virtual_reg_list_create`].
 #[repr(C)]
 pub struct CgVirtualRegList {
     _opaque: [u8; 0],
@@ -264,6 +274,14 @@ pub const CG_INST_RET_VALUE_VALUE: usize = 3;
 pub const CG_INST_RET_BYTES: usize = 16;
 /// `cg_inst_kind_t` value both ret factories stamp.
 pub const CG_INST_KIND_RET: u32 = 11;
+
+/// `cg_virtual_reg_list_t + 0x00` — next cell; NULL in the last one by
+/// the arena's zero-fill.
+pub const CG_VREG_LIST_NEXT: usize = 0;
+/// `cg_virtual_reg_list_t + 0x04` — the register this cell holds.
+pub const CG_VREG_LIST_REG: usize = 1;
+/// Size of `cg_virtual_reg_list_t` in target bytes.
+pub const CG_VREG_LIST_BYTES: usize = 8;
 
 /// Address of a record's pointer-sized field at word index `index`.
 #[inline(always)]
@@ -598,8 +616,7 @@ pub unsafe extern "C" fn cg_create_inst_branch_cond(
 ///
 /// Appends a kind-9 (phi) instruction: a 20-byte record holding the
 /// destination register and the head of a register list built by
-/// `cg_virtual_reg_list_create` (unported: its C varargs ABI has no
-/// Rust expression on this target).
+/// [`cg_virtual_reg_list_create`].
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn cg_create_inst_phi(
@@ -651,6 +668,53 @@ pub unsafe extern "C" fn cg_create_inst_ret_value(
     ) as *mut u8;
     slot(inst, CG_INST_RET_VALUE_VALUE).write(value as *mut u8);
     inst as *mut CgInst
+}
+
+/// cg_virtual_reg_list_create — original: `FUN_082c19bc` @ 0x082c19bc
+/// (76 bytes, 75 `bl` call sites).
+///
+/// Chains a NULL-terminated run of register pointers into a singly
+/// linked list of 8-byte `{next, reg}` cells, each carved straight from
+/// the `heap` arena the CALLER passes (unlike the register/instruction
+/// builders, which dig the arena out of a module). Every iteration
+/// allocates one cell, links it through the previous cell's `next` (or
+/// into the head for the first), stores the register at `+0x4`, and
+/// leaves the new cell's `next` NULL via the arena's zero-fill — the
+/// original relies on exactly that to terminate the list
+/// (`str r0, [r4]` / `str r6, [r0, #4]` / `ldr r4, [r4]`, with no
+/// store to `+0x0` of the tail cell). Returns the head, NULL when the
+/// first entry is already NULL.
+///
+/// DEVIATION: the original is variadic — `stmdb sp!, {r0-r3}` spills
+/// the register arguments and the loop walks upward from `&arg1` until
+/// a NULL. Rust cannot express that ABI on this target, so the port
+/// takes `regs`, a pointer to a NULL-terminated array of register
+/// pointers. The termination rule, cell layout and allocation sequence
+/// are unchanged; a hook wanting the exact stock ABI needs an asm
+/// thunk that materializes the argument frame as such an array.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_virtual_reg_list_create(
+    heap: *mut CgHeap,
+    regs: *const *mut CgVirtualReg,
+) -> *mut CgVirtualRegList {
+    let mut head: *mut u8 = core::ptr::null_mut();
+    // The slot the next cell is linked through: starts at `head`, then
+    // tracks `&previous_cell->next`, exactly like the original's r4.
+    let mut link: *mut *mut u8 = core::ptr::addr_of_mut!(head);
+    let mut arg = regs;
+    loop {
+        let reg = arg.read();
+        if reg.is_null() {
+            break;
+        }
+        arg = arg.add(1);
+        let cell = cg_heap_alloc(heap, record_size(CG_VREG_LIST_BYTES));
+        link.write(cell);
+        slot(cell, CG_VREG_LIST_REG).write(reg as *mut u8);
+        link = slot(cell, CG_VREG_LIST_NEXT);
+    }
+    head as *mut CgVirtualRegList
 }
 
 #[cfg(test)]
@@ -1149,6 +1213,113 @@ mod tests {
                 assert_eq!(inst_next(pair[0]), pair[1]);
             }
             assert!(inst_next(insts[9]).is_null());
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn reg_list_of_no_registers_is_null() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let args = [core::ptr::null_mut::<CgVirtualReg>()];
+            let list = cg_virtual_reg_list_create(f.heap, args.as_ptr());
+            assert!(list.is_null(), "first entry NULL -> NULL head");
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn reg_list_chains_cells_in_argument_order_and_null_terminates() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let r0 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let r1 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let r2 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let args = [r0, r1, r2, core::ptr::null_mut()];
+            let head = cg_virtual_reg_list_create(f.heap, args.as_ptr()) as *mut u8;
+            assert!(!head.is_null());
+
+            let regs = [r0, r1, r2];
+            let mut cell = head;
+            for (i, &reg) in regs.iter().enumerate() {
+                assert_eq!(
+                    slot(cell, CG_VREG_LIST_REG).read(),
+                    reg as *mut u8,
+                    "cell {i} holds argument {i}"
+                );
+                let next = slot(cell, CG_VREG_LIST_NEXT).read();
+                if i + 1 < regs.len() {
+                    assert!(!next.is_null(), "cell {i} links onward");
+                    // Cells are contiguous 8-byte arena carvings.
+                    assert_eq!(
+                        next as usize - cell as usize,
+                        stride(CG_VREG_LIST_BYTES),
+                        "cell {i} stride"
+                    );
+                    cell = next;
+                } else {
+                    assert!(next.is_null(), "last cell's next is NULL by zero-fill");
+                }
+            }
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn reg_list_single_register_is_a_single_unlinked_cell() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let r0 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let args = [r0, core::ptr::null_mut()];
+            let cell = cg_virtual_reg_list_create(f.heap, args.as_ptr()) as *mut u8;
+            assert!(!cell.is_null());
+            assert_eq!(slot(cell, CG_VREG_LIST_REG).read(), r0 as *mut u8);
+            assert!(slot(cell, CG_VREG_LIST_NEXT).read().is_null());
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn reg_list_stops_at_the_first_null_entry() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let r0 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let r1 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            // The NULL at index 1 ends the walk; r1 must never be read.
+            let args = [r0, core::ptr::null_mut(), r1];
+            let head = cg_virtual_reg_list_create(f.heap, args.as_ptr()) as *mut u8;
+            assert_eq!(slot(head, CG_VREG_LIST_REG).read(), r0 as *mut u8);
+            assert!(slot(head, CG_VREG_LIST_NEXT).read().is_null());
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn reg_list_feeds_a_phi_instruction() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let dest = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let r0 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let r1 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let args = [r0, r1, core::ptr::null_mut()];
+            let list = cg_virtual_reg_list_create(f.heap, args.as_ptr());
+            let inst = cg_create_inst_phi(f.block_ptr(), 0x2f, dest, list);
+            assert_eq!(
+                slot(inst as *mut u8, CG_INST_PHI_REGS).read(),
+                list as *mut u8,
+                "the phi records the list head, as at every stock call site"
+            );
+            assert_eq!(slot(list as *mut u8, CG_VREG_LIST_REG).read(), r0 as *mut u8);
         }
         drop(f);
         teardown();
