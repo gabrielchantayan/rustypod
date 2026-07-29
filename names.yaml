@@ -9574,6 +9574,36 @@ functions:
       Rust body tail-calls through the loaded slot instead of a direct
       bl. Old scouting name: sqlite_forward_via_db.
 
+  - address: 0x083788fc
+    ghidra: FUN_083788fc
+    name: expr_set_height
+    size: 80
+    sig: "void expr_set_height(Expr *expr)"
+    module: sqlite/expr_height
+    status: ported
+    vars: {param_1: expr, local_10: height}
+    notes: >-
+      SQLite 3.5.x's sqlite3ExprSetHeight. 7 bl call sites, including
+      the tail of sqlite3Expr @ 0x08376808. Seeds a running signed
+      maximum at 0, folds the cached subtree heights of the node's four
+      child slots into it - p_left +0x08 and p_right +0x0c via
+      exprHeight @ 0x082d2a34 (identified, 24 B, leaf: signed strgt max
+      fold of child n_height +0x40), p_list +0x10 via heightOfExprList
+      @ 0x082d2a4c (identified, 64 B: n_expr +0x00, items +0x0c at a
+      12-byte stride with p_expr at item +0x00), p_select +0x38 via
+      heightOfSelect @ 0x082d2a8c (identified, 112 B: folds p_where
+      +0x10, p_having +0x18, p_limit +0x2c, p_offset +0x30, lists
+      p_elist +0x00/p_group_by +0x14/p_order_by +0x1c, then tail-loops
+      onto p_prior +0x20) - then stores max + 1 into n_height +0x40
+      (plain wrapping add). All three fold helpers are unported, so
+      each is a dispatch static (SQLITE_EXPR_HEIGHT_FOLD /
+      SQLITE_EXPR_LIST_HEIGHT_FOLD / SQLITE_SELECT_HEIGHT_FOLD) whose
+      documented default stub is a no-op - exactly the originals'
+      NULL-child behavior, so an unwired node computes the leaf answer
+      height 1. The match.py diff is exactly that deviation: blx
+      through the loaded slots instead of direct bl's, plus LLVM frame
+      setup.
+
   - address: 0x0837acf4
     ghidra: FUN_0837acf4
     name: get_vdbe
