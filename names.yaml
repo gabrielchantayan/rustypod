@@ -9693,6 +9693,36 @@ functions:
       Rust body tail-calls through the loaded slot instead of a direct
       bl. Old scouting name: sqlite_forward_via_db.
 
+  - address: 0x082d2a1c
+    ghidra: FUN_082d2a1c
+    name: hash_function
+    size: 16
+    sig: "int (*hash_function(int key_class))(const void *key, int key_len)"
+    module: sqlite/hash_function
+    status: ported
+    vars: {param_1: key_class}
+    notes: >-
+      SQLite 3.4.x/3.5.x hash.c's hashFunction: returns &strHash when
+      keyClass == SQLITE_HASH_STRING (3 - this build's hash.h has
+      SQLITE_HASH_INT=1/_POINTER=2 compiled out, STRING=3, BINARY=4),
+      &binHash otherwise. 4 instructions (cmp/ldrne/ldreq/bx) plus an
+      8-byte literal pool at 0x082d2a2c/0x082d2a30 holding the two code
+      pointers. 3 bl call sites: rehash @ 0x0836741c, sqlite3HashFind
+      @ 0x0837ad88, sqlite3HashInsert @ 0x0837ae08 - all ldrb keyClass
+      from Hash+0x00, blx the returned pointer with (pKey, nKey), and
+      mask with htsize-1. Targets: strHash @ runtime 0x08386f14 = image
+      0x08391dec under the +0xaed8 skew (see sqlite/mod.rs), already
+      ported as string_hash_tabled - this dispatcher is the function
+      pointer its scouting note predicted; binHash @ runtime 0x082ac9b4
+      = image 0x082b788c, in a Ghidra-undecoded gap, decoded by hand
+      (h = byte ^ h ^ (h<<3) per byte, raw - no case fold, no strlen
+      probe, return h & 0x7fffffff) - identified, not yet ported. The
+      port returns the stock runtime addresses like the original's
+      literal pool does, so it stays transparent to hooks planted on
+      either hash's stock address. match.py: same cmp #3, same two
+      literal-pool words, predicated select - the diff is LLVM frame
+      setup and register shuffling instead of predicated loads.
+
   - address: 0x082d2a34
     ghidra: FUN_082d2a34
     name: expr_height_of
