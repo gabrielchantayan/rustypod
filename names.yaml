@@ -8967,18 +8967,31 @@ functions:
     name: vdbe_free_p4
     size: 148
     sig: "void vdbe_free_p4(int p4type, void *p4)"
-    module: null
-    status: identified
+    module: sqlite/free_p4
+    status: ported
+    renames:
+      param_1: p4type
+      param_2: p4
     notes: >-
       SQLite's freeP4 - the tag-dispatch destructor vdbe_change_p4
-      (and the op-array teardown) call to release P4 payloads. Jump
-      table over p4type -13..=0 (`add r0,r0,#0xd; cmp r0,#0xc; addls
-      pc`): -13/-12/-11/-9/-6/-1 free the pointer raw, -10/-4/-3/-2
-      return untouched, -8 tail-calls a value destructor @ 0x08386504,
-      -7 releases an ephemeral function @ 0x082cf358(*p4) then frees,
+      (and the op-array teardown) call to release P4 payloads. NULL p4
+      returns before the tag is examined (`cmp r1,#0` / `ldmiaeq`).
+      Jump table over p4type -13..=0 (`add r0,r0,#0xd; cmp r0,#0xc;
+      addls pc`): -13/-12/-11/-9/-6/-1 free the pointer raw,
+      -10/-4/-3/-2 return untouched, -8 tail-calls a value destructor
+      @ 0x08386504, -7 releases an ephemeral function @ 0x082cf358(*p4),
+      sweeps the context's (arg, destructor) record array @
+      0x08386e08(p4, 0) - a step the scout notes missed - then frees,
       -5 tail-calls 0x082cf358(p4). Anything outside -13..=0 (e.g. -14)
-      returns unfreed. Not ported - it is the VDBE_P4_OPS dispatch slot
-      in src/sqlite/vdbe.rs (default: documented no-op).
+      returns unfreed. The raw free is sqlite3_free @ 0x083906f4,
+      called through its ported twin tracked_free; the three unported
+      destructors are the FREE_P4_AUX_OPS dispatch table (documented
+      no-op defaults - leak rather than corrupt, house pattern).
+      vdbe_change_p4 still reaches this through its own VDBE_P4_OPS
+      slot; flipping that default is a separate commit. match.py
+      structural (LLVM emits a ldr-pc table instead of addls-pc,
+      inlines tracked_free into the raw-free path, and calls the aux
+      slots with blx).
 
   # ---- Case-insensitive compare (src/sqlite/stricmp.rs) ----
   - address: 0x08384fa0

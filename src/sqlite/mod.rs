@@ -63,6 +63,7 @@
 pub mod btree_lock;
 pub mod dequote;
 pub mod error_msg;
+pub mod free_p4;
 pub mod mem;
 pub mod name_from_token;
 pub mod parse;
