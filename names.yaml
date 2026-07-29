@@ -5224,16 +5224,21 @@ functions:
     size: 8
     sig: "void ata_cmd_set_buffer(u8 *cmd, void *buffer)"
     module: drivers/ata_cmd
-    status: identified
+    status: ported
     vars: {param_1: cmd, param_2: buffer}
     notes: >-
-      `str r1, [r0, #0x28]`. 16 bl call sites. Deliberately NOT ported -
-      +0x28 is the only pointer field in the block, and drivers/ata_cmd
-      addresses the block by literal byte offset, which cannot hold a
-      pointer on a 64-bit test host (it would overlap +0x2c, the buffer
-      offset, whose setter is 0x08121204). Every builder sets the three
-      as a run - buffer +0x28, offset +0x2c (usually 0), length +0x30 -
-      via `ldmib r4, {r0, r1}`.
+      `str r1, [r0, #0x28]`. 16 bl call sites, binary-scanned. +0x28 is
+      the only pointer field in the block; every builder sets it as the
+      head of the (buffer, offset, length) triple - buffer here, offset
+      +0x2c via ata_cmd_set_buffer_offset (usually 0), length +0x30 via
+      ata_cmd_set_transfer_len - and the two non-data builders skip the
+      whole triple. The port stores `buffer as u32` through the same
+      volatile-word helper as the other word setters: exact on the
+      32-bit target, a documented truncation on the 64-bit test host
+      (the tests pin the low 32 bits, all the hardware ever sees).
+      #[inline(never)] - a real bl target. match.py: the `str r1,
+      [r0, #0x28]` matches; LLVM adds a frame prologue/epilogue, as with
+      the sibling setters.
 
   - address: 0x081212a4
     ghidra: FUN_081212a4

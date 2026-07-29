@@ -68,10 +68,10 @@
 //!   are distinct).
 //! - Offsets are literal byte offsets into a `*mut u8`, the
 //!   `drivers/surface.rs` precedent. The block does hold one pointer
-//!   (+0x28, the transfer buffer), but no function ported here ever
-//!   stores a pointer in it: `ata_cmd_reset` writes it as the same
-//!   32-bit zero the original does, and the +0x28 setter @ 0x08121480 is
-//!   deliberately left unported for exactly that reason.
+//!   (+0x28, the transfer buffer): `ata_cmd_reset` writes it as the same
+//!   32-bit zero the original does, and `ata_cmd_set_buffer` stores its
+//!   argument narrowed to 32 bits — exact on the 32-bit target, a
+//!   documented truncation on the 64-bit test host.
 
 /// +0x0c: the protocol every data-transfer builder selects.
 pub const PROTOCOL_DATA: u8 = 1;
@@ -280,6 +280,25 @@ pub unsafe extern "C" fn ata_cmd_set_block_size(cmd: *mut u8, block_size: u32) {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ata_cmd_set_transfer_len(cmd: *mut u8, length: u32) {
     set_word(cmd, TRANSFER_LEN, length);
+}
+
+/// ata_cmd_set_buffer — original: `FUN_08121480` @ 0x08121480 (8 bytes;
+/// 16 call sites, binary-scanned).
+///
+/// The transfer buffer object pointer (+0x28). Every builder sets it as
+/// the head of the (buffer, offset, length) triple — buffer here, then
+/// [`ata_cmd_set_buffer_offset`] (usually 0), then
+/// [`ata_cmd_set_transfer_len`]. The two non-data builders skip the
+/// whole triple.
+///
+/// Deviation: the field is a 32-bit word on the target, so the port
+/// stores `buffer as u32` — exact where the firmware runs, a
+/// truncation on the 64-bit test host (the tests pin the low 32 bits,
+/// which is all the hardware ever sees).
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_cmd_set_buffer(cmd: *mut u8, buffer: *mut u8) {
+    set_word(cmd, BUFFER, buffer as u32);
 }
 
 /// ata_cmd_set_buffer_offset — original: `FUN_08121204` @ 0x08121204
@@ -612,6 +631,31 @@ mod tests {
                 assert_eq!(block.0[other], 0xa5, "spilled onto +{other:#x}");
             }
         }
+    }
+
+    #[test]
+    fn the_buffer_setter_writes_only_its_word() {
+        let mut block = poisoned();
+        let mut transfer_buffer = [0u8; 0x40];
+        let buffer = transfer_buffer.as_mut_ptr();
+        unsafe { ata_cmd_set_buffer(block.0.as_mut_ptr(), buffer) };
+        // The field is 32 bits on the target; the test host keeps only
+        // the low half of the pointer, which is all the firmware sees.
+        assert_eq!(word_at(&block, BUFFER), buffer as u32);
+        for other in 0..block.0.len() {
+            if !(BUFFER..BUFFER + 4).contains(&other) {
+                assert_eq!(block.0[other], 0xa5, "spilled onto +{other:#x}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_buffer_setter_stores_null_verbatim() {
+        // ata_cmd_reset writes this same word as zero; the setter must
+        // be able to put it back.
+        let mut block = poisoned();
+        unsafe { ata_cmd_set_buffer(block.0.as_mut_ptr(), core::ptr::null_mut()) };
+        assert_eq!(word_at(&block, BUFFER), 0);
     }
 
     #[test]
