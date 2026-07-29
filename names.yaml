@@ -4724,18 +4724,27 @@ functions:
     size: 96
     sig: "u32 ft_platform_stream_io(FtStream *stream, u32 offset, u8 *buffer, u32 count)"
     module: ft/system
-    status: identified
-    vars: {param_1: stream, param_2: offset, param_3: buffer, param_4: count}
+    status: ported
+    vars: {param_1: stream, param_2: offset, param_3: buffer, param_4: count, uVar2: handle, local_1c: transferred, iVar1: read_status}
     notes: >-
       The FT_Stream_IoFunc ft_platform_stream_open plants in
       stream->read (+0x14); its runtime address 0x082c8ea4 is the
       literal at 0x082d3e54. Seeks the descriptor (+0x0c) to offset via
-      0x082787b8, then - only when buffer and count are both non-zero -
-      reads through 0x082784b8 into buffer with a transferred-count
-      out-parameter, which is zeroed again if the read reports an error.
-      Returns the transferred count, so a NULL buffer or a zero count is
-      the pure seek FT_Stream_Seek probes with. Not ported: same C++
-      file class dependency as 0x082d3cb4.
+      0x082787b8, called as (handle, offset, offset, 0, 0) - the doubled
+      offset register reproduced verbatim, its meaning not recovered -
+      then - only when buffer and count are both non-zero - reads
+      through 0x082784b8 with the argument order (handle, count, buffer,
+      &transferred), the count stored through the out-parameter zeroed
+      again if the read reports an error (any non-zero return). Returns
+      the transferred count, so a NULL buffer or a zero count is the
+      pure seek FT_Stream_Seek probes with. Unlike the close callback,
+      stream is never null-tested. PORT DEVIATION: the seek and read
+      are methods of the same unported C++ file class as the
+      constructor (0x082d3cb4), so they sit behind the
+      FT_PLATFORM_FILE_SEEK / FT_PLATFORM_FILE_READ dispatch slots
+      whose default stubs fail closed (seek no-op, read reports an
+      error); match.py shows the same shape, the only delta being the
+      slot loads plus blx indirection and the frame layout.
 
   - address: 0x082d3d40
     ghidra: FUN_082d3d40
@@ -7394,13 +7403,18 @@ functions:
     ghidra: FUN_0826c5cc
     name: rect_unit_dead_stub
     size: 4
+    sig: "void rect_unit_dead_stub()"
     module: ui/rect
-    status: identified
+    status: ported
     notes: >-
       A lone `bx lr` closing the rect compilation unit, with ZERO bl
       and ZERO b call sites in the whole image (binary-verified) - a
-      linked-out empty virtual or an unreferenced inline. Nothing to
-      port.
+      linked-out empty virtual or an unreferenced inline. Ported as an
+      empty body; a zero-instruction `black_box(())` barrier keeps
+      LLVM's identical-function folding from aliasing the symbol onto
+      stdio::semihost::nop_stub (same empty body). The ARM codegen is
+      the crate-wide frame prologue + return, structurally a no-op
+      either way.
 
   # --- Vincent 3D software JIT: IR arena + node builders -------------
   # 0x082b0000-0x082e0000 is a mixed third-party block (SQLite, zlib,
@@ -9002,6 +9016,25 @@ functions:
       still missing, so it is ported alongside in the same module
       (precedent: db_malloc_raw landing with db_malloc_zero). match.py:
       same structure (callee bl, cmp/early-out, strbeq at +0x1e).
+
+  - address: 0x083753d0
+    ghidra: FUN_083753d0
+    name: dequote
+    size: 148
+    sig: "void dequote(char *z)"
+    module: sqlite/dequote
+    status: ported
+    vars: {param_1: z, cVar4: quote, cVar1: c, iVar3: read, iVar2: write}
+    notes: >-
+      SQLite's sqlite3Dequote. 3 bl call sites. NULL -> no-op; leading
+      byte picks the quote (' and " self-quote, [ quotes with ], `
+      self-quotes), anything else returns untouched. In-place compaction
+      from read cursor 1 / write cursor 0: doubled quote collapses to
+      one, a lone quote terminates (NUL stored at write cursor), and a
+      NUL with no closing quote ends the loop with NO terminator store.
+      Ported because name_from_token @ 0x0837d7ac needs it. match.py:
+      same structure (quote classification, compaction loop with escape
+      doubling and terminator store).
 
   - address: 0x08384ed8
     ghidra: FUN_08384ed8

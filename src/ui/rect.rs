@@ -55,11 +55,12 @@
 //! - `rect_clear` — original: `FUN_0826c5a8` @ 0x0826c5a8 (24 bytes,
 //!   26 `bl` + 4 tail `b` call sites).
 //!
-//! Two functions in the unit are deliberately not given their own Rust
+//! One function in the unit is deliberately not given its own Rust
 //! symbol: `FUN_0826c5c0` @ 0x0826c5c0 (12 bytes, 1 `bl` call site) is
-//! byte-for-byte identical to `rect_set`, and `FUN_0826c5cc` @
-//! 0x0826c5cc is a lone `bx lr` with no callers at all. A hook for the
-//! former can point straight at [`rect_set`].
+//! byte-for-byte identical to `rect_set`; a hook for it can point
+//! straight at [`rect_set`]. The unit's final word, `FUN_0826c5cc` @
+//! 0x0826c5cc, is a lone `bx lr` with no callers at all and is ported
+//! as the no-op [`rect_unit_dead_stub`].
 //!
 //! # Field layout
 //!
@@ -470,6 +471,28 @@ pub unsafe extern "C" fn rects_intersect(a: *const Rect, b: *const Rect) -> u32 
     1 - rect_is_empty(&clipped)
 }
 
+/// rect_unit_dead_stub — original: `FUN_0826c5cc` @ 0x0826c5cc
+/// (4 bytes).
+///
+/// The final word of the rect compilation unit: a lone `bx lr` — takes
+/// nothing, reads nothing, writes nothing, returns nothing. Zero `bl`
+/// and zero `b` call sites exist anywhere in the image
+/// (binary-verified), so this is dead code: almost certainly a
+/// linked-out empty virtual or an unreferenced inlined helper the
+/// linker never garbage-collected. Ported as an empty body so the
+/// address is covered if a hook ever wants it.
+///
+/// Deviation (codegen only): the `black_box(())` is a zero-instruction
+/// compiler barrier that keeps LLVM's identical-function folding from
+/// aliasing this symbol onto [`crate::stdio::semihost::nop_stub`],
+/// which is the same empty body. The emitted code is still just the
+/// crate-wide frame prologue/epilogue plus `bx lr` semantics — a pure
+/// no-op either way.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn rect_unit_dead_stub() {
+    core::hint::black_box(());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -514,6 +537,14 @@ mod tests {
             r(i32::MIN, i32::MIN, i32::MAX, i32::MAX),
             r(i32::MAX, i32::MAX, i32::MIN, i32::MIN),
         ]
+    }
+
+    #[test]
+    fn dead_stub_is_a_callable_no_op() {
+        // The whole contract: callable, with no observable effect.
+        let rect = r(1, 2, 3, 4);
+        unsafe { rect_unit_dead_stub() };
+        assert_eq!(rect, r(1, 2, 3, 4));
     }
 
     #[test]

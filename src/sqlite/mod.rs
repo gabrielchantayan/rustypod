@@ -61,6 +61,7 @@
 //! their targets are readable C strings only at `+0xaed8`.
 
 pub mod btree_lock;
+pub mod dequote;
 pub mod error_msg;
 pub mod mem;
 pub mod parse;
