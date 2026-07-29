@@ -9510,11 +9510,22 @@ functions:
     ghidra: FUN_08369778
     name: ata_call_with_zero
     size: 8
-    module: null
-    status: identified
+    sig: "u32 *ata_call_with_zero(void)"
+    module: drivers/ata_cmd
+    status: ported
     notes: >-
-      24 bl + 1 tail b call sites. `mov r0,#0; b 0x083696f4` - a
-      zero-argument veneer over 0x083696f4.
+      24 bl + 1 tail b call sites. `mov r0,#0; b 0x083696f4` - the
+      zero-argument entry point of the ATA handle factory 0x083696f4,
+      which builds the 5-word handle ([0]=0, [1]=zeroed 4-entry table,
+      [2]=0, [3]=4, [4]=param) read by ata_handle_first_word_or_minus1
+      and ata_handle_table_entry; this veneer is the common case where
+      the extra word (+0x10) stays 0. Deviation: the factory and its
+      allocator/free (0x08043c18 / 0x08043994) are unported, so the port
+      calls the factory indirectly through ATA_HANDLE_HOOKS whose
+      default stub returns NULL - the original's own alloc-failure
+      result, which every caller's NULL check already handles (e.g.
+      0x0803bbb0). match.py: same mov r0,#0 + tail-call shape, plus the
+      hook-table ldr/bx indirection and an LLVM frame.
 
   - address: 0x082d0ae8
     ghidra: FUN_082d0ae8
