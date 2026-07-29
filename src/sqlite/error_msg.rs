@@ -102,7 +102,11 @@ pub type VmPrintfFn = unsafe extern "C" fn(db: *mut u8, format: *const u8, ap: V
 /// Default stub: no formatter wired, so the message comes back NULL —
 /// the same shape as a failed allocation inside the real formatter (see
 /// the module header).
-unsafe extern "C" fn missing_vm_printf(_db: *mut u8, _format: *const u8, _ap: VaList) -> *mut u8 {
+pub(crate) unsafe extern "C" fn missing_vm_printf(
+    _db: *mut u8,
+    _format: *const u8,
+    _ap: VaList,
+) -> *mut u8 {
     core::ptr::null_mut()
 }
 
@@ -113,7 +117,7 @@ pub static mut SQLITE_VM_PRINTF: VmPrintfFn = missing_vm_printf;
 /// Reads the formatter slot (volatile — the slot is meant to be swapped
 /// at runtime, and a plain read lets LLVM const-fold the default away).
 #[inline(always)]
-fn vm_printf_op() -> VmPrintfFn {
+pub(crate) fn vm_printf_op() -> VmPrintfFn {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(SQLITE_VM_PRINTF)) }
 }
 

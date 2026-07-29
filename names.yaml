@@ -5899,7 +5899,19 @@ functions:
       {b504/b505, aaaa/aaab, a1e8/a1e9, 9a5f/9a60, 93cd, 8e00/8e01,
       88d6, 8432/8433}; note the odd-e correction constant 0xb504 is
       exactly floor(65536/sqrt(2)), which hints the table was floored
-      too.
+      too. Port attempt 2026-07-29: re-verified the blocker stands -
+      the 16 bytes at file offset 0x3f18b2 in osos.dec are still all
+      zero and no newer decryption artifact exists. The floor-vs-round
+      ambiguity is NOT safely ignorable: a 1-ulp seed difference enters
+      at ~2.2e-5 relative error, and although the three Newton
+      iterations crush that below Q16.16 resolution for the vast
+      majority of inputs, fixed16_mul's truncating (hi<<16)|(lo>>u16)
+      step can flip a result ulp whenever an exact intermediate product
+      lands within ~1e-9 relative of a boundary - rare but real, and
+      indistinguishable from the original without the true table. Kept
+      status: identified; port immediately once `make decrypt` fills
+      the region (the floor hypothesis above then verifies or falsifies
+      in one lookup).
 
   # --- Batch: the nine-array element table (app/element_table) ---
   # FUN_08105ffc lazily builds one 0xd8-byte object holding nine 0x18-byte
@@ -9371,13 +9383,24 @@ functions:
     ghidra: FUN_0837d358
     name: sqlite_set_string_formatted
     size: 28
-    module: null
-    status: identified
+    sig: "char *sqlite_set_string_formatted(sqlite3 *db, const char *format, ...)"
+    module: sqlite/set_string_formatted
+    status: ported
+    vars: {param_1: db, param_2: format, param_3: "variadic word 0 (args[0])", param_4: "variadic word 1 (args[1])"}
     notes: >-
-      37 bl call sites. The same `push {r0-r3}; push {r4,lr}` varargs
-      home-area idiom as sqlite_error_msg, forwarding (arg1, arg2,
-      &arg3) to 0x08386454 (sqlite3VMPrintf) and dropping the result -
-      i.e. a `void f(X *, const char *fmt, ...)`. NOT ported (varargs).
+      37 bl call sites. SQLite's sqlite3MPrintf: spills r0-r3 into a
+      varargs home area, reloads the format (spilled r1), builds ap =
+      &spilled-r2, and calls sqlite3VMPrintf @ 0x08386454 with
+      (db, format, ap). The epilogue never touches r0, so the
+      formatter's heap-owned result (NULL on allocation failure) is
+      returned verbatim - call sites like 0x0836f26c use the return
+      value ("SELECT idx, stat FROM %Q.sqlite_stat1" fed to the
+      executor). Ported with the same two dispatch-level deviations as
+      sqlite_error_msg: the C varargs spill becomes an explicit
+      `args: VaList`, and the unported 0x08386454 is the shared
+      SQLITE_VM_PRINTF dispatch static (default always-NULL stub). The
+      match.py diff is exactly those deviations: the Rust body has no
+      home area to spill, so LLVM tail-calls through the loaded slot.
 
   - address: 0x0837dc18
     ghidra: FUN_0837dc18
