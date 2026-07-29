@@ -5768,6 +5768,31 @@ functions:
       identical bodies, so the archive exports byteswap32 and bswap32 at
       one address - review codegen as `match.py 0x08076f58 bswap32`.
 
+  - address: 0x080e965c
+    ghidra: FUN_080e965c
+    name: bswap32_guid_field
+    size: 28
+    sig: "u32 bswap32_guid_field(u32 value)"
+    module: util/bswap
+    status: ported
+    vars: {param_1: value}
+    notes: >-
+      Register-only 32-bit byte reverse - v >> 24 | (v & 0xff0000) >> 8 |
+      (v & 0xff00) << 8 | v << 24 (top byte accumulated first, the
+      reverse operand order of byteswap32 @ 0x08076f58). Third
+      independent copy of the same operation; semantically identical to
+      bswap32 (0x0805dc24) and byteswap32 (0x08076f58). NOT byte- or
+      instruction-identical to either - same 7-instruction mov/and/orr
+      shape, different accumulation order. All 6 bl call sites (osos.asm)
+      sit in FUN_080fab9c and FUN_080fc3d8, which each pull a 12-byte
+      struct from a COM-style vtable object and swap its three
+      consecutive words - the GUID first-three-fields endianness fix-up,
+      hence the name. LLVM folds all three identical bodies onto one
+      address in the archive - review codegen as
+      `match.py 0x080e965c bswap32` (LLVM emits a rotate-based
+      mask/orr byte swap with an fp frame vs ADS's straight
+      mov/and/orr chain; both straight-line, no loops, no calls).
+
   - address: 0x080e9878
     ghidra: FUN_080e9878
     name: fixed16_mul

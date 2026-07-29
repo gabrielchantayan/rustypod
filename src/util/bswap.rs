@@ -120,6 +120,35 @@ pub extern "C" fn byteswap32(value: u32) -> u32 {
     value.swap_bytes()
 }
 
+// ---------------------------------------------------------------------------
+// The GUID-converter copy @ 0x080e965c.
+//
+// A third, independent instance of the same 32-bit byte reverse, living in
+// the COM-style object code block around 0x080fxxxx. It is the register-only
+// form again: mov/and/orr x2 + final orr + bx, 28 bytes — the same
+// expression as `byteswap32` above, with the shifts accumulated in the
+// opposite order (top byte first instead of bottom byte first).
+//
+// All 6 call sites (osos.asm) sit in two sibling functions, FUN_080fab9c
+// and FUN_080fc3d8, which each pull a 12-byte struct out of a COM-style
+// vtable object and byte-swap its three consecutive words — the classic
+// fix-up for a GUID's three endian-sensitive fields (DWORD, WORD, WORD).
+// Hence the name; the operation itself is a plain bswap32.
+// ---------------------------------------------------------------------------
+
+/// bswap32_guid_field — original: `FUN_080e965c` @ 0x080e965c (28 bytes;
+/// 6 bl call sites, all inside FUN_080fab9c / FUN_080fc3d8).
+///
+/// Full 32-bit byte reverse, assembled in registers:
+/// `v >> 24 | (v & 0xff0000) >> 8 | (v & 0xff00) << 8 | v << 24`.
+/// Semantically identical to `bswap32` (0x0805dc24) and `byteswap32`
+/// (0x08076f58), so LLVM folds all three bodies onto one address in the
+/// archive; review its codegen through any of the three symbols.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn bswap32_guid_field(value: u32) -> u32 {
+    value.swap_bytes()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,6 +246,46 @@ mod tests {
             assert_eq!(byteswap32(v), want, "v={v:#010x}");
             assert_eq!(byteswap32(v), bswap32(v), "v={v:#010x}");
             assert_eq!(byteswap32(byteswap32(v)), v, "involution v={v:#010x}");
+        }
+    }
+
+    /// The GUID-converter copy reproduces the reference C expression
+    /// `v >> 24 | (v & 0xff0000) >> 8 | (v & 0xff00) << 8 | v << 24`
+    /// exactly and agrees with the other two bswap32 instances.
+    #[test]
+    fn bswap32_guid_field_matches_the_reference_expression() {
+        for v in [
+            0u32,
+            1,
+            0xffff_ffff,
+            0x0000_00ff,
+            0x0000_ff00,
+            0x00ff_0000,
+            0xff00_0000,
+            0x1234_5678,
+            0xdead_beef,
+            0x8000_0001,
+            // A plausible GUID first field: endian-flipped.
+            0x8b7c_3f2a,
+        ] {
+            let want = v >> 24 | (v & 0xff_0000) >> 8 | (v & 0xff00) << 8 | v << 24;
+            assert_eq!(bswap32_guid_field(v), want, "v={v:#010x}");
+            assert_eq!(bswap32_guid_field(v), bswap32(v), "v={v:#010x}");
+            assert_eq!(bswap32_guid_field(v), byteswap32(v), "v={v:#010x}");
+            assert_eq!(bswap32_guid_field(bswap32_guid_field(v)), v, "involution v={v:#010x}");
+        }
+    }
+
+    /// Exhaustive over all single-byte and two-byte lane combinations —
+    /// the four byte lanes each land in the reversed position.
+    #[test]
+    fn bswap32_guid_field_reverses_every_byte_lane() {
+        for a in 0u32..=0xff {
+            for b in 0u32..=0xff {
+                let v = a | b << 8;
+                let want = u32::from_le_bytes(v.to_be_bytes());
+                assert_eq!(bswap32_guid_field(v), want, "v={v:#010x}");
+            }
         }
     }
 }
