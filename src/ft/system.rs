@@ -28,13 +28,16 @@
 //! nulled. The constructor is a whole C++ file-class subsystem and is
 //! **not** ported, so it sits behind the [`FT_PLATFORM_FILE_CTOR`]
 //! dispatch slot (the singletons.rs pattern) whose default stub fails
-//! the open closed. Still not ported:
+//! the open closed. [`ft_platform_stream_close`] @ 0x082d3d40 is ported:
+//! it destroys the descriptor through the object's own vtable (slot 1),
+//! which — like [`ft_platform_file_open`]'s failure path — is a property
+//! of the object, not a hard-coded address, so no dispatch slot is
+//! needed. Still not ported:
 //!
 //! - 0x082a5418, the length query, which locks a mutex and walks the
 //!   object's directory entry.
-//! - 0x082d3d7c / 0x082d3d40, the read and close callbacks, which go
-//!   through 0x082787b8 (seek) and 0x082784b8 (read) and the object's
-//!   virtual destructor.
+//! - 0x082d3d7c, the read callback, which goes through 0x082787b8
+//!   (seek) and 0x082784b8 (read).
 //!
 //! So the opener takes *those* as an installable [`FtPlatformFileOps`],
 //! the same shape `ft/trace.rs` uses for the unported logger: every
@@ -273,6 +276,47 @@ pub unsafe extern "C" fn ft_platform_file_open(
     destroy(file);
     *handle = core::ptr::null_mut();
     0
+}
+
+/// ft_platform_stream_close (the firmware's `FT_Stream_CloseFunc`) —
+/// original: `FUN_082d3d40` @ 0x082d3d40 (60 bytes; no direct `bl` call
+/// site — planted in `stream->close` by [`ft_platform_stream_open`] @
+/// 0x082d3ddc, which loads it from the literal at 0x082d3e58, and
+/// reached from there by
+/// [`ft_stream_close`](crate::ft::stream::ft_stream_close)).
+///
+/// A null `stream` is a no-op (`movs r4, r0` / `ldmeqia ...pc`). When
+/// the stream's `descriptor` is non-null it is destroyed through slot 1
+/// of its vtable — the same virtual-destructor call
+/// [`ft_platform_file_open`] makes on its failure path, read out of the
+/// object itself, so this port needs no dispatch slot. Either way the
+/// record is then scrubbed: `descriptor` (+0xc), `pathname` (+0x10),
+/// `size` (+4) and `base` (+0) are all zeroed, in that store order.
+///
+/// Note what is *not* scrubbed: `pos`, `read` and `close` itself are
+/// left in place, so a second `ft_stream_close` on the same record
+/// would run this function again (harmlessly — the nulled `descriptor`
+/// skips the destroy).
+///
+/// # Safety
+/// `stream` must be null or a valid `FtStream` whose `descriptor` is
+/// null or a file object with a destructor in vtable slot 1.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_platform_stream_close(stream: *mut FtStream) {
+    if stream.is_null() {
+        return;
+    }
+    let descriptor = (*stream).descriptor.cast::<u8>();
+    if !descriptor.is_null() {
+        let vtable = descriptor.cast::<*const u8>().read();
+        let destroy: unsafe extern "C" fn(this: *mut u8) =
+            core::mem::transmute(vtable.cast::<*const u8>().add(1).read());
+        destroy(descriptor);
+    }
+    (*stream).descriptor = core::ptr::null_mut();
+    (*stream).pathname = core::ptr::null_mut();
+    (*stream).size = 0;
+    (*stream).base = core::ptr::null_mut();
 }
 
 #[cfg(test)]
@@ -642,5 +686,112 @@ mod tests {
             assert!(block.is_null());
         }
         drop(guard);
+    }
+
+    // ---------------------------------------------------------------
+    // ft_platform_stream_close.
+
+    /// Serializes the close tests, which share the recording statics.
+    static CLOSE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// The fake file object and its fake vtable (slot 0 unused, slot 1
+    /// the recording destructor).
+    static mut CLOSE_OBJECT: [u8; 16] = [0; 16];
+    static mut CLOSE_VTABLE: [usize; 2] = [0; 2];
+    static mut CLOSE_DESTROY_CALLS: usize = 0;
+    static mut CLOSE_DESTROY_THIS: *mut u8 = core::ptr::null_mut();
+
+    unsafe extern "C" fn close_recording_destroy(this: *mut u8) {
+        *core::ptr::addr_of_mut!(CLOSE_DESTROY_CALLS) += 1;
+        *core::ptr::addr_of_mut!(CLOSE_DESTROY_THIS) = this;
+    }
+
+    unsafe extern "C" fn sentinel_read(
+        _stream: *mut FtStream,
+        _offset: u32,
+        _buffer: *mut u8,
+        _count: u32,
+    ) -> u32 {
+        0
+    }
+
+    unsafe extern "C" fn sentinel_close(_stream: *mut FtStream) {}
+
+    /// A stream with every scrubbed field set to a sentinel, a live
+    /// descriptor, and `pos`/`read`/`close` set to their own sentinels.
+    fn dirty_stream() -> FtStream {
+        unsafe {
+            core::ptr::addr_of_mut!(CLOSE_OBJECT)
+                .cast::<usize>()
+                .write(core::ptr::addr_of!(CLOSE_VTABLE) as usize);
+            FtStream {
+                base: 0xaaaa_0000 as *mut u8,
+                size: 0xbbbb_0000,
+                pos: 0xcccc_0000,
+                descriptor: core::ptr::addr_of_mut!(CLOSE_OBJECT).cast(),
+                pathname: 0xdddd_0000 as *mut core::ffi::c_void,
+                read: Some(sentinel_read),
+                close: Some(sentinel_close),
+                memory: core::ptr::null_mut(),
+                cursor: core::ptr::null_mut(),
+                limit: core::ptr::null_mut(),
+            }
+        }
+    }
+
+    fn close_guard() -> std::sync::MutexGuard<'static, ()> {
+        let guard = CLOSE_LOCK.lock().unwrap();
+        unsafe {
+            *core::ptr::addr_of_mut!(CLOSE_VTABLE) = [0, close_recording_destroy as usize];
+            *core::ptr::addr_of_mut!(CLOSE_DESTROY_CALLS) = 0;
+            *core::ptr::addr_of_mut!(CLOSE_DESTROY_THIS) = core::ptr::null_mut();
+        }
+        guard
+    }
+
+    #[test]
+    fn a_null_stream_is_a_no_op() {
+        let _guard = close_guard();
+        unsafe {
+            ft_platform_stream_close(core::ptr::null_mut());
+            assert_eq!(*core::ptr::addr_of!(CLOSE_DESTROY_CALLS), 0);
+        }
+    }
+
+    #[test]
+    fn a_live_descriptor_is_destroyed_through_vtable_slot_one_and_the_record_scrubbed() {
+        let _guard = close_guard();
+        let mut stream = dirty_stream();
+        unsafe {
+            ft_platform_stream_close(&mut stream);
+            assert_eq!(*core::ptr::addr_of!(CLOSE_DESTROY_CALLS), 1);
+            assert_eq!(
+                *core::ptr::addr_of!(CLOSE_DESTROY_THIS),
+                core::ptr::addr_of_mut!(CLOSE_OBJECT).cast::<u8>()
+            );
+            assert!(stream.descriptor.is_null());
+            assert!(stream.pathname.is_null());
+            assert_eq!(stream.size, 0);
+            assert!(stream.base.is_null());
+            // What the original does NOT scrub.
+            assert_eq!(stream.pos, 0xcccc_0000);
+            assert!(stream.read.is_some() && stream.close.is_some());
+        }
+    }
+
+    #[test]
+    fn a_null_descriptor_skips_the_destroy_but_still_scrubs() {
+        let _guard = close_guard();
+        let mut stream = dirty_stream();
+        stream.descriptor = core::ptr::null_mut();
+        unsafe {
+            ft_platform_stream_close(&mut stream);
+            assert_eq!(*core::ptr::addr_of!(CLOSE_DESTROY_CALLS), 0);
+            assert!(stream.descriptor.is_null());
+            assert!(stream.pathname.is_null());
+            assert_eq!(stream.size, 0);
+            assert!(stream.base.is_null());
+            assert!(stream.close.is_some(), "close stays: a second close is a safe no-op");
+        }
     }
 }

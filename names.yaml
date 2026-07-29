@@ -4723,17 +4723,21 @@ functions:
     size: 60
     sig: "void ft_platform_stream_close(FtStream *stream)"
     module: ft/system
-    status: identified
+    status: ported
     vars: {param_1: stream}
     notes: >-
       The FT_Stream_CloseFunc ft_platform_stream_open plants in
       stream->close (+0x18); its runtime address 0x082c8e68 is the
       literal at 0x082d3e58. Null stream is a no-op; otherwise the
-      descriptor (+0x0c) is destroyed through slot 1 of its vtable and
-      the record is scrubbed - descriptor, pathname (+0x10), size (+4)
-      and base (+0) all set to 0. Note it leaves stream->close itself
-      in place, so ft_stream_close would happily run it twice. Not
-      ported: same C++ file class dependency as 0x082d3cb4.
+      descriptor (+0x0c) - when itself non-null - is destroyed through
+      slot 1 of its vtable and the record is scrubbed: descriptor,
+      pathname (+0x10), size (+4) and base (+0) all set to 0, in that
+      store order. Note it leaves stream->close itself in place, so
+      ft_stream_close would happily run it twice. The destructor is
+      read out of the object's own vtable (same call as
+      ft_platform_file_open's failure path), so unlike the opener and
+      the read callback this one carries no hard-coded C++ file-class
+      address and is ported directly.
 
   - address: 0x0804f354
     ghidra: FUN_0804f354
