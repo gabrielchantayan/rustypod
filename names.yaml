@@ -6264,7 +6264,7 @@ functions:
     size: 60
     sig: "void *ptr_vector_at(u8 *owner, u32 index)"
     module: util/ptr_vector
-    status: identified
+    status: ported
     vars: {param_1: owner, param_2: index}
     notes: >-
       Bounds-checked element accessor for the same vector at owner+0x14

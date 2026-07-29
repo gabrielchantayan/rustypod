@@ -190,7 +190,12 @@ pub struct VectorBounds {
 /// a huge unsigned count.
 #[inline(always)]
 unsafe fn vector_size(vector: *const VectorBounds, shift: u32) -> i32 {
-    let span = (*vector).end as isize - (*vector).begin as isize;
+    // `read_unaligned`: on target the two words are a plain `ldm`; on a
+    // 64-bit host a firmware vector head can sit at a 4-aligned address
+    // that is not 8-aligned (e.g. +0x14 of an owner object).
+    let begin = core::ptr::read_unaligned(core::ptr::addr_of!((*vector).begin));
+    let end = core::ptr::read_unaligned(core::ptr::addr_of!((*vector).end));
+    let span = end as isize - begin as isize;
     (span >> shift) as i32
 }
 
