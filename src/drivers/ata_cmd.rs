@@ -257,6 +257,18 @@ pub unsafe extern "C" fn ata_cmd_set_flags(cmd: *mut u8, flags: u32) {
     set_word(cmd, FLAGS, flags);
 }
 
+/// ata_cmd_set_transfer_len — original: `FUN_081212a4` @ 0x081212a4
+/// (8 bytes; 16 call sites, binary-scanned).
+///
+/// Transfer length in bytes (+0x30): the builders pass
+/// `sectors * bytes-per-sector`, the product of the caller's count
+/// argument and the device object's vtable slot +0x20.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_cmd_set_transfer_len(cmd: *mut u8, length: u32) {
+    set_word(cmd, TRANSFER_LEN, length);
+}
+
 /// ata_cmd_set_buffer_offset — original: `FUN_08121204` @ 0x08121204
 /// (8 bytes; 16 call sites, binary-scanned).
 ///
@@ -563,6 +575,18 @@ mod tests {
         let mut block = poisoned();
         unsafe { ata_cmd_set_device(block.0.as_mut_ptr(), DEVICE_NONE) };
         assert_eq!(block.0[DEVICE_INDEX] as i8, -1);
+    }
+
+    #[test]
+    fn the_transfer_len_setter_writes_only_its_word() {
+        let mut block = poisoned();
+        unsafe { ata_cmd_set_transfer_len(block.0.as_mut_ptr(), 0x200 * 8) };
+        assert_eq!(word_at(&block, TRANSFER_LEN), 0x1000);
+        for other in 0..block.0.len() {
+            if !(TRANSFER_LEN..TRANSFER_LEN + 4).contains(&other) {
+                assert_eq!(block.0[other], 0xa5, "spilled onto +{other:#x}");
+            }
+        }
     }
 
     #[test]

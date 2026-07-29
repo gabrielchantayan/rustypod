@@ -5237,7 +5237,7 @@ functions:
     size: 8
     sig: "void ata_cmd_set_transfer_len(u8 *cmd, u32 length)"
     module: drivers/ata_cmd
-    status: identified
+    status: ported
     vars: {param_1: cmd, param_2: length}
     notes: >-
       `str r1, [r0, #0x30]`. 16 bl call sites. Transfer length in bytes -
