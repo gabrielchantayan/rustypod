@@ -702,6 +702,9 @@ pub unsafe extern "C" fn layer_bind_surface(layer: *mut u8, surface: *mut u8) {
 /// of the install, in order, with no inspection.
 ///
 /// Returns 0 (`mov r0, #0`), like the original.
+// `#[inline(never)]`: [`layer_reconfigure_thunk`] must stay a veneer —
+// inlining this body into it turns the one-word `b` into a second copy.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn layer_reconfigure(layer: *mut u8, surface: *mut u8) -> u32 {
     mutex_lock(layer_mutex(layer));
@@ -720,6 +723,27 @@ pub unsafe extern "C" fn layer_reconfigure(layer: *mut u8, surface: *mut u8) -> 
 
     mutex_unlock(layer_mutex(layer));
     0
+}
+
+/// layer_reconfigure_thunk — original: `thunk_FUN_0811fc4c` @ 0x08120134
+/// (4 bytes; 1 `bl` call site @ 0x080f58e8).
+///
+/// A single `b 0x0811fc4c` — an ADS alias veneer that tail-branches into
+/// [`layer_reconfigure`] with the arguments untouched (registers fall
+/// through). The port is the same forward-and-return; semantically a
+/// pure alias. match.py deviation, the crate-wide one: LLVM keeps a
+/// frame pointer on armv5te (the `layer_install_planes` notes), which
+/// blocks the sibling-call fold, so the veneer is `bl` + `mov r0,#0` +
+/// return instead of the original's bare `b`. The call-graph edge —
+/// thunk to reconfigure, nothing else — is identical.
+// `#[inline(never)]`: the original is a real `bl` target; inlining it
+// into a caller would duplicate the branch. `layer_reconfigure` itself
+// is `#[inline(never)]` for the mirror reason — inlining its body here
+// would turn the veneer into a second copy of the whole function.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn layer_reconfigure_thunk(layer: *mut u8, surface: *mut u8) -> u32 {
+    layer_reconfigure(layer, surface)
 }
 
 /// layer_force_enable — original: `FUN_08120654` @ 0x08120654
@@ -1784,6 +1808,31 @@ mod tests {
         let before = layer.0;
         unsafe { layer_reconfigure(layer.ptr(), core::ptr::null_mut()) };
         assert!(layer.0 == before);
+
+        restore_hooks(guard);
+    }
+
+    #[test]
+    fn the_reconfigure_thunk_is_a_pure_alias_of_reconfigure() {
+        // Same return value, same downstream traffic as the direct call.
+        let guard = with_recording_hooks();
+
+        let mut layer = unarmed_layer();
+        layer.0[FORMAT_VARIANT] = FORMAT_VARIANT_ALT_COMMIT;
+        assert_eq!(
+            unsafe { layer_reconfigure_thunk(layer.ptr(), 0x9000 as *mut u8) },
+            0
+        );
+        assert_eq!(SWAPS.load(Ordering::SeqCst), 1);
+        assert_eq!(LAST_SWAPPED_SURFACE.load(Ordering::SeqCst), 0x9000);
+        assert_eq!(QUERIES.load(Ordering::SeqCst), 1);
+        for (slot, installed) in INSTALLED.iter().enumerate() {
+            assert_eq!(
+                installed.load(Ordering::SeqCst),
+                0x1000 + slot * 0x100,
+                "plane {slot} must pass through the thunk untouched"
+            );
+        }
 
         restore_hooks(guard);
     }

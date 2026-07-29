@@ -6583,12 +6583,18 @@ functions:
     size: 4
     sig: "u32 layer_reconfigure_thunk(u8 *layer, u8 *surface)"
     module: drivers/display_layer
-    status: identified
+    status: ported
     vars: {param_1: layer, param_2: surface}
     notes: >-
       A single `b 0x0811fc4c` - an ADS alias veneer for
-      layer_reconfigure, called once (bl @ 0x080f58e8). Nothing to port;
-      a hook on it should point straight at layer_reconfigure.
+      layer_reconfigure, called once (bl @ 0x080f58e8). Ported as the
+      same forward-and-return (a pure alias). #[inline(never)] on both
+      the thunk and layer_reconfigure: without the latter LLVM inlines
+      the whole callee body into the veneer. match.py - the crate-wide
+      frame-pointer deviation: LLVM emits bl + mov r0,#0 + return
+      instead of the bare b (no sibling-call fold with a kept frame
+      pointer); the call-graph edge is identical. A hook on the stock
+      veneer should point straight at layer_reconfigure.
 
   - address: 0x08120654
     ghidra: FUN_08120654
@@ -9217,15 +9223,19 @@ functions:
     name: get_vdbe
     size: 56
     sig: "Vdbe *get_vdbe(Parse *parse)"
-    module: null
-    status: identified
+    module: sqlite/vdbe
+    status: ported
+    vars: {param_1: parse}
     notes: >-
       SQLite's sqlite3GetVdbe. 46 bl call sites. Returns pParse->pVdbe
       (+0x0c), creating it with sqlite3VdbeCreate @ 0x08386c44 on
       pParse->db and then calling 0x083867f8(v, 20) - an AddOp0-shaped
-      helper emitting opcode 20 - when it was NULL. NOT ported: both
-      callees are unported, so the port would be two dispatch slots
-      around three instructions.
+      helper emitting opcode 20 - when it was NULL. The pVdbe store is
+      unconditional even on creation failure. The unported constructor
+      @ 0x08386c44 goes through the VDBE_CREATE_OPS dispatch boundary
+      (default slot always fails, mimicking OOM); the AddOp0 helper is
+      semantically vdbe_add_op3(v, op, 0, 0, 0), so the ported
+      vdbe_add_op3 is called directly.
 
   - address: 0x0837d7ac
     ghidra: FUN_0837d7ac
