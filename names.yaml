@@ -8298,8 +8298,9 @@ functions:
       gets the old length - assignment passes (0, size()), append
       passes (size(), 0). Returns `string`.
 
-  # --- tag-57 tracked allocator: free side (0x083906f4..0x08390774) ---
-  # Block layout built by the allocator @ 0x08390b8c (decoded, not ported):
+  # --- tag-57 tracked allocator: free side (0x083906f4..0x08390774)
+  #     plus the alloc tail @ 0x08390b8c ---
+  # Block layout built by tracked_alloc_tail @ 0x08390b8c (ported):
   #   raw+0x00 i32 size, raw+0x04 i32 size>>31 (the pair is an i64),
   #   raw+0x08 = base, then padding so `data = (base + 36) & ~31` is
   #   32-byte aligned, with `pad = data - base` stored at data-4.
@@ -8365,16 +8366,26 @@ functions:
     ghidra: null
     name: tracked_alloc_tail
     size: 92
+    sig: "void *tracked_alloc_tail(int size)"
     module: heap/tracked
-    status: identified
+    status: ported
+    vars: {r5: size, r6: "size + 0x24", r7: stats, r4: "raw, then payload"}
     notes: >-
       Tail of the tag-57 tracked allocator (not a functions.csv entry; the
-      enclosing function starts earlier). Decoded to recover the block
-      layout documented above - alloc_tag57, store size and size>>31 at
-      raw+0/+4, align `base + 36` down to 32, store the pad at data-4,
-      add the size to the i64 counter at 0x08adc2c0+0x38 and raise the
-      peak at +0x40 when it grew. Not ported - the enclosing function's
-      entry needs scouting first.
+      enclosing entry @ 0x08390b14 - 41 bl call sites - has the size<=0
+      gate, the soft-limit check and the first alloc attempt, and warns
+      via 0x0837d67c before falling into this retry). Retries
+      alloc_tag57(size + 0x24 + 8) = size + 44 (8-byte header + up to 36
+      bytes of alignment pad + payload); NULL in, NULL out. On success:
+      raw+0 = size, raw+4 = size>>31 (the pair is an i64), data =
+      (base + 36) & ~31 with base = raw+8, pad = data - base stored at
+      data-4; current(+0x38) += (i64)(i32)size via adds/adc ..asr #31,
+      and peak(+0x40) := current when peak < current (subs/sbcs +
+      ldrdlt/strdlt). Port takes size as the argument (was r5) and reads
+      the ALLOC_STATS static instead of literal 0x08adc2c0 (module
+      simplification, same as the free side). match.py: same structure -
+      LLVM folds base+8+36 into raw+44 and schedules the two cookie
+      stores together; the peak raise keeps the lt condition.
 
   - address: 0x08390c30
     ghidra: null

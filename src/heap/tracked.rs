@@ -2,8 +2,9 @@
 //! with a size cookie and a running byte counter. Cluster
 //! 0x083906f4..0x08390774 plus the tag-57 veneers @ 0x08391d24/0x08391d2c.
 //!
-//! Block layout produced by the allocator @ 0x08390b8c (not ported here,
-//! but decoded to recover the layout — see below):
+//! Block layout produced by `tracked_alloc_tail` @ 0x08390b8c (ported
+//! below; the enclosing allocator's entry @ 0x08390b14 is not — see
+//! below):
 //!
 //! ```text
 //! raw + 0x00  i32   size          bytes the caller asked for
@@ -33,6 +34,11 @@
 //!
 //! Ported here (binary-scanned call counts):
 //!
+//! - `tracked_alloc_tail` — original @ 0x08390b8c (92 bytes: the tail of
+//!   the tag-57 tracked allocator whose entry @ 0x08390b14 has the size
+//!   gate, the soft-limit check and the retry-warning call; **41 `bl`
+//!   call sites of the entry**). Retries `alloc_tag57(size + 44)`, builds
+//!   the block above, and does the alloc-side accounting.
 //! - `tracked_free` — original: `FUN_083906f4` @ 0x083906f4 (68 bytes:
 //!   64 code + the 0x08adc2c0 literal; **218 `bl` + 22 tail `b` call
 //!   sites**). Undoes the layout above and hands the raw block to the
@@ -98,6 +104,41 @@ pub unsafe extern "C" fn free_tag57(block: *mut u8) {
     free_wrapper(block, TAG_TRACKED)
 }
 
+/// tracked_alloc_tail — original @ 0x08390b8c (92 bytes).
+///
+/// Tail of the tag-57 tracked allocator (entry @ 0x08390b14): the head
+/// rejects `size <= 0`, enforces the soft limit, and warns before the
+/// retry — the tail IS the retry. Requests `size + 44` bytes from
+/// `alloc_tag57` (8-byte header + at most 36 bytes of alignment
+/// padding + payload), returns NULL if the heap is out. On success it
+/// writes the signed size cookie and its sign extension at raw+0/+4,
+/// computes `data = (base + 36) & !31` with `base = raw + 8`, stores
+/// `pad = data - base` at data-4, adds the sign-extended size to the
+/// running byte counter, and raises the peak when the counter grew past
+/// it. Returns the 32-byte-aligned payload pointer.
+///
+/// Deviations: the accounting block is the `ALLOC_STATS` static instead
+/// of the literal 0x08adc2c0 (module simplification), and the size
+/// arrives as the function argument instead of register r5.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn tracked_alloc_tail(size: i32) -> *mut u8 {
+    let raw = alloc_tag57(size as usize + 0x24 + 8);
+    if raw.is_null() {
+        return core::ptr::null_mut();
+    }
+    (raw.add(4) as *mut i32).write(size >> 31);
+    let base = raw.add(BLOCK_HEADER_SIZE);
+    let data = ((base as usize + 0x24) & !31) as *mut u8;
+    (raw as *mut i32).write(size);
+    (data.sub(4) as *mut u32).write((data as usize - base as usize) as u32);
+    let stats = core::ptr::addr_of_mut!(ALLOC_STATS);
+    (*stats).current_bytes = (*stats).current_bytes.wrapping_add(size as i64);
+    if (*stats).peak_bytes < (*stats).current_bytes {
+        (*stats).peak_bytes = (*stats).current_bytes;
+    }
+    data
+}
+
 /// tracked_free — original @ 0x083906f4.
 ///
 /// Recovers the raw block from an aligned payload pointer, subtracts the
@@ -158,12 +199,16 @@ mod tests {
     static mut FREED: [*mut u8; 16] = [core::ptr::null_mut(); 16];
     static mut FREE_TAGS: [usize; 16] = [0; 16];
     static mut FREE_COUNT: usize = 0;
+    static mut LAST_ALLOC_SIZE: usize = 0;
+    static mut LAST_ALLOC_TAG: usize = 0;
 
     unsafe extern "C" fn arena_alloc(
         _heap: *mut HeapDescriptorDescriptor,
         size: usize,
-        _tag: usize,
+        tag: usize,
     ) -> *mut u8 {
+        LAST_ALLOC_SIZE = size;
+        LAST_ALLOC_TAG = tag;
         let used = ARENA_USED;
         let aligned = (size + 31) & !31;
         if used + aligned > ARENA_SIZE {
@@ -200,6 +245,8 @@ mod tests {
         unsafe {
             ARENA_USED = 0;
             FREE_COUNT = 0;
+            LAST_ALLOC_SIZE = 0;
+            LAST_ALLOC_TAG = 0;
             FREED = [core::ptr::null_mut(); 16];
             FREE_TAGS = [0; 16];
             ALLOC_STATS.current_bytes = 0;
@@ -338,6 +385,88 @@ mod tests {
             (base as *mut usize).write(1);
             tracked_free_pointer_array(base.add(1));
             assert_eq!(freed(), &[array_raw]);
+        }
+    }
+
+    // ---- tracked_alloc_tail --------------------------------------------
+
+    /// Recovers the raw block the way `tracked_free` does.
+    unsafe fn raw_of(payload: *mut u8) -> *mut u8 {
+        let pad = (payload.sub(4) as *const u32).read() as usize;
+        payload.sub(pad).sub(BLOCK_HEADER_SIZE)
+    }
+
+    #[test]
+    fn a_failed_retry_returns_null_and_touches_nothing() {
+        let _guard = arena();
+        unsafe {
+            ARENA_USED = ARENA_SIZE; // heap is out
+            ALLOC_STATS.current_bytes = 7;
+            ALLOC_STATS.peak_bytes = 9;
+            assert!(tracked_alloc_tail(16).is_null());
+            assert_eq!(ALLOC_STATS.current_bytes, 7);
+            assert_eq!(ALLOC_STATS.peak_bytes, 9);
+        }
+    }
+
+    /// The request is size + 44 (8-byte header + up to 36 bytes of
+    /// alignment padding + payload) with caller tag 57, and the returned
+    /// payload is 32-aligned at every raw alignment the arena can produce.
+    #[test]
+    fn builds_the_block_the_free_path_undoes() {
+        let _guard = arena();
+        unsafe {
+            for skew in 0..8usize {
+                ARENA_USED = skew * 4;
+                ALLOC_STATS.current_bytes = 0;
+                ALLOC_STATS.peak_bytes = 0;
+                let payload = tracked_alloc_tail(40);
+                assert!(!payload.is_null(), "skew={skew}");
+                assert_eq!(LAST_ALLOC_SIZE, 40 + 44);
+                assert_eq!(LAST_ALLOC_TAG, TAG_TRACKED);
+                assert_eq!(payload as usize % 32, 0, "payload must be 32-aligned");
+                let raw = raw_of(payload);
+                assert_eq!((raw as *const i32).read(), 40);
+                assert_eq!((raw.add(4) as *const i32).read(), 0);
+                let pad = payload as usize - (raw as usize + BLOCK_HEADER_SIZE);
+                assert!((4..=36).contains(&pad), "skew={skew} pad={pad}");
+                assert_eq!(
+                    (payload.sub(4) as *const u32).read() as usize,
+                    pad,
+                    "pad word below the payload"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn adds_the_size_and_raises_the_peak_when_it_grew() {
+        let _guard = arena();
+        unsafe {
+            ALLOC_STATS.current_bytes = 100;
+            ALLOC_STATS.peak_bytes = 100;
+            tracked_alloc_tail(64);
+            assert_eq!(ALLOC_STATS.current_bytes, 164);
+            assert_eq!(ALLOC_STATS.peak_bytes, 164, "peak follows current up");
+
+            ALLOC_STATS.peak_bytes = 1000;
+            tracked_alloc_tail(64);
+            assert_eq!(ALLOC_STATS.current_bytes, 228);
+            assert_eq!(ALLOC_STATS.peak_bytes, 1000, "peak is a high-water mark");
+        }
+    }
+
+    /// The add sign-extends the 32-bit size into the 64-bit counter
+    /// (`adc r1, r1, r5, asr #31`) and carries across the 32-bit boundary.
+    #[test]
+    fn the_counter_is_a_full_sixty_four_bit_add() {
+        let _guard = arena();
+        unsafe {
+            ALLOC_STATS.current_bytes = 0xffff_ffff;
+            ALLOC_STATS.peak_bytes = 0;
+            tracked_alloc_tail(1);
+            assert_eq!(ALLOC_STATS.current_bytes, 0x1_0000_0000);
+            assert_eq!(ALLOC_STATS.peak_bytes, 0x1_0000_0000);
         }
     }
 }
