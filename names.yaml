@@ -9738,20 +9738,27 @@ functions:
     ghidra: FUN_083d7750
     name: vector_size_elem24
     size: 16
-    module: null
-    status: identified
+    sig: "i32 vector_size_elem24(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
     notes: >-
-      The non-power-of-two half of the vector_size family - same
-      `ldm r0,{r0,r1}; sub r0,r1,r0` head, but then `mov r1,#N` and a
-      TAIL BRANCH into the ADS signed divide @ 0x08031568 instead of an
-      asr. One instantiation per element size, byte-identical within
-      each divisor - elem 12 (5 fns, 62 calls, top 0x083d76f8 18),
-      elem 20 (2 fns, 21 calls, top 0x083d7640 14), elem 24 (2 fns, 45
-      calls, 0x083d7750 31 and 0x083d77dc 14), elem 28 (1 fn, 8 calls,
-      0x083d7894), elem 40 (1 fn, 14 calls, 0x083d783c). Blocked on
-      0x08031568 (ADS signed divide) not being ported; the b-not-bl
-      tail call also means the port would have to reproduce the divide's
-      exact quotient/remainder register contract.
+      `vector<T>::size()` for a 24-byte element - the non-power-of-two
+      half of the vector_size family: same `ldm r0,{r0,r1}; sub
+      r0,r1,r0` head as the shifts, but then `mov r1,#0x18` and a TAIL
+      BRANCH into the ADS signed divide @ 0x08031568 (ported as
+      __rt_sdiv; the old blocker is gone). 31 bl call sites here; the
+      byte-identical copy 0x083d77dc (14 bl sites) can hook the same
+      symbol. The port calls the ported __rt_sdiv, which is signed and
+      truncating, so a reversed vector's negative span truncates toward
+      zero. match.py - same structure as vector_capacity (sub / mov
+      r1,#24 / b __rt_sdiv); the ldm comes out as byte loads from the
+      family's read_unaligned host-testing idiom, the same accepted
+      deviation as vector_size_elem4. Other divide instantiations
+      (identified, not ported): elem 12 (5 fns, 62 calls, top
+      0x083d76f8 18), elem 20 (2 fns, 21 calls, top 0x083d7640 14),
+      elem 28 (1 fn, 8 calls, 0x083d7894), elem 40 (1 fn, 14 calls,
+      0x083d783c).
 
   - address: 0x083d7760
     ghidra: FUN_083d7760
