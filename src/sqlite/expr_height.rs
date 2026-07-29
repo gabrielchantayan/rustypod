@@ -37,7 +37,9 @@
 //!   — a signed `strgt` maximum fold.
 //! - `heightOfExprList` @ 0x082d2a4c (64 bytes): walks the list's
 //!   `nExpr` items (+0x00), a 12-byte-stride array at +0x0c whose first
-//!   word is the `Expr *`, folding each through `exprHeight`.
+//!   word is the `Expr *`, folding each through `exprHeight` — **ported**
+//!   as [`crate::sqlite::expr_list_height::expr_list_height`] and wired
+//!   as the default of [`SQLITE_EXPR_LIST_HEIGHT_FOLD`].
 //! - `heightOfSelect` @ 0x082d2a8c (112 bytes): folds p_where (+0x10),
 //!   p_having (+0x18), p_limit (+0x2c) and p_offset (+0x30) through
 //!   `exprHeight`, p_elist (+0x00), p_group_by (+0x14) and p_order_by
@@ -61,16 +63,17 @@
 //! ```
 //!
 //! Deviations:
-//! - Two of the three fold helpers remain unported, so each is a
+//! - One of the three fold helpers remains unported, so it is a
 //!   dispatch boundary (house pattern — see `sqlite/error_msg.rs`):
-//!   [`SQLITE_EXPR_LIST_HEIGHT_FOLD`] and [`SQLITE_SELECT_HEIGHT_FOLD`].
-//!   Both default slots share one documented no-op stub — which is
-//!   *exactly* the behavior the originals have for a NULL child pointer
-//!   (the `movs/ldmiaeq` early return / `cmp r0,#0` guard), so with no
-//!   helpers wired those folds never move the accumulator.
-//!   [`SQLITE_EXPR_HEIGHT_FOLD`] keeps the same dispatch-slot shape
-//!   (host tests swap it for recording mocks), but its default is now
-//!   the real port, [`crate::sqlite::expr_height_of::expr_height_of`].
+//!   [`SQLITE_SELECT_HEIGHT_FOLD`]. Its default slot is a documented
+//!   no-op stub — which is *exactly* the behavior the original has for
+//!   a NULL child pointer (the `cmp r0,#0` guard), so with no helper
+//!   wired that fold never moves the accumulator.
+//!   [`SQLITE_EXPR_HEIGHT_FOLD`] and [`SQLITE_EXPR_LIST_HEIGHT_FOLD`]
+//!   keep the same dispatch-slot shape (host tests swap them for
+//!   recording mocks), but their defaults are now the real ports,
+//!   [`crate::sqlite::expr_height_of::expr_height_of`] and
+//!   [`crate::sqlite::expr_list_height::expr_list_height`].
 //!   The match.py diff is exactly this deviation: indirect calls
 //!   through the loaded slots instead of direct `bl`s.
 //! - `Expr` is a typed `#[repr(C)]` struct rather than raw byte
@@ -79,6 +82,7 @@
 //!   targets (`_EXPR_*_OFFSET`).
 
 use super::expr_height_of::expr_height_of;
+use super::expr_list_height::expr_list_height;
 
 /// An expression node (`sqlite3Expr`), only the fields this fix-up
 /// touches. The full layout is documented in the module header.
@@ -124,10 +128,11 @@ const _EXPR_N_HEIGHT_OFFSET: [u8; 0x40] = [0; core::mem::offset_of!(Expr, n_heig
 /// 0x082d2a4c and `heightOfSelect` @ 0x082d2a8c share this shape.
 pub type HeightFoldFn = unsafe extern "C" fn(child: *mut u8, height: *mut i32);
 
-/// Default stub of the two slots whose originals are still unported
-/// (the operand slot now defaults to [`expr_height_of`]): no fold
-/// helper wired, so the accumulator never moves — exactly what the
-/// original helpers do for a NULL child (see the module header).
+/// Default stub of the slot whose original is still unported (the
+/// operand and list slots now default to [`expr_height_of`] and
+/// [`expr_list_height`]): no fold helper wired, so the accumulator
+/// never moves — exactly what the original helpers do for a NULL child
+/// (see the module header).
 pub(crate) unsafe extern "C" fn missing_height_fold(_child: *mut u8, _height: *mut i32) {}
 
 /// The active operand fold (`exprHeight` @ 0x082d2a34). The default is
@@ -136,7 +141,9 @@ pub(crate) unsafe extern "C" fn missing_height_fold(_child: *mut u8, _height: *m
 pub static mut SQLITE_EXPR_HEIGHT_FOLD: HeightFoldFn = expr_height_of;
 
 /// The active expression-list fold (`heightOfExprList` @ 0x082d2a4c).
-pub static mut SQLITE_EXPR_LIST_HEIGHT_FOLD: HeightFoldFn = missing_height_fold;
+/// The default is the real port, [`expr_list_height`]; host tests still
+/// install recording mocks through the slot.
+pub static mut SQLITE_EXPR_LIST_HEIGHT_FOLD: HeightFoldFn = expr_list_height;
 
 /// The active sub-select fold (`heightOfSelect` @ 0x082d2a8c).
 pub static mut SQLITE_SELECT_HEIGHT_FOLD: HeightFoldFn = missing_height_fold;
@@ -202,12 +209,12 @@ mod tests {
         SLOT_LOCK.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// The documented default configuration: the real `exprHeight`
-    /// port on the operand slot, the no-op stub on the two slots whose
-    /// originals are still unported.
+    /// The documented default configuration: the real `exprHeight` and
+    /// `heightOfExprList` ports on the operand and list slots, the
+    /// no-op stub on the slot whose original is still unported.
     unsafe fn restore_defaults() {
         core::ptr::write_volatile(core::ptr::addr_of_mut!(SQLITE_EXPR_HEIGHT_FOLD), expr_height_of);
-        core::ptr::write_volatile(core::ptr::addr_of_mut!(SQLITE_EXPR_LIST_HEIGHT_FOLD), missing_height_fold);
+        core::ptr::write_volatile(core::ptr::addr_of_mut!(SQLITE_EXPR_LIST_HEIGHT_FOLD), expr_list_height);
         core::ptr::write_volatile(core::ptr::addr_of_mut!(SQLITE_SELECT_HEIGHT_FOLD), missing_height_fold);
     }
 
@@ -523,6 +530,34 @@ mod tests {
             assert_eq!(
                 expr.n_height, 8,
                 "out of the box the operand slot folds real child heights: max(3, 7) + 1"
+            );
+        }
+    }
+
+    #[test]
+    fn the_default_list_fold_is_the_real_port() {
+        use super::super::expr_list_height::{ExprList, ExprListItem};
+        let _guard = lock();
+        unsafe {
+            restore_defaults();
+            let mut a = node(core::ptr::null_mut(), core::ptr::null_mut(), core::ptr::null_mut(), core::ptr::null_mut(), 2);
+            let mut b = node(core::ptr::null_mut(), core::ptr::null_mut(), core::ptr::null_mut(), core::ptr::null_mut(), 6);
+            let mut items = std::vec![
+                ExprListItem { p_expr: &mut a as *mut Expr as *mut u8, _gap_04: [0xa5; 0x0c - 0x04] },
+                ExprListItem { p_expr: &mut b as *mut Expr as *mut u8, _gap_04: [0xa5; 0x0c - 0x04] },
+            ];
+            let mut list = ExprList { n_expr: 2, _gap_04: [0xa5; 0x0c - 0x04], items: items.as_mut_ptr() };
+            let mut expr = node(
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                &mut list as *mut ExprList as *mut u8,
+                core::ptr::null_mut(),
+                0,
+            );
+            expr_set_height(&mut expr);
+            assert_eq!(
+                expr.n_height, 7,
+                "out of the box the list slot folds real item heights: max(2, 6) + 1"
             );
         }
     }
