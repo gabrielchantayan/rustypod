@@ -6708,24 +6708,23 @@ functions:
     name: instance_of_class_8300
     size: 24
     sig: "void *instance_of_class_8300(void)"
-    module: null
-    status: identified
+    module: app/registry
+    status: ported
     notes: >-
-      One of the ten remaining per-class instance accessors, all the
-      same six instructions as the ported 0x081883fc - `push; load id;
-      bl 0x081d2184; pop; load the SAME id into r1; b 0x08275b9c`. The
-      whole set with its class ids, function start and size - 0x08103584
-      (0x8300, 24), 0x08103b88 (0x7600, 24), 0x0812f0a4 (0x4e00, 24),
-      0x081353e8 (0x8f00, 24), 0x0815e1ac (0x5680, 28), 0x0815ff34
+      6 bl call sites. Same lookup-then-cast accessor as the ported
+      0x081883fc for class id 0x8300 - `push; load id; bl 0x081d2184;
+      pop; load the SAME id into r1; b 0x08275b9c`. Class identified as
+      TPhotosSettingsSlideshowPlaylistCntlr from the literal its
+      constructor hands to the class-name factory @ 0x0820b230 next to
+      its `bl 0x081d23f8`; the port names it
+      CLASS_ID_PHOTOS_SLIDESHOW_PLAYLIST_CNTLR. Nine siblings remain
+      identified, all the same shape - 0x08103b88 (0x7600 TSearchCntlr,
+      24), 0x0812f0a4 (0x4e00 TCUnsupported, 24), 0x081353e8 (0x8f00
+      TCEQSetting, 24), 0x0815e1ac (0x5680 TCSportTimer, 28), 0x0815ff34
       (0x8700, 28), 0x0827f218 (0x5780, 28), 0x08284e2c (0x6180, 28),
-      0x08289690 (0x3280, 24), 0x0828ae68 (0x4180, 28). Named classes
-      among them - 0x8300 TPhotosSettingsSlideshowPlaylistCntlr, 0x7600
-      TSearchCntlr, 0x4e00 TCUnsupported, 0x8f00 TCEQSetting, 0x5680
-      TCSportTimer, 0x4180 TCNotesDispatcher (each recovered from the
-      literal its constructor hands to the class-name factory @
-      0x0820b230 next to its `bl 0x081d23f8`). Not ported - they add no
-      logic over the three that are, and app/registry.rs's
-      `instance_of_class` body covers them in one line each.
+      0x08289690 (0x3280, 24), 0x0828ae68 (0x4180 TCNotesDispatcher, 28);
+      app/registry.rs's `instance_of_class` body covers each in one line.
+    renames: {}
 
   - address: 0x081d23f8
     ghidra: FUN_081d23f8
@@ -9917,14 +9916,17 @@ functions:
     ghidra: FUN_083dc0e0
     name: pair_assign_guarded
     size: 24
-    module: null
-    status: identified
+    sig: "u32 *pair_assign_guarded(u32 *dst, const u32 *src)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: dst, param_2: src}
     notes: >-
       8-byte (two-word) copy from r1 to r0, skipped entirely when
       `src == dst` - the self-assignment guard of a two-word value type.
-      Returns via `mov pc, lr`, not `bx lr`. 14 bl call sites; the only
-      copy. Not ported - trivial, but nothing else in the sweep needs
-      it yet.
+      Fully predicated in the original (`cmp` + two ldrne/strne pairs);
+      the LLVM build reproduces that body instruction-for-instruction,
+      differing only in the frame prologue/epilogue (push/pop vs
+      `mov pc, lr`). 14 bl call sites; the only copy.
 
   - address: 0x083db4c4
     ghidra: FUN_083db4c4

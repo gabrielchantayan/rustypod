@@ -524,6 +524,25 @@ pub unsafe extern "C" fn instance_of_class_6600() -> *mut u8 {
     instance_of_class(0x6600)
 }
 
+/// The class id of `TPhotosSettingsSlideshowPlaylistCntlr` (recovered
+/// from the literal its constructor hands to the class-name factory @
+/// 0x0820b230 next to its `bl 0x081d23f8`).
+pub const CLASS_ID_PHOTOS_SLIDESHOW_PLAYLIST_CNTLR: u32 = 0x8300;
+
+/// instance_of_class_8300 — original: `FUN_08103584` @ 0x08103584
+/// (24 bytes; 6 `bl` call sites).
+///
+/// Same accessor for class id 0x8300, `TPhotosSettingsSlideshowPlaylistCntlr`:
+/// `object_cast_to_class(registry_lookup_by_id(0x8300), 0x8300)` — resolve
+/// the registered singleton through the global class registry, then let the
+/// object's own vtable confirm it really is that class (NULL when either
+/// step fails).
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn instance_of_class_8300() -> *mut u8 {
+    instance_of_class(CLASS_ID_PHOTOS_SLIDESHOW_PLAYLIST_CNTLR)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -922,6 +941,22 @@ mod tests {
             assert_eq!(demo_mode_instance(), demo_ptr);
             assert_eq!(instance_of_class_6000(), six_ptr);
             assert!(instance_of_class_6600().is_null(), "0x6600 was never registered");
+            assert!(
+                instance_of_class_8300().is_null(),
+                "0x8300 was never registered"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_8300_accessor_looks_up_and_casts_its_own_id() {
+        let guard = mock();
+        unsafe {
+            let mut object = object_accepting(CLASS_ID_PHOTOS_SLIDESHOW_PLAYLIST_CNTLR);
+            let this = ptr::addr_of_mut!(object) as *mut u8;
+            registry_register(this, CLASS_ID_PHOTOS_SLIDESHOW_PLAYLIST_CNTLR);
+            assert_eq!(instance_of_class_8300(), this);
         }
         restore(guard);
     }
