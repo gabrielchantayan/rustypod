@@ -9281,12 +9281,18 @@ functions:
     ghidra: FUN_083690a8
     name: ata_report_error
     size: 24
-    module: null
-    status: identified
+    sig: "u32 ata_report_error(u32 error)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: error}
     notes: >-
-      25 bl call sites. Fetches an error-record object from 0x082d0ae8,
-      stores its argument at record +0x04 and returns -1. The error
-      shape is C++ and outside this sweep.
+      25 bl call sites. The storage layer's errno setter: fetches the
+      caller's per-task record from ata_error_record (0x082d0ae8,
+      ported first), stores `error` at record +0x04 and returns
+      0xffffffff for the caller to propagate (the reader @ 0x082d0aa4
+      returns record+0x04). match.py: body identical (`mov r4, r0; bl;
+      str r4, [r0, #4]; mvn r0, #0`), only the LLVM frame prologue
+      differs - the same shape as ata_handle_first_word_or_minus1.
 
   # --- Per-instantiation template members of the C++ block (cxx/templates) ---
   # This block is full of families the compiler emitted once per template

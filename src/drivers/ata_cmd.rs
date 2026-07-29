@@ -75,6 +75,10 @@
 //!   pool (stock table @ 0x08adb68c, pointer literal @ 0x082d0b74),
 //!   claiming and zeroing a free slot on first use. See the function's
 //!   doc header for the full algorithm.
+//! - `ata_report_error` — `FUN_083690a8` @ 0x083690a8 (24 bytes; 25 `bl`
+//!   call sites). The island's errno setter: stores its argument at
+//!   record +0x04 of the caller's [`ata_error_record`] and returns
+//!   0xffffffff for the caller to propagate.
 //!
 //! Deviations:
 //!
@@ -506,6 +510,7 @@ pub const ERROR_RECORD_SIZE: usize = 0x38;
 pub const ERROR_RECORD_SLOTS: usize = 8;
 
 const RECORD_OWNER: usize = 0x00;
+const RECORD_ERROR: usize = 0x04;
 const RECORD_SLOT_TAG: usize = 0x0c;
 
 /// The record pool must be word-aligned: the original reaches every
@@ -616,6 +621,26 @@ pub unsafe extern "C" fn ata_error_record() -> *mut u8 {
     set_word(record, RECORD_OWNER, id);
     set_word(record, RECORD_SLOT_TAG, slot as u32 + 1);
     record
+}
+
+/// ata_report_error — original: `FUN_083690a8` @ 0x083690a8 (24 bytes;
+/// 25 `bl` call sites in osos.asm).
+///
+/// The storage layer's errno setter. Fetches the caller's per-task
+/// error record ([`ata_error_record`]), stores `error` in its code
+/// field (+0x04) and returns 0xffffffff. The ATA command flows end
+/// their error paths with `return ata_report_error(code);` — the -1
+/// propagates to the caller while the record keeps the code for whoever
+/// inspects it later (the reader @ 0x082d0aa4 returns record+0x04).
+///
+/// The store is a volatile word store like the original's `str r4,
+/// [r0, #4]` — an in-memory record field, not a hardware register.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_report_error(error: u32) -> u32 {
+    let record = ata_error_record();
+    set_word(record, RECORD_ERROR, error);
+    0xffff_ffff
 }
 
 #[cfg(test)]
@@ -1256,5 +1281,53 @@ mod tests {
         }
         let record = unsafe { ata_error_record() };
         assert_eq!(slot_of(record), 0, "no kernel: the shared slot 0");
+    }
+
+    // ---- ata_report_error ---------------------------------------------
+
+    #[test]
+    fn report_error_returns_minus1_and_stores_the_code_at_plus4() {
+        let _guard = fresh_records();
+        let _reset = ErrorHookReset;
+        set_id(7);
+        assert_eq!(unsafe { ata_report_error(0x1c) }, 0xffff_ffff);
+        let record = unsafe { ata_error_record() };
+        assert_eq!(record_word(record, RECORD_ERROR), 0x1c);
+    }
+
+    #[test]
+    fn report_error_lands_in_the_callers_own_slot() {
+        let _guard = fresh_records();
+        let _reset = ErrorHookReset;
+        set_id(7);
+        unsafe { ata_report_error(0x1111_1111) };
+        set_id(8);
+        unsafe { ata_report_error(0x2222_2222) };
+        let base = core::ptr::addr_of!(ERROR_RECORDS) as *const u8;
+        let slot0 = unsafe { base.add(0) };
+        let slot1 = unsafe { base.add(ERROR_RECORD_SIZE) };
+        assert_eq!(record_word(slot0, RECORD_ERROR), 0x1111_1111, "id 7's record");
+        assert_eq!(record_word(slot1, RECORD_ERROR), 0x2222_2222, "id 8's record");
+    }
+
+    #[test]
+    fn report_error_overwrites_only_the_code_field() {
+        let _guard = fresh_records();
+        let _reset = ErrorHookReset;
+        set_id(7);
+        let record = unsafe { ata_error_record() };
+        unsafe { ata_report_error(1) };
+        let before: std::vec::Vec<u8> = (0..ERROR_RECORD_SIZE)
+            .map(|i| unsafe { record.add(i).read_volatile() })
+            .collect();
+        unsafe { ata_report_error(2) };
+        for i in 0..ERROR_RECORD_SIZE {
+            let after = unsafe { record.add(i).read_volatile() };
+            if (RECORD_ERROR..RECORD_ERROR + 4).contains(&i) {
+                continue;
+            }
+            assert_eq!(after, before[i], "byte +{i:#x} disturbed");
+        }
+        assert_eq!(record_word(record, RECORD_ERROR), 2, "second report wins");
     }
 }
