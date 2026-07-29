@@ -10348,3 +10348,24 @@ functions:
       a mode-dependent inset, but neither the owning class nor the
       meaning of mode 4 is established, so the name describes the
       arithmetic rather than claiming a meaning.
+
+  - address: 0x080e9788
+    ghidra: FUN_080e9788
+    name: iabs
+    size: 12
+    sig: "i32 iabs(i32 x)"
+    module: fp/fp_misc
+    status: ported
+    renames:
+      param_1: x
+    notes: >-
+      Plain 32-bit integer abs: `cmp r0,#0; rsblt r0,r0,#0; bx lr`.
+      The rsb computes 0 - x in 32 bits, so iabs(INT_MIN) wraps back to
+      INT_MIN (port uses wrapping_neg). 3 bl call sites (0x08241e4c/
+      0x08241e58 in FUN_08241acc, 0x082424cc in FUN_0824039c), all in
+      0x0824xxxx graphics-region code comparing two |deltas| and keeping
+      the larger. The immediately following functions 0x080e9794 and
+      0x080e97a0 are byte-identical duplicate emissions (separate
+      assignments, no Rust symbols here). match.py: LLVM emits rsbmi
+      (same N-flag test as rsblt) behind the crate's standard frame-
+      pointer prologue - structurally the same compare-and-negate leaf.

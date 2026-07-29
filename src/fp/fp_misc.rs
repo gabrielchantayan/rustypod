@@ -30,6 +30,16 @@
 //! the tail handles the final half-way comparison including the
 //! round-half-even tie flip.
 //!
+//! `iabs` — original: `FUN_080e9788` @ 0x080e9788 (12 bytes).
+//! Plain 32-bit integer absolute value: `cmp r0,#0; rsblt r0,r0,#0;
+//! bx lr`. The rsb computes `0 - x` in 32 bits, so iabs(INT_MIN) wraps
+//! back to INT_MIN (mirrored with wrapping_neg). 3 bl call sites
+//! (0x08241e4c/0x08241e58 in FUN_08241acc, 0x082424cc in FUN_0824039c),
+//! all in 0x0824xxxx graphics-region code that compares two |deltas|
+//! and keeps the larger. The two immediately following functions
+//! 0x080e9794 and 0x080e97a0 are byte-identical duplicate emissions;
+//! they are separate assignments and have no Rust symbols here.
+//!
 //! Behavioral deviations from IEEE 754, mirrored from the original:
 //! - _dsqrt: denormal inputs flush to +0 (even negative denormals;
 //!   -0.0 returns -0.0). sqrt(NaN) returns the canonical quiet NaN
@@ -294,6 +304,15 @@ pub unsafe extern "C" fn __dmod(a: u64, b: u64) -> u64 {
         return ((hi as u64) << 32) | (rem & 0xffff_ffff);
     }
     0
+}
+
+/// iabs — original @ 0x080e9788 (12 bytes). 32-bit integer absolute
+/// value: `cmp r0,#0; rsblt r0,r0,#0; bx lr`. Negative inputs are
+/// negated with a 32-bit reverse subtract, so iabs(INT_MIN) wraps to
+/// INT_MIN — wrapping_neg mirrors the original exactly.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iabs(x: i32) -> i32 {
+    if x < 0 { x.wrapping_neg() } else { x }
 }
 
 #[cfg(test)]
@@ -602,5 +621,42 @@ mod tests {
             vals.push(dmod(ab, bb));
         }
         assert!(!vals.is_empty());
+    }
+
+    // ---- iabs ----
+
+    fn abs32(x: i32) -> i32 {
+        unsafe { iabs(x) }
+    }
+
+    /// Reference: the original's `rsblt r0,r0,#0` is a 32-bit `0 - x`,
+    /// which wraps for INT_MIN.
+    fn ref_abs(x: i32) -> i32 {
+        if x < 0 { 0i32.wrapping_sub(x) } else { x }
+    }
+
+    #[test]
+    fn iabs_directed() {
+        assert_eq!(abs32(0), 0);
+        assert_eq!(abs32(1), 1);
+        assert_eq!(abs32(-1), 1);
+        assert_eq!(abs32(42), 42);
+        assert_eq!(abs32(-42), 42);
+        assert_eq!(abs32(i32::MAX), i32::MAX);
+        assert_eq!(abs32(-i32::MAX), i32::MAX);
+        // INT_MIN edge: 0 - INT_MIN wraps back to INT_MIN, matching
+        // the original rsb; i32::abs would overflow.
+        assert_eq!(abs32(i32::MIN), i32::MIN);
+        assert_eq!(abs32(i32::MIN + 1), i32::MAX);
+    }
+
+    #[test]
+    fn iabs_random_matches_reference() {
+        let mut rng = Rng(0x5eed_5eed_5eed_5eed);
+        for _ in 0..100_000 {
+            let x = rng.next() as i32;
+            assert_eq!(abs32(x), ref_abs(x), "x={x}");
+            assert_eq!(abs32(x), x.wrapping_abs(), "x={x}");
+        }
     }
 }
