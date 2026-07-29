@@ -69,6 +69,7 @@ pub mod free_p4;
 pub mod mem;
 pub mod name_from_token;
 pub mod parse;
+pub mod parse_expr;
 pub mod set_string_formatted;
 pub mod stricmp;
 pub mod strhash;
