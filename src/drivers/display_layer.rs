@@ -34,7 +34,8 @@
 //! and the render pass `FUN_0811f8c8` @ 0x0811f8c8):
 //!
 //! ```text
-//! +0x00 u32  (opaque)
+//! +0x00 ptr  notify target (the display object), first argument of
+//!            the enable-state notify @ 0x081d892c
 //! +0x04 ptr  display driver object (its vtable is dispatched by the
 //!            render pass: +0x14 geometry, +0x18/+0x3c enable-state,
 //!            +0x40 blend mode, +0x44 global alpha)
@@ -89,26 +90,22 @@
 //! ```
 //!
 //! Offsets are literal byte offsets into a `*mut u8`, the
-//! `drivers/surface.rs` / `drivers/ata_cmd.rs` precedent: none of the
-//! fields these functions touch is a pointer, so nothing shifts on a
-//! 64-bit test host. The one address computed from the object is
-//! `layer + 0x78`, the embedded mutex, which is an *address*, not a
-//! stored pointer.
-//!
-//! That precedent is also why the render pass `FUN_0811f8c8` @
-//! 0x0811f8c8 (892 bytes, 5 call sites) is **not** ported here and stays
-//! behind [`LayerDriverHooks::render`]. It loads the layer's stored
-//! *pointer* fields — the notify target at +0x00, the display driver at
-//! +0x04, and the three surface slots at +0x50/+0x60/+0x64 — and on a
-//! 64-bit host word index 1 (the driver) lands on byte 8, exactly where
-//! the layer id / kind / pixel-format bytes live. Porting it faithfully
-//! therefore means converting this whole module from literal byte
-//! offsets to a `#[repr(C)]` layer struct first (see
-//! `heap/block_region.rs` for the word-index rule); doing that as a
-//! side effect of one 5-call-site function would churn eight green ports
-//! and their tests, so it is left as a deliberate, separate step. The
-//! pass is otherwise fully understood — see the `BLEND_MODE_*` table
-//! above, which was recovered from it.
+//! `drivers/surface.rs` / `drivers/ata_cmd.rs` precedent. The byte and
+//! word fields keep their literal offsets on every host; the *pointer*
+//! fields the render pass loads are native-width, which on a 64-bit
+//! test host makes each of them span eight bytes. That is free where
+//! the target field is followed by unaccounted slack — +0x00 (the
+//! driver moved out, see below), +0x50 (spanning +0x54), the
+//! `layer_swap_surface` precedent — but +0x04, +0x60 and +0x64 are
+//! densely packed against accounted neighbors. Those three are parked,
+//! on 64-bit hosts only, in the object's own dead space (the
+//! `heap/block_region.rs` word-index rule, applied field by field):
+//! the driver at 0x70, the previous surface at 0x58 and the
+//! last-handed surface at 0x68 — all inside the unaccounted
+//! +0x54..+0x5f / +0x68..+0x77 gaps, eight-aligned, disjoint from every
+//! accounted field. On the 32-bit target every offset is the literal
+//! one and the codegen is unaffected. See [`DRIVER`],
+//! [`PREVIOUS_SURFACE`] and [`LAST_SURFACE`].
 
 use crate::kernel::sync_mutex::{mutex_lock, mutex_unlock, Mutex};
 
@@ -132,11 +129,45 @@ pub const BLEND_MODE_PIXEL_AND_GLOBAL_ALPHA: u8 = 3;
 /// sentinel `surface_config_init` arms (`SIZE_AUTO`).
 pub const DISPLAY_SIZE_KEEP: i32 = -1;
 
+/// +0x00: the notify target (display object), first argument of the
+/// enable-state notify @ 0x081d892c. Native-width on every host: on
+/// target exactly the 4-byte field; on a 64-bit host the 8-byte access
+/// spans the target's +0x04 slot, which is free there because the
+/// driver is parked elsewhere (see [`DRIVER`]).
+const NOTIFY_TARGET: usize = 0x00;
+
+/// +0x04 on target: the display driver object whose vtable the render
+/// pass dispatches. Followed by the accounted kind/id bytes at +0x08,
+/// so there is no slack for an 8-byte host access — on 64-bit hosts the
+/// field is parked at 0x70, inside the unaccounted +0x68..+0x77 gap
+/// (eight-aligned, clear of [`LAST_SURFACE`]'s host slot).
+#[cfg(target_pointer_width = "32")]
+const DRIVER: usize = 0x04;
+#[cfg(target_pointer_width = "64")]
+const DRIVER: usize = 0x70;
+
+/// +0x60 on target: the previous surface, only ever *compared* against
+/// [`LAST_SURFACE`] by the render pass's kind-1 guard. Followed by the
+/// accounted +0x64 slot, so on 64-bit hosts it is parked at 0x58, in
+/// the unaccounted +0x54..+0x5f gap right behind [`BOUND_SURFACE`]'s
+/// native span.
+#[cfg(target_pointer_width = "32")]
+const PREVIOUS_SURFACE: usize = 0x60;
+#[cfg(target_pointer_width = "64")]
+const PREVIOUS_SURFACE: usize = 0x58;
+
+/// +0x64 on target: the surface the render pass last handed the driver.
+/// +0x68.. is unaccounted, but 0x64 is not eight-aligned, so on 64-bit
+/// hosts the field is parked at 0x68 (the gap's first aligned slot).
+#[cfg(target_pointer_width = "32")]
+const LAST_SURFACE: usize = 0x64;
+#[cfg(target_pointer_width = "64")]
+const LAST_SURFACE: usize = 0x68;
+
 const LAYER_KIND: usize = 0x08;
 const KIND_SUBTYPE: usize = 0x09;
 const PIXEL_FORMAT: usize = 0x0a;
-const FORMAT_VARIANT: usize = 0x0b;
-const ORIGIN_X: usize = 0x0c;
+const FORMAT_VARIANT: usize = 0x0b;const ORIGIN_X: usize = 0x0c;
 const ORIGIN_Y: usize = 0x10;
 const SOURCE_X: usize = 0x14;
 const SOURCE_Y: usize = 0x18;
@@ -162,6 +193,35 @@ const DIRTY: usize = 0x1bc;
 const TAIL_FLAG: usize = 0x1be;
 const TAIL_WORD_0: usize = 0x1c0;
 const TAIL_WORD_1: usize = 0x1c4;
+/// +0x1c8..+0x1d4: the layer's plane block — four 32-bit plane address
+/// words, refreshed in place by [`layer_query_planes`] from the render
+/// pass and read back as `u32`s (target 32-bit addresses).
+const PLANES: usize = 0x1c8;
+
+// The 0x50-byte render descriptor the pass builds on its stack:
+// 0x0828302c initializes it (class word at +0x00, -1 at +0x08/+0x0c/
+// +0x28/+0x2c, zeros elsewhere), the pass fills the fields below from
+// the layer, and the copy handed to the driver carries them at the
+// same offsets shifted by +0x04 (its +0x00 is the class word instead).
+const DESC_INIT_FIELD: usize = 0x04; // byte, left as the initializer set it
+const DESC_DISABLED: usize = 0x05; // byte <- layer +0x41
+const DESC_BUFFER_WIDTH: usize = 0x08; // word <- layer +0x30
+const DESC_BUFFER_HEIGHT: usize = 0x0c; // word <- layer +0x2c
+const DESC_WIDTH: usize = 0x10; // word <- layer +0x1c
+const DESC_HEIGHT: usize = 0x14; // word <- layer +0x20
+const DESC_ORIGIN_X: usize = 0x18; // word <- layer +0x0c
+const DESC_ORIGIN_Y: usize = 0x1c; // word <- layer +0x10
+const DESC_SOURCE_X: usize = 0x20; // word <- layer +0x14
+const DESC_SOURCE_Y: usize = 0x24; // word <- layer +0x18
+const DESC_DISPLAY_WIDTH: usize = 0x28; // word <- layer +0x24
+const DESC_DISPLAY_HEIGHT: usize = 0x2c; // word <- layer +0x28
+const DESC_TAIL_FLAG: usize = 0x30; // byte <- layer +0x1be
+const DESC_TAIL_WORD_0: usize = 0x34; // word <- layer +0x1c0
+const DESC_TAIL_WORD_1: usize = 0x38; // word <- layer +0x1c4
+const DESC_FORMAT_CODE: usize = 0x3c; // byte <- 0x08120ad4
+const DESC_PLANES: usize = 0x40; // three words, aliased by pixel format
+/// Size of both descriptor blocks.
+const DESC_SIZE: usize = 0x50;
 
 // The configuration block, as `drivers/surface.rs` lays it out.
 const CFG_PIXEL_FORMAT: usize = 0x00;
@@ -208,6 +268,18 @@ unsafe fn word(layer: *mut u8, offset: usize) -> i32 {
 #[inline(always)]
 unsafe fn set_word(layer: *mut u8, offset: usize, value: i32) {
     (layer.add(offset) as *mut i32).write_volatile(value);
+}
+
+/// A stored pointer field, native-width at the given (possibly
+/// host-parked) offset — the [`layer_swap_surface`] precedent.
+#[inline(always)]
+unsafe fn ptr_field(layer: *mut u8, offset: usize) -> *mut u8 {
+    (layer.add(offset) as *const *mut u8).read_volatile()
+}
+
+#[inline(always)]
+unsafe fn set_ptr_field(layer: *mut u8, offset: usize, value: *mut u8) {
+    (layer.add(offset) as *mut *mut u8).write_volatile(value);
 }
 
 /// The layer's embedded mutex (`add r0, r4, #0x78`).
@@ -262,8 +334,28 @@ pub struct LayerDriverHooks {
     ),
     /// `FUN_0811f8c8` @ 0x0811f8c8 (5 call sites): the render pass —
     /// the consumer of every field this module writes. Returns the
-    /// layer. Not ported (see the module header). Default: no-op.
+    /// layer. Ported below as [`layer_render`]; the slot stays so tests
+    /// can interpose a recording mock. Default: the port itself.
     pub render: unsafe extern "C" fn(layer: *mut u8) -> *mut u8,
+    /// `FUN_0828302c` @ 0x0828302c (1 `bl` call site, [`layer_render`]):
+    /// initializes the 0x50-byte render descriptor — class word at
+    /// +0x00, -1 at +0x08/+0x0c/+0x28/+0x2c, zeros elsewhere. Default:
+    /// no-op, which is behaviorally exact for [`layer_render`] — its
+    /// descriptor starts zeroed and the pass overwrites every word the
+    /// initializer would have armed, except the +0x04/+0x3c zero bytes
+    /// the zeroed block already has.
+    pub descriptor_init: unsafe extern "C" fn(desc: *mut u8),
+    /// `FUN_08120ad4` @ 0x08120ad4 (1 `bl` call site, [`layer_render`]):
+    /// maps the layer's pixel format (+0x0a) to the driver's plane-
+    /// format code byte — 0 -> 8, 1 -> 9, 2 -> 3, 3 -> 7, anything else
+    /// stores nothing — and writes it through `out` (descriptor +0x3c).
+    /// Default: no-op (leaves the zeroed byte).
+    pub plane_format_code: unsafe extern "C" fn(layer: *mut u8, out: *mut u8),
+    /// `FUN_081d892c` @ 0x081d892c (2 `bl` call sites, both
+    /// [`layer_render`]): the enable-state notify — the display object
+    /// is told a layer's disabled state reached the panel.
+    /// Default: no-op.
+    pub notify: unsafe extern "C" fn(target: *mut u8, layer_id: u8, disabled: u8),
 }
 
 unsafe extern "C" fn install_planes_stub(
@@ -275,17 +367,22 @@ unsafe extern "C" fn install_planes_stub(
 ) {
 }
 
-unsafe extern "C" fn render_stub(layer: *mut u8) -> *mut u8 {
-    layer
-}
+unsafe extern "C" fn descriptor_init_stub(_desc: *mut u8) {}
 
-/// Wired defaults: the ported swap and query plus no-op stubs for the
-/// originals not yet ported.
+unsafe extern "C" fn plane_format_code_stub(_layer: *mut u8, _out: *mut u8) {}
+
+unsafe extern "C" fn notify_stub(_target: *mut u8, _layer_id: u8, _disabled: u8) {}
+
+/// Wired defaults: the ported swap, query and render plus no-op stubs
+/// for the originals not yet ported.
 pub(crate) const DEFAULT_LAYER_DRIVER_HOOKS: LayerDriverHooks = LayerDriverHooks {
     swap_surface: layer_swap_surface,
     query_planes: layer_query_planes,
     install_planes: install_planes_stub,
-    render: render_stub,
+    render: layer_render,
+    descriptor_init: descriptor_init_stub,
+    plane_format_code: plane_format_code_stub,
+    notify: notify_stub,
 };
 
 /// The active hooks. Host tests swap in recording mocks and restore.
@@ -929,6 +1026,278 @@ pub unsafe extern "C" fn layer_apply_config(layer: *mut u8, config: *mut u8) -> 
     0
 }
 
+/// The display driver's vtable, modeled down to the five slots
+/// [`layer_render`] dispatches. The slots are native-width — on the
+/// 32-bit target they sit at +0x14/+0x18/+0x3c/+0x40/+0x44, on a
+/// 64-bit host at word indices 5/6/15/16/17, and host tests plant a
+/// native vtable (the [`SurfaceVtable`] precedent).
+#[repr(C)]
+pub struct DriverVtable {
+    /// +0x00..+0x13: slots the render pass never touches.
+    pub _slots_0x00: [usize; 5],
+    /// +0x14: push the geometry descriptor copy to the driver.
+    pub push_geometry: unsafe extern "C" fn(driver: *mut u8, layer_id: u8, desc: *mut u8),
+    /// +0x18: kind-5 only — hand the driver the surface flag (+0x34).
+    pub kind5_surface_flag: unsafe extern "C" fn(driver: *mut u8, surface_flag: u8),
+    /// +0x1c..+0x3b: slots the render pass never touches.
+    pub _slots_0x1c: [usize; 8],
+    /// +0x3c: the enable state changed while the layer is enabled.
+    pub enable_state_changed: unsafe extern "C" fn(driver: *mut u8, layer_id: u8),
+    /// +0x40: set the driver's blend code (1/3/2/5 for modes 0..3).
+    pub set_blend_mode: unsafe extern "C" fn(driver: *mut u8, layer_id: u8, code: u32),
+    /// +0x44: push the global alpha byte (+0x48) — modes 1 and 3 only.
+    pub set_global_alpha: unsafe extern "C" fn(driver: *mut u8, layer_id: u8, alpha: u8),
+}
+
+/// Original: the literal 0x089a651c — the class word the render pass
+/// plants at +0x00 of the descriptor copy it hands the driver (the
+/// same word 0x0828302c puts at +0x00 of the descriptor itself).
+///
+/// Deviation (the `heap/block_region.rs` REGION_START_FALLBACK
+/// precedent): 0x089a651c is runtime data, so the word is modeled as
+/// the address of this crate static; only its identity as the class
+/// marker matters to the consumer.
+static LAYER_RENDER_CLASS: u32 = 0;
+
+/// The 0x50-byte render descriptor (and the second block the driver
+/// actually receives), aligned so the word stores are well aligned on
+/// every host.
+#[repr(align(8))]
+struct RenderDescriptor([u8; DESC_SIZE]);
+
+impl RenderDescriptor {
+    #[inline(always)]
+    fn new() -> Self {
+        RenderDescriptor([0; DESC_SIZE])
+    }
+    #[inline(always)]
+    fn ptr(&mut self) -> *mut u8 {
+        self.0.as_mut_ptr()
+    }
+    #[inline(always)]
+    unsafe fn set_byte(&mut self, offset: usize, value: u8) {
+        self.0.as_mut_ptr().add(offset).write_volatile(value);
+    }
+    #[inline(always)]
+    unsafe fn set_word(&mut self, offset: usize, value: u32) {
+        (self.0.as_mut_ptr().add(offset) as *mut u32).write_volatile(value);
+    }
+}
+
+/// layer_render — original: `FUN_0811f8c8` @ 0x0811f8c8 (892 bytes;
+/// 5 `bl` call sites: the flush @ 0x0811fd38, [`layer_force_enable`],
+/// [`layer_restore_enable`], 0x081d8b3c and 0x081d8bb4).
+///
+/// The render pass of the display layer — the consumer of every field
+/// this module's setters write. Returns the layer pointer on every
+/// path (`mov r0, r4`).
+///
+/// 1. **Dirty gate.** Returns at once unless the dirty byte (+0x1bc) is
+///    set; the flag itself is the *callers'* business (the force/restore
+///    pair clears it after rendering).
+/// 2. **Surface swap.** The surface the driver was last handed (+0x64),
+///    if any, is released through its vtable slot +0x04 — except under
+///    the kind-1 guard: subtype (+0x09) 1 with the surface flag (+0x34)
+///    set bails out of the whole render when the previous surface
+///    (+0x60) differs from the last-handed one. The bound surface
+///    (+0x50) is then stored into +0x64 unconditionally and, if
+///    non-NULL, retained through vtable slot +0x00.
+/// 3. **Short path.** When the enable state changed (+0x43) while the
+///    layer is enabled (+0x41 clear), the geometry push is skipped:
+///    driver vtable[+0x3c], clear +0x43, notify 0x081d892c with the
+///    (re-read) disabled byte, and for a kind-5 subtype-0 layer raise
+///    the [`KIND5_RENDER_SUPPRESSED`] latch (the byte @ 0x089ca8ac in
+///    the original). Return.
+/// 4. **Long path.** Otherwise build the 0x50-byte render descriptor on
+///    the stack: `descriptor_init` (0x0828302c), then the geometry,
+///    buffer, tail and disabled fields copied from the layer;
+///    `plane_format_code` (0x08120ad4) maps the pixel format into
+///    descriptor +0x3c; [`layer_query_planes`] refreshes the layer's
+///    plane block (+0x1c8..+0x1d4) in place; the plane words are
+///    aliased into descriptor +0x40.. by pixel format (0: planes 0/2/1,
+///    1: planes 0/1, 2 or 3: plane 0, anything else: zeros). If the
+///    enable state changed while the layer is *disabled*, the notify
+///    fires here instead. A kind-5 layer hands its surface flag to
+///    driver vtable[+0x18]. The descriptor +0x04.. is then copied into
+///    a second block behind the class word and pushed through driver
+///    vtable[+0x14].
+/// 5. **Blend.** The +0x49 mode is translated to the driver's code:
+///    0 -> vtable[+0x40](code 1); 1 -> code 3 then vtable[+0x44](alpha
+///    @ +0x48); 2 -> code 2; 3 -> code 5 then the alpha push; any other
+///    mode skips both calls (the `BLEND_MODE_*` table in the module
+///    header).
+/// 6. **Tail.** If the enable state changed while the layer is enabled
+///    — re-tested at the end, because the driver and notify calls above
+///    may have mutated the layer — driver vtable[+0x3c] fires and +0x43
+///    is cleared.
+///
+/// Deviations:
+///
+/// - The pointer fields it loads are native-width; on 64-bit hosts the
+///   driver, previous-surface and last-surface fields are parked in the
+///   object's dead space — see the module header and [`DRIVER`],
+///   [`PREVIOUS_SURFACE`], [`LAST_SURFACE`]. On target every offset is
+///   literal.
+/// - The class word is the address of [`LAYER_RENDER_CLASS`], not the
+///   literal 0x089a651c (runtime data).
+/// - `descriptor_init`, `plane_format_code` and `notify` dispatch
+///   through [`LAYER_DRIVER_HOOKS`] (unported originals; documented
+///   no-op defaults, the `install_planes` precedent).
+///   [`layer_query_planes`] is called directly — through local slots
+///   seeded from the plane block, because its native-width out-stores
+///   would otherwise straddle the block's 4-byte slots on a 64-bit
+///   host (see the body).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn layer_render(layer: *mut u8) -> *mut u8 {
+    if byte(layer, DIRTY) == 0 {
+        return layer;
+    }
+
+    // Swap the surface the driver was last handed for the bound one.
+    let last_surface = ptr_field(layer, LAST_SURFACE);
+    if !last_surface.is_null() {
+        if byte(layer, KIND_SUBTYPE) == 1
+            && byte(layer, SURFACE_FLAG) != 0
+            && ptr_field(layer, PREVIOUS_SURFACE) != last_surface
+        {
+            return layer;
+        }
+        let vtable = (last_surface as *const *const SurfaceVtable).read_volatile();
+        ((*vtable).release)(last_surface);
+    }
+    let bound_surface = ptr_field(layer, BOUND_SURFACE);
+    set_ptr_field(layer, LAST_SURFACE, bound_surface);
+    if !bound_surface.is_null() {
+        let vtable = (bound_surface as *const *const SurfaceVtable).read_volatile();
+        ((*vtable).retain)(bound_surface);
+    }
+
+    let driver = ptr_field(layer, DRIVER);
+    let driver_vtable = || (driver as *const *const DriverVtable).read_volatile();
+    let layer_id = || byte(layer, LAYER_KIND);
+
+    // Short path: the enable state changed on an enabled layer.
+    if byte(layer, ENABLE_CHANGED) != 0 && byte(layer, DISABLED) == 0 {
+        ((*driver_vtable()).enable_state_changed)(driver, layer_id());
+        set_byte(layer, ENABLE_CHANGED, 0);
+        let disabled = byte(layer, DISABLED);
+        (driver_hooks().notify)(ptr_field(layer, NOTIFY_TARGET), layer_id(), disabled);
+        if byte(layer, KIND_SUBTYPE) == 0 && byte(layer, LAYER_KIND) == LAYER_KIND_LATCHED {
+            core::ptr::write_volatile(core::ptr::addr_of_mut!(KIND5_RENDER_SUPPRESSED), 1);
+        }
+        return layer;
+    }
+
+    // Long path: build the render descriptor and push the geometry.
+    let hooks = driver_hooks();
+    let mut desc = RenderDescriptor::new();
+    (hooks.descriptor_init)(desc.ptr());
+    desc.set_byte(DESC_DISABLED, byte(layer, DISABLED));
+    desc.set_word(DESC_HEIGHT, word(layer, HEIGHT) as u32);
+    desc.set_word(DESC_WIDTH, word(layer, WIDTH) as u32);
+    desc.set_word(DESC_ORIGIN_X, word(layer, ORIGIN_X) as u32);
+    desc.set_word(DESC_ORIGIN_Y, word(layer, ORIGIN_Y) as u32);
+    desc.set_word(DESC_SOURCE_X, word(layer, SOURCE_X) as u32);
+    desc.set_word(DESC_SOURCE_Y, word(layer, SOURCE_Y) as u32);
+    desc.set_word(DESC_DISPLAY_WIDTH, word(layer, DISPLAY_WIDTH) as u32);
+    desc.set_word(DESC_DISPLAY_HEIGHT, word(layer, DISPLAY_HEIGHT) as u32);
+    desc.set_word(DESC_BUFFER_WIDTH, word(layer, BUFFER_WIDTH) as u32);
+    desc.set_word(DESC_BUFFER_HEIGHT, word(layer, BUFFER_HEIGHT) as u32);
+    desc.set_byte(DESC_TAIL_FLAG, byte(layer, TAIL_FLAG));
+    desc.set_word(DESC_TAIL_WORD_0, word(layer, TAIL_WORD_0) as u32);
+    desc.set_word(DESC_TAIL_WORD_1, word(layer, TAIL_WORD_1) as u32);
+    (hooks.plane_format_code)(layer, desc.ptr().add(DESC_FORMAT_CODE));
+
+    // Refresh the plane block in place, then alias the plane words by
+    // pixel format. Host deviation: the query's out-slots are
+    // native-width while the block slots are 4 bytes apart, so the
+    // query runs into local slots seeded from the block and each
+    // answer's low 32 bits are stored back. On target this is the
+    // original's direct query into the block; the seed/store-back is a
+    // no-op there, including the unbound-surface early return, which
+    // leaves the seeded values untouched.
+    let mut slots: [*mut u8; PLANE_COUNT] = [core::ptr::null_mut(); PLANE_COUNT];
+    for (index, slot) in slots.iter_mut().enumerate() {
+        *slot = (layer.add(PLANES + 4 * index) as *const u32).read_volatile() as *mut u8;
+    }
+    layer_query_planes(
+        layer,
+        &mut slots[0],
+        &mut slots[1],
+        &mut slots[2],
+        &mut slots[3],
+    );
+    for (index, slot) in slots.iter().enumerate() {
+        (layer.add(PLANES + 4 * index) as *mut u32).write_volatile(*slot as u32);
+    }
+    let plane = |index: usize| (layer.add(PLANES + 4 * index) as *const u32).read_volatile();
+    desc.set_word(DESC_PLANES, 0);
+    desc.set_word(DESC_PLANES + 4, 0);
+    desc.set_word(DESC_PLANES + 8, 0);
+    desc.set_word(DESC_PLANES + 12, 0);
+    match byte(layer, PIXEL_FORMAT) {
+        0 => {
+            desc.set_word(DESC_PLANES, plane(0));
+            desc.set_word(DESC_PLANES + 8, plane(1));
+            desc.set_word(DESC_PLANES + 4, plane(2));
+        }
+        1 => {
+            desc.set_word(DESC_PLANES, plane(0));
+            desc.set_word(DESC_PLANES + 4, plane(1));
+        }
+        2 | 3 => desc.set_word(DESC_PLANES, plane(0)),
+        _ => {}
+    }
+
+    // An enable-state change on a disabled layer notifies here instead.
+    if byte(layer, ENABLE_CHANGED) != 0 && byte(layer, DISABLED) != 0 {
+        let disabled = byte(layer, DISABLED);
+        (hooks.notify)(ptr_field(layer, NOTIFY_TARGET), layer_id(), disabled);
+    }
+
+    if byte(layer, LAYER_KIND) == LAYER_KIND_LATCHED {
+        ((*driver_vtable()).kind5_surface_flag)(driver, byte(layer, SURFACE_FLAG));
+    }
+
+    // The driver gets a copy behind the class word — a 4-byte field on
+    // every host, so the +0x04.. copy never touches it. On a 64-bit
+    // host the word carries the low 32 bits of the class static's
+    // address.
+    let mut block = RenderDescriptor::new();
+    for offset in DESC_INIT_FIELD..DESC_SIZE {
+        block.set_byte(offset, desc.ptr().add(offset).read_volatile());
+    }
+    (block.ptr() as *mut u32)
+        .write_volatile(core::ptr::addr_of!(LAYER_RENDER_CLASS) as usize as u32);
+    ((*driver_vtable()).push_geometry)(driver, layer_id(), block.ptr());
+
+    // Translate the blend mode into the driver's code; modes 1 and 3
+    // also push the global alpha.
+    match byte(layer, BLEND_MODE) {
+        BLEND_MODE_OPAQUE => ((*driver_vtable()).set_blend_mode)(driver, layer_id(), 1),
+        BLEND_MODE_GLOBAL_ALPHA => {
+            ((*driver_vtable()).set_blend_mode)(driver, layer_id(), 3);
+            let alpha = byte(layer, ALPHA);
+            ((*driver_vtable()).set_global_alpha)(driver, layer_id(), alpha);
+        }
+        BLEND_MODE_PIXEL_ALPHA => ((*driver_vtable()).set_blend_mode)(driver, layer_id(), 2),
+        BLEND_MODE_PIXEL_AND_GLOBAL_ALPHA => {
+            ((*driver_vtable()).set_blend_mode)(driver, layer_id(), 5);
+            let alpha = byte(layer, ALPHA);
+            ((*driver_vtable()).set_global_alpha)(driver, layer_id(), alpha);
+        }
+        _ => {}
+    }
+
+    // The driver/notify traffic above may have changed the enable
+    // state; close out a change on an enabled layer.
+    if byte(layer, ENABLE_CHANGED) != 0 && byte(layer, DISABLED) == 0 {
+        ((*driver_vtable()).enable_state_changed)(driver, layer_id());
+        set_byte(layer, ENABLE_CHANGED, 0);
+    }
+    layer
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -1235,6 +1604,15 @@ mod tests {
         layer
     }
 
+    /// The recording suite leaves the render pass's own callees at
+    /// their defaults; only the swap/query/install/render traffic is
+    /// intercepted.
+    unsafe extern "C" fn recording_descriptor_init(_desc: *mut u8) {}
+
+    unsafe extern "C" fn recording_plane_format_code(_layer: *mut u8, _out: *mut u8) {}
+
+    unsafe extern "C" fn recording_notify(_target: *mut u8, _layer_id: u8, _disabled: u8) {}
+
     /// Installs the recording hooks and hands back the guard; the caller
     /// restores with [`restore_hooks`] (the seek_core.rs rule: never
     /// shadow a guard).
@@ -1253,6 +1631,9 @@ mod tests {
                 query_planes: recording_query_planes,
                 install_planes: recording_install_planes,
                 render: recording_render,
+                descriptor_init: recording_descriptor_init,
+                plane_format_code: recording_plane_format_code,
+                notify: recording_notify,
             }
         };
         guard
@@ -2185,5 +2566,575 @@ mod tests {
 
         unsafe { core::ptr::write(core::ptr::addr_of_mut!(ROM_KERNEL), saved) };
         drop(guard);
+    }
+
+    // ---- render --------------------------------------------------------
+
+    /// Serializes the render suite (shared driver/hook recording
+    /// statics).
+    static RENDER_LOCK: StdMutex<()> = StdMutex::new(());
+    static GEOMETRY_CALLS: AtomicU32 = AtomicU32::new(0);
+    static ENABLE_STATE_CALLS: AtomicU32 = AtomicU32::new(0);
+    static KIND5_FLAG_CALLS: AtomicU32 = AtomicU32::new(0);
+    static LAST_KIND5_FLAG: AtomicUsize = AtomicUsize::new(usize::MAX);
+    static BLEND_CALLS: AtomicU32 = AtomicU32::new(0);
+    static LAST_BLEND_CODE: AtomicUsize = AtomicUsize::new(usize::MAX);
+    static ALPHA_CALLS: AtomicU32 = AtomicU32::new(0);
+    static LAST_ALPHA: AtomicUsize = AtomicUsize::new(usize::MAX);
+    static NOTIFY_CALLS: AtomicU32 = AtomicU32::new(0);
+    static LAST_NOTIFY: [AtomicUsize; 3] = [const { AtomicUsize::new(0) }; 3];
+    static DESC_INIT_CALLS: AtomicU32 = AtomicU32::new(0);
+    static FORMAT_CODE_CALLS: AtomicU32 = AtomicU32::new(0);
+    /// Set by a test to make the geometry mock raise +0x43 mid-render.
+    static GEOMETRY_RAISES_ENABLE: AtomicU32 = AtomicU32::new(0);
+    /// The descriptor copy the geometry push last received.
+    static mut CAPTURED_BLOCK: [u8; DESC_SIZE] = [0; DESC_SIZE];
+
+    unsafe extern "C" fn mock_descriptor_init(desc: *mut u8) {
+        DESC_INIT_CALLS.fetch_add(1, Ordering::SeqCst);
+        // The stores of the original @ 0x0828302c that matter here: the
+        // two zero bytes and the zeroed plane tail (the class word and
+        // the -1 fields are overwritten or never copied out).
+        desc.add(DESC_INIT_FIELD).write(0);
+        desc.add(DESC_FORMAT_CODE).write(0);
+        for offset in (DESC_PLANES..DESC_SIZE).step_by(4) {
+            (desc.add(offset) as *mut u32).write(0);
+        }
+    }
+
+    /// The original @ 0x08120ad4: pixel format -> plane-format code.
+    unsafe extern "C" fn mock_plane_format_code(layer: *mut u8, out: *mut u8) {
+        FORMAT_CODE_CALLS.fetch_add(1, Ordering::SeqCst);
+        let code = match layer.add(PIXEL_FORMAT).read() {
+            0 => 8,
+            1 => 9,
+            2 => 3,
+            3 => 7,
+            _ => return,
+        };
+        out.write(code);
+    }
+
+    unsafe extern "C" fn mock_notify(target: *mut u8, layer_id: u8, disabled: u8) {
+        NOTIFY_CALLS.fetch_add(1, Ordering::SeqCst);
+        LAST_NOTIFY[0].store(target as usize, Ordering::SeqCst);
+        LAST_NOTIFY[1].store(layer_id as usize, Ordering::SeqCst);
+        LAST_NOTIFY[2].store(disabled as usize, Ordering::SeqCst);
+    }
+
+    unsafe extern "C" fn recording_push_geometry(
+        _driver: *mut u8,
+        layer_id: u8,
+        desc: *mut u8,
+    ) {
+        GEOMETRY_CALLS.fetch_add(1, Ordering::SeqCst);
+        LAST_NOTIFY[1].store(layer_id as usize, Ordering::SeqCst);
+        core::ptr::copy_nonoverlapping(
+            desc,
+            core::ptr::addr_of_mut!(CAPTURED_BLOCK) as *mut u8,
+            DESC_SIZE,
+        );
+        if GEOMETRY_RAISES_ENABLE.load(Ordering::SeqCst) != 0 {
+            // The original's callees may mutate the layer; the pass
+            // re-tests the enable state at the tail.
+            let layer = CURRENT_LAYER.load(Ordering::SeqCst) as *mut u8;
+            layer.add(ENABLE_CHANGED).write(1);
+        }
+    }
+
+    static CURRENT_LAYER: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "C" fn recording_enable_state_changed(_driver: *mut u8, _layer_id: u8) {
+        ENABLE_STATE_CALLS.fetch_add(1, Ordering::SeqCst);
+    }
+
+    unsafe extern "C" fn recording_kind5_surface_flag(_driver: *mut u8, surface_flag: u8) {
+        KIND5_FLAG_CALLS.fetch_add(1, Ordering::SeqCst);
+        LAST_KIND5_FLAG.store(surface_flag as usize, Ordering::SeqCst);
+    }
+
+    unsafe extern "C" fn recording_set_blend_mode(_driver: *mut u8, _layer_id: u8, code: u32) {
+        BLEND_CALLS.fetch_add(1, Ordering::SeqCst);
+        LAST_BLEND_CODE.store(code as usize, Ordering::SeqCst);
+    }
+
+    unsafe extern "C" fn recording_set_global_alpha(_driver: *mut u8, _layer_id: u8, alpha: u8) {
+        ALPHA_CALLS.fetch_add(1, Ordering::SeqCst);
+        LAST_ALPHA.store(alpha as usize, Ordering::SeqCst);
+    }
+
+    static TEST_DRIVER_VTABLE: DriverVtable = DriverVtable {
+        _slots_0x00: [0; 5],
+        push_geometry: recording_push_geometry,
+        kind5_surface_flag: recording_kind5_surface_flag,
+        _slots_0x1c: [0; 8],
+        enable_state_changed: recording_enable_state_changed,
+        set_blend_mode: recording_set_blend_mode,
+        set_global_alpha: recording_set_global_alpha,
+    };
+
+    /// A display driver, modeled down to its vtable pointer.
+    #[repr(C)]
+    struct FakeDriver {
+        vtable: *const DriverVtable,
+    }
+
+    impl FakeDriver {
+        fn new() -> Self {
+            FakeDriver { vtable: &TEST_DRIVER_VTABLE }
+        }
+        fn ptr(&mut self) -> *mut u8 {
+            self as *mut FakeDriver as *mut u8
+        }
+    }
+
+    impl Layer {
+        fn set_ptr(&mut self, offset: usize, value: *mut u8) {
+            unsafe { (self.0.as_mut_ptr().add(offset) as *mut *mut u8).write(value) };
+        }
+        fn ptr_at(&self, offset: usize) -> *mut u8 {
+            unsafe { (self.0.as_ptr().add(offset) as *const *mut u8).read() }
+        }
+    }
+
+    /// The captured descriptor copy as words/bytes.
+    fn captured_byte(offset: usize) -> u8 {
+        unsafe { core::ptr::addr_of!(CAPTURED_BLOCK).cast::<u8>().add(offset).read() }
+    }
+    fn captured_word(offset: usize) -> u32 {
+        u32::from_le_bytes([
+            captured_byte(offset),
+            captured_byte(offset + 1),
+            captured_byte(offset + 2),
+            captured_byte(offset + 3),
+        ])
+    }
+
+    /// The recording hooks with the REAL swap/query behind the render:
+    /// only the unported callees are mocked.
+    fn with_render_mocks() -> MutexGuard<'static, ()> {
+        let guard = RENDER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        GEOMETRY_CALLS.store(0, Ordering::SeqCst);
+        ENABLE_STATE_CALLS.store(0, Ordering::SeqCst);
+        KIND5_FLAG_CALLS.store(0, Ordering::SeqCst);
+        LAST_KIND5_FLAG.store(usize::MAX, Ordering::SeqCst);
+        BLEND_CALLS.store(0, Ordering::SeqCst);
+        LAST_BLEND_CODE.store(usize::MAX, Ordering::SeqCst);
+        ALPHA_CALLS.store(0, Ordering::SeqCst);
+        LAST_ALPHA.store(usize::MAX, Ordering::SeqCst);
+        NOTIFY_CALLS.store(0, Ordering::SeqCst);
+        for slot in &LAST_NOTIFY {
+            slot.store(0, Ordering::SeqCst);
+        }
+        DESC_INIT_CALLS.store(0, Ordering::SeqCst);
+        FORMAT_CODE_CALLS.store(0, Ordering::SeqCst);
+        GEOMETRY_RAISES_ENABLE.store(0, Ordering::SeqCst);
+        unsafe {
+            LAYER_DRIVER_HOOKS = LayerDriverHooks {
+                swap_surface: layer_swap_surface,
+                query_planes: layer_query_planes,
+                install_planes: install_planes_stub,
+                render: layer_render,
+                descriptor_init: mock_descriptor_init,
+                plane_format_code: mock_plane_format_code,
+                notify: mock_notify,
+            }
+        };
+        guard
+    }
+
+    fn restore_render_mocks(guard: MutexGuard<'static, ()>) {
+        unsafe { LAYER_DRIVER_HOOKS = DEFAULT_LAYER_DRIVER_HOOKS };
+        drop(guard);
+    }
+
+    /// A dirty layer wired to a recording driver.
+    fn render_layer(driver: &mut FakeDriver) -> Layer {
+        let mut layer = unarmed_layer();
+        layer.set_ptr(DRIVER, driver.ptr());
+        layer.0[DIRTY] = 1;
+        layer
+    }
+
+    #[test]
+    fn a_clean_layer_is_not_rendered() {
+        let guard = with_render_mocks();
+        let mut driver = FakeDriver::new();
+        let mut layer = unarmed_layer();
+        layer.set_ptr(DRIVER, driver.ptr());
+        let before = layer.0;
+
+        let returned = unsafe { layer_render(layer.ptr()) };
+        assert_eq!(returned, layer.ptr());
+        assert!(layer.0 == before, "a clean layer is untouched");
+        assert_eq!(GEOMETRY_CALLS.load(Ordering::SeqCst), 0);
+        assert_eq!(BLEND_CALLS.load(Ordering::SeqCst), 0);
+        assert_eq!(ENABLE_STATE_CALLS.load(Ordering::SeqCst), 0);
+        assert_eq!(NOTIFY_CALLS.load(Ordering::SeqCst), 0);
+        assert_eq!(DESC_INIT_CALLS.load(Ordering::SeqCst), 0);
+
+        restore_render_mocks(guard);
+    }
+
+    #[test]
+    fn a_dirty_layer_pushes_geometry_and_the_opaque_blend_code() {
+        let guard = with_render_mocks();
+        let mut driver = FakeDriver::new();
+        let mut layer = render_layer(&mut driver);
+        layer.0[PIXEL_FORMAT] = 2;
+        layer.0[BLEND_MODE] = BLEND_MODE_OPAQUE;
+        // The query leaves an unbound layer's plane block alone; the
+        // alias then copies whatever words were planted there.
+        layer.set_word(PLANES, 0x1111_2222);
+        layer.set_word(PLANES + 4, 0x3333_4444);
+        CURRENT_LAYER.store(layer.ptr() as usize, Ordering::SeqCst);
+
+        let returned = unsafe { layer_render(layer.ptr()) };
+        assert_eq!(returned, layer.ptr());
+        assert_eq!(DESC_INIT_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(FORMAT_CODE_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(GEOMETRY_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(BLEND_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(LAST_BLEND_CODE.load(Ordering::SeqCst), 1, "mode 0 -> code 1");
+        assert_eq!(ALPHA_CALLS.load(Ordering::SeqCst), 0, "mode 0 pushes no alpha");
+        assert_eq!(ENABLE_STATE_CALLS.load(Ordering::SeqCst), 0);
+        assert_eq!(NOTIFY_CALLS.load(Ordering::SeqCst), 0);
+        assert_eq!(KIND5_FLAG_CALLS.load(Ordering::SeqCst), 0);
+        // The descriptor copy: class word, then the descriptor +0x04...
+        assert_eq!(
+            captured_word(0),
+            core::ptr::addr_of!(LAYER_RENDER_CLASS) as usize as u32,
+            "the class word"
+        );
+        assert_eq!(captured_byte(DESC_FORMAT_CODE), 3, "pixel format 2 -> code 3");
+        assert_eq!(captured_word(DESC_PLANES), 0x1111_2222, "packed format keeps plane 0");
+        assert_eq!(captured_word(DESC_PLANES + 4), 0, "zeroed before aliasing");
+        assert!(layer.ptr_at(LAST_SURFACE).is_null(), "NULL stored over NULL");
+        assert_eq!(layer.byte(DIRTY), 1, "the pass does not clear the dirty flag");
+
+        restore_render_mocks(guard);
+    }
+
+    #[test]
+    fn the_descriptor_carries_the_layers_geometry_words() {
+        let guard = with_render_mocks();
+        let mut driver = FakeDriver::new();
+        let mut layer = render_layer(&mut driver);
+        layer.0[DISABLED] = 1;
+        layer.set_word(ORIGIN_X, 10);
+        layer.set_word(ORIGIN_Y, 20);
+        layer.set_word(SOURCE_X, 4);
+        layer.set_word(SOURCE_Y, 8);
+        layer.set_word(WIDTH, 100);
+        layer.set_word(HEIGHT, 50);
+        layer.set_word(DISPLAY_WIDTH, 200);
+        layer.set_word(DISPLAY_HEIGHT, 150);
+        layer.set_word(BUFFER_WIDTH, 320);
+        layer.set_word(BUFFER_HEIGHT, 240);
+        layer.0[TAIL_FLAG] = 3;
+        layer.set_word(TAIL_WORD_0, 0x0bad_f00d_u32 as i32);
+        layer.set_word(TAIL_WORD_1, 0x42);
+        CURRENT_LAYER.store(layer.ptr() as usize, Ordering::SeqCst);
+
+        unsafe { layer_render(layer.ptr()) };
+        assert_eq!(captured_byte(DESC_DISABLED), 1);
+        assert_eq!(captured_word(DESC_ORIGIN_X), 10);
+        assert_eq!(captured_word(DESC_ORIGIN_Y), 20);
+        assert_eq!(captured_word(DESC_SOURCE_X), 4);
+        assert_eq!(captured_word(DESC_SOURCE_Y), 8);
+        assert_eq!(captured_word(DESC_WIDTH), 100);
+        assert_eq!(captured_word(DESC_HEIGHT), 50);
+        assert_eq!(captured_word(DESC_DISPLAY_WIDTH), 200);
+        assert_eq!(captured_word(DESC_DISPLAY_HEIGHT), 150);
+        assert_eq!(captured_word(DESC_BUFFER_WIDTH), 320);
+        assert_eq!(captured_word(DESC_BUFFER_HEIGHT), 240);
+        assert_eq!(captured_byte(DESC_TAIL_FLAG), 3);
+        assert_eq!(captured_word(DESC_TAIL_WORD_0), 0x0bad_f00d);
+        assert_eq!(captured_word(DESC_TAIL_WORD_1), 0x42);
+
+        restore_render_mocks(guard);
+    }
+
+    #[test]
+    fn the_short_path_reports_the_enable_change_without_geometry() {
+        let guard = with_render_mocks();
+        let mut driver = FakeDriver::new();
+        let mut layer = render_layer(&mut driver);
+        layer.0[LAYER_KIND] = 2;
+        layer.0[ENABLE_CHANGED] = 1;
+        layer.set_ptr(NOTIFY_TARGET, 0x5ead_beef as *mut u8);
+        CURRENT_LAYER.store(layer.ptr() as usize, Ordering::SeqCst);
+
+        let returned = unsafe { layer_render(layer.ptr()) };
+        assert_eq!(returned, layer.ptr());
+        assert_eq!(ENABLE_STATE_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(layer.byte(ENABLE_CHANGED), 0, "consumed by the short path");
+        assert_eq!(NOTIFY_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(LAST_NOTIFY[0].load(Ordering::SeqCst), 0x5ead_beef, "the notify target");
+        assert_eq!(LAST_NOTIFY[1].load(Ordering::SeqCst), 2, "the layer id");
+        assert_eq!(LAST_NOTIFY[2].load(Ordering::SeqCst), 0, "the layer is enabled");
+        assert_eq!(GEOMETRY_CALLS.load(Ordering::SeqCst), 0, "no descriptor");
+        assert_eq!(BLEND_CALLS.load(Ordering::SeqCst), 0, "no blend push");
+        assert_eq!(DESC_INIT_CALLS.load(Ordering::SeqCst), 0);
+
+        restore_render_mocks(guard);
+    }
+
+    #[test]
+    fn the_short_path_raises_the_kind5_latch() {
+        let guard = with_render_mocks();
+        let mut driver = FakeDriver::new();
+
+        let mut layer = render_layer(&mut driver);
+        layer.0[LAYER_KIND] = LAYER_KIND_LATCHED;
+        layer.0[ENABLE_CHANGED] = 1;
+        unsafe { KIND5_RENDER_SUPPRESSED = 0 };
+        unsafe { layer_render(layer.ptr()) };
+        assert_eq!(unsafe { KIND5_RENDER_SUPPRESSED }, 1, "kind 5, subtype 0");
+
+        // Any other kind or subtype leaves the latch alone.
+        unsafe { KIND5_RENDER_SUPPRESSED = 0 };
+        let mut other = render_layer(&mut driver);
+        other.0[LAYER_KIND] = LAYER_KIND_LATCHED;
+        other.0[KIND_SUBTYPE] = 1;
+        other.0[ENABLE_CHANGED] = 1;
+        unsafe { layer_render(other.ptr()) };
+        assert_eq!(unsafe { KIND5_RENDER_SUPPRESSED }, 0, "subtype 1 does not latch");
+
+        unsafe { KIND5_RENDER_SUPPRESSED = 0 };
+        restore_render_mocks(guard);
+    }
+
+    #[test]
+    fn rendering_releases_the_handed_surface_and_retains_the_bound_one() {
+        let _swap = with_recording_surface_vtable();
+        let guard = with_render_mocks();
+        let mut driver = FakeDriver::new();
+        let mut old = FakeSurface::new();
+        let mut new = FakeSurface::new();
+        let (old_ptr, new_ptr) = (old.ptr(), new.ptr());
+        let mut layer = render_layer(&mut driver);
+        layer.set_ptr(LAST_SURFACE, old_ptr);
+        layer.set_bound_surface(new_ptr);
+        CURRENT_LAYER.store(layer.ptr() as usize, Ordering::SeqCst);
+
+        unsafe { layer_render(layer.ptr()) };
+        assert_eq!(layer.ptr_at(LAST_SURFACE), new_ptr);
+        assert_eq!(
+            swap_events().as_slice(),
+            &[(0, old_ptr as usize), (1, new_ptr as usize)],
+            "release(handed), then retain(bound)"
+        );
+
+        restore_render_mocks(guard);
+    }
+
+    #[test]
+    fn the_kind1_guard_bails_out_before_touching_anything() {
+        let _swap = with_recording_surface_vtable();
+        let guard = with_render_mocks();
+        let mut driver = FakeDriver::new();
+        let mut old = FakeSurface::new();
+        let mut new = FakeSurface::new();
+        let (old_ptr, new_ptr) = (old.ptr(), new.ptr());
+        let mut layer = render_layer(&mut driver);
+        layer.0[KIND_SUBTYPE] = 1;
+        layer.0[SURFACE_FLAG] = 1;
+        layer.set_ptr(LAST_SURFACE, old_ptr);
+        layer.set_ptr(PREVIOUS_SURFACE, 0x1111_0000 as *mut u8);
+        layer.set_bound_surface(new_ptr);
+        CURRENT_LAYER.store(layer.ptr() as usize, Ordering::SeqCst);
+
+        let returned = unsafe { layer_render(layer.ptr()) };
+        assert_eq!(returned, layer.ptr());
+        assert_eq!(layer.ptr_at(LAST_SURFACE), old_ptr, "no swap happened");
+        assert!(swap_events().is_empty(), "nothing released or retained");
+        assert_eq!(layer.byte(DIRTY), 1, "the layer stays dirty");
+        assert_eq!(GEOMETRY_CALLS.load(Ordering::SeqCst), 0);
+
+        // When the previous surface IS the handed one, the guard passes.
+        layer.set_ptr(PREVIOUS_SURFACE, old_ptr);
+        unsafe { layer_render(layer.ptr()) };
+        assert_eq!(layer.ptr_at(LAST_SURFACE), new_ptr);
+        assert_eq!(
+            swap_events().as_slice(),
+            &[(0, old_ptr as usize), (1, new_ptr as usize)]
+        );
+
+        restore_render_mocks(guard);
+    }
+
+    #[test]
+    fn the_blend_modes_reach_the_driver_as_codes() {
+        let guard = with_render_mocks();
+        let mut driver = FakeDriver::new();
+        for (mode, code, alpha) in [
+            (BLEND_MODE_OPAQUE, 1usize, None),
+            (BLEND_MODE_GLOBAL_ALPHA, 3, Some(0x7fusize)),
+            (BLEND_MODE_PIXEL_ALPHA, 2, None),
+            (BLEND_MODE_PIXEL_AND_GLOBAL_ALPHA, 5, Some(0x7f)),
+        ] {
+            BLEND_CALLS.store(0, Ordering::SeqCst);
+            LAST_BLEND_CODE.store(usize::MAX, Ordering::SeqCst);
+            ALPHA_CALLS.store(0, Ordering::SeqCst);
+            LAST_ALPHA.store(usize::MAX, Ordering::SeqCst);
+            let mut layer = render_layer(&mut driver);
+            layer.0[BLEND_MODE] = mode;
+            layer.0[ALPHA] = 0x7f;
+            CURRENT_LAYER.store(layer.ptr() as usize, Ordering::SeqCst);
+
+            unsafe { layer_render(layer.ptr()) };
+            assert_eq!(BLEND_CALLS.load(Ordering::SeqCst), 1, "mode {mode}");
+            assert_eq!(LAST_BLEND_CODE.load(Ordering::SeqCst), code, "mode {mode}");
+            match alpha {
+                Some(expected) => {
+                    assert_eq!(ALPHA_CALLS.load(Ordering::SeqCst), 1, "mode {mode}");
+                    assert_eq!(LAST_ALPHA.load(Ordering::SeqCst), expected, "mode {mode}");
+                }
+                None => assert_eq!(ALPHA_CALLS.load(Ordering::SeqCst), 0, "mode {mode}"),
+            }
+        }
+
+        // An unknown mode skips the blend dispatch entirely.
+        BLEND_CALLS.store(0, Ordering::SeqCst);
+        ALPHA_CALLS.store(0, Ordering::SeqCst);
+        let mut layer = render_layer(&mut driver);
+        layer.0[BLEND_MODE] = 4;
+        CURRENT_LAYER.store(layer.ptr() as usize, Ordering::SeqCst);
+        unsafe { layer_render(layer.ptr()) };
+        assert_eq!(BLEND_CALLS.load(Ordering::SeqCst), 0);
+        assert_eq!(ALPHA_CALLS.load(Ordering::SeqCst), 0);
+        assert_eq!(GEOMETRY_CALLS.load(Ordering::SeqCst) > 0, true, "geometry still pushed");
+
+        restore_render_mocks(guard);
+    }
+
+    /// A bound surface that is both retainable (a vtable pointer at
+    /// +0x00) and plane-readable (the format byte and plane words, as
+    /// [`PlaneSurface`] lays them out).
+    #[repr(align(8))]
+    struct RenderSurface([u8; 0x30]);
+
+    impl RenderSurface {
+        fn with_format(format: u8) -> Self {
+            let mut surface = RenderSurface([0; 0x30]);
+            unsafe {
+                (surface.0.as_mut_ptr() as *mut *const SurfaceVtable)
+                    .write(&TEST_SURFACE_VTABLE)
+            };
+            surface.0[SURFACE_FORMAT] = format;
+            surface.0[SURFACE_PLANE_A..SURFACE_PLANE_A + 4]
+                .copy_from_slice(&PLANE_A_WORD.to_le_bytes());
+            surface.0[SURFACE_PLANE_B..SURFACE_PLANE_B + 4]
+                .copy_from_slice(&PLANE_B_WORD.to_le_bytes());
+            surface.0[SURFACE_PLANE_C..SURFACE_PLANE_C + 4]
+                .copy_from_slice(&PLANE_C_WORD.to_le_bytes());
+            surface
+        }
+        fn ptr(&mut self) -> *mut u8 {
+            self.0.as_mut_ptr()
+        }
+    }
+
+    #[test]
+    fn the_plane_words_are_aliased_by_pixel_format() {
+        let _swap = with_recording_surface_vtable();
+        let guard = with_render_mocks();
+        let mut driver = FakeDriver::new();
+
+        // Planar: all three planes, in the descriptor's 0/2/1 order.
+        let mut surface = RenderSurface::with_format(0);
+        let mut layer = render_layer(&mut driver);
+        layer.0[PIXEL_FORMAT] = 0;
+        layer.set_bound_surface(surface.ptr());
+        CURRENT_LAYER.store(layer.ptr() as usize, Ordering::SeqCst);
+        unsafe { layer_render(layer.ptr()) };
+        assert_eq!(captured_word(DESC_PLANES), PLANE_A_WORD);
+        assert_eq!(captured_word(DESC_PLANES + 4), PLANE_C_WORD, "plane 2 in the middle slot");
+        assert_eq!(captured_word(DESC_PLANES + 8), PLANE_B_WORD, "plane 1 in the last slot");
+
+        // Two-plane: A and B.
+        let mut surface = RenderSurface::with_format(1);
+        let mut layer = render_layer(&mut driver);
+        layer.0[PIXEL_FORMAT] = 1;
+        layer.set_bound_surface(surface.ptr());
+        CURRENT_LAYER.store(layer.ptr() as usize, Ordering::SeqCst);
+        unsafe { layer_render(layer.ptr()) };
+        assert_eq!(captured_word(DESC_PLANES), PLANE_A_WORD);
+        assert_eq!(captured_word(DESC_PLANES + 4), PLANE_B_WORD);
+        assert_eq!(captured_word(DESC_PLANES + 8), 0, "zeroed before aliasing");
+
+        // Packed: A only.
+        let mut surface = RenderSurface::with_format(2);
+        let mut layer = render_layer(&mut driver);
+        layer.0[PIXEL_FORMAT] = 2;
+        layer.set_bound_surface(surface.ptr());
+        CURRENT_LAYER.store(layer.ptr() as usize, Ordering::SeqCst);
+        unsafe { layer_render(layer.ptr()) };
+        assert_eq!(captured_word(DESC_PLANES), PLANE_A_WORD);
+        assert_eq!(captured_word(DESC_PLANES + 4), 0);
+        assert_eq!(captured_word(DESC_PLANES + 8), 0);
+
+        restore_render_mocks(guard);
+    }
+
+    #[test]
+    fn a_disabled_layers_enable_change_notifies_on_the_long_path() {
+        let guard = with_render_mocks();
+        let mut driver = FakeDriver::new();
+        let mut layer = render_layer(&mut driver);
+        layer.0[ENABLE_CHANGED] = 1;
+        layer.0[DISABLED] = 1;
+        layer.set_ptr(NOTIFY_TARGET, 0x5ead_beef as *mut u8);
+        CURRENT_LAYER.store(layer.ptr() as usize, Ordering::SeqCst);
+
+        unsafe { layer_render(layer.ptr()) };
+        assert_eq!(NOTIFY_CALLS.load(Ordering::SeqCst), 1, "the change is reported");
+        assert_eq!(LAST_NOTIFY[2].load(Ordering::SeqCst), 1, "as a disable");
+        assert_eq!(GEOMETRY_CALLS.load(Ordering::SeqCst), 1, "the long path ran");
+        // The tail only closes out a change on an ENABLED layer.
+        assert_eq!(ENABLE_STATE_CALLS.load(Ordering::SeqCst), 0);
+        assert_eq!(layer.byte(ENABLE_CHANGED), 1, "left for the next render");
+
+        restore_render_mocks(guard);
+    }
+
+    #[test]
+    fn a_kind5_layer_hands_the_driver_its_surface_flag() {
+        let guard = with_render_mocks();
+        let mut driver = FakeDriver::new();
+        let mut layer = render_layer(&mut driver);
+        layer.0[LAYER_KIND] = LAYER_KIND_LATCHED;
+        layer.0[SURFACE_FLAG] = 1;
+        CURRENT_LAYER.store(layer.ptr() as usize, Ordering::SeqCst);
+
+        unsafe { layer_render(layer.ptr()) };
+        assert_eq!(KIND5_FLAG_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(LAST_KIND5_FLAG.load(Ordering::SeqCst), 1);
+
+        // Any other kind skips the call.
+        let mut other = render_layer(&mut driver);
+        other.0[LAYER_KIND] = 4;
+        CURRENT_LAYER.store(other.ptr() as usize, Ordering::SeqCst);
+        KIND5_FLAG_CALLS.store(0, Ordering::SeqCst);
+        unsafe { layer_render(other.ptr()) };
+        assert_eq!(KIND5_FLAG_CALLS.load(Ordering::SeqCst), 0);
+
+        restore_render_mocks(guard);
+    }
+
+    #[test]
+    fn an_enable_change_raised_mid_render_is_closed_out_at_the_tail() {
+        let guard = with_render_mocks();
+        let mut driver = FakeDriver::new();
+        let mut layer = render_layer(&mut driver);
+        CURRENT_LAYER.store(layer.ptr() as usize, Ordering::SeqCst);
+        GEOMETRY_RAISES_ENABLE.store(1, Ordering::SeqCst);
+
+        unsafe { layer_render(layer.ptr()) };
+        assert_eq!(ENABLE_STATE_CALLS.load(Ordering::SeqCst), 1, "the tail re-tests");
+        assert_eq!(layer.byte(ENABLE_CHANGED), 0, "and clears the flag");
+
+        restore_render_mocks(guard);
     }
 }

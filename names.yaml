@@ -6370,44 +6370,52 @@ functions:
     size: 892
     sig: "u8 *layer_render(u8 *layer)"
     module: drivers/display_layer
-    status: identified
+    status: ported
     vars: {param_1: layer}
     notes: >-
       The render pass of the display layer - the consumer of every field
       the ported setters write. 5 bl call sites (binary-scanned)
       @ 0x0811fd38, 0x08120674 (layer_force_enable), 0x081206ac
-      (layer_restore_enable), 0x081d8b3c and 0x081d8bb4. Returns early
-      unless the dirty byte at +0x1bc is set, swaps the active surface
-      (+0x64 released through its vtable slot +0x04, +0x50 stored in its
-      place and retained through slot +0x00 - with a kind-1 guard that
-      bails out when +0x34 is set and +0x60 differs), then either takes
-      the short path (enable-state-changed +0x43 set while the layer is
-      enabled - driver vtable[+0x3c], clear +0x43, notify 0x081d892c,
-      and for a kind-5 subtype-0 layer set the byte @ 0x089ca8ac) or
-      builds a 0x50-byte descriptor on the stack (0x0828302c inits it),
-      fills it from the layer fields, refreshes the plane block through
-      0x08120ad4 and layer_query_planes @ 0x081203c4, aliases the plane
-      words by pixel format, copies the descriptor into a second stack
-      block with a class word at +0x58 and pushes it through driver
-      vtable[+0x14]. It then translates the blend mode byte +0x49 into
-      the driver's code - mode 0 -> vtable[+0x40](drv, layer_id, 1);
-      mode 1 -> code 3 then vtable[+0x44](drv, layer_id, alpha @ +0x48);
-      mode 2 -> code 2; mode 3 -> code 5 then vtable[+0x44](alpha) -
-      which is where the BLEND_MODE_* table in drivers/display_layer
-      comes from.
-      NOT PORTED, and the reason is now specific - it loads the layer's
-      stored POINTER fields (notify target +0x00, display driver +0x04,
-      surfaces +0x50/+0x60/+0x64), and drivers/display_layer addresses
-      the object by literal byte offset. On a 64-bit test host word
-      index 1 (the driver) lands on byte 8, exactly where the layer id /
-      kind / pixel-format bytes live (the heap/block_region.rs
-      word-index rule). Porting it faithfully therefore requires
-      converting the whole module to a repr(C) layer struct first, which
-      would churn eleven green ports and their tests; it is left as a
-      deliberate separate step. It reaches the port meanwhile through
-      LAYER_DRIVER_HOOKS.render (default - no-op returning the layer).
-      Ghidra's C for it is badly mangled (it inlines callees and invents
-      jumptables).
+      (layer_restore_enable), 0x081d8b3c and 0x081d8bb4. Returns the
+      layer on every path. Returns early unless the dirty byte at +0x1bc
+      is set, swaps the active surface (+0x64 released through its
+      vtable slot +0x04, +0x50 stored in its place and retained through
+      slot +0x00 - with a subtype-1 guard that bails out of the whole
+      render when +0x34 is set and +0x60 differs from +0x64), then
+      either takes the short path (enable-state-changed +0x43 set while
+      the layer is enabled - driver vtable[+0x3c], clear +0x43, notify
+      0x081d892c, and for a kind-5 subtype-0 layer set the byte @
+      0x089ca8ac, modeled as KIND5_RENDER_SUPPRESSED) or builds the
+      0x50-byte descriptor on the stack (0x0828302c inits it), fills it
+      from the layer fields, maps the pixel format into +0x3c through
+      0x08120ad4, refreshes the plane block through layer_query_planes
+      @ 0x081203c4 (into the layer's own +0x1c8..+0x1d4), aliases the
+      plane words by pixel format (0: planes 0/2/1, 1: 0/1, 2|3: 0),
+      notifies instead when the change happened on a disabled layer,
+      hands a kind-5 layer's +0x34 to driver vtable[+0x18], and pushes
+      a copy of the descriptor behind the class word 0x089a651c through
+      driver vtable[+0x14]. It then translates the blend mode byte +0x49
+      into the driver's code - mode 0 -> vtable[+0x40](code 1); mode 1
+      -> code 3 then vtable[+0x44](alpha @ +0x48); mode 2 -> code 2;
+      mode 3 -> code 5 then the alpha push; anything else skips both.
+      The tail re-tests +0x43/+0x41 (the callees may have mutated the
+      layer) and closes out a change on an enabled layer. The blocker's
+      resolution: the densely-packed pointer fields (+0x04 driver, +0x60
+      previous, +0x64 last-handed) are native-width and, on 64-bit hosts
+      only, parked in the object's own unaccounted gaps at 0x70/0x58/0x68
+      (the heap/block_region.rs word-index rule applied field by field);
+      +0x00 (notify target) and +0x50 keep their literal offsets. On the
+      32-bit target every offset is literal and the other eleven ports
+      are untouched. The driver vtable is modeled as repr(C)
+      DriverVtable with native slots at word indices 5/6/15/16/17 (the
+      SurfaceVtable precedent); the class word is the address of the
+      LAYER_RENDER_CLASS static (the REGION_START_FALLBACK precedent).
+      0x0828302c, 0x08120ad4 and 0x081d892c dispatch through new
+      LAYER_DRIVER_HOOKS slots with documented no-op defaults (the
+      install_planes precedent); the render hook's default is now the
+      port itself. match.py: LLVM inlines layer_query_planes and lowers
+      the zeroed descriptors to __aeabi_memclr; the dirty gate, kind-1
+      guard and surface release are instruction-identical.
 
   - address: 0x0811fc4c
     ghidra: FUN_0811fc4c
@@ -6474,8 +6482,8 @@ functions:
       is sidestepped because +0x50 is followed by unaccounted padding up
       to +0x60, so a native-width pointer access at the literal byte
       offset fits on a 64-bit host (the densely packed +0x04/+0x60/+0x64
-      fields lack that slack, which is why layer_render stays behind the
-      hook); the surface vtable slots are modeled native-width (the
+      fields lack that slack; layer_render parks them in the object's
+      unaccounted gaps on 64-bit hosts - see its own entry); the surface vtable slots are modeled native-width (the
       cxx/templates.rs precedent, SurfaceVtable). The port is wired as
       LAYER_DRIVER_HOOKS.swap_surface's default, so layer_enable /
       layer_bind_surface now exercise it; tests interpose a recording
