@@ -2335,6 +2335,40 @@ functions:
       match.py structural (trace call goes through the ops table, the
       str to +4 is verbatim).
 
+  - address: 0x0807a228
+    ghidra: FUN_0807a228
+    name: timer_arm
+    size: 176
+    sig: "void timer_arm(u8 *timer)"
+    module: drivers/timer
+    status: ported
+    renames:
+      param_1: timer
+    notes: >-
+      7 call sites (5 bl + 2 tail b, incl. the timer_restart tail
+      branch). functions.csv lists it as "default"; named for what it
+      does. No-op when the armed flag at +0x1c is set; otherwise, under
+      the pending-list mutex @ 0x089ca318 (NOT timer_stop's 0x089cb294),
+      runs the trace/validate walk 0x0809e620 (the unlocked core of
+      trace_assert 0x08076954), and when the period word +0x4 is nonzero
+      computes the deadline +0x8 = tick() + period*1000 (original: *125
+      then lsl #3; tick getter 0x08056658 -> 0x0836af80 reads the
+      free-running counter @ 0x3C7000B4), stamps 'run ' into the
+      queued-state word +0x18, and splices the timer into the
+      singly-linked pending queue (head cell @ 0x089ca300, link at +0x0)
+      ahead of the first entry whose deadline compares strictly greater
+      (signed comparator 0x082a243c on the +0x8 words - ties stay FIFO),
+      then sets the armed flag. Notify helper 0x0808e2a8 on the cell
+      0x089ca310 runs on BOTH the queued and zero-period paths; the
+      mutex unlock is the tail branch. The four callees are new TimerOps
+      slots (trace_validate / tick / compare_deadlines / notify_pending,
+      documented stubs); the arm_timer slot now defaults to this port.
+      Pending-list link words are absolute u32 pointers on target,
+      offset links from a per-test arena base on host (the
+      heap/alloc_core.rs precedent). match.py structural: same early
+      return, same walk/break loop, LLVM merges the strne/streq splice
+      pair into one predicated store and emits mla for tick+period*1000.
+
   - address: 0x0807f5c4
     name: mutex_lock
     size: 8
@@ -10440,9 +10474,9 @@ functions:
       (outside the class mutex - the str sits between the stop's return
       and the tail branch), then tail branches to the arm helper
       0x0807a228 with the timer in r0, which re-queues it onto the
-      pending list sorted by deadline. The arm helper is not yet ported,
-      so it dispatches through the new TimerOps::arm_timer slot (default
-      no-op stub). Sig corrected from the scouted "u8 *timer_restart(u8
+      pending list sorted by deadline. The arm helper is now ported as
+      timer_arm (its own entry); the TimerOps::arm_timer slot defaults
+      to it. Sig corrected from the scouted "u8 *timer_restart(u8
       *timer)" to void: the tail call's r0 is the arm helper's leftover
       (the armed flag on the early-return path, the mutex pointer
       otherwise), not the timer. LLVM inlines timer_stop into the port,

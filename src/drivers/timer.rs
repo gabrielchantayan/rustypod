@@ -31,8 +31,20 @@
 //!   `timer_stop` on the timer, writes the FourCC `TIMER_STATE_RUNNING`
 //!   ('run ') to the state word at +0x20, then tail-branches to the arm
 //!   helper @ 0x0807a228 with the timer still in r0, which re-queues it
-//!   onto the pending list sorted by deadline. The arm helper is not yet
-//!   ported, so it dispatches through `TimerOps::arm_timer`.
+//!   onto the pending list sorted by deadline. The arm helper is ported
+//!   as `timer_arm` below; the `TimerOps::arm_timer` slot remains as the
+//!   dispatch indirection (its wired default is the port).
+//!
+//! - `timer_arm` — original: `FUN_0807a228` @ 0x0807a228 (176 bytes;
+//!   7 call sites: 5 `bl` + 2 tail `b`, binary-scanned — including the
+//!   `timer_restart` tail branch). No-op when the armed flag at +0x1c
+//!   is set; otherwise, under the pending-list mutex @ 0x089ca318 (NOT
+//!   the 0x089cb294 mutex `timer_stop` takes), validates the timer,
+//!   computes the deadline (+0x8 = tick() + period(+0x4) * 1000), stamps
+//!   'run ' into the queued-state word at +0x18, splices the timer into
+//!   the pending queue (head cell @ 0x089ca300, link at +0x0) sorted by
+//!   deadline, sets the armed flag, and kicks the notify helper @
+//!   0x0808e2a8 on the cell @ 0x089ca310 before unlocking.
 //!
 //! - `timer_schedule_shim` — original: `FUN_0811108c` @ 0x0811108c (20
 //!   bytes; 64 `bl` call sites). Pure argument plumbing: rotates its
@@ -52,7 +64,11 @@
 //! Timer object layout (only the words this function touches):
 //!
 //! ```text
+//! +0x00 u32  pending-list link (next timer; 0 = list end)
 //! +0x04 u32  period/delay in milliseconds (deadline = tick() + this * 1000)
+//! +0x08 u32  deadline in tick units, written by `timer_arm`
+//! +0x18 u32  queued-state FourCC: 'run ' once linked into the pending queue
+//! +0x1c u32  armed flag: nonzero = already queued; `timer_arm` is a no-op
 //! +0x20 u32  state FourCC: 'expi' expired / 'stop' stopped / 'run ' running
 //! +0x28 u32  callback queue handle, handed to the cancel helper
 //! ```
@@ -64,14 +80,19 @@
 //!
 //! Dispatch design (deviation, by necessity — mirrors the `ROM_KERNEL`
 //! pattern in kernel/sync_mutex.rs): the trace/assert helper @ 0x08076954,
-//! the cancel helper @ 0x080a6c0c, the arm helper @ 0x0807a228 and the
-//! timer constructor @ 0x0812c65c are not yet ported, so they dispatch
-//! indirectly through the `TIMER_OPS`
+//! the cancel helper @ 0x080a6c0c and the timer constructor @ 0x0812c65c
+//! are not yet ported, so they dispatch indirectly through the `TIMER_OPS`
 //! fn-pointer table instead of undefined `extern "C"` symbols that would
 //! break the freestanding ARM link. Default stubs are harmless no-ops; on
-//! real hardware the table must be installed before `timer_stop` or
-//! `timer_restart` is hooked. The mutex pair is ported, so the global @
-//! 0x089cb294 is modeled directly as the static `TIMER_CLASS_MUTEX`.
+//! real hardware the table must be installed before `timer_stop` is
+//! hooked. The arm helper @ 0x0807a228 IS ported (`timer_arm`) and is the
+//! wired default of the `arm_timer` slot; its own four callees — the
+//! trace/validate walk @ 0x0809e620, the tick getter @ 0x08056658, the
+//! deadline comparator @ 0x082a243c and the notify helper @ 0x0808e2a8 —
+//! are not, so they are slots of their own with documented default stubs.
+//! The mutex pair is ported, so the globals @ 0x089cb294 and @ 0x089ca318
+//! are modeled directly as the statics `TIMER_CLASS_MUTEX` /
+//! `TIMER_PENDING_MUTEX`.
 //!
 //! Simplifications:
 //! - The original stores the cancel helper's return value into a dead
@@ -86,13 +107,32 @@
 //!   lock/unlock run on the read-out value; without this LLVM folds the
 //!   null-initialized cell and deletes the entire mutex pair (see the
 //!   comment in `timer_stop`). The mutex ops only read through the
-//!   object, so this is behaviorally identical.
+//!   object, so this is behaviorally identical. `TIMER_PENDING_MUTEX`
+//!   follows the same pattern.
+//! - Pending-list link words (+0x0 in each timer, and the head cell @
+//!   0x089ca300) are 32-bit absolute pointers on the ARM target; 64-bit
+//!   host test builds store u32 offsets from a per-test arena base
+//!   (`TEST_LINK_BASE`, the `heap/alloc_core.rs` precedent). 0 is the
+//!   NULL list end in both worlds; only the link-word<->pointer cast
+//!   changes, so the ARM build is the original algorithm.
 
 use crate::kernel::sync_mutex::{mutex_lock, mutex_unlock, Mutex};
 
+/// +0x0: pending-list link — the next timer in the deadline-sorted
+/// queue; 0 is the list end.
+const NEXT: usize = 0x0;
 /// +0x4: period/delay in milliseconds — the arm helper @ 0x0807a228
 /// computes the deadline as tick() + period * 1000 from this word.
 const PERIOD: usize = 0x4;
+/// +0x8: deadline in tick units, written by `timer_arm` when the timer
+/// is queued.
+const DEADLINE: usize = 0x8;
+/// +0x18: queued-state word — `timer_arm` stamps `TIMER_STATE_RUNNING`
+/// ('run ') here when it links the timer into the pending queue.
+const QUEUED_STATE: usize = 0x18;
+/// +0x1c: armed flag — nonzero means the timer is already queued and
+/// `timer_arm` returns immediately.
+const ARMED: usize = 0x1c;
 /// +0x20: state word — one of the FourCCs below.
 const STATE: usize = 0x20;
 /// +0x28: callback queue handle (a 32-bit firmware pointer), first
@@ -114,6 +154,28 @@ pub static mut TIMER_CLASS_MUTEX: Mutex = Mutex {
     sem_cell: core::ptr::null_mut(),
     unused: 0,
 };
+
+/// Original: global pending-list mutex object @ 0x089ca318, taken by
+/// `timer_arm` around the validate/deadline/queue-insert sequence (a
+/// different global from `TIMER_CLASS_MUTEX` — the arm helper never
+/// touches 0x089cb294).
+pub static mut TIMER_PENDING_MUTEX: Mutex = Mutex {
+    sem_cell: core::ptr::null_mut(),
+    unused: 0,
+};
+
+/// Original: pending-queue head cell @ 0x089ca300 — the link word of
+/// the first queued timer, 0 when the queue is empty. `timer_arm`
+/// rewrites it only when the new timer sorts ahead of every queued
+/// entry.
+pub static mut TIMER_PENDING_HEAD: u32 = 0;
+
+/// Original: notify-handle cell @ 0x089ca310, handed to the notify
+/// helper @ 0x0808e2a8 (which loads the handle from it). The handle is
+/// installed at runtime by the not-yet-ported timer-service init;
+/// modeled as a static so the value is observable/overridable (the
+/// `TIMER_EXPIRY_CALLBACK` precedent).
+pub static mut TIMER_NOTIFY_CELL: u32 = 0;
 
 /// Original: code pointer 0x081216b4 — the expiry callback identity the
 /// cancel helper matches against. In osos it reaches `timer_stop` as a
@@ -141,11 +203,35 @@ pub struct TimerOps {
         timer: *mut u8,
     ) -> u32,
     /// Arm/schedule helper @ 0x0807a228(timer): no-op when the armed flag
-    /// at +0x1c is nonzero; otherwise, under the class mutex, traces the
-    /// timer, computes the deadline (+0x8 = tick() + period(+0x4) * 1000),
-    /// inserts the timer into the pending queue sorted by deadline, and
-    /// sets the armed flag. `timer_restart` tail-branches to it.
+    /// at +0x1c is nonzero; otherwise, under the pending-list mutex,
+    /// validates the timer, computes the deadline (+0x8 = tick() +
+    /// period(+0x4) * 1000), inserts the timer into the pending queue
+    /// sorted by deadline, and sets the armed flag. `timer_restart`
+    /// tail-branches to it. Ported as `timer_arm`; that port is the
+    /// wired default of this slot.
     pub arm_timer: unsafe extern "C" fn(timer: *mut u8),
+    /// Trace/validate walk @ 0x0809e620(timer): the unlocked core of the
+    /// trace/assert helper @ 0x08076954 (a walk over the object's words
+    /// at +0x18/+0x1c). `timer_arm` calls it directly — the pending-list
+    /// mutex is already held.
+    pub trace_validate: unsafe extern "C" fn(timer: *mut u8),
+    /// System tick getter @ 0x08056658 — a 4-byte thunk to 0x0836af80,
+    /// which reads the free-running counter register @ 0x3C7000B4 in the
+    /// S5L8702 timer block. Microsecond units: the deadline math is
+    /// tick() + period_ms * 1000.
+    pub tick: unsafe extern "C" fn() -> u32,
+    /// Deadline comparator @ 0x082a243c(a, b) -> u32: returns 1 when the
+    /// signed difference *a - *b is greater than 0, else 0. `timer_arm`
+    /// calls it as (entry + 0x8, timer + 0x8), so a nonzero result
+    /// breaks the queue walk and inserts the timer ahead of `entry`;
+    /// equal deadlines keep FIFO order.
+    pub compare_deadlines: unsafe extern "C" fn(a: *const u32, b: *const u32) -> u32,
+    /// Notify helper @ 0x0808e2a8(cell): loads the handle from `cell`
+    /// (@ 0x089ca310, modeled as `TIMER_NOTIFY_CELL`) and tail-branches
+    /// to 0x080567a8, which posts through 0x08056328(1, handle) — kicks
+    /// the queue owner so it re-evaluates the new head deadline. Runs on
+    /// every locked path of `timer_arm`, queued or not.
+    pub notify_pending: unsafe extern "C" fn(cell: *const u32),
     /// Timer constructor @ 0x0812c65c(timer, init_arg, config_word,
     /// callback_handle): runs the object-init helper @ 0x08076924 with
     /// (timer, class-descriptor word, init_arg, 0), writes an initial
@@ -162,9 +248,14 @@ pub struct TimerOps {
     ),
 }
 
-// Default stubs: without the trace/cancel/arm layer these operations have
-// no meaning. On real hardware TIMER_OPS must be installed before any
-// timer is stopped or restarted through this port.
+// Default stubs: without the trace/cancel/construct layer these
+// operations have no meaning. On real hardware TIMER_OPS must be
+// installed before any timer is stopped through this port. The four
+// `timer_arm` callees likewise default to stubs: trace/notify drop the
+// call, `tick` reads 0, and the comparator never breaks the walk — so
+// the stock-default `timer_arm` appends to the queue tail with deadline
+// period * 1000; documented, harmless, and replaced by the ported
+// helpers as they land.
 unsafe extern "C" fn missing_trace_assert(_timer: *mut u8) {}
 unsafe extern "C" fn missing_cancel_callback(
     _handle: usize,
@@ -173,7 +264,6 @@ unsafe extern "C" fn missing_cancel_callback(
 ) -> u32 {
     0
 }
-unsafe extern "C" fn missing_arm_timer(_timer: *mut u8) {}
 unsafe extern "C" fn missing_construct_timer(
     _timer: *mut u8,
     _init_arg: u32,
@@ -181,17 +271,33 @@ unsafe extern "C" fn missing_construct_timer(
     _callback_handle: usize,
 ) {
 }
+unsafe extern "C" fn missing_trace_validate(_timer: *mut u8) {}
+unsafe extern "C" fn missing_tick() -> u32 {
+    0
+}
+unsafe extern "C" fn missing_compare_deadlines(_a: *const u32, _b: *const u32) -> u32 {
+    0
+}
+unsafe extern "C" fn missing_notify_pending(_cell: *const u32) {}
 
-/// The active timer-service dispatch table. Defaults to the documented
-/// stubs above; replaced by host tests (mocks) and eventually by the
-/// ported trace/cancel/arm layer. Written once at init on target; tests
-/// serialize access.
-pub static mut TIMER_OPS: TimerOps = TimerOps {
+/// The wired defaults: the arm slot is the ported `timer_arm` below;
+/// the not-yet-ported callees are the documented stubs above.
+const DEFAULT_TIMER_OPS: TimerOps = TimerOps {
     trace_assert: missing_trace_assert,
     cancel_callback: missing_cancel_callback,
-    arm_timer: missing_arm_timer,
+    arm_timer: timer_arm,
     construct_timer: missing_construct_timer,
+    trace_validate: missing_trace_validate,
+    tick: missing_tick,
+    compare_deadlines: missing_compare_deadlines,
+    notify_pending: missing_notify_pending,
 };
+
+/// The active timer-service dispatch table. Defaults to
+/// `DEFAULT_TIMER_OPS`; replaced by host tests (mocks) and eventually by
+/// the ported trace/cancel/construct layer. Written once at init on
+/// target; tests serialize access.
+pub static mut TIMER_OPS: TimerOps = DEFAULT_TIMER_OPS;
 
 /// Reads the ops table. The read is volatile: the table is meant to be
 /// swapped at runtime, and in a build where nothing writes it yet LLVM
@@ -210,6 +316,50 @@ unsafe fn word(timer: *mut u8, offset: usize) -> u32 {
 #[inline(always)]
 unsafe fn set_word(timer: *mut u8, offset: usize, value: u32) {
     timer.add(offset).cast::<u32>().write_volatile(value);
+}
+
+/// Link word -> timer pointer. On the ARM target a link word *is* the
+/// absolute 32-bit pointer the original stored. In 64-bit host test
+/// builds links are u32 offsets from `TEST_LINK_BASE` (see the module
+/// header); 0 is the NULL list end in both worlds.
+#[cfg(not(test))]
+#[inline(always)]
+fn link_to_ptr(link: u32) -> *mut u8 {
+    link as *mut u8
+}
+
+#[cfg(test)]
+static mut TEST_LINK_BASE: *mut u8 = core::ptr::null_mut();
+
+#[cfg(test)]
+#[inline(always)]
+fn link_to_ptr(link: u32) -> *mut u8 {
+    unsafe {
+        if link == 0 {
+            core::ptr::null_mut()
+        } else {
+            TEST_LINK_BASE.add(link as usize)
+        }
+    }
+}
+
+/// Timer pointer -> link word, the inverse of [`link_to_ptr`].
+#[cfg(not(test))]
+#[inline(always)]
+fn ptr_to_link(timer: *mut u8) -> u32 {
+    timer as u32
+}
+
+#[cfg(test)]
+#[inline(always)]
+fn ptr_to_link(timer: *mut u8) -> u32 {
+    unsafe {
+        if timer.is_null() {
+            0
+        } else {
+            timer.offset_from(TEST_LINK_BASE) as u32
+        }
+    }
 }
 
 /// timer_stop — original: `FUN_0812c6b0` @ 0x0812c6b0 (76 bytes).
@@ -263,7 +413,71 @@ pub unsafe extern "C" fn timer_restart(timer: *mut u8) {
     (timer_ops().arm_timer)(timer);
 }
 
-/// timer_set_delay — original: `FUN_080744c0` @ 0x080744c0 (24 bytes).
+/// timer_arm — original: `FUN_0807a228` @ 0x0807a228 (176 bytes).
+///
+/// Arms `timer` onto the deadline-sorted pending queue. When the armed
+/// flag at +0x1c is nonzero the original returns immediately
+/// (`ldmiane`) — no lock, no notify — and so does this port. Otherwise,
+/// under the pending-list mutex @ 0x089ca318: runs the trace/validate
+/// walk @ 0x0809e620, and when the period word at +0x4 is nonzero
+/// computes the deadline +0x8 = tick() + period * 1000 (the original
+/// multiplies by 125 and shifts left 3 — identical mod 2^32), stamps
+/// `TIMER_STATE_RUNNING` ('run ') into the queued-state word at +0x18,
+/// and splices the timer into the singly-linked pending queue (head
+/// cell @ 0x089ca300, link at +0x0) ahead of the first entry whose
+/// deadline compares strictly greater (signed compare @ 0x082a243c on
+/// the +0x8 words — equal deadlines keep FIFO order), then sets the
+/// armed flag. The notify helper @ 0x0808e2a8 on the cell @ 0x089ca310
+/// runs on BOTH the queued and the zero-period path (the original's
+/// shared epilogue), and the unlock @ 0x0807f6a0 is the original's tail
+/// branch. The `timer` argument is not NULL-checked, as in the
+/// original. The four unported callees dispatch through `TimerOps` (see
+/// the module header); the link-word representation is the
+/// `heap/alloc_core.rs` offset-link precedent on host test builds.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn timer_arm(timer: *mut u8) {
+    if word(timer, ARMED) != 0 {
+        return;
+    }
+    // Volatile, same rationale as TIMER_CLASS_MUTEX in timer_stop: the
+    // cell is null-initialized and LLVM would otherwise fold the load
+    // and delete the whole mutex pair.
+    let mut pending_mutex = core::ptr::addr_of!(TIMER_PENDING_MUTEX).read_volatile();
+    mutex_lock(&mut pending_mutex);
+    let ops = timer_ops();
+    (ops.trace_validate)(timer);
+    let period = word(timer, PERIOD);
+    if period != 0 {
+        let deadline = (ops.tick)().wrapping_add(period.wrapping_mul(1000));
+        set_word(timer, DEADLINE, deadline);
+        set_word(timer, QUEUED_STATE, TIMER_STATE_RUNNING);
+        let mut prev: *mut u8 = core::ptr::null_mut();
+        let mut entry =
+            link_to_ptr(core::ptr::addr_of_mut!(TIMER_PENDING_HEAD).read_volatile());
+        while !entry.is_null() {
+            if (ops.compare_deadlines)(
+                entry.add(DEADLINE).cast::<u32>(),
+                timer.add(DEADLINE).cast::<u32>(),
+            ) != 0
+            {
+                break;
+            }
+            prev = entry;
+            entry = link_to_ptr(word(entry, NEXT));
+        }
+        // Store order as in the original: predecessor/head link first,
+        // then the armed flag, then the timer's own link.
+        if prev.is_null() {
+            core::ptr::addr_of_mut!(TIMER_PENDING_HEAD).write_volatile(ptr_to_link(timer));
+        } else {
+            set_word(prev, NEXT, ptr_to_link(timer));
+        }
+        set_word(timer, ARMED, 1);
+        set_word(timer, NEXT, ptr_to_link(entry));
+    }
+    (ops.notify_pending)(core::ptr::addr_of_mut!(TIMER_NOTIFY_CELL));
+    mutex_unlock(&mut pending_mutex);
+}
 ///
 /// Traces/asserts `timer` (the helper @ 0x08076954, dispatched through
 /// `TimerOps::trace_assert` as in `timer_stop`), then stores `delay`
@@ -349,6 +563,10 @@ mod tests {
         Cancel(usize, usize, usize),
         Arm(usize),
         Construct(usize, u32, u32, usize),
+        Validate(usize),
+        Tick,
+        Compare(u32, u32),
+        Notify(usize),
     }
 
     static CALLS: StdMutex<Vec<Call>> = StdMutex::new(Vec::new());
@@ -364,6 +582,8 @@ mod tests {
     /// Handle the mock sema ops see. Tests install the class-mutex cell
     /// directly; the ROM define never runs.
     const MOCK_HANDLE: u32 = 0x71e0_0001;
+    /// Same for the pending-list mutex `timer_arm` takes.
+    const PENDING_MOCK_HANDLE: u32 = 0x71e0_0002;
 
     unsafe extern "C" fn mock_trace(timer: *mut u8) {
         record(Call::Trace(timer as usize));
@@ -394,12 +614,35 @@ mod tests {
     unsafe extern "C" fn mock_sema_signal(handle: u32) {
         record(Call::Signal(handle));
     }
+    unsafe extern "C" fn mock_validate(timer: *mut u8) {
+        record(Call::Validate(timer as usize));
+    }
+    unsafe extern "C" fn mock_tick() -> u32 {
+        record(Call::Tick);
+        unsafe { MOCK_TICK }
+    }
+    /// The mock comparator implements the original @ 0x082a243c exactly:
+    /// 1 when the signed difference *a - *b is > 0, else 0.
+    unsafe extern "C" fn mock_compare(a: *const u32, b: *const u32) -> u32 {
+        let (a, b) = unsafe { (*a, *b) };
+        record(Call::Compare(a, b));
+        (a.wrapping_sub(b) as i32 > 0) as u32
+    }
+    unsafe extern "C" fn mock_notify(cell: *const u32) {
+        record(Call::Notify(cell as usize));
+    }
+
+    static mut MOCK_TICK: u32 = 0;
 
     const MOCK_TIMER_OPS: TimerOps = TimerOps {
         trace_assert: mock_trace,
         cancel_callback: mock_cancel,
         arm_timer: mock_arm,
         construct_timer: mock_construct,
+        trace_validate: mock_validate,
+        tick: mock_tick,
+        compare_deadlines: mock_compare,
+        notify_pending: mock_notify,
     };
 
     /// A 0x30-byte timer object: state word at +0x20, handle at +0x28.
@@ -449,11 +692,59 @@ mod tests {
                 unused: 0,
             });
             CLASS_MUTEX_CELL = MOCK_HANDLE;
+            core::ptr::addr_of_mut!(TIMER_PENDING_MUTEX).write_volatile(Mutex {
+                sem_cell: core::ptr::addr_of_mut!(PENDING_MUTEX_CELL),
+                unused: 0,
+            });
+            PENDING_MUTEX_CELL = PENDING_MOCK_HANDLE;
+            core::ptr::addr_of_mut!(TIMER_PENDING_HEAD).write_volatile(0);
+            core::ptr::addr_of_mut!(TIMER_NOTIFY_CELL).write_volatile(0);
+            MOCK_TICK = 0;
+            // Zero the arena and rebase the offset links at it.
+            TEST_LINK_BASE = core::ptr::addr_of_mut!(ARENA) as *mut u8;
+            TEST_LINK_BASE.write_bytes(0, ARENA_SIZE);
         }
         guard
     }
 
     static mut CLASS_MUTEX_CELL: u32 = 0;
+    static mut PENDING_MUTEX_CELL: u32 = 0;
+
+    /// Link arena for the pending-queue tests: host builds store list
+    /// links as u32 offsets from `TEST_LINK_BASE` (see the module
+    /// header), so every timer handed to `timer_arm` lives here.
+    const ARENA_SIZE: usize = 0x200;
+
+    #[repr(align(4))]
+    struct Arena([u8; ARENA_SIZE]);
+
+    static mut ARENA: Arena = Arena([0; ARENA_SIZE]);
+
+    /// Arena timer at byte `offset` with the given period word; every
+    /// other word starts zeroed (mock_env just cleared the arena).
+    /// `offset` must be nonzero: in the offset-link representation 0 is
+    /// the NULL list end, so a linkable timer cannot live at offset 0.
+    unsafe fn arena_timer(offset: usize, period: u32) -> *mut u8 {
+        let timer = unsafe { TEST_LINK_BASE.add(offset) };
+        unsafe { set_word(timer, PERIOD, period) };
+        timer
+    }
+
+    /// Pre-queued arena timer: deadline and armed flag set, link word
+    /// `next` (a link, not a pointer).
+    unsafe fn queued_timer(offset: usize, deadline: u32, next: u32) -> *mut u8 {
+        let timer = arena_timer(offset, 0);
+        unsafe {
+            set_word(timer, DEADLINE, deadline);
+            set_word(timer, ARMED, 1);
+            set_word(timer, NEXT, next);
+        }
+        timer
+    }
+
+    fn pending_head() -> *mut u8 {
+        link_to_ptr(unsafe { core::ptr::addr_of_mut!(TIMER_PENDING_HEAD).read_volatile() })
+    }
 
     /// State 'expi': the pending callback is cancelled with the exact
     /// (handle, callback identity, timer) triple, under the mutex, and
@@ -780,5 +1071,165 @@ mod tests {
             0,
             "no trace/lock/cancel/arm around the construct call"
         );
+    }
+
+    /// The arm slot's wired default is the ported timer_arm itself —
+    /// the stub is gone.
+    #[test]
+    fn arm_slot_defaults_to_the_port() {
+        let _lock = mock_env();
+        assert_eq!(
+            DEFAULT_TIMER_OPS.arm_timer as usize,
+            timer_arm as usize,
+            "the arm dispatch slot must default to the ported timer_arm"
+        );
+    }
+
+    /// Armed flag set: the whole function is the early return — no
+    /// lock, no validate, no notify, and not a word of the timer or the
+    /// queue head changes.
+    #[test]
+    fn armed_timer_is_a_no_op() {
+        let _lock = mock_env();
+        let timer = unsafe { arena_timer(0x100, 100) };
+        unsafe { set_word(timer, ARMED, 1) };
+        unsafe { timer_arm(timer) };
+        assert_eq!(calls(), vec![], "an armed timer must not touch anything");
+        assert_eq!(pending_head(), core::ptr::null_mut());
+        unsafe {
+            assert_eq!(word(timer, DEADLINE), 0);
+            assert_eq!(word(timer, NEXT), 0);
+        }
+    }
+
+    /// Empty queue: deadline = tick + period * 1000 lands at +0x8, the
+    /// queued-state word gets 'run ', the armed flag is set, the timer
+    /// becomes the head with a NULL link — validate/tick/notify and the
+    /// pending-mutex pair run in the original's order.
+    #[test]
+    fn arm_computes_the_deadline_and_takes_the_head() {
+        let _lock = mock_env();
+        unsafe { MOCK_TICK = 65_536 };
+        let timer = unsafe { arena_timer(0x100, 500) };
+        unsafe { timer_arm(timer) };
+        unsafe {
+            assert_eq!(word(timer, DEADLINE), 65_536 + 500 * 1000);
+            assert_eq!(word(timer, QUEUED_STATE), TIMER_STATE_RUNNING);
+            assert_eq!(word(timer, ARMED), 1);
+            assert_eq!(word(timer, NEXT), 0, "sole entry ends the list");
+        }
+        assert_eq!(pending_head(), timer);
+        assert_eq!(
+            calls(),
+            vec![
+                Call::Wait(PENDING_MOCK_HANDLE),
+                Call::Validate(timer as usize),
+                Call::Tick,
+                Call::Notify(core::ptr::addr_of_mut!(TIMER_NOTIFY_CELL) as usize),
+                Call::Signal(PENDING_MOCK_HANDLE),
+            ]
+        );
+    }
+
+    /// Sorted insertion: a timer whose deadline falls between two queued
+    /// entries is spliced between them; the comparator sees
+    /// (entry.deadline, timer.deadline) pairs in walk order.
+    #[test]
+    fn arm_inserts_sorted_by_deadline() {
+        let _lock = mock_env();
+        let b = unsafe { queued_timer(0x80, 3000, 0) };
+        let a = unsafe { queued_timer(0x40, 1000, ptr_to_link(b)) };
+        unsafe { core::ptr::addr_of_mut!(TIMER_PENDING_HEAD).write_volatile(ptr_to_link(a)) };
+        let timer = unsafe { arena_timer(0x100, 2) }; // deadline 2000
+        unsafe { timer_arm(timer) };
+        assert_eq!(pending_head(), a, "head unchanged");
+        unsafe {
+            assert_eq!(link_to_ptr(word(a, NEXT)), timer);
+            assert_eq!(link_to_ptr(word(timer, NEXT)), b);
+            assert_eq!(word(b, NEXT), 0);
+            assert_eq!(word(timer, DEADLINE), 2000);
+        }
+        let compares: Vec<_> = calls()
+            .into_iter()
+            .filter_map(|c| match c {
+                Call::Compare(a, b) => Some((a, b)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(compares, vec![(1000, 2000), (3000, 2000)]);
+    }
+
+    /// A deadline ahead of every queued entry rewrites the head cell and
+    /// links the old head behind the new timer.
+    #[test]
+    fn arm_inserts_ahead_of_the_head() {
+        let _lock = mock_env();
+        let a = unsafe { queued_timer(0x40, 2000, 0) };
+        unsafe { core::ptr::addr_of_mut!(TIMER_PENDING_HEAD).write_volatile(ptr_to_link(a)) };
+        let timer = unsafe { arena_timer(0x100, 1) }; // deadline 1000
+        unsafe { timer_arm(timer) };
+        assert_eq!(pending_head(), timer);
+        unsafe {
+            assert_eq!(link_to_ptr(word(timer, NEXT)), a);
+            assert_eq!(word(a, NEXT), 0);
+        }
+    }
+
+    /// Equal deadline: the compare is strictly-greater, so the new timer
+    /// sorts behind the existing entry — FIFO for ties.
+    #[test]
+    fn arm_appends_after_an_equal_deadline() {
+        let _lock = mock_env();
+        let a = unsafe { queued_timer(0x40, 2000, 0) };
+        unsafe { core::ptr::addr_of_mut!(TIMER_PENDING_HEAD).write_volatile(ptr_to_link(a)) };
+        let timer = unsafe { arena_timer(0x100, 2) }; // deadline 2000
+        unsafe { timer_arm(timer) };
+        assert_eq!(pending_head(), a);
+        unsafe {
+            assert_eq!(link_to_ptr(word(a, NEXT)), timer);
+            assert_eq!(word(timer, NEXT), 0);
+        }
+    }
+
+    /// Period zero: validate and notify still run and the mutex pair
+    /// brackets them (the original's shared epilogue), but no tick is
+    /// read, no deadline/queued-state/armed word is written, and the
+    /// queue is untouched.
+    #[test]
+    fn zero_period_skips_the_queue_but_still_notifies() {
+        let _lock = mock_env();
+        let timer = unsafe { arena_timer(0x100, 0) };
+        unsafe { timer_arm(timer) };
+        assert_eq!(
+            calls(),
+            vec![
+                Call::Wait(PENDING_MOCK_HANDLE),
+                Call::Validate(timer as usize),
+                Call::Notify(core::ptr::addr_of_mut!(TIMER_NOTIFY_CELL) as usize),
+                Call::Signal(PENDING_MOCK_HANDLE),
+            ]
+        );
+        assert_eq!(pending_head(), core::ptr::null_mut());
+        unsafe {
+            assert_eq!(word(timer, DEADLINE), 0);
+            assert_eq!(word(timer, QUEUED_STATE), 0);
+            assert_eq!(word(timer, ARMED), 0);
+        }
+    }
+
+    /// The deadline wraps mod 2^32 exactly like the original's
+    /// 32-bit mul/shift/add.
+    #[test]
+    fn deadline_arithmetic_wraps() {
+        let _lock = mock_env();
+        unsafe { MOCK_TICK = 0xffff_ff00 };
+        let timer = unsafe { arena_timer(0x100, 4) }; // +4000 wraps
+        unsafe { timer_arm(timer) };
+        unsafe {
+            assert_eq!(
+                word(timer, DEADLINE),
+                0xffff_ff00u32.wrapping_add(4000)
+            );
+        }
     }
 }
