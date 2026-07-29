@@ -34,6 +34,16 @@
 //!   onto the pending list sorted by deadline. The arm helper is not yet
 //!   ported, so it dispatches through `TimerOps::arm_timer`.
 //!
+//! - `timer_schedule_shim` — original: `FUN_0811108c` @ 0x0811108c (20
+//!   bytes; 64 `bl` call sites). Pure argument plumbing: rotates its
+//!   arguments (r0 -> r2, r1 -> r0, r2 -> r1, r3 untouched) and
+//!   tail-branches to the timer constructor @ 0x0812c65c, which runs the
+//!   object-init helper @ 0x08076924, writes an initial state word to
+//!   +0x20, stores the first argument to +0x24, and records the
+//!   callback-queue handle (r3, or the current task's queue when r3 is
+//!   0) at +0x28. The constructor is not yet ported, so it dispatches
+//!   through `TimerOps::construct_timer`.
+//!
 //! The FourCC state words are what identify the class as a timer/alarm:
 //! `timer_restart` calls `timer_stop` and then writes 'run '
 //! (0x72756e20) to +0x20, and `timer_start_after` @ 0x0812c63c stops the
@@ -54,8 +64,9 @@
 //!
 //! Dispatch design (deviation, by necessity — mirrors the `ROM_KERNEL`
 //! pattern in kernel/sync_mutex.rs): the trace/assert helper @ 0x08076954,
-//! the cancel helper @ 0x080a6c0c and the arm helper @ 0x0807a228 are not
-//! yet ported, so they dispatch indirectly through the `TIMER_OPS`
+//! the cancel helper @ 0x080a6c0c, the arm helper @ 0x0807a228 and the
+//! timer constructor @ 0x0812c65c are not yet ported, so they dispatch
+//! indirectly through the `TIMER_OPS`
 //! fn-pointer table instead of undefined `extern "C"` symbols that would
 //! break the freestanding ARM link. Default stubs are harmless no-ops; on
 //! real hardware the table must be installed before `timer_stop` or
@@ -135,6 +146,20 @@ pub struct TimerOps {
     /// inserts the timer into the pending queue sorted by deadline, and
     /// sets the armed flag. `timer_restart` tail-branches to it.
     pub arm_timer: unsafe extern "C" fn(timer: *mut u8),
+    /// Timer constructor @ 0x0812c65c(timer, init_arg, config_word,
+    /// callback_handle): runs the object-init helper @ 0x08076924 with
+    /// (timer, class-descriptor word, init_arg, 0), writes an initial
+    /// state word to +0x20, stores `config_word` at +0x24, and records
+    /// `callback_handle` at +0x28 — substituting the current task's
+    /// queue handle (0x080cb828()+0x1c) when `callback_handle` is 0.
+    /// `timer_schedule_shim` tail-branches to it with its arguments
+    /// rotated.
+    pub construct_timer: unsafe extern "C" fn(
+        timer: *mut u8,
+        init_arg: u32,
+        config_word: u32,
+        callback_handle: usize,
+    ),
 }
 
 // Default stubs: without the trace/cancel/arm layer these operations have
@@ -149,6 +174,13 @@ unsafe extern "C" fn missing_cancel_callback(
     0
 }
 unsafe extern "C" fn missing_arm_timer(_timer: *mut u8) {}
+unsafe extern "C" fn missing_construct_timer(
+    _timer: *mut u8,
+    _init_arg: u32,
+    _config_word: u32,
+    _callback_handle: usize,
+) {
+}
 
 /// The active timer-service dispatch table. Defaults to the documented
 /// stubs above; replaced by host tests (mocks) and eventually by the
@@ -158,6 +190,7 @@ pub static mut TIMER_OPS: TimerOps = TimerOps {
     trace_assert: missing_trace_assert,
     cancel_callback: missing_cancel_callback,
     arm_timer: missing_arm_timer,
+    construct_timer: missing_construct_timer,
 };
 
 /// Reads the ops table. The read is volatile: the table is meant to be
@@ -261,6 +294,41 @@ pub unsafe extern "C" fn timer_start_after(timer: *mut u8, delay: u32) {
     timer_set_delay(timer, delay);
 }
 
+/// timer_schedule_shim — original: `FUN_0811108c` @ 0x0811108c (20
+/// bytes).
+///
+/// Pure argument plumbing in front of the timer constructor @
+/// 0x0812c65c: rotates the register arguments (r0 -> r2, r1 -> r0,
+/// r2 -> r1) and tail-branches, so the constructor sees
+/// (timer, init_arg, config_word, callback_handle). The fourth argument
+/// rides through in r3 untouched — every one of the 64 `bl` call sites
+/// sets r3 (to 0) immediately before the branch, and the constructor
+/// consumes it as the callback-queue handle — so the scouted
+/// three-argument signature is corrected to four. The return type is
+/// corrected from the scouted `u32` to `void`: the tail call's r0 is
+/// the constructor's leftover, not a result (the `timer_restart`
+/// precedent). The exact semantics of `config_word` (stored verbatim at
+/// +0x24) and `init_arg` (forwarded verbatim to the object-init helper
+/// @ 0x08076924) are not yet identified; the names reflect the data
+/// flow, nothing more.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn timer_schedule_shim(
+    config_word: u32,
+    timer: *mut u8,
+    init_arg: u32,
+    callback_handle: usize,
+) {
+    // Reads the fn-pointer field directly rather than going through
+    // `timer_ops()`: with the whole-table volatile read, LLVM's ARM
+    // sibling-call lowering drops the argument rotation and the call
+    // target entirely (observed: the port tail-branched to r1 — the
+    // `timer` argument). The single-field read sidesteps the ldrd
+    // pair-load that triggers it.
+    let construct_timer =
+        core::ptr::addr_of!(TIMER_OPS.construct_timer).read_volatile();
+    construct_timer(timer, init_arg, config_word, callback_handle);
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -280,6 +348,7 @@ mod tests {
         Signal(u32),
         Cancel(usize, usize, usize),
         Arm(usize),
+        Construct(usize, u32, u32, usize),
     }
 
     static CALLS: StdMutex<Vec<Call>> = StdMutex::new(Vec::new());
@@ -306,6 +375,19 @@ mod tests {
     unsafe extern "C" fn mock_arm(timer: *mut u8) {
         record(Call::Arm(timer as usize));
     }
+    unsafe extern "C" fn mock_construct(
+        timer: *mut u8,
+        init_arg: u32,
+        config_word: u32,
+        callback_handle: usize,
+    ) {
+        record(Call::Construct(
+            timer as usize,
+            init_arg,
+            config_word,
+            callback_handle,
+        ));
+    }
     unsafe extern "C" fn mock_sema_wait(handle: u32) {
         record(Call::Wait(handle));
     }
@@ -317,6 +399,7 @@ mod tests {
         trace_assert: mock_trace,
         cancel_callback: mock_cancel,
         arm_timer: mock_arm,
+        construct_timer: mock_construct,
     };
 
     /// A 0x30-byte timer object: state word at +0x20, handle at +0x28.
@@ -630,8 +713,7 @@ mod tests {
     /// timer in r4 across the stop and moves it back to r0 for the tail
     /// branch).
     #[test]
-    fn restart_touches_only_the_state_word() {
-        let _lock = mock_env();
+    fn restart_touches_only_the_state_word() {        let _lock = mock_env();
         let mut timer = MockTimer::new(TIMER_STATE_RUNNING, 0x08A0_7777);
         let before = timer.bytes;
         let timer_ptr = timer.ptr();
@@ -642,6 +724,61 @@ mod tests {
         assert!(
             matches!(calls().last(), Some(Call::Arm(t)) if *t == timer_ptr as usize),
             "arm helper receives the same timer pointer"
+        );
+    }
+
+    /// The whole function is the rotation: the constructor receives
+    /// exactly (timer, init_arg, config_word, callback_handle) — the
+    /// original's r0 -> r2, r1 -> r0, r2 -> r1 with r3 untouched.
+    #[test]
+    fn shim_rotates_arguments_into_the_constructor() {
+        let _lock = mock_env();
+        let mut timer = MockTimer::new(TIMER_STATE_STOPPED, 0);
+        let timer_ptr = timer.ptr();
+        unsafe { timer_schedule_shim(0xc0ff_ee11, timer_ptr, 0x0b1e_f00d, 0x08a0_4242) };
+        assert_eq!(
+            calls(),
+            vec![Call::Construct(
+                timer_ptr as usize,
+                0x0b1e_f00d,
+                0xc0ff_ee11,
+                0x08a0_4242,
+            )]
+        );
+    }
+
+    /// r3 rides through untouched: the call sites' zero handle reaches
+    /// the constructor as zero (where the original substitutes the
+    /// current task's queue), and a nonzero handle is passed as-is.
+    #[test]
+    fn shim_forwards_the_callback_handle_verbatim() {
+        let _lock = mock_env();
+        let mut timer = MockTimer::new(TIMER_STATE_STOPPED, 0);
+        let timer_ptr = timer.ptr();
+        unsafe { timer_schedule_shim(7, timer_ptr, 9, 0) };
+        unsafe { timer_schedule_shim(8, timer_ptr, 10, 0x080c_b828) };
+        assert_eq!(
+            calls(),
+            vec![
+                Call::Construct(timer_ptr as usize, 9, 7, 0),
+                Call::Construct(timer_ptr as usize, 10, 8, 0x080c_b828),
+            ]
+        );
+    }
+
+    /// The shim itself touches nothing: no trace, no mutex, no word of
+    /// the timer object — it is plumbing and nothing else.
+    #[test]
+    fn shim_has_no_side_effects_of_its_own() {
+        let _lock = mock_env();
+        let mut timer = MockTimer::new(TIMER_STATE_EXPIRED, 0x08A0_1234);
+        let before = timer.bytes;
+        unsafe { timer_schedule_shim(1, timer.ptr(), 2, 3) };
+        assert_eq!(timer.bytes, before, "the shim must not touch the object");
+        assert_eq!(
+            calls().iter().filter(|c| !matches!(c, Call::Construct(..))).count(),
+            0,
+            "no trace/lock/cancel/arm around the construct call"
         );
     }
 }

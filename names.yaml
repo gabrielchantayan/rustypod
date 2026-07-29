@@ -9800,15 +9800,36 @@ functions:
     ghidra: FUN_0811108c
     name: timer_schedule_shim
     size: 20
-    sig: "u32 timer_schedule_shim(u32 a, u8 *timer, u32 b)"
-    module: null
-    status: identified
+    sig: "void timer_schedule_shim(u32 config_word, u8 *timer, u32 init_arg, usize callback_handle)"
+    module: drivers/timer
+    status: ported
+    renames:
+      param_1: config_word
+      param_2: timer
+      param_3: init_arg
+      param_4: callback_handle
     notes: >-
       64 bl call sites, and nothing but an argument rotation - r0 -> r2,
-      r1 -> r0, r2 -> r1 - before `b 0x0812c65c`, a sibling of the timer
-      cluster above (which itself loads a global at 0x0812c6a8 and calls
-      0x08076924). Not ported - it is pure plumbing in front of an
-      unported callee, so a port would be a hook and nothing else.
+      r1 -> r0, r2 -> r1 - before `b 0x0812c65c`, the timer constructor
+      (runs the object-init helper 0x08076924, writes an initial state
+      word to +0x20, stores the first argument at +0x24, and records the
+      callback-queue handle at +0x28, substituting the current task's
+      queue when the handle is 0). Sig corrected from the scouted
+      "u32 timer_schedule_shim(u32 a, u8 *timer, u32 b)": r3 rides
+      through untouched and every call site sets it (to 0) before the
+      bl, so it is a real fourth argument (the constructor's
+      callback-handle parameter); and the tail call's r0 is the
+      constructor's leftover, so the return is void (the timer_restart
+      precedent). The constructor is not yet ported, so the port
+      dispatches through a new TimerOps::construct_timer slot. Exact
+      semantics of config_word (+0x24) and init_arg (forwarded to
+      0x08076924) are not identified; the names follow the data flow.
+      match.py structural: the rotation is verbatim (mov lr, r2;
+      mov r2, r0; mov r0, r1; mov r1, lr; tail bx), the constructor
+      address becomes a table load. Gotcha recorded in the doc header:
+      the whole-table volatile read made LLVM's ARM sibcall lowering
+      drop the rotation and branch to the timer pointer - the port
+      reads the fn-pointer field directly to sidestep it.
 
   - address: 0x08124a38
     ghidra: FUN_08124a38
