@@ -7892,24 +7892,32 @@ functions:
 
   - address: 0x08277440
     ghidra: FUN_08277440
-    name: unported_string_default_construct
+    name: string_default_construct
     size: 20
-    module: unported
-    status: identified
+    sig: "StringObject *string_default_construct(StringObject *this)"
+    module: cxx/string_object
+    status: ported
+    vars: {DAT_089a6044: STRING_OBJECT_VTABLE_ADDRESS}
     notes: >-
       280 bl call sites. `obj[0] = 0x089a6044; obj[1] = 0` - a two-word
       default constructor planting a vtable pointer and a NULL payload.
-      Three siblings plant the SAME vtable - 0x08277414 (ctor + a call
-      to 0x08276620), 0x08277458 (destructor - vtable, 0x08275d74,
-      then operator delete @ 0x082aad24) and 0x08277484 (990 bl call
-      sites; vtable + 0x08275d74, no delete) - so 0x089a6044 is one
-      class's vtable and this is its trivial ctor. The class sits in the
-      0x0827xxxx cluster next to the NULL-guarded strlen @ 0x082770bc,
-      i.e. it is very likely the retailOS string/buffer class. Skipped -
-      the only content of the function is a ROM vtable ADDRESS, which a
-      host test cannot reproduce and which is meaningless until the
-      vtable's six slots (0x0820c2dc, 0x0821183c, 0x082116f8,
-      0x08213bfc, 0x08213818, 0x0820c5ec) are decoded.
+      Three siblings plant the SAME vtable (literal-pool words
+      0x08277454/0x08277480/0x082774a4 all hold 0x089a6044, binary-
+      verified) - 0x08277414 (ctor + a call to 0x08276620), 0x08277458
+      (deleting destructor - vtable, 0x08275d74, then operator delete @
+      0x082aad24) and 0x08277484 (990 bl call sites; vtable +
+      0x08275d74, no delete) - so 0x089a6044 is one class's vtable and
+      this is its trivial ctor. The class is UNIDENTIFIED: it sits in
+      the 0x0827xxxx cluster next to the NULL-guarded strlen @
+      0x082770bc (very likely a retailOS string/buffer class, but NOT
+      the COW basic_string of cxx/string.rs), and the vtable is
+      serialized in the image as six code pointers (0x0820c2dc,
+      0x0821183c, 0x082116f8, 0x08213bfc, 0x08213818, 0x0820c5ec) of
+      which Ghidra resolves only 0x08213bfc as a function start. Port
+      models the vtable as the static STRING_OBJECT_VTABLE (pointer
+      identity only, original address kept as the named constant
+      STRING_OBJECT_VTABLE_ADDRESS) per the heap/pool_client.rs
+      pattern. Original never writes r0, so the port returns `this`.
 
   - address: 0x082cfae8
     ghidra: FUN_082cfae8
