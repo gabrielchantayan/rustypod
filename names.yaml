@@ -6717,13 +6717,30 @@ functions:
       TPhotosSettingsSlideshowPlaylistCntlr from the literal its
       constructor hands to the class-name factory @ 0x0820b230 next to
       its `bl 0x081d23f8`; the port names it
-      CLASS_ID_PHOTOS_SLIDESHOW_PLAYLIST_CNTLR. Nine siblings remain
-      identified, all the same shape - 0x08103b88 (0x7600 TSearchCntlr,
-      24), 0x0812f0a4 (0x4e00 TCUnsupported, 24), 0x081353e8 (0x8f00
-      TCEQSetting, 24), 0x0815e1ac (0x5680 TCSportTimer, 28), 0x0815ff34
-      (0x8700, 28), 0x0827f218 (0x5780, 28), 0x08284e2c (0x6180, 28),
-      0x08289690 (0x3280, 24), 0x0828ae68 (0x4180 TCNotesDispatcher, 28);
-      app/registry.rs's `instance_of_class` body covers each in one line.
+      CLASS_ID_PHOTOS_SLIDESHOW_PLAYLIST_CNTLR. Eight siblings remain
+      identified, all the same shape - 0x0812f0a4 (0x4e00 TCUnsupported,
+      24), 0x081353e8 (0x8f00 TCEQSetting, 24), 0x0815e1ac (0x5680
+      TCSportTimer, 28), 0x0815ff34 (0x8700, 28), 0x0827f218 (0x5780,
+      28), 0x08284e2c (0x6180, 28), 0x08289690 (0x3280, 24), 0x0828ae68
+      (0x4180 TCNotesDispatcher, 28); app/registry.rs's
+      `instance_of_class` body covers each in one line.
+    renames: {}
+
+  - address: 0x08103b88
+    ghidra: FUN_08103b88
+    name: instance_of_class_7600
+    size: 24
+    sig: "void *instance_of_class_7600(void)"
+    module: app/registry
+    status: ported
+    notes: >-
+      1 bl call site (binary-scanned). Same lookup-then-cast accessor as
+      the ported 0x081883fc for class id 0x7600 - `push; load id;
+      bl 0x081d2184; pop; load the SAME id into r1; b 0x08275b9c`.
+      Class identified as TSearchCntlr from the literal its constructor
+      hands to the class-name factory @ 0x0820b230 next to its
+      `bl 0x081d23f8` (registers @ 0x08103d2c); the port names it
+      CLASS_ID_SEARCH_CNTLR.
     renames: {}
 
   - address: 0x081d23f8

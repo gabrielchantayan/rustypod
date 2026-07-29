@@ -543,6 +543,26 @@ pub unsafe extern "C" fn instance_of_class_8300() -> *mut u8 {
     instance_of_class(CLASS_ID_PHOTOS_SLIDESHOW_PLAYLIST_CNTLR)
 }
 
+/// The class id of `TSearchCntlr` (recovered the same way: its
+/// constructor registers it @ 0x08103d2c and, in the same basic block,
+/// hands the literal `"TSearchCntlr"` to the class-name factory @
+/// 0x0820b230).
+pub const CLASS_ID_SEARCH_CNTLR: u32 = 0x7600;
+
+/// instance_of_class_7600 — original: `FUN_08103b88` @ 0x08103b88
+/// (24 bytes; 1 `bl` call site).
+///
+/// Same accessor for class id 0x7600, `TSearchCntlr`:
+/// `object_cast_to_class(registry_lookup_by_id(0x7600), 0x7600)` — resolve
+/// the registered singleton through the global class registry, then let
+/// the object's own vtable confirm it really is that class (NULL when
+/// either step fails).
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn instance_of_class_7600() -> *mut u8 {
+    instance_of_class(CLASS_ID_SEARCH_CNTLR)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -945,6 +965,22 @@ mod tests {
                 instance_of_class_8300().is_null(),
                 "0x8300 was never registered"
             );
+            assert!(
+                instance_of_class_7600().is_null(),
+                "0x7600 was never registered"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_7600_accessor_looks_up_and_casts_its_own_id() {
+        let guard = mock();
+        unsafe {
+            let mut object = object_accepting(CLASS_ID_SEARCH_CNTLR);
+            let this = ptr::addr_of_mut!(object) as *mut u8;
+            registry_register(this, CLASS_ID_SEARCH_CNTLR);
+            assert_eq!(instance_of_class_7600(), this);
         }
         restore(guard);
     }
