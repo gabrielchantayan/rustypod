@@ -5280,12 +5280,13 @@ functions:
     size: 8
     sig: "void ata_cmd_set_sector_count(u8 *cmd, u8 count)"
     module: drivers/ata_cmd
-    status: identified
+    status: ported
     vars: {param_1: cmd, param_2: count}
     notes: >-
       `strb r1, [r0, #0x15]`. 10 bl call sites, each passing the caller's
       sector count masked to a byte (`and r1, r5, #0xff`), which is why
       the LBA28 flows also cap the count at 0x100 (0x082798e4).
+      #[inline(never)].
 
   - address: 0x081211bc
     ghidra: FUN_081211bc

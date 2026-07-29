@@ -257,6 +257,18 @@ pub unsafe extern "C" fn ata_cmd_set_flags(cmd: *mut u8, flags: u32) {
     set_word(cmd, FLAGS, flags);
 }
 
+/// ata_cmd_set_sector_count — original: `FUN_081213ac` @ 0x081213ac
+/// (8 bytes; 10 call sites, binary-scanned).
+///
+/// The legacy-taskfile sector count (+0x15). Every caller passes the
+/// caller's count masked to a byte (`and r1, r5, #0xff`), which is why
+/// the LBA28 flows also cap the count at 0x100 (0x082798e4).
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_cmd_set_sector_count(cmd: *mut u8, count: u8) {
+    set_byte(cmd, SECTOR_COUNT, count);
+}
+
 /// ata_cmd_set_feature — original: `FUN_081211ec` @ 0x081211ec (8
 /// bytes; 4 call sites, binary-scanned).
 ///
@@ -538,6 +550,18 @@ mod tests {
         let mut block = poisoned();
         unsafe { ata_cmd_set_device(block.0.as_mut_ptr(), DEVICE_NONE) };
         assert_eq!(block.0[DEVICE_INDEX] as i8, -1);
+    }
+
+    #[test]
+    fn the_sector_count_setter_writes_only_the_count_byte() {
+        let mut block = poisoned();
+        unsafe { ata_cmd_set_sector_count(block.0.as_mut_ptr(), 0x80) };
+        assert_eq!(block.0[SECTOR_COUNT], 0x80);
+        for other in 0..block.0.len() {
+            if other != SECTOR_COUNT {
+                assert_eq!(block.0[other], 0xa5, "spilled onto +{other:#x}");
+            }
+        }
     }
 
     #[test]
