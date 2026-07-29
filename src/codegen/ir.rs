@@ -18,6 +18,16 @@
 //!   (48 bytes; **419 `bl` call sites**). Kind 2, 36-byte record.
 //! - `cg_create_inst_load_immed` — original: `FUN_082c18ec` @ 0x082c18ec
 //!   (40 bytes; **201 `bl` call sites**). Kind 6, 20-byte record.
+//! - The rest of the factory family: `cg_create_inst_unary` @ 0x082c1994
+//!   (kind 1, 32 bytes), `cg_create_inst_binary_s` @ 0x082c1824 (kind 2
+//!   with dest_flags, 36 bytes), `cg_create_inst_compare` @ 0x082c1898
+//!   (kind 3, 32 bytes), `cg_create_inst_load` @ 0x082c18c4 (kind 4,
+//!   24 bytes), `cg_create_inst_store` @ 0x082c196c (kind 5, 24 bytes),
+//!   `cg_create_inst_branch_label` @ 0x082c1878 (kind 7, 20 bytes),
+//!   `cg_create_inst_branch_cond` @ 0x082c1850 (kind 8, 20 bytes),
+//!   `cg_create_inst_phi` @ 0x082c1914 (kind 9, 20 bytes),
+//!   `cg_create_inst_ret` @ 0x082c193c (kind 11, 16 bytes),
+//!   `cg_create_inst_ret_value` @ 0x082c194c (kind 11, 16 bytes).
 //!
 //! Layouts recovered from the assembly (byte offsets are the target's;
 //! the port addresses every pointer field by WORD INDEX so the records
@@ -46,9 +56,7 @@
 //! 9/20, 11/16 (twice). That sequence — and the field counts — matches
 //! Vincent's `cg_inst_kind_t` ordering (unary, binary, compare, load,
 //! store, load_immed, branch_label, branch_cond, phi, ...), which is
-//! where the names used here come from. Only the two ported factories'
-//! numbers are asserted as fact; the rest are recorded in names.yaml as
-//! scouting.
+//! where the names used here come from.
 //!
 //! Deviations:
 //! - Neither builder writes the record's `next`: the original relies on
@@ -110,6 +118,13 @@ pub struct CgInst {
     _opaque: [u8; 0],
 }
 
+/// `cg_virtual_reg_list_t` — one cell of a NULL-terminated register
+/// list, built by `cg_virtual_reg_list_create` (unported: C varargs).
+#[repr(C)]
+pub struct CgVirtualRegList {
+    _opaque: [u8; 0],
+}
+
 // --- word indices (target byte offset = index * 4) ---------------------
 
 /// `cg_module_t + 0x00` — the IR arena.
@@ -168,6 +183,87 @@ pub const CG_INST_LOAD_IMMED_VALUE: usize = 4;
 pub const CG_INST_LOAD_IMMED_BYTES: usize = 20;
 /// `cg_inst_kind_t` value the load-immediate factory stamps.
 pub const CG_INST_KIND_LOAD_IMMED: u32 = 6;
+
+/// `cg_inst_unary_t + 0x0c` — destination register.
+pub const CG_INST_UNARY_DEST: usize = 3;
+/// `cg_inst_unary_t + 0x14` — source register. `+0x10` stays NULL by
+/// the arena's zero-fill (the dest_flags slot of the binary layout).
+pub const CG_INST_UNARY_SOURCE: usize = 5;
+/// Size of `cg_inst_unary_t` in target bytes.
+pub const CG_INST_UNARY_BYTES: usize = 32;
+/// `cg_inst_kind_t` value the unary factory stamps.
+pub const CG_INST_KIND_UNARY: u32 = 1;
+
+/// `cg_inst_binary_t + 0x10` — destination-flags register; only the
+/// `_s` factory writes it.
+pub const CG_INST_BINARY_DEST_FLAGS: usize = 4;
+/// `cg_inst_kind_t` value both binary factories stamp.
+pub const CG_INST_KIND_BINARY_S: u32 = 2;
+
+/// `cg_inst_compare_t + 0x0c` — destination register.
+pub const CG_INST_COMPARE_DEST: usize = 3;
+/// `cg_inst_compare_t + 0x10` — first source register (compare has no
+/// dest_flags slot; its sources sit one word earlier than binary's).
+pub const CG_INST_COMPARE_SOURCE0: usize = 4;
+/// `cg_inst_compare_t + 0x14` — second source register.
+pub const CG_INST_COMPARE_SOURCE1: usize = 5;
+/// Size of `cg_inst_compare_t` in target bytes.
+pub const CG_INST_COMPARE_BYTES: usize = 32;
+/// `cg_inst_kind_t` value the compare factory stamps.
+pub const CG_INST_KIND_COMPARE: u32 = 3;
+
+/// `cg_inst_load_t + 0x0c` — destination register.
+pub const CG_INST_LOAD_DEST: usize = 3;
+/// `cg_inst_load_t + 0x10` — address register.
+pub const CG_INST_LOAD_ADDRESS: usize = 4;
+/// Size of `cg_inst_load_t` in target bytes.
+pub const CG_INST_LOAD_BYTES: usize = 24;
+/// `cg_inst_kind_t` value the load factory stamps.
+pub const CG_INST_KIND_LOAD: u32 = 4;
+
+/// `cg_inst_store_t + 0x0c` — value register.
+pub const CG_INST_STORE_VALUE: usize = 3;
+/// `cg_inst_store_t + 0x10` — address register.
+pub const CG_INST_STORE_ADDRESS: usize = 4;
+/// Size of `cg_inst_store_t` in target bytes.
+pub const CG_INST_STORE_BYTES: usize = 24;
+/// `cg_inst_kind_t` value the store factory stamps.
+pub const CG_INST_KIND_STORE: u32 = 5;
+
+/// `cg_inst_branch_label_t + 0x0c` — target block.
+pub const CG_INST_BRANCH_LABEL_TARGET: usize = 3;
+/// Size of `cg_inst_branch_label_t` in target bytes.
+pub const CG_INST_BRANCH_LABEL_BYTES: usize = 20;
+/// `cg_inst_kind_t` value the branch-label factory stamps.
+pub const CG_INST_KIND_BRANCH_LABEL: u32 = 7;
+
+/// `cg_inst_branch_cond_t + 0x0c` — target block (same slot as the
+/// branch-label target, but filled from the FOURTH argument).
+pub const CG_INST_BRANCH_COND_TARGET: usize = 3;
+/// `cg_inst_branch_cond_t + 0x10` — condition register (filled from the
+/// third argument — the swapped order of this factory).
+pub const CG_INST_BRANCH_COND_CONDITION: usize = 4;
+/// Size of `cg_inst_branch_cond_t` in target bytes.
+pub const CG_INST_BRANCH_COND_BYTES: usize = 20;
+/// `cg_inst_kind_t` value the branch-cond factory stamps.
+pub const CG_INST_KIND_BRANCH_COND: u32 = 8;
+
+/// `cg_inst_phi_t + 0x0c` — destination register.
+pub const CG_INST_PHI_DEST: usize = 3;
+/// `cg_inst_phi_t + 0x10` — head of the register list built by
+/// `cg_virtual_reg_list_create`.
+pub const CG_INST_PHI_REGS: usize = 4;
+/// Size of `cg_inst_phi_t` in target bytes.
+pub const CG_INST_PHI_BYTES: usize = 20;
+/// `cg_inst_kind_t` value the phi factory stamps.
+pub const CG_INST_KIND_PHI: u32 = 9;
+
+/// `cg_inst_ret_value_t + 0x0c` — returned value register.
+pub const CG_INST_RET_VALUE_VALUE: usize = 3;
+/// Size of both ret records in target bytes.
+pub const CG_INST_RET_BYTES: usize = 16;
+/// `cg_inst_kind_t` value both ret factories stamp.
+pub const CG_INST_KIND_RET: u32 = 11;
 
 /// Address of a record's pointer-sized field at word index `index`.
 #[inline(always)]
@@ -310,6 +406,250 @@ pub unsafe extern "C" fn cg_create_inst_load_immed(
     ) as *mut u8;
     slot(inst, CG_INST_LOAD_IMMED_DEST).write(dest as *mut u8);
     word(inst, CG_INST_LOAD_IMMED_VALUE).write(value);
+    inst as *mut CgInst
+}
+
+/// cg_create_inst_unary — original: `FUN_082c1994` @ 0x082c1994
+/// (40 bytes, 36 `bl` call sites).
+///
+/// Appends a kind-1 (unary) instruction: a 32-byte record holding the
+/// destination register and one source. `+0x10` stays NULL by the
+/// arena's zero-fill.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_create_inst_unary(
+    block: *mut CgBlock,
+    opcode: u32,
+    dest: *mut CgVirtualReg,
+    source: *mut CgVirtualReg,
+) -> *mut CgInst {
+    let inst = cg_inst_create_base(
+        block,
+        record_size(CG_INST_UNARY_BYTES),
+        CG_INST_KIND_UNARY,
+        opcode,
+    ) as *mut u8;
+    slot(inst, CG_INST_UNARY_DEST).write(dest as *mut u8);
+    slot(inst, CG_INST_UNARY_SOURCE).write(source as *mut u8);
+    inst as *mut CgInst
+}
+
+/// cg_create_inst_binary_s — original: `FUN_082c1824` @ 0x082c1824
+/// (44 bytes, 7 `bl` call sites).
+///
+/// The flags-writing twin of [`cg_create_inst_binary`]: same kind-2,
+/// 36-byte record, but the destination-flags slot (`+0x10`) is filled
+/// too — one `stmia` writes all four derived fields. `dest_flags` and
+/// `source0` arrive on the stack in the original (`ldrd r6, r7,
+/// [sp, #0x18]`); the C ABI makes that invisible here.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_create_inst_binary_s(
+    block: *mut CgBlock,
+    opcode: u32,
+    dest: *mut CgVirtualReg,
+    dest_flags: *mut CgVirtualReg,
+    source0: *mut CgVirtualReg,
+    source1: *mut CgVirtualReg,
+) -> *mut CgInst {
+    let inst = cg_inst_create_base(
+        block,
+        record_size(CG_INST_BINARY_BYTES),
+        CG_INST_KIND_BINARY_S,
+        opcode,
+    ) as *mut u8;
+    slot(inst, CG_INST_BINARY_DEST).write(dest as *mut u8);
+    slot(inst, CG_INST_BINARY_DEST_FLAGS).write(dest_flags as *mut u8);
+    slot(inst, CG_INST_BINARY_SOURCE0).write(source0 as *mut u8);
+    slot(inst, CG_INST_BINARY_SOURCE1).write(source1 as *mut u8);
+    inst as *mut CgInst
+}
+
+/// cg_create_inst_compare — original: `FUN_082c1898` @ 0x082c1898
+/// (44 bytes, 35 `bl` call sites).
+///
+/// Appends a kind-3 (compare) instruction: a 32-byte record holding the
+/// destination register and two sources at `+0xc`, `+0x10`, `+0x14` —
+/// one word earlier than binary's sources, because compare has no
+/// dest_flags slot. `source1` arrives on the stack in the original
+/// (`ldr r6, [sp, #0x10]`).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_create_inst_compare(
+    block: *mut CgBlock,
+    opcode: u32,
+    dest: *mut CgVirtualReg,
+    source0: *mut CgVirtualReg,
+    source1: *mut CgVirtualReg,
+) -> *mut CgInst {
+    let inst = cg_inst_create_base(
+        block,
+        record_size(CG_INST_COMPARE_BYTES),
+        CG_INST_KIND_COMPARE,
+        opcode,
+    ) as *mut u8;
+    slot(inst, CG_INST_COMPARE_DEST).write(dest as *mut u8);
+    slot(inst, CG_INST_COMPARE_SOURCE0).write(source0 as *mut u8);
+    slot(inst, CG_INST_COMPARE_SOURCE1).write(source1 as *mut u8);
+    inst as *mut CgInst
+}
+
+/// cg_create_inst_load — original: `FUN_082c18c4` @ 0x082c18c4
+/// (40 bytes, 34 `bl` call sites).
+///
+/// Appends a kind-4 (load) instruction: a 24-byte record holding the
+/// destination register and the address register.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_create_inst_load(
+    block: *mut CgBlock,
+    opcode: u32,
+    dest: *mut CgVirtualReg,
+    address: *mut CgVirtualReg,
+) -> *mut CgInst {
+    let inst = cg_inst_create_base(
+        block,
+        record_size(CG_INST_LOAD_BYTES),
+        CG_INST_KIND_LOAD,
+        opcode,
+    ) as *mut u8;
+    slot(inst, CG_INST_LOAD_DEST).write(dest as *mut u8);
+    slot(inst, CG_INST_LOAD_ADDRESS).write(address as *mut u8);
+    inst as *mut CgInst
+}
+
+/// cg_create_inst_store — original: `FUN_082c196c` @ 0x082c196c
+/// (40 bytes, 5 `bl` + 2 tail `b` call sites).
+///
+/// Appends a kind-5 (store) instruction: a 24-byte record holding the
+/// value register and the address register. The caller @ 0x0823cc40
+/// passes a freshly computed value in the value slot and the address
+/// computation's register in the address slot, which pins the order.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_create_inst_store(
+    block: *mut CgBlock,
+    opcode: u32,
+    value: *mut CgVirtualReg,
+    address: *mut CgVirtualReg,
+) -> *mut CgInst {
+    let inst = cg_inst_create_base(
+        block,
+        record_size(CG_INST_STORE_BYTES),
+        CG_INST_KIND_STORE,
+        opcode,
+    ) as *mut u8;
+    slot(inst, CG_INST_STORE_VALUE).write(value as *mut u8);
+    slot(inst, CG_INST_STORE_ADDRESS).write(address as *mut u8);
+    inst as *mut CgInst
+}
+
+/// cg_create_inst_branch_label — original: `FUN_082c1878` @ 0x082c1878
+/// (32 bytes, 16 `bl` call sites).
+///
+/// Appends a kind-7 (unconditional branch) instruction: a 20-byte
+/// record holding only the target block.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_create_inst_branch_label(
+    block: *mut CgBlock,
+    opcode: u32,
+    target: *mut CgBlock,
+) -> *mut CgInst {
+    let inst = cg_inst_create_base(
+        block,
+        record_size(CG_INST_BRANCH_LABEL_BYTES),
+        CG_INST_KIND_BRANCH_LABEL,
+        opcode,
+    ) as *mut u8;
+    slot(inst, CG_INST_BRANCH_LABEL_TARGET).write(target as *mut u8);
+    inst as *mut CgInst
+}
+
+/// cg_create_inst_branch_cond — original: `FUN_082c1850` @ 0x082c1850
+/// (40 bytes, 41 `bl` call sites).
+///
+/// Appends a kind-8 (conditional branch) instruction: a 20-byte record
+/// holding the target block and the condition register. NOTE the swap,
+/// kept from the original: the third argument goes to `+0x10` (the
+/// condition) and the fourth to `+0xc` (the target) — the opposite
+/// order from every other factory in the family.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_create_inst_branch_cond(
+    block: *mut CgBlock,
+    opcode: u32,
+    condition: *mut CgVirtualReg,
+    target: *mut CgBlock,
+) -> *mut CgInst {
+    let inst = cg_inst_create_base(
+        block,
+        record_size(CG_INST_BRANCH_COND_BYTES),
+        CG_INST_KIND_BRANCH_COND,
+        opcode,
+    ) as *mut u8;
+    slot(inst, CG_INST_BRANCH_COND_CONDITION).write(condition as *mut u8);
+    slot(inst, CG_INST_BRANCH_COND_TARGET).write(target as *mut u8);
+    inst as *mut CgInst
+}
+
+/// cg_create_inst_phi — original: `FUN_082c1914` @ 0x082c1914
+/// (40 bytes, 75 `bl` call sites).
+///
+/// Appends a kind-9 (phi) instruction: a 20-byte record holding the
+/// destination register and the head of a register list built by
+/// `cg_virtual_reg_list_create` (unported: its C varargs ABI has no
+/// Rust expression on this target).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_create_inst_phi(
+    block: *mut CgBlock,
+    opcode: u32,
+    dest: *mut CgVirtualReg,
+    regs: *mut CgVirtualRegList,
+) -> *mut CgInst {
+    let inst = cg_inst_create_base(
+        block,
+        record_size(CG_INST_PHI_BYTES),
+        CG_INST_KIND_PHI,
+        opcode,
+    ) as *mut u8;
+    slot(inst, CG_INST_PHI_DEST).write(dest as *mut u8);
+    slot(inst, CG_INST_PHI_REGS).write(regs as *mut u8);
+    inst as *mut CgInst
+}
+
+/// cg_create_inst_ret — original: `FUN_082c193c` @ 0x082c193c
+/// (16 bytes, 3 `bl` + 1 tail `b` call sites).
+///
+/// Appends a kind-11 (return) instruction: a 16-byte record with no
+/// derived fields at all — the original is a pure tail branch into
+/// `cg_inst_create_base`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_create_inst_ret(block: *mut CgBlock, opcode: u32) -> *mut CgInst {
+    cg_inst_create_base(block, record_size(CG_INST_RET_BYTES), CG_INST_KIND_RET, opcode)
+}
+
+/// cg_create_inst_ret_value — original: `FUN_082c194c` @ 0x082c194c
+/// (32 bytes, 2 `bl` call sites).
+///
+/// The value-returning twin of [`cg_create_inst_ret`]: same kind-11,
+/// 16-byte record, plus the returned value register at `+0xc`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_create_inst_ret_value(
+    block: *mut CgBlock,
+    opcode: u32,
+    value: *mut CgVirtualReg,
+) -> *mut CgInst {
+    let inst = cg_inst_create_base(
+        block,
+        record_size(CG_INST_RET_BYTES),
+        CG_INST_KIND_RET,
+        opcode,
+    ) as *mut u8;
+    slot(inst, CG_INST_RET_VALUE_VALUE).write(value as *mut u8);
     inst as *mut CgInst
 }
 
@@ -588,6 +928,227 @@ mod tests {
             let other = cg_create_inst_load_immed(f.block_ptr(), 0x28, dest, 0xdead_beef);
             assert_eq!(word(other as *mut u8, CG_INST_LOAD_IMMED_VALUE).read(), 0xdead_beef);
             assert_eq!(inst_next(inst), other);
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn unary_stores_dest_and_source_and_leaves_word4_null() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let dest = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let source = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let inst = cg_create_inst_unary(f.block_ptr(), 0x1a, dest, source);
+            let raw = inst as *mut u8;
+            assert_eq!(inst_kind(inst), CG_INST_KIND_UNARY as u8);
+            assert_eq!(inst_opcode(inst), 0x1a);
+            assert_eq!(slot(raw, CG_INST_UNARY_DEST).read(), dest as *mut u8);
+            assert_eq!(slot(raw, CG_INST_UNARY_SOURCE).read(), source as *mut u8);
+            assert!(slot(raw, 4).read().is_null(), "+0x10 stays NULL");
+            assert_eq!(f.block[CG_BLOCK_INSTS], inst as usize);
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn binary_s_fills_all_four_derived_fields() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let dest = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let flags = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let s0 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let s1 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let inst = cg_create_inst_binary_s(f.block_ptr(), 0x0f, dest, flags, s0, s1);
+            let raw = inst as *mut u8;
+            assert_eq!(inst_kind(inst), CG_INST_KIND_BINARY_S as u8);
+            assert_eq!(inst_opcode(inst), 0x0f);
+            assert_eq!(slot(raw, CG_INST_BINARY_DEST).read(), dest as *mut u8);
+            assert_eq!(slot(raw, CG_INST_BINARY_DEST_FLAGS).read(), flags as *mut u8);
+            assert_eq!(slot(raw, CG_INST_BINARY_SOURCE0).read(), s0 as *mut u8);
+            assert_eq!(slot(raw, CG_INST_BINARY_SOURCE1).read(), s1 as *mut u8);
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn compare_packs_dest_and_both_sources_one_word_earlier_than_binary() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let dest = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let s0 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let s1 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let inst = cg_create_inst_compare(f.block_ptr(), 0x30, dest, s0, s1);
+            let raw = inst as *mut u8;
+            assert_eq!(inst_kind(inst), CG_INST_KIND_COMPARE as u8);
+            assert_eq!(inst_opcode(inst), 0x30);
+            assert_eq!(slot(raw, CG_INST_COMPARE_DEST).read(), dest as *mut u8);
+            assert_eq!(slot(raw, CG_INST_COMPARE_SOURCE0).read(), s0 as *mut u8);
+            assert_eq!(slot(raw, CG_INST_COMPARE_SOURCE1).read(), s1 as *mut u8);
+            assert!(slot(raw, 6).read().is_null(), "+0x18 stays NULL");
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn load_stores_dest_and_address() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let dest = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let address = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let inst = cg_create_inst_load(f.block_ptr(), 0x29, dest, address);
+            let raw = inst as *mut u8;
+            assert_eq!(inst_kind(inst), CG_INST_KIND_LOAD as u8);
+            assert_eq!(inst_opcode(inst), 0x29);
+            assert_eq!(slot(raw, CG_INST_LOAD_DEST).read(), dest as *mut u8);
+            assert_eq!(slot(raw, CG_INST_LOAD_ADDRESS).read(), address as *mut u8);
+            assert!(slot(raw, 5).read().is_null(), "+0x14 stays NULL");
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn store_stores_value_and_address() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let value = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let address = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let inst = cg_create_inst_store(f.block_ptr(), 0x2b, value, address);
+            let raw = inst as *mut u8;
+            assert_eq!(inst_kind(inst), CG_INST_KIND_STORE as u8);
+            assert_eq!(inst_opcode(inst), 0x2b);
+            assert_eq!(slot(raw, CG_INST_STORE_VALUE).read(), value as *mut u8);
+            assert_eq!(slot(raw, CG_INST_STORE_ADDRESS).read(), address as *mut u8);
+            assert!(slot(raw, 5).read().is_null(), "+0x14 stays NULL");
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn branch_label_stores_only_the_target() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let inst = cg_create_inst_branch_label(f.block_ptr(), 0x40, f.block_ptr());
+            let raw = inst as *mut u8;
+            assert_eq!(inst_kind(inst), CG_INST_KIND_BRANCH_LABEL as u8);
+            assert_eq!(inst_opcode(inst), 0x40);
+            assert_eq!(slot(raw, CG_INST_BRANCH_LABEL_TARGET).read(), f.block_ptr() as *mut u8);
+            assert!(slot(raw, 4).read().is_null(), "+0x10 stays NULL");
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn branch_cond_swaps_its_two_derived_fields() {
+        // The original stores the THIRD argument at +0x10 and the
+        // FOURTH at +0xc — the opposite of every sibling factory.
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let condition = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let inst = cg_create_inst_branch_cond(f.block_ptr(), 0x41, condition, f.block_ptr());
+            let raw = inst as *mut u8;
+            assert_eq!(inst_kind(inst), CG_INST_KIND_BRANCH_COND as u8);
+            assert_eq!(inst_opcode(inst), 0x41);
+            assert_eq!(slot(raw, CG_INST_BRANCH_COND_CONDITION).read(), condition as *mut u8);
+            assert_eq!(slot(raw, CG_INST_BRANCH_COND_TARGET).read(), f.block_ptr() as *mut u8);
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn phi_stores_dest_and_the_register_list() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let dest = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let list = [0usize; 2];
+            let inst = cg_create_inst_phi(
+                f.block_ptr(),
+                0x50,
+                dest,
+                list.as_ptr() as *mut CgVirtualRegList,
+            );
+            let raw = inst as *mut u8;
+            assert_eq!(inst_kind(inst), CG_INST_KIND_PHI as u8);
+            assert_eq!(inst_opcode(inst), 0x50);
+            assert_eq!(slot(raw, CG_INST_PHI_DEST).read(), dest as *mut u8);
+            assert_eq!(slot(raw, CG_INST_PHI_REGS).read(), list.as_ptr() as *mut u8);
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn ret_carries_no_derived_fields() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let inst = cg_create_inst_ret(f.block_ptr(), 0x60);
+            let raw = inst as *mut u8;
+            assert_eq!(inst_kind(inst), CG_INST_KIND_RET as u8);
+            assert_eq!(inst_opcode(inst), 0x60);
+            assert!(slot(raw, 3).read().is_null(), "+0x0c stays NULL");
+            assert_eq!(f.block[CG_BLOCK_INSTS], inst as usize);
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn ret_value_stores_the_returned_register() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let value = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let inst = cg_create_inst_ret_value(f.block_ptr(), 0x60, value);
+            let raw = inst as *mut u8;
+            assert_eq!(inst_kind(inst), CG_INST_KIND_RET as u8);
+            assert_eq!(inst_opcode(inst), 0x60);
+            assert_eq!(slot(raw, CG_INST_RET_VALUE_VALUE).read(), value as *mut u8);
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn the_whole_family_appends_in_call_order() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let r0 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let r1 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let insts = [
+                cg_create_inst_unary(f.block_ptr(), 0x1a, r0, r1),
+                cg_create_inst_binary_s(f.block_ptr(), 0x0f, r0, r1, r0, r1),
+                cg_create_inst_compare(f.block_ptr(), 0x30, r0, r1, r0),
+                cg_create_inst_load(f.block_ptr(), 0x29, r0, r1),
+                cg_create_inst_store(f.block_ptr(), 0x2b, r0, r1),
+                cg_create_inst_branch_label(f.block_ptr(), 0x40, f.block_ptr()),
+                cg_create_inst_branch_cond(f.block_ptr(), 0x41, r0, f.block_ptr()),
+                cg_create_inst_phi(f.block_ptr(), 0x50, r0, core::ptr::null_mut()),
+                cg_create_inst_ret(f.block_ptr(), 0x60),
+                cg_create_inst_ret_value(f.block_ptr(), 0x60, r0),
+            ];
+            assert_eq!(f.block[CG_BLOCK_INSTS], insts[0] as usize, "head");
+            assert_eq!(f.block[CG_BLOCK_LAST_INST], insts[9] as usize, "tail");
+            for pair in insts.windows(2) {
+                assert_eq!(inst_next(pair[0]), pair[1]);
+            }
+            assert!(inst_next(insts[9]).is_null());
         }
         drop(f);
         teardown();

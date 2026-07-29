@@ -7458,97 +7458,129 @@ functions:
     ghidra: FUN_082c1994
     name: cg_create_inst_unary
     size: 40
+    sig: "cg_inst_t *cg_create_inst_unary(cg_block_t *block, cg_opcode_t opcode, cg_virtual_reg_t *dest, cg_virtual_reg_t *source)"
     module: codegen/ir
-    status: identified
+    status: ported
+    vars: {param_1: block, param_2: opcode, param_3: dest, param_4: source}
     notes: >-
       36 bl call sites. kind 1, record size 0x20; dest -> +0xc,
-      source -> +0x14 (+0x10 dest_flags left NULL).
+      source -> +0x14 (+0x10 dest_flags left NULL by the arena
+      zero-fill). match.py - same constants and store offsets; LLVM
+      swapped the two strs (unobservable, they cannot alias).
 
   - address: 0x082c1824
     ghidra: FUN_082c1824
     name: cg_create_inst_binary_s
     size: 44
+    sig: "cg_inst_t *cg_create_inst_binary_s(cg_block_t *block, cg_opcode_t opcode, cg_virtual_reg_t *dest, cg_virtual_reg_t *dest_flags, cg_virtual_reg_t *source0, cg_virtual_reg_t *source1)"
     module: codegen/ir
-    status: identified
+    status: ported
+    vars: {param_1: block, param_2: opcode, param_3: dest, param_4: dest_flags, param_5: source0, param_6: source1}
     notes: >-
       7 bl call sites. kind 2, record size 0x24 - the flags-writing
       twin of cg_create_inst_binary - `ldrd r6,[sp,#24]` then
       `add r1,r0,#12` / `stm r1,{r4,r5,r6,r7}` fills +0xc, +0x10,
-      +0x14, +0x18 from four arguments.
+      +0x14, +0x18 from four arguments. dest_flags and source0 arrive
+      on the stack in the original.
 
   - address: 0x082c1898
     ghidra: FUN_082c1898
     name: cg_create_inst_compare
     size: 44
+    sig: "cg_inst_t *cg_create_inst_compare(cg_block_t *block, cg_opcode_t opcode, cg_virtual_reg_t *dest, cg_virtual_reg_t *source0, cg_virtual_reg_t *source1)"
     module: codegen/ir
-    status: identified
+    status: ported
+    vars: {param_1: block, param_2: opcode, param_3: dest, param_4: source0, param_5: source1}
     notes: >-
       35 bl call sites. kind 3, record size 0x20; `stm` fills +0xc,
-      +0x10, +0x14 (the third comes off the stack).
+      +0x10, +0x14 (the third comes off the stack) - the sources sit
+      one word earlier than binary's because compare has no dest_flags
+      slot.
 
   - address: 0x082c18c4
     ghidra: FUN_082c18c4
     name: cg_create_inst_load
     size: 40
+    sig: "cg_inst_t *cg_create_inst_load(cg_block_t *block, cg_opcode_t opcode, cg_virtual_reg_t *dest, cg_virtual_reg_t *address)"
     module: codegen/ir
-    status: identified
-    notes: "34 bl call sites. kind 4, record size 0x18; +0xc and +0x10."
+    status: ported
+    vars: {param_1: block, param_2: opcode, param_3: dest, param_4: address}
+    notes: >-
+      34 bl call sites. kind 4, record size 0x18; dest -> +0xc,
+      address -> +0x10. Field roles pinned by the caller @ 0x0823a8ac
+      (the returned register goes in the dest slot).
 
   - address: 0x082c196c
     ghidra: FUN_082c196c
     name: cg_create_inst_store
     size: 40
+    sig: "cg_inst_t *cg_create_inst_store(cg_block_t *block, cg_opcode_t opcode, cg_virtual_reg_t *value, cg_virtual_reg_t *address)"
     module: codegen/ir
-    status: identified
+    status: ported
+    vars: {param_1: block, param_2: opcode, param_3: value, param_4: address}
     notes: >-
-      5 bl + 2 tail b call sites. kind 5, record size 0x18; +0xc and
-      +0x10.
+      5 bl + 2 tail b call sites. kind 5, record size 0x18; value ->
+      +0xc, address -> +0x10. Field roles pinned by the caller @
+      0x0823cc40 (a freshly computed value in the first slot).
 
   - address: 0x082c1878
     ghidra: FUN_082c1878
     name: cg_create_inst_branch_label
     size: 32
+    sig: "cg_inst_t *cg_create_inst_branch_label(cg_block_t *block, cg_opcode_t opcode, cg_block_t *target)"
     module: codegen/ir
-    status: identified
+    status: ported
+    vars: {param_1: block, param_2: opcode, param_3: target}
     notes: "16 bl call sites. kind 7, record size 0x14; target -> +0xc."
 
   - address: 0x082c1850
     ghidra: FUN_082c1850
     name: cg_create_inst_branch_cond
     size: 40
+    sig: "cg_inst_t *cg_create_inst_branch_cond(cg_block_t *block, cg_opcode_t opcode, cg_virtual_reg_t *condition, cg_block_t *target)"
     module: codegen/ir
-    status: identified
+    status: ported
+    vars: {param_1: block, param_2: opcode, param_3: condition, param_4: target}
     notes: >-
-      41 bl call sites. kind 8, record size 0x14. NOTE the swap - the
-      third argument goes to +0x10 and the fourth to +0xc, the
-      opposite order from every other factory in the family.
+      41 bl call sites. kind 8, record size 0x14. NOTE the swap, kept
+      in the port - the third argument goes to +0x10 (condition) and
+      the fourth to +0xc (target), the opposite order from every other
+      factory in the family.
 
   - address: 0x082c1914
     ghidra: FUN_082c1914
     name: cg_create_inst_phi
     size: 40
+    sig: "cg_inst_t *cg_create_inst_phi(cg_block_t *block, cg_opcode_t opcode, cg_virtual_reg_t *dest, cg_virtual_reg_list_t *regs)"
     module: codegen/ir
-    status: identified
+    status: ported
+    vars: {param_1: block, param_2: opcode, param_3: dest, param_4: regs}
     notes: >-
       75 bl call sites. kind 9, record size 0x14; dest -> +0xc,
-      register list -> +0x10 (built by cg_virtual_reg_list_create).
+      register list -> +0x10 (built by cg_virtual_reg_list_create,
+      unported - C varargs).
 
   - address: 0x082c193c
     ghidra: FUN_082c193c
     name: cg_create_inst_ret
     size: 16
+    sig: "cg_inst_t *cg_create_inst_ret(cg_block_t *block, cg_opcode_t opcode)"
     module: codegen/ir
-    status: identified
+    status: ported
+    vars: {param_1: block, param_2: opcode}
     notes: >-
       3 bl + 1 tail b call sites. kind 11, record size 0x10, no field
-      stores - `mov r3,r1; mov r1,#16; mov r2,#11; b 0x082d6c24`.
+      stores - `mov r3,r1; mov r1,#16; mov r2,#11; b 0x082d6c24`. The
+      port is a plain call; LLVM adds a frame around the tail branch.
 
   - address: 0x082c194c
     ghidra: FUN_082c194c
     name: cg_create_inst_ret_value
     size: 32
+    sig: "cg_inst_t *cg_create_inst_ret_value(cg_block_t *block, cg_opcode_t opcode, cg_virtual_reg_t *value)"
     module: codegen/ir
-    status: identified
+    status: ported
+    vars: {param_1: block, param_2: opcode, param_3: value}
     notes: >-
       2 bl call sites. kind 11, record size 0x10, one field store at
       +0xc - the value-returning twin of 0x082c193c.
