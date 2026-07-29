@@ -6725,13 +6725,13 @@ functions:
       TPhotosSettingsSlideshowPlaylistCntlr from the literal its
       constructor hands to the class-name factory @ 0x0820b230 next to
       its `bl 0x081d23f8`; the port names it
-      CLASS_ID_PHOTOS_SLIDESHOW_PLAYLIST_CNTLR. Eight siblings remain
-      identified, all the same shape - 0x0812f0a4 (0x4e00 TCUnsupported,
-      24), 0x081353e8 (0x8f00 TCEQSetting, 24), 0x0815e1ac (0x5680
-      TCSportTimer, 28), 0x0815ff34 (0x8700, 28), 0x0827f218 (0x5780,
-      28), 0x08284e2c (0x6180, 28), 0x08289690 (0x3280, 24), 0x0828ae68
-      (0x4180 TCNotesDispatcher, 28); app/registry.rs's
-      `instance_of_class` body covers each in one line.
+      CLASS_ID_PHOTOS_SLIDESHOW_PLAYLIST_CNTLR. Seven siblings remain
+      identified, all the same shape - 0x081353e8 (0x8f00 TCEQSetting,
+      24), 0x0815e1ac (0x5680 TCSportTimer, 28), 0x0815ff34 (0x8700, 28),
+      0x0827f218 (0x5780, 28), 0x08284e2c (0x6180, 28), 0x08289690
+      (0x3280, 24), 0x0828ae68 (0x4180 TCNotesDispatcher, 28);
+      app/registry.rs's `instance_of_class` body covers each in one
+      line.
     renames: {}
 
   - address: 0x08103b88
@@ -6749,6 +6749,24 @@ functions:
       hands to the class-name factory @ 0x0820b230 next to its
       `bl 0x081d23f8` (registers @ 0x08103d2c); the port names it
       CLASS_ID_SEARCH_CNTLR.
+    renames: {}
+
+  - address: 0x0812f0a4
+    ghidra: FUN_0812f0a4
+    name: instance_of_class_4e00
+    size: 24
+    sig: "void *instance_of_class_4e00(void)"
+    module: app/registry
+    status: ported
+    notes: >-
+      7 bl call sites (binary-scanned over osos.dec). Same
+      lookup-then-cast accessor as the ported 0x081883fc for class id
+      0x4e00 - `push; load id; bl 0x081d2184; pop; load the SAME id into
+      r1; b 0x08275b9c`. Class identified as TCUnsupported from the
+      literal "TCUnsupported" @ 0x0812f094, handed to the class-name
+      factory @ 0x0820b230 by the naming block @ 0x0812f038 that sits
+      immediately before this accessor in the image; the port names it
+      CLASS_ID_UNSUPPORTED.
     renames: {}
 
   - address: 0x081d23f8

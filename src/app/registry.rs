@@ -66,6 +66,7 @@
 //! | 0x081883fc | [`demo_mode_instance`] | 28 | 328 `bl` |
 //! | 0x08172124 | [`instance_of_class_6000`] | 24 | 72 `bl` |
 //! | 0x08100b74 | [`instance_of_class_6600`] | 24 | 36 `bl` |
+//! | 0x0812f0a4 | [`instance_of_class_4e00`] | 24 | 7 `bl` |
 //!
 //! All call-site counts are binary-scanned over osos.dec (every `bl`/`b`
 //! whose computed target is the function), not read off osos.asm — the
@@ -563,6 +564,26 @@ pub unsafe extern "C" fn instance_of_class_7600() -> *mut u8 {
     instance_of_class(CLASS_ID_SEARCH_CNTLR)
 }
 
+/// The class id of `TCUnsupported` (recovered from the literal
+/// `"TCUnsupported"` @ 0x0812f094, handed to the class-name factory @
+/// 0x0820b230 by the naming block @ 0x0812f038 that sits immediately
+/// before this accessor in the image).
+pub const CLASS_ID_UNSUPPORTED: u32 = 0x4e00;
+
+/// instance_of_class_4e00 — original: `FUN_0812f0a4` @ 0x0812f0a4
+/// (24 bytes; 7 `bl` call sites, binary-scanned).
+///
+/// Same accessor for class id 0x4e00, `TCUnsupported`:
+/// `object_cast_to_class(registry_lookup_by_id(0x4e00), 0x4e00)` — resolve
+/// the registered singleton through the global class registry, then let
+/// the object's own vtable confirm it really is that class (NULL when
+/// either step fails).
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn instance_of_class_4e00() -> *mut u8 {
+    instance_of_class(CLASS_ID_UNSUPPORTED)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -969,6 +990,10 @@ mod tests {
                 instance_of_class_7600().is_null(),
                 "0x7600 was never registered"
             );
+            assert!(
+                instance_of_class_4e00().is_null(),
+                "0x4e00 was never registered"
+            );
         }
         restore(guard);
     }
@@ -993,6 +1018,18 @@ mod tests {
             let this = ptr::addr_of_mut!(object) as *mut u8;
             registry_register(this, CLASS_ID_PHOTOS_SLIDESHOW_PLAYLIST_CNTLR);
             assert_eq!(instance_of_class_8300(), this);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_4e00_accessor_looks_up_and_casts_its_own_id() {
+        let guard = mock();
+        unsafe {
+            let mut object = object_accepting(CLASS_ID_UNSUPPORTED);
+            let this = ptr::addr_of_mut!(object) as *mut u8;
+            registry_register(this, CLASS_ID_UNSUPPORTED);
+            assert_eq!(instance_of_class_4e00(), this);
         }
         restore(guard);
     }
