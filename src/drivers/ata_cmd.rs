@@ -257,6 +257,19 @@ pub unsafe extern "C" fn ata_cmd_set_flags(cmd: *mut u8, flags: u32) {
     set_word(cmd, FLAGS, flags);
 }
 
+/// ata_cmd_set_buffer_offset — original: `FUN_08121204` @ 0x08121204
+/// (8 bytes; 16 call sites, binary-scanned).
+///
+/// Offset into the transfer buffer (+0x2c), always stored immediately
+/// after the buffer pointer and immediately before the transfer length,
+/// which is what makes the triple read as (buffer, offset, length).
+/// Usually 0; 0x0827a2b0 passes a caller argument.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_cmd_set_buffer_offset(cmd: *mut u8, offset: u32) {
+    set_word(cmd, BUFFER_OFFSET, offset);
+}
+
 /// ata_cmd_set_sector_count — original: `FUN_081213ac` @ 0x081213ac
 /// (8 bytes; 10 call sites, binary-scanned).
 ///
@@ -550,6 +563,18 @@ mod tests {
         let mut block = poisoned();
         unsafe { ata_cmd_set_device(block.0.as_mut_ptr(), DEVICE_NONE) };
         assert_eq!(block.0[DEVICE_INDEX] as i8, -1);
+    }
+
+    #[test]
+    fn the_buffer_offset_setter_writes_only_its_word() {
+        let mut block = poisoned();
+        unsafe { ata_cmd_set_buffer_offset(block.0.as_mut_ptr(), 0x1000) };
+        assert_eq!(word_at(&block, BUFFER_OFFSET), 0x1000);
+        for other in 0..block.0.len() {
+            if !(BUFFER_OFFSET..BUFFER_OFFSET + 4).contains(&other) {
+                assert_eq!(block.0[other], 0xa5, "spilled onto +{other:#x}");
+            }
+        }
     }
 
     #[test]

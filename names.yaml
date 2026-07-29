@@ -5252,7 +5252,7 @@ functions:
     size: 8
     sig: "void ata_cmd_set_buffer_offset(u8 *cmd, u32 offset)"
     module: drivers/ata_cmd
-    status: identified
+    status: ported
     vars: {param_1: cmd, param_2: offset}
     notes: >-
       `str r1, [r0, #0x2c]`. 16 bl call sites, always immediately after
