@@ -10209,9 +10209,9 @@ functions:
       family's read_unaligned host-testing idiom, the same accepted
       deviation as vector_size_elem4.       Other divide instantiations
       (identified, not ported): elem 12 (4 more fns besides the ported
-      0x083d76f8; 62 calls across all 5), elem 28 (1 fn, 8 calls,
-      0x083d7894), elem 40 (1 fn, 14 calls, 0x083d783c). Elem 20 is
-      now ported (0x083d7640, see its entry).
+      0x083d76f8; 62 calls across all 5), elem 40 (1 fn, 14 calls,
+      0x083d783c). Elem 20 is now ported (0x083d7640) and elem 28 is
+      now ported (0x083d7894); see their entries.
 
   - address: 0x083d77dc
     ghidra: FUN_083d77dc
@@ -10252,6 +10252,29 @@ functions:
       same structure as vector_size_elem24 (sub / mov r1,#20 / b
       __rt_sdiv); the ldm comes out as byte loads from the family's
       read_unaligned host-testing idiom, the same accepted deviation as
+      vector_size_elem4.
+
+  - address: 0x083d7894
+    ghidra: FUN_083d7894
+    name: vector_size_elem28
+    size: 16
+    sig: "i32 vector_size_elem28(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      `vector<T>::size()` for a 28-byte element - a non-power-of-two
+      member of the vector_size family: same `ldm r0,{r0,r1}; sub
+      r0,r1,r0` head as the shifts, then `mov r1,#0x1c` and a TAIL
+      BRANCH into the ADS signed divide @ 0x08031568 (ported as
+      __rt_sdiv). 8 bl call sites; the only copy. Verified against
+      osos.asm: `ldmia r0,{r0,r1}; sub r0,r1,r0; mov r1,#0x1c;
+      b 0x08031568`. The port calls the ported __rt_sdiv, which is
+      signed and truncating, so a reversed vector's negative span
+      truncates toward zero. match.py - same structure as
+      vector_size_elem24 (sub / mov r1,#28 / b __rt_sdiv); the ldm
+      comes out as byte loads from the family's read_unaligned
+      host-testing idiom, the same accepted deviation as
       vector_size_elem4.
 
   - address: 0x083d7760
