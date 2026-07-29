@@ -8866,15 +8866,19 @@ functions:
     name: db_str_dup
     size: 44
     sig: "char *db_str_dup(sqlite3 *db, const char *z)"
-    module: null
-    status: identified
+    module: sqlite/strdup
+    status: ported
+    vars: {param_1: db, param_2: z}
     notes: >-
       SQLite's sqlite3DbStrDup. 22 bl call sites. Calls str_dup
       @ 0x08384ed8 and, if z was non-NULL and the copy failed, sets
-      db->mallocFailed (+0x1e). Not ported - str_dup's own callees
-      (strlen @ 0x08392478, the __rt_memcpy veneer @ 0x08037db0) sit
-      outside this sweep, so it would need two more dispatch slots for a
-      four-line function.
+      db->mallocFailed (+0x1e) via sqlite::mem::set_malloc_failed.
+      Lives in sqlite/strdup.rs next to str_dup, whose callees are
+      now all reachable (strlen and __rt_memcpy through their ported
+      twins, sqlite3_malloc through DB_MEM_OPS), so the earlier
+      dispatch-slot objection no longer applies. match.py: same
+      structure (str_dup tail call, NULL early-out, conditional
+      flag store).
 
   - address: 0x08374a40
     ghidra: FUN_08374a40
