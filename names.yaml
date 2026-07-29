@@ -9839,6 +9839,30 @@ functions:
       sites. No separate port; hook this address to the
       not_equal_deref symbol.
 
+  - address: 0x083d76f8
+    ghidra: FUN_083d76f8
+    name: vector_size_elem12
+    size: 16
+    sig: "i32 vector_size_elem12(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      `vector<T>::size()` for a 12-byte element - a non-power-of-two
+      member of the vector_size family: same `ldm r0,{r0,r1}; sub
+      r0,r1,r0` head as the shifts, then `mov r1,#0xc` and a TAIL
+      BRANCH into the ADS signed divide @ 0x08031568 (ported as
+      __rt_sdiv). 18 bl call sites here, the hottest instantiation of
+      the divide half; 62 across all 5 byte-identical copies (the other
+      four stay identified - only this one is ported). The port calls
+      the ported __rt_sdiv, which is signed and truncating, so a
+      reversed vector's negative span truncates toward zero. Verified
+      against osos.asm: `ldmia r0,{r0,r1}; sub r0,r1,r0; mov r1,#0xc;
+      b 0x08031568`. match.py - same structure as vector_size_elem24;
+      the ldm comes out as byte loads from the family's read_unaligned
+      host-testing idiom, the same accepted deviation as
+      vector_size_elem4.
+
   - address: 0x083d7750
     ghidra: FUN_083d7750
     name: vector_size_elem24
@@ -9859,9 +9883,10 @@ functions:
       zero. match.py - same structure as vector_capacity (sub / mov
       r1,#24 / b __rt_sdiv); the ldm comes out as byte loads from the
       family's read_unaligned host-testing idiom, the same accepted
-      deviation as vector_size_elem4. Other divide instantiations
-      (identified, not ported): elem 12 (5 fns, 62 calls, top
-      0x083d76f8 18), elem 20 (2 fns, 21 calls, top 0x083d7640 14),
+      deviation as vector_size_elem4.       Other divide instantiations
+      (identified, not ported): elem 12 (4 more fns besides the ported
+      0x083d76f8; 62 calls across all 5), elem 20 (2 fns, 21 calls, top
+      0x083d7640 14),
       elem 28 (1 fn, 8 calls, 0x083d7894), elem 40 (1 fn, 14 calls,
       0x083d783c).
 
