@@ -9498,8 +9498,8 @@ functions:
     name: timer_stop
     size: 76
     sig: "void timer_stop(u8 *timer)"
-    module: null
-    status: identified
+    module: drivers/timer
+    status: ported
     notes: >-
       144 call sites (129 bl + 15 tail b) - the busiest unclaimed
       function in 0x08110000-0x0812ffff. Runs a trace/assert helper
