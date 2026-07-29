@@ -9479,16 +9479,25 @@ functions:
 
   - address: 0x0837dc18
     ghidra: FUN_0837dc18
-    name: sqlite_forward_via_db
+    name: parse_expr
     size: 32
-    module: null
-    status: identified
+    sig: "Expr *parse_expr(Parse *parse, int op, Expr *left, Expr *right, const Token *token)"
+    module: sqlite/parse_expr
+    status: ported
+    vars: {param_1: parse, param_2: op, param_3: left, param_4: right, param_5: token}
     notes: >-
-      44 bl call sites. Replaces its first argument with `*arg1` (the
-      db back-pointer that starts every SQLite context struct) and
-      tail-calls 0x08376808 with the remaining four arguments, shuffling
-      the 5th through the stack. A pure adaptor; naming it properly needs
-      0x08376808 identified first. NOT ported.
+      SQLite's sqlite3PExpr. 44 bl call sites, all grammar actions.
+      Replaces its first argument with the db back-pointer at +0x00 of
+      the parse context and tail-forwards to sqlite3Expr @ 0x08376808
+      (identified: allocates a 0x44-byte Expr via the ported
+      db_malloc_zero @ 0x08374998, stores the op byte at +0x00, operands
+      at +0x08/+0x0c, the token span at +0x14/+0x18, recomputes height
+      via 0x083788fc; on OOM releases both operands via 0x08377e00 and
+      returns NULL). The unported 0x08376808 is the SQLITE_EXPR_NEW
+      dispatch boundary (house pattern, default always-NULL stub mimics
+      its OOM path); the match.py diff is exactly that deviation - the
+      Rust body tail-calls through the loaded slot instead of a direct
+      bl. Old scouting name: sqlite_forward_via_db.
 
   - address: 0x0837acf4
     ghidra: FUN_0837acf4
@@ -9532,16 +9541,26 @@ functions:
     ghidra: FUN_0836761c
     name: release_via_field_0x48
     size: 16
-    module: null
-    status: identified
+    sig: "*mut u8 release_via_field_0x48(owner: *mut u8)"
+    module: cxx/release
+    status: ported
+    vars: {param_1: owner}
     notes: >-
-      51 bl call sites. `if (p) tail-call 0x0837ee98(p->[0x48])` - a
-      NULL-guarded release forwarder. Its target 0x0837ee98 (200 bytes,
-      22 bl + 1 tail b) drops a 16-bit refcount at +0x22 and, at zero,
-      runs C++ teardown through 0x082dd3d8 / 0x082d7fdc, so this is the
-      page-cache/pager glue into retailOS' own object model rather than
-      stock SQLite. NOT ported - the teardown chain is C++ and outside
-      this sweep.
+      51 bl call sites. `if (owner) tail-call 0x0837ee98(owner->[0x48])` -
+      a NULL-guarded release forwarder into retailOS' C++ object model.
+      Only the owner is guarded; a NULL child is forwarded to the callee,
+      which NULL-guards on its own (`movs r5,r0 / bne`). The teardown
+      target 0x0837ee98 (200 bytes, 22 bl + 1 tail b, UNPORTED) drops a
+      16-bit refcount at +0x22 and, at zero, runs C++ teardown through
+      0x082dd3d8 / 0x082d7fdc; every path returns 0, so the forwarder
+      always returns NULL. The tail call goes through the CXX_RELEASE_OPS
+      dispatch boundary (house VDBE_P4_OPS pattern); the default stub
+      returns NULL but leaks, no refcount drop. The child field is
+      addressed by word index 18 (block_region.rs precedent) so a 64-bit
+      host keeps the pointer pointer-sized. match.py: same structure
+      (cmp NULL guard, ldr +0x48, tail bx to the teardown); the extra
+      prologue/literal-pool indirection is the dispatch boundary, an
+      intentional deviation.
 
   # ---- ATA/CE-ATA driver island inside the SQLite span ----
   # ~0x08369000-0x0836c000. Not SQLite; the strings at 0x0836a004+ are
