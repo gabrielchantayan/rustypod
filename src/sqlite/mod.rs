@@ -63,6 +63,7 @@
 pub mod aux_sweep;
 pub mod btree_lock;
 pub mod dequote;
+pub mod ephemeral_fn;
 pub mod error_msg;
 pub mod free_p4;
 pub mod mem;

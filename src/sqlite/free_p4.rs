@@ -29,12 +29,14 @@
 //! - `sqlite3_free` @ 0x083906f4 IS ported
 //!   ([`tracked_free`](crate::heap::tracked::tracked_free)) and is
 //!   called directly, per the porting rules.
-//! - The value destructor @ 0x08386504 and the ephemeral-function
-//!   release @ 0x082cf358 are NOT ported; they are the
+//! - The value destructor @ 0x08386504 is NOT ported; it is the
 //!   [`FREE_P4_AUX_OPS`] dispatch boundary (house pattern — see
-//!   `heap/block_region.rs`, `sqlite/vdbe.rs`). Their default slots are
-//!   documented no-ops: an unconfigured build leaks those payloads
-//!   rather than running the wrong destructor. The record-array sweep
+//!   `heap/block_region.rs`, `sqlite/vdbe.rs`). Its default slot is a
+//!   documented no-op: an unconfigured build leaks that payload rather
+//!   than running the wrong destructor. The ephemeral-function release
+//!   @ 0x082cf358 IS ported
+//!   ([`sqlite::ephemeral_fn`](crate::sqlite::ephemeral_fn)) and is the
+//!   default `free_ephemeral_function` slot. The record-array sweep
 //!   @ 0x08386e08 IS ported ([`sqlite::aux_sweep`](crate::sqlite::aux_sweep))
 //!   and is the default `context_aux_cleanup` slot.
 //! - `vdbe_change_p4` keeps reaching this function through its own
@@ -43,6 +45,7 @@
 
 use crate::heap::tracked::tracked_free;
 use crate::sqlite::aux_sweep::vdbe_context_aux_sweep;
+use crate::sqlite::ephemeral_fn::free_ephemeral_function;
 use crate::sqlite::vdbe::{P4_DYNAMIC, P4_KEYINFO, P4_KEYINFO_HANDOFF};
 
 /// Tag -8: the payload is a value released by the destructor @
@@ -55,9 +58,10 @@ pub const P4_FUNCCTX: i32 = -7;
 /// ephemeral-function check @ 0x082cf358 (upstream's `P4_FUNCDEF`).
 pub const P4_FUNCDEF: i32 = -5;
 
-/// Indirect dispatch for the unported destructors @ 0x08386504 /
-/// 0x082cf358, plus the ported record-array sweep @ 0x08386e08 (kept
-/// behind the table so host tests can intercept it).
+/// Indirect dispatch for the unported value destructor @ 0x08386504,
+/// plus the ported ephemeral-function release @ 0x082cf358 and
+/// record-array sweep @ 0x08386e08 (kept behind the table so host tests
+/// can intercept them).
 #[derive(Clone, Copy)]
 pub struct FreeP4AuxOps {
     /// Value destructor @ 0x08386504: release a value payload (tag
@@ -65,7 +69,9 @@ pub struct FreeP4AuxOps {
     pub value_free: unsafe extern "C" fn(p4: *mut u8),
     /// Ephemeral-function release @ 0x082cf358: free the `FuncDef` only
     /// when its flags byte at +4 has bit 0x4 set (the build's
-    /// `freeEphemeralFunction`). NULL-tolerant itself.
+    /// `freeEphemeralFunction`). NULL-tolerant itself. Ported — the
+    /// default is
+    /// [`free_ephemeral_function`](crate::sqlite::ephemeral_fn::free_ephemeral_function).
     pub free_ephemeral_function: unsafe extern "C" fn(p4: *mut u8),
     /// Record-array sweep @ 0x08386e08: walk the (arg, destructor)
     /// record array hanging off the context, calling each live
@@ -76,15 +82,15 @@ pub struct FreeP4AuxOps {
 }
 
 /// Default stub: the payload is leaked, not destroyed (see the module
-/// header). Deliberately not a passthrough to a raw free — these slots
-/// decide *whether* and *how* to destroy, and guessing wrong corrupts.
+/// header). Deliberately not a passthrough to a raw free — the slot
+/// decides *whether* and *how* to destroy, and guessing wrong corrupts.
 unsafe extern "C" fn missing_destructor(_p4: *mut u8) {}
 
-/// Wired defaults: the two unported destructors are documented no-ops;
-/// the sweep is the ported twin.
+/// Wired defaults: the one unported destructor is a documented no-op;
+/// the ephemeral release and the sweep are the ported twins.
 pub const DEFAULT_FREE_P4_AUX_OPS: FreeP4AuxOps = FreeP4AuxOps {
     value_free: missing_destructor,
-    free_ephemeral_function: missing_destructor,
+    free_ephemeral_function,
     context_aux_cleanup: vdbe_context_aux_sweep,
 };
 

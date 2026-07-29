@@ -6791,6 +6791,29 @@ functions:
       (0x3280, 24), 0x0828ae68 (0x4180 TCNotesDispatcher, 28).
     renames: {}
 
+  - address: 0x0815e1ac
+    ghidra: FUN_0815e1ac
+    name: instance_of_class_5680
+    size: 28
+    sig: "void *instance_of_class_5680(void)"
+    module: app/registry
+    status: ported
+    notes: >-
+      10 bl call sites (binary-scanned over osos.dec). Same
+      lookup-then-cast accessor as the ported 0x081883fc for class id
+      0x5680, but 28 bytes rather than 24: it keeps the id in r4 across
+      the lookup (`stmdb sp!,{r4,lr}; ldr r4,=0x5680; mov r0,r4;
+      bl 0x081d2184; mov r1,r4; ldmia sp!,{r4,lr}; b 0x08275b9c`)
+      instead of re-loading it from the literal pool. Class identified
+      as TCSportTimer: the literal "TCSportTimer" @ 0x0815ea3c is handed
+      to the class-name factory @ 0x0820b230 in the same basic block
+      where the constructor registers its `this` under 0x5680 @
+      0x0815e978; the port names it CLASS_ID_SPORT_TIMER. Five siblings
+      remain identified, all the same shape - 0x0815ff34 (0x8700, 28),
+      0x0827f218 (0x5780, 28), 0x08284e2c (0x6180, 28), 0x08289690
+      (0x3280, 24), 0x0828ae68 (0x4180 TCNotesDispatcher, 28).
+    renames: {}
+
   - address: 0x081d23f8
     ghidra: FUN_081d23f8
     name: registry_register
@@ -8992,6 +9015,35 @@ functions:
       DB_MEM_OPS. match.py structural (slot blx vs direct bl, LLVM
       inlines the strlen, store order swapped in the n<0 branch).
 
+  - address: 0x082cf358
+    ghidra: FUN_082cf358
+    name: free_ephemeral_function
+    size: 20
+    sig: "void free_ephemeral_function(void *funcdef)"
+    module: sqlite/ephemeral_fn
+    status: ported
+    renames:
+      param_1: funcdef
+    notes: >-
+      Upstream SQLite's freeEphemeralFunction, minus the db argument
+      (this build's allocators are global). 1 bl + 1 tail-b call site,
+      both inside vdbe_free_p4 @ 0x082cf388: the -7 branch calls it on
+      the context's first word, the -5 branch tail-calls it on the
+      payload. NULL returns immediately (`cmp r0,#0`); otherwise the
+      FuncDef flags byte at +4 is loaded (`ldrbne r1,[r0,#0x4]`) and
+      tested against the ephemeral bit 0x4 (`tstne r1,#0x4`, upstream's
+      SQLITE_FUNC_EPHEM); only an ephemeral definition is freed via a
+      conditional tail branch (`bne`) into sqlite3_free @ 0x083906f4,
+      here its ported twin tracked_free. A non-ephemeral definition is
+      borrowed from the function registry and left untouched. Now the
+      default free_ephemeral_function slot of free_p4's
+      FREE_P4_AUX_OPS table. match.py structural: the 3-instruction
+      guard/test prologue matches exactly, then LLVM inlines
+      tracked_free's body and tail-calls free_tag57 instead of the
+      original's `bne sqlite3_free`. Ghidra's C merges this function
+      with the following (unrelated) body and invents a second
+      parameter.
+
   - address: 0x082cf388
     ghidra: FUN_082cf388
     name: vdbe_free_p4
@@ -9014,11 +9066,12 @@ functions:
       0x08386e08(p4, 0) - a step the scout notes missed - then frees,
       -5 tail-calls 0x082cf358(p4). Anything outside -13..=0 (e.g. -14)
       returns unfreed. The raw free is sqlite3_free @ 0x083906f4,
-      called through its ported twin tracked_free; the three unported
-      destructors are the FREE_P4_AUX_OPS dispatch table (documented
-      no-op defaults - leak rather than corrupt, house pattern; the
-      aux sweep @ 0x08386e08 has since been ported and is the default
-      context_aux_cleanup slot).
+      called through its ported twin tracked_free; the value
+      destructor @ 0x08386504 is the one unported FREE_P4_AUX_OPS
+      slot (documented no-op default - leak rather than corrupt, house
+      pattern; the ephemeral release @ 0x082cf358 and the aux sweep
+      @ 0x08386e08 have since been ported and are the default
+      free_ephemeral_function / context_aux_cleanup slots).
 
   - address: 0x08386e08
     ghidra: FUN_08386e08
