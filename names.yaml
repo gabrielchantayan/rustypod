@@ -8193,6 +8193,34 @@ functions:
       load-and-mask leaf; LLVM materializes the mask and uses `and`
       instead of the lsl/lsr pair, plus its usual fp frame.
 
+  - address: 0x08292e84
+    ghidra: FUN_08292e84
+    name: control_state_store
+    size: 44
+    sig: "void control_state_store(u32 word)"
+    module: kernel/control_state
+    status: ported
+    renames:
+      param_1: word
+    notes: >-
+      3 bl call sites (plus 1 blne @ 0x0839f6ec and 1 tail b @
+      0x08292ce4). Guarded store of the control-state word @ 0x089cc92c:
+      calls the lock-check helper @ 0x08292f58 (same word, bit 0x8000 =
+      store lock); while locked the store is refused unless the caller
+      sets bit 0x4000 in the argument as a "store anyway" override
+      sentinel; the stored value always has 0x4000 stripped
+      (`bic r0, r1, #0x4000`), so the sentinel never lands in the word
+      and sits above the getter's low-12 mask. The save/force-0x10/
+      restore dance in neighbors @ 0x08292c10..0x08292e64 (restoring via
+      `saved | 0x4000`) uses exactly this override. Port reads/writes the
+      original firmware address on target (global not port-owned, same
+      precedent as control_state_flags); host tests substitute the mock
+      word. The lock-bit read (bl 0x08292f58) is inlined in the port -
+      that helper is a separate function with its own callers and is not
+      ported. match.py - same guard/branch/store structure; LLVM inlines
+      the lock check, reorders the two bit tests, folds base+4 into a
+      direct 0x089cc92c literal, plus its usual fp frame.
+
   - address: 0x08252bec
     ghidra: FUN_08252bec
     name: video_engine_get
