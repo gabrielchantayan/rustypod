@@ -36,6 +36,13 @@
 //! The 0x083d604c copy is the canonical one (most call sites) and the
 //! address this port cites. Note the NULL test is on the *inner* pointer,
 //! not on `slot`: a NULL `slot` faults in the original, and does here.
+//!
+//! Also here: [`refcounted_ptr_assign`], the mutex-guarded shared-body
+//! assign that backs the C++ layer's refcounted handles (it sits outside
+//! the 0x083c0000-0x083dffff block, at 0x0839eda0, so it is not one of
+//! the byte-identical families above).
+
+use crate::kernel::sync_mutex::{mutex_lock, mutex_unlock, Mutex};
 
 /// handle_deref_or_null — original: `FUN_083d604c` @ 0x083d604c
 /// (16 bytes; 253 `bl` call sites at that address, 725 across all 22
@@ -80,6 +87,70 @@ pub unsafe extern "C" fn handle_deref_field12(slot: *const *const *mut u8) -> *m
         return core::ptr::null_mut();
     }
     cell.add(3).read()
+}
+
+/// Shared body of the C++ layer's refcounted handles — the object a
+/// `*mut RefcountedBody` slot points at. [`refcounted_ptr_assign`]
+/// touches only the two trailing fields; the leading word is
+/// owner-defined (a vtable or first datum) and opaque to the assign.
+#[repr(C)]
+pub struct RefcountedBody {
+    /// +0: owner-defined word; never read or written by the assign.
+    pub opaque0: u32,
+    /// +4: intrusive reference count, bumped under the mutex.
+    pub refcount: i32,
+    /// +8: optional mutex guarding the refcount (NULL = unguarded).
+    pub mutex: *mut Mutex,
+}
+
+/// refcounted_ptr_assign — original: `FUN_0839eda0` @ 0x0839eda0
+/// (68 bytes; 78 `bl` call sites).
+///
+/// The copy-assign of a refcounted handle slot: `obj = *src;
+/// *dst = obj`, and when `obj` is non-NULL its refcount (+4) is bumped
+/// by one under the mutex at +8. The mutex field is loaded twice —
+/// before the lock and again before the unlock — and each load is
+/// NULL-checked separately, so a NULL mutex means an unguarded bump.
+/// Returns `dst`.
+///
+/// The lock pair is `kernel::sync_mutex::mutex_lock` /
+/// `mutex_unlock` (originals @ 0x0807f5c4 / 0x0807f6a0, now ported);
+/// an earlier scouting note deferred this function until those landed.
+///
+/// Codegen deviation: LLVM inlines the ported lock/unlock (guards and
+/// ROM_KERNEL dispatch included) instead of emitting the original's
+/// `bl` pair, so the ARM body is larger but structurally the same —
+/// both mutex-field loads are NULL-checked, the bump sits between
+/// them, and `dst` is returned untouched.
+///
+/// # Safety
+/// `dst` and `src` must be valid, aligned pointer slots; when the
+/// loaded body pointer is non-NULL it must point at a readable/writable
+/// [`RefcountedBody`]. As in the original, the slot pointers themselves
+/// are not NULL-checked.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_ptr_assign(
+    dst: *mut *mut RefcountedBody,
+    src: *const *mut RefcountedBody,
+) -> *mut *mut RefcountedBody {
+    let obj = src.read();
+    dst.write(obj);
+    if !obj.is_null() {
+        let mutex = (*obj).mutex;
+        if !mutex.is_null() {
+            mutex_lock(mutex);
+        }
+        // Original: `add r0, r0, #1` — a plain wrapping increment.
+        (*obj).refcount = (*obj).refcount.wrapping_add(1);
+        // Re-loaded, as in the original: a racing release could in
+        // principle have torn the object down under us.
+        let mutex = (*obj).mutex;
+        if !mutex.is_null() {
+            mutex_unlock(mutex);
+        }
+    }
+    dst
 }
 
 #[cfg(test)]
@@ -145,6 +216,96 @@ mod tests {
             let mut cell: [*mut u8; 4] = [core::ptr::null_mut(); 4];
             let slot: *const *mut u8 = cell.as_mut_ptr();
             assert!(handle_deref_field12(&slot).is_null());
+        }
+    }
+
+    /// NULL source body: the slot is overwritten with NULL, nothing
+    /// else is touched, and `dst` comes back.
+    #[test]
+    fn assign_null_body_stores_null_and_returns_dst() {
+        unsafe {
+            let mut slot: *mut RefcountedBody = 0xdead_beefusize as *mut RefcountedBody;
+            let src: *mut RefcountedBody = core::ptr::null_mut();
+            let ret = refcounted_ptr_assign(&mut slot, &src);
+            assert_eq!(ret, &mut slot as *mut *mut RefcountedBody);
+            assert!(slot.is_null());
+        }
+    }
+
+    /// Unguarded body (mutex NULL): the count is bumped and the slot
+    /// repointed, with no kernel interaction.
+    #[test]
+    fn assign_bumps_refcount_when_mutex_is_null() {
+        unsafe {
+            let mut body = RefcountedBody {
+                opaque0: 0x1111_2222,
+                refcount: 3,
+                mutex: core::ptr::null_mut(),
+            };
+            let src: *mut RefcountedBody = core::ptr::addr_of!(body).cast_mut();
+            let mut slot: *mut RefcountedBody = core::ptr::null_mut();
+            let ret = refcounted_ptr_assign(&mut slot, &src);
+            assert_eq!(ret, &mut slot as *mut *mut RefcountedBody);
+            assert_eq!(slot, &mut body as *mut RefcountedBody);
+            assert_eq!(body.refcount, 4);
+            assert_eq!(body.opaque0, 0x1111_2222);
+        }
+    }
+
+    /// Guarded body whose mutex cell is absent: lock/unlock take the
+    /// NULL-cell early-out inside `mutex_lock`/`mutex_unlock`, so the
+    /// bump still happens with no ROM_KERNEL table installed.
+    #[test]
+    fn assign_bumps_refcount_with_empty_mutex_cell() {
+        unsafe {
+            let mut mutex = Mutex {
+                sem_cell: core::ptr::null_mut(),
+                unused: 0,
+            };
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: 0,
+                mutex: &mut mutex,
+            };
+            let src: *mut RefcountedBody = core::ptr::addr_of!(body).cast_mut();
+            let mut slot: *mut RefcountedBody = core::ptr::null_mut();
+            refcounted_ptr_assign(&mut slot, &src);
+            assert_eq!(slot, &mut body as *mut RefcountedBody);
+            assert_eq!(body.refcount, 1);
+        }
+    }
+
+    /// Self-assign (dst == src): the load happens before the store, so
+    /// the slot keeps its pointer and the count rises exactly once.
+    #[test]
+    fn self_assign_bumps_once() {
+        unsafe {
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: 7,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot: *mut RefcountedBody = &mut body;
+            let ret = refcounted_ptr_assign(&mut slot, &slot);
+            assert_eq!(ret, &mut slot as *mut *mut RefcountedBody);
+            assert_eq!(slot, &mut body as *mut RefcountedBody);
+            assert_eq!(body.refcount, 8);
+        }
+    }
+
+    /// The increment is a plain ARM `add` — it wraps at i32::MAX.
+    #[test]
+    fn refcount_increment_wraps() {
+        unsafe {
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: i32::MAX,
+                mutex: core::ptr::null_mut(),
+            };
+            let src: *mut RefcountedBody = core::ptr::addr_of!(body).cast_mut();
+            let mut slot: *mut RefcountedBody = core::ptr::null_mut();
+            refcounted_ptr_assign(&mut slot, &src);
+            assert_eq!(body.refcount, i32::MIN);
         }
     }
 }

@@ -8723,14 +8723,22 @@ functions:
     ghidra: FUN_0839eda0
     name: refcounted_ptr_assign
     size: 68
-    module: null
-    status: identified
+    sig: "RefcountedBody **refcounted_ptr_assign(RefcountedBody **dst, RefcountedBody **src)"
+    module: cxx/handle
+    status: ported
+    vars: {param_1: dst, param_2: src, iVar1: obj}
     notes: >-
-      78 bl call sites. `*dst = *src`, and when the source object is
+      78 bl call sites. `obj = *src; *dst = obj`, and when obj is
       non-NULL bumps its refcount at +4 under the mutex at +8 (RTXC
-      mutex lock 0x0807f5c4 / unlock 0x0807f6a0, both unported and in
-      another agent's range). Returns dst. Not ported - the lock pair is
-      the whole point of the function, so it should wait for those.
+      mutex lock 0x0807f5c4 / unlock 0x0807f6a0, both since ported in
+      kernel/sync_mutex.rs, which is what unblocked this port). The
+      mutex field is re-loaded and NULL-checked again before the
+      unlock. Returns dst. Body layout recovered here: +0 opaque word,
+      +4 i32 refcount, +8 Mutex* (struct RefcountedBody in
+      cxx/handle.rs). Codegen deviation: LLVM inlines the ported
+      lock/unlock (guards + ROM_KERNEL dispatch) rather than the
+      original's bl pair - match.py shows the same guard/bump/guard
+      structure inside a larger body.
 
   # --- Embedded SQLite, 0x08360000-0x0838ffff (agent media) ---
   # The whole span is an amalgamated SQLite ~3.5.x - see src/sqlite/mod.rs
