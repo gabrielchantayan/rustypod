@@ -9829,15 +9829,23 @@ functions:
     ghidra: FUN_083d5eb4
     name: three_pointer_select
     size: 36
-    module: null
-    status: identified
+    sig: "u32 three_pointer_select(const ThreePointers *triple)"
+    module: util
+    status: ported
     notes: >-
       Reads three pointers from the object (+0, +4, +8) and returns one
       of two dereferences - `if (a < b) return *b; c = [this+8];
-      return a <= c ? *a : *c`. 14 bl sites here plus 8 at the
-      byte-identical copy 0x083d5ed8. Shape of an iterator clamp or a
-      three-way begin/cur/end accessor, but the owning container is not
-      identified, so the semantics are not solid enough to name.
+      return a <= c ? *a : *c`, all unsigned compares (cc/ls/hi). 14 bl
+      sites here (all in the switch body @ 0x080c7b40..0x080c7bdc) plus
+      8 at the byte-identical copy 0x083d5ed8 (NOT ported - separate
+      commit). Shape of an iterator clamp or a three-way begin/cur/end
+      accessor, but the owning container is not identified, so the
+      descriptive name is kept and the object is modeled as a repr(C)
+      ThreePointers of three `*const u32`. match.py - same structure
+      (ldm r0,{r1,r2} / cmp / early out / ldr +8 / cmp / select /
+      deref); LLVM splits the predicated ldrcc/bxcc into a branch and
+      folds the ls/hi select through movhi, the usual predication
+      deviation.
 
   # --- scouted 0x08110000-0x0812ffff, not ported (display-layer sweep) ---
 
