@@ -6769,6 +6769,28 @@ functions:
       CLASS_ID_UNSUPPORTED.
     renames: {}
 
+  - address: 0x081353e8
+    ghidra: FUN_081353e8
+    name: instance_of_class_8f00
+    size: 24
+    sig: "void *instance_of_class_8f00(void)"
+    module: app/registry
+    status: ported
+    notes: >-
+      2 bl call sites (binary-scanned over osos.dec: @ 0x080ff318 and
+      0x080ff38c). Same lookup-then-cast accessor as the ported
+      0x081883fc for class id 0x8f00 - `push; load id; bl 0x081d2184;
+      pop; load the SAME id into r1; b 0x08275b9c`. Class identified as
+      TCEQSetting: the literal "TCEQSetting" @ 0x08135574 is handed to
+      the class-name factory by the static-init block @ 0x08135518
+      (alongside "TCSpeakers"), and the constructor @ 0x081356b0
+      registers its `this` under 0x8f00 @ 0x081356e4; the port names it
+      CLASS_ID_EQ_SETTING. Six siblings remain identified, all the same
+      shape - 0x0815e1ac (0x5680 TCSportTimer, 28), 0x0815ff34 (0x8700,
+      28), 0x0827f218 (0x5780, 28), 0x08284e2c (0x6180, 28), 0x08289690
+      (0x3280, 24), 0x0828ae68 (0x4180 TCNotesDispatcher, 28).
+    renames: {}
+
   - address: 0x081d23f8
     ghidra: FUN_081d23f8
     name: registry_register

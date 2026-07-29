@@ -67,6 +67,7 @@
 //! | 0x08172124 | [`instance_of_class_6000`] | 24 | 72 `bl` |
 //! | 0x08100b74 | [`instance_of_class_6600`] | 24 | 36 `bl` |
 //! | 0x0812f0a4 | [`instance_of_class_4e00`] | 24 | 7 `bl` |
+//! | 0x081353e8 | [`instance_of_class_8f00`] | 24 | 2 `bl` |
 //!
 //! All call-site counts are binary-scanned over osos.dec (every `bl`/`b`
 //! whose computed target is the function), not read off osos.asm — the
@@ -584,6 +585,27 @@ pub unsafe extern "C" fn instance_of_class_4e00() -> *mut u8 {
     instance_of_class(CLASS_ID_UNSUPPORTED)
 }
 
+/// The class id of `TCEQSetting` (recovered from the literal
+/// `"TCEQSetting"` @ 0x08135574, handed to the class-name factory by
+/// the static-init block @ 0x08135518 alongside `"TCSpeakers"`; the
+/// constructor @ 0x081356b0 registers its `this` under this id @
+/// 0x081356e4).
+pub const CLASS_ID_EQ_SETTING: u32 = 0x8f00;
+
+/// instance_of_class_8f00 — original: `FUN_081353e8` @ 0x081353e8
+/// (24 bytes; 2 `bl` call sites, binary-scanned).
+///
+/// Same accessor for class id 0x8f00, `TCEQSetting`:
+/// `object_cast_to_class(registry_lookup_by_id(0x8f00), 0x8f00)` — resolve
+/// the registered singleton through the global class registry, then let
+/// the object's own vtable confirm it really is that class (NULL when
+/// either step fails).
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn instance_of_class_8f00() -> *mut u8 {
+    instance_of_class(CLASS_ID_EQ_SETTING)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -994,6 +1016,10 @@ mod tests {
                 instance_of_class_4e00().is_null(),
                 "0x4e00 was never registered"
             );
+            assert!(
+                instance_of_class_8f00().is_null(),
+                "0x8f00 was never registered"
+            );
         }
         restore(guard);
     }
@@ -1030,6 +1056,18 @@ mod tests {
             let this = ptr::addr_of_mut!(object) as *mut u8;
             registry_register(this, CLASS_ID_UNSUPPORTED);
             assert_eq!(instance_of_class_4e00(), this);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_8f00_accessor_looks_up_and_casts_its_own_id() {
+        let guard = mock();
+        unsafe {
+            let mut object = object_accepting(CLASS_ID_EQ_SETTING);
+            let this = ptr::addr_of_mut!(object) as *mut u8;
+            registry_register(this, CLASS_ID_EQ_SETTING);
+            assert_eq!(instance_of_class_8f00(), this);
         }
         restore(guard);
     }
