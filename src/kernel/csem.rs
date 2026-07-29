@@ -45,6 +45,20 @@
 //! - `csem_wake` — `thunk_EXT_FUN_22004368` @ 0x080569a4 (4 bytes;
 //!   2 call sites, 0x080eda08 / 0x0810789c): bare `b 0x08037ea8`, the raw
 //!   ROM wake with r0 = waiter id, no count bookkeeping.
+//! - `csem_post` — `FUN_080567a8` @ 0x080567a8 (40 bytes; 2 call
+//!   sites: tail `b` @ 0x0808e2ac in the deref wrapper `FUN_0808e2a8`,
+//!   `bl` @ 0x080b26b8). The classic add-and-wake V op:
+//!   `old = atomic_add_irqsafe(1, &count)`; if `old + 1 == 0` (the
+//!   original's `adds r0, r0, #1` + EQ — old exactly -1, a single
+//!   sleeper may be parked) it tail-branches thunk 0x08037e78 -> ROM
+//!   0x220041cc with the waiter id. BINARY-VERIFIED CORRECTION to the
+//!   scouting notes: the wake target is kobj's waiter-signal entry
+//!   (ported as `kobj::waiter_wake` @ 0x080567f8, the bare alias of
+//!   the same thunk), NOT thunk 0x08037ea8 / ROM 0x22004368
+//!   (CSEM_ROM_WAKE, which only csem_signal/csem_wake use), and the
+//!   wake condition is equality with -1, not a signed < 0. Twin
+//!   0x080567d0 (same shape, wakes via thunk 0x08037e80) remains
+//!   unported.
 //!
 //! # The interrupt-masking boundary (deviation, by necessity)
 //!
@@ -78,7 +92,7 @@
 //!   with interrupts masked both loads see the same value, so the port
 //!   reads once.
 
-use crate::kernel::kobj::waiter_wait;
+use crate::kernel::kobj::{waiter_wait, waiter_wake};
 
 /// The I and F bits of cpsr (0x80 = IRQ disable, 0x40 = FIQ disable) —
 /// the `#0xc0` immediate throughout the original sequences.
@@ -266,6 +280,23 @@ pub unsafe extern "C" fn csem_wake(id: u32) {
     (rom_wake())(id);
 }
 
+/// csem_post — original: `FUN_080567a8` @ 0x080567a8 (40 bytes).
+///
+/// The classic V operation: returns a token with
+/// [`atomic_add_irqsafe`] and, when the count was exactly -1 (the
+/// original's `adds r0, r0, #1` + EQ — one sleeper may be parked),
+/// wakes the waiter object via thunk 0x08037e78 -> ROM 0x220041cc.
+/// The wake goes through the ported [`waiter_wake`] (kobj's waiter
+/// signal), NOT the [`CSEM_ROM_WAKE`] slot — binary-verified, see the
+/// module header's correction note.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn csem_post(csem: *mut CountingSem) {
+    let old = atomic_add_irqsafe(1, core::ptr::addr_of_mut!((*csem).count));
+    if old.wrapping_add(1) == 0 {
+        waiter_wake((*csem).waiter_id);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -310,6 +341,7 @@ mod tests {
             (*addr_of_mut!(WAKE_LOG)).clear();
             addr_of_mut!(KOBJ_HOOKS).write(KobjHooks {
                 rom_waiter_wait: mock_rom_sleep,
+                rom_waiter_signal: mock_wake,
                 ..DEFAULT_KOBJ_HOOKS
             });
             *addr_of_mut!(CSEM_ROM_WAKE) = mock_wake;
@@ -598,6 +630,73 @@ mod tests {
             csem_wake(0xabcd);
         }
         assert_eq!(wakes(), vec![0xabcd], "no count bookkeeping");
+        restore(guard);
+    }
+
+    // ---- csem_post ---------------------------------------------------------
+
+    #[test]
+    fn post_with_tokens_only_increments() {
+        let guard = install(0x13, 0);
+        let mut sem = csem(1, 0x42);
+        unsafe {
+            csem_post(&mut sem);
+        }
+        assert_eq!(sem.count, 2);
+        assert!(wakes().is_empty(), "old+1 = 2 is nonzero: no wake");
+        restore(guard);
+    }
+
+    #[test]
+    fn post_on_empty_sem_no_wake() {
+        // old = 0 -> count 1: nobody parked (adds result 1, NE).
+        let guard = install(0x13, 0);
+        let mut sem = csem(0, 0x42);
+        unsafe {
+            csem_post(&mut sem);
+        }
+        assert_eq!(sem.count, 1);
+        assert!(wakes().is_empty());
+        restore(guard);
+    }
+
+    #[test]
+    fn post_at_minus_one_wakes_the_single_sleeper() {
+        // The EQ boundary: old = -1 -> old+1 = 0, wake carries the id.
+        let guard = install(0x13, 0);
+        let mut sem = csem(-1, 0x1234);
+        unsafe {
+            csem_post(&mut sem);
+        }
+        assert_eq!(sem.count, 0);
+        assert_eq!(wakes(), vec![0x1234]);
+        restore(guard);
+    }
+
+    #[test]
+    fn post_deeper_negative_does_not_wake() {
+        // old = -3 -> -2: adds result nonzero, no wake. EQ only,
+        // binary-verified — not the <= 0 of a textbook V op.
+        let guard = install(0x13, 0);
+        let mut sem = csem(-3, 0x1234);
+        unsafe {
+            csem_post(&mut sem);
+        }
+        assert_eq!(sem.count, -2);
+        assert!(wakes().is_empty());
+        restore(guard);
+    }
+
+    #[test]
+    fn post_wraps_at_i32_max_without_waking() {
+        // old = i32::MAX: ARM adds wraps to i32::MIN (nonzero) — no wake.
+        let guard = install(0x13, 0);
+        let mut sem = csem(i32::MAX, 0x77);
+        unsafe {
+            csem_post(&mut sem);
+        }
+        assert_eq!(sem.count, i32::MIN);
+        assert!(wakes().is_empty());
         restore(guard);
     }
 }

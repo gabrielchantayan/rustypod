@@ -4022,6 +4022,30 @@ functions:
       the waiter object, r0 = raw waiter id, no count bookkeeping).
       2 call sites: 0x080eda08, 0x0810789c.
 
+  - address: 0x080567a8
+    ghidra: FUN_080567a8
+    name: csem_post
+    size: 40
+    sig: "void csem_post(CountingSem *csem)"
+    module: kernel/csem
+    vars: {param_1: csem}
+    status: ported
+    notes: >-
+      The classic add-and-wake V op: old = atomic_add_irqsafe(1,
+      &count); if old+1 == 0 (adds/EQ — old exactly -1, one sleeper
+      may be parked) tail-branches thunk 0x08037e78 -> ROM 0x220041cc
+      with the waiter id. CORRECTION to the earlier scouting note:
+      the wake target is kobj's waiter-signal entry (ported as
+      kobj::waiter_wake @ 0x080567f8, alias of the same thunk), NOT
+      thunk 0x08037ea8 / ROM 0x22004368 (csem.rs's CSEM_ROM_WAKE),
+      and the condition is equality with -1, not a signed < 0.
+      2 call sites: tail `b` @ 0x0808e2ac (deref wrapper
+      FUN_0808e2a8), bl @ 0x080b26b8. Twin 0x080567d0 (same shape,
+      wakes via thunk 0x08037e80) remains unported. match.py: LLVM
+      inlines the atomic (identical mrs/msr critical section), tests
+      old+1 via the adds carry flag (cc = old != -1 early return),
+      and tail-branches the hook — same structure.
+
   # --- Block-deque element -> region accessors (heap/block_region) ---
   - address: 0x082801f8
     ghidra: FUN_082801f8
