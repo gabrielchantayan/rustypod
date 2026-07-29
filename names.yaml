@@ -8461,62 +8461,62 @@ functions:
   # All 16 bytes, all `ldr r0,[r0]; cmp r0,#0; ldrne r0,[r0]; bx lr`,
   # all served by the one port in cxx/handle.rs.
   - {address: 0x083d602c, ghidra: FUN_083d602c, name: handle_deref_or_null_alias_602c,
-     size: 16, module: cxx/handle, status: identified,
-     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 17 bl sites."}
+     size: 16, module: cxx/handle, status: ported,
+     notes: "ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c; 17 bl sites. No separate port exists; hook this address to the single handle_deref_or_null symbol (the load_be32 alias precedent)."}
   - {address: 0x083d603c, ghidra: FUN_083d603c, name: handle_deref_or_null_alias_603c,
-     size: 16, module: cxx/handle, status: identified,
-     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 8 bl sites."}
+     size: 16, module: cxx/handle, status: ported,
+     notes: "ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c; 8 bl sites. No separate port exists; hook this address to the single handle_deref_or_null symbol (the load_be32 alias precedent)."}
   - {address: 0x083d605c, ghidra: FUN_083d605c, name: handle_deref_or_null_alias_605c,
-     size: 16, module: cxx/handle, status: identified,
-     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 3 bl sites."}
+     size: 16, module: cxx/handle, status: ported,
+     notes: "ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c; 3 bl sites. No separate port exists; hook this address to the single handle_deref_or_null symbol (the load_be32 alias precedent)."}
   - {address: 0x083d606c, ghidra: FUN_083d606c, name: handle_deref_or_null_alias_606c,
-     size: 16, module: cxx/handle, status: identified,
-     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 69 bl sites."}
+     size: 16, module: cxx/handle, status: ported,
+     notes: "ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c; 69 bl sites. No separate port exists; hook this address to the single handle_deref_or_null symbol (the load_be32 alias precedent)."}
   - {address: 0x083d607c, ghidra: FUN_083d607c, name: handle_deref_or_null_alias_607c,
-     size: 16, module: cxx/handle, status: identified,
-     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 9 bl sites."}
+     size: 16, module: cxx/handle, status: ported,
+     notes: "ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c; 9 bl sites. No separate port exists; hook this address to the single handle_deref_or_null symbol (the load_be32 alias precedent)."}
   - {address: 0x083d608c, ghidra: FUN_083d608c, name: handle_deref_or_null_alias_608c,
-     size: 16, module: cxx/handle, status: identified,
-     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 4 bl sites."}
+     size: 16, module: cxx/handle, status: ported,
+     notes: "ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c; 4 bl sites. No separate port exists; hook this address to the single handle_deref_or_null symbol (the load_be32 alias precedent)."}
   - {address: 0x083d609c, ghidra: FUN_083d609c, name: handle_deref_or_null_alias_609c,
-     size: 16, module: cxx/handle, status: identified,
-     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 8 bl sites."}
+     size: 16, module: cxx/handle, status: ported,
+     notes: "ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c; 8 bl sites. No separate port exists; hook this address to the single handle_deref_or_null symbol (the load_be32 alias precedent)."}
   - {address: 0x083d60ac, ghidra: FUN_083d60ac, name: handle_deref_or_null_alias_60ac,
-     size: 16, module: cxx/handle, status: identified,
-     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 7 bl sites."}
+     size: 16, module: cxx/handle, status: ported,
+     notes: "ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c; 7 bl sites. No separate port exists; hook this address to the single handle_deref_or_null symbol (the load_be32 alias precedent)."}
   - {address: 0x083d60bc, ghidra: FUN_083d60bc, name: handle_deref_or_null_alias_60bc,
-     size: 16, module: cxx/handle, status: identified,
-     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 25 bl sites."}
+     size: 16, module: cxx/handle, status: ported,
+     notes: "ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c; 25 bl sites. No separate port exists; hook this address to the single handle_deref_or_null symbol (the load_be32 alias precedent)."}
   - {address: 0x083d60cc, ghidra: FUN_083d60cc, name: handle_deref_or_null_alias_60cc,
-     size: 16, module: cxx/handle, status: identified,
-     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 5 bl sites."}
+     size: 16, module: cxx/handle, status: ported,
+     notes: "ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c; 5 bl sites. No separate port exists; hook this address to the single handle_deref_or_null symbol (the load_be32 alias precedent)."}
   - {address: 0x083d6180, ghidra: FUN_083d6180, name: handle_deref_or_null_alias_6180,
-     size: 16, module: cxx/handle, status: identified,
-     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 13 bl sites."}
+     size: 16, module: cxx/handle, status: ported,
+     notes: "ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c; 13 bl sites. No separate port exists; hook this address to the single handle_deref_or_null symbol (the load_be32 alias precedent)."}
   - {address: 0x083d6190, ghidra: FUN_083d6190, name: handle_deref_or_null_alias_6190,
-     size: 16, module: cxx/handle, status: identified,
-     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 69 bl sites."}
+     size: 16, module: cxx/handle, status: ported,
+     notes: "ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c; 69 bl sites. No separate port exists; hook this address to the single handle_deref_or_null symbol (the load_be32 alias precedent)."}
   - {address: 0x083d61a0, ghidra: FUN_083d61a0, name: handle_deref_or_null_alias_61a0,
-     size: 16, module: cxx/handle, status: identified,
-     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 16 bl sites."}
+     size: 16, module: cxx/handle, status: ported,
+     notes: "ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c; 16 bl sites. No separate port exists; hook this address to the single handle_deref_or_null symbol (the load_be32 alias precedent)."}
   - {address: 0x083d61b0, ghidra: FUN_083d61b0, name: handle_deref_or_null_alias_61b0,
-     size: 16, module: cxx/handle, status: identified,
-     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 7 bl sites."}
+     size: 16, module: cxx/handle, status: ported,
+     notes: "ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c; 7 bl sites. No separate port exists; hook this address to the single handle_deref_or_null symbol (the load_be32 alias precedent)."}
   - {address: 0x083d61c0, ghidra: FUN_083d61c0, name: handle_deref_or_null_alias_61c0,
-     size: 16, module: cxx/handle, status: identified,
-     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 2 bl sites."}
+     size: 16, module: cxx/handle, status: ported,
+     notes: "ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c; 2 bl sites. No separate port exists; hook this address to the single handle_deref_or_null symbol (the load_be32 alias precedent)."}
   - {address: 0x083d61d0, ghidra: FUN_083d61d0, name: handle_deref_or_null_alias_61d0,
-     size: 16, module: cxx/handle, status: identified,
-     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 66 bl sites."}
+     size: 16, module: cxx/handle, status: ported,
+     notes: "ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c; 66 bl sites. No separate port exists; hook this address to the single handle_deref_or_null symbol (the load_be32 alias precedent)."}
   - {address: 0x083d64c4, ghidra: FUN_083d64c4, name: handle_deref_or_null_alias_64c4,
-     size: 16, module: cxx/handle, status: identified,
-     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 18 bl sites."}
+     size: 16, module: cxx/handle, status: ported,
+     notes: "ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c; 18 bl sites. No separate port exists; hook this address to the single handle_deref_or_null symbol (the load_be32 alias precedent)."}
   - {address: 0x083d64d4, ghidra: FUN_083d64d4, name: handle_deref_or_null_alias_64d4,
-     size: 16, module: cxx/handle, status: identified,
-     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 9 bl sites."}
+     size: 16, module: cxx/handle, status: ported,
+     notes: "ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c; 9 bl sites. No separate port exists; hook this address to the single handle_deref_or_null symbol (the load_be32 alias precedent)."}
   - {address: 0x083d64e4, ghidra: FUN_083d64e4, name: handle_deref_or_null_alias_64e4,
-     size: 16, module: cxx/handle, status: identified,
-     notes: "byte-identical alias of handle_deref_or_null @ 0x083d604c; 18 bl sites."}
+     size: 16, module: cxx/handle, status: ported,
+     notes: "ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c; 18 bl sites. No separate port exists; hook this address to the single handle_deref_or_null symbol (the load_be32 alias precedent)."}
   - address: 0x08262b1c
     ghidra: FUN_08262b1c
     name: handle_deref_or_null_alias_2b1c
