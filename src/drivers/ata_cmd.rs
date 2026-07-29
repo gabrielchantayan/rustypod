@@ -257,6 +257,16 @@ pub unsafe extern "C" fn ata_cmd_set_flags(cmd: *mut u8, flags: u32) {
     set_word(cmd, FLAGS, flags);
 }
 
+/// ata_cmd_set_feature — original: `FUN_081211ec` @ 0x081211ec (8
+/// bytes; 4 call sites, binary-scanned).
+///
+/// The ATA feature register (+0x14); one SMART builder passes 0xD5.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_cmd_set_feature(cmd: *mut u8, feature: u8) {
+    set_byte(cmd, FEATURE, feature);
+}
+
 /// ata_cmd_set_command — original: `FUN_081211bc` @ 0x081211bc (8
 /// bytes; 16 call sites, binary-scanned).
 ///
@@ -528,6 +538,18 @@ mod tests {
         let mut block = poisoned();
         unsafe { ata_cmd_set_device(block.0.as_mut_ptr(), DEVICE_NONE) };
         assert_eq!(block.0[DEVICE_INDEX] as i8, -1);
+    }
+
+    #[test]
+    fn the_feature_setter_writes_only_the_feature_byte() {
+        let mut block = poisoned();
+        unsafe { ata_cmd_set_feature(block.0.as_mut_ptr(), 0xd5) };
+        assert_eq!(block.0[FEATURE], 0xd5);
+        for other in 0..block.0.len() {
+            if other != FEATURE {
+                assert_eq!(block.0[other], 0xa5, "spilled onto +{other:#x}");
+            }
+        }
     }
 
     #[test]

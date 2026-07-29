@@ -5307,11 +5307,11 @@ functions:
     size: 8
     sig: "void ata_cmd_set_feature(u8 *cmd, u8 feature)"
     module: drivers/ata_cmd
-    status: identified
+    status: ported
     vars: {param_1: cmd, param_2: feature}
     notes: >-
       `strb r1, [r0, #0x14]`. 4 bl call sites; 0x08279bec passes 0xD5.
-      The ATA feature register.
+      The ATA feature register. #[inline(never)].
 
   - address: 0x0812141c
     ghidra: FUN_0812141c
