@@ -19,6 +19,13 @@
 //!   arm helper @ 0x0807a228 multiplies by 1000 to compute the deadline.
 //!   `timer_start_after` tail-branches here.
 //!
+//! - `timer_start_after` — original: `FUN_0812c63c` @ 0x0812c63c (32
+//!   bytes; 100 call sites: 98 `bl` + 2 tail `b`, binary-scanned).
+//!   Stops the timer (the ported `timer_stop`), then tail-branches to
+//!   the ported `timer_set_delay` @ 0x080744c0 with (timer, delay) —
+//!   the delay survives the stop in r5, which is what marks it as the
+//!   delay/deadline.
+//!
 //! - `timer_restart` — original: `FUN_0812bf4c` @ 0x0812bf4c (32 bytes;
 //!   119 call sites: 72 `bl` + 47 tail `b`, binary-scanned). Calls
 //!   `timer_stop` on the timer, writes the FourCC `TIMER_STATE_RUNNING`
@@ -235,6 +242,23 @@ pub unsafe extern "C" fn timer_restart(timer: *mut u8) {
 pub unsafe extern "C" fn timer_set_delay(timer: *mut u8, delay: u32) {
     (timer_ops().trace_assert)(timer);
     set_word(timer, PERIOD, delay);
+}
+
+/// timer_start_after — original: `FUN_0812c63c` @ 0x0812c63c (32 bytes).
+///
+/// Stops `timer` (the ported `timer_stop` @ 0x0812c6b0), then
+/// tail-branches to `timer_set_delay` @ 0x080744c0 with the timer and
+/// `delay` — the delay is preserved in r5 across the stop, which is
+/// what marks it as the delay/deadline. Unlike `timer_restart` this
+/// does NOT write the 'run ' state word or arm the timer; it only
+/// stops and reprograms the period. The Ghidra signature is `void`:
+/// the tail call's r0 is `timer_set_delay`'s leftover, not the timer,
+/// so the scouted `u8 *` return is corrected to `void` (the
+/// `timer_restart` precedent).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn timer_start_after(timer: *mut u8, delay: u32) {
+    timer_stop(timer);
+    timer_set_delay(timer, delay);
 }
 
 #[cfg(test)]
@@ -493,6 +517,73 @@ mod tests {
             timer_restart(timer.ptr());
             assert_eq!(STATE_AT_ARM, TIMER_STATE_RUNNING);
         }
+    }
+
+    /// Expired timer: start_after runs the full stop sequence (trace,
+    /// lock, cancel, unlock), then the set_delay tail (trace again,
+    /// store the delay) — in that order, matching the original's
+    /// `bl timer_stop` followed by the tail branch.
+    #[test]
+    fn start_after_expired_timer_stops_then_sets_delay() {
+        let _lock = mock_env();
+        let mut timer = MockTimer::new(TIMER_STATE_EXPIRED, 0x08A0_1234);
+        let timer_ptr = timer.ptr();
+        unsafe { timer_start_after(timer_ptr, 500) };
+        assert_eq!(
+            calls(),
+            vec![
+                Call::Trace(timer_ptr as usize),
+                Call::Wait(MOCK_HANDLE),
+                Call::Cancel(0x08A0_1234, 0x0812_16b4, timer_ptr as usize),
+                Call::Signal(MOCK_HANDLE),
+                Call::Trace(timer_ptr as usize),
+            ]
+        );
+        assert_eq!(timer.state(), TIMER_STATE_STOPPED);
+        assert_eq!(timer.period(), 500);
+    }
+
+    /// The delay survives the stop untouched (the original parks it in
+    /// r5 across `bl timer_stop`): a stopped timer gets exactly the
+    /// requested delay, and the store happens after the stop's unlock.
+    #[test]
+    fn start_after_preserves_the_delay_across_the_stop() {
+        let _lock = mock_env();
+        static mut PROBED_TIMER: *const MockTimer = core::ptr::null();
+        static mut PERIOD_AT_SIGNAL: u32 = 0xdead_beef;
+        unsafe extern "C" fn probing_signal(handle: u32) {
+            record(Call::Signal(handle));
+            unsafe { PERIOD_AT_SIGNAL = (*PROBED_TIMER).period() };
+        }
+        let mut timer = MockTimer::new(TIMER_STATE_RUNNING, 0);
+        unsafe {
+            PROBED_TIMER = &timer;
+            let mut rom = core::ptr::addr_of!(ROM_KERNEL).read_volatile();
+            rom.sema_signal = probing_signal;
+            *core::ptr::addr_of_mut!(ROM_KERNEL) = rom;
+            timer_start_after(timer.ptr(), 0x1f4);
+            assert_eq!(PERIOD_AT_SIGNAL, 0, "delay stored only after the stop");
+        }
+        assert_eq!(timer.period(), 0x1f4);
+    }
+
+    /// Unlike timer_restart, start_after never writes 'run ' and never
+    /// arms: only the state word (stop's 'stop') and the period word
+    /// change, and the arm helper is not called.
+    #[test]
+    fn start_after_touches_only_state_and_period() {
+        let _lock = mock_env();
+        let mut timer = MockTimer::new(TIMER_STATE_RUNNING, 0x08A0_7777);
+        let before = timer.bytes;
+        unsafe { timer_start_after(timer.ptr(), 0x7d) };
+        let mut expected = before;
+        expected[STATE..STATE + 4].copy_from_slice(&TIMER_STATE_STOPPED.to_le_bytes());
+        expected[PERIOD..PERIOD + 4].copy_from_slice(&0x7du32.to_le_bytes());
+        assert_eq!(timer.bytes, expected, "only state and period change");
+        assert!(
+            calls().iter().all(|c| !matches!(c, Call::Arm(_))),
+            "start_after must not arm the timer"
+        );
     }
 
     /// The trace runs before the delay store — the original's `bl
