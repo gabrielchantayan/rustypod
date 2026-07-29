@@ -68,6 +68,7 @@
 //! | 0x08100b74 | [`instance_of_class_6600`] | 24 | 36 `bl` |
 //! | 0x0812f0a4 | [`instance_of_class_4e00`] | 24 | 7 `bl` |
 //! | 0x081353e8 | [`instance_of_class_8f00`] | 24 | 2 `bl` |
+//! | 0x0815ff34 | [`instance_of_class_8700`] | 24 | 14 `bl` |
 //!
 //! All call-site counts are binary-scanned over osos.dec (every `bl`/`b`
 //! whose computed target is the function), not read off osos.asm — the
@@ -606,6 +607,30 @@ pub unsafe extern "C" fn instance_of_class_8f00() -> *mut u8 {
     instance_of_class(CLASS_ID_EQ_SETTING)
 }
 
+/// The class id 0x8700. The constructor @ 0x0815ffc4 registers its
+/// `this` under this id @ 0x08160078 but never hands a class-name
+/// literal to the factory @ 0x0820b230, so the class is **not
+/// identified** — the id is the only handle the firmware gives it
+/// (the `instance_of_class_6000` / `_6600` precedent).
+pub const CLASS_ID_8700: u32 = 0x8700;
+
+/// instance_of_class_8700 — original: `FUN_0815ff34` @ 0x0815ff34
+/// (24 bytes; 14 `bl` call sites, binary-scanned over osos.dec).
+///
+/// Same accessor for class id 0x8700: `push {r4,lr}; mov r0,#0x8700;
+/// bl 0x081d2184; pop {r4,lr}; mov r1,#0x8700; b 0x08275b9c` —
+/// resolve the registered singleton through the global class registry,
+/// then let the object's own vtable confirm it really is that class
+/// (NULL when either step fails). functions.csv's 24-byte size is
+/// correct: the next function starts @ 0x0815ff4c (the 28 in the
+/// earlier sibling notes was a mis-count of this 6-instruction body).
+/// The class is **not identified** (see [`CLASS_ID_8700`]).
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn instance_of_class_8700() -> *mut u8 {
+    instance_of_class(CLASS_ID_8700)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -1020,6 +1045,10 @@ mod tests {
                 instance_of_class_8f00().is_null(),
                 "0x8f00 was never registered"
             );
+            assert!(
+                instance_of_class_8700().is_null(),
+                "0x8700 was never registered"
+            );
         }
         restore(guard);
     }
@@ -1068,6 +1097,18 @@ mod tests {
             let this = ptr::addr_of_mut!(object) as *mut u8;
             registry_register(this, CLASS_ID_EQ_SETTING);
             assert_eq!(instance_of_class_8f00(), this);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_8700_accessor_looks_up_and_casts_its_own_id() {
+        let guard = mock();
+        unsafe {
+            let mut object = object_accepting(CLASS_ID_8700);
+            let this = ptr::addr_of_mut!(object) as *mut u8;
+            registry_register(this, CLASS_ID_8700);
+            assert_eq!(instance_of_class_8700(), this);
         }
         restore(guard);
     }
