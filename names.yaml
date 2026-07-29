@@ -9174,14 +9174,19 @@ functions:
     name: name_from_token
     size: 48
     sig: "char *name_from_token(sqlite3 *db, Token *name)"
-    module: null
-    status: identified
+    module: sqlite/name_from_token
+    status: ported
+    vars: {param_1: db, param_2: name}
     notes: >-
       SQLite's sqlite3NameFromToken. 27 bl call sites. NULL token -> NULL;
-      otherwise db_str_ndup(db, tok->z, tok->n) then sqlite3Dequote
-      @ 0x083753d0. Pins the Token layout - z at +0x00 and a packed
-      `dyn:1 | n:31` word at +0x04 that the code reads as `field >> 1`
-      (`lsr r2,r2,#1`). NOT ported - both callees unported.
+      otherwise db_str_ndup(db, tok->z, tok->n) then dequote @ 0x083753d0
+      (unconditional; a NULL duplicate is dequote's no-op case). Pins the
+      Token layout - z at +0x00 and a packed `dyn:1 | n:31` word at +0x04
+      that the code reads as `field >> 1` (`lsr r2,r2,#1`). Both callees
+      are now ported (dequote landed first, in sqlite/dequote). Fields
+      are addressed by word index (block_region.rs precedent) so the
+      64-bit host keeps the pointer and packed words disjoint. match.py:
+      same structure (NULL guard, ldr/ldr/lsr, both callee bls).
 
   - address: 0x0836761c
     ghidra: FUN_0836761c
