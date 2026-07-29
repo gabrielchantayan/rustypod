@@ -1,6 +1,6 @@
 //! FreeType `ftutil.c` — the memory layer every other FreeType module
-//! allocates through. Three functions live here; between them they carry
-//! 326 `bl` + 12 tail `b` call sites (binary-scanned), which makes this
+//! allocates through. Four functions live here; between them they carry
+//! 327 `bl` + 12 tail `b` call sites (binary-scanned), which makes this
 //! the second-busiest FreeType translation unit in the image after the
 //! trace sink.
 //!
@@ -8,7 +8,7 @@
 //! the `__FILE__` pointer 0x08901290, whose text is
 //! `...\freetype\src\base\ftutil.c`; its neighbour at 0x082cfa90 is
 //! upstream's `ft_highpow2` verbatim (clear the lowest set bit until the
-//! value goes to zero, return the previous one); and the
+//! value goes to zero, return the previous one — ported below); and the
 //! `ft_mem_qrealloc` at 0x082cfb34 calls both [`ft_mem_alloc`] and
 //! [`ft_mem_free`] exactly where upstream's source does — the `block =
 //! ft_mem_alloc( memory, new_count*item_size, &error )` of its
@@ -158,6 +158,31 @@ pub unsafe extern "C" fn ft_mem_free(memory: *mut FtMemory, block: *mut u8) {
     }
 }
 
+/// ft_highpow2 (FreeType `ft_highpow2`, ftutil.c) — original:
+/// `FUN_082cfa90` @ 0x082cfa90 (20 bytes; 1 `bl` call site, @
+/// 0x080b7aac).
+///
+/// Clears the lowest set bit (`value & (value - 1)`) until the result
+/// is 0, then returns the last non-zero value — the highest power of
+/// two `<= value`, and 0 for 0. The original is a four-instruction
+/// loop (`sub`/`ands`/`movne`/`bne`) with no frame at all.
+///
+/// Called from the memory stream code's buffer sizing; the third
+/// independent pin on this translation unit being ftutil.c (see the
+/// module header).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub extern "C" fn ft_highpow2(mut value: u32) -> u32 {
+    loop {
+        let cleared = value & value.wrapping_sub(1);
+        if cleared == 0 {
+            return value;
+        }
+        value = cleared;
+    }
+}
+
+
 #[cfg(test)]
 extern crate std;
 
@@ -288,6 +313,37 @@ mod tests {
     use super::test_memory::*;
     use super::*;
     use std::vec;
+
+    #[test]
+    fn highpow2_rounds_down_to_a_power_of_two() {
+        assert_eq!(ft_highpow2(0), 0);
+        assert_eq!(ft_highpow2(1), 1);
+        assert_eq!(ft_highpow2(2), 2);
+        assert_eq!(ft_highpow2(3), 2);
+        assert_eq!(ft_highpow2(4), 4);
+        assert_eq!(ft_highpow2(5), 4);
+        assert_eq!(ft_highpow2(0x4000_0001), 0x4000_0000);
+        assert_eq!(ft_highpow2(0x8000_0000), 0x8000_0000);
+        assert_eq!(ft_highpow2(0xffff_ffff), 0x8000_0000);
+    }
+
+    #[test]
+    fn highpow2_matches_the_bit_clearing_reference() {
+        fn reference(mut value: u32) -> u32 {
+            loop {
+                let cleared = value & value.wrapping_sub(1);
+                if cleared == 0 {
+                    return value;
+                }
+                value = cleared;
+            }
+        }
+        for value in [0u32, 1, 7, 8, 9, 255, 256, 257, 0x5a5a_5a5a, 0xa5a5_a5a5] {
+            assert_eq!(ft_highpow2(value), reference(value), "value {value:#x}");
+            let expected = if value == 0 { 0 } else { 1 << (31 - value.leading_zeros()) };
+            assert_eq!(ft_highpow2(value), expected, "value {value:#x}");
+        }
+    }
 
     #[test]
     fn qalloc_returns_the_allocators_block_and_no_error() {

@@ -7281,12 +7281,13 @@ functions:
     name: rect_set_duplicate
     size: 12
     module: ui/rect
-    status: identified
+    status: ported
     notes: >-
-      Byte-identical duplicate of rect_set @ 0x0826c378 (`ldr ip, [sp]`
-      / `stm r0, {r1,r2,r3,ip}` / `bx lr`), emitted a second time from
-      another translation unit. 1 bl call site. Deliberately given no
-      separate Rust symbol - point any hook at rect_set.
+      ALIAS - byte-identical duplicate of rect_set @ 0x0826c378 (`ldr
+      ip, [sp]` / `stm r0, {r1,r2,r3,ip}` / `bx lr`), emitted a second
+      time from another translation unit. 1 bl call site. No separate
+      Rust symbol - point any hook at rect_set (the load_be32 alias
+      precedent).
 
   - address: 0x0826c5cc
     ghidra: FUN_0826c5cc
@@ -7759,17 +7760,19 @@ functions:
     size: 20
     sig: u32 ft_highpow2(u32 value)
     module: ft/memory
-    status: identified
+    status: ported
     vars:
       param_1: value
     notes: >-
       FreeType ft_highpow2 (ftutil.c) verbatim - clear the lowest set bit
       (`value & (value - 1)`) until the result is 0, then return the last
       non-zero value, i.e. the highest power of two <= value (and 0 for
-      0). 1 bl + 1 b call sites. Not ported; recorded because it is the
-      third independent pin on this translation unit being ftutil.c,
-      alongside the __FILE__ pointer 0x08901290 (runtime; the text sits
-      at file 0x0890c168) and the ft_mem_* family itself.
+      0). 1 bl call site (@ 0x080b7aac; the single `b` to the address is
+      the function's own loop back-edge). The third independent pin on
+      this translation unit being ftutil.c, alongside the __FILE__
+      pointer 0x08901290 (runtime; the text sits at file 0x0890c168) and
+      the ft_mem_* family itself. match.py - same four-instruction loop;
+      LLVM adds its frame and a redundant mov pair.
 
   - address: 0x082cfb34
     ghidra: FUN_082cfb34
