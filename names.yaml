@@ -4679,18 +4679,24 @@ functions:
     size: 112
     sig: "i32 ft_platform_file_open(i32 volume, const char *path, void **handle)"
     module: ft/system
-    status: identified
-    vars: {param_1: volume, param_2: path, param_3: handle}
+    status: ported
+    vars: {param_1: volume, param_2: path, param_3: handle, piVar2: file, uVar3: result}
     notes: >-
       The open behind ft_platform_stream_open @ 0x082d3ddc.
-      operator_new(84) (0x082aadd4) then the file object's constructor
-      at 0x08278dc4 with (raw, path, 1, volume, 0x10000, 2, 0); *handle
-      takes the result. A non-null object whose status word at +28 is
-      non-zero means the open failed, so slot 1 of its vtable is called
-      to destroy it and *handle is nulled; the return value is 1 only
-      when the object survives. Not ported - the C++ file class behind
-      it (constructor 0x08278dc4, seek 0x082787b8, read 0x082784b8) is a
-      whole subsystem.
+      operator_new(84) (0x082aadd4, the real heap::veneers port) then
+      the file object's constructor at 0x08278dc4 with (raw, path, 1,
+      volume, 0x10000, 2, 0); *handle takes the result unconditionally.
+      A non-null object whose status word at +28 is non-zero means the
+      open failed, so slot 1 of its vtable is called to destroy it and
+      *handle is nulled; the return value is 1 only when the object
+      survives. PORT DEVIATION: the constructor is a whole C++ file
+      class subsystem and stays unported, so it is called through the
+      FT_PLATFORM_FILE_CTOR dispatch slot (the app/singletons.rs
+      pattern) whose default stub fails the open closed by returning
+      null; everything else - the 0x54 allocation, the literal
+      immediates, the status-word test, the destroy-and-null path - is
+      reproduced exactly. match.py shows the same shape, the only delta
+      being the blx-through-slot indirection.
 
   - address: 0x082d3d7c
     ghidra: FUN_082d3d7c

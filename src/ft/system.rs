@@ -20,28 +20,32 @@
 //!
 //! # Deviations
 //!
-//! The four firmware routines the opener stands on are not ported:
+//! [`ft_platform_file_open`] @ 0x082d3cb4 — the open itself — is ported:
+//! `operator new(84)` (the real port, `heap::veneers::operator_new`),
+//! then the file object's constructor at 0x08278dc4, then a check of
+//! the object's status word at +28: non-zero means the open failed, so
+//! the object is destroyed through vtable slot 1 and the out-parameter
+//! nulled. The constructor is a whole C++ file-class subsystem and is
+//! **not** ported, so it sits behind the [`FT_PLATFORM_FILE_CTOR`]
+//! dispatch slot (the singletons.rs pattern) whose default stub fails
+//! the open closed. Still not ported:
 //!
-//! - 0x082d3cb4, the open itself — `operator new(84)` followed by the
-//!   file object's constructor at 0x08278dc4, then a check of the
-//!   object's status word at +28: non-zero means the open failed, so the
-//!   object is destroyed through vtable slot 1 and the out-parameter
-//!   nulled.
 //! - 0x082a5418, the length query, which locks a mutex and walks the
 //!   object's directory entry.
 //! - 0x082d3d7c / 0x082d3d40, the read and close callbacks, which go
 //!   through 0x082787b8 (seek) and 0x082784b8 (read) and the object's
 //!   virtual destructor.
 //!
-//! So the port takes them as an installable [`FtPlatformFileOps`], the
-//! same shape `ft/trace.rs` uses for the unported logger: every entry is
-//! one of the opener's own `bl` targets or stored literals, nothing about
-//! the layer below is invented, and the opener's logic — which is what
-//! was actually recovered — is reproduced exactly. With no ops installed
-//! every open fails with [`FT_PLATFORM_OPEN_FAILED`], which is what the
-//! hardware does when the volume is not mounted.
+//! So the opener takes *those* as an installable [`FtPlatformFileOps`],
+//! the same shape `ft/trace.rs` uses for the unported logger: every
+//! entry is one of the opener's own `bl` targets or stored literals,
+//! nothing about the layer below is invented, and the opener's logic —
+//! which is what was actually recovered — is reproduced exactly. With
+//! no ops installed every open fails with [`FT_PLATFORM_OPEN_FAILED`],
+//! which is what the hardware does when the volume is not mounted.
 
 use crate::ft::stream::{FtStream, FtStreamCloseFunc, FtStreamIoFunc};
+use crate::heap::veneers::operator_new;
 
 /// The opener's `moveq r0, #9` @ 0x082d3de4 — a null `FT_Stream`. These
 /// two codes are the firmware's own numbering, not FreeType's;
@@ -149,6 +153,125 @@ pub unsafe extern "C" fn ft_platform_stream_open(
     (*stream).pos = 0;
     (*stream).read = Some(ops.read);
     (*stream).close = Some(ops.close);
+    0
+}
+
+/// Allocation size of the firmware's file object (`mov r0, #0x54` @
+/// 0x082d3cbc).
+pub const FT_FILE_OBJECT_SIZE: usize = 0x54;
+
+/// Offset of the file object's status word (`ldr r1, [r0, #0x1c]` @
+/// 0x082d3cfc): zero means the open succeeded.
+pub const FT_FILE_STATUS_OFFSET: usize = 0x1c;
+
+/// The third constructor argument at this call site (`mov r2, #0x1` @
+/// 0x082d3ce0). Other callers of the constructor pass 0 or 1; what the
+/// constructor does with it (a byte store at sub-object +8 and `arg ^ 1`
+/// into the base constructor) does not pin down a name.
+pub const FT_FILE_OPEN_MODE: u32 = 1;
+
+/// The fifth constructor argument at this call site (`mov r1, #0x10000`
+/// @ 0x082d3cd8). Other call sites pass 0x400; the constructor feeds it
+/// to a helper whose result it keeps at +0x2c. Some kind of size or
+/// budget — carried by value, not named.
+pub const FT_FILE_OPEN_FLAGS: u32 = 0x10000;
+
+/// The file-object constructor @ 0x08278dc4. Only
+/// [`ft_platform_file_open`]'s argument list is recovered: `this` is the
+/// raw `operator new` block, `path` the NUL-terminated path, `volume`
+/// the digit split off the front of the FreeType pathname, and `mode` /
+/// `flags` / `two` / `zero` the literal immediates 1, 0x10000, 2 and 0
+/// (the last three pushed on the stack, ADS-style). Returns `this`, or
+/// null when the object could not be built.
+pub type FtPlatformFileCtor = unsafe extern "C" fn(
+    this: *mut u8,
+    path: *const u8,
+    mode: u32,
+    volume: i32,
+    flags: u32,
+    two: u32,
+    zero: u32,
+) -> *mut u8;
+
+/// Default constructor slot: fails the open by returning null, which the
+/// ported opener already treats as "open failed" (the original's
+/// `beq 0x082d3d20` with r5 = 0). The real constructor @ 0x08278dc4 is a
+/// whole C++ file-class subsystem; until it is ported, succeeding here
+/// would hand the size query a bogus object, so the stub fails closed.
+unsafe extern "C" fn file_ctor_unported(
+    this: *mut u8,
+    _path: *const u8,
+    _mode: u32,
+    _volume: i32,
+    _flags: u32,
+    _two: u32,
+    _zero: u32,
+) -> *mut u8 {
+    let _ = this;
+    core::ptr::null_mut()
+}
+
+/// The active file-object constructor (see the module header). Swap the
+/// slot before the first open; read volatilically at every call, as with
+/// every dispatch table in the crate.
+pub static mut FT_PLATFORM_FILE_CTOR: FtPlatformFileCtor = file_ctor_unported;
+
+/// ft_platform_file_open — original: `FUN_082d3cb4` @ 0x082d3cb4
+/// (112 bytes; 1 `bl` call site, [`ft_platform_stream_open`] @
+/// 0x082d3ddc).
+///
+/// Opens `path` on `volume` as one of the firmware's C++ file objects.
+/// Allocates the 84-byte object with `operator new`, runs the
+/// file-object constructor over it with the argument set
+/// `(path, 1, volume, 0x10000, 2, 0)`, and stores the result in
+/// `*handle` *unconditionally* — even when the constructor returned
+/// null, in which case the function returns 0. On a non-null object the
+/// status word at +0x1c decides: zero means the open succeeded (return
+/// 1), non-zero means the constructor built the object but could not
+/// open the file, so the object is destroyed through slot 1 of its
+/// vtable (the virtual destructor) and `*handle` is nulled before
+/// returning 0.
+///
+/// # Deviations
+///
+/// The constructor is not ported (see the module header); it is called
+/// through the [`FT_PLATFORM_FILE_CTOR`] dispatch slot. Everything else
+/// — the allocation size, the literal immediates, the status-word test,
+/// the destroy-and-null failure path — is reproduced exactly.
+///
+/// # Safety
+/// `path` must be a NUL-terminated string the constructor can read, and
+/// `handle` must be a valid out-pointer. The installed constructor must
+/// honor the original's contract: null or a pointer to a file object
+/// with a status word at +0x1c and a destructor in vtable slot 1.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_platform_file_open(
+    volume: i32,
+    path: *const u8,
+    handle: *mut *mut core::ffi::c_void,
+) -> i32 {
+    let ctor = core::ptr::addr_of!(FT_PLATFORM_FILE_CTOR).read_volatile();
+    let file = ctor(
+        operator_new(FT_FILE_OBJECT_SIZE),
+        path,
+        FT_FILE_OPEN_MODE,
+        volume,
+        FT_FILE_OPEN_FLAGS,
+        2,
+        0,
+    );
+    *handle = file.cast();
+    if file.is_null() {
+        return 0;
+    }
+    if file.add(FT_FILE_STATUS_OFFSET).cast::<u32>().read() == 0 {
+        return 1;
+    }
+    let vtable = file.cast::<*const u8>().read();
+    let destroy: unsafe extern "C" fn(this: *mut u8) =
+        core::mem::transmute(vtable.cast::<*const u8>().add(1).read());
+    destroy(file);
+    *handle = core::ptr::null_mut();
     0
 }
 
@@ -342,5 +465,182 @@ mod tests {
             );
             assert!(stream.read.is_none());
         }
+    }
+
+    // ---------------------------------------------------------------
+    // ft_platform_file_open.
+
+    /// Serializes the tests that swap HEAP_OPS and the ctor slot.
+    static FILE_OPEN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// The block the stub allocator hands out (the file object is 84
+    /// bytes; the arena is padded so the +0x1c status word is in range).
+    static mut FILE_ARENA: [u8; 128] = [0; 128];
+
+    /// What the recording constructor returns.
+    static mut CTOR_RESULT: *mut u8 = core::ptr::null_mut();
+    static mut CTOR_CALLS: usize = 0;
+    static mut CTOR_THIS: *mut u8 = core::ptr::null_mut();
+    static mut CTOR_PATH: *const u8 = core::ptr::null();
+    static mut CTOR_ARGS: [u32; 5] = [0; 5];
+    static mut CTOR_VOLUME: i32 = -1;
+    static mut ALLOC_SIZE: usize = 0;
+    static mut DESTROY_CALLS: usize = 0;
+    static mut DESTROY_THIS: *mut u8 = core::ptr::null_mut();
+
+    /// The fake vtable: slot 0 unused, slot 1 the recording destructor.
+    static mut VTABLE: [usize; 2] = [0; 2];
+
+    unsafe extern "C" fn stub_alloc(
+        _heap: *mut crate::heap::types::HeapDescriptorDescriptor,
+        size: usize,
+        _tag: usize,
+    ) -> *mut u8 {
+        *core::ptr::addr_of_mut!(ALLOC_SIZE) = size;
+        core::ptr::addr_of_mut!(FILE_ARENA).cast()
+    }
+
+    unsafe extern "C" fn stub_create(
+        _desc: *mut crate::heap::types::HeapDescriptor,
+        _start: *mut u8,
+        _size: usize,
+    ) -> *mut crate::heap::types::HeapDescriptorDescriptor {
+        unreachable!("DEFAULT_HEAP is pre-seeded, so the lazy init must not run");
+    }
+
+    unsafe extern "C" fn recording_ctor(
+        this: *mut u8,
+        path: *const u8,
+        mode: u32,
+        volume: i32,
+        flags: u32,
+        two: u32,
+        zero: u32,
+    ) -> *mut u8 {
+        *core::ptr::addr_of_mut!(CTOR_CALLS) += 1;
+        *core::ptr::addr_of_mut!(CTOR_THIS) = this;
+        *core::ptr::addr_of_mut!(CTOR_PATH) = path;
+        *core::ptr::addr_of_mut!(CTOR_VOLUME) = volume;
+        *core::ptr::addr_of_mut!(CTOR_ARGS) = [mode, flags, two, zero, 0];
+        *core::ptr::addr_of!(CTOR_RESULT)
+    }
+
+    unsafe extern "C" fn recording_destroy(this: *mut u8) {
+        *core::ptr::addr_of_mut!(DESTROY_CALLS) += 1;
+        *core::ptr::addr_of_mut!(DESTROY_THIS) = this;
+    }
+
+    /// Installs the stub allocator plus the recording constructor.
+    fn mock_file_layer(ctor_result: *mut u8) -> std::sync::MutexGuard<'static, ()> {
+        let guard = FILE_OPEN_LOCK.lock().unwrap();
+        unsafe {
+            let mut ops = core::ptr::addr_of!(crate::heap::veneers::HEAP_OPS).read_volatile();
+            ops.alloc = stub_alloc;
+            ops.create = stub_create;
+            core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS).write_volatile(ops);
+            core::ptr::addr_of_mut!(crate::heap::types::DEFAULT_HEAP)
+                .write_volatile(0x1111_0000 as *mut crate::heap::types::HeapDescriptorDescriptor);
+            core::ptr::addr_of_mut!(FT_PLATFORM_FILE_CTOR).write_volatile(recording_ctor);
+            *core::ptr::addr_of_mut!(CTOR_RESULT) = ctor_result;
+            *core::ptr::addr_of_mut!(CTOR_CALLS) = 0;
+            *core::ptr::addr_of_mut!(ALLOC_SIZE) = 0;
+            *core::ptr::addr_of_mut!(DESTROY_CALLS) = 0;
+            *core::ptr::addr_of_mut!(DESTROY_THIS) = core::ptr::null_mut();
+            *core::ptr::addr_of_mut!(VTABLE) = [0, recording_destroy as usize];
+        }
+        guard
+    }
+
+    /// Restores every wired default. Takes the guard by value so it
+    /// cannot be re-locked while still held (the singletons.rs rule).
+    fn restore_file_layer(guard: std::sync::MutexGuard<'static, ()>) {
+        unsafe {
+            core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS)
+                .write_volatile(crate::heap::veneers::DEFAULT_HEAP_OPS);
+            core::ptr::addr_of_mut!(crate::heap::types::DEFAULT_HEAP)
+                .write_volatile(core::ptr::null_mut());
+            core::ptr::addr_of_mut!(FT_PLATFORM_FILE_CTOR).write_volatile(file_ctor_unported);
+        }
+        drop(guard);
+    }
+
+    fn arena() -> *mut u8 {
+        unsafe { core::ptr::addr_of_mut!(FILE_ARENA).cast() }
+    }
+
+    #[test]
+    fn a_successful_open_allocates_constructs_and_returns_one() {
+        let guard = mock_file_layer(arena());
+        unsafe {
+            // The constructor reports success: status word zero.
+            arena().add(FT_FILE_STATUS_OFFSET).cast::<u32>().write(0);
+            let path = b"/Fonts/Helvetica.ttf\0";
+            let mut handle = 0x1234 as *mut core::ffi::c_void;
+            assert_eq!(ft_platform_file_open(3, path.as_ptr(), &mut handle), 1);
+            assert_eq!(*core::ptr::addr_of!(ALLOC_SIZE), 0x54);
+            assert_eq!(*core::ptr::addr_of!(CTOR_CALLS), 1);
+            assert_eq!(*core::ptr::addr_of!(CTOR_THIS), arena());
+            assert_eq!(*core::ptr::addr_of!(CTOR_PATH), path.as_ptr());
+            assert_eq!(*core::ptr::addr_of!(CTOR_VOLUME), 3);
+            assert_eq!(
+                *core::ptr::addr_of!(CTOR_ARGS),
+                [1, 0x10000, 2, 0, 0],
+                "the original's literal immediates, in order"
+            );
+            assert_eq!(handle, arena().cast());
+            assert_eq!(*core::ptr::addr_of!(DESTROY_CALLS), 0);
+        }
+        restore_file_layer(guard);
+    }
+
+    #[test]
+    fn a_null_constructing_open_stores_null_and_returns_zero() {
+        let guard = mock_file_layer(core::ptr::null_mut());
+        unsafe {
+            // The out-parameter is written unconditionally — even the
+            // constructor's null goes through it before the test.
+            let mut handle = 0x1234 as *mut core::ffi::c_void;
+            assert_eq!(ft_platform_file_open(0, b"/x\0".as_ptr(), &mut handle), 0);
+            assert!(handle.is_null());
+            assert_eq!(*core::ptr::addr_of!(CTOR_CALLS), 1);
+            assert_eq!(*core::ptr::addr_of!(DESTROY_CALLS), 0);
+        }
+        restore_file_layer(guard);
+    }
+
+    #[test]
+    fn a_failing_open_destroys_through_vtable_slot_one_and_nulls_the_handle() {
+        let guard = mock_file_layer(arena());
+        unsafe {
+            // A built object whose open failed: vtable at +0, status at
+            // +0x1c non-zero.
+            arena().cast::<usize>().write(core::ptr::addr_of!(VTABLE) as usize);
+            arena().add(FT_FILE_STATUS_OFFSET).cast::<u32>().write(5);
+            let mut handle = core::ptr::null_mut();
+            assert_eq!(ft_platform_file_open(1, b"/missing\0".as_ptr(), &mut handle), 0);
+            assert_eq!(*core::ptr::addr_of!(DESTROY_CALLS), 1);
+            assert_eq!(*core::ptr::addr_of!(DESTROY_THIS), arena());
+            assert!(handle.is_null(), "the failed object does not leak into the handle");
+        }
+        restore_file_layer(guard);
+    }
+
+    #[test]
+    fn the_default_ctor_slot_fails_the_open_closed() {
+        let guard = FILE_OPEN_LOCK.lock().unwrap();
+        unsafe {
+            core::ptr::addr_of_mut!(FT_PLATFORM_FILE_CTOR).write_volatile(file_ctor_unported);
+            let block = file_ctor_unported(
+                arena(),
+                b"/x\0".as_ptr(),
+                1,
+                0,
+                0x10000,
+                2,
+                0,
+            );
+            assert!(block.is_null());
+        }
+        drop(guard);
     }
 }
