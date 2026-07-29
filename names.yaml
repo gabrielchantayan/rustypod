@@ -7782,7 +7782,9 @@ functions:
       void *ft_mem_qrealloc(FtMemory *memory, i32 item_size, i32
       cur_count, i32 new_count, void *block, i32 *p_error)
     module: ft/memory
-    status: identified
+    status: ported
+    vars: {param_1: memory, param_2: item_size, param_3: cur_count,
+           param_4: new_count, param_5: block, param_6: p_error}
     notes: >-
       FreeType ft_mem_qrealloc (ftutil.c). Rejects cur_count < 0 ||
       new_count < 0 || item_size <= 0 with FT_Err_Invalid_Argument (the
@@ -7790,11 +7792,14 @@ functions:
       new_count == 0 frees the block through ft_mem_free and yields NULL;
       new_count > FT_INT_MAX/item_size (an __rt_sdiv @ 0x08031568 against
       0x7fffffff) is FT_Err_Array_Too_Large (10); cur_count == 0 asserts
-      block == NULL (FT_ASSERT __LINE__ 139, ftutil.c) and goes to
-      ft_mem_alloc; otherwise memory->realloc (FT_MemoryRec +12) with
-      (memory, cur_count*item_size, new_count*item_size, block) and
-      FT_Err_Out_Of_Memory on NULL. 1 bl call site. Not ported - only
-      reachable through ft_mem_realloc, which no ported caller needs yet.
+      block == NULL (FT_ASSERT __LINE__ 139, ftutil.c, through the ported
+      ft_panic) and goes to ft_mem_alloc; otherwise memory->realloc
+      (FT_MemoryRec +12) with (memory, cur_count*item_size,
+      new_count*item_size, block) and FT_Err_Out_Of_Memory on NULL. 1 bl
+      call site (ft_mem_realloc @ 0x082cfc3c). The assert's third vararg
+      is the live r3 (new_count) - reproduced though the format ignores
+      it. match.py - same arm structure; LLVM inlines __rt_sdiv and
+      ft_mem_alloc (the ft_mem_alloc note's own deviation).
 
   - address: 0x082cfc3c
     ghidra: FUN_082cfc3c

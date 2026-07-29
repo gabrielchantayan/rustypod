@@ -16,6 +16,10 @@ pub const FT_ERR_CANNOT_OPEN_RESOURCE: i32 = 0x01;
 /// @ 0x082cfb24 (a negative size).
 pub const FT_ERR_INVALID_ARGUMENT: i32 = 0x06;
 
+/// `FT_Err_Array_Too_Large` — `movlt r0, #10` in `ft_mem_qrealloc`
+/// @ 0x082cfb94 (`new_count > FT_INT_MAX / item_size`).
+pub const FT_ERR_ARRAY_TOO_LARGE: i32 = 0x0a;
+
 /// `FT_Err_Invalid_Library_Handle` — `moveq r0, #33` @ 0x0804f258.
 pub const FT_ERR_INVALID_LIBRARY_HANDLE: i32 = 0x21;
 

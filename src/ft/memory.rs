@@ -30,7 +30,21 @@
 //! unaffected, so every `bl` target quoted here is a file address like
 //! the rest of the project's.
 
-use crate::ft::error::{FT_ERR_INVALID_ARGUMENT, FT_ERR_OK, FT_ERR_OUT_OF_MEMORY};
+use crate::ft::error::{FT_ERR_ARRAY_TOO_LARGE, FT_ERR_INVALID_ARGUMENT, FT_ERR_OK,
+                       FT_ERR_OUT_OF_MEMORY};
+use crate::ft::trace::ft_panic;
+use crate::runtime::rt_div::__rt_sdiv;
+
+/// `FT_ASSERT`'s message and the `__FILE__` `ft_mem_qrealloc`'s assert
+/// passes — the literal-pool word at 0x082cfc14 and the runtime pointer
+/// 0x08901290 loaded at 0x082cfc10 (the `ft/stream.rs` pattern).
+static ASSERTION_FAILED: &[u8] = b"assertion failed on line %d of file %s\n\0";
+static FTUTIL_C: &[u8] =
+    b"c:\\BWA\\N25CFirmwareWin-75\\srcroot\\Firmware\\Silver\\3rdParty\\freetype\\src\\base\\ftutil.c\0";
+
+/// The `__LINE__` of `FT_ASSERT( block == NULL )` in `ft_mem_qrealloc`
+/// (`movne r1, #0x8b` @ 0x082cfbb0).
+const ASSERT_LINE_QREALLOC_BLOCK_NULL: u32 = 139;
 
 /// `FT_Alloc_Func` — `memory->alloc`, called through `[memory, #4]`.
 /// Returns null when it cannot satisfy the request.
@@ -182,6 +196,86 @@ pub extern "C" fn ft_highpow2(mut value: u32) -> u32 {
     }
 }
 
+/// ft_mem_qrealloc (FreeType `ft_mem_qrealloc`, ftutil.c) — original:
+/// `FUN_082cfb34` @ 0x082cfb34 (220 bytes; 1 `bl` call site, from the
+/// unported `ft_mem_realloc` @ 0x082cfc3c).
+///
+/// Reallocates a counted array:
+///
+/// - `cur_count < 0 || new_count < 0 || item_size <= 0` — the pre-2.3.5
+///   `item_size <= 0` spelling, not the later `< 0`; the original's
+///   predicated `subs`/`cmpge`/`cmpge`/`movle`/`ble` chain tests exactly
+///   these three signed conditions — yields `FT_Err_Invalid_Argument`.
+/// - `new_count == 0` frees the block through [`ft_mem_free`] and
+///   returns NULL with `FT_Err_Ok`.
+/// - `new_count > FT_INT_MAX / item_size` (an [`__rt_sdiv`] against
+///   0x7fffffff, signed `blt`) yields `FT_Err_Array_Too_Large`.
+/// - `cur_count == 0` asserts `block == NULL` (`FT_ASSERT` on line 139
+///   of ftutil.c — a diverging [`ft_panic`] when it is not) and goes to
+///   [`ft_mem_alloc`].
+/// - otherwise calls `memory->realloc` (FT_MemoryRec +12) with
+///   `(memory, cur_count*item_size, new_count*item_size, block)` and
+///   yields `FT_Err_Out_Of_Memory` when it returns NULL.
+///
+/// Faithful details: the two `mul`s are 32-bit wrapping (the original's
+/// `mul` truncates); the products are computed *before* the
+/// `cur_count == 0` split (`mul r4, r6, r4` ahead of the test);
+/// `*p_error` is written exactly once, at the end, from the stack cell
+/// the error paths store into. The assert's third vararg is whatever
+/// r3 still holds at the `blne` — the original `new_count`, reproduced
+/// for faithfulness even though the format ignores it.
+///
+/// "Quick" means the new storage is NOT zeroed on the grow path — that
+/// is what the realloc callback is for, and the port leaves it alone.
+///
+/// # Safety
+/// `memory` must be a valid `FtMemory` with a callable `realloc` when
+/// both counts are positive; `block` must be null or come from this
+/// allocator; `p_error` must be writable.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_mem_qrealloc(
+    memory: *mut FtMemory,
+    item_size: i32,
+    cur_count: i32,
+    new_count: i32,
+    block: *mut u8,
+    p_error: *mut i32,
+) -> *mut u8 {
+    let mut error = FT_ERR_OK;
+    let mut block = block;
+    if cur_count < 0 || new_count < 0 || item_size <= 0 {
+        error = FT_ERR_INVALID_ARGUMENT;
+    } else if new_count == 0 {
+        ft_mem_free(memory, block);
+        block = core::ptr::null_mut();
+    } else if new_count > __rt_sdiv(i32::MAX, item_size) {
+        error = FT_ERR_ARRAY_TOO_LARGE;
+    } else if cur_count == 0 {
+        if !block.is_null() {
+            ft_panic(
+                ASSERTION_FAILED.as_ptr(),
+                ASSERT_LINE_QREALLOC_BLOCK_NULL,
+                FTUTIL_C.as_ptr() as usize as u32,
+                new_count as u32,
+            );
+        }
+        block = ft_mem_alloc(memory, new_count.wrapping_mul(item_size), &mut error);
+    } else {
+        block = ((*memory).realloc)(
+            memory,
+            cur_count.wrapping_mul(item_size),
+            new_count.wrapping_mul(item_size),
+            block,
+        );
+        if block.is_null() {
+            error = FT_ERR_OUT_OF_MEMORY;
+        }
+    }
+    *p_error = error;
+    block
+}
+
 
 #[cfg(test)]
 extern crate std;
@@ -315,8 +409,7 @@ mod tests {
     use std::vec;
 
     #[test]
-    fn highpow2_rounds_down_to_a_power_of_two() {
-        assert_eq!(ft_highpow2(0), 0);
+    fn highpow2_rounds_down_to_a_power_of_two() {        assert_eq!(ft_highpow2(0), 0);
         assert_eq!(ft_highpow2(1), 1);
         assert_eq!(ft_highpow2(2), 2);
         assert_eq!(ft_highpow2(3), 2);
@@ -342,6 +435,166 @@ mod tests {
             assert_eq!(ft_highpow2(value), reference(value), "value {value:#x}");
             let expected = if value == 0 { 0 } else { 1 << (31 - value.leading_zeros()) };
             assert_eq!(ft_highpow2(value), expected, "value {value:#x}");
+        }
+    }
+
+    // ---- ft_mem_qrealloc ---------------------------------------------
+
+    /// Records the grow path's arguments; null return drives the
+    /// `FT_Err_Out_Of_Memory` arm.
+    static mut REALLOC_CALLS: std::vec::Vec<(i32, i32, *mut u8)> = std::vec::Vec::new();
+    static mut REALLOC_FAILS: bool = false;
+
+    unsafe extern "C" fn recording_realloc(
+        _memory: *mut FtMemory,
+        cur_size: i32,
+        new_size: i32,
+        block: *mut u8,
+    ) -> *mut u8 {
+        (*core::ptr::addr_of_mut!(REALLOC_CALLS)).push((cur_size, new_size, block));
+        if *core::ptr::addr_of!(REALLOC_FAILS) {
+            core::ptr::null_mut()
+        } else {
+            block
+        }
+    }
+
+    /// A recording-realloc allocator over the reset arena. Returns the
+    /// guard too, since every arm needs the lock.
+    unsafe fn qrealloc_fixture<'a>(
+        guard: std::sync::MutexGuard<'a, ()>,
+    ) -> (FtMemory, std::sync::MutexGuard<'a, ()>) {
+        let mut memory = reset(false);
+        memory.realloc = recording_realloc;
+        (*core::ptr::addr_of_mut!(REALLOC_CALLS)).clear();
+        *core::ptr::addr_of_mut!(REALLOC_FAILS) = false;
+        (memory, guard)
+    }
+
+    #[test]
+    fn qrealloc_rejects_bad_counts_and_nonpositive_item_size() {
+        let guard = TEST_MEMORY_LOCK.lock().unwrap();
+        unsafe {
+            let (mut memory, _guard) = qrealloc_fixture(guard);
+            let mut block = [0u8; 4];
+            for (item, cur, new) in [(-1, 0, 1), (1, -1, 1), (1, 1, -1), (0, 1, 1)] {
+                let mut error = -1;
+                let out = ft_mem_qrealloc(
+                    &mut memory,
+                    item,
+                    cur,
+                    new,
+                    block.as_mut_ptr(),
+                    &mut error,
+                );
+                if item <= 0 || cur < 0 || new < 0 {
+                    assert_eq!(error, FT_ERR_INVALID_ARGUMENT, "({item}, {cur}, {new})");
+                    assert_eq!(out, block.as_mut_ptr(), "block untouched on the error arm");
+                }
+            }
+            assert!((*core::ptr::addr_of!(REALLOC_CALLS)).is_empty(), "no realloc happened");
+            assert_eq!(free_calls(), 0, "no free happened");
+        }
+    }
+
+    #[test]
+    fn qrealloc_with_zero_new_count_frees_and_returns_null() {
+        let guard = TEST_MEMORY_LOCK.lock().unwrap();
+        unsafe {
+            let (mut memory, _guard) = qrealloc_fixture(guard);
+            let mut block = [0u8; 4];
+            let mut error = -1;
+            let out = ft_mem_qrealloc(&mut memory, 4, 3, 0, block.as_mut_ptr(), &mut error);
+            assert!(out.is_null());
+            assert_eq!(error, FT_ERR_OK, "a shrink-to-zero is not an error");
+            assert_eq!(freed(), std::vec![block.as_mut_ptr()]);
+            assert!((*core::ptr::addr_of!(REALLOC_CALLS)).is_empty());
+        }
+    }
+
+    #[test]
+    fn qrealloc_rejects_an_oversized_array() {
+        let guard = TEST_MEMORY_LOCK.lock().unwrap();
+        unsafe {
+            let (mut memory, _guard) = qrealloc_fixture(guard);
+            let mut block = [0u8; 4];
+            // FT_INT_MAX / 2 == 0x3fffffff, so 0x40000000 items of 2
+            // bytes overflows; the boundary value just fits.
+            for (new, expect_error) in [(0x4000_0000, true), (0x3fff_ffff, false)] {
+                (*core::ptr::addr_of_mut!(REALLOC_CALLS)).clear();
+                let mut error = -1;
+                let out = ft_mem_qrealloc(&mut memory, 2, 1, new, block.as_mut_ptr(), &mut error);
+                if expect_error {
+                    assert_eq!(error, FT_ERR_ARRAY_TOO_LARGE, "new_count {new:#x}");
+                    assert_eq!(out, block.as_mut_ptr());
+                    assert!((*core::ptr::addr_of!(REALLOC_CALLS)).is_empty());
+                } else {
+                    assert_eq!(error, FT_ERR_OK);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn qrealloc_with_zero_cur_count_allocates_fresh() {
+        let guard = TEST_MEMORY_LOCK.lock().unwrap();
+        unsafe {
+            let (mut memory, _guard) = qrealloc_fixture(guard);
+            let mut error = -1;
+            let out = ft_mem_qrealloc(&mut memory, 4, 0, 3, core::ptr::null_mut(), &mut error);
+            assert!(!out.is_null());
+            assert_eq!(error, FT_ERR_OK);
+            assert_eq!(alloc_calls(), 1);
+            // ft_mem_alloc zeroes: the arena poison is gone.
+            assert_eq!(*out, 0);
+            assert!((*core::ptr::addr_of!(REALLOC_CALLS)).is_empty(), "no realloc on the alloc arm");
+        }
+    }
+
+    #[test]
+    fn qrealloc_grows_through_the_memory_realloc_callback() {
+        let guard = TEST_MEMORY_LOCK.lock().unwrap();
+        unsafe {
+            let (mut memory, _guard) = qrealloc_fixture(guard);
+            let mut block = [0u8; 4];
+            let mut error = -1;
+            let out = ft_mem_qrealloc(&mut memory, 4, 3, 5, block.as_mut_ptr(), &mut error);
+            assert_eq!(out, block.as_mut_ptr());
+            assert_eq!(error, FT_ERR_OK);
+            assert_eq!(
+                *core::ptr::addr_of!(REALLOC_CALLS),
+                std::vec![(12, 20, block.as_mut_ptr())],
+                "(cur_count*item_size, new_count*item_size, block)"
+            );
+
+            // A null realloc result is FT_Err_Out_Of_Memory.
+            (*core::ptr::addr_of_mut!(REALLOC_CALLS)).clear();
+            *core::ptr::addr_of_mut!(REALLOC_FAILS) = true;
+            let mut error = -1;
+            let out = ft_mem_qrealloc(&mut memory, 4, 3, 5, block.as_mut_ptr(), &mut error);
+            assert!(out.is_null());
+            assert_eq!(error, FT_ERR_OUT_OF_MEMORY);
+        }
+    }
+
+    #[test]
+    fn qrealloc_uses_wrapping_products_like_the_original_mul() {
+        let guard = TEST_MEMORY_LOCK.lock().unwrap();
+        unsafe {
+            let (mut memory, _guard) = qrealloc_fixture(guard);
+            let mut block = [0u8; 4];
+            // new_count within the FT_INT_MAX/item_size bound, but the
+            // cur product overflows 32 bits: 0x20000 * 0x10000 wraps to
+            // 0, exactly like the original's `mul`.
+            let mut error = -1;
+            ft_mem_qrealloc(&mut memory, 0x1_0000, 0x2_0000, 3, block.as_mut_ptr(), &mut error);
+            assert_eq!(error, FT_ERR_OK);
+            let calls = core::ptr::addr_of!(REALLOC_CALLS).read();
+            assert_eq!(
+                calls[0],
+                (0, 0x3_0000, block.as_mut_ptr()),
+                "cur_count*item_size wrapped to 0"
+            );
         }
     }
 
