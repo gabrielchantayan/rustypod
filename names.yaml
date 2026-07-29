@@ -5851,7 +5851,22 @@ functions:
       populated (ADS compressed-RO-data image, or a decrypt gap). The
       table is exactly 8 u16 entries - 0x083f18b2 + 0x10 = 0x083f18c2 is
       the next referenced object. Port this once the region's contents
-      are recovered; do not guess the seeds.
+      are recovered; do not guess the seeds. Recovery attempts
+      (2026-07-29, still blocked): aupd.dec, bootrom.bin, iram.bin and
+      rsrc.bin do not contain the routine at all (searched for its
+      rsb #0x30000 idiom and its exact code bytes; the only rsb
+      #0x30000 site in osos.dec is 0x080761e4 itself), and no
+      duplicate of the seed table exists in the decrypted portion
+      (byte-searched both the floor and the round hypotheses below).
+      osos.recovery carries the same hole while osos.bin holds nonzero
+      ciphertext there, so the region is simply still undecrypted -
+      `make decrypt` with the DFU oracle should fill it in. Expected
+      seed shape for instant verification once recovered:
+      table[idx] ~= 65536/sqrt(2*(1+idx/8)) giving floor/round pairs
+      {b504/b505, aaaa/aaab, a1e8/a1e9, 9a5f/9a60, 93cd, 8e00/8e01,
+      88d6, 8432/8433}; note the odd-e correction constant 0xb504 is
+      exactly floor(65536/sqrt(2)), which hints the table was floored
+      too.
 
   # --- Batch: the nine-array element table (app/element_table) ---
   # FUN_08105ffc lazily builds one 0xd8-byte object holding nine 0x18-byte
