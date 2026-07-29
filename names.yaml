@@ -7938,10 +7938,11 @@ functions:
     name: strcmp_veneer
     size: 4
     module: libc/strcmp
-    status: identified
+    status: ported
     notes: >-
-      `b 0x08391e44` - the address every one of strcmp's 756 callers
-      actually branches to. No separate port; hook it to `strcmp`.
+      ALIAS - `b 0x08391e44` (verified against osos.asm), the address
+      every one of strcmp's 756 callers actually branches to. No
+      separate port; hook it to the strcmp symbol.
 
   - address: 0x08392478
     ghidra: FUN_08392478
