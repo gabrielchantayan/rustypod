@@ -5110,6 +5110,209 @@ functions:
       @ 0x081bc9f8..0x081bded8 (owns the literal
       "iPod_Control/Device/PlayCounts" @ 0x081bc840).
 
+  - address: 0x0812120c
+    ghidra: (absent from functions.csv)
+    name: ata_cmd_reset
+    size: 136
+    sig: "void ata_cmd_reset(u8 *cmd)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd}
+    notes: >-
+      Default constructor of the 0x58-byte ATA command block - the
+      function that pins the whole layout. MISSING from
+      decomp/functions.csv (Ghidra never made a function here); found by
+      decoding its one reference, a tail `b` @ 0x08166078. Zeroes every
+      field it owns and installs two nonzero defaults - device index
+      +0x20 = 0xff (read back with ldrsb by the consumers, so -1 = no
+      device) and block size +0x34 = 0x200 = one ATA sector. Deliberate
+      gaps - +0x00..+0x0b, +0x0d..+0x0f, +0x1b, +0x1f..+0x23 and +0x4b
+      are never written. The port stores volatile - plain stores let LLVM
+      collapse the six trailing `strh #0` into __aeabi_memclr, which does
+      not exist in osos (confirmed by reading the ARM disassembly of the
+      first attempt).
+
+  - address: 0x08121488
+    ghidra: FUN_08121488
+    name: ata_cmd_set_protocol
+    size: 8
+    sig: "void ata_cmd_set_protocol(u8 *cmd, u8 protocol)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd, param_2: protocol}
+    notes: >-
+      `strb r1, [r0, #0x0c]`. 24 bl call sites, binary-scanned - the
+      busiest member of the accessor family. Every one of the 22
+      data-transfer command builders @ 0x082794xx..0x0827b1xx passes 1;
+      the two non-data builders (0x0827b158, 0x08283490) pass 5, and
+      those two also skip the buffer/offset/length/count setters and ask
+      for a 30-second rather than a 10-second timeout. #[inline(never)] -
+      a real bl target LLVM would otherwise inline away.
+
+  - address: 0x081213ec
+    ghidra: FUN_081213ec
+    name: ata_cmd_set_device
+    size: 8
+    sig: "void ata_cmd_set_device(u8 *cmd, u8 device)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd, param_2: device}
+    notes: >-
+      `strb r1, [r0, #0x20]`. 23 bl call sites, binary-scanned. Every
+      builder feeds it the result of 0x08105a2c, which is a single
+      `ldrsb r0, [r0, #8]` - a SIGNED byte - so the field is a device
+      index whose "none" is -1, matching the 0xff ata_cmd_reset leaves.
+      The store itself is a plain strb, so the port's parameter is u8.
+      #[inline(never)].
+
+  - address: 0x081212c0
+    ghidra: FUN_081212c0
+    name: ata_cmd_set_timeout_ms
+    size: 8
+    sig: "void ata_cmd_set_timeout_ms(u8 *cmd, u32 timeout_ms)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd, param_2: timeout_ms}
+    notes: >-
+      `str r1, [r0, #0x24]`. 23 bl call sites, binary-scanned. Observed
+      arguments - 0x2710 = 10000 in every data-transfer builder, 0x7530
+      = 30000 in the non-data ones, which is what identifies the field as
+      a millisecond timeout. #[inline(never)].
+
+  - address: 0x08121414
+    ghidra: FUN_08121414
+    name: ata_cmd_set_flags
+    size: 8
+    sig: "void ata_cmd_set_flags(u8 *cmd, u32 flags)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd, param_2: flags}
+    notes: >-
+      `str r1, [r0, #0x10]`. 19 bl call sites, binary-scanned. A bit set,
+      not an enum - the builders load 0x1000, 0x1080, 0x2000, 0x2080,
+      0x40000, 0x41000 and 0x42000 as rotated immediates, and 0x08283474
+      ORs 0x80000 into a value it already holds. #[inline(never)].
+
+  - address: 0x081212e8
+    ghidra: FUN_081212e8
+    name: ata_cmd_get_lba48
+    size: 76
+    sig: "void ata_cmd_get_lba48(const u8 *cmd, u32 *lba_hi, u32 *lba_lo)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd, param_2: lba_hi, param_3: lba_lo}
+    notes: >-
+      1 bl call site. Exact inverse of ata_cmd_set_lba48 - undoes the
+      (current | previous << 8) interleave of the three extended
+      taskfile pairs +0x4c/+0x4e/+0x50 into the same (hi = bits 32..47,
+      lo = bits 0..31) split the packer takes, with the out-pointers in
+      the original's register order (r1 = hi, r2 = lo). The port reads
+      the halfwords aligned-volatile - read_unaligned lowers to pairs of
+      ldrb on ARMv5, while the original uses ldrh, and the alignment is
+      free because the same blocks receive word `str`s. LLVM finds a
+      different mask/shift sequence for the same result; proven by a
+      packer/unpacker round trip over six LBAs plus a hand-built
+      taskfile.
+
+  - address: 0x08121480
+    ghidra: FUN_08121480
+    name: ata_cmd_set_buffer
+    size: 8
+    sig: "void ata_cmd_set_buffer(u8 *cmd, void *buffer)"
+    module: drivers/ata_cmd
+    status: identified
+    vars: {param_1: cmd, param_2: buffer}
+    notes: >-
+      `str r1, [r0, #0x28]`. 16 bl call sites. Deliberately NOT ported -
+      +0x28 is the only pointer field in the block, and drivers/ata_cmd
+      addresses the block by literal byte offset, which cannot hold a
+      pointer on a 64-bit test host (it would overlap +0x2c, the buffer
+      offset, whose setter is 0x08121204). Every builder sets the three
+      as a run - buffer +0x28, offset +0x2c (usually 0), length +0x30 -
+      via `ldmib r4, {r0, r1}`.
+
+  - address: 0x081212a4
+    ghidra: FUN_081212a4
+    name: ata_cmd_set_transfer_len
+    size: 8
+    sig: "void ata_cmd_set_transfer_len(u8 *cmd, u32 length)"
+    module: drivers/ata_cmd
+    status: identified
+    vars: {param_1: cmd, param_2: length}
+    notes: >-
+      `str r1, [r0, #0x30]`. 16 bl call sites. Transfer length in bytes -
+      the builders pass `sectors * bytes-per-sector`, the product of the
+      caller's count argument and the device object's vtable slot +0x20.
+      Not ported only because it is one instruction and its family is
+      already represented; trivial to add.
+
+  - address: 0x08121204
+    ghidra: FUN_08121204
+    name: ata_cmd_set_buffer_offset
+    size: 8
+    sig: "void ata_cmd_set_buffer_offset(u8 *cmd, u32 offset)"
+    module: drivers/ata_cmd
+    status: identified
+    vars: {param_1: cmd, param_2: offset}
+    notes: >-
+      `str r1, [r0, #0x2c]`. 16 bl call sites, always immediately after
+      ata_cmd_set_buffer and immediately before ata_cmd_set_transfer_len,
+      which is what makes the triple read as (buffer, offset, length).
+      Usually 0; 0x0827a2b0 passes a caller argument.
+
+  - address: 0x081213e4
+    ghidra: FUN_081213e4
+    name: ata_cmd_set_block_size
+    size: 8
+    sig: "void ata_cmd_set_block_size(u8 *cmd, u32 block_size)"
+    module: drivers/ata_cmd
+    status: identified
+    vars: {param_1: cmd, param_2: block_size}
+    notes: >-
+      `str r1, [r0, #0x34]`. 12 bl call sites, each passing the device
+      object's bytes-per-sector (vtable slot +0x20) - the same value the
+      transfer-length computation multiplies by. ata_cmd_reset defaults
+      the field to 512.
+
+  - address: 0x081213ac
+    ghidra: FUN_081213ac
+    name: ata_cmd_set_sector_count
+    size: 8
+    sig: "void ata_cmd_set_sector_count(u8 *cmd, u8 count)"
+    module: drivers/ata_cmd
+    status: identified
+    vars: {param_1: cmd, param_2: count}
+    notes: >-
+      `strb r1, [r0, #0x15]`. 10 bl call sites, each passing the caller's
+      sector count masked to a byte (`and r1, r5, #0xff`), which is why
+      the LBA28 flows also cap the count at 0x100 (0x082798e4).
+
+  - address: 0x081211bc
+    ghidra: FUN_081211bc
+    name: ata_cmd_set_command
+    size: 8
+    sig: "void ata_cmd_set_command(u8 *cmd, u8 command)"
+    module: drivers/ata_cmd
+    status: identified
+    vars: {param_1: cmd, param_2: command}
+    notes: >-
+      `strb r1, [r0, #0x1a]`. 16 bl call sites. The ATA command register;
+      the read-DMA flow @ 0x082798bc passes 0xC8. ata_cmd_set_lba48
+      writes the same byte itself, which is why only the LBA28 flows need
+      this setter.
+
+  - address: 0x081211ec
+    ghidra: FUN_081211ec
+    name: ata_cmd_set_feature
+    size: 8
+    sig: "void ata_cmd_set_feature(u8 *cmd, u8 feature)"
+    module: drivers/ata_cmd
+    status: identified
+    vars: {param_1: cmd, param_2: feature}
+    notes: >-
+      `strb r1, [r0, #0x14]`. 4 bl call sites; 0x08279bec passes 0xD5.
+      The ATA feature register.
+
   - address: 0x0812141c
     ghidra: FUN_0812141c
     name: ata_cmd_set_lba28
@@ -5879,12 +6082,19 @@ functions:
       enable them in a row (e.g. 0x080feb68). Idempotent - an already
       enabled layer is left completely alone. On a real transition it
       also sets the enable-state-changed byte (+0x43) and the dirty flag
-      (+0x1bc), and for format variant (+0x0b) 3 only, calls the
-      alternate-commit notify 0x081206c4, which is not yet ported and
-      reaches the Rust port through the LAYER_DRIVER_HOOKS dispatch
-      table (default - no-op). The original releases the mutex with a
-      tail branch. Ghidra's C for this function invents a jumptable at
-      0x08037e10 - that is just the mutex_unlock tail branch.
+      (+0x1bc), and for format variant (+0x0b) 3 only, unbinds the
+      layer's surface - layer_swap_surface(layer, NULL) @ 0x081206c4,
+      which is not yet ported and reaches the Rust port through the
+      LAYER_DRIVER_HOOKS dispatch table (default - no-op). The original
+      releases the mutex with a tail branch. Ghidra's C for this
+      function invents a jumptable at 0x08037e10 - that is just the
+      mutex_unlock tail branch.
+      CORRECTION to the first port - 0x081206c4 takes TWO arguments
+      (its second instruction is `mov r4, r1`), and layer_enable leaves
+      the `mov r1, #0` it used for the +0x41 store live across the
+      `bleq`, i.e. it passes a NULL surface. The original hook slot was
+      declared one-argument and silently dropped it; both the slot and
+      the call now carry the surface.
 
   - address: 0x081208bc
     ghidra: FUN_081208bc
@@ -6023,59 +6233,205 @@ functions:
     vars: {param_1: layer}
     notes: >-
       The render pass of the display layer - the consumer of every field
-      the ported setters write. 6 bl call sites. Returns early unless
-      the dirty byte at +0x1bc is set, swaps the active surface
-      (+0x64/+0x50 with a vtable release/retain pair), then either takes
+      the ported setters write. 5 bl call sites (binary-scanned)
+      @ 0x0811fd38, 0x08120674 (layer_force_enable), 0x081206ac
+      (layer_restore_enable), 0x081d8b3c and 0x081d8bb4. Returns early
+      unless the dirty byte at +0x1bc is set, swaps the active surface
+      (+0x64 released through its vtable slot +0x04, +0x50 stored in its
+      place and retained through slot +0x00 - with a kind-1 guard that
+      bails out when +0x34 is set and +0x60 differs), then either takes
       the short path (enable-state-changed +0x43 set while the layer is
-      enabled - driver vtable[+0x3c], clear +0x43, notify 0x081d892c)
-      or rebuilds a 0x50-byte descriptor on the stack from the layer
-      fields and pushes it through driver vtable[+0x14]. It then
-      translates the blend mode byte +0x49 into the driver's code -
-      mode 0 -> vtable[+0x40](drv, layer_id, 1); mode 1 -> code 3 then
-      vtable[+0x44](drv, layer_id, alpha @ +0x48); mode 2 -> code 2;
-      mode 3 -> code 5 then vtable[+0x44](alpha) - which is where the
-      BLEND_MODE_* table in drivers/display_layer comes from. Not
-      ported - it dispatches five driver vtable slots and calls
-      0x0828302c, 0x08120ad4, 0x081203c4 and 0x081d892c, none of them
-      ported, so the body would be almost entirely dispatch-table
-      indirection. Ghidra's C for it is badly mangled (it inlines
-      callees and invents jumptables).
+      enabled - driver vtable[+0x3c], clear +0x43, notify 0x081d892c,
+      and for a kind-5 subtype-0 layer set the byte @ 0x089ca8ac) or
+      builds a 0x50-byte descriptor on the stack (0x0828302c inits it),
+      fills it from the layer fields, refreshes the plane block through
+      0x08120ad4 and layer_query_planes @ 0x081203c4, aliases the plane
+      words by pixel format, copies the descriptor into a second stack
+      block with a class word at +0x58 and pushes it through driver
+      vtable[+0x14]. It then translates the blend mode byte +0x49 into
+      the driver's code - mode 0 -> vtable[+0x40](drv, layer_id, 1);
+      mode 1 -> code 3 then vtable[+0x44](drv, layer_id, alpha @ +0x48);
+      mode 2 -> code 2; mode 3 -> code 5 then vtable[+0x44](alpha) -
+      which is where the BLEND_MODE_* table in drivers/display_layer
+      comes from.
+      NOT PORTED, and the reason is now specific - it loads the layer's
+      stored POINTER fields (notify target +0x00, display driver +0x04,
+      surfaces +0x50/+0x60/+0x64), and drivers/display_layer addresses
+      the object by literal byte offset. On a 64-bit test host word
+      index 1 (the driver) lands on byte 8, exactly where the layer id /
+      kind / pixel-format bytes live (the heap/block_region.rs
+      word-index rule). Porting it faithfully therefore requires
+      converting the whole module to a repr(C) layer struct first, which
+      would churn eleven green ports and their tests; it is left as a
+      deliberate separate step. It reaches the port meanwhile through
+      LAYER_DRIVER_HOOKS.render (default - no-op returning the layer).
+      Ghidra's C for it is badly mangled (it inlines callees and invents
+      jumptables).
 
   - address: 0x0811fc4c
     ghidra: FUN_0811fc4c
     name: layer_reconfigure
     size: 120
-    sig: "u32 layer_reconfigure(u8 *layer, u32 arg)"
+    sig: "u32 layer_reconfigure(u8 *layer, u8 *surface)"
+    module: drivers/display_layer
+    status: ported
+    vars: {param_1: layer, param_2: surface}
+    notes: >-
+      74 call sites (57 bl + 17 tail b, 46 distinct callers, plus the
+      alias thunk @ 0x08120134) - the hottest function of the
+      display-layer cluster. Points a layer at a surface and re-derives
+      everything downstream of it. Under the layer mutex - (1)
+      layer_bind_surface @ 0x0811fe80, a no-op unless the format variant
+      (+0x0b) is 3, in which case the layer's +0x50 surface is released
+      and the argument retained in its place; (2) layer_query_planes
+      @ 0x081203c4 reads the now-current surface's four plane addresses
+      into four stack words; (3) layer_install_planes @ 0x0811feb8
+      writes those same four words into the layer plane block
+      +0x1c8..+0x1d4. Steps 2 and 3 are a pure pass-through - the i-th
+      out-parameter of the query becomes the i-th argument of the
+      install, with no inspection. Returns 0. Callers pass a stored
+      object pointer as the surface (e.g. 0x0810dcb0 - `ldr r1, [r4,
+      #28]`). The three callees dispatch through LAYER_DRIVER_HOOKS.
+
+  - address: 0x0811fe80
+    ghidra: FUN_0811fe80
+    name: layer_bind_surface
+    size: 56
+    sig: "void layer_bind_surface(u8 *layer, u8 *surface)"
+    module: drivers/display_layer
+    status: ported
+    vars: {param_1: layer, param_2: surface}
+    notes: >-
+      1 bl call site (layer_reconfigure). Re-checks the format variant
+      (+0x0b) and returns immediately for anything but 3; otherwise
+      takes the layer mutex and calls layer_swap_surface @ 0x081206c4,
+      releasing the mutex with a tail branch. Deviation kept from the
+      original - the sole caller already holds that mutex, so this
+      re-locks it. The layer mutex is a plain RTXC counting semaphore
+      (kernel/sync_mutex.rs - no recursion counter), so the nesting only
+      survives because these layers' +0x78 cell is never created; the
+      port reproduces the instruction sequence rather than fixing it.
+      #[inline(never)] - a real bl target small enough for LLVM to
+      inline away.
+
+  - address: 0x081206c4
+    ghidra: FUN_081206c4
+    name: layer_swap_surface
+    size: 60
+    sig: "void layer_swap_surface(u8 *layer, u8 *surface)"
     module: drivers/display_layer
     status: identified
-    vars: {param_1: layer, param_2: arg}
+    vars: {param_1: layer, param_2: surface}
     notes: >-
-      74 call sites (57 bl + 17 tail b, 46 distinct callers) - the
-      hottest unported function of the display-layer cluster. Under the
-      layer mutex it runs the format-variant-3 hook 0x0811fe80(layer,
-      arg), reads four words out of the layer through 0x081203c4(layer,
-      &a, &b, &c, &d) and feeds them straight back to
-      0x0811feb8(layer, a, b, c, d); returns 0. All three callees are
-      unported, so nothing but the lock and the plumbing would be real
-      Rust - deferred until 0x081203c4 / 0x0811feb8 are done.
+      2 bl call sites (layer_enable @ 0x08120944 with a NULL surface,
+      layer_bind_surface @ 0x0811fea8 with the caller's). Refcounted
+      swap of the layer's bound surface at +0x50 - releases the old one
+      through its vtable slot +0x04 (skipped when NULL), stores the new
+      pointer, and tail-dispatches its vtable slot +0x00 to retain it
+      (skipped when NULL). Not ported - +0x50 is a pointer field, which
+      the byte-offset addressing of drivers/display_layer cannot hold on
+      a 64-bit host (same blocker as layer_render). Dispatches through
+      LAYER_DRIVER_HOOKS.swap_surface (default - no-op).
+
+  - address: 0x081203c4
+    ghidra: FUN_081203c4
+    name: layer_query_planes
+    size: 224
+    sig: "u8 *layer_query_planes(u8 *layer, u8 **p0, u8 **p1, u8 **p2, u8 **p3)"
+    module: drivers/display_layer
+    status: identified
+    vars: {param_1: layer, param_2: p0, param_3: p1, param_4: p2, param_5: p3}
+    notes: >-
+      2 bl call sites (layer_reconfigure, layer_render). Reads the four
+      plane addresses of the layer's bound surface (+0x50) through the
+      surface plane accessor 0x082978bc(surface, index) and writes them
+      to the four out-pointers, selecting and aliasing by the layer's
+      pixel format (+0x0a) - format 0 - p0=plane 0, p1=plane 2,
+      p2=plane 3; format 1 - p0=p2=plane 0, p1=p3=plane 1; format 2 -
+      p0=plane 4; format 3 - p0=plane 5; anything else leaves the four
+      words alone. An unbound layer (+0x50 NULL) returns without
+      touching them at all - the four zeroing stores happen only on the
+      bound path. Returns the layer. Not ported - reads the +0x50
+      pointer field (same blocker as layer_render). Dispatches through
+      LAYER_DRIVER_HOOKS.query_planes (default - leaves the out-words
+      alone).
+
+  - address: 0x0811feb8
+    ghidra: FUN_0811feb8
+    name: layer_install_planes
+    size: 212
+    sig: "void layer_install_planes(u8 *layer, u8 *p0, u8 *p1, u8 *p2, u8 *p3)"
+    module: drivers/display_layer
+    status: identified
+    vars: {param_1: layer, param_2: p0, param_3: p1, param_4: p2, param_5: p3}
+    notes: >-
+      2 bl call sites (layer_reconfigure, and 0x0811ff8c). Disables the
+      layer first if it is not disabled yet (layer_disable @ 0x081208bc)
+      then flushes the pixel range(s) through 0x08044c48(addr, len) with
+      lengths built from height (+0x20) * buffer width (+0x30) = AREA.
+      Kind (+0x08) 5 with pixel format (+0x0a) 0 and bit 31 clear in p0
+      flushes THREE ranges - p0 for AREA, p1 for AREA/4, p2 for AREA/4,
+      i.e. planar YUV 4:2:0, which is what pins these four words as
+      component plane addresses. Any other kind flushes p0 alone, for
+      AREA*2 (format 2) or AREA*4 (format 3), and not at all for the
+      other formats. Finally stores the four plane words into
+      +0x1c8..+0x1d4 with one `stm` and raises the dirty flag (+0x1bc).
+      Not ported - writes four pointer-typed fields (same blocker as
+      layer_render). Dispatches through LAYER_DRIVER_HOOKS.install_planes
+      (default - no-op).
+
+  - address: 0x08120134
+    ghidra: thunk_FUN_0811fc4c
+    name: layer_reconfigure_thunk
+    size: 4
+    sig: "u32 layer_reconfigure_thunk(u8 *layer, u8 *surface)"
+    module: drivers/display_layer
+    status: identified
+    vars: {param_1: layer, param_2: surface}
+    notes: >-
+      A single `b 0x0811fc4c` - an ADS alias veneer for
+      layer_reconfigure, called once (bl @ 0x080f58e8). Nothing to port;
+      a hook on it should point straight at layer_reconfigure.
 
   - address: 0x08120654
     ghidra: FUN_08120654
-    name: layer_suspend
+    name: layer_force_enable
     size: 56
-    sig: "void layer_suspend(u8 *layer)"
+    sig: "u8 layer_force_enable(u8 *layer)"
     module: drivers/display_layer
-    status: identified
+    status: ported
     vars: {param_1: layer}
     notes: >-
-      Suspend half of the pair that parks a layer's enable state across
-      a mode change. 1 bl call site. If the layer is currently disabled
-      (+0x41) it enables it (layer_enable @ 0x08120908), renders
-      (0x0811f8c8), clears the dirty flag and records the parked state
-      in +0x42. Its mirror layer_resume @ 0x0812068c (56 bytes, 1 call
-      site) returns the old +0x42 and, when set, disables the layer
-      again (layer_disable @ 0x081208bc), renders, clears dirty and
-      clears +0x42. Both are blocked on the render pass 0x0811f8c8.
+      RENAMED from the earlier scouting note's `layer_suspend` - this
+      half *enables*, so "suspend" read backwards. Temporarily makes a
+      hidden layer visible and remembers to put it back. 1 bl call site
+      @ 0x081d8a20, inside a loop that walks all six layers of a display
+      object. An already-enabled layer is left completely untouched
+      (returns 0, the +0x41 byte it just read). A disabled one is
+      enabled (layer_enable @ 0x08120908), rendered at once
+      (layer_render @ 0x0811f8c8, LAYER_DRIVER_HOOKS.render), its dirty
+      flag cleared and the parked flag +0x42 raised for
+      layer_restore_enable. Returns the parked flag on both paths; the
+      sole caller ignores it.
+
+  - address: 0x0812068c
+    ghidra: FUN_0812068c
+    name: layer_restore_enable
+    size: 56
+    sig: "u8 layer_restore_enable(u8 *layer)"
+    module: drivers/display_layer
+    status: ported
+    vars: {param_1: layer}
+    notes: >-
+      RENAMED from the earlier scouting note's `layer_resume`. Mirror of
+      layer_force_enable - if the parked flag +0x42 is set, disables the
+      layer again (layer_disable @ 0x081208bc), renders, clears the
+      dirty flag and clears +0x42. Returns the parked flag as it was on
+      entry; the sole caller @ 0x081d8ac0 ORs the six layers' answers to
+      learn whether the display changed at all (and only then sets the
+      display's +0x98 byte). Asymmetry worth keeping - it reads +0x42
+      and never re-reads +0x41, so a layer someone else enabled in
+      between is still disabled here.
 
   # --- Batch: the by-id class registry (app/registry) ---
   # One statically-allocated associative container @ 0x08a79ca4 maps a
@@ -8830,6 +9186,75 @@ functions:
   - address: 0x083d5eb4
     ghidra: FUN_083d5eb4
     name: three_pointer_select
+
+  # --- scouted 0x08110000-0x0812ffff, not ported (display-layer sweep) ---
+
+  - address: 0x0812c6b0
+    ghidra: FUN_0812c6b0
+    name: timer_stop
+    size: 76
+    sig: "void timer_stop(u8 *timer)"
+    module: null
+    status: identified
+    notes: >-
+      144 call sites (129 bl + 15 tail b) - the busiest unclaimed
+      function in 0x08110000-0x0812ffff. Runs a trace/assert helper
+      (0x08076954, itself a locked call to 0x0809e620), takes the global
+      mutex object @ 0x089cb294, and if the object's state word at +0x20
+      equals the FourCC 'expi' (0x65787069, i.e. "expired") cancels the
+      pending callback with 0x080a6c0c(obj[+0x28], 0x081216b4, obj);
+      then writes the FourCC 'stop' (0x73746f70) to +0x20 and tail
+      branches to the unlock. Sibling 0x0812bf4c (32 bytes, 119 sites)
+      calls it and then writes 'run ' (0x72756e20) before tail branching
+      to 0x0807a228 - i.e. restart. The FourCC state words are what
+      identify the class as a timer/alarm. Not ported - needs the global
+      mutex object, the cancel helper 0x080a6c0c and the restart
+      0x0807a228 first; three dispatch slots for 76 bytes of body, but
+      the call count makes it the best next target in this range.
+
+  - address: 0x0812bf4c
+    ghidra: FUN_0812bf4c
+    name: timer_restart
+    size: 32
+    sig: "u8 *timer_restart(u8 *timer)"
+    module: null
+    status: identified
+    notes: >-
+      119 call sites (72 bl + 47 tail b). timer_stop(timer) @ 0x0812c6b0,
+      then stores the FourCC 'run ' (0x72756e20) in the state word +0x20
+      and tail branches to 0x0807a228 with the timer in r0. Blocked on
+      the same three callees as timer_stop.
+
+  - address: 0x0812c63c
+    ghidra: FUN_0812c63c
+    name: timer_start_after
+    size: 32
+    sig: "u8 *timer_start_after(u8 *timer, u32 delay)"
+    module: null
+    status: identified
+    notes: >-
+      100 call sites (98 bl + 2 tail b). timer_stop(timer) @ 0x0812c6b0,
+      then tail branches to 0x080744c0(timer, delay) - preserving the
+      second argument untouched across the stop, which is what marks it
+      as the delay/deadline. Blocked on the same callees.
+
+  - address: 0x0811108c
+    ghidra: FUN_0811108c
+    name: timer_schedule_shim
+    size: 20
+    sig: "u32 timer_schedule_shim(u32 a, u8 *timer, u32 b)"
+    module: null
+    status: identified
+    notes: >-
+      64 bl call sites, and nothing but an argument rotation - r0 -> r2,
+      r1 -> r0, r2 -> r1 - before `b 0x0812c65c`, a sibling of the timer
+      cluster above (which itself loads a global at 0x0812c6a8 and calls
+      0x08076924). Not ported - it is pure plumbing in front of an
+      unported callee, so a port would be a hook and nothing else.
+
+  - address: 0x08124a38
+    ghidra: FUN_08124a38
+    name: pair_header_construct
     size: 36
     module: null
     status: identified
@@ -8883,3 +9308,91 @@ functions:
       the first word of the result. A find/insert on a container keyed
       by a single byte. Not ported - 0x083b867c has to be scouted first
       and it is below the 0x083c0000 sweep.
+
+      90 bl call sites. `stmia r0!, {r1, r2}` writes the first two
+      argument words to the object and advances, skips a third word, and
+      calls 0x0810ebbc with the advanced pointer; then backs the result
+      up by 12 and clears the word at +0xc4 and the byte at +0x8 of it.
+      Not ported, and the name is STRUCTURAL rather than semantic - the
+      shape (write two header words, hand the interior pointer at +12 to
+      a base-class helper, then clear two fields of the object it
+      returns) is unmistakably a C++ constructor, but 0x0810ebbc sits
+      just below this range in another agent's neighbourhood and has not
+      been read, so the class itself is unidentified.
+
+  - address: 0x08123600
+    ghidra: FUN_08123600
+    name: formatted_message_emit
+    size: 80
+    module: null
+    status: identified
+    notes: >-
+      83 bl call sites. Calls 0x08123a54(obj, r3), then formats into the
+      object's inline 512-byte buffer at +0x15 with 0x0802f768(dst,
+      0x200, format, buf_end, arg) - a bounded string formatter - and
+      tail branches to 0x08123c58(obj, obj+0x15). The format string is
+      taken as `pc + 32`, i.e. a literal immediately after the code.
+      Sibling 0x0812395c (88 bytes, 58 sites) is the same function with
+      the fourth word looked up from a table @ 0x081239b4 instead of
+      passed in. Not ported - the whole body is three unported calls plus
+      a format literal.
+
+  - address: 0x0811d46c
+    ghidra: FUN_0811d46c
+    name: vtable_query_4c_kind4
+    size: 12
+    module: null
+    status: identified
+    notes: >-
+      29 bl call sites. `mov r2, r1; mov r1, #4; b 0x0811d7b0` - binds
+      the constant 4 as the middle argument of 0x0811d7b0 (28 bytes, 16
+      sites), which loads `[[*obj] + 0x4c]` and calls it with the stack
+      pointer as the fourth argument, i.e. a vtable slot +0x4c dispatch
+      with an out-parameter. Its neighbour 0x0811d7fc is the identical
+      shape on slot +0x50. Not ported - the object's vtable would have to
+      be modeled first, and this module addresses nothing by word index
+      yet.
+
+  - address: 0x0811d208
+    ghidra: FUN_0811d208
+    name: is_tagged_c0
+    size: 20
+    sig: "u32 is_tagged_c0(u32 value)"
+    module: null
+    status: identified
+    notes: >-
+      11 bl call sites, a pure leaf - returns 1 when the top byte of the
+      argument is exactly 0xc0, else 0. Trivially portable; left out only
+      because the tag's meaning (0xc0xxxxxx as an address range or as a
+      packed type tag) is not established, and a name without that would
+      be guesswork.
+
+  - address: 0x0811c564
+    ghidra: FUN_0811c564
+    name: flag_2c_is_clear
+    size: 16
+    module: null
+    status: identified
+    notes: >-
+      16 bl call sites, a pure leaf. `rsbs r0, byte[obj + 0x2c], #1;
+      movcc r0, #0` - i.e. it returns 1 when the byte at +0x2c is 0 and 0
+      for every other value (the carry-clear predicate kills the negative
+      results, so it is exactly `byte == 0`, not `1 - byte`). Trivially
+      portable; the owning class is unidentified, so the name would be
+      guesswork.
+
+  - address: 0x0811f704
+    ghidra: FUN_0811f704
+    name: width_0c_minus_inset
+    size: 28
+    module: null
+    status: identified
+    notes: >-
+      13 bl call sites, a pure leaf, all in list/text layout code
+      (0x080f6a80, 0x081396xx, 0x0819xxxx, 0x081acxx-0x081afxxx,
+      0x081fdxxx). Reads the u16 at obj+0x0c and returns it minus 9 when
+      the second argument is 4, minus 8 otherwise, truncated back to 16
+      bits (so it wraps rather than clamping). The shape is a width minus
+      a mode-dependent inset, but neither the owning class nor the
+      meaning of mode 4 is established, so the name describes the
+      arithmetic rather than claiming a meaning.
