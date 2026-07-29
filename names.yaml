@@ -6827,8 +6827,8 @@ functions:
     size: 44
     sig: "u32 record_body_size(const u32 *record, u32 align)"
     module: util
-    status: identified
-    vars: {param_1: record, param_2: align}
+    status: ported
+    vars: {param_1: record, param_2: align, uVar1: size}
     notes: >-
       11 bl call sites from 9 distinct callers, all of them passing
       align = 4. Returns `(record[0] & 0x00ffffff)` - the low 24 bits of
@@ -6838,10 +6838,14 @@ functions:
       align = 4 the padding term is skipped entirely, so every live call
       is just the 24-bit size field. Callers use it as an offset -
       0x0814d6c8 reads `*(record + size + 0x0c)`, 0x0814d74c writes it,
-      0x0814d7a4 forms `record + size + 0x10`. Not ported - the record
-      class and what lives at its +0x0c/+0x10 trailer are not
-      identified, and the alignment path is dead in this image, so a
-      name for it would not be evidence-backed.
+      0x0814d7a4 forms `record + size + 0x10`. The record class and what
+      lives at its +0x0c/+0x10 trailer remain unidentified; the
+      alignment path is dead in this image but ported anyway for
+      structural parity. Ported in src/util/record_body_size.rs.
+      Deviation - the original is fully predicated (addhi/subhi/andhi/
+      subhi straight-line); LLVM emits a conditional branch plus a frame
+      push/pop. Same structure otherwise (load, cmp, align arithmetic,
+      bic of the flags byte, subtract).
 
   - address: 0x081eb0c4
     ghidra: FUN_081eb0c4

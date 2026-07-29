@@ -8,6 +8,7 @@ pub mod fixed;
 pub mod le_read;
 pub mod list_find;
 pub mod ptr_vector;
+pub mod record_body_size;
 pub mod state_flags;
 pub mod table_find;
 pub mod utoa;
