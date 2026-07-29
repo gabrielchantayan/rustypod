@@ -267,7 +267,8 @@ pub unsafe extern "C" fn vector_size_elem32(vector: *const VectorBounds) -> i32 
 
 /// vector_size_elem24 — original: `FUN_083d7750` @ 0x083d7750
 /// (16 bytes; 31 `bl` call sites there, 45 across the 2 byte-identical
-/// copies — 0x083d77dc has 14).
+/// copies — the second instantiation, `FUN_083d77dc` @ 0x083d77dc with
+/// 14 `bl` sites, is byte-identical and hooks this same symbol).
 ///
 /// `vector<T>::size()` for a 24-byte element, the non-power-of-two
 /// member of the `vector_size_elem*` family: the same `ldm r0,{r0,r1};

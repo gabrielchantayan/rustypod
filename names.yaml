@@ -9768,6 +9768,22 @@ functions:
       elem 28 (1 fn, 8 calls, 0x083d7894), elem 40 (1 fn, 14 calls,
       0x083d783c).
 
+  - address: 0x083d77dc
+    ghidra: FUN_083d77dc
+    name: vector_size_elem24
+    size: 16
+    sig: "i32 vector_size_elem24(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      Byte-identical second instantiation of vector_size_elem24
+      @ 0x083d7750 (same `ldm r0,{r0,r1}; sub r0,r1,r0; mov r1,#0x18;
+      b 0x08031568` - verified against osos.asm). Served by the
+      existing cxx/templates port - hook both addresses to the one
+      symbol. 14 bl call sites (census from the first instantiation's
+      commit; osos.asm text shows 6 `bl` references).
+
   - address: 0x083d7760
     ghidra: FUN_083d7760
     name: vector_capacity
