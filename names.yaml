@@ -6917,6 +6917,28 @@ functions:
       TCNotesDispatcher, 28).
     renames: {}
 
+  - address: 0x0827f218
+    ghidra: FUN_0827f218
+    name: instance_of_class_5780
+    size: 28
+    sig: "void *instance_of_class_5780(void)"
+    module: app/registry
+    status: ported
+    notes: >-
+      10 bl call sites (binary-scanned over osos.dec, no tail b). The
+      28-byte sibling shape of the lookup-then-cast accessor - `push
+      {r4,lr}; ldr r4,=0x5780 (literal @ 0x0827f234); mov r0,r4; bl
+      0x081d2184; mov r1,r4; pop {r4,lr}; b 0x08275b9c`: keeps the
+      class id in r4 across the registry lookup, then tail-branches to
+      the instance_of_class cast. Class NOT identified (no class-name
+      literal handed to the factory @ 0x0820b230 next to its
+      registration), so the port names the id CLASS_ID_5780 (the
+      0x6000/0x6600/0x8700 precedent). Three siblings remain
+      identified, all the same shape - 0x08284e2c (0x6180, 28),
+      0x08289690 (0x3280, 24), 0x0828ae68 (0x4180 TCNotesDispatcher,
+      28).
+    renames: {}
+
   - address: 0x081d23f8
     ghidra: FUN_081d23f8
     name: registry_register
