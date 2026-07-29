@@ -9868,8 +9868,8 @@ functions:
       of two dereferences - `if (a < b) return *b; c = [this+8];
       return a <= c ? *a : *c`, all unsigned compares (cc/ls/hi). 14 bl
       sites here (all in the switch body @ 0x080c7b40..0x080c7bdc) plus
-      8 at the byte-identical copy 0x083d5ed8 (NOT ported - separate
-      commit). Shape of an iterator clamp or a three-way begin/cur/end
+      8 at the byte-identical copy 0x083d5ed8, which hooks the same
+      symbol. Shape of an iterator clamp or a three-way begin/cur/end
       accessor, but the owning container is not identified, so the
       descriptive name is kept and the object is modeled as a repr(C)
       ThreePointers of three `*const u32`. match.py - same structure
@@ -9877,6 +9877,21 @@ functions:
       deref); LLVM splits the predicated ldrcc/bxcc into a branch and
       folds the ls/hi select through movhi, the usual predication
       deviation.
+
+  - address: 0x083d5ed8
+    ghidra: FUN_083d5ed8
+    name: three_pointer_select
+    size: 36
+    sig: "u32 three_pointer_select(const ThreePointers *triple)"
+    module: util
+    status: ported
+    vars: {param_1: triple}
+    notes: >-
+      Byte-identical second copy of three_pointer_select @ 0x083d5eb4
+      (36 bytes verified equal against osos.dec:
+      060090e8020051e1000092351eff2f31...). Served by the existing
+      util/three_pointer_select port - hook both addresses to the one
+      symbol. 8 bl call sites.
 
   # --- scouted 0x08110000-0x0812ffff, not ported (display-layer sweep) ---
 

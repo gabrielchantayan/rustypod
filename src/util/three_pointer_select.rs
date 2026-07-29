@@ -20,8 +20,9 @@
 //! container is not identified — the function is ported on its
 //! observable behavior only and keeps the descriptive name.
 //!
-//! A byte-identical copy exists @ 0x083d5ed8 (8 more `bl` sites); it is
-//! deliberately NOT part of this port. The original:
+//! A byte-identical copy, `FUN_083d5ed8` @ 0x083d5ed8 (8 more `bl`
+//! sites), hooks this same symbol — verified byte-equal against
+//! osos.dec. The original:
 //!
 //! ```text
 //! ldmia r0, {r1, r2}
