@@ -25,10 +25,14 @@
 //!   [`vector_size_elem16`] / [`vector_size_elem32`] —
 //!   `vector<T>::size()`, one instantiation per element size; the four
 //!   power-of-two shifts cover 28 functions and 276 call sites.
+//! - [`vector_capacity`] — `vector<T>::capacity()` for a 24-byte
+//!   element, the end-of-storage sibling of the size family.
 //!
 //! Not to be confused with `deque_iter_copy` @ 0x083dd9e4 (already
 //! ported in `heap/block_deque`): that one is the same four-word copy
 //! with the **source in r2**, and it exists exactly once.
+
+use crate::runtime::rt_div::__rt_sdiv;
 
 /// deque_iter_assign — original: `FUN_083da458` @ 0x083da458
 /// (36 bytes; 31 `bl` call sites there, 99 across all 17 byte-identical
@@ -254,6 +258,50 @@ pub unsafe extern "C" fn vector_size_elem32(vector: *const VectorBounds) -> i32 
     vector_size(vector, 5)
 }
 
+/// The `{begin, end, end_of_storage}` head of a vector — the three
+/// words [`vector_capacity`] reads the first and last of (`ldr
+/// r1,[r0,#0x8]` / `ldr r0,[r0,#0x0]`). Addressed by field, so
+/// `end_of_storage` lands two words after `begin` on both the 32-bit
+/// target and a 64-bit host.
+#[repr(C)]
+pub struct VectorStorage {
+    /// First element.
+    pub begin: *mut u8,
+    /// One past the last element (unused by capacity, kept so the
+    /// layout matches the firmware head).
+    pub end: *mut u8,
+    /// One past the allocated storage.
+    pub end_of_storage: *mut u8,
+}
+
+/// vector_capacity — original: `FUN_083d7760` @ 0x083d7760
+/// (20 bytes, 6 `bl` call sites; names.yaml's size: 16 is stale,
+/// functions.csv and the next function at 0x083d7774 both say 20).
+///
+/// `vector<T>::capacity()` for a 24-byte element: the capacity()
+/// sibling of the `vector_size_elem*` family, reading the
+/// end-of-storage word at +8 instead of the end word at +4 —
+/// `(end_of_storage - begin) / 24`. The element size is not a power of
+/// two, so instead of an `asr` the original loads `mov r1, #0x18` and
+/// **tail-branches** into the ADS signed divide @ 0x08031568
+/// (ported as [`__rt_sdiv`]); the divide is signed, so a reversed
+/// vector's negative span truncates toward zero like any C `/`.
+///
+/// # Safety
+/// `vector` must point at a readable `{begin, end, end_of_storage}`
+/// triple.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_capacity(vector: *const VectorStorage) -> i32 {
+    // `read_unaligned`: same 4-but-not-8-aligned firmware head hazard
+    // as `vector_size` on a 64-bit host.
+    let begin = core::ptr::read_unaligned(core::ptr::addr_of!((*vector).begin));
+    let end_of_storage =
+        core::ptr::read_unaligned(core::ptr::addr_of!((*vector).end_of_storage));
+    let span = (end_of_storage as isize - begin as isize) as i32;
+    __rt_sdiv(span, 24)
+}
+
 /// A `{base, count}` pointer array — the two words [`array_at_checked`]
 /// reads. Addressed by field, so the count lands one word after the
 /// base on both the 32-bit target and a 64-bit host.
@@ -471,6 +519,49 @@ mod tests {
             let reversed = VectorBounds { begin: begin.add(16), end: begin };
             assert_eq!(vector_size_elem4(&reversed), -4);
             assert_eq!(vector_size_elem16(&reversed), -1);
+        }
+    }
+
+    // ---- vector_capacity ---------------------------------------------
+
+    #[test]
+    fn vector_capacity_divides_the_allocated_span_by_24() {
+        unsafe {
+            let storage = [0u8; 240];
+            let begin = storage.as_ptr() as *mut u8;
+            for elements in 0..10usize {
+                let head = VectorStorage {
+                    begin,
+                    // `end` is not read by capacity; set it anywhere in
+                    // the allocation to keep the head plausible.
+                    end: begin.add(elements * 12),
+                    end_of_storage: begin.add(elements * 24),
+                };
+                assert_eq!(vector_capacity(&head), elements as i32);
+            }
+        }
+    }
+
+    /// The division is the signed truncating `__rt_sdiv`, so a reversed
+    /// (negative) span truncates toward zero, not toward -inf, and a
+    /// partial element is dropped.
+    #[test]
+    fn vector_capacity_is_signed_and_truncating() {
+        unsafe {
+            let storage = [0u8; 240];
+            let begin = storage.as_ptr() as *mut u8;
+            let head = VectorStorage {
+                begin,
+                end: begin,
+                end_of_storage: begin.add(24 * 3 + 23),
+            };
+            assert_eq!(vector_capacity(&head), 3, "partial element dropped");
+            let reversed = VectorStorage {
+                begin: begin.add(25),
+                end: begin,
+                end_of_storage: begin,
+            };
+            assert_eq!(vector_capacity(&reversed), -1, "-25 / 24 truncates to -1");
         }
     }
 

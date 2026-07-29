@@ -9730,19 +9730,27 @@ functions:
   - address: 0x083d7760
     ghidra: FUN_083d7760
     name: vector_capacity
-    size: 16
-    module: null
-    status: identified
+    size: 20
+    sig: "i32 vector_capacity(const VectorStorage *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
     notes: >-
-      The capacity() sibling of the vector_size family - reads the
-      end-of-storage word at +8 instead of the end word at +4
-      (`ldr r1,[r0,#8]; ldr r0,[r0]; sub r0,r1,r0`) and then divides or
-      shifts by the element size. 13 instantiations in
-      0x083d7300-0x083d7a00, 44 bl sites in total, top 0x083d7760 6,
-      0x083d7954 4, 0x083d7870 4, 0x083d784c 4, 0x083d7828 4,
-      0x083d77ec 4, 0x083d77a8 4, 0x083d7708 4. Same blocker as
-      vector_size_elem24 for the divide-based ones; the shift-based ones
-      are one-line ports whenever they are wanted.
+      `vector<T>::capacity()` for a 24-byte element - the capacity()
+      sibling of the vector_size family, reading the end-of-storage word
+      at +8 instead of the end word at +4 (`ldr r1,[r0,#8]; ldr
+      r0,[r0]; sub r0,r1,r0; mov r1,#0x18`) and TAIL-BRANCHING into the
+      ADS signed divide @ 0x08031568 (ported as __rt_sdiv; the old
+      blocker is gone). 6 bl call sites. size corrected 16 -> 20
+      (functions.csv and the next function at 0x083d7774 agree). The
+      port calls the ported __rt_sdiv (now #[inline(never)] to keep the
+      tail-branch boundary, the __rt_udiv precedent). match.py - same
+      structure (sub / mov r1,#24 / b __rt_sdiv); the ldr pairs come
+      out as byte loads from the family's read_unaligned host-testing
+      idiom, same deviation as vector_size_elem4. Other instantiations
+      (identified, not ported): 0x083d7954 4, 0x083d7870 4, 0x083d784c
+      4, 0x083d7828 4, 0x083d77ec 4, 0x083d77a8 4, 0x083d7708 4 bl
+      sites; shift-based ones are one-line ports whenever wanted.
 
   - address: 0x083d5ea0
     ghidra: FUN_083d5ea0

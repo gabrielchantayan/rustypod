@@ -91,7 +91,11 @@ fn sdiv_core(num: i32, den: i32) -> (i32, i32) {
 }
 
 /// `__rt_sdiv` @ 0x08031568 — signed 32-bit divide, quotient only.
+// `#[inline(never)]`: intra-crate callers (cxx::templates'
+// vector_capacity) keep the original's `b` tail-branch boundary for
+// match.py review (the __rt_udiv precedent below).
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn __rt_sdiv(num: i32, den: i32) -> i32 {
     sdiv_core(num, den).0
 }
