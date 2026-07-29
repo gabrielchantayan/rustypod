@@ -21,6 +21,9 @@
 //!   sites (the largest family in the block after the handle accessor).
 //! - [`array_at_checked`] — bounds-checked lookup in a
 //!   {base, count} pointer array, 2 copies, 43 call sites.
+//! - [`pair_assign_guarded`] — the self-assignment-guarded two-word
+//!   copy-assign of a pair-shaped value type, the only copy, 14 call
+//!   sites.
 //! - [`vector_size_elem4`] / [`vector_size_elem8`] /
 //!   [`vector_size_elem16`] / [`vector_size_elem32`] —
 //!   `vector<T>::size()`, one instantiation per element size; the four
@@ -337,9 +340,73 @@ pub unsafe extern "C" fn array_at_checked(array: *const PtrArray, index: i32) ->
     (*array).base.offset(index as isize).read()
 }
 
+/// pair_assign_guarded — original: `FUN_083dc0e0` @ 0x083dc0e0
+/// (24 bytes; 14 `bl` call sites, the only copy).
+///
+/// The copy-assign of a two-word (8-byte) value type: when `src != dst`
+/// the two words at `src` are copied to `dst`, otherwise nothing
+/// happens — the textbook `if (this != &other)` self-assignment guard.
+/// Unlike [`deque_iter_assign`]'s unconditional four-word copy this one
+/// is fully predicated: the original is a single branchless run of
+/// `cmp` + `ldrne`/`strne` pairs, returning with `dst` in r0 untouched.
+///
+/// Codegen deviation: LLVM emits the guard as a real branch instead of
+/// predicated word copies; the structure (compare, guarded two-word
+/// copy, return) is the same.
+///
+/// # Safety
+/// `dst` and `src` must be valid, 4-byte aligned and 8 bytes wide when
+/// they differ. When they are equal (or both NULL) nothing is touched.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn pair_assign_guarded(dst: *mut u32, src: *const u32) -> *mut u32 {
+    if src as *mut u32 != dst {
+        dst.write(src.read());
+        dst.add(1).write(src.add(1).read());
+    }
+    dst
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pair_assign_copies_two_words_and_returns_dst() {
+        unsafe {
+            let src: [u32; 2] = [0x1111_1111, 0x2222_2222];
+            let mut dst: [u32; 3] = [0; 3];
+            let ret = pair_assign_guarded(dst.as_mut_ptr(), src.as_ptr());
+            assert_eq!(ret, dst.as_mut_ptr());
+            assert_eq!(&dst[..2], &src);
+            assert_eq!(dst[2], 0, "nothing past the 8 bytes");
+        }
+    }
+
+    /// src == dst: the whole copy is skipped — nothing is loaded or
+    /// stored, so the words stay put (trivially) and no overlap hazard
+    /// exists at all.
+    #[test]
+    fn pair_assign_self_assign_is_a_noop() {
+        unsafe {
+            let mut pair: [u32; 2] = [0xaaaa_bbbb, 0xcccc_dddd];
+            let ret = pair_assign_guarded(pair.as_mut_ptr(), pair.as_ptr());
+            assert_eq!(ret, pair.as_mut_ptr());
+            assert_eq!(pair, [0xaaaa_bbbb, 0xcccc_dddd]);
+        }
+    }
+
+    #[test]
+    fn pair_assign_dst_is_returned_on_the_skipped_path() {
+        unsafe {
+            let pair: [u32; 2] = [1, 2];
+            // Two disjoint buffers, so the guard fires only on equality;
+            // NULL==NULL exercises the equal-pointer skip without any
+            // valid memory.
+            assert!(pair_assign_guarded(core::ptr::null_mut(), core::ptr::null()).is_null());
+            assert_eq!(pair, [1, 2]);
+        }
+    }
 
     #[test]
     fn iter_assign_copies_four_words_and_returns_dst() {
