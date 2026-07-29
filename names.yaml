@@ -3389,11 +3389,14 @@ functions:
   - address: 0x082ab11c
     name: linked_out_ret_stub
     size: 4
-    status: identified
+    status: ported
     notes: >-
-      bx lr — the target the linked-out stackheap_bounds_fetch thunk
-      @ 0x0800af04 lands on. Nothing to port (covered by the thunk's
-      port).
+      `bx lr` (verified against osos.asm) — the target the linked-out
+      stackheap_bounds_fetch thunk @ 0x0800af04 lands on. Nothing to
+      port: the linked-out behavior (return r0, leave the block
+      untouched) is reproduced by the stackheap_bounds_fetch port, and
+      the stub is reachable only through that thunk, so hooking the
+      thunk's address covers this one.
 
   - address: 0x0802ecc4
     ghidra: FUN_0802ecc4
