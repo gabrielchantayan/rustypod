@@ -156,6 +156,7 @@ const GEOMETRY_SET: usize = 0x44;
 const EXTRA_FLAG: usize = 0x46;
 const ALPHA: usize = 0x48;
 const BLEND_MODE: usize = 0x49;
+const BOUND_SURFACE: usize = 0x50;
 const MUTEX: usize = 0x78;
 const DIRTY: usize = 0x1bc;
 const TAIL_FLAG: usize = 0x1be;
@@ -221,15 +222,18 @@ unsafe fn layer_mutex(layer: *mut u8) -> *mut Mutex {
 /// bound surface, `layer_install_planes` @ 0x0811feb8 consumes them).
 pub const PLANE_COUNT: usize = 4;
 
-/// Indirect dispatch for the unported callees of this cluster (the
-/// house pattern — see `heap/alloc_core.rs`).
+/// Indirect dispatch for this cluster's callees that are unported or
+/// kept interceptable for tests (the house pattern — see
+/// `heap/alloc_core.rs`).
 #[derive(Clone, Copy)]
 pub struct LayerDriverHooks {
     /// `FUN_081206c4` @ 0x081206c4 (2 call sites): swaps the layer's
     /// bound surface (+0x50) — releases the old one through its vtable
     /// slot +0x04, stores the new pointer, retains it through slot
     /// +0x00. [`layer_enable`] calls it with NULL, [`layer_bind_surface`]
-    /// with the caller's surface. Default: no-op.
+    /// with the caller's surface. Ported below as [`layer_swap_surface`];
+    /// the slot stays so tests can interpose a recording mock. Default:
+    /// the port itself.
     pub swap_surface: unsafe extern "C" fn(layer: *mut u8, surface: *mut u8),
     /// `FUN_081203c4` @ 0x081203c4 (2 call sites): reads the four plane
     /// addresses of the bound surface (+0x50) out through the surface
@@ -261,8 +265,6 @@ pub struct LayerDriverHooks {
     pub render: unsafe extern "C" fn(layer: *mut u8) -> *mut u8,
 }
 
-unsafe extern "C" fn swap_surface_stub(_layer: *mut u8, _surface: *mut u8) {}
-
 unsafe extern "C" fn query_planes_stub(
     layer: *mut u8,
     _plane0: *mut *mut u8,
@@ -286,9 +288,10 @@ unsafe extern "C" fn render_stub(layer: *mut u8) -> *mut u8 {
     layer
 }
 
-/// Wired defaults (no-op stubs until the four originals are ported).
+/// Wired defaults: the ported swap plus no-op stubs for the originals
+/// not yet ported.
 pub(crate) const DEFAULT_LAYER_DRIVER_HOOKS: LayerDriverHooks = LayerDriverHooks {
-    swap_surface: swap_surface_stub,
+    swap_surface: layer_swap_surface,
     query_planes: query_planes_stub,
     install_planes: install_planes_stub,
     render: render_stub,
@@ -472,6 +475,58 @@ pub unsafe extern "C" fn layer_enable(layer: *mut u8) {
         }
     }
     mutex_unlock(layer_mutex(layer));
+}
+
+/// The bound surface's vtable, modeled down to the two slots
+/// [`layer_swap_surface`] dispatches. The slots are native-width — on
+/// the 32-bit target they sit at +0x00/+0x04, on a 64-bit host at
+/// +0x00/+0x08, and host tests plant a native vtable (the
+/// `cxx/templates.rs` precedent).
+#[repr(C)]
+pub struct SurfaceVtable {
+    /// +0x00: retain — tail-dispatched with the new surface.
+    pub retain: unsafe extern "C" fn(surface: *mut u8),
+    /// +0x04 on target: release — called on the old surface.
+    pub release: unsafe extern "C" fn(surface: *mut u8),
+}
+
+/// layer_swap_surface — original: `FUN_081206c4` @ 0x081206c4
+/// (60 bytes; 2 `bl` call sites: [`layer_enable`] with a NULL surface,
+/// [`layer_bind_surface`] with the caller's).
+///
+/// Refcounted swap of the layer's bound surface at +0x50:
+///
+/// 1. Loads the old surface and, if it is non-NULL, releases it through
+///    vtable slot +0x04 (two predicated loads and a `blxne`).
+/// 2. Stores the new pointer into +0x50 — unconditional, even for NULL.
+/// 3. If the new surface is non-NULL, tail-dispatches vtable slot +0x00
+///    to retain it (`ldmiane` + `bxne`); a NULL new surface falls
+///    through to the plain epilogue. A NULL-to-NULL swap is therefore
+///    a single dead store with no vtable traffic.
+///
+/// Deviations:
+///
+/// - +0x50 is accessed as a native-width pointer through the literal
+///   byte offset: exactly the 4-byte field on target; on a 64-bit host
+///   the 8-byte access spans the unaccounted +0x54 word (the next known
+///   field is +0x60), which is how the tests plant fake surfaces. That
+///   slack is exactly what the densely-packed +0x04/+0x60/+0x64 pointer
+///   fields lack, which is why the render pass stays behind the hook.
+/// - The retain dispatch is a trailing call; LLVM lowers it back to the
+///   original's tail branch.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn layer_swap_surface(layer: *mut u8, surface: *mut u8) {
+    let slot = layer.add(BOUND_SURFACE) as *mut *mut u8;
+    let old_surface = slot.read_volatile();
+    if !old_surface.is_null() {
+        let vtable = (old_surface as *const *const SurfaceVtable).read_volatile();
+        ((*vtable).release)(old_surface);
+    }
+    slot.write_volatile(surface);
+    if !surface.is_null() {
+        let vtable = (surface as *const *const SurfaceVtable).read_volatile();
+        ((*vtable).retain)(surface);
+    }
 }
 
 /// layer_bind_surface — original: `FUN_0811fe80` @ 0x0811fe80
@@ -1121,6 +1176,148 @@ mod tests {
         assert_eq!(SWAPS.load(Ordering::SeqCst), 1);
 
         restore_hooks(guard);
+    }
+
+    // ---- swap surface ----------------------------------------------------
+
+    /// Serializes the tests that share the recording surface vtable.
+    static SWAP_LOCK: StdMutex<()> = StdMutex::new(());
+    /// Ordered event log: surface address | kind (0 = release,
+    /// 1 = retain). Fake surfaces are aligned, so the low bit is free.
+    static SWAP_EVENTS: [AtomicUsize; 8] = [const { AtomicUsize::new(0) }; 8];
+    static SWAP_EVENT_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+    fn record_swap_event(kind: usize, surface: *mut u8) {
+        let index = SWAP_EVENT_COUNT.fetch_add(1, Ordering::SeqCst);
+        SWAP_EVENTS[index].store(surface as usize | kind, Ordering::SeqCst);
+    }
+
+    unsafe extern "C" fn recording_release(surface: *mut u8) {
+        record_swap_event(0, surface);
+    }
+
+    unsafe extern "C" fn recording_retain(surface: *mut u8) {
+        record_swap_event(1, surface);
+    }
+
+    static TEST_SURFACE_VTABLE: SurfaceVtable = SurfaceVtable {
+        retain: recording_retain,
+        release: recording_release,
+    };
+
+    /// A surface, modeled down to its first word — the vtable pointer.
+    #[repr(C)]
+    struct FakeSurface {
+        vtable: *const SurfaceVtable,
+    }
+
+    impl FakeSurface {
+        fn new() -> Self {
+            FakeSurface { vtable: &TEST_SURFACE_VTABLE }
+        }
+        fn ptr(&mut self) -> *mut u8 {
+            self as *mut FakeSurface as *mut u8
+        }
+    }
+
+    impl Layer {
+        fn set_bound_surface(&mut self, surface: *mut u8) {
+            unsafe { (self.0.as_mut_ptr().add(BOUND_SURFACE) as *mut *mut u8).write(surface) };
+        }
+        fn bound_surface(&self) -> *mut u8 {
+            unsafe { (self.0.as_ptr().add(BOUND_SURFACE) as *const *mut u8).read() }
+        }
+    }
+
+    fn with_recording_surface_vtable() -> MutexGuard<'static, ()> {
+        let guard = SWAP_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        SWAP_EVENT_COUNT.store(0, Ordering::SeqCst);
+        guard
+    }
+
+    /// The log as (kind, surface address) pairs, oldest first.
+    fn swap_events() -> std::vec::Vec<(usize, usize)> {
+        (0..SWAP_EVENT_COUNT.load(Ordering::SeqCst))
+            .map(|index| {
+                let event = SWAP_EVENTS[index].load(Ordering::SeqCst);
+                (event & 1, event & !1)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn swapping_onto_an_unbound_layer_only_retains_the_new_surface() {
+        let _guard = with_recording_surface_vtable();
+        let mut layer = unarmed_layer();
+        let mut surface = FakeSurface::new();
+        let surface_ptr = surface.ptr();
+
+        unsafe { layer_swap_surface(layer.ptr(), surface_ptr) };
+
+        assert_eq!(layer.bound_surface(), surface_ptr);
+        assert_eq!(swap_events().as_slice(), &[(1, surface_ptr as usize)]);
+    }
+
+    #[test]
+    fn swapping_releases_the_old_surface_before_retaining_the_new_one() {
+        let _guard = with_recording_surface_vtable();
+        let mut old = FakeSurface::new();
+        let mut new = FakeSurface::new();
+        let (old_ptr, new_ptr) = (old.ptr(), new.ptr());
+        let mut layer = unarmed_layer();
+        layer.set_bound_surface(old_ptr);
+
+        unsafe { layer_swap_surface(layer.ptr(), new_ptr) };
+
+        assert_eq!(layer.bound_surface(), new_ptr);
+        assert_eq!(
+            swap_events().as_slice(),
+            &[(0, old_ptr as usize), (1, new_ptr as usize)],
+            "release(old), then retain(new)"
+        );
+    }
+
+    #[test]
+    fn swapping_to_null_releases_without_retaining() {
+        let _guard = with_recording_surface_vtable();
+        let mut old = FakeSurface::new();
+        let old_ptr = old.ptr();
+        let mut layer = unarmed_layer();
+        layer.set_bound_surface(old_ptr);
+
+        unsafe { layer_swap_surface(layer.ptr(), core::ptr::null_mut()) };
+
+        assert!(layer.bound_surface().is_null());
+        assert_eq!(swap_events().as_slice(), &[(0, old_ptr as usize)]);
+    }
+
+    #[test]
+    fn a_null_for_null_swap_calls_no_vtable_slot() {
+        let _guard = with_recording_surface_vtable();
+        let mut layer = unarmed_layer();
+        unsafe { layer_swap_surface(layer.ptr(), core::ptr::null_mut()) };
+        assert!(layer.bound_surface().is_null());
+        assert!(swap_events().is_empty());
+    }
+
+    #[test]
+    fn the_swap_touches_nothing_but_the_surface_slot() {
+        let _guard = with_recording_surface_vtable();
+        let mut layer = unarmed_layer();
+        layer.0 = [0xa5; 0x200];
+        let mut old = FakeSurface::new();
+        layer.set_bound_surface(old.ptr());
+
+        unsafe { layer_swap_surface(layer.ptr(), core::ptr::null_mut()) };
+
+        assert!(layer.bound_surface().is_null());
+        let slot = BOUND_SURFACE..BOUND_SURFACE + core::mem::size_of::<*mut u8>();
+        for offset in 0..0x200 {
+            if slot.contains(&offset) {
+                continue;
+            }
+            assert_eq!(layer.byte(offset), 0xa5, "byte +{offset:#x}");
+        }
     }
 
     // ---- bind / reconfigure --------------------------------------------

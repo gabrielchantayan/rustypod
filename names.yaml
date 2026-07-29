@@ -6174,8 +6174,8 @@ functions:
       also sets the enable-state-changed byte (+0x43) and the dirty flag
       (+0x1bc), and for format variant (+0x0b) 3 only, unbinds the
       layer's surface - layer_swap_surface(layer, NULL) @ 0x081206c4,
-      which is not yet ported and reaches the Rust port through the
-      LAYER_DRIVER_HOOKS dispatch table (default - no-op). The original
+      ported in the same module and reached through the
+      LAYER_DRIVER_HOOKS dispatch table (default - the port itself). The original
       releases the mutex with a tail branch. Ghidra's C for this
       function invents a jumptable at 0x08037e10 - that is just the
       mutex_unlock tail branch.
@@ -6410,7 +6410,7 @@ functions:
     size: 60
     sig: "void layer_swap_surface(u8 *layer, u8 *surface)"
     module: drivers/display_layer
-    status: identified
+    status: ported
     vars: {param_1: layer, param_2: surface}
     notes: >-
       2 bl call sites (layer_enable @ 0x08120944 with a NULL surface,
@@ -6418,10 +6418,18 @@ functions:
       swap of the layer's bound surface at +0x50 - releases the old one
       through its vtable slot +0x04 (skipped when NULL), stores the new
       pointer, and tail-dispatches its vtable slot +0x00 to retain it
-      (skipped when NULL). Not ported - +0x50 is a pointer field, which
-      the byte-offset addressing of drivers/display_layer cannot hold on
-      a 64-bit host (same blocker as layer_render). Dispatches through
-      LAYER_DRIVER_HOOKS.swap_surface (default - no-op).
+      (skipped when NULL). A NULL-to-NULL swap is a single dead store.
+      The earlier "cannot hold a pointer field on a 64-bit host" blocker
+      is sidestepped because +0x50 is followed by unaccounted padding up
+      to +0x60, so a native-width pointer access at the literal byte
+      offset fits on a 64-bit host (the densely packed +0x04/+0x60/+0x64
+      fields lack that slack, which is why layer_render stays behind the
+      hook); the surface vtable slots are modeled native-width (the
+      cxx/templates.rs precedent, SurfaceVtable). The port is wired as
+      LAYER_DRIVER_HOOKS.swap_surface's default, so layer_enable /
+      layer_bind_surface now exercise it; tests interpose a recording
+      mock. match.py - same structure, LLVM uses branches instead of
+      predication and adds a frame-pointer setup.
 
   - address: 0x081203c4
     ghidra: FUN_081203c4
