@@ -8933,11 +8933,17 @@ functions:
     name: db_str_ndup
     size: 48
     sig: "char *db_str_ndup(sqlite3 *db, const char *z, int n)"
-    module: null
-    status: identified
+    module: sqlite/strdup
+    status: ported
+    vars: {param_1: db, param_2: z, param_3: n}
     notes: >-
       SQLite's sqlite3DbStrNDup. 12 bl call sites. Same shape as
-      db_str_dup over str_ndup @ 0x08384f60. Not ported (same reason).
+      db_str_dup over str_ndup @ 0x08384f60: tail call, NULL-z
+      early-out, conditional store of 1 to db->mallocFailed (+0x1e)
+      via sqlite::mem::set_malloc_failed. Its only callee str_ndup was
+      still missing, so it is ported alongside in the same module
+      (precedent: db_malloc_raw landing with db_malloc_zero). match.py:
+      same structure (callee bl, cmp/early-out, strbeq at +0x1e).
 
   - address: 0x08384ed8
     ghidra: FUN_08384ed8
@@ -8955,6 +8961,25 @@ functions:
       their ported twins (LLVM inlines strlen); sqlite3_malloc goes
       through the DB_MEM_OPS dispatch slot like sqlite/mem.rs. No
       mallocFailed flag here - that is db_str_dup's job.
+
+  - address: 0x08384f60
+    ghidra: FUN_08384f60
+    name: str_ndup
+    size: 64
+    sig: "char *str_ndup(const char *z, int n)"
+    module: sqlite/strdup
+    status: ported
+    vars: {param_1: z, param_2: n}
+    notes: >-
+      SQLite's sqlite3StrNDup. 2 bl call sites (db_str_ndup and
+      FUN_0838656c). NULL in, NULL out; otherwise sqlite3_malloc
+      @ 0x08390b14 of n + 1, __rt_memcpy through the veneer
+      @ 0x08037db0 of exactly n bytes (no strlen - the source need not
+      be NUL-terminated in the span), and a terminator store at
+      dup[n]. __rt_memcpy goes through its ported twin; sqlite3_malloc
+      through the DB_MEM_OPS dispatch slot like str_dup. No
+      mallocFailed flag here - that is db_str_ndup's job. Ported
+      together with db_str_ndup, its assigned caller.
 
   # ---- Parse context (src/sqlite/parse.rs) ----
   - address: 0x08381f98
