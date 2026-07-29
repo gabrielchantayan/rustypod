@@ -9251,6 +9251,32 @@ functions:
       24 bl + 1 tail b call sites. `mov r0,#0; b 0x083696f4` - a
       zero-argument veneer over 0x083696f4.
 
+  - address: 0x082d0ae8
+    ghidra: FUN_082d0ae8
+    name: ata_error_record
+    size: 136
+    sig: "u8 *ata_error_record(void)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {iVar1: table, iVar2: id, iVar3: slot, iVar4: record}
+    notes: >-
+      6 bl call sites in osos.asm (0x082d0aa8, 0x082e1f7c, 0x082e1fa0,
+      0x082e2258, 0x082e4074, ata_report_error @ 0x083690b0). The
+      storage layer's per-task error-record allocator: owner id from
+      thunk 0x08037e60 (ROM 0x22003eb0, the UNVERIFIED "size_to_class";
+      called with no argument of its own - ATA_ERROR_HOOKS.current_id,
+      default stub 0 = "no kernel"), then scan 8 slots of 0x38 bytes
+      (stock table @ 0x08adb68c, pointer literal @ 0x082d0b74; crate
+      static in the port) for owner==id, else claim the first owner==0
+      slot: zero it, stamp owner (+0x00) and 1-based slot tag (+0x0c).
+      Faithful quirks kept: a full pool reuses slot 0; id 0 matches the
+      zeroed pool on the FIRST scan and returns slot 0 uninitialized.
+      Deviations: zero fill is the ported memzero, not the island-local
+      byte loop 0x08394120 (whose dst+n return the caller discards);
+      LLVM fully unrolls both constant-trip scans (util/table_find.rs
+      precedent) - slot order, early return and the slot-0 fall-through
+      preserved. match.py structural only, as expected.
+
   - address: 0x083690a8
     ghidra: FUN_083690a8
     name: ata_report_error

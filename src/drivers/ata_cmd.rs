@@ -65,6 +65,17 @@
 //!   lookup into the table the handle's second word points at:
 //!   `((const u32 *)handle[1])[index]`, or 0 when the handle is NULL.
 //!
+//! The island's error reporting bottoms out in a per-task record pool,
+//! allocated by:
+//!
+//! - `ata_error_record` — `FUN_082d0ae8` @ 0x082d0ae8 (136 bytes; 6 `bl`
+//!   call sites in osos.asm, one of them `ata_report_error` @
+//!   0x083690b0). Fetches the current owner id from the ROM thunk
+//!   0x08037e60, returns the caller's 0x38-byte record from an 8-slot
+//!   pool (stock table @ 0x08adb68c, pointer literal @ 0x082d0b74),
+//!   claiming and zeroing a free slot on first use. See the function's
+//!   doc header for the full algorithm.
+//!
 //! Deviations:
 //!
 //! - The original `ata_cmd_set_lba48` reaches its 16-bit fields with
@@ -476,6 +487,135 @@ pub unsafe extern "C" fn ata_handle_table_entry(handle: *const u32, index: u32) 
             .add(index as usize)
             .read()
     }
+}
+
+// ---------------------------------------------------------------------------
+// Per-task error records — the storage layer's errno.
+// ---------------------------------------------------------------------------
+
+use crate::libc::memzero::memzero;
+
+/// Byte size of one error record (the original passes 0x38 to its zero
+/// fill). Only three fields are known: the owner id at +0x00, the error
+/// code at +0x04 (written by `ata_report_error`) and the 1-based slot
+/// tag at +0x0c.
+pub const ERROR_RECORD_SIZE: usize = 0x38;
+
+/// Number of record slots; both of the original's scan loops bound at
+/// `cmp r?, #0x8`.
+pub const ERROR_RECORD_SLOTS: usize = 8;
+
+const RECORD_OWNER: usize = 0x00;
+const RECORD_SLOT_TAG: usize = 0x0c;
+
+/// The record pool must be word-aligned: the original reaches every
+/// field with word `ldr`/`str`s. The field is only ever touched through
+/// raw pointers, hence the `allow`.
+#[repr(align(4))]
+#[allow(dead_code)]
+struct ErrorRecords([u8; ERROR_RECORD_SLOTS * ERROR_RECORD_SIZE]);
+
+/// The record pool. The stock table lives in RAM at 0x08adb68c (pointer
+/// literal @ 0x082d0b74); the port keeps it as a crate static, the
+/// kernel/task.rs pool precedent.
+static mut ERROR_RECORDS: ErrorRecords =
+    ErrorRecords([0; ERROR_RECORD_SLOTS * ERROR_RECORD_SIZE]);
+
+/// ROM/kernel services the error-record allocator depends on. See
+/// [`ATA_ERROR_HOOKS`] for the default-stub policy.
+#[derive(Copy, Clone)]
+pub struct AtaErrorHooks {
+    /// Thunk 0x08037e60 -> ROM 0x22003eb0 (catalogued as the UNVERIFIED
+    /// "size_to_class" in kernel/thunks.rs): the id that owns a record —
+    /// the storage layer's per-task key. The stock call site sets no
+    /// argument of its own (r0 is whatever the caller left in it), so
+    /// this hook takes none.
+    pub current_id: unsafe extern "C" fn() -> u32,
+}
+
+/// Default stub: no kernel — every caller reports under id 0, which the
+/// first scan matches against a zeroed pool's slot 0. The
+/// kernel/condvar.rs "kernel not present" policy.
+unsafe extern "C" fn missing_current_id() -> u32 {
+    0
+}
+
+/// Hook table for the ROM dependency. Replace before first use on
+/// target; host tests install mocks via `core::ptr::addr_of_mut!`.
+pub static mut ATA_ERROR_HOOKS: AtaErrorHooks = AtaErrorHooks {
+    current_id: missing_current_id,
+};
+
+/// Reads the hook table. Volatile so LLVM cannot constant-fold the load
+/// to the default stub (the heap/wrappers.rs pattern).
+#[inline(always)]
+fn error_hooks() -> AtaErrorHooks {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(ATA_ERROR_HOOKS)) }
+}
+
+/// Aligned volatile word read for the record scans — the original's
+/// `ldr r1, [r8, r1, lsl #3]`.
+#[inline(always)]
+unsafe fn word(base: *const u8, offset: usize) -> u32 {
+    (base.add(offset) as *const u32).read_volatile()
+}
+
+/// ata_error_record — original: `FUN_082d0ae8` @ 0x082d0ae8 (136 bytes;
+/// 6 `bl` call sites in osos.asm — 0x082d0aa8, 0x082e1f7c, 0x082e1fa0,
+/// 0x082e2258, 0x082e4074 and `ata_report_error` @ 0x083690b0).
+///
+/// The storage layer's per-task error-record allocator. Fetches the
+/// current owner id (ROM thunk 0x08037e60, see [`AtaErrorHooks`]), then:
+///
+/// 1. Scans the 8 slots of 0x38 bytes for one whose owner word (+0x00)
+///    equals the id and returns it — a caller always finds its own
+///    record back.
+/// 2. Otherwise claims the first slot whose owner word is 0: zeroes the
+///    whole record, stamps the owner and a 1-based slot tag at +0x0c,
+///    and returns it.
+///
+/// Faithful quirks, both preserved:
+///
+/// - A pool with no free slot falls through the second scan and reuses
+///   slot 0 (`mov r4, #0; b found` @ 0x082d0b6c), zeroing whoever was
+///   there.
+/// - An id of 0 matches the zeroed pool on the FIRST scan, so it returns
+///   slot 0 uninitialized — owner 0 reads back as "free" forever.
+///
+/// Deviations: the original zeroes with the island-local byte loop
+/// 0x08394120 (returns dst+n, discarded by the caller); the port calls
+/// the ported [`memzero`] — same memory effect. `#[inline(never)]`
+/// keeps the body out of `ata_report_error`, whose original is a plain
+/// `bl` here.
+///
+/// Codegen deviation: the original keeps two rolled 8-iteration scans;
+/// LLVM fully unrolls the constant trip count into straight-line
+/// compare/branch chains (the util/table_find.rs pattern). Behaviorally
+/// identical — the slot order, the early return on the first owner
+/// match and the full-pool fall-through to slot 0 are all preserved.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_error_record() -> *mut u8 {
+    let id = (error_hooks().current_id)();
+    let table = core::ptr::addr_of_mut!(ERROR_RECORDS) as *mut u8;
+    for slot in 0..ERROR_RECORD_SLOTS {
+        let record = table.add(slot * ERROR_RECORD_SIZE);
+        if word(record, RECORD_OWNER) == id {
+            return record;
+        }
+    }
+    let mut slot = 0;
+    for free in 0..ERROR_RECORD_SLOTS {
+        if word(table, free * ERROR_RECORD_SIZE) == 0 {
+            slot = free;
+            break;
+        }
+    }
+    let record = table.add(slot * ERROR_RECORD_SIZE);
+    memzero(record, ERROR_RECORD_SIZE);
+    set_word(record, RECORD_OWNER, id);
+    set_word(record, RECORD_SLOT_TAG, slot as u32 + 1);
+    record
 }
 
 #[cfg(test)]
@@ -979,5 +1119,142 @@ mod tests {
         // the guard is on the pointer, never on the contents.
         let handle = [0u32, 0xffff_ffff];
         assert_eq!(unsafe { ata_handle_first_word_or_minus1(handle.as_ptr()) }, 0);
+    }
+
+    // ---- the per-task error records ----------------------------------
+
+    extern crate std;
+    use std::sync::{Mutex, MutexGuard};
+
+    static ERROR_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    static mut MOCK_ID: u32 = 0;
+    unsafe extern "C" fn mock_current_id() -> u32 {
+        MOCK_ID
+    }
+
+    fn set_id(id: u32) {
+        unsafe { MOCK_ID = id };
+    }
+
+    /// Restores the default hook when a test ends (drop order: declared
+    /// after the guard, so it runs before the lock is released).
+    struct ErrorHookReset;
+    impl Drop for ErrorHookReset {
+        fn drop(&mut self) {
+            unsafe {
+                (*core::ptr::addr_of_mut!(ATA_ERROR_HOOKS)).current_id = missing_current_id;
+            }
+        }
+    }
+
+    /// Serializes the error-record tests, zeroes the pool and installs
+    /// the mock id hook.
+    fn fresh_records() -> MutexGuard<'static, ()> {
+        let guard = ERROR_TEST_LOCK.lock().unwrap();
+        unsafe {
+            core::ptr::addr_of_mut!(ERROR_RECORDS)
+                .write(ErrorRecords([0; ERROR_RECORD_SLOTS * ERROR_RECORD_SIZE]));
+            MOCK_ID = 0;
+            (*core::ptr::addr_of_mut!(ATA_ERROR_HOOKS)).current_id = mock_current_id;
+        }
+        guard
+    }
+
+    fn record_word(record: *const u8, offset: usize) -> u32 {
+        unsafe { word(record, offset) }
+    }
+
+    fn slot_of(record: *const u8) -> usize {
+        let base = core::ptr::addr_of!(ERROR_RECORDS) as *const u8;
+        (record as usize - base as usize) / ERROR_RECORD_SIZE
+    }
+
+    #[test]
+    fn first_call_claims_slot_zero_and_stamps_it() {
+        let _guard = fresh_records();
+        let _reset = ErrorHookReset;
+        set_id(7);
+        let record = unsafe { ata_error_record() };
+        assert_eq!(slot_of(record), 0);
+        assert_eq!(record_word(record, RECORD_OWNER), 7, "owner id");
+        assert_eq!(record_word(record, RECORD_SLOT_TAG), 1, "1-based slot tag");
+        // Everything outside owner and tag is zeroed.
+        for offset in (0..ERROR_RECORD_SIZE).step_by(4) {
+            if offset != RECORD_OWNER && offset != RECORD_SLOT_TAG {
+                assert_eq!(record_word(record, offset), 0, "word +{offset:#x}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_same_id_finds_its_record_back_without_zeroing_it() {
+        let _guard = fresh_records();
+        let _reset = ErrorHookReset;
+        set_id(7);
+        let first = unsafe { ata_error_record() };
+        // A payload the allocator must not disturb on the second call.
+        unsafe { set_word(first, 0x10, 0xdead_beef) };
+        let second = unsafe { ata_error_record() };
+        assert_eq!(first, second);
+        assert_eq!(record_word(second, 0x10), 0xdead_beef, "no re-zero on the hit path");
+    }
+
+    #[test]
+    fn distinct_ids_claim_consecutive_slots_with_1_based_tags() {
+        let _guard = fresh_records();
+        let _reset = ErrorHookReset;
+        let mut records = [core::ptr::null_mut::<u8>(); ERROR_RECORD_SLOTS];
+        for (i, slot) in records.iter_mut().enumerate() {
+            set_id(100 + i as u32);
+            *slot = unsafe { ata_error_record() };
+            assert_eq!(slot_of(*slot), i);
+            assert_eq!(record_word(*slot, RECORD_OWNER), 100 + i as u32);
+            assert_eq!(record_word(*slot, RECORD_SLOT_TAG), i as u32 + 1);
+        }
+    }
+
+    #[test]
+    fn id_zero_matches_the_zeroed_pool_on_the_first_scan() {
+        // Faithful quirk: owner 0 reads back as "free", so id 0 returns
+        // slot 0 uninitialized — owner and tag stay 0.
+        let _guard = fresh_records();
+        let _reset = ErrorHookReset;
+        set_id(0);
+        let record = unsafe { ata_error_record() };
+        assert_eq!(slot_of(record), 0);
+        assert_eq!(record_word(record, RECORD_OWNER), 0);
+        assert_eq!(record_word(record, RECORD_SLOT_TAG), 0);
+    }
+
+    #[test]
+    fn a_full_pool_reuses_slot_zero() {
+        let _guard = fresh_records();
+        let _reset = ErrorHookReset;
+        for i in 0..ERROR_RECORD_SLOTS {
+            set_id(100 + i as u32);
+            unsafe { ata_error_record() };
+        }
+        set_id(999);
+        let record = unsafe { ata_error_record() };
+        assert_eq!(slot_of(record), 0, "full pool falls through to slot 0");
+        assert_eq!(record_word(record, RECORD_OWNER), 999, "previous owner evicted");
+        assert_eq!(record_word(record, RECORD_SLOT_TAG), 1);
+        // Every other slot survived the eviction.
+        for i in 1..ERROR_RECORD_SLOTS {
+            let base = core::ptr::addr_of!(ERROR_RECORDS) as *const u8;
+            let other = unsafe { base.add(i * ERROR_RECORD_SIZE) };
+            assert_eq!(record_word(other, RECORD_OWNER), 100 + i as u32, "slot {i}");
+        }
+    }
+
+    #[test]
+    fn the_default_stub_reports_every_caller_under_id_zero() {
+        let _guard = fresh_records();
+        unsafe {
+            (*core::ptr::addr_of_mut!(ATA_ERROR_HOOKS)).current_id = missing_current_id;
+        }
+        let record = unsafe { ata_error_record() };
+        assert_eq!(slot_of(record), 0, "no kernel: the shared slot 0");
     }
 }
