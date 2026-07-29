@@ -2132,8 +2132,51 @@ functions:
       line start, so a misaligned addr can leave the final spilled line
       unflushed (callers pass padded lengths). Port dispatches per line
       through DCACHE_LINE_OP (real mcr on target); wired as the
-      POOL_OPS.dcache_flush default. A clean-only sibling loop without
-      the bit-31 guard sits right after @ 0x08044c48 (not ported).
+      POOL_OPS.dcache_flush default. The clean-only sibling loop without
+      the bit-31 guard sits right after @ 0x08044c48 (ported as
+      dcache_clean, same module).
+
+  - address: 0x08037cc8
+    ghidra: FUN_08037cc8
+    name: dcache_line_clean
+    size: 8
+    sig: "void dcache_line_clean(usize mva)"
+    module: heap/dcache
+    status: ported
+    notes: >-
+      mcr p15,0,r0,cr7,cr10,1; bx lr — ARM926EJ-S clean (no invalidate)
+      D-cache single entry by MVA. Sole bl caller 0x08044c64 (inside
+      dcache_clean's walk). Port is cfg-gated real inline asm on the ARM
+      target, no-op on host; the DCACHE_CLEAN_LINE_OP slot (same
+      semihost.rs SEMIHOST_SWI pattern as DCACHE_LINE_OP) lets host
+      tests record the cleaned line addresses. match.py structural:
+      identical mcr, frame-pointer push/pop in place of bare bx lr.
+
+  - address: 0x08044c48
+    ghidra: FUN_08044c48
+    name: dcache_clean
+    size: 48
+    sig: "void dcache_clean(u8 *addr, usize len)"
+    module: heap/dcache
+    vars: {param_1: addr, param_2: len}
+    status: ported
+    notes: >-
+      6 bl call sites, binary-verified — display-layer plane/surface
+      flushes (layer_install_planes @ 0x0811feb8 and friends). The
+      clean-only sibling of dcache_clean_invalidate @ 0x08044c10: same
+      walk (line (addr+off) & ~0x1f for off = 0, 0x20, ... < len,
+      stepping from addr not the line start) but per line via
+      bl 0x08037cc8 (clean only) and with NO bit-31 uncached-alias
+      guard — callers guard themselves (layer_install_planes' tst on
+      p0). Port dispatches per line through DCACHE_CLEAN_LINE_OP (real
+      mcr on target); a separate slot from DCACHE_LINE_OP so recordings
+      distinguish clean-only from clean+invalidate. match.py
+      structural: same loop (bic #0x1f, #0x20 stride, off<len bcc),
+      blx through the slot in place of bl, crate-wide frame-pointer
+      setup. NOTE: layer_install_planes' LAYER_DRIVER_HOOKS.flush_range
+      default (src/drivers/display_layer.rs, drivers/ territory) still
+      defaults to a no-op — wiring it to dcache_clean is left to the
+      drivers/ porter.
 
   - address: 0x0818ae48
     ghidra: FUN_0818ae48
