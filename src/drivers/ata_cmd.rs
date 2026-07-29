@@ -257,6 +257,19 @@ pub unsafe extern "C" fn ata_cmd_set_flags(cmd: *mut u8, flags: u32) {
     set_word(cmd, FLAGS, flags);
 }
 
+/// ata_cmd_set_block_size — original: `FUN_081213e4` @ 0x081213e4
+/// (8 bytes; 12 call sites, binary-scanned).
+///
+/// Block size in bytes (+0x34). Every caller passes the device object's
+/// bytes-per-sector (vtable slot +0x20) — the same value the transfer-
+/// length computation multiplies by. [`ata_cmd_reset`] defaults the
+/// field to [`DEFAULT_BLOCK_SIZE`].
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_cmd_set_block_size(cmd: *mut u8, block_size: u32) {
+    set_word(cmd, BLOCK_SIZE, block_size);
+}
+
 /// ata_cmd_set_transfer_len — original: `FUN_081212a4` @ 0x081212a4
 /// (8 bytes; 16 call sites, binary-scanned).
 ///
@@ -575,6 +588,18 @@ mod tests {
         let mut block = poisoned();
         unsafe { ata_cmd_set_device(block.0.as_mut_ptr(), DEVICE_NONE) };
         assert_eq!(block.0[DEVICE_INDEX] as i8, -1);
+    }
+
+    #[test]
+    fn the_block_size_setter_writes_only_its_word() {
+        let mut block = poisoned();
+        unsafe { ata_cmd_set_block_size(block.0.as_mut_ptr(), 4096) };
+        assert_eq!(word_at(&block, BLOCK_SIZE), 4096);
+        for other in 0..block.0.len() {
+            if !(BLOCK_SIZE..BLOCK_SIZE + 4).contains(&other) {
+                assert_eq!(block.0[other], 0xa5, "spilled onto +{other:#x}");
+            }
+        }
     }
 
     #[test]
