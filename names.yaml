@@ -10021,15 +10021,20 @@ functions:
     ghidra: FUN_0811c564
     name: flag_2c_is_clear
     size: 16
-    module: null
-    status: identified
+    sig: "u32 flag_2c_is_clear(const void *obj)"
+    module: ui/flag_2c
+    status: ported
+    renames:
+      param_1: obj
     notes: >-
       16 bl call sites, a pure leaf. `rsbs r0, byte[obj + 0x2c], #1;
       movcc r0, #0` - i.e. it returns 1 when the byte at +0x2c is 0 and 0
       for every other value (the carry-clear predicate kills the negative
-      results, so it is exactly `byte == 0`, not `1 - byte`). Trivially
-      portable; the owning class is unidentified, so the name would be
-      guesswork.
+      results, so it is exactly `byte == 0`, not `1 - byte`). The owning
+      class is unidentified (UI/layout object judging by the callers), so
+      the descriptive offset-based name is kept. match.py: LLVM lowers
+      `byte == 0` to clz/lsr instead of rsbs/movcc - same load-and-test
+      structure.
 
   - address: 0x0811f704
     ghidra: FUN_0811f704
