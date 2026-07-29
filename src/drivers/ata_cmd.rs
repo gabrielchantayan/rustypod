@@ -68,8 +68,15 @@
 //!   24 `bl` + 1 tail-`b` call sites). The zero-argument entry point of
 //!   the handle factory @ 0x083696f4 (`mov r0, #0; b 0x083696f4`) —
 //!   allocates the 5-word handle both leaves above read. The factory
-//!   itself is not ported yet (it sits on the unported traced allocator
-//!   0x08043c18), so the veneer dispatches through [`ATA_HANDLE_HOOKS`].
+//!   itself is not ported yet (its allocator is the ported
+//!   [`traced_alloc`]), so the veneer dispatches through
+//!   [`ATA_HANDLE_HOOKS`].
+//! - `traced_alloc` — `FUN_08043c18` @ 0x08043c18 (168 bytes; 88 `bl`
+//!   call sites, binary-scanned — the ATA handle factory @ 0x083696f4
+//!   among them). The firmware-wide traced allocator front-end: zeroes
+//!   the descriptor's status word, brackets the real allocator call
+//!   with an optional pre/post trace hook, and stamps the first byte
+//!   of large blocks with a global tag. See its doc header.
 //!
 //! The island's error reporting bottoms out in a per-task record pool,
 //! allocated by:
@@ -504,12 +511,12 @@ pub unsafe extern "C" fn ata_handle_table_entry(handle: *const u32, index: u32) 
 // ---------------------------------------------------------------------------
 
 /// ATA handle-factory services. The factory proper @ 0x083696f4 is not
-/// ported yet — it allocates through the traced allocator 0x08043c18
-/// and frees through 0x08043994, both unported — so the veneer below
-/// dispatches through this table (the [`ATA_ERROR_HOOKS`] pattern) and
-/// the default stub reports allocation failure. Every caller already
-/// handles that: each `bl 0x08369778` site compares the result against
-/// NULL and takes its error path.
+/// ported yet — it allocates through the ported [`traced_alloc`]
+/// (0x08043c18) and frees through 0x08043994 (still unported) — so the
+/// veneer below dispatches through this table (the [`ATA_ERROR_HOOKS`]
+/// pattern) and the default stub reports allocation failure. Every
+/// caller already handles that: each `bl 0x08369778` site compares the
+/// result against NULL and takes its error path.
 #[derive(Copy, Clone)]
 pub struct AtaHandleHooks {
     /// The handle factory @ 0x083696f4: allocates a 5-word handle and a
@@ -554,13 +561,135 @@ fn handle_hooks() -> AtaHandleHooks {
 ///
 /// Deviation: the original tail-branches into the factory; the port
 /// calls it indirectly through [`ATA_HANDLE_HOOKS`] because the factory
-/// (and the traced allocator 0x08043c18 / free 0x08043994 it sits on)
-/// is not ported yet. The default stub returns NULL — the same value
-/// the original produces on an allocation failure.
+/// itself (and the free 0x08043994 it pairs with) is not ported yet —
+/// its allocator [`traced_alloc`] now is. The default stub returns
+/// NULL — the same value the original produces on an allocation
+/// failure.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ata_call_with_zero() -> *mut u32 {
     (handle_hooks().create)(0)
+}
+
+// ---------------------------------------------------------------------------
+// The traced allocator the handle factory (and 87 other call sites) use.
+// ---------------------------------------------------------------------------
+
+/// Allocator-descriptor services for [`traced_alloc`]. The stock
+/// descriptor is a RAM table @ 0x08a0c2a4 (pointer literal @
+/// 0x08043cc0) whose slots are function pointers the heap init
+/// installs; the port keeps the two slots this function consults as a
+/// hook table (the [`ATA_HANDLE_HOOKS`] pattern). The default stubs
+/// report allocation failure — the original's own alloc-failure
+/// result, which every caller's NULL check already handles.
+#[derive(Copy, Clone)]
+pub struct TracedAllocHooks {
+    /// Descriptor slot +0x0c: the underlying allocator, called as
+    /// `alloc(size, tag1, tag2)`; returns the block or NULL.
+    pub alloc: unsafe extern "C" fn(size: i32, tag1: u32, tag2: u32) -> *mut u8,
+    /// Descriptor slot +0x28: the optional trace hook (`None` = the
+    /// stock image's NULL slot). Called before the allocation as
+    /// `trace(NULL, size, tag1, tag2, 0)` and after it as
+    /// `trace(block, size, tag1, tag2, 1)`; the fifth argument rides on
+    /// the stack in the original (`str r3, [sp]` @ 0x08043c4c/0x08043c8c).
+    pub trace: Option<
+        unsafe extern "C" fn(block: *mut u8, size: i32, tag1: u32, tag2: u32, phase: u32),
+    >,
+}
+
+/// Default stub: no heap wired in — fail the way the underlying
+/// allocator does when it cannot serve the request.
+unsafe extern "C" fn missing_allocator(_size: i32, _tag1: u32, _tag2: u32) -> *mut u8 {
+    core::ptr::null_mut()
+}
+
+/// Hook table for the descriptor's function-pointer slots. Replace
+/// before first use on target; host tests install mocks via
+/// `core::ptr::addr_of_mut!`.
+pub static mut TRACED_ALLOC_HOOKS: TracedAllocHooks = TracedAllocHooks {
+    alloc: missing_allocator,
+    trace: None,
+};
+
+/// Reads the hook table. Volatile so LLVM cannot constant-fold the load
+/// to the default stub (the heap/wrappers.rs pattern) — and so the
+/// post-allocation read below really re-reads the slot, the way the
+/// original reloads `[r6, #0x28]` after the allocator returns.
+#[inline(always)]
+fn alloc_hooks() -> TracedAllocHooks {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(TRACED_ALLOC_HOOKS)) }
+}
+
+/// The descriptor's two status words, +0x00 and +0x04. [`traced_alloc`]
+/// zeroes +0x00 on every in-range entry and +0x04 before the pre-trace
+/// call; the rest of the descriptor is opaque to this function. The
+/// stock words sit in the table @ 0x08a0c2a4; the port keeps them as a
+/// crate static (the [`ERROR_RECORDS`] precedent). Only ever touched
+/// through raw pointers, hence the module-level pattern of `static mut`
+/// plus `addr_of_mut!`.
+pub static mut TRACED_ALLOC_STATUS: [u32; 2] = [0; 2];
+
+/// The large-allocation tag byte, read from 0x08a0ea04 in the stock
+/// image (pointer literal @ 0x08043cc4) where it initializes to 0x61.
+/// [`traced_alloc`] stamps it into the first byte of every served block
+/// larger than 0x800 bytes; whatever installs it lives outside this
+/// function. A crate static in the port so target setup (or a host
+/// test) can substitute the live value.
+pub static mut LARGE_ALLOC_TAG: u8 = 0x61;
+
+/// traced_alloc — original: `FUN_08043c18` @ 0x08043c18 (168 bytes;
+/// 88 `bl` call sites, binary-scanned — among them the ATA handle
+/// factory @ 0x083696f4 and its zero-arg veneer [`ata_call_with_zero`]).
+///
+/// The firmware-wide traced allocator front-end. `size` is SIGNED (the
+/// original guards with `subs`/`ble` and stamps with `cmp`/`strbgt`);
+/// `tag1`/`tag2` are call-site tags the trace hook receives verbatim
+/// (0,0 almost everywhere; the one caller @ 0x082d4474 passes a pair of
+/// string literals). Algorithm:
+///
+/// 1. `size <= 0` (signed): return NULL without touching anything.
+/// 2. Zero descriptor status word +0x00.
+/// 3. If the trace hook (slot +0x28) is installed, zero status word
+///    +0x04 and call `trace(NULL, size, tag1, tag2, 0)`.
+/// 4. Allocate: `block = alloc(size, tag1, tag2)` (slot +0x0c).
+/// 5. Re-read the trace slot — it is loaded again after the call, not
+///    cached — and if still installed call
+///    `trace(block, size, tag1, tag2, 1)`.
+/// 6. If a block came back and `size > 0x800` (signed), stamp its
+///    first byte with the global tag byte ([`LARGE_ALLOC_TAG`]) —
+///    `*block = *(u8 *)0x08a0ea04` in the original. The stamp is a
+///    large-allocation marker; blocks of exactly 0x800 bytes escape it
+///    (the comparison is `bgt`, not `bge`).
+/// 7. Return the block.
+///
+/// Deviations: the descriptor's function-pointer slots live in
+/// [`TRACED_ALLOC_HOOKS`] (the [`ATA_HANDLE_HOOKS`] pattern) whose
+/// default allocator fails every request — behaviorally the original's
+/// own alloc-failure path, NULL with the post-trace still issued. The
+/// status stores are `write_volatile` so LLVM cannot fold them away
+/// (they are the descriptor's observable handshake with the trace
+/// machinery); the tag-byte read is volatile to match the original's
+/// `ldrb` off a literal-loaded pointer.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn traced_alloc(size: i32, tag1: u32, tag2: u32) -> *mut u8 {
+    if size <= 0 {
+        return core::ptr::null_mut();
+    }
+    let status = core::ptr::addr_of_mut!(TRACED_ALLOC_STATUS).cast::<u32>();
+    status.write_volatile(0);
+    if let Some(trace) = alloc_hooks().trace {
+        status.add(1).write_volatile(0);
+        trace(core::ptr::null_mut(), size, tag1, tag2, 0);
+    }
+    let block = (alloc_hooks().alloc)(size, tag1, tag2);
+    if let Some(trace) = alloc_hooks().trace {
+        trace(block, size, tag1, tag2, 1);
+    }
+    if !block.is_null() && size > 0x800 {
+        block.write(core::ptr::read_volatile(core::ptr::addr_of!(LARGE_ALLOC_TAG)));
+    }
+    block
 }
 
 // ---------------------------------------------------------------------------
@@ -1444,6 +1573,189 @@ mod tests {
         assert!(
             unsafe { ata_call_with_zero() }.is_null(),
             "no factory wired in: NULL, like the original's alloc-failure path"
+        );
+    }
+
+    // ---- the traced allocator -----------------------------------------
+
+    static ALLOC_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    /// One observable call into the descriptor, in order.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum AllocEvent {
+        Trace { null_block: bool, size: i32, tag1: u32, tag2: u32, phase: u32 },
+        Alloc { size: i32, tag1: u32, tag2: u32 },
+    }
+
+    /// Everything a call lets the world observe.
+    #[derive(Debug, PartialEq, Eq)]
+    struct AllocOutcome {
+        returned_null: bool,
+        first_byte: Option<u8>,
+        second_byte: Option<u8>,
+        status: [u32; 2],
+        events: std::vec::Vec<AllocEvent>,
+    }
+
+    static ALLOC_EVENTS: Mutex<std::vec::Vec<AllocEvent>> = Mutex::new(std::vec::Vec::new());
+
+    const ALLOC_POISON: u8 = 0xa5;
+    static mut ALLOC_BUFFER: [u8; 8] = [ALLOC_POISON; 8];
+    static mut ALLOC_FAIL: bool = false;
+
+    unsafe extern "C" fn mock_alloc(size: i32, tag1: u32, tag2: u32) -> *mut u8 {
+        ALLOC_EVENTS.lock().unwrap().push(AllocEvent::Alloc { size, tag1, tag2 });
+        if ALLOC_FAIL {
+            core::ptr::null_mut()
+        } else {
+            core::ptr::addr_of_mut!(ALLOC_BUFFER) as *mut u8
+        }
+    }
+
+    unsafe extern "C" fn mock_trace(block: *mut u8, size: i32, tag1: u32, tag2: u32, phase: u32) {
+        ALLOC_EVENTS.lock().unwrap().push(AllocEvent::Trace {
+            null_block: block.is_null(),
+            size,
+            tag1,
+            tag2,
+            phase,
+        });
+    }
+
+    /// Restores the default hooks, tag and status when a test ends
+    /// (declared after the guard, so it runs before the lock drops).
+    struct AllocHookReset;
+    impl Drop for AllocHookReset {
+        fn drop(&mut self) {
+            unsafe {
+                (*core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS)).alloc = missing_allocator;
+                (*core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS)).trace = None;
+                TRACED_ALLOC_STATUS = [0; 2];
+                LARGE_ALLOC_TAG = 0x61;
+            }
+        }
+    }
+
+    /// Runs the port under the mocks and collects every observable.
+    fn run_port(size: i32, tag1: u32, tag2: u32, with_trace: bool, fail: bool, tag: u8) -> AllocOutcome {
+        ALLOC_EVENTS.lock().unwrap().clear();
+        unsafe {
+            ALLOC_BUFFER = [ALLOC_POISON; 8];
+            ALLOC_FAIL = fail;
+            TRACED_ALLOC_STATUS = [0xdead_beef; 2];
+            LARGE_ALLOC_TAG = tag;
+            (*core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS)).alloc = mock_alloc;
+            (*core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS)).trace =
+                if with_trace { Some(mock_trace) } else { None };
+        }
+        let result = unsafe { traced_alloc(size, tag1, tag2) };
+        let (first_byte, second_byte) = if result.is_null() {
+            (None, None)
+        } else {
+            (Some(unsafe { ALLOC_BUFFER[0] }), Some(unsafe { ALLOC_BUFFER[1] }))
+        };
+        AllocOutcome {
+            returned_null: result.is_null(),
+            first_byte,
+            second_byte,
+            status: unsafe { TRACED_ALLOC_STATUS },
+            events: ALLOC_EVENTS.lock().unwrap().clone(),
+        }
+    }
+
+    /// The reference implementation: the C of
+    /// `decomp/c/002/08043c18_FUN_08043c18.c` (checked against the
+    /// disassembly — Ghidra's convoluted last condition is just
+    /// `block != NULL && size > 0x800`, both signed) with plain data in
+    /// place of the descriptor.
+    fn reference(size: i32, tag1: u32, tag2: u32, with_trace: bool, fail: bool, tag: u8) -> AllocOutcome {
+        let mut status = [0xdead_beef; 2];
+        let mut events = std::vec::Vec::new();
+        let mut block = [ALLOC_POISON; 8];
+        if size <= 0 {
+            return AllocOutcome {
+                returned_null: true,
+                first_byte: None,
+                second_byte: None,
+                status,
+                events,
+            };
+        }
+        status[0] = 0;
+        if with_trace {
+            status[1] = 0;
+            events.push(AllocEvent::Trace { null_block: true, size, tag1, tag2, phase: 0 });
+        }
+        events.push(AllocEvent::Alloc { size, tag1, tag2 });
+        if with_trace {
+            events.push(AllocEvent::Trace { null_block: fail, size, tag1, tag2, phase: 1 });
+        }
+        if !fail && size > 0x800 {
+            block[0] = tag;
+        }
+        AllocOutcome {
+            returned_null: fail,
+            first_byte: (!fail).then_some(block[0]),
+            second_byte: (!fail).then_some(block[1]),
+            status,
+            events,
+        }
+    }
+
+    #[test]
+    fn matches_the_reference_across_sizes_hooks_and_failures() {
+        let _guard = ALLOC_TEST_LOCK.lock().unwrap();
+        let _reset = AllocHookReset;
+        for size in [i32::MIN, -1, 0, 1, 0x14, 0x7ff, 0x800, 0x801, 0x1000, i32::MAX] {
+            for with_trace in [false, true] {
+                for fail in [false, true] {
+                    for tag in [0x61, 0x42] {
+                        let got = run_port(size, 0x1111_2222, 0x3333_4444, with_trace, fail, tag);
+                        let want = reference(size, 0x1111_2222, 0x3333_4444, with_trace, fail, tag);
+                        assert_eq!(
+                            got, want,
+                            "size {size:#x}, trace {with_trace}, fail {fail}, tag {tag:#x}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn nonpositive_sizes_return_null_without_touching_anything() {
+        let _guard = ALLOC_TEST_LOCK.lock().unwrap();
+        let _reset = AllocHookReset;
+        for size in [0, -1, i32::MIN] {
+            let got = run_port(size, 0, 0, true, false, 0x61);
+            assert!(got.returned_null, "size {size}");
+            assert!(got.events.is_empty(), "size {size}: no trace, no alloc");
+            assert_eq!(got.status, [0xdead_beef; 2], "size {size}: status words untouched");
+        }
+    }
+
+    #[test]
+    fn the_stamp_is_strictly_above_0x800() {
+        let _guard = ALLOC_TEST_LOCK.lock().unwrap();
+        let _reset = AllocHookReset;
+        let at = run_port(0x800, 0, 0, false, false, 0x61);
+        assert_eq!(at.first_byte, Some(ALLOC_POISON), "0x800 exactly: bgt, not bge");
+        let above = run_port(0x801, 0, 0, false, false, 0x61);
+        assert_eq!(above.first_byte, Some(0x61));
+        assert_eq!(above.second_byte, Some(ALLOC_POISON), "only the first byte is stamped");
+    }
+
+    #[test]
+    fn the_default_allocator_stub_fails_every_request() {
+        let _guard = ALLOC_TEST_LOCK.lock().unwrap();
+        let _reset = AllocHookReset;
+        unsafe { TRACED_ALLOC_STATUS = [0xdead_beef; 2] };
+        assert!(unsafe { traced_alloc(0x14, 0, 0) }.is_null());
+        assert_eq!(unsafe { TRACED_ALLOC_STATUS }[0], 0, "status +0x00 still zeroed");
+        assert_eq!(
+            unsafe { TRACED_ALLOC_STATUS }[1],
+            0xdead_beef,
+            "no trace hook installed: +0x04 untouched"
         );
     }
 }

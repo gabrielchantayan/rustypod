@@ -9645,6 +9645,44 @@ functions:
       str r4, [r0, #4]; mvn r0, #0`), only the LLVM frame prologue
       differs - the same shape as ata_handle_first_word_or_minus1.
 
+  - address: 0x08043c18
+    ghidra: FUN_08043c18
+    name: traced_alloc
+    size: 168
+    sig: "u8 *traced_alloc(i32 size, u32 tag1, u32 tag2)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: size, param_2: tag1, param_3: tag2, puVar2: descriptor, puVar3: block}
+    notes: >-
+      88 bl call sites (binary scan), among them the ATA handle factory
+      0x083696f4 and its zero-arg veneer ata_call_with_zero. The
+      firmware-wide traced allocator front-end over the RAM descriptor
+      @ 0x08a0c2a4 (pointer literal @ 0x08043cc0): size <= 0 (SIGNED
+      subs/ble) returns NULL without touching anything; else zero
+      descriptor word +0x00, and if the trace hook (slot +0x28) is
+      installed also zero +0x04 and call trace(NULL, size, tag1, tag2,
+      0) - the phase is the 5th arg on the stack; then block =
+      alloc(size, tag1, tag2) (slot +0x0c); the trace slot is RE-READ
+      and, if still installed, trace(block, size, tag1, tag2, 1) runs;
+      finally block != NULL && size > 0x800 (signed bgt, so exactly
+      0x800 escapes) stamps block[0] = *(u8 *)0x08a0ea04 (pointer
+      literal @ 0x08043cc4, 0x61 in the stock image - a large-
+      allocation tag byte whose writer lives outside this function).
+      tag1/tag2 are call-site tags passed through to the trace hook
+      (0,0 nearly everywhere; 0x082d4474 passes two string literals).
+      Deviations: the consulted descriptor slots live in
+      TRACED_ALLOC_HOOKS (the ATA_HANDLE_HOOKS pattern; the default
+      alloc stub fails every request, the original's own NULL path),
+      the two status words and the tag byte are crate statics
+      (TRACED_ALLOC_STATUS, LARGE_ALLOC_TAG = 0x61), and the status
+      stores are write_volatile so LLVM cannot fold the descriptor
+      handshake away. match.py: same structure - two status-zero
+      stores, null-checked pre/post trace blx with the phase word on
+      the stack, alloc blx, slot reload, signed >0x800 tag stamp; LLVM
+      reordered the block-null/size guards into an equivalent
+      short-circuit. The free twin 0x08043994 (72 bytes; slots +0x18 /
+      +0x30 of its own descriptor) stays unported.
+
   # --- Per-instantiation template members of the C++ block (cxx/templates) ---
   # This block is full of families the compiler emitted once per template
   # instantiation instead of sharing. Each family needs ONE port; every
