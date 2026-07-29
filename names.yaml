@@ -6973,6 +6973,27 @@ functions:
       28).
     renames: {}
 
+  - address: 0x08284e2c
+    ghidra: FUN_08284e2c
+    name: instance_of_class_6180
+    size: 28
+    sig: "void *instance_of_class_6180(void)"
+    module: app/registry
+    status: ported
+    notes: >-
+      15 bl call sites (binary-scanned over osos.dec, no tail b). The
+      28-byte sibling shape of the lookup-then-cast accessor - `push
+      {r4,lr}; ldr r4,=0x6180 (literal @ 0x08284e48); mov r0,r4; bl
+      0x081d2184; mov r1,r4; pop {r4,lr}; b 0x08275b9c`: keeps the
+      class id in r4 across the registry lookup, then tail-branches to
+      the instance_of_class cast. Class NOT identified (no class-name
+      literal handed to the factory @ 0x0820b230 next to its
+      registration), so the port names the id CLASS_ID_6180 (the
+      0x6000/0x6600/0x8700 precedent). Two siblings remain identified,
+      all the same shape - 0x08289690 (0x3280, 24), 0x0828ae68 (0x4180
+      TCNotesDispatcher, 28).
+    renames: {}
+
   - address: 0x081d23f8
     ghidra: FUN_081d23f8
     name: registry_register
@@ -10288,8 +10309,9 @@ functions:
       family's read_unaligned host-testing idiom, the same accepted
       deviation as vector_size_elem4.       Other divide instantiations
       (identified, not ported): elem 12 (4 more fns besides the ported
-      0x083d76f8; 62 calls across all 5), elem 40 (1 fn, 14 calls,
-      0x083d783c). Elem 20 is now ported (0x083d7640) and elem 28 is
+      0x083d76f8; 62 calls across all 5). Elem 40 is now ported
+      (0x083d783c, 1 fn, 14 calls; see its entry). Elem 20 is now
+      ported (0x083d7640) and elem 28 is
       now ported (0x083d7894); see their entries.
 
   - address: 0x083d77dc
@@ -10352,6 +10374,29 @@ functions:
       signed and truncating, so a reversed vector's negative span
       truncates toward zero. match.py - same structure as
       vector_size_elem24 (sub / mov r1,#28 / b __rt_sdiv); the ldm
+      comes out as byte loads from the family's read_unaligned
+      host-testing idiom, the same accepted deviation as
+      vector_size_elem4.
+
+  - address: 0x083d783c
+    ghidra: FUN_083d783c
+    name: vector_size_elem40
+    size: 16
+    sig: "i32 vector_size_elem40(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      `vector<T>::size()` for a 40-byte element - a non-power-of-two
+      member of the vector_size family: same `ldm r0,{r0,r1}; sub
+      r0,r1,r0` head as the shifts, then `mov r1,#0x28` and a TAIL
+      BRANCH into the ADS signed divide @ 0x08031568 (ported as
+      __rt_sdiv). 14 bl call sites; the only copy. Verified against
+      osos.asm: `ldmia r0,{r0,r1}; sub r0,r1,r0; mov r1,#0x28;
+      b 0x08031568`. The port calls the ported __rt_sdiv, which is
+      signed and truncating, so a reversed vector's negative span
+      truncates toward zero. match.py - same structure as
+      vector_size_elem24 (sub / mov r1,#40 / b __rt_sdiv); the ldm
       comes out as byte loads from the family's read_unaligned
       host-testing idiom, the same accepted deviation as
       vector_size_elem4.

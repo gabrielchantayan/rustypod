@@ -70,6 +70,7 @@
 //! | 0x081353e8 | [`instance_of_class_8f00`] | 24 | 2 `bl` |
 //! | 0x0815ff34 | [`instance_of_class_8700`] | 24 | 14 `bl` |
 //! | 0x0827f218 | [`instance_of_class_5780`] | 28 | 10 `bl` |
+//! | 0x08284e2c | [`instance_of_class_6180`] | 28 | 15 `bl` |
 //!
 //! All call-site counts are binary-scanned over osos.dec (every `bl`/`b`
 //! whose computed target is the function), not read off osos.asm — the
@@ -656,6 +657,30 @@ pub unsafe extern "C" fn instance_of_class_5780() -> *mut u8 {
     instance_of_class(CLASS_ID_5780)
 }
 
+/// The class id 0x6180 (the literal @ 0x08284e48). Nothing registers it
+/// next to a class-name literal handed to the factory @ 0x0820b230, so
+/// the class is **not identified** — the id is the only handle the
+/// firmware gives it (the `instance_of_class_6000` / `_6600` precedent).
+pub const CLASS_ID_6180: u32 = 0x6180;
+
+/// instance_of_class_6180 — original: `FUN_08284e2c` @ 0x08284e2c
+/// (28 bytes; 15 `bl` call sites, binary-scanned over osos.dec, no tail
+/// `b`).
+///
+/// `push {r4,lr}; ldr r4,=0x6180; mov r0,r4; bl 0x081d2184; mov r1,r4;
+/// pop {r4,lr}; b 0x08275b9c` — the 28-byte sibling shape: keeps the
+/// class id in r4 across the registry lookup so both calls see the same
+/// literal, then tail-branches to [`object_cast_to_class`]. Resolves the
+/// registered singleton under id 0x6180 through the global class
+/// registry, then lets the object's own vtable confirm it really is
+/// that class (NULL when either step fails). The class is **not
+/// identified** (see [`CLASS_ID_6180`]).
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn instance_of_class_6180() -> *mut u8 {
+    instance_of_class(CLASS_ID_6180)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -1078,6 +1103,10 @@ mod tests {
                 instance_of_class_5780().is_null(),
                 "0x5780 was never registered"
             );
+            assert!(
+                instance_of_class_6180().is_null(),
+                "0x6180 was never registered"
+            );
         }
         restore(guard);
     }
@@ -1150,6 +1179,18 @@ mod tests {
             let this = ptr::addr_of_mut!(object) as *mut u8;
             registry_register(this, CLASS_ID_5780);
             assert_eq!(instance_of_class_5780(), this);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_6180_accessor_looks_up_and_casts_its_own_id() {
+        let guard = mock();
+        unsafe {
+            let mut object = object_accepting(CLASS_ID_6180);
+            let this = ptr::addr_of_mut!(object) as *mut u8;
+            registry_register(this, CLASS_ID_6180);
+            assert_eq!(instance_of_class_6180(), this);
         }
         restore(guard);
     }
