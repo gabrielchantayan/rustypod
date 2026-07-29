@@ -8109,16 +8109,23 @@ functions:
 
   - address: 0x08292e6c
     ghidra: FUN_08292e6c
-    name: unported_global_field_low12
+    name: control_state_flags
     size: 20
-    module: unported
-    status: identified
+    sig: "u32 control_state_flags(void)"
+    module: kernel/control_state
+    status: ported
     notes: >-
       253 bl call sites. Loads the word at 0x089cc92c (= *0x089cc928
-      literal + 4) and returns its low 12 bits (`lsl #20; lsr #20`).
-      A packed-field getter on a global; the field's meaning needs the
-      writers of 0x089cc928. Sibling 0x08292e58 (16 bytes, 25 bl) reads
-      the same global.
+      literal + 4) and returns its low 12 bits (`lsl #20; lsr #20`) -
+      a packed-field getter on the control-subsystem state object
+      (callers test bits, e.g. flags & 0x10 @ 0x081f6344; the sibling
+      setter @ 0x08292e84 stores the full word with bit 0x4000 as a
+      conditional-store sentinel above this mask). Individual bit
+      meanings stay with the unported writers of 0x089cc92c. Port reads
+      the original firmware address on target (the global is not
+      port-owned); host tests substitute a mock word. match.py - same
+      load-and-mask leaf; LLVM materializes the mask and uses `and`
+      instead of the lsl/lsr pair, plus its usual fp frame.
 
   - address: 0x08252bec
     ghidra: FUN_08252bec
