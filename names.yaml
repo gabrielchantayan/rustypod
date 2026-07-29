@@ -8892,13 +8892,17 @@ functions:
     name: str_dup
     size: 60
     sig: "char *str_dup(const char *z)"
-    module: null
-    status: identified
+    module: sqlite/strdup
+    status: ported
+    vars: {param_1: z}
     notes: >-
       SQLite's sqlite3StrDup. 2 bl call sites. NULL in, NULL out;
       otherwise strlen @ 0x08392478, sqlite3_malloc @ 0x08390b14 of
-      len + 1, and __rt_memcpy through the veneer @ 0x08037db0. Not
-      ported - trivial, but three unported callees for two call sites.
+      len + 1, and __rt_memcpy through the veneer @ 0x08037db0
+      (terminator included). strlen and __rt_memcpy are called through
+      their ported twins (LLVM inlines strlen); sqlite3_malloc goes
+      through the DB_MEM_OPS dispatch slot like sqlite/mem.rs. No
+      mallocFailed flag here - that is db_str_dup's job.
 
   # ---- Parse context (src/sqlite/parse.rs) ----
   - address: 0x08381f98

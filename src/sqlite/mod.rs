@@ -65,4 +65,5 @@ pub mod mem;
 pub mod parse;
 pub mod stricmp;
 pub mod strhash;
+pub mod strdup;
 pub mod vdbe;
