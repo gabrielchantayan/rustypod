@@ -10182,15 +10182,30 @@ functions:
     ghidra: FUN_08124a38
     name: pair_header_construct
     size: 36
-    module: null
-    status: identified
+    sig: "u32 *pair_header_construct(u32 *this, u32 header_first, u32 header_second)"
+    module: cxx/pair_header
+    status: ported
+    vars: {param_1: this, param_2: header_first, param_3: header_second}
     notes: >-
-      Reads three pointers from the object (+0, +4, +8) and returns one
-      of two dereferences - `if (a < b) return *b; c = [this+8];
-      return a <= c ? *a : *c`. 14 bl sites here plus 8 at the
-      byte-identical copy 0x083d5ed8. Shape of an iterator clamp or a
-      three-way begin/cur/end accessor, but the owning container is not
-      identified, so the semantics are not solid enough to name.
+      90 bl call sites, the only copy. A 200-byte service-object
+      constructor: `stmia r0!, {r1, r2}` writes the two argument words
+      to +0/+4, skips the word at +8, runs the base-class constructor
+      0x0810ebbc (vtable store + grand-base chain 0x0813eee0 + field
+      clears through base+0xb4) on the subobject at +12, backs the
+      result up by 12 to recover `this`, clears the word at +0xc4 and
+      the byte at +8, and returns `this`. Callers allocate exactly 200
+      bytes per object (FUN_082aadd4(200) at the 0x081b8c20 cluster).
+      The class is unidentified, so the name is STRUCTURAL. The scouted
+      notes here originally described the three-way pointer clamp - that
+      was a mis-addressed note: the clamp lives at 0x083d5eb4/0x083d5ed8
+      and is already ported as util/three_pointer_select. 0x0810ebbc is
+      not yet ported, so the port dispatches through a new
+      PairHeaderOps::construct_base slot (TimerOps precedent; default
+      stub returns its argument). match.py structural: stm of the two
+      header words, cursor advance, indirect ctor call (table-load blx
+      instead of bl), the +0xc4/+8 clears and the -12 recovery - LLVM
+      emits the clears relative to the base pointer (base+0xb8, base-4)
+      before the sub, same offsets; frame is {fp,lr} vs {r4,lr}.
 
   - address: 0x083dc0e0
     ghidra: FUN_083dc0e0

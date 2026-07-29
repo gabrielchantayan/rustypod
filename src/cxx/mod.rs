@@ -3,6 +3,7 @@
 //! 0x083c0000-0x083dffff block of osos (~1000 functions), separate from
 //! the ARM ADS C runtime.
 pub mod handle;
+pub mod pair_header;
 pub mod string;
 pub mod string_object;
 pub mod templates;
