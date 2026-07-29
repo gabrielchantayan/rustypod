@@ -6470,6 +6470,32 @@ functions:
       mock. match.py - same structure, LLVM uses branches instead of
       predication and adds a frame-pointer setup.
 
+  - address: 0x082978bc
+    ghidra: FUN_082978bc
+    name: surface_plane_address
+    size: 200
+    sig: "u32 surface_plane_address(u8 *surface, u32 index)"
+    module: drivers/display_layer
+    status: ported
+    vars: {param_1: surface, param_2: index}
+    notes: >-
+      39 bl call sites (including every plane lookup layer_query_planes
+      @ 0x081203c4 makes). The surface object's plane getter: a
+      seven-way jump table (addls pc,pc,r1,lsl#2) on index, each arm
+      gating on the surface's pixel-format byte at +0x08 and returning
+      one of the plane-address words +0x24/+0x28/+0x2c, or 0 on a miss:
+      idx0 fmt{0,1}->+0x24, idx1 fmt1->+0x28, idx2 fmt0->+0x28, idx3
+      fmt0->+0x2c, idx4/5/6 fmt2/3/4->+0x24, else 0. Format 0 is planar
+      three-component (YUV 4:2:0, per the installer's flush pattern),
+      1 two-plane, 2/3/4 packed single-plane. Belongs to the surface
+      object cluster but lives in drivers/display_layer because its
+      only ported caller is layer_query_planes and the porting task is
+      confined to that module. Ported as a callee-first commit for
+      layer_query_planes. Deviation - returns the plane word as u32
+      (a target 32-bit address) so the surface block stays pure 4-byte
+      fields on a 64-bit host; callers cast. match.py - same structure:
+      LLVM lowers the jump table to a comparison chain.
+
   - address: 0x081203c4
     ghidra: FUN_081203c4
     name: layer_query_planes
@@ -9658,14 +9684,24 @@ functions:
     ghidra: FUN_0812c63c
     name: timer_start_after
     size: 32
-    sig: "u8 *timer_start_after(u8 *timer, u32 delay)"
-    module: null
-    status: identified
+    sig: "void timer_start_after(u8 *timer, u32 delay)"
+    module: drivers/timer
+    status: ported
+    renames:
+      param_1: timer
+      param_2: delay
     notes: >-
       100 call sites (98 bl + 2 tail b). timer_stop(timer) @ 0x0812c6b0,
-      then tail branches to 0x080744c0(timer, delay) - preserving the
-      second argument untouched across the stop, which is what marks it
-      as the delay/deadline. Blocked on the same callees.
+      then tail branches to timer_set_delay @ 0x080744c0(timer, delay) -
+      the delay survives the stop in r5, which is what marks it as the
+      delay/deadline. Unlike timer_restart it never writes 'run ' and
+      never arms; it only stops and reprograms the period word at +0x4.
+      Sig corrected from the scouted "u8 *timer_start_after(u8 *, u32)"
+      to void: the tail call's r0 is timer_set_delay's leftover, not
+      the timer (the timer_restart precedent). The callee was ported
+      first in its own commit. match.py structural - LLVM inlines both
+      the stop and the set_delay, so the port shows the full stop
+      sequence plus the trace and the str to +4.
 
   - address: 0x0811108c
     ghidra: FUN_0811108c

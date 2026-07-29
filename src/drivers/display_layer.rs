@@ -529,6 +529,69 @@ pub unsafe extern "C" fn layer_swap_surface(layer: *mut u8, surface: *mut u8) {
     }
 }
 
+// The bound surface's plane block, as `surface_plane_address` reads it:
+// a pixel-format byte and up to three component plane addresses (one
+// for the packed formats, three for the planar one).
+const SURFACE_FORMAT: usize = 0x08;
+const SURFACE_PLANE_A: usize = 0x24;
+const SURFACE_PLANE_B: usize = 0x28;
+const SURFACE_PLANE_C: usize = 0x2c;
+
+/// surface_plane_address — original: `FUN_082978bc` @ 0x082978bc
+/// (200 bytes; 39 `bl` call sites, including every plane lookup
+/// [`layer_query_planes`] makes).
+///
+/// The surface object's plane getter: a seven-way jump table
+/// (`addls pc, pc, r1, lsl #2`) on `index`, each arm gating on the
+/// surface's own pixel-format byte at +0x08 and returning one of the
+/// three plane-address words, or 0 when the gate fails or the index is
+/// out of range:
+///
+/// ```text
+/// index  surface +0x08   returns
+///  0       0 or 1        plane A (+0x24)
+///  1         1           plane B (+0x28)
+///  2         0           plane B (+0x28)
+///  3         0           plane C (+0x2c)
+///  4         2           plane A (+0x24)
+///  5         3           plane A (+0x24)
+///  6         4           plane A (+0x24)
+/// else     —             0
+/// ```
+///
+/// Read with the installer @ 0x0811feb8 (which flushes plane A in full
+/// and B/C at a quarter of the area for format 0), this pins the
+/// formats: 0 = planar three-component (YUV 4:2:0 — A luma, B/C
+/// chroma), 1 = two-plane, 2/3/4 = packed single-plane.
+///
+/// The function belongs to the surface object cluster; it lives in
+/// this module because its only ported caller is [`layer_query_planes`]
+/// and the porting task is confined to `drivers/display_layer`.
+///
+/// Deviations:
+///
+/// - Returns the plane word as a `u32` (a target 32-bit address)
+///   rather than a pointer, so the surface block stays pure 4-byte
+///   fields and nothing shifts on a 64-bit test host; callers cast.
+/// - The original's index-0 arm computes its `format == 0 ||
+///   format == 1` gate as two predicated flag bytes ORed together; the
+///   port is the plain boolean it computes.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn surface_plane_address(surface: *mut u8, index: u32) -> u32 {
+    let format = surface.add(SURFACE_FORMAT).read_volatile();
+    let plane = |offset: usize| (surface.add(offset) as *const u32).read_volatile();
+    match index {
+        0 if format == 0 || format == 1 => plane(SURFACE_PLANE_A),
+        1 if format == 1 => plane(SURFACE_PLANE_B),
+        2 if format == 0 => plane(SURFACE_PLANE_B),
+        3 if format == 0 => plane(SURFACE_PLANE_C),
+        4 if format == 2 => plane(SURFACE_PLANE_A),
+        5 if format == 3 => plane(SURFACE_PLANE_A),
+        6 if format == 4 => plane(SURFACE_PLANE_A),
+        _ => 0,
+    }
+}
+
 /// layer_bind_surface — original: `FUN_0811fe80` @ 0x0811fe80
 /// (56 bytes; 1 `bl` call site, [`layer_reconfigure`]).
 ///
@@ -1318,6 +1381,155 @@ mod tests {
             }
             assert_eq!(layer.byte(offset), 0xa5, "byte +{offset:#x}");
         }
+    }
+
+    // ---- surface plane address -----------------------------------------
+
+    /// The surface object, modeled down to what `surface_plane_address`
+    /// reads: the format byte at +0x08 and the three plane words.
+    #[repr(align(4))]
+    struct PlaneSurface([u8; 0x30]);
+
+    const PLANE_A_WORD: u32 = 0x2000_0000;
+    const PLANE_B_WORD: u32 = 0x2001_0000;
+    const PLANE_C_WORD: u32 = 0x2001_4000;
+
+    impl PlaneSurface {
+        fn with_format(format: u8) -> Self {
+            let mut surface = PlaneSurface([0; 0x30]);
+            surface.0[SURFACE_FORMAT] = format;
+            surface.set_word(SURFACE_PLANE_A, PLANE_A_WORD);
+            surface.set_word(SURFACE_PLANE_B, PLANE_B_WORD);
+            surface.set_word(SURFACE_PLANE_C, PLANE_C_WORD);
+            surface
+        }
+        fn set_word(&mut self, offset: usize, value: u32) {
+            self.0[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        fn word(&self, offset: usize) -> u32 {
+            u32::from_le_bytes(self.0[offset..offset + 4].try_into().unwrap())
+        }
+        fn ptr(&mut self) -> *mut u8 {
+            self.0.as_mut_ptr()
+        }
+    }
+
+    /// The hand-computed truth table from the original's jump table,
+    /// written out independently of the port.
+    fn reference_plane_address(surface: &PlaneSurface, index: u32) -> u32 {
+        let format = surface.0[SURFACE_FORMAT];
+        let (a, b, c) = (
+            surface.word(SURFACE_PLANE_A),
+            surface.word(SURFACE_PLANE_B),
+            surface.word(SURFACE_PLANE_C),
+        );
+        match index {
+            0 => {
+                if format == 0 || format == 1 {
+                    a
+                } else {
+                    0
+                }
+            }
+            1 => {
+                if format == 1 {
+                    b
+                } else {
+                    0
+                }
+            }
+            2 => {
+                if format == 0 {
+                    b
+                } else {
+                    0
+                }
+            }
+            3 => {
+                if format == 0 {
+                    c
+                } else {
+                    0
+                }
+            }
+            4..=6 => {
+                if u32::from(format) == index - 2 {
+                    a
+                } else {
+                    0
+                }
+            }
+            _ => 0,
+        }
+    }
+
+    #[test]
+    fn every_format_and_index_matches_the_reference_table() {
+        for format in [0u8, 1, 2, 3, 4, 5, 0xff] {
+            let mut surface = PlaneSurface::with_format(format);
+            for index in 0..=7u32 {
+                assert_eq!(
+                    unsafe { surface_plane_address(surface.ptr(), index) },
+                    reference_plane_address(&surface, index),
+                    "format {format:#x}, index {index}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_planar_format_exposes_all_three_planes() {
+        let mut surface = PlaneSurface::with_format(0);
+        assert_eq!(unsafe { surface_plane_address(surface.ptr(), 0) }, PLANE_A_WORD);
+        assert_eq!(unsafe { surface_plane_address(surface.ptr(), 2) }, PLANE_B_WORD);
+        assert_eq!(unsafe { surface_plane_address(surface.ptr(), 3) }, PLANE_C_WORD);
+        assert_eq!(unsafe { surface_plane_address(surface.ptr(), 1) }, 0, "no packed alias");
+    }
+
+    #[test]
+    fn the_two_plane_format_aliases_plane_a_and_b() {
+        let mut surface = PlaneSurface::with_format(1);
+        assert_eq!(unsafe { surface_plane_address(surface.ptr(), 0) }, PLANE_A_WORD);
+        assert_eq!(unsafe { surface_plane_address(surface.ptr(), 1) }, PLANE_B_WORD);
+        assert_eq!(unsafe { surface_plane_address(surface.ptr(), 2) }, 0);
+        assert_eq!(unsafe { surface_plane_address(surface.ptr(), 3) }, 0);
+    }
+
+    #[test]
+    fn each_packed_format_answers_only_its_own_index() {
+        for (format, index) in [(2u8, 4u32), (3, 5), (4, 6)] {
+            let mut surface = PlaneSurface::with_format(format);
+            assert_eq!(
+                unsafe { surface_plane_address(surface.ptr(), index) },
+                PLANE_A_WORD,
+                "format {format}, index {index}"
+            );
+            // The same index on the neighboring format is a miss.
+            let mut other = PlaneSurface::with_format(format + 1);
+            assert_eq!(unsafe { surface_plane_address(other.ptr(), index) }, 0);
+        }
+    }
+
+    #[test]
+    fn out_of_range_indices_and_unknown_formats_return_zero() {
+        let mut surface = PlaneSurface::with_format(0);
+        for index in [7u32, 8, 0xffff_ffff] {
+            assert_eq!(unsafe { surface_plane_address(surface.ptr(), index) }, 0);
+        }
+        let mut unknown = PlaneSurface::with_format(9);
+        for index in 0..=6u32 {
+            assert_eq!(unsafe { surface_plane_address(unknown.ptr(), index) }, 0);
+        }
+    }
+
+    #[test]
+    fn the_lookup_is_purely_a_read() {
+        let mut surface = PlaneSurface::with_format(0);
+        let before = surface.0;
+        for index in 0..=7u32 {
+            unsafe { surface_plane_address(surface.ptr(), index) };
+        }
+        assert!(surface.0 == before);
     }
 
     // ---- bind / reconfigure --------------------------------------------
