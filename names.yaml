@@ -9329,13 +9329,17 @@ functions:
     ghidra: FUN_083d5ea0
     name: handle_deref_field12
     size: 20
-    module: null
-    status: identified
+    sig: "u8 *handle_deref_field12(u8 *const *slot)"
+    module: cxx/handle
+    status: ported
     notes: >-
       `cell = *slot; return cell ? cell[3] : NULL` - handle_deref_or_null
       with the second load at +12 instead of +0. 11 bl call sites; the
-      only copy of this offset in the image. Not ported - it is a
-      one-off and the +12 field is unidentified.
+      only copy of this offset in the image. The +12 field is
+      unidentified; the port addresses it by word index (3) so it is
+      byte-exact on target and disjoint on a 64-bit host. match.py -
+      LLVM splits the predicated ldrne into a branch, as with the
+      primary port.
 
   - address: 0x083d5eb4
     ghidra: FUN_083d5eb4

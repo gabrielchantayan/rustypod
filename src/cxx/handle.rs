@@ -57,6 +57,31 @@ pub unsafe extern "C" fn handle_deref_or_null(slot: *const *const *mut u8) -> *m
     cell.read()
 }
 
+/// handle_deref_field12 — original: `FUN_083d5ea0` @ 0x083d5ea0
+/// (20 bytes; 11 `bl` call sites — the only copy of this offset in the
+/// image).
+///
+/// [`handle_deref_or_null`] with the second load at +0xc instead of +0:
+/// `cell = *slot; return cell ? cell[3] : NULL`. What the fourth word
+/// of the cell holds is not identified.
+///
+/// The field is addressed by WORD INDEX (3), like the +0 field of the
+/// primary port is word 0 — byte-exact +0xc on the 32-bit target,
+/// disjoint from the cell's other words on a 64-bit host.
+///
+/// # Safety
+/// `slot` must be readable; the cell it holds must have at least four
+/// readable words when non-NULL.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn handle_deref_field12(slot: *const *const *mut u8) -> *mut u8 {
+    let cell = slot.read();
+    if cell.is_null() {
+        return core::ptr::null_mut();
+    }
+    cell.add(3).read()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,6 +112,39 @@ mod tests {
             let mut cell: *mut u8 = core::ptr::null_mut();
             let slot: *const *mut u8 = &mut cell;
             assert!(handle_deref_or_null(&slot).is_null());
+        }
+    }
+
+    #[test]
+    fn field12_reads_the_cells_fourth_word() {
+        unsafe {
+            let mut target: u8 = 0;
+            let mut cell: [*mut u8; 5] = [
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                &mut target,
+                0x5555 as *mut u8,
+            ];
+            let slot: *const *mut u8 = cell.as_mut_ptr();
+            assert_eq!(handle_deref_field12(&slot), &mut target as *mut u8);
+        }
+    }
+
+    #[test]
+    fn field12_null_cell_yields_null_without_a_second_load() {
+        unsafe {
+            let slot: *const *mut u8 = core::ptr::null();
+            assert!(handle_deref_field12(&slot).is_null());
+        }
+    }
+
+    #[test]
+    fn field12_null_field_is_passed_through() {
+        unsafe {
+            let mut cell: [*mut u8; 4] = [core::ptr::null_mut(); 4];
+            let slot: *const *mut u8 = cell.as_mut_ptr();
+            assert!(handle_deref_field12(&slot).is_null());
         }
     }
 }
