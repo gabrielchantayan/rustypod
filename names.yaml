@@ -7656,14 +7656,29 @@ functions:
     ghidra: FUN_082c1adc
     name: cg_inst_visit_by_kind
     size: 288
+    sig: "cg_virtual_reg_t **cg_inst_visit_by_kind(cg_inst_t *inst, cg_virtual_reg_t **cursor, cg_virtual_reg_t **end)"
     module: codegen/ir
-    status: identified
+    status: ported
+    vars: {param_1: inst, param_2: cursor, param_3: end}
     notes: >-
-      4 bl call sites. `ldrb r0,[r0,#8]` (the kind byte) then
-      `cmp r0,#20` / `addls pc,pc,r0,lsl #2` over a 21-entry branch
-      table - the authority for cg_inst_kind_t having exactly 21
-      values in this build, and the reason the kind numbers above can
-      be trusted as a dense enum.
+      4 bl call sites. Collects the registers an instruction DEFINES
+      into the bounded output array cursor..end and returns the advanced
+      cursor. Dispatches on the kind byte (inst+0x8) through TWO branch
+      tables: kinds 0-20 via `cmp r0,#20; addls pc,pc,r0,lsl #2`, then
+      the fall-through re-classified by `sub r0,r0,#4; cmp r0,#18;
+      addls` which also reaches kinds 21-22 - so cg_inst_kind_t is dense
+      over 0-22 (23 values; the first table alone suggested 21).
+      Kinds 1, 2, 12-17 append +0xc then +0x10 when non-NULL (the
+      binary_s dest_flags slot, NULL by arena zero-fill elsewhere);
+      kinds 3, 4, 6, 9, 18-22 append only +0xc; kind 10 appends +0x14
+      when non-NULL; kinds 0, 5, 7, 8, 11 and >22 append nothing. Every
+      append goes through the bounded-store helper @ 0x082b2f1c (16
+      bytes: `cmp r1,r2; strne r0,[r1],#4; mov r0,r1; bx lr`); the +0xc
+      store is NOT NULL-checked. DEVIATION: 0x082b2f1c is not yet ported
+      as its own export, so the port inlines it (append_defined_reg);
+      match.py shows LLVM re-expressing the two tables as bitmask/range
+      tests with the helper inlined (cmp/strne pairs) - same dispatch
+      sets, same store sequence.
 
   # --- Scouted in 0x08200000-0x082fffff, deliberately NOT ported ---
   # Small and hot, but needs a global object graph that is not in the

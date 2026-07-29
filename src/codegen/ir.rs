@@ -32,6 +32,10 @@
 //!   0x082c19bc (76 bytes; 75 `bl` call sites — every one feeding a
 //!   phi). Chains a NULL-terminated run of registers into 8-byte
 //!   `{next, reg}` list cells carved from the caller-supplied arena.
+//! - `cg_inst_visit_by_kind` — original: `FUN_082c1adc` @ 0x082c1adc
+//!   (288 bytes; 4 `bl` call sites). Collects the registers an
+//!   instruction DEFINES into a bounded output array, dispatching on the
+//!   kind byte through two branch tables.
 //!
 //! Layouts recovered from the assembly (byte offsets are the target's;
 //! the port addresses every pointer field by WORD INDEX so the records
@@ -52,9 +56,11 @@
 //!                                +0x0c first derived field
 //! ```
 //!
-//! The instruction kinds are a 21-value enum: the visitor @ 0x082c1adc
-//! reads `inst + 0x8` and dispatches through `cmp r0, #20;
-//! addls pc, pc, r0, lsl #2`. The twelve factories encode
+//! The instruction kinds are a dense enum spanning 0-22: the visitor
+//! @ 0x082c1adc reads `inst + 0x8` and dispatches through TWO tables —
+//! `cmp r0, #20; addls pc, pc, r0, lsl #2` for kinds 0-20, then a
+//! `sub r0, r0, #4; cmp r0, #18` table over the fall-through that also
+//! reaches kinds 21 and 22. The twelve factories encode
 //! (kind, record size): 1/32, 2/36 (twice — with and without a
 //! destination-flags register), 3/32, 4/24, 5/24, 6/20, 7/20, 8/20,
 //! 9/20, 11/16 (twice). That sequence — and the field counts — matches
@@ -282,6 +288,19 @@ pub const CG_VREG_LIST_NEXT: usize = 0;
 pub const CG_VREG_LIST_REG: usize = 1;
 /// Size of `cg_virtual_reg_list_t` in target bytes.
 pub const CG_VREG_LIST_BYTES: usize = 8;
+
+/// `cg_inst_t + 0x0c` — the register [`cg_inst_visit_by_kind`] collects
+/// for every defining kind: the destination of the unary/binary/
+/// compare/load/load-immediate/phi layouts, and the first register of
+/// the unrecovered kinds 12-22.
+pub const CG_INST_DEF0: usize = 3;
+/// `cg_inst_t + 0x10` — the optional second defined register: the
+/// dest_flags slot of the binary_s layout (NULL by the arena's zero-fill
+/// for every other factory), collected only when non-NULL.
+pub const CG_INST_DEF1: usize = 4;
+/// `cg_inst_t + 0x14` — the register kind 10 defines, collected only
+/// when non-NULL.
+pub const CG_INST_KIND10_DEF: usize = 5;
 
 /// Address of a record's pointer-sized field at word index `index`.
 #[inline(always)]
@@ -715,6 +734,96 @@ pub unsafe extern "C" fn cg_virtual_reg_list_create(
         link = slot(cell, CG_VREG_LIST_NEXT);
     }
     head as *mut CgVirtualRegList
+}
+
+/// cg_inst_visit_by_kind — original: `FUN_082c1adc` @ 0x082c1adc
+/// (288 bytes, 4 `bl` call sites).
+///
+/// Collects the registers an instruction DEFINES into the bounded output
+/// array `cursor..end` and returns the advanced cursor. Dispatches on
+/// the kind byte (`ldrb r0, [r0, #8]`) through two branch tables —
+/// kinds 0-20 via `cmp r0, #20; addls pc, pc, r0, lsl #2`, with the
+/// fall-through re-classified by `sub r0, r0, #4; cmp r0, #18` (which
+/// also reaches kinds 21 and 22):
+///
+/// - kinds 1 (unary), 2 (binary) and 12-17: append the register at
+///   `+0xc`, then the one at `+0x10` when it is not NULL — that slot is
+///   the dest_flags of the binary_s layout and stays NULL for the other
+///   factories, so unary/binary contribute one register and binary_s
+///   two;
+/// - kinds 3 (compare), 4 (load), 6 (load-immediate), 9 (phi) and
+///   18-22: append only the register at `+0xc`;
+/// - kind 10: append the register at `+0x14`, only when it is not NULL;
+/// - kinds 0, 5 (store), 7 (branch-label), 8 (branch-cond), 11 (ret)
+///   and anything past 22 define no register: the cursor is returned
+///   untouched.
+///
+/// Every append goes through the bounded-store helper @ 0x082b2f1c
+/// (16 bytes: `cmp r1, r2; strne r0, [r1], #4; mov r0, r1; bx lr`) —
+/// store at the cursor and advance it, unless it already equals `end`.
+/// The `+0xc` register is stored WITHOUT a NULL check: a NULL there
+/// lands in the array like any other value; only `+0x10` and kind 10's
+/// `+0x14` are guarded.
+///
+/// DEVIATION: the helper @ 0x082b2f1c is not yet ported as its own
+/// export, so its body is inlined ([`append_defined_reg`]); on target
+/// the original makes one `bl` per append plus a tail `b` for the last
+/// one. The stores, cursor arithmetic and NULL handling are identical.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_inst_visit_by_kind(
+    inst: *mut CgInst,
+    cursor: *mut *mut CgVirtualReg,
+    end: *mut *mut CgVirtualReg,
+) -> *mut *mut CgVirtualReg {
+    let inst = inst as *mut u8;
+    let kind = inst.add(CG_INST_KIND * WORD).read() as u32;
+    match kind {
+        CG_INST_KIND_UNARY | CG_INST_KIND_BINARY | 12..=17 => {
+            let first = slot(inst, CG_INST_DEF0).read() as *mut CgVirtualReg;
+            let cursor = append_defined_reg(first, cursor, end);
+            let second = slot(inst, CG_INST_DEF1).read() as *mut CgVirtualReg;
+            if second.is_null() {
+                cursor
+            } else {
+                append_defined_reg(second, cursor, end)
+            }
+        }
+        CG_INST_KIND_COMPARE
+        | CG_INST_KIND_LOAD
+        | CG_INST_KIND_LOAD_IMMED
+        | CG_INST_KIND_PHI
+        | 18..=22 => {
+            let reg = slot(inst, CG_INST_DEF0).read() as *mut CgVirtualReg;
+            append_defined_reg(reg, cursor, end)
+        }
+        10 => {
+            let reg = slot(inst, CG_INST_KIND10_DEF).read() as *mut CgVirtualReg;
+            if reg.is_null() {
+                cursor
+            } else {
+                append_defined_reg(reg, cursor, end)
+            }
+        }
+        _ => cursor,
+    }
+}
+
+/// The bounded-store helper @ 0x082b2f1c (16 bytes), inlined: stores
+/// `reg` at `cursor` and advances it, unless `cursor` has already
+/// reached `end`. Returns the (possibly advanced) cursor.
+#[inline(always)]
+unsafe fn append_defined_reg(
+    reg: *mut CgVirtualReg,
+    cursor: *mut *mut CgVirtualReg,
+    end: *mut *mut CgVirtualReg,
+) -> *mut *mut CgVirtualReg {
+    if cursor != end {
+        cursor.write(reg);
+        cursor.add(1)
+    } else {
+        cursor
+    }
 }
 
 #[cfg(test)]
@@ -1363,6 +1472,231 @@ mod tests {
                 stride(CG_INST_BINARY_BYTES),
                 "binary record stride"
             );
+        }
+        drop(f);
+        teardown();
+    }
+
+    // --- cg_inst_visit_by_kind ------------------------------------------
+
+    /// Fabricates a raw instruction record with the given kind byte and
+    /// +0xc/+0x10/+0x14 words — for the kinds no factory emits (0, 10,
+    /// 12-22 and out-of-range values).
+    fn raw_inst(kind: u8, def0: usize, def1: usize, kind10_def: usize) -> [usize; 6] {
+        let mut record = [0usize; 6];
+        record[CG_INST_DEF0] = def0;
+        record[CG_INST_DEF1] = def1;
+        record[CG_INST_KIND10_DEF] = kind10_def;
+        unsafe {
+            (record.as_mut_ptr() as *mut u8)
+                .add(CG_INST_KIND * WORD)
+                .write(kind);
+        }
+        record
+    }
+
+    /// Runs the visitor over `inst` into a 4-slot output array; returns
+    /// the array and how many slots the returned cursor covers.
+    unsafe fn visit4(inst: *mut CgInst) -> ([*mut CgVirtualReg; 4], usize) {
+        let mut out = [core::ptr::null_mut::<CgVirtualReg>(); 4];
+        let base = out.as_mut_ptr();
+        let cursor = cg_inst_visit_by_kind(inst, base, base.add(4));
+        (out, cursor.offset_from(base) as usize)
+    }
+
+    #[test]
+    fn unary_and_binary_visit_their_dest_and_skip_the_null_dest_flags() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let dest = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let source = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let unary = cg_create_inst_unary(f.block_ptr(), 0x1a, dest, source);
+            let (out, count) = visit4(unary);
+            assert_eq!(count, 1, "unary defines one register");
+            assert_eq!(out[0], dest);
+
+            let s1 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let binary = cg_create_inst_binary(f.block_ptr(), 0x0f, dest, source, s1);
+            let (out, count) = visit4(binary);
+            assert_eq!(count, 1, "binary's dest_flags slot is NULL by zero-fill");
+            assert_eq!(out[0], dest);
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn binary_s_visits_dest_then_dest_flags() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let dest = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let flags = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let s0 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let s1 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let inst = cg_create_inst_binary_s(f.block_ptr(), 0x0f, dest, flags, s0, s1);
+            let (out, count) = visit4(inst);
+            assert_eq!(count, 2);
+            assert_eq!(out[0], dest, "+0xc first");
+            assert_eq!(out[1], flags, "+0x10 second");
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn compare_load_load_immed_and_phi_visit_their_dest() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let dest = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let src = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let insts = [
+                cg_create_inst_compare(f.block_ptr(), 0x30, dest, src, src),
+                cg_create_inst_load(f.block_ptr(), 0x29, dest, src),
+                cg_create_inst_load_immed(f.block_ptr(), 0x28, dest, 42),
+                cg_create_inst_phi(f.block_ptr(), 0x50, dest, core::ptr::null_mut()),
+            ];
+            for (i, &inst) in insts.iter().enumerate() {
+                let (out, count) = visit4(inst);
+                assert_eq!(count, 1, "inst {i} defines one register");
+                assert_eq!(out[0], dest, "inst {i} dest");
+            }
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn store_branches_and_rets_define_no_register() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let reg = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let insts = [
+                cg_create_inst_store(f.block_ptr(), 0x2b, reg, reg),
+                cg_create_inst_branch_label(f.block_ptr(), 0x40, f.block_ptr()),
+                cg_create_inst_branch_cond(f.block_ptr(), 0x41, reg, f.block_ptr()),
+                cg_create_inst_ret(f.block_ptr(), 0x60),
+                cg_create_inst_ret_value(f.block_ptr(), 0x60, reg),
+            ];
+            for (i, &inst) in insts.iter().enumerate() {
+                let (_, count) = visit4(inst);
+                assert_eq!(count, 0, "inst {i} defines nothing");
+            }
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn kind_zero_and_kinds_past_22_visit_nothing() {
+        // Distinct sentinels in every slot the visitor could read.
+        for kind in [0u8, 23, 100, 255] {
+            let mut record = raw_inst(kind, 0xaaaa, 0xbbbb, 0xcccc);
+            unsafe {
+                let (_, count) = visit4(record.as_mut_ptr() as *mut CgInst);
+                assert_eq!(count, 0, "kind {kind} defines nothing");
+            }
+        }
+    }
+
+    #[test]
+    fn kind_10_visits_word_0x14_only_when_non_null() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let reg = cg_virtual_reg_create(f.proc_ptr(), 1);
+            // +0x14 NULL: nothing, even with garbage in +0xc/+0x10.
+            let mut null_case = raw_inst(10, 0xaaaa, 0xbbbb, 0);
+            let (_, count) = visit4(null_case.as_mut_ptr() as *mut CgInst);
+            assert_eq!(count, 0, "+0x14 NULL -> no append");
+            // +0x14 set: appended; +0xc/+0x10 are never touched.
+            let mut set_case = raw_inst(10, 0xaaaa, 0xbbbb, reg as usize);
+            let (out, count) = visit4(set_case.as_mut_ptr() as *mut CgInst);
+            assert_eq!(count, 1);
+            assert_eq!(out[0], reg);
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn kinds_12_to_17_visit_reg0_then_reg1_when_non_null() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let r0 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let r1 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            for kind in 12..=17u8 {
+                let mut one = raw_inst(kind, r0 as usize, 0, 0xcccc);
+                let (out, count) = visit4(one.as_mut_ptr() as *mut CgInst);
+                assert_eq!(count, 1, "kind {kind} with NULL +0x10");
+                assert_eq!(out[0], r0);
+
+                let mut two = raw_inst(kind, r0 as usize, r1 as usize, 0xcccc);
+                let (out, count) = visit4(two.as_mut_ptr() as *mut CgInst);
+                assert_eq!(count, 2, "kind {kind} with +0x10 set");
+                assert_eq!(out[0], r0);
+                assert_eq!(out[1], r1);
+            }
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn kinds_18_to_22_visit_only_reg0() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let r0 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            for kind in 18..=22u8 {
+                // +0x10 and +0x14 deliberately non-NULL: not read.
+                let mut record = raw_inst(kind, r0 as usize, 0xbbbb, 0xcccc);
+                let (out, count) = visit4(record.as_mut_ptr() as *mut CgInst);
+                assert_eq!(count, 1, "kind {kind}");
+                assert_eq!(out[0], r0);
+            }
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn the_reg0_store_is_not_null_checked() {
+        // `strne r0, [r1], #4` stores whatever +0xc holds — even NULL.
+        let mut record = raw_inst(CG_INST_KIND_COMPARE as u8, 0, 0xbbbb, 0xcccc);
+        unsafe {
+            let (out, count) = visit4(record.as_mut_ptr() as *mut CgInst);
+            assert_eq!(count, 1);
+            assert!(out[0].is_null(), "a NULL +0xc lands in the array as-is");
+        }
+    }
+
+    #[test]
+    fn a_full_output_array_suppresses_the_store() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let dest = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let flags = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let s0 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let s1 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let inst = cg_create_inst_binary_s(f.block_ptr(), 0x0f, dest, flags, s0, s1);
+
+            let mut out = [core::ptr::null_mut::<CgVirtualReg>(); 2];
+            let base = out.as_mut_ptr();
+            // cursor == end: no store at all, cursor returned unchanged.
+            let cursor = cg_inst_visit_by_kind(inst, base, base);
+            assert_eq!(cursor, base);
+            assert!(out[0].is_null(), "nothing was stored");
+            // Room for exactly one: the dest lands, dest_flags is dropped.
+            let cursor = cg_inst_visit_by_kind(inst, base, base.add(1));
+            assert_eq!(cursor, base.add(1));
+            assert_eq!(out[0], dest);
+            assert!(out[1].is_null(), "the second append hit the bound");
         }
         drop(f);
         teardown();
