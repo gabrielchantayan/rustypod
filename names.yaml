@@ -7795,6 +7795,23 @@ functions:
       payload then header, then tail-branches into free() for the
       arena head itself.
 
+  - address: 0x082b2f1c
+    ghidra: FUN_082b2f1c
+    name: cg_reg_append_bounded
+    size: 16
+    sig: "cg_virtual_reg_t **cg_reg_append_bounded(cg_virtual_reg_t *reg, cg_virtual_reg_t **cursor, cg_virtual_reg_t **end)"
+    module: codegen/ir
+    status: ported
+    vars: {param_1: reg, param_2: cursor, param_3: end}
+    notes: >-
+      9 bl + 2 tail b call sites (cg_inst_visit_by_kind @ 0x082c1adc and
+      its sibling collector @ 0x082c1bfc). Bounded-store helper: `cmp
+      r1,r2; strne r0,[r1],#4; mov r0,r1; bx lr` - store reg at cursor
+      and advance the cursor one slot, unless cursor == end; returns the
+      (possibly advanced) cursor. The value is stored WITHOUT a NULL
+      check. match.py: body identical (cmp/strne/mov), LLVM only adds a
+      frame-pointer prologue/epilogue.
+
   - address: 0x082c23dc
     ghidra: FUN_082c23dc
     name: cg_virtual_reg_create
@@ -8040,8 +8057,9 @@ functions:
       when non-NULL; kinds 0, 5, 7, 8, 11 and >22 append nothing. Every
       append goes through the bounded-store helper @ 0x082b2f1c (16
       bytes: `cmp r1,r2; strne r0,[r1],#4; mov r0,r1; bx lr`); the +0xc
-      store is NOT NULL-checked. DEVIATION: 0x082b2f1c is not yet ported
-      as its own export, so the port inlines it (append_defined_reg);
+      store is NOT NULL-checked. DEVIATION: 0x082b2f1c is ported as its
+      own export (cg_reg_append_bounded) but the visitor keeps it inlined
+      (append_defined_reg);
       match.py shows LLVM re-expressing the two tables as bitmask/range
       tests with the helper inlined (cmp/strne pairs) - same dispatch
       sets, same store sequence.

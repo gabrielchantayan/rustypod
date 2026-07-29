@@ -32,6 +32,10 @@
 //!   0x082c19bc (76 bytes; 75 `bl` call sites — every one feeding a
 //!   phi). Chains a NULL-terminated run of registers into 8-byte
 //!   `{next, reg}` list cells carved from the caller-supplied arena.
+//! - `cg_reg_append_bounded` — original: `FUN_082b2f1c` @ 0x082b2f1c
+//!   (16 bytes; 9 `bl` + 2 tail `b` call sites). The bounded-store
+//!   helper the register collectors append through: store at the
+//!   cursor and advance it, unless it already equals `end`.
 //! - `cg_inst_visit_by_kind` — original: `FUN_082c1adc` @ 0x082c1adc
 //!   (288 bytes; 4 `bl` call sites). Collects the registers an
 //!   instruction DEFINES into a bounded output array, dispatching on the
@@ -736,6 +740,31 @@ pub unsafe extern "C" fn cg_virtual_reg_list_create(
     head as *mut CgVirtualRegList
 }
 
+/// cg_reg_append_bounded — original: `FUN_082b2f1c` @ 0x082b2f1c
+/// (16 bytes, 9 `bl` + 2 tail `b` call sites).
+///
+/// The bounded-store helper shared by the defined-register collectors
+/// ([`cg_inst_visit_by_kind`] and its sibling @ 0x082c1bfc): stores
+/// `reg` at `cursor` and advances the cursor by one slot, unless the
+/// cursor has already reached `end` — literally `cmp r1, r2; strne r0,
+/// [r1], #4; mov r0, r1; bx lr`. The value is stored WITHOUT a NULL
+/// check: whatever the caller passes lands in the array as-is. Returns
+/// the (possibly advanced) cursor.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_reg_append_bounded(
+    reg: *mut CgVirtualReg,
+    cursor: *mut *mut CgVirtualReg,
+    end: *mut *mut CgVirtualReg,
+) -> *mut *mut CgVirtualReg {
+    if cursor != end {
+        cursor.write(reg);
+        cursor.add(1)
+    } else {
+        cursor
+    }
+}
+
 /// cg_inst_visit_by_kind — original: `FUN_082c1adc` @ 0x082c1adc
 /// (288 bytes, 4 `bl` call sites).
 ///
@@ -765,10 +794,11 @@ pub unsafe extern "C" fn cg_virtual_reg_list_create(
 /// lands in the array like any other value; only `+0x10` and kind 10's
 /// `+0x14` are guarded.
 ///
-/// DEVIATION: the helper @ 0x082b2f1c is not yet ported as its own
-/// export, so its body is inlined ([`append_defined_reg`]); on target
-/// the original makes one `bl` per append plus a tail `b` for the last
-/// one. The stores, cursor arithmetic and NULL handling are identical.
+/// DEVIATION: the helper @ 0x082b2f1c is ported as its own export
+/// ([`cg_reg_append_bounded`]), but this visitor keeps it inlined
+/// ([`append_defined_reg`]); on target the original makes one `bl` per
+/// append plus a tail `b` for the last one. The stores, cursor
+/// arithmetic and NULL handling are identical.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn cg_inst_visit_by_kind(
@@ -1672,6 +1702,55 @@ mod tests {
             let (out, count) = visit4(record.as_mut_ptr() as *mut CgInst);
             assert_eq!(count, 1);
             assert!(out[0].is_null(), "a NULL +0xc lands in the array as-is");
+        }
+    }
+
+    // --- cg_reg_append_bounded ----------------------------------------
+
+    #[test]
+    fn append_bounded_stores_and_advances_while_room_remains() {
+        let mut out = [core::ptr::null_mut::<CgVirtualReg>(); 3];
+        let base = out.as_mut_ptr();
+        let values = [1usize as *mut CgVirtualReg, 2 as *mut CgVirtualReg];
+        unsafe {
+            let cursor = cg_reg_append_bounded(values[0], base, base.add(3));
+            assert_eq!(cursor, base.add(1), "cursor advanced one slot");
+            assert_eq!(out[0], values[0], "value stored at the old cursor");
+            let cursor = cg_reg_append_bounded(values[1], cursor, base.add(3));
+            assert_eq!(cursor, base.add(2));
+            assert_eq!(out[1], values[1]);
+            assert!(out[2].is_null(), "the untouched slot is undisturbed");
+        }
+    }
+
+    #[test]
+    fn append_bounded_at_end_stores_nothing_and_returns_the_cursor() {
+        let mut out = [0x5cusize as *mut CgVirtualReg; 1];
+        let base = out.as_mut_ptr();
+        unsafe {
+            // cursor == end: `cmp r1, r2` is equal, the strne never fires.
+            let cursor = cg_reg_append_bounded(1 as *mut CgVirtualReg, base, base);
+            assert_eq!(cursor, base, "cursor returned unchanged");
+            assert_eq!(out[0], 0x5c as *mut CgVirtualReg, "nothing stored");
+            // Same one slot before end: the store fills the slot, and the
+            // advanced cursor IS end.
+            let cursor = cg_reg_append_bounded(7 as *mut CgVirtualReg, base, base.add(1));
+            assert_eq!(cursor, base.add(1));
+            assert_eq!(out[0], 7 as *mut CgVirtualReg);
+        }
+    }
+
+    #[test]
+    fn append_bounded_stores_a_null_value_unchecked() {
+        // The original has no NULL test on the value: `strne r0, [r1], #4`
+        // stores whatever r0 holds.
+        let mut out = [0x5cusize as *mut CgVirtualReg; 1];
+        let base = out.as_mut_ptr();
+        unsafe {
+            let cursor =
+                cg_reg_append_bounded(core::ptr::null_mut(), base, base.add(1));
+            assert_eq!(cursor, base.add(1), "a NULL value still advances");
+            assert!(out[0].is_null(), "NULL lands in the array as-is");
         }
     }
 
