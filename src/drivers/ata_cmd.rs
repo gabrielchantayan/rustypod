@@ -53,6 +53,14 @@
 //!   out-parameters, high 16 bits first (r1), low 32 bits second (r2) —
 //!   the same `(hi, lo)` split the packer takes.
 //!
+//! One neighbouring leaf from the ATA island @ 0x08369000..0x0836c000
+//! lives here too:
+//!
+//! - `ata_handle_first_word_or_minus1` — `FUN_08369780` @ 0x08369780
+//!   (16 bytes; 106 `bl` + 2 tail-`b` call sites — the most-called leaf
+//!   in the island). A NULL-guarded read of an ATA handle's first word:
+//!   `handle[0]`, or 0xffffffff when the handle is NULL.
+//!
 //! Deviations:
 //!
 //! - The original `ata_cmd_set_lba48` reaches its 16-bit fields with
@@ -411,6 +419,31 @@ pub unsafe extern "C" fn ata_cmd_set_lba48(
     set_half(cmd, EXT_SECTOR_COUNT, count as u16);
     set_byte(cmd, COMMAND, command);
     set_half(cmd, EXT_DEVICE, ((0x40 | drive << 4) & 0xff) as u16);
+}
+
+/// ata_handle_first_word_or_minus1 — original: `FUN_08369780` @
+/// 0x08369780 (16 bytes; **106 `bl` + 2 tail-`b` call sites**,
+/// binary-scanned — the most-called leaf in the ATA island
+/// @ 0x08369000..0x0836c000).
+///
+/// A NULL-guarded read of an ATA handle's first word: `handle[0]`, or
+/// 0xffffffff when the handle is NULL. The guard folds "no device" into
+/// the same -1 the error paths report, and the callers rely on the
+/// signedness — they `cmp` the result against a count and branch with
+/// the signed `bgt`/`ble` (e.g. @ 0x0803b924, 0x0803b9f4, 0x080438f4),
+/// so a missing handle sorts below every real count rather than reading
+/// as a huge unsigned one.
+///
+/// The load is a plain `ldr` like the original's `ldrne r0, [r0]` —
+/// this is an in-memory object field, not a hardware register.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_handle_first_word_or_minus1(handle: *const u32) -> u32 {
+    if handle.is_null() {
+        0xffff_ffff
+    } else {
+        handle.read()
+    }
 }
 
 #[cfg(test)]
@@ -788,5 +821,32 @@ mod tests {
         assert_eq!(cmd[0x54], 0xff);
         assert_eq!(cmd[0x55], 0xff);
         assert_eq!(cmd[0x1b], 0xff);
+    }
+
+    // ---- the handle's first word -------------------------------------
+
+    #[test]
+    fn null_handle_reads_back_as_minus1() {
+        assert_eq!(
+            unsafe { ata_handle_first_word_or_minus1(core::ptr::null()) },
+            0xffff_ffff,
+            "no device folds into the error paths' -1"
+        );
+    }
+
+    #[test]
+    fn the_first_word_is_returned_verbatim() {
+        for first in [0u32, 1, 0x7fff_ffff, 0x8000_0000, 0xffff_fffe, 0xffff_ffff] {
+            let handle = [first, 0xdead_beef];
+            assert_eq!(unsafe { ata_handle_first_word_or_minus1(handle.as_ptr()) }, first);
+        }
+    }
+
+    #[test]
+    fn only_the_first_word_is_read() {
+        // A zero first word is 0, not the -1 the NULL guard returns —
+        // the guard is on the pointer, never on the contents.
+        let handle = [0u32, 0xffff_ffff];
+        assert_eq!(unsafe { ata_handle_first_word_or_minus1(handle.as_ptr()) }, 0);
     }
 }

@@ -9035,12 +9035,17 @@ functions:
     ghidra: FUN_08369780
     name: ata_handle_first_word_or_minus1
     size: 16
-    module: null
-    status: identified
+    sig: "u32 ata_handle_first_word_or_minus1(const u32 *handle)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: handle}
     notes: >-
       106 bl + 2 tail b call sites - the most-called leaf in the ATA
-      island. `p ? p[0] : -1`. Nothing to name properly until the handle
-      type is known; recorded so the next pass does not re-scout it.
+      island. `cmp/ldrne/mvneq/bx lr`: NULL-guarded read of the handle's
+      first word, `handle ? handle[0] : -1`. Callers cmp the result
+      against a count with SIGNED bgt/ble (@ 0x0803b924, 0x080438f4...),
+      so -1 sorts below every real count. match.py: identical body, only
+      the LLVM frame prologue differs.
 
   - address: 0x08369864
     ghidra: FUN_08369864
