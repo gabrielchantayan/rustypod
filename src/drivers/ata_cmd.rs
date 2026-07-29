@@ -53,13 +53,17 @@
 //!   out-parameters, high 16 bits first (r1), low 32 bits second (r2) —
 //!   the same `(hi, lo)` split the packer takes.
 //!
-//! One neighbouring leaf from the ATA island @ 0x08369000..0x0836c000
-//! lives here too:
+//! Two neighbouring leaves from the ATA island @ 0x08369000..0x0836c000
+//! live here too:
 //!
 //! - `ata_handle_first_word_or_minus1` — `FUN_08369780` @ 0x08369780
 //!   (16 bytes; 106 `bl` + 2 tail-`b` call sites — the most-called leaf
 //!   in the island). A NULL-guarded read of an ATA handle's first word:
 //!   `handle[0]`, or 0xffffffff when the handle is NULL.
+//! - `ata_handle_table_entry` — `FUN_08369864` @ 0x08369864 (20 bytes;
+//!   99 `bl` + 7 tail-`b` call sites). A NULL-guarded word-indexed
+//!   lookup into the table the handle's second word points at:
+//!   `((const u32 *)handle[1])[index]`, or 0 when the handle is NULL.
 //!
 //! Deviations:
 //!
@@ -443,6 +447,34 @@ pub unsafe extern "C" fn ata_handle_first_word_or_minus1(handle: *const u32) -> 
         0xffff_ffff
     } else {
         handle.read()
+    }
+}
+
+/// ata_handle_table_entry — original: `FUN_08369864` @ 0x08369864
+/// (20 bytes; 99 `bl` + 7 tail-`b` call sites, binary-scanned).
+///
+/// A NULL-guarded table lookup off the ATA handle's second word:
+/// `((const u32 *)handle[1])[index]`, or 0 when the handle is NULL.
+/// Where [`ata_handle_first_word_or_minus1`] reports "no device" as -1,
+/// this one folds a missing handle into a zero entry — the two guards
+/// exist because the callers read the results with different eyes (the
+/// first word is compared signed, the table entry is a value or
+/// pointer where 0 already means "none").
+///
+/// Both loads are plain `ldr`s like the original's
+/// `ldrne r0, [r0, #4]; ldrne r0, [r0, r1, lsl #2]` — in-memory object
+/// fields, not hardware registers. The `index` argument is used as a
+/// word index, so on the 32-bit target it can reach any byte offset in
+/// steps of four.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_handle_table_entry(handle: *const u32, index: u32) -> u32 {
+    if handle.is_null() {
+        0
+    } else {
+        (handle.add(1).read() as *const u32)
+            .add(index as usize)
+            .read()
     }
 }
 
@@ -840,6 +872,105 @@ mod tests {
             let handle = [first, 0xdead_beef];
             assert_eq!(unsafe { ata_handle_first_word_or_minus1(handle.as_ptr()) }, first);
         }
+    }
+
+    // ---- the handle's table entries --------------------------------
+
+    /// The handle's second word is a 32-bit table pointer the function
+    /// dereferences — lossless on the 32-bit target, but an ASLR'd host
+    /// stack/static address does not survive the `as u32` round-trip.
+    /// Map a low arena instead, as on the device (the `heap/pool.rs`
+    /// `arena_ptr` precedent), at a hint no other test module claims.
+    fn low_arena() -> *mut u32 {
+        extern crate std;
+        use std::sync::OnceLock;
+        static ARENA: OnceLock<usize> = OnceLock::new();
+        *ARENA.get_or_init(|| {
+            extern "C" {
+                fn mmap(
+                    addr: usize,
+                    len: usize,
+                    prot: i32,
+                    flags: i32,
+                    fd: i32,
+                    offset: i64,
+                ) -> usize;
+            }
+            #[cfg(target_os = "macos")]
+            const MAP_PRIVATE_ANON: i32 = 0x1002;
+            #[cfg(target_os = "linux")]
+            const MAP_PRIVATE_ANON: i32 = 0x22;
+            const PROT_READ_WRITE: i32 = 3;
+            let p = unsafe {
+                mmap(0x0a00_0000, 0x1000, PROT_READ_WRITE, MAP_PRIVATE_ANON, -1, 0)
+            };
+            assert!(p != usize::MAX && p < 0x1_0000_0000, "arena must map below 4 GB (got {p:#x})");
+            p
+        }) as *mut u32
+    }
+
+    /// Layout in the arena: [handle[0], handle[1] = table ptr, table...].
+    unsafe fn handle_with_table(table: &[u32]) -> (*const u32, *const u32) {
+        let arena = low_arena();
+        arena.add(1).write(arena.add(2) as u32);
+        for (i, &entry) in table.iter().enumerate() {
+            arena.add(2 + i).write(entry);
+        }
+        (arena, arena.add(2))
+    }
+
+    #[test]
+    fn null_handle_reads_back_as_zero() {
+        assert_eq!(
+            unsafe { ata_handle_table_entry(core::ptr::null(), 7) },
+            0,
+            "a missing handle folds into a zero entry, not the -1 the first-word reader reports"
+        );
+    }
+
+    #[test]
+    fn the_indexed_entry_is_returned_verbatim() {
+        let table = [0x1111_1111u32, 0x2222_2222, 0xffff_ffff, 0x8000_0000];
+        let (handle, _) = unsafe { handle_with_table(&table) };
+        for (index, &expected) in table.iter().enumerate() {
+            assert_eq!(
+                unsafe { ata_handle_table_entry(handle, index as u32) },
+                expected,
+                "entry {index}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_guard_is_on_the_handle_not_the_contents() {
+        // A zero entry reads back as 0 — the same 0 the NULL guard
+        // returns, but reached by dereferencing, not by the guard.
+        let table = [0u32, 0x1234_5678];
+        let (handle, _) = unsafe { handle_with_table(&table) };
+        assert_eq!(unsafe { ata_handle_table_entry(handle, 0) }, 0);
+        assert_eq!(unsafe { ata_handle_table_entry(handle, 1) }, 0x1234_5678);
+    }
+
+    #[test]
+    fn the_index_scales_by_words() {
+        // r1 is shifted left by 2 — an index, never a byte offset.
+        let table: [u32; 16] = core::array::from_fn(|i| i as u32 * 0x0101_0101);
+        let (handle, _) = unsafe { handle_with_table(&table) };
+        for index in 0..16u32 {
+            assert_eq!(
+                unsafe { ata_handle_table_entry(handle, index) },
+                index * 0x0101_0101
+            );
+        }
+    }
+
+    #[test]
+    fn the_first_word_of_the_handle_is_never_read() {
+        // Poison handle[0]; only handle[1] leads to the table.
+        let table = [0xabcd_1234u32];
+        let (handle, _) = unsafe { handle_with_table(&table) };
+        unsafe { (handle as *mut u32).write(0xffff_ffff) };
+        assert_eq!(unsafe { ata_handle_table_entry(handle, 0) }, 0xabcd_1234);
     }
 
     #[test]
