@@ -13,6 +13,12 @@
 //!   failure path, and the printf front-end @ 0x0802f694 turns its result
 //!   into the EOF return of a failed printf. (The EOF indicator is the
 //!   0x40 bit also cleared above.)
+//! - `stream_test_eof_flag` — original: `FUN_0802fbd4` @ 0x0802fbd4
+//!   (44 bytes). The `feof` core: returns `flags & 0x40`. Byte-structure
+//!   twin of `stream_test_error_flag` (same nop'd lock hooks, same shape)
+//!   with the EOF mask in place of the error mask; it sits at the head of
+//!   the buffered-stream cluster (sync core 0x0802fc00, fseek core
+//!   0x0802fd04) rather than with its sibling at 0x080333f8.
 //! - `setvbuf_core` — original: `FUN_08033424` @ 0x08033424 (164 bytes).
 //!   The `setvbuf` engine — see the function docs for the exact
 //!   validation and stored fields.
@@ -87,6 +93,20 @@ pub unsafe extern "C" fn stream_clear_error(stream: *mut AdsStream) -> *mut u8 {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn stream_test_error_flag(stream: *mut AdsStream) -> u32 {
     (*stream).flags & FLAG_STREAM_ERROR
+}
+
+/// stream_test_eof_flag — original: `FUN_0802fbd4` @ 0x0802fbd4
+/// (44 bytes).
+///
+/// `feof` core: returns `flags & 0x40` (0x40 when the EOF indicator is
+/// set, 0 otherwise — the original returns the masked value, not a
+/// normalized boolean). Structurally identical to `stream_test_error_flag`
+/// @ 0x080333f8 (`stmdb {r4,r5,r6,lr}`; nop'd lock acquire/release on
+/// FILE+0x3c; `ldr flags, [stream, #0xc]`; `and` mask; return), differing
+/// only in the mask constant 0x40 vs 0x80.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn stream_test_eof_flag(stream: *mut AdsStream) -> u32 {
+    (*stream).flags & FLAG_STREAM_EOF
 }
 
 /// setvbuf_core — original: `FUN_08033424` @ 0x08033424 (164 bytes).
@@ -164,6 +184,16 @@ mod tests {
             let mut s = stream_with_flags(flags);
             let got = unsafe { stream_test_error_flag(&mut s) };
             assert_eq!(got, flags & 0x80, "flags={flags:#x}");
+            assert_eq!(s.flags, flags, "must not modify the stream");
+        }
+    }
+
+    #[test]
+    fn test_eof_flag_returns_masked_value() {
+        for flags in [0u32, 0x40, 0x80, 0xc0, 0xffff_ffff, 0xffff_ffbf] {
+            let mut s = stream_with_flags(flags);
+            let got = unsafe { stream_test_eof_flag(&mut s) };
+            assert_eq!(got, flags & 0x40, "flags={flags:#x}");
             assert_eq!(s.flags, flags, "must not modify the stream");
         }
     }

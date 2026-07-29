@@ -382,6 +382,24 @@ functions:
     module: strtol
     status: ported
 
+  - address: 0x0802fbd4
+    ghidra: FUN_0802fbd4
+    name: stream_test_eof_flag
+    size: 44
+    sig: "u32 stream_test_eof_flag(AdsStream *stream)"
+    module: stdio/stream_flags
+    status: ported
+    vars: "r4=stream, r0=flags word, r4'=masked result, r5=&file.lock"
+    notes: >-
+      feof core: returns FILE+0xc flags & 0x40 (masked value, not a
+      normalized boolean). Byte-structure twin of stream_test_error_flag
+      @ 0x080333f8 (ferror core, mask 0x80) — same nop'd lock acquire/
+      release hooks on FILE+0x3c, only the mask constant differs. NOT a
+      strto-area conversion wrapper despite sitting right after atol; it
+      heads the buffered-stream cluster (sync core 0x0802fc00, fseek core
+      0x0802fd04). Callers: 0x08029af4/0x08029c08/0x08029e40/0x08029f64
+      (unidentified 0x08029xxx parser loops).
+
   - address: 0x08034e68
     ghidra: FUN_08034e68
     name: __strtoull
