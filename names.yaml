@@ -9016,7 +9016,43 @@ functions:
       returns unfreed. The raw free is sqlite3_free @ 0x083906f4,
       called through its ported twin tracked_free; the three unported
       destructors are the FREE_P4_AUX_OPS dispatch table (documented
-      no-op defaults - leak rather than corrupt, house pattern).
+      no-op defaults - leak rather than corrupt, house pattern; the
+      aux sweep @ 0x08386e08 has since been ported and is the default
+      context_aux_cleanup slot).
+
+  - address: 0x08386e08
+    ghidra: FUN_08386e08
+    name: vdbe_context_aux_sweep
+    size: 100
+    sig: "void vdbe_context_aux_sweep(void *ctx, int exempt_mask)"
+    module: sqlite/aux_sweep
+    status: ported
+    renames:
+      param_1: ctx
+      param_2: exempt_mask
+      uVar3: index
+      piVar4: record.arg
+      pcVar2: record.destructor
+    notes: >-
+      Upstream SQLite's sqlite3VdbeDeleteAuxData loop, freestanding
+      over a function context's aux-record array: owner pointer at +0
+      (untouched), signed record count at +4, then 8-byte
+      {arg, destructor} records from +8. 2 bl call sites (vdbe_free_p4
+      @ 0x082cf3f4 with mask 0; the statement-exec path @ 0x08387b00
+      with a live mask - Ghidra's C additionally attributes it to
+      vdbe_change_p4's -7 branch, which shares those sites). Each slot
+      with index <= 31 whose mask bit is set is exempt (`cmp r4,#0x1f;
+      bgt` / `tst r7,r8, lsl r4` - indices past 31 cannot be
+      exempted); a non-exempt slot with a non-NULL arg has its
+      destructor, when non-NULL, blx'd WITH the arg in r0 (Ghidra
+      shows `(*pcVar2)()` - the arg is loaded two instructions
+      earlier), then the arg slot is zeroed. NULL-arg slots are
+      skipped before the destructor word is even loaded. The count is
+      reloaded every iteration (volatile in the port) so a destructor
+      mutating it mid-sweep is honored. Wired as the default
+      context_aux_cleanup slot of free_p4's FREE_P4_AUX_OPS. match.py
+      structural (LLVM: tst r9,r4,lsr r6 instead of tst r7,r8,lsl r4,
+      separate cmp/beq/blx instead of blxne, fp frame).
       vdbe_change_p4 still reaches this through its own VDBE_P4_OPS
       slot; flipping that default is a separate commit. match.py
       structural (LLVM emits a ldr-pc table instead of addls-pc,

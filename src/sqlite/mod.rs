@@ -60,6 +60,7 @@
 //! Scanning every pointer literal into 0x088e0000..0x08920000 agrees:
 //! their targets are readable C strings only at `+0xaed8`.
 
+pub mod aux_sweep;
 pub mod btree_lock;
 pub mod dequote;
 pub mod error_msg;
