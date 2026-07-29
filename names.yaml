@@ -10005,14 +10005,15 @@ functions:
     name: is_tagged_c0
     size: 20
     sig: "u32 is_tagged_c0(u32 value)"
-    module: null
-    status: identified
+    module: util::is_tagged_c0
+    status: ported
     notes: >-
       11 bl call sites, a pure leaf - returns 1 when the top byte of the
-      argument is exactly 0xc0, else 0. Trivially portable; left out only
-      because the tag's meaning (0xc0xxxxxx as an address range or as a
-      packed type tag) is not established, and a name without that would
-      be guesswork.
+      argument is exactly 0xc0, else 0. The tag's meaning (0xc0xxxxxx as
+      an address range or as a packed type tag) is still not established;
+      the port is behavior-only. match.py: LLVM lowers the compare to an
+      add/clz/lsr idiom instead of cmp/movne/moveq - same mask-and-test
+      structure.
 
   - address: 0x0811c564
     ghidra: FUN_0811c564
