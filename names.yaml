@@ -2170,10 +2170,11 @@ functions:
     size: 4
     sig: "u32 region_block_size_thunk(void)"
     module: heap/block_mgr
-    status: identified
+    status: ported
     notes: >-
-      b 0x0818a364 — bare alias thunk of region_block_size; 1 bl caller.
-      No separate port needed (hooks can branch to the primary symbol).
+      ALIAS - `b 0x0818a364`, a bare tail-branch thunk of
+      region_block_size (verified against osos.asm); 1 bl caller. No
+      separate port; hook this address to the region_block_size symbol.
 
   - address: 0x080751a0
     ghidra: FUN_080751a0
