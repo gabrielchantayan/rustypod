@@ -8388,21 +8388,24 @@ functions:
     ghidra: FUN_08391dec
     name: string_hash_tabled
     size: 72
-    sig: "u32 string_hash_tabled(const char *s, int len)"
-    module: null
-    status: identified
+    sig: "u32 string_hash_tabled(const u8 *s, i32 len)"
+    module: sqlite/strhash
+    status: ported
+    vars: {param_1: s, param_2: len}
     notes: >-
       Table-driven byte hash - `h = table[c] ^ (h ^ (h << 3))` per byte,
       returning `h & 0x7fffffff`. A `len <= 0` measures the string with
-      strlen @ 0x08392478 first. 3 bl call sites. UNBLOCKED (agent
-      media): the 256-byte table at runtime 0x088faa8b is
-      sqlite3UpperToLower - identity except 'A'..'Z' -> 'a'..'z' - and it
-      IS in the image, at 0x088faa8b + 0xaed8 = 0x08905963 (see the
-      0xaed8 image/runtime skew note in the region-survey block above,
-      and src/sqlite/stricmp.rs, which reproduces the table). This
-      function is SQLite's strHash for SQLITE_HASH_NOCASE; its sibling
-      at 0x08391df0 is the same loop without the length probe. Portable
-      now; left unported only because it is outside this sweep.
+      strlen @ 0x08392478 first. 3 bl call sites per the scouting note
+      (none resolve in the osos.asm text - likely reached through a
+      function pointer in SQLite's Hash machinery). The 256-byte table
+      the literal at 0x08391e34 points at is sqlite3UpperToLower
+      (runtime 0x088faa8b, image 0x088faa8b + 0xaed8 = 0x08905963 - see
+      the skew note in sqlite/mod.rs), reproduced as
+      sqlite/stricmp.rs's UPPER_TO_LOWER. This function is SQLite's
+      strHash for SQLITE_HASH_NOCASE; its sibling at 0x08391df0 is the
+      same loop without the length probe (a mid-function tail-entry
+      alias, not a separate function). Port deviation - LLVM inlines
+      the strlen (the cxx/string.rs precedent).
 
   - address: 0x08384f14
     ghidra: FUN_08384f14
