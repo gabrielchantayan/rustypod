@@ -13,3 +13,11 @@ debug = false
 lto = false
 codegen-units = 1
 panic = "abort"
+
+# The crate is no_std, so an unwinding panic has nothing to unwind through.
+# Without this, `cargo build --target <host>` fails with "unwinding panics are
+# not supported without std" — the release profile already set it, the dev
+# profile did not. Cargo ignores the setting for the test profile, so the host
+# test suite is unaffected.
+[profile.dev]
+panic = "abort"
