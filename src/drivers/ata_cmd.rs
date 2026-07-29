@@ -257,6 +257,18 @@ pub unsafe extern "C" fn ata_cmd_set_flags(cmd: *mut u8, flags: u32) {
     set_word(cmd, FLAGS, flags);
 }
 
+/// ata_cmd_set_command — original: `FUN_081211bc` @ 0x081211bc (8
+/// bytes; 16 call sites, binary-scanned).
+///
+/// The ATA command register (+0x1a). The read-DMA flow @ 0x082798bc
+/// stores 0xC8 (READ DMA) here. [`ata_cmd_set_lba48`] writes the same
+/// byte itself, which is why only the LBA28 flows need this setter.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_cmd_set_command(cmd: *mut u8, command: u8) {
+    set_byte(cmd, COMMAND, command);
+}
+
 /// ata_cmd_get_lba48 — original: `FUN_081212e8` @ 0x081212e8 (76 bytes;
 /// 1 call site).
 ///
@@ -516,6 +528,18 @@ mod tests {
         let mut block = poisoned();
         unsafe { ata_cmd_set_device(block.0.as_mut_ptr(), DEVICE_NONE) };
         assert_eq!(block.0[DEVICE_INDEX] as i8, -1);
+    }
+
+    #[test]
+    fn the_command_setter_writes_only_the_command_byte() {
+        let mut block = poisoned();
+        unsafe { ata_cmd_set_command(block.0.as_mut_ptr(), 0xc8) };
+        assert_eq!(block.0[COMMAND], 0xc8, "READ DMA");
+        for other in 0..block.0.len() {
+            if other != COMMAND {
+                assert_eq!(block.0[other], 0xa5, "spilled onto +{other:#x}");
+            }
+        }
     }
 
     #[test]

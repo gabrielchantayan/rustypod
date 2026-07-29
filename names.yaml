@@ -5293,13 +5293,13 @@ functions:
     size: 8
     sig: "void ata_cmd_set_command(u8 *cmd, u8 command)"
     module: drivers/ata_cmd
-    status: identified
+    status: ported
     vars: {param_1: cmd, param_2: command}
     notes: >-
       `strb r1, [r0, #0x1a]`. 16 bl call sites. The ATA command register;
       the read-DMA flow @ 0x082798bc passes 0xC8. ata_cmd_set_lba48
       writes the same byte itself, which is why only the LBA28 flows need
-      this setter.
+      this setter. #[inline(never)].
 
   - address: 0x081211ec
     ghidra: FUN_081211ec
