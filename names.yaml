@@ -10400,18 +10400,23 @@ functions:
     ghidra: FUN_08123600
     name: formatted_message_emit
     size: 80
-    module: null
-    status: identified
+    sig: "void formatted_message_emit(MessageStream *stream, const char *key, int value, uint32 depth)"
+    module: printf/formatted_message
+    status: ported
+    vars: {param_1: stream, param_2: key, param_3: value, param_4: depth}
     notes: >-
-      83 bl call sites. Calls 0x08123a54(obj, r3), then formats into the
-      object's inline 512-byte buffer at +0x15 with 0x0802f768(dst,
-      0x200, format, buf_end, arg) - a bounded string formatter - and
-      tail branches to 0x08123c58(obj, obj+0x15). The format string is
-      taken as `pc + 32`, i.e. a literal immediately after the code.
-      Sibling 0x0812395c (88 bytes, 58 sites) is the same function with
-      the fourth word looked up from a table @ 0x081239b4 instead of
-      passed in. Not ported - the whole body is three unported calls plus
-      a format literal.
+      83 bl call sites. Emits one indented plist integer property:
+      indent_prepare @ 0x08123a54(stream, depth) fills the scratch at
+      +0x215 with depth copies of the stream's indent unit, then the
+      ported snprintf @ 0x0802f768 formats the literal @ 0x08123650
+      ("%s<key>%s</key>\n%s<integer>%d</integer>\n") into the inline
+      512-byte buffer at +0x15 with args (indent, key, indent, value),
+      and the stream append @ 0x08123c58(stream, buf) is tail-called.
+      The two unported callees are the INDENT_PREPARE / STREAM_APPEND
+      dispatch statics (defaults: empty indent, dropped message);
+      snprintf is called directly. Sibling 0x0812395c (88 bytes, 58
+      sites) is the same function with the value looked up from a table
+      @ 0x081239b4 instead of passed in.
 
   - address: 0x0811d46c
     ghidra: FUN_0811d46c

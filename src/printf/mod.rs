@@ -1,4 +1,5 @@
 //! printf family: state, helpers, converters, engine, API veneers.
+pub mod formatted_message;
 pub mod printf_api;
 pub mod printf_core;
 pub mod printf_d;
