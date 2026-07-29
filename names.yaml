@@ -10162,6 +10162,24 @@ functions:
       sites - 0x083d7884 19, 0x083d7798 14, 0x083d7684 12,
       0x083d7694 12, 0x083d7674 11, 0x083d78b4 10.
 
+  - address: 0x083d78b4
+    ghidra: FUN_083d78b4
+    name: vector_size_elem16
+    size: 16
+    sig: "i32 vector_size_elem16(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      Byte-identical copy of vector_size_elem16 @ 0x083d7884 (same `ldm
+      r0,{r0,r1}; sub r0,r1,r0; asr r0,r0,#4; bx lr` - verified against
+      osos.asm and Ghidra's `return param_1[1] - *param_1 >> 4`). Served
+      by the existing cxx/templates port - hook this address to the
+      vector_size_elem16 symbol. 10 bl call sites. match.py - the ldm
+      comes out as byte loads from the family's read_unaligned
+      host-testing idiom, the same accepted deviation as
+      vector_size_elem4; the sub/asr#4 structure matches.
+
   - address: 0x083d78a4
     ghidra: FUN_083d78a4
     name: vector_size_elem32
