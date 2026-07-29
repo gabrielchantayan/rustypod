@@ -8172,15 +8172,39 @@ functions:
 
   - address: 0x08252bec
     ghidra: FUN_08252bec
-    name: unported_singleton_getter_089ca8a8
+    name: video_engine_get
     size: 12
-    module: unported
-    status: identified
+    sig: "u8 *video_engine_get(void)"
+    module: util/video_engine
+    status: ported
     notes: >-
-      146 bl + 1 tail b call sites. `return *(void **)0x089ca8a8` - a
-      bare singleton getter. Nothing to verify behaviorally and nothing
-      to name until the singleton's type is known; recorded so the next
-      pass does not re-scout it.
+      146 bl + 1 tail b call sites (plus the 4-byte alias thunk
+      `b 0x08252bec` @ 0x082cafbc). Bare singleton getter:
+      `return *(void **)0x089ca8a8` (ldr literal / ldr [r0] / bx lr);
+      NULL means "no video session" and every caller checks. The
+      singleton is the VIDEO PLAYBACK ENGINE instance, named from its
+      own methods and installers: the only setter @ 0x08252d4c
+      (release-old/retain-new via 0x0824ddf0) is called from the media
+      view controller's setup @ 0x08295ae0 while it builds a 320x240
+      (0x140x0xf0, strh immediates @ 0x08295b58/0x08295b60) display-
+      layer output path; the frame-advance method @ 0x08252aXX runs a
+      ring of three frame slots (index @ +0xab4 mod 3), passing the
+      current, (cur-1)%3 and (cur-2)%3 slots to the 1304-byte 3-plane
+      fixed-point (20.12) scaler/compositor @ 0x08251894 - the
+      prev/cur/next cadence of temporal deinterlacing of planar video;
+      the object carries a property bag keyed by 16-bit ids (0x8892 ->
+      +0xad8, 0x8893 -> +0xadc @ 0x0825360c; 0x88e4/0x88e8 @ 0x0824ce14;
+      0x3059/0x305a -> +0xae0/+0xae4 @ 0x082cafc8) with 0x500 as the
+      unknown-property error code (0x0824f388), and an active flag @
+      +0xb50 whose clearing tears down the frame buffer. The bulk of
+      the call sites are the public C wrappers @ 0x082d0c68..0x082d23ec,
+      all `if (video_engine_get()) method(instance, ...)` thunks.
+      Deviation (kernel/control_state.rs precedent): on target the port
+      reads the original firmware slot @ 0x089ca8a8 (the owning setter
+      is unported, so the port must not keep a copy); host tests
+      substitute a mock pointer via set_mock_instance. match.py - same
+      two-load leaf plus the usual LLVM fp frame; exit-1 diff is the
+      frame only.
 
   # --- Region survey: 0x08300000-0x083fffff (agent hi6) ---
   # 3481 Ghidra functions, ~3439 unclaimed at survey time. Sub-blocks:
