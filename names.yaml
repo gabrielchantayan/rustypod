@@ -10128,10 +10128,9 @@ functions:
       family's read_unaligned host-testing idiom, the same accepted
       deviation as vector_size_elem4.       Other divide instantiations
       (identified, not ported): elem 12 (4 more fns besides the ported
-      0x083d76f8; 62 calls across all 5), elem 20 (2 fns, 21 calls, top
-      0x083d7640 14),
-      elem 28 (1 fn, 8 calls, 0x083d7894), elem 40 (1 fn, 14 calls,
-      0x083d783c).
+      0x083d76f8; 62 calls across all 5), elem 28 (1 fn, 8 calls,
+      0x083d7894), elem 40 (1 fn, 14 calls, 0x083d783c). Elem 20 is
+      now ported (0x083d7640, see its entry).
 
   - address: 0x083d77dc
     ghidra: FUN_083d77dc
@@ -10148,6 +10147,31 @@ functions:
       existing cxx/templates port - hook both addresses to the one
       symbol. 14 bl call sites (census from the first instantiation's
       commit; osos.asm text shows 6 `bl` references).
+
+  - address: 0x083d7640
+    ghidra: FUN_083d7640
+    name: vector_size_elem20
+    size: 16
+    sig: "i32 vector_size_elem20(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      `vector<T>::size()` for a 20-byte element - a non-power-of-two
+      member of the vector_size family: same `ldm r0,{r0,r1}; sub
+      r0,r1,r0` head as the shifts, then `mov r1,#0x14` and a TAIL
+      BRANCH into the ADS signed divide @ 0x08031568 (ported as
+      __rt_sdiv). 14 bl call sites here (family census; osos.asm text
+      shows 12 `bl` references), 21 across the 2 byte-identical copies;
+      the second instantiation 0x083d771c (7 bl sites) is byte-identical
+      and can hook the same symbol. Verified against osos.asm: `ldmia
+      r0,{r0,r1}; sub r0,r1,r0; mov r1,#0x14; b 0x08031568`. The port
+      calls the ported __rt_sdiv, which is signed and truncating, so a
+      reversed vector's negative span truncates toward zero. match.py -
+      same structure as vector_size_elem24 (sub / mov r1,#20 / b
+      __rt_sdiv); the ldm comes out as byte loads from the family's
+      read_unaligned host-testing idiom, the same accepted deviation as
+      vector_size_elem4.
 
   - address: 0x083d7760
     ghidra: FUN_083d7760

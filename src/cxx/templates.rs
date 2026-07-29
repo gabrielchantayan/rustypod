@@ -28,9 +28,10 @@
 //!   [`vector_size_elem16`] / [`vector_size_elem32`] —
 //!   `vector<T>::size()`, one instantiation per element size; the four
 //!   power-of-two shifts cover 28 functions and 276 call sites.
-//! - [`vector_size_elem12`] / [`vector_size_elem24`] — the
-//!   non-power-of-two members of the size family, dividing the span by
-//!   12 or 24 through [`__rt_sdiv`] instead of shifting.
+//! - [`vector_size_elem12`] / [`vector_size_elem24`] /
+//!   [`vector_size_elem20`] — the non-power-of-two members of the size
+//!   family, dividing the span by 12, 24 or 20 through [`__rt_sdiv`]
+//!   instead of shifting.
 //! - [`vector_capacity`] — `vector<T>::capacity()` for a 24-byte
 //!   element, the end-of-storage sibling of the size family.
 //!
@@ -216,11 +217,11 @@ unsafe fn vector_size(vector: *const VectorBounds, shift: u32) -> i32 {
 /// `vector<T>::size()` for a 4-byte element: `(end - begin) >> 2`.
 ///
 /// The size family has one member per element size. The four powers of
-/// two are ported here, as are the 12- and 24-byte divide members
-/// ([`vector_size_elem12`], [`vector_size_elem24`]); the other
-/// non-power-of-two instantiations (element sizes 20, 28 and 40)
-/// tail-branch into the ADS signed divide @ 0x08031568 the same way and
-/// are left identified.
+/// two are ported here, as are the 12-, 20- and 24-byte divide members
+/// ([`vector_size_elem12`], [`vector_size_elem20`],
+/// [`vector_size_elem24`]); the other non-power-of-two instantiations
+/// (element sizes 28 and 40) tail-branch into the ADS signed divide
+/// @ 0x08031568 the same way and are left identified.
 ///
 /// # Safety
 /// `vector` must point at a readable `{begin, end}` pair.
@@ -317,6 +318,32 @@ pub unsafe extern "C" fn vector_size_elem24(vector: *const VectorBounds) -> i32 
     let end = core::ptr::read_unaligned(core::ptr::addr_of!((*vector).end));
     let span = (end as isize - begin as isize) as i32;
     __rt_sdiv(span, 24)
+}
+
+/// vector_size_elem20 — original: `FUN_083d7640` @ 0x083d7640
+/// (16 bytes; 14 `bl` call sites there, 21 across the 2 byte-identical
+/// copies — the second instantiation, `FUN_083d771c` @ 0x083d771c with
+/// 7 `bl` sites, is byte-identical and can hook this same symbol).
+///
+/// `vector<T>::size()` for a 20-byte element, a non-power-of-two member
+/// of the `vector_size_elem*` family: the same `ldm r0,{r0,r1}; sub
+/// r0,r1,r0` head as the shifts, then `mov r1,#0x14` and a **tail
+/// branch** into the ADS signed divide @ 0x08031568 (ported as
+/// [`__rt_sdiv`]). The divide is signed and truncating, so a reversed
+/// vector's negative span truncates toward zero like any C `/`, and a
+/// partial element is dropped.
+///
+/// # Safety
+/// `vector` must point at a readable `{begin, end}` pair.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_size_elem20(vector: *const VectorBounds) -> i32 {
+    // `read_unaligned`: same 4-but-not-8-aligned firmware head hazard
+    // as `vector_size` on a 64-bit host.
+    let begin = core::ptr::read_unaligned(core::ptr::addr_of!((*vector).begin));
+    let end = core::ptr::read_unaligned(core::ptr::addr_of!((*vector).end));
+    let span = (end as isize - begin as isize) as i32;
+    __rt_sdiv(span, 20)
 }
 
 /// The `{begin, end, end_of_storage}` head of a vector — the three
@@ -702,6 +729,35 @@ mod tests {
             assert_eq!(vector_size_elem24(&partial), 3, "partial element dropped");
             let reversed = VectorBounds { begin: begin.add(25), end: begin };
             assert_eq!(vector_size_elem24(&reversed), -1, "-25 / 24 truncates to -1");
+        }
+    }
+
+    // ---- vector_size_elem20 ------------------------------------------
+
+    #[test]
+    fn vector_size_elem20_divides_the_span_by_20() {
+        unsafe {
+            let storage = [0u8; 200];
+            let begin = storage.as_ptr() as *mut u8;
+            for elements in 0..10usize {
+                let bounds = VectorBounds { begin, end: begin.add(elements * 20) };
+                assert_eq!(vector_size_elem20(&bounds), elements as i32);
+            }
+        }
+    }
+
+    /// The division is the signed truncating `__rt_sdiv`, so a reversed
+    /// (negative) span truncates toward zero, not toward -inf, and a
+    /// partial element is dropped.
+    #[test]
+    fn vector_size_elem20_is_signed_and_truncating() {
+        unsafe {
+            let storage = [0u8; 200];
+            let begin = storage.as_ptr() as *mut u8;
+            let partial = VectorBounds { begin, end: begin.add(20 * 3 + 19) };
+            assert_eq!(vector_size_elem20(&partial), 3, "partial element dropped");
+            let reversed = VectorBounds { begin: begin.add(21), end: begin };
+            assert_eq!(vector_size_elem20(&reversed), -1, "-21 / 20 truncates to -1");
         }
     }
 
