@@ -9186,6 +9186,16 @@ functions:
   - address: 0x083d5eb4
     ghidra: FUN_083d5eb4
     name: three_pointer_select
+    size: 36
+    module: null
+    status: identified
+    notes: >-
+      Reads three pointers from the object (+0, +4, +8) and returns one
+      of two dereferences - `if (a < b) return *b; c = [this+8];
+      return a <= c ? *a : *c`. 14 bl sites here plus 8 at the
+      byte-identical copy 0x083d5ed8. Shape of an iterator clamp or a
+      three-way begin/cur/end accessor, but the owning container is not
+      identified, so the semantics are not solid enough to name.
 
   # --- scouted 0x08110000-0x0812ffff, not ported (display-layer sweep) ---
 
