@@ -108,6 +108,32 @@ pub unsafe extern "C" fn not_equal_deref(a: *const u32, b: *const u32) -> u32 {
     u32::from(a.read() != b.read())
 }
 
+/// container_is_empty — original: `FUN_083d75e0` @ 0x083d75e0
+/// (16 bytes; 15 `bl` call sites there, 92 across all 9 byte-identical
+/// copies — 0x083d75e0 15, 0x083d7610 13, 0x083d75c0 13, 0x083d7630 12,
+/// 0x083d75f0 10, 0x083d7620 9, 0x083d7600 8, 0x083d75d0 6,
+/// 0x083d75b0 6).
+///
+/// Returns 1 when the word at `this + 0x20` is zero, 0 otherwise — the
+/// ADS idiom for `return !x` (`rsbs r0, r0, #1` / `movcc r0, #0`).
+/// Callers use it as an emptiness predicate (`if (!empty()) front()`,
+/// `if (empty()) construct`), but whether the +0x20 word is a count or
+/// a head pointer is NOT pinned down and the owning class is not
+/// identified, so the name is provisional — it says what callers use
+/// the answer for, which is all the firmware tells us.
+///
+/// The word is addressed by WORD INDEX (8), so the port is byte-exact
+/// +0x20 on the 32-bit target and keeps the field disjoint on a 64-bit
+/// host. It is read as a full `u32` — zero is zero in either width.
+///
+/// # Safety
+/// `container` must have at least nine readable words.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn container_is_empty(container: *const u8) -> u32 {
+    u32::from((container as *const u32).add(8).read() == 0)
+}
+
 /// Signature of the container's virtual element-slot method: given an
 /// index it returns the *address of the slot* holding the element
 /// pointer, which [`container_element_at`] then loads.
@@ -321,6 +347,31 @@ mod tests {
             let min: u32 = 0;
             let max: u32 = 0xffff_ffff;
             assert_eq!(not_equal_deref(&min, &max), 1);
+        }
+    }
+
+    #[test]
+    fn container_is_empty_reports_only_exact_zero() {
+        unsafe {
+            let mut words = [1u32; 9];
+            assert_eq!(container_is_empty(words.as_ptr() as *const u8), 0);
+            words[8] = 0;
+            assert_eq!(container_is_empty(words.as_ptr() as *const u8), 1);
+            words[8] = 2;
+            assert_eq!(container_is_empty(words.as_ptr() as *const u8), 0, "not a <= 1 test");
+            words[8] = u32::MAX;
+            assert_eq!(container_is_empty(words.as_ptr() as *const u8), 0);
+        }
+    }
+
+    #[test]
+    fn container_is_empty_ignores_the_other_words() {
+        unsafe {
+            let mut words = [0u32; 9];
+            words[8] = 7;
+            assert_eq!(container_is_empty(words.as_ptr() as *const u8), 0);
+            words[8] = 0;
+            assert_eq!(container_is_empty(words.as_ptr() as *const u8), 1);
         }
     }
 

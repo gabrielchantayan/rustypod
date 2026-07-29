@@ -9213,20 +9213,104 @@ functions:
     ghidra: FUN_083d75e0
     name: container_is_empty
     size: 16
-    module: null
-    status: identified
+    sig: "u32 container_is_empty(const u8 *container)"
+    module: cxx/templates
+    status: ported
     notes: >-
       `ldr r0,[r0,#0x20]; rsbs r0,r0,#1; movcc r0,#0; bx lr` - returns
       1 when the word at this+0x20 is zero, 0 otherwise (the ADS idiom
       for `return !x`). 9 BYTE-IDENTICAL copies, 92 bl sites -
-      0x083d75e0 15, 0x083d7610 13, 0x083d75c0 13, 0x083d7630 12,
-      0x083d75f0 10, 0x083d7620 9, 0x083d7600 8, 0x083d75d0 6,
-      0x083d75b0 6. Callers use it as an emptiness predicate
-      (0x0815a8e4 does `if (!empty()) front()`, 0x083de868 does
-      `if (empty()) construct`), but whether the word at +0x20 is a
-      count or a head pointer is NOT pinned down, so the class is not
-      identified and the name is provisional. Port once the owning
-      container is known; the body itself is trivial.
+      0x083d75e0 15 (the canonical port), 0x083d7610 13, 0x083d75c0 13,
+      0x083d7630 12, 0x083d75f0 10, 0x083d7620 9, 0x083d7600 8,
+      0x083d75d0 6, 0x083d75b0 6. Callers use it as an emptiness
+      predicate (0x0815a8e4 does `if (!empty()) front()`, 0x083de868
+      does `if (empty()) construct`), but whether the word at +0x20 is
+      a count or a head pointer is NOT pinned down, so the class is not
+      identified and the name is provisional - it says what callers use
+      the answer for, which is all the firmware tells us. The port
+      reads the field by word index (8); match.py - LLVM normalizes the
+      0/1 with clz/lsr instead of rsbs/movcc (the state_flags_contain
+      precedent).
+
+  - address: 0x083d7610
+    ghidra: FUN_083d7610
+    name: container_is_empty_alias_7610
+    size: 16
+    module: cxx/templates
+    status: ported
+    notes: >-
+      ALIAS - byte-identical to container_is_empty @ 0x083d75e0; 13 bl
+      sites. No separate port; hook to the container_is_empty symbol.
+
+  - address: 0x083d75c0
+    ghidra: FUN_083d75c0
+    name: container_is_empty_alias_75c0
+    size: 16
+    module: cxx/templates
+    status: ported
+    notes: >-
+      ALIAS - byte-identical to container_is_empty @ 0x083d75e0; 13 bl
+      sites. No separate port; hook to the container_is_empty symbol.
+
+  - address: 0x083d7630
+    ghidra: FUN_083d7630
+    name: container_is_empty_alias_7630
+    size: 16
+    module: cxx/templates
+    status: ported
+    notes: >-
+      ALIAS - byte-identical to container_is_empty @ 0x083d75e0; 12 bl
+      sites. No separate port; hook to the container_is_empty symbol.
+
+  - address: 0x083d75f0
+    ghidra: FUN_083d75f0
+    name: container_is_empty_alias_75f0
+    size: 16
+    module: cxx/templates
+    status: ported
+    notes: >-
+      ALIAS - byte-identical to container_is_empty @ 0x083d75e0; 10 bl
+      sites. No separate port; hook to the container_is_empty symbol.
+
+  - address: 0x083d7620
+    ghidra: FUN_083d7620
+    name: container_is_empty_alias_7620
+    size: 16
+    module: cxx/templates
+    status: ported
+    notes: >-
+      ALIAS - byte-identical to container_is_empty @ 0x083d75e0; 9 bl
+      sites. No separate port; hook to the container_is_empty symbol.
+
+  - address: 0x083d7600
+    ghidra: FUN_083d7600
+    name: container_is_empty_alias_7600
+    size: 16
+    module: cxx/templates
+    status: ported
+    notes: >-
+      ALIAS - byte-identical to container_is_empty @ 0x083d75e0; 8 bl
+      sites. No separate port; hook to the container_is_empty symbol.
+
+  - address: 0x083d75d0
+    ghidra: FUN_083d75d0
+    name: container_is_empty_alias_75d0
+    size: 16
+    module: cxx/templates
+    status: ported
+    notes: >-
+      ALIAS - byte-identical to container_is_empty @ 0x083d75e0; 6 bl
+      sites. No separate port; hook to the container_is_empty symbol.
+
+  - address: 0x083d75b0
+    ghidra: FUN_083d75b0
+    name: container_is_empty_alias_75b0
+    size: 16
+    module: cxx/templates
+    status: ported
+    notes: >-
+      ALIAS - byte-identical to container_is_empty @ 0x083d75e0; 6 bl
+      sites. No separate port; hook to the container_is_empty symbol.
 
   - address: 0x083d6f78
     ghidra: FUN_083d6f78
