@@ -219,33 +219,96 @@ mod pool_integration_tests {
     static mut LAST_POOL_ALLOC_TAG: usize = 0;
 
     // ---- fixed storage --------------------------------------------------
+    //
+    // Every buffer below lives in ONE low mmap rather than in `static mut`,
+    // and the reason is not tidiness. The heap descriptor stores region
+    // start addresses as u32 (the target is 32-bit), and `pool_alloc` marks
+    // uncached pointers by setting bit 31. A `static mut` in a PIE binary on
+    // Linux lands wherever ASLR puts the image — routinely above 2^32 — so
+    // those round-trips truncate and the test segfaults on roughly 60% of
+    // runs while passing every time under gdb (which disables ASLR) and on
+    // macOS. Same failure, same fix, same reason as `pool.rs`'s `arena_ptr`.
 
-    #[repr(align(8))]
-    struct Buf<const N: usize>([u8; N]);
+    /// Base of the shared low slab; every buffer is a fixed offset into it.
+    fn slab() -> *mut u8 {
+        use std::sync::OnceLock;
+        static SLAB: OnceLock<usize> = OnceLock::new();
+        *SLAB.get_or_init(|| {
+            extern "C" {
+                fn mmap(
+                    addr: usize,
+                    len: usize,
+                    prot: i32,
+                    flags: i32,
+                    fd: i32,
+                    offset: i64,
+                ) -> usize;
+            }
+            #[cfg(target_os = "macos")]
+            const MAP_PRIVATE_ANON: i32 = 0x1002;
+            #[cfg(target_os = "linux")]
+            const MAP_PRIVATE_ANON: i32 = 0x22;
+            const PROT_READ_WRITE: i32 = 3;
+            // Distinct hint from pool.rs's own arena so the two cannot
+            // contend for the same span.
+            let p = unsafe {
+                mmap(0x0900_0000, SLAB_LEN, PROT_READ_WRITE, MAP_PRIVATE_ANON, -1, 0)
+            };
+            // The requirement is bit 31 CLEAR across the whole slab, not
+            // 32-bit addressability: `pool_alloc` marks uncached pointers
+            // with bit 31 and `pool_free` strips it again, so a backing
+            // address that already has it set comes back corrupted. macOS
+            // hands out 0x1_xxxx_xxxx (bit 31 clear) whatever the hint, which
+            // is why this only ever failed on Linux, where PIE placement sets
+            // it about half the time.
+            const UNCACHED_MARK: usize = 0x8000_0000; // pool.rs's, private there
+            assert!(
+                p != usize::MAX && (p | (p + SLAB_LEN - 1)) & UNCACHED_MARK == 0,
+                "integration slab must avoid bit 31 (got {p:#x})"
+            );
+            p
+        }) as *mut u8
+    }
 
-    /// Control-struct backing (host `PoolControl` is wider than 0x418).
-    static mut CONTROL: Buf<0x1000> = Buf([0; 0x1000]);
-    /// Block memory the seeded regions cover — carved by the REAL
-    /// `heap_add_region`.
-    static mut ARENA: Buf<0x2000> = Buf([0; 0x2000]);
-    /// One real deque segment (4 elements used).
-    static mut SEG: Buf<0x500> = Buf([0; 0x500]);
-    /// Segment map (one slot).
-    static mut MAP: [*mut u8; 1] = [core::ptr::null_mut()];
-    /// Region objects, addressed by host word index like
-    /// block_region.rs: [_, start, mutex].
-    static mut REGIONS: [[usize; 3]; 4] = [[0; 3]; 4];
-    /// The mailbox blocks the kobj heap stand-in hands out (the parent
-    /// ctor makes one at +0x24, the derived ctor one at +0x78).
-    static mut MBOX_CELLS: [Mailbox; 2] =
-        [Mailbox { state: 0, id: 0 }, Mailbox { state: 0, id: 0 }];
-    /// Backing for the 0x170-byte block-manager client object.
-    static mut CLIENT_STORAGE: Buf<0x170> = Buf([0; 0x170]);
-    /// Bump arena for the pool-alloc stand-in (the alloc-engine hole).
-    static mut BUMP: Buf<0x4000> = Buf([0; 0x4000]);
+    const SLAB_LEN: usize = 0x10000;
+    const OFF_CONTROL: usize = 0x0000; // 0x1000 — host PoolControl is wider than 0x418
+    const OFF_ARENA: usize = 0x1000; // 0x2000 — block memory the seeded regions cover
+    const OFF_SEG: usize = 0x3000; // 0x500  — one real deque segment (4 elements used)
+    const OFF_MAP: usize = 0x3800; // segment map, one slot
+    const OFF_REGIONS: usize = 0x3840; // 4 x [_, start, mutex], host word index
+    const OFF_MBOX: usize = 0x3900; // 2 mailbox cells (parent +0x24, derived +0x78)
+    const OFF_CLIENT: usize = 0x3980; // 0x170 — block-manager client object
+    const OFF_MGR: usize = 0x3b00; // 0x40   — fake block manager (+0x30 = block size)
+    const OFF_BUMP: usize = 0x4000; // 0x4000 — pool-alloc stand-in arena
+
+    unsafe fn control() -> *mut u8 {
+        slab().add(OFF_CONTROL)
+    }
+    unsafe fn arena() -> *mut u8 {
+        slab().add(OFF_ARENA)
+    }
+    unsafe fn seg() -> *mut u8 {
+        slab().add(OFF_SEG)
+    }
+    unsafe fn map_slot() -> *mut *mut u8 {
+        slab().add(OFF_MAP) as *mut *mut u8
+    }
+    unsafe fn region(i: usize) -> *mut usize {
+        (slab().add(OFF_REGIONS) as *mut usize).add(i * 3)
+    }
+    unsafe fn mbox_cell(i: usize) -> *mut Mailbox {
+        (slab().add(OFF_MBOX) as *mut Mailbox).add(i)
+    }
+    unsafe fn client_storage() -> *mut u8 {
+        slab().add(OFF_CLIENT)
+    }
+    unsafe fn mgr_block() -> *mut u8 {
+        slab().add(OFF_MGR)
+    }
+    unsafe fn bump_base() -> *mut u8 {
+        slab().add(OFF_BUMP)
+    }
     static mut BUMP_AT: usize = 0;
-    /// Fake block manager (+0x30 = block size) — the real install seam.
-    static mut MGR: Buf<0x40> = Buf([0; 0x40]);
 
     const BLOCK_SIZE: u32 = 0x800;
 
@@ -253,18 +316,18 @@ mod pool_integration_tests {
 
     unsafe extern "C" fn std_new(_size: usize) -> *mut u8 {
         NEW_CALLS += 1;
-        core::ptr::addr_of_mut!(CONTROL) as *mut u8
+        control()
     }
 
     unsafe extern "C" fn std_delete(ptr: *mut u8) {
         DELETE_CALLS += 1;
-        assert_eq!(ptr, core::ptr::addr_of_mut!(CONTROL) as *mut u8);
+        assert_eq!(ptr, control());
     }
 
     unsafe extern "C" fn client_new(size: usize) -> *mut u8 {
         CLIENT_NEW_CALLS += 1;
         assert_eq!(size, 0x170, "the block-manager client object size");
-        core::ptr::addr_of_mut!(CLIENT_STORAGE) as *mut u8
+        client_storage()
     }
 
     unsafe extern "C" fn rom_create(_op: u32, slot: *mut u32) {
@@ -279,14 +342,14 @@ mod pool_integration_tests {
 
     unsafe extern "C" fn mbox_alloc(size: usize) -> *mut u8 {
         assert_eq!(size, core::mem::size_of::<Mailbox>());
-        let cell = core::ptr::addr_of_mut!(MBOX_CELLS[MBOX_ALLOCS]);
+        let cell = mbox_cell(MBOX_ALLOCS);
         MBOX_ALLOCS += 1;
         cell as *mut u8
     }
 
     unsafe extern "C" fn mbox_free(ptr: *mut u8) {
         MBOX_FREES += 1;
-        let cells = core::ptr::addr_of!(MBOX_CELLS) as usize;
+        let cells = mbox_cell(0) as usize;
         let off = ptr as usize - cells;
         assert!(off < 2 * core::mem::size_of::<Mailbox>() && off % core::mem::size_of::<Mailbox>() == 0);
     }
@@ -321,21 +384,21 @@ mod pool_integration_tests {
     /// real drain consume.
     unsafe extern "C" fn client_populate(_c: *mut u8, count: usize, dq: *mut BlockDeque) -> i32 {
         assert_eq!(count, 4, "ceil(0x2000 / 0x800)");
-        let seg = core::ptr::addr_of_mut!(SEG) as *mut u8;
-        let arena = core::ptr::addr_of_mut!(ARENA) as *mut u8;
+        let seg = seg();
+        let arena = arena();
         for i in 0..4 {
             let elem = seg.add(i * block_deque::DEQUE_ELEM_SIZE);
             // word 0: vtable pointer; word 1: region object pointer
             // (block_region's ELEM_REGION_INDEX).
             (elem as *mut *const unsafe extern "C" fn(*mut u8)).write(ELEM_VTABLE.as_ptr());
-            let region = core::ptr::addr_of_mut!(REGIONS[i]) as *mut usize;
+            let region = region(i);
             region.add(block_region::REGION_START_INDEX)
                 .write(arena.add(i * BLOCK_SIZE as usize) as usize);
             region.add(block_region::REGION_MUTEX_INDEX).write(0);
             ((elem as *mut usize).add(1)).write(region as usize);
         }
-        MAP[0] = seg;
-        let map = core::ptr::addr_of_mut!(MAP[0]);
+        map_slot().write(seg);
+        let map = map_slot();
         (*dq).begin = DequeIter {
             cur: seg,
             seg_base: seg,
@@ -363,7 +426,7 @@ mod pool_integration_tests {
         POOL_ALLOC_CALLS += 1;
         LAST_POOL_ALLOC_SIZE = size;
         LAST_POOL_ALLOC_TAG = tag;
-        let p = (core::ptr::addr_of_mut!(BUMP) as *mut u8).add(BUMP_AT + 8);
+        let p = bump_base().add(BUMP_AT + 8);
         BUMP_AT += 0x1000;
         p
     }
@@ -385,7 +448,7 @@ mod pool_integration_tests {
             (*core::ptr::addr_of_mut!(SEG_FREES)).clear();
             POOL_ALLOC_CALLS = 0;
             BUMP_AT = 0;
-            core::ptr::write_bytes(core::ptr::addr_of_mut!(CONTROL) as *mut u8, 0, 0x1000);
+            core::ptr::write_bytes(control(), 0, 0x1000);
             // Wired defaults everywhere...
             core::ptr::addr_of_mut!(pool::POOL_OPS).write(pool::DEFAULT_POOL_OPS);
             core::ptr::addr_of_mut!(block_deque::POOL_BASE_OPS)
@@ -421,7 +484,7 @@ mod pool_integration_tests {
                 ..DEFAULT_KOBJ_HOOKS
             };
             // Real install seam: the block-manager global.
-            let mgr = core::ptr::addr_of_mut!(MGR) as *mut u8;
+            let mgr = mgr_block();
             (mgr.add(crate::heap::block_mgr::BLOCK_SIZE_OFFSET) as *mut u32).write(BLOCK_SIZE);
             crate::heap::block_mgr::BLOCK_MANAGER = mgr;
         }
@@ -468,7 +531,7 @@ mod pool_integration_tests {
             assert_eq!(ELEM_DTORS, 0, "deque never got elements");
             // The attach reached the client ctor before refusing.
             assert_eq!(CLIENT_NEW_CALLS, 1, "one 0x170-byte client attempt");
-            let base = core::ptr::addr_of_mut!(CONTROL) as *mut PoolBase;
+            let base = control() as *mut PoolBase;
             assert!((*base).client_cache.is_null(), "nothing memoized");
             assert_eq!(
                 (*base).node.name,
@@ -493,13 +556,13 @@ mod pool_integration_tests {
             install_client();
             let pool = pool::pool_create(0x2000, NAME.as_ptr());
             assert!(!pool.is_null(), "populate stand-in makes the fill succeed");
-            assert_eq!(pool as *mut u8, core::ptr::addr_of_mut!(CONTROL) as *mut u8);
+            assert_eq!(pool as *mut u8, control());
 
             // The REAL seed walk fed the REAL heap_add_region: 4 regions
             // of BLOCK_SIZE carved out of the arena.
             let desc = core::ptr::addr_of_mut!((*pool).heap);
             assert_eq!((*desc).region_count, 4);
-            let arena = core::ptr::addr_of!(ARENA) as usize;
+            let arena = arena() as usize;
             let carved = BLOCK_SIZE as usize - 16; // aligned start: size - 16
             assert_eq!((*desc).total_bytes as usize, 4 * carved);
             assert_eq!((*desc).free_bytes as usize, 4 * carved, "all blocks free");
@@ -533,8 +596,8 @@ mod pool_integration_tests {
             assert_eq!(
                 *core::ptr::addr_of!(SEG_FREES),
                 std::vec![
-                    core::ptr::addr_of!(SEG) as usize,
-                    core::ptr::addr_of!(MAP) as usize
+                    seg() as usize,
+                    map_slot() as usize
                 ],
                 "segment then map, like the original drain"
             );
