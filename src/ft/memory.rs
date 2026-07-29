@@ -175,7 +175,10 @@ pub(crate) mod test_memory {
 
     pub(crate) const ARENA: usize = 4096;
 
-    static mut ARENA_BYTES: [u8; ARENA] = [0; ARENA];
+    /// Word-aligned so records with pointer fields (FtStream's
+    /// `memory`) are aligned on a 64-bit host regardless of where the
+    /// linker parks the arena.
+    static mut ARENA_BYTES: [usize; ARENA / 8] = [0; ARENA / 8];
     static mut ARENA_USED: usize = 0;
     /// When set, `alloc` refuses every request (drives the
     /// `FT_Err_Out_Of_Memory` path).
