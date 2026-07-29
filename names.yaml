@@ -9788,6 +9788,36 @@ functions:
       instead of predicated pops; the loop core (ldr +0x0c, 12-byte
       stride, bl exprHeight, ldr +0x00, cmp/bgt) matches exactly.
 
+  - address: 0x082d2a8c
+    ghidra: FUN_082d2a8c
+    name: select_height
+    size: 112
+    sig: "void select_height(Select *select, int *height)"
+    module: sqlite/select_height
+    status: ported
+    vars: {param_1: select, param_2: height}
+    notes: >-
+      SQLite 3.5.x's heightOfSelect. Called from expr_set_height @
+      0x083788fc (once) and sqlite3SelectExprHeight @ 0x08383dd0 (once).
+      NULL-safe fold over a compound-select chain: while the select is
+      non-NULL (movs/ldmiaeq early return), fold its clause expressions
+      p_where +0x10, p_having +0x18, p_limit +0x2c, p_offset +0x30
+      through exprHeight @ 0x082d2a34 (ported as expr_height_of, called
+      directly) and its lists p_elist +0x00, p_group_by +0x14,
+      p_order_by +0x1c through heightOfExprList @ 0x082d2a4c (ported as
+      expr_list_height, called directly) - the exact field order of the
+      3.5.x source - then tail-loop onto p_prior +0x20 (b 0x082d2a90
+      back to the NULL check). Pins the Select layout used by this fold:
+      p_elist +0x00, p_where +0x10, p_group_by +0x14, p_having +0x18,
+      p_order_by +0x1c, p_prior +0x20, p_limit +0x2c, p_offset +0x30.
+      Wired as the default of the SQLITE_SELECT_HEIGHT_FOLD dispatch
+      static in sqlite/expr_height.rs, replacing the documented no-op
+      stub (host tests still swap the slot for recording mocks) - with
+      this port all three expr-height fold helpers are real ports. The
+      match.py diff is LLVM frame setup and a branchy top-of-loop NULL
+      check instead of predicated pops; the fold core (same offsets,
+      same clause/list order, the ldr +0x20 tail loop) matches exactly.
+
   - address: 0x083788fc
     ghidra: FUN_083788fc
     name: expr_set_height
@@ -9804,16 +9834,13 @@ functions:
       exprHeight @ 0x082d2a34 (ported as expr_height_of, see its
       entry), p_list +0x10 via heightOfExprList
       @ 0x082d2a4c (ported as expr_list_height, see its entry), p_select +0x38 via
-      heightOfSelect @ 0x082d2a8c (identified, 112 B: folds p_where
-      +0x10, p_having +0x18, p_limit +0x2c, p_offset +0x30, lists
-      p_elist +0x00/p_group_by +0x14/p_order_by +0x1c, then tail-loops
-      onto p_prior +0x20) - then stores max + 1 into n_height +0x40
-      (plain wrapping add). One fold helper remains unported, so it is a
-      dispatch static (SQLITE_SELECT_HEIGHT_FOLD) whose documented
-      default stub is a no-op - exactly the original's NULL-child
-      behavior; the operand slot SQLITE_EXPR_HEIGHT_FOLD and the list
-      slot SQLITE_EXPR_LIST_HEIGHT_FOLD keep the same dispatch shape but
-      default to the ported expr_height_of and expr_list_height. The
+      heightOfSelect @ 0x082d2a8c (ported as select_height, see its
+      entry) - then stores max + 1 into n_height +0x40
+      (plain wrapping add). All three fold helpers are ported; the call
+      sites keep the dispatch-static shape (SQLITE_EXPR_HEIGHT_FOLD,
+      SQLITE_EXPR_LIST_HEIGHT_FOLD, SQLITE_SELECT_HEIGHT_FOLD -
+      defaults now the real ports, the documented no-op stub retained
+      for host tests). The
       match.py diff is
       exactly that deviation: blx
       through the loaded slots instead of direct bl's, plus LLVM frame
