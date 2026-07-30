@@ -1,14 +1,17 @@
-//! 16.16 fixed-point and widening integer multiply @ 0x080e9878 / 0x080f0fa4.
+//! 16.16 fixed-point and widening integer multiply @ 0x080e9878 / 0x080f0fa4,
+//! plus the software count-leading-zeros @ 0x0824980c that feeds them.
 //!
 //! Two pure leaf helpers built on the ARMv5TE `smull` (signed 32x32 -> 64)
-//! instruction. Sizes from decomp/functions.csv; call-site counts from
-//! decoding every `b`/`bl` word in osos.dec (osos.asm drops lines):
+//! instruction, and one bit-scan leaf. Sizes from decomp/functions.csv;
+//! call-site counts from decoding every `b`/`bl` word in osos.dec
+//! (osos.asm drops lines):
 //!
 //! - `fixed16_mul` — `FUN_080e9878` @ 0x080e9878 (20 bytes; 94 call sites).
 //! - `mul_wide_i64` — `FUN_080f0fa4` @ 0x080f0fa4 (12 bytes; 49 call sites).
+//! - `clz_31` — `FUN_0824980c` @ 0x0824980c (68 bytes; 3 call sites).
 //!
-//! Both are leaves and touch no hardware, so host tests against `i64`
-//! arithmetic prove complete behavior.
+//! All are leaves and touch no hardware, so host tests against `i64` /
+//! `u32::leading_zeros` arithmetic prove complete behavior.
 //!
 //! `fixed16_mul` is the multiply of retailOS's own Q16.16 fixed-point
 //! arithmetic — *not* FreeType's. FreeType's `FT_MulFix`/`ft_muldiv` (see
@@ -37,6 +40,53 @@
 #[cfg_attr(target_os = "none", no_mangle)]
 pub extern "C" fn fixed16_mul(a: i32, b: i32) -> i32 {
     (((a as i64) * (b as i64)) >> 16) as i32
+}
+
+/// clz_31 — original: `FUN_0824980c` @ 0x0824980c (68 bytes).
+///
+/// Software count-leading-zeros for a 32-bit word, by binary search over
+/// half-ranges: start with the answer 31, then for the masks 0xffff0000,
+/// 0xff00, 0xf0, 0xc, 0x2 in turn, if the value has any bit in the upper
+/// half of the current window subtract that half's width from the answer
+/// and shift the value down. ARMv5TE has a `clz` instruction, but ADS
+/// 1.0.1 emitted this branchy `movs`/`movne`/`tst`/`subne` sequence —
+/// the target predates reliable `clz` codegen and the routine also runs
+/// on the zero input where `clz` is the identity anyway.
+///
+/// The zero-input quirk: a hardware `clz` of 0 yields 32; this routine
+/// yields 31, because the first `movs r2, r0, lsr #0x10` test fails and
+/// every subsequent `tst` fails, leaving the initial 0x1f untouched.
+/// Callers rely on it — `fixed16_rsqrt` @ 0x08076154 computes
+/// `idx = (x >> (28 - lz)) & 7` and `e = lz - 16` from the result, where
+/// a 32 would break the seed-table index. For every nonzero input the
+/// result equals `x.leading_zeros()`.
+///
+/// 3 bl call sites: 0x08076170 (`fixed16_rsqrt`), 0x082417e8 and
+/// 0x08242530.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn clz_31(x: u32) -> u32 {
+    let mut lz = 31u32;
+    let mut v = x;
+    if v >> 16 != 0 {
+        lz = 15;
+        v >>= 16;
+    }
+    if v & 0xff00 != 0 {
+        lz -= 8;
+        v >>= 8;
+    }
+    if v & 0xf0 != 0 {
+        lz -= 4;
+        v >>= 4;
+    }
+    if v & 0xc != 0 {
+        lz -= 2;
+        v >>= 2;
+    }
+    if v & 0x2 != 0 {
+        lz -= 1;
+    }
+    lz
 }
 
 /// mul_wide_i64 — original: `FUN_080f0fa4` @ 0x080f0fa4 (12 bytes).
@@ -196,6 +246,85 @@ mod tests {
         for a in [-0x7fff_0000i32, -1, 0, 1, 0x1234, 0x7fff_0000] {
             for b in [-0x10_0000i32, -3, 0, 3, 0x10_0000, 0x7fff_ffff] {
                 assert_eq!(fixed16_mul(a, b), (mul_wide_i64(a, b) >> 16) as i32);
+            }
+        }
+    }
+
+    /// The zero-input edge case that names the function: 31, not the 32
+    /// a hardware `clz` (or `u32::leading_zeros`) would give.
+    #[test]
+    fn clz_31_zero_input_returns_31_not_32() {
+        assert_eq!(clz_31(0), 31);
+        assert_ne!(clz_31(0), 0u32.leading_zeros());
+    }
+
+    /// Every boundary of the binary search: each mask edge, each
+    /// single-bit value, and the range extremes.
+    #[test]
+    fn clz_31_single_bits_and_mask_edges() {
+        for bit in 0..32 {
+            assert_eq!(clz_31(1u32 << bit), 31 - bit, "bit {bit}");
+        }
+        assert_eq!(clz_31(0x8000_0000), 0);
+        assert_eq!(clz_31(0xffff_ffff), 0);
+        assert_eq!(clz_31(0x0001_0000), 15);
+        assert_eq!(clz_31(0x0000_ffff), 16);
+        assert_eq!(clz_31(0x0000_ff00), 16);
+        assert_eq!(clz_31(0x0000_00ff), 24);
+        assert_eq!(clz_31(0x0000_00f0), 24);
+        assert_eq!(clz_31(0x0000_000c), 28);
+        assert_eq!(clz_31(0x0000_0002), 30);
+        assert_eq!(clz_31(0x0000_0001), 31);
+    }
+
+    /// For all nonzero inputs the result is exactly
+    /// `u32::leading_zeros`; zero is the lone exception. Sweep a dense
+    /// low range, every power of two and its neighbors, and patterned
+    /// values crossing each search boundary.
+    #[test]
+    fn clz_31_matches_leading_zeros_reference() {
+        let mut check = |x: u32| {
+            let want = if x == 0 { 31 } else { x.leading_zeros() };
+            assert_eq!(clz_31(x), want, "x={x:#010x}");
+        };
+        for x in 0..=0x1_0000u32 {
+            check(x);
+        }
+        for bit in 0..32 {
+            let p = 1u32 << bit;
+            check(p.wrapping_sub(1));
+            check(p);
+            check(p + 1);
+            check(p | (p >> 1));
+            check(0xffff_ffffu32 << bit);
+        }
+        for &x in &[
+            0x1234_5678u32,
+            0x8765_4321,
+            0x5555_5555,
+            0xaaaa_aaaa,
+            0x00ff_ff00,
+            0x0f0f_0f0f,
+            0xf0f0_f0f0,
+            0x7fff_ffff,
+        ] {
+            check(x);
+        }
+    }
+
+    /// The semantics `fixed16_rsqrt` @ 0x08076154 depends on: for every
+    /// input that reaches it (`x != 0` returns early there) the seed
+    /// index `(x >> (28 - lz)) & 7` stays in 0..=7 — a lz of 32 would
+    /// wrap the shift amount. (For x < 8 the shift amount is negative;
+    /// ARM register-shift semantics yield 0, i.e. index 0, which is in
+    /// range too.)
+    #[test]
+    fn clz_31_keeps_rsqrt_seed_index_in_range() {
+        for x in 1..=0x1_0000u32 {
+            let lz = clz_31(x);
+            if lz <= 28 {
+                let idx = (x >> (28 - lz)) & 7;
+                assert!(idx <= 7, "x={x:#x} idx={idx}");
             }
         }
     }

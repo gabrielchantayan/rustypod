@@ -6294,6 +6294,32 @@ functions:
       the region (the floor hypothesis above then verifies or falsifies
       in one lookup).
 
+  - address: 0x0824980c
+    ghidra: FUN_0824980c
+    name: clz_31
+    size: 68
+    sig: "u32 clz_31(u32 x)"
+    module: util/fixed
+    status: ported
+    vars: {param_1: x, iVar1: lz}
+    notes: >-
+      Software count-leading-zeros by branchless binary search over
+      half-ranges: lz starts at 31, then for the masks 0xffff0000,
+      0xff00, 0xf0, 0xc, 0x2 in turn, if the value has a bit in the
+      upper half of the current window lz loses that half's width and
+      the value shifts down (movs/movne/tst/subne chains - ADS 1.0.1
+      predates reliable ARMv5TE clz codegen). The zero-input quirk
+      names it: a hardware clz of 0 yields 32, this yields 31, because
+      the first movs test fails and the initial 0x1f survives; callers
+      rely on it (fixed16_rsqrt @ 0x08076154 computes
+      idx = (x >> (28 - lz)) & 7 and e = lz - 16, where 32 would wrap
+      the shift). For every nonzero input the result equals
+      x.leading_zeros(). 3 bl call sites (0x08076170 in fixed16_rsqrt,
+      0x082417e8, 0x08242530). match.py: structural match - same
+      search, LLVM renders the 0xff00/0xf0 masks as cmp #256/#16 and
+      folds the final bit-1 step into lsl #30 + add asr #31; no loops,
+      no calls.
+
   # --- Batch: the nine-array element table (app/element_table) ---
   # FUN_08105ffc lazily builds one 0xd8-byte object holding nine 0x18-byte
   # container sub-objects (9 * 0x18 = 0xd8), each constructed with
