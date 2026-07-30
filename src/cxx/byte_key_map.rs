@@ -41,9 +41,11 @@
 //! node word at result+0 and the flag byte at result+4, which is the
 //! whole contract the find relies on. The comparator, the iterator
 //! equality and the key accessor @ 0x083b6a44 are one-instruction
-//! leaves, inlined into the port; only `_M_insert` @ 0x083b8844 (476
-//! bytes, with its own allocator/rotation dependencies) is not ported
-//! and rides the [`BYTE_KEY_TREE_OPS`] dispatch slot.
+//! leaves, inlined into the port; `_M_insert` @ 0x083b8844 is ported
+//! below as [`byte_key_tree_insert_node`], the shipped default of the
+//! [`BYTE_KEY_TREE_OPS`] dispatch slot, with its pool allocator @
+//! 0x083b7f40 riding the [`BYTE_KEY_ALLOC_OPS`] slot (the allocator
+//! itself is not yet ported).
 //!
 //! Deviations:
 //! - The pair's three padding bytes at +1..+4 are zeroed; the original
@@ -53,10 +55,12 @@
 //! - 0x083b867c is dispatched through [`BYTE_KEY_MAP_OPS`], whose
 //!   shipped default is the port [`byte_key_tree_insert_unique`] in
 //!   this module; the find's tests still install stubs/mocks through
-//!   the slot. With the default slot and the default `BYTE_KEY_TREE_OPS`
-//!   stub (no node linker wired), an insertion reports a null fresh
-//!   node and the find returns 0x14 — install `BYTE_KEY_TREE_OPS`
-//!   before real use.
+//!   the slot. The tree insert in turn dispatches `_M_insert` through
+//!   [`BYTE_KEY_TREE_OPS`] (shipped default: the port
+//!   [`byte_key_tree_insert_node`]), which allocates through
+//!   [`BYTE_KEY_ALLOC_OPS`] — with its default stub (no node allocator
+//!   wired) an insertion reports a null fresh node and the find
+//!   returns 0x14 — install `BYTE_KEY_ALLOC_OPS` before real use.
 //! - The final `node + 0x14` is a wrapping add (the original's plain
 //!   `add r0, r0, #0x14`); with a real node installed the value is
 //!   identical.
@@ -288,10 +292,11 @@ unsafe fn rb_tree_predecessor(
     parent
 }
 
-/// Indirect dispatch for the not-yet-ported node linker `_M_insert` @
-/// 0x083b8844 (476 bytes; allocates a node @ 0x083b7f40, copies the
-/// pair, links it under `parent` and rebalances via the rotations @
-/// 0x083b8090 / 0x083b80e4). The `PairHeaderOps` precedent in
+/// Indirect dispatch for the node linker `_M_insert` @ 0x083b8844
+/// (480 bytes; allocates a node @ 0x083b7f40, copies the pair, links
+/// it under `parent` and rebalances via the rotations @ 0x083b8090 /
+/// 0x083b80e4). Now ported as [`byte_key_tree_insert_node`] below, the
+/// shipped default of the slot. The `PairHeaderOps` precedent in
 /// `cxx/pair_header.rs`.
 #[derive(Clone, Copy)]
 pub struct ByteKeyTreeOps {
@@ -299,9 +304,9 @@ pub struct ByteKeyTreeOps {
     /// key): links a fresh node carrying `key` under `parent` (as its
     /// left child when `insert_position` is nonzero, else by comparing
     /// the key pair against `parent`'s), rebalances, and writes the new
-    /// node pointer at `result + 0`. This port always calls it with
-    /// `insert_position == 0`, matching the original (r2 = the null
-    /// child the descent stopped at).
+    /// node pointer at `result + 0`. The insert-unique port always
+    /// calls it with `insert_position == 0`, matching the original
+    /// (r2 = the null child the descent stopped at).
     pub insert_node: unsafe extern "C" fn(
         result: *mut *mut u8,
         map: *mut ByteKeyMap,
@@ -311,10 +316,11 @@ pub struct ByteKeyTreeOps {
     ),
 }
 
-/// Default stub: no node linker wired, so report a null fresh node —
-/// an insert then stores null at result+0 with the flag set, and the
-/// find returns 0x14. On real hardware BYTE_KEY_TREE_OPS must be
-/// installed (by the ported 0x083b8844) before an insertion can run.
+/// Default stub from before 0x083b8844 was ported: report a null fresh
+/// node — an insert then stores null at result+0 with the flag set,
+/// and the find returns 0x14. The shipped default is now the port
+/// below; retained for the host tests.
+#[allow(dead_code)] // test-only since 0x083b8844 was ported
 unsafe extern "C" fn missing_insert_node(
     result: *mut *mut u8,
     _map: *mut ByteKeyMap,
@@ -325,11 +331,48 @@ unsafe extern "C" fn missing_insert_node(
     result.write(core::ptr::null_mut());
 }
 
-/// The active node-linker slot. Defaults to the documented stub above;
-/// replaced by host tests (mocks) and eventually by the ported
-/// 0x083b8844. Written once at init on target; tests serialize access.
+/// The active node-linker slot. The shipped default is the port
+/// [`byte_key_tree_insert_node`] below; host tests install recording
+/// mocks (and the documented stub above) through the slot. Written
+/// once at init on target; tests serialize access.
 pub static mut BYTE_KEY_TREE_OPS: ByteKeyTreeOps = ByteKeyTreeOps {
-    insert_node: missing_insert_node,
+    insert_node: byte_key_tree_insert_node,
+};
+
+/// Indirect dispatch for the tree's node allocator @ 0x083b7f40 (176
+/// bytes; a 0x20-byte-node pool with a free list threaded through
+/// node+0xc and 1.5x growth chunks from `operator new` @ 0x08266c70 —
+/// itself a throwing wrapper over `FUN_082aadd4`). Not yet ported; the
+/// ported [`byte_key_tree_insert_node`] rides this slot.
+#[derive(Clone, Copy)]
+pub struct ByteKeyTreeAllocOps {
+    /// Node allocator @ 0x083b7f40(map) -> node: hands out a fresh
+    /// 0x20-byte tree node with the color byte at +0 set to 0 (red),
+    /// parent/left/right at +4/+8/+0xc nulled, and the key pair at
+    /// +0x10 uninitialised (the caller copy-constructs it). Never
+    /// returns null in the original — a failed `operator new` throws
+    /// (abort path @ 0x08266abc), so `_M_insert` has no null check.
+    pub allocate_node:
+        unsafe extern "C" fn(map: *mut ByteKeyMap) -> *mut ByteKeyTreeNode,
+}
+
+/// Default stub: no allocator wired, so report null — the ported
+/// `_M_insert` then writes a null fresh node at its result and returns
+/// (a documented deviation; the original cannot fail here). On real
+/// hardware BYTE_KEY_ALLOC_OPS must be installed before an insertion
+/// can run.
+unsafe extern "C" fn missing_allocate_node(
+    _map: *mut ByteKeyMap,
+) -> *mut ByteKeyTreeNode {
+    core::ptr::null_mut()
+}
+
+/// The active node-allocator slot. Defaults to the documented stub
+/// above; replaced by host tests (arena mocks) and eventually by the
+/// ported 0x083b7f40. Written once at init on target; tests serialize
+/// access.
+pub static mut BYTE_KEY_ALLOC_OPS: ByteKeyTreeAllocOps = ByteKeyTreeAllocOps {
+    allocate_node: missing_allocate_node,
 };
 
 /// Links a fresh node for `key` under `parent` through the
@@ -380,9 +423,11 @@ unsafe fn link_fresh_node(
 ///   iterator-equality helper @ 0x083cf740 (one-word compare) and the
 ///   key accessor @ 0x083b6a44 (`node + 0x10`) are one-/few-instruction
 ///   leaves and are inlined; the original reaches them by `bl`.
-/// - `_M_insert` @ 0x083b8844 is not yet ported and is dispatched
-///   through the [`BYTE_KEY_TREE_OPS`] slot (default stub reports a
-///   null fresh node — see its doc).
+/// - `_M_insert` @ 0x083b8844 is ported as
+///   [`byte_key_tree_insert_node`], the shipped default of the
+///   [`BYTE_KEY_TREE_OPS`] slot; its allocator rides
+///   [`BYTE_KEY_ALLOC_OPS`] (default stub reports a null fresh node —
+///   see its doc).
 /// - The original zeroes two stack result words per descent step
 ///   (`str r10, [sp,#0xc]/[sp,#0x10]` inside the loop) — dead scratch
 ///   stores, dropped here.
@@ -430,6 +475,223 @@ pub unsafe extern "C" fn byte_key_tree_insert_unique(
         return;
     }
     link_fresh_node(result, map, parent, key);
+}
+
+// ---------------------------------------------------------------------------
+// The node linker `_M_insert` itself (@ 0x083b8844), with the two
+// rotations it rebalances through (@ 0x083b8090 / 0x083b80e4).
+// ---------------------------------------------------------------------------
+
+/// byte_key_tree_rotate_left — original: `FUN_083b8090` @ 0x083b8090
+/// (84 bytes; `_Rb_tree_rotate_left`, called by `_M_insert` and the
+/// erase rebalance).
+///
+/// Left rotation around `node`: `right` takes `node`'s place (under
+/// the root pointer at header+4 when `node` is the root, else under
+/// `node`'s parent on the side `node` hangs from), `node` adopts
+/// `right`'s left subtree as its right child (re-parenting it when
+/// non-null) and becomes `right`'s left child.
+#[inline(never)]
+unsafe fn byte_key_tree_rotate_left(
+    tree: *mut ByteKeyTree,
+    node: *mut ByteKeyTreeNode,
+) {
+    let right = (*node).right;
+    (*node).right = (*right).left;
+    if !(*right).left.is_null() {
+        (*(*right).left).parent = node;
+    }
+    (*right).parent = (*node).parent;
+    let root_slot = core::ptr::addr_of_mut!((*(*tree).header).parent);
+    if *root_slot == node {
+        *root_slot = right;
+    } else {
+        let parent = (*node).parent;
+        if (*parent).left == node {
+            (*parent).left = right;
+        } else {
+            (*parent).right = right;
+        }
+    }
+    (*right).left = node;
+    (*node).parent = right;
+}
+
+/// byte_key_tree_rotate_right — original: `FUN_083b80e4` @ 0x083b80e4
+/// (84 bytes; `_Rb_tree_rotate_right`, the mirror of 0x083b8090).
+///
+/// Right rotation around `node`: `left` takes `node`'s place (root
+/// pointer first, else the matching side of `node`'s parent), `node`
+/// adopts `left`'s right subtree as its left child and becomes
+/// `left`'s right child.
+#[inline(never)]
+unsafe fn byte_key_tree_rotate_right(
+    tree: *mut ByteKeyTree,
+    node: *mut ByteKeyTreeNode,
+) {
+    let left = (*node).left;
+    (*node).left = (*left).right;
+    if !(*left).right.is_null() {
+        (*(*left).right).parent = node;
+    }
+    (*left).parent = (*node).parent;
+    let root_slot = core::ptr::addr_of_mut!((*(*tree).header).parent);
+    if *root_slot == node {
+        *root_slot = left;
+    } else {
+        let parent = (*node).parent;
+        if (*parent).right == node {
+            (*parent).right = left;
+        } else {
+            (*parent).left = left;
+        }
+    }
+    (*left).right = node;
+    (*node).parent = left;
+}
+
+/// byte_key_tree_insert_node — original: `FUN_083b8844` @ 0x083b8844
+/// (480 bytes; libstdc++ `_Rb_tree::_M_insert` for the byte-keyed map
+/// family, the node-link + rebalance path — its caller
+/// [`byte_key_tree_insert_unique`] @ 0x083b867c is the ported
+/// insert-unique above).
+///
+/// Allocates a fresh 0x20-byte node through the pool allocator @
+/// 0x083b7f40 (dispatched via [`BYTE_KEY_ALLOC_OPS`]; it initialises
+/// color = 0/red and nulls the three links), copy-constructs the
+/// 16-byte pair into node+0x10 and bumps the node count at map+0x14.
+/// Linking: when `parent` is the header (map+0x10) or
+/// `insert_position` is nonzero, the node becomes `parent`'s left
+/// child (+8) — a header parent also takes it as root (header+4) and
+/// rightmost (header+0xc), otherwise the leftmost pointer (header+8)
+/// follows when `parent` was the leftmost. Otherwise the pair's key is
+/// compared against `parent`'s through the byte comparator @
+/// 0x083d73bc: less-than links left (same leftmost follow-up), else
+/// links right (+0xc) with the rightmost pointer following when
+/// `parent` was the rightmost. The node is then re-parented to
+/// `parent` and rebalanced exactly like
+/// `_Rb_tree_rebalance_for_insert`: while the node is not the root and
+/// its parent is red (color 0), a red uncle recolors parent/uncle
+/// black (1) and grandparent red (0) and ascends two levels; a
+/// black/absent uncle rotates — inner child first rotates the parent
+/// down (left case: rotate_left @ 0x083b8090 on the parent, then
+/// rotate_right @ 0x083b80e4 on the grandparent; mirrored on the
+/// right) — then parent black, grandparent red. The loop exits with
+/// the root recolored black and the new node written at `result + 0`.
+///
+/// Deviations:
+/// - The allocator never returns null in the original (`operator new`
+///   throws, abort @ 0x08266abc), so the original has no null check;
+///   with the default [`BYTE_KEY_ALLOC_OPS`] stub this port writes a
+///   null fresh node at `result + 0` and returns without touching the
+///   tree (the stub's documented contract).
+/// - The placement-new guard `node + 0x10 != null` around the pair
+///   copy can only fail for a null node (handled above) and is
+///   dropped.
+/// - The comparator @ 0x083d73bc (unsigned byte less-than) is a
+///   one-instruction leaf, inlined; the rotations are kept as separate
+///   `#[inline(never)]` functions to preserve the original's `bl`
+///   boundaries. The original passes dead extra register arguments to
+///   the rotations (r2-r5 garbage at one site); dropped.
+///
+/// # Safety
+/// `result` must point at a writable word, `map` at a live container
+/// matching the scouted [`ByteKeyTree`] layout, `parent` at a live
+/// node (or the header), and `key` at a readable 16-byte pair. The
+/// installed `allocate_node` must honour the 0x083b7f40 contract
+/// (fresh node: color 0, links null) or return null to abort.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn byte_key_tree_insert_node(
+    result: *mut *mut u8,
+    map: *mut ByteKeyMap,
+    insert_position: *mut u8,
+    parent: *mut u8,
+    key: *const ByteKeyPair,
+) {
+    let tree = map.cast::<ByteKeyTree>();
+    // Reads the fn-pointer field directly rather than through a
+    // whole-table read (the timer_schedule_shim gotcha).
+    let allocate_node =
+        core::ptr::addr_of!(BYTE_KEY_ALLOC_OPS.allocate_node).read_volatile();
+    let node = allocate_node(map);
+    if node.is_null() {
+        // Unreachable in the original (operator new throws); only the
+        // documented stub lands here.
+        result.write(core::ptr::null_mut());
+        return;
+    }
+    let fresh = node;
+    (*node).key = core::ptr::read(key);
+    (*tree).node_count = (*tree).node_count.wrapping_add(1);
+
+    let header = (*tree).header;
+    let parent_node = parent.cast::<ByteKeyTreeNode>();
+    let mut link_left = parent_node == header || !insert_position.is_null();
+    if !link_left {
+        link_left = byte_key_less(key, core::ptr::addr_of!((*parent_node).key));
+    }
+    if link_left {
+        (*parent_node).left = node;
+        if parent_node == header {
+            (*header).parent = node; // root
+            (*header).right = node; // rightmost
+        } else if (*header).left == parent_node {
+            (*header).left = node; // new leftmost
+        }
+    } else {
+        (*parent_node).right = node;
+        if (*header).right == parent_node {
+            (*header).right = node; // new rightmost
+        }
+    }
+    (*node).parent = parent_node;
+
+    // Rebalance (0 = red, 1 = black): ascend while the parent is red.
+    let mut node = node;
+    while (*header).parent != node && (*(*node).parent).color == 0 {
+        let parent = (*node).parent;
+        let grandparent = (*parent).parent;
+        if parent == (*grandparent).left {
+            let uncle = (*grandparent).right;
+            if !uncle.is_null() && (*uncle).color == 0 {
+                (*parent).color = 1;
+                (*uncle).color = 1;
+                (*grandparent).color = 0;
+                node = grandparent;
+            } else {
+                if (*parent).right == node {
+                    byte_key_tree_rotate_left(tree, parent);
+                    node = parent;
+                }
+                let parent = (*node).parent;
+                (*parent).color = 1;
+                let grandparent = (*parent).parent;
+                (*grandparent).color = 0;
+                byte_key_tree_rotate_right(tree, grandparent);
+            }
+        } else {
+            let uncle = (*grandparent).left;
+            if !uncle.is_null() && (*uncle).color == 0 {
+                (*parent).color = 1;
+                (*uncle).color = 1;
+                (*grandparent).color = 0;
+                node = grandparent;
+            } else {
+                if (*parent).left == node {
+                    byte_key_tree_rotate_right(tree, parent);
+                    node = parent;
+                }
+                let parent = (*node).parent;
+                (*parent).color = 1;
+                let grandparent = (*parent).parent;
+                (*grandparent).color = 0;
+                byte_key_tree_rotate_left(tree, grandparent);
+            }
+        }
+    }
+    (*(*header).parent).color = 1;
+    result.write(fresh.cast::<u8>());
 }
 
 #[cfg(test)]
@@ -1024,5 +1286,407 @@ mod tests {
             assert_eq!(core::ptr::addr_of!(INSERT_CALLS).read_volatile(), 1);
             assert_eq!(second, first);
         }
+    }
+
+    // --- byte_key_tree_insert_node (@ 0x083b8844) -------------------
+
+    struct AllocOpsGuard;
+
+    impl AllocOpsGuard {
+        fn install(ops: ByteKeyTreeAllocOps) -> Self {
+            unsafe {
+                core::ptr::addr_of_mut!(BYTE_KEY_ALLOC_OPS).write_volatile(ops);
+            }
+            AllocOpsGuard
+        }
+    }
+
+    impl Drop for AllocOpsGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(BYTE_KEY_ALLOC_OPS).write_volatile(
+                    ByteKeyTreeAllocOps {
+                        allocate_node: missing_allocate_node,
+                    },
+                );
+            }
+        }
+    }
+
+    /// Arena backing the mock allocator; boxes stay put while a test's
+    /// tree is live and are freed by `free_arena`.
+    static mut ARENA: Vec<*mut ByteKeyTreeNode> = Vec::new();
+
+    /// Mock for the pool allocator @ 0x083b7f40: hands out a fresh
+    /// node honouring its contract — color 0 (red), links null, pair
+    /// uninitialised (zeroed here; nothing reads it before the copy).
+    unsafe extern "C" fn arena_allocate_node(
+        _map: *mut ByteKeyMap,
+    ) -> *mut ByteKeyTreeNode {
+        let node = std::boxed::Box::into_raw(std::boxed::Box::new(ByteKeyTreeNode {
+            color: 0,
+            _pad: [0; 3],
+            parent: core::ptr::null_mut(),
+            left: core::ptr::null_mut(),
+            right: core::ptr::null_mut(),
+            key: key_pair(0),
+        }));
+        (*core::ptr::addr_of_mut!(ARENA)).push(node);
+        node
+    }
+
+    fn install_arena_allocator() -> AllocOpsGuard {
+        AllocOpsGuard::install(ByteKeyTreeAllocOps {
+            allocate_node: arena_allocate_node,
+        })
+    }
+
+    fn free_arena() {
+        unsafe {
+            for node in (*core::ptr::addr_of_mut!(ARENA)).drain(..) {
+                drop(std::boxed::Box::from_raw(node));
+            }
+        }
+    }
+
+    fn arena_len() -> usize {
+        unsafe { (*core::ptr::addr_of!(ARENA)).len() }
+    }
+
+    /// Red-black + BST + count validator for a tree under `header`:
+    /// BST ordering by strict unsigned key bounds, no red node (0)
+    /// with a red child, equal black height on every null path, and
+    /// exactly `expected` nodes. Returns the sorted in-order keys.
+    unsafe fn validate_tree(
+        header: *mut ByteKeyTreeNode,
+        expected: usize,
+    ) -> Vec<u8> {
+        fn walk(
+            node: *mut ByteKeyTreeNode,
+            lo: Option<u8>,
+            hi: Option<u8>,
+            keys: &mut Vec<u8>,
+            count: &mut usize,
+        ) -> usize {
+            if node.is_null() {
+                return 1; // null leaves are black
+            }
+            unsafe {
+                let key = (*node).key.key;
+                if let Some(lo) = lo {
+                    assert!(key > lo, "BST lower bound violated at {key}");
+                }
+                if let Some(hi) = hi {
+                    assert!(key < hi, "BST upper bound violated at {key}");
+                }
+                let red = (*node).color == 0;
+                if red {
+                    for child in [(*node).left, (*node).right] {
+                        if !child.is_null() {
+                            assert_eq!((*child).color, 1, "red node with red child");
+                        }
+                    }
+                    assert_eq!((*(*node).parent).color, 1, "red node with red parent");
+                }
+                *count += 1;
+                let left_height = walk((*node).left, lo, Some(key), keys, count);
+                keys.push(key);
+                let right_height = walk((*node).right, Some(key), hi, keys, count);
+                assert_eq!(left_height, right_height, "black height mismatch");
+                left_height + usize::from(!red)
+            }
+        }
+        let mut keys = Vec::new();
+        let mut count = 0;
+        let root = (*header).parent;
+        assert!(!root.is_null());
+        assert_eq!((*root).color, 1, "root must be black");
+        assert_eq!((*root).parent, header, "root's parent must be the header");
+        walk(root, None, None, &mut keys, &mut count);
+        assert_eq!(count, expected, "node count");
+        keys
+    }
+
+    /// The header's leftmost/rightmost pointers track the extremes.
+    unsafe fn validate_extremes(header: *mut ByteKeyTreeNode, keys: &[u8]) {
+        let min = *keys.first().unwrap();
+        let max = *keys.last().unwrap();
+        assert_eq!((*(*header).left).key.key, min, "leftmost");
+        assert_eq!((*(*header).right).key.key, max, "rightmost");
+    }
+
+    /// An empty tree: root null, leftmost and rightmost pointing at
+    /// the header itself (the libstdc++ empty shape).
+    unsafe fn make_empty_tree(
+        header: *mut ByteKeyTreeNode,
+    ) -> ByteKeyTree {
+        (*header).left = header;
+        (*header).right = header;
+        test_tree(header)
+    }
+
+    /// Calls the port directly (the `_M_insert` contract): fresh node
+    /// pointer at result+0.
+    unsafe fn run_insert_node(
+        tree: *mut ByteKeyTree,
+        insert_position: *mut u8,
+        parent: *mut ByteKeyTreeNode,
+        key: u8,
+    ) -> *mut u8 {
+        let pair = key_pair(key);
+        let mut fresh: *mut u8 = core::ptr::null_mut();
+        byte_key_tree_insert_node(
+            &mut fresh,
+            tree.cast::<ByteKeyMap>(),
+            insert_position,
+            parent.cast::<u8>(),
+            &pair,
+        );
+        fresh
+    }
+
+    /// With the default allocator stub the port reports a null fresh
+    /// node and leaves the tree completely untouched.
+    #[test]
+    fn default_alloc_stub_reports_null_and_untouched_tree() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        let _guard = AllocOpsGuard::install(ByteKeyTreeAllocOps {
+            allocate_node: missing_allocate_node,
+        });
+        unsafe {
+            let mut header = test_header();
+            let header_ptr = core::ptr::addr_of_mut!(header);
+            let mut tree = make_empty_tree(header_ptr);
+            let tree_ptr = core::ptr::addr_of_mut!(tree);
+
+            let fresh = run_insert_node(tree_ptr, core::ptr::null_mut(), header_ptr, 5);
+            assert_eq!(fresh, core::ptr::null_mut());
+            assert_eq!((*header_ptr).parent, core::ptr::null_mut());
+            assert_eq!(tree.node_count, 0);
+        }
+    }
+
+    /// First node of an empty tree (parent == header): linked as root,
+    /// leftmost and rightmost, recolored black, count bumped, pair
+    /// copied, result carries the node.
+    #[test]
+    fn first_insert_becomes_black_root() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        let _guard = install_arena_allocator();
+        unsafe {
+            let mut header = test_header();
+            let header_ptr = core::ptr::addr_of_mut!(header);
+            let mut tree = make_empty_tree(header_ptr);
+            let tree_ptr = core::ptr::addr_of_mut!(tree);
+
+            let fresh = run_insert_node(tree_ptr, core::ptr::null_mut(), header_ptr, 5);
+            assert!(!fresh.is_null());
+            let node = fresh.cast::<ByteKeyTreeNode>();
+            assert_eq!((*header_ptr).parent, node); // root
+            assert_eq!((*header_ptr).left, node); // leftmost
+            assert_eq!((*header_ptr).right, node); // rightmost
+            assert_eq!((*node).parent, header_ptr);
+            assert_eq!((*node).color, 1); // root recolored black
+            assert_eq!((*node).key.key, 5);
+            assert_eq!(tree.node_count, 1);
+            assert_eq!(validate_tree(header_ptr, 1), [5]);
+            validate_extremes(header_ptr, &[5]);
+        }
+        free_arena();
+    }
+
+    /// Comparator-driven left link (insert_position == 0, key less
+    /// than parent's): the node becomes the parent's left child and
+    /// the leftmost pointer follows the old leftmost.
+    #[test]
+    fn left_link_updates_leftmost() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        let _guard = install_arena_allocator();
+        unsafe {
+            let mut header = test_header();
+            let header_ptr = core::ptr::addr_of_mut!(header);
+            let mut tree = make_empty_tree(header_ptr);
+            let tree_ptr = core::ptr::addr_of_mut!(tree);
+
+            let root = run_insert_node(tree_ptr, core::ptr::null_mut(), header_ptr, 7)
+                .cast::<ByteKeyTreeNode>();
+            let fresh = run_insert_node(tree_ptr, core::ptr::null_mut(), root, 3)
+                .cast::<ByteKeyTreeNode>();
+            assert_eq!((*root).left, fresh);
+            assert_eq!((*fresh).parent, root);
+            assert_eq!((*header_ptr).left, fresh); // new leftmost
+            assert_eq!((*header_ptr).right, root); // rightmost unchanged
+            assert_eq!(tree.node_count, 2);
+            assert_eq!(validate_tree(header_ptr, 2), [3, 7]);
+            validate_extremes(header_ptr, &[3, 7]);
+        }
+        free_arena();
+    }
+
+    /// Comparator-driven right link: right child plus rightmost
+    /// follow-up.
+    #[test]
+    fn right_link_updates_rightmost() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        let _guard = install_arena_allocator();
+        unsafe {
+            let mut header = test_header();
+            let header_ptr = core::ptr::addr_of_mut!(header);
+            let mut tree = make_empty_tree(header_ptr);
+            let tree_ptr = core::ptr::addr_of_mut!(tree);
+
+            let root = run_insert_node(tree_ptr, core::ptr::null_mut(), header_ptr, 7)
+                .cast::<ByteKeyTreeNode>();
+            let fresh = run_insert_node(tree_ptr, core::ptr::null_mut(), root, 9)
+                .cast::<ByteKeyTreeNode>();
+            assert_eq!((*root).right, fresh);
+            assert_eq!((*header_ptr).right, fresh); // new rightmost
+            assert_eq!((*header_ptr).left, root); // leftmost unchanged
+            assert_eq!(validate_tree(header_ptr, 2), [7, 9]);
+            validate_extremes(header_ptr, &[7, 9]);
+        }
+        free_arena();
+    }
+
+    /// A nonzero insert_position forces the left link even when the
+    /// key compares greater than the parent's (multimap equal-key
+    /// path).
+    #[test]
+    fn insert_position_forces_left_link() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        let _guard = install_arena_allocator();
+        unsafe {
+            let mut header = test_header();
+            let header_ptr = core::ptr::addr_of_mut!(header);
+            let mut tree = make_empty_tree(header_ptr);
+            let tree_ptr = core::ptr::addr_of_mut!(tree);
+
+            let root = run_insert_node(tree_ptr, core::ptr::null_mut(), header_ptr, 7)
+                .cast::<ByteKeyTreeNode>();
+            let mut nonzero: u8 = 1;
+            let fresh = run_insert_node(tree_ptr, &mut nonzero, root, 9)
+                .cast::<ByteKeyTreeNode>();
+            assert_eq!((*root).left, fresh);
+            assert_eq!((*root).right, core::ptr::null_mut());
+            assert_eq!((*header_ptr).left, fresh); // leftmost followed
+            assert_eq!((*header_ptr).right, root);
+        }
+        free_arena();
+    }
+
+    /// Rebalance stress: three key orders over unique keys — ascending
+    /// (right-rotate path), descending (left-rotate), and a fixed
+    /// zigzag permutation (double rotations and recolor ascents) —
+    /// validating the full red-black/BST/count contract and the
+    /// leftmost/rightmost pointers after every single insert.
+    #[test]
+    fn rebalance_keeps_red_black_invariants() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        let _guard = install_arena_allocator();
+
+        let mut orders: Vec<Vec<u8>> = Vec::new();
+        orders.push((1u8..=40).collect());
+        orders.push((1u8..=40).rev().collect());
+        // Deterministic zigzag: mid, mid-1, mid+1, mid-2, mid+2, ...
+        let mut zigzag = Vec::new();
+        let mid = 20u8;
+        zigzag.push(mid);
+        for d in 1..20u8 {
+            zigzag.push(mid - d);
+            zigzag.push(mid + d);
+        }
+        orders.push(zigzag);
+
+        for order in orders {
+            unsafe {
+                let mut header = test_header();
+                let header_ptr = core::ptr::addr_of_mut!(header);
+                let mut tree = make_empty_tree(header_ptr);
+                let tree_ptr = core::ptr::addr_of_mut!(tree);
+
+                let mut inserted: Vec<u8> = Vec::new();
+                for (i, key) in order.iter().enumerate() {
+                    // Descend like the insert-unique caller does to
+                    // find the link parent (keeps this test honest
+                    // about the _M_insert contract: parent + position).
+                    let mut parent = header_ptr;
+                    let mut node = (*header_ptr).parent;
+                    while !node.is_null() {
+                        parent = node;
+                        node = if *key < (*node).key.key {
+                            (*node).left
+                        } else {
+                            (*node).right
+                        };
+                    }
+                    let fresh =
+                        run_insert_node(tree_ptr, core::ptr::null_mut(), parent, *key);
+                    assert!(!fresh.is_null());
+                    assert_eq!(tree.node_count as usize, i + 1);
+                    inserted.push(*key);
+                    let keys = validate_tree(header_ptr, i + 1);
+                    let mut sorted = inserted.clone();
+                    sorted.sort_unstable();
+                    assert_eq!(keys, sorted);
+                    validate_extremes(header_ptr, &sorted);
+                }
+            }
+        }
+        free_arena();
+        assert_eq!(arena_len(), 0);
+    }
+
+    /// End-to-end through the shipped defaults: find -> ported
+    /// insert-unique -> ported _M_insert, with only the allocator
+    /// mocked. Insert several keys, then re-find them all (no further
+    /// allocations, duplicates return the same node), and the value
+    /// pointer is node + 0x14.
+    #[test]
+    fn find_end_to_end_through_shipped_insert_node() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        let _alloc_guard = install_arena_allocator();
+        let _map_guard = OpsGuard::install(ByteKeyMapOps {
+            insert_unique: byte_key_tree_insert_unique,
+        });
+        // BYTE_KEY_TREE_OPS ships with the port as its default; make
+        // that explicit in case another test left a mock installed.
+        let _tree_guard = TreeOpsGuard::install(ByteKeyTreeOps {
+            insert_node: byte_key_tree_insert_node,
+        });
+        unsafe {
+            let mut header = test_header();
+            let header_ptr = core::ptr::addr_of_mut!(header);
+            let mut tree = make_empty_tree(header_ptr);
+            let tree_ptr = core::ptr::addr_of_mut!(tree);
+            let map = tree_ptr.cast::<ByteKeyMap>();
+
+            let keys = [7u8, 3, 9, 3, 7, 0x80, 1];
+            let mut value_ptrs: Vec<*mut u8> = Vec::new();
+            for key in keys {
+                let value = byte_key_map_find(map, &key);
+                assert!(!value.is_null());
+                assert!((value as usize) >= 0x14);
+                value_ptrs.push(value);
+            }
+            // Five unique keys -> five allocations, one node each.
+            assert_eq!(arena_len(), 5);
+            assert_eq!(tree.node_count, 5);
+            // Duplicates returned the very same node + 0x14.
+            assert_eq!(value_ptrs[1], value_ptrs[3]);
+            assert_eq!(value_ptrs[0], value_ptrs[4]);
+            let sorted = validate_tree(header_ptr, 5);
+            assert_eq!(sorted, [1, 3, 7, 9, 0x80]);
+            validate_extremes(header_ptr, &sorted);
+            // The value pointer minus the find's literal +0x14 is the
+            // node base on any host (the struct's own key field then
+            // sits wherever the host layout puts it).
+            for (i, key) in [7u8, 3, 9, 0x80, 1].iter().enumerate() {
+                let node = value_ptrs[[0, 1, 2, 5, 6][i]]
+                    .sub(0x14)
+                    .cast::<ByteKeyTreeNode>();
+                assert_eq!((*node).key.key, *key);
+            }
+        }
+        free_arena();
     }
 }

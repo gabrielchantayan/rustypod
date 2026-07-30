@@ -11091,8 +11091,10 @@ functions:
       dependency is now ported (byte_key_tree_insert_unique, same
       module) and is the shipped default of the swappable
       BYTE_KEY_MAP_OPS slot it dispatches through; _M_insert @
-      0x083b8844 remains a hook (BYTE_KEY_TREE_OPS, default stub
-      reports a null fresh node, so an inserting find returns 0x14). The
+      0x083b8844 is also ported now (byte_key_tree_insert_node, same
+      module, the shipped BYTE_KEY_TREE_OPS default) with its node
+      allocator riding BYTE_KEY_ALLOC_OPS (default stub reports a null
+      fresh node, so an inserting find returns 0x14). The
       pair's pad bytes are zeroed where the original leaves stack
       garbage (unobservable). match.py structural: pair zeroing, key
       stamp, hook load/blx, node+0x14 all present; frame style (fp) and
@@ -11105,7 +11107,7 @@ functions:
     sig: "void byte_key_tree_insert_unique(ByteKeyInsertResult *result, ByteKeyMap *map, const ByteKeyPair *key_pair)"
     module: cxx/byte_key_map
     status: ported
-    vars: {param_1: result, param_2: map, param_3: key_pair, iVar1: went_left, pbVar2: node, pbVar4: parent, local_2c[0]: position}
+    vars: {param_1: result, param_2: map, param_3: key_pair, iVar1: went_left, pbVar2: node, pbVar4: parent, "local_2c[0]": position}
     notes: >-
       Ported. libstdc++ _Rb_tree::_M_insert_unique for a byte-keyed
       map: descend from the root (header at map+0x10; header+4 = root)
@@ -11125,8 +11127,10 @@ functions:
       0x083db038's slot). The comparator @ 0x083d73bc (unsigned byte
       less-than), iterator-equality @ 0x083cf740 and key accessor @
       0x083b6a44 (node+0x10) are one-/few-instruction leaves, inlined;
-      _M_insert @ 0x083b8844 is not ported and rides the new
-      BYTE_KEY_TREE_OPS slot (default stub reports a null fresh node).
+      _M_insert @ 0x083b8844 is ported (byte_key_tree_insert_node,
+      same module) and is the shipped default of BYTE_KEY_TREE_OPS;
+      its pool allocator @ 0x083b7f40 rides BYTE_KEY_ALLOC_OPS
+      (default stub reports a null fresh node).
       Node/container layouts are typed #[repr(C)] structs
       (ByteKeyTreeNode / ByteKeyTree) with 32-bit-asserted offsets, the
       app/node_list.rs precedent. Host tests model trees with typed
@@ -11137,6 +11141,105 @@ functions:
       linker. match.py structural: descent loop, begin test, header
       self-loop check, ascend loop, hook blx and flag stores all
       present; LLVM inlines the leaf callees (deviation, documented).
+
+  - address: 0x083b8844
+    ghidra: FUN_083b8844
+    name: byte_key_tree_insert_node
+    size: 480
+    sig: "void byte_key_tree_insert_node(u8 **result, ByteKeyMap *map, u8 *insert_position, u8 *parent, const ByteKeyPair *key_pair)"
+    module: cxx/byte_key_map
+    status: ported
+    vars: {param_1: result, param_2: map, param_3: insert_position, param_4: parent, param_5: key_pair, pbVar1: node, pbVar4: parent_link, pbVar5: uncle, pbVar8: node}
+    notes: >-
+      Ported. libstdc++ _Rb_tree::_M_insert for the byte-keyed map
+      family: allocate a 0x20-byte node via the pool allocator @
+      0x083b7f40 (dispatched through the new BYTE_KEY_ALLOC_OPS slot,
+      default stub null), copy-construct the 16-byte pair to node+0x10,
+      bump the count at map+0x14, then link: header parent (map+0x10)
+      or nonzero insert_position -> left child (+8), a header parent
+      also taking root (header+4) and rightmost (header+0xc), else
+      leftmost (header+8) following when parent was leftmost;
+      otherwise the byte comparator @ 0x083d73bc decides left (same
+      leftmost follow-up) vs right (+0xc, rightmost follow-up).
+      Rebalance is _Rb_tree_rebalance_for_insert verbatim: while not
+      root and parent red (color 0), red uncle recolors parent/uncle
+      black (1) and grandparent red (0) and ascends; black/absent
+      uncle rotates - inner child rotates the parent down first, then
+      parent black, grandparent red, rotate the grandparent (rotations
+      @ 0x083b8090 rotate-left / 0x083b80e4 rotate-right ported as
+      separate #[inline(never)] helpers keeping the bl boundaries).
+      Root recolored black, fresh node written at result+0 (5th
+      argument arrives on the stack in the original). Deviations: a
+      null allocator result (only the documented stub) writes null at
+      result+0 and leaves the tree untouched - the original cannot
+      fail (operator new throws); the placement-new guard node+0x10 !=
+      0 is folded into that check; the comparator is inlined; dead
+      extra rotation arguments dropped. The port is the shipped
+      default of BYTE_KEY_TREE_OPS (byte_key_tree_insert_unique @
+      0x083b867c's slot). Host tests: arena-backed mock allocator
+      honouring the 0x083b7f40 contract (color 0, links null), direct
+      _M_insert drives (first-node root/leftmost/rightmost, left/right
+      link follow-ups, forced-left insert_position), a full
+      red-black/BST/count validator over ascending, descending and
+      zigzag key orders (recolor + single/double rotation coverage),
+      and an end-to-end find through both shipped defaults with
+      duplicate re-finds. match.py structural: 120 instructions on
+      both sides; allocator blx (slot), pair ldm/stm copy, count
+      increment, link branches with leftmost/rightmost follow-ups,
+      rebalance loop with recolor + four rotation bl sites all
+      present; the null check and frame style (fp) are the documented
+      deviations.
+
+  - address: 0x083b8090
+    ghidra: FUN_083b8090
+    name: byte_key_tree_rotate_left
+    size: 84
+    sig: "void byte_key_tree_rotate_left(ByteKeyTree *tree, ByteKeyTreeNode *node)"
+    module: cxx/byte_key_map
+    status: ported
+    vars: {param_1: tree, param_2: node, iVar3: right}
+    notes: >-
+      Ported as a private #[inline(never)] helper of
+      byte_key_tree_insert_node (0x083b8844), preserving the bl
+      boundary. libstdc++ _Rb_tree_rotate_left: the right child takes
+      node's place (root pointer at header+4 first, else the matching
+      side of node's parent), node adopts its left subtree and becomes
+      its left child.
+
+  - address: 0x083b80e4
+    ghidra: FUN_083b80e4
+    name: byte_key_tree_rotate_right
+    size: 84
+    sig: "void byte_key_tree_rotate_right(ByteKeyTree *tree, ByteKeyTreeNode *node)"
+    module: cxx/byte_key_map
+    status: ported
+    vars: {param_1: tree, param_2: node, iVar3: left}
+    notes: >-
+      Ported as a private #[inline(never)] helper of
+      byte_key_tree_insert_node (0x083b8844), preserving the bl
+      boundary. libstdc++ _Rb_tree_rotate_right, the mirror of
+      0x083b8090.
+
+  - address: 0x083b7f40
+    ghidra: FUN_083b7f40
+    name: byte_key_tree_allocate_node
+    size: 176
+    sig: "ByteKeyTreeNode *byte_key_tree_allocate_node(ByteKeyMap *map)"
+    module: cxx/byte_key_map
+    status: identified
+    vars: {param_1: map, puVar1: node, piVar3: chunk, uVar6: capacity}
+    notes: >-
+      Not ported - byte_key_tree_insert_node @ 0x083b8844 dispatches
+      it through the BYTE_KEY_ALLOC_OPS slot (default stub returns
+      null, which the port reports as a null fresh node). Scouted
+      contract: 0x20-byte-node pool - free list at map+4 threaded
+      through node+0xc; bump range map+8..map+0xc; on exhaustion push
+      a 0xc-byte chunk header (prev at map+0, capacity grown max(n+0x20,
+      n+n/2+n/8), 0x20 first) and a capacity*0x20 arena, both from
+      operator new @ 0x08266c70 (throwing wrapper over FUN_082aadd4,
+      abort @ 0x08266abc on failure). Returned node: color byte 0
+      (red), parent/left/right at +4/+8/+0xc nulled, pair at +0x10
+      uninitialised.
 
   - address: 0x08123600
     ghidra: FUN_08123600
