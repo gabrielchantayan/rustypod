@@ -92,6 +92,13 @@
 //!   ledger's "stats init": arms the stats lock and writes the
 //!   soft-limit configuration — the i64 limit @ +0x20 and the
 //!   callback/callback-arg words @ +0x28/+0x2c — then returns 0.
+//! - `tracked_stats_warn_soft_limit` — original: `FUN_0837d67c` @
+//!   0x0837d67c (84 bytes; 4 call sites: the `blge`/`bl` pair in the
+//!   allocator entry @ 0x08390b14 and the `blge`/`bl` pair in the
+//!   tracked realloc @ 0x08390eec). The soft-limit warn helper: when
+//!   the callback word (+0x28) is nonzero and the reentrancy guard
+//!   (+0x30) is clear, it sets the guard and `blx`s the callback as
+//!   `callback(callback_arg, current_bytes, size)`, then clears it.
 //!
 //! Simplification, same as `heap/veneers.rs` makes for the default heap:
 //! the accounting block is a `static` here instead of living at
@@ -288,6 +295,22 @@ pub unsafe extern "C" fn tracked_stats_arm_lock() {
     }
 }
 
+/// Wired default for the invoke slot: the warn helper's `blx r1` @
+/// 0x0837d6c0 — transmutes the callback word and calls it as
+/// `callback(callback_arg, current_bytes, size)`. Only meaningful on
+/// target (a real code address); host tests swap the slot for a
+/// recorder, same as they do for `lock`.
+unsafe extern "C" fn blx_soft_limit_callback(
+    callback: u32,
+    callback_arg: u32,
+    current_bytes: i64,
+    size: i32,
+) {
+    let callback: unsafe extern "C" fn(u32, i64, i32) =
+        core::mem::transmute(callback as usize);
+    callback(callback_arg, current_bytes, size);
+}
+
 /// Indirect dispatch table for the stats-lock call in
 /// `tracked_stats_current` (house ops-slot pattern: an indirect call in
 /// place of the original's `bl 0x082ccc74`, so host tests can record the
@@ -299,11 +322,18 @@ pub struct TrackedStatsOps {
     /// the 64-bit counter reads so a running scheduler can't tear the
     /// `ldrd`. Defaults to the ported [`tracked_stats_arm_lock`].
     pub lock: unsafe extern "C" fn(),
+    /// Soft-limit callback `blx` @ 0x0837d6c0 — invokes the callback
+    /// word as `callback(callback_arg, current_bytes, size)`. The
+    /// callback is a 32-bit word (module word-index rule), so the
+    /// default transmutes it; host tests swap in a recorder.
+    pub invoke_soft_limit_callback:
+        unsafe extern "C" fn(callback: u32, callback_arg: u32, current_bytes: i64, size: i32),
 }
 
 /// Wired default: the ported scheduler-flag setter @ 0x082ccc74.
 pub(crate) const DEFAULT_TRACKED_STATS_OPS: TrackedStatsOps = TrackedStatsOps {
     lock: tracked_stats_arm_lock,
+    invoke_soft_limit_callback: blx_soft_limit_callback,
 };
 
 /// The active implementation table. Written once at init on target;
@@ -448,6 +478,88 @@ pub unsafe extern "C" fn tracked_stats_set_soft_limit(
     (*stats).soft_limit_callback_arg = callback_arg as u32;
     (*stats).soft_limit = soft_limit;
     0
+}
+
+/// tracked_stats_warn_soft_limit — original: `FUN_0837d67c` @
+/// 0x0837d67c (84 bytes; 4 call sites, all in the tag-57 tracked
+/// allocator family: `blge` @ 0x08390b58 and `bl` @ 0x08390b84 in the
+/// allocator entry @ 0x08390b14 — warn-before-retry and warn-on-OOM —
+/// and `blge` @ 0x08390f50 and `bl` @ 0x08390f84 in the tracked realloc
+/// @ 0x08390eec).
+///
+/// The soft-limit warn helper of the tracked allocator's stats block.
+/// Verified against osos.asm and osos.dec (the literal @ 0x0837d6d0 is
+/// 0x08adc2e0, stats base + 0x20):
+///
+/// ```text
+/// stmdb sp!,{r3,r4,r5,lr}
+/// ldr r4,[lit 0x08adc2e0]  ; stats base + 0x20
+/// mov r3,r0                ; r3 = size
+/// ldr r1,[r4,#0x8]         ; callback @ +0x28
+/// cmp r1,#0
+/// beq out                  ; no callback configured: done
+/// ldr r0,[r4,#0x10]        ; reentrancy guard @ +0x30
+/// cmp r0,#0
+/// bne out                  ; already warning: done
+/// mov r0,#1
+/// str r0,[r4,#0x10]        ; guard = 1
+/// sub r0,r4,#0x20          ; stats base
+/// ldr r2,[r0,#0x38]        ; current_bytes, low word
+/// ldr r12,[r0,#0x3c]       ; current_bytes, high word
+/// ldr r0,[r4,#0xc]         ; callback_arg @ +0x2c
+/// str r3,[sp,#0x0]         ; size -> stack argument
+/// mov r3,r12
+/// blx r1                   ; callback(callback_arg, current_bytes, size)
+/// mov r0,#0
+/// str r0,[r4,#0x10]        ; guard = 0
+/// out: ldmia sp!,{r3,r4,r5,pc}
+/// ```
+///
+/// With the callback word nonzero and the guard clear, sets the guard
+/// and calls the callback as `callback(callback_arg, current_bytes,
+/// size)`: AAPCS puts `callback_arg` in r0, the i64 `current_bytes` in
+/// the aligned r2:r3 pair (r1 skipped — it still holds the callback
+/// pointer, which is how Ghidra's decompile picked up its phantom
+/// second argument) and `size` on the stack. The counter is read
+/// word-wise AFTER the guard store, so the callback sees the pre-alloc
+/// total and a nested warning from inside the callback is suppressed.
+/// The guard is cleared on the way out.
+///
+/// Deviations:
+///
+/// - The accounting block is the `ALLOC_STATS` static instead of the
+///   literal 0x08adc2c0 (module simplification, same as the rest of
+///   heap/tracked).
+/// - The `blx r1` dispatches through the
+///   [`TRACKED_STATS_OPS`]`.invoke_soft_limit_callback` slot (house
+///   ops-slot pattern, an indirect call in place of the original's
+///   `blx`) whose default transmutes the callback word exactly like the
+///   original; host tests swap in a recorder because a real code
+///   address does not survive the u32 word on a 64-bit host.
+/// - The guard word uses volatile accesses, same as `lock_flag` in
+///   [`tracked_stats_arm_lock`]: it is cross-context state (the
+///   callback runs under it) and plain accesses let LLVM's globalopt
+///   narrow the word to a boolean byte, dropping the full-word
+///   `str` of the original.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn tracked_stats_warn_soft_limit(size: i32) {
+    let stats = core::ptr::addr_of_mut!(ALLOC_STATS);
+    let callback = (*stats).soft_limit_callback;
+    if callback == 0 {
+        return;
+    }
+    let guard = core::ptr::addr_of_mut!((*stats).soft_limit_callback_active);
+    if guard.read_volatile() != 0 {
+        return;
+    }
+    guard.write_volatile(1);
+    let current_bytes = (*stats).current_bytes;
+    let callback_arg = (*stats).soft_limit_callback_arg;
+    let invoke = core::ptr::read_volatile(core::ptr::addr_of!(
+        TRACKED_STATS_OPS.invoke_soft_limit_callback
+    ));
+    invoke(callback, callback_arg, current_bytes, size);
+    guard.write_volatile(0);
 }
 
 #[cfg(test)]
@@ -971,6 +1083,137 @@ mod tests {
             assert_eq!(ALLOC_STATS.current_bytes, 7);
             assert_eq!(ALLOC_STATS.peak_bytes, 9);
             assert_eq!(ALLOC_STATS.soft_limit_callback_active, 1);
+        }
+    }
+
+    // ---- tracked_stats_warn_soft_limit (0x0837d67c) -----------------
+
+    static mut INVOKE_CALLS: usize = 0;
+    static mut INVOKE_CALLBACK: u32 = 0;
+    static mut INVOKE_ARG: u32 = 0;
+    static mut INVOKE_CURRENT: i64 = 0;
+    static mut INVOKE_SIZE: i32 = 0;
+    static mut GUARD_DURING_CALL: u32 = 0;
+
+    unsafe extern "C" fn record_invoke(
+        callback: u32,
+        callback_arg: u32,
+        current_bytes: i64,
+        size: i32,
+    ) {
+        INVOKE_CALLS += 1;
+        INVOKE_CALLBACK = callback;
+        INVOKE_ARG = callback_arg;
+        INVOKE_CURRENT = current_bytes;
+        INVOKE_SIZE = size;
+        GUARD_DURING_CALL = ALLOC_STATS.soft_limit_callback_active;
+    }
+
+    /// `stats()` plus a cleared recorder swapped into the invoke slot —
+    /// one guard, no shadowed self-deadlock.
+    fn warn() -> MutexGuard<'static, ()> {
+        let guard = stats();
+        unsafe {
+            INVOKE_CALLS = 0;
+            INVOKE_CALLBACK = 0;
+            INVOKE_ARG = 0;
+            INVOKE_CURRENT = 0;
+            INVOKE_SIZE = 0;
+            GUARD_DURING_CALL = 0;
+            TRACKED_STATS_OPS.invoke_soft_limit_callback = record_invoke;
+        }
+        guard
+    }
+
+    /// `cmp r1,#0; beq out` — no callback configured means no call and
+    /// the guard word is never touched.
+    #[test]
+    fn a_null_callback_is_a_no_op() {
+        let _guard = warn();
+        unsafe {
+            ALLOC_STATS.soft_limit_callback = 0;
+            ALLOC_STATS.soft_limit_callback_active = 0;
+            tracked_stats_warn_soft_limit(0x100);
+            assert_eq!(INVOKE_CALLS, 0);
+            assert_eq!(ALLOC_STATS.soft_limit_callback_active, 0);
+        }
+    }
+
+    /// `cmp r0,#0; bne out` — a set guard suppresses the call entirely
+    /// and is left as it was (never cleared by the suppressed path).
+    #[test]
+    fn an_active_guard_suppresses_the_call() {
+        let _guard = warn();
+        unsafe {
+            ALLOC_STATS.soft_limit_callback = 0x0835_e9a0;
+            ALLOC_STATS.soft_limit_callback_active = 1;
+            ALLOC_STATS.current_bytes = 0x2a;
+            tracked_stats_warn_soft_limit(0x100);
+            assert_eq!(INVOKE_CALLS, 0);
+            assert_eq!(ALLOC_STATS.soft_limit_callback_active, 1, "guard untouched");
+        }
+    }
+
+    /// The callback fires as `callback(callback_arg, current_bytes,
+    /// size)` with the guard held at 1 for the whole call and cleared
+    /// afterwards; the i64 counter crosses the 32-bit boundary whole.
+    #[test]
+    fn invokes_the_callback_under_the_guard() {
+        let _guard = warn();
+        unsafe {
+            ALLOC_STATS.soft_limit_callback = 0x0835_e9a0;
+            ALLOC_STATS.soft_limit_callback_arg = 0x1122_3344;
+            ALLOC_STATS.current_bytes = 0x1_0000_0001;
+            tracked_stats_warn_soft_limit(0x40);
+            assert_eq!(INVOKE_CALLS, 1);
+            assert_eq!(INVOKE_CALLBACK, 0x0835_e9a0, "the callback word itself");
+            assert_eq!(INVOKE_ARG, 0x1122_3344);
+            assert_eq!(INVOKE_CURRENT, 0x1_0000_0001, "the full i64 counter");
+            assert_eq!(INVOKE_SIZE, 0x40);
+            assert_eq!(GUARD_DURING_CALL, 1, "guard held across the call");
+            assert_eq!(ALLOC_STATS.soft_limit_callback_active, 0, "cleared on return");
+        }
+    }
+
+    /// The counter is read AFTER the guard store: a callback that
+    /// samples the stats block sees guard = 1, and a nested warn from
+    /// inside the callback is suppressed by its own guard.
+    #[test]
+    fn a_nested_warning_is_suppressed_by_the_guard() {
+        unsafe extern "C" fn reentrant_invoke(
+            _callback: u32,
+            _callback_arg: u32,
+            _current_bytes: i64,
+            _size: i32,
+        ) {
+            INVOKE_CALLS += 1;
+            GUARD_DURING_CALL = ALLOC_STATS.soft_limit_callback_active;
+            // Nested warning: must hit the guard and return.
+            tracked_stats_warn_soft_limit(8);
+        }
+        let _guard = warn();
+        unsafe {
+            TRACKED_STATS_OPS.invoke_soft_limit_callback = reentrant_invoke;
+            ALLOC_STATS.soft_limit_callback = 0x0835_e9a0;
+            ALLOC_STATS.current_bytes = 5;
+            tracked_stats_warn_soft_limit(0x80);
+            assert_eq!(INVOKE_CALLS, 1, "no recursive invoke");
+            assert_eq!(GUARD_DURING_CALL, 1);
+            assert_eq!(ALLOC_STATS.soft_limit_callback_active, 0);
+        }
+    }
+
+    /// The wired default invoke slot is the transmuting `blx`: its
+    /// identity is all a host test can check (calling it needs a real
+    /// 32-bit code address, which only exists on target).
+    #[test]
+    fn the_default_invoke_slot_is_the_blx() {
+        let _guard = stats();
+        unsafe {
+            let invoke = core::ptr::read_volatile(core::ptr::addr_of!(
+                TRACKED_STATS_OPS.invoke_soft_limit_callback
+            ));
+            assert_eq!(invoke as usize, blx_soft_limit_callback as usize);
         }
     }
 

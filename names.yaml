@@ -8784,6 +8784,32 @@ functions:
       bx lr`. Ported through the object's own vtable pointer, so
       subclass vtables work; no hook table.
 
+  - address: 0x08275d74
+    ghidra: FUN_08275d74
+    name: string_object_release_payload
+    size: 40
+    sig: "void string_object_release_payload(StringObject *this)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: this}
+    notes: >-
+      41 bl call sites (binary-scanned), among them both destructor
+      siblings 0x08277458 and 0x08277484. The shared payload release of
+      the same unidentified two-word string/buffer class as
+      string_default_construct @ 0x08277440 / string_object_destroy @
+      0x08277484: `ldr r0,[r0,#4]; cmp r0,#0; ldmiaeq` (NULL payload
+      early-out), `mov r1,#0x34; bl 0x080e7970` (free_wrapper with
+      caller tag 0x34, the TAG_STRING_OBJECT_PAYLOAD constant), `mov
+      r0,#0; str r0,[r4,#4]` (NULLs the word). No NULL guard on `this`;
+      returns void with r0 clobbered by the free path. Replaces the
+      no-op leak stub as the wired default of the STRING_OBJECT_OPS
+      release_payload slot (house ops-slot pattern; the slot stays so
+      host tests can install recording mocks). match.py structural:
+      same ldr-@+4 / NULL-guard / free-with-tag-0x34 / NULL-the-word
+      sequence; the diff is LLVM's fp frame and the inlined
+      free_wrapper lazy-init + HEAP_OPS dispatch standing in for the
+      original's bl 0x080e7970 (the documented deviation).
+
   - address: 0x08277440
     ghidra: FUN_08277440
     name: string_default_construct
@@ -8828,13 +8854,14 @@ functions:
       0x08277440: `obj[0] = 0x089a6044` (vtable literal @ 0x082774a4),
       then `bl 0x08275d74`, return `this` in r0; no operator delete
       (that is the 0x08277458 sibling's job). The callee 0x08275d74
-      (40 bytes, unported) is the shared payload release: NULL-guards
+      (40 bytes, ported as string_object_release_payload) is the shared
+      payload release: NULL-guards
       the payload word at +4, frees it through free_wrapper @
       0x080e7970 with caller tag 0x34, then NULLs the word - hence the
       semantic name string_object_destroy. Port dispatches 0x08275d74
-      through the STRING_OBJECT_OPS slot whose shipped default is a
-      no-op leak (missing_free_p4 house rule for unported destructors);
-      the tag-0x34 free contract is not guessed. match.py: same
+      through the STRING_OBJECT_OPS slot whose shipped default is the
+      ported release itself (the slot stays so host tests can install
+      recording mocks). match.py: same
       structure (vtable store, call, return this), the bl becoming a
       blx through the ops slot.
 
@@ -9757,6 +9784,39 @@ functions:
       four-word-store/mov r0,#0/pop structure; the diff is LLVM's fp
       frame, the blx-through-slot, and the split strds (the documented
       deviations).
+
+  - address: 0x0837d67c
+    ghidra: FUN_0837d67c
+    name: tracked_stats_warn_soft_limit
+    size: 84
+    sig: "void tracked_stats_warn_soft_limit(i32 size)"
+    module: heap/tracked
+    status: ported
+    vars: {param_1: size, DAT_0837d6d0: stats_plus_0x20}
+    notes: >-
+      The soft-limit warn helper of the tag-57 tracked allocator's
+      stats block. 4 call sites: blge/bl @ 0x08390b58/0x08390b84 in the
+      allocator entry @ 0x08390b14 (warn-before-retry and warn-on-OOM)
+      and blge/bl @ 0x08390f50/0x08390f84 in the tracked realloc
+      @ 0x08390eec. Verified against osos.asm and osos.dec (literal
+      @ 0x0837d6d0 = 0x08adc2e0, stats base + 0x20): when the callback
+      word (+0x28) is nonzero and the reentrancy guard (+0x30) is
+      clear, sets the guard, reads current_bytes (+0x38) word-wise, and
+      blx's the callback as callback(callback_arg, current_bytes, size)
+      - callback_arg in r0, the i64 in the aligned r2:r3 pair (r1
+      skipped, still holding the callback pointer: Ghidra's phantom
+      second parameter), size on the stack - then clears the guard.
+      Port deviations: the ALLOC_STATS static instead of literal
+      0x08adc2c0 (module simplification), the blx dispatches through
+      the new TRACKED_STATS_OPS.invoke_soft_limit_callback slot (house
+      ops-slot pattern; default blx_soft_limit_callback transmutes the
+      callback word exactly like the original, host tests swap in a
+      recorder since a real code address does not fit the u32 word on
+      a 64-bit host), and volatile guard accesses (same globalopt
+      narrowing hazard as lock_flag). match.py: same load-callback/
+      branch/load-guard/branch/store-1/load-args/stack-arg/blx/
+      store-0 structure; the diff is LLVM's fp frame and the
+      blx-through-slot (the documented deviation).
 
   - address: 0x0837a158
     ghidra: FUN_0837a158
