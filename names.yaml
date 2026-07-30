@@ -3114,19 +3114,35 @@ functions:
 
   - address: 0x080c8304
     ghidra: FUN_080c8304
-    name: null
+    name: gateway_wait_ready
     size: 36
-    sig: "void FUN_080c8304(void)"
+    sig: "void gateway_wait_ready(void)"
     module: kernel/gateway_request_blocking
-    status: identified
+    status: ported
     notes: >-
       Gateway-ready spin-wait called at the head of FUN_08048000 and the
-      helper @ 0x08048064: poll FUN_081a5500() (the lazily-created gateway
-      state object) until its byte at +0x6a reads 1, sleeping one tick via
-      thunk 0x080e9eb0 (b 0x080568e8) between polls. Not self-contained
-      (allocator-backed lazy object init + task sleep), so
-      gateway_request_blocking models it through the GATEWAY_READY_WAIT
-      dispatch slot with a documented spin default instead of porting it.
+      helper @ 0x08048064 (6 bl call sites total): entry b polls first,
+      then loops { sleep one tick via thunk 0x080e9eb0; call FUN_081a5500
+      (the lazily-created gateway state object); ldrb the object's byte at
+      +0x6a; repeat until it reads exactly 1 }. Deviations: the state
+      getter FUN_081a5500 is unported (allocator-backed lazy object init),
+      so it dispatches through the new GATEWAY_STATE slot whose default
+      hands back a static 0x6b-byte never-ready object (loud-spin
+      missing-stub philosophy, matching GATEWAY_READY_WAIT's default); the
+      sleep callee is the ported task_sleep (kernel/task) wired directly -
+      thunk 0x080e9eb0 is a bare `b 0x080568e8` alias - with the result
+      discarded like the original; the ready byte is read volatile. The
+      callers in this module still dispatch through the pre-existing
+      GATEWAY_READY_WAIT slot (documented spin default kept; install
+      gateway_wait_ready to wire the real wait - the
+      observable_set_observer dispatch-boundary precedent). Host tests:
+      one-poll return when already ready, getter re-polled every iteration
+      until the +0x6a byte reads 1, default stub stable and never-ready.
+      match.py structural: same poll/ldrb-+0x6a/cmp-1/loop shape; the diff
+      is the crate fp frame, the blx through GATEWAY_STATE standing in for
+      bl 0x081a5500, and LLVM inlining task_sleep's TASK_HOOKS load with
+      the ticks==0 cmp folded away (ticks is the constant 1) - the
+      documented deviations.
 
   - address: 0x080567fc
     ghidra: null
@@ -14001,17 +14017,38 @@ functions:
     ghidra: FUN_0811d46c
     name: vtable_query_4c_kind4
     size: 12
-    module: null
-    status: identified
+    sig: "u32 vtable_query_4c_kind4(handle: *mut *mut u8, out: *mut u32, unused: usize, forwarded: usize)"
+    module: util::vtable_query
+    status: ported
+    renames:
+      param_1: handle
+      param_2: out
+      param_3: unused
+      param_4: forwarded
     notes: >-
       29 bl call sites. `mov r2, r1; mov r1, #4; b 0x0811d7b0` - binds
-      the constant 4 as the middle argument of 0x0811d7b0 (28 bytes, 16
-      sites), which loads `[[*obj] + 0x4c]` and calls it with the stack
-      pointer as the fourth argument, i.e. a vtable slot +0x4c dispatch
-      with an out-parameter. Its neighbour 0x0811d7fc is the identical
-      shape on slot +0x50. Not ported - the object's vtable would have to
-      be modeled first, and this module addresses nothing by word index
-      yet.
+      the constant 4 as the middle (kind) argument of the generic
+      dispatcher FUN_0811d7b0 @ 0x0811d7b0 (28 bytes, 16 sites, NOT
+      ported, stays unported), which loads [[*handle] + 0x4c] and calls
+      it as method(*handle, kind, arg, &spilled_r3) - a vtable slot
+      +0x4c dispatch with an out-parameter. Call sites pass a pointer to
+      a local out-word in r1, treat the return as an error code (0 =
+      success) and then mask a 0xc0 tag byte off the out word (the
+      is_tagged_c0 family) or bit-test it (tst #0x39/#0x43/#0x16):
+      kind 4 is a property/attribute query. The caller's r2 is dead on
+      entry (first instruction overwrites it); the caller's r3 is
+      forwarded verbatim through the dispatcher's stmdb sp!,{r3} spill
+      (no call site sets it deliberately). Ported via the documented
+      VTABLE_SLOT_4C_DISPATCH slot (the util/inner_state.rs
+      INNER_MATERIALIZE_COUNT pattern): the default stub models the
+      dispatcher body exactly (double deref + slot +0x4c load + indirect
+      call, read_unaligned so the layout stays byte-exact on 64-bit
+      hosts), host tests use a recording mock plus an end-to-end fake
+      vtable. Neighbour 0x0811d7fc is the identical shape on slot +0x50.
+      match.py structural: same mov r2,r1 / mov r1,#4 / tail-dispatch
+      shape; the diff is the crate fp frame and the dispatch-slot
+      ldr/blx standing in for the direct b 0x0811d7b0 - the documented
+      deviation.
 
   - address: 0x0811d208
     ghidra: FUN_0811d208
