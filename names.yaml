@@ -12748,6 +12748,66 @@ functions:
       the diff is LLVM's fp frame, register scheduling and branch
       layout (the expected ADS-vs-LLVM noise).
 
+  - address: 0x083c3408
+    ghidra: FUN_083c3408
+    name: string_key_tree_insert_node
+    size: 476
+    sig: "void string_key_tree_insert_node(u8 **result, StringKeyMap *map, u8 *insert_position, u8 *parent, const StringKeyPair *key)"
+    module: cxx/string_map
+    status: ported
+    vars: {param_1: result, param_2: map, param_3: insert_position, param_4: parent, param_5: key, pbVar1: node, pbVar7: node, pbVar4: parent, pbVar5: uncle, uVar6: grandparent}
+    notes: >-
+      libstdc++ _Rb_tree::_M_insert for the string-keyed map family -
+      the node-link + rebalance the (not yet ported) insert-unique @
+      0x083c327c reaches by bl @ 0x083c32f8 / 0x083c3350, passing the
+      key pair as a fifth argument on the stack (the port takes an
+      ordinary fifth parameter). Mirror of the ported byte-keyed twin
+      @ 0x083b8844 (byte_key_tree_insert_node in cxx/byte_key_map.rs,
+      480 bytes). Allocates a 0x18-byte node through the ported pool
+      allocator @ 0x083c311c (string_key_tree_allocate_node), now
+      dispatched through a new StringKeyAllocOps slot (the
+      BYTE_KEY_ALLOC_OPS precedent - the allocator's port note
+      anticipated the slot; shipped default is the port), copy-
+      constructs the 8-byte pair into node+0x10 (the key string via
+      cxx_string_copy_ctor @ 0x083d8c30 - the COW share, a real bl
+      through the existing pair_string_copy_ctor front-end - plus the
+      one mapped-value word) and bumps the node count at map+0x14.
+      Link: header parent or nonzero insert_position forces the left
+      link (header parent also takes root + rightmost; else leftmost
+      follows), else cxx_string_less @ 0x083d74f4 decides left vs
+      right (right link: rightmost follows) - a real bl through a new
+      #[inline(never)] pair_string_less front-end with the stateless
+      comparator object at map+0x19 passed and ignored, like the
+      original (LLVM argument-promotes the front-end to the two used
+      args; the bl boundary survives). Rebalance is the textbook
+      _Rb_tree_rebalance_for_insert: red uncle recolors and ascends,
+      black/absent uncle rotates (inner child rotates the parent down
+      first) via the ported string_key_tree_rotate_left /
+      string_key_tree_rotate_right, root recolored black, fresh node
+      written at result+0. Deviations: null check on the allocator
+      result for the test-only stub (writes null at result+0 and
+      returns; the original cannot fail - operator new throws, abort
+      @ 0x08266abc); the placement-new guard node+0x10 != null dropped
+      (only a 0xfffffff0 node could fail it, like the twin); the
+      original's two dead stack-scratch zeroes before the comparator
+      call and its dead r2-r5 rotation arguments dropped. Exported
+      pub (no in-crate slot needed - the future insert-unique port
+      will introduce that one, like BYTE_KEY_TREE_OPS). StringKeyTree
+      gained node_count (+0x14) / multi_insert (+0x18) / comparator
+      (+0x19) fields with 32-bit layout asserts (the ByteKeyTree
+      precedent). Host tests mirror the twin's set: alloc-stub null,
+      first-insert black root with the pair copy verified (COW share
+      bumps the refcount, value word copied), left/right link
+      leftmost/rightmost follow-ups, insert_position forcing the left
+      link, and a 40-insert rebalance stress in three key orders
+      validating red-black + BST + count + extremes after every
+      insert. match.py structural: 119 vs 123 instructions - same
+      allocate/copy-ctor/value-word/count-bump/link/rebalance sequence
+      and the same three bl boundaries; the diff is the ops-slot
+      table-load blx for the allocator, the documented null check,
+      LLVM's fp frame, register scheduling and branch layout (the
+      expected ADS-vs-LLVM noise).
+
   - address: 0x083db038
     ghidra: FUN_083db038
     name: byte_key_map_find

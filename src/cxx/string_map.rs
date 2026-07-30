@@ -6,13 +6,18 @@
 //!   0x083db4c4 (76 bytes; 40 `bl` call sites, the only copy).
 //! - [`string_key_tree_rotate_left`] — original: `FUN_083c31d4` @
 //!   0x083c31d4 (84 bytes; `_Rb_tree_rotate_left`, the rebalance
-//!   rotation of the not-yet-ported `_M_insert` @ 0x083c3408).
+//!   rotation of `_M_insert` @ 0x083c3408).
 //! - [`string_key_tree_rotate_right`] — original: `FUN_083c3228` @
 //!   0x083c3228 (84 bytes; `_Rb_tree_rotate_right`, the mirror
 //!   rotation).
 //! - [`string_key_tree_allocate_node`] — original: `FUN_083c311c` @
 //!   0x083c311c (184 bytes; the node pool allocator `_M_insert` @
 //!   0x083c3408 carves fresh 0x18-byte nodes through).
+//! - [`string_key_tree_insert_node`] — original: `FUN_083c3408` @
+//!   0x083c3408 (476 bytes; libstdc++ `_Rb_tree::_M_insert` for the
+//!   string-keyed map family — the node link + rebalance the
+//!   insert-unique @ 0x083c327c calls, built on the three pieces
+//!   above).
 //!
 //! Algorithm (from the disassembly): copy-construct a temporary
 //! `basic_string` from the caller's string object into the key half of
@@ -50,7 +55,8 @@
 //! last node, then — via the iterator-equality helper @ 0x083cf818
 //! against the leftmost header child and an inline predecessor walk —
 //! either return the existing node with the flag clear or link a fresh
-//! node through `_M_insert` @ 0x083c3408 (which allocates a node @
+//! node through `_M_insert` @ 0x083c3408 — ported below as
+//! [`string_key_tree_insert_node`] — (which allocates a node @
 //! 0x083c311c — ported below as [`string_key_tree_allocate_node`] —
 //! copy-constructs the pair into it — string via
 //! `cxx_string_copy_ctor` plus the one value word — and rebalances via
@@ -76,7 +82,9 @@
 //!   `add r0, r0, #0x14`); with a real node installed the value is
 //!   identical.
 
-use crate::cxx::string::{cxx_string_copy_ctor, cxx_string_release};
+use crate::cxx::string::{
+    cxx_string_copy_ctor, cxx_string_less, cxx_string_release,
+};
 
 /// The 8-byte key/value pair the lookup builds on its stack frame and
 /// hands to the tree operation: the copy-constructed key string object
@@ -239,20 +247,33 @@ pub struct StringKeyTreeNode {
     pub key: StringKeyPair,
 }
 
-/// The container as the rotations read it: only the header node pointer
-/// at +0x10 (header.parent = root). The first 0x10 bytes are the node
-/// pool state the ported allocator [`string_key_tree_allocate_node`]
-/// owns — see [`StringKeyNodePool`]. Sized off that struct so the
-/// fields stay disjoint on a 64-bit host (the pool's pointers widen
-/// past 0x10 there); exactly 0x10 on the 32-bit target, where the
-/// layout checks below pin `header` at +0x10 (the `ByteKeyTree`
-/// precedent in `cxx/byte_key_map.rs`).
+/// The container as the tree operations read it: the header node
+/// pointer at +0x10 (header.parent = root, header.left = leftmost,
+/// header.right = rightmost), the node count at +0x14 (written by
+/// `_M_insert`, not read here) and the comparator object at +0x19
+/// (only its address is passed to `cxx_string_less`, which ignores
+/// it). The first 0x10 bytes are the node pool state the ported
+/// allocator [`string_key_tree_allocate_node`] owns — see
+/// [`StringKeyNodePool`]. Sized off that struct so the fields stay
+/// disjoint on a 64-bit host (the pool's pointers widen past 0x10
+/// there); exactly 0x10 on the 32-bit target, where the layout checks
+/// below pin `header` at +0x10 (the `ByteKeyTree` precedent in
+/// `cxx/byte_key_map.rs`).
 #[repr(C)]
 pub struct StringKeyTree {
     /// +0..+0x10: the node pool state [`StringKeyNodePool`].
     pub _opaque: [u8; core::mem::size_of::<StringKeyNodePool>()],
     /// +0x10: the header node.
     pub header: *mut StringKeyTreeNode,
+    /// +0x14: live node count.
+    pub node_count: u32,
+    /// +0x18: multi-insert flag byte (nonzero = multimap semantics;
+    /// read by the not-yet-ported insert-unique @ 0x083c327c, never by
+    /// `_M_insert`).
+    pub multi_insert: u8,
+    /// +0x19: key-comparator object (stateless `less<string>`; only
+    /// its address is passed to `cxx_string_less`, which ignores it).
+    pub comparator: u8,
 }
 
 // Target-exact layout; on a 64-bit host the pointer fields widen and
@@ -266,6 +287,9 @@ mod layout_checks {
     const _: [u8; 0x10] = [0; core::mem::offset_of!(StringKeyTreeNode, key)];
     const _: [u8; 0x18] = [0; core::mem::size_of::<StringKeyTreeNode>()];
     const _: [u8; 0x10] = [0; core::mem::offset_of!(StringKeyTree, header)];
+    const _: [u8; 0x14] = [0; core::mem::offset_of!(StringKeyTree, node_count)];
+    const _: [u8; 0x18] = [0; core::mem::offset_of!(StringKeyTree, multi_insert)];
+    const _: [u8; 0x19] = [0; core::mem::offset_of!(StringKeyTree, comparator)];
 }
 
 /// string_key_tree_rotate_left — original: `FUN_083c31d4` @ 0x083c31d4
@@ -288,10 +312,9 @@ mod layout_checks {
 /// left child.
 ///
 /// Exported `pub` (unlike the byte-keyed twin, a private helper of its
-/// ported `_M_insert`): the string-keyed `_M_insert` @ 0x083c3408 is
-/// not yet ported, so there is no in-crate caller yet — the export
-/// keeps the symbol in the staticlib for match.py review and for the
-/// future `_M_insert` port to call.
+/// ported `_M_insert`): called by the ported
+/// [`string_key_tree_insert_node`] below; the export also keeps the
+/// symbol in the staticlib for match.py review.
 ///
 /// # Safety
 /// `tree` must point at a live container matching the scouted
@@ -339,10 +362,9 @@ pub unsafe extern "C" fn string_key_tree_rotate_left(
 /// left child (re-parenting it when non-null) and becomes `left`'s
 /// right child. The exact mirror of [`string_key_tree_rotate_left`].
 ///
-/// Exported `pub` for the same reason as rotate_left: the string-keyed
-/// `_M_insert` @ 0x083c3408 is not yet ported, so there is no in-crate
-/// caller yet — the export keeps the symbol in the staticlib for
-/// match.py review and for the future `_M_insert` port to call.
+/// Exported `pub` for the same reason as rotate_left: called by the
+/// ported [`string_key_tree_insert_node`] below; the export also keeps
+/// the symbol in the staticlib for match.py review.
 ///
 /// # Safety
 /// `tree` must point at a live container matching the scouted
@@ -466,12 +488,10 @@ fn pool_operator_new(size: usize) -> *mut u8 {
 /// pair at +0x10 is left uninitialised for the caller to
 /// copy-construct.
 ///
-/// Exported `pub` for the same reason as the rotations above: the
-/// string-keyed `_M_insert` @ 0x083c3408 that calls this allocator is
-/// not yet ported, so there is no in-crate caller yet — the export
-/// keeps the symbol in the staticlib for match.py review and for the
-/// future `_M_insert` port to call (which, like its byte-keyed twin,
-/// will dispatch it through an ops slot).
+/// Exported `pub` for the same reason as the rotations above; the
+/// ported [`string_key_tree_insert_node`] below calls it through the
+/// [`STRING_KEY_ALLOC_OPS`] slot (the `BYTE_KEY_ALLOC_OPS` precedent),
+/// whose shipped default is this port.
 ///
 /// Deviations:
 /// - Ghidra types the original `void`, but it leaves the node pointer
@@ -550,6 +570,229 @@ pub unsafe extern "C" fn string_key_tree_allocate_node(
     (*node).right = core::ptr::null_mut();
     (*node).color = 0; // red
     node
+}
+
+// ---------------------------------------------------------------------------
+// The node linker `_M_insert` itself (@ 0x083c3408).
+// ---------------------------------------------------------------------------
+
+/// Indirect dispatch for the tree's node allocator @ 0x083c311c,
+/// introduced now that its caller `_M_insert` @ 0x083c3408 is ported
+/// (the `BYTE_KEY_ALLOC_OPS` precedent in `cxx/byte_key_map.rs`; the
+/// allocator's own port note anticipated the slot). The shipped
+/// default is the ported pool allocator
+/// [`string_key_tree_allocate_node`].
+#[derive(Clone, Copy)]
+pub struct StringKeyAllocOps {
+    /// Node allocator @ 0x083c311c(map) -> node: hands out a fresh
+    /// 0x18-byte tree node with the color byte at +0 set to 0 (red),
+    /// parent/left/right at +4/+8/+0xc nulled, and the key pair at
+    /// +0x10 uninitialised (the caller copy-constructs it). Never
+    /// returns null in the original — a failed `operator new` throws
+    /// (abort path @ 0x08266abc), so `_M_insert` has no null check.
+    pub allocate_node:
+        unsafe extern "C" fn(map: *mut StringKeyMap) -> *mut StringKeyTreeNode,
+}
+
+/// Stub for the host tests: report null — the ported `_M_insert` then
+/// writes a null fresh node at its result and returns (a documented
+/// deviation; the original cannot fail here).
+#[allow(dead_code)] // test-only
+unsafe extern "C" fn missing_allocate_node(
+    _map: *mut StringKeyMap,
+) -> *mut StringKeyTreeNode {
+    core::ptr::null_mut()
+}
+
+/// The active node-allocator slot. The shipped default is the port
+/// [`string_key_tree_allocate_node`]; host tests install arena mocks
+/// (and the documented stub above) through the slot. Written once at
+/// init on target; tests serialize access.
+pub static mut STRING_KEY_ALLOC_OPS: StringKeyAllocOps = StringKeyAllocOps {
+    allocate_node: string_key_tree_allocate_node,
+};
+
+/// `#[inline(never)]` front-end for `cxx_string_less` @ 0x083d74f4:
+/// the original reaches it by `bl` for the link-direction compare, and
+/// letting LLVM inline the memcmp/length body into `_M_insert` destroys
+/// the structural match (the `pool_operator_new` rationale in
+/// `cxx/byte_key_map.rs`).
+#[inline(never)]
+fn pair_string_less(
+    comparator: *const u8,
+    a: *const *mut u8,
+    b: *const *mut u8,
+) -> u32 {
+    unsafe { cxx_string_less(comparator, a, b) }
+}
+
+/// string_key_tree_insert_node — original: `FUN_083c3408` @ 0x083c3408
+/// (476 bytes; libstdc++ `_Rb_tree::_M_insert` for the string-keyed map
+/// family, the node-link + rebalance path its caller — the not-yet-
+/// ported insert-unique @ 0x083c327c — reaches by `bl` @ 0x083c32f8
+/// and 0x083c3350, passing the key pair as a fifth argument on the
+/// stack).
+///
+/// Allocates a fresh 0x18-byte node through the pool allocator @
+/// 0x083c311c (dispatched via [`STRING_KEY_ALLOC_OPS`], shipped default
+/// the port [`string_key_tree_allocate_node`]; it initialises
+/// color = 0/red and nulls the three links), copy-constructs the
+/// 8-byte pair into node+0x10 — the key string via
+/// `cxx_string_copy_ctor` @ 0x083d8c30 (the COW share, a real `bl`
+/// through [`pair_string_copy_ctor`]) plus the one mapped-value word —
+/// and bumps the node count at map+0x14. Linking: when `parent` is the
+/// header (map+0x10) or `insert_position` is nonzero, the node becomes
+/// `parent`'s left child (+8) — a header parent also takes it as root
+/// (header+4) and rightmost (header+0xc), otherwise the leftmost
+/// pointer (header+8) follows when `parent` was the leftmost.
+/// Otherwise the pair's key is compared against `parent`'s through the
+/// string comparator @ 0x083d74f4 (reached with the comparator object
+/// at map+0x19 in r0, like the original): less-than links left (same
+/// leftmost follow-up), else links right (+0xc) with the rightmost
+/// pointer following when `parent` was the rightmost. The node is then
+/// re-parented to `parent` and rebalanced exactly like
+/// `_Rb_tree_rebalance_for_insert`: while the node is not the root and
+/// its parent is red (color 0), a red uncle recolors parent/uncle
+/// black (1) and grandparent red (0) and ascends two levels; a
+/// black/absent uncle rotates — inner child first rotates the parent
+/// down (left case: rotate_left @ 0x083c31d4 on the parent, then
+/// rotate_right @ 0x083c3228 on the grandparent; mirrored on the
+/// right) — then parent black, grandparent red. The loop exits with
+/// the root recolored black and the new node written at `result + 0`.
+///
+/// Deviations:
+/// - The allocator never returns null in the original (`operator new`
+///   throws, abort @ 0x08266abc), so the original has no null check;
+///   with the test-only [`STRING_KEY_ALLOC_OPS`] stub this port writes
+///   a null fresh node at `result + 0` and returns without touching
+///   the tree (the stub's documented contract, the byte-keyed twin's
+///   shape).
+/// - The placement-new guard `node + 0x10 != null` around the pair
+///   copy (`adds r0,r0,#0x10; beq`) can only fail for a node at
+///   0xfffffff0 and is dropped, like the byte-keyed twin.
+/// - The original takes the key pair as a fifth argument on the stack
+///   (ARM AAPCS r0-r3 + stack); the port takes it as an ordinary fifth
+///   parameter. The original also passes dead extra register arguments
+///   to one rotation call (r2-r5 garbage @ 0x083c3584); dropped.
+/// - The string comparator is a real function, so unlike the byte-
+///   keyed twin (which inlines a one-instruction byte compare) it is
+///   reached through the `#[inline(never)]` [`pair_string_less`]
+///   front-end to preserve the original's `bl` boundary; the stateless
+///   comparator object's address (map+0x19) is passed along and
+///   ignored, exactly as the original passes it.
+/// - The original zeroes two dead stack scratch words before the
+///   comparator call (`str r7,[sp,#0]/[sp,#4]` @ 0x083c3474-78);
+///   dropped.
+///
+/// # Safety
+/// `result` must point at a writable word, `map` at a live container
+/// matching the scouted [`StringKeyTree`] layout, `parent` at a live
+/// node (or the header), and `key` at a readable 8-byte pair whose
+/// string word is a live `basic_string` object. The installed
+/// `allocate_node` must honour the 0x083c311c contract (fresh node:
+/// color 0, links null) or return null to abort.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_key_tree_insert_node(
+    result: *mut *mut u8,
+    map: *mut StringKeyMap,
+    insert_position: *mut u8,
+    parent: *mut u8,
+    key: *const StringKeyPair,
+) {
+    let tree = map.cast::<StringKeyTree>();
+    // Reads the fn-pointer field directly rather than through a
+    // whole-table read (the timer_schedule_shim gotcha).
+    let allocate_node =
+        core::ptr::addr_of!(STRING_KEY_ALLOC_OPS.allocate_node).read_volatile();
+    let node = allocate_node(map);
+    if node.is_null() {
+        // Unreachable in the original (operator new throws); only the
+        // documented stub lands here.
+        result.write(core::ptr::null_mut());
+        return;
+    }
+    let fresh = node;
+    // Copy-construct the pair: COW-share the key string, then the one
+    // mapped-value word.
+    pair_string_copy_ctor(
+        core::ptr::addr_of_mut!((*node).key.key),
+        core::ptr::addr_of!((*key).key),
+    );
+    (*node).key.value = (*key).value;
+    (*tree).node_count = (*tree).node_count.wrapping_add(1);
+
+    let header = (*tree).header;
+    let parent_node = parent.cast::<StringKeyTreeNode>();
+    let mut link_left = parent_node == header || !insert_position.is_null();
+    if !link_left {
+        link_left = pair_string_less(
+            core::ptr::addr_of!((*tree).comparator),
+            core::ptr::addr_of!((*key).key),
+            core::ptr::addr_of!((*parent_node).key.key),
+        ) != 0;
+    }
+    if link_left {
+        (*parent_node).left = node;
+        if parent_node == header {
+            (*header).parent = node; // root
+            (*header).right = node; // rightmost
+        } else if (*header).left == parent_node {
+            (*header).left = node; // new leftmost
+        }
+    } else {
+        (*parent_node).right = node;
+        if (*header).right == parent_node {
+            (*header).right = node; // new rightmost
+        }
+    }
+    (*node).parent = parent_node;
+
+    // Rebalance (0 = red, 1 = black): ascend while the parent is red.
+    let mut node = node;
+    while (*header).parent != node && (*(*node).parent).color == 0 {
+        let parent = (*node).parent;
+        let grandparent = (*parent).parent;
+        if parent == (*grandparent).left {
+            let uncle = (*grandparent).right;
+            if !uncle.is_null() && (*uncle).color == 0 {
+                (*parent).color = 1;
+                (*uncle).color = 1;
+                (*grandparent).color = 0;
+                node = grandparent;
+            } else {
+                if (*parent).right == node {
+                    string_key_tree_rotate_left(tree, parent);
+                    node = parent;
+                }
+                let parent = (*node).parent;
+                (*parent).color = 1;
+                let grandparent = (*parent).parent;
+                (*grandparent).color = 0;
+                string_key_tree_rotate_right(tree, grandparent);
+            }
+        } else {
+            let uncle = (*grandparent).left;
+            if !uncle.is_null() && (*uncle).color == 0 {
+                (*parent).color = 1;
+                (*uncle).color = 1;
+                (*grandparent).color = 0;
+                node = grandparent;
+            } else {
+                if (*parent).left == node {
+                    string_key_tree_rotate_right(tree, parent);
+                    node = parent;
+                }
+                let parent = (*node).parent;
+                (*parent).color = 1;
+                let grandparent = (*parent).parent;
+                (*grandparent).color = 0;
+                string_key_tree_rotate_left(tree, grandparent);
+            }
+        }
+    }
+    (*(*header).parent).color = 1;
+    result.write(fresh.cast::<u8>());
 }
 
 #[cfg(test)]
@@ -735,11 +978,14 @@ mod tests {
         header
     }
 
-    /// A container wired to `header`.
+    /// A container wired to `header`, node count 0.
     fn test_tree(header: *mut StringKeyTreeNode) -> StringKeyTree {
         StringKeyTree {
             _opaque: [0; core::mem::size_of::<StringKeyNodePool>()],
             header,
+            node_count: 0,
+            multi_insert: 0,
+            comparator: 0,
         }
     }
 
@@ -1314,5 +1560,411 @@ mod tests {
             assert_eq!((*pb).parent, core::ptr::null_mut());
             assert!(alloc_sizes().is_empty());
         }
+    }
+
+    // --- string_key_tree_insert_node (@ 0x083c3408) -------------------
+
+    struct AllocOpsGuard;
+
+    impl AllocOpsGuard {
+        fn install(ops: StringKeyAllocOps) -> Self {
+            unsafe {
+                core::ptr::addr_of_mut!(STRING_KEY_ALLOC_OPS).write_volatile(ops);
+            }
+            AllocOpsGuard
+        }
+    }
+
+    impl Drop for AllocOpsGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(STRING_KEY_ALLOC_OPS).write_volatile(
+                    StringKeyAllocOps {
+                        allocate_node: missing_allocate_node,
+                    },
+                );
+            }
+        }
+    }
+
+    /// Key-string storage for the insert tests: a leaked COW string
+    /// "a<byte>" standing on its own rep (refcount 0 = sole owner), so
+    /// ordering follows the second byte. The copy constructor shares
+    /// the rep, bumping the refcount per linked node; nothing ever
+    /// releases, which is fine for test-owned (leaked) storage.
+    fn key_string(second: u8) -> *mut u8 {
+        let fake = std::boxed::Box::new(FakeString {
+            rep: StringRep {
+                refcount: 0,
+                capacity: 7,
+                length: 2,
+            },
+            data: [b'a', second, 0, 0, 0, 0, 0, 0],
+        });
+        let raw = std::boxed::Box::into_raw(fake);
+        unsafe { core::ptr::addr_of_mut!((*raw).data).cast::<u8>() }
+    }
+
+    /// Lexicographic string less-than through the ported comparator.
+    unsafe fn key_less(a: *mut u8, b: *mut u8) -> bool {
+        cxx_string_less(core::ptr::null(), &a, &b) != 0
+    }
+
+    /// Three-way string order for sorting expected key sequences.
+    fn string_order(a: &*mut u8, b: &*mut u8) -> core::cmp::Ordering {
+        unsafe {
+            if key_less(*a, *b) {
+                core::cmp::Ordering::Less
+            } else if key_less(*b, *a) {
+                core::cmp::Ordering::Greater
+            } else {
+                core::cmp::Ordering::Equal
+            }
+        }
+    }
+
+    /// Arena backing the mock allocator; boxes stay put while a test's
+    /// tree is live and are freed by `free_arena`.
+    static mut ARENA: Vec<*mut StringKeyTreeNode> = Vec::new();
+
+    /// Mock for the pool allocator @ 0x083c311c: hands out a fresh
+    /// node honouring its contract — color 0 (red), links null, pair
+    /// uninitialised (zeroed here; nothing reads it before the copy).
+    unsafe extern "C" fn arena_allocate_node(
+        _map: *mut StringKeyMap,
+    ) -> *mut StringKeyTreeNode {
+        let node = std::boxed::Box::into_raw(std::boxed::Box::new(test_node()));
+        (*node).color = 0; // red
+        (*core::ptr::addr_of_mut!(ARENA)).push(node);
+        node
+    }
+
+    fn install_arena_allocator() -> AllocOpsGuard {
+        AllocOpsGuard::install(StringKeyAllocOps {
+            allocate_node: arena_allocate_node,
+        })
+    }
+
+    fn free_arena() {
+        unsafe {
+            for node in (*core::ptr::addr_of_mut!(ARENA)).drain(..) {
+                drop(std::boxed::Box::from_raw(node));
+            }
+        }
+    }
+
+    /// Red-black + BST + count validator for a tree under `header`:
+    /// BST ordering by strict string-key bounds (through the ported
+    /// comparator), no red node (0) with a red child, equal black
+    /// height on every null path, and exactly `expected` nodes.
+    /// Returns the sorted in-order key pointers.
+    unsafe fn validate_tree(
+        header: *mut StringKeyTreeNode,
+        expected: usize,
+    ) -> Vec<*mut u8> {
+        fn walk(
+            node: *mut StringKeyTreeNode,
+            lo: Option<*mut u8>,
+            hi: Option<*mut u8>,
+            keys: &mut Vec<*mut u8>,
+            count: &mut usize,
+        ) -> usize {
+            if node.is_null() {
+                return 1; // null leaves are black
+            }
+            unsafe {
+                let key = (*node).key.key;
+                if let Some(lo) = lo {
+                    assert!(key_less(lo, key), "BST lower bound violated");
+                }
+                if let Some(hi) = hi {
+                    assert!(key_less(key, hi), "BST upper bound violated");
+                }
+                let red = (*node).color == 0;
+                if red {
+                    for child in [(*node).left, (*node).right] {
+                        if !child.is_null() {
+                            assert_eq!((*child).color, 1, "red node with red child");
+                        }
+                    }
+                    assert_eq!((*(*node).parent).color, 1, "red node with red parent");
+                }
+                *count += 1;
+                let left_height = walk((*node).left, lo, Some(key), keys, count);
+                keys.push(key);
+                let right_height = walk((*node).right, Some(key), hi, keys, count);
+                assert_eq!(left_height, right_height, "black height mismatch");
+                left_height + usize::from(!red)
+            }
+        }
+        let mut keys = Vec::new();
+        let mut count = 0;
+        let root = (*header).parent;
+        assert!(!root.is_null());
+        assert_eq!((*root).color, 1, "root must be black");
+        assert_eq!((*root).parent, header, "root's parent must be the header");
+        walk(root, None, None, &mut keys, &mut count);
+        assert_eq!(count, expected, "node count");
+        keys
+    }
+
+    /// The header's leftmost/rightmost pointers track the extremes
+    /// (`keys` is the sorted in-order sequence).
+    unsafe fn validate_extremes(
+        header: *mut StringKeyTreeNode,
+        keys: &[*mut u8],
+    ) {
+        let min = *keys.first().unwrap();
+        let max = *keys.last().unwrap();
+        assert_eq!((*(*header).left).key.key, min, "leftmost");
+        assert_eq!((*(*header).right).key.key, max, "rightmost");
+    }
+
+    /// An empty tree: root null, leftmost and rightmost pointing at
+    /// the header itself (the libstdc++ empty shape).
+    unsafe fn make_empty_tree(
+        header: *mut StringKeyTreeNode,
+    ) -> StringKeyTree {
+        (*header).left = header;
+        (*header).right = header;
+        test_tree(header)
+    }
+
+    /// Calls the port directly (the `_M_insert` contract): fresh node
+    /// pointer at result+0. The pair carries the key string and a
+    /// zeroed value word, like the lookup builds.
+    unsafe fn run_insert_node(
+        tree: *mut StringKeyTree,
+        insert_position: *mut u8,
+        parent: *mut StringKeyTreeNode,
+        key: *mut u8,
+    ) -> *mut u8 {
+        let pair = StringKeyPair { key, value: 0 };
+        let mut fresh: *mut u8 = core::ptr::null_mut();
+        string_key_tree_insert_node(
+            &mut fresh,
+            tree.cast::<StringKeyMap>(),
+            insert_position,
+            parent.cast::<u8>(),
+            &pair,
+        );
+        fresh
+    }
+
+    /// With the allocator stub the port reports a null fresh node and
+    /// leaves the tree completely untouched.
+    #[test]
+    fn insert_node_alloc_stub_reports_null_and_untouched_tree() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        let _guard = AllocOpsGuard::install(StringKeyAllocOps {
+            allocate_node: missing_allocate_node,
+        });
+        unsafe {
+            let mut header = test_header();
+            let header_ptr = core::ptr::addr_of_mut!(header);
+            let mut tree = make_empty_tree(header_ptr);
+            let tree_ptr = core::ptr::addr_of_mut!(tree);
+
+            let fresh =
+                run_insert_node(tree_ptr, core::ptr::null_mut(), header_ptr, key_string(5));
+            assert_eq!(fresh, core::ptr::null_mut());
+            assert_eq!((*header_ptr).parent, core::ptr::null_mut());
+            assert_eq!(tree.node_count, 0);
+        }
+    }
+
+    /// First node of an empty tree (parent == header): linked as root,
+    /// leftmost and rightmost, recolored black, count bumped, result
+    /// carries the node — and the pair is copy-constructed: the key
+    /// string word is the COW share (same data pointer, refcount
+    /// bumped) and the value word is copied.
+    #[test]
+    fn insert_node_first_insert_becomes_black_root() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        let _guard = install_arena_allocator();
+        unsafe {
+            let mut header = test_header();
+            let header_ptr = core::ptr::addr_of_mut!(header);
+            let mut tree = make_empty_tree(header_ptr);
+            let tree_ptr = core::ptr::addr_of_mut!(tree);
+
+            let key = key_string(5);
+            let pair = StringKeyPair {
+                key,
+                value: 0x5a5a5a5a,
+            };
+            let mut fresh: *mut u8 = core::ptr::null_mut();
+            string_key_tree_insert_node(
+                &mut fresh,
+                tree_ptr.cast::<StringKeyMap>(),
+                core::ptr::null_mut(),
+                header_ptr.cast::<u8>(),
+                &pair,
+            );
+            assert!(!fresh.is_null());
+            let node = fresh.cast::<StringKeyTreeNode>();
+            assert_eq!((*header_ptr).parent, node); // root
+            assert_eq!((*header_ptr).left, node); // leftmost
+            assert_eq!((*header_ptr).right, node); // rightmost
+            assert_eq!((*node).parent, header_ptr);
+            assert_eq!((*node).color, 1); // root recolored black
+            // The pair copy: COW share plus the value word.
+            assert_eq!((*node).key.key, key);
+            assert_eq!((*node).key.value, 0x5a5a5a5a);
+            let rep = (key as *mut StringRep).sub(1);
+            assert_eq!((*rep).refcount, 1); // the share bumped it
+            assert_eq!(tree.node_count, 1);
+            assert_eq!(validate_tree(header_ptr, 1), [key]);
+            validate_extremes(header_ptr, &[key]);
+        }
+        free_arena();
+    }
+
+    /// Comparator-driven left link (insert_position == 0, key less
+    /// than parent's): the node becomes the parent's left child and
+    /// the leftmost pointer follows the old leftmost.
+    #[test]
+    fn insert_node_left_link_updates_leftmost() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        let _guard = install_arena_allocator();
+        unsafe {
+            let mut header = test_header();
+            let header_ptr = core::ptr::addr_of_mut!(header);
+            let mut tree = make_empty_tree(header_ptr);
+            let tree_ptr = core::ptr::addr_of_mut!(tree);
+
+            let k7 = key_string(7);
+            let k3 = key_string(3);
+            let root = run_insert_node(tree_ptr, core::ptr::null_mut(), header_ptr, k7)
+                .cast::<StringKeyTreeNode>();
+            let fresh = run_insert_node(tree_ptr, core::ptr::null_mut(), root, k3)
+                .cast::<StringKeyTreeNode>();
+            assert_eq!((*root).left, fresh);
+            assert_eq!((*fresh).parent, root);
+            assert_eq!((*header_ptr).left, fresh); // new leftmost
+            assert_eq!((*header_ptr).right, root); // rightmost unchanged
+            assert_eq!(tree.node_count, 2);
+            assert_eq!(validate_tree(header_ptr, 2), [k3, k7]);
+            validate_extremes(header_ptr, &[k3, k7]);
+        }
+        free_arena();
+    }
+
+    /// Comparator-driven right link: right child plus rightmost
+    /// follow-up.
+    #[test]
+    fn insert_node_right_link_updates_rightmost() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        let _guard = install_arena_allocator();
+        unsafe {
+            let mut header = test_header();
+            let header_ptr = core::ptr::addr_of_mut!(header);
+            let mut tree = make_empty_tree(header_ptr);
+            let tree_ptr = core::ptr::addr_of_mut!(tree);
+
+            let k7 = key_string(7);
+            let k9 = key_string(9);
+            let root = run_insert_node(tree_ptr, core::ptr::null_mut(), header_ptr, k7)
+                .cast::<StringKeyTreeNode>();
+            let fresh = run_insert_node(tree_ptr, core::ptr::null_mut(), root, k9)
+                .cast::<StringKeyTreeNode>();
+            assert_eq!((*root).right, fresh);
+            assert_eq!((*header_ptr).right, fresh); // new rightmost
+            assert_eq!((*header_ptr).left, root); // leftmost unchanged
+            assert_eq!(validate_tree(header_ptr, 2), [k7, k9]);
+            validate_extremes(header_ptr, &[k7, k9]);
+        }
+        free_arena();
+    }
+
+    /// A nonzero insert_position forces the left link even when the
+    /// key compares greater than the parent's (multimap equal-key
+    /// path).
+    #[test]
+    fn insert_node_insert_position_forces_left_link() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        let _guard = install_arena_allocator();
+        unsafe {
+            let mut header = test_header();
+            let header_ptr = core::ptr::addr_of_mut!(header);
+            let mut tree = make_empty_tree(header_ptr);
+            let tree_ptr = core::ptr::addr_of_mut!(tree);
+
+            let k7 = key_string(7);
+            let k9 = key_string(9);
+            let root = run_insert_node(tree_ptr, core::ptr::null_mut(), header_ptr, k7)
+                .cast::<StringKeyTreeNode>();
+            let mut nonzero: u8 = 1;
+            let fresh = run_insert_node(tree_ptr, &mut nonzero, root, k9)
+                .cast::<StringKeyTreeNode>();
+            assert_eq!((*root).left, fresh);
+            assert_eq!((*root).right, core::ptr::null_mut());
+            assert_eq!((*header_ptr).left, fresh); // leftmost followed
+            assert_eq!((*header_ptr).right, root);
+        }
+        free_arena();
+    }
+
+    /// Rebalance stress: three key orders over unique keys — ascending
+    /// (right-rotate path), descending (left-rotate), and a fixed
+    /// zigzag permutation (double rotations and recolor ascents) —
+    /// validating the full red-black/BST/count contract and the
+    /// leftmost/rightmost pointers after every single insert.
+    #[test]
+    fn insert_node_rebalance_keeps_red_black_invariants() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        let _guard = install_arena_allocator();
+
+        let mut orders: Vec<Vec<u8>> = Vec::new();
+        orders.push((1u8..=40).collect());
+        orders.push((1u8..=40).rev().collect());
+        // Deterministic zigzag: mid, mid-1, mid+1, mid-2, mid+2, ...
+        let mut zigzag = Vec::new();
+        let mid = 20u8;
+        zigzag.push(mid);
+        for d in 1..20u8 {
+            zigzag.push(mid - d);
+            zigzag.push(mid + d);
+        }
+        orders.push(zigzag);
+
+        for order in orders {
+            unsafe {
+                let mut header = test_header();
+                let header_ptr = core::ptr::addr_of_mut!(header);
+                let mut tree = make_empty_tree(header_ptr);
+                let tree_ptr = core::ptr::addr_of_mut!(tree);
+
+                let mut inserted: Vec<*mut u8> = Vec::new();
+                for (i, k) in order.iter().enumerate() {
+                    let key = key_string(*k);
+                    // Descend like the insert-unique caller does to
+                    // find the link parent (keeps this test honest
+                    // about the _M_insert contract: parent + position).
+                    let mut parent = header_ptr;
+                    let mut node = (*header_ptr).parent;
+                    while !node.is_null() {
+                        parent = node;
+                        node = if key_less(key, (*node).key.key) {
+                            (*node).left
+                        } else {
+                            (*node).right
+                        };
+                    }
+                    let fresh =
+                        run_insert_node(tree_ptr, core::ptr::null_mut(), parent, key);
+                    assert!(!fresh.is_null());
+                    assert_eq!(tree.node_count as usize, i + 1);
+                    inserted.push(key);
+                    let keys = validate_tree(header_ptr, i + 1);
+                    let mut sorted = inserted.clone();
+                    sorted.sort_by(string_order);
+                    assert_eq!(keys, sorted);
+                    validate_extremes(header_ptr, &sorted);
+                }
+            }
+        }
+        free_arena();
+        assert!(unsafe { (*core::ptr::addr_of!(ARENA)).is_empty() });
     }
 }
