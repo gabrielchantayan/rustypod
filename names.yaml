@@ -13148,3 +13148,51 @@ functions:
       symbol (the load_be32 alias precedent). match.py against iabs at
       this address: same rsbmi-behind-frame-prologue structure as the
       primary, byte-identical inputs make the diff identical.
+
+  # --- UI pixel/color (ui/color) ---
+
+  - address: 0x080ed43c
+    ghidra: FUN_080ed43c
+    name: color_to_rgba8
+    size: 652
+    sig: "void color_to_rgba8(u32 color, u32 format, u8 *out)"
+    module: ui/color
+    status: ported
+    vars:
+      param_1: color
+      param_2: format
+      param_3: out
+      DAT_080ed6c8: PATTERN_FG (pointer @ 0x089cc8d0)
+      DAT_080ed6cc: PATTERN_BG (pointer @ 0x089cc8c0)
+      DAT_080ed6d0: DITHER_PATTERN_01 (0x55555555)
+      DAT_080ed6d4: PATTERN_MID_01 (pointer @ 0x089cc8c4)
+      DAT_080ed6d8: DITHER_PATTERN_10 (0xaaaaaaaa)
+      DAT_080ed6dc: PATTERN_MID_10 (pointer @ 0x089cc8cc)
+      DAT_080ed6e0: GRAY4_DIV15_MAGIC (0x88888889)
+      DAT_080ed6e4: NIBBLE_TABLE (pointer @ 0x083f85a8)
+    notes: >-
+      Unpacks a color from the pixel format selected by format (masked
+      with 0xffffdfff - bit 13 ignored) into 4 bytes R,G,B,A. Formats:
+      0x1 mono (nonzero -> foreground canned color, zero -> background),
+      0x2 2bpp dither (0 -> bg, 0x55555555 -> mid-01, 0xaaaaaaaa ->
+      mid-10, else fg), 0x4 gray4 inverted (gray = (0xf-(color&0xf))*255
+      umull 0x88888889 >> 35, i.e. exact (15-nibble)*17, RGB=gray A=0xff),
+      0x8 gray8 inverted (0xff-(color&0xff) x3, A=0xff), 0x565/0x555
+      RGB565/RGB555 shift-or-replication expansion A=0xff, 0x1888
+      ARGB8888 byte reorder to RGBA, 0x1444 RGBA4444 via 16-byte nibble
+      table, anything else -> foreground. 37 bl call sites, mostly
+      text/layout drawing (0x080b2a40, 0x080f1600). Remarkable detail:
+      the four canned colors are not the function's own constants - its
+      literal pool holds absolute pointers that land inside the localized
+      clock-city string table ("\0Clock_String_Katmandu\0...
+      Clock_String_Mogadishu\0" @ 0x089cc8c0: bg = 00 43 6c 6f "\0Clo",
+      mid-01 = 63 6b 5f 53 "ck_S", mid-10 = 67 5f 4d 6f "g_Mo", fg =
+      67 61 64 69 "gadi"), and the RGBA4444 nibble table is 16 bytes
+      read out of a (u16 counter, u16 value) pair table @ 0x083f85a8.
+      Port captures all of them by value (behavior identical, regions
+      are read-only). match.py: LLVM dispatches the small formats
+      through a jump table where ADS used a cmp chain; the gray4
+      rsb/umull/lsr#3 sequence, both 565/555 expansion blocks, the
+      0x1888 byte reorder, the 0x1444 nibble lookups and the 4x
+      ldrb/strb canned-color copies all match the original
+      instruction-for-instruction in shape.
