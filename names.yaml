@@ -12481,7 +12481,9 @@ functions:
       begin() test via the iterator-equality helper @ 0x083cf818 and an
       inline predecessor walk decide found-vs-insert; found returns the
       existing node flagged 0, else _M_insert @ 0x083c3408 links a fresh
-      node (allocates @ 0x083c311c, copy-constructs the pair -
+      node (allocates @ 0x083c311c - ported as
+      string_key_tree_allocate_node in cxx/string_map.rs -,
+      copy-constructs the pair -
       cxx_string_copy_ctor plus one value word - and rebalances via the
       rotations @ 0x083c31d4 (ported as string_key_tree_rotate_left in
       cxx/string_map.rs - the scouting note's 0x083c31f4 was
@@ -12490,8 +12492,57 @@ functions:
        cxx/string_map.rs)) flagged 1. _M_insert takes
       the key pair as a fifth argument on the stack. Node keys sit at
       node+0x10. Not ported - needs the _M_insert @ 0x083c3408 chain
-      (allocator + rotations) with it; port them together, like the
-      byte-keyed family.
+       (allocator + rotations) with it; port them together, like the
+       byte-keyed family.
+
+  - address: 0x083c311c
+    ghidra: FUN_083c311c
+    name: string_key_tree_allocate_node
+    size: 184
+    sig: "StringKeyTreeNode *string_key_tree_allocate_node(StringKeyMap *map)"
+    module: cxx/string_map
+    status: ported
+    vars: {param_1: map, puVar1: node, piVar3: chunk, iVar4: arena, uVar2: prev_capacity, uVar5: grown, uVar6: capacity}
+    notes: >-
+      libstdc++ pool allocator for the string-keyed map family's
+      0x18-byte nodes - the near-instruction-identical twin of the
+      ported byte-keyed allocator @ 0x083b7f40
+      (byte_key_tree_allocate_node in cxx/byte_key_map.rs), verified
+      against osos.asm: same free-list/bump/growth sequence, differing
+      only in the node stride (0x18 vs 0x20 - a mul by 0x18 and an
+      add r1,r6,r6,lsl#1 + lsl#3 arena-end where the twin folds 0x20
+      into lsl#5 shifts). Pop the free list at map+4 (next threaded
+      through node+0xc, the right link), else bump-allocate in the
+      map+8..map+0xc range, else grow - capacity max(prev+0x20,
+      prev+prev/2+prev/8), 0x20 first - carving a 0xc-byte chunk
+      header (prev/capacity/arena, pushed at map+0) and a
+      capacity*0x18 arena via two calls to the ported
+      operator_new_checked @ 0x08266c70 (its dead r1=0 argument
+      dropped; reached through an inline(never) pool_operator_new
+      front-end to keep the two bl boundaries). Returned node: color
+      byte 0 (red), parent/left/right nulled, pair uninitialised.
+      Ghidra types the original void, but it leaves the node in r0 and
+      _M_insert @ 0x083c3408 consumes it (mov r5,r0 @ 0x083c3428) -
+      the port returns it, like the byte-keyed twin. Called from
+      _M_insert (bl @ 0x083c3424) and one sibling site @ 0x081a0b28.
+      Pool/chunk state modeled as StringKeyNodePool /
+      StringKeyPoolChunk repr(C) structs (32-bit layout asserted);
+      StringKeyTree._opaque is now sized off the pool struct (the
+      ByteKeyTree precedent) so host fields stay disjoint; node stride
+      and chunk size go through size_of (0x18/0xc on target). Exported
+      pub with no ops slot - the string-keyed _M_insert @ 0x083c3408
+      that will call it is not yet ported, so there is no in-crate
+      caller (the rotations precedent; the future _M_insert port will
+      introduce the slot, like BYTE_KEY_ALLOC_OPS). No null check on
+      the checked-new results, like the original (its new-handler path
+      aborts @ 0x08266abc). Host tests: fresh-chunk carve, bump
+      exhaustion growth (0x20 -> 0x40), the capacity formula on both
+      branches (8 -> 0x28 floor, 0x100 -> 0x1a0), free-list pop
+      (next via node+0xc, re-init) - the byte-keyed pool-test set.
+      match.py structural: 46 vs 46 instructions - same ldr/str pool
+      sequence, growth formula, two bl operator-new boundaries, chunk
+      stm and node zeroing; the diff is LLVM's fp frame, register
+      scheduling and branch layout (the expected ADS-vs-LLVM noise).
 
   - address: 0x083c31d4
     ghidra: FUN_083c31d4
