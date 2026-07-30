@@ -9781,6 +9781,60 @@ functions:
       fp frame and LLVM folding the -4 into `mov r0, r4` (the
       documented deviation).
 
+  - address: 0x08258c9c
+    ghidra: FUN_08258c9c
+    name: string_id_record_assign
+    size: 40
+    sig: "StringIdRecord *string_id_record_assign(StringIdRecord *this, const StringIdRecord *source)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: this, param_2: source}
+    notes: >-
+      12 bl call sites (binary-scanned: five consecutive @
+      0x08177d7c-0x08177dac, five consecutive @ 0x0817a3dc-0x0817a40c,
+      0x0822a164, 0x0822a2a8). 40 bytes, all code - no literal-pool
+      word (it loads no vtable literal, unlike every ctor/dtor
+      sibling). The ASSIGNMENT operator of the 0x10-byte polymorphic
+      (string, id) record class whose three constructors and
+      destructor are ported beside it (full family context in the
+      0x08258c80 entry): `mov r5,r1; mov r4,r0` saves source/this,
+      `add r0,r0,#0x4; add r1,r1,#0x4; bl 0x082774a8` chains to the
+      StringObject assignment operator on this+4 with the SOURCE
+      RECORD's embedded subobject (source+4, not the source record
+      itself), `ldr r0,[r5,#0xc]; str r0,[r4,#0xc]` copies the id,
+      `mov r0,r4` returns the saved this - NOT the callee's return,
+      unlike the ctor siblings' `sub r0,r0,#0x4` derivation. NO vtable
+      store (assignment never replants) and no self-assignment guard
+      at this level (the guard lives inside the StringObject operator
+      @ 0x082774a8: `cmp r0,r1` with the whole body conditional -
+      `ldrne r1,[r1,#4]; movne r0,r4; blne 0x08276474` reassigning the
+      payload from the source's payload word). The StringObject
+      assignment operator @ 0x082774a8 is NOT ported (its payload
+      reassignment helper @ 0x08276474 allocates and dispatches
+      through vtable slots +0x8/+0xc), so the chain goes through the
+      new STRING_OBJECT_ASSIGN dispatch slot (the
+      STRING_OBJECT_COPY_CONSTRUCT pattern) whose default stub is the
+      real operator's self-assignment-guard prefix - the cmp guard and
+      the return, the unported helper call skipped, both objects
+      untouched; the real port of 0x082774a8 replaces the stub when it
+      lands. Neither of the ctor siblings' other deviations applies:
+      no vtable is stored (nothing to model) and the original returns
+      its own argument (no return derivation needed, exact on 64-bit
+      hosts). Sibling NOT ported here: equality @ 0x08258cc4. Host
+      tests: the dispatch receives the embedded subobject and the
+      SOURCE's embedded subobject (recorder reads the +0 word through
+      subobject-1 and observes the sentinel - no vtable store precedes
+      the chain, the inverse of the ctor checks), the id copied (edge
+      values -1/i32::MIN/i32::MAX/0/0x1f03), the return being the
+      saved this even when the mock returns a bogus pointer, the
+      default stub leaving both objects untouched except the id,
+      self-assignment as a byte-identical no-op, and an
+      assign-then-destroy round trip. match.py structural: same
+      push/mov/add/add/call/ldr/str/mov/pop shape; the diff is the
+      crate fp frame and the blx-through-volatile-slot dispatch
+      standing in for the direct bl 0x082774a8 (the documented
+      deviation).
+
   - address: 0x08275d74
     ghidra: FUN_08275d74
     name: string_object_release_payload
@@ -14742,3 +14796,30 @@ functions:
       -> 0. match.py structural: same push/sub-sp/bl/bl/ldr/ldr/mul/pop
       shape; the diffs are the crate-standard fp frame and the
       descriptor living at sp+0 instead of sp+4 because of it.
+
+  - address: 0x080a67dc
+    ghidra: FUN_080a67dc
+    name: f32_to_fixed16_sat
+    size: 48
+    sig: "i32 f32_to_fixed16_sat(u32 x)"
+    module: fp/fp_fixed16
+    status: ported
+    renames:
+      param_1: x
+      DAT_080a680c: POS_SAT_THRESHOLD (0x46ffff00 = 32767.984375f)
+      FUN_083ed150: __fscalb
+      FUN_083ec898: __f2i
+    notes: >-
+      f32 (soft-float bit pattern in r0) -> Q16.16 fixed-point s32 with
+      clamping. Two saturation compares on the raw bit pattern, then a
+      scale-and-truncate tail: signed cmp against literal 0x46ffff00
+      (f32 >= 32767.984375, +Inf, all positive NaN patterns) ->
+      0x7fffffff; unsigned cmp against 0xc7000000 (f32 <= -32768.0,
+      -Inf, all negative NaN patterns) -> 0x80000000; common path is
+      __f2i(__fscalb(x, 16)) = trunc(x * 65536). Ghidra mislabels the
+      function as non-returning (both saturation exits are ldmia
+      sp!,{r4,pc}); it returns on every path. Referenced by the
+      fixed16_cos/fixed16_sin literal pools. match.py structural: same
+      two-compares-then-scale-then-truncate shape; LLVM inlined the
+      __fscalb/__f2i bodies and turned the unsigned >= 0xc7000000
+      compare into an equivalent top-byte compare.

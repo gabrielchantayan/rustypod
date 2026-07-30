@@ -100,6 +100,13 @@
 //!   chains to the StringObject copy constructor @ 0x082773e0 on the
 //!   embedded subobject with the source record's subobject, copies the
 //!   id — see [`StringIdRecord`].
+//! - `string_id_record_assign` — original: `FUN_08258c9c` @
+//!   0x08258c9c (40 bytes, all code — no literal-pool word; 12 `bl`
+//!   call sites, binary-scanned). The assignment operator of the same
+//!   record class — NO vtable store (assignment never replants),
+//!   chains to the StringObject assignment operator @ 0x082774a8 on
+//!   the embedded subobject with the source record's subobject, copies
+//!   the id, returns its own saved `this` — see [`StringIdRecord`].
 //!
 //! # The 0x08258cxx family: a (string, id) record on a StringObject base
 //!
@@ -118,7 +125,9 @@
 //! 0x082773e0 on this+4 with the source record's +4 subobject, then
 //! copies +0xc), the plain
 //! destructor @ 0x08258c80 (ported here), an assignment operator @
-//! 0x08258c9c (0x082774a8 on the strings, then copies +0xc) and an
+//! 0x08258c9c (ported here — chains to the StringObject assignment
+//! operator @ 0x082774a8 on this+4 with the source record's +4
+//! subobject, then copies +0xc) and an
 //! equality operator @ 0x08258cc4 (compares the strings through the
 //! ported `string_object_c_str` @ 0x082a50b0 plus the +0xc words).
 //! The class is unidentified; the name is structural (the
@@ -196,6 +205,19 @@
 //!   [`STRING_ID_RECORD_VTABLE`], the [`STRING_OBJECT_COPY_CONSTRUCT`]
 //!   dispatch slot, and `this` derived from the callee's return minus
 //!   one word — for the same reasons.
+//! - `string_id_record_assign` chains to the StringObject assignment
+//!   operator @ 0x082774a8, which is NOT ported (its payload
+//!   reassignment helper @ 0x08276474 allocates and dispatches
+//!   through vtable slots +0x8/+0xc), so the chain goes through the
+//!   [`STRING_OBJECT_ASSIGN`] dispatch slot (the
+//!   [`STRING_OBJECT_COPY_CONSTRUCT`] pattern). The default stub is
+//!   the real operator's self-assignment-guard prefix — the `cmp r0,
+//!   r1` guard whose whole conditional body is the unported helper
+//!   call — returning `this` with both objects untouched. Unlike the
+//!   constructor siblings, the operator stores no vtable and returns
+//!   its own saved `this` (`mov r0, r4`, not the callee's return), so
+//!   neither the modeled-vtable nor the return-derivation deviation
+//!   applies.
 
 use crate::heap::veneers::{free_wrapper, operator_delete};
 use crate::libc::strlen_safe_plus1::strlen_safe_plus1;
@@ -461,7 +483,8 @@ pub struct StringIdRecord {
     /// +0x0c — the integer id; the default constructor @ 0x08258c58
     /// stores -1 (`mvn r1, #0x0`), the (string, id) constructor @
     /// 0x08258c08 and the copy constructor @ 0x08258c2c store/copy
-    /// it, and the equality operator @ 0x08258cc4 compares it.
+    /// it, the assignment operator @ 0x08258c9c copies it, and the
+    /// equality operator @ 0x08258cc4 compares it.
     pub id: i32,
 }
 
@@ -647,6 +670,91 @@ pub unsafe extern "C" fn string_id_record_copy_construct(
     let record = (base as *mut u8).sub(core::mem::size_of::<usize>()) as *mut StringIdRecord;
     (*record).id = (*source).id;
     record
+}
+
+/// Default [`STRING_OBJECT_ASSIGN`] stub: the self-assignment-guard
+/// prefix of the unported StringObject assignment operator @
+/// 0x082774a8 — the original is `cmp r0, r1` with its whole body
+/// conditional (`ldrne r1, [r1, #0x4]; movne r0, r4; blne
+/// 0x08276474`): when `this` and `source` differ it reassigns the
+/// payload from the source's payload word through 0x08276474 (the
+/// same vtable-dispatching duplication helper the copy constructor
+/// chains to), and when they are equal it does nothing at all. The
+/// stub reproduces the guard and the `mov r0, r4` return, and skips
+/// only the unported helper call — both objects stay untouched.
+/// Exact for self-assignment; the real port of 0x082774a8 replaces
+/// this stub when it lands (see the module header).
+unsafe extern "C" fn string_object_assign_stub(
+    this: *mut StringObject,
+    source: *const StringObject,
+) -> *mut StringObject {
+    if this != source as *mut StringObject {
+        // The real operator would reassign `this`'s payload from
+        // `source`'s payload word through 0x08276474 — unported.
+    }
+    this
+}
+
+/// Indirect dispatch for the unported StringObject assignment
+/// operator @ 0x082774a8 (the [`STRING_OBJECT_COPY_CONSTRUCT`]
+/// pattern). Chained to by the ported record assignment operator
+/// [`string_id_record_assign`]. Host tests install a recording mock;
+/// the real port of 0x082774a8 replaces the default stub when it
+/// lands.
+pub static mut STRING_OBJECT_ASSIGN: unsafe extern "C" fn(
+    this: *mut StringObject,
+    source: *const StringObject,
+) -> *mut StringObject = string_object_assign_stub;
+
+/// Reads the assign slot (volatile — the slot is meant to be swapped
+/// at runtime, and a plain read lets LLVM const-fold the default
+/// away; the [`release_payload_op`] rationale).
+#[inline(always)]
+pub(crate) unsafe fn assign_op() -> unsafe extern "C" fn(
+    *mut StringObject,
+    *const StringObject,
+) -> *mut StringObject {
+    core::ptr::read_volatile(core::ptr::addr_of!(STRING_OBJECT_ASSIGN))
+}
+
+/// string_id_record_assign — original: `FUN_08258c9c` @ 0x08258c9c
+/// (40 bytes, all code — no literal-pool word; 12 `bl` call sites,
+/// binary-scanned: five consecutive @ 0x08177d7c-0x08177dac, five
+/// consecutive @ 0x0817a3dc-0x0817a40c, 0x0822a164, 0x0822a2a8).
+///
+/// The assignment operator of the 0x10-byte (string, id) record
+/// class: saves `source` in r5 and `this` in r4 (`mov r5, r1; mov
+/// r4, r0`), chains to the StringObject assignment operator @
+/// 0x082774a8 on the embedded subobject (`add r0, r0, #0x4` — `this
+/// + 4`) with the SOURCE RECORD's embedded subobject (`add r1, r1,
+/// #0x4` — `source + 4`, not the source record itself), copies the
+/// id word (`ldr r0, [r5, #0xc]; str r0, [r4, #0xc]`), and returns
+/// its own saved `this` (`mov r0, r4`) — NOT the callee's return,
+/// unlike the constructor siblings' `sub r0, r0, #0x4` derivation.
+/// Unlike the constructors there is NO vtable store: assignment
+/// never replants. There is also no self-assignment guard at this
+/// level — the guard lives inside the StringObject operator (its
+/// `cmp r0, r1` on the subobjects catches record self-assignment,
+/// and the id self-copy is harmless). No allocation of its own, no
+/// NULL guard on `this` or `source` — the original faults on either,
+/// and so does the port.
+///
+/// Deviations (see the module header): the unported StringObject
+/// assignment operator @ 0x082774a8 dispatches through
+/// [`STRING_OBJECT_ASSIGN`], whose default stub is the real
+/// operator's self-assignment-guard prefix. Neither of the
+/// constructor siblings' other two deviations applies: there is no
+/// vtable to model (none is stored) and no return to derive (the
+/// original returns its own argument, exact on every host).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_id_record_assign(
+    this: *mut StringIdRecord,
+    source: *const StringIdRecord,
+) -> *mut StringIdRecord {
+    assign_op()(&mut (*this).string, &(*source).string);
+    (*this).id = (*source).id;
+    this
 }
 
 #[cfg(test)]
@@ -1648,5 +1756,304 @@ mod tests {
         );
         assert_eq!(calls[0].0, core::ptr::addr_of!(record.string) as usize);
         assert_eq!(record.id, 0x1f00, "destroy never rewrites the copied id");
+    }
+
+    // ---- string_id_record_assign -----------------------------------
+
+    /// Serializes the tests that swap `STRING_OBJECT_ASSIGN` (the
+    /// `COPY_SLOT_LOCK` precedent; a separate slot, a separate lock).
+    static ASSIGN_SLOT_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Assign dispatches observed by the recording mock: (subobject,
+    /// source subobject, class vtable word at subobject-1 read at
+    /// entry), in call order.
+    static mut ASSIGN_CALLS: Vec<(usize, usize, usize)> = Vec::new();
+
+    unsafe extern "C" fn recording_assign(
+        this: *mut StringObject,
+        source: *const StringObject,
+    ) -> *mut StringObject {
+        // The word one pointer-width before the subobject is the
+        // record's +0 class vtable: the assignment operator stores NO
+        // vtable, so the recorder must observe the caller's sentinel
+        // here (the exact inverse of the constructor mock's check).
+        let class_vtable = (this as *const usize).sub(1).read();
+        (*core::ptr::addr_of_mut!(ASSIGN_CALLS)).push((
+            this as usize,
+            source as usize,
+            class_vtable,
+        ));
+        // The real operator returns its `this` argument (mov r0, r4).
+        this
+    }
+
+    /// Restores the default stub on drop, even when a test panics.
+    struct AssignSlotGuard;
+    impl Drop for AssignSlotGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN)
+                    .write_volatile(string_object_assign_stub);
+            }
+        }
+    }
+
+    /// Installs the recording assign; restores the stub on drop.
+    fn assign_bench() -> (MutexGuard<'static, ()>, AssignSlotGuard) {
+        let lock = ASSIGN_SLOT_LOCK.lock().unwrap();
+        unsafe {
+            (*core::ptr::addr_of_mut!(ASSIGN_CALLS)).clear();
+            core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN).write_volatile(recording_assign);
+        }
+        (lock, AssignSlotGuard)
+    }
+
+    fn assign_calls() -> Vec<(usize, usize, usize)> {
+        unsafe { (*core::ptr::addr_of!(ASSIGN_CALLS)).clone() }
+    }
+
+    #[test]
+    fn record_assign_dispatches_copies_id_returns_this_and_stores_no_vtable() {
+        let _bench = assign_bench();
+        let mut source = StringIdRecord {
+            vtable: 0xdead_beef as *const StringIdRecordVtable,
+            string: StringObject {
+                vtable: 0xcafe_f00d as *const StringObjectVtable,
+                payload: 0x0bad_f00d as *mut u8,
+            },
+            id: 0x1f01,
+        };
+        let mut record = StringIdRecord {
+            vtable: 0x5555_5555 as *const StringIdRecordVtable,
+            string: StringObject {
+                vtable: 0x1111_1111 as *const StringObjectVtable,
+                payload: 0x2222_2222 as *mut u8,
+            },
+            id: -1,
+        };
+        let this: *mut StringIdRecord = &mut record;
+        unsafe {
+            assert_eq!(string_id_record_assign(this, &source), this);
+            assert_eq!(record.id, 0x1f01, "ldr r0,[r5,#0xc]; str r0,[r4,#0xc]");
+            assert_eq!(
+                record.vtable, 0x5555_5555 as *const StringIdRecordVtable,
+                "assignment never replants the class vtable (no str [r4,#0x0])"
+            );
+        }
+        let calls = assign_calls();
+        assert_eq!(calls.len(), 1, "exactly one assign dispatch");
+        assert_eq!(
+            calls[0].0,
+            core::ptr::addr_of!(record.string) as usize,
+            "the chain receives the embedded subobject (add r0, r0, #0x4)"
+        );
+        assert_eq!(
+            calls[0].1,
+            core::ptr::addr_of!(source.string) as usize,
+            "the SOURCE's embedded subobject is forwarded (add r1, r1, #0x4), \
+             not the source record itself"
+        );
+        assert_eq!(
+            calls[0].2, 0x5555_5555usize,
+            "no vtable store precedes the chain: the +0 word is still the sentinel"
+        );
+    }
+
+    #[test]
+    fn record_assign_returns_its_own_this_not_the_callee_return() {
+        // The original ends `mov r0, r4` — the saved `this` — so the
+        // callee's return value is discarded entirely. A mock that
+        // returns a bogus pointer proves the port does the same (the
+        // constructor siblings instead DERIVE this from the return).
+        unsafe extern "C" fn bogus_assign(
+            _this: *mut StringObject,
+            _source: *const StringObject,
+        ) -> *mut StringObject {
+            0x1usize as *mut StringObject
+        }
+        let _lock = ASSIGN_SLOT_LOCK.lock().unwrap();
+        let _guard = AssignSlotGuard;
+        unsafe {
+            core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN).write_volatile(bogus_assign);
+        }
+        let source = StringIdRecord {
+            vtable: core::ptr::null(),
+            string: StringObject {
+                vtable: core::ptr::null(),
+                payload: core::ptr::null_mut(),
+            },
+            id: 7,
+        };
+        let mut record = StringIdRecord {
+            vtable: core::ptr::null(),
+            string: StringObject {
+                vtable: core::ptr::null(),
+                payload: core::ptr::null_mut(),
+            },
+            id: 0,
+        };
+        let this: *mut StringIdRecord = &mut record;
+        unsafe {
+            assert_eq!(
+                string_id_record_assign(this, &source),
+                this,
+                "mov r0, r4: the saved `this`, not the callee's r0"
+            );
+        }
+    }
+
+    #[test]
+    fn record_assign_copies_edge_ids_verbatim() {
+        let _bench = assign_bench();
+        for id in [-1i32, i32::MIN, i32::MAX, 0, 0x1f03] {
+            let source = StringIdRecord {
+                vtable: core::ptr::null(),
+                string: StringObject {
+                    vtable: core::ptr::null(),
+                    payload: core::ptr::null_mut(),
+                },
+                id,
+            };
+            let mut record = StringIdRecord {
+                vtable: core::ptr::null(),
+                string: StringObject {
+                    vtable: core::ptr::null(),
+                    payload: core::ptr::null_mut(),
+                },
+                id: 0x5555_5555,
+            };
+            unsafe {
+                string_id_record_assign(&mut record, &source);
+            }
+            assert_eq!(record.id, id, "the id word at +0xc is copied verbatim");
+        }
+    }
+
+    #[test]
+    fn record_assign_default_stub_leaves_both_objects_untouched_except_id() {
+        // The default slot (no mock): the stub is the real operator's
+        // self-assignment-guard prefix — guard, no payload work — so
+        // the payload/vtable words on both sides are untouched and the
+        // id copy is the outer operator's own work.
+        let _lock = ASSIGN_SLOT_LOCK.lock().unwrap();
+        let mut source = StringIdRecord {
+            vtable: 0xdead_beef as *const StringIdRecordVtable,
+            string: StringObject {
+                vtable: 0xcafe_f00d as *const StringObjectVtable,
+                payload: 0x0bad_f00d as *mut u8,
+            },
+            id: 0x1f02,
+        };
+        let source_before = unsafe {
+            core::ptr::read(
+                core::ptr::addr_of!(source)
+                    as *const [u8; core::mem::size_of::<StringIdRecord>()],
+            )
+        };
+        let mut record = StringIdRecord {
+            vtable: 0x5555_5555 as *const StringIdRecordVtable,
+            string: StringObject {
+                vtable: 0x1111_1111 as *const StringObjectVtable,
+                payload: 0x2222_2222 as *mut u8,
+            },
+            id: -1,
+        };
+        let this: *mut StringIdRecord = &mut record;
+        unsafe {
+            assert_eq!(string_id_record_assign(this, &source), this);
+        }
+        assert_eq!(record.id, 0x1f02, "the outer operator copies the id itself");
+        assert_eq!(
+            record.vtable, 0x5555_5555 as *const StringIdRecordVtable,
+            "the stub stores no vtable"
+        );
+        assert_eq!(
+            record.string.vtable, 0x1111_1111 as *const StringObjectVtable,
+            "the stub never touches the destination subobject"
+        );
+        assert_eq!(record.string.payload, 0x2222_2222 as *mut u8);
+        let source_after = unsafe {
+            core::ptr::read(
+                core::ptr::addr_of!(source)
+                    as *const [u8; core::mem::size_of::<StringIdRecord>()],
+            )
+        };
+        assert_eq!(source_after, source_before, "the assignment never writes the source");
+    }
+
+    #[test]
+    fn record_assign_self_assignment_through_default_stub_is_a_noop() {
+        // Record self-assignment: the subobject pointers compare equal
+        // inside the StringObject operator (its cmp r0, r1), which the
+        // stub reproduces — and the id self-copy is value-preserving.
+        let _lock = ASSIGN_SLOT_LOCK.lock().unwrap();
+        let mut record = StringIdRecord {
+            vtable: 0x5555_5555 as *const StringIdRecordVtable,
+            string: StringObject {
+                vtable: 0x1111_1111 as *const StringObjectVtable,
+                payload: 0x2222_2222 as *mut u8,
+            },
+            id: 0x1f03,
+        };
+        let before = unsafe {
+            core::ptr::read(
+                core::ptr::addr_of!(record)
+                    as *const [u8; core::mem::size_of::<StringIdRecord>()],
+            )
+        };
+        let this: *mut StringIdRecord = &mut record;
+        unsafe {
+            assert_eq!(string_id_record_assign(this, this), this);
+        }
+        let after = unsafe {
+            core::ptr::read(
+                core::ptr::addr_of!(record)
+                    as *const [u8; core::mem::size_of::<StringIdRecord>()],
+            )
+        };
+        assert_eq!(after, before, "self-assignment changes nothing");
+    }
+
+    #[test]
+    fn record_assign_then_destroy_roundtrips() {
+        // Default-construct a record, assign over it through the
+        // default stub, destroy through the recording release — the
+        // same round trip the constructor siblings run, now over the
+        // assignment path.
+        let _bench = bench();
+        let _assign_lock = ASSIGN_SLOT_LOCK.lock().unwrap();
+        let source = StringIdRecord {
+            vtable: core::ptr::null(),
+            string: StringObject {
+                vtable: core::ptr::null(),
+                payload: core::ptr::null_mut(),
+            },
+            id: 0x1f00,
+        };
+        let mut record = StringIdRecord {
+            vtable: core::ptr::null(),
+            string: StringObject {
+                vtable: core::ptr::null(),
+                payload: core::ptr::null_mut(),
+            },
+            id: 0,
+        };
+        let this: *mut StringIdRecord = &mut record;
+        unsafe {
+            assert_eq!(string_id_record_default_construct(this), this);
+            assert_eq!(string_id_record_assign(this, &source), this);
+            assert_eq!(record.id, 0x1f00);
+            assert_eq!(string_id_record_destroy(this), this);
+            assert_eq!(record.vtable, &STRING_ID_RECORD_VTABLE as *const _);
+            assert_eq!(record.string.vtable, &STRING_OBJECT_VTABLE as *const _);
+        }
+        let calls = release_calls();
+        assert_eq!(
+            calls.len(),
+            1,
+            "destroying the assigned record runs exactly one (NULL-payload) release"
+        );
+        assert_eq!(calls[0].0, core::ptr::addr_of!(record.string) as usize);
+        assert_eq!(record.id, 0x1f00, "destroy never rewrites the assigned id");
     }
 }
