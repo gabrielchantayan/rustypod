@@ -11027,10 +11027,35 @@ functions:
       out as byte loads from the family's read_unaligned host-testing
       idiom, same deviation as vector_size_elem4. Other instantiations
       (identified, not ported): 0x083d7954 4, 0x083d7870 4, 0x083d784c
-      4, 0x083d7828 4, 0x083d77ec 4, 0x083d77a8 4 bl sites; shift-based
+      4, 0x083d7828 4, 0x083d77ec 4 bl sites; shift-based
       ones are one-line ports whenever wanted. 0x083d7708 is now ported
       (see its entry) - it turned out to be a DIVIDE-by-12 member, not a
       shift, so element sizes must be read from osos.asm per address.
+      0x083d77a8 is now ported too (see its entry) - that one really is
+      shift-based (asr #4, a 16-byte element).
+
+  - address: 0x083d77a8
+    ghidra: FUN_083d77a8
+    name: vector_capacity_elem16
+    size: 20
+    sig: "i32 vector_capacity_elem16(const VectorStorage *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      `vector<T>::capacity()` for a 16-byte element - the SHIFT member
+      of the capacity family: same end-of-storage head as the 24-byte
+      primary (`ldr r1,[r0,#8]; ldr r0,[r0]; sub r0,r1,r0`), then `mov
+      r0,r0, asr #4` and `bx lr` - 16 is a power of two, so no tail
+      branch into the ADS signed divide. Verified against osos.asm; the
+      ledger's old blanket shift-based guess is right for THIS address
+      only by luck (the 0x083d7708 sibling with the same guess was a
+      divide), so per-address verification stays the rule. The shift is
+      arithmetic, so a reversed span stays negative (rounding toward
+      -inf, unlike the divide members' toward-zero truncation). 4 bl
+      call sites. match.py - same sub / asr #4 core; the ldr pairs come
+      out as byte loads from the family's read_unaligned host-testing
+      idiom, the same accepted deviation as vector_size_elem4.
 
   - address: 0x083d7708
     ghidra: FUN_083d7708

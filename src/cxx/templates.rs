@@ -33,9 +33,10 @@
 //!   [`vector_size_elem40`] — the
 //!   non-power-of-two members of the size family, dividing the span by
 //!   12, 24, 20, 28 or 40 through [`__rt_sdiv`] instead of shifting.
-//! - [`vector_capacity`] / [`vector_capacity_elem12`] —
-//!   `vector<T>::capacity()` for 24-byte and 12-byte elements, the
-//!   end-of-storage sibling of the size family.
+//! - [`vector_capacity`] / [`vector_capacity_elem12`] /
+//!   [`vector_capacity_elem16`] — `vector<T>::capacity()` for 24-,
+//!   12- and 16-byte elements, the end-of-storage sibling of the size
+//!   family (divide-based for 24/12, shift-based for 16).
 //!
 //! Not to be confused with `deque_iter_copy` @ 0x083dd9e4 (already
 //! ported in `heap/block_deque`): that one is the same four-word copy
@@ -467,6 +468,36 @@ pub unsafe extern "C" fn vector_capacity_elem12(vector: *const VectorStorage) ->
         core::ptr::read_unaligned(core::ptr::addr_of!((*vector).end_of_storage));
     let span = (end_of_storage as isize - begin as isize) as i32;
     __rt_sdiv(span, 12)
+}
+
+/// vector_capacity_elem16 — original: `FUN_083d77a8` @ 0x083d77a8
+/// (20 bytes, 4 `bl` call sites).
+///
+/// `vector<T>::capacity()` for a 16-byte element: the same
+/// end-of-storage head as [`vector_capacity`] (`ldr r1,[r0,#0x8]` /
+/// `ldr r0,[r0,#0x0]` / `sub r0,r1,r0`), then `mov r0,r0, asr #0x4`
+/// and `bx lr` — a **shift** member, not a divide: 16 is a power of
+/// two, so there is no tail branch into the ADS signed divide. The
+/// ledger's blanket "shift-based" guess for this instantiation happens
+/// to be right, but that is luck — the sibling at 0x083d7708 with the
+/// same guess turned out to be a divide; element sizes must be read
+/// from osos.asm per address. The shift is **arithmetic**, so a
+/// reversed vector's negative span stays negative instead of becoming
+/// a huge unsigned count.
+///
+/// # Safety
+/// `vector` must point at a readable `{begin, end, end_of_storage}`
+/// triple.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_capacity_elem16(vector: *const VectorStorage) -> i32 {
+    // `read_unaligned`: same 4-but-not-8-aligned firmware head hazard
+    // as `vector_size` on a 64-bit host.
+    let begin = core::ptr::read_unaligned(core::ptr::addr_of!((*vector).begin));
+    let end_of_storage =
+        core::ptr::read_unaligned(core::ptr::addr_of!((*vector).end_of_storage));
+    let span = end_of_storage as isize - begin as isize;
+    (span >> 4) as i32
 }
 
 /// A `{base, count}` pointer array — the two words [`array_at_checked`]
@@ -981,6 +1012,49 @@ mod tests {
                 end_of_storage: begin,
             };
             assert_eq!(vector_capacity_elem12(&reversed), -1, "-13 / 12 truncates to -1");
+        }
+    }
+
+    // ---- vector_capacity_elem16 --------------------------------------
+
+    #[test]
+    fn vector_capacity_elem16_shifts_the_allocated_span_by_4() {
+        unsafe {
+            let storage = [0u8; 160];
+            let begin = storage.as_ptr() as *mut u8;
+            for elements in 0..10usize {
+                let head = VectorStorage {
+                    begin,
+                    // `end` is not read by capacity; set it anywhere in
+                    // the allocation to keep the head plausible.
+                    end: begin.add(elements * 8),
+                    end_of_storage: begin.add(elements * 16),
+                };
+                assert_eq!(vector_capacity_elem16(&head), elements as i32);
+            }
+        }
+    }
+
+    /// The shift is arithmetic, so a reversed (negative) span stays
+    /// negative (arithmetic shift rounds toward -inf, unlike the divide
+    /// members' truncation), and a partial element is dropped.
+    #[test]
+    fn vector_capacity_elem16_is_signed_and_floor_shifting() {
+        unsafe {
+            let storage = [0u8; 160];
+            let begin = storage.as_ptr() as *mut u8;
+            let head = VectorStorage {
+                begin,
+                end: begin,
+                end_of_storage: begin.add(16 * 3 + 15),
+            };
+            assert_eq!(vector_capacity_elem16(&head), 3, "partial element dropped");
+            let reversed = VectorStorage {
+                begin: begin.add(17),
+                end: begin,
+                end_of_storage: begin,
+            };
+            assert_eq!(vector_capacity_elem16(&reversed), -2, "-17 >> 4 (asr) is -2");
         }
     }
 
