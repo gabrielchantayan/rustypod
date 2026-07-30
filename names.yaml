@@ -3372,6 +3372,31 @@ functions:
       in the image (binary-verified bl scan): 0x083d84c0, inside
       FUN_083d8468 (C++-layer flush wrapper, passes a stream arg).
 
+  - address: 0x0802ffa8
+    ghidra: FUN_0802ffa8
+    name: stream_write_block
+    size: 92
+    sig: "i32 stream_write_block(const u8 *buf, i32 size, i32 nitems, i32 ctx)"
+    module: stdio/fwrite
+    status: ported
+    vars: {param_1: buf, param_2: size, param_3: nitems, param_4: ctx (putc context), iVar2/r5: written, FUN_082cf2c8: STREAM_WRITE_PUTC hook (line-buffer putc @ 0x082cf2c8, unported)}
+    notes: >-
+      Block writer through the retailOS line-buffer putc @ 0x082cf2c8:
+      size * nitems bytes from buf, one putc(byte, ctx) call per byte,
+      returns nitems when the whole block is accepted, 0 on the first
+      putc answering -1 (all-or-nothing — no partial-item count, unlike
+      fread). size == 0 short-circuits to nitems; the total is the ARM
+      mul's mod-2^32 product and the loop bound compares signed (blt),
+      so a nonpositive total writes nothing and still returns nitems.
+      Sole caller in the image (binary-verified bl scan): 0x08266c04,
+      inside FUN_08266be8 (retailOS log/formatter helper reporting
+      result == nitems as bool). The putc is NOT the ADS stream layer —
+      0x082cf2c8 owns the line buffer @ 0x08b31720 (Angel svc flush on
+      '\n'/0x50 bytes, -1 for a null ctx) and is unported, so the call
+      goes through the STREAM_WRITE_PUTC hook slot (house pattern,
+      fread.rs's STREAM_REFILL); the default stub answers -1, matching
+      the original's null-context failure.
+
   - address: 0x08030300
     ghidra: FUN_08030300
     name: freopen_core
