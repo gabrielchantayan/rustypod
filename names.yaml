@@ -4473,12 +4473,15 @@ functions:
       error; return 0 or -5 (mvnne r0, #4). 1 call site: bl @ 0x0806e400
       in the 64-bit system-time builder FUN_0806e3dc. The mutexed
       wrapper FUN_082e58f0 is now ported (drivers/i2c::pmu_i2c_read_regs)
-      and is the shipped default of the RTC_READ_REGS slot; the hardware
-      chain under it (FUN_0836d698 -> FUN_0836d3b8 -> FUN_0836bb84 /
-      FUN_0836b950, S5L8702 I2C to slave 0x73) sits behind i2c.rs's
-      PMU_READ_REGS slot whose default stub fails closed with the
-      driver's bad-bank code 9, so the wired defaults behave exactly
-      like the former fail-closed stub (kept for host tests). The
+      and is the shipped default of the RTC_READ_REGS slot; the bank
+      mux under it (FUN_0836d698) is now ported too
+      (drivers/i2c::pmu_i2c_read_bank, the shipped PMU_READ_REGS
+      default), and the raw transfer chain below (FUN_0836d3b8 ->
+      FUN_0836bb84 / FUN_0836b950, S5L8702 I2C to slave 0x73) sits
+      behind i2c.rs's PMU_I2C_TRANSFER slot whose default stub fails
+      closed with the driver's bad-bank code 9, so the wired defaults
+      behave exactly like the former fail-closed stub (kept for host
+      tests). The
       pure-arithmetic conversion FUN_0809e3e8 is ported as
       time/civil::bcd_datetime_to_days_secs and called (it was an inline
       reproduction at this entry's porting). match.py: LLVM
@@ -4518,12 +4521,15 @@ functions:
       - the port calls the same ROM services through
       kernel::sync_mutex::ROM_KERNEL (sema_wait/sema_signal, no-op
       default stubs); FUN_0836d698 (bank 0 -> reg block 0x59 time,
-      bank 1 -> 0x60 alarm, else bad-bank 9; tail-branches into
-      FUN_0836d3b8(reg, 7, buf), which writes the register address to
-      I2C slave 0x73, the PCF50635 PMU, via FUN_0836bb84 and reads 7
-      bytes back via FUN_0836b950) is S5L8702 hardware and dispatches
-      through the new PMU_READ_REGS slot (house pattern, blx in place
-      of bl) whose default stub fails closed with the bad-bank code 9.
+      bank 1 -> 0x60 alarm, else bad-bank 9) is now ported as
+      drivers/i2c::pmu_i2c_read_bank and is the shipped default of the
+      PMU_READ_REGS slot (the pre-port stub is kept for host tests);
+      the raw transfer under it (FUN_0836d3b8(reg, 7, buf) -> register
+      address write to I2C slave 0x73, the PCF50635 PMU, via
+      FUN_0836bb84, then 7 bytes back via FUN_0836b950) is S5L8702
+      hardware and dispatches through the PMU_I2C_TRANSFER slot (house
+      pattern, blx in place of bl) whose default stub fails closed
+      with the bad-bank code 9.
       The port is the shipped default of time/rtc.rs's RTC_READ_REGS
       slot, replacing rtc_read_stub (kept for host tests). Constants:
       PMU_I2C_OUTER_SEM = 0x11, PMU_I2C_INNER_SEM = 5,
@@ -4536,6 +4542,49 @@ functions:
       signal(0x11) sequence with the status kept in r4; the diff is
       blx-through-table for the five calls and LLVM's fp frame (the
       accepted deviations).
+
+  # --- PMU I2C bank mux: RTC register-block read (drivers/i2c) ---
+  - address: 0x0836d698
+    ghidra: FUN_0836d698
+    name: pmu_i2c_read_bank
+    size: 40
+    sig: "i32 pmu_i2c_read_bank(u32 bank, u8 *buf)"
+    module: drivers/i2c
+    status: ported
+    vars: {param_1: bank, param_2: buf}
+    notes: >-
+      The bank mux under pmu_i2c_read_regs (its only bl callee, @
+      0x082e590c): bank 0 selects the PCF50635 RTC time register block
+      0x59 (cmp r0, #0 / moveq r0, #0x59), bank 1 the alarm block 0x60
+      (cmp r0, #1 / mov r0, #0x60), any other bank returns the
+      bad-bank code 9 (movne r0, #9 / bxne lr) with the buffer
+      untouched; a valid bank tail-branches (b 0x0836d3b8) into the
+      raw transfer FUN_0836d3b8(reg, 7, buf), which writes the
+      register address to I2C slave 0x73 (the PCF50635 PMU) via
+      FUN_0836bb84 and reads the 7 BCD bytes back via FUN_0836b950,
+      returning its status verbatim. PORT DEVIATIONS: FUN_0836d3b8 and
+      the S5L8702 I2C hardware chain under it are not ported - the
+      tail branch dispatches through the new PMU_I2C_TRANSFER slot
+      (house ops-slot pattern, a call in place of b) whose default
+      stub fails closed with PMU_READ_BAD_BANK, so the wired defaults
+      are indistinguishable from the pre-port PMU_READ_REGS stub
+      (status 9 for every bank, buffer untouched). The port is the
+      shipped default of i2c.rs's PMU_READ_REGS slot, replacing
+      pmu_read_regs_stub (retained for host tests; rtc.rs's
+      shipped-default tests still pass unchanged). Constants:
+      PMU_RTC_TIME_BLOCK = 0x59, PMU_RTC_ALARM_BLOCK = 0x60,
+      PMU_RTC_BLOCK_LEN = 7. Host tests cover the bank mux (0 -> 0x59,
+      1 -> 0x60, 7 bytes, buf forwarded), the bad-bank fail-closed
+      path (2/9/0xffffffff -> 9, no transfer, buffer untouched),
+      transfer status pass-through (0x15/-5/1), the retained stub, and
+      the wired-default chain (pmu_i2c_read_regs -> pmu_i2c_read_bank
+      -> transfer stub) still failing closed with 9 for every bank.
+      match.py structural: same two-compare bank mux (0x59/0x60/movne
+      #9 + conditional return) and a transfer tail dispatch; the diff
+      is LLVM's fp frame, the slot load (ldr literal + bx r3 in place
+      of b 0x0836d3b8 - LLVM renders it a tail call through the slot,
+      mirroring the original's tail branch), and the reordered
+      compare/select structure (the accepted deviations).
 
   # --- BCD datetime -> (days, seconds-of-day) converter (time/civil) ---
   - address: 0x0809e3e8
