@@ -12447,3 +12447,28 @@ functions:
       iabs symbol (the load_be32 alias precedent). match.py against
       iabs at this address: same rsbmi-behind-frame-prologue structure
       as the primary, byte-identical inputs make the diff identical.
+
+  - address: 0x080e97a0
+    ghidra: FUN_080e97a0
+    name: iabs_alias_97a0
+    size: 12
+    sig: "i32 iabs(i32 x)"
+    module: fp/fp_misc
+    status: ported
+    renames:
+      param_1: x
+    notes: >-
+      ALIAS - byte-identical to iabs @ 0x080e9788 (all 12 bytes
+      verified against osos.dec: cmp r0,#0 / rsblt r0,r0,#0 / bx lr),
+      a duplicate emission from another translation unit; third copy
+      after 0x080e9794. 12 bl call sites
+      (0x082a0a0c/0x082a0a18/0x082a0a30/0x082a0a3c/0x082a0a54/
+      0x082a0a60, 0x082a0ce0/0x082a0cec/0x082a0d04/0x082a0d10,
+      0x082a0ea0/0x082a0eac), all inside FUN_082a0920 in the
+      0x082axxxx region, a fixed-point matrix routine that compares
+      |entries| and keeps the largest magnitude - the same
+      compare-and-keep-larger usage as the primary and 9794 copies.
+      No separate Rust symbol - point any hook at the single iabs
+      symbol (the load_be32 alias precedent). match.py against iabs at
+      this address: same rsbmi-behind-frame-prologue structure as the
+      primary, byte-identical inputs make the diff identical.

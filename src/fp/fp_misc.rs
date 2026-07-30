@@ -38,10 +38,12 @@
 //! all in 0x0824xxxx graphics-region code that compares two |deltas|
 //! and keeps the larger. The two immediately following functions
 //! 0x080e9794 and 0x080e97a0 are byte-identical duplicate emissions
-//! (all 12 bytes verified against osos.dec). 0x080e9794 (6 bl sites)
-//! is an alias with its own ledger entry: no separate Rust symbol,
-//! hooks point at the single `iabs` (the load_be32 alias precedent).
-//! 0x080e97a0 remains a separate assignment with no Rust symbol here.
+//! (all 12 bytes verified against osos.dec). Both are aliases with
+//! their own ledger entries: no separate Rust symbols, hooks point at
+//! the single `iabs` (the load_be32 alias precedent). 0x080e9794 has
+//! 6 bl sites in 0x0824xxxx graphics code; 0x080e97a0 has 12 bl sites
+//! in the 0x082axxxx fixed-point matrix routine FUN_082a0920, which
+//! compares |entries| and keeps the largest magnitude.
 //!
 //! Behavioral deviations from IEEE 754, mirrored from the original:
 //! - _dsqrt: denormal inputs flush to +0 (even negative denormals;
@@ -313,8 +315,9 @@ pub unsafe extern "C" fn __dmod(a: u64, b: u64) -> u64 {
 /// value: `cmp r0,#0; rsblt r0,r0,#0; bx lr`. Negative inputs are
 /// negated with a 32-bit reverse subtract, so iabs(INT_MIN) wraps to
 /// INT_MIN — wrapping_neg mirrors the original exactly. The
-/// byte-identical duplicate @ 0x080e9794 (6 bl sites) hooks this same
-/// symbol; no separate port exists for it (see its names.yaml entry).
+/// byte-identical duplicates @ 0x080e9794 (6 bl sites) and
+/// 0x080e97a0 (12 bl sites) hook this same symbol; no separate ports
+/// exist for them (see their names.yaml entries).
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn iabs(x: i32) -> i32 {
     if x < 0 { x.wrapping_neg() } else { x }
