@@ -8448,6 +8448,35 @@ functions:
       load where the original emits a jump table; behaviourally
       identical.
 
+  - address: 0x08105b28
+    ghidra: FUN_08105b28
+    name: image_format_for_kind_kind4_override
+    size: 16
+    sig: "u32 image_format_for_kind_kind4_override(u32 kind)"
+    module: app/image_format
+    status: ported
+    vars: {param_1: kind}
+    notes: >-
+      Four-instruction wrapper around image_format_for_kind
+      (0x08105a34): `cmp r0,#4; moveq r0,#0x400; bne 0x08105a34;
+      bx lr` - kind 4, which the plain jump table maps to 0x428, is
+      answered 0x400 (kind 3's format) directly; every other kind
+      tail-branches into the jump table unchanged. 5 bl call sites, no
+      tail b (binary-scanned): 0x081b725c, 0x0821514c, 0x08215274,
+      0x08223b98, 0x08223cc0 - all feed the result straight into the
+      descriptor builder FUN_08105b58, so this is the same
+      kind-to-format question asked through a variant table where kind
+      4 shares kind 3's geometry. Why kind 4 is special-cased here but
+      not in the main table is not visible from the image - ported on
+      observable behavior. Neighbours 0x08105b38 (argument swap) and
+      0x08105b58 (descriptor table) remain unported. Host tests: kind
+      4 -> 0x400 (and equal to plain-table kind 3), every other kind
+      0..=17 delegating to the decoded jump table, out-of-range kinds
+      -> 0xffffffff, neighbours 3/5 unaffected. match.py structural:
+      same cmp/moveq/conditional-return/tail-branch shape (the b's
+      R_ARM_JUMP24 targets image_format_for_kind); the diff is LLVM's
+      crate-standard fp frame - the accepted house deviation.
+
   - address: 0x0814d51c
     ghidra: FUN_0814d51c
     name: record_body_size

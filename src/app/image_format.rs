@@ -46,9 +46,10 @@
 //!   the duplication rather than collapsing it, because the original's
 //!   jump table does.
 //!
-//! Its two neighbours are left unported: `FUN_08105b28` overrides kind
-//! 4 to 0x400 and tail-branches here for everything else, and
-//! `FUN_08105b38` is an argument swap around it.
+//! `FUN_08105b28` (ported below as
+//! [`image_format_for_kind_kind4_override`]) overrides kind 4 to 0x400
+//! and tail-branches here for everything else; `FUN_08105b38` (an
+//! argument swap around this function) is left unported.
 
 /// The "no format" answer (`mvn r0, #0`) — kinds 9, 11, 13 and every
 /// kind above [`IMAGE_KIND_COUNT`].
@@ -92,6 +93,38 @@ pub extern "C" fn image_format_for_kind(kind: u32) -> u32 {
         return IMAGE_FORMAT_NONE;
     }
     IMAGE_FORMAT_BY_KIND[kind as usize]
+}
+
+/// image_format_for_kind_kind4_override — original: `FUN_08105b28` @
+/// 0x08105b28 (16 bytes; 5 `bl` call sites, no tail `b`,
+/// binary-scanned).
+///
+/// A four-instruction wrapper around [`image_format_for_kind`]:
+///
+/// ```text
+/// cmp    r0, #4
+/// moveq  r0, #0x400
+/// bne    0x08105a34    ; tail-branch to image_format_for_kind
+/// bx     lr
+/// ```
+///
+/// Kind 4 — which the plain table maps to 0x428 — is answered 0x400
+/// (kind 3's format) directly; every other kind tail-branches into the
+/// jump table unchanged. All five callers (0x081b725c, 0x0821514c,
+/// 0x08215274, 0x08223b98, 0x08223cc0) feed the result straight into
+/// the descriptor builder `FUN_08105b58`, so this is the same
+/// kind-to-format question asked through a variant table where kind 4
+/// shares kind 3's geometry. Why kind 4 is special-cased here but not
+/// in the main table is not visible from the image; ported on
+/// observable behavior.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn image_format_for_kind_kind4_override(kind: u32) -> u32 {
+    if kind == 4 {
+        0x400
+    } else {
+        image_format_for_kind(kind)
+    }
 }
 
 #[cfg(test)]
@@ -158,5 +191,41 @@ mod tests {
             }
             assert!((0x3f1..=0x42d).contains(&format), "kind {kind} -> {format:#x}");
         }
+    }
+
+    #[test]
+    fn kind4_override_answers_0x400_instead_of_0x428() {
+        assert_eq!(image_format_for_kind(4), 0x428, "plain table maps kind 4 to 0x428");
+        assert_eq!(image_format_for_kind_kind4_override(4), 0x400);
+        // 0x400 is kind 3's format: the override makes kind 4 share
+        // kind 3's geometry.
+        assert_eq!(
+            image_format_for_kind_kind4_override(4),
+            image_format_for_kind(3),
+        );
+    }
+
+    #[test]
+    fn kind4_override_delegates_every_other_kind_to_the_plain_table() {
+        for kind in [0u32, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17] {
+            assert_eq!(
+                image_format_for_kind_kind4_override(kind),
+                image_format_for_kind(kind),
+                "kind {kind}"
+            );
+            assert_eq!(
+                image_format_for_kind_kind4_override(kind),
+                reference(kind),
+                "kind {kind} vs decoded jump table"
+            );
+        }
+        // Out-of-range kinds (unsigned bound) fall through to NONE too.
+        for kind in [18u32, 100, 0x8000_0000, u32::MAX] {
+            assert_eq!(image_format_for_kind_kind4_override(kind), IMAGE_FORMAT_NONE, "kind {kind:#x}");
+        }
+        // Only exactly 4 is overridden: neighbours 3 and 5 keep their
+        // own formats.
+        assert_eq!(image_format_for_kind_kind4_override(3), 0x400);
+        assert_eq!(image_format_for_kind_kind4_override(5), 0x42b);
     }
 }
