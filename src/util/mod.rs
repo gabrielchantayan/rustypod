@@ -5,6 +5,7 @@ pub mod bswap;
 pub mod crc32;
 pub mod cursor;
 pub mod fixed;
+pub mod inner_state;
 pub mod is_tagged_c0;
 pub mod le_read;
 pub mod list_find;

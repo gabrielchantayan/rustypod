@@ -14088,3 +14088,33 @@ functions:
       frame-pointer prologue and keeps this in r4 across the call (the
       original relies on the helper preserving r0) - the accepted house
       deviations.
+
+  - address: 0x0813b7c4
+    ghidra: FUN_0813b7c4
+    name: inner_set_state_4
+    size: 12
+    sig: "void inner_set_state_4(u8 *object)"
+    module: util/inner_state
+    status: ported
+    vars: {param_1: object}
+    notes: >-
+      Three-instruction forwarding wrapper: `ldr r0,[r0,#0x40]; mov
+      r1,#4; b 0x08067ca4` - loads the inner object from the query
+      object's +0x40 slot and stores 4 into its state/mode word at
+      +0xe38 (the tail target FUN_08067ca4 @ 0x08067ca4 is the 8-byte
+      setter `str r1,[r0,#0xe38]; bx lr`, inlined by the port - the
+      documented deviation). 1 bl call site: the query runner
+      FUN_080feb68 @ 0x080feba4, which stores 4 right before running
+      query 0x32 through the sibling wrappers FUN_0813bd10 (same shape,
+      constant 0 -> 0x0806673c) and FUN_0813d064. The +0xe38 word is a
+      small state/mode enum: other writers store 1 (0x08053fdc), 3
+      (0x08054038) and 5 (0x08061020); the reader @ 0x0808cf4c compares
+      it against 1 to pick a result code. Enum not identified - ported
+      on observable behavior. Sits immediately after the util/berec.rs
+      record-reader cluster @ 0x0813b714..0x0813b7b0 but is NOT one of
+      them (no record handle, no big-endian decode), so it gets its own
+      file. Host tests: stores 4, overwrites a previous value,
+      idempotent, touches only the +0x40 slot and the +0xe38 word.
+      match.py structural: same ldr/mov pair; the diff is the inlined
+      store standing in for the tail branch plus the crate fp frame -
+      the documented deviation.
