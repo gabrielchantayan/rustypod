@@ -7,5 +7,6 @@ pub mod handle;
 pub mod pair_header;
 pub mod release;
 pub mod string;
+pub mod string_map;
 pub mod string_object;
 pub mod templates;

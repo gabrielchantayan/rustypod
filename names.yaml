@@ -7383,6 +7383,29 @@ functions:
       and never re-reads +0x41, so a layer someone else enabled in
       between is still disabled here.
 
+  - address: 0x08120ad4
+    ghidra: FUN_08120ad4
+    name: layer_plane_format_code
+    size: 60
+    sig: "void layer_plane_format_code(u8 *layer, u8 *out)"
+    module: drivers/display_layer
+    status: ported
+    vars: {param_1: layer, param_2: out}
+    notes: >-
+      1 bl call site (the render pass layer_render @ 0x0811f8c8). Maps
+      the layer's pixel format byte (+0x0a) to the driver's plane-format
+      code and stores it through out - descriptor +0x3c at the call
+      site: 0->8, 1->9, 2->3, 3->7; anything else returns without
+      storing (bxne lr), so the descriptor's zeroed byte survives. A
+      compare/moveq chain with a shared strb. Now the shipped default
+      of LAYER_DRIVER_HOOKS.plane_format_code (the layer_query_planes
+      precedent); the slot stays for recording mocks, and the render
+      suite's counting mock delegates to the port instead of
+      re-implementing the mapping. match.py - same structure (ldrb
+      +0x0a, <=3 gate, code select, strb); LLVM packs the four codes
+      into a 32-bit constant 0x07030908 with a shift-select, plus the
+      usual frame-pointer prologue.
+
   # --- Batch: the by-id class registry (app/registry) ---
   # One statically-allocated associative container @ 0x08a79ca4 maps a
   # 0x80-aligned class id to that class's single live instance; 45
@@ -11959,17 +11982,65 @@ functions:
     ghidra: FUN_083db4c4
     name: string_map_lookup_or_insert
     size: 76
+    sig: "u8 *string_map_lookup_or_insert(StringKeyMap *map, char *const *key)"
+    module: cxx/string_map
+    status: ported
+    vars: {param_1: map, param_2: key}
+    notes: >-
+      40 bl call sites, the only copy. map<string, u32>::operator[]
+      shape: copy-constructs a temporary basic_string from the caller's
+      string object into an 8-byte stack pair (real cxx_string_copy_ctor
+      @ 0x083d8c30 call - the COW share), zeroes the word after it (the
+      default-constructed one-word mapped value), runs the tree
+      insert-unique @ 0x083c327c(&result, map, &pair), releases the
+      temporary (cxx_string_release @ 0x083d8b04) and returns
+      result.node + 0x14 - the mapped value word inside the node (0x10
+      header + key string word at +0x10). The string object word
+      (r1 on entry) is the whole key; the result's inserted-flag byte
+      at +4 is dropped. 0x083c327c is not yet ported, so the port
+      dispatches it through a new StringKeyMapOps::insert_unique slot
+      (PairHeaderOps/ByteKeyMapOps precedent) whose shipped default is
+      fail-closed: null node + flag 0, so the lookup returns 0x14 (null
+      + 0x14), an obviously invalid value pointer - the pre-port
+      byte_key_map_find behaviour. cxx_string_copy_ctor/release are
+      reached through #[inline(never)] front-ends
+      (pair_string_copy_ctor/pair_string_release) to preserve the
+      original's three bl boundaries (the pool_operator_new rationale);
+      without them LLVM inlines the whole COW share/release logic into
+      the wrapper. match.py structural: the three calls (ctor bl, tree
+      op as a table-load blx through the slot, release bl), the value
+      word zeroed after the ctor, the node word reloaded across the
+      release call and the +0x14 add all correspond; LLVM additionally
+      pre-zeroes the pair/result stack slots and uses a wider frame.
+
+  - address: 0x083c327c
+    ghidra: FUN_083c327c
+    name: string_key_tree_insert_unique
+    size: 392
     module: null
     status: identified
     notes: >-
-      40 bl call sites. Copy-constructs a temporary basic_string from
-      the caller's string (real cxx_string_copy_ctor @ 0x083d8c30 call),
-      zeroes the word after it, runs the container operation
-      @ 0x083c327c(&result, key_object), releases the temporary
-      (cxx_string_release @ 0x083d8b04) and returns `result + 20`.
-      Shape of `map<string, T>::operator[]` returning the mapped value
-      inside a 20-byte node header. Not ported - 0x083c327c (the tree
-      walk) has to be scouted first.
+      Scouted from string_map_lookup_or_insert @ 0x083db4c4; the tree
+      walk that lookup dispatches through STRING_KEY_MAP_OPS. libstdc++
+      _Rb_tree::_M_insert_unique for the string-keyed map family - the
+      same shape as its ported byte-keyed twin @ 0x083b867c
+      (byte_key_tree_insert_unique in cxx/byte_key_map.rs, 396 bytes).
+      Contract: insert_unique(result, map, pair) writes the node pointer
+      at result+0 and the inserted-flag byte at result+4. Container:
+      +0x10 header node (header+4 = root, header+8 = leftmost), +0x14
+      node count, +0x18 multi-insert flag byte, +0x19 comparator object.
+      Descends comparing through cxx_string_less @ 0x083d74f4 (ported;
+      nonzero -> left at node+8, else right at node+0xc), then the
+      begin() test via the iterator-equality helper @ 0x083cf818 and an
+      inline predecessor walk decide found-vs-insert; found returns the
+      existing node flagged 0, else _M_insert @ 0x083c3408 links a fresh
+      node (allocates @ 0x083c311c, copy-constructs the pair -
+      cxx_string_copy_ctor plus one value word - and rebalances via the
+      rotations @ 0x083c31f4 / 0x083c3228) flagged 1. _M_insert takes
+      the key pair as a fifth argument on the stack. Node keys sit at
+      node+0x10. Not ported - needs the _M_insert @ 0x083c3408 chain
+      (allocator + rotations) with it; port them together, like the
+      byte-keyed family.
 
   - address: 0x083db038
     ghidra: FUN_083db038
