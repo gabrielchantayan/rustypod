@@ -10292,14 +10292,15 @@ functions:
       the both-operands branch), then from the left child (under left
       != NULL alone, so the left wins a doubly-flagged join); finishes
       with the ported expr_set_height @ 0x083788fc (called directly).
-      The two unported callees are dispatch slots (house pattern):
-      0x08377e00 (sqlite3ExprDelete, 88 bytes, 34 bl call sites -
-      recursive teardown: dyn token/span strings and the node itself
-      via sqlite3_free @ 0x083906f4, p_left/p_right recursion, p_list
-      via 0x08378670, p_select via 0x08383c88; identified, drags in the
-      ExprList/Select destructor chain) is SQLITE_EXPR_DELETE with a
-      documented no-op default (OOM leaks the operands; the NULL return
-      is unchanged); 0x0837894c (span merge, 96 bytes, 5 bl call sites,
+      The destructor callee is ported: 0x08377e00 (sqlite3ExprDelete,
+      88 bytes, 34 bl call sites - recursive teardown: dyn token/span
+      strings and the node itself via sqlite3_free @ 0x083906f4,
+      p_left/p_right recursion, p_list via 0x08378670, p_select via
+      0x08383c88) is expr_delete (see its entry), the shipped default
+      of SQLITE_EXPR_DELETE, so the OOM path really releases both
+      operands; the documented no-op stub is retained for host tests
+      (OOM leaks the operands; the NULL return is unchanged). The
+      span-merge helper @ 0x0837894c (96 bytes, 5 bl call sites,
       the other four in the 0x0839a block; identified: NULL/dyn guards,
       span.z = left->span.z, span.n = right.z + right.n - left.z with
       the dst dyn bit preserved - Token packs n:31|dyn:1, dyn in bit 0)
@@ -10313,6 +10314,50 @@ functions:
       EP_CombBound tst/ldr/str blocks, the height tail call; the diff
       is blx-through-slot for the two unported callees and LLVM frame
       setup.
+
+  - address: 0x08377e00
+    ghidra: FUN_08377e00
+    name: expr_delete
+    size: 88
+    sig: "void expr_delete(Expr *expr)"
+    module: sqlite/expr_delete
+    status: ported
+    vars: {param_1: expr}
+    notes: >-
+      SQLite 3.5.x's sqlite3ExprDelete, the single-argument build
+      variant (no db parameter - the frees go straight to the global
+      tracked allocator). 34 bl call sites. NULL is a no-op
+      (movs/ldmiaeq). Frees the span text (+0x1c) when the span packed
+      word (+0x20) has its dyn bit set (tst #1), then the token text
+      (+0x14) on the token packed word (+0x18), both via sqlite3_free
+      @ 0x083906f4 (the ported tracked_free, called directly);
+      recurses into p_left (+0x08) then p_right (+0x0c) with direct
+      self-calls; hands p_list (+0x10) to sqlite3ExprListDelete
+      @ 0x08378670 and p_select (+0x38) to sqlite3SelectDelete
+      @ 0x08383c88; the node's own block is the tail branch into
+      sqlite3_free (post-order: every child fully released before the
+      parent's block goes back). The two child destructors are
+      unported (0x08378670 walks the ExprList items at stride 0xc and
+      calls 0x08377e00 back per item; 0x08383c88 is a clear helper
+      @ 0x082c36c4 plus the block free - the ExprList/Select chains),
+      so they are the SQLITE_EXPR_LIST_DELETE / SQLITE_SELECT_DELETE
+      dispatch slots (house pattern) with documented no-op defaults
+      (the list/select teardown is skipped; the strings, operands and
+      node are still released exactly as the original releases them).
+      The port is the shipped default of expr_new's SQLITE_EXPR_DELETE
+      slot, replacing the documented no-op stub (retained for host
+      tests, which still swap the slot for recording mocks) - the
+      constructor's OOM path now really releases both operands. Expr
+      reuses expr_new's typed repr(C) Token with 32-bit offset
+      asserts; on a 64-bit host p_select keeps a cfg-split home at
+      +0x48, matching expr_height::Expr's widened layout (the original
+      +0x38 would land on the widened span's n_dyn word). match.py:
+      same structure - the NULL guard, the two dyn-guarded frees in
+      field order, the two recursive bl's, the two slot calls, the
+      tail free; the diff is LLVM narrowing the tst #1 word loads to
+      ldrb, inlining tracked_free's NULL guard + stats update (the
+      accepted mem_release/value_free deviation), blx through the
+      loaded slots, and LLVM's fp frame.
 
   - address: 0x082d2a1c
     ghidra: FUN_082d2a1c

@@ -8,7 +8,9 @@
 //! through `sqlite3DbMallocZero` @ 0x08374998 (ported as
 //! [`db_malloc_zero`](super::mem::db_malloc_zero), called directly). On
 //! failure, release both operands through the expression destructor
-//! @ 0x08377e00 and return NULL — SQLite's OOM unwinding: the sticky
+//! @ 0x08377e00 (ported as [`expr_delete`](super::expr_delete::expr_delete),
+//! reached through the [`SQLITE_EXPR_DELETE`] slot) and return NULL —
+//! SQLite's OOM unwinding: the sticky
 //! `db->mallocFailed` byte is already set by the allocator, so every
 //! later allocation on the connection short-circuits. On success, store
 //! the opcode's low byte at +0x00, seed `iAgg` at +0x30 to -1 and link
@@ -61,15 +63,16 @@
 //!
 //! Deviations:
 //! - The expression destructor @ 0x08377e00 (88 bytes; 34 `bl` call
-//!   sites) is not ported: it is a recursive teardown (dyn token/span
-//!   strings through `sqlite3_free`, recursion into p_left/p_right,
-//!   p_list through 0x08378670, p_select through 0x08383c88, the node
-//!   itself through the ported `tracked_free`) that drags in the whole
-//!   ExprList/Select destructor chain. It is the [`SQLITE_EXPR_DELETE`]
-//!   dispatch boundary (house pattern — see `sqlite/error_msg.rs`). The
-//!   default slot is a documented no-op: an OOM then *leaks* the two
-//!   operands instead of releasing them — the NULL return the caller
-//!   sees is unchanged.
+//!   sites) is ported as
+//!   [`expr_delete`](super::expr_delete::expr_delete) and is the
+//!   shipped default of the [`SQLITE_EXPR_DELETE`] dispatch boundary
+//!   (house pattern — see `sqlite/error_msg.rs`). Its own list/select
+//!   teardown stays behind `sqlite/expr_delete.rs`'s no-op-default
+//!   slots. The documented no-op stub [`missing_expr_delete`] is
+//!   retained for host tests (an OOM then *leaks* the two operands
+//!   instead of releasing them — the NULL return the caller sees is
+//!   unchanged); with the shipped default the OOM path really releases
+//!   both operands, like the original.
 //! - The span-merge helper @ 0x0837894c (96 bytes; 5 `bl` call sites,
 //!   the other four in the 0x0839a block) is not ported either and is
 //!   the [`SQLITE_EXPR_SPAN_MERGE`] dispatch boundary. Its default slot
@@ -204,14 +207,18 @@ const _TOKEN_N_DYN_OFFSET: [u8; 0x04] = [0; core::mem::offset_of!(Token, n_dyn)]
 /// `movs/ldmiaeq` early return).
 pub type ExprDeleteFn = unsafe extern "C" fn(expr: *mut u8);
 
-/// Default stub: no destructor wired, so the operand release is
-/// skipped — an OOM leaks the subtrees instead of freeing them; the
-/// NULL the caller sees is unchanged (see the module header).
+/// Default stub retained for host tests: no destructor wired, so the
+/// operand release is skipped — an OOM leaks the subtrees instead of
+/// freeing them; the NULL the caller sees is unchanged (see the module
+/// header). The shipped default is the real port,
+/// [`super::expr_delete::expr_delete`].
 pub(crate) unsafe extern "C" fn missing_expr_delete(_expr: *mut u8) {}
 
-/// The active destructor. Host tests install recording mocks; the real
-/// port replaces the default when 0x08377e00 lands.
-pub static mut SQLITE_EXPR_DELETE: ExprDeleteFn = missing_expr_delete;
+/// The active destructor. The default is the real port,
+/// [`super::expr_delete::expr_delete`]; host tests still install
+/// recording mocks through the slot ([`missing_expr_delete`] is
+/// retained for them).
+pub static mut SQLITE_EXPR_DELETE: ExprDeleteFn = super::expr_delete::expr_delete;
 
 /// The span-merge helper @ 0x0837894c: given the new node and the two
 /// child spans (`&left->span`, `&right->span` — the `Token` at +0x1c of
@@ -371,9 +378,13 @@ mod tests {
         unsafe { (*core::ptr::addr_of!(MERGED)).clone() }
     }
 
-    /// The documented defaults: no-op stubs on both dispatch slots.
+    /// The documented defaults: the real destructor port on the delete
+    /// slot, the no-op stub on the span-merge slot.
     unsafe fn restore_slot_defaults() {
-        core::ptr::write_volatile(core::ptr::addr_of_mut!(SQLITE_EXPR_DELETE), missing_expr_delete);
+        core::ptr::write_volatile(
+            core::ptr::addr_of_mut!(SQLITE_EXPR_DELETE),
+            super::super::expr_delete::expr_delete,
+        );
         core::ptr::write_volatile(core::ptr::addr_of_mut!(SQLITE_EXPR_SPAN_MERGE), missing_span_merge);
     }
 
