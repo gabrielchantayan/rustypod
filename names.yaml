@@ -12773,7 +12773,9 @@ functions:
       family. The comparator is reached through the inline(never)
       pair_string_less front-end to keep the original's bl boundaries;
       the iterator-equality helper @ 0x083cf818 (a one-word compare) is
-      inlined, like the twin's 0x083cf740. Deviations: the original's
+      likewise ported (string_key_tree_iter_eq, same module) and called
+      for the begin test - the original's bl @ 0x083c3330; the
+      byte-keyed twin's 0x083cf740 stays inlined. Deviations: the original's
       not-found insert shares the multimap tail (bne 0x083c32e4 into
       the bl @ 0x083c32f8) - the port expresses all three inserts
       through one link_fresh_node helper (LLVM keeps three call sites);
@@ -13425,6 +13427,40 @@ functions:
       0x1888 byte reorder, the 0x1444 nibble lookups and the 4x
       ldrb/strb canned-color copies all match the original
       instruction-for-instruction in shape.
+
+  # --- UI block-loaded record resource (ui/block_map) ---
+
+  - address: 0x080f8778
+    ghidra: FUN_080f8778
+    name: block_map_init
+    size: 52
+    sig: "void block_map_init(BlockMap *ctx, u8 *data, const u8 *desc, const u8 *block_ok)"
+    module: ui/block_map
+    status: ported
+    vars:
+      param_1: ctx
+      param_2: data
+      param_3: desc
+      param_4: block_ok
+    notes: >-
+      Initializes the 0x20-byte BlockMap context the fault-tolerant
+      record-resource parsers in the 0x080f8xxx cluster use: data at
+      +0x00 and mirrored into the header slot +0x04, desc at +0x08,
+      num_blocks at +0x0c = *(u16 *)(desc+0x1c) >> 9 (native-endian
+      byte length -> 512-byte block count), block_ok at +0x10, gap
+      range +0x14/+0x18 and bad-block flag bytes +0x1c/+0x1d/+0x1e
+      zeroed. One call site: FUN_080ed3f8 builds the context on its
+      stack (0x24-byte temp) for FUN_080f86c4, which queries the flags
+      and dispatches the gap scanner/repairers (FUN_080f83fc,
+      FUN_080f8454, FUN_080f84e0) and the big-endian offset-table
+      builder FUN_080f824c over a resource read from storage in
+      0x200-byte blocks (its caller, unnamed @ 0x081bfdf8, reads the
+      blocks via FUN_08136920 and records one status byte per block).
+      Struct is repr(C); byte offsets asserted on the 32-bit target
+      only. match.py: 13 instructions vs 13 - same store set to the
+      same offsets; LLVM folds the three strb zeros into strh+strb and
+      derives (u16 >> 9) as ldrb of the high byte + lsr #1, and adds
+      the crate-standard frame-pointer prologue.
 
   - address: 0x081523b8
     ghidra: FUN_081523b8
