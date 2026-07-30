@@ -65,6 +65,46 @@
 //!   @ 0x082a50a0 (`ldr r0,[r0,#4]; b 0x08275e20`) runs the count+1
 //!   strlen variant over it, while the 0x08279338 neighbor scans the
 //!   class's characters for the path separators ':', '/' and '\\'.
+//! - `string_id_record_destroy` — original: `FUN_08258c80` @
+//!   0x08258c80 (24 bytes: 20 code + the 4-byte vtable literal @
+//!   0x08258c98; 113 `bl` call sites, binary-scanned). The plain
+//!   (non-deleting) destructor of a SECOND, derived class built on
+//!   this one — see [`StringIdRecord`].
+//!
+//! # The 0x08258cxx family: a (string, id) record on a StringObject base
+//!
+//! A six-function cluster at 0x08258c08-0x08258cfc is a 0x10-byte
+//! polymorphic class whose +0 word is its own vtable (literal-pool
+//! words 0x08258c28/0x08258c54/0x08258c78/0x08258c98 all hold
+//! 0x089a76f0, binary-verified) and whose +4/+8 words are an embedded
+//! StringObject subobject: the default constructor @ 0x08258c58
+//! (`stmia r0, {r1, r2}` with literals 0x089a76f0 and 0x089a6044,
+//! binary-verified) plants BOTH vtables, NULLs the payload at +8 and
+//! stores -1 at +0xc. Siblings: a (string, id) constructor @
+//! 0x08258c08, a copy constructor @ 0x08258c2c (both chain to the
+//! StringObject copy constructor @ 0x082773e0 on this+4), the plain
+//! destructor @ 0x08258c80 (ported here), an assignment operator @
+//! 0x08258c9c (0x082774a8 on the strings, then copies +0xc) and an
+//! equality operator @ 0x08258cc4 (compares the strings through the
+//! ported `string_object_c_str` @ 0x082a50b0 plus the +0xc words).
+//! The class is unidentified; the name is structural (the
+//! pair_header.rs precedent). What the sampled call sites establish:
+//! records are returned BY VALUE (sret) from virtual slot +0x13c of
+//! menu/UI objects and consumed through slot +0x44 (e.g. the
+//! 0x081026b4 and 0x0813b9d4 destructor sites), are heap-allocated
+//! (`operator_new(0x10)` @ 0x0807f160) and appended to a list at
+//! +0x60 of the element_table manager @ 0x08105ffc, and the
+//! constructor sites @ 0x0813b828/0x0813b884 build them from a
+//! formatted name string plus a database id (0x080528ec reads the
+//! record store at r4+0x40). The vtable is serialized in the image at
+//! 0x089a76f0: eighteen words (see [`STRING_ID_RECORD_VTABLE`]) —
+//! slot 0 is 0x082559ac, a get-descriptive-string function over the
+//! id space 0x1f00-0x1f03 (the OpenGL ES VENDOR/RENDERER/VERSION/
+//! EXTENSIONS enums, returning "Hans-Martin Will", "Software",
+//! "OpenGL ES-CM 1.1" and a pointer-loaded EXTENSIONS string, else
+//! storing 0x500 = GL_INVALID_ENUM and returning NULL) — so the class
+//! is a GL-flavoured named-object record; the remaining slots are
+//! undecoded.
 //!
 //! Deviations:
 //!
@@ -92,6 +132,13 @@
 //!   static [`STRING_OBJECT_EMPTY_CSTR`], the same simplification
 //!   cxx/string.rs makes for its shared empty rep. The original
 //!   address survives as [`STRING_OBJECT_EMPTY_CSTR_ADDRESS`].
+//! - `string_id_record_destroy` plants the modeled static
+//!   [`STRING_ID_RECORD_VTABLE`] for the same ROM-address reason, and
+//!   computes its return as the callee's `this+4` minus one word (the
+//!   original's `sub r0, r0, #4` on `string_object_destroy`'s return)
+//!   rather than returning its own argument — the values are
+//!   identical; the subtraction width is `size_of::<usize>()` so the
+//!   identity holds on 64-bit hosts too.
 
 use crate::heap::veneers::{free_wrapper, operator_delete};
 
@@ -276,6 +323,92 @@ pub unsafe extern "C" fn string_object_c_str(this: *const StringObject) -> *cons
         return &STRING_OBJECT_EMPTY_CSTR;
     }
     payload
+}
+
+/// Original load address of the 0x08258cxx-class vtable
+/// [`string_id_record_destroy`] plants (its literal-pool word @
+/// 0x08258c98 holds 0x089a76f0, binary-verified against osos.dec; the
+/// three constructor siblings load the same value from 0x08258c28,
+/// 0x08258c54 and 0x08258c78). See the module header for why the port
+/// plants a static instead of this address.
+pub const STRING_ID_RECORD_VTABLE_ADDRESS: usize = 0x089a76f0;
+
+/// The 0x08258cxx-class vtable, modeled down to its eighteen
+/// serialized words (original @ 0x089a76f0; the class is unidentified
+/// — see the module header).
+#[repr(C)]
+pub struct StringIdRecordVtable {
+    /// The eighteen words the image stores at 0x089a76f0..0x089a7738,
+    /// binary-verified: slot 0 is the id-to-string query 0x082559ac,
+    /// slot 1 is NULL, the rest are undecoded code pointers (followed
+    /// by a zero tail at 0x089a7738).
+    pub slots: [usize; 18],
+}
+
+/// The vtable instance [`string_id_record_destroy`] plants (original
+/// literal: [`STRING_ID_RECORD_VTABLE_ADDRESS`]). The slots hold their
+/// original code addresses as identities only; nothing in this crate
+/// dispatches through them.
+pub static STRING_ID_RECORD_VTABLE: StringIdRecordVtable = StringIdRecordVtable {
+    slots: [
+        0x082559ac, 0x00000000, 0x08129dec, 0x08129b40, 0x0821f04c, 0x08129d28,
+        0x0820ed90, 0x083a4368, 0x0820e610, 0x0820f084, 0x08255b5c, 0x08255b44,
+        0x0821f220, 0x0821f200, 0x0820f074, 0x0821f384, 0x0821f1f8, 0x0820f250,
+    ],
+};
+
+/// The 0x10-byte object the 0x08258cxx cluster operates on: its own
+/// vtable at +0, an embedded StringObject subobject at +4 (the
+/// StringObject vtable at +4, the payload at +8 — the default constructor @
+/// 0x08258c58 stores both vtables in one `stmia`), and an integer id
+/// at +0xc (-1 by default). `repr(C)` gives this exact layout on
+/// 32-bit ARM; on 64-bit hosts the fields pad wider, which only the
+/// tests see.
+#[repr(C)]
+pub struct StringIdRecord {
+    /// +0x00 — the class vtable (original literal 0x089a76f0).
+    pub vtable: *const StringIdRecordVtable,
+    /// +0x04 — the embedded StringObject subobject (base or member —
+    /// indistinguishable from the code; it keeps its OWN vtable, so
+    /// it is not the primary base).
+    pub string: StringObject,
+    /// +0x0c — the integer id; the default constructor @ 0x08258c58
+    /// stores -1 (`mvn r1, #0x0`), the (string, id) constructor @
+    /// 0x08258c08 and the copy constructor @ 0x08258c2c store/copy
+    /// it, and the equality operator @ 0x08258cc4 compares it.
+    pub id: i32,
+}
+
+/// string_id_record_destroy — original: `FUN_08258c80` @ 0x08258c80
+/// (24 bytes: 20 code + the 4-byte vtable literal @ 0x08258c98;
+/// 113 `bl` call sites, binary-scanned).
+///
+/// The plain (non-deleting) destructor of the 0x10-byte (string, id)
+/// record class: plants the class vtable at `this + 0` (`str r1,
+/// [r0], #0x4` — the post-index add also forms the `this + 4`
+/// argument), then destroys the embedded StringObject subobject at
+/// `this + 4` through the ported [`string_object_destroy`] @
+/// 0x08277484 (which re-plants the StringObject vtable at +4 and
+/// releases the payload at +8), and returns `this`. The original
+/// derives the return from the callee: `string_object_destroy`
+/// returns its `this + 4` argument in r0 and the destructor subtracts
+/// one word (`sub r0, r0, #4`). No operator delete (the caller owns
+/// the storage — sampled sites destroy stack temporaries), no NULL
+/// guard on `this` — the original faults on a NULL `this`, and so
+/// does the port. The callee is ported, so it is called directly, not
+/// through an ops slot.
+///
+/// Deviation: the return is computed as the callee's return minus
+/// `size_of::<usize>()` (one vtable word) so the original's dataflow
+/// — and its value — holds on 64-bit hosts too.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_id_record_destroy(
+    this: *mut StringIdRecord,
+) -> *mut StringIdRecord {
+    (*this).vtable = &STRING_ID_RECORD_VTABLE;
+    let base = string_object_destroy(&mut (*this).string);
+    (base as *mut u8).sub(core::mem::size_of::<usize>()) as *mut StringIdRecord
 }
 
 #[cfg(test)]
@@ -593,5 +726,104 @@ mod tests {
     #[test]
     fn empty_cstr_address_is_binary_verified() {
         assert_eq!(STRING_OBJECT_EMPTY_CSTR_ADDRESS, 0x083e2e3a);
+    }
+
+    #[test]
+    fn the_record_static_vtable_carries_the_eighteen_serialized_slots() {
+        assert_eq!(STRING_ID_RECORD_VTABLE_ADDRESS, 0x089a76f0);
+        assert_eq!(
+            STRING_ID_RECORD_VTABLE.slots,
+            [
+                0x082559ac, 0x00000000, 0x08129dec, 0x08129b40, 0x0821f04c, 0x08129d28,
+                0x0820ed90, 0x083a4368, 0x0820e610, 0x0820f084, 0x08255b5c, 0x08255b44,
+                0x0821f220, 0x0821f200, 0x0820f074, 0x0821f384, 0x0821f1f8, 0x0820f250,
+            ]
+        );
+    }
+
+    #[test]
+    fn record_destroy_plants_derived_vtable_destroys_embedded_string_and_returns_this() {
+        let _bench = bench();
+        let mut record = StringIdRecord {
+            vtable: 0xdead_beef as *const StringIdRecordVtable,
+            string: StringObject {
+                vtable: 0xcafe_f00d as *const StringObjectVtable,
+                payload: 0x0bad_f00d as *mut u8,
+            },
+            id: 42,
+        };
+        let this: *mut StringIdRecord = &mut record;
+        unsafe {
+            assert_eq!(string_id_record_destroy(this), this);
+            assert_eq!(record.vtable, &STRING_ID_RECORD_VTABLE as *const _);
+            assert_eq!(
+                record.string.vtable, &STRING_OBJECT_VTABLE as *const _,
+                "the callee re-plants the StringObject vtable at +4"
+            );
+        }
+        let calls = release_calls();
+        assert_eq!(calls.len(), 1, "exactly one payload release");
+        assert_eq!(
+            calls[0].0,
+            core::ptr::addr_of!(record.string) as usize,
+            "the release receives the embedded subobject (this + 4 on target)"
+        );
+        assert_eq!(
+            calls[0].1,
+            &STRING_OBJECT_VTABLE as *const _ as usize,
+            "the derived vtable store at +0 precedes the call, and the \
+             StringObject vtable store at +4 happens inside it (str before bl)"
+        );
+    }
+
+    #[test]
+    fn record_destroy_derives_the_return_from_the_callee() {
+        let _bench = bench();
+        let mut record = StringIdRecord {
+            vtable: core::ptr::null(),
+            string: StringObject {
+                vtable: core::ptr::null(),
+                payload: core::ptr::null_mut(),
+            },
+            id: -1,
+        };
+        let this: *mut StringIdRecord = &mut record;
+        unsafe {
+            // The original: r0 = string_object_destroy(this + 4); r0 -= 4.
+            // The port subtracts one vtable word from the callee's return,
+            // which lands back on `this` whatever the host's field padding.
+            let expected = (core::ptr::addr_of_mut!(record.string) as *mut u8)
+                .sub(core::mem::size_of::<usize>()) as *mut StringIdRecord;
+            assert_eq!(string_id_record_destroy(this), expected);
+            assert_eq!(expected, this, "and that is `this` on every host");
+        }
+    }
+
+    #[test]
+    fn record_destroy_with_default_ops_releases_the_embedded_payload() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _lock = OPS_LOCK.lock().unwrap();
+        let mut payload_storage = [0u8; 8];
+        let payload = payload_storage.as_mut_ptr();
+        let mut record = StringIdRecord {
+            vtable: core::ptr::null(),
+            string: StringObject {
+                vtable: core::ptr::null(),
+                payload,
+            },
+            id: 7,
+        };
+        let this: *mut StringIdRecord = &mut record;
+        unsafe {
+            assert_eq!(string_id_record_destroy(this), this);
+            assert_eq!(record.vtable, &STRING_ID_RECORD_VTABLE as *const _);
+            assert_eq!(record.string.vtable, &STRING_OBJECT_VTABLE as *const _);
+        }
+        let (calls, freed, tag) = crate::heap::veneers::tests::free_log();
+        assert_eq!(calls, 1);
+        assert_eq!(freed, payload, "the embedded payload word is what gets freed");
+        assert_eq!(tag, 0x34, "the StringObject payload release's tag");
+        assert!(record.string.payload.is_null(), "the release NULLed the word");
+        assert_eq!(record.id, 7, "the destructor never touches the id word");
     }
 }

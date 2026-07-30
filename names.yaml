@@ -9319,6 +9319,60 @@ functions:
       bx lr`. Ported through the object's own vtable pointer, so
       subclass vtables work; no hook table.
 
+  - address: 0x08258c80
+    ghidra: FUN_08258c80
+    name: string_id_record_destroy
+    size: 24
+    sig: "StringIdRecord *string_id_record_destroy(StringIdRecord *this)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: this, DAT_08258c98: STRING_ID_RECORD_VTABLE_ADDRESS}
+    notes: >-
+      113 bl call sites (binary-scanned). 20 code bytes + the 4-byte
+      vtable literal @ 0x08258c98 (= 0x089a76f0, binary-verified). The
+      plain (non-deleting) destructor of a 0x10-byte polymorphic
+      (string, id) record class built on the two-word StringObject
+      class: `ldr r1,[0x08258c98]; str r1,[r0],#0x4` (plants the class
+      vtable at +0, the post-index add forms the this+4 argument),
+      `bl 0x08277484` (the ported string_object_destroy on the
+      embedded StringObject subobject at +4/+8), `sub r0,r0,#0x4`
+      (the callee returns its argument, so r0-4 = this). NOT a
+      constructor - the callee is the StringObject DESTRUCTOR; the
+      scouting shape notes had it backwards. The class is
+      unidentified, the name structural (pair_header precedent); its
+      0x08258cxx family: default ctor @ 0x08258c58 (`stmia` plants
+      BOTH vtables - 0x089a76f0 at +0 and StringObject's 0x089a6044
+      at +4, all four literal-pool words binary-verified - NULLs the
+      +8 payload, stores -1 at +0xc), (string,id) ctor @ 0x08258c08
+      and copy ctor @ 0x08258c2c (both chain to the StringObject copy
+      ctor @ 0x082773e0 on this+4), assignment @ 0x08258c9c, equality
+      @ 0x08258cc4 (compares via the ported string_object_c_str @
+      0x082a50b0 plus the +0xc words). Sampled call sites: records
+      are returned BY VALUE (sret) from virtual slot +0x13c of menu/UI
+      objects and consumed through slot +0x44 (0x081026b4, 0x0813b9d4
+      sites), heap-allocated via operator_new(0x10) @ 0x0807f160 and
+      appended to the list at +0x60 of the element_table manager @
+      0x08105ffc (ported, app/element_table), and constructed from a
+      formatted name string plus a database id @ 0x0813b828/0x0813b884
+      (0x080528ec reads the record store at r4+0x40). Vtable @
+      0x089a76f0 is eighteen serialized words (modeled verbatim in the
+      port): slot 0 is 0x082559ac, a get-descriptive-string query
+      over ids 0x1f00-0x1f03 (the GLES VENDOR/RENDERER/VERSION/
+      EXTENSIONS enums - "Hans-Martin Will", "Software", "OpenGL
+      ES-CM 1.1", else stores 0x500 = GL_INVALID_ENUM and returns
+      NULL) - a GL-flavoured named-object record; the rest undecoded.
+      The 0x08258d00 neighbor plants 0x089a76fc (vtable+0xc) - a
+      different 0x10-byte tagged-value class tail-merged onto the same
+      storage. Port plants the modeled static vtable (ROM address a
+      host cannot reproduce, house pattern), calls the ported
+      string_object_destroy directly, and derives the return as the
+      callee's return minus one size_of::<usize>() word (the
+      original's sub r0,r0,#4 dataflow, value-identical on 64-bit
+      hosts). match.py structural: same literal load / post-index
+      vtable store / destroy call / return-this; the diff is LLVM's
+      fp frame and LLVM folding the -4 into `mov r0, r4` (the
+      documented deviation).
+
   - address: 0x08275d74
     ghidra: FUN_08275d74
     name: string_object_release_payload
