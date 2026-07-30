@@ -10876,6 +10876,35 @@ functions:
       sites) is the same function with the value looked up from a table
       @ 0x081239b4 instead of passed in.
 
+  - address: 0x0812395c
+    ghidra: FUN_0812395c
+    name: formatted_message_emit_boolean
+    size: 88
+    sig: "void formatted_message_emit_boolean(MessageStream *stream, const char *key, uint32 index, uint32 depth)"
+    module: printf/formatted_message
+    status: ported
+    vars: {param_1: stream, param_2: key, param_3: index, param_4: depth}
+    notes: >-
+      58 bl call sites. Sibling of formatted_message_emit @ 0x08123600:
+      same indented plist property emitter, but the value is an
+      empty-element tag looked up from a table instead of passed in.
+      The literal-pool word @ 0x081239b4 holds the table base
+      0x089cb210, the tag is table[index] (ldr r3, [r0, r5, lsl #2]),
+      and the format literal @ 0x081239b8 ("%s<key>%s</key>\n%s<%s/>\n")
+      is formatted with args (indent, key, indent, tag) into the +0x15
+      buffer; the stream append @ 0x08123c58 is tail-called. All call
+      sites pass index 0/1 with plist boolean semantics ("Stereo" with
+      1, "Multichannel" with 0 @ 0x081502b0), i.e. the table is the
+      {"false", "true"} tag pair. The osos.dec bytes at VA 0x089cb210
+      are an unreferenced resource-string blob, so the runtime table
+      contents are not statically readable from the image; the pair is
+      pinned by the call sites and plist syntax. The lookup keeps the
+      original's double indirection as the swappable BOOLEAN_TAG_TABLE
+      static (default: false/true); INDENT_PREPARE / STREAM_APPEND
+      dispatch slots are shared with the integer sibling, snprintf is
+      called directly (LLVM inlines its bounded-cursor wrapper, same
+      codegen shape as the sibling's accepted port).
+
   - address: 0x0811d46c
     ghidra: FUN_0811d46c
     name: vtable_query_4c_kind4

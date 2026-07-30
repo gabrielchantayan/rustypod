@@ -4,6 +4,8 @@
 //!
 //! - `formatted_message_emit` — original: `FUN_08123600` @ 0x08123600
 //!   (80 bytes; 83 `bl` call sites, binary-scanned).
+//! - `formatted_message_emit_boolean` — original: `FUN_0812395c` @
+//!   0x0812395c (88 bytes; 58 `bl` call sites, binary-scanned).
 //!
 //! Algorithm: prepare the stream's indentation for the requested nesting
 //! `depth` (`indent_prepare` @ 0x08123a54 fills the scratch buffer at
@@ -21,6 +23,21 @@
 //! Call sites confirm the shape, e.g. @ 0x081502b0:
 //! `formatted_message_emit(ctx + 0xc, "Minimum", *(u8 *)(ctx + 0x264), 2)`
 //! — a plist writer emitting one integer property per call.
+//!
+//! The boolean sibling @ 0x0812395c is the same emitter with the value
+//! replaced by an empty-element tag looked up from a table: the literal-
+//! pool word @ 0x081239b4 (right after the 88-byte body) holds the table
+//! base 0x089cb210, the tag is `table[index]` (`ldr r3, [r0, r5, lsl
+//! #2]`), and the format literal @ 0x081239b8 (reached with `adr`) is
+//! `"%s<key>%s</key>\n%s<%s/>\n"` with the argument list `(indent, key,
+//! indent, tag)`. Every call site passes `index` 0/1 with plist boolean
+//! semantics — @ 0x081502b0 emits `"Stereo"` with 1 but
+//! `"Multichannel"` with 0 — so the table is the `{"false", "true"}`
+//! tag pair of a plist boolean property. (The osos.dec bytes at VA
+//! 0x089cb210 are an unreferenced resource-string blob, so the runtime
+//! table contents are not statically readable from the image; the
+//! pair above is pinned by the call sites and plist syntax, and the
+//! [`BOOLEAN_TAG_TABLE`] slot keeps the indirection faithful.)
 //!
 //! `MessageStream` fields used (pinned by this function's `add rX, r4,
 //! #off` sequence):
@@ -56,6 +73,12 @@ use super::printf_api::{snprintf, VaList};
 /// original with `adr r2, 0x8123650`, right after the 80-byte body).
 /// Consumes four argument words: indent, key, indent, value.
 const PLIST_INTEGER_FORMAT: &[u8] = b"%s<key>%s</key>\n%s<integer>%d</integer>\n\0";
+
+/// The boolean-sibling format literal @ 0x081239b8 (addressed by the
+/// original with `adr r2, 0x81239b8`, right after the 88-byte body and
+/// its literal-pool word). Consumes four argument words: indent, key,
+/// indent, tag — the tag is emitted as an empty element (`<true/>`).
+const PLIST_BOOLEAN_FORMAT: &[u8] = b"%s<key>%s</key>\n%s<%s/>\n\0";
 
 /// Capacity of the inline format buffer at +0x15 (original: `mov r1,
 /// #0x200`).
@@ -133,6 +156,32 @@ pub(crate) fn stream_append_op() -> StreamAppendFn {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(STREAM_APPEND)) }
 }
 
+/// A static table of C-string pointers; the strings are immutable
+/// literals, so sharing the table across (test) threads is sound.
+struct BooleanTags([*const u8; 2]);
+unsafe impl Sync for BooleanTags {}
+
+/// The default boolean-tag table: the plist empty-element tags indexed
+/// 0/1, as pinned by the call sites (index 0 for `"Multichannel"`, 1
+/// for `"Stereo"`). The original's table base lives in the literal-pool
+/// word @ 0x081239b4; its runtime contents are not statically readable
+/// from osos.dec (see the module header).
+static DEFAULT_BOOLEAN_TAGS: BooleanTags =
+    BooleanTags([b"false\0".as_ptr(), b"true\0".as_ptr()]);
+
+/// The active boolean-tag table base — the value of the original's
+/// literal-pool word @ 0x081239b4, dereferenced as `table[index]` with
+/// no bounds check (the original's `ldr r3, [r0, r5, lsl #2]`). Host
+/// tests install recording tables; the firmware table replaces the
+/// default if 0x089cb210's runtime contents are ever mapped.
+pub static mut BOOLEAN_TAG_TABLE: *const *const u8 = DEFAULT_BOOLEAN_TAGS.0.as_ptr();
+
+/// Reads the table-base slot (volatile — see [`indent_prepare_op`]).
+#[inline(always)]
+pub(crate) fn boolean_tag_table() -> *const *const u8 {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(BOOLEAN_TAG_TABLE)) }
+}
+
 /// formatted_message_emit — original: `FUN_08123600` @ 0x08123600 (80
 /// bytes; 83 `bl` call sites).
 ///
@@ -163,6 +212,48 @@ pub unsafe extern "C" fn formatted_message_emit(
         stream.buf.as_mut_ptr(),
         stream.buf.len(),
         PLIST_INTEGER_FORMAT.as_ptr(),
+        args.as_ptr(),
+    );
+    let text = stream.buf.as_ptr();
+    (stream_append_op())(stream, text);
+}
+
+/// formatted_message_emit_boolean — original: `FUN_0812395c` @
+/// 0x0812395c (88 bytes; 58 `bl` call sites).
+///
+/// Emit one indented `<key>key</key>` + `<tag/>` plist boolean property
+/// to `stream`: prepare the indentation for nesting `depth`, look the
+/// empty-element `tag` up as `BOOLEAN_TAG_TABLE[index]` (the original's
+/// literal-pool table base @ 0x081239b4, `ldr r3, [r0, r5, lsl #2]`),
+/// format the fragment into the stream's inline buffer with
+/// [`PLIST_BOOLEAN_FORMAT`], and append the buffer to the stream
+/// output. Same body as [`formatted_message_emit`] apart from the table
+/// lookup and the format literal.
+///
+/// Register usage: r0 = stream, r1 = key, r2 = index, r3 = depth
+/// (original forwards r3 as the preparer's depth argument and indexes
+/// the tag table with r2).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn formatted_message_emit_boolean(
+    stream: *mut MessageStream,
+    key: *const u8,
+    index: u32,
+    depth: u32,
+) {
+    let stream = &mut *stream;
+    (indent_prepare_op())(stream, depth);
+    // The original's table lookup: base from the pool word @ 0x081239b4,
+    // entry at base + index*4, no bounds check.
+    let tag = *boolean_tag_table().offset(index as isize);
+    let indent = stream.indent.as_ptr();
+    // Same four-word argument area as the integer sibling: r3 = indent,
+    // stack = {key, indent, tag}.
+    let args: [u32; 4] = [indent as u32, key as u32, indent as u32, tag as u32];
+    snprintf(
+        stream.buf.as_mut_ptr(),
+        stream.buf.len(),
+        PLIST_BOOLEAN_FORMAT.as_ptr(),
         args.as_ptr(),
     );
     let text = stream.buf.as_ptr();
@@ -348,6 +439,105 @@ mod tests {
             // The default append dropped the message: bytes past the NUL
             // are the untouched backing fill.
             assert_eq!((*stream).buf[1], 0xAA);
+        }
+    }
+
+    /// A recording table distinct from the default, so the lookup is
+    /// observably the slot's product: index 0 -> "no", index 1 -> "yes".
+    static RECORDING_TAGS: BooleanTags = BooleanTags([b"no\0".as_ptr(), b"yes\0".as_ptr()]);
+
+    /// Swaps in the recording tag table for `body`, then restores the
+    /// previous base (same discipline as [`with_mocks`]).
+    unsafe fn with_table(body: impl FnOnce()) {
+        let saved = boolean_tag_table();
+        core::ptr::write_volatile(
+            core::ptr::addr_of_mut!(BOOLEAN_TAG_TABLE),
+            RECORDING_TAGS.0.as_ptr(),
+        );
+        body();
+        core::ptr::write_volatile(core::ptr::addr_of_mut!(BOOLEAN_TAG_TABLE), saved);
+    }
+
+    #[test]
+    fn boolean_looks_up_the_tag_and_emits_in_order() {
+        let _guard = slot_lock();
+        let mut mem = backing();
+        let stream = stream_of(&mut mem);
+        let key = b"Stereo\0";
+        unsafe {
+            with_mocks(snapshot_engine, || {
+                with_table(|| {
+                    formatted_message_emit_boolean(stream, key.as_ptr(), 1, 3);
+                });
+            });
+            let (prep_stream, prep_depth) = PREPARE_LEG.expect("indent prepared");
+            assert_eq!(prep_stream, stream, "preparer saw the stream");
+            assert_eq!(prep_depth, 3, "preparer saw the depth (original r3)");
+
+            let (fmt, cursor, end, words) = FORMAT_LEG.expect("formatter ran");
+            let mut fmt_bytes = std::vec::Vec::new();
+            let mut p = fmt;
+            while *p != 0 {
+                fmt_bytes.push(*p);
+                p = p.add(1);
+            }
+            assert_eq!(fmt_bytes, &PLIST_BOOLEAN_FORMAT[..PLIST_BOOLEAN_FORMAT.len() - 1]);
+            let buf = (*stream).buf.as_mut_ptr();
+            assert_eq!(cursor, buf as usize, "snprintf target is the inline buffer at +0x15");
+            assert_eq!(end, buf.add(BUFFER_CAPACITY - 1) as usize, "bounded at +0x15 + 0x200");
+            let indent = (*stream).indent.as_ptr();
+            assert_eq!(
+                words,
+                [
+                    indent as u32,
+                    key.as_ptr() as u32,
+                    indent as u32,
+                    RECORDING_TAGS.0[1] as u32
+                ],
+                "argument area: (indent, key, indent, table[index])"
+            );
+
+            let (app_stream, app_text, _) =
+                (*core::ptr::addr_of_mut!(APPEND_LEG)).take().expect("appended");
+            assert_eq!(app_stream, stream);
+            assert_eq!(app_text, buf, "append got the inline buffer");
+        }
+    }
+
+    #[test]
+    fn boolean_index_zero_picks_the_first_tag() {
+        let _guard = slot_lock();
+        let mut mem = backing();
+        let stream = stream_of(&mut mem);
+        unsafe {
+            with_mocks(snapshot_engine, || {
+                with_table(|| {
+                    formatted_message_emit_boolean(stream, b"Multichannel\0".as_ptr(), 0, 3);
+                });
+            });
+            let (_, _, _, words) = FORMAT_LEG.expect("formatter ran");
+            assert_eq!(words[3], RECORDING_TAGS.0[0] as u32, "index 0 -> first tag");
+        }
+    }
+
+    #[test]
+    fn boolean_default_table_is_the_plist_false_true_pair() {
+        let _guard = slot_lock();
+        let mut mem = backing();
+        let stream = stream_of(&mut mem);
+        unsafe {
+            // Only the engine is mocked, so the lookup observes the
+            // documented default table.
+            with_mocks(snapshot_engine, || {
+                formatted_message_emit_boolean(stream, b"PodcastsSupported\0".as_ptr(), 1, 1);
+            });
+            let (_, _, _, words) = FORMAT_LEG.expect("formatter ran");
+            assert_eq!(words[3], b"true\0".as_ptr() as u32, "index 1 -> \"true\"");
+            with_mocks(snapshot_engine, || {
+                formatted_message_emit_boolean(stream, b"Multichannel\0".as_ptr(), 0, 1);
+            });
+            let (_, _, _, words) = FORMAT_LEG.expect("formatter ran");
+            assert_eq!(words[3], b"false\0".as_ptr() as u32, "index 0 -> \"false\"");
         }
     }
 }
