@@ -11055,9 +11055,11 @@ functions:
       red-black-tree insert-unique @ 0x083b867c(&result, map, &pair) and
       returns result.node + 0x14 (node header 0x10: flag/parent/left/
       right, key pair at +0x10, so +0x14 is the mapped value). The
-      dependency is not ported; the port dispatches it through the
-      swappable BYTE_KEY_MAP_OPS slot (default stub reports a null node,
-      so the find returns 0x14 - install the slot before real use). The
+      dependency is now ported (byte_key_tree_insert_unique, same
+      module) and is the shipped default of the swappable
+      BYTE_KEY_MAP_OPS slot it dispatches through; _M_insert @
+      0x083b8844 remains a hook (BYTE_KEY_TREE_OPS, default stub
+      reports a null fresh node, so an inserting find returns 0x14). The
       pair's pad bytes are zeroed where the original leaves stack
       garbage (unobservable). match.py structural: pair zeroing, key
       stamp, hook load/blx, node+0x14 all present; frame style (fp) and
@@ -11067,25 +11069,41 @@ functions:
     ghidra: FUN_083b867c
     name: byte_key_tree_insert_unique
     size: 396
-    module: null
-    status: identified
+    sig: "void byte_key_tree_insert_unique(ByteKeyInsertResult *result, ByteKeyMap *map, const ByteKeyPair *key_pair)"
+    module: cxx/byte_key_map
+    status: ported
+    vars: {param_1: result, param_2: map, param_3: key_pair, iVar1: went_left, pbVar2: node, pbVar4: parent, local_2c[0]: position}
     notes: >-
-      Scouted from byte_key_map_find @ 0x083db038; NOT ported (out of
-      that port's scope). Contract: void (u32 *result, map *this, const
-      u8 *key_pair) - writes the node pointer at result+0 and an
-      inserted-flag byte (1 = newly linked, 0 = key already present) at
-      result+4. Container fields read: +0x10 header node (header+4 =
-      root, header+8 = leftmost), +0x18 multi-insert flag byte (nonzero
-      skips the uniqueness test - multimap semantics), +0x19 comparator
-      object. Body is libstdc++ _Rb_tree::_M_insert_unique: descend from
-      the root through the comparator @ 0x083d73bc (nonzero -> left at
-      node+8, else right at node+0xc; node keys at node+0x10), then the
-      iterator-equality helper @ 0x083cf740 against the leftmost header
-      child plus an inline predecessor/successor walk decide between
-      returning the existing node (flag 0) and linking a fresh one via
-      0x083b8844 (_M_insert: allocate, copy the pair, rebalance; flag
-      1). The result contract above is all byte_key_map_find consumes;
-      modeled there as the BYTE_KEY_MAP_OPS hook slot.
+      Ported. libstdc++ _Rb_tree::_M_insert_unique for a byte-keyed
+      map: descend from the root (header at map+0x10; header+4 = root)
+      comparing the pair's key byte against node keys at node+0x10
+      (less-than -> left at +8, else right at +0xc), remembering the
+      last node and direction. Uniqueness (multi-insert byte at
+      map+0x18 clear): a last-left step tests position == header+8
+      (begin) for an immediate insert, else walks to the in-order
+      predecessor (inline _Rb_tree_decrement at 0x083b8768-0x083b87c4:
+      header recognised by red color 0 + parent->parent self-loop, else
+      ascend while the node is its parent's left child); the
+      candidate's key comparing less than the new key links a fresh
+      node via _M_insert @ 0x083b8844 (flag 1), otherwise the existing
+      node returns (flag 0). Multi-insert set: always links. Result:
+      node word at result+0, flag byte at result+4. The port is the
+      shipped default of BYTE_KEY_MAP_OPS (byte_key_map_find @
+      0x083db038's slot). The comparator @ 0x083d73bc (unsigned byte
+      less-than), iterator-equality @ 0x083cf740 and key accessor @
+      0x083b6a44 (node+0x10) are one-/few-instruction leaves, inlined;
+      _M_insert @ 0x083b8844 is not ported and rides the new
+      BYTE_KEY_TREE_OPS slot (default stub reports a null fresh node).
+      Node/container layouts are typed #[repr(C)] structs
+      (ByteKeyTreeNode / ByteKeyTree) with 32-bit-asserted offsets, the
+      app/node_list.rs precedent. Host tests model trees with typed
+      nodes: empty tree, duplicate, new min/max, ascend-loop duplicate,
+      predecessor-less insert under the descent parent, unsigned
+      compare (0x40 vs 0x80), multi-insert skip, stub default, and an
+      end-to-end find through the shipped default with a real mini
+      linker. match.py structural: descent loop, begin test, header
+      self-loop check, ascend loop, hook blx and flag stores all
+      present; LLVM inlines the leaf callees (deviation, documented).
 
   - address: 0x08123600
     ghidra: FUN_08123600
