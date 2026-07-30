@@ -65,12 +65,13 @@
 //!   0x08280464 / 0x082804fc (their return values are discarded by the
 //!   original, so the region slots return `()`). The defaults are
 //!   documented: the hand-out default is the REAL port
-//!   (heap/block_mgr.rs's `manager_take_blocks`), whose own body stub
-//!   refuses 0 — the no-manager contract of block_deque.rs's
-//!   `stub_client_populate`, one boundary deeper — so with the wired
-//!   defaults the loop is unreachable and the no-op grow/region stubs
-//!   never run; the port then reports the same refusal 0 the old
-//!   wholesale stub faked.
+//!   (heap/block_mgr.rs's `manager_take_blocks`), whose own body
+//!   default is the REAL 0x0818b108 port (`take_blocks_body`) — with
+//!   no block manager on device nothing reaches it, the no-manager
+//!   contract of block_deque.rs's `stub_client_populate`, one boundary
+//!   deeper — so with the wired defaults the loop is unreachable and
+//!   the no-op grow/region stubs never run; the port then reports the
+//!   same refusal 0 the old wholesale stub faked.
 //! - **Shipped wiring**: block_deque.rs is off-limits in this shared
 //!   tree (its `stub_client_populate` stays the POOL_BASE_OPS default —
 //!   behavior-identical under the no-manager defaults above), so the
@@ -150,8 +151,9 @@ pub struct ClientPopulateOps {
     /// Manager block hand-out @ 0x0818b0c4 `(manager, client + 0x8,
     /// count)`: nonzero hands `count` blocks to the client, zero
     /// refuses the whole populate. The wired default is the REAL port
-    /// (heap/block_mgr.rs's `manager_take_blocks`); its own body stub
-    /// keeps the no-manager refusal below.
+    /// (heap/block_mgr.rs's `manager_take_blocks`); its own body
+    /// default is the REAL 0x0818b108 port (`take_blocks_body`),
+    /// unreachable with no block manager on device.
     pub manager_take_blocks:
         unsafe extern "C" fn(manager: *mut u8, client_state: *mut u8, count: usize) -> i32,
     /// Deque growth @ 0x083dda08 `(deque)`: installs a fresh segment
@@ -166,7 +168,7 @@ pub struct ClientPopulateOps {
 }
 
 /// Default growth/region stubs: with the real 0x0818b0c4 port as the
-/// hand-out default (heap/block_mgr.rs, body stub fail-closed) the
+/// hand-out default (heap/block_mgr.rs, real body fail-closed with no
 /// loop is unreachable, so these never run in the wired configuration.
 unsafe extern "C" fn stub_deque_grow(_deque: *mut BlockDeque) {}
 
@@ -734,9 +736,20 @@ mod tests {
             addr_of_mut!(REGION_MUTEX_OPS).write(DEFAULT_REGION_MUTEX_OPS);
             client_with(0, 0, 4, 0, core::ptr::null_mut());
             let client = client();
+            // The hand-out body's wired default is now the REAL
+            // 0x0818b108 port (block_mgr.rs's take_blocks_body), which
+            // dereferences the manager — the bare 0x0b10_c000 marker
+            // is unmapped. Point the client at a mapped fake manager
+            // whose free-count word (+0x14) is 0: the real body's gate
+            // refuses, the same 0 the old fail-closed body stub faked
+            // (the no-op mutex stubs bracket it; the no-op splice is
+            // never reached).
+            let fake_mgr = slab().add(0x800);
+            set_word(client, CLIENT_MANAGER_OFFSET, fake_mgr as u32);
+            set_word(fake_mgr, 0x14, 0);
             let mut dq = empty_deque();
-            // The gates pass; the real hand-out port's fail-closed
-            // body stub refuses (the no-op mutex stubs bracket it).
+            // The gates pass; the real hand-out port's free-count gate
+            // refuses (the no-op mutex stubs bracket it).
             assert_eq!(client_populate(client, 3, &mut *dq), 0, "no manager -> refused");
             assert_eq!(dq.count, 0);
             assert!(events().is_empty(), "the no-op mutex stubs ran, nothing else");

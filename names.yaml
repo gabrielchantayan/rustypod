@@ -2274,7 +2274,9 @@ functions:
       the new CLIENT_POPULATE_OPS slots (house pattern, blx for bl);
       the manager slot's default is now the REAL 0x0818b0c4 port
       (heap/block_mgr.rs's manager_take_blocks — stub_manager_take_blocks
-      removed) whose own body stub refuses 0, the no-manager contract
+      removed) whose own body default is now the REAL 0x0818b108 port
+      (take_blocks_body) — unreachable with no block manager on device,
+      the no-manager contract
       of block_deque.rs's stub_client_populate one boundary deeper, so
       the wired defaults are still fail-closed and the no-op
       grow/region stubs are unreachable. block_deque.rs is off-limits in the shared
@@ -2508,11 +2510,13 @@ functions:
       bracket: lock the manager's own mutex object at manager+0x148
       (the unported C++ recursive-mutex pair 0x082e8390/0x082e83d8 via
       thunks 0x082621a8/0x082621ac, block_region.rs's REGION_MUTEX_OPS
-      boundary), run the unported body 0x0818b108(manager,
+      boundary), run the body 0x0818b108(manager,
       client_state, count) through the new BLOCK_MANAGER_OPS
       take_blocks_body slot (house pattern, blx for bl), unlock, return
       the body's verdict held in a callee-saved register across the
-      unlock (the client_commit.rs shape). The body stub refuses 0 —
+      unlock (the client_commit.rs shape). The body slot's default is
+      now the REAL 0x0818b108 port (take_blocks_body, stub_take_blocks_body
+      removed) — unreachable with no block manager on device,
       the fail-closed no-manager contract — so the
       CLIENT_POPULATE_OPS.manager_take_blocks default is now this REAL
       port (replacing client_populate.rs's wholesale stub_manager_take_blocks,
@@ -2524,6 +2528,62 @@ functions:
       lock/body/unlock, verdict-in-callee-saved shape; the diff is
       blx-through-table for the three calls and LLVM's fp frame, the
       accepted house deviations.
+
+  - address: 0x0818b108
+    ghidra: FUN_0818b108
+    name: take_blocks_body
+    size: 264
+    sig: "i32 take_blocks_body(u8 *manager, u8 *client_state, usize count)"
+    module: heap/block_mgr
+    vars: {param_1: manager, param_2: client_state, param_3: count, local_24: end, local_28: cursor, local_18: pos, local_1c: first, local_20: last, uVar3: remaining, iVar2: entry}
+    status: ported
+    notes: >-
+      The block hand-out body the manager_take_blocks bracket (above)
+      runs under the manager+0x148 mutex — the actual
+      (*(client+4), client+8, count) work from client_populate's
+      perspective. 2 bl call sites @ 0x0818b0e8 (the bracket) and
+      0x0818b050 (FUN_0818b028, count always 1), binary-verified.
+      Gate: the manager free list's count word (list object at
+      manager+0x4, count at +0x10 -> absolute +0x14) must cover count
+      (unsigned bcc, equality grants), else refuse 0. Then a stack
+      end-iterator walks count steps from the free-list head
+      (manager+0x8) through the 0x083d5e88 advance (ported in place as
+      iter_advance; NULL current node tail-calls heap_panic
+      0x08030f44, defensive/unreachable given the gate); the range
+      [head, end) is spliced out of the manager's free list into the
+      client state's own list (the client state IS a list object;
+      position = its head word at +0x4) through the unported 316-byte
+      0x083d5d20 — the new BLOCK_MANAGER_OPS.splice_blocks slot
+      (documented no-op default, verdict discarded like the original);
+      finally a stamping walk re-reads the client head AFTER the
+      splice and, per node, derefs to the +0xc block entry
+      (0x083d5ea0, ported in place as iter_entry), reads the entry's
+      +0x4 owner handle (NULL -> heap_panic, non-returning) and stamps
+      the handle's +0xc back-link with the node. Returns 1.
+      0x083d5e88/0x083d5ea0 are inlined private helpers (their only
+      call sites are this body). Deviations: the original's triple
+      entry/owner re-read per node and the dead post-panic NULL
+      re-check collapse to one read (0x08030f44 is non-returning); the
+      intermediate iterator spills collapse into the two locals the
+      splice consumes; list pointer fields are u32 target pointers
+      zero-extended on read / truncated on the stamp (host fixtures in
+      a low mmap slab, the client_populate.rs idiom). The port is the
+      wired BLOCK_MANAGER_OPS.take_blocks_body default
+      (stub_take_blocks_body removed); client_populate.rs's
+      wired-default test now points its fake client at a mapped fake
+      manager with a 0 free-count word (the real body dereferences the
+      manager where the stub refused — same refusal 0, one gate
+      deeper). Host tests: refusal on a short free count (no splice,
+      no stamps), a 2-of-3 hand-out (splice args with the end iterator
+      two advances in, owner back-links stamped in list order),
+      free == count (strict bcc boundary, end advances off the list to
+      NULL), count 0 (empty-range splice, grants, nothing stamped),
+      and the wired-default refusal through the real body's gate.
+      match.py structural: same gate/advance-loop/splice/stamping-walk/
+      panic/return-1 shape; the splice is blx-through-table for bl,
+      the u32 word accesses come out as ldrb/strb chains from the
+      (read|write)_unaligned idiom, LLVM peels the first advance
+      iteration and adds its fp frame — the accepted house deviations.
 
   - address: 0x080751a0
     ghidra: FUN_080751a0
