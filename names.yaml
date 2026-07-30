@@ -9524,6 +9524,57 @@ functions:
       unobservable between distinct addresses) plus the crate fp frame
       - the accepted house deviations.
 
+  - address: 0x08258c08
+    ghidra: FUN_08258c08
+    name: string_id_record_construct_from_string_id
+    size: 32
+    sig: "StringIdRecord *string_id_record_construct_from_string_id(StringIdRecord *this, const StringObject *source, i32 id)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: this, param_2: source, param_3: id, DAT_08258c28: STRING_ID_RECORD_VTABLE_ADDRESS}
+    notes: >-
+      7 bl call sites (binary-scanned: 0x0813b828, 0x0813b884,
+      0x0813bd64, 0x0813bde0, 0x0813c3fc, 0x0813c478, 0x0813c9c8 - the
+      name-plus-database-id record construction sites; full family
+      context in the 0x08258c80 entry). 28 code bytes + the 4-byte
+      literal-pool word @ 0x08258c28 (= 0x089a76f0, binary-verified
+      against osos.dec). The (string, id) constructor of the 0x10-byte
+      polymorphic (string, id) record class: `ldr r2,[0x08258c28];
+      str r2,[r0],#0x4` plants the class vtable at +0 (the post-index
+      add forms the this+4 argument, the embedded StringObject
+      subobject), `bl 0x082773e0` chains to the StringObject copy
+      constructor on this+4 with `source` still in r1 (the scouting
+      note verified exact against osos.asm; the copy ctor's pool word
+      @ 0x08277410 = 0x089a6044 also binary-verified), `sub r0,r0,#0x4`
+      derives this back from the callee's return (the callee returns
+      its argument), `str r4,[r0,#0xc]` stores the id argument (saved
+      in r4 at entry). No allocation of its own, no NULL guard.
+      Deviations: the class vtable is the modeled static
+      STRING_ID_RECORD_VTABLE (ROM address, the sibling precedent);
+      the StringObject copy ctor @ 0x082773e0 is NOT ported (its own
+      payload-duplication callee @ 0x08276474 allocates and dispatches
+      through vtable slot +0xc), so the chain goes through the new
+      STRING_OBJECT_COPY_CONSTRUCT dispatch slot (the util/inner_state.rs
+      INNER_MATERIALIZE_COUNT pattern) whose default stub is the copy
+      ctor's empty-construction prefix (StringObject vtable + NULL
+      payload, source ignored); the port derives this from the callee's
+      return minus size_of::<usize>() (one vtable word) so the
+      original's dataflow holds on 64-bit hosts too. Siblings NOT
+      ported here: copy ctor @ 0x08258c2c, assignment @ 0x08258c9c,
+      equality @ 0x08258cc4. Host tests: vtable planted before the
+      dispatch (recorder reads the +0 word through subobject-1), the
+      embedded subobject and source forwarded verbatim, the id stored
+      (edge values -1/i32::MIN/i32::MAX/0/0x1f03), the return derived
+      from the callee's return, the default stub's empty-string
+      construction leaving the source byte-identical, and a
+      construct-then-destroy round trip. match.py structural: same
+      push/mov/ldr-pool/str-postindex/call/sub/str/pop shape; the diff
+      is the crate fp frame, the blx-through-volatile-slot dispatch
+      standing in for the direct bl 0x082773e0 (the documented
+      deviation), and LLVM scheduling the id store before the sub
+      (str r4,[r0,#8] on the not-yet-subtracted r0 - same effective
+      +0xc address, unobservable reorder of an independent store).
+
   - address: 0x08258c80
     ghidra: FUN_08258c80
     name: string_id_record_destroy
