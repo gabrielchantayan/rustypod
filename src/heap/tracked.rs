@@ -50,6 +50,10 @@
 //! - `free_tag57` / `alloc_tag57` — originals @ 0x08391d24 and
 //!   0x08391d2c (8 bytes each): `mov r1, #57` in front of `free_wrapper`
 //!   @ 0x080e7970 / `malloc_wrapper` @ 0x080eb67c (heap/veneers.rs).
+//! - `tracked_stats_current` — original: `FUN_08390c54` @ 0x08390c54
+//!   (20 bytes, 1 `bl` call site @ 0x08391450). Arms the stats lock
+//!   (scheduler-flag setter @ 0x082ccc74) and returns the running byte
+//!   counter (+0x38) read with `ldrd`.
 //!
 //! Simplification, same as `heap/veneers.rs` makes for the default heap:
 //! the accounting block is a `static` here instead of living at
@@ -179,6 +183,66 @@ pub unsafe extern "C" fn tracked_free_pointer_array(elements: *mut *mut u8) {
         index += 1;
     }
     tracked_free(base as *mut u8);
+}
+
+/// Indirect dispatch table for the unported stats-lock callee (see
+/// `tracked_stats_current`'s doc header for the default's contract).
+#[derive(Clone, Copy)]
+pub struct TrackedStatsOps {
+    /// Stats lock @ 0x082ccc74 — the scheduler-flag setter
+    /// (`if [scheduler_state + 0x14] == 0 { [scheduler_state + 0x14] = 8 }`),
+    /// called before the 64-bit counter reads so a running scheduler
+    /// can't tear the `ldrd`.
+    pub lock: unsafe extern "C" fn(),
+}
+
+/// Default stats-lock stub: no ported scheduler state — nothing to
+/// arm. The counter value the reader returns is unaffected (the flag
+/// only guards against a torn `ldrd` under concurrency the port
+/// doesn't have).
+unsafe extern "C" fn stub_stats_lock() {}
+
+/// Wired default (documented no-op until the scheduler-flag setter
+/// @ 0x082ccc74 is ported).
+pub(crate) const DEFAULT_TRACKED_STATS_OPS: TrackedStatsOps = TrackedStatsOps {
+    lock: stub_stats_lock,
+};
+
+/// The active implementation table. Written once at init on target;
+/// host tests swap in recorders and restore the default.
+pub static mut TRACKED_STATS_OPS: TrackedStatsOps = DEFAULT_TRACKED_STATS_OPS;
+
+/// tracked_stats_current — original: `FUN_08390c54` @ 0x08390c54
+/// (20 bytes; 1 `bl` call site @ 0x08391450).
+///
+/// The current-bytes reader of the tag-57 tracked allocator's stats
+/// block, sibling of the peak reader/reset pair @ 0x08390c24 /
+/// 0x08390c30. Verified against osos.asm: unlike that pair (an
+/// envelope head carrying the lock call plus a tail fragment), this is
+/// a COMPLETE function whose 20 bytes include the lock call inline —
+/// `stmdb sp!,{r4,lr}; bl 0x082ccc74; ldr r1,[lit 0x08adc2c0];
+/// ldrd r0,r1,[r1,#0x38]; ldmia sp!,{r4,pc}`. It arms the stats lock,
+/// reads the running byte counter (stats + 0x38, i64) with `ldrd`,
+/// and returns it in the r0:r1 pair.
+///
+/// Deviations:
+///
+/// - The accounting block is the `ALLOC_STATS` static instead of the
+///   literal 0x08adc2c0 (module simplification, same as the rest of
+///   heap/tracked).
+/// - The lock callee @ 0x082ccc74 (scheduler-flag setter) is
+///   unported, so the `bl` dispatches through the
+///   [`TRACKED_STATS_OPS`]`.lock` slot (house ops-slot pattern, an
+///   indirect call in place of `bl`). The default is a documented
+///   no-op: the flag only keeps a running scheduler from tearing the
+///   64-bit `ldrd`, and the port has no scheduler — the returned value
+///   is unaffected either way.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn tracked_stats_current() -> i64 {
+    let lock = core::ptr::read_volatile(core::ptr::addr_of!(TRACKED_STATS_OPS.lock));
+    lock();
+    let stats = core::ptr::addr_of!(ALLOC_STATS);
+    (*stats).current_bytes
 }
 
 #[cfg(test)]
@@ -467,6 +531,60 @@ mod tests {
             tracked_alloc_tail(1);
             assert_eq!(ALLOC_STATS.current_bytes, 0x1_0000_0000);
             assert_eq!(ALLOC_STATS.peak_bytes, 0x1_0000_0000);
+        }
+    }
+
+    // ---- tracked_stats_current ----------------------------------------
+
+    /// `arena()` plus a restored stats ops table — one guard, no
+    /// shadowed self-deadlock.
+    fn stats() -> MutexGuard<'static, ()> {
+        let guard = arena();
+        unsafe { TRACKED_STATS_OPS = DEFAULT_TRACKED_STATS_OPS };
+        guard
+    }
+
+    /// The whole i64 at stats+0x38 comes back: small, negative, and
+    /// wider-than-32-bit values.
+    #[test]
+    fn returns_the_running_counter() {
+        let _guard = stats();
+        unsafe {
+            ALLOC_STATS.current_bytes = 0x1234;
+            assert_eq!(tracked_stats_current(), 0x1234);
+            ALLOC_STATS.current_bytes = -7;
+            assert_eq!(tracked_stats_current(), -7);
+            ALLOC_STATS.current_bytes = 0x1_0000_0001;
+            assert_eq!(tracked_stats_current(), 0x1_0000_0001);
+        }
+    }
+
+    /// The lock runs before the read: the mock leaves its mark in the
+    /// counter and the reader must return the value the lock set.
+    #[test]
+    fn calls_the_lock_before_reading() {
+        static mut LOCK_CALLS: usize = 0;
+        unsafe extern "C" fn mock_lock() {
+            LOCK_CALLS += 1;
+            ALLOC_STATS.current_bytes = 0x2a;
+        }
+        let _guard = stats();
+        unsafe {
+            LOCK_CALLS = 0;
+            TRACKED_STATS_OPS.lock = mock_lock;
+            assert_eq!(tracked_stats_current(), 0x2a);
+            assert_eq!(LOCK_CALLS, 1);
+        }
+    }
+
+    /// The wired default is the no-op stub: the reader just returns
+    /// the counter.
+    #[test]
+    fn the_default_lock_is_a_noop() {
+        let _guard = stats();
+        unsafe {
+            ALLOC_STATS.current_bytes = 99;
+            assert_eq!(tracked_stats_current(), 99);
         }
     }
 }

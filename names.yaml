@@ -9554,7 +9554,34 @@ functions:
       lock call @ 0x082ccc74 (module simplification, same as
       tracked_alloc_tail). match.py: same structure - LLVM uses a beq
       instead of predication and splits the ldrd. Sibling 0x08390c54
-      (returns current after the lock call) not ported.
+      (returns current after the lock call) ported as
+      tracked_stats_current below.
+
+  - address: 0x08390c54
+    ghidra: FUN_08390c54
+    name: tracked_stats_current
+    size: 20
+    sig: "i64 tracked_stats_current(void)"
+    module: heap/tracked
+    status: ported
+    notes: >-
+      1 bl call site (0x08391450). Verified against osos.asm: a
+      COMPLETE 20-byte function, not a bare reader and not a tail
+      fragment (unlike the 0x08390c24/0x08390c30 pair, where the lock
+      call lives in the envelope head) - its body includes the lock
+      call inline: stmdb {r4,lr}; bl 0x082ccc74 (scheduler-flag
+      setter); ldr r1,[lit 0x08adc2c0]; ldrd r0,r1,[r1,#0x38];
+      ldmia {r4,pc}. Arms the stats lock, reads current(+0x38, i64)
+      with ldrd, returns it in r0:r1. Port deviations: reads the
+      ALLOC_STATS static instead of literal 0x08adc2c0 (module
+      simplification, same as the rest of heap/tracked), and the
+      unported lock callee @ 0x082ccc74 dispatches through the new
+      TRACKED_STATS_OPS.lock slot (house ops-slot pattern, an indirect
+      call in place of bl) whose documented default is a no-op - the
+      flag only keeps a running scheduler from tearing the 64-bit
+      ldrd, so the returned value is unaffected. match.py: same
+      push/call/ldr-stats/ldrd/pop structure; the diff is LLVM's fp
+      frame and the blx-through-slot (the documented deviations).
 
   - address: 0x0837a158
     ghidra: FUN_0837a158
