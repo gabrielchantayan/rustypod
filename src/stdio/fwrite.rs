@@ -16,30 +16,23 @@
 //!   `stream_write_block(...) == nitems` as a bool. Register usage:
 //!   r0 = buf, r1 = size, r2 = nitems, r3 = putc context.
 //!
-//! The putc @ 0x082cf2c8 is not ported (it owns the line-buffer global
-//! and the semihosting flush); the call goes through the
+//! The putc @ 0x082cf2c8 is ported as
+//! [`super::linebuf_putc::linebuf_putc`] (it owns the line-buffer global
+//! and the semihosting flush); the call still goes through the
 //! [`STREAM_WRITE_PUTC`] hook slot, the same house pattern `fread.rs`
-//! uses for `STREAM_REFILL`. The default is [`stream_putc_stub`], which
-//! answers -1 (write failure) — matching the original putc's behavior
-//! for a null context — until the real line putc lands.
+//! uses for `STREAM_REFILL`, with the real port as the shipped default.
 
 /// putc sink used by [`stream_write_block`]: the original calls
 /// `FUN_082cf2c8 @ 0x082cf2c8(c, ctx)`, which returns the character
 /// written, or -1 when `ctx` is 0 (no sink attached).
 pub type StreamPutcFn = unsafe extern "C" fn(c: i32, ctx: i32) -> i32;
 
-/// Default putc stand-in: always reports the failure result -1, exactly
-/// what the original line putc @ 0x082cf2c8 returns for a null context.
-/// Swap in the real port when it lands.
-unsafe extern "C" fn stream_putc_stub(_c: i32, _ctx: i32) -> i32 {
-    -1
-}
-
 /// putc entry used by [`stream_write_block`]; tests script it with
-/// mocks. Defaults to [`stream_putc_stub`] (always fails), so a bare
-/// link behaves like the original with a null putc context.
+/// mocks. Defaults to the ported line-buffer putc @ 0x082cf2c8
+/// ([`super::linebuf_putc::linebuf_putc`]), which answers -1 for a null
+/// context and otherwise appends to the line buffer.
 #[cfg_attr(target_os = "none", no_mangle)]
-pub static mut STREAM_WRITE_PUTC: StreamPutcFn = stream_putc_stub;
+pub static mut STREAM_WRITE_PUTC: StreamPutcFn = super::linebuf_putc::linebuf_putc;
 
 /// Volatile hook read (keeps runtime swapping alive; house pattern).
 #[inline(always)]
@@ -99,7 +92,7 @@ mod tests {
 
     fn reset_hook() {
         unsafe {
-            STREAM_WRITE_PUTC = stream_putc_stub;
+            STREAM_WRITE_PUTC = super::super::linebuf_putc::linebuf_putc;
         }
     }
 
@@ -128,13 +121,26 @@ mod tests {
     }
 
     #[test]
-    fn default_hook_always_fails_the_first_byte() {
+    fn default_hook_is_the_linebuf_putc() {
         let _guard = hook_lock();
+        // Serializes against the linebuf_putc tests, which assert on the
+        // shared line-buffer state this test writes through.
+        let _swi_guard = super::super::semihost::tests::SWI_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         reset_hook();
+        unsafe {
+            *core::ptr::addr_of_mut!(super::super::linebuf_putc::LINE_BUF_POS) = 0;
+        }
         let buf = *b"abc";
         unsafe {
-            assert_eq!(stream_write_block(buf.as_ptr(), 1, 3, 7), 0);
+            // Null putc context: the real line putc answers -1.
+            assert_eq!(stream_write_block(buf.as_ptr(), 1, 3, 0), 0);
+            // Non-null context: the real line putc accepts every byte.
+            assert_eq!(stream_write_block(buf.as_ptr(), 1, 3, 1), 3);
+            *core::ptr::addr_of_mut!(super::super::linebuf_putc::LINE_BUF_POS) = 0;
         }
+        reset_hook();
     }
 
     #[test]

@@ -47,6 +47,10 @@ pub const SYS_OPEN: usize = 0x01;
 pub const SYS_CLOSE: usize = 0x02;
 /// See [`SYS_OPEN`].
 pub const SYS_WRITEC: usize = 0x03;
+/// Angel SYS_WRITE0: r1 points DIRECTLY at a NUL-terminated string (no
+/// parameter block). Used by the line-buffer putc flush (`linebuf_putc`
+/// @ 0x082cf2c8).
+pub const SYS_WRITE0: usize = 0x04;
 /// See [`SYS_OPEN`].
 pub const SYS_WRITE: usize = 0x05;
 /// See [`SYS_OPEN`].
@@ -91,7 +95,7 @@ pub static mut SEMIHOST_SWI: SemihostSwiFn = semihost_swi_default;
 /// rewrites the slot does not constant-fold the default in and delete the
 /// dispatch (the slot is meant to be swapped at runtime).
 #[inline(always)]
-fn semihost_swi() -> SemihostSwiFn {
+pub(crate) fn semihost_swi() -> SemihostSwiFn {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(SEMIHOST_SWI)) }
 }
 

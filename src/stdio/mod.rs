@@ -2,6 +2,7 @@
 pub mod fread;
 pub mod fwrite;
 pub mod getc_core;
+pub mod linebuf_putc;
 pub mod seek_core;
 pub mod semihost;
 pub mod stdio_init;

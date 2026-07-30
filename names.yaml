@@ -3379,7 +3379,7 @@ functions:
     sig: "i32 stream_write_block(const u8 *buf, i32 size, i32 nitems, i32 ctx)"
     module: stdio/fwrite
     status: ported
-    vars: {param_1: buf, param_2: size, param_3: nitems, param_4: ctx (putc context), iVar2/r5: written, FUN_082cf2c8: STREAM_WRITE_PUTC hook (line-buffer putc @ 0x082cf2c8, unported)}
+    vars: {param_1: buf, param_2: size, param_3: nitems, param_4: ctx (putc context), iVar2/r5: written, FUN_082cf2c8: STREAM_WRITE_PUTC hook (line-buffer putc @ 0x082cf2c8, ported as linebuf_putc)}
     notes: >-
       Block writer through the retailOS line-buffer putc @ 0x082cf2c8:
       size * nitems bytes from buf, one putc(byte, ctx) call per byte,
@@ -3392,10 +3392,41 @@ functions:
       inside FUN_08266be8 (retailOS log/formatter helper reporting
       result == nitems as bool). The putc is NOT the ADS stream layer —
       0x082cf2c8 owns the line buffer @ 0x08b31720 (Angel svc flush on
-      '\n'/0x50 bytes, -1 for a null ctx) and is unported, so the call
-      goes through the STREAM_WRITE_PUTC hook slot (house pattern,
-      fread.rs's STREAM_REFILL); the default stub answers -1, matching
-      the original's null-context failure.
+      '\n'/0x50 bytes, -1 for a null ctx); now ported as linebuf_putc
+      (see its entry), which is the shipped default of the
+      STREAM_WRITE_PUTC hook slot (house pattern, fread.rs's
+      STREAM_REFILL).
+
+  - address: 0x082cf2c8
+    ghidra: FUN_082cf2c8
+    name: linebuf_putc
+    size: 88
+    sig: "i32 linebuf_putc(i32 c, i32 ctx)"
+    module: stdio/linebuf_putc
+    status: ported
+    vars: {param_1/r0/r4: c, param_2/r1: ctx (putc context — only tested for 0, otherwise ignored), r6: &line_pos, r2: pos (pre-increment), r0(after inc): new_pos, r5: 0 (NUL/reset scratch), DAT_082cf320: 0x08a0fc00 (line position counter, LINE_BUF_POS), DAT_082cf324: 0x08b31720 (line buffer base, LINE_BUF)}
+    notes: >-
+      RetailOS debug-console line-buffer putc — NOT the ADS stream
+      layer; the sink behind stream_write_block @ 0x0802ffa8 (sole
+      caller in the image, binary-verified bl scan: bl @ 0x0802ffd8).
+      Null ctx answers -1 without touching state. Otherwise the position
+      is incremented FIRST, the low byte of c is stored (strb) at the
+      OLD position, and the line flushes — NUL written at the new
+      position, Angel semihosting svc 0x123456 op 0x04 (SYS_WRITE0,
+      r1 = buffer base directly, no parameter block, result ignored),
+      position reset to 0 — when c == '\n' (FULL-WORD compare: c =
+      0x0000010a stores 0x0a but does not flush) or the new position
+      reaches 0x50 (80 chars, signed blt skipped; deepest write is the
+      NUL at index 0x50, so the buffer is 0x51 bytes). Returns c
+      verbatim (full word). PORT DEVIATIONS: the flush goes through the
+      SEMIHOST_SWI dispatch hook (house pattern; dead on device anyway,
+      no debugger traps the svc) instead of an inlined svc, and the two
+      firmware globals are the exported statics LINE_BUF (0x08b31720)
+      and LINE_BUF_POS (0x08a0fc00). match.py: structural match —
+      null-ctx early -1, pos inc/store, strb at old pos, flush on
+      newline or pos >= 0x50 (LLVM renders as > 0x4f), NUL store, op-4
+      dispatch (blx through the hook vs inlined svc), pos reset, return
+      c.
 
   - address: 0x08030300
     ghidra: FUN_08030300
