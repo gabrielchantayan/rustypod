@@ -11,6 +11,7 @@ pub mod list_find;
 pub mod ptr_vector;
 pub mod record_body_size;
 pub mod state_flags;
+pub mod str_fold_upper;
 pub mod table_find;
 pub mod three_pointer_select;
 pub mod utoa;

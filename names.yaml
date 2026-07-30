@@ -13978,3 +13978,48 @@ functions:
       the read_unaligned ldrb chain for the {begin, end} head, the
       clz/lsr equality select for the original's moveq, and LLVM's fp
       frame - the accepted house deviations.
+
+  - address: 0x0810b498
+    ghidra: FUN_0810b498
+    name: str_fold_upper_inplace
+    size: 40
+    sig: "void str_fold_upper_inplace(u8 **slot)"
+    module: util/str_fold_upper
+    status: ported
+    vars:
+      param_1: slot
+      pbVar2: p
+      iVar1: table
+    notes: >-
+      1 bl call site (0x081a3618, binary-scanned). In-place uppercase
+      fold of a NUL-terminated narrow string reached through a pointer
+      slot: ldr r0,[r0] takes the char* out of the slot, NULL returns
+      immediately, every byte up to (not including) the first NUL is
+      rewritten through the runtime uppercase fold map (ldrb/cmp #0/
+      ldrbne [table,c]/strbne [r0],#1/bne); the NUL is never stored,
+      the slot word never written, nothing returned. 40 bytes = 36
+      code + the 4-byte fold-table literal @ 0x0810b4c0, which in the
+      cold image holds 0x083ed0dd - the same pre-locale-init
+      placeholder one byte into __dscalb as wstr_case_eq's pool word
+      (binary-verified against osos.dec offset 0x10b4c0); the real ADS
+      LC_CTYPE upper map @ 0x83f80b5 is installed at runtime by the
+      locale init. Reuses the shared WSTR_FOLD_TABLE dispatch slot /
+      DEFAULT_FOLD_TABLE of util/wstr_casecmp.rs rather than
+      duplicating the map - this is the only other user of that
+      runtime table. Sole caller 0x081a35ec: builds a string object
+      from a C string (0x0810b634), folds it to uppercase here, takes
+      a 4-byte hash/key (0x08297df8), converts it (0x0810b654) and
+      compares against a tag literal (0x0810b444) - a case-normalizing
+      tag/key lookup. Deviation: volatile slot/byte/table accesses so
+      the fold loop keeps its shape under LLVM's loop-idiom pass.
+      Host tests: NULL-slot no-op, ASCII fold in place, unchanged
+      uppercase/digits/punctuation, Latin-1 high-half fold with the
+      0xf7/0xff exceptions, empty string, interior-NUL early stop
+      (bytes after untouched), slot word never written, and a
+      200-round swept reference comparison. No WSTR_FOLD_TABLE swap
+      test here - the slot is shared with wstr_casecmp's tests, which
+      prove the swap mechanism. match.py structural: same slot-deref /
+      NULL early-out / literal table load / ldrb-cmp-fold-strb loop
+      until NUL; the diff is LLVM's loop rotation (bottom-tested), the
+      dispatch-slot indirection for the table pointer, and the crate
+      fp frame - the accepted house deviations.
