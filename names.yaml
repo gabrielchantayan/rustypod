@@ -9747,7 +9747,8 @@ functions:
       word by word when reset is nonzero; ldmia {r4,pc}. The port
       absorbs the tail (the head falls through into it, so there is no
       fragment boundary to call across - unlike tracked_alloc_tail,
-      whose enclosing entry @ 0x08390b14 is genuinely unported).
+      which the enclosing entry @ 0x08390b14 (since ported as
+      sqlite3_malloc) CALLS for its retry).
       Deviations: the ALLOC_STATS static instead of the literal
       0x08adc2c0 (module simplification), and the lock call dispatches
       through TRACKED_STATS_OPS.lock (house ops-slot pattern) whose
@@ -10600,7 +10601,8 @@ functions:
       mallocFailed protocol as db_realloc, but guards BOTH the entry
       check and the failure record on db != 0 - a NULL connection is
       allowed and simply goes straight to sqlite3_malloc @ 0x08390b14
-      (unported, second DB_MEM_OPS slot).
+      (ported - it IS the wired default of the DB_MEM_OPS.malloc
+      dispatch slot).
 
   - address: 0x08374998
     ghidra: FUN_08374998
@@ -10615,6 +10617,60 @@ functions:
       (-> 0x220002d4 = the ported memzero @ 0x080002d4). Nothing is
       zeroed when the allocation fails.
 
+  - address: 0x08390b14
+    ghidra: FUN_08390b14
+    name: sqlite3_malloc
+    size: 184
+    sig: "void *sqlite3_malloc(int n)"
+    module: sqlite/mem
+    status: ported
+    vars: {param_1: n, r5: n, r4: "NULL, then payload", r6: "n + 0x24",
+      r7: stats, DAT_08390be8: stats_plus_0x20, DAT_08390bec: stats_base}
+    notes: >-
+      SQLite's sqlite3_malloc, the tag-57 tracked allocator's entry.
+      41 bl call sites (binary-scanned). functions.csv size 184; the
+      visible body - this head, the 0x08390b8c fall-through tail (the
+      ported tracked_alloc_tail) and the two stats literals @
+      0x08390be8/0x08390bec - spans to 0x08390bf0. Verified against
+      osos.asm and osos.dec (literal @ 0x08390be8 = 0x08adc2e0 = stats
+      + 0x20, so [r0,#8] is the callback word at stats+0x28; literal
+      @ 0x08390bec = 0x08adc2c0, the stats base). n <= 0 (signed,
+      subs/ble) returns NULL before the lock is armed. Then: bl
+      0x082ccc74 arms the stats lock (the ported
+      tracked_stats_arm_lock, dispatched through the
+      TRACKED_STATS_OPS.lock slot, house pattern same as the stats
+      readers); GATED soft-limit check (unlike the realloc entry - the
+      callback word must be nonzero): current(+0x38) + n >=
+      soft_limit(+0x20) as signed i64 (ldrd/adds/adc ..asr #31,
+      subs/sbcs, blge) warns with n through the ported
+      tracked_stats_warn_soft_limit @ 0x0837d67c (called directly; the
+      sum is only compared, accounting happens on success in the
+      tail); the allocation-deny schedule @ 0x08378a44(0) can refuse
+      with NULL before the heap is touched (ALLOC_PRESSURE_OPS slot,
+      default is the BSS-inactive at-rest proceed). First attempt
+      alloc_tag57(n + 44) via bl 0x08391d2c; on failure an UNGATED
+      warn(n) and a single retry - the retry IS the ported
+      tracked_alloc_tail @ 0x08390b8c the head falls through into.
+      Deviations: BOTH attempts call the ported tracked_alloc_tail
+      (the original's first attempt is a raw bl 0x08391d2c whose
+      success path branches INTO the tail's rebuild @ 0x08390b98 -
+      same alloc, same rebuild/accounting, one copy of the builder);
+      the stats block is the ALLOC_STATS static (heap/tracked module
+      simplification). The port is the wired DB_MEM_OPS.malloc
+      default, replacing the documented always-fails stub, so the
+      db_* wrappers and the realloc NULL branch now reach real
+      behavior. Host tests: n <= 0 touching nothing (no lock arm, no
+      heap, no warn, no deny), the callback-word and limit gating of
+      the entry warn (incl. the current+n == limit edge), lock-before-
+      warn ordering via recorders, deny refusal ordering (warn first,
+      heap untouched, no accounting), success-path header/accounting/
+      peak, the OOM warn-and-retry-once path, and the default wiring.
+      match.py structural: same gate/lock/gated-warn/deny/alloc/
+      warn-retry/rebuild/accounting branch structure; the diff is
+      LLVM's fp frame, the blx-through-slot lock and deny calls, and
+      the warn helper inlined (same bytes, different shape - the
+      documented deviations).
+
   - address: 0x08390eec
     ghidra: FUN_08390eec
     name: sqlite3_realloc
@@ -10627,8 +10683,8 @@ functions:
     notes: >-
       SQLite's sqlite3_realloc, the tag-57 tracked-heap resize. 5 bl call
       sites. p == 0 tail-branches to sqlite3_malloc @ 0x08390b14
-      (dispatched through the DB_MEM_OPS.malloc slot, whose default is
-      still the always-fails stub). n <= 0 (signed) is sqlite3_free
+      (dispatched through the DB_MEM_OPS.malloc slot, whose wired
+      default is the ported sqlite3_malloc). n <= 0 (signed) is sqlite3_free
       @ 0x083906f4 (the ported tracked_free, called directly) + NULL -
       a zero resize is a free. Otherwise: recover pad at p-4, base =
       p - pad, raw = base - 8, old_size at raw+0; UNGATED soft-limit

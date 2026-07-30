@@ -12,6 +12,10 @@
 //! - `sqlite3_realloc` — original: `FUN_08390eec` @ 0x08390eec (284
 //!   bytes; 5 `bl`). SQLite's `sqlite3_realloc`, the raw tracked-heap
 //!   resize the `db_*` wrappers dispatch to.
+//! - `sqlite3_malloc` — original: `FUN_08390b14` @ 0x08390b14 (184
+//!   bytes; 41 `bl`). SQLite's `sqlite3_malloc`, the tag-57 tracked
+//!   allocator's entry — the raw allocate the `db_*` wrappers and the
+//!   realloc NULL-branch dispatch to.
 //!
 //! The `db_*` four hang the out-of-memory condition off one sticky byte in the
 //! connection: `db->mallocFailed` at +0x1e. Once it is set the allocator
@@ -25,14 +29,12 @@
 //! failure record. Both behaviors are the originals', kept as-is.
 //!
 //! Deviations:
-//! - The raw allocator `sqlite3_malloc` @ 0x08390b14 is not ported; it
-//!   is the [`DB_MEM_OPS`]`.malloc` dispatch boundary (house pattern,
-//!   see `heap/block_region.rs`). The default slot is a documented
-//!   always-fails stub, so an unconfigured build behaves like an
-//!   exhausted heap rather than corrupting memory. `sqlite3_realloc`
-//!   @ 0x08390eec *is* ported (below) and is the wired `.realloc`
-//!   default; its NULL-pointer branch reaches the same stub through
-//!   the malloc slot, exactly like the original's tail branch.
+//! - The raw allocator `sqlite3_malloc` @ 0x08390b14 *is* ported
+//!   (below) and is the wired [`DB_MEM_OPS`]`.malloc` default, exactly
+//!   like the original's entry; `sqlite3_realloc` @ 0x08390eec *is*
+//!   ported as well and is the wired `.realloc` default, so its
+//!   NULL-pointer branch reaches the ported malloc through the malloc
+//!   slot, exactly like the original's tail branch.
 //! - `sqlite3_free` @ 0x083906f4 *is* ported
 //!   (`heap::tracked::tracked_free`), and so is the zero-fill the
 //!   original reaches through the IRAM thunk @ 0x08037dc8
@@ -43,7 +45,8 @@
 //!   pointer fields elsewhere, which need word indices).
 
 use crate::heap::tracked::{
-    tracked_free, tracked_stats_warn_soft_limit, ALLOC_STATS, BLOCK_HEADER_SIZE, TAG_TRACKED,
+    tracked_alloc_tail, tracked_free, tracked_stats_warn_soft_limit, ALLOC_STATS,
+    BLOCK_HEADER_SIZE, TAG_TRACKED, TRACKED_STATS_OPS,
 };
 use crate::heap::veneers::realloc_wrapper;
 use crate::libc::memmove::memmove;
@@ -52,34 +55,27 @@ use crate::libc::memzero::memzero;
 /// Byte offset of `sqlite3.mallocFailed` (original: `ldrb rX, [db, #30]`).
 pub const MALLOC_FAILED_OFFSET: usize = 0x1e;
 
-/// Indirect dispatch for the raw allocator @ 0x08390b14 (unported) and
-/// the ported realloc @ 0x08390eec.
+/// Indirect dispatch for the ported raw allocator @ 0x08390b14 and the
+/// ported realloc @ 0x08390eec.
 #[derive(Clone, Copy)]
 pub struct DbMemOps {
     /// `sqlite3_malloc(n)` @ 0x08390b14. Returns NULL on failure.
+    /// The wired default is the ported [`sqlite3_malloc`].
     pub malloc: unsafe extern "C" fn(n: i32) -> *mut u8,
     /// `sqlite3_realloc(p, n)` @ 0x08390eec. Returns NULL on failure.
     /// The wired default is the ported [`sqlite3_realloc`].
     pub realloc: unsafe extern "C" fn(p: *mut u8, n: i32) -> *mut u8,
 }
 
-/// Default stub: no raw allocator wired, so every request fails (see the
-/// module header).
-unsafe extern "C" fn missing_malloc(_n: i32) -> *mut u8 {
-    core::ptr::null_mut()
-}
-
-/// Wired defaults: the malloc slot is the documented always-fails stub
-/// (the entry @ 0x08390b14 is still unported); the realloc slot is the
-/// ported [`sqlite3_realloc`], whose NULL-pointer branch reaches the
-/// same stub through the malloc slot — an unconfigured build still
-/// behaves like an exhausted heap for fresh allocations.
+/// Wired defaults: both slots are the ported entries — the malloc slot
+/// is [`sqlite3_malloc`] @ 0x08390b14, the realloc slot is
+/// [`sqlite3_realloc`] @ 0x08390eec, whose NULL-pointer branch reaches
+/// the malloc slot, exactly like the original's tail branch.
 pub const DEFAULT_DB_MEM_OPS: DbMemOps =
-    DbMemOps { malloc: missing_malloc, realloc: sqlite3_realloc };
+    DbMemOps { malloc: sqlite3_malloc, realloc: sqlite3_realloc };
 
-/// The active raw allocator. Host tests install mocks; on target the
-/// realloc slot is the real port and the malloc slot stays a stub until
-/// 0x08390b14 lands.
+/// The active raw allocator. Host tests install mocks; on target both
+/// slots are the real ports.
 pub static mut DB_MEM_OPS: DbMemOps = DEFAULT_DB_MEM_OPS;
 
 /// Reads the realloc slot (volatile — the slot is meant to be swapped at
@@ -96,12 +92,12 @@ pub(crate) unsafe fn db_malloc_op() -> unsafe extern "C" fn(i32) -> *mut u8 {
 }
 
 /// Indirect dispatch for the memory-pressure helper [`sqlite3_realloc`]
-/// shares with the malloc entry @ 0x08390b14 that is still unported
-/// (house ops-slot pattern: an indirect call in place of the original's
-/// `bl`, so host tests can record and swap). The default reproduces the
-/// original's at-rest behavior (see the slot). The family's other
-/// pressure helper — the soft-limit warn @ 0x0837d67c — is ported
-/// ([`tracked_stats_warn_soft_limit`]) and called directly.
+/// and [`sqlite3_malloc`] share (house ops-slot pattern: an indirect
+/// call in place of the original's `bl`, so host tests can record and
+/// swap). The default reproduces the original's at-rest behavior (see
+/// the slot). The family's other pressure helper — the soft-limit warn
+/// @ 0x0837d67c — is ported ([`tracked_stats_warn_soft_limit`]) and
+/// called directly.
 #[derive(Clone, Copy)]
 pub struct AllocPressureOps {
     /// Allocation-deny schedule @ 0x08378a44: countdown-driven failure
@@ -131,6 +127,82 @@ pub static mut ALLOC_PRESSURE_OPS: AllocPressureOps = DEFAULT_ALLOC_PRESSURE_OPS
 #[inline(always)]
 fn alloc_pressure_ops() -> AllocPressureOps {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(ALLOC_PRESSURE_OPS)) }
+}
+
+/// sqlite3_malloc — original: `FUN_08390b14` @ 0x08390b14 (184 bytes,
+/// functions.csv's size; the visible body — this head, the 0x08390b8c
+/// fall-through tail and the two stats literals @ 0x08390be8/0x08390bec
+/// — spans to 0x08390bf0; 41 `bl` call sites, binary-scanned).
+///
+/// SQLite's `sqlite3_malloc`, the tag-57 tracked allocator's entry.
+/// Verified against osos.asm and osos.dec (literal @ 0x08390be8 =
+/// 0x08adc2e0 = stats + 0x20, literal @ 0x08390bec = 0x08adc2c0, the
+/// stats base):
+///
+/// - `n <= 0` (signed, `subs`/`ble`) returns NULL immediately — before
+///   the stats lock is armed and without touching the heap.
+/// - Arms the stats lock (`bl 0x082ccc74`, the ported
+///   [`tracked_stats_arm_lock`], dispatched through the
+///   [`TRACKED_STATS_OPS`]`.lock` slot — house ops-slot pattern, same
+///   as the stats readers).
+/// - GATED soft-limit check (unlike [`sqlite3_realloc`]'s ungated one):
+///   only when the callback word (+0x28, read through the stats+0x20
+///   literal) is nonzero AND `current(+0x38) + n >= soft_limit(+0x20)`
+///   (signed i64: `ldrd`/`adds`/`adc ..asr #31` then `subs`/`sbcs` +
+///   `blge`) does it warn with n through the ported
+///   [`tracked_stats_warn_soft_limit`] @ 0x0837d67c (called directly).
+///   The sum is only compared — accounting happens on success, in the
+///   tail.
+/// - The allocation-deny schedule @ 0x08378a44(0) may then refuse the
+///   allocation outright — NULL without touching the heap (the
+///   [`ALLOC_PRESSURE_OPS`] slot, default reproduces the BSS-inactive
+///   at-rest proceed).
+/// - First heap attempt `alloc_tag57(n + 44)` (`bl 0x08391d2c`); on
+///   failure an UNGATED warn(n) and a single retry — the retry IS the
+///   ported [`tracked_alloc_tail`] @ 0x08390b8c this head falls through
+///   into. On success the tail builds the tracked block (raw+0 = n,
+///   raw+4 = n>>31, `data = (raw + 8 + 36) & !31`, pad word at data-4),
+///   accounts `current += (i64)n`, raises the peak, and returns the
+///   32-byte-aligned payload. A failed retry returns NULL with no
+///   accounting.
+///
+/// Deviations:
+/// - The accounting block is the [`ALLOC_STATS`] static instead of the
+///   literal 0x08adc2c0 (the `heap::tracked` module simplification).
+/// - BOTH heap attempts go through the ported [`tracked_alloc_tail`]:
+///   the original's first attempt is a raw `bl 0x08391d2c` whose
+///   success path branches INTO the tail's rebuild (@ 0x08390b98), so
+///   calling the tail for the first attempt is the same alloc followed
+///   by the same rebuild/accounting — and keeps one copy of the block
+///   builder.
+/// - The lock arm and the deny schedule dispatch through ops slots
+///   (house pattern; defaults are the ported [`tracked_stats_arm_lock`]
+///   and the at-rest proceed); the ported warn helper and
+///   [`tracked_alloc_tail`] are called directly, per the porting rules.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn sqlite3_malloc(n: i32) -> *mut u8 {
+    if n <= 0 {
+        return core::ptr::null_mut();
+    }
+    let lock = core::ptr::read_volatile(core::ptr::addr_of!(TRACKED_STATS_OPS.lock));
+    lock();
+    let stats = core::ptr::addr_of_mut!(ALLOC_STATS);
+    if (*stats).soft_limit_callback != 0 {
+        let new_current = (*stats).current_bytes.wrapping_add(n as i64);
+        if new_current >= (*stats).soft_limit {
+            tracked_stats_warn_soft_limit(n);
+        }
+    }
+    if (alloc_pressure_ops().alloc_deny_check)(0) != 0 {
+        return core::ptr::null_mut();
+    }
+    let payload = tracked_alloc_tail(n);
+    if payload.is_null() {
+        tracked_stats_warn_soft_limit(n);
+        return tracked_alloc_tail(n);
+    }
+    payload
 }
 
 /// sqlite3_realloc — original: `FUN_08390eec` @ 0x08390eec (284 bytes;
@@ -172,11 +244,13 @@ fn alloc_pressure_ops() -> AllocPressureOps {
 /// Deviations:
 /// - The accounting block is the [`ALLOC_STATS`] static instead of the
 ///   literal 0x08adc2c0 (the `heap::tracked` module simplification).
-/// - The unported helpers (the malloc entry, the deny schedule)
-///   dispatch through ops slots whose defaults reproduce the at-rest
-///   behavior; the ported callees ([`tracked_free`],
-///   [`tracked_stats_warn_soft_limit`], [`realloc_wrapper`],
-///   [`memmove`]) are called directly, per the porting rules.
+/// - The unported helper (the deny schedule) dispatches through an ops
+///   slot whose default reproduces the at-rest behavior; the ported
+///   callees ([`tracked_free`], [`tracked_stats_warn_soft_limit`],
+///   [`realloc_wrapper`], [`memmove`]) are called directly, per the
+///   porting rules, and the malloc entry dispatches through the
+///   [`DB_MEM_OPS`]`.malloc` slot whose wired default is the ported
+///   [`sqlite3_malloc`].
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn sqlite3_realloc(p: *mut u8, n: i32) -> *mut u8 {
@@ -510,6 +584,10 @@ pub(crate) mod tests {
     /// Realloc attempts left to fail before the arena relents (-1: never).
     static mut REALLOC_FAILS_LEFT: i32 = -1;
     static mut REALLOC_COUNT: usize = 0;
+    /// Alloc attempts made / left to fail before the arena relents
+    /// (-1: never) — the malloc entry's first-attempt/retry injector.
+    static mut ALLOC_COUNT: usize = 0;
+    static mut ALLOC_FAILS_LEFT: i32 = -1;
     /// (ptr, size, tag, copy_on_move) of the last arena realloc.
     static mut LAST_REALLOC: (usize, usize, usize, usize) = (0, 0, 0, 0);
     static mut FREED_LOG: Vec<(usize, usize)> = Vec::new();
@@ -524,6 +602,11 @@ pub(crate) mod tests {
         size: usize,
         _tag: usize,
     ) -> *mut u8 {
+        ALLOC_COUNT += 1;
+        if ALLOC_FAILS_LEFT > 0 {
+            ALLOC_FAILS_LEFT -= 1;
+            return core::ptr::null_mut();
+        }
         let used = ARENA_USED;
         let aligned = (size + 7) & !7;
         if used + aligned > ARENA_SIZE || LIVE_COUNT >= 16 {
@@ -609,6 +692,8 @@ pub(crate) mod tests {
             LIVE_COUNT = 0;
             REALLOC_FAILS_LEFT = -1;
             REALLOC_COUNT = 0;
+            ALLOC_FAILS_LEFT = -1;
+            ALLOC_COUNT = 0;
             LAST_REALLOC = (0, 0, 0, 0);
             DENY_RESULT = 0;
             DENY_AFTER_WARN = false;
@@ -893,6 +978,194 @@ pub(crate) mod tests {
             let (_raw, payload) = make_block(16);
             let grown = sqlite3_realloc(payload, 40);
             assert!(!grown.is_null(), "the at-rest defaults let the resize through");
+        }
+    }
+
+    // ---- sqlite3_malloc (0x08390b14) -------------------------------
+
+    /// n <= 0 (signed) returns NULL before the lock is armed and
+    /// without touching the heap, the warn or the deny check.
+    #[test]
+    fn a_nonpositive_size_returns_null_and_touches_nothing() {
+        let _f = pressure();
+        unsafe {
+            ALLOC_STATS.soft_limit = 1; // would warn if the gate let it through
+            assert!(sqlite3_malloc(0).is_null());
+            assert!(sqlite3_malloc(-64).is_null());
+            assert_eq!(ALLOC_STATS.lock_flag, 0, "the lock is not armed");
+            assert_eq!(ALLOC_COUNT, 0, "the heap is not touched");
+            assert!(warn_log().is_empty());
+            assert!(deny_log().is_empty(), "the deny check is not reached");
+            assert_eq!(ALLOC_STATS.current_bytes, 0);
+        }
+    }
+
+    /// The entry warn fires only when the callback word is nonzero AND
+    /// current + n reaches the soft limit (signed i64, ge) — and the
+    /// allocation still proceeds.
+    #[test]
+    fn the_entry_warn_is_gated_on_the_callback_word_and_the_limit() {
+        let _f = pressure();
+        unsafe {
+            // Callback word 0: over the limit, but no warn.
+            ALLOC_STATS.soft_limit_callback = 0;
+            ALLOC_STATS.soft_limit = 1;
+            ALLOC_STATS.current_bytes = 100;
+            let p = sqlite3_malloc(16);
+            assert!(!p.is_null());
+            assert!(warn_log().is_empty(), "NULL callback word: no entry warn");
+            tracked_free(p);
+
+            // Callback word set, under the limit: no warn.
+            ALLOC_STATS.soft_limit_callback = 1;
+            ALLOC_STATS.soft_limit = i64::MAX;
+            let p = sqlite3_malloc(16);
+            assert!(!p.is_null());
+            assert!(warn_log().is_empty(), "below the limit: no entry warn");
+            tracked_free(p);
+
+            // Callback word set, current + n == limit exactly: warn(n),
+            // and the allocation still succeeds and accounts.
+            ALLOC_STATS.current_bytes = 50;
+            ALLOC_STATS.soft_limit = 50 + 24;
+            let p = sqlite3_malloc(24);
+            assert!(!p.is_null(), "the warn does not refuse the allocation");
+            assert_eq!(warn_log(), std::vec![24], "the entry warn gets n");
+            assert_eq!(ALLOC_STATS.current_bytes, 50 + 24, "accounted on success");
+            tracked_free(p);
+        }
+    }
+
+    /// The stats lock is armed BEFORE the gated entry warn runs (the
+    /// original's bl 0x082ccc74 precedes the whole check).
+    #[test]
+    fn the_lock_is_armed_before_the_entry_warn() {
+        static mut ORDER: Vec<u8> = Vec::new();
+        unsafe extern "C" fn recording_lock() {
+            (*core::ptr::addr_of_mut!(ORDER)).push(1);
+        }
+        unsafe extern "C" fn ordering_warn(
+            _callback: u32,
+            _callback_arg: u32,
+            _current_bytes: i64,
+            size: i32,
+        ) {
+            (*core::ptr::addr_of_mut!(ORDER)).push(2);
+            (*core::ptr::addr_of_mut!(WARN_LOG)).push(size);
+        }
+        let _f = pressure();
+        unsafe {
+            (*core::ptr::addr_of_mut!(ORDER)).clear();
+            let stats_ops = core::ptr::addr_of_mut!(TRACKED_STATS_OPS);
+            let saved_lock = (*stats_ops).lock;
+            (*stats_ops).lock = recording_lock;
+            (*stats_ops).invoke_soft_limit_callback = ordering_warn;
+
+            ALLOC_STATS.soft_limit = 0; // current(0) + n >= 0: warn
+            let p = sqlite3_malloc(16);
+            assert!(!p.is_null());
+            assert_eq!(
+                (*core::ptr::addr_of!(ORDER)).clone(),
+                std::vec![1, 2],
+                "lock arm, then the entry warn"
+            );
+            assert_eq!(ALLOC_STATS.lock_flag, 0, "the recorder replaced the real arm");
+
+            (*stats_ops).lock = saved_lock;
+        }
+    }
+
+    /// The deny schedule refuses the allocation before the heap is
+    /// touched — and the gated entry warn runs before it.
+    #[test]
+    fn the_deny_schedule_refuses_the_allocation_without_touching_the_heap() {
+        let _f = pressure();
+        unsafe {
+            ALLOC_STATS.soft_limit = 1; // force the entry warn
+            DENY_RESULT = 1;
+
+            assert!(sqlite3_malloc(64).is_null());
+            assert_eq!(deny_log(), std::vec![0], "always slot 0");
+            assert!(DENY_AFTER_WARN, "the entry warn runs before the deny check");
+            assert_eq!(warn_log(), std::vec![64], "the entry warn gets n");
+            assert_eq!(ALLOC_COUNT, 0, "the heap is not touched");
+            assert_eq!(ALLOC_STATS.current_bytes, 0, "no accounting on refusal");
+            assert_eq!(ALLOC_STATS.lock_flag, 8, "the lock WAS armed first");
+        }
+    }
+
+    /// A successful request returns a 32-byte-aligned payload with the
+    /// tracked header, accounts current += n and raises the peak.
+    #[test]
+    fn a_successful_malloc_builds_the_block_and_accounts() {
+        let _f = pressure();
+        unsafe {
+            ALLOC_STATS.soft_limit = i64::MAX;
+            ALLOC_STATS.current_bytes = 100;
+            ALLOC_STATS.peak_bytes = 100;
+
+            let payload = sqlite3_malloc(48);
+            assert!(!payload.is_null());
+            assert_eq!(payload as usize % 32, 0, "payload is 32-aligned");
+            assert_eq!(ALLOC_COUNT, 1, "one heap attempt");
+            assert_eq!(deny_log(), std::vec![0], "the deny check ran, slot 0");
+            assert_eq!(ALLOC_STATS.lock_flag, 8, "the lock was armed");
+            assert!(warn_log().is_empty(), "below the limit: no entry warn");
+            let raw = raw_of(payload);
+            assert_eq!((raw as *const i32).read(), 48);
+            assert_eq!((raw.add(4) as *const i32).read(), 0);
+            assert_eq!(ALLOC_STATS.current_bytes, 148, "current += n");
+            assert_eq!(ALLOC_STATS.peak_bytes, 148, "peak follows current up");
+        }
+    }
+
+    /// A failed first attempt warns with n (ungated — the helper itself
+    /// gates) and retries exactly once; a failed retry returns NULL
+    /// with no accounting.
+    #[test]
+    fn an_oom_warns_and_retries_once() {
+        let _f = pressure();
+        unsafe {
+            ALLOC_STATS.soft_limit = i64::MAX; // keep the entry warn out of the log
+
+            ALLOC_FAILS_LEFT = 1;
+            let payload = sqlite3_malloc(96);
+            assert!(!payload.is_null(), "the retry succeeds");
+            assert_eq!(ALLOC_COUNT, 2, "first attempt, then the retry");
+            assert_eq!(warn_log(), std::vec![96], "warn(n) fires between the attempts");
+            assert_eq!(ALLOC_STATS.current_bytes, 96, "accounted once, by the tail");
+
+            ALLOC_FAILS_LEFT = 2;
+            ALLOC_COUNT = 0;
+            (*core::ptr::addr_of_mut!(WARN_LOG)).clear();
+            let before = ALLOC_STATS.current_bytes;
+            assert!(sqlite3_malloc(48).is_null());
+            assert_eq!(ALLOC_COUNT, 2, "no third attempt");
+            assert_eq!(warn_log(), std::vec![48], "one warn per OOM");
+            assert_eq!(ALLOC_STATS.current_bytes, before, "no accounting on failure");
+        }
+    }
+
+    /// The wired DB_MEM_OPS.malloc default IS this port, so the `db_*`
+    /// wrappers reach real behavior; the realloc NULL-branch lands here
+    /// through the same slot.
+    #[test]
+    fn the_default_wiring_makes_the_malloc_slot_this_port() {
+        let _f = pressure();
+        unsafe {
+            assert_eq!(DEFAULT_DB_MEM_OPS.malloc as usize, sqlite3_malloc as usize);
+            ALLOC_STATS.soft_limit = i64::MAX;
+
+            let mut db = Connection::healthy();
+            let block = db_malloc_raw(db.ptr(), 24);
+            assert!(!block.is_null(), "db_malloc_raw reaches the real allocator");
+            assert_eq!(block as usize % 32, 0);
+            assert_eq!(db.failed_flag(), 0);
+            assert_eq!(ALLOC_STATS.current_bytes, 24);
+
+            let grown = sqlite3_realloc(core::ptr::null_mut(), 40);
+            assert!(!grown.is_null(), "the realloc NULL branch reaches it too");
+            assert_eq!(ALLOC_STATS.current_bytes, 24 + 40);
         }
     }
 }
