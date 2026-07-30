@@ -2108,16 +2108,58 @@ functions:
       value is 0x081eff38(this) — the block manager's registration,
       which installs the two-level client ref at +0x4 that
       client_handle_get reads (it calls 0x08262b1c, a twin of
-      0x083d64f4, then 0x0818a630(mgr, this+0x2c, 0, this+0x4)).
+      0x083d64f4, then 0x0818a630(mgr, this+0x2c, 0, this+0x4)) —
+      now ported, heap/client_register.rs.
       Ghidra's decompile of this one is accurate and agrees. A failed
       singleton is remembered as NULL and never retried (the guard is
       spent) — reproduced. Still unported block-manager client
-      machinery: ctor 0x081e6b34, register 0x081eff38, reserve
+      machinery: ctor 0x081e6b34, reserve
       0x081fbe4c, headroom 0x081fc3f4, populate 0x081fc298, erase
       0x081fc080 + commit 0x081fc884.
       match.py structural: same offsets (0x3c/0x29/0x2c/+0xc/0x170),
       same guard test and shared-vs-private split; ops-table blx in
       place of bl.
+
+  - address: 0x081eff38
+    ghidra: FUN_081eff38
+    name: client_register
+    size: 60
+    sig: "i32 client_register(PoolBase *this)"
+    module: heap/client_register
+    vars: {param_1: this}
+    status: ported
+    notes: >-
+      The block manager's client registration — pool_client_attach's
+      return value and block_deque_fill's gate verdict. 1 bl call
+      site @ 0x081efd30 (inside pool_client_attach), binary-verified.
+      Presets the verdict 1 (mov r5, #0x1), reads the two-level
+      client ref at this+0x4 through the 0x08262b1c copy of
+      handle_deref_or_null (cxx/handle.rs — byte-identical to the
+      other 21, the only copy outside the C++ block): a live handle
+      means already registered and the preset 1 is returned (bne).
+      Otherwise block_manager_get @ 0x0818ae48 (heap/block_mgr.rs,
+      real port) fetches the manager and 0x0818a630(mgr, this+0x2c,
+      0, this+0x4) links the registration node into the manager's
+      client list and installs the two-level ref client_handle_get
+      reads; its return is the verdict. The r2 zero is a notification
+      flag inside 0x0818a630 (nonzero would bl 0x0818a3b4(mgr, 0xa)
+      after linking; always 0 here). 0x0818a630 is unported, so it
+      dispatches through the MANAGER_CLIENT_REGISTER slot (house
+      pattern); the default reports 0 — the no-manager verdict that
+      keeps pool_client_attach's wired defaults refusing. The port is
+      the shipped POOL_CLIENT_OPS.client_register default, replacing
+      pool_client.rs's stub_client_register (kept a slot so host
+      tests can observe it — the mailbox_slot_create/client_alloc
+      precedent). Host tests cover the live-handle short-circuit, the
+      empty middle pointer falling through, the argument tuple
+      (mgr/node/0/ref slot), verdict pass-through (0/1/-1/7) and the
+      wired-default 0. match.py structural: same push, this+0x4,
+      bl handle_deref_or_null, conditional verdict 1 (rendered
+      branchless movne/popne — the queue_wait idiom), node/0/ref-slot
+      argument setup and the indirect manager call; LLVM adds its fp
+      frame, inlines the 12-byte block_manager_get into a direct
+      global load, and tail-calls the registration slot (bx ip)
+      since the verdict needs no further work.
 
   - address: 0x080b4adc
     ghidra: FUN_080b4adc

@@ -28,8 +28,9 @@
 //!   A NULL client leaves the memo NULL and returns 0. Otherwise it
 //!   points the node at the client, stamps the node's owner back at
 //!   `this`, and returns the block manager's registration verdict
-//!   (0x081eff38, which installs the two-level ref at +0x4 that
-//!   `client_handle_get` reads).
+//!   (0x081eff38 — the real port, heap/client_register.rs — which
+//!   installs the two-level ref at +0x4 that `client_handle_get`
+//!   reads).
 //!
 //! # Deviations
 //!
@@ -52,20 +53,24 @@
 //!   that is the type of the field it is stored in.
 //! - **Ops table** ([`POOL_CLIENT_OPS`], house pattern): the mutex ctor
 //!   (0x082621b0), the node ctor (0x081eff0c), the client ctor
-//!   (0x081e6b34), the registration call (0x081eff38) and the
-//!   static-init guard pair (0x082ab31c/0x082ab338) are unported and
-//!   dispatch indirectly. The guard defaults reproduce their originals
-//!   exactly (they are five instructions between them: acquire claims a
-//!   zero word and reports 1, release is a bare `mov pc, lr` — ADS's
-//!   single-threaded guard), and the node ctor default reproduces
-//!   everything but the unrecoverable vtable pointer. The client ctor
-//!   and registration default to the no-block-manager answers (NULL /
-//!   0), which is what makes `block_deque_fill`'s gate refuse without a
-//!   manager. `mailbox_slot_create` and `client_alloc` default to the
-//!   real ports (kernel/kobj.rs, `veneers::operator_new`); they are
-//!   slots only so host tests can observe them and stay out of the
-//!   target-only allocation engine (the `POOL_OPS.new_control`
-//!   precedent in heap/pool.rs).
+//!   (0x081e6b34) and the static-init guard pair
+//!   (0x082ab31c/0x082ab338) are unported and dispatch indirectly. The
+//!   guard defaults reproduce their originals exactly (they are five
+//!   instructions between them: acquire claims a zero word and reports
+//!   1, release is a bare `mov pc, lr` — ADS's single-threaded guard),
+//!   and the node ctor default reproduces everything but the
+//!   unrecoverable vtable pointer. The client ctor defaults to the
+//!   no-block-manager answer (NULL), which is what makes
+//!   `block_deque_fill`'s gate refuse without a manager. The
+//!   registration call (0x081eff38) is the real port
+//!   (heap/client_register.rs) — kept a slot only so host tests can
+//!   observe it, like `mailbox_slot_create` and `client_alloc`; its
+//!   own manager-side slot defaults to 0, so the wired defaults still
+//!   refuse without a manager. `mailbox_slot_create` and
+//!   `client_alloc` default to the real ports (kernel/kobj.rs,
+//!   `veneers::operator_new`); they are slots only so host tests can
+//!   observe them and stay out of the target-only allocation engine
+//!   (the `POOL_OPS.new_control` precedent in heap/pool.rs).
 //! - **Mutex**: locked/unlocked through block_region.rs's
 //!   `REGION_MUTEX_OPS` — the same original pair (0x082e8390 /
 //!   0x082e83d8, reached via the thunks at 0x082621a8/0x082621ac) the
@@ -178,7 +183,9 @@ pub struct PoolClientOps {
         unsafe extern "C" fn(storage: *mut u8, name: *const u8) -> *mut u8,
     /// Client registration @ 0x081eff38 `(this)`: installs the
     /// two-level client ref at +0x4. Nonzero on success — this is
-    /// `pool_client_attach`'s return value.
+    /// `pool_client_attach`'s return value. Real port
+    /// (heap/client_register.rs); a slot only so host tests can
+    /// observe it.
     pub client_register: unsafe extern "C" fn(this: *mut PoolBase) -> i32,
     /// ADS static-init guard acquire @ 0x082ab31c: claims a zero guard
     /// word (setting it to 1) and reports 1; reports 0 otherwise.
@@ -215,11 +222,6 @@ unsafe extern "C" fn stub_client_construct(_storage: *mut u8, _name: *const u8) 
     core::ptr::null_mut()
 }
 
-/// Default registration: no block manager to register with.
-unsafe extern "C" fn stub_client_register(_this: *mut PoolBase) -> i32 {
-    0
-}
-
 /// Default guard acquire — the original @ 0x082ab31c verbatim.
 unsafe extern "C" fn guard_acquire(guard: *mut usize) -> i32 {
     if guard.read() != 0 {
@@ -241,7 +243,7 @@ pub(crate) const DEFAULT_POOL_CLIENT_OPS: PoolClientOps = PoolClientOps {
     node_construct: default_node_construct,
     client_alloc: crate::heap::veneers::operator_new,
     client_construct: stub_client_construct,
-    client_register: stub_client_register,
+    client_register: crate::heap::client_register::client_register,
     guard_acquire,
     guard_release,
 };

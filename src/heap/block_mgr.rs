@@ -65,13 +65,15 @@ pub unsafe extern "C" fn region_block_size() -> u32 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
     use super::*;
     use std::sync::{Mutex, MutexGuard};
 
-    /// Serializes tests that swap the global manager pointer.
-    static MGR_LOCK: Mutex<()> = Mutex::new(());
+    /// Serializes tests that swap the global manager pointer. pub(crate)
+    /// so client_register.rs's tests can hold it while they install a
+    /// manager (the kobj.rs HOOKS_LOCK precedent).
+    pub(crate) static MGR_LOCK: Mutex<()> = Mutex::new(());
 
     /// Fake block-manager object: big enough to hold the +0x30 word.
     #[repr(align(4))]
