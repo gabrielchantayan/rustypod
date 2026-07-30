@@ -54,6 +54,18 @@
 //!   (20 bytes, 1 `bl` call site @ 0x08391450). Arms the stats lock
 //!   (scheduler-flag setter @ 0x082ccc74) and returns the running byte
 //!   counter (+0x38) read with `ldrd`.
+//! - `tracked_stats_arm_lock` — original: `FUN_082ccc74` @ 0x082ccc74
+//!   (24 bytes; 4 `bl` call sites: the allocator entry @ 0x08390b14, the
+//!   stats init @ 0x08390bf0, the peak reader @ 0x08390c24 and
+//!   `tracked_stats_current` @ 0x08390c54). The "scheduler-flag setter":
+//!   arms the stats-lock word (stats + 0x34) to 8 when it is 0, so a
+//!   running scheduler knows not to tear the `ldrd` counter reads.
+//!   Verified against osos.dec: its literal-pool pointer is 0x08adc2e0
+//!   (stats base + 0x20), so the flag it arms — `*(0x08adc2e0 + 0x14)` —
+//!   is 0x08adc2f4, i.e. **the word at stats + 0x34 inside the same
+//!   0x08adc2c0 accounting block**, immediately before `current_bytes`.
+//!   The RTXC scheduler is never touched; the flag is the allocator's
+//!   own tear-guard for the two i64 counters.
 //!
 //! Simplification, same as `heap/veneers.rs` makes for the default heap:
 //! the accounting block is a `static` here instead of living at
@@ -73,12 +85,16 @@ pub const TAG_TRACKED: usize = 57;
 /// Bytes of header below the payload area (`size`, `size >> 31`).
 pub const BLOCK_HEADER_SIZE: usize = 8;
 
-/// Allocation accounting block. Original: 0x08adc2c0; only the two
-/// counters this module and the allocator touch are named.
+/// Allocation accounting block. Original: 0x08adc2c0; only the words
+/// this module and the allocator touch are named.
 #[repr(C)]
 pub struct AllocStats {
-    /// 0x00..0x38 — fields owned by other parts of the allocator.
-    pub reserved: [u32; 14],
+    /// 0x00..0x34 — fields owned by other parts of the allocator.
+    pub reserved: [u32; 13],
+    /// +0x34: stats-lock flag (original 0x08adc2f4). Armed to 8 by
+    /// `tracked_stats_arm_lock` when 0; guards the `ldrd` reads of the
+    /// two i64 counters below against a running scheduler.
+    pub lock_flag: u32,
     /// +0x38: bytes currently outstanding.
     pub current_bytes: i64,
     /// +0x40: high-water mark of `current_bytes`.
@@ -87,7 +103,8 @@ pub struct AllocStats {
 
 /// The accounting block (original @ 0x08adc2c0).
 pub static mut ALLOC_STATS: AllocStats = AllocStats {
-    reserved: [0; 14],
+    reserved: [0; 13],
+    lock_flag: 0,
     current_bytes: 0,
     peak_bytes: 0,
 };
@@ -185,27 +202,62 @@ pub unsafe extern "C" fn tracked_free_pointer_array(elements: *mut *mut u8) {
     tracked_free(base as *mut u8);
 }
 
-/// Indirect dispatch table for the unported stats-lock callee (see
-/// `tracked_stats_current`'s doc header for the default's contract).
+/// tracked_stats_arm_lock — original: `FUN_082ccc74` @ 0x082ccc74
+/// (24 bytes; 4 `bl` call sites: the tracked-allocator entry
+/// @ 0x08390b14, the stats init @ 0x08390bf0, the peak reader
+/// @ 0x08390c24 and `tracked_stats_current` @ 0x08390c54).
+///
+/// The "scheduler-flag setter" the stats readers arm before touching the
+/// 64-bit counters. Original:
+///
+/// ```text
+/// ldr r0, [0x82ccc8c]   ; literal 0x08adc2e0 (stats base + 0x20)
+/// ldr r1, [r0, #0x14]   ; the lock word @ 0x08adc2f4 (stats + 0x34)
+/// cmp r1, #0
+/// moveq r1, #8
+/// streq r1, [r0, #0x14] ; arm it to 8 when clear
+/// bx lr
+/// ```
+///
+/// One-way arm: when the stats-lock word is 0 it is set to 8; any other
+/// value is left alone. Callers (every stats reader/writer of the
+/// 0x0839xxxx cluster) run it before the `ldrd`/`strd` pairs on
+/// `current_bytes`/`peak_bytes`, so a running scheduler can see the
+/// counters are mid-access and not tear the 64-bit reads.
+///
+/// Deviation: the flag word is `ALLOC_STATS.lock_flag` — the literal
+/// pointer resolves to 0x08adc2e0, so `+0x14` is 0x08adc2f4, the word at
+/// stats + 0x34 inside the same accounting block the rest of the module
+/// already models as a static (same module simplification).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn tracked_stats_arm_lock() {
+    let stats = core::ptr::addr_of_mut!(ALLOC_STATS);
+    // Volatile: the flag is cross-context synchronization state (the
+    // allocator arms it, the scheduler reads it) — and without volatile
+    // LLVM's globalopt narrows the word to a boolean byte and drops the
+    // 8 (observed in ARM release: ldrb/moveq #1/strbeq).
+    let flag = core::ptr::addr_of_mut!((*stats).lock_flag);
+    if flag.read_volatile() == 0 {
+        flag.write_volatile(8);
+    }
+}
+
+/// Indirect dispatch table for the stats-lock call in
+/// `tracked_stats_current` (house ops-slot pattern: an indirect call in
+/// place of the original's `bl 0x082ccc74`, so host tests can record the
+/// call). The default is the ported `tracked_stats_arm_lock` itself.
 #[derive(Clone, Copy)]
 pub struct TrackedStatsOps {
     /// Stats lock @ 0x082ccc74 — the scheduler-flag setter
-    /// (`if [scheduler_state + 0x14] == 0 { [scheduler_state + 0x14] = 8 }`),
-    /// called before the 64-bit counter reads so a running scheduler
-    /// can't tear the `ldrd`.
+    /// (`if [stats + 0x34] == 0 { [stats + 0x34] = 8 }`), called before
+    /// the 64-bit counter reads so a running scheduler can't tear the
+    /// `ldrd`. Defaults to the ported [`tracked_stats_arm_lock`].
     pub lock: unsafe extern "C" fn(),
 }
 
-/// Default stats-lock stub: no ported scheduler state — nothing to
-/// arm. The counter value the reader returns is unaffected (the flag
-/// only guards against a torn `ldrd` under concurrency the port
-/// doesn't have).
-unsafe extern "C" fn stub_stats_lock() {}
-
-/// Wired default (documented no-op until the scheduler-flag setter
-/// @ 0x082ccc74 is ported).
+/// Wired default: the ported scheduler-flag setter @ 0x082ccc74.
 pub(crate) const DEFAULT_TRACKED_STATS_OPS: TrackedStatsOps = TrackedStatsOps {
-    lock: stub_stats_lock,
+    lock: tracked_stats_arm_lock,
 };
 
 /// The active implementation table. Written once at init on target;
@@ -230,13 +282,11 @@ pub static mut TRACKED_STATS_OPS: TrackedStatsOps = DEFAULT_TRACKED_STATS_OPS;
 /// - The accounting block is the `ALLOC_STATS` static instead of the
 ///   literal 0x08adc2c0 (module simplification, same as the rest of
 ///   heap/tracked).
-/// - The lock callee @ 0x082ccc74 (scheduler-flag setter) is
-///   unported, so the `bl` dispatches through the
+/// - The lock callee @ 0x082ccc74 (scheduler-flag setter) is ported as
+///   [`tracked_stats_arm_lock`]; the `bl` dispatches through the
 ///   [`TRACKED_STATS_OPS`]`.lock` slot (house ops-slot pattern, an
-///   indirect call in place of `bl`). The default is a documented
-///   no-op: the flag only keeps a running scheduler from tearing the
-///   64-bit `ldrd`, and the port has no scheduler — the returned value
-///   is unaffected either way.
+///   indirect call in place of `bl`) whose default is that port, so
+///   host tests can still swap in a recorder.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn tracked_stats_current() -> i64 {
     let lock = core::ptr::read_volatile(core::ptr::addr_of!(TRACKED_STATS_OPS.lock));
@@ -313,6 +363,7 @@ mod tests {
             LAST_ALLOC_TAG = 0;
             FREED = [core::ptr::null_mut(); 16];
             FREE_TAGS = [0; 16];
+            ALLOC_STATS.lock_flag = 0;
             ALLOC_STATS.current_bytes = 0;
             ALLOC_STATS.peak_bytes = 0;
             let ops = core::ptr::addr_of_mut!(HEAP_OPS);
@@ -577,14 +628,48 @@ mod tests {
         }
     }
 
-    /// The wired default is the no-op stub: the reader just returns
+    /// The wired default is the ported scheduler-flag setter: the
+    /// reader arms the lock word (stats + 0x34) to 8 before returning
     /// the counter.
     #[test]
-    fn the_default_lock_is_a_noop() {
+    fn the_default_lock_is_the_ported_arm() {
         let _guard = stats();
         unsafe {
             ALLOC_STATS.current_bytes = 99;
             assert_eq!(tracked_stats_current(), 99);
+            assert_eq!(ALLOC_STATS.lock_flag, 8, "the default lock arms the flag");
+        }
+    }
+
+    // ---- tracked_stats_arm_lock (0x082ccc74) -------------------------
+
+    /// A clear lock word is armed to 8 (`cmp r1,#0; moveq r1,#8;
+    /// streq r1,[r0,#0x14]`).
+    #[test]
+    fn arms_a_clear_flag_to_eight() {
+        let _guard = arena();
+        unsafe {
+            assert_eq!(ALLOC_STATS.lock_flag, 0);
+            tracked_stats_arm_lock();
+            assert_eq!(ALLOC_STATS.lock_flag, 8);
+        }
+    }
+
+    /// One-way arm: an already-armed (or any non-zero) flag is left
+    /// untouched, and a second call is a no-op.
+    #[test]
+    fn never_overwrites_a_nonzero_flag() {
+        let _guard = arena();
+        unsafe {
+            for value in [8u32, 1, 0xdead_beef] {
+                ALLOC_STATS.lock_flag = value;
+                tracked_stats_arm_lock();
+                assert_eq!(ALLOC_STATS.lock_flag, value, "value={value:#x}");
+            }
+            ALLOC_STATS.lock_flag = 0;
+            tracked_stats_arm_lock();
+            tracked_stats_arm_lock();
+            assert_eq!(ALLOC_STATS.lock_flag, 8, "second arm is a no-op");
         }
     }
 }

@@ -9533,6 +9533,36 @@ functions:
       `mov r1, #57; b 0x080eb67c` - malloc_wrapper with caller tag 57.
       2 bl call sites, one of them the tracked allocator @ 0x08390b8c.
 
+  - address: 0x082ccc74
+    ghidra: FUN_082ccc74
+    name: tracked_stats_arm_lock
+    size: 24
+    sig: "void tracked_stats_arm_lock(void)"
+    module: heap/tracked
+    status: ported
+    vars: {DAT_082ccc8c: stats_plus_0x20}
+    notes: >-
+      The "scheduler-flag setter" used as the stats lock by the whole
+      tracked-allocator cluster: 4 bl call sites (allocator entry
+      0x08390b14, stats init 0x08390bf0, peak reader 0x08390c24,
+      tracked_stats_current 0x08390c54). ldr r0,[lit 0x082ccc8c] loads
+      0x08adc2e0; if [r0,#0x14] == 0 it is set to 8 (cmp/moveq/streq),
+      else left alone - a one-way arm that keeps a running scheduler
+      from tearing the ldrd reads of the i64 counters. Verified against
+      osos.dec: 0x08adc2e0 is the 0x08adc2c0 accounting block + 0x20, so
+      the flag word is 0x08adc2f4 = stats+0x34, INSIDE the same block,
+      immediately before current_bytes(+0x38) - the RTXC scheduler is
+      never touched, so it lives in heap/tracked (not kernel/), modeled
+      as the new ALLOC_STATS.lock_flag field (reserved shrank 14->13
+      words, layout unchanged). It is also the wired default of
+      TRACKED_STATS_OPS.lock, replacing the documented no-op stub.
+      Accesses are volatile: without it LLVM's globalopt narrowed the
+      word to a boolean byte and dropped the 8 (ldrb/moveq #1/strbeq in
+      ARM release). match.py: same ldr/ldr/cmp/moveq/streq structure;
+      the diff is LLVM's fp frame and offset #0x34 vs #0x14 (the
+      port-owned static vs the +0x20-based literal - the documented
+      module simplification).
+
   - address: 0x08390b8c
     ghidra: null
     name: tracked_alloc_tail
@@ -9598,11 +9628,11 @@ functions:
       with ldrd, returns it in r0:r1. Port deviations: reads the
       ALLOC_STATS static instead of literal 0x08adc2c0 (module
       simplification, same as the rest of heap/tracked), and the
-      unported lock callee @ 0x082ccc74 dispatches through the new
+      lock callee @ 0x082ccc74 (scheduler-flag setter, since ported
+      as tracked_stats_arm_lock) dispatches through the
       TRACKED_STATS_OPS.lock slot (house ops-slot pattern, an indirect
-      call in place of bl) whose documented default is a no-op - the
-      flag only keeps a running scheduler from tearing the 64-bit
-      ldrd, so the returned value is unaffected. match.py: same
+      call in place of bl) whose default is that port, so host tests
+      can still swap in a recorder. match.py: same
       push/call/ldr-stats/ldrd/pop structure; the diff is LLVM's fp
       frame and the blx-through-slot (the documented deviations).
 
