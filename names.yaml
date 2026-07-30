@@ -8514,6 +8514,46 @@ functions:
       R_ARM_JUMP24 targets image_format_for_kind); the diff is LLVM's
       crate-standard fp frame - the accepted house deviation.
 
+  - address: 0x08105b38
+    ghidra: FUN_08105b38
+    name: image_format_descriptor_for_kind
+    size: 32
+    sig: "void image_format_descriptor_for_kind(u8 *descriptor, u32 kind)"
+    module: app/image_format
+    status: ported
+    vars: {param_1: descriptor, param_2: kind}
+    notes: >-
+      Argument swap around image_format_for_kind (0x08105a34) that turns
+      the kind-to-format question into the descriptor question in one
+      call: `mov r2,r0; push {r4,lr}; mov r0,r1; bl 0x08105a34; mov
+      r1,r0; pop {r4,lr}; mov r0,r2; mov r0,r0` - NO bx lr: popping lr
+      and falling through (the last mov is a pad nop) into FUN_08105b58
+      is a tail call, so the descriptor builder returns straight to this
+      function's caller. Semantics: image_format_descriptor(descriptor,
+      image_format_for_kind(kind)). Ghidra folds the fall-through into
+      one C function. 15 bl call sites, no tail b (binary-scanned):
+      0x08119d28, 0x081b1e34, 0x081b71d0, 0x081b7d88, 0x081cc030,
+      0x081cd218/0x081cd234/0x081cd250/0x081cd26c/0x081cd288,
+      0x0820a4ec/0x0820a508/0x0820a524, 0x08220218/0x08220234 - all
+      pass a 32-byte stack buffer and a kind (the `auStack_2bc [32]`
+      pattern in FUN_081cd1fc & co.), so this is the one-step "format
+      descriptor for artwork kind N" entry point. Consults the PLAIN
+      table: kind 4 forwards 0x428 here, where the kind4-override
+      wrapper would answer 0x400. Deviations - (1) the fall-through
+      becomes an explicit tail call to the extern symbol
+      image_format_descriptor (FUN_08105b58, still unported; on device
+      it resolves at firmware link time to the stock address, and to the
+      Rust port once 0x08105b58 is ported under that name; a recording
+      shim stands in on the host), LLVM emits it as a `b` - the same
+      control-flow shape; (2) LLVM's crate-standard fp frame. Host
+      tests: descriptor pointer passes through unchanged, every kind
+      0..=17 forwards the decoded jump table's format, out-of-range
+      kinds forward 0xffffffff, kind 4 forwards 0x428 (plain table, not
+      the override). match.py structural: same save-pointer/push/
+      swap/bl/shuffle/pop/tail-branch shape; the bl's R_ARM_JUMP24
+      target is image_format_for_kind and the tail b targets
+      image_format_descriptor.
+
   - address: 0x0814d51c
     ghidra: FUN_0814d51c
     name: record_body_size

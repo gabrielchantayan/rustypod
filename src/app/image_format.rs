@@ -48,8 +48,10 @@
 //!
 //! `FUN_08105b28` (ported below as
 //! [`image_format_for_kind_kind4_override`]) overrides kind 4 to 0x400
-//! and tail-branches here for everything else; `FUN_08105b38` (an
-//! argument swap around this function) is left unported.
+//! and tail-branches here for everything else; `FUN_08105b38` (ported
+//! below as [`image_format_descriptor_for_kind`]) swaps its arguments,
+//! calls this table on the kind and falls through into the descriptor
+//! builder `FUN_08105b58` (still unported).
 
 /// The "no format" answer (`mvn r0, #0`) — kinds 9, 11, 13 and every
 /// kind above [`IMAGE_KIND_COUNT`].
@@ -125,6 +127,72 @@ pub extern "C" fn image_format_for_kind_kind4_override(kind: u32) -> u32 {
     } else {
         image_format_for_kind(kind)
     }
+}
+
+// The tail target of `image_format_descriptor_for_kind`: the descriptor
+// builder `FUN_08105b58` @ 0x08105b58 (32-byte descriptor for a format
+// id, copied to the caller's buffer). Not yet ported. On the device the
+// symbol is the stock function — resolved at firmware link time; when
+// `FUN_08105b58` is ported under this name the tail call resolves to
+// the Rust port instead. On the host the recording shim below stands
+// in so tests can observe the forwarded arguments.
+#[cfg(target_os = "none")]
+extern "C" {
+    fn image_format_descriptor(descriptor: *mut u8, format: u32);
+}
+
+/// Last `descriptor` argument the host shim was called with.
+#[cfg(not(target_os = "none"))]
+static mut SHIM_DESCRIPTOR: *mut u8 = core::ptr::null_mut();
+/// Last `format` argument the host shim was called with.
+#[cfg(not(target_os = "none"))]
+static mut SHIM_FORMAT: u32 = 0;
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn image_format_descriptor(descriptor: *mut u8, format: u32) {
+    SHIM_DESCRIPTOR = descriptor;
+    SHIM_FORMAT = format;
+}
+
+/// image_format_descriptor_for_kind — original: `FUN_08105b38` @
+/// 0x08105b38 (32 bytes; 15 `bl` call sites, no tail `b`,
+/// binary-scanned).
+///
+/// An argument swap around [`image_format_for_kind`] that turns the
+/// kind-to-format question into the descriptor question in one call:
+///
+/// ```text
+/// mov    r2, r0            ; keep the caller's descriptor pointer
+/// stmdb  sp!, {r4, lr}
+/// mov    r0, r1            ; kind into arg0
+/// bl     0x08105a34        ; image_format_for_kind(kind)
+/// mov    r1, r0            ; format id into arg1
+/// ldmia  sp!, {r4, lr}
+/// mov    r0, r2            ; descriptor pointer back into arg0
+/// mov    r0, r0            ; pad nop — falls through into 0x08105b58
+/// ```
+///
+/// There is no `bx lr`: popping `lr` and falling through into
+/// `FUN_08105b58` is a tail call, so the descriptor builder returns
+/// straight to this function's caller. Ghidra folds the fall-through
+/// into one C function: `FUN_08105b38(out, kind)` =
+/// `image_format_descriptor(out, image_format_for_kind(kind))`.
+///
+/// All 15 callers pass a 32-byte stack buffer and a kind (the
+/// `auStack_2bc [32]` pattern in `FUN_081cd1fc` & co.) — this is the
+/// one-step "give me the format descriptor for artwork kind N" entry
+/// point. Note it consults the *plain* table: kind 4 forwards 0x428
+/// here, where [`image_format_for_kind_kind4_override`] would answer
+/// 0x400.
+///
+/// Deliberate deviation: the original's fall-through into
+/// `FUN_08105b58` becomes an explicit tail call to the
+/// `image_format_descriptor` symbol (unported; see the extern block
+/// above), which LLVM emits as a `b` — the same control-flow shape.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn image_format_descriptor_for_kind(descriptor: *mut u8, kind: u32) {
+    image_format_descriptor(descriptor, image_format_for_kind(kind))
 }
 
 #[cfg(test)]
@@ -227,5 +295,66 @@ mod tests {
         // own formats.
         assert_eq!(image_format_for_kind_kind4_override(3), 0x400);
         assert_eq!(image_format_for_kind_kind4_override(5), 0x42b);
+    }
+
+    // ---- image_format_descriptor_for_kind (FUN_08105b38) -------------
+    // The host shim for the unported descriptor builder records its
+    // arguments in SHIM_DESCRIPTOR / SHIM_FORMAT; the lock serializes
+    // the tests that observe them.
+
+    extern crate std;
+    use std::sync::Mutex;
+    static SHIM_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Calls the port and returns what the tail call forwarded:
+    /// `(descriptor pointer, format id)`.
+    fn forwarded(descriptor: *mut u8, kind: u32) -> (*mut u8, u32) {
+        unsafe {
+            SHIM_DESCRIPTOR = core::ptr::null_mut();
+            SHIM_FORMAT = 0;
+            image_format_descriptor_for_kind(descriptor, kind);
+            (SHIM_DESCRIPTOR, SHIM_FORMAT)
+        }
+    }
+
+    #[test]
+    fn descriptor_pointer_passes_through_unchanged() {
+        let _guard = SHIM_LOCK.lock().unwrap();
+        for addr in [0x1000usize, 0x0800_0020, 0x0a00_0000, 0xffff_ffe0] {
+            let (descriptor, _) = forwarded(addr as *mut u8, 0);
+            assert_eq!(descriptor, addr as *mut u8, "descriptor {addr:#x}");
+        }
+    }
+
+    #[test]
+    fn every_kind_forwards_the_plain_tables_format() {
+        let _guard = SHIM_LOCK.lock().unwrap();
+        let mut buf = [0u8; 32];
+        for kind in 0..IMAGE_KIND_COUNT {
+            let (_, format) = forwarded(buf.as_mut_ptr(), kind);
+            assert_eq!(format, image_format_for_kind(kind), "kind {kind}");
+            assert_eq!(format, reference(kind), "kind {kind} vs decoded jump table");
+        }
+    }
+
+    #[test]
+    fn out_of_range_kinds_forward_format_none() {
+        let _guard = SHIM_LOCK.lock().unwrap();
+        let mut buf = [0u8; 32];
+        for kind in [18u32, 100, 0x8000_0000, u32::MAX] {
+            let (_, format) = forwarded(buf.as_mut_ptr(), kind);
+            assert_eq!(format, IMAGE_FORMAT_NONE, "kind {kind:#x}");
+        }
+    }
+
+    #[test]
+    fn kind4_uses_the_plain_table_not_the_override() {
+        let _guard = SHIM_LOCK.lock().unwrap();
+        let mut buf = [0u8; 32];
+        let (_, format) = forwarded(buf.as_mut_ptr(), 4);
+        // The swap calls image_format_for_kind, NOT the kind4 override:
+        // kind 4 forwards 0x428 here, not 0x400.
+        assert_eq!(format, 0x428);
+        assert_eq!(image_format_for_kind_kind4_override(4), 0x400);
     }
 }
