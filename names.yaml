@@ -197,6 +197,26 @@ functions:
       genuinely absent from the binary; this is what retailOS uses.
       Variants: 0x0810b610 (identical), 0x08275e20 (count+1).
 
+  - address: 0x08275e20
+    ghidra: FUN_08275e20
+    name: strlen_safe_plus1
+    size: 36
+    sig: "size_t strlen_safe_plus1(const char *s)"
+    module: strlen_safe_plus1
+    status: ported
+    notes: >-
+      NULL-guarded strlen + 1: returns 1 for a null pointer, else
+      strlen(s) + 1 (buffer size including the NUL terminator). The
+      "count+1" variant of strlen_safe @ 0x082770bc. 51 `bl` call sites
+      (binary-scanned); sampled callers confirm the buffer-size reading:
+      0x08115678 subtracts 1 to recover the plain length for a bounded
+      copy, and the StringObject sibling @ 0x082a50a0 (`ldr r0,[r0,#4];
+      b 0x08275e20`) tail-branches here over the string payload (that
+      sibling is a separate function, not ported here). match.py
+      structural: same NULL guard / byte loop / count+1 return; the diff
+      is LLVM's fp frame and a peeled first iteration with the counter
+      pre-offset to 1.
+
   # --- Batch 2: ARM ADS arithmetic / stdlib runtime ---
   - address: 0x08031568
     ghidra: FUN_08031568
