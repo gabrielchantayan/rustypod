@@ -18,6 +18,13 @@
 //!   public fseek entry: a (patched-out) lock bracket around the seek
 //!   core @ 0x0802fd04 — unported, dispatched through [`STREAM_SEEK_CORE`].
 //!   Six callers (scanf/stdio/C++ layers + `freopen_core`'s append path).
+//! - `fflush` — original: `FUN_0802fc9c` @ 0x0802fc9c (96 bytes). The
+//!   public fflush entry: `fflush(file)` is a (patched-out) lock bracket
+//!   around the sync core @ 0x0802fc00 ([`STREAM_SYNC_CORE`], take_lock
+//!   1) whose result passes through; `fflush(NULL)` walks the whole
+//!   stream chain from the static stdin (head pointer literal
+//!   0x08b2f820 @ pool 0x0802fd00), syncing every stream and returning
+//!   -1 when ANY sync reports nonzero.
 //! - `freopen_core` — original: `FUN_08030300` @ 0x08030300 (252 bytes).
 //!   fclose + mode-string parse + `_sys_open` + stream re-init; see docs.
 //!   Callers: `fopen` @ 0x080303fc (below) and `stdio_init` (x3).
@@ -228,6 +235,36 @@ pub unsafe extern "C" fn fclose(file: *mut AdsFile) -> i32 {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn fseek(file: *mut AdsFile, offset: i32, whence: i32) -> i32 {
     hook(core::ptr::addr_of!(STREAM_SEEK_CORE))(file, offset, whence)
+}
+
+/// fflush — original: `FUN_0802fc9c` @ 0x0802fc9c (96 bytes).
+///
+/// The public fflush entry. `fflush(file)` runs the sync core
+/// ([`STREAM_SYNC_CORE`], original 0x0802fc00) with take_lock 1 and
+/// returns its result verbatim (a nonzero failure is NOT normalized to
+/// -1 on this path). `fflush(NULL)` walks the entire stream chain
+/// starting at the static stdin FILE (the original loads the head
+/// pointer 0x08b2f820 from its literal pool @ 0x0802fd00 and advances
+/// over the +0x40 chain links), syncing every stream with take_lock 1;
+/// the walk continues past failures and the return is -1 when ANY sync
+/// reported nonzero, else 0. The (patched-out) stream-list lock bracket
+/// (`ldr r0, [0x0802fcfc]` = lock object 0x08a0fc04; `mov r0, r0`) is
+/// omitted, house precedent (module docs).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn fflush(file: *mut AdsFile) -> i32 {
+    if !file.is_null() {
+        return hook(core::ptr::addr_of!(STREAM_SYNC_CORE))(file, 1);
+    }
+    let mut result = 0;
+    let mut stream = stdin_file();
+    while !stream.is_null() {
+        let sync_result = hook(core::ptr::addr_of!(STREAM_SYNC_CORE))(stream, 1);
+        stream = (*stream).link;
+        if sync_result != 0 {
+            result = -1;
+        }
+    }
+    result
 }
 
 /// freopen_core — original: `FUN_08030300` @ 0x08030300 (252 bytes).
@@ -565,6 +602,107 @@ mod tests {
             STREAM_SEEK_CORE = recording_seek;
             assert_eq!(fseek(&mut f, 40, 1), 7, "core result passes through");
             assert_eq!(events(), std::vec![("seek", 40, 1)]);
+            restore_swi();
+        }
+    }
+
+    // --- fflush ----------------------------------------------------------
+
+    /// Sync mock that fails (with a distinctive nonzero) on one chosen
+    /// stream pointer, succeeds elsewhere.
+    static mut FAIL_STREAM: usize = 0;
+
+    unsafe extern "C" fn selectively_failing_sync(file: *mut AdsFile, take_lock: i32) -> i32 {
+        (*core::ptr::addr_of_mut!(EVENTS)).push(("sync", file as usize, take_lock as usize));
+        if file as usize == *core::ptr::addr_of!(FAIL_STREAM) {
+            -5
+        } else {
+            0
+        }
+    }
+
+    /// Chains the three static streams plus one heap node, stdin at the
+    /// head exactly like `stdio_init` leaves them.
+    unsafe fn chain_statics() -> *mut AdsFile {
+        static mut EXTRA: AdsFile = ADS_FILE_ZERO;
+        let extra = core::ptr::addr_of_mut!(EXTRA);
+        *extra = ADS_FILE_ZERO;
+        (*stdin_file()).link = stdout_file();
+        (*stdout_file()).link = stderr_file();
+        (*stderr_file()).link = extra;
+        extra
+    }
+
+    #[test]
+    fn fflush_stream_dispatches_the_sync_core_verbatim() {
+        let _guard = lock_and_reset(&[]);
+        unsafe {
+            let mut f = ADS_FILE_ZERO;
+            assert_eq!(fflush(&mut f), 0, "default stub succeeds");
+            STREAM_SYNC_CORE = selectively_failing_sync;
+            *core::ptr::addr_of_mut!(FAIL_STREAM) = &mut f as *mut _ as usize;
+            // A failing sync's result passes through verbatim — the
+            // single-stream path does NOT normalize nonzero to -1.
+            assert_eq!(fflush(&mut f), -5);
+            assert_eq!(
+                events(),
+                std::vec![("sync", &f as *const _ as usize, 1)],
+                "take_lock 1"
+            );
+            restore_swi();
+        }
+    }
+
+    #[test]
+    fn fflush_null_syncs_every_stream_in_chain_order() {
+        let _guard = lock_and_reset(&[]);
+        unsafe {
+            STREAM_SYNC_CORE = recording_sync;
+            let extra = chain_statics();
+            assert_eq!(fflush(core::ptr::null_mut()), 0);
+            assert_eq!(
+                events(),
+                std::vec![
+                    ("sync", stdin_file() as usize, 1),
+                    ("sync", stdout_file() as usize, 1),
+                    ("sync", stderr_file() as usize, 1),
+                    ("sync", extra as usize, 1),
+                ],
+                "chain order, take_lock 1"
+            );
+            restore_swi();
+        }
+    }
+
+    #[test]
+    fn fflush_null_reports_failure_but_walks_the_whole_chain() {
+        let _guard = lock_and_reset(&[]);
+        unsafe {
+            STREAM_SYNC_CORE = selectively_failing_sync;
+            let extra = chain_statics();
+            *core::ptr::addr_of_mut!(FAIL_STREAM) = stdout_file() as usize;
+            assert_eq!(fflush(core::ptr::null_mut()), -1, "any failure -> -1");
+            assert_eq!(
+                events().len(),
+                4,
+                "the walk continues past the failing stream"
+            );
+            assert_eq!(events()[3].1, extra as usize, "tail still synced");
+            restore_swi();
+        }
+    }
+
+    #[test]
+    fn fflush_null_on_a_lone_stdin_succeeds() {
+        let _guard = lock_and_reset(&[]);
+        unsafe {
+            STREAM_SYNC_CORE = recording_sync;
+            assert_eq!(fflush(core::ptr::null_mut()), 0);
+            assert_eq!(
+                events(),
+                std::vec![("sync", stdin_file() as usize, 1)],
+                "null link: stdin only"
+            );
             restore_swi();
         }
     }

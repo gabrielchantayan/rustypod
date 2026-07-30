@@ -3349,6 +3349,29 @@ functions:
       second arg carrying foreach_close's not_excluded flag —
       stream_file.rs's STREAM_CLOSE_CORE hook.
 
+  - address: 0x0802fc9c
+    ghidra: FUN_0802fc9c
+    name: fflush
+    size: 96
+    sig: "i32 fflush(AdsFile *file)"
+    module: stdio/stdio_init
+    status: ported
+    vars: "r0/param_1: file, r4: chain cursor, r5: result latch, DAT_0802fd00: 0x08b2f820 (static stdin FILE, chain head), DAT_0802fcfc: 0x08a0fc04 (stream-list lock object, patched-out bracket)"
+    notes: >-
+      The public fflush entry. fflush(file): sync core 0x0802fc00
+      (STREAM_SYNC_CORE hook) with take_lock r1=1, result passed through
+      verbatim — a nonzero failure is NOT normalized to -1 on this path.
+      fflush(NULL): walks the whole stream chain from the static stdin
+      FILE (head pointer 0x08b2f820 loaded from the literal pool @
+      0x0802fd00 — the global IS the stdin object, not a
+      pointer-to-pointer), syncing every stream (+0x40 links) with
+      take_lock 1; the walk continues past failures and the return is
+      -1 (mvnne latch) when ANY sync reported nonzero, else 0. The
+      stream-list lock bracket (ldr r0,[0x0802fcfc] = 0x08a0fc04;
+      mov r0,r0) is patched out — omitted, house precedent. Sole caller
+      in the image (binary-verified bl scan): 0x083d84c0, inside
+      FUN_083d8468 (C++-layer flush wrapper, passes a stream arg).
+
   - address: 0x08030300
     ghidra: FUN_08030300
     name: freopen_core
