@@ -21,27 +21,31 @@
 //! 0837dc34:  ldmia sp!,{r12,pc}   ; r0 (the new Expr*) falls through
 //! ```
 //!
-//! The callee is identified as SQLite 3.5.x's
-//! `sqlite3Expr(db, op, pLeft, pRight, pToken)`: it allocates a 0x44-byte
+//! The callee is SQLite 3.5.x's
+//! `sqlite3Expr(db, op, pLeft, pRight, pToken)` — **ported** as
+//! [`crate::sqlite::expr_new::expr_new`]: it allocates a 0x44-byte
 //! `Expr` through the ported [`db_malloc_zero`](crate::sqlite::mem)
 //! @ 0x08374998, stores the opcode byte at +0x00, the operands at
 //! +0x08/+0x0c, `EP_CombBound`-style flag propagation off the children,
 //! the token span as two words at +0x14/+0x18 (and +0x1c/+0x20), and
-//! finishes with the height recomputation helper @ 0x083788fc. On
+//! finishes with the height recomputation helper @ 0x083788fc (the
+//! ported [`crate::sqlite::expr_height::expr_set_height`]). On
 //! allocation failure it releases both operands through the expression
-//! destructor @ 0x08377e00 and returns NULL. Every one of this adaptor's
-//! 44 call sites is a grammar action building a tree node — e.g.
-//! `parse_expr(pParse, 0x70 /*TK_LSHIFT*/, lhs, rhs, 0)`.
+//! destructor @ 0x08377e00 and returns NULL. Every one of this
+//! adaptor's 44 call sites is a grammar action building a tree node —
+//! e.g. `parse_expr(pParse, 0x70 /*TK_LSHIFT*/, lhs, rhs, 0)`.
 //!
 //! Deviations:
-//! - `sqlite3Expr` @ 0x08376808 is not ported (its operand-release and
-//!   span-merge paths pull in the expression destructor chain); it is
-//!   the [`SQLITE_EXPR_NEW`] dispatch boundary (house pattern — see
-//!   `sqlite/error_msg.rs`). The default slot is a documented
-//!   always-NULL stub — the same end state the original reaches when
-//!   the 0x44-byte allocation fails, and what grammar actions already
-//!   test for. The match.py diff is exactly that deviation: the Rust
-//!   body tail-calls through the loaded slot instead of a direct `bl`.
+//! - The call to `sqlite3Expr` keeps the dispatch-slot shape (house
+//!   pattern — see `sqlite/error_msg.rs`) so host tests can swap in
+//!   recording mocks: [`SQLITE_EXPR_NEW`] now defaults to the real
+//!   port, [`crate::sqlite::expr_new::expr_new`];
+//!   [`missing_expr_new`], the documented always-NULL stub that used to
+//!   fill the slot, is retained for the host tests — its behavior is
+//!   *exactly* the end state the original reaches when the 0x44-byte
+//!   allocation fails, and what grammar actions already test for. The
+//!   match.py diff is exactly this deviation: the Rust body tail-calls
+//!   through the loaded slot instead of a direct `bl`.
 
 /// A parse context (`sqlite3Parse`), only the field this adaptor
 /// touches. The full layout is documented in `sqlite/mod.rs`; `db` at
@@ -51,6 +55,8 @@ pub struct Parse {
     /// +0x00: the owning connection (`sqlite3 *`).
     pub db: *mut u8,
 }
+
+use super::expr_new::expr_new;
 
 /// The expression constructor: `sqlite3Expr(db, op, left, right,
 /// token)` @ 0x08376808. Returns the new `Expr *`, or NULL when its
@@ -63,9 +69,11 @@ pub type ExprNewFn = unsafe extern "C" fn(
     token: *const u8,
 ) -> *mut u8;
 
-/// Default stub: no constructor wired, so the node comes back NULL —
-/// the same shape as a failed allocation inside the real constructor
-/// (see the module header).
+/// Default stub while 0x08376808 was unported; the slot now defaults
+/// to the real port (see the module header). Retained for the host
+/// tests: no constructor wired, so the node comes back NULL — the same
+/// shape as a failed allocation inside the real constructor.
+#[allow(dead_code)] // test-only since 0x08376808 was ported
 pub(crate) unsafe extern "C" fn missing_expr_new(
     _db: *mut u8,
     _op: i32,
@@ -76,9 +84,10 @@ pub(crate) unsafe extern "C" fn missing_expr_new(
     core::ptr::null_mut()
 }
 
-/// The active expression constructor. Host tests install recording
-/// mocks; the real port replaces the default when 0x08376808 lands.
-pub static mut SQLITE_EXPR_NEW: ExprNewFn = missing_expr_new;
+/// The active expression constructor. The default is the real port,
+/// [`expr_new`]; host tests still install recording mocks through the
+/// slot.
+pub static mut SQLITE_EXPR_NEW: ExprNewFn = expr_new;
 
 /// Reads the constructor slot (volatile — the slot is meant to be
 /// swapped at runtime, and a plain read lets LLVM const-fold the
@@ -158,10 +167,10 @@ mod tests {
         unsafe { (*core::ptr::addr_of!(CALLS)).clone() }
     }
 
-    /// Puts the documented always-NULL stub back.
+    /// Puts the shipped default — the real `sqlite3Expr` port — back.
     fn restore_default() {
         unsafe {
-            core::ptr::write_volatile(core::ptr::addr_of_mut!(SQLITE_EXPR_NEW), missing_expr_new);
+            core::ptr::write_volatile(core::ptr::addr_of_mut!(SQLITE_EXPR_NEW), expr_new);
         }
     }
 
@@ -220,7 +229,7 @@ mod tests {
     }
 
     #[test]
-    fn the_default_stub_mimics_an_allocation_failure() {
+    fn the_missing_stub_mimics_an_allocation_failure() {
         let _guard = SLOT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             core::ptr::write_volatile(core::ptr::addr_of_mut!(SQLITE_EXPR_NEW), missing_expr_new);
@@ -234,5 +243,32 @@ mod tests {
         };
 
         assert!(node.is_null(), "no constructor wired: NULL, like OOM");
+        restore_default();
+    }
+
+    #[test]
+    fn the_shipped_default_is_the_real_port() {
+        use super::super::mem::tests::{install_recorder, Connection};
+        use super::super::mem::{DB_MEM_OPS, DEFAULT_DB_MEM_OPS};
+        let _guard = SLOT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        restore_default();
+        // 96 zeroed, aligned bytes: on a 64-bit host the constructor's
+        // height fix-up reaches past the original's 0x44-byte request
+        // (the widened Expr's p_select/n_height), so the arena covers
+        // the widened struct with a NULL p_select.
+        let mut arena = [0u64; 12];
+        let _ops = install_recorder(arena.as_mut_ptr() as *mut u8);
+        let mut conn = Connection::healthy();
+        let mut parse = Parse { db: conn.ptr() };
+
+        let node = unsafe {
+            parse_expr(&mut parse, 0x70, core::ptr::null_mut(), core::ptr::null_mut(), core::ptr::null())
+        };
+
+        assert_eq!(node, arena.as_mut_ptr() as *mut u8, "the real constructor's allocation comes back");
+        assert_eq!(unsafe { *node }, 0x70, "and its op byte (+0x00) is the opcode's low half");
+        unsafe {
+            core::ptr::write_volatile(core::ptr::addr_of_mut!(DB_MEM_OPS), DEFAULT_DB_MEM_OPS);
+        }
     }
 }

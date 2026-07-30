@@ -10255,15 +10255,64 @@ functions:
       SQLite's sqlite3PExpr. 44 bl call sites, all grammar actions.
       Replaces its first argument with the db back-pointer at +0x00 of
       the parse context and tail-forwards to sqlite3Expr @ 0x08376808
-      (identified: allocates a 0x44-byte Expr via the ported
-      db_malloc_zero @ 0x08374998, stores the op byte at +0x00, operands
-      at +0x08/+0x0c, the token span at +0x14/+0x18, recomputes height
-      via 0x083788fc; on OOM releases both operands via 0x08377e00 and
-      returns NULL). The unported 0x08376808 is the SQLITE_EXPR_NEW
-      dispatch boundary (house pattern, default always-NULL stub mimics
-      its OOM path); the match.py diff is exactly that deviation - the
-      Rust body tail-calls through the loaded slot instead of a direct
-      bl. Old scouting name: sqlite_forward_via_db.
+      (ported as expr_new - see its entry; allocates a 0x44-byte Expr
+      via the ported db_malloc_zero @ 0x08374998, stores the op byte at
+      +0x00, operands at +0x08/+0x0c, the token span at +0x14/+0x18,
+      recomputes height via the ported expr_set_height @ 0x083788fc; on
+      OOM releases both operands via 0x08377e00 and returns NULL).
+      0x08376808 is wired as the default of the SQLITE_EXPR_NEW
+      dispatch static, replacing the documented always-NULL stub
+      (mimics its OOM path; retained for host tests, which still swap
+      the slot for recording mocks). The match.py diff is unchanged by
+      the wiring: the Rust body tail-calls through the loaded slot
+      instead of a direct bl. Old scouting name: sqlite_forward_via_db.
+
+  - address: 0x08376808
+    ghidra: FUN_08376808
+    name: expr_new
+    size: 216
+    sig: "Expr *expr_new(sqlite3 *db, int op, Expr *left, Expr *right, const Token *token)"
+    module: sqlite/expr_new
+    status: ported
+    vars: {param_1: db, param_2: op, param_3: left, param_4: right, param_5: token, puVar1: node}
+    notes: >-
+      SQLite 3.5.x's sqlite3Expr, the SQLITE_EXPR_NEW dependency of
+      parse_expr (sqlite3PExpr). 6 bl call sites. Allocates a 0x44-byte
+      Expr via the ported db_malloc_zero @ 0x08374998 (called
+      directly); on OOM releases both operands through the expression
+      destructor @ 0x08377e00 (left first, then right) and returns
+      NULL. Otherwise stores the op low byte at +0x00 (strb of the full
+      op register), iAgg = -1 at +0x30 (mvn r0,#0), the operands at
+      +0x08/+0x0c; with a token, ldmia's its two words into BOTH token
+      (+0x14/+0x18) and span (+0x1c/+0x20); without one and with both
+      operands, merges the child spans through the helper @ 0x0837894c
+      (called as (node, &left->span, &right->span) - the Token at +0x1c
+      of each child) and propagates EP_CombBound (flags halfword +0x02
+      bit 0x100, iTable word +0x04) from the right child (only inside
+      the both-operands branch), then from the left child (under left
+      != NULL alone, so the left wins a doubly-flagged join); finishes
+      with the ported expr_set_height @ 0x083788fc (called directly).
+      The two unported callees are dispatch slots (house pattern):
+      0x08377e00 (sqlite3ExprDelete, 88 bytes, 34 bl call sites -
+      recursive teardown: dyn token/span strings and the node itself
+      via sqlite3_free @ 0x083906f4, p_left/p_right recursion, p_list
+      via 0x08378670, p_select via 0x08383c88; identified, drags in the
+      ExprList/Select destructor chain) is SQLITE_EXPR_DELETE with a
+      documented no-op default (OOM leaks the operands; the NULL return
+      is unchanged); 0x0837894c (span merge, 96 bytes, 5 bl call sites,
+      the other four in the 0x0839a block; identified: NULL/dyn guards,
+      span.z = left->span.z, span.n = right.z + right.n - left.z with
+      the dst dyn bit preserved - Token packs n:31|dyn:1, dyn in bit 0)
+      is SQLITE_EXPR_SPAN_MERGE with a documented no-op default (the
+      zeroed span survives - identical to the original whenever either
+      child's span.z is NULL). The port is the shipped default of
+      parse_expr's SQLITE_EXPR_NEW, replacing the always-NULL stub.
+      Expr/Token are typed repr(C) structs with 32-bit offset asserts.
+      match.py: same structure - the alloc/NULL fork, the field stores,
+      the token two-word copies, the conditional merge call, both
+      EP_CombBound tst/ldr/str blocks, the height tail call; the diff
+      is blx-through-slot for the two unported callees and LLVM frame
+      setup.
 
   - address: 0x082d2a1c
     ghidra: FUN_082d2a1c

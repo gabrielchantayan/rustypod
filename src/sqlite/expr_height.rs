@@ -189,14 +189,16 @@ pub unsafe extern "C" fn expr_set_height(expr: *mut Expr) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
     use super::*;
     use std::sync::{Mutex, MutexGuard};
     use std::vec::Vec;
 
-    /// Serializes access to the three fold slots across tests.
-    static SLOT_LOCK: Mutex<()> = Mutex::new(());
+    /// Serializes access to the three fold slots across tests. Also
+    /// taken by `sqlite/expr_new.rs`'s end-to-end height test, so the
+    /// shipped defaults below are in effect while it runs.
+    pub(crate) static SLOT_LOCK: Mutex<()> = Mutex::new(());
 
     /// Which slot a recording fold was invoked through.
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]

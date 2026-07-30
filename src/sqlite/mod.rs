@@ -68,6 +68,7 @@ pub mod error_msg;
 pub mod expr_height;
 pub mod expr_height_of;
 pub mod expr_list_height;
+pub mod expr_new;
 pub mod free_p4;
 pub mod hash_function;
 pub mod hex_to_int;
