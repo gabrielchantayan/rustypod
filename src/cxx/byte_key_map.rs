@@ -44,8 +44,8 @@
 //! leaves, inlined into the port; `_M_insert` @ 0x083b8844 is ported
 //! below as [`byte_key_tree_insert_node`], the shipped default of the
 //! [`BYTE_KEY_TREE_OPS`] dispatch slot, with its pool allocator @
-//! 0x083b7f40 riding the [`BYTE_KEY_ALLOC_OPS`] slot (the allocator
-//! itself is not yet ported).
+//! 0x083b7f40 ported as [`byte_key_tree_allocate_node`], the shipped
+//! default of the [`BYTE_KEY_ALLOC_OPS`] slot.
 //!
 //! Deviations:
 //! - The pair's three padding bytes at +1..+4 are zeroed; the original
@@ -58,9 +58,10 @@
 //!   the slot. The tree insert in turn dispatches `_M_insert` through
 //!   [`BYTE_KEY_TREE_OPS`] (shipped default: the port
 //!   [`byte_key_tree_insert_node`]), which allocates through
-//!   [`BYTE_KEY_ALLOC_OPS`] — with its default stub (no node allocator
-//!   wired) an insertion reports a null fresh node and the find
-//!   returns 0x14 — install `BYTE_KEY_ALLOC_OPS` before real use.
+//!   [`BYTE_KEY_ALLOC_OPS`] (shipped default: the ported pool
+//!   allocator [`byte_key_tree_allocate_node`], carving nodes out of
+//!   `operator_new_checked` arenas — with the whole chain at its
+//!   shipped defaults an insertion really links a node).
 //! - The final `node + 0x14` is a wrapping add (the original's plain
 //!   `add r0, r0, #0x14`); with a real node installed the value is
 //!   identical.
@@ -159,9 +160,10 @@ pub static mut BYTE_KEY_MAP_OPS: ByteKeyMapOps = ByteKeyMapOps {
 /// whose layout matches the scouted one in the module header. The
 /// installed `insert_unique` must honour the 0x083b867c contract (node
 /// word at result+0, flag byte at result+4); the shipped default is
-/// the port below, which with the default `BYTE_KEY_TREE_OPS` stub
-/// reports a null fresh node on insertion — the returned pointer is
-/// then 0x14 and must not be dereferenced.
+/// the port below, which — with the whole slot chain at its shipped
+/// defaults — inserts through the ported `_M_insert` and pool
+/// allocator. (Only a test-installed stub reports a null fresh node;
+/// the returned pointer is then 0x14 and must not be dereferenced.)
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn byte_key_map_find(map: *mut ByteKeyMap, key: *const u8) -> *mut u8 {
@@ -214,8 +216,12 @@ pub struct ByteKeyTreeNode {
 /// object, which the byte comparator never reads.
 #[repr(C)]
 pub struct ByteKeyTree {
-    /// +0..+0x10: allocator/base subobject — unmodeled.
-    pub _opaque: [u8; 0x10],
+    /// +0..+0x10: the node pool state [`byte_key_tree_allocate_node`]
+    /// owns — see [`ByteKeyNodePool`]. Sized off that struct so the
+    /// fields stay disjoint on a 64-bit host (the pool's pointers
+    /// widen past 0x10 there); exactly 0x10 on the 32-bit target,
+    /// where the layout checks below pin `header` at +0x10.
+    pub _opaque: [u8; core::mem::size_of::<ByteKeyNodePool>()],
     /// +0x10: the header node.
     pub header: *mut ByteKeyTreeNode,
     /// +0x14: live node count.
@@ -342,8 +348,9 @@ pub static mut BYTE_KEY_TREE_OPS: ByteKeyTreeOps = ByteKeyTreeOps {
 /// Indirect dispatch for the tree's node allocator @ 0x083b7f40 (176
 /// bytes; a 0x20-byte-node pool with a free list threaded through
 /// node+0xc and 1.5x growth chunks from `operator new` @ 0x08266c70 —
-/// itself a throwing wrapper over `FUN_082aadd4`). Not yet ported; the
-/// ported [`byte_key_tree_insert_node`] rides this slot.
+/// itself a throwing wrapper over `FUN_082aadd4`). Ported as
+/// [`byte_key_tree_allocate_node`] below, the shipped default of the
+/// slot; the ported [`byte_key_tree_insert_node`] rides this slot.
 #[derive(Clone, Copy)]
 pub struct ByteKeyTreeAllocOps {
     /// Node allocator @ 0x083b7f40(map) -> node: hands out a fresh
@@ -356,23 +363,23 @@ pub struct ByteKeyTreeAllocOps {
         unsafe extern "C" fn(map: *mut ByteKeyMap) -> *mut ByteKeyTreeNode,
 }
 
-/// Default stub: no allocator wired, so report null — the ported
+/// Stub from before 0x083b7f40 was ported: report null — the ported
 /// `_M_insert` then writes a null fresh node at its result and returns
-/// (a documented deviation; the original cannot fail here). On real
-/// hardware BYTE_KEY_ALLOC_OPS must be installed before an insertion
-/// can run.
+/// (a documented deviation; the original cannot fail here). The
+/// shipped default is now the port below; retained for the host tests.
+#[allow(dead_code)] // test-only since 0x083b7f40 was ported
 unsafe extern "C" fn missing_allocate_node(
     _map: *mut ByteKeyMap,
 ) -> *mut ByteKeyTreeNode {
     core::ptr::null_mut()
 }
 
-/// The active node-allocator slot. Defaults to the documented stub
-/// above; replaced by host tests (arena mocks) and eventually by the
-/// ported 0x083b7f40. Written once at init on target; tests serialize
-/// access.
+/// The active node-allocator slot. The shipped default is the port
+/// [`byte_key_tree_allocate_node`] below; host tests install arena
+/// mocks (and the documented stub above) through the slot. Written
+/// once at init on target; tests serialize access.
 pub static mut BYTE_KEY_ALLOC_OPS: ByteKeyTreeAllocOps = ByteKeyTreeAllocOps {
-    allocate_node: missing_allocate_node,
+    allocate_node: byte_key_tree_allocate_node,
 };
 
 /// Links a fresh node for `key` under `parent` through the
@@ -425,9 +432,9 @@ unsafe fn link_fresh_node(
 ///   leaves and are inlined; the original reaches them by `bl`.
 /// - `_M_insert` @ 0x083b8844 is ported as
 ///   [`byte_key_tree_insert_node`], the shipped default of the
-///   [`BYTE_KEY_TREE_OPS`] slot; its allocator rides
-///   [`BYTE_KEY_ALLOC_OPS`] (default stub reports a null fresh node —
-///   see its doc).
+///   [`BYTE_KEY_TREE_OPS`] slot; its allocator is ported as
+///   [`byte_key_tree_allocate_node`], the shipped default of
+///   [`BYTE_KEY_ALLOC_OPS`].
 /// - The original zeroes two stack result words per descent step
 ///   (`str r10, [sp,#0xc]/[sp,#0x10]` inside the loop) — dead scratch
 ///   stores, dropped here.
@@ -557,7 +564,8 @@ unsafe fn byte_key_tree_rotate_right(
 /// insert-unique above).
 ///
 /// Allocates a fresh 0x20-byte node through the pool allocator @
-/// 0x083b7f40 (dispatched via [`BYTE_KEY_ALLOC_OPS`]; it initialises
+/// 0x083b7f40 (dispatched via [`BYTE_KEY_ALLOC_OPS`], shipped default
+/// the port [`byte_key_tree_allocate_node`]; it initialises
 /// color = 0/red and nulls the three links), copy-constructs the
 /// 16-byte pair into node+0x10 and bumps the node count at map+0x14.
 /// Linking: when `parent` is the header (map+0x10) or
@@ -582,7 +590,7 @@ unsafe fn byte_key_tree_rotate_right(
 /// Deviations:
 /// - The allocator never returns null in the original (`operator new`
 ///   throws, abort @ 0x08266abc), so the original has no null check;
-///   with the default [`BYTE_KEY_ALLOC_OPS`] stub this port writes a
+///   with the test-only [`BYTE_KEY_ALLOC_OPS`] stub this port writes a
 ///   null fresh node at `result + 0` and returns without touching the
 ///   tree (the stub's documented contract).
 /// - The placement-new guard `node + 0x10 != null` around the pair
@@ -692,6 +700,162 @@ pub unsafe extern "C" fn byte_key_tree_insert_node(
     }
     (*(*header).parent).color = 1;
     result.write(fresh.cast::<u8>());
+}
+
+// ---------------------------------------------------------------------------
+// The pool allocator itself (@ 0x083b7f40).
+// ---------------------------------------------------------------------------
+
+/// The node pool state the allocator owns in the container's first
+/// 0x10 bytes (the `_opaque` head of [`ByteKeyTree`]; the container
+/// base subobject doubles as the node pool — libstdc++'s old
+/// `_Rb_tree` kept its allocator's pool in the same words). Fields are
+/// typed struct members, never literal byte offsets: the 32-bit target
+/// layout is exact (asserted below) while a 64-bit host keeps the
+/// fields disjoint (the `NodeList` precedent in `app/node_list.rs`).
+#[repr(C)]
+pub struct ByteKeyNodePool {
+    /// +0: newest growth-chunk header (0xc bytes: prev / capacity /
+    /// arena); null until the first arena is carved.
+    pub chunk_head: *mut ByteKeyPoolChunk,
+    /// +4: free-list head, threaded through the freed node's +0xc word
+    /// (its right link).
+    pub free_list: *mut ByteKeyTreeNode,
+    /// +8: bump cursor into the current arena.
+    pub bump: *mut u8,
+    /// +0xc: end of the current arena; `bump == bump_end` means grow.
+    pub bump_end: *mut u8,
+}
+
+/// A growth-chunk header (0xc bytes): the intrusive list of arenas the
+/// pool carved, newest first.
+#[repr(C)]
+pub struct ByteKeyPoolChunk {
+    /// +0: the previous (older) chunk header.
+    pub prev: *mut ByteKeyPoolChunk,
+    /// +4: node capacity of this chunk's arena.
+    pub capacity: u32,
+    /// +8: the arena — `capacity` nodes of 0x20 bytes each.
+    pub arena: *mut u8,
+}
+
+// Target-exact layout; on a 64-bit host the pointer fields widen and
+// the offsets shift — harmless, all access goes through the structs.
+#[cfg(target_pointer_width = "32")]
+mod pool_layout_checks {
+    use super::*;
+    const _: [u8; 0x4] = [0; core::mem::offset_of!(ByteKeyNodePool, free_list)];
+    const _: [u8; 0x8] = [0; core::mem::offset_of!(ByteKeyNodePool, bump)];
+    const _: [u8; 0xc] = [0; core::mem::offset_of!(ByteKeyNodePool, bump_end)];
+    const _: [u8; 0x10] = [0; core::mem::size_of::<ByteKeyNodePool>()];
+    const _: [u8; 0x4] = [0; core::mem::offset_of!(ByteKeyPoolChunk, capacity)];
+    const _: [u8; 0x8] = [0; core::mem::offset_of!(ByteKeyPoolChunk, arena)];
+    const _: [u8; 0xc] = [0; core::mem::size_of::<ByteKeyPoolChunk>()];
+    const _: [u8; 0x20] = [0; core::mem::size_of::<ByteKeyTreeNode>()];
+}
+
+/// `#[inline(never)]` front-end for the checked operator new @
+/// 0x08266c70 (ported in heap/veneers.rs): on device the original
+/// allocator reaches it with `bl` from both allocation sites, and
+/// letting LLVM inline the null-check + new-handler path into the
+/// allocator nearly doubles its size and destroys the structural
+/// match (the `operator_new` `inline(never)` rationale in
+/// heap/veneers.rs).
+#[inline(never)]
+fn pool_operator_new(size: usize) -> *mut u8 {
+    unsafe { crate::heap::veneers::operator_new_checked(size) }
+}
+
+/// byte_key_tree_allocate_node — original: `FUN_083b7f40` @ 0x083b7f40
+/// (176 bytes; called from `_M_insert` @ 0x083b8844 — the ported
+/// [`byte_key_tree_insert_node`] — and one sibling site @ 0x08258b24).
+///
+/// libstdc++'s pool allocator for the byte-keyed map family's 0x20-byte
+/// tree nodes. If the free list at map+4 is non-empty, pop its head
+/// (the next pointer is threaded through the node's +0xc word). Else
+/// bump-allocate from the current arena (cursor at map+8, end at
+/// map+0xc); when the cursor reaches the end, grow first: capacity is
+/// `max(prev + 0x20, prev + prev/2 + prev/8)` of the newest chunk's
+/// capacity (0x20 for the first chunk), then a 0xc-byte chunk header
+/// and a `capacity * 0x20` arena are carved by two calls to the checked
+/// operator new @ 0x08266c70, the chunk is pushed at map+0 (prev link,
+/// capacity, arena pointer), and the arena becomes the new bump range.
+/// The handed-out node gets its parent/left/right words at +4/+8/+0xc
+/// nulled and its color byte at +0 set to 0 (red); the key pair at
+/// +0x10 is left uninitialised for the caller to copy-construct.
+///
+/// Deviations:
+/// - The node stride and chunk-header size go through `size_of`
+///   (0x20 / 0xc on the 32-bit target — the original's `#0x20` / `#0xc`
+///   immediates — wider on 64-bit hosts, where that keeps the fields
+///   disjoint; the `NodeList` precedent).
+/// - The original passes a dead `r1 = 0` second argument to
+///   0x08266c70 (the callee only stack-saves it); the ported
+///   `operator_new_checked` (heap/veneers.rs) takes the size alone and
+///   is reached through the `#[inline(never)]` [`pool_operator_new`]
+///   front-end to preserve the original's two `bl` boundaries.
+/// - Like the original, there is no null check on the checked-new
+///   results: the original's new-handler path (abort @ 0x08266abc)
+///   cannot produce a usable null, and a hypothetical one would fault
+///   on the chunk-header store exactly as the original would.
+///
+/// # Safety
+/// `map` must point at a live container whose first 0x10 bytes are the
+/// pool state ([`ByteKeyNodePool`]); on a freshly constructed container
+/// those words are zero (no chunks, empty free list, empty bump range),
+/// which the growth path handles. The returned node's key pair is
+/// uninitialised — the caller must construct it before any read.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn byte_key_tree_allocate_node(
+    map: *mut ByteKeyMap,
+) -> *mut ByteKeyTreeNode {
+    const NODE_SIZE: usize = core::mem::size_of::<ByteKeyTreeNode>();
+    let pool = map.cast::<ByteKeyNodePool>();
+    let node: *mut ByteKeyTreeNode;
+    let free = (*pool).free_list;
+    if !free.is_null() {
+        // Free-list pop: the next pointer rides the node's right link.
+        node = free;
+        (*pool).free_list = (*free).right;
+    } else {
+        let mut bump = (*pool).bump;
+        if bump == (*pool).bump_end {
+            // Growth: 1.625x the newest chunk's capacity, floored at
+            // prev + 0x20; 0x20 nodes for the very first chunk.
+            let capacity: u32 = match (*pool).chunk_head.is_null() {
+                true => 0x20,
+                false => {
+                    let prev = (*(*pool).chunk_head).capacity;
+                    let grown = prev
+                        .wrapping_add(prev >> 1)
+                        .wrapping_add(prev >> 3);
+                    prev.wrapping_add(0x20).max(grown)
+                }
+            };
+            let chunk = pool_operator_new(
+                core::mem::size_of::<ByteKeyPoolChunk>(),
+            )
+            .cast::<ByteKeyPoolChunk>();
+            let arena = pool_operator_new(
+                (capacity as usize).wrapping_mul(NODE_SIZE),
+            );
+            (*chunk).arena = arena;
+            (*chunk).prev = (*pool).chunk_head;
+            (*chunk).capacity = capacity;
+            (*pool).chunk_head = chunk;
+            bump = arena;
+            (*pool).bump_end =
+                arena.add((capacity as usize).wrapping_mul(NODE_SIZE));
+        }
+        node = bump.cast::<ByteKeyTreeNode>();
+        (*pool).bump = bump.add(NODE_SIZE);
+    }
+    (*node).parent = core::ptr::null_mut();
+    (*node).left = core::ptr::null_mut();
+    (*node).right = core::ptr::null_mut();
+    (*node).color = 0; // red
+    node
 }
 
 #[cfg(test)]
@@ -875,7 +1039,7 @@ mod tests {
     /// A container wired to `header`, uniqueness test on.
     fn test_tree(header: *mut ByteKeyTreeNode) -> ByteKeyTree {
         ByteKeyTree {
-            _opaque: [0; 0x10],
+            _opaque: [0; core::mem::size_of::<ByteKeyNodePool>()],
             header,
             node_count: 0,
             multi_insert: 0,
@@ -1237,7 +1401,11 @@ mod tests {
         let _lock = OPS_LOCK.lock().unwrap();
         reset_recording();
 
-        static mut MINI_NODE: [u8; 0x30] = [0; 0x30];
+        /// 8-aligned so the typed node writes through it stay aligned
+        /// on a 64-bit host (a bare `[u8; N]` static is 1-aligned).
+        #[repr(align(8))]
+        struct AlignedNode([u8; 0x30]);
+        static mut MINI_NODE: AlignedNode = AlignedNode([0; 0x30]);
 
         /// A minimal `_M_insert` good for the first node of an empty
         /// tree: parent is always the header here, so link the node as
@@ -1688,5 +1856,292 @@ mod tests {
             }
         }
         free_arena();
+    }
+
+    // --- byte_key_tree_allocate_node (@ 0x083b7f40) -------------------
+
+    use crate::heap::types::{HeapDescriptor, HeapDescriptorDescriptor};
+    use crate::heap::veneers::HEAP_OPS;
+    use std::sync::MutexGuard;
+
+    /// Bump arena backing the heap-ops `alloc` slot for the pool
+    /// tests: the real heap core is not exercised on the host, and the
+    /// shared mock in heap/veneers hands out a fixed fake address that
+    /// cannot be written (the cxx/string.rs pattern).
+    const POOL_ARENA_SIZE: usize = 0x10000;
+
+    #[repr(C, align(8))]
+    struct PoolArena([u8; POOL_ARENA_SIZE]);
+
+    static mut POOL_ARENA: PoolArena = PoolArena([0; POOL_ARENA_SIZE]);
+    static mut POOL_ARENA_USED: usize = 0;
+    /// Every size the pool asked the checked operator new for, in
+    /// order — the heap-traffic log.
+    static mut POOL_ALLOC_SIZES: Vec<usize> = Vec::new();
+
+    unsafe extern "C" fn pool_arena_alloc(
+        _heap: *mut HeapDescriptorDescriptor,
+        size: usize,
+        _tag: usize,
+    ) -> *mut u8 {
+        let used = POOL_ARENA_USED;
+        let aligned = (size + 7) & !7;
+        if used + aligned > POOL_ARENA_SIZE {
+            return core::ptr::null_mut();
+        }
+        POOL_ARENA_USED = used + aligned;
+        (*core::ptr::addr_of_mut!(POOL_ALLOC_SIZES)).push(size);
+        core::ptr::addr_of_mut!(POOL_ARENA.0).cast::<u8>().add(used)
+    }
+
+    unsafe extern "C" fn pool_arena_create(
+        desc: *mut HeapDescriptor,
+        _start: *mut u8,
+        _size: usize,
+    ) -> *mut HeapDescriptorDescriptor {
+        desc as *mut HeapDescriptorDescriptor
+    }
+
+    /// Installs the arena over the shared heap-ops table, under the
+    /// same lock heap/veneers' own tests use. One guard per test
+    /// function (a second, shadowed guard in the same function would
+    /// self-deadlock).
+    fn pool_heap() -> MutexGuard<'static, ()> {
+        let guard = crate::heap::veneers::tests::mock_heap();
+        unsafe {
+            POOL_ARENA_USED = 0;
+            (*core::ptr::addr_of_mut!(POOL_ALLOC_SIZES)).clear();
+            let ops = core::ptr::addr_of_mut!(HEAP_OPS);
+            (*ops).alloc = pool_arena_alloc;
+            (*ops).create = pool_arena_create;
+        }
+        guard
+    }
+
+    /// A fresh container's pool words (all zero: no chunks, empty free
+    /// list, empty bump range — which reads as exhausted).
+    fn fresh_pool() -> ByteKeyNodePool {
+        ByteKeyNodePool {
+            chunk_head: core::ptr::null_mut(),
+            free_list: core::ptr::null_mut(),
+            bump: core::ptr::null_mut(),
+            bump_end: core::ptr::null_mut(),
+        }
+    }
+
+    fn alloc_sizes() -> Vec<usize> {
+        unsafe { (*core::ptr::addr_of!(POOL_ALLOC_SIZES)).clone() }
+    }
+
+    /// First allocation on a fresh container: one chunk header and one
+    /// 0x20-node arena from the checked operator new (in that order),
+    /// the chunk pushed at map+0, the bump range covering the arena,
+    /// and the returned node — the arena base — initialised (color
+    /// 0/red, the three links null).
+    #[test]
+    fn fresh_container_carves_first_chunk() {
+        let _heap = pool_heap();
+        unsafe {
+            let node_size = core::mem::size_of::<ByteKeyTreeNode>();
+            let chunk_size = core::mem::size_of::<ByteKeyPoolChunk>();
+            let mut pool = fresh_pool();
+            let pool_ptr = core::ptr::addr_of_mut!(pool);
+
+            let node = byte_key_tree_allocate_node(pool_ptr.cast::<ByteKeyMap>());
+
+            assert_eq!(alloc_sizes(), [chunk_size, 0x20 * node_size]);
+            let chunk = pool.chunk_head;
+            assert!(!chunk.is_null());
+            assert_eq!((*chunk).prev, core::ptr::null_mut());
+            assert_eq!((*chunk).capacity, 0x20);
+            let arena = (*chunk).arena;
+            assert_eq!(node, arena.cast::<ByteKeyTreeNode>());
+            assert_eq!(pool.bump, arena.add(node_size));
+            assert_eq!(pool.bump_end, arena.add(0x20 * node_size));
+            assert_eq!(pool.free_list, core::ptr::null_mut());
+            assert_eq!((*node).color, 0); // red
+            assert_eq!((*node).parent, core::ptr::null_mut());
+            assert_eq!((*node).left, core::ptr::null_mut());
+            assert_eq!((*node).right, core::ptr::null_mut());
+        }
+    }
+
+    /// The bump range hands out the whole arena a node at a time with
+    /// no further heap traffic; the allocation past the end grows a
+    /// second chunk at max(0x20+0x20, 0x20 + 0x20/2 + 0x20/8) = 0x40
+    /// and links it ahead of the first.
+    #[test]
+    fn bump_exhaustion_grows_second_chunk() {
+        let _heap = pool_heap();
+        unsafe {
+            let node_size = core::mem::size_of::<ByteKeyTreeNode>();
+            let chunk_size = core::mem::size_of::<ByteKeyPoolChunk>();
+            let mut pool = fresh_pool();
+            let pool_ptr = core::ptr::addr_of_mut!(pool);
+            let map = pool_ptr.cast::<ByteKeyMap>();
+
+            let first_chunk;
+            let first_arena;
+            let first = byte_key_tree_allocate_node(map);
+            first_chunk = pool.chunk_head;
+            first_arena = (*first_chunk).arena;
+            assert_eq!(first, first_arena.cast());
+            for i in 1..0x20usize {
+                let node = byte_key_tree_allocate_node(map);
+                assert_eq!(node, first_arena.add(i * node_size).cast());
+            }
+            // Header + arena so far, nothing more.
+            assert_eq!(alloc_sizes(), [chunk_size, 0x20 * node_size]);
+
+            let node = byte_key_tree_allocate_node(map);
+            let grown = pool.chunk_head;
+            assert!(grown != first_chunk);
+            assert_eq!((*grown).prev, first_chunk);
+            assert_eq!((*grown).capacity, 0x40);
+            assert_eq!(node, (*grown).arena.cast());
+            assert_eq!(pool.bump, (*grown).arena.add(node_size));
+            assert_eq!(pool.bump_end, (*grown).arena.add(0x40 * node_size));
+            assert_eq!(
+                alloc_sizes(),
+                [chunk_size, 0x20 * node_size, chunk_size, 0x40 * node_size]
+            );
+        }
+    }
+
+    /// The growth formula max(prev + 0x20, prev + prev/2 + prev/8):
+    /// the +0x20 floor wins for small capacities (8 -> 0x28 against
+    /// 8+4+1), the 1.625x term for large ones (0x100 -> 0x1a0 against
+    /// 0x120). Both cases start from a hand-crafted exhausted pool.
+    #[test]
+    fn growth_capacity_formula() {
+        let _heap = pool_heap();
+        unsafe {
+            let node_size = core::mem::size_of::<ByteKeyTreeNode>();
+            let chunk_size = core::mem::size_of::<ByteKeyPoolChunk>();
+            for (prev_cap, want) in [(8u32, 0x28u32), (0x100, 0x1a0)] {
+                POOL_ARENA_USED = 0;
+                (*core::ptr::addr_of_mut!(POOL_ALLOC_SIZES)).clear();
+                let mut old_chunk = ByteKeyPoolChunk {
+                    prev: core::ptr::null_mut(),
+                    capacity: prev_cap,
+                    arena: core::ptr::null_mut(),
+                };
+                let mut sentinel = 0u8;
+                let bump = core::ptr::addr_of_mut!(sentinel);
+                let mut pool = ByteKeyNodePool {
+                    chunk_head: core::ptr::addr_of_mut!(old_chunk),
+                    free_list: core::ptr::null_mut(),
+                    bump,
+                    bump_end: bump, // exhausted
+                };
+
+                let node = byte_key_tree_allocate_node(
+                    core::ptr::addr_of_mut!(pool).cast::<ByteKeyMap>(),
+                );
+
+                let chunk = pool.chunk_head;
+                assert_eq!((*chunk).prev, core::ptr::addr_of_mut!(old_chunk));
+                assert_eq!((*chunk).capacity, want);
+                assert_eq!(node, (*chunk).arena.cast());
+                assert_eq!(
+                    alloc_sizes(),
+                    [chunk_size, want as usize * node_size]
+                );
+            }
+        }
+    }
+
+    /// The free list pops before any bump/heap traffic: head first,
+    /// the next pointer threaded through the node's +0xc right link,
+    /// and the recycled node re-initialised (color 0, links null).
+    #[test]
+    fn free_list_pop_recycles_nodes() {
+        let _heap = pool_heap();
+        unsafe {
+            let mut a = test_node(0xaa);
+            let mut b = test_node(0xbb);
+            let pa = core::ptr::addr_of_mut!(a);
+            let pb = core::ptr::addr_of_mut!(b);
+            (*pa).right = pb; // free-list next
+            (*pa).parent = pb; // garbage the pop must clear
+            (*pb).parent = pa;
+            let mut pool = fresh_pool();
+            pool.free_list = pa;
+            // The bump range reads exhausted (null == null) but must
+            // never be reached while the free list is non-empty.
+            let map = core::ptr::addr_of_mut!(pool).cast::<ByteKeyMap>();
+
+            let first = byte_key_tree_allocate_node(map);
+            assert_eq!(first, pa);
+            assert_eq!(pool.free_list, pb);
+            assert_eq!((*pa).color, 0);
+            assert_eq!((*pa).parent, core::ptr::null_mut());
+            assert_eq!((*pa).left, core::ptr::null_mut());
+            assert_eq!((*pa).right, core::ptr::null_mut());
+            assert!(alloc_sizes().is_empty(), "no heap traffic on a pop");
+
+            let second = byte_key_tree_allocate_node(map);
+            assert_eq!(second, pb);
+            assert_eq!(pool.free_list, core::ptr::null_mut());
+            assert_eq!((*pb).color, 0);
+            assert_eq!((*pb).parent, core::ptr::null_mut());
+            assert!(alloc_sizes().is_empty());
+        }
+    }
+
+    /// End-to-end with the whole slot chain at its shipped defaults:
+    /// find -> ported insert-unique -> ported _M_insert -> ported pool
+    /// allocator -> checked operator new (heap mocked by the arena).
+    /// Inserts really link pool-carved nodes, duplicates return the
+    /// same node, and the red-black invariants hold.
+    #[test]
+    fn find_end_to_end_through_shipped_allocator() {
+        let _heap = pool_heap();
+        let _lock = OPS_LOCK.lock().unwrap();
+        // All three slots ship with the ports as their defaults; make
+        // that explicit in case another test left a mock installed.
+        let _alloc_guard = AllocOpsGuard::install(ByteKeyTreeAllocOps {
+            allocate_node: byte_key_tree_allocate_node,
+        });
+        let _tree_guard = TreeOpsGuard::install(ByteKeyTreeOps {
+            insert_node: byte_key_tree_insert_node,
+        });
+        let _map_guard = OpsGuard::install(ByteKeyMapOps {
+            insert_unique: byte_key_tree_insert_unique,
+        });
+        unsafe {
+            let mut header = test_header();
+            let header_ptr = core::ptr::addr_of_mut!(header);
+            let mut tree = make_empty_tree(header_ptr);
+            let tree_ptr = core::ptr::addr_of_mut!(tree);
+            let map = tree_ptr.cast::<ByteKeyMap>();
+
+            let keys = [5u8, 3, 9, 5, 1, 0x80, 3];
+            let mut value_ptrs: Vec<*mut u8> = Vec::new();
+            for key in keys {
+                let value = byte_key_map_find(map, &key);
+                assert!(!value.is_null());
+                value_ptrs.push(value);
+            }
+            assert_eq!(tree.node_count, 5);
+            assert_eq!(value_ptrs[0], value_ptrs[3]); // 5 again
+            assert_eq!(value_ptrs[1], value_ptrs[6]); // 3 again
+            let sorted = validate_tree(header_ptr, 5);
+            assert_eq!(sorted, [1, 3, 5, 9, 0x80]);
+            validate_extremes(header_ptr, &sorted);
+
+            // Every unique key's node came out of the pool's first
+            // 0x20-node arena, at a node-sized stride.
+            let pool = tree_ptr.cast::<ByteKeyNodePool>();
+            let chunk = (*pool).chunk_head;
+            assert_eq!((*chunk).capacity, 0x20);
+            let arena = (*chunk).arena as usize;
+            let node_size = core::mem::size_of::<ByteKeyTreeNode>();
+            for i in [0usize, 1, 2, 4, 5] {
+                let offset = value_ptrs[i].sub(0x14) as usize - arena;
+                assert_eq!(offset % node_size, 0);
+                assert!(offset < 0x20 * node_size);
+            }
+        }
     }
 }

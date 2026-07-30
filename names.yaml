@@ -11176,8 +11176,9 @@ functions:
       BYTE_KEY_MAP_OPS slot it dispatches through; _M_insert @
       0x083b8844 is also ported now (byte_key_tree_insert_node, same
       module, the shipped BYTE_KEY_TREE_OPS default) with its node
-      allocator riding BYTE_KEY_ALLOC_OPS (default stub reports a null
-      fresh node, so an inserting find returns 0x14). The
+      allocator also ported (byte_key_tree_allocate_node @ 0x083b7f40,
+      the shipped BYTE_KEY_ALLOC_OPS default - an inserting find really
+      links a pool-carved node). The
       pair's pad bytes are zeroed where the original leaves stack
       garbage (unobservable). match.py structural: pair zeroing, key
       stamp, hook load/blx, node+0x14 all present; frame style (fp) and
@@ -11212,8 +11213,9 @@ functions:
       0x083b6a44 (node+0x10) are one-/few-instruction leaves, inlined;
       _M_insert @ 0x083b8844 is ported (byte_key_tree_insert_node,
       same module) and is the shipped default of BYTE_KEY_TREE_OPS;
-      its pool allocator @ 0x083b7f40 rides BYTE_KEY_ALLOC_OPS
-      (default stub reports a null fresh node).
+      its pool allocator @ 0x083b7f40 is ported too
+      (byte_key_tree_allocate_node, same module), the shipped default
+      of BYTE_KEY_ALLOC_OPS.
       Node/container layouts are typed #[repr(C)] structs
       (ByteKeyTreeNode / ByteKeyTree) with 32-bit-asserted offsets, the
       app/node_list.rs precedent. Host tests model trees with typed
@@ -11236,8 +11238,9 @@ functions:
     notes: >-
       Ported. libstdc++ _Rb_tree::_M_insert for the byte-keyed map
       family: allocate a 0x20-byte node via the pool allocator @
-      0x083b7f40 (dispatched through the new BYTE_KEY_ALLOC_OPS slot,
-      default stub null), copy-construct the 16-byte pair to node+0x10,
+      0x083b7f40 (dispatched through the BYTE_KEY_ALLOC_OPS slot, now
+      ported as byte_key_tree_allocate_node - the shipped default),
+      copy-construct the 16-byte pair to node+0x10,
       bump the count at map+0x14, then link: header parent (map+0x10)
       or nonzero insert_position -> left child (+8), a header parent
       also taking root (header+4) and rightmost (header+0xc), else
@@ -11309,20 +11312,34 @@ functions:
     size: 176
     sig: "ByteKeyTreeNode *byte_key_tree_allocate_node(ByteKeyMap *map)"
     module: cxx/byte_key_map
-    status: identified
+    status: ported
     vars: {param_1: map, puVar1: node, piVar3: chunk, uVar6: capacity}
     notes: >-
-      Not ported - byte_key_tree_insert_node @ 0x083b8844 dispatches
-      it through the BYTE_KEY_ALLOC_OPS slot (default stub returns
-      null, which the port reports as a null fresh node). Scouted
-      contract: 0x20-byte-node pool - free list at map+4 threaded
-      through node+0xc; bump range map+8..map+0xc; on exhaustion push
-      a 0xc-byte chunk header (prev at map+0, capacity grown max(n+0x20,
-      n+n/2+n/8), 0x20 first) and a capacity*0x20 arena, both from
-      operator new @ 0x08266c70 (throwing wrapper over FUN_082aadd4,
-      abort @ 0x08266abc on failure). Returned node: color byte 0
-      (red), parent/left/right at +4/+8/+0xc nulled, pair at +0x10
-      uninitialised.
+      libstdc++ pool allocator for the byte-keyed map family's
+      0x20-byte nodes: pop the free list at map+4 (next threaded
+      through node+0xc, the right link), else bump-allocate in the
+      map+8..map+0xc range, else grow - capacity max(prev+0x20,
+      prev+prev/2+prev/8), 0x20 first - carving a 0xc-byte chunk
+      header (prev/capacity/arena, pushed at map+0) and a
+      capacity*0x20 arena via two calls to the ported
+      operator_new_checked @ 0x08266c70 (its dead r1=0 argument
+      dropped; reached through an inline(never) pool_operator_new
+      front-end to keep the two bl boundaries). Returned node: color
+      byte 0 (red), parent/left/right nulled, pair uninitialised.
+      Pool/chunk state modeled as ByteKeyNodePool / ByteKeyPoolChunk
+      repr(C) structs (32-bit layout asserted; ByteKeyTree._opaque
+      sized off the pool struct so host fields stay disjoint); node
+      stride and chunk size go through size_of (0x20/0xc on target).
+      Shipped default of the BYTE_KEY_ALLOC_OPS slot the ported
+      byte_key_tree_insert_node @ 0x083b8844 dispatches through,
+      replacing the missing_allocate_node null stub. No null check on
+      the checked-new results, like the original (its new-handler path
+      aborts @ 0x08266abc). Host tests: fresh-chunk carve, bump
+      exhaustion growth (0x20 -> 0x40), the capacity formula on both
+      branches (8 -> 0x28 floor, 0x100 -> 0x1a0), free-list pop
+      recycling, and an all-shipped-defaults end-to-end find over a
+      mocked heap arena. match.py: 45 vs 44 instructions, instruction-
+      parallel apart from the LLVM frame-pointer setup.
 
   - address: 0x08123600
     ghidra: FUN_08123600
