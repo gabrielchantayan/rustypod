@@ -22,10 +22,11 @@
 //!   unlock, return the body's verdict (held in a callee-saved
 //!   register across the unlock, like client_commit.rs). The body
 //!   dispatches through [`BLOCK_MANAGER_OPS`]; its default is the REAL
-//!   port below (`take_blocks_body`), whose own unported splice callee
-//!   is the table's second slot with a documented no-op default — with
-//!   no block manager on device nothing calls the bracket at all, the
-//!   same fail-closed no-manager contract the
+//!   port below (`take_blocks_body`), whose splice callee is the
+//!   table's second slot, wired to the real port
+//!   (cxx/list_splice.rs's `list_splice` via its `splice_blocks`
+//!   adapter) — with no block manager on device nothing calls the
+//!   bracket at all, the same fail-closed no-manager contract the
 //!   CLIENT_POPULATE_OPS.manager_take_blocks default used to fake
 //!   wholesale.
 //! - `take_blocks_body` — original: `FUN_0818b108` @ 0x0818b108 (264
@@ -190,7 +191,8 @@ pub struct BlockManagerOps {
     pub take_blocks_body:
         unsafe extern "C" fn(manager: *mut u8, client_state: *mut u8, count: usize) -> i32,
     /// Range splice @ 0x083d5d20 `(dst_list, &dst_pos, src_list,
-    /// &src_first, &src_last)` (316 bytes, unported): moves the node
+    /// &src_first, &src_last)` (316 bytes, ported as
+    /// cxx/list_splice.rs's `list_splice`): moves the node
     /// range [src_first, src_last) out of `src_list` into `dst_list`
     /// ahead of `dst_pos`, fixing the links and both list counts. The
     /// original body's callers discard its 0/1 verdict, so the slot
@@ -204,24 +206,12 @@ pub struct BlockManagerOps {
     ),
 }
 
-/// Default splice stub: no block-manager machinery — no-op. With no
-/// manager on device nothing calls the body at all (the no-manager
-/// contract), so this never runs in the wired configuration; host
-/// tests install recorders.
-unsafe extern "C" fn stub_splice_blocks(
-    _dst_list: *mut u8,
-    _dst_pos: *mut *mut u8,
-    _src_list: *mut u8,
-    _src_first: *mut *mut u8,
-    _src_last: *mut *mut u8,
-) {
-}
-
-/// Wired defaults: the real hand-out body plus the documented no-op
-/// splice until the splice itself is ported.
+/// Wired defaults: the real hand-out body plus the real splice port
+/// (cxx/list_splice.rs's `splice_blocks` adapter, verdict discarded
+/// like the original).
 pub(crate) const DEFAULT_BLOCK_MANAGER_OPS: BlockManagerOps = BlockManagerOps {
     take_blocks_body,
-    splice_blocks: stub_splice_blocks,
+    splice_blocks: crate::cxx::list_splice::splice_blocks,
 };
 
 /// The active implementation table. Written once at init on target;
@@ -264,11 +254,12 @@ macro_rules! mutex_op {
 ///    (head word at list + 0x4 → absolute manager + 0x8) through the
 ///    0x083d5e88 advance ([`iter_advance`]); a short list panics —
 ///    unreachable given the gate, defensive.
-/// 3. Splice the range [head, end) out of the manager's free list
-///    into the client state's own list (the client state IS a list
-///    object; the insertion position is its head word at +0x4) through
-///    the unported 0x083d5d20 — [`BLOCK_MANAGER_OPS`].splice_blocks,
-///    verdict discarded exactly like the original.
+    /// 3. Splice the range [head, end) out of the manager's free list
+    ///    into the client state's own list (the client state IS a list
+    ///    object; the insertion position is its head word at +0x4) through
+    ///    0x083d5d20 — [`BLOCK_MANAGER_OPS`].splice_blocks, wired to the
+    ///    real cxx/list_splice.rs port, verdict discarded exactly like
+    ///    the original.
 /// 4. Stamping walk: re-read the client state's head AFTER the splice
 ///    (`ldr r0, [r7, #0x4]` at 0x0818b1a4) and walk `count` nodes; for
 ///    each, deref the node to its +0xc block entry (0x083d5ea0,
@@ -308,9 +299,10 @@ pub unsafe extern "C" fn take_blocks_body(
         iter_advance(&mut end);
         remaining -= 1;
     }
-    // The splice (unported 0x083d5d20): [head, end) moves from the
-    // manager's free list into the client state's list ahead of its
-    // head position. The original discards the verdict.
+    // The splice (0x083d5d20, cxx/list_splice.rs's port wired as the
+    // slot default): [head, end) moves from the manager's free list
+    // into the client state's list ahead of its head position. The
+    // original discards the verdict.
     let mut pos: *mut u8 = ptr_word(client_state, LIST_HEAD_OFFSET);
     let mut first: *mut u8 = ptr_word(free_list, LIST_HEAD_OFFSET);
     (mgr_op!(splice_blocks))(client_state, &mut pos, free_list, &mut first, &mut end);

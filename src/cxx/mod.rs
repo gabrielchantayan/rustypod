@@ -4,6 +4,7 @@
 //! the ARM ADS C runtime.
 pub mod byte_key_map;
 pub mod handle;
+pub mod list_splice;
 pub mod pair_header;
 pub mod release;
 pub mod string;

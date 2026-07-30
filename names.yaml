@@ -2585,6 +2585,58 @@ functions:
       (read|write)_unaligned idiom, LLVM peels the first advance
       iteration and adds its fp frame — the accepted house deviations.
 
+  - address: 0x083d5d20
+    ghidra: FUN_083d5d20
+    name: list_splice
+    size: 316
+    sig: "i32 list_splice(u8 *dst_list, u8 **dst_pos, u8 *src_list, u8 **src_first, u8 **src_last)"
+    module: cxx/list_splice
+    vars: {param_1: dst_list, param_2: dst_pos, param_3: src_list, param_4: src_first, param_5: src_last, local_28: cursor, local_24: probe, iVar1: moved, iVar2: range_last}
+    status: ported
+    notes: >-
+      std::list node-range splice (the ADS checked-iterator C++
+      library's list::splice(pos, other, first, last)) — the callee
+      take_blocks_body (0x0818b108, above) hands block-node ranges
+      through; 3 bl call sites @ 0x0818adb0, 0x0818ae34 and
+      0x0818b1a0, binary-scanned. Layout recovered from the cluster:
+      list object +0x0 identity word / +0x4 head / +0x10 node count,
+      node +0x0 owning-list identity / +0x4 next / +0x8 prev / +0xc
+      element; lists are circular through a sentinel (end() is the
+      sentinel, never NULL). Algorithm: three ownership checks (the
+      iterator-debug asserts compiled down to a refusal — pos's node
+      must carry dst_list's identity, first's and last's must carry
+      src_list's, NULL node's owner reads 0) return 0 untouched on
+      mismatch; a dead validation (nonempty source -> compare first
+      against the list object itself, verdict discarded, reproduced
+      for fidelity); an adopt walk re-stamping each moved node's +0x0
+      owner with dst_list's identity while counting (0x083d5e88
+      advance, NULL current node panics); a NULL last is fatal
+      (0x08030f44, unreachable for circular lists); then the six-store
+      circular re-link (range_last = last->prev; first->prev->next =
+      last, last->prev = first->prev, first->prev = pos->prev,
+      range_last->next = pos, pos->prev->next = first, pos->prev =
+      range_last, in the original's order) and both count fixups,
+      return 1. Quirk: NO empty-range guard — first == last moves zero
+      nodes but the re-link still runs, swapping the predecessor links
+      (pinned by a host test). Helpers ported in place, private:
+      iter_owner (0x083d5e5c, 20 bytes), iter_equal (0x083d5e70, 24
+      bytes), iter_advance (0x083d5e88, 24 bytes — same in-place
+      rationale as block_mgr.rs's copy). The crate adapter
+      splice_blocks (verdict discarded, like the original's callers)
+      is now the wired BLOCK_MANAGER_OPS.splice_blocks default
+      (stub_splice_blocks removed — the only src/heap touch, three
+      stale "unported" doc mentions updated). Host tests: a middle
+      range (links both directions, counts, owner re-stamps of only
+      the moved nodes), the whole source through the sentinels
+      (emptied source self-links), three foreign-iterator refusals
+      (full-slab snapshot unchanged), the empty-range quirk, and the
+      adapter (grant + silent refusal). match.py structural: same
+      ownership-check/adopt-walk/relink/count-fixup shape; the u32
+      word accesses come out as ldrb/strb chains from the
+      (read|write)_unaligned idiom, the private helper bls label as
+      list_splice+off, LLVM adds its fp frame — the accepted house
+      deviations.
+
   - address: 0x080751a0
     ghidra: FUN_080751a0
     name: crc32_table_gen
@@ -6899,7 +6951,26 @@ functions:
       indistinguishable from the original without the true table. Kept
       status: identified; port immediately once `make decrypt` fills
       the region (the floor hypothesis above then verifies or falsifies
-      in one lookup).
+      in one lookup). Port attempt 2026-07-30: blocker confirmed
+      unchanged - osos.dec/osos.recovery untouched since 2026-07-22,
+      the 16 bytes at file offset 0x3f18b2 are still all zero and the
+      zero run is still exactly 0x083ee1c1-0x083f25ec; no copy of the
+      routine exists in aupd.dec, bootrom.bin, iram.bin, rsrc.bin or
+      hash.bin (searched for the exact 12-byte prologue
+      stmdb;movs r4,r0;mvneq r0,#0x80000000). Re-quantified the seed
+      sensitivity with an exact i64 simulation of the decoded
+      algorithm, and it is harsher than the "rare" estimate above for
+      small x: bumping a single table entry by 1 ulp flips ~58% of
+      outputs for 0 < x < 0x10000 (values below 1.0 - there
+      t = fixed16_mul(y,x) keeps only a few significant bits, so the
+      truncation drives the Newton loop into a seed-dependent limit
+      cycle rather than a clean fixpoint) and ~0.1% of outputs for
+      x >= 0x10000; the floor-vs-midpoint table hypotheses disagree on
+      ~48% of a 410k-input sweep. Guessing the seeds is therefore not
+      a "few ulps on edge cases" risk but a wholesale behavioral
+      divergence for fractional inputs. Still blocked; still status:
+      identified. Do not port until the true 8 halfwords are
+      recovered.
 
   - address: 0x0824980c
     ghidra: FUN_0824980c
