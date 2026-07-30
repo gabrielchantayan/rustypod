@@ -4,6 +4,9 @@
 //!
 //! - [`string_map_lookup_or_insert`] — original: `FUN_083db4c4` @
 //!   0x083db4c4 (76 bytes; 40 `bl` call sites, the only copy).
+//! - [`string_key_tree_rotate_left`] — original: `FUN_083c31d4` @
+//!   0x083c31d4 (84 bytes; `_Rb_tree_rotate_left`, the rebalance
+//!   rotation of the not-yet-ported `_M_insert` @ 0x083c3408).
 //!
 //! Algorithm (from the disassembly): copy-construct a temporary
 //! `basic_string` from the caller's string object into the key half of
@@ -44,7 +47,9 @@
 //! node through `_M_insert` @ 0x083c3408 (which allocates a node @
 //! 0x083c311c, copy-constructs the pair into it — string via
 //! `cxx_string_copy_ctor` plus the one value word — and rebalances via
-//! the rotations @ 0x083c31f4 / 0x083c3228) and return it flagged.
+//! the rotations @ 0x083c31d4 — ported below as
+//! [`string_key_tree_rotate_left`] — and 0x083c3228) and return it
+//! flagged.
 //! `_M_insert` takes the key pair as a fifth argument on the stack.
 //! Every path stores the node word at result+0 and the flag byte at
 //! result+4, which is the whole contract the lookup relies on.
@@ -196,6 +201,120 @@ pub unsafe extern "C" fn string_map_lookup_or_insert(
     let node = result.node;
     pair_string_release(core::ptr::addr_of_mut!(pair.key));
     node.wrapping_add(0x14)
+}
+
+// ---------------------------------------------------------------------------
+// The rebalance rotations of `_M_insert` @ 0x083c3408.
+// ---------------------------------------------------------------------------
+
+/// A red-black tree node of the string-keyed map family: the same
+/// 0x10-byte header as the byte-keyed tree (color byte, parent / left /
+/// right links) with the 8-byte key pair — the COW string word plus the
+/// one mapped-value word — at +0x10. Fields are typed struct members,
+/// never literal byte offsets: the 32-bit target layout is exact
+/// (asserted below) while a 64-bit host keeps the fields disjoint (the
+/// `NodeList` precedent in `app/node_list.rs`).
+#[repr(C)]
+pub struct StringKeyTreeNode {
+    /// +0: red-black color byte (0 = red; the header node is red).
+    pub color: u8,
+    /// +1..+4: padding.
+    pub _pad: [u8; 3],
+    /// +4: parent link.
+    pub parent: *mut StringKeyTreeNode,
+    /// +8: left child (smaller keys), null when absent.
+    pub left: *mut StringKeyTreeNode,
+    /// +0xc: right child, null when absent.
+    pub right: *mut StringKeyTreeNode,
+    /// +0x10: the 8-byte key pair (string word at +0x10, mapped value
+    /// at +0x14).
+    pub key: StringKeyPair,
+}
+
+/// The container as the rotation reads it: only the header node pointer
+/// at +0x10 (header.parent = root). The first 0x10 bytes are the node
+/// pool state owned by the not-yet-ported allocator @ 0x083c311c; kept
+/// opaque here. The byte-keyed counterpart (`ByteKeyTree`) sizes this
+/// head off its ported pool struct; the fixed 0x10 here keeps `header`
+/// at +0x10 on every host (a pointer there is 8-aligned even on
+/// 64-bit).
+#[repr(C)]
+pub struct StringKeyTree {
+    /// +0..+0x10: the node pool state (allocator @ 0x083c311c, not yet
+    /// ported).
+    pub _opaque: [u8; 0x10],
+    /// +0x10: the header node.
+    pub header: *mut StringKeyTreeNode,
+}
+
+// Target-exact layout; on a 64-bit host the pointer fields widen and
+// the offsets shift — harmless, all access goes through the structs.
+#[cfg(target_pointer_width = "32")]
+mod layout_checks {
+    use super::*;
+    const _: [u8; 0x4] = [0; core::mem::offset_of!(StringKeyTreeNode, parent)];
+    const _: [u8; 0x8] = [0; core::mem::offset_of!(StringKeyTreeNode, left)];
+    const _: [u8; 0xc] = [0; core::mem::offset_of!(StringKeyTreeNode, right)];
+    const _: [u8; 0x10] = [0; core::mem::offset_of!(StringKeyTreeNode, key)];
+    const _: [u8; 0x18] = [0; core::mem::size_of::<StringKeyTreeNode>()];
+    const _: [u8; 0x10] = [0; core::mem::offset_of!(StringKeyTree, header)];
+}
+
+/// string_key_tree_rotate_left — original: `FUN_083c31d4` @ 0x083c31d4
+/// (84 bytes; libstdc++ `_Rb_tree_rotate_left` for the string-keyed map
+/// family, called by `_M_insert` @ 0x083c3408 — `bl` @ 0x083c35a8 — and
+/// the erase rebalance).
+///
+/// NOTE on the address: the scouting note for 0x083c327c cited this
+/// rotation as 0x083c31f4, but that address is mid-function (the
+/// `ldr r0,[r0,#0x10]` header reload); the real entry — and the only
+/// `bl` target — is 0x083c31d4 (FUN_083c31d4, 84 bytes).
+///
+/// Instruction-identical to the byte-keyed rotate_left @ 0x083b8090
+/// ([`byte_key_tree_rotate_left`](crate::cxx::byte_key_map) — verified
+/// against osos.asm word for word). Left rotation around `node`:
+/// `right` takes `node`'s place (under the root pointer at header+4
+/// when `node` is the root, else under `node`'s parent on the side
+/// `node` hangs from), `node` adopts `right`'s left subtree as its
+/// right child (re-parenting it when non-null) and becomes `right`'s
+/// left child.
+///
+/// Exported `pub` (unlike the byte-keyed twin, a private helper of its
+/// ported `_M_insert`): the string-keyed `_M_insert` @ 0x083c3408 is
+/// not yet ported, so there is no in-crate caller yet — the export
+/// keeps the symbol in the staticlib for match.py review and for the
+/// future `_M_insert` port to call.
+///
+/// # Safety
+/// `tree` must point at a live container matching the scouted
+/// [`StringKeyTree`] layout, and `node` at a live node of that tree
+/// whose right child is non-null (a red-black rotation precondition the
+/// callers guarantee; the original has no check either).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_key_tree_rotate_left(
+    tree: *mut StringKeyTree,
+    node: *mut StringKeyTreeNode,
+) {
+    let right = (*node).right;
+    (*node).right = (*right).left;
+    if !(*right).left.is_null() {
+        (*(*right).left).parent = node;
+    }
+    (*right).parent = (*node).parent;
+    let root_slot = core::ptr::addr_of_mut!((*(*tree).header).parent);
+    if *root_slot == node {
+        *root_slot = right;
+    } else {
+        let parent = (*node).parent;
+        if (*parent).left == node {
+            (*parent).left = right;
+        } else {
+            (*parent).right = right;
+        }
+    }
+    (*right).left = node;
+    (*node).parent = right;
 }
 
 #[cfg(test)]
@@ -353,6 +472,208 @@ mod tests {
                 string_map_lookup_or_insert(core::ptr::null_mut(), &key);
             let node = core::ptr::addr_of_mut!(NODE).cast::<u8>();
             assert_eq!(value, node.add(0x14));
+        }
+    }
+
+    // --- string_key_tree_rotate_left (@ 0x083c31d4) -----------------
+
+    /// A black tree node with no links (the key pair is never read by
+    /// the rotation).
+    fn test_node() -> StringKeyTreeNode {
+        StringKeyTreeNode {
+            color: 1,
+            _pad: [0; 3],
+            parent: core::ptr::null_mut(),
+            left: core::ptr::null_mut(),
+            right: core::ptr::null_mut(),
+            key: StringKeyPair {
+                key: core::ptr::null_mut(),
+                value: 0,
+            },
+        }
+    }
+
+    /// A red header node (libstdc++ marks the header red).
+    fn test_header() -> StringKeyTreeNode {
+        let mut header = test_node();
+        header.color = 0;
+        header
+    }
+
+    /// A container wired to `header`.
+    fn test_tree(header: *mut StringKeyTreeNode) -> StringKeyTree {
+        StringKeyTree {
+            _opaque: [0; 0x10],
+            header,
+        }
+    }
+
+    /// Rotating at the root: `right` becomes the root (header.parent),
+    /// `node` becomes its left child and adopts `right`'s old left
+    /// subtree, re-parented.
+    #[test]
+    fn rotate_left_at_root() {
+        unsafe {
+            let mut header = std::boxed::Box::new(test_header());
+            let mut node = std::boxed::Box::new(test_node());
+            let mut right = std::boxed::Box::new(test_node());
+            let mut adopted = std::boxed::Box::new(test_node());
+            let header_ptr = core::ptr::addr_of_mut!(*header);
+            let node_ptr = core::ptr::addr_of_mut!(*node);
+            let right_ptr = core::ptr::addr_of_mut!(*right);
+            let adopted_ptr = core::ptr::addr_of_mut!(*adopted);
+
+            node.parent = header_ptr;
+            node.right = right_ptr;
+            right.parent = node_ptr;
+            right.left = adopted_ptr;
+            adopted.parent = right_ptr;
+            header.parent = node_ptr; // root
+            let mut tree = std::boxed::Box::new(test_tree(header_ptr));
+
+            string_key_tree_rotate_left(
+                core::ptr::addr_of_mut!(*tree),
+                node_ptr,
+            );
+
+            assert_eq!(header.parent, right_ptr); // new root
+            assert_eq!(right.parent, header_ptr);
+            assert_eq!(right.left, node_ptr);
+            assert_eq!(node.parent, right_ptr);
+            assert_eq!(node.right, adopted_ptr); // adopted subtree
+            assert_eq!(adopted.parent, node_ptr);
+        }
+    }
+
+    /// Rotating under a left-child parent: the parent's left link
+    /// swings to `right`; a null adopted subtree leaves node's right
+    /// link null.
+    #[test]
+    fn rotate_left_under_left_child() {
+        unsafe {
+            let mut header = std::boxed::Box::new(test_header());
+            let mut grand = std::boxed::Box::new(test_node());
+            let mut node = std::boxed::Box::new(test_node());
+            let mut right = std::boxed::Box::new(test_node());
+            let header_ptr = core::ptr::addr_of_mut!(*header);
+            let grand_ptr = core::ptr::addr_of_mut!(*grand);
+            let node_ptr = core::ptr::addr_of_mut!(*node);
+            let right_ptr = core::ptr::addr_of_mut!(*right);
+
+            grand.parent = header_ptr;
+            grand.left = node_ptr;
+            node.parent = grand_ptr;
+            node.right = right_ptr;
+            right.parent = node_ptr; // right.left null: nothing adopted
+            header.parent = grand_ptr; // root is the grandparent
+            let mut tree = std::boxed::Box::new(test_tree(header_ptr));
+
+            string_key_tree_rotate_left(
+                core::ptr::addr_of_mut!(*tree),
+                node_ptr,
+            );
+
+            assert_eq!(header.parent, grand_ptr); // root unchanged
+            assert_eq!(grand.left, right_ptr); // took node's place
+            assert_eq!(right.parent, grand_ptr);
+            assert_eq!(right.left, node_ptr);
+            assert_eq!(node.parent, right_ptr);
+            assert_eq!(node.right, core::ptr::null_mut());
+        }
+    }
+
+    /// Rotating under a right-child parent: the parent's right link
+    /// swings to `right`.
+    #[test]
+    fn rotate_left_under_right_child() {
+        unsafe {
+            let mut header = std::boxed::Box::new(test_header());
+            let mut grand = std::boxed::Box::new(test_node());
+            let mut node = std::boxed::Box::new(test_node());
+            let mut right = std::boxed::Box::new(test_node());
+            let header_ptr = core::ptr::addr_of_mut!(*header);
+            let grand_ptr = core::ptr::addr_of_mut!(*grand);
+            let node_ptr = core::ptr::addr_of_mut!(*node);
+            let right_ptr = core::ptr::addr_of_mut!(*right);
+
+            grand.parent = header_ptr;
+            grand.right = node_ptr;
+            node.parent = grand_ptr;
+            node.right = right_ptr;
+            right.parent = node_ptr;
+            header.parent = grand_ptr;
+            let mut tree = std::boxed::Box::new(test_tree(header_ptr));
+
+            string_key_tree_rotate_left(
+                core::ptr::addr_of_mut!(*tree),
+                node_ptr,
+            );
+
+            assert_eq!(grand.right, right_ptr); // took node's place
+            assert_eq!(right.parent, grand_ptr);
+            assert_eq!(right.left, node_ptr);
+            assert_eq!(node.parent, right_ptr);
+        }
+    }
+
+    /// The BST invariant: an in-order walk yields the same node
+    /// sequence before and after the rotation (a 5-node tree rotated
+    /// at the root).
+    #[test]
+    fn rotate_left_preserves_inorder_sequence() {
+        unsafe {
+            let mut header = std::boxed::Box::new(test_header());
+            let mut nodes: std::vec::Vec<std::boxed::Box<StringKeyTreeNode>> =
+                (0..5).map(|_| std::boxed::Box::new(test_node())).collect();
+            let mut ptr = |i: usize| core::ptr::addr_of_mut!(*nodes[i]);
+            let header_ptr = core::ptr::addr_of_mut!(*header);
+
+            //       2      rotate       3
+            //      / \     left        / \
+            //     0   3     @ 2  ->   2   4
+            //        / \             / \
+            //       1   4           0   1
+            (*ptr(2)).left = ptr(0);
+            (*ptr(2)).right = ptr(3);
+            (*ptr(2)).parent = header_ptr;
+            (*ptr(0)).parent = ptr(2);
+            (*ptr(3)).parent = ptr(2);
+            (*ptr(3)).left = ptr(1);
+            (*ptr(3)).right = ptr(4);
+            (*ptr(1)).parent = ptr(3);
+            (*ptr(4)).parent = ptr(3);
+            header.parent = ptr(2); // root
+            let mut tree = std::boxed::Box::new(test_tree(header_ptr));
+
+            fn inorder(
+                node: *mut StringKeyTreeNode,
+                out: &mut std::vec::Vec<*mut StringKeyTreeNode>,
+            ) {
+                unsafe {
+                    if node.is_null() {
+                        return;
+                    }
+                    inorder((*node).left, out);
+                    out.push(node);
+                    inorder((*node).right, out);
+                }
+            }
+            let mut before = std::vec::Vec::new();
+            inorder(header.parent, &mut before);
+
+            string_key_tree_rotate_left(
+                core::ptr::addr_of_mut!(*tree),
+                ptr(2),
+            );
+
+            let mut after = std::vec::Vec::new();
+            inorder(header.parent, &mut after);
+            assert_eq!(before, after);
+            assert_eq!(
+                before,
+                std::vec![ptr(0), ptr(2), ptr(1), ptr(3), ptr(4)]
+            );
+            assert_eq!(header.parent, ptr(3)); // new root
         }
     }
 }

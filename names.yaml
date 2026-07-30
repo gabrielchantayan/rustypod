@@ -12146,11 +12146,50 @@ functions:
       existing node flagged 0, else _M_insert @ 0x083c3408 links a fresh
       node (allocates @ 0x083c311c, copy-constructs the pair -
       cxx_string_copy_ctor plus one value word - and rebalances via the
-      rotations @ 0x083c31f4 / 0x083c3228) flagged 1. _M_insert takes
+      rotations @ 0x083c31d4 (ported as string_key_tree_rotate_left in
+      cxx/string_map.rs - the scouting note's 0x083c31f4 was
+      mid-function; the real entry and only bl target is 0x083c31d4) /
+      0x083c3228) flagged 1. _M_insert takes
       the key pair as a fifth argument on the stack. Node keys sit at
       node+0x10. Not ported - needs the _M_insert @ 0x083c3408 chain
       (allocator + rotations) with it; port them together, like the
       byte-keyed family.
+
+  - address: 0x083c31d4
+    ghidra: FUN_083c31d4
+    name: string_key_tree_rotate_left
+    size: 84
+    sig: "void string_key_tree_rotate_left(StringKeyTree *tree, StringKeyTreeNode *node)"
+    module: cxx/string_map
+    status: ported
+    vars: {param_1: tree, param_2: node, iVar3: right}
+    notes: >-
+      Ported, exported pub (the string-keyed _M_insert @ 0x083c3408
+      that will call it is not yet ported, so there is no in-crate
+      caller; the export keeps the symbol in the staticlib). Address
+      correction: the 0x083c327c scouting note cited this rotation as
+      0x083c31f4, but that address is mid-function (the ldr
+      r0,[r0,#0x10] header reload); the real entry - and the only bl
+      target (@ 0x083c35a8 inside _M_insert @ 0x083c3408) - is
+      0x083c31d4. Instruction-identical to the byte-keyed rotate_left
+      @ 0x083b8090 (byte_key_tree_rotate_left in cxx/byte_key_map.rs),
+      verified word for word against osos.asm: libstdc++
+      _Rb_tree_rotate_left - the right child takes node's place (root
+      pointer at header+4 first, else the matching side of node's
+      parent), node adopts its left subtree as its right child
+      (re-parented when non-null) and becomes its left child. Node /
+      container modeled as StringKeyTreeNode / StringKeyTree repr(C)
+      structs (the byte-keyed precedent; 32-bit offsets asserted:
+      parent +4, left +8, right +0xc, 8-byte string key pair at +0x10,
+      header pointer at tree+0x10 with the first 0x10 bytes the
+      not-yet-ported allocator @ 0x083c311c's pool state). Host tests:
+      rotate at root (with adopted subtree re-parenting), rotate under
+      a left-child parent (null adopted subtree), rotate under a
+      right-child parent, and in-order sequence preservation on a
+      5-node tree. match.py structural: 21 vs 22 instructions - same
+      ldr/str rotation sequence, conditional stores and root/parent
+      branch structure; the diff is LLVM's fp frame and register
+      scheduling (the expected ADS-vs-LLVM noise).
 
   - address: 0x083db038
     ghidra: FUN_083db038
