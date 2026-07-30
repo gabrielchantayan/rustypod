@@ -14296,3 +14296,42 @@ functions:
       match.py structural: same ldr/mov pair; the diff is the inlined
       store standing in for the tail branch plus the crate fp frame -
       the documented deviation.
+
+  - address: 0x0813b7d0
+    ghidra: FUN_0813b7d0
+    name: inner_result_count
+    size: 8
+    sig: "u32 inner_result_count(u8 *object)"
+    module: util/inner_state
+    status: ported
+    vars: {param_1: object, FUN_080542a0: INNER_MATERIALIZE_COUNT, FUN_08086694: materializer}
+    notes: >-
+      Two-instruction forwarding wrapper, the read-side sibling of
+      inner_set_state_4 (FUN_0813b7c4, ported beside it):
+      `ldr r0,[r0,#0x40]; b 0x080542a0` - loads the inner object from
+      the query object's +0x40 slot and tail-branches to the
+      materialize-and-count getter FUN_080542a0 @ 0x080542a0 (20 bytes,
+      3 bl call sites), which calls the lazy materializer FUN_08086694
+      @ 0x08086694 (480 bytes: when the cached result-array pointer at
+      inner+0xeec is NULL it builds the array under a mutex, caching
+      the array at +0xeec, an aux pointer at +0xef0 and the result
+      count at +0xef4 - a no-op otherwise) and returns the count word
+      at inner+0xef4. 1 bl call site: the query runner FUN_080feb68
+      @ 0x080febc8, two instructions after its inner_set_state_4 call,
+      which uses the result as the loop bound over the per-index record
+      fetch FUN_0813b898 after running query 0x32 - the number of
+      records the query produced. Deviation: the materializer is
+      unported firmware (allocates, walks a record table, locks a
+      mutex, nine further callees), so the whole tail target sits
+      behind the INNER_MATERIALIZE_COUNT dispatch slot (the
+      app/class_registry.rs pattern); the default stub is the
+      materializer's no-op path - reads the cached count word at +0xef4
+      without materializing, exact once a query has populated the
+      cache, the only state the sole caller ever observes. Host tests:
+      mock slot receives exactly the +0x40 slot value and its count is
+      returned, exactly one dispatch; default stub reads +0xef4,
+      touches nothing else (inner and outer byte-compared), returns 0
+      for a fresh zeroed object. match.py structural: same
+      ldr-r0-@-+0x40 + tail-branch shape; the diff is the crate fp
+      frame and the dispatch-slot ldr/bx standing in for the direct
+      `b 0x080542a0` - the documented deviation.
