@@ -2,6 +2,7 @@
 //! context and the small helpers its view classes lean on.
 pub mod context;
 pub mod element_table;
+pub mod fixed_value;
 pub mod image_format;
 pub mod media_ext;
 pub mod node_list;

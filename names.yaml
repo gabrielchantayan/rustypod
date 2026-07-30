@@ -13256,3 +13256,52 @@ functions:
       0x1888 byte reorder, the 0x1444 nibble lookups and the 4x
       ldrb/strb canned-color copies all match the original
       instruction-for-instruction in shape.
+
+  - address: 0x081523b8
+    ghidra: FUN_081523b8
+    name: fixed_value_init
+    size: 32
+    sig: "FixedValue *fixed_value_init(FixedValue *this, i32 value_q16)"
+    module: app/fixed_value
+    status: ported
+    renames:
+      param_1: this
+      param_2: value_q16
+      DAT_081523d8: FIXED_VALUE_VTABLE
+      FUN_08138460: refcounted_base_init
+      DAT_08138484: REFCOUNTED_BASE_VTABLE
+    notes: >-
+      138 bl call sites - one of the hottest small leaves in the app
+      framework. The value constructor of retailOS's UI
+      property/animation framework: builds a refcounted Q16.16
+      fixed-point scalar object in caller-allocated storage (every
+      caller does operator_new(0x18) @ 0x082aadd4, the default ctor's
+      array stride is 0x18) and returns it. Runs the refcounted base
+      constructor @ 0x08138460 (installs base vtable 0x08984ca0,
+      zeroes the flags/refcount word +0x14 via an odd
+      byte-clear-then-word-mask sequence that always lands 0), then
+      overrides the vtable with 0x08986998, stores the scalar at +0x04
+      and zeroes the +0x08 aux word. Callers pass `x << 16` (Q16.16 -
+      the util/fixed.rs fixed16 convention; literals 0xff0000 = 255.0,
+      0xa00000 = 160.0, 0x1400000 = 320.0) and stash the results as
+      view-property slots or hand (from, to) pairs to the animation
+      constructor FUN_08166b88, which retains/releases them
+      (0x08273a14 / 0x082739e0 - +0x14 word holds flags in bits 0..1
+      and the refcount in bits 2.., release dispatches the deleting
+      destructor at vtable +0x04) and keeps the maximum of their +0x08
+      words, so +0x08 is an aux/rank word a plain scalar leaves 0.
+      Deviations - the base ctor @ 0x08138460 is unported; its behavior
+      is reproduced by the private refcounted_base_init helper (not
+      exported, not a separate port), keeping the call structure. Both
+      vtables are address constants: their contents in the decrypted
+      image are stale (the app/registry.rs 0x08989718 caveat - that
+      page does not match what the device runs; the slots there point
+      into 16-bit data tables, not code), so only the stored pointer
+      value is reproduced. The sibling default ctor FUN_081523dc
+      (20 bytes, same base ctor and vtable, stores no value) is
+      identified but not ported. match.py: same structure - push, value
+      saved in r4, bl to the base-ctor helper, vtable literal
+      (0x08986998) loaded from the pool, stm {vtable, value}, zero
+      store to +8, return this; LLVM adds the crate-standard frame-
+      pointer prologue and keeps `this` in r5 across the call (the
+      original relies on the helper preserving r0).
