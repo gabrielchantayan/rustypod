@@ -9538,6 +9538,35 @@ functions:
       return; the diff is LLVM's fp frame and a movne standing in for
       the original's ldreq literal load (the documented deviation).
 
+  - address: 0x082a50a0
+    ghidra: FUN_082a50a0
+    name: string_object_len_plus1
+    size: 8
+    sig: "size_t string_object_len_plus1(const StringObject *this)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: this}
+    notes: >-
+      1 bl call site (binary-scanned), @ 0x081ae498, which truncates the
+      result to 16 bits (mov r6,r0,lsl #0x10; lsr #0x10) - a buffer
+      size for a copy buffer. The length-plus-one accessor of the same
+      two-word string class as string_object_c_str @ 0x082a50b0: a
+      two-instruction thunk `ldr r0,[r0,#4]; b 0x08275e20` that
+      tail-branches to the ported strlen_safe_plus1 @ 0x08275e20 over
+      the payload word at +4 - the payload's buffer size including the
+      NUL terminator, or 1 when the payload is NULL (the thunk guards
+      nothing; the callee's own NULL guard yields 1, unlike c_str which
+      substitutes a shared empty C string first). No NULL guard on
+      `this`. Its 8-byte sibling @ 0x082a50a8 (`ldr r0,[r0,#4]; b
+      0x0827609c`) runs the 84-byte FUN_0827609c over the payload and is
+      NOT ported here. Port calls the ported callee through a volatile
+      read (the house anti-const-fold trick, same as release_payload_op)
+      purely to stop LLVM inlining strlen_safe_plus1 and dissolving the
+      thunk. match.py structural: same ldr-@+4 + tail-branch shape; the
+      diff is LLVM's fp frame and the branch becoming a bx through the
+      volatile-read literal instead of the original's direct b (the
+      documented deviation).
+
   - address: 0x082cfae8
     ghidra: FUN_082cfae8
     name: ft_mem_free
