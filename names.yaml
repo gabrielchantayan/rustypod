@@ -13899,3 +13899,62 @@ functions:
       store to +8, return this; LLVM adds the crate-standard frame-
       pointer prologue and keeps `this` in r5 across the call (the
       original relies on the helper preserving r0).
+
+  - address: 0x08076370
+    ghidra: FUN_08076370
+    name: wstr_case_eq
+    size: 116
+    sig: "i32 wstr_case_eq(const VectorBounds *wide, const u8 *s)"
+    module: util/wstr_casecmp
+    status: ported
+    vars:
+      param_1: wide
+      param_2: s
+      iVar3: len
+      iVar6: i
+      puVar4: wp
+      puVar5: sp
+      uVar1: wide_fold
+      uVar2: byte_fold
+    notes: >-
+      94 bl call sites (binary-scanned). Length-bounded case-folded
+      equality between a UTF-16-ish wide buffer (passed as a pointer to
+      an ADS std::vector<u16> {begin, end} head) and a C string: n from
+      the vector, each wide element and string byte run through a
+      per-character uppercase fold table, 1 iff all n folded pairs match
+      AND strlen(s) == n; empty vector -> 0 even against "". Return is
+      a 1/0 bool, not a tri-state. Sampled call sites (0x0811de70
+      family) match vector<u16> buffers against command/name C strings
+      from object slots - an identifier/verb matcher. Helpers ported in
+      place, private (house precedent): wide_vec_len (FUN_0829db9c @
+      0x0829db9c, 20 bytes - ADS out-of-line vector<u16>::size, UNSIGNED
+      end>begin guard then (end-begin)>>1 asr, inverted -> 0) and
+      fold_upper (FUN_080f4cbc @ 0x080f4cbc, 16 bytes - -1 -> 0xffffffff
+      else TABLE[c]). The fold-table literal @ 0x080f4cd0 in the cold
+      image holds 0x083ed0dd - one byte into __dscalb (0x083ed0dc, live
+      soft-float, ported in fp/fp_scalb.rs) - a pre-locale-init
+      placeholder, not a usable map (binary-verified: 'c'/'C' fold
+      apart). The image's only real fold maps sit in a full ADS LC_CTYPE
+      block: ctype flags @ 0x83f7eb5, lower map @ 0x83f7fb5, upper map @
+      0x83f80b5 (Latin-1 toupper: ASCII fold plus 0xe0..=0xfe ->
+      0xc0..=0xde, 0xf7/0xff unchanged); no pointer to it exists, the
+      address is installed at runtime by the locale init (the ctype.rs
+      0x08985f01 precedent). Modeled as the WSTR_FOLD_TABLE dispatch
+      slot (FP_TRAP_HANDLER precedent) defaulting to DEFAULT_FOLD_TABLE,
+      a byte-exact copy of the upper map @ 0x83f80b5 (verified against
+      osos.dec offset 0x3f80b5). Only other user of the same runtime
+      table: the in-place narrow-string transformer FUN_0810b498 @
+      0x0810b498 (not ported). Faithful quirks pinned by host tests: the
+      wide fold is truncated to 16 bits, the byte fold to 8; begin is
+      dereferenced only after the n != 0 guard; the strlen == n gate
+      runs last, so bytes after the string's first NUL are invisible.
+      Wide codes above 0xff index PAST the 256-entry map in the original
+      as in the default copy (the slot can be pointed at the live map to
+      keep even those reads faithful). The ported unguarded strlen @
+      0x08392478 is called directly. match.py structural: same guarded
+      size (cmp/bcs -> 0, sub, asr #1, beq -> 0), same two-table-load
+      compare loop, same inlined strlen tail; the diff is LLVM folding
+      the redundant &0xffff/&0xff (the fold result is already a byte),
+      the read_unaligned ldrb chain for the {begin, end} head, the
+      clz/lsr equality select for the original's moveq, and LLVM's fp
+      frame - the accepted house deviations.
