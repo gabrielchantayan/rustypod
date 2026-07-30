@@ -10880,26 +10880,49 @@ functions:
     ghidra: FUN_083db038
     name: byte_key_map_find
     size: 88
+    sig: "u8 *byte_key_map_find(ByteKeyMap *map, const u8 *key)"
+    module: cxx/byte_key_map
+    status: ported
+    vars: {param_1: map, param_2: key}
+    notes: >-
+      26 bl call sites, the only copy. map<u8, V>::operator[] shape:
+      builds a 16-byte pair on the stack (key byte from *key at +0,
+      zeroed 12-byte mapped value at +4 - the original zeroes a separate
+      12-byte temporary with stmia and block-copies it in), runs the
+      red-black-tree insert-unique @ 0x083b867c(&result, map, &pair) and
+      returns result.node + 0x14 (node header 0x10: flag/parent/left/
+      right, key pair at +0x10, so +0x14 is the mapped value). The
+      dependency is not ported; the port dispatches it through the
+      swappable BYTE_KEY_MAP_OPS slot (default stub reports a null node,
+      so the find returns 0x14 - install the slot before real use). The
+      pair's pad bytes are zeroed where the original leaves stack
+      garbage (unobservable). match.py structural: pair zeroing, key
+      stamp, hook load/blx, node+0x14 all present; frame style (fp) and
+      the dispatch blx differ, as expected.
+
+  - address: 0x083b867c
+    ghidra: FUN_083b867c
+    name: byte_key_tree_insert_unique
+    size: 396
     module: null
     status: identified
     notes: >-
-      26 bl call sites. Builds a zeroed 12-byte value on the stack,
-      stamps one byte read from *r1 into it, copies it into a second
-      stack slot and calls 0x083b867c(&result, this, &key), returning
-      the first word of the result. A find/insert on a container keyed
-      by a single byte. Not ported - 0x083b867c has to be scouted first
-      and it is below the 0x083c0000 sweep.
-
-      90 bl call sites. `stmia r0!, {r1, r2}` writes the first two
-      argument words to the object and advances, skips a third word, and
-      calls 0x0810ebbc with the advanced pointer; then backs the result
-      up by 12 and clears the word at +0xc4 and the byte at +0x8 of it.
-      Not ported, and the name is STRUCTURAL rather than semantic - the
-      shape (write two header words, hand the interior pointer at +12 to
-      a base-class helper, then clear two fields of the object it
-      returns) is unmistakably a C++ constructor, but 0x0810ebbc sits
-      just below this range in another agent's neighbourhood and has not
-      been read, so the class itself is unidentified.
+      Scouted from byte_key_map_find @ 0x083db038; NOT ported (out of
+      that port's scope). Contract: void (u32 *result, map *this, const
+      u8 *key_pair) - writes the node pointer at result+0 and an
+      inserted-flag byte (1 = newly linked, 0 = key already present) at
+      result+4. Container fields read: +0x10 header node (header+4 =
+      root, header+8 = leftmost), +0x18 multi-insert flag byte (nonzero
+      skips the uniqueness test - multimap semantics), +0x19 comparator
+      object. Body is libstdc++ _Rb_tree::_M_insert_unique: descend from
+      the root through the comparator @ 0x083d73bc (nonzero -> left at
+      node+8, else right at node+0xc; node keys at node+0x10), then the
+      iterator-equality helper @ 0x083cf740 against the leftmost header
+      child plus an inline predecessor/successor walk decide between
+      returning the existing node (flag 0) and linking a fresh one via
+      0x083b8844 (_M_insert: allocate, copy the pair, rebalance; flag
+      1). The result contract above is all byte_key_map_find consumes;
+      modeled there as the BYTE_KEY_MAP_OPS hook slot.
 
   - address: 0x08123600
     ghidra: FUN_08123600
