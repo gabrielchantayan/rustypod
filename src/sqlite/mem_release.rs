@@ -12,9 +12,11 @@
 //! (`bl`) — that helper finalizes an aggregate context when the flags
 //! halfword at +0x1c has bit 0x400 set (`MEM_Agg`), invokes the `xDel`
 //! destructor at +0x20 on the string pointer at +0x14 when bit 0x40 is
-//! set (`MEM_Dyn`), and NULLs `xDel`; it is *not* ported and rides the
-//! [`MEM_EXTERN_OPS`] slot. Then `zMalloc` at +0x24 is freed raw — the
-//! original's `ldr r0,[r4,#0x24]; bl sqlite3_free` @ 0x083906f4, here
+//! set (`MEM_Dyn`), and NULLs `xDel`; it IS ported
+//! ([`sqlite::mem_extern_release`](crate::sqlite::mem_extern_release))
+//! and is the shipped default of the [`MEM_EXTERN_OPS`] slot. Then
+//! `zMalloc` at +0x24 is freed raw — the original's
+//! `ldr r0,[r4,#0x24]; bl sqlite3_free` @ 0x083906f4, here
 //! [`tracked_free`] (NULL-tolerant, matching the original's
 //! unconditional call on a possibly-NULL `zMalloc`). Finally `z` +0x14,
 //! `zMalloc` +0x24 and `xDel` +0x20 are NULLed in that order
@@ -31,14 +33,16 @@
 //! ```
 //!
 //! Deviations:
-//! - The extern release @ 0x0838c074 is NOT ported; it is the
-//!   [`MEM_EXTERN_OPS`] dispatch boundary (house pattern — see
-//!   `sqlite/mem.rs`, `sqlite/value_free.rs`). Its default slot is a
-//!   documented no-op: an unconfigured build frees `zMalloc` and leaks
-//!   the aggregate context / external string rather than running the
-//!   wrong destructor (the same leak-rather-than-corrupt stance the
-//!   `missing_mem_release` stub of `value_free` took before this port
-//!   landed).
+//! - The extern release @ 0x0838c074 IS ported
+//!   ([`sqlite::mem_extern_release`](crate::sqlite::mem_extern_release))
+//!   and is the shipped default of the [`MEM_EXTERN_OPS`] slot (the
+//!   slot is kept so host tests can intercept it); its own aggregate
+//!   finalize dependency @ 0x0838bc38 rides that module's
+//!   `MEM_AGG_FINALIZE_OPS` slot (documented stub default: clear the
+//!   `MEM_Agg`/`MEM_Dyn` bits, free `zMalloc`, leak the external
+//!   string rather than run the wrong destructor — the same
+//!   leak-rather-than-corrupt stance the `missing_extern_release`
+//!   no-op held before that port landed).
 //! - `sqlite3_free` @ 0x083906f4 IS ported
 //!   ([`tracked_free`](crate::heap::tracked::tracked_free)) and is
 //!   called directly, per the porting rules. Its NULL guard stands in
@@ -47,6 +51,7 @@
 //!   `value_free`'s `VALUE_MEM_OPS`.
 
 use crate::heap::tracked::tracked_free;
+use crate::sqlite::mem_extern_release::mem_extern_release;
 
 /// Byte offset of `Mem.z` (original: `str r0,[r4,#0x14]`).
 pub const Z_OFFSET: usize = 0x14;
@@ -71,24 +76,18 @@ pub struct MemExternOps {
     /// (flags bit [`FLAG_AGG`] at [`FLAGS_OFFSET`]) or invoke the
     /// `xDel` destructor at [`X_DEL_OFFSET`] on the string at
     /// [`Z_OFFSET`] (flags bit [`FLAG_DYN`]), and clear `xDel`.
-    /// Upstream's `vdbeMemClearExternAndSetNull`. NOT ported — the
-    /// default is a documented no-op (see the module header).
+    /// Upstream's `vdbeMemClearExternAndSetNull`. Ported
+    /// ([`mem_extern_release`]) and the shipped default.
     pub extern_release: unsafe extern "C" fn(value: *mut u8),
 }
 
-/// Default stub: the aggregate context / external string are leaked,
-/// not released (see the module header). Deliberately not a guess at
-/// the destructor — `xDel` and the aggregate finalizer are
-/// type-tagged, and guessing wrong corrupts.
-unsafe extern "C" fn missing_extern_release(_value: *mut u8) {}
-
-/// Wired defaults: the one unported helper is a documented no-op.
+/// Wired default: the ported extern release @ 0x0838c074
+/// ([`mem_extern_release`]).
 pub const DEFAULT_MEM_EXTERN_OPS: MemExternOps = MemExternOps {
-    extern_release: missing_extern_release,
+    extern_release: mem_extern_release,
 };
 
-/// The active extern release. Host tests install recording mocks; the
-/// real port replaces the default when 0x0838c074 lands.
+/// The active extern release. Host tests install recording mocks.
 pub static mut MEM_EXTERN_OPS: MemExternOps = DEFAULT_MEM_EXTERN_OPS;
 
 /// Reads the extern-release slot (volatile — the slot is meant to be
@@ -283,38 +282,12 @@ mod tests {
     }
 
     #[test]
-    fn the_default_extern_release_is_the_documented_no_op() {
-        // With the default (no-op) extern release, a value with the
-        // aggregate / xDel flags set still has zMalloc freed and all
-        // three fields NULLed — leak the extern guts, never corrupt.
-        let _heap_guard = mock_heap();
+    fn the_default_extern_release_is_the_ported_function() {
+        use crate::sqlite::mem_extern_release::mem_extern_release;
         assert_eq!(
             DEFAULT_MEM_EXTERN_OPS.extern_release as usize,
-            missing_extern_release as usize,
+            mem_extern_release as usize,
+            "the extern release @ 0x0838c074 is ported and shipped by default"
         );
-        unsafe {
-            core::ptr::write_volatile(
-                core::ptr::addr_of_mut!(MEM_EXTERN_OPS),
-                DEFAULT_MEM_EXTERN_OPS,
-            );
-            (*core::ptr::addr_of_mut!(HEAP_OPS)).free = recording_heap_free;
-            (*core::ptr::addr_of_mut!(EVENTS)).clear();
-
-            let mut value = Mem::new();
-            let mut z_malloc_block = TrackedBlock::new();
-            let z_malloc_raw = z_malloc_block.raw();
-            value.set_word(Z_OFFSET, 0x0bad_beefusize as *mut u8);
-            value.set_word(X_DEL_OFFSET, 0x0bad_d00dusize as *mut u8);
-            value.set_word(Z_MALLOC_OFFSET, z_malloc_block.payload());
-            (value.ptr().add(FLAGS_OFFSET) as *mut u16).write(FLAG_AGG | FLAG_DYN);
-
-            mem_release(value.ptr());
-
-            assert_eq!(
-                events(),
-                std::vec![Event::RawFree(z_malloc_raw as usize, TAG_TRACKED)],
-                "no extern destructor runs, zMalloc is still freed"
-            );
-        }
     }
 }

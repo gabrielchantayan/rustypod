@@ -9658,9 +9658,12 @@ functions:
       tracked_free called directly. 0x0838c04c has since been ported
       (sqlite/mem_release) and is the shipped default mem_release slot
       of VALUE_MEM_OPS; its own extern-release dependency @ 0x0838c074
-      rides that module's MEM_EXTERN_OPS slot (documented no-op default:
-      free zMalloc, leak the aggregate context / external string rather
-      than run the wrong destructor; same leak-rather-than-corrupt
+      has since been ported (sqlite/mem_extern_release) and is the
+      shipped default of that module's MEM_EXTERN_OPS slot; the extern
+      release's aggregate finalize @ 0x0838bc38 rides
+      MEM_AGG_FINALIZE_OPS (documented stub default: clear the
+      MEM_Agg/MEM_Dyn bits, free zMalloc, leak the external string
+      rather than run the wrong destructor; same leak-rather-than-corrupt
       stance as the missing_destructor stub this port replaces). Now the default
       value_free slot of free_p4's FREE_P4_AUX_OPS. Ghidra's C inlines
       the whole tag-57 free after the bl - that is the tail-called
@@ -9691,15 +9694,67 @@ functions:
       0x083906f4, here tracked_free - its NULL guard stands in for the
       original's, which also runs unconditionally); then z +0x14,
       zMalloc +0x24 and xDel +0x20 are NULLed in that order so a
-      re-released Mem is inert. The extern release @ 0x0838c074 is NOT
-      ported - it is the MEM_EXTERN_OPS dispatch boundary (documented
-      no-op default: free zMalloc, leak the aggregate context /
+      re-released Mem is inert. The extern release @ 0x0838c074 has
+      since been ported (sqlite/mem_extern_release) and is the shipped
+      default of the MEM_EXTERN_OPS slot (the slot is kept so host
+      tests can intercept it); its aggregate finalize @ 0x0838bc38
+      rides that module's MEM_AGG_FINALIZE_OPS slot (documented stub
+      default: clear the MEM_Agg/MEM_Dyn bits, free zMalloc, leak the
       external string rather than run the wrong destructor). Shipped as
       the default mem_release slot of value_free's VALUE_MEM_OPS.
-      match.py structural: slot blx for the unported extern release,
+      match.py structural: slot blx for the extern release,
       LLVM inlines tracked_free's stats-update prologue and NULL guard
       and reorders the +0x20/+0x24 NULL stores; the three str zeros and
       the zMalloc load/free structure match.
+
+  - address: 0x0838c074
+    ghidra: FUN_0838c074
+    name: mem_extern_release
+    size: 80
+    sig: "void mem_extern_release(void *value)"
+    module: sqlite/mem_extern_release
+    status: ported
+    renames:
+      param_1: value
+      param_2: x_del
+    notes: >-
+      Upstream SQLite's vdbeMemClearExternAndSetNull (this build's
+      variant checks the aggregate flag first and tail-calls
+      mem_release) - the extern release mem_release @ 0x0838c04c runs
+      first; 6 bl call sites (mem_release @ 0x0838c054, the row/column
+      teardowns @ 0x083675fc, 0x08386fbc, 0x0838c2e0, 0x0838eeb4 and
+      the make-owned copy helper @ 0x0838bae0). The flags halfword at
+      +0x1c is loaded once (ldrh r0,[r0,#0x1c]): bit 0x400 (MEM_Agg)
+      finalizes the aggregate context - the FuncDef pointer at +0x00
+      (upstream Mem.u.pDef) goes to the finalize helper @ 0x0838bc38
+      (ldr r1,[r4,#0x0]; bl - upstream sqlite3VdbeMemFinalize, which
+      invokes the user xFinalize, frees the accumulation buffer and
+      copies the 0x28-byte finalized result over the Mem, landing
+      flags = 1) - and the function tail-calls mem_release @ 0x0838c04c
+      (ldmia sp!,{r4,lr}; b), which re-enters this function on the
+      finalized value before freeing zMalloc. Otherwise bit 0x40
+      (MEM_Dyn) gates the xDel destructor at +0x20: when also non-NULL
+      it is blx'd on the string pointer at +0x14 (ldr r0,[r4,#0x14];
+      blx r1) and xDel is NULLed; when either check fails the function
+      returns untouched (ldmiaeq sp!,{r4,pc}). The aggregate finalize
+      @ 0x0838bc38 is NOT ported - it is the MEM_AGG_FINALIZE_OPS
+      dispatch boundary (documented stub default: clear the MEM_Agg and
+      MEM_Dyn flag bits and return 0 without invoking xFinalize, so the
+      tail-called mem_release terminates - the original relies on the
+      finalize's result copy clearing MEM_Agg, and a pure no-op default
+      would recurse without bound; zMalloc is still freed, the external
+      string at z is leaked, no type-tagged destructor is guessed -
+      the same leak-rather-than-corrupt stance the
+      missing_extern_release no-op held before this port). mem_release
+      @ 0x0838c04c IS ported (sqlite/mem_release) and is tail-called
+      directly. The port is the shipped default extern_release slot of
+      mem_release's MEM_EXTERN_OPS, replacing the
+      missing_extern_release no-op. match.py structural: same two flag
+      tests (tst 0x400 / tst 0x40 + ldrne/cmpne), conditional xDel blx
+      with the z load, the mov r0,#0 / str xDel NULL and the tail b
+      into mem_release all match; LLVM adds its fp frame, calls the
+      finalize slot with blx through a literal-pool load (the slot, not
+      the original's bl @ 0x0838bc38) and reloads value into r4 late.
 
   - address: 0x08386e08
     ghidra: FUN_08386e08
