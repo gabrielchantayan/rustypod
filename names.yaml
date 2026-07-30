@@ -3322,6 +3322,28 @@ functions:
       passed through. Six callers (binary-verified) incl. scanf/C++
       layers and freopen_core's append path.
 
+  - address: 0x0802ff38
+    ghidra: FUN_0802ff38
+    name: ftell
+    size: 112
+    sig: "i32 ftell(AdsFile *file)"
+    module: stdio/ftell
+    status: ported
+    vars: {param_1: file, uVar1: flags, iVar3: pos, param_2/param_3: scratch loads of ptr/offset_end (Ghidra artifact — one real argument), FUN_0802ecb4: __rt_errno_addr (ported in runtime/errno.rs)}
+    notes: >-
+      Public ftell: returns the stream's logical position — (ptr - base)
+      + offset_end (stream +0x04/+0x10/+0x18), or the alt_offset word
+      (+0x28) under FLAG_ALT_OFFSET (0x20) — the exact `cur` formula
+      fseek_core's SEEK_CUR arm offsets from — minus one when
+      FLAG_UNGETC_PENDING (0x80000) is set and the position is positive
+      (subgt: 0 and negative positions are left alone). A not-open
+      stream (flags & 3 == 0) stores 1 (EPERM, ADS numbering) through
+      __rt_errno_addr and returns -1; no state changes on success. The
+      mov r0,file+0x3c; mov r0,r0 brackets are the patched-out stream
+      lock — omitted (house precedent). Two callers (binary bl scan:
+      0x0802907c and 0x0802910c, both inside FUN_08028ff4) feed the
+      result straight into fseek — the classic tell-then-seek pattern.
+
   - address: 0x0802fd04
     ghidra: FUN_0802fd04
     name: fseek_core
