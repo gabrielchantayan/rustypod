@@ -11393,8 +11393,8 @@ functions:
       structure (sub / mov r1,#24 / b __rt_sdiv); the ldr pairs come
       out as byte loads from the family's read_unaligned host-testing
       idiom, same deviation as vector_size_elem4. Other instantiations
-      (identified, not ported): 0x083d7954 4, 0x083d7870 4, 0x083d784c
-      4 bl sites; shift-based
+      (identified, not ported): 0x083d7954 4, 0x083d7870 4 bl sites;
+      shift-based
       ones are one-line ports whenever wanted. 0x083d7708 is now ported
       (see its entry) - it turned out to be a DIVIDE-by-12 member, not a
       shift, so element sizes must be read from osos.asm per address.
@@ -11403,6 +11403,35 @@ functions:
       as well (see its entry) - another divide-by-24 copy, byte-identical
       to this one. 0x083d7828 is now ported too (see its entry) - a
       divide-by-12 copy, byte-identical to vector_capacity_elem12.
+      0x083d784c is now ported too (see its entry) - a divide-by-40
+      member (mov r1,#0x28), a distinct instantiation, not a copy.
+
+  - address: 0x083d784c
+    ghidra: FUN_083d784c
+    name: vector_capacity_elem40
+    size: 20
+    sig: "i32 vector_capacity_elem40(const VectorStorage *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      `vector<T>::capacity()` for a 40-byte element - the DIVIDE member
+      of the capacity family for a 40-byte element: same end-of-storage
+      head as the 24-byte primary (`ldr r1,[r0,#8]; ldr r0,[r0]; sub
+      r0,r1,r0`), then `mov r1,#0x28` and a TAIL BRANCH into the ADS
+      signed divide @ 0x08031568 (ported as __rt_sdiv). Verified against
+      osos.asm per address - the ledger's old blanket shift-based guess
+      for the remaining capacity instantiations is wrong for this one
+      too (as it was for 0x083d7708, 0x083d77ec and 0x083d7828); only
+      0x083d77a8 is really a shift. The divide is signed and truncating,
+      so a reversed span truncates toward zero and a partial element is
+      dropped. 4 bl call sites (0x083e32bc, 0x083e33d8, 0x083e3434,
+      0x083e34bc). The port calls the ported __rt_sdiv
+      (#[inline(never)] keeps the tail-branch boundary, the vector_capacity
+      precedent). match.py - same structure (sub / mov r1,#40 / b
+      __rt_sdiv); the ldr pairs come out as byte loads from the family's
+      read_unaligned host-testing idiom, the same accepted deviation as
+      vector_size_elem4, plus LLVM's fp frame.
 
   - address: 0x083d77a8
     ghidra: FUN_083d77a8
