@@ -77,6 +77,10 @@
 //!   the descriptor's status word, brackets the real allocator call
 //!   with an optional pre/post trace hook, and stamps the first byte
 //!   of large blocks with a global tag. See its doc header.
+//! - `traced_free` — `FUN_08043994` @ 0x08043994 (72 bytes; 126
+//!   conditional/unconditional `bl` call sites in osos.asm). The free
+//!   twin, over the same descriptor: an optional pre/post trace hook
+//!   around an unconditional underlying free. See its doc header.
 //!
 //! The island's error reporting bottoms out in a per-task record pool,
 //! allocated by:
@@ -512,7 +516,8 @@ pub unsafe extern "C" fn ata_handle_table_entry(handle: *const u32, index: u32) 
 
 /// ATA handle-factory services. The factory proper @ 0x083696f4 is not
 /// ported yet — it allocates through the ported [`traced_alloc`]
-/// (0x08043c18) and frees through 0x08043994 (still unported) — so the
+/// (0x08043c18) and frees through the ported [`traced_free`]
+/// (0x08043994) — so the
 /// veneer below dispatches through this table (the [`ATA_ERROR_HOOKS`]
 /// pattern) and the default stub reports allocation failure. Every
 /// caller already handles that: each `bl 0x08369778` site compares the
@@ -561,8 +566,8 @@ fn handle_hooks() -> AtaHandleHooks {
 ///
 /// Deviation: the original tail-branches into the factory; the port
 /// calls it indirectly through [`ATA_HANDLE_HOOKS`] because the factory
-/// itself (and the free 0x08043994 it pairs with) is not ported yet —
-/// its allocator [`traced_alloc`] now is. The default stub returns
+/// itself is not ported yet — its allocator [`traced_alloc`] and the
+/// free [`traced_free`] it pairs with now are. The default stub returns
 /// NULL — the same value the original produces on an allocation
 /// failure.
 #[inline(never)]
@@ -690,6 +695,87 @@ pub unsafe extern "C" fn traced_alloc(size: i32, tag1: u32, tag2: u32) -> *mut u
         block.write(core::ptr::read_volatile(core::ptr::addr_of!(LARGE_ALLOC_TAG)));
     }
     block
+}
+
+// ---------------------------------------------------------------------------
+// The traced free — traced_alloc's twin over the same descriptor.
+// ---------------------------------------------------------------------------
+
+/// Allocator-descriptor services for [`traced_free`]. The stock
+/// descriptor is the same RAM table [`traced_alloc`] consults @
+/// 0x08a0c2a4 (this function's pointer literal @ 0x080439dc); the port
+/// keeps the two slots this function consults as a hook table (the
+/// [`TRACED_ALLOC_HOOKS`] pattern). The default free stub is a no-op:
+/// the original calls slot +0x18 unconditionally, so with no heap wired
+/// in the only safe stand-in is one that frees nothing.
+#[derive(Copy, Clone)]
+pub struct TracedFreeHooks {
+    /// Descriptor slot +0x18: the underlying free, called as
+    /// `free(block)`. Never NULL-checked by the original — not the
+    /// slot, and not `block` (guarding is the callers' job; 44 of them
+    /// reach this function through `blne`).
+    pub free: unsafe extern "C" fn(block: *mut u8),
+    /// Descriptor slot +0x30: the optional free-trace hook (`None` =
+    /// the stock image's NULL slot). Called before the free as
+    /// `trace(block, 0)` and after it as `trace(NULL, 1)`; the second
+    /// argument is the phase, and the post-free block is NULL because
+    /// the real one is already gone.
+    pub trace: Option<unsafe extern "C" fn(block: *mut u8, phase: u32)>,
+}
+
+/// Default stub: no heap wired in — freeing is a no-op.
+unsafe extern "C" fn missing_free(_block: *mut u8) {}
+
+/// Hook table for the descriptor's function-pointer slots. Replace
+/// before first use on target; host tests install mocks via
+/// `core::ptr::addr_of_mut!`.
+pub static mut TRACED_FREE_HOOKS: TracedFreeHooks = TracedFreeHooks {
+    free: missing_free,
+    trace: None,
+};
+
+/// Reads the hook table. Volatile so LLVM cannot constant-fold the load
+/// to the default stub (the heap/wrappers.rs pattern) — and so the
+/// post-free read below really re-reads the slot, the way the original
+/// reloads `[r4, #0x30]` after the free returns.
+#[inline(always)]
+fn free_hooks() -> TracedFreeHooks {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(TRACED_FREE_HOOKS)) }
+}
+
+/// traced_free — original: `FUN_08043994` @ 0x08043994 (72 bytes; 80
+/// `bl` + 44 `blne` + 2 `bleq` call sites in osos.asm — among them the
+/// keyid/serial formatter's hex-blob release @ 0x080aee4c and the ATA
+/// handle factory's teardown).
+///
+/// The free twin of [`traced_alloc`] over the same descriptor @
+/// 0x08a0c2a4. Algorithm:
+///
+/// 1. If the free-trace hook (slot +0x30) is installed, call
+///    `trace(block, 0)` — the pre-free phase.
+/// 2. Free: `free(block)` (slot +0x18), unconditionally — neither the
+///    slot nor `block` is NULL-checked (the callers guard; that is what
+///    the 44 `blne` sites are for).
+/// 3. Re-read the trace slot — it is loaded again after the call, not
+///    cached (`ldr r2, [r4, #0x30]` twice) — and if still installed,
+///    tail-call `trace(NULL, 1)` — the post-free phase, reporting a
+///    NULL block because the real one is already freed.
+///
+/// Deviations: the descriptor's function-pointer slots live in
+/// [`TRACED_FREE_HOOKS`] (the [`TRACED_ALLOC_HOOKS`] pattern) whose
+/// default free is a no-op; the post-free trace is an ordinary
+/// returning call where the original tail-branches (`bxne r2`) — same
+/// observable behavior.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn traced_free(block: *mut u8) {
+    if let Some(trace) = free_hooks().trace {
+        trace(block, 0);
+    }
+    (free_hooks().free)(block);
+    if let Some(trace) = free_hooks().trace {
+        trace(core::ptr::null_mut(), 1);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1757,5 +1843,133 @@ mod tests {
             0xdead_beef,
             "no trace hook installed: +0x04 untouched"
         );
+    }
+
+    // ---- the traced free --------------------------------------------
+
+    static FREE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    /// One observable call into the descriptor, in order.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum FreeEvent {
+        Trace { null_block: bool, phase: u32 },
+        Free { null_block: bool },
+    }
+
+    static FREE_EVENTS: Mutex<std::vec::Vec<FreeEvent>> = Mutex::new(std::vec::Vec::new());
+
+    static mut FREE_BUFFER: [u8; 8] = [0; 8];
+
+    unsafe extern "C" fn mock_free(block: *mut u8) {
+        FREE_EVENTS.lock().unwrap().push(FreeEvent::Free { null_block: block.is_null() });
+    }
+
+    unsafe extern "C" fn mock_free_trace(block: *mut u8, phase: u32) {
+        FREE_EVENTS
+            .lock()
+            .unwrap()
+            .push(FreeEvent::Trace { null_block: block.is_null(), phase });
+    }
+
+    /// The trace slot is re-read after the free: a free that uninstalls
+    /// the hook suppresses the post-trace, one that installs it adds it.
+    unsafe extern "C" fn free_that_uninstalls_trace(_block: *mut u8) {
+        (*core::ptr::addr_of_mut!(TRACED_FREE_HOOKS)).trace = None;
+    }
+
+    unsafe extern "C" fn free_that_installs_trace(_block: *mut u8) {
+        (*core::ptr::addr_of_mut!(TRACED_FREE_HOOKS)).trace = Some(mock_free_trace);
+    }
+
+    /// Restores the default hooks when a test ends (declared after the
+    /// guard, so it runs before the lock drops).
+    struct FreeHookReset;
+    impl Drop for FreeHookReset {
+        fn drop(&mut self) {
+            unsafe {
+                (*core::ptr::addr_of_mut!(TRACED_FREE_HOOKS)).free = missing_free;
+                (*core::ptr::addr_of_mut!(TRACED_FREE_HOOKS)).trace = None;
+            }
+        }
+    }
+
+    /// Runs the port under the given hooks and collects the events.
+    fn run_free(
+        block: *mut u8,
+        free: unsafe extern "C" fn(*mut u8),
+        trace: Option<unsafe extern "C" fn(*mut u8, u32)>,
+    ) -> std::vec::Vec<FreeEvent> {
+        FREE_EVENTS.lock().unwrap().clear();
+        unsafe {
+            (*core::ptr::addr_of_mut!(TRACED_FREE_HOOKS)).free = free;
+            (*core::ptr::addr_of_mut!(TRACED_FREE_HOOKS)).trace = trace;
+            traced_free(block);
+        }
+        FREE_EVENTS.lock().unwrap().clone()
+    }
+
+    /// The reference implementation: the C of
+    /// `decomp/c/002/08043994_FUN_08043994.c` (checked against the
+    /// disassembly — the "unrecovered jumptable" is just the tail-call
+    /// `bxne r2` of the post-free trace) with plain data in place of
+    /// the descriptor.
+    fn reference_free(null_block: bool, with_trace: bool) -> std::vec::Vec<FreeEvent> {
+        let mut events = std::vec::Vec::new();
+        if with_trace {
+            events.push(FreeEvent::Trace { null_block, phase: 0 });
+        }
+        events.push(FreeEvent::Free { null_block });
+        if with_trace {
+            events.push(FreeEvent::Trace { null_block: true, phase: 1 });
+        }
+        events
+    }
+
+    #[test]
+    fn brackets_the_free_with_the_two_trace_phases() {
+        let _guard = FREE_TEST_LOCK.lock().unwrap();
+        let _reset = FreeHookReset;
+        let block = unsafe { core::ptr::addr_of_mut!(FREE_BUFFER) as *mut u8 };
+        for with_trace in [false, true] {
+            let got = run_free(block, mock_free, if with_trace { Some(mock_free_trace) } else { None });
+            assert_eq!(got, reference_free(false, with_trace), "with_trace {with_trace}");
+        }
+    }
+
+    #[test]
+    fn passes_a_null_block_verbatim_like_the_original() {
+        // No NULL guard anywhere in the original — the 44 `blne` call
+        // sites do the guarding, and a NULL that does arrive reaches
+        // both the pre-trace and the free untouched.
+        let _guard = FREE_TEST_LOCK.lock().unwrap();
+        let _reset = FreeHookReset;
+        let got = run_free(core::ptr::null_mut(), mock_free, Some(mock_free_trace));
+        assert_eq!(got, reference_free(true, true));
+    }
+
+    #[test]
+    fn rereads_the_trace_slot_after_the_free() {
+        let _guard = FREE_TEST_LOCK.lock().unwrap();
+        let _reset = FreeHookReset;
+        let block = unsafe { core::ptr::addr_of_mut!(FREE_BUFFER) as *mut u8 };
+        // Installed before, gone after: only the pre-trace fires.
+        let got = run_free(block, free_that_uninstalls_trace, Some(mock_free_trace));
+        assert_eq!(got, [FreeEvent::Trace { null_block: false, phase: 0 }]);
+        // Absent before, installed after: only the post-trace fires.
+        let got = run_free(block, free_that_installs_trace, None);
+        assert_eq!(got, [FreeEvent::Trace { null_block: true, phase: 1 }]);
+    }
+
+    #[test]
+    fn the_default_free_stub_is_a_noop() {
+        let _guard = FREE_TEST_LOCK.lock().unwrap();
+        let _reset = FreeHookReset;
+        FREE_EVENTS.lock().unwrap().clear();
+        let block = unsafe { core::ptr::addr_of_mut!(FREE_BUFFER) as *mut u8 };
+        unsafe {
+            traced_free(block);
+            traced_free(core::ptr::null_mut());
+        }
+        assert!(FREE_EVENTS.lock().unwrap().is_empty(), "no hooks, no calls");
     }
 }

@@ -25,7 +25,8 @@
 //! are undecoded; the second word is a payload pointer that starts NULL
 //! and is released by the shared destructor body 0x08275d74 (40 bytes:
 //! NULL-guards the payload word at +4, frees it through `free_wrapper`
-//! @ 0x080e7970 with caller tag 0x34, then NULLs the word).
+//! @ 0x080e7970 with caller tag 0x34, then NULLs the word — ported here
+//! as `string_object_release_payload`).
 //!
 //! Ported functions:
 //!
@@ -40,6 +41,11 @@
 //!   image). Plants the vtable, runs the payload release @ 0x08275d74,
 //!   returns `this`; no operator delete (that is the 0x08277458
 //!   sibling's job).
+//! - `string_object_release_payload` — original: `FUN_08275d74` @
+//!   0x08275d74 (40 bytes; 41 `bl` call sites, binary-scanned). The
+//!   shared payload release both destructors run: NULL-guards the
+//!   payload word at +4, frees it through `free_wrapper` @ 0x080e7970
+//!   with caller tag 0x34, then NULLs the word.
 //!
 //! Deviations:
 //!
@@ -50,14 +56,14 @@
 //!   [`STRING_OBJECT_VTABLE_ADDRESS`], and the static carries the six
 //!   serialized slot addresses verbatim; nothing in this crate
 //!   dispatches through them.
-//! - The payload release @ 0x08275d74 is not ported, so
-//!   `string_object_destroy` reaches it through the
-//!   [`STRING_OBJECT_OPS`] dispatch slot (house pattern — see
-//!   cxx/string_map.rs `STRING_KEY_MAP_OPS`). The shipped default is a
-//!   no-op that leaks the payload, the `missing_free_p4` house rule for
-//!   unported destructors: the real callee frees through the heap with
-//!   caller tag 0x34, and guessing that wrong corrupts. Host tests
-//!   install a recording mock.
+//! - `string_object_destroy` reaches the payload release @ 0x08275d74
+//!   through the [`STRING_OBJECT_OPS`] dispatch slot (house pattern —
+//!   see cxx/string_map.rs `STRING_KEY_MAP_OPS`) so host tests can
+//!   install a recording mock; the shipped default is the ported
+//!   [`string_object_release_payload`] itself (the same wiring as
+//!   heap/tracked.rs's `TRACKED_STATS_OPS.lock`).
+
+use crate::heap::veneers::free_wrapper;
 
 /// Original load address of the class vtable the constructor plants
 /// (`ldr r1, [0x08277454]` in every sibling). See the module header for
@@ -106,8 +112,8 @@ pub unsafe extern "C" fn string_default_construct(this: *mut StringObject) -> *m
     this
 }
 
-/// Indirect dispatch for the unported payload release @ 0x08275d74
-/// (see the module header).
+/// Indirect dispatch for the payload release @ 0x08275d74 (ported as
+/// [`string_object_release_payload`]; see the module header).
 #[derive(Clone, Copy)]
 pub struct StringObjectOps {
     /// The shared destructor body: NULL-guards `this.payload`, frees it
@@ -116,16 +122,9 @@ pub struct StringObjectOps {
     pub release_payload: unsafe extern "C" fn(this: *mut StringObject),
 }
 
-/// Fail-closed default: performs no release — the payload is leaked,
-/// not freed (the `missing_free_p4` house rule for unported
-/// destructors; see the module header). Deliberately not a passthrough
-/// to `free_wrapper`: the tag-0x34 free contract belongs to the
-/// unported 0x08275d74, and guessing wrong corrupts the heap.
-unsafe extern "C" fn missing_release_payload(_this: *mut StringObject) {}
-
-/// Wired default (documented leak until 0x08275d74 is ported).
+/// Wired default: the ported release @ 0x08275d74.
 pub const DEFAULT_STRING_OBJECT_OPS: StringObjectOps = StringObjectOps {
-    release_payload: missing_release_payload,
+    release_payload: string_object_release_payload,
 };
 
 /// The active payload release. Host tests install recording mocks.
@@ -137,6 +136,32 @@ pub static mut STRING_OBJECT_OPS: StringObjectOps = DEFAULT_STRING_OBJECT_OPS;
 #[inline(always)]
 pub(crate) unsafe fn release_payload_op() -> unsafe extern "C" fn(*mut StringObject) {
     core::ptr::read_volatile(core::ptr::addr_of!(STRING_OBJECT_OPS.release_payload))
+}
+
+/// Caller tag the original passes to `free_wrapper` (`mov r1, #0x34` @
+/// 0x08275d88). Telemetry only (see `BlockHeader::link_or_tag`).
+pub const TAG_STRING_OBJECT_PAYLOAD: usize = 0x34;
+
+/// string_object_release_payload — original: `FUN_08275d74` @ 0x08275d74
+/// (40 bytes, 41 `bl` call sites).
+///
+/// The shared payload release of the two-word string/buffer class, run
+/// by both destructor siblings (0x08277458 and the ported 0x08277484):
+/// NULL-guards the payload word at `this + 4` (a NULL payload returns
+/// untouched — the original's `ldmiaeq` early-out), frees it through
+/// `free_wrapper` @ 0x080e7970 with caller tag 0x34, then NULLs the
+/// word. No NULL guard on `this` — the original faults on a NULL
+/// `this`, and so does the port. The original returns void with r0
+/// clobbered by the free path, and so does the port.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_release_payload(this: *mut StringObject) {
+    let payload = (*this).payload;
+    if payload.is_null() {
+        return;
+    }
+    free_wrapper(payload, TAG_STRING_OBJECT_PAYLOAD);
+    (*this).payload = core::ptr::null_mut();
 }
 
 /// string_object_destroy — original: `FUN_08277484` @ 0x08277484
@@ -272,20 +297,75 @@ mod tests {
     }
 
     #[test]
-    fn default_release_is_a_noop_leak() {
+    fn release_payload_with_null_payload_frees_nothing() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
         let _lock = OPS_LOCK.lock().unwrap();
         let mut object = StringObject {
             vtable: core::ptr::null(),
-            payload: 0xcafe_f00d as *mut u8,
+            payload: core::ptr::null_mut(),
+        };
+        unsafe {
+            string_object_release_payload(&mut object);
+        }
+        assert!(object.payload.is_null());
+        assert_eq!(
+            crate::heap::veneers::tests::free_log().0,
+            0,
+            "a NULL payload is the original's ldmiaeq early-out"
+        );
+    }
+
+    #[test]
+    fn release_payload_frees_tag_0x34_then_nulls_the_word() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _lock = OPS_LOCK.lock().unwrap();
+        let mut payload_storage = [0u8; 8];
+        let payload = payload_storage.as_mut_ptr();
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload,
+        };
+        unsafe {
+            string_object_release_payload(&mut object);
+        }
+        let (calls, freed, tag) = crate::heap::veneers::tests::free_log();
+        assert_eq!(calls, 1, "exactly one heap free");
+        assert_eq!(freed, payload, "the payload word is what gets freed");
+        assert_eq!(tag, 0x34, "the original's mov r1, #0x34");
+        assert_eq!(tag, TAG_STRING_OBJECT_PAYLOAD);
+        assert!(
+            object.payload.is_null(),
+            "the word is NULLed after the free (mov r0,#0; str r0,[r4,#4])"
+        );
+    }
+
+    #[test]
+    fn wired_default_ops_is_the_ported_release() {
+        assert_eq!(
+            DEFAULT_STRING_OBJECT_OPS.release_payload as usize,
+            string_object_release_payload as usize
+        );
+    }
+
+    #[test]
+    fn destroy_with_the_default_ops_releases_the_payload() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _lock = OPS_LOCK.lock().unwrap();
+        let mut payload_storage = [0u8; 8];
+        let payload = payload_storage.as_mut_ptr();
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload,
         };
         let this: *mut StringObject = &mut object;
         unsafe {
             assert_eq!(string_object_destroy(this), this);
             assert_eq!(object.vtable, &STRING_OBJECT_VTABLE as *const _);
-            assert_eq!(
-                object.payload, 0xcafe_f00d as *mut u8,
-                "the stub frees nothing and NULLs nothing (documented leak)"
-            );
         }
+        let (calls, freed, tag) = crate::heap::veneers::tests::free_log();
+        assert_eq!(calls, 1);
+        assert_eq!(freed, payload);
+        assert_eq!(tag, 0x34);
+        assert!(object.payload.is_null(), "destroy releases and NULLs");
     }
 }

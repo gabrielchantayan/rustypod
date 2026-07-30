@@ -11318,8 +11318,37 @@ functions:
       stores, null-checked pre/post trace blx with the phase word on
       the stack, alloc blx, slot reload, signed >0x800 tag stamp; LLVM
       reordered the block-null/size guards into an equivalent
-      short-circuit. The free twin 0x08043994 (72 bytes; slots +0x18 /
-      +0x30 of its own descriptor) stays unported.
+      short-circuit. The free twin 0x08043994 is ported as traced_free
+      (see its entry).
+
+  - address: 0x08043994
+    ghidra: FUN_08043994
+    name: traced_free
+    size: 72
+    sig: "void traced_free(u8 *block)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: block, iVar1: descriptor, UNRECOVERED_JUMPTABLE: trace}
+    notes: >-
+      80 bl + 44 blne + 2 bleq call sites in osos.asm, among them the
+      keyid/serial formatter's hex-blob release @ 0x080aee4c and the
+      ATA handle factory's teardown. The free twin of traced_alloc
+      (0x08043c18) over the SAME RAM descriptor @ 0x08a0c2a4 (pointer
+      literal @ 0x080439dc): if the free-trace hook (slot +0x30, not
+      the allocator's +0x28) is installed, call trace(block, 0); then
+      free(block) via slot +0x18, unconditionally - neither the slot
+      nor block is NULL-checked (the 44 blne callers guard); then the
+      trace slot is RE-READ and, if still installed, the post-free
+      trace(NULL, 1) runs as a tail call (bxne r2 - Ghidra's
+      "unrecovered jumptable"). Deviations: the consulted slots live
+      in TRACED_FREE_HOOKS (the TRACED_ALLOC_HOOKS pattern; the
+      default free stub is a no-op since the original never NULL-
+      checks the slot), and the post-free trace is an ordinary
+      returning call where the original tail-branches. match.py: same
+      structure - null-checked pre-trace blx with (block, 0),
+      unconditional free blx, slot reload, null-checked post-trace
+      tail branch with (NULL, 1); LLVM frame and ldrd hook-table loads
+      aside.
 
   # --- Per-instantiation template members of the C++ block (cxx/templates) ---
   # This block is full of families the compiler emitted once per template
