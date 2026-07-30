@@ -493,6 +493,12 @@ pub unsafe extern "C" fn rom_svc_220041cc(a0: usize) -> usize {
 /// conditional tail `beq` @ 0x080567f0 in csem_post_deferred @ 0x080567d0,
 /// kernel/csem.rs, and the bare alias `b` @ 0x080567fc); signature from
 /// the mirror's prologue.
+///
+/// Alias veneer @ 0x080567fc (4 bytes: `b 0x08037e80`; absent from
+/// functions.csv, extent from osos.asm): a bare tail branch onto this
+/// thunk with 2 call sites (`bl` @ 0x08081968, `bne` @ 0x0809ece8).
+/// No separate port exists — hook 0x080567fc straight to this symbol
+/// (the container_is_empty alias precedent).
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_22001cbc(a0: usize) -> usize {
     (hook!(rom_svc_22001cbc))(a0)
