@@ -2522,6 +2522,21 @@ functions:
       kernel_create_dispatch (e70), tick_elapsed (eb8), irq_fiq_disable
       (ed8), tick_delay (ef0, 23 callers).
 
+  - address: 0x080567fc
+    ghidra: null
+    name: rom_svc_22001cbc_alias_67fc
+    size: 4
+    sig: "usize rom_svc_22001cbc_alias_67fc(usize a0)"
+    module: kernel/task_lock
+    status: ported
+    notes: >-
+      ALIAS - bare `b 0x08037e80` tail veneer onto the rom_svc_22001cbc
+      thunk (ROM 0x22001cbc). Absent from functions.csv; extent verified
+      from osos.asm (1 instruction; the next word @ 0x08056800 opens a
+      new frame). 2 call sites: bl @ 0x08081968, bne @ 0x0809ece8. No
+      separate port exists; hook this address to the rom_svc_22001cbc
+      symbol (the container_is_empty alias precedent).
+
   - address: 0x080769b8
     ghidra: FUN_080769b8
     name: os_malloc
@@ -10931,8 +10946,36 @@ functions:
       out as byte loads from the family's read_unaligned host-testing
       idiom, same deviation as vector_size_elem4. Other instantiations
       (identified, not ported): 0x083d7954 4, 0x083d7870 4, 0x083d784c
-      4, 0x083d7828 4, 0x083d77ec 4, 0x083d77a8 4, 0x083d7708 4 bl
-      sites; shift-based ones are one-line ports whenever wanted.
+      4, 0x083d7828 4, 0x083d77ec 4, 0x083d77a8 4 bl sites; shift-based
+      ones are one-line ports whenever wanted. 0x083d7708 is now ported
+      (see its entry) - it turned out to be a DIVIDE-by-12 member, not a
+      shift, so element sizes must be read from osos.asm per address.
+
+  - address: 0x083d7708
+    ghidra: FUN_083d7708
+    name: vector_capacity_elem12
+    size: 20
+    sig: "i32 vector_capacity_elem12(const VectorStorage *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      `vector<T>::capacity()` for a 12-byte element - the capacity()
+      sibling of the vector_size family, reading the end-of-storage word
+      at +8 instead of the end word at +4 (`ldr r1,[r0,#8]; ldr
+      r0,[r0]; sub r0,r1,r0; mov r1,#0xc`) and TAIL-BRANCHING into the
+      ADS signed divide @ 0x08031568 (ported as __rt_sdiv). 4 bl call
+      sites. Verified against osos.asm: the old ledger note in
+      vector_capacity's entry guessed this instantiation was shift-based
+      - wrong, 12 is not a power of two and the function carries `mov
+      r1,#0xc; b 0x08031568`, a divide member exactly like the 24-byte
+      primary. The port calls the ported __rt_sdiv, which is signed and
+      truncating, so a reversed vector's negative span truncates toward
+      zero and a partial element is dropped. match.py - same structure
+      as vector_capacity (sub / mov r1,#12 / b __rt_sdiv); the ldr
+      pairs come out as byte loads from the family's read_unaligned
+      host-testing idiom, the same accepted deviation as
+      vector_size_elem4.
 
   - address: 0x083d5ea0
     ghidra: FUN_083d5ea0
