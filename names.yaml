@@ -4193,11 +4193,48 @@ functions:
       FUN_0836b950 + RTXC mutex wrappers) is unported hardware, so it
       sits behind the RTC_READ_REGS dispatch slot whose default stub
       fails closed with the driver's bad-bank code 9; the pure-arithmetic
-      conversion FUN_0809e3e8 is reproduced inline. match.py: LLVM
+      conversion FUN_0809e3e8 is now ported as
+      time/civil::bcd_datetime_to_days_secs and called (it was an inline
+      reproduction at this entry's porting). match.py: LLVM
       inlines the conversion and strength-reduces the divides to magic
       multiplies, but every formula element is present (rsb #14,
       +0x1a90, mla 365, 0x99, -0x7d2d, 0xe10, mvnne #4); the original's
       two bl calls become one blx through the slot.
+
+  # --- BCD datetime -> (days, seconds-of-day) converter (time/civil) ---
+  - address: 0x0809e3e8
+    ghidra: FUN_0809e3e8
+    name: bcd_datetime_to_days_secs
+    size: 228
+    sig: "void bcd_datetime_to_days_secs(i32 *out_pair, const u8 *buf)"
+    module: time/civil
+    status: ported
+    vars: {param_1: out_pair, param_2: buf, iVar1: adj, iVar6: year}
+    notes: >-
+      Hinnant civil-to-days over a 7-byte BCD RTC register image (sec,
+      min, hour, weekday, day, month, year; weekday ignored). BCD decode
+      FUN_080ed424 (v - 6*(v>>4) for v < 0x9a, else 99) is reproduced
+      inline, not yet ported in its own right; the month byte is decoded
+      TWICE in the original. adj = (14 - month) / 12 via UNSIGNED
+      __rt_udiv (0x08036f14 — a month above 14 wraps to a huge
+      quotient); y = year - adj + 0x1a90 (6800, a multiple of 400, so
+      the 2-digit year's leap pattern is undisturbed); mp = month +
+      12*adj - 3; days = 365*y + day + (153*mp + 2)/5 + y/4 - y/100 +
+      y/400 - 0x7d2d (365 from the literal @ 0x0809e4cc via mla; /5,
+      /100, /400 are signed truncating __rt_sdiv @ 0x08031568; /4 is
+      the compiler's add-3-and-asr truncating idiom); secs = hour*0xe10
+      + min*60 + sec (the *60 strength-reduced to (min*15) << 2).
+      Returns void; days -> out[0], secs -> out[1]. 5 bl call sites:
+      @ 0x08056174 (rtc_read_time, ported — now calls this port instead
+      of its inline reproduction), @ 0x080641f0 (FUN_0806418c),
+      @ 0x0806e850 / 0x0806e8a4 / 0x0806e8b0 (FUN_0806e7e4). The port
+      calls the ported __rt_udiv/__rt_sdiv (inline(never)) so the bl
+      boundaries survive. match.py: same structure — LLVM re-schedules
+      the 365*y and /4 terms earlier and builds 365 as 0x16d via
+      mov/mvn+orr instead of the pool literal, but every formula
+      element is present (rsb #14, +0x1a90, mla 0x99, the /4
+      asr/lsr/asr idiom, -0x7d2d, 0xe10, rsb *60, seven decode calls,
+      one udiv, three sdivs).
 
   # --- Block-deque element -> region accessors (heap/block_region) ---
   - address: 0x082801f8

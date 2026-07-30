@@ -40,10 +40,10 @@
 //! pattern); the default stub fails closed with the driver's own
 //! bad-bank code 9, making [`rtc_read_time`] report -5 and convert
 //! whatever the seeds left in the buffer. The BCD conversion
-//! FUN_0809e3e8 is pure arithmetic (on the ported __rt_udiv/__rt_sdiv)
-//! and is reproduced inline as [`bcd_datetime_to_days_secs`]; native
-//! Rust i32/u32 division has the same truncation semantics, and all
-//! adds/multiplies are wrapping to match ARM flag-less arithmetic.
+//! FUN_0809e3e8 is pure arithmetic and is ported as
+//! [`super::civil::bcd_datetime_to_days_secs`] (on the ported
+//! __rt_udiv/__rt_sdiv); all adds/multiplies wrap to match ARM
+//! flag-less arithmetic.
 
 /// The mutexed RTC register read behind [`rtc_read_time`]: stock
 /// `FUN_082e58f0` @ 0x082e58f0. `bank` 0 selects the time registers
@@ -59,50 +59,6 @@ unsafe extern "C" fn rtc_read_stub(_bank: u32, _buf: *mut u8) -> i32 {
 /// The active RTC register read. Host tests install a recording mock;
 /// the real port replaces the stub when the I2C driver lands.
 pub static mut RTC_READ_REGS: RtcReadFn = rtc_read_stub;
-
-/// BCD byte to binary: `v - 6*(v>>4)` for `v < 0x9a`, else clamped to
-/// 99 (stock FUN_080ed424 @ 0x080ed424).
-fn bcd_to_bin(v: u8) -> i32 {
-    if (v as u32) < 0x9a {
-        (v as i32).wrapping_sub(6 * (v as i32 >> 4))
-    } else {
-        99
-    }
-}
-
-/// BCD datetime block to (days, seconds-of-day): stock FUN_0809e3e8 @
-/// 0x0809e3e8, reproduced inline. `buf` is the 7-byte RTC register
-/// image (sec, min, hour, weekday, day, month, year) plus one spare
-/// byte. All arithmetic wraps like the ARM original; the divisions
-/// carry the exact signed/unsigned flavor of the original's
-/// __rt_sdiv/__rt_udiv calls.
-fn bcd_datetime_to_days_secs(buf: &[u8; 8]) -> (u32, u32) {
-    let month = bcd_to_bin(buf[5]);
-    // Jan/Feb year adjustment — UNSIGNED divide in the original, so a
-    // month above 14 wraps the subtraction to a huge quotient.
-    let adj = 14u32.wrapping_sub(month as u32) / 12;
-    let year = bcd_to_bin(buf[6])
-        .wrapping_sub(adj as i32)
-        .wrapping_add(0x1a90);
-    let mp = month
-        .wrapping_add((adj as i32).wrapping_mul(12))
-        .wrapping_sub(3);
-    let day = bcd_to_bin(buf[4]);
-    let month_days = mp.wrapping_mul(0x99).wrapping_add(2) / 5;
-    let days = year
-        .wrapping_mul(365)
-        .wrapping_add(day)
-        .wrapping_add(month_days)
-        .wrapping_add(year / 4)
-        .wrapping_sub(year / 100)
-        .wrapping_add(year / 400)
-        .wrapping_sub(0x7d2d);
-    let secs = bcd_to_bin(buf[2])
-        .wrapping_mul(0xe10)
-        .wrapping_add(bcd_to_bin(buf[1]).wrapping_mul(60))
-        .wrapping_add(bcd_to_bin(buf[0]));
-    (days as u32, secs as u32)
-}
 
 /// rtc_read_time @ 0x08056150 — read the RTC and return the wall clock
 /// as a day count and a seconds-of-day count. 0 on success, -5 when the
@@ -120,9 +76,10 @@ pub unsafe extern "C" fn rtc_read_time(
     buf[4..].copy_from_slice(&seed_hi.to_le_bytes());
     let read = core::ptr::read_volatile(core::ptr::addr_of!(RTC_READ_REGS));
     let status = read(0, buf.as_mut_ptr());
-    let (days, secs) = bcd_datetime_to_days_secs(&buf);
-    *days_out = days;
-    *secs_out = secs;
+    let mut pair = [0i32; 2];
+    super::civil::bcd_datetime_to_days_secs(pair.as_mut_ptr(), buf.as_ptr());
+    *days_out = pair[0] as u32;
+    *secs_out = pair[1] as u32;
     if status != 0 {
         -5
     } else {
@@ -134,7 +91,16 @@ pub unsafe extern "C" fn rtc_read_time(
 mod tests {
     extern crate std;
     use super::*;
+    use crate::time::civil::{bcd_datetime_to_days_secs, bcd_to_bin};
     use std::sync::{Mutex, MutexGuard};
+
+    /// The ported FUN_0809e3e8 through its raw-pointer ABI, returning
+    /// the (days, seconds) pair.
+    fn convert(buf: &[u8; 8]) -> (u32, u32) {
+        let mut pair = [0i32; 2];
+        unsafe { bcd_datetime_to_days_secs(pair.as_mut_ptr(), buf.as_ptr()) };
+        (pair[0] as u32, pair[1] as u32)
+    }
 
     /// Serializes tests that swap the dispatch slot.
     static SLOT_LOCK: Mutex<()> = Mutex::new(());
@@ -308,7 +274,7 @@ mod tests {
         // so secs = bcd(0x33)*3600 + bcd(0x22)*60 + bcd(0x11)
         // = 33*3600 + 22*60 + 11.
         assert_eq!(secs, (33 * 3600 + 22 * 60 + 11) as u32);
-        let expect = bcd_datetime_to_days_secs(&[0x11, 0x22, 0x33, 0x44, 0x88, 0x55, 0x66, 0x77]);
+        let expect = convert(&[0x11, 0x22, 0x33, 0x44, 0x88, 0x55, 0x66, 0x77]);
         assert_eq!((days, secs), expect);
         restore(guard);
     }
@@ -323,7 +289,7 @@ mod tests {
         assert_eq!(rc, -5);
         // Zero buffer converts deterministically: month 0 -> adj 1,
         // year 6799, mp 9, day 0.
-        let expect = bcd_datetime_to_days_secs(&[0; 8]);
+        let expect = convert(&[0; 8]);
         assert_eq!((days, secs), expect);
     }
 
@@ -334,7 +300,7 @@ mod tests {
         // overflow checks.
         for m in [0x13u8, 0x32, 0x99, 0x9a, 0xff] {
             let buf = [0xff, 0xff, 0xff, 0xff, 0xff, m, 0xff, 0xff];
-            let _ = bcd_datetime_to_days_secs(&buf);
+            let _ = convert(&buf);
         }
         // Clamped month 99 through the full entry point.
         let (_, _, rc) = read([0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99]);
