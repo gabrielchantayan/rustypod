@@ -9840,6 +9840,30 @@ functions:
       check instead of predicated pops; the fold core (same offsets,
       same clause/list order, the ldr +0x20 tail loop) matches exactly.
 
+  - address: 0x082d2ba0
+    ghidra: FUN_082d2ba0
+    name: hex_to_int
+    size: 24
+    sig: "u32 hex_to_int(u32 h)"
+    module: sqlite/hex_to_int
+    status: ported
+    vars: {param_1: h}
+    notes: >-
+      SQLite 3.5.x's sqlite3HexToInt (util.c, SQLITE_ASCII build).
+      Called from hexToBlob @ 0x0837b00c twice (once per nibble of
+      each output byte when packing an x'ABCD' blob literal).
+      Branchless ASCII hex-digit decode: bit 6 of the character
+      separates the digit band ('0'..'9', bit 6 clear) from the letter
+      bands ('A'..'F'/'a'..'f', bit 6 set); add 9 when bit 6 is set and
+      mask with 0xf, landing every band's low nibble on the value:
+      (h + 9*(1 & (h>>6))) & 0xf, character-for-character the 3.5.x
+      source. The original returns the full register (the (u8) cast in
+      the source is just the 0xf mask) and validates nothing, so
+      non-hex input yields whatever the bit formula gives. The match.py
+      diff is cosmetic: LLVM folds the shift-out/shift-back bit-6
+      extract into `tst r0,#0x40` + `addne r0,r0,#9` (same branchless
+      +9 correction, same mask, 6 instructions each side).
+
   - address: 0x083788fc
     ghidra: FUN_083788fc
     name: expr_set_height

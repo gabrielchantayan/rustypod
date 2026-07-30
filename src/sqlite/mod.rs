@@ -70,6 +70,7 @@ pub mod expr_height_of;
 pub mod expr_list_height;
 pub mod free_p4;
 pub mod hash_function;
+pub mod hex_to_int;
 pub mod mem;
 pub mod name_from_token;
 pub mod parse;
