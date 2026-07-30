@@ -14412,3 +14412,42 @@ functions:
       ldr-r0-@-+0x40 + tail-branch shape; the diff is the crate fp
       frame and the dispatch-slot ldr/bx standing in for the direct
       `b 0x080542a0` - the documented deviation.
+
+  - address: 0x0813b6ec
+    ghidra: FUN_0813b6ec
+    name: drive_set_last_lba
+    size: 8
+    sig: "void drive_set_last_lba(u8 *drive, u32 last_lba)"
+    module: util/drive
+    status: ported
+    vars: {param_1: drive, param_2: last_lba, FUN_08283a7c: drive_descriptor_builder, FUN_0813b650: drive_descriptor_ctor, FUN_0813b5d4: drive_set_block_size, FUN_082bcb74: drive_unit_count, DAT_08283c18: DRIVE_VTABLE}
+    notes: >-
+      Two-instruction field setter `str r1,[r0,#0x58]; bx lr` - stores
+      the last-logical-block-address word at +0x58 of the 0x68-byte
+      NAND-flash drive descriptor. 1 bl call site: the descriptor
+      builder FUN_08283a7c @ 0x08283be8, which operator_new(0x68)s the
+      object, tags it with the DRIVE_VTABLE literal and constructs it
+      through FUN_0813b650 @ 0x0813b650 (fills "NAND_FLASH_DRIVE" at
+      +0x13, serial "12345678901234567890" at +0x43, 0x2000000 at
+      +0x60), then sets the geometry pair: FUN_0813b5d4 stores 0x1000
+      at +0x64 (block size) and this setter stores FUN_082bcb74's
+      result minus 1 at +0x58. FUN_082bcb74 @ 0x082bcb74 computes
+      total_sectors / sectors_per_0x1000_unit = capacity in
+      0x1000-byte blocks, so the pair is exactly the READ CAPACITY
+      response shape (last LBA + block length) - hence the name. The
+      +0x58 stores of 4/5 and 1/3/4/5 state comparisons in
+      FUN_08283c1c/FUN_08283d20 belong to a different transfer-state
+      object class (its accessors FUN_0816607c/FUN_081213dc touch
+      +0x30/+0x44, offsets inside this descriptor's serial string), so
+      this word has no other writer for the drive class. Sits
+      immediately before the util/berec.rs record-reader cluster @
+      0x0813b714..0x0813b7b0 and the util/inner_state.rs wrappers @
+      0x0813b7c4/0x0813b7d0 but is NOT one of them (no record handle,
+      no +0x40 inner forwarding), so it gets its own file - the
+      inner_state.rs precedent. Deviation: none beyond the crate fp
+      frame; the original leaves r0 = drive but the sole caller
+      discards it, so the port is void. Host tests: stores the value,
+      touches only the +0x58 word (whole 0x68-byte descriptor
+      byte-compared), overwrites, round-trips 0/1/u32::MAX. match.py
+      structural: identical `str r1,[r0,#0x58]`; the only diff is the
+      crate-standard push-fp-lr/pop-fp-pc frame.
