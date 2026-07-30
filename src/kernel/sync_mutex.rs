@@ -26,6 +26,12 @@
 //!   unless it is the static early-boot cell — free veneer 0x080f151c ->
 //!   retailOS free @ 0x080e7970 with flag 0), then NULLs the mutex's cell
 //!   pointer.
+//! - `mutex_delete_counted` — original: `FUN_08094424` @ 0x08094424
+//!   (40 bytes; 6 call sites). Counted-lock teardown: if the cell pointer
+//!   is non-NULL the cell is destroyed by the same cell-destroy thunk
+//!   @ 0x805646c `mutex_delete` uses, then all three words (cell pointer,
+//!   padding, hold counter) are zeroed — the whole object returns to its
+//!   born state, even when there was no cell to destroy.
 //! - `kernel_running` — original: `FUN_0809444c` @ 0x0809444c (72 bytes;
 //!   20 call sites). If the kernel-started byte @ 0x089ca848 is zero,
 //!   returns 0. Otherwise returns the current task id (thunk @ 0x805665c:
@@ -340,6 +346,35 @@ pub unsafe extern "C" fn mutex_unlock_counted(lock: *mut CountedMutex) {
     let count = core::ptr::addr_of_mut!((*lock).hold_count);
     count.write(count.read().wrapping_sub(1));
     mutex_unlock(core::ptr::addr_of_mut!((*lock).mutex));
+}
+
+/// mutex_delete_counted — original: `FUN_08094424` @ 0x08094424 (40 bytes;
+/// 6 `bl` call sites, binary-scanned).
+///
+/// Teardown for a [`CountedMutex`]: if the semaphore cell pointer (word 0)
+/// is non-NULL, the cell is destroyed by the same cell-destroy thunk
+/// @ 0x805646c that `mutex_delete` uses (ROM semaphore delete, `*cell`
+/// zeroed, cell freed unless it is the shared static early-boot cell);
+/// then all three words — cell pointer, padding, hold counter — are
+/// zeroed unconditionally. Unlike `mutex_delete`, which only NULLs the
+/// cell pointer of a live `Mutex`, this resets the whole counted-lock
+/// object to its all-zero born state.
+///
+/// Every call site hands it an embedded 12-byte object inside a larger
+/// struct (decomp callers pass `this + 0x18`, `this + 0x74`, `this +
+/// 0x88`, `task - 0xc`), i.e. the destructor half of the
+/// `mutex_lock_counted` / `mutex_unlock_counted` pair. The zeroing runs
+/// even when the cell pointer is NULL — the counter is reset either way,
+/// exactly like the original's three unconditional `str`s.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn mutex_delete_counted(lock: *mut CountedMutex) {
+    let cell = (*lock).mutex.sem_cell;
+    if !cell.is_null() {
+        semaphore_cell_destroy(cell);
+    }
+    (*lock).mutex.sem_cell = core::ptr::null_mut();
+    (*lock).mutex.unused = 0;
+    (*lock).hold_count = 0;
 }
 
 #[cfg(test)]
@@ -810,5 +845,93 @@ mod tests {
             assert_eq!(lock.hold_count, 2);
         }
         assert_eq!(calls(), vec![Call::Signal(MOCK_HANDLE)]);
+    }
+
+    // -- the counted-lock teardown @ 0x08094424 -------------------------
+
+    /// A live heap cell is destroyed (ROM delete + free), then every word
+    /// of the object is zeroed.
+    #[test]
+    fn delete_counted_destroys_cell_and_zeroes_all_words() {
+        let _lock = mock_kernel();
+        let mut m = Mutex {
+            sem_cell: core::ptr::null_mut(),
+            unused: 0,
+        };
+        unsafe { mutex_create(&mut m) };
+        CALLS.lock().unwrap().clear();
+        let cell = m.sem_cell;
+        let mut lock = CountedMutex {
+            mutex: m,
+            hold_count: 9,
+        };
+        unsafe { mutex_delete_counted(&mut lock) };
+        assert_eq!(
+            calls(),
+            vec![Call::Delete(1, cell as usize), Call::Free(cell as usize)]
+        );
+        assert_eq!(unsafe { *cell }, 0, "cell is zeroed after delete");
+        assert!(lock.mutex.sem_cell.is_null(), "cell pointer NULLed");
+        assert_eq!(lock.mutex.unused, 0, "padding zeroed");
+        assert_eq!(lock.hold_count, 0, "hold counter reset");
+    }
+
+    /// NULL cell: no ROM op, no free — but the object is still zeroed,
+    /// counter included (the three stores are unconditional).
+    #[test]
+    fn delete_counted_null_cell_still_resets_the_object() {
+        let _lock = mock_kernel();
+        let mut lock = CountedMutex {
+            mutex: Mutex {
+                sem_cell: core::ptr::null_mut(),
+                unused: 0xdead_beef,
+            },
+            hold_count: 0xdead_beef,
+        };
+        unsafe { mutex_delete_counted(&mut lock) };
+        assert_eq!(calls(), vec![]);
+        assert!(lock.mutex.sem_cell.is_null());
+        assert_eq!(lock.mutex.unused, 0);
+        assert_eq!(lock.hold_count, 0);
+    }
+
+    /// A zero ROM handle guards off the thunk's ROM delete and free, but
+    /// the object is still fully reset.
+    #[test]
+    fn delete_counted_zero_handle_resets_without_rom() {
+        let _lock = mock_kernel();
+        let mut cell: u32 = 0;
+        let mut lock = live_counted_lock(&mut cell, 4);
+        unsafe { mutex_delete_counted(&mut lock) };
+        assert_eq!(calls(), vec![], "zero handle: no ROM delete, no free");
+        assert!(lock.mutex.sem_cell.is_null());
+        assert_eq!(lock.hold_count, 0);
+    }
+
+    /// The shared early-boot cell is deleted but never freed, same as
+    /// `mutex_delete`; the object around it is still zeroed.
+    #[test]
+    fn delete_counted_early_cell_is_not_freed() {
+        let _lock = mock_kernel();
+        unsafe { EARLY_FLAG_RET = 1 };
+        let mut m = Mutex {
+            sem_cell: core::ptr::null_mut(),
+            unused: 0,
+        };
+        unsafe { mutex_create(&mut m) };
+        CALLS.lock().unwrap().clear();
+        let mut lock = CountedMutex {
+            mutex: m,
+            hold_count: 2,
+        };
+        unsafe { mutex_delete_counted(&mut lock) };
+        assert_eq!(
+            calls(),
+            vec![Call::Delete(1, early_cell() as usize)],
+            "the shared static cell must not be freed"
+        );
+        assert_eq!(unsafe { *early_cell() }, 0);
+        assert!(lock.mutex.sem_cell.is_null());
+        assert_eq!(lock.hold_count, 0);
     }
 }

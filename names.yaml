@@ -6697,6 +6697,31 @@ functions:
       unconditional - a NULL cell or zero handle skips the ROM op but
       still decrements, and unlocking a free lock wraps to 0xffffffff.
 
+  - address: 0x08094424
+    ghidra: FUN_08094424
+    name: mutex_delete_counted
+    size: 40
+    sig: "void mutex_delete_counted(CountedMutex *lock)"
+    module: kernel/sync_mutex
+    status: ported
+    vars: {param_1: lock}
+    notes: >-
+      Counted-lock teardown, the destructor half of the
+      mutex_lock_counted / mutex_unlock_counted pair. If the semaphore
+      cell pointer (word 0) is non-NULL it runs the same cell-destroy
+      thunk 0x0805646c that mutex_delete uses (guards cell/*cell, ROM
+      semaphore delete kind 1 via 0x08037e40 -> 0x22003dc8, *cell zeroed,
+      cell freed unless it is the static early-boot cell 0x089cc8f8);
+      then all three words (cell pointer, padding, hold counter) are
+      zeroed unconditionally - even with a NULL cell the object returns
+      to its all-zero born state. 6 bl call sites, binary-scanned; every
+      caller hands it an embedded 12-byte object inside a larger struct
+      (decomp: this+0x18 @ 0x08209f20, this+0x74 @ 0x08133fe0, this+0x88
+      @ 0x081b676c, task-0xc @ 0x0816f5c0 / 0x08297458, wrapper
+      0x080f81f0). Ported as mutex_delete_counted over CountedMutex; the
+      thunk is inlined via the ROM_KERNEL dispatch table like the rest of
+      sync_mutex.rs.
+
   - address: 0x08076154
     ghidra: FUN_08076154
     name: fixed16_rsqrt
