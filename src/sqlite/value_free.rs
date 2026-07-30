@@ -17,13 +17,12 @@
 //! `b sqlite3_free` @ 0x083906f4, here [`tracked_free`].
 //!
 //! Deviations:
-//! - `sqlite3VdbeMemRelease` @ 0x0838c04c is NOT ported; it is the
-//!   [`VALUE_MEM_OPS`] dispatch boundary (house pattern — see
-//!   `heap/block_region.rs`, `sqlite/mem.rs`). Its default slot is a
-//!   documented no-op: an unconfigured build frees the shell and leaks
-//!   the guts rather than running the wrong destructor (the same
-//!   "leak rather than corrupt" stance the `missing_destructor` stub
-//!   this port replaces took for the whole payload).
+//! - `sqlite3VdbeMemRelease` @ 0x0838c04c IS ported
+//!   ([`sqlite::mem_release`](crate::sqlite::mem_release)) and is the
+//!   shipped default of the [`VALUE_MEM_OPS`] dispatch slot (the slot
+//!   is kept so host tests can intercept it; its own extern-release
+//!   dependency @ 0x0838c074 rides that module's `MEM_EXTERN_OPS`
+//!   slot).
 //! - `sqlite3_free` @ 0x083906f4 IS ported
 //!   ([`tracked_free`](crate::heap::tracked::tracked_free)) and is
 //!   called directly, per the porting rules.
@@ -33,9 +32,10 @@
 //!   `b 0x083906f4`).
 
 use crate::heap::tracked::tracked_free;
+use crate::sqlite::mem_release::mem_release;
 
-/// Indirect dispatch for the unported guts release @ 0x0838c04c
-/// (kept behind the table so host tests can intercept it).
+/// Indirect dispatch for the guts release @ 0x0838c04c (kept behind
+/// the table so host tests can intercept it).
 #[derive(Clone, Copy)]
 pub struct ValueMemOps {
     /// `sqlite3VdbeMemRelease(value)` @ 0x0838c04c: release the value's
@@ -45,17 +45,11 @@ pub struct ValueMemOps {
     pub mem_release: unsafe extern "C" fn(value: *mut u8),
 }
 
-/// Default stub: the guts are leaked, not released (see the module
-/// header). Deliberately not a passthrough to a raw free — the guts of
-/// a `Mem` are reached through type-tagged pointers and destructors,
-/// and guessing wrong corrupts.
-unsafe extern "C" fn missing_mem_release(_value: *mut u8) {}
+/// Wired default: the ported guts release @ 0x0838c04c
+/// ([`mem_release`]).
+pub const DEFAULT_VALUE_MEM_OPS: ValueMemOps = ValueMemOps { mem_release };
 
-/// Wired defaults: the one unported helper is a documented no-op.
-pub const DEFAULT_VALUE_MEM_OPS: ValueMemOps = ValueMemOps { mem_release: missing_mem_release };
-
-/// The active guts release. Host tests install recording mocks; the
-/// real port replaces the default when 0x0838c04c lands.
+/// The active guts release. Host tests install recording mocks.
 pub static mut VALUE_MEM_OPS: ValueMemOps = DEFAULT_VALUE_MEM_OPS;
 
 /// Reads the mem-release slot (volatile — the slot is meant to be

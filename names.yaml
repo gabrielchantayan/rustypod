@@ -9565,17 +9565,51 @@ functions:
       on bit 0x40, zMalloc free at +0x24, then z/xDel/zMalloc NULLed);
       the Mem shell itself is freed through the tag-57 tracked
       allocator via the tail branch b sqlite3_free @ 0x083906f4, here
-      tracked_free called directly. 0x0838c04c is NOT ported - it is
-      the VALUE_MEM_OPS dispatch boundary (documented no-op default:
-      free the shell, leak the guts rather than run the wrong
-      destructor; same leak-rather-than-corrupt stance as the
-      missing_destructor stub this port replaces). Now the default
+      tracked_free called directly. 0x0838c04c has since been ported
+      (sqlite/mem_release) and is the shipped default mem_release slot
+      of VALUE_MEM_OPS; its own extern-release dependency @ 0x0838c074
+      rides that module's MEM_EXTERN_OPS slot (documented no-op default:
+      free zMalloc, leak the aggregate context / external string rather
+      than run the wrong destructor; same leak-rather-than-corrupt
+      stance as the missing_destructor stub this port replaces). Now the default
       value_free slot of free_p4's FREE_P4_AUX_OPS. Ghidra's C inlines
       the whole tag-57 free after the bl - that is the tail-called
-      sqlite3_free's body, not this function's 32 bytes. match.py
+      sqlite3_free's body, not this function's 32 bytes.       match.py
       structural: guard matches (cmp/bxeq vs movs/popeq), slot blx for
       the unported release, LLVM inlines tracked_free's stats-update
       prologue and tail-calls free_tag57 instead of b sqlite3_free.
+
+  - address: 0x0838c04c
+    ghidra: FUN_0838c04c
+    name: mem_release
+    size: 40
+    sig: "void mem_release(void *value)"
+    module: sqlite/mem_release
+    status: ported
+    renames:
+      param_1: value
+    notes: >-
+      Upstream SQLite's sqlite3VdbeMemRelease - the value guts release
+      value_free @ 0x08386504 calls before freeing the Mem shell (~20
+      bl call sites across the VDBE column/row teardowns plus one tail
+      b @ 0x082d9728; the aggregate branch of the extern release @
+      0x0838c074 tail-calls back into it). Three steps: the extern
+      release @ 0x0838c074 runs first (bl - finalize an aggregate
+      context on flags bit 0x400 at +0x1c, invoke the xDel destructor
+      at +0x20 on the string at +0x14 on bit 0x40, clear xDel); zMalloc
+      at +0x24 is freed raw (ldr r0,[r4,#0x24]; bl sqlite3_free @
+      0x083906f4, here tracked_free - its NULL guard stands in for the
+      original's, which also runs unconditionally); then z +0x14,
+      zMalloc +0x24 and xDel +0x20 are NULLed in that order so a
+      re-released Mem is inert. The extern release @ 0x0838c074 is NOT
+      ported - it is the MEM_EXTERN_OPS dispatch boundary (documented
+      no-op default: free zMalloc, leak the aggregate context /
+      external string rather than run the wrong destructor). Shipped as
+      the default mem_release slot of value_free's VALUE_MEM_OPS.
+      match.py structural: slot blx for the unported extern release,
+      LLVM inlines tracked_free's stats-update prologue and NULL guard
+      and reorders the +0x20/+0x24 NULL stores; the three str zeros and
+      the zMalloc load/free structure match.
 
   - address: 0x08386e08
     ghidra: FUN_08386e08

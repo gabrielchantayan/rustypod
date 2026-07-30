@@ -72,6 +72,7 @@ pub mod free_p4;
 pub mod hash_function;
 pub mod hex_to_int;
 pub mod mem;
+pub mod mem_release;
 pub mod name_from_token;
 pub mod parse;
 pub mod parse_expr;
