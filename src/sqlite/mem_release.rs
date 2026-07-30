@@ -37,12 +37,10 @@
 //!   ([`sqlite::mem_extern_release`](crate::sqlite::mem_extern_release))
 //!   and is the shipped default of the [`MEM_EXTERN_OPS`] slot (the
 //!   slot is kept so host tests can intercept it); its own aggregate
-//!   finalize dependency @ 0x0838bc38 rides that module's
-//!   `MEM_AGG_FINALIZE_OPS` slot (documented stub default: clear the
-//!   `MEM_Agg`/`MEM_Dyn` bits, free `zMalloc`, leak the external
-//!   string rather than run the wrong destructor — the same
-//!   leak-rather-than-corrupt stance the `missing_extern_release`
-//!   no-op held before that port landed).
+//!   finalize dependency @ 0x0838bc38 IS ported
+//!   ([`sqlite::mem_finalize`](crate::sqlite::mem_finalize::mem_finalize))
+//!   and is the shipped default of that module's
+//!   `MEM_AGG_FINALIZE_OPS` slot.
 //! - `sqlite3_free` @ 0x083906f4 IS ported
 //!   ([`tracked_free`](crate::heap::tracked::tracked_free)) and is
 //!   called directly, per the porting rules. Its NULL guard stands in

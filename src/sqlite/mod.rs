@@ -73,6 +73,7 @@ pub mod hash_function;
 pub mod hex_to_int;
 pub mod mem;
 pub mod mem_extern_release;
+pub mod mem_finalize;
 pub mod mem_release;
 pub mod name_from_token;
 pub mod parse;

@@ -34,20 +34,16 @@
 //! ```
 //!
 //! Deviations:
-//! - The aggregate finalize @ 0x0838bc38 is NOT ported; it is the
-//!   [`MEM_AGG_FINALIZE_OPS`] dispatch boundary (house pattern — see
-//!   `sqlite/mem.rs`, `sqlite/value_free.rs`). Its default slot is a
-//!   documented stub: it clears the `MEM_Agg` and `MEM_Dyn` flag bits
-//!   and returns without invoking `xFinalize`. Termination of the
-//!   aggregate branch relies on the finalize clearing `MEM_Agg` —
-//!   exactly as the original relies on @ 0x0838bc38's 0x28-byte copy
-//!   of the finalized result over the `Mem` (which lands flags = 1) —
-//!   and a pure no-op default would recurse without bound. The stub's
-//!   bit clear keeps the leak-rather-than-corrupt stance the
-//!   `missing_extern_release` no-op held before this port: `zMalloc`
-//!   is still freed by the tail-called `mem_release`, the external
-//!   string at `z` is leaked, and no type-tagged destructor is ever
-//!   guessed.
+//! - The aggregate finalize @ 0x0838bc38 IS ported
+//!   ([`mem_finalize`](crate::sqlite::mem_finalize::mem_finalize)) and
+//!   is the shipped default of the [`MEM_AGG_FINALIZE_OPS`] slot,
+//!   replacing the `missing_agg_finalize` stub (which cleared the
+//!   `MEM_Agg`/`MEM_Dyn` bits and returned 0 without invoking
+//!   `xFinalize`). The slot is kept so host tests can intercept it.
+//!   Termination of the aggregate branch relies on the finalize
+//!   clearing `MEM_Agg` — exactly as the original relies on
+//!   @ 0x0838bc38's 0x28-byte copy of the finalized result over the
+//!   `Mem` (which lands flags = 1).
 //! - `mem_release` @ 0x0838c04c IS ported
 //!   ([`mem_release`](crate::sqlite::mem_release::mem_release)) and is
 //!   tail-called directly, per the porting rules.
@@ -55,6 +51,7 @@
 //!   `mem_release`'s `MEM_EXTERN_OPS`, replacing the
 //!   `missing_extern_release` no-op.
 
+use crate::sqlite::mem_finalize::mem_finalize;
 use crate::sqlite::mem_release::{
     mem_release, FLAGS_OFFSET, FLAG_AGG, FLAG_DYN, X_DEL_OFFSET, Z_OFFSET,
 };
@@ -63,37 +60,25 @@ use crate::sqlite::mem_release::{
 /// `ldr r1,[r4,#0x0]`, upstream `Mem.u.pDef`).
 pub const FUNC_DEF_OFFSET: usize = 0x00;
 
-/// Indirect dispatch for the unported aggregate finalize @ 0x0838bc38
-/// (kept behind the table so host tests can intercept it).
+/// Indirect dispatch for the aggregate finalize @ 0x0838bc38 (kept
+/// behind the table so host tests can intercept it).
 #[derive(Clone, Copy)]
 pub struct MemAggFinalizeOps {
     /// The aggregate finalize @ 0x0838bc38: invoke the FuncDef's
     /// `xFinalize` on the context, free the accumulation buffer and
     /// copy the finalized result over the `Mem` (returning 1 on
-    /// error). Upstream's `sqlite3VdbeMemFinalize`. NOT ported — the
-    /// default is a documented stub (see the module header).
+    /// error). Upstream's `sqlite3VdbeMemFinalize`. Ported
+    /// ([`mem_finalize`]) and the shipped default.
     pub agg_finalize: unsafe extern "C" fn(value: *mut u8, func_def: *mut u8) -> i32,
 }
 
-/// Default stub: skip the type-tagged `xFinalize` invocation; clear
-/// the `MEM_Agg` and `MEM_Dyn` flag bits so the tail-called
-/// `mem_release` terminates without running a destructor this stub
-/// cannot identify (see the module header). Returns 0 (no error), as
-/// the original does on its NULL-FuncDef early-out.
-unsafe extern "C" fn missing_agg_finalize(value: *mut u8, _func_def: *mut u8) -> i32 {
-    let flags = value.add(FLAGS_OFFSET) as *mut u16;
-    // In-bounds: the caller just read the flags halfword at this offset.
-    flags.write(flags.read() & !(FLAG_AGG | FLAG_DYN));
-    0
-}
-
-/// Wired default: the one unported helper is a documented stub.
+/// Wired default: the ported aggregate finalize @ 0x0838bc38
+/// ([`mem_finalize`]).
 pub const DEFAULT_MEM_AGG_FINALIZE_OPS: MemAggFinalizeOps = MemAggFinalizeOps {
-    agg_finalize: missing_agg_finalize,
+    agg_finalize: mem_finalize,
 };
 
-/// The active aggregate finalize. Host tests install recording mocks;
-/// the real port replaces the default when 0x0838bc38 lands.
+/// The active aggregate finalize. Host tests install recording mocks.
 pub static mut MEM_AGG_FINALIZE_OPS: MemAggFinalizeOps = DEFAULT_MEM_AGG_FINALIZE_OPS;
 
 /// Reads the aggregate-finalize slot (volatile — the slot is meant to
@@ -262,6 +247,9 @@ mod tests {
             // In-bounds: flags at 0x1c, block is 0x30.
             unsafe { (self.ptr().add(FLAGS_OFFSET) as *mut u16).write(flags) };
         }
+        fn flags(&self) -> u16 {
+            unsafe { (self.0.as_ptr().add(FLAGS_OFFSET) as *const u16).read() }
+        }
     }
 
     #[test]
@@ -362,13 +350,51 @@ mod tests {
     }
 
     #[test]
-    fn the_default_finalize_stub_clears_the_extern_bits_and_leaks() {
-        // With the shipped defaults (ported extern release + stub
-        // finalize), a value claiming both an aggregate context and an
-        // xDel destructor — with a garbage xDel — is still torn down
-        // safely: no destructor runs, the bits are cleared, zMalloc is
-        // freed and the three fields are NULLed by the tail-called
-        // mem_release. Leak the external string, never corrupt.
+    fn the_default_agg_finalize_slot_is_the_ported_function() {
+        use crate::sqlite::mem_finalize::mem_finalize;
+        assert_eq!(
+            DEFAULT_MEM_AGG_FINALIZE_OPS.agg_finalize as usize,
+            mem_finalize as usize,
+            "the aggregate finalize @ 0x0838bc38 is ported and shipped by default"
+        );
+    }
+
+    /// A user finalizer that leaves the scratch `Mem` as the port
+    /// initialized it (flags = MEM_Null, zMalloc = NULL) — the
+    /// smallest real `xFinalize`: the ported finalize's 0x28-byte
+    /// result copy then clears `MEM_Agg` exactly as the original's
+    /// does.
+    unsafe extern "C" fn null_result_x_finalize(_ctx: *mut u8) {}
+
+    /// A fake FuncDef holding `null_result_x_finalize` at +0x18.
+    #[repr(align(8))]
+    struct FuncDef([u8; 0x20]);
+
+    impl FuncDef {
+        fn new() -> Self {
+            let mut func_def = FuncDef([0; 0x20]);
+            // In-bounds: xFinalize at 0x18, block is 0x20.
+            unsafe {
+                (func_def.0.as_mut_ptr().add(0x18)
+                    as *mut Option<unsafe extern "C" fn(*mut u8)>)
+                    .write(Some(null_result_x_finalize))
+            };
+            func_def
+        }
+        fn ptr(&mut self) -> *mut u8 {
+            self.0.as_mut_ptr()
+        }
+    }
+
+    #[test]
+    fn the_shipped_default_finalize_tears_down_an_agg_value() {
+        // With the shipped defaults (ported extern release + ported
+        // finalize), an aggregate value is torn down end to end: the
+        // ported finalize runs the user xFinalize, frees zMalloc and
+        // copies the MEM_Null result over the Mem — clearing MEM_Agg,
+        // so the tail-called mem_release's re-entry takes no branch
+        // and just NULLs the three fields (zMalloc is already NULL in
+        // the copied result, so no second free).
         let _heap_guard = mock_heap();
         let _ops_guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
@@ -386,20 +412,28 @@ mod tests {
             let mut value = Mem::new();
             let mut z_malloc_block = TrackedBlock::new();
             let z_malloc_raw = z_malloc_block.raw();
-            value.set_word(FUNC_DEF_OFFSET, 0x0bad_f00dusize as *mut u8);
+            let mut func_def = FuncDef::new();
+            value.set_word(FUNC_DEF_OFFSET, func_def.ptr());
             value.set_word(Z_OFFSET, 0x0bad_beefusize as *mut u8);
-            value.set_word(X_DEL_OFFSET, 0x0bad_d00dusize as *mut u8);
             value.set_word(Z_MALLOC_OFFSET, z_malloc_block.payload());
-            value.set_flags(FLAG_AGG | FLAG_DYN);
+            value.set_flags(FLAG_AGG);
 
             mem_extern_release(value.ptr());
 
             assert_eq!(
                 events(),
                 std::vec![Event::RawFree(z_malloc_raw as usize, TAG_TRACKED)],
-                "the garbage xDel never runs; zMalloc is still freed"
+                "the ported finalize freed zMalloc; the copied MEM_Null \
+                 result cleared MEM_Agg so the re-entry freed nothing else"
             );
-            assert!(value.word(X_DEL_OFFSET).is_null(), "xDel NULLed by mem_release");
+            assert_eq!(
+                value.flags(),
+                1,
+                "the finalize's result copy landed flags = MEM_Null"
+            );
+            assert!(value.word(Z_OFFSET).is_null(), "z NULLed by mem_release");
+            assert!(value.word(Z_MALLOC_OFFSET).is_null(), "zMalloc NULLed");
+            assert!(value.word(X_DEL_OFFSET).is_null(), "xDel NULLed");
         }
     }
 }

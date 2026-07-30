@@ -9718,11 +9718,11 @@ functions:
       of VALUE_MEM_OPS; its own extern-release dependency @ 0x0838c074
       has since been ported (sqlite/mem_extern_release) and is the
       shipped default of that module's MEM_EXTERN_OPS slot; the extern
-      release's aggregate finalize @ 0x0838bc38 rides
-      MEM_AGG_FINALIZE_OPS (documented stub default: clear the
+      release's aggregate finalize @ 0x0838bc38 has since been ported
+      (sqlite/mem_finalize) and is the shipped default of
+      MEM_AGG_FINALIZE_OPS, replacing the documented stub (clear the
       MEM_Agg/MEM_Dyn bits, free zMalloc, leak the external string
-      rather than run the wrong destructor; same leak-rather-than-corrupt
-      stance as the missing_destructor stub this port replaces). Now the default
+      rather than run the wrong destructor). Now the default
       value_free slot of free_p4's FREE_P4_AUX_OPS. Ghidra's C inlines
       the whole tag-57 free after the bl - that is the tail-called
       sqlite3_free's body, not this function's 32 bytes.       match.py
@@ -9755,10 +9755,12 @@ functions:
       re-released Mem is inert. The extern release @ 0x0838c074 has
       since been ported (sqlite/mem_extern_release) and is the shipped
       default of the MEM_EXTERN_OPS slot (the slot is kept so host
-      tests can intercept it); its aggregate finalize @ 0x0838bc38
-      rides that module's MEM_AGG_FINALIZE_OPS slot (documented stub
-      default: clear the MEM_Agg/MEM_Dyn bits, free zMalloc, leak the
-      external string rather than run the wrong destructor). Shipped as
+      tests can intercept it); its aggregate finalize @ 0x0838bc38 has
+      since been ported (sqlite/mem_finalize) and is the shipped
+      default of that module's MEM_AGG_FINALIZE_OPS slot, replacing
+      the documented stub (clear the MEM_Agg/MEM_Dyn bits, free
+      zMalloc, leak the external string rather than run the wrong
+      destructor). Shipped as
       the default mem_release slot of value_free's VALUE_MEM_OPS.
       match.py structural: slot blx for the extern release,
       LLVM inlines tracked_free's stats-update prologue and NULL guard
@@ -9795,15 +9797,11 @@ functions:
       it is blx'd on the string pointer at +0x14 (ldr r0,[r4,#0x14];
       blx r1) and xDel is NULLed; when either check fails the function
       returns untouched (ldmiaeq sp!,{r4,pc}). The aggregate finalize
-      @ 0x0838bc38 is NOT ported - it is the MEM_AGG_FINALIZE_OPS
-      dispatch boundary (documented stub default: clear the MEM_Agg and
-      MEM_Dyn flag bits and return 0 without invoking xFinalize, so the
-      tail-called mem_release terminates - the original relies on the
-      finalize's result copy clearing MEM_Agg, and a pure no-op default
-      would recurse without bound; zMalloc is still freed, the external
-      string at z is leaked, no type-tagged destructor is guessed -
-      the same leak-rather-than-corrupt stance the
-      missing_extern_release no-op held before this port). mem_release
+      @ 0x0838bc38 has since been ported (sqlite/mem_finalize) and is
+      the shipped default of the MEM_AGG_FINALIZE_OPS slot, replacing
+      the documented stub (clear the MEM_Agg and MEM_Dyn flag bits and
+      return 0 without invoking xFinalize); the slot is kept so host
+      tests can intercept it. mem_release
       @ 0x0838c04c IS ported (sqlite/mem_release) and is tail-called
       directly. The port is the shipped default extern_release slot of
       mem_release's MEM_EXTERN_OPS, replacing the
@@ -9813,6 +9811,55 @@ functions:
       into mem_release all match; LLVM adds its fp frame, calls the
       finalize slot with blx through a literal-pool load (the slot, not
       the original's bl @ 0x0838bc38) and reloads value into r4 late.
+
+  - address: 0x0838bc38
+    ghidra: FUN_0838bc38
+    name: mem_finalize
+    size: 124
+    sig: "int mem_finalize(void *value, void *func_def)"
+    module: sqlite/mem_finalize
+    status: ported
+    renames:
+      param_1: value
+      param_2: func_def
+    notes: >-
+      Upstream SQLite's sqlite3VdbeMemFinalize - the aggregate-context
+      finalize the extern release @ 0x0838c074 bl's with the FuncDef
+      pointer at Mem+0x00; 2 bl call sites (the extern release's
+      aggregate branch @ 0x0838c090 and the VDBE step machinery @
+      0x0838a700 - both callers test the return == 1 for the error
+      path, confirming the 0/1 contract). A NULL func_def or NULL
+      xFinalize at FuncDef+0x18 returns 0 untouched (cmp r1,#0;
+      ldrne r2,[r1,#0x18]; cmpne r2,#0; beq - xFinalize is loaded
+      twice, once for the guard and once for the call). Otherwise a
+      0x40-byte frame (sub sp,sp,#0x40) holds an old-style
+      sqlite3_context with the result Mem embedded inline (upstream
+      3.5.x layout: FuncDef *pFunc @ +0x00, Mem s @ +0x08, Mem *pMem
+      @ +0x30, int isError @ +0x34): scratch.flags = 1/MEM_Null
+      (strh @ctx+0x24), scratch.db = value->db @ Mem+0x10 (str
+      @ctx+0x18), scratch.zMalloc = 0 (str @ctx+0x2c), ctx.pMem =
+      value (str r4,[sp,#0x30]), ctx.isError = 0 (str @ctx+0x34),
+      ctx.pFunc = func_def (str r1,[sp,#0x0]); xFinalize(ctx) is
+      blx'd; value->zMalloc at +0x24 is freed raw (bl sqlite3_free @
+      0x083906f4, here tracked_free); the 0x28-byte scratch Mem is
+      memcpy'd over value (bl 0x08037df8, the ROM memcpy veneer, here
+      the ported memcpy) - landing flags = 1 unless xFinalize set a
+      result, which is what clears MEM_Agg for the re-entered extern
+      release; the return is isError != 0 normalized by movne r0,#0x1.
+      The original's compiler omitted upstream's memsets (only the
+      seven stored fields are initialized); the port zero-fills the
+      whole frame instead, and on 64-bit hosts additionally clears the
+      upper half of the widened zMalloc field after the copy (cfg'd
+      out on the ARM target). Shipped as the default agg_finalize slot
+      of mem_extern_release's MEM_AGG_FINALIZE_OPS, replacing the
+      missing_agg_finalize stub (which cleared the MEM_Agg/MEM_Dyn
+      bits and returned 0 without invoking xFinalize). match.py
+      structural: same NULL guard, 0x40 frame, seven context stores,
+      blx xFinalize, ldr/free of zMalloc, 0x28-byte memcpy and the
+      cmp/movne r0,#1 tail; LLVM emits its fp frame, a __aeabi_memclr4
+      for the zero-fill, elides the dead zMalloc zero-store, and
+      inlines tracked_free's NULL guard + stats-update prologue (the
+      same accepted deviation as mem_release/value_free).
 
   - address: 0x08386e08
     ghidra: FUN_08386e08
