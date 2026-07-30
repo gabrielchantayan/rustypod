@@ -53,6 +53,28 @@
 //! `FUN_0813b898` after running query 0x32 — the number of records the
 //! query produced.
 //!
+//! # inner_set_state — original: `FUN_08067ca4` @ 0x08067ca4 (8 bytes)
+//!
+//! The state/mode setter that `inner_set_state_4` tail-branches into:
+//!
+//! ```text
+//! str r1, [r0, #0xe38]   @ inner->state = state
+//! bx  lr
+//! ```
+//!
+//! Unlike the wrapper, callers pass the inner object directly (they
+//! load the +0x40 slot themselves). 11 `bl` call sites: a switch over
+//! query ids @ 0x08111368..0x081113c4 stores states 0..6, and the
+//! query-family wrappers `FUN_0813c02c`/`FUN_0813c6c0` (4),
+//! `FUN_0813c700` (7), `FUN_0813d974`/`FUN_0813deb0`/`FUN_0813e474`
+//! (5) and `FUN_0817a238` (5, then a variable) call it with the inner
+//! object from the query object's +0x40 slot — the same state/mode
+//! word the writers @ 0x08053fdc (1), 0x08054038 (3), 0x08061020 (5)
+//! poke inline and the reader @ 0x0808cf4c compares against 1. The
+//! exact enum is not identified; the function is ported on observable
+//! behavior. This is the symbol `inner_set_state_4`'s port inlined;
+//! it gets its own per-address symbol here.
+//!
 //! Deviation: the materializer is unported firmware (it allocates,
 //! walks a record table and locks a mutex through nine further
 //! callees), so the whole tail target sits behind the
@@ -85,6 +107,16 @@ const RESULT_COUNT: usize = 0xef4;
 pub unsafe extern "C" fn inner_set_state_4(object: *mut u8) {
     let inner = (object.add(INNER) as *const *mut u8).read();
     (inner.add(STATE) as *mut u32).write(STATE_4);
+}
+
+/// inner_set_state — original: `FUN_08067ca4` @ 0x08067ca4 (8 bytes).
+///
+/// Stores `state` into the inner object's state/mode word at +0xe38
+/// and returns. The tail target of `inner_set_state_4`; here callers
+/// pass the inner object itself, having loaded the +0x40 slot.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn inner_set_state(inner: *mut u8, state: u32) {
+    (inner.add(STATE) as *mut u32).write(state);
 }
 
 /// Default [`INNER_MATERIALIZE_COUNT`] stub: the no-op path of the
@@ -207,6 +239,44 @@ mod tests {
         fixture.call();
         fixture.call();
         assert_eq!(fixture.state(), STATE_4);
+    }
+
+    // ---- inner_set_state ---------------------------------------------
+
+    #[test]
+    fn direct_setter_stores_the_given_state() {
+        let mut fixture = Fixture::new();
+        let inner_base = fixture.inner.as_mut_ptr();
+        unsafe { inner_set_state(inner_base, 5) };
+        assert_eq!(fixture.state(), 5);
+    }
+
+    #[test]
+    fn direct_setter_round_trips_every_observed_state() {
+        let mut fixture = Fixture::new();
+        let inner_base = fixture.inner.as_mut_ptr();
+        // 0..7 are the values the 11 bl call sites store; u32::MAX
+        // proves the store is a full word, not a byte.
+        for state in [0u32, 1, 2, 3, 4, 5, 6, 7, u32::MAX] {
+            unsafe { inner_set_state(inner_base, state) };
+            assert_eq!(fixture.state(), state);
+        }
+    }
+
+    #[test]
+    fn direct_setter_touches_only_the_state_word() {
+        let mut fixture = Fixture::new();
+        let inner_before = fixture.inner;
+        let inner_base = fixture.inner.as_mut_ptr();
+        unsafe { inner_set_state(inner_base, 3) };
+        for offset in 0..INNER_LEN {
+            let expect = if (STATE..STATE + 4).contains(&offset) {
+                [3u8, 0, 0, 0][offset - STATE]
+            } else {
+                inner_before[offset]
+            };
+            assert_eq!(fixture.inner[offset], expect, "inner +{offset:#x}");
+        }
     }
 
     // ---- inner_result_count -------------------------------------------

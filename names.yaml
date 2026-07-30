@@ -2922,7 +2922,33 @@ functions:
       stock callee is ported as kernel_yield (kernel/task). match.py
       structural: same call-then-return-0 shape; the diff is the crate fp
       frame and the dispatch-slot blx standing in for the direct bl —
-      the documented condvar.rs deviation.
+       the documented condvar.rs deviation.
+
+  - address: 0x0807f680
+    ghidra: FUN_0807f680
+    name: condvar_init
+    size: 32
+    sig: "void condvar_init(CondVar *condvar)"
+    module: kernel/condvar
+    status: ported
+    renames:
+      r0: condvar
+      r4: condvar (saved)
+    notes: >-
+      Condvar initializer between task_yield (0x0807f670) and
+      mutex_unlock (0x0807f6a0): push {r4,lr}; bl sem_create @
+      0x08056724 (a.k.a. object_create in CONDVAR_HOOKS); store the new
+      kernel object handle at condvar+0; store 0 at +4 and +8 (wait-queue
+      head/tail = empty); pop {r4,pc}. 20 bl call sites. Already ported
+      as `condvar_init` by the condvar-layer region port
+      (0x0807f5cc..0x0807f740 in kernel/condvar.rs, CONDVAR_HOOKS.
+      object_create slot); this entry records the per-address mapping,
+      like the task_yield commit (9ac77aa) did. Sibling no-allocation
+      initializer is condvar_bind @ 0x080ed9c8 (ported). match.py
+      structural: same create-then-zero-queue shape; the diff is the
+      crate fp frame, the dispatch-slot blx standing in for the direct
+      bl, and LLVM merging the +0/+4 stores into one stm — the
+      documented condvar.rs deviation.
 
   - address: 0x0809444c
     ghidra: FUN_0809444c
@@ -14394,6 +14420,37 @@ functions:
       frame-pointer prologue and keeps this in r4 across the call (the
       original relies on the helper preserving r0) - the accepted house
       deviations.
+
+  - address: 0x08067ca4
+    ghidra: FUN_08067ca4
+    name: inner_set_state
+    size: 8
+    sig: "void inner_set_state(u8 *inner, u32 state)"
+    module: util/inner_state
+    status: ported
+    vars: {param_1: inner, param_2: state}
+    notes: >-
+      Two-instruction setter `str r1,[r0,#0xe38]; bx lr` - stores the
+      state/mode word at +0xe38 of the inner query object. This is the
+      tail target of inner_set_state_4 (FUN_0813b7c4, ported beside
+      it); that wrapper's port inlined this store as a documented
+      deviation, and this entry gives the setter its own per-address
+      symbol. 11 bl call sites, all loading the inner object from the
+      query object's +0x40 slot themselves: a switch over query ids @
+      0x08111368..0x081113c4 stores states 0..6, and the query-family
+      wrappers FUN_0813c02c/FUN_0813c6c0 store 4, FUN_0813c700 stores
+      7, FUN_0813d974/FUN_0813deb0/FUN_0813e474 store 5, FUN_0817a238
+      stores 5 then a variable. Same word the inline writers @
+      0x08053fdc (1), 0x08054038 (3) and 0x08061020 (5) poke and the
+      reader @ 0x0808cf4c compares against 1 to pick a result code;
+      the byte-setter sibling @ 0x08067c9c (`strb r1,[r0,#0xe3c]`)
+      touches a different field. Enum not identified - ported on
+      observable behavior. Deviation: none beyond the crate fp frame.
+      Host tests: stores the given value, round-trips 0..7 and
+      u32::MAX (full-word store), touches only the +0xe38 word
+      (whole-buffer byte-compare). match.py structural: identical
+      `str r1,[r0,#0xe38]`; the only diff is the crate-standard
+      push-fp-lr/pop-fp-pc frame.
 
   - address: 0x0813b7c4
     ghidra: FUN_0813b7c4
