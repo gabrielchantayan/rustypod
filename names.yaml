@@ -7088,19 +7088,32 @@ functions:
   - address: 0x0810e64c
     ghidra: FUN_0810e64c
     name: class_registry_construct
-    size: null
+    size: 96
     sig: "void *class_registry_construct(Registry *registry)"
-    module: null
-    status: identified
+    module: app/class_registry
+    status: ported
+    vars: {param_1: registry, piVar1: observer_cache, piVar3: observer, uVar2: registry}
     notes: >-
-      The constructor of the global class registry @ 0x08a79ca4, called
-      from the static-init chain @ 0x082afb6c. Calls 0x08135308(this, 8,
-      4) (the container base ctor, capacity 8 / growth 4), then lazily
-      builds a second 8-byte singleton (operator_new(8) + ctor
-      0x082028a4, cached in a global) and dispatches its vtable[+0x18].
-      NOT ported - it is the missing piece that makes
-      app/registry.rs's registry_lookup_by_id hook-ready, and it pulls
-      in the whole unported container class.
+      The constructor of the global class registry @ 0x08a79ca4 (the
+      crate's CLASS_REGISTRY), called from the static-init chain @
+      0x082afb6c - 9 bl + 1 tail b call sites, binary-scanned. Calls
+      0x08135308(this, 8, 4) (the container base ctor, capacity 8 /
+      growth 4), then lazily builds a second 8-byte observer singleton
+      (operator_new(8) + ctor 0x082028a4, vtable 0x089910ac, cached in
+      the global word @ 0x089d01ac - the literal @ 0x0810e6ac) and
+      dispatches its vtable[+0x18] attach; the cache store lands BEFORE
+      the dispatch and the observer is re-loaded after it. Then
+      0x08135040(this, observer) swaps it in for the container's default
+      observer and 0x08134ff8(this, 1) enables notifications, firing
+      the first change notification. operator_new and
+      observable_set_notify_enabled are already ported and called
+      directly; the container ctor, observer ctor and observer swap sit
+      behind the CLASS_REGISTRY_OPS dispatch table (the
+      app/singletons.rs SINGLETON_CTORS pattern) whose documented
+      default stubs make the port NOT hook-ready: the zeroing observer
+      stub installs no vtable, so the attach dispatch would fault where
+      the original succeeds. match.py: identical shape; the only deltas
+      are the blx-through-slot indirections and the frame layout.
 
   - address: 0x080ed7c0
     ghidra: FUN_080ed7c0

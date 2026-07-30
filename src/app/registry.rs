@@ -111,12 +111,15 @@
 //!   precedent: 0x08a79ca4 is past the end of the decrypted image, pure
 //!   runtime RAM). It defaults to an all-zero object — exactly the
 //!   pre-init state.
-//! - **Not hook-ready.** Its constructor `FUN_0810e64c` is unported, so
-//!   the static's vtable pointer is NULL and [`registry_lookup_by_id`]
-//!   would fault on the first dispatch, precisely as the original would
-//!   before static init. The original has no NULL-vtable guard and
-//!   neither does this port; adding one would be a behavior change, not
-//!   a fix. Host tests install a vtable first.
+//! - **Not hook-ready.** Its constructor `FUN_0810e64c` is ported in
+//!   `app/class_registry.rs`, but that port's container/observer ctor
+//!   slots ship as documented stubs, so the static's vtable pointer is
+//!   NULL until real implementations are installed and
+//!   [`registry_lookup_by_id`] would fault on the first dispatch,
+//!   precisely as the original would before static init. The original
+//!   has no NULL-vtable guard and neither does this port; adding one
+//!   would be a behavior change, not a fix. Host tests install a vtable
+//!   first.
 //! - Struct fields are typed members, never literal byte offsets, so the
 //!   32-bit target layout is exact while a 64-bit host keeps every field
 //!   disjoint (the `block_region.rs` word-index rule).
