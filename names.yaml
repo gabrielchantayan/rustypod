@@ -2880,7 +2880,8 @@ functions:
     notes: >-
       Walks the stream chain from static stdin (pool @ 0x0803068c =
       0x08b2f820) via the +0x40 links, calling the fclose core @
-      0x0802fc00 (STREAM_CLOSE_CORE hook, unported) on every stream whose
+      0x0802fc00 (STREAM_CLOSE_CORE hook, ported as stream_sync_core in
+      stdio/seek_core.rs) on every stream whose
       flags contain all of 0x202 (pool @ 0x08030690), with arg2 = 0 for
       `excluded`, 1 otherwise. List lock object @ 0x08a0fc04 (pool @
       0x08030688; lock hooks patched to nops).
