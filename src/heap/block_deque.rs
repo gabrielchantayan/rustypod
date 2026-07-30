@@ -124,8 +124,9 @@
 //!   returning `this`; the remaining block-manager client calls
 //!   (0x081fbe4c, 0x081fc3f4, 0x081fc298, 0x081fc080, 0x081fc884)
 //!   default to failure/no-op stubs matching the no-manager state;
-//!   `queue_wait` @ 0x080b4adc defaults to a no-op (its result is
-//!   discarded by the only ported caller). `seg_dealloc` @ 0x08266f2c
+//!   `queue_wait` @ 0x080b4adc defaults to the real port in
+//!   heap/queue_wait.rs (its result is discarded by the only ported
+//!   caller). `seg_dealloc` @ 0x08266f2c
 //!   and the mailbox slot pair default to the real ports
 //!   (`veneers::cxx_array_dealloc`, kernel/kobj.rs).
 //! - **Mutex**: the base mutex at +0x8 is locked/unlocked through the
@@ -313,7 +314,8 @@ pub struct PoolBaseOps {
     pub client_erase: unsafe extern "C" fn(client: *mut u8, deque: *mut BlockDeque),
     pub client_erase_commit: unsafe extern "C" fn(client: *mut u8),
     /// Mailbox queue-get wait @ 0x080b4adc `(slot, timeout)`; result
-    /// discarded by the fill loop.
+    /// discarded by the fill loop. Default: the real port
+    /// (heap/queue_wait.rs).
     pub queue_wait: unsafe extern "C" fn(slot: *mut *mut Mailbox, timeout: u32) -> u32,
     /// Segment/map deallocator @ 0x08266f2c `(ptr, count, 0)` — the
     /// count and the trailing zero are dead in the original too (it is
@@ -349,12 +351,6 @@ unsafe extern "C" fn stub_client_erase(_client: *mut u8, _deque: *mut BlockDeque
 
 unsafe extern "C" fn stub_client_erase_commit(_client: *mut u8) {}
 
-/// Default queue wait stub: nothing to wait on without the kernel
-/// queue machinery; the caller discards the result.
-unsafe extern "C" fn stub_queue_wait(_slot: *mut *mut Mailbox, _timeout: u32) -> u32 {
-    0
-}
-
 /// Wired defaults (real ports where they exist, documented stubs for
 /// the unported block-manager client and parent class).
 pub(crate) const DEFAULT_POOL_BASE_OPS: PoolBaseOps = PoolBaseOps {
@@ -368,7 +364,7 @@ pub(crate) const DEFAULT_POOL_BASE_OPS: PoolBaseOps = PoolBaseOps {
     client_populate: stub_client_populate,
     client_erase: stub_client_erase,
     client_erase_commit: stub_client_erase_commit,
-    queue_wait: stub_queue_wait,
+    queue_wait: crate::heap::queue_wait::queue_wait,
     seg_dealloc: crate::heap::veneers::cxx_array_dealloc,
 };
 

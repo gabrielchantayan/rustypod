@@ -8,6 +8,7 @@ pub mod free_path;
 pub mod init;
 pub mod pool;
 pub mod pool_client;
+pub mod queue_wait;
 pub mod stats;
 pub mod tracked;
 pub mod types;

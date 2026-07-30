@@ -2114,10 +2114,45 @@ functions:
       spent) — reproduced. Still unported block-manager client
       machinery: ctor 0x081e6b34, register 0x081eff38, reserve
       0x081fbe4c, headroom 0x081fc3f4, populate 0x081fc298, erase
-      0x081fc080 + commit 0x081fc884, queue-get wait 0x080b4adc.
+      0x081fc080 + commit 0x081fc884.
       match.py structural: same offsets (0x3c/0x29/0x2c/+0xc/0x170),
       same guard test and shared-vs-private split; ops-table blx in
       place of bl.
+
+  - address: 0x080b4adc
+    ghidra: FUN_080b4adc
+    name: queue_wait
+    size: 44
+    sig: "u32 queue_wait(Mailbox **slot, u32 timeout)"
+    module: heap/queue_wait
+    vars: {param_1: slot, param_2: timeout}
+    status: ported
+    notes: >-
+      Queue-get wait wrapper of the block-manager client machinery (the
+      +0x78 mailbox wait of block_deque_fill, timeout [this+0x48]). 9
+      bl call sites, binary-verified: 0x080e2ee4, 0x080e4310,
+      0x0813b1a8, 0x0814b9f0, 0x08160cd8, 0x081effa4, 0x08214068
+      (block_deque_fill), 0x0822356c, 0x08223684. `ldr r0, [r0]`
+      dereferences the caller's mailbox slot once, then bl @ 0x080b4ae4
+      to the ported csem_wait @ 0x08056904 (the 8-byte mailbox block
+      and CountingSem share the state+id layout); the timeout arrives
+      untouched in r1, which is why Ghidra's decompile shows one
+      parameter. Verdict remapped: 0 -> 0, 1 (timeout) -> 3, any other
+      code -> 0 (cmp #0 / bne, cmp #1 / bne, mov r0, #3; the
+      other-code fold is unreachable from the ported csem_wait, kept
+      for the branch structure). Callers cmp r0, #0x3 (0x0813b1ac,
+      0x0814b9f4), map nonzero to -1 (0x080e2ee8, 0x080e4314), or
+      discard the result (the fill loop). The bl is kept as an indirect
+      call through the QUEUE_WAIT_SEM slot (default: the real port) so
+      LLVM cannot inline the whole 88-byte semaphore into the 44-byte
+      wrapper; the port is the shipped default of
+      POOL_BASE_OPS.queue_wait, replacing the no-op stub (identical
+      verdict under stock hooks: an empty mailbox times out). Host
+      tests drive the 0/1/other mapping through the slot and the
+      timeout/zero-clamp/count-bookkeeping end-to-end through the real
+      csem_wait. match.py structural: ldr r0,[r0] then blx-in-place-of-
+      bl, the mapping folded to cmp #1 + moveq #3 (0/else -> 0) — the
+      original's two-compare structure rendered branchless.
 
   - address: 0x08037cd0
     ghidra: FUN_08037cd0
