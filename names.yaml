@@ -12692,12 +12692,13 @@ functions:
       result.node + 0x14 - the mapped value word inside the node (0x10
       header + key string word at +0x10). The string object word
       (r1 on entry) is the whole key; the result's inserted-flag byte
-      at +4 is dropped. 0x083c327c is not yet ported, so the port
-      dispatches it through a new StringKeyMapOps::insert_unique slot
-      (PairHeaderOps/ByteKeyMapOps precedent) whose shipped default is
-      fail-closed: null node + flag 0, so the lookup returns 0x14 (null
-      + 0x14), an obviously invalid value pointer - the pre-port
-      byte_key_map_find behaviour. cxx_string_copy_ctor/release are
+      at +4 is dropped. 0x083c327c is now ported (string_key_tree_insert_unique,
+      same module) and is the shipped default of the
+      StringKeyMapOps::insert_unique slot the lookup dispatches through
+      (PairHeaderOps/ByteKeyMapOps precedent); the pre-port fail-closed
+      default (null node + flag 0, so the lookup returned 0x14 - null
+      + 0x14, an obviously invalid value pointer, the pre-port
+      byte_key_map_find behaviour) is retained test-only. cxx_string_copy_ctor/release are
       reached through #[inline(never)] front-ends
       (pair_string_copy_ctor/pair_string_release) to preserve the
       original's three bl boundaries (the pool_operator_new rationale);
@@ -12711,37 +12712,64 @@ functions:
   - address: 0x083c327c
     ghidra: FUN_083c327c
     name: string_key_tree_insert_unique
-    size: 392
-    module: null
-    status: identified
+    size: 396
+    sig: "void string_key_tree_insert_unique(StringKeyInsertResult *result, StringKeyMap *map, const StringKeyPair *key_pair)"
+    module: cxx/string_map
+    status: ported
+    vars: {param_1: result, param_2: map, param_3: key_pair, iVar1: went_left, pbVar2: node, pbVar3: parent, "local_2c[0]": position}
     notes: >-
-      Scouted from string_map_lookup_or_insert @ 0x083db4c4; the tree
-      walk that lookup dispatches through STRING_KEY_MAP_OPS. libstdc++
-      _Rb_tree::_M_insert_unique for the string-keyed map family - the
-      same shape as its ported byte-keyed twin @ 0x083b867c
-      (byte_key_tree_insert_unique in cxx/byte_key_map.rs, 396 bytes).
-      Contract: insert_unique(result, map, pair) writes the node pointer
-      at result+0 and the inserted-flag byte at result+4. Container:
-      +0x10 header node (header+4 = root, header+8 = leftmost), +0x14
-      node count, +0x18 multi-insert flag byte, +0x19 comparator object.
-      Descends comparing through cxx_string_less @ 0x083d74f4 (ported;
-      nonzero -> left at node+8, else right at node+0xc), then the
-      begin() test via the iterator-equality helper @ 0x083cf818 and an
-      inline predecessor walk decide found-vs-insert; found returns the
-      existing node flagged 0, else _M_insert @ 0x083c3408 links a fresh
-      node (allocates @ 0x083c311c - ported as
-      string_key_tree_allocate_node in cxx/string_map.rs -,
-      copy-constructs the pair -
-      cxx_string_copy_ctor plus one value word - and rebalances via the
-      rotations @ 0x083c31d4 (ported as string_key_tree_rotate_left in
-      cxx/string_map.rs - the scouting note's 0x083c31f4 was
-       mid-function; the real entry and only bl target is 0x083c31d4) /
-       0x083c3228 (ported as string_key_tree_rotate_right in
-       cxx/string_map.rs)) flagged 1. _M_insert takes
-      the key pair as a fifth argument on the stack. Node keys sit at
-      node+0x10. Not ported - needs the _M_insert @ 0x083c3408 chain
-       (allocator + rotations) with it; port them together, like the
-       byte-keyed family.
+      Ported. libstdc++ _Rb_tree::_M_insert_unique for the string-keyed
+      map family - the twin of the ported byte-keyed insert-unique @
+      0x083b867c (byte_key_tree_insert_unique in cxx/byte_key_map.rs),
+      differing only in the comparator (the string less @ 0x083d74f4,
+      the ported cxx_string_less, instead of an inlined byte compare).
+      Size corrected from the scouting note's 392 to 396 (the body runs
+      0x083c327c..0x083c3408, like the twin). Descend from the root
+      (header at map+0x10; header+4 = root) comparing the pair's key
+      string against node keys at node+0x10 (less-than -> left at +8,
+      else right at +0xc), remembering the last node and direction.
+      Uniqueness (multi-insert byte at map+0x18 clear): a last-left
+      step tests position == header+8 (begin) for an immediate insert,
+      else walks to the in-order predecessor (inline
+      _Rb_tree_decrement at 0x083c3368-0x083c33c4: header recognised by
+      red color 0 + parent->parent self-loop, else ascend while the
+      node is its parent's left child); the candidate's key comparing
+      less than the new key links a fresh node via _M_insert @
+      0x083c3408 (flag 1), otherwise the existing node returns (flag
+      0). Multi-insert set: always links. Result: node word at
+      result+0, flag byte at result+4. The port is the shipped default
+      of STRING_KEY_MAP_OPS (string_map_lookup_or_insert @ 0x083db4c4's
+      slot; the pre-port fail-closed stub is retained test-only) and
+      calls the ported _M_insert (string_key_tree_insert_node, same
+      module) directly - no insert-node slot, unlike the byte-keyed
+      family. The comparator is reached through the inline(never)
+      pair_string_less front-end to keep the original's bl boundaries;
+      the iterator-equality helper @ 0x083cf818 (a one-word compare) is
+      inlined, like the twin's 0x083cf740. Deviations: the original's
+      not-found insert shares the multimap tail (bne 0x083c32e4 into
+      the bl @ 0x083c32f8) - the port expresses all three inserts
+      through one link_fresh_node helper (LLVM keeps three call sites);
+      _M_insert's fifth stack argument (the key pair) is an ordinary
+      fifth parameter in the port; the original's per-descent-step and
+      pre-compare dead stack-scratch zeroes are dropped (the twin's
+      deviation). Host tests: empty-tree begin insert (root/leftmost/
+      rightmost, COW share), existing key flagged 0 with no new share,
+      new minimum (begin path) and new maximum (right descent)
+      leftmost/rightmost follow-ups, the predecessor path both ways
+      (insert between predecessor and position; duplicate of the
+      predecessor's key found), the multi-insert byte skipping
+      uniqueness, and a 40-key insert-then-find stress in three key
+      orders validating flag, node identity, share counts, count and
+      the full red-black/BST/extremes contract after every insert.
+      match.py structural: 99 vs 106 instructions - same descent loop
+      (comparator bl, #8/#0xc child select), multi-insert check, begin
+      test, inline predecessor walk, reverse compare, the three result
+      epilogues and the _M_insert bl sites with r2=0 and the key pair
+      on the stack; the diff is LLVM's fp frame, register scheduling,
+      the private comparator front-end's argument promotion (the
+      ignored comparator-object argument dropped) and the third _M_insert
+      call site (the original tail-shares two) - the expected
+      ADS-vs-LLVM noise.
 
   - address: 0x083c311c
     ghidra: FUN_083c311c
@@ -12870,8 +12898,9 @@ functions:
     vars: {param_1: result, param_2: map, param_3: insert_position, param_4: parent, param_5: key, pbVar1: node, pbVar7: node, pbVar4: parent, pbVar5: uncle, uVar6: grandparent}
     notes: >-
       libstdc++ _Rb_tree::_M_insert for the string-keyed map family -
-      the node-link + rebalance the (not yet ported) insert-unique @
-      0x083c327c reaches by bl @ 0x083c32f8 / 0x083c3350, passing the
+      the node-link + rebalance the (now ported)
+      insert-unique @ 0x083c327c reaches by bl @ 0x083c32f8 /
+      0x083c3350, passing the
       key pair as a fifth argument on the stack (the port takes an
       ordinary fifth parameter). Mirror of the ported byte-keyed twin
       @ 0x083b8844 (byte_key_tree_insert_node in cxx/byte_key_map.rs,

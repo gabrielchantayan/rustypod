@@ -18,6 +18,10 @@
 //!   string-keyed map family — the node link + rebalance the
 //!   insert-unique @ 0x083c327c calls, built on the three pieces
 //!   above).
+//! - [`string_key_tree_insert_unique`] — original: `FUN_083c327c` @
+//!   0x083c327c (396 bytes; libstdc++ `_Rb_tree::_M_insert_unique` —
+//!   the find-or-insert walk the lookup dispatches to, built on
+//!   `_M_insert` above).
 //!
 //! Algorithm (from the disassembly): copy-construct a temporary
 //! `basic_string` from the caller's string object into the key half of
@@ -31,10 +35,10 @@
 //! +0xc) with the key pair at +0x10, so +0x14 is the mapped value
 //! inside the pair.
 //!
-//! Contract of the tree operation @ 0x083c327c — scouted, not yet
-//! ported, so dispatched through the [`STRING_KEY_MAP_OPS`] slot with a
-//! fail-closed default (house pattern — see `cxx/pair_header.rs` and
-//! the pre-port history of `cxx/byte_key_map.rs`):
+//! Contract of the tree operation @ 0x083c327c — now ported below as
+//! [`string_key_tree_insert_unique`], the shipped default of the
+//! [`STRING_KEY_MAP_OPS`] dispatch slot (house pattern — see
+//! `cxx/pair_header.rs` and `cxx/byte_key_map.rs`):
 //!
 //! ```text
 //! void insert_unique(result *r0, map *r1, const pair *r2)
@@ -46,10 +50,10 @@
 //!   r2     the 8-byte key pair above; node keys sit at node+0x10
 //! ```
 //!
-//! The body (392 bytes, 0x083c327c-0x083c3404) is libstdc++'s
-//! `_Rb_tree::_M_insert_unique`, the same shape as its ported byte-keyed
-//! twin @ 0x083b867c (`byte_key_tree_insert_unique` in
-//! `cxx/byte_key_map.rs`): descend from the root comparing keys through
+//! The body (396 bytes) is libstdc++'s `_Rb_tree::_M_insert_unique`,
+//! the same shape as its ported byte-keyed twin @ 0x083b867c
+//! (`byte_key_tree_insert_unique` in `cxx/byte_key_map.rs`) — ported
+//! below as [`string_key_tree_insert_unique`]: descend from the root comparing keys through
 //! the string comparator @ 0x083d74f4 (the ported `cxx_string_less`;
 //! nonzero -> descend left at +8, else right at +0xc), remember the
 //! last node, then — via the iterator-equality helper @ 0x083cf818
@@ -70,11 +74,15 @@
 //!
 //! Deviations:
 //! - 0x083c327c is dispatched through [`STRING_KEY_MAP_OPS`], whose
-//!   shipped default is the fail-closed stub below (no tree wired: a
-//!   null node with the flag clear, so the lookup returns null + 0x14
-//!   — an obviously invalid value pointer, matching the pre-port
-//!   `byte_key_map_find` behaviour). The lookup's tests install
-//!   recording mocks through the slot.
+//!   shipped default is the port [`string_key_tree_insert_unique`] in
+//!   this module (the pre-port fail-closed stub is retained for the
+//!   host tests); the lookup's tests install recording mocks through
+//!   the slot. The tree insert in turn calls the ported `_M_insert`
+//!   [`string_key_tree_insert_node`] directly (no slot, unlike the
+//!   byte-keyed family), which allocates through
+//!   [`STRING_KEY_ALLOC_OPS`] (shipped default: the ported pool
+//!   allocator [`string_key_tree_allocate_node`]) — with the whole
+//!   chain at its shipped defaults an insertion really links a node.
 //! - The original spills the result's node word to the stack across the
 //!   release call (`str r0,[sp,#0]` / `ldr r0,[sp,#0]`); a Rust local
 //!   serves the same purpose.
@@ -122,8 +130,9 @@ pub struct StringKeyMap {
     _opaque: [u8; 0],
 }
 
-/// Indirect dispatch for the not-yet-ported tree insert-unique
-/// operation @ 0x083c327c (the `PairHeaderOps` precedent in
+/// Indirect dispatch for the tree insert-unique operation @
+/// 0x083c327c, now ported as [`string_key_tree_insert_unique`] below —
+/// the shipped default of the slot (the `PairHeaderOps` precedent in
 /// `cxx/pair_header.rs`).
 #[derive(Clone, Copy)]
 pub struct StringKeyMapOps {
@@ -137,10 +146,13 @@ pub struct StringKeyMapOps {
     ),
 }
 
-/// Fail-closed default: no tree wired, so report "not found, not
-/// inserted" with a null node — the lookup then returns 0x14 (null +
-/// 0x14), an obviously invalid value pointer. A null node can never
-/// come out of the real operation (the header node always exists).
+/// Default stub from before 0x083c327c was ported: no tree wired, so
+/// report "not found, not inserted" with a null node — the lookup then
+/// returns 0x14 (null + 0x14), an obviously invalid value pointer. The
+/// shipped default is now the port below; retained for the host tests
+/// (a null node can never come out of the real operation — the header
+/// node always exists).
+#[allow(dead_code)] // test-only since 0x083c327c was ported
 unsafe extern "C" fn missing_insert_unique(
     result: *mut StringKeyInsertResult,
     _map: *mut StringKeyMap,
@@ -150,12 +162,12 @@ unsafe extern "C" fn missing_insert_unique(
     (*result).inserted = 0;
 }
 
-/// The active tree-operation slot. The shipped default is the
-/// documented fail-closed stub above; host tests install recording
-/// mocks through the slot. Written once at init on target; tests
-/// serialize access.
+/// The active tree-operation slot. The shipped default is the port
+/// [`string_key_tree_insert_unique`] below; host tests install
+/// recording mocks (and the documented stub above) through the slot.
+/// Written once at init on target; tests serialize access.
 pub static mut STRING_KEY_MAP_OPS: StringKeyMapOps = StringKeyMapOps {
-    insert_unique: missing_insert_unique,
+    insert_unique: string_key_tree_insert_unique,
 };
 
 /// `#[inline(never)]` front-end for `cxx_string_copy_ctor` @ 0x083d8c30:
@@ -190,9 +202,11 @@ fn pair_string_release(string: *mut *mut u8) {
 /// `key` must point at a live `basic_string` object and `map` at a live
 /// container whose layout matches the scouted one in the module header.
 /// The installed `insert_unique` must honour the 0x083c327c contract
-/// (node word at result+0, flag byte at result+4). The shipped default
-/// reports a null node, and the returned pointer is then 0x14 and must
-/// not be dereferenced.
+/// (node word at result+0, flag byte at result+4); the shipped default
+/// is the port below, which — with the whole slot chain at its shipped
+/// defaults — inserts through the ported `_M_insert` and pool
+/// allocator. (Only a test-installed stub reports a null node; the
+/// returned pointer is then 0x14 and must not be dereferenced.)
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn string_map_lookup_or_insert(
@@ -217,6 +231,181 @@ pub unsafe extern "C" fn string_map_lookup_or_insert(
     let node = result.node;
     pair_string_release(core::ptr::addr_of_mut!(pair.key));
     node.wrapping_add(0x14)
+}
+
+// ---------------------------------------------------------------------------
+// The tree insert-unique operation itself (@ 0x083c327c).
+// ---------------------------------------------------------------------------
+
+/// Iterator decrement (predecessor) — the walk the original emits
+/// inline at 0x083c3368-0x083c33c4 (old libstdc++ `_Rb_tree_decrement`;
+/// the iterator-equality helper @ 0x083cf818 is a one-word compare,
+/// folded into the caller's `position == begin` test). The header node
+/// is recognised by its red (0) color byte plus the parent->parent
+/// self-loop and steps to its rightmost child; otherwise descend the
+/// left subtree to its rightmost node, or ascend while the current
+/// node is its parent's left child. In this function the walk only
+/// ever runs on a non-header node with a null left child (the begin()
+/// check catches the header, and a non-null left would have been
+/// descended into), so only the ascend loop is reachable — the other
+/// branches are kept for fidelity with the original.
+#[inline(always)]
+unsafe fn rb_tree_predecessor(
+    mut node: *mut StringKeyTreeNode,
+) -> *mut StringKeyTreeNode {
+    if (*node).color == 0 && (*(*node).parent).parent == node {
+        return (*node).right;
+    }
+    let left = (*node).left;
+    if !left.is_null() {
+        let mut rightmost = left;
+        loop {
+            let next = (*rightmost).right;
+            if next.is_null() {
+                return rightmost;
+            }
+            rightmost = next;
+        }
+    }
+    let mut parent = (*node).parent;
+    while (*parent).left == node {
+        node = parent;
+        parent = (*parent).parent;
+    }
+    parent
+}
+
+/// Links a fresh node for `key` under `parent` through the ported
+/// `_M_insert` [`string_key_tree_insert_node`] and reports it flagged
+/// as inserted — the original's two `bl 0x083c3408` sites (the shared
+/// multimap / not-found tail @ 0x083c32f8 and the begin() insert @
+/// 0x083c3350), each passing insert_position = 0 (r2 = r4, the null
+/// child the descent stopped at).
+#[inline(always)]
+unsafe fn link_fresh_node(
+    result: *mut StringKeyInsertResult,
+    map: *mut StringKeyMap,
+    parent: *mut StringKeyTreeNode,
+    key: *const StringKeyPair,
+) {
+    let mut fresh: *mut u8 = core::ptr::null_mut();
+    string_key_tree_insert_node(
+        &mut fresh,
+        map,
+        core::ptr::null_mut(),
+        parent.cast::<u8>(),
+        key,
+    );
+    (*result).node = fresh;
+    (*result).inserted = 1;
+}
+
+/// string_key_tree_insert_unique — original: `FUN_083c327c` @
+/// 0x083c327c (396 bytes; called from `string_map_lookup_or_insert` @
+/// 0x083db4c4 and its siblings through the [`STRING_KEY_MAP_OPS`] slot,
+/// whose shipped default is this port).
+///
+/// libstdc++ `_Rb_tree::_M_insert_unique` for the string-keyed map
+/// family — the twin of the ported byte-keyed insert-unique @
+/// 0x083b867c
+/// ([`byte_key_tree_insert_unique`](crate::cxx::byte_key_map)),
+/// differing only in the comparator (the string less @ 0x083d74f4
+/// instead of an inlined byte compare). Descend from the root
+/// (`header->parent`; the header node pointer is at map+0x10) comparing
+/// the new pair's key string against each node's key at node+0x10
+/// through `cxx_string_less` — less-than goes left (+8), else right
+/// (+0xc) — and remember the last node (`parent`) and the last
+/// direction. With the multi-insert byte at map+0x18 clear (map
+/// semantics): if the last step went left, a `position == header->left`
+/// (begin) test decides an immediate insert, else `position` becomes
+/// its in-order predecessor; the candidate's key is then compared
+/// against the new key — an existing key (`!(pos_key < new_key)`)
+/// returns the existing node with the inserted flag 0, otherwise a
+/// fresh node is linked under `parent` via `_M_insert` @ 0x083c3408 —
+/// the ported [`string_key_tree_insert_node`] — and returned flagged 1.
+/// With the multi-insert byte set (multimap semantics) the uniqueness
+/// test is skipped and every call links a fresh node.
+///
+/// The result contract (see the module header): node pointer at
+/// `result + 0`, inserted-flag byte at `result + 4`.
+///
+/// Deviations:
+/// - The string comparator @ 0x083d74f4 (the ported `cxx_string_less`)
+///   is reached through the `#[inline(never)]` [`pair_string_less`]
+///   front-end to preserve the original's `bl` boundaries (the
+///   `pool_operator_new` rationale in `cxx/byte_key_map.rs`); the
+///   iterator-equality helper @ 0x083cf818 (a one-word compare of the
+///   two iterator words) is inlined, like the byte-keyed twin's
+///   0x083cf740.
+/// - The original's not-found insert shares the multimap insert tail
+///   (`bne 0x083c32e4` into the `bl 0x083c3408` @ 0x083c32f8) rather
+///   than having its own call site; the port expresses all three
+///   inserts through [`link_fresh_node`] (LLVM keeps three call
+///   sites — same calls, different tail sharing).
+/// - The original passes the key pair to `_M_insert` as a fifth
+///   argument on the stack (ARM AAPCS r0-r3 + stack); the ported
+///   [`string_key_tree_insert_node`] takes it as an ordinary fifth
+///   parameter.
+/// - The original zeroes two dead stack scratch words per descent step
+///   (`str r10,[sp,#0xc]/[sp,#0x10]` inside the loop) and two more
+///   before the final compare (`[sp,#0x1c]/[sp,#0x10]`) — dead scratch
+///   stores, dropped here (the byte-keyed twin's deviation).
+///
+/// # Safety
+/// `result` must point at 8 writable bytes, `map` at a live container
+/// matching the scouted [`StringKeyTree`] layout (module header), and
+/// `key` at a readable 8-byte pair whose string word is a live
+/// `basic_string` object. The `_M_insert` port's `allocate_node` slot
+/// must honour the 0x083c311c contract (fresh node: color 0, links
+/// null) or return null to abort — a null fresh node then propagates
+/// to `result + 0` with the flag set, like the byte-keyed twin.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_key_tree_insert_unique(
+    result: *mut StringKeyInsertResult,
+    map: *mut StringKeyMap,
+    key: *const StringKeyPair,
+) {
+    let tree = map.cast::<StringKeyTree>();
+    let comparator = core::ptr::addr_of!((*tree).comparator);
+    let header = (*tree).header;
+    let mut node = (*header).parent;
+    let mut parent = header;
+    let mut went_left = true;
+    while !node.is_null() {
+        went_left = pair_string_less(
+            comparator,
+            core::ptr::addr_of!((*key).key),
+            core::ptr::addr_of!((*node).key.key),
+        ) != 0;
+        parent = node;
+        node = if went_left { (*node).left } else { (*node).right };
+    }
+
+    if (*tree).multi_insert == 0 {
+        let mut position = parent;
+        if went_left {
+            // header.left is the leftmost node (begin()); the original
+            // compares the two iterator words through 0x083cf818.
+            if position == (*header).left {
+                link_fresh_node(result, map, parent, key);
+                return;
+            }
+            position = rb_tree_predecessor(position);
+        }
+        if pair_string_less(
+            comparator,
+            core::ptr::addr_of!((*position).key.key),
+            core::ptr::addr_of!((*key).key),
+        ) != 0 {
+            link_fresh_node(result, map, parent, key);
+            return;
+        }
+        (*result).node = position.cast::<u8>();
+        (*result).inserted = 0;
+        return;
+    }
+    link_fresh_node(result, map, parent, key);
 }
 
 // ---------------------------------------------------------------------------
@@ -268,7 +457,7 @@ pub struct StringKeyTree {
     /// +0x14: live node count.
     pub node_count: u32,
     /// +0x18: multi-insert flag byte (nonzero = multimap semantics;
-    /// read by the not-yet-ported insert-unique @ 0x083c327c, never by
+    /// read by the ported insert-unique @ 0x083c327c, never by
     /// `_M_insert`).
     pub multi_insert: u8,
     /// +0x19: key-comparator object (stateless `less<string>`; only
@@ -628,10 +817,10 @@ fn pair_string_less(
 
 /// string_key_tree_insert_node — original: `FUN_083c3408` @ 0x083c3408
 /// (476 bytes; libstdc++ `_Rb_tree::_M_insert` for the string-keyed map
-/// family, the node-link + rebalance path its caller — the not-yet-
-/// ported insert-unique @ 0x083c327c — reaches by `bl` @ 0x083c32f8
-/// and 0x083c3350, passing the key pair as a fifth argument on the
-/// stack).
+/// family, the node-link + rebalance path its caller — the ported
+/// [`string_key_tree_insert_unique`] @ 0x083c327c — reaches by `bl` @
+/// 0x083c32f8 and 0x083c3350, passing the key pair as a fifth argument
+/// on the stack).
 ///
 /// Allocates a fresh 0x18-byte node through the pool allocator @
 /// 0x083c311c (dispatched via [`STRING_KEY_ALLOC_OPS`], shipped default
@@ -1961,6 +2150,315 @@ mod tests {
                     sorted.sort_by(string_order);
                     assert_eq!(keys, sorted);
                     validate_extremes(header_ptr, &sorted);
+                }
+            }
+        }
+        free_arena();
+        assert!(unsafe { (*core::ptr::addr_of!(ARENA)).is_empty() });
+    }
+
+    // --- string_key_tree_insert_unique (@ 0x083c327c) ----------------
+
+    /// Calls the port directly (the insert-unique contract): node
+    /// pointer at result+0, inserted-flag byte at result+4. The pair
+    /// carries the key string and a zeroed value word, like the lookup
+    /// builds.
+    unsafe fn run_insert_unique(
+        tree: *mut StringKeyTree,
+        key: *mut u8,
+    ) -> StringKeyInsertResult {
+        let pair = StringKeyPair { key, value: 0 };
+        let mut result = StringKeyInsertResult {
+            node: core::ptr::null_mut(),
+            inserted: 0xaa,
+        };
+        string_key_tree_insert_unique(
+            &mut result,
+            tree.cast::<StringKeyMap>(),
+            &pair,
+        );
+        result
+    }
+
+    /// The COW share count of a key string's rep (how many copies hold
+    /// it — one per node the key was linked into).
+    unsafe fn share_count(key: *mut u8) -> i32 {
+        (*(key as *mut StringRep).sub(1)).refcount
+    }
+
+    /// Empty tree (root null, leftmost/rightmost == header): the
+    /// begin() test hits immediately and the fresh node is linked under
+    /// the header as root/leftmost/rightmost, flagged 1 — a real
+    /// pool-node insertion through the ported `_M_insert` chain, COW
+    /// share and all.
+    #[test]
+    fn insert_unique_empty_tree_inserts_under_header() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        let _guard = install_arena_allocator();
+        unsafe {
+            let mut header = test_header();
+            let header_ptr = core::ptr::addr_of_mut!(header);
+            let mut tree = make_empty_tree(header_ptr);
+            let tree_ptr = core::ptr::addr_of_mut!(tree);
+
+            let key = key_string(5);
+            let result = run_insert_unique(tree_ptr, key);
+            assert_eq!(result.inserted, 1);
+            let node = result.node.cast::<StringKeyTreeNode>();
+            assert!(!node.is_null());
+            assert_eq!((*header_ptr).parent, node); // root
+            assert_eq!((*header_ptr).left, node); // leftmost
+            assert_eq!((*header_ptr).right, node); // rightmost
+            assert_eq!((*node).key.key, key); // COW share
+            assert_eq!(share_count(key), 1);
+            assert_eq!(tree.node_count, 1);
+            assert_eq!(validate_tree(header_ptr, 1), [key]);
+            validate_extremes(header_ptr, &[key]);
+        }
+        free_arena();
+    }
+
+    /// Single-node tree, same key: the descent goes right (equal keys
+    /// are not less), the reverse compare fails too, so the existing
+    /// node comes back with the flag clear — no allocation, no new COW
+    /// share, count untouched.
+    #[test]
+    fn insert_unique_existing_key_returns_node_flag_clear() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        let _guard = install_arena_allocator();
+        unsafe {
+            let mut header = test_header();
+            let header_ptr = core::ptr::addr_of_mut!(header);
+            let mut tree = make_empty_tree(header_ptr);
+            let tree_ptr = core::ptr::addr_of_mut!(tree);
+
+            let key = key_string(7);
+            let first = run_insert_unique(tree_ptr, key);
+            assert_eq!(first.inserted, 1);
+            assert_eq!(share_count(key), 1);
+
+            let second = run_insert_unique(tree_ptr, key);
+            assert_eq!(second.inserted, 0);
+            assert_eq!(second.node, first.node);
+            assert_eq!(share_count(key), 1); // found: no new share
+            assert_eq!(tree.node_count, 1);
+            assert_eq!(validate_tree(header_ptr, 1), [key]);
+        }
+        free_arena();
+    }
+
+    /// Single-node tree, smaller key: left descent, position is the
+    /// leftmost (begin) node, so the fresh node links right away under
+    /// it and the leftmost pointer follows.
+    #[test]
+    fn insert_unique_new_minimum_inserts_at_begin() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        let _guard = install_arena_allocator();
+        unsafe {
+            let mut header = test_header();
+            let header_ptr = core::ptr::addr_of_mut!(header);
+            let mut tree = make_empty_tree(header_ptr);
+            let tree_ptr = core::ptr::addr_of_mut!(tree);
+
+            let k7 = key_string(7);
+            let k3 = key_string(3);
+            let root = run_insert_unique(tree_ptr, k7)
+                .node
+                .cast::<StringKeyTreeNode>();
+            let result = run_insert_unique(tree_ptr, k3);
+            assert_eq!(result.inserted, 1);
+            let fresh = result.node.cast::<StringKeyTreeNode>();
+            assert_eq!((*root).left, fresh);
+            assert_eq!((*header_ptr).left, fresh); // new leftmost
+            assert_eq!((*header_ptr).right, root); // rightmost unchanged
+            assert_eq!(validate_tree(header_ptr, 2), [k3, k7]);
+            validate_extremes(header_ptr, &[k3, k7]);
+        }
+        free_arena();
+    }
+
+    /// Single-node tree, larger key: right descent, the candidate's
+    /// key compares less than the new key, so a fresh node links under
+    /// it and the rightmost pointer follows.
+    #[test]
+    fn insert_unique_new_maximum_inserts_after_right_descent() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        let _guard = install_arena_allocator();
+        unsafe {
+            let mut header = test_header();
+            let header_ptr = core::ptr::addr_of_mut!(header);
+            let mut tree = make_empty_tree(header_ptr);
+            let tree_ptr = core::ptr::addr_of_mut!(tree);
+
+            let k7 = key_string(7);
+            let k9 = key_string(9);
+            let root = run_insert_unique(tree_ptr, k7)
+                .node
+                .cast::<StringKeyTreeNode>();
+            let result = run_insert_unique(tree_ptr, k9);
+            assert_eq!(result.inserted, 1);
+            let fresh = result.node.cast::<StringKeyTreeNode>();
+            assert_eq!((*root).right, fresh);
+            assert_eq!((*header_ptr).right, fresh); // new rightmost
+            assert_eq!((*header_ptr).left, root); // leftmost unchanged
+            assert_eq!(validate_tree(header_ptr, 2), [k7, k9]);
+            validate_extremes(header_ptr, &[k7, k9]);
+        }
+        free_arena();
+    }
+
+    /// The predecessor path, insert case: the descent ends going left
+    /// at a non-leftmost node, so the begin() test fails and the inline
+    /// predecessor walk runs; the predecessor's key compares less than
+    /// the new key, so a fresh node links, flagged 1. Tree keys 30, 10,
+    /// 20, 5 (inserted in that order): key 25 descends right of 20 and
+    /// left of 30, whose predecessor is 20.
+    #[test]
+    fn insert_unique_left_descent_past_begin_walks_predecessor() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        let _guard = install_arena_allocator();
+        unsafe {
+            let mut header = test_header();
+            let header_ptr = core::ptr::addr_of_mut!(header);
+            let mut tree = make_empty_tree(header_ptr);
+            let tree_ptr = core::ptr::addr_of_mut!(tree);
+
+            let keys: Vec<*mut u8> =
+                [30u8, 10, 20, 5].iter().map(|&k| key_string(k)).collect();
+            for &key in &keys {
+                assert_eq!(run_insert_unique(tree_ptr, key).inserted, 1);
+            }
+            let k25 = key_string(25);
+            let result = run_insert_unique(tree_ptr, k25);
+            assert_eq!(result.inserted, 1);
+            let fresh = result.node.cast::<StringKeyTreeNode>();
+            assert_eq!((*fresh).key.key, k25);
+            assert_eq!(tree.node_count, 5);
+            let mut sorted = keys.clone();
+            sorted.push(k25);
+            sorted.sort_by(string_order);
+            assert_eq!(validate_tree(header_ptr, 5), sorted);
+            validate_extremes(header_ptr, &sorted);
+        }
+        free_arena();
+    }
+
+    /// The predecessor path, found case: same descent shape, but the
+    /// new key duplicates the predecessor's key — key 20 descends right
+    /// of itself (equal is not less) and left of 30, whose predecessor
+    /// is 20 — so the existing node comes back with the flag clear and
+    /// the tree untouched.
+    #[test]
+    fn insert_unique_predecessor_duplicate_returns_found() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        let _guard = install_arena_allocator();
+        unsafe {
+            let mut header = test_header();
+            let header_ptr = core::ptr::addr_of_mut!(header);
+            let mut tree = make_empty_tree(header_ptr);
+            let tree_ptr = core::ptr::addr_of_mut!(tree);
+
+            let keys: Vec<*mut u8> =
+                [30u8, 10, 20, 5].iter().map(|&k| key_string(k)).collect();
+            let mut nodes: Vec<*mut u8> = Vec::new();
+            for &key in &keys {
+                nodes.push(run_insert_unique(tree_ptr, key).node);
+            }
+            let k20 = keys[2];
+            let result = run_insert_unique(tree_ptr, k20);
+            assert_eq!(result.inserted, 0);
+            assert_eq!(result.node, nodes[2]);
+            assert_eq!(share_count(k20), 1); // found: no new share
+            assert_eq!(tree.node_count, 4);
+            let mut sorted = keys.clone();
+            sorted.sort_by(string_order);
+            assert_eq!(validate_tree(header_ptr, 4), sorted);
+        }
+        free_arena();
+    }
+
+    /// The multi-insert byte set (multimap semantics): the uniqueness
+    /// test is skipped and a duplicate key still links a fresh node,
+    /// flagged 1 — count grows, the key's COW share count grows with
+    /// each link.
+    #[test]
+    fn insert_unique_multi_insert_flag_skips_uniqueness() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        let _guard = install_arena_allocator();
+        unsafe {
+            let mut header = test_header();
+            let header_ptr = core::ptr::addr_of_mut!(header);
+            let mut tree = make_empty_tree(header_ptr);
+            tree.multi_insert = 1;
+            let tree_ptr = core::ptr::addr_of_mut!(tree);
+
+            let key = key_string(7);
+            let first = run_insert_unique(tree_ptr, key);
+            let second = run_insert_unique(tree_ptr, key);
+            assert_eq!(first.inserted, 1);
+            assert_eq!(second.inserted, 1);
+            assert!(!second.node.is_null());
+            assert!(second.node != first.node);
+            assert_eq!(tree.node_count, 2);
+            assert_eq!(share_count(key), 2); // one share per link
+        }
+        free_arena();
+    }
+
+    /// Behavioural parity against a reference model: three key orders
+    /// over unique keys — ascending, descending, and a deterministic
+    /// zigzag — each insert validated for the flag, the count and the
+    /// full red-black/BST/extremes contract; then every key is
+    /// re-inserted in reverse order, expecting the found path: flag
+    /// clear, the very node the first pass linked, count and share
+    /// counts unchanged.
+    #[test]
+    fn insert_unique_insert_then_find_matches_reference() {
+        let _lock = OPS_LOCK.lock().unwrap();
+        let _guard = install_arena_allocator();
+
+        let mut orders: Vec<Vec<u8>> = Vec::new();
+        orders.push((1u8..=40).collect());
+        orders.push((1u8..=40).rev().collect());
+        // Deterministic zigzag: mid, mid-1, mid+1, mid-2, mid+2, ...
+        let mut zigzag = Vec::new();
+        let mid = 20u8;
+        zigzag.push(mid);
+        for d in 1..20u8 {
+            zigzag.push(mid - d);
+            zigzag.push(mid + d);
+        }
+        orders.push(zigzag);
+
+        for order in orders {
+            unsafe {
+                let mut header = test_header();
+                let header_ptr = core::ptr::addr_of_mut!(header);
+                let mut tree = make_empty_tree(header_ptr);
+                let tree_ptr = core::ptr::addr_of_mut!(tree);
+
+                let mut keys: Vec<*mut u8> = Vec::new();
+                let mut nodes: Vec<*mut u8> = Vec::new();
+                for (i, k) in order.iter().enumerate() {
+                    let key = key_string(*k);
+                    let result = run_insert_unique(tree_ptr, key);
+                    assert_eq!(result.inserted, 1, "first pass inserts");
+                    assert!(!result.node.is_null());
+                    assert_eq!(tree.node_count as usize, i + 1);
+                    keys.push(key);
+                    nodes.push(result.node);
+                    let mut sorted = keys.clone();
+                    sorted.sort_by(string_order);
+                    assert_eq!(validate_tree(header_ptr, i + 1), sorted);
+                    validate_extremes(header_ptr, &sorted);
+                }
+                // Second pass, reverse order: every key is found.
+                for (i, &key) in keys.iter().enumerate().rev() {
+                    let result = run_insert_unique(tree_ptr, key);
+                    assert_eq!(result.inserted, 0, "second pass finds");
+                    assert_eq!(result.node, nodes[i], "the same node");
+                    assert_eq!(share_count(key), 1, "no new share");
+                    assert_eq!(tree.node_count as usize, keys.len());
                 }
             }
         }
