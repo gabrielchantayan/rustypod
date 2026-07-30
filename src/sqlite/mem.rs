@@ -16,6 +16,11 @@
 //!   bytes; 41 `bl`). SQLite's `sqlite3_malloc`, the tag-57 tracked
 //!   allocator's entry — the raw allocate the `db_*` wrappers and the
 //!   realloc NULL-branch dispatch to.
+//! - `alloc_deny_check` — original: `FUN_08378a44` @ 0x08378a44 (132
+//!   bytes; 2 `bl`, one from each of the entries above, both slot 0).
+//!   SQLite's fault-injection allocation-deny schedule (the upstream
+//!   `sqlite3MemdebugFail` deny-counter family): a countdown of
+//!   successes to let through, then a budget of denials.
 //!
 //! The `db_*` four hang the out-of-memory condition off one sticky byte in the
 //! connection: `db->mallocFailed` at +0x1e. Once it is set the allocator
@@ -35,6 +40,10 @@
 //!   ported as well and is the wired `.realloc` default, so its
 //!   NULL-pointer branch reaches the ported malloc through the malloc
 //!   slot, exactly like the original's tail branch.
+//! - The allocation-deny schedule both entries consult @ 0x08378a44
+//!   *is* ported ([`alloc_deny_check`], below) and is the wired
+//!   [`ALLOC_PRESSURE_OPS`]`.alloc_deny_check` default; the slot stays
+//!   so host tests can record and swap.
 //! - `sqlite3_free` @ 0x083906f4 *is* ported
 //!   (`heap::tracked::tracked_free`), and so is the zero-fill the
 //!   original reaches through the IRAM thunk @ 0x08037dc8
@@ -94,30 +103,128 @@ pub(crate) unsafe fn db_malloc_op() -> unsafe extern "C" fn(i32) -> *mut u8 {
 /// Indirect dispatch for the memory-pressure helper [`sqlite3_realloc`]
 /// and [`sqlite3_malloc`] share (house ops-slot pattern: an indirect
 /// call in place of the original's `bl`, so host tests can record and
-/// swap). The default reproduces the original's at-rest behavior (see
-/// the slot). The family's other pressure helper — the soft-limit warn
-/// @ 0x0837d67c — is ported ([`tracked_stats_warn_soft_limit`]) and
-/// called directly.
+/// swap). The wired default is the ported [`alloc_deny_check`]. The
+/// family's other pressure helper — the soft-limit warn @ 0x0837d67c —
+/// is ported ([`tracked_stats_warn_soft_limit`]) and called directly.
 #[derive(Clone, Copy)]
 pub struct AllocPressureOps {
     /// Allocation-deny schedule @ 0x08378a44: countdown-driven failure
     /// injection whose 0x14-byte records live in the stats block at
     /// +0x0c. While a record is active the check drains its countdown,
     /// then denies (returns 1) until the record's denial budget runs
-    /// out. The records are BSS-zero at rest — inactive — so the
-    /// default stub returns 0 (proceed). Always called with slot 0.
+    /// out. Always called with slot 0. The wired default is the ported
+    /// [`alloc_deny_check`] (BSS-zero at rest: inactive, proceed).
     pub alloc_deny_check: unsafe extern "C" fn(slot: i32) -> i32,
 }
 
-/// Default stub: the at-rest schedule is inactive, so the original
-/// check @ 0x08378a44 falls through to its `mov r0, #0`.
-unsafe extern "C" fn alloc_deny_check_inactive(_slot: i32) -> i32 {
-    0
+/// One 0x14-byte allocation-deny schedule record (original layout:
+/// [`AllocDenyRecord::countdown`] @ +0x00 … [`AllocDenyRecord::benign_mode`]
+/// @ +0x12, matching upstream SQLite's fault-injection `MemFault`).
+#[repr(C)]
+pub struct AllocDenyRecord {
+    /// +0x00: allocations to let through before the denials begin.
+    pub countdown: i32,
+    /// +0x04: denials left; when the last one is handed out the record
+    /// deactivates itself.
+    pub deny_budget: i32,
+    /// +0x08: denials handed out while [`AllocDenyRecord::benign_mode`]
+    /// was positive.
+    pub benign_denies: i32,
+    /// +0x0c: denials handed out since the record was armed.
+    pub deny_count: i32,
+    /// +0x10: nonzero while the schedule is armed (`ldrb`/`strb`).
+    pub active: u8,
+    /// +0x12: when positive (`ldrsh` — signed) each denial also counts
+    /// into [`AllocDenyRecord::benign_denies`].
+    pub benign_mode: i16,
 }
 
-/// Wired default (the at-rest behavior — see the slot doc).
+/// The record is exactly the 0x14 bytes the original strides by
+/// (`add r1, r0, r0, lsl #2; add r0, r3, r1, lsl #2`).
+const _: () = assert!(core::mem::size_of::<AllocDenyRecord>() == 0x14);
+
+/// The schedule table. Original: the stats block + 0x0c (literal
+/// 0x08adc2cc) — exactly one 0x14-byte record fits before `soft_limit`
+/// @ +0x20, and every call site passes slot 0. BSS-zero at rest:
+/// inactive, so every check proceeds.
+pub static mut ALLOC_DENY_SCHEDULE: [AllocDenyRecord; 1] = [AllocDenyRecord {
+    countdown: 0,
+    deny_budget: 0,
+    benign_denies: 0,
+    deny_count: 0,
+    active: 0,
+    benign_mode: 0,
+}];
+
+/// Global denial counter, incremented once per denial. Original: word
+/// +0x18 of the BSS struct @ 0x08a09918 (literal @ 0x08378acc), which
+/// no other code references.
+pub static mut ALLOC_DENY_TOTAL: i32 = 0;
+
+/// alloc_deny_check — original: `FUN_08378a44` @ 0x08378a44 (132 bytes;
+/// the two literals @ 0x08378ac8/0x08378acc extend the visible span to
+/// 0x08378ad0; 2 `bl` call sites — [`sqlite3_malloc`] @ 0x08390b14 and
+/// [`sqlite3_realloc`] @ 0x08390eec, both with slot 0, binary-scanned).
+///
+/// SQLite's fault-injection allocation-deny schedule — the upstream
+/// test-harness `sqlite3MemdebugFail` deny-counter family, NOT the
+/// soft-limit alarm (the alarm is the ported
+/// [`tracked_stats_warn_soft_limit`] @ 0x0837d67c path; verified
+/// against osos.asm and osos.dec: literal @ 0x08378ac8 = 0x08adc2cc =
+/// stats + 0x0c, the record table; literal @ 0x08378acc = 0x08a09918,
+/// the otherwise-unreferenced BSS struct with the global counter):
+///
+/// - `record = table + slot * 0x14` — no bounds check; only slot 0
+///   exists and only slot 0 is ever passed.
+/// - Record inactive (byte @ +0x10 == 0): return 0 — proceed.
+/// - `countdown` (+0x00) > 0: countdown-- and return 0 — the schedule
+///   lets this many allocations through before the denials begin
+///   (`cmp`/`subgt`/`strgt`/`bgt`).
+/// - Otherwise a denial: the global counter ++, `deny_count` (+0x0c)
+///   ++, and when `benign_mode` (+0x12, signed halfword) > 0 also
+///   `benign_denies` (+0x08) ++ (`ldrsh`/`cmp`/`ldrgt`/`addgt`/`strgt`);
+///   then `deny_budget` (+0x04) -- and, when it runs out (<= 0), the
+///   active byte is cleared (`movle`/`strble`) — the schedule
+///   deactivates itself after its budget of denials. Returns 1: the
+///   caller fails the allocation without touching the heap.
+///
+/// Deviations:
+/// - The record table is the [`ALLOC_DENY_SCHEDULE`] static instead of
+///   living inside the stats block at 0x08adc2cc (the `heap::tracked`
+///   module simplification, same as [`ALLOC_STATS`]).
+/// - The global counter is the [`ALLOC_DENY_TOTAL`] static instead of
+///   the anonymous BSS struct @ 0x08a09918.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn alloc_deny_check(slot: i32) -> i32 {
+    let schedule = core::ptr::addr_of_mut!(ALLOC_DENY_SCHEDULE);
+    let record = schedule.cast::<AllocDenyRecord>().add(slot as usize);
+    if (*record).active == 0 {
+        return 0;
+    }
+    let countdown = (*record).countdown;
+    if countdown > 0 {
+        (*record).countdown = countdown - 1;
+        return 0;
+    }
+    let total = core::ptr::addr_of_mut!(ALLOC_DENY_TOTAL);
+    *total += 1;
+    (*record).deny_count += 1;
+    if (*record).benign_mode > 0 {
+        (*record).benign_denies += 1;
+    }
+    let budget = (*record).deny_budget - 1;
+    (*record).deny_budget = budget;
+    if budget <= 0 {
+        (*record).active = 0;
+    }
+    1
+}
+
+/// Wired default: the ported [`alloc_deny_check`] @ 0x08378a44 (at rest
+/// the schedule is BSS-inactive, so it falls through to its proceed).
 pub const DEFAULT_ALLOC_PRESSURE_OPS: AllocPressureOps =
-    AllocPressureOps { alloc_deny_check: alloc_deny_check_inactive };
+    AllocPressureOps { alloc_deny_check: alloc_deny_check };
 
 /// The active pressure helper. Host tests install a recorder and
 /// restore the default.
@@ -155,8 +262,8 @@ fn alloc_pressure_ops() -> AllocPressureOps {
 ///   tail.
 /// - The allocation-deny schedule @ 0x08378a44(0) may then refuse the
 ///   allocation outright — NULL without touching the heap (the
-///   [`ALLOC_PRESSURE_OPS`] slot, default reproduces the BSS-inactive
-///   at-rest proceed).
+///   [`ALLOC_PRESSURE_OPS`] slot; the wired default is the ported
+///   [`alloc_deny_check`], BSS-inactive at rest).
 /// - First heap attempt `alloc_tag57(n + 44)` (`bl 0x08391d2c`); on
 ///   failure an UNGATED warn(n) and a single retry — the retry IS the
 ///   ported [`tracked_alloc_tail`] @ 0x08390b8c this head falls through
@@ -176,9 +283,10 @@ fn alloc_pressure_ops() -> AllocPressureOps {
 ///   by the same rebuild/accounting — and keeps one copy of the block
 ///   builder.
 /// - The lock arm and the deny schedule dispatch through ops slots
-///   (house pattern; defaults are the ported [`tracked_stats_arm_lock`]
-///   and the at-rest proceed); the ported warn helper and
-///   [`tracked_alloc_tail`] are called directly, per the porting rules.
+///   (house pattern; the defaults are the ported
+///   [`tracked_stats_arm_lock`] and the ported [`alloc_deny_check`]);
+///   the ported warn helper and [`tracked_alloc_tail`] are called
+///   directly, per the porting rules.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn sqlite3_malloc(n: i32) -> *mut u8 {
@@ -244,9 +352,11 @@ pub unsafe extern "C" fn sqlite3_malloc(n: i32) -> *mut u8 {
 /// Deviations:
 /// - The accounting block is the [`ALLOC_STATS`] static instead of the
 ///   literal 0x08adc2c0 (the `heap::tracked` module simplification).
-/// - The unported helper (the deny schedule) dispatches through an ops
-///   slot whose default reproduces the at-rest behavior; the ported
-///   callees ([`tracked_free`], [`tracked_stats_warn_soft_limit`],
+/// - The ported deny schedule ([`alloc_deny_check`] @ 0x08378a44)
+///   dispatches through the [`ALLOC_PRESSURE_OPS`]`.alloc_deny_check`
+///   slot — the wired default IS the port (house pattern, kept so host
+///   tests can record and swap); the ported callees
+///   ([`tracked_free`], [`tracked_stats_warn_soft_limit`],
 ///   [`realloc_wrapper`], [`memmove`]) are called directly, per the
 ///   porting rules, and the malloc entry dispatches through the
 ///   [`DB_MEM_OPS`]`.malloc` slot whose wired default is the ported
@@ -956,14 +1066,21 @@ pub(crate) mod tests {
     }
 
     /// The wired defaults: DB_MEM_OPS.realloc is this port, the deny
-    /// stub reproduces the at-rest schedule (proceed), and the ported
-    /// warn helper is a no-op with the at-rest NULL callback.
+    /// default IS the ported schedule @ 0x08378a44 (at rest: proceed),
+    /// and the ported warn helper is a no-op with the at-rest NULL
+    /// callback.
     #[test]
-    fn the_default_wiring_is_the_port_with_at_rest_pressure_stubs() {
+    fn the_default_wiring_is_the_port_with_the_at_rest_schedule() {
         let _f = pressure();
         unsafe {
+            reset_schedule();
             assert_eq!(DEFAULT_DB_MEM_OPS.realloc as usize, sqlite3_realloc as usize);
-            assert_eq!((DEFAULT_ALLOC_PRESSURE_OPS.alloc_deny_check)(0), 0);
+            assert_eq!(
+                DEFAULT_ALLOC_PRESSURE_OPS.alloc_deny_check as usize,
+                alloc_deny_check as usize,
+                "the wired deny default is the ported schedule"
+            );
+            assert_eq!((DEFAULT_ALLOC_PRESSURE_OPS.alloc_deny_check)(0), 0, "at rest: proceed");
 
             // At rest the callback word is NULL: the real warn helper
             // returns before the invoke slot — nothing is recorded.
@@ -1167,5 +1284,160 @@ pub(crate) mod tests {
             assert!(!grown.is_null(), "the realloc NULL branch reaches it too");
             assert_eq!(ALLOC_STATS.current_bytes, 24 + 40);
         }
+    }
+
+    // ---- alloc_deny_check (0x08378a44) -------------------------------
+
+    /// Puts the schedule and the global counter back to their BSS
+    /// at-rest zeros. Every deny test calls this on the way in AND on
+    /// the way out: the schedule is global state and the other tests in
+    /// this module rely on the at-rest proceed.
+    unsafe fn reset_schedule() {
+        (*core::ptr::addr_of_mut!(ALLOC_DENY_SCHEDULE))[0] = AllocDenyRecord {
+            countdown: 0,
+            deny_budget: 0,
+            benign_denies: 0,
+            deny_count: 0,
+            active: 0,
+            benign_mode: 0,
+        };
+        core::ptr::write(core::ptr::addr_of_mut!(ALLOC_DENY_TOTAL), 0);
+    }
+
+    fn schedule() -> &'static mut AllocDenyRecord {
+        unsafe { &mut (*core::ptr::addr_of_mut!(ALLOC_DENY_SCHEDULE))[0] }
+    }
+
+    fn deny_total() -> i32 {
+        unsafe { core::ptr::read(core::ptr::addr_of!(ALLOC_DENY_TOTAL)) }
+    }
+
+    /// At rest (BSS zeros) the record is inactive: the check proceeds
+    /// and nothing is touched.
+    #[test]
+    fn an_inactive_schedule_proceeds_and_touches_nothing() {
+        let _guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            reset_schedule();
+            assert_eq!(alloc_deny_check(0), 0);
+            assert_eq!(alloc_deny_check(0), 0);
+            assert_eq!(deny_total(), 0);
+            let record = schedule();
+            assert_eq!(record.countdown, 0);
+            assert_eq!(record.deny_budget, 0);
+            assert_eq!(record.deny_count, 0);
+            assert_eq!(record.benign_denies, 0);
+            reset_schedule();
+        }
+    }
+
+    /// The active gate comes first: an inactive record does NOT drain
+    /// its countdown (the ldrb/cmp/bne precedes the countdown load).
+    #[test]
+    fn an_inactive_record_does_not_drain_its_countdown() {
+        let _guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            reset_schedule();
+            schedule().countdown = 5;
+            assert_eq!(alloc_deny_check(0), 0);
+            assert_eq!(schedule().countdown, 5, "untouched while inactive");
+            assert_eq!(deny_total(), 0);
+            reset_schedule();
+        }
+    }
+
+    /// An armed record lets `countdown` allocations through (one
+    /// decrement each, no denial counters) before the first denial.
+    #[test]
+    fn the_countdown_runs_out_before_the_first_denial() {
+        let _guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            reset_schedule();
+            {
+                let record = schedule();
+                record.active = 1;
+                record.countdown = 2;
+                record.deny_budget = 1;
+            }
+            assert_eq!(alloc_deny_check(0), 0);
+            assert_eq!(alloc_deny_check(0), 0);
+            assert_eq!(schedule().countdown, 0);
+            assert_eq!(deny_total(), 0, "no denials while the countdown drains");
+            assert_eq!(schedule().deny_count, 0);
+            assert_eq!(alloc_deny_check(0), 1, "then the denial budget kicks in");
+            reset_schedule();
+        }
+    }
+
+    /// Each denial bumps the global counter and the record's deny
+    /// count; when the budget runs out the record deactivates itself
+    /// and later checks proceed again.
+    #[test]
+    fn the_budget_runs_out_and_the_record_deactivates() {
+        let _guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            reset_schedule();
+            {
+                let record = schedule();
+                record.active = 1;
+                record.deny_budget = 2;
+            }
+            assert_eq!(alloc_deny_check(0), 1);
+            assert_eq!(deny_total(), 1);
+            assert_eq!(schedule().deny_count, 1);
+            assert_eq!(schedule().deny_budget, 1);
+            assert_eq!(schedule().active, 1, "budget left: still armed");
+
+            assert_eq!(alloc_deny_check(0), 1);
+            assert_eq!(deny_total(), 2);
+            assert_eq!(schedule().deny_count, 2);
+            assert_eq!(schedule().deny_budget, 0);
+            assert_eq!(schedule().active, 0, "the last denial disarms the record");
+
+            assert_eq!(alloc_deny_check(0), 0, "inactive again: proceed");
+            assert_eq!(schedule().deny_count, 2, "no further accounting");
+            reset_schedule();
+        }
+    }
+
+    /// `benign_mode` (+0x12) is a SIGNED halfword: positive counts each
+    /// denial into `benign_denies`; zero or negative does not.
+    #[test]
+    fn a_positive_benign_mode_counts_denials_separately() {
+        let _guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            reset_schedule();
+            {
+                let record = schedule();
+                record.active = 1;
+                record.deny_budget = 3;
+                record.benign_mode = 1;
+            }
+            assert_eq!(alloc_deny_check(0), 1);
+            assert_eq!(schedule().benign_denies, 1);
+
+            schedule().benign_mode = 0;
+            assert_eq!(alloc_deny_check(0), 1);
+            assert_eq!(schedule().benign_denies, 1, "zero: not counted");
+
+            schedule().benign_mode = -1;
+            assert_eq!(alloc_deny_check(0), 1);
+            assert_eq!(schedule().benign_denies, 1, "negative: not counted");
+            assert_eq!(schedule().deny_count, 3, "the main count always moves");
+            reset_schedule();
+        }
+    }
+
+    /// The slot's wired default IS this port (kept behind the slot so
+    /// the pressure tests above can record and swap).
+    #[test]
+    fn the_pressure_slot_defaults_to_this_port() {
+        let _guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(
+            DEFAULT_ALLOC_PRESSURE_OPS.alloc_deny_check as usize,
+            alloc_deny_check as usize
+        );
+        unsafe { reset_schedule() };
+        assert_eq!(unsafe { (DEFAULT_ALLOC_PRESSURE_OPS.alloc_deny_check)(0) }, 0);
     }
 }

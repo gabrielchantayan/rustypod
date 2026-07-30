@@ -11085,6 +11085,51 @@ functions:
       the tst #1 word loads (the accepted expr_delete deviation), and
       a reassociated (bic #1; orr) form of the length<<1 | dyn merge.
 
+  - address: 0x08378a44
+    ghidra: FUN_08378a44
+    name: alloc_deny_check
+    size: 132
+    sig: "int alloc_deny_check(int slot)"
+    module: sqlite/mem
+    status: ported
+    vars: {param_1: slot, iVar1: record, iVar2: countdown, DAT_08378ac8: ALLOC_DENY_SCHEDULE (literal 0x08adc2cc = stats + 0x0c), DAT_08378acc: ALLOC_DENY_TOTAL (literal 0x08a09918, +0x18 word)}
+    notes: >-
+      SQLite's fault-injection allocation-deny schedule - the upstream
+      test-harness sqlite3MemdebugFail deny-counter family, NOT
+      sqlite3MallocAlarm (the soft-limit alarm is the ported
+      tracked_stats_warn_soft_limit @ 0x0837d67c path). Verified against
+      osos.asm and osos.dec: literal @ 0x08378ac8 = 0x08adc2cc = the
+      stats block + 0x0c (exactly one 0x14-byte record fits before
+      soft_limit @ +0x20); literal @ 0x08378acc = 0x08a09918, an
+      otherwise-unreferenced BSS struct whose +0x18 word is a global
+      denial counter. 2 bl call sites: sqlite3_malloc @ 0x08390b14 and
+      sqlite3_realloc @ 0x08390eec, both with slot 0. Record layout
+      (0x14 bytes, upstream's MemFault): +0x00 countdown, +0x04
+      deny_budget, +0x08 benign_denies, +0x0c deny_count, +0x10 active
+      (byte), +0x12 benign_mode (signed halfword). Inactive record:
+      return 0 without draining the countdown. countdown > 0:
+      decrement, proceed (cmp/subgt/strgt/bgt). Otherwise a denial:
+      global counter++, deny_count++, benign_denies++ when benign_mode
+      > 0 (ldrsh), deny_budget-- and the active byte cleared when the
+      budget runs out (movle/strble), return 1 - the caller fails the
+      allocation without touching the heap. Deviations: the table is
+      the ALLOC_DENY_SCHEDULE static and the counter the
+      ALLOC_DENY_TOTAL static instead of stats+0x0c / the 0x08a09918
+      BSS struct (the heap::tracked ALLOC_STATS simplification). The
+      port is the wired ALLOC_PRESSURE_OPS.alloc_deny_check default,
+      replacing the documented at-rest stub; the slot stays for
+      host-test mocks (at rest the schedule is BSS-inactive, so the
+      default proceeds exactly like the stub did). Host tests: at-rest
+      proceed touching nothing, the inactive-before-countdown gate
+      ordering, countdown draining before the first denial, budget
+      exhaustion self-deactivating the record, the signed benign_mode
+      gate (positive/zero/negative), and the slot default identity.
+      match.py structural: same add-shifted slot*0x14 index, ldrb
+      active gate, subgt/strgt countdown, ldrsh/ldrgt benign path and
+      sub/cmp/str/movle/strble budget tail - the diff is LLVM's fp
+      frame, register shuffling, and ALLOC_DENY_TOTAL addressed
+      directly (no +0x18, documented deviation).
+
   - address: 0x082d2a1c
     ghidra: FUN_082d2a1c
     name: hash_function
