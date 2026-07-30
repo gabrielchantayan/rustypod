@@ -4128,6 +4128,29 @@ functions:
       3 call sites: csem_wait @ 0x08056918, csem_signal @ 0x0805698c,
       alias thunk `b` @ 0x080f0420 (thunk_FUN_08056364).
 
+  - address: 0x080f041c
+    ghidra: null
+    name: atomic_add_irqsafe_alias_f041c
+    size: 4
+    sig: "i32 atomic_add_irqsafe_alias_f041c(i32 amount, i32 *ptr)"
+    module: kernel/csem
+    vars: {param_1: amount, param_2: ptr}
+    status: ported
+    notes: >-
+      ALIAS - bare `b 0x08056328` tail veneer onto atomic_add_irqsafe.
+      Absent from functions.csv AND osos.asm (the disassembly listing
+      drops the line); extent and target binary-verified from osos.dec
+      (word eafd97c1; the next word @ 0x080f0420 is the twin alias
+      `b 0x08056364` onto atomic_sub_irqsafe, NOT this entry). 1 call
+      site (binary scan; osos.asm drops it too): the tail `b` @
+      0x08147254 of an unnamed add-veneer @ 0x0814724c (add r1,r0,#4;
+      mov r0,#1 — atomic_add_irqsafe(1, &obj->field4), also absent
+      from functions.csv), mirrored by FUN_08147258 which bl's the sub
+      twin. No separate port exists; hook this address to the
+      atomic_add_irqsafe symbol (the rom_svc_22001cbc_alias_67fc
+      precedent). Doc header placed on atomic_add_irqsafe in
+      src/kernel/csem.rs.
+
   - address: 0x08056904
     ghidra: FUN_08056904
     name: csem_wait

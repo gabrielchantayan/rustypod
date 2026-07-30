@@ -205,6 +205,16 @@ unsafe fn irq_restore(saved: u32) {
 /// With IRQ/FIQ masked: `old = *ptr; *ptr = old + amount` (wrapping, as
 /// ARM `add`), then restores the previous I/F bits and returns `old`.
 /// Argument order is the original's (r0 = amount, r1 = ptr).
+///
+/// Alias veneer @ 0x080f041c (4 bytes: `b 0x08056328`; absent from
+/// functions.csv AND osos.asm — extent binary-verified, word `eafd97c1`;
+/// the next word @ 0x080f0420 is the twin alias onto
+/// [`atomic_sub_irqsafe`]): a bare tail branch onto this function with
+/// 1 call site, the tail `b` @ 0x08147254 of an unnamed add-veneer @
+/// 0x0814724c (`add r1, r0, #4; mov r0, #1` — `atomic_add_irqsafe(1,
+/// &obj->field4)`; also absent from functions.csv). No separate port
+/// exists — hook 0x080f041c straight to this symbol (the
+/// rom_svc_22001cbc_alias_67fc precedent).
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn atomic_add_irqsafe(amount: i32, ptr: *mut i32) -> i32 {
     let mut saved: u32 = 0;
