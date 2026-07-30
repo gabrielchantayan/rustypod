@@ -2904,6 +2904,26 @@ functions:
     module: kernel/sync_mutex
     status: ported
 
+  - address: 0x0807f670
+    ghidra: FUN_0807f670
+    name: task_yield
+    size: 16
+    sig: "i32 task_yield(void)"
+    module: kernel/condvar
+    status: ported
+    notes: >-
+      Yield wrapper between mutex_delete and mutex_unlock: push {r4,lr};
+      bl kernel_yield @ 0x080568fc (r0=0 -> ROM 0x22004260, exact RTXC
+      service unidentified, yield-like); mov r0,#0; pop {r4,pc} — the ROM
+      result is discarded and 0 is always returned. 1 bl call site.
+      Already ported as `task_yield` by the condvar-layer region port
+      (0x0807f5cc..0x0807f740 in kernel/condvar.rs, CONDVAR_HOOKS.
+      task_yield slot); this entry records the per-address mapping. The
+      stock callee is ported as kernel_yield (kernel/task). match.py
+      structural: same call-then-return-0 shape; the diff is the crate fp
+      frame and the dispatch-slot blx standing in for the direct bl —
+      the documented condvar.rs deviation.
+
   - address: 0x0809444c
     ghidra: FUN_0809444c
     name: kernel_running
