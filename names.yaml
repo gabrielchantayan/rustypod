@@ -8935,11 +8935,33 @@ functions:
       `saved | 0x4000`) uses exactly this override. Port reads/writes the
       original firmware address on target (global not port-owned, same
       precedent as control_state_flags); host tests substitute the mock
-      word. The lock-bit read (bl 0x08292f58) is inlined in the port -
-      that helper is a separate function with its own callers and is not
-      ported. match.py - same guard/branch/store structure; LLVM inlines
-      the lock check, reorders the two bit tests, folds base+4 into a
-      direct 0x089cc92c literal, plus its usual fp frame.
+      word. The lock-bit read (bl 0x08292f58) goes through the ported
+      control_state_is_locked; LLVM inlines it on ARM. match.py - same
+      guard/branch/store structure; LLVM inlines the lock check,
+      reorders the two bit tests, folds base+4 into a direct 0x089cc92c
+      literal, plus its usual fp frame.
+
+  - address: 0x08292f58
+    ghidra: FUN_08292f58
+    name: control_state_is_locked
+    size: 20
+    sig: "u32 control_state_is_locked(void)"
+    module: kernel/control_state
+    status: ported
+    notes: >-
+      1 bl call site (@ 0x08292e8c, from control_state_store; Ghidra's
+      decompiled cross-references list further callers, but a binary
+      scan of osos shows only the one). Store-lock query for the
+      control-state word @ 0x089cc92c: loads the object base literal
+      (0x089cc928), loads the word at +4, `and #0x8000; lsr #15` -
+      returns the store-lock bit as a 0/1 value, the guard the setter
+      consults before requiring the 0x4000 override sentinel. Port reads
+      the original firmware address on target (global not port-owned,
+      same precedent as control_state_flags); host tests substitute the
+      mock word. match.py - same load-and-mask-to-0/1 leaf; LLVM folds
+      base+4 into a direct 0x089cc92c literal and merges the and/lsr
+      pair into one barrel-shifter `and r0, r1, r0, lsr #15`, plus its
+      usual fp frame.
 
   - address: 0x08252bec
     ghidra: FUN_08252bec

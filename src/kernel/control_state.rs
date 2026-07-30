@@ -1,5 +1,7 @@
 //! Port of the control-state flags getter `FUN_08292e6c` @ 0x08292e6c
-//! (20 bytes, 253 `bl` call sites in osos).
+//! (20 bytes, 253 `bl` call sites in osos), the guarded setter
+//! `FUN_08292e84` @ 0x08292e84 (44 bytes) and its store-lock query
+//! `FUN_08292f58` @ 0x08292f58 (20 bytes).
 //!
 //! Original:
 //!
@@ -49,9 +51,10 @@ const FLAGS_WORD_ADDR: u32 = 0x089c_c92c;
 /// Mask applied by the original's `lsl #20; lsr #20` pair.
 const FLAGS_MASK: u32 = 0xFFF;
 
-/// Store lock: bit 0x8000 of the *current* state word, tested by the
-/// lock-check helper `FUN_08292f58` (`and #0x8000; lsr #15`) that the
-/// setter calls before deciding to store.
+/// Store lock: bit 0x8000 of the *current* state word, queried by the
+/// lock-check helper `FUN_08292f58` (`and #0x8000; lsr #15`, ported
+/// below as `control_state_is_locked`) that the setter calls before
+/// deciding to store.
 const STORE_LOCK_BIT: u32 = 0x8000;
 
 /// Override sentinel: bit 0x4000 of the *argument* to the setter means
@@ -100,6 +103,37 @@ pub extern "C" fn control_state_flags() -> u32 {
     flags_word() & FLAGS_MASK
 }
 
+/// Original: `FUN_08292f58` @ 0x08292f58 (20 bytes; 1 `bl` call site
+/// @ 0x08292e8c, from `control_state_store` — Ghidra's decompiled
+/// cross-references list further callers, but a binary scan of osos
+/// shows only the one).
+///
+/// Store-lock query for the control-state word @ 0x089cc92c:
+///
+/// ```text
+/// ldr r0, [0x8292f6c]      ; literal 0x089cc928 — control-state object base
+/// ldr r0, [r0, #0x4]       ; state word @ 0x089cc92c
+/// and r0, r0, #0x8000
+/// mov r0, r0, lsr #0xf     ; -> 1 if locked, 0 if not
+/// bx  lr
+/// ```
+///
+/// Returns the store-lock bit (0x8000) of the *current* state word as a
+/// 0/1 value — the guard `control_state_store` consults before deciding
+/// whether a write needs the 0x4000 override sentinel.
+///
+/// # Deviation
+///
+/// Same convention as `control_state_flags`: on target the word is read
+/// straight from the original firmware address 0x089cc92c (the field
+/// belongs to the still-unported control subsystem, so the port must
+/// not own a copy); host builds read the mock word. Codegen on ARM is
+/// the same load-and-shift leaf as the original.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn control_state_is_locked() -> u32 {
+    (flags_word() & STORE_LOCK_BIT) >> 15
+}
+
 /// Original: `FUN_08292e84` @ 0x08292e84 (44 bytes, 3 `bl` call sites
 /// plus 1 `blne` @ 0x0839f6ec and 1 tail `b` @ 0x08292ce4).
 ///
@@ -135,11 +169,11 @@ pub extern "C" fn control_state_flags() -> u32 {
 /// Same convention as the getter: on target the word is read and written
 /// at the original firmware address 0x089cc92c (not port-owned); host
 /// builds use the mock word. The lock-bit read (`bl 0x08292f58` in the
-/// original) is inlined here — that helper is a separate function with
-/// its own callers and is not part of this port.
+/// original) goes through the ported `control_state_is_locked` above;
+/// LLVM inlines it on ARM, as the original's `bl` is to a 20-byte leaf.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub extern "C" fn control_state_store(word: u32) {
-    let locked = flags_word() & STORE_LOCK_BIT != 0;
+    let locked = control_state_is_locked() != 0;
     if locked && word & FORCE_STORE_SENTINEL == 0 {
         return;
     }
@@ -173,6 +207,37 @@ mod tests {
             assert_eq!(control_state_flags(), 0x123);
             set_mock_flags_word(0xFFFF_FFFF);
             assert_eq!(control_state_flags(), 0xFFF);
+        }
+    }
+
+    #[test]
+    fn lock_query_reports_only_bit15() {
+        unsafe {
+            // Lock bit clear -> 0, no matter what else is in the word.
+            for word in [0x0000_0000u32, 0x0000_0FFF, 0x0000_4000, 0xFFFF_7FFF] {
+                set_mock_flags_word(word);
+                assert_eq!(control_state_is_locked(), 0);
+            }
+            // Lock bit set -> exactly 1 (the original's `lsr #15`), no
+            // matter what else is in the word.
+            for word in [0x0000_8000u32, 0x0000_8055, 0xFFFF_FFFF] {
+                set_mock_flags_word(word);
+                assert_eq!(control_state_is_locked(), 1);
+            }
+        }
+    }
+
+    #[test]
+    fn lock_query_tracks_the_live_word() {
+        unsafe {
+            // The query reads the word fresh each call, matching the
+            // original's reload of 0x089cc92c.
+            set_mock_flags_word(0x0000_0000);
+            assert_eq!(control_state_is_locked(), 0);
+            set_mock_flags_word(STORE_LOCK_BIT);
+            assert_eq!(control_state_is_locked(), 1);
+            set_mock_flags_word(0x0000_0000);
+            assert_eq!(control_state_is_locked(), 0);
         }
     }
 
