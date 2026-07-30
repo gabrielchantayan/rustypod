@@ -2,6 +2,7 @@
 pub mod condvar;
 pub mod control_state;
 pub mod csem;
+pub mod gateway_request;
 pub mod irq;
 pub mod kobj;
 pub mod mqueue;

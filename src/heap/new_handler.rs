@@ -3,6 +3,11 @@
 //! 0x08266c70 with code 3 and the C++ runtime's std::ios/exception
 //! reporters with codes 4, 8, 9, 0xe, 0xf, 0x10, 0x11, 0x14).
 //!
+//! This file also hosts `operator_new_checked` — original:
+//! `FUN_08266c70` @ 0x08266c70 — the ADS checked operator-new wrapper
+//! behind which the code-3 new-handler call sits (ported below, next
+//! to the dispatch it calls).
+//!
 //! The ADS C++ runtime error/new-handler dispatch. It spills all four
 //! argument registers at entry (the function is variadic: r0 = code,
 //! r1..r3 = message arguments), then reads the registered handler from
@@ -177,9 +182,51 @@ pub unsafe extern "C" fn cxx_new_handler_dispatch(
 /// (heap/veneers.rs): the checked-allocation path passes only a code
 /// (always 3), whose variadic tail the original never reads either —
 /// `operator_new_checked` sets r0 and branches with r1..r3 live-out
-/// from its own body, dead on arrival.
+/// from its own body, dead on arrival. The `inline(never)` keeps the
+/// original's `bleq 0x08266abc` branch boundary in `operator_new_checked`
+/// below — with the shim inlined, LLVM folds the whole dispatch
+/// (handler-global load, NULL check, indirect call) into the caller
+/// and the boundary is lost.
+#[inline(never)]
 pub unsafe extern "C" fn cxx_new_handler_report(code: usize) {
     cxx_new_handler_dispatch(code, 0, 0, 0);
+}
+
+/// Code passed to the new-handler dispatch when a checked allocation
+/// fails — original: `moveq r0, #3` @ 0x08266c90.
+const NEW_HANDLER_CODE: usize = 3;
+
+/// operator_new_checked — original: `FUN_08266c70` @ 0x08266c70
+/// (48-byte span; 40 bytes per functions.csv — Ghidra excludes the
+/// 8-byte unreachable `bl` pair @ 0x08266c84/0x08266c88, branched over
+/// on every path, compiler outlining residue. 223 call sites).
+///
+/// The ADS checked operator-new wrapper: `block = operator_new(size)`
+/// (the tag-2 dominant allocator @ 0x082aadd4, heap/veneers.rs), and
+/// on NULL invokes the C++ new-handler dispatch @ 0x08266abc with code
+/// 3 (`cmp r4, #0; moveq r0, #3; bleq`), then returns `block` as-is —
+/// still NULL when no handler freed anything; the original does not
+/// retry at this level.
+///
+/// Deviations: the unreachable `bl` pair is not reproduced; the
+/// prologue/epilogue's r0/r1 spill-restore stack scratch (`stmdb
+/// sp!,{r0,r1,r4,lr}` / `ldmia sp!,{r2,r3,r4,pc}`) and the dead
+/// `mov r4, #0` pre-init collapse away; both callees are the real
+/// ports called directly (the original's `bl`/`bleq` boundaries), the
+/// new-handler call going through the one-argument
+/// `cxx_new_handler_report` — the code-3 call never carries the
+/// variadic tail. `inline(never)` for the same reason as veneers.rs's
+/// `operator_new`: this is a real function 223 callers reach with `bl`,
+/// and inlining it into the ported callers (cxx/string.rs, the string
+/// maps) would destroy their matches.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn operator_new_checked(size: usize) -> *mut u8 {
+    let block = crate::heap::veneers::operator_new(size);
+    if block.is_null() {
+        cxx_new_handler_report(NEW_HANDLER_CODE);
+    }
+    block
 }
 
 #[cfg(test)]
@@ -355,5 +402,59 @@ mod tests {
             crate::heap::veneers::DEFAULT_HEAP_OPS.new_handler as usize,
             cxx_new_handler_report as usize
         );
+    }
+
+    // --- operator_new_checked ---
+
+    /// Distinct sentinel block the mock heap "allocates".
+    const CHECKED_BLOCK: usize = 0xC4EC_ED00;
+
+    #[test]
+    fn checked_new_returns_the_block_without_a_handler_call_on_success() {
+        let (_guard, _heap) = mock_dispatch();
+        unsafe {
+            crate::heap::veneers::tests::set_alloc_ret(CHECKED_BLOCK as *mut u8);
+            let p = operator_new_checked(64);
+            assert_eq!(p, CHECKED_BLOCK as *mut u8);
+            let (allocs, size, tag) = crate::heap::veneers::tests::alloc_log();
+            assert_eq!(allocs, 1);
+            assert_eq!(size, 64);
+            assert_eq!(tag, 2, "checked new allocates through the tag-2 operator_new");
+            assert_eq!(HANDLER_CALLS, 0, "no failure, no new-handler call");
+        }
+        teardown();
+    }
+
+    #[test]
+    fn checked_new_reports_code_3_and_returns_null_on_failure() {
+        let (_guard, _heap) = mock_dispatch();
+        unsafe {
+            crate::heap::veneers::tests::set_alloc_ret(core::ptr::null_mut());
+            let p = operator_new_checked(64);
+            assert!(p.is_null(), "no retry at this level: NULL propagates");
+            assert_eq!(HANDLER_CALLS, 1);
+            assert_eq!(LAST_HANDLER_CODE, 3);
+            assert!(
+                LAST_HANDLER_MESSAGE.is_null(),
+                "code 3 never builds a message"
+            );
+            assert_eq!(FORMAT_CALLS, 0, "the builder is a code>3 path");
+        }
+        teardown();
+    }
+
+    #[test]
+    fn checked_new_failure_with_no_handler_registered_is_a_silent_null() {
+        let (_guard, _heap) = mock_dispatch();
+        unsafe {
+            // Stock retailOS state: no handler ever registered.
+            core::ptr::addr_of_mut!(CXX_ERROR_HANDLER).write(None);
+            crate::heap::veneers::tests::set_alloc_ret(core::ptr::null_mut());
+            let p = operator_new_checked(64);
+            assert!(p.is_null());
+            assert_eq!(HANDLER_CALLS, 0);
+            assert_eq!(FORMAT_CALLS, 0);
+        }
+        teardown();
     }
 }

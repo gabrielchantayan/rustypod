@@ -1892,6 +1892,44 @@ functions:
       must be volatile — LLVM folded it to None and erased the whole
       function on the first ARM build.
 
+  - address: 0x08266c70
+    ghidra: FUN_08266c70
+    name: operator_new_checked
+    size: 40
+    sig: "void *operator_new_checked(size_t size)"
+    module: heap/new_handler
+    vars: {param_1: size, iVar1: block}
+    status: ported
+    notes: >-
+      The ADS checked operator-new wrapper behind which the code-3
+      new-handler call sits (223 call sites). block = operator_new(size)
+      (tag-2 dominant allocator 0x082aadd4, already ported in
+      heap/veneers, called directly); on NULL invokes
+      cxx_new_handler_dispatch 0x08266abc with code 3 (`cmp r4,#0;
+      moveq r0,#3; bleq`) through the one-argument cxx_new_handler_report
+      (the code-3 call never carries the variadic tail), then returns
+      block as-is — still NULL when no handler freed anything; no retry
+      at this level. Size: 48-byte span @ 0x08266c70..0x08266ca0, 40
+      per functions.csv — Ghidra excludes the 8-byte unreachable bl
+      pair @ 0x08266c84/0x08266c88 (branched over on every path,
+      compiler outlining residue), not reproduced. Other deviations:
+      the prologue/epilogue r0/r1 spill-restore stack scratch and the
+      dead `mov r4,#0` pre-init collapse away. The port moved from
+      heap/veneers.rs (where it predated the dispatch port and reached
+      the handler through the HEAP_OPS.new_handler slot) into
+      heap/new_handler.rs next to the dispatch; veneers.rs re-exports
+      it so cxx/string.rs and the string maps keep their
+      heap::veneers::operator_new_checked paths. cxx_new_handler_report
+      gained #[inline(never)] to preserve the original's bleq branch
+      boundary (otherwise LLVM folds the whole dispatch into the
+      caller). Host tests: success returns the block with no handler
+      call (tag-2 alloc), failure reports code 3 with NULL message and
+      propagates NULL, and the stock no-handler failure is a silent
+      NULL. match.py structural: 10 vs 10 instructions, identical
+      alloc/NULL-check/code-3-bleq/return shape; the diff is LLVM's fp
+      frame, a popne early-out for the success path, and intra-archive
+      bl relocations — the accepted ADS-vs-LLVM noise.
+
   - address: 0x0826f580
     name: aligned_pool
     size: 612
@@ -2962,6 +3000,26 @@ functions:
       task_lock/unlock (e48/e50), size_to_class (e60, UNVERIFIED),
       kernel_create_dispatch (e70), tick_elapsed (eb8), irq_fiq_disable
       (ed8), tick_delay (ef0, 23 callers).
+
+  - address: 0x08047f40
+    ghidra: FUN_08047f40
+    name: gateway_request_timed
+    size: 104
+    sig: "void gateway_request_timed(void *payload, u32 timeout)"
+    module: kernel/gateway_request
+    status: ported
+    vars: {param_1: payload, param_2: timeout}
+    notes: >-
+      Tag-2 member of the 4-helper request family @ 0x08047edc..0x0804805c
+      (tags 3/2/4/0). Builds a 9-word stack frame {0,0,0,0, tag 2, payload,
+      timeout+1, pad, 0} and posts the declared 5-word head to the ROM
+      kernel gateway's service-4 stub (rom_svc_2200418c) as (1, &frame, 5),
+      bracketed by kernel semaphore 9 (rom_sem_wait/rom_sem_signal).
+      69 bl call sites; timeout is 0x3e8 at 53 of them (else 0xfa/0x1f4/
+      0x1f40/0/computed), payload an object pointer or small id. Deviations:
+      indirect dispatch through task_lock::ROM_KERNEL (family pattern); the
+      original's r3 = 6 (service-4 sub-op) cannot ride the 3-arg veneer;
+      the pad word is zeroed rather than left uninitialized.
 
   - address: 0x080567fc
     ghidra: null

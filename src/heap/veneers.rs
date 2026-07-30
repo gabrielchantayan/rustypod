@@ -53,9 +53,12 @@
 //!   returns NULL (r0 unchanged). Sole osos caller: `cxx_vec_delete`.
 //! - `operator_new_checked` — original: `FUN_08266c70` @ 0x08266c70
 //!   (48 bytes, 223 call sites). `p = operator_new(size)`; on NULL it
-//!   invokes the C++ new-handler dispatch @ 0x08266abc (new_handler.rs)
-//!   with code 3, then returns `p` (still NULL if no handler freed
-//!   anything — the original does not retry at this level).
+//!   invokes the C++ new-handler dispatch @ 0x08266abc with code 3,
+//!   then returns `p` (still NULL if no handler freed anything — the
+//!   original does not retry at this level). The port lives in
+//!   heap/new_handler.rs next to the dispatch it calls; re-exported
+//!   here so existing `heap::veneers::operator_new_checked` callers
+//!   (cxx/string.rs, the string maps) keep their paths.
 //! - `heap_panic` — original: `FUN_08030f44` @ 0x08030f44 (32 bytes,
 //!   fatal, does not return). `__rt_raise(1, 0)` @ 0x080320a8, then the
 //!   exit path @ 0x08035878 (`_rt_exit`-ish: runs atexit handlers and
@@ -93,9 +96,6 @@
 //!   sequence through the ops table, with a final `loop {}` safety net in
 //!   case a swapped-in `terminate` hook returns (the original target
 //!   0x082b20a0 never does).
-//! - `operator_new_checked`'s original has two unreachable `bl`
-//!   instructions at 0x08266c84/0x08266c88 (branched over on every path;
-//!   compiler outlining residue) — not reproduced.
 
 use crate::heap::types::{HeapDescriptor, HeapDescriptorDescriptor, DEFAULT_HEAP};
 
@@ -108,10 +108,6 @@ const TAG_OPERATOR_NEW: usize = 2;
 
 /// Caller tag used by the second new/delete pair (0x082aad74 / 0x082aad14).
 const TAG_OPERATOR_NEW_TAG3: usize = 3;
-
-/// Code passed to the new-handler dispatch @ 0x08266abc when a checked
-/// allocation fails (original: `moveq r0, #3`).
-const NEW_HANDLER_CODE: usize = 3;
 
 /// Default-heap backing storage. Original layout: a 32 KB region @
 /// 0x08a12710 immediately followed by the 0x398-byte descriptor @
@@ -444,20 +440,11 @@ pub unsafe extern "C" fn cxx_array_dealloc(ptr: *mut u8, _count: usize, _elem: u
 }
 
 /// operator_new_checked — original: `FUN_08266c70` @ 0x08266c70
-/// (48 bytes, 223 call sites).
-///
-/// Allocates via the tag-2 `operator_new`; on failure invokes the C++
-/// new-handler dispatch @ 0x08266abc with code 3 and returns the result
-/// as-is (NULL when no handler freed anything — the original does not
-/// retry at this level).
-#[cfg_attr(target_os = "none", no_mangle)]
-pub unsafe extern "C" fn operator_new_checked(size: usize) -> *mut u8 {
-    let block = operator_new(size);
-    if block.is_null() {
-        (heap_ops().new_handler)(NEW_HANDLER_CODE);
-    }
-    block
-}
+/// (48 bytes, 223 call sites). The port lives in heap/new_handler.rs
+/// alongside the new-handler dispatch it calls with code 3; re-exported
+/// here so the cxx/string and string-map callers keep their
+/// `heap::veneers::operator_new_checked` paths.
+pub use crate::heap::new_handler::operator_new_checked;
 
 /// heap_panic — original: `FUN_08030f44` @ 0x08030f44 (32 bytes). Fatal,
 /// does not return.
@@ -643,6 +630,12 @@ pub(crate) mod tests {
     /// (calls, size, tag) of the last mock alloc.
     pub(crate) fn alloc_log() -> (usize, usize, usize) {
         unsafe { (ALLOC_CALLS, LAST_ALLOC_SIZE, LAST_ALLOC_TAG) }
+    }
+
+    /// Overrides the pointer the mock alloc returns (new_handler.rs's
+    /// operator_new_checked tests force allocation failure this way).
+    pub(crate) fn set_alloc_ret(ptr: *mut u8) {
+        unsafe { ALLOC_RET = ptr }
     }
 
     /// (calls, ptr, tag) of the last mock free.
@@ -841,29 +834,6 @@ pub(crate) mod tests {
             operator_delete_tag3(BLOCK_A as *mut u8);
             assert_eq!(FREE_CALLS, 1);
             assert_eq!(LAST_FREE_TAG, 3);
-        }
-    }
-
-    #[test]
-    fn checked_new_returns_block_without_handler_on_success() {
-        let _lock = mock_heap();
-        unsafe {
-            let p = operator_new_checked(64);
-            assert_eq!(p, BLOCK_A as *mut u8);
-            assert_eq!(LAST_ALLOC_TAG, 2, "checked new allocates with tag 2");
-            assert_eq!(NEW_HANDLER_CALLS, 0);
-        }
-    }
-
-    #[test]
-    fn checked_new_invokes_handler_code_3_on_failure() {
-        let _lock = mock_heap();
-        unsafe {
-            ALLOC_RET = core::ptr::null_mut();
-            let p = operator_new_checked(64);
-            assert!(p.is_null(), "no retry at this level: NULL propagates");
-            assert_eq!(NEW_HANDLER_CALLS, 1);
-            assert_eq!(LAST_NEW_HANDLER_CODE, 3);
         }
     }
 
