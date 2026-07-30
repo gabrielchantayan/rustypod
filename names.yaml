@@ -8810,8 +8810,33 @@ functions:
       which Ghidra resolves only 0x08213bfc as a function start. Port
       models the vtable as the static STRING_OBJECT_VTABLE (pointer
       identity only, original address kept as the named constant
-      STRING_OBJECT_VTABLE_ADDRESS) per the heap/pool_client.rs
-      pattern. Original never writes r0, so the port returns `this`.
+       STRING_OBJECT_VTABLE_ADDRESS) per the heap/pool_client.rs
+       pattern. Original never writes r0, so the port returns `this`.
+
+  - address: 0x08277484
+    ghidra: FUN_08277484
+    name: string_object_destroy
+    size: 32
+    sig: "StringObject *string_object_destroy(StringObject *this)"
+    module: cxx/string_object
+    status: ported
+    vars: {DAT_089a6044: STRING_OBJECT_VTABLE_ADDRESS}
+    notes: >-
+      899 bl call sites (binary-scanned) - one of the hottest functions
+      in the image. The plain (non-deleting) destructor of the same
+      unidentified two-word class as string_default_construct @
+      0x08277440: `obj[0] = 0x089a6044` (vtable literal @ 0x082774a4),
+      then `bl 0x08275d74`, return `this` in r0; no operator delete
+      (that is the 0x08277458 sibling's job). The callee 0x08275d74
+      (40 bytes, unported) is the shared payload release: NULL-guards
+      the payload word at +4, frees it through free_wrapper @
+      0x080e7970 with caller tag 0x34, then NULLs the word - hence the
+      semantic name string_object_destroy. Port dispatches 0x08275d74
+      through the STRING_OBJECT_OPS slot whose shipped default is a
+      no-op leak (missing_free_p4 house rule for unported destructors);
+      the tag-0x34 free contract is not guessed. match.py: same
+      structure (vtable store, call, return this), the bl becoming a
+      blx through the ops slot.
 
   - address: 0x082cfae8
     ghidra: FUN_082cfae8
