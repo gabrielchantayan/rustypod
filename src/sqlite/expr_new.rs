@@ -74,12 +74,14 @@
 //!   unchanged); with the shipped default the OOM path really releases
 //!   both operands, like the original.
 //! - The span-merge helper @ 0x0837894c (96 bytes; 5 `bl` call sites,
-//!   the other four in the 0x0839a block) is not ported either and is
-//!   the [`SQLITE_EXPR_SPAN_MERGE`] dispatch boundary. Its default slot
-//!   is a documented no-op: the node's span keeps the zeroes
+//!   the other four in the 0x0839a block) is ported as
+//!   [`expr_span`](super::expr_span::expr_span) and is the shipped
+//!   default of the [`SQLITE_EXPR_SPAN_MERGE`] dispatch boundary. The
+//!   documented no-op stub [`missing_span_merge`] is retained for host
+//!   tests (with it installed the node's span keeps the zeroes
 //!   `db_malloc_zero` wrote — identical to the original's early return
-//!   whenever either child's `span.z` is NULL, and observable only when
-//!   both children carry real spans.
+//!   whenever either child's `span.z` is NULL); with the shipped
+//!   default the node gets the merged span, like the original.
 //! - `Expr`/`Token` are typed `#[repr(C)]` structs rather than raw byte
 //!   offsets, so the pointer fields stay disjoint on a 64-bit test
 //!   host. The original byte offsets are statically asserted on 32-bit
@@ -228,9 +230,11 @@ pub static mut SQLITE_EXPR_DELETE: ExprDeleteFn = super::expr_delete::expr_delet
 pub type ExprSpanMergeFn =
     unsafe extern "C" fn(expr: *mut Expr, left_span: *const Token, right_span: *const Token);
 
-/// Default stub: no merge wired, so the node's span keeps the zeroes
-/// the allocator wrote — exactly what the original leaves behind when
-/// either child's `span.z` is NULL (see the module header).
+/// Default stub retained for host tests: no merge wired, so the node's
+/// span keeps the zeroes the allocator wrote — exactly what the
+/// original leaves behind when either child's `span.z` is NULL (see the
+/// module header). The shipped default is the real port,
+/// [`super::expr_span::expr_span`].
 pub(crate) unsafe extern "C" fn missing_span_merge(
     _expr: *mut Expr,
     _left_span: *const Token,
@@ -238,9 +242,11 @@ pub(crate) unsafe extern "C" fn missing_span_merge(
 ) {
 }
 
-/// The active span merge. Host tests install recording mocks; the real
-/// port replaces the default when 0x0837894c lands.
-pub static mut SQLITE_EXPR_SPAN_MERGE: ExprSpanMergeFn = missing_span_merge;
+/// The active span merge. The default is the real port,
+/// [`super::expr_span::expr_span`]; host tests still install recording
+/// mocks through the slot ([`missing_span_merge`] is retained for
+/// them).
+pub static mut SQLITE_EXPR_SPAN_MERGE: ExprSpanMergeFn = super::expr_span::expr_span;
 
 /// Reads a dispatch slot (volatile — the slots are meant to be swapped
 /// at runtime, and a plain read lets LLVM const-fold the default away).
@@ -351,25 +357,6 @@ mod tests {
         (*core::ptr::addr_of_mut!(MERGED)).push((expr as usize, left_span as usize, right_span as usize));
     }
 
-    /// A faithful port of the helper @ 0x0837894c, so tests can drive
-    /// the merge path the way the original's helper does.
-    unsafe extern "C" fn faithful_span_merge(
-        expr: *mut Expr,
-        left_span: *const Token,
-        right_span: *const Token,
-    ) {
-        if expr.is_null() || (*right_span).z.is_null() || (*left_span).z.is_null() {
-            return;
-        }
-        if (*left_span).n_dyn & 1 != 0 || (*right_span).n_dyn & 1 != 0 {
-            (*expr).span.z = core::ptr::null();
-            return;
-        }
-        (*expr).span.z = (*left_span).z;
-        let n = ((*right_span).z as usize - (*left_span).z as usize) as u32 + ((*right_span).n_dyn >> 1);
-        (*expr).span.n_dyn = ((*expr).span.n_dyn & 1) | (n << 1);
-    }
-
     fn deleted() -> Vec<usize> {
         unsafe { (*core::ptr::addr_of!(DELETED)).clone() }
     }
@@ -379,13 +366,16 @@ mod tests {
     }
 
     /// The documented defaults: the real destructor port on the delete
-    /// slot, the no-op stub on the span-merge slot.
+    /// slot, the real span-merge port on the span-merge slot.
     unsafe fn restore_slot_defaults() {
         core::ptr::write_volatile(
             core::ptr::addr_of_mut!(SQLITE_EXPR_DELETE),
             super::super::expr_delete::expr_delete,
         );
-        core::ptr::write_volatile(core::ptr::addr_of_mut!(SQLITE_EXPR_SPAN_MERGE), missing_span_merge);
+        core::ptr::write_volatile(
+            core::ptr::addr_of_mut!(SQLITE_EXPR_SPAN_MERGE),
+            super::super::expr_span::expr_span,
+        );
     }
 
     /// Puts the allocator's documented always-fails stubs back (the
@@ -640,7 +630,7 @@ mod tests {
     }
 
     #[test]
-    fn the_faithful_merge_covers_both_child_spans() {
+    fn the_shipped_merge_covers_both_child_spans() {
         let mut buf = arena();
         let _ops = install_recorder(buf.0.as_mut_ptr());
         let _guard = SLOT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -656,7 +646,7 @@ mod tests {
         }
 
         let raw = unsafe {
-            with_slots_result(missing_expr_delete, faithful_span_merge, || {
+            with_slots_result(missing_expr_delete, super::super::expr_span::expr_span, || {
                 expr_new(
                     db.ptr(),
                     0x6b,
@@ -674,7 +664,7 @@ mod tests {
     }
 
     #[test]
-    fn the_default_span_merge_stub_leaves_the_zeroed_span() {
+    fn the_retained_stub_leaves_the_zeroed_span() {
         let mut buf = arena();
         let _ops = install_recorder(buf.0.as_mut_ptr());
         let _guard = SLOT_LOCK.lock().unwrap_or_else(|e| e.into_inner());

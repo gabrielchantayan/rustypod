@@ -10449,14 +10449,15 @@ functions:
       operands; the documented no-op stub is retained for host tests
       (OOM leaks the operands; the NULL return is unchanged). The
       span-merge helper @ 0x0837894c (96 bytes, 5 bl call sites,
-      the other four in the 0x0839a block; identified: NULL/dyn guards,
-      span.z = left->span.z, span.n = right.z + right.n - left.z with
-      the dst dyn bit preserved - Token packs n:31|dyn:1, dyn in bit 0)
-      is SQLITE_EXPR_SPAN_MERGE with a documented no-op default (the
-      zeroed span survives - identical to the original whenever either
-      child's span.z is NULL). The port is the shipped default of
-      parse_expr's SQLITE_EXPR_NEW, replacing the always-NULL stub.
-      Expr/Token are typed repr(C) structs with 32-bit offset asserts.
+      the other four in the 0x0839a block) is ported: expr_span (see
+      its entry), the shipped default of SQLITE_EXPR_SPAN_MERGE, so a
+      token-less node with two spanned operands gets the merged span;
+      the documented no-op stub is retained for host tests (with it
+      installed the zeroed span survives - identical to the original
+      whenever either child's span.z is NULL). The port is the shipped
+      default of parse_expr's SQLITE_EXPR_NEW, replacing the
+      always-NULL stub. Expr/Token are typed repr(C) structs with
+      32-bit offset asserts.
       match.py: same structure - the alloc/NULL fork, the field stores,
       the token two-word copies, the conditional merge call, both
       EP_CombBound tst/ldr/str blocks, the height tail call; the diff
@@ -10506,6 +10507,44 @@ functions:
       ldrb, inlining tracked_free's NULL guard + stats update (the
       accepted mem_release/value_free deviation), blx through the
       loaded slots, and LLVM's fp frame.
+
+  - address: 0x0837894c
+    ghidra: FUN_0837894c
+    name: expr_span
+    size: 96
+    sig: "void expr_span(Expr *expr, const Token *left_span, const Token *right_span)"
+    module: sqlite/expr_span
+    status: ported
+    vars: {param_1: expr, param_2: left_span, param_3: right_span, param_4: scratch (phantom - r3 is dead on entry)}
+    notes: >-
+      SQLite 3.5.x's sqlite3ExprSpan, the span-merge dependency of
+      expr_new (sqlite3Expr). 5 bl call sites: one in expr_new
+      @ 0x08376894 (node, &left->span, &right->span), the other four in
+      the 0x0839a grammar-action block. A NULL node or a NULL z in
+      either child span is a no-op (predicated cmp/ldrne/bxeq chain -
+      right->z checked before left->z); if either child span is
+      heap-owned (dyn, bit 0 of the packed n:31|dyn:1 word at +0x04;
+      left checked first via tst [r1,#4],#1) only span.z (+0x1c) is
+      NULLed and the packed word (+0x20) is left alone; otherwise
+      span.z = left_span->z and span.n_dyn = (old span.n_dyn & 1) |
+      ((right.z - left.z + right.n) << 1) - the covering length with
+      the node's own previous dyn bit preserved. Ghidra's decompile
+      invents a fourth parameter (param_4, reused as a scratch slot);
+      the original reads r0..r2 only, so the port is three-argument.
+      Reuses expr_new's typed repr(C) Expr/Token (the 32-bit offset
+      asserts live in expr_new.rs). The port is the shipped default of
+      expr_new's SQLITE_EXPR_SPAN_MERGE slot, replacing the documented
+      no-op stub (retained for host tests) - a token-less node with two
+      spanned operands now gets the merged span instead of the
+      allocator's zeroes. Host tests cover the NULL-expr and
+      NULL-child-z no-ops (span untouched), both dyn orderings (only
+      span.z cleared, n_dyn kept), the covering-length computation, and
+      the dst dyn-bit preservation. match.py: same NULL/dyn guard
+      chain, strne 0 to +0x1c, and the sub/add-shifted/and #1/orr
+      length arithmetic into +0x20; the diff is LLVM's fp frame,
+      branchy instead of predicated early returns, ldrb narrowing of
+      the tst #1 word loads (the accepted expr_delete deviation), and
+      a reassociated (bic #1; orr) form of the length<<1 | dyn merge.
 
   - address: 0x082d2a1c
     ghidra: FUN_082d2a1c
