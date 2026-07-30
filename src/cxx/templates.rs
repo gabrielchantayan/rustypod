@@ -34,9 +34,11 @@
 //!   non-power-of-two members of the size family, dividing the span by
 //!   12, 24, 20, 28 or 40 through [`__rt_sdiv`] instead of shifting.
 //! - [`vector_capacity`] / [`vector_capacity_elem12`] /
-//!   [`vector_capacity_elem16`] — `vector<T>::capacity()` for 24-,
-//!   12- and 16-byte elements, the end-of-storage sibling of the size
-//!   family (divide-based for 24/12, shift-based for 16).
+//!   [`vector_capacity_elem16`] / [`vector_capacity_elem24_copy_77ec`]
+//!   — `vector<T>::capacity()` for 24-, 12- and 16-byte elements, the
+//!   end-of-storage sibling of the size family (divide-based for
+//!   24/12, shift-based for 16; the last is a byte-identical second
+//!   instantiation of the 24-byte primary).
 //!
 //! Not to be confused with `deque_iter_copy` @ 0x083dd9e4 (already
 //! ported in `heap/block_deque`): that one is the same four-word copy
@@ -498,6 +500,39 @@ pub unsafe extern "C" fn vector_capacity_elem16(vector: *const VectorStorage) ->
         core::ptr::read_unaligned(core::ptr::addr_of!((*vector).end_of_storage));
     let span = end_of_storage as isize - begin as isize;
     (span >> 4) as i32
+}
+
+/// vector_capacity_elem24_copy_77ec — original: `FUN_083d77ec` @
+/// 0x083d77ec (20 bytes; 3 `bl` call sites: 0x083e2c1c, 0x083e2d4c,
+/// 0x083e2dd0 — the ledger's "4 bl sites" guess was stale).
+///
+/// A second, byte-identical instantiation of the 24-byte
+/// [`vector_capacity`] @ 0x083d7760: the same end-of-storage head
+/// (`ldr r1,[r0,#0x8]` / `ldr r0,[r0,#0x0]` / `sub r0,r1,r0`), then
+/// `mov r1, #0x18` and a **tail branch** into the ADS signed divide @
+/// 0x08031568 (ported as [`__rt_sdiv`]). Verified against osos.asm per
+/// address — the ledger's blanket "shift-based" guess for the remaining
+/// capacity instantiations is wrong for this one too (as it was for
+/// 0x083d7708); only 0x083d77a8 is really a shift. The divide is
+/// signed and truncating, so a reversed vector's negative span
+/// truncates toward zero like any C `/`, and a partial element is
+/// dropped.
+///
+/// # Safety
+/// `vector` must point at a readable `{begin, end, end_of_storage}`
+/// triple.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_capacity_elem24_copy_77ec(
+    vector: *const VectorStorage,
+) -> i32 {
+    // `read_unaligned`: same 4-but-not-8-aligned firmware head hazard
+    // as `vector_size` on a 64-bit host.
+    let begin = core::ptr::read_unaligned(core::ptr::addr_of!((*vector).begin));
+    let end_of_storage =
+        core::ptr::read_unaligned(core::ptr::addr_of!((*vector).end_of_storage));
+    let span = (end_of_storage as isize - begin as isize) as i32;
+    __rt_sdiv(span, 24)
 }
 
 /// A `{base, count}` pointer array — the two words [`array_at_checked`]
@@ -1055,6 +1090,59 @@ mod tests {
                 end_of_storage: begin,
             };
             assert_eq!(vector_capacity_elem16(&reversed), -2, "-17 >> 4 (asr) is -2");
+        }
+    }
+
+    // ---- vector_capacity_elem24_copy_77ec -----------------------------
+
+    #[test]
+    fn vector_capacity_elem24_copy_77ec_divides_the_allocated_span_by_24() {
+        unsafe {
+            let storage = [0u8; 240];
+            let begin = storage.as_ptr() as *mut u8;
+            for elements in 0..10usize {
+                let head = VectorStorage {
+                    begin,
+                    // `end` is not read by capacity; set it anywhere in
+                    // the allocation to keep the head plausible.
+                    end: begin.add(elements * 12),
+                    end_of_storage: begin.add(elements * 24),
+                };
+                assert_eq!(vector_capacity_elem24_copy_77ec(&head), elements as i32);
+            }
+        }
+    }
+
+    /// The division is the signed truncating `__rt_sdiv`, so a reversed
+    /// (negative) span truncates toward zero, not toward -inf, and a
+    /// partial element is dropped — matching the primary
+    /// [`vector_capacity`] byte for byte.
+    #[test]
+    fn vector_capacity_elem24_copy_77ec_is_signed_and_truncating() {
+        unsafe {
+            let storage = [0u8; 240];
+            let begin = storage.as_ptr() as *mut u8;
+            let head = VectorStorage {
+                begin,
+                end: begin,
+                end_of_storage: begin.add(24 * 3 + 23),
+            };
+            assert_eq!(vector_capacity_elem24_copy_77ec(&head), 3, "partial element dropped");
+            let reversed = VectorStorage {
+                begin: begin.add(25),
+                end: begin,
+                end_of_storage: begin,
+            };
+            assert_eq!(
+                vector_capacity_elem24_copy_77ec(&reversed),
+                -1,
+                "-25 / 24 truncates to -1"
+            );
+            assert_eq!(
+                vector_capacity_elem24_copy_77ec(&reversed),
+                vector_capacity(&reversed),
+                "byte-identical twin of the 24-byte primary"
+            );
         }
     }
 

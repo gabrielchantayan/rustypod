@@ -11155,12 +11155,14 @@ functions:
       out as byte loads from the family's read_unaligned host-testing
       idiom, same deviation as vector_size_elem4. Other instantiations
       (identified, not ported): 0x083d7954 4, 0x083d7870 4, 0x083d784c
-      4, 0x083d7828 4, 0x083d77ec 4 bl sites; shift-based
+      4, 0x083d7828 4 bl sites; shift-based
       ones are one-line ports whenever wanted. 0x083d7708 is now ported
       (see its entry) - it turned out to be a DIVIDE-by-12 member, not a
       shift, so element sizes must be read from osos.asm per address.
       0x083d77a8 is now ported too (see its entry) - that one really is
-      shift-based (asr #4, a 16-byte element).
+      shift-based (asr #4, a 16-byte element). 0x083d77ec is now ported
+      as well (see its entry) - another divide-by-24 copy, byte-identical
+      to this one.
 
   - address: 0x083d77a8
     ghidra: FUN_083d77a8
@@ -11210,6 +11212,34 @@ functions:
       pairs come out as byte loads from the family's read_unaligned
       host-testing idiom, the same accepted deviation as
       vector_size_elem4.
+
+  - address: 0x083d77ec
+    ghidra: FUN_083d77ec
+    name: vector_capacity_elem24_copy_77ec
+    size: 20
+    sig: "i32 vector_capacity_elem24_copy_77ec(const VectorStorage *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      A second, BYTE-IDENTICAL instantiation of the 24-byte
+      vector_capacity @ 0x083d7760: same end-of-storage head (`ldr
+      r1,[r0,#8]; ldr r0,[r0]; sub r0,r1,r0`), then `mov r1,#0x18` and
+      a TAIL BRANCH into the ADS signed divide @ 0x08031568 (ported as
+      __rt_sdiv). Verified against osos.asm per address - the ledger's
+      blanket shift-based guess for the remaining capacity
+      instantiations is wrong for this one too (as it was for
+      0x083d7708); only 0x083d77a8 is really a shift. 3 bl call sites
+      (0x083e2c1c, 0x083e2d4c, 0x083e2dd0) - the old "4 bl sites" guess
+      was stale. The divide is signed and truncating, so a reversed
+      vector's negative span truncates toward zero and a partial
+      element is dropped. LLVM's MergeFunctions folds the port into an
+      alias of vector_capacity's section (the symbol stays exported and
+      hookable; objdump prints no separate label), so match.py is run
+      against the canonical vector_capacity: same structure (sub / mov
+      r1,#24 / b __rt_sdiv); the ldr pairs come out as byte loads from
+      the family's read_unaligned host-testing idiom, the same accepted
+      deviation as vector_size_elem4, plus LLVM's fp frame.
 
   - address: 0x083d5ea0
     ghidra: FUN_083d5ea0
