@@ -9,8 +9,8 @@
 //! Algorithm (mirrored from the disassembly): `buf` is the 7-byte RTC
 //! register image (sec, min, hour, weekday, day, month, year; weekday
 //! is ignored). Each field goes through the BCD decode FUN_080ed424
-//! (`v - 6*(v>>4)` for `v < 0x9a`, else 99 — reproduced inline as
-//! [`bcd_to_bin`]; the month byte is decoded TWICE, once for the year
+//! (`v - 6*(v>>4)` for `v < 0x9a`, else 99 — the ported [`bcd_to_bin`]
+//! in this module; the month byte is decoded TWICE, once for the year
 //! adjustment and once for the month pipeline). The day count is
 //! Hinnant's days_from_civil over the 2-digit year:
 //! `adj = (14 - month) / 12` — an UNSIGNED `__rt_udiv` @ 0x08036f14,
@@ -29,15 +29,24 @@
 //! The port calls the ported `__rt_udiv`/`__rt_sdiv`
 //! (runtime/rt_div.rs, `#[inline(never)]`) so the original's `bl`
 //! boundaries survive for match.py review; all adds/multiplies wrap to
-//! match ARM flag-less arithmetic. The inline `bcd_to_bin` stands in
-//! for the unported FUN_080ed424 and is likewise kept out-of-line so
+//! match ARM flag-less arithmetic. The BCD decode is the ported
+//! [`bcd_to_bin`] (FUN_080ed424, below), likewise kept out-of-line so
 //! the seven decode calls remain visible.
 
-/// BCD byte to binary: `v - 6*(v>>4)` for `v < 0x9a`, else clamped to
-/// 99 (stock FUN_080ed424 @ 0x080ed424, reproduced inline — that
-/// function is not yet ported in its own right).
+/// bcd_to_bin @ 0x080ed424 — 24 bytes. BCD byte to binary decode:
+/// `v - 6*(v>>4)` for `v <= 0x99` (unsigned), else clamped to 99.
+/// The original computes the correction branchlessly under the `ls`
+/// predicate of `cmp r0, #0x99` (`r1 = v>>4; r1 = r1 - r1*4; r0 = v +
+/// r1*2`, i.e. `v - 6*(v>>4)`) and selects 99 (`movhi r0, #0x63`)
+/// above the boundary. Note the clamp test is on the raw byte, so
+/// values like 0x9a-0x9f (invalid BCD) and 0xa0+ all return 99, while
+/// a byte like 0x0f decodes to 15. 13 `bl` call sites in osos.asm:
+/// the seven in bcd_datetime_to_days_secs @ 0x0809e3e8 (this module)
+/// plus six elsewhere (e.g. @ 0x0806423c/0x0806424c/0x08064258/
+/// 0x08064264 in FUN_0806418c).
+#[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
-pub(crate) fn bcd_to_bin(v: u8) -> i32 {
+pub extern "C" fn bcd_to_bin(v: u8) -> i32 {
     if (v as u32) < 0x9a {
         (v as i32).wrapping_sub(6 * (v as i32 >> 4))
     } else {
@@ -233,6 +242,35 @@ mod tests {
         assert_eq!(bcd_to_bin(0x9a), 99);
         assert_eq!(bcd_to_bin(0xff), 99);
         assert_eq!(bcd_to_bin(0x59), 59);
+    }
+
+    #[test]
+    fn bcd_to_bin_full_range() {
+        // Exhaustive over the full u8 range against the reference:
+        // valid BCD pairs decode to tens*10 + ones, the 0x9a boundary
+        // is the first clamped value, and everything >= 0x9a is 99.
+        for v in 0u16..=0xff {
+            let expected = if v < 0x9a {
+                (v as i32) - 6 * ((v as i32) >> 4)
+            } else {
+                99
+            };
+            assert_eq!(bcd_to_bin(v as u8), expected, "mismatch for {v:#04x}");
+        }
+        // Spot-pin the reference itself: valid BCD digits.
+        assert_eq!(bcd_to_bin(0x00), 0);
+        assert_eq!(bcd_to_bin(0x09), 9);
+        assert_eq!(bcd_to_bin(0x10), 10);
+        assert_eq!(bcd_to_bin(0x42), 42);
+        assert_eq!(bcd_to_bin(0x99), 99);
+        // Boundary: 0x99 is the last decoded value, 0x9a the first clamp.
+        assert_eq!(bcd_to_bin(0x9a), 99);
+        assert_eq!(bcd_to_bin(0xa0), 99);
+        assert_eq!(bcd_to_bin(0xff), 99);
+        // The clamp is on the raw byte: 0x0f..0x8f (low nibble > 9)
+        // still decode arithmetically, e.g. 0x0f -> 15, 0x1a -> 20.
+        assert_eq!(bcd_to_bin(0x0f), 15);
+        assert_eq!(bcd_to_bin(0x1a), 20);
     }
 
     #[test]
