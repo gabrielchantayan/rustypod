@@ -9638,6 +9638,40 @@ functions:
       LLVM folds base+8+36 into raw+44 and schedules the two cookie
       stores together; the peak raise keeps the lt condition.
 
+  - address: 0x08390c24
+    ghidra: FUN_08390c24
+    name: tracked_stats_peak
+    size: 44
+    sig: "i64 tracked_stats_peak(i32 reset)"
+    module: heap/tracked
+    status: ported
+    vars: {param_1: reset, r4: reset, r2: stats, DAT_08390c50: stats_base}
+    notes: >-
+      The COMPLETE peak reader of the tracked allocator's stats block
+      (functions.csv size 44, verified against osos.asm and osos.dec -
+      the literal @ 0x8390c50 is 0x08adc2c0, the stats base); the
+      0x08390c30 entry below is its fall-through tail, not a separate
+      callee. stmdb {r4,lr}; mov r4,r0; bl 0x082ccc74 (arms the stats
+      lock, the ported tracked_stats_arm_lock); ldr r2,[lit]; cmp
+      r4,#0; ldrd r0,r1,[r2,#0x40] - the PRE-reset peak into the return
+      pair - then ldrne/strne copies current(+0x38) over peak(+0x40)
+      word by word when reset is nonzero; ldmia {r4,pc}. The port
+      absorbs the tail (the head falls through into it, so there is no
+      fragment boundary to call across - unlike tracked_alloc_tail,
+      whose enclosing entry @ 0x08390b14 is genuinely unported).
+      Deviations: the ALLOC_STATS static instead of the literal
+      0x08adc2c0 (module simplification), and the lock call dispatches
+      through TRACKED_STATS_OPS.lock (house ops-slot pattern) whose
+      default is the ported tracked_stats_arm_lock, same as
+      tracked_stats_current. Host tests: the full-i64 peak read,
+      reset=0 leaving both counters, reset!=0 copying current over
+      peak but returning the pre-reset peak, lock-before-read/reset
+      ordering via a recorder mock, and the wired default arming the
+      flag. match.py: same push/mov/lock-call/ldr-stats/cmp/ldrd-peak/
+      conditional-copy/pop; the diff is LLVM's fp frame, the
+      blx-through-slot, and ldrdne/strdne in place of the split
+      ldrne/strne word pairs - the documented deviations.
+
   - address: 0x08390c30
     ghidra: null
     name: tracked_stats_reset_peak
@@ -9647,18 +9681,20 @@ functions:
     status: ported
     vars: {r4: reset}
     notes: >-
-      Tail of the stats reader @ 0x08390c24 (which saves r4 and calls
-      the scheduler-flag setter @ 0x082ccc74 first). Loads peak(+0x40)
-      into the return pair, then when reset is nonzero (cmp r4,#0 +
-      ldrne/strne) copies current(+0x38) over peak; the returned peak is
-      the pre-reset value. Port deviations: reset arrives as the argument
-      (was r4 - the port IS the tail fragment), reads the ALLOC_STATS
-      static instead of literal 0x08adc2c0, and drops the envelope's
-      lock call @ 0x082ccc74 (module simplification, same as
-      tracked_alloc_tail). match.py: same structure - LLVM uses a beq
-      instead of predication and splits the ldrd. Sibling 0x08390c54
-      (returns current after the lock call) ported as
-      tracked_stats_current below.
+      Tail of the peak reader @ 0x08390c24 (the envelope head saves r4
+      and calls the scheduler-flag setter @ 0x082ccc74 first), not a
+      separate callee - the head falls through into it. Loads
+      peak(+0x40) into the return pair, then when reset is nonzero
+      (cmp r4,#0 + ldrne/strne) copies current(+0x38) over peak; the
+      returned peak is the pre-reset value. The port of this logic
+      lives INSIDE tracked_stats_peak @ 0x08390c24 (ported above),
+      which absorbs the tail; there is no separate Rust symbol.
+      (History: the earlier "the port IS the tail fragment" note
+      described a standalone fragment port that was never committed -
+      it was swept into names.yaml by an unrelated edit; the envelope
+      port now covers both addresses.) Sibling 0x08390c54 (returns
+      current after the lock call) ported as tracked_stats_current
+      below.
 
   - address: 0x08390c54
     ghidra: FUN_08390c54

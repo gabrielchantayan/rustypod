@@ -40,9 +40,10 @@
 //!
 //! Both are read/written with `ldrd`/`strd`, so the block is 8-aligned
 //! (0x08adc2f8 and 0x08adc300 are). The peak is only touched by the
-//! allocator and by the reset helper @ 0x08390c30; the free path here
-//! just subtracts, and it subtracts a *signed* 32-bit size widened to 64
-//! (`sbc r1, r1, r2, asr #31`).
+//! allocator and by the peak reader @ 0x08390c24 (ported below; its
+//! 0x08390c30 tail does the conditional `peak := current` reset); the
+//! free path here just subtracts, and it subtracts a *signed* 32-bit
+//! size widened to 64 (`sbc r1, r1, r2, asr #31`).
 //!
 //! Ported here (binary-scanned call counts):
 //!
@@ -62,6 +63,13 @@
 //! - `free_tag57` / `alloc_tag57` — originals @ 0x08391d24 and
 //!   0x08391d2c (8 bytes each): `mov r1, #57` in front of `free_wrapper`
 //!   @ 0x080e7970 / `malloc_wrapper` @ 0x080eb67c (heap/veneers.rs).
+//! - `tracked_stats_peak` — original: `FUN_08390c24` @ 0x08390c24
+//!   (44 bytes — functions.csv's size, verified against osos.asm: the
+//!   COMPLETE peak reader whose 0x08390c30 tail the ledger lists
+//!   separately as `tracked_stats_reset_peak`). Arms the stats lock,
+//!   reads the peak (+0x40) with `ldrd` into the return pair, then
+//!   conditionally copies current (+0x38) over the peak when the reset
+//!   argument is nonzero — the returned peak is the pre-reset value.
 //! - `tracked_stats_current` — original: `FUN_08390c54` @ 0x08390c54
 //!   (20 bytes, 1 `bl` call site @ 0x08391450). Arms the stats lock
 //!   (scheduler-flag setter @ 0x082ccc74) and returns the running byte
@@ -301,6 +309,60 @@ pub(crate) const DEFAULT_TRACKED_STATS_OPS: TrackedStatsOps = TrackedStatsOps {
 /// The active implementation table. Written once at init on target;
 /// host tests swap in recorders and restore the default.
 pub static mut TRACKED_STATS_OPS: TrackedStatsOps = DEFAULT_TRACKED_STATS_OPS;
+
+/// tracked_stats_peak — original: `FUN_08390c24` @ 0x08390c24
+/// (44 bytes, functions.csv's own size; verified against osos.asm and
+/// osos.dec — the literal @ 0x8390c50 is 0x08adc2c0, the stats base).
+///
+/// The peak reader of the tag-57 tracked allocator's stats block, and
+/// the COMPLETE function the ledger's 0x08390c30 entry
+/// (`tracked_stats_reset_peak`) is the fall-through tail of:
+///
+/// ```text
+/// stmdb sp!,{r4,lr}
+/// mov r4,r0               ; reset flag
+/// bl 0x082ccc74           ; arm the stats lock (scheduler-flag setter)
+/// ldr r2,[lit 0x08adc2c0]
+/// cmp r4,#0
+/// ldrd r0,r1,[r2,#0x40]   ; peak into the return pair (PRE-reset)
+/// ldrne r3,[r2,#0x38]     ; \
+/// ldrne r12,[r2,#0x3c]    ;  } reset != 0: peak := current, word-wise
+/// strne r3,[r2,#0x40]     ;  }
+/// strne r12,[r2,#0x44]    ; /
+/// ldmia sp!,{r4,pc}
+/// ```
+///
+/// Arms the stats lock, then reads the high-water mark (stats + 0x40,
+/// i64) with `ldrd` into the return pair BEFORE the conditional reset,
+/// so the caller always gets the pre-reset peak; when `reset` is
+/// nonzero it then copies the running counter (stats + 0x38, i64) over
+/// the peak word by word. Because the tail is not a separate callee —
+/// the head falls through into it — this port absorbs the 0x08390c30
+/// tail rather than calling a fragment (unlike `tracked_alloc_tail`,
+/// whose enclosing entry @ 0x08390b14 is genuinely unported).
+///
+/// Deviations:
+///
+/// - The accounting block is the `ALLOC_STATS` static instead of the
+///   literal 0x08adc2c0 (module simplification, same as the rest of
+///   heap/tracked).
+/// - The lock callee @ 0x082ccc74 (ported as
+///   [`tracked_stats_arm_lock`]) dispatches through the
+///   [`TRACKED_STATS_OPS`]`.lock` slot (house ops-slot pattern, an
+///   indirect call in place of `bl`) whose default is that port, same
+///   as [`tracked_stats_current`], so host tests can swap in a
+///   recorder.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn tracked_stats_peak(reset: i32) -> i64 {
+    let lock = core::ptr::read_volatile(core::ptr::addr_of!(TRACKED_STATS_OPS.lock));
+    lock();
+    let stats = core::ptr::addr_of_mut!(ALLOC_STATS);
+    let peak = (*stats).peak_bytes;
+    if reset != 0 {
+        (*stats).peak_bytes = (*stats).current_bytes;
+    }
+    peak
+}
 
 /// tracked_stats_current — original: `FUN_08390c54` @ 0x08390c54
 /// (20 bytes; 1 `bl` call site @ 0x08391450).
@@ -734,6 +796,82 @@ mod tests {
         unsafe {
             ALLOC_STATS.current_bytes = 99;
             assert_eq!(tracked_stats_current(), 99);
+            assert_eq!(ALLOC_STATS.lock_flag, 8, "the default lock arms the flag");
+        }
+    }
+
+    // ---- tracked_stats_peak (0x08390c24) -----------------------------
+
+    /// The whole i64 at stats+0x40 comes back — small, negative and
+    /// wider-than-32-bit values — and reset = 0 leaves both counters
+    /// alone (`cmp r4,#0` guards the whole copy).
+    #[test]
+    fn returns_the_peak_and_leaves_it_alone_when_reset_is_clear() {
+        let _guard = stats();
+        unsafe {
+            for peak in [0x1234i64, -7, 0x1_0000_0001, i64::MIN] {
+                ALLOC_STATS.peak_bytes = peak;
+                ALLOC_STATS.current_bytes = 42;
+                assert_eq!(tracked_stats_peak(0), peak, "peak={peak:#x}");
+                assert_eq!(ALLOC_STATS.peak_bytes, peak, "peak untouched");
+                assert_eq!(ALLOC_STATS.current_bytes, 42, "current untouched");
+            }
+        }
+    }
+
+    /// A nonzero reset copies current(+0x38) over peak(+0x40) — the
+    /// full i64, so wider-than-32-bit and negative currents survive —
+    /// but the RETURNED peak is the pre-reset value: the `ldrd` at
+    /// +0x40 runs before the conditional copy.
+    #[test]
+    fn reset_copies_current_over_peak_but_returns_the_pre_reset_peak() {
+        let _guard = stats();
+        unsafe {
+            ALLOC_STATS.peak_bytes = 0x1_0000_0001;
+            ALLOC_STATS.current_bytes = 0x2_0000_0002;
+            assert_eq!(tracked_stats_peak(1), 0x1_0000_0001, "pre-reset peak");
+            assert_eq!(ALLOC_STATS.peak_bytes, 0x2_0000_0002, "peak := current");
+            assert_eq!(ALLOC_STATS.current_bytes, 0x2_0000_0002);
+
+            ALLOC_STATS.peak_bytes = -5;
+            ALLOC_STATS.current_bytes = -9;
+            assert_eq!(tracked_stats_peak(-1), -5, "any nonzero resets");
+            assert_eq!(ALLOC_STATS.peak_bytes, -9);
+        }
+    }
+
+    /// The lock runs before the read AND the conditional copy: the mock
+    /// leaves its marks in both counters and the reader must return and
+    /// copy the values the lock set.
+    #[test]
+    fn calls_the_lock_before_reading_and_resetting() {
+        static mut LOCK_CALLS: usize = 0;
+        unsafe extern "C" fn mock_lock() {
+            LOCK_CALLS += 1;
+            ALLOC_STATS.peak_bytes = 0x2a;
+            ALLOC_STATS.current_bytes = 0x5a;
+        }
+        let _guard = stats();
+        unsafe {
+            LOCK_CALLS = 0;
+            TRACKED_STATS_OPS.lock = mock_lock;
+            assert_eq!(tracked_stats_peak(1), 0x2a, "the lock's peak, read after it");
+            assert_eq!(
+                ALLOC_STATS.peak_bytes, 0x5a,
+                "the lock's current, copied after it"
+            );
+            assert_eq!(LOCK_CALLS, 1);
+        }
+    }
+
+    /// The wired default lock is the ported scheduler-flag setter, so
+    /// the peak reader arms the flag (stats + 0x34) to 8 on its way in.
+    #[test]
+    fn the_default_lock_arms_the_flag_before_the_peak_read() {
+        let _guard = stats();
+        unsafe {
+            ALLOC_STATS.peak_bytes = 99;
+            assert_eq!(tracked_stats_peak(0), 99);
             assert_eq!(ALLOC_STATS.lock_flag, 8, "the default lock arms the flag");
         }
     }
