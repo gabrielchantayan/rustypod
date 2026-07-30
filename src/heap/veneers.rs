@@ -53,9 +53,9 @@
 //!   returns NULL (r0 unchanged). Sole osos caller: `cxx_vec_delete`.
 //! - `operator_new_checked` — original: `FUN_08266c70` @ 0x08266c70
 //!   (48 bytes, 223 call sites). `p = operator_new(size)`; on NULL it
-//!   invokes the C++ new-handler dispatch @ 0x08266abc with code 3, then
-//!   returns `p` (still NULL if no handler freed anything — the original
-//!   does not retry at this level).
+//!   invokes the C++ new-handler dispatch @ 0x08266abc (new_handler.rs)
+//!   with code 3, then returns `p` (still NULL if no handler freed
+//!   anything — the original does not retry at this level).
 //! - `heap_panic` — original: `FUN_08030f44` @ 0x08030f44 (32 bytes,
 //!   fatal, does not return). `__rt_raise(1, 0)` @ 0x080320a8, then the
 //!   exit path @ 0x08035878 (`_rt_exit`-ish: runs atexit handlers and
@@ -73,10 +73,12 @@
 //! @ 0x0819d6a0 (wrappers.rs, free_path.rs) and `heap_create` @
 //! 0x0819d7b4 (init.rs) through thin handle-cast shims (the heap handle
 //! *is* the descriptor pointer — `heap_create` returns its first
-//! argument), and `raise` is `__rt_raise` @ 0x080320a8 (runtime/raise.rs)
+//! argument), `new_handler` is the real C++ new-handler dispatch @
+//! 0x08266abc (new_handler.rs, through the one-argument shim — the
+//! checked path's code-3 call never carries the variadic tail), and
+//! `raise` is `__rt_raise` @ 0x080320a8 (runtime/raise.rs)
 //! directly. The remaining slots keep behavior-faithful stubs:
-//! `new_handler` returns, matching the original 0x08266abc with no C++
-//! new-handler registered; `exit` is a no-op, matching the 0x08035878
+//! `exit` is a no-op, matching the 0x08035878
 //! stdio cleanup which runtime/exit.rs ports as dead semihost code; and
 //! `terminate` spins, matching the 0x082b20a0 semihosting-SWI + spin
 //! stub in runtime/exit.rs.
@@ -166,7 +168,9 @@ pub struct HeapVeneerOps {
         size: usize,
     ) -> *mut HeapDescriptorDescriptor,
     /// C++ new-handler dispatch @ 0x08266abc (code 3 = plain `operator
-    /// new` failure). No-op when no handler is registered.
+    /// new` failure). The default is the real port's one-argument form
+    /// (new_handler.rs), which returns immediately when no handler is
+    /// registered — the only state stock retailOS ever reaches.
     pub new_handler: unsafe extern "C" fn(code: usize),
     /// `__rt_raise` @ 0x080320a8 (runtime/raise.rs; the default is the
     /// real port).
@@ -227,11 +231,6 @@ unsafe extern "C" fn create_ported(
     crate::heap::init::heap_create(desc, start as usize, size) as *mut HeapDescriptorDescriptor
 }
 
-/// Default stub: matches the original 0x08266abc with no C++ new-handler
-/// registered — nothing to call, just return (the checked front-end then
-/// returns NULL).
-unsafe extern "C" fn missing_new_handler(_code: usize) {}
-
 /// Default stub: the original exit path @ 0x08035878 is the stdio cleanup
 /// that runtime/exit.rs ports as a no-op (dead semihost code) — no-op.
 unsafe extern "C" fn missing_exit() {}
@@ -250,7 +249,7 @@ pub(crate) const DEFAULT_HEAP_OPS: HeapVeneerOps = HeapVeneerOps {
     free: free_ported,
     realloc: realloc_ported,
     create: create_ported,
-    new_handler: missing_new_handler,
+    new_handler: crate::heap::new_handler::cxx_new_handler_report,
     raise: crate::runtime::raise::__rt_raise,
     exit: missing_exit,
     terminate: missing_terminate,

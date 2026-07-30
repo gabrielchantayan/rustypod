@@ -1851,6 +1851,47 @@ functions:
     status: ported
     notes: raise(1,0) -> exit -> terminate @ 0x82b20a0 (non-returning).
 
+  - address: 0x08266abc
+    ghidra: FUN_08266abc
+    name: cxx_new_handler_dispatch
+    size: 164
+    sig: "void cxx_new_handler_dispatch(usize code, usize arg1, usize arg2, usize arg3)"
+    module: heap/new_handler
+    vars: {param_1: code, param_2: arg1, param_3: arg2, param_4: arg3,
+      DAT_08266b60: handler_global_ptr, piVar3: message, uVar4: text}
+    status: ported
+    notes: >-
+      ADS C++ runtime error/new-handler dispatch (variadic: r0 = code,
+      r1..r3 = message args, spilled at entry). Reads the handler global
+      @ 0x08a0fc08 (literal @ 0x08266b60); NULL -> immediate return —
+      the only state stock retailOS reaches (binary-verified: the only
+      reference to 0x08a0fc08 in the whole image is this function's own
+      literal, nothing ever registers a handler). code <= 3 (SIGNED
+      `cmp r0,#3; bgt`): handler(code, NULL), no message built. code >
+      3: 8-byte message object {vtable, text} constructed in place over
+      the spilled args (placement-new identity 0x082aaddc + ctor
+      0x082a7cf4, vtable DAT_082a7d0c), text filled by the builder
+      0x082a7c20 and read back through vtable[2], handler(code, text),
+      then vtable[0] releases the tag-3-allocated text. 10 call sites:
+      operator_new_checked 0x08266c70 (code 3) + the std::ios/exception
+      reporters (codes 4, 8, 9, 0xe..0x11, 0x14). Deviation: the
+      builder subsystem (RWSTDERR catalog 0x08266d28 + growable
+      vasprintf 0x08266ca0 over string table DAT_082a7cf0) is NOT
+      ported — it sits behind CXX_NEW_HANDLER_OPS.format_message whose
+      default stub yields NULL text (unobservable on stock); vtable[0]
+      is modeled as operator_delete_tag3, inferred from the builder's
+      0x082aad74/0x082aad14 alloc/free pair (the vtable lives in
+      runtime-initialized data, body unrecoverable); the original's
+      post-build reload of the handler global is folded into one load.
+      veneers.rs's HEAP_OPS.new_handler default is now the real port
+      via the one-argument cxx_new_handler_report (the code-3 call
+      never carries the variadic tail). match.py structural: early
+      return + signed code compare + both handler call sites
+      correspond; the release tail is the inlined lazy-init + tag-3
+      delete chain (veneers pattern). Gotcha: the handler-global read
+      must be volatile — LLVM folded it to None and erased the whole
+      function on the first ARM build.
+
   - address: 0x0826f580
     name: aligned_pool
     size: 612

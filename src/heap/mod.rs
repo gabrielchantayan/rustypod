@@ -10,6 +10,7 @@ pub mod client_register;
 pub mod dcache;
 pub mod free_path;
 pub mod init;
+pub mod new_handler;
 pub mod pool;
 pub mod pool_client;
 pub mod queue_wait;
