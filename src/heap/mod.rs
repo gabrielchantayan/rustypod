@@ -3,6 +3,7 @@ pub mod alloc_core;
 pub mod block_deque;
 pub mod block_mgr;
 pub mod block_region;
+pub mod client_erase;
 pub mod client_register;
 pub mod dcache;
 pub mod free_path;

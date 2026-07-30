@@ -1890,7 +1890,10 @@ functions:
       base mutex (+0x8) via the C++ recursive mutex thunk 0x082621a8; if
       the deque is non-empty and the client handle (0x083d64f4 on
       this+0x4, re-read before every call) is non-NULL, hands the
-      descriptors back: 0x081fc080(client, deque) then 0x081fc884(client);
+      descriptors back: 0x081fc080(client, deque) then 0x081fc884(client)
+      (the erase is now ported — heap/client_erase.rs, the shipped
+      POOL_BASE_OPS.client_erase default; the commit stays a no-op
+      stub);
       zeroes fill_block_count/fill_cap (+0x44/+0x48); tail b 0x082621ac
       (unlock — its status is the return value, ignored by the only
       caller; port returns void). Ghidra's decompile inlines the whole
@@ -2114,11 +2117,58 @@ functions:
       singleton is remembered as NULL and never retried (the guard is
       spent) — reproduced. Still unported block-manager client
       machinery: ctor 0x081e6b34, reserve
-      0x081fbe4c, headroom 0x081fc3f4, populate 0x081fc298, erase
-      0x081fc080 + commit 0x081fc884.
+      0x081fbe4c, headroom 0x081fc3f4, populate 0x081fc298, commit
+      0x081fc884. (Erase @ 0x081fc080 is now ported —
+      heap/client_erase.rs.)
       match.py structural: same offsets (0x3c/0x29/0x2c/+0xc/0x170),
       same guard test and shared-vs-private split; ops-table blx in
       place of bl.
+
+  - address: 0x081fc080
+    ghidra: FUN_081fc080
+    name: client_erase
+    size: 136
+    sig: "void client_erase(u8 *client, BlockDeque *deque)"
+    module: heap/client_erase
+    vars: {param_1: client, param_2: deque, local_24: front, local_14: block, iVar1: remaining}
+    status: ported
+    notes: >-
+      The block-manager client's erase op — pool_base_release_blocks'
+      block hand-back (with commit @ 0x081fc884). 2 bl call sites @
+      0x0814bb54 (FUN_0814bb18) and 0x08214198 (pool_base_release_blocks),
+      binary-verified. Under the CLIENT's own mutex (client + 0x24, not
+      the pool base's +0x8 — same unported C++ pair 0x082e8390/0x082e83d8
+      via thunks 0x082621a8/0x082621ac, REGION_MUTEX_OPS boundary):
+      presets the hand-back word 0 (dead store, kept), snapshots the
+      deque count (+0x20) once into the loop counter (NOT re-read —
+      deque_pop_front decrements the deque's own count in parallel),
+      and per iteration: copies the 16-byte begin iterator onto the
+      stack via the 0x083d9ec8 copy of the ported deque_iter_assign
+      (cxx/templates.rs, called directly), reads the front element's
+      block word (element word 1 = region object pointer,
+      block_region.rs's ELEM_REGION_INDEX; the u32 at region + 0xc is
+      the hand-back word — 0x081fc124 dereferences it further as a
+      handle middle), pops the front element through the real
+      deque_pop_front @ 0x083ddbdc (virtual element dtor + segment
+      retirement happen there), then hands the word to the manager:
+      0x081fc124(client, &block). Tail: 0x081fbf1c(client, 1) then
+      0x081fc230(client), both verdicts discarded. The three unported
+      client-machinery callees dispatch through the new CLIENT_ERASE_OPS
+      slots (house pattern, blx in place of bl) with documented no-op
+      defaults (no manager); both notification slots return () since
+      every caller discards the 0/1 verdict. The port is the shipped
+      POOL_BASE_OPS.client_erase default, replacing block_deque.rs's
+      stub_client_erase (removed — behavior-identical under the no-op
+      defaults: a drained deque, nothing handed back). Host tests cover
+      the empty-deque lock/notify/unlock protocol, a full 3-element
+      drain through the real pop_front (per-element dtor-then-hand-back
+      order, block words in order, segment+map retirement, count 0,
+      NULL iterators), the count snapshot, and the wired-default no-op
+      path. match.py structural: same lock/count-snapshot/loop/
+      pop/hand-back/notify/unlock shape; the slot calls are blx for bl,
+      the two ported callees are direct bl, LLVM adds its fp frame, and
+      the element/region word reads come out as byte loads from the
+      read_unaligned host-testing idiom (the block_region.rs deviation).
 
   - address: 0x081eff38
     ghidra: FUN_081eff38

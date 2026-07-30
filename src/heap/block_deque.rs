@@ -52,11 +52,12 @@
 //!   (100 bytes; 1 bl call site @ 0x08214238 in the dtor, binary-
 //!   verified). Under the base mutex: when the deque is non-empty and a
 //!   client is attached, hands the block descriptors back to the block
-//!   manager (erase @ 0x081fc080 + commit @ 0x081fc884, ops slots; the
-//!   client handle is re-read before every call, faithfully), then
-//!   zeroes the fill counters (+0x44/+0x48). The original tail-branches
-//!   through the mutex unlock and returns its status; the only caller
-//!   ignores it, so the port returns ().
+//!   manager (erase @ 0x081fc080 — ops slot defaulting to the real
+//!   port in heap/client_erase.rs — + commit @ 0x081fc884, still a
+//!   no-op stub; the client handle is re-read before every call,
+//!   faithfully), then zeroes the fill counters (+0x44/+0x48). The
+//!   original tail-branches through the mutex unlock and returns its
+//!   status; the only caller ignores it, so the port returns ().
 //! - `pool_base_destroy` — original @ 0x08214224 (76 bytes incl. the
 //!   vtable literal; NOT in Ghidra's function list — it decompiled the
 //!   chain inlined into `pool_destroy`, whose tail `b 0x0826f800 ->
@@ -122,8 +123,11 @@
 //!   heap/pool_client.rs (which owns the +0x00..+0x44 half of the
 //!   object); the parent dtor @ 0x081f00a0 still defaults to a stub
 //!   returning `this`; the remaining block-manager client calls
-//!   (0x081fbe4c, 0x081fc3f4, 0x081fc298, 0x081fc080, 0x081fc884)
-//!   default to failure/no-op stubs matching the no-manager state;
+//!   (0x081fbe4c, 0x081fc3f4, 0x081fc298, 0x081fc884) default to
+//!   failure/no-op stubs matching the no-manager state; the erase
+//!   @ 0x081fc080 defaults to the real port in heap/client_erase.rs
+//!   (whose own unported callees default to no-ops, so the wired
+//!   behavior is unchanged: a drained deque, nothing handed back).
 //!   `queue_wait` @ 0x080b4adc defaults to the real port in
 //!   heap/queue_wait.rs (its result is discarded by the only ported
 //!   caller). `seg_dealloc` @ 0x08266f2c
@@ -309,8 +313,8 @@ pub struct PoolBaseOps {
     /// Nonzero on success — `block_deque_fill`'s return value.
     pub client_populate:
         unsafe extern "C" fn(client: *mut u8, count: usize, deque: *mut BlockDeque) -> i32,
-    /// Block hand-back pair @ 0x081fc080 `(client, deque)` /
-    /// 0x081fc884 `(client)`.
+    /// Block hand-back pair @ 0x081fc080 `(client, deque)` — default:
+    /// the real port (heap/client_erase.rs) — and 0x081fc884 `(client)`.
     pub client_erase: unsafe extern "C" fn(client: *mut u8, deque: *mut BlockDeque),
     pub client_erase_commit: unsafe extern "C" fn(client: *mut u8),
     /// Mailbox queue-get wait @ 0x080b4adc `(slot, timeout)`; result
@@ -330,7 +334,9 @@ unsafe extern "C" fn stub_parent_destroy(this: *mut PoolBase) -> *mut PoolBase {
 }
 
 /// Default client stubs: no block manager — reserve/avail/populate
-/// report failure, the hand-back pair is a no-op.
+/// report failure, the commit is a no-op. (The erase default is the
+/// real port in heap/client_erase.rs, whose own unported callees
+/// no-op — behavior-identical for the no-manager state.)
 unsafe extern "C" fn stub_client_reserve(_client: *mut u8, _bytes: usize, _zero: usize) -> i32 {
     0
 }
@@ -347,8 +353,6 @@ unsafe extern "C" fn stub_client_populate(
     0
 }
 
-unsafe extern "C" fn stub_client_erase(_client: *mut u8, _deque: *mut BlockDeque) {}
-
 unsafe extern "C" fn stub_client_erase_commit(_client: *mut u8) {}
 
 /// Wired defaults (real ports where they exist, documented stubs for
@@ -362,7 +366,7 @@ pub(crate) const DEFAULT_POOL_BASE_OPS: PoolBaseOps = PoolBaseOps {
     client_reserve: stub_client_reserve,
     client_avail: stub_client_avail,
     client_populate: stub_client_populate,
-    client_erase: stub_client_erase,
+    client_erase: crate::heap::client_erase::client_erase,
     client_erase_commit: stub_client_erase_commit,
     queue_wait: crate::heap::queue_wait::queue_wait,
     seg_dealloc: crate::heap::veneers::cxx_array_dealloc,
