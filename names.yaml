@@ -10975,6 +10975,35 @@ functions:
       called directly (LLVM inlines its bounded-cursor wrapper, same
       codegen shape as the sibling's accepted port).
 
+  - address: 0x08123a54
+    ghidra: FUN_08123a54
+    name: indent_prepare
+    size: 76
+    sig: "void indent_prepare(MessageStream *stream, uint32 depth)"
+    module: printf/formatted_message
+    status: ported
+    vars: {param_1: stream, param_2: depth}
+    notes: >-
+      14 bl call sites. The indent preparer of the formatted-message
+      family: NUL the scratch at +0x215, then strncat @ 0x08031200
+      (ported, libc/strcat) the stream's indent unit depth times -
+      unit = table[style], table base from the literal-pool word @
+      0x08123aa0 (value 0x089cb218, 8 bytes past the boolean-tag table
+      base), style byte at +0x14 re-read each iteration (ldrb r0,
+      [r5, #0x14]; ldr r1, [r7, r0, lsl #2]), each copy bounded at 0x40
+      source bytes with no destination bound. The osos.dec bytes at VA
+      0x089cb218 are the same unreferenced resource-string blob as the
+      boolean sibling's table, so the runtime unit strings are not
+      statically readable from the image; the lookup keeps the
+      original's indirection as the swappable INDENT_UNIT_TABLE static
+      (default: single-entry {"\t"}, pinned by plist convention). The
+      port is the shipped default of the INDENT_PREPARE dispatch slot
+      shared with formatted_message_emit / _emit_boolean. match.py
+      structural: same algorithm - LLVM inlines the ported strncat
+      (strlen scan + copy bounded at 0x40) and early-returns on
+      depth == 0 instead of entering the loop; scratch NUL, table
+      load, per-iteration style re-read and copy bound all present.
+
   - address: 0x0811d46c
     ghidra: FUN_0811d46c
     name: vtable_query_4c_kind4

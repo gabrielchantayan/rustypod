@@ -6,11 +6,13 @@
 //!   (80 bytes; 83 `bl` call sites, binary-scanned).
 //! - `formatted_message_emit_boolean` — original: `FUN_0812395c` @
 //!   0x0812395c (88 bytes; 58 `bl` call sites, binary-scanned).
+//! - `indent_prepare` — original: `FUN_08123a54` @ 0x08123a54 (76
+//!   bytes; 14 `bl` call sites, binary-scanned).
 //!
 //! Algorithm: prepare the stream's indentation for the requested nesting
-//! `depth` (`indent_prepare` @ 0x08123a54 fills the scratch buffer at
-//! +0x215 with `depth` copies of the stream's indent unit, looked up from
-//! a table indexed by the style byte at +0x14), then format
+//! `depth` ([`indent_prepare`] fills the scratch buffer at +0x215 with
+//! `depth` copies of the stream's indent unit, looked up from a table
+//! indexed by the style byte at +0x14), then format
 //! `"%s<key>%s</key>\n%s<integer>%d</integer>\n"` — a literal @
 //! 0x08123650, immediately after the body and reached with `adr` — into
 //! the inline 512-byte buffer at +0x15 via `snprintf` @ 0x0802f768 with
@@ -43,9 +45,22 @@
 //! #off` sequence):
 //!
 //! ```text
+//! +0x14 style   (u8)          indent-style byte, indexes the unit table
 //! +0x15 buf     ([u8; 0x200])  inline format buffer, one message at a time
 //! +0x215 indent ([u8; 0x40])   indent scratch, filled by the preparer
 //! ```
+//!
+//! `indent_prepare` @ 0x08123a54 (ported below): NUL the scratch at
+//! +0x215, then `strncat` @ 0x08031200 the indent unit `depth` times —
+//! `unit = INDENT_UNIT_TABLE[style]`, table base from the literal-pool
+//! word @ 0x08123aa0 (0x089cb218, 8 bytes past the boolean-tag table
+//! base; the style byte is re-read each iteration), each copy bounded
+//! at 0x40 source bytes with no destination bound. The osos.dec bytes
+//! at VA 0x089cb218 are the same unreferenced resource-string blob as
+//! the boolean sibling's table, so the runtime unit strings are not
+//! statically readable from the image; the [`INDENT_UNIT_TABLE`] slot
+//! keeps the indirection faithful, defaulting to the single-entry
+//! `{"\t"}` table pinned by plist convention.
 //!
 //! Deviations:
 //! - `snprintf` @ 0x0802f768 *is* ported
@@ -54,20 +69,24 @@
 //!   [`VaList`] built on the stack — exactly the r3 + two stack-word
 //!   argument area the original builds (house convention, see
 //!   `printf/printf_api.rs`).
-//! - `indent_prepare` @ 0x08123a54 and the stream append @ 0x08123c58
-//!   are not ported; they are the [`INDENT_PREPARE`] / [`STREAM_APPEND`]
-//!   dispatch boundaries (house pattern, see `sqlite/error_msg.rs`). The
-//!   default indent slot writes a single NUL — the same end state the
-//!   original reaches with `depth == 0` (buffer NULed, zero copies
-//!   appended). The default append slot drops the message: the stream
-//!   keeps its counters, the formatted text stays in the inline buffer
-//!   (the original's overflow path would instead bump +0x10 by the
-//!   message length — that counter belongs to the append batch).
+//! - `indent_prepare` @ 0x08123a54 *is* ported (below) and is the
+//!   shipped default of the [`INDENT_PREPARE`] dispatch slot; the slot
+//!   stays swappable so host tests can install recording mocks (house
+//!   pattern, see `sqlite/error_msg.rs`). Its indent-unit table base —
+//!   the original's literal-pool word @ 0x08123aa0 — is the swappable
+//!   [`INDENT_UNIT_TABLE`] static, mirroring the boolean sibling's
+//!   [`BOOLEAN_TAG_TABLE`]. The stream append @ 0x08123c58 is not
+//!   ported; it is the [`STREAM_APPEND`] dispatch boundary. The default
+//!   append slot drops the message: the stream keeps its counters, the
+//!   formatted text stays in the inline buffer (the original's overflow
+//!   path would instead bump +0x10 by the message length — that counter
+//!   belongs to the append batch).
 //! - The original tail-branches to the append (`b 0x08123c58`); the Rust
 //!   body calls and returns. Same argument registers, one extra stack
 //!   frame in the match.py diff.
 
 use super::printf_api::{snprintf, VaList};
+use crate::libc::strcat::strncat;
 
 /// The plist-fragment format literal @ 0x08123650 (addressed by the
 /// original with `adr r2, 0x8123650`, right after the 80-byte body).
@@ -84,45 +103,103 @@ const PLIST_BOOLEAN_FORMAT: &[u8] = b"%s<key>%s</key>\n%s<%s/>\n\0";
 /// #0x200`).
 const BUFFER_CAPACITY: usize = 0x200;
 
+/// Capacity of the indent scratch buffer at +0x215, and the per-copy
+/// `strncat` limit the original passes (`mov r2, #0x40`). Note the
+/// original bounds each *source* copy at 0x40 bytes but never the
+/// destination — `depth` copies of a long unit would overrun the
+/// scratch; the port keeps the call pattern faithful.
+const INDENT_SCRATCH_CAPACITY: usize = 0x40;
+
 /// An indented-message output stream, only the fields this emitter
 /// touches. See the module header for the original byte offsets; the
-/// output base/end/written/overflow words at +0x04..+0x10 and the
-/// indent-style byte at +0x14 belong to the append/indent batches and
-/// are unmodeled here.
+/// output base/end/written/overflow words at +0x04..+0x10 belong to the
+/// append batch and are unmodeled here.
 #[repr(C)]
 pub struct MessageStream {
-    /// +0x00..+0x15: unmodeled (stream output state and indent style).
-    pub _gap_00: [u8; 0x15],
+    /// +0x00..+0x14: unmodeled (stream output state).
+    pub _gap_00: [u8; 0x14],
+    /// +0x14: indent-style byte; indexes [`INDENT_UNIT_TABLE`] with no
+    /// bounds check (the original's `ldrb r0, [r5, #0x14]` + `ldr r1,
+    /// [r7, r0, lsl #2]`).
+    pub style: u8,
     /// +0x15: inline format buffer; the message is built here, then
     /// appended to the stream.
     pub buf: [u8; BUFFER_CAPACITY],
-    /// +0x215: indent scratch buffer; the preparer fills it with `depth`
-    /// copies of the stream's indent unit. Only its address is used here
-    /// (as the first and third `%s` argument); its true extent is owned
-    /// by the indent batch.
-    pub indent: [u8; 0x40],
+    /// +0x215: indent scratch buffer; [`indent_prepare`] fills it with
+    /// `depth` copies of the stream's indent unit.
+    pub indent: [u8; INDENT_SCRATCH_CAPACITY],
 }
 
 // The original's byte offsets. The struct is all bytes, so they hold on
 // every host — asserted unconditionally.
+const _STYLE_OFFSET: [u8; 0x14] = [0; core::mem::offset_of!(MessageStream, style)];
 const _BUF_OFFSET: [u8; 0x15] = [0; core::mem::offset_of!(MessageStream, buf)];
 const _INDENT_OFFSET: [u8; 0x215] = [0; core::mem::offset_of!(MessageStream, indent)];
+
+/// A static table of C-string pointers; the strings are immutable
+/// literals, so sharing the table across (test) threads is sound.
+struct IndentUnits([*const u8; 1]);
+unsafe impl Sync for IndentUnits {}
+
+/// The default indent-unit table: a single style whose unit is one
+/// horizontal tab — the conventional plist indent. The original's table
+/// base lives in the literal-pool word @ 0x08123aa0 (value 0x089cb218);
+/// its runtime contents are not statically readable from osos.dec (the
+/// VA is an unreferenced resource-string blob — see the module header),
+/// so the default is pinned by plist convention, exactly the situation
+/// of the boolean sibling's tag table.
+static DEFAULT_INDENT_UNITS: IndentUnits = IndentUnits([b"\t\0".as_ptr()]);
+
+/// The active indent-unit table base — the value of the original's
+/// literal-pool word @ 0x08123aa0, dereferenced as `table[style]` with
+/// no bounds check (the original's `ldr r1, [r7, r0, lsl #2]`). Host
+/// tests install recording tables; the firmware table replaces the
+/// default if 0x089cb218's runtime contents are ever mapped.
+pub static mut INDENT_UNIT_TABLE: *const *const u8 = DEFAULT_INDENT_UNITS.0.as_ptr();
+
+/// Reads the table-base slot (volatile — the slot is meant to be swapped
+/// at runtime, and a plain read lets LLVM const-fold the default away).
+#[inline(always)]
+pub(crate) fn indent_unit_table() -> *const *const u8 {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(INDENT_UNIT_TABLE)) }
+}
+
+/// indent_prepare — original: `FUN_08123a54` @ 0x08123a54 (76 bytes; 14
+/// `bl` call sites).
+///
+/// Fill `stream.indent` (the scratch at +0x215) with `depth` copies of
+/// the stream's indent unit: NUL the scratch, then `strncat(indent,
+/// INDENT_UNIT_TABLE[style], 0x40)` per copy — the unit string is looked
+/// up from the table base in the literal-pool word @ 0x08123aa0,
+/// indexed by the style byte at +0x14 (re-read each iteration, no
+/// bounds check). Each copy appends at most 0x40 source bytes; the
+/// destination is never bounded (faithful to the original).
+///
+/// Register usage: r0 = stream, r1 = depth.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn indent_prepare(stream: *mut MessageStream, depth: u32) {
+    let stream = &mut *stream;
+    stream.indent[0] = 0;
+    let table = indent_unit_table();
+    for _ in 0..depth {
+        let unit = *table.offset(stream.style as isize);
+        strncat(
+            stream.indent.as_mut_ptr(),
+            unit,
+            INDENT_SCRATCH_CAPACITY,
+        );
+    }
+}
 
 /// The indentation preparer: `indent_prepare(stream, depth)` @
 /// 0x08123a54. Fills `stream.indent` with `depth` copies of the stream's
 /// indent unit.
 pub type IndentPrepareFn = unsafe extern "C" fn(stream: *mut MessageStream, depth: u32);
 
-/// Default stub: no preparer wired, so the indent comes out empty — the
-/// same end state the original reaches with `depth == 0` (it NULs the
-/// scratch buffer, then appends zero copies).
-pub(crate) unsafe extern "C" fn empty_indent_prepare(stream: *mut MessageStream, _depth: u32) {
-    (*stream).indent[0] = 0;
-}
-
-/// The active indentation preparer. Host tests install recording mocks;
-/// the real port replaces the default when 0x08123a54 lands.
-pub static mut INDENT_PREPARE: IndentPrepareFn = empty_indent_prepare;
+/// The active indentation preparer. The shipped default is the ported
+/// [`indent_prepare`]; host tests install recording mocks.
+pub static mut INDENT_PREPARE: IndentPrepareFn = indent_prepare;
 
 /// Reads the preparer slot (volatile — the slot is meant to be swapped
 /// at runtime, and a plain read lets LLVM const-fold the default away).
@@ -427,18 +504,122 @@ mod tests {
     }
 
     #[test]
-    fn default_slots_give_empty_indent_and_drop_the_message() {
+    fn default_slots_prepare_the_default_indent_and_drop_the_message() {
         let _guard = slot_lock();
         let mut mem = backing();
         let stream = stream_of(&mut mem);
         unsafe {
-            // No mocks installed: documented defaults + the engine stub.
-            formatted_message_emit(stream, b"k\0".as_ptr(), -1, 7);
-            assert_eq!((*stream).indent[0], 0, "default preparer: empty indent");
+            (*stream).style = 0; // index the default table's "\t" unit
+            // No mocks installed: ported default preparer, default table,
+            // default append, and the engine stub.
+            formatted_message_emit(stream, b"k\0".as_ptr(), -1, 3);
+            assert_eq!(
+                &(&(*stream).indent)[..4],
+                b"\t\t\t\0".as_slice(),
+                "default preparer: depth copies of the default unit"
+            );
             assert_eq!((*stream).buf[0], 0, "stub engine still NUL-terminates the buffer");
             // The default append dropped the message: bytes past the NUL
             // are the untouched backing fill.
             assert_eq!((*stream).buf[1], 0xAA);
+        }
+    }
+
+    /// A recording unit table distinct from the default, so the lookup
+    /// is observably the slot's product: style 0 -> "--", style 1 -> "..".
+    static RECORDING_UNITS: IndentUnits2 = IndentUnits2([b"--\0".as_ptr(), b"..\0".as_ptr()]);
+
+    /// Two-entry variant of the unit-table wrapper for the recording
+    /// table (the default needs only one style).
+    struct IndentUnits2([*const u8; 2]);
+    unsafe impl Sync for IndentUnits2 {}
+
+    /// Swaps in the recording unit table for `body`, then restores the
+    /// previous base (same discipline as [`with_mocks`]).
+    unsafe fn with_units(body: impl FnOnce()) {
+        let saved = indent_unit_table();
+        core::ptr::write_volatile(
+            core::ptr::addr_of_mut!(INDENT_UNIT_TABLE),
+            RECORDING_UNITS.0.as_ptr(),
+        );
+        body();
+        core::ptr::write_volatile(core::ptr::addr_of_mut!(INDENT_UNIT_TABLE), saved);
+    }
+
+    #[test]
+    fn prepare_depth_zero_only_nuls_the_scratch() {
+        let _guard = slot_lock();
+        let mut mem = backing();
+        let stream = stream_of(&mut mem);
+        unsafe {
+            (*stream).style = 1;
+            with_units(|| {
+                indent_prepare(stream, 0);
+            });
+            assert_eq!((*stream).indent[0], 0, "scratch NULed");
+            assert_eq!((*stream).indent[1], 0xAA, "zero copies appended");
+        }
+    }
+
+    #[test]
+    fn prepare_appends_depth_copies_of_the_styled_unit() {
+        let _guard = slot_lock();
+        let mut mem = backing();
+        let stream = stream_of(&mut mem);
+        unsafe {
+            (*stream).style = 1;
+            with_units(|| {
+                indent_prepare(stream, 3);
+            });
+            assert_eq!(
+                &(&(*stream).indent)[..7],
+                b"......\0".as_slice(),
+                "depth 3 x style 1 (\"..\")"
+            );
+            (*stream).style = 0;
+            with_units(|| {
+                indent_prepare(stream, 2);
+            });
+            assert_eq!(
+                &(&(*stream).indent)[..5],
+                b"----\0".as_slice(),
+                "depth 2 x style 0 (\"--\"), scratch reset first"
+            );
+        }
+    }
+
+    #[test]
+    fn prepare_bounds_each_copy_at_0x40_source_bytes() {
+        let _guard = slot_lock();
+        let mut mem = backing();
+        let stream = stream_of(&mut mem);
+        // A unit longer than the per-copy limit: only the first 0x40
+        // bytes land per strncat(dst, src, 0x40).
+        static LONG_UNIT: [u8; 0x49] = {
+            let mut a = [b'x'; 0x49];
+            a[0x48] = 0;
+            a
+        };
+        struct LongUnit([*const u8; 1]);
+        unsafe impl Sync for LongUnit {}
+        static LONG_TABLE: LongUnit = LongUnit([LONG_UNIT.as_ptr()]);
+        unsafe {
+            (*stream).style = 0;
+            let saved = indent_unit_table();
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!(INDENT_UNIT_TABLE),
+                LONG_TABLE.0.as_ptr(),
+            );
+            indent_prepare(stream, 1);
+            core::ptr::write_volatile(core::ptr::addr_of_mut!(INDENT_UNIT_TABLE), saved);
+            assert!(
+                (*stream).indent.iter().all(|&b| b == b'x'),
+                "0x40 source bytes copied"
+            );
+            // strncat's terminator lands one past the 0x40-byte scratch
+            // (the original never bounds the destination; the backing's
+            // pad absorbs it here).
+            assert_eq!((*stream).indent.as_ptr().add(INDENT_SCRATCH_CAPACITY).read(), 0);
         }
     }
 
