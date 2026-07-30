@@ -3927,6 +3927,28 @@ functions:
       b 0x08037e78 — pure alias of the thunk for ROM 0x220041cc (signal/
       wake the waiter object). CONDVAR_HOOKS.waiter_wake.
 
+  - address: 0x080568e8
+    ghidra: FUN_080568e8
+    name: task_sleep
+    size: 24
+    sig: "u32 task_sleep(u32 ticks)"
+    module: kernel/task
+    vars: {param_1: ticks}
+    status: ported
+    notes: >-
+      cmp r0,#0 splits two tail branches: ticks != 0 -> thunk
+      0x08037e88 -> ROM 0x22003d44 (gateway service 20, the timed task
+      delay) with (0 = current task, ticks); ticks == 0 -> thunk
+      0x08037e90 -> ROM 0x220043f4 (gateway service 28 sub 13, no
+      arguments, exact RTXC op unidentified). Both ROM results pass
+      through the tail branch; call sites ignore them. The ROM services
+      route through TASK_HOOKS .rom_timed_delay/.rom_reschedule
+      (rom_yield precedent, no-op default stubs). 8 direct bl call
+      sites plus three veneer thunks @ 0x0805f4a0/0x080a6b40/0x080e9eb0;
+      observed counts are small polling delays (1, 10, 0x32, 100).
+      match.py: LLVM loads the hook table then makes the same two-way
+      cmp/beq split into the two indirect calls — same structure.
+
   - address: 0x080568fc
     ghidra: FUN_080568fc
     name: kernel_yield

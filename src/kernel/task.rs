@@ -137,6 +137,15 @@
 //!   service call behind condvar.rs's `task_yield`/`task_yield_thunk`
 //!   wrappers (their `CONDVAR_HOOKS.task_yield` slot is this function);
 //!   the ROM result passes through to the caller.
+//! - `task_sleep` — `FUN_080568e8` @ 0x080568e8 (24 bytes; 8 direct bl
+//!   call sites plus three veneer thunks @ 0x0805f4a0 / 0x080a6b40 /
+//!   0x080e9eb0 — the delay call polling loops everywhere use with small
+//!   counts like 1, 10, 0x32, 100). `ticks != 0` tail-branches to thunk
+//!   0x08037e88 -> ROM 0x22003d44 (gateway service 20, the timed task
+//!   delay; r0 = 0 — the current task — r1 = ticks at every call site);
+//!   `ticks == 0` tail-branches to thunk 0x08037e90 -> ROM 0x220043f4
+//!   (gateway service 28 sub 13, no arguments, exact RTXC op
+//!   unidentified). Both ROM results pass through the tail branch.
 //!
 //! # Simplifications / deviations
 //!
@@ -388,6 +397,14 @@ pub struct TaskHooks {
     /// Thunk 0x08037e98 -> ROM 0x22004260: the yield-like kernel service
     /// (exact RTXC op unidentified; always called with 0 here).
     pub rom_yield: unsafe extern "C" fn(arg: u32) -> i32,
+    /// Thunk 0x08037e88 -> ROM 0x22003d44: gateway service 20, the timed
+    /// task delay behind `task_sleep`'s nonzero path (r0 = 0 — the
+    /// current task — and r1 = ticks at every call site).
+    pub rom_timed_delay: unsafe extern "C" fn(task: usize, ticks: usize) -> usize,
+    /// Thunk 0x08037e90 -> ROM 0x220043f4: gateway service 28 sub 13,
+    /// the no-argument path `task_sleep(0)` takes (exact RTXC op
+    /// unidentified).
+    pub rom_reschedule: unsafe extern "C" fn() -> usize,
 }
 
 /// Default stub: no kernel, no object ids — spin (create cannot succeed).
@@ -504,6 +521,16 @@ unsafe extern "C" fn missing_rom_yield(_arg: u32) -> i32 {
     0
 }
 
+/// Default stub: delaying without a scheduler is a no-op reporting 0.
+unsafe extern "C" fn missing_rom_timed_delay(_task: usize, _ticks: usize) -> usize {
+    0
+}
+
+/// Default stub: rescheduling without a scheduler is a no-op reporting 0.
+unsafe extern "C" fn missing_rom_reschedule() -> usize {
+    0
+}
+
 /// Shipped defaults — see the module header for the wiring rationale.
 pub const DEFAULT_TASK_HOOKS: TaskHooks = TaskHooks {
     task_id_alloc: missing_id_alloc,
@@ -530,6 +557,8 @@ pub const DEFAULT_TASK_HOOKS: TaskHooks = TaskHooks {
     queue_pool_create,
     pool_init: crate::kernel::mqueue::queue_pool_init,
     rom_yield: missing_rom_yield,
+    rom_timed_delay: missing_rom_timed_delay,
+    rom_reschedule: missing_rom_reschedule,
 };
 
 /// The active hook table. Written once at init on target; host tests
@@ -933,6 +962,27 @@ pub unsafe extern "C" fn kernel_yield() -> i32 {
     (hooks().rom_yield)(0)
 }
 
+/// task_sleep — original: `FUN_080568e8` @ 0x080568e8 (24 bytes).
+///
+/// The retailOS task sleep. `cmp r0, #0` splits two tail branches:
+/// `ticks != 0` forwards `(0, ticks)` to thunk 0x08037e88 -> ROM
+/// 0x22003d44 (gateway service 20, the timed task delay — r0 = 0 picks
+/// the current task); `ticks == 0` invokes thunk 0x08037e90 -> ROM
+/// 0x220043f4 (gateway service 28 sub 13, no arguments). The ROM result
+/// word passes through to the caller, as the original's tail branches
+/// do; call sites ignore it. The ROM services route through the
+/// `rom_timed_delay` / `rom_reschedule` hook slots (rom_yield
+/// precedent); the ported task_lock wrappers implement them on target.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn task_sleep(ticks: u32) -> usize {
+    let h = hooks();
+    if ticks == 0 {
+        (h.rom_reschedule)()
+    } else {
+        (h.rom_timed_delay)(0, ticks as usize)
+    }
+}
+
 /// task_notify — original: `FUN_08060f80` @ 0x08060f80 (72 bytes).
 ///
 /// Returns 0 while the kernel-started byte is clear. Otherwise, when the
@@ -1025,6 +1075,8 @@ mod tests {
         RomCurrentTask(u32),
         RomSlotId(u32),
         RomYield(u32),
+        RomTimedDelay { task: usize, ticks: usize },
+        RomReschedule,
         KernelRunningNode,
         TaggedAlloc { size: usize, tag: usize },
         TaggedAllocZero { size: usize, tag: usize },
@@ -1228,6 +1280,16 @@ mod tests {
         -3
     }
 
+    unsafe extern "C" fn mock_rom_timed_delay(task: usize, ticks: usize) -> usize {
+        CALLS.lock().unwrap().push(Call::RomTimedDelay { task, ticks });
+        0xd31a
+    }
+
+    unsafe extern "C" fn mock_rom_reschedule() -> usize {
+        CALLS.lock().unwrap().push(Call::RomReschedule);
+        0x28d
+    }
+
     /// Node the kernel_running_node mock returns (NULL = no task).
     static mut RUNNING_NODE_RET: *mut NameNode = null_mut();
 
@@ -1283,6 +1345,8 @@ mod tests {
                 queue_pool_create: mock_pool_create,
                 pool_init: mock_pool_init,
                 rom_yield: mock_rom_yield,
+                rom_timed_delay: mock_rom_timed_delay,
+                rom_reschedule: mock_rom_reschedule,
             });
         }
         CALLS.lock().unwrap().clear();
@@ -1448,6 +1512,50 @@ mod tests {
         unsafe {
             assert_eq!(kernel_yield(), -3);
             assert_eq!(drain(), vec![Call::RomYield(0)]);
+        }
+    }
+
+    // ---- task_sleep (0x080568e8) -------------------------------------
+
+    /// Nonzero ticks take the timed-delay branch: service 20 with
+    /// (0 = current task, ticks), result passed through.
+    #[test]
+    fn sleep_nonzero_ticks_calls_the_timed_delay_service() {
+        let _guard = mock_hooks();
+        unsafe {
+            assert_eq!(task_sleep(10), 0xd31a);
+            assert_eq!(drain(), vec![Call::RomTimedDelay { task: 0, ticks: 10 }]);
+            // Every observed call-site count routes identically.
+            assert_eq!(task_sleep(100), 0xd31a);
+            assert_eq!(task_sleep(u32::MAX), 0xd31a);
+            assert_eq!(
+                drain(),
+                vec![
+                    Call::RomTimedDelay { task: 0, ticks: 100 },
+                    Call::RomTimedDelay { task: 0, ticks: u32::MAX as usize },
+                ]
+            );
+        }
+    }
+
+    /// Zero ticks take the no-argument service 28 sub 13 branch — the
+    /// timed-delay service is NOT invoked.
+    #[test]
+    fn sleep_zero_ticks_calls_the_reschedule_service() {
+        let _guard = mock_hooks();
+        unsafe {
+            assert_eq!(task_sleep(0), 0x28d);
+            assert_eq!(drain(), vec![Call::RomReschedule]);
+        }
+    }
+
+    /// The shipped defaults are the documented no-op stubs (rom_yield
+    /// precedent): both report 0 and fire no ROM call.
+    #[test]
+    fn sleep_default_hooks_are_noop_stubs() {
+        unsafe {
+            assert_eq!((DEFAULT_TASK_HOOKS.rom_timed_delay)(0, 50), 0);
+            assert_eq!((DEFAULT_TASK_HOOKS.rom_reschedule)(), 0);
         }
     }
 
