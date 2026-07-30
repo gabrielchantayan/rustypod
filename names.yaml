@@ -3021,6 +3021,47 @@ functions:
       original's r3 = 6 (service-4 sub-op) cannot ride the 3-arg veneer;
       the pad word is zeroed rather than left uninitialized.
 
+  - address: 0x08048000
+    ghidra: FUN_08048000
+    name: gateway_request_blocking
+    size: 100
+    sig: "void gateway_request_blocking(void *payload, u32 flag)"
+    module: kernel/gateway_request_blocking
+    status: ported
+    vars: {param_1: payload, param_2: flag}
+    notes: >-
+      Tag-0 member of the 4-helper request family @ 0x08047edc..0x0804805c
+      (tags 3/2/4/0), sibling of gateway_request_timed (0x08047f40). Calls
+      the gateway-ready wait FUN_080c8304 first, then builds a 9-word stack
+      frame {0,0,0,0, tag 0, payload, pad, pad, flag} (payload at sp+0x14,
+      tag byte at sp+0x10, flag at sp+0x20) and posts the declared 5-word
+      head to the ROM kernel gateway's service-4 stub (rom_svc_2200418c) as
+      (1, &frame, 5), bracketed by kernel semaphore 9 (rom_sem_wait/
+      rom_sem_signal). 64 bl call sites: payload (r0) is a small id
+      (0x1/0x8/0x10/0x23/0x30/0x33/0x37 observed) or an object pointer, flag
+      (r1) is immediate 0/1 at every immediate site. Deviations: the ready
+      wait rides the GATEWAY_READY_WAIT dispatch slot (documented spin
+      default) since FUN_080c8304's own callees are unported; indirect
+      dispatch through task_lock::ROM_KERNEL (family pattern); the
+      original's r3 = 6 (service-4 sub-op) cannot ride the 3-arg veneer;
+      pad words 6/7 zeroed rather than left uninitialized.
+
+  - address: 0x080c8304
+    ghidra: FUN_080c8304
+    name: null
+    size: 36
+    sig: "void FUN_080c8304(void)"
+    module: kernel/gateway_request_blocking
+    status: identified
+    notes: >-
+      Gateway-ready spin-wait called at the head of FUN_08048000 and the
+      helper @ 0x08048064: poll FUN_081a5500() (the lazily-created gateway
+      state object) until its byte at +0x6a reads 1, sleeping one tick via
+      thunk 0x080e9eb0 (b 0x080568e8) between polls. Not self-contained
+      (allocator-backed lazy object init + task sleep), so
+      gateway_request_blocking models it through the GATEWAY_READY_WAIT
+      dispatch slot with a documented spin default instead of porting it.
+
   - address: 0x080567fc
     ghidra: null
     name: rom_svc_22001cbc_alias_67fc
@@ -10582,6 +10623,35 @@ functions:
       lock/unlock (guards + ROM_KERNEL dispatch) rather than the
       original's bl pair - match.py shows the same guard/bump/guard
       structure inside a larger body.
+
+  - address: 0x0816cd44
+    ghidra: FUN_0816cd44
+    name: refcounted_ptr_release
+    size: 20
+    sig: "RefcountedBody **refcounted_ptr_release(RefcountedBody **slot)"
+    module: cxx/handle
+    status: ported
+    vars: {param_1: slot}
+    notes: >-
+      90 bl call sites (mostly the 0x0822xxxx application layer
+      releasing stack- and member-slot handles). The drop counterpart
+      of refcounted_ptr_assign @ 0x0839eda0: hands the slot to the
+      refcount-drop teardown @ 0x0839cd98 and returns the slot
+      unchanged (the ADS destroy-and-return-this idiom; the teardown
+      NULLs the slot on every path). The 136-byte teardown @
+      0x0839cd98 is NOT ported - it locks the body mutex, drops the
+      refcount at +4 and, at zero, runs the impl destructor through
+      vtable slot 7 (+0x1c) of the impl pointer at body+0, then
+      mutex_delete (0x0807f650, ported) + tag-2 operator delete
+      (0x082aad24) on the mutex and the body - so the call goes
+      through the REFCOUNTED_RELEASE_OPS dispatch slot whose default
+      stub NULLs the slot and leaks the body (cxx/release.rs
+      missing_release_object house rule). Filed under cxx/handle, not
+      src/sqlite: 0x0839cd98 sits above the SQLite span and is the
+      same RefcountedBody family as the assign. match.py structural:
+      same push/mov-r4/call/return-this frame; the bl becomes a
+      slot-indirected blx (documented deviation) plus LLVM's
+      frame-pointer setup.
 
   # --- Embedded SQLite, 0x08360000-0x0838ffff (agent media) ---
   # The whole span is an amalgamated SQLite ~3.5.x - see src/sqlite/mod.rs
