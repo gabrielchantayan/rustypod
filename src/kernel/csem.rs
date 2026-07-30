@@ -228,6 +228,18 @@ pub unsafe extern "C" fn atomic_add_irqsafe(amount: i32, ptr: *mut i32) -> i32 {
 /// atomic_sub_irqsafe — original: `FUN_08056364` @ 0x08056364 (60 bytes).
 ///
 /// Twin of [`atomic_add_irqsafe`] with `*ptr = old - amount`.
+///
+/// Alias veneer @ 0x080f0420 (4 bytes: `b 0x08056364`; listed in
+/// functions.csv as `thunk_FUN_08056364` and present in osos.asm —
+/// unlike its add twin @ 0x080f041c, which the listing drops — extent
+/// and target binary-verified anyway, word `eafd97cf`): a bare tail
+/// branch onto this function with 1 call site (binary scan), the `bl`
+/// @ 0x08147268 of `FUN_08147258` (`add r1, r0, #4; mov r0, #1` —
+/// `atomic_sub_irqsafe(1, &obj->field4)`; when `old == 1` the object
+/// tail-dispatches the virtual at `(*obj)+0x20` — the last-reference
+/// release, mirror of the unnamed add-veneer @ 0x0814724c). No
+/// separate port exists — hook 0x080f0420 straight to this symbol
+/// (the rom_svc_22001cbc_alias_67fc precedent).
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn atomic_sub_irqsafe(amount: i32, ptr: *mut i32) -> i32 {
     let mut saved: u32 = 0;
