@@ -81,6 +81,11 @@
 //!   0x08258c98; 113 `bl` call sites, binary-scanned). The plain
 //!   (non-deleting) destructor of a SECOND, derived class built on
 //!   this one — see [`StringIdRecord`].
+//! - `string_id_record_default_construct` — original: `FUN_08258c58`
+//!   @ 0x08258c58 (36 bytes: 28 code + two 4-byte literal-pool words
+//!   @ 0x08258c78/0x08258c7c; 49 `bl` call sites, binary-scanned).
+//!   The default constructor of the same record class — one `stmia`
+//!   plants BOTH vtables — see [`StringIdRecord`].
 //!
 //! # The 0x08258cxx family: a (string, id) record on a StringObject base
 //!
@@ -91,7 +96,7 @@
 //! StringObject subobject: the default constructor @ 0x08258c58
 //! (`stmia r0, {r1, r2}` with literals 0x089a76f0 and 0x089a6044,
 //! binary-verified) plants BOTH vtables, NULLs the payload at +8 and
-//! stores -1 at +0xc. Siblings: a (string, id) constructor @
+//! stores -1 at +0xc (ported here). Siblings: a (string, id) constructor @
 //! 0x08258c08, a copy constructor @ 0x08258c2c (both chain to the
 //! StringObject copy constructor @ 0x082773e0 on this+4), the plain
 //! destructor @ 0x08258c80 (ported here), an assignment operator @
@@ -150,6 +155,10 @@
 //!   rather than returning its own argument — the values are
 //!   identical; the subtraction width is `size_of::<usize>()` so the
 //!   identity holds on 64-bit hosts too.
+//! - `string_id_record_default_construct` plants BOTH modeled statics
+//!   ([`STRING_ID_RECORD_VTABLE`] and [`STRING_OBJECT_VTABLE`]) for
+//!   the same ROM-address reason — the original's single `stmia` is
+//!   two stores here; LLVM may or may not fuse them back.
 
 use crate::heap::veneers::{free_wrapper, operator_delete};
 use crate::libc::strlen_safe_plus1::strlen_safe_plus1;
@@ -449,6 +458,37 @@ pub unsafe extern "C" fn string_id_record_destroy(
     (*this).vtable = &STRING_ID_RECORD_VTABLE;
     let base = string_object_destroy(&mut (*this).string);
     (base as *mut u8).sub(core::mem::size_of::<usize>()) as *mut StringIdRecord
+}
+
+/// string_id_record_default_construct — original: `FUN_08258c58` @
+/// 0x08258c58 (36 bytes: 28 code + two 4-byte literal-pool words @
+/// 0x08258c78/0x08258c7c, both binary-verified against osos.dec;
+/// 49 `bl` call sites, binary-scanned).
+///
+/// The default constructor of the 0x10-byte (string, id) record
+/// class: one `stmia r0, {r1, r2}` plants BOTH vtables — the class
+/// vtable at `this + 0` (pool word @ 0x08258c78 holds 0x089a76f0)
+/// and the embedded StringObject's vtable at `this + 4` (pool word @
+/// 0x08258c7c holds 0x089a6044) — then stores -1 at `this + 0xc`
+/// (`mvn r1, #0x0`, the default id) and NULL at `this + 8` (the
+/// embedded payload). The original stores the id BEFORE the payload
+/// (`str r1,[r0,#0xc]` precedes `str r2,[r0,#0x8]`); the port
+/// reproduces that order. No allocation, no call into the
+/// StringObject default ctor (the `stmia` inlines it), no NULL guard
+/// on `this` — the original faults on a NULL `this`, and so does the
+/// port. Returns `this`: the original never touches r0 after entry,
+/// the ADS constructor return convention (same as
+/// [`string_default_construct`]).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_id_record_default_construct(
+    this: *mut StringIdRecord,
+) -> *mut StringIdRecord {
+    (*this).vtable = &STRING_ID_RECORD_VTABLE;
+    (*this).string.vtable = &STRING_OBJECT_VTABLE;
+    (*this).id = -1;
+    (*this).string.payload = core::ptr::null_mut();
+    this
 }
 
 #[cfg(test)]
@@ -926,5 +966,86 @@ mod tests {
         assert_eq!(tag, 0x34, "the StringObject payload release's tag");
         assert!(record.string.payload.is_null(), "the release NULLed the word");
         assert_eq!(record.id, 7, "the destructor never touches the id word");
+    }
+
+    #[test]
+    fn record_default_construct_plants_both_vtables_null_payload_minus1_id() {
+        let mut record = StringIdRecord {
+            vtable: 0xdead_beef as *const StringIdRecordVtable,
+            string: StringObject {
+                vtable: 0xcafe_f00d as *const StringObjectVtable,
+                payload: 0x0bad_f00d as *mut u8,
+            },
+            id: 42,
+        };
+        let this: *mut StringIdRecord = &mut record;
+        unsafe {
+            assert_eq!(string_id_record_default_construct(this), this);
+            assert_eq!(
+                record.vtable,
+                &STRING_ID_RECORD_VTABLE as *const _,
+                "the stmia's first register: the class vtable at +0"
+            );
+            assert_eq!(
+                record.string.vtable,
+                &STRING_OBJECT_VTABLE as *const _,
+                "the stmia's second register: the StringObject vtable at +4"
+            );
+            assert_eq!(record.id, -1, "mvn r1, #0x0 -> id word at +0xc");
+            assert!(
+                record.string.payload.is_null(),
+                "mov r2, #0x0 -> the embedded payload word at +8"
+            );
+        }
+    }
+
+    #[test]
+    fn record_default_construct_needs_no_heap_and_calls_nothing() {
+        // The stmia inlines the StringObject default ctor: no call
+        // into string_default_construct, no allocation — a recording
+        // release installed on the ops slot must observe nothing, and
+        // the payload word is NULLed in place, never freed.
+        let _bench = bench();
+        let mut record = StringIdRecord {
+            vtable: core::ptr::null(),
+            string: StringObject {
+                vtable: core::ptr::null(),
+                payload: 0x0bad_f00d as *mut u8,
+            },
+            id: 7,
+        };
+        unsafe {
+            string_id_record_default_construct(&mut record);
+        }
+        assert!(release_calls().is_empty(), "the ctor runs no destructor body");
+        assert!(record.string.payload.is_null());
+    }
+
+    #[test]
+    fn record_default_construct_then_destroy_roundtrips_a_fresh_record() {
+        let _bench = bench();
+        let mut record = StringIdRecord {
+            vtable: core::ptr::null(),
+            string: StringObject {
+                vtable: core::ptr::null(),
+                payload: core::ptr::null_mut(),
+            },
+            id: 0,
+        };
+        let this: *mut StringIdRecord = &mut record;
+        unsafe {
+            assert_eq!(string_id_record_default_construct(this), this);
+            assert_eq!(string_id_record_destroy(this), this);
+            assert_eq!(record.vtable, &STRING_ID_RECORD_VTABLE as *const _);
+            assert_eq!(record.string.vtable, &STRING_OBJECT_VTABLE as *const _);
+        }
+        let calls = release_calls();
+        assert_eq!(
+            calls.len(),
+            1,
+            "destroying the fresh record runs exactly one (NULL-payload) release"
+        );
+        assert_eq!(calls[0].0, core::ptr::addr_of!(record.string) as usize);
+        assert_eq!(record.id, -1, "destroy never rewrites the ctor's id");
     }
 }

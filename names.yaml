@@ -9414,6 +9414,39 @@ functions:
       bx lr`. Ported through the object's own vtable pointer, so
       subclass vtables work; no hook table.
 
+  - address: 0x08258c58
+    ghidra: FUN_08258c58
+    name: string_id_record_default_construct
+    size: 36
+    sig: "StringIdRecord *string_id_record_default_construct(StringIdRecord *this)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: this, DAT_08258c78: STRING_ID_RECORD_VTABLE_ADDRESS, DAT_08258c7c: STRING_OBJECT_VTABLE_ADDRESS}
+    notes: >-
+      49 bl call sites (binary-scanned). 28 code bytes + two 4-byte
+      literal-pool words @ 0x08258c78 (= 0x089a76f0) and 0x08258c7c
+      (= 0x089a6044), both binary-verified against osos.dec. The
+      DEFAULT constructor of the 0x10-byte polymorphic (string, id)
+      record class whose destructor is string_id_record_destroy @
+      0x08258c80 (ported beside it): one `stmia r0, {r1, r2}` plants
+      BOTH vtables (the class vtable at +0 and the embedded
+      StringObject's vtable at +4 - inlining string_default_construct,
+      no call), `mvn r1, #0x0` stores -1 at +0xc (the default id),
+      `mov r2, #0x0` NULLs the payload word at +8 (id stored BEFORE
+      the payload - reproduced), returns this (r0 untouched, the ADS
+      constructor convention). No allocation, no NULL guard. Siblings
+      NOT ported here: (string,id) ctor @ 0x08258c08, copy ctor @
+      0x08258c2c, assignment @ 0x08258c9c, equality @ 0x08258cc4 (full
+      family context in the 0x08258c80 entry). Host tests: both
+      vtables/NULL payload/id -1 on a garbage record, no destructor
+      body run (ops-slot recorder observes nothing), and a
+      construct-then-destroy round trip. match.py structural: same
+      four stores at offsets 0/4/8/12 with the two pool literals and
+      the mvn/mov constants; the diff is LLVM scheduling the stores in
+      offset order (the original's id-before-payload order is
+      unobservable between distinct addresses) plus the crate fp frame
+      - the accepted house deviations.
+
   - address: 0x08258c80
     ghidra: FUN_08258c80
     name: string_id_record_destroy
