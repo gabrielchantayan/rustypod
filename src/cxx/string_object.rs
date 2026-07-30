@@ -55,6 +55,16 @@
 //!   branches). NULL-guards `this`, plants the vtable, runs the
 //!   payload release, then tail-branches to the ported
 //!   `operator_delete` @ 0x082aad24 with `this`.
+//! - `string_object_c_str` — original: `FUN_082a50b0` @ 0x082a50b0
+//!   (16 bytes, **503 `bl` call sites**, binary-scanned — one of the
+//!   hottest leaves in the image). The C-string accessor: the payload
+//!   word at +4, or a shared empty C string when it is NULL. This
+//!   pins the payload down as a heap-allocated NUL-terminated `char`
+//!   buffer: sampled call sites feed the result to `strtol` (base
+//!   10), character-search and printf-family calls, and the sibling
+//!   @ 0x082a50a0 (`ldr r0,[r0,#4]; b 0x08275e20`) runs the count+1
+//!   strlen variant over it, while the 0x08279338 neighbor scans the
+//!   class's characters for the path separators ':', '/' and '\\'.
 //!
 //! Deviations:
 //!
@@ -75,6 +85,13 @@
 //!   (heap/veneers.rs `operator_delete`), so it is called directly —
 //!   the missing_free_p4 ops-slot rule for unported free contracts
 //!   does not apply.
+//! - `string_object_c_str`'s shared empty default is a ROM pointer
+//!   (the literal-pool word @ 0x082a50c0 holds 0x083e2e3a,
+//!   binary-verified — a NUL byte inside the 0x083exxxx stdlib code),
+//!   which a host cannot reproduce; the port returns the modeled
+//!   static [`STRING_OBJECT_EMPTY_CSTR`], the same simplification
+//!   cxx/string.rs makes for its shared empty rep. The original
+//!   address survives as [`STRING_OBJECT_EMPTY_CSTR_ADDRESS`].
 
 use crate::heap::veneers::{free_wrapper, operator_delete};
 
@@ -219,6 +236,46 @@ pub unsafe extern "C" fn string_object_delete(this: *mut StringObject) {
     (*this).vtable = &STRING_OBJECT_VTABLE;
     release_payload_op()(this);
     operator_delete(this as *mut u8);
+}
+
+/// Original load address of the shared empty C string
+/// [`string_object_c_str`] falls back to: the literal-pool word @
+/// 0x082a50c0 holds 0x083e2e3a (binary-verified against osos.dec), and
+/// the byte at 0x083e2e3a is 0x00 — a NUL inside the vector-growth
+/// code of the 0x083exxxx stdlib cluster, so the default reads as "".
+pub const STRING_OBJECT_EMPTY_CSTR_ADDRESS: usize = 0x083e2e3a;
+
+/// The shared empty C string, modeled (the original's default points
+/// into ROM code — see [`STRING_OBJECT_EMPTY_CSTR_ADDRESS`] — which a
+/// host cannot reproduce). Never written: every payload write goes
+/// through the word at `this + 4`, never through this pointer.
+static STRING_OBJECT_EMPTY_CSTR: u8 = 0;
+
+/// string_object_c_str — original: `FUN_082a50b0` @ 0x082a50b0
+/// (16 bytes, **503 `bl` call sites**, binary-scanned — one of the
+/// hottest leaves in the image; a 4-byte tail-branch thunk @
+/// 0x082a704c, `b 0x082a50b0`, also reaches it and is not ported
+/// here).
+///
+/// The C-string accessor of the two-word string class: returns the
+/// payload pointer at `this + 4`, or the shared empty C string when
+/// the payload is NULL — `ldr r0, [r0, #4]; cmp r0, #0; ldreq r0,
+/// [0x082a50c0]; bx lr`. The result is never NULL; sampled call sites
+/// treat it as a read-only `const char *` (strtol with base 10,
+/// character-search and printf-family calls). No NULL guard on `this`
+/// — the original faults on a NULL `this`, and so does the port.
+///
+/// Deviation: the original's default is a ROM pointer (see
+/// [`STRING_OBJECT_EMPTY_CSTR_ADDRESS`]); the port returns the modeled
+/// static [`STRING_OBJECT_EMPTY_CSTR`] instead.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_c_str(this: *const StringObject) -> *const u8 {
+    let payload = (*this).payload as *const u8;
+    if payload.is_null() {
+        return &STRING_OBJECT_EMPTY_CSTR;
+    }
+    payload
 }
 
 #[cfg(test)]
@@ -477,5 +534,64 @@ mod tests {
         assert_eq!(tag, 2, "operator delete's tag-2, after the payload's 0x34");
         assert!(object.payload.is_null(), "the release NULLed the word first");
         assert_eq!(object.vtable, &STRING_OBJECT_VTABLE as *const _);
+    }
+
+    #[test]
+    fn c_str_returns_the_payload_word_untouched() {
+        let mut payload_storage = *b"nowplaying\0";
+        let payload = payload_storage.as_mut_ptr();
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload,
+        };
+        unsafe {
+            assert_eq!(
+                string_object_c_str(&object),
+                payload as *const u8,
+                "a non-NULL payload is returned verbatim (ldr r0,[r0,#4]; bx lr)"
+            );
+            assert_eq!(object.payload, payload, "the accessor never writes");
+        }
+    }
+
+    #[test]
+    fn c_str_with_null_payload_returns_the_shared_empty() {
+        let object = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        unsafe {
+            let s = string_object_c_str(&object);
+            assert!(!s.is_null(), "the accessor never returns NULL");
+            assert_eq!(*s, 0, "the shared default reads as \"\"");
+            assert_eq!(
+                s, &STRING_OBJECT_EMPTY_CSTR as *const u8,
+                "the default is the modeled static, not a fresh buffer"
+            );
+        }
+    }
+
+    #[test]
+    fn c_str_shared_empty_is_a_singleton() {
+        let a = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        let b = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        unsafe {
+            assert_eq!(
+                string_object_c_str(&a),
+                string_object_c_str(&b),
+                "every NULL-payload object shares the one empty C string"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_cstr_address_is_binary_verified() {
+        assert_eq!(STRING_OBJECT_EMPTY_CSTR_ADDRESS, 0x083e2e3a);
     }
 }

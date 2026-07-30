@@ -9341,6 +9341,39 @@ functions:
       branch into the delete; the diff is LLVM's fp frame and the bl
       becoming a blx through the ops slot (the documented deviation).
 
+  - address: 0x082a50b0
+    ghidra: FUN_082a50b0
+    name: string_object_c_str
+    size: 16
+    sig: "const char *string_object_c_str(const StringObject *this)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: this, DAT_082a50c0: STRING_OBJECT_EMPTY_CSTR_ADDRESS}
+    notes: >-
+      503 bl call sites (binary-scanned) - one of the hottest leaves in
+      the image; a 4-byte tail-branch thunk @ 0x082a704c (`b
+      0x082a50b0`) also reaches it and is NOT ported (one function per
+      commit). The C-string accessor of the same two-word string class
+      as string_default_construct @ 0x08277440 / string_object_destroy
+      @ 0x08277484: `ldr r0,[r0,#4]; cmp r0,#0; ldreq r0,[0x082a50c0];
+      bx lr` - the payload word at +4, or a shared empty C string when
+      it is NULL. This pins the payload down as a heap-allocated
+      NUL-terminated char buffer: sampled call sites feed the result
+      to strtol (base 10), character-search and printf-family calls,
+      the sibling @ 0x082a50a0 (`ldr r0,[r0,#4]; b 0x08275e20`) runs
+      the count+1 strlen variant over it, and the 0x08279338 neighbor
+      scans the class's characters for the path separators ':', '/'
+      and '\\'. The shared default: the literal-pool word @ 0x082a50c0
+      holds 0x083e2e3a (binary-verified against osos.dec) and the byte
+      there is 0x00 - a NUL inside the 0x083exxxx stdlib code, so the
+      default reads as "". Never returns NULL; no NULL guard on `this`.
+      Port models the ROM default as the static STRING_OBJECT_EMPTY_CSTR
+      (original address kept as STRING_OBJECT_EMPTY_CSTR_ADDRESS), the
+      same simplification cxx/string.rs makes for its shared empty rep.
+      match.py structural: same ldr-@+4 / NULL test / default-select /
+      return; the diff is LLVM's fp frame and a movne standing in for
+      the original's ldreq literal load (the documented deviation).
+
   - address: 0x082cfae8
     ghidra: FUN_082cfae8
     name: ft_mem_free
