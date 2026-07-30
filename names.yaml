@@ -1819,6 +1819,31 @@ functions:
       0x082aad24 (tag 2, NULL-guarded), tag-3 pair 0x082aad74/0x82aad14,
       checked new 0x08266c70 (new-handler code 3).
 
+  - address: 0x082aad24
+    ghidra: FUN_082aad24
+    name: operator_delete
+    size: 16
+    sig: "void operator_delete(void *ptr)"
+    module: heap/veneers
+    vars: {param_1: ptr}
+    status: ported
+    notes: >-
+      Tag 2, NULL-guarded (verified against osos.asm: `cmp r0,#0x0;
+      movne r1,#0x2; bne 0x080e7970; bx lr` @ 0x082aad24..0x082aad34) —
+      the dominant deallocator, 665 call sites. NULL is a no-op; non-NULL
+      tail-branches into free_wrapper @ 0x080e7970 with tag 2. The port
+      was already in veneers.rs (written alongside operator_new); this
+      entry records it. Deviation: the free dispatch is indirect through
+      the HEAP_OPS.free slot (the file's documented ops-table pattern)
+      instead of the original's direct tail branch; the NULL guard is
+      instruction-faithful. #[inline(never)] keeps the branch boundary so
+      callers' matches survive (the operator_new rationale).
+      Relationship: cxx_array_dealloc @ 0x08266f2c (ported) is a bare
+      `b 0x082aad24`, so both entries' hooks now point at real symbols.
+      match.py structural: `cmp r0,#0` guard + early return correspond;
+      the rest is the inlined lazy-init + ops-slot free tail call, the
+      documented deviation.
+
   - address: 0x08030f44
     name: heap_panic
     size: 32
@@ -12148,8 +12173,9 @@ functions:
       cxx_string_copy_ctor plus one value word - and rebalances via the
       rotations @ 0x083c31d4 (ported as string_key_tree_rotate_left in
       cxx/string_map.rs - the scouting note's 0x083c31f4 was
-      mid-function; the real entry and only bl target is 0x083c31d4) /
-      0x083c3228) flagged 1. _M_insert takes
+       mid-function; the real entry and only bl target is 0x083c31d4) /
+       0x083c3228 (ported as string_key_tree_rotate_right in
+       cxx/string_map.rs)) flagged 1. _M_insert takes
       the key pair as a fifth argument on the stack. Node keys sit at
       node+0x10. Not ported - needs the _M_insert @ 0x083c3408 chain
       (allocator + rotations) with it; port them together, like the
@@ -12186,10 +12212,42 @@ functions:
       rotate at root (with adopted subtree re-parenting), rotate under
       a left-child parent (null adopted subtree), rotate under a
       right-child parent, and in-order sequence preservation on a
-      5-node tree. match.py structural: 21 vs 22 instructions - same
-      ldr/str rotation sequence, conditional stores and root/parent
-      branch structure; the diff is LLVM's fp frame and register
-      scheduling (the expected ADS-vs-LLVM noise).
+       5-node tree. match.py structural: 21 vs 22 instructions - same
+       ldr/str rotation sequence, conditional stores and root/parent
+       branch structure; the diff is LLVM's fp frame and register
+       scheduling (the expected ADS-vs-LLVM noise).
+
+  - address: 0x083c3228
+    ghidra: FUN_083c3228
+    name: string_key_tree_rotate_right
+    size: 84
+    sig: "void string_key_tree_rotate_right(StringKeyTree *tree, StringKeyTreeNode *node)"
+    module: cxx/string_map
+    status: ported
+    vars: {param_1: tree, param_2: node, iVar3: left}
+    notes: >-
+      Ported, exported pub (the string-keyed _M_insert @ 0x083c3408
+      that will call it is not yet ported, so there is no in-crate
+      caller; the export keeps the symbol in the staticlib). bl
+      targets @ 0x083c3534 and 0x083c3584 (bleq) inside _M_insert.
+      Instruction-identical to the byte-keyed rotate_right @
+      0x083b80e4 (byte_key_tree_rotate_right in cxx/byte_key_map.rs),
+      verified word for word against osos.asm: libstdc++
+      _Rb_tree_rotate_right - the mirror of the ported
+      string_key_tree_rotate_left @ 0x083c31d4. The left child takes
+      node's place (root pointer at header+4 first, else the matching
+      side of node's parent - the original tests the parent's right
+      link at +0xc first), node adopts its right subtree as its left
+      child (re-parented when non-null) and becomes its right child.
+      Reuses the StringKeyTreeNode / StringKeyTree repr(C) structs of
+      the rotate_left port. Host tests: rotate at root (with adopted
+      subtree re-parenting), rotate under a right-child parent (null
+      adopted subtree), rotate under a left-child parent, and
+      in-order sequence preservation on a 5-node tree. match.py
+      structural: 21 vs 22 instructions - same ldr/str rotation
+      sequence, conditional stores and root/parent branch structure;
+      the diff is LLVM's fp frame, register scheduling and branch
+      layout (the expected ADS-vs-LLVM noise).
 
   - address: 0x083db038
     ghidra: FUN_083db038
