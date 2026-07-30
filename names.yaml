@@ -13859,10 +13859,80 @@ functions:
       0x082axxxx region, a fixed-point matrix routine that compares
       |entries| and keeps the largest magnitude - the same
       compare-and-keep-larger usage as the primary and 9794 copies.
-      No separate Rust symbol - point any hook at the single iabs
-      symbol (the load_be32 alias precedent). match.py against iabs at
-      this address: same rsbmi-behind-frame-prologue structure as the
-      primary, byte-identical inputs make the diff identical.
+       No separate Rust symbol - point any hook at the single iabs
+       symbol (the load_be32 alias precedent). match.py against iabs at
+       this address: same rsbmi-behind-frame-prologue structure as the
+       primary, byte-identical inputs make the diff identical.
+
+  - address: 0x080e97ac
+    ghidra: FUN_080e97ac
+    name: fixed16_cos
+    size: 40
+    sig: "i32 fixed16_cos(i32 angle)"
+    module: fp/fp_misc
+    status: identified
+    renames:
+      param_1: angle
+      DAT_080e9828: TWO_PI_F32 (0x40c90fdb = 6.2831855f)
+      DAT_080e982c: INV_TWO_PI_F32 (0x3e22f983 = 0.15915494f)
+      DAT_080e9830: SIN_TABLE (pointer 0x083f10b2)
+      FUN_080a67dc: f32_to_fixed16_sat
+      FUN_083ed150: f32_scale_pow2
+      FUN_083ec898: fixsfsi
+    notes: >-
+      Q16.16 fixed-point cosine by quarter-wave table lookup. Fully
+      decoded from raw osos.dec bytes, NOT ported - blocked on the same
+      undecrypted zero hole as fixed16_rsqrt (0x08076154). The Ghidra
+      listing/functions.csv "40 bytes" is truncated: Ghidra believes
+      the helper 0x080a67dc does not return ("Subroutine does not
+      return") and stops the flow at the second bl; the helper DOES
+      return (both saturation exits are ldmia sp!,{r4,pc}; the common
+      path tail-calls fixsfsi which returns), and the body actually
+      continues at 0x080e97d8. True extent: code 0x080e97ac-0x080e9827
+      (31 instructions) + literal pool 0x080e9828-0x080e9833 (TWO_PI_F32,
+      INV_TWO_PI_F32, SIN_TABLE pointer). Algorithm (all wrapping
+      32-bit): while (i32)angle < 0, angle += f32_to_fixed16_sat(2pi)
+      (= 0x6487e, reconverted from the float literal each iteration);
+      rev = (angle * f32_to_fixed16_sat(1/(2pi)) = 0x28be) keeping the
+      low 32 product bits, then asr #16 -> fractional revolutions in
+      Q16.16 mod 1 turn; idx12 = (rev + 0x4000) asr #4 -> 4096
+      units/turn, the +0x4000 being exactly a +pi/2 phase shift (this
+      is what makes it cos); quadrant mirror: idx = idx12 & 0x3ff, and
+      if idx12 & 0x400 then idx = 0x3ff - idx (rsb #0xff + add #0x300);
+      entry = SIN_TABLE[idx] (u16, amplitude 65536); if idx12 & 0x800
+      return -entry else entry. The smull r1,r2,r3,r1 with r3 = 0x10000
+      plus the lsl #16/lsr #16 funnel is an identity (entry * 0x10000
+      >> 16) - a fixed16_mul-by-1.0 artifact, no rounding effect.
+      0x080a67dc = saturate-to-i32-then-scale-by-2^16 (exponent
+      adjust via 0x083ed150, truncate via fixsfsi @ 0x083ec898), i.e.
+      f32 -> Q16.16 with clamping. 1 bl call site: 0x08256f70 inside
+      FUN_08256eac, which builds a 3x3 Rodrigues rotation matrix from
+      an axis (param_3/4/5 through fixed16_mul/fixed16_rsqrt) and this
+      cosine (param_1[0] = (1-c)*x*x + c, param_1[4] = (1-c)*x*y -
+      s*z, ...), pinning the semantics; the sibling 0x080e988c (NOT
+      this entry) is the same body minus the +0x4000 phase shift (asr
+      #20 directly) = fixed16_sin. BLOCKER: SIN_TABLE @ 0x083f10b2
+      (1024 u16 entries; the pointer is referenced only from this
+      function's and fixed16_sin's literal pools, binary-scanned over
+      osos.dec) sits inside the 0x442b-byte all-zero run
+      0x083ee1c1-0x083f25ec in work/firmware/osos.dec - the same
+      still-undecrypted region documented under fixed16_rsqrt, present
+      identically in osos.recovery and osos.patched. No duplicate
+      quarter-wave table exists anywhere in the decrypted image
+      (byte-scanned for both round- and trunc-scaled sin sequences at
+      4-byte alignment); aupd.dec does not contain the routine at all
+      (searched for the 0x40c90fdb literal). Do NOT guess the table:
+      entry rounding (round vs floor vs 65535-clamp of the sin(1023)
+      peak) is unverifiable, and every output is a direct table read,
+      so any wrong entry is a behavioral divergence, not an ulp
+      detail. To port once `make decrypt` fills the region: embed the
+      1024 u16 entries as a static table in fp/fp_misc.rs and
+      implement the wrapping arithmetic exactly as decoded above
+      (wrapping_add for the 2pi loop, wrapping_mul + asr for the
+      revolution reduction, mask/mirror/negate for the quadrant
+      logic); expected shape for a one-glance check:
+      table[i] ~= sin(i*pi/2048) * 65536, table[0] = 0, table[0x3ff]
+      ~= 0xffe0.
 
   # --- UI pixel/color (ui/color) ---
 
