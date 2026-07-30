@@ -10511,8 +10511,8 @@ functions:
       calling the heap when db->mallocFailed (db +0x1e) is already set;
       otherwise sqlite3_realloc @ 0x08390eec and, on failure, sets the
       flag. db is dereferenced unconditionally here (unlike the malloc
-      path). 0x08390eec is unported - the DB_MEM_OPS dispatch slot in
-      src/sqlite/mem.rs, default always-fails.
+      path). 0x08390eec is ported - it IS the wired default of the
+      DB_MEM_OPS.realloc dispatch slot in src/sqlite/mem.rs.
 
   - address: 0x083749f4
     ghidra: FUN_083749f4
@@ -10552,6 +10552,50 @@ functions:
       zero-fill of the whole request through the IRAM thunk @ 0x08037dc8
       (-> 0x220002d4 = the ported memzero @ 0x080002d4). Nothing is
       zeroed when the allocation fails.
+
+  - address: 0x08390eec
+    ghidra: FUN_08390eec
+    name: sqlite3_realloc
+    size: 284
+    sig: "void *sqlite3_realloc(void *p, int n)"
+    module: sqlite/mem
+    status: ported
+    vars: {param_1: p, param_2: n, r5: n, r7: old_pad, r6: "base, then data",
+      r8: old_size, r9: "n + 0x24, then new_pad", sl: stats, r4: "raw, then data"}
+    notes: >-
+      SQLite's sqlite3_realloc, the tag-57 tracked-heap resize. 5 bl call
+      sites. p == 0 tail-branches to sqlite3_malloc @ 0x08390b14
+      (dispatched through the DB_MEM_OPS.malloc slot, whose default is
+      still the always-fails stub). n <= 0 (signed) is sqlite3_free
+      @ 0x083906f4 (the ported tracked_free, called directly) + NULL -
+      a zero resize is a free. Otherwise: recover pad at p-4, base =
+      p - pad, raw = base - 8, old_size at raw+0; UNGATED soft-limit
+      check (unlike the malloc entry - no callback-word test, no
+      stats-lock arm): current(+0x38) + n - old_size >= soft_limit(+0x20)
+      as signed i64 warns with n - old_size through the ported
+      tracked_stats_warn_soft_limit @ 0x0837d67c (called directly); the
+      allocation-deny schedule @ 0x08378a44(0) can then refuse with NULL
+      before the heap is touched. Raw resize is realloc_tag57(raw,
+      n + 44) = the veneer chain 0x08391d34 -> 0x08081688 ->
+      realloc_wrapper @ 0x080edbf0 with (tag 57, copy-on-move 1),
+      retried once after a warn(n) on failure. Rebuild: raw+4 = n>>31,
+      raw+0 = n, data = (raw + 8 + 36) & ~31, memmove of the FULL
+      old_size from the old to the new alignment via the ROM thunk
+      @ 0x08037e00 (ported libc memmove; a shrink can run the copy past
+      the new block's end - the original's behavior), pad word at data-4
+      AFTER the copy; current += (i64)(i32)(n - old_size), peak := current
+      when it grew. The one unported pressure helper (the deny schedule
+      @ 0x08378a44; the warn helper @ 0x0837d67c is ported) dispatches
+      through the new ALLOC_PRESSURE_OPS.alloc_deny_check slot whose
+      default reproduces the at-rest behavior (schedule records
+      BSS-inactive -> proceed); the stats block is the ALLOC_STATS
+      static (heap/tracked module simplification). match.py: same
+      structure - LLVM folds raw+8+36 into raw+44, const-folds n>>31 to
+      0 (n > 0 there), inlines realloc_wrapper + lazy_init_default_heap
+      (the long HEAP_OPS ldrd midsection), tracked_free and the warn
+      helper (the memzero precedent: same bytes, different shape) and
+      routes the copy through __aeabi_memmove; the p==0 path stays a
+      tail call (bx) through the malloc slot.
 
   - address: 0x08374a14
     ghidra: FUN_08374a14
