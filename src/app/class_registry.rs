@@ -396,6 +396,10 @@ mod tests {
         unreachable!()
     }
 
+    unsafe extern "C" fn unimplemented_has_pending_changes(_this: *mut Registry) -> *mut u8 {
+        unreachable!()
+    }
+
     static MOCK_REGISTRY_VTABLE: RegistryVtable = RegistryVtable {
         unresolved_00: [0; 7],
         insert: unimplemented_insert,
@@ -405,7 +409,8 @@ mod tests {
         entry_at: unimplemented_entry_at,
         unresolved_40: [0; 3],
         index_of: unimplemented_index_of,
-        unresolved_50: [0; 5],
+        unresolved_50: [0; 4],
+        has_pending_changes: unimplemented_has_pending_changes,
         notify_deferred: mock_notify_deferred,
         notify_changed: mock_notify_changed,
     };

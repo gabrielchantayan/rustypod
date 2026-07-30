@@ -60,6 +60,7 @@
 //! | 0x0810e4f0 | [`registry_assign`] | 60 | 2 `bl` + 1 `b` |
 //! | 0x08134ff8 | [`observable_set_notify_enabled`] | 64 | 5 `bl` + 1 `b` |
 //! | 0x08135038 | [`observable_set_changed`] | 8 | 1 `bl` |
+//! | 0x08135040 | [`observable_set_observer`] | 96 | 10 `bl` |
 //! | 0x081d2184 | [`registry_lookup_by_id`] | 36 | 60 `bl` + 2 `b` |
 //! | 0x081d23f8 | [`registry_register`] | 16 | 45 `bl` |
 //! | 0x08275b9c | [`object_cast_to_class`] | 20 | 414 `bl` + 17 `b` |
@@ -88,8 +89,9 @@
 //! vtable +0x24  assign_at(this, index, const RegistryEntry *entry)
 //! vtable +0x3c  entry_at(this, index, RegistryEntry *out) -> out
 //! vtable +0x4c  index_of(this, const u32 *key) -> index, -1 if absent
-//! vtable +0x64  notify_deferred(this)   \ the change-notification pair
-//! vtable +0x68  notify_changed(this)    / (roles inferred, see below)
+//! vtable +0x60  has_pending_changes(this)  \ consulted by the observer
+//! vtable +0x64  notify_deferred(this)      | swap and the notify enable
+//! vtable +0x68  notify_changed(this)       / (roles inferred, see below)
 //! ```
 //!
 //! The entry is the container's `value_type`, a `(key, value)` pair —
@@ -100,9 +102,12 @@
 //! +0x20 and a "notifications enabled" byte at +0x21, and
 //! [`registry_assign`] brackets its write with them —
 //! disable, write, mark changed, re-enable — so exactly one
-//! notification fires per assignment. The +0x64 / +0x68 slot *names* are
-//! inferred from that idiom (the +0x64 result short-circuits +0x68); the
-//! slot offsets are exact.
+//! notification fires per assignment. The +0x60 / +0x64 / +0x68 slot
+//! *names* are inferred from those idioms (a non-NULL +0x60 result fires
+//! +0x68 from the observer swap; a non-NULL +0x64 result suppresses +0x68
+//! on the notify enable); the slot offsets are exact. The cold image's
+//! copy of the container vtable page (0x08984770) is 0x55-fill, so the
+//! slot targets themselves are not recoverable from it.
 //!
 //! ## Deviations
 //!
@@ -180,8 +185,12 @@ pub struct RegistryVtable {
     pub unresolved_40: [usize; 3],
     /// +0x4c: `index_of(this, &key)` — the entry index, or -1.
     pub index_of: unsafe extern "C" fn(this: *mut Registry, key: *const u32) -> i32,
-    /// Slots +0x50..+0x60: not dispatched here.
-    pub unresolved_50: [usize; 5],
+    /// Slots +0x50..+0x5c: not dispatched here.
+    pub unresolved_50: [usize; 4],
+    /// +0x60: consulted by [`observable_set_observer`] after the swap; a
+    /// non-NULL result fires the +0x68 notification (role inferred — see
+    /// the module header).
+    pub has_pending_changes: unsafe extern "C" fn(this: *mut Registry) -> *mut u8,
     /// +0x64: consulted when notifications are re-enabled; a nonzero
     /// result suppresses the +0x68 call (role inferred — see the module
     /// header).
@@ -205,7 +214,7 @@ pub struct Registry {
     pub notify_enabled: u8,
     /// +0x22..+0x23: never touched.
     pub reserved: [u8; 2],
-    /// +0x24: the observer installed by `FUN_08135040`.
+    /// +0x24: the observer installed by [`observable_set_observer`].
     pub observer: *mut u8,
 }
 
@@ -389,6 +398,99 @@ pub unsafe extern "C" fn observable_set_notify_enabled(
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn observable_set_changed(observable: *mut Registry, changed: u32) {
     core::ptr::write_volatile(core::ptr::addr_of_mut!((*observable).changed), changed as u8);
+}
+
+/// An observer's vtable, modeled down to the two slots
+/// [`observable_set_observer`] dispatches. The filler array reproduces
+/// the original byte offsets on the 32-bit target and keeps the named
+/// slots disjoint on a 64-bit host.
+#[repr(C)]
+pub struct ObserverVtable {
+    /// Slots +0x00..+0x14: not dispatched here.
+    pub unresolved_00: [usize; 6],
+    /// +0x18: `attach(this)` — dispatched on the *new* observer right
+    /// after it is installed (the same slot the registry observer's own
+    /// constructor dispatches once, `app/class_registry.rs`). Its
+    /// result is discarded.
+    pub attach: unsafe extern "C" fn(this: *mut Observer) -> *mut u8,
+    /// +0x1c: `detach(this)` — dispatched on the *old* observer before
+    /// the swap, only when there is one. Its result is discarded.
+    pub detach: unsafe extern "C" fn(this: *mut Observer) -> *mut u8,
+}
+
+/// Any observable's observer, modeled down to its vtable pointer; the
+/// rest of the object belongs to the unported observer classes (the
+/// registry's own observer is the 8-byte singleton of
+/// `app/class_registry.rs`).
+#[repr(C)]
+pub struct Observer {
+    /// +0x00: the observer's vtable.
+    pub vtable: *const ObserverVtable,
+}
+
+/// observable_set_observer — original: `FUN_08135040` @ 0x08135040
+/// (96 bytes; 10 `bl` call sites, binary-scanned over osos.dec).
+///
+/// Swaps the observable's observer (the +0x24 word):
+///
+/// ```text
+/// old = this->observer
+/// if (old != NULL) old->vtable->detach(old)       // slot +0x1c
+/// this->observer = observer
+/// observer->vtable->attach(observer)              // slot +0x18
+/// if (this->vtable->has_pending_changes(this))    // slot +0x60
+///     return this->vtable->notify_changed(this)   // slot +0x68 (tail)
+/// return NULL
+/// ```
+///
+/// Returns the +0x68 notification's result when it fires, NULL
+/// otherwise (the original's no-notify path returns the +0x60 result
+/// that failed the test, i.e. 0).
+///
+/// Faithful details:
+///
+/// - The +0x24 store lands **before** the attach dispatch (the
+///   original's `str r5, [r4, #0x24]` ahead of the `blx`), so an attach
+///   that reads the observable's observer word back sees the new
+///   observer already installed.
+/// - The new observer is dereferenced unconditionally: a NULL
+///   `observer` faults on the attach dispatch, precisely as the
+///   original does. No guard added — every one of the 10 callers hands
+///   over a freshly constructed heap object (the
+///   `operator_new(8)` + ctor + `set_observer` + `set_notify_enabled`
+///   idiom of `app/class_registry.rs`).
+/// - The detach and attach results are discarded, like the original's
+///   dead `blx` results.
+/// - The original pushes r6 and never touches it (an ADS register-
+///   allocation artifact); nothing to reproduce.
+///
+/// Like [`observable_set_notify_enabled`] this is a base-class method
+/// on device — the registry is only one of the observables that use it
+/// — but the layout it touches (+0x24 and vtable +0x60/+0x68) is the
+/// base layout, which is what [`Registry`] models.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn observable_set_observer(
+    observable: *mut Registry,
+    observer: *mut Observer,
+) -> *mut u8 {
+    let old =
+        core::ptr::read_volatile(core::ptr::addr_of!((*observable).observer)) as *mut Observer;
+    if !old.is_null() {
+        let old_vtable = core::ptr::read_volatile(core::ptr::addr_of!((*old).vtable));
+        ((*old_vtable).detach)(old);
+    }
+    core::ptr::write_volatile(
+        core::ptr::addr_of_mut!((*observable).observer),
+        observer as *mut u8,
+    );
+    let new_vtable = core::ptr::read_volatile(core::ptr::addr_of!((*observer).vtable));
+    ((*new_vtable).attach)(observer);
+    let pending = ((*vtable(observable)).has_pending_changes)(observable);
+    if pending.is_null() {
+        return pending;
+    }
+    ((*vtable(observable)).notify_changed)(observable)
 }
 
 /// registry_lookup_by_id — original: `FUN_081d2184` @ 0x081d2184
@@ -706,6 +808,16 @@ mod tests {
     /// What [`mock_notify_deferred`] hands back.
     static mut DEFERRED: *mut u8 = ptr::null_mut();
 
+    /// What [`mock_has_pending_changes`] hands back.
+    static mut PENDING: *mut u8 = ptr::null_mut();
+
+    /// What [`mock_notify_changed`] hands back.
+    static mut NOTIFY_RESULT: *mut u8 = ptr::null_mut();
+
+    /// Observers the attach/detach slots were dispatched on, in order.
+    static mut ATTACHED: Vec<*mut Observer> = Vec::new();
+    static mut DETACHED: Vec<*mut Observer> = Vec::new();
+
     fn entries() -> &'static mut Vec<RegistryEntry> {
         unsafe { &mut *ptr::addr_of_mut!(ENTRIES) }
     }
@@ -755,9 +867,37 @@ mod tests {
         ptr::read_volatile(ptr::addr_of!(DEFERRED))
     }
 
+    unsafe extern "C" fn mock_has_pending_changes(_this: *mut Registry) -> *mut u8 {
+        trace().push("has_pending_changes");
+        ptr::read_volatile(ptr::addr_of!(PENDING))
+    }
+
     unsafe extern "C" fn mock_notify_changed(_this: *mut Registry) -> *mut u8 {
         trace().push("notify_changed");
+        ptr::read_volatile(ptr::addr_of!(NOTIFY_RESULT))
+    }
+
+    unsafe extern "C" fn mock_observer_attach(this: *mut Observer) -> *mut u8 {
+        trace().push("attach");
+        (*ptr::addr_of_mut!(ATTACHED)).push(this);
         ptr::null_mut()
+    }
+
+    unsafe extern "C" fn mock_observer_detach(this: *mut Observer) -> *mut u8 {
+        trace().push("detach");
+        (*ptr::addr_of_mut!(DETACHED)).push(this);
+        ptr::null_mut()
+    }
+
+    static MOCK_OBSERVER_VTABLE: ObserverVtable = ObserverVtable {
+        unresolved_00: [0; 6],
+        attach: mock_observer_attach,
+        detach: mock_observer_detach,
+    };
+
+    /// A distinct mock observer object per call.
+    fn mock_observer() -> Observer {
+        Observer { vtable: &MOCK_OBSERVER_VTABLE }
     }
 
     static MOCK_VTABLE: RegistryVtable = RegistryVtable {
@@ -769,7 +909,8 @@ mod tests {
         entry_at: mock_entry_at,
         unresolved_40: [0; 3],
         index_of: mock_index_of,
-        unresolved_50: [0; 5],
+        unresolved_50: [0; 4],
+        has_pending_changes: mock_has_pending_changes,
         notify_deferred: mock_notify_deferred,
         notify_changed: mock_notify_changed,
     };
@@ -781,9 +922,14 @@ mod tests {
             entries().clear();
             trace().clear();
             DEFERRED = ptr::null_mut();
+            PENDING = ptr::null_mut();
+            NOTIFY_RESULT = ptr::null_mut();
+            (*ptr::addr_of_mut!(ATTACHED)).clear();
+            (*ptr::addr_of_mut!(DETACHED)).clear();
             CLASS_REGISTRY.vtable = &MOCK_VTABLE;
             CLASS_REGISTRY.changed = 0;
             CLASS_REGISTRY.notify_enabled = 0;
+            CLASS_REGISTRY.observer = ptr::null_mut();
         }
         guard
     }
@@ -794,9 +940,12 @@ mod tests {
         unsafe {
             entries().clear();
             trace().clear();
+            (*ptr::addr_of_mut!(ATTACHED)).clear();
+            (*ptr::addr_of_mut!(DETACHED)).clear();
             CLASS_REGISTRY.vtable = ptr::null();
             CLASS_REGISTRY.changed = 0;
             CLASS_REGISTRY.notify_enabled = 0;
+            CLASS_REGISTRY.observer = ptr::null_mut();
         }
         drop(guard);
     }
@@ -970,6 +1119,93 @@ mod tests {
             assert_eq!(ptr::read_volatile(ptr::addr_of!(CLASS_REGISTRY.changed)), 0xff);
             observable_set_changed(registry(), 0x100);
             assert_eq!(ptr::read_volatile(ptr::addr_of!(CLASS_REGISTRY.changed)), 0);
+        }
+        restore(guard);
+    }
+
+    // ---- the observer swap ----
+
+    #[test]
+    fn the_swap_detaches_the_old_observer_attaches_the_new_and_notifies() {
+        let guard = mock();
+        unsafe {
+            let mut old = mock_observer();
+            let mut new = mock_observer();
+            let old_ptr = ptr::addr_of_mut!(old);
+            let new_ptr = ptr::addr_of_mut!(new);
+            CLASS_REGISTRY.observer = old_ptr as *mut u8;
+            PENDING = instance(1);
+            NOTIFY_RESULT = instance(2);
+            let result = observable_set_observer(registry(), new_ptr);
+            assert_eq!(
+                *trace(),
+                std::vec!["detach", "attach", "has_pending_changes", "notify_changed"],
+                "the original's order: detach old, store, attach new, pending?, notify"
+            );
+            assert_eq!(*ptr::addr_of!(DETACHED), std::vec![old_ptr]);
+            assert_eq!(*ptr::addr_of!(ATTACHED), std::vec![new_ptr]);
+            assert_eq!(CLASS_REGISTRY.observer, new_ptr as *mut u8);
+            assert_eq!(result, instance(2), "the tail-called +0x68 result is returned");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn a_null_old_observer_skips_the_detach() {
+        let guard = mock();
+        unsafe {
+            let mut new = mock_observer();
+            PENDING = instance(1);
+            observable_set_observer(registry(), ptr::addr_of_mut!(new));
+            assert_eq!(
+                *trace(),
+                std::vec!["attach", "has_pending_changes", "notify_changed"],
+                "no detach dispatch when +0x24 was NULL"
+            );
+            assert!((*ptr::addr_of!(DETACHED)).is_empty());
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn no_pending_changes_suppresses_the_notification_and_returns_null() {
+        let guard = mock();
+        unsafe {
+            let mut new = mock_observer();
+            NOTIFY_RESULT = instance(2);
+            let result = observable_set_observer(registry(), ptr::addr_of_mut!(new));
+            assert_eq!(
+                *trace(),
+                std::vec!["attach", "has_pending_changes"],
+                "a NULL +0x60 result short-circuits +0x68"
+            );
+            assert!(result.is_null(), "the failed +0x60 result (0) is returned");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_new_observer_is_installed_before_attach_runs() {
+        // The original's `str r5, [r4, #0x24]` lands ahead of the attach
+        // `blx`: an attach that reads the observer word back sees the
+        // new observer already installed.
+        unsafe extern "C" fn field_checking_attach(this: *mut Observer) -> *mut u8 {
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(CLASS_REGISTRY.observer)),
+                this as *mut u8,
+                "the +0x24 store precedes the attach dispatch"
+            );
+            ptr::null_mut()
+        }
+        static FIELD_CHECK_VTABLE: ObserverVtable = ObserverVtable {
+            unresolved_00: [0; 6],
+            attach: field_checking_attach,
+            detach: mock_observer_detach,
+        };
+        let guard = mock();
+        unsafe {
+            let mut new = Observer { vtable: &FIELD_CHECK_VTABLE };
+            observable_set_observer(registry(), ptr::addr_of_mut!(new));
         }
         restore(guard);
     }
