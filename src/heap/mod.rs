@@ -5,6 +5,7 @@ pub mod block_mgr;
 pub mod block_region;
 pub mod client_commit;
 pub mod client_erase;
+pub mod client_populate;
 pub mod client_register;
 pub mod dcache;
 pub mod free_path;
@@ -184,9 +185,14 @@ mod wiring_tests {
 /// - `POOL_CLIENT_OPS.client_alloc` (the real `operator new` for the
 ///   0x170-byte block-manager client), for the same reason;
 /// - the unported 0x081fxxxx block-manager client
-///   (`POOL_BASE_OPS.client_attach`/`client_*`) in the success tests,
-///   which short-circuit the real attach; its populate
-///   stand-in builds a real deque segment the drain then really pops;
+///   (`POOL_BASE_OPS.client_attach`/`client_reserve`/`client_avail`) in
+///   the success tests, which short-circuit the real attach; populate
+///   itself is now the REAL port (heap/client_populate.rs, installed
+///   through the slot) whose unported callees — the manager hand-out,
+///   the deque growth, and the region ctor/copy/dtor triple — get
+///   stand-ins over CLIENT_POPULATE_OPS, so the real populate loop
+///   builds a real deque segment the seed walk and the drain then
+///   really consume;
 /// - `POOL_BASE_OPS.seg_dealloc` in the success tests (the segments are
 ///   host buffers, not default-heap blocks).
 /// Everything else — every POOL_OPS slot, the deque machinery, the
@@ -195,7 +201,7 @@ mod wiring_tests {
 #[cfg(test)]
 mod pool_integration_tests {
     extern crate std;
-    use crate::heap::block_deque::{self, BlockDeque, DequeIter, PoolBase};
+    use crate::heap::block_deque::{self, BlockDeque, PoolBase};
     use crate::heap::block_region;
     use crate::heap::pool::{self, PoolControl};
     use crate::heap::pool_client;
@@ -283,6 +289,8 @@ mod pool_integration_tests {
     const OFF_MBOX: usize = 0x3900; // 2 mailbox cells (parent +0x24, derived +0x78)
     const OFF_CLIENT: usize = 0x3980; // 0x170 — block-manager client object
     const OFF_MGR: usize = 0x3b00; // 0x40   — fake block manager (+0x30 = block size)
+    const OFF_NODES: usize = 0x3b40; // 4 x 0x10 — u32-packed region-list nodes (+0x4 next, +0xc region)
+    const OFF_SRCREG: usize = 0x3b80; // 4 x 5 words — source region objects (word 1: record ptr)
     const OFF_BUMP: usize = 0x4000; // 0x4000 — pool-alloc stand-in arena
 
     unsafe fn control() -> *mut u8 {
@@ -308,6 +316,12 @@ mod pool_integration_tests {
     }
     unsafe fn mgr_block() -> *mut u8 {
         slab().add(OFF_MGR)
+    }
+    unsafe fn node(i: usize) -> *mut u8 {
+        slab().add(OFF_NODES + i * 0x10)
+    }
+    unsafe fn src_region(i: usize) -> *mut usize {
+        (slab().add(OFF_SRCREG) as *mut usize).add(i * 5)
     }
     unsafe fn bump_base() -> *mut u8 {
         slab().add(OFF_BUMP)
@@ -370,7 +384,13 @@ mod pool_integration_tests {
         (*core::ptr::addr_of_mut!(SEG_FREES)).push(ptr as usize);
     }
 
-    unsafe extern "C" fn client_ok(_this: *mut PoolBase) -> i32 {
+    /// The client handle cell the attach stand-in points the base's
+    /// two-level client ref at (the pool_client.rs CLIENT_OBJ pattern).
+    static mut CLIENT_HANDLE: *mut u8 = core::ptr::null_mut();
+
+    unsafe extern "C" fn client_ok(this: *mut PoolBase) -> i32 {
+        CLIENT_HANDLE = client_storage();
+        (*this).client_ref = core::ptr::addr_of!(CLIENT_HANDLE);
         1
     }
 
@@ -382,44 +402,47 @@ mod pool_integration_tests {
         1
     }
 
-    /// Stand-in for the unported client populate @ 0x081fc298: builds a
-    /// REAL single-segment deque (4 descriptor elements wired to real
-    /// region objects over the arena) that the real seed walk and the
-    /// real drain consume.
-    unsafe extern "C" fn client_populate(_c: *mut u8, count: usize, dq: *mut BlockDeque) -> i32 {
+    /// Manager hand-out stand-in @ 0x0818b0c4 (CLIENT_POPULATE_OPS):
+    /// asserts the argument tuple the real populate builds
+    /// (manager = *(client+4), client+8, count) and grants the blocks.
+    unsafe extern "C" fn mgr_take_ok(manager: *mut u8, state: *mut u8, count: usize) -> i32 {
+        assert_eq!(manager, mgr_block());
+        assert_eq!(state, client_storage().add(8));
         assert_eq!(count, 4, "ceil(0x2000 / 0x800)");
-        let seg = seg();
-        let arena = arena();
-        for i in 0..4 {
-            let elem = seg.add(i * block_deque::DEQUE_ELEM_SIZE);
-            // word 0: vtable pointer; word 1: region object pointer
-            // (block_region's ELEM_REGION_INDEX).
-            (elem as *mut *const unsafe extern "C" fn(*mut u8)).write(ELEM_VTABLE.as_ptr());
-            let region = region(i);
-            region.add(block_region::REGION_START_INDEX)
-                .write(arena.add(i * BLOCK_SIZE as usize) as usize);
-            region.add(block_region::REGION_MUTEX_INDEX).write(0);
-            ((elem as *mut usize).add(1)).write(region as usize);
-        }
-        map_slot().write(seg);
-        let map = map_slot();
-        (*dq).begin = DequeIter {
-            cur: seg,
-            seg_base: seg,
-            seg_end: seg.add(block_deque::DEQUE_SEG_BYTES),
-            seg_slot: map,
-        };
-        (*dq).end = DequeIter {
-            cur: seg.add(4 * block_deque::DEQUE_ELEM_SIZE),
-            seg_base: seg,
-            seg_end: seg.add(block_deque::DEQUE_SEG_BYTES),
-            seg_slot: map,
-        };
-        (*dq).count = 4;
-        (*dq).map = map;
-        (*dq).map_cap = 1;
         1
     }
+
+    /// Deque-growth stand-in @ 0x083dda08 (empty-deque path): installs
+    /// the one host segment and anchors both iterators on it.
+    unsafe extern "C" fn grow_host_segment(dq: *mut BlockDeque) {
+        let seg = seg();
+        map_slot().write(seg);
+        let map = map_slot();
+        (*dq).map = map;
+        (*dq).map_cap = 1;
+        block_deque::deque_iter_init(core::ptr::addr_of_mut!((*dq).begin), seg, map);
+        (*dq).end = (*dq).begin;
+    }
+
+    /// Region copy-ctor stand-in @ 0x08280464: vtable at word 0, words
+    /// 1/2 copied shallow — an element built from a source region (or
+    /// from a temp copied from one) ends with the region RECORD pointer
+    /// at word 1 (block_region's ELEM_REGION_INDEX layout).
+    unsafe extern "C" fn region_copy_host(dst: *mut u8, src: *const u8) {
+        (dst as *mut *const unsafe extern "C" fn(*mut u8)).write(ELEM_VTABLE.as_ptr());
+        ((dst as *mut usize).add(1)).write((src as *const usize).add(1).read());
+        ((dst as *mut usize).add(2)).write((src as *const usize).add(2).read());
+    }
+
+    /// Region default-ctor/dtor stand-ins @ 0x082804b8 / 0x082804fc —
+    /// the list is never short here, so the default path never runs.
+    unsafe extern "C" fn region_default_host(dst: *mut u8) {
+        (dst as *mut *const unsafe extern "C" fn(*mut u8)).write(ELEM_VTABLE.as_ptr());
+        ((dst as *mut usize).add(1)).write(0);
+        ((dst as *mut usize).add(2)).write(0);
+    }
+
+    unsafe extern "C" fn region_destroy_host(_obj: *mut u8) {}
 
     /// Pool heap-alloc stand-in (the alloc-engine hole): bump allocator.
     unsafe extern "C" fn pool_bump_alloc(
@@ -501,18 +524,58 @@ mod pool_integration_tests {
             core::ptr::addr_of_mut!(pool::POOL_OPS).write(pool::DEFAULT_POOL_OPS);
             core::ptr::addr_of_mut!(block_deque::POOL_BASE_OPS)
                 .write(block_deque::DEFAULT_POOL_BASE_OPS);
+            core::ptr::addr_of_mut!(crate::heap::client_populate::CLIENT_POPULATE_OPS)
+                .write(crate::heap::client_populate::DEFAULT_CLIENT_POPULATE_OPS);
             core::ptr::addr_of_mut!(KOBJ_HOOKS).write(DEFAULT_KOBJ_HOOKS);
         }
     }
 
     /// Installs the block-manager-client stand-ins (success-path tests).
+    /// Populate is the REAL port (heap/client_populate.rs) over mocked
+    /// unported callees; the fake client object is wired so its gates
+    /// pass: counters covering 4 blocks, flags clear, a 4-node region
+    /// list whose source regions point at the [_, start, mutex] records.
     unsafe fn install_client() {
         let ops = &mut *core::ptr::addr_of_mut!(block_deque::POOL_BASE_OPS);
         ops.client_attach = client_ok;
         ops.client_reserve = client_reserve_ok;
         ops.client_avail = client_avail_ok;
-        ops.client_populate = client_populate;
+        ops.client_populate = crate::heap::client_populate::client_populate;
         ops.seg_dealloc = seg_free_recorder;
+        core::ptr::addr_of_mut!(crate::heap::client_populate::CLIENT_POPULATE_OPS).write(
+            crate::heap::client_populate::ClientPopulateOps {
+                manager_take_blocks: mgr_take_ok,
+                deque_grow: grow_host_segment,
+                region_default: region_default_host,
+                region_copy: region_copy_host,
+                region_destroy: region_destroy_host,
+            },
+        );
+        // The client object the real populate reads (target-layout u32
+        // words — the slab is below 4 GiB, so u32 pointers round-trip).
+        let client = client_storage();
+        let arena = arena();
+        for i in 0..4 {
+            // Node: +0x4 next, +0xc source region.
+            let n = node(i);
+            (n.add(0x4) as *mut u32).write(if i < 3 { node(i + 1) as u32 } else { 0 });
+            (n.add(0xc) as *mut u32).write(src_region(i) as u32);
+            // Source region word 1: the region record pointer; the
+            // record carries the block start and mutex words the seed
+            // walk reads (block_region's layout).
+            src_region(i).add(1).write(region(i) as usize);
+            src_region(i).add(2).write(0);
+            region(i)
+                .add(block_region::REGION_START_INDEX)
+                .write(arena.add(i * BLOCK_SIZE as usize) as usize);
+            region(i).add(block_region::REGION_MUTEX_INDEX).write(0);
+        }
+        (client.add(0x04) as *mut u32).write(mgr_block() as u32);
+        (client.add(0x0c) as *mut u32).write(node(0) as u32);
+        (client.add(0x18) as *mut u32).write(0); // produced
+        (client.add(0x1c) as *mut u32).write(4); // expected
+        (client.add(0x44) as *mut u32).write(0); // state flags
+        (client.add(0x50) as *mut u32).write(4); // head
     }
 
     static NAME: &[u8] = b"integration_pool\0";
