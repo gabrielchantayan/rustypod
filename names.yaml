@@ -2272,10 +2272,12 @@ functions:
       success, 0 on every refusal. The five unported callees (manager
       hand-out, deque growth, region ctor/copy/dtor) dispatch through
       the new CLIENT_POPULATE_OPS slots (house pattern, blx for bl);
-      the manager stub refuses 0 — the no-manager contract of
-      block_deque.rs's stub_client_populate, so the wired defaults are
-      behavior-identical to the old stub and the no-op grow/region
-      stubs are unreachable. block_deque.rs is off-limits in the shared
+      the manager slot's default is now the REAL 0x0818b0c4 port
+      (heap/block_mgr.rs's manager_take_blocks — stub_manager_take_blocks
+      removed) whose own body stub refuses 0, the no-manager contract
+      of block_deque.rs's stub_client_populate one boundary deeper, so
+      the wired defaults are still fail-closed and the no-op
+      grow/region stubs are unreachable. block_deque.rs is off-limits in the shared
       tree, so its stub stays the POOL_BASE_OPS default; the port is
       exercised through the slot by heap/mod.rs's integration tests
       (real port + mocked callees replacing the wholesale stand-in,
@@ -2490,6 +2492,38 @@ functions:
       ALIAS - `b 0x0818a364`, a bare tail-branch thunk of
       region_block_size (verified against osos.asm); 1 bl caller. No
       separate port; hook this address to the region_block_size symbol.
+
+  - address: 0x0818b0c4
+    ghidra: FUN_0818b0c4
+    name: manager_take_blocks
+    size: 60
+    sig: "i32 manager_take_blocks(u8 *manager, u8 *client_state, usize count)"
+    module: heap/block_mgr
+    vars: {param_1: manager, param_2: client_state, param_3: count, uVar1: result}
+    status: ported
+    notes: >-
+      The block-manager hand-out client_populate calls as
+      0x0818b0c4(*(client+4), client+8, count) — its one bl call site @
+      0x081fc310 (client_populate), binary-verified. A pure mutex
+      bracket: lock the manager's own mutex object at manager+0x148
+      (the unported C++ recursive-mutex pair 0x082e8390/0x082e83d8 via
+      thunks 0x082621a8/0x082621ac, block_region.rs's REGION_MUTEX_OPS
+      boundary), run the unported body 0x0818b108(manager,
+      client_state, count) through the new BLOCK_MANAGER_OPS
+      take_blocks_body slot (house pattern, blx for bl), unlock, return
+      the body's verdict held in a callee-saved register across the
+      unlock (the client_commit.rs shape). The body stub refuses 0 —
+      the fail-closed no-manager contract — so the
+      CLIENT_POPULATE_OPS.manager_take_blocks default is now this REAL
+      port (replacing client_populate.rs's wholesale stub_manager_take_blocks,
+      removed): the wired configuration reports the same refusal 0, one
+      boundary deeper. Host tests cover the lock/body/unlock ordering
+      with argument pass-through, verdict pass-through (0/1/-1/7) with
+      the mutex released even on refusal, and the fail-closed wired
+      default. match.py structural: same push, manager+0x148,
+      lock/body/unlock, verdict-in-callee-saved shape; the diff is
+      blx-through-table for the three calls and LLVM's fp frame, the
+      accepted house deviations.
 
   - address: 0x080751a0
     ghidra: FUN_080751a0
