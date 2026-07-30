@@ -46,9 +46,8 @@
 //!   controller: a deeply chained C++ ctor (vtable 0x089a75c8 at
 //!   +0x14, sub-objects out past +0x9c4) that the getter's 101 call
 //!   sites reach through the +4 slot of the global @ 0x089ca7c8. Its
-//!   hottest consumer is the leaf `FUN_08259594` (returns
-//!   `instance + 0x14` or NULL, 264 `bl` call sites) — identified, not
-//!   yet ported.
+//!   hottest consumer is [`media_player_interface_get`] (returns
+//!   `instance + 0x14` or NULL, 264 `bl` call sites), ported below.
 //! - Three of the remaining four are identified only by the **class id**
 //!   their constructor publishes into the by-id registry
 //!   (`app/registry.rs`), which is the firmware's own name for them:
@@ -278,6 +277,32 @@ pub unsafe extern "C" fn media_player_get() -> *mut u8 {
     lazy_singleton(cache, MEDIA_PLAYER_SIZE, || unsafe { ctor!(media_player) })
 }
 
+/// media_player_interface_get — original: `FUN_08259594` @ 0x08259594
+/// (20 bytes; 264 `bl` call sites — one of the hottest leaves in the
+/// image).
+///
+/// Algorithm: `push {r4,lr}; bl media_player_get; cmp r0,#0;
+/// addne r0,r0,#0x14; pop {r4,pc}` — fetch the TPodMediaPlayer
+/// singleton and return a pointer to its interface sub-object at +0x14,
+/// or NULL unchanged when the singleton is NULL (the NULL is *not*
+/// offset). The +0x14 sub-object is the player's vtable-bearing
+/// interface base: the constructor @ 0x0817d970 forms `r6 = this+0x14`
+/// first and plants the vtable literal (pool @ 0x0817db6c) at `[r6]`,
+/// and all 264 callers use the result purely as a `this` for virtual
+/// dispatch (`ldr r1,[r0]; ldr r1,[r1,#N]; blx r1`, slots out past
+/// +0x110). Same NOT-HOOK-READY caveat as the getters — see the module
+/// header.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn media_player_interface_get() -> *mut u8 {
+    let player = media_player_get();
+    if player.is_null() {
+        player
+    } else {
+        player.add(0x14)
+    }
+}
+
 /// singleton_class_8900 — original: `FUN_081eb0c4` @ 0x081eb0c4
 /// (44 bytes; 88 `bl` call sites from 64 distinct callers).
 ///
@@ -485,6 +510,43 @@ mod tests {
                 constructed(),
                 "the ctor result is cached"
             );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_interface_getter_returns_the_player_plus_0x14() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(media_player_interface_get(), constructed().add(0x14));
+            assert_eq!(
+                *ptr::addr_of!(ALLOC_SIZES),
+                std::vec![MEDIA_PLAYER_SIZE],
+                "the singleton is still constructed exactly once, at its own size"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_interface_getter_returns_null_unchanged_when_the_player_is_null() {
+        // `addne`: the NULL is not offset by 0x14.
+        let guard = mock(ptr::null_mut());
+        unsafe {
+            assert!(media_player_interface_get().is_null());
+            assert!(media_player_interface_get().is_null());
+            assert_eq!((*ptr::addr_of!(ALLOC_SIZES)).len(), 2, "no failure memory, same as the getter");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_interface_getter_offsets_the_cached_player_on_every_call() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(media_player_interface_get(), constructed().add(0x14));
+            assert_eq!(media_player_interface_get(), constructed().add(0x14));
+            assert_eq!((*ptr::addr_of!(ALLOC_SIZES)).len(), 1, "the second call hits the cache");
         }
         restore(guard);
     }

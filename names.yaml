@@ -6374,10 +6374,38 @@ functions:
       literal (@ 0x0817db74) to the class-name factory @ 0x0822053c and
       chains sub-ctors out past +0x9c4 (vtable 0x089a75c8 at +0x14).
       Feeds the 264-call-site leaf FUN_08259594 (returns instance+0x14
-      or NULL) - identified, not yet ported. Same deviations and the
+      or NULL) - ported as media_player_interface_get (see 0x08259594).
+      Same deviations and the
       same NOT-HOOK-READY caveat as 0x0817ee04: the ctor sits behind the
       SINGLETON_CTORS dispatch table with a zeroing stub default and the
       cache is the crate static MEDIA_PLAYER_INSTANCE.
+
+  - address: 0x08259594
+    ghidra: FUN_08259594
+    name: media_player_interface_get
+    size: 20
+    sig: "void *media_player_interface_get(void)"
+    module: app/singletons
+    status: ported
+    renames:
+      FUN_0817ceb4: media_player_get
+      iVar1: player (TPodMediaPlayer instance, then instance + 0x14)
+    notes: >-
+      `push {r4,lr}; bl media_player_get; cmp r0,#0; addne r0,r0,#0x14;
+      pop {r4,pc}` - fetch the TPodMediaPlayer singleton and return a
+      pointer to its interface sub-object at +0x14, or NULL unchanged
+      when the singleton is NULL (the `addne`: the NULL is NOT offset).
+      264 bl call sites - one of the hottest unported leaves. The +0x14
+      sub-object is the player's vtable-bearing interface base: the ctor
+      @ 0x0817d970 forms `r6 = this+0x14` first thing and plants the
+      vtable literal (pool @ 0x0817db6c) at [r6], and every caller uses
+      the result purely as a `this` for virtual dispatch
+      (`ldr r1,[r0]; ldr r1,[r1,#N]; blx r1`, slots out past +0x110 -
+      e.g. the Coverflow album-play handler FUN_0816d6c0 dispatches
+      slots +0x10c and +0xac through it). match.py: same 5-instruction
+      push/bl/cmp/addne/pop skeleton; LLVM emits an fp/lr frame and an
+      intra-archive bl relocation instead of ADS's r4/lr frame. Same
+      NOT-HOOK-READY caveat as the singleton getters.
 
   - address: 0x0813b6f4
     ghidra: FUN_0813b6f4
