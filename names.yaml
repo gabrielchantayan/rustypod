@@ -12325,3 +12325,24 @@ functions:
       assignments, no Rust symbols here). match.py: LLVM emits rsbmi
       (same N-flag test as rsblt) behind the crate's standard frame-
       pointer prologue - structurally the same compare-and-negate leaf.
+
+  - address: 0x080e9794
+    ghidra: FUN_080e9794
+    name: iabs_alias_9794
+    size: 12
+    sig: "i32 iabs(i32 x)"
+    module: fp/fp_misc
+    status: ported
+    renames:
+      param_1: x
+    notes: >-
+      ALIAS - byte-identical to iabs @ 0x080e9788 (all 12 bytes
+      verified against osos.dec: cmp r0,#0 / rsblt r0,r0,#0 / bx lr),
+      a duplicate emission from another translation unit. 6 bl call
+      sites (0x08240f18/0x08240f24, 0x0824178c/0x08241798,
+      0x082417bc/0x082417c8), all in 0x0824xxxx graphics-region code
+      comparing two |deltas| and keeping the larger, same usage as the
+      primary. No separate Rust symbol - point any hook at the single
+      iabs symbol (the load_be32 alias precedent). match.py against
+      iabs at this address: same rsbmi-behind-frame-prologue structure
+      as the primary, byte-identical inputs make the diff identical.
