@@ -14023,3 +14023,39 @@ functions:
       until NUL; the diff is LLVM's loop rotation (bottom-tested), the
       dispatch-slot indirection for the table pointer, and the crate
       fp frame - the accepted house deviations.
+
+  - address: 0x081523dc
+    ghidra: FUN_081523dc
+    name: fixed_value_default_init
+    size: 20
+    sig: "FixedValue *fixed_value_default_init(FixedValue *this)"
+    module: app/fixed_value
+    status: ported
+    renames:
+      param_1: this
+      DAT_081523f0: FIXED_VALUE_VTABLE
+      FUN_08138460: refcounted_base_init
+    notes: >-
+      The default constructor of the same refcounted Q16.16 scalar
+      class as fixed_value_init (FUN_081523b8, ported beside it in
+      app/fixed_value.rs): runs the refcounted base constructor @
+      0x08138460 (base vtable 0x08984ca0, flags/refcount word +0x14
+      landed at 0 via the byte-clear-then-word-mask sequence -
+      reproduced by the private refcounted_base_init helper), then
+      overrides the vtable with 0x08986998 and returns this. Stores NO
+      value: the +0x04 scalar and +0x08 aux word keep whatever the
+      storage held. Pool literal @ 0x081523f0 binary-verified against
+      osos.dec to hold 0x08986998 - the same FIXED_VALUE_VTABLE the
+      value ctor's literal @ 0x081523d8 holds. Its callers are array
+      builders (FUN_08280fc0, FUN_081eadec, FUN_081a167c, FUN_081b8e74)
+      that chain it over consecutive objects at a 0x18 stride
+      (operator_new(0x18) per element), so a default-constructed
+      element's value/aux words stay dirty. Both vtables are address
+      constants: contents stale in the decrypted image (the
+      app/registry.rs 0x08989718 caveat); only the stored pointer value
+      is reproduced. match.py: same structure - push, bl to the
+      base-ctor helper, vtable literal (0x08986998) from the pool, str
+      to [this], return this; LLVM adds the crate-standard
+      frame-pointer prologue and keeps this in r4 across the call (the
+      original relies on the helper preserving r0) - the accepted house
+      deviations.

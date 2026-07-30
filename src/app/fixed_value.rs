@@ -1,6 +1,9 @@
 //! `fixed_value_init` — original: `FUN_081523b8` @ 0x081523b8
 //! (32 bytes; **138 `bl` call sites**, one of the hottest unported
-//! small leaves in the app framework).
+//! small leaves in the app framework), and its sibling default
+//! constructor `fixed_value_default_init` — original: `FUN_081523dc`
+//! @ 0x081523dc (20 bytes; builds FixedValue arrays in place with a
+//! 0x18 stride).
 //!
 //! The value constructor of retailOS's UI property/animation framework:
 //! it builds a refcounted **Q16.16 fixed-point scalar** object in
@@ -57,9 +60,15 @@
 //!   point into what the image holds as 16-bit data tables, not code.
 //!   What the port must reproduce is the stored pointer value, which is
 //!   exact.
-//! - The default constructor `FUN_081523dc` @ 0x081523dc (20 bytes;
-//!   shares the base ctor and the vtable, stores no value) is
-//!   identified but not ported here.
+//! - The default constructor `FUN_081523dc` @ 0x081523dc (20 bytes)
+//!   is ported here as [`fixed_value_default_init`]. It runs the same
+//!   base constructor and installs the same scalar vtable but stores
+//!   no value and touches no other word — its array-builder callers
+//!   (e.g. `FUN_08280fc0`, `FUN_081eadec`, `FUN_081b8e74`) chain it
+//!   over consecutive objects at a 0x18 stride. Verified against
+//!   osos.dec: the pool literal @ 0x081523f0 holds 0x08986998, the
+//!   same [`FIXED_VALUE_VTABLE`] the value ctor's literal @ 0x081523d8
+//!   holds.
 
 /// The derived (Q16.16 scalar) vtable, installed by [`fixed_value_init`]
 /// (original: the literal @ 0x081523d8). An address constant — see the
@@ -138,6 +147,35 @@ pub unsafe extern "C" fn fixed_value_init(
     (*this).vtable = FIXED_VALUE_VTABLE;
     (*this).value_q16 = value_q16;
     (*this).aux = 0;
+    this
+}
+
+/// fixed_value_default_init — original: `FUN_081523dc` @ 0x081523dc
+/// (20 bytes).
+///
+/// The default constructor of the same refcounted Q16.16 scalar class:
+/// runs the refcounted base constructor, then overrides the vtable with
+/// the scalar one — and stores nothing else. The original:
+///
+/// ```text
+/// str  lr, [sp, #-0x4]!
+/// bl   0x08138460           ; refcounted base-class constructor
+/// ldr  r1, [0x081523f0]     ; the derived (scalar) vtable 0x08986998
+/// str  r1, [r0, #0x0]       ; vtable -> +0x00
+/// ldr  pc, [sp], #0x4       ; return this
+/// ```
+///
+/// Unlike [`fixed_value_init`], the +0x04 scalar and the +0x08 aux word
+/// are left untouched — its callers are array builders
+/// (`FUN_08280fc0`, `FUN_081eadec`, `FUN_081a167c`, `FUN_081b8e74`)
+/// that chain it over consecutive objects at a 0x18 stride, so a
+/// default-constructed element's value/aux words keep whatever the
+/// storage held.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn fixed_value_default_init(this: *mut FixedValue) -> *mut FixedValue {
+    refcounted_base_init(this);
+    (*this).vtable = FIXED_VALUE_VTABLE;
     this
 }
 
@@ -246,5 +284,53 @@ mod tests {
         assert_eq!(object.aux, 0);
         assert_eq!(object.flags, 0, "the base ctor's zero survives the override");
         assert_eq!(object.opaque, [0x1111_1111, 0x2222_2222]);
+    }
+
+    #[test]
+    fn default_init_returns_the_same_object_it_was_given() {
+        let mut object = dirty();
+        let this = core::ptr::addr_of_mut!(object);
+        assert_eq!(unsafe { fixed_value_default_init(this) }, this);
+    }
+
+    #[test]
+    fn default_init_installs_the_derived_vtable_over_the_base_one() {
+        let mut object = dirty();
+        unsafe { fixed_value_default_init(core::ptr::addr_of_mut!(object)) };
+        assert_eq!(object.vtable, FIXED_VALUE_VTABLE, "0x08986998, the 0x081523f0 literal");
+        assert_eq!(object.flags, 0, "the base ctor's zero survives the override");
+    }
+
+    #[test]
+    fn default_init_leaves_the_value_and_aux_words_untouched() {
+        // Unlike fixed_value_init, the default ctor stores no scalar and
+        // does not zero +0x08 — array elements keep their dirty words.
+        let mut object = dirty();
+        unsafe { fixed_value_default_init(core::ptr::addr_of_mut!(object)) };
+        assert_eq!(object.value_q16, 0x0bad_f00d_u32 as i32, "+0x04 is not written");
+        assert_eq!(object.aux, 0xcafe_babe, "+0x08 is not written");
+        assert_eq!(object.opaque, [0x1111_1111, 0x2222_2222]);
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "32")]
+    fn default_init_constructs_an_array_at_the_0x18_stride() {
+        // The callers' pattern: chain the default ctor over consecutive
+        // 0x18-byte slots (`FUN_081523dc(p); FUN_081523dc(p + 0x18); ...`).
+        // 32-bit target only: on the 64-bit host `vtable: usize` widens
+        // the struct past 0x18 bytes (see `layout_checks`), so the
+        // target stride is not the host stride.
+        let mut objects = [dirty(), dirty(), dirty()];
+        let base = core::ptr::addr_of_mut!(objects[0]);
+        for i in 0..3 {
+            let slot = unsafe { base.byte_add(0x18 * i) };
+            assert_eq!(unsafe { fixed_value_default_init(slot) }, slot);
+        }
+        for object in &objects {
+            assert_eq!(object.vtable, FIXED_VALUE_VTABLE);
+            assert_eq!(object.flags, 0);
+            assert_eq!(object.value_q16, 0x0bad_f00d_u32 as i32);
+            assert_eq!(object.aux, 0xcafe_babe);
+        }
     }
 }
