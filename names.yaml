@@ -9539,11 +9539,43 @@ functions:
       -5 tail-calls 0x082cf358(p4). Anything outside -13..=0 (e.g. -14)
       returns unfreed. The raw free is sqlite3_free @ 0x083906f4,
       called through its ported twin tracked_free; the value
-      destructor @ 0x08386504 is the one unported FREE_P4_AUX_OPS
-      slot (documented no-op default - leak rather than corrupt, house
-      pattern; the ephemeral release @ 0x082cf358 and the aux sweep
-      @ 0x08386e08 have since been ported and are the default
-      free_ephemeral_function / context_aux_cleanup slots).
+      destructor @ 0x08386504 has since been ported (sqlite/value_free)
+      and is the default value_free slot, alongside the ephemeral
+      release @ 0x082cf358 and the aux sweep @ 0x08386e08 as the
+      default free_ephemeral_function / context_aux_cleanup slots.
+
+  - address: 0x08386504
+    ghidra: FUN_08386504
+    name: value_free
+    size: 32
+    sig: "void value_free(void *value)"
+    module: sqlite/value_free
+    status: ported
+    renames:
+      param_1: value
+    notes: >-
+      Upstream SQLite's sqlite3ValueFree - the value destructor
+      vdbe_free_p4's -8 (P4_MEM) branch tail-calls; 4 bl + 1 tail-b
+      call sites total (the column-name / error-message teardowns
+      @ 0x082beac8, 0x0836ed14, 0x083866ac, 0x0838feec call it
+      directly). Three steps: NULL returns immediately (movs r4,r0 /
+      ldmiaeq); the value's dynamic guts are released by
+      sqlite3VdbeMemRelease @ 0x0838c04c (bl - aggregate-context
+      finalize on flags bit 0x400 at +0x1c, xDel destructor at +0x20
+      on bit 0x40, zMalloc free at +0x24, then z/xDel/zMalloc NULLed);
+      the Mem shell itself is freed through the tag-57 tracked
+      allocator via the tail branch b sqlite3_free @ 0x083906f4, here
+      tracked_free called directly. 0x0838c04c is NOT ported - it is
+      the VALUE_MEM_OPS dispatch boundary (documented no-op default:
+      free the shell, leak the guts rather than run the wrong
+      destructor; same leak-rather-than-corrupt stance as the
+      missing_destructor stub this port replaces). Now the default
+      value_free slot of free_p4's FREE_P4_AUX_OPS. Ghidra's C inlines
+      the whole tag-57 free after the bl - that is the tail-called
+      sqlite3_free's body, not this function's 32 bytes. match.py
+      structural: guard matches (cmp/bxeq vs movs/popeq), slot blx for
+      the unported release, LLVM inlines tracked_free's stats-update
+      prologue and tail-calls free_tag57 instead of b sqlite3_free.
 
   - address: 0x08386e08
     ghidra: FUN_08386e08
