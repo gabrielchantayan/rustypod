@@ -8582,11 +8582,10 @@ functions:
       descriptor for artwork kind N" entry point. Consults the PLAIN
       table: kind 4 forwards 0x428 here, where the kind4-override
       wrapper would answer 0x400. Deviations - (1) the fall-through
-      becomes an explicit tail call to the extern symbol
-      image_format_descriptor (FUN_08105b58, still unported; on device
-      it resolves at firmware link time to the stock address, and to the
-      Rust port once 0x08105b58 is ported under that name; a recording
-      shim stands in on the host), LLVM emits it as a `b` - the same
+      becomes an explicit tail call to image_format_descriptor
+      (FUN_08105b58, ported below in the same module; the recording
+      shim that stood in on the host while it was unported was removed
+      when it landed), LLVM emits it as a `b` - the same
       control-flow shape; (2) LLVM's crate-standard fp frame. Host
       tests: descriptor pointer passes through unchanged, every kind
       0..=17 forwards the decoded jump table's format, out-of-range
@@ -8595,6 +8594,65 @@ functions:
       swap/bl/shuffle/pop/tail-branch shape; the bl's R_ARM_JUMP24
       target is image_format_for_kind and the tail b targets
       image_format_descriptor.
+
+  - address: 0x08105b58
+    ghidra: FUN_08105b58
+    name: image_format_descriptor
+    size: 444
+    sig: "void image_format_descriptor(u8 *descriptor, u32 format)"
+    module: app/image_format
+    status: ported
+    vars: {param_1: descriptor, param_2: format, local_38: width, local_34: height, local_30: height_bytes, local_2c: aux_tag, local_28: reserved_10, local_24: reserved_14, local_20: bit_depth, local_1c: pixel_format, DAT_08105fe4: PIXEL_FORMAT_TAG_RGB565, DAT_08105ff4: PIXEL_FORMAT_TAG_2565, DAT_08105ff8: PIXEL_FORMAT_TAG_1888, DAT_08105ff0: PIXEL_FORMAT_TAG_C422, DAT_08105fec: PIXEL_FORMAT_TAG_C420}
+    notes: >-
+      The one-step descriptor builder behind every artwork geometry
+      query: caller passes a 32-byte stack buffer and a format id
+      0x3f1..=0x42d (usually from image_format_for_kind) and gets back
+      the image geometry: u32 width @+0x00, u32 height @+0x04, u32
+      height_bytes @+0x08 (= height * bytes-per-pixel in every arm, so
+      width * height_bytes is the buffer byte size FUN_08079d38
+      computes as desc[0]*desc[8]), u16 aux tag @+0x0c (0 everywhere
+      except the 220x176 pair 0x3f5/0x3fc where it is 0x10e; semantics
+      unknown, ported on observable behavior), u32 zero @+0x10 and
+      @+0x14 (always), u32 bit depth @+0x18 (16/32/12), u16
+      pixel-format tag @+0x1c. Algorithm: zero the +0x10/+0x14 words,
+      preload shared constants (0x140, 0x80, 0xdc, 0x54, 0x64, 0xb0,
+      0x160, 0x10e) and the 0x565 tag from the literal pool, then a
+      dense 61-entry jump table on format - 0x3f1 (`cmp r6,#0x3c;
+      addls pc,pc,r6,lsl#2`, unsigned bound; holes and out-of-range ids
+      take the default arm); each arm stores its fields and rejoins
+      through shared store tails at 0x08105e94/0x08105f70/0x08105fd4/
+      0x08105ccc (shared arms: 0x403/0x404, 0x3f9/0x40b/0x41a,
+      0x41f/0x42c); finally the 32-byte stack image is copied to the
+      caller's buffer (bl 0x08037df8, the ROM memcpy veneer). 18 bl
+      call sites, no tail b (binary-scanned), plus the fall-through
+      tail call from image_format_descriptor_for_kind. Literal pool
+      (read from osos.dec, absent from the asm listing): 0x08105fe4 =
+      0x565, 0x08105fe8 = 0x438 (height_bytes for 0x42b), 0x08105fec =
+      0xc420, 0x08105ff0 = 0xc422, 0x08105ff4 = 0x2565, 0x08105ff8 =
+      0x1888. Deviations - (1) the original initializes only 26 of the
+      32 descriptor bytes: +0x0e/+0x0f and +0x1e/+0x1f are never
+      stored, and the default arm stores nothing but the two zero
+      words, so the copy leaks stack garbage there; the port zero-fills
+      the whole descriptor instead (strictly safer) and reproduces
+      every byte the original does store exactly; (2) the ROM veneer @
+      0x08037df8 targets memcpy; the ported memcpy is called directly
+      per house pattern (LLVM then inlines/elides the whole local +
+      copy, see below). Host tests: every covered id's 32-byte
+      descriptor vs an independently decoded arm table, the 29 table
+      holes and out-of-range ids (unsigned bound) -> all-zero
+      descriptor (deviation 1), the reserved words always zero,
+      height_bytes * width = byte size at all three bit depths, and
+      image_format_descriptor_for_kind building the plain table's
+      descriptor for every kind (kind 4 -> 0x428's, not the override's
+      0x400). match.py structural: NOT close at instruction level -
+      LLVM converts the match into per-field constant tables indexed by
+      format - 0x3f1 (zeros for the holes, folding the default arm in),
+      stores the fields straight into the caller's buffer and calls
+      __aeabi_memclr for the +0x0e..+0x17 zero gap, eliding the stack
+      image and the memcpy entirely; same bounds check (cmp r3,#0x3c;
+      bhi) and the same field values. The geometry reading of the id
+      space (inferred when 0x08105a34 was ported) is confirmed by this
+      table.
 
   - address: 0x0814d51c
     ghidra: FUN_0814d51c
