@@ -56,9 +56,19 @@
 //!   (ported as `kobj::waiter_wake` @ 0x080567f8, the bare alias of
 //!   the same thunk), NOT thunk 0x08037ea8 / ROM 0x22004368
 //!   (CSEM_ROM_WAKE, which only csem_signal/csem_wake use), and the
-//!   wake condition is equality with -1, not a signed < 0. Twin
-//!   0x080567d0 (same shape, wakes via thunk 0x08037e80) remains
-//!   unported.
+//!   wake condition is equality with -1, not a signed < 0.
+//! - `csem_post_deferred` — (no Ghidra name; absent from functions.csv,
+//!   extent verified from osos.asm) @ 0x080567d0 (40 bytes; 1 call
+//!   site: the tail `b` @ 0x080c692c of the deref wrapper
+//!   `FUN_080c6928`, whose Ghidra decomp is this function verbatim).
+//!   Instruction-for-instruction twin of `csem_post` except the wake
+//!   tail-branches thunk 0x08037e80 -> ROM 0x22001cbc: under the
+//!   kernel lock the ROM walks a pending-id table (mirror 0x08001cbc)
+//!   and appends the waiter id if not already present, instead of
+//!   invoking the gateway signal stub directly — a deferred-wake
+//!   flavor of the same V op (the name is inferred from that
+//!   difference). Routed through the ported
+//!   `task_lock::rom_svc_22001cbc`.
 //!
 //! # The interrupt-masking boundary (deviation, by necessity)
 //!
@@ -297,11 +307,32 @@ pub unsafe extern "C" fn csem_post(csem: *mut CountingSem) {
     }
 }
 
+/// csem_post_deferred — original: (no Ghidra name; absent from
+/// functions.csv, extent verified from osos.asm) @ 0x080567d0 (40 bytes).
+///
+/// Instruction-for-instruction twin of [`csem_post`]: returns a token
+/// with [`atomic_add_irqsafe`] and, when the count was exactly -1 (the
+/// original's `adds r0, r0, #1` + EQ — one sleeper may be parked),
+/// wakes the waiter object. The only difference is the wake target:
+/// thunk 0x08037e80 -> ROM 0x22001cbc, a full ROM function that under
+/// the kernel lock appends the waiter id to a pending-id table
+/// (mirror 0x08001cbc) instead of the gateway signal stub — a
+/// deferred-wake flavor, routed through the ported
+/// [`crate::kernel::task_lock::rom_svc_22001cbc`].
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn csem_post_deferred(csem: *mut CountingSem) {
+    let old = atomic_add_irqsafe(1, core::ptr::addr_of_mut!((*csem).count));
+    if old.wrapping_add(1) == 0 {
+        crate::kernel::task_lock::rom_svc_22001cbc((*csem).waiter_id as usize);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
     use super::*;
     use crate::kernel::kobj::{KobjHooks, DEFAULT_KOBJ_HOOKS, KOBJ_HOOKS};
+    use crate::kernel::task_lock::{self, RomThunkOps};
     use core::ptr::{addr_of, addr_of_mut};
     use std::sync::MutexGuard;
     use std::vec;
@@ -312,6 +343,10 @@ mod tests {
     static mut SLEEP_LOG: Vec<(u32, u32)> = Vec::new();
     static mut SLEEP_RC: u32 = 0;
     static mut WAKE_LOG: Vec<u32> = Vec::new();
+    // Mock of ROM 0x22001cbc (csem_post_deferred's wake), riding
+    // task_lock's ROM_KERNEL table (its OPS_LOCK serializes the swap
+    // against task_lock's own tests).
+    static mut DEFERRED_WAKE_LOG: Vec<u32> = Vec::new();
 
     unsafe extern "C" fn mock_rom_sleep(id: u32, timeout: u32) -> u32 {
         (*addr_of_mut!(SLEEP_LOG)).push((id, timeout));
@@ -322,15 +357,29 @@ mod tests {
         (*addr_of_mut!(WAKE_LOG)).push(id);
     }
 
+    unsafe extern "C" fn mock_deferred_wake(id: usize) -> usize {
+        (*addr_of_mut!(DEFERRED_WAKE_LOG)).push(id as u32);
+        0
+    }
+
     /// RTXC return code 5 — the ROM sleep timed out.
     const RC_TIMEOUT: u32 = 5;
     /// Any non-5 code — the sleeper was woken.
     const RC_WOKEN: u32 = 0;
 
     /// Installs the cpsr simulation + mock ROM sleep/wake under kobj's
-    /// hook lock and returns the guard.
-    fn install(initial_cpsr: u32, sleep_rc: u32) -> MutexGuard<'static, ()> {
+    /// hook lock, plus the deferred-wake mock in task_lock's ROM_KERNEL
+    /// under its OPS_LOCK, and returns both guards with the saved table.
+    /// Lock order is always HOOKS_LOCK then OPS_LOCK (no other module
+    /// takes both, so no cycle).
+    fn install(
+        initial_cpsr: u32,
+        sleep_rc: u32,
+    ) -> (MutexGuard<'static, ()>, MutexGuard<'static, ()>, RomThunkOps) {
         let guard = crate::kernel::kobj::tests::HOOKS_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let task_lock_guard = crate::kernel::task_lock::tests::OPS_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         unsafe {
@@ -339,24 +388,30 @@ mod tests {
             (*addr_of_mut!(SLEEP_LOG)).clear();
             *addr_of_mut!(SLEEP_RC) = sleep_rc;
             (*addr_of_mut!(WAKE_LOG)).clear();
+            (*addr_of_mut!(DEFERRED_WAKE_LOG)).clear();
             addr_of_mut!(KOBJ_HOOKS).write(KobjHooks {
                 rom_waiter_wait: mock_rom_sleep,
                 rom_waiter_signal: mock_wake,
                 ..DEFAULT_KOBJ_HOOKS
             });
             *addr_of_mut!(CSEM_ROM_WAKE) = mock_wake;
+            let saved = core::ptr::read_volatile(addr_of!(task_lock::ROM_KERNEL));
+            let mut patched = saved;
+            patched.rom_svc_22001cbc = mock_deferred_wake;
+            addr_of_mut!(task_lock::ROM_KERNEL).write(patched);
+            (guard, task_lock_guard, saved)
         }
-        guard
     }
 
-    /// Restores the defaults; takes the guard by value so it drops last
+    /// Restores the defaults; takes the guards by value so they drop last
     /// (house pattern, see stdio/seek_core.rs).
-    fn restore(guard: MutexGuard<'static, ()>) {
+    fn restore(guards: (MutexGuard<'static, ()>, MutexGuard<'static, ()>, RomThunkOps)) {
         unsafe {
             addr_of_mut!(KOBJ_HOOKS).write(DEFAULT_KOBJ_HOOKS);
             *addr_of_mut!(CSEM_ROM_WAKE) = missing_rom_csem_wake;
+            addr_of_mut!(task_lock::ROM_KERNEL).write(guards.2);
         }
-        drop(guard);
+        drop(guards);
     }
 
     fn cpsr() -> u32 {
@@ -376,6 +431,10 @@ mod tests {
 
     fn wakes() -> Vec<u32> {
         unsafe { (*addr_of!(WAKE_LOG)).clone() }
+    }
+
+    fn deferred_wakes() -> Vec<u32> {
+        unsafe { (*addr_of!(DEFERRED_WAKE_LOG)).clone() }
     }
 
     fn csem(count: i32, waiter_id: u32) -> CountingSem {
@@ -697,6 +756,64 @@ mod tests {
         }
         assert_eq!(sem.count, i32::MIN);
         assert!(wakes().is_empty());
+        restore(guard);
+    }
+
+    // ---- csem_post_deferred ----------------------------------------------
+
+    #[test]
+    fn post_deferred_with_tokens_only_increments() {
+        let guard = install(0x13, 0);
+        let mut sem = csem(1, 0x42);
+        unsafe {
+            csem_post_deferred(&mut sem);
+        }
+        assert_eq!(sem.count, 2);
+        assert!(deferred_wakes().is_empty(), "old+1 = 2 is nonzero: no wake");
+        assert!(wakes().is_empty());
+        restore(guard);
+    }
+
+    #[test]
+    fn post_deferred_on_empty_sem_no_wake() {
+        // old = 0 -> count 1: nobody parked (adds result 1, NE).
+        let guard = install(0x13, 0);
+        let mut sem = csem(0, 0x42);
+        unsafe {
+            csem_post_deferred(&mut sem);
+        }
+        assert_eq!(sem.count, 1);
+        assert!(deferred_wakes().is_empty());
+        restore(guard);
+    }
+
+    #[test]
+    fn post_deferred_at_minus_one_wakes_via_rom_22001cbc() {
+        // The EQ boundary: old = -1 -> old+1 = 0. The wake rides the
+        // rom_svc_22001cbc slot of task_lock's ROM_KERNEL, NOT the
+        // waiter_wake / CSEM_ROM_WAKE paths of the sibling ops.
+        let guard = install(0x13, 0);
+        let mut sem = csem(-1, 0x1234);
+        unsafe {
+            csem_post_deferred(&mut sem);
+        }
+        assert_eq!(sem.count, 0);
+        assert_eq!(deferred_wakes(), vec![0x1234], "wake carries the waiter id");
+        assert!(wakes().is_empty(), "no gateway/kobj wake on this flavor");
+        restore(guard);
+    }
+
+    #[test]
+    fn post_deferred_deeper_negative_does_not_wake() {
+        // old = -3 -> -2: adds result nonzero, no wake (EQ only, like the
+        // twin — binary-verified shape).
+        let guard = install(0x13, 0);
+        let mut sem = csem(-3, 0x1234);
+        unsafe {
+            csem_post_deferred(&mut sem);
+        }
+        assert_eq!(sem.count, -2);
+        assert!(deferred_wakes().is_empty());
         restore(guard);
     }
 }

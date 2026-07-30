@@ -73,7 +73,9 @@
 //! - 0x08037e78 -> 0x220041cc — gateway stub, service 2, r0 arg. 16 callers
 //!   (r0 = small ids like 0x2e, or pointers).
 //! - 0x08037e80 -> 0x22001cbc — a full ROM function (kernel lock, then a
-//!   table walk), NOT a gateway stub. 0 callers in osos 2.0.4.
+//!   table walk), NOT a gateway stub. 2 callers: the conditional tail
+//!   `beq` @ 0x080567f0 in csem_post_deferred @ 0x080567d0 (kernel/csem.rs)
+//!   and the bare alias `b` @ 0x080567fc.
 //! - 0x08037e88 -> 0x22003d44 — gateway stub, service 20, (r0, r1).
 //!   15 callers, always r0 = 0, r1 = small count (1, 0x64) — delay-flavoured.
 //! - 0x08037e90 -> 0x220043f4 — gateway stub, service 28 sub 13, returns a
@@ -487,8 +489,10 @@ pub unsafe extern "C" fn rom_svc_220041cc(a0: usize) -> usize {
 }
 
 /// rom_svc_22001cbc — original: thunk @ 0x08037e80 -> ROM 0x22001cbc, a
-/// full ROM function (kernel lock, then a table walk). No callers in osos
-/// 2.0.4; signature from the mirror's prologue.
+/// full ROM function (kernel lock, then a table walk). 2 callers (the
+/// conditional tail `beq` @ 0x080567f0 in csem_post_deferred @ 0x080567d0,
+/// kernel/csem.rs, and the bare alias `b` @ 0x080567fc); signature from
+/// the mirror's prologue.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_22001cbc(a0: usize) -> usize {
     (hook!(rom_svc_22001cbc))(a0)
@@ -609,14 +613,16 @@ pub unsafe extern "C" fn rom_svc_22003b08() -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
     use super::*;
     use std::sync::Mutex;
     use std::vec::Vec;
 
-    /// Serializes tests that swap the global ROM_KERNEL table.
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
+    /// Serializes tests that swap the global ROM_KERNEL table. pub(crate)
+    /// so csem's tests (which patch the rom_svc_22001cbc slot for the
+    /// ported csem_post_deferred @ 0x080567d0) serialize against these.
+    pub(crate) static OPS_LOCK: Mutex<()> = Mutex::new(());
 
     /// Per-slot call log: how often each hook fired and with what args.
     static mut CALLS: [usize; WRAPPER_COUNT] = [0; WRAPPER_COUNT];

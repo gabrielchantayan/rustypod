@@ -4095,7 +4095,8 @@ functions:
       *ptr += amount, restores the saved I/F bits with the inline mrs/
       bic/orr/msr sequence, returns old. Twin of 0x08056364. 4 call
       sites (binary scan; osos.asm drops one line): 0x080567b8,
-      0x080567e0 (unported add-and-wake ops @ 0x080567a8/0x080567d0),
+      0x080567e0 (the add-and-wake V ops csem_post @ 0x080567a8 /
+      csem_post_deferred @ 0x080567d0, both ported),
       csem_wait's timeout undo @ 0x08056948, and the bare alias thunk
       `b` @ 0x080f041c.
 
@@ -4149,8 +4150,8 @@ functions:
       are a ROM-skipping fast path, and once drifted negative every
       wait parks and every signal wakes (ROM keeps the signaled state).
       2 call sites: tail `b` @ 0x0808e2b4 (deref wrapper FUN_0808e2b0),
-      bl @ 0x080bbb90. The classic add-and-wake V ops live at the
-      unported neighbors 0x080567a8/0x080567d0.
+      bl @ 0x080bbb90. The classic add-and-wake V ops are the ported
+      csem_post @ 0x080567a8 / csem_post_deferred @ 0x080567d0.
 
   - address: 0x080569a4
     ghidra: thunk_EXT_FUN_22004368
@@ -4183,10 +4184,36 @@ functions:
       and the condition is equality with -1, not a signed < 0.
       2 call sites: tail `b` @ 0x0808e2ac (deref wrapper
       FUN_0808e2a8), bl @ 0x080b26b8. Twin 0x080567d0 (same shape,
-      wakes via thunk 0x08037e80) remains unported. match.py: LLVM
-      inlines the atomic (identical mrs/msr critical section), tests
-      old+1 via the adds carry flag (cc = old != -1 early return),
-      and tail-branches the hook — same structure.
+      wakes via thunk 0x08037e80) ported as csem_post_deferred.
+      match.py: LLVM inlines the atomic (identical mrs/msr critical
+      section), tests old+1 via the adds carry flag (cc = old != -1
+      early return), and tail-branches the hook — same structure.
+
+  - address: 0x080567d0
+    ghidra: null
+    name: csem_post_deferred
+    size: 40
+    sig: "void csem_post_deferred(CountingSem *csem)"
+    module: kernel/csem
+    status: ported
+    notes: >-
+      Absent from functions.csv (no Ghidra name); extent verified from
+      osos.asm (0x080567d0..0x080567f8, 10 instructions). Instruction-
+      for-instruction twin of csem_post @ 0x080567a8 — old =
+      atomic_add_irqsafe(1, &count); if old+1 == 0 (adds/EQ — old
+      exactly -1, one sleeper may be parked) tail-branches with the
+      waiter id — except the wake goes to thunk 0x08037e80 -> ROM
+      0x22001cbc, a full ROM function (kernel lock, then a pending-id
+      table walk/append; mirror 0x08001cbc) instead of the gateway
+      signal stub: a deferred-wake flavor of the same V op, routed
+      through the ported task_lock::rom_svc_22001cbc. 1 call site:
+      tail `b` @ 0x080c692c of the deref wrapper FUN_080c6928 (whose
+      Ghidra decomp is this function verbatim; FUN_0812c444 picks
+      between this flavor and csem_post's wrapper FUN_0808e2a8 on a
+      flag). match.py (--size 40): LLVM inlines the atomic (identical
+      mrs/msr critical section), early-returns on cc (old != -1), and
+      calls the wake indirectly through the ROM_KERNEL table — the
+      documented ROM-thunk dispatch deviation; same structure.
 
   # --- RTC wall-clock read (time/rtc) ---
   - address: 0x08056150
