@@ -9636,6 +9636,42 @@ functions:
       push/call/ldr-stats/ldrd/pop structure; the diff is LLVM's fp
       frame and the blx-through-slot (the documented deviations).
 
+  - address: 0x08390bf0
+    ghidra: FUN_08390bf0
+    name: tracked_stats_set_soft_limit
+    size: 52
+    sig: "i32 tracked_stats_set_soft_limit(void *callback, void *callback_arg, i64 soft_limit)"
+    module: heap/tracked
+    status: ported
+    vars: {param_1: callback, param_2: callback_arg, "param_3,param_4": soft_limit, DAT_08390c20: stats_plus_0x20}
+    notes: >-
+      The ledger's "stats init"; verified against osos.asm it is really
+      the soft-limit SETTER of the tracked allocator's stats block.
+      1 bl call site (0x0839144c, inside the memory-pressure reclaimer
+      @ 0x08391408; the init path reaches the same setter through the
+      thunk @ 0x0813eb3c with a 0x80000 limit). Arms the stats lock
+      (bl 0x082ccc74, the scheduler-flag setter), then strd (r0,r1) at
+      [lit 0x08adc2e0]+0x8 and strd (r2,r3) at [lit]-0x20+0x20 - i.e.
+      callback @ stats+0x28, callback_arg @ stats+0x2c, and the i64
+      soft_limit @ stats+0x20 - and returns 0. Consumers verified in
+      osos.asm: the allocator entry @ 0x08390b14 warns when the callback
+      word is nonzero and current(+0x38)+size reaches the limit, and the
+      warn helper @ 0x0837d67c blx's the callback as
+      callback(callback_arg, current_bytes, size) under the +0x30
+      reentrancy guard. Port deviations: the ALLOC_STATS static instead
+      of literal 0x08adc2c0 (module simplification), the pointer words
+      modeled as u32 (word-index rule, so the strd at +0x28 becomes two
+      word stores), and the lock call dispatches through
+      TRACKED_STATS_OPS.lock (house ops-slot pattern, same as
+      tracked_stats_current) whose default is the ported
+      tracked_stats_arm_lock. ALLOC_STATS gained the named fields
+      soft_limit/soft_limit_callback/soft_limit_callback_arg/
+      soft_limit_callback_active (reserved shrank 13->8 words, offsets
+      unchanged). match.py: same push/arg-shuffle/lock-call/
+      four-word-store/mov r0,#0/pop structure; the diff is LLVM's fp
+      frame, the blx-through-slot, and the split strds (the documented
+      deviations).
+
   - address: 0x0837a158
     ghidra: FUN_0837a158
     name: load_be32
@@ -10636,14 +10672,16 @@ functions:
       @ 0x08378670 and p_select (+0x38) to sqlite3SelectDelete
       @ 0x08383c88; the node's own block is the tail branch into
       sqlite3_free (post-order: every child fully released before the
-      parent's block goes back). The two child destructors are
-      unported (0x08378670 walks the ExprList items at stride 0xc and
-      calls 0x08377e00 back per item; 0x08383c88 is a clear helper
-      @ 0x082c36c4 plus the block free - the ExprList/Select chains),
-      so they are the SQLITE_EXPR_LIST_DELETE / SQLITE_SELECT_DELETE
-      dispatch slots (house pattern) with documented no-op defaults
-      (the list/select teardown is skipped; the strings, operands and
-      node are still released exactly as the original releases them).
+      parent's block goes back). The list destructor is ported:
+      0x08378670 (see its entry) is expr_list_delete, the shipped
+      default of the SQLITE_EXPR_LIST_DELETE slot - the documented
+      no-op stub is retained for host tests (with it installed the
+      list teardown is skipped; the strings, operands and node are
+      still released exactly as the original releases them). The
+      select destructor 0x08383c88 (a clear helper @ 0x082c36c4 plus
+      the block free - the Select chain) is unported, so it stays the
+      SQLITE_SELECT_DELETE dispatch slot (house pattern) with a
+      documented no-op default.
       The port is the shipped default of expr_new's SQLITE_EXPR_DELETE
       slot, replacing the documented no-op stub (retained for host
       tests, which still swap the slot for recording mocks) - the
@@ -10658,6 +10696,48 @@ functions:
       ldrb, inlining tracked_free's NULL guard + stats update (the
       accepted mem_release/value_free deviation), blx through the
       loaded slots, and LLVM's fp frame.
+
+  - address: 0x08378670
+    ghidra: FUN_08378670
+    name: expr_list_delete
+    size: 80
+    sig: "void expr_list_delete(ExprList *list)"
+    module: sqlite/expr_list_delete
+    status: ported
+    vars: {param_1: list, puVar6: item, iVar8: index}
+    notes: >-
+      SQLite 3.5.x's sqlite3ExprListDelete, the single-argument build
+      variant (no db parameter - the frees go straight to the global
+      tracked allocator). 22 bl call sites, binary-scanned: one in
+      expr_delete @ 0x08377e3c, the rest across the parser/VDBE
+      teardown paths. NULL is a no-op (movs/ldmiaeq). Otherwise walk
+      the item array at +0x0c with stride 0xc under a signed bgt guard
+      against n_expr (+0x00, re-read from the header every iteration):
+      each item's p_expr (+0x00) goes back through sqlite3ExprDelete
+      @ 0x08377e00 (the ported expr_delete, called directly - the same
+      direct bl the original makes, mirroring expr_delete's own
+      direct self-calls) and its alias name p_name (+0x04) is freed
+      unconditionally through sqlite3_free @ 0x083906f4 (the ported
+      tracked_free, whose internal NULL guard is the original's own
+      sqlite3_free NULL check); then the items array and finally the
+      list header, the latter as the tail branch into sqlite3_free.
+      ExprList/ExprListItem are typed repr(C) structs with 32-bit
+      offset and 0xc-stride asserts. The port is the shipped default
+      of expr_delete's SQLITE_EXPR_LIST_DELETE slot, replacing the
+      documented no-op stub (retained for host tests) - deleting an
+      expression with an argument list now really releases the whole
+      list instead of leaking it. Host tests cover the NULL no-op,
+      empty/negative-count lists (array free, then header; a NULL
+      array hits only the free's internal guard), in-order per-item
+      teardown (expr, name, expr, name, then array and header), and
+      the stride/n_expr walk boundary (a poisoned item past the count
+      is never touched). match.py: same structure - the NULL guard,
+      the pre-tested signed loop re-reading n_expr with the 0xc
+      stride, the direct expr_delete call, the array and header frees;
+      the diff is LLVM's fp frame, an early-out branch layout, and
+      tracked_free's NULL guard + stats update inlined at each of the
+      three free sites (the accepted mem_release/value_free
+      deviation).
 
   - address: 0x0837894c
     ghidra: FUN_0837894c

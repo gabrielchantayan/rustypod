@@ -16,7 +16,10 @@
 //! word, +0x14 text). Then recurse into the operands — p_left at +0x08
 //! first, p_right at +0x0c second, both direct self-calls — tear the
 //! argument list at +0x10 down through `sqlite3ExprListDelete` @
-//! 0x08378670 and the sub-select at +0x38 through `sqlite3SelectDelete`
+//! 0x08378670 (ported as
+//! [`expr_list_delete`](super::expr_list_delete::expr_list_delete),
+//! reached through the [`SQLITE_EXPR_LIST_DELETE`] slot) and the
+//! sub-select at +0x38 through `sqlite3SelectDelete`
 //! @ 0x08383c88, and finish with a tail branch into `sqlite3_free` on
 //! the node itself. Post-order: every child is fully released before
 //! its parent's own block goes back.
@@ -47,17 +50,21 @@
 //! ```
 //!
 //! Deviations:
-//! - The two child destructors are not ported: `sqlite3ExprListDelete`
-//!   @ 0x08378670 (80 bytes; walks the items array at stride 0xc,
-//!   freeing each item's `p_expr` back through 0x08377e00 and its name
-//!   through `sqlite3_free`, then the array and the header) drags in
-//!   the whole ExprList chain, and `sqlite3SelectDelete` @ 0x08383c88
-//!   (32 bytes; a clear helper @ 0x082c36c4 then the block free) drags
-//!   in the Select chain. They are the [`SQLITE_EXPR_LIST_DELETE`] and
-//!   [`SQLITE_SELECT_DELETE`] dispatch boundaries (house pattern — see
-//!   `sqlite/error_msg.rs`) with documented no-op defaults: the list/
-//!   select teardown is skipped, the node's strings, operands and own
-//!   block are still released exactly as the original releases them.
+//! - The argument-list destructor @ 0x08378670 (80 bytes; 22 `bl` call
+//!   sites — walks the items array at stride 0xc, releasing each item's
+//!   `p_expr` back through 0x08377e00 and its name through
+//!   `sqlite3_free`, then the array and the header) is ported as
+//!   [`expr_list_delete`](super::expr_list_delete::expr_list_delete)
+//!   and is the shipped default of the [`SQLITE_EXPR_LIST_DELETE`]
+//!   dispatch boundary (house pattern — see `sqlite/error_msg.rs`). The
+//!   documented no-op stub [`missing_expr_list_delete`] is retained for
+//!   host tests (with it installed the list teardown is skipped; the
+//!   node's strings, operands and own block are still released exactly
+//!   as the original releases them). The sub-select destructor
+//!   `sqlite3SelectDelete` @ 0x08383c88 (32 bytes; a clear helper
+//!   @ 0x082c36c4 then the block free) is not ported — it drags in the
+//!   Select chain — so it stays the [`SQLITE_SELECT_DELETE`] dispatch
+//!   boundary with a documented no-op default.
 //! - `Expr` is a typed `#[repr(C)]` struct rather than raw byte
 //!   offsets, reusing [`expr_new`](super::expr_new)'s `Token`, so the
 //!   pointer fields stay disjoint on a 64-bit test host. The original
@@ -147,14 +154,19 @@ const _EXPR_SIZE_CHECK: [u8; 0x44] = [0; core::mem::size_of::<Expr>()];
 /// original's `movs/ldmiaeq` early return).
 pub type ExprListDeleteFn = unsafe extern "C" fn(list: *mut u8);
 
-/// Default stub: no list destructor wired, so the list teardown is
-/// skipped — the node, its strings and its operands are still released
-/// (see the module header).
+/// Default stub retained for host tests: no list destructor wired, so
+/// the list teardown is skipped — the node, its strings and its
+/// operands are still released (see the module header). The shipped
+/// default is the real port,
+/// [`super::expr_list_delete::expr_list_delete`].
 pub(crate) unsafe extern "C" fn missing_expr_list_delete(_list: *mut u8) {}
 
-/// The active list destructor. Host tests install recording mocks; the
-/// real port replaces the default when 0x08378670 lands.
-pub static mut SQLITE_EXPR_LIST_DELETE: ExprListDeleteFn = missing_expr_list_delete;
+/// The active list destructor. The default is the real port,
+/// [`super::expr_list_delete::expr_list_delete`]; host tests still
+/// install recording mocks through the slot ([`missing_expr_list_delete`]
+/// is retained for them).
+pub static mut SQLITE_EXPR_LIST_DELETE: ExprListDeleteFn =
+    super::expr_list_delete::expr_list_delete;
 
 /// The sub-select destructor: `sqlite3SelectDelete(select)` @
 /// 0x08383c88. Releases a `Select`; NULL is a no-op (the original's
@@ -267,11 +279,12 @@ mod tests {
         unsafe { (*core::ptr::addr_of!(SELECTS)).clone() }
     }
 
-    /// The documented defaults: no-op stubs on both dispatch slots.
+    /// The documented defaults: the real list-destructor port on the
+    /// list slot, the no-op stub on the select slot.
     unsafe fn restore_slot_defaults() {
         core::ptr::write_volatile(
             core::ptr::addr_of_mut!(SQLITE_EXPR_LIST_DELETE),
-            missing_expr_list_delete,
+            super::super::expr_list_delete::expr_list_delete,
         );
         core::ptr::write_volatile(core::ptr::addr_of_mut!(SQLITE_SELECT_DELETE), missing_select_delete);
     }
@@ -445,8 +458,8 @@ mod tests {
         let _guard = SLOT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut node_block = TrackedBlock::new(0x44);
         // Non-NULL, deliberately untracked list/select pointers: the
-        // no-op defaults must not touch them (a real destructor would
-        // dereference and crash on 0xa5a5..).
+        // retained no-op stubs must not touch them (a real destructor
+        // would dereference and crash on 0xa5a5..).
         unsafe {
             let node = node_block.node();
             (*node).p_list = 0xa5a5_a5a5 as *mut u8;
@@ -457,6 +470,55 @@ mod tests {
         }
         assert_eq!(freed(), std::vec![(node_block.raw(), TAG_TRACKED)]);
         assert!(lists().is_empty() && selects().is_empty());
+    }
+
+    #[test]
+    fn the_shipped_list_delete_tears_down_a_real_list() {
+        let _heap = mock_heap();
+        let _guard = SLOT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut node_block = TrackedBlock::new(0x44);
+        let mut list_block = TrackedBlock::new(0x10);
+        let mut array_block = TrackedBlock::new(0x18);
+        let mut item_node = TrackedBlock::new(0x44);
+        let mut item_name = TrackedBlock::new(4);
+        unsafe {
+            // A one-item list in tracked blocks: the item's expression
+            // is a zeroed node, its alias name a tracked text block.
+            let array = array_block.payload()
+                as *mut super::super::expr_list_delete::ExprListItem;
+            core::ptr::write(
+                array,
+                super::super::expr_list_delete::ExprListItem {
+                    p_expr: item_node.payload(),
+                    p_name: item_name.payload(),
+                    #[cfg(target_pointer_width = "32")]
+                    _gap_08: [0; 0x0c - 0x08],
+                },
+            );
+            let list = list_block.payload() as *mut super::super::expr_list_delete::ExprList;
+            core::ptr::write(
+                list,
+                super::super::expr_list_delete::ExprList { n_expr: 1, _gap_04: [0; 0x0c - 0x04], items: array },
+            );
+            let node = node_block.node();
+            (*node).p_list = list as *mut u8;
+            // The shipped list default plus the retained select stub:
+            // restore_slot_defaults puts exactly that pair back.
+            with_bench(super::super::expr_list_delete::expr_list_delete, missing_select_delete, || {
+                expr_delete(node_block.payload());
+            });
+        }
+        assert_eq!(
+            freed(),
+            std::vec![
+                (item_node.raw(), TAG_TRACKED),
+                (item_name.raw(), TAG_TRACKED),
+                (array_block.raw(), TAG_TRACKED),
+                (list_block.raw(), TAG_TRACKED),
+                (node_block.raw(), TAG_TRACKED),
+            ],
+            "the list's expr, name, array and header all go back before the node"
+        );
     }
 
     #[test]

@@ -22,9 +22,21 @@
 //! Accounting globals live in the 0x08adc2c0 block (9 code references):
 //!
 //! ```text
+//! +0x20  i64  soft_limit       entry warns when current + size reaches it
+//! +0x28  u32   limit_callback  pointer word; blx'd by the warn helper
+//! +0x2c  u32   callback_arg    pointer word; the callback's 1st argument
+//! +0x30  u32   callback_active reentrancy guard around the blx
+//! +0x34  u32   lock_flag       stats lock, armed to 8 (see arm_lock)
 //! +0x38  i64  current_bytes   incremented on alloc, decremented on free
 //! +0x40  i64  peak_bytes      raised to current_bytes whenever it grows
 //! ```
+//!
+//! The +0x20..+0x30 group is the soft-limit configuration, written by
+//! `tracked_stats_set_soft_limit` @ 0x08390bf0 (ported below) and read
+//! by the allocator entry @ 0x08390b14 — when the callback word is
+//! nonzero and `current_bytes + size` reaches `soft_limit` it calls the
+//! warn helper @ 0x0837d67c, which `blx`s the callback as
+//! `callback(callback_arg, current_bytes, size)` under the +0x30 guard.
 //!
 //! Both are read/written with `ldrd`/`strd`, so the block is 8-aligned
 //! (0x08adc2f8 and 0x08adc300 are). The peak is only touched by the
@@ -56,7 +68,7 @@
 //!   counter (+0x38) read with `ldrd`.
 //! - `tracked_stats_arm_lock` — original: `FUN_082ccc74` @ 0x082ccc74
 //!   (24 bytes; 4 `bl` call sites: the allocator entry @ 0x08390b14, the
-//!   stats init @ 0x08390bf0, the peak reader @ 0x08390c24 and
+//!   soft-limit setter @ 0x08390bf0, the peak reader @ 0x08390c24 and
 //!   `tracked_stats_current` @ 0x08390c54). The "scheduler-flag setter":
 //!   arms the stats-lock word (stats + 0x34) to 8 when it is 0, so a
 //!   running scheduler knows not to tear the `ldrd` counter reads.
@@ -66,6 +78,12 @@
 //!   0x08adc2c0 accounting block**, immediately before `current_bytes`.
 //!   The RTXC scheduler is never touched; the flag is the allocator's
 //!   own tear-guard for the two i64 counters.
+//! - `tracked_stats_set_soft_limit` — original: `FUN_08390bf0` @
+//!   0x08390bf0 (52 bytes, 1 `bl` call site @ 0x0839144c; the init path
+//!   reaches the same setter through the thunk @ 0x0813eb3c). The
+//!   ledger's "stats init": arms the stats lock and writes the
+//!   soft-limit configuration — the i64 limit @ +0x20 and the
+//!   callback/callback-arg words @ +0x28/+0x2c — then returns 0.
 //!
 //! Simplification, same as `heap/veneers.rs` makes for the default heap:
 //! the accounting block is a `static` here instead of living at
@@ -73,6 +91,8 @@
 //!
 //! Word-index rule: every field `tracked_free` touches is a 32-bit
 //! scalar, so its literal byte offsets are correct on a 64-bit host too.
+//! The stats block's pointer-valued words (the soft-limit callback and
+//! its argument) are likewise modeled as `u32` for the same reason.
 //! The pointer array is different — its cookie and elements are
 //! pointer-sized, so it is addressed by *index* through a `*mut *mut u8`,
 //! which is stride 4 on the target and stride 8 on the host.
@@ -86,11 +106,25 @@ pub const TAG_TRACKED: usize = 57;
 pub const BLOCK_HEADER_SIZE: usize = 8;
 
 /// Allocation accounting block. Original: 0x08adc2c0; only the words
-/// this module and the allocator touch are named.
+/// this module and the allocator touch are named. The pointer-valued
+/// words are modeled as `u32` so the literal byte offsets hold on a
+/// 64-bit host too (the module's word-index rule).
 #[repr(C)]
 pub struct AllocStats {
-    /// 0x00..0x34 — fields owned by other parts of the allocator.
-    pub reserved: [u32; 13],
+    /// 0x00..0x20 — fields owned by other parts of the allocator.
+    pub reserved: [u32; 8],
+    /// +0x20: soft limit. The allocator entry @ 0x08390b14 warns when
+    /// `current_bytes + size` reaches it (gated on the callback word).
+    pub soft_limit: i64,
+    /// +0x28: limit-warning callback (pointer-valued word). The warn
+    /// helper @ 0x0837d67c `blx`s it as
+    /// `callback(callback_arg, current_bytes, size)` when the limit is
+    /// reached; the allocator entry skips the whole check when it is 0.
+    pub soft_limit_callback: u32,
+    /// +0x2c: the callback's first argument (pointer-valued word).
+    pub soft_limit_callback_arg: u32,
+    /// +0x30: reentrancy guard the warn helper sets around the `blx`.
+    pub soft_limit_callback_active: u32,
     /// +0x34: stats-lock flag (original 0x08adc2f4). Armed to 8 by
     /// `tracked_stats_arm_lock` when 0; guards the `ldrd` reads of the
     /// two i64 counters below against a running scheduler.
@@ -103,7 +137,11 @@ pub struct AllocStats {
 
 /// The accounting block (original @ 0x08adc2c0).
 pub static mut ALLOC_STATS: AllocStats = AllocStats {
-    reserved: [0; 13],
+    reserved: [0; 8],
+    soft_limit: 0,
+    soft_limit_callback: 0,
+    soft_limit_callback_arg: 0,
+    soft_limit_callback_active: 0,
     lock_flag: 0,
     current_bytes: 0,
     peak_bytes: 0,
@@ -204,7 +242,7 @@ pub unsafe extern "C" fn tracked_free_pointer_array(elements: *mut *mut u8) {
 
 /// tracked_stats_arm_lock — original: `FUN_082ccc74` @ 0x082ccc74
 /// (24 bytes; 4 `bl` call sites: the tracked-allocator entry
-/// @ 0x08390b14, the stats init @ 0x08390bf0, the peak reader
+/// @ 0x08390b14, the soft-limit setter @ 0x08390bf0, the peak reader
 /// @ 0x08390c24 and `tracked_stats_current` @ 0x08390c54).
 ///
 /// The "scheduler-flag setter" the stats readers arm before touching the
@@ -295,6 +333,61 @@ pub unsafe extern "C" fn tracked_stats_current() -> i64 {
     (*stats).current_bytes
 }
 
+/// tracked_stats_set_soft_limit — original: `FUN_08390bf0` @ 0x08390bf0
+/// (52 bytes; 1 `bl` call site @ 0x0839144c, inside the memory-pressure
+/// reclaimer @ 0x08391408 — the init path reaches the same setter
+/// through the thunk @ 0x0813eb3c with a 0x80000 limit).
+///
+/// The soft-limit setter of the tag-57 tracked allocator's stats block
+/// (the ledger's "stats init"). Verified against osos.asm:
+///
+/// ```text
+/// stmdb sp!,{r4,r5,r6,r7,r8,lr}
+/// mov r7,r3 / mov r6,r2 / mov r5,r1 / mov r4,r0
+/// bl 0x082ccc74             ; arm the stats lock
+/// ldr r0,[lit 0x08adc2e0]   ; stats base + 0x20
+/// strd r4,r5,[r0,#0x8]      ; callback @ +0x28, callback_arg @ +0x2c
+/// sub r0,r0,#0x20
+/// strd r6,r7,[r0,#0x20]     ; soft_limit @ +0x20 (i64)
+/// mov r0,#0
+/// ldmia sp!,{r4,r5,r6,r7,r8,pc}
+/// ```
+///
+/// Everything it writes is consumed by the alloc side: the entry
+/// @ 0x08390b14 warns when the callback word is nonzero and
+/// `current_bytes + size` reaches `soft_limit`, and the warn helper
+/// @ 0x0837d67c `blx`s the callback as
+/// `callback(callback_arg, current_bytes, size)` under the +0x30
+/// reentrancy guard. Returns 0.
+///
+/// Deviations:
+///
+/// - The accounting block is the `ALLOC_STATS` static instead of the
+///   literal 0x08adc2c0 (module simplification, same as the rest of
+///   heap/tracked).
+/// - The callback and its argument arrive pointer-sized but are stored
+///   as 32-bit words (the `strd` pair at +0x28), so on a 64-bit host
+///   the store truncates — host tests use low sentinel values.
+/// - The lock callee @ 0x082ccc74 (ported as
+///   [`tracked_stats_arm_lock`]) dispatches through the
+///   [`TRACKED_STATS_OPS`]`.lock` slot (house ops-slot pattern, an
+///   indirect call in place of `bl`), same as
+///   [`tracked_stats_current`], so host tests can swap in a recorder.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn tracked_stats_set_soft_limit(
+    callback: *mut core::ffi::c_void,
+    callback_arg: *mut core::ffi::c_void,
+    soft_limit: i64,
+) -> i32 {
+    let lock = core::ptr::read_volatile(core::ptr::addr_of!(TRACKED_STATS_OPS.lock));
+    lock();
+    let stats = core::ptr::addr_of_mut!(ALLOC_STATS);
+    (*stats).soft_limit_callback = callback as u32;
+    (*stats).soft_limit_callback_arg = callback_arg as u32;
+    (*stats).soft_limit = soft_limit;
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -363,6 +456,10 @@ mod tests {
             LAST_ALLOC_TAG = 0;
             FREED = [core::ptr::null_mut(); 16];
             FREE_TAGS = [0; 16];
+            ALLOC_STATS.soft_limit = 0;
+            ALLOC_STATS.soft_limit_callback = 0;
+            ALLOC_STATS.soft_limit_callback_arg = 0;
+            ALLOC_STATS.soft_limit_callback_active = 0;
             ALLOC_STATS.lock_flag = 0;
             ALLOC_STATS.current_bytes = 0;
             ALLOC_STATS.peak_bytes = 0;
@@ -638,6 +735,104 @@ mod tests {
             ALLOC_STATS.current_bytes = 99;
             assert_eq!(tracked_stats_current(), 99);
             assert_eq!(ALLOC_STATS.lock_flag, 8, "the default lock arms the flag");
+        }
+    }
+
+    // ---- tracked_stats_set_soft_limit (0x08390bf0) ------------------
+
+    /// The two pointer words and the i64 limit land at +0x28/+0x2c/+0x20
+    /// and the return value is 0 (`mov r0, #0`).
+    #[test]
+    fn stores_the_callback_arg_and_limit_and_returns_zero() {
+        let _guard = stats();
+        unsafe {
+            let result = tracked_stats_set_soft_limit(
+                0x0835_e9a0 as *mut core::ffi::c_void,
+                0x1122_3344 as *mut core::ffi::c_void,
+                0x0008_0000,
+            );
+            assert_eq!(result, 0);
+            assert_eq!(ALLOC_STATS.soft_limit_callback, 0x0835_e9a0);
+            assert_eq!(ALLOC_STATS.soft_limit_callback_arg, 0x1122_3344);
+            assert_eq!(ALLOC_STATS.soft_limit, 0x0008_0000);
+        }
+    }
+
+    /// The limit is a full `strd` at +0x20: wider-than-32-bit and
+    /// negative values survive.
+    #[test]
+    fn the_limit_is_a_full_sixty_four_bit_store() {
+        let _guard = stats();
+        unsafe {
+            for limit in [0x1_0000_0001i64, -1, i64::MIN, 0] {
+                tracked_stats_set_soft_limit(
+                    core::ptr::null_mut(),
+                    core::ptr::null_mut(),
+                    limit,
+                );
+                assert_eq!(ALLOC_STATS.soft_limit, limit, "limit={limit:#x}");
+            }
+        }
+    }
+
+    /// The lock runs before the stores: the mock samples the limit word
+    /// and must see the pre-call value.
+    #[test]
+    fn calls_the_lock_before_writing() {
+        static mut LOCK_CALLS: usize = 0;
+        static mut LIMIT_AT_LOCK: i64 = 0;
+        unsafe extern "C" fn mock_lock() {
+            LOCK_CALLS += 1;
+            LIMIT_AT_LOCK = ALLOC_STATS.soft_limit;
+        }
+        let _guard = stats();
+        unsafe {
+            LOCK_CALLS = 0;
+            ALLOC_STATS.soft_limit = 0x5a;
+            TRACKED_STATS_OPS.lock = mock_lock;
+            tracked_stats_set_soft_limit(
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                0x1234,
+            );
+            assert_eq!(LOCK_CALLS, 1);
+            assert_eq!(LIMIT_AT_LOCK, 0x5a, "the lock ran before the stores");
+            assert_eq!(ALLOC_STATS.soft_limit, 0x1234);
+        }
+    }
+
+    /// The wired default lock is the ported scheduler-flag setter, so
+    /// the setter arms the flag (stats + 0x34) to 8 on its way in.
+    #[test]
+    fn the_default_lock_arms_the_flag() {
+        let _guard = stats();
+        unsafe {
+            tracked_stats_set_soft_limit(
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                0x8000,
+            );
+            assert_eq!(ALLOC_STATS.lock_flag, 8, "the default lock arms the flag");
+        }
+    }
+
+    /// The counters, the peak and the reentrancy guard are not this
+    /// function's business.
+    #[test]
+    fn leaves_the_counters_and_guard_untouched() {
+        let _guard = stats();
+        unsafe {
+            ALLOC_STATS.current_bytes = 7;
+            ALLOC_STATS.peak_bytes = 9;
+            ALLOC_STATS.soft_limit_callback_active = 1;
+            tracked_stats_set_soft_limit(
+                0x1111_1111 as *mut core::ffi::c_void,
+                0x2222_2222 as *mut core::ffi::c_void,
+                0x3333_3333,
+            );
+            assert_eq!(ALLOC_STATS.current_bytes, 7);
+            assert_eq!(ALLOC_STATS.peak_bytes, 9);
+            assert_eq!(ALLOC_STATS.soft_limit_callback_active, 1);
         }
     }
 

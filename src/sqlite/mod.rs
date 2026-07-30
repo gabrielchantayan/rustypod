@@ -68,6 +68,7 @@ pub mod error_msg;
 pub mod expr_delete;
 pub mod expr_height;
 pub mod expr_height_of;
+pub mod expr_list_delete;
 pub mod expr_list_height;
 pub mod expr_new;
 pub mod expr_span;

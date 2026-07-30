@@ -66,9 +66,13 @@
 //!   sites) is ported as
 //!   [`expr_delete`](super::expr_delete::expr_delete) and is the
 //!   shipped default of the [`SQLITE_EXPR_DELETE`] dispatch boundary
-//!   (house pattern — see `sqlite/error_msg.rs`). Its own list/select
-//!   teardown stays behind `sqlite/expr_delete.rs`'s no-op-default
-//!   slots. The documented no-op stub [`missing_expr_delete`] is
+//!   (house pattern — see `sqlite/error_msg.rs`). Its own list
+//!   teardown is likewise ported:
+//!   [`expr_list_delete`](super::expr_list_delete::expr_list_delete) @
+//!   0x08378670 is the shipped default of `sqlite/expr_delete.rs`'s
+//!   `SQLITE_EXPR_LIST_DELETE` slot; only the select teardown stays
+//!   behind a no-op-default slot there. The documented no-op stub
+//!   [`missing_expr_delete`] is
 //!   retained for host tests (an OOM then *leaks* the two operands
 //!   instead of releasing them — the NULL return the caller sees is
 //!   unchanged); with the shipped default the OOM path really releases
