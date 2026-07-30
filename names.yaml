@@ -11526,7 +11526,7 @@ functions:
       structure (sub / mov r1,#24 / b __rt_sdiv); the ldr pairs come
       out as byte loads from the family's read_unaligned host-testing
       idiom, same deviation as vector_size_elem4. Other instantiations
-      (identified, not ported): 0x083d7954 4, 0x083d7870 4 bl sites;
+      (identified, not ported): 0x083d7954 4 bl sites;
       shift-based
       ones are one-line ports whenever wanted. 0x083d7708 is now ported
       (see its entry) - it turned out to be a DIVIDE-by-12 member, not a
@@ -11538,6 +11538,9 @@ functions:
       divide-by-12 copy, byte-identical to vector_capacity_elem12.
       0x083d784c is now ported too (see its entry) - a divide-by-40
       member (mov r1,#0x28), a distinct instantiation, not a copy.
+      0x083d7870 is now ported too (see its entry) - a shift member
+      (asr #3, an 8-byte element), the second real shift of the family
+      after 0x083d77a8.
 
   - address: 0x083d784c
     ghidra: FUN_083d784c
@@ -11588,6 +11591,32 @@ functions:
       call sites. match.py - same sub / asr #4 core; the ldr pairs come
       out as byte loads from the family's read_unaligned host-testing
       idiom, the same accepted deviation as vector_size_elem4.
+
+  - address: 0x083d7870
+    ghidra: FUN_083d7870
+    name: vector_capacity_elem8
+    size: 20
+    sig: "i32 vector_capacity_elem8(const VectorStorage *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      `vector<T>::capacity()` for an 8-byte element - the second SHIFT
+      member of the capacity family after 0x083d77a8 (elem16): same
+      end-of-storage head as the 24-byte primary (`ldr r1,[r0,#8]; ldr
+      r0,[r0]; sub r0,r1,r0`), then `mov r0,r0, asr #3` and `bx lr` -
+      8 is a power of two, so no tail branch into the ADS signed divide.
+      Verified against osos.asm per address; the ledger's old blanket
+      shift-based guess is right for THIS address, but that is luck (the
+      0x083d7708, 0x083d77ec, 0x083d7828 and 0x083d784c siblings with
+      the same guess were all divides), so per-address verification
+      stays the rule. The shift is arithmetic, so a reversed span stays
+      negative (rounding toward -inf, unlike the divide members'
+      toward-zero truncation). 4 bl call sites (0x083e35dc, 0x083e36f4,
+      0x083e3748, 0x083e37cc). match.py - same sub / asr #3 core; the
+      ldr pairs come out as byte loads from the family's read_unaligned
+      host-testing idiom, the same accepted deviation as
+      vector_size_elem4.
 
   - address: 0x083d7708
     ghidra: FUN_083d7708
