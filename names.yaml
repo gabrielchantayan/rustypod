@@ -4134,6 +4134,40 @@ functions:
       old+1 via the adds carry flag (cc = old != -1 early return),
       and tail-branches the hook — same structure.
 
+  # --- RTC wall-clock read (time/rtc) ---
+  - address: 0x08056150
+    ghidra: FUN_08056150
+    name: rtc_read_time
+    size: 72
+    sig: "i32 rtc_read_time(u32 *days_out, u32 *secs_out, u32 seed_lo, u32 seed_hi)"
+    module: time/rtc
+    status: ported
+    vars: {param_1: days_out, param_2: secs_out, param_3: seed_lo, param_4: seed_hi, iVar1: read_status}
+    notes: >-
+      NOT a sync primitive despite the 0x08056xxx neighborhood — the
+      device's wall-clock read. FUN_082e58f0(0, buf) fetches 7 BCD bytes
+      from the PCF50635 PMU RTC (I2C slave 0x73, register block 0x59:
+      sec/min/hour/weekday/day/month/year; the mutexed wrapper around
+      FUN_0836d698), then FUN_0809e3e8 converts them to a (days,
+      seconds-of-day) pair: Hinnant civil-to-days over the 2-digit year
+      (adj = (14-month)/12 UNSIGNED, y = year-adj+0x1a90, days =
+      365*y + day + (153*mp+2)/5 + y/4 - y/100 + y/400 - 0x7d2d; 365
+      from the literal @ 0x0809e4cc; BCD decode FUN_080ed424 clamps
+      >= 0x9a to 99), secs = hour*0xe10 + min*60 + sec. The saved r2/r3
+      slots double as the RTC buffer, so the 3rd/4th argument words seed
+      it (visible on failed reads); the outputs are written even on
+      error; return 0 or -5 (mvnne r0, #4). 1 call site: bl @ 0x0806e400
+      in the 64-bit system-time builder FUN_0806e3dc. PORT DEVIATION:
+      the I2C chain (FUN_082e58f0 -> FUN_0836d698 -> FUN_0836bb84 /
+      FUN_0836b950 + RTXC mutex wrappers) is unported hardware, so it
+      sits behind the RTC_READ_REGS dispatch slot whose default stub
+      fails closed with the driver's bad-bank code 9; the pure-arithmetic
+      conversion FUN_0809e3e8 is reproduced inline. match.py: LLVM
+      inlines the conversion and strength-reduces the divides to magic
+      multiplies, but every formula element is present (rsb #14,
+      +0x1a90, mla 365, 0x99, -0x7d2d, 0xe10, mvnne #4); the original's
+      two bl calls become one blx through the slot.
+
   # --- Block-deque element -> region accessors (heap/block_region) ---
   - address: 0x082801f8
     ghidra: FUN_082801f8
@@ -9911,6 +9945,42 @@ functions:
       diff is cosmetic: LLVM folds the shift-out/shift-back bit-6
       extract into `tst r0,#0x40` + `addne r0,r0,#9` (same branchless
       +9 correction, same mask, 6 instructions each side).
+
+  - address: 0x082d2bb8
+    ghidra: FUN_082d2bb8
+    name: blob_to_hex
+    size: 160
+    sig: "u8 *blob_to_hex(const u8 *blob, i32 len)"
+    module: sqlite/blob_to_hex
+    status: ported
+    vars: {param_1: blob, param_2: len, puVar2: out, puVar4: cursor, iVar5: i, iVar1: digits}
+    notes: >-
+      2 bl call sites (0x080aedfc, 0x080aee4c), both in the keyid/serial
+      formatter 0x080aede0, which hands the result to the string builder
+      0x0806ea5c with "keyid"/"serial" and frees it through 0x08043994.
+      Format a byte string as colon-separated uppercase hex ("01:23:AB"):
+      NULL blob or len == 0 (cmpne; negatives pass) returns NULL without
+      touching the heap; otherwise len*3+1 bytes (wrapping shift-add)
+      from traced_alloc @ 0x08043c18 (ported, called directly), alloc
+      failure records the packed tag triple (0x22, 0x6f, 0x41, 0, 0) in
+      the diagnostic ring buffer @ 0x08049a84 and returns NULL; each
+      byte then emits digits[b>>4], digits[b&0xf], ':' and the final
+      ':' is overwritten with the NUL terminator. The digit table rides
+      the literal-pool pointer @ 0x082d2c58 = 0x08a0eddc; at +0xaed8
+      (the image/runtime skew documented in sqlite/mod.rs) the image
+      holds exactly "0123456789ABCDEF\0\0\0\0" there, so it is the
+      standard uppercase table (crate static HEX_DIGITS in the port).
+      len stays signed end to end (blt loop); a negative len wraps
+      len*3+1 negative and traced_alloc's own size<=0 guard takes the
+      diagnostic path before any underlying alloc call. Deviations: the
+      ring-buffer logger 0x08049a84 is unported (walks a per-task
+      struct from 0x080498f8) and is the HEX_BLOB_HOOKS dispatch
+      boundary, default None = documented no-op (the NULL return the
+      caller sees is unchanged). match.py: same structure - entry
+      guard, add r0,r4,r4,lsl#1 +1 alloc with zero tags, the
+      ldrb [table, b>>4] / and #15 / ':' loop, terminator at [r3,#-1],
+      diag path with 0x22/0x6f/0x41; the diff is the LLVM frame, the
+      hook-slot indirection for the diag call, and a count-down loop.
 
   - address: 0x083788fc
     ghidra: FUN_083788fc

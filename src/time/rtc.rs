@@ -1,0 +1,343 @@
+//! RTC time read: fetch the PCF50635 real-time-clock registers over the
+//! PMU I2C bus and convert the 7-byte BCD block into a
+//! (days, seconds-of-day) pair — the device's wall clock.
+//!
+//! Original: `FUN_08056150` @ 0x08056150 (72 bytes; 1 call site, `bl` @
+//! 0x0806e400 inside `FUN_0806e3dc`, the 64-bit system-time builder that
+//! scales the day count by 0x80*675 = 86400 and folds the seconds in).
+//!
+//! Algorithm (mirrored from the disassembly):
+//! 1. `stmdb sp!, {r0..r3, r4, r5, r6, lr}` spills the argument
+//!    registers into the frame; the saved r2/r3 slots double as the
+//!    8-byte RTC buffer (so the third/fourth argument words SEED the
+//!    buffer — visible when the read fails partway) and the saved r0/r1
+//!    slots double as the (days, seconds) out-pair.
+//! 2. `FUN_082e58f0(0, buf)` — mutexed I2C read of the RTC: slave 0x73
+//!    (the PCF50635 PMU), register block 0x59, 7 bytes (sec, min, hour,
+//!    weekday, day, month, year; FUN_0836d698).
+//! 3. `FUN_0809e3e8(out_pair, buf)` converts BCD to a day count and a
+//!    seconds-of-day count. BCD decode (FUN_080ed424) is
+//!    `v - 6*(v>>4)` for `v < 0x9a`, else 99. The day count is the
+//!    Hinnant civil-to-days formula over the 2-digit year:
+//!    `adj = (14 - month) / 12` (UNSIGNED divide @ 0x08036f14 — a month
+//!    above 14 wraps to a huge quotient), `y = year - adj + 0x1a90`,
+//!    `mp = month + 12*adj - 3`,
+//!    `days = 365*y + day + (153*mp + 2)/5 + y/4 - y/100 + y/400
+//!    - 0x7d2d` (365 from the literal @ 0x0809e4cc, 0x7d2d = 32045; the
+//!    /5, /100, /400 are signed truncating __rt_sdiv @ 0x08031568, the
+//!    /4 is the compiler's add-3-and-asr truncating idiom). The year is
+//!    biased by 0x1a90 = 6800, a multiple of 400, so the 2-digit year's
+//!    leap pattern is undisturbed. Seconds-of-day is
+//!    `hour*0xe10 + min*60 + sec` from buf[2]/buf[1]/buf[0].
+//! 4. The out-pair is stored to *days_out / *secs_out even when the I2C
+//!    read failed (the conversion runs unconditionally); the return is
+//!    0 on success or -5 (`mvnne r0, #4`) on read error.
+//!
+//! PORT DEVIATION: the I2C read chain (FUN_082e58f0 -> FUN_0836d698 ->
+//! FUN_0836bb84/FUN_0836b950, the PMU I2C driver, plus its RTXC mutex
+//! wrappers) is hardware and stays unported, so it sits behind the
+//! [`RTC_READ_REGS`] dispatch slot (the app/singletons.rs house
+//! pattern); the default stub fails closed with the driver's own
+//! bad-bank code 9, making [`rtc_read_time`] report -5 and convert
+//! whatever the seeds left in the buffer. The BCD conversion
+//! FUN_0809e3e8 is pure arithmetic (on the ported __rt_udiv/__rt_sdiv)
+//! and is reproduced inline as [`bcd_datetime_to_days_secs`]; native
+//! Rust i32/u32 division has the same truncation semantics, and all
+//! adds/multiplies are wrapping to match ARM flag-less arithmetic.
+
+/// The mutexed RTC register read behind [`rtc_read_time`]: stock
+/// `FUN_082e58f0` @ 0x082e58f0. `bank` 0 selects the time registers
+/// (0x59), bank 1 the alarm registers (0x60); returns 0 on success.
+pub type RtcReadFn = unsafe extern "C" fn(bank: u32, buf: *mut u8) -> i32;
+
+/// Default slot: fail closed with FUN_0836d698's own bad-bank code 9.
+/// The real I2C driver is unported hardware.
+unsafe extern "C" fn rtc_read_stub(_bank: u32, _buf: *mut u8) -> i32 {
+    9
+}
+
+/// The active RTC register read. Host tests install a recording mock;
+/// the real port replaces the stub when the I2C driver lands.
+pub static mut RTC_READ_REGS: RtcReadFn = rtc_read_stub;
+
+/// BCD byte to binary: `v - 6*(v>>4)` for `v < 0x9a`, else clamped to
+/// 99 (stock FUN_080ed424 @ 0x080ed424).
+fn bcd_to_bin(v: u8) -> i32 {
+    if (v as u32) < 0x9a {
+        (v as i32).wrapping_sub(6 * (v as i32 >> 4))
+    } else {
+        99
+    }
+}
+
+/// BCD datetime block to (days, seconds-of-day): stock FUN_0809e3e8 @
+/// 0x0809e3e8, reproduced inline. `buf` is the 7-byte RTC register
+/// image (sec, min, hour, weekday, day, month, year) plus one spare
+/// byte. All arithmetic wraps like the ARM original; the divisions
+/// carry the exact signed/unsigned flavor of the original's
+/// __rt_sdiv/__rt_udiv calls.
+fn bcd_datetime_to_days_secs(buf: &[u8; 8]) -> (u32, u32) {
+    let month = bcd_to_bin(buf[5]);
+    // Jan/Feb year adjustment — UNSIGNED divide in the original, so a
+    // month above 14 wraps the subtraction to a huge quotient.
+    let adj = 14u32.wrapping_sub(month as u32) / 12;
+    let year = bcd_to_bin(buf[6])
+        .wrapping_sub(adj as i32)
+        .wrapping_add(0x1a90);
+    let mp = month
+        .wrapping_add((adj as i32).wrapping_mul(12))
+        .wrapping_sub(3);
+    let day = bcd_to_bin(buf[4]);
+    let month_days = mp.wrapping_mul(0x99).wrapping_add(2) / 5;
+    let days = year
+        .wrapping_mul(365)
+        .wrapping_add(day)
+        .wrapping_add(month_days)
+        .wrapping_add(year / 4)
+        .wrapping_sub(year / 100)
+        .wrapping_add(year / 400)
+        .wrapping_sub(0x7d2d);
+    let secs = bcd_to_bin(buf[2])
+        .wrapping_mul(0xe10)
+        .wrapping_add(bcd_to_bin(buf[1]).wrapping_mul(60))
+        .wrapping_add(bcd_to_bin(buf[0]));
+    (days as u32, secs as u32)
+}
+
+/// rtc_read_time @ 0x08056150 — read the RTC and return the wall clock
+/// as a day count and a seconds-of-day count. 0 on success, -5 when the
+/// I2C read reports an error; the outputs are written either way. The
+/// seed words reproduce the original's saved-r2/r3 buffer slots.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn rtc_read_time(
+    days_out: *mut u32,
+    secs_out: *mut u32,
+    seed_lo: u32,
+    seed_hi: u32,
+) -> i32 {
+    let mut buf = [0u8; 8];
+    buf[..4].copy_from_slice(&seed_lo.to_le_bytes());
+    buf[4..].copy_from_slice(&seed_hi.to_le_bytes());
+    let read = core::ptr::read_volatile(core::ptr::addr_of!(RTC_READ_REGS));
+    let status = read(0, buf.as_mut_ptr());
+    let (days, secs) = bcd_datetime_to_days_secs(&buf);
+    *days_out = days;
+    *secs_out = secs;
+    if status != 0 {
+        -5
+    } else {
+        0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+    use super::*;
+    use std::sync::{Mutex, MutexGuard};
+
+    /// Serializes tests that swap the dispatch slot.
+    static SLOT_LOCK: Mutex<()> = Mutex::new(());
+
+    static mut MOCK_REGS: [u8; 7] = [0; 7];
+    static mut MOCK_STATUS: i32 = 0;
+    static mut MOCK_CALLS: u32 = 0;
+    static mut MOCK_LAST_BANK: u32 = 0xffffffff;
+
+    unsafe extern "C" fn mock_rtc_read(bank: u32, buf: *mut u8) -> i32 {
+        MOCK_CALLS += 1;
+        MOCK_LAST_BANK = bank;
+        if MOCK_STATUS == 0 {
+            core::ptr::copy_nonoverlapping(MOCK_REGS.as_ptr(), buf, 7);
+        }
+        MOCK_STATUS
+    }
+
+    fn install_mock(regs: [u8; 7], status: i32) -> MutexGuard<'static, ()> {
+        let guard = SLOT_LOCK.lock().unwrap();
+        unsafe {
+            MOCK_REGS = regs;
+            MOCK_STATUS = status;
+            MOCK_CALLS = 0;
+            MOCK_LAST_BANK = 0xffffffff;
+            RTC_READ_REGS = mock_rtc_read;
+        }
+        guard
+    }
+
+    fn restore(guard: MutexGuard<'static, ()>) {
+        unsafe {
+            RTC_READ_REGS = rtc_read_stub;
+        }
+        drop(guard);
+    }
+
+    /// Naive proleptic-Gregorian day counter over the 2-digit RTC year,
+    /// days since 0000-03-01 (the Hinnant epoch), computed by loops.
+    fn is_leap(y: i32) -> bool {
+        y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)
+    }
+
+    fn ref_days_since_mar1_year0(y: i32, m: i32, d: i32) -> i32 {
+        let yy = if m <= 2 { y - 1 } else { y };
+        let mp = if m <= 2 { m + 9 } else { m - 3 };
+        // Month lengths from March. February is the LAST month of the
+        // March-year, so no in-year leap bump is needed; instead each
+        // full March-year k is 366 days when year k+1 is leap.
+        const MLEN: [i32; 12] = [31, 30, 31, 30, 31, 31, 30, 31, 30, 31, 31, 28];
+        let mut days = d - 1;
+        for len in MLEN.iter().take(mp as usize) {
+            days += len;
+        }
+        if yy >= 0 {
+            for year in 0..yy {
+                days += if is_leap(year + 1) { 366 } else { 365 };
+            }
+        } else {
+            for year in yy..0 {
+                days -= if is_leap(year + 1) { 366 } else { 365 };
+            }
+        }
+        days
+    }
+
+    /// Offset between the port's day count and the naive reference,
+    /// computed once from the formula at 0000-03-01:
+    /// 365*6800 + 0 + 1700 - 68 + 17 - 32045 + 1 = 2451605.
+    const EPOCH_OFFSET: i32 = 2451605;
+
+    fn read(regs: [u8; 7]) -> (u32, u32, i32) {
+        let _guard = SLOT_LOCK.lock().unwrap();
+        unsafe {
+            MOCK_REGS = regs;
+            MOCK_STATUS = 0;
+            RTC_READ_REGS = mock_rtc_read;
+        }
+        let mut days = 0u32;
+        let mut secs = 0u32;
+        let rc = unsafe { rtc_read_time(&mut days, &mut secs, 0, 0) };
+        unsafe {
+            RTC_READ_REGS = rtc_read_stub;
+        }
+        (days, secs, rc)
+    }
+
+    #[test]
+    fn bcd_decode() {
+        assert_eq!(bcd_to_bin(0x00), 0);
+        assert_eq!(bcd_to_bin(0x09), 9);
+        assert_eq!(bcd_to_bin(0x10), 10);
+        assert_eq!(bcd_to_bin(0x59), 59);
+        assert_eq!(bcd_to_bin(0x99), 99);
+        // 0x9a and above clamp to 99.
+        assert_eq!(bcd_to_bin(0x9a), 99);
+        assert_eq!(bcd_to_bin(0xff), 99);
+    }
+
+    #[test]
+    fn valid_dates_match_naive_gregorian() {
+        // (year2, month, day) cases across leap boundaries.
+        let cases: [(i32, i32, i32); 12] = [
+            (0, 3, 1),
+            (0, 1, 1),
+            (0, 2, 28),
+            (0, 2, 29), // year 0 is leap (divisible by 400)
+            (0, 12, 31),
+            (24, 2, 28),
+            (24, 2, 29),
+            (24, 3, 1),
+            (23, 2, 28),
+            (23, 3, 1),
+            (99, 12, 31),
+            (70, 1, 1),
+        ];
+        for &(y, m, d) in &cases {
+            let regs = [0x00, 0x00, 0x00, 0x00, to_bcd(d), to_bcd(m), to_bcd(y)];
+            let (days, secs, rc) = read(regs);
+            assert_eq!(rc, 0);
+            assert_eq!(secs, 0);
+            let expect = (ref_days_since_mar1_year0(y, m, d) + EPOCH_OFFSET) as u32;
+            assert_eq!(
+                days, expect,
+                "day count mismatch for {y:02}-{m:02}-{d:02}"
+            );
+        }
+    }
+
+    fn to_bcd(v: i32) -> u8 {
+        (((v / 10) << 4) | (v % 10)) as u8
+    }
+
+    #[test]
+    fn seconds_of_day() {
+        let (days, secs, rc) = read([0x58, 0x59, 0x23, 0x04, 0x29, 0x02, 0x24]);
+        assert_eq!(rc, 0);
+        assert_eq!(secs, (23 * 3600 + 59 * 60 + 58) as u32);
+        let expect = (ref_days_since_mar1_year0(24, 2, 29) + EPOCH_OFFSET) as u32;
+        assert_eq!(days, expect);
+        // 00:00:00.
+        let (_, secs, _) = read([0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x24]);
+        assert_eq!(secs, 0);
+    }
+
+    #[test]
+    fn reader_called_with_bank_zero() {
+        let guard = install_mock([0x00, 0x00, 0x12, 0x00, 0x15, 0x06, 0x24], 0);
+        let mut days = 0u32;
+        let mut secs = 0u32;
+        let rc = unsafe { rtc_read_time(&mut days, &mut secs, 0, 0) };
+        assert_eq!(rc, 0);
+        unsafe {
+            assert_eq!(MOCK_CALLS, 1);
+            assert_eq!(MOCK_LAST_BANK, 0);
+        }
+        assert_eq!(secs, (12 * 3600) as u32);
+        restore(guard);
+    }
+
+    #[test]
+    fn read_error_returns_minus5_but_still_converts() {
+        // Failing reader leaves the buffer untouched: the seed words
+        // (the original's saved r2/r3 slots) are what gets converted.
+        let guard = install_mock([0; 7], 9);
+        let mut days = 0u32;
+        let mut secs = 0u32;
+        let rc = unsafe { rtc_read_time(&mut days, &mut secs, 0x44332211, 0x77665588) };
+        assert_eq!(rc, -5);
+        // LE seeds -> buf = [0x11,0x22,0x33,0x44, 0x88,0x55,0x66,0x77],
+        // so secs = bcd(0x33)*3600 + bcd(0x22)*60 + bcd(0x11)
+        // = 33*3600 + 22*60 + 11.
+        assert_eq!(secs, (33 * 3600 + 22 * 60 + 11) as u32);
+        let expect = bcd_datetime_to_days_secs(&[0x11, 0x22, 0x33, 0x44, 0x88, 0x55, 0x66, 0x77]);
+        assert_eq!((days, secs), expect);
+        restore(guard);
+    }
+
+    #[test]
+    fn default_stub_fails_closed() {
+        let _guard = SLOT_LOCK.lock().unwrap();
+        // No mock installed: the stub reports the bad-bank code 9.
+        let mut days = 0u32;
+        let mut secs = 0u32;
+        let rc = unsafe { rtc_read_time(&mut days, &mut secs, 0, 0) };
+        assert_eq!(rc, -5);
+        // Zero buffer converts deterministically: month 0 -> adj 1,
+        // year 6799, mp 9, day 0.
+        let expect = bcd_datetime_to_days_secs(&[0; 8]);
+        assert_eq!((days, secs), expect);
+    }
+
+    #[test]
+    fn wild_bcd_does_not_panic() {
+        // Months above 14 wrap the unsigned (14 - month) / 12 into a
+        // huge quotient; all arithmetic must wrap, not trip debug
+        // overflow checks.
+        for m in [0x13u8, 0x32, 0x99, 0x9a, 0xff] {
+            let buf = [0xff, 0xff, 0xff, 0xff, 0xff, m, 0xff, 0xff];
+            let _ = bcd_datetime_to_days_secs(&buf);
+        }
+        // Clamped month 99 through the full entry point.
+        let (_, _, rc) = read([0x99, 0x99, 0x99, 0x99, 0x99, 0x99, 0x99]);
+        assert_eq!(rc, 0);
+    }
+}
