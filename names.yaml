@@ -3844,6 +3844,23 @@ functions:
     notes: mov pc,lr. Weak hook target (reached via 0x080358a0 from the
       abort report path).
 
+  - address: 0x080358a0
+    ghidra: FUN_080358a0
+    name: abort_report_hook
+    size: 12
+    sig: "void abort_report_hook()"
+    module: stdio/semihost
+    status: ported
+    notes: >-
+      Weak-hook veneer of the abort report sequence (exit.rs
+      abort_report): push {r4,lr}; bl nop_stub @ 0x08036d08 (ported);
+      pop {r4,pc}. No direct bl call sites in osos.asm — the abort path
+      reaches it as the report hook between the ADS library (re)init @
+      0x08035788 and the retailOS log call @ 0x082d8fe8. Deviation: the
+      callee address is read through a volatile pointer (house
+      anti-const-fold trick) so LLVM keeps the call instead of inlining
+      the empty nop_stub and dissolving the veneer into a bare bx lr.
+
   # --- Batch 12: the __rt_lib_init dependency chain (runtime/lib_init +
   # stdio/stdio_init) ---
   - address: 0x08030238

@@ -28,7 +28,11 @@
 //!   semihost stub of the tmpnam/ensure family).
 //! - `sys_stub_ret0_2` @ 0x080320a0 (8 bytes) — identical second stub.
 //! - `nop_stub`        @ 0x08036d08 (4 bytes) — `mov pc, lr` (weak hook
-//!   target reached via 0x080358a0 from the abort report path).
+//!   target reached via [`abort_report_hook`] @ 0x080358a0 from the
+//!   abort report path).
+//! - `abort_report_hook` @ 0x080358a0 (12 bytes) — the abort report
+//!   sequence's weak-hook veneer: saves `{r4, lr}`, calls [`nop_stub`],
+//!   returns.
 //!
 //! Deviations:
 //! - The SWI boundary is the [`SEMIHOST_SWI`] dispatch hook instead of an
@@ -205,9 +209,28 @@ pub unsafe extern "C" fn sys_stub_ret0_2() -> i32 {
 }
 
 /// nop_stub — original @ 0x08036d08 (4 bytes): `mov pc, lr`. Weak hook
-/// target (reached via 0x080358a0 from the abort report path).
+/// target (reached via [`abort_report_hook`] @ 0x080358a0 from the abort
+/// report path).
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn nop_stub() {}
+
+/// abort_report_hook — original @ 0x080358a0 (12 bytes):
+/// `stmdb sp!, {r4, lr}; bl 0x08036d08; ldmia sp!, {r4, pc}`.
+///
+/// The weak no-op hook of the abort report sequence (runtime/exit.rs's
+/// `abort_report`): a call veneer over the weak stub [`nop_stub`]
+/// @ 0x08036d08 (`mov pc, lr`). No direct `bl` call sites in osos.asm;
+/// the abort path reaches it as the report hook between the ADS library
+/// (re)init @ 0x08035788 and the retailOS log call @ 0x082d8fe8.
+///
+/// Deviation: the callee address is read through a volatile pointer (the
+/// house anti-const-fold trick) purely to stop LLVM inlining the empty
+/// [`nop_stub`] and dissolving the veneer into a bare `bx lr`.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn abort_report_hook() {
+    let hook = core::ptr::read_volatile(&(nop_stub as unsafe extern "C" fn()));
+    hook();
+}
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -379,5 +402,14 @@ pub(crate) mod tests {
             assert_eq!(sys_stub_ret0_2(), 0);
             nop_stub();
         }
+    }
+
+    #[test]
+    fn abort_report_hook_calls_the_nop_hook_and_returns() {
+        // The veneer is observable only as "calls the hook, returns, no
+        // state touched": a hook that faults or diverges would fail here.
+        unsafe { abort_report_hook() };
+        // Same observable behavior as invoking the weak stub directly.
+        unsafe { nop_stub() };
     }
 }
