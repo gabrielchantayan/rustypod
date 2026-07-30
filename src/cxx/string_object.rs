@@ -93,6 +93,13 @@
 //!   class — plants the class vtable, chains to the StringObject copy
 //!   constructor @ 0x082773e0 on the embedded subobject, stores the id
 //!   — see [`StringIdRecord`].
+//! - `string_id_record_copy_construct` — original: `FUN_08258c2c` @
+//!   0x08258c2c (40 bytes: 36 code + the 4-byte literal-pool word @
+//!   0x08258c54; 15 `bl` call sites, binary-scanned). The copy
+//!   constructor of the same record class — plants the class vtable,
+//!   chains to the StringObject copy constructor @ 0x082773e0 on the
+//!   embedded subobject with the source record's subobject, copies the
+//!   id — see [`StringIdRecord`].
 //!
 //! # The 0x08258cxx family: a (string, id) record on a StringObject base
 //!
@@ -107,9 +114,9 @@
 //! 0x08258c08 (ported here — plants the class vtable, chains to the
 //! StringObject copy constructor @ 0x082773e0 on this+4 with the source
 //! string argument, stores the id argument at +0xc), a copy constructor @
-//! 0x08258c2c (chains to the same copy constructor @ 0x082773e0 on
-//! this+4 with the source record's +4 subobject, then copies +0xc — NOT
-//! ported here), the plain
+//! 0x08258c2c (ported here — chains to the same copy constructor @
+//! 0x082773e0 on this+4 with the source record's +4 subobject, then
+//! copies +0xc), the plain
 //! destructor @ 0x08258c80 (ported here), an assignment operator @
 //! 0x08258c9c (0x082774a8 on the strings, then copies +0xc) and an
 //! equality operator @ 0x08258cc4 (compares the strings through the
@@ -184,6 +191,11 @@
 //!   `string_id_record_destroy`, the port derives `this` from the
 //!   callee's return minus one word (the original's `sub r0, r0, #4`),
 //!   so the dataflow holds on 64-bit hosts too.
+//! - `string_id_record_copy_construct` makes the same three deviations
+//!   as its (string, id) sibling — the modeled static
+//!   [`STRING_ID_RECORD_VTABLE`], the [`STRING_OBJECT_COPY_CONSTRUCT`]
+//!   dispatch slot, and `this` derived from the callee's return minus
+//!   one word — for the same reasons.
 
 use crate::heap::veneers::{free_wrapper, operator_delete};
 use crate::libc::strlen_safe_plus1::strlen_safe_plus1;
@@ -539,9 +551,10 @@ unsafe extern "C" fn string_object_copy_construct_stub(
 /// Indirect dispatch for the unported StringObject copy constructor @
 /// 0x082773e0 (the util/inner_state.rs `INNER_MATERIALIZE_COUNT`
 /// pattern). Chained to by [`string_id_record_construct_from_string_id`]
-/// (and by the copy constructor sibling @ 0x08258c2c when it is ported).
-/// Host tests install a recording mock; the real port of 0x082773e0
-/// replaces the default stub when it lands.
+/// and by the ported copy constructor sibling
+/// [`string_id_record_copy_construct`]. Host tests install a recording
+/// mock; the real port of 0x082773e0 replaces the default stub when it
+/// lands.
 pub static mut STRING_OBJECT_COPY_CONSTRUCT: unsafe extern "C" fn(
     this: *mut StringObject,
     source: *const StringObject,
@@ -594,6 +607,45 @@ pub unsafe extern "C" fn string_id_record_construct_from_string_id(
     let base = copy_construct_op()(&mut (*this).string, source);
     let record = (base as *mut u8).sub(core::mem::size_of::<usize>()) as *mut StringIdRecord;
     (*record).id = id;
+    record
+}
+
+/// string_id_record_copy_construct — original: `FUN_08258c2c` @
+/// 0x08258c2c (40 bytes: 36 code + the 4-byte literal-pool word @
+/// 0x08258c54 = 0x089a76f0, binary-verified against osos.dec; 15 `bl`
+/// call sites, binary-scanned).
+///
+/// The copy constructor of the 0x10-byte (string, id) record class:
+/// saves `source` in r4 (`mov r4, r1`), plants the class vtable at
+/// `this + 0` (`ldr r1, [0x08258c54]; str r1, [r0], #0x4` — the
+/// post-index add also forms the `this + 4` argument, the embedded
+/// StringObject subobject), chains to the StringObject copy
+/// constructor @ 0x082773e0 on `this + 4` with the SOURCE RECORD's
+/// embedded subobject (`add r1, r4, #0x4` — `source + 4`, not the
+/// source record itself), loads the source id word (`ldr r1,
+/// [r4, #0xc]`), derives `this` back from the callee's return
+/// (`sub r0, r0, #0x4` — the callee returns its argument), stores the
+/// id at `this + 0xc`, and returns `this`. No allocation of its own,
+/// no NULL guard on `this` or `source` — the original faults on
+/// either, and so does the port.
+///
+/// Deviations (the same three as the (string, id) sibling — see the
+/// module header): the class vtable is the modeled static
+/// [`STRING_ID_RECORD_VTABLE`]; the unported copy constructor @
+/// 0x082773e0 dispatches through [`STRING_OBJECT_COPY_CONSTRUCT`]; the
+/// return/id store derive `this` from the callee's return minus
+/// `size_of::<usize>()` (one vtable word) so the original's dataflow —
+/// and its values — hold on 64-bit hosts too.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_id_record_copy_construct(
+    this: *mut StringIdRecord,
+    source: *const StringIdRecord,
+) -> *mut StringIdRecord {
+    (*this).vtable = &STRING_ID_RECORD_VTABLE;
+    let base = copy_construct_op()(&mut (*this).string, &(*source).string);
+    let record = (base as *mut u8).sub(core::mem::size_of::<usize>()) as *mut StringIdRecord;
+    (*record).id = (*source).id;
     record
 }
 
@@ -1397,5 +1449,204 @@ mod tests {
         );
         assert_eq!(calls[0].0, core::ptr::addr_of!(record.string) as usize);
         assert_eq!(record.id, 0x1f03, "destroy never rewrites the ctor's id");
+    }
+
+    // ---- string_id_record_copy_construct -----------------------------
+
+    #[test]
+    fn record_copy_construct_plants_vtable_dispatches_copies_id_returns_this() {
+        let _bench = copy_bench();
+        let mut source = StringIdRecord {
+            vtable: 0xdead_beef as *const StringIdRecordVtable,
+            string: StringObject {
+                vtable: 0xcafe_f00d as *const StringObjectVtable,
+                payload: 0x0bad_f00d as *mut u8,
+            },
+            id: 0x1f01,
+        };
+        let mut record = StringIdRecord {
+            vtable: core::ptr::null(),
+            string: StringObject {
+                vtable: core::ptr::null(),
+                payload: core::ptr::null_mut(),
+            },
+            id: -1,
+        };
+        let this: *mut StringIdRecord = &mut record;
+        unsafe {
+            assert_eq!(string_id_record_copy_construct(this, &source), this);
+            assert_eq!(record.vtable, &STRING_ID_RECORD_VTABLE as *const _);
+            assert_eq!(record.id, 0x1f01, "ldr r1,[r4,#0xc]; str r1,[r0,#0xc]");
+        }
+        let calls = copy_calls();
+        assert_eq!(calls.len(), 1, "exactly one copy-construct dispatch");
+        assert_eq!(
+            calls[0].0,
+            core::ptr::addr_of!(record.string) as usize,
+            "the chain receives the embedded subobject (this + 4 on target)"
+        );
+        assert_eq!(
+            calls[0].1,
+            core::ptr::addr_of!(source.string) as usize,
+            "the source's embedded subobject is forwarded (add r1, r4, #0x4), \
+             not the source record itself"
+        );
+        assert_eq!(
+            calls[0].2,
+            &STRING_ID_RECORD_VTABLE as *const _ as usize,
+            "the class vtable store at +0 precedes the chain (str before bl)"
+        );
+    }
+
+    #[test]
+    fn record_copy_construct_derives_this_from_the_callee_return() {
+        let _bench = copy_bench();
+        let source = StringIdRecord {
+            vtable: core::ptr::null(),
+            string: StringObject {
+                vtable: core::ptr::null(),
+                payload: core::ptr::null_mut(),
+            },
+            id: 7,
+        };
+        let mut record = StringIdRecord {
+            vtable: core::ptr::null(),
+            string: StringObject {
+                vtable: core::ptr::null(),
+                payload: core::ptr::null_mut(),
+            },
+            id: 0,
+        };
+        let this: *mut StringIdRecord = &mut record;
+        unsafe {
+            // The original: r0 = copy_ctor(this + 4, source + 4); r0 -= 4.
+            // The port subtracts one vtable word from the callee's
+            // return, which lands back on `this` whatever the host's
+            // field padding.
+            let expected = (core::ptr::addr_of_mut!(record.string) as *mut u8)
+                .sub(core::mem::size_of::<usize>())
+                as *mut StringIdRecord;
+            assert_eq!(string_id_record_copy_construct(this, &source), expected);
+            assert_eq!(expected, this, "and that is `this` on every host");
+        }
+    }
+
+    #[test]
+    fn record_copy_construct_copies_edge_ids_verbatim() {
+        let _bench = copy_bench();
+        for id in [-1i32, i32::MIN, i32::MAX, 0, 0x1f03] {
+            let source = StringIdRecord {
+                vtable: core::ptr::null(),
+                string: StringObject {
+                    vtable: core::ptr::null(),
+                    payload: core::ptr::null_mut(),
+                },
+                id,
+            };
+            let mut record = StringIdRecord {
+                vtable: core::ptr::null(),
+                string: StringObject {
+                    vtable: core::ptr::null(),
+                    payload: core::ptr::null_mut(),
+                },
+                id: 0x5555_5555,
+            };
+            unsafe {
+                string_id_record_copy_construct(&mut record, &source);
+            }
+            assert_eq!(record.id, id, "the id word at +0xc is copied verbatim");
+        }
+    }
+
+    #[test]
+    fn record_copy_construct_default_stub_constructs_an_empty_string() {
+        // The default slot (no mock): the stub plants the StringObject
+        // vtable and NULLs the payload, ignoring the source's subobject
+        // — the real copy constructor's empty-construction prefix. The
+        // id copy is the outer ctor's own work and happens regardless.
+        let _lock = COPY_SLOT_LOCK.lock().unwrap();
+        let mut source = StringIdRecord {
+            vtable: 0xdead_beef as *const StringIdRecordVtable,
+            string: StringObject {
+                vtable: 0xcafe_f00d as *const StringObjectVtable,
+                payload: 0x0bad_f00d as *mut u8,
+            },
+            id: 0x1f02,
+        };
+        let source_before = unsafe {
+            core::ptr::read(
+                core::ptr::addr_of!(source)
+                    as *const [u8; core::mem::size_of::<StringIdRecord>()],
+            )
+        };
+        let mut record = StringIdRecord {
+            vtable: core::ptr::null(),
+            string: StringObject {
+                vtable: 0x1111_1111 as *const StringObjectVtable,
+                payload: 0x2222_2222 as *mut u8,
+            },
+            id: -1,
+        };
+        let this: *mut StringIdRecord = &mut record;
+        unsafe {
+            assert_eq!(string_id_record_copy_construct(this, &source), this);
+        }
+        assert_eq!(record.vtable, &STRING_ID_RECORD_VTABLE as *const _);
+        assert_eq!(
+            record.string.vtable, &STRING_OBJECT_VTABLE as *const _,
+            "the stub plants the StringObject vtable at +4"
+        );
+        assert!(
+            record.string.payload.is_null(),
+            "the stub NULLs the embedded payload at +8"
+        );
+        assert_eq!(record.id, 0x1f02, "the outer ctor copies the id itself");
+        let source_after = unsafe {
+            core::ptr::read(
+                core::ptr::addr_of!(source)
+                    as *const [u8; core::mem::size_of::<StringIdRecord>()],
+            )
+        };
+        assert_eq!(source_after, source_before, "the copy never writes the source");
+    }
+
+    #[test]
+    fn record_copy_construct_then_destroy_roundtrips() {
+        // Copy-construct through the default stub, destroy through the
+        // recording release — the same round trip the (string, id)
+        // sibling runs, now over the copy path.
+        let _bench = bench();
+        let _copy_lock = COPY_SLOT_LOCK.lock().unwrap();
+        let source = StringIdRecord {
+            vtable: core::ptr::null(),
+            string: StringObject {
+                vtable: core::ptr::null(),
+                payload: core::ptr::null_mut(),
+            },
+            id: 0x1f00,
+        };
+        let mut record = StringIdRecord {
+            vtable: core::ptr::null(),
+            string: StringObject {
+                vtable: core::ptr::null(),
+                payload: core::ptr::null_mut(),
+            },
+            id: 0,
+        };
+        let this: *mut StringIdRecord = &mut record;
+        unsafe {
+            assert_eq!(string_id_record_copy_construct(this, &source), this);
+            assert_eq!(string_id_record_destroy(this), this);
+            assert_eq!(record.vtable, &STRING_ID_RECORD_VTABLE as *const _);
+            assert_eq!(record.string.vtable, &STRING_OBJECT_VTABLE as *const _);
+        }
+        let calls = release_calls();
+        assert_eq!(
+            calls.len(),
+            1,
+            "destroying the copied record runs exactly one (NULL-payload) release"
+        );
+        assert_eq!(calls[0].0, core::ptr::addr_of!(record.string) as usize);
+        assert_eq!(record.id, 0x1f00, "destroy never rewrites the copied id");
     }
 }

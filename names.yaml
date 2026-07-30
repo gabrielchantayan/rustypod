@@ -9538,9 +9538,10 @@ functions:
       `mov r2, #0x0` NULLs the payload word at +8 (id stored BEFORE
       the payload - reproduced), returns this (r0 untouched, the ADS
       constructor convention). No allocation, no NULL guard. Siblings
-      NOT ported here: (string,id) ctor @ 0x08258c08, copy ctor @
-      0x08258c2c, assignment @ 0x08258c9c, equality @ 0x08258cc4 (full
-      family context in the 0x08258c80 entry). Host tests: both
+      NOT ported here: assignment @ 0x08258c9c, equality @ 0x08258cc4
+      (full family context in the 0x08258c80 entry; the (string,id)
+      ctor @ 0x08258c08 and copy ctor @ 0x08258c2c are ported beside
+      it). Host tests: both
       vtables/NULL payload/id -1 on a garbage record, no destructor
       body run (ops-slot recorder observes nothing), and a
       construct-then-destroy round trip. match.py structural: same
@@ -9586,8 +9587,8 @@ functions:
       payload, source ignored); the port derives this from the callee's
       return minus size_of::<usize>() (one vtable word) so the
       original's dataflow holds on 64-bit hosts too. Siblings NOT
-      ported here: copy ctor @ 0x08258c2c, assignment @ 0x08258c9c,
-      equality @ 0x08258cc4. Host tests: vtable planted before the
+      ported here: assignment @ 0x08258c9c, equality @ 0x08258cc4 (the
+      copy ctor @ 0x08258c2c is ported beside it). Host tests: vtable planted before the
       dispatch (recorder reads the +0 word through subobject-1), the
       embedded subobject and source forwarded verbatim, the id stored
       (edge values -1/i32::MIN/i32::MAX/0/0x1f03), the return derived
@@ -9600,6 +9601,57 @@ functions:
       deviation), and LLVM scheduling the id store before the sub
       (str r4,[r0,#8] on the not-yet-subtracted r0 - same effective
       +0xc address, unobservable reorder of an independent store).
+
+  - address: 0x08258c2c
+    ghidra: FUN_08258c2c
+    name: string_id_record_copy_construct
+    size: 40
+    sig: "StringIdRecord *string_id_record_copy_construct(StringIdRecord *this, const StringIdRecord *source)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: this, param_2: source, DAT_08258c54: STRING_ID_RECORD_VTABLE_ADDRESS}
+    notes: >-
+      15 bl call sites (binary-scanned). 36 code bytes + the 4-byte
+      literal-pool word @ 0x08258c54 (= 0x089a76f0, binary-verified
+      against osos.dec). The COPY constructor of the 0x10-byte
+      polymorphic (string, id) record class whose (string,id)
+      constructor @ 0x08258c08, default constructor @ 0x08258c58 and
+      destructor @ 0x08258c80 are ported beside it (full family context
+      in the 0x08258c80 entry): `mov r4, r1` saves the source record,
+      `ldr r1,[0x08258c54]; str r1,[r0],#0x4` plants the class vtable
+      at +0 (the post-index add forms the this+4 argument, the embedded
+      StringObject subobject), `add r1, r4, #0x4; bl 0x082773e0` chains
+      to the StringObject copy constructor on this+4 with the SOURCE
+      RECORD's embedded subobject (source+4, not the source record
+      itself), `ldr r1,[r4,#0xc]` loads the source id, `sub r0,r0,#0x4`
+      derives this back from the callee's return (the callee returns
+      its argument), `str r1,[r0,#0xc]` copies the id. No allocation of
+      its own, no NULL guard on this or source. Deviations: the same
+      three as the (string,id) sibling - the class vtable is the
+      modeled static STRING_ID_RECORD_VTABLE (ROM address, the sibling
+      precedent); the StringObject copy ctor @ 0x082773e0 is NOT ported
+      (its payload-duplication callee @ 0x08276474 allocates and
+      dispatches through vtable slot +0xc), so the chain goes through
+      the existing STRING_OBJECT_COPY_CONSTRUCT dispatch slot whose
+      default stub is the copy ctor's empty-construction prefix
+      (StringObject vtable + NULL payload, source ignored); the port
+      derives this from the callee's return minus size_of::<usize>()
+      (one vtable word) so the original's dataflow holds on 64-bit
+      hosts too. Siblings NOT ported here: assignment @ 0x08258c9c,
+      equality @ 0x08258cc4. Host tests: vtable planted before the
+      dispatch (recorder reads the +0 word through subobject-1), the
+      embedded subobject and the SOURCE's embedded subobject forwarded
+      verbatim, the id copied (edge values -1/i32::MIN/i32::MAX/0/
+      0x1f03), the return derived from the callee's return, the default
+      stub's empty-string construction leaving the source
+      byte-identical while the id copy still lands, and a
+      copy-construct-then-destroy round trip. match.py structural: same
+      push/mov/ldr-pool/str-postindex/add/call/ldr/sub/str/pop shape;
+      the diff is the crate fp frame, the blx-through-volatile-slot
+      dispatch standing in for the direct bl 0x082773e0 (the documented
+      deviation), and LLVM scheduling the id store before the sub
+      (str r1,[r0,#8] - same effective +0xc address, unobservable
+      reorder of an independent store, as the sibling).
 
   - address: 0x08258c80
     ghidra: FUN_08258c80
