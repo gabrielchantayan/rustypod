@@ -11246,14 +11246,15 @@ functions:
       out as byte loads from the family's read_unaligned host-testing
       idiom, same deviation as vector_size_elem4. Other instantiations
       (identified, not ported): 0x083d7954 4, 0x083d7870 4, 0x083d784c
-      4, 0x083d7828 4 bl sites; shift-based
+      4 bl sites; shift-based
       ones are one-line ports whenever wanted. 0x083d7708 is now ported
       (see its entry) - it turned out to be a DIVIDE-by-12 member, not a
       shift, so element sizes must be read from osos.asm per address.
       0x083d77a8 is now ported too (see its entry) - that one really is
       shift-based (asr #4, a 16-byte element). 0x083d77ec is now ported
       as well (see its entry) - another divide-by-24 copy, byte-identical
-      to this one.
+      to this one. 0x083d7828 is now ported too (see its entry) - a
+      divide-by-12 copy, byte-identical to vector_capacity_elem12.
 
   - address: 0x083d77a8
     ghidra: FUN_083d77a8
@@ -11331,6 +11332,11 @@ functions:
       r1,#24 / b __rt_sdiv); the ldr pairs come out as byte loads from
       the family's read_unaligned host-testing idiom, the same accepted
       deviation as vector_size_elem4, plus LLVM's fp frame.
+
+  - {address: 0x083d7828, ghidra: FUN_083d7828, name: vector_capacity_elem12_alias_7828,
+     size: 20, sig: "i32 vector_capacity_elem12_alias_7828(const VectorStorage *vector)",
+     module: cxx/templates, status: ported, vars: {param_1: vector},
+     notes: "ALIAS - byte-identical to vector_capacity_elem12 @ 0x083d7708 (all 20 bytes: ldr r1,[r0,#8]; ldr r0,[r0]; sub r0,r1,r0; mov r1,#0xc; b 0x08031568 __rt_sdiv) - a divide-by-12 capacity() copy, so the ledger's old blanket shift-based guess is wrong for this address too; per-address verification stays the rule. 4 bl sites (0x083e2f88, 0x083e30b8, 0x083e3114, 0x083e319c). No separate port exists; hook this address to the single vector_capacity_elem12 symbol (the handle_deref_or_null alias precedent). match.py against vector_capacity_elem12 at this address - same structure (sub / mov r1,#12 / b __rt_sdiv); the ldr pairs come out as byte loads from the family's read_unaligned host-testing idiom, the same accepted deviation as vector_size_elem4."}
 
   - address: 0x083d5ea0
     ghidra: FUN_083d5ea0
