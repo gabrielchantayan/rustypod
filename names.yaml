@@ -6292,6 +6292,33 @@ functions:
       registers the result with class id 0x7800. Same deviations and the
       same NOT-HOOK-READY caveat as 0x0817ee04.
 
+  - address: 0x0817ceb4
+    ghidra: FUN_0817ceb4
+    name: media_player_get
+    size: 44
+    sig: "void *media_player_get(void)"
+    module: app/singletons
+    status: ported
+    renames:
+      DAT_0817cee0: media_player_holder (global @ 0x089ca7c8; instance in its +4 slot)
+      DAT_0817cee4: MEDIA_PLAYER_SIZE
+      FUN_082aadd4: operator_new
+      FUN_0817d970: media_player_ctor (SINGLETON_CTORS.media_player slot)
+    notes: >-
+      Same lazy-singleton shape as 0x0817ee04 but a 0xA6C-byte object
+      (the size is a pool literal @ 0x0817cee4, too big for an ARM
+      immediate), cached in the word @ 0x089ca7cc - the +4 slot of the
+      global @ 0x089ca7c8. 101 bl call sites. The object is the
+      TPodMediaPlayer, the one singleton whose class name survives in
+      the image: its ctor @ 0x0817d970 hands the "TPodMediaPlayer"
+      literal (@ 0x0817db74) to the class-name factory @ 0x0822053c and
+      chains sub-ctors out past +0x9c4 (vtable 0x089a75c8 at +0x14).
+      Feeds the 264-call-site leaf FUN_08259594 (returns instance+0x14
+      or NULL) - identified, not yet ported. Same deviations and the
+      same NOT-HOOK-READY caveat as 0x0817ee04: the ctor sits behind the
+      SINGLETON_CTORS dispatch table with a zeroing stub default and the
+      cache is the crate static MEDIA_PLAYER_INSTANCE.
+
   - address: 0x0813b6f4
     ghidra: FUN_0813b6f4
     name: context_target_id

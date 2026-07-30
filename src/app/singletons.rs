@@ -1,4 +1,4 @@
-//! The six lazily-constructed framework singletons. Every one is the
+//! The seven lazily-constructed framework singletons. Every one is the
 //! same four-step idiom over its own cache word, its own allocation
 //! size and its own constructor:
 //!
@@ -11,6 +11,7 @@
 //! |---|---|---|---|---|---|
 //! | 0x0817ee04 | [`app_controller_get`] | 0xe8 | 0x089cc648 | 0x081847fc | **1108** |
 //! | 0x08173848 | [`app_screen_get`] | 0x850 | 0x089cc1bc | 0x08177a78 | 140 |
+//! | 0x0817ceb4 | [`media_player_get`] | 0xa6c | 0x089ca7cc | 0x0817d970 | 101 |
 //! | 0x081eb0c4 | [`singleton_class_8900`] | 0x380 | 0x089cc3ac | 0x081ee0c0 | 88 |
 //! | 0x0810a7b8 | [`singleton_class_6200`] | 0xd0 | 0x089cb308 | 0x0810ab3c | 47 |
 //! | 0x081b803c | [`singleton_class_7f80`] | 0x1d4 | 0x089cc61c | 0x081b80b4 | 38 |
@@ -38,6 +39,16 @@
 //!   controller (`FUN_08183950(controller, screen)`). Neither class name
 //!   survives in the image (the ctor's name argument comes from a
 //!   runtime global @ 0x080cb828).
+//! - The 0xA6C object is the **TPodMediaPlayer** — the one singleton
+//!   whose class name survives in the image: its constructor @
+//!   0x0817d970 hands the "TPodMediaPlayer" literal (@ 0x0817db74) to
+//!   the class-name factory @ 0x0822053c. It is the media player
+//!   controller: a deeply chained C++ ctor (vtable 0x089a75c8 at
+//!   +0x14, sub-objects out past +0x9c4) that the getter's 101 call
+//!   sites reach through the +4 slot of the global @ 0x089ca7c8. Its
+//!   hottest consumer is the leaf `FUN_08259594` (returns
+//!   `instance + 0x14` or NULL, 264 `bl` call sites) — identified, not
+//!   yet ported.
 //! - Three of the remaining four are identified only by the **class id**
 //!   their constructor publishes into the by-id registry
 //!   (`app/registry.rs`), which is the firmware's own name for them:
@@ -70,7 +81,7 @@
 //! - The cache slots are the crate statics below rather than words in
 //!   the 0x089cxxxx / 0x089dxxxx pages (the block_mgr.rs deviation:
 //!   those RW pages are runtime-initialized; the image holds stale UI
-//!   strings there). All six default to NULL, exactly the pre-init
+//!   strings there). All seven default to NULL, exactly the pre-init
 //!   state.
 
 use crate::heap::veneers::operator_new;
@@ -80,6 +91,11 @@ pub const APP_CONTROLLER_SIZE: usize = 0xe8;
 
 /// Allocation size of the screen object (`mov r0, #0x850`).
 pub const APP_SCREEN_SIZE: usize = 0x850;
+
+/// Allocation size of the TPodMediaPlayer object (original: the literal
+/// @ 0x0817cee4, loaded by `ldr r0, [0x817cee4]` — too big for an ARM
+/// immediate).
+pub const MEDIA_PLAYER_SIZE: usize = 0xa6c;
 
 /// Allocation size of the registry-class-0x8900 singleton
 /// (`mov r0, #0x380`).
@@ -108,6 +124,8 @@ pub struct SingletonCtors {
     pub app_controller: Constructor,
     /// Screen-object ctor @ 0x08177a78.
     pub app_screen: Constructor,
+    /// TPodMediaPlayer ctor @ 0x0817d970.
+    pub media_player: Constructor,
     /// Registry-class-0x8900 ctor @ 0x081ee0c0.
     pub class_8900: Constructor,
     /// Registry-class-0x6200 ctor @ 0x0810ab3c.
@@ -132,6 +150,7 @@ macro_rules! zeroing_ctor {
 
 zeroing_ctor!(zeroing_controller_ctor, APP_CONTROLLER_SIZE);
 zeroing_ctor!(zeroing_screen_ctor, APP_SCREEN_SIZE);
+zeroing_ctor!(zeroing_media_player_ctor, MEDIA_PLAYER_SIZE);
 zeroing_ctor!(zeroing_class_8900_ctor, CLASS_8900_SIZE);
 zeroing_ctor!(zeroing_class_6200_ctor, CLASS_6200_SIZE);
 zeroing_ctor!(zeroing_class_7f80_ctor, CLASS_7F80_SIZE);
@@ -153,6 +172,7 @@ unsafe fn zero_block(this: *mut u8, size: usize) -> *mut u8 {
 pub(crate) const DEFAULT_SINGLETON_CTORS: SingletonCtors = SingletonCtors {
     app_controller: zeroing_controller_ctor,
     app_screen: zeroing_screen_ctor,
+    media_player: zeroing_media_player_ctor,
     class_8900: zeroing_class_8900_ctor,
     class_6200: zeroing_class_6200_ctor,
     class_7f80: zeroing_class_7f80_ctor,
@@ -178,6 +198,10 @@ pub static mut APP_CONTROLLER: *mut u8 = core::ptr::null_mut();
 /// The screen singleton (original: the word @ 0x089cc1bc).
 pub static mut APP_SCREEN: *mut u8 = core::ptr::null_mut();
 
+/// The TPodMediaPlayer singleton (original: the word @ 0x089ca7cc, the
+/// `+4` slot of the global @ 0x089ca7c8).
+pub static mut MEDIA_PLAYER_INSTANCE: *mut u8 = core::ptr::null_mut();
+
 /// The registry-class-0x8900 singleton (original: the word @
 /// 0x089cc3ac, the `+4` slot of the global @ 0x089cc3a8).
 pub static mut CLASS_8900_INSTANCE: *mut u8 = core::ptr::null_mut();
@@ -194,7 +218,7 @@ pub static mut CLASS_7F80_INSTANCE: *mut u8 = core::ptr::null_mut();
 /// the `+0xc` slot of the global @ 0x089d0124).
 pub static mut SINGLETON_0X3C: *mut u8 = core::ptr::null_mut();
 
-/// The body all six getters share: test the cache, allocate, construct,
+/// The body all seven getters share: test the cache, allocate, construct,
 /// store, and re-load the cache (the original's second `ldr r0, [r4,
 /// #N]`, which is what makes a self-caching ctor observable).
 ///
@@ -235,6 +259,23 @@ pub unsafe extern "C" fn app_controller_get() -> *mut u8 {
 pub unsafe extern "C" fn app_screen_get() -> *mut u8 {
     let cache = core::ptr::addr_of_mut!(APP_SCREEN);
     lazy_singleton(cache, APP_SCREEN_SIZE, || unsafe { ctor!(app_screen) })
+}
+
+/// media_player_get — original: `FUN_0817ceb4` @ 0x0817ceb4 (44 bytes;
+/// 101 `bl` call sites).
+///
+/// Returns the TPodMediaPlayer singleton — the media player controller —
+/// constructing it on first use: `operator_new(0xa6c)` (the size is a
+/// pool literal @ 0x0817cee4, too big for an ARM immediate) then the
+/// constructor @ 0x0817d970, which names its class "TPodMediaPlayer"
+/// through the name factory @ 0x0822053c. The instance is cached in the
+/// `+4` slot of the global @ 0x089ca7c8. Same NOT-HOOK-READY caveat as
+/// its siblings — see the module header.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn media_player_get() -> *mut u8 {
+    let cache = core::ptr::addr_of_mut!(MEDIA_PLAYER_INSTANCE);
+    lazy_singleton(cache, MEDIA_PLAYER_SIZE, || unsafe { ctor!(media_player) })
 }
 
 /// singleton_class_8900 — original: `FUN_081eb0c4` @ 0x081eb0c4
@@ -307,9 +348,9 @@ mod tests {
     /// Serializes every test that swaps the globals below.
     static SINGLETON_LOCK: Mutex<()> = Mutex::new(());
 
-    /// The block the stub allocator hands out (big enough for either
-    /// singleton).
-    static mut ARENA: [u8; APP_SCREEN_SIZE] = [0xa5; APP_SCREEN_SIZE];
+    /// The block the stub allocator hands out (big enough for the
+    /// largest singleton, the 0xa6c media player).
+    static mut ARENA: [u8; MEDIA_PLAYER_SIZE] = [0xa5; MEDIA_PLAYER_SIZE];
 
     /// Sizes passed to `operator new`, in order.
     static mut ALLOC_SIZES: Vec<usize> = Vec::new();
@@ -359,6 +400,7 @@ mod tests {
             SINGLETON_CTORS = SingletonCtors {
                 app_controller: recording_ctor,
                 app_screen: recording_ctor,
+                media_player: recording_ctor,
                 class_8900: recording_ctor,
                 class_6200: recording_ctor,
                 class_7f80: recording_ctor,
@@ -388,6 +430,7 @@ mod tests {
     unsafe fn clear_caches() {
         APP_CONTROLLER = ptr::null_mut();
         APP_SCREEN = ptr::null_mut();
+        MEDIA_PLAYER_INSTANCE = ptr::null_mut();
         CLASS_8900_INSTANCE = ptr::null_mut();
         CLASS_6200_INSTANCE = ptr::null_mut();
         CLASS_7F80_INSTANCE = ptr::null_mut();
@@ -421,6 +464,53 @@ mod tests {
         unsafe {
             assert_eq!(app_screen_get(), constructed());
             assert_eq!(*ptr::addr_of!(ALLOC_SIZES), std::vec![0x850]);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_media_player_is_allocated_at_its_exact_size_and_constructed_once() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(media_player_get(), constructed());
+            assert_eq!(media_player_get(), constructed());
+            assert_eq!(
+                *ptr::addr_of!(ALLOC_SIZES),
+                std::vec![0xa6c],
+                "the 0x0817cee4 pool literal, allocated exactly once"
+            );
+            assert_eq!((*ptr::addr_of!(CTOR_BLOCKS)).len(), 1, "constructed exactly once");
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(MEDIA_PLAYER_INSTANCE)),
+                constructed(),
+                "the ctor result is cached"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_media_player_cache_is_independent_of_the_others() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(media_player_get(), constructed());
+            assert!(ptr::read_volatile(ptr::addr_of!(APP_CONTROLLER)).is_null(), "untouched");
+            assert!(ptr::read_volatile(ptr::addr_of!(APP_SCREEN)).is_null(), "untouched");
+            assert_eq!(*ptr::addr_of!(ALLOC_SIZES), std::vec![MEDIA_PLAYER_SIZE]);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_media_player_zeroing_stub_clears_the_whole_block() {
+        let guard = SINGLETON_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            let block = ptr::addr_of_mut!(ARENA) as *mut u8;
+            for offset in 0..MEDIA_PLAYER_SIZE {
+                block.add(offset).write(0xa5);
+            }
+            assert_eq!(zeroing_media_player_ctor(block), block);
+            assert!((0..MEDIA_PLAYER_SIZE).all(|offset| block.add(offset).read() == 0));
         }
         restore(guard);
     }
