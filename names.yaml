@@ -6744,6 +6744,55 @@ functions:
       Dispatch goes through the node's own vtable pointer, no hook
       table.
 
+  - address: 0x0810fa30
+    ghidra: FUN_0810fa30
+    name: node_list_get
+    size: 72
+    sig: "NodeList *node_list_get(void)"
+    module: app/node_list
+    status: ported
+    vars: {iVar1: acquired, uVar2: this, DAT_0810fa78: guard-pool-word
+      (0x089cc834 = NODE_LIST_GUARD), DAT_0810fa7c: object-pool-word
+      (0x08a79c74 = NODE_LIST storage), DAT_0810fa80: DSO_HANDLE
+      (0x089ca09c = __dso_handle), DAT_0810fa84: dtor-pool-word
+      (0x0810516c = node_list_destructor)}
+    notes: >-
+      The view-list singleton's accessor - a textbook ADS
+      function-local static over a fixed .bss object, NOT the
+      operator_new cache pattern of app/singletons.rs (which is why it
+      lives in app/node_list.rs beside the NodeList it returns and its
+      consumers, not in singletons.rs). Literal pool binary-verified:
+      guard 0x089cc834 (@ 0x0810fa78), object 0x08a79c74 (@
+      0x0810fa7c), __dso_handle 0x089ca09c (@ 0x0810fa80), destructor
+      0x0810516c (@ 0x0810fa84). 168 bl call sites, binary-verified.
+      Shape: tst guard,#1 fast path; cxa_guard_acquire (0x082ab31c);
+      ctor FUN_0811000c(object) returning this in r0; cxa_atexit(this,
+      dtor, dso) (0x082ab1c8); cxa_guard_release (0x082ab338); reload
+      the OBJECT address - never the ctor's return - and return it.
+      The guard pair and cxa_atexit are ported and called directly;
+      the ctor is not, so it sits behind the NODE_LIST_CTOR dispatch
+      slot whose documented zeroing default installs no vtables (the
+      SINGLETON_CTORS contract - NOT hook-ready until the ctor is
+      ported). The ctor (decomp examined) plants vtable 0x0898165c at
+      +0x00, zeroes head +0x04 / stop_key +0x08 / draining-flag byte
+      +0x0c, builds a sub-object at +0x10 (vtable 0x089a5d0c via the
+      0x08275bb8/0x08271cec pair) and zeroes the drain-callback words
+      +0x20/+0x28/+0x2c - object size 0x30 (NODE_LIST_SIZE). The
+      registered "destructor" 0x0810516c is binary-verified a shared
+      `mov r0,#1; ldmia sp!,{r4,pc}` epilogue stub - as a shutdown
+      handler it would pop a frame it never pushed, so the
+      registration could never fire (and retailOS never runs exit's
+      chain anyway); modeled as a no-op. Deviations: guard and object
+      are crate statics, not the 0x089cc834/0x08a79c74 .bss words
+      (block_mgr.rs RW-page precedent), both zero-init = the exact
+      pre-init state. match.py structural: same
+      guard-test/acquire/ctor/register/return-object sequence with the
+      ported callees inlined by LLVM (the two-level guard test merges
+      into one whole-word test - outcome-identical in every guard
+      state, since a bit-0-clear nonzero guard is refused by both) and
+      the empty cxa_guard_release call deleted - the accepted
+      intra-crate inlining noise (class_registry_construct precedent).
+
   - address: 0x081c93fc
     ghidra: FUN_081c93fc
     name: table6_find_by_key
