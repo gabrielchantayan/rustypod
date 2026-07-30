@@ -26,7 +26,8 @@
 //! descriptor is built from are image geometry: 352, 320, 270, 220, 180,
 //! 176, 128, 100, 90, 84, 56, 41, 37 written to +0x00 and +0x04 (often
 //! the *same* value to both — square), a fixed 16 at +0x18 (bit depth,
-//! i.e. RGB565) and a halfword at +0x1c. `FUN_08079d38` then does
+//! i.e. RGB565) and a halfword at +0x1c. `FUN_08079d38` (ported below
+//! as [`image_pixel_buffer_size_for_kind`]) then does
 //! `format_descriptor(image_format_for_kind(kind)); return desc[0] *
 //! desc[8];` — a byte size. So the 0x3f1..0x42d space is an **image /
 //! artwork format** id space, and this table says which format each
@@ -35,8 +36,8 @@
 //! That reading was an inference from the constants, not from a symbol;
 //! porting `FUN_08105b58` confirmed it: the descriptor IS geometry —
 //! width at +0x00, height at +0x04, height×bytes-per-pixel at +0x08
-//! (`FUN_08079d38`'s `desc[0] * desc[8]` byte size falls out as
-//! width × that), bit depth at +0x18 and a pixel-format tag halfword at
+//! ([`image_pixel_buffer_size_for_kind`]'s `desc[0] * desc[8]` byte
+//! size falls out as width × that), bit depth at +0x18 and a pixel-format tag halfword at
 //! +0x1c (0x565 ≈ RGB565, 0x1888 at 32bpp, 0xc420/0xc422 at 12bpp).
 //! Nothing in the image names either the kinds or the formats.
 //!
@@ -348,6 +349,56 @@ pub unsafe extern "C" fn image_format_descriptor_for_kind(descriptor: *mut u8, k
     image_format_descriptor(descriptor, image_format_for_kind(kind))
 }
 
+/// image_pixel_buffer_size_for_kind — original: `FUN_08079d38` @
+/// 0x08079d38 (44 bytes; 5 `bl` call sites, no tail `b`,
+/// binary-scanned — all five inside `FUN_08211898` @ 0x08211898).
+///
+/// The one-step "how many bytes does artwork kind N's pixel buffer
+/// need" query: resolves the kind to a format, builds the 32-byte
+/// descriptor on its stack and multiplies the two geometry words:
+///
+/// ```text
+/// str    lr, [sp, #-4]!
+/// sub    sp, sp, #0x24         ; 32-byte descriptor at sp+4
+/// bl     0x08105a34            ; image_format_for_kind(kind)
+/// mov    r1, r0                ; format id
+/// add    r0, sp, #0x4          ; descriptor buffer
+/// bl     0x08105b58            ; image_format_descriptor(buf, format)
+/// ldr    r0, [sp, #0xc]        ; desc +0x08 = height_bytes
+/// ldr    r1, [sp, #0x4]        ; desc +0x00 = width
+/// add    sp, sp, #0x24
+/// mul    r0, r1, r0            ; width * height_bytes
+/// ldr    pc, [sp], #0x4
+/// ```
+///
+/// The +0x08 field is height × bytes-per-pixel, so the product is the
+/// pixel buffer's byte size: kind 3 (0x400, 240×320 16bpp) answers
+/// 153600, kind 4 here answers 0x428's 307200 (the *plain* table —
+/// this function does not consult the kind-4 override), kind 9 has no
+/// format at all.
+///
+/// The sole caller `FUN_08211898` multiplies the result by an item
+/// count and feeds it into `FUN_083eb9b4` (an allocation-size
+/// computation), then sizes a scratch buffer from
+/// `size(9) + size(8)` — confirming this is a byte size, not a pixel
+/// count.
+///
+/// Deliberate deviation (inherited from
+/// [`image_format_descriptor`]): for a kind with no format (9, 11, 13,
+/// or out of range) the original's default arm leaves +0x00/+0x08
+/// unstored, so the product is stack garbage; this port's zero-filled
+/// descriptor makes the answer a deterministic 0. Every kind with a
+/// format returns exactly what the original computes.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn image_pixel_buffer_size_for_kind(kind: u32) -> u32 {
+    let mut descriptor = [0u8; DESCRIPTOR_SIZE];
+    unsafe { image_format_descriptor(descriptor.as_mut_ptr(), image_format_for_kind(kind)) };
+    let width = u32::from_le_bytes(descriptor[0x00..0x04].try_into().unwrap());
+    let height_bytes = u32::from_le_bytes(descriptor[0x08..0x0c].try_into().unwrap());
+    width.wrapping_mul(height_bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -586,5 +637,54 @@ mod tests {
         assert_eq!(buf, describe(0x428));
         assert_ne!(buf, describe(0x400));
         assert_eq!(image_format_for_kind_kind4_override(4), 0x400);
+    }
+
+    // ---- image_pixel_buffer_size_for_kind (FUN_08079d38) -----------
+
+    /// The original's `desc[0] * desc[8]`, recomputed from the
+    /// descriptor built by the independently decoded jump-table arms —
+    /// independent of the port's own field reads.
+    fn reference_size(kind: u32) -> u32 {
+        let desc = describe(reference(kind));
+        let width = u32::from_le_bytes(desc[0x00..0x04].try_into().unwrap());
+        let height_bytes = u32::from_le_bytes(desc[0x08..0x0c].try_into().unwrap());
+        width.wrapping_mul(height_bytes)
+    }
+
+    #[test]
+    fn every_kind_returns_width_times_height_bytes() {
+        for kind in 0..IMAGE_KIND_COUNT {
+            assert_eq!(image_pixel_buffer_size_for_kind(kind), reference_size(kind), "kind {kind}");
+        }
+    }
+
+    #[test]
+    fn spot_checks_against_known_geometry() {
+        // Kind 3 -> 0x400: 240x320 16bpp.
+        assert_eq!(image_pixel_buffer_size_for_kind(3), 240 * 320 * 2);
+        // Kind 4 -> 0x428 via the PLAIN table: 240x320 32bpp (the
+        // kind4 override's 0x400 would give half of this).
+        assert_eq!(image_pixel_buffer_size_for_kind(4), 240 * 320 * 4);
+        assert_eq!(
+            image_pixel_buffer_size_for_kind(4),
+            2 * image_pixel_buffer_size_for_kind(3),
+        );
+        // Kind 5 -> 0x42b: 480x720 12bpp.
+        assert_eq!(image_pixel_buffer_size_for_kind(5), 480 * 720 * 12 / 8);
+        // Kind 8 -> 0x425: 55 wide, but height_bytes is 0x70 = 56*2
+        // (the 16bpp row padded to an even pixel count) - one of the
+        // sizes FUN_08211898 asks for.
+        assert_eq!(image_pixel_buffer_size_for_kind(8), 0x37 * 0x70);
+    }
+
+    #[test]
+    fn kinds_without_a_format_return_zero() {
+        // The original would multiply descriptor bytes its default arm
+        // never stored (stack garbage); the port's inherited zero-fill
+        // deviation makes the answer a deterministic 0.
+        for kind in [9u32, 11, 13, 18, 100, 0x8000_0000, u32::MAX] {
+            assert_eq!(image_pixel_buffer_size_for_kind(kind), 0, "kind {kind:#x}");
+            assert_eq!(reference_size(kind), 0, "reference kind {kind:#x}");
+        }
     }
 }

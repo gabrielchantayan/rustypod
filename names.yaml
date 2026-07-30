@@ -14706,3 +14706,39 @@ functions:
       byte-compared), overwrites, round-trips 0/1/u32::MAX. match.py
       structural: identical `str r1,[r0,#0x58]`; the only diff is the
       crate-standard push-fp-lr/pop-fp-pc frame.
+
+  - address: 0x08079d38
+    ghidra: FUN_08079d38
+    name: image_pixel_buffer_size_for_kind
+    size: 44
+    sig: "u32 image_pixel_buffer_size_for_kind(u32 kind)"
+    module: app/image_format
+    status: ported
+    vars: {param_1: kind, local_24: descriptor, local_1c: height_bytes, uVar1: format, FUN_08105a34: image_format_for_kind, FUN_08105b58: image_format_descriptor}
+    notes: >-
+      The one-step "how many bytes does artwork kind N's pixel buffer
+      need" query: `str lr,[sp,#-4]!; sub sp,sp,#0x24; bl
+      image_format_for_kind; mov r1,r0; add r0,sp,#4; bl
+      image_format_descriptor; ldr r0,[sp,#0xc]; ldr r1,[sp,#4]; add
+      sp,sp,#0x24; mul r0,r1,r0; ldr pc,[sp],#4` - resolve the kind to
+      a format (PLAIN table, not the kind-4 override: kind 4 here gives
+      0x428's 307200, not 0x400's 153600), build the 32-byte descriptor
+      on the stack, return desc[0] * desc[8] = width * height_bytes.
+      height_bytes is height * bytes-per-pixel (with row padding, e.g.
+      kind 8 -> 0x425: 55 wide but height_bytes 0x70 = 56*2), so the
+      product is the pixel buffer's byte size. 5 bl call sites, no tail
+      b (binary-scanned), all inside FUN_08211898 @ 0x08211898, which
+      multiplies the result by an item count for an allocation-size
+      computation (FUN_083eb9b4) and sizes a scratch buffer from
+      size(9) + size(8) - confirming byte size, not pixel count.
+      Deviation (inherited from image_format_descriptor's documented
+      zero-fill): kinds without a format (9, 0xb, 0xd, out of range)
+      leave desc[0]/desc[8] unstored in the original's default arm, so
+      the original's product is stack garbage; the port answers a
+      deterministic 0. Every kind with a format returns exactly what
+      the original computes. Host tests: every kind 0..=17 vs an
+      independently decoded width*height_bytes reference, spot checks
+      at 16/32/12bpp and the kind-8 padded row, kinds without a format
+      -> 0. match.py structural: same push/sub-sp/bl/bl/ldr/ldr/mul/pop
+      shape; the diffs are the crate-standard fp frame and the
+      descriptor living at sp+0 instead of sp+4 because of it.
