@@ -4623,8 +4623,9 @@ functions:
     notes: >-
       Hinnant civil-to-days over a 7-byte BCD RTC register image (sec,
       min, hour, weekday, day, month, year; weekday ignored). BCD decode
-      FUN_080ed424 (v - 6*(v>>4) for v < 0x9a, else 99) is reproduced
-      inline, not yet ported in its own right; the month byte is decoded
+      FUN_080ed424 (v - 6*(v>>4) for v < 0x9a, else 99) is now ported in
+      its own right as time/civil::bcd_to_bin (see the 0x080ed424
+      entry); the month byte is decoded
       TWICE in the original. adj = (14 - month) / 12 via UNSIGNED
       __rt_udiv (0x08036f14 — a month above 14 wraps to a huge
       quotient); y = year - adj + 0x1a90 (6800, a multiple of 400, so
@@ -4643,8 +4644,38 @@ functions:
       the 365*y and /4 terms earlier and builds 365 as 0x16d via
       mov/mvn+orr instead of the pool literal, but every formula
       element is present (rsb #14, +0x1a90, mla 0x99, the /4
-      asr/lsr/asr idiom, -0x7d2d, 0xe10, rsb *60, seven decode calls,
-      one udiv, three sdivs).
+       asr/lsr/asr idiom, -0x7d2d, 0xe10, rsb *60, seven decode calls,
+       one udiv, three sdivs).
+
+  # --- BCD byte -> binary decode helper (time/civil) ---
+  - address: 0x080ed424
+    ghidra: FUN_080ed424
+    name: bcd_to_bin
+    size: 24
+    sig: "i32 bcd_to_bin(u8 v)"
+    module: time/civil
+    status: ported
+    vars: {param_1: v}
+    notes: >-
+      BCD byte to binary: v - 6*(v>>4) for v <= 0x99 (unsigned cmp
+      r0, #0x99; r1 = v>>4, r1 = r1 - r1*4 = -3*(v>>4), r0 = v +
+      r1*2 = v - 6*(v>>4), all under the ls predicate), else clamped
+      to 99 (movhi r0, #0x63). The clamp tests the RAW byte, so
+      0x9a-0xff all return 99 while a low-nibble-above-9 byte like
+      0x0f still decodes arithmetically (15). 13 bl call sites in
+      osos.asm (grep -c "bl 0x080ed424"): the seven decode calls in
+      bcd_datetime_to_days_secs @ 0x0809e3e8 (whose inline stand-in
+      this port replaces, call sites unchanged, still out-of-line)
+      plus six more elsewhere (e.g. four in FUN_0806418c @
+      0x0806423c/0x0806424c/0x08064258/0x08064264). Host tests cover
+      the full u8 range 0x00-0xff against the reference formula
+      (valid BCD pairs, the 0x99/0x9a boundary, the >= 0x9a clamp,
+      and low-nibble-above-9 arithmetic decodes). match.py
+      structural: identical computation (lsr #4; sub r1, r1, r1 lsl
+      #2; add r0, r0, r1 lsl #1; select 99 vs the computed value);
+      the diff is LLVM's fp frame and cmp #0x9a + addcc/mov select in
+      place of the original's cmp #0x99 with ls/hi predication —
+      semantically identical boundary.
 
   # --- Block-deque element -> region accessors (heap/block_region) ---
   - address: 0x082801f8
@@ -8862,8 +8893,39 @@ functions:
       through the STRING_OBJECT_OPS slot whose shipped default is the
       ported release itself (the slot stays so host tests can install
       recording mocks). match.py: same
-      structure (vtable store, call, return this), the bl becoming a
-      blx through the ops slot.
+       structure (vtable store, call, return this), the bl becoming a
+       blx through the ops slot.
+
+  - address: 0x08277458
+    ghidra: FUN_08277458
+    name: string_object_delete
+    size: 40
+    sig: "void string_object_delete(StringObject *this)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: this, DAT_089a6044: STRING_OBJECT_VTABLE_ADDRESS}
+    notes: >-
+      0 direct bl call sites (binary-scanned) - the deleting destructor
+      is reached through delete expressions, not branches. 36 code
+      bytes + the 4-byte vtable literal @ 0x08277480 (= 0x089a6044,
+      binary-verified). The deleting-destructor sibling of
+      string_object_destroy @ 0x08277484: `movs r4, r0` / `ldmiaeq
+      sp!, {r4, pc}` (a NULL `this` returns untouched - unlike the
+      destroy sibling there IS a NULL guard), `obj[0] = 0x089a6044`,
+      `bl 0x08275d74` (the ported string_object_release_payload), then
+      a tail `b 0x082aad24` with `this`. Verified against osos.asm:
+      0x082aad24 is the tag-2 operator delete (`movne r1, #2; bne
+      0x080e7970`), already ported as operator_delete in
+      heap/veneers.rs, so the port calls it directly - the
+      missing_free_p4 ops-slot rule for unported free contracts does
+      not apply. The payload release dispatches through the
+      STRING_OBJECT_OPS.release_payload slot (wired default: the ported
+      release) exactly like the destroy sibling. Port returns void -
+      the original tail-branches into the delete without rewriting r0,
+      so the caller never sees a usable `this`. match.py structural:
+      same NULL-guard early-out / vtable store / release call / tail
+      branch into the delete; the diff is LLVM's fp frame and the bl
+      becoming a blx through the ops slot (the documented deviation).
 
   - address: 0x082cfae8
     ghidra: FUN_082cfae8

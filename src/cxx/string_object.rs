@@ -13,8 +13,10 @@
 //!
 //! - 0x08277440 — the trivial default ctor (ported here).
 //! - 0x08277414 — a second ctor that additionally calls 0x08276620.
-//! - 0x08277458 — the deleting destructor: vtable, then 0x08275d74,
-//!   then operator delete @ 0x082aad24 (NULL-guarded on `this`).
+//! - 0x08277458 — the deleting destructor (ported here): vtable, then
+//!   0x08275d74, then operator delete @ 0x082aad24 (NULL-guarded on
+//!   `this`; operator delete is ported as `operator_delete` in
+//!   heap/veneers.rs, so it is called directly).
 //! - 0x08277484 — the plain destructor (ported here): vtable +
 //!   0x08275d74, no delete.
 //!
@@ -46,6 +48,13 @@
 //!   shared payload release both destructors run: NULL-guards the
 //!   payload word at +4, frees it through `free_wrapper` @ 0x080e7970
 //!   with caller tag 0x34, then NULLs the word.
+//! - `string_object_delete` — original: `FUN_08277458` @ 0x08277458
+//!   (40 bytes: 36 code + the 4-byte vtable literal @ 0x08277480;
+//!   0 direct `bl` call sites, binary-scanned — the deleting
+//!   destructor is reached through `delete` expressions, not
+//!   branches). NULL-guards `this`, plants the vtable, runs the
+//!   payload release, then tail-branches to the ported
+//!   `operator_delete` @ 0x082aad24 with `this`.
 //!
 //! Deviations:
 //!
@@ -62,8 +71,12 @@
 //!   install a recording mock; the shipped default is the ported
 //!   [`string_object_release_payload`] itself (the same wiring as
 //!   heap/tracked.rs's `TRACKED_STATS_OPS.lock`).
+//! - `string_object_delete`'s operator delete @ 0x082aad24 IS ported
+//!   (heap/veneers.rs `operator_delete`), so it is called directly —
+//!   the missing_free_p4 ops-slot rule for unported free contracts
+//!   does not apply.
 
-use crate::heap::veneers::free_wrapper;
+use crate::heap::veneers::{free_wrapper, operator_delete};
 
 /// Original load address of the class vtable the constructor plants
 /// (`ldr r1, [0x08277454]` in every sibling). See the module header for
@@ -179,6 +192,33 @@ pub unsafe extern "C" fn string_object_destroy(this: *mut StringObject) -> *mut 
     (*this).vtable = &STRING_OBJECT_VTABLE;
     release_payload_op()(this);
     this
+}
+
+/// string_object_delete — original: `FUN_08277458` @ 0x08277458
+/// (40 bytes: 36 code + the 4-byte vtable literal @ 0x08277480; 0
+/// direct `bl` call sites, binary-scanned).
+///
+/// The deleting destructor, sibling of [`string_object_destroy`] @
+/// 0x08277484: NULL-guards `this` (the original's `movs r4, r0` /
+/// `ldmiaeq sp!, {r4, pc}` — a NULL `this` returns untouched), plants
+/// the class vtable at `this + 0`, runs the shared payload release @
+/// 0x08275d74 on `this`, then tail-branches to operator delete @
+/// 0x082aad24 with `this`. Unlike the destroy sibling there IS a NULL
+/// guard on `this`. The delete primitive is ported
+/// ([`operator_delete`], the NULL-guarded tag-2 `free_wrapper`), so it
+/// is called directly rather than through an ops slot. The port
+/// returns void: the original tail-branches into the delete without
+/// rewriting r0, so the caller sees whatever the free path leaves
+/// there, never a usable `this`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_delete(this: *mut StringObject) {
+    if this.is_null() {
+        return;
+    }
+    (*this).vtable = &STRING_OBJECT_VTABLE;
+    release_payload_op()(this);
+    operator_delete(this as *mut u8);
 }
 
 #[cfg(test)]
@@ -367,5 +407,75 @@ mod tests {
         assert_eq!(freed, payload);
         assert_eq!(tag, 0x34);
         assert!(object.payload.is_null(), "destroy releases and NULLs");
+    }
+
+    #[test]
+    fn delete_with_null_this_touches_nothing() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _bench = bench();
+        unsafe {
+            string_object_delete(core::ptr::null_mut());
+        }
+        assert!(
+            release_calls().is_empty(),
+            "the original's movs/ldmiaeq early-out skips the release"
+        );
+        assert_eq!(
+            crate::heap::veneers::tests::free_log().0,
+            0,
+            "and never reaches operator delete"
+        );
+    }
+
+    #[test]
+    fn delete_releases_payload_then_operator_deletes_this() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _bench = bench();
+        let mut object = StringObject {
+            vtable: 0xdead_beef as *const StringObjectVtable,
+            payload: 0xcafe_f00d as *mut u8,
+        };
+        let this: *mut StringObject = &mut object;
+        unsafe {
+            string_object_delete(this);
+        }
+        assert_eq!(object.vtable, &STRING_OBJECT_VTABLE as *const _);
+        let calls = release_calls();
+        assert_eq!(calls.len(), 1, "exactly one payload release");
+        assert_eq!(calls[0].0, this as usize, "release receives `this`");
+        assert_eq!(
+            calls[0].1,
+            &STRING_OBJECT_VTABLE as *const _ as usize,
+            "the vtable store precedes the release call (str before bl)"
+        );
+        let (calls, freed, tag) = crate::heap::veneers::tests::free_log();
+        assert_eq!(
+            calls, 1,
+            "the recording release frees nothing, so the one free is the delete"
+        );
+        assert_eq!(freed, this as *mut u8, "operator delete receives `this`");
+        assert_eq!(tag, 2, "operator_delete @ 0x082aad24's tag-2 free");
+    }
+
+    #[test]
+    fn delete_with_default_ops_frees_payload_then_this() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _lock = OPS_LOCK.lock().unwrap();
+        let mut payload_storage = [0u8; 8];
+        let payload = payload_storage.as_mut_ptr();
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload,
+        };
+        let this: *mut StringObject = &mut object;
+        unsafe {
+            string_object_delete(this);
+        }
+        let (calls, freed, tag) = crate::heap::veneers::tests::free_log();
+        assert_eq!(calls, 2, "the payload free, then the delete of `this`");
+        assert_eq!(freed, this as *mut u8, "the LAST free is the delete");
+        assert_eq!(tag, 2, "operator delete's tag-2, after the payload's 0x34");
+        assert!(object.payload.is_null(), "the release NULLed the word first");
+        assert_eq!(object.vtable, &STRING_OBJECT_VTABLE as *const _);
     }
 }
