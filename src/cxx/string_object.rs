@@ -941,10 +941,30 @@ pub unsafe extern "C" fn utf16_utf8_byte_len_bounded_plus1(
     utf8_byte_len_add(utf8_byte_len, 1)
 }
 
-
-
-
-
+/// utf8_codepoint_byte_width — original: `FUN_08276380` @ 0x08276380
+/// (28 bytes, all code; source:
+/// `ipod-decomp/decomp/c/026/08276380_FUN_08276380.c`).
+///
+/// Classifies the number of UTF-8 bytes needed for an unsigned codepoint:
+/// values through 0x7f need one byte, values from 0x80 through 0x7ff need
+/// two, and every value from 0x800 through `u32::MAX` needs three. The
+/// original compares unsigned values (`0x7f < codepoint`, then
+/// `codepoint < 0x800`); this `u32` signature preserves those boundary
+/// semantics exactly. It does not validate Unicode scalar values, so
+/// surrogates and out-of-range codepoints take the three-byte branch.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub extern "C" fn utf8_codepoint_byte_width(codepoint: u32) -> u32 {
+    if 0x7f < codepoint {
+        if codepoint < 0x800 {
+            2
+        } else {
+            3
+        }
+    } else {
+        1
+    }
+}
 
 /// utf8_strcmp_safe — original: `FUN_08276d64` @ 0x08276d64 (56 bytes,
 /// all code; source: `ipod-decomp/decomp/c/026/08276d64_FUN_08276d64.c`).
@@ -2540,6 +2560,27 @@ mod tests {
             "the terminator is not counted as UTF-8 data and ends the loop"
         );
     }
+
+    // ---- utf8_codepoint_byte_width ----------------------------------
+
+    #[test]
+    fn utf8_codepoint_byte_width_uses_unsigned_utf8_boundaries() {
+        for (codepoint, expected) in [
+            (0u32, 1),
+            (0x7f, 1),
+            (0x80, 2),
+            (0x7ff, 2),
+            (0x800, 3),
+            (u32::MAX, 3),
+        ] {
+            assert_eq!(
+                utf8_codepoint_byte_width(codepoint),
+                expected,
+                "codepoint {codepoint:#x}"
+            );
+        }
+    }
+
 
     // ---- utf8_strcmp_safe -------------------------------------------
 

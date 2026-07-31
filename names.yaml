@@ -10079,6 +10079,23 @@ functions:
       only after a nonzero unit is processed. The signed 32-bit sum,
       including the final NUL, wraps on overflow.
 
+  - address: 0x08276380
+    ghidra: FUN_08276380
+    name: utf8_codepoint_byte_width
+    size: 28
+    sig: "unsigned int utf8_codepoint_byte_width(unsigned int codepoint)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: codepoint, uVar1: byte_width}
+    notes: >-
+      The unsigned codepoint-to-UTF-8 byte-width classifier. The original
+      first tests `0x7f < codepoint`: values 0x00 through 0x7f return 1.
+      Larger values then test `codepoint < 0x800`: 0x80 through 0x7ff
+      return 2, and 0x800 through 0xffffffff return 3. No Unicode scalar
+      validation occurs, so surrogates and out-of-range values take the
+      three-byte branch. The `u32` Rust argument preserves the original
+      unsigned comparison behavior.
+
   - address: 0x08275d74
     ghidra: FUN_08275d74
     name: string_object_release_payload
