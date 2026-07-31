@@ -14823,3 +14823,25 @@ functions:
       two-compares-then-scale-then-truncate shape; LLVM inlined the
       __fscalb/__f2i bodies and turned the unsigned >= 0xc7000000
       compare into an equivalent top-byte compare.
+
+  - address: 0x080e9974
+    ghidra: FUN_080e9974
+    name: atoi_decimal
+    size: 44
+    sig: "u32 atoi_decimal(const char *s)"
+    module: strto/atoi_decimal
+    status: ported
+    renames:
+      param_1: s
+      iVar1: acc
+    notes: >-
+      Minimal decimal atoi: wrapping u32 accumulate
+      acc = acc*10 + (byte - '0') while the byte is in '0'..'9'
+      (unsigned compare). No whitespace skip, no sign, no overflow
+      check. Six bl call sites, all inside FUN_08056d70 @ 0x08056d70,
+      which parses a space-separated line of six decimal fields into a
+      struct at offsets 0x11c..0x128. NOT the libc atoi (that is the
+      ADS strtol wrapper @ 0x0802f990). Port returns u32 instead of
+      int; identical bit pattern. match.py structural: same
+      ldrb/sub-0x30/cmp-9/shift-add-*10 loop; LLVM peels the first
+      iteration and uses a frame.
