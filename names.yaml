@@ -11406,9 +11406,9 @@ functions:
       SQLite's sqlite3StrAccumReset. If zText (+0x4) equals zBase (+0x0),
       it returns immediately and preserves every field. Otherwise it passes
       zText to sqlite3_free at 0x083906f4 (the ported
-      heap::tracked::tracked_free) and then writes NULL to zText. The
-      allocator call and post-call store are verified against the 40-byte
-      disassembly.
+      heap::tracked::tracked_free) and then writes NULL to zText.
+      The allocator call and post-call NULL store are verified against the
+      40-byte disassembly.
 
   # ---- VDBE code builder (src/sqlite/vdbe.rs) ----
   - address: 0x08386824
