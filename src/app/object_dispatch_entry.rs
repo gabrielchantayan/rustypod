@@ -71,6 +71,48 @@ const _: [u8; 0x04] = [0; core::mem::offset_of!(ObjectDispatchEntry, drain_state
 const _: [u8; 0x14] = [0; core::mem::offset_of!(ObjectDispatchEntry, pending_dispatch)];
 const _: [u8; 0x18] = [0; core::mem::offset_of!(ObjectDispatchEntry, condition_variable)];
 const _: [u8; OBJECT_DISPATCH_ENTRY_SIZE] = [0; core::mem::size_of::<ObjectDispatchEntry>()];
+/// Return-preserving slot +0x4c of the target's virtual table. The target
+/// class is not yet identified, so the return register stays a raw word.
+pub type ObjectDispatchEntryDispatch = unsafe extern "C" fn(*mut ObjectDispatchTarget) -> usize;
+
+/// The virtual table reached through an object's dispatch target. The filler
+/// keeps the named call slot at +0x4c on the 32-bit firmware target while
+/// keeping host function-pointer fields disjoint.
+#[repr(C)]
+pub struct ObjectDispatchTargetVtable {
+    /// Slots +0x00..+0x48: not dispatched by this veneer.
+    pub unresolved_00_48: [usize; 19],
+    /// +0x4c: target-specific action invoked by
+    /// [`object_dispatch_entry_dispatch`].
+    pub dispatch: ObjectDispatchEntryDispatch,
+}
+
+/// The vtable-bearing target selected from a dispatch source's +0x88 word.
+#[repr(C)]
+pub struct ObjectDispatchTarget {
+    /// +0x00: virtual table loaded immediately before the +0x4c dispatch.
+    pub vtable: *const ObjectDispatchTargetVtable,
+}
+
+/// The portion of the source object observed by
+/// [`object_dispatch_entry_dispatch`].
+///
+/// The preceding words remain opaque: this small veneer only selects the
+/// target pointer at +0x88 and never reads the source object otherwise.
+#[repr(C)]
+pub struct ObjectDispatchSource {
+    /// +0x00..+0x84: source-class state not observed here.
+    pub opaque_00_84: [usize; 34],
+    /// +0x88: target whose virtual +0x4c slot is invoked.
+    pub dispatch_target: *mut ObjectDispatchTarget,
+}
+
+// Target-exact field offsets. Host tests intentionally use pointer-width
+// fields so real host function pointers remain valid.
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x88] = [0; core::mem::offset_of!(ObjectDispatchSource, dispatch_target)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x4c] = [0; core::mem::offset_of!(ObjectDispatchTargetVtable, dispatch)];
 
 /// Injection point for the embedded drain-state constructor @ 0x08271cec.
 pub type DrainStateConstruct = unsafe extern "C" fn(*mut DrainState) -> *mut DrainState;
@@ -109,6 +151,32 @@ pub static mut OBJECT_DISPATCH_ENTRY_OPS: ObjectDispatchEntryOps = ObjectDispatc
 #[inline(always)]
 unsafe fn dispatch_entry_ops() -> ObjectDispatchEntryOps {
     core::ptr::read_volatile(core::ptr::addr_of!(OBJECT_DISPATCH_ENTRY_OPS))
+}
+/// object_dispatch_entry_dispatch — original: `FUN_0811c178` @ 0x0811c178
+/// (16 bytes).
+///
+/// Loads the dispatch target from `source + 0x88`, then tail-dispatches the
+/// target's vtable slot +0x4c with that target as its sole argument. The raw
+/// sequence is `ldr r0, [r0, #0x88]`, `ldr r1, [r0]`, `ldr r1, [r1, #0x4c]`,
+/// `bx r1`; consequently there is no NULL guard and the target's raw r0
+/// return word becomes this veneer’s return word unchanged.
+///
+/// The target class and slot semantics are not recovered. The port therefore
+/// uses neutral source/target types and an `usize` result rather than
+/// assigning an unsupported meaning. On the 64-bit host, `usize` filler
+/// fields keep the typed +0x4c dispatch slot disjoint; the documented layout
+/// and compile-time offset checks are exact on the 32-bit firmware target.
+///
+/// Sources: `ipod-decomp/decomp/c/010/0811c178_FUN_0811c178.c` and the raw
+/// instruction sequence at 0x0811c178 in `ipod-decomp/decomp/osos.asm`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn object_dispatch_entry_dispatch(
+    source: *mut ObjectDispatchSource,
+) -> usize {
+    let target = core::ptr::read_volatile(core::ptr::addr_of!((*source).dispatch_target));
+    let vtable = core::ptr::read_volatile(core::ptr::addr_of!((*target).vtable));
+    ((*vtable).dispatch)(target)
 }
 
 /// object_dispatch_entry_construct — original: `FUN_0810f9f0` @ 0x0810f9f0
@@ -152,6 +220,24 @@ mod tests {
     static mut EXPECTED_CONDITION_VARIABLE: *mut ConditionVariableState = ptr::null_mut();
     static mut CALLS: [u8; 2] = [0; 2];
     static mut CALL_COUNT: usize = 0;
+    static mut EXPECTED_DISPATCH_TARGET: *mut ObjectDispatchTarget = ptr::null_mut();
+    static mut DISPATCH_CALLS: usize = 0;
+    static mut DISPATCH_RESULT: usize = 0;
+
+    unsafe extern "C" fn record_dispatch(target: *mut ObjectDispatchTarget) -> usize {
+        assert_eq!(
+            target, EXPECTED_DISPATCH_TARGET,
+            "the selected +0x88 target is forwarded as the slot's r0"
+        );
+        DISPATCH_CALLS += 1;
+        DISPATCH_RESULT
+    }
+
+    unsafe fn clear_dispatch_recording() {
+        EXPECTED_DISPATCH_TARGET = ptr::null_mut();
+        DISPATCH_CALLS = 0;
+        DISPATCH_RESULT = 0;
+    }
 
     unsafe extern "C" fn record_drain_state(state: *mut DrainState) -> *mut DrainState {
         assert_eq!(state, EXPECTED_DRAIN_STATE);
@@ -225,5 +311,31 @@ mod tests {
 
         unsafe { restore_ops() };
         drop(guard);
+    }
+    #[test]
+    fn dispatch_uses_the_4c_slot_and_forwards_the_selected_target() {
+        let vtable = ObjectDispatchTargetVtable {
+            unresolved_00_48: [0xdead_beef; 19],
+            dispatch: record_dispatch,
+        };
+        let mut target = ObjectDispatchTarget { vtable: &vtable };
+        let mut source = ObjectDispatchSource {
+            opaque_00_84: [0xa5a5_a5a5; 34],
+            dispatch_target: ptr::addr_of_mut!(target),
+        };
+
+        unsafe {
+            clear_dispatch_recording();
+            EXPECTED_DISPATCH_TARGET = ptr::addr_of_mut!(target);
+            DISPATCH_RESULT = 0xcafe_babe;
+
+            assert_eq!(
+                object_dispatch_entry_dispatch(ptr::addr_of_mut!(source)),
+                DISPATCH_RESULT,
+                "the slot's r0 result is returned by the tail-dispatch veneer"
+            );
+            assert_eq!(DISPATCH_CALLS, 1, "only the named +0x4c slot runs");
+            clear_dispatch_recording();
+        }
     }
 }

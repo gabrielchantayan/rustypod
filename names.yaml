@@ -15709,3 +15709,23 @@ functions:
       post-index pre-call stores, drain-state call, subtract-16, and five
       post-call zero stores are retained; the seam lowers to a volatile
       ops-table load plus blx.
+
+  - address: 0x0811c178
+    ghidra: FUN_0811c178
+    name: object_dispatch_entry_dispatch
+    size: 16
+    sig: "u32 object_dispatch_entry_dispatch(ObjectDispatchSource *source)"
+    module: app/object_dispatch_entry
+    status: ported
+    renames:
+      param_1: source
+      iVar1: target_vtable
+    notes: >-
+      Tail-dispatch veneer: loads the target pointer from source+0x88, loads
+      its vtable, then branches to vtable+0x4c with the selected target as r0.
+      The target class and slot semantics remain unidentified, so the Rust
+      signature preserves the raw returned r0 word. Reference C:
+      decomp/c/010/0811c178_FUN_0811c178.c; raw assembly: osos.asm
+      0x0811c178. Focused host tests prove +0x4c slot selection, target
+      forwarding, and raw return-word propagation. match.py structural:
+      source +0x88 load, target-vtable load, +0x4c indirect tail dispatch.
