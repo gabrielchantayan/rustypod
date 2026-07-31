@@ -9965,8 +9965,8 @@ functions:
     size: 56
     sig: "int utf8_strcmp_safe(const char *a, const char *b)"
     module: cxx/string_object
-    status: identified
-    vars: {param_1: a, param_2: b, DAT_08276db0: UTF8_STRCMP_SAFE_EMPTY_CSTR_ADDRESS}
+    status: ported
+    vars: {param_1: a, param_2: b, local_c: a_cursor, local_10: b_cursor, iVar1: codepoint_a, iVar2: codepoint_b, DAT_08276db0: UTF8_STRCMP_SAFE_EMPTY_CSTR_ADDRESS}
     notes: >-
       ~20 bl call sites (decomp/c grepped: 0x0816c58c, 0x0816ddb4,
       0x0816ed0c, 0x08172afc, 0x0817f72c, 0x081bdb6c, 0x0828a9d4,
@@ -9977,13 +9977,9 @@ functions:
       0x08276db0 holds 0x083e2e3a - the SAME address
       string_object_c_str @ 0x082a50b0 falls back to, binary-verified),
       then both strings are walked CODEPOINT by CODEPOINT through the
-      UTF-8 decoder @ 0x08276214 (identified below), returning the
-      first differing codepoint pair's difference (sub r0, r4, r0), 0
-      at a shared terminator. Reached from cxx/string_object.rs's
-      string_id_record_equals through the UTF8_STRCMP_SAFE dispatch
-      slot whose default stub is a byte-wise strcmp behind the same
-      NULL guard - exact on pure ASCII inputs; the real port replaces
-      the stub when it lands.
+      ported UTF-8 decoder @ 0x08276214, returning the first differing
+      codepoint pair's difference (sub r0, r4, r0), 0 at a shared
+      terminator. string_id_record_equals calls the port directly.
 
   - address: 0x08276214
     ghidra: FUN_08276214
@@ -11396,6 +11392,23 @@ functions:
       capacities, and mallocFailed/useMalloc/tooBig at +0x14/+0x15/+0x16
       become 0/1/0. Leaf 44-byte store sequence; no validation or base
       buffer access.
+
+  # ---- SQLite string accumulator reset (src/sqlite/str_accum.rs) ----
+  - address: 0x08384eb0
+    ghidra: FUN_08384eb0
+    name: str_accum_reset
+    size: 40
+    sig: "void str_accum_reset(StrAccum *accum)"
+    module: sqlite/str_accum
+    status: ported
+    vars: {param_1: accum}
+    notes: >-
+      SQLite's sqlite3StrAccumReset. If zText (+0x4) equals zBase (+0x0),
+      it returns immediately and preserves every field. Otherwise it passes
+      zText to sqlite3_free at 0x083906f4 (the ported
+      heap::tracked::tracked_free) and then writes NULL to zText. The
+      allocator call and post-call store are verified against the 40-byte
+      disassembly.
 
   # ---- VDBE code builder (src/sqlite/vdbe.rs) ----
   - address: 0x08386824

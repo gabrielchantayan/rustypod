@@ -226,17 +226,11 @@
 //!   its own saved `this` (`mov r0, r4`, not the callee's return), so
 //!   neither the modeled-vtable nor the return-derivation deviation
 //!   applies.
-//! - `string_id_record_equals` compares the strings through the
-//!   unported UTF-8 comparator @ 0x08276d64 (its per-character decoder
-//!   @ 0x08276214 walks 1/2/3-byte sequences and compares decoded
-//!   codepoints), so the comparison goes through the
-//!   [`UTF8_STRCMP_SAFE`] dispatch slot (the
-//!   [`STRING_OBJECT_COPY_CONSTRUCT`] pattern). The default stub is a
-//!   plain byte-wise strcmp behind the original's own NULL guard —
-//!   exact whenever both strings are pure ASCII (the UTF-8 decode
-//!   collapses to the identity for bytes < 0x80), divergent only on
-//!   multibyte sequences. The real port of 0x08276d64 replaces the
-//!   stub when it lands. The source side runs through the ported
+//! - `string_id_record_equals` compares the strings through the ported
+//!   [`utf8_strcmp_safe`] comparator @ 0x08276d64. It substitutes the
+//!   shared empty C string for either NULL argument, then walks both
+//!   strings through [`utf8_next_codepoint`] and compares decoded
+//!   codepoints. The source side runs through the ported
 //!   [`string_object_c_str`] directly (no deviation).
 
 use crate::heap::veneers::{free_wrapper, operator_delete};
@@ -815,58 +809,32 @@ pub unsafe extern "C" fn utf8_next_codepoint(cursor: *mut *const u8) -> u32 {
     0
 }
 
-/// Default [`UTF8_STRCMP_SAFE`] stub: a plain byte-wise strcmp behind
-/// the original's own NULL guard. The unported comparator @ 0x08276d64
-/// substitutes a shared empty C string for either NULL argument (its
-/// literal-pool word @ 0x08276db0 holds 0x083e2e3a — the SAME shared
-/// empty [`string_object_c_str`] falls back to, binary-verified
-/// against osos.dec) and then compares the strings CODEPOINT by
-/// CODEPOINT through the UTF-8 decoder @ 0x08276214 (1/2/3-byte
-/// sequences; a 4-byte lead decodes as 0, terminating the string).
-/// For bytes < 0x80 that decode is the identity, so this stub — NULL
-/// substitution plus a byte loop returning the first differing byte
-/// pair's difference, 0 at a shared NUL — is exact whenever both
-/// strings are pure ASCII, and reproduces the original's loop
-/// structure and result contract (`a - b`, like strcmp) on every
-/// input. Multibyte inputs diverge: the original compares decoded
-/// codepoints, this stub compares bytes. The real port of 0x08276d64
-/// replaces this stub when it lands (see the module header).
-unsafe extern "C" fn utf8_strcmp_safe_stub(a: *const u8, b: *const u8) -> i32 {
+/// utf8_strcmp_safe — original: `FUN_08276d64` @ 0x08276d64 (56 bytes,
+/// all code; source: `ipod-decomp/decomp/c/026/08276d64_FUN_08276d64.c`).
+///
+/// Substitutes the firmware's shared empty C string for either NULL argument,
+/// then decodes both cursors with [`utf8_next_codepoint`]. Returns the first
+/// unequal decoded codepoints' difference, or zero once both decoders return
+/// the same zero codepoint. Consequently an invalid or four-byte lead ends
+/// comparison because the retail decoder consumes three bytes and returns
+/// zero for it.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn utf8_strcmp_safe(a: *const u8, b: *const u8) -> i32 {
     let empty = core::ptr::addr_of!(STRING_OBJECT_EMPTY_CSTR);
-    let a = if a.is_null() { empty } else { a };
-    let b = if b.is_null() { empty } else { b };
-    let mut index = 0usize;
+    let mut a_cursor = if a.is_null() { empty } else { a };
+    let mut b_cursor = if b.is_null() { empty } else { b };
+
     loop {
-        // Volatile reads: LLVM's loop-idiom recognition would turn a
-        // plain byte loop into a call to the libc strcmp that does not
-        // exist here (the PORTING.md gotcha).
-        let ca = core::ptr::read_volatile(a.add(index));
-        let cb = core::ptr::read_volatile(b.add(index));
-        if ca != cb {
-            return ca as i32 - cb as i32;
+        let codepoint_a = utf8_next_codepoint(&mut a_cursor);
+        let codepoint_b = utf8_next_codepoint(&mut b_cursor);
+        if codepoint_a != codepoint_b {
+            return codepoint_a as i32 - codepoint_b as i32;
         }
-        if ca == 0 {
+        if codepoint_a == 0 {
             return 0;
         }
-        index += 1;
     }
-}
-
-/// Indirect dispatch for the unported UTF-8 string comparator @
-/// 0x08276d64 (the [`STRING_OBJECT_COPY_CONSTRUCT`] pattern). Chained
-/// to by the ported record equality operator
-/// [`string_id_record_equals`]. Host tests install a recording mock;
-/// the real port of 0x08276d64 replaces the default stub when it
-/// lands.
-pub static mut UTF8_STRCMP_SAFE: unsafe extern "C" fn(a: *const u8, b: *const u8) -> i32 =
-    utf8_strcmp_safe_stub;
-
-/// Reads the string-compare slot (volatile — the slot is meant to be
-/// swapped at runtime, and a plain read lets LLVM const-fold the
-/// default away; the [`release_payload_op`] rationale).
-#[inline(always)]
-pub(crate) unsafe fn utf8_strcmp_safe_op() -> unsafe extern "C" fn(*const u8, *const u8) -> i32 {
-    core::ptr::read_volatile(core::ptr::addr_of!(UTF8_STRCMP_SAFE))
 }
 
 /// string_id_record_equals — original: `FUN_08258cc4` @ 0x08258cc4
@@ -891,13 +859,9 @@ pub(crate) unsafe fn utf8_strcmp_safe_op() -> unsafe extern "C" fn(*const u8, *c
 /// vtable store, no NULL guard on `this` or `source` — the original
 /// faults on either, and so does the port.
 ///
-/// Deviations (see the module header): the unported UTF-8 comparator @
-/// 0x08276d64 dispatches through [`UTF8_STRCMP_SAFE`], whose default
-/// stub is a plain byte-wise strcmp behind the original's own NULL
-/// guard — exact on ASCII strings. The ported [`string_object_c_str`]
-/// is called directly. The return is the C++ `bool` widened to `i32`
-/// (the original's `movne r0, #0x0` / `moveq r0, #0x1` writes the
-/// whole register — exact).
+/// The ported [`utf8_strcmp_safe`] is called directly. The return is the C++
+/// `bool` widened to `i32` (the original's `movne r0, #0x0` / `moveq r0,
+/// #0x1` writes the whole register — exact).
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn string_id_record_equals(
@@ -905,7 +869,7 @@ pub unsafe extern "C" fn string_id_record_equals(
     source: *const StringIdRecord,
 ) -> i32 {
     let source_cstr = string_object_c_str(&(*source).string);
-    let cmp = utf8_strcmp_safe_op()((*this).string.payload as *const u8, source_cstr);
+    let cmp = utf8_strcmp_safe((*this).string.payload as *const u8, source_cstr);
     if cmp == 0 && (*this).id == (*source).id {
         1
     } else {
@@ -2215,49 +2179,6 @@ mod tests {
 
     // ---- string_id_record_equals -----------------------------------
 
-    /// Serializes the tests that swap `UTF8_STRCMP_SAFE` (the
-    /// `ASSIGN_SLOT_LOCK` precedent; a separate slot, a separate lock).
-    static COMPARE_SLOT_LOCK: Mutex<()> = Mutex::new(());
-
-    /// String-compare dispatches observed by the recording mock:
-    /// (this's raw payload pointer, source's c_str result), in call
-    /// order.
-    static mut COMPARE_CALLS: Vec<(usize, usize)> = Vec::new();
-
-    /// The result the recording mock returns.
-    static mut COMPARE_RESULT: i32 = 0;
-
-    unsafe extern "C" fn recording_compare(a: *const u8, b: *const u8) -> i32 {
-        (*core::ptr::addr_of_mut!(COMPARE_CALLS)).push((a as usize, b as usize));
-        *core::ptr::addr_of!(COMPARE_RESULT)
-    }
-
-    /// Restores the default stub on drop, even when a test panics.
-    struct CompareSlotGuard;
-    impl Drop for CompareSlotGuard {
-        fn drop(&mut self) {
-            unsafe {
-                core::ptr::addr_of_mut!(UTF8_STRCMP_SAFE)
-                    .write_volatile(utf8_strcmp_safe_stub);
-            }
-        }
-    }
-
-    /// Installs the recording comparator with the given result;
-    /// restores the stub on drop.
-    fn compare_bench(result: i32) -> (MutexGuard<'static, ()>, CompareSlotGuard) {
-        let lock = COMPARE_SLOT_LOCK.lock().unwrap();
-        unsafe {
-            (*core::ptr::addr_of_mut!(COMPARE_CALLS)).clear();
-            *core::ptr::addr_of_mut!(COMPARE_RESULT) = result;
-            core::ptr::addr_of_mut!(UTF8_STRCMP_SAFE).write_volatile(recording_compare);
-        }
-        (lock, CompareSlotGuard)
-    }
-
-    fn compare_calls() -> Vec<(usize, usize)> {
-        unsafe { (*core::ptr::addr_of!(COMPARE_CALLS)).clone() }
-    }
 
     /// A record with a garbage vtable, a garbage StringObject vtable,
     /// the given payload and id.
@@ -2273,105 +2194,29 @@ mod tests {
     }
 
     #[test]
-    fn record_equals_dispatches_raw_this_payload_against_sources_c_str() {
-        let _bench = compare_bench(-3);
+    fn record_equals_compares_payload_strings_and_ids() {
         let mut this_storage = *b"artist\0";
         let mut source_storage = *b"artist\0";
-        let this_payload = this_storage.as_mut_ptr();
-        let source_payload = source_storage.as_mut_ptr();
-        let this_rec = test_record(this_payload, 7);
-        let source_rec = test_record(source_payload, 7);
+        let mut other_storage = *b"album\0";
+        let this_rec = test_record(this_storage.as_mut_ptr(), 7);
+        let same_rec = test_record(source_storage.as_mut_ptr(), 7);
+        let different_id = test_record(source_storage.as_mut_ptr(), 8);
+        let different_string = test_record(other_storage.as_mut_ptr(), 7);
         unsafe {
-            assert_eq!(
-                string_id_record_equals(&this_rec, &source_rec),
-                0,
-                "the mock's nonzero comparison forces inequality"
-            );
-        }
-        let calls = compare_calls();
-        assert_eq!(calls.len(), 1, "exactly one string-compare dispatch");
-        assert_eq!(
-            calls[0].0, this_payload as usize,
-            "ldr r0, [r4, #0x8]: this's RAW payload word, no c_str substitution"
-        );
-        assert_eq!(
-            calls[0].1, source_payload as usize,
-            "bl 0x082a50b0 on source+4: the source's c_str (non-NULL payload verbatim)"
-        );
-    }
-
-    #[test]
-    fn record_equals_passes_null_this_payload_through_verbatim() {
-        // The asymmetry: the source side runs through
-        // string_object_c_str (NULL -> shared empty), this side does
-        // not — a NULL this payload reaches the comparator as NULL and
-        // the guard lives inside 0x08276d64 itself.
-        let _bench = compare_bench(1);
-        let source_rec = test_record(core::ptr::null_mut(), 3);
-        let this_rec = test_record(core::ptr::null_mut(), 3);
-        unsafe {
-            assert_eq!(string_id_record_equals(&this_rec, &source_rec), 0);
-        }
-        let calls = compare_calls();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].0, 0, "this's NULL payload is passed through untouched");
-        assert_eq!(
-            calls[0].1,
-            core::ptr::addr_of!(STRING_OBJECT_EMPTY_CSTR) as usize,
-            "the source's NULL payload became the shared empty inside c_str"
-        );
-    }
-
-    #[test]
-    fn record_equals_with_equal_strings_compares_edge_ids() {
-        let _bench = compare_bench(0);
-        let mut storage = *b"genre\0";
-        let payload = storage.as_mut_ptr();
-        for (a, b, want) in [
-            (-1i32, -1i32, 1),
-            (i32::MIN, i32::MIN, 1),
-            (i32::MAX, 0, 0),
-            (0x1f03, 0x1f03, 1),
-            (0x1f00, 0x1f01, 0),
-        ] {
-            let this_rec = test_record(payload, a);
-            let source_rec = test_record(payload, b);
-            unsafe {
-                assert_eq!(
-                    string_id_record_equals(&this_rec, &source_rec),
-                    want,
-                    "ids {a} vs {b}: ldreq/cmpeq on the +0xc words"
-                );
-            }
+            assert_eq!(string_id_record_equals(&this_rec, &same_rec), 1);
+            assert_eq!(string_id_record_equals(&this_rec, &different_id), 0);
+            assert_eq!(string_id_record_equals(&this_rec, &different_string), 0);
         }
     }
 
     #[test]
-    fn record_equals_with_unequal_strings_never_yields_one() {
-        // cmp r0, #0x0 with the id comparison conditional: a nonzero
-        // comparator result skips the id loads entirely and yields 0
-        // even when the ids match.
-        let _bench = compare_bench(42);
-        let this_rec = test_record(core::ptr::null_mut(), 0x1f02);
-        let source_rec = test_record(core::ptr::null_mut(), 0x1f02);
+    fn record_equals_treats_null_payload_as_empty() {
+        let a = test_record(core::ptr::null_mut(), -1);
+        let b = test_record(core::ptr::null_mut(), -1);
+        let different_id = test_record(core::ptr::null_mut(), 0);
         unsafe {
-            assert_eq!(
-                string_id_record_equals(&this_rec, &source_rec),
-                0,
-                "movne r0, #0x0: strings differ, ids irrelevant"
-            );
-        }
-    }
-
-    #[test]
-    fn record_equals_returns_exactly_zero_or_one() {
-        // The original's moveq r0,#0x1 / movne r0,#0x0 writes the
-        // whole register — no other truth values exist.
-        let _bench = compare_bench(0);
-        let this_rec = test_record(core::ptr::null_mut(), 5);
-        let source_rec = test_record(core::ptr::null_mut(), 5);
-        unsafe {
-            assert_eq!(string_id_record_equals(&this_rec, &source_rec), 1);
+            assert_eq!(string_id_record_equals(&a, &b), 1);
+            assert_eq!(string_id_record_equals(&a, &different_id), 0);
         }
     }
 
@@ -2427,93 +2272,56 @@ mod tests {
         }
     }
 
-    // ---- utf8_strcmp_safe_stub (the default compare slot) -----------
+    // ---- utf8_strcmp_safe -------------------------------------------
+
+    fn compare(a: &[u8], b: &[u8]) -> i32 {
+        unsafe { utf8_strcmp_safe(a.as_ptr(), b.as_ptr()) }
+    }
 
     #[test]
-    fn compare_stub_compares_ascii_byte_wise() {
-        let _lock = COMPARE_SLOT_LOCK.lock().unwrap();
+    fn utf8_strcmp_safe_compares_ascii_prefixes_and_raw_first_difference() {
+        assert_eq!(compare(b"abc\0", b"abc\0"), 0);
+        assert_eq!(compare(b"abc\0", b"abd\0"), -1);
+        assert_eq!(compare(b"abd\0", b"abc\0"), 1);
+        assert_eq!(compare(b"ab\0", b"abc\0"), -99, "NUL - 'c'");
+        assert_eq!(compare(b"abc\0", b"ab\0"), 99, "'c' - NUL");
+    }
+
+    #[test]
+    fn utf8_strcmp_safe_compares_decoded_multibyte_codepoints() {
+        assert_eq!(
+            compare(&[0xc3, 0xa0, 0], &[0xc2, 0xbf, 0]),
+            33,
+            "U+00E0 - U+00BF, not the lead-byte difference"
+        );
+        assert_eq!(
+            compare(&[0xe2, 0x82, 0xac, 0], &[0xe2, 0x82, 0xad, 0]),
+            -1,
+            "U+20AC - U+20AD"
+        );
+    }
+
+    #[test]
+    fn utf8_strcmp_safe_substitutes_the_shared_empty_for_null() {
         unsafe {
-            assert_eq!(utf8_strcmp_safe_stub(b"abc\0".as_ptr(), b"abc\0".as_ptr()), 0);
-            assert_eq!(
-                utf8_strcmp_safe_stub(b"abc\0".as_ptr(), b"abd\0".as_ptr()),
-                -1,
-                "the first differing byte pair's difference ('c' - 'd')"
-            );
-            assert_eq!(utf8_strcmp_safe_stub(b"abd\0".as_ptr(), b"abc\0".as_ptr()), 1);
-            assert_eq!(
-                utf8_strcmp_safe_stub(b"ab\0".as_ptr(), b"abc\0".as_ptr()),
-                -99,
-                "0 - 'c': a shared prefix ends at the NUL"
-            );
-            assert_eq!(utf8_strcmp_safe_stub(b"abc\0".as_ptr(), b"ab\0".as_ptr()), 99);
-            assert_eq!(utf8_strcmp_safe_stub(b"\0".as_ptr(), b"\0".as_ptr()), 0);
+            assert_eq!(utf8_strcmp_safe(core::ptr::null(), core::ptr::null()), 0);
+            assert_eq!(utf8_strcmp_safe(core::ptr::null(), b"\0".as_ptr()), 0);
+            assert_eq!(utf8_strcmp_safe(core::ptr::null(), b"a\0".as_ptr()), -97);
+            assert_eq!(utf8_strcmp_safe(b"a\0".as_ptr(), core::ptr::null()), 97);
         }
     }
 
     #[test]
-    fn compare_stub_substitutes_the_shared_empty_for_null() {
-        // The original's own guard (ldreq r0/r1, [0x08276db0]) —
-        // reproduced exactly, with the same modeled empty c_str uses.
-        let _lock = COMPARE_SLOT_LOCK.lock().unwrap();
-        unsafe {
-            assert_eq!(
-                utf8_strcmp_safe_stub(core::ptr::null(), core::ptr::null()),
-                0,
-                "NULL == NULL: both become the shared empty"
-            );
-            assert_eq!(
-                utf8_strcmp_safe_stub(core::ptr::null(), b"\0".as_ptr()),
-                0,
-                "NULL reads as the empty string"
-            );
-            assert_eq!(
-                utf8_strcmp_safe_stub(core::ptr::null(), b"a\0".as_ptr()),
-                -97,
-                "0 - 'a'"
-            );
-            assert_eq!(utf8_strcmp_safe_stub(b"a\0".as_ptr(), core::ptr::null()), 97);
-        }
-    }
-
-    #[test]
-    fn record_equals_through_the_default_stub_compares_real_strings() {
-        // End to end with no mock: the ported c_str on the source side
-        // and the default byte-compare stub decide, then the ids.
-        let _lock = COMPARE_SLOT_LOCK.lock().unwrap();
-        let mut this_storage = *b"OpenGL ES-CM 1.1\0";
-        let mut source_storage = *b"OpenGL ES-CM 1.1\0";
-        let this_rec = test_record(this_storage.as_mut_ptr(), 0x1f02);
-        let source_rec = test_record(source_storage.as_mut_ptr(), 0x1f02);
-        let other_id = test_record(source_storage.as_mut_ptr(), 0x1f01);
-        let mut other_storage = *b"Software\0";
-        let other_str = test_record(other_storage.as_mut_ptr(), 0x1f02);
-        unsafe {
-            assert_eq!(
-                string_id_record_equals(&this_rec, &source_rec),
-                1,
-                "same content in different buffers, same id"
-            );
-            assert_eq!(string_id_record_equals(&this_rec, &other_id), 0, "ids differ");
-            assert_eq!(
-                string_id_record_equals(&this_rec, &other_str),
-                0,
-                "strings differ"
-            );
-        }
-    }
-
-    #[test]
-    fn record_equals_through_the_default_stub_treats_null_payloads_as_empty() {
-        // Both NULL payloads: this side passes NULL into the stub
-        // (substituted inside it), the source side substitutes inside
-        // c_str — either way both compare as "", so the ids decide.
-        let _lock = COMPARE_SLOT_LOCK.lock().unwrap();
-        let a = test_record(core::ptr::null_mut(), -1);
-        let b = test_record(core::ptr::null_mut(), -1);
-        let c = test_record(core::ptr::null_mut(), 0);
-        unsafe {
-            assert_eq!(string_id_record_equals(&a, &b), 1, "two default records are equal");
-            assert_eq!(string_id_record_equals(&a, &c), 0, "until the id differs");
-        }
+    fn utf8_strcmp_safe_uses_decoder_results_for_malformed_and_four_byte_leads() {
+        assert_eq!(
+            compare(&[0xc2, 0xff, 0], &[0xc2, 0xbf, 0]),
+            0,
+            "the decoder payload-masks malformed continuation bytes"
+        );
+        assert_eq!(
+            compare(&[0xf0, 0x9f, 0x92, 0xa9, b'x', 0], b"\0"),
+            0,
+            "a four-byte lead decodes as the comparator's terminator"
+        );
     }
 }
