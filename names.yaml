@@ -15710,6 +15710,39 @@ functions:
       post-call zero stores are retained; the seam lowers to a volatile
       ops-table load plus blx.
 
+  - address: 0x0811c138
+    ghidra: FUN_0811c138
+    name: app_string_owner_initialize
+    size: 32
+    sig: "void *app_string_owner_initialize(void *this, u32 owner_word, void *argument)"
+    module: app/string_owner_init
+    status: ported
+    renames:
+      param_1: this
+      param_2: owner_word
+      param_3: argument
+      DAT_0811c158: APP_STRING_OWNER_VTABLE
+      FUN_0827735c: initialize_string_object
+      iVar2: helper_result
+    notes: >-
+      28 code bytes plus the 4-byte vtable literal at 0x0811c158
+      (= 0x089a7428, binary-verified). Initializer paired with the
+      0x0811c15c destructor of an otherwise unidentified application object:
+      it plants that outer vtable at +0, stores the caller's owner_word at +4,
+      and invokes the unported embedded StringObject constructor
+      FUN_0827735c(this + 8, argument). It returns that helper result minus 8
+      with wrapping pointer arithmetic, preserving ARM `sub r0, r0, #8` at
+      every address. The helper's argument-consuming virtual construction is
+      intentionally modeled as a volatile application operation seam rather
+      than claimed as a port of FUN_0827735c; its default establishes only the
+      independently verified StringObject base layout. Reference C:
+      decomp/c/010/0811c138_FUN_0811c138.c; dependency:
+      decomp/c/026/0827735c_FUN_0827735c.c; assembly: osos.asm 0x0811c138.
+      Focused tests prove the +0/+4 field layout, exact +8 helper and argument
+      forwarding, and zero-address wrapping return adjustment. match.py
+      structural: outer stores, +8 helper base, argument forwarding, and
+      subtract-8 remain; the seam lowers to a volatile ops-table load plus blx.
+
   - address: 0x0811c15c
     ghidra: FUN_0811c15c
     name: app_string_owner_destroy
