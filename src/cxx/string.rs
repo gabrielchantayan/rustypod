@@ -90,10 +90,12 @@
 //!   one-to-one.
 
 use crate::heap::veneers::{operator_delete, operator_new_checked};
+use crate::cxx::string_object::{string_object_c_str, StringObject};
 use crate::libc::memcmp::memcmp;
 use crate::libc::memmove::memmove;
 use crate::libc::rt_memcpy::__rt_memcpy;
 use crate::libc::strlen::strlen;
+use crate::libc::strncpy::strncpy;
 
 /// Bytes of header below the character data.
 pub const REP_HEADER_SIZE: usize = 12;
@@ -323,6 +325,56 @@ pub unsafe extern "C" fn cxx_string_from_cstr(
     __rt_memcpy(data, source, length as usize);
     string
 }
+
+/// string_object_copy_cstr_to_buffer — original: `FUN_080e9740` @
+/// 0x080e9740 (72 bytes; source:
+/// `ipod-decomp/decomp/c/008/080e9740_FUN_080e9740.c`).
+///
+/// Copies a [`StringObject`]'s C string into a caller-provided buffer and
+/// replaces `*inout_length` with the full source length. The incoming word is
+/// the `strncpy` byte limit: the copy stops at that many bytes and
+/// zero-pads after a terminator, while the outgoing word is always `strlen`
+/// of the untruncated source. The two calls to
+/// [`string_object_c_str`] and the conditional gate are deliberately kept:
+/// 0x080e9750 probes the accessor before copying, then 0x080e9778 obtains
+/// it again for `strlen`. The current accessor never returns NULL (a NULL
+/// payload becomes the shared empty C string), so the gate normally takes
+/// the copy path; if an implementation returns NULL, the original leaves
+/// `destination` untouched and writes zero to `*inout_length`.
+///
+/// The routine returns `void`; `inout_length` is its sole result location.
+/// It has no ownership effect on the source or the returned C-string pointer.
+///
+/// The callee addresses are volatile-read function pointers to retain the
+/// three `c_str` calls plus the `strncpy` and `strlen` call boundaries in
+/// the ARM object; this is the same anti-inlining pattern used by
+/// `string_object_len_plus1`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_copy_cstr_to_buffer(
+    source: *const StringObject,
+    destination: *mut u8,
+    inout_length: *mut u32,
+) {
+    let c_str: unsafe extern "C" fn(*const StringObject) -> *const u8 =
+        core::ptr::read_volatile(
+            &(string_object_c_str as unsafe extern "C" fn(*const StringObject) -> *const u8),
+        );
+    let mut source_length = 0;
+    if !c_str(source).is_null() {
+        let cstr = c_str(source);
+        let copy: unsafe extern "C" fn(*mut u8, *const u8, usize) -> *mut u8 =
+            core::ptr::read_volatile(
+                &(strncpy as unsafe extern "C" fn(*mut u8, *const u8, usize) -> *mut u8),
+            );
+        copy(destination, cstr, (*inout_length) as usize);
+        let measure: unsafe extern "C" fn(*const u8) -> usize =
+            core::ptr::read_volatile(&(strlen as unsafe extern "C" fn(*const u8) -> usize));
+        source_length = measure(c_str(source)) as u32;
+    }
+    *inout_length = source_length;
+}
+
 
 /// cxx_string_rep_add_ref — original: `FUN_083b54f8` @ 0x083b54f8
 /// (24 bytes, 2 `bl` call sites — 0x083d8c54 in [`cxx_string_copy_ctor`]
@@ -1581,5 +1633,58 @@ mod tests {
             assert_eq!((*rep).length, 9);
             (*core::ptr::addr_of_mut!(CXX_STRING_OPS)).report_error = saved;
         }
+    }
+
+    #[test]
+    fn string_object_copy_cstr_to_buffer_truncates_by_capacity_but_reports_full_length() {
+        let mut source = *b"alphabet\0";
+        let string = StringObject {
+            vtable: core::ptr::null(),
+            payload: source.as_mut_ptr(),
+        };
+        let mut destination = [0xa5; 10];
+        let mut length = 4;
+
+        unsafe {
+            string_object_copy_cstr_to_buffer(&string, destination.as_mut_ptr(), &mut length);
+        }
+
+        assert_eq!(&destination[..4], b"alph");
+        assert_eq!(&destination[4..], &[0xa5; 6]);
+        assert_eq!(length, 8, "the output is strlen(source), not bytes copied");
+    }
+
+    #[test]
+    fn string_object_copy_cstr_to_buffer_zero_pads_and_empty_payload_reports_zero() {
+        let mut empty = [0u8; 4];
+        let string = StringObject {
+            vtable: core::ptr::null(),
+            payload: empty.as_mut_ptr(),
+        };
+        let mut destination = [0xa5; 6];
+        let mut length = destination.len() as u32;
+
+        unsafe {
+            string_object_copy_cstr_to_buffer(&string, destination.as_mut_ptr(), &mut length);
+        }
+
+        assert_eq!(destination, [0; 6], "strncpy zero-pads through the input capacity");
+        assert_eq!(length, 0);
+
+        let null_payload = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        let mut untouched = [0xa5; 2];
+        let mut zero_capacity = 0;
+        unsafe {
+            string_object_copy_cstr_to_buffer(
+                &null_payload,
+                untouched.as_mut_ptr(),
+                &mut zero_capacity,
+            );
+        }
+        assert_eq!(untouched, [0xa5; 2], "zero-capacity strncpy writes nothing");
+        assert_eq!(zero_capacity, 0, "the accessor's empty fallback has strlen zero");
     }
 }

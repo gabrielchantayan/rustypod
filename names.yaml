@@ -14508,6 +14508,37 @@ functions:
       meaning of mode 4 is established, so the name describes the
       arithmetic rather than claiming a meaning.
 
+  - address: 0x080e9740
+    ghidra: FUN_080e9740
+    name: string_object_copy_cstr_to_buffer
+    size: 72
+    sig: "void string_object_copy_cstr_to_buffer(const StringObject *source, char *destination, u32 *inout_length)"
+    module: cxx/string
+    status: ported
+    renames:
+      param_1: source
+      param_2: destination
+      param_3: inout_length
+      iVar1: source_cstr
+      uVar2: source_length
+    notes: >-
+      Source: decomp/c/008/080e9740_FUN_080e9740.c; structure verified
+      against the original osos image disassembly. The 72-byte wrapper
+      probes string_object_c_str
+      @ 0x082a50b0, then when its result is non-NULL calls strncpy
+      @ 0x080310d4 with destination, that C string, and the INPUT
+      *inout_length. It calls string_object_c_str again, measures that
+      untruncated C string through strlen @ 0x08392478, and overwrites
+      *inout_length with the full length; when the probe is NULL it skips
+      both copy and strlen and writes 0. The current c_str accessor
+      substitutes a shared empty string for a NULL payload, so its result
+      is normally non-NULL: an empty payload therefore zero-pads the input
+      capacity and reports 0. The routine returns void, retains no pointer,
+      and has no ownership/release effect. Port reuses the existing
+      StringObject/string_object_c_str and strncpy/strlen seams without
+      porting callees. match.py structural: expected call-gated
+      c_str/c_str/strncpy/c_str/strlen flow and final output store.
+
   - address: 0x080e9788
     ghidra: FUN_080e9788
     name: iabs
