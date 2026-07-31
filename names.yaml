@@ -15945,3 +15945,30 @@ functions:
       decomp/c/011/0811f7e8_FUN_0811f7e8.c; assembly: osos.asm
       0x0811f7e8. Focused host tests cover one-byte-only copying, independent
       source and destination offsets, and aliasing.
+
+  - address: 0x0811ca48
+    ghidra: FUN_0811ca48
+    name: app_string_resolve
+    size: 16
+    sig: "void *app_string_resolve(void *resolver, void *context, void *value)"
+    module: app/string_resolve
+    status: ported
+    renames:
+      param_1: resolver
+      param_2: context
+      param_3: value
+      FUN_0811ca58: app_string_resolve_operation
+    notes: >-
+      The reference C falsely infers a void no-argument wrapper. Assembly
+      preserves r0-r2, reserves one uninitialized stack word, passes its
+      address in r3 to FUN_0811ca58, and leaves the callee return in r0.
+      Known callers consume that result as a C string. The unported resolver
+      is a volatile app-string-resolver seam; this wrapper neither reads nor
+      alters the output slot. Reference C: decomp/c/010/0811ca48_FUN_0811ca48.c;
+      callee and callers: decomp/c/010/0811ca58_FUN_0811ca58.c,
+      decomp/c/028/0829a124_FUN_0829a124.c, and
+      decomp/c/028/0829a4dc_FUN_0829a4dc.c; assembly: osos.asm 0x0811ca48.
+      Focused host test proves one invocation, argument order, distinct stack
+      output slot, and unchanged callee return. match.py structural report
+      preserves the stack slot and call route via the operation seam (exit 1
+      expected).

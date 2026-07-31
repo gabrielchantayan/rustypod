@@ -14,4 +14,5 @@ pub mod registry;
 pub mod singletons;
 pub mod slot_table;
 pub mod string_owner;
+pub mod string_resolve;
 pub mod string_owner_init;
