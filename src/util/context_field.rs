@@ -18,10 +18,11 @@
 //! kernel/sync_mutex.rs). So the whole chain is a two-level accessor
 //! onto the kernel's task object graph: field +0x30 of the current
 //! task's context block. What that field holds is not decoded — its
-//! writers live outside the ported set — so the function is ported on
-//! observable behavior under the field-offset name. (Its 16-byte
-//! sibling @ 0x0827234c is the matching setter, `str r4, [r0, #0x30]`;
-//! it is NOT ported here.)
+//! other writers live outside the ported set — so the function is
+//! ported on observable behavior under the field-offset name. Its
+//! 20-byte sibling @ 0x0827234c is the matching setter
+//! (`mov r4, r0; bl 0x080cb828; str r4, [r0, #0x30]`), ported below
+//! as [`task_ctx_set_field_0x30`].
 //!
 //! The original does NOT NULL-check the callee's result: with no
 //! current task (kernel not started, or a bare-metal caller) the
@@ -86,6 +87,32 @@ pub unsafe extern "C" fn task_ctx_field_0x30() -> u32 {
     let ctx_block =
         core::ptr::read_volatile(core::ptr::addr_of!(CURRENT_TASK_CTX_BLOCK))();
     (ctx_block.add(FIELD) as *const u32).read()
+}
+
+/// task_ctx_set_field_0x30 — original: `FUN_0827234c` @ 0x0827234c
+/// (20 bytes; 2 `bl` call sites).
+///
+/// The setter sibling of [`task_ctx_field_0x30`]:
+///
+/// ```text
+/// push {r4, lr}
+/// mov  r4, r0            @ keep the value across the call
+/// bl   0x080cb828        @ ctx = current_task_ctx_block()
+/// str  r4, [r0, #0x30]   @ ctx->+0x30 = value
+/// pop  {r4, pc}
+/// ```
+///
+/// Writes `value` to the word at +0x30 of the current task's context
+/// block. Like the getter, the callee's result is NOT NULL-checked:
+/// with no current task the original stores to 0x30 and takes a data
+/// abort; the port keeps the unchecked store so the same fault is
+/// reproduced rather than masked. Shares the [`CURRENT_TASK_CTX_BLOCK`]
+/// dispatch slot with the getter (see the module header).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn task_ctx_set_field_0x30(value: u32) {
+    let ctx_block =
+        core::ptr::read_volatile(core::ptr::addr_of!(CURRENT_TASK_CTX_BLOCK))();
+    (ctx_block.add(FIELD) as *mut u32).write(value);
 }
 
 #[cfg(test)]
@@ -198,5 +225,49 @@ mod tests {
         // the node.
         assert_eq!(unsafe { crate::kernel::sync_mutex::kernel_running() }, 0);
         assert!(unsafe { current_task_ctx_block_stub() }.is_null());
+    }
+
+    #[test]
+    fn setter_writes_the_field_word_and_calls_the_getter_once() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        fixture.install();
+
+        unsafe { task_ctx_set_field_0x30(0xdead_beef) };
+
+        assert_eq!(fixture.field(), 0xdead_beef);
+        unsafe {
+            assert_eq!(MOCK_CALLS, 1, "exactly one getter call");
+        }
+    }
+
+    #[test]
+    fn setter_round_trips_edge_values_through_the_getter() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        fixture.install();
+        for value in [0u32, 1, 0x8000_0000, u32::MAX] {
+            unsafe { task_ctx_set_field_0x30(value) };
+            assert_eq!(unsafe { task_ctx_field_0x30() }, value);
+        }
+        unsafe {
+            assert_eq!(MOCK_CALLS, 8);
+        }
+    }
+
+    #[test]
+    fn setter_writes_only_the_field_word() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new().with_field(0x2a);
+        fixture.install();
+        let mut expected = fixture.ctx;
+        expected[FIELD..FIELD + 4].copy_from_slice(&0xc0ff_eeu32.to_le_bytes());
+
+        unsafe { task_ctx_set_field_0x30(0xc0ff_ee) };
+
+        assert_eq!(fixture.ctx, expected, "the setter touches only +0x30");
     }
 }

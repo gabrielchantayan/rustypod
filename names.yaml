@@ -9576,8 +9576,36 @@ functions:
       started. match.py structural: tail `ldr r0,[r0,#0x30]` exact;
       the diff is the crate fp frame and the dispatch-slot ldr/blx
       standing in for the direct `bl 0x080cb828` - the documented
-      deviation. The 16-byte sibling setter @ 0x0827234c
-      (`str r4,[r0,#0x30]`) is NOT ported here.
+      deviation. The 20-byte sibling setter @ 0x0827234c
+      (`str r4,[r0,#0x30]`) is ported as task_ctx_set_field_0x30 in
+      the same module.
+
+  - address: 0x0827234c
+    ghidra: FUN_0827234c
+    name: task_ctx_set_field_0x30
+    size: 20
+    sig: "void task_ctx_set_field_0x30(u32 value)"
+    module: util/context_field
+    status: ported
+    vars: {param_1: value, FUN_080cb828: CURRENT_TASK_CTX_BLOCK}
+    notes: >-
+      2 bl call sites (0x081d22a8, 0x0829060c). The setter sibling of
+      task_ctx_field_0x30 @ 0x0827233c: `push {r4,lr}; mov r4,r0; bl
+      0x080cb828; str r4,[r0,#0x30]; pop {r4,pc}` - writes the value
+      to field +0x30 of the current task's context block. The callee's
+      result is NOT NULL-checked, exactly like the getter: with no
+      current task the original stores to 0x30 and takes a data abort;
+      the port keeps the unchecked store. Shares the
+      CURRENT_TASK_CTX_BLOCK dispatch slot with the getter (same
+      documented deviation - the slot's default stub models the
+      callee's known prefix exactly). Host tests: the recording mock's
+      ctx block receives the value at +0x30 with exactly one getter
+      call; edge values 0/1/0x80000000/u32::MAX round-trip through the
+      getter; a byte-compare proves only the +0x30 word is touched.
+      match.py structural: `mov r4,r0` and tail `str r4,[r0,#0x30]`
+      exact; the diff is the crate fp frame and the dispatch-slot
+      ldr/blx standing in for the direct `bl 0x080cb828` - the
+      documented deviation.
 
   - address: 0x08275b9c
     ghidra: FUN_08275b9c
