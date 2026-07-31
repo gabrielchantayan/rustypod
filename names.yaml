@@ -10115,6 +10115,29 @@ functions:
       three-byte branch. The `u32` Rust argument preserves the original
       unsigned comparison behavior.
 
+  - address: 0x0827639c
+    ghidra: FUN_0827639c
+    name: string_object_assign_cstr
+    size: 100
+    sig: "void string_object_assign_cstr(StringObject *this, const char *source)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: this, param_2: source, piVar1: source_first_byte, iVar2: destination}
+    notes: >-
+      Source: decomp/c/026/0827639c_FUN_0827639c.c. The function tests
+      source itself and then its first byte, so NULL and empty strings
+      dispatch only virtual slot +0xc with this. Nonempty input calls the
+      NULL-safe strlen at 0x082770bc, adds the NUL byte, and invokes virtual
+      slot +0x8 with (this, size, 0). A NULL result returns immediately:
+      no source copy and no +0xc fallback. A non-NULL result receives the
+      source copy through DAT_08037db4, including the terminator. The source
+      remains caller-owned; the virtual slots own destination replacement and
+      release protocol. Those two unported virtual callees are an injectable
+      STRING_OBJECT_ASSIGN_CSTR_OPS boundary in the Rust port, while the
+      existing libc strcpy port supplies the copy seam. match.py structural:
+      source NULL/first-byte branch, strlen-plus-one request, NULL-result
+      return, source copy, and +0xc fallback are retained.
+
   - address: 0x08275d74
     ghidra: FUN_08275d74
     name: string_object_release_payload

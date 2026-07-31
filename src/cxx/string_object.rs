@@ -32,6 +32,13 @@
 //!
 //! Ported functions:
 //!
+//! - `string_object_assign_cstr` — original: `FUN_0827639c` @
+//!   0x0827639c (100 bytes).
+//!   Assigns a nonempty caller-owned C string by asking virtual slot
+//!   +0x8 for exactly `strlen(source) + 1` bytes with flag zero, then
+//!   copying the source (including its NUL) into the returned storage.
+//!   A NULL or empty source instead tail-dispatches virtual slot +0xc;
+//!   an allocation failure returns without copying or falling back.
 //! - `string_default_construct` — original: `FUN_08277440` @ 0x08277440
 //!   (20 bytes: 16 code + the 4-byte vtable literal @ 0x08277454;
 //!   280 `bl` call sites, binary-scanned). `obj[0] = vtable`,
@@ -164,8 +171,10 @@
 //!   only, exactly as heap/pool_client.rs models its vtables. The
 //!   original address survives as the named constant
 //!   [`STRING_OBJECT_VTABLE_ADDRESS`], and the static carries the six
-//!   serialized slot addresses verbatim; nothing in this crate
-//!   dispatches through them.
+//!   serialized slot addresses verbatim. [`string_object_assign_cstr`]
+//!   models its two virtual calls with the explicit injectable
+//!   [`STRING_OBJECT_ASSIGN_CSTR_OPS`] boundary instead of treating
+//!   those ROM addresses as host-callable pointers.
 //! - `string_object_destroy` reaches the payload release @ 0x08275d74
 //!   through the [`STRING_OBJECT_OPS`] dispatch slot (house pattern —
 //!   see cxx/string_map.rs `STRING_KEY_MAP_OPS`) so host tests can
@@ -234,6 +243,8 @@
 //!   [`string_object_c_str`] directly (no deviation).
 
 use crate::heap::veneers::{free_wrapper, operator_delete};
+use crate::libc::strcpy::strcpy;
+use crate::libc::strlen_safe::strlen_safe;
 use crate::libc::strlen_safe_plus1::strlen_safe_plus1;
 
 /// Original load address of the class vtable the constructor plants
@@ -307,6 +318,109 @@ pub static mut STRING_OBJECT_OPS: StringObjectOps = DEFAULT_STRING_OBJECT_OPS;
 #[inline(always)]
 pub(crate) unsafe fn release_payload_op() -> unsafe extern "C" fn(*mut StringObject) {
     core::ptr::read_volatile(core::ptr::addr_of!(STRING_OBJECT_OPS.release_payload))
+}
+
+/// Explicit host-model boundary for the `StringObject` virtual calls in
+/// [`string_object_assign_cstr`]. On retailOS these are the object's vtable
+/// slots +0x8 and +0xc respectively; the modeled host vtable retains ROM
+/// addresses only, so it cannot be invoked as native host function pointers.
+///
+/// `allocate_payload` owns whatever replacement/free protocol the concrete
+/// object needs. The assignment routine neither frees the caller-owned source
+/// nor writes `this.payload` directly: after a non-NULL result it only copies
+/// source bytes into the returned storage. `clear_payload` is the exact
+/// NULL/empty fallback dispatch and likewise owns its payload cleanup.
+#[derive(Clone, Copy)]
+pub struct StringObjectAssignCstrOps {
+    /// Original vtable slot +0x8: obtain storage for a replacement payload.
+    pub allocate_payload: unsafe extern "C" fn(
+        this: *mut StringObject,
+        requested_size: usize,
+        flags: u32,
+    ) -> *mut u8,
+    /// Original vtable slot +0xc: clear/release the current payload.
+    pub clear_payload: unsafe extern "C" fn(this: *mut StringObject),
+}
+
+/// Default boundary before the two virtual callees are ported. Returning NULL
+/// takes the original caller's allocation-failure exit; the no-op clear is
+/// intentionally not a substitute for the unported +0xc virtual method.
+unsafe extern "C" fn missing_assign_cstr_allocation(
+    _this: *mut StringObject,
+    _requested_size: usize,
+    _flags: u32,
+) -> *mut u8 {
+    core::ptr::null_mut()
+}
+
+unsafe extern "C" fn missing_assign_cstr_clear(_this: *mut StringObject) {}
+
+/// Wired defaults for [`STRING_OBJECT_ASSIGN_CSTR_OPS`].
+pub const DEFAULT_STRING_OBJECT_ASSIGN_CSTR_OPS: StringObjectAssignCstrOps =
+    StringObjectAssignCstrOps {
+        allocate_payload: missing_assign_cstr_allocation,
+        clear_payload: missing_assign_cstr_clear,
+    };
+
+/// Active model of vtable slots +0x8/+0xc for
+/// [`string_object_assign_cstr`]. Tests replace these boundaries to observe
+/// the exact dispatch protocol; a later port of either virtual callee replaces
+/// its corresponding default without changing this caller.
+pub static mut STRING_OBJECT_ASSIGN_CSTR_OPS: StringObjectAssignCstrOps =
+    DEFAULT_STRING_OBJECT_ASSIGN_CSTR_OPS;
+
+#[inline(always)]
+unsafe fn assign_cstr_allocate_op() -> unsafe extern "C" fn(
+    *mut StringObject,
+    usize,
+    u32,
+) -> *mut u8 {
+    core::ptr::read_volatile(core::ptr::addr_of!(
+        STRING_OBJECT_ASSIGN_CSTR_OPS.allocate_payload
+    ))
+}
+
+#[inline(always)]
+unsafe fn assign_cstr_clear_op() -> unsafe extern "C" fn(*mut StringObject) {
+    core::ptr::read_volatile(core::ptr::addr_of!(
+        STRING_OBJECT_ASSIGN_CSTR_OPS.clear_payload
+    ))
+}
+
+/// string_object_assign_cstr — original: `FUN_0827639c` @ 0x0827639c
+/// (100 bytes).
+///
+/// Source: `ipod-decomp/decomp/c/026/0827639c_FUN_0827639c.c`.
+///
+/// Assigns the caller-owned, NUL-terminated `source` to this polymorphic
+/// string object. It makes its branch decision from precisely the source
+/// pointer and first byte: NULL and `source[0] == 0` invoke vtable slot +0xc
+/// with only `this`; nonempty source requests `strlen_safe(source) + 1` bytes
+/// through vtable slot +0x8 with a zero flag. A NULL allocation result is an
+/// immediate failure return: it neither copies source nor invokes the +0xc
+/// fallback. Otherwise `strcpy` copies through the NUL into the returned
+/// storage. The source remains caller-owned; replacement/free ownership of
+/// this object's prior payload belongs solely to the virtual boundaries.
+///
+/// The virtual callees are intentionally not ported here. They are modeled by
+/// [`STRING_OBJECT_ASSIGN_CSTR_OPS`], an injectable faithful boundary for
+/// slots +0x8/+0xc because [`STRING_OBJECT_VTABLE`] stores ROM identities,
+/// not callable host pointers. No NULL guard exists for `this`, matching the
+/// original's dereference to load its vtable before either virtual call.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_assign_cstr(this: *mut StringObject, source: *const u8) {
+    if source.is_null() || source.read() == 0 {
+        assign_cstr_clear_op()(this);
+        return;
+    }
+
+    let requested_size = strlen_safe(source).wrapping_add(1);
+    let destination = assign_cstr_allocate_op()(this, requested_size, 0);
+    if destination.is_null() {
+        return;
+    }
+    strcpy(destination, source);
 }
 
 /// Caller tag the original passes to `free_wrapper` (`mov r1, #0x34` @
@@ -1062,6 +1176,136 @@ mod tests {
             STRING_OBJECT_VTABLE.slots,
             [0x0820c2dc, 0x0821183c, 0x082116f8, 0x08213bfc, 0x08213818, 0x0820c5ec]
         );
+    }
+
+    /// Serializes the modeled +0x8/+0xc virtual slots and their recorders.
+    static ASSIGN_CSTR_OPS_LOCK: Mutex<()> = Mutex::new(());
+    static mut ASSIGN_CSTR_ALLOCATE_CALLS: Vec<(usize, usize, u32)> = Vec::new();
+    static mut ASSIGN_CSTR_CLEAR_CALLS: Vec<usize> = Vec::new();
+    static mut ASSIGN_CSTR_ALLOCATE_RESULT: *mut u8 = core::ptr::null_mut();
+
+    unsafe extern "C" fn recording_assign_cstr_allocate(
+        this: *mut StringObject,
+        requested_size: usize,
+        flags: u32,
+    ) -> *mut u8 {
+        (*core::ptr::addr_of_mut!(ASSIGN_CSTR_ALLOCATE_CALLS)).push((
+            this as usize,
+            requested_size,
+            flags,
+        ));
+        core::ptr::read_volatile(core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_RESULT))
+    }
+
+    unsafe extern "C" fn recording_assign_cstr_clear(this: *mut StringObject) {
+        (*core::ptr::addr_of_mut!(ASSIGN_CSTR_CLEAR_CALLS)).push(this as usize);
+    }
+
+    /// Restores the unported virtual-method boundary even when a test panics.
+    struct AssignCstrOpsGuard {
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for AssignCstrOpsGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS)
+                    .write_volatile(DEFAULT_STRING_OBJECT_ASSIGN_CSTR_OPS);
+            }
+        }
+    }
+
+    fn assign_cstr_bench(allocation_result: *mut u8) -> AssignCstrOpsGuard {
+        let lock = ASSIGN_CSTR_OPS_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        unsafe {
+            (*core::ptr::addr_of_mut!(ASSIGN_CSTR_ALLOCATE_CALLS)).clear();
+            (*core::ptr::addr_of_mut!(ASSIGN_CSTR_CLEAR_CALLS)).clear();
+            core::ptr::addr_of_mut!(ASSIGN_CSTR_ALLOCATE_RESULT).write(allocation_result);
+            core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS).write_volatile(
+                StringObjectAssignCstrOps {
+                    allocate_payload: recording_assign_cstr_allocate,
+                    clear_payload: recording_assign_cstr_clear,
+                },
+            );
+        }
+        AssignCstrOpsGuard { _lock: lock }
+    }
+
+    #[test]
+    fn assign_cstr_allocates_strlen_plus_nul_then_copies_without_transferring_source() {
+        let mut destination = [0xa5u8; 16];
+        let source = *b"album\0";
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: 0xcafe_f00d as *mut u8,
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(destination.as_mut_ptr());
+
+        unsafe { string_object_assign_cstr(this, source.as_ptr()) };
+
+        let allocations =
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() };
+        assert_eq!(allocations, std::vec![(this as usize, 6, 0)]);
+        assert!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty() },
+            "nonempty input never reaches vtable slot +0xc"
+        );
+        assert_eq!(&destination[..6], &source, "the copy includes the NUL");
+        assert_eq!(source, *b"album\0", "source remains caller-owned");
+        assert_eq!(
+            object.payload, 0xcafe_f00d as *mut u8,
+            "only the +0x8 virtual callee owns replacement/free bookkeeping"
+        );
+    }
+
+    #[test]
+    fn assign_cstr_allocation_failure_skips_copy_and_fallback() {
+        let source = *b"full\0";
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: 0x1111_1111 as *mut u8,
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(core::ptr::null_mut());
+
+        unsafe { string_object_assign_cstr(this, source.as_ptr()) };
+
+        let allocations =
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() };
+        assert_eq!(allocations, std::vec![(this as usize, 5, 0)]);
+        assert!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty() },
+            "a NULL +0x8 result returns directly instead of falling back to +0xc"
+        );
+        assert_eq!(object.payload, 0x1111_1111 as *mut u8);
+    }
+
+    #[test]
+    fn assign_cstr_null_and_empty_dispatch_only_the_clear_slot() {
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: 0x2222_2222 as *mut u8,
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let empty = [0u8; 1];
+        let _bench = assign_cstr_bench(0x3333_3333 as *mut u8);
+
+        unsafe {
+            string_object_assign_cstr(this, core::ptr::null());
+            string_object_assign_cstr(this, empty.as_ptr());
+        }
+
+        assert!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty() },
+            "NULL and first-byte-NUL skip strlen and vtable slot +0x8"
+        );
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).clone() },
+            std::vec![this as usize, this as usize],
+            "both branch forms dispatch vtable slot +0xc with only this"
+        );
+        assert_eq!(object.payload, 0x2222_2222 as *mut u8);
     }
 
     /// Serializes the destroy tests — the ops table and the recorder
