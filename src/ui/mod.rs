@@ -5,3 +5,4 @@ pub mod color;
 pub mod flag_2c;
 pub mod rect;
 pub mod width_inset;
+pub mod static_descriptor;

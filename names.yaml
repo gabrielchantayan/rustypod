@@ -15729,3 +15729,22 @@ functions:
       0x0811c178. Focused host tests prove +0x4c slot selection, target
       forwarding, and raw return-word propagation. match.py structural:
       source +0x88 load, target-vtable load, +0x4c indirect tail dispatch.
+
+  - address: 0x0811f720
+    ghidra: FUN_0811f720
+    name: ui_descriptor_init_static_span
+    size: 28
+    sig: "void ui_descriptor_init_static_span(void *descriptor)"
+    module: ui/static_descriptor
+    status: ported
+    renames:
+      param_1: descriptor
+      DAT_0811f73c: UI_DESCRIPTOR_STATIC_BASE
+      iVar1: static_base
+    notes: >-
+      Initializes only three observed fields of a caller-owned UI descriptor:
+      pointer 0x08982f40 at +0x00, that base plus 0x20 at +0x04, and u16
+      0x0400 at +0x0c. The remaining object layout is unidentified and
+      untouched. Reference C: decomp/c/011/0811f720_FUN_0811f720.c; literal
+      at 0x0811f73c; assembly: osos.asm 0x0811f720. Three callers overwrite
+      additional fields after this common initialization.
