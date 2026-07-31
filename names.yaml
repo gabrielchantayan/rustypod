@@ -6858,6 +6858,26 @@ functions:
       image, pure runtime RAM); stores are write_volatile since no
       ported code reads the table and plain stores get dropped as dead.
 
+  - address: 0x0811000c
+    ghidra: FUN_0811000c
+    name: node_list_construct
+    size: 52
+    sig: "NodeList *node_list_construct(NodeList *this)"
+    module: app/node_list
+    status: ported
+    vars: {param_1: this, iVar1: drain_state, DAT_08110040: node_list_vtable}
+    notes: >-
+      Constructs the fixed view-list singleton in place. Installs vtable
+      0x0898165c at +0x00; clears head +0x04, stop key +0x08, and the
+      draining flag byte +0x0c; constructs its embedded drain state at
+      +0x10 through 0x08271cec/0x08275bb8 (vtable 0x089a5d0c, then
+      zeroes +0x14/+0x18/+0x1c); and clears callback words
+      +0x20/+0x28/+0x2c. Returns this in r0. The word at +0x24 is
+      deliberately untouched. Reference C:
+      decomp/c/010/0811000c_FUN_0811000c.c and
+      decomp/c/026/08271cec_FUN_08271cec.c. The Rust port uses target
+      offsets and volatile stores, preserving both ordering and the
+      partial-initialization behavior rather than zeroing the object.
   - address: 0x0810fa90
     ghidra: FUN_0810fa90
     name: list_count_until_match

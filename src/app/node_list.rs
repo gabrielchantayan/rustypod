@@ -1,6 +1,8 @@
 //! The view-list singleton and its walker.
 //!
 //! Ports:
+//! - [`node_list_construct`] — original: `FUN_0811000c` @ 0x0811000c
+//!   (52 bytes) — constructs the view-list singleton in place.
 //! - [`node_list_get`] — original: `FUN_0810fa30` @ 0x0810fa30 (72
 //!   bytes; 168 `bl` call sites, binary-verified) — the singleton's
 //!   accessor, a textbook ADS function-local-static initializer.
@@ -94,12 +96,11 @@ use crate::runtime::cxa_guard::{cxa_guard_acquire, cxa_guard_release};
 use crate::runtime::shutdown_chain::cxa_atexit;
 
 /// Byte size of the singleton object on target (original: the .bss
-/// object @ 0x08a79c74). The constructor @ 0x0811000c writes out to
-/// +0x2c: the [`NodeList`] header (+0x00..+0x0b), the draining flag
-/// byte (+0x0c), an embedded sub-object (+0x10, vtable literal
-/// 0x089a5d0c via the 0x08275bb8 / 0x08271cec pair) and the
-/// drain-callback words (+0x20, +0x28, +0x2c) that the drain @
-/// 0x0810fb48 runs when the list empties.
+/// object @ 0x08a79c74). [`node_list_construct`] writes all fields
+/// except the untouched word at +0x24: the [`NodeList`] header
+/// (+0x00..+0x0b), the draining flag byte (+0x0c), an embedded
+/// sub-object (+0x10), and the drain-callback words (+0x20, +0x28,
+/// +0x2c) used by the drain @ 0x0810fb48.
 pub const NODE_LIST_SIZE: usize = 0x30;
 
 /// `__dso_handle` — the same literal @ 0x089ca09c every ADS
@@ -109,15 +110,14 @@ const DSO_HANDLE: i32 = 0x089ca09c;
 
 /// The singleton's storage (original: the fixed object @ 0x08a79c74 in
 /// .bss — a function-local static, NOT heap-allocated like the
-/// singletons.rs objects). Only the [`NodeList`] header at +0x00 is
-/// modeled; the rest is written by the (unported) constructor and read
-/// by the (unported) drain @ 0x0810fb48.
+/// singletons.rs objects). The constructor addresses it as a target
+/// layout byte block; [`NodeList`] still models the header consumed by
+/// the ported list walker.
 #[repr(C, align(4))]
 struct NodeListStorage {
     /// +0x00: the list header every ported consumer uses.
     list: NodeList,
-    /// +0x0c on: the draining flag, the sub-object, the drain
-    /// callbacks. Opaque to every ported function.
+    /// +0x0c on: the draining flag, the sub-object, and callbacks.
     opaque: [u8; NODE_LIST_SIZE - core::mem::size_of::<NodeList>()],
 }
 
@@ -132,33 +132,49 @@ static mut NODE_LIST: NodeListStorage = NodeListStorage {
 /// 0x089cc834, reached through pool word @ 0x0810fa78).
 static mut NODE_LIST_GUARD: u32 = 0;
 
-/// The singleton constructor: takes the raw storage, returns `this`
-/// (original: `FUN_0811000c` @ 0x0811000c).
-pub type NodeListCtor = unsafe extern "C" fn(this: *mut u8) -> *mut u8;
+/// node_list_construct — original: `FUN_0811000c` @ 0x0811000c (52
+/// bytes).
+///
+/// Reference: `ipod-decomp/decomp/c/010/0811000c_FUN_0811000c.c`;
+/// the embedded +0x10 sub-object's effects come from
+/// `decomp/c/026/08271cec_FUN_08271cec.c` and
+/// `decomp/c/026/08275bb8_FUN_08275bb8.c`.
+///
+/// Installs the list vtable at +0x00, clears its head and stop key,
+/// constructs the embedded drain-callback sub-object at +0x10, clears
+/// its flag and callback words, and returns `this`. The stock sequence
+/// deliberately does not write the word at +0x24, so this port does not
+/// turn the constructor into a whole-object zeroing operation.
+const NODE_LIST_VTABLE: u32 = 0x0898_165c;
+const NODE_LIST_DRAIN_VTABLE: u32 = 0x089a_5d0c;
 
-/// Default [`NODE_LIST_CTOR`]: zeroes the object and returns it. A
-/// faithful *subset* of the original — everything `FUN_0811000c`
-/// writes except the two vtable literals (0x0898165c at +0x00,
-/// 0x089a5d0c at +0x10) is a zero store, and the vtables mean nothing
-/// outside the stock image. Volatile stores: a plain byte loop becomes
-/// an `__aeabi_memclr` libcall that does not exist in this build (the
-/// singletons.rs `zero_block` trap).
-unsafe extern "C" fn zeroing_node_list_ctor(this: *mut u8) -> *mut u8 {
-    if !this.is_null() {
-        for offset in 0..NODE_LIST_SIZE {
-            this.add(offset).write_volatile(0);
-        }
-    }
-    this
+#[inline(always)]
+unsafe fn node_list_store_word(this: *mut u8, offset: usize, value: u32) {
+    this.add(offset).cast::<u32>().write_volatile(value);
 }
 
-/// The active constructor — original: the direct `bl 0x0811000c`. The
-/// real ctor is not ported, so the default is the documented zeroing
-/// stub above, the same contract as singletons.rs's `SINGLETON_CTORS`:
-/// it installs no vtables, which is why [`node_list_get`] is **not
-/// hook-ready** until the ctor is ported. Host tests install a
-/// recording mock.
-pub static mut NODE_LIST_CTOR: NodeListCtor = zeroing_node_list_ctor;
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn node_list_construct(this: *mut u8) -> *mut u8 {
+    // `*param_1 = DAT_08110040; param_1[2] = 0`.
+    node_list_store_word(this, 0x00, NODE_LIST_VTABLE);
+    node_list_store_word(this, 0x08, 0);
+
+    // `FUN_08271cec(param_1 + 4)`, including its
+    // `FUN_08275bb8` base-constructor call.
+    node_list_store_word(this, 0x10, NODE_LIST_DRAIN_VTABLE);
+    node_list_store_word(this, 0x14, 0);
+    node_list_store_word(this, 0x18, 0);
+    node_list_store_word(this, 0x1c, 0);
+
+    // The caller's stores relative to the returned +0x10 sub-object.
+    node_list_store_word(this, 0x28, 0);
+    node_list_store_word(this, 0x2c, 0);
+    node_list_store_word(this, 0x04, 0);
+    this.add(0x0c).write_volatile(0);
+    node_list_store_word(this, 0x20, 0);
+    this
+}
 
 /// The destructor registered with `cxa_atexit` — original: the shared
 /// `mov r0, #1; ldmia sp!, {r4, pc}` stub @ 0x0810516c (pool word @
@@ -193,19 +209,15 @@ unsafe extern "C" fn node_list_destructor(_object: *mut c_void) {}
 /// ldr r0, =0x08a79c74      ; reloaded — NOT the ctor's return
 /// ```
 ///
-/// The guard pair and `cxa_atexit` are ported (runtime/cxa_guard.rs,
-/// runtime/shutdown_chain.rs) and called directly; the constructor is
-/// not, so it sits behind the [`NODE_LIST_CTOR`] dispatch slot with a
-/// documented zeroing default (the `SINGLETON_CTORS` contract — **not
-/// hook-ready** until the ctor is ported).
+/// The guard pair, `cxa_atexit`, and [`node_list_construct`] are
+/// ported and called directly.
 ///
 /// Faithful details:
 /// - The return value is always the fixed object's address, reloaded
 ///   after the init block (the original's second
 ///   `ldr r0, [0x810fa7c]`) — never the constructor's return. The
-///   ctor's return is what gets registered with `cxa_atexit` (it rides
-///   through in r0); the two differ only if the ctor lies, which the
-///   tests reproduce.
+///   constructor returns that same in-place address, which is registered
+///   with `cxa_atexit`.
 /// - The inlined fast path tests bit 0 only (`tst r0, #1`) while
 ///   [`cxa_guard_acquire`] tests the whole word, so a nonzero guard
 ///   with bit 0 clear (never produced by this pair) takes the slow
@@ -229,10 +241,7 @@ pub unsafe extern "C" fn node_list_get() -> *mut NodeList {
     let object = core::ptr::addr_of_mut!(NODE_LIST) as *mut u8;
     if (core::ptr::read_volatile(guard) & 1) == 0 {
         if cxa_guard_acquire(guard) != 0 {
-            // The slot read stays on the cold path, where the
-            // original's `bl 0x0811000c` is.
-            let ctor = core::ptr::read_volatile(core::ptr::addr_of!(NODE_LIST_CTOR));
-            let this = ctor(object);
+            let this = node_list_construct(object);
             cxa_atexit(this as *mut c_void, node_list_destructor, DSO_HANDLE);
             cxa_guard_release(guard);
         }
@@ -417,20 +426,10 @@ mod tests {
 
     // --- node_list_get: the function-local-static accessor ---
 
-    /// Serializes the tests below: the guard word, the storage, the
-    /// ctor slot and the process-wide shutdown chain are all global.
+    /// Serializes the tests below: the guard word, storage, and
+    /// process-wide shutdown chain are all global.
     static GETTER_LOCK: Mutex<()> = Mutex::new(());
 
-    /// Blocks the recording ctor was handed, in order.
-    static mut CTOR_BLOCKS: Vec<*mut u8> = Vec::new();
-
-    /// What the recording ctor returns.
-    static mut CTOR_RESULT: *mut u8 = ptr::null_mut();
-
-    unsafe extern "C" fn recording_ctor(this: *mut u8) -> *mut u8 {
-        (*ptr::addr_of_mut!(CTOR_BLOCKS)).push(this);
-        ptr::read_volatile(ptr::addr_of!(CTOR_RESULT))
-    }
 
     /// Box-backed node allocator pair for the shutdown chain (the
     /// shipped defaults are the firmware malloc/free, wrong for host
@@ -450,18 +449,18 @@ mod tests {
     }
 
     fn storage() -> *mut u8 {
-        unsafe { ptr::addr_of_mut!(NODE_LIST) as *mut u8 }
+        ptr::addr_of_mut!(NODE_LIST) as *mut u8
     }
 
-    /// Installs the recording ctor and the Box allocator pair, and
-    /// resets the guard, the storage and the chain to their pre-init
-    /// state.
-    fn mock(ctor_result: *mut u8) -> MutexGuard<'static, ()> {
+    fn word_at(block: *const u8, offset: usize) -> u32 {
+        unsafe { ptr::read_unaligned(block.add(offset).cast::<u32>()) }
+    }
+
+    /// Installs the Box allocator pair and resets the guard, storage,
+    /// and chain to their pre-init state.
+    fn reset_getter() -> MutexGuard<'static, ()> {
         let guard = GETTER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
-            NODE_LIST_CTOR = recording_ctor;
-            CTOR_RESULT = ctor_result;
-            (*ptr::addr_of_mut!(CTOR_BLOCKS)).clear();
             NODE_LIST_GUARD = 0;
             let block = storage();
             for offset in 0..core::mem::size_of::<NodeListStorage>() {
@@ -484,7 +483,6 @@ mod tests {
             lib_shutdown_chain(0);
             SHUTDOWN_ALLOC = crate::malloc_rt::malloc;
             SHUTDOWN_FREE = crate::malloc_rt::free;
-            NODE_LIST_CTOR = zeroing_node_list_ctor;
             NODE_LIST_GUARD = 0;
         }
         drop(guard);
@@ -492,15 +490,17 @@ mod tests {
 
     #[test]
     fn the_first_call_constructs_registers_and_caches() {
-        let guard = mock(storage());
+        let guard = reset_getter();
         unsafe {
             assert_eq!(node_list_get(), storage() as *mut NodeList);
-            assert_eq!(*ptr::addr_of!(CTOR_BLOCKS), std::vec![storage()], "constructed once, in place");
             assert_eq!(
                 ptr::read_volatile(ptr::addr_of!(NODE_LIST_GUARD)),
                 1,
                 "acquire published the flag"
             );
+            assert_eq!(word_at(storage(), 0x00), NODE_LIST_VTABLE);
+            assert_eq!(word_at(storage(), 0x04), 0);
+            assert_eq!(word_at(storage(), 0x08), 0);
 
             // Exactly one registration: the object, the shared-stub
             // destructor, the __dso_handle key.
@@ -511,9 +511,11 @@ mod tests {
             assert_eq!((*head).key, DSO_HANDLE, "__dso_handle @ 0x089ca09c");
             assert!((*head).next.is_null(), "registered exactly once");
 
-            // The second call takes the bit-0 fast path.
+            // The second call takes the bit-0 fast path, preserving a
+            // post-construction mutation rather than reconstructing.
+            node_list_store_word(storage(), 0x08, 0xfeed_beef);
             assert_eq!(node_list_get(), storage() as *mut NodeList);
-            assert_eq!((*ptr::addr_of!(CTOR_BLOCKS)).len(), 1, "no reconstruction");
+            assert_eq!(word_at(storage(), 0x08), 0xfeed_beef, "no reconstruction");
             assert!((*(*shutdown_chain_head())).next.is_null(), "no second registration");
         }
         restore(guard);
@@ -521,11 +523,11 @@ mod tests {
 
     #[test]
     fn a_guard_with_bit0_set_short_circuits_everything() {
-        let guard = mock(storage());
+        let guard = reset_getter();
         unsafe {
             NODE_LIST_GUARD = 3; // bit 0 set: `tst r0, #1` -> bne done
             assert_eq!(node_list_get(), storage() as *mut NodeList);
-            assert!((*ptr::addr_of!(CTOR_BLOCKS)).is_empty(), "no construction");
+            assert_eq!(word_at(storage(), 0x00), 0xa5a5_a5a5, "no construction");
             assert!(shutdown_chain_head().read().is_null(), "no registration");
             assert_eq!(ptr::read_volatile(ptr::addr_of!(NODE_LIST_GUARD)), 3, "untouched");
         }
@@ -537,62 +539,50 @@ mod tests {
         // The fast path tests bit 0, cxa_guard_acquire the whole word:
         // this state is never produced by the guard pair, but the
         // original's two-level test defines its behavior.
-        let guard = mock(storage());
+        let guard = reset_getter();
         unsafe {
             NODE_LIST_GUARD = 2;
             assert_eq!(node_list_get(), storage() as *mut NodeList);
-            assert!((*ptr::addr_of!(CTOR_BLOCKS)).is_empty(), "acquire refused: no construction");
+            assert_eq!(word_at(storage(), 0x00), 0xa5a5_a5a5, "acquire refused: no construction");
             assert_eq!(ptr::read_volatile(ptr::addr_of!(NODE_LIST_GUARD)), 2, "a refused acquire never writes");
         }
         restore(guard);
     }
 
-    #[test]
-    fn the_registered_object_is_the_ctors_return_but_the_getter_returns_the_storage() {
-        // The ctor's return rides through to cxa_atexit in r0 while
-        // the getter reloads the fixed object address — the two differ
-        // only if the ctor lies.
-        static mut ALIAS: u32 = 0;
-        let guard = mock(unsafe { ptr::addr_of_mut!(ALIAS) as *mut u8 });
-        unsafe {
-            assert_eq!(
-                node_list_get(),
-                storage() as *mut NodeList,
-                "the original's second ldr: the fixed object, not the ctor's return"
-            );
-            let head = *shutdown_chain_head();
-            assert_eq!(
-                (*head).arg as *mut u8,
-                ptr::addr_of_mut!(ALIAS) as *mut u8,
-                "the ctor's return is what was registered"
-            );
-        }
-        restore(guard);
-    }
 
     #[test]
     fn the_registration_is_real_and_the_chain_runs_the_noop_destructor() {
-        let guard = mock(storage());
+        let guard = reset_getter();
         unsafe {
             node_list_get();
+            node_list_store_word(storage(), 0x08, 0xa5a5_a5a5);
             lib_shutdown_chain(0);
             assert!(shutdown_chain_head().read().is_null(), "the node ran and was freed");
-            // The no-op destructor touched nothing: the header the
-            // recording ctor left (untouched 0xa5 fill) survives.
-            assert_eq!((storage() as *mut NodeList).read().stop_key, 0xa5a5a5a5);
+            assert_eq!(word_at(storage(), 0x08), 0xa5a5_a5a5, "the no-op destructor touched nothing");
         }
         restore(guard);
     }
 
     #[test]
-    fn the_zeroing_default_ctor_clears_the_object_and_returns_it() {
+    fn constructor_writes_only_the_stock_fields_and_returns_this() {
+        #[repr(align(4))]
+        struct AlignedBlock([u8; NODE_LIST_SIZE]);
+
         let _guard = GETTER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
-            let mut block = [0xa5u8; NODE_LIST_SIZE];
-            let this = block.as_mut_ptr();
-            assert_eq!(zeroing_node_list_ctor(this), this);
-            assert!(block.iter().all(|byte| *byte == 0), "the whole object zeroed");
-            assert!(zeroing_node_list_ctor(ptr::null_mut()).is_null(), "NULL-safe");
+            let mut block = AlignedBlock([0xa5; NODE_LIST_SIZE]);
+            let this = block.0.as_mut_ptr();
+            assert_eq!(node_list_construct(this), this);
+            assert_eq!(word_at(this, 0x00), NODE_LIST_VTABLE);
+            assert_eq!(word_at(this, 0x04), 0);
+            assert_eq!(word_at(this, 0x08), 0);
+            assert_eq!(block.0[0x0c], 0);
+            assert_eq!(&block.0[0x0d..0x10], &[0xa5; 3], "only the flag byte is cleared");
+            assert_eq!(word_at(this, 0x10), NODE_LIST_DRAIN_VTABLE);
+            for offset in [0x14, 0x18, 0x1c, 0x20, 0x28, 0x2c] {
+                assert_eq!(word_at(this, offset), 0, "word at +{offset:#x}");
+            }
+            assert_eq!(&block.0[0x24..0x28], &[0xa5; 4], "+0x24 is untouched");
         }
     }
 }
