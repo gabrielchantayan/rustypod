@@ -12,3 +12,4 @@ pub mod object_dispatch_entry;
 pub mod registry;
 pub mod singletons;
 pub mod slot_table;
+pub mod string_owner;

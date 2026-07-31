@@ -15710,6 +15710,36 @@ functions:
       post-call zero stores are retained; the seam lowers to a volatile
       ops-table load plus blx.
 
+  - address: 0x0811c15c
+    ghidra: FUN_0811c15c
+    name: app_string_owner_destroy
+    size: 24
+    sig: "void *app_string_owner_destroy(void *this)"
+    module: app/string_owner
+    status: ported
+    renames:
+      param_1: this
+      DAT_0811c174: APP_STRING_OWNER_VTABLE
+      FUN_08277484: string_object_destroy
+      iVar1: embedded_string
+    notes: >-
+      20 code bytes plus the 4-byte vtable literal at 0x0811c174
+      (= 0x089a7428, binary-verified). Plain non-deleting destructor of an
+      unidentified application object: it plants that vtable at +0, leaves
+      the opaque +4 word untouched, destroys the embedded StringObject at +8
+      through string_object_destroy (0x08277484), then returns the helper
+      result minus 8. The port's subtraction uses wrapping pointer arithmetic
+      to preserve the ARM `sub r0, r0, #8` result at every address. Reference
+      C: decomp/c/010/0811c15c_FUN_0811c15c.c; dependency:
+      decomp/c/026/08277484_FUN_08277484.c; assembly: osos.asm 0x0811c15c.
+      Deliberate codegen deviation: the already-ported direct helper call is
+      exposed through a volatile AppStringOwnerOps seam so host tests can
+      prove helper argument/return dataflow and wraparound. Focused tests
+      prove the +0 vtable store, untouched +4 word, +8 helper argument,
+      helper-derived return, and zero-address wraparound. match.py structural:
+      literal load, post-index +8 equivalent, helper call, and subtract-8
+      remain; the volatile seam becomes an indirect blx.
+
   - address: 0x0811c178
     ghidra: FUN_0811c178
     name: object_dispatch_entry_dispatch
