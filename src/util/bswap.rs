@@ -159,11 +159,13 @@ pub extern "C" fn bswap32_word(value: u32) -> u32 {
 /// Full 32-bit byte reverse, assembled in registers:
 /// `v >> 24 | (v & 0xff0000) >> 8 | (v & 0xff00) << 8 | v << 24`.
 /// Semantically identical to `bswap32` (0x0805dc24) and `byteswap32`
-/// (0x08076f58), so LLVM folds all three bodies onto one address in the
-/// archive; review its codegen through any of the three symbols.
+/// (0x08076f58), but its dedicated text section preserves this distinct
+/// firmware entry point rather than letting LLVM merge equal bodies. It uses
+/// the source expression directly; there are no deliberate deviations.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.bswap32_guid_field")]
 pub extern "C" fn bswap32_guid_field(value: u32) -> u32 {
-    value.swap_bytes()
+    value >> 24 | (value & 0xff_0000) >> 8 | (value & 0xff00) << 8 | value << 24
 }
 
 #[cfg(test)]

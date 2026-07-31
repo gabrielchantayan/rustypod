@@ -7189,11 +7189,12 @@ functions:
       sit in FUN_080fab9c and FUN_080fc3d8, which each pull a 12-byte
       struct from a COM-style vtable object and swap its three
       consecutive words - the GUID first-three-fields endianness fix-up,
-      hence the name. LLVM folds all three identical bodies onto one
-      address in the archive - review codegen as
-      `match.py 0x080e965c bswap32` (LLVM emits a rotate-based
-      mask/orr byte swap with an fp frame vs ADS's straight
-      mov/and/orr chain; both straight-line, no loops, no calls).
+      hence the name. The dedicated `.text.bswap32_guid_field` section
+      keeps its exported firmware entry point distinct in the archive.
+      Review codegen as
+      `match.py 0x080e965c bswap32_guid_field`; LLVM emits a rotate-based
+      mask/orr byte swap with an fp frame vs ADS's straight mov/and/orr
+      chain; both straight-line, no loops, no calls.
 
   - address: 0x080e9878
     ghidra: FUN_080e9878
