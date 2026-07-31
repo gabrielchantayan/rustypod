@@ -7170,6 +7170,38 @@ functions:
       ((value & 0xff00) << 8). Semantically a full u32 byte reversal;
       no deliberate deviations.
 
+  - address: 0x080e9514
+    ghidra: FUN_080e9514
+    name: format_signed_radix_integer
+    size: 232
+    sig: "void format_signed_radix_integer(i32 value, u32 radix, RadixFormatSpec *spec)"
+    module: printf/printf_radix_integer
+    status: ported
+    vars:
+      param_1: value
+      param_2: radix
+      param_3: spec
+      iVar6: remaining_precision
+      bVar7: negative
+      auStack_3c: reverse_digits
+    notes: >-
+      Signed 32-bit radix formatter. Negative values use ARM's wrapping
+      negate (so INT_MIN becomes magnitude 0x80000000); the unconditional
+      divide/remainder loop writes one or more reversed digit bytes, applies
+      an active precision capped at 31, then appends '-' or the optional '+'
+      before recording text_len. It calls the pad helper before and after
+      reverse-byte output, using 1-left_justify then left_justify. The
+      source and original disassembly show direct calls to unsigned div/mod
+      0x08036f14, bounded output 0x08280f7c, padding 0x080ec120, and length
+      scan 0x08392478; literal pool 0x080e95fc contains 0x083ecb4c for the
+      digit-byte lookup. The three unported external helpers are volatile
+      formatter seams in printf/printf_radix_integer; focused host tests
+      install deterministic counterparts and cover INT_MIN, sign/zero
+      precision, leading/trailing width padding, radix conversion, count,
+      and callback order. match.py confirms the same signed-magnitude,
+      division/reverse-buffer, precision, sign, pre/output/post control
+      flow; indirect seams make the Rust body longer than the direct BLs.
+
   - address: 0x080e9600
     ghidra: FUN_080e9600
     name: managed_handle_mode
