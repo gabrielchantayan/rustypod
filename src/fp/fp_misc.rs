@@ -323,11 +323,61 @@ pub unsafe extern "C" fn iabs(x: i32) -> i32 {
     if x < 0 { x.wrapping_neg() } else { x }
 }
 
+/// Host-swappable entry point for the reciprocal helper `FUN_08076204`.
+/// [`fixed16_div`] calls it with the divisor when that value fits in 24
+/// signed bits, otherwise with both operands shifted right by eight. The
+/// target build calls the fixed firmware address directly; host tests swap
+/// this writable cell to record the exact dispatch behavior.
+#[cfg(not(target_os = "none"))]
+pub static mut FIXED16_RECIPROCAL: usize = 0x0807_6204;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn fixed16_reciprocal(divisor: i32) -> i32 {
+    let reciprocal: unsafe extern "C" fn(i32) -> i32 = core::mem::transmute(0x0807_6204usize);
+    reciprocal(divisor)
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn fixed16_reciprocal(divisor: i32) -> i32 {
+    let address = core::ptr::addr_of!(FIXED16_RECIPROCAL).read_volatile();
+    let reciprocal: unsafe extern "C" fn(i32) -> i32 = core::mem::transmute(address);
+    reciprocal(divisor)
+}
+
+/// fixed16_div — original: `FUN_080e9834` @ 0x080e9834 (68 bytes).
+///
+/// Divides two Q16.16 values by obtaining the divisor's Q16.16 reciprocal
+/// from `FUN_08076204` and multiplying it by the numerator. The reciprocal
+/// helper handles values whose signed top byte is zero or all ones directly.
+/// For every other divisor this function calls it with `divisor >> 8`, then
+/// shifts `numerator` right by eight too, retaining the Q16.16 scale without
+/// overflowing the helper's input range. The original restores its frame
+/// and falls through into the immediately following `fixed16_mul`
+/// (`FUN_080e9878`), which returns signed product bits [47:16] through its
+/// `smull` plus `lsl #16`/`lsr #16` funnel. Calling that existing port keeps
+/// the same truncation-toward-negative-infinity and wrapping behavior.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn fixed16_div(mut numerator: i32, divisor: i32) -> i32 {
+    let divisor_high_byte = divisor >> 24;
+    let reciprocal = if divisor_high_byte == 0 || divisor_high_byte == -1 {
+        fixed16_reciprocal(divisor)
+    } else {
+        let reciprocal = fixed16_reciprocal(divisor >> 8);
+        numerator >>= 8;
+        reciprocal
+    };
+
+    crate::util::fixed::fixed16_mul(numerator, reciprocal)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
     use super::*;
     use std::vec::Vec;
+    use std::sync::{Mutex, MutexGuard};
 
     const INF: u64 = 0x7ff0_0000_0000_0000;
     const MIN_NORMAL: u64 = 0x0010_0000_0000_0000;
@@ -665,6 +715,111 @@ mod tests {
             let x = rng.next() as i32;
             assert_eq!(abs32(x), ref_abs(x), "x={x}");
             assert_eq!(abs32(x), x.wrapping_abs(), "x={x}");
+        }
+    }
+
+    // ---- fixed16_div ----
+
+    static FIXED16_DIV_LOCK: Mutex<()> = Mutex::new(());
+    static mut RECIPROCAL_RESULT: i32 = 0;
+    static mut RECIPROCAL_CALLS: usize = 0;
+    static mut LAST_RECIPROCAL_INPUT: i32 = 0;
+
+    unsafe extern "C" fn recording_reciprocal(divisor: i32) -> i32 {
+        RECIPROCAL_CALLS += 1;
+        LAST_RECIPROCAL_INPUT = divisor;
+        RECIPROCAL_RESULT
+    }
+
+    struct ReciprocalInstall {
+        previous: usize,
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for ReciprocalInstall {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(FIXED16_RECIPROCAL).write_volatile(self.previous);
+            }
+        }
+    }
+
+    fn install_reciprocal(result: i32) -> ReciprocalInstall {
+        let lock = FIXED16_DIV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            let previous = core::ptr::addr_of!(FIXED16_RECIPROCAL).read_volatile();
+            core::ptr::addr_of_mut!(FIXED16_RECIPROCAL)
+                .write_volatile(recording_reciprocal as usize);
+            RECIPROCAL_RESULT = result;
+            RECIPROCAL_CALLS = 0;
+            LAST_RECIPROCAL_INPUT = 0;
+            ReciprocalInstall {
+                previous,
+                _lock: lock,
+            }
+        }
+    }
+
+    fn fixed_div(numerator: i32, divisor: i32) -> i32 {
+        unsafe { fixed16_div(numerator, divisor) }
+    }
+
+    /// The two-register result construction from `smull`: `lsl hi,#16`
+    /// and `orr` with `lsr lo,#16`, rather than a rounded multiply.
+    fn funnel_product(a: i32, b: i32) -> i32 {
+        let product = (a as i64) * (b as i64);
+        (((product >> 32) as u32) << 16 | (product as u32 >> 16)) as i32
+    }
+
+    #[test]
+    fn fixed16_div_dispatches_signed_top_byte_cases() {
+        let _reciprocal = install_reciprocal(0x0001_0000);
+        for (divisor, expected_input) in [
+            (0x007f_ffff, 0x007f_ffff),
+            (-0x0080_0000, -0x0080_0000),
+            (0x0100_0000, 0x0001_0000),
+            (-0x0200_0000, -0x0002_0000),
+        ] {
+            assert_eq!(fixed_div(0, divisor), 0);
+            unsafe {
+                assert_eq!(LAST_RECIPROCAL_INPUT, expected_input, "divisor={divisor:#x}");
+            }
+        }
+        unsafe {
+            assert_eq!(RECIPROCAL_CALLS, 4);
+        }
+    }
+
+    #[test]
+    fn fixed16_div_scales_both_operands_only_outside_24bit_range() {
+        let reciprocal = -0x0001_8000;
+        let _reciprocal = install_reciprocal(reciprocal);
+        let numerator = 0x1234_8000;
+        let divisor = 0x0100_0000;
+
+        assert_eq!(
+            fixed_div(numerator, divisor),
+            funnel_product(reciprocal, numerator >> 8)
+        );
+        unsafe {
+            assert_eq!(LAST_RECIPROCAL_INPUT, divisor >> 8);
+            assert_eq!(RECIPROCAL_CALLS, 1);
+        }
+    }
+
+    #[test]
+    fn fixed16_div_preserves_the_wrapping_funnel_product() {
+        let reciprocal = i32::MAX;
+        let _reciprocal = install_reciprocal(reciprocal);
+        let numerator = i32::MIN;
+        let divisor = -1; // sign-extended top byte: no operand scaling.
+
+        assert_eq!(
+            fixed_div(numerator, divisor),
+            funnel_product(reciprocal, numerator)
+        );
+        unsafe {
+            assert_eq!(LAST_RECIPROCAL_INPUT, divisor);
         }
     }
 }

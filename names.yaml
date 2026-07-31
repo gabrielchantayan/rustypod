@@ -14536,6 +14536,33 @@ functions:
       table[i] ~= sin(i*pi/2048) * 65536, table[0] = 0, table[0x3ff]
       ~= 0xffe0.
 
+  - address: 0x080e9834
+    ghidra: FUN_080e9834
+    name: fixed16_div
+    size: 68
+    sig: "i32 fixed16_div(i32 numerator, i32 divisor)"
+    module: fp/fp_misc
+    status: ported
+    vars:
+      param_1: numerator
+      param_2: divisor
+      iVar1: reciprocal
+      FUN_08076204: fixed16_reciprocal
+    notes: >-
+      Q16.16 division by a reciprocal helper plus a signed widening
+      multiply. The divisor is accepted directly by the reciprocal helper
+      when its signed top byte is 0 or -1 (the full 24-bit signed range);
+      otherwise the helper receives divisor >> 8 and the numerator is
+      arithmetic-shifted by 8 after the call. The function then falls
+      straight into the immediately following fixed16_mul body
+      (0x080e9878): the result is the signed product bits [47:16]
+      assembled as `(product_hi << 16) | (product_lo >> 16)`, with
+      negative truncation toward minus infinity and 32-bit wrap.
+      FUN_08076204 (16 bytes, an unported leading-zero-count dispatch)
+      remains a firmware-address call boundary through
+      FIXED16_RECIPROCAL; host tests install a recorder to prove both
+      dispatch arms and the exact multiply funnel.
+
   # --- UI pixel/color (ui/color) ---
 
   - address: 0x080ed43c
