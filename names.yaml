@@ -10157,6 +10157,30 @@ functions:
       source NULL/first-byte branch, strlen-plus-one request, NULL-result
       return, source copy, and +0xc fallback are retained.
 
+  - address: 0x08276474
+    ghidra: FUN_08276474
+    name: string_object_assign_payload
+    size: 100
+    sig: "void string_object_assign_payload(StringObject *this, const char *payload)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: this, param_2: payload, piVar1: payload_first_byte, uVar2: requested_size, iVar3: destination}
+    notes: >-
+      Source: decomp/c/026/08276474_FUN_08276474.c. Called by the
+      StringObject copy assignment operator (0x082774a8) with the
+      source object's payload. NULL and empty payloads dispatch only
+      virtual slot +0xc with this. A nonempty payload calls the
+      NULL-safe inclusive-length helper at 0x08275e20, then invokes
+      virtual slot +0x8 as (this, requested_size, 0). A NULL allocation
+      result returns directly; otherwise DAT_08037db4 copies the payload
+      including its NUL terminator. The +0x8 virtual method owns prior
+      payload replacement/free bookkeeping, while this helper neither
+      frees nor stores the payload field. The unported virtual callees
+      are represented by the shared injectable STRING_OBJECT_ASSIGN_CSTR_OPS
+      boundary; the existing libc strcpy port supplies the copy seam.
+      match.py structural: NULL/empty branch, inclusive-size request,
+      NULL-result return, source copy, and +0xc fallback are retained.
+
   - address: 0x08275d74
     ghidra: FUN_08275d74
     name: string_object_release_payload
@@ -11605,6 +11629,24 @@ functions:
       affinity-cache allocation failure returns before modifying the op; a
       P4-copy allocation failure retains the dynamic tag with NULL P4.
 
+
+  # ---- VDBE table-lock collection (src/sqlite/table_lock.rs) ----
+  - address: 0x08385084
+    ghidra: FUN_08385084
+    name: vdbe_add_table_lock
+    size: 176
+    sig: "void vdbe_add_table_lock(Vdbe *vdbe, int database_index, int table_index, int is_write_lock, const char *table_name)"
+    module: sqlite/table_lock
+    status: ported
+    vars: {param_1: vdbe, param_2: database_index, param_3: table_index, param_4: is_write_lock, param_5: table_name, iVar1: lock_index, piVar2: table_lock, iVar3: table_count}
+    notes: >-
+      SQLite's sqlite3VdbeAddTableLock. Negative database indexes are ignored.
+      The existing 16-byte VdbeTableLock array is scanned for the first
+      matching (iDb, iTab) pair, whose write byte becomes the boolean OR of
+      its old value and isWriteLock. A new pair reallocates through the ported
+      sqlite3DbReallocOrFree (0x083749f4) to (nTableLock + 1) * 16 bytes,
+      stores all four fields, and increments nTableLock. On allocation failure
+      it clears nTableLock and explicitly sets db->mallocFailed (+0x1e).
   # ---- VDBE code builder (src/sqlite/vdbe.rs) ----
   - address: 0x08386824
     ghidra: FUN_08386824
@@ -15458,3 +15500,71 @@ functions:
       branches, signed comparisons, callback error joins, descending
       negations, and final pair/state stores are retained; ops-table calls
       lower to indirect blx calls.
+
+  - address: 0x080e9b24
+    ghidra: FUN_080e9b24
+    name: raster_profile_emit_segment
+    size: 408
+    sig: "u32 raster_profile_emit_segment(RasterProfileState *state, i32 previous_x, i32 previous_y, i32 x, i32 y, i32 lower_limit, i32 upper_limit)"
+    module: util/raster_profile
+    status: ported
+    renames:
+      param_1: state
+      param_2: previous_x
+      param_3: previous_y
+      param_4: x
+      param_5: y
+      param_6: lower_limit
+      param_7: upper_limit
+      iVar2: first_x
+      iVar3: dda_error
+      iVar4: delta_x
+      iVar5: delta_y
+      piVar6: scanline_cursor
+      cVar1: reusable_final_scanline
+      FUN_0804d1a8: scaled_divide
+      FUN_08031568: quotient_remainder
+    notes: >-
+      Emits a strictly ascending raster edge after inclusive vertical clipping.
+      It derives the first/last scanline by arithmetic right shift, removes a
+      reusable exact prior endpoint, records an exact final endpoint for the
+      following edge, initializes a pending profile's +0x14 accumulator, then
+      advances x through a quotient/remainder DDA. If the scanline buffer has
+      no room, it stores 0x62 at state+0x30 and returns 1 before any output
+      store; all outside/descending edges return 0 without mutation. Reference
+      C: decomp/c/008/080e9b24_FUN_080e9b24.c; assembly: osos.asm
+      0x080e9b24. The unported signed scaled-divider 0x0804d1a8 and signed
+      quotient/remainder helper 0x08031568 are RasterProfileOps seams; ARM
+      defaults call retailOS, while host tests use deterministic arithmetic
+      mocks. match.py structural: clip/reuse branches, capacity error path,
+      pending-profile initialization, and DDA loop are retained.
+
+  - address: 0x0811000c
+    ghidra: FUN_0811000c
+    name: app_object_init
+    size: 52
+    sig: "void app_object_init(AppObject *this)"
+    module: app/app_object
+    status: ported
+    renames:
+      param_1: this
+      DAT_08110040: APP_OBJECT_VTABLE
+      FUN_08271cec: construct_drain_state
+      iVar1: drain_state
+    notes: >-
+      Initializes the 0x30-byte application object used by the lazy global
+      accessor FUN_0810fa30. Installs vtable 0x0898165c, clears scalar fields
+      +0x04/+0x08/+0x0c/+0x20, and delegates the embedded drain state at +0x10
+      to FUN_08271cec. It then derives the enclosing base from that call's
+      returned pointer with `sub r0, r0, #16` before zeroing +0x28 and +0x2c.
+      Consequently those stores deliberately follow the constructor result,
+      while the vtable and first pre-call zero store target the incoming
+      pointer. Reference C: decomp/c/010/0811000c_FUN_0811000c.c;
+      dependency: decomp/c/026/08271cec_FUN_08271cec.c; assembly:
+      osos.asm 0x0811000c. The unported dependency is an AppObjectOps
+      injection seam that fails hard until target integration supplies its
+      retail implementation. Focused tests record the call base, exact sparse
+      writes, and return-base adjustment. match.py structural: the two
+      post-index pre-call stores, drain-state call, subtract-16, and five
+      post-call zero stores are retained; the seam lowers to a volatile
+      ops-table load plus blx.
