@@ -9971,8 +9971,8 @@ functions:
     size: 112
     sig: "unsigned int utf8_next_codepoint(const char **cursor)"
     module: cxx/string_object
-    status: identified
-    vars: {param_1: cursor}
+    status: ported
+    vars: {param_1: cursor, pbVar1: sequence, uVar2: lead_or_codepoint, uVar3: second_byte}
     notes: >-
       Advances *cursor past one UTF-8 sequence and returns the decoded
       codepoint: ASCII (< 0x80) returned as-is; (b & 0xe0) == 0xc0

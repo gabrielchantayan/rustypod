@@ -777,6 +777,44 @@ pub unsafe extern "C" fn string_id_record_assign(
     this
 }
 
+/// Decodes the codepoint at `*cursor` and advances the cursor — original:
+/// `FUN_08276214` @ 0x08276214 (112 bytes, all code).
+///
+/// The retail decoder returns ASCII unchanged after consuming one byte. A
+/// `0b110xxxxx` lead consumes two bytes and a `0b1110xxxx` lead consumes
+/// three, assembling their payload bits without validating continuation
+/// bytes, overlong encodings, or surrogate values. Every other high-bit lead
+/// — including a four-byte UTF-8 lead — consumes exactly three bytes and
+/// returns zero, which its string-comparison caller treats as a terminator.
+/// The original faults for an invalid `cursor` or unreadable sequence, and
+/// this direct raw-pointer port has the same preconditions.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn utf8_next_codepoint(cursor: *mut *const u8) -> u32 {
+    let sequence = *cursor;
+    *cursor = sequence.add(1);
+
+    let lead = *sequence as u32;
+    if lead & 0x80 == 0 {
+        return lead;
+    }
+
+    *cursor = sequence.add(2);
+    let second_byte = *sequence.add(1) as u32;
+    if lead & 0xe0 == 0xc0 {
+        return second_byte & 0x3f | (lead & 0x1f) << 6;
+    }
+
+    *cursor = sequence.add(3);
+    if lead & 0xf0 == 0xe0 {
+        return (lead & 0x0f) << 12
+            | (second_byte & 0x3f) << 6
+            | (*sequence.add(2) as u32 & 0x3f);
+    }
+
+    0
+}
+
 /// Default [`UTF8_STRCMP_SAFE`] stub: a plain byte-wise strcmp behind
 /// the original's own NULL guard. The unported comparator @ 0x08276d64
 /// substitutes a shared empty C string for either NULL argument (its
@@ -2334,6 +2372,58 @@ mod tests {
         let source_rec = test_record(core::ptr::null_mut(), 5);
         unsafe {
             assert_eq!(string_id_record_equals(&this_rec, &source_rec), 1);
+        }
+    }
+
+    fn decode_next(bytes: &[u8]) -> (u32, usize) {
+        let start = bytes.as_ptr();
+        let mut cursor = start;
+        let codepoint = unsafe { utf8_next_codepoint(&mut cursor) };
+        let consumed = unsafe { cursor.offset_from(start) as usize };
+        (codepoint, consumed)
+    }
+
+    #[test]
+    fn utf8_next_codepoint_consumes_one_ascii_byte_including_nul() {
+        assert_eq!(decode_next(&[0x00]), (0, 1));
+        assert_eq!(decode_next(&[0x7f]), (0x7f, 1));
+    }
+
+    #[test]
+    fn utf8_next_codepoint_decodes_two_bytes_without_continuation_validation() {
+        assert_eq!(decode_next(&[0xc2, 0xa2]), (0x00a2, 2));
+        assert_eq!(
+            decode_next(&[0xc2, 0xff]),
+            (0x00bf, 2),
+            "the decoder masks a malformed second byte instead of rejecting it"
+        );
+    }
+
+    #[test]
+    fn utf8_next_codepoint_decodes_three_bytes_without_continuation_validation() {
+        assert_eq!(decode_next(&[0xe2, 0x82, 0xac]), (0x20ac, 3));
+        assert_eq!(
+            decode_next(&[0xef, 0xff, 0x80]),
+            (0xffc0, 3),
+            "both continuation bytes are merely payload-masked"
+        );
+    }
+
+    #[test]
+    fn utf8_next_codepoint_invalid_and_four_byte_leads_consume_three_and_return_zero() {
+        for sequence in [
+            [0x80, 0xaa, 0xbb, 0xcc],
+            [0xbf, 0xaa, 0xbb, 0xcc],
+            [0xf0, 0x9f, 0x92, 0xa9],
+            [0xf7, 0xaa, 0xbb, 0xcc],
+            [0xff, 0xaa, 0xbb, 0xcc],
+        ] {
+            assert_eq!(
+                decode_next(&sequence),
+                (0, 3),
+                "lead byte {:#04x}",
+                sequence[0]
+            );
         }
     }
 
