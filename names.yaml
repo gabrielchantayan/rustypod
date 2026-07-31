@@ -7170,6 +7170,26 @@ functions:
       ((value & 0xff00) << 8). Semantically a full u32 byte reversal;
       no deliberate deviations.
 
+  - address: 0x080e9600
+    ghidra: FUN_080e9600
+    name: managed_handle_mode
+    size: 72
+    sig: "i32 managed_handle_mode(i32 mode, *mut *mut u8 handle_slot)"
+    module: heap/managed_handle
+    status: ported
+    vars: {param_1: mode, param_2: handle_slot, iVar1: handle}
+    notes: >-
+      Two-mode managed-handle lifecycle dispatcher. Mode 0 calls the
+      constructor @ 0x08062470, stores its result to *handle_slot, and
+      returns 0 for NULL / 2 otherwise. Mode 2 calls the release helper @
+      0x08062374 with *handle_slot, clears the slot, then returns 2. Every
+      other mode returns 1 and leaves the slot untouched. The structural
+      comparison confirms those exact two original BL targets and all three
+      status paths. The helpers' resource subsystem remains unported, so
+      heap/managed_handle.rs uses the established volatile ops-table seam:
+      its documented default reports creation failure and makes release
+      inert until target integration wires both helpers.
+
   - address: 0x080e965c
     ghidra: FUN_080e965c
     name: bswap32_guid_field
