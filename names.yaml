@@ -10044,6 +10044,23 @@ functions:
       is a raw pointer cursor operation: invalid cursor or unreadable
       lookbehind faults as in retailOS.
 
+  - address: 0x082762fc
+    ghidra: FUN_082762fc
+    name: utf16_utf8_byte_len_plus1
+    size: 60
+    sig: "int utf16_utf8_byte_len_plus1(const unsigned short *utf16)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: utf16, uVar1: code_unit, puVar2: next_code_unit, iVar3: utf8_byte_len}
+    notes: >-
+      Counts the UTF-8 byte length implied by NUL-terminated UTF-16 code
+      units and includes one byte for the output NUL. NULL input returns 1.
+      Values below 0x80 count as 1 byte, values below 0x800 as 2, and all
+      remaining nonzero 16-bit values as 3. It does not combine surrogate
+      pairs, so each surrogate counts as a separate 3-byte unit. The
+      original's signed 32-bit sum wraps on overflow; the Rust port uses
+      wrapping_add for that target-machine behavior.
+
   - address: 0x08275d74
     ghidra: FUN_08275d74
     name: string_object_release_payload
@@ -14539,6 +14556,40 @@ functions:
        symbol (the load_be32 alias precedent). match.py against iabs at
        this address: same rsbmi-behind-frame-prologue structure as the
        primary, byte-identical inputs make the diff identical.
+
+  - address: 0x080e988c
+    ghidra: FUN_080e988c
+    name: fixed16_sin
+    size: 40
+    sig: "i32 fixed16_sin(i32 angle)"
+    module: fp/fp_misc
+    status: identified
+    renames:
+      param_1: angle
+      DAT_080e9900: TWO_PI_F32 (0x40c90fdb = 6.2831855f)
+      DAT_080e9904: INV_TWO_PI_F32 (0x3e22f983 = 0.15915494f)
+      DAT_080e9908: SIN_TABLE (pointer 0x083f10b2)
+      FUN_080a67dc: f32_to_fixed16_sat
+    notes: >-
+      Q16.16 fixed-point sine by quarter-wave table lookup. The Ghidra C
+      listing stops after the calls to 0x080a67dc because it falsely marks
+      that helper no-return; raw osos.dec disassembly confirms both calls
+      return and the body continues through 0x080e98fc. The signed `blt`
+      loop adds f32_to_fixed16_sat(2pi) (= 0x6487e) while angle is negative,
+      then multiplies by f32_to_fixed16_sat(1/(2pi)) (= 0x28be), retains
+      the low 32 product bits, and arithmetic-shifts 20 to form a 4096
+      units/turn phase. It mirrors phase bit 0x400 into index 0..0x3ff,
+      reads a u16 amplitude, and negates it for phase bit 0x800. This is
+      fixed16_sin: the same routine as fixed16_cos @ 0x080e97ac without
+      that routine's +0x4000 (pi/2) phase offset. Not ported because every
+      output directly depends on SIN_TABLE's exact 1024 u16 entries at
+      0x083f10b2; that region is an all-zero undecrypted hole in osos.dec
+      (also recovery/patched), and no duplicate table exists. Do not
+      synthesize it: the unknown entry rounding/clamping changes observable
+      Q16.16 outputs. Revisit only after decrypt fills the table, then embed
+      it and retain an explicit f32_to_fixed16_sat seam for unported
+      0x080a67dc. Ghidra size 40 is truncated by the false no-return edge;
+      actual code is 0x080e988c-0x080e98ff plus literals 0x080e9900-0x080e990b.
 
   - address: 0x080e97ac
     ghidra: FUN_080e97ac
