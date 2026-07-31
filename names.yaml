@@ -9544,24 +9544,40 @@ functions:
       tests with the helper inlined (cmp/strne pairs) - same dispatch
       sets, same store sequence.
 
-  # --- Scouted in 0x08200000-0x082fffff, deliberately NOT ported ---
-  # Small and hot, but needs a global object graph that is not in the
-  # tree yet. Notes are the findings, not guesses.
-
   - address: 0x0827233c
     ghidra: FUN_0827233c
-    name: unported_context_field_0x30
+    name: task_ctx_field_0x30
     size: 16
-    module: unported
-    status: identified
+    sig: "u32 task_ctx_field_0x30(void)"
+    module: util/context_field
+    status: ported
+    vars: {FUN_080cb828: CURRENT_TASK_CTX_BLOCK, FUN_0809444c: kernel_running}
     notes: >-
       647 bl call sites - the hottest 16-byte leaf in the range.
-      `push {r4,lr}; bl 0x080cb828; ldr r0, [r0, #0x30]; pop {r4,pc}`.
-      0x080cb828 (46 bl call sites, in another agent's range) is itself
-      `x = 0x0809444c(); return x ? x[3] : x` - so the whole chain is a
-      two-level accessor onto a global object graph. Skipped - the
-      semantics of field +0x30 cannot be established without the object
-      at 0x0809444c, which lives in 0x08060000-0x080fffff.
+      `push {r4,lr}; bl 0x080cb828; ldr r0, [r0, #0x30]; pop {r4,pc}`:
+      field +0x30 of the current task's context block. 0x080cb828
+      (46 bl call sites, ported as current_task_ctx_block in
+      kernel/task.rs) is `node = kernel_running() (0x0809444c, ported);
+      return node ? node->+0xc : 0` - so the whole chain is a two-level
+      accessor onto the kernel task object graph; what +0x30 holds is
+      not decoded (writers outside the ported set), hence the
+      field-offset name. The callee's result is NOT NULL-checked -
+      with no current task the original reads 0x30 and takes a data
+      abort; the port keeps the unchecked load. Deviation: the callee
+      sits behind the CURRENT_TASK_CTX_BLOCK dispatch slot (the
+      util/inner_state.rs INNER_MATERIALIZE_COUNT pattern); the default
+      stub models the callee's known prefix exactly (kernel_running as
+      the name-node pointer, then the +0xc word, or NULL) via the
+      ported kernel/sync_mutex.rs kernel_running. Host tests: recording
+      mock's ctx pointer is dereferenced at +0x30 and returned, exactly
+      one getter call; edge values 0/1/0x80000000/u32::MAX round-trip;
+      the block is byte-compared untouched (read-only); the default
+      stub returns NULL without dereferencing when the kernel is not
+      started. match.py structural: tail `ldr r0,[r0,#0x30]` exact;
+      the diff is the crate fp frame and the dispatch-slot ldr/blx
+      standing in for the direct `bl 0x080cb828` - the documented
+      deviation. The 16-byte sibling setter @ 0x0827234c
+      (`str r4,[r0,#0x30]`) is NOT ported here.
 
   - address: 0x08275b9c
     ghidra: FUN_08275b9c
