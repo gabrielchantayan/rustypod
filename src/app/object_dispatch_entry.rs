@@ -73,18 +73,27 @@ const _: [u8; 0x18] = [0; core::mem::offset_of!(ObjectDispatchEntry, condition_v
 const _: [u8; OBJECT_DISPATCH_ENTRY_SIZE] = [0; core::mem::size_of::<ObjectDispatchEntry>()];
 /// Return-preserving slot +0x4c of the target's virtual table. The target
 /// class is not yet identified, so the return register stays a raw word.
-pub type ObjectDispatchEntryDispatch = unsafe extern "C" fn(*mut ObjectDispatchTarget) -> usize;
+pub type ObjectDispatchEntrySlot4cDispatch =
+    unsafe extern "C" fn(*mut ObjectDispatchTarget) -> usize;
+
+/// Return-unobserved slot +0x50 of the target's virtual table. The target
+/// class and action are not recovered, but the raw tail branch binds its
+/// target as the sole argument.
+pub type ObjectDispatchEntrySlot50Dispatch = unsafe extern "C" fn(*mut ObjectDispatchTarget);
 
 /// The virtual table reached through an object's dispatch target. The filler
-/// keeps the named call slot at +0x4c on the 32-bit firmware target while
-/// keeping host function-pointer fields disjoint.
+/// keeps the named call slots at +0x4c and +0x50 on the 32-bit firmware
+/// target while keeping host function-pointer fields disjoint.
 #[repr(C)]
 pub struct ObjectDispatchTargetVtable {
-    /// Slots +0x00..+0x48: not dispatched by this veneer.
+    /// Slots +0x00..+0x48: not dispatched by either veneer.
     pub unresolved_00_48: [usize; 19],
     /// +0x4c: target-specific action invoked by
     /// [`object_dispatch_entry_dispatch`].
-    pub dispatch: ObjectDispatchEntryDispatch,
+    pub dispatch_slot_4c: ObjectDispatchEntrySlot4cDispatch,
+    /// +0x50: target-specific action invoked by
+    /// [`object_dispatch_entry_dispatch_vtable_slot_50`].
+    pub dispatch_slot_50: ObjectDispatchEntrySlot50Dispatch,
 }
 
 /// The vtable-bearing target selected from a dispatch source's +0x88 word.
@@ -112,7 +121,9 @@ pub struct ObjectDispatchSource {
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x88] = [0; core::mem::offset_of!(ObjectDispatchSource, dispatch_target)];
 #[cfg(target_pointer_width = "32")]
-const _: [u8; 0x4c] = [0; core::mem::offset_of!(ObjectDispatchTargetVtable, dispatch)];
+const _: [u8; 0x4c] = [0; core::mem::offset_of!(ObjectDispatchTargetVtable, dispatch_slot_4c)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x50] = [0; core::mem::offset_of!(ObjectDispatchTargetVtable, dispatch_slot_50)];
 
 /// Injection point for the embedded drain-state constructor @ 0x08271cec.
 pub type DrainStateConstruct = unsafe extern "C" fn(*mut DrainState) -> *mut DrainState;
@@ -176,7 +187,35 @@ pub unsafe extern "C" fn object_dispatch_entry_dispatch(
 ) -> usize {
     let target = core::ptr::read_volatile(core::ptr::addr_of!((*source).dispatch_target));
     let vtable = core::ptr::read_volatile(core::ptr::addr_of!((*target).vtable));
-    ((*vtable).dispatch)(target)
+    ((*vtable).dispatch_slot_4c)(target)
+}
+
+/// object_dispatch_entry_dispatch_vtable_slot_50 — original:
+/// `FUN_0811c298` @ 0x0811c298 (16 bytes).
+///
+/// Loads the dispatch target from `source + 0x88`, then tail-dispatches the
+/// target's vtable slot +0x50 with that target as its sole argument. The raw
+/// sequence is `ldr r0, [r0, #0x88]`, `ldr r1, [r0]`, `ldr r1, [r1, #0x50]`,
+/// `bx r1`; consequently there is no NULL guard, no additional argument, and
+/// no return value observed by this void veneer.
+///
+/// The target class and slot action are not recovered. The port therefore
+/// keeps neutral source/target types and exposes the verified slot offset
+/// rather than assigning a speculative operation name. On the 64-bit host,
+/// `usize` filler fields keep the typed +0x50 dispatch slot disjoint; the
+/// documented layout and compile-time offset checks are exact on the 32-bit
+/// firmware target.
+///
+/// Sources: `ipod-decomp/decomp/c/010/0811c298_FUN_0811c298.c` and the raw
+/// instruction sequence at 0x0811c298 in `ipod-decomp/decomp/osos.asm`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn object_dispatch_entry_dispatch_vtable_slot_50(
+    source: *mut ObjectDispatchSource,
+) {
+    let target = core::ptr::read_volatile(core::ptr::addr_of!((*source).dispatch_target));
+    let vtable = core::ptr::read_volatile(core::ptr::addr_of!((*target).vtable));
+    ((*vtable).dispatch_slot_50)(target)
 }
 
 /// object_dispatch_entry_construct — original: `FUN_0810f9f0` @ 0x0810f9f0
@@ -222,6 +261,7 @@ mod tests {
     static mut CALL_COUNT: usize = 0;
     static mut EXPECTED_DISPATCH_TARGET: *mut ObjectDispatchTarget = ptr::null_mut();
     static mut DISPATCH_CALLS: usize = 0;
+    static mut SLOT_50_CALLS: usize = 0;
     static mut DISPATCH_RESULT: usize = 0;
 
     unsafe extern "C" fn record_dispatch(target: *mut ObjectDispatchTarget) -> usize {
@@ -233,9 +273,18 @@ mod tests {
         DISPATCH_RESULT
     }
 
+    unsafe extern "C" fn record_dispatch_slot_50(target: *mut ObjectDispatchTarget) {
+        assert_eq!(
+            target, EXPECTED_DISPATCH_TARGET,
+            "the selected +0x88 target is forwarded as the slot's r0"
+        );
+        SLOT_50_CALLS += 1;
+    }
+
     unsafe fn clear_dispatch_recording() {
         EXPECTED_DISPATCH_TARGET = ptr::null_mut();
         DISPATCH_CALLS = 0;
+        SLOT_50_CALLS = 0;
         DISPATCH_RESULT = 0;
     }
 
@@ -316,7 +365,8 @@ mod tests {
     fn dispatch_uses_the_4c_slot_and_forwards_the_selected_target() {
         let vtable = ObjectDispatchTargetVtable {
             unresolved_00_48: [0xdead_beef; 19],
-            dispatch: record_dispatch,
+            dispatch_slot_4c: record_dispatch,
+            dispatch_slot_50: record_dispatch_slot_50,
         };
         let mut target = ObjectDispatchTarget { vtable: &vtable };
         let mut source = ObjectDispatchSource {
@@ -335,6 +385,31 @@ mod tests {
                 "the slot's r0 result is returned by the tail-dispatch veneer"
             );
             assert_eq!(DISPATCH_CALLS, 1, "only the named +0x4c slot runs");
+            clear_dispatch_recording();
+        }
+    }
+
+    #[test]
+    fn dispatch_vtable_slot_50_skips_4c_and_forwards_the_selected_target() {
+        let vtable = ObjectDispatchTargetVtable {
+            unresolved_00_48: [0xdead_beef; 19],
+            dispatch_slot_4c: record_dispatch,
+            dispatch_slot_50: record_dispatch_slot_50,
+        };
+        let mut target = ObjectDispatchTarget { vtable: &vtable };
+        let mut source = ObjectDispatchSource {
+            opaque_00_84: [0xa5a5_a5a5; 34],
+            dispatch_target: ptr::addr_of_mut!(target),
+        };
+
+        unsafe {
+            clear_dispatch_recording();
+            EXPECTED_DISPATCH_TARGET = ptr::addr_of_mut!(target);
+
+            object_dispatch_entry_dispatch_vtable_slot_50(ptr::addr_of_mut!(source));
+
+            assert_eq!(SLOT_50_CALLS, 1, "the named +0x50 slot runs once");
+            assert_eq!(DISPATCH_CALLS, 0, "the neighboring +0x4c slot is not called");
             clear_dispatch_recording();
         }
     }

@@ -15793,6 +15793,28 @@ functions:
       forwarding, and raw return-word propagation. match.py structural:
       source +0x88 load, target-vtable load, +0x4c indirect tail dispatch.
 
+  - address: 0x0811c298
+    ghidra: FUN_0811c298
+    name: object_dispatch_entry_dispatch_vtable_slot_50
+    size: 16
+    sig: "void object_dispatch_entry_dispatch_vtable_slot_50(ObjectDispatchSource *source)"
+    module: app/object_dispatch_entry
+    status: ported
+    renames:
+      param_1: source
+      iVar1: target_vtable
+    notes: >-
+      Tail-dispatch veneer: loads the target pointer from source+0x88, loads
+      its vtable, then branches to the separately verified vtable+0x50 slot
+      with the selected target as its sole r0 argument. The target class and
+      slot action remain unidentified, so the Rust signature faithfully
+      exposes a void tail call without inventing an operation name. Reference
+      C: decomp/c/010/0811c298_FUN_0811c298.c; raw assembly: osos.asm
+      0x0811c298. Focused host tests prove +0x50 selection (not +0x4c) and
+      exact selected-target forwarding. match.py structural: source +0x88
+      load, target-vtable load, +0x50 indirect tail dispatch; LLVM adds a
+      frame prologue/epilogue around the tail branch.
+
   - address: 0x0811c284
     ghidra: FUN_0811c284
     name: flag_2c_is_one
