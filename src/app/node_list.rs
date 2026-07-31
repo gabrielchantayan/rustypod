@@ -8,10 +8,11 @@
 //! - [`node_list_get`] — original: `FUN_0810fa30` @ 0x0810fa30 (72
 //!   bytes; 168 `bl` call sites, binary-verified) — the singleton's
 //!   accessor, a textbook ADS function-local-static initializer.
+//! - [`node_list_enqueue`] — original: `FUN_0810fe7c` @ 0x0810fe7c
+//!   (232 bytes) — pushes a new node, or records it for completion after
+//!   an active drain.
 //! - [`list_count_until_match`] — original: `FUN_0810fa90` @ 0x0810fa90
 //!   (84 bytes; 125 `bl` call sites, binary-scanned).
-//! - [`list_count_unflagged_before_key`] — original: `FUN_0810faf4` @
-//!   0x0810faf4 (84 bytes) — counts unflagged nodes before a nonzero key.
 //!
 //! `list_count_until_match` walks the singly-linked node list hanging
 //! off a list object and returns how many nodes it visited. When the
@@ -75,14 +76,14 @@ pub struct NodeVtable {
     pub key: NodeProperty,
     /// +0x6c: reports whether +0x78 work is needed.
     pub requires_capture: NodeProperty,
-    /// +0x70: not dispatched here.
-    pub unresolved_70: usize,
+    /// +0x70: whether this node must advance before a new node is enqueued.
+    pub blocks_enqueue: NodeProperty,
     /// +0x74: reports whether +0x80 preparation is needed.
     pub requires_prepare: NodeProperty,
     /// +0x78: captures the node before it is activated.
     pub capture: NodeAction,
-    /// +0x7c: not dispatched here.
-    pub unresolved_7c: usize,
+    /// +0x7c: advances a node that blocks a new enqueue.
+    pub advance_enqueue_blocker: NodeAction,
     /// +0x80: prepares a node before its active state is toggled.
     pub prepare: NodeProperty,
     /// +0x84..+0x94: not dispatched here.
@@ -100,8 +101,10 @@ pub struct Node {
     pub opaque: [u32; 4],
     /// +0x14: next node.
     pub next: *mut Node,
-    /// +0x18..+0x1f: not read by this operation.
-    pub opaque_after_next: [u8; 8],
+    /// +0x18: low byte of the mode recorded by [`node_list_enqueue`].
+    pub enqueue_mode: u8,
+    /// +0x19..+0x1f: not read by the ported operations.
+    pub opaque_after_enqueue_mode: [u8; 7],
     /// +0x20: whether this node remains the drain's terminal head.
     pub continues_drain: u8,
     /// +0x21: selects eviction rather than active-state transitions.
@@ -171,9 +174,11 @@ pub struct NodeList {
     pub padding: [u8; 3],
     /// +0x10: tracks retained nodes while draining.
     pub drain_state: DrainState,
-    /// +0x20: non-null enables the vtable completion callback.
+    /// +0x20: deferred node / drain-completion payload. While a drain is
+    /// active, [`node_list_enqueue`] records its node here; drain completion
+    /// passes it to the list vtable and clears this field.
     pub completion_context: *mut c_void,
-    /// +0x24: passed to the vtable completion callback.
+    /// +0x24: mode paired with [`NodeList::completion_context`].
     pub completion_flag: u8,
     /// +0x25..+0x27: target-layout padding.
     pub completion_padding: [u8; 3],
@@ -181,6 +186,87 @@ pub struct NodeList {
     pub final_callback: Option<NodeListFinalCallback>,
     /// +0x2c: argument to [`NodeList::final_callback`].
     pub final_callback_argument: *mut c_void,
+}
+
+/// Scope state initialized before every [`node_list_enqueue`] attempt and
+/// destroyed on both its immediate and deferred paths. On target it is the
+/// two 32-bit stack words at `sp+8` and `sp+12`.
+#[repr(C)]
+pub struct NodeListEnqueueScope {
+    pub mode: u32,
+    pub context: *mut c_void,
+}
+
+/// The singleton object's vtable slot +0x1ec, notified before an immediate
+/// enqueue. Its class is not recovered yet, so only this observed slot is
+/// modeled.
+pub type EnqueueObserverNotify = unsafe extern "C" fn(*mut EnqueueObserver);
+
+/// C++ observer returned by `FUN_081d2204`; its only operation here is the
+/// vtable notification at +0x1ec.
+#[repr(C)]
+pub struct EnqueueObserver {
+    pub vtable: *const EnqueueObserverVtable,
+}
+
+#[repr(C)]
+pub struct EnqueueObserverVtable {
+    pub unresolved_00_1e8: [usize; 123],
+    pub notify_enqueue: EnqueueObserverNotify,
+}
+
+/// Injection point for `FUN_08266a48`, which initializes the enqueue scope.
+pub type NodeListEnqueueScopeEnter =
+    unsafe extern "C" fn(*mut NodeListEnqueueScope, u32, u32, *mut c_void, *mut Node);
+/// Injection point for the `thunk_FUN_08275bc8` scope destructor.
+pub type NodeListEnqueueScopeExit = unsafe extern "C" fn(*mut NodeListEnqueueScope);
+/// Injection point for `FUN_081d2204`, the singleton accessor supplying the
+/// observer whose +0x1ec vtable slot is called.
+pub type EnqueueObserverGet = unsafe extern "C" fn() -> *mut EnqueueObserver;
+
+/// RetailOS dependencies of [`node_list_enqueue`]. Target integration must
+/// install these; focused host tests replace them with recording seams.
+#[derive(Clone, Copy)]
+pub struct NodeListEnqueueOps {
+    pub enter_scope: NodeListEnqueueScopeEnter,
+    pub exit_scope: NodeListEnqueueScopeExit,
+    pub enqueue_observer: EnqueueObserverGet,
+}
+
+unsafe extern "C" fn missing_enqueue_scope_enter(
+    _scope: *mut NodeListEnqueueScope,
+    _zero: u32,
+    _mode: u32,
+    _context: *mut c_void,
+    _node: *mut Node,
+) {
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
+unsafe extern "C" fn missing_enqueue_scope_exit(_scope: *mut NodeListEnqueueScope) {
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
+unsafe extern "C" fn missing_enqueue_observer() -> *mut EnqueueObserver {
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
+/// Replace before invoking [`node_list_enqueue`] on target.
+pub static mut NODE_LIST_ENQUEUE_OPS: NodeListEnqueueOps = NodeListEnqueueOps {
+    enter_scope: missing_enqueue_scope_enter,
+    exit_scope: missing_enqueue_scope_exit,
+    enqueue_observer: missing_enqueue_observer,
+};
+
+#[inline(always)]
+unsafe fn node_list_enqueue_ops() -> NodeListEnqueueOps {
+    core::ptr::read_volatile(core::ptr::addr_of!(NODE_LIST_ENQUEUE_OPS))
 }
 
 // Target-exact layout.
@@ -191,6 +277,8 @@ mod layout_checks {
     const _: [u8; 0x54] = [0; core::mem::offset_of!(NodeVtable, set_active)];
     const _: [u8; 0x58] = [0; core::mem::offset_of!(NodeVtable, evict)];
     const _: [u8; 0x68] = [0; core::mem::offset_of!(NodeVtable, key)];
+    const _: [u8; 0x70] = [0; core::mem::offset_of!(NodeVtable, blocks_enqueue)];
+    const _: [u8; 0x7c] = [0; core::mem::offset_of!(NodeVtable, advance_enqueue_blocker)];
     const _: [u8; 0x98] = [0; core::mem::offset_of!(NodeVtable, mode)];
     const _: [u8; 0x14] = [0; core::mem::offset_of!(Node, next)];
     const _: [u8; 0x20] = [0; core::mem::offset_of!(Node, continues_drain)];
@@ -205,6 +293,8 @@ mod layout_checks {
     const _: [u8; 0x28] = [0; core::mem::offset_of!(NodeList, final_callback)];
     const _: [u8; 0x90] = [0; core::mem::offset_of!(NodeListVtable, advance)];
     const _: [u8; 0x94] = [0; core::mem::offset_of!(NodeListVtable, measure)];
+    const _: [u8; 0x1ec] = [0; core::mem::offset_of!(EnqueueObserverVtable, notify_enqueue)];
+    const _: [u8; 0x08] = [0; core::mem::size_of::<NodeListEnqueueScope>()];
     const _: [u8; NODE_LIST_SIZE] = [0; core::mem::size_of::<NodeList>()];
 }
 
@@ -580,6 +670,70 @@ pub unsafe extern "C" fn node_list_drain(
     }
 }
 
+/// node_list_enqueue — original: `FUN_0810fe7c` @ 0x0810fe7c (232 bytes).
+///
+/// Sources: `ipod-decomp/decomp/c/010/0810fe7c_FUN_0810fe7c.c`;
+/// `decomp/c/019/081d2204_FUN_081d2204.c`; and the sibling node-list
+/// layouts in `decomp/c/010/0810fb48_FUN_0810fb48.c`.
+///
+/// Establishes a scope around an enqueue attempt. If the list is currently
+/// draining, it defers `node` and its low-byte `mode` in the +0x20/+0x24
+/// completion slot for `node_list_drain` to consume. Otherwise it repeatedly
+/// dispatches +0x70/+0x7c on blocking heads until the head is absent,
+/// unchanged, or no longer blocks; notifies the observer returned by
+/// `FUN_081d2204` through vtable slot +0x1ec; prepends `node`, records
+/// `mode` at node+0x18, and invokes node slot +0x78. Finally it invokes the
+/// optional list callback at +0x28, if any, before destroying the scope.
+///
+/// No null checks are added for `list`, `node`, their vtables, or the
+/// observer: retailOS dereferences each on its corresponding path.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn node_list_enqueue(
+    list: *mut NodeList,
+    node: *mut Node,
+    mode: u32,
+    context: *mut c_void,
+) {
+    let mut scope = NodeListEnqueueScope { mode, context };
+    let ops = node_list_enqueue_ops();
+    (ops.enter_scope)(&mut scope, 0, mode, context, node);
+
+    if (*list).is_draining != 0 {
+        (*list).completion_context = node.cast::<c_void>();
+        (*list).completion_flag = mode as u8;
+    } else {
+        let mut observed_head = (*list).head;
+        if !observed_head.is_null()
+            && ((*(*observed_head).vtable).blocks_enqueue)(observed_head) != 0
+        {
+            loop {
+                ((*(*(*list).head).vtable).advance_enqueue_blocker)((*list).head);
+                let head = (*list).head;
+                if head.is_null()
+                    || head == observed_head
+                    || ((*(*head).vtable).blocks_enqueue)(head) == 0
+                {
+                    break;
+                }
+                observed_head = head;
+            }
+        }
+
+        let observer = (ops.enqueue_observer)();
+        ((*(*observer).vtable).notify_enqueue)(observer);
+        (*node).enqueue_mode = mode as u8;
+        (*node).next = (*list).head;
+        (*list).head = node;
+        ((*(*node).vtable).capture)(node);
+        if let Some(callback) = (*list).final_callback {
+            callback((*list).final_callback_argument);
+        }
+    }
+
+    (ops.exit_scope)(&mut scope);
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -588,6 +742,7 @@ mod tests {
         lib_shutdown_chain, shutdown_chain_head, ShutdownNode, SHUTDOWN_ALLOC, SHUTDOWN_FREE,
     };
     use core::ptr;
+    use std::vec;
     use std::boxed::Box;
     use std::sync::{Mutex, MutexGuard};
     use std::vec::Vec;
@@ -599,7 +754,8 @@ mod tests {
         vtable: *const NodeVtable,
         opaque: [u32; 4],
         next: *mut Node,
-        opaque_after_next: [u8; 8],
+        enqueue_mode: u8,
+        opaque_after_enqueue_mode: [u8; 7],
         continues_drain: u8,
         evict_when_transitioning: u8,
         key: u32,
@@ -642,10 +798,10 @@ mod tests {
             unresolved_5c_64: [0; 3],
             key,
             requires_capture: ignore_property,
-            unresolved_70: 0,
+            blocks_enqueue: ignore_property,
             requires_prepare: ignore_property,
             capture: ignore_action,
-            unresolved_7c: 0,
+            advance_enqueue_blocker: ignore_action,
             prepare: ignore_property,
             unresolved_84_94: [0; 5],
             mode: ignore_property,
@@ -666,7 +822,8 @@ mod tests {
             vtable: &TEST_VTABLE,
             opaque: [0; 4],
             next: ptr::null_mut(),
-            opaque_after_next: [0; 8],
+            enqueue_mode: 0,
+            opaque_after_enqueue_mode: [0; 7],
             continues_drain: 0,
             evict_when_transitioning: 0,
             key,
@@ -1100,10 +1257,10 @@ mod tests {
         unresolved_5c_64: [0; 3],
         key: drain_key,
         requires_capture: drain_requires_capture,
-        unresolved_70: 0,
+        blocks_enqueue: ignore_property,
         requires_prepare: drain_requires_prepare,
         capture: drain_capture,
-        unresolved_7c: 0,
+        advance_enqueue_blocker: ignore_action,
         prepare: drain_prepare,
         unresolved_84_94: [0; 5],
         mode: drain_mode,
@@ -1164,7 +1321,8 @@ mod tests {
                 vtable: &DRAIN_NODE_VTABLE,
                 opaque: [0; 4],
                 next: ptr::null_mut(),
-                opaque_after_next: [0; 8],
+                enqueue_mode: 0,
+                opaque_after_enqueue_mode: [0; 7],
                 continues_drain,
                 evict_when_transitioning: 0,
             },
@@ -1399,5 +1557,230 @@ mod tests {
             }
             assert_eq!(&block.0[0x24..0x28], &[0xa5; 4], "+0x24 is untouched");
         }
+    }
+
+    #[derive(Debug, Eq, PartialEq)]
+    enum EnqueueEvent {
+        ScopeEnter { zero: u32, mode: u32, context: usize, node: usize },
+        Blocks(usize),
+        Advance(usize),
+        ObserverGet,
+        ObserverNotify,
+        NodeCapture(usize),
+        Final(usize),
+        ScopeExit,
+    }
+
+    static ENQUEUE_EVENTS: Mutex<Vec<EnqueueEvent>> = Mutex::new(Vec::new());
+    static ENQUEUE_TEST_LOCK: Mutex<()> = Mutex::new(());
+    static mut ENQUEUE_LIST: *mut NodeList = ptr::null_mut();
+    static mut ENQUEUE_REPLACEMENT: *mut Node = ptr::null_mut();
+    static mut ENQUEUE_BLOCKING_NODE: *mut Node = ptr::null_mut();
+
+    fn record_enqueue(event: EnqueueEvent) {
+        ENQUEUE_EVENTS.lock().unwrap().push(event);
+    }
+
+    fn take_enqueue_events() -> Vec<EnqueueEvent> {
+        core::mem::take(&mut *ENQUEUE_EVENTS.lock().unwrap())
+    }
+
+    unsafe extern "C" fn enqueue_scope_enter(
+        scope: *mut NodeListEnqueueScope,
+        zero: u32,
+        mode: u32,
+        context: *mut c_void,
+        node: *mut Node,
+    ) {
+        record_enqueue(EnqueueEvent::ScopeEnter {
+            zero,
+            mode,
+            context: context as usize,
+            node: node as usize,
+        });
+        assert_eq!((*scope).mode, mode);
+        assert_eq!((*scope).context, context);
+    }
+
+    unsafe extern "C" fn enqueue_scope_exit(_scope: *mut NodeListEnqueueScope) {
+        record_enqueue(EnqueueEvent::ScopeExit);
+    }
+
+    unsafe extern "C" fn enqueue_blocks(this: *mut Node) -> u32 {
+        record_enqueue(EnqueueEvent::Blocks(this as usize));
+        (this == ENQUEUE_BLOCKING_NODE) as u32
+    }
+
+    unsafe extern "C" fn enqueue_advance(this: *mut Node) {
+        record_enqueue(EnqueueEvent::Advance(this as usize));
+        (*ENQUEUE_LIST).head = ENQUEUE_REPLACEMENT;
+    }
+
+    unsafe extern "C" fn enqueue_capture(this: *mut Node) {
+        record_enqueue(EnqueueEvent::NodeCapture(this as usize));
+    }
+
+    static ENQUEUE_NODE_VTABLE: NodeVtable = NodeVtable {
+        unresolved_00: 0,
+        release: ignore_release,
+        unresolved_08_50: [0; 19],
+        set_active: ignore_set_active,
+        evict: ignore_action,
+        unresolved_5c_64: [0; 3],
+        key: ignore_property,
+        requires_capture: ignore_property,
+        blocks_enqueue: enqueue_blocks,
+        requires_prepare: ignore_property,
+        capture: enqueue_capture,
+        advance_enqueue_blocker: enqueue_advance,
+        prepare: ignore_property,
+        unresolved_84_94: [0; 5],
+        mode: ignore_property,
+    };
+
+    unsafe extern "C" fn enqueue_observer_notify(_observer: *mut EnqueueObserver) {
+        record_enqueue(EnqueueEvent::ObserverNotify);
+    }
+
+    static ENQUEUE_OBSERVER_VTABLE: EnqueueObserverVtable = EnqueueObserverVtable {
+        unresolved_00_1e8: [0; 123],
+        notify_enqueue: enqueue_observer_notify,
+    };
+    static mut ENQUEUE_OBSERVER: EnqueueObserver = EnqueueObserver {
+        vtable: &ENQUEUE_OBSERVER_VTABLE,
+    };
+
+    unsafe extern "C" fn enqueue_observer_get() -> *mut EnqueueObserver {
+        record_enqueue(EnqueueEvent::ObserverGet);
+        core::ptr::addr_of_mut!(ENQUEUE_OBSERVER)
+    }
+
+    unsafe extern "C" fn enqueue_final_callback(argument: *mut c_void) {
+        record_enqueue(EnqueueEvent::Final(argument as usize));
+    }
+
+    fn enqueue_node() -> Node {
+        Node {
+            vtable: &ENQUEUE_NODE_VTABLE,
+            opaque: [0; 4],
+            next: ptr::null_mut(),
+            enqueue_mode: 0,
+            opaque_after_enqueue_mode: [0; 7],
+            continues_drain: 0,
+            evict_when_transitioning: 0,
+        }
+    }
+
+    fn install_enqueue_ops() -> MutexGuard<'static, ()> {
+        let guard = ENQUEUE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        take_enqueue_events();
+        unsafe {
+            ENQUEUE_LIST = ptr::null_mut();
+            ENQUEUE_REPLACEMENT = ptr::null_mut();
+            ENQUEUE_BLOCKING_NODE = ptr::null_mut();
+            NODE_LIST_ENQUEUE_OPS = NodeListEnqueueOps {
+                enter_scope: enqueue_scope_enter,
+                exit_scope: enqueue_scope_exit,
+                enqueue_observer: enqueue_observer_get,
+            };
+        }
+        guard
+    }
+
+    struct EnqueueOpsReset;
+
+    impl Drop for EnqueueOpsReset {
+        fn drop(&mut self) {
+            unsafe {
+                NODE_LIST_ENQUEUE_OPS = NodeListEnqueueOps {
+                    enter_scope: missing_enqueue_scope_enter,
+                    exit_scope: missing_enqueue_scope_exit,
+                    enqueue_observer: missing_enqueue_observer,
+                };
+                ENQUEUE_LIST = ptr::null_mut();
+                ENQUEUE_REPLACEMENT = ptr::null_mut();
+                ENQUEUE_BLOCKING_NODE = ptr::null_mut();
+            }
+        }
+    }
+
+    #[test]
+    fn enqueue_advances_blocking_heads_then_links_starts_and_notifies() {
+        let _guard = install_enqueue_ops();
+        let _reset = EnqueueOpsReset;
+        let mut blocking = enqueue_node();
+        let mut unblocked = enqueue_node();
+        let mut incoming = enqueue_node();
+        let context = ptr::dangling_mut::<c_void>();
+        let final_argument = ptr::dangling_mut::<c_void>();
+        let mut queued = list(&mut blocking, 0);
+        queued.final_callback = Some(enqueue_final_callback);
+        queued.final_callback_argument = final_argument;
+        unsafe {
+            ENQUEUE_LIST = &mut queued;
+            ENQUEUE_REPLACEMENT = &mut unblocked;
+            ENQUEUE_BLOCKING_NODE = &mut blocking;
+            node_list_enqueue(&mut queued, &mut incoming, 0x1234, context);
+        }
+
+        assert_eq!(queued.head as usize, &mut incoming as *mut Node as usize);
+        assert_eq!(incoming.next as usize, &mut unblocked as *mut Node as usize);
+        assert_eq!(incoming.enqueue_mode, 0x34);
+        assert_eq!(
+            take_enqueue_events(),
+            vec![
+                EnqueueEvent::ScopeEnter {
+                    zero: 0,
+                    mode: 0x1234,
+                    context: context as usize,
+                    node: (&mut incoming as *mut Node) as usize,
+                },
+                EnqueueEvent::Blocks((&mut blocking as *mut Node) as usize),
+                EnqueueEvent::Advance((&mut blocking as *mut Node) as usize),
+                EnqueueEvent::Blocks((&mut unblocked as *mut Node) as usize),
+                EnqueueEvent::ObserverGet,
+                EnqueueEvent::ObserverNotify,
+                EnqueueEvent::NodeCapture((&mut incoming as *mut Node) as usize),
+                EnqueueEvent::Final(final_argument as usize),
+                EnqueueEvent::ScopeExit,
+            ]
+        );
+    }
+
+    #[test]
+    fn enqueue_defers_during_a_drain_without_immediate_dispatch() {
+        let _guard = install_enqueue_ops();
+        let _reset = EnqueueOpsReset;
+        let mut existing = enqueue_node();
+        let mut incoming = enqueue_node();
+        let context = ptr::dangling_mut::<c_void>();
+        let mut queued = list(&mut existing, 0);
+        queued.is_draining = 1;
+        queued.final_callback = Some(enqueue_final_callback);
+        unsafe {
+            node_list_enqueue(&mut queued, &mut incoming, 0x1ff, context);
+        }
+
+        assert_eq!(
+            queued.head as usize,
+            &mut existing as *mut Node as usize,
+            "a deferred node is not linked"
+        );
+        assert_eq!(queued.completion_context, (&mut incoming as *mut Node).cast::<c_void>());
+        assert_eq!(queued.completion_flag, 0xff, "only the low mode byte is retained");
+        assert!(incoming.next.is_null());
+        assert_eq!(incoming.enqueue_mode, 0, "the node has not started");
+        assert_eq!(
+            take_enqueue_events(),
+            vec![
+                EnqueueEvent::ScopeEnter {
+                    zero: 0,
+                    mode: 0x1ff,
+                    context: context as usize,
+                    node: (&mut incoming as *mut Node) as usize,
+                },
+                EnqueueEvent::ScopeExit,
+            ]
+        );
     }
 }

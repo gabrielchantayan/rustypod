@@ -6947,6 +6947,31 @@ functions:
       removal is the stock non-returning assertion path. Host tests
       verify lifecycle/capture/release order, retained-node ownership,
       terminal-head preservation, and completion callback order.
+  - address: 0x0810fe7c
+    ghidra: FUN_0810fe7c
+    name: node_list_enqueue
+    size: 232
+    sig: "void node_list_enqueue(NodeList *list, Node *node, u32 mode, void *context)"
+    module: app/node_list
+    status: ported
+    vars: {param_1: list, param_2: node, param_3: mode, param_4: context, iVar1: blocks_enqueue, piVar3: observed_head, piVar2: head, uStack_24: enqueue_scope_mode, uStack_20: enqueue_scope_context}
+    notes: >-
+      Enqueues a view-list node with a scope around the whole operation
+      (reference C: decomp/c/010/0810fe7c_FUN_0810fe7c.c). When +0x0c
+      says a drain is active, it defers the node in +0x20 and mode's low
+      byte in +0x24; node_list_drain later passes that pair to its
+      completion slot. Otherwise it advances a blocking head through
+      node vtable +0x70/+0x7c until the head disappears, remains the
+      same, or reports clear; fetches FUN_081d2204's observer and calls
+      its vtable+0x1ec; then records the low mode byte at node+0x18,
+      links node+0x14 to the old head, installs it as head, and dispatches
+      node vtable+0x78. The optional list +0x28 callback runs only on
+      that immediate path. Scope setup/teardown (FUN_08266a48 and
+      thunk_FUN_08275bc8) and the observer accessor are explicit
+      NodeListEnqueueOps seams, while the observer's +0x1ec and node
+      slots remain true vtable calls. Focused host tests pin immediate
+      callback order, head traversal/linkage, low-byte truncation, and
+      drain deferral.
   - address: 0x0810fdc8
     ghidra: FUN_0810fdc8
     name: node_list_advance_until
