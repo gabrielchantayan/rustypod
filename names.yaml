@@ -7154,6 +7154,22 @@ functions:
       identical bodies, so the archive exports byteswap32 and bswap32 at
       one address - review codegen as `match.py 0x08076f58 bswap32`.
 
+  - address: 0x080e94f4
+    ghidra: FUN_080e94f4
+    name: bswap32_word
+    size: 32
+    sig: "u32 bswap32_word(u32 value)"
+    module: util/bswap
+    status: ported
+    vars: {param_1: value}
+    notes: >-
+      Standalone register-only 32-bit byte reverse. The raw sequence is
+      mov #0xff00; and value lsr #8; orr value lsr #24; orr value lsl #24;
+      mov #0xff0000; and value lsl #8; final orr, returning
+      ((value >> 8) & 0xff00) | (value >> 24) | (value << 24) |
+      ((value & 0xff00) << 8). Semantically a full u32 byte reversal;
+      no deliberate deviations.
+
   - address: 0x080e965c
     ghidra: FUN_080e965c
     name: bswap32_guid_field
@@ -15375,6 +15391,30 @@ functions:
       two-compares-then-scale-then-truncate shape; LLVM inlined the
       __fscalb/__f2i bodies and turned the unsigned >= 0xc7000000
       compare into an equivalent top-byte compare.
+
+  - address: 0x080e9310
+    ghidra: FUN_080e9310
+    name: scan_decimal_cursor
+    size: 60
+    sig: "u32 scan_decimal_cursor(const char **cursor)"
+    module: strto/decimal_cursor
+    status: ported
+    renames:
+      param_1: cursor
+      pbVar2: input
+      iVar1: acc
+      DAT_080e934c: DECIMAL_DIGIT_CLASS
+    notes: >-
+      Cursor-advancing decimal scanner. The byte-class table's 0x10 bit
+      admits ASCII '0'..'9'; for every accepted byte, accumulate
+      acc = acc*10 + (byte - '0') with 32-bit wrapping arithmetic, then
+      store the first non-digit cursor through the input slot. The port
+      spells the recovered undefined4 cursor slot as const char ** and
+      returns u32 instead of int; both preserve the target's pointer and
+      return-word bit patterns. Host tests cover cursor update,
+      non-digit termination, and overflow wrapping. match.py structural:
+      table-classification loop, shift-add/multiply-by-10 accumulation,
+      and final cursor store.
 
   - address: 0x080e9974
     ghidra: FUN_080e9974
