@@ -11542,6 +11542,27 @@ functions:
       The allocator call and post-call NULL store are verified against the
       40-byte disassembly.
 
+  # ---- VDBE table-affinity materialization (src/sqlite/table_affinity.rs) ----
+  - address: 0x08385004
+    ghidra: FUN_08385004
+    name: vdbe_attach_table_affinity
+    size: 128
+    sig: "void vdbe_attach_table_affinity(Vdbe *vdbe, Table *table)"
+    module: sqlite/table_affinity
+    status: ported
+    vars: {param_1: vdbe, param_2: table, iVar1: affinity_cache, iVar3: column_index, uVar2: p4_copy}
+    notes: >-
+      SQLite's 3.6-era table-affinity helper. If table->zColAff (+0x28) is
+      NULL, allocates table->nCol + 1 through sqlite3DbMallocRaw
+      (0x08374960), copies every Column.affinity (+0x12, 20-byte Column
+      stride), terminates the string, and caches it. It tail-calls the ported
+      vdbe_change_p4 (0x08386aa4) with that cache, addr -1 and n 0; that seam
+      applies the Vdbe/op/malloc-failure guards, frees and clears the former
+      P4 through freeP4 (0x082cf388), duplicates the string through
+      sqlite3DbStrNDup (0x08374a40), and tags it P4_DYNAMIC (-1). An
+      affinity-cache allocation failure returns before modifying the op; a
+      P4-copy allocation failure retains the dynamic tag with NULL P4.
+
   # ---- VDBE code builder (src/sqlite/vdbe.rs) ----
   - address: 0x08386824
     ghidra: FUN_08386824
