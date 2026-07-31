@@ -11360,6 +11360,23 @@ functions:
   # Call-site counts below come from decoding every bl/b word in
   # osos.dec, not from osos.asm.
 
+  # ---- SQLite string accumulator (src/sqlite/vdbe_op.rs) ----
+  - address: 0x08384e84
+    ghidra: FUN_08384e84
+    name: str_accum_init
+    size: 44
+    sig: "void str_accum_init(StrAccum *accum, char *base, int initial_capacity, int max_capacity)"
+    module: sqlite/vdbe_op
+    status: ported
+    vars: {param_1: accum, param_2: base, param_3: initial_capacity, param_4: max_capacity}
+    notes: >-
+      SQLite's sqlite3StrAccumInit. Initializes the 23-byte recovered
+      prefix of StrAccum: zBase and zText at +0/+4 both take base, nChar
+      at +8 is zero, nAlloc and mxAlloc at +0xc/+0x10 retain the supplied
+      capacities, and mallocFailed/useMalloc/tooBig at +0x14/+0x15/+0x16
+      become 0/1/0. Leaf 44-byte store sequence; no validation or base
+      buffer access.
+
   # ---- VDBE code builder (src/sqlite/vdbe.rs) ----
   - address: 0x08386824
     ghidra: FUN_08386824

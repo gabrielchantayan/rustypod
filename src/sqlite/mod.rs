@@ -89,3 +89,4 @@ pub mod strhash;
 pub mod strdup;
 pub mod value_free;
 pub mod vdbe;
+pub mod vdbe_op;
