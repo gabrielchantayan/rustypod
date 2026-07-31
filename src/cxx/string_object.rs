@@ -423,6 +423,45 @@ pub unsafe extern "C" fn string_object_assign_cstr(this: *mut StringObject, sour
     strcpy(destination, source);
 }
 
+/// string_object_assign_payload — original: `FUN_08276474` @ 0x08276474
+/// (100 bytes).
+///
+/// Source: `ipod-decomp/decomp/c/026/08276474_FUN_08276474.c`.
+///
+/// Assigns the caller-supplied C-string payload used by the StringObject copy
+/// assignment operator. NULL and an empty payload dispatch only vtable slot
+/// +0xc with `this`. Otherwise it calls the inclusive-length helper
+/// [`strlen_safe_plus1`] @ 0x08275e20, requests exactly that many bytes from
+/// vtable slot +0x8 as `(this, requested_size, 0)`, and copies the source
+/// including its NUL terminator into the returned storage. A NULL allocation
+/// result returns immediately without copying or falling back to +0xc.
+///
+/// The allocation virtual call owns replacing/freeing this object's prior
+/// payload; this helper neither frees nor stores the payload word itself.
+/// The two virtual callees remain modeled by
+/// [`STRING_OBJECT_ASSIGN_CSTR_OPS`], because the modeled vtable contains ROM
+/// identities rather than host-callable pointers. As in the original, `this`
+/// is not NULL-guarded before virtual dispatch.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_assign_payload(
+    this: *mut StringObject,
+    payload: *const u8,
+) {
+    if payload.is_null() || payload.read() == 0 {
+        assign_cstr_clear_op()(this);
+        return;
+    }
+
+    let requested_size = strlen_safe_plus1(payload);
+    let destination = assign_cstr_allocate_op()(this, requested_size, 0);
+    if destination.is_null() {
+        return;
+    }
+    strcpy(destination, payload);
+}
+
+
 /// Caller tag the original passes to `free_wrapper` (`mov r1, #0x34` @
 /// 0x08275d88). Telemetry only (see `BlockHeader::link_or_tag`).
 pub const TAG_STRING_OBJECT_PAYLOAD: usize = 0x34;
@@ -1304,6 +1343,85 @@ mod tests {
             unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).clone() },
             std::vec![this as usize, this as usize],
             "both branch forms dispatch vtable slot +0xc with only this"
+        );
+        assert_eq!(object.payload, 0x2222_2222 as *mut u8);
+    }
+
+    #[test]
+    fn assign_payload_uses_inclusive_length_and_leaves_bookkeeping_to_allocation() {
+        let mut destination = [0xa5u8; 16];
+        let payload = *b"album\0";
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: 0xcafe_f00d as *mut u8,
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(destination.as_mut_ptr());
+
+        unsafe { string_object_assign_payload(this, payload.as_ptr()) };
+
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
+            std::vec![(this as usize, 6, 0)],
+            "0x08275e20 supplies strlen plus the NUL"
+        );
+        assert!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty() },
+            "nonempty payload never reaches vtable slot +0xc"
+        );
+        assert_eq!(&destination[..6], &payload, "the copy includes the NUL");
+        assert_eq!(payload, *b"album\0", "source payload remains caller-owned");
+        assert_eq!(
+            object.payload, 0xcafe_f00d as *mut u8,
+            "replacement/free bookkeeping belongs to the +0x8 virtual call"
+        );
+    }
+
+    #[test]
+    fn assign_payload_allocation_failure_skips_copy_and_clear_fallback() {
+        let payload = *b"full\0";
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: 0x1111_1111 as *mut u8,
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(core::ptr::null_mut());
+
+        unsafe { string_object_assign_payload(this, payload.as_ptr()) };
+
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
+            std::vec![(this as usize, 5, 0)]
+        );
+        assert!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty() },
+            "a NULL +0x8 result returns instead of dispatching +0xc"
+        );
+        assert_eq!(object.payload, 0x1111_1111 as *mut u8);
+    }
+
+    #[test]
+    fn assign_payload_null_and_empty_dispatch_only_vtable_slot_0xc() {
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: 0x2222_2222 as *mut u8,
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let empty = [0u8; 1];
+        let _bench = assign_cstr_bench(0x3333_3333 as *mut u8);
+
+        unsafe {
+            string_object_assign_payload(this, core::ptr::null());
+            string_object_assign_payload(this, empty.as_ptr());
+        }
+
+        assert!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty() },
+            "NULL and first-byte-NUL skip 0x08275e20 and vtable slot +0x8"
+        );
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).clone() },
+            std::vec![this as usize, this as usize]
         );
         assert_eq!(object.payload, 0x2222_2222 as *mut u8);
     }
