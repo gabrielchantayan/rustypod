@@ -272,8 +272,14 @@ mod tests {
     /// Serializes every test that swaps the globals below.
     static CONSTRUCT_LOCK: Mutex<()> = Mutex::new(());
 
-    /// The block the stub allocator hands out.
-    static mut ARENA: [u8; REGISTRY_OBSERVER_SIZE] = [0xa5; REGISTRY_OBSERVER_SIZE];
+    /// Alignment-safe host backing for the target's 8-byte observer
+    /// allocation. [`RegistryObserver`] remains exactly that 8-byte,
+    /// pointer-plus-word layout on the 32-bit firmware target, while its
+    /// native host alignment makes the volatile vtable load valid.
+    static mut ARENA: RegistryObserver = RegistryObserver {
+        vtable: ptr::null(),
+        reserved: 0,
+    };
 
     /// Sizes passed to `operator new`, in order.
     static mut ALLOC_SIZES: Vec<usize> = Vec::new();
