@@ -895,6 +895,55 @@ pub unsafe extern "C" fn utf16_utf8_byte_len_plus1(utf16: *const u16) -> i32 {
     utf8_byte_len_add(utf8_byte_len, 1)
 }
 
+/// utf16_utf8_byte_len_bounded_plus1 — original: `FUN_08276338` @
+/// 0x08276338 (72 bytes, all code; source:
+/// `ipod-decomp/decomp/c/026/08276338_FUN_08276338.c`).
+///
+/// Counts the UTF-8 byte length implied by at most `max_code_units` UTF-16
+/// code units and includes the output's NUL terminator. A NULL input is an
+/// empty string and returns 1. The retail loop reads only while the signed
+/// bound is positive; it stops earlier at a UTF-16 NUL. Each nonzero code
+/// unit below 0x80, below 0x800, or otherwise contributes one, two, or three
+/// bytes respectively. It neither combines nor validates surrogate pairs.
+/// The pointer advances and the remaining bound decrements only after a
+/// nonzero code unit is counted, so a terminating NUL leaves the bound
+/// untouched. Its signed 32-bit accumulator, including the final NUL byte,
+/// wraps on overflow.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn utf16_utf8_byte_len_bounded_plus1(
+    utf16: *const u16,
+    mut max_code_units: i32,
+) -> i32 {
+    let mut utf8_byte_len = 0;
+    let mut code_unit_ptr = utf16;
+
+    if !code_unit_ptr.is_null() {
+        while max_code_units > 0 {
+            let code_unit = *code_unit_ptr;
+            if code_unit == 0 {
+                break;
+            }
+
+            let encoded_bytes = if code_unit < 0x80 {
+                1
+            } else if code_unit < 0x800 {
+                2
+            } else {
+                3
+            };
+            utf8_byte_len = utf8_byte_len_add(utf8_byte_len, encoded_bytes);
+            code_unit_ptr = code_unit_ptr.add(1);
+            max_code_units -= 1;
+        }
+    }
+
+    utf8_byte_len_add(utf8_byte_len, 1)
+}
+
+
+
+
 
 
 /// utf8_strcmp_safe — original: `FUN_08276d64` @ 0x08276d64 (56 bytes,
@@ -2448,6 +2497,48 @@ mod tests {
         assert_eq!(utf8_byte_len_add(i32::MAX, 1), i32::MIN);
         assert_eq!(utf8_byte_len_add(i32::MAX, 3), i32::MIN + 2);
         assert_eq!(utf8_byte_len_add(-1, 1), 0, "the terminal NUL also wraps");
+    }
+
+    // ---- utf16_utf8_byte_len_bounded_plus1 --------------------------
+
+    fn bounded_utf16_encoded_len(code_units: &[u16], max_code_units: i32) -> i32 {
+        unsafe { utf16_utf8_byte_len_bounded_plus1(code_units.as_ptr(), max_code_units) }
+    }
+
+    #[test]
+    fn utf16_utf8_byte_len_bounded_plus1_null_and_nonpositive_bounds_are_one() {
+        assert_eq!(
+            unsafe { utf16_utf8_byte_len_bounded_plus1(core::ptr::null(), 4) },
+            1
+        );
+
+        let unreadable = core::ptr::NonNull::<u16>::dangling().as_ptr();
+        assert_eq!(unsafe { utf16_utf8_byte_len_bounded_plus1(unreadable, 0) }, 1);
+        assert_eq!(unsafe { utf16_utf8_byte_len_bounded_plus1(unreadable, -1) }, 1);
+    }
+
+    #[test]
+    fn utf16_utf8_byte_len_bounded_plus1_honors_bound_and_encoding_thresholds() {
+        let code_units = [0x7f, 0x80, 0x7ff, 0x800];
+        assert_eq!(
+            bounded_utf16_encoded_len(&code_units, 4),
+            9,
+            "1 + 2 + 2 + 3 bytes, then the output terminator"
+        );
+        assert_eq!(
+            bounded_utf16_encoded_len(&code_units, 3),
+            6,
+            "the positive bound excludes the fourth code unit"
+        );
+    }
+
+    #[test]
+    fn utf16_utf8_byte_len_bounded_plus1_stops_at_utf16_nul_before_bound() {
+        assert_eq!(
+            bounded_utf16_encoded_len(&[0x800, 0, 0x7f], 3),
+            4,
+            "the terminator is not counted as UTF-8 data and ends the loop"
+        );
     }
 
     // ---- utf8_strcmp_safe -------------------------------------------

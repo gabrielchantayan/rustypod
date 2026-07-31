@@ -10061,6 +10061,24 @@ functions:
       original's signed 32-bit sum wraps on overflow; the Rust port uses
       wrapping_add for that target-machine behavior.
 
+  - address: 0x08276338
+    ghidra: FUN_08276338
+    name: utf16_utf8_byte_len_bounded_plus1
+    size: 72
+    sig: "int utf16_utf8_byte_len_bounded_plus1(const unsigned short *utf16, int max_code_units)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: utf16, param_2: max_code_units, uVar1: code_unit, iVar2: utf8_byte_len}
+    notes: >-
+      Counts the UTF-8 byte length implied by up to max_code_units UTF-16
+      code units, including one byte for the output NUL. NULL input, zero,
+      and negative bounds return 1. The bounded loop stops at either a
+      UTF-16 NUL or the positive limit. Values below 0x80 count as 1 byte,
+      values below 0x800 as 2, and all remaining nonzero 16-bit values as 3;
+      surrogate pairs are not combined. The count and bound decrement happen
+      only after a nonzero unit is processed. The signed 32-bit sum,
+      including the final NUL, wraps on overflow.
+
   - address: 0x08275d74
     ghidra: FUN_08275d74
     name: string_object_release_payload
