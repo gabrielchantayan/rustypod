@@ -15793,6 +15793,27 @@ functions:
       forwarding, and raw return-word propagation. match.py structural:
       source +0x88 load, target-vtable load, +0x4c indirect tail dispatch.
 
+  - address: 0x0811c284
+    ghidra: FUN_0811c284
+    name: flag_2c_is_one
+    size: 20
+    sig: "u32 flag_2c_is_one(const void *obj)"
+    module: app/flag_2c_is_one
+    status: ported
+    renames:
+      param_1: obj
+    notes: >-
+      Pure offset-based predicate on an otherwise unidentified application-side
+      object: it loads byte obj+0x2c and returns 1 only when the byte is
+      exactly 1; it returns 0 for 0 and for every value 2 through 255. This is
+      deliberately not the complement of ui::flag_2c::flag_2c_is_clear
+      (0x0811c564), because values above 1 are false for both routines. The
+      port makes no object layout or ownership claim beyond this readable byte.
+      Reference C: decomp/c/010/0811c284_FUN_0811c284.c; assembly: osos.asm
+      0x0811c284 (`ldrb +0x2c; cmp #1; movne/moveq`). Focused host tests cover
+      0, 1, 2, and 255 plus an unaligned base. match.py structural output is
+      an expected LLVM compare-lowering diff (exit 1).
+
   - address: 0x0811f720
     ghidra: FUN_0811f720
     name: ui_descriptor_init_static_span
