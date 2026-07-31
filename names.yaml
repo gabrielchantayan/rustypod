@@ -6947,6 +6947,25 @@ functions:
       removal is the stock non-returning assertion path. Host tests
       verify lifecycle/capture/release order, retained-node ownership,
       terminal-head preservation, and completion callback order.
+  - address: 0x0810fdc8
+    ghidra: FUN_0810fdc8
+    name: node_list_advance_until
+    size: 164
+    sig: "void node_list_advance_until(NodeList *list, i32 target, i32 threshold)"
+    module: app/node_list
+    status: ported
+    vars: {param_1: list, param_2: target, param_3: threshold, iVar1: measurement, uVar2: is_subsequent}
+    notes: >-
+      Advances the list through vtable+0x90 until either its vtable+0x94
+      measurement minus a nonzero threshold is no longer positive as a
+      wrapping signed i32 difference, or,
+      when the threshold is zero, the current head is NULL or its own
+      vtable+0x68 key equals target. The +0x90 callback receives
+      is_subsequent=0 initially, then 1, with its middle argument always
+      zero; it owns the actual advancement. Reference C:
+      decomp/c/010/0810fdc8_FUN_0810fdc8.c. Host tests cover wrapping
+      signed threshold comparison, both virtual-dispatch modes, match/empty
+      termination, and iteration-flag ordering.
 
   - address: 0x0810fa30
     ghidra: FUN_0810fa30

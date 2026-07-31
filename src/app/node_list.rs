@@ -111,13 +111,25 @@ pub struct Node {
 /// Slot +0x00 in the list vtable, invoked once a drain stops.
 pub type NodeListComplete =
     unsafe extern "C" fn(this: *mut NodeList, context: *mut c_void, flag: u8);
+/// Slot +0x90 dispatches one list advance iteration.
+pub type NodeListAdvance =
+    unsafe extern "C" fn(this: *mut NodeList, is_subsequent: u32, zero: u32, target: i32);
+/// Slot +0x94 measures the current position against an advance target.
+pub type NodeListMeasure = unsafe extern "C" fn(this: *mut NodeList, target: i32) -> i32;
 /// Callback stored at list +0x28.
 pub type NodeListFinalCallback = unsafe extern "C" fn(argument: *mut c_void);
 
-/// The only list-vtable slot dispatched by [`node_list_drain`].
+/// The list-vtable slots dispatched by drain and advance operations.
 #[repr(C)]
 pub struct NodeListVtable {
+    /// +0x00: completes a node-list drain.
     pub complete_drain: NodeListComplete,
+    /// +0x04..+0x8c: not dispatched here.
+    pub unresolved_04_8c: [usize; 35],
+    /// +0x90: advances the list toward a target.
+    pub advance: NodeListAdvance,
+    /// +0x94: measures position relative to a target.
+    pub measure: NodeListMeasure,
 }
 
 /// The embedded list +0x10 state.
@@ -191,6 +203,8 @@ mod layout_checks {
     const _: [u8; 0x10] = [0; core::mem::offset_of!(NodeList, drain_state)];
     const _: [u8; 0x20] = [0; core::mem::offset_of!(NodeList, completion_context)];
     const _: [u8; 0x28] = [0; core::mem::offset_of!(NodeList, final_callback)];
+    const _: [u8; 0x90] = [0; core::mem::offset_of!(NodeListVtable, advance)];
+    const _: [u8; 0x94] = [0; core::mem::offset_of!(NodeListVtable, measure)];
     const _: [u8; NODE_LIST_SIZE] = [0; core::mem::size_of::<NodeList>()];
 }
 
@@ -400,6 +414,47 @@ pub unsafe extern "C" fn list_count_unflagged_before_key(
     }
     unflagged_count
 }
+/// node_list_advance_until — original: `FUN_0810fdc8` @ 0x0810fdc8
+/// (164 bytes).
+///
+/// Reference: `ipod-decomp/decomp/c/010/0810fdc8_FUN_0810fdc8.c`.
+///
+/// Advances the list toward `target`. With a nonzero `threshold`, it
+/// repeatedly measures through the list vtable's +0x94 slot, subtracts
+/// the threshold with ARM's wrapping `i32` arithmetic, and advances
+/// through +0x90 while that signed difference is positive. With a zero
+/// threshold, it instead walks from the current head, stopping at null or
+/// at the first node whose +0x68 vtable key equals `target`; every
+/// nonmatching head is advanced through +0x90.
+/// The advance callback receives a zero iteration flag first, then one on
+/// every subsequent iteration; its middle argument is always zero.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn node_list_advance_until(
+    list: *mut NodeList,
+    target: i32,
+    threshold: i32,
+) {
+    let mut is_subsequent = 0_u32;
+
+    if threshold != 0 {
+        while ((*(*list).vtable).measure)(list, target).wrapping_sub(threshold) > 0 {
+            ((*(*list).vtable).advance)(list, is_subsequent, 0, target);
+            is_subsequent = 1;
+        }
+        return;
+    }
+
+    loop {
+        let head = (*list).head;
+        if head.is_null() || ((*(*head).vtable).key)(head) == target as u32 {
+            return;
+        }
+        ((*(*list).vtable).advance)(list, is_subsequent, 0, target);
+        is_subsequent = 1;
+    }
+}
+
 
 /// node_list_drain — original: `FUN_0810fb48` @ 0x0810fb48 (640 bytes).
 ///
@@ -563,6 +618,17 @@ mod tests {
     unsafe extern "C" fn ignore_set_active(_this: *mut Node, _active: u32) {}
     unsafe extern "C" fn ignore_action(_this: *mut Node) {}
     unsafe extern "C" fn ignore_property(_this: *mut Node) -> u32 {
+        0
+    }
+    unsafe extern "C" fn ignore_list_advance(
+        _this: *mut NodeList,
+        _is_subsequent: u32,
+        _zero: u32,
+        _target: i32,
+    ) {
+    }
+
+    unsafe extern "C" fn ignore_list_measure(_this: *mut NodeList, _target: i32) -> i32 {
         0
     }
 
@@ -779,6 +845,175 @@ mod tests {
             "the callback marks node one before its flag is counted, then the +0x14 link advances"
         );
     }
+    #[derive(Debug, PartialEq, Eq)]
+    enum AdvanceEvent {
+        Measure(i32),
+        Advance { is_subsequent: u32, zero: u32, target: i32 },
+    }
+
+    #[repr(C)]
+    struct AdvanceTestList {
+        list: NodeList,
+        measurements: *mut Vec<i32>,
+        events: *mut Vec<AdvanceEvent>,
+    }
+
+    unsafe extern "C" fn advance_measure(this: *mut NodeList, target: i32) -> i32 {
+        let fixture = this as *mut AdvanceTestList;
+        (*(*fixture).events).push(AdvanceEvent::Measure(target));
+        (*(*fixture).measurements).remove(0)
+    }
+
+    unsafe extern "C" fn advance_head(
+        this: *mut NodeList,
+        is_subsequent: u32,
+        zero: u32,
+        target: i32,
+    ) {
+        let fixture = this as *mut AdvanceTestList;
+        (*(*fixture).events).push(AdvanceEvent::Advance {
+            is_subsequent,
+            zero,
+            target,
+        });
+        let head = (*this).head;
+        if !head.is_null() {
+            (*this).head = (*head).next;
+        }
+    }
+
+    static ADVANCE_LIST_VTABLE: NodeListVtable = NodeListVtable {
+        complete_drain: ignore_complete_drain,
+        unresolved_04_8c: [0; 35],
+        advance: advance_head,
+        measure: advance_measure,
+    };
+
+    unsafe extern "C" fn ignore_complete_drain(
+        _this: *mut NodeList,
+        _context: *mut c_void,
+        _flag: u8,
+    ) {
+    }
+
+    fn advance_list(
+        head: *mut Node,
+        measurements: *mut Vec<i32>,
+        events: *mut Vec<AdvanceEvent>,
+    ) -> AdvanceTestList {
+        AdvanceTestList {
+            list: NodeList {
+                vtable: &ADVANCE_LIST_VTABLE,
+                head,
+                stop_key: 0,
+                is_draining: 0,
+                padding: [0; 3],
+                drain_state: DrainState {
+                    vtable: ptr::null(),
+                    state: 0,
+                    opaque: [0; 2],
+                },
+                completion_context: ptr::null_mut(),
+                completion_flag: 0,
+                completion_padding: [0; 3],
+                final_callback: None,
+                final_callback_argument: ptr::null_mut(),
+            },
+            measurements,
+            events,
+        }
+    }
+
+    #[test]
+    fn advance_until_threshold_mode_dispatches_list_slots_with_signed_comparison() {
+        let mut measurements = std::vec![-1, -2, -3];
+        let mut events = Vec::new();
+        let mut fixture = advance_list(ptr::null_mut(), &mut measurements, &mut events);
+
+        unsafe { node_list_advance_until(&mut fixture.list, 41, -3) };
+
+        assert_eq!(
+            events,
+            std::vec![
+                AdvanceEvent::Measure(41),
+                AdvanceEvent::Advance {
+                    is_subsequent: 0,
+                    zero: 0,
+                    target: 41,
+                },
+                AdvanceEvent::Measure(41),
+                AdvanceEvent::Advance {
+                    is_subsequent: 1,
+                    zero: 0,
+                    target: 41,
+                },
+                AdvanceEvent::Measure(41),
+            ],
+            "signed -1/-2 are greater than -3; equality terminates without an advance"
+        );
+        assert!(measurements.is_empty(), "the terminating measurement is dispatched");
+    }
+    #[test]
+    fn advance_until_threshold_mode_keeps_the_arm_subtraction_wraparound() {
+        let mut measurements = std::vec![i32::MAX];
+        let mut events = Vec::new();
+        let mut fixture = advance_list(ptr::null_mut(), &mut measurements, &mut events);
+
+        unsafe { node_list_advance_until(&mut fixture.list, 9, -1) };
+
+        assert_eq!(
+            events,
+            std::vec![AdvanceEvent::Measure(9)],
+            "i32::MAX - -1 wraps negative, so the signed result is not greater than zero"
+        );
+        assert!(measurements.is_empty());
+    }
+
+    #[test]
+    fn advance_until_zero_threshold_walks_heads_until_a_node_key_matches() {
+        let mut visits = Vec::new();
+        let mut nodes = [
+            node(1, &mut visits),
+            node(u32::MAX, &mut visits),
+            node(3, &mut visits),
+        ];
+        let head = chain(&mut nodes);
+        let mut measurements = Vec::new();
+        let mut events = Vec::new();
+        let mut fixture = advance_list(head, &mut measurements, &mut events);
+
+        unsafe { node_list_advance_until(&mut fixture.list, -1, 0) };
+
+        assert_eq!(visits, std::vec![1, u32::MAX], "the matching head terminates the walk");
+        assert_eq!(
+            events,
+            std::vec![AdvanceEvent::Advance {
+                is_subsequent: 0,
+                zero: 0,
+                target: -1,
+            }],
+            "only the first nonmatching head is advanced"
+        );
+        assert_eq!(
+            fixture.list.head,
+            &mut nodes[1] as *mut TestNode as *mut Node,
+            "the action owns traversal; the port rechecks the current head"
+        );
+        assert!(measurements.is_empty(), "zero threshold never calls the +0x94 measurement slot");
+    }
+
+    #[test]
+    fn advance_until_zero_threshold_terminates_on_an_empty_list() {
+        let mut measurements = Vec::new();
+        let mut events = Vec::new();
+        let mut fixture = advance_list(ptr::null_mut(), &mut measurements, &mut events);
+
+        unsafe { node_list_advance_until(&mut fixture.list, 7, 0) };
+
+        assert!(events.is_empty());
+        assert!(measurements.is_empty());
+    }
+
 
 
     #[derive(Debug, PartialEq, Eq)]
@@ -906,7 +1141,12 @@ mod tests {
         record_drain(DrainEvent::Complete(flag));
     }
 
-    static DRAIN_LIST_VTABLE: NodeListVtable = NodeListVtable { complete_drain };
+    static DRAIN_LIST_VTABLE: NodeListVtable = NodeListVtable {
+        complete_drain,
+        unresolved_04_8c: [0; 35],
+        advance: ignore_list_advance,
+        measure: ignore_list_measure,
+    };
 
     unsafe extern "C" fn final_drain_callback(_argument: *mut c_void) {
         record_drain(DrainEvent::Final);
