@@ -9999,6 +9999,26 @@ functions:
       as a string terminator to its callers. Sole user in the equality
       path: the UTF-8 strcmp @ 0x08276d64 above.
 
+  - address: 0x08276288
+    ghidra: FUN_08276288
+    name: utf8_prev_codepoint
+    size: 116
+    sig: "unsigned int utf8_prev_codepoint(const char **cursor)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: cursor, iVar1: sequence_end, uVar2: final_byte, uVar3: leading_byte, uVar4: preceding_byte}
+    notes: >-
+      Moves *cursor backward over one reverse-decoded UTF-8 sequence.
+      The final byte is returned unchanged when ASCII. Otherwise the
+      preceding byte selects a 2-byte form only for 0b110xxxxx; failing
+      that, the third byte back selects a 3-byte form only for
+      0b1110xxxx. Payload bytes are masked without continuation,
+      overlong, or surrogate validation. Every failed high-bit
+      lookbehind (including a malformed final lead and the tail of a
+      4-byte sequence) consumes three bytes and returns 0. The function
+      is a raw pointer cursor operation: invalid cursor or unreadable
+      lookbehind faults as in retailOS.
+
   - address: 0x08275d74
     ghidra: FUN_08275d74
     name: string_object_release_payload
@@ -11375,6 +11395,22 @@ functions:
   # 0x0839eda0, above the range.
   # Call-site counts below come from decoding every bl/b word in
   # osos.dec, not from osos.asm.
+
+  # ---- SQLite string accumulator finish (src/sqlite/str_accum.rs) ----
+  - address: 0x08384e14
+    ghidra: FUN_08384e14
+    name: str_accum_finish
+    size: 112
+    sig: "char *str_accum_finish(StrAccum *accum)"
+    module: sqlite/str_accum
+    status: ported
+    vars: {param_1: accum, iVar2: z_text, cVar1: use_malloc}
+    notes: >-
+      SQLite's sqlite3StrAccumFinish. When zText is non-NULL it first writes
+      its terminator at zText[nChar]. If useMalloc is set and zText still
+      equals zBase, it requests nChar + 1 bytes through sqlite3_malloc
+      (0x08390b14), installs the result in zText, sets mallocFailed on NULL,
+      or copies zBase including its terminator on success. Returns zText.
 
   # ---- SQLite string accumulator (src/sqlite/vdbe_op.rs) ----
   - address: 0x08384e84
@@ -15070,6 +15106,25 @@ functions:
       int; identical bit pattern. match.py structural: same
       ldrb/sub-0x30/cmp-9/shift-add-*10 loop; LLVM peels the first
       iteration and uses a frame.
+
+  - address: 0x080e99a0
+    ghidra: FUN_080e99a0
+    name: clock_pair_subtract
+    size: 56
+    sig: "void clock_pair_subtract(const ClockPair *left, const ClockPair *right, ClockPair *difference)"
+    module: util/clock_pair
+    status: ported
+    renames:
+      param_1: left
+      param_2: right
+      param_3: difference
+      iVar2: left_days
+      iVar3: right_days
+      iVar1: second_difference
+    notes: >-
+      Subtracts {signed days, seconds-of-day}; stores both differences,
+      then borrows one day only when the signed seconds difference is
+      negative. The borrow radix is exactly 0x15180 (86,400).
 
   - address: 0x0812bf70
     ghidra: FUN_0812bf70
