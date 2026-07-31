@@ -121,6 +121,23 @@ pub extern "C" fn byteswap32(value: u32) -> u32 {
 }
 
 // ---------------------------------------------------------------------------
+// The standalone register-only word converter @ 0x080e94f4.
+// ---------------------------------------------------------------------------
+
+/// bswap32_word — original: `FUN_080e94f4` @ 0x080e94f4 (32 bytes).
+///
+/// Reverses all four byte lanes of a 32-bit word. The original forms
+/// `((value >> 8) & 0xff00) | (value >> 24) | (value << 24) |
+/// ((value & 0xff00) << 8)` with two masks and four shifts/ORs; this is
+/// exactly `u32::swap_bytes()`. There are no deliberate deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.bswap32_word")]
+pub extern "C" fn bswap32_word(value: u32) -> u32 {
+    ((value >> 8) & 0xff00) | (value >> 24) | (value << 24) | ((value & 0xff00) << 8)
+}
+
+
+// ---------------------------------------------------------------------------
 // The GUID-converter copy @ 0x080e965c.
 //
 // A third, independent instance of the same 32-bit byte reverse, living in
@@ -247,6 +264,32 @@ mod tests {
             assert_eq!(byteswap32(v), bswap32(v), "v={v:#010x}");
             assert_eq!(byteswap32(byteswap32(v)), v, "involution v={v:#010x}");
         }
+    }
+
+    /// 0x080e94f4's low-byte-first accumulation is a full reversal, not a
+    /// rotate or a swap of adjacent byte pairs.
+    #[test]
+    fn bswap32_word_matches_its_four_lane_reference() {
+        for value in [
+            0u32,
+            0x0000_00ff,
+            0x0000_ff00,
+            0x00ff_0000,
+            0xff00_0000,
+            0x1234_5678,
+            0x80ff_0102,
+        ] {
+            let want = ((value >> 8) & 0xff00)
+                | (value >> 24)
+                | (value << 24)
+                | ((value & 0xff00) << 8);
+            assert_eq!(bswap32_word(value), want, "value={value:#010x}");
+        }
+
+        let value = 0x1234_5678;
+        assert_eq!(bswap32_word(value), 0x7856_3412);
+        assert_ne!(bswap32_word(value), value.rotate_left(8));
+        assert_ne!(bswap32_word(value), ((value & 0x00ff_00ff) << 8) | ((value & 0xff00_ff00) >> 8));
     }
 
     /// The GUID-converter copy reproduces the reference C expression
