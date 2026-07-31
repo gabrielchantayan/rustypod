@@ -6,3 +6,4 @@ pub mod flag_2c;
 pub mod rect;
 pub mod width_inset;
 pub mod static_descriptor;
+pub mod resource_release;

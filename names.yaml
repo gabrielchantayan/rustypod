@@ -15838,3 +15838,29 @@ functions:
       and callee routing. match.py structural: preserves the callee route,
       static-base literal, +0x24 span, +0x08 parameter store, and descriptor
       return.
+
+  - address: 0x0811f76c
+    ghidra: FUN_0811f76c
+    name: ui_resource_release
+    size: 72
+    sig: "i32 ui_resource_release(void)"
+    module: ui/resource_release
+    status: ported
+    renames:
+      iVar1: resource_state
+      iVar2: release_result
+      FUN_081f5034: lazy_ui_resource_state
+      FUN_0838f764: resource_release
+    notes: >-
+      Gets the lazy 0x18-byte UI resource state, whose only identified fields
+      are its resource word at +0x04 and active byte at +0x08. An empty
+      resource returns 0 without calling the release helper. Otherwise it
+      passes the resource to FUN_0838f764, returns any nonzero helper result
+      unchanged, and only on zero clears +0x08 then +0x04. Reference C:
+      decomp/c/011/0811f76c_FUN_0811f76c.c; caller shutdown sequence:
+      decomp/c/004/08068d68_FUN_08068d68.c. FUN_081f5034 and FUN_0838f764 are
+      unported and are exposed through a volatile UI resource lifecycle seam;
+      its default empty state safely takes the early-return path. Focused host
+      tests cover empty, helper-failure, and success-clear behavior. match.py
+      structural output includes the seam's indirect calls and reports its
+      expected diff (exit 1).
