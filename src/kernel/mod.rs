@@ -12,4 +12,5 @@ pub mod sync_mutex;
 pub mod sync_sem;
 pub mod task;
 pub mod task_lock;
+pub mod task_message;
 pub mod thunks;

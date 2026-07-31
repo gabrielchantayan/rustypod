@@ -14861,3 +14861,43 @@ functions:
       int; identical bit pattern. match.py structural: same
       ldrb/sub-0x30/cmp-9/shift-add-*10 loop; LLVM peels the first
       iteration and uses a frame.
+
+  - address: 0x0812bf70
+    ghidra: FUN_0812bf70
+    name: task_message_post_sync
+    size: 20
+    sig: "u32 task_message_post_sync(usize reply_queue, usize target_queue, const u32 *message, u32 flags)"
+    module: kernel/task_message
+    status: ported
+    renames:
+      param_1: reply_queue
+      param_2: target_queue
+      param_3: message
+      param_4: flags
+    notes: >-
+      2 bl call sites (0x08111050 in FUN_08110fdc, 0x08125228 in
+      FUN_081251cc). Pure argument plumbing in front of the message-post
+      helper @ 0x0812c088: forwards (reply_queue, target_queue, message,
+      flags) with the wait flag (r3) forced to 1, and returns the
+      helper's 1-on-success / 0-on-failure result. The pushed r3 slot is
+      the helper's fifth (stack) argument, not a saved register. Mirror
+      image @ 0x0812c628 (FUN_0812c628) is the identical 20-byte body
+      with mov r3, #0x0 - the fire-and-forget flavor. The helper
+      allocates a message cell from the global pool (locked alloc
+      0x0812bf9c), copies the 3-word tagged message, and posts through
+      0x080944b0 when wait != 0 (else 0x080f117c); both bottom out in
+      the queue send @ 0x0809eb58, whose wait-for-reply argument blocks
+      the sender until the reply - hence _sync. Both call sites build a
+      3-word stack message {FourCC tag, arg, arg} and pass queue handles
+      read from task context blocks (+0x1c, cf. current_task_ctx_block @
+      0x080cb828). Sig corrected from the scouted "void
+      FUN_0812bf70(void)": both callers consume the result, so four
+      arguments returning u32. Semantics of the fourth argument
+      (forwarded verbatim to the send's cell-blocking flag) not yet
+      identified; the name follows the data flow. The helper is not yet
+      ported, so the port dispatches through a new
+      TASK_MESSAGE_OPS.post_message slot (TimerOps pattern; default stub
+      returns 0). match.py structural: the str r3,[sp] stack-arg store,
+      mov r3,#1 and the call are intact; the bl becomes a table-load blx
+      and LLVM uses a frame, same deviation shape as
+      timer_schedule_shim.
