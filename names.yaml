@@ -15382,3 +15382,37 @@ functions:
       post-index owner store, drain-state call, return-base adjustment,
       zero store, condition-variable call, and return are all retained;
       dependency seams lower to a volatile ops-table load plus blx calls.
+
+  - address: 0x080e99d8
+    ghidra: FUN_080e99d8
+    name: raster_profile_append_edge
+    size: 332
+    sig: "u64 raster_profile_append_edge(RasterProfileState *state, u32 x, u32 y)"
+    module: util/raster_profile
+    status: ported
+    renames:
+      param_1: state
+      param_2: x
+      param_3: y
+      cVar1: profile_direction
+      iVar2: callback_error
+      uVar4: carried_ordinate
+      FUN_08076228: end_profile
+      FUN_080767a8: begin_profile
+      FUN_080e9b24: emit_profile_segment
+    notes: >-
+      Raster-edge profile transition state machine. Signed previous_y/y
+      comparisons start ascending (1) or descending (2) profiles, and a
+      direction change first ends the old profile. Ascending emission carries
+      y; descending emission negates y and both limits, then negates the
+      active profile's +0x14 accumulator exactly when the pending-profile
+      byte changes from nonzero to zero. Callback failure returns low-word 1
+      and does not advance previous_x/previous_y; success writes both and
+      returns the carried value in the high word. Reference C:
+      decomp/c/008/080e99d8_FUN_080e99d8.c; assembly: osos.asm
+      0x080e99d8. Unported dependencies 0x08076228, 0x080767a8, and
+      0x080e9b24 are volatile RasterProfileOps seams (retail entry-point
+      wrappers on ARM, mocks in host tests). match.py structural: direction
+      branches, signed comparisons, callback error joins, descending
+      negations, and final pair/state stores are retained; ops-table calls
+      lower to indirect blx calls.

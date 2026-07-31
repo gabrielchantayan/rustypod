@@ -14,6 +14,7 @@ pub mod le_read;
 pub mod list_find;
 pub mod ptr_vector;
 pub mod record_body_size;
+pub mod raster_profile;
 pub mod state_flags;
 pub mod str_fold_upper;
 pub mod table_find;
