@@ -15882,6 +15882,25 @@ functions:
       static-base literal, +0x24 span, +0x08 parameter store, and descriptor
       return.
 
+  - address: 0x0811f7f4
+    ghidra: FUN_0811f7f4
+    name: ui_noop_f7f4
+    size: 4
+    sig: "void ui_noop_f7f4(void)"
+    module: ui/noop_f7f4
+    status: ported
+    renames: {}
+    notes: >-
+      The complete raw ARM body is `bx lr`, making this a no-argument,
+      no-state ABI-visible return. Decompilation lists a void signature.
+      Several object-building callers leave an object-derived r0 value live
+      across this call, but neither that use nor the empty body establishes an
+      object role or a return contract. Reference C:
+      decomp/c/011/0811f7f4_FUN_0811f7f4.c; raw ARM at 0x0811f7f4. Focused
+      host test proves that the no-argument port returns without changing
+      observable state. match.py reports the expected LLVM stack-frame-only
+      structural diff (exit 1).
+
   - address: 0x0811f76c
     ghidra: FUN_0811f76c
     name: ui_resource_release

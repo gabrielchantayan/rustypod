@@ -5,6 +5,7 @@ pub mod byte_store;
 pub mod color;
 pub mod flag_2c;
 pub mod rect;
+pub mod noop_f7f4;
 pub mod width_inset;
 pub mod static_descriptor;
 pub mod resource_release;
