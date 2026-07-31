@@ -15778,3 +15778,30 @@ functions:
       untouched. Reference C: decomp/c/011/0811f720_FUN_0811f720.c; literal
       at 0x0811f73c; assembly: osos.asm 0x0811f720. Three callers overwrite
       additional fields after this common initialization.
+
+  - address: 0x0811f748
+    ghidra: FUN_0811f748
+    name: ui_descriptor_init_static_span_with_parameter
+    size: 32
+    sig: "void *ui_descriptor_init_static_span_with_parameter(void *descriptor, u32 parameter)"
+    module: ui/static_descriptor
+    status: ported
+    renames:
+      param_1: descriptor
+      param_2: parameter
+      piVar2: descriptor
+      iVar1: static_base
+      DAT_0811f768: UI_DESCRIPTOR_STATIC_BASE
+    notes: >-
+      Calls ui_descriptor_init_static_span (0x0811f720), then writes the
+      static base 0x08982f40 at +0x00, its +0x24 endpoint at +0x04, and the
+      caller parameter at +0x08; the callee's u16 0x0400 at +0x0c remains.
+      r0 reaches the return unchanged from the callee and is the descriptor
+      pointer, although the reference C inferred void. Reference C:
+      decomp/c/011/0811f748_FUN_0811f748.c; literal at 0x0811f768; assembly:
+      osos.asm 0x0811f748. A volatile function-pointer seam prevents LLVM
+      from inlining the ported 0x0811f720 callee, so its direct bl becomes an
+      indirect blx; focused host tests prove output pointer, field values,
+      and callee routing. match.py structural: preserves the callee route,
+      static-base literal, +0x24 span, +0x08 parameter store, and descriptor
+      return.
