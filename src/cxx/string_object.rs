@@ -851,6 +851,51 @@ pub unsafe extern "C" fn utf8_prev_codepoint(cursor: *mut *const u8) -> u32 {
     0
 }
 
+/// utf16_utf8_byte_len_plus1 — original: `FUN_082762fc` @ 0x082762fc
+/// (60 bytes, all code; source:
+/// `ipod-decomp/decomp/c/026/082762fc_FUN_082762fc.c`).
+///
+/// Counts the UTF-8 byte length implied by NUL-terminated UTF-16 code units,
+/// then includes the output's NUL terminator. A NULL input is an empty string
+/// and returns 1. Each nonzero code unit below 0x80, below 0x800, or otherwise
+/// contributes one, two, or three bytes respectively. The retail loop does
+/// not recognize surrogate pairs: each surrogate is independently counted as
+/// a three-byte unit. Its signed 32-bit accumulator wraps, rather than
+/// trapping, on an overlong input.
+#[inline(always)]
+fn utf8_byte_len_add(total: i32, byte_count: i32) -> i32 {
+    total.wrapping_add(byte_count)
+}
+
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn utf16_utf8_byte_len_plus1(utf16: *const u16) -> i32 {
+    let mut utf8_byte_len = 0;
+    let mut code_unit_ptr = utf16;
+
+    if !code_unit_ptr.is_null() {
+        loop {
+            let code_unit = *code_unit_ptr;
+            if code_unit == 0 {
+                break;
+            }
+            code_unit_ptr = code_unit_ptr.add(1);
+
+            let encoded_bytes = if code_unit < 0x80 {
+                1
+            } else if code_unit < 0x800 {
+                2
+            } else {
+                3
+            };
+            utf8_byte_len = utf8_byte_len_add(utf8_byte_len, encoded_bytes);
+        }
+    }
+
+    utf8_byte_len_add(utf8_byte_len, 1)
+}
+
+
 
 /// utf8_strcmp_safe — original: `FUN_08276d64` @ 0x08276d64 (56 bytes,
 /// all code; source: `ipod-decomp/decomp/c/026/08276d64_FUN_08276d64.c`).
@@ -2366,6 +2411,43 @@ mod tests {
             (0, 3),
             "the final continuation of a four-byte encoding is not decoded"
         );
+    }
+
+    // ---- utf16_utf8_byte_len_plus1 ----------------------------------
+
+    fn utf16_encoded_len(code_units: &[u16]) -> i32 {
+        unsafe { utf16_utf8_byte_len_plus1(code_units.as_ptr()) }
+    }
+
+    #[test]
+    fn utf16_utf8_byte_len_plus1_null_and_terminator_are_one() {
+        assert_eq!(unsafe { utf16_utf8_byte_len_plus1(core::ptr::null()) }, 1);
+        assert_eq!(utf16_encoded_len(&[0]), 1);
+    }
+
+    #[test]
+    fn utf16_utf8_byte_len_plus1_uses_the_exact_encoding_boundaries() {
+        assert_eq!(
+            utf16_encoded_len(&[0x7f, 0x80, 0x7ff, 0x800, 0]),
+            9,
+            "1 + 2 + 2 + 3 bytes, then the output terminator"
+        );
+    }
+
+    #[test]
+    fn utf16_utf8_byte_len_plus1_counts_surrogate_code_units_independently() {
+        assert_eq!(
+            utf16_encoded_len(&[0xd83d, 0xdca9, 0]),
+            7,
+            "the original counts a surrogate pair as two three-byte units plus NUL"
+        );
+    }
+
+    #[test]
+    fn utf16_utf8_byte_len_plus1_wraps_the_signed_accumulator() {
+        assert_eq!(utf8_byte_len_add(i32::MAX, 1), i32::MIN);
+        assert_eq!(utf8_byte_len_add(i32::MAX, 3), i32::MIN + 2);
+        assert_eq!(utf8_byte_len_add(-1, 1), 0, "the terminal NUL also wraps");
     }
 
     // ---- utf8_strcmp_safe -------------------------------------------
