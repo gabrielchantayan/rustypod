@@ -15885,3 +15885,22 @@ functions:
       tests cover empty, helper-failure, and success-clear behavior. match.py
       structural output includes the seam's indirect calls and reports its
       expected diff (exit 1).
+
+  - address: 0x0811f7e0
+    ghidra: FUN_0811f7e0
+    name: ui_store_byte
+    size: 8
+    sig: "void ui_store_byte(u8 *destination, u8 value)"
+    module: ui/byte_store
+    status: ported
+    renames:
+      param_1: destination
+      param_2: value
+    notes: >-
+      Stores only the low byte of r1 to the byte addressed by r0 (`strb r1,
+      [r0]`) and returns immediately. The target pointer may be unaligned;
+      no validation, adjacent-byte access, or return side effect is present.
+      Reference C: decomp/c/011/0811f7e0_FUN_0811f7e0.c; assembly:
+      osos.asm 0x0811f7e0. Callers pass stack-local storage onward, but do
+      not establish UI-object ownership. Focused host tests prove an
+      unaligned destination changes exactly one byte.
