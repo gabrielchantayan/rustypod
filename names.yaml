@@ -15468,6 +15468,29 @@ functions:
       non-digit termination, and overflow wrapping. match.py structural:
       table-classification loop, shift-add/multiply-by-10 accumulation,
       and final cursor store.
+  - address: 0x080e9364
+    ghidra: FUN_080e9364
+    name: scan_stream_setup_scratch
+    size: 44
+    sig: "bool scan_stream_setup_scratch(ScanStreamState *state)"
+    module: stdio/scan_stream_setup
+    status: ported
+    renames:
+      param_1: state
+      iVar1: scratch
+      FUN_0804ad80: scan_stream_allocate_zeroed_scratch
+    notes: >-
+      Allocates a 16-byte zeroed scratch area through FUN_0804ad80. A NULL
+      helper result returns false and preserves every state field; success
+      stores the result at +0x20, clears the independently recovered words
+      at +0x0c and +0x14, and returns true. The helper itself is deliberately
+      unported: the module dispatches it through a local slot whose default
+      uses stdio's allocator seam and reproduces its four-word zero fill.
+      Host tests cover helper success, NULL failure, and preservation of
+      fields not written by the firmware. match.py structural: the same
+      helper-call/null-guard/three-store result shape; the function-pointer
+      dispatch adds an indirect call and standard LLVM frame.
+
 
   - address: 0x080e9974
     ghidra: FUN_080e9974
