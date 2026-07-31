@@ -808,6 +808,49 @@ pub unsafe extern "C" fn utf8_next_codepoint(cursor: *mut *const u8) -> u32 {
 
     0
 }
+/// Decodes the codepoint ending immediately before `*cursor` and moves the
+/// cursor backward — original: `FUN_08276288` @ 0x08276288 (116 bytes, all
+/// code; source: `ipod-decomp/decomp/c/026/08276288_FUN_08276288.c`).
+///
+/// The retail reverse decoder first consumes the final byte. ASCII returns
+/// unchanged. For a high-bit byte, it consumes the preceding byte and accepts
+/// a two-byte form only when that byte has a `0b110xxxxx` prefix. Otherwise it
+/// consumes a third byte and accepts a three-byte form only when that byte has
+/// a `0b1110xxxx` prefix. As with the forward decoder, continuation bytes,
+/// overlong encodings, and surrogate values are not validated; any other
+/// three-byte lookbehind returns zero after consuming all three bytes. This
+/// deliberately also means a malformed final lead byte can consume bytes
+/// before it and return zero. The original faults for an invalid cursor or
+/// unreadable lookbehind, and this raw-pointer port has the same preconditions.
+///
+/// Deviation: none.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn utf8_prev_codepoint(cursor: *mut *const u8) -> u32 {
+    let sequence_end = *cursor;
+    *cursor = sequence_end.sub(1);
+    let final_byte = *sequence_end.sub(1);
+    if final_byte & 0x80 == 0 {
+        return final_byte as u32;
+    }
+
+    *cursor = sequence_end.sub(2);
+    let preceding_byte = *sequence_end.sub(2);
+    if preceding_byte & 0xe0 == 0xc0 {
+        return (final_byte & 0x3f) as u32 | ((preceding_byte & 0x1f) as u32) << 6;
+    }
+
+    *cursor = sequence_end.sub(3);
+    let leading_byte = *sequence_end.sub(3);
+    if leading_byte & 0xf0 == 0xe0 {
+        return ((leading_byte & 0x0f) as u32) << 12
+            | ((preceding_byte & 0x3f) as u32) << 6
+            | (final_byte & 0x3f) as u32;
+    }
+
+    0
+}
+
 
 /// utf8_strcmp_safe — original: `FUN_08276d64` @ 0x08276d64 (56 bytes,
 /// all code; source: `ipod-decomp/decomp/c/026/08276d64_FUN_08276d64.c`).
@@ -2228,6 +2271,14 @@ mod tests {
         (codepoint, consumed)
     }
 
+    fn decode_prev(bytes: &[u8]) -> (u32, usize) {
+        let end = unsafe { bytes.as_ptr().add(bytes.len()) };
+        let mut cursor = end;
+        let codepoint = unsafe { utf8_prev_codepoint(&mut cursor) };
+        let consumed = unsafe { end.offset_from(cursor) as usize };
+        (codepoint, consumed)
+    }
+
     #[test]
     fn utf8_next_codepoint_consumes_one_ascii_byte_including_nul() {
         assert_eq!(decode_next(&[0x00]), (0, 1));
@@ -2270,6 +2321,51 @@ mod tests {
                 sequence[0]
             );
         }
+    }
+
+    #[test]
+    fn utf8_prev_codepoint_consumes_one_ascii_byte_including_nul() {
+        assert_eq!(decode_prev(&[0x00]), (0, 1));
+        assert_eq!(decode_prev(&[0x7f]), (0x7f, 1));
+    }
+
+    #[test]
+    fn utf8_prev_codepoint_decodes_two_bytes_without_continuation_validation() {
+        assert_eq!(decode_prev(&[0xc2, 0xa2]), (0x00a2, 2));
+        assert_eq!(
+            decode_prev(&[0xc2, 0xff]),
+            (0x00bf, 2),
+            "the decoder masks a malformed final byte instead of rejecting it"
+        );
+    }
+
+    #[test]
+    fn utf8_prev_codepoint_decodes_three_bytes_without_continuation_validation() {
+        assert_eq!(decode_prev(&[0xe2, 0x82, 0xac]), (0x20ac, 3));
+        assert_eq!(
+            decode_prev(&[0xe2, 0xff, 0x80]),
+            (0x2fc0, 3),
+            "both bytes after the 3-byte lead are merely payload-masked"
+        );
+    }
+
+    #[test]
+    fn utf8_prev_codepoint_malformed_and_four_byte_tails_consume_three_and_return_zero() {
+        assert_eq!(
+            decode_prev(&[0xaa, 0xbb, 0x80]),
+            (0, 3),
+            "no 0b1110xxxx byte appears in the three-byte lookbehind"
+        );
+        assert_eq!(
+            decode_prev(&[0x80, b'a', 0xc2]),
+            (0, 3),
+            "a malformed final lead also consumes the three-byte lookbehind"
+        );
+        assert_eq!(
+            decode_prev(&[0xf0, 0x9f, 0x92, 0xa9]),
+            (0, 3),
+            "the final continuation of a four-byte encoding is not decoded"
+        );
     }
 
     // ---- utf8_strcmp_safe -------------------------------------------
