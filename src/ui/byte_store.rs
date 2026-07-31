@@ -19,6 +19,22 @@ pub unsafe extern "C" fn ui_store_byte(destination: *mut u8, value: u8) {
     unsafe { destination.write(value) };
 }
 
+/// `ui_copy_byte` — original: `FUN_0811f7e8` @ `0x0811f7e8` (12 bytes).
+///
+/// Loads exactly one byte from `source`, then stores it at `destination`, as
+/// `ldrb r1, [r1]; strb r1, [r0]; bx lr`. Read-before-write order is
+/// preserved when the pointers alias. Deviations: none.
+///
+/// Both pointers are the firmware's unsafe ABI: they must designate valid
+/// readable and writable bytes respectively, need no alignment, and are not
+/// NULL-checked.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ui_copy_byte(destination: *mut u8, source: *const u8) {
+    let value = unsafe { source.read() };
+    unsafe { destination.write(value) };
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -45,5 +61,37 @@ mod tests {
             assert_eq!(storage[1], value, "stored value={value:#04x}");
             assert_eq!(storage[2], 0x5a, "byte after value={value:#04x}");
         }
+    }
+
+    #[test]
+    fn copy_writes_only_the_destination_byte() {
+        let mut storage = [0xa5u8, 0x3c, 0xa5, 0x00, 0xa5, 0xa5];
+        let source = unsafe { storage.as_ptr().add(1) };
+        let destination = unsafe { storage.as_mut_ptr().add(3) };
+
+        unsafe { ui_copy_byte(destination, source) };
+
+        assert_eq!(storage, [0xa5, 0x3c, 0xa5, 0x3c, 0xa5, 0xa5]);
+    }
+
+    #[test]
+    fn copy_uses_the_provided_source_and_destination_offsets() {
+        let mut storage = [0x10u8, 0x21, 0x32, 0x43, 0x54, 0x65];
+        let source = unsafe { storage.as_ptr().add(4) };
+        let destination = unsafe { storage.as_mut_ptr().add(1) };
+
+        unsafe { ui_copy_byte(destination, source) };
+
+        assert_eq!(storage, [0x10, 0x54, 0x32, 0x43, 0x54, 0x65]);
+    }
+
+    #[test]
+    fn copy_allows_source_and_destination_to_alias() {
+        let mut storage = [0x18u8, 0x27, 0x36];
+        let byte = unsafe { storage.as_mut_ptr().add(1) };
+
+        unsafe { ui_copy_byte(byte, byte) };
+
+        assert_eq!(storage, [0x18, 0x27, 0x36]);
     }
 }

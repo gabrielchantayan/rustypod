@@ -15926,3 +15926,22 @@ functions:
       osos.asm 0x0811f7e0. Callers pass stack-local storage onward, but do
       not establish UI-object ownership. Focused host tests prove an
       unaligned destination changes exactly one byte.
+
+  - address: 0x0811f7e8
+    ghidra: FUN_0811f7e8
+    name: ui_copy_byte
+    size: 12
+    sig: "void ui_copy_byte(u8 *destination, const u8 *source)"
+    module: ui/byte_store
+    status: ported
+    renames:
+      param_1: destination
+      param_2: source
+    notes: >-
+      Loads one byte from source with `ldrb r1, [r1]`, then writes it to
+      destination with `strb r1, [r0]`, returning immediately. The source is
+      read before the destination write, including when both pointers alias;
+      neither pointer is validated or required to be aligned. Reference C:
+      decomp/c/011/0811f7e8_FUN_0811f7e8.c; assembly: osos.asm
+      0x0811f7e8. Focused host tests cover one-byte-only copying, independent
+      source and destination offsets, and aliasing.
