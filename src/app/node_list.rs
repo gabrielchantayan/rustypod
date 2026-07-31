@@ -10,6 +10,8 @@
 //!   accessor, a textbook ADS function-local-static initializer.
 //! - [`list_count_until_match`] — original: `FUN_0810fa90` @ 0x0810fa90
 //!   (84 bytes; 125 `bl` call sites, binary-scanned).
+//! - [`list_count_unflagged_before_key`] — original: `FUN_0810faf4` @
+//!   0x0810faf4 (84 bytes) — counts unflagged nodes before a nonzero key.
 //!
 //! `list_count_until_match` walks the singly-linked node list hanging
 //! off a list object and returns how many nodes it visited. When the
@@ -367,6 +369,38 @@ pub unsafe extern "C" fn list_count_until_match(list: *mut NodeList) -> u32 {
     count
 }
 
+/// list_count_unflagged_before_key — original: `FUN_0810faf4` @
+/// 0x0810faf4 (84 bytes).
+///
+/// Reference: `ipod-decomp/decomp/c/010/0810faf4_FUN_0810faf4.c`.
+///
+/// Walks from the list head, dispatching every node's vtable +0x68 key
+/// accessor before inspecting its +0x20 flag. A nonzero returned key equal
+/// to `stop_key` ends the walk without counting that node; key 0 never
+/// matches. Each prior node whose flag is clear contributes one to the
+/// wrapping count, then the walker follows its +0x14 next link.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn list_count_unflagged_before_key(
+    list: *mut NodeList,
+    stop_key: u32,
+) -> u32 {
+    let mut node = (*list).head;
+    let mut unflagged_count = 0_u32;
+
+    while !node.is_null() {
+        let node_key = ((*(*node).vtable).key)(node);
+        if node_key != 0 && node_key == stop_key {
+            break;
+        }
+        if (*node).continues_drain == 0 {
+            unflagged_count = unflagged_count.wrapping_add(1);
+        }
+        node = (*node).next;
+    }
+    unflagged_count
+}
+
 /// node_list_drain — original: `FUN_0810fb48` @ 0x0810fb48 (640 bytes).
 ///
 /// Reference: `ipod-decomp/decomp/c/010/0810fb48_FUN_0810fb48.c`.
@@ -510,6 +544,9 @@ mod tests {
         vtable: *const NodeVtable,
         opaque: [u32; 4],
         next: *mut Node,
+        opaque_after_next: [u8; 8],
+        continues_drain: u8,
+        evict_when_transitioning: u8,
         key: u32,
         /// Shared visit log (raw pointer so the node stays `repr(C)`
         /// compatible past the fields the port reads).
@@ -550,11 +587,22 @@ mod tests {
     }
 
     static TEST_VTABLE: NodeVtable = count_vtable(test_key);
+    unsafe extern "C" fn key_that_sets_continues_drain(this: *mut Node) -> u32 {
+        let node = this as *mut TestNode;
+        (*(*node).visits).push((*node).key);
+        (*node).continues_drain = 1;
+        (*node).key
+    }
+
+    static FLAG_MUTATING_VTABLE: NodeVtable = count_vtable(key_that_sets_continues_drain);
     fn node(key: u32, visits: *mut Vec<u32>) -> TestNode {
         TestNode {
             vtable: &TEST_VTABLE,
             opaque: [0; 4],
             next: ptr::null_mut(),
+            opaque_after_next: [0; 8],
+            continues_drain: 0,
+            evict_when_transitioning: 0,
             key,
             visits,
         }
@@ -681,6 +729,55 @@ mod tests {
             assert_eq!(list_count_until_match(&mut list), 2);
         }
         assert_eq!(visits, std::vec![8], "the second node skips the call: key is now 0");
+    }
+
+    #[test]
+    fn count_unflagged_before_key_handles_a_null_head() {
+        let mut list = list(ptr::null_mut(), 0);
+        assert_eq!(
+            unsafe { list_count_unflagged_before_key(&mut list, 7) },
+            0,
+            "a null head enters neither dispatch nor count"
+        );
+    }
+
+    #[test]
+    fn count_unflagged_before_key_stops_at_a_matching_node_without_counting_it() {
+        let mut visits = Vec::new();
+        let mut nodes = [node(10, &mut visits), node(20, &mut visits), node(30, &mut visits)];
+        let head = chain(&mut nodes);
+        let mut list = list(head, 0);
+
+        assert_eq!(unsafe { list_count_unflagged_before_key(&mut list, 20) }, 1);
+        assert_eq!(visits, std::vec![10, 20], "the matching key is dispatched but not counted");
+    }
+
+    #[test]
+    fn count_unflagged_before_key_visits_every_node_when_the_key_misses() {
+        let mut visits = Vec::new();
+        let mut nodes = [node(0, &mut visits), node(4, &mut visits), node(7, &mut visits)];
+        nodes[1].continues_drain = 1;
+        let head = chain(&mut nodes);
+        let mut list = list(head, 0);
+
+        assert_eq!(unsafe { list_count_unflagged_before_key(&mut list, 99) }, 2);
+        assert_eq!(visits, std::vec![0, 4, 7], "a zero node key never matches");
+    }
+
+    #[test]
+    fn count_unflagged_before_key_reads_the_flag_after_key_dispatch_then_follows_next() {
+        let mut visits = Vec::new();
+        let mut nodes = [node(1, &mut visits), node(2, &mut visits)];
+        nodes[0].vtable = &FLAG_MUTATING_VTABLE;
+        let head = chain(&mut nodes);
+        let mut list = list(head, 0);
+
+        assert_eq!(unsafe { list_count_unflagged_before_key(&mut list, 99) }, 1);
+        assert_eq!(
+            visits,
+            std::vec![1, 2],
+            "the callback marks node one before its flag is counted, then the +0x14 link advances"
+        );
     }
 
 

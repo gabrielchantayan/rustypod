@@ -6903,6 +6903,25 @@ functions:
       `ldr r0, [r5, #8]`), so a callee that rewrites it is honored.
       Dispatch goes through the node's own vtable pointer, no hook
       table.
+  - address: 0x0810faf4
+    ghidra: FUN_0810faf4
+    name: list_count_unflagged_before_key
+    size: 84
+    sig: "u32 list_count_unflagged_before_key(NodeList *list, u32 stop_key)"
+    module: app/node_list
+    status: ported
+    vars: {param_1: list, param_2: stop_key, piVar3: node, piVar1: node_flags, iVar2: node_key, iVar4: unflagged_count}
+    notes: >-
+      Counts clear +0x20 node flags before a matching nonzero node key.
+      Starting at list+0x04, each iteration dispatches the current
+      node's own vtable+0x68 key accessor first. A returned nonzero key
+      equal to stop_key ends the walk without inspecting or counting that
+      node; a returned key of zero never matches. Otherwise the function
+      reads the +0x20 flag, increments the wrapping count only if clear,
+      then follows +0x14. Reference C:
+      decomp/c/010/0810faf4_FUN_0810faf4.c. Host tests cover a null head,
+      match, miss (including a zero node key), and callback-before-flag
+      ordering with mocked vtables/nodes.
   - address: 0x0810fb48
     ghidra: FUN_0810fb48
     name: node_list_drain
