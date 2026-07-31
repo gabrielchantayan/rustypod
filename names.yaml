@@ -6903,6 +6903,31 @@ functions:
       `ldr r0, [r5, #8]`), so a callee that rewrites it is honored.
       Dispatch goes through the node's own vtable pointer, no hook
       table.
+  - address: 0x0810fb48
+    ghidra: FUN_0810fb48
+    name: node_list_drain
+    size: 640
+    sig: "void node_list_drain(NodeList *list, u32 transition_mode, u32 successor_mode, u32 successor_key)"
+    module: app/node_list
+    status: ported
+    vars: {param_1: list, param_2: transition_mode, param_3: successor_mode, param_4: successor_key, piVar4: removed_node, cVar5: keep_draining, uVar2: transition_action, uVar3: preparation_result, local_28: retained_node, local_24: retained_value}
+    notes: >-
+      Drains the view list (reference C:
+      decomp/c/010/0810fb48_FUN_0810fb48.c). Sets the +0x0c draining
+      flag, removes and releases each current head, and leaves the first
+      head whose +0x20 continuation byte is clear (or whose +0x68 key
+      matches nonzero list+0x08 stop_key). A transition-marked (+0x21)
+      node is evicted through vtable+0x58; otherwise its +0x74/+0x80
+      preparation and +0x54 inactive/active lifecycle calls run. After
+      a removal it derives the successor transition mode from +0x68 or
+      +0x98, handles the successor's +0x6c/+0x78 capture, releases every
+      retained node enumerated by the embedded +0x10 state's vtable+0x3c,
+      and finishes it through +0xbc. Finally clears the flag, consumes
+      the +0x20 completion context/byte through the list vtable, then
+      invokes the +0x28 final callback. The null successor after a
+      removal is the stock non-returning assertion path. Host tests
+      verify lifecycle/capture/release order, retained-node ownership,
+      terminal-head preservation, and completion callback order.
 
   - address: 0x0810fa30
     ghidra: FUN_0810fa30

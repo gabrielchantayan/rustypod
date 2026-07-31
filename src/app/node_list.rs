@@ -1,6 +1,8 @@
 //! The view-list singleton and its walker.
 //!
 //! Ports:
+//! - [`node_list_drain`] — original: `FUN_0810fb48` @ 0x0810fb48
+//!   (640 bytes) — removes list nodes while driving their virtual lifecycle.
 //! - [`node_list_construct`] — original: `FUN_0811000c` @ 0x0811000c
 //!   (52 bytes) — constructs the view-list singleton in place.
 //! - [`node_list_get`] — original: `FUN_0810fa30` @ 0x0810fa30 (72
@@ -20,74 +22,174 @@
 //! a function-local-static initializer (guard word @ 0x089cc834, ADS
 //! guard helpers @ 0x082ab31c / 0x082ab338) that returns the fixed
 //! object @ 0x08a79c74, and the getter @ 0x0810fa88 hands out its head
-//! pointer. The 125 callers are view classes in the 0x0839xxxx block,
-//! all of the form `list_walk_begin(); depth = list_count_until_match();
-//! this->field_c4 = depth;`. Its sibling `FUN_0810fb48` drains the same
-//! list, dispatching the same +0x68 slot against the same stop key.
+//! pointer. Its sibling [`node_list_drain`] removes heads until its
+//! stop condition, preserving the final node as the new head.
 //!
 //! ```text
-//! list +0x00  vtable            (dispatched by FUN_0810fb48, not here)
+//! list +0x00  vtable (+0x00 = drain-complete callback)
 //! list +0x04  head node
-//! list +0x08  stop key          0 = walk the whole list
-//! node +0x00  vtable            (+0x68 = the node's key accessor)
+//! list +0x08  stop key          0 = no key stop
+//! list +0x0c  draining flag
+//! list +0x10  embedded drain state (+0x3c enumerate, +0xbc finish)
+//! list +0x20  completion context
+//! list +0x24  completion flag byte
+//! list +0x28  final callback
+//! list +0x2c  final callback argument
+//! node +0x00  vtable
 //! node +0x14  next node
+//! node +0x20  continue-draining flag
+//! node +0x21  evict-on-transition flag
 //! ```
 //!
-//! Faithful details:
-//! - The counter is bumped *before* the key test, so a matching node is
-//!   included in the result.
-//! - The stop key is re-read from the list on both sides of the virtual
-//!   call — the original does two `ldr r0, [r5, #8]` — so a callee that
-//!   rewrites it is honored. Reproduced.
-//! - The dispatch goes through the node's own vtable pointer, not a
-//!   crate-level hook table, so subclass (and test) vtables work.
-//! - Fields are typed struct members, never literal byte offsets: the
-//!   32-bit target layout is exact (asserted in `layout_checks`) while a
-//!   64-bit host keeps the fields disjoint.
+//! Fields are typed struct members, never literal byte offsets: the
+//! 32-bit target layout is exact (asserted in `layout_checks`) while a
+//! 64-bit host keeps the fields disjoint.
 
-/// The node's vtable, modeled down to the one slot this walk
-/// dispatches (+0x68).
+/// Callback slot +0x04 of a node vtable.
+pub type NodeRelease = unsafe extern "C" fn(this: *mut Node);
+/// Callback slot +0x54 of a node vtable.
+pub type NodeSetActive = unsafe extern "C" fn(this: *mut Node, active: u32);
+/// Callback slots that take only their node.
+pub type NodeAction = unsafe extern "C" fn(this: *mut Node);
+/// Callback slots that return a node property.
+pub type NodeProperty = unsafe extern "C" fn(this: *mut Node) -> u32;
+
+/// The node's vtable slots dispatched by the count and drain operations.
 #[repr(C)]
 pub struct NodeVtable {
-    /// Slots +0x00..+0x64: not dispatched here.
-    pub unresolved: [usize; 26],
-    /// Slot +0x68: the node's key, compared against the list's stop key.
-    pub key: unsafe extern "C" fn(this: *mut Node) -> u32,
+    /// +0x00: RTTI / base slot, not called here.
+    pub unresolved_00: usize,
+    /// +0x04: drops the node after it has been unlinked.
+    pub release: NodeRelease,
+    /// +0x08..+0x50: not dispatched here.
+    pub unresolved_08_50: [usize; 19],
+    /// +0x54: transitions a node's active state.
+    pub set_active: NodeSetActive,
+    /// +0x58: evicts a transition-marked node.
+    pub evict: NodeAction,
+    /// +0x5c..+0x64: not dispatched here.
+    pub unresolved_5c_64: [usize; 3],
+    /// +0x68: node key, compared against the list's stop key.
+    pub key: NodeProperty,
+    /// +0x6c: reports whether +0x78 work is needed.
+    pub requires_capture: NodeProperty,
+    /// +0x70: not dispatched here.
+    pub unresolved_70: usize,
+    /// +0x74: reports whether +0x80 preparation is needed.
+    pub requires_prepare: NodeProperty,
+    /// +0x78: captures the node before it is activated.
+    pub capture: NodeAction,
+    /// +0x7c: not dispatched here.
+    pub unresolved_7c: usize,
+    /// +0x80: prepares a node before its active state is toggled.
+    pub prepare: NodeProperty,
+    /// +0x84..+0x94: not dispatched here.
+    pub unresolved_84_94: [usize; 5],
+    /// +0x98: successor mode used to derive the next transition mode.
+    pub mode: NodeProperty,
 }
 
-/// A list node, modeled down to its vtable pointer and its link.
+/// A list node, modeled down to the fields used by the walker and drain.
 #[repr(C)]
 pub struct Node {
     /// +0x00: the node's vtable.
     pub vtable: *const NodeVtable,
-    /// +0x04..+0x13: not read by this walk.
+    /// +0x04..+0x13: not read by these operations.
     pub opaque: [u32; 4],
-    /// +0x14: next node, NULL at the end.
+    /// +0x14: next node.
     pub next: *mut Node,
+    /// +0x18..+0x1f: not read by this operation.
+    pub opaque_after_next: [u8; 8],
+    /// +0x20: whether this node remains the drain's terminal head.
+    pub continues_drain: u8,
+    /// +0x21: selects eviction rather than active-state transitions.
+    pub evict_when_transitioning: u8,
+}
+
+/// Slot +0x00 in the list vtable, invoked once a drain stops.
+pub type NodeListComplete =
+    unsafe extern "C" fn(this: *mut NodeList, context: *mut c_void, flag: u8);
+/// Callback stored at list +0x28.
+pub type NodeListFinalCallback = unsafe extern "C" fn(argument: *mut c_void);
+
+/// The only list-vtable slot dispatched by [`node_list_drain`].
+#[repr(C)]
+pub struct NodeListVtable {
+    pub complete_drain: NodeListComplete,
+}
+
+/// The embedded list +0x10 state.
+#[repr(C)]
+pub struct DrainState {
+    /// +0x00: the state vtable.
+    pub vtable: *const DrainStateVtable,
+    /// +0x04: state consumed (negated) by its finish callback.
+    pub state: i32,
+    /// +0x08..+0x0c: not read here.
+    pub opaque: [u32; 2],
+}
+
+/// Slot +0x3c enumerates a retained node; +0xbc closes the state.
+pub type DrainStateEnumerate =
+    unsafe extern "C" fn(this: *mut DrainState, index: i32, node_out: *mut *mut Node) -> u32;
+pub type DrainStateFinish = unsafe extern "C" fn(this: *mut DrainState, state: i32);
+
+#[repr(C)]
+pub struct DrainStateVtable {
+    pub unresolved_00_38: [usize; 15],
+    pub enumerate: DrainStateEnumerate,
+    pub unresolved_40_b8: [usize; 31],
+    pub finish: DrainStateFinish,
 }
 
 /// The list object (the singleton @ 0x08a79c74 on device).
 #[repr(C)]
 pub struct NodeList {
-    /// +0x00: the list's own vtable — dispatched by the drain function
-    /// @ 0x0810fb48, never here.
-    pub vtable: *const u8,
+    /// +0x00: completion vtable.
+    pub vtable: *const NodeListVtable,
     /// +0x04: first node.
     pub head: *mut Node,
-    /// +0x08: stop key; 0 means "count everything".
+    /// +0x08: stop key; 0 means no key stop.
     pub stop_key: u32,
+    /// +0x0c: set for the duration of a drain.
+    pub is_draining: u8,
+    /// +0x0d..+0x0f: target-layout padding.
+    pub padding: [u8; 3],
+    /// +0x10: tracks retained nodes while draining.
+    pub drain_state: DrainState,
+    /// +0x20: non-null enables the vtable completion callback.
+    pub completion_context: *mut c_void,
+    /// +0x24: passed to the vtable completion callback.
+    pub completion_flag: u8,
+    /// +0x25..+0x27: target-layout padding.
+    pub completion_padding: [u8; 3],
+    /// +0x28: optional final callback, retained after invocation.
+    pub final_callback: Option<NodeListFinalCallback>,
+    /// +0x2c: argument to [`NodeList::final_callback`].
+    pub final_callback_argument: *mut c_void,
 }
 
 // Target-exact layout.
 #[cfg(target_pointer_width = "32")]
 mod layout_checks {
     use super::*;
+    const _: [u8; 0x04] = [0; core::mem::offset_of!(NodeVtable, release)];
+    const _: [u8; 0x54] = [0; core::mem::offset_of!(NodeVtable, set_active)];
+    const _: [u8; 0x58] = [0; core::mem::offset_of!(NodeVtable, evict)];
     const _: [u8; 0x68] = [0; core::mem::offset_of!(NodeVtable, key)];
-    const _: [u8; 0x04] = [0; core::mem::offset_of!(Node, opaque)];
+    const _: [u8; 0x98] = [0; core::mem::offset_of!(NodeVtable, mode)];
     const _: [u8; 0x14] = [0; core::mem::offset_of!(Node, next)];
+    const _: [u8; 0x20] = [0; core::mem::offset_of!(Node, continues_drain)];
+    const _: [u8; 0x21] = [0; core::mem::offset_of!(Node, evict_when_transitioning)];
+    const _: [u8; 0x3c] = [0; core::mem::offset_of!(DrainStateVtable, enumerate)];
+    const _: [u8; 0xbc] = [0; core::mem::offset_of!(DrainStateVtable, finish)];
     const _: [u8; 0x04] = [0; core::mem::offset_of!(NodeList, head)];
     const _: [u8; 0x08] = [0; core::mem::offset_of!(NodeList, stop_key)];
-    const _: [u8; NODE_LIST_SIZE] = [0; core::mem::size_of::<NodeListStorage>()];
+    const _: [u8; 0x0c] = [0; core::mem::offset_of!(NodeList, is_draining)];
+    const _: [u8; 0x10] = [0; core::mem::offset_of!(NodeList, drain_state)];
+    const _: [u8; 0x20] = [0; core::mem::offset_of!(NodeList, completion_context)];
+    const _: [u8; 0x28] = [0; core::mem::offset_of!(NodeList, final_callback)];
+    const _: [u8; NODE_LIST_SIZE] = [0; core::mem::size_of::<NodeList>()];
 }
 
 use core::ffi::c_void;
@@ -108,25 +210,17 @@ pub const NODE_LIST_SIZE: usize = 0x30;
 /// 0x0810fa80). See runtime/shutdown_chain.rs.
 const DSO_HANDLE: i32 = 0x089ca09c;
 
-/// The singleton's storage (original: the fixed object @ 0x08a79c74 in
-/// .bss — a function-local static, NOT heap-allocated like the
-/// singletons.rs objects). The constructor addresses it as a target
-/// layout byte block; [`NodeList`] still models the header consumed by
-/// the ported list walker.
+/// The singleton's target-layout storage (original: fixed .bss object
+/// @ 0x08a79c74). A byte block keeps its device offsets exact even when
+/// host pointers are wider than target pointers.
 #[repr(C, align(4))]
 struct NodeListStorage {
-    /// +0x00: the list header every ported consumer uses.
-    list: NodeList,
-    /// +0x0c on: the draining flag, the sub-object, and callbacks.
-    opaque: [u8; NODE_LIST_SIZE - core::mem::size_of::<NodeList>()],
+    bytes: [u8; NODE_LIST_SIZE],
 }
 
-/// The singleton object (original: .bss @ 0x08a79c74; zero-init is the
-/// exact pre-init state — the image holds no initializer there).
-static mut NODE_LIST: NodeListStorage = NodeListStorage {
-    list: NodeList { vtable: core::ptr::null(), head: core::ptr::null_mut(), stop_key: 0 },
-    opaque: [0; NODE_LIST_SIZE - core::mem::size_of::<NodeList>()],
-};
+/// The singleton object, zero-initialized as in the firmware image.
+static mut NODE_LIST: NodeListStorage = NodeListStorage { bytes: [0; NODE_LIST_SIZE] };
+
 
 /// The one-time-initialization guard word (original: the .bss word @
 /// 0x089cc834, reached through pool word @ 0x0810fa78).
@@ -273,6 +367,130 @@ pub unsafe extern "C" fn list_count_until_match(list: *mut NodeList) -> u32 {
     count
 }
 
+/// node_list_drain — original: `FUN_0810fb48` @ 0x0810fb48 (640 bytes).
+///
+/// Reference: `ipod-decomp/decomp/c/010/0810fb48_FUN_0810fb48.c`.
+///
+/// Drains heads from the view list until it reaches an empty list, a node
+/// that asks to remain, or a node whose key equals the list's stop key.
+/// Each removed head is either evicted or put through an inactive/active
+/// transition, then released through its own vtable. The successor's mode
+/// derives the next transition choice; it is prepared, its retained nodes
+/// are released through the embedded drain state, and that state is
+/// finished before the next iteration. On exit the draining flag is cleared
+/// and the list-vtable completion callback and final callback run in order.
+///
+/// The stock code requires a non-null successor after every removal and
+/// enters its non-returning assertion path otherwise; this port uses
+/// `assert!` for that invariant.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn node_list_drain(
+    list: *mut NodeList,
+    mut transition_mode: u32,
+    successor_mode: u32,
+    successor_key: u32,
+) {
+    let mut keep_draining = true;
+    (*list).is_draining = 1;
+
+    loop {
+        let head = (*list).head;
+        if head.is_null()
+            || !keep_draining
+            || ((*list).stop_key != 0 && ((*(*head).vtable).key)(head) == (*list).stop_key)
+        {
+            (*list).is_draining = 0;
+            if !(*list).completion_context.is_null() {
+                ((*(*list).vtable).complete_drain)(
+                    list,
+                    (*list).completion_context,
+                    (*list).completion_flag,
+                );
+                (*list).completion_context = core::ptr::null_mut();
+                (*list).completion_flag = 0;
+            }
+            if let Some(callback) = (*list).final_callback {
+                callback((*list).final_callback_argument);
+            }
+            return;
+        }
+
+        // Every virtual dispatch below reloads `list->head`, just as the
+        // source repeatedly loads `param_1[1]`; callbacks may mutate it.
+        let current = (*list).head;
+        let requires_prepare = ((*(*current).vtable).requires_prepare)(current) != 0;
+        if requires_prepare
+            && !(transition_mode != 0 && (*(*list).head).evict_when_transitioning != 0)
+        {
+            let current = (*list).head;
+            ((*(*current).vtable).prepare)(current);
+        }
+        if transition_mode != 0 && (*(*list).head).evict_when_transitioning != 0 {
+            let current = (*list).head;
+            ((*(*current).vtable).evict)(current);
+        } else {
+            let current = (*list).head;
+            ((*(*current).vtable).set_active)(current, 0);
+            let current = (*list).head;
+            ((*(*current).vtable).set_active)(current, 1);
+        }
+
+        let removed = (*list).head;
+        (*list).head = (*removed).next;
+        ((*(*removed).vtable).release)(removed);
+
+        // `FUN_08030f44()` is a non-returning invariant failure if a
+        // removal left no successor.
+        let successor = (*list).head;
+        assert!(!successor.is_null(), "node_list_drain requires a successor");
+
+        transition_mode = if successor_mode == 0 {
+            if successor_key != 0 && ((*(*successor).vtable).key)(successor) != successor_key {
+                1
+            } else {
+                0
+            }
+        } else if ((*(*successor).vtable).mode)(successor) == successor_mode {
+            0
+        } else {
+            1
+        };
+
+        if transition_mode != 0 && (*(*list).head).evict_when_transitioning != 0 {
+            let current = (*list).head;
+            ((*(*current).vtable).evict)(current);
+        } else {
+            let current = (*list).head;
+            ((*(*current).vtable).set_active)(current, 0);
+            let current = (*list).head;
+            if ((*(*current).vtable).requires_capture)(current) != 0 {
+                let current = (*list).head;
+                ((*(*current).vtable).capture)(current);
+            }
+            let current = (*list).head;
+            ((*(*current).vtable).set_active)(current, 1);
+        }
+
+        let drain_state = &mut (*list).drain_state;
+        let mut index = -2_i32;
+        loop {
+            index = if index == -2 { 0 } else { index.wrapping_add(1) };
+            let mut retained = core::ptr::null_mut();
+            if ((*(*drain_state).vtable).enumerate)(drain_state, index, &mut retained) == 0 {
+                break;
+            }
+            if !retained.is_null() {
+                ((*(*retained).vtable).release)(retained);
+            }
+        }
+        ((*(*drain_state).vtable).finish)(drain_state, (*drain_state).state.wrapping_neg());
+
+        // This is deliberately reloaded after the state callbacks.
+        keep_draining = (*(*list).head).continues_drain != 0;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -304,8 +522,34 @@ mod tests {
         (*node).key
     }
 
-    static TEST_VTABLE: NodeVtable = NodeVtable { unresolved: [0; 26], key: test_key };
+    unsafe extern "C" fn ignore_release(_this: *mut Node) {}
+    unsafe extern "C" fn ignore_set_active(_this: *mut Node, _active: u32) {}
+    unsafe extern "C" fn ignore_action(_this: *mut Node) {}
+    unsafe extern "C" fn ignore_property(_this: *mut Node) -> u32 {
+        0
+    }
 
+    const fn count_vtable(key: NodeProperty) -> NodeVtable {
+        NodeVtable {
+            unresolved_00: 0,
+            release: ignore_release,
+            unresolved_08_50: [0; 19],
+            set_active: ignore_set_active,
+            evict: ignore_action,
+            unresolved_5c_64: [0; 3],
+            key,
+            requires_capture: ignore_property,
+            unresolved_70: 0,
+            requires_prepare: ignore_property,
+            capture: ignore_action,
+            unresolved_7c: 0,
+            prepare: ignore_property,
+            unresolved_84_94: [0; 5],
+            mode: ignore_property,
+        }
+    }
+
+    static TEST_VTABLE: NodeVtable = count_vtable(test_key);
     fn node(key: u32, visits: *mut Vec<u32>) -> TestNode {
         TestNode {
             vtable: &TEST_VTABLE,
@@ -325,7 +569,23 @@ mod tests {
     }
 
     fn list(head: *mut Node, stop_key: u32) -> NodeList {
-        NodeList { vtable: ptr::null(), head, stop_key }
+        NodeList {
+            vtable: ptr::null(),
+            head,
+            stop_key,
+            is_draining: 0,
+            padding: [0; 3],
+            drain_state: DrainState {
+                vtable: ptr::null(),
+                state: 0,
+                opaque: [0; 2],
+            },
+            completion_context: ptr::null_mut(),
+            completion_flag: 0,
+            completion_padding: [0; 3],
+            final_callback: None,
+            final_callback_argument: ptr::null_mut(),
+        }
     }
 
     #[test]
@@ -406,8 +666,7 @@ mod tests {
             (*(*core::ptr::addr_of!(LIST_UNDER_TEST))).stop_key = 0;
             (*node).key
         }
-        static CLEARING_VTABLE: NodeVtable =
-            NodeVtable { unresolved: [0; 26], key: clearing_key };
+        static CLEARING_VTABLE: NodeVtable = count_vtable(clearing_key);
 
         let mut visits = Vec::new();
         let mut nodes = [node(8, &mut visits), node(9, &mut visits)];
@@ -424,7 +683,226 @@ mod tests {
         assert_eq!(visits, std::vec![8], "the second node skips the call: key is now 0");
     }
 
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum DrainEvent {
+        Prepare(u32),
+        SetActive(u32, u32),
+        Evict(u32),
+        Release(u32),
+        Capture(u32),
+        Finish(i32),
+        Complete(u8),
+        Final,
+    }
+
+    static DRAIN_EVENTS: Mutex<Vec<DrainEvent>> = Mutex::new(Vec::new());
+    static DRAIN_TEST_LOCK: Mutex<()> = Mutex::new(());
+    static mut RETAINED_NODE: *mut Node = ptr::null_mut();
+
+    fn record_drain(event: DrainEvent) {
+        DRAIN_EVENTS.lock().unwrap().push(event);
+    }
+
+    fn take_drain_events() -> Vec<DrainEvent> {
+        core::mem::take(&mut *DRAIN_EVENTS.lock().unwrap())
+    }
+
+    #[repr(C)]
+    struct DrainTestNode {
+        node: Node,
+        id: u32,
+        key: u32,
+        mode: u32,
+        requires_capture: u32,
+        requires_prepare: u32,
+    }
+
+    unsafe fn drain_test_node(this: *mut Node) -> *mut DrainTestNode {
+        this.cast()
+    }
+
+    unsafe extern "C" fn drain_release(this: *mut Node) {
+        record_drain(DrainEvent::Release((*drain_test_node(this)).id));
+    }
+
+    unsafe extern "C" fn drain_set_active(this: *mut Node, active: u32) {
+        record_drain(DrainEvent::SetActive((*drain_test_node(this)).id, active));
+    }
+
+    unsafe extern "C" fn drain_evict(this: *mut Node) {
+        record_drain(DrainEvent::Evict((*drain_test_node(this)).id));
+    }
+
+    unsafe extern "C" fn drain_key(this: *mut Node) -> u32 {
+        (*drain_test_node(this)).key
+    }
+
+    unsafe extern "C" fn drain_requires_capture(this: *mut Node) -> u32 {
+        (*drain_test_node(this)).requires_capture
+    }
+
+    unsafe extern "C" fn drain_requires_prepare(this: *mut Node) -> u32 {
+        (*drain_test_node(this)).requires_prepare
+    }
+
+    unsafe extern "C" fn drain_capture(this: *mut Node) {
+        record_drain(DrainEvent::Capture((*drain_test_node(this)).id));
+    }
+
+    unsafe extern "C" fn drain_prepare(this: *mut Node) -> u32 {
+        record_drain(DrainEvent::Prepare((*drain_test_node(this)).id));
+        0
+    }
+
+    unsafe extern "C" fn drain_mode(this: *mut Node) -> u32 {
+        (*drain_test_node(this)).mode
+    }
+
+    static DRAIN_NODE_VTABLE: NodeVtable = NodeVtable {
+        unresolved_00: 0,
+        release: drain_release,
+        unresolved_08_50: [0; 19],
+        set_active: drain_set_active,
+        evict: drain_evict,
+        unresolved_5c_64: [0; 3],
+        key: drain_key,
+        requires_capture: drain_requires_capture,
+        unresolved_70: 0,
+        requires_prepare: drain_requires_prepare,
+        capture: drain_capture,
+        unresolved_7c: 0,
+        prepare: drain_prepare,
+        unresolved_84_94: [0; 5],
+        mode: drain_mode,
+    };
+
+    unsafe extern "C" fn enumerate_retained(
+        _this: *mut DrainState,
+        index: i32,
+        node_out: *mut *mut Node,
+    ) -> u32 {
+        if index == 0 {
+            node_out.write(RETAINED_NODE);
+            1
+        } else {
+            0
+        }
+    }
+
+    unsafe extern "C" fn finish_drain_state(_this: *mut DrainState, state: i32) {
+        record_drain(DrainEvent::Finish(state));
+    }
+
+    static DRAIN_STATE_VTABLE: DrainStateVtable = DrainStateVtable {
+        unresolved_00_38: [0; 15],
+        enumerate: enumerate_retained,
+        unresolved_40_b8: [0; 31],
+        finish: finish_drain_state,
+    };
+
+    unsafe extern "C" fn complete_drain(
+        _this: *mut NodeList,
+        _context: *mut c_void,
+        flag: u8,
+    ) {
+        record_drain(DrainEvent::Complete(flag));
+    }
+
+    static DRAIN_LIST_VTABLE: NodeListVtable = NodeListVtable { complete_drain };
+
+    unsafe extern "C" fn final_drain_callback(_argument: *mut c_void) {
+        record_drain(DrainEvent::Final);
+    }
+
+    fn drain_node(
+        id: u32,
+        key: u32,
+        continues_drain: u8,
+        requires_capture: u32,
+        requires_prepare: u32,
+    ) -> DrainTestNode {
+        DrainTestNode {
+            node: Node {
+                vtable: &DRAIN_NODE_VTABLE,
+                opaque: [0; 4],
+                next: ptr::null_mut(),
+                opaque_after_next: [0; 8],
+                continues_drain,
+                evict_when_transitioning: 0,
+            },
+            id,
+            key,
+            mode: 0,
+            requires_capture,
+            requires_prepare,
+        }
+    }
+
+    #[test]
+    fn drain_orders_lifecycle_callbacks_releases_owned_nodes_and_keeps_terminal_head() {
+        let _serial = DRAIN_TEST_LOCK.lock().unwrap();
+        take_drain_events();
+
+        let mut removed = drain_node(1, 10, 1, 0, 1);
+        let mut terminal = drain_node(2, 20, 0, 1, 0);
+        let mut retained = drain_node(3, 30, 0, 0, 0);
+        removed.node.next = &mut terminal.node;
+
+        let mut list = list(&mut removed.node, 0);
+        list.vtable = &DRAIN_LIST_VTABLE;
+        list.drain_state = DrainState {
+            vtable: &DRAIN_STATE_VTABLE,
+            state: 3,
+            opaque: [0; 2],
+        };
+        list.completion_context = core::ptr::dangling_mut();
+        list.completion_flag = 7;
+        list.final_callback = Some(final_drain_callback);
+        list.final_callback_argument = core::ptr::dangling_mut();
+
+        unsafe {
+            RETAINED_NODE = &mut retained.node;
+            node_list_drain(&mut list, 0, 0, 999);
+            RETAINED_NODE = ptr::null_mut();
+        }
+
+        assert!(core::ptr::eq(list.head, &mut terminal.node));
+        assert_eq!(list.is_draining, 0);
+        assert!(list.completion_context.is_null(), "completion context is consumed");
+        assert_eq!(list.completion_flag, 0, "completion flag is consumed");
+        assert_eq!(
+            take_drain_events(),
+            std::vec![
+                DrainEvent::Prepare(1),
+                DrainEvent::SetActive(1, 0),
+                DrainEvent::SetActive(1, 1),
+                DrainEvent::Release(1),
+                DrainEvent::SetActive(2, 0),
+                DrainEvent::Capture(2),
+                DrainEvent::SetActive(2, 1),
+                DrainEvent::Release(3),
+                DrainEvent::Finish(-3),
+                DrainEvent::Complete(7),
+                DrainEvent::Final,
+            ],
+        );
+    }
+    #[test]
+    fn drain_stops_at_the_matching_key_without_touching_that_head() {
+        let _serial = DRAIN_TEST_LOCK.lock().unwrap();
+        take_drain_events();
+
+        let mut matching = drain_node(4, 0x55, 0, 0, 0);
+        let mut list = list(&mut matching.node, 0x55);
+        unsafe { node_list_drain(&mut list, 1, 0, 0) };
+
+        assert!(core::ptr::eq(list.head, &mut matching.node));
+        assert_eq!(list.is_draining, 0);
+        assert!(take_drain_events().is_empty(), "the matching head is not transitioned or released");
+    }
     // --- node_list_get: the function-local-static accessor ---
+
 
     /// Serializes the tests below: the guard word, storage, and
     /// process-wide shutdown chain are all global.
