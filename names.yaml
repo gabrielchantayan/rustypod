@@ -9851,6 +9851,110 @@ functions:
       standing in for the direct bl 0x082774a8 (the documented
       deviation).
 
+  - address: 0x08258cc4
+    ghidra: FUN_08258cc4
+    name: string_id_record_equals
+    size: 56
+    sig: "int string_id_record_equals(const StringIdRecord *this, const StringIdRecord *source)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: this, param_2: source}
+    notes: >-
+      5 bl call sites (binary-scanned: five consecutive @
+      0x081978ec-0x0819793c, comparing the records at
+      +0x18/+0x28/+0x38/+0x48/+0x58 of two larger structures, each
+      result consumed as a bool by `cmp r0,#0x0`). 56 bytes, all code
+      - no literal-pool word (like the assignment sibling, it loads no
+      vtable literal). The EQUALITY operator of the 0x10-byte
+      polymorphic (string, id) record class whose three constructors,
+      destructor and assignment operator are ported beside it (full
+      family context in the 0x08258c80 entry): `mov r4,r0; mov r5,r1`
+      saves this/source, `add r0,r1,#0x4; bl 0x082a50b0` runs the
+      ported string_object_c_str over the SOURCE RECORD's embedded
+      subobject (never NULL - a NULL source payload yields the shared
+      empty string), `mov r1,r0; ldr r0,[r4,#0x8]; bl 0x08276d64`
+      compares this's RAW payload word (NULL passed through untouched -
+      the substitution guard lives inside the comparator, an asymmetry
+      with the source side) against the source's C string through the
+      UTF-8 comparator @ 0x08276d64 (identified below, NOT ported), and
+      only when that returns 0 (`cmp r0,#0x0` with the rest
+      conditional) are the id words compared (`ldreq r0,[r4,#0xc];
+      ldreq r1,[r5,#0xc]; cmpeq r0,r1`), yielding 1 on equality, 0
+      otherwise (`moveq r0,#0x1; movne r0,#0x0` - the whole register
+      written, so the port returns the C++ bool widened to i32, exact).
+      NO vtable store and no NULL guard on this/source. Deviation: the
+      UTF-8 comparator @ 0x08276d64 dispatches through the new
+      UTF8_STRCMP_SAFE slot (the STRING_OBJECT_COPY_CONSTRUCT pattern)
+      whose default stub is a plain byte-wise strcmp behind the
+      original's own NULL guard (its literal-pool word @ 0x08276db0
+      holds 0x083e2e3a - the SAME shared empty string_object_c_str
+      falls back to, binary-verified against osos.dec) - exact whenever
+      both strings are pure ASCII (the UTF-8 decode @ 0x08276214
+      collapses to the identity for bytes < 0x80), divergent only on
+      multibyte sequences; the real port of 0x08276d64 replaces the
+      stub when it lands. The ported string_object_c_str is called
+      directly (no deviation on the source side). Host tests: the
+      dispatch receives this's raw payload verbatim (NULL included)
+      against the source's c_str result (NULL payload -> the modeled
+      shared empty), a nonzero comparator result yields 0 even with
+      matching ids, equal strings fall through to the id compare (edge
+      values -1/i32::MIN/i32::MAX/0/0x1f00-0x1f03), the return is
+      exactly 0/1, the default stub's byte-wise strcmp semantics
+      (difference of the first differing pair, prefix-vs-NUL, the NULL
+      -> shared-empty substitution on both arguments), and two
+      end-to-end runs through the default stub (same content in
+      different buffers; two NULL-payload default records equal until
+      the id differs). match.py structural: same push/mov/add/bl/mov/
+      ldr/call/cmp/conditional-id-loads/0-or-1-result shape; the diff
+      is the crate fp frame, the blx-through-volatile-slot dispatch
+      standing in for the direct bl 0x08276d64 (the documented
+      deviation), and LLVM forming the id equality as sub/clz/lsr
+      instead of cmpeq/moveq/movne (same 0/1 result).
+
+  - address: 0x08276d64
+    ghidra: FUN_08276d64
+    name: utf8_strcmp_safe
+    size: 56
+    sig: "int utf8_strcmp_safe(const char *a, const char *b)"
+    module: cxx/string_object
+    status: identified
+    vars: {param_1: a, param_2: b, DAT_08276db0: UTF8_STRCMP_SAFE_EMPTY_CSTR_ADDRESS}
+    notes: >-
+      ~20 bl call sites (decomp/c grepped: 0x0816c58c, 0x0816ddb4,
+      0x0816ed0c, 0x08172afc, 0x0817f72c, 0x081bdb6c, 0x0828a9d4,
+      0x0828b50c, 0x082a1df8, 0x082aad4c, 0x082aad94, 0x082c6ef0,
+      0x083d6550, ... plus the ported record equality operator @
+      0x08258cc4). NULL-guarded UTF-8-aware strcmp: a NULL argument is
+      substituted with the shared empty C string (literal-pool word @
+      0x08276db0 holds 0x083e2e3a - the SAME address
+      string_object_c_str @ 0x082a50b0 falls back to, binary-verified),
+      then both strings are walked CODEPOINT by CODEPOINT through the
+      UTF-8 decoder @ 0x08276214 (identified below), returning the
+      first differing codepoint pair's difference (sub r0, r4, r0), 0
+      at a shared terminator. Reached from cxx/string_object.rs's
+      string_id_record_equals through the UTF8_STRCMP_SAFE dispatch
+      slot whose default stub is a byte-wise strcmp behind the same
+      NULL guard - exact on pure ASCII inputs; the real port replaces
+      the stub when it lands.
+
+  - address: 0x08276214
+    ghidra: FUN_08276214
+    name: utf8_next_codepoint
+    size: 112
+    sig: "unsigned int utf8_next_codepoint(const char **cursor)"
+    module: cxx/string_object
+    status: identified
+    vars: {param_1: cursor}
+    notes: >-
+      Advances *cursor past one UTF-8 sequence and returns the decoded
+      codepoint: ASCII (< 0x80) returned as-is; (b & 0xe0) == 0xc0
+      decodes a 2-byte sequence ((b & 0x1f) << 6 | b1 & 0x3f);
+      (b & 0xf0) == 0xe0 decodes a 3-byte sequence ((b & 0xf) << 12 |
+      (b1 & 0x3f) << 6 | b2 & 0x3f); any other lead byte (4-byte
+      sequences included) consumes THREE bytes and returns 0 - reading
+      as a string terminator to its callers. Sole user in the equality
+      path: the UTF-8 strcmp @ 0x08276d64 above.
+
   - address: 0x08275d74
     ghidra: FUN_08275d74
     name: string_object_release_payload
