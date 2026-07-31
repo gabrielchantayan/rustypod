@@ -7,6 +7,7 @@ pub mod fixed_value;
 pub mod image_format;
 pub mod media_ext;
 pub mod node_list;
+pub mod object_dispatch_entry;
 pub mod registry;
 pub mod singletons;
 pub mod slot_table;

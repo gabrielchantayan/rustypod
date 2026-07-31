@@ -15259,3 +15259,38 @@ functions:
       mov r3,#1 and the call are intact; the bl becomes a table-load blx
       and LLVM uses a frame, same deviation shape as
       timer_schedule_shim.
+
+  - address: 0x0810f9f0
+    ghidra: FUN_0810f9f0
+    name: object_dispatch_entry_construct
+    size: 40
+    sig: "ObjectDispatchEntry *object_dispatch_entry_construct(ObjectDispatchEntry *this, void *owner)"
+    module: app/object_dispatch_entry
+    status: ported
+    renames:
+      param_1: this
+      param_2: owner
+      iVar1: drain_state
+      FUN_08271cec: construct_drain_state
+      FUN_0807f680: construct_condition_variable
+    notes: >-
+      Constructs the 0x24-byte object-dispatch entry allocated by
+      FUN_0810f548 (operator_new(0x24) @ 0x082aadd4), which keys its
+      registry records by the owner object pointer. Stores owner at +0,
+      delegates the +4..+0x13 embedded drain state to 0x08271cec
+      (including its 0x08275bb8 base constructor), clears
+      pending_dispatch at +0x14, and initializes the three-word
+      condition-variable state at +0x18 through 0x0807f680. The returned
+      drain-state base is adjusted by -4 before subsequent stores and the
+      final return; this is the literal `sub r4, r0, #4` at 0x0810f9fc,
+      not an assumption that the incoming allocation survives the callee.
+      Reference C: decomp/c/010/0810f9f0_FUN_0810f9f0.c; dependencies:
+      decomp/c/026/08271cec_FUN_08271cec.c and
+      decomp/c/005/0807f680_FUN_0807f680.c; assembly: osos.asm
+      0x0810f9f0. The two unported dependency calls are explicit
+      ObjectDispatchEntryOps injection seams and fail hard until target
+      integration installs them. Focused host test records both call bases,
+      order, fields, and the adjusted return. match.py structural: stock
+      post-index owner store, drain-state call, return-base adjustment,
+      zero store, condition-variable call, and return are all retained;
+      dependency seams lower to a volatile ops-table load plus blx calls.
