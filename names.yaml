@@ -86,6 +86,22 @@ functions:
     vars: {param_1: dst, param_2: len}
     notes: Zero-fill with len<4 + misalignment prologue, then shared block loop.
 
+  - address: 0x08000318
+    ghidra: FUN_08000318
+    name: pwrcon_update_masks
+    size: 72
+    sig: "u32 pwrcon_update_masks(u32 pwrcon0_mask, u32 pwrcon1_mask, u32 enable)"
+    module: drivers/pwrcon
+    status: ported
+    vars: {param_1: pwrcon0_mask, param_2: pwrcon1_mask, param_3: enable,
+      DAT_08000360: pwrcon_base, pwrcon_base_plus_0x48: pwrcon0,
+      pwrcon_base_plus_0x4c: pwrcon1}
+    notes: Enters the 0x08001e70 IRQ/FIQ guard, atomically updates PWRCON0
+      (0x3c500048) and PWRCON1 (0x3c50004c), then restores with 0x08001e84.
+      enable == 0 ORs the masks (gates clocks); any nonzero enable clears
+      them (enables clocks). Target uses volatile MMIO; host tests install a
+      recording driver-local guard/MMIO seam.
+
   - address: 0x080004ec
     ghidra: FUN_080004ec
     name: startup_wait_for_status_clear

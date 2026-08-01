@@ -8,6 +8,7 @@ pub mod gpio_cmd;
 pub mod gpioic;
 pub mod i2c;
 pub mod piezo;
+pub mod pwrcon;
 pub mod pmu;
 pub mod surface;
 pub mod timer;
