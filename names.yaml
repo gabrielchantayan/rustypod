@@ -2829,6 +2829,24 @@ functions:
       the result in unsigned comparisons. This supports u32 but not a
       more specific upstream representation, so the operation-based name
       is intentional. All adds wrap modulo 2^32.
+  - address: 0x08045f14
+    ghidra: FUN_08045f14
+    name: cstr_to_counted_u8
+    size: 64
+    sig: "void cstr_to_counted_u8(const u8 *src, u8 *dst, u32 limit)"
+    module: libc/counted_copy
+    vars: {param_1: src, param_2: dst, param_3: limit, bVar1: source_byte, pbVar2: payload, in_lr: length}
+    status: ported
+    notes: >-
+      Converts a NUL-terminated source into a byte-counted destination:
+      dst[0] is first cleared and bytes are appended at dst+1 without a NUL
+      terminator. The source NUL test precedes comparison of the zero-extended
+      u8 length against u32 limit; a continued iteration stores the byte,
+      advances both cursors, then increments the stored length modulo 256.
+      Thus a limit greater than 255 is unreachable through the byte counter.
+      Callers 0x08052228, 0x08054ea0, and 0x08055f50 pass its result to
+      0x08046a88, which reads byte 0 as length and starts at byte 1.
+
 
   - address: 0x08045ee0
     ghidra: FUN_08045ee0
