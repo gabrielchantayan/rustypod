@@ -61,16 +61,20 @@ pub struct RtcContextOwner {
     rtc_context: *const RtcContext,
 }
 
-/// The portion of the nested RTC context reached by the stock accessor.
+/// The portion of the nested RTC context reached by the stock accessors.
 #[repr(C)]
 pub struct RtcContext {
     reserved: [u8; 0x0c],
     handle: u32,
+    reserved_to_status: [u8; 0xb14],
+    status: u8,
 }
 
 const _: [u8; 0xf00] = [0; core::mem::offset_of!(RtcContextOwner, rtc_context)];
 const _: [u8; 0x0c] = [0; core::mem::offset_of!(RtcContext, handle)];
-const _: [u8; 0x10] = [0; core::mem::size_of::<RtcContext>()];
+const _: [u8; 0x10] = [0; core::mem::offset_of!(RtcContext, reserved_to_status)];
+const _: [u8; 0xb24] = [0; core::mem::offset_of!(RtcContext, status)];
+
 
 /// rtc_context_handle — original: `FUN_08056124` @ 0x08056124 (12 bytes).
 ///
@@ -83,6 +87,18 @@ const _: [u8; 0x10] = [0; core::mem::size_of::<RtcContext>()];
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rtc_context_handle(owner: *const RtcContextOwner) -> u32 {
     unsafe { (*(*owner).rtc_context).handle }
+}
+
+/// rtc_context_status — original: `FUN_08056198` @ 0x08056198 (12 bytes).
+///
+/// Follow the RTC owner's context pointer at +0xf00 and return the nested
+/// context's status byte at +0xb24. The raw ARM body is `ldr r0,[r0,#0xf00]`,
+/// `ldrb r0,[r0,#0xb24]`, then `bx lr`; it makes no writes or null checks.
+/// Its sole recovered caller caches the result before publishing event
+/// `0x60ae` when it changes. Deviation: none.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn rtc_context_status(owner: *const RtcContextOwner) -> u8 {
+    unsafe { (*(*owner).rtc_context).status }
 }
 
 /// rtc_static_time_pair — original: `FUN_08056130` @ 0x08056130 (28 bytes).
@@ -425,8 +441,18 @@ mod tests {
         assert_eq!(core::mem::offset_of!(RtcContextOwner, rtc_context), 0xf00);
         assert_eq!(core::mem::offset_of!(RtcContext, handle), 0x0c);
 
-        let first = RtcContext { reserved: [0x11; 0x0c], handle: 0x1122_3344 };
-        let second = RtcContext { reserved: [0x22; 0x0c], handle: 0xaabb_ccdd };
+        let first = RtcContext {
+            reserved: [0x11; 0x0c],
+            handle: 0x1122_3344,
+            reserved_to_status: [0x11; 0xb14],
+            status: 0x11,
+        };
+        let second = RtcContext {
+            reserved: [0x22; 0x0c],
+            handle: 0xaabb_ccdd,
+            reserved_to_status: [0x22; 0xb14],
+            status: 0x22,
+        };
         let mut owner = RtcContextOwner {
             reserved: [0xa5; 0xf00],
             rtc_context: &first,
@@ -439,7 +465,12 @@ mod tests {
 
     #[test]
     fn rtc_context_handle_only_reads_the_pointer_chain() {
-        let nested = RtcContext { reserved: [0x3c; 0x0c], handle: 0xfeed_beef };
+        let nested = RtcContext {
+            reserved: [0x3c; 0x0c],
+            handle: 0xfeed_beef,
+            reserved_to_status: [0x3c; 0xb14],
+            status: 0x3c,
+        };
         let owner = RtcContextOwner {
             reserved: [0x5a; 0xf00],
             rtc_context: &nested,
@@ -450,6 +481,59 @@ mod tests {
         assert_eq!(unsafe { rtc_context_handle(&owner) }, 0xfeed_beef);
         assert_eq!(nested.reserved, nested_reserved);
         assert_eq!(nested.handle, 0xfeed_beef);
+        assert_eq!(owner.reserved, owner_reserved);
+        assert!(core::ptr::eq(owner.rtc_context, &nested));
+    }
+
+    #[test]
+    fn rtc_context_status_uses_the_target_pointer_chain() {
+        assert_eq!(core::mem::offset_of!(RtcContextOwner, rtc_context), 0xf00);
+        assert_eq!(core::mem::offset_of!(RtcContext, status), 0xb24);
+
+        let first = RtcContext {
+            reserved: [0x11; 0x0c],
+            handle: 0x1122_3344,
+            reserved_to_status: [0x11; 0xb14],
+            status: 0x19,
+        };
+        let second = RtcContext {
+            reserved: [0x22; 0x0c],
+            handle: 0xaabb_ccdd,
+            reserved_to_status: [0x22; 0xb14],
+            status: 0x81,
+        };
+        let mut owner = RtcContextOwner {
+            reserved: [0xa5; 0xf00],
+            rtc_context: &first,
+        };
+
+        assert_eq!(unsafe { rtc_context_status(&owner) }, first.status);
+        owner.rtc_context = &second;
+        assert_eq!(unsafe { rtc_context_status(&owner) }, second.status);
+    }
+
+    #[test]
+    fn rtc_context_status_only_reads_the_pointer_chain() {
+        let nested = RtcContext {
+            reserved: [0x3c; 0x0c],
+            handle: 0xfeed_beef,
+            reserved_to_status: [0x3c; 0xb14],
+            status: 0x7f,
+        };
+        let owner = RtcContextOwner {
+            reserved: [0x5a; 0xf00],
+            rtc_context: &nested,
+        };
+        let nested_reserved = nested.reserved;
+        let nested_handle = nested.handle;
+        let nested_to_status = nested.reserved_to_status;
+        let owner_reserved = owner.reserved;
+
+        assert_eq!(unsafe { rtc_context_status(&owner) }, nested.status);
+        assert_eq!(nested.reserved, nested_reserved);
+        assert_eq!(nested.handle, nested_handle);
+        assert_eq!(nested.reserved_to_status, nested_to_status);
+        assert_eq!(nested.status, 0x7f);
         assert_eq!(owner.reserved, owner_reserved);
         assert!(core::ptr::eq(owner.rtc_context, &nested));
     }

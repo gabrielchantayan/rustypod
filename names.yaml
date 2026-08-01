@@ -5428,6 +5428,51 @@ functions:
       +0x1a90, mla 365, 0x99, -0x7d2d, 0xe10, mvnne #4); the original's
       two bl calls become one blx through the slot.
 
+  # --- RTC context status (time/rtc) ---
+  - address: 0x08056198
+    ghidra: FUN_08056198
+    name: rtc_context_status
+    size: 12
+    sig: "u8 rtc_context_status(const RtcContextOwner *owner)"
+    module: time/rtc
+    vars: {param_1: owner}
+    status: ported
+    notes: >-
+      Read-only nested-context byte accessor. The raw ARM body is
+      ldr r0,[r0,#0xf00]; ldrb r0,[r0,#0xb24]; bx lr: owner supplies
+      the RTC-context pointer at +0xf00 and the return is its status byte
+      at +0xb24, zero-extended in r0. The sole recovered caller is
+      FUN_08172c6c, which invokes it on its context-owner +0xa8, caches
+      the returned byte, and publishes event 0x60ae when it changes.
+      The nested owner/context relationship is shared with the adjacent
+      RTC-context accessors FUN_08056124 (+0x0c handle) and
+      FUN_0805603c (+0xb54 companion word). ABI: r0 is the only input
+      and return register; no stack access, writes, or null check. Port
+      deviation: none.
+
+  # --- RTC context field (time/rtc) ---
+  - address: 0x080561a4
+    ghidra: FUN_080561a4
+    name: rtc_context_field
+    size: 16
+    sig: "u8 *rtc_context_field(void)"
+    module: time/rtc
+    vars: {iVar1: current_context}
+    status: ported
+    notes: >-
+      Context-field address accessor: push {r4,lr}; bl FUN_08369bec;
+      add r0,r0,#0x38; pop {r4,pc}. FUN_08369bec is the retailOS lazy
+      shared-context getter: it publishes DAT_08369c0c into the slot
+      DAT_08369c08 when zero, then returns that context base. This function
+      returns (without dereferencing) the opaque eight-byte field at +0x38.
+      Three recovered callers consume it: FUN_08067e6c and FUN_08067eb4
+      use its +4 word in their word-wise transforms; FUN_08068504 copies
+      all eight bytes into its iPod_Control_iTunes message. ABI: no
+      arguments, pointer result in r0, no writes except the stock getter's
+      lazy initialization. The target port calls that unported stock getter
+      at 0x08369bec; host tests inject its result. Port deviation: none on
+      target.
+
   # --- Mutexed PMU I2C register-block read (drivers/i2c) ---
   - address: 0x082e58f0
     ghidra: FUN_082e58f0
@@ -14000,6 +14045,24 @@ functions:
       callers (0x083d8eb4, 0x083d916c, 0x083d9318 twice, 0x083da614,
       0x083da728, 0x083dab68) test stream-buffer read results before
       consuming or storing them. No deviations.
+
+  - address: 0x083d7054
+    ghidra: FUN_083d7054
+    name: strstreambuf_is_eof_alias
+    size: 16
+    sig: "bool strstreambuf_is_eof_alias(const u8 *this, i32 character)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: this, param_2: character}
+    notes: >-
+      `cmn r1,#1; movne r0,#0; moveq r0,#1; mov pc,lr`: independently
+      addressed EOF predicate that ignores `this` and returns true only for
+      the signed 32-bit sentinel -1. Its three direct call sites
+      (0x083d9898 and 0x083d9b20 twice) test buffered character results
+      before consuming or storing them. The predicate matches the sibling
+      at 0x083d7044, but this raw body uses the semantically equivalent
+      `mov pc,lr` epilogue instead of `bx lr`; exported independently.
+      No deviations.
 
   # --- scouted, not ported (0x083c0000-0x083dffff) ---
 

@@ -884,6 +884,48 @@ fn strstreambuf_is_eof_accepts_only_negative_one() {
     }
 }
 
+/// strstreambuf_is_eof_alias — original: `FUN_083d7054` @ 0x083d7054
+/// (16 bytes: `cmn/movne/moveq/mov pc,lr`; 3 direct `bl` call sites).
+///
+/// Returns whether a `strstreambuf` character result is the signed EOF
+/// sentinel, -1. This separately addressed callback has the same predicate
+/// as [`strstreambuf_is_eof`] at 0x083d7044, but has its own export because
+/// callers retain its original load-address identity. Its `this` argument is
+/// deliberately ignored: the raw ARM body reads only r1, then normalizes the
+/// comparison to a C++ `bool`. The only raw-code difference from 0x083d7044
+/// is its semantically equivalent `mov pc,lr` return. No deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", unsafe(link_section = ".text.strstreambuf_is_eof_alias"))]
+#[inline(never)]
+pub unsafe extern "C" fn strstreambuf_is_eof_alias(
+    _this: *const u8,
+    character: i32,
+) -> bool {
+    character == -1
+}
+
+/// `strstreambuf_is_eof_alias` is independently callable despite sharing
+/// `strstreambuf_is_eof`'s EOF-only predicate.
+#[cfg(test)]
+#[test]
+fn strstreambuf_is_eof_alias_accepts_only_negative_one() {
+    let ignored_receiver = 1usize as *const u8;
+    for (character, expected) in [
+        (-1, true),
+        (0, false),
+        (1, false),
+        (i32::MIN, false),
+        (i32::MAX, false),
+    ] {
+        assert_eq!(
+            unsafe { strstreambuf_is_eof_alias(ignored_receiver, character) },
+            expected,
+            "character {character}"
+        );
+    }
+}
+
+
 
 /// strstreambuf_input_available — original: `FUN_083d7020` @ 0x083d7020
 /// (36 bytes: `ldr/and/lsrs/ldrne/cmpne/ldrne/moveq/subne/mov`; 1 direct
