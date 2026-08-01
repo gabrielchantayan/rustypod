@@ -13884,6 +13884,7 @@ functions:
     module: cxx/templates
     status: ported
     vars: {param_1: vector}
+
     notes: >-
       vector_size_elem4 with `asr #3`. 4 byte-identical copies, 50 bl
       sites - 0x083d7860 14, 0x083d76a4 14, 0x083d7a88 13,
@@ -13984,6 +13985,21 @@ functions:
       at +0x14; otherwise returns zero. The ARM conditional loads prove the
       current cursor is untouched outside that active, non-NULL-end path.
       No deviations.
+
+  - address: 0x083d7044
+    ghidra: FUN_083d7044
+    name: strstreambuf_is_eof
+    size: 16
+    sig: "bool strstreambuf_is_eof(const u8 *this, i32 character)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: this, param_2: character}
+    notes: >-
+      `cmn r1,#1; movne r0,#0; moveq r0,#1; bx lr`: ignores `this` and
+      returns true only for the signed 32-bit EOF sentinel -1. The 7 direct
+      callers (0x083d8eb4, 0x083d916c, 0x083d9318 twice, 0x083da614,
+      0x083da728, 0x083dab68) test stream-buffer read results before
+      consuming or storing them. No deviations.
 
   # --- scouted, not ported (0x083c0000-0x083dffff) ---
 
