@@ -171,9 +171,24 @@ pub unsafe extern "C" fn usec_timer_read() -> u32 {
         read_usec_timer_counter()
     }
 }
+/// usec_timer_elapsed — original: `FUN_08001ee8` @ 0x08001ee8 (28 bytes).
+/// Reference: `ipod-decomp/decomp/c/000/08001ee8_FUN_08001ee8.c` and
+/// `ipod-decomp/decomp/osos.asm` @ 0x08001ee8..0x08001efc.
+///
+/// Reads Timer E's microsecond counter through [`usec_timer_read`], subtracts
+/// `start` with the firmware's unsigned 32-bit wrapping semantics, and
+/// returns whether that elapsed duration is at least `interval`. This keeps
+/// timeout polling correct across a counter wrap. Deviation: none; the
+/// shared read function supplies the existing host timer seam.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn usec_timer_elapsed(start: u32, interval: u32) -> bool {
+    unsafe { usec_timer_read() }.wrapping_sub(start) >= interval
+}
+
 
 #[cfg(test)]
-mod usec_timer_read_tests {
+mod usec_timer_tests {
     use super::*;
 
     #[test]
@@ -188,6 +203,26 @@ mod usec_timer_read_tests {
         for count in [0, 1, 0x1234_5678, u32::MAX] {
             HOST_USEC_TIMER_COUNT.store(count, Ordering::Relaxed);
             assert_eq!(unsafe { usec_timer_read() }, count);
+        }
+    }
+
+    #[test]
+    fn elapsed_predicate_honors_normal_and_wrapped_boundaries() {
+        const INTERVAL: u32 = 10;
+
+        for start in [1_000, u32::MAX - 4] {
+            for (elapsed, expected) in [
+                (INTERVAL - 1, false),
+                (INTERVAL, true),
+                (INTERVAL + 1, true),
+            ] {
+                HOST_USEC_TIMER_COUNT.store(start.wrapping_add(elapsed), Ordering::Relaxed);
+                assert_eq!(
+                    unsafe { usec_timer_elapsed(start, INTERVAL) },
+                    expected,
+                    "start={start:#010x}, elapsed={elapsed}"
+                );
+            }
         }
     }
 }

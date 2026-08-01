@@ -245,6 +245,20 @@ functions:
       for timeout polling. Target uses volatile MMIO; host uses a
       deterministic driver-local counter seam.
 
+  - address: 0x08001ee8
+    ghidra: FUN_08001ee8
+    name: usec_timer_elapsed
+    size: 28
+    sig: "bool usec_timer_elapsed(u32 start, u32 interval)"
+    module: drivers/timer
+    status: ported
+    vars: {param_1: start, param_2: interval,
+      DAT_080023d0: timer_register_base,
+      timer_register_base_plus_0xb4: usec_timer_count}
+    notes: Reads Timer E TECNT through usec_timer_read, computes
+      usec_timer_count - start with u32 wrapping arithmetic, and returns
+      whether the elapsed duration is at least interval.
+
   - address: 0x08000318
     ghidra: FUN_08000318
     name: pwrcon_update_masks
