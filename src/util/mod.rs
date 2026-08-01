@@ -13,6 +13,7 @@ pub mod is_tagged_c0;
 pub mod le_read;
 pub mod list_find;
 pub mod ptr_vector;
+pub mod pascal_string;
 pub mod record_body_size;
 pub mod raster_profile;
 pub mod state_flags;

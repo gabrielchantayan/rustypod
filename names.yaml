@@ -16774,3 +16774,23 @@ functions:
       followed by ldrb [src+1] then strb [dst+1]. The second load occurs
       after the first store, so overlapping pairs intentionally retain this
       forward-copy behavior rather than memcpy or memmove semantics.
+
+  - address: 0x08046a50
+    ghidra: FUN_08046a50
+    name: pascal_u8_to_cstr_bounded
+    size: 56
+    sig: "u32 pascal_u8_to_cstr_bounded(const u8 *source, u8 *destination, u32 maximum)"
+    module: util/pascal_string
+    status: ported
+    renames:
+      param_1: source
+      param_2: destination
+      param_3: maximum
+      uVar1: offset
+      uVar2: copied
+    notes: >-
+      Reads the unsigned u8 Pascal count at source[0], clamps it against the
+      u32 maximum, then performs ordered forward byte loads from source+1 and
+      stores to destination. It appends NUL at destination[copied] and returns
+      copied; overlapping ranges retain the original interleaved load/store
+      behavior rather than memcpy or memmove semantics.
