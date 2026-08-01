@@ -75,7 +75,6 @@ const _: [u8; 0x0c] = [0; core::mem::offset_of!(RtcContext, handle)];
 const _: [u8; 0x10] = [0; core::mem::offset_of!(RtcContext, reserved_to_status)];
 const _: [u8; 0xb24] = [0; core::mem::offset_of!(RtcContext, status)];
 
-
 /// rtc_context_handle — original: `FUN_08056124` @ 0x08056124 (12 bytes).
 ///
 /// Follow the RTC owner's context pointer at +0xf00 and return that nested
@@ -99,6 +98,49 @@ pub unsafe extern "C" fn rtc_context_handle(owner: *const RtcContextOwner) -> u3
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rtc_context_status(owner: *const RtcContextOwner) -> u8 {
     unsafe { (*(*owner).rtc_context).status }
+}
+
+/// Byte offset of the opaque eight-byte context field returned by the stock
+/// source accessor.
+const RTC_CONTEXT_FIELD_OFFSET: usize = 0x38;
+
+/// The unported shared-context getter `FUN_08369bec` called by the original.
+/// It returns the base of the process-wide context after lazily publishing
+/// its initialized instance.
+type CurrentContextFn = unsafe extern "C" fn() -> *mut u8;
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_current_context() -> *mut u8 {
+    panic!("install an RTC current-context source before reading its field")
+}
+
+/// Host-only replacement for the retailOS context getter. The firmware
+/// build calls its fixed load address directly, keeping this one-function
+/// port coupled to the active stock service just like the original.
+#[cfg(not(target_os = "none"))]
+static mut CURRENT_CONTEXT: CurrentContextFn = missing_current_context;
+
+/// rtc_context_field — original: `FUN_080561a4` @ 0x080561a4 (16 bytes).
+///
+/// Get the process-wide context through retailOS's lazy context getter
+/// (`FUN_08369bec`) and return its opaque eight-byte field at +0x38. The
+/// returned field supplies the eight bytes copied by the three recovered
+/// callers: two word-wise stream transforms and the iTunes-control message
+/// builder. The ARM body saves `r4,lr`, calls the getter, adds 0x38, and
+/// returns without dereferencing the field. On the firmware target this
+/// calls the unported stock getter at its load address; host tests replace
+/// that dependency with a deterministic function pointer. No target
+/// behavior deviation.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn rtc_context_field() -> *mut u8 {
+    #[cfg(target_os = "none")]
+    let current_context: CurrentContextFn = unsafe { core::mem::transmute(0x0836_9becusize) };
+    #[cfg(not(target_os = "none"))]
+    let current_context =
+        unsafe { core::ptr::read_volatile(core::ptr::addr_of!(CURRENT_CONTEXT)) };
+
+    unsafe { current_context().wrapping_add(RTC_CONTEXT_FIELD_OFFSET) }
 }
 
 /// rtc_static_time_pair — original: `FUN_08056130` @ 0x08056130 (28 bytes).
@@ -179,6 +221,34 @@ mod tests {
 
     /// Serializes tests that swap the dispatch slot.
     static SLOT_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Serializes host seams for FUN_080561a4's stock context getter.
+    static CONTEXT_FIELD_LOCK: Mutex<()> = Mutex::new(());
+    static mut MOCK_CONTEXT: *mut u8 = core::ptr::null_mut();
+
+    unsafe extern "C" fn mock_current_context() -> *mut u8 {
+        MOCK_CONTEXT
+    }
+
+    struct ContextSourceReset;
+
+    impl Drop for ContextSourceReset {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(CURRENT_CONTEXT).write_volatile(missing_current_context);
+                MOCK_CONTEXT = core::ptr::null_mut();
+            }
+        }
+    }
+
+    fn install_current_context(context: *mut u8) -> std::sync::MutexGuard<'static, ()> {
+        let guard = CONTEXT_FIELD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            MOCK_CONTEXT = context;
+            core::ptr::addr_of_mut!(CURRENT_CONTEXT).write_volatile(mock_current_context);
+        }
+        guard
+    }
 
     static mut MOCK_REGS: [u8; 7] = [0; 7];
     static mut MOCK_STATUS: i32 = 0;
@@ -536,6 +606,42 @@ mod tests {
         assert_eq!(nested.status, 0x7f);
         assert_eq!(owner.reserved, owner_reserved);
         assert!(core::ptr::eq(owner.rtc_context, &nested));
+    }
+
+    #[test]
+    fn rtc_context_field_returns_offset_38_from_the_current_context() {
+        let mut first = [0xa5u8; RTC_CONTEXT_FIELD_OFFSET + 8];
+        let mut second = [0x5au8; RTC_CONTEXT_FIELD_OFFSET + 8];
+        let guard = install_current_context(first.as_mut_ptr());
+        let _reset = ContextSourceReset;
+
+        assert_eq!(
+            unsafe { rtc_context_field() },
+            unsafe { first.as_mut_ptr().add(RTC_CONTEXT_FIELD_OFFSET) }
+        );
+        unsafe { MOCK_CONTEXT = second.as_mut_ptr() };
+        assert_eq!(
+            unsafe { rtc_context_field() },
+            unsafe { second.as_mut_ptr().add(RTC_CONTEXT_FIELD_OFFSET) }
+        );
+        assert_eq!(first, [0xa5; RTC_CONTEXT_FIELD_OFFSET + 8]);
+        assert_eq!(second, [0x5a; RTC_CONTEXT_FIELD_OFFSET + 8]);
+
+        drop(_reset);
+        drop(guard);
+    }
+
+    #[test]
+    fn rtc_context_field_does_not_dereference_the_context_base() {
+        let guard = install_current_context(core::ptr::null_mut());
+        let _reset = ContextSourceReset;
+
+        // The original only adds 0x38 after its getter call; a null
+        // getter result becomes the non-null field address, without a load.
+        assert_eq!(unsafe { rtc_context_field() as usize }, RTC_CONTEXT_FIELD_OFFSET);
+
+        drop(_reset);
+        drop(guard);
     }
 
     #[test]
