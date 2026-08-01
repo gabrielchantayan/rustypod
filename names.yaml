@@ -7751,6 +7751,9 @@ functions:
       explicit x == 0 / x == 0x10000 exits. Since seed values change
       observable fractional-input results, retain status: identified rather
       than publishing a non-parity Rust implementation.
+      This porting pass independently confirmed that `cmp -n 16 -i
+      0x3f18b2 osos.dec /dev/zero` succeeds, so no behavioral Rust port can
+      be verified until the seed bytes are recovered.
 
   - address: 0x0824980c
     ghidra: FUN_0824980c
