@@ -207,6 +207,17 @@ functions:
       pwrcon_update_masks uses it as an atomic guard and discards the returned
       mask because the paired 0x08001e84 helper restores directly afterward.
 
+  - address: 0x08001e84
+    ghidra: FUN_08001e84
+    name: cpsr_restore_irq_fiq
+    size: 20
+    sig: "void cpsr_restore_irq_fiq(u32 saved_if_mask)"
+    module: drivers/interrupts
+    status: ported
+    vars: {r0: saved_if_mask, r1: cpsr_without_if}
+    notes: Reads CPSR, clears IRQ/FIQ I/F bits (0xc0), ORs the supplied saved
+      I/F mask, and writes CPSR control with the MRS/BIC/ORR/MSR sequence.
+
   - address: 0x08000318
     ghidra: FUN_08000318
     name: pwrcon_update_masks
