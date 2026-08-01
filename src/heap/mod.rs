@@ -12,6 +12,7 @@ pub mod gateway_service1;
 pub mod free_path;
 pub mod init;
 pub mod managed_handle;
+pub mod mailbox_receive_gateway;
 pub mod rom_task_start;
 pub mod task_delete_gateway;
 pub mod task_unlock_gateway;

@@ -16290,6 +16290,36 @@ functions:
       result pair. Reference C: decomp/c/000/0800408c_FUN_0800408c.c;
       assembly 0x0800408c; thunk/caller evidence in kernel/task_lock.rs.
 
+  - address: 0x080040fc
+    ghidra: FUN_080040fc
+    name: mailbox_receive_gateway
+    size: 60
+    sig: "u32 mailbox_receive_gateway(u32 mailbox, u32 task)"
+    module: heap/mailbox_receive_gateway
+    status: ported
+    renames:
+      param_1: mailbox
+      param_2: task
+      local_2c: request_selector_and_uninitialized_words
+      local_20: request_mailbox
+      uStack_1c: request_task
+      local_14: request_output
+      local_10: request_mode
+      local_c: request_zero
+      FUN_08003660: gateway_dispatch
+    notes: >-
+      Mask-ROM mirror for RTXC KS_receive(MBOX mailbox, TASK task), established
+      by service selector 5 and the RTXC service catalogue. Raw assembly
+      reserves 44 stack bytes and dispatches its nine-word span at sp+4:
+      {5, uninitialized, uninitialized, mailbox, task, uninitialized,
+      output=0, 1, 0}. It returns the gateway-mutated output word at request
+      word 6; the leading stack word outside that span is also unwritten. The
+      shared volatile heap gateway seam represents the foreign dispatcher;
+      focused host test records every initialized word, proves one delegation,
+      and proves capture/return of the gateway output. Reference C:
+      decomp/c/000/080040fc_FUN_080040fc.c; assembly 0x080040fc. match.py
+      structural diff is expected for the hook indirection.
+
 
   - address: 0x0800427c
     ghidra: FUN_0800427c
