@@ -79,6 +79,20 @@ functions:
       no NULL checks are present. Its only direct caller invokes it after
       processing a decoder batch and before the paired decoder teardown.
 
+  - address: 0x08005d28
+    ghidra: FUN_08005d28
+    name: ui_dispatch_pending_cleanup
+    size: 52
+    sig: "int ui_dispatch_pending_cleanup(void *cleanup_slot)"
+    module: ui/pending_cleanup
+    status: ported
+    vars: {param_1: cleanup_slot, DAT_08005d5c: ui_notification_context}
+    notes: Pending UI decoder-cleanup wrapper. The target slot has its decoder
+      pointer at +0x00 and active-cleanup byte at +0x06; when that byte is
+      nonzero it invokes the slot's unported vtable +0x0c dispatcher, then
+      calls the second unported UI notification target with 0x22008cb8,
+      clears the byte, and returns zero. A clear byte performs no call/store.
+
   - address: 0x0800027c
     ghidra: FUN_0800027c
     name: memzero_aligned
