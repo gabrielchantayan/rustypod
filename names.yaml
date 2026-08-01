@@ -2830,6 +2830,24 @@ functions:
       more specific upstream representation, so the operation-based name
       is intentional. All adds wrap modulo 2^32.
 
+  - address: 0x08045ee0
+    ghidra: FUN_08045ee0
+    name: strcpy_bounded_nul
+    size: 52
+    sig: "void strcpy_bounded_nul(const u8 *src, u8 *dst, i32 limit)"
+    module: libc/bounded_copy
+    vars: {param_1: src, param_2: dst, param_3: limit, iVar1: copied}
+    status: ported
+    notes: >-
+      Reads source before testing its NUL and then comparing copied (starting
+      at signed i32 zero) for equality with limit. Copies only while both
+      checks pass, incrementing copied with ARM's wrapping 32-bit add, then
+      always writes a NUL at the current destination. Thus zero writes only
+      the terminator and negative limits copy an ordinary finite string
+      through its NUL. Direct callers use it as source-first,
+      destination-second bounded text copy (notably 0x08079f54,
+      0x08093d64, and 0x080bd7f8).
+
   - address: 0x08044c10
     ghidra: FUN_08044c10
     name: dcache_clean_invalidate
