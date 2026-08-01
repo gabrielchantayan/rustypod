@@ -207,6 +207,21 @@ pub unsafe extern "C" fn mqueue_deliver(
     }
     1
 }
+/// queue_node_clear_data — original: `FUN_08056b10` @ 0x08056b10
+/// (16 bytes).
+///
+/// Clears a [`QueueNode`]'s two-word message payload. The stock leaf stores
+/// zero to +0x0c before +0x08; it does not touch the linkage, owning pool, or
+/// validity and persistence flags. The raw caller at 0x080393d4 passes its
+/// embedded queue node, and the target's +0x08/+0x0c offsets are exactly
+/// [`QueueNode::data`].
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn queue_node_clear_data(node: *mut QueueNode) {
+    core::ptr::addr_of_mut!((*node).data[1]).write_volatile(0);
+    core::ptr::addr_of_mut!((*node).data[0]).write_volatile(0);
+}
+
 
 /// mqueue_node_recycle — original: `FUN_080ed958` @ 0x080ed958
 /// (112 bytes; 2 bl call sites, both in `mqueue_deliver`).
@@ -506,6 +521,29 @@ mod tests {
         let r = unsafe { mqueue_deliver(&mut n, data.as_mut_ptr(), &mut out) };
         assert_eq!(r, 1);
         assert_eq!(out, &mut n as *mut QueueNode);
+    }
+
+    // ---- queue_node_clear_data ---------------------------------------
+
+    #[test]
+    fn clear_data_zeros_only_the_two_payload_words() {
+        let mut n = QueueNode {
+            next: 0x1111_2222usize as *mut QueueNode,
+            owner: 0x3333_4444usize as *mut QueuePool,
+            data: [0x5555_6666, 0x7777_8888],
+            valid: 0x99,
+            persistent: 0xaa,
+        };
+
+        unsafe {
+            queue_node_clear_data(&mut n);
+        }
+
+        assert_eq!(n.data, [0, 0], "the +0x08/+0x0c payload words are cleared");
+        assert_eq!(n.next, 0x1111_2222usize as *mut QueueNode, "+0x00 linkage untouched");
+        assert_eq!(n.owner, 0x3333_4444usize as *mut QueuePool, "+0x04 owner untouched");
+        assert_eq!(n.valid, 0x99, "+0x10 valid flag untouched");
+        assert_eq!(n.persistent, 0xaa, "+0x11 persistence flag untouched");
     }
 
     // ---- mqueue_node_recycle -----------------------------------------

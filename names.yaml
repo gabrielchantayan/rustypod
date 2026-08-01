@@ -4755,6 +4755,24 @@ functions:
       on a stack copy. Frees nothing. 2 callers (condvar layer's
       waiter_delete hook @ stock 0x080564ec).
 
+  - address: 0x08056b10
+    ghidra: FUN_08056b10
+    name: queue_node_clear_data
+    size: 16
+    sig: "void queue_node_clear_data(QueueNode *node)"
+    module: kernel/mqueue
+    status: ported
+    renames:
+      param_1: node
+    notes: >-
+      Leaf reset for QueueNode's 8-byte message payload: stores zero at
+      node+0x0c then node+0x08, leaving the +0x00 linkage, +0x04 owner,
+      and +0x10/+0x11 flags untouched. The raw ARM caller at 0x080393d4
+      passes an embedded queue node; these offsets align with QueueNode.data.
+      Volatile Rust stores preserve that observable write order; no semantic
+      deviation. match.py structural (two zero stores, reversed payload-word
+      order).
+
   - address: 0x080b4a88
     ghidra: FUN_080b4a88
     name: mqueue_deliver
