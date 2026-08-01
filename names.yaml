@@ -5325,6 +5325,26 @@ functions:
       calls the wake indirectly through the ROM_KERNEL table — the
       documented ROM-thunk dispatch deviation; same structure.
 
+  # --- RTC context handle (time/rtc) ---
+  - address: 0x08056124
+    ghidra: FUN_08056124
+    name: rtc_context_handle
+    size: 12
+    sig: "u32 rtc_context_handle(const RtcContextOwner *owner)"
+    module: time/rtc
+    vars: {param_1: owner}
+    status: ported
+    notes: >-
+      Leaf read-only accessor: ldr r0,[r0,#0xf00]; ldr r0,[r0,#0xc];
+      bx lr. owner is the context-bearing object, whose +0xf00 nested
+      RTC-context pointer supplies an opaque 32-bit handle at +0xc.
+      Its sole recovered caller is the tail-dispatch setup
+      FUN_08160254: it gets owner through
+      FUN_08289690()->+0x28->+0x30, stores this result to its +0x54,
+      then passes the nested context's companion +0xb54 word to its
+      vtable +0x84 method. ABI: r0 is the sole pointer argument and
+      return register; no stack or writes. Port deviation: none.
+
   # --- RTC wall-clock read (time/rtc) ---
   - address: 0x08056150
     ghidra: FUN_08056150
