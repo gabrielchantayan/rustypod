@@ -13345,6 +13345,22 @@ functions:
 
   # ---- ATA/CE-ATA driver island inside the SQLite span ----
   # ~0x08369000-0x0836c000. Not SQLite; the strings at 0x0836a004+ are
+  - address: 0x0806f1a0
+    ghidra: switchD_0807a000::caseD_7
+    name: ata_handle_field4_is_positive
+    size: 24
+    sig: "i32 ata_handle_field4_is_positive(const u8 *handle)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: handle, iVar2: field4_is_positive}
+    notes: >-
+      ATA candidate-selection leaf used by FUN_08070c34 after it finds a
+      matching table entry. Returns 1 exactly when handle is non-NULL and
+      its signed in-memory word at +0x04 is positive; NULL, negative, and
+      zero return 0. ARM is `cmp r0,#0; ldrne r0,[r0,#4]; cmpne r0,#0;
+      movle/movgt r0,#0/#1`; the plain aligned load is not MMIO. match.py:
+      same NULL guard, +4 load, signed comparison, and 0/1 result shape.
+
   # the IAD/RMS/WMS ATA command logger. gpio_pin_configure @ 0x0836b5b0
   # (already ported) belongs to this island, not to the database engine.
   - address: 0x08369780

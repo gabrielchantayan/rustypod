@@ -481,6 +481,25 @@ pub unsafe extern "C" fn ata_handle_first_word_or_minus1(handle: *const u32) -> 
         handle.read()
     }
 }
+/// ata_handle_field4_is_positive — original:
+/// `switchD_0807a000::caseD_7` @ 0x0806f1a0 (24 bytes).
+///
+/// The ATA candidate-selection path @ 0x08070c34 writes this leaf's result
+/// to its optional status out-parameter after finding a matching table
+/// entry. It returns 1 precisely when that entry is non-NULL and its signed
+/// in-memory word at byte offset +0x04 is positive; a NULL entry, a negative
+/// word, and zero each return 0. This is a plain aligned `ldr`, not an MMIO
+/// access (`cmp r0,#0; ldrne r0,[r0,#4]; cmpne r0,#0; movle/movgt`).
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_handle_field4_is_positive(handle: *const u8) -> i32 {
+    if handle.is_null() {
+        0
+    } else {
+        ((handle.add(4) as *const i32).read() > 0) as i32
+    }
+}
+
 
 /// ata_handle_table_entry — original: `FUN_08369864` @ 0x08369864
 /// (20 bytes; 99 `bl` + 7 tail-`b` call sites, binary-scanned).
@@ -1323,6 +1342,45 @@ mod tests {
             assert_eq!(unsafe { ata_handle_first_word_or_minus1(handle.as_ptr()) }, first);
         }
     }
+
+    // ---- ATA candidate field +0x04 -----------------------------------
+
+    /// Independent expression of the leaf's observable contract.
+    fn reference_field4_is_positive(field4: Option<i32>) -> i32 {
+        match field4 {
+            Some(value) if value > 0 => 1,
+            _ => 0,
+        }
+    }
+
+    #[repr(C)]
+    struct AtaCandidate {
+        ignored_word: u32,
+        field4: i32,
+    }
+
+    #[test]
+    fn candidate_field4_positive_matches_reference_for_all_branches() {
+        let null = core::ptr::null();
+        assert_eq!(
+            unsafe { ata_handle_field4_is_positive(null) },
+            reference_field4_is_positive(None),
+            "NULL candidate"
+        );
+
+        for field4 in [-1, 0, 1] {
+            let candidate = AtaCandidate {
+                ignored_word: 0xdead_beef,
+                field4,
+            };
+            assert_eq!(
+                unsafe { ata_handle_field4_is_positive((&candidate as *const AtaCandidate).cast()) },
+                reference_field4_is_positive(Some(field4)),
+                "field +0x04 = {field4}"
+            );
+        }
+    }
+
 
     // ---- the handle's table entries --------------------------------
 
