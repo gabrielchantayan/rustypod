@@ -185,6 +185,31 @@ pub unsafe extern "C" fn usec_timer_read() -> u32 {
 pub unsafe extern "C" fn usec_timer_elapsed(start: u32, interval: u32) -> bool {
     unsafe { usec_timer_read() }.wrapping_sub(start) >= interval
 }
+/// usec_timer_elapsed_millis — original: `FUN_08001f04` @ 0x08001f04
+/// (52 bytes).
+/// Reference: `ipod-decomp/decomp/c/000/08001f04_FUN_08001f04.c` and
+/// `ipod-decomp/decomp/osos.asm` @ 0x08001f04..0x08001f38.
+///
+/// Reads Timer E before validating `milliseconds` against the firmware's
+/// `0x0041_8937` maximum (`floor(u32::MAX / 1000)`). An over-limit duration
+/// returns `u32::MAX`; otherwise it subtracts `start` from the counter with
+/// `u32` wrapping, compares the elapsed microseconds with the firmware's
+/// wrapping `milliseconds * 1000`, and returns 0 or 1. Deviation: none; the
+/// existing [`usec_timer_read`] seam supplies the counter on both targets.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn usec_timer_elapsed_millis(start: u32, milliseconds: u32) -> u32 {
+    const MAX_MILLISECONDS: u32 = 0x0041_8937;
+
+    // The firmware reads the hardware counter before checking the interval.
+    let elapsed = unsafe { usec_timer_read() }.wrapping_sub(start);
+    if milliseconds > MAX_MILLISECONDS {
+        u32::MAX
+    } else {
+        (elapsed >= milliseconds.wrapping_mul(1_000)) as u32
+    }
+}
+
 
 
 #[cfg(test)]
@@ -224,6 +249,36 @@ mod usec_timer_tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn elapsed_millis_matches_boundary_wrapping_and_limit_conventions() {
+        const MAX_MILLISECONDS: u32 = 0x0041_8937;
+
+        HOST_USEC_TIMER_COUNT.store(10_999, Ordering::Relaxed);
+        assert_eq!(unsafe { usec_timer_elapsed_millis(1_000, 10) }, 0);
+        HOST_USEC_TIMER_COUNT.store(11_000, Ordering::Relaxed);
+        assert_eq!(unsafe { usec_timer_elapsed_millis(1_000, 10) }, 1);
+
+        let wrapped_start = u32::MAX - 499;
+        HOST_USEC_TIMER_COUNT.store(500, Ordering::Relaxed);
+        assert_eq!(
+            unsafe { usec_timer_elapsed_millis(wrapped_start, 1) },
+            1
+        );
+
+        let max_usecs = MAX_MILLISECONDS.wrapping_mul(1_000);
+        HOST_USEC_TIMER_COUNT.store(max_usecs, Ordering::Relaxed);
+        assert_eq!(
+            unsafe { usec_timer_elapsed_millis(0, MAX_MILLISECONDS) },
+            1
+        );
+
+        HOST_USEC_TIMER_COUNT.store(0, Ordering::Relaxed);
+        assert_eq!(
+            unsafe { usec_timer_elapsed_millis(0, MAX_MILLISECONDS + 1) },
+            u32::MAX
+        );
     }
 }
 

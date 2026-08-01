@@ -230,6 +230,22 @@ functions:
       when the IRQ-disable I bit is clear. The FIQ-disable F bit does not
       affect the result, and CPSR is not modified.
 
+  - address: 0x08001f04
+    ghidra: FUN_08001f04
+    name: usec_timer_elapsed_millis
+    size: 52
+    sig: "u32 usec_timer_elapsed_millis(u32 start, u32 milliseconds)"
+    module: drivers/timer
+    status: ported
+    vars: {param_1: start, param_2: milliseconds,
+      DAT_080023d0: timer_register_base,
+      DAT_080023d4: max_milliseconds,
+      timer_register_base_plus_0xb4: usec_timer_count}
+    notes: Reads Timer E TECNT before validation. Intervals greater than
+      0x00418937 (floor(u32::MAX / 1000)) return u32::MAX; otherwise,
+      computes the elapsed count with u32 wrapping and returns whether it is
+      at least milliseconds * 1000, as 0 or 1.
+
   - address: 0x08001edc
     ghidra: FUN_08001edc
     name: usec_timer_read
