@@ -16028,3 +16028,35 @@ functions:
       output slot, and unchanged callee return. match.py structural report
       preserves the stack slot and call route via the operation seam (exit 1
       expected).
+
+  - address: 0x08003e00
+    ghidra: FUN_08003e00
+    name: rom_task_start
+    size: 28
+    sig: "u64 rom_task_start(u32 task_id, u32 input_r1, u32 input_r2, u32 input_r3)"
+    module: heap/rom_task_start
+    status: ported
+    renames:
+      param_1: task_id
+      param_2: input_r1
+      param_3: input_r2
+      param_4: input_r3
+      local_18: request_selector_or_result_low
+      uStack_14: request_word1_or_result_high
+      local_10: request_task_id
+      uStack_c: request_word3
+      FUN_08003660: gateway_dispatch
+    notes: >-
+      Mask-ROM mirror for the RTXC task-start gateway (ROM 0x22003e00,
+      reached by thunk 0x08037f78). Direct boot callers and the thunk establish
+      selector 0x15 as task start with task_id in r0. Assembly saves r0-r4/lr,
+      replaces only the stack frame's first word with 0x15, and calls
+      0x08003660 with the four words {0x15, incoming r1, task_id, incoming
+      r3}; incoming r2 is not submitted. The dispatch may overwrite words 0/1;
+      `pop {r0,r1,r2,r3,r4,pc}` returns those two words as the ARM EABI u64
+      result (r0 low, r1 high), while r2-r4 are restored. Reference C:
+      decomp/c/000/08003e00_FUN_08003e00.c; assembly 0x08003e00. The foreign
+      dispatcher is a volatile heap hook seam whose unwired default spins;
+      focused host test records the exact frame, proves one delegation, and
+      proves the mutated two-word result convention. match.py structural diff
+      is expected for the hook indirection.

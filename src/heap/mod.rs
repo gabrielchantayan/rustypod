@@ -11,6 +11,7 @@ pub mod dcache;
 pub mod free_path;
 pub mod init;
 pub mod managed_handle;
+pub mod rom_task_start;
 pub mod new_handler;
 pub mod pool;
 pub mod pool_client;
