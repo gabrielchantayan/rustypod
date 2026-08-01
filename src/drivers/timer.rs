@@ -135,6 +135,17 @@ use core::sync::atomic::{AtomicU32, Ordering};
 #[cfg(not(target_os = "none"))]
 static HOST_USEC_TIMER_COUNT: AtomicU32 = AtomicU32::new(0);
 
+/// Test-only per-read increment for a deterministic advancing Timer E.
+///
+/// Production host builds retain a fixed counter seam; tests opt into this
+/// increment to exercise polling loops without sleeping or spinning forever.
+#[cfg(test)]
+static HOST_USEC_TIMER_INCREMENT: AtomicU32 = AtomicU32::new(0);
+
+/// Number of host Timer E reads performed while the test seam is installed.
+#[cfg(test)]
+static HOST_USEC_TIMER_READS: AtomicU32 = AtomicU32::new(0);
+
 #[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn read_usec_timer_counter() -> u32 {
@@ -144,7 +155,19 @@ unsafe fn read_usec_timer_counter() -> u32 {
 #[cfg(not(target_os = "none"))]
 #[inline(always)]
 fn read_usec_timer_counter() -> u32 {
-    HOST_USEC_TIMER_COUNT.load(Ordering::Relaxed)
+    #[cfg(test)]
+    {
+        HOST_USEC_TIMER_READS.fetch_add(1, Ordering::Relaxed);
+        return HOST_USEC_TIMER_COUNT.fetch_add(
+            HOST_USEC_TIMER_INCREMENT.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+    }
+
+    #[cfg(not(test))]
+    {
+        HOST_USEC_TIMER_COUNT.load(Ordering::Relaxed)
+    }
 }
 
 /// usec_timer_read — original: `FUN_08001edc` @ 0x08001edc (12 bytes).
@@ -210,14 +233,52 @@ pub unsafe extern "C" fn usec_timer_elapsed_millis(start: u32, milliseconds: u32
     }
 }
 
+/// usec_delay — original: `FUN_08001f78` @ 0x08001f78 (44 bytes).
+/// Reference: `ipod-decomp/decomp/c/000/08001f78_FUN_08001f78.c` and
+/// `ipod-decomp/decomp/osos.asm` @ 0x08001f78..0x08001fa4.
+///
+/// Captures Timer E's microsecond counter once, then busy-polls
+/// [`usec_timer_elapsed`] until the elapsed duration reaches `interval`.
+/// The initial read is deliberately outside the loop; every subsequent time
+/// read occurs only inside the predicate. The do-while body invokes that
+/// predicate at least once, including when `interval` is zero, and returns
+/// zero after it succeeds. Deviation: none; the shared timer-read seam makes
+/// host polling deterministic without adding sleep or yield behavior.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn usec_delay(interval: u32) -> u32 {
+    let start = unsafe { usec_timer_read() };
+    while !unsafe { usec_timer_elapsed(start, interval) } {}
+    0
+}
+
+
 
 
 #[cfg(test)]
 mod usec_timer_tests {
     use super::*;
+    extern crate std;
+    use std::sync::{Mutex as StdMutex, MutexGuard as StdMutexGuard};
+
+    /// Serializes tests that reprogram the global Timer E host seam.
+    static USEC_TIMER_TEST_LOCK: StdMutex<()> = StdMutex::new(());
+
+    fn configure_usec_timer(initial: u32, increment: u32) -> StdMutexGuard<'static, ()> {
+        let guard = USEC_TIMER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        HOST_USEC_TIMER_COUNT.store(initial, Ordering::Relaxed);
+        HOST_USEC_TIMER_INCREMENT.store(increment, Ordering::Relaxed);
+        HOST_USEC_TIMER_READS.store(0, Ordering::Relaxed);
+        guard
+    }
+
 
     #[test]
     fn returns_the_raw_timer_e_counter_word_at_exact_b4_offset() {
+        let _guard = configure_usec_timer(0, 0);
+
 
         assert_eq!(TIMER_E_COUNTER as usize, 0x3c70_00b4);
         assert_eq!(
@@ -233,6 +294,8 @@ mod usec_timer_tests {
 
     #[test]
     fn elapsed_predicate_honors_normal_and_wrapped_boundaries() {
+        let _guard = configure_usec_timer(0, 0);
+
         const INTERVAL: u32 = 10;
 
         for start in [1_000, u32::MAX - 4] {
@@ -253,6 +316,8 @@ mod usec_timer_tests {
 
     #[test]
     fn elapsed_millis_matches_boundary_wrapping_and_limit_conventions() {
+        let _guard = configure_usec_timer(0, 0);
+
         const MAX_MILLISECONDS: u32 = 0x0041_8937;
 
         HOST_USEC_TIMER_COUNT.store(10_999, Ordering::Relaxed);
@@ -279,6 +344,17 @@ mod usec_timer_tests {
             unsafe { usec_timer_elapsed_millis(0, MAX_MILLISECONDS + 1) },
             u32::MAX
         );
+    }
+
+    #[test]
+    fn delay_captures_start_once_and_repolls_until_elapsed() {
+        let _guard = configure_usec_timer(1_000, 5);
+
+        assert_eq!(unsafe { usec_delay(10) }, 0);
+        // One initial capture plus two predicate reads: at +5 it is false,
+        // and at +10 it succeeds.
+        assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 3);
+        assert_eq!(HOST_USEC_TIMER_COUNT.load(Ordering::Relaxed), 1_015);
     }
 }
 

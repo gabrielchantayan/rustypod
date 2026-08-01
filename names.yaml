@@ -275,6 +275,20 @@ functions:
       usec_timer_count - start with u32 wrapping arithmetic, and returns
       whether the elapsed duration is at least interval.
 
+  - address: 0x08001f78
+    ghidra: FUN_08001f78
+    name: usec_delay
+    size: 44
+    sig: "u32 usec_delay(u32 interval)"
+    module: drivers/timer
+    status: ported
+    vars: {param_1: interval, uVar2: start, iVar1: elapsed,
+      DAT_080023d0: timer_register_base,
+      timer_register_base_plus_0xb4: initial_usec_timer_count}
+    notes: Captures Timer E TECNT once, then repeatedly invokes
+      usec_timer_elapsed(start, interval) until it succeeds. Subsequent
+      counter reads occur only inside that predicate; returns zero.
+
   - address: 0x08000318
     ghidra: FUN_08000318
     name: pwrcon_update_masks
