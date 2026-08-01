@@ -2797,6 +2797,22 @@ functions:
       DCACHE_LINE_OP slot (semihost.rs SEMIHOST_SWI pattern) lets host
       tests record the flushed line addresses.
 
+  - address: 0x08044190
+    ghidra: FUN_08044190
+    name: strlen_byte_loop
+    size: 32
+    sig: "u32 strlen_byte_loop(const u8 *s)"
+    module: libc/strlen
+    vars: {param_1: s, iVar1: len}
+    status: ported
+    notes: >-
+      Unguarded plain byte loop, independent of the ADS strlen at
+      0x08392478. Copies s to r1, clears the 32-bit r0 count, loads
+      bytes through r1, and increments both r1 and r0 only for a non-NUL
+      byte; the first NUL is read but not stepped over. Codegraph found
+      no named direct callers; the function remains separately exported
+      as strlen_byte_loop for its 32-bit return ABI.
+
   - address: 0x08044c10
     ghidra: FUN_08044c10
     name: dcache_clean_invalidate

@@ -29,6 +29,24 @@ pub unsafe extern "C" fn strlen(s: *const u8) -> usize {
     len
 }
 
+/// `strlen_byte_loop` — original: `FUN_08044190` @ 0x08044190 (32 bytes).
+///
+/// Independent unguarded byte-at-a-time NUL scan: copy the input pointer,
+/// load one unsigned byte, and advance both the pointer and 32-bit count
+/// only while that byte is nonzero. The terminator is read but not advanced
+/// past. `read_volatile` keeps LLVM from recognizing the loop as a libc
+/// `strlen` call; this is distinct from the ADS `strlen` at 0x08392478.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn strlen_byte_loop(s: *const u8) -> u32 {
+    let mut p = s;
+    let mut len = 0u32;
+    while p.read_volatile() != 0 {
+        p = p.add(1);
+        len = len.wrapping_add(1);
+    }
+    len
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -70,6 +88,41 @@ mod tests {
                 let got = unsafe { strlen(buf.as_ptr().add(align)) };
                 assert_eq!(got, ref_strlen(&buf[align..]), "align={align} len={len}");
                 assert_eq!(got, len, "align={align} len={len}");
+            }
+        }
+    }
+
+    fn ref_strlen_byte_loop(s: &[u8]) -> u32 {
+        s.iter()
+            .position(|&b| b == 0)
+            .expect("NUL-terminated") as u32
+    }
+
+    #[test]
+    fn byte_loop_empty_string_returns_zero() {
+        let buf = [0u8; 1];
+        assert_eq!(
+            unsafe { strlen_byte_loop(buf.as_ptr()) },
+            ref_strlen_byte_loop(&buf)
+        );
+    }
+
+    /// Every length 0..64 at every start alignment 0..3, checked against an
+    /// independent slice reference. The scan must stop at the first NUL.
+    #[test]
+    fn byte_loop_matches_reference_all_lengths_and_alignments() {
+        for align in 0..4usize {
+            let mut buf: Vec<u8> = std::vec![0u8; align + 64 + 2];
+            for len in 0..64usize {
+                for i in 0..len {
+                    buf[align + i] = (i as u8 % 251) + 1;
+                }
+                buf[align + len] = 0;
+                buf[align + len + 1] = 0x80;
+                let input = &buf[align..];
+                let got = unsafe { strlen_byte_loop(input.as_ptr()) };
+                assert_eq!(got, ref_strlen_byte_loop(input), "align={align} len={len}");
+                assert_eq!(got, len as u32, "align={align} len={len}");
             }
         }
     }
