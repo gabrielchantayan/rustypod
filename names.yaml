@@ -16474,6 +16474,33 @@ functions:
       object, overwritten r1, forwarded r2/r3, one slot invocation, and return
       value. match.py structural diff is expected (exit 1).
 
+  - address: 0x0811f5a8
+    ghidra: FUN_0811f5a8
+    name: ui_dispatch_vtable_slot_24
+    size: 16
+    sig: "usize ui_dispatch_vtable_slot_24(void *dispatch_record, usize forwarded_r1, usize discarded_r2, usize forwarded_r3)"
+    module: ui/vtable_slot_24
+    status: ported
+    renames:
+      param_1: dispatch_record
+      r0_after_first_ldr: object
+      r2_after_second_ldr: vtable
+      r2_after_third_ldr: slot_24_method
+      r1: forwarded_r1
+      r3: forwarded_r3
+    notes: >-
+      Four-instruction opaque UI data-provider slot dispatcher: loads object
+      from dispatch_record+0x04, loads its vtable at +0x00, loads slot +0x24,
+      and tail-branches to it. The raw ARM uses r2 for both vtable and method,
+      so it preserves incoming r1, passes the method address as r2, preserves
+      r3, and returns the method's usize result. Confirmed from raw ARM at
+      0x0811f5a8 and callers 0x08279564 (r1=0) and 0x0827b2a8 (r1=1).
+      Reference C: decomp/c/011/0811f5a8_FUN_0811f5a8.c. No NULL/alignment
+      checks or vtable-target port were added. Host test builds byte-accurate
+      ARM-layout records and verifies slot +0x24, object transfer into r0,
+      r1/r3 forwarding, r2 method-address replacement, one invocation, and
+      return value. match.py structural diff is expected (exit 1).
+
   - address: 0x0811f7f4
     ghidra: FUN_0811f7f4
     name: ui_noop_f7f4
@@ -16573,6 +16600,7 @@ functions:
       The reference C falsely infers a void no-argument wrapper. Assembly
       preserves r0-r2, reserves one uninitialized stack word, passes its
       address in r3 to FUN_0811ca58, and leaves the callee return in r0.
+
       Known callers consume that result as a C string. The unported resolver
       is a volatile app-string-resolver seam; this wrapper neither reads nor
       alters the output slot. Reference C: decomp/c/010/0811ca48_FUN_0811ca48.c;
