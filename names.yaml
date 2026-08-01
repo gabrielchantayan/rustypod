@@ -194,6 +194,19 @@ functions:
     vars: {param_1: dst, param_2: len}
     notes: Zero-fill with len<4 + misalignment prologue, then shared block loop.
 
+  - address: 0x08001e70
+    ghidra: FUN_08001e70
+    name: cpsr_disable_irq_fiq
+    size: 20
+    sig: "u32 cpsr_disable_irq_fiq(void)"
+    module: drivers/interrupts
+    status: ported
+    vars: {r0: saved_if_mask, r1: cpsr}
+    notes: Snapshots CPSR, returns only the prior IRQ/FIQ I/F mask (0xc0),
+      then sets both I/F bits with the MRS/ORR/MSR cpsr_c sequence. Its caller
+      pwrcon_update_masks uses it as an atomic guard and discards the returned
+      mask because the paired 0x08001e84 helper restores directly afterward.
+
   - address: 0x08000318
     ghidra: FUN_08000318
     name: pwrcon_update_masks
