@@ -15259,9 +15259,11 @@ functions:
       function's and fixed16_sin's literal pools, binary-scanned over
       osos.dec) sits inside the 0x442b-byte all-zero run
       0x083ee1c1-0x083f25ec in work/firmware/osos.dec - the same
-      still-undecrypted region documented under fixed16_rsqrt, present
-      identically in osos.recovery and osos.patched. No duplicate
-      quarter-wave table exists anywhere in the decrypted image
+      still-undecrypted region documented under fixed16_rsqrt. Direct
+      byte-for-byte comparison of the exact table interval
+      [0x083f10b2, 0x083f18b2) against zeros succeeds in osos.dec,
+      osos.recovery, and osos.patched. No duplicate quarter-wave table
+      exists anywhere in the decrypted image
       (byte-scanned for both round- and trunc-scaled sin sequences at
       4-byte alignment); aupd.dec does not contain the routine at all
       (searched for the 0x40c90fdb literal). Do NOT guess the table:
