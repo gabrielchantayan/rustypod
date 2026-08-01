@@ -1650,6 +1650,7 @@ functions:
 
   - address: 0x083ec4b4
     name: __fadd
+
     size: 308
     module: fp_fadd
     status: ported
@@ -5345,6 +5346,28 @@ functions:
       vtable +0x84 method. ABI: r0 is the sole pointer argument and
       return register; no stack or writes. Port deviation: none.
 
+  # --- RTC static fallback pair (time/rtc) ---
+  - address: 0x08056130
+    ghidra: FUN_08056130
+    name: rtc_static_time_pair
+    size: 28
+    sig: "i32 rtc_static_time_pair(u32 *days_out, u32 *secs_out)"
+    module: time/rtc
+    vars: {param_1: days_out, param_2: secs_out, puVar1: static_time_pair}
+    status: ported
+    notes: >-
+      Leaf static-pair copier, not an RTC bus access: ldr r3,[pc,#20]
+      loads 0x089caa98; ldr r2,[r3]; str r2,[r0]; ldr r0,[r3,#4];
+      str r0,[r1]; mov r0,#0; bx lr. Thus the source's first word is
+      written to days_out (r0 on entry) and its adjacent second word to
+      secs_out (r1), preserving the source order. The retail image's
+      read-only words are 0x74614400 and 0x6d695465. The caller at
+      0x08065d18 passes r0=sp+4 and r1=sp, then compares the first
+      result with its context +0xb7c and the second with +0xb80; the
+      system-time builder FUN_0806e3dc likewise consumes them as a
+      (days, seconds) pair. ABI: two valid writable u32 pointers in
+      r0/r1; no stack access; return 0 in r0. Port deviation: volatile
+      source reads retain the original read-only two-load behavior.
   # --- RTC wall-clock read (time/rtc) ---
   - address: 0x08056150
     ghidra: FUN_08056150

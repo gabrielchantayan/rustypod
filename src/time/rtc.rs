@@ -85,6 +85,28 @@ pub unsafe extern "C" fn rtc_context_handle(owner: *const RtcContextOwner) -> u3
     unsafe { (*(*owner).rtc_context).handle }
 }
 
+/// rtc_static_time_pair — original: `FUN_08056130` @ 0x08056130 (28 bytes).
+///
+/// Copy the firmware's read-only fallback `(day_count, seconds_of_day)` pair
+/// into the two ARM ABI output pointers, in that order, and return zero. The
+/// body loads the adjacent source words at `0x089caa98` then writes the first
+/// through r0 and the second through r1; callers use the same order when
+/// comparing or constructing a 64-bit system time. The source's retained
+/// retail image contents are `0x7461_4400, 0x6d69_5465`. Deviation: none.
+static RTC_STATIC_TIME_PAIR: [u32; 2] = [0x7461_4400, 0x6d69_5465];
+
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn rtc_static_time_pair(
+    days_out: *mut u32,
+    secs_out: *mut u32,
+) -> i32 {
+    unsafe {
+        *days_out = core::ptr::read_volatile(RTC_STATIC_TIME_PAIR.as_ptr());
+        *secs_out = core::ptr::read_volatile(RTC_STATIC_TIME_PAIR.as_ptr().add(1));
+    }
+    0
+}
+
 /// Pre-port default slot, kept for host tests: fail closed with
 /// FUN_0836d698's own bad-bank code 9. The shipped default is now the
 /// ported [`crate::drivers::i2c::pmu_i2c_read_regs`], which fails
@@ -430,5 +452,33 @@ mod tests {
         assert_eq!(nested.handle, 0xfeed_beef);
         assert_eq!(owner.reserved, owner_reserved);
         assert!(core::ptr::eq(owner.rtc_context, &nested));
+    }
+
+    #[test]
+    fn rtc_static_time_pair_places_the_adjacent_words_in_abi_order() {
+        let mut outputs = [0xcccc_cccc; 4];
+        let rc = unsafe { rtc_static_time_pair(&mut outputs[1], &mut outputs[3]) };
+
+        assert_eq!(rc, 0);
+        assert_eq!(
+            outputs,
+            [
+                0xcccc_cccc,
+                RTC_STATIC_TIME_PAIR[0],
+                0xcccc_cccc,
+                RTC_STATIC_TIME_PAIR[1],
+            ]
+        );
+    }
+
+    #[test]
+    fn rtc_static_time_pair_does_not_modify_its_read_only_source() {
+        let source_before = RTC_STATIC_TIME_PAIR;
+        let mut days = 0;
+        let mut secs = 0;
+
+        assert_eq!(unsafe { rtc_static_time_pair(&mut days, &mut secs) }, 0);
+        assert_eq!(RTC_STATIC_TIME_PAIR, source_before);
+        assert_eq!((days, secs), (source_before[0], source_before[1]));
     }
 }
