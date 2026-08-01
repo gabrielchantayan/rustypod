@@ -230,6 +230,21 @@ functions:
       when the IRQ-disable I bit is clear. The FIQ-disable F bit does not
       affect the result, and CPSR is not modified.
 
+  - address: 0x08001edc
+    ghidra: FUN_08001edc
+    name: usec_timer_read
+    size: 12
+    sig: "u32 usec_timer_read(void)"
+    module: drivers/timer
+    status: ported
+    vars: {DAT_080023d0: timer_register_base,
+      timer_register_base_plus_0xb4: timer_e_counter}
+    notes: Returns the raw Timer E TECNT word at 0x3c7000b4. The literal
+      global DAT_080023d0 contains the timer-controller base 0x3c700000;
+      callers use unsigned wrapping subtraction from this microsecond count
+      for timeout polling. Target uses volatile MMIO; host uses a
+      deterministic driver-local counter seam.
+
   - address: 0x08000318
     ghidra: FUN_08000318
     name: pwrcon_update_masks

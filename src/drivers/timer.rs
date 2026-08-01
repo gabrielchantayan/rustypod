@@ -118,6 +118,80 @@
 
 use crate::kernel::sync_mutex::{mutex_lock, mutex_unlock, Mutex};
 
+/// S5L8702 timer-controller base. The firmware's literal global
+/// `DAT_080023d0` at 0x080023d0 contains this physical address.
+const TIMER_REGISTER_BASE: usize = 0x3c70_0000;
+/// Timer E's live 32-bit counter (`TECNT`) within the timer controller.
+const TIMER_E_COUNTER_OFFSET: usize = 0xb4;
+/// Physical address of the `TECNT` word read by [`usec_timer_read`].
+const TIMER_E_COUNTER: *const u32 =
+    (TIMER_REGISTER_BASE + TIMER_E_COUNTER_OFFSET) as *const u32;
+
+#[cfg(not(target_os = "none"))]
+use core::sync::atomic::{AtomicU32, Ordering};
+
+/// Deterministic driver-local replacement for Timer E's counter on hosts,
+/// where 0x3c70_00b4 is not mapped.
+#[cfg(not(target_os = "none"))]
+static HOST_USEC_TIMER_COUNT: AtomicU32 = AtomicU32::new(0);
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn read_usec_timer_counter() -> u32 {
+    core::ptr::read_volatile(TIMER_E_COUNTER)
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+fn read_usec_timer_counter() -> u32 {
+    HOST_USEC_TIMER_COUNT.load(Ordering::Relaxed)
+}
+
+/// usec_timer_read — original: `FUN_08001edc` @ 0x08001edc (12 bytes).
+/// Reference: `ipod-decomp/decomp/c/000/08001edc_FUN_08001edc.c` and
+/// `ipod-decomp/decomp/osos.asm` @ 0x08001edc..0x08001ee4.
+///
+/// Returns the raw `u32` counter word from Timer E's `TECNT` register. The
+/// three-instruction firmware body loads the timer-controller address from
+/// its literal global at 0x080023d0 (0x3c70_0000), reads exactly `+0xb4`,
+/// and returns that word in `r0`; callers use wrapping subtraction for
+/// microsecond timeout polling. Deviation: the target path performs that
+/// volatile MMIO read; host builds read the deterministic driver-local seam
+/// above because the physical register is unavailable.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn usec_timer_read() -> u32 {
+    #[cfg(target_os = "none")]
+    {
+        return read_usec_timer_counter();
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        read_usec_timer_counter()
+    }
+}
+
+#[cfg(test)]
+mod usec_timer_read_tests {
+    use super::*;
+
+    #[test]
+    fn returns_the_raw_timer_e_counter_word_at_exact_b4_offset() {
+
+        assert_eq!(TIMER_E_COUNTER as usize, 0x3c70_00b4);
+        assert_eq!(
+            TIMER_E_COUNTER as usize - TIMER_REGISTER_BASE,
+            TIMER_E_COUNTER_OFFSET
+        );
+
+        for count in [0, 1, 0x1234_5678, u32::MAX] {
+            HOST_USEC_TIMER_COUNT.store(count, Ordering::Relaxed);
+            assert_eq!(unsafe { usec_timer_read() }, count);
+        }
+    }
+}
+
 /// +0x0: pending-list link — the next timer in the deadline-sorted
 /// queue; 0 is the list end.
 const NEXT: usize = 0x0;
