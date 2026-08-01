@@ -13362,8 +13362,6 @@ functions:
       prologue/literal-pool indirection is the dispatch boundary, an
       intentional deviation.
 
-  # ---- ATA/CE-ATA driver island inside the SQLite span ----
-  # ~0x08369000-0x0836c000. Not SQLite; the strings at 0x0836a004+ are
   - address: 0x0806f1a0
     ghidra: switchD_0807a000::caseD_7
     name: ata_handle_field4_is_positive
@@ -13393,6 +13391,8 @@ functions:
       `handle[0]` through a plain aligned in-memory load, or 0 when the
       handle is NULL. match.py: same NULL guard and field-0 load shape.
 
+  # ---- ATA/CE-ATA driver island inside the SQLite span ----
+  # ~0x08369000-0x0836c000. Not SQLite; the strings at 0x0836a004+ are
   # the IAD/RMS/WMS ATA command logger. gpio_pin_configure @ 0x0836b5b0
   # (already ported) belongs to this island, not to the database engine.
   - address: 0x08369780
@@ -16684,5 +16684,21 @@ functions:
     notes: >-
       Two ordered forward halfword transfers: ldrh [src] then strh [dst],
       followed by ldrh [src+2] then strh [dst+2]. The second load occurs
+      after the first store, so overlapping pairs intentionally retain this
+      forward-copy behavior rather than memcpy or memmove semantics.
+
+  - address: 0x08046a3c
+    ghidra: FUN_08046a3c
+    name: copy_u8_pair
+    size: 20
+    sig: "void copy_u8_pair(u8 *dst, const u8 *src)"
+    module: util/u8_pair_copy
+    status: ported
+    renames:
+      param_1: dst
+      param_2: src
+    notes: >-
+      Two ordered forward byte transfers: ldrb [src] then strb [dst],
+      followed by ldrb [src+1] then strb [dst+1]. The second load occurs
       after the first store, so overlapping pairs intentionally retain this
       forward-copy behavior rather than memcpy or memmove semantics.
