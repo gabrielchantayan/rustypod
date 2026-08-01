@@ -79,6 +79,19 @@ functions:
       MCR, and returns the stored control word. Host builds use the shared
       replaceable deterministic CP15 seam.
 
+  - address: 0x08003178
+    ghidra: FUN_08003178
+    name: sctlr_disable_mmu
+    size: 20
+    sig: "u32 sctlr_disable_mmu(void)"
+    module: drivers/cp15
+    status: ported
+    vars: {uVar1: sctlr}
+    notes: Reads ARM926EJ-S CP15 c1 (SCTLR) with MRC p15,0,<Rt>,c1,c0,0,
+      clears the architectural M bit (MMU enable, bit 0/0x1), writes the
+      result with the paired MCR, and returns the stored control word. Host
+      builds use the shared replaceable deterministic CP15 seam.
+
   - address: 0x08005d18
     ghidra: FUN_08005d18
     name: decoder_end_batch
