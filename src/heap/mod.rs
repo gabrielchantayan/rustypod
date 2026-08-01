@@ -17,6 +17,7 @@ pub mod task_delete_gateway;
 pub mod task_unlock_gateway;
 pub mod task_unblock_range_gateway;
 pub mod task_yield_gateway;
+pub mod timer_free_gateway;
 pub mod new_handler;
 pub mod pool;
 pub mod pool_client;

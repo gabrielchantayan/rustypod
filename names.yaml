@@ -16221,6 +16221,33 @@ functions:
       proves the mutated two-word result convention. match.py structural diff
       is expected for the hook indirection.
 
+  - address: 0x08003e1c
+    ghidra: FUN_08003e1c
+    name: timer_free_gateway
+    size: 40
+    sig: "void timer_free_gateway(void *timer)"
+    module: heap/timer_free_gateway
+    status: ported
+    renames:
+      param_1: timer
+      local_1c: request_selector_and_unwritten_words
+      local_8: request_timer
+      FUN_08003660: gateway_dispatch
+    notes: >-
+      Mask-ROM mirror for RTXC KS_free_timer (service selector 0x11), reached
+      by thunk 0x08037f10 -> ROM 0x22003e1c. The adjacent selector-0x10
+      wrapper (0x08003b8c, KS_alloc_timer), the RTXC service catalogue, and
+      timer-lifecycle callers establish the operation and timer argument. A
+      zero timer returns without dispatch. For a nonzero timer, assembly
+      reserves seven stack words, passes the pointer at its second word, writes
+      only selector 0x11 at request word 0 and timer at word 5 (+0x14), and
+      deliberately leaves request words 1..4 unwritten. It returns void after
+      dispatch. The shared volatile heap gateway seam represents the foreign
+      dispatcher; focused host tests prove the zero no-call path and one
+      nonzero delegation while observing only initialized words. Reference C:
+      decomp/c/000/08003e1c_FUN_08003e1c.c; assembly 0x08003e1c. match.py
+      structural diff is expected for the hook indirection.
+
   - address: 0x0800408c
     ghidra: FUN_0800408c
     name: task_unlock_gateway
