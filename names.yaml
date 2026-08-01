@@ -13908,6 +13908,22 @@ functions:
       strstreambuf. Port reads the unconditionally dereferenced mode word
       at `this + 4`; no deviations.
 
+  - address: 0x083d7020
+    ghidra: FUN_083d7020
+    name: strstreambuf_input_available
+    size: 36
+    sig: "i32 strstreambuf_input_available(const u8 *this)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: this, bVar2: input_active, iVar1: input_end}
+    notes: >-
+      One direct caller (0x083d954c). If bit 0x4 of the mode word at
+      `this + 4` marks an active input area and its end cursor at +0x18 is
+      non-NULL, returns `input_end - input_cursor` for the current cursor
+      at +0x14; otherwise returns zero. The ARM conditional loads prove the
+      current cursor is untouched outside that active, non-NULL-end path.
+      No deviations.
+
   # --- scouted, not ported (0x083c0000-0x083dffff) ---
 
   - address: 0x083d75e0

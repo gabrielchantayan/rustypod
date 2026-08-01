@@ -66,6 +66,9 @@
 //! - `strstreambuf_has_input_and_output` — original: `FUN_083d7008` @
 //!   0x083d7008 (24 bytes, 2 direct `bl` call sites). Tests whether both
 //!   the input and output areas of a `strstreambuf` are active.
+//! - `strstreambuf_input_available` — original: `FUN_083d7020` @
+//!   0x083d7020 (36 bytes, 1 direct `bl` call site). Returns the active
+//!   input area's end-minus-current cursor span.
 //!
 //! `refcount == -1` carries two meanings, and both are the same
 //! `adds r, r, #1; beq` test: to the destructor it means "no owners
@@ -844,6 +847,69 @@ fn strstreambuf_mode_requires_both_input_and_output_bits() {
             unsafe { strstreambuf_has_input_and_output((&object as *const StrstreamBufferMode).cast()) },
             expected,
             "mode {mode:#x}"
+        );
+    }
+}
+
+/// strstreambuf_input_available — original: `FUN_083d7020` @ 0x083d7020
+/// (36 bytes: `ldr/and/lsrs/ldrne/cmpne/ldrne/moveq/subne/mov`; 1 direct
+/// `bl` call site).
+///
+/// Returns the active input area's remaining span: the end cursor at
+/// `this + 0x18` minus its current cursor at `this + 0x14`. Input mode is
+/// bit 0x4 of the mode word at `this + 4`; with that bit clear, or with a
+/// null end cursor, the result is zero. The conditional loads preserve the
+/// original's behavior: the current cursor is read only when input mode is
+/// active and the end cursor is non-null. No deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn strstreambuf_input_available(this: *const u8) -> i32 {
+    const INPUT_ACTIVE: u32 = 0x04;
+    if (this.add(4) as *const u32).read() & INPUT_ACTIVE == 0 {
+        return 0;
+    }
+
+    let input_end = (this.add(0x18) as *const u32).read();
+    if input_end == 0 {
+        return 0;
+    }
+
+    let input_cursor = (this.add(0x14) as *const u32).read();
+    (input_end as i32).wrapping_sub(input_cursor as i32)
+}
+
+/// `strstreambuf_input_available` only exposes an input area selected by
+/// mode bit 0x4, and returns its end-minus-current span modulo 2^32.
+#[cfg(test)]
+#[test]
+fn strstreambuf_input_available_honors_mode_and_cursors() {
+    #[repr(C)]
+    struct StrstreamBufferInput {
+        vtable: u32,
+        mode: u32,
+        ignored: [u32; 3],
+        input_cursor: u32,
+        input_end: u32,
+    }
+
+    for (mode, input_cursor, input_end, expected) in [
+        (0x00, 0x10, 0x40, 0),
+        (0x08, 0x10, 0x40, 0),
+        (0x04, 0x10, 0x40, 0x30),
+        (0x0c, 0x40, 0x10, -0x30),
+        (0x04, 0x10, 0x00, 0),
+    ] {
+        let object = StrstreamBufferInput {
+            vtable: 0xfeed_face,
+            mode,
+            ignored: [0xa5a5_a5a5; 3],
+            input_cursor,
+            input_end,
+        };
+        assert_eq!(
+            unsafe { strstreambuf_input_available((&object as *const StrstreamBufferInput).cast()) },
+            expected,
+            "mode {mode:#x}, cursor {input_cursor:#x}, end {input_end:#x}"
         );
     }
 }
