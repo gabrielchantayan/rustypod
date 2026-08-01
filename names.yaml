@@ -53,6 +53,19 @@ functions:
       skips all reads and writes when len is zero; overlapping ranges retain
       forward-copy (not memmove) behavior.
 
+  - address: 0x08005d18
+    ghidra: FUN_08005d18
+    name: decoder_end_batch
+    size: 16
+    sig: "uintptr_t decoder_end_batch(void **decoder_slot)"
+    module: cxx/decoder_end_batch
+    status: ported
+    vars: {param_1: decoder_slot}
+    notes: Media decoder lifecycle wrapper. Dereferences decoder_slot to its
+      object, loads that object's vtable, and tail-dispatches slot +0x3c;
+      no NULL checks are present. Its only direct caller invokes it after
+      processing a decoder batch and before the paired decoder teardown.
+
   - address: 0x0800027c
     ghidra: FUN_0800027c
     name: memzero_aligned
