@@ -19,6 +19,7 @@ pub mod state_flags;
 pub mod str_fold_upper;
 pub mod table_find;
 pub mod three_pointer_select;
+pub mod u16_pair_copy;
 pub mod utoa;
 pub mod video_engine;
 pub mod vtable_query;

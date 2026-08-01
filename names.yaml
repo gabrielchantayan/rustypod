@@ -16638,3 +16638,19 @@ functions:
       initialized status, one delegation, and the post-dispatch status return.
       Reference C: decomp/c/000/080043f4_FUN_080043f4.c; raw assembly
       0x080043f4; RTXC selector catalogue: freemyipod.org/wiki/RetailOS.
+
+  - address: 0x08046a28
+    ghidra: FUN_08046a28
+    name: copy_u16_pair
+    size: 20
+    sig: "void copy_u16_pair(u16 *dst, const u16 *src)"
+    module: util/u16_pair_copy
+    status: ported
+    renames:
+      param_1: dst
+      param_2: src
+    notes: >-
+      Two ordered forward halfword transfers: ldrh [src] then strh [dst],
+      followed by ldrh [src+2] then strh [dst+2]. The second load occurs
+      after the first store, so overlapping pairs intentionally retain this
+      forward-copy behavior rather than memcpy or memmove semantics.
