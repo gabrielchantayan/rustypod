@@ -10,6 +10,7 @@ pub mod memory;
 pub mod outline;
 pub mod stream;
 pub mod system;
+pub mod selection;
 pub mod trace;
 pub mod trig;
 pub mod types;

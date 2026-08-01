@@ -2813,6 +2813,22 @@ functions:
       no named direct callers; the function remains separately exported
       as strlen_byte_loop for its 32-bit return ABI.
 
+  - address: 0x080413dc
+    ghidra: FUN_080413dc
+    name: ft_clear_selected_entry_index
+    size: 24
+    sig: "i32 ft_clear_selected_entry_index(FtSelectionPrefix *selection)"
+    module: ft/selection
+    vars: {param_1: selection}
+    status: ported
+    notes: >-
+      The selection fallback's 24-byte guard: null returns -50
+      (0xffffffce), otherwise only the word at +4 is zeroed and it
+      returns 0. Callers 0x08041ae4 and 0x08041d48 read that word as the
+      index passed to FUN_08053d6c; after a selected-entry lookup cannot
+      be used, they clear it before taking the unselected path. The
+      leading word and caller-owned trailing record remain untouched.
+
   - address: 0x08044200
     ghidra: FUN_08044200
     name: ft_round_add_clear_bit16
