@@ -16353,6 +16353,33 @@ functions:
       static-base literal, +0x24 span, +0x08 parameter store, and descriptor
       return.
 
+  - address: 0x0811f598
+    ghidra: FUN_0811f598
+    name: ui_dispatch_vtable_slot_20
+    size: 16
+    sig: "usize ui_dispatch_vtable_slot_20(void *dispatch_record, usize discarded_r1, usize forwarded_r2, usize forwarded_r3)"
+    module: ui/vtable_slot_20
+    status: ported
+    renames:
+      param_1: dispatch_record
+      r0_after_first_ldr: object
+      r1_after_second_ldr: vtable
+      r1_after_third_ldr: slot_20_method
+      r2: forwarded_r2
+      r3: forwarded_r3
+    notes: >-
+      Four-instruction UI data-provider slot dispatcher: loads object from
+      dispatch_record+0x04, loads its vtable at +0x00, loads slot +0x20, and
+      tail-branches to it. The raw ARM uses r1 for both vtable and method, so
+      it discards incoming r1 and passes the method address as r1; r2/r3 and
+      the method's usize return are preserved. UI layout callers use the same
+      +0x20 query alongside slots +0x18/+0x24. Reference C:
+      decomp/c/011/0811f598_FUN_0811f598.c; raw assembly:
+      osos.asm 0x0811f598. No NULL/alignment checks or vtable-target port were
+      added. Host tests build byte-accurate ARM-layout records and verify the
+      object, overwritten r1, forwarded r2/r3, one slot invocation, and return
+      value. match.py structural diff is expected (exit 1).
+
   - address: 0x0811f7f4
     ghidra: FUN_0811f7f4
     name: ui_noop_f7f4
