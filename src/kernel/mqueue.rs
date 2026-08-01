@@ -221,6 +221,21 @@ pub unsafe extern "C" fn queue_node_clear_data(node: *mut QueueNode) {
     core::ptr::addr_of_mut!((*node).data[1]).write_volatile(0);
     core::ptr::addr_of_mut!((*node).data[0]).write_volatile(0);
 }
+/// queue_node_data_delta — original: `FUN_08056b20` @ 0x08056b20
+/// (16 bytes).
+///
+/// Reads the two signed 32-bit words in a [`QueueNode`]'s message payload
+/// (+0x08 and +0x0c) and returns their wrapping difference. The stock leaf
+/// is two loads followed by `sub`, so it neither saturates nor changes the
+/// node; `wrapping_sub` preserves ARM's modulo-$2^{32}$ arithmetic.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn queue_node_data_delta(node: *mut QueueNode) -> i32 {
+    let first_word = (*node).data[0] as i32;
+    let second_word = (*node).data[1] as i32;
+    first_word.wrapping_sub(second_word)
+}
+
 
 
 /// mqueue_node_recycle — original: `FUN_080ed958` @ 0x080ed958
@@ -468,6 +483,32 @@ mod tests {
         f.pool.persist_sem = &mut f.persist_sem_cell;
         f.pool.persist_cv = &mut f.persist_cv;
         f
+    }
+
+    // ---- queue_node_data_delta ---------------------------------------
+
+    #[test]
+    fn data_delta_returns_the_normal_signed_difference() {
+        let mut n = node(0, 0);
+        n.data = [17, 5];
+
+        assert_eq!(unsafe { queue_node_data_delta(&mut n) }, 12);
+    }
+
+    #[test]
+    fn data_delta_returns_a_negative_signed_difference() {
+        let mut n = node(0, 0);
+        n.data = [5, 17];
+
+        assert_eq!(unsafe { queue_node_data_delta(&mut n) }, -12);
+    }
+
+    #[test]
+    fn data_delta_wraps_on_signed_subtraction_overflow() {
+        let mut n = node(0, 0);
+        n.data = [i32::MAX as u32, (-1_i32) as u32];
+
+        assert_eq!(unsafe { queue_node_data_delta(&mut n) }, i32::MIN);
     }
 
     // ---- mqueue_deliver ----------------------------------------------

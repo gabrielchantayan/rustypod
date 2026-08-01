@@ -4774,6 +4774,24 @@ functions:
       deviation. match.py structural (two zero stores, reversed payload-word
       order).
 
+  - address: 0x08056b20
+    ghidra: FUN_08056b20
+    name: queue_node_data_delta
+    size: 16
+    sig: "i32 queue_node_data_delta(QueueNode *node)"
+    module: kernel/mqueue
+    status: ported
+    renames:
+      param_1: node
+    notes: >-
+      Leaf arithmetic accessor for QueueNode's two-word message payload:
+      raw ARM loads node+0x08 then node+0x0c and returns the signed,
+      modulo-2^32 subtraction (first word minus second). QueueNode.data
+      models exactly those payload words; this does not measure queue
+      occupancy or mutate the node. Rust wrapping_sub is intentional to
+      preserve ARM SUB overflow behavior. match.py structural (two payload
+      loads and one subtraction).
+
   - address: 0x080b4a88
     ghidra: FUN_080b4a88
     name: mqueue_deliver
