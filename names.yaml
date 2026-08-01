@@ -82,7 +82,8 @@ functions:
     status: ported
     vars: {DAT_08000504: startup_wait_timeout_ticks}
     notes: Calls the unported 0x080003b8 status-clear wait with its fixed
-      100000-tick literal, discards that status, and returns zero.
+      100000-tick literal, discards that status, and returns zero; the port
+      keeps the callee behind a target-default ROM dispatch seam.
 
   - address: 0x08030fe4
     ghidra: FUN_08030fe4
