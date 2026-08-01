@@ -65,6 +65,35 @@ pub unsafe extern "C" fn cpsr_restore_irq_fiq(saved_if_mask: u32) {
     }
 }
 
+/// cpsr_irq_enabled — original: `FUN_08001e98` @ `0x08001e98` (16 bytes).
+/// Reference: `ipod-decomp/decomp/osos.asm` @ `0x08001e98..0x08001ea4`.
+///
+/// Reads CPSR and returns one exactly when its IRQ-disable I bit is clear;
+/// the FIQ-disable F bit has no effect. Target builds use the firmware's MRS
+/// CPSR read; host builds read the deterministic CPSR seam. This is the
+/// equivalent of `1 & !(cpsr >> 7)` and does not modify CPSR.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cpsr_irq_enabled() -> u32 {
+    #[cfg(target_os = "none")]
+    {
+        let cpsr: u32;
+        unsafe {
+            core::arch::asm!(
+                "mrs {cpsr}, cpsr",
+                cpsr = out(reg) cpsr,
+                options(nostack, preserves_flags),
+            );
+        }
+        1 & !(cpsr >> 7)
+    }
+
+    #[cfg(not(target_os = "none"))]
+    unsafe {
+        host_cpsr::irq_enabled()
+    }
+}
+
 /// Deterministic local CPSR seam for host behavioral tests.
 #[cfg(not(target_os = "none"))]
 mod host_cpsr {
@@ -87,6 +116,11 @@ mod host_cpsr {
         let cpsr = core::ptr::read_volatile(addr_of!(CPSR));
         let updated = (cpsr & !super::CPSR_IF_MASK) | (saved_if_mask & super::CPSR_IF_MASK);
         core::ptr::write_volatile(addr_of_mut!(CPSR), updated);
+    }
+
+    #[inline(always)]
+    pub(super) unsafe fn irq_enabled() -> u32 {
+        1 & !(core::ptr::read_volatile(addr_of!(CPSR)) >> 7)
     }
 }
 
@@ -112,6 +146,27 @@ mod tests {
                     core::ptr::read_volatile(addr_of!(host_cpsr::CPSR)),
                     cpsr | CPSR_IF_MASK,
                     "CPSR transition for {cpsr:#010x}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn reports_irq_enable_state_independently_of_fiq() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+
+        for (cpsr, expected) in [
+            (0x0000_0013, 1),
+            (0x0000_0053, 1),
+            (0x0000_0093, 0),
+            (0x0000_00d3, 0),
+        ] {
+            unsafe {
+                core::ptr::write_volatile(addr_of_mut!(host_cpsr::CPSR), cpsr);
+                assert_eq!(
+                    cpsr_irq_enabled(),
+                    expected,
+                    "IRQ state for CPSR {cpsr:#010x}",
                 );
             }
         }

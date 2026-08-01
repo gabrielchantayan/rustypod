@@ -218,6 +218,18 @@ functions:
     notes: Reads CPSR, clears IRQ/FIQ I/F bits (0xc0), ORs the supplied saved
       I/F mask, and writes CPSR control with the MRS/BIC/ORR/MSR sequence.
 
+  - address: 0x08001e98
+    ghidra: FUN_08001e98
+    name: cpsr_irq_enabled
+    size: 16
+    sig: "u32 cpsr_irq_enabled(void)"
+    module: drivers/interrupts
+    status: ported
+    vars: {r0: irq_enabled, r1: one}
+    notes: Reads CPSR and computes 1 & ~(cpsr >> 7), returning one exactly
+      when the IRQ-disable I bit is clear. The FIQ-disable F bit does not
+      affect the result, and CPSR is not modified.
+
   - address: 0x08000318
     ghidra: FUN_08000318
     name: pwrcon_update_masks
