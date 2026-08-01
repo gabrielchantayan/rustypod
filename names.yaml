@@ -6610,6 +6610,25 @@ functions:
       builtin forwards to the strong ported memmove at link - same
       linkage shape as rom_memmove_keep_dst).
 
+  - address: 0x08042ccc
+    ghidra: FUN_08042ccc
+    name: ft_buffered_stream_buffered_bytes
+    size: 48
+    sig: "u32 ft_buffered_stream_buffered_bytes(const FtBufferedStream *stream)"
+    module: ft/buffer
+    status: ported
+    vars: {param_1: stream, uVar2: cursor, iVar1: buffered_bytes}
+    notes: >-
+      The 48-byte `buff`-tagged buffered-I/O record's byte count. Its
+      reader at 0x08042fd4 copies from and advances +0x18 by this result;
+      its output flush at 0x08042d68 uses the zero-flag span. ldrb +5
+      selects output `cursor - buffer_start` (+0x18 - +0x1c, wrapping)
+      when zero, or input `buffer_end - cursor + 1` (+0x20 - +0x18,
+      inclusive) when nonzero. cmp/sub{ls}/add{ls}/mov{hi} make the
+      input result zero exactly when the unsigned cursor exceeds the
+      inclusive end; the permitted sub/add also wraps for the full
+      0..=u32::MAX input range.
+
   - address: 0x0813b714
     ghidra: FUN_0813b714
     name: berec_test_bit
