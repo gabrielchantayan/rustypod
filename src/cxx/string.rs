@@ -63,6 +63,9 @@
 //!   (56 bytes, 21 call sites). `operator+=(const char*)`.
 //! - `cxx_string_less` — original: `FUN_083d74f4` @ 0x083d74f4
 //!   (116 bytes, 34 call sites). `std::less<basic_string>`.
+//! - `strstreambuf_has_input_and_output` — original: `FUN_083d7008` @
+//!   0x083d7008 (24 bytes, 2 direct `bl` call sites). Tests whether both
+//!   the input and output areas of a `strstreambuf` are active.
 //!
 //! `refcount == -1` carries two meanings, and both are the same
 //! `adds r, r, #1; beq` test: to the destructor it means "no owners
@@ -799,6 +802,50 @@ pub unsafe extern "C" fn cxx_string_less(
         };
     }
     (ordering as u32) >> 31
+}
+
+/// strstreambuf_has_input_and_output — original: `FUN_083d7008` @
+/// 0x083d7008 (24 bytes: `ldr/mov/bics/movne/moveq/bx`; 2 direct `bl`
+/// call sites).
+///
+/// Tests the `strstreambuf` mode word at `this + 4`: bits 0x4 and 0x8
+/// independently mark an active input and output area. It returns true
+/// only when both are set. Its two direct callers reallocate the put
+/// buffer, then use this predicate to decide whether the get-area
+/// pointers need to follow that relocation. `this` is dereferenced
+/// unconditionally, as in the original. No deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn strstreambuf_has_input_and_output(this: *const u8) -> bool {
+    const INPUT_AND_OUTPUT: u32 = 0x0c;
+    ((this.add(4) as *const u32).read() & INPUT_AND_OUTPUT) == INPUT_AND_OUTPUT
+}
+
+/// `strstreambuf_has_input_and_output` reads the mode word at `this + 4`;
+/// no other object field participates.
+#[cfg(test)]
+#[test]
+fn strstreambuf_mode_requires_both_input_and_output_bits() {
+    #[repr(C)]
+    struct StrstreamBufferMode {
+        vtable: u32,
+        mode: u32,
+        ignored: u32,
+    }
+
+    for mode in 0u32..16 {
+        let object = StrstreamBufferMode {
+            vtable: 0xfeed_face,
+            mode,
+            ignored: !mode,
+        };
+        let expected = mode & 0x0c == 0x0c;
+        assert_eq!(
+            unsafe { strstreambuf_has_input_and_output((&object as *const StrstreamBufferMode).cast()) },
+            expected,
+            "mode {mode:#x}"
+        );
+    }
 }
 
 #[cfg(test)]

@@ -13873,6 +13873,23 @@ functions:
       embedded NULs order correctly. `this` (r0) is overwritten by the
       first load.
 
+  - address: 0x083d7008
+    ghidra: FUN_083d7008
+    name: strstreambuf_has_input_and_output
+    size: 24
+    sig: "bool strstreambuf_has_input_and_output(const u8 *this)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: this}
+    notes: >-
+      `ldr r0,[r0,#4]; mov r1,#12; bics r0,r1,r0; movne r0,#0;
+      moveq r0,#1; bx lr`: true exactly when both mode bits 0x4 and 0x8
+      are set. The 2 direct callers (0x083da85c and 0x083dab68) replace
+      the put buffer, then refresh the get-area pointers only on true,
+      identifying the bits as simultaneous input/output areas of a
+      strstreambuf. Port reads the unconditionally dereferenced mode word
+      at `this + 4`; no deviations.
+
   # --- scouted, not ported (0x083c0000-0x083dffff) ---
 
   - address: 0x083d75e0
