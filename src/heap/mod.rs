@@ -8,6 +8,7 @@ pub mod client_erase;
 pub mod client_populate;
 pub mod client_register;
 pub mod dcache;
+pub mod gateway_service1;
 pub mod free_path;
 pub mod init;
 pub mod managed_handle;

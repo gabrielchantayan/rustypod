@@ -16271,3 +16271,35 @@ functions:
       one delegation, clobbers the request, and proves the wrapper returns
       void. Reference C: decomp/c/000/08004298_FUN_08004298.c; assembly
       0x08004298.
+
+  - address: 0x080043c0
+    ghidra: FUN_080043c0
+    name: gateway_service1_request
+    size: 52
+    sig: "u32 gateway_service1_request(u32 input0, u32 input1)"
+    module: heap/gateway_service1
+    status: ported
+    renames:
+      param_1: input0
+      param_2: input1
+      auStack_38: scratch
+      local_18: service_selector
+      local_14: output
+      local_10: input0
+      uStack_c: input1
+      local_8: scratch_pointer
+      FUN_08003660: gateway_dispatch
+    notes: >-
+      Raw mask-ROM service-1 request. Assembly reserves 52 bytes: the first
+      32 are uninitialized scratch, followed by the five words
+      {1, 0, input0, input1, scratch_base}. It passes the address of word 0
+      (sp + 0x20) to 0x08003660, whose writable request ABI may replace word
+      1; the wrapper loads that post-dispatch output word and returns it in r0.
+      The scratch-base field points 32 bytes before the dispatch pointer.
+      Recovered C has no callers or thunk identifying a higher-level RTXC
+      operation, so gateway_service1_request names the established protocol
+      rather than guessing one. The foreign dispatcher uses the shared volatile
+      heap seam; focused host testing proves all initialized fields, delegation,
+      scratch geometry, output initialization, and post-dispatch return.
+      Reference C: decomp/c/000/080043c0_FUN_080043c0.c; raw assembly:
+      0x080043c0.
