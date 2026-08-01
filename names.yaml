@@ -16307,6 +16307,46 @@ functions:
       decomp/c/000/08003e1c_FUN_08003e1c.c; assembly 0x08003e1c. match.py
       structural diff is expected for the hook indirection.
 
+  - address: 0x080040ac
+    ghidra: FUN_080040ac
+    name: mailbox_receive_timed_gateway
+    size: 80
+    sig: "u32 mailbox_receive_timed_gateway(u32 mailbox, u32 task, u32 timeout_ticks, u32 *message_out)"
+    module: heap/mailbox_receive_timed_gateway
+    status: ported
+    renames:
+      param_1: mailbox
+      param_2: task
+      param_3: timeout_ticks
+      param_4: message_out
+      auStack_50: request_scratch
+      local_30: request_selector
+      local_2c: request_message_output
+      local_24: request_mailbox
+      local_20: request_task
+      local_18: request_status
+      local_14: request_wait_flag
+      local_10: request_timeout_ticks
+      local_c: request_scratch_pointer
+      FUN_08003660: gateway_dispatch
+    notes: >-
+      Internal mask-ROM gateway ABI for RTXC KS_receivet(MBOX mailbox, TASK
+      task, TICKS timeout): selector 5's timed, status-and-out-pointer form.
+      Assembly reserves 72 local bytes below saved {r4,lr}: a 32-byte
+      uninitialized scratch prefix, then the dispatched ten-word request
+      {5, output=0, uninitialized, mailbox, task, uninitialized, status=0, 1,
+      timeout, scratch_pointer}. The pointer is sp+0x20 and its last word
+      points back to scratch at sp. After exactly one dispatch, it writes
+      mutated word 1 through message_out and returns mutated word 6; the
+      dispatcher's register return is ignored. The adjacent 0x080040fc
+      KS_receive wrapper and RTXC mailbox API establish the mailbox/task/output
+      mapping; its extra word 8 is the timed-receive tick count. The shared
+      volatile heap gateway seam represents the foreign dispatcher. Focused
+      host test proves every initialized request word, scratch geometry,
+      delegation, output write, and status return. Reference C:
+      decomp/c/000/080040ac_FUN_080040ac.c; assembly 0x080040ac. match.py
+      structural diff is expected for the hook indirection.
+
   - address: 0x0800408c
     ghidra: FUN_0800408c
     name: task_unlock_gateway
