@@ -319,6 +319,27 @@ functions:
       usec_timer_elapsed(start, interval) until it succeeds. Subsequent
       counter reads occur only inside that predicate; returns zero.
 
+  - address: 0x08001fa4
+    ghidra: FUN_08001fa4
+    name: configure_cpu_to_ahb_divider
+    size: 104
+    sig: "u32 configure_cpu_to_ahb_divider(u32 clock_source, u32 requested_divider)"
+    module: drivers/clock_config
+    status: ported
+    vars: {param_1: clock_source_unused, param_2: requested_divider,
+      DAT_080023d8: clkcon_base, DAT_080023d8_plus_4: clkcon1,
+      DAT_080023dc: clock_manager_state, clock_manager_state_plus_4: requested_cpu_to_ahb_divider,
+      uVar2: clkcon1_control_word, uVar3: encoded_cpu_to_ahb_divider}
+    notes: Configures System Controller CLKCON1 (0x3c500004) CPU-to-AHB
+      divider field [20:16]; divider one clears CLKCON1[23:16], otherwise
+      ((divider >> 1) - 1) & 0x1f is installed in [20:16] with update bit 22.
+      clock_source is unused in this mode. Stores the requested divider in
+      clock-manager IRAM state 0x2200ad10, calls the retailOS CLKCON1
+      control-word transform dispatch at 0x08003508, writes the transformed
+      word, and polls CLKCON1[23:16] for acknowledgement. Target performs
+      volatile MMIO/IRAM accesses and invokes the original dispatch stub;
+      host tests use a deterministic driver-local seam.
+
   - address: 0x08000318
     ghidra: FUN_08000318
     name: pwrcon_update_masks
@@ -7722,6 +7743,14 @@ functions:
       divergence for fractional inputs. Still blocked; still status:
       identified. Do not port until the true 8 halfwords are
       recovered.
+      Deferral reconfirmed 2026-08-01 from the raw ARM disassembly and
+      osos.dec: the function's literal pool still resolves the seed base to
+      0x083f18b2 and the following literal is 0x0000b504, while all sixteen
+      bytes at the seed address remain zero. The ARM body confirms the
+      three fixed16_mul Newton iterations and no saturation beyond the
+      explicit x == 0 / x == 0x10000 exits. Since seed values change
+      observable fractional-input results, retain status: identified rather
+      than publishing a non-parity Rust implementation.
 
   - address: 0x0824980c
     ghidra: FUN_0824980c
