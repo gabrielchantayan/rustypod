@@ -5,6 +5,7 @@
 pub mod byte_key_map;
 pub mod decoder_begin_batch;
 pub mod decoder_end_batch;
+pub mod decoder_cleanup;
 pub mod handle;
 pub mod list_splice;
 pub mod pair_header;
