@@ -2813,6 +2813,23 @@ functions:
       no named direct callers; the function remains separately exported
       as strlen_byte_loop for its 32-bit return ABI.
 
+  - address: 0x08044200
+    ghidra: FUN_08044200
+    name: ft_round_add_clear_bit16
+    size: 36
+    sig: "u32 ft_round_add_clear_bit16(u32 left, u32 right)"
+    module: ft/arith
+    vars: {param_1: left, param_2: right}
+    status: ported
+    notes: >-
+      ARM sequence: tst bit 0 of each operand; only for an odd operand,
+      add #1 then bic bit 16; add the resulting u32 words; bic bit 16
+      from the sum. The 0x08044a9c and 0x0806b734 callers form left from
+      a byte/halfword plus 1/2, pass right in a full register, and use
+      the result in unsigned comparisons. This supports u32 but not a
+      more specific upstream representation, so the operation-based name
+      is intentional. All adds wrap modulo 2^32.
+
   - address: 0x08044c10
     ghidra: FUN_08044c10
     name: dcache_clean_invalidate
