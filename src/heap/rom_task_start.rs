@@ -23,30 +23,33 @@ pub type TaskStartRequest = [u32; 4];
 
 /// Foreign gateway entry `FUN_08003660` @ `0x08003660`.
 ///
-/// It receives a writable request-frame pointer and may replace the first two
-/// words.  The wrapper returns those words as the ARM EABI `u64` result
-/// (`r0 = word 0`, `r1 = word 1`).
+/// It receives a writable request-frame pointer. Each selector defines its
+/// own frame length, but the gateway may replace the first two words; wrappers
+/// that return `u64` expose those words as the ARM EABI result (`r0` low,
+/// `r1` high).
 #[derive(Clone, Copy)]
-pub struct RomTaskStartOps {
-    pub dispatch: unsafe extern "C" fn(request: *mut TaskStartRequest),
+pub struct RomGatewayOps {
+    pub dispatch: unsafe extern "C" fn(request: *mut u32),
 }
 
-unsafe extern "C" fn missing_dispatch(_request: *mut TaskStartRequest) {
+unsafe extern "C" fn missing_dispatch(_request: *mut u32) {
     loop {}
 }
 
 /// Default foreign-service binding until the mask-ROM gateway is installed.
-pub const DEFAULT_ROM_TASK_START_OPS: RomTaskStartOps = RomTaskStartOps {
+pub const DEFAULT_ROM_GATEWAY_OPS: RomGatewayOps = RomGatewayOps {
     dispatch: missing_dispatch,
 };
 
-/// Active task-start gateway binding.  Target integration installs the ROM
+/// Active mask-ROM gateway binding. Target integration installs the real
 /// service once; focused host tests replace it with a request recorder.
-pub static mut ROM_TASK_START_OPS: RomTaskStartOps = DEFAULT_ROM_TASK_START_OPS;
+pub static mut ROM_GATEWAY_OPS: RomGatewayOps = DEFAULT_ROM_GATEWAY_OPS;
 
+/// Reads the shared mask-ROM gateway hook without allowing LLVM to fold the
+/// table back to its unwired default.
 #[inline(always)]
-fn dispatch() -> unsafe extern "C" fn(request: *mut TaskStartRequest) {
-    unsafe { core::ptr::addr_of!(ROM_TASK_START_OPS.dispatch).read_volatile() }
+pub(crate) fn gateway_dispatch() -> unsafe extern "C" fn(request: *mut u32) {
+    unsafe { core::ptr::addr_of!(ROM_GATEWAY_OPS.dispatch).read_volatile() }
 }
 
 /// rom_task_start — original: `FUN_08003e00` @ `0x08003e00` (28 bytes).
@@ -71,7 +74,7 @@ pub unsafe extern "C" fn rom_task_start(
     input_r3: u32,
 ) -> u64 {
     let mut request = [0x15, input_r1, task_id, input_r3];
-    dispatch()(&mut request);
+    gateway_dispatch()(request.as_mut_ptr());
     (request[0] as u64) | ((request[1] as u64) << 32)
 }
 
@@ -87,10 +90,10 @@ mod tests {
     static mut CALLS: u32 = 0;
     static mut RECORDED_REQUEST: TaskStartRequest = [0; 4];
 
-    unsafe extern "C" fn record_and_reply(request: *mut TaskStartRequest) {
+    unsafe extern "C" fn record_and_reply(request: *mut u32) {
         addr_of_mut!(CALLS).write(addr_of!(CALLS).read() + 1);
-        let request = &mut *request;
-        addr_of_mut!(RECORDED_REQUEST).write(*request);
+        let request = core::slice::from_raw_parts_mut(request, 4);
+        addr_of_mut!(RECORDED_REQUEST).write(request.try_into().unwrap());
         request[0] = 0xfeed_cafe;
         request[1] = 0x1234_5678;
     }
@@ -100,7 +103,7 @@ mod tests {
         unsafe {
             addr_of_mut!(CALLS).write(0);
             addr_of_mut!(RECORDED_REQUEST).write([0; 4]);
-            addr_of_mut!(ROM_TASK_START_OPS).write(RomTaskStartOps {
+            addr_of_mut!(ROM_GATEWAY_OPS).write(RomGatewayOps {
                 dispatch: record_and_reply,
             });
         }
@@ -108,7 +111,7 @@ mod tests {
     }
 
     fn restore(guard: MutexGuard<'static, ()>) {
-        unsafe { addr_of_mut!(ROM_TASK_START_OPS).write(DEFAULT_ROM_TASK_START_OPS) };
+        unsafe { addr_of_mut!(ROM_GATEWAY_OPS).write(DEFAULT_ROM_GATEWAY_OPS) };
         drop(guard);
     }
 

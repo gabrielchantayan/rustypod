@@ -16060,3 +16060,30 @@ functions:
       focused host test records the exact frame, proves one delegation, and
       proves the mutated two-word result convention. match.py structural diff
       is expected for the hook indirection.
+
+  - address: 0x0800408c
+    ghidra: FUN_0800408c
+    name: task_unlock_gateway
+    size: 32
+    sig: "u64 task_unlock_gateway(u32 task_id)"
+    module: heap/task_unlock_gateway
+    status: ported
+    renames:
+      param_1: task_id
+      local_18: request_selector_or_result_low
+      uStack_14: request_result_high
+      local_10: request_task_id
+      FUN_08003660: gateway_dispatch
+    notes: >-
+      Mask-ROM mirror for the RTXC task-unlock gateway service (ROM
+      0x2200408c, reached by thunk 0x08037e50). The thunk catalogue and its
+      critical-section callers establish the semantic task_unlock name. Raw
+      assembly reserves five stack words, writes only selector 3 at word 0 and
+      task_id at word 2, and passes the three-word prefix to 0x08003660; word
+      1 is deliberately uninitialized output. The gateway overwrites words
+      0/1, and `pop {r0,r1,r2,r3,ip,pc}` returns those words as the ARM EABI
+      u64 result (r0 low, r1 high). The shared volatile heap gateway seam
+      represents the foreign dispatcher; focused host tests record the two
+      initialized request words, prove one delegation, and prove the mutated
+      result pair. Reference C: decomp/c/000/0800408c_FUN_0800408c.c;
+      assembly 0x0800408c; thunk/caller evidence in kernel/task_lock.rs.

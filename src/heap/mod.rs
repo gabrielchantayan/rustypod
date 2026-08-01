@@ -12,6 +12,7 @@ pub mod free_path;
 pub mod init;
 pub mod managed_handle;
 pub mod rom_task_start;
+pub mod task_unlock_gateway;
 pub mod new_handler;
 pub mod pool;
 pub mod pool_client;
