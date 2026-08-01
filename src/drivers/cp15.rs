@@ -112,6 +112,57 @@ pub extern "C" fn sctlr_disable_data_cache() -> u32 {
     control
 }
 
+/// Invalidates the entire ARM926EJ-S instruction cache and synchronizes CP15.
+///
+/// Original: `FUN_080031b8` @ 0x080031b8 (20 bytes).
+/// Reference: `/home/gabe/Programming/ipod-decomp/decomp/c/000/080031b8_FUN_080031b8.c`.
+/// The firmware places zero in `r0`, sends `MCR p15,0,r0,c7,c5,0`
+/// (`0xee070f15`, Invalidate Entire Instruction Cache), then sends
+/// `MCR p15,0,r0,c7,c10,4` (`0xee070f9a`, ARMv5 Data Synchronization
+/// Barrier), and returns zero.
+///
+/// On the firmware target this emits precisely those CP15 operations in that
+/// order. Non-firmware builds use a replaceable deterministic maintenance
+/// seam, the deliberate host-only deviation that makes ordering and operands
+/// observable in behavioral tests.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn invalidate_entire_instruction_cache() -> u32 {
+    invalidate_instruction_cache(0);
+    data_synchronization_barrier(0);
+    0
+}
+
+/// Target implementation of `MCR p15,0,r0,c7,c5,0`.
+#[cfg(all(target_os = "none", target_arch = "arm"))]
+#[inline(always)]
+fn invalidate_instruction_cache(operand: u32) {
+    // SAFETY: This is the ARM926EJ-S Invalidate Entire Instruction Cache
+    // operation used by the retail firmware. The fixed r0 operand is zero.
+    unsafe {
+        core::arch::asm!(
+            "mcr p15, 0, r0, c7, c5, 0",
+            in("r0") operand,
+            options(nostack),
+        );
+    }
+}
+
+/// Target implementation of `MCR p15,0,r0,c7,c10,4`.
+#[cfg(all(target_os = "none", target_arch = "arm"))]
+#[inline(always)]
+fn data_synchronization_barrier(operand: u32) {
+    // SAFETY: This is the ARMv5 CP15 Data Synchronization Barrier used by the
+    // retail firmware. It follows instruction-cache invalidation with r0=0.
+    unsafe {
+        core::arch::asm!(
+            "mcr p15, 0, r0, c7, c10, 4",
+            in("r0") operand,
+            options(nostack),
+        );
+    }
+}
+
 
 
 
@@ -209,13 +260,76 @@ fn write_sctlr(control: u32) {
     unsafe { (core::ptr::read_volatile(core::ptr::addr_of!(HOST_SCTLR_HOOKS)).write)(control) }
 }
 
+/// Host implementation seam for CP15 cache-maintenance operations.
+///
+/// This is available only away from the firmware target. Replacing it is
+/// unsafe because the static seam is process-global; callers must serialize
+/// replacement with every user of [`invalidate_entire_instruction_cache`].
+#[cfg(not(all(target_os = "none", target_arch = "arm")))]
+#[derive(Clone, Copy)]
+pub struct HostCacheMaintenanceHooks {
+    /// Replacement for `MCR p15,0,<Rt>,c7,c5,0`.
+    pub invalidate_instruction_cache: fn(u32),
+    /// Replacement for `MCR p15,0,<Rt>,c7,c10,4`.
+    pub data_synchronization_barrier: fn(u32),
+}
+
+#[cfg(not(all(target_os = "none", target_arch = "arm")))]
+fn default_invalidate_instruction_cache(_: u32) {}
+
+#[cfg(not(all(target_os = "none", target_arch = "arm")))]
+fn default_data_synchronization_barrier(_: u32) {}
+
+#[cfg(not(all(target_os = "none", target_arch = "arm")))]
+static mut HOST_CACHE_MAINTENANCE_HOOKS: HostCacheMaintenanceHooks = HostCacheMaintenanceHooks {
+    invalidate_instruction_cache: default_invalidate_instruction_cache,
+    data_synchronization_barrier: default_data_synchronization_barrier,
+};
+
+/// Replaces the host CP15 cache-maintenance seam and returns the prior hooks.
+///
+/// This does not exist on the firmware target, where the function always
+/// executes the actual CP15 instructions.
+#[cfg(not(all(target_os = "none", target_arch = "arm")))]
+pub unsafe fn replace_host_cache_maintenance_hooks(
+    hooks: HostCacheMaintenanceHooks,
+) -> HostCacheMaintenanceHooks {
+    let previous =
+        core::ptr::read_volatile(core::ptr::addr_of!(HOST_CACHE_MAINTENANCE_HOOKS));
+    core::ptr::write_volatile(core::ptr::addr_of_mut!(HOST_CACHE_MAINTENANCE_HOOKS), hooks);
+    previous
+}
+
+#[cfg(not(all(target_os = "none", target_arch = "arm")))]
+#[inline(always)]
+fn invalidate_instruction_cache(operand: u32) {
+    // SAFETY: callers of replace_host_cache_maintenance_hooks serialize hook
+    // replacement with cache-maintenance use, as its safety contract requires.
+    unsafe {
+        (core::ptr::read_volatile(core::ptr::addr_of!(HOST_CACHE_MAINTENANCE_HOOKS))
+            .invalidate_instruction_cache)(operand)
+    }
+}
+
+#[cfg(not(all(target_os = "none", target_arch = "arm")))]
+#[inline(always)]
+fn data_synchronization_barrier(operand: u32) {
+    // SAFETY: callers of replace_host_cache_maintenance_hooks serialize hook
+    // replacement with cache-maintenance use, as its safety contract requires.
+    unsafe {
+        (core::ptr::read_volatile(core::ptr::addr_of!(HOST_CACHE_MAINTENANCE_HOOKS))
+            .data_synchronization_barrier)(operand)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
     use super::{
+        invalidate_entire_instruction_cache, replace_host_cache_maintenance_hooks,
         replace_host_sctlr_hooks, sctlr_disable_data_cache, sctlr_disable_instruction_cache,
         sctlr_disable_mmu, sctlr_enable_data_cache, sctlr_enable_instruction_cache,
-        HostSctlrHooks,
+        HostCacheMaintenanceHooks, HostSctlrHooks,
     };
     use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
     use std::sync::{Mutex, MutexGuard};
@@ -224,6 +338,13 @@ mod tests {
     static CONTROL: AtomicU32 = AtomicU32::new(0);
     static READS: AtomicUsize = AtomicUsize::new(0);
     static WRITES: AtomicUsize = AtomicUsize::new(0);
+
+    const INVALIDATE_INSTRUCTION_CACHE: u32 = 1;
+    const DATA_SYNCHRONIZATION_BARRIER: u32 = 2;
+    static CACHE_OPERATION_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static CACHE_OPERATION_CODES: [AtomicU32; 2] = [AtomicU32::new(0), AtomicU32::new(0)];
+    static CACHE_OPERATION_OPERANDS: [AtomicU32; 2] =
+        [AtomicU32::new(u32::MAX), AtomicU32::new(u32::MAX)];
 
     fn recording_read() -> u32 {
         READS.fetch_add(1, Ordering::SeqCst);
@@ -235,12 +356,35 @@ mod tests {
         CONTROL.store(control, Ordering::SeqCst);
     }
 
+    fn record_cache_operation(code: u32, operand: u32) {
+        let slot = CACHE_OPERATION_COUNT.fetch_add(1, Ordering::SeqCst);
+        CACHE_OPERATION_CODES[slot].store(code, Ordering::SeqCst);
+        CACHE_OPERATION_OPERANDS[slot].store(operand, Ordering::SeqCst);
+    }
+
+    fn recording_invalidate_instruction_cache(operand: u32) {
+        record_cache_operation(INVALIDATE_INSTRUCTION_CACHE, operand);
+    }
+
+    fn recording_data_synchronization_barrier(operand: u32) {
+        record_cache_operation(DATA_SYNCHRONIZATION_BARRIER, operand);
+    }
+
     struct RestoreHooks(HostSctlrHooks);
 
     impl Drop for RestoreHooks {
         fn drop(&mut self) {
             // SAFETY: TEST_LOCK remains held for this test's entire scope.
             unsafe { replace_host_sctlr_hooks(self.0) };
+        }
+    }
+
+    struct RestoreCacheHooks(HostCacheMaintenanceHooks);
+
+    impl Drop for RestoreCacheHooks {
+        fn drop(&mut self) {
+            // SAFETY: TEST_LOCK remains held for this test's entire scope.
+            unsafe { replace_host_cache_maintenance_hooks(self.0) };
         }
     }
 
@@ -258,6 +402,26 @@ mod tests {
             })
         };
         (lock, RestoreHooks(old))
+    }
+
+    fn install_recording_cache_maintenance() -> (MutexGuard<'static, ()>, RestoreCacheHooks) {
+        let lock = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        CACHE_OPERATION_COUNT.store(0, Ordering::SeqCst);
+        for operation in &CACHE_OPERATION_CODES {
+            operation.store(0, Ordering::SeqCst);
+        }
+        for operand in &CACHE_OPERATION_OPERANDS {
+            operand.store(u32::MAX, Ordering::SeqCst);
+        }
+        // SAFETY: the returned TEST_LOCK guard serializes every seam swap and
+        // every invocation in these focused tests.
+        let old = unsafe {
+            replace_host_cache_maintenance_hooks(HostCacheMaintenanceHooks {
+                invalidate_instruction_cache: recording_invalidate_instruction_cache,
+                data_synchronization_barrier: recording_data_synchronization_barrier,
+            })
+        };
+        (lock, RestoreCacheHooks(old))
     }
 
     #[test]
@@ -378,6 +542,25 @@ mod tests {
         assert_eq!(CONTROL.load(Ordering::SeqCst), 0xabcd_1002);
         assert_eq!(READS.load(Ordering::SeqCst), 1);
         assert_eq!(WRITES.load(Ordering::SeqCst), 1);
+    }
+    #[test]
+    fn invalidating_entire_instruction_cache_uses_zero_operand_then_synchronizes() {
+        let (_lock, _restore) = install_recording_cache_maintenance();
+
+        let returned = invalidate_entire_instruction_cache();
+
+        assert_eq!(returned, 0);
+        assert_eq!(CACHE_OPERATION_COUNT.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            CACHE_OPERATION_CODES[0].load(Ordering::SeqCst),
+            INVALIDATE_INSTRUCTION_CACHE
+        );
+        assert_eq!(CACHE_OPERATION_OPERANDS[0].load(Ordering::SeqCst), 0);
+        assert_eq!(
+            CACHE_OPERATION_CODES[1].load(Ordering::SeqCst),
+            DATA_SYNCHRONIZATION_BARRIER
+        );
+        assert_eq!(CACHE_OPERATION_OPERANDS[1].load(Ordering::SeqCst), 0);
     }
 }
 

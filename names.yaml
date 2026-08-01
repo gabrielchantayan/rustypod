@@ -118,6 +118,20 @@ functions:
       MCR, and returns the stored control word. Host builds use the shared
       replaceable deterministic CP15 seam.
 
+  - address: 0x080031b8
+    ghidra: FUN_080031b8
+    name: invalidate_entire_instruction_cache
+    size: 20
+    sig: "u32 invalidate_entire_instruction_cache(void)"
+    module: drivers/cp15
+    status: ported
+    vars: {}
+    notes: Sends zero through ARM926EJ-S CP15 MCR p15,0,r0,c7,c5,0
+      (Invalidate Entire Instruction Cache, 0xee070f15), followed in order by
+      MCR p15,0,r0,c7,c10,4 (ARMv5 Data Synchronization Barrier,
+      0xee070f9a), then returns zero. Host builds use the shared replaceable
+      deterministic CP15 cache-maintenance seam.
+
   - address: 0x08005d18
     ghidra: FUN_08005d18
     name: decoder_end_batch
