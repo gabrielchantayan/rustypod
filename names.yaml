@@ -12885,6 +12885,23 @@ functions:
       the statement. The `cmpne r1,#8` is unsigned, so a counter already
       past the cap cannot overrun the array.
 
+  # ---- Big-endian byte stores (src/util/beload.rs) ----
+  - address: 0x08046b1c
+    ghidra: FUN_08046b1c
+    name: store_u32_be_bytes
+    size: 40
+    sig: "void store_u32_be_bytes(u8 *p, u32 value)"
+    module: util/beload
+    status: ported
+    vars: {param_1: p, param_2: value}
+    notes: >-
+      Four alignment-free strb stores, most significant byte first. ARM
+      spills the little-endian u32 argument then reloads stack offsets 3,
+      2, 1, 0, making the source argument's logical bit order explicit.
+      This is separate from SQLite's store_be32 @ 0x083816cc even though
+      they implement the same byte-store operation. Three recovered
+      decompiler call sites write 1 or 2 into a buffer at p + 2.
+
   # ---- Big-endian page fields (src/util/beload.rs) ----
   - address: 0x083816cc
     ghidra: FUN_083816cc

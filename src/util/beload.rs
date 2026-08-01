@@ -12,6 +12,11 @@
 //! - `store_be32` — original: `FUN_083816cc` @ 0x083816cc (32 bytes;
 //!   38 `bl` call sites). SQLite's `sqlite3Put4byte`, the write twin of
 //!   the above: four `strb`s, most significant byte first.
+//! - `store_u32_be_bytes` — original: `FUN_08046b1c` @ 0x08046b1c
+//!   (40 bytes; 3 recovered decompiler call sites). A separate
+//!   big-endian byte-store implementation: it spills `value` then copies
+//!   its bytes from most to least significant, so it remains a distinct
+//!   firmware function rather than an alias of `store_be32`.
 //!
 //! Algorithm: assemble/split a 32-bit value big-endian through
 //! individual byte accesses (`ldrb`/`strb`), so the pointer needs no
@@ -34,6 +39,23 @@ pub unsafe extern "C" fn load_be32(p: *const u8) -> u32 {
 /// exactly four bytes and nothing else.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn store_be32(p: *mut u8, value: u32) {
+    p.write((value >> 24) as u8);
+    p.add(1).write((value >> 16) as u8);
+    p.add(2).write((value >> 8) as u8);
+    p.add(3).write(value as u8);
+}
+
+/// store_u32_be_bytes — original: `FUN_08046b1c` @ 0x08046b1c (40 bytes;
+/// 3 recovered decompiler call sites).
+///
+/// Stores the logical `u32` value as four big-endian bytes at `p`: bits
+/// 31..24 through 7..0 go to increasing byte addresses. The original spills
+/// the little-endian ARM argument then loads offsets 3, 2, 1, 0 with `ldrb`
+/// before four `strb`s; these shifts express the same byte order directly.
+/// It accepts any valid writable four-byte range, including unaligned ones.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.store_u32_be_bytes")]
+pub unsafe extern "C" fn store_u32_be_bytes(p: *mut u8, value: u32) {
     p.write((value >> 24) as u8);
     p.add(1).write((value >> 16) as u8);
     p.add(2).write((value >> 8) as u8);
@@ -98,5 +120,20 @@ mod tests {
         assert_eq!(buf, [1, 2, 3, 4]);
         unsafe { store_be32(buf.as_mut_ptr(), 0) };
         assert_eq!(buf, [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn store_u32_be_bytes_matches_independent_reference_without_clobbering() {
+        for value in [0, 1, 0x0000_ff00, 0x8000_0001, 0x1234_5678, u32::MAX] {
+            for offset in [1usize, 2, 3, 5] {
+                let mut actual = [0xa5u8; 12];
+                let mut expected = actual;
+                expected[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+
+                unsafe { store_u32_be_bytes(actual.as_mut_ptr().add(offset), value) };
+
+                assert_eq!(actual, expected, "value={value:#010x}, offset={offset}");
+            }
+        }
     }
 }
