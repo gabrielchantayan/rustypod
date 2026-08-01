@@ -16213,3 +16213,32 @@ functions:
       dispatcher; focused host test records all initialized request words,
       proves one delegation, and proves the mutated result pair. Reference C:
       decomp/c/000/0800427c_FUN_0800427c.c; assembly 0x0800427c.
+
+  - address: 0x08004298
+    ghidra: FUN_08004298
+    name: task_unblock_range_gateway
+    size: 28
+    sig: "void task_unblock_range_gateway(u32 start_task_id, u32 end_task_id)"
+    module: heap/task_unblock_range_gateway
+    status: ported
+    renames:
+      param_1: start_task_id
+      param_2: end_task_id
+      local_10: request_selector
+      uStack_c: request_start_task_id
+      uStack_8: request_end_task_id
+      FUN_08003660: gateway_dispatch
+    notes: >-
+      Mask-ROM mirror for RTXC gateway service 30, KS_unblock(start, end)
+      (ROM 0x22004298, reached by veneer 0x08038250). RTXCbug callers at
+      0x082bf120 and 0x082bfa84 send {1, max_task_id} to unblock all
+      configured tasks, while 0x08393cfc sends {task_id, task_id} for one;
+      together they establish its inclusive task-id range semantics. Assembly
+      pushes r1-r3/lr, overwrites the first three stack words with
+      {0x1e, incoming r0, incoming r1}, and calls 0x08003660. The pop restores
+      only r2/r3/ip/pc, so no gateway result is observed: this is a void
+      wrapper. The shared volatile heap gateway seam represents the foreign ROM
+      dispatcher; focused host test records all three initialized words, proves
+      one delegation, clobbers the request, and proves the wrapper returns
+      void. Reference C: decomp/c/000/08004298_FUN_08004298.c; assembly
+      0x08004298.
