@@ -70,6 +70,28 @@ pub extern "C" fn sctlr_disable_mmu() -> u32 {
     control
 }
 
+/// Disables the ARM926EJ-S instruction cache through SCTLR's I bit.
+///
+/// Original: `FUN_0800318c` @ 0x0800318c (20 bytes).
+/// Reference: `/home/gabe/Programming/ipod-decomp/decomp/c/000/0800318c_FUN_0800318c.c`.
+/// The firmware loads SCTLR with `MRC p15, 0, r0, c1, c0, 0`
+/// (`0xee110f10`), clears instruction-cache-enable bit 12, stores it with
+/// `MCR p15, 0, r0, c1, c0, 0` (`0xee010f10`), and returns that stored word
+/// in `r0` per AAPCS.
+///
+/// On the firmware target this emits that CP15 read/modify/write sequence.
+/// Non-firmware builds use the deterministic SCTLR seam described above; this
+/// is the deliberate host-only deviation that makes the register transition
+/// observable in behavioral tests.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn sctlr_disable_instruction_cache() -> u32 {
+    let control = read_sctlr() & !SCTLR_INSTRUCTION_CACHE_ENABLE;
+    write_sctlr(control);
+    control
+}
+
+
 
 #[cfg(all(target_os = "none", target_arch = "arm"))]
 #[inline(always)]
@@ -169,8 +191,8 @@ fn write_sctlr(control: u32) {
 mod tests {
     extern crate std;
     use super::{
-        replace_host_sctlr_hooks, sctlr_disable_mmu, sctlr_enable_data_cache,
-        sctlr_enable_instruction_cache, HostSctlrHooks,
+        replace_host_sctlr_hooks, sctlr_disable_instruction_cache, sctlr_disable_mmu,
+        sctlr_enable_data_cache, sctlr_enable_instruction_cache, HostSctlrHooks,
     };
     use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
     use std::sync::{Mutex, MutexGuard};
@@ -287,4 +309,28 @@ mod tests {
         assert_eq!(READS.load(Ordering::SeqCst), 1);
         assert_eq!(WRITES.load(Ordering::SeqCst), 1);
     }
+    #[test]
+    fn disabling_instruction_cache_clears_i_bit_and_returns_stored_control() {
+        let (_lock, _restore) = install_recording_sctlr(0xfeed_1005);
+
+        let returned = sctlr_disable_instruction_cache();
+
+        assert_eq!(returned, 0xfeed_0005);
+        assert_eq!(CONTROL.load(Ordering::SeqCst), returned);
+        assert_eq!(READS.load(Ordering::SeqCst), 1);
+        assert_eq!(WRITES.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn disabling_instruction_cache_is_idempotent_but_still_reads_and_writes() {
+        let (_lock, _restore) = install_recording_sctlr(0xabcd_0002);
+
+        let returned = sctlr_disable_instruction_cache();
+
+        assert_eq!(returned, 0xabcd_0002);
+        assert_eq!(CONTROL.load(Ordering::SeqCst), 0xabcd_0002);
+        assert_eq!(READS.load(Ordering::SeqCst), 1);
+        assert_eq!(WRITES.load(Ordering::SeqCst), 1);
+    }
 }
+
