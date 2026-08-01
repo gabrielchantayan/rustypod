@@ -16327,3 +16327,36 @@ functions:
       scratch geometry, output initialization, and post-dispatch return.
       Reference C: decomp/c/000/080043c0_FUN_080043c0.c; raw assembly:
       0x080043c0.
+
+  - address: 0x080043f4
+    ghidra: FUN_080043f4
+    name: task_yield_gateway
+    size: 40
+    sig: "u32 task_yield_gateway(u32 ignored_r0, u32 ignored_r1, u32 input_r2, u32 input_r3)"
+    module: heap/task_yield_gateway
+    status: ported
+    renames:
+      param_1: ignored_r0
+      param_2: ignored_r1
+      param_3: input_r2
+      param_4: input_r3
+      local_18: service_selector
+      local_14: status
+      uStack_10: input_r2
+      uStack_c: input_r3
+      FUN_08003660: gateway_dispatch
+    notes: >-
+      RTXC KS_yield gateway wrapper. The retailOS RTXC service catalogue maps
+      selector 0x1c to KS_yield (voluntary scheduling yield). There are no
+      direct callers or veneer for this otherwise isolated 40-byte mirror;
+      raw assembly resolves the complete saved frame. It saves
+      {r0, r1, r2, r3, r4, lr}, overwrites its first two words with
+      {0x1c, 0x0d}, and dispatches the four-word prefix
+      {selector, status, incoming_r2, incoming_r3}. Incoming r0/r1 are
+      ignored, r4/lr are preserved by the post-dispatch epilogue, and the
+      dispatcher may replace status; that mutated word is returned in r0.
+      The shared volatile heap gateway seam represents the foreign ROM
+      dispatcher. Focused host testing records request construction, the
+      initialized status, one delegation, and the post-dispatch status return.
+      Reference C: decomp/c/000/080043f4_FUN_080043f4.c; raw assembly
+      0x080043f4; RTXC selector catalogue: freemyipod.org/wiki/RetailOS.
