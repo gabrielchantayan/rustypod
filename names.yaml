@@ -41,6 +41,18 @@ functions:
       word-aligned pointers; memmove's aligned fast path as its own entry.
       Original advances and returns the end pointer; port returns dst.
 
+  - address: 0x080005fc
+    ghidra: FUN_080005fc
+    name: byte_copy
+    size: 24
+    sig: "void byte_copy(void *dst, const void *src, u32 len)"
+    module: libc/byte_copy
+    status: ported
+    vars: {param_1: dst, param_2: src, param_3: len}
+    notes: Forward byte-at-a-time copy helper. The pre-decrement/CMN loop
+      skips all reads and writes when len is zero; overlapping ranges retain
+      forward-copy (not memmove) behavior.
+
   - address: 0x0800027c
     ghidra: FUN_0800027c
     name: memzero_aligned
@@ -60,6 +72,17 @@ functions:
     status: ported
     vars: {param_1: dst, param_2: len}
     notes: Zero-fill with len<4 + misalignment prologue, then shared block loop.
+
+  - address: 0x080004ec
+    ghidra: FUN_080004ec
+    name: startup_wait_for_status_clear
+    size: 20
+    sig: "int startup_wait_for_status_clear(void)"
+    module: runtime/startup_wait
+    status: ported
+    vars: {DAT_08000504: startup_wait_timeout_ticks}
+    notes: Calls the unported 0x080003b8 status-clear wait with its fixed
+      100000-tick literal, discards that status, and returns zero.
 
   - address: 0x08030fe4
     ghidra: FUN_08030fe4
