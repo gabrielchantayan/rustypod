@@ -500,6 +500,24 @@ pub unsafe extern "C" fn ata_handle_field4_is_positive(handle: *const u8) -> i32
     }
 }
 
+/// ata_handle_first_word_or_zero — original: `FUN_0806f1b8` @
+/// 0x0806f1b8 (16 bytes).
+///
+/// The ATA candidate-selection helper's NULL-safe field-0 accessor:
+/// returns the first in-memory word of `handle`, or zero when no handle
+/// exists. The original is exactly `cmp r0,#0; ldrne r0,[r0];
+/// moveq r0,#0; bx lr`; this is therefore a plain aligned object-field
+/// load, not an MMIO read.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_handle_first_word_or_zero(handle: *const u32) -> u32 {
+    if handle.is_null() {
+        0
+    } else {
+        handle.read()
+    }
+}
+
 
 /// ata_handle_table_entry — original: `FUN_08369864` @ 0x08369864
 /// (20 bytes; 99 `bl` + 7 tail-`b` call sites, binary-scanned).
@@ -1377,6 +1395,29 @@ mod tests {
                 unsafe { ata_handle_field4_is_positive((&candidate as *const AtaCandidate).cast()) },
                 reference_field4_is_positive(Some(field4)),
                 "field +0x04 = {field4}"
+            );
+        }
+    }
+
+    // ---- ATA candidate field +0x00 -----------------------------------
+
+    #[test]
+    fn null_candidate_first_word_is_zero() {
+        assert_eq!(
+            unsafe { ata_handle_first_word_or_zero(core::ptr::null()) },
+            0,
+            "NULL candidate follows the original moveq-zero path"
+        );
+    }
+
+    #[test]
+    fn candidate_first_word_is_returned_verbatim() {
+        for first in [0u32, 1, 0x7fff_ffff, 0x8000_0000, 0xdead_beef, u32::MAX] {
+            let candidate = [first, 0xa5a5_5a5a];
+            assert_eq!(
+                unsafe { ata_handle_first_word_or_zero(candidate.as_ptr()) },
+                first,
+                "field +0x00 = {first:#010x}"
             );
         }
     }

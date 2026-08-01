@@ -13361,6 +13361,19 @@ functions:
       movle/movgt r0,#0/#1`; the plain aligned load is not MMIO. match.py:
       same NULL guard, +4 load, signed comparison, and 0/1 result shape.
 
+  - address: 0x0806f1b8
+    ghidra: FUN_0806f1b8
+    name: ata_handle_first_word_or_zero
+    size: 16
+    sig: "u32 ata_handle_first_word_or_zero(const u32 *handle)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: handle, uVar1: first_word_or_zero}
+    notes: >-
+      ATA candidate-selection leaf. `cmp/ldrne/moveq/bx lr`: returns
+      `handle[0]` through a plain aligned in-memory load, or 0 when the
+      handle is NULL. match.py: same NULL guard and field-0 load shape.
+
   # the IAD/RMS/WMS ATA command logger. gpio_pin_configure @ 0x0836b5b0
   # (already ported) belongs to this island, not to the database engine.
   - address: 0x08369780
