@@ -132,6 +132,44 @@ pub extern "C" fn invalidate_entire_instruction_cache() -> u32 {
     data_synchronization_barrier(0);
     0
 }
+/// Invalidates the entire ARM926EJ-S data cache, then drains the write buffer.
+///
+/// Original: `FUN_080031cc` @ 0x080031cc (20 bytes).
+/// Reference: `/home/gabe/Programming/ipod-decomp/decomp/c/000/080031cc_FUN_080031cc.c`.
+/// The firmware places zero in `r0`, sends `MCR p15,0,r0,c7,c6,0`
+/// (`0xee070f16`, Invalidate Entire Data Cache), then sends
+/// `MCR p15,0,r0,c7,c10,4` (`0xee070f9a`, Drain Write Buffer), and returns
+/// zero. Although the decompiler labels the latter operation "Data
+/// Synchronization", ARM926EJ-S documents this CP15 encoding as draining the
+/// write buffer.
+///
+/// On the firmware target this emits precisely those CP15 operations in that
+/// order. Non-firmware builds use a replaceable deterministic maintenance
+/// seam, the deliberate host-only deviation that makes ordering and operands
+/// observable in behavioral tests.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn invalidate_entire_data_cache_and_drain_write_buffer() -> u32 {
+    invalidate_data_cache(0);
+    data_synchronization_barrier(0);
+    0
+}
+
+/// Target implementation of `MCR p15,0,r0,c7,c6,0`.
+#[cfg(all(target_os = "none", target_arch = "arm"))]
+#[inline(always)]
+fn invalidate_data_cache(operand: u32) {
+    // SAFETY: This is the ARM926EJ-S Invalidate Entire Data Cache operation
+    // used by the retail firmware. The fixed r0 operand is zero.
+    unsafe {
+        core::arch::asm!(
+            "mcr p15, 0, r0, c7, c6, 0",
+            in("r0") operand,
+            options(nostack),
+        );
+    }
+}
+
 
 /// Target implementation of `MCR p15,0,r0,c7,c5,0`.
 #[cfg(all(target_os = "none", target_arch = "arm"))]
@@ -270,6 +308,8 @@ fn write_sctlr(control: u32) {
 pub struct HostCacheMaintenanceHooks {
     /// Replacement for `MCR p15,0,<Rt>,c7,c5,0`.
     pub invalidate_instruction_cache: fn(u32),
+    /// Replacement for `MCR p15,0,<Rt>,c7,c6,0`.
+    pub invalidate_data_cache: fn(u32),
     /// Replacement for `MCR p15,0,<Rt>,c7,c10,4`.
     pub data_synchronization_barrier: fn(u32),
 }
@@ -279,13 +319,16 @@ fn default_invalidate_instruction_cache(_: u32) {}
 
 #[cfg(not(all(target_os = "none", target_arch = "arm")))]
 fn default_data_synchronization_barrier(_: u32) {}
+#[cfg(not(all(target_os = "none", target_arch = "arm")))]
+fn default_invalidate_data_cache(_: u32) {}
+
 
 #[cfg(not(all(target_os = "none", target_arch = "arm")))]
 static mut HOST_CACHE_MAINTENANCE_HOOKS: HostCacheMaintenanceHooks = HostCacheMaintenanceHooks {
     invalidate_instruction_cache: default_invalidate_instruction_cache,
+    invalidate_data_cache: default_invalidate_data_cache,
     data_synchronization_barrier: default_data_synchronization_barrier,
 };
-
 /// Replaces the host CP15 cache-maintenance seam and returns the prior hooks.
 ///
 /// This does not exist on the firmware target, where the function always
@@ -313,6 +356,17 @@ fn invalidate_instruction_cache(operand: u32) {
 
 #[cfg(not(all(target_os = "none", target_arch = "arm")))]
 #[inline(always)]
+fn invalidate_data_cache(operand: u32) {
+    // SAFETY: callers of replace_host_cache_maintenance_hooks serialize hook
+    // replacement with cache-maintenance use, as its safety contract requires.
+    unsafe {
+        (core::ptr::read_volatile(core::ptr::addr_of!(HOST_CACHE_MAINTENANCE_HOOKS))
+            .invalidate_data_cache)(operand)
+    }
+}
+
+#[cfg(not(all(target_os = "none", target_arch = "arm")))]
+#[inline(always)]
 fn data_synchronization_barrier(operand: u32) {
     // SAFETY: callers of replace_host_cache_maintenance_hooks serialize hook
     // replacement with cache-maintenance use, as its safety contract requires.
@@ -326,6 +380,7 @@ fn data_synchronization_barrier(operand: u32) {
 mod tests {
     extern crate std;
     use super::{
+        invalidate_entire_data_cache_and_drain_write_buffer,
         invalidate_entire_instruction_cache, replace_host_cache_maintenance_hooks,
         replace_host_sctlr_hooks, sctlr_disable_data_cache, sctlr_disable_instruction_cache,
         sctlr_disable_mmu, sctlr_enable_data_cache, sctlr_enable_instruction_cache,
@@ -340,6 +395,7 @@ mod tests {
     static WRITES: AtomicUsize = AtomicUsize::new(0);
 
     const INVALIDATE_INSTRUCTION_CACHE: u32 = 1;
+    const INVALIDATE_DATA_CACHE: u32 = 3;
     const DATA_SYNCHRONIZATION_BARRIER: u32 = 2;
     static CACHE_OPERATION_COUNT: AtomicUsize = AtomicUsize::new(0);
     static CACHE_OPERATION_CODES: [AtomicU32; 2] = [AtomicU32::new(0), AtomicU32::new(0)];
@@ -366,6 +422,10 @@ mod tests {
         record_cache_operation(INVALIDATE_INSTRUCTION_CACHE, operand);
     }
 
+
+    fn recording_invalidate_data_cache(operand: u32) {
+        record_cache_operation(INVALIDATE_DATA_CACHE, operand);
+    }
     fn recording_data_synchronization_barrier(operand: u32) {
         record_cache_operation(DATA_SYNCHRONIZATION_BARRIER, operand);
     }
@@ -418,6 +478,7 @@ mod tests {
         let old = unsafe {
             replace_host_cache_maintenance_hooks(HostCacheMaintenanceHooks {
                 invalidate_instruction_cache: recording_invalidate_instruction_cache,
+                invalidate_data_cache: recording_invalidate_data_cache,
                 data_synchronization_barrier: recording_data_synchronization_barrier,
             })
         };
@@ -555,6 +616,23 @@ mod tests {
             CACHE_OPERATION_CODES[0].load(Ordering::SeqCst),
             INVALIDATE_INSTRUCTION_CACHE
         );
+        assert_eq!(CACHE_OPERATION_OPERANDS[0].load(Ordering::SeqCst), 0);
+        assert_eq!(
+            CACHE_OPERATION_CODES[1].load(Ordering::SeqCst),
+            DATA_SYNCHRONIZATION_BARRIER
+        );
+        assert_eq!(CACHE_OPERATION_OPERANDS[1].load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn invalidating_entire_data_cache_uses_zero_operand_then_drains_write_buffer() {
+        let (_lock, _restore) = install_recording_cache_maintenance();
+
+        let returned = invalidate_entire_data_cache_and_drain_write_buffer();
+
+        assert_eq!(returned, 0);
+        assert_eq!(CACHE_OPERATION_COUNT.load(Ordering::SeqCst), 2);
+        assert_eq!(CACHE_OPERATION_CODES[0].load(Ordering::SeqCst), INVALIDATE_DATA_CACHE);
         assert_eq!(CACHE_OPERATION_OPERANDS[0].load(Ordering::SeqCst), 0);
         assert_eq!(
             CACHE_OPERATION_CODES[1].load(Ordering::SeqCst),

@@ -132,6 +132,21 @@ functions:
       0xee070f9a), then returns zero. Host builds use the shared replaceable
       deterministic CP15 cache-maintenance seam.
 
+  - address: 0x080031cc
+    ghidra: FUN_080031cc
+    name: invalidate_entire_data_cache_and_drain_write_buffer
+    size: 20
+    sig: "u32 invalidate_entire_data_cache_and_drain_write_buffer(void)"
+    module: drivers/cp15
+    status: ported
+    vars: {}
+    notes: Sends zero through ARM926EJ-S CP15 MCR p15,0,r0,c7,c6,0
+      (Invalidate Entire Data Cache, 0xee070f16), followed in order by MCR
+      p15,0,r0,c7,c10,4 (Drain Write Buffer, 0xee070f9a), then returns zero.
+      Ghidra calls the latter Data Synchronization; ARM926EJ-S documents this
+      encoding as draining the write buffer. Host builds use the shared
+      replaceable deterministic CP15 cache-maintenance seam.
+
   - address: 0x08005d18
     ghidra: FUN_08005d18
     name: decoder_end_batch
