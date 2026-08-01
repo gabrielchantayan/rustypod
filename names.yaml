@@ -16351,6 +16351,38 @@ functions:
       structural diff is expected for the hook indirection.
 
 
+  - address: 0x08004154
+    ghidra: FUN_08004154
+    name: mailbox_send_gateway
+    size: 56
+    sig: "void mailbox_send_gateway(u32 mailbox, u32 message, u32 priority, u32 semaphore)"
+    module: heap/mailbox_send_gateway
+    status: ported
+    renames:
+      param_1: mailbox
+      param_2: message
+      param_3: priority
+      param_4: semaphore
+      local_2c: request_selector_and_uninitialized_words
+      local_24: request_semaphore
+      local_20: request_mailbox
+      local_18: request_priority
+      local_14: request_message
+      local_10: request_output
+      FUN_08003660: gateway_dispatch
+    notes: >-
+      Mask-ROM mirror for RTXC KS_send(MBOX mailbox, RTXCMSG *message,
+      PRIORITY priority, SEMA semaphore), established by service selector 4
+      and the RTXC service catalogue. Raw assembly reserves 44 stack bytes
+      and dispatches its eight-word span at sp+4: {4, uninitialized,
+      semaphore, mailbox, uninitialized, priority, message, output=0}.
+      It returns void after exactly one dispatch; the initialized output word
+      is not read by this asynchronous-send wrapper. The shared volatile heap
+      gateway seam represents the foreign dispatcher; focused host test records
+      every initialized word and proves one delegation. Reference C:
+      decomp/c/000/08004154_FUN_08004154.c; assembly 0x08004154. match.py
+      structural diff is expected for the hook indirection.
+
   - address: 0x0800427c
     ghidra: FUN_0800427c
     name: task_delete_gateway
