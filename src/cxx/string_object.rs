@@ -79,6 +79,10 @@
 //!   image). Plants the vtable, runs the payload release @ 0x08275d74,
 //!   returns `this`; no operator delete (that is the 0x08277458
 //!   sibling's job).
+//! - `string_object_destroy_veneer` — original: `thunk_FUN_082792fc` @
+//!   0x082792fc (4 bytes: the single word `b 0x08277484`; **98** `bl`
+//!   call sites, binary-scanned). The long-branch veneer through which
+//!   the far callers reach `string_object_destroy`.
 //! - `string_object_release_payload` — original: `FUN_08275d74` @
 //!   0x08275d74 (40 bytes; 41 `bl` call sites, binary-scanned). The
 //!   shared payload release both destructors run: NULL-guards the
@@ -783,6 +787,32 @@ pub unsafe extern "C" fn string_object_destroy(this: *mut StringObject) -> *mut 
     (*this).vtable = &STRING_OBJECT_VTABLE;
     release_payload_op()(this);
     this
+}
+
+/// string_object_destroy_veneer — original: `thunk_FUN_082792fc` @
+/// 0x082792fc (4 bytes; **98** `bl` call sites).
+///
+/// One word — `b 0x08277484` (0xeafff860) — the long-branch veneer
+/// through which the 0x0827xxxx-and-above callers reach
+/// [`string_object_destroy`]. Genuinely 4 bytes, not the 8 of the
+/// `ldr pc, [pc, #-4]` + target-word form: this is a direct `B`, and
+/// the following word (0x08279300, `push {r4, lr}`) is the entry of an
+/// unrelated function. It sits in a veneer block — the word before it,
+/// 0x082792f8, is `b 0x082aad24` (operator delete).
+///
+/// 98 `bl` call sites and 0 `b`, binary-scanned by decoding every ARM
+/// `B`/`BL` word in `work/firmware/osos.dec` and resolving its target.
+///
+/// Kept as its own `#[inline(never)]` symbol rather than an alias so a
+/// hook at 0x082792fc lands on a real forwarding branch; the callee is
+/// called directly, which lowers to a plain tail branch plus the
+/// target's mandatory non-leaf frame pointer.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_destroy_veneer(
+    this: *mut StringObject,
+) -> *mut StringObject {
+    string_object_destroy(this)
 }
 
 /// string_object_delete — original: `FUN_08277458` @ 0x08277458
@@ -2340,6 +2370,27 @@ mod tests {
             calls[0].1,
             &STRING_OBJECT_VTABLE as *const _ as usize,
             "the vtable store precedes the release call (str before bl)"
+        );
+    }
+
+    #[test]
+    fn the_destroy_veneer_reaches_destroy_and_is_a_distinct_symbol() {
+        let _bench = bench();
+        let mut object = StringObject {
+            vtable: 0xdead_beef as *const StringObjectVtable,
+            payload: 0xcafe_f00d as *mut u8,
+        };
+        let this: *mut StringObject = &mut object;
+        unsafe {
+            assert_eq!(string_object_destroy_veneer(this), this);
+            assert_eq!(object.vtable, &STRING_OBJECT_VTABLE as *const _);
+        }
+        assert_eq!(release_calls().len(), 1, "the veneer forwards exactly once");
+        // The image has two entry points; an alias would make a hook at
+        // 0x082792fc meaningless.
+        assert_ne!(
+            string_object_destroy_veneer as usize,
+            string_object_destroy as usize
         );
     }
 

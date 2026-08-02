@@ -13,6 +13,7 @@ pub mod node_list;
 pub mod object_dispatch_entry;
 pub mod registry;
 pub mod resource_chain;
+pub mod service_manager;
 pub mod silver_list_table;
 pub mod singletons;
 pub mod slot_table;
