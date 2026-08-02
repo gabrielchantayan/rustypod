@@ -367,7 +367,10 @@ pub unsafe extern "C" fn node_list_construct(this: *mut u8) -> *mut u8 {
     node_list_store_word(this, 0x18, 0);
     node_list_store_word(this, 0x1c, 0);
 
-    // The caller's stores relative to the returned +0x10 sub-object.
+    // The stock code addresses the remaining stores off `sub r0, r0, #16`
+    // applied to the sub-object constructor's RETURN value, not off `this`.
+    // Inlining that constructor above fixes its return at `this + 0x10`, so
+    // the derived base is `this` and the two forms coincide.
     node_list_store_word(this, 0x28, 0);
     node_list_store_word(this, 0x2c, 0);
     node_list_store_word(this, 0x04, 0);

@@ -16346,31 +16346,20 @@ functions:
     ghidra: FUN_0811000c
     name: app_object_init
     size: 52
-    sig: "void app_object_init(AppObject *this)"
-    module: app/app_object
-    status: ported
-    renames:
-      param_1: this
-      DAT_08110040: APP_OBJECT_VTABLE
-      FUN_08271cec: construct_drain_state
-      iVar1: drain_state
+    status: duplicate
     notes: >-
-      Initializes the 0x30-byte application object used by the lazy global
-      accessor FUN_0810fa30. Installs vtable 0x0898165c, clears scalar fields
-      +0x04/+0x08/+0x0c/+0x20, and delegates the embedded drain state at +0x10
-      to FUN_08271cec. It then derives the enclosing base from that call's
-      returned pointer with `sub r0, r0, #16` before zeroing +0x28 and +0x2c.
-      Consequently those stores deliberately follow the constructor result,
-      while the vtable and first pre-call zero store target the incoming
-      pointer. Reference C: decomp/c/010/0811000c_FUN_0811000c.c;
-      dependency: decomp/c/026/08271cec_FUN_08271cec.c; assembly:
-      osos.asm 0x0811000c. The unported dependency is an AppObjectOps
-      injection seam that fails hard until target integration supplies its
-      retail implementation. Focused tests record the call base, exact sparse
-      writes, and return-base adjustment. match.py structural: the two
-      post-index pre-call stores, drain-state call, subtract-16, and five
-      post-call zero stores are retained; the seam lowers to a volatile
-      ops-table load plus blx.
+      Second, independent port of the same 52-byte function already ported as
+      node_list_construct (module app/node_list) — same address, same object.
+      The "application object" reading was the weaker one: the vtable 0x0898165c
+      it installs is the view-list vtable, and the lazy accessor FUN_0810fa30
+      both entries cite is node_list_get, whose whole class (enqueue, advance,
+      destructor) lives in app/node_list.rs. The duplicate implementation was
+      removed; node_list_construct is canonical and is the one its own module
+      calls. One observation from this entry is worth keeping and is recorded
+      in the canonical port's doc comment: after `bl 0x08271cec` the function
+      does `sub r0, r0, #16` and the five trailing zero stores are addressed
+      off THAT derived base, not off the incoming pointer. The two differ only
+      if the embedded constructor returns something other than this+0x10.
 
   - address: 0x0811c138
     ghidra: FUN_0811c138
