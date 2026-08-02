@@ -18033,3 +18033,30 @@ functions:
       deviation as context_scope_init. match.py structural: identical walk
       and identical NULL-owner select; LLVM splits the NULL-subject branch
       into its own tail instead of predicating the two stores.
+
+  - address: 0x08284188
+    ghidra: FUN_08284188
+    name: context_scope_drop
+    size: 4
+    sig: "void *context_scope_drop(void *scope)"
+    module: app/context_scope
+    status: ported
+    vars: {param_1: scope}
+    notes: >-
+      The context-scope class's non-deleting destructor, and it is empty.
+      NOT A VENEER: the single word at 0x08284188 is 0xe12fff1e (`bx lr`);
+      a veneer would be 0xe51ff004 (`ldr pc,[pc,#-4]`) plus a target word,
+      and a dispatch stub would be a `b`. There is nothing to follow — the
+      record owns nothing that needs releasing, so ADS emitted a bare
+      return and shared it across all 120 call sites. Ghidra's 4-byte
+      extent is exact on both sides: 0x08284184 is the closing `bx lr` of
+      the deleting destructor @ 0x0828417c and 0x0828418c is the first
+      instruction of the assignment operator (37 bl sites of its own).
+      120 bl call sites, no b sites, binary-scanned by decoding every B/BL
+      word in osos.dec; 87 of the 110 context_scope_init sites have one
+      within the following 0x800 bytes, the pairing the RAII reading
+      predicts. r0 is untouched, so the ADS `this` return is preserved and
+      the port returns its argument. match.py structural: the body is
+      empty on both sides; LLVM adds the crate-wide frame-pointer
+      prologue (push {fp,lr} / mov fp,sp / pop {fp,pc}) that every small
+      port in this crate carries, e.g. cxx::handle::handle_deref_or_null.

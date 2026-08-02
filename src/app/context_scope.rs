@@ -1,13 +1,14 @@
 //! The application framework's 20-byte **context scope** — the stack-local
 //! RAII record 110 functions build on entry and tear down on exit.
 //!
-//! Two functions live here, both decoded from the raw words in
+//! Three functions live here, all decoded from the raw words in
 //! `work/firmware/osos.dec` (load base 0x08000000) rather than from Ghidra:
 //!
 //! | address | bytes | `bl` | `b` | role |
 //! |---|---|---|---|---|
 //! | 0x082840e8 | 44 code + 4 literal | 110 | 1 | [`context_scope_init`] — the constructor |
 //! | 0x08283f3c | 52 code + 4 literal | 1 | 1 | [`context_scope_capture`] — its one callee |
+//! | 0x08284188 | 4 | 120 | 0 | [`context_scope_drop`] — the trivial destructor |
 //!
 //! ## What the record is
 //!
@@ -54,8 +55,18 @@
 //!   `0x089a6600` that `ldr r0, [pc, #32]` loads. Ghidra dropped the trailing
 //!   literal, exactly the failure mode this repo has hit before. 110 `bl`
 //!   sites plus one tail `b`.
+//! - **0x08284188 is not a veneer.** Its single word is `0xe12fff1e` = `bx
+//!   lr`; a veneer would read `0xe51ff004` (`ldr pc, [pc, #-4]`) followed by a
+//!   target word, and a dispatch stub would be a `b`. There is nothing to
+//!   follow: the class's destructor is genuinely empty, which is why the same
+//!   4 bytes are shared by 120 call sites. The extent is exact on both sides —
+//!   0x08284184 is the closing `bx lr` of the deleting destructor at
+//!   0x0828417c, and 0x0828418c is the first instruction of the assignment
+//!   operator (37 `bl` sites of its own).
 //! - Call-site shapes: 99 of the 110 constructor sites set `mov r2, #0` within
-//!   four instructions (flag clear) and 71 set `mov r1, #0` (no subject).
+//!   four instructions (flag clear) and 71 set `mov r1, #0` (no subject); 87
+//!   have a 0x08284188 site within the following 0x800 bytes, the pairing the
+//!   RAII reading predicts.
 //!
 //! ## Deviations
 //!
@@ -197,6 +208,25 @@ pub unsafe extern "C" fn context_scope_init(
     words.add(WORD_SUBJECT).write(0);
     context_scope_capture(scope, subject);
     scope.add(CONTEXT_SCOPE_FLAG).write(flag);
+    scope
+}
+
+/// context_scope_drop — original: `FUN_08284188` @ 0x08284188
+/// (**4 bytes — the single word `0xe12fff1e`, `bx lr`**; 120 `bl` call sites,
+/// no `b` sites, binary-scanned over osos.dec).
+///
+/// The class's non-deleting destructor, and it is empty: the record owns
+/// nothing that needs releasing, so the compiler emitted a bare return and
+/// shared it across all 120 sites. It is not a veneer and there is no hidden
+/// body behind it — see the module header for the byte-level argument.
+///
+/// `r0` is untouched, so the ADS convention's `this` return is preserved.
+///
+/// # Safety
+/// Nothing is dereferenced; `scope` may be any value, including NULL.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn context_scope_drop(scope: *mut u8) -> *mut u8 {
     scope
 }
 
@@ -378,4 +408,19 @@ mod tests {
         assert_eq!(record.word(3), 0);
     }
 
+    #[test]
+    fn the_destructor_is_a_bare_return_that_preserves_this() {
+        let mut record = Record::new();
+        let this = record.0.as_mut_ptr();
+        unsafe { context_scope_init(this, core::ptr::null_mut(), 3) };
+        let before = record.0;
+
+        assert_eq!(unsafe { context_scope_drop(this) }, this);
+        assert_eq!(record.0, before, "the destructor writes nothing");
+        assert_eq!(
+            unsafe { context_scope_drop(core::ptr::null_mut()) },
+            core::ptr::null_mut(),
+            "NULL is safe: nothing is dereferenced"
+        );
+    }
 }
