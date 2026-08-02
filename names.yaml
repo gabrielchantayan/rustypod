@@ -18040,3 +18040,46 @@ functions:
       LLVM's reordering of the independent stores, and the
       dispatch-slot ldr/blx standing in for the direct bl 0x0826fda0 -
       the documented deviation.
+
+  - address: 0x08270414
+    ghidra: FUN_08270414
+    name: scoped_context_destroy
+    size: 4
+    sig: "void scoped_context_destroy(ScopedContext *this)"
+    module: app/scoped_context
+    vars: {param_1: this}
+    status: ported
+    notes: >-
+      175 bl call sites, 0 b - binary-scanned by decoding every B/BL
+      word in osos.dec. Ghidra's 4 bytes are right and the function is
+      NOT a veneer: the whole body is `bx lr` (0xe12fff1e), the word
+      before it @ 0x08270410 is the sibling ctor's vtable literal
+      0x089a5b30 and the word after it starts the separate field-copy
+      member @ 0x08270418, so there is no target word to follow. The
+      trivial destructor of the scoped context token constructed by
+      0x08270394 above: the class owns nothing (its two derived words
+      are borrowed views onto the system root, its owner is not
+      retained), so destruction has nothing to release. Identified as
+      this class's destructor rather than a generic shared no-op by
+      correlating call sites: 166 of the 175 sit within 0x300 bytes of
+      a call to 0x08270394 / 0x082703d0 / 0x08270320 / 0x08270418, or
+      to a function that itself calls one - 0x0813b898 is the archetype
+      (runs 0x08270394 on this, copies a second token in with
+      0x08270418), and its caller at 0x080fec78 destroys the result at
+      0x080feca8. Deviation: the recovered C signature is `void(void)`
+      (the body consumes nothing), but the port takes `this` because
+      every call site passes the token in r0 and an unused AAPCS
+      argument is ABI-identical - the ui/noop_f7f4.rs precedent argued
+      the other way for a function with no destructor role. Host tests:
+      destroying a fully constructed token leaves all six fields
+      byte-identical; a NULL token is accepted, since the original
+      never dereferences this. match.py: the port compiles to the same
+      three-instruction frame as runtime/cxa_guard.rs
+      cxa_guard_release, so the linker folds them and emits
+      scoped_context_destroy as a second global on
+      .text.cxa_guard_release; objdump prints only the first label, so
+      `match.py 0x08270414 scoped_context_destroy` reports the symbol
+      missing. Diffed through the folded section instead
+      (`match.py 0x08270414 cxa_guard_release --size 4`): `push
+      {fp,lr}; mov fp,sp; pop {fp,pc}` - the crate frame around the
+      original's bare `bx lr`, identical to ui_noop_f7f4.

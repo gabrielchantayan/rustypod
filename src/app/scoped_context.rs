@@ -1,9 +1,12 @@
 //! The framework's **scoped context token** — a 0x18-byte polymorphic
 //! object that call sites build on the stack, hand to a service, and
-//! throw away. [`scoped_context_construct`] — `FUN_08270394` @
-//! 0x08270394 — is ported here, from the 0x0827xxxx cluster that also
-//! holds the string/buffer class (`cxx/string_object.rs`) and the
-//! resource-lookup chain (`app/resource_chain.rs`).
+//! throw away. Two of its members are ported here, both from the
+//! 0x0827xxxx cluster that also holds the string/buffer class
+//! (`cxx/string_object.rs`) and the resource-lookup chain
+//! (`app/resource_chain.rs`):
+//!
+//! - [`scoped_context_construct`] — `FUN_08270394` @ 0x08270394.
+//! - [`scoped_context_destroy`] — `FUN_08270414` @ 0x08270414.
 //!
 //! ## What the class is
 //!
@@ -24,10 +27,17 @@
 //! | address | `bl` | what it is |
 //! |---|---|---|
 //! | 0x08270394 | **109** + 2 `b` | ctor `(this, owner, mode)` — **ported here** |
-//! | 0x08270414 | **175** | trivial destructor (`bx lr`) |
+//! | 0x08270414 | **175** | trivial destructor — **ported here** |
 //! | 0x08270418 | 15 | field copy: `dst[+4..+0x14] = src[+4..+0x14]`, vtable untouched |
 //! | 0x082703d0 | 7 | ctor that adopts another token's owner through 0x0826fd24 |
 //! | 0x08270320 | 2 | a third ctor variant |
+//!
+//! `0x08270414` really is this class's destructor and not a generic
+//! shared no-op: of its 175 call sites, 166 sit within 0x300 bytes of a
+//! call to one of the constructors above, or to a function that itself
+//! calls one (0x0813b898 is the archetype — it runs 0x08270394 on
+//! `this`, then copies a second token in with 0x08270418, and its
+//! caller at 0x080feca8 destroys the result through 0x08270414).
 //!
 //! ## Where the derived fields come from
 //!
@@ -86,6 +96,21 @@
 //!   With a NULL root and a non-NULL owner the stub faults exactly where
 //!   the original would with an uninitialized global; the guard is not
 //!   added.
+//! - [`scoped_context_destroy`] compiles to the same three-instruction
+//!   frame as `runtime::cxa_guard::cxa_guard_release`, so the linker
+//!   folds the two: `scoped_context_destroy` is emitted as a second
+//!   global on `.text.cxa_guard_release`. Behaviorally that is exactly
+//!   right — both functions are empty — but it means `objdump -d` prints
+//!   only the first label, and `match.py 0x08270414 scoped_context_destroy`
+//!   reports the symbol as missing. Diff it through the folded section
+//!   (`match.py 0x08270414 cxa_guard_release --size 4`); the emitted code
+//!   is `push {fp, lr}; mov fp, sp; pop {fp, pc}`, the crate frame around
+//!   the original's bare `bx lr`, identical to `ui/noop_f7f4.rs`.
+//! - The destructor's recovered C signature is `void (void)` — the body
+//!   is a bare `bx lr` and consumes nothing. The port takes `this`
+//!   anyway, because every one of the 175 call sites passes the token in
+//!   r0 and the argument documents the calling convention; an unused
+//!   AAPCS argument is ABI-identical.
 
 use core::ptr;
 
@@ -250,6 +275,17 @@ pub unsafe extern "C" fn scoped_context_construct(
     (*this).mode = mode;
     this
 }
+
+/// scoped_context_destroy — original: `FUN_08270414` @ 0x08270414
+/// (4 bytes; **175 `bl` call sites**, binary-scanned — no `b` sites).
+///
+/// The whole body is `bx lr`. The class owns nothing: its two derived
+/// words are borrowed views onto the system root, and its owner is not
+/// retained, so destruction has nothing to release. The token is left
+/// exactly as the constructor wrote it.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub extern "C" fn scoped_context_destroy(_this: *mut ScopedContext) {}
 
 #[cfg(test)]
 mod tests {
@@ -436,6 +472,43 @@ mod tests {
             token.registry_token.is_null(),
             "a NULL registry must leave the cached word NULL, not fault"
         );
+    }
+
+    #[test]
+    fn destroy_touches_nothing() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut token = poisoned_token();
+        unsafe { install_mock() };
+        unsafe { scoped_context_construct(&mut token, 0x99 as *mut u8, 0x11) };
+        let before = (
+            token.vtable,
+            token.owner_valid,
+            token.owner,
+            token.service_context,
+            token.registry_token,
+            token.mode,
+        );
+
+        scoped_context_destroy(&mut token);
+
+        assert_eq!(
+            (
+                token.vtable,
+                token.owner_valid,
+                token.owner,
+                token.service_context,
+                token.registry_token,
+                token.mode,
+            ),
+            before
+        );
+    }
+
+    #[test]
+    fn destroy_accepts_a_null_token() {
+        // The original never dereferences `this`; neither may the port.
+        scoped_context_destroy(ptr::null_mut());
     }
 
     #[test]
