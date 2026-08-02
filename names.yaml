@@ -17832,3 +17832,95 @@ functions:
       stack iterator slots / add r1,r4,#0x38 / erase call / strb 0 to
       +0x54; the diff is the seam's literal-pool indirect call and the
       crate's fp frame.
+  - address: 0x082769d4
+    ghidra: FUN_082769d4
+    name: string_object_format
+    size: 68
+    sig: "int string_object_format(StringObject *this, const char *format, ...)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: this, param_2: format, in_stack_ffffffe8: varargs, iVar1: length, auStack_200: scratch}
+    notes: >-
+      Decoded from raw bytes (osos.dec 0x082769d4..0x08276a14, 68 bytes
+      all code - no literal-pool word; next function starts at
+      0x08276a18). 117 bl call sites, binary-scanned. The polymorphic
+      string class's printf-style assignment, StringObject::format(const
+      char *fmt, ...). The ADS variadic prologue `push {r0,r1,r2,r3}`
+      spills the four register arguments, `sub sp,sp,#516` reserves a
+      512-byte scratch at sp+4 (plus a 4-byte alignment pad), then
+      `ldr r2,[sp,#532]` re-reads the spilled format, `add r3,sp,#536`
+      points at the spilled third argument word - the va_list - and
+      `bl 0x08074ba0` runs the bounded formatter as
+      vsnprintf(scratch, 512, format, va). Its count is parked in r4
+      while `bl 0x08276474` hands the scratch to the already-ported
+      string_object_assign_payload (which sizes the copy with
+      strlen_safe_plus1, requests storage from vtable slot +0x8, or
+      dispatches slot +0xc when the formatted text came out empty), and
+      `mov r0,r4` returns the FORMATTER's character count - not this and
+      not the stored length. The epilogue `ldr pc,[sp],#20` drops the
+      variadic spill. No NULL guard on this (the assignment dereferences
+      it for the vtable). Call sites pin the shape: 0x08176a4c passes
+      "%s, %s" with two string arguments, 0x0816ff3c passes "%d".
+      Deviations: (a) the `...` becomes an explicit VaList (*const u32)
+      parameter - stable Rust cannot define C-variadic functions, and
+      args IS the pointer the original's spill builds (house convention,
+      printf/printf_api.rs); (b) the bounded formatter @ 0x08074ba0 is
+      NOT ported (it is a second vsnprintf, distinct from 0x08032f94:
+      its literal-pool word @ 0x08074bdc holds the sink descriptor
+      0x0807ca58 and it drives the conversion core @ 0x08077c94), so it
+      goes through the STRING_OBJECT_FORMAT_VSNPRINTF dispatch slot
+      whose wired default is the ported vsnprintf @ 0x08032f94 - same
+      (buf, size, format, args) contract and NUL termination, differing
+      only in the conversion engine; (c) the scratch is MaybeUninit,
+      matching the original's unwritten stack frame. Host tests: the
+      formatter receives size 512 with format and va_list verbatim, the
+      formatted text sizes the +0x8 allocation (strlen + NUL) and is
+      copied into it, empty output dispatches only +0xc, allocation
+      failure still returns the count and never falls back to +0xc, the
+      formatter result is returned verbatim including a would-be length
+      past the scratch, and the slot's wired default is the ported
+      vsnprintf. match.py structural: same 512-byte scratch reservation,
+      argument shuffle into r1/r2/r3, formatter call, count parked in a
+      callee-saved register, assign_payload(this, scratch) and
+      count-in-r0 return; the diff is the crate's fp frame, the absent
+      variadic spill (the explicit VaList) and the blx-through-volatile-
+      slot dispatch standing in for the direct bl 0x08074ba0.
+
+  - address: 0x082770e0
+    ghidra: FUN_082770e0
+    name: utf8_codepoint_count_safe
+    size: 48
+    sig: "size_t utf8_codepoint_count_safe(const char *text)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: text, local_c: cursor, iVar1: count, uVar2: codepoint}
+    notes: >-
+      Decoded from raw bytes (osos.dec 0x082770e0..0x0827710c, 48 bytes
+      all code - no literal-pool word; next function starts at
+      0x08277110). 102 bl call sites, binary-scanned. The UTF-8
+      counterpart of the NULL-guarded byte strlen_safe @ 0x082770bc that
+      sits immediately before it in the image: this one counts
+      CODEPOINTS. `push {r0,r4,lr}` spills the argument and that spill
+      slot IS the cursor cell - `ldr r0,[sp]; cmp r0,#0; beq` returns 0
+      for NULL without decoding, then the loop is `mov r0,sp;
+      bl 0x08276214; cmp r0,#0; addne r4,r4,#1; bne` - the already-ported
+      utf8_next_codepoint advances the spilled cursor and the counter is
+      bumped for every nonzero codepoint. Termination is whatever the
+      decoder calls zero: the NUL byte, but also any four-byte or
+      otherwise malformed lead (those consume three bytes and stop the
+      count), the same terminator semantics utf8_strcmp_safe @ 0x08276d64
+      relies on. Continuation bytes, overlong forms and surrogates are
+      not validated. The 48-byte sibling at 0x08277110 is the bounded
+      variant (same loop with an `s + len` end pointer, 4 bl call sites)
+      and is NOT ported here. Deviations: none - utf8_next_codepoint is
+      ported and called directly, and the NULL guard runs once before the
+      loop as in the original; a non-NULL unreadable string faults in
+      both. Host tests: NULL and empty are 0, pure ASCII agrees with
+      strlen_safe, a two-byte + three-byte + ASCII string is 3 codepoints
+      over 6 bytes, a four-byte lead and a lone continuation byte each
+      end the count early, and a malformed two-byte sequence still counts
+      as one. match.py structural: same spill-as-cursor cell, NULL guard,
+      decoder call with &cursor, nonzero-codepoint count and count-in-r0
+      return; the diff is the crate's fp frame and LLVM rotating the loop
+      (counter seeded at -1 with mvn and incremented at the loop head
+      instead of the original's predicated addne).
