@@ -2203,6 +2203,34 @@ functions:
       instruction-for-instruction the same shape the accepted tag-2
       operator_new @ 0x082aadd4 produces (26 instructions each).
 
+  - address: 0x082aad14
+    ghidra: FUN_082aad14
+    name: operator_delete_tag3
+    size: 16
+    sig: "void operator_delete_tag3(void *ptr)"
+    module: heap/veneers
+    vars: {param_1: ptr}
+    status: ported
+    notes: >-
+      C++ `operator delete` for caller tag 3, and the immediate neighbour
+      *below* the tag-2 delete @ 0x082aad24 — a distinct function, not the
+      same one. Whole body, verified against the raw image (words e3500000
+      13a01003 1af8f313 e12fff1e): `cmp r0,#0; movne r1,#3; bne 0x080e7970;
+      bx lr` — NULL returns without touching the heap, non-NULL tail-branches
+      into free_wrapper @ 0x080e7970 (already ported) with tag 3. 155 `bl`
+      call sites (105 unconditional + 50 `blne`) plus 3 tail `b`, counted by
+      scanning every ARM branch word in the image; 145 of the `bl` fall
+      inside a Ghidra-known function extent. The NULL guard here against its
+      absence in operator_new_tag3 @ 0x082aad74 is real and deliberate — the
+      C++ standard requires it on delete and not on new, and both host tests
+      pin that asymmetry. Deviations: the conditional tail branch is a
+      guarded plain call, and the free dispatch goes through the HEAP_OPS.free
+      slot instead of branching to 0x080e7970 directly. #[inline(never)] for
+      the 155 `bl` targets. match.py structural: the `cmp r0,#0` guard and
+      its early return correspond one-to-one; the rest is the inlined lazy
+      init plus the ops-slot free tail call, matching the shape already
+      accepted for the tag-2 operator_delete @ 0x082aad24.
+
   - address: 0x08030f44
     name: heap_panic
     size: 32
