@@ -74,7 +74,8 @@
 //! - **Mutex**: locked/unlocked through block_region.rs's
 //!   `REGION_MUTEX_OPS` — the same original pair (0x082e8390 /
 //!   0x082e83d8, reached via the thunks at 0x082621a8/0x082621ac) the
-//!   rest of the heap cluster brackets with.
+//!   rest of the heap cluster brackets with; its slots default to the
+//!   real ports in kernel/posix_mutex.rs.
 //! - The original threads `this` through its callees' return values
 //!   (`r4 = mutex_init(this + 8) - 8`, `this = node_construct(this +
 //!   0x2c) - 0x2c`). Both callees return their argument unchanged, so

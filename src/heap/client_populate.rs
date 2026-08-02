@@ -7,7 +7,7 @@
 //!   bytes; 2 `bl` call sites @ 0x081a8434 (FUN_081a83b8) and
 //!   0x082140b0 (`block_deque_fill`), binary-verified). Under the
 //!   client's own mutex (client + 0x24 — NOT the pool base's +0x8 one —
-//!   the same unported C++ recursive-mutex pair @ 0x082e8390 /
+//!   the same C++ owner-tracked mutex pair @ 0x082e8390 /
 //!   0x082e83d8 via the alias thunks @ 0x082621a8 / 0x082621ac that
 //!   client_erase/client_commit use) it:
 //!   1. gates on headroom: either the client's 0x40000 state-flag bit
@@ -46,8 +46,8 @@
 //!
 //! - **Mutex**: client + 0x24 is locked/unlocked through
 //!   block_region.rs's `REGION_MUTEX_OPS` (one boundary for the one
-//!   unported original pair — the client_erase.rs/client_commit.rs
-//!   precedent; defaults are documented no-ops, no mutual exclusion).
+//!   original pair — the client_erase.rs/client_commit.rs precedent;
+//!   the defaults are the real ports, kernel/posix_mutex.rs).
 //!   The offset constant is shared: `client_erase::CLIENT_MUTEX_OFFSET`.
 //! - **Headroom probes** dispatch to the REAL `state_flags_contain`
 //!   (0x081fc3f4 is its canonical address, not a copy) — direct calls.
@@ -759,17 +759,17 @@ mod tests {
             // is unmapped. Point the client at a mapped fake manager
             // whose free-count word (+0x14) is 0: the real body's gate
             // refuses, the same 0 the old fail-closed body stub faked
-            // (the no-op mutex stubs bracket it; the no-op splice is
+            // (the real mutex pair brackets it; the no-op splice is
             // never reached).
             let fake_mgr = slab().add(0x800);
             set_word(client, CLIENT_MANAGER_OFFSET, fake_mgr as u32);
             set_word(fake_mgr, 0x14, 0);
             let mut dq = empty_deque();
             // The gates pass; the real hand-out port's free-count gate
-            // refuses (the no-op mutex stubs bracket it).
+            // refuses (the real mutex pair brackets it).
             assert_eq!(client_populate(client, 3, &mut *dq), 0, "no manager -> refused");
             assert_eq!(dq.count, 0);
-            assert!(events().is_empty(), "the no-op mutex stubs ran, nothing else");
+            assert!(events().is_empty(), "the real mutex pair ran, nothing else");
         }
         drop(guard);
     }

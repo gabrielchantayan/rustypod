@@ -2630,8 +2630,9 @@ functions:
       block hand-back (with commit @ 0x081fc884). 2 bl call sites @
       0x0814bb54 (FUN_0814bb18) and 0x08214198 (pool_base_release_blocks),
       binary-verified. Under the CLIENT's own mutex (client + 0x24, not
-      the pool base's +0x8 — same unported C++ pair 0x082e8390/0x082e83d8
-      via thunks 0x082621a8/0x082621ac, REGION_MUTEX_OPS boundary):
+      the pool base's +0x8 — same C++ mutex pair 0x082e8390/0x082e83d8
+      via thunks 0x082621a8/0x082621ac, REGION_MUTEX_OPS boundary,
+      now defaulting to the real ports in kernel/posix_mutex):
       presets the hand-back word 0 (dead store, kept), snapshots the
       deque count (+0x20) once into the loop counter (NOT re-read —
       deque_pop_front decrements the deque's own count in parallel),
@@ -2678,7 +2679,7 @@ functions:
       (pool_base_release_blocks), 0x08223664, 0x0828bdbc, plus 2
       tail-branch sites @ 0x08168160 and 0x081f7430, binary-verified.
       A pure mutex bracket: under the CLIENT's own mutex (client + 0x24,
-      not the pool base's +0x8 — same unported C++ pair
+      not the pool base's +0x8 — same C++ mutex pair
       0x082e8390/0x082e83d8 via thunks 0x082621a8/0x082621ac,
       REGION_MUTEX_OPS boundary, client_erase's CLIENT_MUTEX_OFFSET
       shared) it calls the commit body 0x081fc408(client, 1) — the
@@ -3059,7 +3060,7 @@ functions:
       0x0818b0c4(*(client+4), client+8, count) — its one bl call site @
       0x081fc310 (client_populate), binary-verified. A pure mutex
       bracket: lock the manager's own mutex object at manager+0x148
-      (the unported C++ recursive-mutex pair 0x082e8390/0x082e83d8 via
+      (the C++ owner-tracked mutex pair 0x082e8390/0x082e83d8 via
       thunks 0x082621a8/0x082621ac, block_region.rs's REGION_MUTEX_OPS
       boundary), run the body 0x0818b108(manager,
       client_state, count) through the new BLOCK_MANAGER_OPS
@@ -5707,8 +5708,8 @@ functions:
       returns 0 without touching a mutex, otherwise tail-branches to the
       C++ mutex lock @ 0x082e8390 (alias thunk @ 0x082621a8) on the
       region's mutex (region + 0x8). 14 bl call sites. The mutex pair is
-      unported C++ machinery — the REGION_MUTEX_OPS dispatch boundary,
-      defaulting to documented no-ops (no mutual exclusion).
+      the REGION_MUTEX_OPS dispatch boundary, whose slots default to the
+      real ports (kernel/posix_mutex: posix_mutex_lock / _unlock).
 
   - address: 0x082802cc
     ghidra: FUN_082802cc
