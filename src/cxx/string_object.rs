@@ -54,6 +54,13 @@
 //!   duplicates the source's payload through
 //!   `string_object_assign_payload` @ 0x08276474; returns `this`. It is
 //!   the wired default of the [`STRING_OBJECT_COPY_CONSTRUCT`] slot.
+//! - `string_object_format` — original: `FUN_082769d4` @ 0x082769d4
+//!   (68 bytes, all code; 117 `bl` call sites, binary-scanned). The
+//!   class's printf-style assignment, `int format(const char *fmt,
+//!   ...)`: formats into a 512-byte stack scratch buffer through the
+//!   bounded formatter @ 0x08074ba0, hands the buffer to
+//!   `string_object_assign_payload` @ 0x08276474, and returns the
+//!   formatter's character count.
 //! - `string_default_construct` — original: `FUN_08277440` @ 0x08277440
 //!   (20 bytes: 16 code + the 4-byte vtable literal @ 0x08277454;
 //!   280 `bl` call sites, binary-scanned). `obj[0] = vtable`,
@@ -252,10 +259,13 @@
 //!   codepoints. The source side runs through the ported
 //!   [`string_object_c_str`] directly (no deviation).
 
+use core::mem::MaybeUninit;
+
 use crate::heap::veneers::{free_wrapper, operator_delete};
 use crate::libc::strcpy::strcpy;
 use crate::libc::strlen_safe::strlen_safe;
 use crate::libc::strlen_safe_plus1::strlen_safe_plus1;
+use crate::printf::printf_api::{vsnprintf, VaList};
 
 /// Original load address of the class vtable the constructor plants
 /// (`ldr r1, [0x08277454]` in every sibling). See the module header for
@@ -469,6 +479,103 @@ pub unsafe extern "C" fn string_object_assign_payload(
         return;
     }
     strcpy(destination, payload);
+}
+
+/// Size of the stack scratch buffer [`string_object_format`] formats into
+/// (`sub sp, sp, #516` reserves 512 bytes at `sp + 4` plus a 4-byte
+/// alignment pad, and `mov r1, #512` is the length handed to vsnprintf).
+pub const STRING_OBJECT_FORMAT_BUFFER_LEN: usize = 512;
+
+/// The bounded formatter @ 0x08074ba0 that [`string_object_format`] runs.
+/// Signature decoded from its prologue: `(buf, size, format, args)`, the
+/// classic `vsnprintf` shape — it saves `buf` and the va_list on the
+/// stack, passes `size - 1` and a sink descriptor (literal-pool word
+/// @ 0x08074bdc holds 0x0807ca58) to the conversion core @ 0x08077c94,
+/// NUL-terminates at the final cursor, and returns the core's count
+/// (0 when `size` is zero, with nothing written).
+pub type StringObjectFormatVsnprintfFn = unsafe extern "C" fn(
+    buf: *mut u8,
+    size: usize,
+    format: *const u8,
+    args: VaList,
+) -> i32;
+
+/// Dispatch slot for the unported formatter @ 0x08074ba0.
+///
+/// Wired default: the ported `vsnprintf` @ 0x08032f94, retailOS's *other*
+/// bounded formatter — same `(buf, size, format, args)` contract and the
+/// same NUL-termination, differing only in which conversion engine runs
+/// underneath. Swapping in a port of 0x08074ba0 later needs no change
+/// here. (Note the ported sibling's own [`crate::printf_api::PRINTF_ENGINE`]
+/// is still a stub, so today the default yields an empty string.)
+pub static mut STRING_OBJECT_FORMAT_VSNPRINTF: StringObjectFormatVsnprintfFn = vsnprintf;
+
+#[inline(always)]
+unsafe fn format_vsnprintf_op() -> StringObjectFormatVsnprintfFn {
+    core::ptr::read_volatile(core::ptr::addr_of!(STRING_OBJECT_FORMAT_VSNPRINTF))
+}
+
+/// string_object_format — original: `FUN_082769d4` @ 0x082769d4
+/// (68 bytes, all code — no literal-pool word; 117 `bl` call sites,
+/// binary-scanned).
+///
+/// `int StringObject::format(const char *format, ...)`: the class's
+/// printf-style assignment. Decoded from the raw ARM at 0x082769d4:
+///
+/// ```text
+/// push {r0, r1, r2, r3}   ; ADS variadic spill: this, format, arg, arg
+/// push {r4, r5, lr}
+/// sub  sp, sp, #516       ; 512-byte scratch at sp+4, 4-byte pad at sp+0
+/// mov  r5, r0             ; r5 = this
+/// ldr  r2, [sp, #532]     ; r2 = the spilled `format`
+/// add  r0, sp, #4         ; r0 = scratch
+/// add  r3, sp, #536       ; r3 = &spilled arg 2 — the va_list
+/// mov  r1, #512
+/// bl   0x08074ba0         ; vsnprintf(scratch, 512, format, va)
+/// mov  r4, r0             ; keep the formatted length
+/// mov  r0, r5
+/// add  r1, sp, #4
+/// bl   0x08276474         ; string_object_assign_payload(this, scratch)
+/// mov  r0, r4
+/// add  sp, sp, #516
+/// pop  {r4, r5}
+/// ldr  pc, [sp], #20      ; return, dropping the variadic spill
+/// ```
+///
+/// Format the caller's arguments into a 512-byte stack buffer, hand that
+/// buffer to [`string_object_assign_payload`] (which sizes and requests
+/// replacement storage through vtable slot +0x8, or dispatches slot +0xc
+/// when the formatted text came out empty), and return the formatter's
+/// character count — *not* `this`, and not the stored length. The scratch
+/// buffer is caller-owned stack: the object always receives a copy.
+///
+/// Call sites confirm the shape, e.g. @ 0x08176a4c the format literal is
+/// `"%s, %s"` with two string arguments, and @ 0x0816ff3c it is `"%d"`.
+/// There is no NULL guard on `this` — the original dereferences it inside
+/// the assignment for the vtable, and so does the port.
+///
+/// Deviations:
+/// - The variadic `...` becomes an explicit [`VaList`] (house convention,
+///   see `printf/printf_api.rs`): stable Rust cannot define C-variadic
+///   functions, and `args` IS the pointer the original's spill builds.
+/// - The formatter @ 0x08074ba0 is unported and goes through the
+///   [`STRING_OBJECT_FORMAT_VSNPRINTF`] slot.
+/// - The scratch buffer is [`core::mem::MaybeUninit`], matching the
+///   original's unwritten stack frame; the formatter's NUL termination is
+///   what makes it readable.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_format(
+    this: *mut StringObject,
+    format: *const u8,
+    args: VaList,
+) -> i32 {
+    let mut scratch = MaybeUninit::<[u8; STRING_OBJECT_FORMAT_BUFFER_LEN]>::uninit();
+    let scratch = scratch.as_mut_ptr() as *mut u8;
+
+    let length = format_vsnprintf_op()(scratch, STRING_OBJECT_FORMAT_BUFFER_LEN, format, args);
+    string_object_assign_payload(this, scratch);
+    length
 }
 
 /// string_object_assign — original: `FUN_082774a8` @ 0x082774a8
@@ -1389,6 +1496,42 @@ mod tests {
         (*core::ptr::addr_of_mut!(ASSIGN_CSTR_CLEAR_CALLS)).push(this as usize);
     }
 
+    /// `(scratch, size, format, args)` seen by the formatter slot @ 0x08074ba0.
+    static mut FORMAT_VSNPRINTF_CALLS: Vec<(usize, usize, usize, usize)> = Vec::new();
+    /// Canned formatter output. Always NUL-terminated: the original's scratch
+    /// buffer is uninitialized stack, and the NUL is what makes it readable.
+    static mut FORMAT_VSNPRINTF_OUTPUT: &[u8] = b"\0";
+    static mut FORMAT_VSNPRINTF_RESULT: i32 = 0;
+
+    unsafe extern "C" fn recording_format_vsnprintf(
+        scratch: *mut u8,
+        size: usize,
+        format: *const u8,
+        args: VaList,
+    ) -> i32 {
+        (*core::ptr::addr_of_mut!(FORMAT_VSNPRINTF_CALLS)).push((
+            scratch as usize,
+            size,
+            format as usize,
+            args as usize,
+        ));
+        let output = core::ptr::read_volatile(core::ptr::addr_of!(FORMAT_VSNPRINTF_OUTPUT));
+        assert!(output.len() <= size, "the canned output must fit the scratch");
+        core::ptr::copy_nonoverlapping(output.as_ptr(), scratch, output.len());
+        core::ptr::read_volatile(core::ptr::addr_of!(FORMAT_VSNPRINTF_RESULT))
+    }
+
+    /// Arms the formatter slot's canned output for the next
+    /// [`string_object_format`] run. Only valid while the bench guard —
+    /// which owns the lock and installed the recorder — is alive.
+    fn arm_format_output(output: &'static [u8], result: i32) {
+        assert_eq!(output.last(), Some(&0), "canned output must be NUL-terminated");
+        unsafe {
+            core::ptr::addr_of_mut!(FORMAT_VSNPRINTF_OUTPUT).write(output);
+            core::ptr::addr_of_mut!(FORMAT_VSNPRINTF_RESULT).write(result);
+        }
+    }
+
     /// Restores the unported virtual-method boundary even when a test panics.
     struct AssignCstrOpsGuard {
         _lock: MutexGuard<'static, ()>,
@@ -1399,6 +1542,7 @@ mod tests {
             unsafe {
                 core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS)
                     .write_volatile(DEFAULT_STRING_OBJECT_ASSIGN_CSTR_OPS);
+                core::ptr::addr_of_mut!(STRING_OBJECT_FORMAT_VSNPRINTF).write_volatile(vsnprintf);
             }
         }
     }
@@ -1408,6 +1552,7 @@ mod tests {
         unsafe {
             (*core::ptr::addr_of_mut!(ASSIGN_CSTR_ALLOCATE_CALLS)).clear();
             (*core::ptr::addr_of_mut!(ASSIGN_CSTR_CLEAR_CALLS)).clear();
+            (*core::ptr::addr_of_mut!(FORMAT_VSNPRINTF_CALLS)).clear();
             core::ptr::addr_of_mut!(ASSIGN_CSTR_ALLOCATE_RESULT).write(allocation_result);
             core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS).write_volatile(
                 StringObjectAssignCstrOps {
@@ -1415,7 +1560,10 @@ mod tests {
                     clear_payload: recording_assign_cstr_clear,
                 },
             );
+            core::ptr::addr_of_mut!(STRING_OBJECT_FORMAT_VSNPRINTF)
+                .write_volatile(recording_format_vsnprintf);
         }
+        arm_format_output(b"\0", 0);
         AssignCstrOpsGuard { _lock: lock }
     }
 
@@ -1573,6 +1721,126 @@ mod tests {
             std::vec![this as usize, this as usize]
         );
         assert_eq!(object.payload, 0x2222_2222 as *mut u8);
+    }
+
+    // ---- string_object_format ---------------------------------------
+
+    /// A distinguishable stand-in for the va_list the original's spill builds.
+    const FORMAT_ARGS: VaList = 0x4444_4444 as VaList;
+
+    #[test]
+    fn format_slot_defaults_to_the_ported_bounded_formatter() {
+        let wired = unsafe { core::ptr::read_volatile(core::ptr::addr_of!(
+            STRING_OBJECT_FORMAT_VSNPRINTF
+        )) };
+        assert_eq!(
+            wired as usize, vsnprintf as usize,
+            "0x08074ba0 stands in as the ported vsnprintf @ 0x08032f94"
+        );
+        assert_eq!(STRING_OBJECT_FORMAT_BUFFER_LEN, 512, "mov r1, #512");
+    }
+
+    #[test]
+    fn format_bounds_the_scratch_then_assigns_it_and_returns_the_length() {
+        let mut destination = [0xa5u8; 16];
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: 0x2222_2222 as *mut u8,
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let format = b"%s, %s\0";
+        let _bench = assign_cstr_bench(destination.as_mut_ptr());
+        arm_format_output(b"artist, album\0", 13);
+
+        let length = unsafe { string_object_format(this, format.as_ptr(), FORMAT_ARGS) };
+
+        assert_eq!(length, 13, "the formatter's count is returned, not `this`");
+        let formatter = unsafe { (*core::ptr::addr_of!(FORMAT_VSNPRINTF_CALLS)).clone() };
+        assert_eq!(formatter.len(), 1);
+        let (scratch, size, seen_format, seen_args) = formatter[0];
+        assert_eq!(size, STRING_OBJECT_FORMAT_BUFFER_LEN);
+        assert_eq!(seen_format, format.as_ptr() as usize, "format passed verbatim");
+        assert_eq!(seen_args, FORMAT_ARGS as usize, "va_list passed verbatim");
+
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
+            std::vec![(this as usize, 14, 0)],
+            "the scratch text sizes the allocation (strlen + NUL)"
+        );
+        assert!(unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty() });
+        assert_eq!(&destination[..14], b"artist, album\0");
+        assert_eq!(
+            object.payload, 0x2222_2222 as *mut u8,
+            "the payload word belongs to the allocation slot, untouched here"
+        );
+        assert_ne!(scratch, destination.as_mut_ptr() as usize, "the scratch is a copy source");
+    }
+
+    #[test]
+    fn format_empty_output_dispatches_the_clear_slot_only() {
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(0x3333_3333 as *mut u8);
+        arm_format_output(b"\0", 0);
+
+        let length = unsafe { string_object_format(this, b"\0".as_ptr(), FORMAT_ARGS) };
+
+        assert_eq!(length, 0);
+        assert!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty() },
+            "an empty scratch never reaches vtable slot +0x8"
+        );
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).clone() },
+            std::vec![this as usize]
+        );
+        assert!(object.payload.is_null(), "a NULL prior payload is never read");
+    }
+
+    #[test]
+    fn format_allocation_failure_still_returns_the_formatted_length() {
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: 0x2222_2222 as *mut u8,
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(core::ptr::null_mut());
+        arm_format_output(b"track\0", 5);
+
+        let length = unsafe { string_object_format(this, b"%s\0".as_ptr(), FORMAT_ARGS) };
+
+        assert_eq!(length, 5, "the count survives a failed assignment");
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
+            std::vec![(this as usize, 6, 0)]
+        );
+        assert!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty() },
+            "allocation failure does not fall back to vtable slot +0xc"
+        );
+    }
+
+    #[test]
+    fn format_returns_the_formatter_result_verbatim_including_overflow() {
+        let mut destination = [0xa5u8; 8];
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(destination.as_mut_ptr());
+        // The original returns the conversion core's count untouched: a
+        // would-be length past the 512-byte scratch is reported as such.
+        arm_format_output(b"ab\0", 900);
+
+        assert_eq!(
+            unsafe { string_object_format(this, b"%s\0".as_ptr(), FORMAT_ARGS) },
+            900
+        );
+        assert_eq!(&destination[..3], b"ab\0", "only the truncated text is assigned");
     }
 
     #[test]
