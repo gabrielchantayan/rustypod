@@ -18012,3 +18012,27 @@ functions:
       global load / `cmp r0,#0` / `bxne lr` / fatal-call shape, the port
       adding only the cold-path frame push.
 
+  - address: 0x081391ec
+    ghidra: thunk_FUN_08165520
+    name: service_manager_instance_veneer
+    size: 4
+    sig: "void *service_manager_instance_veneer(void)"
+    module: app/service_manager
+    renames:
+      FUN_08165520: service_manager_instance
+    status: ported
+    notes: >-
+      Long-branch veneer to service_manager_instance @ 0x08165520 - one
+      word, `b 0x08165520` (0xea00b0cb). Genuinely 4 bytes, not the 8 of
+      the `ldr pc,[pc,#-4]` + target-word form: this is a direct B and the
+      following word (0x081391f0, `add r1,r0,#0x18`) is the entry of an
+      unrelated function. 213 `bl` call sites, binary-scanned by decoding
+      every B/BL word in osos.dec - one of the most-called veneers left,
+      and the only `b` that reaches 0x08165520. Ported as its own
+      `#[inline(never)]` symbol rather than an alias so a hook here lands
+      on a real forwarding branch; the callee is called directly (not
+      through read_volatile - unlike the libc/iram_veneers, nothing here
+      resembles a compiler builtin, so LLVM cannot re-lower it).
+      match.py structural: `push {fp,lr}; mov fp,sp; pop {fp,lr};
+      b service_manager_instance` - the original's tail branch plus the
+      target's mandatory non-leaf frame pointer.

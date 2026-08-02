@@ -1,13 +1,13 @@
 //! The **service-manager singleton** — the framework object that owns
-//! retailOS's per-hardware subsystem handlers — and the accessor that
-//! hands it out. (Its 213-call-site veneer @ 0x081391ec follows in the
-//! next commit.)
+//! retailOS's per-hardware subsystem handlers — and the two entry
+//! points that hand it out.
 //!
 //! | address | name | size | `bl` sites |
 //! |---|---|---|---|
 //! | 0x08165520 | [`service_manager_instance`] | 24 | 17 direct |
+//! | 0x081391ec | [`service_manager_instance_veneer`] | 4 | **213** |
 //!
-//! The count is binary-scanned out of `work/firmware/osos.dec` by
+//! Both counts are binary-scanned out of `work/firmware/osos.dec` by
 //! decoding every ARM `B`/`BL` word in the image (load base
 //! 0x08000000) and resolving its target: 17 `BL` reach 0x08165520
 //! directly, 213 `BL` reach the veneer, and the *only* plain `B` at
@@ -70,7 +70,7 @@
 //! - Nothing here constructs. The original 0x08165520 does not either:
 //!   a NULL instance is fatal, and the only thing that fills the slot
 //!   is 0x081655e0 / `FUN_0816566c`, neither of which is ported. That
-//!   makes this symbol **hook-ready only once something publishes
+//!   makes these two symbols **hook-ready only once something publishes
 //!   the instance** — branching stock code at 0x08165520 today would
 //!   turn every one of the 230 call sites into a `heap_panic`.
 //! - The fatal path is not exercised by the host tests:
@@ -117,6 +117,32 @@ pub unsafe extern "C" fn service_manager_instance() -> *mut u8 {
         heap_panic();
     }
     instance
+}
+
+/// service_manager_instance_veneer — original: `thunk_FUN_08165520` @
+/// 0x081391ec (4 bytes; **213** `bl` call sites).
+///
+/// One instruction — `b 0x08165520` — the long-branch veneer the
+/// linker planted so the 0x0813xxxx/0x0816xxxx callers could reach
+/// [`service_manager_instance`]. The word after it (0x081391f0,
+/// `add r1, r0, #0x18`) is the entry of an unrelated function, so the
+/// extent really is 4 bytes: this is a direct `B`, not the
+/// `ldr pc, [pc, #-4]` + target-word form whose true extent is 8.
+///
+/// Kept as its own `#[inline(never)]` symbol rather than an alias so a
+/// hook at 0x081391ec lands on a real veneer that branches on to the
+/// accessor, exactly as the image has it — the built ARM body is
+/// `push {fp,lr}; mov fp,sp; pop {fp,lr}; b service_manager_instance`,
+/// i.e. the original's tail branch plus the target's mandatory
+/// non-leaf frame pointer.
+///
+/// # Safety
+///
+/// Same contract as [`service_manager_instance`].
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn service_manager_instance_veneer() -> *mut u8 {
+    service_manager_instance()
 }
 
 #[cfg(test)]
@@ -187,6 +213,26 @@ mod tests {
         clear(guard);
     }
 
+    #[test]
+    fn the_veneer_reaches_the_same_accessor() {
+        let mut object = [0u8; 0xe8];
+        let instance = object.as_mut_ptr();
+        let guard = publish(instance);
+        unsafe {
+            assert_eq!(service_manager_instance_veneer(), instance);
+            assert_eq!(service_manager_instance_veneer(), service_manager_instance());
+        }
+        clear(guard);
+    }
 
+    #[test]
+    fn the_veneer_is_a_distinct_symbol_from_its_target() {
+        // The image has two separate entry points; an alias would make a
+        // hook at 0x081391ec meaningless.
+        assert_ne!(
+            service_manager_instance_veneer as usize,
+            service_manager_instance as usize
+        );
+    }
 
 }
