@@ -2172,6 +2172,37 @@ functions:
       the rest is the inlined lazy-init + ops-slot free tail call, the
       documented deviation.
 
+  - address: 0x082aad74
+    ghidra: FUN_082aad74
+    name: operator_new_tag3
+    size: 8
+    sig: "void *operator_new_tag3(size_t size)"
+    module: heap/veneers
+    vars: {param_1: size}
+    status: ported
+    notes: >-
+      C++ `operator new` for caller tag 3 — the alloc half of the tag-3
+      pair whose delete is 0x082aad14. Whole body, verified against the raw
+      image (osos.dec, load base 0x08000000, words e3a01003 eaf9023f):
+      `mov r1,#3; b 0x080eb67c`, i.e. pin the caller tag to 3 and tail-branch
+      into malloc_wrapper @ 0x080eb67c (already ported). 111 `bl` call sites
+      and 0 `b`, counted by scanning every ARM branch word in the image (101
+      of the 111 fall inside a Ghidra-known function extent; the remainder
+      sit in regions functions.csv does not cover). No NULL/zero guard: any
+      size, 0 included, reaches the heap core, and the returned pointer flows
+      back verbatim — NULL means the allocation failed and is not retried
+      here (that is operator_new_checked @ 0x08266c70). Deviations: the tail
+      branch is a plain call in Rust, and the alloc dispatch goes through the
+      HEAP_OPS.alloc slot (veneers.rs's documented ops-table pattern) rather
+      than branching to 0x080eb67c directly. #[inline(never)] keeps the
+      branch boundary — an 8-byte body is exactly what LLVM inlines away,
+      which would drag the lazy-heap-init path into all 111 callers and
+      destroy their matches. match.py structural: `mov r2,#3` (the tag) plus
+      the trailing `bx r0` tail call through the ops slot correspond; the
+      body in between is the inlined lazy init, the documented deviation —
+      instruction-for-instruction the same shape the accepted tag-2
+      operator_new @ 0x082aadd4 produces (26 instructions each).
+
   - address: 0x08030f44
     name: heap_panic
     size: 32

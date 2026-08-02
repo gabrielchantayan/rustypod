@@ -366,8 +366,32 @@ pub unsafe extern "C" fn operator_delete(ptr: *mut u8) {
     }
 }
 
-/// operator new (tag 3) — original @ 0x082aad74 (8 bytes):
-/// `mov r1, #3; b 0x080eb67c`.
+/// operator new (tag 3) — original: `FUN_082aad74` @ 0x082aad74 (8 bytes,
+/// 111 `bl` call sites; binary-verified against osos.dec, of which 101 sit
+/// inside a function extent Ghidra knows about). Whole body:
+///
+/// ```text
+/// 082aad74:  mov r1, #3        ; caller tag
+/// 082aad78:  b   0x080eb67c    ; tail call malloc_wrapper(size, 3)
+/// ```
+///
+/// The tag-2 `operator_new`'s sibling for a second allocation tag: pins
+/// the caller tag to 3 and hands `size` straight to `malloc_wrapper`,
+/// returning whatever it returns (NULL included — there is no
+/// out-of-memory check here; that lives in `operator_new_checked`).
+///
+/// Note the asymmetry with `operator_delete_tag3`: the alloc side has **no
+/// NULL guard** — `size == 0` is passed through to the heap core
+/// untouched, exactly like the original's unconditional tail branch.
+///
+/// Deviations: the original's tail branch is a plain call here (Rust has
+/// no guaranteed tail calls), and `malloc_wrapper` dispatches through
+/// `HEAP_OPS` rather than branching to 0x080eb67c directly.
+/// `inline(never)` for the same reason as the tag-2 pair: on device this
+/// is a real `bl` target for 111 call sites, and an 8-byte body is exactly
+/// what LLVM would otherwise inline away, dragging the whole lazy-heap-init
+/// path into every caller and destroying those callers' matches.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn operator_new_tag3(size: usize) -> *mut u8 {
     malloc_wrapper(size, TAG_OPERATOR_NEW_TAG3)
@@ -834,6 +858,28 @@ pub(crate) mod tests {
             operator_delete_tag3(BLOCK_A as *mut u8);
             assert_eq!(FREE_CALLS, 1);
             assert_eq!(LAST_FREE_TAG, 3);
+        }
+    }
+
+    #[test]
+    fn tag3_new_forwards_size_unguarded_and_returns_the_block_verbatim() {
+        let _lock = mock_heap();
+        unsafe {
+            // The original is an unconditional tail branch: every size,
+            // including 0, reaches the heap core with tag 3.
+            for size in [0usize, 1, 48, 0x1000] {
+                let before = ALLOC_CALLS;
+                assert_eq!(operator_new_tag3(size), BLOCK_A as *mut u8);
+                assert_eq!(ALLOC_CALLS, before + 1, "no guard on the alloc side");
+                assert_eq!(LAST_ALLOC_SIZE, size);
+                assert_eq!(LAST_ALLOC_TAG, 3);
+            }
+            assert_eq!(FREE_CALLS, 0, "new must never touch the free path");
+            // The heap's return value flows back untouched — a failed
+            // allocation surfaces as NULL, not as a retry (that is
+            // operator_new_checked's job).
+            set_alloc_ret(core::ptr::null_mut());
+            assert!(operator_new_tag3(64).is_null());
         }
     }
 
