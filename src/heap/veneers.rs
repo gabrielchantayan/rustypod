@@ -35,8 +35,11 @@
 //!   (16 bytes, 665 call sites). Tag-2 pair: new is a pure tail veneer
 //!   (`mov r1, #2; b 0x080eb67c`), delete is NULL-guarded
 //!   (`cmp r0, #0; movne r1, #2; bne 0x080e7970; bx lr`).
-//! - `operator_new_tag3` / `operator_delete_tag3` — originals @ 0x082aad74
-//!   and 0x082aad14. Identical pair with tag 3.
+//! - `operator_new_tag3` / `operator_delete_tag3` — originals `FUN_082aad74`
+//!   @ 0x082aad74 (8 bytes, 111 `bl` call sites) and `FUN_082aad14` @
+//!   0x082aad14 (16 bytes, 155 `bl` + 3 `b` call sites). Structurally
+//!   identical pair with tag 3; 0x082aad14 is the neighbour immediately
+//!   below the tag-2 delete @ 0x082aad24, not the same function.
 //! - `cxx_vec_delete` — original: `FUN_0803170c` @ 0x0803170c (16 bytes).
 //!   C++ `delete[]` with destructors: cookie-driven `__cpp_finalise` walk
 //!   via the null-guard veneer @ 0x082ab254, then the tag-3 delete.
@@ -366,15 +369,60 @@ pub unsafe extern "C" fn operator_delete(ptr: *mut u8) {
     }
 }
 
-/// operator new (tag 3) — original @ 0x082aad74 (8 bytes):
-/// `mov r1, #3; b 0x080eb67c`.
+/// operator new (tag 3) — original: `FUN_082aad74` @ 0x082aad74 (8 bytes,
+/// 111 `bl` call sites; binary-verified against osos.dec, of which 101 sit
+/// inside a function extent Ghidra knows about). Whole body:
+///
+/// ```text
+/// 082aad74:  mov r1, #3        ; caller tag
+/// 082aad78:  b   0x080eb67c    ; tail call malloc_wrapper(size, 3)
+/// ```
+///
+/// The tag-2 `operator_new`'s sibling for a second allocation tag: pins
+/// the caller tag to 3 and hands `size` straight to `malloc_wrapper`,
+/// returning whatever it returns (NULL included — there is no
+/// out-of-memory check here; that lives in `operator_new_checked`).
+///
+/// Note the asymmetry with `operator_delete_tag3`: the alloc side has **no
+/// NULL guard** — `size == 0` is passed through to the heap core
+/// untouched, exactly like the original's unconditional tail branch.
+///
+/// Deviations: the original's tail branch is a plain call here (Rust has
+/// no guaranteed tail calls), and `malloc_wrapper` dispatches through
+/// `HEAP_OPS` rather than branching to 0x080eb67c directly.
+/// `inline(never)` for the same reason as the tag-2 pair: on device this
+/// is a real `bl` target for 111 call sites, and an 8-byte body is exactly
+/// what LLVM would otherwise inline away, dragging the whole lazy-heap-init
+/// path into every caller and destroying those callers' matches.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn operator_new_tag3(size: usize) -> *mut u8 {
     malloc_wrapper(size, TAG_OPERATOR_NEW_TAG3)
 }
 
-/// operator delete (tag 3) — original @ 0x082aad14 (16 bytes):
-/// NULL-guarded `free_wrapper` with tag 3.
+/// operator delete (tag 3) — original: `FUN_082aad14` @ 0x082aad14
+/// (16 bytes, 155 `bl` call sites + 3 tail `b`; binary-verified against
+/// osos.dec, of which 145 `bl` sit inside a function extent Ghidra knows
+/// about). The immediate neighbour *below* the tag-2 `operator_delete`
+/// @ 0x082aad24, not the same function. Whole body:
+///
+/// ```text
+/// 082aad14:  cmp   r0, #0
+/// 082aad18:  movne r1, #3      ; caller tag
+/// 082aad1c:  bne   0x080e7970  ; tail call free_wrapper(ptr, 3)
+/// 082aad20:  bx    lr          ; NULL: return without touching the heap
+/// ```
+///
+/// The tag-3 half of the pair: `delete NULL` is a no-op that never reaches
+/// the heap at all, while a non-NULL pointer is released with caller tag 3.
+/// That NULL guard is genuinely absent from `operator_new_tag3` — the C++
+/// standard requires it on delete and not on new, and the original encodes
+/// exactly that.
+///
+/// Deviations: the original's conditional tail branch is a plain guarded
+/// call here, and `free_wrapper` dispatches through `HEAP_OPS`.
+/// `inline(never)`: 155 call sites reach this with `bl` on device.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn operator_delete_tag3(ptr: *mut u8) {
     if !ptr.is_null() {
@@ -834,6 +882,46 @@ pub(crate) mod tests {
             operator_delete_tag3(BLOCK_A as *mut u8);
             assert_eq!(FREE_CALLS, 1);
             assert_eq!(LAST_FREE_TAG, 3);
+        }
+    }
+
+    #[test]
+    fn tag3_new_forwards_size_unguarded_and_returns_the_block_verbatim() {
+        let _lock = mock_heap();
+        unsafe {
+            // The original is an unconditional tail branch: every size,
+            // including 0, reaches the heap core with tag 3.
+            for size in [0usize, 1, 48, 0x1000] {
+                let before = ALLOC_CALLS;
+                assert_eq!(operator_new_tag3(size), BLOCK_A as *mut u8);
+                assert_eq!(ALLOC_CALLS, before + 1, "no guard on the alloc side");
+                assert_eq!(LAST_ALLOC_SIZE, size);
+                assert_eq!(LAST_ALLOC_TAG, 3);
+            }
+            assert_eq!(FREE_CALLS, 0, "new must never touch the free path");
+            // The heap's return value flows back untouched — a failed
+            // allocation surfaces as NULL, not as a retry (that is
+            // operator_new_checked's job).
+            set_alloc_ret(core::ptr::null_mut());
+            assert!(operator_new_tag3(64).is_null());
+        }
+    }
+
+    #[test]
+    fn tag3_delete_null_takes_the_no_op_path() {
+        let _lock = mock_heap();
+        unsafe {
+            // `cmp r0,#0; ... bx lr`: NULL returns without a heap call,
+            // and without even running the lazy heap init.
+            operator_delete_tag3(core::ptr::null_mut());
+            assert_eq!(FREE_CALLS, 0, "delete(NULL) must not reach the heap");
+            assert_eq!(CREATE_CALLS, 0, "NULL returns before free_wrapper");
+            // Non-NULL forwards the pointer verbatim with tag 3.
+            operator_delete_tag3(BLOCK_A as *mut u8);
+            assert_eq!(FREE_CALLS, 1);
+            assert_eq!(LAST_FREE_HEAP, core::ptr::addr_of_mut!(FAKE_HANDLE));
+            assert_eq!(LAST_FREE_PTR, BLOCK_A as *mut u8);
+            assert_eq!(LAST_FREE_TAG, 3, "tag 3, not the tag-2 delete");
         }
     }
 
