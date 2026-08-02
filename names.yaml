@@ -17455,3 +17455,42 @@ functions:
       count-in-r0 return; the diff is the crate's fp frame, the absent
       variadic spill (the explicit VaList) and the blx-through-volatile-
       slot dispatch standing in for the direct bl 0x08074ba0.
+
+  - address: 0x082770e0
+    ghidra: FUN_082770e0
+    name: utf8_codepoint_count_safe
+    size: 48
+    sig: "size_t utf8_codepoint_count_safe(const char *text)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: text, local_c: cursor, iVar1: count, uVar2: codepoint}
+    notes: >-
+      Decoded from raw bytes (osos.dec 0x082770e0..0x0827710c, 48 bytes
+      all code - no literal-pool word; next function starts at
+      0x08277110). 102 bl call sites, binary-scanned. The UTF-8
+      counterpart of the NULL-guarded byte strlen_safe @ 0x082770bc that
+      sits immediately before it in the image: this one counts
+      CODEPOINTS. `push {r0,r4,lr}` spills the argument and that spill
+      slot IS the cursor cell - `ldr r0,[sp]; cmp r0,#0; beq` returns 0
+      for NULL without decoding, then the loop is `mov r0,sp;
+      bl 0x08276214; cmp r0,#0; addne r4,r4,#1; bne` - the already-ported
+      utf8_next_codepoint advances the spilled cursor and the counter is
+      bumped for every nonzero codepoint. Termination is whatever the
+      decoder calls zero: the NUL byte, but also any four-byte or
+      otherwise malformed lead (those consume three bytes and stop the
+      count), the same terminator semantics utf8_strcmp_safe @ 0x08276d64
+      relies on. Continuation bytes, overlong forms and surrogates are
+      not validated. The 48-byte sibling at 0x08277110 is the bounded
+      variant (same loop with an `s + len` end pointer, 4 bl call sites)
+      and is NOT ported here. Deviations: none - utf8_next_codepoint is
+      ported and called directly, and the NULL guard runs once before the
+      loop as in the original; a non-NULL unreadable string faults in
+      both. Host tests: NULL and empty are 0, pure ASCII agrees with
+      strlen_safe, a two-byte + three-byte + ASCII string is 3 codepoints
+      over 6 bytes, a four-byte lead and a lone continuation byte each
+      end the count early, and a malformed two-byte sequence still counts
+      as one. match.py structural: same spill-as-cursor cell, NULL guard,
+      decoder call with &cursor, nonzero-codepoint count and count-in-r0
+      return; the diff is the crate's fp frame and LLVM rotating the loop
+      (counter seeded at -1 with mvn and incremented at the loop head
+      instead of the original's predicated addne).

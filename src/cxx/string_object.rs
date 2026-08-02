@@ -61,6 +61,13 @@
 //!   bounded formatter @ 0x08074ba0, hands the buffer to
 //!   `string_object_assign_payload` @ 0x08276474, and returns the
 //!   formatter's character count.
+//! - `utf8_codepoint_count_safe` — original: `FUN_082770e0` @
+//!   0x082770e0 (48 bytes, all code; 102 `bl` call sites,
+//!   binary-scanned). The UTF-8 counterpart of the NULL-guarded
+//!   `strlen_safe` @ 0x082770bc it sits immediately after: it counts
+//!   *codepoints* by walking the string through
+//!   `utf8_next_codepoint` @ 0x08276214 until that decoder reports
+//!   zero. NULL returns 0 without decoding.
 //! - `string_default_construct` — original: `FUN_08277440` @ 0x08277440
 //!   (20 bytes: 16 code + the 4-byte vtable literal @ 0x08277454;
 //!   280 `bl` call sites, binary-scanned). `obj[0] = vtable`,
@@ -1217,6 +1224,57 @@ pub unsafe extern "C" fn utf8_next_codepoint(cursor: *mut *const u8) -> u32 {
 
     0
 }
+
+/// utf8_codepoint_count_safe — original: `FUN_082770e0` @ 0x082770e0
+/// (48 bytes, all code — no literal-pool word; 102 `bl` call sites,
+/// binary-scanned).
+///
+/// The UTF-8 counterpart of [`strlen_safe`] @ 0x082770bc, which sits
+/// immediately before it in the image: where that one counts *bytes*,
+/// this one counts *codepoints*. Decoded from the raw ARM at 0x082770e0:
+///
+/// ```text
+/// push {r0, r4, lr}    ; spill `text` — [sp] IS the cursor
+/// ldr  r0, [sp]
+/// mov  r4, #0          ; count
+/// cmp  r0, #0
+/// beq  done            ; NULL -> 0, without decoding
+/// loop:
+/// mov  r0, sp          ; &cursor
+/// bl   0x08276214      ; utf8_next_codepoint(&cursor)
+/// cmp  r0, #0
+/// addne r4, r4, #1
+/// bne  loop
+/// done:
+/// mov  r0, r4
+/// pop  {r3, r4, pc}
+/// ```
+///
+/// The spilled argument word doubles as the cursor cell the decoder
+/// advances, so the walk needs no other state. Termination is whatever
+/// [`utf8_next_codepoint`] calls a zero codepoint: the NUL byte, but also
+/// any four-byte or otherwise malformed lead — those consume three bytes
+/// and stop the count, exactly as they end a comparison in
+/// [`utf8_strcmp_safe`]. Codepoints are counted, not validated: an empty
+/// string and a NULL pointer both return 0.
+///
+/// Deviations: none. The NULL guard runs once before the loop, as in the
+/// original; a non-NULL but unreadable string faults in both.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn utf8_codepoint_count_safe(text: *const u8) -> usize {
+    let mut cursor = text;
+    if cursor.is_null() {
+        return 0;
+    }
+
+    let mut count = 0usize;
+    while utf8_next_codepoint(&mut cursor) != 0 {
+        count += 1;
+    }
+    count
+}
+
 /// Decodes the codepoint ending immediately before `*cursor` and moves the
 /// cursor backward — original: `FUN_08276288` @ 0x08276288 (116 bytes, all
 /// code; source: `ipod-decomp/decomp/c/026/08276288_FUN_08276288.c`).
@@ -3758,6 +3816,53 @@ mod tests {
         }
     }
 
+
+    // ---- utf8_codepoint_count_safe ----------------------------------
+
+    fn codepoints(text: &[u8]) -> usize {
+        unsafe { utf8_codepoint_count_safe(text.as_ptr()) }
+    }
+
+    #[test]
+    fn utf8_codepoint_count_safe_returns_zero_for_null_and_empty() {
+        assert_eq!(unsafe { utf8_codepoint_count_safe(core::ptr::null()) }, 0);
+        assert_eq!(codepoints(b"\0"), 0);
+    }
+
+    #[test]
+    fn utf8_codepoint_count_safe_counts_ascii_bytes_like_strlen_safe() {
+        for text in [&b"a\0"[..], b"abc\0", b"playlist name\0"] {
+            assert_eq!(
+                codepoints(text),
+                unsafe { strlen_safe(text.as_ptr()) },
+                "pure ASCII agrees with the byte strlen @ 0x082770bc"
+            );
+        }
+    }
+
+    #[test]
+    fn utf8_codepoint_count_safe_counts_multibyte_sequences_as_one_each() {
+        // "é€a" — a two-byte, a three-byte and an ASCII codepoint (6 bytes).
+        let text = [0xc3, 0xa9, 0xe2, 0x82, 0xac, b'a', 0];
+        assert_eq!(codepoints(&text), 3);
+        assert_eq!(unsafe { strlen_safe(text.as_ptr()) }, 6, "six bytes, three codepoints");
+    }
+
+    #[test]
+    fn utf8_codepoint_count_safe_stops_where_the_decoder_reports_zero() {
+        // A four-byte lead decodes as the decoder's terminator: the count
+        // stops there even though bytes follow.
+        assert_eq!(codepoints(&[b'a', 0xf0, 0x9f, 0x92, 0xa9, b'b', 0]), 1);
+        // A lone continuation byte is equally malformed and equally final.
+        assert_eq!(codepoints(&[b'a', b'b', 0x80, 0x80, 0x80, b'c', 0]), 2);
+    }
+
+    #[test]
+    fn utf8_codepoint_count_safe_does_not_validate_continuation_bytes() {
+        // The decoder masks payload bits without checking them, so a
+        // malformed but well-shaped two-byte sequence still counts as one.
+        assert_eq!(codepoints(&[0xc3, 0xff, b'x', 0]), 2);
+    }
 
     // ---- utf8_strcmp_safe -------------------------------------------
 
