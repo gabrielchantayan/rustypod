@@ -19,6 +19,8 @@
 //! one skip their tests on those hosts rather than crash — which is why this
 //! returns an `Option` instead of asserting.
 
+extern crate std;
+
 /// Maps `len` bytes at `hint` and returns it only if the whole span
 /// round-trips through `u32` unchanged. `None` means this host cannot place
 /// the fixture below 4 GiB; callers skip rather than guess an address.
@@ -59,3 +61,12 @@ pub fn note_missing_u32_fixture(module: &str) -> bool {
     );
     true
 }
+
+/// Serializes every host test that installs mocks into the crate-global
+/// `drivers::ata_cmd::TRACED_ALLOC_HOOKS`. That table is one shared
+/// mutable global, and `cargo test` runs test functions on parallel
+/// threads, so the allocator tests in `drivers::ata_cmd` and every
+/// ported caller that allocates (`sqlite::blob_to_hex`, ...) must take
+/// this lock for the duration of a test rather than each keeping a
+/// private one.
+pub static TRACED_ALLOC_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

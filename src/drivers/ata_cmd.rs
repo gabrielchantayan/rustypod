@@ -641,7 +641,7 @@ pub struct TracedAllocHooks {
 
 /// Default stub: no heap wired in — fail the way the underlying
 /// allocator does when it cannot serve the request.
-unsafe extern "C" fn missing_allocator(_size: i32, _tag1: u32, _tag2: u32) -> *mut u8 {
+pub unsafe extern "C" fn missing_allocator(_size: i32, _tag1: u32, _tag2: u32) -> *mut u8 {
     core::ptr::null_mut()
 }
 
@@ -1769,7 +1769,9 @@ mod tests {
 
     // ---- the traced allocator -----------------------------------------
 
-    static ALLOC_TEST_LOCK: Mutex<()> = Mutex::new(());
+    // Shared with every other module that mocks TRACED_ALLOC_HOOKS
+    // (sqlite/blob_to_hex.rs), so those tests cannot race these.
+    use crate::testing::TRACED_ALLOC_TEST_LOCK as ALLOC_TEST_LOCK;
 
     /// One observable call into the descriptor, in order.
     #[derive(Debug, Clone, PartialEq, Eq)]
