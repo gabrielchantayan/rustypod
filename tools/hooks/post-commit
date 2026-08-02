@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# post-commit — publish every commit the moment it lands.
+#
+# The transpile loop used to push only between agent runs, but a single run
+# can last hours and produce a dozen commits; nine once sat unpushed while
+# the README badge showed stale numbers. Commits are the thing being
+# published, so publish on commit.
+#
+# Installed only by `install.sh --with-autopush` (the porting VM), so a
+# workstation checkout does not start pushing on its own.
+#
+# Never fail the commit: a rejected push is something to fix later, not a
+# reason to lose work.
+gitdir=$(git rev-parse --git-dir)
+if [ -d "$gitdir/rebase-merge" ] || [ -d "$gitdir/rebase-apply" ]; then
+  exit 0   # mid-rebase; the loop pushes once the rebase settles
+fi
+{
+  printf '[push %s] ' "$(date -Is)"
+  git push origin HEAD:master 2>&1 | tail -1
+} >> "$HOME/transpile-push.log"
+exit 0

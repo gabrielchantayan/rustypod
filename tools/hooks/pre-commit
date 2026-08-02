@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# pre-commit — refuse to commit a red tree.
+#
+# PORTING.md has always said "never commit a failing tree", but it was only
+# ever an instruction, and instructions are not a gate: master arrived red on
+# macOS in five modules because every commit was made on a Linux box where
+# the suite happened to pass. Enforce it where commits actually happen.
+#
+# Install: tools/hooks/install.sh (or symlink this into .git/hooks/).
+# Bypass for a genuine emergency: RUSTYPOD_SKIP_TEST_GATE=1 git commit ...
+set -uo pipefail
+
+if [[ "${RUSTYPOD_SKIP_TEST_GATE:-0}" == "1" ]]; then
+  printf 'pre-commit: test gate bypassed (RUSTYPOD_SKIP_TEST_GATE=1)\n' >&2
+  exit 0
+fi
+
+export PATH="$HOME/.cargo/bin:$PATH"
+root=$(git rev-parse --show-toplevel)
+cd "$root" || exit 1
+
+# Resolve the host triple from inside the crate: rust-toolchain.toml pins
+# nightly here, and the porting VM has no default toolchain outside a project.
+host=$(rustc -vV | awk '/^host:/ {print $2}')
+if [[ -z "$host" ]]; then
+  printf 'pre-commit: cannot resolve the host triple; refusing to gate blind\n' >&2
+  exit 1
+fi
+
+printf 'pre-commit: cargo test --target %s\n' "$host" >&2
+out=$(cargo test --target "$host" 2>&1)
+status=$?
+
+if (( status != 0 )); then
+  printf '\n\033[31mpre-commit: REFUSED — the test suite is not green.\033[0m\n' >&2
+  # Show the failures, not the thousands of passing lines.
+  grep -E 'test result|^error|FAILED|panicked at|SIGSEGV|SIGABRT|^test .* \.\.\. FAILED' \
+    <<<"$out" | tail -15 >&2
+  printf '\nFix it, or commit with RUSTYPOD_SKIP_TEST_GATE=1 if you truly must.\n' >&2
+  exit 1
+fi
+
+grep -E 'test result' <<<"$out" | tail -1 >&2
+exit 0
