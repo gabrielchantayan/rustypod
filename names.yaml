@@ -17112,3 +17112,102 @@ functions:
       structural: same compare/skip/load-source-payload/call/return-this
       shape; the diff is LLVM inverting the predicated guard into an early
       bxeq lr and adding the crate's fp frame.
+  - address: 0x0827216c
+    ghidra: FUN_0827216c
+    name: resource_chain_find
+    size: 84
+    sig: "void *resource_chain_find(ResourceProvider *head, ResourceKind kind, u32 id)"
+    module: app/resource_chain
+    status: ported
+    renames:
+      param_1: head
+      param_2: kind
+      param_3: id
+      local_8: found
+      FUN_0827239c: resource_chain_find_string
+      FUN_0827238c: resource_chain_find_bitmap
+      FUN_08272360: resource_chain_find_on_current_task
+    notes: >-
+      377 bl + 11 b call sites (binary-scanned over the whole decrypted
+      image by decoding every B/BL word) - the most-called function in
+      retailOS that had not been ported. The framework's typed resource
+      lookup: walk a chain of resource-provider objects and ask each one,
+      through vtable slot +0x64, for the resource named by a
+      (four-character kind, numeric id) pair; the first provider that
+      answers wins. Raw ARM: push {r3,r4,r5,r6,r7,lr} (the r3 push is the
+      one-word out slot); found = NULL stored once at [sp]; enter at the
+      loop test; per node - vtable = node[0], ip = vtable[0x64],
+      ip(node, kind, id, &found); cmp r0,#0; bne out; node = node[0x14];
+      cmp node,#0; bne loop; return [sp]. Two details are load-bearing
+      and reproduced exactly. First, the out word is cleared ONCE before
+      the loop, never per node, so a provider that writes it and then
+      reports "not mine" still decides the result when nobody else
+      answers. Second, the provider's r0 is a plain non-zero test
+      (cmp #0/bne), not a comparison with 1. A NULL head is the loop's
+      own exit test and returns NULL without faulting; a NULL vtable or
+      NULL slot faults, and the port keeps that unguarded load.
+      Identification - the two constant-binding thunks that follow the
+      function are its only shape-revealing callers: 0x0827238c binds
+      literal 0x424d6170 ("BMap") and 0x0827239c binds 0x53747220
+      ("Str "), both as `mov r2,r1; ldr r1,[pc]; b 0x0827216c`, so r1 is
+      a FourCC type tag held big-endian in a word and the caller's second
+      argument is the resource id. The "Str " result is consumed as a
+      const char *: 0x080c6324 hands it straight to the string-object
+      constructor @ 0x0827735c (vtable literal 0x089a6044, the
+      cxx/string_object.rs class) and the 0x080d28e0 cluster copies it
+      with the bounded UTF-8 copy @ 0x08275d00 into 0x20-byte fields. The
+      chain head is task-local - the 17-call-site wrapper @ 0x08272360 is
+      `head = task_ctx_field_0x30(); if (head) tail-call this` - i.e.
+      field +0x30 of the current task's context block (ported in
+      util/context_field.rs) is the head of this provider chain; the next
+      link at +0x14 is refcounted by its setter @ 0x082722a0 (release old,
+      retain new). The 4-argument sibling @ 0x082721c0 is the same walk
+      with an extra bool* "did anyone answer" out parameter, and
+      0x08272230 is the slot +0x68 variant that falls back to slot +0x58;
+      neither is ported here. Deviations - the provider object and its
+      vtable are modeled as #[repr(C)] structs with real Rust pointers, so
+      offsets are the original's on the 32-bit target (vtable +0x00, next
+      +0x14, find = the 26th vtable word = +0x64) and self-consistent on
+      the 64-bit host, where tests build the graph natively; a compile-time
+      offset_of test pins all three. Host tests (12 in the module): empty
+      chain asks nobody; first answer stops the walk; three-node walk in
+      order with kind and id forwarded verbatim; nobody answers -> NULL
+      after asking everyone; a declining provider's write survives to the
+      result; an answer without a write yields NULL; every non-zero answer
+      (1, 2, 0x80000000, 0xffffffff) stops the walk; a mixed-class chain
+      dispatches through each node's OWN vtable; the FourCC literals spell
+      "Str " and "BMap" big-endian. match.py structural: identical loop -
+      same out-word init before the loop, same ldr [node,#0x64] slot load,
+      same blx, same cmp/bne, same ldr [node,#20] link walk; the only diff
+      is the crate's fp prologue/epilogue and LLVM's register allocation
+      plus a hoisted head-NULL pre-test.
+
+  - address: 0x0827239c
+    ghidra: FUN_0827239c
+    name: resource_chain_find_string
+    size: 12
+    sig: "const char *resource_chain_find_string(ResourceProvider *head, u32 id)"
+    module: app/resource_chain
+    status: ported
+    renames:
+      param_1: head
+      param_2: id
+      FUN_0827216c: resource_chain_find
+    notes: >-
+      171 bl + 14 b call sites (binary-scanned). 12 bytes - 8 of code plus
+      the 4-byte literal 0x53747220 at 0x082723a8, which is "Str " read
+      big-endian. `mov r2,r1; ldr r1,[pc] (=0x53747220); b 0x0827216c`:
+      binds the string resource kind as the middle argument of
+      resource_chain_find, shifting the caller's id from r2 into place, and
+      tail-branches. So it is "look this string resource id up in the
+      provider chain", returning a NUL-terminated C string or NULL when no
+      provider owns the id. Call-site evidence that the result really is a
+      C string: 0x080c6324 passes it to the string-object constructor
+      @ 0x0827735c, and 0x080d28e0..0x080d2ca0 feed it to the bounded
+      UTF-8 copy @ 0x08275d00 with limits of 0x20 and 0xa bytes. Deviation:
+      the port is a call rather than a tail branch (observably identical);
+      LLVM still emits `mov r2,r1; ldr r1,=0x53747220; b resource_chain_find`
+      around the crate frame, so match.py is instruction-for-instruction on
+      the body. Its 12-byte sibling @ 0x0827238c binds 0x424d6170 ("BMap")
+      the same way (46 bl + 2 b call sites) and is documented but NOT
+      ported; its kind constant is exported as ResourceKind::BITMAP.
