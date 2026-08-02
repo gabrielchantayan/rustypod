@@ -122,10 +122,20 @@ pub const OWNER_ID_OFFSET: usize = 0x18;
 /// modeled as a crate static (see the module header's deviation note).
 /// NULL is the pre-initialization state and is only ever dereferenced on the
 /// non-NULL subject path.
+///
+/// This is the crate's **single** model of that word — 0x089ca674 is the
+/// framework's system root, with 120 literal-pool references image-wide, and
+/// `app/scoped_context.rs` derives the same three fields from it through this
+/// static. Its address stands in for 0x089ca674, so a read is the original's
+/// `ldr rN, [pc, #imm]; ldr rN, [rN]` pair, and wiring it once at integration
+/// serves every reader.
 pub static mut APP_ROOT_OBJECT: *mut u8 = core::ptr::null_mut();
 
+/// Reads [`APP_ROOT_OBJECT`] the one way every reader must: volatile, because
+/// the word is written at runtime and a build in which nothing writes it must
+/// not constant-fold the NULL in.
 #[inline(always)]
-unsafe fn app_root_object() -> *mut u8 {
+pub(crate) unsafe fn app_root_object() -> *mut u8 {
     core::ptr::read_volatile(core::ptr::addr_of!(APP_ROOT_OBJECT))
 }
 
@@ -235,12 +245,10 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
-    use std::sync::Mutex;
+    use crate::testing::{
+        hints, note_missing_u32_fixture, try_map_u32_slab, APP_ROOT_TEST_LOCK,
+    };
 
-    /// [`APP_ROOT_OBJECT`] is one shared mutable global; the tests that
-    /// install a fixture root must not run concurrently.
-    static ROOT_LOCK: Mutex<()> = Mutex::new(());
 
     const FILL: u8 = 0xa5;
 
@@ -322,7 +330,7 @@ mod tests {
 
     #[test]
     fn a_null_subject_never_reads_the_root_global() {
-        let _lock = ROOT_LOCK
+        let _lock = APP_ROOT_TEST_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut record = Record::new();
@@ -338,7 +346,7 @@ mod tests {
 
     #[test]
     fn a_subject_captures_the_context_and_the_owner_id() {
-        let _lock = ROOT_LOCK
+        let _lock = APP_ROOT_TEST_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let Some(fixture) = RootFixture::map() else {
@@ -369,7 +377,7 @@ mod tests {
 
     #[test]
     fn a_null_owner_record_yields_a_zero_owner_id_but_still_stores_the_context() {
-        let _lock = ROOT_LOCK
+        let _lock = APP_ROOT_TEST_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let Some(fixture) = RootFixture::map() else {

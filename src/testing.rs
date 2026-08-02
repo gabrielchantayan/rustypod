@@ -104,3 +104,10 @@ pub static TRACED_ALLOC_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(
 /// ported caller of `demo_mode_instance`, such as `app::class_6800` —
 /// must hold this lock rather than each keeping a private one.
 pub static CLASS_REGISTRY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serializes every host test that installs a fixture root into
+/// `app::context_scope::APP_ROOT_OBJECT`. That static is the crate's single
+/// model of the firmware word @ 0x089ca674 and is read by both
+/// `app::context_scope` and `app::scoped_context`, so a per-module lock would
+/// let one module's teardown NULL the root while the other is walking it.
+pub static APP_ROOT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

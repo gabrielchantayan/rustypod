@@ -18241,11 +18241,13 @@ functions:
       the CAPTURE_CONTEXT_FIELDS dispatch slot (the
       util/context_field.rs CURRENT_TASK_CTX_BLOCK pattern) whose
       default stub reproduces its body exactly - `owner==0 -> both
-      derived words NULL, else service_context = (*SYSTEM_ROOT)->+0x30,
+      derived words NULL, else service_context = ROOT->+0x30,
       registry_token = service_context->+0xf60 ? that->+0x18 : 0` -
       reading the runtime-initialized RW word @ 0x089ca674 (120
-      literal-pool references image-wide) through the SYSTEM_ROOT
-      static, the app/singletons.rs deviation. The unguarded root walk
+      literal-pool references image-wide) through
+      app/context_scope.rs's APP_ROOT_OBJECT static, the crate's single
+      model of that word (app/singletons.rs deviation; app/context_scope
+      derives the same three fields from it). The unguarded root walk
       is kept, so a NULL root with a non-NULL owner faults exactly
       where the original would. What the derived words are: the object
       at root+0x30 owns a registry at +0xf60 that 0x0805e36c

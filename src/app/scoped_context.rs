@@ -90,9 +90,12 @@
 //!   [`CAPTURE_CONTEXT_FIELDS`] dispatch slot — the
 //!   `util/context_field.rs` `CURRENT_TASK_CTX_BLOCK` pattern — whose
 //!   default stub reproduces the body above exactly, reading the system
-//!   root through the [`SYSTEM_ROOT`] static that stands in for the RW
-//!   word @ 0x089ca674 (the `app/singletons.rs` deviation: those pages
-//!   are runtime-initialized and the image holds stale bytes there).
+//!   root through [`crate::app::context_scope::APP_ROOT_OBJECT`], the
+//!   crate's single static for the RW word @ 0x089ca674 (the
+//!   `app/singletons.rs` deviation: those pages are runtime-initialized
+//!   and the image holds stale bytes there). `app/context_scope.rs`
+//!   walks the same root for its own capture, so the two share one
+//!   definition rather than each modeling the word separately.
 //!   With a NULL root and a non-NULL owner the stub faults exactly where
 //!   the original would with an uninitialized global; the guard is not
 //!   added.
@@ -112,6 +115,7 @@
 //!   r0 and the argument documents the calling convention; an unused
 //!   AAPCS argument is ABI-identical.
 
+use crate::app::context_scope::app_root_object;
 use core::ptr;
 
 /// The original's vtable literal, held in the ctor's own literal-pool
@@ -185,12 +189,6 @@ const SERVICE_CONTEXT_REGISTRY_SLOT: usize = 0xf60 / 4;
 /// (`ldrne r1, [r1, #0x18]`).
 const REGISTRY_TOKEN_SLOT: usize = 0x18 / 4;
 
-/// Stands in for the runtime-initialized RW word @ 0x089ca674 — the
-/// framework's system root, from which the constructor's callee derives
-/// both of the token's context fields. Defaults to NULL, which is the
-/// pre-init state; wire it before any owner-bearing token is built.
-pub static mut SYSTEM_ROOT: *const *mut u8 = ptr::null();
-
 /// Default [`CAPTURE_CONTEXT_FIELDS`] stub: `FUN_0826fda0` @ 0x0826fda0,
 /// reproduced instruction for instruction (see the module header). With
 /// no owner both derived words are cleared and the system root is never
@@ -204,7 +202,7 @@ unsafe extern "C" fn capture_context_fields_stub(token: *mut ScopedContext, owne
         return;
     }
 
-    let root = ptr::read_volatile(ptr::addr_of!(SYSTEM_ROOT)).read();
+    let root = app_root_object();
     let service_context = (root as *const *mut u8).add(ROOT_SERVICE_CONTEXT_SLOT).read();
     (*token).service_context = service_context;
 
@@ -291,15 +289,15 @@ pub extern "C" fn scoped_context_destroy(_this: *mut ScopedContext) {}
 mod tests {
     extern crate std;
     use super::*;
-    use std::boxed::Box;
-    use std::sync::Mutex;
+    use crate::app::context_scope::APP_ROOT_OBJECT;
     use std::vec;
     use std::vec::Vec;
 
     /// Serializes every test that swaps [`CAPTURE_CONTEXT_FIELDS`] or
-    /// [`SYSTEM_ROOT`] (the `util/context_field.rs` `SLOT_TEST_LOCK`
-    /// precedent).
-    static SLOT_TEST_LOCK: Mutex<()> = Mutex::new(());
+    /// installs a fixture root. The root lives in `app::context_scope`
+    /// and that module's tests write it too, so the lock is the crate-wide
+    /// [`APP_ROOT_TEST_LOCK`] rather than a private one.
+    use crate::testing::APP_ROOT_TEST_LOCK as SLOT_TEST_LOCK;
 
     static mut MOCK_CALLS: u32 = 0;
     static mut MOCK_OWNER: *mut u8 = ptr::null_mut();
@@ -319,7 +317,7 @@ mod tests {
         fn drop(&mut self) {
             unsafe {
                 ptr::addr_of_mut!(CAPTURE_CONTEXT_FIELDS).write_volatile(capture_context_fields_stub);
-                ptr::addr_of_mut!(SYSTEM_ROOT).write_volatile(ptr::null());
+                ptr::addr_of_mut!(APP_ROOT_OBJECT).write_volatile(ptr::null_mut());
             }
         }
     }
@@ -435,10 +433,8 @@ mod tests {
         service_context[SERVICE_CONTEXT_REGISTRY_SLOT] = registry.as_mut_ptr() as *mut u8;
         let mut root: Vec<*mut u8> = vec![ptr::null_mut(); ROOT_SERVICE_CONTEXT_SLOT + 1];
         root[ROOT_SERVICE_CONTEXT_SLOT] = service_context.as_mut_ptr() as *mut u8;
-        let root_word = Box::new(root.as_mut_ptr() as *mut u8);
-
         unsafe {
-            ptr::addr_of_mut!(SYSTEM_ROOT).write_volatile(&*root_word as *const *mut u8);
+            ptr::addr_of_mut!(APP_ROOT_OBJECT).write_volatile(root.as_mut_ptr() as *mut u8);
         }
 
         let mut token = poisoned_token();
@@ -458,10 +454,8 @@ mod tests {
         let mut service_context: Vec<*mut u8> = vec![ptr::null_mut(); SERVICE_CONTEXT_REGISTRY_SLOT + 1];
         let mut root: Vec<*mut u8> = vec![ptr::null_mut(); ROOT_SERVICE_CONTEXT_SLOT + 1];
         root[ROOT_SERVICE_CONTEXT_SLOT] = service_context.as_mut_ptr() as *mut u8;
-        let root_word = Box::new(root.as_mut_ptr() as *mut u8);
-
         unsafe {
-            ptr::addr_of_mut!(SYSTEM_ROOT).write_volatile(&*root_word as *const *mut u8);
+            ptr::addr_of_mut!(APP_ROOT_OBJECT).write_volatile(root.as_mut_ptr() as *mut u8);
         }
 
         let mut token = poisoned_token();
