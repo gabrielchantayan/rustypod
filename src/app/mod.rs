@@ -10,6 +10,7 @@ pub mod media_ext;
 pub mod node_list;
 pub mod object_dispatch_entry;
 pub mod registry;
+pub mod resource_chain;
 pub mod singletons;
 pub mod slot_table;
 pub mod string_owner;
