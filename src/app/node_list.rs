@@ -300,6 +300,7 @@ mod layout_checks {
 
 use core::ffi::c_void;
 
+use crate::cxx::observable_array::observable_array_construct;
 use crate::runtime::cxa_guard::{cxa_guard_acquire, cxa_guard_release};
 use crate::runtime::shutdown_chain::cxa_atexit;
 
@@ -345,8 +346,11 @@ static mut NODE_LIST_GUARD: u32 = 0;
 /// its flag and callback words, and returns `this`. The stock sequence
 /// deliberately does not write the word at +0x24, so this port does not
 /// turn the constructor into a whole-object zeroing operation.
+///
+/// The +0x10 sub-object is the observable array of `cxx/observable_array.rs`
+/// (vtable 0x089a5d0c); its constructor @ 0x08271cec is ported, so the
+/// stock `bl` is a real call here rather than four inlined stores.
 const NODE_LIST_VTABLE: u32 = 0x0898_165c;
-const NODE_LIST_DRAIN_VTABLE: u32 = 0x089a_5d0c;
 
 #[inline(always)]
 unsafe fn node_list_store_word(this: *mut u8, offset: usize, value: u32) {
@@ -360,17 +364,13 @@ pub unsafe extern "C" fn node_list_construct(this: *mut u8) -> *mut u8 {
     node_list_store_word(this, 0x00, NODE_LIST_VTABLE);
     node_list_store_word(this, 0x08, 0);
 
-    // `FUN_08271cec(param_1 + 4)`, including its
-    // `FUN_08275bb8` base-constructor call.
-    node_list_store_word(this, 0x10, NODE_LIST_DRAIN_VTABLE);
-    node_list_store_word(this, 0x14, 0);
-    node_list_store_word(this, 0x18, 0);
-    node_list_store_word(this, 0x1c, 0);
+    // `FUN_08271cec(param_1 + 4)`, including its `FUN_08275bb8`
+    // base-constructor call.
+    let embedded_array = observable_array_construct(this.add(0x10).cast());
 
     // The stock code addresses the remaining stores off `sub r0, r0, #16`
     // applied to the sub-object constructor's RETURN value, not off `this`.
-    // Inlining that constructor above fixes its return at `this + 0x10`, so
-    // the derived base is `this` and the two forms coincide.
+    let this = embedded_array.cast::<u8>().sub(0x10);
     node_list_store_word(this, 0x28, 0);
     node_list_store_word(this, 0x2c, 0);
     node_list_store_word(this, 0x04, 0);
@@ -1554,7 +1554,10 @@ mod tests {
             assert_eq!(word_at(this, 0x08), 0);
             assert_eq!(block.0[0x0c], 0);
             assert_eq!(&block.0[0x0d..0x10], &[0xa5; 3], "only the flag byte is cleared");
-            assert_eq!(word_at(this, 0x10), NODE_LIST_DRAIN_VTABLE);
+            assert_eq!(
+                word_at(this, 0x10),
+                crate::cxx::observable_array::OBSERVABLE_ARRAY_VTABLE
+            );
             for offset in [0x14, 0x18, 0x1c, 0x20, 0x28, 0x2c] {
                 assert_eq!(word_at(this, offset), 0, "word at +{offset:#x}");
             }

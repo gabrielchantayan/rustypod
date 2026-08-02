@@ -8,6 +8,7 @@ pub mod decoder_end_batch;
 pub mod decoder_cleanup;
 pub mod handle;
 pub mod list_splice;
+pub mod observable_array;
 pub mod pair_header;
 pub mod release;
 pub mod string;
