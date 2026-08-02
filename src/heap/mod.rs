@@ -270,7 +270,7 @@ mod pool_integration_tests {
         use std::sync::OnceLock;
         static SLAB: OnceLock<Option<usize>> = OnceLock::new();
         (*SLAB.get_or_init(|| {
-            crate::testing::try_map_u32_slab(0x0900_0000, SLAB_LEN).map(|p| p as usize)
+            crate::testing::try_map_u32_slab(crate::testing::hints::HEAP_INTEGRATION, SLAB_LEN).map(|p| p as usize)
         }))
         .map(|p| p as *mut u8)
     }

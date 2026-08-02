@@ -1435,7 +1435,7 @@ mod tests {
         use std::sync::OnceLock;
         static ARENA: OnceLock<Option<usize>> = OnceLock::new();
         (*ARENA.get_or_init(|| {
-            crate::testing::try_map_u32_slab(0x0a00_0000, 0x1000).map(|p| p as usize)
+            crate::testing::try_map_u32_slab(crate::testing::hints::ATA_CMD, 0x1000).map(|p| p as usize)
         }))
         .map(|p| p as *mut u32)
     }

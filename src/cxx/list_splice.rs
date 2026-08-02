@@ -272,28 +272,8 @@ mod tests {
         use std::sync::OnceLock;
         static SLAB: OnceLock<Option<usize>> = OnceLock::new();
         (*SLAB.get_or_init(|| {
-            extern "C" {
-                fn mmap(
-                    addr: usize,
-                    len: usize,
-                    prot: i32,
-                    flags: i32,
-                    fd: i32,
-                    offset: i64,
-                ) -> usize;
-            }
-            #[cfg(target_os = "macos")]
-            const MAP_PRIVATE_ANON: i32 = 0x1002;
-            #[cfg(target_os = "linux")]
-            const MAP_PRIVATE_ANON: i32 = 0x22;
-            const PROT_READ_WRITE: i32 = 3;
-            const LEN: usize = 0x1000;
-            let p = unsafe { mmap(0x0d00_0000, LEN, PROT_READ_WRITE, MAP_PRIVATE_ANON, -1, 0) };
-            // The whole span must round-trip through u32 unchanged.
-            if p == usize::MAX || p == 0 || p + LEN > 0x1_0000_0000 {
-                return None;
-            }
-            Some(p)
+            crate::testing::try_map_u32_slab(crate::testing::hints::LIST_SPLICE, 0x1000)
+                .map(|p| p as usize)
         }))
         .map(|p| p as *mut u8)
     }

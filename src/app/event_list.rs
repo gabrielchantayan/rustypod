@@ -359,7 +359,7 @@ mod tests {
 
     /// The release half dereferences the list's sentinel word as a 32-bit
     /// target pointer, so its fixture must round-trip through `u32`.
-    const SLAB_HINT: usize = 0x0d00_0000;
+    const SLAB_HINT: usize = crate::testing::hints::EVENT_LIST;
     const SLAB_LEN: usize = 0x1000;
     /// Where the sentinel node lives inside the slab, after the object.
     const SENTINEL_AT: usize = 0x100;

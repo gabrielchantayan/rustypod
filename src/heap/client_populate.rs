@@ -417,7 +417,7 @@ mod tests {
         use std::sync::OnceLock;
         static SLAB: OnceLock<Option<usize>> = OnceLock::new();
         (*SLAB.get_or_init(|| {
-            crate::testing::try_map_u32_slab(0x0b00_0000, 0x1000).map(|p| p as usize)
+            crate::testing::try_map_u32_slab(crate::testing::hints::CLIENT_POPULATE, 0x1000).map(|p| p as usize)
         }))
         .map(|p| p as *mut u8)
     }

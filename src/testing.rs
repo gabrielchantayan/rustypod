@@ -21,11 +21,36 @@
 
 extern crate std;
 
+/// Fixture base addresses, one per module.
+///
+/// These MUST be unique. A duplicate does not fail loudly — the second
+/// module to map simply gets some other address, which on a 64-bit host is
+/// usually above 4 GiB, so [`try_map_u32_slab`] returns `None` and that
+/// module's tests quietly skip on EVERY host. That is exactly what happened
+/// when `app/event_list` picked `0x0d00_0000`, already held by
+/// `cxx/list_splice`: seven tests stopped running anywhere and the suite
+/// still reported green.
+///
+/// Keep every fixture hint here rather than as a literal in the module, so
+/// a collision is visible in one place instead of being invisible across
+/// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
+/// overlap.
+pub mod hints {
+    pub const HEAP_INTEGRATION: usize = 0x0900_0000;
+    pub const ATA_CMD: usize = 0x0a00_0000;
+    pub const CLIENT_POPULATE: usize = 0x0b00_0000;
+    pub const BLOCK_MGR: usize = 0x0c00_0000;
+    pub const LIST_SPLICE: usize = 0x0d00_0000;
+    pub const EVENT_LIST: usize = 0x0e00_0000;
+    // `heap/pool.rs` maps its own arena at 0x0800_0000 through a separate
+    // path: it needs only bit 31 clear, not full u32 addressability.
+}
+
 /// Maps `len` bytes at `hint` and returns it only if the whole span
 /// round-trips through `u32` unchanged. `None` means this host cannot place
 /// the fixture below 4 GiB; callers skip rather than guess an address.
 ///
-/// Give each module a distinct `hint` so two fixtures cannot contend.
+/// Pass a constant from [`hints`] — never a bare literal.
 pub fn try_map_u32_slab(hint: usize, len: usize) -> Option<*mut u8> {
     extern "C" {
         fn mmap(
