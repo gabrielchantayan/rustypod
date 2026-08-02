@@ -18198,3 +18198,112 @@ functions:
       match.py structural: `push {fp,lr}; mov fp,sp; pop {fp,lr};
       b string_object_destroy` - the original's tail branch plus the
       target's mandatory non-leaf frame pointer.
+
+  # --- the framework's scoped context token (vtable 0x089a5b30) ---
+
+  - address: 0x08270394
+    ghidra: FUN_08270394
+    name: scoped_context_construct
+    size: 60
+    sig: "ScopedContext *scoped_context_construct(ScopedContext *this, void *owner, u8 mode)"
+    module: app/scoped_context
+    vars: {param_1: this, param_2: owner, param_3: mode, DAT_082703cc: SCOPED_CONTEXT_VTABLE_ADDRESS, FUN_0826fda0: CAPTURE_CONTEXT_FIELDS}
+    status: ported
+    notes: >-
+      109 bl + 2 b call sites (the tail-b sites are 0x08159a6c and
+      0x0816ef78), binary-scanned by decoding every B/BL word in
+      osos.dec - not from Ghidra xrefs. Ghidra's 56-byte extent drops
+      the trailing literal-pool word @ 0x082703cc (= 0x089a5b30, the
+      class vtable), so the true extent is 60. Constructor of a
+      0x18-byte polymorphic stack token: `str vtable,[this]; mov r0,#0;
+      stmib this,{r0,r1}` (+0x04 = 0, +0x08 = owner), zero +0x0c/+0x10
+      and the +0x14 byte, `bl 0x0826fda0` with r1 still the owner, then
+      `strb r2,[this,#0x14]` and return this. Two orderings are
+      load-bearing and reproduced: the mode byte is zeroed BEFORE the
+      callee and written AFTER it, and the owner is stored twice (once
+      by the stmib, once by the callee). Sibling members of the same
+      class, all planting 0x089a5b30: 0x08270414 (trivial dtor, ported
+      below), 0x08270418 (field copy +0x04..+0x14, vtable untouched, 15
+      bl), 0x082703d0 (adopts another token's owner through 0x0826fd24,
+      7 bl), 0x08270320 (2 bl). Field map: +0x00 vtable, +0x04
+      owner_valid (word; only the low byte is ever read, by
+      0x0826fd24), +0x08 owner, +0x0c service_context, +0x10
+      registry_token, +0x14 mode byte. The class name does not survive
+      in the image - no constructor hands a literal to the class-name
+      factory, and all fifteen vtable slots at 0x089a5b30..0x089a5b68
+      point into undecoded code - so the port names it for what it
+      holds (the cxx/string_object.rs precedent). Deviations: repr(C)
+      structs with real Rust pointers, so no literal byte offset
+      appears (app/resource_chain.rs precedent); the vtable is the
+      modeled static SCOPED_CONTEXT_VTABLE carrying the fifteen ROM
+      words, not the ROM address; FUN_0826fda0 @ 0x0826fda0 is NOT
+      ported (it is its own function, 2 bl + 1 b sites) and sits behind
+      the CAPTURE_CONTEXT_FIELDS dispatch slot (the
+      util/context_field.rs CURRENT_TASK_CTX_BLOCK pattern) whose
+      default stub reproduces its body exactly - `owner==0 -> both
+      derived words NULL, else service_context = (*SYSTEM_ROOT)->+0x30,
+      registry_token = service_context->+0xf60 ? that->+0x18 : 0` -
+      reading the runtime-initialized RW word @ 0x089ca674 (120
+      literal-pool references image-wide) through the SYSTEM_ROOT
+      static, the app/singletons.rs deviation. The unguarded root walk
+      is kept, so a NULL root with a non-NULL owner faults exactly
+      where the original would. What the derived words are: the object
+      at root+0x30 owns a registry at +0xf60 that 0x0805e36c
+      interrogates by FourCC (0x66696c65 = "file" at 0x0803bf48, one of
+      this ctor's own callers), and +0x18 of that registry is the
+      cached word. Host tests (9 in the module): every field written
+      over sentinels and `this` returned; the capture callee called
+      exactly once with the owner and a still-zero mode byte; mode
+      0/1/0x7f/0x80/0xff round-trip; the default stub leaves both
+      derived words NULL without an owner and never reads the root;
+      with an owner it walks a three-level slot fixture; a NULL
+      registry yields a NULL cached word instead of faulting.
+      match.py structural: same vtable literal, same six field
+      initializations, same callee call, same `strb mode,[this,#0x14]`
+      tail, same `mov r0,this` return; the diff is the crate fp frame,
+      LLVM's reordering of the independent stores, and the
+      dispatch-slot ldr/blx standing in for the direct bl 0x0826fda0 -
+      the documented deviation.
+
+  - address: 0x08270414
+    ghidra: FUN_08270414
+    name: scoped_context_destroy
+    size: 4
+    sig: "void scoped_context_destroy(ScopedContext *this)"
+    module: app/scoped_context
+    vars: {param_1: this}
+    status: ported
+    notes: >-
+      175 bl call sites, 0 b - binary-scanned by decoding every B/BL
+      word in osos.dec. Ghidra's 4 bytes are right and the function is
+      NOT a veneer: the whole body is `bx lr` (0xe12fff1e), the word
+      before it @ 0x08270410 is the sibling ctor's vtable literal
+      0x089a5b30 and the word after it starts the separate field-copy
+      member @ 0x08270418, so there is no target word to follow. The
+      trivial destructor of the scoped context token constructed by
+      0x08270394 above: the class owns nothing (its two derived words
+      are borrowed views onto the system root, its owner is not
+      retained), so destruction has nothing to release. Identified as
+      this class's destructor rather than a generic shared no-op by
+      correlating call sites: 166 of the 175 sit within 0x300 bytes of
+      a call to 0x08270394 / 0x082703d0 / 0x08270320 / 0x08270418, or
+      to a function that itself calls one - 0x0813b898 is the archetype
+      (runs 0x08270394 on this, copies a second token in with
+      0x08270418), and its caller at 0x080fec78 destroys the result at
+      0x080feca8. Deviation: the recovered C signature is `void(void)`
+      (the body consumes nothing), but the port takes `this` because
+      every call site passes the token in r0 and an unused AAPCS
+      argument is ABI-identical - the ui/noop_f7f4.rs precedent argued
+      the other way for a function with no destructor role. Host tests:
+      destroying a fully constructed token leaves all six fields
+      byte-identical; a NULL token is accepted, since the original
+      never dereferences this. match.py: the port compiles to the same
+      three-instruction frame as runtime/cxa_guard.rs
+      cxa_guard_release, so the linker folds them and emits
+      scoped_context_destroy as a second global on
+      .text.cxa_guard_release; objdump prints only the first label, so
+      `match.py 0x08270414 scoped_context_destroy` reports the symbol
+      missing. Diffed through the folded section instead
+      (`match.py 0x08270414 cxa_guard_release --size 4`): `push
+      {fp,lr}; mov fp,sp; pop {fp,pc}` - the crate frame around the
+      original's bare `bx lr`, identical to ui_noop_f7f4.
