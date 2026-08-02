@@ -17974,3 +17974,41 @@ functions:
       binary-verified the same way. Sibling of the memzero_aligned veneer @
       0x08037db8. Same deviations and the same read_volatile callee load as
       iram_memcpy_veneer; match.py structural: ldr/ldr/bx through a literal.
+
+  - address: 0x08165520
+    ghidra: FUN_08165520
+    name: service_manager_instance
+    size: 24
+    sig: "void *service_manager_instance(void)"
+    module: app/service_manager
+    renames:
+      DAT_08165534: service_manager_holder (global @ 0x089ca948; instance in its +4 slot)
+      FUN_08030f44: heap_panic
+    status: ported
+    notes: >-
+      Asserting accessor for the service-manager singleton:
+      `ldr r0,[0x08165534]; ldr r0,[r0,#4]; cmp r0,#0; bxne lr;
+      bl 0x08030f44`. Never returns NULL - a NULL instance falls into
+      heap_panic (already ported, called directly). 24 bytes, NOT the 20
+      Ghidra reports: the fifth instruction is followed by the holder
+      literal at 0x08165534, and the next function starts at 0x08165538
+      (`push {r4,lr}`) - verified from raw bytes. 17 direct `bl` sites and
+      exactly one plain `b`, which is the veneer 0x081391ec (213 more
+      `bl`), so 230 call sites in total; binary-scanned by decoding every
+      B/BL word in osos.dec, not from Ghidra xrefs. The object is a 0xE8
+      C++ singleton built by the unported lazy getter 0x081655e0
+      (operator_new(0xe8) + ctor 0x0816566c); its ctor picks up to
+      thirteen subsystem handlers by a per-hardware-model capability mask
+      (default 0x1fbf @ 0x0816592c) into the slot table at `this + 4`, and
+      callers dispatch to a handler through vtable +0x14. No class name
+      survives in the image, so the symbol names the role only.
+      Deviations: the holder's +4 slot is the crate static
+      SERVICE_MANAGER_INSTANCE, since 0x089ca948 is a runtime-initialized
+      RW page (the image holds stale UI strings there, same as the
+      app/singletons.rs caches); the fatal path is not exercised on host
+      (heap_panic is `-> !`), as in cxx/list_splice.rs. NOT HOOK-READY
+      until something ports 0x081655e0 and publishes an instance - today
+      every call site would reach heap_panic. match.py structural: same
+      global load / `cmp r0,#0` / `bxne lr` / fatal-call shape, the port
+      adding only the cold-path frame push.
+
