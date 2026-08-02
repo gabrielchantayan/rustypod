@@ -1430,32 +1430,26 @@ mod tests {
     /// stack/static address does not survive the `as u32` round-trip.
     /// Map a low arena instead, as on the device (the `heap/pool.rs`
     /// `arena_ptr` precedent), at a hint no other test module claims.
-    fn low_arena() -> *mut u32 {
+    fn try_low_arena() -> Option<*mut u32> {
         extern crate std;
         use std::sync::OnceLock;
-        static ARENA: OnceLock<usize> = OnceLock::new();
-        *ARENA.get_or_init(|| {
-            extern "C" {
-                fn mmap(
-                    addr: usize,
-                    len: usize,
-                    prot: i32,
-                    flags: i32,
-                    fd: i32,
-                    offset: i64,
-                ) -> usize;
-            }
-            #[cfg(target_os = "macos")]
-            const MAP_PRIVATE_ANON: i32 = 0x1002;
-            #[cfg(target_os = "linux")]
-            const MAP_PRIVATE_ANON: i32 = 0x22;
-            const PROT_READ_WRITE: i32 = 3;
-            let p = unsafe {
-                mmap(0x0a00_0000, 0x1000, PROT_READ_WRITE, MAP_PRIVATE_ANON, -1, 0)
-            };
-            assert!(p != usize::MAX && p < 0x1_0000_0000, "arena must map below 4 GB (got {p:#x})");
-            p
-        }) as *mut u32
+        static ARENA: OnceLock<Option<usize>> = OnceLock::new();
+        (*ARENA.get_or_init(|| {
+            crate::testing::try_map_u32_slab(0x0a00_0000, 0x1000).map(|p| p as usize)
+        }))
+        .map(|p| p as *mut u32)
+    }
+
+    /// The arena base. Only reached after the caller's skip guard has
+    /// confirmed the mapping exists.
+    fn low_arena() -> *mut u32 {
+        try_low_arena().expect("arena checked by the caller's skip guard")
+    }
+
+    /// Early-return marker: `if fixture_unavailable() { return; }`. arm64
+    /// macOS cannot map below 4 GiB at all, so there these tests skip.
+    fn fixture_unavailable() -> bool {
+        try_low_arena().is_none() && crate::testing::note_missing_u32_fixture("ata_cmd")
     }
 
     /// Layout in the arena: [handle[0], handle[1] = table ptr, table...].
@@ -1479,6 +1473,9 @@ mod tests {
 
     #[test]
     fn the_indexed_entry_is_returned_verbatim() {
+        if fixture_unavailable() {
+            return;
+        }
         let table = [0x1111_1111u32, 0x2222_2222, 0xffff_ffff, 0x8000_0000];
         let (handle, _) = unsafe { handle_with_table(&table) };
         for (index, &expected) in table.iter().enumerate() {
@@ -1492,6 +1489,9 @@ mod tests {
 
     #[test]
     fn the_guard_is_on_the_handle_not_the_contents() {
+        if fixture_unavailable() {
+            return;
+        }
         // A zero entry reads back as 0 — the same 0 the NULL guard
         // returns, but reached by dereferencing, not by the guard.
         let table = [0u32, 0x1234_5678];
@@ -1502,6 +1502,9 @@ mod tests {
 
     #[test]
     fn the_index_scales_by_words() {
+        if fixture_unavailable() {
+            return;
+        }
         // r1 is shifted left by 2 — an index, never a byte offset.
         let table: [u32; 16] = core::array::from_fn(|i| i as u32 * 0x0101_0101);
         let (handle, _) = unsafe { handle_with_table(&table) };
@@ -1515,6 +1518,9 @@ mod tests {
 
     #[test]
     fn the_first_word_of_the_handle_is_never_read() {
+        if fixture_unavailable() {
+            return;
+        }
         // Poison handle[0]; only handle[1] leads to the table.
         let table = [0xabcd_1234u32];
         let (handle, _) = unsafe { handle_with_table(&table) };

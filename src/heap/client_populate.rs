@@ -413,31 +413,24 @@ mod tests {
     /// u32 target pointers and zero-extends, so a Box/static-mut
     /// fixture wherever ASLR put it truncates (the mod.rs
     /// pool_integration_tests lesson). One low mmap holds everything.
-    fn slab() -> *mut u8 {
+    fn try_slab() -> Option<*mut u8> {
         use std::sync::OnceLock;
-        static SLAB: OnceLock<usize> = OnceLock::new();
-        *SLAB.get_or_init(|| {
-            extern "C" {
-                fn mmap(
-                    addr: usize,
-                    len: usize,
-                    prot: i32,
-                    flags: i32,
-                    fd: i32,
-                    offset: i64,
-                ) -> usize;
-            }
-            #[cfg(target_os = "macos")]
-            const MAP_PRIVATE_ANON: i32 = 0x1002;
-            #[cfg(target_os = "linux")]
-            const MAP_PRIVATE_ANON: i32 = 0x22;
-            const PROT_READ_WRITE: i32 = 3;
-            // Distinct hint from the other test slabs so the spans
-            // cannot contend.
-            let p = unsafe { mmap(0x0b00_0000, 0x1000, PROT_READ_WRITE, MAP_PRIVATE_ANON, -1, 0) };
-            assert!(p != usize::MAX && (p | (p + 0xfff)) & 0x8000_0000 == 0);
-            p
-        }) as *mut u8
+        static SLAB: OnceLock<Option<usize>> = OnceLock::new();
+        (*SLAB.get_or_init(|| {
+            crate::testing::try_map_u32_slab(0x0b00_0000, 0x1000).map(|p| p as usize)
+        }))
+        .map(|p| p as *mut u8)
+    }
+
+    /// The fixture base. Only reached after the caller's skip guard has
+    /// confirmed the mapping exists.
+    fn slab() -> *mut u8 {
+        try_slab().expect("fixture slab checked by the caller's skip guard")
+    }
+
+    /// Early-return marker: `if fixture_unavailable() { return; }`.
+    fn fixture_unavailable() -> bool {
+        try_slab().is_none() && crate::testing::note_missing_u32_fixture("client_populate")
     }
 
     /// The fake client object (0x60 bytes of target-layout u32 words).
@@ -496,6 +489,9 @@ mod tests {
 
     #[test]
     fn no_headroom_and_insufficient_coverage_refuses_before_the_manager() {
+        if fixture_unavailable() {
+            return;
+        }
         let _guard = install();
         unsafe {
             // expected - produced - count = 2 - 0 - 3 < 0 (signed bmi).
@@ -516,6 +512,9 @@ mod tests {
 
     #[test]
     fn the_flagged_path_still_requires_the_head_counter() {
+        if fixture_unavailable() {
+            return;
+        }
         let _guard = install();
         unsafe {
             // Flag set: the coverage counters are garbage but skipped;
@@ -532,6 +531,9 @@ mod tests {
 
     #[test]
     fn the_flagged_path_ignores_the_coverage_counters() {
+        if fixture_unavailable() {
+            return;
+        }
         let _guard = install();
         unsafe {
             // Flag set with headroom (head - produced = 8 >= 3): gate 1
@@ -553,6 +555,9 @@ mod tests {
 
     #[test]
     fn a_manager_refusal_returns_zero_and_unlocks() {
+        if fixture_unavailable() {
+            return;
+        }
         let _guard = install();
         unsafe {
             client_with(0, 0, 4, 0, core::ptr::null_mut());
@@ -580,6 +585,9 @@ mod tests {
 
     #[test]
     fn a_full_populate_copies_every_region_in_list_order() {
+        if fixture_unavailable() {
+            return;
+        }
         let _guard = install();
         unsafe {
             let regions = [0x0ae9_1000u32, 0x0ae9_2000, 0x0ae9_3000];
@@ -642,6 +650,9 @@ mod tests {
 
     #[test]
     fn growth_installing_a_segment_lands_the_element_copies() {
+        if fixture_unavailable() {
+            return;
+        }
         let _guard = install();
         unsafe {
             // A grow mock that really installs one host segment, like
@@ -704,6 +715,9 @@ mod tests {
 
     #[test]
     fn growth_also_runs_when_the_end_segment_is_spent() {
+        if fixture_unavailable() {
+            return;
+        }
         let _guard = install();
         unsafe {
             let mut seg = [0u8; DEQUE_SEG_BYTES];
@@ -729,6 +743,9 @@ mod tests {
 
     #[test]
     fn the_wired_defaults_report_the_no_manager_refusal() {
+        if fixture_unavailable() {
+            return;
+        }
         let guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             (*addr_of_mut!(EVENTS)).clear();

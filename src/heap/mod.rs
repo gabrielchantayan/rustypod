@@ -252,44 +252,39 @@ mod pool_integration_tests {
     // macOS. Same failure, same fix, same reason as `pool.rs`'s `arena_ptr`.
 
     /// Base of the shared low slab; every buffer is a fixed offset into it.
-    fn slab() -> *mut u8 {
+    /// This fixture began life needing only bit 31 clear — `pool_alloc`
+    /// marks uncached pointers with it and `pool_free` strips it again, so a
+    /// backing address that already had it set came back corrupted (a
+    /// Linux-only, ASLR-dependent SIGSEGV).
+    ///
+    /// It now needs the stronger property: **every address must round-trip
+    /// through u32**. Porting `take_blocks_body` (0x0818b108) made the block
+    /// hand-out genuinely dereference the manager it reads out of the client
+    /// object's u32 word at +4, so a slab above 4 GiB truncates the manager
+    /// pointer and `mgr_take_ok`'s argument assertion fails inside an
+    /// `extern "C"` stand-in — a non-unwinding panic, i.e. an abort.
+    ///
+    /// arm64 macOS cannot map below 4 GiB at all, so these tests skip there.
+    /// Distinct hint from pool.rs's own arena so the two cannot contend.
+    fn try_slab() -> Option<*mut u8> {
         use std::sync::OnceLock;
-        static SLAB: OnceLock<usize> = OnceLock::new();
-        *SLAB.get_or_init(|| {
-            extern "C" {
-                fn mmap(
-                    addr: usize,
-                    len: usize,
-                    prot: i32,
-                    flags: i32,
-                    fd: i32,
-                    offset: i64,
-                ) -> usize;
-            }
-            #[cfg(target_os = "macos")]
-            const MAP_PRIVATE_ANON: i32 = 0x1002;
-            #[cfg(target_os = "linux")]
-            const MAP_PRIVATE_ANON: i32 = 0x22;
-            const PROT_READ_WRITE: i32 = 3;
-            // Distinct hint from pool.rs's own arena so the two cannot
-            // contend for the same span.
-            let p = unsafe {
-                mmap(0x0900_0000, SLAB_LEN, PROT_READ_WRITE, MAP_PRIVATE_ANON, -1, 0)
-            };
-            // The requirement is bit 31 CLEAR across the whole slab, not
-            // 32-bit addressability: `pool_alloc` marks uncached pointers
-            // with bit 31 and `pool_free` strips it again, so a backing
-            // address that already has it set comes back corrupted. macOS
-            // hands out 0x1_xxxx_xxxx (bit 31 clear) whatever the hint, which
-            // is why this only ever failed on Linux, where PIE placement sets
-            // it about half the time.
-            const UNCACHED_MARK: usize = 0x8000_0000; // pool.rs's, private there
-            assert!(
-                p != usize::MAX && (p | (p + SLAB_LEN - 1)) & UNCACHED_MARK == 0,
-                "integration slab must avoid bit 31 (got {p:#x})"
-            );
-            p
-        }) as *mut u8
+        static SLAB: OnceLock<Option<usize>> = OnceLock::new();
+        (*SLAB.get_or_init(|| {
+            crate::testing::try_map_u32_slab(0x0900_0000, SLAB_LEN).map(|p| p as usize)
+        }))
+        .map(|p| p as *mut u8)
+    }
+
+    /// The fixture base. Only reached after the caller's skip guard has
+    /// confirmed the mapping exists.
+    fn slab() -> *mut u8 {
+        try_slab().expect("integration slab checked by the caller's skip guard")
+    }
+
+    /// Early-return marker: `if fixture_unavailable() { return; }`.
+    fn fixture_unavailable() -> bool {
+        try_slab().is_none()
+            && crate::testing::note_missing_u32_fixture("heap::pool_integration_tests")
     }
 
     const SLAB_LEN: usize = 0x10000;
@@ -594,6 +589,9 @@ mod pool_integration_tests {
 
     #[test]
     fn create_without_a_client_fails_cleanly_through_the_real_chain() {
+        if fixture_unavailable() {
+            return;
+        }
         let _guard = setup();
         unsafe {
             // The REAL client attach runs (pool_client.rs) and finds no
@@ -630,6 +628,9 @@ mod pool_integration_tests {
 
     #[test]
     fn create_seeds_the_embedded_heap_from_real_deque_content() {
+        if fixture_unavailable() {
+            return;
+        }
         let _guard = setup();
         unsafe {
             install_client();
@@ -688,6 +689,9 @@ mod pool_integration_tests {
 
     #[test]
     fn created_pool_serves_aligned_allocations() {
+        if fixture_unavailable() {
+            return;
+        }
         let _guard = setup();
         unsafe {
             install_client();

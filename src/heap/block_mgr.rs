@@ -583,29 +583,24 @@ pub(crate) mod tests {
     /// as u32 target pointers, so the fixtures must live below 4 GiB
     /// (the client_populate.rs slab lesson). One low mmap holds
     /// everything; distinct hint from the other modules' slabs.
-    fn slab() -> *mut u8 {
+    fn try_slab() -> Option<*mut u8> {
         use std::sync::OnceLock;
-        static SLAB: OnceLock<usize> = OnceLock::new();
-        *SLAB.get_or_init(|| {
-            extern "C" {
-                fn mmap(
-                    addr: usize,
-                    len: usize,
-                    prot: i32,
-                    flags: i32,
-                    fd: i32,
-                    offset: i64,
-                ) -> usize;
-            }
-            #[cfg(target_os = "macos")]
-            const MAP_PRIVATE_ANON: i32 = 0x1002;
-            #[cfg(target_os = "linux")]
-            const MAP_PRIVATE_ANON: i32 = 0x22;
-            const PROT_READ_WRITE: i32 = 3;
-            let p = unsafe { mmap(0x0c00_0000, 0x1000, PROT_READ_WRITE, MAP_PRIVATE_ANON, -1, 0) };
-            assert!(p != usize::MAX && (p | (p + 0xfff)) & 0x8000_0000 == 0);
-            p
-        }) as *mut u8
+        static SLAB: OnceLock<Option<usize>> = OnceLock::new();
+        (*SLAB.get_or_init(|| {
+            crate::testing::try_map_u32_slab(0x0c00_0000, 0x1000).map(|p| p as usize)
+        }))
+        .map(|p| p as *mut u8)
+    }
+
+    /// The fixture base. Only reached after the caller's skip guard has
+    /// confirmed the mapping exists.
+    fn slab() -> *mut u8 {
+        try_slab().expect("fixture slab checked by the caller's skip guard")
+    }
+
+    /// Early-return marker: `if fixture_unavailable() { return; }`.
+    fn fixture_unavailable() -> bool {
+        try_slab().is_none() && crate::testing::note_missing_u32_fixture("block_mgr")
     }
 
     /// The fake manager object; its free-list object sits at +0x4.
@@ -701,6 +696,9 @@ pub(crate) mod tests {
 
     #[test]
     fn the_body_refuses_when_the_free_count_falls_short() {
+        if fixture_unavailable() {
+            return;
+        }
         let _guard = install_body();
         unsafe {
             build(2, 2);
@@ -718,6 +716,9 @@ pub(crate) mod tests {
 
     #[test]
     fn the_body_splices_the_range_and_stamps_the_owner_back_links() {
+        if fixture_unavailable() {
+            return;
+        }
         let _guard = install_body();
         unsafe {
             build(3, 2);
@@ -744,6 +745,9 @@ pub(crate) mod tests {
 
     #[test]
     fn an_equal_free_count_grants_and_the_range_runs_off_the_list() {
+        if fixture_unavailable() {
+            return;
+        }
         let _guard = install_body();
         unsafe {
             // free == count: the `bcc` gate is strict, so equality
@@ -769,6 +773,9 @@ pub(crate) mod tests {
 
     #[test]
     fn a_zero_count_splices_an_empty_range_and_grants() {
+        if fixture_unavailable() {
+            return;
+        }
         let _guard = install_body();
         unsafe {
             build(1, 1);

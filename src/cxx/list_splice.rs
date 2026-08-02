@@ -253,14 +253,25 @@ mod tests {
         LIST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// The list/node words are u32 target pointers, so the fixtures
-    /// must live below 4 GiB (the client_populate.rs slab lesson).
-    /// One low mmap holds everything; distinct hint from the other
-    /// modules' slabs.
-    fn slab() -> *mut u8 {
+    /// The list/node words are u32 target pointers and `ptr_word` casts
+    /// them straight back to a host pointer, so the fixture must live
+    /// entirely below 4 GiB — bit-31-clear is NOT enough here, unlike the
+    /// heap slabs whose only constraint is `pool_alloc`'s uncached mark.
+    ///
+    /// Linux honours the low mmap hint. arm64 macOS reserves the whole low
+    /// 4 GiB and refuses it even with MAP_FIXED, so the fixture simply
+    /// cannot exist there: every candidate mapping comes back at
+    /// 0x1_xxxx_xxxx, which passes a bit-31 check, truncates to 32 bits on
+    /// store, and then segfaults on the first dereference. That is exactly
+    /// how this module arrived — green on the Linux porting VM, SIGSEGV on
+    /// a Mac — so report the shortfall instead of guessing an address.
+    ///
+    /// Returns `None` when the host cannot supply such a mapping; the tests
+    /// below skip rather than crash.
+    fn try_slab() -> Option<*mut u8> {
         use std::sync::OnceLock;
-        static SLAB: OnceLock<usize> = OnceLock::new();
-        *SLAB.get_or_init(|| {
+        static SLAB: OnceLock<Option<usize>> = OnceLock::new();
+        (*SLAB.get_or_init(|| {
             extern "C" {
                 fn mmap(
                     addr: usize,
@@ -276,10 +287,35 @@ mod tests {
             #[cfg(target_os = "linux")]
             const MAP_PRIVATE_ANON: i32 = 0x22;
             const PROT_READ_WRITE: i32 = 3;
-            let p = unsafe { mmap(0x0d00_0000, 0x1000, PROT_READ_WRITE, MAP_PRIVATE_ANON, -1, 0) };
-            assert!(p != usize::MAX && (p | (p + 0xfff)) & 0x8000_0000 == 0);
-            p
-        }) as *mut u8
+            const LEN: usize = 0x1000;
+            let p = unsafe { mmap(0x0d00_0000, LEN, PROT_READ_WRITE, MAP_PRIVATE_ANON, -1, 0) };
+            // The whole span must round-trip through u32 unchanged.
+            if p == usize::MAX || p == 0 || p + LEN > 0x1_0000_0000 {
+                return None;
+            }
+            Some(p)
+        }))
+        .map(|p| p as *mut u8)
+    }
+
+    /// The fixture base. Only reached once [`try_slab`] has confirmed the
+    /// mapping exists, so the panic here is a programming error, not a
+    /// host-capability shortfall.
+    fn slab() -> *mut u8 {
+        try_slab().expect("fixture slab checked by the caller's skip guard")
+    }
+
+    /// Early-return marker for the tests that need the sub-4 GiB fixture.
+    /// Prints once so a skip is never mistaken for a pass.
+    fn fixture_unavailable() -> bool {
+        if try_slab().is_some() {
+            return false;
+        }
+        std::eprintln!(
+            "list_splice: skipped — this host cannot map the fixture below 4 GiB \
+             (u32 node pointers cannot round-trip); run these on Linux"
+        );
+        true
     }
 
     /// List A's object (+0x0 identity = its own address, +0x10 count).
@@ -373,6 +409,9 @@ mod tests {
 
     #[test]
     fn a_middle_range_moves_links_counts_and_owners() {
+        if fixture_unavailable() {
+            return;
+        }
         let _guard = lock();
         unsafe {
             build(3, 3);
@@ -409,6 +448,9 @@ mod tests {
 
     #[test]
     fn the_whole_source_splices_onto_the_dst_end_via_the_sentinel() {
+        if fixture_unavailable() {
+            return;
+        }
         let _guard = lock();
         unsafe {
             build(2, 3);
@@ -440,6 +482,9 @@ mod tests {
 
     #[test]
     fn a_foreign_position_is_refused_and_nothing_moves() {
+        if fixture_unavailable() {
+            return;
+        }
         let _guard = lock();
         unsafe {
             build(2, 2);
@@ -458,6 +503,9 @@ mod tests {
 
     #[test]
     fn a_foreign_first_is_refused_and_nothing_moves() {
+        if fixture_unavailable() {
+            return;
+        }
         let _guard = lock();
         unsafe {
             build(2, 2);
@@ -475,6 +523,9 @@ mod tests {
 
     #[test]
     fn a_foreign_last_is_refused_and_nothing_moves() {
+        if fixture_unavailable() {
+            return;
+        }
         let _guard = lock();
         unsafe {
             build(2, 2);
@@ -492,6 +543,9 @@ mod tests {
 
     #[test]
     fn an_empty_range_keeps_counts_and_swaps_predecessors() {
+        if fixture_unavailable() {
+            return;
+        }
         let _guard = lock();
         unsafe {
             build(2, 2);
@@ -517,6 +571,9 @@ mod tests {
 
     #[test]
     fn the_slot_adapter_runs_the_splice_and_discards_the_verdict() {
+        if fixture_unavailable() {
+            return;
+        }
         let _guard = lock();
         unsafe {
             build(1, 2);

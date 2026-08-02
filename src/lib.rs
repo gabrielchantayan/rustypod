@@ -25,6 +25,9 @@ fn panic(_info: &PanicInfo) -> ! {
     loop {}
 }
 
+#[cfg(test)]
+pub mod testing;
+
 pub mod app;
 pub mod codegen;
 pub mod cxx;
