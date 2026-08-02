@@ -9,6 +9,7 @@ pub mod noop_f7f4;
 pub mod pending_cleanup;
 pub mod width_inset;
 pub mod static_descriptor;
+pub mod styled_text_view;
 pub mod vtable_slot_20;
 pub mod vtable_slot_24;
 pub mod resource_release;

@@ -17401,3 +17401,126 @@ functions:
       call / return-this sequence; the diff is LLVM hoisting the
       predicated guard into an early bxeq lr and adding the crate's fp
       frame.
+
+  # --- H.264 / MPEG-4 AVC video decoder: RBSP bitstream ---
+  - address: 0x082b3258
+    ghidra: FUN_082b3258
+    name: h264_bitstream_advance
+    size: 60
+    sig: "bool h264_bitstream_advance(RbspBitReader *reader, i32 bits, u8 *emulation_byte_pending)"
+    module: h264/bitstream
+    vars: {param_1: reader, param_2: bits, param_3: emulation_byte_pending}
+    status: ported
+    notes: >-
+      The commit half of every H.264 syntax-element read. 60 bytes, all
+      code — no literal pool; the body starts with `ldrb r3,[r2]` (no
+      push) and ends `bx lr`, a leaf. 114 `bl` call sites, 0 `b`,
+      binary-scanned by decoding every B/BL word in osos.dec; they
+      cluster in the decoder's syntax parsers at 0x0836xxxx plus the
+      Exp-Golomb helpers at 0x082c5dxx.
+      The cursor is three words: `data` (+0x00, first byte of the NAL
+      payload), `bit_pos` (+0x04, signed bit offset) and `end` (+0x08,
+      one past the last readable byte). The read primitives —
+      0x082d0630 (read n bits), 0x0809b040 (leading-zero count) — never
+      move the cursor; they report through a caller-owned u8 flag that
+      they stepped over an emulation-prevention 0x03 byte (detected by
+      0x082c319c). This function pays for it: if the flag is set, `bits`
+      grows by 8; the flag is then cleared unconditionally, so one flag
+      variable serves a whole parse function. `bit_pos += bits` is
+      stored back, and the return is the UNSIGNED pointer comparison
+      `data + (bit_pos asr 3) < end` (movcc/movcs) — strict, so landing
+      exactly on `end` reports exhausted, and arithmetic-shifted, so the
+      rewinds parsers do stay correct. The cursor is updated even when
+      the result is false.
+      Codec identification: emulation-prevention bytes are H.264/HEVC
+      specific, and the caller at 0x08365640 is textbook
+      dec_ref_pic_marking() — nal_unit_type == 5 reads
+      no_output_of_prior_pics_flag and long_term_reference_flag,
+      otherwise adaptive_ref_pic_marking_mode_flag then a
+      memory_management_control_operation loop pulling an extra ue(v)
+      for ops 1/3, 2 and 3/6. Neighbours characterized while porting:
+      0x082c5df0 = ue(v), 0x082c5dcc = se(v), 0x082c319c = emulation
+      probe.
+      Deviations: none. Wrapping arithmetic stands in for the
+      original's `add` so a debug build cannot panic on overflow.
+      Host tests: flag consumption, the 8-bit surcharge, any nonzero
+      flag byte, exact-end exhaustion, empty payload, negative
+      positions (arithmetic shift), a 220-case sweep against a
+      transcription of the disassembly, and i32 overflow.
+      match.py structural: same +0x00/+0x04/+0x08 offsets, same
+      `asr #3` bounds test and movcc/movcs verdict; the diff is the
+      crate's frame-pointer prologue and LLVM fusing two loads into
+      `ldmib`.
+
+  # --- retailOS UI: the styled-text view widget ---
+  - address: 0x0819b9e0
+    ghidra: FUN_0819b9e0
+    name: styled_text_view_construct
+    size: 108
+    sig: "StyledTextView *styled_text_view_construct(StyledTextView *view, ResourceProvider *resources, void *controller, void *parent, const StyledTextSpec *spec)"
+    module: ui/styled_text_view
+    vars: {param_1: view, param_2: resources, param_3: controller, param_4: parent, param_5: spec}
+    status: ported
+    notes: >-
+      Constructor of a 560-byte screen widget - NOT a heap function
+      despite the 0x0819xxxx address (the application heap cluster is
+      0x0819cd5c..0x0819d9d8, above this). True extent 108 bytes: 104
+      of code, ending `ldmia sp!,{r3,r4,r5,pc}` @ 0x0819ba44, plus the
+      4-byte vtable literal @ 0x0819ba48 (= 0x0898a764); Ghidra's 104
+      is code only. 109 `bl` call sites and 0 `b`, binary-scanned by
+      decoding every B/BL word in osos.dec - 61 in the screen builder
+      @ 0x08204714, the rest spread over 0x0821xxxx..0x0826xxxx screen
+      builders, plus the `new` wrapper @ 0x0819b614
+      (operator_new(0x230) then this, forwarding all four arguments).
+      Body: forward all five arguments to the base ctor @ 0x0810b29c
+      (the original re-stores the stacked spec into its own outgoing
+      slot), plant the vtable, run the 0x0810ebbc subobject ctor on
+      +0x168, then clear +0x164 and +0x220 and copy the spec tail
+      +0x5c/+0x5d/+0x60/+0x64..0x67 into +0x224/+0x225/+0x228/
+      +0x22c..0x22f. Returns `view` (Ghidra says void; the closing
+      `sub r0,r0,#0x168` is authoritative - the pool_parent_construct
+      precedent).
+      Class identified from its siblings rather than its name: the
+      draw path @ 0x0819b80c builds the row's string, picks the style
+      byte at +0x224 or +0x225 by bit 3 of the view flag word at +0x48,
+      applies it with 0x08262d70, passes &view+0x22c to 0x0826319c when
+      the style code is 0x21 (a colour), and fits the text with the
+      0x0826c574/0x082a2340 ellipsis loop. The lazy resolve @
+      0x0819b724 turns the id at +0x228 into the 0x44-byte drawable
+      cached at +0x220 (flag +0x164) through resource_chain_find on the
+      provider at +0x38, trying 'Draw' then 'BMap' by the view's class
+      code at +0x40 (literals @ 0x0819b7d0 = 0x424d6170 'BMap' and
+      0x0819b7d4 = 0x44726177 'Draw', binary-verified). The dtor @
+      0x0819ba64 deletes +0x220 (0x082646ac then operator delete),
+      runs 0x0810ec10 on +0x168 and chains to 0x0810b2f0; the deleting
+      variant is the unlisted 0x0819ba4c, which Ghidra drops entirely.
+      Layout: vtable +0x00, base subobject to +0x164, graphic_resolved
+      +0x164, a second instance of the 0xb8-byte 0x0810ebbc class at
+      +0x168 (the base embeds one at +0xa4 too), graphic +0x220,
+      text_style +0x224, text_style_alt +0x225, graphic_id +0x228,
+      text_color +0x22c - 0x230 total, matching every call site's
+      operator_new(0x230). The spec is the generic 104-byte view spec
+      the grand-base ctor 0x0826f26c unpacks (+0x04 class code, +0x18
+      flags, +0x1c 0x30-byte block); only its +0x5c..+0x68 tail is this
+      class's.
+      Deviations: the two unported callees (0x0810b29c, and 0x0810ebbc
+      which cxx/pair_header.rs already models) go through the new
+      STYLED_TEXT_VIEW_OPS dispatch table, both defaults returning
+      their argument; `view` is kept in hand rather than recovered from
+      the callees' returns by byte arithmetic, which would be wrong on
+      a 64-bit host (pool_parent_construct precedent); the vtable is
+      the u32 ROM address STYLED_TEXT_VIEW_VTABLE_ADDRESS, since
+      nothing here dispatches through it and the image's bytes at
+      0x0898a764 are stale RW init data (they read as RTTI name
+      strings); and the four-byte colour copy is one array move, which
+      LLVM folds into a word load/store - the same bytes, and both
+      offsets are word-aligned.
+      Host tests: struct offsets against the target layout, the full
+      construction with the wired stubs, a zero graphic id, and a
+      recording mock proving the five arguments arrive unchanged, the
+      subobject ctor gets view+0x168, and the derived tail is written
+      after the base ctor runs.
+      match.py structural: identical offsets and order (0x164, 0x220,
+      0x224, 0x225, 0x228, 0x22c from spec 0x5c/0x5d/0x60/0x64), same
+      vtable literal; the diff is ops-table blx for bl, the folded
+      colour word, and the crate's frame-pointer prologue.

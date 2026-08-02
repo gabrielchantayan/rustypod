@@ -35,6 +35,7 @@ pub mod drivers;
 pub mod fp;
 pub mod fs;
 pub mod ft;
+pub mod h264;
 pub mod heap;
 pub mod kernel;
 pub mod libm;
