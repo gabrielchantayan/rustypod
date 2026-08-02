@@ -17454,3 +17454,50 @@ functions:
       same add-this+0x28 / c_str / compare / tail-call-c_str vs
       load-constant split; the diff is LLVM inlining the ported strcmp
       byte loop and the crate's fp frame.
+
+  - address: 0x081346c8
+    ghidra: FUN_081346c8
+    name: template_binding_map_assign
+    size: 28
+    sig: "u32 template_binding_map_assign(void *this, const void *source)"
+    module: app/template_binding
+    status: ported
+    vars: {param_1: this, param_2: source}
+    notes: >-
+      116 bl call sites and no tail b (binary-scanned over osos.dec).
+      28 bytes, no literal pool - it ends at 0x081346e0 and
+      0x081346e4 begins immediately, so the two are back-to-back members
+      of the same ROM block. Copy-assigns the container member at
+      this+0x94 from `source` (`bl 0x083c2130`, a red-black-tree
+      operator= that self-assignment-guards on dst==src and keeps its
+      header word at member+0x10) and then TAIL-BRANCHES to 0x08134938
+      with `this`, returning its verdict; the assignment's own return is
+      discarded by the original's `mov r0,r4`. 0x08134938 is the
+      validation walk over that same container - it opens with `ldr
+      r0,[this+0xa4]`, which IS member+0x10 - iterating the tree
+      (the classic [+0x4]/[+0x8]/[+0xc] rb-tree increment at
+      0x081349ac), calling 0x08134ad4(this, name) per node value and
+      0x08134c70(this, name) per 0x10-byte record in the node's
+      sub-array, ANDing the results into r6 and returning it. 0x08134c70
+      is a name whitelist: empty name passes, otherwise it strcmps
+      against a NULL-terminated table (pool word @ 0x08134cc0), so the
+      member is a NAME-KEYED BINDING MAP and the return value means
+      "every bound name is known". 0x08134ad4 additionally dispatches
+      vtable slot +0x114 (with the literal 0xdeadbeef in r2). The 116
+      call sites are a run of near-identical ~0x29c-byte functions in
+      0x0839f88c..0x083b44e4, a code-only region of UI view classes.
+      Deviation: neither callee is ported, so both go through the
+      TEMPLATE_BINDING_OPS read_volatile seam (house pattern - see
+      cxx/string_object's STRING_OBJECT_ASSIGN_CSTR_OPS); the default
+      assign returns its destination unchanged and the default validate
+      returns 0, the original's "some bound name did not validate"
+      answer. The class behind this is inferred, so the object stays
+      opaque bytes addressed by the one offset the instruction spells
+      out. Host tests: the assignment is handed exactly
+      this+BINDING_MAP_OFFSET and the source pointer, validation is
+      handed the unadjusted this and runs strictly after the
+      assignment, its verdict is returned verbatim for both 1 and 0, and
+      the wired default reports an unvalidated object. match.py
+      structural: same mov r4,r0 / add r0,r0,#0x94 / call / mov r0,r4 /
+      pop / tail-branch shape; the diff is the ops-table indirection and
+      the crate's fp frame.
