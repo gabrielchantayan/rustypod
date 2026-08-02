@@ -17442,3 +17442,46 @@ functions:
       flag load / zero test / build call / flag store / add r0,r4,#0x38 /
       return; the diff is LLVM inverting the branch into an early-return
       block and the crate's fp frame.
+
+  - address: 0x081e054c
+    ghidra: FUN_081e054c
+    name: event_list_release
+    size: 80
+    sig: "void event_list_release(void *source)"
+    module: app/event_list
+    status: ported
+    vars: {param_1: source}
+    notes: >-
+      125 bl call sites (binary-scanned, same method), identical to its
+      paired acquire half 0x081e04b0 and paired with it at every site. 20
+      instructions. Empties the source's event list with erase(begin(),
+      end()) and clears the built flag at +0x54, so the next acquire
+      rebuilds against fresh registry state. end() is the list's circular
+      sentinel node at list+0x10 - the same word the source reaches as
+      +0x48, which is what pins the embedded list to +0x38 - and begin() is
+      that node's next pointer at +0x8. Both are read before the erase and
+      passed to it by address (r2 = &begin, r3 = &end) with an sret slot in
+      r0; the returned iterator is discarded. The callee 0x083c1c3c is
+      std::list::erase(first, last): it stores list->sentinel through the
+      sret slot, then compares *first against sentinel->next and *last
+      against the sentinel via the iterator operator== @ 0x083cf7d0 before
+      unlinking. It is identified by 0x083c2130 (list::operator=), whose
+      own first act is byte-for-byte this same marshalling on the
+      destination list - i.e. this half is a plain clear(). Nothing gates
+      the erase, so releasing a never-acquired source still runs it over an
+      already-empty (self-linked sentinel) list and stores the already-clear
+      flag again; preserved. Deviations - 0x083c1c3c is unported and
+      unnamed, so it goes through the EVENT_LIST_OPS.erase_range
+      read_volatile dispatch seam; the original's 24-byte frame holds TWO
+      copies of each iterator (sp+4/sp+16 = end(), sp+8/sp+20 = begin(),
+      ADS materializing the temporaries twice) where the port keeps one
+      slot each, and the original loads the sentinel word twice (ldr
+      r0,[r0,#0x48] then ldr r0,[r1,#0x10]) where the port loads it once -
+      same address, no intervening store. The list/node fields are 32-bit
+      target pointers read with aligned u32 loads, so the host tests need a
+      sub-4-GiB fixture (crate::testing::try_map_u32_slab, hint
+      0x0d000000) and skip on arm64 macOS. match.py structural: 21
+      instructions vs 20, same ldr r0,[r0,#0x48] / ldr r1,[r0,#8] / two
+      stack iterator slots / add r1,r4,#0x38 / erase call / strb 0 to
+      +0x54; the diff is the seam's literal-pool indirect call and the
+      crate's fp frame.
