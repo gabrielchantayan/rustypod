@@ -17073,3 +17073,41 @@ functions:
       stores to destination. It appends NUL at destination[copied] and returns
       copied; overlapping ranges retain the original interleaved load/store
       behavior rather than memcpy or memmove semantics.
+  - address: 0x082774a8
+    ghidra: FUN_082774a8
+    name: string_object_assign
+    size: 32
+    sig: "StringObject *string_object_assign(StringObject *this, const StringObject *source)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1: this
+      param_2: source
+      FUN_08276474: string_object_assign_payload
+    notes: >-
+      217 bl call sites (binary-scanned) - the most-called function of the
+      unidentified two-word string/buffer class whose default ctor is
+      string_default_construct @ 0x08277440. The class's copy-assignment
+      operator, StringObject &operator=(const StringObject &). Raw ARM:
+      push {r4,lr}; cmp r0,r1; mov r4,r0; ldrne r1,[r1,#0x4]; movne r0,r4;
+      blne 0x08276474; mov r0,r4; pop {r4,pc}. Two details are load-bearing
+      and reproduced exactly. First, the self-assignment guard compares the
+      two object ADDRESSES (cmp r0,r1), not payload content, so x = x is a
+      complete no-op - not even a redundant copy through the allocator -
+      while assigning between distinct objects that happen to share a
+      payload pointer still runs the full path. Second, this is returned on
+      every path (the mov r0,r4 sits after the conditional call), giving the
+      C++ chaining convention even when the guard skipped the work. The
+      SOURCE's payload word at +0x4 is forwarded to the already-ported
+      string_object_assign_payload @ 0x08276474, which owns replacing and
+      releasing this object's prior payload through vtable slots +0x8/+0xc;
+      this operator never reads or writes this.payload itself. Neither
+      operand is NULL-guarded - the original faults on the ldrne for a NULL
+      source, and so does the port. Host tests cover the forwarding path
+      (source payload reaches +0x8 with strlen+1), self-assignment as a
+      total no-op that still returns this, the address-not-content guard
+      (two distinct objects sharing one payload pointer still assign), and a
+      NULL source payload reaching only the +0xc clear slot. match.py
+      structural: same compare/skip/load-source-payload/call/return-this
+      shape; the diff is LLVM inverting the predicated guard into an early
+      bxeq lr and adding the crate's fp frame.

@@ -461,6 +461,51 @@ pub unsafe extern "C" fn string_object_assign_payload(
     strcpy(destination, payload);
 }
 
+/// string_object_assign — original: `FUN_082774a8` @ 0x082774a8
+/// (32 bytes, 217 `bl` call sites — the most-called function of the class).
+///
+/// The class's copy-assignment operator, `StringObject &operator=(const
+/// StringObject &source)`. Decoded from the raw ARM at 0x082774a8:
+///
+/// ```text
+/// push {r4, lr}
+/// cmp  r0, r1          ; self-assignment test, on ADDRESS not content
+/// mov  r4, r0          ; save `this` across the call
+/// ldrne r1, [r1, #4]   ; r1 = source->payload
+/// movne r0, r4
+/// blne 0x08276474      ; string_object_assign_payload(this, source->payload)
+/// mov  r0, r4          ; return `this` on every path
+/// pop  {r4, pc}
+/// ```
+///
+/// Two details of the original are load-bearing and reproduced exactly.
+/// First, the self-assignment guard compares the two object *addresses*, so
+/// `x = x` is a complete no-op — not even a redundant copy of the payload
+/// through the allocator — while assigning from a distinct object that
+/// happens to share a payload pointer still runs the full path. Second,
+/// `this` is returned unconditionally (`mov r0, r4` sits after the
+/// conditional call), giving the C++ chaining convention even when the guard
+/// skipped the work.
+///
+/// The SOURCE's payload word is forwarded to the ported
+/// [`string_object_assign_payload`] @ 0x08276474, which owns replacing and
+/// releasing this object's prior payload through vtable slots +0x8/+0xc.
+/// This operator itself never reads or writes `this.payload`.
+///
+/// Neither operand is NULL-guarded: the original faults on the `ldrne` for a
+/// NULL `source`, and dereferencing one here faults the same way. A NULL
+/// `this` reaches the callee exactly as it does in the original.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_assign(
+    this: *mut StringObject,
+    source: *const StringObject,
+) -> *mut StringObject {
+    if this as *const StringObject != source {
+        string_object_assign_payload(this, (*source).payload);
+    }
+    this
+}
 
 /// Caller tag the original passes to `free_wrapper` (`mov r1, #0x34` @
 /// 0x08275d88). Telemetry only (see `BlockHeader::link_or_tag`).
@@ -1424,6 +1469,122 @@ mod tests {
             std::vec![this as usize, this as usize]
         );
         assert_eq!(object.payload, 0x2222_2222 as *mut u8);
+    }
+
+    #[test]
+    fn assign_forwards_the_source_payload_and_returns_this() {
+        let mut destination = [0xa5u8; 16];
+        let mut source_storage = *b"artist\0";
+        let mut target = StringObject {
+            vtable: core::ptr::null(),
+            payload: 0xdead_beef as *mut u8,
+        };
+        let mut source = StringObject {
+            vtable: core::ptr::null(),
+            payload: source_storage.as_mut_ptr(),
+        };
+        let this = core::ptr::addr_of_mut!(target);
+        let from = core::ptr::addr_of!(source);
+        let _bench = assign_cstr_bench(destination.as_mut_ptr());
+
+        let returned = unsafe { string_object_assign(this, from) };
+
+        assert_eq!(returned, this, "the operator returns `this` for chaining");
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
+            std::vec![(this as usize, 7, 0)],
+            "the SOURCE's payload reached 0x08276474 (strlen \"artist\" + NUL)"
+        );
+        assert_eq!(&destination[..7], b"artist\0", "copied including the NUL");
+        assert_eq!(
+            source.payload,
+            source_storage.as_mut_ptr(),
+            "the source object is left untouched"
+        );
+        assert_eq!(
+            target.payload, 0xdead_beef as *mut u8,
+            "this operator never writes the payload word itself (+0x8 owns it)"
+        );
+    }
+
+    #[test]
+    fn assign_to_self_is_a_complete_no_op_but_still_returns_this() {
+        let mut storage = *b"nowplaying\0";
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: storage.as_mut_ptr(),
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(0x4444_4444 as *mut u8);
+
+        let returned = unsafe { string_object_assign(this, this as *const StringObject) };
+
+        assert_eq!(returned, this);
+        assert!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty() },
+            "`cmp r0, r1` skips the call entirely — not even a re-copy"
+        );
+        assert!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty() },
+            "self-assignment must not release the payload it is keeping"
+        );
+        assert_eq!(object.payload, storage.as_mut_ptr(), "payload survives x = x");
+    }
+
+    #[test]
+    fn assign_guards_on_address_not_on_a_shared_payload_pointer() {
+        // Two DISTINCT objects that happen to share one payload pointer: the
+        // original compares addresses (`cmp r0, r1`), so this runs the full
+        // path even though the payload word is identical.
+        let mut destination = [0xa5u8; 16];
+        let mut shared = *b"ok\0";
+        let mut target = StringObject {
+            vtable: core::ptr::null(),
+            payload: shared.as_mut_ptr(),
+        };
+        let source = StringObject {
+            vtable: core::ptr::null(),
+            payload: shared.as_mut_ptr(),
+        };
+        let this = core::ptr::addr_of_mut!(target);
+        let _bench = assign_cstr_bench(destination.as_mut_ptr());
+
+        let returned = unsafe { string_object_assign(this, core::ptr::addr_of!(source)) };
+
+        assert_eq!(returned, this);
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
+            std::vec![(this as usize, 3, 0)],
+            "distinct addresses assign even with an identical payload word"
+        );
+        assert_eq!(&destination[..3], b"ok\0");
+    }
+
+    #[test]
+    fn assign_from_a_null_payload_source_dispatches_only_the_clear_slot() {
+        let mut target = StringObject {
+            vtable: core::ptr::null(),
+            payload: 0x5555_5555 as *mut u8,
+        };
+        let source = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        let this = core::ptr::addr_of_mut!(target);
+        let _bench = assign_cstr_bench(0x6666_6666 as *mut u8);
+
+        let returned = unsafe { string_object_assign(this, core::ptr::addr_of!(source)) };
+
+        assert_eq!(returned, this);
+        assert!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty() },
+            "a NULL source payload never allocates"
+        );
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).clone() },
+            std::vec![this as usize],
+            "it reaches vtable slot +0xc through the ported assign_payload"
+        );
     }
 
     /// Serializes the destroy tests — the ops table and the recorder
