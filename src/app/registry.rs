@@ -794,8 +794,10 @@ mod tests {
     use std::sync::{Mutex, MutexGuard};
     use std::vec::Vec;
 
-    /// Serializes every test that touches the global registry.
-    static REGISTRY_LOCK: Mutex<()> = Mutex::new(());
+    /// Serializes every test that touches the global registry — shared
+    /// with the ported callers that resolve ids through it (see
+    /// `crate::testing::CLASS_REGISTRY_TEST_LOCK`).
+    use crate::testing::CLASS_REGISTRY_TEST_LOCK as REGISTRY_LOCK;
 
     // ---- a tiny array-backed container standing in for the C++ map ----
 

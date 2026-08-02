@@ -70,3 +70,11 @@ pub fn note_missing_u32_fixture(module: &str) -> bool {
 /// this lock for the duration of a test rather than each keeping a
 /// private one.
 pub static TRACED_ALLOC_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serializes every host test that installs a container vtable into
+/// `app::registry::CLASS_REGISTRY`. That registry is one shared mutable
+/// global whose default vtable is NULL, so any test that resolves a
+/// class id through it — `app::registry`'s own container tests and every
+/// ported caller of `demo_mode_instance`, such as `app::class_6800` —
+/// must hold this lock rather than each keeping a private one.
+pub static CLASS_REGISTRY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

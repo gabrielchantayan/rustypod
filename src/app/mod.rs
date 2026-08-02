@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod class_6800;
 pub mod class_registry;
 pub mod context;
 pub mod flag_2c_is_one;

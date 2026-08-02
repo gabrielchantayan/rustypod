@@ -17401,3 +17401,70 @@ functions:
       call / return-this sequence; the diff is LLVM hoisting the
       predicated guard into an early bxeq lr and adding the crate's fp
       frame.
+
+  # --- Silver UI framework: the class-0x6800 controller addon ---
+
+  - address: 0x08177e84
+    ghidra: FUN_08177e84
+    name: class_6800_new
+    size: 72
+    sig: "Class6800 *class_6800_new(Class6800 *storage)"
+    module: app/class_6800
+    status: ported
+    vars:
+      param_1: storage
+      DAT_08177ecc: CLASS_6800_VTABLE_ADDRESS
+      FUN_081110d0: base_construct (CLASS_6800_OPS slot)
+      FUN_081d2204: framework_root_instance (CLASS_6800_OPS slot)
+      FUN_081883fc: demo_mode_instance
+    notes: >-
+      128 bl + 0 b call sites, binary-scanned by decoding every B/BL word
+      in osos.dec. True extent is 76 bytes - Ghidra's 72 bytes of code
+      plus the literal-pool word @ 0x08177ecc holding the vtable address
+      0x0898908c. The constructor of the small Silver-framework object a
+      controller hangs off itself, whose runtime class id is 0x6800:
+      `base_construct(storage, 0, 1)` @ 0x081110d0, plant the vtable,
+      store the framework root instance (0x081d2204 = the +4 slot of the
+      global @ 0x089cc858) at +0x14 and the TCDemoMode singleton
+      (0x081883fc, already ported, called DIRECTLY) at +0x18, then
+      dispatch vtable slot +0x2c with the +0x14 word RE-READ from the
+      object, and return `this` - which is the BASE CONSTRUCTOR'S
+      RETURN (`mov r4, r0` follows the bl), not the incoming storage.
+      Class identification - the cast_to_class operator @ 0x08177e08 is
+      `cmp r1,#0x6800; bne 0x08110640; bx lr` (the base @ 0x08110640
+      answers ids 4, 3 and 1); the immediate 0x6800 occurs at exactly
+      128 sites image-wide, the one cmp plus 127 `mov r1,#0x6800`, one
+      per call site, and every call site reads
+      `if (object_cast_to_class(ctrl->vtable[0x1c](ctrl), 0x6800) == 0)
+      { obj = class_6800_new(operator_new(28)); ctrl->vtable[0x2c](ctrl,
+      obj); }`. 125 of the callers are the near-identical Silver
+      controller bodies in 0x0839f6a0-0x083b43f4 (the framework prefix is
+      the 159 distinct TSilver* mangled names in the image). The CLASS IS
+      NOT NAMED anywhere in the image, so the port calls it by its id,
+      the same rule app/registry.rs's instance_of_class_6000/_6600
+      follow. Object layout - +0x00 vtable, +0x0c the 16-byte node the
+      base ctor @ 0x081108b4 allocates, +0x14 default_target, +0x18
+      demo_mode, 28 bytes total (`mov r0,#28` before every
+      operator_new). Sibling methods corroborate slot +0x2c as "adopt
+      this target": 0x08177e14 re-dispatches it with +0x14, 0x08177e24
+      dispatches it with a live object when one exists and +0x14
+      otherwise. Deviations - the vtable literal 0x0898908c lands inside
+      the C++ mangled-name blob in the decrypted image (the same page
+      mismatch app/registry.rs records for TCDemoMode's 0x08989718) and
+      is the only reference to that word in the image, so the port plants
+      the modeled static CLASS_6800_VTABLE and keeps the address as
+      CLASS_6800_VTABLE_ADDRESS; the +0x2c dispatch still goes through
+      `this->vtable`, so a real vtable is picked up unchanged. The two
+      unported callees go through the CLASS_6800_OPS read_volatile
+      dispatch table - the base-ctor default zeroes the four base words
+      and returns the storage (no base vtable, no link node), the
+      root-instance default reads the modeled static
+      FRAMEWORK_ROOT_HOLDER (app/context.rs's APP_CONTEXT deviation).
+      NOT HOOK-READY until 0x081110d0 is ported. Host tests cover the
+      full construction order, a relocating base constructor, a NULL root
+      instance, and the wired defaults with and without TCDemoMode
+      registered. match.py structural: identical mov #1 / mov #0 / call /
+      mov r4,r0 / str vtable / call / str +20 / call / str +24 / ldr
+      vtable / ldr +20 / ldr +0x2c / blx / mov r0,r4 sequence; the diff
+      is the ops-table ldrd+blx in place of two direct bls and the
+      crate's fp frame.
