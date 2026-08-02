@@ -17974,3 +17974,143 @@ functions:
       binary-verified the same way. Sibling of the memzero_aligned veneer @
       0x08037db8. Same deviations and the same read_volatile callee load as
       iram_memcpy_veneer; match.py structural: ldr/ldr/bx through a literal.
+
+  # --- C++ layer owner-tracked mutex (0x082e8390 / 0x082e83d8) ---
+  #
+  # NOT the RTXC mutex of kernel/sync_mutex (0x080744a4 & co.): this pair
+  # carries an owner thread, a recursion count and a kind, over a counting
+  # semaphore held inline at mutex+0x14. Object layout (24 bytes, all
+  # scalar): +0x00 magic, +0x04 owner thread, +0x08 reserved, +0x0c attr
+  # word (kind = bits 4..5 of the halfword at +0x0e: 0 normal,
+  # 1 error-checking, 2 recursive), +0x12 recursion count (u16),
+  # +0x14 ROM semaphore handle cell.
+  # Status codes: 0x1a invalid object, 0x0f would-deadlock, 0x27 recursion
+  # overflow, 0x05 not owner.
+
+  - address: 0x082e8390
+    ghidra: FUN_082e8390
+    name: posix_mutex_lock
+    size: 72
+    sig: "u32 posix_mutex_lock(PosixMutex *mutex)"
+    module: kernel/posix_mutex
+    status: ported
+    vars: {param_1: mutex}
+    notes: >-
+      NULL -> 0x1a; an object still carrying the static-init magic
+      0x4d545853 (literal @ 0x082e83d4) is run through the lazy
+      initializer @ 0x082e82f8 with a NULL attr and its error propagated;
+      then tail b 0x080cdd6c with r1 = 0 (no deadline).
+      SIZE IS 72 BYTES (0x082e8390..0x082e83d8: 68 code + the 4-byte
+      literal), NOT the 320 Ghidra reports — its extent swallows the
+      unlock and two siblings. Byte-decoded from osos.dec.
+      240 call sites, binary-verified by decoding every B/BL word: 2
+      direct bl (0x080c9848, 0x080c9884) + the 4-byte alias veneer
+      `b` @ 0x08261e20 (156 bl + 1 tail b) + the veneer @ 0x082621a8
+      (78 bl + 3 tail b).
+      Deviation: the mask-ROM-backed callees (initializer 0x082e82f8,
+      running-thread query 0x080a3e68, semaphore helpers 0x080a3c7c /
+      0x080a3ca4 / 0x080a3d30, clock read 0x082c372c) dispatch through
+      POSIX_MUTEX_OPS; the defaults model the pre-kernel machine and
+      provide no mutual exclusion. This port is the shipped default of
+      block_region.rs's REGION_MUTEX_OPS.lock, replacing the no-op stub.
+      match.py structural: same NULL check, same magic compare against the
+      same literal, same init call with r1=0, same propagate-nonzero, same
+      tail branch with r1=0.
+
+  - address: 0x080cdd6c
+    ghidra: (inlined into FUN_082e8390)
+    name: posix_mutex_lock_deadline
+    size: 256
+    sig: "u32 posix_mutex_lock_deadline(PosixMutex *mutex, const TimeSpec *deadline)"
+    module: kernel/posix_mutex
+    status: ported
+    vars: {param_1: mutex, param_2: deadline}
+    notes: >-
+      The acquire core, a real separately linked function (0x080cdd6c..
+      0x080cde6c, including the 1e9 literal @ 0x080cde68) that Ghidra
+      inlined into FUN_082e8390 and then mis-sized. EXACTLY ONE reference
+      in the image — the lock's tail b @ 0x082e83d0 — so the deadline half
+      of the interface is unreachable on this ROM; ported anyway because
+      it IS the lock's body.
+      Reads the kind (ldrh +0xe, lsl #26, lsr #30), asks who is running
+      (0x080a3e68) and compares the owner at +0x4. Already ours: a
+      recursive mutex bumps the u16 at +0x12 unless it has reached 0xffff
+      (the subs/subscs carry chain against 0xff00 then 0xff) -> 0x27; an
+      error-checking mutex -> 0x0f; a normal mutex falls through and
+      blocks on itself. Otherwise waits: 0x080a3c7c with no deadline, or
+      0x080a3ca4 after converting the absolute deadline to a relative one
+      (clock 0 via 0x082c372c — its error returns raw, past the result
+      register — field-wise subtract, then borrow whole seconds while the
+      nanosecond field is negative). A successful wait sets owner and
+      count = 1.
+      match.py structural: same kind decode, owner compare, recursion
+      limit, clock/subtract/normalize/timed-wait chain and claim stores;
+      LLVM turns the three-way kind test into a jump table and reshapes
+      the borrow loop into a min/max form.
+
+  - address: 0x082e83d8
+    ghidra: FUN_082e83d8
+    name: posix_mutex_unlock
+    size: 156
+    sig: "u32 posix_mutex_unlock(PosixMutex *mutex)"
+    module: kernel/posix_mutex
+    status: ported
+    vars: {param_1: mutex}
+    notes: >-
+      NULL -> 0x1a; same lazy-init prologue as the lock (magic literal
+      @ 0x082e8470, same word). A non-owner -> 0x05. A recursive mutex
+      decrements the u16 at +0x12 and stops while it stays nonzero;
+      otherwise count and owner are cleared and the semaphore is signalled
+      (0x080a3d30), whose status is the return value.
+      SIZE IS 156 BYTES (0x082e83d8..0x082e8474): Ghidra's 152 drops the
+      trailing literal.
+      266 call sites, binary-verified by decoding every B/BL word: 1
+      direct bl (0x080c97ac) + the alias veneer `b` @ 0x08261e24
+      (153 bl + 12 tail b) + the veneer @ 0x082621ac (76 bl + 24 tail b).
+      Shipped default of REGION_MUTEX_OPS.unlock.
+      match.py structural: same prologue, same owner compare, same
+      predicated recursion decrement and same clear/signal tail; LLVM
+      hoists the status constants and returns through bx r2 on the
+      indirect release.
+
+  - address: 0x08261e20
+    ghidra: (veneer)
+    name: posix_mutex_lock_veneer_a
+    size: 4
+    module: kernel/posix_mutex
+    status: identified
+    notes: >-
+      Single `b 0x082e8390`. Nothing to port — the veneer address IS the
+      lock for every caller that reaches it. 156 bl + 1 tail b
+      (0x0818af78), binary-verified by decoding every B/BL word.
+
+  - address: 0x08261e24
+    ghidra: (veneer)
+    name: posix_mutex_unlock_veneer_a
+    size: 4
+    module: kernel/posix_mutex
+    status: identified
+    notes: >-
+      Single `b 0x082e83d8`. 153 bl + 12 tail b, binary-verified.
+
+  - address: 0x082621a8
+    ghidra: (veneer)
+    name: posix_mutex_lock_veneer_b
+    size: 4
+    module: kernel/posix_mutex
+    status: identified
+    notes: >-
+      Duplicate of the 0x08261e20 veneer (the linker emitted a second
+      block so far callers stay in bl range). Single `b 0x082e8390`;
+      78 bl + 3 tail b, binary-verified. This is the thunk every heap
+      client in src/heap/ names.
+
+  - address: 0x082621ac
+    ghidra: (veneer)
+    name: posix_mutex_unlock_veneer_b
+    size: 4
+    module: kernel/posix_mutex
+    status: identified
+    notes: >-
+      Duplicate of the 0x08261e24 veneer. Single `b 0x082e83d8`;
+      76 bl + 24 tail b, binary-verified.
