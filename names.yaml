@@ -12275,22 +12275,28 @@ functions:
     ghidra: FUN_08385084
     name: vdbe_add_table_lock
     size: 176
-    sig: "void vdbe_add_table_lock(Vdbe *vdbe, int database_index, int table_index, int is_write_lock, const char *table_name)"
-    status: identified
-    vars: {param_1: vdbe, param_2: database_index, param_3: table_index, param_4: is_write_lock, param_5: table_name, iVar1: lock_index, piVar2: table_lock, iVar3: table_count}
+    sig: "void vdbe_add_table_lock(Parse *parse, int database_index, int table_index, int is_write_lock, const char *table_name)"
+    module: sqlite/table_lock
+    status: ported
+    vars: {param_1: parse, param_2: database_index, param_3: table_index, param_4: is_write_lock, param_5: table_name, iVar1: index, piVar2: lock, iVar3: count}
     notes: >-
-      SQLite's sqlite3VdbeAddTableLock. Negative database indexes are ignored.
-      The existing 16-byte VdbeTableLock array is scanned for the first
-      matching (iDb, iTab) pair, whose write byte becomes the boolean OR of
-      its old value and isWriteLock. A new pair reallocates through the ported
+      SQLite's sqlite3TableLock (the first argument is the Parse context,
+      not a Vdbe: +0x00 db, +0x13c nTableLock, +0x140 aTableLock). Negative
+      database indexes are ignored - the code generator's "no database"
+      sentinel - and there is no shared-cache feature test, so the
+      bookkeeping otherwise runs unconditionally. The existing 16-byte
+      TableLock array (iDb +0, iTab +4, isWriteLock +8, zName +0xc) is
+      scanned for the first matching (iDb, iTab) pair, whose write byte
+      becomes the boolean OR of its old value and isWriteLock - promotion
+      only, never demotion. A new pair reallocates through the ported
       sqlite3DbReallocOrFree (0x083749f4) to (nTableLock + 1) * 16 bytes,
-      stores all four fields, and increments nTableLock. On allocation failure
-      it clears nTableLock and explicitly sets db->mallocFailed (+0x1e).
-      STATUS CORRECTION: this entry was committed as 'ported' by 3fd2977 (an
-      app_object_init commit that carried only src/app/app_object.rs), but no
-      sqlite/table_lock source ever landed on master and no branch, worktree
-      or stash holds it. The analysis above is intact and is a complete port
-      recipe; the port itself must be redone.
+      stores all four fields (zName is borrowed, not copied) and increments
+      nTableLock. Note the asymmetry the port preserves: the fold path
+      normalizes the flag to 0/1 while the append path `strb`s the low byte
+      of isWriteLock verbatim. On allocation failure the old block is
+      already freed, so it clears both aTableLock and nTableLock and
+      explicitly sets db->mallocFailed (+0x1e) even though
+      sqlite3DbRealloc has set it too.
   # ---- VDBE code builder (src/sqlite/vdbe.rs) ----
   - address: 0x08386824
     ghidra: FUN_08386824

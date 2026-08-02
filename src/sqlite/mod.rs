@@ -89,6 +89,7 @@ pub mod strhash;
 pub mod strdup;
 pub mod str_accum;
 pub mod table_affinity;
+pub mod table_lock;
 pub mod value_free;
 pub mod vdbe;
 pub mod vdbe_op;
