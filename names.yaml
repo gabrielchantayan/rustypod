@@ -16152,31 +16152,54 @@ functions:
     name: f32_to_fixed16_sat
     size: 48
     sig: "i32 f32_to_fixed16_sat(u32 x)"
-    status: identified
+    module: fp/fp_fixed16
+    status: ported
     renames:
       param_1: x
-      DAT_080a680c: POS_SAT_THRESHOLD (0x46ffff00 = 32767.984375f)
+      DAT_080a680c: POS_SAT_THRESHOLD (0x46ffff00 = 32767.5f)
+      0xc7000000: NEG_SAT_THRESHOLD (-32768.0f)
       FUN_083ed150: __fscalb
       FUN_083ec898: __f2i
     notes: >-
       f32 (soft-float bit pattern in r0) -> Q16.16 fixed-point s32 with
       clamping. Two saturation compares on the raw bit pattern, then a
       scale-and-truncate tail: signed cmp against literal 0x46ffff00
-      (f32 >= 32767.984375, +Inf, all positive NaN patterns) ->
+      (f32 >= 32767.5, +Inf, all positive NaN patterns) ->
       0x7fffffff; unsigned cmp against 0xc7000000 (f32 <= -32768.0,
       -Inf, all negative NaN patterns) -> 0x80000000; common path is
       __f2i(__fscalb(x, 16)) = trunc(x * 65536). Ghidra mislabels the
       function as non-returning (both saturation exits are ldmia
       sp!,{r4,pc}); it returns on every path. Referenced by the
-      fixed16_cos/fixed16_sin literal pools. match.py structural: same
+      fixed16_cos/fixed16_sin literal pools. True extent confirmed from
+      raw osos.dec: 12 instructions of code 0x080a67dc-0x080a680b (the
+      last is a tail `b 0x83ec898`, not a bl) plus the one literal word
+      at 0x080a680c; Ghidra's 48-byte size is code-only and correct.
+      CORRECTION to the earlier analysis: the literal 0x46ffff00 decodes
+      to 32767.5, NOT 32767.984375 (exp 0x8d, mantissa 0x7fff00). The
+      thresholds are therefore asymmetric - the negative one is the exact
+      -2^31 boundary, the positive one is well inside it, so the highest
+      non-saturated output is 0x7fff7f80 and anything above jumps
+      straight to i32::MAX. Reproduced faithfully.
+      Both callees were already ported (fp/fp_scalb::__fscalb,
+      fp/fp_fconv::__f2i), so the port calls them directly - no dispatch
+      seam is needed and none was added. Saturation absorbs every
+      non-finite input, so the helpers only ever see finite |x| < 32768:
+      __fscalb takes its exponent-add fast path (biased exp <= 0x8d) and
+      __f2i sees |value| < 2^31, meaning neither helper's error/trap path
+      is live from here. __fscalb flushes subnormals to +0.0 instead of
+      scaling them, which is unobservable because truncation would yield
+      0 anyway. Host tests (9) cover both saturation boundaries and the
+      ulp on each side, +/-Inf and both NaN signs, +/-0, subnormals,
+      exact powers of two incl. the 2^-16 ulp and 2^-17 underflow,
+      trunc-toward-zero on both signs, and a ~2000-case sweep against an
+      f64 oracle; the two firmware-witnessed constants from the
+      fixed16_sin/cos literal pools are pinned exactly
+      (2pi -> 0x6487e, 1/2pi -> 0x28be). match.py structural: same
       two-compares-then-scale-then-truncate shape; LLVM inlined the
-      __fscalb/__f2i bodies and turned the unsigned >= 0xc7000000
-      compare into an equivalent top-byte compare.
-      STATUS CORRECTION: this entry was committed as 'ported' by d21e54a
-      (a fixed16_sin deferral touching only names.yaml), but no fp/fp_fixed16
-      source ever landed on master and no branch, worktree or stash holds it.
-      The analysis above is intact and is a complete port recipe; the port
-      itself must be redone.
+      __fscalb/__f2i bodies (12 instructions -> 85) and rewrote both
+      compares - signed `> 0x46fffeff` for the high threshold and a
+      top-byte `lsr #24; cmp #0xc6; bhi` for the unsigned 0xc7000000
+      one - exactly as the earlier pass predicted.
 
   - address: 0x080e9310
     ghidra: FUN_080e9310
