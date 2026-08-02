@@ -3,6 +3,7 @@
 pub mod class_6800;
 pub mod class_registry;
 pub mod context;
+pub mod context_scope;
 pub mod flag_2c_is_one;
 pub mod element_table;
 pub mod event_list;

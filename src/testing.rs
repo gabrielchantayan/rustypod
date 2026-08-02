@@ -42,6 +42,7 @@ pub mod hints {
     pub const BLOCK_MGR: usize = 0x0c00_0000;
     pub const LIST_SPLICE: usize = 0x0d00_0000;
     pub const EVENT_LIST: usize = 0x0e00_0000;
+    pub const CONTEXT_SCOPE: usize = 0x0f00_0000;
     // `heap/pool.rs` maps its own arena at 0x0800_0000 through a separate
     // path: it needs only bit 31 clear, not full u32 addressability.
 }

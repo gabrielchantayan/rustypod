@@ -17974,3 +17974,62 @@ functions:
       binary-verified the same way. Sibling of the memzero_aligned veneer @
       0x08037db8. Same deviations and the same read_volatile callee load as
       iram_memcpy_veneer; match.py structural: ldr/ldr/bx through a literal.
+
+  # --- Application context scope (app/context_scope) ---
+  - address: 0x082840e8
+    ghidra: FUN_082840e8
+    name: context_scope_init
+    size: 48
+    sig: "void *context_scope_init(void *scope, void *subject, u8 flag)"
+    module: app/context_scope
+    status: ported
+    vars: {param_1: scope, param_2: subject, param_3: flag}
+    notes: >-
+      Constructor of the 20-byte stack-local application "context scope"
+      record. Plants the class descriptor 0x089a6600 at +0x00, zeroes
+      +0x04, calls context_scope_capture @ 0x08283f3c (r1 flows through
+      untouched — Ghidra's C drops that argument), stores the low byte of
+      r2 at +0x10 and returns this. SIZE: Ghidra says 44; the true extent
+      is 48 — the eleven instructions end at 0x08284110 and the word at
+      0x08284114 is the descriptor literal `ldr r0, [pc, #32]` loads.
+      Ghidra dropped the trailing literal word. 110 bl call sites plus one
+      tail b, binary-scanned by decoding every B/BL word in osos.dec (not
+      from Ghidra xrefs). Call-site shapes confirm the RAII reading — 99
+      of the 110 set `mov r2, #0` and 71 set `mov r1, #0` within four
+      instructions, and 87 have a context_scope_drop site within the
+      following 0x800 bytes. The class has no surviving name (nothing
+      reaches the class-name factory @ 0x0820b230); its siblings are the
+      handle-taking constructor @ 0x08284118 (12 bl), the copy constructor
+      @ 0x0828414c (7 bl), the assignment operator @ 0x0828418c (37 bl)
+      and the deleting destructor @ 0x0828417c. Deviation — the root
+      object global @ 0x089ca674 is the crate static APP_ROOT_OBJECT (the
+      block_mgr.rs / app/context.rs precedent: that RW page is
+      runtime-initialized and the image holds stale UI strings there), so
+      the non-NULL-subject path is not hook-ready until integration
+      assigns it; the 71 default-constructing sites never touch it.
+      match.py structural: same store order (descriptor, +0x04 zero, bl,
+      strb, return this) with LLVM keeping the flag in r4 and the crate's
+      frame-pointer prologue.
+
+  - address: 0x08283f3c
+    ghidra: FUN_08283f3c
+    name: context_scope_capture
+    size: 56
+    sig: "void context_scope_capture(void *scope, void *subject)"
+    module: app/context_scope
+    status: ported
+    vars: {param_1: scope, param_2: subject}
+    notes: >-
+      The one callee of context_scope_init: stores subject at +0x04, and
+      with a NULL subject zeroes +0x08/+0x0c without reading any global
+      (the `streq`/`beq` pair). Otherwise walks *0x089ca674 -> +0x30
+      (stored at +0x08) -> +0xf60, storing that record's +0x18 at +0x0c or
+      0 when it is NULL. Ghidra's 52 bytes covers the code
+      (0x08283f3c..0x08283f6c) but drops the trailing literal at
+      0x08283f70 (the 0x089ca674 global), so the true extent is 56; its
+      one-argument signature is also wrong, r1 is a real parameter that
+      the constructor passes through untouched. 1 bl call site plus the tail b from the sibling
+      constructor's handle adapter @ 0x08283e80. Same APP_ROOT_OBJECT
+      deviation as context_scope_init. match.py structural: identical walk
+      and identical NULL-owner select; LLVM splits the NULL-subject branch
+      into its own tail instead of predicating the two stores.
