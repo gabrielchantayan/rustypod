@@ -17151,3 +17151,54 @@ functions:
       match.py structural: same save-this / plant-vtable / NULL-payload /
       call-assign / return-this shape; the diff is LLVM reordering the
       two stores and adding the crate's fp frame.
+  - address: 0x082773e0
+    ghidra: FUN_082773e0
+    name: string_object_copy_construct
+    size: 48
+    sig: "StringObject *string_object_copy_construct(StringObject *this, const StringObject *source)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1: this
+      param_2: source
+      DAT_08277410: STRING_OBJECT_VTABLE_ADDRESS
+      FUN_08276474: string_object_assign_payload
+    notes: >-
+      212 bl call sites (binary-scanned) - the copy constructor
+      StringObject(const StringObject &) of the same class. Raw ARM: push
+      {r4,lr}; mov r4,r0; ldr r0,[0x08277410] (0x089a6044,
+      binary-verified); cmp r4,r1; str r0,[r4]; movne r0,#0; strne
+      r0,[r4,#0x4]; ldrne r1,[r1,#0x4]; movne r0,r4; blne 0x08276474; mov
+      r0,r4; pop {r4,pc}. 48 code bytes plus the 4-byte literal-pool word
+      @ 0x08277410. Two details are load-bearing and reproduced exactly.
+      First, the vtable store sits OUTSIDE the self-construction guard
+      while the payload NULLing sits INSIDE it, so constructing an object
+      from itself plants the vtable and leaves the existing payload word
+      alone instead of dropping it; the guard is the same
+      address-not-content test string_object_assign @ 0x082774a8 uses,
+      but here it also decides whether the storage is treated as raw.
+      Second, this is returned on every path (the mov r0,r4 follows the
+      conditional call). The duplication itself is the already-ported
+      string_object_assign_payload @ 0x08276474 over the SOURCE's payload
+      word: it sizes the copy with strlen_safe_plus1, asks vtable slot
+      +0x8 for the storage and copies through the NUL, or dispatches slot
+      +0xc when the source payload is NULL or empty; a failed allocation
+      leaves the empty-string state the constructor already established.
+      Neither operand is NULL-guarded - the original faults on the vtable
+      store for a NULL this and on the ldrne for a NULL source, and so
+      does the port. Deviation: the modeled static STRING_OBJECT_VTABLE
+      instead of the ROM address. The port also replaces the
+      empty-construction stub as the wired default of the
+      STRING_OBJECT_COPY_CONSTRUCT dispatch slot that
+      string_id_record_construct_from_string_id @ 0x08258c08 and
+      string_id_record_copy_construct @ 0x08258c2c chain through (the
+      slot stays so host tests can install recording mocks). Host tests
+      cover duplication through +0x8, self-construction as vtable-only
+      with the payload kept, the address-not-content guard (two distinct
+      objects sharing one payload pointer still duplicate), the NULL
+      source payload clear-slot path, allocation failure, and the wired
+      default. match.py structural: same literal-load / address-compare /
+      unconditional-vtable-store / NULL-payload / load-source-payload /
+      call / return-this sequence; the diff is LLVM hoisting the
+      predicated guard into an early bxeq lr and adding the crate's fp
+      frame.
