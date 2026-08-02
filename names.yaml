@@ -17401,3 +17401,54 @@ functions:
       call / return-this sequence; the diff is LLVM hoisting the
       predicated guard into an early bxeq lr and adding the crate's fp
       frame.
+
+  # --- IRAM veneers for the ADS block-memory routines ---
+  # 0x22000000 is S5L8702 *internal SRAM*, not mask ROM as the header of
+  # kernel/thunks.rs says (mask ROM is at 0x20000000). The relocator @
+  # 0x080046e0 copies a 0xaed8-byte blob to 0x22000000, zero-fills the IRAM
+  # BSS at 0x2200aed8 for 0x589c bytes and jumps to 0x22000000 — so the
+  # mirrored code region is exactly 0x22000000..0x2200aed8, matching osos
+  # 0x08000000..0x0800aed8. Binary confirmation of that extent: of 190027
+  # decoded B/BL words in osos.dec, 1467 stay wholly below 0x0800aed8 and
+  # 188560 wholly above it; the 7 apparent crossings are literal-pool words
+  # that happen to decode as branches. The low block is reached from the rest
+  # of the image only through the veneer table.
+
+  - address: 0x08037df8
+    ghidra: thunk_EXT_FUN_22000188
+    name: iram_memcpy_veneer
+    size: 8
+    sig: "void *iram_memcpy_veneer(void *dst, const void *src, size_t len)"
+    module: libc/iram_veneers
+    status: ported
+    notes: >-
+      ldr pc,[pc,#-4] -> 0x22000188 = the IRAM copy of memcpy @ 0x08000188
+      (ADS __rt_memcpy's word-aligned fast path). Ghidra reports 4 bytes;
+      the stub is 8 (0xe51ff004 + the target word). THE most-called
+      veneer-only address in the image: 477 bl (465 unconditional, 12
+      predicated) + 11 tail b, all from above 0x0800aed8 — binary-verified
+      by decoding every B/BL word, not from Ghidra xrefs. Body recoverable
+      and already ported, so this is a real forwarding call, not a stub.
+      Deviation: the ARM body returns dst+len; the port returns dst. Safe —
+      sampling 24 call sites across the image, the instruction after every
+      bl either overwrites r0 or ignores it; none reads it. The port loads
+      its callee through read_volatile, otherwise LLVM re-lowers the call to
+      __aeabi_memcpy and the veneer stops reaching the port. match.py
+      structural: compiles to ldr/ldr/bx through a literal — the original's
+      indirect-jump-through-a-literal shape plus one indirection and the
+      crate's fp frame, r0-r2 passed through untouched.
+
+  - address: 0x08037dc8
+    ghidra: thunk_EXT_FUN_220002d4
+    name: iram_memzero_veneer
+    size: 8
+    sig: "void *iram_memzero_veneer(void *dst, size_t len)"
+    module: libc/iram_veneers
+    status: ported
+    notes: >-
+      ldr pc,[pc,#-4] -> 0x220002d4 = the IRAM copy of memzero @ 0x080002d4
+      (zero-fill with the len<4 / misalignment prologue). 106 bl (96
+      unconditional, 10 predicated) + 7 tail b, all from above 0x0800aed8,
+      binary-verified the same way. Sibling of the memzero_aligned veneer @
+      0x08037db8. Same deviations and the same read_volatile callee load as
+      iram_memcpy_veneer; match.py structural: ldr/ldr/bx through a literal.

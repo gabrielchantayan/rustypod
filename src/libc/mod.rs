@@ -4,6 +4,7 @@ pub mod byte_copy;
 pub mod counted_copy;
 pub mod bounded_copy;
 pub mod bzero;
+pub mod iram_veneers;
 pub mod memchr;
 pub mod memcmp;
 pub mod memcpy;
