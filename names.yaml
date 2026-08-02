@@ -17401,3 +17401,56 @@ functions:
       call / return-this sequence; the diff is LLVM hoisting the
       predicated guard into an early bxeq lr and adding the crate's fp
       frame.
+
+  - address: 0x081346e4
+    ghidra: FUN_081346e4
+    name: template_binding_name_or_default
+    size: 48
+    sig: "const char *template_binding_name_or_default(void *this)"
+    module: app/template_binding
+    status: ported
+    vars: {param_1: this}
+    notes: >-
+      114 bl + 114 tail b call sites (every B/BL word in osos.dec decoded
+      and its target computed). 48 bytes of code plus the two-word
+      literal pool it owns at 0x08134714..0x0813471b (56 total); the
+      next function, a lone `bx lr`, starts at 0x0813471c. Reads the
+      embedded two-word StringObject at this+0x28 through the ported
+      string_object_c_str @ 0x082a50b0 and returns that C string, except
+      that when it equals a ROM sentinel the function returns a ROM
+      default instead - `bl 0x082a50b0; ldr r1,[0x08134714]; bl strcmp;
+      cmp r0,#0; addne r0,r4,#0x28; popne; bne 0x082a50b0; ldreq
+      r0,[0x08134718]`. Both callees (string_object_c_str, strcmp @
+      0x08391e38) are ported and called DIRECTLY - no dispatch seam -
+      and the port keeps the original's two separate c_str calls, one
+      per branch. It is the base of a 114-member override family: every
+      bl site is followed by the identical 44-byte wrapper `bl
+      0x081346e4 / adr r1,"CntrlHistoryFn" / bl strcmp / cmp r0,#0 /
+      movne r0,this / popne / bne 0x081346e4 / ldreq r0,[pool] / pop`,
+      each derived class substituting its own ROM string when the
+      inherited name is the framework's "CntrlHistoryFn" marker (158
+      copies of that literal in the image; the app-layer literal pools
+      carry it in per-translation-unit triples with "TSilverCntlr" and
+      the unit's controller names - "TCNotesDispatcher", "TCClock",
+      "TCVoiceMemos", "TDiskModeCntlr" ... @ 0x083f5cbc onward), which
+      places the family in the TSilverCntlr controller framework. 108 of
+      those 114 wrappers have no reference anywhere in the image
+      (neither data word nor branch), i.e. they are emitted-but-unreached
+      overrides. Deviation: the two literal-pool words hold 0x083e267c
+      and 0x083e266c, which are CODE addresses - this toolchain resolves
+      short string literals to any matching byte run in the image, the
+      same phenomenon string_object_c_str's 0x083e2e3a empty string
+      documents - so the port models their CONTENT (sentinel = the two
+      bytes 0x12 0x00, default = the empty string) and keeps the ROM
+      addresses as NAME_SENTINEL_CSTR_ADDRESS /
+      NAME_DEFAULT_CSTR_ADDRESS. The class behind this is inferred, not
+      proven, so the object stays opaque bytes and the port claims only
+      the offset the instruction spells out. Host tests: an ordinary
+      name returns the payload pointer itself, a name equal to the
+      sentinel returns the modeled default, a name that merely STARTS
+      with the sentinel byte survives (strcmp, not memcmp), the empty
+      name survives, and a NULL payload yields string_object_c_str's
+      shared empty string rather than the default. match.py structural:
+      same add-this+0x28 / c_str / compare / tail-call-c_str vs
+      load-constant split; the diff is LLVM inlining the ported strcmp
+      byte loop and the crate's fp frame.
