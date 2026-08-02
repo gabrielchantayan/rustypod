@@ -17974,3 +17974,37 @@ functions:
       binary-verified the same way. Sibling of the memzero_aligned veneer @
       0x08037db8. Same deviations and the same read_volatile callee load as
       iram_memcpy_veneer; match.py structural: ldr/ldr/bx through a literal.
+
+  - address: 0x082646ac
+    ghidra: FUN_082646ac
+    name: trivial_destructor
+    size: 4
+    sig: "void *trivial_destructor(void *this)"
+    module: cxx/trivial_destructor
+    status: ported
+    notes: >-
+      The image's single shared EMPTY destructor body - one instruction,
+      `bx lr`. Extent binary-verified: 0x082646a8 is the literal pool of
+      the ctor @ 0x0826467c and 0x082646b0 starts the next function, so
+      the 4-byte size is right and there is no trailing literal word. Not
+      a veneer - no `ldr pc,[pc,#-4]`, no `b`.
+      112 `bl` call sites and 0 `b`, binary-scanned by decoding every
+      B/BL word in osos.dec (range 0x08090754..0x0829869c), plus ZERO
+      occurrences of the word 0x082646ac anywhere in the image, so it is
+      never reached through a vtable: every caller binds it statically,
+      as a compiler does for a known-type destructor. The sites are two
+      destructor shapes - 79 are `add r0, sp, #N` immediately before the
+      `bl` (a stack temporary going out of scope) and 24 are immediately
+      followed by `bl 0x082aad24` (operator_delete), the destroy-then-free
+      pair that names.yaml already records from the other side at the view
+      destructor 0x0819ba64 ("0x082646ac then operator delete").
+      Load-bearing detail: `bx lr` leaves r0 untouched, and the
+      destroy-then-free sites rely on it - e.g. 0x081023d0 does
+      `ldr r0,[r0,#0xa8]; cmp r0,#0; beq +; bl 0x082646ac; bl 0x082aad24`,
+      so operator_delete consumes the pointer this function passed
+      through. The port therefore returns `this` rather than being void.
+      Reads and writes nothing, so a NULL, unaligned or dangling `this`
+      is fine. Deviations: none behaviorally. match.py structural: the
+      body is empty in both; the port adds only the crate's fp frame
+      (push {fp,lr}/mov fp,sp/pop {fp,pc}) around the same no-op, with r0
+      untouched on every path.

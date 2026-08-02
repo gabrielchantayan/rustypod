@@ -14,3 +14,4 @@ pub mod string;
 pub mod string_map;
 pub mod string_object;
 pub mod templates;
+pub mod trivial_destructor;
