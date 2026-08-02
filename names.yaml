@@ -7635,6 +7635,86 @@ functions:
       the empty cxa_guard_release call deleted - the accepted
       intra-crate inlining noise (class_registry_construct precedent).
 
+  - address: 0x08189464
+    ghidra: FUN_08189464
+    name: media_command_facade_get
+    size: 92
+    sig: "void *media_command_facade_get(void)"
+    module: app/media_command_facade
+    status: ported
+    vars: {iVar1: acquired, uVar2: this,
+      DAT_081894ac: guard-base-pool-word (0x089ca3a4; the guard is its +0xc),
+      DAT_081894b0: guard-pool-word (0x089ca3b0 = MEDIA_COMMAND_GUARD),
+      DAT_081894b4: object-pool-word (0x08a107f8 = MEDIA_COMMAND_FACADE),
+      DAT_081894b8: DSO_HANDLE (0x089ca09c = __dso_handle),
+      DAT_081894bc: dtor-pool-word (0x0817f190)}
+    notes: >-
+      EXTENT CORRECTED - functions.csv says 72 bytes, which is the code
+      only; the five pool words @ 0x081894ac..0x081894bc belong to the
+      function and the next function opens at 0x081894c0 (`ldr r0,[r0];
+      ldr r1,[r0]; ldr r1,[r1,#0x158]; bx r1`, a sibling facade method),
+      so the true extent is 92 bytes. 76 bl call sites from 22 distinct
+      callers, zero plain-b tail sites - verified by decoding every B/BL
+      word in osos.dec.
+      A textbook ADS function-local static over a FIXED object, the
+      node_list_get idiom, NOT the operator_new cache pattern of
+      app/singletons.rs - which is why it lives beside the object it
+      returns. Shape - tst guard,#1 fast path (read as
+      `[0x089ca3a4+0xc]`, the same word as the 0x089ca3b0 literal the
+      slow path loads); cxa_guard_acquire (0x082ab31c); ctor
+      FUN_0818a010(object) returning this in r0; cxa_atexit(this, dtor
+      0x0817f190, __dso_handle 0x089ca09c) (0x082ab1c8);
+      cxa_guard_release (0x082ab338); reload the OBJECT literal - never
+      the ctor's return - and return it. The guard pair and cxa_atexit
+      are ported and called directly; the ctor is not, so it sits behind
+      the MEDIA_COMMAND_CTOR seam (documented zeroing default - NOT
+      hook-ready).
+      WHAT THE OBJECT IS - a thin facade over the media player. The ctor
+      (binary-verified, 84 bytes) writes +0x00 = media_player_get
+      (0x0817ceb4, ported), +0x04 = instance_of_class_6600 (0x08100b74,
+      ported), zeroes the bytes +0x08/+0x09, the half +0x0a and the
+      bytes +0x0c/+0x0d, sets +0x10/+0x14/+0x18 = -1, +0x1c = 0 and
+      +0x20 = 0xffff63c0 (-40000, the pool word @ 0x0818a064). +0x20 is
+      the last store, so the object extent is 0x24 - there is no
+      operator_new here to confirm a size independently.
+      The methods around the accessor are one-liners of the form
+      `[strb #1,[r0,#0xd];] ldr r0,[r0]; ldr r1,[r0]; ldr r1,[r1,#N]; bx
+      r1` - most first mark the facade dirty at +0x0d (0x081897a8,
+      0x08189998, 0x081899f4...), a few do not (0x081892e8, 0x081892f8,
+      0x08189500) - then tail-dispatch through the player's vtable (slots +0x58, +0x68, +0x78, +0x88, +0x120,
+      +0x130, +0x158, +0x17c, +0x1a4 observed). 21 of the 76 sites are
+      in the message pump FUN_08100bb4, whose switch keys are the
+      class-0x6600 command codes 0x6600000d, 0x6600000e, 0x6600000f...,
+      each case fetching the facade and calling one method; the rest are
+      the command wrappers @ 0x082c6a40..0x082c6ed0.
+      The registered destructor 0x0817f190 is NOT a function entry - it
+      is 0xbc bytes inside FUN_0817f0d4 (0x0817f0d4, 228 bytes), on a
+      `ldr r2,[pc,#36]` that falls through to `pop {r0-r8,pc}`; as a
+      shutdown handler it would pop a frame it never pushed, so the
+      registration could never fire (and retailOS never runs exit's
+      chain anyway). Modeled as a no-op - the node_list_get 0x0810516c
+      precedent.
+      Deviations - the guard and the object are crate statics, not the
+      0x089ca3b0 / 0x08a107f8 words (the block_mgr.rs RW-page
+      precedent); both zero-init = the exact pre-init state.
+      Host tests - first call constructs/registers/publishes the guard,
+      second call takes the bit-0 fast path and preserves a
+      post-construction mutation, a bit-0-set guard short-circuits
+      everything, a nonzero bit-0-clear guard is still refused by
+      acquire, the RELOADED literal is returned while the registration
+      carries the ctor's (deliberately different) return, the chain runs
+      the no-op destructor, and the zeroing default covers exactly 0x24
+      bytes.
+      match.py structural - same guard-test / acquire / ctor / register /
+      return-object sequence with the ported callees inlined by LLVM
+      (the two-level guard test merges into one whole-word test -
+      outcome-identical in every guard state, since a bit-0-clear
+      nonzero guard is refused by both; cxa_atexit's malloc(16) and node
+      link open-code; the empty cxa_guard_release is deleted) plus the
+      crate fp frame and the `blx` through MEDIA_COMMAND_CTOR standing
+      in for `bl 0x0818a010` - the accepted intra-crate inlining noise
+      (node_list_get / class_registry_construct precedent).
+
   - address: 0x081c93fc
     ghidra: FUN_081c93fc
     name: table6_find_by_key
