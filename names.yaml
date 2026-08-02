@@ -12276,8 +12276,7 @@ functions:
     name: vdbe_add_table_lock
     size: 176
     sig: "void vdbe_add_table_lock(Vdbe *vdbe, int database_index, int table_index, int is_write_lock, const char *table_name)"
-    module: sqlite/table_lock
-    status: ported
+    status: identified
     vars: {param_1: vdbe, param_2: database_index, param_3: table_index, param_4: is_write_lock, param_5: table_name, iVar1: lock_index, piVar2: table_lock, iVar3: table_count}
     notes: >-
       SQLite's sqlite3VdbeAddTableLock. Negative database indexes are ignored.
@@ -12287,6 +12286,11 @@ functions:
       sqlite3DbReallocOrFree (0x083749f4) to (nTableLock + 1) * 16 bytes,
       stores all four fields, and increments nTableLock. On allocation failure
       it clears nTableLock and explicitly sets db->mallocFailed (+0x1e).
+      STATUS CORRECTION: this entry was committed as 'ported' by 3fd2977 (an
+      app_object_init commit that carried only src/app/app_object.rs), but no
+      sqlite/table_lock source ever landed on master and no branch, worktree
+      or stash holds it. The analysis above is intact and is a complete port
+      recipe; the port itself must be redone.
   # ---- VDBE code builder (src/sqlite/vdbe.rs) ----
   - address: 0x08386824
     ghidra: FUN_08386824
@@ -13469,8 +13473,7 @@ functions:
     name: blob_to_hex
     size: 160
     sig: "u8 *blob_to_hex(const u8 *blob, i32 len)"
-    module: sqlite/blob_to_hex
-    status: ported
+    status: identified
     vars: {param_1: blob, param_2: len, puVar2: out, puVar4: cursor, iVar5: i, iVar1: digits}
     notes: >-
       2 bl call sites (0x080aedfc, 0x080aee4c), both in the keyid/serial
@@ -13499,6 +13502,11 @@ functions:
       ldrb [table, b>>4] / and #15 / ':' loop, terminator at [r3,#-1],
       diag path with 0x22/0x6f/0x41; the diff is the LLVM frame, the
       hook-slot indirection for the diag call, and a count-down loop.
+      STATUS CORRECTION: this entry was committed as 'ported' by 45932ca (an
+      rtc_read_time commit that carried only src/time/rtc.rs), but no
+      sqlite/blob_to_hex source ever landed on master and no branch, worktree
+      or stash holds it. The analysis above is intact and is a complete port
+      recipe; the port itself must be redone.
 
   - address: 0x083788fc
     ghidra: FUN_083788fc
@@ -16085,8 +16093,7 @@ functions:
     name: f32_to_fixed16_sat
     size: 48
     sig: "i32 f32_to_fixed16_sat(u32 x)"
-    module: fp/fp_fixed16
-    status: ported
+    status: identified
     renames:
       param_1: x
       DAT_080a680c: POS_SAT_THRESHOLD (0x46ffff00 = 32767.984375f)
@@ -16106,6 +16113,11 @@ functions:
       two-compares-then-scale-then-truncate shape; LLVM inlined the
       __fscalb/__f2i bodies and turned the unsigned >= 0xc7000000
       compare into an equivalent top-byte compare.
+      STATUS CORRECTION: this entry was committed as 'ported' by d21e54a
+      (a fixed16_sin deferral touching only names.yaml), but no fp/fp_fixed16
+      source ever landed on master and no branch, worktree or stash holds it.
+      The analysis above is intact and is a complete port recipe; the port
+      itself must be redone.
 
   - address: 0x080e9310
     ghidra: FUN_080e9310
