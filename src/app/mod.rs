@@ -8,6 +8,7 @@ pub mod element_table;
 pub mod event_list;
 pub mod fixed_value;
 pub mod image_format;
+pub mod media_command_facade;
 pub mod media_ext;
 pub mod node_list;
 pub mod object_dispatch_entry;
