@@ -282,8 +282,20 @@ mod tests {
     const FIXTURE_LEN: usize = 0x2000;
 
     impl RootFixture {
+        /// One mapping for the whole module, cached (the
+        /// `heap/client_populate.rs` `try_slab` precedent).
+        /// [`try_map_u32_slab`] does not pass `MAP_FIXED`, so a second
+        /// request for the same hint lands wherever the kernel likes —
+        /// above 4 GiB on a 64-bit host — and the test that asked for it
+        /// would skip on EVERY host while the suite still reported green.
+        /// Every caller holds `APP_ROOT_TEST_LOCK`, so one shared region
+        /// is safe; it is re-zeroed on each acquisition.
         fn map() -> Option<Self> {
-            let base = try_map_u32_slab(hints::CONTEXT_SCOPE, FIXTURE_LEN)?;
+            use std::sync::OnceLock;
+            static BASE: OnceLock<Option<usize>> = OnceLock::new();
+            let base = (*BASE.get_or_init(|| {
+                try_map_u32_slab(hints::CONTEXT_SCOPE, FIXTURE_LEN).map(|p| p as usize)
+            }))? as *mut u8;
             unsafe { core::ptr::write_bytes(base, 0, FIXTURE_LEN) };
             Some(Self { base })
         }
