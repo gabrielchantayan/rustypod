@@ -17112,3 +17112,42 @@ functions:
       structural: same compare/skip/load-source-payload/call/return-this
       shape; the diff is LLVM inverting the predicated guard into an early
       bxeq lr and adding the crate's fp frame.
+  - address: 0x08277304
+    ghidra: FUN_08277304
+    name: string_object_construct_from_cstr
+    size: 40
+    sig: "StringObject *string_object_construct_from_cstr(StringObject *this, const char *source)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1: this
+      param_2: source
+      DAT_0827732c: STRING_OBJECT_VTABLE_ADDRESS
+      FUN_0827639c: string_object_assign_cstr
+    notes: >-
+      143 bl call sites (binary-scanned). The converting constructor
+      StringObject(const char *) of the unidentified two-word
+      string/buffer class whose default ctor is string_default_construct
+      @ 0x08277440. Raw ARM: push {r4,lr}; mov r4,r0; ldr r0,[0x0827732c]
+      (0x089a6044, the class vtable, binary-verified); str r0,[r4]; mov
+      r0,#0; str r0,[r4,#0x4]; mov r0,r4; bl 0x0827639c; mov r0,r4; pop
+      {r4,pc}. 40 code bytes plus the 4-byte literal-pool word @
+      0x0827732c. Ghidra drops the second argument in
+      decomp/c/026/08277304_FUN_08277304.c - r1 is never written between
+      entry and the bl, so the caller's C string flows straight into
+      string_object_assign_cstr. It is exactly the default ctor followed
+      by the ported assign: NULLing the payload word FIRST is what makes
+      the shared assignment path safe on raw storage - the +0x8
+      allocation slot sees no prior payload to release. source stays
+      caller-owned; a NULL or empty source leaves the freshly-constructed
+      empty state through the +0xc clear slot, and an allocation failure
+      leaves the payload NULL. this is returned unconditionally (the ADS
+      constructor convention) and is not NULL-guarded - the original
+      faults on the vtable store, and so does the port. Deviation: the
+      vtable is the modeled static STRING_OBJECT_VTABLE, not the ROM
+      address (the whole module's convention). Host tests cover the
+      garbage-storage NULLing plus strlen+1 allocation and copy, the
+      NULL/empty source clear-slot path, and allocation failure.
+      match.py structural: same save-this / plant-vtable / NULL-payload /
+      call-assign / return-this shape; the diff is LLVM reordering the
+      two stores and adding the crate's fp frame.

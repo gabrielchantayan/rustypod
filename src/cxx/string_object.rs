@@ -39,6 +39,13 @@
 //!   copying the source (including its NUL) into the returned storage.
 //!   A NULL or empty source instead tail-dispatches virtual slot +0xc;
 //!   an allocation failure returns without copying or falling back.
+//! - `string_object_construct_from_cstr` — original: `FUN_08277304` @
+//!   0x08277304 (44 bytes: 40 code + the 4-byte vtable literal @
+//!   0x0827732c; 143 `bl` call sites, binary-scanned). The converting
+//!   constructor `StringObject(const char *)`: plants the vtable, NULLs
+//!   the payload word so the shared assignment path sees no prior
+//!   payload to release, then chains to `string_object_assign_cstr` @
+//!   0x0827639c with the caller's C string; returns `this`.
 //! - `string_default_construct` — original: `FUN_08277440` @ 0x08277440
 //!   (20 bytes: 16 code + the 4-byte vtable literal @ 0x08277454;
 //!   280 `bl` call sites, binary-scanned). `obj[0] = vtable`,
@@ -504,6 +511,57 @@ pub unsafe extern "C" fn string_object_assign(
     if this as *const StringObject != source {
         string_object_assign_payload(this, (*source).payload);
     }
+    this
+}
+
+/// string_object_construct_from_cstr — original: `FUN_08277304` @
+/// 0x08277304 (44 bytes: 40 code + the 4-byte vtable literal @
+/// 0x0827732c = 0x089a6044, binary-verified against osos.dec; 143 `bl`
+/// call sites, binary-scanned).
+///
+/// Source: `ipod-decomp/decomp/c/026/08277304_FUN_08277304.c` (Ghidra
+/// drops the second argument: r1 is never written between entry and the
+/// `bl`, so the caller's C string flows straight through).
+///
+/// The class's converting constructor, `StringObject(const char
+/// *source)`. Decoded from the raw ARM at 0x08277304:
+///
+/// ```text
+/// push {r4, lr}
+/// mov  r4, r0          ; save `this` across the call
+/// ldr  r0, [0x0827732c] ; 0x089a6044, the class vtable
+/// str  r0, [r4]
+/// mov  r0, #0
+/// str  r0, [r4, #4]    ; payload = NULL — raw storage, nothing to free
+/// mov  r0, r4
+/// bl   0x0827639c      ; string_object_assign_cstr(this, source)
+/// mov  r0, r4          ; return `this`
+/// pop  {r4, pc}
+/// ```
+///
+/// It is exactly the default constructor @ 0x08277440 followed by the
+/// ported [`string_object_assign_cstr`] @ 0x0827639c: NULLing the
+/// payload word first is what makes the shared assignment path safe on
+/// uninitialized storage — the +0x8 allocation slot sees no prior
+/// payload to release. `source` is caller-owned and passed through
+/// untouched; an empty or NULL `source` leaves the object in the
+/// freshly-constructed state through the +0xc clear slot, and an
+/// allocation failure leaves the payload NULL. `this` is returned
+/// unconditionally (the ADS constructor convention) and is not
+/// NULL-guarded — the original faults on the vtable store, and so does
+/// the port.
+///
+/// Deviation: the vtable is the modeled static [`STRING_OBJECT_VTABLE`]
+/// rather than the ROM address (see the module header).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_construct_from_cstr(
+    this: *mut StringObject,
+    source: *const u8,
+) -> *mut StringObject {
+    (*this).vtable = &STRING_OBJECT_VTABLE;
+    (*this).payload = core::ptr::null_mut();
+    string_object_assign_cstr(this, source);
     this
 }
 
@@ -1584,6 +1642,99 @@ mod tests {
             unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).clone() },
             std::vec![this as usize],
             "it reaches vtable slot +0xc through the ported assign_payload"
+        );
+    }
+
+    // ---- string_object_construct_from_cstr ----------------------------
+
+    #[test]
+    fn construct_from_cstr_nulls_garbage_storage_then_assigns_the_source() {
+        let mut destination = [0xa5u8; 16];
+        let source = *b"track\0";
+        // Raw storage: both words hold garbage, as they do at a real
+        // construction site.
+        let mut object = StringObject {
+            vtable: 0xdead_beef as *const StringObjectVtable,
+            payload: 0xcafe_f00d as *mut u8,
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(destination.as_mut_ptr());
+
+        let returned =
+            unsafe { string_object_construct_from_cstr(this, source.as_ptr()) };
+
+        assert_eq!(returned, this, "the ADS constructor return convention");
+        assert_eq!(object.vtable, &STRING_OBJECT_VTABLE as *const _);
+        assert!(
+            object.payload.is_null(),
+            "the ctor NULLs the garbage payload word; only the +0x8 slot \
+             ever writes it, and the mock does not"
+        );
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
+            std::vec![(this as usize, source.len(), 0u32)],
+            "it chains to assign_cstr, which asks +0x8 for strlen + 1"
+        );
+        assert_eq!(&destination[..source.len()], &source[..]);
+        assert_eq!(&source, b"track\0", "the source stays caller-owned");
+    }
+
+    #[test]
+    fn construct_from_cstr_with_null_or_empty_source_leaves_a_fresh_object() {
+        for source in [core::ptr::null(), b"\0".as_ptr()] {
+            let mut object = StringObject {
+                vtable: 0xdead_beef as *const StringObjectVtable,
+                payload: 0xcafe_f00d as *mut u8,
+            };
+            let this = core::ptr::addr_of_mut!(object);
+            let _bench = assign_cstr_bench(0x6666_6666 as *mut u8);
+
+            assert_eq!(
+                unsafe { string_object_construct_from_cstr(this, source) },
+                this
+            );
+
+            assert_eq!(object.vtable, &STRING_OBJECT_VTABLE as *const _);
+            assert!(object.payload.is_null());
+            assert!(
+                unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty() },
+                "an empty source never allocates"
+            );
+            assert_eq!(
+                unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).clone() },
+                std::vec![this as usize],
+                "it reaches vtable slot +0xc through the ported assign_cstr"
+            );
+        }
+    }
+
+    #[test]
+    fn construct_from_cstr_allocation_failure_still_leaves_an_empty_object() {
+        let source = *b"track\0";
+        let mut object = StringObject {
+            vtable: 0xdead_beef as *const StringObjectVtable,
+            payload: 0xcafe_f00d as *mut u8,
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(core::ptr::null_mut());
+
+        assert_eq!(
+            unsafe { string_object_construct_from_cstr(this, source.as_ptr()) },
+            this
+        );
+
+        assert_eq!(object.vtable, &STRING_OBJECT_VTABLE as *const _);
+        assert!(
+            object.payload.is_null(),
+            "a failed allocation leaves the freshly-constructed empty state"
+        );
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).len() },
+            1
+        );
+        assert!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty() },
+            "failure never falls back to the +0xc slot"
         );
     }
 
