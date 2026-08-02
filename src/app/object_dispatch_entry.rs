@@ -8,20 +8,22 @@
 //!
 //! ```text
 //! entry +0x00  owner object pointer
-//! entry +0x04  embedded drain state (vtable + state + two opaque words)
+//! entry +0x04  embedded observable array (cxx/observable_array.rs)
 //! entry +0x14  pending-dispatch word
 //! entry +0x18  embedded condition-variable state (three words)
 //! ```
 //!
 //! The constructor stores the owner, delegates construction of the embedded
-//! drain state to `FUN_08271cec` (which in turn invokes its base constructor
-//! @ 0x08275bb8), clears the pending-dispatch word, and delegates
-//! condition-variable initialization to `FUN_0807f680`. The two unported
-//! dependencies are explicit replaceable seams: target integration installs
-//! their retailOS implementations, while host tests install recording mocks.
-//! Crucially, the stock code derives its return object from the **returned**
-//! drain-state pointer (`sub r4, r0, #4`), rather than retaining the incoming
-//! allocation pointer; the port preserves that return-base adjustment.
+//! observable array to `FUN_08271cec` (which in turn invokes its base
+//! constructor @ 0x08275bb8), clears the pending-dispatch word, and delegates
+//! condition-variable initialization to `FUN_0807f680`. That array
+//! constructor is ported as [`observable_array_construct`] and is called
+//! directly; only the unported condition-variable initializer remains a
+//! replaceable seam, which target integration fills with the retailOS
+//! implementation and host tests fill with a recording mock. Crucially, the
+//! stock code derives its return object from the **returned** array pointer
+//! (`sub r4, r0, #4`), rather than retaining the incoming allocation
+//! pointer; the port preserves that return-base adjustment.
 //!
 //! Sources: `ipod-decomp/decomp/c/010/0810f9f0_FUN_0810f9f0.c`,
 //! `ipod-decomp/decomp/c/026/08271cec_FUN_08271cec.c`, and the instruction
@@ -29,20 +31,11 @@
 
 use core::ffi::c_void;
 
+use crate::cxx::observable_array::{observable_array_construct, ObservableArray};
+
 /// Target byte size of [`ObjectDispatchEntry`]. The owning factory allocates
 /// exactly this many bytes before invoking the constructor.
 pub const OBJECT_DISPATCH_ENTRY_SIZE: usize = 0x24;
-
-/// The embedded drain-state object initialized by `FUN_08271cec`.
-#[repr(C)]
-pub struct DrainState {
-    /// +0x00: vtable installed by the unported constructor.
-    pub vtable: u32,
-    /// +0x04: state word cleared by that constructor.
-    pub state: u32,
-    /// +0x08..+0x0c: opaque words also cleared by that constructor.
-    pub opaque: [u32; 2],
-}
 
 /// The three-word condition-variable state initialized by `FUN_0807f680`.
 #[repr(C)]
@@ -59,15 +52,15 @@ pub struct ConditionVariableState {
 pub struct ObjectDispatchEntry {
     /// +0x00: owning application object's target address.
     pub owner: u32,
-    /// +0x04: drain state for the owner's queued dispatches.
-    pub drain_state: DrainState,
+    /// +0x04: the observable array holding the owner's queued dispatches.
+    pub queued_dispatches: ObservableArray,
     /// +0x14: cleared before the condition variable is initialized.
     pub pending_dispatch: u32,
     /// +0x18: condition-variable state.
     pub condition_variable: ConditionVariableState,
 }
 
-const _: [u8; 0x04] = [0; core::mem::offset_of!(ObjectDispatchEntry, drain_state)];
+const _: [u8; 0x04] = [0; core::mem::offset_of!(ObjectDispatchEntry, queued_dispatches)];
 const _: [u8; 0x14] = [0; core::mem::offset_of!(ObjectDispatchEntry, pending_dispatch)];
 const _: [u8; 0x18] = [0; core::mem::offset_of!(ObjectDispatchEntry, condition_variable)];
 const _: [u8; OBJECT_DISPATCH_ENTRY_SIZE] = [0; core::mem::size_of::<ObjectDispatchEntry>()];
@@ -125,28 +118,19 @@ const _: [u8; 0x4c] = [0; core::mem::offset_of!(ObjectDispatchTargetVtable, disp
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x50] = [0; core::mem::offset_of!(ObjectDispatchTargetVtable, dispatch_slot_50)];
 
-/// Injection point for the embedded drain-state constructor @ 0x08271cec.
-pub type DrainStateConstruct = unsafe extern "C" fn(*mut DrainState) -> *mut DrainState;
 /// Injection point for the condition-variable initializer @ 0x0807f680.
 pub type ConditionVariableConstruct = unsafe extern "C" fn(*mut ConditionVariableState);
 
-/// The two retailOS constructor dependencies used by
+/// The one remaining unported constructor dependency of
 /// [`object_dispatch_entry_construct`].
 #[derive(Clone, Copy)]
 pub struct ObjectDispatchEntryOps {
-    pub construct_drain_state: DrainStateConstruct,
     pub construct_condition_variable: ConditionVariableConstruct,
 }
 
-// Calling the port before target integration supplies the dependent retailOS
-// constructors is a configuration error. Fail hard rather than pretending a
-// drain state or condition variable was initialized.
-unsafe extern "C" fn missing_drain_state_construct(_state: *mut DrainState) -> *mut DrainState {
-    loop {
-        core::hint::spin_loop();
-    }
-}
-
+// Calling the port before target integration supplies the retailOS
+// condition-variable constructor is a configuration error. Fail hard rather
+// than pretending a condition variable was initialized.
 unsafe extern "C" fn missing_condition_variable_construct(_state: *mut ConditionVariableState) {
     loop {
         core::hint::spin_loop();
@@ -155,7 +139,6 @@ unsafe extern "C" fn missing_condition_variable_construct(_state: *mut Condition
 
 /// Replace before first use on target; tests temporarily install mocks.
 pub static mut OBJECT_DISPATCH_ENTRY_OPS: ObjectDispatchEntryOps = ObjectDispatchEntryOps {
-    construct_drain_state: missing_drain_state_construct,
     construct_condition_variable: missing_condition_variable_construct,
 };
 
@@ -223,8 +206,8 @@ pub unsafe extern "C" fn object_dispatch_entry_dispatch_vtable_slot_50(
 ///
 /// Initializes an already-allocated entry for `owner` and returns the entry
 /// base. There is no NULL guard, allocation, or whole-object clear: the
-/// caller owns allocation, and the two injected constructors own their
-/// embedded subobjects. The base returned by the drain-state constructor is
+/// caller owns allocation, and the two subobject constructors own their
+/// embedded subobjects. The base returned by the array constructor is
 /// adjusted by -4 exactly as the stock `sub r4, r0, #4` does.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
@@ -234,13 +217,16 @@ pub unsafe extern "C" fn object_dispatch_entry_construct(
 ) -> *mut ObjectDispatchEntry {
     core::ptr::addr_of_mut!((*this).owner).write_volatile(owner as usize as u32);
 
-    let ops = dispatch_entry_ops();
-    let drain_state = (ops.construct_drain_state)(core::ptr::addr_of_mut!((*this).drain_state));
-    let entry = drain_state.cast::<u8>().sub(core::mem::offset_of!(ObjectDispatchEntry, drain_state))
+    let queued = observable_array_construct(core::ptr::addr_of_mut!((*this).queued_dispatches));
+    let entry = queued
+        .cast::<u8>()
+        .sub(core::mem::offset_of!(ObjectDispatchEntry, queued_dispatches))
         .cast::<ObjectDispatchEntry>();
 
     core::ptr::addr_of_mut!((*entry).pending_dispatch).write_volatile(0);
-    (ops.construct_condition_variable)(core::ptr::addr_of_mut!((*entry).condition_variable));
+    (dispatch_entry_ops().construct_condition_variable)(
+        core::ptr::addr_of_mut!((*entry).condition_variable),
+    );
     entry
 }
 
@@ -248,6 +234,7 @@ pub unsafe extern "C" fn object_dispatch_entry_construct(
 mod tests {
     extern crate std;
     use super::*;
+    use crate::cxx::observable_array::OBSERVABLE_ARRAY_VTABLE;
     use core::ptr;
     use std::sync::{Mutex, MutexGuard};
 
@@ -255,10 +242,8 @@ mod tests {
     struct EntryStorage([u8; OBJECT_DISPATCH_ENTRY_SIZE]);
 
     static OPS_LOCK: Mutex<()> = Mutex::new(());
-    static mut EXPECTED_DRAIN_STATE: *mut DrainState = ptr::null_mut();
     static mut EXPECTED_CONDITION_VARIABLE: *mut ConditionVariableState = ptr::null_mut();
-    static mut CALLS: [u8; 2] = [0; 2];
-    static mut CALL_COUNT: usize = 0;
+    static mut CONDITION_VARIABLE_CALLS: usize = 0;
     static mut EXPECTED_DISPATCH_TARGET: *mut ObjectDispatchTarget = ptr::null_mut();
     static mut DISPATCH_CALLS: usize = 0;
     static mut SLOT_50_CALLS: usize = 0;
@@ -288,17 +273,9 @@ mod tests {
         DISPATCH_RESULT = 0;
     }
 
-    unsafe extern "C" fn record_drain_state(state: *mut DrainState) -> *mut DrainState {
-        assert_eq!(state, EXPECTED_DRAIN_STATE);
-        CALLS[CALL_COUNT] = 1;
-        CALL_COUNT += 1;
-        state
-    }
-
     unsafe extern "C" fn record_condition_variable(state: *mut ConditionVariableState) {
         assert_eq!(state, EXPECTED_CONDITION_VARIABLE);
-        CALLS[CALL_COUNT] = 2;
-        CALL_COUNT += 1;
+        CONDITION_VARIABLE_CALLS += 1;
         ptr::addr_of_mut!((*state).handle).write_volatile(0xfeed_beef);
         ptr::addr_of_mut!((*state).opaque[0]).write_volatile(0);
         ptr::addr_of_mut!((*state).opaque[1]).write_volatile(0);
@@ -306,12 +283,9 @@ mod tests {
 
     unsafe fn install_recording_ops(entry: *mut ObjectDispatchEntry) -> MutexGuard<'static, ()> {
         let guard = OPS_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        EXPECTED_DRAIN_STATE = ptr::addr_of_mut!((*entry).drain_state);
         EXPECTED_CONDITION_VARIABLE = ptr::addr_of_mut!((*entry).condition_variable);
-        CALLS = [0; 2];
-        CALL_COUNT = 0;
+        CONDITION_VARIABLE_CALLS = 0;
         OBJECT_DISPATCH_ENTRY_OPS = ObjectDispatchEntryOps {
-            construct_drain_state: record_drain_state,
             construct_condition_variable: record_condition_variable,
         };
         guard
@@ -319,10 +293,8 @@ mod tests {
 
     unsafe fn restore_ops() {
         OBJECT_DISPATCH_ENTRY_OPS = ObjectDispatchEntryOps {
-            construct_drain_state: missing_drain_state_construct,
             construct_condition_variable: missing_condition_variable_construct,
         };
-        EXPECTED_DRAIN_STATE = ptr::null_mut();
         EXPECTED_CONDITION_VARIABLE = ptr::null_mut();
     }
 
@@ -339,23 +311,22 @@ mod tests {
 
         let result = unsafe { object_dispatch_entry_construct(entry, owner) };
 
-        assert_eq!(result, entry, "drain-state return is adjusted back by four bytes");
-        assert_eq!(unsafe { CALL_COUNT }, 2);
-        assert_eq!(unsafe { CALLS }, [1, 2], "drain state precedes condition variable");
+        assert_eq!(result, entry, "the array's return is adjusted back by four bytes");
+        assert_eq!(unsafe { CONDITION_VARIABLE_CALLS }, 1);
         assert_eq!(word_at(&storage, 0x00), owner as usize as u32);
+        assert_eq!(word_at(&storage, 0x04), OBSERVABLE_ARRAY_VTABLE, "+0x04 array vtable");
+        assert_eq!(word_at(&storage, 0x08), 0, "array length");
+        assert_eq!(word_at(&storage, 0x0c), 0, "array storage");
+        assert_eq!(word_at(&storage, 0x10), 0, "array observer list");
         assert_eq!(word_at(&storage, 0x14), 0, "pending dispatch is cleared");
         assert_eq!(word_at(&storage, 0x18), 0xfeed_beef);
         assert_eq!(word_at(&storage, 0x1c), 0);
         assert_eq!(word_at(&storage, 0x20), 0);
 
-        // Only the owner, pending word, and dependency-owned condition state
-        // changed. The unported drain-state constructor mock intentionally
-        // leaves its four words untouched.
+        // Every word of the entry is now written: the embedded array's
+        // constructor is ported and runs for real, so no poison survives.
         for offset in (0..OBJECT_DISPATCH_ENTRY_SIZE).step_by(4) {
-            if matches!(offset, 0x00 | 0x14 | 0x18 | 0x1c | 0x20) {
-                continue;
-            }
-            assert_eq!(word_at(&storage, offset), 0xa5a5_a5a5, "word +{offset:#x}");
+            assert_ne!(word_at(&storage, offset), 0xa5a5_a5a5, "word +{offset:#x}");
         }
 
         unsafe { restore_ops() };

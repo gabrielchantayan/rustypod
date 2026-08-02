@@ -7472,6 +7472,10 @@ functions:
       decomp/c/026/08271cec_FUN_08271cec.c. The Rust port uses target
       offsets and volatile stores, preserving both ordering and the
       partial-initialization behavior rather than zeroing the object.
+      UPDATE: 0x08271cec is now ported (cxx/observable_array,
+      observable_array_construct); the four inlined stores at +0x10..+0x1c
+      were replaced by the real call, and the trailing stores are again
+      addressed off ITS return value as the stock `sub r0, r0, #16` does.
   - address: 0x0810fa90
     ghidra: FUN_0810fa90
     name: list_count_until_match
@@ -16518,6 +16522,11 @@ functions:
       post-index owner store, drain-state call, return-base adjustment,
       zero store, condition-variable call, and return are all retained;
       dependency seams lower to a volatile ops-table load plus blx calls.
+      UPDATE: 0x08271cec is now ported (cxx/observable_array,
+      observable_array_construct) and is called DIRECTLY; the entry's
+      +0x04 subobject is that class, so the local DrainState model was
+      replaced by ObservableArray and only the condition-variable seam
+      remains.
 
   - address: 0x080e99d8
     ghidra: FUN_080e99d8
@@ -18395,3 +18404,116 @@ functions:
       empty on both sides; LLVM adds the crate-wide frame-pointer
       prologue (push {fp,lr} / mov fp,sp / pop {fp,pc}) that every small
       port in this crate carries, e.g. cxx::handle::handle_deref_or_null.
+
+  - address: 0x082646ac
+    ghidra: FUN_082646ac
+    name: trivial_destructor
+    size: 4
+    sig: "void *trivial_destructor(void *this)"
+    module: cxx/trivial_destructor
+    status: ported
+    notes: >-
+      The image's single shared EMPTY destructor body - one instruction,
+      `bx lr`. Extent binary-verified: 0x082646a8 is the literal pool of
+      the ctor @ 0x0826467c and 0x082646b0 starts the next function, so
+      the 4-byte size is right and there is no trailing literal word. Not
+      a veneer - no `ldr pc,[pc,#-4]`, no `b`.
+      112 `bl` call sites and 0 `b`, binary-scanned by decoding every
+      B/BL word in osos.dec (range 0x08090754..0x0829869c), plus ZERO
+      occurrences of the word 0x082646ac anywhere in the image, so it is
+      never reached through a vtable: every caller binds it statically,
+      as a compiler does for a known-type destructor. The sites are two
+      destructor shapes - 79 are `add r0, sp, #N` immediately before the
+      `bl` (a stack temporary going out of scope) and 24 are immediately
+      followed by `bl 0x082aad24` (operator_delete), the destroy-then-free
+      pair that names.yaml already records from the other side at the view
+      destructor 0x0819ba64 ("0x082646ac then operator delete").
+      Load-bearing detail: `bx lr` leaves r0 untouched, and the
+      destroy-then-free sites rely on it - e.g. 0x081023d0 does
+      `ldr r0,[r0,#0xa8]; cmp r0,#0; beq +; bl 0x082646ac; bl 0x082aad24`,
+      so operator_delete consumes the pointer this function passed
+      through. The port therefore returns `this` rather than being void.
+      Reads and writes nothing, so a NULL, unaligned or dangling `this`
+      is fine. Deviations: none behaviorally. match.py structural: the
+      body is empty in both; the port adds only the crate's fp frame
+      (push {fp,lr}/mov fp,sp/pop {fp,pc}) around the same no-op, with r0
+      untouched on every path.
+
+  - address: 0x08271cec
+    ghidra: FUN_08271cec
+    name: observable_array_construct
+    size: 36
+    sig: "ObservableArray *observable_array_construct(ObservableArray *this)"
+    module: cxx/observable_array
+    status: ported
+    vars: {puVar1: this, DAT_08271d10: OBSERVABLE_ARRAY_VTABLE, FUN_08275bb8: framework_object_construct}
+    notes: >-
+      The default constructor of retailOS's OBSERVABLE ARRAY - a
+      polymorphic, growable array of 32-bit elements that broadcasts
+      changes to a list of attached observers. Extent binary-verified as
+      32 bytes of code (0x08271cec..0x08271d0c) plus the 4-byte vtable
+      literal 0x089a5d0c @ 0x08271d10, so Ghidra's 36 is right and does
+      include the literal. 82 `bl` call sites and 0 `b`, binary-scanned by
+      decoding every B/BL word in osos.dec (0x0807f7d8..0x083d0e64).
+      Body - `bl 0x08275bb8` (the root base ctor), then plant 0x089a5d0c
+      at +0x00 and zero +0x04/+0x08/+0x0c, returning this in r0.
+      Class identified from its three siblings, all binding the same
+      vtable literal (binary-verified at 0x08271ce8, 0x08271d10,
+      0x08271d84) - the copy ctor ending at 0x08271ce4 grows by the
+      source's +0x04 through 0x082718a4 then `lsl r2,r1,#2` /
+      `ldr r1,[src,#8]` / `ldr r0,[this,#8]` / `bl 0x08037e00`
+      (rom_memmove), so +0x04 is a count of 4-byte elements and +0x08
+      their storage; the dtor @ 0x08271d2c broadcasts via 0x082a4ccc,
+      drains the +0x0c list with 0x08271724, hands +0x08 to `free`
+      (0x0802edc8, ported), zeroes +0x04/+0x08 and tail-branches to the
+      root dtor 0x08275bc8, so +0x08 is owned heap storage; and
+      0x082a4ccc is `for (n = this[+0xc]; n; n = n[+0x10])
+      0x08155d30(n, arg)`, a broadcast over the observer list rooted at
+      +0x0c - hence "observable". The growth helper 0x082718a4 rounds up
+      to the granularity from vtable slot +0x70, compares with the
+      capacity from +0xa0 and adjusts through +0xc0, all three NULL in
+      0x089a5d0c, so the class is abstract and every concrete array is
+      one of the 82 derived ctors' classes.
+      Load-bearing - the four stores are addressed off the BASE CTOR'S
+      RETURN (r0), and this function returns it; names.yaml already
+      recorded the same from 0x0810f9f0's `sub r4, r0, #4`. The port
+      returns `this` rather than being void.
+      Earlier repo entries called this object the "drain state" after the
+      one caller whose use of it is a drain (0x0811000c, 0x0810f9f0);
+      same class. Both of those ports now call this one DIRECTLY instead
+      of open-coding it (node_list) or failing through an injection seam
+      (object_dispatch_entry, whose local DrainState model is replaced by
+      ObservableArray).
+      Deviations - none; same words, same order, same return register,
+      and the vtable is a plain u32 constant since nothing in the crate
+      dereferences it. match.py structural - identical
+      bl/ldr-literal/str/mov#0/three-str body, differing only by the
+      crate's fp frame and the literal being emitted after the body.
+
+  - address: 0x08275bb8
+    ghidra: FUN_08275bb8
+    name: framework_object_construct
+    size: 16
+    sig: "FrameworkObject *framework_object_construct(FrameworkObject *this)"
+    module: cxx/observable_array
+    status: ported
+    vars: {param_1: this, DAT_08275bc4: FRAMEWORK_OBJECT_VTABLE}
+    notes: >-
+      The trivial constructor of the abstract ROOT of the class hierarchy
+      cxx/observable_array's class descends from - `ldr r1,[pc,#4];
+      str r1,[r0]; bx lr` plus the 4-byte vtable literal 0x089a5fdc @
+      0x08275bc4: 12 bytes of code, true extent 16. Its matching
+      destructor @ 0x08275bc8 is a bare `bx lr`.
+      9 `bl` call sites and 0 `b`, binary-scanned - 0x08125238,
+      0x081433ac, 0x081b1270, 0x08266a50, 0x0826bad0, 0x0826bffc,
+      0x08271ca0, 0x08271cf0, 0x08275cd8. All nine follow the call
+      immediately with their own `ldr r1,[pc,#N]; str r1,[r0]`, i.e. all
+      nine are derived-class constructors overwriting the root vtable -
+      which is what makes this the shared root rather than one class's
+      ctor.
+      r0 passes through untouched and every caller depends on it to
+      address its own vtable store, so the port returns `this`. Ported
+      alongside its only in-crate caller because a dispatch seam for
+      three instructions would be pure ceremony. Deviations - none.
+      match.py structural - same ldr-literal/str body plus the crate's fp
+      frame, with the literal after the body.
