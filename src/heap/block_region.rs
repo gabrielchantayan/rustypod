@@ -31,14 +31,13 @@
 //! this cluster).
 //!
 //! Deviations:
-//! - The mutex pair @ 0x082e8390 / 0x082e83d8 is unported C++ recursive-
-//!   mutex machinery (magic-word fast path + kernel slow path @
-//!   0x080cdd6c); it is the [`REGION_MUTEX_OPS`] dispatch boundary. The
-//!   defaults are documented no-ops returning 0: they provide NO mutual
-//!   exclusion — sound for the current single-threaded/pre-manager use,
-//!   and the slots take the real ports when they land (the free_path.rs
-//!   HEAP_MUTEX_HOOKS pattern). Host tests install recording mocks and
-//!   prove the lock -> read -> unlock protocol, not exclusion.
+//! - The mutex pair @ 0x082e8390 / 0x082e83d8 is the [`REGION_MUTEX_OPS`]
+//!   dispatch boundary — the one seam every heap module in this cluster
+//!   brackets its critical sections through. Both slots now default to
+//!   the REAL ports (kernel/posix_mutex.rs), whose own mask-ROM callees
+//!   carry the "no mutual exclusion before the kernel" contract the old
+//!   no-op stubs used to fake wholesale. Host tests install recording
+//!   mocks and prove the lock -> read -> unlock protocol, not exclusion.
 //! - Pointer fields are addressed by WORD INDEX, not by the literal
 //!   target byte offset: on the 32-bit target `index * WORD` reproduces
 //!   the original offsets exactly (0x4, 0x8), while on a 64-bit host the
@@ -47,6 +46,8 @@
 //!   bytes, so a start-address read would return
 //!   `(mutex << 32) | start`. Reads stay unaligned-safe because the test
 //!   fixtures are plain `u8` arrays with no pointer alignment guarantee.
+
+use crate::kernel::posix_mutex::{posix_mutex_lock, posix_mutex_unlock};
 
 /// Width of a pointer field: 4 on the ARMv5TE target (matching the
 /// original layout), 8 on a 64-bit test host.
@@ -71,32 +72,35 @@ pub const REGION_MUTEX_INDEX: usize = 2;
 /// and only that one's value are ever used.
 pub static mut REGION_START_FALLBACK: u32 = 0;
 
-/// Indirect dispatch pair for the unported C++ mutex @ 0x082e8390 /
-/// 0x082e83d8 (see the module header for the default-stub contract).
+/// Indirect dispatch pair for the C++ mutex @ 0x082e8390 / 0x082e83d8
+/// (see the module header; the defaults are the real ports).
 #[derive(Clone, Copy)]
 pub struct RegionMutexOps {
     /// Mutex lock @ 0x082e8390 (thunk @ 0x082621a8). Returns the lock
-    /// status word (0x1a on NULL mutex in the original).
+    /// status word (0x1a on NULL mutex).
     pub lock: unsafe extern "C" fn(mutex: *mut u8) -> u32,
     /// Mutex unlock @ 0x082e83d8 (thunk @ 0x082621ac).
     pub unlock: unsafe extern "C" fn(mutex: *mut u8) -> u32,
 }
 
-/// Default stub: no mutex implementation — no-op, no mutual exclusion
-/// (documented in the module header).
-unsafe extern "C" fn missing_mutex_lock(_mutex: *mut u8) -> u32 {
-    0
+/// Adapters onto the real pair. The seam is addressed in bytes because
+/// that is what every caller has — a fixed offset into a larger object
+/// (region + 0x8, client + 0x24, manager + 0x148, base + 0x8) — and
+/// every one of those offsets is word-aligned inside a word-aligned
+/// object, so the cast to the typed mutex is sound.
+unsafe extern "C" fn region_mutex_lock(mutex: *mut u8) -> u32 {
+    posix_mutex_lock(mutex.cast())
 }
 
-/// Default stub: see [`missing_mutex_lock`].
-unsafe extern "C" fn missing_mutex_unlock(_mutex: *mut u8) -> u32 {
-    0
+/// See [`region_mutex_lock`].
+unsafe extern "C" fn region_mutex_unlock(mutex: *mut u8) -> u32 {
+    posix_mutex_unlock(mutex.cast())
 }
 
-/// Wired defaults (documented no-ops until the mutex cluster is ported).
+/// Wired defaults: the real ports (kernel/posix_mutex.rs).
 pub(crate) const DEFAULT_REGION_MUTEX_OPS: RegionMutexOps = RegionMutexOps {
-    lock: missing_mutex_lock,
-    unlock: missing_mutex_unlock,
+    lock: region_mutex_lock,
+    unlock: region_mutex_unlock,
 };
 
 /// The active mutex implementation. Host tests install recording mocks;
@@ -298,19 +302,62 @@ mod tests {
         restore_mutex();
     }
 
+    /// The shipped defaults are the real mutex pair: the seed walk runs
+    /// a genuine acquire/release on the region's mutex object and the
+    /// mapping comes out unchanged.
     #[test]
-    fn default_mutex_ops_are_noops() {
+    fn the_wired_defaults_map_through_the_real_mutex_pair() {
+        use crate::kernel::posix_mutex::{PosixMutex, PRE_KERNEL_THREAD};
+        let _guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        restore_mutex();
+        let mut elem = [0u8; 0x28];
+        let mut region = [0u8; 0x18];
+        let mut mutex: PosixMutex = unsafe { core::mem::zeroed() };
+        unsafe {
+            write_region(
+                region.as_mut_ptr(),
+                0x3_0000 as *mut u8,
+                &mut mutex as *mut PosixMutex as *mut u8,
+            );
+            write_elem(elem.as_mut_ptr(), region.as_mut_ptr());
+            assert_eq!(
+                block_to_region_start(elem.as_ptr()),
+                0x3_0000 as *mut u8,
+                "the real pair must not disturb the mapping"
+            );
+        }
+        assert_eq!(mutex.owner, 0, "acquired and released again");
+        assert_eq!(mutex.recursion, 0);
+
+        // ...and the bracket really is a bracket: an unlock-free lock
+        // leaves the object held by the (pre-kernel) running thread.
+        unsafe { assert_eq!(region_ref_lock(elem.as_ptr()), 0) };
+        assert_eq!(mutex.owner, PRE_KERNEL_THREAD, "held");
+        assert_eq!(mutex.recursion, 1);
+        unsafe { assert_eq!(region_ref_unlock(elem.as_ptr()), 0) };
+        assert_eq!(mutex.owner, 0, "released");
+    }
+
+    /// A NULL region mutex — the state every zeroed fixture in this
+    /// cluster carries — is refused by the real pair without a
+    /// dereference, and the mapping still comes through.
+    #[test]
+    fn the_wired_defaults_tolerate_a_null_mutex() {
         let _guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         restore_mutex();
         let mut elem = [0u8; 0x28];
         let mut region = [0u8; 0x18];
         unsafe {
-            write_region(region.as_mut_ptr(), 0x3_0000 as *mut u8, 0x8000 as *mut u8);
-            write_elem(elem.as_mut_ptr(), region.as_mut_ptr());
-            assert_eq!(
-                block_to_region_start(elem.as_ptr()),
+            write_region(
+                region.as_mut_ptr(),
                 0x3_0000 as *mut u8,
-                "defaults must not disturb the mapping"
+                core::ptr::null_mut(),
+            );
+            write_elem(elem.as_mut_ptr(), region.as_mut_ptr());
+            assert_eq!(block_to_region_start(elem.as_ptr()), 0x3_0000 as *mut u8);
+            assert_eq!(
+                region_ref_lock(elem.as_ptr()),
+                crate::kernel::posix_mutex::ERR_INVALID_OBJECT
             );
         }
     }

@@ -139,10 +139,11 @@
 //!   and the mailbox slot pair default to the real ports
 //!   (`veneers::cxx_array_dealloc`, kernel/kobj.rs).
 //! - **Mutex**: the base mutex at +0x8 is locked/unlocked through the
-//!   same unported C++ recursive-mutex pair @ 0x082e8390 / 0x082e83d8
+//!   same C++ owner-tracked mutex pair @ 0x082e8390 / 0x082e83d8
 //!   as the region mutexes, so this module dispatches through
 //!   block_region.rs's `REGION_MUTEX_OPS` (one boundary for one
-//!   original pair; defaults are documented no-ops).
+//!   original pair; the defaults are the real ports,
+//!   kernel/posix_mutex.rs).
 //! - Field access is by typed struct field, never literal byte offset,
 //!   so the 32-bit target layout is exact while 64-bit host tests get
 //!   disjoint (wider) fields — the block_region.rs lesson.

@@ -8,7 +8,7 @@
 //!   plus 2 tail-branch sites @ 0x08168160 and 0x081f7430,
 //!   binary-verified). A pure mutex bracket: under the client's own
 //!   mutex (client + 0x24 — NOT the pool base's +0x8 one — the same
-//!   unported C++ recursive-mutex pair @ 0x082e8390 / 0x082e83d8 via the
+//!   C++ owner-tracked mutex pair @ 0x082e8390 / 0x082e83d8 via the
 //!   alias thunks @ 0x082621a8 / 0x082621ac that client_erase uses), it
 //!   calls the commit body @ 0x081fc408(client, 1) — the `1` flag
 //!   (`mov r1, #0x1`) enables the body's post-commit manager
@@ -22,8 +22,8 @@
 //!
 //! - **Mutex**: client + 0x24 is locked/unlocked through
 //!   block_region.rs's `REGION_MUTEX_OPS` (one boundary for the one
-//!   unported original pair — the client_erase.rs precedent; defaults
-//!   are documented no-ops, no mutual exclusion). The mutex offset
+//!   original pair — the client_erase.rs precedent; the defaults are
+//!   the real ports, kernel/posix_mutex.rs). The mutex offset
 //!   constant itself is shared: `client_erase::CLIENT_MUTEX_OFFSET`.
 //! - **Commit body** @ 0x081fc408 is unported block-manager machinery
 //!   (a 0x40000/0x20000 headroom probe pair, state-word updates at
@@ -243,7 +243,7 @@ mod tests {
             addr_of_mut!(REGION_MUTEX_OPS).write(DEFAULT_REGION_MUTEX_OPS);
             let mut client = FakeClient([0; 0x60]);
             let client = client.0.as_mut_ptr();
-            // No recorders installed: the no-op mutex stubs and the
+            // No recorders installed: the real mutex pair and the
             // fail-closed body stub run, nothing else.
             assert_eq!(client_commit(client), 0, "no manager -> refused");
             assert!(events().is_empty());

@@ -6,7 +6,7 @@
 //!   2 `bl` call sites @ 0x0814bb54 (FUN_0814bb18) and 0x08214198
 //!   (`pool_base_release_blocks`), binary-verified). Under the client's
 //!   own mutex (client + 0x24 — NOT the pool base's +0x8 one — through
-//!   the same C++ recursive-mutex pair @ 0x082e8390 / 0x082e83d8 via the
+//!   the same C++ owner-tracked mutex pair @ 0x082e8390 / 0x082e83d8 via the
 //!   alias thunks @ 0x082621a8 / 0x082621ac), it drains the whole deque
 //!   back to the block manager: the hand-back word is preset to 0 (dead
 //!   store, kept), the deque count (+0x20) is snapshotted once into the
@@ -34,8 +34,8 @@
 //!
 //! - **Mutex**: client + 0x24 is locked/unlocked through
 //!   block_region.rs's `REGION_MUTEX_OPS` (one boundary for the one
-//!   unported original pair — the block_deque.rs precedent; defaults
-//!   are documented no-ops, no mutual exclusion).
+//!   original pair — the block_deque.rs precedent; the defaults are
+//!   the real ports, kernel/posix_mutex.rs).
 //! - **Unported client machinery** dispatches through
 //!   [`CLIENT_ERASE_OPS`] (house ops-slot pattern, indirect `blx` in
 //!   place of `bl`): the per-block hand-back @ 0x081fc124 and the two
@@ -463,7 +463,7 @@ mod tests {
             let mut client = FakeClient([0; 0x60]);
             let client = client.0.as_mut_ptr();
             let mut fixture = DequeFixture::new(&[]);
-            // No recorders installed: the no-op mutex stubs and the
+            // No recorders installed: the real mutex pair and the
             // no-op hand-back/notification stubs run, nothing else.
             client_erase(client, fixture.deque());
             assert!(events().is_empty());

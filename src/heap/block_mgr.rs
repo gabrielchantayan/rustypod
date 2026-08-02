@@ -15,7 +15,7 @@
 //!   hand-out the client's populate op calls as
 //!   `0x0818b0c4(*(client+4), client+8, count)`. A pure mutex bracket:
 //!   lock the manager's own mutex object at manager + 0x148 (the same
-//!   unported C++ recursive-mutex pair @ 0x082e8390 / 0x082e83d8 via
+//!   C++ owner-tracked mutex pair @ 0x082e8390 / 0x082e83d8 via
 //!   the alias thunks @ 0x082621a8 / 0x082621ac every heap client uses
 //!   — block_region.rs's `REGION_MUTEX_OPS` boundary), run the real
 //!   hand-out body @ 0x0818b108 `(manager, client_state, count)`,
@@ -355,10 +355,13 @@ pub(crate) mod tests {
     /// manager (the kobj.rs HOOKS_LOCK precedent).
     pub(crate) static MGR_LOCK: Mutex<()> = Mutex::new(());
 
-    /// Fake block-manager object: big enough to hold the +0x30 word.
+    /// Fake block-manager object: big enough to hold the +0x30 block-size
+    /// word AND the manager's own 24-byte mutex object at +0x148, which
+    /// the wired-default bracket now really locks (the real pair
+    /// dereferences it, where the old no-op stub only saw its address).
     #[repr(align(4))]
-    struct FakeManager([u8; 0x40]);
-    static mut FAKE_MGR: FakeManager = FakeManager([0; 0x40]);
+    struct FakeManager([u8; 0x160]);
+    static mut FAKE_MGR: FakeManager = FakeManager([0; 0x160]);
 
     /// Locks the global and installs the fake manager with the given
     /// block-size word.
@@ -570,7 +573,7 @@ pub(crate) mod tests {
             // manager's free-count word (+0x14) falls short of 3, so
             // the bracket still reports the refusal 0 the old body
             // stub faked — the fail-closed no-manager contract, one
-            // gate deeper. The no-op mutex stubs record nothing.
+            // gate deeper. The real mutex pair records nothing.
             assert_eq!(manager_take_blocks(mgr, mgr, 3), 0);
             assert_eq!(events(), std::vec![]);
         }
