@@ -13538,8 +13538,9 @@ functions:
     name: blob_to_hex
     size: 160
     sig: "u8 *blob_to_hex(const u8 *blob, i32 len)"
-    status: identified
-    vars: {param_1: blob, param_2: len, puVar2: out, puVar4: cursor, iVar5: i, iVar1: digits}
+    module: sqlite/blob_to_hex
+    status: ported
+    vars: {param_1: blob, param_2: len, puVar2: out, puVar4: cursor, iVar5: index, iVar1: digits}
     notes: >-
       2 bl call sites (0x080aedfc, 0x080aee4c), both in the keyid/serial
       formatter 0x080aede0, which hands the result to the string builder
@@ -13558,20 +13559,31 @@ functions:
       standard uppercase table (crate static HEX_DIGITS in the port).
       len stays signed end to end (blt loop); a negative len wraps
       len*3+1 negative and traced_alloc's own size<=0 guard takes the
-      diagnostic path before any underlying alloc call. Deviations: the
-      ring-buffer logger 0x08049a84 is unported (walks a per-task
-      struct from 0x080498f8) and is the HEX_BLOB_HOOKS dispatch
-      boundary, default None = documented no-op (the NULL return the
-      caller sees is unchanged). match.py: same structure - entry
-      guard, add r0,r4,r4,lsl#1 +1 alloc with zero tags, the
-      ldrb [table, b>>4] / and #15 / ':' loop, terminator at [r3,#-1],
-      diag path with 0x22/0x6f/0x41; the diff is the LLVM frame, the
-      hook-slot indirection for the diag call, and a count-down loop.
-      STATUS CORRECTION: this entry was committed as 'ported' by 45932ca (an
-      rtc_read_time commit that carried only src/time/rtc.rs), but no
-      sqlite/blob_to_hex source ever landed on master and no branch, worktree
-      or stash holds it. The analysis above is intact and is a complete port
-      recipe; the port itself must be redone.
+      diagnostic path before any underlying alloc call - except for the
+      negatives whose len*3+1 wraps back POSITIVE (e.g. -0x55555555 ->
+      2): those allocate, skip the loop, and land the terminator store
+      one byte before the block. Faithful hazard, reproduced and tested
+      against a guard byte; no caller can reach it. Note also that the
+      block is one byte larger than the string it holds (2n digits +
+      n-1 separators + NUL = 3n written out of 3n+1 requested), so the
+      last byte of every block stays uninitialized - reproduced, not
+      tightened. Deviations: the ring-buffer logger 0x08049a84 is
+      unported (walks a per-task record block from 0x080498f8 and packs
+      its first three args as a0<<24 | (a1&0xfff)<<12 | (a2&0xfff)) and
+      is the HEX_BLOB_HOOKS dispatch boundary, default a documented
+      no-op recorder (the NULL return the caller sees is unchanged).
+      match.py: same structure - entry guard, add r0,r4,r4,lsl#1 +1
+      alloc with zero tags, the ldrb [table, b>>4] / and #15 / ':'
+      loop, terminator at [r1,#-1], diag path with 0x22/0x6f/0x41 and
+      the fifth arg on the stack; the diff is the LLVM frame pointer, a
+      count-down loop with a 3-byte stride, the hook-slot blx for the
+      diag call, and the diag block sunk past the return. Host tests
+      (12) cover the reference, zero/NULL/one-byte, all 256 byte
+      values, high-bit bytes, the exact allocation request, the
+      untouched spare byte, alloc failure, and both negative-len paths;
+      they mock TRACED_ALLOC_HOOKS under the new shared
+      testing::TRACED_ALLOC_TEST_LOCK (the ata_cmd allocator tests now
+      take the same lock instead of a private one).
 
   - address: 0x083788fc
     ghidra: FUN_083788fc
