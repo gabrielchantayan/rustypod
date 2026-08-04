@@ -14137,6 +14137,7 @@ functions:
     notes: >-
       less_signed with `movcs 0 / movcc 1` - an unsigned compare. That
       the unsigned form has 12 byte-identical copies and the signed form
+
       one is the only thing that distinguishes the two families in the
       image. bl counts (73 total) - 0x083d7598 20, 0x083d7404 7, and
       then 0x083d7434, 0x083d744c, 0x083d7464, 0x083d747c, 0x083d74ac,
@@ -14237,6 +14238,21 @@ functions:
       call sites use the same {begin, end} vector head. The `asr` is
       arithmetic, so reversed spans retain their negative count. Source C:
       decomp/c/037/083d77cc_FUN_083d77cc.c.
+
+  - address: 0x083d7944
+    ghidra: FUN_083d7944
+    name: vector_size_elem4_alias_7944
+    size: 16
+    sig: "i32 vector_size_elem4_alias_7944(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      Byte-identical vector_size_elem4 instantiation at 0x083d76d8:
+      `ldm r0,{r0,r1}; sub r0,r1,r0; asr r0,r0,#2; bx lr`. Its 17 bl
+      call sites use the same {begin, end} vector head. The `asr` is
+      arithmetic, so reversed spans retain their negative count. Source C:
+      decomp/c/037/083d7944_FUN_083d7944.c.
 
   - address: 0x083d7a48
     ghidra: FUN_083d7a48
