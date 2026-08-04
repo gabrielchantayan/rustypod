@@ -74,10 +74,27 @@ functions:
     module: drivers/cp15
     status: ported
     vars: {uVar1: sctlr}
+
     notes: Reads ARM926EJ-S CP15 c1 (SCTLR) with MRC p15,0,<Rt>,c1,c0,0,
       sets data-cache-enable bit 2 (0x4), writes the result with the paired
       MCR, and returns the stored control word. Host builds use the shared
       replaceable deterministic CP15 seam.
+
+  # --- retailOS UI sequence identifier ---
+  - address: 0x08055eb8
+    ghidra: FUN_08055eb8
+    name: sequence_id_next
+    size: 16
+    sig: "u32 sequence_id_next(void)"
+    module: ui/object_state
+    status: ported
+    renames:
+      DAT_08055ecc: sequence_id_global
+    notes: >-
+      The 0x08055ecc literal is 0x089cfcc4, a runtime sequence-counter
+      word. The leaf loads that word into r0, stores its wrapping increment,
+      and returns the original value. All five recovered call sites store
+      the return value as the new record's identifier.
 
   - address: 0x08003178
     ghidra: FUN_08003178
@@ -14129,6 +14146,22 @@ functions:
       original - `base` is loaded only on the in-range path, so an empty
       array never touches it. 40 bl sites here plus 3 at the
       byte-identical copy 0x083d5500.
+
+  - address: 0x083d7810
+    ghidra: FUN_083d7810
+    name: vector_is_empty
+    size: 24
+    sig: "u32 vector_is_empty(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      `std::vector<T>::empty()` over the {begin, end} head. Verified
+      against raw osos.dec: `ldr r1,[r0]; ldr r0,[r0,#4]; cmp r1,r0;
+      movne r0,#0; moveq r0,#1; bx lr`. It takes the vector in r0 and
+      returns an AAPCS word-sized 0/1 bool in r0; neither bound is
+      dereferenced. Source C:
+      decomp/c/037/083d7810_FUN_083d7810.c.
 
   - address: 0x083d76d8
     ghidra: FUN_083d76d8
