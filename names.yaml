@@ -18674,3 +18674,21 @@ functions:
       Pure leaf accessor: returns the aligned 32-bit little-endian state
       word at object+0xe38. The owning UI object remains unidentified;
       no null or alignment guard is present in the original.
+
+  # --- C++ object-header low-flag predicate ---
+  - address: 0x0808539c
+    ghidra: FUN_0808539c
+    name: object_low_flags_clear
+    size: 20
+    sig: "u32 object_low_flags_clear(const void *object)"
+    module: cxx/object_flags
+    status: ported
+    renames:
+      param_1: object
+      uVar1: flags
+    notes: >-
+      Pure leaf predicate: loads the aligned 32-bit object-header word at
+      +0x04, tests mask 0x7, and returns 1 exactly when all three low bits
+      are clear (otherwise 0). The complete retail body is 20 bytes:
+      ldr; tst #7; moveq #1; movne #0; bx lr. The owning object type and
+      individual flag meanings remain unidentified.
