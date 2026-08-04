@@ -113,6 +113,29 @@ functions:
       and returns the original value. All five recovered call sites store
       the return value as the new record's identifier.
 
+  # --- retailOS one-based indexed object offset ---
+  - address: 0x08055ed0
+    ghidra: FUN_08055ed0
+    name: indexed_object_offset
+    size: 80
+    sig: "void *indexed_object_offset(const IndexedObject *object, u32 index)"
+    module: ui/object_state
+    status: ported
+    renames:
+      param_1: indexed_object
+      param_2: index
+      iVar1: storage_base
+      DAT_08055f20: indexed_object_tag
+      FUN_080aa828: indexed_object_storage_base
+    notes: >-
+      The literal at 0x08055f20 is 0x61726179. The helper returns NULL
+      unless word +0 equals that tag, index is nonzero, and index is no
+      greater than unsigned word +8. It then calls 0x080aa828 for the
+      storage base and returns base + word(+4) * (index - 1). Callers at
+      0x08066bb8, 0x080e2d70, and 0x080e2dc8 use it as a one-based
+      fixed-record accessor; 0x080aa828 verifies the same tag and reads
+      its storage word at +24.
+
   - address: 0x08003178
     ghidra: FUN_08003178
     name: sctlr_disable_mmu

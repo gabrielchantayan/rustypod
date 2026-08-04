@@ -34,14 +34,155 @@ pub unsafe extern "C" fn sequence_id_next() -> u32 {
     sequence_id
 }
 
+/// The three words inspected by [`indexed_object_offset`], followed by the
+/// storage word consumed by its unported base-address callee.
+///
+/// Call sites at 0x08066bb8, 0x080e2d70, and 0x080e2dc8 pass this header and
+/// use a one-based index to address fixed-size records. The callee at
+/// 0x080aa828 verifies the same tag and reads `storage` at byte offset 24.
+#[repr(C)]
+pub struct IndexedObject {
+    /// Fixed object-format tag: the literal at 0x08055f20 is `0x6172_6179`.
+    pub type_tag: u32,
+    /// Byte stride of one stored record.
+    pub element_size: u32,
+    /// Number of addressable records.
+    pub element_count: u32,
+    /// Header words not inspected by this helper.
+    pub reserved: [u32; 3],
+    /// Storage pointer read by the unported 0x080aa828 base-address helper.
+    pub storage: *mut u8,
+}
+
+/// Object tag loaded from the literal pool at 0x08055f20.
+pub const INDEXED_OBJECT_TAG: u32 = 0x6172_6179;
+
+type IndexedObjectStorageBase = unsafe extern "C" fn(*const IndexedObject) -> *mut u8;
+
+/// Calls the stock object-storage-base helper, which remains in retailOS.
+///
+/// This is deliberately a boundary rather than a port of 0x080aa828. Host
+/// tests replace the one function pointer below; ARM builds call its fixed
+/// firmware load address.
+unsafe extern "C" fn firmware_indexed_object_storage_base(
+    object: *const IndexedObject,
+) -> *mut u8 {
+    #[cfg(target_os = "none")]
+    {
+        let storage_base: IndexedObjectStorageBase =
+            core::mem::transmute(0x080a_a828usize);
+        storage_base(object)
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        let _ = object;
+        core::ptr::null_mut()
+    }
+}
+
+/// Narrow boundary for the unported 0x080aa828 dependency.
+static mut INDEXED_OBJECT_STORAGE_BASE: IndexedObjectStorageBase =
+    firmware_indexed_object_storage_base;
+
+#[inline(always)]
+unsafe fn indexed_object_storage_base() -> IndexedObjectStorageBase {
+    core::ptr::read_volatile(core::ptr::addr_of!(INDEXED_OBJECT_STORAGE_BASE))
+}
+
+/// indexed_object_offset — original: `FUN_08055ed0` @ `0x08055ed0` (80
+/// bytes).
+///
+/// Source: `/home/gabe/Programming/ipod-decomp/decomp/c/003/08055ed0_FUN_08055ed0.c`;
+/// assembly: `decomp/osos.asm` @ `0x08055ed0..0x08055f1c`.
+///
+/// Addresses one-based fixed-size records in an [`IndexedObject`]. It first
+/// requires the literal [`INDEXED_OBJECT_TAG`], a nonzero index, and
+/// `index <= element_count`; only then does it call retailOS helper
+/// 0x080aa828 for the storage base and add `element_size * (index - 1)`.
+///
+/// # Safety
+///
+/// `object` must be readable as an aligned [`IndexedObject`]. Like the ARM
+/// `ldr` at entry, this function has no null or alignment guard.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn indexed_object_offset(
+    object: *const IndexedObject,
+    index: u32,
+) -> *mut u8 {
+    if (*object).type_tag != INDEXED_OBJECT_TAG
+        || index == 0
+        || index > (*object).element_count
+    {
+        return core::ptr::null_mut();
+    }
+
+    let storage_base = indexed_object_storage_base()(object);
+    storage_base.wrapping_add(
+        (*object)
+            .element_size
+            .wrapping_mul(index.wrapping_sub(1)) as usize,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     extern crate std;
 
-    use std::sync::Mutex;
+    use std::sync::{Mutex, MutexGuard};
 
     static SEQUENCE_ID_LOCK: Mutex<()> = Mutex::new(());
+    static INDEXED_OBJECT_STORAGE_BASE_LOCK: Mutex<()> = Mutex::new(());
+    static mut STORAGE_BASE_CALLS: u32 = 0;
+    static mut STORAGE_BASE_OBJECT: usize = 0;
+    static mut MOCK_STORAGE_BASE: *mut u8 = core::ptr::null_mut();
+
+    unsafe extern "C" fn recording_storage_base(object: *const IndexedObject) -> *mut u8 {
+        STORAGE_BASE_CALLS += 1;
+        STORAGE_BASE_OBJECT = object as usize;
+        MOCK_STORAGE_BASE
+    }
+
+    /// Restores the stock-call boundary before another test uses it.
+    struct StorageBaseReset;
+
+    impl Drop for StorageBaseReset {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(INDEXED_OBJECT_STORAGE_BASE)
+                    .write(firmware_indexed_object_storage_base);
+            }
+        }
+    }
+
+    fn install_recording_storage_base(storage_base: *mut u8) -> MutexGuard<'static, ()> {
+        let guard = INDEXED_OBJECT_STORAGE_BASE_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        unsafe {
+            STORAGE_BASE_CALLS = 0;
+            STORAGE_BASE_OBJECT = 0;
+            MOCK_STORAGE_BASE = storage_base;
+            core::ptr::addr_of_mut!(INDEXED_OBJECT_STORAGE_BASE).write(recording_storage_base);
+        }
+        guard
+    }
+
+    fn indexed_object(
+        type_tag: u32,
+        element_size: u32,
+        element_count: u32,
+    ) -> IndexedObject {
+        IndexedObject {
+            type_tag,
+            element_size,
+            element_count,
+            reserved: [0; 3],
+            storage: core::ptr::null_mut(),
+        }
+    }
 
     fn seed_sequence_id(value: u32) {
         unsafe {
@@ -91,5 +232,67 @@ mod tests {
         assert_eq!(sequence_id(), 0);
         assert_eq!(unsafe { sequence_id_next() }, 0);
         assert_eq!(sequence_id(), 1);
+    }
+    #[test]
+    fn wrong_type_tag_returns_null_without_querying_storage() {
+        let mut storage = [0u8; 32];
+        let _guard = install_recording_storage_base(storage.as_mut_ptr());
+        let _reset = StorageBaseReset;
+        let object = indexed_object(INDEXED_OBJECT_TAG ^ 1, 4, 1);
+
+        assert_eq!(
+            unsafe { indexed_object_offset(&object, 1) },
+            core::ptr::null_mut()
+        );
+        assert_eq!(unsafe { STORAGE_BASE_CALLS }, 0);
+    }
+
+    #[test]
+    fn zero_index_returns_null_without_querying_storage() {
+        let mut storage = [0u8; 32];
+        let _guard = install_recording_storage_base(storage.as_mut_ptr());
+        let _reset = StorageBaseReset;
+        let object = indexed_object(INDEXED_OBJECT_TAG, 4, 1);
+
+        assert_eq!(
+            unsafe { indexed_object_offset(&object, 0) },
+            core::ptr::null_mut()
+        );
+        assert_eq!(unsafe { STORAGE_BASE_CALLS }, 0);
+    }
+
+    #[test]
+    fn index_above_count_returns_null_without_querying_storage() {
+        let mut storage = [0u8; 32];
+        let _guard = install_recording_storage_base(storage.as_mut_ptr());
+        let _reset = StorageBaseReset;
+        let object = indexed_object(INDEXED_OBJECT_TAG, 4, 2);
+
+        assert_eq!(
+            unsafe { indexed_object_offset(&object, 3) },
+            core::ptr::null_mut()
+        );
+        assert_eq!(unsafe { STORAGE_BASE_CALLS }, 0);
+    }
+
+    #[test]
+    fn valid_one_based_indices_call_storage_base_and_scale_by_stride() {
+        let mut storage = [0u8; 32];
+        let _guard = install_recording_storage_base(storage.as_mut_ptr());
+        let _reset = StorageBaseReset;
+        let object = indexed_object(INDEXED_OBJECT_TAG, 12, 3);
+
+        assert_eq!(
+            unsafe { indexed_object_offset(&object, 1) },
+            storage.as_mut_ptr(),
+            "the first one-based record begins at the base"
+        );
+        assert_eq!(
+            unsafe { indexed_object_offset(&object, 3) },
+            unsafe { storage.as_mut_ptr().add(24) },
+            "the upper inclusive index uses stride * (index - 1)"
+        );
+        assert_eq!(unsafe { STORAGE_BASE_CALLS }, 2);
+        assert_eq!(unsafe { STORAGE_BASE_OBJECT }, &object as *const IndexedObject as usize);
     }
 }
