@@ -13,3 +13,4 @@ pub mod styled_text_view;
 pub mod vtable_slot_20;
 pub mod vtable_slot_24;
 pub mod resource_release;
+pub mod object_state;

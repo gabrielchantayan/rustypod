@@ -18658,3 +18658,19 @@ functions:
     notes: >-
       Duplicate of the 0x08261e24 veneer. Single `b 0x082e83d8`;
       76 bl + 24 tail b, binary-verified.
+
+  # --- retailOS UI object state accessor ---
+  - address: 0x08055e80
+    ghidra: FUN_08055e80
+    name: object_state_word
+    size: 12
+    sig: "u32 object_state_word(const void *object)"
+    module: ui/object_state
+    status: ported
+    renames:
+      param_1: object
+      uVar1: state_word
+    notes: >-
+      Pure leaf accessor: returns the aligned 32-bit little-endian state
+      word at object+0xe38. The owning UI object remains unidentified;
+      no null or alignment guard is present in the original.
