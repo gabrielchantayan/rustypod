@@ -202,6 +202,25 @@ pub struct VectorBounds {
     /// One past the last element.
     pub end: *mut u8,
 }
+/// vector_is_empty — original: `FUN_083d7810` @ 0x083d7810
+/// (24 bytes; `ipod-decomp/decomp/c/037/083d7810_FUN_083d7810.c`).
+///
+/// `std::vector<T>::empty()`: loads the vector head's `begin` and `end`
+/// pointers and returns whether they compare equal. The raw ARM body is
+/// `ldr r1,[r0]; ldr r0,[r0,#4]; cmp r1,r0; movne r0,#0; moveq r0,#1;
+/// bx lr`, establishing both the `r0` vector argument and its 0/1
+/// word-sized bool result ABI.
+///
+/// # Safety
+/// `vector` must point at a readable, target-word-aligned
+/// [`VectorBounds`]. The pointed-to elements are never accessed, so
+/// either bound may be NULL.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_is_empty(vector: *const VectorBounds) -> u32 {
+    if (*vector).begin == (*vector).end { 1 } else { 0 }
+}
+
 
 /// `(end - begin) >> shift`, the shared body of the `vector_size_elem*`
 /// family. The shift is **arithmetic**: the original's `asr` keeps a
@@ -881,6 +900,31 @@ mod tests {
             };
             let this = core::ptr::addr_of_mut!(container) as *mut u8;
             assert_eq!(container_element_at(this, 0), &mut sentinel as *mut u8);
+        }
+    }
+
+    // ---- vector_is_empty ---------------------------------------------
+
+    #[test]
+    fn vector_is_empty_returns_a_word_sized_boolean_for_equal_bounds() {
+        unsafe {
+            let storage = [0u8; 2];
+            let begin = storage.as_ptr() as *mut u8;
+            let occupied = VectorBounds { begin, end: begin.add(1) };
+            let empty = VectorBounds { begin, end: begin };
+            assert_eq!(vector_is_empty(&empty), 1, "same non-NULL bound");
+            assert_eq!(vector_is_empty(&occupied), 0, "one element differs");
+        }
+    }
+
+    #[test]
+    fn vector_is_empty_compares_pointer_values_without_dereferencing_them() {
+        unsafe {
+            let null = core::ptr::null_mut();
+            let null_bounds = VectorBounds { begin: null, end: null };
+            let nonempty = VectorBounds { begin: null, end: 0x4 as *mut u8 };
+            assert_eq!(vector_is_empty(&null_bounds), 1, "NULL equals NULL");
+            assert_eq!(vector_is_empty(&nonempty), 0, "only equality is empty");
         }
     }
 

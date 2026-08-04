@@ -14161,7 +14161,9 @@ functions:
       movne r0,#0; moveq r0,#1; bx lr`. It takes the vector in r0 and
       returns an AAPCS word-sized 0/1 bool in r0; neither bound is
       dereferenced. Source C:
-      decomp/c/037/083d7810_FUN_083d7810.c.
+      decomp/c/037/083d7810_FUN_083d7810.c. Focused host tests cover
+      equal non-NULL bounds, unequal adjacent bounds, and NULL values;
+      only the two bound words are read.
 
   - address: 0x083d76d8
     ghidra: FUN_083d76d8
