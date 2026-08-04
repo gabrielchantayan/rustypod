@@ -18828,7 +18828,8 @@ functions:
       returns the byte at nested_object+0xb88. The complete body is ldr;
       ldrb; bx lr, so the result is zero-extended in r0 and neither pointer
       receives a null guard. The UI object and flag semantics remain
-      unidentified.
+      unidentified. Rust implementation and focused host tests:
+      `src/ui/object_state.rs::object_nested_flag`.
 
   # --- C++ object-header low-flag predicate ---
   - address: 0x0808539c
