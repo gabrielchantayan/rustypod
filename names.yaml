@@ -14239,6 +14239,21 @@ functions:
       arithmetic, so reversed spans retain their negative count. Source C:
       decomp/c/037/083d77cc_FUN_083d77cc.c.
 
+  - address: 0x083d78c4
+    ghidra: FUN_083d78c4
+    name: vector_size_elem4_alias_78c4
+    size: 16
+    sig: "i32 vector_size_elem4_alias_78c4(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      Byte-identical vector_size_elem4 instantiation at 0x083d76d8:
+      `ldm r0,{r0,r1}; sub r0,r1,r0; asr r0,r0,#2; bx lr`. Its 11 bl
+      call sites use the same {begin, end} vector head. The `asr` is
+      arithmetic, so reversed spans retain their negative count. Source C:
+      decomp/c/037/083d78c4_FUN_083d78c4.c.
+
   - address: 0x083d7944
     ghidra: FUN_083d7944
     name: vector_size_elem4_alias_7944
@@ -18795,6 +18810,25 @@ functions:
       Pure leaf accessor: returns the aligned 32-bit little-endian state
       word at object+0xe38. The owning UI object remains unidentified;
       no null or alignment guard is present in the original.
+
+  # --- retailOS nested UI-object flag accessor ---
+  - address: 0x08055f90
+    ghidra: FUN_08055f90
+    name: object_nested_flag
+    size: 12
+    sig: "u8 object_nested_flag(const void *object)"
+    module: ui/object_state
+    status: ported
+    renames:
+      param_1: object
+      puVar1: nested_object
+      uVar1: nested_flag
+    notes: >-
+      Pure leaf accessor: follows the aligned pointer at object+0xf00 and
+      returns the byte at nested_object+0xb88. The complete body is ldr;
+      ldrb; bx lr, so the result is zero-extended in r0 and neither pointer
+      receives a null guard. The UI object and flag semantics remain
+      unidentified.
 
   # --- C++ object-header low-flag predicate ---
   - address: 0x0808539c
