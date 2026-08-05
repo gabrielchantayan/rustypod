@@ -21654,6 +21654,67 @@ functions:
       query_read_read_error_skips_the_finish /
       query_read_finish_args_and_final_return.
 
+  - address: 0x0811d874
+    ghidra: FUN_0811d874
+    name: vtable_set_50_write_indirect_kind4
+    size: 56
+    sig: "u32 vtable_set_50_write_indirect_kind4(handle: *mut *mut u8, selector: u32, data: *const u8, forwarded: usize)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r5: handle
+      param_2/r4: selector
+      param_3/r6: data
+      param_4/r3: forwarded
+    notes: >-
+      1 bl call site (grep on decomp/osos.asm): 0x0811d324, the
+      middle stage of the unported three-stage routine FUN_0811d2f8
+      (open 0x0811d458 -> this call -> tail commit 0x0811d340 - the
+      vtable_set_50_kind4 shape with this routine in place of the
+      by-value write stage 0x0811d56c; FUN_0811d2f8 passes its own
+      arg4 as this function's arg2 and its own arg3 - a pointer from
+      an accessor, e.g. 0x082a50b0/0x082770e0 at its call sites
+      0x08136600/0x081b00fc - as arg3). NO reference C exists
+      (decomp/c/010/ has no 0811d874 file); the port follows the
+      disassembly. True extent verified against the disassembly: the
+      next function starts at 0x0811d8ac, so 0x38 = 56 bytes, matching
+      functions.csv. The indirect (by-pointer) write stage of the
+      kind-4 slot +0x50 message family - the second two-dispatch
+      member after vtable_set_50_write_kind4 and the slot +0x50 mirror
+      of vtable_query_4c_kind4_read (0x0811d818). The entry stmdb
+      sp!,{r3,r4,r5,r6,r7,lr} spills arg4, but str r1,[sp,#0x0]
+      OVERWRITES that spill slot with the selector and mov r2,sp makes
+      it the first message's data word: dispatch(handle, 4,
+      &selector) - the open stage 0x0811d458's exact message. Only on
+      a zero status does the bleq fire the second, GENERIC dispatch:
+      the selector itself is the middle (kind) argument (moveq r1,r4)
+      and the caller's arg3 pointer is the data (moveq r2,r6) - the
+      shape of query_read's read dispatch, whose middle argument
+      carries the clamped size. A nonzero first status short-circuits
+      and returns verbatim; otherwise the second dispatch's status
+      returns. Deviations: the callee 0x0811d7fc is ported
+      (vtable_slot_50_dispatch) and both calls route through the
+      VTABLE_SLOT_50_DISPATCH read_volatile seam, as the siblings do.
+      arg4 reaches ONLY the first dispatch (nothing before the first
+      bl touches r3), modeled as `forwarded` per family convention;
+      for the SECOND dispatch r3 is DEAD - the first method clobbers
+      r0-r3, the dispatcher's ldmia {r12,pc} epilogue does not restore
+      r3, and the entry spill slot was overwritten with the selector -
+      so the port passes a pointer to a zero stack word for that
+      unobservable argument (the query_read _unused precedent). arg3
+      is typed *const u8 (the query_read buffer mirror, direction
+      reversed: the second method reads the payload); it is only ever
+      consumed as an address. match.py (exit 0): the two dispatches
+      are ldr/blx through the seam in place of bl; LLVM turns the
+      conditional bleq into a beq over the epilogue (same structure);
+      the collapsed-spill convention pre-spills the forwarded word and
+      passes its address; the crate fp frame accounts for the rest.
+      Host tests:
+      src/app/vtable_set.rs::indirect_write_first_dispatch_error_skips_the_second
+      / indirect_write_success_redispatches_with_exact_args /
+      indirect_write_arg4_spill_reaches_only_the_first_dispatch /
+      indirect_write_forwards_the_second_status_verbatim.
+
   - address: 0x082c2290
     ghidra: FUN_082c2290
     name: cg_buffer_align_offset

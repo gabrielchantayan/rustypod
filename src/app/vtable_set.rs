@@ -171,7 +171,8 @@ type VtableSlot4cMethod =
 /// eight sites 0x0811d390..0x0811d440 in the multi-message routine
 /// 0x0811d360, the open stage 0x0811d458, the kind-2 / kind-4 write
 /// stages 0x0811d52c / 0x0811d56c, the tag thunks 0x0811d6cc /
-/// 0x0811d6ec and the routine at 0x0811d880).
+/// 0x0811d6ec and the two sites 0x0811d890 / 0x0811d8a4 in
+/// [`vtable_set_50_write_indirect_kind4`] (0x0811d874)).
 ///
 /// The shared vtable dispatcher of the slot +0x50 message family — the
 /// slot +0x50 twin of [`vtable_slot_4c_dispatch`] (`FUN_0811d7b0` @
@@ -849,6 +850,115 @@ pub unsafe extern "C" fn vtable_set_50_write_kind4(
     result
 }
 
+/// vtable_set_50_write_indirect_kind4 — original: `FUN_0811d874` @
+/// 0x0811d874 (56 bytes; **1 `bl` call site**, grep on
+/// `decomp/osos.asm`: 0x0811d324, the middle stage of the unported
+/// three-stage routine `FUN_0811d2f8` — open 0x0811d458 → this call →
+/// tail commit 0x0811d340, the [`vtable_set_50_kind4`] shape with
+/// this routine in place of the by-value write stage 0x0811d56c. The
+/// caller passes its own arg4 as this function's arg2 and its own
+/// arg3 — a pointer from an accessor — as arg3). There is NO
+/// reference C for this function (`decomp/c/010/` has no `0811d874`
+/// file); the port follows the disassembly.
+///
+/// The indirect (by-pointer) write stage of the kind-4 vtable message
+/// family — the second two-dispatch member after
+/// [`vtable_set_50_write_kind4`], and the slot +0x50 mirror of this
+/// module's [`vtable_query_4c_kind4_read`] (0x0811d818): a first
+/// kind-4 message carrying the selector by pointer, then — only on
+/// success — a generic dispatch whose middle argument is the selector
+/// itself (not a kind constant) and whose data is the caller's
+/// pointer:
+///
+/// ```text
+/// 0811d874  stmdb sp!, {r3, r4, r5, r6, r7, lr}  @ spill arg4 (r3)
+/// 0811d878  mov   r6, r2            @ save data (arg3)
+/// 0811d87c  mov   r4, r1            @ save selector (arg2)
+/// 0811d880  str   r1, [sp, #0x0]    @ selector OVERWRITES the r3 spill slot
+/// 0811d884  mov   r1, #0x4          @ kind 4
+/// 0811d888  mov   r2, sp            @ data = &selector
+/// 0811d88c  mov   r5, r0            @ save handle
+/// 0811d890  bl    0x0811d7fc        @ dispatch(handle, 4, &selector, r3)
+/// 0811d894  cmp   r0, #0x0
+/// 0811d898  moveq r2, r6            @ data = arg3 pointer
+/// 0811d89c  moveq r1, r4            @ kind = selector
+/// 0811d8a0  moveq r0, r5
+/// 0811d8a4  bleq  0x0811d7fc        @ dispatch(handle, selector, data, r3)
+/// 0811d8a8  ldmia sp!, {r3, r4, r5, r6, r7, pc}  @ return the last result
+/// ```
+///
+/// Two messages to the slot +0x50 dispatcher: first kind 4 with a
+/// pointer to the selector (the open stage 0x0811d458's exact
+/// message), then — only when that returns 0 — a generic dispatch
+/// with the **selector as the middle (kind) argument** and the
+/// caller's arg3 pointer as the data (the shape of
+/// [`vtable_query_4c_kind4_read`]'s read dispatch, whose middle
+/// argument carries the clamped size). A nonzero first result
+/// short-circuits and returns verbatim; otherwise the second
+/// dispatch's error code returns. The one caller,
+/// `FUN_0811d2f8`, branches on it (`cmp r0, #0` at 0x0811d328):
+/// nonzero skips the commit tail call and propagates.
+///
+/// # Deviations
+///
+/// - **The callee 0x0811d7fc is ported** in this module as
+///   [`vtable_slot_50_dispatch`]; both calls route through the
+///   [`VTABLE_SLOT_50_DISPATCH`] `read_volatile` seam (retained for
+///   hookability — rewiring to a direct call is a follow-up), exactly
+///   as the ported siblings do.
+/// - **The caller's r3 (arg4) reaches ONLY the first dispatch**,
+///   modeled as a fourth parameter `forwarded` — the family
+///   convention. Nothing between entry and the first `bl` touches r3,
+///   so the first dispatcher's `stmdb sp!, {r3}` spill exposes it
+///   verbatim. For the **second** dispatch r3 is DEAD: the first
+///   dispatch's `blx` method clobbers r0–r3 (and the dispatcher's
+///   `ldmia sp!, {r12, pc}` epilogue restores the spilled word into
+///   r12, not r3), nothing reloads r3 before the `bleq`, and the
+///   entry spill slot it came from was overwritten with the selector
+///   (`str r1, [sp, #0x0]`) — so the second dispatcher spills
+///   whatever the first method happened to leave in r3. The port
+///   passes a pointer to a zero stack word for that unobservable
+///   argument (the [`vtable_query_4c_kind4_read`] `_unused`
+///   precedent).
+/// - **arg3 is typed `*const u8`** (the [`vtable_query_4c_kind4_read`]
+///   `buffer: *mut u8` mirror, direction reversed: the second
+///   dispatch's method reads the payload the caller's accessor
+///   produced). It is only ever consumed as an address.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_set_50_write_indirect_kind4(
+    handle: *mut *mut u8,
+    selector: u32,
+    data: *const u8,
+    forwarded: usize,
+) -> u32 {
+    let dispatch = core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_SLOT_50_DISPATCH));
+    // `str r1, [sp, #0x0]`: the selector overwrites the entry r3 spill
+    // slot; `mov r2, sp` makes it the first message's data word.
+    let selector_slot = selector;
+    let forwarded_slot = forwarded;
+    let mut result = dispatch(
+        handle,
+        MESSAGE_KIND_4,
+        core::ptr::addr_of!(selector_slot) as usize,
+        core::ptr::addr_of!(forwarded_slot),
+    );
+    if result == 0 {
+        // r3 is dead across the first dispatch (method-clobbered, and
+        // the spill slot it came from was overwritten with the
+        // selector); 0 stands in for the unobservable fourth argument
+        // — the query_read `_unused` precedent.
+        let dead_slot = 0usize;
+        result = dispatch(
+            handle,
+            selector,
+            data as usize,
+            core::ptr::addr_of!(dead_slot),
+        );
+    }
+    result
+}
+
 /// The status [`vtable_query_4c_kind4_read`] treats as "unsupported —
 /// bail silently" (`cmp r0, #0x5; beq`): it returns verbatim, exactly
 /// like any hard error, but the caller convention distinguishes it
@@ -897,9 +1007,10 @@ pub static mut VTABLE_QUERY_4C_READ_FINISH: unsafe extern "C" fn(
 ///
 /// The query-size-then-read routine of the slot +0x4c message family
 /// — the only caller that drives [`vtable_slot_4c_dispatch`]
-/// (0x0811d7b0) twice, and the mirror of the unported slot +0x50
-/// sibling at 0x0811d874 (same shape through
-/// [`vtable_slot_50_dispatch`]):
+/// (0x0811d7b0) twice, and the mirror of this module's slot +0x50
+/// sibling [`vtable_set_50_write_indirect_kind4`] (0x0811d874 — same
+/// two-dispatch shape through [`vtable_slot_50_dispatch`], direction
+/// reversed: it sends the selector first, then writes):
 ///
 /// ```text
 /// 0811d818  stmdb sp!, {r2, r3, r4, r5, r6, lr}  @ pair = {buffer, r3}
@@ -2469,6 +2580,135 @@ mod tests {
                  it (mov r2, r1); the port passes 0"
             );
             assert_eq!(FINISH_FORWARDED, FORWARDED);
+        }
+    }
+
+    // ---- vtable_set_50_write_indirect_kind4 (0x0811d874) -------------
+
+    #[test]
+    fn indirect_write_first_dispatch_error_skips_the_second() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let payload = [VALUE_WORD, 0xa5a5_a5a5];
+        unsafe {
+            install_recording_dispatch();
+            DISPATCH_RESULTS[0] = OPEN_ERR;
+
+            let result = vtable_set_50_write_indirect_kind4(
+                fixture.handle_ptr(),
+                SELECTOR,
+                payload.as_ptr() as *const u8,
+                FORWARDED,
+            );
+
+            assert_eq!(
+                result, OPEN_ERR,
+                "a nonzero first status returns verbatim (cmp r0, #0x0; no bleq)"
+            );
+            assert_eq!(
+                DISPATCH_CALLS, 1,
+                "the second dispatch fires only on a zero first status"
+            );
+        }
+    }
+
+    #[test]
+    fn indirect_write_success_redispatches_with_exact_args() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let payload = [VALUE_WORD, 0xa5a5_a5a5];
+        unsafe {
+            install_recording_dispatch();
+
+            let result = vtable_set_50_write_indirect_kind4(
+                fixture.handle_ptr(),
+                SELECTOR,
+                payload.as_ptr() as *const u8,
+                FORWARDED,
+            );
+
+            assert_eq!(result, MOCK_OK);
+            assert_eq!(DISPATCH_CALLS, 2, "select message, then the write");
+            // First dispatch: the open-shaped kind-4 message carrying
+            // the selector by pointer (str r1, [sp]; mov r2, sp).
+            assert_eq!(DISPATCH_HANDLE[0], fixture.handle_ptr(), "moveq/mov r0, r5");
+            assert_eq!(DISPATCH_KIND[0], MESSAGE_KIND_4, "mov r1, #0x4");
+            assert_eq!(
+                DISPATCH_WORD0[0], SELECTOR,
+                "the first message word is the bare selector"
+            );
+            // Second dispatch: generic — the selector is the middle
+            // (kind) argument, arg3 the data pointer (moveq r1, r4 /
+            // moveq r2, r6).
+            assert_eq!(DISPATCH_HANDLE[1], fixture.handle_ptr());
+            assert_eq!(
+                DISPATCH_KIND[1], SELECTOR,
+                "the selector doubles as the second dispatch's kind"
+            );
+            assert_eq!(
+                DISPATCH_WORD0[1], payload[0],
+                "the data argument is the caller's arg3 pointer, verbatim"
+            );
+            assert_eq!(DISPATCH_WORD1[1], payload[1]);
+        }
+    }
+
+    #[test]
+    fn indirect_write_arg4_spill_reaches_only_the_first_dispatch() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let payload = [VALUE_WORD, 0xa5a5_a5a5];
+        unsafe {
+            install_recording_dispatch();
+
+            vtable_set_50_write_indirect_kind4(
+                fixture.handle_ptr(),
+                SELECTOR,
+                payload.as_ptr() as *const u8,
+                FORWARDED,
+            );
+
+            assert_eq!(DISPATCH_CALLS, 2);
+            assert_eq!(
+                DISPATCH_EXTRA[0], FORWARDED,
+                "nothing before the first bl touches r3 — the entry arg4 is \
+                 forwarded into the first dispatcher's stmdb {{r3}} spill"
+            );
+            assert_eq!(
+                DISPATCH_EXTRA[1], 0,
+                "r3 is dead across the first dispatch (method-clobbered; its \
+                 entry spill slot was overwritten with the selector) — the \
+                 port passes a zero word for the unobservable argument"
+            );
+        }
+    }
+
+    #[test]
+    fn indirect_write_forwards_the_second_status_verbatim() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let payload = [VALUE_WORD, 0xa5a5_a5a5];
+        unsafe {
+            install_recording_dispatch();
+            DISPATCH_RESULTS[1] = WRITE_ERR;
+
+            let result = vtable_set_50_write_indirect_kind4(
+                fixture.handle_ptr(),
+                SELECTOR,
+                payload.as_ptr() as *const u8,
+                FORWARDED,
+            );
+
+            assert_eq!(DISPATCH_CALLS, 2);
+            assert_eq!(
+                result, WRITE_ERR,
+                "ldmia sp!, {{r3, r4, r5, r6, r7, pc}} returns the last \
+                 dispatch's r0 verbatim"
+            );
         }
     }
 }
