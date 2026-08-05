@@ -19877,6 +19877,71 @@ functions:
       Rust implementation and focused host tests:
       `src/ui/object_state.rs::object_nested_companion_word`.
 
+  # --- record-field text installer (query kind 2) ---
+  - address: 0x08056048
+    ghidra: FUN_08056048
+    name: object_install_field_text
+    size: 220
+    sig: "i32 object_install_field_text(void *object)"
+    module: ui/object_state
+    status: ported
+    renames:
+      param_1: object
+      iVar1/r6: status
+      uVar2/uVar3: text_len (clamped)
+      local_24c: query_word
+      local_40: result.flags
+      local_3e: result.text_len
+      local_38: result.text
+      local_1f8: result.field_word
+      local_23c: result.tagged_word
+      auStack_248: result (FieldQueryResult block, 0x238 bytes)
+      FUN_08051600: field_query
+      FUN_08042cbc: bcopy (ported; called directly)
+      FUN_08049398: heap_free
+      thunk_EXT_FUN_2200027c: iram_memzero_aligned_veneer
+    notes: >-
+      Fetches field kind 2 of the object's record through the retailOS
+      query helper 0x08051600 and installs the returned text on the
+      object. Zeroes the 0x2c-byte tail of a 0x238-byte stack result
+      block (flags/length/pointer head at +0x208, via IRAM memzero
+      veneer 0x08037db8) and a separate query word, then calls
+      (object, 2, 0, 0, 0, &block, &word) — Ghidra's 12-byte
+      auStack_248 is an artifact: the helper's own decompilation writes
+      the block out to param_6 + 0x214, so argument six is the whole
+      0x238-byte block. On a zero status it clamps the block's length
+      halfword (+0x20a) to 0xff, bcopy-port-copies that many bytes from
+      the block's text pointer (+0x210) into the object's inline buffer
+      at +0x1c, NUL-terminates at +0x1c+len, stores the block's +0x50
+      word into object+0x188, and — only when the object's tag halfword
+      at +2 is 0x482b (the same tag the helper tests to pick its larger
+      inline capacity) — stores the block's +0x0c word into object+4.
+      Then, regardless of status, if bit 0 of the block's flags
+      halfword is set it frees the text pointer through the retailOS
+      heap free 0x08049398; the helper's status is returned in r0. One
+      `bl 0x08056048` call site (grep -c on decomp/osos.asm), at
+      0x08161fb8: applies it to the sub-record at r4+0x208 after
+      building three sibling records and running 0x08058150, and
+      discards the result — an init-time text/field population step;
+      the fetched field's concrete meaning is not recovered.
+      Deviations: the port zero-initializes the entire result block
+      instead of memset-ing only its +0x208..+0x234 tail (the head
+      fields are only read after the helper writes them), and skips the
+      original's dead post-free cleanup (clearing the flag bit and
+      nulling the pointer in the dying stack frame) plus the redundant
+      strh re-zeroing the flags right after the memset. Query helper
+      and heap free stay in retailOS behind replaceable FIELD_QUERY /
+      HEAP_FREE function-pointer boundaries; the copy runs the ported
+      bcopy @ 0x08042cbc directly. match.py confirms the structural
+      shape — zero block, query call, length clamp (LLVM movcs vs ADS
+      movhi: clamping 255 to 255 is a no-op), bcopy, NUL store, the
+      +0x188 and conditional +4 word stores, the `tst #1` free gate —
+      52 versus 55 instructions; the diff is LLVM's frame, the
+      __aeabi_memclr4/__aeabi_memmove lowerings, and the indirect blx
+      through the boundary statics versus the ADS direct bls. Rust
+      implementation and focused host tests:
+      `src/ui/object_state.rs::object_install_field_text`.
+
   # --- C++ object-header low-flag predicate ---
   - address: 0x0808539c
     ghidra: FUN_0808539c

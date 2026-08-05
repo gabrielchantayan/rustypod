@@ -724,6 +724,233 @@ pub unsafe extern "C" fn object_nested_companion_word(object: *const u8) -> u32 
     (nested_object.add(NESTED_OBJECT_COMPANION_WORD_OFFSET) as *const u32).read()
 }
 
+/// Byte offset of the object's inline text buffer (`add r1,r4,#0x1c`).
+const OBJECT_TEXT_OFFSET: usize = 0x1c;
+
+/// Text-length clamp applied to the query result's length halfword
+/// (`cmp r2,#0xff; movhi r2,#0xff`): the inline buffer at
+/// [`OBJECT_TEXT_OFFSET`] holds at most 0xff bytes plus the NUL
+/// terminator the function stores itself.
+const OBJECT_TEXT_LIMIT: u16 = 0xff;
+
+/// Byte offset of the object's field word (`str r0,[r4,#0x188]`).
+const OBJECT_FIELD_WORD_OFFSET: usize = 0x188;
+
+/// Byte offset of the object's tag halfword (`ldrh r0,[r4,#0x2]`).
+const OBJECT_TAG_OFFSET: usize = 0x2;
+
+/// Tag halfword selecting the extended object layout — the same value the
+/// query helper 0x08051600 tests (`*(short *)(param_1 + 2) == 0x482b`) to
+/// pick its larger inline capacity.
+const OBJECT_TAG_EXTENDED: u16 = 0x482b;
+
+/// Byte offset of the tagged-layout-only word (`streq r0,[r4,#0x4]`).
+const OBJECT_TAGGED_WORD_OFFSET: usize = 0x4;
+
+/// Query kind passed to the stock helper in r1 (`mov r1,#0x2`).
+const FIELD_QUERY_KIND: u32 = 2;
+
+/// Result-flags bit marking the text pointer as heap-owned (`tst r0,#0x1`).
+const FIELD_RESULT_HEAP_TEXT: u16 = 0x1;
+
+/// Result block filled by the stock field-query helper 0x08051600.
+///
+/// The original reserves the block at `sp + 0x10` inside its 0x248-byte
+/// frame and zeroes only the 0x2c-byte tail at block offset `+0x208`
+/// (flags, length, pointer and the head of the inline text buffer)
+/// through the IRAM memzero veneer 0x08037db8. Only the fields this
+/// caller consumes are named; the gaps are the helper's private scratch
+/// (its decompilation shows field-type tags and a sub-query header living
+/// there). The layout extends to `+0x238`, the end of the original frame.
+#[repr(C)]
+struct FieldQueryResult {
+    _head: [u8; 0xc],
+    /// Block `+0x0c`: stored into a tagged object's `+0x4` word.
+    tagged_word: u32,
+    _middle: [u8; 0x40],
+    /// Block `+0x50`: stored into the object's `+0x188` word.
+    field_word: u32,
+    _scratch: [u8; 0x1b4],
+    /// Block `+0x208`: result flags; bit 0 = heap-owned text pointer.
+    flags: u16,
+    /// Block `+0x20a`: text length in bytes.
+    text_len: u16,
+    _reserved: [u8; 4],
+    /// Block `+0x210`: the text bytes — the helper's inline buffer at
+    /// `+0x214`, or a heap allocation when [`FIELD_RESULT_HEAP_TEXT`] is
+    /// set.
+    text: *mut u8,
+    /// Block `+0x214`: head of the helper's inline text buffer, out to
+    /// the end of the original's stack frame.
+    _inline_text: [u8; 0x24],
+}
+
+type FieldQuery = unsafe extern "C" fn(
+    object: *mut u8,
+    kind: u32,
+    key: u32,
+    key_len: u32,
+    reserved: u32,
+    result: *mut FieldQueryResult,
+    query_word: *mut u32,
+) -> i32;
+
+/// Calls the stock record field-query helper, which remains in retailOS.
+///
+/// This is deliberately a boundary rather than a port of 0x08051600. Host
+/// tests replace the one function pointer below; ARM builds call its fixed
+/// firmware load address. The original resolves field `kind` of `object`'s
+/// record (0x08043444), reads the typed value (0x08041d48) — chasing
+/// sub-record lookups through 0x0805bfd0/0x0805be98 depending on the
+/// `0x482b` object tag — and fills `result`: field-type tags and a
+/// sub-query header in the scratch gaps, flags at `+0x208`, the text
+/// length at `+0x20a`, and the text pointer at `+0x210` (its inline
+/// buffer at `+0x214`, or a heap allocation marked with flags bit 0).
+/// `key`/`key_len` select an optional named sub-field (both zero at this
+/// call site); `query_word` is an in/out detail word. The return is a
+/// status code: 0 on success, with 0x20 remapped to 0x30.
+unsafe extern "C" fn firmware_field_query(
+    object: *mut u8,
+    kind: u32,
+    key: u32,
+    key_len: u32,
+    reserved: u32,
+    result: *mut FieldQueryResult,
+    query_word: *mut u32,
+) -> i32 {
+    #[cfg(target_os = "none")]
+    {
+        let field_query: FieldQuery = core::mem::transmute(0x0805_1600usize);
+        field_query(object, kind, key, key_len, reserved, result, query_word)
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        let _ = (object, kind, key, key_len, reserved, result, query_word);
+        // A nonzero status keeps host callers on the untouched failure path.
+        -1
+    }
+}
+
+/// Narrow boundary for the unported 0x08051600 dependency.
+static mut FIELD_QUERY: FieldQuery = firmware_field_query;
+
+#[inline(always)]
+unsafe fn field_query_fn() -> FieldQuery {
+    core::ptr::read_volatile(core::ptr::addr_of!(FIELD_QUERY))
+}
+
+type HeapFree = unsafe extern "C" fn(*mut u8);
+
+/// Calls the stock heap free, which remains in retailOS.
+///
+/// This is deliberately a boundary rather than a port of 0x08049398. Host
+/// tests replace the one function pointer below; ARM builds call its fixed
+/// firmware load address. The original is the retailOS allocator's free:
+/// it returns immediately on a null pointer, validates the eight-byte
+/// allocation header, decrements the pool accounting, and returns the
+/// block to its pool. This caller invokes it only for query-result text
+/// the helper flagged heap-owned.
+unsafe extern "C" fn firmware_heap_free(pointer: *mut u8) {
+    #[cfg(target_os = "none")]
+    {
+        let heap_free: HeapFree = core::mem::transmute(0x0804_9398usize);
+        heap_free(pointer)
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        let _ = pointer;
+    }
+}
+
+/// Narrow boundary for the unported 0x08049398 dependency.
+static mut HEAP_FREE: HeapFree = firmware_heap_free;
+
+#[inline(always)]
+unsafe fn heap_free_fn() -> HeapFree {
+    core::ptr::read_volatile(core::ptr::addr_of!(HEAP_FREE))
+}
+
+/// object_install_field_text — original: `FUN_08056048` @ `0x08056048`
+/// (220 bytes).
+///
+/// Source: `/home/gabe/Programming/ipod-decomp/decomp/c/003/08056048_FUN_08056048.c`;
+/// assembly: `decomp/osos.asm` @ `0x08056048..0x08056120`.
+///
+/// Fetches field kind [`FIELD_QUERY_KIND`] of the object's record through
+/// the retailOS query helper 0x08051600 and installs the returned text on
+/// the object. It zeroes the 0x2c-byte tail of a 0x238-byte stack result
+/// block (the flags/length/pointer head at `+0x208`, through the IRAM
+/// memzero veneer 0x08037db8) and a separate query word, then calls the
+/// helper with `(object, 2, 0, 0, 0, &block, &word)` — Ghidra's 12-byte
+/// `auStack_248` is an artifact: the helper's own decompilation writes
+/// the block out to `param_6 + 0x214`, so the sixth argument is the whole
+/// 0x238-byte block. On a zero status it clamps the block's length
+/// halfword (`+0x20a`) to [`OBJECT_TEXT_LIMIT`], copies that many bytes
+/// from the block's text pointer (`+0x210`) into the object's inline
+/// buffer at `+0x1c` through the ported [`crate::libc::bcopy::bcopy`]
+/// (0x08042cbc), stores a NUL terminator at `object + 0x1c + len`, stores
+/// the block's `+0x50` word into `object + 0x188`, and — only when the
+/// object's tag halfword at `+2` is [`OBJECT_TAG_EXTENDED`] (`sub
+/// r12,r0,#0x4800; subs r12,r12,#0x2b`) — stores the block's `+0x0c` word
+/// into `object + 4`. Then, regardless of status, if bit 0 of the block's
+/// flags halfword is set it frees the text pointer through the retailOS
+/// heap free 0x08049398. The helper's status is returned in r0. The
+/// single stock call site (0x08161fb8, grep -c on `decomp/osos.asm`)
+/// applies it to the sub-record at `r4 + 0x208` after building three
+/// sibling records and running 0x08058150, and discards the result — an
+/// init-time text/field population step; the fetched field's concrete
+/// meaning is not recovered.
+///
+/// Deviations: the port zero-initializes the entire result block instead
+/// of memset-ing only its `+0x208..+0x234` tail — the head fields are
+/// only read after the helper writes them on the success path — and it
+/// skips the original's dead post-free cleanup (clearing the flag bit and
+/// nulling the pointer in the dying stack frame) and the redundant
+/// `strh` re-zeroing the flags right after the memset. The original's
+/// reload-and-reclamp of the length for the terminator store recomputes
+/// the same value and is folded into one clamp here. The query helper
+/// and heap free stay in retailOS behind the [`FIELD_QUERY`] and
+/// [`HEAP_FREE`] boundaries; the copy runs the ported bcopy directly.
+///
+/// # Safety
+///
+/// Like the original, there is no null guard on `object`: it must be
+/// writable for at least 0x18c bytes (text buffer at `+0x1c`, tag at
+/// `+2`, words at `+4` and `+0x188`), as at the single stock call site.
+/// The stock helper must fill the block's flags/length/pointer on its
+/// success path, and a flagged text pointer must be a live allocation of
+/// the retailOS heap.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn object_install_field_text(object: *mut u8) -> i32 {
+    let mut result: FieldQueryResult = core::mem::zeroed();
+    let mut query_word: u32 = 0;
+    let status = field_query_fn()(
+        object,
+        FIELD_QUERY_KIND,
+        0,
+        0,
+        0,
+        &mut result,
+        &mut query_word,
+    );
+    if status == 0 {
+        let text_len = result.text_len.min(OBJECT_TEXT_LIMIT) as usize;
+        crate::libc::bcopy::bcopy(result.text, object.add(OBJECT_TEXT_OFFSET), text_len);
+        object.add(OBJECT_TEXT_OFFSET + text_len).write(0);
+        (object.add(OBJECT_FIELD_WORD_OFFSET) as *mut u32).write(result.field_word);
+        if (object.add(OBJECT_TAG_OFFSET) as *const u16).read() == OBJECT_TAG_EXTENDED {
+            (object.add(OBJECT_TAGGED_WORD_OFFSET) as *mut u32).write(result.tagged_word);
+        }
+    }
+    if result.flags & FIELD_RESULT_HEAP_TEXT != 0 {
+        heap_free_fn()(result.text);
+    }
+    status
+}
+
 type ObjectKindTable = unsafe extern "C" fn(*const u8, u32) -> *const u64;
 
 /// Calls the stock kind-indexed mask-table getter, which remains in
@@ -1820,7 +2047,7 @@ mod tests {
         let mut object = [0u8; 0x1a0];
 
         assert_eq!(
-            unsafe { object_kind_mask_union(object.as_mut_ptr(), 2) },
+            unsafe { object_kind_mask_union(object.as_mut_ptr(), 1) },
             0,
             "a zero first doubleword ends the walk before any OR"
         );
@@ -1847,19 +2074,273 @@ mod tests {
         );
     }
 
+    static FIELD_QUERY_LOCK: Mutex<()> = Mutex::new(());
+    static HEAP_FREE_LOCK: Mutex<()> = Mutex::new(());
+    static mut FIELD_QUERY_CALLS: u32 = 0;
+    static mut FIELD_QUERY_OBJECT: usize = 0;
+    static mut FIELD_QUERY_KIND_SEEN: u32 = u32::MAX;
+    static mut FIELD_QUERY_KEY: u32 = u32::MAX;
+    static mut FIELD_QUERY_KEY_LEN: u32 = u32::MAX;
+    static mut FIELD_QUERY_RESERVED: u32 = u32::MAX;
+    static mut FIELD_QUERY_WORD_SEEN: u32 = u32::MAX;
+    static mut MOCK_QUERY_STATUS: i32 = 0;
+    static mut MOCK_QUERY_FLAGS: u16 = 0;
+    static mut MOCK_QUERY_TEXT_LEN: u16 = 0;
+    static mut MOCK_QUERY_TEXT: *mut u8 = core::ptr::null_mut();
+    static mut MOCK_QUERY_FIELD_WORD: u32 = 0;
+    static mut MOCK_QUERY_TAGGED_WORD: u32 = 0;
+    static mut HEAP_FREE_CALLS: u32 = 0;
+    static mut HEAP_FREE_POINTER: usize = usize::MAX;
+
+    unsafe extern "C" fn recording_field_query(
+        object: *mut u8,
+        kind: u32,
+        key: u32,
+        key_len: u32,
+        reserved: u32,
+        result: *mut FieldQueryResult,
+        query_word: *mut u32,
+    ) -> i32 {
+        FIELD_QUERY_CALLS += 1;
+        FIELD_QUERY_OBJECT = object as usize;
+        FIELD_QUERY_KIND_SEEN = kind;
+        FIELD_QUERY_KEY = key;
+        FIELD_QUERY_KEY_LEN = key_len;
+        FIELD_QUERY_RESERVED = reserved;
+        FIELD_QUERY_WORD_SEEN = query_word.read();
+        let result = &mut *result;
+        result.flags = MOCK_QUERY_FLAGS;
+        result.text_len = MOCK_QUERY_TEXT_LEN;
+        result.text = MOCK_QUERY_TEXT;
+        result.field_word = MOCK_QUERY_FIELD_WORD;
+        result.tagged_word = MOCK_QUERY_TAGGED_WORD;
+        MOCK_QUERY_STATUS
+    }
+
+    unsafe extern "C" fn recording_heap_free(pointer: *mut u8) {
+        HEAP_FREE_CALLS += 1;
+        HEAP_FREE_POINTER = pointer as usize;
+    }
+
+    /// Restores both stock-call boundaries before another test uses them.
+    struct FieldQueryReset;
+
+    impl Drop for FieldQueryReset {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(FIELD_QUERY).write(firmware_field_query);
+                core::ptr::addr_of_mut!(HEAP_FREE).write(firmware_heap_free);
+            }
+        }
+    }
+
+    struct FieldQueryMocks {
+        _query_guard: MutexGuard<'static, ()>,
+        _free_guard: MutexGuard<'static, ()>,
+        _reset: FieldQueryReset,
+    }
+
+    fn install_field_query_mocks(status: i32, flags: u16, text_len: u16) -> FieldQueryMocks {
+        let query_guard = FIELD_QUERY_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let free_guard = HEAP_FREE_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        unsafe {
+            FIELD_QUERY_CALLS = 0;
+            FIELD_QUERY_OBJECT = 0;
+            FIELD_QUERY_KIND_SEEN = u32::MAX;
+            FIELD_QUERY_KEY = u32::MAX;
+            FIELD_QUERY_KEY_LEN = u32::MAX;
+            FIELD_QUERY_RESERVED = u32::MAX;
+            FIELD_QUERY_WORD_SEEN = u32::MAX;
+            MOCK_QUERY_STATUS = status;
+            MOCK_QUERY_FLAGS = flags;
+            MOCK_QUERY_TEXT_LEN = text_len;
+            MOCK_QUERY_TEXT = core::ptr::null_mut();
+            MOCK_QUERY_FIELD_WORD = 0;
+            MOCK_QUERY_TAGGED_WORD = 0;
+            HEAP_FREE_CALLS = 0;
+            HEAP_FREE_POINTER = usize::MAX;
+            core::ptr::addr_of_mut!(FIELD_QUERY).write(recording_field_query);
+            core::ptr::addr_of_mut!(HEAP_FREE).write(recording_heap_free);
+        }
+        FieldQueryMocks {
+            _query_guard: query_guard,
+            _free_guard: free_guard,
+            _reset: FieldQueryReset,
+        }
+    }
+
+    /// Sentinel-filled object buffer with its tag halfword set.
+    fn field_text_object(tag: u16) -> [u8; 0x200] {
+        let mut object = [0xaau8; 0x200];
+        object[OBJECT_TAG_OFFSET..OBJECT_TAG_OFFSET + 2].copy_from_slice(&tag.to_le_bytes());
+        object
+    }
+
     #[test]
-    fn terminator_requires_both_words_zero() {
-        // A half-zero entry is not the terminator: the original tests the
-        // full doubleword (`cmp r1,#0x0; cmpeq r0,r2`).
-        let table = [0x0000_0000_1111_1111u64, 0x2222_2222_0000_0000, 0];
-        let _guard = install_recording_kind_table(table.as_ptr());
-        let _reset = KindTableReset;
-        let mut object = [0u8; 0x1a0];
+    fn forwards_the_query_tuple_and_returns_status_verbatim() {
+        let _mocks = install_field_query_mocks(0x30, 0, 0);
+        let mut object = field_text_object(0x1234);
 
         assert_eq!(
-            unsafe { object_kind_mask_union(object.as_mut_ptr(), 1) },
-            0x2222_2222_1111_1111,
-            "entries with one zero word still contribute to the union"
+            unsafe { object_install_field_text(object.as_mut_ptr()) },
+            0x30,
+            "the helper's status is returned in r0"
+        );
+        assert_eq!(unsafe { FIELD_QUERY_CALLS }, 1, "the helper is called once");
+        assert_eq!(
+            unsafe { FIELD_QUERY_OBJECT },
+            object.as_mut_ptr() as usize,
+            "r0 is forwarded untouched"
+        );
+        assert_eq!(
+            unsafe { FIELD_QUERY_KIND_SEEN },
+            FIELD_QUERY_KIND,
+            "r1 is the hardcoded query kind (`mov r1,#0x2`)"
+        );
+        assert_eq!(
+            unsafe { (FIELD_QUERY_KEY, FIELD_QUERY_KEY_LEN, FIELD_QUERY_RESERVED) },
+            (0, 0, 0),
+            "the remaining arguments are the original's three zeros"
+        );
+        assert_eq!(
+            unsafe { FIELD_QUERY_WORD_SEEN },
+            0,
+            "the query word is zero-initialized (`str r5,[sp,#0xc]`)"
+        );
+        assert!(
+            object.iter().skip(4).all(|&byte| byte == 0xaa),
+            "a nonzero status leaves the object untouched"
+        );
+        assert_eq!(
+            unsafe { HEAP_FREE_CALLS },
+            0,
+            "flags bit 0 clear: nothing is freed"
+        );
+    }
+
+    #[test]
+    fn installs_text_and_both_words_on_success_for_tagged_objects() {
+        let _mocks = install_field_query_mocks(0, 0, 5);
+        let mut text = *b"hello";
+        unsafe {
+            MOCK_QUERY_TEXT = text.as_mut_ptr();
+            MOCK_QUERY_FIELD_WORD = 0xcafe_f00d;
+            MOCK_QUERY_TAGGED_WORD = 0x1234_5678;
+        }
+        let mut object = field_text_object(OBJECT_TAG_EXTENDED);
+
+        assert_eq!(unsafe { object_install_field_text(object.as_mut_ptr()) }, 0);
+        assert_eq!(
+            &object[OBJECT_TEXT_OFFSET..OBJECT_TEXT_OFFSET + 6],
+            b"hello\0",
+            "the text is copied to object+0x1c and NUL-terminated"
+        );
+        assert_eq!(
+            u32::from_le_bytes(
+                object[OBJECT_FIELD_WORD_OFFSET..OBJECT_FIELD_WORD_OFFSET + 4]
+                    .try_into()
+                    .unwrap()
+            ),
+            0xcafe_f00d,
+            "the block's +0x50 word lands at object+0x188"
+        );
+        assert_eq!(
+            u32::from_le_bytes(
+                object[OBJECT_TAGGED_WORD_OFFSET..OBJECT_TAGGED_WORD_OFFSET + 4]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x1234_5678,
+            "a 0x482b-tagged object also receives the block's +0x0c word at +4"
+        );
+        assert_eq!(
+            unsafe { HEAP_FREE_CALLS },
+            0,
+            "inline (flags bit 0 clear) text is never freed"
+        );
+    }
+
+    #[test]
+    fn skips_the_tagged_word_for_other_tags() {
+        let _mocks = install_field_query_mocks(0, 0, 1);
+        let mut text = [b'x'];
+        unsafe {
+            MOCK_QUERY_TEXT = text.as_mut_ptr();
+            MOCK_QUERY_TAGGED_WORD = 0xdead_beef;
+        }
+        let mut object = field_text_object(0x1234);
+
+        assert_eq!(unsafe { object_install_field_text(object.as_mut_ptr()) }, 0);
+        assert_eq!(
+            u32::from_le_bytes(
+                object[OBJECT_TAGGED_WORD_OFFSET..OBJECT_TAGGED_WORD_OFFSET + 4]
+                    .try_into()
+                    .unwrap()
+            ),
+            0xaaaa_aaaa,
+            "without the 0x482b tag the +4 word keeps its prior bytes"
+        );
+    }
+
+    #[test]
+    fn clamps_the_text_length_and_terminates_at_the_clamped_index() {
+        let _mocks = install_field_query_mocks(0, 0, 0x1ff);
+        let mut text = [0x5au8; 0x200];
+        unsafe {
+            MOCK_QUERY_TEXT = text.as_mut_ptr();
+        }
+        let mut object = field_text_object(0x1234);
+
+        assert_eq!(unsafe { object_install_field_text(object.as_mut_ptr()) }, 0);
+        assert!(
+            object[OBJECT_TEXT_OFFSET..OBJECT_TEXT_OFFSET + 0xff]
+                .iter()
+                .all(|&byte| byte == 0x5a),
+            "exactly 0xff bytes are copied (`cmp r2,#0xff; movhi r2,#0xff`)"
+        );
+        assert_eq!(
+            object[OBJECT_TEXT_OFFSET + 0xff],
+            0,
+            "the terminator lands at object+0x1c+0xff"
+        );
+        assert_eq!(
+            object[OBJECT_TEXT_OFFSET + 0x100],
+            0xaa,
+            "nothing past the terminator is touched"
+        );
+    }
+
+    #[test]
+    fn frees_heap_owned_text_even_when_the_query_failed() {
+        let _mocks = install_field_query_mocks(0x30, FIELD_RESULT_HEAP_TEXT, 0);
+        let mut heap_text = [0u8; 16];
+        unsafe {
+            MOCK_QUERY_TEXT = heap_text.as_mut_ptr();
+        }
+        let mut object = field_text_object(0x1234);
+
+        assert_eq!(
+            unsafe { object_install_field_text(object.as_mut_ptr()) },
+            0x30,
+            "the failure status is still returned"
+        );
+        assert_eq!(
+            unsafe { HEAP_FREE_CALLS },
+            1,
+            "the free runs outside the success branch (`tst r0,#0x1` after it)"
+        );
+        assert_eq!(
+            unsafe { HEAP_FREE_POINTER },
+            heap_text.as_mut_ptr() as usize,
+            "the block's text pointer is handed to the heap free"
+        );
+        assert!(
+            object.iter().skip(4).all(|&byte| byte == 0xaa),
+            "the object is untouched on the failure path"
         );
     }
 }
