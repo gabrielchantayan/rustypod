@@ -42,6 +42,15 @@
 //! - `cg_label_add_fixup` — original: `FUN_082c17ac` @ 0x082c17ac
 //!   (64 bytes; 4 `bl` call sites). Prepends the current output position
 //!   to a label's fixup list.
+//! - `cg_codegen_resolve_label_fixups` — original: `FUN_082c16e0` @
+//!   0x082c16e0 (200 bytes + one literal; 1 `bl` call site — the
+//!   compile-and-patch driver `FUN_08243138`, reached tail-branch-wise
+//!   from its six clones). The label-fixup resolver: walks every bound
+//!   label's fixup list and patches each recorded instruction word in
+//!   the emitted-code buffer in place — sign-extended 12-bit byte
+//!   displacements (tag 0) or 24-bit word displacements (tag 1, the
+//!   `B<cond>` branches) spliced under the word's preserved high bits.
+//!   The sole caller of `cg_buffer_read_word`/`cg_buffer_write_word`.
 //! - `cg_codegen_buffer_create` — original: `FUN_082c22b0` @ 0x082c22b0
 //!   (52 bytes; 1 `bl` call site, from the `cg_codegen_t` constructor
 //!   `FUN_082c0d7c`). Allocates and initializes the emitted-code
@@ -1126,6 +1135,104 @@ pub unsafe extern "C" fn cg_label_add_fixup(
     slot(fixup, CG_LABEL_FIXUP_NEXT).write(label_fixups.read());
     fixup.add(CG_LABEL_FIXUP_TAG * WORD).write(tag as u8);
     label_fixups.write(fixup);
+}
+
+/// cg_codegen_resolve_label_fixups — original: `FUN_082c16e0` @
+/// 0x082c16e0 (200 bytes + a 4-byte literal pool entry at 0x082c17a8;
+/// **1 `bl` call site**: 0x08243204, inside the compile-and-patch
+/// driver `FUN_08243138` — its six clones tail-branch into the driver,
+/// so every JIT compilation ends here). The sole caller of
+/// [`cg_buffer_read_word`] and [`cg_buffer_write_word`].
+///
+/// The label-fixup resolver: after every label in `codegen->labels`
+/// (+0x0c) has been bound to its emitted-code offset (label +0x08, by
+/// the binder `FUN_082c1360`), this pass walks the whole label list and
+/// patches each pending fixup's instruction word in place in the
+/// emitted-code buffer (`codegen->output`, +0x10). For every fixup it
+/// reads the word at `fixup->offset` (+0x08) back out of the paged
+/// buffer, splices the now-known displacement into the word's immediate
+/// field — keeping every other bit verbatim — and stores it back. The
+/// patch encoding is selected by the fixup's one-byte tag (+0x04):
+///
+/// - tag 0 — 12-bit byte displacement (PC-relative literal loads
+///   emitted by e.g. `FUN_082beb70`'s caller path): the word's low 12
+///   bits are sign-extended from bit 11 (`tst r1, #0x800`, OR-ing the
+///   0xfffff000 literal at 0x082c17a8), the byte delta
+///   `label->offset - fixup->offset` is added, and the result is
+///   masked back to 12 bits under the word's preserved top 20 bits
+///   (`mov r0, r0, lsr #0xc` / `mov r0, r0, lsl #0xc`).
+/// - tag 1 — 24-bit word displacement (the `B<cond>` branches whose
+///   fixups are added at 0x082bcf1c/0x082cbc64): the word's low 24
+///   bits are sign-extended from bit 23 (`tst r1, #0x800000`, OR-ing
+///   0xff000000), the delta is taken as a LOGICAL shift right by 2
+///   (`add r1, r1, r2, lsr #0x2` — branch immediates count words),
+///   added, and masked back to 24 bits under the word's preserved top
+///   byte (condition code and opcode).
+///
+/// Fixups with any other tag byte are skipped entirely — the original
+/// branches straight to the list advance (`bne 0x082c178c`), without
+/// even reading the emitted word.
+///
+/// Ghidra's decompile drops the tag-1 sign extension (it shows the
+/// 24-bit field as unsigned); the `tst`/`orrne` pair at 0x082c1728-
+/// 0x082c172c is authoritative and the port replicates it.
+///
+/// EDGE SEMANTICS (parity, not sanitized): an unbound label still
+/// carrying the all-ones [`CG_LABEL_UNBOUND`] sentinel is patched
+/// against exactly like a bound one — the original never checks. All
+/// arithmetic wraps mod 2^32 before the field mask, as on target.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_codegen_resolve_label_fixups(codegen: *mut CgCodegen) {
+    let codegen = codegen as *mut u8;
+    let output = slot(codegen, CG_CODEGEN_OUTPUT).read() as *mut CgCodegenBuffer;
+
+    let mut label = slot(codegen, CG_CODEGEN_LABELS).read() as *mut u8;
+    while !label.is_null() {
+        let label_offset = word(label, CG_LABEL_OFFSET).read();
+
+        let mut fixup = slot(label, CG_LABEL_FIXUPS).read() as *mut u8;
+        while !fixup.is_null() {
+            let tag = fixup.add(CG_LABEL_FIXUP_TAG * WORD).read();
+            let fixup_offset = word(fixup, CG_LABEL_FIXUP_OFFSET).read();
+
+            match tag {
+                // Tag 0: 12-bit byte displacement.
+                0 => {
+                    let emitted = cg_buffer_read_word(output, fixup_offset);
+                    let imm12 = emitted & 0x0000_0fff;
+                    let signed = if imm12 & 0x800 != 0 {
+                        imm12 | 0xffff_f000 // the literal at 0x082c17a8
+                    } else {
+                        imm12
+                    };
+                    let delta = label_offset.wrapping_sub(fixup_offset) as u32;
+                    let patched = signed.wrapping_add(delta) & 0x0000_0fff;
+                    cg_buffer_write_word(output, fixup_offset, (emitted & 0xffff_f000) | patched);
+                }
+                // Tag 1: 24-bit word displacement (B<cond>).
+                1 => {
+                    let emitted = cg_buffer_read_word(output, fixup_offset);
+                    let imm24 = emitted & 0x00ff_ffff;
+                    let signed = if imm24 & 0x0080_0000 != 0 {
+                        imm24 | 0xff00_0000
+                    } else {
+                        imm24
+                    };
+                    // `lsr #0x2` — a logical shift of the byte delta.
+                    let delta = (label_offset.wrapping_sub(fixup_offset) as u32) >> 2;
+                    let patched = signed.wrapping_add(delta) & 0x00ff_ffff;
+                    cg_buffer_write_word(output, fixup_offset, (emitted & 0xff00_0000) | patched);
+                }
+                // `bne 0x082c178c`: unknown tags are not even read.
+                _ => {}
+            }
+
+            fixup = slot(fixup, CG_LABEL_FIXUP_NEXT).read() as *mut u8;
+        }
+
+        label = slot(label, CG_LABEL_NEXT).read() as *mut u8;
+    }
 }
 
 /// cg_virtual_reg_create — original: `FUN_082c23dc` @ 0x082c23dc
@@ -3184,6 +3291,274 @@ mod tests {
                 "adding fixups never touches the label list link"
             );
             assert_eq!(f.codegen[CG_CODEGEN_LABELS], label as usize);
+        }
+        drop(f);
+        teardown();
+    }
+
+    // --- cg_codegen_resolve_label_fixups (0x082c16e0) ----------------
+
+    /// Binds `label` to an emitted-code offset the way the binder
+    /// `FUN_082c1360` would before the resolver runs.
+    unsafe fn bind_label(label: *mut CgLabel, offset: usize) {
+        word(label as *mut u8, CG_LABEL_OFFSET).write(offset);
+    }
+
+    #[test]
+    fn resolve_fixups_with_no_labels_or_no_fixups_is_a_no_op() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        let mut cell = 0xe12f_ff1eu32; // bx lr
+
+        unsafe {
+            let saved = hook(core::ptr::addr_of!(CG_BUFFER_PAGE_POINTER));
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_POINTER) = recording_page_pointer;
+            PAGE_POINTER_CALLS.clear();
+            PAGE_POINTER_RESULT = core::ptr::addr_of_mut!(cell) as *mut u8;
+
+            // A codegen whose label list is still the fixture's NULL.
+            cg_codegen_resolve_label_fixups(f.codegen_ptr());
+            // A bound label whose fixup list is the creator's NULL.
+            let label = cg_label_create(f.codegen_ptr());
+            bind_label(label, 0x80);
+            cg_codegen_resolve_label_fixups(f.codegen_ptr());
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_POINTER) = saved;
+
+            assert!(
+                PAGE_POINTER_CALLS.is_empty(),
+                "no label, no fixup: the resolver never touches the buffer"
+            );
+            assert_eq!(cell, 0xe12f_ff1e, "the emitted word is untouched");
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn resolve_fixups_skips_unknown_tags_without_even_reading_the_word() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        let mut cell = 0xdead_beefu32;
+
+        unsafe {
+            let saved = hook(core::ptr::addr_of!(CG_BUFFER_PAGE_POINTER));
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_POINTER) = recording_page_pointer;
+            PAGE_POINTER_CALLS.clear();
+            PAGE_POINTER_RESULT = core::ptr::addr_of_mut!(cell) as *mut u8;
+
+            let label = cg_label_create(f.codegen_ptr());
+            f.output[CG_CODEGEN_OUTPUT_OFFSET] = 0x40;
+            cg_label_add_fixup(f.codegen_ptr(), label, 7); // neither 0 nor 1
+            bind_label(label, 0x80);
+            cg_codegen_resolve_label_fixups(f.codegen_ptr());
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_POINTER) = saved;
+
+            assert!(
+                PAGE_POINTER_CALLS.is_empty(),
+                "the original branches straight to the list advance (`bne 0x082c178c`)"
+            );
+            assert_eq!(cell, 0xdead_beef, "the emitted word is untouched");
+            assert_eq!(
+                f.codegen[CG_CODEGEN_LABELS], label as usize,
+                "the label list itself is untouched"
+            );
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn resolve_fixups_patches_a_tag1_branch_read_modify_write_through_the_seam() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        let mut cell = 0x1a00_0000u32; // bne . — cond nibble must survive
+
+        unsafe {
+            let saved = hook(core::ptr::addr_of!(CG_BUFFER_PAGE_POINTER));
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_POINTER) = recording_page_pointer;
+            PAGE_POINTER_CALLS.clear();
+            PAGE_POINTER_RESULT = core::ptr::addr_of_mut!(cell) as *mut u8;
+
+            let buffer = f.output.as_mut_ptr() as *mut CgCodegenBuffer;
+            let label = cg_label_create(f.codegen_ptr());
+            f.output[CG_CODEGEN_OUTPUT_OFFSET] = 0x100;
+            cg_label_add_fixup(f.codegen_ptr(), label, 1);
+            bind_label(label, 0x180); // +0x80 bytes = +0x20 words
+            cg_codegen_resolve_label_fixups(f.codegen_ptr());
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_POINTER) = saved;
+
+            assert_eq!(cell, 0x1a00_0020, "byte delta >> 2 spliced into imm24");
+            assert_eq!(
+                PAGE_POINTER_CALLS.as_slice(),
+                &[(buffer, 0x100), (buffer, 0x100)],
+                "read then write, both at the fixup offset VERBATIM"
+            );
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn resolve_fixups_patches_a_tag0_literal_offset_keeping_the_top_20_bits() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        let mut cell = 0xe59f_f018u32; // ldr r0, [pc, #0x18]
+
+        unsafe {
+            let saved = hook(core::ptr::addr_of!(CG_BUFFER_PAGE_POINTER));
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_POINTER) = recording_page_pointer;
+            PAGE_POINTER_CALLS.clear();
+            PAGE_POINTER_RESULT = core::ptr::addr_of_mut!(cell) as *mut u8;
+
+            let buffer = f.output.as_mut_ptr() as *mut CgCodegenBuffer;
+            let label = cg_label_create(f.codegen_ptr());
+            f.output[CG_CODEGEN_OUTPUT_OFFSET] = 0x40;
+            cg_label_add_fixup(f.codegen_ptr(), label, 0);
+
+            // Forward: label at fixup + 0x18, existing imm12 0x18.
+            bind_label(label, 0x58);
+            cg_codegen_resolve_label_fixups(f.codegen_ptr());
+            assert_eq!(cell, 0xe59f_f030, "imm12 = 0x18 + 0x18, top 20 bits kept");
+            assert_eq!(
+                PAGE_POINTER_CALLS.as_slice(),
+                &[(buffer, 0x40), (buffer, 0x40)],
+                "read then write, both at the fixup offset VERBATIM"
+            );
+
+            // Backward: label BEFORE the fixup — the byte delta wraps.
+            cell = 0xe59f_f010;
+            PAGE_POINTER_CALLS.clear();
+            bind_label(label, 0x20); // delta = -0x20
+            cg_codegen_resolve_label_fixups(f.codegen_ptr());
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_POINTER) = saved;
+
+            assert_eq!(
+                cell, 0xe59f_fff0,
+                "imm12 = (0x10 - 0x20) & 0xfff, wrapping like the target"
+            );
+            assert_eq!(
+                PAGE_POINTER_CALLS.as_slice(),
+                &[(buffer, 0x40), (buffer, 0x40)],
+                "the re-resolve reads and writes the same word again"
+            );
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn resolve_fixups_walks_every_label_and_full_fixup_chains() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+
+        unsafe {
+            let saved = hook(core::ptr::addr_of!(CG_BUFFER_PAGE_POINTER));
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_POINTER) = cooperating_page_pointer;
+            core::ptr::write_bytes(core::ptr::addr_of_mut!(COOP_ARENA) as *mut u8, 0, 64);
+            let arena = core::ptr::addr_of_mut!(COOP_ARENA) as *mut u32;
+
+            // Two labels on the codegen's list; label_a carries a
+            // three-fixup chain (newest first: 0x18, 0x08, 0x00 — the
+            // middle one tagged with an encoding the resolver skips).
+            let label_a = cg_label_create(f.codegen_ptr());
+            let label_b = cg_label_create(f.codegen_ptr());
+            f.output[CG_CODEGEN_OUTPUT_OFFSET] = 0x00;
+            cg_label_add_fixup(f.codegen_ptr(), label_a, 1);
+            f.output[CG_CODEGEN_OUTPUT_OFFSET] = 0x08;
+            cg_label_add_fixup(f.codegen_ptr(), label_a, 1);
+            f.output[CG_CODEGEN_OUTPUT_OFFSET] = 0x18;
+            cg_label_add_fixup(f.codegen_ptr(), label_a, 9); // unknown tag
+            f.output[CG_CODEGEN_OUTPUT_OFFSET] = 0x10;
+            cg_label_add_fixup(f.codegen_ptr(), label_b, 0);
+            f.output[CG_CODEGEN_OUTPUT_OFFSET] = 0x14;
+            cg_label_add_fixup(f.codegen_ptr(), label_b, 1);
+
+            arena.add(0x00 / 4).write(0xea00_0000); // b .
+            arena.add(0x08 / 4).write(0x5a00_0001); // bpl .+4 (imm 1)
+            arena.add(0x10 / 4).write(0xe59f_f000); // ldr r0, [pc, #0]
+            arena.add(0x14 / 4).write(0x0a00_0000); // beq .
+            arena.add(0x18 / 4).write(0xdead_beef); // unknown-tag word
+
+            bind_label(label_a, 0x20);
+            bind_label(label_b, 0x04);
+            cg_codegen_resolve_label_fixups(f.codegen_ptr());
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_POINTER) = saved;
+
+            assert_eq!(arena.add(0x00 / 4).read(), 0xea00_0008, "+0x20 bytes = 8 words");
+            assert_eq!(arena.add(0x08 / 4).read(), 0x5a00_0007, "imm 1 + 6, cond kept");
+            assert_eq!(arena.add(0x10 / 4).read(), 0xe59f_fff4, "imm12 = (0 - 0xc) & 0xfff");
+            assert_eq!(arena.add(0x14 / 4).read(), 0x0aff_fffc, "-0x10 bytes = -4 words");
+            assert_eq!(arena.add(0x18 / 4).read(), 0xdead_beef, "tag 9 is skipped mid-chain");
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn resolve_fixups_end_to_end_emits_and_patches_across_a_page_boundary() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+
+        unsafe {
+            let saved_alloc = hook(core::ptr::addr_of!(CG_BUFFER_ALLOC));
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = poisoning_alloc;
+
+            let buffer = f.output.as_mut_ptr() as *mut CgCodegenBuffer;
+            let codegen = f.codegen_ptr();
+            // Both buffer seams stay at their wired defaults (ported
+            // accessor + exact-body page-slot model). Start the run at
+            // 0xff8 so the fixup positions straddle the 0x1000 page
+            // boundary: two forward branches live in page 0 with their
+            // targets in page 1, one backward branch lives in page 1
+            // with its target in page 0.
+            f.output[CG_CODEGEN_OUTPUT_OFFSET] = 0xff8;
+
+            let forward_a = cg_label_create(codegen);
+            cg_label_add_fixup(codegen, forward_a, 1); // fixup @ 0xff8
+            cg_buffer_emit_word(buffer, 0xea00_0000); // b . @ 0xff8
+
+            let forward_b = cg_label_create(codegen);
+            cg_label_add_fixup(codegen, forward_b, 1); // fixup @ 0xffc
+            cg_buffer_emit_word(buffer, 0xea00_0000); // b . @ 0xffc
+
+            let backward = cg_label_create(codegen);
+            cg_label_add_fixup(codegen, backward, 1); // fixup @ 0x1000
+            cg_buffer_emit_word(buffer, 0xea00_0000); // b . @ 0x1000
+
+            cg_buffer_emit_word(buffer, 0xe3a0_0001); // mov r0, #1 @ 0x1004
+            cg_buffer_emit_word(buffer, 0xe3a0_0002); // mov r0, #2 @ 0x1008
+            cg_buffer_emit_word(buffer, 0xe3a0_0003); // mov r0, #3 @ 0x100c
+
+            bind_label(forward_a, 0x1010); // +0x18 bytes from 0xff8
+            bind_label(forward_b, 0x1004); // +0x08 bytes from 0xffc
+            bind_label(backward, 0x0ff8); // -0x08 bytes from 0x1000
+            cg_codegen_resolve_label_fixups(codegen);
+
+            assert_eq!(cg_buffer_read_word(buffer, 0x0ff8), 0xea00_0006, "fwd: +6 words");
+            assert_eq!(cg_buffer_read_word(buffer, 0x0ffc), 0xea00_0002, "fwd: +2 words");
+            assert_eq!(cg_buffer_read_word(buffer, 0x1000), 0xeaff_fffe, "back: -2 words");
+            assert_eq!(cg_buffer_read_word(buffer, 0x1004), 0xe3a0_0001, "non-fixup word kept");
+            assert_eq!(cg_buffer_read_word(buffer, 0x1008), 0xe3a0_0002, "non-fixup word kept");
+            assert_eq!(cg_buffer_read_word(buffer, 0x100c), 0xe3a0_0003, "non-fixup word kept");
+            assert_eq!(
+                cg_buffer_current_offset(buffer),
+                0x1010,
+                "the resolver never moves the emit offset"
+            );
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = saved_alloc;
+            let record = f.output.as_mut_ptr() as *mut u8;
+            for index in 0..=(0x1010usize >> CG_BUFFER_PAGE_SHIFT) {
+                let page = slot(record, CG_BUFFER_PAGES + index).read();
+                if !page.is_null() {
+                    poisoning_free(page);
+                }
+            }
         }
         drop(f);
         teardown();

@@ -10402,6 +10402,40 @@ functions:
       bl to cg_heap_alloc; LLVM only adds its frame-pointer prologue
       and swaps the two disjoint constant stores.
 
+  - address: 0x082c16e0
+    ghidra: FUN_082c16e0
+    name: cg_codegen_resolve_label_fixups
+    size: 200
+    sig: "void cg_codegen_resolve_label_fixups(cg_codegen_t *codegen)"
+    module: codegen/ir
+    status: ported
+    vars: {param_1: codegen, puVar4: label, puVar3: fixup, uVar7: output, iVar5: label_offset, iVar6: fixup_offset, uVar1: emitted, uVar2: patched}
+    notes: >-
+      1 bl call site (0x08243204, inside the compile-and-patch driver
+      FUN_08243138; its six clones tail-branch into the driver, so every
+      JIT compilation ends here) plus a 4-byte literal pool entry at
+      0x082c17a8 (0xfffff000, the 12-bit sign-extension mask). The
+      label-fixup resolver: takes the CODEGEN (reads codegen+0x0c =
+      labels head, codegen+0x10 = output buffer - cg_label_t is only 12
+      bytes, so the argument cannot be a label) and walks every bound
+      label's fixup list, patching each recorded instruction word in
+      place in the emitted-code buffer via cg_buffer_read_word /
+      cg_buffer_write_word (their sole caller). Tag byte 0 = 12-bit
+      BYTE displacement (PC-relative literal loads): sign-extend the
+      word's imm12 (tst #0x800, orr 0xfffff000), add
+      label->offset - fixup->offset, mask to 12 bits, keep the top 20
+      bits verbatim. Tag byte 1 = 24-bit WORD displacement (B<cond>):
+      sign-extend imm24 (tst #0x800000, orr 0xff000000), add the byte
+      delta logically shifted right by 2 (`add r1, r1, r2, lsr #0x2`),
+      mask to 24 bits, keep the top byte (cond+opcode) verbatim. Any
+      other tag is skipped without even reading the emitted word
+      (`bne 0x082c178c`). Ghidra's decompile drops the tag-1 sign
+      extension; the tst/orrne pair at 0x082c1728-0x082c172c is
+      authoritative (it is arithmetically unobservable after the field
+      mask, but the port replicates it). An unbound label still
+      carrying the all-ones sentinel is patched against unchecked -
+      parity, not sanitized.
+
   - address: 0x082c17ac
     ghidra: FUN_082c17ac
     name: cg_label_add_fixup
