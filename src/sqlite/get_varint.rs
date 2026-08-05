@@ -42,9 +42,10 @@
 //!    0x0837aab0 (identified — the u64 counterpart of this routine,
 //!    with the 1..=9-byte cascade including the one-byte fast path),
 //!    then copies only the LOW word of the callee's stack u64 into the
-//!    out-param and returns the callee's byte count. 0x0837aab0 is not
-//!    yet ported, so [`decode_tail`] inlines the equivalent decode,
-//!    verified group-by-group against its disassembly (the 7-bit
+//!    out-param and returns the callee's byte count. 0x0837aab0 is now
+//!    ported (`sqlite/get_varint64.rs`); [`decode_tail`] still inlines
+//!    the equivalent decode rather than calling it, verified
+//!    group-by-group against its disassembly (the 7-bit
 //!    accumulation is exact; the 9th byte contributes all 8 bits,
 //!    `v = (v<<8) | p[8]` — the path Ghidra's decompile of that
 //!    function mangles).
@@ -62,8 +63,8 @@
 //!   discarded the high word of. The low word is bit-identical to the
 //!   original in every case.
 //! - 0x0837aab0's tail semantics are inlined in [`decode_tail`] rather
-//!   than called (unported); when that function lands, both bodies
-//!   decode identically.
+//!   than called; that function has since been ported
+//!   (`sqlite/get_varint64.rs`) and both bodies decode identically.
 
 /// Literal pool entry @ 0x0837acf0 (and @ 0x0837ac2c in the u64
 /// counterpart): keeps the low 7 bits of the first and third byte of a

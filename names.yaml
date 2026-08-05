@@ -13252,6 +13252,10 @@ functions:
       passes_page_and_cell_through_verbatim,
       result_tracks_only_the_0x1e_field, zero_fill_stand_in_reports_zero,
       shipped_default_is_the_ported_parser.
+      Follow-up: both varint readers are now ported — 0x0837ac30
+      (sqlite/get_varint.rs) and 0x0837aab0 (sqlite/get_varint64.rs)
+      are their slots' shipped defaults; the get_varint32 slot's type
+      was corrected to *mut u64 for 0x0837aab0's true u64 out-param.
 
   # ---- B-tree cell parser (src/sqlite/parse_cell.rs) ----
   - address: 0x083727ec
@@ -13319,6 +13323,11 @@ functions:
       overflow_keeps_the_surplus_when_it_fits_max_local,
       n_size_is_clamped_to_four,
       n_size_lands_at_0x1e_where_cell_size_ptr_reads.
+      Follow-up: 0x0837aab0 is now ported (sqlite/get_varint64.rs) and
+      is the shipped get_varint32 slot default; the slot type was
+      corrected to *mut u64 (the original's paired stores) and the
+      rowid read now writes the hi word at CellInfo+0x0c exactly like
+      the original's callee.
 
   # ---- B-tree varint decoder (src/sqlite/get_varint.rs) ----
   - address: 0x0837ac30
@@ -13399,8 +13408,83 @@ functions:
       bytes_consumed_stops_at_the_first_clean_high_bit,
       reads_no_byte_past_the_varint_end (PROT_NONE guard page),
       shipped_seam_default_is_this_port.
+      Follow-up: 0x0837aab0 is now ported (sqlite/get_varint64.rs) and
+      is the shipped default of the get_varint32 seam slot; this port's
+      decode_tail remains inlined by choice and decodes identically.
 
-  # ---- Connection allocator (src/sqlite/mem.rs) ----
+  # ---- 64-bit b-tree varint decoder (src/sqlite/get_varint64.rs) ----
+  - address: 0x0837aab0
+    ghidra: FUN_0837aab0
+    name: get_varint64
+    size: 380
+    sig: "u8 sqlite3GetVarint(const u8 *p, u64 *v) [asm out-param: paired lo/hi stores at [r1,#0]/[r1,#4] in every exit]"
+    module: sqlite/get_varint64
+    status: ported
+    vars: {param_1: p, param_2: out, bVar1: b_next, bVar2: b7_raw, bVar3: cont_clear, uVar4: acc_a, uVar5: acc_b, uVar6: acc_c, DAT_0837ac2c: PAIR_MASK}
+    notes: >-
+      SQLite 3.5.x's full-width sqlite3GetVarint — the 64-bit varint
+      decoder behind every table b-tree rowid read and the tail of the
+      truncating u32 getter. 3 bl call sites: 0x08372008 (FUN_08371e54,
+      reads the result back with ldrd r0,r1,[sp,#0x8] — a full u64),
+      0x08372858 (the ported btree_parse_cell_ptr's rowid read,
+      out-pointer = CellInfo+0x08 so the hi word lands at +0x0c),
+      0x0837ace0 (the tail call from the ported get_varint @
+      0x0837ac30, which keeps only the low word). NAMING INVERSION vs
+      upstream, documented in the module header: upstream sqlite
+      attaches sqlite3GetVarint to the u64 decoder (THIS function) and
+      sqlite3GetVarint32 to the truncating u32 one (0x0837ac30); the
+      repo's established naming has them swapped (0x0837ac30 was ported
+      first as get_varint), so this port is get_varint64 and the
+      BTREE_CELL_OPS seam slot it ships on keeps its established
+      (upstream-inverted) name get_varint32 — with its type corrected
+      from *mut u32 to *mut u64, the original's true signature
+      (paired str/strd stores, Ghidra's param_2[1] hi-word writes).
+      Algorithm, verified instruction-by-instruction against osos.asm:
+      big-endian base-128, cases unrolled shortest-first, length
+      returned. Unlike 0x0837ac30 there IS a one-byte case (v = p[0],
+      len 1 — the rowid call site has no inline fast path). Each case
+      k reads exactly p[0..k] and tests p[k-1]'s continuation bit.
+      Cases 1..=8 accumulate 7-bit groups most-significant first
+      (v = (v<<7) | (p[i]&0x7f)); the 9th byte contributes all 8 bits
+      (v = (v<<8) | p[8] — the original re-reads p[4] via
+      ldrb r2,[r2,#-0x4] to rebuild the hi word's top group). The
+      original computes in a u32 lo/hi register pair (literal pool @
+      0x0837ac2c = 0x001FC07F, the same PAIR_MASK as the sibling's @
+      0x0837acf0; bic pairs 0x0FE00000/0x3F80 strip continuation bits
+      from shifted accumulators); its paired stores equal
+      (v as u32, (v>>32) as u32) of the port's plain u64 accumulation
+      for every case — the masks drop exactly the bits the group
+      accumulation never sets, and 7-bit-group bits above bit 31 fall
+      off the 32-bit store identically (hand-checked for the 5/7/8/9
+      cases; the sibling's decode_tail shares this function's shifts
+      and was verified the same way). Unlike the u32 sibling nothing
+      truncates: hi = v>>32 from the 5-byte case up. Seam-default
+      promotion (the get_varint/cell_size_ptr precedent): the export
+      replaced missing_get_varint32 as DEFAULT_BTREE_CELL_OPS.
+      get_varint32; callers still reach it only through the slot. The
+      parse_cell rowid read now decodes into a u64 and writes BOTH
+      words like the original (lo at CellInfo+0x08, hi at +0x0c — the
+      previous port left +0x0c untouched on a u32-slot reading of the
+      callee); its test now asserts the +0x0c hi-word store. The zero
+      stand-in remains for tests. Deviations: none in behavior — the
+      unrolled cascade is written as plain u64 group accumulation
+      rather than the original's paired-u32 shift/mask machinery
+      (bit-exact, see above). match.py (--size 380): original 95
+      insns vs 94 — same shortest-first unrolled cascade, same length
+      constants 1..9, same per-byte continuation tests (LLVM:
+      ldrsb/cmp/bmi sign trick for `tst #0x80`), same u64 shift
+      carries into the hi word (lsr #25/orr pairs for v<<7 across
+      words) and strd slot stores; expected LLVM shape diffs:
+      predicated per-case epilogues vs the original's shared
+      stmia/popeq blocks, and a late push once the register budget
+      grows. Host tests:
+      round_trips_every_encoded_length_against_the_reference_encoder,
+      one_byte_varints_decode_in_the_export, boundary_values,
+      five_byte_varints_keep_the_full_value_unlike_the_u32_sibling,
+      ninth_byte_contributes_all_eight_bits,
+      bytes_consumed_stops_at_the_first_clean_high_bit,
+      reads_no_byte_past_the_varint_end (PROT_NONE guard page),
+      shipped_seam_default_is_this_port.
   - address: 0x083749bc
     ghidra: FUN_083749bc
     name: db_realloc

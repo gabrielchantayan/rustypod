@@ -24,8 +24,9 @@
 //!    pages have no payload varint (0).
 //! 3. Table pages (intKey, MemPage +0x03): the rowid varint is decoded
 //!    by `sqlite3GetVarint32` @ 0x0837aab0 — always through the call,
-//!    no inline fast path — straight into `info` +0x08 (nKey). +0x0c is
-//!    never written on this path.
+//!    no inline fast path — straight into `info` +0x08 (nKey). The
+//!    callee's out-param is a u64 (paired lo/hi stores), so the high
+//!    word lands at +0x0c on this path.
 //!    Index pages: the nData varint goes through the same inline fast
 //!    path / `sqlite3GetVarint` pair as step 2, lands at +0x08, +0x0c
 //!    is zeroed, and nData is added to the payload total.
@@ -45,13 +46,14 @@
 //!
 //! - The 0x0837ac30 varint reader (`sqlite3GetVarint`) is ported
 //!   (`sqlite/get_varint.rs`) and is the shipped default of its
-//!   [`BTREE_CELL_OPS`] slot; the 0x0837aab0 reader
-//!   (`sqlite3GetVarint32`) is identified but not yet ported and rides
-//!   the seam as a zero-writing stand-in — the same house static
-//!   `cell_size_ptr` already dispatches through (one seam per
-//!   cluster). The ported `__rt_udiv` @ 0x08036f14 is called as
-//!   [`__rt_udivmod`] because the original consumes the r1 remainder,
-//!   not the r0 quotient.
+//!   [`BTREE_CELL_OPS`] slot; the 0x0837aab0 reader is ported too
+//!   (`sqlite/get_varint64.rs` — the u64 decoder; the repo's
+//!   `sqlite3GetVarint32` slot name is upstream-inverted, see that
+//!   module) and ships as its slot's default. Both slots ride the
+//!   same house static `cell_size_ptr` already dispatches through
+//!   (one seam per cluster). The ported `__rt_udiv` @ 0x08036f14 is
+//!   called as [`__rt_udivmod`] because the original consumes the r1
+//!   remainder, not the r0 quotient.
 //! - `info.pCell` stores the 32-bit pointer value exactly like the
 //!   original's `str r1,[r2,#0x0]`; on 64-bit hosts that is the low
 //!   word of the address, which the host fixtures round-trip by living
@@ -152,11 +154,14 @@ pub unsafe extern "C" fn btree_parse_cell_ptr(page: *const u8, cell: *const u8, 
 
     if rd_u8(page, MP_INT_KEY) != 0 {
         // Table b-tree: the rowid varint, always decoded through
-        // sqlite3GetVarint32 straight into +0x08 (nKey). +0x0c keeps
-        // whatever the caller's CellInfo held.
-        let mut rowid = 0u32;
+        // sqlite3GetVarint32 @ 0x0837aab0 straight into +0x08 (nKey).
+        // The original passes CellInfo+0x08 as the out-pointer and the
+        // callee's paired stores write the full u64, so +0x0c gets the
+        // high word (0 for every rowid below 2^32).
+        let mut rowid = 0u64;
         header += get_varint32_op()(cell.add(header as usize), &mut rowid);
-        wr_u32(info, CI_N_KEY, rowid);
+        wr_u32(info, CI_N_KEY, rowid as u32);
+        wr_u32(info, CI_N_KEY_HI, (rowid >> 32) as u32);
     } else {
         // Index b-tree: the nData varint (sqlite3GetVarint, low word)
         // at +0x08, +0x0c zeroed, and it counts toward the payload.
@@ -252,10 +257,10 @@ mod tests {
         n
     }
 
-    unsafe extern "C" fn real_get_varint32(p: *const u8, out: *mut u32) -> u32 {
+    unsafe extern "C" fn real_get_varint32(p: *const u8, out: *mut u64) -> u32 {
         GET_VARINT32_CALLS.fetch_add(1, Ordering::Relaxed);
         let (v, n) = decode_varint(p);
-        *out = v as u32;
+        *out = v;
         n
     }
 
@@ -405,10 +410,9 @@ mod tests {
         assert_eq!(f.info_u32(CI_N_KEY), 180, "rowid from get_varint32");
         assert_eq!(get_varint32_calls(), 1);
         assert_eq!(get_varint_calls(), 0, "internal page reads no payload varint");
-        // +0x0c is never written on table pages.
-        for i in 0x0c..0x10 {
-            assert_eq!(unsafe { *f.info().add(i) }, 0xaa, "byte +{i:#x}");
-        }
+        // The callee writes the full u64: +0x0c is the rowid's high
+        // word (0 here), exactly like the original's paired stores.
+        assert_eq!(f.info_u32(CI_N_KEY_HI), 0, "rowid high word");
         assert_eq!(f.info_u32(CI_PAYLOAD_VARINT), 0);
         assert_eq!(f.info_u32(CI_N_PAYLOAD), 0);
         assert_eq!(f.info_u16(CI_N_HEADER), 6, "child pointer + 2 varint bytes");

@@ -28,7 +28,8 @@
 //! ```text
 //! +0x00  pCell     (u32)   start of the cell, i.e. the `cell` argument
 //! +0x04  (pad — never written; the i64 at +0x08 is 8-aligned)
-//! +0x08  nKey/nData pair (2 x u32)  intKey pages: rowid varint;
+//! +0x08  nKey/nData pair (2 x u32)  intKey pages: rowid varint (the
+//!        0x0837aab0 callee writes the full u64, hi word at +0x0c);
 //!        index pages: nData at +0x08, +0x0c zeroed
 //! +0x10  u32       payload varint read on leaf pages
 //! +0x14  u32       total payload (nPayload)
@@ -42,9 +43,10 @@
 //! `MemPage` fields the callee reads (for the record): leaf +0x07,
 //! intKey +0x03, childPtrSize +0x09, maxLocal +0x0a, minLocal +0x0c,
 //! pBt +0x40 (whose +0x1e is the usable page size). Its varint readers
-//! are 0x0837ac30 (`sqlite3GetVarint`) and 0x0837aab0
-//! (`sqlite3GetVarint32`); the overflow-branch divisor goes through
-//! `__rt_udiv` @ 0x08036f14.
+//! are 0x0837ac30 (`sqlite3GetVarint`) and 0x0837aab0 (the u64
+//! decoder — upstream's `sqlite3GetVarint` role despite the repo's
+//! inverted naming, see `sqlite/get_varint64.rs`); the overflow-branch
+//! divisor goes through `__rt_udiv` @ 0x08036f14.
 //!
 //! Deviations:
 //!
@@ -52,9 +54,10 @@
 //!   boundary (house pattern — see `sqlite/blob_to_hex.rs`). The shipped
 //!   default is now the ported parser in `sqlite/parse_cell.rs`, whose
 //!   varint readers ride sibling slots on the same static: 0x0837ac30
-//!   is ported (`sqlite/get_varint.rs`) and is its slot's shipped
-//!   default, 0x0837aab0 remains a zero-writing stand-in. The zero-fill
-//!   parser stand-in (`missing_parse_cell`) remains for tests. Nothing
+//!   is ported (`sqlite/get_varint.rs`) and 0x0837aab0 is ported
+//!   (`sqlite/get_varint64.rs`); each is its slot's shipped default.
+//!   The zero-fill parser stand-in (`missing_parse_cell`) remains for
+//!   tests. Nothing
 //!   in the shipped firmware consumes this port yet (no
 //!   hooks.yaml entry).
 //! - The original's stack frame is 0x24 bytes (0x20 of `CellInfo` plus
@@ -71,10 +74,9 @@ const N_SIZE_OFFSET: usize = 0x1e;
 
 /// The unported services the b-tree cell cluster reaches: the parser
 /// itself (ported — that slot's default is the real thing), plus the
-/// two varint readers the parser calls. `sqlite3GetVarint` @
-/// 0x0837ac30 is now ported too (`sqlite/get_varint.rs`) and ships as
-/// its slot's default; `sqlite3GetVarint32` @ 0x0837aab0 is
-/// identified but not yet ported and rides the same seam.
+/// two varint readers the parser calls. Both are now ported and ship
+/// as their slots' defaults: 0x0837ac30 in `sqlite/get_varint.rs`,
+/// 0x0837aab0 in `sqlite/get_varint64.rs`.
 #[derive(Clone, Copy)]
 pub struct BtreeCellOps {
     /// `sqlite3BtreeParseCellPtr` @ 0x083727ec: parse the cell at
@@ -88,9 +90,16 @@ pub struct BtreeCellOps {
     /// caller's inline fast path); the original's out-param is the
     /// low u32 word of this slot's u64.
     pub get_varint: unsafe extern "C" fn(p: *const u8, out: *mut u64) -> u32,
-    /// `sqlite3GetVarint32` @ 0x0837aab0 (identified, unported): decode
-    /// the 32-bit varint at `p` into `out`, return the byte count.
-    pub get_varint32: unsafe extern "C" fn(p: *const u8, out: *mut u32) -> u32,
+    /// `sqlite3GetVarint32` @ 0x0837aab0 (ported —
+    /// `sqlite::get_varint64::get_varint64` is the shipped default):
+    /// decode the varint at `p` into `out`, return the byte count.
+    /// Naming inversion caveat: despite the slot's upstream-derived
+    /// name, the original's out-param is a u64 (paired lo/hi stores —
+    /// upstream's `sqlite3GetVarint` role), so the slot is `*mut u64`;
+    /// see `sqlite/get_varint64.rs`. Unlike the `get_varint` slot this
+    /// one is also called for single-byte varints (the rowid read has
+    /// no inline fast path).
+    pub get_varint32: unsafe extern "C" fn(p: *const u8, out: *mut u64) -> u32,
 }
 
 /// Default boundary while 0x083727ec is unported. Zero-filling is the
@@ -109,20 +118,20 @@ unsafe extern "C" fn missing_get_varint(_p: *const u8, out: *mut u64) -> u32 {
     1
 }
 
-/// Stand-in for the unported `sqlite3GetVarint32` @ 0x0837aab0, same
-/// reasoning as [`missing_get_varint`].
-unsafe extern "C" fn missing_get_varint32(_p: *const u8, out: *mut u32) -> u32 {
+/// Stand-in kept for tests after the 0x0837aab0 port landed, same
+/// reasoning as [`missing_get_varint`]. The shipped default is now
+/// the ported `sqlite::get_varint64::get_varint64`.
+unsafe extern "C" fn missing_get_varint32(_p: *const u8, out: *mut u64) -> u32 {
     *out = 0;
     1
 }
 
-/// Wired default for [`BTREE_CELL_OPS`]: the ported parser, the
-/// ported 0x0837ac30 varint reader, a zero stand-in for the unported
-/// 0x0837aab0 one.
+/// Wired default for [`BTREE_CELL_OPS`]: the ported parser and both
+/// ported varint readers (0x0837ac30 and 0x0837aab0).
 pub const DEFAULT_BTREE_CELL_OPS: BtreeCellOps = BtreeCellOps {
     parse_cell: crate::sqlite::parse_cell::btree_parse_cell_ptr,
     get_varint: crate::sqlite::get_varint::get_varint,
-    get_varint32: missing_get_varint32,
+    get_varint32: crate::sqlite::get_varint64::get_varint64,
 };
 
 /// Active model of the parser call in [`cell_size_ptr`] and of the
@@ -147,7 +156,7 @@ pub(crate) unsafe fn get_varint_op() -> unsafe extern "C" fn(*const u8, *mut u64
 /// Reads the `sqlite3GetVarint32` slot. Volatile, same rationale as
 /// `parse_cell_op` above.
 #[inline(always)]
-pub(crate) unsafe fn get_varint32_op() -> unsafe extern "C" fn(*const u8, *mut u32) -> u32 {
+pub(crate) unsafe fn get_varint32_op() -> unsafe extern "C" fn(*const u8, *mut u64) -> u32 {
     core::ptr::read_volatile(core::ptr::addr_of!(BTREE_CELL_OPS.get_varint32))
 }
 
@@ -297,6 +306,14 @@ mod tests {
         let _guard = BTREE_CELL_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut value = u64::MAX;
         let len = unsafe { missing_get_varint(PAGE.as_ptr(), &mut value) };
+        assert_eq!((value, len), (0, 1));
+    }
+
+    #[test]
+    fn missing_get_varint32_stand_in_reports_zero_len_one() {
+        let _guard = BTREE_CELL_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut value = u64::MAX;
+        let len = unsafe { missing_get_varint32(PAGE.as_ptr(), &mut value) };
         assert_eq!((value, len), (0, 1));
     }
 
