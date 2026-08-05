@@ -18823,10 +18823,22 @@ functions:
     ghidra: (veneer)
     name: posix_mutex_unlock_veneer_a
     size: 4
+    sig: "u32 posix_mutex_unlock_veneer_a(PosixMutex *mutex)"
     module: kernel/posix_mutex
-    status: identified
+    status: ported
     notes: >-
-      Single `b 0x082e83d8`. 153 bl + 12 tail b, binary-verified.
+      ALIAS - bare `b 0x082e83d8` tail veneer onto posix_mutex_unlock
+      (word 0xea02196b in osos.dec, binary-verified). Nothing to port —
+      the veneer address IS the unlock for every caller that reaches it.
+      153 bl + 12 tail b, binary-verified by decoding every B/BL word.
+      No separate Rust symbol exists; hook this address to the single
+      posix_mutex_unlock symbol (precedent: the iabs aliases
+      in fp/fp_misc, atomic_add_irqsafe_alias_f041c in kernel/csem,
+      rom_svc_22001cbc_alias_67fc in kernel/task_lock — all single-
+      instruction veneers resolved by pointing hooks at the canonical
+      port). match.py against posix_mutex_unlock at this address confirms
+      the original is exactly the 1-instruction branch; the body diff is
+      the unlock itself, which is the resolution.
 
   - address: 0x082621a8
     ghidra: (veneer)
