@@ -349,6 +349,122 @@ pub unsafe extern "C" fn ft_open_face_dfont_fallback(
     result
 }
 
+/// `FT_FaceRec.family_name` (+0x14; the `str r5,[r4,#0x14]` @
+/// 0x0808560c). Addressed by word index, like cxx/handle.rs's
+/// handle_deref_field12: byte-exact on the 32-bit target, disjoint
+/// from the face's other words on a 64-bit host.
+const FACE_FAMILY_NAME_WORD: usize = 0x14 / 4;
+/// `FT_FaceRec.style_name` (+0x18; the `str r5,[r4,#0x18]` @
+/// 0x08085610).
+const FACE_STYLE_NAME_WORD: usize = 0x18 / 4;
+/// `FT_FaceRec.available_sizes` (+0x20; the `ldr r1,[r4,#0x20]` @
+/// 0x08085620 and the `str r5,[r4,#0x20]` @ 0x0808562c).
+const FACE_AVAILABLE_SIZES_WORD: usize = 0x20 / 4;
+/// `FT_FaceRec.driver` (+0x60; the `ldr r0,[r0,#0x60]` @ 0x08085600).
+const FACE_DRIVER_WORD: usize = 0x60 / 4;
+/// `FT_FaceRec.memory` (+0x64; the `ldr r1,[r4,#0x64]` @ 0x08085614).
+const FACE_MEMORY_WORD: usize = 0x64 / 4;
+/// `PFR_FaceRec.phy_font` (+0x120; the `add r0,r4,#0x120` @
+/// 0x08085618): `FT_FaceRec` (0x84) + `PFR_HeaderRec` + `PFR_LogFont`
+/// of the retailOS fork's PFR_FaceRec.
+const FACE_PHY_FONT_WORD: usize = 0x120 / 4;
+/// `FT_ModuleRec.memory` (+0x08; the `ldr r6,[r0,#0x8]` @ 0x08085608),
+/// reached through the face's driver — upstream
+/// `pfrface->driver->root.memory`.
+const MODULE_MEMORY_WORD: usize = 0x08 / 4;
+
+/// Physical-font teardown `FUN_080a3554` (unported): upstream
+/// FreeType `pfr_phy_font_done` (pfrload.c). Frees and zeroes the
+/// PFR physical-font record's owned fields — the pointer fields at
+/// +0x3c..+0x80 plus the extra-items `FT_List` at +0x88, whose nodes
+/// it walks and frees — all through `ft_mem_free`. Identified by its
+/// sole call site (@ 0x0808561c, inside [`pfr_face_done`]) matching
+/// upstream's `pfr_phy_font_done( &face->phy_font, FT_FACE_MEMORY )
+///`, and by its sibling `FUN_080a3624` = `pfr_phy_font_load` (whose
+/// trace string reads "pfr_phy_font_load: invalid physical font" and
+/// which `FT_LIST`-initializes the same +0x88 list: `head = NULL;
+/// tail = &head`).
+pub type PfrPhyFontDone =
+    unsafe extern "C" fn(phys: *mut *mut u8, memory: *mut crate::ft::memory::FtMemory);
+
+/// Spins forever: [`pfr_face_done`] must not run before target
+/// integration installs the retailOS `FUN_080a3554`.
+unsafe extern "C" fn missing_pfr_phy_font_done(
+    _phys: *mut *mut u8,
+    _memory: *mut crate::ft::memory::FtMemory,
+) {
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
+/// RetailOS dependency of [`pfr_face_done`]. Target integration must
+/// install the real `FUN_080a3554`; focused host tests replace it with
+/// a recording seam.
+pub static mut PFR_PHY_FONT_DONE: PfrPhyFontDone = missing_pfr_phy_font_done;
+
+#[inline(always)]
+unsafe fn pfr_phy_font_done() -> PfrPhyFontDone {
+    core::ptr::read_volatile(core::ptr::addr_of!(PFR_PHY_FONT_DONE))
+}
+
+/// pfr_face_done (FreeType `pfr_face_done`, pfrdrivr.c) — original:
+/// `FUN_080855f8` @ `0x080855f8` (60 bytes; source:
+/// `ipod-decomp/decomp/c/005/080855f8_FUN_080855f8.c`).
+///
+/// The PFR driver's `FT_Done_Face`. Loads the allocator from the
+/// face's driver (`FT_FaceRec.driver` @ +0x60 → `FT_ModuleRec.memory`
+/// @ +0x08, upstream `pfrface->driver->root.memory`), NULLs
+/// `family_name` (+0x14) and `style_name` (+0x18) so no dangling
+/// pointers outlive the face, tears down the embedded physical-font
+/// record at +0x120 with the face's own memory (+0x64) through
+/// `pfr_phy_font_done` (`FUN_080a3554`), then `FT_FREE`s
+/// `available_sizes` (+0x20) with the driver memory —
+/// `ft_mem_free(memory, available_sizes)` plus the macro's own NULL
+/// store. The retail sequence is `stmdb sp!,{r4,r5,r6,lr};
+/// ldr r0,[r0,#0x60]; ldr r6,[r0,#0x8]; str #0 @ +0x14/+0x18;
+/// bl 0x080a3554(face+0x120, [face,#0x64]); bl 0x082cfae8(r6,
+/// [face,#0x20]); str #0 @ +0x20; ldmia sp!,{r4,r5,r6,pc}`.
+///
+/// Identification: 0 `bl 0x080855f8` call sites and no data pointer
+/// anywhere in the decrypted image — it is reached through the PFR
+/// driver class's `done_face` slot, whose record does not survive in
+/// osos.dec (upstream stores it adjacent to `init_face` =
+/// `FUN_08085634`, likewise absent; the class record presumably sits
+/// in one of the image's undecrypted zero holes). The PFR pin is
+/// `FUN_08085634` itself, which checks the PFR header signature at
+/// `PFR_Face` +0x84 (the `header` right after the 0x84-byte
+/// `FT_FaceRec`), plus `pfr_phy_font_load`'s trace string.
+///
+/// Deviations: the unported `pfr_phy_font_done` rides the
+/// [`PFR_PHY_FONT_DONE`] seam (house pattern — see
+/// [`OBJECT_FLAGS_FETCH_INCREMENT_LOCK`]) instead of a direct `bl`;
+/// the already-ported [`ft_mem_free`](crate::ft::memory::ft_mem_free)
+/// @ 0x082cfae8 takes the `FT_FREE` half directly (LLVM inlines its
+/// null-guarded `blx [memory,#8]` body — the same inlining deviation
+/// ft_mem_alloc's entry records); and the face
+/// fields are addressed by word index (byte-exact +0x14..+0x120 on
+/// the 32-bit target; each field stays disjoint on a 64-bit host —
+/// the same model as cxx/handle.rs's handle_deref_field12).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn pfr_face_done(face: *mut *mut u8) {
+    let driver = face.add(FACE_DRIVER_WORD).read_volatile();
+    let memory = driver
+        .cast::<*mut crate::ft::memory::FtMemory>()
+        .add(MODULE_MEMORY_WORD)
+        .read_volatile();
+    face.add(FACE_FAMILY_NAME_WORD).write_volatile(core::ptr::null_mut());
+    face.add(FACE_STYLE_NAME_WORD).write_volatile(core::ptr::null_mut());
+    pfr_phy_font_done()(
+        face.add(FACE_PHY_FONT_WORD),
+        face.add(FACE_MEMORY_WORD).read_volatile().cast::<crate::ft::memory::FtMemory>(),
+    );
+    let available_sizes = face.add(FACE_AVAILABLE_SIZES_WORD);
+    crate::ft::memory::ft_mem_free(memory, available_sizes.read_volatile());
+    available_sizes.write_volatile(core::ptr::null_mut());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -947,5 +1063,221 @@ mod tests {
             assert_eq!(events[1], dfont_event(), "level={level}");
             uninstall_recording_fallback(true);
         }
+    }
+
+    // --- pfr_face_done ---
+
+    /// Serializes the tests that swap the phy-font-teardown seam and
+    /// the recording allocator below.
+    static PFR_FACE_DONE_TEST_LOCK: StdMutex<()> = StdMutex::new(());
+
+    /// Word count of the mock face: the highest touched field is
+    /// `phy_font` at word 0x48, whose address is only passed on.
+    const FACE_WORDS: usize = FACE_PHY_FONT_WORD + 1;
+
+    static mut SEAM_PHYS: *mut *mut u8 = core::ptr::null_mut();
+    static mut SEAM_MEMORY: *mut crate::ft::memory::FtMemory = core::ptr::null_mut();
+    static mut SEAM_CALLS: usize = 0;
+    /// Allocator free-call count observed when the seam ran: pins the
+    /// phy-font teardown ahead of the `available_sizes` free.
+    static mut SEAM_FREE_COUNT_AT_CALL: usize = 0;
+    static mut FREE_CALLS: usize = 0;
+    static mut FREE_MEMORY_ARG: *mut crate::ft::memory::FtMemory = core::ptr::null_mut();
+    static mut FREE_BLOCK_ARG: *mut u8 = core::ptr::null_mut();
+
+    unsafe extern "C" fn recording_phy_font_done(
+        phys: *mut *mut u8,
+        memory: *mut crate::ft::memory::FtMemory,
+    ) {
+        SEAM_PHYS = phys;
+        SEAM_MEMORY = memory;
+        SEAM_FREE_COUNT_AT_CALL = FREE_CALLS;
+        SEAM_CALLS += 1;
+    }
+
+    unsafe extern "C" fn recording_free(
+        memory: *mut crate::ft::memory::FtMemory,
+        block: *mut u8,
+    ) {
+        FREE_MEMORY_ARG = memory;
+        FREE_BLOCK_ARG = block;
+        FREE_CALLS += 1;
+    }
+
+    unsafe extern "C" fn unused_alloc(
+        _memory: *mut crate::ft::memory::FtMemory,
+        _size: i32,
+    ) -> *mut u8 {
+        panic!("pfr_face_done never allocates")
+    }
+
+    unsafe extern "C" fn unused_realloc(
+        _memory: *mut crate::ft::memory::FtMemory,
+        _cur: i32,
+        _new: i32,
+        _block: *mut u8,
+    ) -> *mut u8 {
+        panic!("pfr_face_done never reallocates")
+    }
+
+    fn recording_memory() -> crate::ft::memory::FtMemory {
+        crate::ft::memory::FtMemory {
+            user: core::ptr::null_mut(),
+            alloc: unused_alloc,
+            free: recording_free,
+            realloc: unused_realloc,
+        }
+    }
+
+    /// A face/driver/memory triplet. [`MockFace::wire`] fills the
+    /// cross-pointers once the struct sits at its final address —
+    /// they point into the struct itself, so wiring before the move
+    /// would leave them dangling.
+    struct MockFace {
+        words: [*mut u8; FACE_WORDS],
+        driver_words: [*mut crate::ft::memory::FtMemory; 3],
+        driver_memory: crate::ft::memory::FtMemory,
+        face_memory: crate::ft::memory::FtMemory,
+        block: u8,
+    }
+
+    fn mock_face() -> MockFace {
+        MockFace {
+            words: [core::ptr::null_mut(); FACE_WORDS],
+            driver_words: [core::ptr::null_mut(); 3],
+            driver_memory: recording_memory(),
+            face_memory: recording_memory(),
+            block: 0xa5,
+        }
+    }
+
+    impl MockFace {
+        /// Wires the retail PFR face layout: face word 0x18 -> driver,
+        /// driver word 2 -> `driver_memory`, face word 0x19 ->
+        /// `face_memory`, face word 8 -> `block`.
+        fn wire(&mut self) {
+            self.driver_words[MODULE_MEMORY_WORD] =
+                core::ptr::addr_of_mut!(self.driver_memory);
+            self.words[FACE_DRIVER_WORD] = self.driver_words.as_mut_ptr().cast::<u8>();
+            self.words[FACE_MEMORY_WORD] =
+                (core::ptr::addr_of_mut!(self.face_memory)).cast::<u8>();
+            self.words[FACE_AVAILABLE_SIZES_WORD] = core::ptr::addr_of_mut!(self.block);
+        }
+    }
+
+    /// Installs the recording seam and zeroes the recorders; returns
+    /// the guard serializing the swap.
+    fn install_recording_teardown() -> StdMutexGuard<'static, ()> {
+        let guard = PFR_FACE_DONE_TEST_LOCK.lock().unwrap();
+        unsafe {
+            SEAM_PHYS = core::ptr::null_mut();
+            SEAM_MEMORY = core::ptr::null_mut();
+            SEAM_CALLS = 0;
+            SEAM_FREE_COUNT_AT_CALL = usize::MAX;
+            FREE_CALLS = 0;
+            FREE_MEMORY_ARG = core::ptr::null_mut();
+            FREE_BLOCK_ARG = core::ptr::null_mut();
+            PFR_PHY_FONT_DONE = recording_phy_font_done;
+        }
+        guard
+    }
+
+    fn uninstall_recording_teardown() {
+        unsafe { PFR_PHY_FONT_DONE = missing_pfr_phy_font_done };
+    }
+
+    #[test]
+    fn nulls_family_style_and_available_sizes_words() {
+        let _guard = install_recording_teardown();
+        let mut mock = mock_face();
+        mock.wire();
+        mock.words[FACE_FAMILY_NAME_WORD] = 0x1111_1111usize as *mut u8;
+        mock.words[FACE_STYLE_NAME_WORD] = 0x2222_2222usize as *mut u8;
+        let available = mock.words[FACE_AVAILABLE_SIZES_WORD];
+        unsafe { pfr_face_done(mock.words.as_mut_ptr()) };
+        assert!(mock.words[FACE_FAMILY_NAME_WORD].is_null());
+        assert!(mock.words[FACE_STYLE_NAME_WORD].is_null());
+        assert!(
+            mock.words[FACE_AVAILABLE_SIZES_WORD].is_null(),
+            "FT_FREE nulls the pointer after freeing"
+        );
+        assert_eq!(unsafe { FREE_BLOCK_ARG }, available);
+        uninstall_recording_teardown();
+    }
+
+    #[test]
+    fn tears_down_phy_font_with_face_memory() {
+        let _guard = install_recording_teardown();
+        let mut mock = mock_face();
+        mock.wire();
+        let face_ptr = mock.words.as_mut_ptr();
+        let face_memory = core::ptr::addr_of_mut!(mock.face_memory);
+        unsafe { pfr_face_done(face_ptr) };
+        assert_eq!(unsafe { SEAM_CALLS }, 1);
+        assert_eq!(
+            unsafe { SEAM_PHYS },
+            unsafe { face_ptr.add(FACE_PHY_FONT_WORD) },
+            "the embedded physical-font record is at word 0x48 (+0x120)"
+        );
+        assert_eq!(
+            unsafe { SEAM_MEMORY },
+            face_memory,
+            "the teardown runs under FT_FACE_MEMORY (face +0x64)"
+        );
+        uninstall_recording_teardown();
+    }
+
+    #[test]
+    fn frees_available_sizes_through_driver_root_memory() {
+        let _guard = install_recording_teardown();
+        let mut mock = mock_face();
+        mock.wire();
+        let driver_memory = core::ptr::addr_of_mut!(mock.driver_memory);
+        let face_memory = core::ptr::addr_of_mut!(mock.face_memory);
+        let block = mock.words[FACE_AVAILABLE_SIZES_WORD];
+        unsafe { pfr_face_done(mock.words.as_mut_ptr()) };
+        assert_eq!(unsafe { FREE_CALLS }, 1);
+        assert_eq!(
+            unsafe { FREE_MEMORY_ARG },
+            driver_memory,
+            "FT_FREE uses driver->root.memory, not the face memory"
+        );
+        assert_ne!(unsafe { FREE_MEMORY_ARG }, face_memory);
+        assert_eq!(unsafe { FREE_BLOCK_ARG }, block);
+        uninstall_recording_teardown();
+    }
+
+    #[test]
+    fn phy_font_teardown_precedes_available_sizes_free() {
+        let _guard = install_recording_teardown();
+        let mut mock = mock_face();
+        mock.wire();
+        unsafe { pfr_face_done(mock.words.as_mut_ptr()) };
+        assert_eq!(unsafe { SEAM_CALLS }, 1);
+        assert_eq!(
+            unsafe { SEAM_FREE_COUNT_AT_CALL },
+            0,
+            "the free has not run yet when pfr_phy_font_done is called"
+        );
+        assert_eq!(unsafe { FREE_CALLS }, 1);
+        uninstall_recording_teardown();
+    }
+
+    #[test]
+    fn null_available_sizes_reaches_no_allocator() {
+        let _guard = install_recording_teardown();
+        let mut mock = mock_face();
+        mock.wire();
+        mock.words[FACE_AVAILABLE_SIZES_WORD] = core::ptr::null_mut();
+        unsafe { pfr_face_done(mock.words.as_mut_ptr()) };
+        assert_eq!(
+            unsafe { FREE_CALLS },
+            0,
+            "ft_mem_free short-circuits a null block"
+        );
+        assert_eq!(unsafe { SEAM_CALLS }, 1, "the phy teardown still runs");
+        assert!(mock.words[FACE_FAMILY_NAME_WORD].is_null());
+        assert!(mock.words[FACE_STYLE_NAME_WORD].is_null());
+        uninstall_recording_teardown();
     }
 }

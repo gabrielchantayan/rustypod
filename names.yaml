@@ -14500,6 +14500,26 @@ functions:
       read_unaligned host-testing idiom, the same accepted deviation as
       vector_size_elem4; the sub/asr#3 structure matches.
 
+  - address: 0x083d7674
+    ghidra: FUN_083d7674
+    name: vector_size_elem16
+    size: 16
+    sig: "i32 vector_size_elem16(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      Byte-identical copy of vector_size_elem16 @ 0x083d7884 (same `ldm
+      r0,{r0,r1}; sub r0,r1,r0; asr r0,r0,#4; bx lr` - verified against
+      osos.asm per address; the 0x083d7884 entry's "0x083d7674 11" bl
+      count was stale, it is 8 bl sites plus one beq tail-branch at
+      0x08054290). Served by the existing cxx/templates port - hook this
+      address to the vector_size_elem16 symbol (the vector_size_elem16
+      copy-at-0x083d78b4 precedent). match.py - the ldm comes out as
+      byte loads from the family's read_unaligned host-testing idiom,
+      the same accepted deviation as vector_size_elem4; the sub/asr#4
+      structure matches.
+
   - address: 0x083d7884
     ghidra: FUN_083d7884
     name: vector_size_elem16
@@ -19569,3 +19589,66 @@ functions:
       and the direct call into the ported ft_error_trace. Rust
       implementation and focused host tests:
       `src/cxx/object_flags.rs::ft_open_face_dfont_fallback`.
+
+  # --- FreeType PFR driver face finalizer ---
+  - address: 0x080855f8
+    ghidra: FUN_080855f8
+    name: pfr_face_done
+    size: 60
+    sig: "void pfr_face_done(void **face)"
+    module: cxx/object_flags
+    status: ported
+    renames:
+      param_1: face
+      uVar1: memory
+    notes: >-
+      Upstream FreeType pfr_face_done (pfrdrivr.c), the PFR driver's
+      FT_Done_Face. Loads the allocator from the face's driver
+      (FT_FaceRec.driver @ +0x60 -> FT_ModuleRec.memory @ +0x08,
+      upstream pfrface->driver->root.memory), NULLs family_name (+0x14)
+      and style_name (+0x18) so no dangling pointers outlive the face,
+      tears down the embedded physical-font record at +0x120 with the
+      face's own memory (+0x64) through pfr_phy_font_done
+      (FUN_080a3554, unported — 1 `bl 0x080a3554` site, @ 0x0808561c,
+      here), then FT_FREEs available_sizes (+0x20) with the driver
+      memory: ft_mem_free(memory, available_sizes) plus the macro's own
+      NULL store. The complete retail body is 60 bytes: push
+      {r4,r5,r6,lr}; ldr r0,[r0,#0x60]; ldr r6,[r0,#0x8]; str #0 @
+      +0x14/+0x18; bl 0x080a3554(face+0x120, [face,#0x64]); bl
+      0x082cfae8(r6, [face,#0x20]); str #0 @ +0x20; pop {r4,r5,r6,pc}.
+      0 `bl 0x080855f8` call sites (grep -c on decomp/osos.asm) and no
+      data pointer anywhere in osos.dec (binary-scanned): the function
+      is reached through the PFR driver class's done_face slot, whose
+      record does not survive in the decrypted image — upstream stores
+      done_face adjacent to init_face = FUN_08085634, likewise absent,
+      so the class record presumably sits in one of the image's
+      undecrypted zero holes. The PFR pin is FUN_08085634 itself
+      (pfr_face_init: checks the PFR header signature at PFR_Face
+      +0x84, the header right after the 0x84-byte FT_FaceRec) plus
+      FUN_080a3624 = pfr_phy_font_load, whose trace string reads
+      "pfr_phy_font_load: invalid physical font" and which
+      FT_LIST-initializes the same +0x88 extra-items list that
+      FUN_080a3554 walks and frees. The FT_FaceRec field offsets are
+      the upstream layout: FT_Open_Face's face object is 0x84 bytes
+      here (pfr_face_init finds the PFR header at face+0x84), and the
+      statement-for-statement match with upstream pfr_face_done —
+      driver@+0x60, family/style@+0x14/+0x18, available_sizes@+0x20,
+      memory@+0x64, phy_font@+0x120 — pins each field. Deviations: the
+      unported
+      pfr_phy_font_done rides the PFR_PHY_FONT_DONE seam (house
+      pattern — OBJECT_FLAGS_FETCH_INCREMENT_LOCK) instead of a direct
+      `bl`; the already-ported ft_mem_free @ 0x082cfae8 takes the
+      FT_FREE half directly (LLVM inlines its null-guarded `blx
+      [memory,#8]` body — the same inlining deviation ft_mem_alloc's
+      entry records); and the face fields are addressed by word index
+      (byte-exact +0x14..+0x120 on the 32-bit target, disjoint words on
+      a 64-bit host — cxx/handle.rs's handle_deref_field12 model).
+      match.py confirms the structural shape: the ldr-@+0x60 / ldr-@+8
+      allocator chain, both NULL stores, the +0x64 load and face+0x120
+      add, the +0x20 load/store bracket around the free are
+      instruction-identical; the diff is LLVM's push {r4-r6,sl,fp,lr}
+      frame, the indirect `blx` through the seam versus the ADS direct
+      `bl`, and the inlined ft_mem_free (cmp/beq guard plus `blx
+      [memory,#8]`) replacing the `bl 0x082cfae8`. Rust implementation
+      and focused host tests:
+      `src/cxx/object_flags.rs::pfr_face_done`.
