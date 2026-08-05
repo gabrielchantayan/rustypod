@@ -4,6 +4,7 @@
 //! | address | name | size | sites |
 //! |---|---|---:|---:|
 //! | 0x0810e64c | [`class_registry_construct`] | 96 | 9 `bl` + 1 tail `b` |
+//! | 0x08135308 | [`registry_container_construct`] | 48 | 6 `bl` |
 //! | 0x082028a4 | [`registry_observer_construct`] | 20 | 3 `bl` |
 //! (Call-site count binary-scanned over osos.dec; one of the nine `bl`s
 //! is the static-init chain @ 0x082afb6c, which runs it against the
@@ -25,14 +26,15 @@
 //!     return registry
 //! ```
 //!
-//! - `container_construct` @ 0x08135308 is the registry's container
-//!   base ctor: it layers two vtables over the object (base @
-//!   0x08271cec, container vtable 0x08984770 stored at +0x00), then
-//!   `FUN_08135110` initialises the container state — capacity 8 at
-//!   +0x10, growth step 4 at +0x18, zeroed count/observer words, the
-//!   +0x20 "changed" byte raised, the +0x21 "notify enabled" byte
-//!   cleared — and installs a *default* observer singleton picked by
-//!   capacity.
+//! - [`registry_container_construct`] @ 0x08135308 is the registry's
+//!   concrete observable-array constructor. It invokes the ported
+//!   [`observable_array_construct`] base @ 0x08271cec (vtable + three
+//!   zero words at +0x00..+0x0c), overwrites the returned object's vtable
+//!   with 0x08984770, then calls `FUN_08135110` with the original capacity
+//!   and growth. That latter container-state/default-observer initializer
+//!   remains an explicit dispatch boundary: it initializes +0x10..+0x24
+//!   and constructs the capacity-selected default observer, which is
+//!   outside this one-function port.
 //! - The second singleton is the registry's own observer: an 8-byte
 //!   object (vtable 0x089910ac + one word) constructed lazily by
 //!   `FUN_082028a4` over `operator_new(8)`, cached in the global word @
@@ -52,27 +54,27 @@
 //!
 //! `operator new` @ 0x082aadd4 is already ported
 //! (`heap::veneers::operator_new`), so it is called directly. The
-//! container ctor and the observer swap are unported C++ machinery, so
-//! they sit behind the [`CLASS_REGISTRY_OPS`] dispatch table — the
-//! `app/singletons.rs` pattern. The observer's own 20-byte constructor
-//! is ported; its distinct base constructor @ 0x0810dddc remains a
-//! dispatch boundary. The documented stubs are:
+//! container-state initializer @ 0x08135110 and observer swap are
+//! unported C++ machinery, so they sit behind the
+//! [`CLASS_REGISTRY_OPS`] dispatch table — the `app/singletons.rs`
+//! pattern. The observer's own 20-byte constructor is ported; its
+//! distinct base constructor @ 0x0810dddc remains a dispatch boundary.
+//! The documented stubs are:
 //!
-//! - `container_construct`: returns `this` **unchanged** — the object
-//!   keeps its pre-init all-zero state, vtable NULL, the same
-//!   fault-on-first-dispatch contract `registry.rs` documents;
+//! - `container_construct`: returns `this` **unchanged** — its shipped
+//!   default remains conservative because `FUN_08135110`, called by the
+//!   now-ported wrapper, has not been ported;
+//! - `container_initialize`: no-op, leaving its object's post-base state
+//!   intact;
 //! - `observer_base_construct`: returns `this` unchanged; the port then
 //!   installs the observer's literal firmware vtable at +0x00;
 //! - `set_observer`: a no-op.
 //!
-//! **Not hook-ready.** With the default stubs the attach dispatch reads
-//! a NULL observer vtable, so branching stock static-init here would
-//! fault where the original succeeds; the port exists because the
-//! *constructor's own* logic (capacity/growth immediates, the lazy
-//! 8-byte singleton, the store-then-dispatch-then-reload ordering, the
-//! observer swap, the final notification enable) is fully recovered.
-//! The ops slots are the documented boundary, exactly like
-//! `SINGLETON_CTORS`.
+//! **Not hook-ready.** The shipped container slot remains the conservative
+//! stub until `FUN_08135110` is separately ported. Its default observer
+//! construction is outside this assignment; wiring the wrapper through a
+//! no-op initializer would instead produce an object that deviates from
+//! stock firmware.
 //!
 //! ## Deviations
 //!
@@ -87,6 +89,7 @@
 //!   adding one would be a behavior change.
 
 use crate::app::registry::{observable_set_notify_enabled, Registry};
+use crate::cxx::observable_array::{observable_array_construct, ObservableArray};
 use crate::heap::veneers::operator_new;
 
 /// The container's initial capacity (`mov r1, #0x8` @ 0x0810e654).
@@ -98,6 +101,10 @@ pub const REGISTRY_GROWTH_STEP: u32 = 4;
 /// Allocation size of the registry observer singleton (`mov r0, #0x8`
 /// @ 0x0810e670): a vtable pointer plus one word.
 pub const REGISTRY_OBSERVER_SIZE: usize = 8;
+
+/// The concrete registry-container vtable literal loaded from 0x08135338
+/// and written at +0x00 by [`registry_container_construct`].
+pub const REGISTRY_CONTAINER_VTABLE_ADDRESS: usize = 0x0898_4770;
 
 /// The registry observer's vtable, modeled down to the one slot
 /// [`class_registry_construct`] dispatches. The filler array reproduces
@@ -135,8 +142,9 @@ pub const REGISTRY_OBSERVER_VTABLE_ADDRESS: usize = 0x0899_10ac;
 /// [`class_registry_construct`] first runs.
 pub static mut REGISTRY_OBSERVER: *mut RegistryObserver = core::ptr::null_mut();
 
-/// Indirect dispatch table for the two unported callees and the
-/// observer's distinct unported base constructor (see the module header).
+/// Indirect dispatch table for the unported container-state initializer,
+/// observer constructor/swap, and observer's distinct base constructor
+/// (see the module header).
 #[derive(Clone, Copy)]
 pub struct ClassRegistryOps {
     /// The container base ctor @ 0x08135308
@@ -146,6 +154,15 @@ pub struct ClassRegistryOps {
         capacity: u32,
         growth: u32,
     ) -> *mut Registry,
+    /// The state/default-observer initializer @ 0x08135110, called by
+    /// [`registry_container_construct`] after it installs the registry
+    /// vtable. It returns `void`; this call's container observer work is
+    /// deliberately outside the assigned function.
+    pub container_initialize: unsafe extern "C" fn(
+        this: *mut Registry,
+        capacity: u32,
+        growth: u32,
+    ),
     /// The registry observer's complete ctor @ 0x082028a4. Its default
     /// is the port below; retaining this seam preserves callers that
     /// replace the complete original constructor.
@@ -173,6 +190,54 @@ unsafe extern "C" fn stub_container_construct(
     _growth: u32,
 ) -> *mut Registry {
     this
+}
+
+/// Default state-initializer stub: preserves the base object's state until
+/// `FUN_08135110` is ported. It must remain separate from the constructor
+/// wrapper, whose call ordering is recovered below.
+unsafe extern "C" fn stub_container_initialize(_this: *mut Registry, _capacity: u32, _growth: u32) {}
+
+/// registry_container_construct — original: `FUN_08135308` @ 0x08135308
+/// (48 bytes; 6 `bl` call sites).
+///
+/// Constructs the registry's concrete observable-array base. It first calls
+/// [`observable_array_construct`] (`FUN_08271cec`) on `this`, overwrites the
+/// vtable at +0x00 of *that returned pointer* with literal `0x08984770`,
+/// then calls `FUN_08135110` with the original capacity and growth values.
+/// The saved base-constructor return, rather than the state initializer's
+/// return, is returned in r0.
+///
+/// Raw ARM saves r1/r2 before `bl 0x08271cec`, stores the vtable before
+/// restoring them for `bl 0x08135110`, then returns r4. There is no NULL
+/// guard: the base constructor's first store faults for an invalid `this`,
+/// exactly as stock firmware does.
+///
+/// The state initializer itself is intentionally an explicit ops boundary:
+/// it constructs a capacity-selected observer and is not part of this
+/// assigned function. Therefore the wrapper is tested directly but is not
+/// installed as the shipped `container_construct` default until that callee
+/// has a faithful port.
+///
+/// # Safety
+///
+/// `this` must address a writable registry object; a NULL or invalid pointer
+/// faults during base construction.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn registry_container_construct(
+    this: *mut Registry,
+    capacity: u32,
+    growth: u32,
+) -> *mut Registry {
+    let registry = observable_array_construct(this.cast::<ObservableArray>()).cast::<Registry>();
+    core::ptr::write_volatile(
+        core::ptr::addr_of_mut!((*registry).vtable),
+        REGISTRY_CONTAINER_VTABLE_ADDRESS as *const _,
+    );
+    let initialize =
+        core::ptr::read_volatile(core::ptr::addr_of!(CLASS_REGISTRY_OPS.container_initialize));
+    initialize(registry, capacity, growth);
+    registry
 }
 
 /// Default observer base-ctor stub: forwards `this` untouched. The
@@ -223,6 +288,7 @@ unsafe extern "C" fn stub_set_observer(
 /// its base and the two container operations are documented stubs.
 pub(crate) const DEFAULT_CLASS_REGISTRY_OPS: ClassRegistryOps = ClassRegistryOps {
     container_construct: stub_container_construct,
+    container_initialize: stub_container_initialize,
     observer_construct: registry_observer_construct,
     observer_base_construct: stub_observer_base_construct,
     set_observer: stub_set_observer,
@@ -321,6 +387,9 @@ mod tests {
     /// The container-ctor arguments, recorded on every call.
     static mut CONTAINER_ARGS: Vec<(*mut Registry, u32, u32)> = Vec::new();
 
+    /// The unported state-initializer arguments, recorded on every call.
+    static mut CONTAINER_INITIALIZE_ARGS: Vec<(*mut Registry, u32, u32)> = Vec::new();
+
     /// The observer/set_observer arguments, recorded on every call.
     static mut OBSERVER_ARGS: Vec<*mut RegistryObserver> = Vec::new();
 
@@ -359,6 +428,20 @@ mod tests {
         trace().push("container_construct");
         (*ptr::addr_of_mut!(CONTAINER_ARGS)).push((this, capacity, growth));
         ptr::read_volatile(ptr::addr_of!(CONTAINER_RESULT))
+    }
+
+    unsafe extern "C" fn mock_container_initialize(
+        this: *mut Registry,
+        capacity: u32,
+        growth: u32,
+    ) {
+        assert_eq!(
+            ptr::read_volatile(this.cast::<[u32; 4]>()),
+            [REGISTRY_CONTAINER_VTABLE_ADDRESS as u32, 0, 0, 0],
+            "FUN_08135110 is called after the base zeroes and derived-vtable store"
+        );
+        trace().push("container_initialize");
+        (*ptr::addr_of_mut!(CONTAINER_INITIALIZE_ARGS)).push((this, capacity, growth));
     }
 
     unsafe extern "C" fn mock_observer_construct(this: *mut u8) -> *mut u8 {
@@ -487,6 +570,7 @@ mod tests {
             DEFAULT_HEAP = ptr::addr_of_mut!(FAKE_HEAP) as *mut HeapDescriptorDescriptor;
             CLASS_REGISTRY_OPS = ClassRegistryOps {
                 container_construct: mock_container_construct,
+                container_initialize: mock_container_initialize,
                 observer_construct: mock_observer_construct,
                 observer_base_construct: stub_observer_base_construct,
                 set_observer: mock_set_observer,
@@ -503,6 +587,7 @@ mod tests {
             REGISTRY_OBSERVER = ptr::null_mut();
             (*ptr::addr_of_mut!(ALLOC_SIZES)).clear();
             (*ptr::addr_of_mut!(CONTAINER_ARGS)).clear();
+            (*ptr::addr_of_mut!(CONTAINER_INITIALIZE_ARGS)).clear();
             (*ptr::addr_of_mut!(OBSERVER_ARGS)).clear();
             (*ptr::addr_of_mut!(ATTACHED)).clear();
             trace().clear();
@@ -544,6 +629,40 @@ mod tests {
                 *ptr::addr_of!(CONTAINER_ARGS),
                 std::vec![(argument(), 8, 4)],
                 "the original's mov r1, #0x8 / mov r2, #0x4"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn registry_container_constructor_initializes_observable_base_before_container_state() {
+        let guard = mock();
+        unsafe {
+            let mut registry = Registry {
+                vtable: 0xdead_beefusize as *const RegistryVtable,
+                container: [usize::MAX; 7],
+                changed: 0xa5,
+                notify_enabled: 0x5a,
+                reserved: [0xa5; 2],
+                observer: usize::MAX as *mut u8,
+            };
+            let this = ptr::addr_of_mut!(registry);
+
+            assert_eq!(registry_container_construct(this, 0x0c, 5), this);
+            assert_eq!(
+                ptr::read_volatile(this.cast::<[u32; 4]>()),
+                [REGISTRY_CONTAINER_VTABLE_ADDRESS as u32, 0, 0, 0],
+                "the base call zeros +0x04..+0x0c before the derived vtable replaces +0x00"
+            );
+            assert_eq!(
+                *ptr::addr_of!(CONTAINER_INITIALIZE_ARGS),
+                std::vec![(this, 0x0c, 5)],
+                "the original restores saved r1/r2 for FUN_08135110"
+            );
+            assert_eq!(
+                *trace(),
+                std::vec!["container_initialize"],
+                "the state initializer is called only after both vtable stores"
             );
         }
         restore(guard);

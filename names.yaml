@@ -8426,6 +8426,25 @@ functions:
       the original succeeds. match.py: identical shape; the only deltas
       are the blx-through-slot indirections and the frame layout.
 
+  - address: 0x08135308
+    ghidra: FUN_08135308
+    name: registry_container_construct
+    size: 48
+    sig: "Registry *registry_container_construct(Registry *this, u32 capacity, u32 growth)"
+    module: app/class_registry
+    status: ported
+    vars: {param_1: this, param_2: capacity, param_3: growth, puVar1: registry}
+    notes: >-
+      Concrete observable-array constructor with 6 bl call sites. Raw ARM
+      saves capacity/growth, calls observable_array_construct
+      (0x08271cec), writes literal vtable 0x08984770 at +0x00 of its
+      return, restores the saved arguments, calls the unported state and
+      default-observer initializer 0x08135110, then returns the saved
+      observable-array result. The existing observable-array port is
+      called directly; 0x08135110 remains a test-injectable ops boundary,
+      so the outer wrapper is deliberately not the shipped default until
+      that separate function is ported.
+
   - address: 0x082028a4
     ghidra: FUN_082028a4
     name: registry_observer_construct
