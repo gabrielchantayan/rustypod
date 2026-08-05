@@ -134,6 +134,12 @@ const VTABLE_SLOT_50: usize = 0x50;
 /// loads; the +0x4c twin of [`VTABLE_SLOT_50`].
 const VTABLE_SLOT_4C: usize = 0x4c;
 
+/// Byte offset of the dispose method inside the object's vtable — the
+/// slot [`vtable_slot_04_dispose`] (`FUN_0811d7cc` @ 0x0811d7cc)
+/// loads; the teardown counterpart of the message-dispatch slots
+/// [`VTABLE_SLOT_4C`] / [`VTABLE_SLOT_50`].
+const VTABLE_SLOT_04: usize = 0x4;
+
 /// The message kind this whole block binds (the value width, 4 bytes —
 /// the sibling 0x0811d64c/0x0811d52c pair binds kind 2 for u16 values).
 const MESSAGE_KIND_4: u32 = 4;
@@ -324,6 +330,88 @@ pub unsafe extern "C" fn vtable_slot_4c_dispatch(
     let method =
         (vtable.add(VTABLE_SLOT_4C) as *const VtableSlot4cMethod).read_unaligned();
     method(object, kind, data, extra)
+}
+
+/// The vtable method signature at slot +0x4: `dispose(object)`. The
+/// original's `blx r1` passes only r0 (the object) — r1 holds the
+/// method pointer itself and r2/r3 are the caller's leftovers (the
+/// frame spills `{r4, lr}` only, so unlike the dispatcher siblings
+/// nothing is forwarded) — and any method return value is discarded
+/// (r0 is reloaded with 0), so the method is modeled as a
+/// single-argument, unit-returning call.
+type VtableSlot04Method = unsafe extern "C" fn(object: *mut u8);
+
+/// vtable_slot_04_dispose — original: `FUN_0811d7cc` @ 0x0811d7cc
+/// (48 bytes; **14 `bl` call sites**, grep on `decomp/osos.asm`:
+/// 0x0810ab00, 0x0811b278, 0x0811c798, 0x0811d8c8 — inside the
+/// unported wrapper thunk 0x0811d8c0, which disposes and then
+/// returns the handle — 0x08136840, 0x0815e904, 0x081affb4,
+/// 0x081b0174, 0x081bc82c and the 5-site cluster
+/// 0x08285738..0x08285938; several sit in the same routines that
+/// drive this family's kind-4 probe/set thunks — this is the
+/// family's teardown counterpart).
+///
+/// The NULL-guarded dispose thunk sitting between the two ported
+/// dispatchers [`vtable_slot_4c_dispatch`] (0x0811d7b0) and
+/// [`vtable_slot_50_dispatch`] (0x0811d7fc) — not a third dispatch
+/// variant (it binds no kind and sends no message) but the handle
+/// teardown the message-family callers run when they are done:
+///
+/// ```text
+/// 0811d7cc  stmdb sp!, {r4, lr}   @ frame
+/// 0811d7d0  mov   r4, r0          @ save handle
+/// 0811d7d4  ldr   r0, [r0, #0x0]  @ object = *handle
+/// 0811d7d8  cmp   r0, #0x0
+/// 0811d7dc  beq   0x0811d7f4      @ NULL handle -> skip, return 0
+/// 0811d7e0  ldr   r1, [r0, #0x0]  @ vtable = *object
+/// 0811d7e4  ldr   r1, [r1, #0x4]  @ method = vtable->slot_04
+/// 0811d7e8  blx   r1              @ dispose(object)
+/// 0811d7ec  mov   r0, #0x0
+/// 0811d7f0  str   r0, [r4, #0x0]  @ *handle = NULL
+/// 0811d7f4  mov   r0, #0x0        @ return 0 (both paths)
+/// 0811d7f8  ldmia sp!, {r4, pc}
+/// ```
+///
+/// If `*handle` is non-NULL: the same double dereference as the
+/// dispatchers — handle to object to vtable — then the method at
+/// vtable slot **+0x4** is invoked with the object in r0, the handle
+/// is NULLed (`str r0, [r4]`) AFTER the call, and 0 returns. A NULL
+/// `*handle` skips the call and the store entirely (`beq` straight
+/// to the `mov r0, #0` epilogue) and still returns 0. Every observed
+/// call site ignores the return value (the 0x0811d8c0 wrapper
+/// overwrites r0 with the handle; the others branch on nothing).
+///
+/// # Deviations
+///
+/// - **The slot +0x4 method is modeled as a single-argument,
+///   unit-returning call.** At the `blx` only r0 is meaningful (r1
+///   holds the method pointer itself, r2/r3 are the caller's
+///   leftovers — the frame spills no r3, so there is no `forwarded`
+///   parameter, unlike the dispatcher siblings), and any method
+///   return value is discarded: r0 is reloaded with 0.
+/// - **The slot load uses `read_unaligned`** so the layout stays
+///   byte-exact on a 64-bit host: 0x4 is 4-aligned but not 8-aligned
+///   (the [`vtable_slot_50_dispatch`] precedent).
+/// - **No seam.** No ported caller exists; host tests call the body
+///   directly on a fake vtable (the dispatcher-test precedent).
+/// - **The reference C is not followed where it mis-decompiles**:
+///   `decomp/c/010/0811d7cc_FUN_0811d7cc.c` drops the object
+///   argument of the indirect call (`(**(code **)(*(int *)*param_1 +
+///   4))()`), showing a no-arg method — the disassembly loads
+///   r0 = *param_1 (the object) before `blx r1`. The port follows
+///   the disassembly.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_slot_04_dispose(handle: *mut *mut u8) -> u32 {
+    let object = handle.read();
+    if !object.is_null() {
+        let vtable = (object as *const *const u8).read();
+        let method =
+            (vtable.add(VTABLE_SLOT_04) as *const VtableSlot04Method).read_unaligned();
+        method(object);
+        handle.write(core::ptr::null_mut());
+    }
+    0
 }
 
 /// The open stage (`FUN_0811d458` @ 0x0811d458): sends the bare
@@ -2735,6 +2823,128 @@ mod tests {
                 "any other status returns verbatim (ldmia sp!, {{r12, pc}})"
             );
             assert_eq!(DIRECT_CALLS, 3);
+        }
+    }
+
+    // ---- vtable_slot_04_dispose (0x0811d7cc) direct, fake vtable ----
+
+    static mut DISPOSE_CALLS: usize = 0;
+    static mut DISPOSE_OBJECT: *mut u8 = core::ptr::null_mut();
+    /// The `*handle` word observed from INSIDE the slot +0x4 method:
+    /// non-NULL there proves the handle is NULLed only after the
+    /// `blx` returns (`str r0, [r4]` follows `blx r1`).
+    static mut DISPOSE_HANDLE_WORD_AT_CALL: *mut u8 = core::ptr::null_mut();
+    static mut DISPOSE_HANDLE_PTR: *const *mut u8 = core::ptr::null();
+
+    unsafe extern "C" fn dispose_method(object: *mut u8) {
+        DISPOSE_CALLS += 1;
+        DISPOSE_OBJECT = object;
+        DISPOSE_HANDLE_WORD_AT_CALL = DISPOSE_HANDLE_PTR.read();
+    }
+
+    /// Decoy for the slots neighbouring +0x4: any call through it
+    /// proves the thunk loaded the wrong offset.
+    unsafe extern "C" fn wrong_slot_dispose(_object: *mut u8) {
+        WRONG_SLOT_CALLS += 1;
+    }
+
+    impl FakeChain {
+        /// Writes `method` into the vtable at byte offset `slot`,
+        /// typed for the slot +0x4 dispose signature.
+        fn install_dispose(&mut self, slot: usize, method: VtableSlot04Method) {
+            unsafe {
+                (self.vtable.as_mut_ptr().add(slot) as *mut VtableSlot04Method)
+                    .write_unaligned(method);
+            }
+        }
+    }
+
+    unsafe fn reset_dispose_log() {
+        DISPOSE_CALLS = 0;
+        DISPOSE_OBJECT = core::ptr::null_mut();
+        DISPOSE_HANDLE_WORD_AT_CALL = core::ptr::null_mut();
+        DISPOSE_HANDLE_PTR = core::ptr::null();
+        WRONG_SLOT_CALLS = 0;
+    }
+
+    // The ported thunk is called directly (no seam), so no SlotGuard
+    // is needed; the lock only serializes the recording statics.
+
+    #[test]
+    fn dispose_double_dereferences_and_loads_slot_04_exactly() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let mut chain = FakeChain::new();
+        chain.install_dispose(VTABLE_SLOT_04, dispose_method);
+        // Decoy above the slot only: method pointers are 8 bytes wide
+        // on the 64-bit host, so the slot-0x4 write spans 0x4..0xc
+        // and a decoy at 0x0 (the target's preceding slot) would
+        // overlap it; +0xc is the nearest non-overlapping offset.
+        chain.install_dispose(VTABLE_SLOT_04 + 8, wrong_slot_dispose);
+        chain.link();
+        unsafe {
+            reset_dispose_log();
+            DISPOSE_HANDLE_PTR = chain.handle_ptr() as *const *mut u8;
+
+            let result = vtable_slot_04_dispose(chain.handle_ptr());
+
+            assert_eq!(result, 0, "mov r0, #0 — always returns 0");
+            assert_eq!(DISPOSE_CALLS, 1, "exactly one blx");
+            assert_eq!(
+                WRONG_SLOT_CALLS, 0,
+                "only vtable slot +0x4 is loaded (ldr r1, [r1, #0x4])"
+            );
+            assert_eq!(
+                DISPOSE_OBJECT,
+                core::ptr::addr_of_mut!(chain.object) as *mut u8,
+                "the method receives *handle (ldr r0, [r0])"
+            );
+            // vtable = *object (ldr r1, [r0]) is proven by the chain
+            // itself: only the method installed in the vtable buffer
+            // could have run.
+        }
+    }
+
+    #[test]
+    fn dispose_nulls_the_handle_after_the_call() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let mut chain = FakeChain::new();
+        chain.install_dispose(VTABLE_SLOT_04, dispose_method);
+        chain.link();
+        unsafe {
+            reset_dispose_log();
+            DISPOSE_HANDLE_PTR = chain.handle_ptr() as *const *mut u8;
+
+            vtable_slot_04_dispose(chain.handle_ptr());
+
+            assert_eq!(
+                DISPOSE_HANDLE_WORD_AT_CALL,
+                core::ptr::addr_of_mut!(chain.object) as *mut u8,
+                "the handle still points at the object DURING the blx"
+            );
+            assert_eq!(
+                chain.handle_ptr().read(),
+                core::ptr::null_mut(),
+                "str r0, [r4] NULLs the handle after the method returns"
+            );
+        }
+    }
+
+    #[test]
+    fn dispose_skips_the_call_on_a_null_handle_and_returns_zero() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let mut handle: *mut u8 = core::ptr::null_mut();
+        unsafe {
+            reset_dispose_log();
+
+            let result = vtable_slot_04_dispose(core::ptr::addr_of_mut!(handle));
+
+            assert_eq!(result, 0, "the beq path also returns 0 (mov r0, #0)");
+            assert_eq!(DISPOSE_CALLS, 0, "cmp r0, #0; beq — no blx on a NULL handle");
+            assert_eq!(
+                handle,
+                core::ptr::null_mut(),
+                "the NULL store is skipped too (beq jumps past str r0, [r4])"
+            );
         }
     }
 
