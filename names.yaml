@@ -18767,7 +18767,7 @@ functions:
       param_1: storage
       DAT_08177ecc: CLASS_6800_VTABLE_ADDRESS
       FUN_081110d0: framework_base_construct
-      FUN_081d2204: framework_root_instance
+      FUN_081d2204: framework_root_instance (CLASS_6800_OPS slot)
       FUN_081883fc: demo_mode_instance
     notes: >-
       128 bl + 0 b call sites, binary-scanned by decoding every B/BL word
@@ -18806,7 +18806,7 @@ functions:
       is the only reference to that word in the image, so the port plants
       the modeled static CLASS_6800_VTABLE and keeps the address as
       CLASS_6800_VTABLE_ADDRESS; the +0x2c dispatch still goes through
-      `this->vtable`, so a real vtable is picked up unchanged. The two
+      `this->vtable`, so a real vtable is picked up unchanged. The three
       remaining unported callees go through CLASS_6800_OPS read_volatile
       slots: framework_base_construct's parent (0x08125234) and
       link/target initializer (0x081108b4). framework_root_instance
@@ -18822,27 +18822,6 @@ functions:
       ldrd+blx in place of the two unported child calls and the crate's fp
       frame.
 
-  # --- Silver UI framework: root-instance getter ---
-
-  - address: 0x081d2204
-    ghidra: FUN_081d2204
-    name: framework_root_instance
-    size: 12
-    sig: "void *framework_root_instance(void)"
-    module: app/class_6800
-    status: ported
-    vars:
-      DAT_081d2210: FRAMEWORK_ROOT_HOLDER_ADDRESS
-      DAT_081d2210_plus_4: FRAMEWORK_ROOT_HOLDER.instance
-    notes: >-
-      Loads the literal global 0x089cc858, then returns that holder's +4
-      instance word verbatim. The 12-byte ARM leaf is `ldr r0, [pc] ; ldr
-      r0, [r0, #4] ; bx lr`; it takes no arguments, stores nothing, and
-      preserves a NULL slot as the pre-initialization return. Callers use
-      the result as the shared framework-root object and dispatch its
-      vtable; class_6800_new stores it as its default target. The runtime
-      global is modeled as FRAMEWORK_ROOT_HOLDER, following APP_CONTEXT's
-      modeled-global precedent.
 
   # --- Silver UI framework: link-owning base constructor ---
 
