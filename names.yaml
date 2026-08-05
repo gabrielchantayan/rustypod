@@ -18813,14 +18813,14 @@ functions:
       (0x081d2204) is direct and reads the modeled root-holder global.
       Their wired defaults retain the modeled zero state, but the base is
       not hook-ready until the two constructor children are ported. Host
-      are ported. Host tests cover the direct base wrapper's call order,
-      return forwarding, NULL storage forwarding through a cooperating
-      parent, full derived construction order, relocation, NULL root,
-      and the defaults. match.py structural: identical mov #1 / mov #0 /
-      call / mov r4,r0 / str vtable / call / str +20 / call / str +24 /
-      ldr vtable / ldr +20 / ldr +0x2c / blx / mov r0,r4 sequence; the
-      diff is the ops-table ldrd+blx in place of direct child calls and
-      the crate's fp frame.
+      tests cover the direct base wrapper's call order, return forwarding,
+      NULL storage forwarding through a cooperating parent, full derived
+      construction order, relocation, NULL root, and the defaults.
+      match.py structural: identical mov #1 / mov #0 / call / mov r4,r0 /
+      str vtable / call / str +20 / call / str +24 / ldr vtable / ldr +20 /
+      ldr +0x2c / blx / mov r0,r4 sequence; the diff is the ops-table
+      ldrd+blx in place of the two unported child calls and the crate's fp
+      frame.
 
   # --- Silver UI framework: root-instance getter ---
 
