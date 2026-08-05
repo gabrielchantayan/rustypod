@@ -581,7 +581,11 @@ pub unsafe extern "C" fn vector_size_elem2(vector: *const VectorBounds) -> i32 {
 /// The copy at 0x083d76a4 (13 `bl` call sites plus one `b` tail-branch
 /// at 0x0829c02c; `ipod-decomp/decomp/c/037/083d76a4_FUN_083d76a4.c`) is
 /// likewise byte-identical — verified against osos.asm per address — and
-/// hooks this same symbol.
+/// hooks this same symbol. The copy at 0x083d7a88 (12 `bl` call sites
+/// plus one `bne` tail-branch at 0x08269c50;
+/// `ipod-decomp/decomp/c/037/083d7a88_FUN_083d7a88.c`) is likewise
+/// byte-identical — verified against osos.asm per address — and hooks
+/// this same symbol.
 ///
 /// # Safety
 /// `vector` must point at a readable `{begin, end}` pair.

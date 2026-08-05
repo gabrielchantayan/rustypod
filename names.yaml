@@ -14541,6 +14541,30 @@ functions:
       the same accepted deviation as vector_size_elem4; the sub/asr#3
       structure matches.
 
+  - address: 0x083d7a88
+    ghidra: FUN_083d7a88
+    name: vector_size_elem8
+    size: 16
+    sig: "i32 vector_size_elem8(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      Byte-identical copy of vector_size_elem8 @ 0x083d7860 (same `ldm
+      r0,{r0,r1}; sub r0,r1,r0; asr r0,r0,#3; bx lr` - verified against
+      osos.asm per address; it sits immediately after the
+      vector_size_elem2 @ 0x083d7a78). Served by the existing
+      cxx/templates port - hook this address to the vector_size_elem8
+      symbol (the vector_size_elem16 copy-at-0x083d78b4 precedent). 12
+      bl call sites plus one bne tail-branch at 0x08269c50; the
+      0x083d7860 entry's "0x083d7a88 13" count includes that
+      tail-branch. Source C:
+      decomp/c/037/083d7a88_FUN_083d7a88.c - Ghidra's
+      `return param_1[1] - *param_1 >> 3`. match.py - the ldm comes out
+      as byte loads from the family's read_unaligned host-testing idiom,
+      the same accepted deviation as vector_size_elem4; the sub/asr#3
+      structure matches.
+
   - address: 0x083d7674
     ghidra: FUN_083d7674
     name: vector_size_elem16
