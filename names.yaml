@@ -18800,7 +18800,9 @@ functions:
       in fp/fp_misc, atomic_add_irqsafe_alias_f041c in kernel/csem,
       rom_svc_22001cbc_alias_67fc in kernel/task_lock — all single-
       instruction veneers resolved by pointing hooks at the canonical
-      port). match.py N/A: there is no veneer symbol to diff.
+      port). match.py against posix_mutex_lock at this address confirms
+      the original is exactly the 1-instruction branch; the body diff is
+      the lock itself, which is the resolution.
 
   - address: 0x08261e24
     ghidra: (veneer)
