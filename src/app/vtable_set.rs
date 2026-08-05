@@ -83,7 +83,8 @@
 //! bytes; **15 `bl` call sites**, all inside this message-family thunk
 //! cluster 0x0811d358..0x0811d890; ported in this module as
 //! [`vtable_slot_50_dispatch`]), the slot +0x50 twin of
-//! `FUN_0811d7b0`:
+//! [`vtable_slot_4c_dispatch`] (`FUN_0811d7b0` @ 0x0811d7b0, ported
+//! in this module):
 //!
 //! ```text
 //! stmdb sp!, {r3, lr}     @ spill the caller's 4th argument
@@ -128,6 +129,11 @@
 /// Byte offset of the dispatched method inside the object's vtable.
 const VTABLE_SLOT_50: usize = 0x50;
 
+/// Byte offset of the queried method inside the object's vtable — the
+/// slot [`vtable_slot_4c_dispatch`] (`FUN_0811d7b0` @ 0x0811d7b0)
+/// loads; the +0x4c twin of [`VTABLE_SLOT_50`].
+const VTABLE_SLOT_4C: usize = 0x4c;
+
 /// The message kind this whole block binds (the value width, 4 bytes —
 /// the sibling 0x0811d64c/0x0811d52c pair binds kind 2 for u16 values).
 const MESSAGE_KIND_4: u32 = 4;
@@ -152,6 +158,13 @@ const COMMIT_PROBE_TAG: u32 = 0xc000_0000;
 type VtableSlot50Method =
     unsafe extern "C" fn(object: *mut u8, kind: u32, data: usize, extra: *const usize) -> u32;
 
+/// The vtable method signature at slot +0x4c: identical in shape to
+/// [`VtableSlot50Method`] — `method(object, kind, data, extra)`,
+/// returning an error code (0 = success); see
+/// [`vtable_slot_4c_dispatch`].
+type VtableSlot4cMethod =
+    unsafe extern "C" fn(object: *mut u8, kind: u32, data: usize, extra: *const usize) -> u32;
+
 /// vtable_slot_50_dispatch — original: `FUN_0811d7fc` @ 0x0811d7fc (28
 /// bytes; **15 `bl` call sites**, grep on `decomp/osos.asm`, all inside
 /// this message-family thunk cluster: the commit stage 0x0811d340, the
@@ -161,8 +174,9 @@ type VtableSlot50Method =
 /// 0x0811d6ec and the routine at 0x0811d880).
 ///
 /// The shared vtable dispatcher of the slot +0x50 message family — the
-/// slot +0x50 twin of the still-unported `FUN_0811d7b0` @ 0x0811d7b0
-/// (`util/vtable_query.rs`), which differs only in the slot offset:
+/// slot +0x50 twin of [`vtable_slot_4c_dispatch`] (`FUN_0811d7b0` @
+/// 0x0811d7b0, ported in this module), which differs only in the slot
+/// offset:
 ///
 /// ```text
 /// 0811d7fc  stmdb sp!, {r3, lr}     @ spill the caller's 4th argument
@@ -229,6 +243,81 @@ pub static mut VTABLE_SLOT_50_DISPATCH: unsafe extern "C" fn(
     data: usize,
     extra: *const usize,
 ) -> u32 = vtable_slot_50_dispatch;
+
+/// vtable_slot_4c_dispatch — original: `FUN_0811d7b0` @ 0x0811d7b0
+/// (28 bytes; **16 call sites**, grep on `decomp/osos.asm`: 15 `bl`
+/// — the 8-site cluster 0x0811d230..0x0811d2e0, 0x0811d4a0, the
+/// 4-site cluster 0x0811d5c4..0x0811d634, and the two sites
+/// 0x0811d830 / 0x0811d85c in the unported query-clamp-write routine
+/// at 0x0811d818 — plus the tail `b` at 0x0811d474 from the ported
+/// `util/vtable_query.rs` `vtable_query_4c_kind4` thunk 0x0811d46c).
+///
+/// The shared vtable dispatcher of the slot +0x4c message family —
+/// the slot +0x4c twin of this module's [`vtable_slot_50_dispatch`]
+/// (`FUN_0811d7fc` @ 0x0811d7fc), differing only in the slot offset:
+///
+/// ```text
+/// 0811d7b0  stmdb sp!, {r3, lr}     @ spill the caller's 4th argument
+/// 0811d7b4  ldr   r0, [r0, #0x0]    @ object = *handle
+/// 0811d7b8  ldr   r3, [r0, #0x0]    @ vtable  = *object
+/// 0811d7bc  ldr   r12, [r3, #0x4c]  @ method  = vtable->slot_4c
+/// 0811d7c0  mov   r3, sp            @ extra = &spilled_r3
+/// 0811d7c4  blx   r12               @ method(object, kind, data, extra)
+/// 0811d7c8  ldmia sp!, {r12, pc}    @ return the method's r0
+/// ```
+///
+/// A double dereference — handle to object to vtable — then the
+/// method pointer at vtable slot +0x4c is invoked as
+/// `method(object, kind, data, &spilled_r3)` and its error code
+/// returns verbatim. Unlike [`vtable_slot_50_dispatch`], whose
+/// callers all bind kind 4 themselves, this dispatcher is generic in
+/// `kind`: r1 passes through untouched and the kind-4 binding lives
+/// in the callers — `vtable_query_4c_kind4` (0x0811d46c) and the
+/// routine at 0x0811d818, which calls it twice with kind 4 and a
+/// stack out-slot, treating **5** as "unsupported — bail silently"
+/// (`cmp r0, #0x5; beq`) and any other nonzero as a hard error.
+/// The spilled r3 is whatever the caller happened to carry — no call
+/// site sets it deliberately.
+///
+/// # Deviations
+///
+/// - **The r3 spill is collapsed into the `extra` parameter** — the
+///   [`vtable_slot_50_dispatch`] deviation verbatim: the original
+///   receives the caller's r3 *by value* and spills it itself
+///   (`stmdb sp!, {r3}` / `mov r3, sp`); this port's callers
+///   pre-spill the forwarded word and pass its address, so `extra`
+///   arrives as the pointer and reaches the method verbatim. One
+///   consequence: this export is **not** ABI-hookable at 0x0811d7b0,
+///   where r3 arrives by value, not as a pointer (no hook targets
+///   it).
+/// - **No new seam.** The one ported caller,
+///   `util/vtable_query.rs`'s `vtable_query_4c_kind4`, routes
+///   through that module's `VTABLE_SLOT_4C_DISPATCH` static, still
+///   wired to its private stub of this same body; pointing that
+///   seam at this export is a deliberate follow-up (one function
+///   per commit).
+/// - **The slot load uses `read_unaligned`** so the layout stays
+///   byte-exact on a 64-bit host: 0x4c is 4-aligned but not
+///   8-aligned.
+/// - **The reference C is not followed where it mis-decompiles**:
+///   `decomp/c/010/0811d7b0_FUN_0811d7b0.c` drops all four call
+///   arguments (`(**(code **)(*(int *)*param_1 + 0x4c))()`), showing
+///   a void call of a no-arg method — the dispatcher consumes
+///   r0..r3. The port follows the disassembly.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_slot_4c_dispatch(
+    handle: *mut *mut u8,
+    kind: u32,
+    data: usize,
+    extra: *const usize,
+) -> u32 {
+    let object = handle.read();
+    let vtable = (object as *const *const u8).read();
+    let method =
+        (vtable.add(VTABLE_SLOT_4C) as *const VtableSlot4cMethod).read_unaligned();
+    method(object, kind, data, extra)
+}
 
 /// The open stage (`FUN_0811d458` @ 0x0811d458): sends the bare
 /// selector by pointer.
@@ -1780,6 +1869,139 @@ mod tests {
                 "ldmia sp!, {{r12, pc}} returns the method's r0 unbranched"
             );
             assert_eq!(DIRECT_CALLS, 2);
+        }
+    }
+
+    // ---- vtable_slot_4c_dispatch (0x0811d7b0) direct, fake vtable ----
+
+    /// The "unsupported" status the caller at 0x0811d818 bails on
+    /// silently (`cmp r0, #0x5; beq 0x0811d870`).
+    const UNSUPPORTED_ERR: u32 = 0x5;
+
+    /// A kind other than 4: unlike the slot +0x50 callers, this
+    /// dispatcher's callers bind the kind themselves, so r1 must pass
+    /// through generically.
+    const OTHER_KIND: u32 = 7;
+
+    #[test]
+    fn dispatch_4c_double_dereferences_and_loads_slot_4c_exactly() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let mut chain = FakeChain::new();
+        chain.install(VTABLE_SLOT_4C, direct_method);
+        // Decoys at the adjacent non-overlapping host slots: method
+        // pointers are 8 bytes wide on the 64-bit host (an 8-byte
+        // write at +0x4c spans 0x4c..0x54), so +0x44 and +0x54 are
+        // the nearest decoy offsets that cannot overlap the slot
+        // under test.
+        chain.install(VTABLE_SLOT_4C - 8, wrong_slot_method);
+        chain.install(VTABLE_SLOT_4C + 8, wrong_slot_method);
+        chain.link();
+        let data_word: u32 = VALUE_WORD;
+        let forwarded: usize = FORWARDED;
+        unsafe {
+            reset_direct_log();
+
+            let result = vtable_slot_4c_dispatch(
+                chain.handle_ptr(),
+                OTHER_KIND,
+                core::ptr::addr_of!(data_word) as usize,
+                core::ptr::addr_of!(forwarded),
+            );
+
+            assert_eq!(result, MOCK_OK);
+            assert_eq!(DIRECT_CALLS, 1, "exactly one blx");
+            assert_eq!(
+                WRONG_SLOT_CALLS, 0,
+                "only vtable slot +0x4c is loaded (ldr r12, [r3, #0x4c])"
+            );
+            assert_eq!(
+                DIRECT_OBJECT,
+                core::ptr::addr_of_mut!(chain.object) as *mut u8,
+                "the method receives *handle (ldr r0, [r0])"
+            );
+            // vtable = *object (ldr r3, [r0]) is proven by the chain
+            // itself: only the method installed in the vtable buffer
+            // could have run.
+            assert_eq!(
+                DIRECT_KIND, OTHER_KIND,
+                "r1 passes through verbatim — the dispatcher is generic in kind"
+            );
+            assert_eq!(DIRECT_DATA_WORD, VALUE_WORD, "r2 (data) passes through verbatim");
+        }
+    }
+
+    #[test]
+    fn dispatch_4c_forwards_the_spilled_r3_pointer_verbatim() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let mut chain = FakeChain::new();
+        chain.install(VTABLE_SLOT_4C, direct_method);
+        chain.link();
+        let data_word: u32 = VALUE_WORD;
+        let forwarded: usize = FORWARDED;
+        unsafe {
+            reset_direct_log();
+
+            vtable_slot_4c_dispatch(
+                chain.handle_ptr(),
+                MESSAGE_KIND_4,
+                core::ptr::addr_of!(data_word) as usize,
+                core::ptr::addr_of!(forwarded),
+            );
+
+            // The original spills the incoming r3 and hands the method
+            // &spilled_r3 (stmdb sp!, {r3} / mov r3, sp); the port's
+            // callers pre-spill (see the function's deviations), so
+            // the collapsed spill-and-point is a verbatim pointer
+            // pass-through: same pointer in, same word observed.
+            assert_eq!(
+                DIRECT_EXTRA_PTR,
+                core::ptr::addr_of!(forwarded),
+                "the extra pointer reaches the method untouched"
+            );
+            assert_eq!(
+                DIRECT_EXTRA_PTR.read(),
+                FORWARDED,
+                "the word the method observes through it is the forwarded r3"
+            );
+        }
+    }
+
+    #[test]
+    fn dispatch_4c_returns_the_methods_status_verbatim() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let mut chain = FakeChain::new();
+        chain.install(VTABLE_SLOT_4C, direct_method);
+        chain.link();
+        let data_word: u32 = VALUE_WORD;
+        let forwarded: usize = FORWARDED;
+        unsafe {
+            reset_direct_log();
+
+            let mut results = [0u32; 3];
+            for (i, status) in [MOCK_OK, UNSUPPORTED_ERR, METHOD_ERR]
+                .iter()
+                .enumerate()
+            {
+                DIRECT_RESULT = *status;
+                results[i] = vtable_slot_4c_dispatch(
+                    chain.handle_ptr(),
+                    MESSAGE_KIND_4,
+                    core::ptr::addr_of!(data_word) as usize,
+                    core::ptr::addr_of!(forwarded),
+                );
+            }
+
+            assert_eq!(results[0], MOCK_OK, "0 = success, the ok path");
+            assert_eq!(
+                results[1], UNSUPPORTED_ERR,
+                "5 = \"unsupported\", the status the caller at 0x0811d818 \
+                 bails on silently (cmp r0, #0x5; beq)"
+            );
+            assert_eq!(
+                results[2], METHOD_ERR,
+                "any other status returns verbatim (ldmia sp!, {{r12, pc}})"
+            );
+            assert_eq!(DIRECT_CALLS, 3);
         }
     }
 }

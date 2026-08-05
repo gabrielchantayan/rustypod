@@ -21444,3 +21444,68 @@ functions:
       init structure is otherwise identical. Host tests:
       src/codegen/ir.rs::codegen_buffer_create_allocates_zeroes_and_stamps_the_record
       and ::codegen_buffer_create_returns_null_when_allocation_fails.
+
+  - address: 0x0811d7b0
+    ghidra: FUN_0811d7b0
+    name: vtable_slot_4c_dispatch
+    size: 28
+    sig: "u32 vtable_slot_4c_dispatch(handle: *mut *mut u8, kind: u32, data: usize, extra: *const usize)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1: handle
+      param_2: kind
+      param_3: data
+      param_4: extra
+    notes: >-
+      16 call sites (grep on decomp/osos.asm): 15 bl - the 8-site
+      cluster 0x0811d230..0x0811d2e0, 0x0811d4a0, the 4-site cluster
+      0x0811d5c4..0x0811d634, and the two sites 0x0811d830 /
+      0x0811d85c in the unported query-clamp-write routine at
+      0x0811d818 (calls it with kind 4 and a stack out-slot, treats
+      5 as "unsupported - bail silently" via cmp r0,#0x5; beq, other
+      nonzero as hard error) - plus the tail b at 0x0811d474 from
+      the ported util/vtable_query.rs vtable_query_4c_kind4 thunk
+      0x0811d46c. The shared vtable dispatcher of the slot +0x4c
+      message family - the slot +0x4c twin of this module's
+      vtable_slot_50_dispatch (FUN_0811d7fc @ 0x0811d7fc), differing
+      only in the slot offset: stmdb sp!,{r3,lr}; ldr r0,[r0];
+      ldr r3,[r0]; ldr r12,[r3,#0x4c]; mov r3,sp; blx r12;
+      ldmia sp!,{r12,pc} - double dereference handle -> object ->
+      vtable, the method at slot +0x4c invoked as method(object,
+      kind, data, &spilled_r3), its error code (0 = success)
+      returned verbatim; kind (r1) passes through untouched (the
+      kind-4 binding lives in the callers, unlike the +0x50 family),
+      and the spilled r3 is whatever the caller carried (no call
+      site sets it deliberately). Deviations: the r3 spill is
+      collapsed into the 4th parameter (the vtable_slot_50_dispatch
+      deviation verbatim - the original receives r3 by value and
+      spills it itself; the port's callers pre-spill and pass the
+      address), so the export is NOT ABI-hookable at 0x0811d7b0
+      where r3 arrives by value (no hook targets it). NO new seam:
+      the one ported caller vtable_query_4c_kind4 routes through
+      util/vtable_query.rs's VTABLE_SLOT_4C_DISPATCH static, still
+      wired to its private stub of this same body - pointing that
+      seam at this export is a deliberate follow-up (one function
+      per commit). read_unaligned slot load keeps the layout
+      byte-exact on a 64-bit host (0x4c is 4-aligned but not
+      8-aligned). Reference C
+      (decomp/c/010/0811d7b0_FUN_0811d7b0.c) mis-decompiles: drops
+      all four call arguments, showing a void call of a no-arg
+      method; the port follows the disassembly. match.py (exit 1,
+      diff expected): same double-deref / slot-load / indirect-call
+      shape as the +0x50 twin; LLVM lowers read_unaligned on ARMv5
+      to 4x ldrb + orr assembly instead of ldr r12,[r3,#0x4c],
+      tail-calls (pop then bx) instead of blx/ldmia-pc, and needs
+      no mov r3,sp because `extra` already arrives in r3 - the
+      documented collapsed-spill deviation; the crate fp frame
+      accounts for the rest. Host tests (direct calls on a fake
+      vtable): double-deref chain traversal + slot +0x4c selection
+      against +0x44/+0x54 decoys with a non-4 kind (r1 genericity),
+      verbatim r3-spill pointer forwarding, verbatim status
+      forwarding across 0 / 5 (the 0x0811d818 caller's
+      "unsupported") / generic error -
+      src/app/vtable_set.rs::dispatch_4c_double_dereferences_and_loads_slot_4c_exactly
+      /
+      dispatch_4c_forwards_the_spilled_r3_pointer_verbatim /
+      dispatch_4c_returns_the_methods_status_verbatim.
