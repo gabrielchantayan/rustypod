@@ -19045,6 +19045,33 @@ functions:
       unidentified. Rust implementation and focused host tests:
       `src/ui/object_state.rs::object_nested_flag`.
 
+  # --- retailOS nested UI-object property accessor ---
+  - address: 0x08055f9c
+    ghidra: FUN_08055f9c
+    name: object_nested_property
+    size: 12
+    sig: "u8 object_nested_property(const void *object)"
+    module: ui/object_state
+    status: ported
+    renames:
+      param_1: object
+    notes: >-
+      Pure leaf accessor: follows the aligned pointer at object+0xf00 (the
+      same nested object object_nested_flag @ 0x08055f90 dereferences) and
+      returns the byte at nested_object+0xb51. The complete body is ldr;
+      ldrb; bx lr, so the result is zero-extended in r0 and neither pointer
+      receives a null guard. Two `bl 0x08055f9c` call sites (grep -c on
+      decomp/osos.asm), both in the change-notification routine at
+      0x081732b0/0x081732c4: they cache the byte at r4+0x86 and fire a
+      virtual callback when it changes, so it behaves as a polled nested
+      property; its concrete meaning remains unidentified. The adjacent
+      0x08055fa8 (12 bytes) is the same ldr/ldrb/bx lr shape but reads
+      offset 0xb66, not byte-identical, so it stays a separate function.
+      match.py diff is only LLVM's push {fp,lr}/pop {fp,pc} frame versus
+      the ADS `bx lr` leaf; the two loads are instruction-identical. Rust
+      implementation and focused host tests:
+      `src/ui/object_state.rs::object_nested_property`.
+
   # --- C++ object-header low-flag predicate ---
   - address: 0x0808539c
     ghidra: FUN_0808539c

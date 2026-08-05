@@ -46,6 +46,10 @@ const NESTED_OBJECT_POINTER_OFFSET: usize = 0xf00;
 /// Byte offset of the flag inside the nested object (`ldrb r0, [r0, #0xb88]`).
 const NESTED_OBJECT_FLAG_OFFSET: usize = 0xb88;
 
+/// Byte offset of the property byte inside the nested object
+/// (`ldrb r0, [r0, #0xb51]`).
+const NESTED_OBJECT_PROPERTY_OFFSET: usize = 0xb51;
+
 /// object_nested_flag — original: `FUN_08055f90` @ `0x08055f90` (12 bytes).
 ///
 /// Source: `/home/gabe/Programming/ipod-decomp/decomp/c/003/08055f90_FUN_08055f90.c`;
@@ -58,6 +62,27 @@ const NESTED_OBJECT_FLAG_OFFSET: usize = 0xb88;
 pub unsafe extern "C" fn object_nested_flag(object: *const u8) -> u8 {
     let nested_object = (object.add(NESTED_OBJECT_POINTER_OFFSET) as *const *const u8).read();
     nested_object.add(NESTED_OBJECT_FLAG_OFFSET).read()
+}
+
+/// object_nested_property — original: `FUN_08055f9c` @ `0x08055f9c` (12
+/// bytes).
+///
+/// Source: `/home/gabe/Programming/ipod-decomp/decomp/c/003/08055f9c_FUN_08055f9c.c`;
+/// raw ARM: `ldr r0, [r0, #0xf00]; ldrb r0, [r0, #0xb51]; bx lr`.
+/// The leaf follows the pointer at `object + 0xf00` (the same nested object
+/// [`object_nested_flag`] dereferences), then loads and returns that nested
+/// object's byte at `+0xb51`. `ldrb` zero-extends the returned byte in `r0`;
+/// the port exposes that unsigned ABI result as `u8`. Neither pointer is
+/// null-checked, matching the original. Both stock call sites (in the
+/// change-notification routine at 0x081732b0/0x081732c4) cache the byte and
+/// fire a virtual callback when it changes, so it behaves as a polled
+/// property of the nested object; the property's concrete meaning remains
+/// unidentified. The adjacent 0x08055fa8 is the same shape with offset
+/// `0xb66` and is a separate function, not a duplicate.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn object_nested_property(object: *const u8) -> u8 {
+    let nested_object = (object.add(NESTED_OBJECT_POINTER_OFFSET) as *const *const u8).read();
+    nested_object.add(NESTED_OBJECT_PROPERTY_OFFSET).read()
 }
 
 
@@ -418,6 +443,54 @@ mod tests {
                 nested.0[NESTED_OBJECT_FLAG_OFFSET] = byte;
                 assert_eq!(
                     u32::from(object_nested_flag(outer.0.as_ptr())),
+                    u32::from(byte),
+                    "the ldrb result must be zero-extended for {byte:#04x}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn follows_the_object_pointer_to_the_nested_property() {
+        #[repr(align(8))]
+        struct OuterObject(
+            [u8; NESTED_OBJECT_POINTER_OFFSET + core::mem::size_of::<*const u8>()],
+        );
+        #[repr(align(8))]
+        struct NestedObject([u8; NESTED_OBJECT_PROPERTY_OFFSET + 2]);
+
+        let mut outer = OuterObject([0xa5; NESTED_OBJECT_POINTER_OFFSET + core::mem::size_of::<*const u8>()]);
+        let mut nested = NestedObject([0xa5; NESTED_OBJECT_PROPERTY_OFFSET + 2]);
+        nested.0[NESTED_OBJECT_PROPERTY_OFFSET - 1] = 0x11;
+        nested.0[NESTED_OBJECT_PROPERTY_OFFSET] = 0x3c;
+        nested.0[NESTED_OBJECT_PROPERTY_OFFSET + 1] = 0xe2;
+
+        unsafe {
+            (outer.0.as_mut_ptr().add(NESTED_OBJECT_POINTER_OFFSET) as *mut *const u8)
+                .write(nested.0.as_ptr());
+            assert_eq!(object_nested_property(outer.0.as_ptr()), 0x3c);
+        }
+    }
+
+    #[test]
+    fn nested_property_is_an_unsigned_byte() {
+        #[repr(align(8))]
+        struct OuterObject(
+            [u8; NESTED_OBJECT_POINTER_OFFSET + core::mem::size_of::<*const u8>()],
+        );
+        #[repr(align(8))]
+        struct NestedObject([u8; NESTED_OBJECT_PROPERTY_OFFSET + 1]);
+
+        let mut outer = OuterObject([0; NESTED_OBJECT_POINTER_OFFSET + core::mem::size_of::<*const u8>()]);
+        let mut nested = NestedObject([0; NESTED_OBJECT_PROPERTY_OFFSET + 1]);
+
+        unsafe {
+            (outer.0.as_mut_ptr().add(NESTED_OBJECT_POINTER_OFFSET) as *mut *const u8)
+                .write(nested.0.as_ptr());
+            for byte in [0x00, 0x01, 0x7f, 0x80, 0xff] {
+                nested.0[NESTED_OBJECT_PROPERTY_OFFSET] = byte;
+                assert_eq!(
+                    u32::from(object_nested_property(outer.0.as_ptr())),
                     u32::from(byte),
                     "the ldrb result must be zero-extended for {byte:#04x}"
                 );
