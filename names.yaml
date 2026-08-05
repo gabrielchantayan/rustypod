@@ -15388,6 +15388,37 @@ functions:
       as vector_size_bool, plus LLVM's fp frame and a subs/movne
       fold of the equality-invert.
 
+  - address: 0x083d79dc
+    ghidra: FUN_083d79dc
+    name: vector_bool_reference_init
+    size: 28
+    sig: "VectorBoolReference *vector_bool_reference_init(VectorBoolReference *mask_ref, const VectorBoolIter *iter)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: mask_ref, param_2: iter}
+    notes: >-
+      `std::vector<bool>` mask-reference constructor: initializes a
+      `{word, mask}` reference proxy from a bit iterator `{word, bit}`
+      - `ldr r2,[r1]; ldr r1,[r1,#4]; mov r3,#1; mov r1,r3, lsl r1;
+      str r1,[r0,#4]; str r2,[r0]`, i.e. copy the word pointer and
+      store the single-bit mask `1 << bit`. r0 (mask_ref) is left
+      untouched, so the port returns it like deque_iter_assign. The
+      mask shift is an ARM register lsl - only the low byte of the bit
+      offset is used and a shift of 32 or more yields zero; the port
+      reproduces that with checked_shl (an in-range iterator, bit
+      0..32, never hits either edge). Identification: sits in the
+      bit-iterator cluster between operator!= @ 0x083d79b4 and the
+      `*word & mask` bit test @ 0x083d7a20 (see the 0x083d7968 entry
+      for the neighborhood). 8 bl call sites (0x0826a3f4, 0x083e5d90,
+      0x083e5da4, 0x083e5dd8, 0x083e5e78, 0x083e5f04, 0x083e5f20,
+      0x083e603c), seven of them in the vector<bool> storage-grow
+      path; the only copy. match.py - same ldr / lsl / str structure;
+      the loads and stores come out as byte accesses from the family's
+      read_unaligned/write_unaligned host-testing idiom, the same
+      accepted deviation as vector_size_bool, the checked_shl compiles
+      to a `cmp #32` + conditional lsl (exactly the ARM register-shift
+      zero-above-31 semantics), plus LLVM's fp frame.
+
   - address: 0x083d7708
     ghidra: FUN_083d7708
     name: vector_capacity_elem12

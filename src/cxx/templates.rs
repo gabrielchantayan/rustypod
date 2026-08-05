@@ -39,6 +39,9 @@
 //!   begin bit offset.
 //! - [`vector_bool_iter_not_equal`] — the `vector<bool>` bit-iterator
 //!   `operator!=`: the word pointers differ, or the bit offsets do.
+//! - [`vector_bool_reference_init`] — the `vector<bool>` mask-reference
+//!   constructor: copies the iterator's word pointer and stores the
+//!   single-bit mask `1 << bit`.
 //! - [`vector_capacity`] / [`vector_capacity_elem12`] /
 //!   [`vector_capacity_elem16`] / [`vector_capacity_elem24_copy_77ec`]
 //!   / [`vector_capacity_elem40`] / [`vector_capacity_elem8`] /
@@ -732,6 +735,20 @@ pub struct VectorBoolIter {
     pub bit: u32,
 }
 
+/// A `vector<bool>` mask reference — the `{word, mask}` pair
+/// [`vector_bool_reference_init`] writes, `std::vector<bool>`'s
+/// `_Vb_reference`-shaped proxy for a single bit: `word` addresses the
+/// storage word and `mask` is the single-bit selector `1 << bit`
+/// within it. Addressed by field, so the port is layout-correct on
+/// both the 32-bit target and a 64-bit host.
+#[repr(C)]
+pub struct VectorBoolReference {
+    /// Word containing the referenced bit.
+    pub word: *mut u32,
+    /// Single-bit mask selecting the bit within `word`.
+    pub mask: u32,
+}
+
 /// The `{begin_word, begin_bit, end_word, end_bit}` head of a
 /// `vector<bool>` — two bit iterators, each a word pointer plus a bit
 /// offset within that word. Addressed by field, so the port is
@@ -765,7 +782,8 @@ pub struct VectorBoolBounds {
 ///
 /// Identification: the immediate neighbors are the bit-iterator
 /// members — `operator!=` @ 0x083d79b4 (compare word pointer, then bit
-/// offset), the `{word, 1 << bit}` mask-reference ctor @ 0x083d79dc and
+/// offset), [`vector_bool_reference_init`] @ 0x083d79dc (the `{word, 1 << bit}`
+/// mask-reference ctor) and
 /// the `*word & mask` bit test @ 0x083d7a20 — and both call sites feed
 /// the result into `words = (max(0x20, 2*size) + 0x1f) >> 5; alloc
 /// words * 4`, the `vector<bool>` storage grow.
@@ -807,7 +825,8 @@ pub unsafe extern "C" fn vector_size_bool(bits: *const VectorBoolBounds) -> i32 
 /// [`not_equal_deref`].
 ///
 /// Identification: it sits between [`vector_size_bool`] @ 0x083d7968
-/// and the `{word, 1 << bit}` mask-reference ctor @ 0x083d79dc in the
+/// and [`vector_bool_reference_init`] @ 0x083d79dc (the `{word, 1 << bit}`
+/// mask-reference ctor) in the
 /// bit-iterator cluster (see that entry for the neighborhood).
 ///
 /// # Safety
@@ -827,6 +846,54 @@ pub unsafe extern "C" fn vector_bool_iter_not_equal(
     let b_word = core::ptr::read_unaligned(core::ptr::addr_of!((*b).word));
     let b_bit = core::ptr::read_unaligned(core::ptr::addr_of!((*b).bit));
     u32::from(a_word != b_word || a_bit != b_bit)
+}
+
+/// vector_bool_reference_init — original: `FUN_083d79dc` @ 0x083d79dc
+/// (28 bytes; 8 `bl` call sites — 0x0826a3f4 plus 0x083e5d90,
+/// 0x083e5da4, 0x083e5dd8, 0x083e5e78, 0x083e5f04, 0x083e5f20 and
+/// 0x083e603c, seven of them in the `vector<bool>` storage-grow path;
+/// the only copy — `ipod-decomp/decomp/c/037/083d79dc_FUN_083d79dc.c`).
+///
+/// `std::vector<bool>` mask-reference constructor: initializes a
+/// `{word, mask}` reference proxy ([`VectorBoolReference`]) from a bit
+/// iterator `{word, bit}` ([`VectorBoolIter`]) — copies the word
+/// pointer and computes the single-bit mask `1 << bit`. The original
+/// is a straight `ldr`/`lsl`/`str` run — `ldr r2,[r1]; ldr r1,[r1,#4];
+/// mov r3,#1; mov r1,r3, lsl r1; str r1,[r0,#4]; str r2,[r0]` — and
+/// leaves `mask_ref` in r0 untouched, so like [`deque_iter_assign`]
+/// the port returns it.
+///
+/// The mask shift is an ARM register `lsl`: only the low byte of the
+/// bit offset is used and a shift of 32 or more yields zero, which the
+/// port reproduces with `checked_shl`; an in-range iterator (bit 0..32)
+/// never reaches either edge.
+///
+/// Identification: it sits between the bit-iterator `operator!=` @
+/// 0x083d79b4 and the `*word & mask` bit test @ 0x083d7a20 in the
+/// bit-iterator cluster (see [`vector_size_bool`] @ 0x083d7968 for the
+/// neighborhood), and every call site pairs it with that cluster's
+/// iterator.
+///
+/// # Safety
+/// `mask_ref` must point at a writable [`VectorBoolReference`] and
+/// `iter` at a readable [`VectorBoolIter`]. The word storage itself is
+/// never accessed, so the iterator's word pointer may be NULL.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_bool_reference_init(
+    mask_ref: *mut VectorBoolReference,
+    iter: *const VectorBoolIter,
+) -> *mut VectorBoolReference {
+    // `read_unaligned`/`write_unaligned`: same 4-but-not-8-aligned
+    // firmware head hazard as `vector_size_bool` on a 64-bit host.
+    let word = core::ptr::read_unaligned(core::ptr::addr_of!((*iter).word));
+    let bit = core::ptr::read_unaligned(core::ptr::addr_of!((*iter).bit));
+    // ARM register `lsl`: the shift amount is the low byte of `bit`,
+    // and a shift of 32 or more produces zero (not a wrap).
+    let mask = 1u32.checked_shl(bit & 0xff).unwrap_or(0);
+    core::ptr::write_unaligned(core::ptr::addr_of_mut!((*mask_ref).mask), mask);
+    core::ptr::write_unaligned(core::ptr::addr_of_mut!((*mask_ref).word), word);
+    mask_ref
 }
 
 /// The `{begin, end, end_of_storage}` head of a vector — the three
@@ -1899,6 +1966,77 @@ mod tests {
             assert_eq!(vector_bool_iter_not_equal(&null_iter, &null_iter), 0);
             let other = VectorBoolIter { word: core::ptr::null_mut(), bit: 1 };
             assert_eq!(vector_bool_iter_not_equal(&null_iter, &other), 1);
+        }
+    }
+
+    // ---- vector_bool_reference_init -----------------------------
+
+    /// Every in-range bit offset produces its single-bit mask and the
+    /// word pointer is copied verbatim; the original returns `mask_ref`
+    /// in r0 untouched, and so does the port.
+    #[test]
+    fn vector_bool_reference_init_copies_word_and_shifts_mask() {
+        unsafe {
+            let storage = [0u32; 4];
+            let mut reference = VectorBoolReference { word: core::ptr::null_mut(), mask: 0 };
+            for word_index in 0..4usize {
+                for bit in 0..32u32 {
+                    let iter = VectorBoolIter { word: storage.as_ptr().add(word_index) as *mut u32, bit };
+                    let dst = core::ptr::addr_of_mut!(reference);
+                    let returned = vector_bool_reference_init(dst, &iter);
+                    assert_eq!(returned, dst, "returns mask_ref untouched");
+                    assert_eq!(reference.word, iter.word, "word copied for bit {bit}");
+                    assert_eq!(reference.mask, 1u32 << bit, "mask for bit {bit}");
+                    // The iterator itself is never written.
+                    assert_eq!(iter.bit, bit);
+                }
+            }
+        }
+    }
+
+    /// The word storage is never dereferenced: a NULL iterator word
+    /// passes straight through into the reference.
+    #[test]
+    fn vector_bool_reference_init_never_touches_the_word_storage() {
+        unsafe {
+            let mut reference = VectorBoolReference { word: 1usize as *mut u32, mask: 0xff };
+            let iter = VectorBoolIter { word: core::ptr::null_mut(), bit: 7 };
+            vector_bool_reference_init(core::ptr::addr_of_mut!(reference), &iter);
+            assert_eq!(reference.word, core::ptr::null_mut());
+            assert_eq!(reference.mask, 0x80);
+        }
+    }
+
+    /// The mask shift is an ARM register `lsl`: only the low byte of
+    /// the bit offset counts and a shift of 32 or more yields zero
+    /// (no wraparound).
+    #[test]
+    fn vector_bool_reference_init_matches_arm_register_shift_edges() {
+        unsafe {
+            let mut reference = VectorBoolReference { word: core::ptr::null_mut(), mask: 0 };
+            for (bit, want) in [(32u32, 0u32), (63, 0), (255, 0), (0x100, 1), (0x101, 2), (0x11f, 1 << 31)] {
+                let iter = VectorBoolIter { word: core::ptr::null_mut(), bit };
+                vector_bool_reference_init(core::ptr::addr_of_mut!(reference), &iter);
+                assert_eq!(reference.mask, want, "mask for bit {bit:#x}");
+            }
+        }
+    }
+
+    /// Firmware heads are only guaranteed 4-byte aligned; the port
+    /// must write a 4-but-not-8-aligned destination without faulting
+    /// on a 64-bit host.
+    #[test]
+    fn vector_bool_reference_init_writes_an_unaligned_destination() {
+        unsafe {
+            let mut buf = [0u8; 24];
+            let storage = [0u32; 1];
+            let unaligned = buf.as_mut_ptr().add(4) as *mut VectorBoolReference;
+            let iter = VectorBoolIter { word: storage.as_ptr() as *mut u32, bit: 5 };
+            vector_bool_reference_init(unaligned, &iter);
+            let word = core::ptr::read_unaligned(core::ptr::addr_of!((*unaligned).word));
+            let mask = core::ptr::read_unaligned(core::ptr::addr_of!((*unaligned).mask));
+            assert_eq!(word, iter.word);
+            assert_eq!(mask, 0x20);
         }
     }
 
