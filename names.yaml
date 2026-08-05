@@ -15049,6 +15049,8 @@ functions:
       same accepted deviation as vector_size_elem4, plus LLVM's fp
       frame. This was the last identified-not-ported instantiation of
       the capacity family - the block is now fully ported.
+
+  - address: 0x083d7708
     ghidra: FUN_083d7708
     name: vector_capacity_elem12
     size: 20
@@ -15073,6 +15075,32 @@ functions:
       pairs come out as byte loads from the family's read_unaligned
       host-testing idiom, the same accepted deviation as
       vector_size_elem4.
+
+  - address: 0x083d7650
+    ghidra: FUN_083d7650
+    name: vector_capacity_elem20
+    size: 20
+    sig: "i32 vector_capacity_elem20(const VectorStorage *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      `vector<T>::capacity()` for a 20-byte element - a DIVIDE member
+      of the capacity family: same end-of-storage head as the 24-byte
+      primary (`ldr r1,[r0,#8]; ldr r0,[r0]; sub r0,r1,r0`), then `mov
+      r1,#0x14` and a TAIL BRANCH into the ADS signed divide @
+      0x08031568 (ported as __rt_sdiv), signed and truncating like any
+      C `/`, so a reversed span truncates toward zero and a partial
+      element is dropped. 2 bl call sites (0x083e0130, 0x083e0260).
+      This instantiation was never in the ledger at all - the
+      vector_capacity_elem4 entry's "the block is now fully ported"
+      claim was premature; it sits immediately before the
+      vector_size_elem8-shaped shift at 0x083d7664. Verified against
+      osos.asm per address. match.py - same sub / mov r1,#20 / b
+      __rt_sdiv core as the other divide members; the ldr pairs come
+      out as byte loads from the family's read_unaligned host-testing
+      idiom, plus LLVM's fp frame, the same accepted deviation as
+      vector_capacity_elem12.
 
   - address: 0x083d77ec
     ghidra: FUN_083d77ec
