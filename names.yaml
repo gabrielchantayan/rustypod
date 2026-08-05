@@ -261,6 +261,17 @@ functions:
       calls the second unported UI notification target with 0x22008cb8,
       clears the byte, and returns zero. A clear byte performs no call/store.
 
+  - address: 0x08005f10
+    ghidra: FUN_08005f10
+    name: ui_operation_unavailable
+    size: 8
+    sig: "int ui_operation_unavailable(void)"
+    module: ui/operation_unavailable
+    status: ported
+    vars: {}
+    notes: Stateless UI leaf. `mvn r0, #0; bx lr` returns the signed -1
+      unavailable/error sentinel without reading an argument or memory.
+
   - address: 0x0800027c
     ghidra: FUN_0800027c
     name: memzero_aligned
