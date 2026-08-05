@@ -23629,7 +23629,7 @@ functions:
       FUN_080eb67c: malloc_wrapper (direct, ported in heap/veneers) - the checked wrapper, called (8, 0x19)
       FUN_080edb74: checked-alloc guard (unported; the EXISTING VTABLE_FILE_RECORD_KIND1_GUARD seam - same callee the kind-1 constructor seamed, no duplicate seam)
       FUN_0812d1b8: the shared 84-byte tail body (lookup-or-create-bucket then insert node), INLINED - functions.csv's 160-byte row lumps it into this function and Ghidra decompiles the pair as one C function; its only other reach is the tag-0x1a sibling FUN_0811cefc's `b 0x0812d1b8` at 0x0811cf68 (that sibling reads the registry at +0x18 and stays unported)
-      FUN_0812d160: bucket lookup thunk (16-byte spill-slot wrapper over the ported registry_lookup 0x0810e4c8, 6 bl sites; unported; new VTABLE_FILE_RECORD_INSERT_LOOKUP seam, wired default models the exact body over registry_lookup)
+      FUN_0812d160: vtable_file_record_lookup (24-byte spill-slot wrapper over the ported registry_lookup 0x0810e4c8, 6 bl sites; ported in app/vtable_set; the wired VTABLE_FILE_RECORD_INSERT_LOOKUP default, callers still route through the seam)
       FUN_082aadd4: operator_new (direct, ported in heap/veneers) - the miss path's 0x28 bucket allocation
       FUN_0810e64c: class_registry_construct (the EXISTING VTABLE_FILE_RECORD_KIND1_CTOR seam - same callee the kind-1 constructor seamed; note the original here bls 0x0810e64c DIRECTLY, not through the kind-1's 0x0812d2fc thunk, so the seam's wired default models this chain exactly)
       FUN_0810e4ac: registry_insert (direct, ported in app/registry) - the vtable +0x1c dispatch building the {key, value} pair on its stack (stmia sp, {r1, r2}); called twice on a miss (outer keyed bucket insert, then the node insert tail), once on a hit
@@ -23663,13 +23663,15 @@ functions:
       and the registry construct REUSE the existing
       VTABLE_FILE_RECORD_KIND1_GUARD / VTABLE_FILE_RECORD_KIND1_CTOR
       read_volatile seams (same callees the kind-1 constructor seamed
-      - no duplicate seam under a second name); the unported lookup
-      thunk 0x0812d160 sits behind the new
-      VTABLE_FILE_RECORD_INSERT_LOOKUP seam whose wired default
-      models its exact 16-byte body over the ported registry_lookup
-      (the original's uninitialized r3 spill out-slot is seeded NULL
-      - exact for the miss path's r0, the app/registry.rs
-      zeroed-stack-pair precedent); the record's +0x04 registry field
+      - no duplicate seam under a second name); the ported lookup thunk
+      0x0812d160 is vtable_file_record_lookup, the wired
+      VTABLE_FILE_RECORD_INSERT_LOOKUP default (the cell_size_ptr /
+      get_varint promotion precedent — callers still route through
+      the seam for hookability); it directly calls the already-ported
+      registry_lookup 0x0810e4c8, its dead r2 parameter is dropped,
+      and its r3 spill only seeds an unobservable out-slot (the
+      search writes every nonzero-status result before the thunk's
+      conditional load); the record's +0x04 registry field
       is read POINTER-SIZED, a host-representation deviation from the
       32-bit `ldr r0, [r5, #0x4]` (the miss path dereferences the
       registry through registry_insert's vtable read, so a truncated
@@ -23704,8 +23706,55 @@ functions:
       / file_record_insert_stores_arg4_and_arg5_into_the_node
       / file_record_insert_dispatches_vtable_slot_1c_with_the_stack_pair
       / file_record_insert_runs_the_checked_alloc_guard_on_the_node
-      / file_record_insert_lookup_default_chains_the_ported_registry_lookup.
+      / file_record_lookup_hit_returns_the_slot_value
+      / file_record_lookup_miss_returns_null
+      / file_record_lookup_routes_registry_and_key_verbatim_to_the_search.
 
+
+  - address: 0x0812d160
+    ghidra: FUN_0812d160
+    name: vtable_file_record_lookup
+    size: 24
+    sig: "*mut u8 vtable_file_record_lookup(registry: *mut u8, key: u32)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r0: registry
+      param_2/r1: key
+      param_3/r2: dead (overwritten with the stack out-slot pointer by `mov r2, sp` before the search; the reference C's unused param_3)
+      param_4/r3: the initial content of the stack out-slot (spilled by `stmdb sp!, {r3, lr}`; unobservable because registry_lookup writes every nonzero-status result before `ldrne` reads the slot, while a zero status returns 0 without loading it)
+      FUN_0810e4c8: registry_lookup (direct, ported in app/registry; `registry, key, &out_slot`)
+    notes: >-
+      6 bl call sites (grep on decomp/osos.asm): 0x0812d184 in the
+      dispose-bucket wrapper FUN_0812d178, 0x0812d1cc in the shared
+      insert tail inlined by vtable_file_record_insert, 0x0812d218 /
+      0x0812d240 / 0x0812d264 in the rest of the registry-facade
+      thunk cluster 0x0812d178..0x0812d254, and 0x0821c4d8 in the
+      unported inner-iterator begin FUN_0821c4c8. A keyed search
+      wrapper: it spills r3 and lr, overwrites dead r2 with sp, calls
+      registry_lookup(registry, key, &slot), and returns slot on its
+      nonzero found status or 0 on a miss. The r3 spill is arg4's
+      initial slot value (vtable_file_record_insert's inlined tail
+      happens to pass the node), not an argument forwarded to the
+      search; it is unobservable because registry_lookup writes every
+      hit before the conditional load. The reference C
+      decomp/c/011/0812d160_FUN_0812d160.c accurately shows this
+      shape, including `local_8[0] = param_4`; its param_3 is dead.
+      Promotion: this export replaced the private insert_lookup_default
+      model as the wired VTABLE_FILE_RECORD_INSERT_LOOKUP seam default
+      (the cell_size_ptr / get_varint precedent); vtable_file_record_insert
+      deliberately remains routed through that seam for hookability,
+      with no caller rewiring. FUN_0810e4c8 is already ported as
+      app/registry.rs registry_lookup and is called directly; its
+      remaining firmware vtable methods stay beneath that port's own
+      dispatches. match.py: 12 Rust instructions versus the original
+      6; same registry_lookup-call -> status-test -> conditional-slot-
+      return structure, with the port's explicit zero initialization
+      and frame accounting for the extra instructions (the direct
+      relocation is printed as `bl 0`). Host tests:
+      src/app/vtable_set.rs::file_record_lookup_hit_returns_the_slot_value
+      / file_record_lookup_miss_returns_null
+      / file_record_lookup_routes_registry_and_key_verbatim_to_the_search.
   - address: 0x0811d21c
     ghidra: FUN_0811d21c
     name: vtable_query_4c_read_eight_byte_record

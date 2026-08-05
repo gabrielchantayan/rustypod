@@ -3483,8 +3483,9 @@ unsafe extern "C" fn teardown_outer_next_unported(_iter: *mut u32, _key_out: *mu
 /// 0821c4e8  b     0x081dde18        @ tail: iterator_begin(iter, bucket)
 /// ```
 ///
-/// Looks the outer key up in the registry through the unported
-/// 0x0812d160 and tail-branches into the shared iterator begin
+/// Looks the outer key up in the registry through the ported
+/// [`vtable_file_record_lookup`] (0x0812d160) and tail-branches into
+/// the shared iterator begin
 /// `FUN_081dde18` (see [`VTABLE_FILE_RECORD_TEARDOWN_OUTER_BEGIN`])
 /// over the resulting bucket. The wired default is a no-op (the
 /// [`VTABLE_FILE_RECORD_TEARDOWN_OUTER_BEGIN`] rationale). Host tests
@@ -4073,46 +4074,79 @@ const FILE_RECORD_NODE_SIZE: usize = 8;
 const FILE_RECORD_NODE_ALLOC_TAG: usize = 0x19;
 
 /// The bucket lookup behind the `bl 0x0812d160` inside
-/// [`vtable_file_record_insert`]'s inlined tail body. `FUN_0812d160` @
-/// 0x0812d160 (16 bytes; **6 `bl` call sites**, grep on
-/// `decomp/osos.asm`, all inside this registry-facade thunk cluster
-/// 0x0812d178..0x0812d254 — the inner-iterator begin `FUN_0821c4c8`
-/// [`vtable_file_record_teardown`] documents routes through it too;
-/// **unported**):
+/// [`vtable_file_record_insert`]'s inlined tail body — the ported
+/// [`vtable_file_record_lookup`] (`FUN_0812d160` @ 0x0812d160, 24
+/// bytes), which IS this seam's wired default (the
+/// cell_size_ptr / get_varint promotion precedent: the port replaced
+/// the private model, callers keep routing through the seam — no
+/// rewiring). The seam is retained for host-test interception: on
+/// firmware the lookup bottoms out in the registry's vtable
+/// dispatches (+0x4c `index_of` / +0x3c `entry_at` inside
+/// `registry_find`), so host tests install a scripted mock via
+/// `core::ptr::addr_of_mut!` instead of running the default against a
+/// real container.
+pub static mut VTABLE_FILE_RECORD_INSERT_LOOKUP: unsafe extern "C" fn(
+    registry: *mut u8,
+    key: u32,
+) -> *mut u8 = vtable_file_record_lookup;
+
+/// vtable_file_record_lookup — original: `FUN_0812d160` @ 0x0812d160
+/// (24 bytes; **6 `bl` call sites**, grep on `decomp/osos.asm`:
+/// 0x0812d184 (the dispose-bucket wrapper `FUN_0812d178`), 0x0812d1cc
+/// (the shared insert tail [`vtable_file_record_insert`] inlines),
+/// 0x0812d218, 0x0812d240 and 0x0812d264 (the rest of the
+/// registry-facade thunk cluster 0x0812d178..0x0812d254), and
+/// 0x0821c4d8 in the inner-iterator begin `FUN_0821c4c8`
+/// [`vtable_file_record_teardown`] documents).
+///
+/// The keyed registry lookup of the file-record family — a spill-slot
+/// wrapper over the PORTED `app/registry.rs` `registry_lookup`
+/// (0x0810e4c8):
 ///
 /// ```text
 /// 0812d160  stmdb sp!, {r3, lr}   @ spill slot = the value out-slot
-/// 0812d164  mov   r2, sp
+/// 0812d164  mov   r2, sp          @ out = &slot (arg3 DIES here)
 /// 0812d168  bl    0x0810e4c8      @ registry_lookup(registry, key, &slot)
 /// 0812d16c  cmp   r0, #0x0
 /// 0812d170  ldrne r0, [sp, #0x0]  @ hit -> r0 = the registered value
 /// 0812d174  ldmia sp!, {r12, pc}  @ miss -> r0 stays 0 (NULL)
 /// ```
 ///
-/// A spill-slot wrapper over the PORTED `app/registry.rs`
-/// `registry_lookup` (0x0810e4c8): the value registered under `key`,
-/// or NULL on a miss. The wired default models the exact chain (the
-/// [`VTABLE_SET_50_KIND4_OPS`] pattern); on firmware it bottoms out in
-/// the registry's vtable dispatches (+0x4c `index_of` / +0x3c
-/// `entry_at` inside `registry_find`), so host tests install a
-/// scripted mock via `core::ptr::addr_of_mut!` instead of running the
-/// default against a real container.
-pub static mut VTABLE_FILE_RECORD_INSERT_LOOKUP: unsafe extern "C" fn(
-    registry: *mut u8,
-    key: u32,
-) -> *mut u8 = insert_lookup_default;
-
-/// Default bucket lookup: the exact 16-byte body of `FUN_0812d160` —
-/// the ported `registry_lookup` (0x0810e4c8) into a stack out-slot,
-/// the value on a hit, NULL on a miss. The original's out-slot is its
-/// uninitialized r3 spill, but the slot is only loaded on a hit
-/// (`ldrne`), after `registry_lookup` wrote it, so seeding NULL here
-/// is exact for the miss path's r0 (the `app/registry.rs`
-/// zeroed-stack-pair deviation precedent).
-unsafe extern "C" fn insert_lookup_default(registry: *mut u8, key: u32) -> *mut u8 {
+/// Returns the value registered under `key`, or NULL on a miss.
+///
+/// # Deviations
+///
+/// - **The search 0x0810e4c8 is called DIRECTLY** — it is already
+///   ported in `app/registry.rs` as `registry_lookup` (the
+///   app/class_6800.rs ported-callees-called-directly precedent), so
+///   no inner seam is introduced. The only unported remainder of the
+///   original chain is the registry's firmware vtable methods
+///   themselves, reached through `registry_find`'s dispatches.
+/// - **arg3 (r2) is DEAD** — `mov r2, sp` overwrites it with the
+///   out-slot pointer before the search; the reference C's `param_3`
+///   is genuinely unused. The port drops the parameter.
+/// - **arg4 (r3) seeds the out-slot** — the entry `stmdb sp!, {r3,
+///   lr}` spill is the slot `registry_lookup` is pointed at, exactly
+///   the family's r3-spill pattern the 0x0811d340 entry documents
+///   (here the spill feeds the out-slot rather than a dispatcher's
+///   `extra`). It is UNOBSERVABLE: `registry_lookup` writes the slot
+///   on every nonzero-status path and the slot is only loaded then
+///   (`ldrne`), while on a miss r0 is 0 regardless of the slot's
+///   content — so the port's `value` local needs no seed (the
+///   `app/registry.rs` zeroed-stack-pair deviation precedent). No
+///   call site relies on it ([`vtable_file_record_insert`]'s inlined
+///   tail happens to pass the node pointer in r3).
+/// - **The reference C is accurate in shape**
+///   (`decomp/c/011/0812d160_FUN_0812d160.c`: `local_8[0] = param_4`
+///   is the r3 spill, the search gets `param_1`/`param_2` and the
+///   slot, the value returns only on nonzero status); the port only
+///   drops the dead `param_3` and gives the untyped parameters their
+///   concrete registry/key types.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_file_record_lookup(registry: *mut u8, key: u32) -> *mut u8 {
     let mut value: *mut u8 = core::ptr::null_mut();
-    let found =
-        crate::app::registry::registry_lookup(registry.cast(), key, &mut value);
+    let found = crate::app::registry::registry_lookup(registry.cast(), key, &mut value);
     if found != 0 { value } else { core::ptr::null_mut() }
 }
 
@@ -4219,10 +4253,12 @@ unsafe extern "C" fn insert_lookup_default(registry: *mut u8, key: u32) -> *mut 
 ///   straight — models this call chain even more exactly than the
 ///   kind-1 one. The guard's r0 (the node) is dead after the call, so
 ///   the seam returns nothing (the kind-1 precedent).
-/// - **The lookup thunk 0x0812d160 is unported** and sits behind the
-///   new [`VTABLE_FILE_RECORD_INSERT_LOOKUP`] seam, whose wired
-///   default models its exact 16-byte body over the ported
-///   `registry_lookup` (see the seam's doc).
+/// - **The lookup thunk 0x0812d160 is ported** in this module as
+///   [`vtable_file_record_lookup`], which is the wired default of the
+///   [`VTABLE_FILE_RECORD_INSERT_LOOKUP`] seam (the cell_size_ptr /
+///   get_varint promotion precedent); the call still routes through
+///   the seam — retained for hookability — so host tests observe it
+///   by swapping that one static.
 /// - **The record's +0x04 registry field is read POINTER-SIZED**, a
 ///   host-representation deviation from the original's 32-bit `ldr
 ///   r0, [r5, #0x4]`: the miss path dereferences the registry through
@@ -4356,7 +4392,7 @@ mod tests {
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_DESTRUCT_KIND2_DISPOSE)
                     .write_volatile(teardown_registry_dispose_unported);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_INSERT_LOOKUP)
-                    .write_volatile(insert_lookup_default);
+                    .write_volatile(vtable_file_record_lookup);
             }
         }
     }
@@ -10199,14 +10235,17 @@ mod tests {
         }
     }
 
-    // ---- the VTABLE_FILE_RECORD_INSERT_LOOKUP default ------
+    // ---- vtable_file_record_lookup (0x0812d160, the
+    // VTABLE_FILE_RECORD_INSERT_LOOKUP default) ----
 
     static mut INS_SCRIPTED_INDEX_OF_RESULT: i32 = -1;
     static mut INS_SCRIPTED_INDEX_OF_KEY: u32 = 0;
+    static mut INS_SCRIPTED_INDEX_OF_THIS: *mut Registry = core::ptr::null_mut();
     static mut INS_SCRIPTED_INSTANCE: *mut u8 = core::ptr::null_mut();
     static mut INS_SCRIPTED_ENTRY_AT_CALLS: usize = 0;
 
-    unsafe extern "C" fn scripted_index_of(_this: *mut Registry, key: *const u32) -> i32 {
+    unsafe extern "C" fn scripted_index_of(this: *mut Registry, key: *const u32) -> i32 {
+        INS_SCRIPTED_INDEX_OF_THIS = this;
         INS_SCRIPTED_INDEX_OF_KEY = key.read();
         INS_SCRIPTED_INDEX_OF_RESULT
     }
@@ -10224,8 +10263,8 @@ mod tests {
         out
     }
 
-    /// The scripted vtable for the lookup-default test: +0x4c index_of
-    /// and +0x3c entry_at answer, +0x1c insert traps (the lookup never
+    /// The scripted vtable for the lookup tests: +0x4c index_of and
+    /// +0x3c entry_at answer, +0x1c insert traps (the lookup never
     /// inserts).
     static INS_SCRIPTED_VTABLE: RegistryVtable = RegistryVtable {
         unresolved_00: [0; 7],
@@ -10252,29 +10291,62 @@ mod tests {
     };
 
     #[test]
-    fn file_record_insert_lookup_default_chains_the_ported_registry_lookup() {
+    fn file_record_lookup_hit_returns_the_slot_value() {
         unsafe {
             let registry = core::ptr::addr_of_mut!(INS_LOOKUP_FAKE);
             (*registry).vtable = &INS_SCRIPTED_VTABLE;
 
-            // Hit: index_of answers, entry_at fills the pair, the
-            // pair's VALUE word returns (ldrne r0, [sp, #0x0]).
+            // Hit: index_of answers, entry_at fills the pair, and the
+            // pair's VALUE word returns — the original's
+            // `ldrne r0, [sp, #0x0]`: a nonzero search status means
+            // the out-slot was written and becomes r0.
             INS_SCRIPTED_INDEX_OF_RESULT = 3;
             INS_SCRIPTED_INSTANCE = 0x5500_0000 as *mut u8;
             INS_SCRIPTED_ENTRY_AT_CALLS = 0;
-            let hit = insert_lookup_default(registry.cast(), 0x777);
+            let hit = vtable_file_record_lookup(registry.cast(), 0x777);
             assert_eq!(hit, INS_SCRIPTED_INSTANCE);
-            assert_eq!(INS_SCRIPTED_INDEX_OF_KEY, 0x777, "the key reaches index_of");
             assert_eq!(INS_SCRIPTED_ENTRY_AT_CALLS, 1);
+        }
+    }
 
-            // Miss: index_of answers -1, entry_at never runs, NULL
-            // returns (r0 stays 0 — the slot is never loaded).
+    #[test]
+    fn file_record_lookup_miss_returns_null() {
+        unsafe {
+            let registry = core::ptr::addr_of_mut!(INS_LOOKUP_FAKE);
+            (*registry).vtable = &INS_SCRIPTED_VTABLE;
+
+            // Miss: index_of answers -1, entry_at never runs (the
+            // out-slot is never written — per the asm the slot would
+            // still hold the r3 spill, but the miss path never loads
+            // it), and r0 stays 0: NULL returns.
             INS_SCRIPTED_INDEX_OF_RESULT = -1;
             INS_SCRIPTED_ENTRY_AT_CALLS = 0;
-            let miss = insert_lookup_default(registry.cast(), 0x888);
+            let miss = vtable_file_record_lookup(registry.cast(), 0x888);
             assert!(miss.is_null());
-            assert_eq!(INS_SCRIPTED_INDEX_OF_KEY, 0x888);
             assert_eq!(INS_SCRIPTED_ENTRY_AT_CALLS, 0);
+        }
+    }
+
+    #[test]
+    fn file_record_lookup_routes_registry_and_key_verbatim_to_the_search() {
+        unsafe {
+            let registry = core::ptr::addr_of_mut!(INS_LOOKUP_FAKE);
+            (*registry).vtable = &INS_SCRIPTED_VTABLE;
+
+            // Argument routing: the registry reaches the search's
+            // vtable dispatch as `this` verbatim and the key reaches
+            // index_of untouched — the original's r0/r1 pass straight
+            // through (r2 is dead, overwritten with the out-slot
+            // pointer).
+            INS_SCRIPTED_INDEX_OF_RESULT = -1;
+            INS_SCRIPTED_INDEX_OF_THIS = core::ptr::null_mut();
+            let _ = vtable_file_record_lookup(registry.cast(), 0xdead_beef);
+            assert_eq!(
+                INS_SCRIPTED_INDEX_OF_THIS,
+                registry,
+                "the registry pointer reaches the search verbatim"
+            );
+            assert_eq!(INS_SCRIPTED_INDEX_OF_KEY, 0xdead_beef);
         }
     }
 }
