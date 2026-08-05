@@ -24,3 +24,4 @@ pub mod string_owner;
 pub mod string_resolve;
 pub mod string_owner_init;
 pub mod template_binding;
+pub mod vtable_set;

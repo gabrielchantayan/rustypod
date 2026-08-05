@@ -20862,3 +20862,57 @@ functions:
       exhaustive 256x256 equivalence sweep against the primary —
       src/cxx/templates.rs::less_unsigned_byte_alias_73d4_truth_table /
       less_unsigned_byte_alias_73d4_matches_primary_exhaustively.
+
+  - address: 0x0811d68c
+    ghidra: FUN_0811d68c
+    name: vtable_set_50_kind4
+    size: 64
+    sig: "u32 vtable_set_50_kind4(handle: *mut *mut u8, selector: u32, value: *const u32, forwarded: usize)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1: handle
+      param_2: selector
+      param_3: value
+    notes: >-
+      21 bl call sites (grep on decomp/osos.asm): 5-site cluster
+      0x0811c60c..0x0811c710, 0x0811e8c8, 3-site cluster
+      0x081b0094..0x081b0120, 0x081bc700, 6-site cluster
+      0x081d1408..0x081d14e4, 5-site cluster 0x082713e0..0x08271448.
+      Three-stage guarded property-write dispatcher of the kind-4
+      vtable message family (slot +0x50 twin of util/vtable_query.rs's
+      vtable_query_4c_kind4 @ 0x0811d46c, which uses slot +0x4c):
+      open = FUN_0811d458 (dispatch(handle, 4, &bare_selector)); if
+      nonzero return it; write = FUN_0811d56c (reuses its push {r2,r3}
+      spill slots as the message: dispatch(handle, 4, &4) then, only
+      on 0, dispatch(handle, 4, &{*value, 4})); if nonzero return it;
+      else tail-call commit = FUN_0811d340 (dispatch(handle, 4,
+      &(selector | 0x80000000))). Arg routing: r5 = arg2 (selector)
+      feeds stages 1 and 3, r6 = arg3 (pointer to the caller's value
+      word) feeds only stage 2. Tag-bit family: neighbours 0x0811d6ec /
+      0x0811d6cc are the same one-dispatch thunk with 0x40000000 /
+      0xc0000000 tags (0x0811d6ec is the callers' "supported?" probe);
+      sibling 0x0811d64c is the identical three-stage shape with the
+      u16/kind-2 write stage 0x0811d52c (ldrh) - kind encodes the value
+      width. All stages bottom out in the unported slot +0x50
+      dispatcher FUN_0811d7fc (stmdb sp!,{r3,lr}; ldr r0,[r0]; ldr
+      r3,[r0]; ldr r12,[r3,#0x50]; mov r3,sp; blx r12). Deviations:
+      the three callees sit behind the VTABLE_SET_50_KIND4_OPS seam
+      (class_6800.rs CLASS_6800_OPS pattern) whose defaults model each
+      callee's exact body; 0x0811d7fc sits behind the
+      VTABLE_SLOT_50_DISPATCH seam (vtable_query.rs
+      VTABLE_SLOT_4C_DISPATCH pattern, read_unaligned slot load); the
+      caller's r3 is forwarded verbatim to every stage, modeled as a
+      4th parameter `forwarded` (vtable_query_4c_kind4 precedent).
+      Reference C decomp/c/010/0811d68c_FUN_0811d68c.c inlines the
+      commit thunk as FUN_0811d7fc(param_1, 4, &stack) (hiding the
+      0x80000000 tag) and drops stage 1's selector + the r3 forwarding
+      - the port follows the disassembly. match.py (exit 1, diff
+      expected): same three-call/two-guard/tail-call structure; the
+      diff is the crate fp frame and the ops-table ldr/blx standing in
+      for the direct bl 0x0811d458 / 0x0811d56c / b 0x0811d340 - the
+      documented seams. Host tests: open/write short-circuits, full
+      order + r5/r6 arg routing, default stage bodies' message
+      sequence (bare selector, kind word, {value, kind}, tagged
+      selector) and a fake-vtable end-to-end through the default
+      dispatcher body.
