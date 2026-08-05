@@ -9,6 +9,7 @@ pub mod client_populate;
 pub mod client_register;
 pub mod dcache;
 pub mod gateway_service1;
+pub mod first_event_dispatch;
 pub mod free_path;
 pub mod init;
 pub mod managed_handle;

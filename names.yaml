@@ -53,6 +53,23 @@ functions:
       skips all reads and writes when len is zero; overlapping ranges retain
       forward-copy (not memmove) behavior.
 
+  # --- first event-handler dispatch ---
+  - address: 0x080076cc
+    ghidra: FUN_080076cc
+    name: dispatch_first_event_handler
+    size: 8
+    sig: "u32 dispatch_first_event_handler(const EventHandlerSource *source, u32 event)"
+    module: heap/first_event_dispatch
+    status: ported
+    renames:
+      param_1: source
+      DAT_08003934: first_event_handler_veneer_target
+    notes: >-
+      Loads source + 0x20 into r0 and branches (not bl) to the 0x08003930
+      veneer, preserving r1's event word and forwarding the target's r0
+      result unchanged. The veneer literal enters unported retailOS code,
+      represented by FIRST_EVENT_DISPATCH_OPS with a zero-result default.
+
   - address: 0x08003150
     ghidra: FUN_08003150
     name: sctlr_enable_instruction_cache
