@@ -14224,6 +14224,21 @@ functions:
       0x083d7914 5, 0x083d78f4 5, 0x083d7a68 5, 0x083d76c8 4,
       0x083d78d4 4, 0x083d7934 4, 0x083d7a38 4, 0x083d7a58 4.
 
+  - address: 0x083d76e8
+    ghidra: FUN_083d76e8
+    name: vector_size_elem4_alias_76e8
+    size: 16
+    sig: "i32 vector_size_elem4_alias_76e8(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      Byte-identical vector_size_elem4 instantiation at 0x083d76d8:
+      `ldm r0,{r0,r1}; sub r0,r1,r0; asr r0,r0,#2; bx lr`. Its 9 bl
+      call sites use the same {begin, end} vector head. The `asr` is
+      arithmetic, so reversed spans retain their negative count. Source C:
+      decomp/c/037/083d76e8_FUN_083d76e8.c.
+
   - address: 0x083d77cc
     ghidra: FUN_083d77cc
     name: vector_size_elem4_alias_77cc
@@ -18772,12 +18787,20 @@ functions:
     ghidra: (veneer)
     name: posix_mutex_lock_veneer_a
     size: 4
+    sig: "u32 posix_mutex_lock_veneer_a(PosixMutex *mutex)"
     module: kernel/posix_mutex
-    status: identified
+    status: ported
     notes: >-
-      Single `b 0x082e8390`. Nothing to port — the veneer address IS the
-      lock for every caller that reaches it. 156 bl + 1 tail b
-      (0x0818af78), binary-verified by decoding every B/BL word.
+      ALIAS - bare `b 0x082e8390` tail veneer onto posix_mutex_lock
+      (word 0xea02195a in osos.dec, binary-verified). Nothing to port —
+      the veneer address IS the lock for every caller that reaches it.
+      156 bl + 1 tail b (0x0818af78), binary-verified by decoding every
+      B/BL word. No separate Rust symbol exists; hook this address to
+      the single posix_mutex_lock symbol (precedent: the iabs aliases
+      in fp/fp_misc, atomic_add_irqsafe_alias_f041c in kernel/csem,
+      rom_svc_22001cbc_alias_67fc in kernel/task_lock — all single-
+      instruction veneers resolved by pointing hooks at the canonical
+      port). match.py N/A: there is no veneer symbol to diff.
 
   - address: 0x08261e24
     ghidra: (veneer)
