@@ -349,6 +349,96 @@ pub unsafe extern "C" fn ft_open_face_dfont_fallback(
     result
 }
 
+/// Bitstream read-and-advance `FUN_080ebbe0` (unported): 28 bytes of
+/// `stmdb sp!,{r4,r5,lr}; bl 0x080efa38; ldr r1,[r4,#0x4];
+/// add r1,r1,r5; str r1,[r4,#0x4]; ldmia sp!,{r4,r5,pc}` — returns
+/// the `bit_count` bits FUN_080efa38 fetches MSB-first from the
+/// +0x00 buffer at the +0x04 bit position, then advances +0x04 by
+/// `bit_count`. 64 `bl 0x080ebbe0` sites, all in the video header
+/// parser cluster 0x0807d7xx..0x080f1xxx.
+pub type BitstreamReadAdvance =
+    unsafe extern "C" fn(stream: *mut u8, bit_count: u32) -> u32;
+
+/// Spins forever: [`bitstream_stuffing_to_byte_check`] must not run
+/// before target integration installs the retailOS `FUN_080ebbe0`.
+unsafe extern "C" fn missing_bitstream_read_advance(
+    _stream: *mut u8,
+    _bit_count: u32,
+) -> u32 {
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
+/// RetailOS dependency of [`bitstream_stuffing_to_byte_check`]. Target
+/// integration must install the real `FUN_080ebbe0`; focused host
+/// tests replace it with a recording seam.
+pub static mut BITSTREAM_READ_ADVANCE: BitstreamReadAdvance =
+    missing_bitstream_read_advance;
+
+#[inline(always)]
+unsafe fn bitstream_read_advance() -> BitstreamReadAdvance {
+    core::ptr::read_volatile(core::ptr::addr_of!(BITSTREAM_READ_ADVANCE))
+}
+
+/// bitstream_stuffing_to_byte_check — original: `FUN_0808554c` @
+/// `0x0808554c` (80 bytes; source:
+/// `ipod-decomp/decomp/c/005/0808554c_FUN_0808554c.c`).
+///
+/// Validates and consumes one byte-alignment stuffing sequence of the
+/// {data-pointer @ +0x00, bit-position @ +0x04} stream object whose
+/// initializer is [`object_value_set_flags_clear`] @ 0x08085344
+/// ({value, 0} into +0x00/+0x04) and whose predicate
+/// [`object_low_flags_clear`] @ 0x0808539c reports "+0x04 low three
+/// bits clear" — the bit position sitting on a byte boundary. Reads
+/// one bit, which must be 0, then keeps reading bits, each of which
+/// must be 1, until the position is byte-aligned again; returns 0
+/// once aligned and 1 the moment any bit breaks the pattern. Every
+/// read goes through the read-and-advance `FUN_080ebbe0(stream, 1)`
+/// (`mov r1, #0x1` @ 0x08085554 and @ 0x08085568), so each call
+/// nudges the +0x04 position by one. The retail sequence is
+/// `stmdb sp!,{r4,lr}; mov r4,r0; mov r1,#1; bl 0x080ebbe0;
+/// cmp #0; bne-ret1; loop: mov r0,r4; bl 0x0808539c; cmp #0;
+/// beq-read; mov r0,#0; pop; read: mov r1,#1; mov r0,r4;
+/// bl 0x080ebbe0; cmp #1; bne-ret1; b-loop`.
+///
+/// Identification: the only 2 `bl 0x0808554c` sites (@ 0x080ed0e8
+/// and @ 0x080f0cec, grep -c on decomp/osos.asm) sit in the video
+/// header parser that matches 32-bit start codes 0x000001B5 /
+/// 0x000001B3 (`sub r12,r0,#0x100; subs r12,r12,#0xb5/#0xb3` @
+/// 0x080ecfcc/0x080f0d14), a 24-bit == 1 prefix with an 8-bit code
+/// < 0x20 (@ 0x080ed104-0x080ed120), MPEG's video_signal_type field
+/// pattern (1-bit flag gating 3-bit format, 1-bit range, and a
+/// 1-bit colour-description flag gating three 8-bit tables @
+/// 0x080ed074-0x080ed0e0), and FUN_0807d724's scan to the next
+/// 0x000001xx start code (which both callers run only when this
+/// function returns 0). The 0-bit-then-1-bits-to-the-byte-boundary
+/// shape is the byte-alignment stuffing an MPEG-style stream writes
+/// before a start code, and the return value gates the scan for
+/// that start code. The parser's own name is unlocated, so the
+/// name claims only the verified bitstream behavior.
+///
+/// Deviations: the unported read-and-advance rides the
+/// [`BITSTREAM_READ_ADVANCE`] seam (house pattern — see
+/// [`OBJECT_FLAGS_FETCH_INCREMENT_LOCK`]) instead of a direct `bl`;
+/// the ported [`object_low_flags_clear`] takes the byte-alignment
+/// test directly.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn bitstream_stuffing_to_byte_check(stream: *mut u8) -> u32 {
+    if bitstream_read_advance()(stream, 1) != 0 {
+        return 1;
+    }
+    loop {
+        if object_low_flags_clear(stream) != 0 {
+            return 0;
+        }
+        if bitstream_read_advance()(stream, 1) != 1 {
+            return 1;
+        }
+    }
+}
+
 /// Namespace-provider count accessor `FUN_08369780` (unported): 16
 /// bytes of `cmp r0,#0x0; ldrne r0,[r0,#0x0]; mvneq r0,#0x0; bx lr`
 /// — the signed entry count in the providers object's +0x00 word, or
@@ -1736,5 +1826,238 @@ mod tests {
             "the ldr r1,[r4,#0x0] @ 0x080855e8 reloads the index after the hash call"
         );
         uninstall_registry_seam();
+    }
+
+    // --- bitstream_stuffing_to_byte_check ---
+
+    /// Serializes the tests that swap the bitstream read-advance seam
+    /// and the scripted stream data.
+    static STUFFING_TEST_LOCK: StdMutex<()> = StdMutex::new(());
+
+    /// The stream object's +0x00 word is a data pointer only to the
+    /// (unported) retail read-advance; the host seam below reads the
+    /// scripted bits from this global instead, so test objects only
+    /// need their +0x04 position word — the word
+    /// [`object_low_flags_clear`] tests.
+    static mut STUFFING_DATA: [u8; 8] = [0; 8];
+
+    /// One recorded read-advance call: the stream pointer and the
+    /// requested bit count.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct StuffingRead {
+        stream: usize,
+        bit_count: u32,
+    }
+
+    const NO_READ: StuffingRead = StuffingRead { stream: 0, bit_count: 0 };
+
+    static mut STUFFING_READS: [StuffingRead; 16] = [NO_READ; 16];
+    static mut STUFFING_READ_COUNT: usize = 0;
+
+    /// A faithful host stand-in for `FUN_080ebbe0`: fetches
+    /// `bit_count` bits MSB-first at the stream's +0x04 bit position
+    /// (the FUN_080efa38 fetch — bit `i` is bit `7 - (i & 7)` of byte
+    /// `i >> 3`), then advances +0x04 by `bit_count` — the retail
+    /// `ldr r1,[r4,#0x4]; add; str` — and records the call.
+    unsafe extern "C" fn real_bitstream_read_advance(stream: *mut u8, bit_count: u32) -> u32 {
+        let position = stream.add(4).cast::<u32>();
+        let mut bit_position = position.read_volatile();
+        let mut value = 0u32;
+        for _ in 0..bit_count {
+            let byte = STUFFING_DATA[(bit_position >> 3) as usize];
+            value = (value << 1) | u32::from(byte >> (7 - (bit_position & 7)) & 1);
+            bit_position += 1;
+        }
+        position.write_volatile(bit_position);
+        let count = STUFFING_READ_COUNT;
+        assert!(count < 16, "read-advance seam called more than 16 times");
+        STUFFING_READS[count] = StuffingRead { stream: stream as usize, bit_count };
+        STUFFING_READ_COUNT = count + 1;
+        value
+    }
+
+    /// An aligned stand-in for the stream object: +0x00 unused by the
+    /// host seam, +0x04 the bit position.
+    #[repr(C, align(4))]
+    struct StuffingStream {
+        words: [u32; 2],
+    }
+
+    /// Installs the real read-advance seam and seeds the scripted
+    /// bits, returning the guard serializing the swap.
+    fn install_bitstream_seam(data: [u8; 8]) -> StdMutexGuard<'static, ()> {
+        let guard = STUFFING_TEST_LOCK.lock().unwrap();
+        unsafe {
+            STUFFING_DATA = data;
+            STUFFING_READ_COUNT = 0;
+            BITSTREAM_READ_ADVANCE = real_bitstream_read_advance;
+        }
+        guard
+    }
+
+    fn uninstall_bitstream_seam() {
+        unsafe { BITSTREAM_READ_ADVANCE = missing_bitstream_read_advance };
+    }
+
+    fn stuffing_reads() -> (usize, [StuffingRead; 16]) {
+        unsafe { (STUFFING_READ_COUNT, STUFFING_READS) }
+    }
+
+    /// Runs the ported function on a stream whose +0x04 word starts
+    /// at `start_position`, returning (result, final position).
+    fn invoke_stuffing_check(start_position: u32) -> (u32, u32) {
+        let mut stream = StuffingStream { words: [0, start_position] };
+        let result =
+            unsafe { bitstream_stuffing_to_byte_check(stream.words.as_mut_ptr().cast::<u8>()) };
+        (result, stream.words[1])
+    }
+
+    /// Independent formulation of the retail control flow: first bit
+    /// must be 0, every following bit must be 1, stop (success) at
+    /// the next byte boundary. Returns (result, final position).
+    fn reference_stuffing_check(data: &[u8; 8], start_position: u32) -> (u32, u32) {
+        let bit = |position: u32| {
+            u32::from(data[(position >> 3) as usize] >> (7 - (position & 7)) & 1)
+        };
+        let mut position = start_position;
+        let first = bit(position);
+        position += 1;
+        if first != 0 {
+            return (1, position);
+        }
+        loop {
+            if position & 7 == 0 {
+                return (0, position);
+            }
+            let next = bit(position);
+            position += 1;
+            if next != 1 {
+                return (1, position);
+            }
+        }
+    }
+
+    #[test]
+    fn first_bit_set_returns_one_after_a_single_read() {
+        for start_position in [0u32, 1, 3, 7, 8, 12, 15] {
+            let _guard = install_bitstream_seam([0xff; 8]);
+            let (result, final_position) = invoke_stuffing_check(start_position);
+            assert_eq!(result, 1, "start={start_position}");
+            assert_eq!(final_position, start_position + 1, "start={start_position}");
+            let (count, reads) = stuffing_reads();
+            assert_eq!(count, 1, "start={start_position}: one read, no padding scan");
+            assert_eq!(reads[0].bit_count, 1, "start={start_position}");
+            uninstall_bitstream_seam();
+        }
+    }
+
+    #[test]
+    fn full_byte_stuffing_returns_zero_after_eight_reads() {
+        // 0x7f = 0b0111_1111: the 0 bit then seven 1 bits reaches the
+        // boundary at position 8.
+        let _guard = install_bitstream_seam([0x7f; 8]);
+        let (result, final_position) = invoke_stuffing_check(0);
+        assert_eq!(result, 0);
+        assert_eq!(final_position, 8);
+        let (count, reads) = stuffing_reads();
+        assert_eq!(count, 8, "one 0 bit plus seven 1 bits");
+        assert!(
+            reads[..8].iter().all(|read| read.bit_count == 1),
+            "every read goes through FUN_080ebbe0(stream, 1)"
+        );
+        uninstall_bitstream_seam();
+    }
+
+    #[test]
+    fn aligned_after_first_bit_returns_zero_without_padding_reads() {
+        // Start at bit 7: the single 0 bit lands exactly on the byte
+        // boundary, so no padding bits are read at all.
+        let _guard = install_bitstream_seam([0x00, 0xfe, 0, 0, 0, 0, 0, 0]);
+        let (result, final_position) = invoke_stuffing_check(7);
+        assert_eq!(result, 0);
+        assert_eq!(final_position, 8);
+        let (count, _) = stuffing_reads();
+        assert_eq!(count, 1);
+        uninstall_bitstream_seam();
+    }
+
+    #[test]
+    fn zero_in_the_padding_returns_one_at_that_bit() {
+        // 0x5f = 0b0101_1111: 0, 1, then a 0 at bit 2 ends the scan.
+        let _guard = install_bitstream_seam([0x5f; 8]);
+        let (result, final_position) = invoke_stuffing_check(0);
+        assert_eq!(result, 1);
+        assert_eq!(final_position, 3, "first bit plus two padding reads");
+        let (count, _) = stuffing_reads();
+        assert_eq!(count, 3);
+        uninstall_bitstream_seam();
+    }
+
+    #[test]
+    fn mid_byte_start_consumes_only_to_the_boundary() {
+        // Start at bit 3 of 0x0f = 0b0000_1111: bit 3 is 0, bits 4..8
+        // are 1, boundary at 8 — five reads total.
+        let _guard = install_bitstream_seam([0x0f; 8]);
+        let (result, final_position) = invoke_stuffing_check(3);
+        assert_eq!(result, 0);
+        assert_eq!(final_position, 8);
+        let (count, _) = stuffing_reads();
+        assert_eq!(count, 5);
+        uninstall_bitstream_seam();
+    }
+
+    #[test]
+    fn stream_pointer_is_passed_through_to_every_read() {
+        let _guard = install_bitstream_seam([0x7f; 8]);
+        let mut stream = StuffingStream { words: [0, 0] };
+        let result =
+            unsafe { bitstream_stuffing_to_byte_check(stream.words.as_mut_ptr().cast::<u8>()) };
+        assert_eq!(result, 0);
+        let (count, reads) = stuffing_reads();
+        assert_eq!(count, 8);
+        let expected = stream.words.as_mut_ptr().cast::<u8>() as usize;
+        assert!(
+            reads[..8].iter().all(|read| read.stream == expected),
+            "r4 holds the stream across the whole loop (mov r0,r4 @ 0x0808556c/0x08085584)"
+        );
+        uninstall_bitstream_seam();
+    }
+
+    #[test]
+    fn matches_reference_over_positions_and_patterns() {
+        let mut patterns: std::vec::Vec<[u8; 8]> =
+            (0..=0xffu8).map(|byte| [byte; 8]).collect();
+        // Deterministic pseudo-random multi-byte patterns.
+        let mut state = 0x1234_5678u32;
+        for _ in 0..64 {
+            let mut pattern = [0u8; 8];
+            for slot in &mut pattern {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                *slot = state as u8;
+            }
+            patterns.push(pattern);
+        }
+        for pattern in patterns {
+            for start_position in 0..15u32 {
+                let _guard = install_bitstream_seam(pattern);
+                let (result, final_position) = invoke_stuffing_check(start_position);
+                let (expected_result, expected_position) =
+                    reference_stuffing_check(&pattern, start_position);
+                assert_eq!(
+                    (result, final_position),
+                    (expected_result, expected_position),
+                    "pattern={pattern:02x?} start={start_position}"
+                );
+                let (count, _) = stuffing_reads();
+                assert_eq!(
+                    count as u32,
+                    final_position - start_position,
+                    "one read-advance call per consumed bit, start={start_position}"
+                );
+                uninstall_bitstream_seam();
+            }
+        }
     }
 }

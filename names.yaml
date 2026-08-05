@@ -20277,3 +20277,66 @@ functions:
       default_name_hash, overwritten by the vtable slot on the
       provider path). Rust implementation and focused host tests:
       `src/cxx/object_flags.rs::registry_key_hash`.
+
+  # --- Bitstream byte-alignment stuffing check (0 bit then 1 bits) ---
+  - address: 0x0808554c
+    ghidra: FUN_0808554c
+    name: bitstream_stuffing_to_byte_check
+    size: 80
+    sig: "u32 bitstream_stuffing_to_byte_check(u8 *stream)"
+    module: cxx/object_flags
+    status: ported
+    renames:
+      param_1: stream
+      iVar1: read_result
+    notes: >-
+      Validates and consumes one byte-alignment stuffing sequence of
+      the {data-pointer @ +0x00, bit-position @ +0x04} stream object
+      whose initializer is object_value_set_flags_clear @ 0x08085344
+      ({value, 0} into +0x00/+0x04) and whose predicate
+      object_low_flags_clear @ 0x0808539c reports "+0x04 low three
+      bits clear" — the bit position sitting on a byte boundary.
+      Reads one bit, which must be 0, then keeps reading bits, each
+      of which must be 1, until the position is byte-aligned again;
+      returns 0 once aligned and 1 the moment any bit breaks the
+      pattern. Every read goes through the unported read-and-advance
+      FUN_080ebbe0(stream, 1) (the `mov r1, #0x1` @ 0x08085554 and
+      @ 0x08085568) — 28 bytes wrapping FUN_080efa38's MSB-first
+      fetch (bit i is bit 7-(i&7) of byte i>>3 of the +0x00 buffer
+      at the +0x04 bit position) with a +0x04 += bit_count advance
+      (64 `bl 0x080ebbe0` sites, all in the video header parser
+      cluster 0x0807d7xx..0x080f1xxx) — so each call nudges the +0x04
+      position by one. The complete retail body is 80 bytes (20
+      instructions, no literal pool): push {r4,lr}; mov r4,r0;
+      mov r1,#1; bl 0x080ebbe0; cmp #0; bne-ret1; loop: mov r0,r4;
+      bl 0x0808539c; cmp #0; beq-read; mov r0,#0; pop; read:
+      mov r1,#1; mov r0,r4; bl 0x080ebbe0; cmp #1; bne-ret1;
+      b-loop. The only 2 `bl 0x0808554c` sites (@ 0x080ed0e8 and
+      @ 0x080f0cec, grep -c on decomp/osos.asm) sit in the video
+      header parser that matches 32-bit start codes 0x000001B5 /
+      0x000001B3 (`sub r12,r0,#0x100; subs r12,r12,#0xb5/#0xb3` @
+      0x080ecfcc/0x080f0d14), a 24-bit == 1 prefix with an 8-bit
+      code < 0x20 (@ 0x080ed104-0x080ed120), MPEG's
+      video_signal_type field pattern (1-bit flag gating 3-bit
+      format, 1-bit range, and a 1-bit colour-description flag
+      gating three 8-bit tables @ 0x080ed074-0x080ed0e0), and
+      FUN_0807d724's scan to the next 0x000001xx start code (which
+      both callers run only when this function returns 0). The
+      0-bit-then-1-bits-to-the-byte-boundary shape is the
+      byte-alignment stuffing an MPEG-style stream writes before a
+      start code, and the return value gates the scan for that
+      start code; the parser's own name is unlocated, so the name
+      claims only the verified bitstream behavior. Deviations: the
+      unported read-and-advance rides the BITSTREAM_READ_ADVANCE
+      seam (house pattern — OBJECT_FLAGS_FETCH_INCREMENT_LOCK)
+      instead of a direct `bl`; the ported object_low_flags_clear
+      takes the byte-alignment test directly. match.py confirms the
+      structural shape: the first read with cmp #0 branching to the
+      return-1 block, the loop's bl into the ported
+      object_low_flags_clear with cmp #0, the second read with
+      cmp #1 looping back, and the two 0/1 return blocks are all
+      present; the diff is LLVM's push {r4-r6,sl,fp,lr} frame, the
+      `blx` through the seam (with the seam word reloaded per call
+      site) versus the ADS direct `bl`, and LLVM's loop rotation.
+      Rust implementation and focused host tests:
+      `src/cxx/object_flags.rs::bitstream_stuffing_to_byte_check`.
