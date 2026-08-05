@@ -15359,6 +15359,33 @@ functions:
      module: cxx/templates, status: ported, vars: {param_1: vector},
      notes: "ALIAS - byte-identical to vector_capacity_elem12 @ 0x083d7708 (all 20 bytes: ldr r1,[r0,#8]; ldr r0,[r0]; sub r0,r1,r0; mov r1,#0xc; b 0x08031568 __rt_sdiv) - a divide-by-12 capacity() copy verified against osos.asm per address; per-address verification stays the rule. It sits immediately after the vector_size_elem12 copy at 0x083d7774 and immediately before the vector_size_elem16 shift member at 0x083d7798, exactly like the primary sits beside its own divide siblings. 2 bl sites (0x083e20d0, 0x083e21e8). Source C: decomp/c/037/083d7784_FUN_083d7784.c - Ghidra inlines the ADS signed divide through the tail branch; the real body is the 5-instruction capacity/12 head. No separate port exists; hook this address to the single vector_capacity_elem12 symbol (the vector_capacity_elem12 alias-at-0x083d773c precedent). match.py against vector_capacity_elem12 at this address - same structure (sub / mov r1,#12 / b __rt_sdiv); the ldr pairs come out as byte loads from the family's read_unaligned host-testing idiom, the same accepted deviation as vector_size_elem4."}
 
+  - address: 0x083d7798
+    ghidra: FUN_083d7798
+    name: vector_size_elem16
+    size: 16
+    sig: "i32 vector_size_elem16(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      Byte-identical copy of vector_size_elem16 @ 0x083d7884 (same
+      `ldmia r0,{r0,r1}; sub r0,r1,r0; mov r0,r0, asr #0x4; bx lr` -
+      verified against osos.asm per address; it sits immediately after
+      the vector_capacity_elem12 alias at 0x083d7784 and immediately
+      before the vector_capacity_elem16 primary at 0x083d77a8, exactly
+      like the other elem16 copies sit beside their own capacity
+      siblings). Served by the existing cxx/templates port - hook this
+      address to the vector_size_elem16 symbol (the vector_size_elem16
+      copy-at-0x083d78b4 precedent). 14 bl call sites, no tail
+      branches: 0x08197bb8, 0x08197c00, 0x083e227c, 0x083e22e8,
+      0x083e236c, 0x083e25bc, 0x083e25d8, 0x083e25e4, 0x083e2668,
+      0x083e2684, 0x083e2690, 0x083e26bc, 0x083e26d8, 0x083e26f4.
+      Source C: decomp/c/037/083d7798_FUN_083d7798.c - Ghidra's
+      `return param_1[1] - *param_1 >> 4`. match.py - the ldm comes
+      out as byte loads from the family's read_unaligned host-testing
+      idiom, the same accepted deviation as vector_size_elem4; the
+      sub/asr#4 structure matches.
+
   - address: 0x083d5ea0
     ghidra: FUN_083d5ea0
     name: handle_deref_field12
