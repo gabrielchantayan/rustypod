@@ -1397,6 +1397,40 @@ pub unsafe extern "C" fn pair_assign_guarded(dst: *mut u32, src: *const u32) -> 
     }
     dst
 }
+/// vector_pair_copy_into — original: `FUN_083d7d10` @ 0x083d7d10
+/// (16 bytes; 3 `bl` call sites).
+///
+/// Copies the opaque two-word pair stored as an 8-byte vector element into
+/// `dst`. The caller at 0x080d1e38 passes the vector header in `r0`, an
+/// insertion-slot iterator in `r1`, and a stack pair in `r2`; the vector
+/// reallocation member @ 0x083e02a8 uses the same `(vector, slot, pair)`
+/// shape at 0x083e02f0 and 0x083e0370. The pair fields are not identified,
+/// but both source words are loaded before either destination word is stored,
+/// matching `ldmne r2,{r1,r2}; stmne r0,{r1,r2}`.
+///
+/// The vector argument is ABI-required but ignored. A NULL destination is a
+/// no-op and leaves the source unread. Although Ghidra declares `void`, the
+/// opening `movs r0,r1` leaves `dst` in the return register on both paths.
+///
+/// # Safety
+/// When `dst` is non-NULL, `dst` must be writable and `src` readable for two
+/// aligned `u32` words. The original has no overlap guard.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_pair_copy_into(
+    _vector: *const u8,
+    dst: *mut u32,
+    src: *const u32,
+) -> *mut u32 {
+    if !dst.is_null() {
+        let first = src.read();
+        let second = src.add(1).read();
+        dst.write(first);
+        dst.add(1).write(second);
+    }
+    dst
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -1440,6 +1474,44 @@ mod tests {
             assert_eq!(pair, [1, 2]);
         }
     }
+
+    #[test]
+    fn vector_pair_copy_null_destination_is_a_noop() {
+        unsafe {
+            assert!(vector_pair_copy_into(
+                core::ptr::null(),
+                core::ptr::null_mut(),
+                core::ptr::null(),
+            )
+            .is_null());
+        }
+    }
+
+    #[test]
+    fn vector_pair_copy_copies_exactly_two_words() {
+        unsafe {
+            let src = [0x1111_1111, 0x2222_2222];
+            let mut dst = [0u32; 2];
+            let ret = vector_pair_copy_into(core::ptr::null(), dst.as_mut_ptr(), src.as_ptr());
+            assert_eq!(ret, dst.as_mut_ptr());
+            assert_eq!(dst, src);
+        }
+    }
+
+    #[test]
+    fn vector_pair_copy_does_not_write_adjacent_words() {
+        unsafe {
+            let src = [0x1111_1111, 0x2222_2222];
+            let mut surrounding = [0xaaaa_aaaa, 0, 0, 0xbbbb_bbbb];
+            vector_pair_copy_into(
+                core::ptr::null(),
+                surrounding.as_mut_ptr().add(1),
+                src.as_ptr(),
+            );
+            assert_eq!(surrounding, [0xaaaa_aaaa, 0x1111_1111, 0x2222_2222, 0xbbbb_bbbb]);
+        }
+    }
+
 
     #[test]
     fn iter_assign_copies_four_words_and_returns_dst() {
