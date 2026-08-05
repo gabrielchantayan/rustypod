@@ -21949,6 +21949,44 @@ functions:
       cg_buffer_emit_word across the 0x1000-byte page boundary, every
       word reads back bit-exact, offset unmoved).
 
+  - address: 0x082c23c0
+    ghidra: FUN_082c23c0
+    name: cg_buffer_write_word
+    size: 20
+    sig: "void cg_buffer_write_word(cg_codegen_buffer_t *output, u32 offset, u32 value)"
+    module: codegen/ir
+    status: ported
+    vars: {param_1: output, param_2: offset, param_3: value}
+    notes: >-
+      1 bl call site (grep on decomp/osos.asm): 0x082c1788, inside the
+      label-fixup resolver FUN_082c16e0 - storing the patched
+      instruction word back into the emitted-code buffer after the
+      resolver spliced the resolved branch offset into the word it
+      read with cg_buffer_read_word @ 0x082c23b0 (FUN_082c23c0's
+      param_3 is uVar2 | uVar1 in the resolver: the original word's
+      opcode/condition bits OR the resolved offset). The write-side
+      mirror of cg_buffer_read_word: the whole body is `mov r4, r2`
+      (keep value across the call - unlike the reader, the saved r4
+      IS used here), `bl 0x082c5b1c` (resolve offset to a pointer
+      through the code-page accessor cg_buffer_page_pointer - ported,
+      call routed through the CG_BUFFER_PAGE_POINTER seam wired to
+      that port, the documented seam scheme same as the emitter and
+      the reader), `str r4, [r0, #0x0]` (store the word). Like the
+      reader - and unlike the emitter - the offset is NOT aligned
+      first (no bl 0x082c2290) and current_offset (+0x804) is never
+      touched: the resolver's fixup positions are word-aligned by
+      construction. No NULL check on the accessor's result, same
+      failure semantics as cg_buffer_emit_word. Host tests:
+      src/codegen/ir.rs::buffer_write_word_stores_through_the_page_pointer_seam_with_the_offset_verbatim
+      (recording fake: word stored bit-exact, accessor receives
+      (buffer, offset) verbatim - offset 6 NOT aligned up, unlike the
+      emitter, current_offset never touched),
+      buffer_write_word_patches_words_emitted_across_a_page_boundary
+      (end-to-end through the wired defaults: 0x404 words emitted via
+      cg_buffer_emit_word, then the resolver's read-modify-write at
+      fixup positions on both sides of the 0x1000-byte page boundary,
+      every word reads back bit-exact, offset unmoved).
+
   - address: 0x082c2350
     ghidra: FUN_082c2350
     name: cg_buffer_copy_out

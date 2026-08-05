@@ -74,6 +74,11 @@
 //!   `FUN_082c16e0`). Reads one 32-bit word back out of the
 //!   emitted-code buffer at a byte offset, through the code-page
 //!   accessor.
+//! - `cg_buffer_write_word` — original: `FUN_082c23c0` @ 0x082c23c0
+//!   (20 bytes; 1 `bl` call site — the label-fixup resolver
+//!   `FUN_082c16e0`). Writes one 32-bit word into the emitted-code
+//!   buffer at a byte offset, through the code-page accessor — the
+//!   write-side mirror of `cg_buffer_read_word`.
 //! - `cg_codegen_output` — original: `FUN_082c17ec` @ 0x082c17ec
 //!   (8 bytes; 1 `bl` call site). Pure getter for the codegen's
 //!   emitted-code buffer at +0x10.
@@ -998,6 +1003,41 @@ pub unsafe extern "C" fn cg_buffer_read_word(
     // `bl 0x082c5b1c` — the accessor seam; `ldr r0, [r0, #0x0]`.
     let read_ptr = hook(core::ptr::addr_of!(CG_BUFFER_PAGE_POINTER))(output, offset);
     (read_ptr as *const u32).read()
+}
+
+/// cg_buffer_write_word — original: `FUN_082c23c0` @ 0x082c23c0
+/// (20 bytes, 1 `bl` call site: 0x082c1788, inside the label-fixup
+/// resolver `FUN_082c16e0` — storing the patched instruction word
+/// back into the emitted-code buffer after the resolver spliced the
+/// resolved branch offset into the word it read with
+/// [`cg_buffer_read_word`]).
+///
+/// The write-side mirror of [`cg_buffer_read_word`], verbatim from the
+/// original's `mov r4, r2; bl 0x082c5b1c; str r4, [r0, #0x0]`: keeps
+/// `value` across the accessor call (the saved r4), resolves `offset`
+/// to a pointer through the code-page accessor [`cg_buffer_page_pointer`]
+/// (the [`CG_BUFFER_PAGE_POINTER`] seam, still wired to the ported
+/// accessor — the documented seam scheme, same as the emitter and the
+/// reader) and stores the 32-bit word there.
+///
+/// Like the reader — and unlike the emitter — the offset is NOT
+/// aligned first and the current offset at +0x804 is never touched:
+/// the resolver's fixup positions are word-aligned by construction.
+///
+/// EDGE SEMANTICS (parity, not sanitized): no NULL check on the
+/// accessor's result — a failed page allocation behind the default
+/// accessor stores through NULL exactly as the original's would (same
+/// failure semantics as [`cg_buffer_emit_word`]).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_buffer_write_word(
+    output: *mut CgCodegenBuffer,
+    offset: usize,
+    value: u32,
+) {
+    // `bl 0x082c5b1c` — the accessor seam; `str r4, [r0, #0x0]`.
+    let write_ptr = hook(core::ptr::addr_of!(CG_BUFFER_PAGE_POINTER))(output, offset);
+    (write_ptr as *mut u32).write(value);
 }
 
 /// cg_codegen_output — original: `FUN_082c17ec` @ 0x082c17ec
@@ -2454,6 +2494,105 @@ mod tests {
                 word(buffer as *mut u8, CG_CODEGEN_OUTPUT_OFFSET).read(),
                 len,
                 "0x404 reads never moved the offset"
+            );
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = saved_alloc;
+            let record = output.as_mut_ptr() as *mut u8;
+            for index in 0..=(len >> CG_BUFFER_PAGE_SHIFT) {
+                let page = slot(record, CG_BUFFER_PAGES + index).read();
+                if !page.is_null() {
+                    poisoning_free(page);
+                }
+            }
+        }
+    }
+
+    // --- cg_buffer_write_word (0x082c23c0) ---------------------------
+
+    #[test]
+    fn buffer_write_word_stores_through_the_page_pointer_seam_with_the_offset_verbatim() {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        const POISON: usize = 0xAAAA_AAAA_AAAA_AAAA;
+        let mut output = [POISON; CG_CODEGEN_OUTPUT_OFFSET + 2];
+        let mut cell = 0xe59f_f018u32; // ldr r0, [pc, #0x18] — pre-patch
+
+        unsafe {
+            let saved = hook(core::ptr::addr_of!(CG_BUFFER_PAGE_POINTER));
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_POINTER) = recording_page_pointer;
+            PAGE_POINTER_CALLS.clear();
+            PAGE_POINTER_RESULT = core::ptr::addr_of_mut!(cell) as *mut u8;
+
+            let buffer = output.as_mut_ptr() as *mut CgCodegenBuffer;
+            cg_buffer_write_word(buffer, 6, 0xea00_0002); // b +8
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_POINTER) = saved;
+
+            assert_eq!(
+                cell, 0xea00_0002,
+                "the patched word lands at the accessor's pointer bit-exact"
+            );
+            assert_eq!(
+                PAGE_POINTER_CALLS.as_slice(),
+                &[(buffer, 6)],
+                "the accessor sees the buffer and the offset VERBATIM — no align-up, unlike the emitter"
+            );
+            assert_eq!(
+                output[CG_CODEGEN_OUTPUT_OFFSET], POISON,
+                "the writer never touches current_offset"
+            );
+            assert_eq!(
+                output[CG_CODEGEN_OUTPUT_OFFSET + 1],
+                POISON,
+                "the writer writes no neighboring word"
+            );
+        }
+    }
+
+    #[test]
+    fn buffer_write_word_patches_words_emitted_across_a_page_boundary() {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut output = [0usize; CG_CODEGEN_OUTPUT_OFFSET + 1];
+
+        unsafe {
+            let saved_alloc = hook(core::ptr::addr_of!(CG_BUFFER_ALLOC));
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = poisoning_alloc;
+
+            let buffer = output.as_mut_ptr() as *mut CgCodegenBuffer;
+            // 0x404 words = 0x1010 bytes: the run spills 0x10 bytes into
+            // the second code page. Both seams stay at their wired
+            // defaults (ported accessor + exact-body page-slot model).
+            let words = 0x404usize;
+            for i in 0..words {
+                cg_buffer_emit_word(buffer, (0xea00_0000usize | i) as u32);
+            }
+            let len = cg_buffer_current_offset(buffer);
+
+            // The fixup resolver's read-modify-write, at fixup positions
+            // on both sides of the page boundary: read the emitted word
+            // back, splice the resolved offset into its low bits, store
+            // the patched word.
+            for &fixup in &[0usize, 0x400, 0x402, 0x403] {
+                let word_at = cg_buffer_read_word(buffer, fixup * 4);
+                let patched = (word_at & !0x00ff_ffff) | 0x0000_1234;
+                cg_buffer_write_word(buffer, fixup * 4, patched);
+            }
+
+            for i in 0..words {
+                let expected = if [0usize, 0x400, 0x402, 0x403].contains(&i) {
+                    0xea00_1234u32
+                } else {
+                    (0xea00_0000usize | i) as u32
+                };
+                assert_eq!(
+                    cg_buffer_read_word(buffer, i * 4),
+                    expected,
+                    "word {i:#x} after patching reads back bit-exact through the page boundary"
+                );
+            }
+            assert_eq!(
+                word(buffer as *mut u8, CG_CODEGEN_OUTPUT_OFFSET).read(),
+                len,
+                "the writes never moved the offset"
             );
 
             *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = saved_alloc;
