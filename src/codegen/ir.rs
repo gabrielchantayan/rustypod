@@ -42,6 +42,10 @@
 //! - `cg_label_add_fixup` — original: `FUN_082c17ac` @ 0x082c17ac
 //!   (64 bytes; 4 `bl` call sites). Prepends the current output position
 //!   to a label's fixup list.
+//! - `cg_codegen_buffer_create` — original: `FUN_082c22b0` @ 0x082c22b0
+//!   (52 bytes; 1 `bl` call site, from the `cg_codegen_t` constructor
+//!   `FUN_082c0d7c`). Allocates and initializes the emitted-code
+//!   buffer: owner back-pointer, zeroed code-page table, zero offset.
 //! - `cg_buffer_current_offset` — original: `FUN_082c23d4` @ 0x082c23d4
 //!   (8 bytes; 8 `bl` call sites). Pure getter for the emitted-code
 //!   buffer's current write offset at +0x804.
@@ -77,6 +81,14 @@
 //!   +0x08 heap                   +0x00 next
 //!   +0x0c labels (head)          +0x04 fixups (head)
 //!   +0x10 output                 +0x08 offset (all-ones while unbound)
+//!
+//! cg_codegen_buffer_t (0x808 bytes)
+//!   +0x00 owner (back-pointer to the cg_codegen_t)
+//!   +0x04 pages — 512-slot table of lazily allocated 0x1000-byte code
+//!       pages (the destructor @ 0x082c22e8 walks +0x04+i*4 freeing each
+//!       non-NULL entry; `FUN_082c5b1c` maps a byte offset to
+//!       `pages[offset >> 12] + (offset & 0xfff)`)
+//!   +0x804 current_offset
 //! ```
 //!
 //! The instruction kinds are a dense enum spanning 0-22: the visitor
@@ -109,6 +121,14 @@
 //!   The port takes a pointer to a NULL-terminated array of register
 //!   pointers instead — same termination rule, same cell layout, same
 //!   allocation sequence; only the argument marshalling differs.
+//! - `cg_codegen_buffer_create` allocates through the swappable
+//!   [`CG_BUFFER_ALLOC`] slot (default: the ported `malloc` @
+//!   0x0802edac, the original's direct `bl` — same scheme as stdio's
+//!   `STDIO_ALLOC`) so host tests can observe the requested size
+//!   without racing malloc's global ops table, and returns NULL when
+//!   the allocation fails, where the original has NO null check and
+//!   would memzero 0x800 bytes at address 4 (same deviation as
+//!   `fopen`'s fresh-node allocation).
 
 use super::heap::{cg_heap_alloc, CgHeap};
 
@@ -205,6 +225,16 @@ pub const CG_CODEGEN_OUTPUT: usize = 4;
 /// `cg_codegen_buffer_t + 0x804` — current output position, read by
 /// [`cg_buffer_current_offset`].
 pub const CG_CODEGEN_OUTPUT_OFFSET: usize = 0x804 / 4;
+/// `cg_codegen_buffer_t + 0x00` — back-pointer to the owning
+/// `cg_codegen_t`, stored by [`cg_codegen_buffer_create`].
+pub const CG_BUFFER_OWNER: usize = 0;
+/// `cg_codegen_buffer_t + 0x04` — first slot of the code-page table.
+pub const CG_BUFFER_PAGES: usize = 1;
+/// Size of the code-page table in target bytes (512 pointer slots).
+pub const CG_BUFFER_PAGE_TABLE_BYTES: usize = 0x800;
+/// Size of `cg_codegen_buffer_t` in target bytes: 4 owner + 0x800 page
+/// table + 4 offset — the literal-pool constant at 0x082c22e4.
+pub const CG_CODEGEN_BUFFER_BYTES: usize = 0x808;
 
 /// `cg_label_t + 0x00` — next label in the codegen's list.
 pub const CG_LABEL_NEXT: usize = 0;
@@ -403,6 +433,57 @@ unsafe fn word(record: *mut u8, index: usize) -> *mut usize {
 #[inline(always)]
 unsafe fn module_heap(module: *mut u8) -> *mut CgHeap {
     slot(module, CG_MODULE_HEAP).read() as *mut CgHeap
+}
+
+/// Reads a hook slot. Volatile so a build in which nothing rewrites the
+/// slot does not constant-fold the default in and delete the dispatch.
+#[inline(always)]
+fn hook<T: Copy>(slot: *const T) -> T {
+    unsafe { core::ptr::read_volatile(slot) }
+}
+
+/// Allocator boundary for [`cg_codegen_buffer_create`]; defaults to the
+/// ported `malloc` @ 0x0802edac — the original's direct `bl`.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub static mut CG_BUFFER_ALLOC: unsafe extern "C" fn(usize) -> *mut u8 =
+    crate::runtime::malloc_rt::malloc;
+
+/// cg_codegen_buffer_create — original: `FUN_082c22b0` @ 0x082c22b0
+/// (52 bytes, 1 `bl` call site: 0x082c0db4, inside the `cg_codegen_t`
+/// constructor `FUN_082c0d7c`, which stores the result at
+/// `codegen->output` (+0x10)).
+///
+/// The emitted-code buffer constructor. `malloc`s the 0x808-byte record
+/// (the size comes from the literal pool at 0x082c22e4: 4 owner + 0x800
+/// page table + 4 offset), zeroes the 0x800-byte code-page table at
+/// +0x04 through the IRAM veneer 0x08037db8 (`ldr pc,[0x8037dbc]` ->
+/// 0x2200027c, the relocated copy of `memzero_aligned` @ 0x0800027c —
+/// called directly here), sets `current_offset` (+0x804) to 0 and
+/// stores the owning codegen at +0x00. The record's layout is pinned by
+/// the destructor @ 0x082c22e8, which walks the page table freeing each
+/// non-NULL entry, and by [`cg_buffer_current_offset`].
+///
+/// DEVIATION: the original does not null-check the `malloc` result —
+/// on failure it zeroes 0x800 bytes at address 4. The port returns
+/// NULL (module-header deviations).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_codegen_buffer_create(
+    owner: *mut CgCodegen,
+) -> *mut CgCodegenBuffer {
+    let buffer = hook(core::ptr::addr_of!(CG_BUFFER_ALLOC))(record_size(
+        CG_CODEGEN_BUFFER_BYTES,
+    ));
+    if buffer.is_null() {
+        return core::ptr::null_mut();
+    }
+    crate::libc::memzero::memzero_aligned(
+        buffer.add(WORD * CG_BUFFER_PAGES),
+        record_size(CG_BUFFER_PAGE_TABLE_BYTES),
+    );
+    word(buffer, CG_CODEGEN_OUTPUT_OFFSET).write(0);
+    slot(buffer, CG_BUFFER_OWNER).write(owner as *mut u8);
+    buffer as *mut CgCodegenBuffer
 }
 
 /// cg_buffer_current_offset — original: `FUN_082c23d4` @ 0x082c23d4
@@ -1369,6 +1450,72 @@ mod tests {
                 codegen[CG_CODEGEN_OUTPUT + 1],
                 POISON,
                 "the getter reads no neighboring word"
+            );
+        }
+    }
+
+    /// Alloc hook that always fails, for the NULL-path deviation test.
+    unsafe extern "C" fn failing_alloc(_size: usize) -> *mut u8 {
+        core::ptr::null_mut()
+    }
+
+    #[test]
+    fn codegen_buffer_create_allocates_zeroes_and_stamps_the_record() {
+        let _guard = LOCK.lock().unwrap();
+        unsafe {
+            let saved = hook(core::ptr::addr_of!(CG_BUFFER_ALLOC));
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = poisoning_alloc;
+
+            let mut codegen = [0usize; CG_CODEGEN_OUTPUT + 1];
+            let owner = codegen.as_mut_ptr() as *mut CgCodegen;
+            let buffer = cg_codegen_buffer_create(owner) as *mut u8;
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = saved;
+
+            assert!(!buffer.is_null());
+            // The allocator's pointer is forwarded as-is (its header is
+            // readable) and the requested size is the whole 0x808-byte
+            // record — the literal at 0x082c22e4.
+            assert_eq!(
+                (buffer.sub(HDR) as *mut usize).read(),
+                record_size(CG_CODEGEN_BUFFER_BYTES),
+                "allocation size forwarded to the allocator"
+            );
+            // +0x04..+0x803 (the code-page table) is zeroed, proven by
+            // the allocator's 0x5c poison.
+            let pages = buffer.add(WORD * CG_BUFFER_PAGES);
+            for i in 0..record_size(CG_BUFFER_PAGE_TABLE_BYTES) {
+                assert_eq!(pages.add(i).read(), 0, "page-table byte {i} not zeroed");
+            }
+            // +0x804 current_offset starts at 0 and reads back through
+            // the getter.
+            assert_eq!(word(buffer, CG_CODEGEN_OUTPUT_OFFSET).read(), 0);
+            assert_eq!(
+                cg_buffer_current_offset(buffer as *mut CgCodegenBuffer),
+                0,
+                "the getter sees the fresh offset"
+            );
+            // The owner back-pointer sits at +0x00.
+            assert_eq!(slot(buffer, CG_BUFFER_OWNER).read(), owner as *mut u8);
+
+            poisoning_free(buffer);
+        }
+    }
+
+    #[test]
+    fn codegen_buffer_create_returns_null_when_allocation_fails() {
+        let _guard = LOCK.lock().unwrap();
+        unsafe {
+            let saved = hook(core::ptr::addr_of!(CG_BUFFER_ALLOC));
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = failing_alloc;
+
+            let buffer = cg_codegen_buffer_create(core::ptr::null_mut());
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = saved;
+
+            assert!(
+                buffer.is_null(),
+                "documented deviation: no wild zero-fill at address 4"
             );
         }
     }

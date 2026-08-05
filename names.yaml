@@ -21410,3 +21410,37 @@ functions:
       NULL/0 and a live pointer-sized word at +0x10 come back
       exactly, with poisoned neighbours proving no adjacent word is
       read.
+
+  - address: 0x082c22b0
+    ghidra: FUN_082c22b0
+    name: cg_codegen_buffer_create
+    size: 52
+    sig: "CgCodegenBuffer *cg_codegen_buffer_create(CgCodegen *owner)"
+    module: codegen/ir
+    status: ported
+    vars: {param_1/r5: owner, r4: buffer}
+    notes: >-
+      1 bl call site: 0x082c0db4 in FUN_082c0d7c (the cg_codegen_t
+      constructor, which stores the result at codegen->output, +0x10).
+      The emitted-code buffer constructor: mallocs the 0x808-byte
+      record (literal pool @ 0x082c22e4 = 0x00000808, verified in
+      osos.dec: 4 owner + 0x800 page table + 4 offset), zeroes the
+      0x800-byte code-page table at +0x04, sets current_offset
+      (+0x804) = 0 and stores the owner back-pointer at +0x00.
+      Callees: 0x0802edac = malloc (ported, runtime/malloc_rt);
+      0x08037db8 = iram_memzero_aligned_veneer -> IRAM copy 0x2200027c
+      of memzero_aligned @ 0x0800027c (ported, libc/memzero) - the
+      port calls memzero_aligned directly. Layout pinned by the
+      destructor @ 0x082c22e8 (walks +0x04+i*4 freeing each non-NULL
+      page) and by FUN_082c5b1c (pages[offset >> 12] +
+      (offset & 0xfff)). Deviations: allocation goes through the
+      swappable CG_BUFFER_ALLOC slot (default the ported malloc; same
+      scheme as stdio's STDIO_ALLOC) and a failed allocation returns
+      NULL where the original has NO null check and would zero 0x800
+      bytes at address 4. match.py (exit 1, diff expected): the diff
+      is the hook-slot ldr/blx in place of bl malloc, the NULL guard,
+      and LLVM folding the current_offset zero-store into an
+      __aeabi_memclr4 of 0x804 bytes (memclr idiom merge); the record
+      init structure is otherwise identical. Host tests:
+      src/codegen/ir.rs::codegen_buffer_create_allocates_zeroes_and_stamps_the_record
+      and ::codegen_buffer_create_returns_null_when_allocation_fails.
