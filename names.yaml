@@ -21415,18 +21415,28 @@ functions:
     ghidra: FUN_082c22b0
     name: cg_codegen_buffer_create
     size: 52
-    sig: "CgCodegenBuffer *cg_codegen_buffer_create(CgCodegen *owner)"
+    sig: "CgCodegenBuffer *cg_codegen_buffer_create(const char *name)"
     module: codegen/ir
     status: ported
-    vars: {param_1/r5: owner, r4: buffer}
+    vars: {param_1/r5: name, r4: buffer}
     notes: >-
       1 bl call site: 0x082c0db4 in FUN_082c0d7c (the cg_codegen_t
       constructor, which stores the result at codegen->output, +0x10).
       The emitted-code buffer constructor: mallocs the 0x808-byte
       record (literal pool @ 0x082c22e4 = 0x00000808, verified in
-      osos.dec: 4 owner + 0x800 page table + 4 offset), zeroes the
+      osos.dec: 4 name + 0x800 page table + 4 offset), zeroes the
       0x800-byte code-page table at +0x04, sets current_offset
-      (+0x804) = 0 and stores the owner back-pointer at +0x00.
+      (+0x804) = 0 and stores the name pointer at +0x00.
+      CORRECTION (made by the 0x082c0d7c cg_codegen_create port):
+      +0x00 is NOT an owner back-pointer - the constructor's bl at
+      0x082c0db4 passes r0 = adr 0x82c0de4, the eight-byte datum
+      "CSEG" plus 4 NULs sitting in the gap before cg_label_create @
+      0x082c0dec (verified in osos.dec at file offset 0x2c0de4:
+      43 53 45 47 00 00 00 00). It is a write-only segment name - no
+      function reads buffer+0x00 (the destructor walks only the page
+      table; the emitters/page accessor 0x082c2290/0x082c231c/
+      0x082c2350/0x082b7edc touch only pages and +0x804). The port's
+      parameter was renamed owner -> name and retyped *const u8.
       Callees: 0x0802edac = malloc (ported, runtime/malloc_rt);
       0x08037db8 = iram_memzero_aligned_veneer -> IRAM copy 0x2200027c
       of memzero_aligned @ 0x0800027c (ported, libc/memzero) - the
@@ -21444,6 +21454,73 @@ functions:
       init structure is otherwise identical. Host tests:
       src/codegen/ir.rs::codegen_buffer_create_allocates_zeroes_and_stamps_the_record
       and ::codegen_buffer_create_returns_null_when_allocation_fails.
+
+  - address: 0x082c0d7c
+    ghidra: FUN_082c0d7c
+    name: cg_codegen_create
+    size: 104
+    sig: "CgCodegen *cg_codegen_create(CgHeap *heap, const usize *helpers, usize *status)"
+    module: codegen/ir
+    status: ported
+    vars: {param_1/r0->r5: heap, param_2/r1->r6: helpers, param_3/r2->r7: status, r4: codegen, r0 (loop): reg_no}
+    notes: >-
+      7 bl call sites, all JIT compile-and-patch drivers: 0x08243138
+      and its six clones at 0x08246580/0x0824854c/0x082493c0/
+      0x0824a43c/0x0824af58/0x0824bd40, each calling
+      create(*proc, &local_helper_table, &zeroed_status_cell). The
+      cg_codegen_t constructor: cg_heap_alloc(heap, 0x220) (direct
+      call to the ported 0x082c1a08), zero-fill through the IRAM
+      veneer 0x08037db8 -> memzero_aligned @ 0x2200027c (ported,
+      libc/memzero, called directly - same as
+      cg_codegen_buffer_create), then the field stores: +0x08 = heap
+      (pinned by cg_label_create reading codegen+0x08 as its
+      allocation arena), +0x0c = NULL labels head (explicit store,
+      redundant with the zero-fill), stmia r4,{r6,r7} -> +0x00 =
+      helpers, +0x04 = status, +0x10 = the fresh output buffer from
+      cg_codegen_buffer_create (pinned by cg_codegen_output and the
+      fixup resolver FUN_082c16e0). +0x00 helpers is the driver's
+      0x28-byte ten-word table of code pointers (0x08025f88,
+      0x080de95c, 0x0806b32c, 0x0806b27c, 0x080e2468, 0x0809b904 -
+      all mid-function entries into osos text, dumped from osos.dec);
+      the emitters copy words OUT of it INTO the generated code
+      (FUN_082c0f4c reads helpers[6] for kind 0x17 and hands it to
+      the word emitter 0x082beb4c), so it is a runtime-helper
+      address table, not a vtable the codegen calls. +0x04 status:
+      every driver passes &zeroed_stack_word; no reader recovered in
+      the compile/fixup path. THE adr ANOMALY: the bl
+      cg_codegen_buffer_create at 0x082c0db4 passes r0 = adr
+      0x82c0de4, NOT the new record - the datum there is the
+      NUL-padded string "CSEG" (osos.dec offset 0x2c0de4), the
+      emitted-code buffer's write-only name; see the corrected
+      0x082c22b0 entry. The port passes a static with identical
+      contents. +0x20: 16-entry hardware-register descriptor table,
+      28 bytes per entry (rsb r1,r0,r0,lsl #3 / add r1,r4,r1,lsl #2
+      = i*28), one per ARM register r0-r15; the loop stamps
+      strb i,[codegen+0x20+i*28] - the register NUMBER, not zero
+      (the Ghidra reference C confirms: *(char*)(puVar1+iVar3*7+8) =
+      (char)iVar3). Field evidence for the table from its walkers
+      FUN_082cea24/FUN_082d7800/FUN_082d7870: each entry is a
+      descriptor anchor at codegen+0x14+i*0x1c with an intrusive
+      binding-list head at anchor+0x10 and a flags word at
+      anchor+0x18 (bit 0x100); the stamped byte is anchor+0x0c.
+      +0x1e0 = 0: the id byte of the codegen's own embedded anchor
+      at +0x1d4 (list head at +0x1e4 per FUN_082d7870 and the
+      fixup-path store at 0x082c1660), another explicit
+      zero-redundant store. Deviation: none beyond the inherited
+      buffer_create NULL-output one. match.py (exit 1, diff
+      expected): LLVM unrolls the 16-iteration loop into 16 strb at
+      the identical offsets (0x20..0x1c4, stride 0x1c), merges the
+      record zero-fill into an __aeabi_memclr4 of 0x210 bytes from
+      +0x10 (the four stm-words hoisted out; same memclr idiom merge
+      as buffer_create), and the two bl show as local symbol calls
+      in the relocatable - field stores, table stride, +0x1e0 store
+      and r0 return all line up. Host tests:
+      src/codegen/ir.rs::codegen_create_allocates_zeroes_and_wires_the_record
+      (arena carve + return value, poison-proven zero-fill, all five
+      field stores, 16 register-number bytes at the 28-byte stride,
+      +0x1e0 zero, the real buffer_create's CSEG-named 0x808 buffer,
+      and cg_codegen_output/cg_label_create layout consistency) and
+      ::codegen_create_stores_a_null_output_when_the_buffer_alloc_fails.
 
   - address: 0x0811d7b0
     ghidra: FUN_0811d7b0

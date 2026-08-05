@@ -45,7 +45,13 @@
 //! - `cg_codegen_buffer_create` — original: `FUN_082c22b0` @ 0x082c22b0
 //!   (52 bytes; 1 `bl` call site, from the `cg_codegen_t` constructor
 //!   `FUN_082c0d7c`). Allocates and initializes the emitted-code
-//!   buffer: owner back-pointer, zeroed code-page table, zero offset.
+//!   buffer: name pointer, zeroed code-page table, zero offset.
+//! - `cg_codegen_create` — original: `FUN_082c0d7c` @ 0x082c0d7c
+//!   (104 bytes; 7 `bl` call sites — the JIT's compile-and-patch
+//!   drivers at 0x08243138 and its six clones). The `cg_codegen_t`
+//!   constructor: a 0x220-byte arena record wiring the arena, the
+//!   helper table, the emitted-code buffer and the 16-entry
+//!   hardware-register descriptor table.
 //! - `cg_buffer_current_offset` — original: `FUN_082c23d4` @ 0x082c23d4
 //!   (8 bytes; 8 `bl` call sites). Pure getter for the emitted-code
 //!   buffer's current write offset at +0x804.
@@ -77,13 +83,20 @@
 //!                                +0x09 opcode (u8)
 //!                                +0x0c first derived field
 //!
-//! cg_codegen_t                 cg_label_t (12 bytes)
-//!   +0x08 heap                   +0x00 next
-//!   +0x0c labels (head)          +0x04 fixups (head)
-//!   +0x10 output                 +0x08 offset (all-ones while unbound)
+//! cg_codegen_t (0x220 bytes)   cg_label_t (12 bytes)
+//!   +0x00 helpers                +0x00 next
+//!   +0x04 status                 +0x04 fixups (head)
+//!   +0x08 heap                   +0x08 offset (all-ones while unbound)
+//!   +0x0c labels (head)
+//!   +0x10 output
+//!   +0x20 hw_regs — 16 entries of 28 bytes, one descriptor per ARM
+//!       register r0-r15; the constructor stamps each entry's
+//!       register-number byte
+//!   +0x1e0 id byte of the codegen's embedded descriptor anchor at
+//!       +0x1d4, zeroed
 //!
 //! cg_codegen_buffer_t (0x808 bytes)
-//!   +0x00 owner (back-pointer to the cg_codegen_t)
+//!   +0x00 name ("CSEG", write-only)
 //!   +0x04 pages — 512-slot table of lazily allocated 0x1000-byte code
 //!       pages (the destructor @ 0x082c22e8 walks +0x04+i*4 freeing each
 //!       non-NULL entry; `FUN_082c5b1c` maps a byte offset to
@@ -215,6 +228,21 @@ pub struct CgVirtualRegList {
 
 /// `cg_module_t + 0x00` — the IR arena.
 pub const CG_MODULE_HEAP: usize = 0;
+/// `cg_codegen_t + 0x00` — pointer to the caller's ten-entry table of
+/// runtime-helper addresses. Every driver
+/// (`FUN_08243138` and its six clones) hands in the same 0x28-byte
+/// block of code pointers (0x08025f88, 0x080de95c, 0x0806b32c,
+/// 0x0806b27c, 0x080e2468, 0x0809b904 — all mid-function entry points
+/// into osos text); the instruction emitters read individual words out
+/// of it and emit them INTO the generated code (e.g. `FUN_082c0f4c`
+/// reads `helpers[6]` for kind 0x17 and passes it to the word emitter
+/// @ 0x082beb4c).
+pub const CG_CODEGEN_HELPERS: usize = 0;
+/// `cg_codegen_t + 0x04` — pointer to the caller's status cell (every
+/// driver passes the address of a zero-initialized stack word). No
+/// reader was recovered in the compile/fixup path; the constructor
+/// stores it verbatim.
+pub const CG_CODEGEN_STATUS: usize = 1;
 /// `cg_codegen_t + 0x08` — the JIT arena used for label metadata.
 pub const CG_CODEGEN_HEAP: usize = 2;
 /// `cg_codegen_t + 0x0c` — head of the codegen's label list, built by
@@ -225,16 +253,46 @@ pub const CG_CODEGEN_OUTPUT: usize = 4;
 /// `cg_codegen_buffer_t + 0x804` — current output position, read by
 /// [`cg_buffer_current_offset`].
 pub const CG_CODEGEN_OUTPUT_OFFSET: usize = 0x804 / 4;
-/// `cg_codegen_buffer_t + 0x00` — back-pointer to the owning
-/// `cg_codegen_t`, stored by [`cg_codegen_buffer_create`].
-pub const CG_BUFFER_OWNER: usize = 0;
+/// `cg_codegen_buffer_t + 0x00` — the buffer's name, a pointer to a
+/// static C string stored by [`cg_codegen_buffer_create`]. The only
+/// call site passes `"CSEG"` (see [`cg_codegen_create`]) and no
+/// function reads it back — the destructor @ 0x082c22e8 walks only the
+/// page table, and the emitters/page accessor (0x082c2290, 0x082c231c,
+/// 0x082c2350, 0x082b7edc, ...) touch only pages and the offset.
+pub const CG_BUFFER_NAME: usize = 0;
 /// `cg_codegen_buffer_t + 0x04` — first slot of the code-page table.
 pub const CG_BUFFER_PAGES: usize = 1;
 /// Size of the code-page table in target bytes (512 pointer slots).
 pub const CG_BUFFER_PAGE_TABLE_BYTES: usize = 0x800;
-/// Size of `cg_codegen_buffer_t` in target bytes: 4 owner + 0x800 page
+/// Size of `cg_codegen_buffer_t` in target bytes: 4 name + 0x800 page
 /// table + 4 offset — the literal-pool constant at 0x082c22e4.
 pub const CG_CODEGEN_BUFFER_BYTES: usize = 0x808;
+
+/// Size of `cg_codegen_t` in target bytes — the constructor's
+/// `mov r1, #0x220` (twice: the arena request and the zero-fill).
+pub const CG_CODEGEN_BYTES: usize = 0x220;
+/// `cg_codegen_t + 0x20` — the register-number byte of the first
+/// hardware-register descriptor. The table runs 16 entries of 28
+/// target bytes each, one per ARM register r0-r15; entry `i` starts at
+/// `+0x14 + i*0x1c` as a descriptor anchor and the constructor stamps
+/// `i` into the byte at `+0x20 + i*0x1c` (anchor `+0x0c`). Field
+/// evidence from the walkers `FUN_082cea24` / `FUN_082d7800` / the
+/// spill path `FUN_082d7870`: anchor `+0x10` is the head of an
+/// intrusive binding list (nodes back-point to the anchor at their
+/// `+0x08`) and anchor `+0x18` is a flags word (bit 0x100).
+pub const CG_CODEGEN_HW_REGS: usize = 8;
+/// Number of hardware-register descriptors — exactly ARM r0-r15.
+pub const CG_HW_REG_COUNT: usize = 16;
+/// Descriptor stride in words: 28 target bytes (the original's
+/// `rsb r1, r0, r0, lsl #3` / `add r1, r4, r1, lsl #2` = i*7*4).
+pub const CG_HW_REG_ENTRY_WORDS: usize = 7;
+/// `cg_codegen_t + 0x1e0` — the id byte of the codegen's own embedded
+/// descriptor anchor at `+0x1d4` (same layout as the register-table
+/// anchors: list head at anchor `+0x10` = `+0x1e4`, per `FUN_082d7870`
+/// and the fixup-path stores at 0x082c1660). The constructor zeroes it
+/// explicitly even though the record-wide zero-fill already did — the
+/// same defensive style as the explicit `labels = NULL` store.
+pub const CG_CODEGEN_ANCHOR_ID: usize = 0x78;
 
 /// `cg_label_t + 0x00` — next label in the codegen's list.
 pub const CG_LABEL_NEXT: usize = 0;
@@ -448,20 +506,116 @@ fn hook<T: Copy>(slot: *const T) -> T {
 pub static mut CG_BUFFER_ALLOC: unsafe extern "C" fn(usize) -> *mut u8 =
     crate::runtime::malloc_rt::malloc;
 
+/// The segment name [`cg_codegen_create`] stamps into the emitted-code
+/// buffer. On target the constructor's `adr r0, 0x82c0de4` picks up
+/// this exact eight-byte datum ("CSEG" plus four NUL padding bytes),
+/// which sits in the gap between the constructor's last instruction
+/// (0x082c0de0) and `cg_label_create` @ 0x082c0dec — verified against
+/// osos.dec at file offset 0x2c0de4.
+static CODE_SEGMENT_NAME: [u8; 8] = *b"CSEG\0\0\0\0";
+
+/// cg_codegen_create — original: `FUN_082c0d7c` @ 0x082c0d7c
+/// (104 bytes, 7 `bl` call sites: the JIT's compile-and-patch drivers
+/// `FUN_08243138` @ 0x08243138 and its six clones at 0x08246580,
+/// 0x0824854c, 0x082493c0, 0x0824a43c, 0x0824af58, 0x0824bd40, all
+/// calling it as `create(*proc_or_module, &helper_table, &status)`).
+///
+/// The `cg_codegen_t` constructor. Bump-allocates the 0x220-byte record
+/// out of the caller's arena (`bl 0x082c1a08` — [`cg_heap_alloc`],
+/// called directly) and zeroes it through the IRAM veneer 0x08037db8
+/// (`ldr pc,[0x8037dbc]` -> 0x2200027c, the relocated copy of
+/// `memzero_aligned` @ 0x0800027c — called directly here, exactly as
+/// [`cg_codegen_buffer_create`] does), then wires the record:
+///
+/// - `+0x08 heap` = the arena argument (pinned by [`cg_label_create`],
+///   which reads `codegen + 0x08` as the heap it allocates labels
+///   from);
+/// - `+0x0c labels` = NULL (explicit store, redundant with the
+///   zero-fill — the label list head);
+/// - `+0x00 helpers` = the second argument (`stmia r4, {r6, r7}`
+///   together with `+0x04`): a pointer to the caller's ten-entry table
+///   of runtime-helper addresses, which the emitters later copy words
+///   from into the generated code;
+/// - `+0x04 status` = the third argument: a pointer to the caller's
+///   zero-initialized status cell, stored verbatim;
+/// - `+0x10 output` = [`cg_codegen_buffer_create`]'s fresh
+///   emitted-code buffer (pinned by [`cg_codegen_output`] and the
+///   fixup resolver `FUN_082c16e0`);
+/// - the 16-entry hardware-register descriptor table at `+0x20`:
+///   16 iterations of `strb i, [codegen + 0x20 + i*28]` stamp each
+///   descriptor's register-number byte (NOTE the reference C and the
+///   task brief's "zero byte" reading are both wrong — the stored
+///   value is the loop counter r0, 0..15, one per ARM register);
+/// - `+0x1e0` = 0, the id byte of the codegen's embedded descriptor
+///   anchor at `+0x1d4` (explicit `strb`, again redundant with the
+///   zero-fill).
+///
+/// Returns the new record in r0 (`mov r0, r4` before the pop).
+///
+/// THE `adr` ANOMALY: the `bl cg_codegen_buffer_create` at 0x082c0db4
+/// passes r0 = `adr 0x82c0de4`, which is NOT the new codegen record —
+/// it is the address of an eight-byte datum sitting in the gap before
+/// `cg_label_create` @ 0x082c0dec. That datum is the NUL-padded string
+/// `"CSEG"` (osos.dec offset 0x2c0de4: `43 53 45 47 00 00 00 00`), so
+/// the buffer's `+0x00` word is a segment NAME, not an owner
+/// back-pointer: no function in the image ever reads it back (see
+/// [`CG_BUFFER_NAME`]). The port passes a static with identical
+/// contents.
+///
+/// DEVIATION: none of the NULL paths exist in the original — like the
+/// rest of the cluster it trusts the GL heap. The port inherits
+/// [`cg_codegen_buffer_create`]'s documented deviation (NULL output on
+/// allocation failure, stored verbatim) instead of the original's wild
+/// zero-fill at address 4.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_codegen_create(
+    heap: *mut CgHeap,
+    helpers: *const usize,
+    status: *mut usize,
+) -> *mut CgCodegen {
+    let codegen = cg_heap_alloc(heap, record_size(CG_CODEGEN_BYTES));
+    crate::libc::memzero::memzero_aligned(codegen, record_size(CG_CODEGEN_BYTES));
+
+    // Same store order as the original: heap, labels = NULL, then the
+    // `stmia r4, {r6, r7}` pair.
+    slot(codegen, CG_CODEGEN_HEAP).write(heap as *mut u8);
+    slot(codegen, CG_CODEGEN_LABELS).write(core::ptr::null_mut());
+    slot(codegen, CG_CODEGEN_HELPERS).write(helpers as *mut u8);
+    slot(codegen, CG_CODEGEN_STATUS).write(status as *mut u8);
+
+    // `adr r0, 0x82c0de4` + `bl 0x082c22b0`: the "CSEG" name, not the
+    // record (see the doc header).
+    let output = cg_codegen_buffer_create(CODE_SEGMENT_NAME.as_ptr());
+    slot(codegen, CG_CODEGEN_OUTPUT).write(output as *mut u8);
+
+    // 16 descriptors, 28 bytes each: stamp register r0-r15's number.
+    for reg in 0..CG_HW_REG_COUNT {
+        codegen
+            .add((CG_CODEGEN_HW_REGS + reg * CG_HW_REG_ENTRY_WORDS) * WORD)
+            .write(reg as u8);
+    }
+    codegen.add(CG_CODEGEN_ANCHOR_ID * WORD).write(0);
+
+    codegen as *mut CgCodegen
+}
+
 /// cg_codegen_buffer_create — original: `FUN_082c22b0` @ 0x082c22b0
 /// (52 bytes, 1 `bl` call site: 0x082c0db4, inside the `cg_codegen_t`
-/// constructor `FUN_082c0d7c`, which stores the result at
+/// constructor [`cg_codegen_create`], which stores the result at
 /// `codegen->output` (+0x10)).
 ///
 /// The emitted-code buffer constructor. `malloc`s the 0x808-byte record
-/// (the size comes from the literal pool at 0x082c22e4: 4 owner + 0x800
+/// (the size comes from the literal pool at 0x082c22e4: 4 name + 0x800
 /// page table + 4 offset), zeroes the 0x800-byte code-page table at
 /// +0x04 through the IRAM veneer 0x08037db8 (`ldr pc,[0x8037dbc]` ->
 /// 0x2200027c, the relocated copy of `memzero_aligned` @ 0x0800027c —
 /// called directly here), sets `current_offset` (+0x804) to 0 and
-/// stores the owning codegen at +0x00. The record's layout is pinned by
-/// the destructor @ 0x082c22e8, which walks the page table freeing each
-/// non-NULL entry, and by [`cg_buffer_current_offset`].
+/// stores `name` at +0x00. The record's layout is pinned by the
+/// destructor @ 0x082c22e8, which walks the page table freeing each
+/// non-NULL entry, and by [`cg_buffer_current_offset`]. The name is
+/// write-only: the constructor passes `"CSEG"` and nothing reads it
+/// back (see [`CG_BUFFER_NAME`]).
 ///
 /// DEVIATION: the original does not null-check the `malloc` result —
 /// on failure it zeroes 0x800 bytes at address 4. The port returns
@@ -469,7 +623,7 @@ pub static mut CG_BUFFER_ALLOC: unsafe extern "C" fn(usize) -> *mut u8 =
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn cg_codegen_buffer_create(
-    owner: *mut CgCodegen,
+    name: *const u8,
 ) -> *mut CgCodegenBuffer {
     let buffer = hook(core::ptr::addr_of!(CG_BUFFER_ALLOC))(record_size(
         CG_CODEGEN_BUFFER_BYTES,
@@ -482,7 +636,7 @@ pub unsafe extern "C" fn cg_codegen_buffer_create(
         record_size(CG_BUFFER_PAGE_TABLE_BYTES),
     );
     word(buffer, CG_CODEGEN_OUTPUT_OFFSET).write(0);
-    slot(buffer, CG_BUFFER_OWNER).write(owner as *mut u8);
+    slot(buffer, CG_BUFFER_NAME).write(name as *mut u8);
     buffer as *mut CgCodegenBuffer
 }
 
@@ -1459,6 +1613,152 @@ mod tests {
         core::ptr::null_mut()
     }
 
+    /// Byte offset of register `reg`'s number byte inside a host
+    /// `cg_codegen_t` record.
+    fn hw_reg_no_offset(reg: usize) -> usize {
+        (CG_CODEGEN_HW_REGS + reg * CG_HW_REG_ENTRY_WORDS) * WORD
+    }
+
+    #[test]
+    fn codegen_create_allocates_zeroes_and_wires_the_record() {
+        let _g = setup();
+        unsafe {
+            let saved = hook(core::ptr::addr_of!(CG_BUFFER_ALLOC));
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = poisoning_alloc;
+
+            let heap = cg_heap_create(4096);
+            let helpers = [0x080e2468usize; 10];
+            let mut status_cell = 0usize;
+            let block = (*heap).current;
+            let before = (*block).current;
+            let expected = (*block).base.add(before);
+            let codegen = cg_codegen_create(
+                heap,
+                helpers.as_ptr(),
+                core::ptr::addr_of_mut!(status_cell),
+            ) as *mut u8;
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = saved;
+
+            // The 0x220-byte record is carved from the front of the
+            // arena and returned verbatim.
+            assert_eq!(codegen, expected, "the arena carve is the return value");
+            assert_eq!(
+                (*block).current,
+                before + stride(CG_CODEGEN_BYTES),
+                "the arena advances by the eight-byte-rounded 0x220 request"
+            );
+
+            // Field stores: helpers, status, heap, labels = NULL, and
+            // the freshly built output buffer.
+            assert_eq!(slot(codegen, CG_CODEGEN_HELPERS).read(), helpers.as_ptr() as *mut u8);
+            assert_eq!(
+                slot(codegen, CG_CODEGEN_STATUS).read(),
+                core::ptr::addr_of_mut!(status_cell) as *mut u8
+            );
+            assert_eq!(slot(codegen, CG_CODEGEN_HEAP).read(), heap as *mut u8);
+            assert!(
+                slot(codegen, CG_CODEGEN_LABELS).read().is_null(),
+                "the label list starts empty (explicit NULL store)"
+            );
+            let output = slot(codegen, CG_CODEGEN_OUTPUT).read();
+            assert!(!output.is_null());
+
+            // Every other byte of the 0x220 record is zero (the
+            // allocator's 0x5c poison proves the zero-fill), except the
+            // 16 register-number bytes, which hold 0..=15 at the
+            // 28-byte stride — and +0x1e0, which is zero like the rest.
+            const FIELD_WORDS: [usize; 5] = [
+                CG_CODEGEN_HELPERS,
+                CG_CODEGEN_STATUS,
+                CG_CODEGEN_HEAP,
+                CG_CODEGEN_LABELS,
+                CG_CODEGEN_OUTPUT,
+            ];
+            for w in 0..record_size(CG_CODEGEN_BYTES) / WORD {
+                if FIELD_WORDS.contains(&w) {
+                    continue;
+                }
+                for b in 0..WORD {
+                    let off = w * WORD + b;
+                    let mut want = 0u8;
+                    for reg in 0..CG_HW_REG_COUNT {
+                        if off == hw_reg_no_offset(reg) {
+                            want = reg as u8;
+                        }
+                    }
+                    assert_eq!(codegen.add(off).read(), want, "record byte {off:#x}");
+                }
+            }
+            // Spot-check the stride directly: r0's byte at +0x20,
+            // r15's at +0x20 + 15*28, nothing stamped at the byte just
+            // past r15's entry (+0x1e0 is the anchor id, zero).
+            assert_eq!(codegen.add(hw_reg_no_offset(0)).read(), 0);
+            assert_eq!(codegen.add(hw_reg_no_offset(15)).read(), 15);
+            assert_eq!(codegen.add(CG_CODEGEN_ANCHOR_ID * WORD).read(), 0);
+
+            // The buffer is the real ported constructor's product: a
+            // 0x808-byte malloc'd record whose +0x00 holds the "CSEG"
+            // name, pages zeroed, offset zero.
+            assert_eq!(
+                (output.sub(HDR) as *mut usize).read(),
+                record_size(CG_CODEGEN_BUFFER_BYTES),
+                "the output buffer is the 0x808-byte malloc"
+            );
+            let name = slot(output, CG_BUFFER_NAME).read();
+            for (i, want) in b"CSEG\0".iter().enumerate() {
+                assert_eq!(name.add(i).read(), *want, "the buffer is named CSEG");
+            }
+            assert_eq!(word(output, CG_CODEGEN_OUTPUT_OFFSET).read(), 0);
+
+            // Layout consistency with the already-ported consumers:
+            // cg_codegen_output reads +0x10 back, and cg_label_create
+            // allocates from +0x08 and prepends to +0x0c.
+            assert_eq!(
+                cg_codegen_output(codegen as *mut CgCodegen) as *mut u8,
+                output,
+                "cg_codegen_output sees the fresh buffer"
+            );
+            let label = cg_label_create(codegen as *mut CgCodegen) as *mut u8;
+            assert_eq!(
+                slot(codegen, CG_CODEGEN_LABELS).read(),
+                label,
+                "cg_label_create prepends to the NULL head the constructor left"
+            );
+            assert_eq!(word(label, CG_LABEL_OFFSET).read(), CG_LABEL_UNBOUND);
+
+            poisoning_free(output);
+            cg_heap_destroy(heap);
+        }
+    }
+
+    #[test]
+    fn codegen_create_stores_a_null_output_when_the_buffer_alloc_fails() {
+        let _g = setup();
+        unsafe {
+            let saved = hook(core::ptr::addr_of!(CG_BUFFER_ALLOC));
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = failing_alloc;
+
+            let heap = cg_heap_create(4096);
+            let codegen =
+                cg_codegen_create(heap, core::ptr::null(), core::ptr::null_mut()) as *mut u8;
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = saved;
+
+            // The inherited buffer_create deviation: NULL is stored
+            // verbatim instead of the original's wild zero-fill, and
+            // the rest of the record is still wired.
+            assert!(
+                slot(codegen, CG_CODEGEN_OUTPUT).read().is_null(),
+                "documented deviation: NULL output propagates verbatim"
+            );
+            assert_eq!(slot(codegen, CG_CODEGEN_HEAP).read(), heap as *mut u8);
+            assert_eq!(codegen.add(hw_reg_no_offset(15)).read(), 15);
+
+            cg_heap_destroy(heap);
+        }
+    }
+
     #[test]
     fn codegen_buffer_create_allocates_zeroes_and_stamps_the_record() {
         let _guard = LOCK.lock().unwrap();
@@ -1466,9 +1766,8 @@ mod tests {
             let saved = hook(core::ptr::addr_of!(CG_BUFFER_ALLOC));
             *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = poisoning_alloc;
 
-            let mut codegen = [0usize; CG_CODEGEN_OUTPUT + 1];
-            let owner = codegen.as_mut_ptr() as *mut CgCodegen;
-            let buffer = cg_codegen_buffer_create(owner) as *mut u8;
+            let name = b"CSEG\0";
+            let buffer = cg_codegen_buffer_create(name.as_ptr()) as *mut u8;
 
             *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = saved;
 
@@ -1495,8 +1794,8 @@ mod tests {
                 0,
                 "the getter sees the fresh offset"
             );
-            // The owner back-pointer sits at +0x00.
-            assert_eq!(slot(buffer, CG_BUFFER_OWNER).read(), owner as *mut u8);
+            // The name pointer sits at +0x00, stored verbatim.
+            assert_eq!(slot(buffer, CG_BUFFER_NAME).read(), name.as_ptr() as *mut u8);
 
             poisoning_free(buffer);
         }
@@ -1509,7 +1808,7 @@ mod tests {
             let saved = hook(core::ptr::addr_of!(CG_BUFFER_ALLOC));
             *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = failing_alloc;
 
-            let buffer = cg_codegen_buffer_create(core::ptr::null_mut());
+            let buffer = cg_codegen_buffer_create(core::ptr::null());
 
             *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = saved;
 
