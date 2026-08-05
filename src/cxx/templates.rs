@@ -589,9 +589,10 @@ pub unsafe extern "C" fn vector_size_elem32(vector: *const VectorBounds) -> i32 
 /// vector_size_elem12 — original: `FUN_083d76f8` @ 0x083d76f8
 /// (16 bytes; 18 `bl` call sites there — the hottest instantiation of
 /// the whole `vector_size` divide half — 62 across all 5 byte-identical
-/// copies; the byte-identical copies `FUN_083d772c` @ 0x083d772c and
-/// `FUN_083d7774` @ 0x083d7774 are ported as ledger-only aliases of
-/// this symbol, the other two stay identified in `names.yaml`).
+/// copies; the byte-identical copies `FUN_083d772c` @ 0x083d772c,
+/// `FUN_083d7774` @ 0x083d7774 and `FUN_083d77bc` @ 0x083d77bc are
+/// ported as ledger-only aliases of this symbol, the last copy
+/// (`FUN_083d7800` @ 0x083d7800) stays identified in `names.yaml`).
 ///
 /// `vector<T>::size()` for a 12-byte element, a non-power-of-two member
 /// of the `vector_size_elem*` family: the same `ldm r0,{r0,r1}; sub
