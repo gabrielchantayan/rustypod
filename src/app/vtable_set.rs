@@ -72,8 +72,11 @@
 //! module as [`vtable_set_50_commit_probe_kind4`], the 0x40000000 one
 //! (0x0811d6ec) as [`vtable_set_50_probe_kind4`].
 //!
-//! All three stages bottom out in `FUN_0811d7fc` @ 0x0811d7fc (24
-//! bytes, unported), the slot +0x50 twin of `FUN_0811d7b0`:
+//! All three stages bottom out in `FUN_0811d7fc` @ 0x0811d7fc (28
+//! bytes; **15 `bl` call sites**, all inside this message-family thunk
+//! cluster 0x0811d358..0x0811d890; ported in this module as
+//! [`vtable_slot_50_dispatch`]), the slot +0x50 twin of
+//! `FUN_0811d7b0`:
 //!
 //! ```text
 //! stmdb sp!, {r3, lr}     @ spill the caller's 4th argument
@@ -92,14 +95,16 @@
 //!   `CLASS_6800_OPS` pattern, read through `read_volatile`). Unlike
 //!   inert stubs, the wired defaults **model each callee's exact body**,
 //!   so an unswapped table reproduces the original call chain.
-//! - **The slot +0x50 dispatcher 0x0811d7fc is unported** and sits
-//!   behind the [`VTABLE_SLOT_50_DISPATCH`] seam (the
-//!   `util/vtable_query.rs` `VTABLE_SLOT_4C_DISPATCH` pattern). The
-//!   default stub is the dispatcher body verbatim — double dereference,
-//!   slot +0x50 load (`read_unaligned`, so the layout stays byte-exact
-//!   on a 64-bit host: 0x50 is 4-aligned but not 8-aligned) and the
-//!   indirect call — so on firmware the behavior is identical; host
-//!   tests install a recording mock.
+//! - **The slot +0x50 dispatcher 0x0811d7fc is ported** in this module
+//!   as [`vtable_slot_50_dispatch`] and stays the wired default of the
+//!   [`VTABLE_SLOT_50_DISPATCH`] seam (the `util/vtable_query.rs`
+//!   `VTABLE_SLOT_4C_DISPATCH` pattern): its `blx` targets are firmware
+//!   vtable methods, so the seam is retained for hookability and the
+//!   three siblings keep routing through it — rewiring them to direct
+//!   calls is a deliberate follow-up (one function per commit; the
+//!   `app/class_6800.rs` precedent calls ported callees directly).
+//!   Host tests install a recording mock through the seam, or call the
+//!   ported body directly on a fake vtable.
 //! - **The caller's r3 is forwarded verbatim to every stage** (none of
 //!   the bodies between this function's entry and each dispatcher's
 //!   `stmdb sp!, {r3}` spill touches r3), so — the
@@ -136,15 +141,62 @@ const COMMIT_PROBE_TAG: u32 = 0xc000_0000;
 /// The vtable method signature at slot +0x50: `method(object, kind,
 /// data, extra)`, returning an error code (0 = success). `data` is a
 /// pointer to the message word(s); `extra` points at the dispatcher's
-/// spilled r3 (see [`VTABLE_SLOT_50_DISPATCH`]).
+/// spilled r3 (see [`vtable_slot_50_dispatch`]).
 type VtableSlot50Method =
     unsafe extern "C" fn(object: *mut u8, kind: u32, data: usize, extra: *const usize) -> u32;
 
-/// Default [`VTABLE_SLOT_50_DISPATCH`] stub: the exact body of the
-/// unported dispatcher `FUN_0811d7fc` @ 0x0811d7fc — dereference the
-/// handle to the object, the object to its vtable, load the method
-/// pointer from vtable slot +0x50 and call it (see the module header).
-unsafe extern "C" fn vtable_slot_50_dispatch(
+/// vtable_slot_50_dispatch — original: `FUN_0811d7fc` @ 0x0811d7fc (28
+/// bytes; **15 `bl` call sites**, grep on `decomp/osos.asm`, all inside
+/// this message-family thunk cluster: the commit stage 0x0811d340, the
+/// eight sites 0x0811d390..0x0811d440 in the multi-message routine
+/// 0x0811d360, the open stage 0x0811d458, the kind-2 / kind-4 write
+/// stages 0x0811d52c / 0x0811d56c, the tag thunks 0x0811d6cc /
+/// 0x0811d6ec and the routine at 0x0811d880).
+///
+/// The shared vtable dispatcher of the slot +0x50 message family — the
+/// slot +0x50 twin of the still-unported `FUN_0811d7b0` @ 0x0811d7b0
+/// (`util/vtable_query.rs`), which differs only in the slot offset:
+///
+/// ```text
+/// 0811d7fc  stmdb sp!, {r3, lr}     @ spill the caller's 4th argument
+/// 0811d800  ldr   r0, [r0, #0x0]    @ object = *handle
+/// 0811d804  ldr   r3, [r0, #0x0]    @ vtable = *object
+/// 0811d808  ldr   r12, [r3, #0x50]  @ method = vtable->slot_50
+/// 0811d80c  mov   r3, sp            @ extra = &spilled_r3
+/// 0811d810  blx   r12               @ method(object, kind, data, extra)
+/// 0811d814  ldmia sp!, {r12, pc}    @ return the method's r0
+/// ```
+///
+/// A double dereference — handle to object to vtable — then the method
+/// pointer at vtable slot +0x50 is invoked as
+/// `method(object, kind, data, &spilled_r3)` and its error code
+/// (0 = success) returns verbatim. The spilled r3 is whatever the
+/// caller happened to carry: no call site sets it deliberately — every
+/// caller is one of the message thunks, which forward their own
+/// caller's r3 untouched (see the module header).
+///
+/// # Deviations
+///
+/// - **The r3 spill is collapsed into the `extra` parameter.** The
+///   original receives the caller's r3 *by value* and spills it itself
+///   (`stmdb sp!, {r3}` / `mov r3, sp`); this port's callers pre-spill
+///   the forwarded word and pass its address (the
+///   `util/vtable_query.rs` `VTABLE_SLOT_4C_DISPATCH` precedent), so
+///   `extra` arrives as the pointer and reaches the method verbatim —
+///   the word the method observes through it is identical. One
+///   consequence: this export is **not** ABI-hookable at 0x0811d7fc,
+///   where r3 arrives by value, not as a pointer (no hook targets it).
+/// - **The `blx` target remains a seam.** The vtable methods are
+///   firmware code, so this body stays the wired default of
+///   [`VTABLE_SLOT_50_DISPATCH`] and the three ported siblings still
+///   reach it through the seam; rewiring them to a direct call is a
+///   deliberate follow-up (one function per commit — the
+///   `app/class_6800.rs` precedent calls ported callees directly).
+/// - **The slot load uses `read_unaligned`** so the layout stays
+///   byte-exact on a 64-bit host: 0x50 is 4-aligned but not 8-aligned.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_slot_50_dispatch(
     handle: *mut *mut u8,
     kind: u32,
     data: usize,
@@ -157,11 +209,13 @@ unsafe extern "C" fn vtable_slot_50_dispatch(
     method(object, kind, data, extra)
 }
 
-/// Indirect dispatch for the unported vtable slot +0x50 dispatcher
-/// `FUN_0811d7fc` @ 0x0811d7fc (the util/vtable_query.rs
-/// `VTABLE_SLOT_4C_DISPATCH` pattern). The default stub is the
-/// dispatcher's exact body; host tests install a recording mock via
-/// `core::ptr::addr_of_mut!`.
+/// Indirect dispatch for the vtable slot +0x50 dispatcher, wired to
+/// the ported [`vtable_slot_50_dispatch`] (original: `FUN_0811d7fc` @
+/// 0x0811d7fc; the util/vtable_query.rs `VTABLE_SLOT_4C_DISPATCH`
+/// pattern). The seam is retained for hookability — the dispatcher's
+/// `blx` targets are firmware vtable methods — so the three ported
+/// siblings keep routing through it; host tests install a recording
+/// mock via `core::ptr::addr_of_mut!`.
 pub static mut VTABLE_SLOT_50_DISPATCH: unsafe extern "C" fn(
     handle: *mut *mut u8,
     kind: u32,
@@ -358,9 +412,11 @@ pub unsafe extern "C" fn vtable_set_50_kind4(
 ///
 /// # Deviations
 ///
-/// - **The callee 0x0811d7fc is unported** and sits behind the
-///   [`VTABLE_SLOT_50_DISPATCH`] seam, exactly as the three stages of
-///   [`vtable_set_50_kind4`] do (this function's body IS the
+/// - **The callee 0x0811d7fc is ported** in this module as
+///   [`vtable_slot_50_dispatch`]; the call still routes through the
+///   [`VTABLE_SLOT_50_DISPATCH`] seam (retained for hookability —
+///   rewiring to a direct call is a follow-up), exactly as the three
+///   stages of [`vtable_set_50_kind4`] do (this function's body IS the
 ///   0x0811d340 stage shape with a wider tag, so no new seam is
 ///   needed).
 /// - **The caller's r3 is forwarded verbatim** (nothing between entry
@@ -425,8 +481,10 @@ pub unsafe extern "C" fn vtable_set_50_commit_probe_kind4(
 ///
 /// # Deviations
 ///
-/// - **The callee 0x0811d7fc is unported** and sits behind the
-///   [`VTABLE_SLOT_50_DISPATCH`] seam, exactly as
+/// - **The callee 0x0811d7fc is ported** in this module as
+///   [`vtable_slot_50_dispatch`]; the call still routes through the
+///   [`VTABLE_SLOT_50_DISPATCH`] seam (retained for hookability —
+///   rewiring to a direct call is a follow-up), exactly as
 ///   [`vtable_set_50_commit_probe_kind4`] does (the two bodies differ
 ///   only in the `orr` immediate, so no new seam is needed).
 /// - **The caller's r3 is forwarded verbatim** (nothing between entry
@@ -1008,6 +1066,212 @@ mod tests {
                 result, OPEN_ERR,
                 "ldmia sp!, {{r2, r3, r4, pc}} returns the dispatcher's r0 unbranched"
             );
+        }
+    }
+
+    // ---- vtable_slot_50_dispatch (0x0811d7fc) direct, fake vtable ----
+
+    const METHOD_ERR: u32 = 0x0bad_0009;
+
+    static mut DIRECT_CALLS: usize = 0;
+    static mut DIRECT_OBJECT: *mut u8 = core::ptr::null_mut();
+    static mut DIRECT_KIND: u32 = 0;
+    static mut DIRECT_DATA_WORD: u32 = 0;
+    static mut DIRECT_EXTRA_PTR: *const usize = core::ptr::null();
+    static mut DIRECT_RESULT: u32 = MOCK_OK;
+    static mut WRONG_SLOT_CALLS: usize = 0;
+
+    unsafe extern "C" fn direct_method(
+        object: *mut u8,
+        kind: u32,
+        data: usize,
+        extra: *const usize,
+    ) -> u32 {
+        DIRECT_CALLS += 1;
+        DIRECT_OBJECT = object;
+        DIRECT_KIND = kind;
+        DIRECT_DATA_WORD = (data as *const u32).read();
+        DIRECT_EXTRA_PTR = extra;
+        DIRECT_RESULT
+    }
+
+    /// Decoy for the slots neighbouring +0x50: any call through it
+    /// proves the dispatcher loaded the wrong offset.
+    unsafe extern "C" fn wrong_slot_method(
+        _object: *mut u8,
+        _kind: u32,
+        _data: usize,
+        _extra: *const usize,
+    ) -> u32 {
+        WRONG_SLOT_CALLS += 1;
+        0xdead_0000
+    }
+
+    /// A fake handle -> object -> vtable chain (the
+    /// `default_dispatch_body_loads_slot_50_and_calls_it` precedent).
+    /// The vtable is a raw byte buffer so the +0x50 slot sits at a
+    /// 4-aligned (not 8-aligned) offset exactly as on the 32-bit
+    /// target; the buffer is 0x60 bytes, not the 0x54 the slot needs
+    /// on the target, because on a 64-bit host each method pointer
+    /// written into it is 8 bytes wide.
+    struct FakeChain {
+        vtable: [u8; 0x60],
+        object: *const u8,
+        handle: *mut u8,
+    }
+
+    impl FakeChain {
+        fn new() -> Self {
+            FakeChain {
+                vtable: [0; 0x60],
+                object: core::ptr::null(),
+                handle: core::ptr::null_mut(),
+            }
+        }
+        /// Writes `method` into the vtable at byte offset `slot`.
+        fn install(&mut self, slot: usize, method: VtableSlot50Method) {
+            unsafe {
+                (self.vtable.as_mut_ptr().add(slot) as *mut VtableSlot50Method)
+                    .write_unaligned(method);
+            }
+        }
+        /// (Re)links object -> vtable and handle -> \&object. MUST run
+        /// after the fixture reaches its final stack home: the handle
+        /// slot points at the `object` field.
+        fn link(&mut self) {
+            self.object = self.vtable.as_ptr();
+            self.handle = core::ptr::addr_of_mut!(self.object) as *mut u8;
+        }
+        fn handle_ptr(&mut self) -> *mut *mut u8 {
+            core::ptr::addr_of_mut!(self.handle) as *mut *mut u8
+        }
+    }
+
+    unsafe fn reset_direct_log() {
+        DIRECT_CALLS = 0;
+        DIRECT_OBJECT = core::ptr::null_mut();
+        DIRECT_KIND = 0;
+        DIRECT_DATA_WORD = 0;
+        DIRECT_EXTRA_PTR = core::ptr::null();
+        DIRECT_RESULT = MOCK_OK;
+        WRONG_SLOT_CALLS = 0;
+    }
+
+    // The ported dispatcher is called directly, never through the
+    // seams, so no SlotGuard is needed; the lock only serializes the
+    // DIRECT_* recording statics.
+
+    #[test]
+    fn dispatch_double_dereferences_and_loads_slot_50_exactly() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let mut chain = FakeChain::new();
+        chain.install(VTABLE_SLOT_50, direct_method);
+        // Decoys at the adjacent non-overlapping host slots: method
+        // pointers are 8 bytes wide on the 64-bit host, so the twin
+        // dispatcher's +0x4c slot (FUN_0811d7b0) cannot hold a decoy —
+        // an 8-byte write there would overlap the +0x50 pointer.
+        chain.install(VTABLE_SLOT_50 - 8, wrong_slot_method);
+        chain.install(VTABLE_SLOT_50 + 8, wrong_slot_method);
+        chain.link();
+        let data_word: u32 = VALUE_WORD;
+        let forwarded: usize = FORWARDED;
+        unsafe {
+            reset_direct_log();
+
+            let result = vtable_slot_50_dispatch(
+                chain.handle_ptr(),
+                MESSAGE_KIND_4,
+                core::ptr::addr_of!(data_word) as usize,
+                core::ptr::addr_of!(forwarded),
+            );
+
+            assert_eq!(result, MOCK_OK);
+            assert_eq!(DIRECT_CALLS, 1, "exactly one blx");
+            assert_eq!(
+                WRONG_SLOT_CALLS, 0,
+                "only vtable slot +0x50 is loaded (ldr r12, [r3, #0x50])"
+            );
+            assert_eq!(
+                DIRECT_OBJECT,
+                core::ptr::addr_of_mut!(chain.object) as *mut u8,
+                "the method receives *handle (ldr r0, [r0])"
+            );
+            // vtable = *object (ldr r3, [r0]) is proven by the chain
+            // itself: only the method installed in the vtable buffer
+            // could have run.
+            assert_eq!(DIRECT_KIND, MESSAGE_KIND_4, "r1 passes through verbatim");
+            assert_eq!(DIRECT_DATA_WORD, VALUE_WORD, "r2 (data) passes through verbatim");
+        }
+    }
+
+    #[test]
+    fn dispatch_forwards_the_spilled_r3_pointer_verbatim() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let mut chain = FakeChain::new();
+        chain.install(VTABLE_SLOT_50, direct_method);
+        chain.link();
+        let data_word: u32 = VALUE_WORD;
+        let forwarded: usize = FORWARDED;
+        unsafe {
+            reset_direct_log();
+
+            vtable_slot_50_dispatch(
+                chain.handle_ptr(),
+                MESSAGE_KIND_4,
+                core::ptr::addr_of!(data_word) as usize,
+                core::ptr::addr_of!(forwarded),
+            );
+
+            // The original spills the incoming r3 and hands the method
+            // &spilled_r3 (stmdb sp!, {r3} / mov r3, sp); the port's
+            // callers pre-spill (see the function's deviations), so the
+            // collapsed spill-and-point is a verbatim pointer
+            // pass-through: same pointer in, same word observed.
+            assert_eq!(
+                DIRECT_EXTRA_PTR,
+                core::ptr::addr_of!(forwarded),
+                "the extra pointer reaches the method untouched"
+            );
+            assert_eq!(
+                DIRECT_EXTRA_PTR.read(),
+                FORWARDED,
+                "the word the method observes through it is the forwarded r3"
+            );
+        }
+    }
+
+    #[test]
+    fn dispatch_returns_the_methods_error_code_verbatim() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let mut chain = FakeChain::new();
+        chain.install(VTABLE_SLOT_50, direct_method);
+        chain.link();
+        let data_word: u32 = VALUE_WORD;
+        let forwarded: usize = FORWARDED;
+        unsafe {
+            reset_direct_log();
+
+            DIRECT_RESULT = MOCK_OK;
+            let ok = vtable_slot_50_dispatch(
+                chain.handle_ptr(),
+                MESSAGE_KIND_4,
+                core::ptr::addr_of!(data_word) as usize,
+                core::ptr::addr_of!(forwarded),
+            );
+            DIRECT_RESULT = METHOD_ERR;
+            let err = vtable_slot_50_dispatch(
+                chain.handle_ptr(),
+                MESSAGE_KIND_4,
+                core::ptr::addr_of!(data_word) as usize,
+                core::ptr::addr_of!(forwarded),
+            );
+
+            assert_eq!(ok, MOCK_OK);
+            assert_eq!(
+                err, METHOD_ERR,
+                "ldmia sp!, {{r12, pc}} returns the method's r0 unbranched"
+            );
+            assert_eq!(DIRECT_CALLS, 2);
         }
     }
 }
