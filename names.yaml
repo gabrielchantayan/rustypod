@@ -21056,6 +21056,69 @@ functions:
       probe_ors_instead_of_replacing_the_high_bits /
       probe_forwards_the_dispatch_return_verbatim.
 
+  - address: 0x0811d7fc
+    ghidra: FUN_0811d7fc
+    name: vtable_slot_50_dispatch
+    size: 28
+    sig: "u32 vtable_slot_50_dispatch(handle: *mut *mut u8, kind: u32, data: usize, extra: *const usize)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1: handle
+      param_2: kind
+      param_3: data
+      param_4: extra
+    notes: >-
+      15 bl call sites (grep on decomp/osos.asm), all inside the slot
+      +0x50 message-family thunk cluster: the commit stage 0x0811d340
+      (site 0x0811d358), the multi-message routine 0x0811d360 (eight
+      sites 0x0811d390..0x0811d440), the open stage 0x0811d458
+      (0x0811d464), the kind-2 write stage 0x0811d52c (0x0811d550),
+      the kind-4 write stage 0x0811d56c (0x0811d590), the tag thunks
+      vtable_set_50_commit_probe_kind4 0x0811d6cc (0x0811d6e4) and
+      vtable_set_50_probe_kind4 0x0811d6ec (0x0811d704), and the
+      routine at 0x0811d880 (0x0811d890). The shared vtable
+      dispatcher of the slot +0x50 family - the slot +0x50 twin of
+      the still-unported FUN_0811d7b0 @ 0x0811d7b0
+      (util/vtable_query.rs), differing only in the slot offset:
+      stmdb sp!,{r3,lr}; ldr r0,[r0]; ldr r3,[r0]; ldr r12,[r3,#0x50];
+      mov r3,sp; blx r12; ldmia sp!,{r12,pc} - double dereference
+      handle -> object -> vtable, the method at slot +0x50 invoked as
+      method(object, kind, data, &spilled_r3), its error code
+      (0 = success) returned verbatim; the spilled r3 is whatever the
+      caller carried (no call site sets it deliberately - every
+      caller is a message thunk forwarding its own caller's r3).
+      Deviations: the r3 spill is collapsed into the 4th parameter -
+      the original receives r3 by value and spills it itself
+      (stmdb/mov r3,sp), but the port's callers pre-spill the
+      forwarded word and pass its address (vtable_query.rs
+      VTABLE_SLOT_4C_DISPATCH precedent), so `extra` reaches the
+      method verbatim; the export is therefore NOT ABI-hookable at
+      0x0811d7fc, where r3 arrives by value (no hook targets it). The
+      blx targets are firmware vtable methods, so the ported body
+      stays the wired default of the VTABLE_SLOT_50_DISPATCH seam and
+      the three ported siblings (vtable_set_50_kind4 0x0811d68c,
+      vtable_set_50_commit_probe_kind4 0x0811d6cc,
+      vtable_set_50_probe_kind4 0x0811d6ec) keep routing through it.
+      REWIRING OPPORTUNITY (follow-up, one function per commit): the
+      app/class_6800.rs precedent calls ported callees directly, so
+      the siblings' read_volatile seam reads can become direct calls
+      to vtable_slot_50_dispatch in separate commits. read_unaligned
+      slot load keeps the layout byte-exact on a 64-bit host (0x50 is
+      4-aligned but not 8-aligned). match.py (exit 1, diff expected):
+      same double-deref / slot-load / indirect-call shape; LLVM
+      lowers read_unaligned on ARMv5 to 4x ldrb + orr assembly
+      instead of ldr r12,[r3,#0x50], tail-calls (pop then bx) instead
+      of blx/ldmia-pc, and needs no mov r3,sp because `extra`
+      already arrives in r3 - the documented collapsed-spill
+      deviation; the crate fp frame accounts for the rest. Host tests
+      (direct calls on a fake vtable): double-deref chain traversal +
+      slot +0x50 selection against +0x48/+0x58 decoys, verbatim
+      r3-spill pointer forwarding, verbatim return forwarding -
+      src/app/vtable_set.rs::dispatch_double_dereferences_and_loads_slot_50_exactly
+      / dispatch_forwards_the_spilled_r3_pointer_verbatim /
+      dispatch_returns_the_methods_error_code_verbatim.
+
   - address: 0x082c23d4
     ghidra: FUN_082c23d4
     name: cg_buffer_current_offset
@@ -21089,3 +21152,46 @@ functions:
       - NULL/0 and a live pointer-sized word at +0x804 come back
       exactly, with poisoned neighbours proving no adjacent word is
       read.
+
+  - address: 0x082c0d6c
+    ghidra: FUN_082c0d6c
+    name: cg_block_ref_create
+    size: 16
+    sig: "cg_block_t **cg_block_ref_create(cg_proc_t *proc)"
+    module: codegen/block_ref
+    status: ported
+    vars: {param_1: proc}
+    notes: >-
+      43 bl call sites. The whole body is four instructions:
+      `ldr r0,[r0,#4]` (proc->module), `mov r1,#4`, `ldr r0,[r0,#0]`
+      (module->heap), `b 0x082c1a08` - a typed-allocation wrapper that
+      resolves the arena through the same proc->module->heap chain as
+      cg_virtual_reg_create and tail-calls cg_heap_alloc(heap, 4).
+      The 4-byte cell is an INDIRECT basic-block reference: branch
+      instructions (cg_create_inst_branch_label @ 0x082c1878 kind 7,
+      cg_create_inst_branch_cond @ 0x082c1850 kind 8) store the CELL
+      pointer in their target field (+0xc), not a block pointer, so a
+      branch can be emitted before its destination block exists.
+      Call-site evidence: all 43 callers are pipeline generators
+      (0x0823fa7c, 0x082439b0, 0x08248728, 0x082498d4, 0x0824a478,
+      0x0824af94); the pattern is `cell = FUN_082c0d6c(proc); emit
+      branch(..., cell); ...; *cell = cg_block_create(...)` (e.g.
+      082439b0 lines 174-177: `local_c0 = FUN_082c0d6c(iVar1);
+      FUN_082c1878(block,0x25,local_c0); *puVar4 = uVar2;`), and the
+      emitter FUN_082c6430 line 133 resolves it as
+      `*(cg_block_t **)target` then block->label (+0x8) for
+      cg_label_add_fixup. The port calls the already-ported
+      cg_heap_alloc (0x082c1a08, codegen/heap.rs) directly - no seam -
+      and returns its result verbatim, matching the original's tail
+      branch (R_ARM_JUMP24 cg_heap_alloc). The arena rounds the
+      4-byte request to 8 and zero-fills, so a fresh cell reads as a
+      NULL block pointer until back-patched. match.py (exit 1, diff
+      expected): both ldrs and `mov r1,#4` verbatim; the diff is the
+      crate fp frame push/pop. Host tests:
+      src/codegen/block_ref.rs::resolves_heap_through_proc_module_and_returns_the_carve_verbatim
+      (chain proc+0x04 -> module+0x00 -> heap, verbatim carve return,
+      decoy arena untouched),
+      requests_one_word_rounded_to_the_arena_granularity (consecutive
+      cells 8 bytes apart, cursor advances by exactly the rounded
+      word), cell_is_zero_filled_and_back_patchable (fresh cell NULL
+      despite poisoned allocator, writable back-patch).

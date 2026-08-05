@@ -12,6 +12,7 @@
 //! from the pipeline generators in 0x0823a000-0x0826f5ff:
 //! `cg_virtual_reg_create` alone has **835 `bl` call sites**, more than
 //! any other unported function in osos.
+pub mod block_ref;
 pub mod heap;
 pub mod ir;
 /// `cg_timer_wait` @ 0x082bc4fc — the timer-armed event wait used by
