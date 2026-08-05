@@ -13320,6 +13320,86 @@ functions:
       n_size_is_clamped_to_four,
       n_size_lands_at_0x1e_where_cell_size_ptr_reads.
 
+  # ---- B-tree varint decoder (src/sqlite/get_varint.rs) ----
+  - address: 0x0837ac30
+    ghidra: FUN_0837ac30
+    name: get_varint
+    size: 192
+    sig: "u8 sqlite3GetVarint(const u8 *p, u32 *v) [asm out-param; the seam slot it ships on widens the store to u64]"
+    module: sqlite/get_varint
+    status: ported
+    vars: {param_1: p, param_2: out, param_3: '[invented — untouched stack slot reused by the tail call]', param_4: '[invented — same]', uVar3: a, uVar4: b1_accum, bVar1: b3, local_10: tail_low_word, DAT_0837acf0: PAIR_MASK}
+    notes: >-
+      SQLite 3.5.x sqlite3GetVarint (the repo's established
+      identification — see the naming caveat below): the varint reader
+      the b-tree layer is built on. 13 bl call sites: 0x08371ff8
+      (FUN_08371e54), 0x08372834/0x08372880 (the ported
+      btree_parse_cell_ptr), 0x083882e0/0x083883a4 (FUN_08386ef8),
+      0x0838b504/0x0838b52c (FUN_0838b478), 0x0838b590/0x0838b5b4
+      (FUN_0838b570), 0x0838c8d0/0x0838c900 (FUN_0838c87c),
+      0x0838ca78/0x0838caa8 (FUN_0838c9f0). Algorithm, verified
+      instruction-by-instruction against osos.asm (Ghidra invents
+      param_3/param_4 from the stack slots the tail call reuses):
+      big-endian base-128, cases unrolled shortest-first, length
+      returned. NO one-byte case — the function reads p[0] and p[1]
+      unconditionally and tests p[1]'s high bit; ALL 13 call sites
+      guard with `cmp r0,#0x80; bcc` and keep the single byte inline
+      (value = byte, len 1), so the export's contract, like the
+      original's, is "p[0] has the continuation bit set". 2 bytes:
+      v = p[1] | (p[0]&0x7f)<<7. 3: a = p[2]|p[0]<<14, v = (a&mask) |
+      (p[1]&0x7f)<<7. 4: b = p[3]|p[1]<<14, v = (b&mask) |
+      ((a&mask)<<7). mask = literal pool @ 0x0837acf0 = 0x001FC07F =
+      (0x7f<<14)|0x7f, confirmed in osos.dec. 5: c = p[4]|a<<14,
+      v = (c & ~0x0FE00000 & ~0x3F80) | ((b & ~0x0FE00000 & ~0x3F80)
+      << 7) — the bic pairs strip each raw byte's continuation bit out
+      of the shifted accumulators; the top group's bits above the low
+      32 shift out, i.e. the u32 out-param truncates a 5-byte (35-bit)
+      varint to its low word. 6+ (p[4] high bit set): rewinds to p
+      (`sub r0,r1,#0x4`) and tail-calls the u64 decoder @ 0x0837aab0
+      (identified, unported), copies only the LOW word of the callee's
+      stack u64 into the out-param, returns the callee's byte count.
+      The port inlines the tail's equivalent (decode_tail),
+      group-by-group verified against 0x0837aab0's disassembly — 7-bit
+      accumulation, 9th byte contributes all 8 bits (v<<8 | p[8]); an
+      independent register-level Python simulation of both functions'
+      exact u32 ops matched the port on 400k random 2..=9-byte inputs
+      (lengths and low words everywhere, hi=0 for len<=5, full u64
+      tail), sidestepping the classic Ghidra mis-decompile of the
+      9-byte path. Naming caveat: this function's out-param is a u32
+      (single str per case) and 0x0837aab0's is a u64 (paired
+      stores), i.e. by upstream roles 0x0837ac30 is the truncating
+      getter and 0x0837aab0 the full 64-bit one — the repo's docs
+      (parse_cell.rs/cell_size.rs, kept for continuity) attach the
+      upstream names the other way around; the seam SLOT-to-ADDRESS
+      mapping is correct either way. Seam-default promotion (the
+      vtable_slot_50_dispatch precedent): the export replaced
+      missing_get_varint as DEFAULT_BTREE_CELL_OPS.get_varint;
+      callers still reach it only through the slot
+      (parse_cell::read_varint_fast truncates the u64 with `as u32`,
+      exactly the original's u32 store); the zero stand-in remains
+      for tests. Deviations: the slot's out-param is u64 where the
+      original's is u32 — the port writes hi=0 for 2..=5-byte cases
+      (bit-identical to the zero-extended u32 store, 5-byte
+      truncation included) and the FULL u64 for the 6..=9 tail (the
+      value the original computed in its callee and discarded the hi
+      word of; low word bit-identical). match.py (--size 192):
+      original 48 insns vs 108 — same shortest-first cascade with the
+      same masks (0x1fc07f pair mask rebuilt as orr 0x7f|0x1fc000,
+      the 0xfe00000/0x3f80 bic immediates) and the same group shifts;
+      expected LLVM shape diffs: per-case epilogues instead of
+      predicated blocks + shared tail, ldrsb/asrs/bmi sign tests for
+      `tst #0x80`, strd r2,[r1] with r3=0 for the u64 slot store, and
+      the tail inlined (no bl 0x0837aab0 — callee unported). Host
+      tests:
+      round_trips_every_encoded_length_against_the_reference_encoder,
+      decodes_two_through_nine_byte_varints_directly,
+      one_byte_varints_are_the_callers_inline_fast_path,
+      boundary_values, ninth_byte_contributes_all_eight_bits,
+      five_byte_varints_keep_only_the_low_word_like_the_original,
+      bytes_consumed_stops_at_the_first_clean_high_bit,
+      reads_no_byte_past_the_varint_end (PROT_NONE guard page),
+      shipped_seam_default_is_this_port.
+
   # ---- Connection allocator (src/sqlite/mem.rs) ----
   - address: 0x083749bc
     ghidra: FUN_083749bc

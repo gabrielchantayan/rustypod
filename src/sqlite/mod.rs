@@ -75,6 +75,7 @@ pub mod expr_list_height;
 pub mod expr_new;
 pub mod expr_span;
 pub mod free_p4;
+pub mod get_varint;
 pub mod hash_function;
 pub mod hex_to_int;
 pub mod mem;

@@ -43,10 +43,12 @@
 //!
 //! Deviations:
 //!
-//! - The two varint readers (0x0837ac30 `sqlite3GetVarint`, 0x0837aab0
-//!   `sqlite3GetVarint32`) are identified but not yet ported, so they
-//!   ride the [`BTREE_CELL_OPS`] seam as sibling slots — the same house
-//!   static `cell_size_ptr` already dispatches through (one seam per
+//! - The 0x0837ac30 varint reader (`sqlite3GetVarint`) is ported
+//!   (`sqlite/get_varint.rs`) and is the shipped default of its
+//!   [`BTREE_CELL_OPS`] slot; the 0x0837aab0 reader
+//!   (`sqlite3GetVarint32`) is identified but not yet ported and rides
+//!   the seam as a zero-writing stand-in — the same house static
+//!   `cell_size_ptr` already dispatches through (one seam per
 //!   cluster). The ported `__rt_udiv` @ 0x08036f14 is called as
 //!   [`__rt_udivmod`] because the original consumes the r1 remainder,
 //!   not the r0 quotient.
