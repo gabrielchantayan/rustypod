@@ -21336,6 +21336,39 @@ functions:
       src/app/vtable_set.rs::commit_tags_selector_and_routes_arguments /
       commit_ors_instead_of_replacing_the_high_bits /
       commit_forwards_the_dispatch_return_verbatim.
+  - address: 0x0811d360
+    ghidra: FUN_0811d360
+    name: vtable_set_50_write_eight_byte_record
+    size: 248
+    sig: "u32 vtable_set_50_write_eight_byte_record(handle: *mut *mut u8, record: *const u8, forwarded: usize)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1: handle
+      param_2: record
+      param_4: forwarded
+    notes: >-
+      3 bl callers (grep on decomp/osos.asm): 0x0813662c, 0x0813666c,
+      and 0x081d147c. The selector-0x12 batch serializer opens through
+      FUN_0811d458 (ported vtable_set_50_open_kind4), then makes eight
+      slot-0x50 dispatches: kind 4 &8 at 0x0811d390; kind-1 byte
+      fields record+0 through record+4 at 0x0811d3a8..0x0811d408;
+      kind-2 u16(record+6) at 0x0811d428; and kind-1 record+8 at
+      0x0811d440. It commits selector 0x12 via ported
+      vtable_set_50_commit_kind4 only after all eight return zero.
+      Every nonzero status returns verbatim and short-circuits the
+      remaining messages. The 0x0813662c / 0x0813666c callers pass
+      records ten bytes apart, confirming padding at offsets 5 and 9.
+      The port calls the open/commit exports directly and observes the
+      eight dispatches through the existing VTABLE_SLOT_50_DISPATCH
+      seam. r3 reaches open as `forwarded`, open's epilogue reloads
+      r3 with selector 0x12 for the length dispatch, and later r3 is
+      method-clobbered (modeled as zero). Reference C
+      decomp/c/010/0811d360_FUN_0811d360.c incorrectly declares void
+      and treats entry r2/r3 spills as locals; callers branch on r0,
+      and r2 is overwritten before use. Host tests:
+      src/app/vtable_set.rs::eight_byte_record_serializes_every_field_in_protocol_order
+      / eight_byte_record_propagates_field_error_and_skips_later_messages.
 
   - address: 0x0811d458
     ghidra: FUN_0811d458

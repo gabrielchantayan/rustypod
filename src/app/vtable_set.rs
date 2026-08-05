@@ -149,6 +149,17 @@ const MESSAGE_KIND_4: u32 = 4;
 /// [`vtable_set_50_write_kind2`] (0x0811d52c); its first dispatch
 /// still goes out with kind 4, exactly like the kind-4 sibling.
 const MESSAGE_KIND_2: u32 = 2;
+/// The byte-wide message kind used by
+/// [`vtable_set_50_write_eight_byte_record`].
+const MESSAGE_KIND_1: u32 = 1;
+
+/// The selector opened and committed by
+/// [`vtable_set_50_write_eight_byte_record`].
+const EIGHT_BYTE_RECORD_SELECTOR: u32 = 0x12;
+
+/// The number of payload bytes serialized by
+/// [`vtable_set_50_write_eight_byte_record`].
+const EIGHT_BYTE_RECORD_PAYLOAD_LEN: u32 = 8;
 
 /// The top-bit tag the commit stage (0x0811d340) ORs into the selector.
 const COMMIT_TAG: u32 = 0x8000_0000;
@@ -779,6 +790,112 @@ pub unsafe extern "C" fn vtable_set_50_commit_kind4(
         core::ptr::addr_of!(tagged_slot) as usize,
         core::ptr::addr_of!(forwarded_slot),
     )
+}
+
+/// vtable_set_50_write_eight_byte_record — original: `FUN_0811d360` @
+/// 0x0811d360 (248 bytes; **3 `bl` call sites**, grep on
+/// `decomp/osos.asm`: 0x0813662c, 0x0813666c, and 0x081d147c).
+///
+/// Serializes the eight payload bytes of a padded record through the
+/// slot +0x50 message protocol. It opens selector 0x12, sends a kind-4
+/// payload-length word of 8, sends the five byte fields at offsets
+/// 0..4 as kind-1 messages, sends the u16 field at offset 6 as kind 2,
+/// sends the final byte at offset 8 as kind 1, then commits selector
+/// 0x12. Every call is guarded: its first nonzero status returns
+/// verbatim and prevents every later message and the commit.
+///
+/// The eight direct dispatch sites are 0x0811d390 (kind 4, `&8`),
+/// 0x0811d3a8..0x0811d408 (kind 1, `record + 0` through
+/// `record + 4`), 0x0811d428 (kind 2, `&u16(record + 6)`), and
+/// 0x0811d440 (kind 1, `record + 8`). The callers at 0x0813662c /
+/// 0x0813666c pass records ten bytes apart, confirming the skipped
+/// padding at offsets 5 and 9.
+///
+/// # Deviations
+///
+/// - **Ported callees are called directly.**
+///   [`vtable_set_50_open_kind4`] (0x0811d458) and
+///   [`vtable_set_50_commit_kind4`] (0x0811d340) are already ported;
+///   the eight original `bl 0x0811d7fc` calls use the retained
+///   [`VTABLE_SLOT_50_DISPATCH`] seam, so host tests observe the full
+///   sequence without a new seam.
+/// - **The fourth-register forwarding is modeled explicitly.** Open's
+///   dispatcher sees the caller's r3 (`forwarded`); its epilogue
+///   reloads r3 with selector 0x12, which reaches the length dispatch.
+///   Thereafter each dispatcher leaves r3 method-clobbered, so the
+///   remaining messages and commit receive a zero `dead_slot`, as in
+///   [`vtable_set_50_write_indirect_kind4`]'s unobservable-r3
+///   precedent.
+/// - **The return type is `u32`, not the reference C's `void`.** All
+///   three callers branch on r0, and the assembly keeps each failing
+///   result in r0 or replaces a final zero with commit's result.
+///   `decomp/c/010/0811d360_FUN_0811d360.c` also mistakes the entry
+///   r2/r3 spills for live local parameters; r2 is overwritten before
+///   use. The port follows the disassembly.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_set_50_write_eight_byte_record(
+    handle: *mut *mut u8,
+    record: *const u8,
+    forwarded: usize,
+) -> u32 {
+    let result = vtable_set_50_open_kind4(handle, EIGHT_BYTE_RECORD_SELECTOR, forwarded);
+    if result != 0 {
+        return result;
+    }
+
+    let dispatch = core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_SLOT_50_DISPATCH));
+    let payload_len = EIGHT_BYTE_RECORD_PAYLOAD_LEN;
+    // Open's `ldmia sp!, {r2, r3, r4, pc}` reloads its spilled selector
+    // into r3, so the first direct dispatch sees 0x12 in its spill.
+    let selector_slot = EIGHT_BYTE_RECORD_SELECTOR as usize;
+    let result = dispatch(
+        handle,
+        MESSAGE_KIND_4,
+        core::ptr::addr_of!(payload_len) as usize,
+        core::ptr::addr_of!(selector_slot),
+    );
+    if result != 0 {
+        return result;
+    }
+
+    // `vtable_slot_50_dispatch` hands r3 to a vtable method and pops
+    // into r12, leaving later r3 values method-clobbered.
+    let dead_slot = 0usize;
+    for offset in 0..5 {
+        let result = dispatch(
+            handle,
+            MESSAGE_KIND_1,
+            record.add(offset) as usize,
+            core::ptr::addr_of!(dead_slot),
+        );
+        if result != 0 {
+            return result;
+        }
+    }
+
+    let halfword_slot = record.add(6).cast::<u16>().read_unaligned();
+    let result = dispatch(
+        handle,
+        MESSAGE_KIND_2,
+        core::ptr::addr_of!(halfword_slot) as usize,
+        core::ptr::addr_of!(dead_slot),
+    );
+    if result != 0 {
+        return result;
+    }
+
+    let result = dispatch(
+        handle,
+        MESSAGE_KIND_1,
+        record.add(8) as usize,
+        core::ptr::addr_of!(dead_slot),
+    );
+    if result != 0 {
+        return result;
+    }
+
+    vtable_set_50_commit_kind4(handle, EIGHT_BYTE_RECORD_SELECTOR, dead_slot)
 }
 
 /// vtable_set_50_open_kind4 — original: `FUN_0811d458` @ 0x0811d458
@@ -2832,12 +2949,12 @@ mod tests {
     // ---- recording mock for the slot +0x50 dispatch seam -------------
 
     static mut DISPATCH_CALLS: usize = 0;
-    static mut DISPATCH_HANDLE: [*mut *mut u8; 8] = [core::ptr::null_mut(); 8];
-    static mut DISPATCH_KIND: [u32; 8] = [0; 8];
-    static mut DISPATCH_WORD0: [u32; 8] = [0; 8];
-    static mut DISPATCH_WORD1: [u32; 8] = [0; 8];
-    static mut DISPATCH_EXTRA: [usize; 8] = [0; 8];
-    static mut DISPATCH_RESULTS: [u32; 8] = [MOCK_OK; 8];
+    static mut DISPATCH_HANDLE: [*mut *mut u8; 12] = [core::ptr::null_mut(); 12];
+    static mut DISPATCH_KIND: [u32; 12] = [0; 12];
+    static mut DISPATCH_WORD0: [u32; 12] = [0; 12];
+    static mut DISPATCH_WORD1: [u32; 12] = [0; 12];
+    static mut DISPATCH_EXTRA: [usize; 12] = [0; 12];
+    static mut DISPATCH_RESULTS: [u32; 12] = [MOCK_OK; 12];
 
     unsafe extern "C" fn recording_dispatch(
         handle: *mut *mut u8,
@@ -2849,21 +2966,19 @@ mod tests {
         DISPATCH_CALLS += 1;
         DISPATCH_HANDLE[call] = handle;
         DISPATCH_KIND[call] = kind;
-        // The data pointers handed to the dispatcher always point into a
-        // live frame with at least one word past the message (the open /
-        // commit frames place `forwarded_slot` there, the write frame's
-        // two-word message is contiguous), so reading the neighbour word
-        // of a live frame is in-bounds stack; the word is only asserted
-        // on for the write stage's second message.
-        DISPATCH_WORD0[call] = (data as *const u32).read();
-        DISPATCH_WORD1[call] = (data as *const u32).add(1).read();
+        // The fixtures reserve two readable words from every message
+        // pointer. `read_unaligned` additionally lets record byte fields
+        // at offsets 1..4 be observed without imposing host alignment.
+        // The neighbour word is only asserted for two-word messages.
+        DISPATCH_WORD0[call] = (data as *const u32).read_unaligned();
+        DISPATCH_WORD1[call] = (data as *const u32).add(1).read_unaligned();
         DISPATCH_EXTRA[call] = extra.read();
         DISPATCH_RESULTS[call]
     }
 
     unsafe fn install_recording_dispatch() {
         DISPATCH_CALLS = 0;
-        DISPATCH_RESULTS = [MOCK_OK; 8];
+        DISPATCH_RESULTS = [MOCK_OK; 12];
         core::ptr::addr_of_mut!(VTABLE_SLOT_50_DISPATCH)
             .write_volatile(recording_dispatch);
     }
@@ -3420,6 +3535,114 @@ mod tests {
             assert_eq!(DISPATCH_CALLS, 2);
             assert_eq!(DISPATCH_WORD0[0], SELECTOR | COMMIT_TAG);
             assert_eq!(DISPATCH_WORD0[1], SELECTOR | PROBE_TAG);
+        }
+    }
+
+    // ---- vtable_set_50_write_eight_byte_record (0x0811d360) -------
+
+    #[test]
+    fn eight_byte_record_serializes_every_field_in_protocol_order() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        // Five byte fields, skipped padding, a little-endian u16, final
+        // byte, then padding so the recording mock can inspect words.
+        let record = [
+            0x10u8, 0x20, 0x30, 0x40, 0x50, 0xcc, 0x66, 0x77, 0x80, 0xdd, 0, 0, 0, 0,
+            0, 0,
+        ];
+        unsafe {
+            install_recording_dispatch();
+
+            let result = vtable_set_50_write_eight_byte_record(
+                fixture.handle_ptr(),
+                record.as_ptr(),
+                FORWARDED,
+            );
+
+            assert_eq!(result, MOCK_OK);
+            assert_eq!(DISPATCH_CALLS, 10, "open + length + eight fields + commit");
+            let expected_kinds = [
+                MESSAGE_KIND_4,
+                MESSAGE_KIND_4,
+                MESSAGE_KIND_1,
+                MESSAGE_KIND_1,
+                MESSAGE_KIND_1,
+                MESSAGE_KIND_1,
+                MESSAGE_KIND_1,
+                MESSAGE_KIND_2,
+                MESSAGE_KIND_1,
+                MESSAGE_KIND_4,
+            ];
+            for (call, expected_kind) in expected_kinds.iter().enumerate() {
+                assert_eq!(DISPATCH_HANDLE[call], fixture.handle_ptr());
+                assert_eq!(DISPATCH_KIND[call], *expected_kind, "message {call}");
+            }
+            assert_eq!(
+                DISPATCH_WORD0[0], EIGHT_BYTE_RECORD_SELECTOR,
+                "open sends selector 0x12 bare"
+            );
+            assert_eq!(
+                DISPATCH_WORD0[1], EIGHT_BYTE_RECORD_PAYLOAD_LEN,
+                "the first direct dispatch sends the eight-byte length"
+            );
+            for (field, expected) in [0x10u32, 0x20, 0x30, 0x40, 0x50].iter().enumerate() {
+                assert_eq!(
+                    DISPATCH_WORD0[field + 2] & 0xff,
+                    *expected,
+                    "kind-1 record field {field}"
+                );
+            }
+            assert_eq!(
+                DISPATCH_WORD0[7] & 0xffff,
+                0x7766,
+                "the offset-six field is loaded as a little-endian halfword"
+            );
+            assert_eq!(DISPATCH_WORD0[8] & 0xff, 0x80, "the final byte is at offset 8");
+            assert_eq!(
+                DISPATCH_WORD0[9],
+                EIGHT_BYTE_RECORD_SELECTOR | COMMIT_TAG,
+                "the successful batch commits selector 0x12"
+            );
+            assert_eq!(DISPATCH_EXTRA[0], FORWARDED, "open sees entry r3");
+            assert_eq!(
+                DISPATCH_EXTRA[1],
+                EIGHT_BYTE_RECORD_SELECTOR as usize,
+                "open reloads selector 0x12 into r3 for the length dispatch"
+            );
+            for call in 2..10 {
+                assert_eq!(
+                    DISPATCH_EXTRA[call], 0,
+                    "later r3 values are method-clobbered and unobservable"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn eight_byte_record_propagates_field_error_and_skips_later_messages() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let record = [0u8; 16];
+        unsafe {
+            install_recording_dispatch();
+            // Call 0 is open, 1 is the payload length, 2..6 are bytes,
+            // and call 7 is the offset-six halfword.
+            DISPATCH_RESULTS[7] = WRITE_ERR;
+
+            let result = vtable_set_50_write_eight_byte_record(
+                fixture.handle_ptr(),
+                record.as_ptr(),
+                FORWARDED,
+            );
+
+            assert_eq!(result, WRITE_ERR, "the first failing field status returns verbatim");
+            assert_eq!(
+                DISPATCH_CALLS, 8,
+                "the final byte and commit are both skipped after the halfword error"
+            );
+            assert_eq!(DISPATCH_KIND[7], MESSAGE_KIND_2);
         }
     }
 
