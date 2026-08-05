@@ -13,9 +13,9 @@
 //!   immediately after that instantiation's `deque_seg_capacity`
 //!   (8 bytes + 36 bytes, adjacent), which is what identifies the pair
 //!   as the deque template's out-of-line members.
-//! - [`less_signed`] / [`less_unsigned`] — `std::less`-shaped
-//!   comparators taking their operands by reference, 1 and 12 copies,
-//!   45 and 73 call sites.
+//! - [`less_signed`] / [`less_unsigned`] / [`less_unsigned_byte`] —
+//!   `std::less`-shaped comparators taking their operands by
+//!   reference, 1, 12 and 2 copies, 45, 73 and 13 call sites.
 //! - [`container_element_at`] — indexed element access through the
 //!   container's virtual element-slot method, 30 copies, 154 call
 //!   sites (the largest family in the block after the handle accessor).
@@ -117,6 +117,28 @@ pub unsafe extern "C" fn less_signed(_this: *const u8, a: *const i32, b: *const 
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn less_unsigned(_this: *const u8, a: *const u32, b: *const u32) -> u32 {
+    u32::from(a.read() < b.read())
+}
+
+/// less_unsigned_byte — original: `FUN_083d73bc` @ 0x083d73bc
+/// (24 bytes; 10 `bl` call sites at this copy; the byte-identical
+/// twin @ 0x083d73d4 has 3 more and is a separate future port).
+///
+/// `std::less<unsigned char>::operator()(const u8 &a, const u8 &b)`
+/// — the byte-width member of the [`less_signed`] / [`less_unsigned`]
+/// comparator family: loads one byte from each operand reference
+/// (`ldrb`), unsigned-compares, and returns 1/0 (`movcs #0` /
+/// `movcc #1`). `this` arrives in r0 and is immediately overwritten,
+/// exactly as the word-sized functors take it. Callers in the byte
+/// key tree (`byte_key_tree_insert_node`, `names.yaml` @ 0x083b8844)
+/// use it as the key-ordering predicate deciding left vs right
+/// insertion.
+///
+/// # Safety
+/// `a` and `b` must be valid readable `u8` pointers.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn less_unsigned_byte(_this: *const u8, a: *const u8, b: *const u8) -> u32 {
     u32::from(a.read() < b.read())
 }
 
@@ -1541,6 +1563,40 @@ mod tests {
 
     /// The same bit patterns compare the other way round unsigned —
     /// this is the whole difference between the two families.
+    #[test]
+    fn less_unsigned_byte_edges() {
+        unsafe {
+            // equal / less / greater
+            assert_eq!(less_unsigned_byte(core::ptr::null(), &7, &7), 0, "strict");
+            assert_eq!(less_unsigned_byte(core::ptr::null(), &3, &9), 1);
+            assert_eq!(less_unsigned_byte(core::ptr::null(), &9, &3), 0);
+            // unsigned, not signed: 255 is the largest byte, not -1
+            assert_eq!(less_unsigned_byte(core::ptr::null(), &255, &0), 0);
+            assert_eq!(less_unsigned_byte(core::ptr::null(), &0, &255), 1);
+            assert_eq!(less_unsigned_byte(core::ptr::null(), &255, &255), 0, "strict");
+            assert_eq!(less_unsigned_byte(core::ptr::null(), &0, &0), 0, "strict");
+            assert_eq!(less_unsigned_byte(core::ptr::null(), &254, &255), 1);
+        }
+    }
+
+    #[test]
+    fn less_unsigned_byte_matches_reference_exhaustively() {
+        fn reference(a: u8, b: u8) -> u32 {
+            u32::from(a < b)
+        }
+        unsafe {
+            for a in 0..=u8::MAX {
+                for b in 0..=u8::MAX {
+                    assert_eq!(
+                        less_unsigned_byte(core::ptr::null(), &a, &b),
+                        reference(a, b),
+                        "{a} vs {b}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn less_unsigned_is_unsigned() {
         unsafe {

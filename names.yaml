@@ -20804,3 +20804,30 @@ functions:
       Rust implementation and focused host tests:
       `src/cxx/object_flags.rs::bitstream_stuffing_to_byte_check`.
 
+  - address: 0x083d73bc
+    ghidra: FUN_083d73bc
+    name: less_unsigned_byte
+    size: 24
+    sig: "u32 less_unsigned_byte(void *this, const u8 *a, const u8 *b)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: this, param_2: a, param_3: b}
+    notes: >-
+      `std::less<unsigned char>::operator()(const u8 &, const u8 &)` —
+      the byte-width member of the less_signed @ 0x083d7580 /
+      less_unsigned @ 0x083d7598 comparator family: ldrb both operand
+      references, unsigned cmp, return 1/0 via `movcs #0` / `movcc #1`.
+      `this` arrives in r0 and is immediately overwritten, as with the
+      word-sized functors. 10 `bl 0x083d73bc` sites (grep -c on
+      decomp/osos.asm); callers in the byte key tree
+      (byte_key_tree_insert_node @ 0x083b8844) use it as the
+      key-ordering predicate deciding left vs right insertion. The
+      byte-identical twin @ 0x083d73d4 (3 bl sites) is deliberately
+      NOT ported here — a separate future commit. Deviations: none
+      semantic. match.py (exit 1, diff expected): same
+      ldrb/ldrb/cmp + predicated 0/1 return shape; the diff is LLVM's
+      push {fp,lr} frame and instruction scheduling. Host tests prove
+      the equal/less/greater truth table with 0 and 255 edges plus an
+      exhaustive 256x256 sweep against a reference `u8 < u8`:
+      src/cxx/templates.rs::less_unsigned_byte_edges /
+      less_unsigned_byte_matches_reference_exhaustively.
