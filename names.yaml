@@ -20958,3 +20958,51 @@ functions:
       0x10, low < 6, low == 6, low > 6, 0xffff), fixed seven-call
       order, verbatim ticks/event/channel forwarding, and tail-call
       result propagation.
+
+  - address: 0x0811d6cc
+    ghidra: FUN_0811d6cc
+    name: vtable_set_50_commit_probe_kind4
+    size: 32
+    sig: "u32 vtable_set_50_commit_probe_kind4(handle: *mut *mut u8, selector: u32, forwarded: usize)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1: handle
+      param_2: selector
+    notes: >-
+      14 bl call sites (grep on decomp/osos.asm): 0x0810aa30, 3-site
+      cluster 0x0811c724..0x0811c788, 3-site cluster
+      0x08136640..0x08136694, 0x081b0134, 0x081b015c, 0x081bc714,
+      0x081d0e80, 2-site cluster 0x081d1504..0x081d1518, 0x08285864.
+      One-dispatch commit+probe thunk of the kind-4 vtable message
+      family (slot +0x50; sibling of vtable_set_50_kind4 @ 0x0811d68c):
+      stmdb sp!,{r0,r1,r4,lr}; ldr r1,[sp,#4]; add r2,sp,#4; orr
+      r1,r1,#0xc0000000; str r1,[sp,#4]; mov r1,#4; bl 0x0811d7fc;
+      ldmia sp!,{r2,r3,r4,pc} - handle passes through in r0 untouched,
+      kind 4 in r1, r2 points at the stack slot holding
+      selector | 0xc0000000 (COMMIT_PROBE_TAG: the 0x80000000 commit
+      tag of the sibling's third stage 0x0811d340 plus the 0x40000000
+      "supported?" probe tag of the unported neighbour 0x0811d6ec;
+      exact protocol meaning not established), and the dispatcher's r0
+      returns unbranched. Callers issue it after successful writes
+      (e.g. probe 0x0811c6f0 -> vtable_set_50_kind4 0x0811c710 ->
+      this call 0x0811c724), always branching on the error code.
+      Deviations: callee 0x0811d7fc is unported and sits behind the
+      existing VTABLE_SLOT_50_DISPATCH seam (this body IS the
+      0x0811d340 stage shape with a wider tag, so no new seam); the
+      caller's r3 is forwarded verbatim, modeled as a 3rd parameter
+      `forwarded` (vtable_query_4c_kind4 / vtable_set_50_kind4
+      precedent). Reference C decomp/c/010/0811d6cc_FUN_0811d6cc.c
+      invents a phantom 5th argument (FUN_0811d7fc(param_1, 4,
+      &local_c, param_4, param_1)) - the dispatcher consumes r0..r3
+      only; the port follows the disassembly. match.py (exit 1, diff
+      expected): same orr 0xc0000000 / mov r1,#4 / tagged-stack-slot /
+      single-dispatch structure; the diff is the crate fp frame and the
+      seam's ldr/blx standing in for bl 0x0811d7fc. Host tests:
+      0xc0000000 tagging + argument routing (handle verbatim, kind 4,
+      stack-slot indirection, r3 forwarding), orr-not-replace on
+      selectors already carrying each tag bit, and verbatim return
+      forwarding -
+      src/app/vtable_set.rs::commit_probe_tags_selector_and_routes_arguments /
+      commit_probe_ors_instead_of_replacing_the_high_bits /
+      commit_probe_forwards_the_dispatch_return_verbatim.
