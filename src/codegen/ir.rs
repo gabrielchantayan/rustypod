@@ -43,6 +43,8 @@
 //!   (288 bytes; 4 `bl` call sites). Collects the registers an
 //!   instruction DEFINES into a bounded output array, dispatching on the
 //!   kind byte through two branch tables.
+//! - `cg_inst_collect_used_regs` — original: `FUN_082c1bfc` @ 0x082c1bfc
+//!   (388 bytes). Collects an instruction's input registers.
 //!
 //! Layouts recovered from the assembly (byte offsets are the target's;
 //! the port addresses every pointer field by WORD INDEX so the records
@@ -346,6 +348,9 @@ pub const CG_INST_DEF1: usize = 4;
 /// `cg_inst_t + 0x14` — the register kind 10 defines, collected only
 /// when non-NULL.
 pub const CG_INST_KIND10_DEF: usize = 5;
+/// `cg_inst_kind16_t + 0x1c` — the third source register collected by
+/// [`cg_inst_collect_used_regs`].
+pub const CG_INST_KIND16_SOURCE2: usize = 7;
 
 /// Address of a record's pointer-sized field at word index `index`.
 #[inline(always)]
@@ -910,6 +915,140 @@ pub unsafe extern "C" fn cg_inst_visit_by_kind(
             } else {
                 append_defined_reg(reg, cursor, end)
             }
+        }
+        _ => cursor,
+    }
+}
+
+/// cg_inst_collect_used_regs — original: `FUN_082c1bfc` @ 0x082c1bfc
+/// (388 bytes, 8 `bl` + 2 tail `b` call sites).
+///
+/// Collects the registers an instruction USES into the bounded output array
+/// `cursor..end` and returns the advanced cursor. It dispatches directly on
+/// the kind byte at `inst + 0x8` through a 25-entry jump table (kinds 0-24).
+/// The input layouts and append order recovered from that table are:
+///
+/// - kinds 1, 14 and 15 append `+0x14`;
+/// - kinds 2, 13 and 17 append `+0x14`, then `+0x18`;
+/// - kinds 3, 20 and 22 append `+0x10`, then `+0x14`;
+/// - kinds 4, 8, 18 and 21 append `+0x10`;
+/// - kinds 5, 19 and 23 append `+0xc`, then `+0x10`;
+/// - kinds 9 and 10 walk the `{next, reg}` list rooted at `+0x10`, appending
+///   each `reg` in list order;
+/// - kind 11 appends `+0xc` only when non-NULL;
+/// - kind 16 appends `+0x14`, `+0x18`, then `+0x1c`; and kind 24 appends
+///   `+0xc`, `+0x10`, then `+0x14`.
+///
+/// Kinds 0, 6, 7 and 12, plus values above 24, use no registers. Every
+/// selected value is passed to [`cg_reg_append_bounded`] without a NULL
+/// check, except kind 11's optional return-value slot. Thus a selected NULL
+/// is still a bounded store and advances the cursor when room remains.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_inst_collect_used_regs(
+    inst: *mut CgInst,
+    cursor: *mut *mut CgVirtualReg,
+    end: *mut *mut CgVirtualReg,
+) -> *mut *mut CgVirtualReg {
+    let inst = inst as *mut u8;
+    let kind = inst.add(CG_INST_KIND * WORD).read() as u32;
+    match kind {
+        1 | 14 | 15 => {
+            cg_reg_append_bounded(slot(inst, CG_INST_UNARY_SOURCE).read() as *mut CgVirtualReg, cursor, end)
+        }
+        CG_INST_KIND_BINARY | 13 | 17 => {
+            let cursor = cg_reg_append_bounded(
+                slot(inst, CG_INST_BINARY_SOURCE0).read() as *mut CgVirtualReg,
+                cursor,
+                end,
+            );
+            cg_reg_append_bounded(
+                slot(inst, CG_INST_BINARY_SOURCE1).read() as *mut CgVirtualReg,
+                cursor,
+                end,
+            )
+        }
+        CG_INST_KIND_COMPARE | 20 | 22 => {
+            let cursor = cg_reg_append_bounded(
+                slot(inst, CG_INST_COMPARE_SOURCE0).read() as *mut CgVirtualReg,
+                cursor,
+                end,
+            );
+            cg_reg_append_bounded(
+                slot(inst, CG_INST_COMPARE_SOURCE1).read() as *mut CgVirtualReg,
+                cursor,
+                end,
+            )
+        }
+        CG_INST_KIND_LOAD | CG_INST_KIND_BRANCH_COND | 18 | 21 => {
+            cg_reg_append_bounded(slot(inst, CG_INST_LOAD_ADDRESS).read() as *mut CgVirtualReg, cursor, end)
+        }
+        CG_INST_KIND_STORE | 19 | 23 => {
+            let cursor = cg_reg_append_bounded(
+                slot(inst, CG_INST_STORE_VALUE).read() as *mut CgVirtualReg,
+                cursor,
+                end,
+            );
+            cg_reg_append_bounded(
+                slot(inst, CG_INST_STORE_ADDRESS).read() as *mut CgVirtualReg,
+                cursor,
+                end,
+            )
+        }
+        CG_INST_KIND_PHI | 10 => {
+            let mut node = slot(inst, CG_INST_PHI_REGS).read();
+            let mut cursor = cursor;
+            while !node.is_null() {
+                cursor = cg_reg_append_bounded(
+                    slot(node, CG_VREG_LIST_REG).read() as *mut CgVirtualReg,
+                    cursor,
+                    end,
+                );
+                node = slot(node, CG_VREG_LIST_NEXT).read();
+            }
+            cursor
+        }
+        CG_INST_KIND_RET => {
+            let reg = slot(inst, CG_INST_RET_VALUE_VALUE).read() as *mut CgVirtualReg;
+            if reg.is_null() {
+                cursor
+            } else {
+                cg_reg_append_bounded(reg, cursor, end)
+            }
+        }
+        16 => {
+            let cursor = cg_reg_append_bounded(
+                slot(inst, CG_INST_UNARY_SOURCE).read() as *mut CgVirtualReg,
+                cursor,
+                end,
+            );
+            let cursor = cg_reg_append_bounded(
+                slot(inst, CG_INST_BINARY_SOURCE1).read() as *mut CgVirtualReg,
+                cursor,
+                end,
+            );
+            cg_reg_append_bounded(
+                slot(inst, CG_INST_KIND16_SOURCE2).read() as *mut CgVirtualReg,
+                cursor,
+                end,
+            )
+        }
+        24 => {
+            let cursor = cg_reg_append_bounded(
+                slot(inst, CG_INST_DEF0).read() as *mut CgVirtualReg,
+                cursor,
+                end,
+            );
+            let cursor = cg_reg_append_bounded(
+                slot(inst, CG_INST_DEF1).read() as *mut CgVirtualReg,
+                cursor,
+                end,
+            );
+            cg_reg_append_bounded(
+                slot(inst, CG_INST_KIND10_DEF).read() as *mut CgVirtualReg,
+                cursor,
+                end,
+            )
         }
         _ => cursor,
     }
@@ -1665,6 +1804,29 @@ mod tests {
         (out, cursor.offset_from(base) as usize)
     }
 
+    /// Runs the used-register collector over `inst` into a 4-slot output
+    /// array; returns the array and how many slots the returned cursor covers.
+    unsafe fn collect4(inst: *mut CgInst) -> ([*mut CgVirtualReg; 4], usize) {
+        let mut out = [core::ptr::null_mut::<CgVirtualReg>(); 4];
+        let base = out.as_mut_ptr();
+        let cursor = cg_inst_collect_used_regs(inst, base, base.add(4));
+        (out, cursor.offset_from(base) as usize)
+    }
+
+    /// Builds the eight words needed by the largest recovered input layout:
+    /// kind plus the five candidate source slots at +0xc through +0x1c.
+    unsafe fn collect_raw_used(
+        kind: u8,
+        source_words: [usize; 5],
+    ) -> ([*mut CgVirtualReg; 4], usize) {
+        let mut record = [0usize; 8];
+        record[CG_INST_DEF0..=CG_INST_KIND16_SOURCE2].copy_from_slice(&source_words);
+        (record.as_mut_ptr() as *mut u8)
+            .add(CG_INST_KIND * WORD)
+            .write(kind);
+        collect4(record.as_mut_ptr() as *mut CgInst)
+    }
+
     #[test]
     fn unary_and_binary_visit_their_dest_and_skip_the_null_dest_flags() {
         let _g = setup();
@@ -1833,6 +1995,142 @@ mod tests {
             let (out, count) = visit4(record.as_mut_ptr() as *mut CgInst);
             assert_eq!(count, 1);
             assert!(out[0].is_null(), "a NULL +0xc lands in the array as-is");
+        }
+    }
+
+    // --- cg_inst_collect_used_regs -------------------------------------
+
+    #[test]
+    fn used_collector_reads_factory_inputs_and_preserves_their_order() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let dest = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let r0 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let r1 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let r2 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let regs = [r0, r1, core::ptr::null_mut()];
+            let list = cg_virtual_reg_list_create(f.heap, regs.as_ptr());
+            let insts: [(*mut CgInst, &[*mut CgVirtualReg]); 10] = [
+                (cg_create_inst_unary(f.block_ptr(), 0x1a, dest, r0), &[r0]),
+                (cg_create_inst_binary(f.block_ptr(), 0x0f, dest, r0, r1), &[r0, r1]),
+                (cg_create_inst_compare(f.block_ptr(), 0x30, dest, r0, r1), &[r0, r1]),
+                (cg_create_inst_load(f.block_ptr(), 0x29, dest, r0), &[r0]),
+                (cg_create_inst_store(f.block_ptr(), 0x2b, r0, r1), &[r0, r1]),
+                (cg_create_inst_load_immed(f.block_ptr(), 0x28, dest, 42), &[]),
+                (cg_create_inst_branch_label(f.block_ptr(), 0x40, f.block_ptr()), &[]),
+                (cg_create_inst_branch_cond(f.block_ptr(), 0x41, r0, f.block_ptr()), &[r0]),
+                (cg_create_inst_phi(f.block_ptr(), 0x50, dest, list), &[r0, r1]),
+                (cg_create_inst_ret_value(f.block_ptr(), 0x60, r2), &[r2]),
+            ];
+            for (i, &(inst, expected)) in insts.iter().enumerate() {
+                let (out, count) = collect4(inst);
+                assert_eq!(count, expected.len(), "factory kind class {i}");
+                assert_eq!(&out[..count], expected, "factory kind class {i}");
+            }
+            let (out, count) = collect4(cg_create_inst_ret(f.block_ptr(), 0x60));
+            assert_eq!(count, 0, "ret without a value is optional");
+            assert!(out[0].is_null());
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn used_collector_dispatches_every_unrecovered_kind_class() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let r0 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let r1 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let r2 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let r3 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            for kind in [1, 14, 15] {
+                let (out, count) = collect_raw_used(kind, [0, 0, r0 as usize, r1 as usize, r2 as usize]);
+                assert_eq!((&out[..count], count), (&[r0][..], 1), "kind {kind}");
+            }
+            for kind in [2, 13, 17] {
+                let (out, count) = collect_raw_used(kind, [0, 0, r0 as usize, r1 as usize, r2 as usize]);
+                assert_eq!((&out[..count], count), (&[r0, r1][..], 2), "kind {kind}");
+            }
+            for kind in [3, 20, 22] {
+                let (out, count) = collect_raw_used(kind, [0, r0 as usize, r1 as usize, r2 as usize, 0]);
+                assert_eq!((&out[..count], count), (&[r0, r1][..], 2), "kind {kind}");
+            }
+            for kind in [4, 8, 18, 21] {
+                let (out, count) = collect_raw_used(kind, [r3 as usize, r0 as usize, r1 as usize, 0, 0]);
+                assert_eq!((&out[..count], count), (&[r0][..], 1), "kind {kind}");
+            }
+            for kind in [5, 19, 23] {
+                let (out, count) = collect_raw_used(kind, [r0 as usize, r1 as usize, r2 as usize, 0, 0]);
+                assert_eq!((&out[..count], count), (&[r0, r1][..], 2), "kind {kind}");
+            }
+            let (out, count) = collect_raw_used(16, [0, 0, r0 as usize, r1 as usize, r2 as usize]);
+            assert_eq!((&out[..count], count), (&[r0, r1, r2][..], 3));
+            let (out, count) = collect_raw_used(24, [r0 as usize, r1 as usize, r2 as usize, r3 as usize, 0]);
+            assert_eq!((&out[..count], count), (&[r0, r1, r2][..], 3));
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn used_collector_handles_list_empty_and_out_of_range_kinds() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let r0 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let r1 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let cells = [r0, r1, core::ptr::null_mut()];
+            let list = cg_virtual_reg_list_create(f.heap, cells.as_ptr()) as usize;
+            for kind in [9, 10] {
+                let (out, count) = collect_raw_used(kind, [0, list, 0, 0, 0]);
+                assert_eq!((&out[..count], count), (&[r0, r1][..], 2), "kind {kind} list");
+            }
+            for kind in [9, 10] {
+                let (out, count) = collect_raw_used(kind, [0, 0, r0 as usize, r1 as usize, 0]);
+                assert_eq!(count, 0, "kind {kind} NULL list is empty");
+                assert!(out[0].is_null());
+            }
+            for kind in [0, 6, 7, 12, 25, 100, 255] {
+                let (out, count) =
+                    collect_raw_used(kind, [r0 as usize, r1 as usize, r0 as usize, r1 as usize, r0 as usize]);
+                assert_eq!(count, 0, "kind {kind} has no input");
+                assert!(out[0].is_null());
+            }
+            let (out, count) = collect_raw_used(11, [0, r0 as usize, r1 as usize, 0, 0]);
+            assert_eq!(count, 0, "NULL return-value slot is not appended");
+            assert!(out[0].is_null());
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn used_collector_stores_selected_nulls_and_stops_at_the_bound() {
+        let mut record = [0usize; 8];
+        record[CG_INST_DEF0] = 0xaaaa;
+        record[CG_INST_DEF1] = 0xbbbb;
+        record[CG_INST_KIND10_DEF] = 0xcccc;
+        unsafe {
+            (record.as_mut_ptr() as *mut u8)
+                .add(CG_INST_KIND * WORD)
+                .write(24);
+            let mut out = [0x5cusize as *mut CgVirtualReg; 3];
+            let base = out.as_mut_ptr();
+            let cursor = cg_inst_collect_used_regs(record.as_mut_ptr() as *mut CgInst, base, base);
+            assert_eq!(cursor, base);
+            assert_eq!(out, [0x5cusize as *mut CgVirtualReg; 3], "full output remains untouched");
+
+            let cursor =
+                cg_inst_collect_used_regs(record.as_mut_ptr() as *mut CgInst, base, base.add(1));
+            assert_eq!(cursor, base.add(1));
+            assert_eq!(out[0], 0xaaaa as *mut CgVirtualReg, "first source wins");
+            assert_eq!(out[1], 0x5c as *mut CgVirtualReg, "later sources are dropped");
+
+            let (out, count) = collect_raw_used(1, [0, 0, 0, 0, 0]);
+            assert_eq!(count, 1, "selected NULL still consumes bounded capacity");
+            assert!(out[0].is_null());
         }
     }
 
