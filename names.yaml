@@ -21006,3 +21006,85 @@ functions:
       src/app/vtable_set.rs::commit_probe_tags_selector_and_routes_arguments /
       commit_probe_ors_instead_of_replacing_the_high_bits /
       commit_probe_forwards_the_dispatch_return_verbatim.
+  - address: 0x0811d6ec
+    ghidra: FUN_0811d6ec
+    name: vtable_set_50_probe_kind4
+    size: 32
+    sig: "u32 vtable_set_50_probe_kind4(handle: *mut *mut u8, selector: u32, forwarded: usize)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1: handle
+      param_2: selector
+    notes: >-
+      16 bl call sites (grep on decomp/osos.asm): 0x0810a9c4, 3-site
+      cluster 0x0811c5ec..0x0811c6f0, 0x0811e8b0, 3-site cluster
+      0x081365b0..0x08136654, 2-site cluster 0x081b004c..0x081b0070,
+      0x081bc6b0, 0x081d0e34, 2-site cluster 0x081d13f0..0x081d149c,
+      0x082713c8, 0x08285804. The "supported?" probe thunk of the
+      kind-4 vtable message family (slot +0x50; sibling of
+      vtable_set_50_kind4 @ 0x0811d68c and
+      vtable_set_50_commit_probe_kind4 @ 0x0811d6cc, whose body sits
+      one instruction earlier and differs only in the orr immediate):
+      stmdb sp!,{r0,r1,r4,lr}; ldr r1,[sp,#4]; add r2,sp,#4; orr
+      r1,r1,#0x40000000; str r1,[sp,#4]; mov r1,#4; bl 0x0811d7fc;
+      ldmia sp!,{r2,r3,r4,pc} - handle passes through in r0 untouched,
+      kind 4 in r1, r2 points at the stack slot holding
+      selector | 0x40000000 (PROBE_TAG; exact protocol meaning not
+      established, see the module header), and the dispatcher's r0
+      returns unbranched. Callers issue it as a probe before the
+      guarded write (e.g. this call 0x0811c6f0 -> vtable_set_50_kind4
+      0x0811c710 -> commit-probe 0x0811c724), always branching on the
+      error code. Deviations: callee 0x0811d7fc is unported and sits
+      behind the existing VTABLE_SLOT_50_DISPATCH seam (the body is
+      the sibling's shape with a narrower tag, so no new seam); the
+      caller's r3 is forwarded verbatim, modeled as a 3rd parameter
+      `forwarded` (vtable_query_4c_kind4 / vtable_set_50_kind4 /
+      vtable_set_50_commit_probe_kind4 precedent). Reference C
+      decomp/c/010/0811d6ec_FUN_0811d6ec.c invents a phantom 5th
+      argument (FUN_0811d7fc(param_1, 4, &local_c, param_4, param_1))
+      - the dispatcher consumes r0..r3 only; the port follows the
+      disassembly. match.py: same orr 0x40000000 / mov r1,#4 /
+      tagged-stack-slot / single-dispatch structure; the diff is the
+      crate fp frame and the seam's ldr/blx standing in for bl
+      0x0811d7fc. Host tests: 0x40000000 tagging + argument routing
+      (handle verbatim, kind 4, stack-slot indirection, r3
+      forwarding), orr-not-replace on selectors already carrying each
+      tag bit, and verbatim return forwarding -
+      src/app/vtable_set.rs::probe_tags_selector_and_routes_arguments /
+      probe_ors_instead_of_replacing_the_high_bits /
+      probe_forwards_the_dispatch_return_verbatim.
+
+  - address: 0x082c23d4
+    ghidra: FUN_082c23d4
+    name: cg_buffer_current_offset
+    size: 8
+    sig: "u32 cg_buffer_current_offset(cg_codegen_buffer_t *output)"
+    module: codegen/ir
+    status: ported
+    vars: {param_1: output}
+    notes: >-
+      8 bl call sites, all passing codegen->output (+0x10 of the
+      caller's cg_codegen_t): the ported cg_label_add_fixup @
+      0x082c17ac plus unported 0x082c0e28, 0x082c1320 (x3),
+      0x0824a43c (x2), 0x082493c0. A pure leaf getter - the whole
+      body is `ldr r0,[r0,#0x804]; bx lr` - returning
+      output->current_offset, the running byte write position inside
+      the emitted-code buffer. Buffer shape from its siblings: a
+      lazily allocated table of 0x1000-byte code pages
+      (FUN_082b7edc allocates page[offset >> 12] on demand), aligned
+      by FUN_082c2290, stored through and post-incremented by the
+      word emitters (0x082c231c, 0x082beb4c, 0x082c0f4c, 0x082c6430,
+      0x082cb824, 0x082cc0c8, 0x0836816c, 0x083685d4), and mapped to
+      a pointer by FUN_082c5b1c as page[offset >> 12] + (offset &
+      0xfff). Field rename: the +0x804 word is
+      cg_codegen_buffer_t::current_offset (CG_CODEGEN_OUTPUT_OFFSET,
+      word index 0x201). The port returns usize (a word) and the one
+      ported caller, cg_label_add_fixup, now issues a real bl to it
+      instead of inlining the load. match.py (exit 1, diff expected):
+      the single ldr r0,[r0,#0x804] is verbatim; the diff is the
+      crate fp frame push/pop. Host test:
+      src/codegen/ir.rs::buffer_current_offset_returns_the_word_at_0x804
+      - NULL/0 and a live pointer-sized word at +0x804 come back
+      exactly, with poisoned neighbours proving no adjacent word is
+      read.
