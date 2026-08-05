@@ -21328,6 +21328,59 @@ functions:
       / open_passes_even_tagged_selectors_through_untouched /
       open_forwards_the_dispatch_return_verbatim.
 
+  - address: 0x0811d56c
+    ghidra: FUN_0811d56c
+    name: vtable_set_50_write_kind4
+    size: 64
+    sig: "u32 vtable_set_50_write_kind4(handle: *mut *mut u8, value: *const u32, forwarded: usize)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1: handle
+      param_2: value
+    notes: >-
+      1 bl call site (grep on decomp/osos.asm): 0x0811d6b0, the
+      second stage of vtable_set_50_kind4 (0x0811d68c) - its nonzero
+      result short-circuits the commit tail call (cmp r0,#0 at
+      0x0811d6b4). The 0x0811d590 from the cluster ledger is the
+      bl 0x0811d7fc INSIDE this body (decomp/functions.csv lists no
+      function there), not a separate entry point - not ported
+      separately. The write thunk of the kind-4 vtable message
+      family (slot +0x50) - the only two-dispatch member: stmdb
+      sp!,{r2,r3,r4,lr} reuses the {r2,r3} spill slots as a two-word
+      message; str #4 -> [sp,#4]; ldr r0,[r1] (*value) -> [sp,#0];
+      then dispatch(handle, 4, sp+4) sends the kind word alone and,
+      only when it returns 0, dispatch(handle, 4, sp) sends the
+      two-word {*value, 4} message; the last result returns
+      (ldmia sp!,{r2,r3,r4,pc}). The value arrives by pointer in r1
+      and is loaded once, before the first dispatch. Deviations:
+      callee 0x0811d7fc is ported in-module as
+      vtable_slot_50_dispatch; both calls still route through the
+      VTABLE_SLOT_50_DISPATCH read_volatile seam (retained for
+      hookability - rewiring to a direct call is a follow-up), and
+      the VTABLE_SET_50_KIND4_OPS write default stays the private
+      identical-body model vtable_set_write for now (pointing the
+      table at this export is a deliberate follow-up; one function
+      per commit). The caller's r3 is forwarded verbatim, modeled as
+      a 3rd parameter `forwarded` (vtable_set_50_open_kind4
+      precedent). Reference C
+      decomp/c/010/0811d56c_FUN_0811d56c.c invents phantom 4th/5th
+      arguments on the first call (FUN_0811d7fc(param_1, 4,
+      &local_c, param_4, *param_2)) and drops the second call's
+      message pointer entirely (FUN_0811d7fc(param_1, 4)) - the
+      dispatcher consumes r0..r3 only; the port follows the
+      disassembly. match.py: same [sp]=*value / [sp,#4]=4 message
+      layout, kind 4 in r1, and cmp-gated double dispatch; the diff
+      is the crate fp frame and the seam's ldr/blx standing in for
+      bl 0x0811d7fc. Host tests: two-dispatch count + argument
+      routing (handle verbatim, kind 4, first message = the kind
+      word, second message = {*value, 4}, r3 forwarding), first-error
+      short-circuit skipping the value message, and verbatim
+      forwarding of the second dispatch's return -
+      src/app/vtable_set.rs::write_sends_kind_word_then_value_message_and_routes_arguments
+      / write_short_circuits_the_value_message_on_a_first_error /
+      write_forwards_the_second_dispatch_return_verbatim.
+
   - address: 0x082c17ec
     ghidra: FUN_082c17ec
     name: cg_codegen_output

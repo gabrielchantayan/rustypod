@@ -47,7 +47,10 @@
 //!   `push {r0, r1, r4, lr}; add r2, sp, #4; mov r1, #4; bl 0x0811d7fc`
 //!   sends the **bare selector** by pointer: `dispatch(handle, 4,
 //!   &selector)`.
-//! - **write** — `FUN_0811d56c` @ 0x0811d56c (64 bytes): reuses its
+//! - **write** — `FUN_0811d56c` @ 0x0811d56c (64 bytes; ported in
+//!   this module as [`vtable_set_50_write_kind4`], with the
+//!   [`VTABLE_SET_50_KIND4_OPS`] default `vtable_set_write` still
+//!   modeling the identical body): reuses its
 //!   `push {r2, r3, ...}` spill slots as a two-word message —
 //!   `[sp+4] = 4`, `[sp+0] = *value` — then sends the kind word first
 //!   (`dispatch(handle, 4, &4)`) and, only when that returns 0, the
@@ -662,6 +665,99 @@ pub unsafe extern "C" fn vtable_set_50_open_kind4(
         core::ptr::addr_of!(selector_slot) as usize,
         core::ptr::addr_of!(forwarded_slot),
     )
+}
+
+/// vtable_set_50_write_kind4 — original: `FUN_0811d56c` @ 0x0811d56c
+/// (64 bytes; **1 `bl` call site** — grep on `decomp/osos.asm`:
+/// 0x0811d6b0, the second stage of [`vtable_set_50_kind4`]
+/// (0x0811d68c). The 0x0811d590 noted in the cluster ledger is the
+/// `bl 0x0811d7fc` **inside** this body — `decomp/functions.csv`
+/// lists no function there, so it is not a separate entry point).
+///
+/// The write thunk of the kind-4 vtable message family — the only
+/// two-dispatch member: it reuses its `push {r2, r3}` spill slots as a
+/// two-word message and sends the kind word ahead of the value:
+///
+/// ```text
+/// 0811d56c  stmdb sp!, {r2, r3, r4, lr}  @ spill slots become the message
+/// 0811d570  mov   r4, r0                 @ save handle
+/// 0811d574  mov   r0, #0x4
+/// 0811d578  str   r0, [sp, #0x4]         @ message[1] = kind word 4
+/// 0811d57c  ldr   r0, [r1, #0x0]         @ r0 = *value
+/// 0811d580  mov   r1, #0x4               @ kind 4
+/// 0811d584  str   r0, [sp, #0x0]         @ message[0] = *value
+/// 0811d588  mov   r0, r4
+/// 0811d58c  add   r2, sp, #0x4           @ r2 = &message[1]
+/// 0811d590  bl    0x0811d7fc             @ dispatch(handle, 4, &kind)
+/// 0811d594  cmp   r0, #0x0
+/// 0811d598  moveq r2, sp                 @ r2 = &message[0]
+/// 0811d59c  moveq r1, #0x4               @ kind 4
+/// 0811d5a0  moveq r0, r4
+/// 0811d5a4  bleq  0x0811d7fc             @ dispatch(handle, 4, &{*value, 4})
+/// 0811d5a8  ldmia sp!, {r2, r3, r4, pc}  @ return the last result
+/// ```
+///
+/// Two messages to the slot +0x50 dispatcher: first the kind word
+/// alone (r2 points at the stack slot holding 4), then — only when
+/// that returns 0 — the two-word `{*value, 4}` message starting at
+/// `sp` (the value itself arrives by pointer in r1 and is loaded
+/// once, `ldr r0, [r1]`, before the first dispatch). A nonzero first
+/// result short-circuits and returns verbatim; otherwise the second
+/// dispatch's error code returns. [`vtable_set_50_kind4`] branches on
+/// it (`cmp r0, #0` at 0x0811d6b4): nonzero skips the commit tail
+/// call and propagates to the caller.
+///
+/// # Deviations
+///
+/// - **The callee 0x0811d7fc is ported** in this module as
+///   [`vtable_slot_50_dispatch`]; both calls still route through the
+///   [`VTABLE_SLOT_50_DISPATCH`] `read_volatile` seam (retained for
+///   hookability — rewiring to a direct call is a follow-up), exactly
+///   as the ported siblings do.
+/// - **The caller's r3 is forwarded verbatim** (nothing between entry
+///   and the dispatcher's `stmdb sp!, {r3}` spill touches it), modeled
+///   as a third parameter `forwarded` — the
+///   [`vtable_set_50_open_kind4`] precedent. No call site sets r3
+///   deliberately.
+/// - **The reference C is not followed where it mis-decompiles**:
+///   `decomp/c/010/0811d56c_FUN_0811d56c.c` invents phantom fourth and
+///   fifth arguments on the first call (`FUN_0811d7fc(param_1, 4,
+///   &local_c, param_4, *param_2)`) and drops the second call's
+///   message pointer entirely (`FUN_0811d7fc(param_1, 4)`) — the
+///   dispatcher consumes r0..r3 only. The port follows the
+///   disassembly.
+/// - **This export duplicates the [`VTABLE_SET_50_KIND4_OPS`] write
+///   default** `vtable_set_write` (both are the exact body above);
+///   the private model stays wired as that table's default for now —
+///   pointing the table at this export is a deliberate follow-up (one
+///   function per commit).
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_set_50_write_kind4(
+    handle: *mut *mut u8,
+    value: *const u32,
+    forwarded: usize,
+) -> u32 {
+    let dispatch = core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_SLOT_50_DISPATCH));
+    let mut message = [0u32; 2];
+    message[1] = MESSAGE_KIND_4;
+    message[0] = value.read();
+    let forwarded_slot = forwarded;
+    let mut result = dispatch(
+        handle,
+        MESSAGE_KIND_4,
+        core::ptr::addr_of!(message[1]) as usize,
+        core::ptr::addr_of!(forwarded_slot),
+    );
+    if result == 0 {
+        result = dispatch(
+            handle,
+            MESSAGE_KIND_4,
+            core::ptr::addr_of!(message[0]) as usize,
+            core::ptr::addr_of!(forwarded_slot),
+        );
+    }
+    result
 }
 
 #[cfg(test)]
@@ -1379,6 +1475,104 @@ mod tests {
             assert_eq!(
                 result, OPEN_ERR,
                 "ldmia sp!, {{r2, r3, r4, pc}} returns the dispatcher's r0 unbranched"
+            );
+        }
+    }
+
+    // ---- vtable_set_50_write_kind4 (0x0811d56c) -------------------
+
+    #[test]
+    fn write_sends_kind_word_then_value_message_and_routes_arguments() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let value: u32 = VALUE_WORD;
+        unsafe {
+            install_recording_dispatch();
+
+            let result =
+                vtable_set_50_write_kind4(fixture.handle_ptr(), &value, FORWARDED);
+
+            assert_eq!(result, MOCK_OK);
+            assert_eq!(
+                DISPATCH_CALLS, 2,
+                "two dispatches (bl 0x0811d7fc + bleq 0x0811d7fc)"
+            );
+            // First dispatch: the kind word alone (r2 = sp + 4).
+            assert_eq!(
+                DISPATCH_HANDLE[0],
+                fixture.handle_ptr(),
+                "r0 (handle) passes through untouched"
+            );
+            assert_eq!(
+                DISPATCH_KIND[0], MESSAGE_KIND_4,
+                "r1 is the kind word (mov r1, #0x4)"
+            );
+            assert_eq!(
+                DISPATCH_WORD0[0], MESSAGE_KIND_4,
+                "the first message is the kind word itself (str r0, [sp, #4] with r0 = 4)"
+            );
+            assert_eq!(
+                DISPATCH_EXTRA[0], FORWARDED,
+                "the caller's r3 reaches the dispatcher's spill"
+            );
+            // Second dispatch: the two-word {*value, 4} message (r2 = sp).
+            assert_eq!(DISPATCH_HANDLE[1], fixture.handle_ptr());
+            assert_eq!(DISPATCH_KIND[1], MESSAGE_KIND_4);
+            assert_eq!(
+                DISPATCH_WORD0[1], VALUE_WORD,
+                "message word 0 is *value (ldr r0, [r1])"
+            );
+            assert_eq!(
+                DISPATCH_WORD1[1], MESSAGE_KIND_4,
+                "message word 1 is the kind word ([sp+4] = 4)"
+            );
+            assert_eq!(DISPATCH_EXTRA[1], FORWARDED);
+        }
+    }
+
+    #[test]
+    fn write_short_circuits_the_value_message_on_a_first_error() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let value: u32 = VALUE_WORD;
+        unsafe {
+            install_recording_dispatch();
+            DISPATCH_RESULTS[0] = WRITE_ERR;
+
+            let result =
+                vtable_set_50_write_kind4(fixture.handle_ptr(), &value, FORWARDED);
+
+            assert_eq!(
+                result, WRITE_ERR,
+                "a nonzero first result returns verbatim (cmp r0, #0; no bleq)"
+            );
+            assert_eq!(
+                DISPATCH_CALLS, 1,
+                "the {{*value, 4}} message is gated on the first dispatch's success"
+            );
+            assert_eq!(DISPATCH_WORD0[0], MESSAGE_KIND_4);
+        }
+    }
+
+    #[test]
+    fn write_forwards_the_second_dispatch_return_verbatim() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let value: u32 = VALUE_WORD;
+        unsafe {
+            install_recording_dispatch();
+            DISPATCH_RESULTS[1] = WRITE_ERR;
+
+            let result =
+                vtable_set_50_write_kind4(fixture.handle_ptr(), &value, FORWARDED);
+
+            assert_eq!(DISPATCH_CALLS, 2);
+            assert_eq!(
+                result, WRITE_ERR,
+                "ldmia sp!, {{r2, r3, r4, pc}} returns the second dispatch's r0"
             );
         }
     }
