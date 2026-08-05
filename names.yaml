@@ -19302,3 +19302,47 @@ functions:
       {fp,pc} frame versus the ADS `bx lr` leaf. Rust implementation and
       focused host tests:
       `src/cxx/object_flags.rs::object_value_set_flags_clear`.
+
+  # --- C++ singleton flag-word fetch-and-increment ---
+  - address: 0x08085354
+    ghidra: FUN_08085354
+    name: object_flags_fetch_increment
+    size: 68
+    sig: "u32 object_flags_fetch_increment(void)"
+    module: cxx/object_flags
+    status: ported
+    renames:
+      iVar1: previous
+      DAT_08085398: SINGLETON_OBJECT
+    notes: >-
+      Fetch-and-increment of the fixed singleton's +0x04 word (the same
+      header offset object_low_flags_clear @ 0x0808539c tests and
+      object_value_set_flags_clear @ 0x08085344 clear on their
+      caller-passed objects) under the retailOS lock dispatcher
+      FUN_08043b94: acquire (9,2,0,0) via the `bl` @ 0x08085368, read the
+      word, store the value plus one, release (10,2,0,0) via the `bl` @
+      0x0808538c, return the pre-increment value. The op 9/10 pair is the
+      acquire/release bracket used throughout retailOS (59 `bl
+      0x08043b94` sites); FUN_08043b94's own negative-argument path
+      performs a timeout-queue wait, confirming the roles. SIZE IS 68
+      BYTES: 64 of code (0x08085354..0x08085394) plus the 4-byte literal
+      @ 0x08085398 holding the singleton address 0x08a0e9e0 — the lock
+      machinery's own singleton (FUN_08075914 lazily points its +0x00
+      word at the embedded vtable @ 0x08a0e9ec; FUN_080439e0 /
+      FUN_08043e04 dispatch through its vtable slots +0x14 / +0x0c). The
+      word's role (plain counter versus sequence number) is unverified,
+      hence the field-level name. 0 `bl 0x08085354` call sites (grep -c
+      on decomp/osos.asm) and no pointer reference anywhere in osos.dec —
+      the function appears unreferenced on this ROM. Deviations: the
+      unported dispatcher FUN_08043b94 (no names.yaml entry) rides the
+      OBJECT_FLAGS_FETCH_INCREMENT_LOCK seam (house pattern —
+      app/node_list.rs's NODE_LIST_ENQUEUE_OPS) instead of a direct `bl`,
+      and host builds substitute test storage for the firmware singleton
+      @ 0x08a0e9e0. match.py confirms the structural shape: both
+      dispatch calls carry (9|10, 2, 0, 0), the ldr/add/str of the +0x04
+      word and the pre-increment return in r4 are instruction-identical;
+      the diff is only LLVM's push {r4,r5,fp,lr} frame, the indirect
+      `blx` through the seam versus the ADS direct `bl`, and LLVM folding
+      the +0x04 into the 0x08a0e9e4 literal. Rust implementation and
+      focused host tests:
+      `src/cxx/object_flags.rs::object_flags_fetch_increment`.
