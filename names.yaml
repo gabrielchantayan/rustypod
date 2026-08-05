@@ -21716,6 +21716,50 @@ functions:
       ::codegen_destroy_default_frees_pages_in_order_then_the_buffer
       and ::compile_and_patch_seams_stay_wired_to_the_defaults.
 
+  - address: 0x082430c4
+    ghidra: FUN_082430c4
+    name: cg_cell_table_create
+    size: 72
+    sig: "CgCellTable *cg_cell_table_create(CgCellTable *record)"
+    module: codegen/ir
+    status: ported
+    renames:
+      param_1/r0/r4: record (arrives in r0, held in r4 across the cell
+        init calls, moved back to r0 for the return)
+      r3: index (0..=0xc, the `cmp r3,#0xc; bls` loop counter)
+    notes: >-
+      1 bl call site: the video engine's lazy slot-table getter
+      FUN_083b4830 @ 0x083b4830 (call at 0x083b4914), whose
+      operator_new(0x110) result is still in r0 when it bls here; the
+      returned pointer goes into the freshly claimed slot. 0 tail b
+      sites. Binary-adjacent to cg_compile_and_patch (0x08243138) but
+      NOT called by it (verified: no `bl 0x082430c4` in the driver's
+      body or its clones). Constructor for a 0x110-byte record:
+      stamps the five config bytes at +0x104..+0x108 as {1, 1, 0, 1,
+      1} in that store order, then initializes thirteen 0x14-byte
+      cells in index order (addressing `add r0,r3,r3,lsl #0x2; add
+      r0,r4,r0,lsl #0x2` = record + index*0x14) through the cell init
+      FUN_08256c10 @ 0x08256c10 (24 bytes, leaf, unported: word +0x00
+      = 0, byte +0x0c = 0xff, word +0x10 = 0), and returns the record
+      - the C++ constructor convention. Each cell is an
+      optionally-owned heap buffer: the mirror destructor FUN_0824310c
+      @ 0x0824310c (44 bytes, unported) runs the same thirteen-cell
+      loop over the cell destroy FUN_08256c28, which frees cell +0x10
+      when cell +0x00 is non-zero. Record size 0x110 from the
+      caller's operator_new argument (the constructor touches 0x109
+      bytes; the tail is allocator padding). Deviation: the per-cell
+      init routes through the CG_CELL_TABLE_CELL_INIT seam (the
+      CG_PROC_EMIT precedent) whose wired default is FUN_08256c10's
+      exact body, so default behavior is the original's; the two
+      cell words are genuine 32-bit stores at fixed byte offsets
+      (record ABI pinned by the unported caller/destructor), not the
+      module's word-index convention. Host tests:
+      src/codegen/ir.rs::cell_table_create_stamps_flags_and_every_cell_through_the_default_init
+      (return-this, exact flag bytes, per-cell writes, poison on
+      untouched bytes),
+      ::cell_table_create_routes_thirteen_cells_in_index_order_through_the_seam
+      and ::cell_table_cell_init_seam_stays_wired_to_the_default.
+
   - address: 0x0811d5ac
     ghidra: (absent from functions.csv)
     name: vtable_query_4c_read_scalar_body

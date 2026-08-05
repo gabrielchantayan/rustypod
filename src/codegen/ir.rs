@@ -111,6 +111,14 @@
 //!   flush caches, tear down. Its unported callees sit behind the
 //!   [`CG_COMPILE_AND_PATCH_OPS`] ops-table seam (plus the nested
 //!   [`CG_PROC_EMIT`] and [`CG_BUFFER_FREE`] seams).
+//! - `cg_cell_table_create` — original: `FUN_082430c4` @ 0x082430c4
+//!   (72 bytes; 1 `bl` call site — the video engine's lazy slot-table
+//!   getter `FUN_083b4830`, immediately after its
+//!   `operator_new(0x110)`). Constructor for a 0x110-byte record of
+//!   thirteen 0x14-byte owned-pointer cells plus five config bytes
+//!   `{1, 1, 0, 1, 1}`; the per-cell init `FUN_08256c10` sits behind
+//!   the [`CG_CELL_TABLE_CELL_INIT`] seam. Binary-adjacent to
+//!   `cg_compile_and_patch` but not called by it.
 //!
 //! Layouts recovered from the assembly (byte offsets are the target's;
 //! the port addresses every pointer field by WORD INDEX so the records
@@ -2399,6 +2407,128 @@ pub unsafe extern "C" fn cg_compile_and_patch(
     // Stages 11-12: buffer teardown, then the whole arena.
     (ops.codegen_destroy)(codegen);
     cg_heap_destroy(module_heap(module as *mut u8));
+}
+
+// --- cg_cell_table_create (0x082430c4) and its cell-init seam -------
+
+/// Number of 0x14-byte cells in a [`CgCellTable`] — the original's
+/// `cmp r3,#0xc; bls` loop bound (cell indices 0..=0xc).
+pub const CG_CELL_TABLE_CELLS: usize = 13;
+/// Size of one cell in target bytes, from the original's address
+/// computation `add r0,r3,r3,lsl #0x2; add r0,r4,r0,lsl #0x2`
+/// (index * 5 * 4).
+pub const CG_CELL_TABLE_CELL_BYTES: usize = 0x14;
+/// Cell-relative offset of the ownership word: zeroed by the cell
+/// init; the mirror destructor (`FUN_0824310c`, through the cell
+/// destroy `FUN_08256c28`) frees the cell's pointer only when this
+/// word is non-zero.
+pub const CG_CELL_OWNED: usize = 0x00;
+/// Cell-relative offset of the tag byte, stamped 0xff by the cell
+/// init (the only byte the init writes).
+pub const CG_CELL_TAG: usize = 0x0c;
+/// Cell-relative offset of the owned heap pointer word: zeroed by
+/// the cell init, freed by the mirror destructor when the
+/// [`CG_CELL_OWNED`] word is non-zero.
+pub const CG_CELL_POINTER: usize = 0x10;
+/// Byte offset of the record's five config bytes, stamped
+/// `{1, 1, 0, 1, 1}` — immediately past the last cell
+/// (13 * 0x14 = 0x104).
+pub const CG_CELL_TABLE_FLAGS: usize = CG_CELL_TABLE_CELLS * CG_CELL_TABLE_CELL_BYTES;
+/// Total record size in target bytes, from the sole caller's
+/// `operator_new(0x110)` in `FUN_083b4830` (the constructor itself
+/// touches only 0x109 bytes; the tail is allocator padding).
+pub const CG_CELL_TABLE_BYTES: usize = 0x110;
+
+/// The 0x110-byte record [`cg_cell_table_create`] constructs:
+/// thirteen 0x14-byte owned-pointer cells followed by five config
+/// bytes. Allocated by the caller (the video engine's lazy
+/// slot-table getter `FUN_083b4830`, via `operator_new(0x110)`); the
+/// layout is recovered only as far as this constructor and the
+/// mirror destructor `FUN_0824310c` touch it.
+#[repr(C)]
+pub struct CgCellTable {
+    _opaque: [u8; 0],
+}
+
+/// The cell-init boundary for [`cg_cell_table_create`]: one call per
+/// cell, in index order — the original's in-loop `bl 0x08256c10`.
+/// `FUN_08256c10` @ 0x08256c10 (24 bytes, leaf) stays unported; the
+/// wired default ([`default_cg_cell_table_cell_init`]) models its
+/// exact body, so the seam exists for hookability and host-test
+/// interception (the [`CG_PROC_EMIT`] precedent) and porting
+/// 0x08256c10 later replaces the default without touching the
+/// constructor.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub static mut CG_CELL_TABLE_CELL_INIT: unsafe extern "C" fn(*mut u8) =
+    default_cg_cell_table_cell_init;
+
+/// The wired default of [`CG_CELL_TABLE_CELL_INIT`]: the exact body
+/// of `FUN_08256c10` @ 0x08256c10 — store 0 at cell +0x00, store
+/// 0xff at cell +0x0c, store 0 at cell +0x10, nothing else (every
+/// other cell byte keeps whatever the allocator left). The two words
+/// are genuine 32-bit target stores at fixed byte offsets — the
+/// record's ABI is pinned by its unported users (the caller's
+/// `operator_new(0x110)` and the mirror destructor's identical
+/// 0x14-stride loop), so the module's word-index convention does not
+/// apply and the record is 0x110 bytes on any host.
+unsafe extern "C" fn default_cg_cell_table_cell_init(cell: *mut u8) {
+    (cell.add(CG_CELL_OWNED) as *mut u32).write(0);
+    cell.add(CG_CELL_TAG).write(0xffu8);
+    (cell.add(CG_CELL_POINTER) as *mut u32).write(0);
+}
+
+/// cg_cell_table_create — original: `FUN_082430c4` @ 0x082430c4
+/// (72 bytes; **1 `bl` call site**: the video engine's lazy
+/// slot-table getter `FUN_083b4830` @ 0x083b4830 — its
+/// `operator_new(0x110)` result is still in r0 when it `bl`s here,
+/// and the returned pointer is stored into the freshly claimed
+/// slot). Binary-adjacent to [`cg_compile_and_patch`] (0x08243138)
+/// but NOT called by it. Constructor for the 0x110-byte cell-table
+/// record: stamps the five config bytes at +0x104..+0x108 as
+/// `{1, 1, 0, 1, 1}` (in that store order), initializes each of the
+/// thirteen 0x14-byte cells in index order through the cell init
+/// (`FUN_08256c10`, behind the [`CG_CELL_TABLE_CELL_INIT`] seam) and
+/// returns the record pointer — the C++ constructor convention,
+/// which the caller stores verbatim.
+///
+/// The mirror destructor is `FUN_0824310c` @ 0x0824310c (44 bytes,
+/// unported): the same thirteen-cell loop over the cell destroy
+/// `FUN_08256c28`, which frees cell +0x10 when cell +0x00 is
+/// non-zero — each cell is an optionally-owned heap buffer with a
+/// 0xff-tagged byte.
+///
+/// Signature from the register moves: `record` arrives in r0, is
+/// held in r4 across the calls, and is moved back to r0 for the
+/// return.
+///
+/// DEVIATION: the per-cell init routes through the
+/// [`CG_CELL_TABLE_CELL_INIT`] seam where the original `bl`s
+/// `FUN_08256c10` directly; the wired default is that callee's exact
+/// body, so default behavior is the original's.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_cell_table_create(record: *mut CgCellTable) -> *mut CgCellTable {
+    let record = record as *mut u8;
+    // The five config bytes, in the original's store order (r0 = 1,
+    // r1 = 0 held across the strb run).
+    record.add(CG_CELL_TABLE_FLAGS).write(1u8);
+    record.add(CG_CELL_TABLE_FLAGS + 1).write(1u8);
+    record.add(CG_CELL_TABLE_FLAGS + 2).write(0u8);
+    record.add(CG_CELL_TABLE_FLAGS + 3).write(1u8);
+    record.add(CG_CELL_TABLE_FLAGS + 4).write(1u8);
+    // The thirteen cells in index order — the original's
+    // `add r0,r3,r3,lsl #0x2; add r0,r4,r0,lsl #0x2` addressing
+    // (index * 0x14) and `cmp r3,#0xc; bls` bound.
+    let cell_init = hook(core::ptr::addr_of!(CG_CELL_TABLE_CELL_INIT));
+    let mut index = 0usize;
+    loop {
+        cell_init(record.add(index * CG_CELL_TABLE_CELL_BYTES));
+        index += 1;
+        if index == CG_CELL_TABLE_CELLS {
+            break;
+        }
+    }
+    record as *mut CgCellTable
 }
 
 #[cfg(test)]
@@ -5601,6 +5731,115 @@ mod tests {
                 hook(core::ptr::addr_of!(CG_BUFFER_FREE)) as usize,
                 crate::runtime::malloc_rt::free as usize,
                 "the free seam stays wired to the ported free — the original's direct bl"
+            );
+        }
+        teardown();
+    }
+
+    // --- cg_cell_table_create (0x082430c4) through its seam ---------
+
+    /// Cell-init calls observed by the recording mock, in order.
+    static mut CELL_INIT_LOG: std::vec::Vec<*mut u8> = std::vec::Vec::new();
+
+    unsafe extern "C" fn recording_cell_init(cell: *mut u8) {
+        CELL_INIT_LOG.push(cell);
+    }
+
+    /// A 0x110-byte record on the heap, filled with poison so every
+    /// byte the constructor does NOT write stays observable.
+    unsafe fn poisoned_cell_table() -> *mut u8 {
+        let record = poisoning_alloc(CG_CELL_TABLE_BYTES);
+        assert!(!record.is_null());
+        record
+    }
+
+    #[test]
+    fn cell_table_create_stamps_flags_and_every_cell_through_the_default_init() {
+        let _g = setup();
+        unsafe {
+            let record = poisoned_cell_table();
+
+            let returned = cg_cell_table_create(record as *mut CgCellTable);
+
+            assert_eq!(returned, record as *mut CgCellTable, "a constructor returns this");
+            // The five config bytes at +0x104..+0x108, exact values.
+            let flags: std::vec::Vec<u8> =
+                (0..5).map(|i| record.add(CG_CELL_TABLE_FLAGS + i).read()).collect();
+            assert_eq!(flags.as_slice(), &[1, 1, 0, 1, 1]);
+            // Every cell: the default init's exact three writes.
+            for i in 0..CG_CELL_TABLE_CELLS {
+                let cell = record.add(i * CG_CELL_TABLE_CELL_BYTES);
+                assert_eq!(
+                    (cell.add(CG_CELL_OWNED) as *mut u32).read(),
+                    0,
+                    "cell {i} ownership word"
+                );
+                assert_eq!(cell.add(CG_CELL_TAG).read(), 0xff, "cell {i} tag byte");
+                assert_eq!(
+                    (cell.add(CG_CELL_POINTER) as *mut u32).read(),
+                    0,
+                    "cell {i} owned pointer"
+                );
+                // Bytes the init never touches keep the 0x5c poison —
+                // the constructor writes nothing else in a cell.
+                for off in [4usize, 8, 0xb, 0xd, 0xf] {
+                    assert_eq!(
+                        cell.add(off).read(),
+                        0x5c,
+                        "cell {i} byte +{off:#x} is not the constructor's to write"
+                    );
+                }
+            }
+            poisoning_free(record);
+        }
+        teardown();
+    }
+
+    #[test]
+    fn cell_table_create_routes_thirteen_cells_in_index_order_through_the_seam() {
+        let _g = setup();
+        unsafe {
+            let saved_init = hook(core::ptr::addr_of!(CG_CELL_TABLE_CELL_INIT));
+            *core::ptr::addr_of_mut!(CG_CELL_TABLE_CELL_INIT) = recording_cell_init;
+            CELL_INIT_LOG.clear();
+            let record = poisoned_cell_table();
+
+            let returned = cg_cell_table_create(record as *mut CgCellTable);
+
+            *core::ptr::addr_of_mut!(CG_CELL_TABLE_CELL_INIT) = saved_init;
+
+            assert_eq!(returned, record as *mut CgCellTable);
+            let expected: std::vec::Vec<*mut u8> = (0..CG_CELL_TABLE_CELLS)
+                .map(|i| record.add(i * CG_CELL_TABLE_CELL_BYTES))
+                .collect();
+            assert_eq!(
+                CELL_INIT_LOG.as_slice(),
+                expected.as_slice(),
+                "exactly thirteen cell-init calls, at record + index * 0x14, in index order"
+            );
+            // The seam replaced the init entirely: no cell byte was
+            // written (all poison), but the constructor's own config
+            // bytes were still stamped before the loop.
+            assert!(CELL_INIT_LOG.iter().all(|&cell| {
+                (0..CG_CELL_TABLE_CELL_BYTES).all(|off| cell.add(off).read() == 0x5c)
+            }));
+            let flags: std::vec::Vec<u8> =
+                (0..5).map(|i| record.add(CG_CELL_TABLE_FLAGS + i).read()).collect();
+            assert_eq!(flags.as_slice(), &[1, 1, 0, 1, 1]);
+
+            poisoning_free(record);
+        }
+        teardown();
+    }
+
+    #[test]
+    fn cell_table_cell_init_seam_stays_wired_to_the_default() {
+        let _g = setup();
+        unsafe {
+            assert_eq!(
+                hook(core::ptr::addr_of!(CG_CELL_TABLE_CELL_INIT)) as usize,
+                default_cg_cell_table_cell_init as usize,
+                "the cell-init seam stays wired to the exact-body model of FUN_08256c10"
             );
         }
         teardown();
