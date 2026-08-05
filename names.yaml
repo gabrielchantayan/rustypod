@@ -21586,3 +21586,70 @@ functions:
       /
       dispatch_4c_forwards_the_spilled_r3_pointer_verbatim /
       dispatch_4c_returns_the_methods_status_verbatim.
+
+  - address: 0x0811d818
+    ghidra: FUN_0811d818
+    name: vtable_query_4c_kind4_read
+    size: 92
+    sig: "u32 vtable_query_4c_kind4_read(handle: *mut *mut u8, capacity: u32, buffer: *mut u8, forwarded: usize)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r5: handle
+      param_2/r4: capacity
+      param_3/r6: buffer
+      param_4/r3: forwarded
+    notes: >-
+      3 bl call sites (grep on decomp/osos.asm): 0x08136784,
+      0x081bc7f0, 0x08271504 - all pass a capacity in r1 (0x40,
+      0x40, 0x100), a caller stack-buffer pointer in r2 (add r2,
+      sp, #0x4) and the handle in r0; none sets r3. NO reference C
+      exists (decomp/c/010/ has no 0811d818 file); the port follows
+      the disassembly. The query-size-then-read routine of the slot
+      +0x4c message family - the only caller that drives
+      vtable_slot_4c_dispatch (0x0811d7b0, ported in this module)
+      twice, and the mirror of the unported slot +0x50 sibling at
+      0x0811d874. The entry stmdb sp!,{r2,r3,r4,r5,r6,lr} spills
+      arg3 (buffer) and arg4 (r3) into a two-word stack pair: the
+      first dispatch sends kind 4 with &pair[1] as out-slot and the
+      method answers with the available size; the size is clamped
+      to capacity with an UNSIGNED compare (strhi); the second
+      dispatch performs the read with the clamped size as the
+      generic middle argument and the buffer pointer as data; only
+      on a zero read status does the closing bleq fire - and
+      0x0811d46c is the PORTED kind-4 query thunk
+      util/vtable_query.rs vtable_query_4c_kind4 (mov r2,r1;
+      mov r1,#4; b 0x0811d7b0), NOT a block-copy helper: it
+      re-dispatches kind 4 with the {buffer, clamped_size} pair as
+      the message and its error code becomes the return value.
+      Every bail path returns the last call's status verbatim
+      (5 = "unsupported", behaviorally identical to a hard error
+      here). Deviations: both callees are ported and route through
+      the new VTABLE_QUERY_4C_READ_DISPATCH /
+      VTABLE_QUERY_4C_READ_FINISH seams (the VTABLE_SLOT_50_DISPATCH
+      pattern; role-specific names because util/vtable_query.rs's
+      glob-re-exported VTABLE_SLOT_4C_DISPATCH already claims the
+      family name at the crate root, and a module-local finish seam
+      avoids racing util's parallel tests). arg4 is modeled as
+      `forwarded` per family convention - it doubles as the size
+      out-slot's INITIAL word (the entry spill) and as each
+      dispatcher's stmdb r3 spill. r2 into the closing call is DEAD
+      (method-clobbered across the second bl; the thunk's mov r2,r1
+      discards it) - the "arg3 forwarded to the copy-out" reading
+      does NOT hold; the port passes 0 for the thunk's _unused.
+      pair[1] is only ever consumed as a 32-bit word (ARM ldr), so
+      the port truncates to u32 on every read, keeping the stack
+      pair exact on a 64-bit host. match.py (exit 1, diff
+      expected): the two dispatches and the finish call are ldr/blx
+      through the seams in place of bl; LLVM merges the cmp #5;beq
+      / cmp #0;bne pair into one status test (both branch to the
+      same return-status epilogue); the clamp survives as
+      cmp/movhi/strhi (unsigned HI); the collapsed-spill convention
+      puts the extra pointer in r3 directly; the crate fp frame
+      accounts for the rest. Host tests:
+      src/app/vtable_set.rs::query_read_unsupported_status_bails_before_the_read
+      / query_read_query_error_bails_before_the_read /
+      query_read_first_dispatch_args_and_initial_out_slot /
+      query_read_clamps_the_size_unsigned_and_routes_the_read /
+      query_read_read_error_skips_the_finish /
+      query_read_finish_args_and_final_return.

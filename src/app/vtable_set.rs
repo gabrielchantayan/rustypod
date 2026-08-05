@@ -849,6 +849,180 @@ pub unsafe extern "C" fn vtable_set_50_write_kind4(
     result
 }
 
+/// The status [`vtable_query_4c_kind4_read`] treats as "unsupported —
+/// bail silently" (`cmp r0, #0x5; beq`): it returns verbatim, exactly
+/// like any hard error, but the caller convention distinguishes it
+/// (see [`vtable_slot_4c_dispatch`]).
+const STATUS_UNSUPPORTED: u32 = 5;
+
+/// Indirect dispatch for the two slot +0x4c dispatches of
+/// [`vtable_query_4c_kind4_read`], wired to this module's ported
+/// [`vtable_slot_4c_dispatch`] (original: `FUN_0811d7b0` @ 0x0811d7b0;
+/// the [`VTABLE_SLOT_50_DISPATCH`] pattern — the seam is retained for
+/// hookability, the dispatcher's `blx` targets are firmware vtable
+/// methods). The name is role-specific because
+/// `util/vtable_query.rs`'s `VTABLE_SLOT_4C_DISPATCH` already claims
+/// the family name at the crate root (both modules are glob
+/// re-exported in `lib.rs`); host tests install a recording mock via
+/// `core::ptr::addr_of_mut!`.
+pub static mut VTABLE_QUERY_4C_READ_DISPATCH: unsafe extern "C" fn(
+    handle: *mut *mut u8,
+    kind: u32,
+    data: usize,
+    extra: *const usize,
+) -> u32 = vtable_slot_4c_dispatch;
+
+/// Indirect dispatch for the closing query-thunk call of
+/// [`vtable_query_4c_kind4_read`], wired to the ported
+/// `util/vtable_query.rs` `vtable_query_4c_kind4` (original:
+/// `FUN_0811d46c` @ 0x0811d46c). Routing the call through a seam local
+/// to this module (instead of calling the export directly) keeps host
+/// tests able to intercept it without swapping util's
+/// `VTABLE_SLOT_4C_DISPATCH` static — which would race util's own
+/// parallel tests.
+pub static mut VTABLE_QUERY_4C_READ_FINISH: unsafe extern "C" fn(
+    handle: *mut *mut u8,
+    out: *mut u32,
+    unused: usize,
+    forwarded: usize,
+) -> u32 = crate::util::vtable_query::vtable_query_4c_kind4;
+
+/// vtable_query_4c_kind4_read — original: `FUN_0811d818` @ 0x0811d818
+/// (92 bytes; **3 `bl` call sites**, grep on `decomp/osos.asm`:
+/// 0x08136784, 0x081bc7f0 and 0x08271504 — all three pass a capacity
+/// in r1 (0x40, 0x40, 0x100), a pointer to the caller's stack buffer
+/// in r2 (`add r2, sp, #0x4`) and the handle in r0; none sets r3).
+/// There is NO reference C for this function (`decomp/c/010/` has no
+/// `0811d818` file); the port follows the disassembly.
+///
+/// The query-size-then-read routine of the slot +0x4c message family
+/// — the only caller that drives [`vtable_slot_4c_dispatch`]
+/// (0x0811d7b0) twice, and the mirror of the unported slot +0x50
+/// sibling at 0x0811d874 (same shape through
+/// [`vtable_slot_50_dispatch`]):
+///
+/// ```text
+/// 0811d818  stmdb sp!, {r2, r3, r4, r5, r6, lr}  @ pair = {buffer, r3}
+/// 0811d81c  mov   r6, r2            @ save buffer (arg3)
+/// 0811d820  mov   r4, r1            @ save capacity (arg2)
+/// 0811d824  mov   r1, #0x4          @ kind 4
+/// 0811d828  add   r2, sp, #0x4      @ out-slot = &pair[1]
+/// 0811d82c  mov   r5, r0            @ save handle
+/// 0811d830  bl    0x0811d7b0        @ size query: dispatch(handle, 4, &pair[1])
+/// 0811d834  cmp   r0, #0x5
+/// 0811d838  beq   0x0811d870        @ unsupported -> return status
+/// 0811d83c  cmp   r0, #0x0
+/// 0811d840  bne   0x0811d870        @ hard error -> return status
+/// 0811d844  ldr   r0, [sp, #0x4]    @ size = pair[1] (method-written)
+/// 0811d848  mov   r2, r6            @ data = buffer
+/// 0811d84c  cmp   r0, r4
+/// 0811d850  strhi r4, [sp, #0x4]    @ pair[1] = min(size, capacity) UNSIGNED
+/// 0811d854  ldr   r1, [sp, #0x4]    @ r1 = clamped size
+/// 0811d858  mov   r0, r5
+/// 0811d85c  bl    0x0811d7b0        @ read: dispatch(handle, size, buffer)
+/// 0811d860  cmp   r0, #0x0
+/// 0811d864  moveq r1, sp            @ out = &pair[0]
+/// 0811d868  moveq r0, r5
+/// 0811d86c  bleq  0x0811d46c        @ finish: vtable_query_4c_kind4(handle, &pair)
+/// 0811d870  ldmia sp!, {r2, r3, r4, r5, r6, pc}
+/// ```
+///
+/// The entry `stmdb` spills arg3 (r2, the caller's buffer pointer) and
+/// arg4 (r3) into the two-word stack pair at `sp+0`/`sp+4`. The first
+/// dispatch sends kind 4 with `&pair[1]` as the out-slot: the method
+/// answers with the available size. The size is clamped to the
+/// caller's capacity with an UNSIGNED compare (`strhi`), then the
+/// second dispatch performs the read — the generic dispatcher's
+/// middle argument carries the clamped size (not a kind constant) and
+/// its data argument is the buffer pointer. Only when the read
+/// returns 0 does the closing `bleq` fire: 0x0811d46c is the PORTED
+/// kind-4 query thunk `util/vtable_query.rs`
+/// `vtable_query_4c_kind4` (`mov r2, r1; mov r1, #4; b 0x0811d7b0`),
+/// NOT a block-copy helper — it re-dispatches kind 4 with the
+/// two-word `{buffer, clamped_size}` pair as the message and its
+/// error code becomes this function's return value. On every bail
+/// path the status of the last executed call returns verbatim
+/// (status 5 = "unsupported", indistinguishable in behavior from a
+/// hard error here — both return untouched).
+///
+/// # Deviations
+///
+/// - **Both callees are ported** ([`vtable_slot_4c_dispatch`] in this
+///   module, `vtable_query_4c_kind4` in util/vtable_query.rs); the
+///   calls route through the new [`VTABLE_QUERY_4C_READ_DISPATCH`] /
+///   [`VTABLE_QUERY_4C_READ_FINISH`] seams (the
+///   [`VTABLE_SLOT_50_DISPATCH`] pattern — hookability plus host-test
+///   interception without racing util's own seam).
+/// - **arg4 (r3) is modeled as `forwarded`** — the family convention:
+///   no call site sets r3 deliberately. Here it doubles as the
+///   INITIAL CONTENT of the size out-slot `pair[1]` (the entry spill),
+///   which the size-query method overwrites; it is also the word each
+///   dispatcher's `stmdb sp!, {r3}` spill exposes to the methods.
+/// - **r2 into the closing call is dead, not arg3.** The assignment
+///   sketch's "arg3 forwarded to BOTH the second dispatch and the
+///   copy-out" does NOT hold past the second `bl`: r2 is
+///   method-clobbered across the read dispatch, and the thunk's first
+///   instruction (`mov r2, r1`) discards it unconditionally. The
+///   port passes 0 for the thunk's `_unused` parameter. arg3 reaches
+///   exactly one place — the read dispatch's data argument.
+/// - **`pair[1]` is only ever consumed as a 32-bit word** (ARM `ldr`),
+///   so the port truncates it to `u32` on every read; `pair[0]` is
+///   only ever consumed as an address. This keeps the stack-pair
+///   semantics exact on a 64-bit host.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_query_4c_kind4_read(
+    handle: *mut *mut u8,
+    capacity: u32,
+    buffer: *mut u8,
+    forwarded: usize,
+) -> u32 {
+    let dispatch =
+        core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_QUERY_4C_READ_DISPATCH));
+    let finish =
+        core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_QUERY_4C_READ_FINISH));
+    // The entry `stmdb sp!, {r2, r3, ...}` spill: pair[0] = buffer
+    // (sp+0), pair[1] = forwarded (sp+4, the out-slot's initial word).
+    let mut pair = [buffer as usize, forwarded];
+    let forwarded_slot = forwarded;
+    let status = dispatch(
+        handle,
+        MESSAGE_KIND_4,
+        core::ptr::addr_of!(pair[1]) as usize,
+        core::ptr::addr_of!(forwarded_slot),
+    );
+    if status == STATUS_UNSUPPORTED {
+        return status;
+    }
+    if status != 0 {
+        return status;
+    }
+    // ldr r0, [sp, #4] / cmp r0, r4 / strhi r4, [sp, #4]: the clamp is
+    // unsigned (HI), so a size with the top bit set still clamps.
+    let mut size = pair[1] as u32;
+    if size > capacity {
+        size = capacity;
+        pair[1] = capacity as usize;
+    }
+    let status = dispatch(
+        handle,
+        size,
+        buffer as usize,
+        core::ptr::addr_of!(forwarded_slot),
+    );
+    if status != 0 {
+        return status;
+    }
+    // r2 is dead across the read dispatch and the thunk discards it
+    // (`mov r2, r1`); 0 stands in for the unobservable third argument.
+    finish(
+        handle,
+        core::ptr::addr_of_mut!(pair[0]) as *mut u32,
+        0,
+        forwarded,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -877,6 +1051,10 @@ mod tests {
                     .write_volatile(DEFAULT_VTABLE_SET_50_KIND4_OPS);
                 core::ptr::addr_of_mut!(VTABLE_SLOT_50_DISPATCH)
                     .write_volatile(vtable_slot_50_dispatch);
+                core::ptr::addr_of_mut!(VTABLE_QUERY_4C_READ_DISPATCH)
+                    .write_volatile(vtable_slot_4c_dispatch);
+                core::ptr::addr_of_mut!(VTABLE_QUERY_4C_READ_FINISH)
+                    .write_volatile(crate::util::vtable_query::vtable_query_4c_kind4);
             }
         }
     }
@@ -2002,6 +2180,295 @@ mod tests {
                 "any other status returns verbatim (ldmia sp!, {{r12, pc}})"
             );
             assert_eq!(DIRECT_CALLS, 3);
+        }
+    }
+
+    // ---- recording mocks for the query-4c-read seams ------------------
+
+    const READ_ERR: u32 = 0x0bad_000a;
+    const FINISH_CODE: u32 = 0x0bad_000b;
+    const CAPACITY: u32 = 0x40;
+
+    static mut QUERY_CALLS: usize = 0;
+    static mut QUERY_HANDLE: [*mut *mut u8; 8] = [core::ptr::null_mut(); 8];
+    static mut QUERY_KIND: [u32; 8] = [0; 8];
+    static mut QUERY_DATA: [usize; 8] = [0; 8];
+    static mut QUERY_DATA_WORD: [u32; 8] = [0; 8];
+    static mut QUERY_EXTRA: [usize; 8] = [0; 8];
+    static mut QUERY_RESULTS: [u32; 8] = [MOCK_OK; 8];
+    /// The available size the size query answers through the out-slot.
+    static mut QUERY_SIZE: u32 = 0;
+
+    unsafe extern "C" fn recording_read_dispatch(
+        handle: *mut *mut u8,
+        kind: u32,
+        data: usize,
+        extra: *const usize,
+    ) -> u32 {
+        let call = QUERY_CALLS;
+        QUERY_CALLS += 1;
+        QUERY_HANDLE[call] = handle;
+        QUERY_KIND[call] = kind;
+        QUERY_DATA[call] = data;
+        // Call 0's data is the out-slot (its entry word is the spilled
+        // r3); call 1's data is the caller's buffer, which the tests
+        // back with a real array — both reads are in-bounds.
+        QUERY_DATA_WORD[call] = (data as *const u32).read();
+        QUERY_EXTRA[call] = extra.read();
+        if call == 0 {
+            // The size query answers through the out-slot (a 32-bit
+            // store, as the firmware method's `str` would be).
+            (data as *mut u32).write(QUERY_SIZE);
+        }
+        QUERY_RESULTS[call]
+    }
+
+    static mut FINISH_CALLS: usize = 0;
+    static mut FINISH_HANDLE: *mut *mut u8 = core::ptr::null_mut();
+    static mut FINISH_OUT: *mut u32 = core::ptr::null_mut();
+    static mut FINISH_BUFFER: usize = 0;
+    static mut FINISH_SIZE: usize = 0;
+    static mut FINISH_UNUSED: usize = 0;
+    static mut FINISH_FORWARDED: usize = 0;
+    static mut FINISH_RESULT: u32 = MOCK_OK;
+
+    unsafe extern "C" fn recording_finish(
+        handle: *mut *mut u8,
+        out: *mut u32,
+        unused: usize,
+        forwarded: usize,
+    ) -> u32 {
+        FINISH_CALLS += 1;
+        FINISH_HANDLE = handle;
+        FINISH_OUT = out;
+        // `out` addresses the {buffer, clamped_size} stack pair, whose
+        // words are pointer-sized on this 64-bit host — step in usize.
+        FINISH_BUFFER = (out as *const usize).read();
+        FINISH_SIZE = (out as *const usize).add(1).read();
+        FINISH_UNUSED = unused;
+        FINISH_FORWARDED = forwarded;
+        FINISH_RESULT
+    }
+
+    unsafe fn install_read_mocks() {
+        QUERY_CALLS = 0;
+        QUERY_RESULTS = [MOCK_OK; 8];
+        QUERY_SIZE = 0;
+        FINISH_CALLS = 0;
+        FINISH_HANDLE = core::ptr::null_mut();
+        FINISH_OUT = core::ptr::null_mut();
+        FINISH_RESULT = MOCK_OK;
+        core::ptr::addr_of_mut!(VTABLE_QUERY_4C_READ_DISPATCH)
+            .write_volatile(recording_read_dispatch);
+        core::ptr::addr_of_mut!(VTABLE_QUERY_4C_READ_FINISH)
+            .write_volatile(recording_finish);
+    }
+
+    // ---- vtable_query_4c_kind4_read (0x0811d818) ----------------------
+
+    #[test]
+    fn query_read_unsupported_status_bails_before_the_read() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let mut buffer = [0u8; 0x100];
+        unsafe {
+            install_read_mocks();
+            QUERY_RESULTS[0] = UNSUPPORTED_ERR;
+
+            let status = vtable_query_4c_kind4_read(
+                fixture.handle_ptr(),
+                CAPACITY,
+                buffer.as_mut_ptr(),
+                FORWARDED,
+            );
+
+            assert_eq!(
+                status, UNSUPPORTED_ERR,
+                "cmp r0, #0x5; beq — the unsupported status returns verbatim"
+            );
+            assert_eq!(QUERY_CALLS, 1, "no read dispatch after a 5");
+            assert_eq!(FINISH_CALLS, 0, "no finish call after a 5");
+        }
+    }
+
+    #[test]
+    fn query_read_query_error_bails_before_the_read() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let mut buffer = [0u8; 0x100];
+        unsafe {
+            install_read_mocks();
+            QUERY_RESULTS[0] = METHOD_ERR;
+
+            let status = vtable_query_4c_kind4_read(
+                fixture.handle_ptr(),
+                CAPACITY,
+                buffer.as_mut_ptr(),
+                FORWARDED,
+            );
+
+            assert_eq!(
+                status, METHOD_ERR,
+                "cmp r0, #0x0; bne — a hard error returns verbatim"
+            );
+            assert_eq!(QUERY_CALLS, 1, "no read dispatch after an error");
+            assert_eq!(FINISH_CALLS, 0, "no finish call after an error");
+        }
+    }
+
+    #[test]
+    fn query_read_first_dispatch_args_and_initial_out_slot() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let mut buffer = [0u8; 0x100];
+        unsafe {
+            install_read_mocks();
+            QUERY_SIZE = 0x20;
+
+            let status = vtable_query_4c_kind4_read(
+                fixture.handle_ptr(),
+                CAPACITY,
+                buffer.as_mut_ptr(),
+                FORWARDED,
+            );
+
+            assert_eq!(status, MOCK_OK);
+            assert_eq!(QUERY_KIND[0], MESSAGE_KIND_4, "mov r1, #0x4");
+            assert_eq!(QUERY_HANDLE[0], fixture.handle_ptr(), "r0 passes through");
+            assert_eq!(
+                QUERY_DATA_WORD[0], FORWARDED as u32,
+                "the out-slot's initial word is the entry r3 spill (stmdb {{r2, r3, ...}})"
+            );
+            assert_eq!(
+                QUERY_EXTRA[0], FORWARDED,
+                "the dispatcher's stmdb sp!, {{r3}} spill forwards the same word"
+            );
+        }
+    }
+
+    #[test]
+    fn query_read_clamps_the_size_unsigned_and_routes_the_read() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let mut buffer = [0u8; 0x100];
+        unsafe {
+            install_read_mocks();
+            // (reported size, capacity, expected read size): equal and
+            // below pass through unchanged, above clamps, and a size
+            // with the top bit set still clamps — the `strhi` compare
+            // is unsigned.
+            for (reported, capacity, expected) in [
+                (0x40u32, 0x40u32, 0x40u32),
+                (0x20, 0x40, 0x20),
+                (0x41, 0x40, 0x40),
+                (0x8000_0000, 0x40, 0x40),
+                (0, 0x40, 0),
+            ] {
+                QUERY_CALLS = 0;
+                FINISH_CALLS = 0;
+                QUERY_SIZE = reported;
+
+                let status = vtable_query_4c_kind4_read(
+                    fixture.handle_ptr(),
+                    capacity,
+                    buffer.as_mut_ptr(),
+                    FORWARDED,
+                );
+
+                assert_eq!(status, MOCK_OK, "reported {reported:#x}");
+                assert_eq!(QUERY_CALLS, 2, "query then read, reported {reported:#x}");
+                assert_eq!(
+                    QUERY_KIND[1], expected,
+                    "ldr r1, [sp, #4] — the read's middle argument is the \
+                     clamped size (reported {reported:#x}, capacity {capacity:#x})"
+                );
+                assert_eq!(
+                    QUERY_DATA[1],
+                    buffer.as_mut_ptr() as usize,
+                    "mov r2, r6 — the read's data is the caller's buffer (arg3)"
+                );
+                assert_eq!(QUERY_HANDLE[1], fixture.handle_ptr());
+                assert_eq!(QUERY_EXTRA[1], FORWARDED);
+                assert_eq!(FINISH_CALLS, 1);
+                assert_eq!(
+                    FINISH_SIZE, expected as usize,
+                    "the pair's size word the finish message carries is clamped too"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn query_read_read_error_skips_the_finish() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let mut buffer = [0u8; 0x100];
+        unsafe {
+            install_read_mocks();
+            QUERY_SIZE = 0x20;
+            QUERY_RESULTS[1] = READ_ERR;
+
+            let status = vtable_query_4c_kind4_read(
+                fixture.handle_ptr(),
+                CAPACITY,
+                buffer.as_mut_ptr(),
+                FORWARDED,
+            );
+
+            assert_eq!(
+                status, READ_ERR,
+                "the read dispatch's error returns verbatim"
+            );
+            assert_eq!(QUERY_CALLS, 2);
+            assert_eq!(
+                FINISH_CALLS, 0,
+                "bleq — the finish fires only on a zero read status"
+            );
+        }
+    }
+
+    #[test]
+    fn query_read_finish_args_and_final_return() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let mut buffer = [0u8; 0x100];
+        unsafe {
+            install_read_mocks();
+            QUERY_SIZE = 0x20;
+            FINISH_RESULT = FINISH_CODE;
+
+            let status = vtable_query_4c_kind4_read(
+                fixture.handle_ptr(),
+                CAPACITY,
+                buffer.as_mut_ptr(),
+                FORWARDED,
+            );
+
+            assert_eq!(
+                status, FINISH_CODE,
+                "the finish thunk's error code is the function's return value"
+            );
+            assert_eq!(FINISH_CALLS, 1);
+            assert_eq!(FINISH_HANDLE, fixture.handle_ptr(), "moveq r0, r5");
+            assert!(!FINISH_OUT.is_null(), "moveq r1, sp — out is the pair base");
+            assert_eq!(
+                FINISH_BUFFER,
+                buffer.as_mut_ptr() as usize,
+                "pair[0] is the entry r2 spill — the caller's buffer pointer"
+            );
+            assert_eq!(FINISH_SIZE, 0x20, "pair[1] is the clamped size");
+            assert_eq!(
+                FINISH_UNUSED, 0,
+                "r2 is dead across the read dispatch and the thunk discards \
+                 it (mov r2, r1); the port passes 0"
+            );
+            assert_eq!(FINISH_FORWARDED, FORWARDED);
         }
     }
 }
