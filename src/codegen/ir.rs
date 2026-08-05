@@ -102,6 +102,15 @@
 //!   kind byte through two branch tables.
 //! - `cg_inst_collect_used_regs` — original: `FUN_082c1bfc` @ 0x082c1bfc
 //!   (388 bytes). Collects an instruction's input registers.
+//! - `cg_compile_and_patch` — original: `FUN_08243138` @ 0x08243138
+//!   (348 bytes; 0 `bl` callers, 6 tail `b` sites — the clones). The
+//!   JIT's compile-and-patch driver, the top of the ported codegen
+//!   stack: eight analysis passes over the module, construct the
+//!   codegen, lower/emit, resolve label fixups, reserve destination
+//!   space through the driver's vtable, copy the flattened image out,
+//!   flush caches, tear down. Its unported callees sit behind the
+//!   [`CG_COMPILE_AND_PATCH_OPS`] ops-table seam (plus the nested
+//!   [`CG_PROC_EMIT`] and [`CG_BUFFER_FREE`] seams).
 //!
 //! Layouts recovered from the assembly (byte offsets are the target's;
 //! the port addresses every pointer field by WORD INDEX so the records
@@ -197,7 +206,7 @@
 //!   0x1000 bytes at address 0
 //!   (same deviation as [`cg_codegen_buffer_create`]).
 
-use super::heap::{cg_heap_alloc, CgHeap};
+use super::heap::{cg_heap_alloc, cg_heap_destroy, CgHeap};
 use crate::libc::rt_memcpy::__rt_memcpy;
 
 /// Width of a pointer/word field: 4 on the ARMv5TE target (matching the
@@ -1956,6 +1965,440 @@ unsafe fn append_defined_reg(
     } else {
         cursor
     }
+}
+
+// --- cg_compile_and_patch (0x08243138) and its seams -----------------
+
+/// `cg_compile_driver_t + 0x00` — the driver object's vtable. The
+/// compile-and-patch driver calls exactly one method on it: the one at
+/// vtable `+0x0c` (`ldr r0,[r4,#0x0]; ldr r1,[r0,#0xc]; mov r0,r4;
+/// blx r1`).
+pub const CG_DRIVER_VTABLE: usize = 0;
+/// `cg_compile_driver_t + 0x04` — the module being compiled (the
+/// `param_1[1]` every analysis pass and the constructor's
+/// `*module` heap deref read). The clones create it via the factory
+/// @ 0x082432ac and store a third word at driver `+0x08` before
+/// tail-branching into the driver; the driver itself reads neither
+/// `+0x08` nor any other field.
+pub const CG_DRIVER_MODULE: usize = 1;
+/// vtable `+0x0c` — the patch-base method slot (word 3). Called with
+/// the driver as its sole argument; the result is forwarded verbatim
+/// to the reserve stage's second argument.
+pub const CG_DRIVER_VTABLE_PATCH_BASE: usize = 3;
+
+/// `cg_proc_t + 0x2c` — the procedure's FIRST codegen label, filled by
+/// the lowering driver's first loop (`str` of the first
+/// [`cg_label_create`] result).
+pub const CG_PROC_FIRST_LABEL: usize = 11;
+/// `cg_proc_t + 0x30` — the procedure's SECOND codegen label, filled
+/// by the same loop's second [`cg_label_create`] call.
+pub const CG_PROC_SECOND_LABEL: usize = 12;
+
+/// The JIT compile driver object: vtable at `+0x00`, module at `+0x04`.
+/// Only those two fields are recovered (the driver's own reads); the
+/// record belongs to the six clone entries.
+#[repr(C)]
+pub struct CgCompileDriver {
+    _opaque: [u8; 0],
+}
+
+/// The driver's vtable `+0x0c` method: returns the value forwarded to
+/// the reserve stage as its second argument (a code-space base; the
+/// recovered reserve body passes it on to the state allocator
+/// `FUN_08243844`, which uses it as the index of the branch-table
+/// getter @ 0x082432c8).
+pub type CgPatchBaseMethod = unsafe extern "C" fn(driver: *mut CgCompileDriver) -> usize;
+
+/// One whole-module analysis/transform pass: the shape of the eight
+/// `bl FUN_082c*` callees the driver runs over `driver->module` before
+/// constructing the codegen.
+pub type CgGraphPass = unsafe extern "C" fn(module: *mut CgModule);
+
+/// The ten-entry runtime-helper table the driver hands to
+/// [`cg_codegen_create`], verbatim from the literal pool at
+/// 0x08243294-0x082432a8 (osos.dec offset 0x243294): six distinct
+/// mid-function entry points into osos text, four of them duplicated
+/// (`[1] == [5]`, `[2] == [6]`, `[3] == [7]`, `[4] == [8]`). The
+/// original memzeroes 0x28 stack bytes and then overwrites all ten
+/// words before any read — the zero-fill is dead — so a shared static
+/// is byte-identical to the stack copy; the table is only ever read
+/// FROM (the emitters copy words out of it into the generated code),
+/// never written, so sharing it is safe. See [`CG_CODEGEN_HELPERS`].
+static CG_HELPER_TABLE: [usize; 10] = [
+    0x0802_5f88,
+    0x080d_e95c,
+    0x0806_b32c,
+    0x0806_b27c,
+    0x080e_2468,
+    0x080d_e95c,
+    0x0806_b32c,
+    0x0806_b27c,
+    0x080e_2468,
+    0x0809_b904,
+];
+
+/// The unported direct callees of [`cg_compile_and_patch`], modeled as
+/// an ops table (the `app/vtable_set.rs` `VTABLE_SET_50_KIND4_OPS`
+/// precedent, itself the `app/class_6800.rs` `CLASS_6800_OPS`
+/// pattern). Fields are in the original's exact call order. The wired
+/// defaults model what is recoverable of each callee's exact body;
+/// where the body (or its own callee tree) is too deep to model
+/// without porting it, the default performs no work and the field's
+/// doc says so — host tests swap in recording mocks, and porting a
+/// callee later replaces its slot without touching the driver.
+#[derive(Clone, Copy)]
+pub struct CgCompileAndPatchOps {
+    /// `FUN_082c2008` @ 0x082c2008 (144 bytes). Clears every virtual
+    /// register's defining-inst (`+0x18`) and use-list (`+0x1c`) words,
+    /// then walks every instruction and stamps each DEFINED register's
+    /// `+0x18` with the instruction (collected through the ported
+    /// [`cg_inst_visit_by_kind`]). Default: no graph mutation.
+    pub pass_link_defining_insts: CgGraphPass,
+    /// `FUN_082c1d78` @ 0x082c1d78 (76 bytes). Visits every instruction
+    /// and dispatches it to the canonicalizer `FUN_082d6a90` (rewrites
+    /// kind/opcode pairs, e.g. unary opcode 0xb to 0xc/0xd/0xe by
+    /// operand count). Default: no graph mutation.
+    pub pass_canonicalize_insts: CgGraphPass,
+    /// `FUN_082c1f04` @ 0x082c1f04 (260 bytes). Mark-and-sweep dead
+    /// code: clears flag 0x10000 on every instruction, re-marks a root
+    /// set of seven kinds (5, 7, 0xa, 0xb and three more rendered as
+    /// the tiny `IRQ`/`SupervisorCall` constants by Ghidra) through
+    /// the recursive marker `FUN_082d90ec`, then unlinks every
+    /// unmarked instruction from its block. Default: no graph
+    /// mutation.
+    pub pass_eliminate_dead_insts: CgGraphPass,
+    /// `FUN_082c21b8` @ 0x082c21b8 (176 bytes). Rewrites the phi runs
+    /// at block heads (opcode 0x2f) and self-links register word 1 —
+    /// the SSA-deconstruction step. Called TWICE overall: directly
+    /// here and again inside the next pass. Default: no graph
+    /// mutation.
+    pub pass_resolve_phis: CgGraphPass,
+    /// `FUN_082c1d4c` @ 0x082c1d4c (44 bytes). Invokes `FUN_082c21b8`
+    /// (the phi pass) once more, then runs the per-procedure register
+    /// allocator `FUN_082e72d8` over the module. Default: no graph
+    /// mutation.
+    pub pass_allocate_registers: CgGraphPass,
+    /// `FUN_082c2098` @ 0x082c2098 (180 bytes). Clears the register
+    /// def/use words again, then walks every instruction and prepends
+    /// an 8-byte arena cell `{next, inst}` to every USED register's
+    /// `+0x1c` list (collected through the ported
+    /// [`cg_inst_collect_used_regs`]). Default: no graph mutation.
+    pub pass_link_use_insts: CgGraphPass,
+    /// `FUN_082c1ddc` @ 0x082c1ddc (296 bytes). Walks every
+    /// instruction and, for the branch kinds 7 and 8, links the
+    /// owning block to the target block through the edge helpers
+    /// `FUN_082b2f60`/`FUN_082b2ee8`. Default: no graph mutation.
+    pub pass_link_branch_edges: CgGraphPass,
+    /// `FUN_082c214c` @ 0x082c214c (108 bytes). Per procedure,
+    /// arena-allocates a `num_registers`-entry pointer table at
+    /// proc `+0x18`, fills `table[reg_no] = reg`, then visits every
+    /// block through `FUN_082b7bbc`. Default: no graph mutation.
+    pub pass_index_registers: CgGraphPass,
+    /// `FUN_082c12c4` @ 0x082c12c4 (92 bytes) — lowering and emission:
+    /// creates the two per-procedure codegen labels, then emits every
+    /// procedure. The wired default
+    /// ([`default_cg_lower_and_emit`]) models its exact body; the
+    /// per-procedure emitter sits behind the [`CG_PROC_EMIT`] seam.
+    pub lower_and_emit: unsafe extern "C" fn(codegen: *mut CgCodegen, module: *mut CgModule),
+    /// `FUN_082438f0` @ 0x082438f0 (56 bytes) — reserves `size` bytes
+    /// of destination code space: bumps `code_space`'s cursor word
+    /// (`+0x04`), records the old cursor and the size into the JIT
+    /// state record (at its `+0xbc`/`+0xc0`, the record coming from
+    /// the unported state allocator `FUN_08243844` with its grow path
+    /// @ 0x082433b4) and returns `base_word(+0x00) + old_cursor`, the
+    /// linear address the emitted code is copied to. Default: returns
+    /// NULL without touching anything (see the driver's DEVIATIONS).
+    pub reserve_dst: unsafe extern "C" fn(
+        code_space: *mut u8,
+        base: usize,
+        extra: usize,
+        size: usize,
+    ) -> *mut u8,
+    /// `FUN_08243768` @ 0x08243768 (16 bytes) — post-patch cache
+    /// maintenance: `bl 0x08037d0c` (IRAM veneer: `mcr p15,0,r2,cr7,
+    /// cr14,0x2` set/way loop — clean+invalidate the D-cache over both
+    /// 0x00000000- and 0x20000000-based segments) then tail-branches
+    /// through the veneer @ 0x08038238 into IRAM 0x220031b8 (further
+    /// cache maintenance, I-cache side). The original loads all three
+    /// arguments into r0-r2 and never reads them. Default: no work —
+    /// CP15 maintenance is inexpressible in portable Rust, and the
+    /// driver is not hooked until its callees are ported.
+    pub flush_caches: unsafe extern "C" fn(code_space: *mut u8, dst: *mut u8, size: usize),
+    /// `FUN_082c0e20` @ 0x082c0e20 (8 bytes): `ldr r0,[r0,#0x10]; b
+    /// 0x082c22e8` — loads `codegen->output` and tail-branches into
+    /// the emitted-code-buffer destructor @ 0x082c22e8 (52 bytes),
+    /// which frees every non-NULL code page and then the buffer
+    /// record. The wired default ([`default_cg_codegen_destroy`])
+    /// models the flattened exact body. The codegen record itself is
+    /// NOT freed — it lives in the module arena, which the driver's
+    /// final [`cg_heap_destroy`] tears down wholesale.
+    pub codegen_destroy: unsafe extern "C" fn(codegen: *mut CgCodegen),
+}
+
+/// Wired default for every analysis-pass slot of
+/// [`CgCompileAndPatchOps`]: performs NO graph mutation.
+///
+/// DEVIATION (documented, deliberate): the eight originals are
+/// identified (address, size and recovered behavior on each field of
+/// [`CgCompileAndPatchOps`]) but stay unported in this commit — each
+/// is a whole-graph walker with its own deep callee tree
+/// (`FUN_082d6a90`, `FUN_082d90ec`, `FUN_082e72d8`, `FUN_082b2f60`,
+/// ...), and modeling half of a mark-and-sweep or a register
+/// allocator would be worse than modeling none. Porting a pass later
+/// replaces its slot without touching the driver. With the defaults
+/// wired, the driver's own pipeline — construct, lower (label
+/// creation only), resolve, reserve, copy out, flush, destroy — runs
+/// exactly as the original's; only the graph rewrites are absent.
+unsafe extern "C" fn default_cg_graph_pass(_module: *mut CgModule) {}
+
+/// The per-procedure emitter boundary for [`default_cg_lower_and_emit`]:
+/// the identified-but-unported `FUN_082c1320` @ 0x082c1320 (called as
+/// `emit(codegen, proc)` from the lowering driver's second loop). The
+/// wired default models its exact body as far as recovered: no work —
+/// the body and its emitter callee tree stay unported (same documented
+/// deviation as [`default_cg_graph_pass`]). Host tests swap in a
+/// recording fake; porting 0x082c1320 later replaces the default
+/// without touching the lowering driver (the [`CG_BUFFER_PAGE_SLOT`]
+/// precedent).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub static mut CG_PROC_EMIT: unsafe extern "C" fn(*mut CgCodegen, *mut CgProc) =
+    default_cg_proc_emit;
+
+/// The wired default of [`CG_PROC_EMIT`]: no emission. See the seam's
+/// doc for the deviation.
+unsafe extern "C" fn default_cg_proc_emit(_codegen: *mut CgCodegen, _proc: *mut CgProc) {}
+
+/// The `free` boundary for [`default_cg_codegen_destroy`]; defaults to
+/// the ported `free` @ 0x0802edc8 — the original's direct `bl` (twice:
+/// the page loop's `blne 0x0802edc8` and the tail `b 0x0802edc8`). The
+/// exact mirror of [`CG_BUFFER_ALLOC`]: swappable so host tests can
+/// observe the frees without racing malloc's global ops table.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub static mut CG_BUFFER_FREE: unsafe extern "C" fn(*mut u8) =
+    crate::runtime::malloc_rt::free;
+
+/// The wired default of [`CgCompileAndPatchOps::lower_and_emit`]: the
+/// exact body of `FUN_082c12c4` @ 0x082c12c4 (92 bytes). First loop:
+/// for every procedure in `module->procs`, create two labels through
+/// the ported [`cg_label_create`] and store them at proc `+0x2c` /
+/// `+0x30`. Second loop: emit every procedure through the
+/// [`CG_PROC_EMIT`] seam (`FUN_082c1320`, unported — see the seam's
+/// documented deviation).
+unsafe extern "C" fn default_cg_lower_and_emit(codegen: *mut CgCodegen, module: *mut CgModule) {
+    let module = module as *mut u8;
+    let mut proc = slot(module, CG_MODULE_PROCS).read();
+    while !proc.is_null() {
+        let first = cg_label_create(codegen);
+        slot(proc, CG_PROC_FIRST_LABEL).write(first as *mut u8);
+        let second = cg_label_create(codegen);
+        slot(proc, CG_PROC_SECOND_LABEL).write(second as *mut u8);
+        proc = slot(proc, CG_PROC_NEXT).read();
+    }
+    let mut proc = slot(module, CG_MODULE_PROCS).read();
+    while !proc.is_null() {
+        hook(core::ptr::addr_of!(CG_PROC_EMIT))(codegen, proc as *mut CgProc);
+        proc = slot(proc, CG_PROC_NEXT).read();
+    }
+}
+
+/// The wired default of [`CgCompileAndPatchOps::reserve_dst`]: no
+/// reservation, NULL destination.
+///
+/// DEVIATION (documented, deliberate): the original `FUN_082438f0`
+/// bumps the code-space cursor and records cursor+size into the JIT
+/// state record from `FUN_08243844`, whose own body (the branch-table
+/// getter @ 0x082432c8 plus the grow path @ 0x082433b4) stays
+/// unported. With the default wired together with the default
+/// [`CG_PROC_EMIT`], nothing is ever emitted, `current_offset` stays
+/// 0 and [`cg_buffer_copy_out`] copies zero bytes, so the NULL
+/// destination is never dereferenced — the default pipeline is
+/// benign. Porting 0x082438f0 (with 0x08243844) replaces the slot.
+unsafe extern "C" fn default_cg_reserve_dst(
+    _code_space: *mut u8,
+    _base: usize,
+    _extra: usize,
+    _size: usize,
+) -> *mut u8 {
+    core::ptr::null_mut()
+}
+
+/// The wired default of [`CgCompileAndPatchOps::flush_caches`]: no
+/// cache maintenance. See the field's doc for why (CP15 ops, and the
+/// original ignores all three arguments anyway).
+unsafe extern "C" fn default_cg_flush_caches(
+    _code_space: *mut u8,
+    _dst: *mut u8,
+    _size: usize,
+) {
+}
+
+/// The wired default of [`CgCompileAndPatchOps::codegen_destroy`]: the
+/// exact body of `FUN_082c0e20` @ 0x082c0e20 flattened with its
+/// tail-branch target, the buffer destructor @ 0x082c22e8 — load
+/// `codegen->output`, free every non-NULL page-table entry in index
+/// order (`cmp r0,#0x0; blne 0x0802edc8` over the 512 slots), then
+/// free the buffer record itself (the destructor's tail `b
+/// 0x0802edc8`).
+///
+/// DEVIATIONS (module-header family): the frees go through the
+/// swappable [`CG_BUFFER_FREE`] slot where the original `bl`s `free`
+/// directly (the slot defaults to that same port), and a NULL output
+/// returns early where the original — no NULL check, like the rest of
+/// the cluster — would walk the page table at address 4. A NULL
+/// output is only reachable through [`cg_codegen_buffer_create`]'s own
+/// documented allocation-failure deviation.
+unsafe extern "C" fn default_cg_codegen_destroy(codegen: *mut CgCodegen) {
+    let output = slot(codegen as *mut u8, CG_CODEGEN_OUTPUT).read();
+    if output.is_null() {
+        return;
+    }
+    for index in 0..CG_BUFFER_PAGE_TABLE_BYTES / 4 {
+        let page = slot(output, CG_BUFFER_PAGES + index).read();
+        if !page.is_null() {
+            hook(core::ptr::addr_of!(CG_BUFFER_FREE))(page);
+        }
+    }
+    hook(core::ptr::addr_of!(CG_BUFFER_FREE))(output);
+}
+
+/// Wired defaults for [`CG_COMPILE_AND_PATCH_OPS`]: the modeled bodies
+/// of the driver's unported callees.
+pub const DEFAULT_CG_COMPILE_AND_PATCH_OPS: CgCompileAndPatchOps =
+    CgCompileAndPatchOps {
+        pass_link_defining_insts: default_cg_graph_pass,
+        pass_canonicalize_insts: default_cg_graph_pass,
+        pass_eliminate_dead_insts: default_cg_graph_pass,
+        pass_resolve_phis: default_cg_graph_pass,
+        pass_allocate_registers: default_cg_graph_pass,
+        pass_link_use_insts: default_cg_graph_pass,
+        pass_link_branch_edges: default_cg_graph_pass,
+        pass_index_registers: default_cg_graph_pass,
+        lower_and_emit: default_cg_lower_and_emit,
+        reserve_dst: default_cg_reserve_dst,
+        flush_caches: default_cg_flush_caches,
+        codegen_destroy: default_cg_codegen_destroy,
+    };
+
+/// Active seams for the unported direct callees of
+/// [`cg_compile_and_patch`] (the `VTABLE_SET_50_KIND4_OPS` scheme,
+/// read through `read_volatile`). Host tests replace the table (or
+/// individual stages) with recording mocks; on firmware the defaults
+/// reproduce the original chain as far as documented on each field.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub static mut CG_COMPILE_AND_PATCH_OPS: CgCompileAndPatchOps =
+    DEFAULT_CG_COMPILE_AND_PATCH_OPS;
+
+/// cg_compile_and_patch — original: `FUN_08243138` @ 0x08243138
+/// (348 bytes: 87 instructions plus the six-word literal pool at
+/// 0x08243294-0x082432ac; **0 `bl` callers**, reached by the six tail
+/// `b 0x08243138` sites in its clones @ 0x08246580 / 0x0824854c /
+/// 0x082493c0 / 0x0824a43c / 0x0824af58 / 0x0824bd40 — every JIT
+/// compilation ends here). The top of the codegen stack: the JIT's
+/// compile-and-patch driver.
+///
+/// Signature from the register moves: `driver` (r4) is the clone's
+/// compile-driver object (vtable at `+0x00`, module at `+0x04`);
+/// `code_space` (r5) is the destination code-space cursor object;
+/// `extra` (r9) is forwarded verbatim to the reserve stage's third
+/// argument (the recovered bodies pass it to the state allocator
+/// `FUN_08243844`). Returns nothing.
+///
+/// The pipeline, in the original's exact order:
+///
+/// 1. EIGHT whole-module analysis/transform passes over
+    /// `driver->module`, each `bl`'d with the module as sole argument:
+///    `FUN_082c2008`, `FUN_082c1d78`, `FUN_082c1f04`, `FUN_082c21b8`,
+///    `FUN_082c1d4c`, `FUN_082c2098`, `FUN_082c1ddc`, `FUN_082c214c`
+///    (unported — the [`CG_COMPILE_AND_PATCH_OPS`] pass slots).
+/// 2. Build the ten-word runtime-helper table [`CG_HELPER_TABLE`] and
+///    a zero-initialized status cell on the stack.
+/// 3. `codegen = cg_codegen_create(*module, &helpers, &status)` — the
+///    ported constructor, called directly (`*module` is the arena,
+    /// re-read fresh: `ldr r0,[r4,#0x4]; ldr r0,[r0,#0x0]`).
+/// 4. `lower_and_emit(codegen, module)` — `FUN_082c12c4` (the ops
+///    slot; its default models the exact body).
+/// 5. [`cg_codegen_resolve_label_fixups`]`(codegen)` — ported, direct.
+/// 6. `output = cg_codegen_output(codegen)` (ported, direct) and
+///    `size = cg_buffer_current_offset(output)` — the FIRST of three
+///    offset reads, kept verbatim.
+/// 7. `base = driver->vtable->patch_base(driver)` — the one indirect
+///    call: `ldr r0,[r4,#0x0]; ldr r1,[r0,#0xc]; mov r0,r4; blx r1`.
+/// 8. `dst = reserve_dst(code_space, base, extra, size)` —
+///    `FUN_082438f0` (ops slot).
+/// 9. Re-read the offset (second read) and
+///    [`cg_buffer_copy_out`]`(output, 0, dst, offset)` — flatten the
+///    whole emitted image into the reserved destination.
+/// 10. Re-read the offset (third read) and
+///     `flush_caches(code_space, dst, offset)` — `FUN_08243768` (ops
+///     slot; the original loads the three argument registers and its
+///     body never reads them).
+/// 11. `codegen_destroy(codegen)` — `FUN_082c0e20` (ops slot; frees
+///     the buffer and its pages, NOT the arena-owned codegen record).
+/// 12. `cg_heap_destroy(*module)` — ported, called directly: tears
+///     down the whole arena backing the module, the procedures, the
+///     labels and the codegen record.
+///
+/// DEVIATIONS: the helper table is a shared static instead of a
+/// stack copy (the original's 0x28-byte `memzero` at sp+4 is dead —
+/// all ten words are stored before any read — and the table is only
+/// ever read from); the eight analysis passes, the per-procedure
+/// emitter, the reserve stage and the cache flush default to no-ops
+/// as documented on [`CgCompileAndPatchOps`] / [`CG_PROC_EMIT`];
+/// [`default_cg_codegen_destroy`] adds a NULL-output guard and routes
+/// frees through [`CG_BUFFER_FREE`]. Everything else — stage order,
+/// argument routing, the three `current_offset` re-reads, the vtable
+/// call — is the original's exact body.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_compile_and_patch(
+    driver: *mut CgCompileDriver,
+    code_space: *mut u8,
+    extra: usize,
+) {
+    let driver = driver as *mut u8;
+    let module = slot(driver, CG_DRIVER_MODULE).read() as *mut CgModule;
+    let ops = hook(core::ptr::addr_of!(CG_COMPILE_AND_PATCH_OPS));
+
+    // Stage 1: the eight analysis passes, in the original's order.
+    (ops.pass_link_defining_insts)(module);
+    (ops.pass_canonicalize_insts)(module);
+    (ops.pass_eliminate_dead_insts)(module);
+    (ops.pass_resolve_phis)(module);
+    (ops.pass_allocate_registers)(module);
+    (ops.pass_link_use_insts)(module);
+    (ops.pass_link_branch_edges)(module);
+    (ops.pass_index_registers)(module);
+
+    // Stages 2-3: helper table, zeroed status cell, the constructor.
+    let mut status = 0usize;
+    let codegen = cg_codegen_create(
+        module_heap(module as *mut u8),
+        CG_HELPER_TABLE.as_ptr(),
+        core::ptr::addr_of_mut!(status),
+    );
+
+    // Stages 4-5: lower/emit, then resolve the label fixups.
+    (ops.lower_and_emit)(codegen, module);
+    cg_codegen_resolve_label_fixups(codegen);
+
+    // Stages 6-8: size, the vtable patch-base call, the reservation.
+    let output = cg_codegen_output(codegen);
+    let size = cg_buffer_current_offset(output);
+    let vtable = slot(driver, CG_DRIVER_VTABLE).read();
+    let patch_base: CgPatchBaseMethod =
+        core::mem::transmute(slot(vtable, CG_DRIVER_VTABLE_PATCH_BASE).read());
+    let base = patch_base(driver as *mut CgCompileDriver);
+    let dst = (ops.reserve_dst)(code_space, base, extra, size);
+
+    // Stages 9-10: flatten into the destination, then flush.
+    let copied = cg_buffer_current_offset(output);
+    cg_buffer_copy_out(output, 0, dst, copied);
+    let flushed = cg_buffer_current_offset(output);
+    (ops.flush_caches)(code_space, dst, flushed);
+
+    // Stages 11-12: buffer teardown, then the whole arena.
+    (ops.codegen_destroy)(codegen);
+    cg_heap_destroy(module_heap(module as *mut u8));
 }
 
 #[cfg(test)]
@@ -4706,6 +5149,460 @@ mod tests {
             assert!(out[1].is_null(), "the second append hit the bound");
         }
         drop(f);
+        teardown();
+    }
+
+    // --- cg_compile_and_patch (0x08243138) through its seams ---------
+
+    /// One observed pipeline stage, in call order.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    enum CompileStage {
+        /// One of the eight analysis passes (1-based).
+        Pass(usize),
+        Lower,
+        Reserve,
+        Flush,
+        Destroy,
+    }
+
+    static mut COMPILE_LOG: std::vec::Vec<CompileStage> = std::vec::Vec::new();
+    static mut PASS_MODULE: [*mut CgModule; 8] = [core::ptr::null_mut(); 8];
+    static mut LOWER_ARGS: (*mut CgCodegen, *mut CgModule) =
+        (core::ptr::null_mut(), core::ptr::null_mut());
+    static mut LOWER_OFFSET_AT_ENTRY: usize = usize::MAX;
+    static mut RESERVE_ARGS: (*mut u8, usize, usize, usize) =
+        (core::ptr::null_mut(), 0, 0, 0);
+    static mut FLUSH_ARGS: (*mut u8, *mut u8, usize) = (core::ptr::null_mut(), core::ptr::null_mut(), 0);
+    static mut DESTROY_CODEGEN: *mut CgCodegen = core::ptr::null_mut();
+    static mut DESTROY_HELPERS: [usize; 10] = [0; 10];
+    static mut DESTROY_STATUS_WORD: usize = usize::MAX;
+    static mut DESTROY_HEAP: *mut u8 = core::ptr::null_mut();
+    static mut DESTROY_OUTPUT: *mut u8 = core::ptr::null_mut();
+    static mut PATCH_BASE_CALLS: usize = 0;
+    static mut PATCH_BASE_DRIVER: *mut CgCompileDriver = core::ptr::null_mut();
+    /// The patch base the fake vtable method answers.
+    const FAKE_PATCH_BASE: usize = 0x1122_0000;
+    /// The forwarded third driver argument.
+    const FAKE_EXTRA: usize = 0xdead_beef;
+    /// The reservation the fake reserve stage hands to the copy-out.
+    static mut PATCH_DST: [u8; 64] = [0; 64];
+
+    macro_rules! recording_pass {
+        ($name:ident, $n:expr) => {
+            unsafe extern "C" fn $name(module: *mut CgModule) {
+                COMPILE_LOG.push(CompileStage::Pass($n));
+                PASS_MODULE[$n - 1] = module;
+            }
+        };
+    }
+    recording_pass!(recording_pass_1, 1);
+    recording_pass!(recording_pass_2, 2);
+    recording_pass!(recording_pass_3, 3);
+    recording_pass!(recording_pass_4, 4);
+    recording_pass!(recording_pass_5, 5);
+    recording_pass!(recording_pass_6, 6);
+    recording_pass!(recording_pass_7, 7);
+    recording_pass!(recording_pass_8, 8);
+
+    /// The three words the lower mock emits, and the bound-label target
+    /// offset: word 0 is a `B` placeholder patched by the resolver to
+    /// reach offset 8.
+    const EMITTED_WORDS: [u32; 3] = [0xea00_0000, 0xe1a0_0000, 0xe59f_0000];
+
+    unsafe extern "C" fn emitting_lower(codegen: *mut CgCodegen, module: *mut CgModule) {
+        COMPILE_LOG.push(CompileStage::Lower);
+        LOWER_ARGS = (codegen, module);
+        let output = cg_codegen_output(codegen);
+        LOWER_OFFSET_AT_ENTRY = cg_buffer_current_offset(output);
+        // A tag-1 (B<cond>) fixup at offset 0, the branch placeholder,
+        // then two more words; the label binds at offset 8.
+        let label = cg_label_create(codegen);
+        cg_label_add_fixup(codegen, label, 1);
+        for &word in &EMITTED_WORDS {
+            cg_buffer_emit_word(output, word);
+        }
+        bind_label(label, 8);
+    }
+
+    unsafe extern "C" fn recording_reserve(
+        code_space: *mut u8,
+        base: usize,
+        extra: usize,
+        size: usize,
+    ) -> *mut u8 {
+        COMPILE_LOG.push(CompileStage::Reserve);
+        RESERVE_ARGS = (code_space, base, extra, size);
+        core::ptr::addr_of_mut!(PATCH_DST) as *mut u8
+    }
+
+    unsafe extern "C" fn recording_flush(code_space: *mut u8, dst: *mut u8, size: usize) {
+        COMPILE_LOG.push(CompileStage::Flush);
+        FLUSH_ARGS = (code_space, dst, size);
+    }
+
+    unsafe extern "C" fn recording_destroy(codegen: *mut CgCodegen) {
+        COMPILE_LOG.push(CompileStage::Destroy);
+        DESTROY_CODEGEN = codegen;
+        let record = codegen as *mut u8;
+        // The record is still alive here (the arena teardown runs
+        // after this stage): snapshot the wiring the constructor was
+        // handed.
+        let helpers = slot(record, CG_CODEGEN_HELPERS).read() as *const usize;
+        for i in 0..10 {
+            DESTROY_HELPERS[i] = helpers.add(i).read();
+        }
+        DESTROY_STATUS_WORD =
+            (slot(record, CG_CODEGEN_STATUS).read() as *const usize).read();
+        DESTROY_HEAP = slot(record, CG_CODEGEN_HEAP).read();
+        DESTROY_OUTPUT = slot(record, CG_CODEGEN_OUTPUT).read();
+    }
+
+    unsafe extern "C" fn recording_patch_base(driver: *mut CgCompileDriver) -> usize {
+        PATCH_BASE_CALLS += 1;
+        PATCH_BASE_DRIVER = driver;
+        FAKE_PATCH_BASE
+    }
+
+    /// A recording ops table: every seam swapped for a mock, the lower
+    /// stage emitting a real three-word image with one label fixup.
+    fn recording_compile_ops() -> CgCompileAndPatchOps {
+        CgCompileAndPatchOps {
+            pass_link_defining_insts: recording_pass_1,
+            pass_canonicalize_insts: recording_pass_2,
+            pass_eliminate_dead_insts: recording_pass_3,
+            pass_resolve_phis: recording_pass_4,
+            pass_allocate_registers: recording_pass_5,
+            pass_link_use_insts: recording_pass_6,
+            pass_link_branch_edges: recording_pass_7,
+            pass_index_registers: recording_pass_8,
+            lower_and_emit: emitting_lower,
+            reserve_dst: recording_reserve,
+            flush_caches: recording_flush,
+            codegen_destroy: recording_destroy,
+        }
+    }
+
+    /// A driver object over a real arena and an empty module, plus its
+    /// fake vtable. Boxed so the addresses stay put.
+    struct DriverFixture {
+        heap: *mut CgHeap,
+        module: [usize; 2],
+        vtable: [usize; 4],
+        driver: [usize; 2],
+        code_space: [usize; 2],
+    }
+
+    impl DriverFixture {
+        fn new() -> std::boxed::Box<DriverFixture> {
+            let heap = unsafe { cg_heap_create(4096) };
+            let mut f = std::boxed::Box::new(DriverFixture {
+                heap,
+                module: [0; 2],
+                vtable: [0; 4],
+                driver: [0; 2],
+                code_space: [0x5000_0000, 0],
+            });
+            f.module[CG_MODULE_HEAP] = heap as usize;
+            f.vtable[CG_DRIVER_VTABLE_PATCH_BASE] = recording_patch_base as usize;
+            f.driver[CG_DRIVER_VTABLE] = f.vtable.as_ptr() as usize;
+            f.driver[CG_DRIVER_MODULE] = f.module.as_ptr() as usize;
+            f
+        }
+
+        fn driver_ptr(&mut self) -> *mut CgCompileDriver {
+            self.driver.as_mut_ptr() as *mut CgCompileDriver
+        }
+
+        fn code_space_ptr(&mut self) -> *mut u8 {
+            self.code_space.as_mut_ptr() as *mut u8
+        }
+    }
+
+    #[test]
+    fn compile_and_patch_runs_the_pipeline_in_order_through_the_seams() {
+        let _g = setup();
+        unsafe {
+            let saved_alloc = hook(core::ptr::addr_of!(CG_BUFFER_ALLOC));
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = poisoning_alloc;
+            let saved_ops = hook(core::ptr::addr_of!(CG_COMPILE_AND_PATCH_OPS));
+            *core::ptr::addr_of_mut!(CG_COMPILE_AND_PATCH_OPS) = recording_compile_ops();
+            COMPILE_LOG.clear();
+            PASS_MODULE = [core::ptr::null_mut(); 8];
+            PATCH_BASE_CALLS = 0;
+            PATCH_DST = [0; 64];
+
+            let mut f = DriverFixture::new();
+            let driver = f.driver_ptr();
+            let code_space = f.code_space_ptr();
+            let module = f.module.as_mut_ptr() as *mut CgModule;
+            let heap = f.heap;
+            cg_compile_and_patch(driver, code_space, FAKE_EXTRA);
+
+            *core::ptr::addr_of_mut!(CG_COMPILE_AND_PATCH_OPS) = saved_ops;
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = saved_alloc;
+
+            // The stage sequence: eight passes in the original's order,
+            // then lower, reserve, flush, destroy (the ported stages —
+            // create, resolve, output, copy_out — are pinned by the
+            // arguments and bytes below).
+            assert_eq!(
+                COMPILE_LOG.as_slice(),
+                &[
+                    CompileStage::Pass(1),
+                    CompileStage::Pass(2),
+                    CompileStage::Pass(3),
+                    CompileStage::Pass(4),
+                    CompileStage::Pass(5),
+                    CompileStage::Pass(6),
+                    CompileStage::Pass(7),
+                    CompileStage::Pass(8),
+                    CompileStage::Lower,
+                    CompileStage::Reserve,
+                    CompileStage::Flush,
+                    CompileStage::Destroy,
+                ],
+                "the pipeline fires in the original's exact order"
+            );
+            assert_eq!(
+                PASS_MODULE, [module; 8],
+                "every pass receives the driver's module, verbatim"
+            );
+
+            // Lower: a live codegen over the module's arena, the module
+            // verbatim, and a fresh (offset 0) output buffer — the
+            // constructor ran first.
+            let (codegen, lower_module) = LOWER_ARGS;
+            assert!(!codegen.is_null());
+            assert_eq!(lower_module, module);
+            assert_eq!(LOWER_OFFSET_AT_ENTRY, 0, "the buffer starts empty");
+            assert_eq!(DESTROY_HEAP, heap as *mut u8);
+
+            // The vtable call: exactly once, with the driver.
+            assert_eq!(PATCH_BASE_CALLS, 1);
+            assert_eq!(PATCH_BASE_DRIVER, driver);
+
+            // Reserve: (code_space, vtable result, extra, size) with
+            // the size sampled BEFORE the reservation — twelve emitted
+            // bytes.
+            assert_eq!(
+                RESERVE_ARGS,
+                (code_space, FAKE_PATCH_BASE, FAKE_EXTRA, 12),
+                "reserve sees code_space, base, extra and the pre-reserve offset"
+            );
+            // Flush: (code_space, the reserved dst, offset re-read).
+            assert_eq!(
+                FLUSH_ARGS,
+                (code_space, core::ptr::addr_of_mut!(PATCH_DST) as *mut u8, 12),
+                "flush sees code_space, the reserved dst and the re-read offset"
+            );
+            assert_eq!(DESTROY_CODEGEN, codegen, "teardown gets the same codegen");
+
+            // The constructor's wiring, snapshotted inside the destroy
+            // stage: the ten-word helper table verbatim and the
+            // zero-initialized status cell.
+            assert_eq!(DESTROY_HELPERS, CG_HELPER_TABLE, "the helper table lands word-for-word");
+            assert_eq!(DESTROY_STATUS_WORD, 0, "the status cell starts zeroed");
+
+            // The copied-out image: the resolver patched word 0 BEFORE
+            // the copy — imm24 0 + ((8 - 0) >> 2) = 2 — and the other
+            // two words are verbatim.
+            let mut expected = [0u8; 12];
+            expected[0..4].copy_from_slice(&0xea00_0002u32.to_le_bytes());
+            expected[4..8].copy_from_slice(&EMITTED_WORDS[1].to_le_bytes());
+            expected[8..12].copy_from_slice(&EMITTED_WORDS[2].to_le_bytes());
+            assert_eq!(&PATCH_DST[..12], &expected, "resolve ran before copy_out");
+            assert_eq!(&PATCH_DST[12..], &[0; 52], "nothing past current_offset is copied");
+
+            // The destroy stage was mocked: free the buffer and its one
+            // page by hand. The arena (module, codegen, labels) was
+            // already torn down by the driver's own cg_heap_destroy.
+            let page = slot(DESTROY_OUTPUT, CG_BUFFER_PAGES).read();
+            if !page.is_null() {
+                poisoning_free(page);
+            }
+            poisoning_free(DESTROY_OUTPUT);
+        }
+        teardown();
+    }
+
+    #[test]
+    fn compile_and_patch_default_ops_run_the_benign_empty_pipeline() {
+        let _g = setup();
+        unsafe {
+            let saved_alloc = hook(core::ptr::addr_of!(CG_BUFFER_ALLOC));
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = poisoning_alloc;
+            let saved_free = hook(core::ptr::addr_of!(CG_BUFFER_FREE));
+            *core::ptr::addr_of_mut!(CG_BUFFER_FREE) = recording_buffer_free;
+            BUFFER_FREE_LOG.clear();
+            PATCH_BASE_CALLS = 0;
+
+            // All driver seams at their wired defaults. With an empty
+            // module nothing is emitted: reserve's NULL destination is
+            // never dereferenced because copy_out moves zero bytes, and
+            // the default destroy frees exactly the buffer record.
+            let mut f = DriverFixture::new();
+            cg_compile_and_patch(f.driver_ptr(), f.code_space_ptr(), FAKE_EXTRA);
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = saved_alloc;
+            *core::ptr::addr_of_mut!(CG_BUFFER_FREE) = saved_free;
+
+            assert_eq!(PATCH_BASE_CALLS, 1, "the vtable method still fires");
+            assert_eq!(
+                BUFFER_FREE_LOG.len(),
+                1,
+                "the default destroy frees the buffer record and no pages (nothing was emitted): {:?}",
+                BUFFER_FREE_LOG
+            );
+        }
+        teardown();
+    }
+
+    static mut BUFFER_FREE_LOG: std::vec::Vec<*mut u8> = std::vec::Vec::new();
+
+    unsafe extern "C" fn recording_buffer_free(ptr: *mut u8) {
+        BUFFER_FREE_LOG.push(ptr);
+        poisoning_free(ptr);
+    }
+
+    #[test]
+    fn lower_and_emit_default_creates_two_labels_per_proc_then_emits_in_list_order() {
+        let _g = setup();
+        unsafe {
+            let saved_alloc = hook(core::ptr::addr_of!(CG_BUFFER_ALLOC));
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = poisoning_alloc;
+            let saved_emit = hook(core::ptr::addr_of!(CG_PROC_EMIT));
+            *core::ptr::addr_of_mut!(CG_PROC_EMIT) = recording_proc_emit;
+            PROC_EMIT_LOG.clear();
+
+            let heap = cg_heap_create(4096);
+            let mut module = [heap as usize, 0usize];
+            let module_ptr = module.as_mut_ptr() as *mut CgModule;
+            // cg_proc_create prepends: the list runs p2 -> p1.
+            let p1 = cg_proc_create(module_ptr);
+            let p2 = cg_proc_create(module_ptr);
+
+            let helpers = [0usize; 10];
+            let mut status = 0usize;
+            let codegen = cg_codegen_create(heap, helpers.as_ptr(), core::ptr::addr_of_mut!(status));
+
+            default_cg_lower_and_emit(codegen, module_ptr);
+
+            *core::ptr::addr_of_mut!(CG_PROC_EMIT) = saved_emit;
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = saved_alloc;
+
+            // The emitter sees every procedure in list order.
+            assert_eq!(
+                PROC_EMIT_LOG.as_slice(),
+                &[(codegen, p2), (codegen, p1)],
+                "FUN_082c1320 is called per procedure, newest first"
+            );
+            // Each procedure carries two distinct labels, all four on
+            // the codegen's label list.
+            let mut labels = std::vec::Vec::new();
+            for proc in [p1, p2] {
+                let first = slot(proc as *mut u8, CG_PROC_FIRST_LABEL).read();
+                let second = slot(proc as *mut u8, CG_PROC_SECOND_LABEL).read();
+                assert!(!first.is_null() && !second.is_null());
+                assert_ne!(first, second, "two distinct labels per procedure");
+                labels.push(first);
+                labels.push(second);
+            }
+            let mut listed = std::vec::Vec::new();
+            let mut label = slot(codegen as *mut u8, CG_CODEGEN_LABELS).read();
+            while !label.is_null() {
+                listed.push(label);
+                label = slot(label, CG_LABEL_NEXT).read();
+            }
+            labels.sort();
+            listed.sort();
+            assert_eq!(labels, listed, "exactly the four per-proc labels were created");
+
+            poisoning_free(cg_codegen_output(codegen) as *mut u8);
+            cg_heap_destroy(heap);
+        }
+        teardown();
+    }
+
+    static mut PROC_EMIT_LOG: std::vec::Vec<(*mut CgCodegen, *mut CgProc)> =
+        std::vec::Vec::new();
+
+    unsafe extern "C" fn recording_proc_emit(codegen: *mut CgCodegen, proc: *mut CgProc) {
+        PROC_EMIT_LOG.push((codegen, proc));
+    }
+
+    #[test]
+    fn codegen_destroy_default_frees_pages_in_order_then_the_buffer() {
+        let _g = setup();
+        unsafe {
+            let saved_alloc = hook(core::ptr::addr_of!(CG_BUFFER_ALLOC));
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = poisoning_alloc;
+            let saved_free = hook(core::ptr::addr_of!(CG_BUFFER_FREE));
+            *core::ptr::addr_of_mut!(CG_BUFFER_FREE) = recording_buffer_free;
+            BUFFER_FREE_LOG.clear();
+
+            let heap = cg_heap_create(4096);
+            let helpers = [0usize; 10];
+            let mut status = 0usize;
+            let codegen = cg_codegen_create(heap, helpers.as_ptr(), core::ptr::addr_of_mut!(status));
+            // 0x401 words = 0x1004 bytes: page 0 plus four bytes of
+            // page 1 — two page-table entries to free.
+            let output = cg_codegen_output(codegen);
+            for i in 0..0x401usize {
+                cg_buffer_emit_word(output, i as u32);
+            }
+            let record = output as *mut u8;
+            let page0 = slot(record, CG_BUFFER_PAGES).read();
+            let page1 = slot(record, CG_BUFFER_PAGES + 1).read();
+            let page2 = slot(record, CG_BUFFER_PAGES + 2).read();
+            assert!(!page0.is_null() && !page1.is_null());
+            assert!(page2.is_null(), "only two pages are live");
+
+            default_cg_codegen_destroy(codegen);
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_FREE) = saved_free;
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = saved_alloc;
+
+            assert_eq!(
+                BUFFER_FREE_LOG.as_slice(),
+                &[page0, page1, output as *mut u8],
+                "pages in index order, the buffer record last"
+            );
+
+            // The NULL-output deviation guard: no frees, no crash.
+            BUFFER_FREE_LOG.clear();
+            let mut bare = [0usize; 5];
+            default_cg_codegen_destroy(bare.as_mut_ptr() as *mut CgCodegen);
+            assert!(BUFFER_FREE_LOG.is_empty(), "a NULL output frees nothing");
+
+            cg_heap_destroy(heap);
+        }
+        teardown();
+    }
+
+    #[test]
+    fn compile_and_patch_seams_stay_wired_to_the_defaults() {
+        let _g = setup();
+        unsafe {
+            let ops = hook(core::ptr::addr_of!(CG_COMPILE_AND_PATCH_OPS));
+            assert_eq!(
+                ops.lower_and_emit as usize, default_cg_lower_and_emit as usize,
+                "the lowering slot stays wired to the exact-body model"
+            );
+            assert_eq!(
+                ops.codegen_destroy as usize, default_cg_codegen_destroy as usize,
+                "the destroy slot stays wired to the exact-body model"
+            );
+            assert_eq!(
+                hook(core::ptr::addr_of!(CG_PROC_EMIT)) as usize,
+                default_cg_proc_emit as usize,
+                "the nested emitter seam stays wired to its documented default"
+            );
+            assert_eq!(
+                hook(core::ptr::addr_of!(CG_BUFFER_FREE)) as usize,
+                crate::runtime::malloc_rt::free as usize,
+                "the free seam stays wired to the ported free — the original's direct bl"
+            );
+        }
         teardown();
     }
 }

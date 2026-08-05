@@ -21643,6 +21643,79 @@ functions:
       and cg_codegen_output/cg_label_create layout consistency) and
       ::codegen_create_stores_a_null_output_when_the_buffer_alloc_fails.
 
+  - address: 0x08243138
+    ghidra: FUN_08243138
+    name: cg_compile_and_patch
+    size: 348
+    sig: "void cg_compile_and_patch(CgCompileDriver *driver, u8 *code_space, usize extra)"
+    module: codegen/ir
+    status: ported
+    renames:
+      param_1/r4: driver (vtable at +0x00, module at +0x04)
+      param_2/r5: code_space (destination cursor object, forwarded to reserve/flush)
+      param_3/r9: extra (forwarded verbatim to the reserve stage's r2)
+      r6: codegen
+      r7: output
+      r8: size, then dst
+      sp+0x04..sp+0x28: helper_table (ten-word CG_HELPER_TABLE)
+      sp+0x00: status (zero-initialized cell)
+    notes: >-
+      0 bl callers; 6 tail `b 0x08243138` sites - the clones at
+      0x08246580/0x0824854c/0x082493c0/0x0824a43c/0x0824af58/0x0824bd40
+      (each builds a driver object, calls its own lowering driver such
+      as FUN_082439b0, then tail-branches here; porting the six clones
+      is future work). The JIT's compile-and-patch driver, top of the
+      codegen stack: (1) eight whole-module analysis passes over
+      driver->module, each bl'd with the module as sole arg, in this
+      exact order - FUN_082c2008 (link defining insts), FUN_082c1d78
+      (canonicalize), FUN_082c1f04 (mark-and-sweep DCE), FUN_082c21b8
+      (phi resolution), FUN_082c1d4c (register allocation; calls
+      FUN_082c21b8 again internally), FUN_082c2098 (link use insts),
+      FUN_082c1ddc (branch-edge linking), FUN_082c214c (register
+      indexing); (2) build the ten-word helper table (literal pool
+      0x08243294-0x082432a8: 0x08025f88, 0x080de95c, 0x0806b32c,
+      0x0806b27c, 0x080e2468, then 0x080de95c/0x0806b32c/0x0806b27c/
+      0x080e2468 duplicated, 0x0809b904 - osos.dec offset 0x243294)
+      plus a zeroed status cell; (3) cg_codegen_create(*module,
+      &table, &status) - ported, direct; (4) FUN_082c12c4
+      lower/emit (seam slot; default models the exact body: two
+      cg_label_create per proc at +0x2c/+0x30, then per-proc
+      FUN_082c1320 behind the nested CG_PROC_EMIT seam); (5)
+      cg_codegen_resolve_label_fixups - ported, direct; (6)
+      cg_codegen_output + first of three cg_buffer_current_offset
+      reads; (7) the one indirect call: driver->vtable->+0x0c(driver);
+      (8) FUN_082438f0 reserve(code_space, base, extra, size) - seam
+      slot, no-op NULL default (needs the unported state allocator
+      FUN_08243844 with grow path 0x082433b4); (9) second offset read
+      + cg_buffer_copy_out(output, 0, dst, size) - ported, direct;
+      (10) third offset read + FUN_08243768 flush(code_space, dst,
+      size) - seam slot, no-op default (CP15 D-cache clean+invalidate
+      via IRAM veneer 0x08037d0c, tail into IRAM 0x220031b8 via
+      0x08038238; the original loads r0-r2 and never reads them);
+      (11) FUN_082c0e20 codegen_destroy - seam slot; default models
+      the exact body flattened with its tail target, the buffer
+      destructor @ 0x082c22e8 (free 512 non-NULL pages in index
+      order, then the buffer), routing frees through the new
+      CG_BUFFER_FREE seam (default: the ported free @ 0x0802edc8,
+      the CG_BUFFER_ALLOC mirror) and adding a NULL-output guard;
+      (12) cg_heap_destroy(*module) - ported, direct: the whole arena
+      (module, procs, labels, codegen record) dies wholesale.
+      Deviations: helper table is a shared static (the original's
+      0x28-byte stack memzero is dead - all ten words stored before
+      any read); the eight passes and the emitter/reserve/flush
+      stages default to no-ops as documented on CgCompileAndPatchOps
+      (each original identified with address/size/recovered behavior
+      on its slot; benign default chain - nothing emitted means the
+      NULL dst is never dereferenced). Host tests:
+      src/codegen/ir.rs::compile_and_patch_runs_the_pipeline_in_order_through_the_seams
+      (stage order, per-stage argument routing, helper table + status
+      wiring, resolve-before-copy_out proven by the patched branch
+      word in the copied image),
+      ::compile_and_patch_default_ops_run_the_benign_empty_pipeline,
+      ::lower_and_emit_default_creates_two_labels_per_proc_then_emits_in_list_order,
+      ::codegen_destroy_default_frees_pages_in_order_then_the_buffer
+      and ::compile_and_patch_seams_stay_wired_to_the_defaults.
+
   - address: 0x0811d5ac
     ghidra: (absent from functions.csv)
     name: vtable_query_4c_read_scalar_body
