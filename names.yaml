@@ -21895,8 +21895,16 @@ functions:
       shifted early by offset & 0xfff bytes; the sole call site passes
       offset 0 (mov r1,#0x0 @ 0x08243258), so the quirk is latent and
       the port reproduces it verbatim. No NULL check on the page-slot
-      result, same failure semantics as cg_buffer_emit_word. Host
-      tests:
+      result, same failure semantics as cg_buffer_emit_word. match.py
+      (exit 1, diff expected): the lsl/lsr mask shows as an `and`
+      against a precomputed 0xfff register, the movls clamp shows as
+      movcc (equal-valued when len == page_left, so identical), the
+      page-slot accessor is ldr/blx through the CG_BUFFER_PAGE_SLOT
+      static in place of bl 0x082b7edc (the documented seam scheme,
+      same as emit_word's CG_BUFFER_PAGE_POINTER), __rt_memcpy shows
+      as a same-section reloc, LLVM hoists the len == 0 test to the
+      entry in place of the original's b-to-tail-test, and the crate
+      fp frame accounts for the rest. Host tests:
       src/codegen/ir.rs::buffer_copy_out_copies_a_sub_page_run_in_one_chunk
       (single page-slot call, bit-exact bytes, nothing past len),
       buffer_copy_out_chunks_a_copy_spanning_two_pages (0x1000 + 0x10:

@@ -63,6 +63,12 @@
 //!   word emitter). Aligns the emitted-code buffer to 4, stores one
 //!   32-bit word through the code-page accessor and post-increments the
 //!   offset by 4 from the aligned value.
+//! - `cg_buffer_copy_out` — original: `FUN_082c2350` @ 0x082c2350
+//!   (96 bytes; 1 `bl` call site — the compile-and-patch driver
+//!   `FUN_08243138`, flattening the emitted code from offset 0 to
+//!   `cg_buffer_current_offset`). Copies bytes OUT of the paged
+//!   emitted-code buffer into a linear destination, chunked on
+//!   code-page boundaries.
 //! - `cg_codegen_output` — original: `FUN_082c17ec` @ 0x082c17ec
 //!   (8 bytes; 1 `bl` call site). Pure getter for the codegen's
 //!   emitted-code buffer at +0x10.
@@ -167,6 +173,7 @@
 //!   (same deviation as [`cg_codegen_buffer_create`]).
 
 use super::heap::{cg_heap_alloc, CgHeap};
+use crate::libc::rt_memcpy::__rt_memcpy;
 
 /// Width of a pointer/word field: 4 on the ARMv5TE target (matching the
 /// original layout), 8 on a 64-bit test host.
@@ -876,6 +883,79 @@ pub unsafe extern "C" fn cg_buffer_emit_word(output: *mut CgCodegenBuffer, value
     (write_ptr as *mut u32).write(value);
     let cursor = word(output as *mut u8, CG_CODEGEN_OUTPUT_OFFSET);
     cursor.write(cursor.read().wrapping_add(4));
+}
+
+/// cg_buffer_copy_out — original: `FUN_082c2350` @ 0x082c2350
+/// (96 bytes, 1 `bl` call site: 0x0824325c inside the compile-and-patch
+/// driver `FUN_08243138` — `copy_out(buffer, 0, dst,
+/// cg_buffer_current_offset(buffer))`, flattening the freshly emitted
+/// code into its final linear destination).
+///
+/// Copies `len` bytes OUT of the emitted-code buffer's lazily allocated
+/// code pages into the caller's linear buffer `dst`, chunking so no
+/// single copy crosses a code-page boundary. The loop, verbatim from
+/// the original's register allocation (r8 = buffer, r7 = dst cursor,
+/// r5 = offset, r4 = remaining):
+///
+/// 1. `chunk = 0x1000 - (offset & 0xfff)` — bytes left in the current
+///    page (`mov r0,r5,lsl #0x14; mov r0,r0,lsr #0x14;
+///    rsb r6,r0,#0x1000`), clamped to `remaining` (`cmp r4,r6;
+///    movls r6,r4` — unsigned lower-or-same);
+/// 2. resolves the page BASE through the lazy page-slot accessor
+///    (`mov r1,r5,lsr #0xc; bl 0x082b7edc` — the
+///    [`CG_BUFFER_PAGE_SLOT`] seam, the same `bl` target
+///    [`cg_buffer_page_pointer`] routes through);
+/// 3. copies `chunk` bytes from the page base to the dst cursor through
+///    the ROM thunk 0x08037db0 (-> 0x22000020, `__rt_memcpy` — the
+///    ported [`__rt_memcpy`], called directly per house pattern);
+/// 4. advances offset, dst and remaining by `chunk`
+///    (`add r5,r5,r6; add r7,r7,r6; sub r4,r4,r6`) and loops while
+///    `remaining != 0` (`cmp r4,#0x0; bne 0x082c2368`).
+///
+/// QUIRK (parity, not sanitized): the memcpy source is the page BASE —
+/// the original never adds `offset & 0xfff` to it (there is no `add`
+/// between the accessor's return and the `bl 0x08037db0`). For a
+/// page-aligned `offset` the chunks line up exactly; for a misaligned
+/// one the first chunk reads from the page's START while being sized
+/// `0x1000 - (offset & 0xfff)`, so the copy comes out shifted early by
+/// `offset & 0xfff` bytes. The sole call site passes offset 0
+/// (`mov r1,#0x0` @ 0x08243258), so the quirk is latent — the port
+/// reproduces it verbatim.
+///
+/// EDGE SEMANTICS: `len == 0` skips the loop entirely (the original
+/// enters through `b 0x082c23a4`, the tail test). No NULL check on the
+/// page-slot result — a failed lazy allocation behind the seam's wired
+/// default copies through NULL exactly as the original would (same
+/// failure semantics as [`cg_buffer_emit_word`]).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_buffer_copy_out(
+    output: *mut CgCodegenBuffer,
+    offset: usize,
+    dst: *mut u8,
+    len: usize,
+) {
+    let mut offset = offset;
+    let mut dst = dst;
+    let mut remaining = len;
+    while remaining != 0 {
+        // `mov r0,r5,lsl #0x14; mov r0,r0,lsr #0x14; rsb r6,r0,#0x1000;
+        // cmp r4,r6; movls r6,r4`
+        let mut chunk = CG_BUFFER_PAGE_BYTES - (offset & (CG_BUFFER_PAGE_BYTES - 1));
+        if remaining <= chunk {
+            chunk = remaining;
+        }
+        // `bl 0x082b7edc` — the page-slot seam; base only (see QUIRK).
+        let page = hook(core::ptr::addr_of!(CG_BUFFER_PAGE_SLOT))(
+            output,
+            offset >> CG_BUFFER_PAGE_SHIFT,
+        );
+        // `bl 0x08037db0` — the ROM __rt_memcpy thunk, ported directly.
+        __rt_memcpy(dst, page, chunk);
+        offset = offset.wrapping_add(chunk);
+        dst = dst.add(chunk);
+        remaining -= chunk;
+    }
 }
 
 /// cg_codegen_output — original: `FUN_082c17ec` @ 0x082c17ec
@@ -2007,6 +2087,257 @@ mod tests {
                 16,
                 "three words emitted, 12 bytes past the first aligned offset 4... i.e. 16"
             );
+        }
+    }
+
+    // --- cg_buffer_copy_out (0x082c2350) -----------------------------
+
+    /// Every page index the paged fake page-slot accessor was invoked
+    /// with, and the page bases it serves (one per index).
+    static mut COPY_SLOT_CALLS: std::vec::Vec<usize> = std::vec::Vec::new();
+    static mut COPY_PAGES: [*const u8; 2] = [core::ptr::null(); 2];
+
+    unsafe extern "C" fn paged_copy_slot(
+        _output: *mut CgCodegenBuffer,
+        index: usize,
+    ) -> *mut u8 {
+        COPY_SLOT_CALLS.push(index);
+        COPY_PAGES[index] as *mut u8
+    }
+
+    /// Fill `page` with `seed ^ (i & 0xff)` per byte: position 0 and
+    /// position 0xff0 hold distinct values, so the misaligned-offset
+    /// quirk (page BASE vs base + offset & 0xfff) is observable.
+    fn fill_page(page: &mut [u8], seed: u8) {
+        for (i, byte) in page.iter_mut().enumerate() {
+            *byte = seed ^ (i & 0xff) as u8;
+        }
+    }
+
+    #[test]
+    fn buffer_copy_out_copies_a_sub_page_run_in_one_chunk() {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut output = [0usize; CG_CODEGEN_OUTPUT_OFFSET + 1];
+        let mut page0 = [0u8; CG_BUFFER_PAGE_BYTES];
+        fill_page(&mut page0, 0x00);
+        let mut dst = [0xccu8; 64 + 8];
+
+        unsafe {
+            let saved = hook(core::ptr::addr_of!(CG_BUFFER_PAGE_SLOT));
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_SLOT) = paged_copy_slot;
+            COPY_SLOT_CALLS.clear();
+            COPY_PAGES = [page0.as_ptr(), core::ptr::null()];
+
+            let buffer = output.as_mut_ptr() as *mut CgCodegenBuffer;
+            cg_buffer_copy_out(buffer, 0, dst.as_mut_ptr(), 64);
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_SLOT) = saved;
+
+            assert_eq!(
+                COPY_SLOT_CALLS.as_slice(),
+                &[0],
+                "a sub-page run resolves exactly one page"
+            );
+            assert_eq!(&dst[..64], &page0[..64], "bytes copied bit-exact");
+            assert_eq!(
+                &dst[64..],
+                &[0xcc; 8],
+                "nothing past len is touched"
+            );
+        }
+    }
+
+    #[test]
+    fn buffer_copy_out_chunks_a_copy_spanning_two_pages() {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut output = [0usize; CG_CODEGEN_OUTPUT_OFFSET + 1];
+        let mut page0 = [0u8; CG_BUFFER_PAGE_BYTES];
+        let mut page1 = [0u8; CG_BUFFER_PAGE_BYTES];
+        fill_page(&mut page0, 0x00);
+        fill_page(&mut page1, 0xa5);
+        let mut dst = [0xccu8; CG_BUFFER_PAGE_BYTES + 0x10 + 8];
+
+        unsafe {
+            let saved = hook(core::ptr::addr_of!(CG_BUFFER_PAGE_SLOT));
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_SLOT) = paged_copy_slot;
+            COPY_SLOT_CALLS.clear();
+            COPY_PAGES = [page0.as_ptr(), page1.as_ptr()];
+
+            let buffer = output.as_mut_ptr() as *mut CgCodegenBuffer;
+            cg_buffer_copy_out(buffer, 0, dst.as_mut_ptr(), CG_BUFFER_PAGE_BYTES + 0x10);
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_SLOT) = saved;
+
+            assert_eq!(
+                COPY_SLOT_CALLS.as_slice(),
+                &[0, 1],
+                "one chunk per page, in offset order"
+            );
+            assert_eq!(
+                &dst[..CG_BUFFER_PAGE_BYTES],
+                &page0[..],
+                "the full first page lands as one 0x1000-byte chunk"
+            );
+            assert_eq!(
+                &dst[CG_BUFFER_PAGE_BYTES..CG_BUFFER_PAGE_BYTES + 0x10],
+                &page1[..0x10],
+                "the 0x10-byte remainder comes from the second page's base"
+            );
+            assert_eq!(
+                &dst[CG_BUFFER_PAGE_BYTES + 0x10..],
+                &[0xcc; 8],
+                "nothing past len is touched"
+            );
+        }
+    }
+
+    #[test]
+    fn buffer_copy_out_exact_page_multiple_stops_without_a_third_chunk() {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut output = [0usize; CG_CODEGEN_OUTPUT_OFFSET + 1];
+        let mut page0 = [0u8; CG_BUFFER_PAGE_BYTES];
+        let mut page1 = [0u8; CG_BUFFER_PAGE_BYTES];
+        fill_page(&mut page0, 0x00);
+        fill_page(&mut page1, 0xa5);
+        let mut dst = [0u8; 2 * CG_BUFFER_PAGE_BYTES];
+
+        unsafe {
+            let saved = hook(core::ptr::addr_of!(CG_BUFFER_PAGE_SLOT));
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_SLOT) = paged_copy_slot;
+            COPY_SLOT_CALLS.clear();
+            COPY_PAGES = [page0.as_ptr(), page1.as_ptr()];
+
+            let buffer = output.as_mut_ptr() as *mut CgCodegenBuffer;
+            cg_buffer_copy_out(buffer, 0, dst.as_mut_ptr(), 2 * CG_BUFFER_PAGE_BYTES);
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_SLOT) = saved;
+
+            assert_eq!(
+                COPY_SLOT_CALLS.as_slice(),
+                &[0, 1],
+                "remaining hits 0 exactly: the loop exits, no index-2 lookup"
+            );
+            assert_eq!(&dst[..CG_BUFFER_PAGE_BYTES], &page0[..]);
+            assert_eq!(&dst[CG_BUFFER_PAGE_BYTES..], &page1[..]);
+        }
+    }
+
+    #[test]
+    fn buffer_copy_out_with_zero_length_copies_nothing() {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut output = [0usize; CG_CODEGEN_OUTPUT_OFFSET + 1];
+        let mut dst = [0xccu8; 16];
+
+        unsafe {
+            let saved = hook(core::ptr::addr_of!(CG_BUFFER_PAGE_SLOT));
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_SLOT) = recording_page_slot;
+            PAGE_SLOT_CALLS.clear();
+            PAGE_SLOT_RESULT = core::ptr::null_mut();
+
+            let buffer = output.as_mut_ptr() as *mut CgCodegenBuffer;
+            cg_buffer_copy_out(buffer, 0x1234, dst.as_mut_ptr(), 0);
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_SLOT) = saved;
+
+            assert!(
+                PAGE_SLOT_CALLS.is_empty(),
+                "len == 0 skips the loop (the original's b-to-tail-test entry)"
+            );
+            assert_eq!(dst, [0xcc; 16], "the destination is untouched");
+        }
+    }
+
+    #[test]
+    fn buffer_copy_out_keeps_the_page_base_quirk_for_misaligned_offsets() {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut output = [0usize; CG_CODEGEN_OUTPUT_OFFSET + 1];
+        let mut page0 = [0u8; CG_BUFFER_PAGE_BYTES];
+        let mut page1 = [0u8; CG_BUFFER_PAGE_BYTES];
+        fill_page(&mut page0, 0x00);
+        fill_page(&mut page1, 0xa5);
+        let mut dst = [0u8; 0x20];
+
+        unsafe {
+            let saved = hook(core::ptr::addr_of!(CG_BUFFER_PAGE_SLOT));
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_SLOT) = paged_copy_slot;
+            COPY_SLOT_CALLS.clear();
+            COPY_PAGES = [page0.as_ptr(), page1.as_ptr()];
+
+            let buffer = output.as_mut_ptr() as *mut CgCodegenBuffer;
+            // offset 0xff0, len 0x20: chunk 0x10 sized as
+            // 0x1000 - (0xff0 & 0xfff), then 0x10 more.
+            cg_buffer_copy_out(buffer, 0xff0, dst.as_mut_ptr(), 0x20);
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_SLOT) = saved;
+
+            assert_eq!(
+                COPY_SLOT_CALLS.as_slice(),
+                &[0, 1],
+                "the chunk sizing still honors the misaligned offset"
+            );
+            assert_eq!(
+                &dst[..0x10],
+                &page0[..0x10],
+                "QUIRK: the first chunk reads the page BASE, not base + 0xff0"
+            );
+            assert_ne!(
+                &dst[..0x10],
+                &page0[0xff0..],
+                "...which is NOT what a base + (offset & 0xfff) read would give"
+            );
+            assert_eq!(
+                &dst[0x10..],
+                &page1[..0x10],
+                "the second chunk reads the next page's base (aligned now)"
+            );
+        }
+    }
+
+    #[test]
+    fn buffer_copy_out_flattens_words_emitted_across_a_page_boundary() {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut output = [0usize; CG_CODEGEN_OUTPUT_OFFSET + 1];
+
+        unsafe {
+            let saved_alloc = hook(core::ptr::addr_of!(CG_BUFFER_ALLOC));
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = poisoning_alloc;
+
+            let buffer = output.as_mut_ptr() as *mut CgCodegenBuffer;
+            // 0x404 words = 0x1010 bytes: the run spills 0x10 bytes into
+            // the second code page. Both seams stay at their wired
+            // defaults (ported accessor + exact-body page-slot model).
+            let words = 0x404usize;
+            for i in 0..words {
+                cg_buffer_emit_word(buffer, (0xe000_0000usize | i) as u32);
+            }
+            let len = cg_buffer_current_offset(buffer);
+            assert_eq!(len, words * 4, "every emit advanced the offset by 4");
+
+            let mut flat = [0u8; 0x1020];
+            cg_buffer_copy_out(buffer, 0, flat.as_mut_ptr(), len);
+
+            for i in 0..words {
+                let expect = ((0xe000_0000usize | i) as u32).to_le_bytes();
+                assert_eq!(
+                    &flat[i * 4..i * 4 + 4],
+                    &expect,
+                    "word {i:#x} round-trips through the page boundary"
+                );
+            }
+            assert_eq!(
+                &flat[len..],
+                &[0; 0x10],
+                "nothing past current_offset is copied"
+            );
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = saved_alloc;
+            let record = output.as_mut_ptr() as *mut u8;
+            for index in 0..=(len >> CG_BUFFER_PAGE_SHIFT) {
+                let page = slot(record, CG_BUFFER_PAGES + index).read();
+                if !page.is_null() {
+                    poisoning_free(page);
+                }
+            }
         }
     }
 
