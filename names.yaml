@@ -19381,3 +19381,59 @@ functions:
       the +0x04 into the 0x08a0e9e4 literal. Rust implementation and
       focused host tests:
       `src/cxx/object_flags.rs::object_flags_fetch_increment`.
+
+  # --- FreeType FT_Open_Face dfont / fallback-rule retry stage ---
+  - address: 0x080853b0
+    ghidra: FUN_080853b0
+    name: ft_open_face_dfont_fallback
+    size: 200
+    sig: "u32 ft_open_face_dfont_fallback(void *library, void *stream, i32 face_index, void *face_out, const u32 *open_args)"
+    module: cxx/object_flags
+    status: ported
+    renames:
+      param_1: library
+      param_2: stream
+      param_3: face_index
+      param_4: face_out
+      param_5: open_args
+      uVar2: result
+      iVar1: trace_levels
+      pcVar3: outcome
+      DAT_08085478: TRACE_LEVELS
+      s_Try_as_dfont___s_____0808547c: TRY_AS_DFONT_FORMAT
+      s_successful_08085494: OUTCOME_SUCCESSFUL
+      s_failed_080854a0: OUTCOME_FAILED
+      DAT_080854a8: OUTCOME_FORMAT
+    notes: >-
+      The format-fallback stage of FT_Open_Face (FUN_0804d6b8), reached
+      from its single call site @ 0x0804d844 (1 `bl 0x080853b0` site,
+      grep -c on decomp/osos.asm) after every registered font driver
+      rejected the stream. Re-probes the stream as a Mac resource fork
+      (FUN_08076510); on low-byte status class 2 (unknown format) it
+      traces "Try as dfont: %s ..." (string @ 0x0808547c, arg open_args[3]
+      = pathname), retries as a data-fork resource file
+      (FUN_0807f478(library, stream, 0, face_index, face_out) — the
+      `mov r2, #0` @ 0x080853f8), and traces "successful"/"failed"
+      (strings @ 0x08085494/0x080854a0 under the "%s\n" format @
+      0x080854a8) by whether the retry returned 0. Both traces fire only
+      when the signed level at 0x08b209dc+0x34 (literal @ 0x08085478)
+      exceeds 2. If the surviving class is then 2 or 0x55 and
+      open_args[0] (flags) has bit 0x4 set, a final attempt runs through
+      the fallback-rule chain FUN_080db8ac ("Try rule %d: %s offset %d")
+      and its status is returned; every other status passes through
+      unchanged. SIZE IS 200 BYTES: 196 of code (0x080853b0..0x08085474)
+      plus the 4-byte literal @ 0x08085478 holding 0x08b209dc. The fifth
+      argument arrives on the stack (ldr r5, [sp, #0x28] @ 0x080853b4).
+      Deviations: the three unported callees ride the DFONT_FALLBACK_OPS
+      seam (house pattern — app/node_list.rs's NODE_LIST_ENQUEUE_OPS)
+      instead of direct `bl`s; the already-ported ft_error_trace @
+      0x0804d17c takes the two trace calls directly (its unused r2/r3
+      slots, garbage in retail, are passed as 0); host builds substitute
+      test storage for the firmware trace-level block. match.py confirms
+      the structural shape (probe; and #0xff; cmp #2; signed cmp #3 on
+      the +0x34 level; outcome select; cmp #0x55; tst #4 on open_args[0];
+      three calls, fifth argument homed via [sp]); the diff is LLVM's
+      push {r4-r8,sl,fp,lr} frame, the indirect `blx`s through the seam,
+      and the direct call into the ported ft_error_trace. Rust
+      implementation and focused host tests:
+      `src/cxx/object_flags.rs::ft_open_face_dfont_fallback`.
