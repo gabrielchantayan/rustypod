@@ -27,9 +27,29 @@ def badge_color(pct):
     return "red"
 
 
+def load_functions(path):
+    """Parse names.yaml, failing with an actionable message on invalid YAML.
+
+    The usual culprit is a `notes:` written as a plain scalar containing an
+    unquoted ` #` (ARM immediates like `mov r0, #0`), which YAML reads as a
+    comment. Use a `>-` folded block scalar—as every other note does—so the
+    `#` stays literal text.
+    """
+    with open(path) as f:
+        try:
+            return yaml.safe_load(f)["functions"]
+        except yaml.YAMLError as e:
+            mark = getattr(e, "problem_mark", None)
+            where = f" near {path}:{mark.line + 1}" if mark else ""
+            raise SystemExit(
+                f"names.yaml is not valid YAML{where}. A ` #` in an unquoted "
+                "notes value is read as a comment—use a `>-` block scalar. "
+                f"Original error: {e}"
+            )
+
+
 def main():
-    with open(os.path.join(ROOT, "names.yaml")) as f:
-        functions = yaml.safe_load(f)["functions"]
+    functions = load_functions(os.path.join(ROOT, "names.yaml"))
     ported = sum(1 for fn in functions if fn.get("status") == "ported")
     pct = 100.0 * ported / TOTAL_FUNCTIONS
     print(json.dumps({
