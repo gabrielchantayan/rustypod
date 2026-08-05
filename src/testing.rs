@@ -44,6 +44,7 @@ pub mod hints {
     pub const EVENT_LIST: usize = 0x0e00_0000;
     pub const CONTEXT_SCOPE: usize = 0x0f00_0000;
     pub const BTREE_PARSE_CELL: usize = 0x1000_0000;
+    pub const BTREE_DATA_SIZE: usize = 0x1100_0000;
     // `heap/pool.rs` maps its own arena at 0x0800_0000 through a separate
     // path: it needs only bit 31 clear, not full u32 addressability.
 }
@@ -55,14 +56,7 @@ pub mod hints {
 /// Pass a constant from [`hints`] — never a bare literal.
 pub fn try_map_u32_slab(hint: usize, len: usize) -> Option<*mut u8> {
     extern "C" {
-        fn mmap(
-            addr: usize,
-            len: usize,
-            prot: i32,
-            flags: i32,
-            fd: i32,
-            offset: i64,
-        ) -> usize;
+        fn mmap(addr: usize, len: usize, prot: i32, flags: i32, fd: i32, offset: i64) -> usize;
     }
     #[cfg(target_os = "macos")]
     const MAP_PRIVATE_ANON: i32 = 0x1002;

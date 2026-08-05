@@ -13209,6 +13209,71 @@ functions:
       the flag still set (the original's assert(wantToLock>0) is
       compiled out).
 
+  # ---- B-tree cursor data-size accessor (src/sqlite/data_size.rs) ----
+  - address: 0x08370e6c
+    ghidra: FUN_08370e6c
+    name: btree_data_size
+    size: 104
+    sig: "i32 btree_data_size(cursor: *mut BtCursor, out: *mut u32)"
+    module: sqlite/data_size
+    status: ported
+    vars:
+      param_1/r0/r4: cursor
+      param_2/r1/r5: out
+      r6: rc
+      FUN_08372ae0: restore_cursor_position (BTREE_CELL_OPS.restore_cursor_position seam)
+      FUN_083727c8: btree_parse_cell (direct ported callee)
+    notes: >-
+      Verified against osos.asm 0x08370e6c..0x08370ed0 (104 bytes) and
+      decomp/c/033/08370e6c_FUN_08370e6c.c. This is SQLite 3.5.x
+      sqlite3BtreeDataSize, NOT sqlite3BtreeKeySize: `ldr r0,[r4,#0x30]`
+      / `str r0,[r5]` transfers one u32 from cursor +0x30 = cached
+      CellInfo +0x10 = nData (the leaf payload varint); the i64 KeySize
+      sibling is UNPORTED FUN_08371cc4, whose otherwise-identical body
+      does `ldrd r0,r1,[r4,#0x28]` (CellInfo.nKey at +0x08) and `strd`
+      to its eight-byte out-param. The two call sites prove the split:
+      0x083881e4 is vdbeExec OP_Column's non-index branch (the isIndex
+      branch immediately beside it calls 0x08371cc4), and 0x08389a20 is
+      OP_RowData's data-size/length-limit path.
+      Fields, each verified by the target's loads/stores: BtCursor +0x18
+      pPage (u32 target MemPage pointer, ldrd low word); +0x1c idx (u32,
+      ldrd high word); +0x20 cached CellInfo base (r2 = cursor +0x20);
+      +0x30 = CellInfo +0x10 nData (u32, the returned value); +0x3e =
+      CellInfo +0x1e nSize (u16, `ldrh` cache-valid flag — zero causes
+      parse); +0x42 validNKey (u8, `strb #1` only after parse); +0x43
+      eState (u8: INVALID 0, VALID 1, REQUIRESEEK 2, FAULT 3); out +0x00
+      receives nData with `str`. Algorithm: state < 2 executes
+      `movcc r0,#0; bcc`, so it skips validation but DOES NOT return
+      from the function; on rc == 0 it re-reads state, writes out=0 for
+      INVALID, otherwise parses lazily on nSize==0 and returns cached
+      nData. A nonzero validator rc branches directly to the epilogue,
+      leaving out untouched.
+      Callees: the UNPORTED cursor-state validator
+      sqlite3BtreeRestoreOrClearCursorPosition @ 0x08372ae0 (its C
+      shows FAULT -> cursor +0x50 saved rc, +0x54 isIncrblobHandle ->
+      SQLITE_ABORT, else seek/restore) is modeled by the new
+      read_volatile BTREE_CELL_OPS.restore_cursor_position slot; its
+      shipped documented stand-in returns SQLITE_OK and changes nothing.
+      The cache-miss parser is the JUST-PORTED sqlite3BtreeParseCell @
+      0x083727c8, called directly with (pPage, idx, cursor +0x20) per
+      the ported-callee direct-call house precedent (not via its seam).
+      Host tests: invalid_state_skips_restore_and_writes_zero,
+      valid_state_skips_restore_too,
+      restore_failure_propagates_and_leaves_out_untouched,
+      restore_leaving_state_invalid_writes_zero,
+      cache_hit_skips_parse_and_reads_the_n_data_word,
+      cache_miss_parses_current_cell_caches_and_reuses,
+      default_restore_stand_in_lets_requireseek_proceed,
+      restore_slot_lives_on_btree_cell_ops. match.py (exit 1, diff
+      expected): target has 26 instructions and the port 53; both have
+      the same state gate, rc short-circuit, state re-read, nSize cache
+      gate, parse-on-miss/validNKey store, and nData out-store. Expected
+      differences are the fp frame, the read_volatile slot load + blx in
+      place of the validator's direct bl, the direct ported parser's
+      unresolved `bl 0` relocation, and LLVM expanding raw u16/u32
+      reads to little-endian byte loads/orrs on ARMv5 rather than the
+      original's aligned ldrh/ldrd/ldr.
+
   # ---- B-tree cell size query (src/sqlite/cell_size.rs) ----
   - address: 0x082c0a50
     ghidra: FUN_082c0a50
