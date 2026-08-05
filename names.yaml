@@ -23705,3 +23705,82 @@ functions:
       / file_record_insert_dispatches_vtable_slot_1c_with_the_stack_pair
       / file_record_insert_runs_the_checked_alloc_guard_on_the_node
       / file_record_insert_lookup_default_chains_the_ported_registry_lookup.
+
+  - address: 0x0811d21c
+    ghidra: FUN_0811d21c
+    name: vtable_query_4c_read_eight_byte_record
+    size: 220
+    sig: "u32 vtable_query_4c_read_eight_byte_record(handle: *mut *mut u8, record: *mut u8, scratch: usize, forwarded: usize)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r0/r5: handle
+      param_2/r1/r4: record
+      param_3/r2: scratch (the entry spill into triple[1], the finish out-slot's initial content - never read back)
+      param_4/r3: forwarded (the entry spill into triple[2], the kind-4 out-slot's initial content - never read back - and the word the first dispatcher's stmdb sp!,{r3} spill exposes verbatim)
+      local_18: triple[0] (the record spill slot, sp+0 - doubles as the kind-2 out-slot; only its low half is consumed, ldrh)
+      uStack_14: triple[1] (the arg3 spill slot, sp+4 - the finish thunk's out-slot)
+      uStack_10: triple[2] (the arg4 spill slot, sp+8 - the kind-4 scratch out-slot)
+      FUN_0811d7b0: vtable_slot_4c_dispatch (through the new VTABLE_QUERY_4C_RECORD_DISPATCH seam, wired to the ported implementation in the same module)
+      FUN_0811d46c: vtable_query_4c_kind4 (through the new VTABLE_QUERY_4C_RECORD_FINISH seam, wired to the ported implementation in util/vtable_query.rs)
+    notes: >-
+      2 bl call sites (grep on decomp/osos.asm): 0x081367e4 and
+      0x081d15ac - both pass the handle in r0 and a record pointer in
+      r1 (param + 0x8 / + 0x12 at the first site, r4 + 0x24 at the
+      second), neither sets r2/r3 deliberately, and both branch on the
+      returned status (movs r4, r0; bne / cmp r0, #0; beq). The
+      multi-message record READ of the slot +0x4c message family - the
+      exact slot +0x4c mirror of the ported slot +0x50
+      vtable_set_50_write_eight_byte_record @ 0x0811d360, direction
+      reversed. Eight guarded dispatches through vtable_slot_4c_dispatch,
+      every stage short-circuiting on the first nonzero status
+      (cmp r0, #0; bne - NO status-5 special case, unlike the
+      probe/read siblings): kind 4 with &triple[2] (the arg4 spill,
+      sp+8 - a scratch out-slot whose word is never read back, site
+      0x0811d230), kind 1 over record+0..+4 (five sequential
+      dispatches, 0x0811d248..0x0811d2a8), kind 2 with &triple[0] (the
+      RECORD spill slot itself, sp+0 - the pointer is dead, r4 saved
+      it at entry; site 0x0811d2c0), then kind 1 at record+8
+      (0x0811d2e0); on a zero status the tail bleq 0x0811d46c (the
+      ported kind-4 query thunk vtable_query_4c_kind4) fires with
+      &triple[1] (the arg3 spill, sp+4) as the message and its error
+      code becomes the return value. The two subtle orderings: the u16
+      store at record+6 runs BEFORE the status branch (ldrh r1,[sp];
+      cmp r0,#0; strh r1,[r4,#6]; bne - even a failing kind-2 dispatch
+      leaves its out-slot's low half at record+6), and the kind-2
+      dispatch reads its result into the SAME stack word the u16 store
+      then consumes (Ghidra's local_18 aliasing is CORRECT here,
+      unlike its mangled siblings: local_18/uStack_14/uStack_10 match
+      sp+0/sp+4/sp+8 exactly). Deviations: both callees are ported and
+      route through the new role-specific VTABLE_QUERY_4C_RECORD_DISPATCH
+      / VTABLE_QUERY_4C_RECORD_FINISH read_volatile seams (the
+      VTABLE_QUERY_4C_SCALAR_DISPATCH/_FINISH precedent - hookability
+      plus host-test interception without racing the siblings' or
+      util's own parallel tests); the {r1, r2, r3} entry spill is
+      modeled as a three-word usize stack triple (the
+      vtable_query_4c_kind4_read / vtable_query_4c_walk_alloc stack-pair
+      convention widened by one slot), triple[0] doubling as the
+      kind-2 out-slot - only its low 16 bits are consumed, so the port
+      reads triple[0] as u16, byte-exact on a 64-bit host where the
+      method's 32-bit answer store lands in the word's low half; arg3
+      is scratch (the walk_alloc precedent - only the finish
+      out-slot's initial content), arg4 is forwarded (verbatim into
+      the first dispatch's extra - nothing touches r3 before the first
+      bl; DEAD for every later dispatch and the finish call, so a zero
+      stack word stands in for those extras and 0 for the thunk's
+      forwarded/_unused - the 0x0811d360 dead_slot precedent; the
+      thunk discards r2 with mov r2, r1); the return type is u32, not
+      the reference C's void (both call sites branch on r0; bail paths
+      return the failing dispatch's status verbatim, success returns
+      the finish thunk's code). match.py (exit 1, diff expected): same
+      guarded-dispatch chain, kind sequence 4/1x5/2/1, unconditional
+      u16 store before the kind-2 status branch, conditional finish
+      tail; the diff is the crate fp frame, the two seam ldr/blx pairs
+      standing in for the direct bl 0x0811d7b0 / bleq 0x0811d46c (the
+      documented seams), and LLVM lowering the unaligned u16
+      load/store to a full-word ldr + two strb byte stores (ARMv5
+      unaligned-access splitting, semantically identical to
+      ldrh/strh). Host tests:
+      src/app/vtable_set.rs::record_read_full_chain_dispatches_all_fields_in_protocol_order
+      / record_read_short_circuits_at_every_failing_stage
+      / record_read_finish_result_is_the_return_value.

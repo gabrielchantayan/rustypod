@@ -2454,6 +2454,231 @@ pub unsafe extern "C" fn vtable_query_4c_walk_alloc(
     }
 }
 
+/// Indirect dispatch for the eight slot +0x4c dispatches of
+/// [`vtable_query_4c_read_eight_byte_record`], wired to this module's
+/// ported [`vtable_slot_4c_dispatch`] (original: `FUN_0811d7b0` @
+/// 0x0811d7b0; the [`VTABLE_QUERY_4C_SCALAR_DISPATCH`] pattern — the
+/// seam is retained for hookability, the dispatcher's `blx` targets
+/// are firmware vtable methods, and a role-specific name keeps host
+/// tests from racing the siblings' parallel tests).
+pub static mut VTABLE_QUERY_4C_RECORD_DISPATCH: unsafe extern "C" fn(
+    handle: *mut *mut u8,
+    kind: u32,
+    data: usize,
+    extra: *const usize,
+) -> u32 = vtable_slot_4c_dispatch;
+
+/// Indirect dispatch for the closing query-thunk call of
+/// [`vtable_query_4c_read_eight_byte_record`], wired to the ported
+/// `util/vtable_query.rs` `vtable_query_4c_kind4` (original:
+/// `FUN_0811d46c` @ 0x0811d46c; the [`VTABLE_QUERY_4C_SCALAR_FINISH`]
+/// pattern — a module-local seam keeps host tests able to intercept
+/// it without swapping util's `VTABLE_SLOT_4C_DISPATCH` static, which
+/// would race util's own parallel tests).
+pub static mut VTABLE_QUERY_4C_RECORD_FINISH: unsafe extern "C" fn(
+    handle: *mut *mut u8,
+    out: *mut u32,
+    unused: usize,
+    forwarded: usize,
+) -> u32 = crate::util::vtable_query::vtable_query_4c_kind4;
+
+/// vtable_query_4c_read_eight_byte_record — original: `FUN_0811d21c`
+/// @ 0x0811d21c (220 bytes; **2 `bl` call sites**, grep on
+/// `decomp/osos.asm`: 0x081367e4 and 0x081d15ac — both pass the
+/// handle in r0 (`add r0, sp, #0x48` / `mov r0, r7`) and a record
+/// pointer in r1 (`param + 0x8` / `+ 0x12` at the first site,
+/// `r4 + 0x24` at the second), neither sets r2/r3 deliberately, and
+/// both branch on the returned status (`movs r4, r0; bne` /
+/// `cmp r0, #0; beq`).
+///
+/// The multi-message record READ of the slot +0x4c message family —
+/// the exact slot +0x4c mirror of this module's slot +0x50
+/// [`vtable_set_50_write_eight_byte_record`] (0x0811d360), direction
+/// reversed: where the write twin SERIALIZES the eight payload bytes
+/// of a record (five kind-1 byte fields at offsets 0..4, the u16
+/// field at offset 6 as kind 2, the final byte at offset 8), this
+/// routine QUERIES them back through eight guarded dispatches, every
+/// stage short-circuiting on the first nonzero status:
+///
+/// ```text
+/// 0811d21c  stmdb sp!, {r1, r2, r3, r4, r5, lr}  @ triple = {record, arg3, arg4}
+/// 0811d220  mov   r4, r1            @ save record (arg2)
+/// 0811d224  mov   r1, #0x4          @ kind 4
+/// 0811d228  add   r2, sp, #0x8      @ out-slot = &triple[2] (the arg4 spill)
+/// 0811d22c  mov   r5, r0            @ save handle
+/// 0811d230  bl    0x0811d7b0        @ dispatch(handle, 4, &triple[2])
+/// 0811d234  cmp   r0, #0x0
+/// 0811d238  bne   0x0811d2f4        @ bail: status returns verbatim
+/// 0811d23c  mov   r2, r4            @ record + 0
+/// 0811d240  mov   r1, #0x1          @ kind 1
+/// 0811d244  mov   r0, r5
+/// 0811d248  bl    0x0811d7b0        @ dispatch(handle, 1, record + 0)
+/// 0811d24c  cmp   r0, #0x0
+/// 0811d250  bne   0x0811d2f4
+///   ...                              @ kind-1 dispatches at record + 1 .. + 4
+/// 0811d2b4  mov   r2, sp            @ out-slot = &triple[0] (the record spill!)
+/// 0811d2b8  mov   r1, #0x2          @ kind 2
+/// 0811d2bc  mov   r0, r5
+/// 0811d2c0  bl    0x0811d7b0        @ dispatch(handle, 2, &triple[0])
+/// 0811d2c4  ldrh  r1, [sp, #0x0]    @ low half of the method-written word
+/// 0811d2c8  cmp   r0, #0x0
+/// 0811d2cc  strh  r1, [r4, #0x6]    @ record + 6 = the u16 — UNCONDITIONAL
+/// 0811d2d0  bne   0x0811d2f4
+/// 0811d2d4  add   r2, r4, #0x8      @ record + 8
+/// 0811d2d8  mov   r1, #0x1          @ kind 1
+/// 0811d2dc  mov   r0, r5
+/// 0811d2e0  bl    0x0811d7b0        @ dispatch(handle, 1, record + 8)
+/// 0811d2e4  cmp   r0, #0x0
+/// 0811d2e8  addeq r1, sp, #0x4      @ message = &triple[1] (the arg3 spill)
+/// 0811d2ec  moveq r0, r5
+/// 0811d2f0  bleq  0x0811d46c        @ finish: vtable_query_4c_kind4(handle, &triple[1])
+/// 0811d2f4  ldmia sp!, {r1, r2, r3, r4, r5, pc}
+/// ```
+///
+/// Eight messages to the slot +0x4c dispatcher
+/// ([`vtable_slot_4c_dispatch`], 0x0811d7b0): a kind-4 query whose
+/// out-slot is the entry arg4 spill `triple[2]` (sp+8 — the word is
+/// never read back, a scratch out-slot like the scalar read's
+/// `pair[1]` probe slot), then the five byte fields at record+0..4
+/// as kind-1 messages, then the kind-2 dispatch whose out-slot is
+/// the entry RECORD spill `triple[0]` (sp+0) — the SAME stack word
+/// whose low half is then stored at record+6 (`ldrh [sp]` / `strh
+/// [r4, #6]`), and finally the byte at record+8 as kind 1. Only on a
+/// zero status from the last byte does the closing `bleq` fire:
+/// 0x0811d46c is the PORTED kind-4 query thunk
+/// `util/vtable_query.rs` `vtable_query_4c_kind4`, re-dispatching
+/// kind 4 with the one-word `triple[1]` (arg3) spill as the message;
+/// its error code becomes the return value. Every bail returns the
+/// failing dispatch's status verbatim. The two subtle orderings:
+/// **the u16 store runs BEFORE the status branch** (`strh` sits
+/// between `cmp` and `bne` — even a failing kind-2 dispatch leaves
+/// its out-slot's low half at record+6), and the record spill slot
+/// doubles as the kind-2 out-slot (the pointer value is dead by then
+/// — r4 saved it at entry).
+///
+/// # Deviations
+///
+/// - **Both callees are ported** ([`vtable_slot_4c_dispatch`] in this
+///   module, `vtable_query_4c_kind4` in util/vtable_query.rs); the
+///   calls route through the new
+///   [`VTABLE_QUERY_4C_RECORD_DISPATCH`] /
+///   [`VTABLE_QUERY_4C_RECORD_FINISH`] seams (the
+///   [`VTABLE_QUERY_4C_SCALAR_DISPATCH`] /
+///   [`VTABLE_QUERY_4C_SCALAR_FINISH`] precedent — hookability plus
+///   host-test interception without racing the siblings' or util's
+///   own parallel tests).
+/// - **The `{r1, r2, r3}` entry spill is modeled as a three-word
+///   stack triple** — `triple[0]` = record (sp+0), `triple[1]` = arg3
+///   (sp+4), `triple[2]` = arg4 (sp+8) — exactly the
+///   [`vtable_query_4c_kind4_read`] / [`vtable_query_4c_walk_alloc`]
+///   stack-pair convention widened by one slot. `triple[0]` doubles
+///   as the kind-2 out-slot: after the dispatch only its low 16 bits
+///   are consumed (`ldrh`), so the port reads `triple[0] as u16` —
+///   byte-exact on a 64-bit host, where the method's 32-bit answer
+///   store lands in the word's low half.
+/// - **arg3 (r2) is modeled as `scratch`** — only the INITIAL content
+///   of the finish out-slot `triple[1]` (the entry spill), never read
+///   back (the [`vtable_query_4c_walk_alloc`] `scratch` precedent).
+///   Neither call site sets r2 deliberately.
+/// - **arg4 (r3) is modeled as `forwarded`** — the family convention:
+///   no call site sets r3 deliberately. It doubles as the INITIAL
+///   content of the kind-4 out-slot `triple[2]` (the entry spill),
+///   and — nothing touching r3 between entry and the first `bl` — as
+///   the word the first dispatcher's `stmdb sp!, {r3}` spill exposes
+///   verbatim. For every LATER dispatch and the finish call r3 is
+///   DEAD (method-clobbered across each `bl`, nothing reloads it), so
+///   a zero stack word stands in for those extras and 0 for the
+///   thunk's `forwarded` / `_unused` (the
+///   [`vtable_set_50_write_eight_byte_record`] `dead_slot` /
+///   [`vtable_query_4c_read_scalar_body`] precedents; the thunk
+///   discards r2 with `mov r2, r1`).
+/// - **The return type is `u32`**, not the reference C's `void`:
+///   both call sites branch on r0, and the original returns the
+///   failing dispatch's status — or the finish thunk's, via the
+///   `bleq` — in r0.
+/// - **The reference C is accurate here, unlike its mangled
+///   siblings**: `decomp/c/010/0811d21c_FUN_0811d21c.c`'s
+///   `local_18`/`uStack_14`/`uStack_10` DO match the disassembly's
+///   sp+0/sp+4/sp+8 triple (the kind-2 dispatch's `&local_18` IS the
+///   record spill slot and the `(undefined2)local_18` store at
+///   `param_2 + 6` reads that same word), and it catches the
+///   unconditional u16 store ahead of the status branch. Only the
+///   `void` return and the untyped `undefined4` parameters deviate.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_query_4c_read_eight_byte_record(
+    handle: *mut *mut u8,
+    record: *mut u8,
+    scratch: usize,
+    forwarded: usize,
+) -> u32 {
+    let dispatch =
+        core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_QUERY_4C_RECORD_DISPATCH));
+    let finish =
+        core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_QUERY_4C_RECORD_FINISH));
+    // The entry `stmdb sp!, {r1, r2, r3, ...}` spill: triple[0] =
+    // record (sp+0), triple[1] = arg3 (sp+4), triple[2] = arg4 (sp+8).
+    let mut triple = [record as usize, scratch, forwarded];
+    let forwarded_slot = forwarded;
+    // Kind-4 query: dispatch(handle, 4, &triple[2]) — the out-slot is
+    // the arg4 spill (add r2, sp, #0x8); its word is never read back.
+    // r3 is the caller's arg4 here (nothing touches it before the
+    // bl), so the dispatcher's spill exposes `forwarded`.
+    let status = dispatch(
+        handle,
+        MESSAGE_KIND_4,
+        core::ptr::addr_of_mut!(triple[2]) as usize,
+        core::ptr::addr_of!(forwarded_slot),
+    );
+    if status != 0 {
+        return status;
+    }
+    // r3 is dead across the first dispatch (method-clobbered, nothing
+    // reloads it); a zero word stands in for the unobservable extra
+    // of every later message (the 0x0811d360 dead_slot precedent).
+    let dead_slot = 0usize;
+    for offset in 0..5 {
+        let status = dispatch(
+            handle,
+            MESSAGE_KIND_1,
+            record.add(offset) as usize,
+            core::ptr::addr_of!(dead_slot),
+        );
+        if status != 0 {
+            return status;
+        }
+    }
+    // Kind-2 query: dispatch(handle, 2, &triple[0]) — the out-slot is
+    // the RECORD spill slot itself (mov r2, sp; the pointer is dead,
+    // r4 saved it at entry).
+    let status = dispatch(
+        handle,
+        MESSAGE_KIND_2,
+        core::ptr::addr_of_mut!(triple[0]) as usize,
+        core::ptr::addr_of!(dead_slot),
+    );
+    // ldrh r1, [sp]; strh r1, [r4, #6]: the low half of the
+    // method-written word lands at record+6 BEFORE the status branch
+    // (the strh sits between cmp and bne — unconditional).
+    record.add(6).cast::<u16>().write_unaligned(triple[0] as u16);
+    if status != 0 {
+        return status;
+    }
+    let status = dispatch(
+        handle,
+        MESSAGE_KIND_1,
+        record.add(8) as usize,
+        core::ptr::addr_of!(dead_slot),
+    );
+    if status != 0 {
+        return status;
+    }
+    // Finish: vtable_query_4c_kind4(handle, &triple[1]); r2/r3 are
+    // dead across the last dispatch (the thunk discards r2 with
+    // `mov r2, r1`), so 0 stands in for both unobservable arguments.
+    finish(handle, core::ptr::addr_of_mut!(triple[1]) as *mut u32, 0, 0)
+}
+
 /// The store-object size [`vtable_file_open`] allocates (`mov r0,
 /// #0x34` ahead of the `bl 0x082aadd4`).
 const STORE_OBJECT_SIZE: usize = 0x34;
@@ -4095,6 +4320,10 @@ mod tests {
                 core::ptr::addr_of_mut!(VTABLE_QUERY_4C_WALK_DISPATCH)
                     .write_volatile(vtable_slot_4c_dispatch);
                 core::ptr::addr_of_mut!(VTABLE_QUERY_4C_WALK_QUERY)
+                    .write_volatile(crate::util::vtable_query::vtable_query_4c_kind4);
+                core::ptr::addr_of_mut!(VTABLE_QUERY_4C_RECORD_DISPATCH)
+                    .write_volatile(vtable_slot_4c_dispatch);
+                core::ptr::addr_of_mut!(VTABLE_QUERY_4C_RECORD_FINISH)
                     .write_volatile(crate::util::vtable_query::vtable_query_4c_kind4);
                 core::ptr::addr_of_mut!(VTABLE_FILE_OPEN_REMOVE)
                     .write_volatile(store_remove_unported);
@@ -6572,6 +6801,242 @@ mod tests {
         let _lock = SLOT_TEST_LOCK.lock().unwrap();
         let _restore = SlotGuard;
         assert_scalar_thunk_end_to_end(MESSAGE_KIND_2, true);
+    }
+
+    // ---- recording mocks for the record-read seams (0x0811d21c) ---
+
+    /// The word the kind-4 query answers through its scratch out-slot.
+    const RECORD_PROBE_WORD: u32 = 0x5a5a_5a5a;
+    /// The bytes the six kind-1 field methods deliver (offsets 0..4,
+    /// then 8).
+    const RECORD_BYTES: [u8; 6] = [0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6];
+    /// The u16 the kind-2 method delivers through the record spill
+    /// slot.
+    const RECORD_HALFWORD: u16 = 0xbeef;
+
+    static mut RECORD_CALLS: usize = 0;
+    static mut RECORD_HANDLE: [*mut *mut u8; 8] = [core::ptr::null_mut(); 8];
+    static mut RECORD_KIND: [u32; 8] = [0; 8];
+    static mut RECORD_DATA: [usize; 8] = [0; 8];
+    static mut RECORD_DATA_WORD: [u32; 8] = [0; 8];
+    static mut RECORD_EXTRA: [usize; 8] = [0; 8];
+    static mut RECORD_RESULTS: [u32; 8] = [MOCK_OK; 8];
+
+    unsafe extern "C" fn recording_record_dispatch(
+        handle: *mut *mut u8,
+        kind: u32,
+        data: usize,
+        extra: *const usize,
+    ) -> u32 {
+        let call = RECORD_CALLS;
+        RECORD_CALLS += 1;
+        RECORD_HANDLE[call] = handle;
+        RECORD_KIND[call] = kind;
+        RECORD_DATA[call] = data;
+        // Every data pointer is word-readable: calls 0/6 point at the
+        // function's spill slots, calls 1..5/7 into the 16-byte record
+        // the tests back — `read_unaligned` covers the byte offsets
+        // 1..4 (the recording_dispatch precedent).
+        RECORD_DATA_WORD[call] = (data as *const u32).read_unaligned();
+        RECORD_EXTRA[call] = extra.read();
+        match call {
+            // The kind-4 query answers through its scratch out-slot (a
+            // 32-bit store, as the firmware method's `str` would be).
+            0 => (data as *mut u32).write(RECORD_PROBE_WORD),
+            // The five kind-1 byte fields deliver one byte each.
+            1..=5 => (data as *mut u8).write(RECORD_BYTES[call - 1]),
+            // The kind-2 method delivers the u16 through the record
+            // spill slot (a 32-bit store; the caller reads the low
+            // half).
+            6 => (data as *mut u32).write(RECORD_HALFWORD as u32),
+            // The final kind-1 byte at offset 8.
+            _ => (data as *mut u8).write(RECORD_BYTES[5]),
+        }
+        RECORD_RESULTS[call]
+    }
+
+    unsafe fn install_record_mocks() {
+        RECORD_CALLS = 0;
+        RECORD_RESULTS = [MOCK_OK; 8];
+        FINISH_CALLS = 0;
+        FINISH_HANDLE = core::ptr::null_mut();
+        FINISH_OUT = core::ptr::null_mut();
+        FINISH_RESULT = MOCK_OK;
+        core::ptr::addr_of_mut!(VTABLE_QUERY_4C_RECORD_DISPATCH)
+            .write_volatile(recording_record_dispatch);
+        core::ptr::addr_of_mut!(VTABLE_QUERY_4C_RECORD_FINISH)
+            .write_volatile(recording_finish);
+    }
+
+    // ---- vtable_query_4c_read_eight_byte_record (0x0811d21c) -------
+
+    #[test]
+    fn record_read_full_chain_dispatches_all_fields_in_protocol_order() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        // 16 bytes: the five byte fields, the skipped padding at 5 and
+        // 9, the u16 at 6, the final byte at 8, and room for the
+        // recording mock's word reads.
+        let mut record = [0xccu8; 16];
+        unsafe {
+            install_record_mocks();
+
+            let status = vtable_query_4c_read_eight_byte_record(
+                fixture.handle_ptr(),
+                record.as_mut_ptr(),
+                SCRATCH,
+                FORWARDED,
+            );
+
+            assert_eq!(status, MOCK_OK);
+            assert_eq!(RECORD_CALLS, 8, "query + six fields + halfword");
+            let expected_kinds = [
+                MESSAGE_KIND_4,
+                MESSAGE_KIND_1,
+                MESSAGE_KIND_1,
+                MESSAGE_KIND_1,
+                MESSAGE_KIND_1,
+                MESSAGE_KIND_1,
+                MESSAGE_KIND_2,
+                MESSAGE_KIND_1,
+            ];
+            for (call, expected_kind) in expected_kinds.iter().enumerate() {
+                assert_eq!(RECORD_HANDLE[call], fixture.handle_ptr(), "call {call}");
+                assert_eq!(RECORD_KIND[call], *expected_kind, "call {call}");
+            }
+            assert_eq!(
+                RECORD_DATA_WORD[0], FORWARDED as u32,
+                "the kind-4 out-slot's initial word is the entry r3 spill \
+                 (stmdb {{r1, r2, r3, ...}}, sp+8)"
+            );
+            for field in 0..5 {
+                assert_eq!(
+                    RECORD_DATA[field + 1],
+                    record.as_mut_ptr().add(field) as usize,
+                    "kind-1 field {field} reads through record + {field}"
+                );
+            }
+            assert_eq!(
+                RECORD_DATA_WORD[6], record.as_mut_ptr() as u32,
+                "the kind-2 out-slot IS the record spill slot (mov r2, sp): its \
+                 initial word is the spilled record pointer"
+            );
+            assert_eq!(
+                RECORD_DATA[7],
+                record.as_mut_ptr().add(8) as usize,
+                "the final kind-1 field reads through record + 8"
+            );
+            assert_eq!(RECORD_EXTRA[0], FORWARDED, "the first dispatch sees entry r3");
+            for call in 1..8 {
+                assert_eq!(
+                    RECORD_EXTRA[call], 0,
+                    "later r3 values are method-clobbered and unobservable"
+                );
+            }
+            // The delivered fields landed in the record.
+            for field in 0..5 {
+                assert_eq!(record[field], RECORD_BYTES[field], "byte field {field}");
+            }
+            assert_eq!(record[5], 0xcc, "the padding at offset 5 is never touched");
+            assert_eq!(
+                record.as_ptr().add(6).cast::<u16>().read_unaligned(),
+                RECORD_HALFWORD,
+                "ldrh [sp]; strh [r4, #6] — the out-slot's low half at record + 6"
+            );
+            assert_eq!(record[8], RECORD_BYTES[5], "the final byte field");
+            assert_eq!(record[9], 0xcc, "the padding at offset 9 is never touched");
+            // The finish fired once with the triple's middle slot.
+            assert_eq!(FINISH_CALLS, 1);
+            assert_eq!(FINISH_HANDLE, fixture.handle_ptr(), "moveq r0, r5");
+            assert_eq!(
+                FINISH_BUFFER, SCRATCH,
+                "out word 0 is triple[1] — the entry r2 spill (addeq r1, sp, #0x4)"
+            );
+            assert_eq!(
+                FINISH_SIZE, RECORD_PROBE_WORD as usize,
+                "out word 1 is triple[2] — the kind-4 method's answer"
+            );
+            assert_eq!(
+                FINISH_UNUSED, 0,
+                "r2 is dead across the last dispatch and the thunk discards it"
+            );
+            assert_eq!(FINISH_FORWARDED, 0, "r3 is likewise dead (method-clobbered)");
+        }
+    }
+
+    #[test]
+    fn record_read_short_circuits_at_every_failing_stage() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        unsafe {
+            for fail_at in 0..8 {
+                install_record_mocks();
+                RECORD_RESULTS[fail_at] = READ_ERR;
+                let mut record = [0u8; 16];
+
+                let status = vtable_query_4c_read_eight_byte_record(
+                    fixture.handle_ptr(),
+                    record.as_mut_ptr(),
+                    SCRATCH,
+                    FORWARDED,
+                );
+
+                assert_eq!(
+                    status, READ_ERR,
+                    "stage {fail_at}: cmp r0, #0; bne — the status returns verbatim"
+                );
+                assert_eq!(
+                    RECORD_CALLS,
+                    fail_at + 1,
+                    "stage {fail_at}: every later dispatch is skipped"
+                );
+                assert_eq!(
+                    FINISH_CALLS, 0,
+                    "stage {fail_at}: the finish bleq never fires"
+                );
+                let halfword = record.as_ptr().add(6).cast::<u16>().read_unaligned();
+                if fail_at >= 6 {
+                    assert_eq!(
+                        halfword, RECORD_HALFWORD,
+                        "stage {fail_at}: strh sits between cmp and bne — the u16 \
+                         store at record + 6 runs even on a failing kind-2 dispatch"
+                    );
+                } else {
+                    assert_eq!(
+                        halfword, 0,
+                        "stage {fail_at}: the kind-2 store has not run yet"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn record_read_finish_result_is_the_return_value() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let mut record = [0u8; 16];
+        unsafe {
+            install_record_mocks();
+            FINISH_RESULT = FINISH_CODE;
+
+            let status = vtable_query_4c_read_eight_byte_record(
+                fixture.handle_ptr(),
+                record.as_mut_ptr(),
+                SCRATCH,
+                FORWARDED,
+            );
+
+            assert_eq!(RECORD_CALLS, 8);
+            assert_eq!(FINISH_CALLS, 1);
+            assert_eq!(
+                status, FINISH_CODE,
+                "the finish thunk's error code is the function's return value"
+            );
+        }
     }
 
     // ---- recording mocks for the walk-alloc seams -------------------
