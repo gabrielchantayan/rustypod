@@ -858,8 +858,9 @@ pub unsafe extern "C" fn vtable_set_50_write_kind4(
 
 /// vtable_set_50_write_kind2 — original: `FUN_0811d52c` @ 0x0811d52c
 /// (64 bytes; **1 `bl` call site** — grep on `decomp/osos.asm`:
-/// 0x0811d670, the second stage of the unported kind-2 three-stage
-/// sibling `FUN_0811d64c` (open 0x0811d458 → this call → tail commit
+/// 0x0811d670, the second stage of the kind-2 three-stage sibling
+/// [`vtable_set_50_kind2`] (`FUN_0811d64c`, ported in this module —
+/// open 0x0811d458 → this call → tail commit
 /// 0x0811d340, the [`vtable_set_50_kind4`] shape with this u16 write
 /// stage in place of the u32 0x0811d56c). The 0x0811d550 noted in the
 /// cluster ledger is the `bl 0x0811d7fc` **inside** this body —
@@ -954,6 +955,105 @@ pub unsafe extern "C" fn vtable_set_50_write_kind2(
         );
     }
     result
+}
+
+/// vtable_set_50_kind2 — original: `FUN_0811d64c` @ 0x0811d64c (64
+/// bytes; **2 `bl` call sites**, grep on `decomp/osos.asm`:
+/// 0x081365cc and 0x081366d4 — both set r1 to a small property
+/// selector (0x34 / 0x38), r2 to a pointer into a live structure
+/// (object + 0x1c / r5 + 0x18), r0 to a stack handle, and both branch
+/// on the returned status (`movs r4, r0; bne`).
+///
+/// The kind-2 (u16) twin of this module's [`vtable_set_50_kind4`]
+/// (0x0811d68c, one instruction later): the identical three-stage
+/// guarded property-write pipeline — open → write → tail-call commit,
+/// the first nonzero status short-circuiting and propagating — with
+/// the u16 write stage [`vtable_set_50_write_kind2`] (0x0811d52c,
+/// `ldrh`) in place of the u32 0x0811d56c:
+///
+/// ```text
+/// 0811d64c  stmdb sp!, {r4, r5, r6, lr}
+/// 0811d650  mov   r6, r2            @ save value pointer (arg3)
+/// 0811d654  mov   r5, r1            @ save selector (arg2)
+/// 0811d658  mov   r4, r0            @ save handle (arg1)
+/// 0811d65c  bl    0x0811d458        @ open(handle, selector)
+/// 0811d660  cmp   r0, #0x0
+/// 0811d664  ldmiane sp!, {r4, r5, r6, pc}  @ bail: open's status
+/// 0811d668  mov   r1, r6
+/// 0811d66c  mov   r0, r4
+/// 0811d670  bl    0x0811d52c        @ write_kind2(handle, value)
+/// 0811d674  cmp   r0, #0x0
+/// 0811d678  moveq r1, r5            @ selector -> commit's arg2
+/// 0811d67c  moveq r0, r4
+/// 0811d680  ldmiaeq sp!, {r4, r5, r6, lr}
+/// 0811d684  beq   0x0811d340        @ tail: commit(handle, selector)
+/// 0811d688  ldmia sp!, {r4, r5, r6, pc}    @ write's status returns
+/// ```
+///
+/// The argument routing is the kind-4 twin's exactly: **arg2 (r1, the
+/// selector) reaches stages 1 and 3**, **arg3 (r2, a pointer to the
+/// caller's u16 value) reaches only stage 2** (`r5 = r1` is restored
+/// into r1 only for the tail call, `r6 = r2` becomes r1 of the middle
+/// call); the write stage loads the value as a HALFWORD and
+/// zero-extends it into the 32-bit message word — kind encodes the
+/// value width (see the module header).
+///
+/// # Deviations
+///
+/// - **All three callees are ported in this module and called
+///   DIRECTLY** — [`vtable_set_50_open_kind4`] (0x0811d458),
+///   [`vtable_set_50_write_kind2`] (0x0811d52c) and
+///   [`vtable_set_50_commit_kind4`] (0x0811d340); no new seam is
+///   introduced (the [`vtable_set_50_indirect_kind4`] precedent — the
+///   older [`vtable_set_50_kind4`] port routes through
+///   [`VTABLE_SET_50_KIND4_OPS`] only because its stages were unported
+///   at the time). The stages still reach the dispatcher through the
+///   retained [`VTABLE_SLOT_50_DISPATCH`] seam, so host tests observe
+///   every stage by swapping that one static.
+/// - **Each stage's forwarded r3 is modeled EXACTLY, not as one
+///   `forwarded` parameter** (the [`vtable_set_50_indirect_kind4`]
+///   refinement): at entry r3 is the caller's and nothing touches it
+///   before open's `bl`, so open's dispatcher spill exposes the
+///   caller's r3 verbatim; open's epilogue (`ldmia sp!, {r2, r3, r4,
+///   pc}`) reloads r3 from its spilled r1, so the write stage's entry
+///   r3 is the **selector**; the write stage's epilogue reloads r3
+///   from its [sp+4] spill slot, which its own `str r0, [sp, #0x4]`
+///   overwrote with the kind word, so the commit's entry r3 is **2**
+///   ([`MESSAGE_KIND_2`]).
+/// - **The return type is `u32`**, not the reference C's `void`: both
+///   call sites branch on r0 (`movs r4, r0; bne`), and the original
+///   returns the failing stage's status — or the commit's, via the
+///   tail call — in r0.
+/// - **The reference C is not followed where it mis-decompiles**:
+///   `decomp/c/010/0811d64c_FUN_0811d64c.c` drops the open call's
+///   arguments and inlines the commit tail call as
+///   `FUN_0811d7fc(param_1, 4, &stack0xfffffff4)`, hiding the
+///   0x0811d340 thunk and its `| 0x80000000` tag. The port follows
+///   the disassembly.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_set_50_kind2(
+    handle: *mut *mut u8,
+    selector: u32,
+    value: *const u16,
+    forwarded: usize,
+) -> u32 {
+    // r3 is untouched up to open's `bl`, so open's dispatcher spill
+    // exposes the caller's r3 verbatim.
+    let result = vtable_set_50_open_kind4(handle, selector, forwarded);
+    if result != 0 {
+        return result;
+    }
+    // open's epilogue reloads r3 from its spilled r1: the write
+    // stage's forwarded r3 is the selector.
+    let result = vtable_set_50_write_kind2(handle, value, selector as usize);
+    if result != 0 {
+        return result;
+    }
+    // The write stage's epilogue reloads r3 from its [sp+4] spill
+    // slot, overwritten with the kind word: the commit's forwarded r3
+    // is MESSAGE_KIND_2.
+    vtable_set_50_commit_kind4(handle, selector, MESSAGE_KIND_2 as usize)
 }
 
 /// vtable_set_50_write_indirect_kind4 — original: `FUN_0811d874` @
@@ -3189,6 +3289,156 @@ mod tests {
                 DISPATCH_EXTRA[3],
                 WRITE_SELECTOR as usize,
                 "the write's overwritten entry spill restores arg4 into r3"
+            );
+        }
+    }
+
+    // ---- vtable_set_50_kind2 (0x0811d64c): three-stage u16 pipeline ----
+
+    #[test]
+    fn kind2_open_error_short_circuits_before_write_and_commit() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let value: u16 = VALUE_HALFWORD;
+        unsafe {
+            install_recording_dispatch();
+            DISPATCH_RESULTS[0] = OPEN_ERR;
+
+            let result =
+                vtable_set_50_kind2(fixture.handle_ptr(), SELECTOR, &value, FORWARDED);
+
+            assert_eq!(result, OPEN_ERR, "open's status propagates verbatim");
+            assert_eq!(DISPATCH_CALLS, 1, "write and commit are not reached");
+            assert_eq!(DISPATCH_HANDLE[0], fixture.handle_ptr());
+            assert_eq!(DISPATCH_KIND[0], MESSAGE_KIND_4, "open binds kind 4");
+            assert_eq!(DISPATCH_WORD0[0], SELECTOR, "arg2 (r1) routes to open");
+            assert_eq!(
+                DISPATCH_EXTRA[0], FORWARDED,
+                "the caller's r3 reaches open's dispatcher spill verbatim"
+            );
+        }
+    }
+
+    #[test]
+    fn kind2_write_error_skips_commit_and_routes_the_value_pointer() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let value: u16 = VALUE_HALFWORD;
+        unsafe {
+            install_recording_dispatch();
+            DISPATCH_RESULTS[1] = WRITE_ERR;
+
+            let result =
+                vtable_set_50_kind2(fixture.handle_ptr(), SELECTOR, &value, FORWARDED);
+
+            assert_eq!(result, WRITE_ERR, "write's status propagates verbatim");
+            assert_eq!(
+                DISPATCH_CALLS, 2,
+                "open plus the write's kind-word dispatch run; the value message \
+                 and the commit are skipped"
+            );
+            assert_eq!(DISPATCH_KIND[1], MESSAGE_KIND_4);
+            assert_eq!(
+                DISPATCH_WORD0[1], MESSAGE_KIND_2,
+                "the write's first message is the kind-2 word"
+            );
+            assert_eq!(
+                DISPATCH_EXTRA[1], SELECTOR as usize,
+                "open's pop reloads r3 from its selector spill before the write"
+            );
+        }
+    }
+
+    #[test]
+    fn kind2_loads_the_value_as_a_halfword() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        // The word under the value pointer has junk in its high half; a
+        // word-loading (`ldr`) pipeline would leak it into the message,
+        // the original's `ldrh` write stage must not.
+        let wide: u32 = 0xaabb_0000 | VALUE_HALFWORD as u32;
+        let value: *const u16 = core::ptr::addr_of!(wide) as *const u16;
+        unsafe {
+            install_recording_dispatch();
+
+            let result =
+                vtable_set_50_kind2(fixture.handle_ptr(), SELECTOR, value, FORWARDED);
+
+            assert_eq!(result, MOCK_OK);
+            assert_eq!(DISPATCH_CALLS, 4);
+            assert_eq!(
+                DISPATCH_WORD0[2], VALUE_HALFWORD as u32,
+                "the value message word is zero-extended: no high-half junk"
+            );
+        }
+    }
+
+    #[test]
+    fn kind2_runs_in_order_with_exact_argument_routing() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let value: u16 = VALUE_HALFWORD;
+        unsafe {
+            install_recording_dispatch();
+            DISPATCH_RESULTS[3] = COMMIT_CODE;
+
+            let result =
+                vtable_set_50_kind2(fixture.handle_ptr(), SELECTOR, &value, FORWARDED);
+
+            assert_eq!(
+                result, COMMIT_CODE,
+                "the commit tail call's status becomes this function's return"
+            );
+            assert_eq!(DISPATCH_CALLS, 4, "open 1 + kind-2 write 2 + commit 1");
+            for call in 0..4 {
+                assert_eq!(DISPATCH_HANDLE[call], fixture.handle_ptr());
+            }
+
+            assert_eq!(DISPATCH_KIND[0], MESSAGE_KIND_4, "open binds kind 4");
+            assert_eq!(DISPATCH_WORD0[0], SELECTOR, "arg2 routes to open");
+            assert_eq!(
+                DISPATCH_EXTRA[0], FORWARDED,
+                "the caller's r3 is open's forwarded spill"
+            );
+
+            assert_eq!(
+                DISPATCH_KIND[1], MESSAGE_KIND_4,
+                "the kind-2 write's first dispatch still binds kind 4"
+            );
+            assert_eq!(
+                DISPATCH_WORD0[1], MESSAGE_KIND_2,
+                "its message is the kind-2 word"
+            );
+            assert_eq!(
+                DISPATCH_EXTRA[1], SELECTOR as usize,
+                "open's epilogue leaves the selector in r3 for the write"
+            );
+
+            assert_eq!(
+                DISPATCH_KIND[2], MESSAGE_KIND_2,
+                "the value dispatch carries the width kind"
+            );
+            assert_eq!(
+                DISPATCH_WORD0[2], VALUE_HALFWORD as u32,
+                "arg3 (r2) reaches only stage 2, loaded as a halfword"
+            );
+            assert_eq!(DISPATCH_WORD1[2], MESSAGE_KIND_2);
+            assert_eq!(DISPATCH_EXTRA[2], SELECTOR as usize);
+
+            assert_eq!(DISPATCH_KIND[3], MESSAGE_KIND_4, "commit binds kind 4");
+            assert_eq!(
+                DISPATCH_WORD0[3],
+                SELECTOR | COMMIT_TAG,
+                "the original selector is restored for the tagged commit"
+            );
+            assert_eq!(
+                DISPATCH_EXTRA[3],
+                MESSAGE_KIND_2 as usize,
+                "the write's kind-word store overwrites its r3 spill slot"
             );
         }
     }

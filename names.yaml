@@ -21862,6 +21862,56 @@ functions:
       buffer_page_pointer_returns_null_when_the_page_allocation_fails
       (the deviation: NULL, slot never stored).
 
+  - address: 0x082c2350
+    ghidra: FUN_082c2350
+    name: cg_buffer_copy_out
+    size: 96
+    sig: "void cg_buffer_copy_out(cg_codegen_buffer_t *output, u32 offset, u8 *dst, u32 len)"
+    module: codegen/ir
+    status: ported
+    vars: {param_1: output, param_2: offset, param_3: dst, param_4: len}
+    notes: >-
+      1 bl call site (grep on decomp/osos.asm): 0x0824325c inside the
+      compile-and-patch driver FUN_08243138, called as
+      copy_out(buffer, 0, dst, cg_buffer_current_offset(buffer)) -
+      flattening the freshly emitted code into its final linear
+      destination. The emitted-code buffer's bulk READER, mirror of
+      the word emitters: loops while len != 0 (b-to-tail-test entry,
+      so len == 0 copies nothing), chunk = 0x1000 - (offset & 0xfff)
+      clamped to len (`cmp r4,r6; movls r6,r4`, unsigned), resolves
+      the page BASE through the lazy page-slot accessor FUN_082b7edc
+      (the CG_BUFFER_PAGE_SLOT seam, same bl target
+      cg_buffer_page_pointer routes through), copies chunk bytes from
+      the page base to the dst cursor through ROM thunk 0x08037db0
+      (-> 0x22000020, __rt_memcpy - the ported
+      libc::rt_memcpy::__rt_memcpy, called directly per house
+      pattern), then advances offset/dst/len by chunk. QUIRK kept for
+      parity, not sanitized: the memcpy source is the page BASE - the
+      original never adds offset & 0xfff to it (no add between the
+      accessor's return and the bl 0x08037db0), so for a misaligned
+      offset the first chunk reads from the page's START while being
+      sized 0x1000 - (offset & 0xfff), i.e. the copy comes out
+      shifted early by offset & 0xfff bytes; the sole call site passes
+      offset 0 (mov r1,#0x0 @ 0x08243258), so the quirk is latent and
+      the port reproduces it verbatim. No NULL check on the page-slot
+      result, same failure semantics as cg_buffer_emit_word. Host
+      tests:
+      src/codegen/ir.rs::buffer_copy_out_copies_a_sub_page_run_in_one_chunk
+      (single page-slot call, bit-exact bytes, nothing past len),
+      buffer_copy_out_chunks_a_copy_spanning_two_pages (0x1000 + 0x10:
+      one chunk per page in offset order, full page then remainder),
+      buffer_copy_out_exact_page_multiple_stops_without_a_third_chunk
+      (len 0x2000: exactly two calls, no index-2 lookup),
+      buffer_copy_out_with_zero_length_copies_nothing (len 0: no
+      page-slot call, dst untouched),
+      buffer_copy_out_keeps_the_page_base_quirk_for_misaligned_offsets
+      (offset 0xff0, len 0x20: chunk sized 0x10 but read from page0
+      BASE, not base + 0xff0; second chunk from page1 base),
+      buffer_copy_out_flattens_words_emitted_across_a_page_boundary
+      (end-to-end through the wired defaults: 0x404 words emitted via
+      cg_buffer_emit_word, flattened back bit-exact across the
+      0x1000-byte page boundary).
+
   - address: 0x082c5b1c
     ghidra: FUN_082c5b1c
     name: cg_buffer_page_pointer
@@ -21979,3 +22029,52 @@ functions:
       src/app/vtable_set.rs::indirect_pipeline_open_error_short_circuits_before_write_and_commit /
       indirect_pipeline_write_error_skips_commit /
       indirect_pipeline_runs_in_order_with_exact_argument_routing.
+
+  - address: 0x0811d64c
+    ghidra: FUN_0811d64c
+    name: vtable_set_50_kind2
+    size: 64
+    sig: "u32 vtable_set_50_kind2(handle: *mut *mut u8, selector: u32, value: *const u16, forwarded: usize)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r4: handle
+      param_2/r5: selector
+      param_3/r6: value
+    notes: >-
+      2 bl call sites (grep on decomp/osos.asm): 0x081365cc and
+      0x081366d4 - both set r1 to a small property selector (0x34 /
+      0x38), r2 to a pointer into a live structure (object + 0x1c /
+      r5 + 0x18), r0 to a stack handle, and both branch on the
+      returned r0 status (movs r4, r0; bne). The kind-2 (u16) twin of
+      vtable_set_50_kind4 @ 0x0811d68c (one instruction later): the
+      identical three-stage guarded property-write pipeline with the
+      u16 write stage vtable_set_50_write_kind2 @ 0x0811d52c (ldrh)
+      in place of the u32 0x0811d56c - open = FUN_0811d458
+      (dispatch(handle, 4, &bare_selector)); if nonzero return it;
+      write = FUN_0811d52c (dispatch(handle, 4, &2) then, only on 0,
+      dispatch(handle, 2, &{zero-extended *value, 2})); if nonzero
+      return it; else tail-call commit = FUN_0811d340
+      (dispatch(handle, 4, &(selector | 0x80000000))). Arg routing:
+      r5 = arg2 (selector) feeds stages 1 and 3, r6 = arg3 (pointer
+      to the caller's u16 value) feeds only stage 2; kind encodes the
+      value width. Deviations: all three callees are ported in this
+      module and called DIRECTLY (vtable_set_50_indirect_kind4
+      precedent - no VTABLE_SET_50_KIND4_OPS-style stage seam; the
+      stages still route through the retained VTABLE_SLOT_50_DISPATCH
+      seam); each stage's forwarded r3 is modeled exactly
+      (vtable_set_50_indirect_kind4 refinement) - open sees the
+      caller's r3 (the `forwarded` parameter), open's ldmia
+      {r2,r3,r4,pc} epilogue makes the write see the selector, and
+      the write's str r0,[sp,#4] kind-word store makes the commit
+      see 2 (MESSAGE_KIND_2); return type is u32, not the reference
+      C's void (both call sites branch on r0). Reference C
+      decomp/c/010/0811d64c_FUN_0811d64c.c drops the open call's
+      arguments and inlines the commit tail call as
+      FUN_0811d7fc(param_1, 4, &stack0xfffffff4), hiding the
+      0x0811d340 thunk and its 0x80000000 tag - the port follows
+      osos.asm. Host tests:
+      src/app/vtable_set.rs::kind2_open_error_short_circuits_before_write_and_commit /
+      kind2_write_error_skips_commit_and_routes_the_value_pointer /
+      kind2_loads_the_value_as_a_halfword /
+      kind2_runs_in_order_with_exact_argument_routing.
