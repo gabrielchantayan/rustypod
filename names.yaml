@@ -17290,6 +17290,24 @@ functions:
       non-digit termination, and overflow wrapping. match.py structural:
       table-classification loop, shift-add/multiply-by-10 accumulation,
       and final cursor store.
+  - address: 0x0804ad80
+    ghidra: FUN_0804ad80
+    name: scan_stream_allocate_zeroed_scratch
+    size: 44
+    sig: "*mut u8 scan_stream_allocate_zeroed_scratch(void)"
+    module: stdio/scan_stream_setup
+    status: ported
+    renames:
+      puVar1: scratch
+      FUN_08043c18: scan_stream_backing_alloc
+    notes: >-
+      Calls the internal allocator with its three target arguments
+      `(16, 0, 0)`, stores zero in all four words of the returned 16-byte
+      area in ascending-address order, and returns its base. It deliberately
+      has no NULL guard: the first word store preserves the target's fault
+      behavior on allocation failure. Host tests record the allocator ABI,
+      prove return forwarding, and bound the four initialized words exactly.
+
   - address: 0x080e9364
     ghidra: FUN_080e9364
     name: scan_stream_setup_scratch
@@ -17302,16 +17320,15 @@ functions:
       iVar1: scratch
       FUN_0804ad80: scan_stream_allocate_zeroed_scratch
     notes: >-
-      Allocates a 16-byte zeroed scratch area through FUN_0804ad80. A NULL
-      helper result returns false and preserves every state field; success
-      stores the result at +0x20, clears the independently recovered words
-      at +0x0c and +0x14, and returns true. The helper itself is deliberately
-      unported: the module dispatches it through a local slot whose default
-      uses stdio's allocator seam and reproduces its four-word zero fill.
-      Host tests cover helper success, NULL failure, and preservation of
-      fields not written by the firmware. match.py structural: the same
-      helper-call/null-guard/three-store result shape; the function-pointer
-      dispatch adds an indirect call and standard LLVM frame.
+      Allocates a 16-byte zeroed scratch area through the ported
+      `scan_stream_allocate_zeroed_scratch`. A NULL helper result returns
+      false and preserves every state field; success stores the result at
+      +0x20, clears the independently recovered words at +0x0c and +0x14,
+      and returns true. Host tests cover helper success, NULL failure, and
+      preservation of fields not written by the firmware. match.py
+      structural: the same helper-call/null-guard/three-store result shape;
+      the function-pointer dispatch adds an indirect call and standard LLVM
+      frame.
 
 
   - address: 0x080e9974

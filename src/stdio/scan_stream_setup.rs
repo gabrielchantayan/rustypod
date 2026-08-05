@@ -1,15 +1,13 @@
-//! Scanner stream scratch setup — original: `FUN_080e9364` @ `0x080e9364` (44 bytes).
+//! Scanner stream scratch setup.
 //!
-//! Algorithm: request the firmware helper's 16-byte zeroed work area. A NULL
-//! result returns false and leaves the caller-owned state untouched. Otherwise
-//! install the work-area pointer at +0x20, clear the state words at +0x0c and
-//! +0x14, and return true.
-//!
-//! Deliberate deviation: the allocating helper `FUN_0804ad80` is not ported.
-//! Its observed contract (allocate and zero 16 bytes) is represented locally
-//! through the existing [`crate::stdio::stream_file::STDIO_ALLOC`] dispatch
-//! seam, whose default remains the ported allocator. This keeps the helper
-//! replaceable for host tests without exporting or claiming a port of it.
+//! Ports:
+//! - [`scan_stream_allocate_zeroed_scratch`] — original: `FUN_0804ad80` @
+//!   `0x0804ad80` (44 bytes); calls the internal allocator with `(16, 0, 0)`,
+//!   clears its four returned words without checking for NULL, and returns the
+//!   allocation.
+//! - [`scan_stream_setup_scratch`] — original: `FUN_080e9364` @ `0x080e9364`
+//!   (44 bytes); obtains the 16-byte work area, installs it in the caller's
+//!   state, and clears its two scanner state words.
 
 use crate::stdio::stream_file::STDIO_ALLOC;
 
@@ -32,28 +30,59 @@ pub struct ScanStreamState {
     pub scratch: *mut u8,
 }
 
-/// Function shape of the unported `FUN_0804ad80` helper.
+/// Function shape of the target's three-register `FUN_08043c18` allocation
+/// call. The stdio allocator seam backs the default bridge, preserving test
+/// isolation while keeping the target's `(size, 0, 0)` call ABI observable.
+pub type ScanStreamBackingAllocFn =
+    unsafe extern "C" fn(size: u32, zero_arg: u32, flags_arg: u32) -> *mut u8;
+
+/// Function shape of `FUN_0804ad80`.
 pub type ScanStreamScratchAllocFn = unsafe extern "C" fn() -> *mut u8;
 
-/// Default bridge for the unported helper: allocate through stdio's existing
-/// seam, then reproduce the helper's four-word zero initialization.
-#[inline(never)]
-unsafe extern "C" fn allocate_zeroed_scratch() -> *mut u8 {
+/// Bridges the target's internal allocator ABI to stdio's existing allocation
+/// seam. `FUN_08043c18` receives all three arguments; the ported malloc
+/// boundary needs only the requested byte count.
+unsafe extern "C" fn allocate_scan_stream_backing(
+    size: u32,
+    _zero_arg: u32,
+    _flags_arg: u32,
+) -> *mut u8 {
     let allocate = core::ptr::read_volatile(core::ptr::addr_of!(STDIO_ALLOC));
-    let scratch = allocate(SCAN_STREAM_SCRATCH_SIZE);
-    if !scratch.is_null() {
-        core::ptr::write_bytes(scratch, 0, SCAN_STREAM_SCRATCH_SIZE);
-    }
+    allocate(size as usize)
+}
+
+/// Allocation boundary for `FUN_08043c18`; host tests replace it to observe
+/// the target ABI. The shipped bridge reaches the real ported stdio allocator.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub static mut SCAN_STREAM_BACKING_ALLOC: ScanStreamBackingAllocFn = allocate_scan_stream_backing;
+
+/// scan_stream_allocate_zeroed_scratch — original: `FUN_0804ad80` @
+/// `0x0804ad80` (44 bytes).
+///
+/// Calls `FUN_08043c18` with `(16, 0, 0)`, then stores zero to the returned
+/// area's four words in ascending-address order and returns its base. The ARM
+/// original has no NULL check between the allocation and first store, so this
+/// port deliberately retains that fault behavior.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn scan_stream_allocate_zeroed_scratch() -> *mut u8 {
+    let allocate = core::ptr::read_volatile(core::ptr::addr_of!(SCAN_STREAM_BACKING_ALLOC));
+    let scratch = allocate(SCAN_STREAM_SCRATCH_SIZE as u32, 0, 0);
+    let words = scratch.cast::<u32>();
+    words.write(0);
+    words.add(1).write(0);
+    words.add(2).write(0);
+    words.add(3).write(0);
     scratch
 }
 
-/// Allocation boundary standing in for unported `FUN_0804ad80`.
+/// Allocation boundary for [`scan_stream_allocate_zeroed_scratch`].
 ///
-/// The shipped default is [`allocate_zeroed_scratch`]; host tests install
-/// result-controlled helpers. It is a local implementation seam, not a claim
-/// that the helper itself has been ported.
+/// The shipped default is the real port; host tests install result-controlled
+/// helpers for [`scan_stream_setup_scratch`].
 #[cfg_attr(target_os = "none", no_mangle)]
-pub static mut SCAN_STREAM_SCRATCH_ALLOC: ScanStreamScratchAllocFn = allocate_zeroed_scratch;
+pub static mut SCAN_STREAM_SCRATCH_ALLOC: ScanStreamScratchAllocFn =
+    scan_stream_allocate_zeroed_scratch;
 
 #[inline(always)]
 fn scratch_alloc() -> ScanStreamScratchAllocFn {
@@ -87,6 +116,18 @@ mod tests {
 
     static ALLOC_LOCK: Mutex<()> = Mutex::new(());
     static mut ALLOC_RESULT: *mut u8 = core::ptr::null_mut();
+    static mut BACKING_ALLOC_RESULT: *mut u8 = core::ptr::null_mut();
+    static mut BACKING_ALLOC_ARGS: [u32; 3] = [u32::MAX; 3];
+
+    unsafe extern "C" fn recording_backing_alloc(
+        size: u32,
+        zero_arg: u32,
+        flags_arg: u32,
+    ) -> *mut u8 {
+        BACKING_ALLOC_ARGS = [size, zero_arg, flags_arg];
+        BACKING_ALLOC_RESULT
+    }
+
 
     unsafe extern "C" fn recording_alloc() -> *mut u8 {
         ALLOC_RESULT
@@ -108,12 +149,40 @@ mod tests {
         }
     }
 
+    struct BackingAllocGuard(MutexGuard<'static, ()>);
+
+    impl BackingAllocGuard {
+        fn install(result: *mut u8) -> Self {
+            let lock = ALLOC_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+            unsafe {
+                BACKING_ALLOC_RESULT = result;
+                BACKING_ALLOC_ARGS = [u32::MAX; 3];
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(SCAN_STREAM_BACKING_ALLOC),
+                    recording_backing_alloc,
+                );
+            }
+            Self(lock)
+        }
+    }
+
+    impl Drop for BackingAllocGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(SCAN_STREAM_BACKING_ALLOC),
+                    allocate_scan_stream_backing,
+                );
+            }
+        }
+    }
+
     impl Drop for AllocGuard {
         fn drop(&mut self) {
             unsafe {
                 core::ptr::write_volatile(
                     core::ptr::addr_of_mut!(SCAN_STREAM_SCRATCH_ALLOC),
-                    allocate_zeroed_scratch,
+                    scan_stream_allocate_zeroed_scratch,
                 );
             }
         }
@@ -127,6 +196,27 @@ mod tests {
             field_14: 0xd4d4_d4d4,
             _between_18_20: [0xe5; 0x08],
             scratch: 0xf6f6_f6f6usize as *mut u8,
+        }
+    }
+
+    #[repr(align(4))]
+    struct AlignedScratch([u8; SCAN_STREAM_SCRATCH_SIZE + 8]);
+
+    #[test]
+    fn scratch_allocator_forwards_target_arguments_zeroes_four_words_and_returns_base() {
+        let mut allocation = AlignedScratch([0xa5; SCAN_STREAM_SCRATCH_SIZE + 8]);
+        let scratch = unsafe { allocation.0.as_mut_ptr().add(4) };
+        let _guard = BackingAllocGuard::install(scratch);
+
+        let returned = unsafe { scan_stream_allocate_zeroed_scratch() };
+
+        assert_eq!(returned, scratch);
+        assert_eq!(unsafe { BACKING_ALLOC_ARGS }, [16, 0, 0]);
+        assert_eq!(&allocation.0[..4], &[0xa5; 4]);
+        assert_eq!(&allocation.0[4..20], &[0; SCAN_STREAM_SCRATCH_SIZE]);
+        assert_eq!(&allocation.0[20..], &[0xa5; 4]);
+        for word in allocation.0[4..20].chunks_exact(4) {
+            assert_eq!(u32::from_le_bytes(word.try_into().unwrap()), 0);
         }
     }
 
