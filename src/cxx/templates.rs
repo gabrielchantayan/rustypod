@@ -549,6 +549,10 @@ pub unsafe extern "C" fn vector_size_elem4_alias_7a68(vector: *const VectorBound
 /// — verified against osos.asm and Ghidra's `return param_1[1] - *param_1
 /// >> 3` — so it is served by this port: any hook at that address points
 /// here (the `vector_size_elem16` copy-at-0x083d78b4 ledger precedent).
+/// The copy at 0x083d76a4 (13 `bl` call sites plus one `b` tail-branch
+/// at 0x0829c02c; `ipod-decomp/decomp/c/037/083d76a4_FUN_083d76a4.c`) is
+/// likewise byte-identical — verified against osos.asm per address — and
+/// hooks this same symbol.
 ///
 /// # Safety
 /// `vector` must point at a readable `{begin, end}` pair.
