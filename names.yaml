@@ -21694,3 +21694,93 @@ functions:
       1/2/4/8/0x10 over offsets 0..64, return == stored),
       buffer_align_offset_keeps_align_zero_parity (align 0 rewinds to
       0, matching the unguarded original).
+
+  - address: 0x082c231c
+    ghidra: FUN_082c231c
+    name: cg_buffer_emit_word
+    size: 52
+    sig: "void cg_buffer_emit_word(cg_codegen_buffer_t *output, u32 value)"
+    module: codegen/ir
+    status: ported
+    vars: {param_1: output, param_2: value}
+    notes: >-
+      42 bl + 15 tail b call sites (grep on decomp/osos.asm; sampled bl
+      sites 0x082b48a4/0x082b4954/0x082beb60/0x082becac/0x082c111c,
+      sampled tail sites 0x082bcf30/0x082bebc8/0x082c1240) - the JIT's
+      canonical 32-bit word emitter, one of the eight emitter bodies
+      listed in the cg_codegen_buffer_t notes at 0x082c23d4. Body:
+      align current_offset (+0x804) up to 4 through cg_buffer_align_offset
+      @ 0x082c2290 (ported, called directly), RE-READ the aligned offset
+      (the original ignores the aligner's r0 and reloads the field),
+      resolve it to a write pointer through the page accessor
+      FUN_082c5b1c (unported - the CG_BUFFER_PAGE_POINTER seam, whose
+      wired default models the original's pages[offset >> 12] +
+      (offset & 0xfff)), store value verbatim (str r5, [r0]), then
+      RE-READ current_offset again and post-increment it by 4 from the
+      ALIGNED value. Both field reloads are kept verbatim: through the
+      seam a replacement could legally move the offset, and only the
+      reloads reproduce the original's behavior in that case. No NULL
+      check on the accessor's result, matching the original. match.py
+      (exit 1, diff expected): the align bl, offset ldr, word str and
+      the ldr/add #4/str post-increment are verbatim; the accessor is
+      ldr/blx through the CG_BUFFER_PAGE_POINTER static in place of
+      bl 0x082c5b1c (the documented seam scheme, same as CG_BUFFER_ALLOC);
+      the align call shows as a same-section reloc; the crate fp frame
+      accounts for the rest. Host tests:
+      src/codegen/ir.rs::buffer_emit_word_aligns_stores_verbatim_and_advances_from_the_aligned_offset
+      (misaligned 9 rounds to 12, accessor receives (buffer, 12), word
+      bit-exact at the returned pointer, offset becomes 16 = aligned +
+      4, poisoned neighbours),
+      buffer_emit_word_end_to_end_through_a_cooperating_accessor (three
+      emits over a flat-arena fake: verbatim stores, align gap skipped
+      untouched, final offset 16),
+      buffer_page_pointer_default_lazy_allocates_zeroes_and_reuses_the_page
+      (wired default: lazy 0x1000-byte allocation, zero-fill over the
+      allocator poison, slot store-back, resident-page reuse, distinct
+      pages distinct),
+      buffer_page_pointer_default_returns_null_when_the_page_allocation_fails
+      (the deviation: NULL, slot never stored).
+
+  - address: 0x082c5b1c
+    ghidra: FUN_082c5b1c
+    name: cg_buffer_page_pointer
+    size: 32
+    sig: "u8 *cg_buffer_page_pointer(cg_codegen_buffer_t *output, u32 offset)"
+    module: codegen/ir
+    status: identified
+    vars: {param_1: output, param_2: offset}
+    notes: >-
+      3 bl call sites (0x082c2338 in cg_buffer_emit_word plus two more;
+      grep on decomp/osos.asm). The emitted-code buffer's page accessor:
+      returns pages[offset >> 12] + (offset & 0xfff) - the body is
+      `mov r4, r2, lsl #0x14; mov r4, r4, lsr #0x14; mov r1, r1,
+      lsr #0xc; bl 0x082b7edc; add r0, r0, r4`. NOT separately ported:
+      modeled as the wired default of the CG_BUFFER_PAGE_POINTER seam in
+      src/codegen/ir.rs (default_cg_buffer_page_pointer), which
+      reproduces the exact body and inlines its only callee
+      FUN_082b7edc. Replace the seam default with a real port when this
+      is ported.
+
+  - address: 0x082b7edc
+    ghidra: FUN_082b7edc
+    name: cg_buffer_page_slot
+    size: 52
+    sig: "u8 *cg_buffer_page_slot(cg_codegen_buffer_t *output, u32 index)"
+    module: codegen/ir
+    status: identified
+    vars: {param_1: output, param_2: index}
+    notes: >-
+      2 bl call sites (0x082c5b30 inside the page accessor @ 0x082c5b1c
+      and one more; grep on decomp/osos.asm). The lazy page-slot
+      accessor of the emitted-code buffer: reads buffer->pages[index]
+      at +0x04+index*4; when NULL, mallocs one 0x1000-byte page
+      (bl 0x0802edac = malloc, ported), zero-fills it through the IRAM
+      veneer 0x08037dc8 (-> 0x220002d4, the relocated copy of memzero @
+      0x080002d4, ported in libc/memzero), stores it into the slot and
+      returns it; a resident slot comes back unchanged. No NULL check
+      after malloc (a failure memzeroes 0x1000 bytes at address 0) and
+      no bounds check on the 512-slot table. NOT separately ported:
+      modeled inline inside default_cg_buffer_page_pointer in
+      src/codegen/ir.rs, with the documented deviations that the page
+      allocation goes through the swappable CG_BUFFER_ALLOC slot and a
+      failed allocation returns NULL.

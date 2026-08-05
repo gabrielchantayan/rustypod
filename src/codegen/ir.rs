@@ -58,6 +58,11 @@
 //! - `cg_buffer_align_offset` — original: `FUN_082c2290` @ 0x082c2290
 //!   (32 bytes; 2 `bl` call sites). Rounds the emitted-code buffer's
 //!   current offset up to a power-of-two alignment, in place.
+//! - `cg_buffer_emit_word` — original: `FUN_082c231c` @ 0x082c231c
+//!   (52 bytes; 42 `bl` + 15 tail `b` call sites — the JIT's canonical
+//!   word emitter). Aligns the emitted-code buffer to 4, stores one
+//!   32-bit word through the code-page accessor and post-increments the
+//!   offset by 4 from the aligned value.
 //! - `cg_codegen_output` — original: `FUN_082c17ec` @ 0x082c17ec
 //!   (8 bytes; 1 `bl` call site). Pure getter for the codegen's
 //!   emitted-code buffer at +0x10.
@@ -145,6 +150,17 @@
 //!   the allocation fails, where the original has NO null check and
 //!   would memzero 0x800 bytes at address 4 (same deviation as
 //!   `fopen`'s fresh-node allocation).
+//! - `cg_buffer_emit_word` resolves its write pointer through the
+//!   swappable [`CG_BUFFER_PAGE_POINTER`] seam (the same
+//!   `read_volatile`-dispatched scheme as [`CG_BUFFER_ALLOC`]); the
+//!   wired default models the exact body of the unported page accessor
+//!   `FUN_082c5b1c` @ 0x082c5b1c (32 bytes) —
+//!   `pages[offset >> 12] + (offset & 0xfff)` — including the lazy
+//!   page-slot accessor `FUN_082b7edc` @ 0x082b7edc (52 bytes) inline.
+//!   The default's page allocation goes through [`CG_BUFFER_ALLOC`] and
+//!   a failed allocation returns NULL, where the original calls
+//!   `malloc` directly and would memzero 0x1000 bytes at address 0
+//!   (same deviation as [`cg_codegen_buffer_create`]).
 
 use super::heap::{cg_heap_alloc, CgHeap};
 
@@ -270,6 +286,16 @@ pub const CG_BUFFER_PAGE_TABLE_BYTES: usize = 0x800;
 /// Size of `cg_codegen_buffer_t` in target bytes: 4 name + 0x800 page
 /// table + 4 offset — the literal-pool constant at 0x082c22e4.
 pub const CG_CODEGEN_BUFFER_BYTES: usize = 0x808;
+/// Size of one lazily allocated code page in bytes — the page-slot
+/// accessor's `mov r0, #0x1000` (FUN_082b7edc @ 0x082b7ef0) and
+/// `mov r1, #0x1000` (@ 0x082b7efc).
+pub const CG_BUFFER_PAGE_BYTES: usize = 0x1000;
+/// Log2 of the code-page size: an offset's page index is
+/// `offset >> CG_BUFFER_PAGE_SHIFT` and its in-page byte is
+/// `offset & (CG_BUFFER_PAGE_BYTES - 1)` — the page accessor's
+/// `mov r1, r1, lsr #0xc` and `mov r4, r2, lsl #0x14; mov r4, r4,
+/// lsr #0x14` pair (FUN_082c5b1c @ 0x082c5b24-0x082c5b2c).
+pub const CG_BUFFER_PAGE_SHIFT: usize = 12;
 
 /// Size of `cg_codegen_t` in target bytes — the constructor's
 /// `mov r1, #0x220` (twice: the arena request and the zero-fill).
@@ -509,6 +535,60 @@ fn hook<T: Copy>(slot: *const T) -> T {
 pub static mut CG_BUFFER_ALLOC: unsafe extern "C" fn(usize) -> *mut u8 =
     crate::runtime::malloc_rt::malloc;
 
+/// The page-accessor boundary for [`cg_buffer_emit_word`]: maps a byte
+/// offset inside the emitted-code buffer to a host pointer into the
+/// lazily allocated code pages. The wired default
+/// ([`default_cg_buffer_page_pointer`]) models the exact body of the
+/// unported original `FUN_082c5b1c` @ 0x082c5b1c (32 bytes):
+/// `pages[offset >> 12] + (offset & 0xfff)`, resolving the page base
+/// through the lazy page-slot accessor `FUN_082b7edc` @ 0x082b7edc
+/// (52 bytes, modeled inline there). Host tests swap in a recording
+/// fake; porting 0x082c5b1c later replaces the default without
+/// touching the emitter.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub static mut CG_BUFFER_PAGE_POINTER: unsafe extern "C" fn(
+    *mut CgCodegenBuffer,
+    usize,
+) -> *mut u8 = default_cg_buffer_page_pointer;
+
+/// The wired default of [`CG_BUFFER_PAGE_POINTER`]: the exact body of
+/// the unported page accessor `FUN_082c5b1c` @ 0x082c5b1c (32 bytes:
+/// `mov r4, r2, lsl #0x14; mov r4, r4, lsr #0x14; mov r1, r1, lsr #0xc;
+/// bl 0x082b7edc; add r0, r0, r4`), i.e. `pages[offset >> 12] +
+/// (offset & 0xfff)`.
+///
+/// The `bl` target — the lazy page-slot accessor `FUN_082b7edc` @
+/// 0x082b7edc (52 bytes) — is modeled inline: read
+/// `buffer->pages[index]`; when NULL, allocate one 0x1000-byte page,
+/// zero-fill it through the IRAM veneer 0x08037dc8 (-> 0x220002d4, the
+/// relocated copy of `memzero` @ 0x080002d4 — [`crate::libc::memzero::
+/// memzero`] here), store it into the slot and return it; a non-NULL
+/// slot comes back unchanged. Like the original, there is no bounds
+/// check on the 512-slot page table.
+///
+/// DEVIATIONS (module header): the page allocation goes through the
+/// swappable [`CG_BUFFER_ALLOC`] slot where the original `bl`s `malloc`
+/// @ 0x0802edac directly (the slot defaults to that same port), and a
+/// failed allocation returns NULL where the original has no NULL check
+/// and would memzero 0x1000 bytes at address 0 (same deviation as
+/// [`cg_codegen_buffer_create`]).
+unsafe extern "C" fn default_cg_buffer_page_pointer(
+    output: *mut CgCodegenBuffer,
+    offset: usize,
+) -> *mut u8 {
+    let page_slot = slot(output as *mut u8, CG_BUFFER_PAGES + (offset >> CG_BUFFER_PAGE_SHIFT));
+    let mut page = page_slot.read();
+    if page.is_null() {
+        page = hook(core::ptr::addr_of!(CG_BUFFER_ALLOC))(record_size(CG_BUFFER_PAGE_BYTES));
+        if page.is_null() {
+            return core::ptr::null_mut();
+        }
+        crate::libc::memzero::memzero(page, record_size(CG_BUFFER_PAGE_BYTES));
+        page_slot.write(page);
+    }
+    page.add(offset & (CG_BUFFER_PAGE_BYTES - 1))
+}
+
 /// The segment name [`cg_codegen_create`] stamps into the emitted-code
 /// buffer. On target the constructor's `adr r0, 0x82c0de4` picks up
 /// this exact eight-byte datum ("CSEG" plus four NUL padding bytes),
@@ -691,6 +771,48 @@ pub unsafe extern "C" fn cg_buffer_align_offset(
     let aligned = offset.read().wrapping_add(align).wrapping_sub(1) & !align.wrapping_sub(1);
     offset.write(aligned);
     aligned
+}
+
+/// cg_buffer_emit_word — original: `FUN_082c231c` @ 0x082c231c
+/// (52 bytes, 42 `bl` + 15 tail `b` call sites — the JIT's canonical
+/// 32-bit word emitter; sampled `bl` sites: 0x082b48a4, 0x082b4954,
+/// 0x082beb60, 0x082becac, 0x082c111c).
+///
+/// Emits one word of generated ARM code into the emitted-code buffer:
+///
+/// 1. aligns the buffer's `current_offset` (+0x804) up to 4 through
+///    [`cg_buffer_align_offset`] (`mov r1, #0x4; bl 0x082c2290` —
+///    called directly), so every 32-bit instruction lands on a word
+///    boundary;
+/// 2. re-reads the now-aligned offset (`ldr r1, [r4, #0x804]` — the
+///    original ignores the aligner's r0 return and reloads the field)
+///    and resolves it to a write pointer through the code-page
+///    accessor `FUN_082c5b1c` (unported — the [`CG_BUFFER_PAGE_POINTER`]
+///    seam, whose wired default models the original's
+///    `pages[offset >> 12] + (offset & 0xfff)`);
+/// 3. stores `value` verbatim at that pointer (`str r5, [r0, #0x0]`);
+/// 4. re-reads `current_offset` again and post-increments it by 4 —
+///    from the ALIGNED value, not the pre-align one
+///    (`ldr r0, [r4, #0x804]; add r0, r0, #0x4; str r0, [r4, #0x804]`).
+///
+/// The two field reloads are kept verbatim: through the accessor seam
+/// a replacement could legally move the offset, and only the reloads
+/// reproduce the original's behavior in that case.
+///
+/// EDGE SEMANTICS (parity, not sanitized): no NULL check on the
+/// accessor's result — when the page allocation behind the default
+/// accessor fails, the store goes through NULL exactly as the
+/// original's would (the original crashes on the wild memzero one
+/// callee earlier; see [`default_cg_buffer_page_pointer`]).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_buffer_emit_word(output: *mut CgCodegenBuffer, value: u32) {
+    cg_buffer_align_offset(output, 4);
+    let offset = word(output as *mut u8, CG_CODEGEN_OUTPUT_OFFSET).read();
+    let write_ptr = hook(core::ptr::addr_of!(CG_BUFFER_PAGE_POINTER))(output, offset);
+    (write_ptr as *mut u32).write(value);
+    let cursor = word(output as *mut u8, CG_CODEGEN_OUTPUT_OFFSET);
+    cursor.write(cursor.read().wrapping_add(4));
 }
 
 /// cg_codegen_output — original: `FUN_082c17ec` @ 0x082c17ec
@@ -1694,6 +1816,210 @@ mod tests {
                 cg_buffer_current_offset(buffer),
                 0,
                 "the original rewinds the buffer to its start, unguarded"
+            );
+        }
+    }
+
+    // --- cg_buffer_emit_word ------------------------------------------
+
+    /// Every (buffer, offset) pair the recording fake accessor was
+    /// invoked with, and the pointer it hands back.
+    static mut PAGE_POINTER_CALLS: std::vec::Vec<(*mut CgCodegenBuffer, usize)> =
+        std::vec::Vec::new();
+    static mut PAGE_POINTER_RESULT: *mut u8 = core::ptr::null_mut();
+
+    unsafe extern "C" fn recording_page_pointer(
+        output: *mut CgCodegenBuffer,
+        offset: usize,
+    ) -> *mut u8 {
+        PAGE_POINTER_CALLS.push((output, offset));
+        PAGE_POINTER_RESULT
+    }
+
+    /// A fake accessor honoring the real contract: resolves (buffer,
+    /// offset) to `arena + offset`, one flat page standing in for the
+    /// original's `pages[offset >> 12] + (offset & 0xfff)`.
+    static mut COOP_ARENA: [u8; 64] = [0; 64];
+
+    unsafe extern "C" fn cooperating_page_pointer(
+        _output: *mut CgCodegenBuffer,
+        offset: usize,
+    ) -> *mut u8 {
+        (core::ptr::addr_of_mut!(COOP_ARENA) as *mut u8).add(offset)
+    }
+
+    #[test]
+    fn buffer_emit_word_aligns_stores_verbatim_and_advances_from_the_aligned_offset() {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        const POISON: usize = 0xAAAA_AAAA_AAAA_AAAA;
+        let mut output = [POISON; CG_CODEGEN_OUTPUT_OFFSET + 2];
+        let mut cell = [0u8; 4];
+
+        unsafe {
+            let saved = hook(core::ptr::addr_of!(CG_BUFFER_PAGE_POINTER));
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_POINTER) = recording_page_pointer;
+            PAGE_POINTER_CALLS.clear();
+            PAGE_POINTER_RESULT = cell.as_mut_ptr();
+
+            let buffer = output.as_mut_ptr() as *mut CgCodegenBuffer;
+            output[CG_CODEGEN_OUTPUT_OFFSET] = 9;
+
+            cg_buffer_emit_word(buffer, 0xe59f_f018);
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_POINTER) = saved;
+
+            assert_eq!(
+                PAGE_POINTER_CALLS.as_slice(),
+                &[(buffer, 12)],
+                "the accessor sees the buffer and the offset ALIGNED up from 9"
+            );
+            assert_eq!(
+                cell,
+                0xe59f_f018u32.to_le_bytes(),
+                "the word lands at the accessor's pointer bit-exact"
+            );
+            assert_eq!(
+                output[CG_CODEGEN_OUTPUT_OFFSET],
+                16,
+                "the offset advances by 4 from the aligned 12, not from 9 + 4 = 13"
+            );
+            assert_eq!(
+                output[CG_CODEGEN_OUTPUT_OFFSET - 1],
+                POISON,
+                "the emitter writes no neighboring word"
+            );
+            assert_eq!(
+                output[CG_CODEGEN_OUTPUT_OFFSET + 1],
+                POISON,
+                "the emitter writes no neighboring word"
+            );
+        }
+    }
+
+    #[test]
+    fn buffer_emit_word_end_to_end_through_a_cooperating_accessor() {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut output = [0usize; CG_CODEGEN_OUTPUT_OFFSET + 1];
+
+        unsafe {
+            let saved = hook(core::ptr::addr_of!(CG_BUFFER_PAGE_POINTER));
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_POINTER) = cooperating_page_pointer;
+            COOP_ARENA = [0; 64];
+
+            let buffer = output.as_mut_ptr() as *mut CgCodegenBuffer;
+
+            output[CG_CODEGEN_OUTPUT_OFFSET] = 0;
+            cg_buffer_emit_word(buffer, 0xe3a0_002a); // mov r0, #0x2a at 0
+            // A misaligned offset, as a byte/halfword emitter would
+            // leave behind: the next word lands at 8, skipping 6..8.
+            output[CG_CODEGEN_OUTPUT_OFFSET] = 6;
+            cg_buffer_emit_word(buffer, 0xe12f_ff1e); // bx lr at 8
+            cg_buffer_emit_word(buffer, 0xea00_0000); // b +8 at 12
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_POINTER) = saved;
+
+            let arena = &*core::ptr::addr_of!(COOP_ARENA);
+            assert_eq!(
+                u32::from_le_bytes(arena[0..4].try_into().unwrap()),
+                0xe3a0_002a,
+                "first word at offset 0"
+            );
+            assert_eq!(
+                &arena[4..8],
+                &[0; 4],
+                "the align-up gap is skipped, not written"
+            );
+            assert_eq!(
+                u32::from_le_bytes(arena[8..12].try_into().unwrap()),
+                0xe12f_ff1e,
+                "the misaligned emit realigned to 8"
+            );
+            assert_eq!(
+                u32::from_le_bytes(arena[12..16].try_into().unwrap()),
+                0xea00_0000,
+                "the already-aligned emit stores in place"
+            );
+            assert_eq!(
+                cg_buffer_current_offset(buffer),
+                16,
+                "three words emitted, 12 bytes past the first aligned offset 4... i.e. 16"
+            );
+        }
+    }
+
+    #[test]
+    fn buffer_page_pointer_default_lazy_allocates_zeroes_and_reuses_the_page() {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // Zeroed record: every page slot NULL, offset 0.
+        let mut output = [0usize; CG_CODEGEN_OUTPUT_OFFSET + 1];
+
+        unsafe {
+            let saved_alloc = hook(core::ptr::addr_of!(CG_BUFFER_ALLOC));
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = poisoning_alloc;
+
+            let record = output.as_mut_ptr() as *mut u8;
+            let buffer = record as *mut CgCodegenBuffer;
+            // The wired default itself, exercising the exact-body model
+            // of FUN_082c5b1c + FUN_082b7edc.
+            let accessor = default_cg_buffer_page_pointer;
+
+            let first = accessor(buffer, 0x1234);
+            let page = slot(record, CG_BUFFER_PAGES + (0x1234 >> CG_BUFFER_PAGE_SHIFT)).read();
+            assert!(!page.is_null(), "a miss lazy-allocates the page");
+            assert_eq!(
+                first,
+                page.add(0x234),
+                "pages[offset >> 12] + (offset & 0xfff)"
+            );
+            assert!(
+                core::slice::from_raw_parts(page, record_size(CG_BUFFER_PAGE_BYTES))
+                    .iter()
+                    .all(|&b| b == 0),
+                "the fresh page is zero-filled over the allocator's 0x5c poison,\
+                 as through the original's IRAM memzero veneer"
+            );
+
+            let again = accessor(buffer, 0x1ffc);
+            assert_eq!(
+                again,
+                page.add(0xffc),
+                "a resident page is reused, not reallocated"
+            );
+
+            let other = accessor(buffer, 0x0800);
+            let page0 = slot(record, CG_BUFFER_PAGES).read();
+            assert!(!page0.is_null(), "a new index lazy-allocates its own page");
+            assert_eq!(other, page0.add(0x800));
+            assert_ne!(page0, page, "distinct pages are distinct allocations");
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = saved_alloc;
+            poisoning_free(page0);
+            poisoning_free(page);
+        }
+    }
+
+    #[test]
+    fn buffer_page_pointer_default_returns_null_when_the_page_allocation_fails() {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut output = [0usize; CG_CODEGEN_OUTPUT_OFFSET + 1];
+
+        unsafe {
+            let saved_alloc = hook(core::ptr::addr_of!(CG_BUFFER_ALLOC));
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = failing_alloc;
+
+            let buffer = output.as_mut_ptr() as *mut CgCodegenBuffer;
+            assert!(
+                default_cg_buffer_page_pointer(buffer, 0x2000).is_null(),
+                "the deviation: NULL where the original would memzero at address 0"
+            );
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = saved_alloc;
+
+            assert!(
+                slot(output.as_mut_ptr() as *mut u8, CG_BUFFER_PAGES + 2)
+                    .read()
+                    .is_null(),
+                "the failed page is never stored into the slot"
             );
         }
     }
