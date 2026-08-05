@@ -961,8 +961,9 @@ pub unsafe extern "C" fn vtable_set_50_write_kind2(
 /// bytes; **2 `bl` call sites**, grep on `decomp/osos.asm`:
 /// 0x081365cc and 0x081366d4 — both set r1 to a small property
 /// selector (0x34 / 0x38), r2 to a pointer into a live structure
-/// (object + 0x1c / r5 + 0x18), r0 to a stack handle, and both branch
-/// on the returned status (`movs r4, r0; bne`).
+/// (object + 0x1c / r5 + 0x18), r0 to a stack handle, and both test
+/// the returned status (`movs r4, r0`, then `bne` at the first site,
+/// `strbeq` + `beq` at the second).
 ///
 /// The kind-2 (u16) twin of this module's [`vtable_set_50_kind4`]
 /// (0x0811d68c, one instruction later): the identical three-stage
