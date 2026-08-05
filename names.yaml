@@ -18898,11 +18898,31 @@ functions:
     ghidra: (veneer)
     name: posix_mutex_unlock_veneer_b
     size: 4
+    sig: "u32 posix_mutex_unlock_veneer_b(PosixMutex *mutex)"
     module: kernel/posix_mutex
-    status: identified
+    status: ported
     notes: >-
-      Duplicate of the 0x08261e24 veneer. Single `b 0x082e83d8`;
-      76 bl + 24 tail b, binary-verified.
+      ALIAS - duplicate of the 0x08261e24 veneer (the linker emitted a
+      second block so far callers stay in bl range): bare
+      `b 0x082e83d8` tail veneer onto posix_mutex_unlock (word
+      0xea021889 in osos.dec, binary-verified). Nothing to port — the
+      veneer address IS the unlock for every caller that reaches it.
+      76 bl + 23 tail b, binary-verified by decoding every B/BL word
+      in osos.dec (the earlier identified note said 24 tail b —
+      recount lists all 23 tail sites; the sibling 0x082621a8 lock
+      veneer is likewise 78 bl + 2 tail b, not 3). This is the
+      unlock thunk every heap client in src/heap/ names, twin of the
+      lock thunk 0x082621a8. No separate Rust symbol exists; hook
+      this address to the single posix_mutex_unlock symbol
+      (precedent: posix_mutex_lock_veneer_b @ 0x082621a8, commit
+      7cbc65c; posix_mutex_unlock_veneer_a @ 0x08261e24; and the
+      alias resolutions they cite — posix_mutex_lock_veneer_a @
+      0x08261e20 commit a0f27c1, iabs aliases in fp/fp_misc,
+      atomic_add_irqsafe_alias_f041c in kernel/csem,
+      rom_svc_22001cbc_alias_67fc in kernel/task_lock). match.py
+      against posix_mutex_unlock at this address confirms the
+      original is exactly the 1-instruction branch; the body diff is
+      the unlock itself, which is the resolution.
 
   # --- retailOS UI object state accessor ---
   - address: 0x08055e80
