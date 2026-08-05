@@ -21774,9 +21774,11 @@ functions:
       @ 0x082c2290 (ported, called directly), RE-READ the aligned offset
       (the original ignores the aligner's r0 and reloads the field),
       resolve it to a write pointer through the page accessor
-      FUN_082c5b1c (unported - the CG_BUFFER_PAGE_POINTER seam, whose
-      wired default models the original's pages[offset >> 12] +
-      (offset & 0xfff)), store value verbatim (str r5, [r0]), then
+      cg_buffer_page_pointer @ 0x082c5b1c (ported; the call still
+      routes through the CG_BUFFER_PAGE_POINTER seam, which stays wired
+      to the ported accessor - the vtable_slot_50_dispatch precedent,
+      direct-call rewiring a deliberate follow-up), store value
+      verbatim (str r5, [r0]), then
       RE-READ current_offset again and post-increment it by 4 from the
       ALIGNED value. Both field reloads are kept verbatim: through the
       seam a replacement could legally move the offset, and only the
@@ -21795,11 +21797,11 @@ functions:
       buffer_emit_word_end_to_end_through_a_cooperating_accessor (three
       emits over a flat-arena fake: verbatim stores, align gap skipped
       untouched, final offset 16),
-      buffer_page_pointer_default_lazy_allocates_zeroes_and_reuses_the_page
-      (wired default: lazy 0x1000-byte allocation, zero-fill over the
-      allocator poison, slot store-back, resident-page reuse, distinct
-      pages distinct),
-      buffer_page_pointer_default_returns_null_when_the_page_allocation_fails
+      buffer_page_pointer_lazy_allocates_zeroes_and_reuses_the_page
+      (accessor through the page-slot seam's wired default: lazy
+      0x1000-byte allocation, zero-fill over the allocator poison,
+      slot store-back, resident-page reuse, distinct pages distinct),
+      buffer_page_pointer_returns_null_when_the_page_allocation_fails
       (the deviation: NULL, slot never stored).
 
   - address: 0x082c5b1c
@@ -21808,19 +21810,50 @@ functions:
     size: 32
     sig: "u8 *cg_buffer_page_pointer(cg_codegen_buffer_t *output, u32 offset)"
     module: codegen/ir
-    status: identified
-    vars: {param_1: output, param_2: offset}
+    status: ported
+    vars: {param_1: output, param_2: offset, r4: intra}
     notes: >-
       3 bl call sites (0x082c2338 in cg_buffer_emit_word plus two more;
       grep on decomp/osos.asm). The emitted-code buffer's page accessor:
       returns pages[offset >> 12] + (offset & 0xfff) - the body is
-      `mov r4, r2, lsl #0x14; mov r4, r4, lsr #0x14; mov r1, r1,
-      lsr #0xc; bl 0x082b7edc; add r0, r0, r4`. NOT separately ported:
-      modeled as the wired default of the CG_BUFFER_PAGE_POINTER seam in
-      src/codegen/ir.rs (default_cg_buffer_page_pointer), which
-      reproduces the exact body and inlines its only callee
-      FUN_082b7edc. Replace the seam default with a real port when this
-      is ported.
+      `mov r4, r2, lsl #0x14; mov r4, r4, lsr #0x14` (intra-page byte),
+      `mov r1, r1, lsr #0xc` (page index), `bl 0x082b7edc` (the lazy
+      page-slot accessor), `add r0, r0, r4` (base + intra). PORTED in
+      src/codegen/ir.rs. SEAM DECISION (the app/vtable_set.rs
+      vtable_slot_50_dispatch precedent): the port stays the wired
+      default of the CG_BUFFER_PAGE_POINTER seam and cg_buffer_emit_word
+      keeps routing through the seam - retained for hookability and
+      host-test interception; rewiring the emitter to a direct call is a
+      deliberate follow-up (one function per commit). The bl target
+      0x082b7edc stays identified behind the new CG_BUFFER_PAGE_SLOT
+      seam, whose wired default (default_cg_buffer_page_slot) models its
+      exact body - the lazy-alloc/memzero/store-back logic formerly
+      inlined in default_cg_buffer_page_pointer. DEVIATION: the original
+      has NO NULL guard on the accessor's result (verified in osos.asm:
+      the `add r0, r0, r4` @ 0x082c5b34 is unconditional, and an
+      allocation failure has already crashed one callee earlier, on the
+      wild 0x1000-byte memzero at address 0 inside 0x082b7edc); the port
+      propagates the page-slot seam's NULL instead, carrying forward the
+      previous seam default's documented deviation, so emit_word's
+      store-through-NULL failure semantics are unchanged. match.py
+      (exit 1, diff expected): same shape - offset split (lsr #12 +
+      and 0xfff), call through the CG_BUFFER_PAGE_SLOT static (ldr/blx
+      in place of bl 0x082b7edc, the documented seam scheme), base +
+      intra add; the cmp/addne pair is the documented NULL-propagation
+      deviation, the crate fp frame accounts for the rest. Host tests:
+      src/codegen/ir.rs::page_pointer_seam_stays_wired_to_the_ported_accessor
+      (both seams' wiring),
+      buffer_page_pointer_splits_offsets_straddling_page_boundaries
+      (0xfff/0x1000/0x1001/0x2000: exact idx 0/1/1/2 to the slot seam,
+      result = base + intra),
+      buffer_page_pointer_propagates_null_from_the_page_slot_seam (the
+      deviation: NULL out, exact idx still passed),
+      buffer_page_pointer_lazy_allocates_zeroes_and_reuses_the_page
+      (through the slot seam's wired default: lazy 0x1000-byte
+      allocation, zero-fill over the allocator poison, slot store-back,
+      resident-page reuse, distinct pages distinct),
+      buffer_page_pointer_returns_null_when_the_page_allocation_fails
+      (the deviation end to end: NULL, slot never stored).
 
   - address: 0x082b7edc
     ghidra: FUN_082b7edc
@@ -21841,7 +21874,8 @@ functions:
       returns it; a resident slot comes back unchanged. No NULL check
       after malloc (a failure memzeroes 0x1000 bytes at address 0) and
       no bounds check on the 512-slot table. NOT separately ported:
-      modeled inline inside default_cg_buffer_page_pointer in
-      src/codegen/ir.rs, with the documented deviations that the page
-      allocation goes through the swappable CG_BUFFER_ALLOC slot and a
-      failed allocation returns NULL.
+      modeled as the wired default (default_cg_buffer_page_slot) of the
+      CG_BUFFER_PAGE_SLOT seam in src/codegen/ir.rs, called by the
+      ported cg_buffer_page_pointer @ 0x082c5b1c, with the documented
+      deviations that the page allocation goes through the swappable
+      CG_BUFFER_ALLOC slot and a failed allocation returns NULL.
