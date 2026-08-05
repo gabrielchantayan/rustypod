@@ -8426,6 +8426,23 @@ functions:
       the original succeeds. match.py: identical shape; the only deltas
       are the blx-through-slot indirections and the frame layout.
 
+  - address: 0x082028a4
+    ghidra: FUN_082028a4
+    name: registry_observer_construct
+    size: 20
+    sig: "void *registry_observer_construct(void *allocation)"
+    module: app/class_registry
+    status: ported
+    vars: {param_1: allocation, puVar1: observer}
+    notes: >-
+      Registry observer C++ derived constructor. Raw ARM is
+      push {r4,lr}; bl 0x0810dddc; ldr r1, [pc,#4];
+      str r1, [r0]; pop {r4,pc}, with the literal 0x089910ac at
+      0x082028b8. Thus it forwards the allocation in r0 to the distinct
+      unported base ctor 0x0810dddc, stores that vtable at +0x00 of the
+      base return, and forwards the same r0 return value. Called after
+      operator_new(8) from the lazy observer path in 0x0810e64c.
+
   - address: 0x080ed7c0
     ghidra: FUN_080ed7c0
     name: is_mpeg4_container_extension

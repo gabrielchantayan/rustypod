@@ -2,9 +2,9 @@
 //! half of `app/registry.rs`.
 //!
 //! | address | name | size | sites |
-//! |---|---|---|---|
+//! |---|---|---:|---:|
 //! | 0x0810e64c | [`class_registry_construct`] | 96 | 9 `bl` + 1 tail `b` |
-//!
+//! | 0x082028a4 | [`registry_observer_construct`] | 20 | 3 `bl` |
 //! (Call-site count binary-scanned over osos.dec; one of the nine `bl`s
 //! is the static-init chain @ 0x082afb6c, which runs it against the
 //! statically-allocated registry object @ 0x08a79ca4 — the crate's
@@ -52,16 +52,17 @@
 //!
 //! `operator new` @ 0x082aadd4 is already ported
 //! (`heap::veneers::operator_new`), so it is called directly. The
-//! container ctor, the observer ctor and the observer swap are the
-//! unported C++ container/observer machinery, so they sit behind the
-//! [`CLASS_REGISTRY_OPS`] dispatch table — the `app/singletons.rs`
-//! pattern — whose documented stubs are:
+//! container ctor and the observer swap are unported C++ machinery, so
+//! they sit behind the [`CLASS_REGISTRY_OPS`] dispatch table — the
+//! `app/singletons.rs` pattern. The observer's own 20-byte constructor
+//! is ported; its distinct base constructor @ 0x0810dddc remains a
+//! dispatch boundary. The documented stubs are:
 //!
 //! - `container_construct`: returns `this` **unchanged** — the object
 //!   keeps its pre-init all-zero state, vtable NULL, the same
 //!   fault-on-first-dispatch contract `registry.rs` documents;
-//! - `observer_construct`: the zeroing stub (8 bytes), which installs
-//!   no vtable;
+//! - `observer_base_construct`: returns `this` unchanged; the port then
+//!   installs the observer's literal firmware vtable at +0x00;
 //! - `set_observer`: a no-op.
 //!
 //! **Not hook-ready.** With the default stubs the attach dispatch reads
@@ -117,20 +118,25 @@ pub struct RegistryObserverVtable {
 /// pointer; the second word belongs to the unported observer class.
 #[repr(C)]
 pub struct RegistryObserver {
-    /// +0x00: the observer's vtable (original: the literal 0x089910ac,
-    /// stored by the ctor @ 0x082028a4).
+    /// +0x00: the observer's vtable (original literal: `0x089910ac`,
+    /// stored by [`registry_observer_construct`] @ 0x082028a4).
     pub vtable: *const RegistryObserverVtable,
     /// +0x04: the observer class's own state.
     pub reserved: u32,
 }
+
+/// The literal observer vtable installed by
+/// [`registry_observer_construct`] (`ldr r1, [pc, #4]` loads it from
+/// 0x082028b8 in the original).
+pub const REGISTRY_OBSERVER_VTABLE_ADDRESS: usize = 0x0899_10ac;
 
 /// The registry observer singleton (original: the global word @
 /// 0x089d01ac — see the module-header deviation). NULL until
 /// [`class_registry_construct`] first runs.
 pub static mut REGISTRY_OBSERVER: *mut RegistryObserver = core::ptr::null_mut();
 
-/// Indirect dispatch table for the three unported callees (see the
-/// module header for the default-stub contract).
+/// Indirect dispatch table for the two unported callees and the
+/// observer's distinct unported base constructor (see the module header).
 #[derive(Clone, Copy)]
 pub struct ClassRegistryOps {
     /// The container base ctor @ 0x08135308
@@ -140,9 +146,13 @@ pub struct ClassRegistryOps {
         capacity: u32,
         growth: u32,
     ) -> *mut Registry,
-    /// The registry observer's ctor @ 0x082028a4: an ADS C++
-    /// constructor, takes the raw block, returns `this`.
+    /// The registry observer's complete ctor @ 0x082028a4. Its default
+    /// is the port below; retaining this seam preserves callers that
+    /// replace the complete original constructor.
     pub observer_construct: unsafe extern "C" fn(this: *mut u8) -> *mut u8,
+    /// The observer's distinct unported base ctor @ 0x0810dddc. It takes
+    /// the raw allocation in r0 and returns its object pointer in r0.
+    pub observer_base_construct: unsafe extern "C" fn(this: *mut u8) -> *mut u8,
     /// The observer swap @ 0x08135040 `(observable, observer)`:
     /// detaches the old observer (+0x24) through its vtable +0x1c,
     /// installs the new one, attaches it (vtable +0x18) and notifies
@@ -165,19 +175,40 @@ unsafe extern "C" fn stub_container_construct(
     this
 }
 
-/// Default observer-ctor stub: zeroes the 8-byte block and returns it
-/// (the `singletons.rs` zeroing precedent — a faithful *subset* of the
-/// original's stores, but no vtable, which is why the module header
-/// calls this port not hook-ready). Volatile stores: a plain loop is
-/// rewritten by LLVM into a call to `__aeabi_memclr`, a symbol that
-/// does not exist in this build (the strcat.rs trap).
-unsafe extern "C" fn stub_observer_construct(this: *mut u8) -> *mut u8 {
-    if !this.is_null() {
-        for offset in 0..REGISTRY_OBSERVER_SIZE {
-            this.add(offset).write_volatile(0);
-        }
-    }
+/// Default observer base-ctor stub: forwards `this` untouched. The
+/// complete observer constructor below still installs its own vtable,
+/// exactly after this dispatch; the base object's remaining initialization
+/// belongs to unported `FUN_0810dddc`.
+unsafe extern "C" fn stub_observer_base_construct(this: *mut u8) -> *mut u8 {
     this
+}
+
+/// registry_observer_construct — original: `FUN_082028a4` @ 0x082028a4
+/// (20 bytes; 3 `bl` call sites, including
+/// [`class_registry_construct`]).
+///
+/// ADS C++ constructor for the registry's 8-byte observer singleton.
+/// It forwards the raw allocation to its base constructor
+/// (`FUN_0810dddc` @ 0x0810dddc), writes the literal vtable
+/// `0x089910ac` at offset +0x00 of the pointer returned by that call,
+/// then returns that same pointer. The base constructor is deliberately
+/// left behind [`ClassRegistryOps::observer_base_construct`].
+///
+/// Raw ARM establishes both ordering and ABI: `bl 0x0810dddc` leaves its
+/// r0 result live for `str r1, [r0]`, and `pop {r4, pc}` returns that
+/// unmodified r0 value. There is intentionally no NULL guard; neither
+/// the ARM `str` nor this volatile store makes a failed allocation safe.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn registry_observer_construct(this: *mut u8) -> *mut u8 {
+    let base_construct =
+        core::ptr::read_volatile(core::ptr::addr_of!(CLASS_REGISTRY_OPS.observer_base_construct));
+    let observer = base_construct(this);
+    core::ptr::write_volatile(
+        observer.cast::<*const RegistryObserverVtable>(),
+        REGISTRY_OBSERVER_VTABLE_ADDRESS as *const RegistryObserverVtable,
+    );
+    observer
 }
 
 /// Default observer-swap stub: no-op (see the module header).
@@ -188,16 +219,16 @@ unsafe extern "C" fn stub_set_observer(
     core::ptr::null_mut()
 }
 
-/// Wired defaults (documented stubs until the container/observer
-/// classes are ported).
+/// Wired defaults. The complete registry-observer constructor is ported;
+/// its base and the two container operations are documented stubs.
 pub(crate) const DEFAULT_CLASS_REGISTRY_OPS: ClassRegistryOps = ClassRegistryOps {
     container_construct: stub_container_construct,
-    observer_construct: stub_observer_construct,
+    observer_construct: registry_observer_construct,
+    observer_base_construct: stub_observer_base_construct,
     set_observer: stub_set_observer,
 };
 
-/// The active implementation table. Host tests install recording mocks;
-/// the real ports replace the defaults when they exist.
+/// the base or container ports replace their defaults when they exist.
 pub static mut CLASS_REGISTRY_OPS: ClassRegistryOps = DEFAULT_CLASS_REGISTRY_OPS;
 
 /// Reads one op (volatile — same rationale as every dispatch table: the
@@ -457,6 +488,7 @@ mod tests {
             CLASS_REGISTRY_OPS = ClassRegistryOps {
                 container_construct: mock_container_construct,
                 observer_construct: mock_observer_construct,
+                observer_base_construct: stub_observer_base_construct,
                 set_observer: mock_set_observer,
             };
             ptr::addr_of_mut!(CONSTRUCTED_REGISTRY).write(Registry {
@@ -664,6 +696,49 @@ mod tests {
     // ---- the default stubs ----
 
     #[test]
+    fn registry_observer_constructor_forwards_base_return_then_installs_vtable() {
+        // The base mock sees its return object's old vtable. The final
+        // literal proves the constructor's only store follows that call.
+        const OLD_VTABLE: usize = 0xdead_beef;
+        unsafe extern "C" fn recording_base_construct(this: *mut u8) -> *mut u8 {
+            trace().push("observer_base_construct");
+            assert_eq!(this, 0x2000 as *mut u8, "the allocation is r0");
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(ARENA.vtable)) as usize,
+                OLD_VTABLE,
+                "the derived vtable store cannot precede the base call"
+            );
+            ptr::addr_of_mut!(ARENA) as *mut u8
+        }
+
+        let guard = mock();
+        unsafe {
+            ptr::write_volatile(
+                ptr::addr_of_mut!(ARENA.vtable),
+                OLD_VTABLE as *const RegistryObserverVtable,
+            );
+            CLASS_REGISTRY_OPS.observer_base_construct = recording_base_construct;
+
+            let returned = registry_observer_construct(0x2000 as *mut u8);
+
+            assert_eq!(returned, ptr::addr_of_mut!(ARENA) as *mut u8);
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(ARENA.vtable)) as usize,
+                REGISTRY_OBSERVER_VTABLE_ADDRESS,
+                "the literal 0x089910ac is installed at +0x00"
+            );
+            assert_eq!(
+                *trace(),
+                std::vec!["observer_base_construct"],
+                "base construction is the sole call, before the vtable store"
+            );
+        }
+        restore(guard);
+    }
+
+    // ---- the unported-operation stubs ----
+
+    #[test]
     fn the_default_container_stub_returns_this_unchanged() {
         let guard = CONSTRUCT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
@@ -685,16 +760,12 @@ mod tests {
     }
 
     #[test]
-    fn the_default_observer_stub_zeroes_the_8_byte_block() {
+    fn the_default_observer_base_stub_returns_this_unchanged() {
         let guard = CONSTRUCT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
-            let block = ptr::addr_of_mut!(ARENA) as *mut u8;
-            for offset in 0..REGISTRY_OBSERVER_SIZE {
-                block.add(offset).write(0xa5);
-            }
-            assert_eq!(stub_observer_construct(block), block);
-            assert!((0..REGISTRY_OBSERVER_SIZE).all(|offset| block.add(offset).read() == 0));
-            assert!(stub_observer_construct(ptr::null_mut()).is_null(), "NULL-safe");
+            let this = ptr::addr_of_mut!(ARENA) as *mut u8;
+            assert_eq!(stub_observer_base_construct(this), this);
+            assert!(stub_observer_base_construct(ptr::null_mut()).is_null(), "forwards NULL");
         }
         restore(guard);
     }
