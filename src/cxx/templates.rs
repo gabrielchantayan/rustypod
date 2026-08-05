@@ -42,6 +42,9 @@
 //! - [`vector_bool_reference_init`] — the `vector<bool>` mask-reference
 //!   constructor: copies the iterator's word pointer and stores the
 //!   single-bit mask `1 << bit`.
+//! - [`vector_bool_reference_test`] — the `vector<bool>` mask-reference
+//!   dereference: reads the storage word and returns whether the masked
+//!   bit is set.
 //! - [`vector_capacity`] / [`vector_capacity_elem12`] /
 //!   [`vector_capacity_elem16`] / [`vector_capacity_elem24_copy_77ec`]
 //!   / [`vector_capacity_elem40`] / [`vector_capacity_elem8`] /
@@ -894,6 +897,40 @@ pub unsafe extern "C" fn vector_bool_reference_init(
     core::ptr::write_unaligned(core::ptr::addr_of_mut!((*mask_ref).mask), mask);
     core::ptr::write_unaligned(core::ptr::addr_of_mut!((*mask_ref).word), word);
     mask_ref
+}
+
+/// vector_bool_reference_test — original: `FUN_083d7a20` @ 0x083d7a20
+/// (24 bytes; 3 `bl` call sites — 0x08269edc plus 0x083e5dac and
+/// 0x083e5f28 in the `vector<bool>` storage-grow path; the only copy —
+/// `ipod-decomp/decomp/c/037/083d7a20_FUN_083d7a20.c`).
+///
+/// `std::vector<bool>` mask-reference dereference — the
+/// `_Vb_reference`-shaped proxy's `operator bool`: loads the
+/// reference's word pointer and single-bit mask, reads the storage
+/// word, and returns whether the masked bit is set. The original is a
+/// straight `ldr`/`and` run — `ldr r1,[r0]; ldr r0,[r0,#4]; ldr
+/// r1,[r1]; ands r0,r1,r0; movne r0,#1; bx lr` — the `ands` setting
+/// the flags and `movne r0, #1` normalizing the result to the ADS 0/1
+/// word-sized bool.
+///
+/// Identification: it sits immediately after [`vector_bool_reference_init`]
+/// @ 0x083d79dc in the bit-iterator cluster (see [`vector_size_bool`]
+/// @ 0x083d7968 for the neighborhood), the read half of the
+/// `{word, mask}` proxy that constructor writes.
+///
+/// # Safety
+/// `mask_ref` must point at a readable [`VectorBoolReference`] whose
+/// `word` field addresses a readable storage word — unlike the other
+/// cluster members, this one dereferences the storage, so `word` must
+/// not be NULL.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_bool_reference_test(mask_ref: *const VectorBoolReference) -> u32 {
+    // `read_unaligned`: same 4-but-not-8-aligned firmware head hazard
+    // as `vector_bool_reference_init` on a 64-bit host.
+    let word = core::ptr::read_unaligned(core::ptr::addr_of!((*mask_ref).word));
+    let mask = core::ptr::read_unaligned(core::ptr::addr_of!((*mask_ref).mask));
+    u32::from(word.read() & mask != 0)
 }
 
 /// The `{begin, end, end_of_storage}` head of a vector — the three
@@ -2037,6 +2074,66 @@ mod tests {
             let mask = core::ptr::read_unaligned(core::ptr::addr_of!((*unaligned).mask));
             assert_eq!(word, iter.word);
             assert_eq!(mask, 0x20);
+        }
+    }
+
+    // ---- vector_bool_reference_test ---------------------------------
+
+    /// The masked bit set answers 1, clear answers 0, across every bit
+    /// position of a storage word.
+    #[test]
+    fn vector_bool_reference_test_reports_the_masked_bit() {
+        unsafe {
+            let mut storage = [0u32; 1];
+            let mut reference =
+                VectorBoolReference { word: core::ptr::addr_of_mut!(storage[0]), mask: 0 };
+            for bit in 0..32u32 {
+                let mask = 1u32 << bit;
+                reference.mask = mask;
+                storage[0] = mask;
+                assert_eq!(vector_bool_reference_test(&reference), 1, "bit {bit} set");
+                storage[0] = !mask;
+                assert_eq!(vector_bool_reference_test(&reference), 0, "bit {bit} clear");
+            }
+        }
+    }
+
+    /// Only the masked bit counts: other bits set in the word do not
+    /// leak into the answer, and a multi-bit mask ORs its bits (the
+    /// `ands`/`movne` idiom tests the whole intersection).
+    #[test]
+    fn vector_bool_reference_test_masks_the_word_exactly() {
+        unsafe {
+            let mut storage = [0xffff_fffeu32; 1];
+            let reference = VectorBoolReference { word: core::ptr::addr_of_mut!(storage[0]), mask: 1 };
+            assert_eq!(vector_bool_reference_test(&reference), 0);
+            storage[0] |= 1;
+            assert_eq!(vector_bool_reference_test(&reference), 1);
+            let reference = VectorBoolReference { word: core::ptr::addr_of_mut!(storage[0]), mask: 0x0000_0006 };
+            storage[0] = 0x0000_0002;
+            assert_eq!(vector_bool_reference_test(&reference), 1);
+            storage[0] = 0x0000_0008;
+            assert_eq!(vector_bool_reference_test(&reference), 0);
+        }
+    }
+
+    /// Firmware heads are only guaranteed 4-byte aligned; the port
+    /// must read a 4-but-not-8-aligned reference without faulting on a
+    /// 64-bit host.
+    #[test]
+    fn vector_bool_reference_test_reads_an_unaligned_head() {
+        unsafe {
+            let mut buf = [0u8; 24];
+            let mut storage = [0x0000_0080u32; 1];
+            let unaligned = buf.as_mut_ptr().add(4) as *mut VectorBoolReference;
+            core::ptr::write_unaligned(
+                core::ptr::addr_of_mut!((*unaligned).word),
+                core::ptr::addr_of_mut!(storage[0]),
+            );
+            core::ptr::write_unaligned(core::ptr::addr_of_mut!((*unaligned).mask), 0x80);
+            assert_eq!(vector_bool_reference_test(unaligned), 1);
+            storage[0] = 0;
+            assert_eq!(vector_bool_reference_test(unaligned), 0);
         }
     }
 

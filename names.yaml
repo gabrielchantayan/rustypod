@@ -15419,6 +15419,33 @@ functions:
       to a `cmp #32` + conditional lsl (exactly the ARM register-shift
       zero-above-31 semantics), plus LLVM's fp frame.
 
+  - address: 0x083d7a20
+    ghidra: FUN_083d7a20
+    name: vector_bool_reference_test
+    size: 24
+    sig: "u32 vector_bool_reference_test(const VectorBoolReference *mask_ref)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: mask_ref}
+    notes: >-
+      `std::vector<bool>` mask-reference dereference - the
+      `_Vb_reference`-shaped proxy's `operator bool`: `ldr r1,[r0];
+      ldr r0,[r0,#4]; ldr r1,[r1]; ands r0,r1,r0; movne r0,#1; bx lr`,
+      i.e. read the reference's word pointer and single-bit mask, load
+      the storage word, and return whether the masked bit is set as the
+      ADS 0/1 word-sized bool (`ands` sets the flags, `movne r0,#1`
+      normalizes). Unlike the rest of the bit-iterator cluster this
+      member DOES dereference the storage, so `word` must be valid.
+      Identification: sits immediately after the mask-reference ctor @
+      0x083d79dc in the bit-iterator cluster (see the 0x083d7968 entry
+      for the neighborhood), the read half of the `{word, mask}` proxy
+      that ctor writes. 3 bl call sites (0x08269edc, 0x083e5dac,
+      0x083e5f28), the last two in the vector<bool> storage-grow path;
+      the only copy. match.py - same ldr / ldr / ldr / and structure;
+      the head loads come out as byte accesses from the family's
+      read_unaligned host-testing idiom, the same accepted deviation as
+      vector_bool_reference_init, plus LLVM's fp frame.
+
   - address: 0x083d7708
     ghidra: FUN_083d7708
     name: vector_capacity_elem12
