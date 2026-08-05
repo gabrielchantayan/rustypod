@@ -14314,6 +14314,21 @@ functions:
       arithmetic, so reversed spans retain their negative count. Source C:
       decomp/c/037/083d7904_FUN_083d7904.c.
 
+  - address: 0x083d7914
+    ghidra: FUN_083d7914
+    name: vector_size_elem4_alias_7914
+    size: 16
+    sig: "i32 vector_size_elem4_alias_7914(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      Byte-identical vector_size_elem4 instantiation at 0x083d76d8:
+      `ldm r0,{r0,r1}; sub r0,r1,r0; asr r0,r0,#2; bx lr`. Its 5 bl
+      call sites use the same {begin, end} vector head. The `asr` is
+      arithmetic, so reversed spans retain their negative count. Source C:
+      decomp/c/037/083d7914_FUN_083d7914.c.
+
   - address: 0x083d7924
     ghidra: FUN_083d7924
     name: vector_size_elem4_alias_7924

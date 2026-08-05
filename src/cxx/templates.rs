@@ -365,6 +365,23 @@ pub unsafe extern "C" fn vector_size_elem4_alias_7904(vector: *const VectorBound
     vector_size(vector, 2)
 }
 
+/// vector_size_elem4_alias_7914 — original: `FUN_083d7914` @ 0x083d7914
+/// (16 bytes; `ipod-decomp/decomp/c/037/083d7914_FUN_083d7914.c`).
+///
+/// A byte-identical `std::vector<T>::size()` instantiation for a 4-byte
+/// element: loads the `{begin, end}` head, subtracts `begin` from `end`,
+/// then applies the original ARM `asr #2`. Reusing [`vector_size`] preserves
+/// that signed arithmetic-shift result for reversed spans.
+///
+/// # Safety
+/// `vector` must point at a readable `{begin, end}` pair.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.vector_size_elem4_alias_7914")]
+#[inline(never)]
+pub unsafe extern "C" fn vector_size_elem4_alias_7914(vector: *const VectorBounds) -> i32 {
+    vector_size(vector, 2)
+}
+
 /// vector_size_elem4_alias_7924 — original: `FUN_083d7924` @ 0x083d7924
 /// (16 bytes; `ipod-decomp/decomp/c/037/083d7924_FUN_083d7924.c`).
 ///
@@ -1227,6 +1244,21 @@ mod tests {
             // -15 >> 2 is -4, rather than a truncating -3.
             let reversed = VectorBounds { begin: begin.add(15), end: begin };
             assert_eq!(vector_size_elem4_alias_7904(&reversed), -4);
+        }
+    }
+
+    #[test]
+    fn vector_size_elem4_alias_7914_counts_normal_and_reversed_spans() {
+        unsafe {
+            let storage = [0u8; 32];
+            let begin = storage.as_ptr() as *mut u8;
+            let normal = VectorBounds { begin, end: begin.add(28) };
+            assert_eq!(vector_size_elem4_alias_7914(&normal), 7);
+
+            // ARM `asr #2` rounds negative, non-element-aligned spans down:
+            // -15 >> 2 is -4, rather than a truncating -3.
+            let reversed = VectorBounds { begin: begin.add(15), end: begin };
+            assert_eq!(vector_size_elem4_alias_7914(&reversed), -4);
         }
     }
 
