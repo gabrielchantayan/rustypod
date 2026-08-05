@@ -21653,3 +21653,44 @@ functions:
       query_read_clamps_the_size_unsigned_and_routes_the_read /
       query_read_read_error_skips_the_finish /
       query_read_finish_args_and_final_return.
+
+  - address: 0x082c2290
+    ghidra: FUN_082c2290
+    name: cg_buffer_align_offset
+    size: 32
+    sig: "u32 cg_buffer_align_offset(cg_codegen_buffer_t *output, u32 align)"
+    module: codegen/ir
+    status: ported
+    vars: {param_1: output, param_2: align}
+    notes: >-
+      2 bl call sites (grep on decomp/osos.asm), both passing align = 4
+      via `mov r1, #0x4`: 0x082c13e4 inside the label-fixup resolver
+      FUN_082c1360 (aligning the output before the fixup words are
+      emitted) and 0x082c232c inside the word emitter @ 0x082c231c
+      (aligning before the 32-bit store, then post-incrementing by 4).
+      The whole body is the classic power-of-two round-up idiom on the
+      emitted-code buffer's current_offset (+0x804):
+      `ldr r2,[r0,#0x804]; add r2,r2,r1; sub r2,r2,#0x1; sub r1,r1,#0x1;
+      bic r1,r2,r1; str r1,[r0,#0x804]; mov r0,r1; bx lr`, i.e.
+      current_offset = (current_offset + align - 1) & ~(align - 1),
+      stored back and returned. This is the "page accessor"/alignment
+      helper referenced by the cg_codegen_buffer_t notes at
+      0x082c23d4/0x082c22b0. Edge semantics kept for parity, not
+      sanitized: align is ASSUMED a power of two (a non-power-of-two
+      align clears more low bits than it rounds to); align == 1 is the
+      identity; align == 0 is pathological - align - 1 wraps to
+      all-ones, the bic yields 0 and the buffer rewinds to its start,
+      unguarded in the original and in the port (which uses wrapping
+      arithmetic, as ARM has no overflow traps). match.py (exit 1, diff
+      expected): the ldr/sub/str/mov sequence is verbatim; LLVM emits
+      `add r2, r1, r2; rsb r1, r1, #0; and r1, r2, r1` for the bic
+      (identical, since ~(a-1) == -a in two's complement), plus the
+      crate fp frame push/pop. Host tests:
+      src/codegen/ir.rs::buffer_align_offset_rounds_up_stores_back_and_leaves_neighbors
+      (already-aligned identity, +1 rounds up, store-back visible
+      through cg_buffer_current_offset, poisoned neighbours proving no
+      adjacent word is written),
+      buffer_align_offset_sweeps_power_of_two_alignments (align
+      1/2/4/8/0x10 over offsets 0..64, return == stored),
+      buffer_align_offset_keeps_align_zero_parity (align 0 rewinds to
+      0, matching the unguarded original).

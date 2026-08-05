@@ -55,6 +55,9 @@
 //! - `cg_buffer_current_offset` — original: `FUN_082c23d4` @ 0x082c23d4
 //!   (8 bytes; 8 `bl` call sites). Pure getter for the emitted-code
 //!   buffer's current write offset at +0x804.
+//! - `cg_buffer_align_offset` — original: `FUN_082c2290` @ 0x082c2290
+//!   (32 bytes; 2 `bl` call sites). Rounds the emitted-code buffer's
+//!   current offset up to a power-of-two alignment, in place.
 //! - `cg_codegen_output` — original: `FUN_082c17ec` @ 0x082c17ec
 //!   (8 bytes; 1 `bl` call site). Pure getter for the codegen's
 //!   emitted-code buffer at +0x10.
@@ -655,6 +658,39 @@ pub unsafe extern "C" fn cg_codegen_buffer_create(
 #[inline(never)]
 pub unsafe extern "C" fn cg_buffer_current_offset(output: *mut CgCodegenBuffer) -> usize {
     word(output as *mut u8, CG_CODEGEN_OUTPUT_OFFSET).read()
+}
+
+/// cg_buffer_align_offset — original: `FUN_082c2290` @ 0x082c2290
+/// (32 bytes, 2 `bl` call sites: 0x082c13e4 inside the label-fixup
+/// resolver `FUN_082c1360` (aligning the output before the fixup words
+/// are emitted) and 0x082c232c inside the word emitter @ 0x082c231c —
+/// both passing `align = 4` via `mov r1, #0x4`).
+///
+/// Rounds `output->current_offset` (+0x804) UP to a multiple of
+/// `align`, stores the aligned value back and returns it. The body is
+/// the classic power-of-two idiom, verbatim from the original's
+/// `ldr r2,[r0,#0x804]; add r2,r2,r1; sub r2,r2,#0x1; sub r1,r1,#0x1;
+/// bic r1,r2,r1; str r1,[r0,#0x804]; mov r0,r1; bx lr`:
+/// `current_offset = (current_offset + align - 1) & !(align - 1)`.
+/// The emitters run it before word stores so every 32-bit instruction
+/// lands on a 4-byte boundary within the lazily allocated code pages.
+///
+/// EDGE SEMANTICS (kept for parity, not sanitized): `align` is ASSUMED
+/// to be a power of two — a non-power-of-two `align` clears more low
+/// bits than it rounds to. `align == 1` is the identity
+/// (`(off + 0) & !0`). `align == 0` is pathological: `align - 1`
+/// wraps to all-ones, so the `bic` yields 0 and the buffer rewinds to
+/// its start — the original has no guard and neither does the port.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_buffer_align_offset(
+    output: *mut CgCodegenBuffer,
+    align: usize,
+) -> usize {
+    let offset = word(output as *mut u8, CG_CODEGEN_OUTPUT_OFFSET);
+    let aligned = offset.read().wrapping_add(align).wrapping_sub(1) & !align.wrapping_sub(1);
+    offset.write(aligned);
+    aligned
 }
 
 /// cg_codegen_output — original: `FUN_082c17ec` @ 0x082c17ec
@@ -1568,6 +1604,96 @@ mod tests {
                 output[CG_CODEGEN_OUTPUT_OFFSET + 1],
                 POISON,
                 "the getter reads no neighboring word"
+            );
+        }
+    }
+
+    #[test]
+    fn buffer_align_offset_rounds_up_stores_back_and_leaves_neighbors() {
+        const POISON: usize = 0xAAAA_AAAA_AAAA_AAAA;
+        let mut output = [POISON; CG_CODEGEN_OUTPUT_OFFSET + 2];
+
+        unsafe {
+            let buffer = output.as_mut_ptr() as *mut CgCodegenBuffer;
+
+            output[CG_CODEGEN_OUTPUT_OFFSET] = 8;
+            assert_eq!(
+                cg_buffer_align_offset(buffer, 4),
+                8,
+                "an already aligned offset is the identity"
+            );
+            assert_eq!(
+                cg_buffer_current_offset(buffer),
+                8,
+                "the identity is stored back"
+            );
+
+            output[CG_CODEGEN_OUTPUT_OFFSET] = 9;
+            assert_eq!(
+                cg_buffer_align_offset(buffer, 4),
+                12,
+                "one past a boundary rounds up to the next"
+            );
+            assert_eq!(
+                cg_buffer_current_offset(buffer),
+                12,
+                "the rounded value is stored back"
+            );
+
+            assert_eq!(
+                output[CG_CODEGEN_OUTPUT_OFFSET - 1],
+                POISON,
+                "the aligner writes no neighboring word"
+            );
+            assert_eq!(
+                output[CG_CODEGEN_OUTPUT_OFFSET + 1],
+                POISON,
+                "the aligner writes no neighboring word"
+            );
+        }
+    }
+
+    #[test]
+    fn buffer_align_offset_sweeps_power_of_two_alignments() {
+        let mut output = [0usize; CG_CODEGEN_OUTPUT_OFFSET + 1];
+
+        unsafe {
+            let buffer = output.as_mut_ptr() as *mut CgCodegenBuffer;
+            for align in [1usize, 2, 4, 8, 0x10] {
+                for off in 0..64usize {
+                    output[CG_CODEGEN_OUTPUT_OFFSET] = off;
+                    let expected = (off + align - 1) & !(align - 1);
+                    assert_eq!(
+                        cg_buffer_align_offset(buffer, align),
+                        expected,
+                        "return value for offset {off} align {align}"
+                    );
+                    assert_eq!(
+                        cg_buffer_current_offset(buffer),
+                        expected,
+                        "store-back for offset {off} align {align}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn buffer_align_offset_keeps_align_zero_parity() {
+        let mut output = [0usize; CG_CODEGEN_OUTPUT_OFFSET + 1];
+
+        unsafe {
+            let buffer = output.as_mut_ptr() as *mut CgCodegenBuffer;
+            output[CG_CODEGEN_OUTPUT_OFFSET] = 0x1234;
+            assert_eq!(
+                cg_buffer_align_offset(buffer, 0),
+                0,
+                "align - 1 wraps to all-ones, so the bic yields 0"
+            );
+            assert_eq!(
+                cg_buffer_current_offset(buffer),
+                0,
+                "the original rewinds the buffer to its start, unguarded"
             );
         }
     }
