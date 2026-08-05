@@ -20916,3 +20916,45 @@ functions:
       sequence (bare selector, kind word, {value, kind}, tagged
       selector) and a fake-vtable end-to-end through the default
       dispatcher body.
+
+  - address: 0x082bc4fc
+    ghidra: FUN_082bc4fc
+    name: cg_timer_wait
+    size: 96
+    sig: "u32 cg_timer_wait(u32 ticks, void *event)"
+    module: codegen/timer_wait
+    status: ported
+    vars: {param_1: ticks, param_2: event, uVar1: version, uVar2: channel, FUN_080e624c: board_version, FUN_0836dc14: timer_channel_arm, FUN_0836d854: notify_wait_enter, FUN_0836dd90: timer_channel_start, thunk_EXT_FUN_22001f78: event_wait, FUN_0836ddbc: timer_channel_stop, FUN_0836d82c: notify_wait_exit}
+    notes: >-
+      3 bl call sites, all from the unported FUN_0819d048 @
+      0x0819d278/0x0819d284/0x0819d290 (tick counts 0x4b0, a global,
+      0x960 against one event handle). A timed wait on an event handle
+      built on an S5L8702 timer channel (block at 0x3c700000, 0x20-byte
+      stride): channel = 3 when board_version()'s HIGH halfword == 0x10
+      and LOW halfword >= 6 (cmp r1,r0,lsr#16 / movcs r4,#3), else 0;
+      then the fixed sequence timer_channel_arm(channel, ticks) ->
+      notify_wait_enter() -> timer_channel_start(channel) ->
+      event_wait(event) -> timer_channel_stop(channel), tail-calling
+      notify_wait_exit(), whose result (always 0) is the return value.
+      Callees: 0x080e624c board_version (lazily cached sysinfo word,
+      +0x84 of 0x08369bec's object behind a 0x7fffffff sentinel);
+      0x0836dc14 timer_channel_arm (smallest prescaler n<=0x400 with
+      CLK/(ticks*n)<=0x10000, count -> ch+0x08, n-1 -> ch+0x10, 0x40 ->
+      ch+0x00, cmd word ch+0x04 |= 2, left stopped); 0x0836dd90 /
+      0x0836ddbc timer_channel_start/stop (cmd word ch+0x04 bit 0
+      set/clear); 0x0836d854 / 0x0836d82c notify_wait_enter/exit
+      (mailbox pairs (6,3,0),(7,5,0) / (6,1,0),(7,1,0) through the
+      command writer @ 0x0836b5b0); 0x08037ef0 event_wait (ROM veneer
+      to 0x22001f78, mirror of osos 0x08001f78: poll an event service
+      with the handle until ready). Deviation: all seven callees are
+      unported and sit behind the CG_TIMER_WAIT_OPS read_volatile seam
+      (heap.rs CG_HEAP_OPS pattern) with missing_* spin-loop defaults
+      (node_list.rs convention); the tail b is a returned seam call.
+      match.py (exit 1, diff expected): identical call sequence and
+      two-halfword channel-select condition; LLVM even emits the final
+      seam call as a real tail `bx r0`, matching the original's
+      `b 0x0836d82c`; the diff is the ops-table ldr/blx pairs and the
+      crate fp frame. Host tests: channel select boundaries (high !=
+      0x10, low < 6, low == 6, low > 6, 0xffff), fixed seven-call
+      order, verbatim ticks/event/channel forwarding, and tail-call
+      result propagation.

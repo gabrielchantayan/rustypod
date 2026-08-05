@@ -14,3 +14,7 @@
 //! any other unported function in osos.
 pub mod heap;
 pub mod ir;
+/// `cg_timer_wait` @ 0x082bc4fc — the timer-armed event wait used by
+/// the display path; not IR, but it lives inside the JIT's address
+/// block and is ported under the same `cg_*` roof.
+pub mod timer_wait;
