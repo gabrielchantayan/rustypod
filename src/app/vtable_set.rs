@@ -3587,6 +3587,254 @@ pub unsafe extern "C" fn vtable_file_record_teardown(record: *mut u8) {
     record.write(0);
 }
 
+/// The kind-1 +0x08 container teardown behind the `bl 0x08212a60` at
+/// 0x0811d1e0 inside [`vtable_file_record_destruct`]. `FUN_08212a60` @
+/// 0x08212a60 (16 bytes; **1 `bl` call site** — this function's; grep
+/// on `decomp/osos.asm`; **unported**):
+///
+/// ```text
+/// 08212a60  stmdb sp!, {r4, lr}
+/// 08212a64  add   r0, r0, #0x4
+/// 08212a68  bl    0x08155ec0        @ iter_cleanup(container + 4)
+/// 08212a6c  sub   r0, r0, #0x4      @ return the container
+/// 08212a70  ldmia sp!, {r4, pc}
+/// ```
+///
+/// The +0x08 container is one more iterator scratch object: its state
+/// object (container + 4) is released through the SAME iterator-state
+/// cleanup `FUN_08155ec0` [`vtable_file_record_teardown`] uses
+/// ([`VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP`]), and the container
+/// pointer returns so the caller's following `operator_delete` frees
+/// the block. The reference C's "Subroutine does not return" on this
+/// callee is a Ghidra mis-analysis: the body ends in a real `ldmia
+/// sp!, {r4, pc}` and the `bl 0x082aad24` after it (0x0811d1e4) is
+/// live code. The wired default models the exact chain minus the
+/// unported cleanup — the no-op [`teardown_iter_cleanup_unported`]
+/// stands in for `FUN_08155ec0` (its no-op rationale lives on
+/// [`VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP`]), then returns the
+/// container, so an unswapped table still runs the caller's
+/// `operator_delete` on the right block (the
+/// [`VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE`] "delete still
+/// frees the block" precedent). The default calls the no-op DIRECTLY
+/// rather than through the teardown's seam: a module-local name keeps
+/// host tests from racing the sibling's parallel tests (the
+/// [`VTABLE_QUERY_4C_SCALAR_DISPATCH`] precedent). Host tests install
+/// a recording mock via `core::ptr::addr_of_mut!`.
+pub static mut VTABLE_FILE_RECORD_DESTRUCT_KIND1_CONTAINER08_TEARDOWN: unsafe extern "C" fn(
+    container: *mut u8,
+) -> *mut u8 = destruct_container_teardown_default;
+
+/// The kind-1 +0x10 container teardown behind the `bl 0x0821c4ec` at
+/// 0x0811d1f4 inside [`vtable_file_record_destruct`]. `FUN_0821c4ec` @
+/// 0x0821c4ec (16 bytes; **2 `bl` call sites**, grep on
+/// `decomp/osos.asm`: 0x0811cd44 in the unported `FUN_0811ccd0` and
+/// this function's; **unported**) — the byte-identical twin of
+/// `FUN_08212a60` (see [`VTABLE_FILE_RECORD_DESTRUCT_KIND1_CONTAINER08_TEARDOWN`]):
+///
+/// ```text
+/// 0821c4ec  stmdb sp!, {r4, lr}
+/// 0821c4f0  add   r0, r0, #0x4
+/// 0821c4f4  bl    0x08155ec0        @ iter_cleanup(container + 4)
+/// 0821c4f8  sub   r0, r0, #0x4      @ return the container
+/// 0821c4fc  ldmia sp!, {r4, pc}
+/// ```
+///
+/// Same shape, same default, same Ghidra "Subroutine does not return"
+/// mis-analysis (the `bl 0x082aad24` at 0x0811d1f8 is live). A
+/// separate role-specific seam — not a shared one — keeps host tests
+/// able to tell the +0x08 call from the +0x10 call and to script them
+/// independently (the [`VTABLE_FILE_RECORD_KIND1_GUARD`] /
+/// [`VTABLE_FILE_RECORD_KIND2_GUARD`] two-seams-one-default
+/// precedent). Host tests install a recording mock via
+/// `core::ptr::addr_of_mut!`.
+pub static mut VTABLE_FILE_RECORD_DESTRUCT_KIND1_CONTAINER10_TEARDOWN: unsafe extern "C" fn(
+    container: *mut u8,
+) -> *mut u8 = destruct_container_teardown_default;
+
+/// Default kind-1 container teardown: the exact 16-byte body of
+/// `FUN_08212a60` / `FUN_0821c4ec` minus the unported iterator-state
+/// cleanup — [`teardown_iter_cleanup_unported`] (the no-op modeling
+/// `FUN_08155ec0`, see [`VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP`])
+/// runs on the state object at container + 4, and the container
+/// pointer returns so the caller's `operator_delete` frees the right
+/// block. Shared by both kind-1 container seams (the
+/// `construct_guard_unported` shared-default precedent).
+unsafe extern "C" fn destruct_container_teardown_default(container: *mut u8) -> *mut u8 {
+    teardown_iter_cleanup_unported(container.add(4).cast::<u32>());
+    container
+}
+
+/// The kind-2 +0x18 dispose behind the `bl 0x0812d300` at 0x0811d1c4
+/// inside [`vtable_file_record_destruct`]. `FUN_0812d300` @ 0x0812d300
+/// (24 bytes; **2 `bl` call sites**, grep on `decomp/osos.asm` — this
+/// function's and 0x0811d09c inside [`vtable_file_record_teardown`];
+/// **unported**) is the registry dispose already documented under
+/// [`VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE`]: it drains the
+/// remaining entries (0x0812d294) and tail-branches to the object
+/// teardown 0x0810e6b0 (`b 0x08135380`). The reference C's
+/// "Subroutine does not return" is the same Ghidra mis-analysis — the
+/// tail chain returns and the `bl 0x082aad24` at 0x0811d1c8 is live.
+/// Wired to the SAME no-op default as the teardown sibling's seam
+/// (the [`VTABLE_FILE_RECORD_KIND2_GUARD`] precedent — a
+/// role-specific name keeps host tests from racing the sibling's
+/// parallel tests). Host tests install a recording mock via
+/// `core::ptr::addr_of_mut!`.
+pub static mut VTABLE_FILE_RECORD_DESTRUCT_KIND2_DISPOSE: unsafe extern "C" fn(
+    registry: *mut u8,
+) = teardown_registry_dispose_unported;
+
+/// vtable_file_record_destruct — original: `FUN_0811d188` @ 0x0811d188
+/// (128 bytes; **2 `bl` call sites**, grep on `decomp/osos.asm`:
+/// 0x0815aa74 and 0x0819fdf8 — both are the destruct-then-free pair
+/// `bl 0x0811d188; bl 0x082aad24` on a NULL-guarded record pointer
+/// (`ldr r0, [r4, #0xcc]; cmp; beq` / two `ldrne`s and `cmpne; beq`),
+/// so both consume the returned record pointer as `operator_delete`'s
+/// argument).
+///
+/// The tag-dispatched destructor of the tagged 0x1c-byte file-record
+/// family — the counterpart of the constructors
+/// [`vtable_file_record_construct_kind1`] (0x0811d148) and
+/// [`vtable_file_record_construct_kind2`] (0x0811d104), dispatching on
+/// the tag byte they write at record +0x00:
+///
+/// ```text
+/// 0811d188  stmdb sp!, {r4, lr}
+/// 0811d18c  mov   r4, r0            @ save record
+/// 0811d190  ldrb  r0, [r0, #0x0]    @ tag = record.+0x00
+/// 0811d194  cmp   r0, #0x0
+/// 0811d198  beq   0x0811d1cc        @ tag 0 -> return the record
+/// 0811d19c  cmp   r0, #0x1
+/// 0811d1a0  beq   0x0811d1d4        @ tag 1 -> kind-1 branch
+/// 0811d1a4  cmp   r0, #0x2
+/// 0811d1a8  bne   0x0811d1cc        @ unknown tag -> return the record
+/// 0811d1ac  ldr   r0, [r4, #0x4]    @ kind 2: block = record.+0x04
+/// 0811d1b0  cmp   r0, #0x0
+/// 0811d1b4  blne  0x082aad24        @ operator_delete(block) — NO dispose
+/// 0811d1b8  ldr   r0, [r4, #0x18]   @ registry = record.+0x18
+/// 0811d1bc  cmp   r0, #0x0
+/// 0811d1c0  beq   0x0811d1cc
+/// 0811d1c4  bl    0x0812d300        @ registry_dispose(registry)
+/// 0811d1c8  bl    0x082aad24        @ operator_delete(registry)
+/// 0811d1cc  mov   r0, r4            @ return the record
+/// 0811d1d0  ldmia sp!, {r4, pc}
+/// 0811d1d4  ldr   r0, [r4, #0x8]    @ kind 1: container = record.+0x08
+/// 0811d1d8  cmp   r0, #0x0
+/// 0811d1dc  beq   0x0811d1e8
+/// 0811d1e0  bl    0x08212a60        @ container08_teardown(container)
+/// 0811d1e4  bl    0x082aad24        @ operator_delete(its return)
+/// 0811d1e8  ldr   r0, [r4, #0x10]   @ container = record.+0x10
+/// 0811d1ec  cmp   r0, #0x0
+/// 0811d1f0  beq   0x0811d1fc
+/// 0811d1f4  bl    0x0821c4ec        @ container10_teardown(container)
+/// 0811d1f8  bl    0x082aad24        @ operator_delete(its return)
+/// 0811d1fc  mov   r0, r4
+/// 0811d200  bl    0x0811d008        @ vtable_file_record_teardown(record)
+/// 0811d204  b     0x0811d1cc        @ return the record
+/// ```
+///
+/// Tag 0 and any unknown tag are a straight no-op returning the
+/// record. **Kind 1** tears the two iterator containers down in field
+/// order — +0x08 first, then +0x10 — each only when non-NULL, each
+/// teardown (0x08212a60 / 0x0821c4ec, the iterator-state-cleanup
+/// wrappers) immediately followed by `operator_delete` on the
+/// teardown's return value, then runs the shared registry-half
+/// teardown [`vtable_file_record_teardown`] (0x0811d008, ported in
+/// this module) on the whole record. **Kind 2** deletes the +0x04
+/// block directly (NO dispose — the block is a plain five-word
+/// allocation from [`vtable_file_record_construct_kind2`]'s
+/// `operator_new(0x14)`, not an object) and, when +0x18 is non-NULL,
+/// disposes it through 0x0812d300 before deleting it. This function
+/// itself writes NOTHING back to the record — the tag and +0x04
+/// clearing on the kind-1 path is the teardown's own tail.
+///
+/// # Deviations
+///
+/// - **The three unported callees sit behind seams** — 0x08212a60
+///   behind [`VTABLE_FILE_RECORD_DESTRUCT_KIND1_CONTAINER08_TEARDOWN`],
+///   0x0821c4ec behind
+///   [`VTABLE_FILE_RECORD_DESTRUCT_KIND1_CONTAINER10_TEARDOWN`] and
+///   0x0812d300 behind [`VTABLE_FILE_RECORD_DESTRUCT_KIND2_DISPOSE`].
+///   The container seams' wired default models the callees' exact
+///   16-byte bodies minus the unported `FUN_08155ec0` cleanup (the
+///   no-op [`teardown_iter_cleanup_unported`] stands in — its
+///   rationale lives on [`VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP`]),
+///   returning the container so the following `operator_delete` frees
+///   the right block; the kind-2 dispose seam shares the teardown
+///   sibling's no-op default (see each seam's doc).
+/// - **[`vtable_file_record_teardown`] is called DIRECTLY** (the
+///   original's `bl 0x0811d008` at 0x0811d200 targets the ported
+///   body — the app/class_6800.rs ported-callees-called-directly
+///   precedent) and **`operator_delete` (0x082aad24) is called
+///   directly** (ported in `heap/veneers.rs`); host tests observe the
+///   deletes through the `HEAP_OPS.free` slot (the
+///   [`vtable_file_record_teardown`] precedent).
+/// - **The kind-1 deletes consume the teardown seams' RETURN value**
+///   (`operator_delete(teardown(container))`): the original's `bl
+///   0x082aad24` receives r0 straight from 0x08212a60 / 0x0821c4ec,
+///   and both callees provably return their argument (`sub r0, r0,
+///   #0x4` after the cleanup).
+/// - **The kind-2 +0x18 delete gets the guarded word, not the
+///   dispose's return** — the [`vtable_file_record_teardown`]
+///   convention for the same `bl 0x0812d300; bl 0x082aad24` pair:
+///   0x0812d300 reloads r0 with its argument (`mov r0, r4`) before
+///   tail-branching into the object-teardown chain, whose return is
+///   not established; the seam returns nothing and the registry
+///   pointer is deleted.
+/// - **Every field load keeps the original's width**: `ldrb` for the
+///   tag, 32-bit `ldr` for the pointer words (on a 64-bit host the
+///   pointers truncate to their low 32 bits — the
+///   [`vtable_file_record_init`] byte-exact precedent).
+/// - **No `forwarded` parameter**: the entry `stmdb` spills no
+///   argument registers and r1..r3 are never read — this is a record
+///   destructor, not a message thunk (the
+///   [`vtable_file_record_construct_kind1`] precedent).
+/// - **The reference C is not followed where it mis-decompiles**:
+///   `decomp/c/010/0811d188_FUN_0811d188.c` marks all three
+///   container/registry teardowns "Subroutine does not return" — the
+///   disassembly shows real returns (0x08212a60 / 0x0821c4ec end in
+///   `ldmia sp!, {r4, pc}`; 0x0812d300's tail chain returns — see
+///   [`VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE`]) and the
+///   `operator_delete` after each is live code — and it drops every
+///   call argument (the teardowns receive the container in r0, the
+///   deletes the teardown's return). The port follows the
+///   disassembly.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_file_record_destruct(record: *mut u8) -> *mut u8 {
+    let tag = record.read();
+    if tag == FILE_RECORD_TAG_KIND1 {
+        let container = record.add(8).cast::<u32>().read() as *mut u8;
+        if !container.is_null() {
+            let teardown = core::ptr::read_volatile(core::ptr::addr_of!(
+                VTABLE_FILE_RECORD_DESTRUCT_KIND1_CONTAINER08_TEARDOWN
+            ));
+            crate::heap::veneers::operator_delete(teardown(container));
+        }
+        let container = record.add(0x10).cast::<u32>().read() as *mut u8;
+        if !container.is_null() {
+            let teardown = core::ptr::read_volatile(core::ptr::addr_of!(
+                VTABLE_FILE_RECORD_DESTRUCT_KIND1_CONTAINER10_TEARDOWN
+            ));
+            crate::heap::veneers::operator_delete(teardown(container));
+        }
+        vtable_file_record_teardown(record);
+    } else if tag == FILE_RECORD_TAG_KIND2 {
+        let block = record.add(4).cast::<u32>().read() as *mut u8;
+        if !block.is_null() {
+            crate::heap::veneers::operator_delete(block);
+        }
+        let registry = record.add(0x18).cast::<u32>().read() as *mut u8;
+        if !registry.is_null() {
+            let dispose = core::ptr::read_volatile(core::ptr::addr_of!(
+                VTABLE_FILE_RECORD_DESTRUCT_KIND2_DISPOSE
+            ));
+            dispose(registry);
+            crate::heap::veneers::operator_delete(registry);
+        }
+    }
+    record
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -3654,6 +3902,12 @@ mod tests {
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP)
                     .write_volatile(teardown_iter_cleanup_unported);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE)
+                    .write_volatile(teardown_registry_dispose_unported);
+                core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_DESTRUCT_KIND1_CONTAINER08_TEARDOWN)
+                    .write_volatile(destruct_container_teardown_default);
+                core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_DESTRUCT_KIND1_CONTAINER10_TEARDOWN)
+                    .write_volatile(destruct_container_teardown_default);
+                core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_DESTRUCT_KIND2_DISPOSE)
                     .write_volatile(teardown_registry_dispose_unported);
             }
         }
@@ -8582,6 +8836,297 @@ mod tests {
             assert_eq!(TD_FREE_PTRS[0], (registry as u32) as *mut u8);
             assert_eq!(record[0], 0);
             assert_eq!(record.as_ptr().add(4).cast::<u32>().read(), 0);
+        }
+    }
+
+    // ---- recording mocks for the vtable_file_record_destruct seams ---
+
+    const DT_EV_CONTAINER08: u32 = 0xde08;
+    const DT_EV_CONTAINER10: u32 = 0xde10;
+    const DT_EV_DISPOSE: u32 = 0xde18;
+    const DT_EV_FREE: u32 = 0xdefe;
+
+    static mut DT_EVENTS: [u32; 32] = [0; 32];
+    static mut DT_EVENT_COUNT: usize = 0;
+    static mut DT_FREE_PTRS: [*mut u8; 8] = [core::ptr::null_mut(); 8];
+    static mut DT_FREE_COUNT: usize = 0;
+
+    /// The stand-in kind-1 containers (+0x08 / +0x10), the kind-2 +0x04
+    /// block and the kind-2 +0x18 registry.
+    static mut DT_CONTAINER08: [u8; 0x18] = [0; 0x18];
+    static mut DT_CONTAINER10: [u8; 0x18] = [0; 0x18];
+    static mut DT_BLOCK: [u8; 0x14] = [0; 0x14];
+    static mut DT_KIND2_REGISTRY: [u8; 0x28] = [0; 0x28];
+
+    /// Sentinel blocks the container-teardown mocks RETURN instead of
+    /// their argument — pins that the delete consumes the teardown's
+    /// r0 (`bl 0x082aad24` straight after `bl 0x08212a60` /
+    /// `bl 0x0821c4ec`), not the raw record field.
+    static mut DT_RETURN08: [u8; 8] = [0; 8];
+    static mut DT_RETURN10: [u8; 8] = [0; 8];
+
+    unsafe fn dt_push(event: u32) {
+        let count = DT_EVENT_COUNT;
+        DT_EVENTS[count] = event;
+        DT_EVENT_COUNT = count + 1;
+    }
+
+    unsafe extern "C" fn recording_dt_container08(container: *mut u8) -> *mut u8 {
+        dt_push(DT_EV_CONTAINER08);
+        dt_push(container as u32);
+        core::ptr::addr_of_mut!(DT_RETURN08).cast()
+    }
+
+    unsafe extern "C" fn recording_dt_container10(container: *mut u8) -> *mut u8 {
+        dt_push(DT_EV_CONTAINER10);
+        dt_push(container as u32);
+        core::ptr::addr_of_mut!(DT_RETURN10).cast()
+    }
+
+    unsafe extern "C" fn recording_dt_dispose(registry: *mut u8) {
+        dt_push(DT_EV_DISPOSE);
+        dt_push(registry as u32);
+    }
+
+    unsafe extern "C" fn recording_dt_free(
+        _heap: *mut crate::heap::types::HeapDescriptorDescriptor,
+        ptr: *mut u8,
+        tag: usize,
+    ) {
+        dt_push(DT_EV_FREE);
+        dt_push(tag as u32);
+        let count = DT_FREE_COUNT;
+        DT_FREE_PTRS[count] = ptr;
+        DT_FREE_COUNT = count + 1;
+    }
+
+    /// Resets the recording state, swaps in the recording free and
+    /// installs the three recording seam mocks (the
+    /// `install_recording_teardown` precedent).
+    unsafe fn install_recording_destruct() {
+        DT_EVENT_COUNT = 0;
+        DT_FREE_COUNT = 0;
+        install_stub_heap();
+        let mut ops = core::ptr::addr_of!(crate::heap::veneers::HEAP_OPS).read_volatile();
+        ops.free = recording_dt_free;
+        core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS).write_volatile(ops);
+        core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_DESTRUCT_KIND1_CONTAINER08_TEARDOWN)
+            .write_volatile(recording_dt_container08);
+        core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_DESTRUCT_KIND1_CONTAINER10_TEARDOWN)
+            .write_volatile(recording_dt_container10);
+        core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_DESTRUCT_KIND2_DISPOSE)
+            .write_volatile(recording_dt_dispose);
+    }
+
+    #[test]
+    fn file_record_destruct_tag0_is_a_noop_and_returns_the_record() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = [0xa5u8; 0x20];
+        unsafe {
+            install_recording_destruct();
+            record[0] = 0;
+            let ptr = record.as_mut_ptr();
+
+            let returned = vtable_file_record_destruct(ptr);
+
+            assert_eq!(returned, ptr, "mov r0, r4 — the record returns");
+            assert_eq!(DT_EVENT_COUNT, 0, "cmp r0, #0; beq — nothing runs");
+            assert_eq!(DT_FREE_COUNT, 0);
+            assert_eq!(record[0], 0, "the tag byte is untouched");
+            assert_eq!(&record[1..], &[0xa5u8; 0x1f], "the record is untouched");
+        }
+    }
+
+    #[test]
+    fn file_record_destruct_unknown_tag_is_a_noop_and_returns_the_record() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = [0xa5u8; 0x20];
+        unsafe {
+            install_recording_destruct();
+            record[0] = 3;
+            let ptr = record.as_mut_ptr();
+
+            let returned = vtable_file_record_destruct(ptr);
+
+            assert_eq!(returned, ptr);
+            assert_eq!(DT_EVENT_COUNT, 0, "cmp r0, #0x2; bne — nothing runs");
+            assert_eq!(DT_FREE_COUNT, 0);
+            assert_eq!(record[0], 3, "the unknown tag byte is untouched");
+            assert_eq!(&record[1..], &[0xa5u8; 0x1f], "the record is untouched");
+        }
+    }
+
+    #[test]
+    fn file_record_destruct_kind1_null_containers_run_straight_to_the_teardown() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = [0xa5u8; 0x20];
+        unsafe {
+            install_recording_destruct();
+            record[0] = FILE_RECORD_TAG_KIND1;
+            record.as_mut_ptr().add(4).cast::<u32>().write(0); // NULL registry
+            record.as_mut_ptr().add(8).cast::<u32>().write(0); // NULL +0x08
+            record.as_mut_ptr().add(0x10).cast::<u32>().write(0); // NULL +0x10
+            record.as_mut_ptr().add(0x18).cast::<u32>().write(0xdead_beef); // unread
+            let ptr = record.as_mut_ptr();
+
+            let returned = vtable_file_record_destruct(ptr);
+
+            assert_eq!(returned, ptr);
+            assert_eq!(
+                DT_EVENT_COUNT, 0,
+                "both containers NULL: no container teardown, no delete; \
+                 the NULL registry makes the teardown's own tail a no-op too"
+            );
+            assert_eq!(DT_FREE_COUNT, 0);
+            // The teardown ran: zeroing the tag and +0x04 is its tail
+            // (this function writes nothing back itself).
+            assert_eq!(record[0], 0, "vtable_file_record_teardown's strb");
+            assert_eq!(record.as_ptr().add(4).cast::<u32>().read(), 0);
+            assert_eq!(record.as_ptr().add(8).cast::<u32>().read(), 0);
+            assert_eq!(record.as_ptr().add(0x10).cast::<u32>().read(), 0);
+            assert_eq!(
+                record.as_ptr().add(0x18).cast::<u32>().read(),
+                0xdead_beef,
+                "+0x18 is never read on the kind-1 path"
+            );
+        }
+    }
+
+    #[test]
+    fn file_record_destruct_kind1_tears_down_and_deletes_both_containers_in_order() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = [0xa5u8; 0x20];
+        unsafe {
+            install_recording_destruct();
+            let container08 = core::ptr::addr_of_mut!(DT_CONTAINER08).cast::<u8>();
+            let container10 = core::ptr::addr_of_mut!(DT_CONTAINER10).cast::<u8>();
+            let container08_32 = container08 as u32;
+            let container10_32 = container10 as u32;
+            record[0] = FILE_RECORD_TAG_KIND1;
+            record.as_mut_ptr().add(4).cast::<u32>().write(0); // NULL registry
+            record.as_mut_ptr().add(8).cast::<u32>().write(container08_32);
+            record.as_mut_ptr().add(0x10).cast::<u32>().write(container10_32);
+            let ptr = record.as_mut_ptr();
+
+            let returned = vtable_file_record_destruct(ptr);
+
+            assert_eq!(returned, ptr);
+            let events = &DT_EVENTS[..DT_EVENT_COUNT];
+            assert_eq!(
+                events,
+                &[
+                    DT_EV_CONTAINER08,
+                    container08_32,
+                    DT_EV_FREE,
+                    TD_DELETE_TAG,
+                    DT_EV_CONTAINER10,
+                    container10_32,
+                    DT_EV_FREE,
+                    TD_DELETE_TAG,
+                ],
+                "+0x08 first, then +0x10 — each teardown immediately followed \
+                 by its operator_delete (0x0811d1d4..0x0811d1f8)"
+            );
+            assert_eq!(DT_FREE_COUNT, 2);
+            assert_eq!(
+                DT_FREE_PTRS[0],
+                core::ptr::addr_of_mut!(DT_RETURN08).cast::<u8>(),
+                "the delete consumes the +0x08 teardown's RETURN, not the field"
+            );
+            assert_eq!(
+                DT_FREE_PTRS[1],
+                core::ptr::addr_of_mut!(DT_RETURN10).cast::<u8>(),
+                "the delete consumes the +0x10 teardown's RETURN, not the field"
+            );
+            // The shared teardown ran (its zeroing tail); the container
+            // fields themselves are never written back.
+            assert_eq!(record[0], 0);
+            assert_eq!(record.as_ptr().add(4).cast::<u32>().read(), 0);
+            assert_eq!(record.as_ptr().add(8).cast::<u32>().read(), container08_32);
+            assert_eq!(record.as_ptr().add(0x10).cast::<u32>().read(), container10_32);
+        }
+    }
+
+    #[test]
+    fn file_record_destruct_kind2_deletes_the_block_then_disposes_and_deletes_the_registry() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = [0xa5u8; 0x20];
+        unsafe {
+            install_recording_destruct();
+            let block = core::ptr::addr_of_mut!(DT_BLOCK).cast::<u8>();
+            let registry = core::ptr::addr_of_mut!(DT_KIND2_REGISTRY).cast::<u8>();
+            let block32 = block as u32;
+            let registry32 = registry as u32;
+            record[0] = FILE_RECORD_TAG_KIND2;
+            record.as_mut_ptr().add(4).cast::<u32>().write(block32);
+            record.as_mut_ptr().add(0x18).cast::<u32>().write(registry32);
+            // +0x08/+0x10 stay at the 0xa5 fill: the kind-2 path never reads them.
+            let ptr = record.as_mut_ptr();
+
+            let returned = vtable_file_record_destruct(ptr);
+
+            assert_eq!(returned, ptr);
+            let events = &DT_EVENTS[..DT_EVENT_COUNT];
+            assert_eq!(
+                events,
+                &[
+                    DT_EV_FREE, // operator_delete(+0x04) — NO dispose first
+                    TD_DELETE_TAG,
+                    DT_EV_DISPOSE,
+                    registry32,
+                    DT_EV_FREE,
+                    TD_DELETE_TAG,
+                ],
+                "the +0x04 block is deleted bare (blne 0x082aad24); +0x18 is \
+                 disposed through 0x0812d300, then deleted (0x0811d1b8..0x0811d1c8)"
+            );
+            assert_eq!(DT_FREE_COUNT, 2);
+            assert_eq!(DT_FREE_PTRS[0], block32 as *mut u8);
+            assert_eq!(
+                DT_FREE_PTRS[1],
+                registry32 as *mut u8,
+                "the +0x18 delete frees the guarded word (the \
+                 vtable_file_record_teardown convention)"
+            );
+            // This function writes NOTHING back on the kind-2 path.
+            assert_eq!(record[0], FILE_RECORD_TAG_KIND2, "the tag byte stays");
+            assert_eq!(record.as_ptr().add(4).cast::<u32>().read(), block32);
+            assert_eq!(record.as_ptr().add(0x18).cast::<u32>().read(), registry32);
+        }
+    }
+
+    #[test]
+    fn file_record_destruct_kind2_null_members_is_a_noop() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = [0xa5u8; 0x20];
+        unsafe {
+            install_recording_destruct();
+            record[0] = FILE_RECORD_TAG_KIND2;
+            record.as_mut_ptr().add(4).cast::<u32>().write(0); // NULL block
+            record.as_mut_ptr().add(0x18).cast::<u32>().write(0); // NULL registry
+            let ptr = record.as_mut_ptr();
+
+            let returned = vtable_file_record_destruct(ptr);
+
+            assert_eq!(returned, ptr);
+            assert_eq!(
+                DT_EVENT_COUNT, 0,
+                "blne / beq skip both deletes and the dispose"
+            );
+            assert_eq!(DT_FREE_COUNT, 0);
+            assert_eq!(record[0], FILE_RECORD_TAG_KIND2);
         }
     }
 }

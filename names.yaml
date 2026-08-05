@@ -23391,3 +23391,89 @@ functions:
       / file_record_teardown_null_registry_skips_the_dispose_and_delete
       / file_record_teardown_zeroes_only_the_registry_word_and_the_tag
       / file_record_teardown_default_seams_yield_an_empty_traversal.
+
+  - address: 0x0811d188
+    ghidra: FUN_0811d188
+    name: vtable_file_record_destruct
+    size: 128
+    sig: "*mut u8 vtable_file_record_destruct(record: *mut u8)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r4: record
+      FUN_08212a60: kind-1 +0x08 container teardown (16-byte iterator-state-cleanup wrapper, 1 bl site - this function's; unported; VTABLE_FILE_RECORD_DESTRUCT_KIND1_CONTAINER08_TEARDOWN seam)
+      FUN_0821c4ec: kind-1 +0x10 container teardown (the byte-identical twin of FUN_08212a60, 2 bl sites - 0x0811cd44 and this function's; unported; VTABLE_FILE_RECORD_DESTRUCT_KIND1_CONTAINER10_TEARDOWN seam)
+      FUN_082aad24: operator_delete (direct, ported in heap/veneers)
+      FUN_0812d300: kind-2 +0x18 registry dispose (2 bl sites - this function's and vtable_file_record_teardown's; unported; VTABLE_FILE_RECORD_DESTRUCT_KIND2_DISPOSE seam, sharing the teardown sibling's no-op default)
+      FUN_0811d008: vtable_file_record_teardown (direct, ported in the same module)
+    notes: >-
+      2 bl call sites (grep on decomp/osos.asm): 0x0815aa74 and
+      0x0819fdf8 - both are the destruct-then-free pair `bl 0x0811d188;
+      bl 0x082aad24` on a NULL-guarded record pointer, consuming the
+      returned record pointer as operator_delete's argument. The
+      tag-dispatched destructor of the tagged 0x1c-byte file-record
+      family - the counterpart of vtable_file_record_construct_kind1 @
+      0x0811d148 and vtable_file_record_construct_kind2 @ 0x0811d104
+      (both ported in the same module), dispatching on the tag byte
+      they write at +0x00 (ldrb). Tag 0 and any unknown tag (cmp/bne)
+      are a straight no-op returning the record. Kind 1 tears the two
+      iterator containers down in field order - +0x08 first, then
+      +0x10 - each only when non-NULL, each teardown (FUN_08212a60 /
+      FUN_0821c4ec: add r0,r0,#0x4; bl FUN_08155ec0; sub r0,r0,#0x4 -
+      the same iterator-state cleanup vtable_file_record_teardown
+      uses, then return the container) immediately followed by
+      operator_delete on the teardown's RETURN value, then runs the
+      shared registry-half teardown FUN_0811d008 (ported as
+      vtable_file_record_teardown, commit 30604e8) on the whole
+      record. Kind 2 deletes the +0x04 block directly (blne 0x082aad24
+      - NO dispose: the block is a plain five-word operator_new(0x14)
+      allocation from the kind-2 constructor, not an object) and, when
+      +0x18 is non-NULL, disposes it through FUN_0812d300 before
+      deleting it. This function writes NOTHING back to the record -
+      the tag and +0x04 clearing on the kind-1 path is the teardown's
+      own tail. Deviations: the three unported callees sit behind the
+      new VTABLE_FILE_RECORD_DESTRUCT_KIND1_CONTAINER08_TEARDOWN /
+      _CONTAINER10_TEARDOWN / _KIND2_DISPOSE read_volatile seams; the
+      container seams share one wired default modeling the callees'
+      exact 16-byte bodies minus the unported FUN_08155ec0 cleanup
+      (the no-op teardown_iter_cleanup_unported stands in - its
+      rationale lives on VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP),
+      returning the container so the following operator_delete frees
+      the right block (the KIND1_GUARD/KIND2_GUARD two-seams-one-default
+      precedent), and the kind-2 dispose seam is wired to the SAME
+      no-op default as VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE
+      (role-specific names keep host tests from racing the sibling's
+      parallel tests); vtable_file_record_teardown and operator_delete
+      are called directly (both ported - the app/class_6800.rs
+      ported-callees-called-directly precedent), host tests observe
+      the deletes through the HEAP_OPS.free slot; the kind-1 deletes
+      consume the teardown seams' return value (both callees provably
+      return their argument - `sub r0, r0, #0x4`), while the kind-2
+      +0x18 delete gets the guarded word (the
+      vtable_file_record_teardown convention for the same bl 0x0812d300;
+      bl 0x082aad24 pair - 0x0812d300 reloads r0 with its argument
+      before tail-branching into the object-teardown chain, whose
+      return is not established); every field load keeps the
+      original's width (ldrb tag, 32-bit ldr pointer words - the
+      vtable_file_record_init byte-exact precedent); no forwarded
+      parameter (the entry stmdb spills no argument registers and
+      r1..r3 are never read). Reference C
+      (decomp/c/010/0811d188_FUN_0811d188.c) marks all three
+      container/registry teardowns "Subroutine does not return" - the
+      disassembly shows real returns (FUN_08212a60 / FUN_0821c4ec end
+      in ldmia sp!,{r4,pc}; FUN_0812d300's tail chain returns) and the
+      operator_delete after each is live code - and drops every call
+      argument; the port follows the disassembly. match.py: same tag
+      dispatch, the guarded teardown-then-delete pairs, the bare
+      blne delete of the kind-2 +0x04 block, the trailing teardown
+      call and the record return; the diff is the crate fp frame, the
+      three seam ldr/blx pairs standing in for the direct bls (the
+      documented seams), LLVM keeping the +0x18 registry in r5 and its
+      block ordering (kind-1 branch laid out ahead of kind-2's).
+      Host tests:
+      src/app/vtable_set.rs::file_record_destruct_tag0_is_a_noop_and_returns_the_record
+      / file_record_destruct_unknown_tag_is_a_noop_and_returns_the_record
+      / file_record_destruct_kind1_null_containers_run_straight_to_the_teardown
+      / file_record_destruct_kind1_tears_down_and_deletes_both_containers_in_order
+      / file_record_destruct_kind2_deletes_the_block_then_disposes_and_deletes_the_registry
+      / file_record_destruct_kind2_null_members_is_a_noop.
