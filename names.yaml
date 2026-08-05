@@ -19176,6 +19176,46 @@ functions:
       `bl`. Rust implementation and focused host tests:
       `src/ui/object_state.rs::scaled_timestamp_now`.
 
+  # --- retailOS elapsed-time baseline snapshot ---
+  - address: 0x08055fd0
+    ghidra: FUN_08055fd0
+    name: snapshot_timestamp_baseline
+    size: 36
+    sig: "i64 snapshot_timestamp_baseline(void)"
+    module: ui/object_state
+    status: ported
+    renames:
+      lVar1: scaled_sample
+      FUN_08090b88: baseline_clock_sample
+      DAT_08055ff4: TIMESTAMP_BASELINE
+    notes: >-
+      Calls retailOS baseline-clock getter 0x08090b88 with interface index
+      0 (`mov r0,#0x0`), shifts its 64-bit sample left by 10 (the same
+      fixed-point scale scaled_timestamp_now @ 0x08055fb4 applies to
+      sibling getter 0x0809b60c; 0x08090b88 reads through accessor
+      0x08296ea4 instead of 0x08296f18 and zero-extends a 32-bit result),
+      and stores the result as the doubleword at global 0x089ca5e0 + 0x20
+      (`strd r0,r1,[r2,#0x20]`; both the 0x08055ff4 and 0x08056024 literals
+      hold 0x089ca5e0, verified in osos.dec). This is the "snapshot" half
+      of the firmware's elapsed-time measurement. Three `bl 0x08055fd0`
+      call sites (grep -c on decomp/osos.asm): 0x08056014 inside the lazy
+      baseline getter 0x08055ff8 (populates a zero baseline), 0x08068638,
+      and 0x081eb420, which moves the r0:r1 residue into r6/r8 as the
+      subtrahend for the following scaled_timestamp_now delta. Ghidra
+      declares the original void, but it leaves the scaled sample in r0:r1
+      and both non-trivial call sites rely on that residue, so the port
+      returns the stored value; the global slot is modeled by the
+      TIMESTAMP_BASELINE static and 0x08090b88 stays in retailOS behind a
+      replaceable function-pointer boundary (same pattern as
+      scaled_timestamp_now's 0x0809b60c seam). match.py confirms the
+      structural shape: `mov r0,#0`, the three shift instructions, and the
+      doubleword store; the diff is only LLVM's push {fp,lr}/pop {fp,pc}
+      frame, the indirect `blx` through the boundary static versus the ADS
+      direct `bl`, and `strd` against the modeled static (offset 0) versus
+      the 0x089ca5e0 literal at offset 0x20. Rust implementation and
+      focused host tests:
+      `src/ui/object_state.rs::snapshot_timestamp_baseline`.
+
   # --- C++ object-header low-flag predicate ---
   - address: 0x0808539c
     ghidra: FUN_0808539c

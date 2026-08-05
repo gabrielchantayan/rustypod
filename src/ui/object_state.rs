@@ -291,6 +291,78 @@ pub unsafe extern "C" fn scaled_timestamp_now() -> i64 {
     clock_sample_fn()(TIMESTAMP_INTERFACE) << TIMESTAMP_SCALE_SHIFT
 }
 
+/// The elapsed-time baseline slot at global 0x089c_a5e0 + 0x20.
+///
+/// The firmware reaches this doubleword through the literals at
+/// `0x0805_5ff4` (0x08055fd0's `strd` store) and `0x0805_6024`
+/// (0x08055ff8's lazy `ldrd` load), both holding 0x089c_a5e0; this static
+/// models that target-side state. To the lazy getter 0x08055ff8, a zero
+/// doubleword means "not yet snapshotted".
+pub static mut TIMESTAMP_BASELINE: i64 = 0;
+
+/// Calls the stock baseline-clock getter, which remains in retailOS.
+///
+/// This is deliberately a boundary rather than a port of 0x08090b88. Host
+/// tests replace the one function pointer below; ARM builds call its fixed
+/// firmware load address. Like its sibling 0x0809b60c (see
+/// [`firmware_clock_sample`]), the original constructs a temporary stack
+/// object around interface `interface` (0x08206e40) and destroys it
+/// (0x08206e6c), but reads through the sibling accessor 0x08296ea4 instead
+/// of 0x08296f18 and returns that 32-bit result zero-extended to 64 bits
+/// in r0:r1 (`mov r1,r5` with r5 zeroed at 0x08090b9c).
+unsafe extern "C" fn firmware_baseline_clock_sample(interface: u32) -> i64 {
+    #[cfg(target_os = "none")]
+    {
+        let clock_sample: ClockSample = core::mem::transmute(0x0809_0b88usize);
+        clock_sample(interface)
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        let _ = interface;
+        0
+    }
+}
+
+/// Narrow boundary for the unported 0x08090b88 dependency.
+static mut BASELINE_CLOCK_SAMPLE: ClockSample = firmware_baseline_clock_sample;
+
+#[inline(always)]
+unsafe fn baseline_clock_sample_fn() -> ClockSample {
+    core::ptr::read_volatile(core::ptr::addr_of!(BASELINE_CLOCK_SAMPLE))
+}
+
+/// snapshot_timestamp_baseline — original: `FUN_08055fd0` @ `0x08055fd0`
+/// (36 bytes).
+///
+/// Source: `/home/gabe/Programming/ipod-decomp/decomp/c/003/08055fd0_FUN_08055fd0.c`;
+/// assembly: `decomp/osos.asm` @ `0x08055fd0..0x08055ff0`.
+///
+/// Calls retailOS baseline-clock getter 0x08090b88 with interface index
+/// [`TIMESTAMP_INTERFACE`], shifts its 64-bit sample left by
+/// [`TIMESTAMP_SCALE_SHIFT`] bits (the same fixed-point scale
+/// [`scaled_timestamp_now`] applies to sibling getter 0x0809b60c), and
+/// stores the result as the doubleword at global 0x089c_a5e0 + 0x20
+/// (`strd r0,r1,[r2,#0x20]`, modeled by [`TIMESTAMP_BASELINE`]). This is
+/// the "snapshot" half of the firmware's elapsed-time measurement: the
+/// lazy getter 0x08055ff8 calls it to populate a zero baseline, and all
+/// three [`scaled_timestamp_now`] call sites subtract that baseline from
+/// the current sample. Ghidra declares the original `void`, but it leaves
+/// the scaled sample in r0:r1 and both non-trivial call sites rely on the
+/// residue — 0x08055ff8 re-stores r0:r1 right after its `bl`, and
+/// 0x081eb420 moves them into r6/r8 as the subtrahend for the following
+/// `scaled_timestamp_now` delta — so the port returns the stored value.
+/// The original's `push {r4,lr}` never uses r4 — an ADS frame artifact not
+/// reproduced here.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn snapshot_timestamp_baseline() -> i64 {
+    let scaled_sample =
+        baseline_clock_sample_fn()(TIMESTAMP_INTERFACE) << TIMESTAMP_SCALE_SHIFT;
+    core::ptr::addr_of_mut!(TIMESTAMP_BASELINE).write_volatile(scaled_sample);
+    scaled_sample
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,9 +373,47 @@ mod tests {
     static SEQUENCE_ID_LOCK: Mutex<()> = Mutex::new(());
     static INDEXED_OBJECT_STORAGE_BASE_LOCK: Mutex<()> = Mutex::new(());
     static CLOCK_SAMPLE_LOCK: Mutex<()> = Mutex::new(());
+    static BASELINE_CLOCK_SAMPLE_LOCK: Mutex<()> = Mutex::new(());
     static mut CLOCK_SAMPLE_CALLS: u32 = 0;
     static mut CLOCK_SAMPLE_INTERFACE: u32 = u32::MAX;
     static mut MOCK_SAMPLE: i64 = 0;
+    static mut BASELINE_SAMPLE_CALLS: u32 = 0;
+    static mut BASELINE_SAMPLE_INTERFACE: u32 = u32::MAX;
+    static mut MOCK_BASELINE_SAMPLE: i64 = 0;
+
+    unsafe extern "C" fn recording_baseline_clock_sample(interface: u32) -> i64 {
+        BASELINE_SAMPLE_CALLS += 1;
+        BASELINE_SAMPLE_INTERFACE = interface;
+        MOCK_BASELINE_SAMPLE
+    }
+
+    /// Restores the stock-call boundary before another test uses it.
+    struct BaselineClockSampleReset;
+
+    impl Drop for BaselineClockSampleReset {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(BASELINE_CLOCK_SAMPLE)
+                    .write(firmware_baseline_clock_sample);
+                core::ptr::addr_of_mut!(TIMESTAMP_BASELINE).write(0);
+            }
+        }
+    }
+
+    fn install_recording_baseline_clock_sample(sample: i64) -> MutexGuard<'static, ()> {
+        let guard = BASELINE_CLOCK_SAMPLE_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        unsafe {
+            BASELINE_SAMPLE_CALLS = 0;
+            BASELINE_SAMPLE_INTERFACE = u32::MAX;
+            MOCK_BASELINE_SAMPLE = sample;
+            core::ptr::addr_of_mut!(TIMESTAMP_BASELINE).write(i64::MIN);
+            core::ptr::addr_of_mut!(BASELINE_CLOCK_SAMPLE)
+                .write(recording_baseline_clock_sample);
+        }
+        guard
+    }
 
     unsafe extern "C" fn recording_clock_sample(interface: u32) -> i64 {
         CLOCK_SAMPLE_CALLS += 1;
@@ -705,5 +815,56 @@ mod tests {
         let _reset = ClockSampleReset;
 
         assert_eq!(unsafe { scaled_timestamp_now() }, -1i64 << 10);
+    }
+
+    #[test]
+    fn baseline_snapshot_stores_the_scaled_sample_and_returns_it() {
+        let _guard = install_recording_baseline_clock_sample(0x0012_3456_789a_bcde);
+        let _reset = BaselineClockSampleReset;
+
+        let returned = unsafe { snapshot_timestamp_baseline() };
+
+        assert_eq!(
+            returned,
+            0x0012_3456_789a_bcdei64 << 10,
+            "call sites 0x08055ff8 and 0x081eb420 consume the r0:r1 residue"
+        );
+        assert_eq!(
+            unsafe { core::ptr::addr_of!(TIMESTAMP_BASELINE).read() },
+            0x0012_3456_789a_bcdei64 << 10,
+            "the scaled sample replaces the baseline slot (`strd r0,r1,[r2,#0x20]`)"
+        );
+        assert_eq!(unsafe { BASELINE_SAMPLE_CALLS }, 1);
+        assert_eq!(
+            unsafe { BASELINE_SAMPLE_INTERFACE },
+            0,
+            "the original passes interface index 0 (`mov r0,#0x0`)"
+        );
+    }
+
+    #[test]
+    fn baseline_snapshot_shift_carries_across_the_word_boundary() {
+        let _guard = install_recording_baseline_clock_sample(0x003f_ffff_ffff_ffff);
+        let _reset = BaselineClockSampleReset;
+
+        assert_eq!(
+            unsafe { snapshot_timestamp_baseline() },
+            0x003f_ffff_ffff_ffffi64 << 10,
+            "the top ten bits of r0 must shift into r1 (`orr r1,r1,r0,lsr #0x16`)"
+        );
+        assert_eq!(
+            unsafe { core::ptr::addr_of!(TIMESTAMP_BASELINE).read() },
+            0x003f_ffff_ffff_ffffi64 << 10
+        );
+    }
+
+    #[test]
+    fn baseline_snapshot_overwrites_a_previous_baseline() {
+        let _guard = install_recording_baseline_clock_sample(7);
+        let _reset = BaselineClockSampleReset;
+
+        assert_eq!(unsafe { snapshot_timestamp_baseline() }, 7 << 10);
+        assert_eq!(unsafe { snapshot_timestamp_baseline() }, 7 << 10);
+        assert_eq!(unsafe { BASELINE_SAMPLE_CALLS }, 2);
     }
 }
