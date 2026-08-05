@@ -2592,6 +2592,60 @@ pub unsafe extern "C" fn vtable_file_open(
     status
 }
 
+/// vtable_file_record_init — original: `FUN_0811d8ac` @ 0x0811d8ac
+/// (20 bytes; **7 `bl` call sites**, grep on `decomp/osos.asm`:
+/// 0x0810a94c, 0x0811c874, 0x0813653c, 0x0815e968, 0x081b0268,
+/// 0x081bc63c and 0x082859d8 — every site clears a six-byte record
+/// (a feature-state field like `param_1 + 0x6c` / `+ 0x54` ... or a
+/// stack record) immediately before handing the SAME pointer to
+/// [`vtable_file_open`] (0x0811d724), e.g. `FUN_08136520` does
+/// `init(auStack_28); ...; vtable_file_open(auStack_28, path, mode)`,
+/// and `FUN_081b0240` / `FUN_0811c7fc` / `FUN_0815e934` /
+/// `FUN_08285988` init a record field inside a freshly built object.
+/// No site passes anything but the record pointer, and several
+/// consume the return value as the record pointer).
+///
+/// The initializer of the six-byte file-open record
+/// [`vtable_file_open`] fills — a leaf thunk that zeroes all three
+/// fields (the object word, the flags byte, the write-mode byte):
+///
+/// ```text
+/// 0811d8ac  mov  r1, #0x0
+/// 0811d8b0  str  r1, [r0, #0x0]   @ record.object = NULL
+/// 0811d8b4  strb r1, [r0, #0x4]   @ record.flags  = 0
+/// 0811d8b8  strb r1, [r0, #0x5]   @ record.write  = 0
+/// 0811d8bc  bx   lr
+/// ```
+///
+/// # Deviations
+///
+/// - **The return type is `*mut u8`, not the reference C's `void`**:
+///   the body never writes r0, so the argument falls through to the
+///   caller — and callers rely on it (`iVar2 = FUN_0811d8ac(puVar1 +
+///   2)` at 0x081b0268, `iVar3 = FUN_0811d8ac(iVar3 + 0x10)` at
+///   0x082859d8, ...). `decomp/c/011/0811d8ac_FUN_0811d8ac.c` is
+///   otherwise exact (one `undefined4` store, two `undefined1`
+///   stores).
+/// - **The first store is a 32-bit `str`, modeled as a `u32` write**
+///   (not pointer-sized): byte-exact on a 64-bit host, where a
+///   pointer-sized store would clobber bytes 4..8 before the trailing
+///   byte stores — the inverse of [`vtable_file_open`]'s
+///   host-representation note.
+/// - **The adjacent sibling `FUN_0811d8c0` @ 0x0811d8c0 (20 bytes) is
+///   a SEPARATE routine**, not one body split by Ghidra: this
+///   function ends in a real `bx lr` at 0x0811d8bc. The sibling is
+///   the dispose-and-return-handle wrapper (`push {r4, lr}; mov r4,
+///   r0; bl 0x0811d7cc; mov r0, r4; pop {r4, pc}`) already documented
+///   under [`vtable_slot_04_dispose`]; it is NOT ported here.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_file_record_init(record: *mut u8) -> *mut u8 {
+    record.cast::<u32>().write(0);
+    record.add(4).write(0);
+    record.add(5).write(0);
+    record
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -6585,6 +6639,47 @@ mod tests {
             let result = vtable_file_open(record.ptr(), path.as_ptr(), 1);
             assert_ne!(result, 0);
             assert_eq!(record.bytes[5], 1);
+        }
+    }
+
+    // ---- vtable_file_record_init (0x0811d8ac) ----------------------
+
+    #[test]
+    fn file_record_init_zeroes_the_record_and_returns_the_pointer() {
+        let mut record = RecordFixture::new();
+        unsafe {
+            let result = vtable_file_record_init(record.ptr());
+
+            assert_eq!(result, record.ptr(), "r0 falls through: the argument returns");
+            assert_eq!(
+                record.bytes.as_ptr().cast::<u32>().read(),
+                0,
+                "str r1, [r0, #0x0] — record.object = NULL"
+            );
+            assert_eq!(record.bytes[4], 0, "strb r1, [r0, #0x4] — record.flags = 0");
+            assert_eq!(record.bytes[5], 0, "strb r1, [r0, #0x5] — record.write = 0");
+            assert_eq!(
+                &record.bytes[6..],
+                &[0xa5; 10],
+                "only the six record bytes are touched"
+            );
+        }
+    }
+
+    #[test]
+    fn file_record_init_clears_a_field_inside_a_larger_object() {
+        // The object-field call sites (0x081b0268, 0x0811c874,
+        // 0x0815e968, 0x082859d8) pass an interior pointer; the
+        // surrounding bytes must survive.
+        let mut object = [0xa5u8; 24];
+        unsafe {
+            let record = object.as_mut_ptr().add(8);
+            let result = vtable_file_record_init(record);
+
+            assert_eq!(result, record);
+            assert_eq!(&object[..8], &[0xa5; 8], "the prefix is untouched");
+            assert_eq!(&object[8..14], &[0; 6], "the six record bytes are cleared");
+            assert_eq!(&object[14..], &[0xa5; 10], "the tail is untouched");
         }
     }
 }

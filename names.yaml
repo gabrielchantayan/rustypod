@@ -22748,3 +22748,42 @@ functions:
       walk_alloc_probe_recursion_error_propagates /
       walk_alloc_default_seams_are_wired_to_the_ported_callees /
       walk_alloc_default_dispatch_seam_runs_the_ported_dispatcher.
+
+  - address: 0x0811d8ac
+    ghidra: FUN_0811d8ac
+    name: vtable_file_record_init
+    size: 20
+    sig: "*mut u8 vtable_file_record_init(record: *mut u8)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r0: record
+    notes: >-
+      7 bl call sites (grep on decomp/osos.asm): 0x0810a94c,
+      0x0811c874, 0x0813653c, 0x0815e968, 0x081b0268, 0x081bc63c and
+      0x082859d8 - every site clears a six-byte record (a
+      feature-state field like param_1 + 0x6c / + 0x54 ... or a stack
+      record) immediately before handing the SAME pointer to
+      vtable_file_open (0x0811d724), e.g. FUN_08136520 does
+      init(auStack_28); ...; vtable_file_open(auStack_28, path, mode),
+      and FUN_081b0240 / FUN_0811c7fc / FUN_0815e934 / FUN_08285988
+      init a record field inside a freshly built object. No b (tail)
+      sites. The leaf initializer of the six-byte file-open record:
+      mov r1,#0x0; str r1,[r0,#0x0]; strb r1,[r0,#0x4]; strb
+      r1,[r0,#0x5]; bx lr - record.object = NULL, record.flags = 0,
+      record.write = 0. Deviations: the return type is *mut u8, not
+      the reference C's void - the body never writes r0, so the
+      argument falls through, and callers rely on it (iVar2 =
+      FUN_0811d8ac(puVar1 + 2) at 0x081b0268, iVar3 =
+      FUN_0811d8ac(iVar3 + 0x10) at 0x082859d8, ...);
+      decomp/c/011/0811d8ac_FUN_0811d8ac.c is otherwise exact. The
+      first store is a 32-bit str modeled as a u32 write, byte-exact
+      on a 64-bit host (the inverse of vtable_file_open's
+      host-representation note). The adjacent sibling FUN_0811d8c0 @
+      0x0811d8c0 (20 bytes) is a SEPARATE routine, not one body split
+      by Ghidra: this function ends in a real bx lr at 0x0811d8bc; the
+      sibling is the dispose-and-return-handle wrapper over
+      vtable_slot_04_dispose (0x0811d7cc) and is NOT ported here.
+      Host tests:
+      src/app/vtable_set.rs::file_record_init_zeroes_the_record_and_returns_the_pointer
+      / file_record_init_clears_a_field_inside_a_larger_object.
