@@ -15326,6 +15326,39 @@ functions:
       frame. This was the last identified-not-ported instantiation of
       the capacity family - the block is now fully ported.
 
+  - address: 0x083d7968
+    ghidra: FUN_083d7968
+    name: vector_size_bool
+    size: 76
+    sig: "i32 vector_size_bool(const VectorBoolBounds *bits)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: bits}
+    notes: >-
+      `std::vector<bool>::size()` - the bit-vector member of the
+      vector_size family: the head is TWO bit iterators `{begin_word,
+      begin_bit, end_word, end_bit}` and the body is the bit-iterator
+      difference `(end_word - begin_word) / 4` whole words of 32 bits
+      each, plus end_bit, minus begin_bit (`sub` / `mov r0,r0, asr #2`
+      / `add r0,r2,r0, lsl #5` / `sub`). The asr is ARITHMETIC, so a
+      reversed head's negative word span floors like the family's shift
+      members. The original's spill of all four head words to the stack
+      and immediate reload is ADS noise around an inlined iterator
+      difference; the port keeps only the computation. Identification:
+      the immediate neighbors are the bit-iterator members -
+      operator!= @ 0x083d79b4 (compare word pointer, then bit offset),
+      the `{word, 1 << bit}` mask-reference ctor @ 0x083d79dc and the
+      `*word & mask` bit test @ 0x083d7a20 - and both call sites feed
+      the result into `words = (max(0x20, 2*size) + 0x1f) >> 5; alloc
+      words * 4`, the vector<bool> storage grow. 2 bl call sites
+      (0x083e5dfc, 0x083e5e10), the only copy (the other two
+      `add r0,r2,r0, lsl #5` hits in osos.asm, 0x08004c54 and
+      0x08008698, are unrelated array indexing). match.py - same
+      sub / asr #2 / lsl #5 / sub core; the word loads come out as byte
+      loads from the family's read_unaligned host-testing idiom, the
+      same accepted deviation as vector_size_elem4, plus LLVM's fp
+      frame.
+
   - address: 0x083d7708
     ghidra: FUN_083d7708
     name: vector_capacity_elem12

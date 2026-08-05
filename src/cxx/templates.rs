@@ -33,6 +33,10 @@
 //!   [`vector_size_elem40`] — the
 //!   non-power-of-two members of the size family, dividing the span by
 //!   12, 24, 20, 28 or 40 through [`__rt_sdiv`] instead of shifting.
+//! - [`vector_size_bool`] — `vector<bool>::size()`, the bit-iterator
+//!   difference over the `{begin_word, begin_bit, end_word, end_bit}`
+//!   head: whole words times 32, plus the end bit offset, minus the
+//!   begin bit offset.
 //! - [`vector_capacity`] / [`vector_capacity_elem12`] /
 //!   [`vector_capacity_elem16`] / [`vector_capacity_elem24_copy_77ec`]
 //!   / [`vector_capacity_elem40`] / [`vector_capacity_elem8`] /
@@ -713,6 +717,65 @@ pub unsafe extern "C" fn vector_size_elem40(vector: *const VectorBounds) -> i32 
     let end = core::ptr::read_unaligned(core::ptr::addr_of!((*vector).end));
     let span = (end as isize - begin as isize) as i32;
     __rt_sdiv(span, 40)
+}
+
+/// The `{begin_word, begin_bit, end_word, end_bit}` head of a
+/// `vector<bool>` — two bit iterators, each a word pointer plus a bit
+/// offset within that word. Addressed by field, so the port is
+/// layout-correct on both the 32-bit target and a 64-bit host.
+#[repr(C)]
+pub struct VectorBoolBounds {
+    /// Word containing the first bit.
+    pub begin_word: *mut u32,
+    /// Bit offset of the first bit within `begin_word` (0..32).
+    pub begin_bit: u32,
+    /// Word containing the end position.
+    pub end_word: *mut u32,
+    /// Bit offset of the end position within `end_word` (0..32).
+    pub end_bit: u32,
+}
+
+/// vector_size_bool — original: `FUN_083d7968` @ 0x083d7968
+/// (76 bytes; 2 `bl` call sites, both in the storage-grow path at
+/// 0x083e5dfc / 0x083e5e10; the only copy —
+/// `ipod-decomp/decomp/c/037/083d7968_FUN_083d7968.c`).
+///
+/// `std::vector<bool>::size()`, the bit-vector member of the
+/// `vector_size_elem*` family: the bit-iterator difference
+/// `(end_word - begin_word) / 4` whole words of 32 bits each, plus
+/// `end_bit`, minus `begin_bit`. The original applies an **arithmetic**
+/// `asr #2` to the word span, so a reversed head's negative word count
+/// floors like the shift members of the size family, then `lsl #5`
+/// scales words to bits. Its spill of all four head words to the stack
+/// and immediate reload is ADS noise around an inlined iterator
+/// difference; the port keeps only the computation.
+///
+/// Identification: the immediate neighbors are the bit-iterator
+/// members — `operator!=` @ 0x083d79b4 (compare word pointer, then bit
+/// offset), the `{word, 1 << bit}` mask-reference ctor @ 0x083d79dc and
+/// the `*word & mask` bit test @ 0x083d7a20 — and both call sites feed
+/// the result into `words = (max(0x20, 2*size) + 0x1f) >> 5; alloc
+/// words * 4`, the `vector<bool>` storage grow.
+///
+/// # Safety
+/// `bits` must point at a readable [`VectorBoolBounds`]. The word
+/// storage itself is never accessed, so either word pointer may be
+/// NULL.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_size_bool(bits: *const VectorBoolBounds) -> i32 {
+    // `read_unaligned`: same 4-but-not-8-aligned firmware head hazard
+    // as `vector_size` on a 64-bit host.
+    let begin_word = core::ptr::read_unaligned(core::ptr::addr_of!((*bits).begin_word));
+    let begin_bit = core::ptr::read_unaligned(core::ptr::addr_of!((*bits).begin_bit));
+    let end_word = core::ptr::read_unaligned(core::ptr::addr_of!((*bits).end_word));
+    let end_bit = core::ptr::read_unaligned(core::ptr::addr_of!((*bits).end_bit));
+    // `asr #2`: arithmetic, so a reversed head's negative word span
+    // floors instead of truncating toward zero.
+    let words = ((end_word as isize - begin_word as isize) >> 2) as i32;
+    // `lsl #5` + wrapping add/sub: 32 bits per word, 32-bit register
+    // arithmetic exactly as the ARM body.
+    (end_bit as i32).wrapping_add(words << 5).wrapping_sub(begin_bit as i32)
 }
 
 /// The `{begin, end, end_of_storage}` head of a vector — the three
@@ -1676,6 +1739,77 @@ mod tests {
             assert_eq!(vector_size_elem40(&partial), 3, "partial element dropped");
             let reversed = VectorBounds { begin: begin.add(41), end: begin };
             assert_eq!(vector_size_elem40(&reversed), -1, "-41 / 40 truncates to -1");
+        }
+    }
+
+    // ---- vector_size_bool ------------------------------------------
+
+    #[test]
+    fn vector_size_bool_counts_words_times_32_plus_bit_offsets() {
+        unsafe {
+            let storage = [0u32; 8];
+            let base = storage.as_ptr() as *mut u32;
+            // Same word: pure bit-offset difference.
+            for begin_bit in 0..32u32 {
+                for end_bit in begin_bit..32 {
+                    let head = VectorBoolBounds {
+                        begin_word: base,
+                        begin_bit,
+                        end_word: base,
+                        end_bit,
+                    };
+                    assert_eq!(vector_size_bool(&head), (end_bit - begin_bit) as i32);
+                }
+            }
+            // Spanning words: 32 bits per word plus the end offset,
+            // minus the begin offset.
+            for words in 0..8usize {
+                let head = VectorBoolBounds {
+                    begin_word: base,
+                    begin_bit: 5,
+                    end_word: base.add(words),
+                    end_bit: 27,
+                };
+                assert_eq!(vector_size_bool(&head), (words * 32 + 27 - 5) as i32);
+            }
+            // An empty head reads as zero, NULL word pointers included
+            // (the storage itself is never dereferenced).
+            let empty = VectorBoolBounds {
+                begin_word: core::ptr::null_mut(),
+                begin_bit: 0,
+                end_word: core::ptr::null_mut(),
+                end_bit: 0,
+            };
+            assert_eq!(vector_size_bool(&empty), 0);
+        }
+    }
+
+    /// The word span uses the original's arithmetic `asr #2`, so a
+    /// reversed head's negative span floors to whole words and stays
+    /// negative instead of truncating toward zero.
+    #[test]
+    fn vector_size_bool_reversed_head_floors_the_word_span() {
+        unsafe {
+            let storage = [0u32; 8];
+            let base = storage.as_ptr() as *mut u32;
+            // -16 bytes is exactly -4 words: -128 bits, then the bit
+            // offsets apply.
+            let reversed = VectorBoolBounds {
+                begin_word: base.add(4),
+                begin_bit: 3,
+                end_word: base,
+                end_bit: 7,
+            };
+            assert_eq!(vector_size_bool(&reversed), -4 * 32 + 7 - 3);
+            // -20 bytes is -4.5 words; `asr #2` floors to -5, where C
+            // division would truncate to -4.
+            let partial = VectorBoolBounds {
+                begin_word: base.add(5),
+                begin_bit: 0,
+                end_word: base,
+                end_bit: 0,
+            };
+            assert_eq!(vector_size_bool(&partial), -5 * 32, "-20 >> 2 (asr) is -5");
         }
     }
 
