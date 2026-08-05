@@ -2979,6 +2979,196 @@ pub unsafe extern "C" fn vtable_file_record_construct_kind1(record: *mut u8) -> 
     record
 }
 
+/// The tag byte [`vtable_file_record_construct_kind2`] writes at
+/// record +0x00 (`mov r0, #0x2; strb r0, [r4]`) — the kind the
+/// tag-dispatching dispose `FUN_0811d188` (unported) branches on.
+const FILE_RECORD_TAG_KIND2: u8 = 2;
+
+/// The allocation size feeding the kind-2 block constructor (`mov r0,
+/// #0x14` ahead of the `bl 0x082aadd4`) — the five-word block
+/// 0x0815bdbc fills.
+const KIND2_BLOCK_SIZE: usize = 0x14;
+
+/// The kind-2 record-block construct behind the `bl 0x0815bdbc` site
+/// inside [`vtable_file_record_construct_kind2`]. 0x0815bdbc (68
+/// bytes; **1 `bl` call site** — this constructor's 0x0811d134 —
+/// grep on `decomp/osos.asm`; **unported and unidentified**, absent
+/// from `names.yaml`) fills the fresh 0x14-byte block from the
+/// caller's descriptor:
+///
+/// ```text
+/// 0815bdbc  stmdb sp!, {r4, r5, r6, lr}
+/// 0815bdc0  mov   r4, r0            @ save block
+/// 0815bdc4  stmia r0, {r1, r2}      @ block[0] = descriptor; block[1] = extra
+/// 0815bdc8  ldr   r0, [r1, #0x0]
+/// 0815bdcc  mov   r5, r1
+/// 0815bdd0  cmp   r0, #0x3          @ descriptor word 0 must be 3
+/// 0815bdd4  ldrne r1, [0x815be04]   @ diagnostic message pointer
+/// 0815bdd8  movne r0, #0x0
+/// 0815bddc  blne  0x081b53e4        @ report the diagnostic (unported)
+/// 0815bde0  ldr   r0, [r5, #0x4]
+/// 0815bde4  add   r0, r0, r5
+/// 0815bde8  str   r0, [r4, #0x8]    @ block[2] = descriptor + descriptor[1]
+/// 0815bdec  ldr   r0, [r5, #0x8]
+/// 0815bdf0  str   r0, [r4, #0xc]    @ block[3] = descriptor[2]
+/// 0815bdf4  add   r0, r5, #0xc
+/// 0815bdf8  str   r0, [r4, #0x10]   @ block[4] = descriptor + 0xc
+/// 0815bdfc  mov   r0, r4            @ return the block
+/// 0815be00  ldmia sp!, {r4, r5, r6, pc}
+/// ```
+///
+/// The wired default models the exact store body (the
+/// [`VTABLE_SET_50_KIND4_OPS`] pattern, so an unswapped table
+/// reproduces the original call chain); the `descriptor[0] == 3`
+/// check's only effect is the unported 0x081b53e4 diagnostic — the
+/// `blne` falls through identically on both paths — so it is modeled
+/// as a no-op (the class_6800.rs unported_report_allocation_failure
+/// no-op precedent, the same treatment the
+/// [`VTABLE_FILE_RECORD_KIND1_GUARD`] seam gives the identical
+/// diagnostic in 0x080edb74). Host tests install a recording mock via
+/// `core::ptr::addr_of_mut!`.
+pub static mut VTABLE_FILE_RECORD_KIND2_CTOR: unsafe extern "C" fn(
+    allocation: *mut u8,
+    descriptor: *const u32,
+    extra: u32,
+) -> *mut u8 = kind2_block_ctor_default;
+
+/// Default kind-2 block construct: the exact store body of
+/// 0x0815bdbc (see the seam's doc) — every word is a 32-bit store, so
+/// the pointer-valued words truncate to their low 32 bits on a 64-bit
+/// host (the [`vtable_file_record_init`] byte-exact precedent).
+unsafe extern "C" fn kind2_block_ctor_default(
+    allocation: *mut u8,
+    descriptor: *const u32,
+    extra: u32,
+) -> *mut u8 {
+    let block = allocation.cast::<u32>();
+    block.write(descriptor as u32);
+    block.add(1).write(extra);
+    block.add(2)
+        .write((descriptor as usize).wrapping_add(descriptor.add(1).read() as usize) as u32);
+    block.add(3).write(descriptor.add(2).read());
+    block.add(4).write((descriptor as u32).wrapping_add(0xc));
+    allocation
+}
+
+/// Indirect dispatch for the checked-construct guard @ 0x080edb74
+/// called by [`vtable_file_record_construct_kind2`], wired to the same
+/// no-op default as [`VTABLE_FILE_RECORD_KIND1_GUARD`] (the
+/// [`VTABLE_QUERY_4C_READ_DISPATCH`] / [`VTABLE_QUERY_4C_SCALAR_DISPATCH`]
+/// role-specific-name precedent — see the kind-1 seam's doc for the
+/// guard's disassembly and the no-op rationale; a module-local name
+/// keeps host tests from racing the kind-1 sibling's parallel tests).
+pub static mut VTABLE_FILE_RECORD_KIND2_GUARD: unsafe extern "C" fn(
+    object: *mut u8,
+) = construct_guard_unported;
+
+/// vtable_file_record_construct_kind2 — original: `FUN_0811d104` @
+/// 0x0811d104 (68 bytes; **21 `bl` call sites**, grep on
+/// `decomp/osos.asm`, ALL inside the 0x081a0454..0x081a0a80 cluster:
+/// 0x081a0488, 0x081a04cc, 0x081a050c, 0x081a054c, 0x081a058c,
+/// 0x081a05cc, 0x081a060c, 0x081a064c, 0x081a068c, 0x081a06cc,
+/// 0x081a070c, 0x081a074c, 0x081a078c, 0x081a07cc, 0x081a080c,
+/// 0x081a0940, 0x081a0980, 0x081a09c0, 0x081a0a00, 0x081a0a40 and
+/// 0x081a0a80 — every site allocates the 0x1c-byte record with
+/// `operator_new(0x1c)` (0x082aadd4) immediately before the call,
+/// loads arg2/arg3 from a per-site literal pair (`ldr r2, [lit]; ldr
+/// r1, [lit]`) and consumes the returned record pointer (`mov r5,
+/// r0`).
+///
+/// The kind-2 constructor of the tagged file-record family — the
+/// sibling of the kind-1 constructor [`vtable_file_record_construct_kind1`]
+/// (0x0811d148, ported above) and of the tag-dispatching dispose
+/// `FUN_0811d188` (128 bytes, unported; its kind-2 branch
+/// `operator_delete`s the +0x04 block via 0x082aad24 and disposes a
+/// non-NULL +0x18 through 0x0812d300), operating on the SAME
+/// 0x1c-byte record layout:
+///
+/// ```text
+/// 0811d104  stmdb sp!, {r4, r5, r6, lr}
+/// 0811d108  mov   r4, r0            @ save record (arg1)
+/// 0811d10c  mov   r0, #0x2
+/// 0811d110  strb  r0, [r4, #0x0]    @ record.tag = 2 (kind 2)
+/// 0811d114  mov   r0, #0x0
+/// 0811d118  str   r0, [r4, #0x18]   @ record.+0x18 = NULL
+/// 0811d11c  mov   r0, #0x14
+/// 0811d120  mov   r6, r2            @ save extra (arg3)
+/// 0811d124  mov   r5, r1            @ save descriptor (arg2)
+/// 0811d128  bl    0x082aadd4        @ operator_new(0x14)
+/// 0811d12c  mov   r2, r6
+/// 0811d130  mov   r1, r5
+/// 0811d134  bl    0x0815bdbc        @ block_ctor(block, descriptor, extra)
+/// 0811d138  str   r0, [r4, #0x4]    @ record.block = construct result
+/// 0811d13c  bl    0x080edb74        @ checked-construct guard
+/// 0811d140  mov   r0, r4            @ return the record
+/// 0811d144  ldmia sp!, {r4, r5, r6, pc}
+/// ```
+///
+/// The kind-1 sibling's exact prologue — tag byte at +0x00 (`strb`),
+/// NULL word at +0x18 — then `operator_new(0x14)` whose block feeds
+/// the 0x0815bdbc block constructor in r0 alongside the caller's
+/// descriptor (arg2) and extra word (arg3); the construct result is
+/// stored at +0x04 (32-bit `str`) and handed to the checked-construct
+/// guard 0x080edb74, and the record pointer returns regardless of the
+/// guard's outcome. Unlike kind 1 there are NO trailing field stores:
+/// +0x08..+0x17 are never written (the caller's `operator_new(0x1c)`
+/// block carries them in uninitialized).
+///
+/// # Deviations
+///
+/// - **`operator_new` (0x082aadd4) is called directly** — the ported
+///   `crate::heap::veneers::operator_new` (the
+///   [`vtable_file_record_construct_kind1`] precedent).
+/// - **The block construct 0x0815bdbc is unported and unidentified**
+///   (absent from `names.yaml`) and routes through the new
+///   [`VTABLE_FILE_RECORD_KIND2_CTOR`] seam, whose wired default
+///   models the callee's exact store body minus the unported
+///   0x081b53e4 diagnostic (see the seam's doc).
+/// - **The checked-construct guard 0x080edb74 is unported** and sits
+///   behind the new [`VTABLE_FILE_RECORD_KIND2_GUARD`] seam (the same
+///   no-op default as the kind-1 sibling's guard seam; see its doc).
+///   Its r0 is dead here — the continuation overwrites r0 with the
+///   record pointer — so the seam returns nothing.
+/// - **Every field store keeps the original's width**: `strb` for the
+///   tag, 32-bit `str` for the pointer and NULL words (the block
+///   pointer is truncated to its low 32 bits on a 64-bit host — the
+///   [`vtable_file_record_init`] byte-exact precedent).
+/// - **arg2 is typed `*const u32`** — the block constructor
+///   dereferences it as words (`descriptor[0]` magic, `descriptor[1]`
+///   offset, `descriptor[2]` count); every call site loads it from a
+///   literal-pool entry. **arg3 is a verbatim `u32` word** — the
+///   constructor only stores it (`stmia r0, {r1, r2}`); it is likewise
+///   literal-loaded at every site.
+/// - **No `forwarded` parameter**: the entry `stmdb` spills no
+///   argument registers and r3 is never read — this is a record
+///   constructor, not a message thunk (the
+///   [`vtable_file_record_construct_kind1`] precedent).
+/// - **The reference C is followed — it is accurate**:
+///   `decomp/c/010/0811d104_FUN_0811d104.c` catches the tag store, the
+///   +0x18 NULL, the allocation feeding `FUN_0815bdbc(alloc, param_2,
+///   param_3)`, the +0x04 store, the guard and the return; only the
+///   untyped `undefined4` parameters get concrete types.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_file_record_construct_kind2(
+    record: *mut u8,
+    descriptor: *const u32,
+    extra: u32,
+) -> *mut u8 {
+    record.write(FILE_RECORD_TAG_KIND2);
+    record.add(0x18).cast::<u32>().write(0);
+    let ctor = core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_FILE_RECORD_KIND2_CTOR));
+    let block = ctor(
+        crate::heap::veneers::operator_new(KIND2_BLOCK_SIZE),
+        descriptor,
+        extra,
+    );
+    record.add(4).cast::<u32>().write(block as u32);
+    let guard = core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_FILE_RECORD_KIND2_GUARD));
+    guard(block);
+    record
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -3030,6 +3220,10 @@ mod tests {
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_KIND1_CTOR)
                     .write_volatile(kind1_registry_ctor_default);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_KIND1_GUARD)
+                    .write_volatile(construct_guard_unported);
+                core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_KIND2_CTOR)
+                    .write_volatile(kind2_block_ctor_default);
+                core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_KIND2_GUARD)
                     .write_volatile(construct_guard_unported);
             }
         }
@@ -7367,6 +7561,213 @@ mod tests {
         unsafe {
             construct_guard_unported(core::ptr::null_mut());
             construct_guard_unported(0x1c as *mut u8);
+        }
+    }
+
+    // ---- vtable_file_record_construct_kind2 (0x0811d104) -----------
+
+    /// The block the recording kind-2 ctor returns as the record's
+    /// +0x04 pointer.
+    static mut KIND2_BLOCK: [u8; 0x14] = [0; 0x14];
+
+    static mut KIND2_CTOR_CALLS: usize = 0;
+    static mut KIND2_CTOR_THIS: *mut u8 = core::ptr::null_mut();
+    static mut KIND2_CTOR_DESCRIPTOR: *const u32 = core::ptr::null();
+    static mut KIND2_CTOR_EXTRA: u32 = 0;
+    static mut KIND2_GUARD_CALLS: usize = 0;
+    static mut KIND2_GUARD_OBJECT: *mut u8 = core::ptr::null_mut();
+    /// The record under construction, so the recording mocks can pin
+    /// the store/call ordering against it.
+    static mut KIND2_RECORD: *const u8 = core::ptr::null();
+
+    /// The descriptor the kind-2 tests hand the constructor: word 0
+    /// the magic 3, word 1 the block[2] offset, word 2 the block[3]
+    /// count.
+    static KIND2_DESCRIPTOR: [u32; 3] = [3, 0x40, 7];
+    const KIND2_EXTRA: u32 = 0x5eed_0002;
+
+    unsafe extern "C" fn recording_kind2_ctor(
+        allocation: *mut u8,
+        descriptor: *const u32,
+        extra: u32,
+    ) -> *mut u8 {
+        KIND2_CTOR_CALLS += 1;
+        KIND2_CTOR_THIS = allocation;
+        KIND2_CTOR_DESCRIPTOR = descriptor;
+        KIND2_CTOR_EXTRA = extra;
+        // Order pins: the tag and the +0x18 NULL store precede the
+        // allocation/construct (`strb` / `str` before the `bl`s).
+        assert_eq!(
+            KIND2_RECORD.read(),
+            FILE_RECORD_TAG_KIND2,
+            "the tag store precedes the allocation"
+        );
+        assert_eq!(
+            KIND2_RECORD.add(0x18).cast::<u32>().read(),
+            0,
+            "+0x18 is zeroed before the allocation"
+        );
+        core::ptr::addr_of_mut!(KIND2_BLOCK).cast()
+    }
+
+    unsafe extern "C" fn recording_kind2_guard(object: *mut u8) {
+        KIND2_GUARD_CALLS += 1;
+        KIND2_GUARD_OBJECT = object;
+        // Order pin: the block store at +0x04 precedes the guard (`str
+        // r0, [r4, #0x4]` before the `bl`).
+        assert_eq!(
+            KIND2_RECORD.add(4).cast::<u32>().read(),
+            object as u32,
+            "the +0x04 store precedes the guard"
+        );
+    }
+
+    /// Resets the recording state and installs both recording mocks
+    /// plus the stub heap (the `install_recording_kind1` precedent).
+    unsafe fn install_recording_kind2(record: *const u8) {
+        KIND2_CTOR_CALLS = 0;
+        KIND2_CTOR_THIS = core::ptr::null_mut();
+        KIND2_CTOR_DESCRIPTOR = core::ptr::null();
+        KIND2_CTOR_EXTRA = 0;
+        KIND2_GUARD_CALLS = 0;
+        KIND2_GUARD_OBJECT = core::ptr::null_mut();
+        KIND2_RECORD = record;
+        install_stub_heap();
+        core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_KIND2_CTOR)
+            .write_volatile(recording_kind2_ctor);
+        core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_KIND2_GUARD)
+            .write_volatile(recording_kind2_guard);
+    }
+
+    #[test]
+    fn file_record_kind2_initializes_the_record_and_returns_it() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = [0xa5u8; 0x20];
+        unsafe {
+            install_recording_kind2(record.as_ptr());
+
+            let result = vtable_file_record_construct_kind2(
+                record.as_mut_ptr(),
+                KIND2_DESCRIPTOR.as_ptr(),
+                KIND2_EXTRA,
+            );
+
+            assert_eq!(
+                result,
+                record.as_mut_ptr(),
+                "mov r0, r4 — the record pointer returns"
+            );
+            assert_eq!(record[0], FILE_RECORD_TAG_KIND2, "strb: the kind-2 tag");
+            let block = core::ptr::addr_of_mut!(KIND2_BLOCK).cast::<u8>();
+            assert_eq!(
+                record.as_ptr().add(4).cast::<u32>().read(),
+                block as u32,
+                "str: the construct result at +0x04 (32-bit on a 64-bit host)"
+            );
+            assert_eq!(
+                record.as_ptr().add(0x08).cast::<u32>().read(),
+                0xa5a5_a5a5,
+                "unlike kind 1, +0x08 is never written"
+            );
+            assert_eq!(
+                record.as_ptr().add(0x10).cast::<u32>().read(),
+                0xa5a5_a5a5,
+                "unlike kind 1, +0x10 is never written"
+            );
+            assert_eq!(
+                record.as_ptr().add(0x14).cast::<u32>().read(),
+                0xa5a5_a5a5,
+                "unlike kind 1, +0x14 is never written"
+            );
+            assert_eq!(record.as_ptr().add(0x18).cast::<u32>().read(), 0);
+            assert_eq!(
+                &record[0x1c..],
+                &[0xa5; 4],
+                "bytes past the 0x1c record are untouched"
+            );
+        }
+    }
+
+    #[test]
+    fn file_record_kind2_allocates_the_block_and_feeds_it_to_the_ctor() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = [0xa5u8; 0x20];
+        unsafe {
+            install_recording_kind2(record.as_ptr());
+
+            vtable_file_record_construct_kind2(
+                record.as_mut_ptr(),
+                KIND2_DESCRIPTOR.as_ptr(),
+                KIND2_EXTRA,
+            );
+
+            assert_eq!(OPEN_ALLOC_SIZE, KIND2_BLOCK_SIZE, "operator_new(0x14)");
+            assert_eq!(KIND2_CTOR_CALLS, 1, "the block construct runs once");
+            assert_eq!(
+                KIND2_CTOR_THIS,
+                core::ptr::addr_of_mut!(OPEN_ARENA).cast::<u8>(),
+                "the fresh block feeds the construct in r0"
+            );
+            assert_eq!(
+                KIND2_CTOR_DESCRIPTOR,
+                KIND2_DESCRIPTOR.as_ptr(),
+                "arg2 (r1 -> r5) reaches the construct verbatim"
+            );
+            assert_eq!(
+                KIND2_CTOR_EXTRA, KIND2_EXTRA,
+                "arg3 (r2 -> r6) reaches the construct verbatim"
+            );
+            let block = core::ptr::addr_of_mut!(KIND2_BLOCK).cast::<u8>();
+            assert_eq!(KIND2_GUARD_CALLS, 1, "the checked-construct guard runs once");
+            assert_eq!(
+                KIND2_GUARD_OBJECT, block,
+                "the guard checks the construct's result, not the raw allocation"
+            );
+        }
+    }
+
+    #[test]
+    fn file_record_kind2_default_ctor_fills_the_five_words() {
+        // The wired default models 0x0815bdbc's exact store body (the
+        // VTABLE_SET_50_KIND4_OPS pattern): block = {descriptor, extra,
+        // descriptor + descriptor[1], descriptor[2], descriptor + 0xc},
+        // all 32-bit stores, and the block returns.
+        let mut block = [0xa5u8; 0x18];
+        unsafe {
+            let result = kind2_block_ctor_default(
+                block.as_mut_ptr(),
+                KIND2_DESCRIPTOR.as_ptr(),
+                KIND2_EXTRA,
+            );
+
+            assert_eq!(result, block.as_mut_ptr(), "mov r0, r4 — the block returns");
+            let words = block.as_ptr().cast::<u32>();
+            assert_eq!(
+                words.read(),
+                KIND2_DESCRIPTOR.as_ptr() as u32,
+                "stmia: descriptor at +0x00 (32-bit on a 64-bit host)"
+            );
+            assert_eq!(words.add(1).read(), KIND2_EXTRA, "stmia: extra at +0x04");
+            assert_eq!(
+                words.add(2).read(),
+                (KIND2_DESCRIPTOR.as_ptr() as usize + KIND2_DESCRIPTOR[1] as usize) as u32,
+                "+0x08 = descriptor + descriptor[1]"
+            );
+            assert_eq!(words.add(3).read(), KIND2_DESCRIPTOR[2], "+0x0c = descriptor[2]");
+            assert_eq!(
+                words.add(4).read(),
+                (KIND2_DESCRIPTOR.as_ptr() as u32).wrapping_add(0xc),
+                "+0x10 = descriptor + 0xc"
+            );
+            assert_eq!(
+                &block[0x14..],
+                &[0xa5; 4],
+                "bytes past the 0x14 block are untouched"
+            );
         }
     }
 }

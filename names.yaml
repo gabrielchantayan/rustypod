@@ -23070,3 +23070,76 @@ functions:
       src/app/vtable_set.rs::file_record_kind1_initializes_the_record_and_returns_it
       / file_record_kind1_allocates_the_registry_and_feeds_it_to_the_ctor
       / file_record_kind1_default_guard_is_a_noop.
+
+  - address: 0x0811d104
+    ghidra: FUN_0811d104
+    name: vtable_file_record_construct_kind2
+    size: 68
+    sig: "*mut u8 vtable_file_record_construct_kind2(record: *mut u8, descriptor: *const u32, extra: u32)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r4: record
+      param_2/r5: descriptor (the block 0x0815bdbc reads as u32 words)
+      param_3/r6: extra (the verbatim word 0x0815bdbc stores at block +0x04)
+      FUN_082aadd4: operator_new (direct, ported in heap/veneers)
+      FUN_0815bdbc: kind-2 record-block constructor (UNPORTED and UNIDENTIFIED - absent from names.yaml; VTABLE_FILE_RECORD_KIND2_CTOR seam, exact-body default)
+      FUN_080edb74: checked-construct guard (unported; VTABLE_FILE_RECORD_KIND2_GUARD seam, same no-op default as the kind-1 sibling's guard)
+    notes: >-
+      21 bl call sites (grep on decomp/osos.asm), ALL inside the
+      0x081a0454..0x081a0a80 cluster (0x081a0488, 0x081a04cc,
+      0x081a050c, 0x081a054c, 0x081a058c, 0x081a05cc, 0x081a060c,
+      0x081a064c, 0x081a068c, 0x081a06cc, 0x081a070c, 0x081a074c,
+      0x081a078c, 0x081a07cc, 0x081a080c, 0x081a0940, 0x081a0980,
+      0x081a09c0, 0x081a0a00, 0x081a0a40, 0x081a0a80): every site
+      allocates the 0x1c-byte record with operator_new(0x1c)
+      immediately before the call, loads arg2/arg3 from a per-site
+      literal pair (ldr r2,[lit]; ldr r1,[lit]) and consumes the
+      returned record pointer (mov r5,r0). The kind-2 constructor of
+      the tagged file-record family (the kind-1 twin
+      vtable_file_record_construct_kind1 @ 0x0811d148 is ported; the
+      tag-dispatching dispose FUN_0811d188 @ 0x0811d188 is unported -
+      its kind-2 branch operator_deletes the +0x04 block via
+      0x082aad24 and disposes a non-NULL +0x18 through 0x0812d300),
+      operating on the SAME 0x1c-byte record layout: tag byte 2 at
+      +0x00 (strb), NULL word at +0x18, operator_new(0x14) whose block
+      feeds 0x0815bdbc in r0 alongside the descriptor (r1->r5) and
+      the extra word (r2->r6), the construct result stored at +0x04
+      (32-bit str), checked by the unported guard 0x080edb74 (its r0
+      dead here - the continuation overwrites r0 with the record
+      pointer), then the record pointer returns (mov r0,r4). UNLIKE
+      kind 1 there are NO trailing field stores: +0x08..+0x17 are
+      never written. The callee 0x0815bdbc (68 bytes; 1 bl site -
+      this constructor's 0x0811d134) fills the five-word block:
+      {descriptor, extra, descriptor + descriptor[1], descriptor[2],
+      descriptor + 0xc}, with a descriptor[0] == 3 magic check whose
+      only effect is the unported 0x081b53e4 diagnostic (blne -
+      execution falls through identically). Deviations: operator_new
+      called directly (the vtable_file_record_construct_kind1
+      precedent); the 0x0815bdbc call routes through the new
+      VTABLE_FILE_RECORD_KIND2_CTOR seam whose wired default models
+      the callee's exact store body minus the unported diagnostic
+      (the VTABLE_SET_50_KIND4_OPS pattern / the class_6800.rs
+      unported_report_allocation_failure no-op precedent); the guard
+      sits behind the new VTABLE_FILE_RECORD_KIND2_GUARD seam with
+      the same construct_guard_unported no-op default as the kind-1
+      sibling (the VTABLE_QUERY_4C_READ_DISPATCH /
+      VTABLE_QUERY_4C_SCALAR_DISPATCH role-specific-name precedent);
+      every store keeps the original's width (strb/str; the block
+      pointer truncates to its low 32 bits on a 64-bit host - the
+      vtable_file_record_init byte-exact precedent); arg2 typed
+      *const u32 (the callee dereferences it as words), arg3 a
+      verbatim u32 (only stored, stmia r0,{r1,r2}); no forwarded
+      parameter (the entry stmdb spills no argument registers and r3
+      is never read). Reference C
+      (decomp/c/010/0811d104_FUN_0811d104.c) is accurate - it catches
+      the allocation feeding FUN_0815bdbc(alloc, param_2, param_3),
+      the +0x04 store, the guard and the return; only the untyped
+      undefined4 parameters get concrete types. match.py: same
+      store/alloc/construct/store/guard/return structure; the diff is
+      the crate fp frame and the two seam ldr/blx pairs standing in
+      for the direct bl 0x0815bdbc / bl 0x080edb74 (the documented
+      seams). Host tests:
+      src/app/vtable_set.rs::file_record_kind2_initializes_the_record_and_returns_it
+      / file_record_kind2_allocates_the_block_and_feeds_it_to_the_ctor
+      / file_record_kind2_default_ctor_fills_the_five_words.
