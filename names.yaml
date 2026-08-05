@@ -10338,6 +10338,24 @@ functions:
       and writes kind and opcode as BYTES at inst+8 and inst+9.
       inst->next relies on the arena's zero-fill.
 
+  - address: 0x082c17ac
+    ghidra: FUN_082c17ac
+    name: cg_label_add_fixup
+    size: 64
+    sig: "void cg_label_add_fixup(cg_codegen_t *codegen, cg_label_t *label, cg_label_fixup_tag_t tag)"
+    module: codegen/ir
+    status: ported
+    vars: {param_1: codegen, param_2: label, param_3: tag, puVar1: fixup, uVar2: output_offset}
+    notes: >-
+      4 bl call sites. Creates a 12-byte cg_label_fixup_t from
+      codegen->heap (+0x08), calls FUN_082c23d4 on codegen->output
+      (+0x10) to obtain its current offset (+0x804), then stores it at
+      fixup+0x08. The exact remaining store order is `label->fixups`
+      (+0x04) to fixup+0x00, tag as a BYTE to fixup+0x04, then fixup
+      back to label->fixups. The label creator @ 0x082c0dec has the
+      matching 12-byte layout: next label at +0x00, fixup head at
+      +0x04, and bound offset at +0x08.
+
   - address: 0x082c17f4
     ghidra: FUN_082c17f4
     name: cg_create_inst_binary
@@ -19220,13 +19238,42 @@ functions:
 
   # --- the framework's scoped context token (vtable 0x089a5b30) ---
 
+  - address: 0x0826fda0
+    ghidra: FUN_0826fda0
+    name: capture_context_fields
+    size: 52
+    sig: "void capture_context_fields(ScopedContext *this, void *owner)"
+    module: app/scoped_context
+    renames:
+      param_1: this
+      param_2: owner
+      iVar1: service_context
+      uVar2: registry_token
+      DAT_0826fdd4: APP_ROOT_OBJECT
+    status: ported
+    notes: >-
+      Stores owner unconditionally at this+0x08. If owner is NULL, the
+      conditional store clears this+0x0c and the common tail clears
+      this+0x10 before the system-root literal is loaded. Otherwise it
+      follows the runtime-initialized RW root word @ 0x089ca674, loads
+      root+0x30 into this+0x0c, then stores either NULL or
+      (service_context+0xf60)+0x18 at this+0x10. The root and service
+      context are intentionally unguarded, matching the ARM fault
+      behavior. Raw ARM confirms the two direct BL callers at
+      0x0827037c and 0x082703bc; the scoped constructor also has the
+      tail-B caller at 0x0816ef78. The public CAPTURE_CONTEXT_FIELDS
+      dispatch slot defaults to this port and remains replaceable only
+      for constructor-test isolation. Host tests directly prove the
+      owner-NULL path makes zero root accesses, captures all three
+      non-NULL fields, and yields NULL for a NULL registry.
+
   - address: 0x08270394
     ghidra: FUN_08270394
     name: scoped_context_construct
     size: 60
     sig: "ScopedContext *scoped_context_construct(ScopedContext *this, void *owner, u8 mode)"
     module: app/scoped_context
-    vars: {param_1: this, param_2: owner, param_3: mode, DAT_082703cc: SCOPED_CONTEXT_VTABLE_ADDRESS, FUN_0826fda0: CAPTURE_CONTEXT_FIELDS}
+    vars: {param_1: this, param_2: owner, param_3: mode, DAT_082703cc: SCOPED_CONTEXT_VTABLE_ADDRESS, FUN_0826fda0: capture_context_fields}
     status: ported
     notes: >-
       109 bl + 2 b call sites (the tail-b sites are 0x08159a6c and
@@ -19255,36 +19302,23 @@ functions:
       structs with real Rust pointers, so no literal byte offset
       appears (app/resource_chain.rs precedent); the vtable is the
       modeled static SCOPED_CONTEXT_VTABLE carrying the fifteen ROM
-      words, not the ROM address; FUN_0826fda0 @ 0x0826fda0 is NOT
-      ported (it is its own function, 2 bl + 1 b sites) and sits behind
-      the CAPTURE_CONTEXT_FIELDS dispatch slot (the
-      util/context_field.rs CURRENT_TASK_CTX_BLOCK pattern) whose
-      default stub reproduces its body exactly - `owner==0 -> both
-      derived words NULL, else service_context = ROOT->+0x30,
-      registry_token = service_context->+0xf60 ? that->+0x18 : 0` -
-      reading the runtime-initialized RW word @ 0x089ca674 (120
-      literal-pool references image-wide) through
-      app/context_scope.rs's APP_ROOT_OBJECT static, the crate's single
-      model of that word (app/singletons.rs deviation; app/context_scope
-      derives the same three fields from it). The unguarded root walk
-      is kept, so a NULL root with a non-NULL owner faults exactly
-      where the original would. What the derived words are: the object
-      at root+0x30 owns a registry at +0xf60 that 0x0805e36c
+      words, not the ROM address; capture_context_fields @ 0x0826fda0
+      is separately ported above. Its public CAPTURE_CONTEXT_FIELDS
+      dispatch slot still wraps the real port so constructor tests can
+      install a recording callee without changing its ABI. The unguarded
+      root walk remains, so a NULL root with a non-NULL owner faults
+      exactly where the original would. What the derived words are: the
+      object at root+0x30 owns a registry at +0xf60 that 0x0805e36c
       interrogates by FourCC (0x66696c65 = "file" at 0x0803bf48, one of
-      this ctor's own callers), and +0x18 of that registry is the
-      cached word. Host tests (9 in the module): every field written
-      over sentinels and `this` returned; the capture callee called
-      exactly once with the owner and a still-zero mode byte; mode
-      0/1/0x7f/0x80/0xff round-trip; the default stub leaves both
-      derived words NULL without an owner and never reads the root;
-      with an owner it walks a three-level slot fixture; a NULL
-      registry yields a NULL cached word instead of faulting.
-      match.py structural: same vtable literal, same six field
-      initializations, same callee call, same `strb mode,[this,#0x14]`
-      tail, same `mov r0,this` return; the diff is the crate fp frame,
-      LLVM's reordering of the independent stores, and the
-      dispatch-slot ldr/blx standing in for the direct bl 0x0826fda0 -
-      the documented deviation.
+      this ctor's own callers), and +0x18 of that registry is the cached
+      word. Host tests cover every constructor field and this returned;
+      the capture callee receives the owner and zero mode byte; mode
+      0/1/0x7f/0x80/0xff round-trips. match.py structural: same vtable
+      literal, same six field initializations, same callee call, same
+      `strb mode,[this,#0x14]` tail, same `mov r0,this` return; the diff
+      is the crate fp frame, LLVM's reordering of independent stores, and
+      the dispatch-slot ldr/blx standing in for the direct
+      `bl 0x0826fda0` documented deviation.
 
   - address: 0x08270414
     ghidra: FUN_08270414

@@ -1,13 +1,13 @@
 //! The framework's **scoped context token** — a 0x18-byte polymorphic
 //! object that call sites build on the stack, hand to a service, and
-//! throw away. Two of its members are ported here, both from the
-//! 0x0827xxxx cluster that also holds the string/buffer class
+//! throw away. Three of its members are ported here, all from the
+//! 0x0826/0x0827 framework cluster that also holds the string/buffer class
 //! (`cxx/string_object.rs`) and the resource-lookup chain
 //! (`app/resource_chain.rs`):
 //!
+//! - [`capture_context_fields`] — `FUN_0826fda0` @ 0x0826fda0.
 //! - [`scoped_context_construct`] — `FUN_08270394` @ 0x08270394.
 //! - [`scoped_context_destroy`] — `FUN_08270414` @ 0x08270414.
-//!
 //! ## What the class is
 //!
 //! Every constructor in the family plants the same vtable literal,
@@ -41,8 +41,8 @@
 //!
 //! ## Where the derived fields come from
 //!
-//! The constructor's tail calls `FUN_0826fda0` @ 0x0826fda0, which is
-//! the only place the two derived words are computed:
+//! [`capture_context_fields`] computes the two derived words. The
+//! constructor calls it after initializing the token:
 //!
 //! ```text
 //! 0826fda0  cmp   r1, #0
@@ -85,20 +85,18 @@
 //!   carries the fifteen ROM words verbatim; the original's literal
 //!   address is [`SCOPED_CONTEXT_VTABLE_ADDRESS`]. Pointer identity with
 //!   the ROM table is not preserved, exactly as in `cxx/string_object.rs`.
-//! - `FUN_0826fda0` is *not* ported here (it is its own function, with
-//!   its own two `bl` and one `b` call sites). It sits behind the
-//!   [`CAPTURE_CONTEXT_FIELDS`] dispatch slot — the
-//!   `util/context_field.rs` `CURRENT_TASK_CTX_BLOCK` pattern — whose
-//!   default stub reproduces the body above exactly, reading the system
+//! - [`capture_context_fields`] is ported below. The public
+//!   [`CAPTURE_CONTEXT_FIELDS`] volatile dispatch slot remains so callers
+//!   retain their existing ABI and host tests can replace the callee in
+//!   isolation; its default is the real port. The port reads the system
 //!   root through [`crate::app::context_scope::APP_ROOT_OBJECT`], the
-//!   crate's single static for the RW word @ 0x089ca674 (the
-//!   `app/singletons.rs` deviation: those pages are runtime-initialized
-//!   and the image holds stale bytes there). `app/context_scope.rs`
-//!   walks the same root for its own capture, so the two share one
-//!   definition rather than each modeling the word separately.
-//!   With a NULL root and a non-NULL owner the stub faults exactly where
-//!   the original would with an uninitialized global; the guard is not
-//!   added.
+//!   crate's single static for the RW word @ 0x089ca674
+//!   (`app/singletons.rs` deviation: those pages are runtime-initialized
+//!   and the image holds stale bytes there). `app/context_scope.rs` walks
+//!   the same root for its own capture, so the two share one definition
+//!   rather than each modeling the word separately. With a NULL root and
+//!   a non-NULL owner the port faults exactly where the original would;
+//!   the guard is not added.
 //! - [`scoped_context_destroy`] compiles to the same three-instruction
 //!   frame as `runtime::cxa_guard::cxa_guard_release`, so the linker
 //!   folds the two: `scoped_context_destroy` is emitted as a second
@@ -189,12 +187,24 @@ const SERVICE_CONTEXT_REGISTRY_SLOT: usize = 0xf60 / 4;
 /// (`ldrne r1, [r1, #0x18]`).
 const REGISTRY_TOKEN_SLOT: usize = 0x18 / 4;
 
-/// Default [`CAPTURE_CONTEXT_FIELDS`] stub: `FUN_0826fda0` @ 0x0826fda0,
-/// reproduced instruction for instruction (see the module header). With
-/// no owner both derived words are cleared and the system root is never
-/// read; with an owner the root is walked unguarded, exactly as the
-/// original does.
-unsafe extern "C" fn capture_context_fields_stub(token: *mut ScopedContext, owner: *mut u8) {
+// Test-only evidence that the owner-null branch reaches neither the
+// root-slot accessor nor the unguarded root walk.
+#[cfg(test)]
+static mut CAPTURE_ROOT_READS: u32 = 0;
+
+/// capture_context_fields — original: `FUN_0826fda0` @ 0x0826fda0
+/// (52 bytes of code; the 4-byte system-root literal follows at
+/// 0x0826fdd4; **2 `bl` call sites**).
+///
+/// Unconditionally records `owner` at token +0x08. A NULL owner clears
+/// token +0x0c and +0x10 without reading the system-root global. Otherwise
+/// it loads the root's +0x30 service context into +0x0c, then caches that
+/// context's registry +0xf60 word's +0x18 field at +0x10, or NULL when the
+/// registry is NULL. As in ARM, a non-NULL owner requires a valid root and
+/// service context; neither is null-checked.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn capture_context_fields(token: *mut ScopedContext, owner: *mut u8) {
     (*token).owner = owner;
     if owner.is_null() {
         (*token).service_context = ptr::null_mut();
@@ -202,6 +212,10 @@ unsafe extern "C" fn capture_context_fields_stub(token: *mut ScopedContext, owne
         return;
     }
 
+    #[cfg(test)]
+    unsafe {
+        CAPTURE_ROOT_READS += 1;
+    }
     let root = app_root_object();
     let service_context = (root as *const *mut u8).add(ROOT_SERVICE_CONTEXT_SLOT).read();
     (*token).service_context = service_context;
@@ -216,13 +230,10 @@ unsafe extern "C" fn capture_context_fields_stub(token: *mut ScopedContext, owne
     };
 }
 
-/// Indirect dispatch for the context-capture callee `FUN_0826fda0` @
-/// 0x0826fda0 (the `util/context_field.rs` `CURRENT_TASK_CTX_BLOCK`
-/// pattern). That function is not ported — it is a separate function
-/// with its own call sites — so the slot's default stub models it
-/// exactly and host tests install a recording mock.
+/// Indirect dispatch for [`capture_context_fields`]. The default is the
+/// ported callee; the slot stays replaceable for constructor-test isolation.
 pub static mut CAPTURE_CONTEXT_FIELDS: unsafe extern "C" fn(*mut ScopedContext, *mut u8) =
-    capture_context_fields_stub;
+    capture_context_fields;
 
 /// scoped_context_construct — original: `FUN_08270394` @ 0x08270394
 /// (60 bytes: 56 code + the 4-byte vtable literal @ 0x082703cc, which
@@ -311,13 +322,14 @@ mod tests {
         MOCK_MODE_AT_CALL = (*token).mode;
     }
 
-    /// Restores the default stub and a NULL root on drop, even on panic.
+    /// Restores the ported capture callee and a NULL root on drop, even on panic.
     struct SlotGuard;
     impl Drop for SlotGuard {
         fn drop(&mut self) {
             unsafe {
-                ptr::addr_of_mut!(CAPTURE_CONTEXT_FIELDS).write_volatile(capture_context_fields_stub);
+                ptr::addr_of_mut!(CAPTURE_CONTEXT_FIELDS).write_volatile(capture_context_fields);
                 ptr::addr_of_mut!(APP_ROOT_OBJECT).write_volatile(ptr::null_mut());
+                CAPTURE_ROOT_READS = 0;
             }
         }
     }
@@ -345,7 +357,7 @@ mod tests {
 
     #[test]
     fn writes_every_field_and_returns_this() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let _restore = SlotGuard;
         let mut token = poisoned_token();
         let owner = 0x1234_5678usize as *mut u8;
@@ -364,7 +376,7 @@ mod tests {
 
     #[test]
     fn calls_the_capture_callee_once_with_the_owner_and_a_zero_mode() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let _restore = SlotGuard;
         let mut token = poisoned_token();
         let owner = 0xabc0_0000usize as *mut u8;
@@ -391,7 +403,7 @@ mod tests {
 
     #[test]
     fn mode_round_trips_edge_values() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let _restore = SlotGuard;
         unsafe { install_mock() };
         for mode in [0u8, 1, 0x7f, 0x80, 0xff] {
@@ -410,22 +422,26 @@ mod tests {
     }
 
     #[test]
-    fn default_stub_leaves_both_derived_words_null_without_an_owner() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+    fn capture_context_fields_with_null_owner_skips_the_root_walk() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let _restore = SlotGuard;
         let mut token = poisoned_token();
-        // The root stays NULL: with no owner the stub must never read it.
-        unsafe { scoped_context_construct(&mut token, ptr::null_mut(), 3) };
+        // A root that would fault if the owner-null path walked it.
+        unsafe {
+            ptr::addr_of_mut!(APP_ROOT_OBJECT).write_volatile(0x1usize as *mut u8);
+            CAPTURE_ROOT_READS = 0;
+            capture_context_fields(&mut token, ptr::null_mut());
+        }
 
         assert!(token.owner.is_null());
         assert!(token.service_context.is_null());
         assert!(token.registry_token.is_null());
-        assert_eq!(token.mode, 3);
+        assert_eq!(unsafe { ptr::addr_of!(CAPTURE_ROOT_READS).read() }, 0);
     }
 
     #[test]
-    fn default_stub_walks_the_system_root_for_an_owner() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+    fn capture_context_fields_walks_the_system_root_for_an_owner() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let _restore = SlotGuard;
 
         let mut registry = registry_with_token(0x4242_4242usize as *mut u8);
@@ -439,16 +455,18 @@ mod tests {
 
         let mut token = poisoned_token();
         let owner = 0x0011_2233usize as *mut u8;
-        unsafe { scoped_context_construct(&mut token, owner, 1) };
+        unsafe { CAPTURE_ROOT_READS = 0 };
+        unsafe { capture_context_fields(&mut token, owner) };
 
         assert_eq!(token.owner, owner);
         assert_eq!(token.service_context, service_context.as_mut_ptr() as *mut u8);
         assert_eq!(token.registry_token, 0x4242_4242usize as *mut u8);
+        assert_eq!(unsafe { ptr::addr_of!(CAPTURE_ROOT_READS).read() }, 1);
     }
 
     #[test]
-    fn default_stub_yields_a_null_token_when_the_registry_slot_is_null() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+    fn capture_context_fields_yields_a_null_token_when_the_registry_slot_is_null() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let _restore = SlotGuard;
 
         let mut service_context: Vec<*mut u8> = vec![ptr::null_mut(); SERVICE_CONTEXT_REGISTRY_SLOT + 1];
@@ -459,7 +477,7 @@ mod tests {
         }
 
         let mut token = poisoned_token();
-        unsafe { scoped_context_construct(&mut token, 1 as *mut u8, 0) };
+        unsafe { capture_context_fields(&mut token, 1 as *mut u8) };
 
         assert_eq!(token.service_context, service_context.as_mut_ptr() as *mut u8);
         assert!(
@@ -470,7 +488,7 @@ mod tests {
 
     #[test]
     fn destroy_touches_nothing() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let _restore = SlotGuard;
         let mut token = poisoned_token();
         unsafe { install_mock() };
