@@ -15004,6 +15004,26 @@ functions:
       read_unaligned host-testing idiom, the same accepted deviation as
       vector_size_elem4.
 
+  - address: 0x083d771c
+    ghidra: FUN_083d771c
+    name: vector_size_elem20
+    size: 16
+    sig: "i32 vector_size_elem20(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      Byte-identical second instantiation of vector_size_elem20
+      @ 0x083d7640 (same `ldm r0,{r0,r1}; sub r0,r1,r0; mov r1,#0x14;
+      b 0x08031568` - verified against osos.asm). Served by the
+      existing cxx/templates port - hook this address to the one
+      vector_size_elem20 symbol (the vector_size_elem24
+      copy-at-0x083d77dc precedent). 7 bl call sites. match.py against
+      vector_size_elem20 at this address - same structure (sub / mov
+      r1,#20 / b __rt_sdiv); the ldm comes out as byte loads from the
+      family's read_unaligned host-testing idiom, the same accepted
+      deviation as vector_size_elem4.
+
   - address: 0x083d7894
     ghidra: FUN_083d7894
     name: vector_size_elem28
