@@ -21701,6 +21701,59 @@ functions:
       ::scalar_body_end_to_end_kind4_through_the_thunk /
       ::scalar_body_end_to_end_kind2_through_the_thunk.
 
+  - address: 0x0811d5fc
+    ghidra: FUN_0811d5fc
+    name: vtable_query_4c_read_buffer_size_out
+    size: 80
+    sig: "u32 vtable_query_4c_read_buffer_size_out(handle: *mut *mut u8, _capacity: u32, buffer: *mut u8, size_out: *mut u32)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r5: handle
+      param_2/r1: _capacity (DEAD - mov r1,#0x4 kills it before any use)
+      param_3/r6: buffer
+      param_4/r3/r4: size_out
+    notes: >-
+      1 bl call site (grep on decomp/osos.asm): 0x0811afeb8 in
+      FUN_081afdb8, which passes the handle (param_1 + 0xd), the
+      buffer capacity 0x100 in r1, a 0x100-byte stack buffer in r2
+      and &local_140 in r3, then NUL-terminates auStack_13c[local_140]
+      - the probed word IS a byte count. Reference C
+      decomp/c/010/0811d5fc_FUN_0811d5fc.c is accurate. The
+      unclamped, size-reporting sibling of vtable_query_4c_kind4_read
+      (0x0811d818): the same probe-read-finish shape as the shared
+      scalar body vtable_query_4c_read_scalar_body (0x0811d5ac)
+      through vtable_slot_4c_dispatch (0x0811d7b0), but the probe's
+      out-slot is the CALLER's size_out pointer (mov r2,r3 - r3 is a
+      REAL argument here, breaking the family's no-r3 convention),
+      and the probed size feeds the read UNCLAMPED (ldr r1,[r4] -
+      no strhi) with the caller's buffer as data. Probe sends the
+      hardcoded kind 4; status 5 = unsupported and any other nonzero
+      = hard error, both returning verbatim. The finish bleq
+      0x0811d46c (ported util/vtable_query.rs vtable_query_4c_kind4)
+      fires only on a zero read status, with the one-word {size_out}
+      entry spill (moveq r1,sp) as the message; its error code is
+      the return value. Deviations: both callees are ported and
+      route through the new VTABLE_QUERY_4C_BUFFER_DISPATCH /
+      VTABLE_QUERY_4C_BUFFER_FINISH seams (the
+      VTABLE_QUERY_4C_SCALAR_DISPATCH/FINISH precedent - seams
+      retained, wired to the ported implementations). r1 (capacity)
+      is DEAD - mov r1,#0x4 overwrites it before anything reads it;
+      the sole call site's 0x100 is never consulted (unlike the
+      clamping 0x0811d818 sibling), modeled as _capacity. r3 is DEAD
+      for the read dispatch and the finish call (the 0x0811d874
+      dead-slot refinement): a zero stack word and 0 stand in for
+      those unobservable arguments (r2 likewise dead). Host tests
+      (the buffer recording mocks through the two new seams,
+      SLOT_TEST_LOCK serialized):
+      src/app/vtable_set.rs::buffer_read_probe_unsupported_bails_before_the_read
+      / ::buffer_read_probe_error_bails_before_the_read /
+      ::buffer_read_probe_args_route_size_out_and_ignore_capacity /
+      ::buffer_read_read_dispatch_routes_the_probed_size_unclamped /
+      ::buffer_read_read_error_skips_the_finish /
+      ::buffer_read_finish_routing_and_final_return /
+      ::buffer_read_end_to_end_reports_size_and_delivers_bytes.
+
   - address: 0x0811d70c
     ghidra: FUN_0811d70c
     name: vtable_query_4c_read_scalar_kind2

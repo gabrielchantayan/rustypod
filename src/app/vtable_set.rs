@@ -1700,6 +1700,176 @@ pub unsafe extern "C" fn vtable_query_4c_read_scalar_body(
     finish(handle, core::ptr::addr_of_mut!(pair[0]) as *mut u32, 0, 0)
 }
 
+/// Indirect dispatch for the two slot +0x4c dispatches of
+/// [`vtable_query_4c_read_buffer_size_out`], wired to this module's
+/// ported [`vtable_slot_4c_dispatch`] (original: `FUN_0811d7b0` @
+/// 0x0811d7b0; the [`VTABLE_QUERY_4C_SCALAR_DISPATCH`] pattern — the
+/// seam is retained for hookability, the dispatcher's `blx` targets
+/// are firmware vtable methods, and a role-specific name keeps host
+/// tests from racing the siblings' parallel tests).
+pub static mut VTABLE_QUERY_4C_BUFFER_DISPATCH: unsafe extern "C" fn(
+    handle: *mut *mut u8,
+    kind: u32,
+    data: usize,
+    extra: *const usize,
+) -> u32 = vtable_slot_4c_dispatch;
+
+/// Indirect dispatch for the closing query-thunk call of
+/// [`vtable_query_4c_read_buffer_size_out`], wired to the ported
+/// `util/vtable_query.rs` `vtable_query_4c_kind4` (original:
+/// `FUN_0811d46c` @ 0x0811d46c; the [`VTABLE_QUERY_4C_SCALAR_FINISH`]
+/// pattern — a module-local seam keeps host tests able to intercept
+/// it without swapping util's `VTABLE_SLOT_4C_DISPATCH` static, which
+/// would race util's own parallel tests).
+pub static mut VTABLE_QUERY_4C_BUFFER_FINISH: unsafe extern "C" fn(
+    handle: *mut *mut u8,
+    out: *mut u32,
+    unused: usize,
+    forwarded: usize,
+) -> u32 = crate::util::vtable_query::vtable_query_4c_kind4;
+
+/// vtable_query_4c_read_buffer_size_out — original: `FUN_0811d5fc` @
+/// 0x0811d5fc (80 bytes; **1 `bl` call site**, grep on
+/// `decomp/osos.asm`: 0x0811afeb8 in `FUN_081afdb8` — it passes the
+/// handle in r0 (`param_1 + 0xd`), the buffer capacity 0x100 in r1, a
+/// pointer to the caller's 0x100-byte stack buffer in r2 and a
+/// pointer to the caller's size word in r3 (`&local_140`), then
+/// NUL-terminates the buffer at the reported size
+/// (`auStack_13c[local_140] = 0`) — the size IS a byte count).
+/// Reference C `decomp/c/010/0811d5fc_FUN_0811d5fc.c` is accurate.
+///
+/// The unclamped, size-reporting sibling of this module's
+/// [`vtable_query_4c_kind4_read`] (0x0811d818): the same
+/// probe→read→finish shape through the slot +0x4c dispatcher, but
+/// the probe's out-slot is the CALLER's `size_out` pointer (r3
+/// doubles as the probe's data argument — `mov r2, r3`), the probed
+/// size feeds the read UNCLAMPED (`ldr r1, [r4]` — no `strhi`
+/// clamp), and the capacity argument is never consulted:
+///
+/// ```text
+/// 0811d5fc  stmdb sp!, {r3, r4, r5, r6, r7, lr}  @ spill = size_out
+/// 0811d600  mov   r6, r2            @ save buffer (arg3)
+/// 0811d604  mov   r2, r3            @ probe data = size_out
+/// 0811d608  mov   r5, r0            @ save handle
+/// 0811d60c  mov   r4, r3            @ save size_out
+/// 0811d610  mov   r1, #0x4          @ kind 4 — r1 (capacity) DIES here
+/// 0811d614  bl    0x0811d7b0        @ probe: dispatch(handle, 4, size_out)
+/// 0811d618  cmp   r0, #0x5
+/// 0811d61c  beq   0x0811d648        @ unsupported -> return status
+/// 0811d620  cmp   r0, #0x0
+/// 0811d624  bne   0x0811d648        @ hard error -> return status
+/// 0811d628  ldr   r1, [r4, #0x0]    @ size = *size_out (method-written)
+/// 0811d62c  mov   r2, r6            @ data = buffer
+/// 0811d630  mov   r0, r5
+/// 0811d634  bl    0x0811d7b0        @ read: dispatch(handle, size, buffer)
+/// 0811d638  cmp   r0, #0x0
+/// 0811d63c  moveq r1, sp            @ message = &spill (holds size_out)
+/// 0811d640  moveq r0, r5
+/// 0811d644  bleq  0x0811d46c        @ finish: vtable_query_4c_kind4(handle, &spill)
+/// 0811d648  ldmia sp!, {r3, r4, r5, r6, r7, pc}
+/// ```
+///
+/// Three messages to the slot +0x4c dispatcher
+/// ([`vtable_slot_4c_dispatch`], 0x0811d7b0), exactly the
+/// [`vtable_query_4c_read_scalar_body`] (0x0811d5ac) flow with the
+/// out-slot promoted to a real argument. The **probe** sends kind 4
+/// (hardcoded `mov r1, #0x4`) with the caller's `size_out` pointer
+/// as the out-slot; the method answers with the property's byte
+/// count. Status **5** means "unsupported" and bails, any other
+/// nonzero is a hard error, both returning verbatim. The **read**
+/// re-dispatches with the PROBED size as the middle argument (`ldr
+/// r1, [r4]` — a byte count, not a kind constant) and the caller's
+/// buffer as data; the method stores the bytes through it. Only on
+/// a zero read status does the **finish** `bleq` fire: 0x0811d46c is
+/// the PORTED kind-4 query thunk `util/vtable_query.rs`
+/// `vtable_query_4c_kind4`, re-dispatching kind 4 with the one-word
+/// `{size_out}` spill as the message; its error code becomes the
+/// return value.
+///
+/// # Deviations
+///
+/// - **Both callees are ported** ([`vtable_slot_4c_dispatch`] in this
+///   module, `vtable_query_4c_kind4` in util/vtable_query.rs); the
+///   calls route through the new
+///   [`VTABLE_QUERY_4C_BUFFER_DISPATCH`] /
+///   [`VTABLE_QUERY_4C_BUFFER_FINISH`] seams (the
+///   [`VTABLE_QUERY_4C_SCALAR_DISPATCH`] /
+///   [`VTABLE_QUERY_4C_SCALAR_FINISH`] precedent — hookability plus
+///   host-test interception without racing the siblings' or util's
+///   own parallel tests).
+/// - **arg2 (r1, the caller's capacity) is DEAD** — `mov r1, #0x4`
+///   overwrites it before anything reads it and nothing saves it.
+///   The sole call site passes the buffer capacity 0x100, but unlike
+///   the clamping sibling [`vtable_query_4c_kind4_read`] this
+///   function never consults it: the probed size drives the read
+///   unclamped. It is modeled as `_capacity` to document the
+///   call-site contract.
+/// - **arg4 (r3) is a REAL argument** (`size_out`), breaking the
+///   family's "no call site sets r3" convention — the sole caller
+///   deliberately passes `&local_140`. It triples as the probe's
+///   data argument (`mov r2, r3`), the word this function's entry
+///   `stmdb sp!, {r3, ...}` spill exposes (the finish message and,
+///   by value, the probe dispatcher's own `stmdb sp!, {r3}` extra),
+///   and the probed-size source for the read (`ldr r1, [r4]`).
+/// - **r3 is DEAD for the read dispatch and the finish call** (the
+///   [`vtable_query_4c_read_scalar_body`] refinement): the probe
+///   method clobbers r0–r3 across the first `bl` and nothing
+///   reloads r3, so the port passes a pointer to a zero stack word
+///   for the read's extra and 0 for the thunk's `forwarded` /
+///   `_unused` (r2 is likewise dead and the thunk discards it with
+///   `mov r2, r1`).
+/// - **The return type is `u32`** (r0 carries the failing dispatch's
+///   status — or the finish's — back to the call site, which
+///   branches on it).
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_query_4c_read_buffer_size_out(
+    handle: *mut *mut u8,
+    _capacity: u32,
+    buffer: *mut u8,
+    size_out: *mut u32,
+) -> u32 {
+    let dispatch =
+        core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_QUERY_4C_BUFFER_DISPATCH));
+    let finish =
+        core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_QUERY_4C_BUFFER_FINISH));
+    // The entry `stmdb sp!, {r3, ...}` spill: one word holding
+    // size_out — by value the probe dispatcher's extra content, by
+    // address (moveq r1, sp) the finish message.
+    let mut spill = size_out as usize;
+    // Probe: dispatch(handle, 4, size_out) — kind 4 is hardcoded
+    // (`mov r1, #0x4`); the method answers with the property's byte
+    // count through size_out. 5 = "unsupported", any other nonzero a
+    // hard error — both return the status verbatim.
+    let status = dispatch(
+        handle,
+        MESSAGE_KIND_4,
+        size_out as usize,
+        core::ptr::addr_of!(spill),
+    );
+    if status == STATUS_UNSUPPORTED {
+        return status;
+    }
+    if status != 0 {
+        return status;
+    }
+    // Read: dispatch(handle, *size_out, buffer) — `ldr r1, [r4]` is
+    // the probed byte count, UNCLAMPED (no `strhi` here, unlike the
+    // 0x0811d818 sibling). r3 is dead across the probe
+    // (method-clobbered); a zero word stands in for the unobservable
+    // extra (the 0x0811d874 dead-slot precedent).
+    let size = *size_out;
+    let dead_slot = 0usize;
+    let status = dispatch(handle, size, buffer as usize, core::ptr::addr_of!(dead_slot));
+    if status != 0 {
+        return status;
+    }
+    // Finish: vtable_query_4c_kind4(handle, &spill); r2/r3 are dead
+    // across the read dispatch (the thunk discards r2 with `mov r2,
+    // r1`), so 0 stands in for both unobservable arguments.
+    finish(handle, core::ptr::addr_of_mut!(spill) as *mut u32, 0, 0)
+}
+
 /// vtable_query_4c_read_scalar_kind2 — original: `FUN_0811d70c` @
 /// 0x0811d70c (12 bytes per `decomp/functions.csv`: the kind-2 entry
 /// thunk only; the shared 80-byte body at 0x0811d5ac it tail-calls
@@ -1940,6 +2110,10 @@ mod tests {
                 core::ptr::addr_of_mut!(VTABLE_QUERY_4C_SCALAR_DISPATCH)
                     .write_volatile(vtable_slot_4c_dispatch);
                 core::ptr::addr_of_mut!(VTABLE_QUERY_4C_SCALAR_FINISH)
+                    .write_volatile(crate::util::vtable_query::vtable_query_4c_kind4);
+                core::ptr::addr_of_mut!(VTABLE_QUERY_4C_BUFFER_DISPATCH)
+                    .write_volatile(vtable_slot_4c_dispatch);
+                core::ptr::addr_of_mut!(VTABLE_QUERY_4C_BUFFER_FINISH)
                     .write_volatile(crate::util::vtable_query::vtable_query_4c_kind4);
             }
         }
@@ -4269,6 +4443,345 @@ mod tests {
         let _lock = SLOT_TEST_LOCK.lock().unwrap();
         let _restore = SlotGuard;
         assert_scalar_thunk_end_to_end(MESSAGE_KIND_2, true);
+    }
+
+    // ---- recording mocks for the buffer-size-out read seams ---------
+
+    /// The byte count the probe answers through `size_out` (distinct
+    /// from both MESSAGE_KIND_4 and BUFFER_CAPACITY, so a kind/data
+    /// mix-up cannot pass silently).
+    const BUFFER_SIZE: u32 = 0x24;
+    /// The capacity the caller passes in r1 — the original never
+    /// reads it (`mov r1, #0x4` kills r1 before any use).
+    const BUFFER_CAPACITY: u32 = 0x100;
+    /// The marker bytes the read method stores into the buffer.
+    const BUFFER_PAYLOAD: [u8; 4] = [0xde, 0xad, 0xbe, 0xef];
+
+    static mut BUFFER_CALLS: usize = 0;
+    static mut BUFFER_HANDLE: [*mut *mut u8; 8] = [core::ptr::null_mut(); 8];
+    static mut BUFFER_KIND: [u32; 8] = [0; 8];
+    static mut BUFFER_DATA: [usize; 8] = [0; 8];
+    static mut BUFFER_DATA_WORD: [u32; 8] = [0; 8];
+    static mut BUFFER_EXTRA: [usize; 8] = [0; 8];
+    static mut BUFFER_RESULTS: [u32; 8] = [MOCK_OK; 8];
+    /// The byte count the probe answers through the size pointer.
+    static mut BUFFER_ANSWER: u32 = BUFFER_SIZE;
+
+    unsafe extern "C" fn recording_buffer_dispatch(
+        handle: *mut *mut u8,
+        kind: u32,
+        data: usize,
+        extra: *const usize,
+    ) -> u32 {
+        let call = BUFFER_CALLS;
+        BUFFER_CALLS += 1;
+        BUFFER_HANDLE[call] = handle;
+        BUFFER_KIND[call] = kind;
+        BUFFER_DATA[call] = data;
+        // Call 0's data is the caller's size word; call 1's data is
+        // the caller's buffer — the tests back both with real
+        // locals, so the word reads are in-bounds.
+        BUFFER_DATA_WORD[call] = (data as *const u32).read();
+        BUFFER_EXTRA[call] = extra.read();
+        if call == 0 {
+            // The probe answers the byte count through size_out (a
+            // 32-bit store, as the firmware method's `str` would be).
+            (data as *mut u32).write(BUFFER_ANSWER);
+        } else {
+            // The read method delivers the bytes through the caller's
+            // buffer pointer.
+            (data as *mut u8)
+                .copy_from_nonoverlapping(BUFFER_PAYLOAD.as_ptr(), BUFFER_PAYLOAD.len());
+        }
+        BUFFER_RESULTS[call]
+    }
+
+    static mut BUFFER_FINISH_CALLS: usize = 0;
+    static mut BUFFER_FINISH_HANDLE: *mut *mut u8 = core::ptr::null_mut();
+    static mut BUFFER_FINISH_OUT: *mut u32 = core::ptr::null_mut();
+    static mut BUFFER_FINISH_WORD: usize = 0;
+    static mut BUFFER_FINISH_UNUSED: usize = 0;
+    static mut BUFFER_FINISH_FORWARDED: usize = 0;
+    static mut BUFFER_FINISH_RESULT: u32 = MOCK_OK;
+
+    unsafe extern "C" fn recording_buffer_finish(
+        handle: *mut *mut u8,
+        out: *mut u32,
+        unused: usize,
+        forwarded: usize,
+    ) -> u32 {
+        BUFFER_FINISH_CALLS += 1;
+        BUFFER_FINISH_HANDLE = handle;
+        BUFFER_FINISH_OUT = out;
+        // `out` addresses the one-word {size_out} entry spill, whose
+        // word is pointer-sized on this 64-bit host.
+        BUFFER_FINISH_WORD = (out as *const usize).read();
+        BUFFER_FINISH_UNUSED = unused;
+        BUFFER_FINISH_FORWARDED = forwarded;
+        BUFFER_FINISH_RESULT
+    }
+
+    unsafe fn install_buffer_mocks() {
+        BUFFER_CALLS = 0;
+        BUFFER_RESULTS = [MOCK_OK; 8];
+        BUFFER_ANSWER = BUFFER_SIZE;
+        BUFFER_FINISH_CALLS = 0;
+        BUFFER_FINISH_HANDLE = core::ptr::null_mut();
+        BUFFER_FINISH_OUT = core::ptr::null_mut();
+        BUFFER_FINISH_RESULT = MOCK_OK;
+        core::ptr::addr_of_mut!(VTABLE_QUERY_4C_BUFFER_DISPATCH)
+            .write_volatile(recording_buffer_dispatch);
+        core::ptr::addr_of_mut!(VTABLE_QUERY_4C_BUFFER_FINISH)
+            .write_volatile(recording_buffer_finish);
+    }
+
+    // ---- vtable_query_4c_read_buffer_size_out (0x0811d5fc) ----------
+
+    #[test]
+    fn buffer_read_probe_unsupported_bails_before_the_read() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let mut buffer = [0u8; 8];
+        let mut size_out: u32 = 0;
+        unsafe {
+            install_buffer_mocks();
+            BUFFER_RESULTS[0] = UNSUPPORTED_ERR;
+
+            let status = vtable_query_4c_read_buffer_size_out(
+                fixture.handle_ptr(),
+                BUFFER_CAPACITY,
+                buffer.as_mut_ptr(),
+                core::ptr::addr_of_mut!(size_out),
+            );
+
+            assert_eq!(
+                status, UNSUPPORTED_ERR,
+                "cmp r0, #0x5; beq — the unsupported status returns verbatim"
+            );
+            assert_eq!(BUFFER_CALLS, 1, "no read dispatch after a 5");
+            assert_eq!(BUFFER_FINISH_CALLS, 0, "no finish call after a 5");
+        }
+    }
+
+    #[test]
+    fn buffer_read_probe_error_bails_before_the_read() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let mut buffer = [0u8; 8];
+        let mut size_out: u32 = 0;
+        unsafe {
+            install_buffer_mocks();
+            BUFFER_RESULTS[0] = METHOD_ERR;
+
+            let status = vtable_query_4c_read_buffer_size_out(
+                fixture.handle_ptr(),
+                BUFFER_CAPACITY,
+                buffer.as_mut_ptr(),
+                core::ptr::addr_of_mut!(size_out),
+            );
+
+            assert_eq!(
+                status, METHOD_ERR,
+                "cmp r0, #0; bne — the probe's hard error returns verbatim"
+            );
+            assert_eq!(BUFFER_CALLS, 1, "no read dispatch after a probe error");
+            assert_eq!(BUFFER_FINISH_CALLS, 0);
+        }
+    }
+
+    #[test]
+    fn buffer_read_probe_args_route_size_out_and_ignore_capacity() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let mut buffer = [0u8; 8];
+        let mut size_out: u32 = 0;
+        unsafe {
+            install_buffer_mocks();
+
+            let status = vtable_query_4c_read_buffer_size_out(
+                fixture.handle_ptr(),
+                BUFFER_CAPACITY,
+                buffer.as_mut_ptr(),
+                core::ptr::addr_of_mut!(size_out),
+            );
+
+            assert_eq!(status, MOCK_OK);
+            assert_eq!(
+                BUFFER_KIND[0], MESSAGE_KIND_4,
+                "mov r1, #0x4 — the probe is hardcoded kind 4"
+            );
+            assert_eq!(BUFFER_HANDLE[0], fixture.handle_ptr(), "mov r5, r0 — r0 passes through");
+            assert_eq!(
+                BUFFER_DATA[0],
+                core::ptr::addr_of_mut!(size_out) as usize,
+                "mov r2, r3 — the probe's out-slot IS the caller's size pointer"
+            );
+            assert_eq!(
+                BUFFER_EXTRA[0],
+                core::ptr::addr_of_mut!(size_out) as usize,
+                "the entry stmdb sp!, {{r3}} spill — the dispatcher's extra \
+                 points at a word holding the same size_out pointer"
+            );
+            assert!(
+                BUFFER_KIND[..BUFFER_CALLS]
+                    .iter()
+                    .all(|&kind| kind != BUFFER_CAPACITY),
+                "r1 is dead (`mov r1, #0x4` overwrites it before any use): \
+                 the caller's capacity reaches no dispatch"
+            );
+        }
+    }
+
+    #[test]
+    fn buffer_read_read_dispatch_routes_the_probed_size_unclamped() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let mut buffer = [0u8; 8];
+        let mut size_out: u32 = 0;
+        unsafe {
+            install_buffer_mocks();
+            // A probed size LARGER than the caller's capacity: the
+            // 0x0811d818 sibling clamps with strhi; this function has
+            // no clamp — the read must carry the probed size verbatim.
+            BUFFER_ANSWER = 0x180;
+
+            let status = vtable_query_4c_read_buffer_size_out(
+                fixture.handle_ptr(),
+                BUFFER_CAPACITY,
+                buffer.as_mut_ptr(),
+                core::ptr::addr_of_mut!(size_out),
+            );
+
+            assert_eq!(status, MOCK_OK);
+            assert_eq!(BUFFER_CALLS, 2, "probe then read");
+            assert_eq!(
+                BUFFER_KIND[1], 0x180,
+                "ldr r1, [r4] — the read's middle argument is the probed \
+                 size, NOT the (dead) capacity and NOT clamped to it"
+            );
+            assert_eq!(BUFFER_HANDLE[1], fixture.handle_ptr(), "mov r0, r5");
+            assert_eq!(
+                BUFFER_DATA[1],
+                buffer.as_mut_ptr() as usize,
+                "mov r2, r6 — the read's data is the caller's buffer pointer"
+            );
+            assert_eq!(
+                BUFFER_EXTRA[1], 0,
+                "r3 is dead across the probe (method-clobbered); a zero word \
+                 stands in for the unobservable extra"
+            );
+            assert_eq!(
+                size_out, 0x180,
+                "the probe's store through size_out reaches the caller"
+            );
+            assert_eq!(
+                &buffer[..BUFFER_PAYLOAD.len()],
+                &BUFFER_PAYLOAD,
+                "the read method's stores through the buffer pointer reach the caller"
+            );
+        }
+    }
+
+    #[test]
+    fn buffer_read_read_error_skips_the_finish() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let mut buffer = [0u8; 8];
+        let mut size_out: u32 = 0;
+        unsafe {
+            install_buffer_mocks();
+            BUFFER_RESULTS[1] = READ_ERR;
+
+            let status = vtable_query_4c_read_buffer_size_out(
+                fixture.handle_ptr(),
+                BUFFER_CAPACITY,
+                buffer.as_mut_ptr(),
+                core::ptr::addr_of_mut!(size_out),
+            );
+
+            assert_eq!(status, READ_ERR, "the read dispatch's error returns verbatim");
+            assert_eq!(BUFFER_CALLS, 2);
+            assert_eq!(
+                BUFFER_FINISH_CALLS, 0,
+                "bleq — the finish fires only on a zero read status"
+            );
+        }
+    }
+
+    #[test]
+    fn buffer_read_finish_routing_and_final_return() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let mut buffer = [0u8; 8];
+        let mut size_out: u32 = 0;
+        unsafe {
+            install_buffer_mocks();
+            BUFFER_FINISH_RESULT = FINISH_CODE;
+
+            let status = vtable_query_4c_read_buffer_size_out(
+                fixture.handle_ptr(),
+                BUFFER_CAPACITY,
+                buffer.as_mut_ptr(),
+                core::ptr::addr_of_mut!(size_out),
+            );
+
+            assert_eq!(
+                status, FINISH_CODE,
+                "the finish thunk's error code is the function's return value"
+            );
+            assert_eq!(BUFFER_FINISH_CALLS, 1);
+            assert_eq!(BUFFER_FINISH_HANDLE, fixture.handle_ptr(), "moveq r0, r5");
+            assert!(!BUFFER_FINISH_OUT.is_null(), "moveq r1, sp — the entry spill slot");
+            assert_eq!(
+                BUFFER_FINISH_WORD,
+                core::ptr::addr_of_mut!(size_out) as usize,
+                "the spill word is the entry r3 — the caller's size_out pointer"
+            );
+            assert_eq!(
+                BUFFER_FINISH_UNUSED, 0,
+                "r2 is dead across the read dispatch and the thunk discards \
+                 it (mov r2, r1); the port passes 0"
+            );
+            assert_eq!(
+                BUFFER_FINISH_FORWARDED, 0,
+                "r3 is likewise dead (method-clobbered across the read \
+                 dispatch); the port passes 0"
+            );
+        }
+    }
+
+    #[test]
+    fn buffer_read_end_to_end_reports_size_and_delivers_bytes() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let mut buffer = [0u8; 8];
+        let mut size_out: u32 = 0;
+        unsafe {
+            install_buffer_mocks();
+
+            let status = vtable_query_4c_read_buffer_size_out(
+                fixture.handle_ptr(),
+                BUFFER_CAPACITY,
+                buffer.as_mut_ptr(),
+                core::ptr::addr_of_mut!(size_out),
+            );
+
+            assert_eq!(status, MOCK_OK);
+            assert_eq!(BUFFER_CALLS, 2, "probe then read");
+            assert_eq!(BUFFER_KIND[0], MESSAGE_KIND_4, "the probe is always kind 4");
+            assert_eq!(BUFFER_KIND[1], BUFFER_SIZE, "the read carries the probed size");
+            assert_eq!(size_out, BUFFER_SIZE, "the byte count is reported");
+            assert_eq!(&buffer[..BUFFER_PAYLOAD.len()], &BUFFER_PAYLOAD, "the bytes arrive");
+            assert_eq!(BUFFER_FINISH_CALLS, 1, "the finish fires on a zero read status");
+            assert_eq!(BUFFER_FINISH_HANDLE, fixture.handle_ptr());
+        }
     }
 
     // ---- vtable_set_50_write_indirect_kind4 (0x0811d874) -------------
