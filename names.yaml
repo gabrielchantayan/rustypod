@@ -15321,6 +15321,11 @@ functions:
      module: cxx/templates, status: ported, vars: {param_1: vector},
      notes: "ALIAS - byte-identical to vector_capacity_elem12 @ 0x083d7708 (all 20 bytes: ldr r1,[r0,#8]; ldr r0,[r0]; sub r0,r1,r0; mov r1,#0xc; b 0x08031568 __rt_sdiv) - a divide-by-12 capacity() copy, so the ledger's old blanket shift-based guess is wrong for this address too; per-address verification stays the rule. 4 bl sites (0x083e2f88, 0x083e30b8, 0x083e3114, 0x083e319c). No separate port exists; hook this address to the single vector_capacity_elem12 symbol (the handle_deref_or_null alias precedent). match.py against vector_capacity_elem12 at this address - same structure (sub / mov r1,#12 / b __rt_sdiv); the ldr pairs come out as byte loads from the family's read_unaligned host-testing idiom, the same accepted deviation as vector_size_elem4."}
 
+  - {address: 0x083d773c, ghidra: FUN_083d773c, name: vector_capacity_elem12_alias_773c,
+     size: 20, sig: "i32 vector_capacity_elem12_alias_773c(const VectorStorage *vector)",
+     module: cxx/templates, status: ported, vars: {param_1: vector},
+     notes: "ALIAS - byte-identical to vector_capacity_elem12 @ 0x083d7708 (all 20 bytes: ldr r1,[r0,#8]; ldr r0,[r0]; sub r0,r1,r0; mov r1,#0xc; b 0x08031568 __rt_sdiv) - a divide-by-12 capacity() copy verified against osos.asm per address; per-address verification stays the rule. It sits immediately after the vector_size_elem12 copy at 0x083d772c and immediately before the vector_size_elem24 primary at 0x083d7750, exactly like the primary sits beside its own divide siblings. 2 bl sites (0x083e1840, 0x083e1960). Source C: decomp/c/037/083d773c_FUN_083d773c.c - Ghidra inlines the ADS signed divide through the tail branch; the real body is the 5-instruction capacity/12 head. No separate port exists; hook this address to the single vector_capacity_elem12 symbol (the vector_capacity_elem12 alias-at-0x083d7828 precedent). match.py against vector_capacity_elem12 at this address - same structure (sub / mov r1,#12 / b __rt_sdiv); the ldr pairs come out as byte loads from the family's read_unaligned host-testing idiom, the same accepted deviation as vector_size_elem4."}
+
   - address: 0x083d5ea0
     ghidra: FUN_083d5ea0
     name: handle_deref_field12
@@ -19796,3 +19801,71 @@ functions:
       [memory,#8]`) replacing the `bl 0x082cfae8`. Rust implementation
       and focused host tests:
       `src/cxx/object_flags.rs::pfr_face_done`.
+
+  # --- String-registry key hash (namespace index XOR name hash) ---
+  - address: 0x080855a0
+    ghidra: FUN_080855a0
+    name: registry_key_hash
+    size: 84
+    sig: "u32 registry_key_hash(const usize *key)"
+    module: cxx/object_flags
+    status: ported
+    renames:
+      param_1: key
+      iVar1: registry_singleton
+      iVar2: count
+      puVar3: provider
+      uVar4: name_hash
+      DAT_080855f4: REGISTRY_SINGLETON
+    notes: >-
+      The key hash of the retailOS string registry rooted at the fixed
+      singleton @ 0x08a0ea6c (the 4-byte literal @ 0x080855f4, just past
+      the 84 code bytes 0x080855a0..0x080855f3). A key is three words —
+      namespace index (+0x00), unused (+0x04), name string pointer
+      (+0x08) — and the hash combines the index with a hash of the
+      name: when the singleton's +0x08 providers array exists and its
+      signed entry count exceeds the key's index (`ble` @ 0x080855c4
+      falls back), the provider object at table[index] supplies the
+      name hash through its vtable slot +0x00 (the `blx r1` @
+      0x080855d8); otherwise the registry's default name hash
+      FUN_082d7e54 computes it (unported: 88 bytes of per-byte salted
+      rotate-xor-multiply — c = b | 0x100*(i+1); h = rol(h, (c ^
+      c>>2) & 0xf) ^ c*c — folded as h ^ (h>>16); null/empty name
+      hashes to 0). The return is the key's index word, reloaded after
+      the hash call (`ldr r1,[r4,#0x0]` @ 0x080855e8), XORed with the
+      name hash. The two tiny accessor callees are FUN_08369780 (16
+      bytes: signed count at the providers object's +0x00 word, or -1
+      for null) and FUN_08369864 (20 bytes: table[index] of the +0x04
+      table, or null); the +0x08 providers word is reloaded before the
+      table index (`ldr r0,[r5,#0x8]` @ 0x080855ac and again @
+      0x080855c8). 0 `bl 0x080855a0` call sites (grep -c on
+      decomp/osos.asm) and no data pointer anywhere in osos.dec
+      (binary-scanned) — like pfr_face_done @ 0x080855f8 next door,
+      the record referencing it does not survive the decrypted image.
+      The registry is pinned by the singleton's other users (literal
+      pools @ 0x0805e8a4 / 0x0805e938 / 0x0805e984 / 0x0807d174):
+      FUN_0805e7dc inserts {index, flag, name, value} nodes into the
+      singleton's +0x00 hash map (lazily created by FUN_0805e93c
+      through FUN_082d7d08, a 16-bucket table with pluggable hash/eq)
+      and then notifies the same providers array's entry through
+      vtable slot +0x08; FUN_0805e8a8 looks nodes up by {index, name},
+      chasing +0x0c value links up to ten deep while the 0x8000 flag
+      bit is clear. The subsystem's own name is unlocated, so
+      "registry" names only this observed insert/lookup/notify
+      cluster. Deviations: the three unported callees ride the
+      REGISTRY_KEY_HASH_OPS seam (house pattern — DFONT_FALLBACK_OPS)
+      instead of direct `bl`s; host builds substitute test storage for
+      the firmware singleton @ 0x08a0ea6c; the key and singleton words
+      are addressed by pointer-sized word index (byte-exact on the
+      32-bit target, disjoint slots on a 64-bit host — the
+      pfr_face_done face-word model). match.py confirms the structural
+      shape: the null check, the signed cmp/ble gate on the count, the
+      providers-word reload, the vtable-slot-0 load, the key-word
+      reloads and the final eor are instruction-identical; the diff is
+      LLVM's push {r4-r8,sl,fp,lr} frame, the indirect `blx`s through
+      the seam, the constant-folded 0x08a0ea74 providers-word literal,
+      and LLVM tail-merging the default-hash and vtable-hash calls
+      into a single `blx r5` (r5 preloaded with the seam's
+      default_name_hash, overwritten by the vtable slot on the
+      provider path). Rust implementation and focused host tests:
+      `src/cxx/object_flags.rs::registry_key_hash`.
