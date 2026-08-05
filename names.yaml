@@ -21793,6 +21793,40 @@ functions:
       ::cell_table_create_routes_thirteen_cells_in_index_order_through_the_seam
       and ::cell_table_cell_init_seam_stays_wired_to_the_default.
 
+  - address: 0x0824310c
+    ghidra: FUN_0824310c
+    name: cg_cell_table_destroy
+    size: 44
+    sig: "CgCellTable *cg_cell_table_destroy(CgCellTable *record)"
+    module: codegen/ir
+    status: ported
+    renames:
+      param_1/r0/r5: record (arrives in r0, held in r5 across all cell
+        destroys, then returned in r0)
+      r4: index (0..=0xc, the `cmp r4,#0xc; bls` loop counter)
+    notes: >-
+      2 bl call sites, at 0x08251848 and 0x08256518; both callers
+      immediately call operator_delete @ 0x082aad24 after this routine
+      returns, proving this is a destructor rather than a deleting
+      destructor. It walks all thirteen cells at record + index*0x14
+      in ascending order through sibling cell helper FUN_08256c28
+      (36 bytes, unported). That helper loads +0x00 into r1, skips
+      NULL, loads +0x10 into r0, calls allocator-aware
+      FUN_0807f234(r0 = allocator, r1 = buffer), then clears +0x00.
+      Thus +0x00 is the owned buffer pointer and +0x10 the allocator
+      handle (NULL selects FUN_0807f234's default heap); no
+      operator_delete occurs in this body. Target behavior retains the
+      original direct call to stock FUN_08256c28 through the
+      CG_CELL_TABLE_CELL_DESTROY seam. Host behavior models its
+      default-allocator branch via free_wrapper(ptr, 0x38); the
+      unported non-NULL allocator registry path remains target-only,
+      and tests replace the seam if needed. The fixed ABI words use
+      u32 loads/stores at byte offsets, not host pointer-width slots.
+      Host tests: src/codegen/ir.rs::cell_table_destroy_skips_null_buffers,
+      ::cell_table_destroy_frees_all_owned_cells_in_order_and_pairs_with_create,
+      ::cell_table_destroy_routes_all_cells_in_index_order_through_the_seam,
+      and ::cell_table_destroy_seam_stays_wired_to_the_host_model.
+
   - address: 0x0811d5ac
     ghidra: (absent from functions.csv)
     name: vtable_query_4c_read_scalar_body

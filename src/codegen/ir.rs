@@ -111,13 +111,17 @@
 //!   flush caches, tear down. Its unported callees sit behind the
 //!   [`CG_COMPILE_AND_PATCH_OPS`] ops-table seam (plus the nested
 //!   [`CG_PROC_EMIT`] and [`CG_BUFFER_FREE`] seams).
-//! - `cg_cell_table_create` — original: `FUN_082430c4` @ 0x082430c4
-//!   (72 bytes; 1 `bl` call site — the video engine's lazy slot-table
-//!   getter `FUN_083b4830`, immediately after its
-//!   `operator_new(0x110)`). Constructor for a 0x110-byte record of
-//!   thirteen 0x14-byte owned-pointer cells plus five config bytes
-//!   `{1, 1, 0, 1, 1}`; the per-cell init `FUN_08256c10` sits behind
-//!   the [`CG_CELL_TABLE_CELL_INIT`] seam. Binary-adjacent to
+//! - `cg_cell_table_create` / `cg_cell_table_destroy` — originals
+//!   `FUN_082430c4` @ 0x082430c4 (72 bytes; 1 `bl` caller) /
+//!   `FUN_0824310c` @ 0x0824310c (44 bytes; 2 `bl` callers). The video
+//!   engine's lazy slot-table getter `FUN_083b4830` constructs a
+//!   0x110-byte record of thirteen 0x14-byte cells and five config
+//!   bytes `{1, 1, 0, 1, 1}`. Each cell owns a buffer at +0x00 and
+//!   records its allocator at +0x10; the constructor's per-cell init
+//!   is `FUN_08256c10`, while the destructor invokes its sibling
+//!   `FUN_08256c28`. The init has the
+//!   [`CG_CELL_TABLE_CELL_INIT`] seam; the target destroy seam calls
+//!   its still-unported stock helper directly. Binary-adjacent to
 //!   `cg_compile_and_patch` but not called by it.
 //!
 //! Layouts recovered from the assembly (byte offsets are the target's;
@@ -2418,18 +2422,17 @@ pub const CG_CELL_TABLE_CELLS: usize = 13;
 /// computation `add r0,r3,r3,lsl #0x2; add r0,r4,r0,lsl #0x2`
 /// (index * 5 * 4).
 pub const CG_CELL_TABLE_CELL_BYTES: usize = 0x14;
-/// Cell-relative offset of the ownership word: zeroed by the cell
-/// init; the mirror destructor (`FUN_0824310c`, through the cell
-/// destroy `FUN_08256c28`) frees the cell's pointer only when this
-/// word is non-zero.
-pub const CG_CELL_OWNED: usize = 0x00;
+/// Cell-relative offset of the owned buffer pointer: zeroed by the
+/// cell init, passed as r1 to `FUN_0807f234` by the mirror cell
+/// destructor, then zeroed after the free completes.
+pub const CG_CELL_BUFFER: usize = 0x00;
 /// Cell-relative offset of the tag byte, stamped 0xff by the cell
 /// init (the only byte the init writes).
 pub const CG_CELL_TAG: usize = 0x0c;
-/// Cell-relative offset of the owned heap pointer word: zeroed by
-/// the cell init, freed by the mirror destructor when the
-/// [`CG_CELL_OWNED`] word is non-zero.
-pub const CG_CELL_POINTER: usize = 0x10;
+/// Cell-relative offset of the allocator handle: zeroed by the cell
+/// init, passed as r0 to `FUN_0807f234` when freeing
+/// [`CG_CELL_BUFFER`]. NULL selects that routine's default-heap path.
+pub const CG_CELL_ALLOCATOR: usize = 0x10;
 /// Byte offset of the record's five config bytes, stamped
 /// `{1, 1, 0, 1, 1}` — immediately past the last cell
 /// (13 * 0x14 = 0x104).
@@ -2472,9 +2475,9 @@ pub static mut CG_CELL_TABLE_CELL_INIT: unsafe extern "C" fn(*mut u8) =
 /// 0x14-stride loop), so the module's word-index convention does not
 /// apply and the record is 0x110 bytes on any host.
 unsafe extern "C" fn default_cg_cell_table_cell_init(cell: *mut u8) {
-    (cell.add(CG_CELL_OWNED) as *mut u32).write(0);
+    (cell.add(CG_CELL_BUFFER) as *mut u32).write(0);
     cell.add(CG_CELL_TAG).write(0xffu8);
-    (cell.add(CG_CELL_POINTER) as *mut u32).write(0);
+    (cell.add(CG_CELL_ALLOCATOR) as *mut u32).write(0);
 }
 
 /// cg_cell_table_create — original: `FUN_082430c4` @ 0x082430c4
@@ -2491,11 +2494,12 @@ unsafe extern "C" fn default_cg_cell_table_cell_init(cell: *mut u8) {
 /// returns the record pointer — the C++ constructor convention,
 /// which the caller stores verbatim.
 ///
-/// The mirror destructor is `FUN_0824310c` @ 0x0824310c (44 bytes,
-/// unported): the same thirteen-cell loop over the cell destroy
-/// `FUN_08256c28`, which frees cell +0x10 when cell +0x00 is
-/// non-zero — each cell is an optionally-owned heap buffer with a
-/// 0xff-tagged byte.
+/// The mirror destructor is [`cg_cell_table_destroy`] @ 0x0824310c
+/// (44 bytes): the same thirteen-cell loop over sibling cell destroy
+/// `FUN_08256c28`. Its `ldr r1,[cell,#0]` NULL-guards the buffer,
+/// then it calls `FUN_0807f234(cell + 0x10, cell + 0x00)` and clears
+/// the buffer word. It does not call `operator_delete`; that routine
+/// returns the record for its caller to manage.
 ///
 /// Signature from the register moves: `record` arrives in r0, is
 /// held in r4 across the calls, and is moved back to r0 for the
@@ -2523,6 +2527,81 @@ pub unsafe extern "C" fn cg_cell_table_create(record: *mut CgCellTable) -> *mut 
     let mut index = 0usize;
     loop {
         cell_init(record.add(index * CG_CELL_TABLE_CELL_BYTES));
+        index += 1;
+        if index == CG_CELL_TABLE_CELLS {
+            break;
+        }
+    }
+    record as *mut CgCellTable
+}
+
+/// The cell-destroy boundary for [`cg_cell_table_destroy`]: one call
+/// per cell, in index order — the original's in-loop `bl 0x08256c28`.
+///
+/// On firmware, the wired default branches directly to the stock,
+/// unported helper, preserving its allocator-aware
+/// `FUN_0807f234(allocator, buffer)` path. On hosts it models the
+/// helper's default-allocator branch through the ported
+/// [`crate::heap::veneers::free_wrapper`] so tests can safely observe
+/// the free; host tests that need a non-default allocator replace this
+/// seam.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg(target_os = "none")]
+pub static mut CG_CELL_TABLE_CELL_DESTROY: unsafe extern "C" fn(*mut u8) =
+    stock_cg_cell_table_cell_destroy;
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg(not(target_os = "none"))]
+pub static mut CG_CELL_TABLE_CELL_DESTROY: unsafe extern "C" fn(*mut u8) =
+    host_cg_cell_table_cell_destroy;
+
+/// Firmware default for [`CG_CELL_TABLE_CELL_DESTROY`]: keep the
+/// original direct call to unported `FUN_08256c28` at its load address.
+#[cfg(target_os = "none")]
+unsafe extern "C" fn stock_cg_cell_table_cell_destroy(cell: *mut u8) {
+    let destroy: unsafe extern "C" fn(*mut u8) = core::mem::transmute(0x0825_6c28usize);
+    destroy(cell);
+}
+
+/// Host model of `FUN_08256c28`'s default-allocator path. It reads the
+/// ABI-fixed 32-bit buffer word, skips NULL, frees non-NULL through
+/// `free_wrapper` with the original's tag 0x38, then clears that word.
+///
+/// DEVIATION: the stock helper's non-NULL allocator path is left at
+/// its target address above because its `FUN_0807f234` registry
+/// machinery is unported; host tests requiring it install the public
+/// cell-destroy seam.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn host_cg_cell_table_cell_destroy(cell: *mut u8) {
+    let buffer = (cell.add(CG_CELL_BUFFER) as *const u32).read() as usize as *mut u8;
+    if !buffer.is_null() {
+        crate::heap::veneers::free_wrapper(buffer, 0x38);
+        (cell.add(CG_CELL_BUFFER) as *mut u32).write(0);
+    }
+}
+
+/// cg_cell_table_destroy — original: `FUN_0824310c` @ 0x0824310c
+/// (44 bytes; **2 `bl` call sites**, at 0x08251848 and 0x08256518).
+/// The C++-style mirror destructor for [`cg_cell_table_create`]: walks
+/// all thirteen cells at `record + index * 0x14` in ascending index
+/// order through sibling cell destroy `FUN_08256c28`, then returns
+/// `record`. The sibling reads the buffer at +0x00, skips NULL cells,
+/// frees non-NULL buffers through the allocator at +0x10 and clears
+/// +0x00. This destructor neither deallocates the 0x110-byte record
+/// nor invokes `operator_delete`.
+///
+/// Signature from the register moves: `record` arrives in r0, stays in
+/// r5 across all calls, then moves back to r0 for the return. The
+/// target implementation reaches `FUN_08256c28` directly through
+/// [`CG_CELL_TABLE_CELL_DESTROY`]; the replaceable seam is a documented
+/// host-test boundary whose target default is that exact stock call.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_cell_table_destroy(record: *mut CgCellTable) -> *mut CgCellTable {
+    let record = record as *mut u8;
+    let cell_destroy = hook(core::ptr::addr_of!(CG_CELL_TABLE_CELL_DESTROY));
+    let mut index = 0usize;
+    loop {
+        cell_destroy(record.add(index * CG_CELL_TABLE_CELL_BYTES));
         index += 1;
         if index == CG_CELL_TABLE_CELLS {
             break;
@@ -5770,15 +5849,15 @@ mod tests {
             for i in 0..CG_CELL_TABLE_CELLS {
                 let cell = record.add(i * CG_CELL_TABLE_CELL_BYTES);
                 assert_eq!(
-                    (cell.add(CG_CELL_OWNED) as *mut u32).read(),
+                    (cell.add(CG_CELL_BUFFER) as *mut u32).read(),
                     0,
-                    "cell {i} ownership word"
+                    "cell {i} buffer pointer"
                 );
                 assert_eq!(cell.add(CG_CELL_TAG).read(), 0xff, "cell {i} tag byte");
                 assert_eq!(
-                    (cell.add(CG_CELL_POINTER) as *mut u32).read(),
+                    (cell.add(CG_CELL_ALLOCATOR) as *mut u32).read(),
                     0,
-                    "cell {i} owned pointer"
+                    "cell {i} allocator handle"
                 );
                 // Bytes the init never touches keep the 0x5c poison —
                 // the constructor writes nothing else in a cell.
@@ -5828,6 +5907,183 @@ mod tests {
             assert_eq!(flags.as_slice(), &[1, 1, 0, 1, 1]);
 
             poisoning_free(record);
+        }
+        teardown();
+    }
+
+    // --- cg_cell_table_destroy (0x0824310c) through its seam ------
+
+    /// Cell-destroy calls observed by the recording mock, in order.
+    static mut CELL_DESTROY_LOG: std::vec::Vec<*mut u8> = std::vec::Vec::new();
+
+    unsafe extern "C" fn recording_cell_destroy(cell: *mut u8) {
+        CELL_DESTROY_LOG.push(cell);
+    }
+
+    /// A target-address fake heap: the record's ABI carries 32-bit
+    /// pointers, so allocation tokens deliberately fit in one target
+    /// word instead of borrowing host pointers.
+    static mut CELL_TABLE_FAKE_LIVE: std::vec::Vec<usize> = std::vec::Vec::new();
+    static mut CELL_TABLE_FAKE_FREE_LOG: std::vec::Vec<usize> = std::vec::Vec::new();
+    static mut CELL_TABLE_FAKE_NEXT: usize = 0x1000_0000;
+    static mut CELL_TABLE_FAKE_HEAP: usize = 0;
+
+    unsafe extern "C" fn fake_cell_table_alloc(
+        _heap: *mut crate::heap::types::HeapDescriptorDescriptor,
+        _size: usize,
+        _tag: usize,
+    ) -> *mut u8 {
+        let block = CELL_TABLE_FAKE_NEXT as *mut u8;
+        CELL_TABLE_FAKE_NEXT += 0x100;
+        CELL_TABLE_FAKE_LIVE.push(block as usize);
+        block
+    }
+
+    unsafe extern "C" fn fake_cell_table_free(
+        _heap: *mut crate::heap::types::HeapDescriptorDescriptor,
+        block: *mut u8,
+        tag: usize,
+    ) {
+        assert_eq!(tag, 0x38, "FUN_0807f234's default-heap free tag");
+        let index = CELL_TABLE_FAKE_LIVE
+            .iter()
+            .position(|&live| live == block as usize)
+            .expect("every freed buffer was allocated by this fake heap");
+        CELL_TABLE_FAKE_LIVE.remove(index);
+        CELL_TABLE_FAKE_FREE_LOG.push(block as usize);
+    }
+
+    /// Holds the heap veneer mock lock while the fake target heap is
+    /// installed, and restores the real pre-init state even on panic.
+    struct CellTableFakeHeapGuard {
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for CellTableFakeHeapGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS)
+                    .write(crate::heap::veneers::DEFAULT_HEAP_OPS);
+                core::ptr::addr_of_mut!(crate::heap::types::DEFAULT_HEAP)
+                    .write(core::ptr::null_mut());
+            }
+        }
+    }
+
+    /// Swaps the 32-bit-layout retailOS heap for an address-token fake
+    /// and pre-seeds DEFAULT_HEAP, so the host path never enters the
+    /// real heap core.
+    unsafe fn install_cell_table_fake_heap() -> CellTableFakeHeapGuard {
+        let lock = crate::heap::veneers::tests::mock_heap();
+        CELL_TABLE_FAKE_LIVE.clear();
+        CELL_TABLE_FAKE_FREE_LOG.clear();
+        CELL_TABLE_FAKE_NEXT = 0x1000_0000;
+        let mut ops = crate::heap::veneers::DEFAULT_HEAP_OPS;
+        ops.alloc = fake_cell_table_alloc;
+        ops.free = fake_cell_table_free;
+        core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS).write(ops);
+        core::ptr::addr_of_mut!(crate::heap::types::DEFAULT_HEAP).write(
+            core::ptr::addr_of_mut!(CELL_TABLE_FAKE_HEAP)
+                .cast::<crate::heap::types::HeapDescriptorDescriptor>(),
+        );
+        CellTableFakeHeapGuard { _lock: lock }
+    }
+
+    #[test]
+    fn cell_table_destroy_skips_null_buffers() {
+        let _g = setup();
+        unsafe {
+            let _heap = install_cell_table_fake_heap();
+            let record = poisoned_cell_table();
+            cg_cell_table_create(record.cast());
+
+            let returned = cg_cell_table_destroy(record.cast());
+
+            assert_eq!(returned, record.cast(), "a destructor returns this");
+            assert!(
+                CELL_TABLE_FAKE_FREE_LOG.is_empty(),
+                "the cell helper skips every NULL buffer"
+            );
+            poisoning_free(record);
+        }
+        teardown();
+    }
+
+    #[test]
+    fn cell_table_destroy_frees_all_owned_cells_in_order_and_pairs_with_create() {
+        let _g = setup();
+        unsafe {
+            let _heap = install_cell_table_fake_heap();
+            let record = poisoned_cell_table();
+            cg_cell_table_create(record.cast());
+            let mut expected = std::vec::Vec::new();
+            for index in 0..CG_CELL_TABLE_CELLS {
+                let block = crate::heap::veneers::malloc_wrapper(0x40, 0x38);
+                expected.push(block as usize);
+                let cell = record.add(index * CG_CELL_TABLE_CELL_BYTES);
+                (cell.add(CG_CELL_BUFFER) as *mut u32).write(block as usize as u32);
+            }
+
+            let returned = cg_cell_table_destroy(record.cast());
+
+            assert_eq!(returned, record.cast(), "a destructor returns this");
+            assert_eq!(
+                CELL_TABLE_FAKE_FREE_LOG.as_slice(),
+                expected.as_slice(),
+                "all thirteen owned buffers free in ascending cell order"
+            );
+            assert!(
+                CELL_TABLE_FAKE_LIVE.is_empty(),
+                "create's cells leave no live fake-heap buffers after destroy"
+            );
+            for index in 0..CG_CELL_TABLE_CELLS {
+                let cell = record.add(index * CG_CELL_TABLE_CELL_BYTES);
+                assert_eq!(
+                    (cell.add(CG_CELL_BUFFER) as *mut u32).read(),
+                    0,
+                    "cell {index} buffer pointer is cleared after free"
+                );
+            }
+            poisoning_free(record);
+        }
+        teardown();
+    }
+
+    #[test]
+    fn cell_table_destroy_routes_all_cells_in_index_order_through_the_seam() {
+        let _g = setup();
+        unsafe {
+            let saved_destroy = hook(core::ptr::addr_of!(CG_CELL_TABLE_CELL_DESTROY));
+            *core::ptr::addr_of_mut!(CG_CELL_TABLE_CELL_DESTROY) = recording_cell_destroy;
+            CELL_DESTROY_LOG.clear();
+            let record = poisoned_cell_table();
+
+            let returned = cg_cell_table_destroy(record.cast());
+
+            *core::ptr::addr_of_mut!(CG_CELL_TABLE_CELL_DESTROY) = saved_destroy;
+            assert_eq!(returned, record.cast());
+            let expected: std::vec::Vec<*mut u8> = (0..CG_CELL_TABLE_CELLS)
+                .map(|index| record.add(index * CG_CELL_TABLE_CELL_BYTES))
+                .collect();
+            assert_eq!(
+                CELL_DESTROY_LOG.as_slice(),
+                expected.as_slice(),
+                "all thirteen cell-destroy calls use record + index * 0x14 in order"
+            );
+            poisoning_free(record);
+        }
+        teardown();
+    }
+
+    #[test]
+    fn cell_table_destroy_seam_stays_wired_to_the_host_model() {
+        let _g = setup();
+        unsafe {
+            assert_eq!(
+                hook(core::ptr::addr_of!(CG_CELL_TABLE_CELL_DESTROY)) as usize,
+                host_cg_cell_table_cell_destroy as usize,
+                "the host seam models FUN_08256c28's default-allocator path"
+            );
         }
         teardown();
     }
