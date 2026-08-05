@@ -2075,6 +2075,262 @@ pub unsafe extern "C" fn vtable_query_4c_read_scalar_kind4(
     vtable_query_4c_read_scalar_body(handle, MESSAGE_KIND_4, out, forwarded)
 }
 
+/// The store-object size [`vtable_file_open`] allocates (`mov r0,
+/// #0x34` ahead of the `bl 0x082aadd4`).
+const STORE_OBJECT_SIZE: usize = 0x34;
+
+/// Byte offset of the inner file object inside the store object — the
+/// pointer [`vtable_file_open`] reads its open status through (`ldr
+/// r1, [r0, #0x30]`).
+const STORE_INNER_OFFSET: usize = 0x30;
+
+/// Byte offset of the open-status word inside the inner file object
+/// (`ldr r7, [r1, #0x1c]`; zero = the open succeeded).
+const STORE_STATUS_OFFSET: usize = 0x1c;
+
+/// The flags word [`vtable_file_open`] hands the store-object
+/// constructor as its fifth (stacked) argument (`mov r3, #0x8000; str
+/// r3, [sp]`).
+const STORE_OPEN_FLAGS: u32 = 0x8000;
+
+/// The pre-open remove @ 0x08084d58: [`vtable_file_open`] calls it with
+/// the path in r0 and a zeroed r1 (`mov r1, #0x0`) only on a write-mode
+/// open, and discards the result. The callee is a mutex-guarded
+/// (0x08206e40/0x08206e6c lock pair) indirect call through an object
+/// from 0x0818a0bc — vtable slot +0x5c with the path in r1; it consumes
+/// only r0 (its r1..r3 spills are its own lock frame), so `zero` models
+/// the call site's deliberate r1 clear. The write-mode-only call-site
+/// pattern is delete-before-recreate; the exact operation is not
+/// established.
+pub static mut VTABLE_FILE_OPEN_REMOVE: unsafe extern "C" fn(
+    path: *const u8,
+    zero: u32,
+) -> u32 = store_remove_unported;
+
+/// Default remove stub: a no-op returning 0 (the discarded result the
+/// original's callers never observe). The real 0x08084d58 is a
+/// filesystem-facade subsystem; until it is ported there is nothing to
+/// remove, so the stub does nothing — the ft/system.rs
+/// `FT_PLATFORM_FILE_CTOR` fail-closed policy.
+unsafe extern "C" fn store_remove_unported(_path: *const u8, _zero: u32) -> u32 {
+    0
+}
+
+/// The store-object constructor @ 0x08149cec (88 bytes): builds the
+/// 0x34-byte store object over the raw `operator_new` block — base
+/// constructor 0x0816bfe4 with `flags`, derived vtable store, an inner
+/// `operator_new(0x54)` file object opened via 0x08278e8c(inner, path,
+/// read_only, 0, {0x400, 1, 0}) and stashed at +0x30 — and returns
+/// `this`. The original NEVER null-checks the result
+/// ([`vtable_file_open`] dereferences it unconditionally), so the
+/// contract is "always returns the object"; `read_only` is the open's
+/// mode bit ([`vtable_file_open`] computes it as `write_mode == 0`),
+/// `zero` the original's r3 immediate, `flags` the stacked fifth
+/// argument ([`STORE_OPEN_FLAGS`]).
+pub static mut VTABLE_FILE_OPEN_CTOR: unsafe extern "C" fn(
+    this: *mut u8,
+    path: *const u8,
+    read_only: u32,
+    zero: u32,
+    flags: u32,
+) -> *mut u8 = store_ctor_unported;
+
+/// No-op dispose filling slot +0x04 of the fail-closed default's
+/// vtable — the slot [`vtable_slot_04_dispose`] reads on
+/// [`vtable_file_open`]'s failure path.
+unsafe extern "C" fn stub_store_dispose(_object: *mut u8) {}
+
+/// The fail-closed default's vtable: word 0 unused, slot +0x04 the
+/// no-op dispose.
+/// The fail-closed default's vtable: word 0 unused, slot +0x04 the
+/// no-op dispose. A raw byte buffer written at runtime (the FakeChain
+/// precedent) — static initializers cannot hold a function pointer
+/// beside a null word without const-eval pointer casts.
+static mut STUB_STORE_VTABLE: [u8; 0x10] = [0; 0x10];
+
+/// The fail-closed default's inner block: the status word at +0x1c
+/// ([`STORE_STATUS_OFFSET`] / 4 = word 7) is a hard failure, so the
+/// ported open takes its dispose-and-null path.
+static STUB_STORE_INNER: [u32; 8] = [0, 0, 0, 0, 0, 0, 0, 1];
+
+/// The fail-closed default's store object, laid out at runtime (static
+/// initializers cannot take sibling statics' addresses).
+static mut STUB_STORE_OBJECT: [u8; 0x40] = [0; 0x40];
+
+/// Default store-ctor stub: fails the open closed (the ft/system.rs
+/// `FT_PLATFORM_FILE_CTOR` policy) by returning a stand-in object whose
+/// status word is a hard failure, so the ported open disposes it
+/// through the no-op vtable and reports the error. The real 0x08149cec
+/// is a whole C++ file-class subsystem; until it is ported, succeeding
+/// here would hand the message family a bogus object. The `this` block
+/// is left untouched (the original would have constructed over it; the
+/// leaked 0x34 block is the allocator's, exactly the cxx/release.rs
+/// default-stub leak policy).
+unsafe extern "C" fn store_ctor_unported(
+    _this: *mut u8,
+    _path: *const u8,
+    _read_only: u32,
+    _zero: u32,
+    _flags: u32,
+) -> *mut u8 {
+    let object = core::ptr::addr_of_mut!(STUB_STORE_OBJECT).cast::<u8>();
+    let vtable = core::ptr::addr_of_mut!(STUB_STORE_VTABLE).cast::<u8>();
+    vtable
+        .add(VTABLE_SLOT_04)
+        .cast::<usize>()
+        .write(stub_store_dispose as usize);
+    object.cast::<usize>().write(vtable as usize);
+    object
+        .add(STORE_INNER_OFFSET)
+        .cast::<usize>()
+        .write(core::ptr::addr_of!(STUB_STORE_INNER) as usize);
+    object
+}
+
+/// vtable_file_open — original: `FUN_0811d724` @ 0x0811d724 (140 bytes;
+/// **9 `bl` call sites**, grep on `decomp/osos.asm`: 0x0810a99c,
+/// 0x0811af90, 0x0811c5cc, 0x08136580, 0x0815e8b8, 0x081afe0c,
+/// 0x081b0028, 0x081bc680 and 0x082857c0 — every site passes a
+/// six-byte record (a feature-state field `param_1 + 0x6c` / `+ 0x84` /
+/// `+ 0x54` ... or a stack record) in r0, a path the 0x08279284 builder
+/// produced (`"iPod_Control/Device/radio_..."`, `PlayCounts`, `Users`)
+/// in r1 and a write-mode flag (0 or 1) in r2; none sets r3
+/// deliberately, and every site branches on the returned status.
+///
+/// The file-open entry of the vtable message family — the routine that
+/// creates the file-backed property-store object the family's query
+/// ([`vtable_query_4c_read_scalar_kind4`], [`vtable_query_4c_kind4_read`])
+/// and set ([`vtable_set_50_kind4`]) thunks then drive through the SAME
+/// record pointer (e.g. `FUN_0811af5c` calls this on `param_1 + 0x6c`,
+/// then queries `param_1 + 0x6c`):
+///
+/// ```text
+/// 0811d724  stmdb sp!, {r3, r4, r5, r6, r7, lr}  @ spill r3 (dead)
+/// 0811d728  movs  r5, r2            @ write_mode (arg3), set flags
+/// 0811d72c  mov   r7, r1            @ save path (arg2)
+/// 0811d730  mov   r6, #0x1          @ read_only = 1
+/// 0811d734  mov   r4, r0            @ save record (arg1)
+/// 0811d738  beq   0x0811d74c        @ read mode -> skip the remove
+/// 0811d73c  mov   r1, #0x0
+/// 0811d740  mov   r0, r7
+/// 0811d744  bl    0x08084d58        @ remove(path, 0) — result discarded
+/// 0811d748  mov   r6, #0x0          @ write mode -> read_only = 0
+/// 0811d74c  mov   r0, #0x34
+/// 0811d750  bl    0x082aadd4        @ operator_new(0x34)
+/// 0811d754  mov   r3, #0x8000
+/// 0811d758  str   r3, [sp, #0x0]    @ stacked arg5 = 0x8000 (overwrites
+///                                   @  the dead r3 spill)
+/// 0811d75c  mov   r3, #0x0
+/// 0811d760  mov   r2, r6            @ read_only
+/// 0811d764  mov   r1, r7            @ path
+/// 0811d768  bl    0x08149cec        @ ctor(this, path, read_only, 0, 0x8000)
+/// 0811d76c  str   r0, [r4, #0x0]    @ record.object = store
+/// 0811d770  ldr   r1, [r0, #0x30]   @ inner = store->inner
+/// 0811d774  mov   r6, #0x0
+/// 0811d778  ldr   r7, [r1, #0x1c]   @ status = inner->status
+/// 0811d77c  cmp   r7, #0x0
+/// 0811d780  beq   0x0811d798        @ success -> keep the object
+/// 0811d784  cmp   r0, #0x0
+/// 0811d788  ldrne r1, [r0, #0x0]    @ vtable = *object
+/// 0811d78c  ldrne r1, [r1, #0x4]    @ method = vtable->slot_04
+/// 0811d790  blxne r1                @ dispose(object)
+/// 0811d794  str   r6, [r4, #0x0]    @ record.object = NULL
+/// 0811d798  movs  r0, r5
+/// 0811d79c  movne r0, #0x1
+/// 0811d7a0  strb  r6, [r4, #0x4]    @ record.flags = 0
+/// 0811d7a4  strb  r0, [r4, #0x5]    @ record.write = (write_mode != 0)
+/// 0811d7a8  mov   r0, r7            @ return the status
+/// 0811d7ac  ldmia sp!, {r3, r4, r5, r6, r7, pc}
+/// ```
+///
+/// On a write-mode open the path is first handed to the pre-open remove
+/// (0x08084d58, result discarded) and the store constructor receives
+/// `read_only = 0`; on a read-mode open the remove is skipped and
+/// `read_only = 1`. The constructor's result is stored into the record
+/// UNCONDITIONALLY, then the inner object's status word decides: zero
+/// keeps the object, nonzero disposes it through vtable slot +0x04 (the
+/// exact [`vtable_slot_04_dispose`] sequence, inlined) and NULLs the
+/// record. Either way the record's trailing bytes are written — +0x04
+/// cleared, +0x05 the write-mode flag — and the status returns verbatim
+/// (callers `cmp r0, #0`).
+///
+/// # Deviations
+///
+/// - **The two unported callees sit behind seams** — the pre-open
+///   remove 0x08084d58 behind [`VTABLE_FILE_OPEN_REMOVE`] (no-op
+///   default) and the store constructor 0x08149cec behind
+///   [`VTABLE_FILE_OPEN_CTOR`] (fail-closed default: a stand-in object
+///   with a hard-failure status word, so the wired defaults report a
+///   failed open instead of handing the family a bogus object — the
+///   ft/system.rs `FT_PLATFORM_FILE_CTOR` policy). Unlike
+///   [`VTABLE_SET_50_KIND4_OPS`], the defaults do NOT model the exact
+///   bodies: the callees are a filesystem facade and a C++ file-class
+///   subsystem, not message thunks.
+/// - **`operator_new` (0x082aadd4) is called directly** — the ported
+///   `crate::heap::veneers::operator_new` (the app/singletons.rs
+///   precedent).
+/// - **The failure-path dispose calls the ported
+///   [`vtable_slot_04_dispose`] directly**, although the original
+///   INLINES that body (no `bl 0x0811d7cc`): the guard, the slot +0x04
+///   call and the NULL store are identical, so the call is
+///   behaviorally exact (the app/class_6800.rs
+///   ported-callees-called-directly precedent).
+/// - **arg4 (r3) is DEAD — no `forwarded` parameter**, breaking the
+///   family convention: the entry spill slot is overwritten with
+///   [`STORE_OPEN_FLAGS`] (`str r3, [sp]`) before anything reads it,
+///   and the epilogue restores r3 as 0x8000. No call site sets r3
+///   deliberately.
+/// - **The record's first word is stored and read pointer-sized** (the
+///   32-bit `str`/`ldr`), so on a 64-bit host the trailing byte stores
+///   at +0x04/+0x05 overwrite the object pointer's high half — the
+///   [`vtable_query_4c_kind4_read`] host-representation note. On the
+///   failure path the word is NULLed before the byte stores, so no
+///   live pointer is ever truncated.
+/// - **The constructor result is dereferenced without a NULL check**
+///   (`ldr r1, [r0, #0x30]` unconditional): the original's contract is
+///   that 0x08149cec always returns the object; the fail-closed
+///   default honors it. The port reproduces the unguarded read.
+/// - **The reference C is followed only where it matches the
+///   disassembly**: `decomp/c/010/0811d724_FUN_0811d724.c` is largely
+///   accurate — it catches the `param_3 == 0` mode inversion and the
+///   trailing bool — but passes a phantom `param_4` into
+///   `FUN_08084d58` (r3 is dead, see above) and types `param_1` as
+///   `int *`, hiding the record's trailing mode bytes at +0x04/+0x05.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_file_open(
+    record: *mut u8,
+    path: *const u8,
+    write_mode: u32,
+) -> u32 {
+    if write_mode != 0 {
+        let remove = core::ptr::addr_of!(VTABLE_FILE_OPEN_REMOVE).read_volatile();
+        remove(path, 0);
+    }
+    let ctor = core::ptr::addr_of!(VTABLE_FILE_OPEN_CTOR).read_volatile();
+    let object = ctor(
+        crate::heap::veneers::operator_new(STORE_OBJECT_SIZE),
+        path,
+        (write_mode == 0) as u32,
+        0,
+        STORE_OPEN_FLAGS,
+    );
+    record.cast::<*mut u8>().write(object);
+    let status = object
+        .add(STORE_INNER_OFFSET)
+        .cast::<*mut u8>()
+        .read()
+        .add(STORE_STATUS_OFFSET)
+        .cast::<u32>()
+        .read();
+    if status != 0 {
+        vtable_slot_04_dispose(record.cast::<*mut u8>());
+    }
+    record.add(4).write(0);
+    record.add(5).write((write_mode != 0) as u8);
+    status
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -2115,6 +2371,10 @@ mod tests {
                     .write_volatile(vtable_slot_4c_dispatch);
                 core::ptr::addr_of_mut!(VTABLE_QUERY_4C_BUFFER_FINISH)
                     .write_volatile(crate::util::vtable_query::vtable_query_4c_kind4);
+                core::ptr::addr_of_mut!(VTABLE_FILE_OPEN_REMOVE)
+                    .write_volatile(store_remove_unported);
+                core::ptr::addr_of_mut!(VTABLE_FILE_OPEN_CTOR)
+                    .write_volatile(store_ctor_unported);
             }
         }
     }
@@ -5198,6 +5458,358 @@ mod tests {
                 MESSAGE_KIND_2 as usize,
                 "the write's kind-word store overwrites its r3 spill slot"
             );
+        }
+    }
+
+    // ---- vtable_file_open (0x0811d724): mocks and fixtures -----------
+
+    const OPEN_STATUS_ERR: u32 = 0x0bad_0007;
+
+    static mut REMOVE_CALLS: usize = 0;
+    static mut REMOVE_PATH: *const u8 = core::ptr::null();
+    static mut REMOVE_ZERO: u32 = 1;
+
+    static mut CTOR_CALLS: usize = 0;
+    static mut CTOR_THIS: *mut u8 = core::ptr::null_mut();
+    static mut CTOR_PATH: *const u8 = core::ptr::null();
+    static mut CTOR_READ_ONLY: u32 = 0xdead;
+    static mut CTOR_ZERO: u32 = 0xdead;
+    static mut CTOR_FLAGS: u32 = 0xdead;
+
+    static mut OPEN_DISPOSE_CALLS: usize = 0;
+    static mut OPEN_DISPOSE_OBJECT: *mut u8 = core::ptr::null_mut();
+
+    /// The block the stub allocator hands out (the ft/system.rs
+    /// FILE_ARENA precedent — the real heap core is 32-bit-layout and
+    /// cannot run on a 64-bit host, so HEAP_OPS is swapped).
+    static mut OPEN_ARENA: [u8; 0x40] = [0; 0x40];
+
+    /// The size the stub allocator observed — pins the 0x34 object size.
+    static mut OPEN_ALLOC_SIZE: usize = 0;
+
+    unsafe extern "C" fn stub_open_alloc(
+        _heap: *mut crate::heap::types::HeapDescriptorDescriptor,
+        size: usize,
+        _tag: usize,
+    ) -> *mut u8 {
+        OPEN_ALLOC_SIZE = size;
+        core::ptr::addr_of_mut!(OPEN_ARENA).cast()
+    }
+
+    unsafe extern "C" fn stub_open_create(
+        _desc: *mut crate::heap::types::HeapDescriptor,
+        _start: *mut u8,
+        _size: usize,
+    ) -> *mut crate::heap::types::HeapDescriptorDescriptor {
+        unreachable!("DEFAULT_HEAP is pre-seeded, so the lazy init must not run");
+    }
+
+    /// Restores HEAP_OPS and DEFAULT_HEAP on drop, even when a test
+    /// panics (the ft/system.rs restore_file_layer precedent).
+    struct HeapGuard;
+    impl Drop for HeapGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS)
+                    .write_volatile(crate::heap::veneers::DEFAULT_HEAP_OPS);
+                core::ptr::addr_of_mut!(crate::heap::types::DEFAULT_HEAP)
+                    .write_volatile(core::ptr::null_mut());
+            }
+        }
+    }
+
+    /// Swaps the stub allocator in and pre-seeds DEFAULT_HEAP so the
+    /// lazy init does not run (the ft/system.rs mock_file_layer
+    /// precedent).
+    unsafe fn install_stub_heap() {
+        let mut ops = core::ptr::addr_of!(crate::heap::veneers::HEAP_OPS).read_volatile();
+        ops.alloc = stub_open_alloc;
+        ops.create = stub_open_create;
+        core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS).write_volatile(ops);
+        core::ptr::addr_of_mut!(crate::heap::types::DEFAULT_HEAP)
+            .write_volatile(0x1111_0000 as *mut crate::heap::types::HeapDescriptorDescriptor);
+        OPEN_ALLOC_SIZE = 0;
+    }
+
+    /// The stand-in store object the recording ctor returns: +0x00 the
+    /// vtable pointer, +0x30 the inner-object pointer — large enough
+    /// for the host's pointer-sized reads.
+    static mut FAKE_STORE: [u8; 0x40] = [0; 0x40];
+
+    /// The stand-in inner object; the ctor mock plants the requested
+    /// status at +0x1c.
+    static mut FAKE_STORE_INNER: [u8; 0x20] = [0; 0x20];
+
+    unsafe extern "C" fn recording_open_dispose(object: *mut u8) {
+        OPEN_DISPOSE_CALLS += 1;
+        OPEN_DISPOSE_OBJECT = object;
+    }
+
+    /// The stand-in vtable: slot +0x04 is the recording dispose,
+    /// written at runtime by the ctor mock (the FakeChain precedent).
+    static mut FAKE_STORE_VTABLE: [u8; 0x10] = [0; 0x10];
+
+    unsafe extern "C" fn recording_remove(path: *const u8, zero: u32) -> u32 {
+        REMOVE_CALLS += 1;
+        REMOVE_PATH = path;
+        REMOVE_ZERO = zero;
+        0
+    }
+
+    /// Builds the stand-in store object with `status` in the inner
+    /// object's status word and returns it, recording every argument.
+    unsafe extern "C" fn recording_ctor(
+        this: *mut u8,
+        path: *const u8,
+        read_only: u32,
+        zero: u32,
+        flags: u32,
+    ) -> *mut u8 {
+        CTOR_CALLS += 1;
+        CTOR_THIS = this;
+        CTOR_PATH = path;
+        CTOR_READ_ONLY = read_only;
+        CTOR_ZERO = zero;
+        CTOR_FLAGS = flags;
+        let object = core::ptr::addr_of_mut!(FAKE_STORE).cast::<u8>();
+        let vtable = core::ptr::addr_of_mut!(FAKE_STORE_VTABLE).cast::<u8>();
+        vtable
+            .add(VTABLE_SLOT_04)
+            .cast::<usize>()
+            .write(recording_open_dispose as usize);
+        object.cast::<usize>().write(vtable as usize);
+        object
+            .add(STORE_INNER_OFFSET)
+            .cast::<usize>()
+            .write(core::ptr::addr_of_mut!(FAKE_STORE_INNER) as usize);
+        core::ptr::addr_of_mut!(FAKE_STORE_INNER)
+            .cast::<u8>()
+            .add(STORE_STATUS_OFFSET)
+            .cast::<u32>()
+            .write(OPEN_STATUS);
+        object
+    }
+
+    static mut OPEN_STATUS: u32 = MOCK_OK;
+
+    /// Resets the recording state and installs both recording mocks.
+    unsafe fn install_recording_open() {
+        REMOVE_CALLS = 0;
+        REMOVE_PATH = core::ptr::null();
+        REMOVE_ZERO = 1;
+        CTOR_CALLS = 0;
+        CTOR_THIS = core::ptr::null_mut();
+        CTOR_PATH = core::ptr::null();
+        CTOR_READ_ONLY = 0xdead;
+        CTOR_ZERO = 0xdead;
+        CTOR_FLAGS = 0xdead;
+        OPEN_DISPOSE_CALLS = 0;
+        OPEN_DISPOSE_OBJECT = core::ptr::null_mut();
+        OPEN_STATUS = MOCK_OK;
+        install_stub_heap();
+        core::ptr::addr_of_mut!(VTABLE_FILE_OPEN_REMOVE)
+            .write_volatile(recording_remove);
+        core::ptr::addr_of_mut!(VTABLE_FILE_OPEN_CTOR).write_volatile(recording_ctor);
+    }
+
+    /// A stand-in six-byte record, padded so the host's pointer-sized
+    /// first-word store is in bounds.
+    struct RecordFixture {
+        bytes: [u8; 16],
+    }
+
+    impl RecordFixture {
+        fn new() -> Self {
+            RecordFixture { bytes: [0xa5; 16] }
+        }
+        fn ptr(&mut self) -> *mut u8 {
+            self.bytes.as_mut_ptr()
+        }
+    }
+
+    /// Asserts the record's first word holds `object` with bytes 4 and
+    /// 5 overwritten by the trailing mode stores — the exact host image
+    /// of the original's `str` + `strb` + `strb` sequence (the byte
+    /// stores land inside the pointer-sized word on a 64-bit host; see
+    /// the function's deviations).
+    unsafe fn assert_record(record: &RecordFixture, object: *mut u8, write_mode: u32) {
+        let word = record.bytes.as_ptr().cast::<usize>().read();
+        // The exact host image of the original's str + strb + strb
+        // sequence: on a 64-bit host the trailing byte stores land
+        // inside the pointer-sized first word, so byte 4 is cleared and
+        // byte 5 holds the write-mode flag (see the deviations).
+        let expected = ((object as usize) & !0xffff_0000_0000usize)
+            | (((write_mode != 0) as usize) << 40);
+        assert_eq!(word, expected);
+        assert_eq!(record.bytes[4], 0, "record.flags cleared on every path");
+        assert_eq!(
+            record.bytes[5],
+            (write_mode != 0) as u8,
+            "record.write mirrors write_mode != 0"
+        );
+    }
+
+    #[test]
+    fn file_open_write_mode_calls_the_preopen_remove_with_a_zeroed_r1() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = RecordFixture::new();
+        let path = b"iPod_Control/Device/radio\0";
+        unsafe {
+            install_recording_open();
+
+            let result = vtable_file_open(record.ptr(), path.as_ptr(), 1);
+
+            assert_eq!(result, MOCK_OK);
+            assert_eq!(REMOVE_CALLS, 1, "write mode runs the pre-open remove");
+            assert_eq!(REMOVE_PATH, path.as_ptr(), "the remove gets arg2 (r7)");
+            assert_eq!(REMOVE_ZERO, 0, "the call site's mov r1, #0x0 is modeled");
+        }
+    }
+
+    #[test]
+    fn file_open_read_mode_skips_the_preopen_remove() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = RecordFixture::new();
+        let path = b"iPod_Control/Device/PlayCounts\0";
+        unsafe {
+            install_recording_open();
+
+            let result = vtable_file_open(record.ptr(), path.as_ptr(), 0);
+
+            assert_eq!(result, MOCK_OK);
+            assert_eq!(REMOVE_CALLS, 0, "read mode takes the beq past the remove");
+            assert_eq!(CTOR_CALLS, 1);
+        }
+    }
+
+    #[test]
+    fn file_open_ctor_argument_routing_and_mode_inversion() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = RecordFixture::new();
+        let path = b"iPod_Control/Device/Users\0";
+        unsafe {
+            install_recording_open();
+
+            vtable_file_open(record.ptr(), path.as_ptr(), 0);
+            assert_eq!(OPEN_ALLOC_SIZE, STORE_OBJECT_SIZE, "operator_new(0x34)");
+            assert!(!CTOR_THIS.is_null(), "operator_new(0x34) feeds the ctor");
+            assert_eq!(CTOR_PATH, path.as_ptr(), "arg2 (r7) routes to the ctor");
+            assert_eq!(CTOR_READ_ONLY, 1, "read mode: read_only = (write_mode == 0)");
+            assert_eq!(CTOR_ZERO, 0, "the original's r3 immediate");
+            assert_eq!(CTOR_FLAGS, STORE_OPEN_FLAGS, "the stacked fifth argument");
+
+            vtable_file_open(record.ptr(), path.as_ptr(), 1);
+            assert_eq!(CTOR_READ_ONLY, 0, "write mode inverts the mode bit");
+            assert_eq!(CTOR_CALLS, 2);
+        }
+    }
+
+    #[test]
+    fn file_open_success_stores_the_object_and_mode_bytes() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = RecordFixture::new();
+        let path = b"iPod_Control/Device/radio\0";
+        unsafe {
+            install_recording_open();
+
+            let result = vtable_file_open(record.ptr(), path.as_ptr(), 1);
+
+            assert_eq!(result, MOCK_OK);
+            assert_eq!(OPEN_DISPOSE_CALLS, 0, "a zero status keeps the object");
+            assert_record(&record, core::ptr::addr_of_mut!(FAKE_STORE).cast::<u8>(), 1);
+        }
+    }
+
+    #[test]
+    fn file_open_failure_disposes_nulls_and_returns_the_status_verbatim() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = RecordFixture::new();
+        let path = b"iPod_Control/Device/PlayCounts\0";
+        unsafe {
+            install_recording_open();
+            OPEN_STATUS = OPEN_STATUS_ERR;
+
+            let result = vtable_file_open(record.ptr(), path.as_ptr(), 0);
+
+            assert_eq!(result, OPEN_STATUS_ERR, "the inner status returns verbatim");
+            assert_eq!(OPEN_DISPOSE_CALLS, 1, "a nonzero status disposes the object");
+            assert_eq!(
+                OPEN_DISPOSE_OBJECT,
+                core::ptr::addr_of_mut!(FAKE_STORE).cast::<u8>(),
+                "the slot +0x04 method gets the store object"
+            );
+            assert_record(&record, core::ptr::null_mut(), 0);
+        }
+    }
+
+    #[test]
+    fn file_open_mode_byte_mirrors_write_mode_on_both_paths() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = RecordFixture::new();
+        let path = b"iPod_Control/Device/radio\0";
+        unsafe {
+            install_recording_open();
+
+            // Success + write mode: byte 5 = 1.
+            vtable_file_open(record.ptr(), path.as_ptr(), 1);
+            assert_eq!(record.bytes[5], 1);
+            // Failure + write mode: the bytes are written after the
+            // dispose/NULL, on every path.
+            OPEN_STATUS = OPEN_STATUS_ERR;
+            vtable_file_open(record.ptr(), path.as_ptr(), 1);
+            assert_eq!(record.bytes[5], 1);
+            assert_eq!(record.bytes[4], 0);
+            // Failure + read mode: byte 5 = 0.
+            vtable_file_open(record.ptr(), path.as_ptr(), 0);
+            assert_eq!(record.bytes[5], 0);
+        }
+    }
+
+    #[test]
+    fn file_open_default_remove_stub_is_a_noop() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        unsafe {
+            // The default is already wired (the guard reinstalls it), but
+            // call the stub directly to pin its contract.
+            assert_eq!(store_remove_unported(b"any\0".as_ptr(), 0), 0);
+            assert_eq!(store_remove_unported(core::ptr::null(), 1), 0);
+        }
+    }
+
+    #[test]
+    fn file_open_default_ctor_stub_fails_the_open_closed() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = RecordFixture::new();
+        let path = b"iPod_Control/Device/radio\0";
+        unsafe {
+            install_stub_heap();
+            // No mocks installed: the wired defaults are the stubs. The
+            // fail-closed ctor reports a hard failure through the stand-
+            // in object, so the ported failure path disposes it through
+            // the no-op vtable and NULLs the record.
+            let result = vtable_file_open(record.ptr(), path.as_ptr(), 0);
+
+            assert_ne!(result, 0, "the stub fails the open closed");
+            assert_record(&record, core::ptr::null_mut(), 0);
+            // Write mode reaches the no-op remove stub without harm.
+            let result = vtable_file_open(record.ptr(), path.as_ptr(), 1);
+            assert_ne!(result, 0);
+            assert_eq!(record.bytes[5], 1);
         }
     }
 }

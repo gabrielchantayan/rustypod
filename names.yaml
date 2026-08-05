@@ -21892,6 +21892,77 @@ functions:
       scalar_read_read_error_skips_the_finish /
       scalar_read_finish_args_and_final_return.
 
+  - address: 0x0811d724
+    ghidra: FUN_0811d724
+    name: vtable_file_open
+    size: 140
+    sig: "u32 vtable_file_open(record: *mut u8, path: *const u8, write_mode: u32)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r4: record
+      param_2/r7: path
+      param_3/r5: write_mode
+      r6: read_only (mode bit for the ctor; later the zero source)
+      r7 (second use): status
+    notes: >-
+      9 bl call sites (grep on decomp/osos.asm): 0x0810a99c,
+      0x0811af90, 0x0811c5cc, 0x08136580, 0x0815e8b8, 0x081afe0c,
+      0x081b0028, 0x081bc680 and 0x082857c0 - every site passes a
+      six-byte record (a feature-state field param_1 + 0x6c / + 0x84 /
+      + 0x54 ... or a stack record) in r0, a 0x08279284-built path
+      (iPod_Control/Device/radio_..., PlayCounts, Users) in r1 and a
+      write-mode flag (0 or 1) in r2; none sets r3 deliberately, and
+      every site branches on the returned status. The file-open entry
+      of the vtable message family - creates the file-backed
+      property-store object the family's query/set thunks then drive
+      through the SAME record pointer (FUN_0811af5c opens param_1 +
+      0x6c, then queries param_1 + 0x6c). Write mode first calls the
+      pre-open remove 0x08084d58(path, 0) - a mutex-guarded
+      (0x08206e40/0x08206e6c) vtable-slot-+0x5c call on a facade from
+      0x0818a0bc, result discarded; delete-before-recreate pattern,
+      exact operation not established - and inverts the mode bit
+      (read_only = write_mode == 0). Then operator_new(0x34) (the
+      ported heap::veneers::operator_new, called directly) and the
+      store-object ctor 0x08149cec(this, path, read_only, 0, 0x8000):
+      base ctor 0x0816bfe4 with the flags word, derived vtable store,
+      inner operator_new(0x54) file object opened via 0x08278e8c and
+      stashed at +0x30. The result is stored into the record
+      UNCONDITIONALLY (never null-checked), the inner object's status
+      word at +0x1c decides: zero keeps the object, nonzero disposes
+      it through vtable slot +0x04 (the exact vtable_slot_04_dispose
+      sequence, inlined in the original; the port calls the ported
+      export directly) and NULLs the record. Either way record+0x04
+      is cleared, record+0x05 = (write_mode != 0), and the status
+      returns verbatim. Deviations: the two unported callees sit
+      behind the VTABLE_FILE_OPEN_REMOVE (no-op default) and
+      VTABLE_FILE_OPEN_CTOR (fail-closed default: stand-in object
+      with a hard-failure status word - the ft/system.rs
+      FT_PLATFORM_FILE_CTOR policy; NOT exact-body models, the
+      callees are a filesystem facade and a C++ file-class
+      subsystem). arg4 (r3) is DEAD - no forwarded parameter, the
+      entry spill slot is overwritten with 0x8000 before any read
+      (the epilogue restores r3 as 0x8000). The record's first word
+      is stored/read pointer-sized (32-bit str/ldr), so on a 64-bit
+      host the trailing byte stores overwrite the pointer's high
+      half - the vtable_query_4c_kind4_read host-representation
+      note; on the failure path the word is NULLed first, so no live
+      pointer is truncated. Reference C
+      (decomp/c/010/0811d724_FUN_0811d724.c) is largely accurate
+      (catches the mode inversion and the trailing bool) but passes
+      a phantom param_4 into FUN_08084d58 and types param_1 as int*,
+      hiding the trailing mode bytes - the port follows the
+      disassembly. Host tests (recording mocks through the two
+      seams, SLOT_TEST_LOCK serialized):
+      src/app/vtable_set.rs::file_open_write_mode_calls_the_preopen_remove_with_a_zeroed_r1
+      / file_open_read_mode_skips_the_preopen_remove /
+      file_open_ctor_argument_routing_and_mode_inversion /
+      file_open_success_stores_the_object_and_mode_bytes /
+      file_open_failure_disposes_nulls_and_returns_the_status_verbatim
+      / file_open_mode_byte_mirrors_write_mode_on_both_paths /
+      file_open_default_remove_stub_is_a_noop /
+      file_open_default_ctor_stub_fails_the_open_closed.
+
   - address: 0x0811d7b0
     ghidra: FUN_0811d7b0
     name: vtable_slot_4c_dispatch
