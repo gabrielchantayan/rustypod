@@ -666,6 +666,37 @@ pub unsafe extern "C" fn timestamp_baseline() -> i64 {
     core::ptr::addr_of!(TIMESTAMP_BASELINE).read_volatile()
 }
 
+/// Byte offset of the mode flag word inside the retailOS shared context
+/// (`ldr r0,[r0,#0x94]` on the context getter's result).
+const CONTEXT_MODE_FLAG_OFFSET: usize = 0x94;
+
+/// context_mode_flag — original: `FUN_08056028` @ `0x08056028` (20 bytes).
+///
+/// Source: `/home/gabe/Programming/ipod-decomp/decomp/c/003/08056028_FUN_08056028.c`;
+/// assembly: `decomp/osos.asm` @ `0x08056028..0x08056038`.
+///
+/// Fetches the process-wide shared context through the retailOS lazy getter
+/// 0x08369bec (the same [`SHARED_CONTEXT`] boundary [`object_set_version_text`]
+/// uses), loads the word at `context + 0x94`, and returns its low bit
+/// (`and r0,r0,#0x1`) — a boolean flag of the shared context. The single
+/// stock call site (0x081602b0, grep -c on `decomp/osos.asm`) lazily caches
+/// a record size selected by the flag into a global slot: 0x100 when the
+/// bit is clear, 0xd8 when set (`moveq r0,#0x100; movne r0,#0xd8`), so the
+/// bit behaves as a two-state layout/capacity mode selector; the concrete
+/// mode is not recovered. The context getter stays in retailOS behind the
+/// [`SHARED_CONTEXT`] boundary. The original's `push {r4,lr}` never uses
+/// r4 — an ADS frame artifact not reproduced here.
+///
+/// # Safety
+///
+/// Like the original, there is no null guard: the context getter must
+/// return a pointer readable at `+0x94`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn context_mode_flag() -> u32 {
+    (shared_context_fn()().add(CONTEXT_MODE_FLAG_OFFSET) as *const u32).read() & 1
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1495,6 +1526,54 @@ mod tests {
             unsafe { SET_TEXT_COUNTED }[0],
             0,
             "an immediate source NUL leaves the counted length at zero"
+        );
+    }
+
+    /// Installs the recording context getter for [`context_mode_flag`].
+    ///
+    /// Shares `VERSION_TEXT_LOCK` with the version-text tests because both
+    /// suites overwrite the `SHARED_CONTEXT` boundary.
+    fn install_mode_flag_mock(context: *mut u8) -> MutexGuard<'static, ()> {
+        let guard = VERSION_TEXT_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        unsafe {
+            MOCK_CONTEXT = context;
+            SHARED_CONTEXT_CALLS = 0;
+            core::ptr::addr_of_mut!(SHARED_CONTEXT).write(recording_shared_context);
+        }
+        guard
+    }
+
+    #[test]
+    fn returns_the_low_bit_of_the_context_word_at_0x94() {
+        let mut context = [0u8; 0x9c];
+        // Neighboring words stay all-ones so a wrong offset reads 1 here.
+        context[0x90..0x94].copy_from_slice(&u32::MAX.to_le_bytes());
+        context[0x94..0x98].copy_from_slice(&0x5a5a_5a5bu32.to_le_bytes());
+        context[0x98..0x9c].copy_from_slice(&u32::MAX.to_le_bytes());
+        let _guard = install_mode_flag_mock(context.as_mut_ptr());
+        let _reset = VersionTextReset;
+
+        assert_eq!(unsafe { context_mode_flag() }, 1);
+        assert_eq!(
+            unsafe { SHARED_CONTEXT_CALLS },
+            1,
+            "the context is fetched once (`bl 0x08369bec`)"
+        );
+    }
+
+    #[test]
+    fn masks_everything_but_the_low_bit() {
+        let mut context = [0u8; 0x98];
+        context[0x94..0x98].copy_from_slice(&0xffff_fffeu32.to_le_bytes());
+        let _guard = install_mode_flag_mock(context.as_mut_ptr());
+        let _reset = VersionTextReset;
+
+        assert_eq!(
+            unsafe { context_mode_flag() },
+            0,
+            "a set word with bit 0 clear yields 0 (`and r0,r0,#0x1`)"
         );
     }
 }

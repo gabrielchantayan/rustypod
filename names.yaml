@@ -19620,6 +19620,38 @@ functions:
       0x089ca5e0 literal at offset 0x20. Rust implementation and focused
       host tests: `src/ui/object_state.rs::timestamp_baseline`.
 
+  # --- shared-context mode-flag low-bit accessor ---
+  - address: 0x08056028
+    ghidra: FUN_08056028
+    name: context_mode_flag
+    size: 20
+    sig: "u32 context_mode_flag(void)"
+    module: ui/object_state
+    status: ported
+    renames:
+      iVar1: context
+      FUN_08369bec: shared_context
+    notes: >-
+      Fetches the process-wide shared context through the retailOS lazy
+      getter 0x08369bec (the same SHARED_CONTEXT boundary
+      object_set_version_text @ 0x08055f50 uses), loads the word at
+      context+0x94 (`ldr r0,[r0,#0x94]`), and returns its low bit
+      (`and r0,r0,#0x1`) — a boolean flag of the shared context. One
+      `bl 0x08056028` call site (grep -c on decomp/osos.asm), at
+      0x081602b0: lazily caches a record size selected by the flag into
+      a global slot — 0x100 when the bit is clear, 0xd8 when set
+      (`moveq r0,#0x100; movne r0,#0xd8`) — so the bit behaves as a
+      two-state layout/capacity mode selector; the concrete mode is not
+      recovered. The context getter stays in retailOS behind the
+      replaceable SHARED_CONTEXT function-pointer boundary. The
+      original's `push {r4,lr}` never uses r4 — an ADS frame artifact
+      not reproduced. match.py confirms the structural shape — call the
+      getter, `ldr [r0,#0x94]`, `and #1` — 9 versus 5 instructions; the
+      diff is only LLVM's push {fp,lr} frame and the indirect `blx`
+      through the boundary static versus the ADS direct `bl`. Rust
+      implementation and focused host tests:
+      `src/ui/object_state.rs::context_mode_flag`.
+
   # --- C++ object-header low-flag predicate ---
   - address: 0x0808539c
     ghidra: FUN_0808539c
