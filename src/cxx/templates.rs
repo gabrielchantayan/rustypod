@@ -24,10 +24,11 @@
 //! - [`pair_assign_guarded`] — the self-assignment-guarded two-word
 //!   copy-assign of a pair-shaped value type, the only copy, 14 call
 //!   sites.
-//! - [`vector_size_elem4`] / [`vector_size_elem8`] /
-//!   [`vector_size_elem16`] / [`vector_size_elem32`] —
-//!   `vector<T>::size()`, one instantiation per element size; the four
-//!   power-of-two shifts cover 28 functions and 276 call sites.
+//! - [`vector_size_elem2`] / [`vector_size_elem4`] /
+//!   [`vector_size_elem8`] / [`vector_size_elem16`] /
+//!   [`vector_size_elem32`] —
+//!   `vector<T>::size()`, one instantiation per element size; the five
+//!   power-of-two shifts cover 29 functions and 292 call sites.
 //! - [`vector_size_elem12`] / [`vector_size_elem24`] /
 //!   [`vector_size_elem20`] / [`vector_size_elem28`] /
 //!   [`vector_size_elem40`] — the
@@ -553,6 +554,18 @@ pub unsafe extern "C" fn vector_size_elem4_alias_7a58(vector: *const VectorBound
 #[inline(never)]
 pub unsafe extern "C" fn vector_size_elem4_alias_7a68(vector: *const VectorBounds) -> i32 {
     vector_size(vector, 2)
+}
+
+/// vector_size_elem2 — original: `FUN_083d7a78` @ 0x083d7a78
+/// (16 bytes, 16 `bl` call sites; the only copy of this shift).
+/// [`vector_size_elem4`] with `>> 1`.
+///
+/// # Safety
+/// `vector` must point at a readable `{begin, end}` pair.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_size_elem2(vector: *const VectorBounds) -> i32 {
+    vector_size(vector, 1)
 }
 
 
@@ -1870,6 +1883,23 @@ mod tests {
             // -15 >> 2 is -4, rather than a truncating -3.
             let reversed = VectorBounds { begin: begin.add(15), end: begin };
             assert_eq!(vector_size_elem4_alias_7a68(&reversed), -4);
+        }
+    }
+
+    // ---- vector_size_elem2 -------------------------------------------
+
+    #[test]
+    fn vector_size_elem2_counts_normal_and_reversed_spans() {
+        unsafe {
+            let storage = [0u8; 32];
+            let begin = storage.as_ptr() as *mut u8;
+            let normal = VectorBounds { begin, end: begin.add(14) };
+            assert_eq!(vector_size_elem2(&normal), 7);
+
+            // ARM `asr #1` rounds a negative odd span down:
+            // -15 >> 1 is -8, rather than a truncating -7.
+            let reversed = VectorBounds { begin: begin.add(15), end: begin };
+            assert_eq!(vector_size_elem2(&reversed), -8);
         }
     }
 

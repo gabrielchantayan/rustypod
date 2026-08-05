@@ -14464,6 +14464,22 @@ functions:
       arithmetic, so reversed spans retain their negative count. Source C:
       decomp/c/037/083d7a68_FUN_083d7a68.c.
 
+  - address: 0x083d7a78
+    ghidra: FUN_083d7a78
+    name: vector_size_elem2
+    size: 16
+    sig: "i32 vector_size_elem2(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      vector_size_elem4 with `asr #1`. 16 bl call sites; the only copy
+      of this shift (verified against osos.asm - no other `ldm
+      r0,{r0,r1}; sub r0,r1,r0; asr #1; bx lr` veneer exists). Source C:
+      decomp/c/037/083d7a78_FUN_083d7a78.c - Ghidra's `return
+      param_1[1] - *param_1 >> 1`. The `asr` is arithmetic, so reversed
+      spans retain their negative count.
+
   - address: 0x083d7860
     ghidra: FUN_083d7860
     name: vector_size_elem8
