@@ -18407,6 +18407,33 @@ functions:
       predicated guard into an early bxeq lr and adding the crate's fp
       frame.
 
+  # --- MPEG video header parser: user-data start-code scan ---
+  - address: 0x0807d724
+    ghidra: FUN_0807d724
+    name: mpeg_skip_user_data_to_start_code
+    size: 76
+    sig: "void mpeg_skip_user_data_to_start_code(u8 *stream)"
+    module: h264/bitstream
+    status: ported
+    renames:
+      param_1: stream
+      iVar1: scan_state
+    notes: >-
+      Recognizes the MPEG user-data start code 0x000001B2 at the current
+      two-word cursor {data @ +0x00, bit_pos @ +0x04}. A non-B2 code
+      returns without writing the cursor. For B2, it writes bit_pos + 32,
+      then calls bitstream_msb_fetch(stream, 24) at every subsequent byte
+      until the 24-bit start-code prefix 0x000001 is found. It leaves the
+      prefix unread for the caller's start-code parser; each rejected byte
+      advances the cursor by eight. The 76-byte retail body is two direct
+      calls to bitstream_msb_fetch @ 0x080efa38 (first count 32, loop count
+      24), with wrapping ARM-add arithmetic and no bounds check. Rust port
+      and host tests: src/h264/bitstream.rs. Host tests cover the non-B2
+      no-op and scans across 0..7 payload bytes, verifying the next parser
+      can still fetch 0x000001B3. match.py structural: same initial 32-bit
+      compare, +32 commit, 24-bit loop check, and +8 non-prefix step; LLVM
+      frame/register allocation differs.
+
   # --- H.264 / MPEG-4 AVC video decoder: RBSP bitstream ---
   - address: 0x082b3258
     ghidra: FUN_082b3258

@@ -227,6 +227,45 @@ pub unsafe extern "C" fn bitstream_read_advance(stream: *mut u8, bit_count: u32)
     bits
 }
 
+/// mpeg_skip_user_data_to_start_code — original: `FUN_0807d724` @
+/// 0x0807d724 (76 bytes, all code — two direct calls to
+/// [`bitstream_msb_fetch`]).
+///
+/// If the next 32 bits are the MPEG user-data start code
+/// `0x0000_01B2`, consumes that code and scans one byte at a time until
+/// the next 24-bit `0x000001` start-code prefix. The prefix is left
+/// unread for the caller's start-code parser. Any other initial code
+/// leaves the cursor untouched. The cursor has no bounds word: exactly
+/// like retailOS, a malformed user-data payload without a later prefix
+/// keeps scanning.
+///
+/// The retail body fetches the first code before its first store, then
+/// stores `bit_pos + 32` on each iteration, fetches 24 bits, and adds
+/// eight after each non-prefix. All additions wrap like ARM `add`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn mpeg_skip_user_data_to_start_code(stream: *mut u8) {
+    const MPEG_USER_DATA_START_CODE: u32 = 0x0000_01B2;
+    const MPEG_START_CODE_PREFIX: u32 = 0x0000_0001;
+
+    if bitstream_msb_fetch(stream, 32) != MPEG_USER_DATA_START_CODE {
+        return;
+    }
+
+    let position = stream
+        .cast::<*const u8>()
+        .add(STREAM_BIT_POS_WORD)
+        .cast::<i32>();
+    let mut scan_position = position.read().wrapping_add(32);
+    loop {
+        position.write(scan_position);
+        if bitstream_msb_fetch(stream, 24) == MPEG_START_CODE_PREFIX {
+            return;
+        }
+        scan_position = position.read().wrapping_add(8);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -480,6 +519,39 @@ mod tests {
                     "pos {start} count {count}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn user_data_scan_leaves_non_user_start_codes_untouched() {
+        let bytes = [0xCC, 0x00, 0x00, 0x01, 0xB3, 0x00, 0x00, 0x01, 0xB2];
+        let mut stream = stream_at(&bytes, 0);
+        unsafe { mpeg_skip_user_data_to_start_code((&mut stream as *mut ReadStream).cast()) };
+        assert_eq!(stream.bit_pos, 0);
+    }
+
+    /// The loop commits the first user-data code, then takes every
+    /// non-prefix byte before leaving the next start-code prefix unread.
+    #[test]
+    fn user_data_scan_stops_at_the_next_start_code_prefix() {
+        for user_data_bytes in 0..=7i32 {
+            let mut bytes = [0xA5; 17];
+            bytes[0] = 0xCC;
+            bytes[1..5].copy_from_slice(&[0x00, 0x00, 0x01, 0xB2]);
+            let prefix_offset = 5 + user_data_bytes as usize;
+            bytes[prefix_offset..prefix_offset + 5]
+                .copy_from_slice(&[0x00, 0x00, 0x01, 0xB3, 0x00]);
+            let mut stream = stream_at(&bytes, 0);
+
+            unsafe { mpeg_skip_user_data_to_start_code((&mut stream as *mut ReadStream).cast()) };
+
+            let prefix_position = 32 + user_data_bytes * 8;
+            assert_eq!(stream.bit_pos, prefix_position, "payload bytes: {user_data_bytes}");
+            assert_eq!(
+                unsafe { bitstream_msb_fetch((&mut stream as *mut ReadStream).cast(), 32) },
+                0x0000_01B3,
+                "the next parser still owns its start code"
+            );
         }
     }
 }
