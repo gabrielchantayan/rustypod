@@ -303,6 +303,43 @@ pub unsafe extern "C" fn object_scaled_total(object: *const u8) -> i64 {
     scaled_field_total_fn()(fields)
 }
 
+/// object_scaled_total_base — original: `FUN_08055f3c` @ `0x08055f3c`
+/// (20 bytes; functions.csv's 168 counts the fall-through tail Ghidra
+/// merged from the following thunks — the original's `bx lr` is at
+/// 0x08055f4c).
+///
+/// Source: `/home/gabe/Programming/ipod-decomp/decomp/c/003/08055f3c_FUN_08055f3c.c`;
+/// assembly: `decomp/osos.asm` @ `0x08055f3c..0x08055f50`.
+///
+/// Null-guarded thunk over the same retailOS multiply-accumulate helper
+/// 0x08064980 that [`object_scaled_total`] uses: with a null `object` it
+/// returns 0 in r0:r1 (`moveq r0,#0x0; moveq r1,#0x0`); otherwise it
+/// tail-calls the helper with `object` itself (`cmp r0,#0x0;
+/// bne 0x08064980`), which folds the three doublewords at object offsets
+/// 0/8/0x10 into `base + count * scale` (plain `base` when `count` is
+/// zero). Ghidra decompiles the thunk with the callee body inlined, which
+/// is why the reference C shows the full arithmetic; the callee itself
+/// stays in retailOS behind the [`SCALED_FIELD_TOTAL`] boundary. This is
+/// the sibling [`object_scaled_total`] @ 0x08055f24 without the +0x18
+/// offset. The single stock call site (0x080aaf54) applies it to the same
+/// 0x44-byte descriptor copied by 0x08054d28 as [`object_scaled_total`]
+/// and forwards both results together to 0x08045174; the concrete meaning
+/// of the field triple is not recovered.
+///
+/// # Safety
+///
+/// With a non-null `object`, the firmware helper reads the three
+/// doublewords at `object..0x18`; `object` must stay readable for at
+/// least 0x18 bytes, as at the single stock call site.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn object_scaled_total_base(object: *const u8) -> i64 {
+    if object.is_null() {
+        return 0;
+    }
+    scaled_field_total_fn()(object)
+}
+
 /// Byte offset of the version word inside the retailOS shared context
 /// (`ldr r0,[r0,#0x48]` on the context getter's result).
 const CONTEXT_VERSION_WORD_OFFSET: usize = 0x48;
@@ -982,6 +1019,43 @@ mod tests {
                 unsafe { SCALED_TOTAL_FIELDS },
                 object.as_ptr() as usize + 0x18,
                 "the helper must receive object + 0x18"
+            );
+        }
+        assert_eq!(unsafe { SCALED_TOTAL_CALLS }, 7);
+    }
+
+    #[test]
+    fn base_null_object_returns_zero_without_querying_the_field_triple() {
+        let _guard = install_recording_scaled_field_total(0x1122_3344_5566_7788);
+        let _reset = ScaledFieldTotalReset;
+
+        assert_eq!(unsafe { object_scaled_total_base(core::ptr::null()) }, 0);
+        assert_eq!(unsafe { SCALED_TOTAL_CALLS }, 0);
+    }
+
+    #[test]
+    fn base_forwards_the_object_pointer_unshifted_and_the_helper_result() {
+        let _guard = install_recording_scaled_field_total(0);
+        let _reset = ScaledFieldTotalReset;
+        let object = [0xa5u8; 0x18];
+
+        for total in [
+            0i64,
+            1,
+            -1,
+            i64::MIN,
+            i64::MAX,
+            0x1122_3344_5566_7788,
+            -0x1122_3344_5566_7788,
+        ] {
+            unsafe {
+                MOCK_SCALED_TOTAL = total;
+            }
+            assert_eq!(unsafe { object_scaled_total_base(object.as_ptr()) }, total);
+            assert_eq!(
+                unsafe { SCALED_TOTAL_FIELDS },
+                object.as_ptr() as usize,
+                "the helper must receive object itself, with no +0x18 shift"
             );
         }
         assert_eq!(unsafe { SCALED_TOTAL_CALLS }, 7);

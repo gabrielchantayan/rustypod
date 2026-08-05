@@ -19131,6 +19131,41 @@ functions:
       push {fp,lr} frame, flag-setting addsne for addne, and the indirect
       call through the boundary static instead of the direct b 0x08064980.
 
+  # --- retailOS null-guarded base scaled-total thunk ---
+  - address: 0x08055f3c
+    ghidra: FUN_08055f3c
+    name: object_scaled_total_base
+    size: 20
+    sig: "i64 object_scaled_total_base(const void *object)"
+    module: ui/object_state
+    status: ported
+    renames:
+      param_1: object
+      thunk_EXT_FUN_22000020: memcpy_8
+      FUN_08064980: scaled_field_total
+    notes: >-
+      Null-guarded thunk (cmp r0,#0; bne 0x08064980; moveq r0,#0; moveq
+      r1,#0; bx lr): a null object returns 0 in r0:r1, otherwise it
+      tail-calls the same retailOS helper 0x08064980 as sibling
+      object_scaled_total @ 0x08055f24, but with object itself (no +0x18
+      offset), folding the three doublewords at object offsets 0/8/0x10
+      into base + count * scale (plain base when count is zero). The real
+      extent is 20 bytes (bx lr at 0x08055f4c); functions.csv's 168 is a
+      Ghidra fall-through merge of the following thunks. Ghidra decompiles
+      the thunk with the callee body inlined, hence the full arithmetic in
+      the reference C; the callee stays in retailOS behind the
+      SCALED_FIELD_TOTAL boundary shared with object_scaled_total. One
+      `bl 0x08055f3c` call site (grep -c on decomp/osos.asm), at
+      0x080aaf54: it applies the thunk to the same 0x44-byte descriptor
+      copied by 0x08054d28 as object_scaled_total and forwards both
+      results together to 0x08045174; the field triple's concrete meaning
+      is not recovered. match.py (structural, exit 1 expected) shows the
+      same guard/conditional-branch/zero-return shape; diffs are LLVM's
+      push {fp,lr} frame and the indirect call through the boundary
+      static instead of the direct b 0x08064980. Rust implementation and
+      focused host tests:
+      `src/ui/object_state.rs::object_scaled_total_base`.
+
   # --- retailOS object counted-text install from the shared context's dotted-triple word ---
   - address: 0x08055f50
     ghidra: FUN_08055f50
