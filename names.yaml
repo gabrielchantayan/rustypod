@@ -14515,7 +14515,9 @@ functions:
       count was stale, it is 8 bl sites plus one beq tail-branch at
       0x08054290). Served by the existing cxx/templates port - hook this
       address to the vector_size_elem16 symbol (the vector_size_elem16
-      copy-at-0x083d78b4 precedent). match.py - the ldm comes out as
+      copy-at-0x083d78b4 precedent). Source C:
+      decomp/c/037/083d7674_FUN_083d7674.c - Ghidra's
+      `return param_1[1] - *param_1 >> 4`. match.py - the ldm comes out as
       byte loads from the family's read_unaligned host-testing idiom,
       the same accepted deviation as vector_size_elem4; the sub/asr#4
       structure matches.
