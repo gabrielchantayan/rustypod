@@ -36,6 +36,9 @@
 //!   (16 bytes; 9 `bl` + 2 tail `b` call sites). The bounded-store
 //!   helper the register collectors append through: store at the
 //!   cursor and advance it, unless it already equals `end`.
+//! - `cg_label_create` — original: `FUN_082c0dec` @ 0x082c0dec
+//!   (52 bytes; 4 `bl` call sites). Allocates and initializes a label
+//!   record and prepends it to the codegen's label list.
 //! - `cg_label_add_fixup` — original: `FUN_082c17ac` @ 0x082c17ac
 //!   (64 bytes; 4 `bl` call sites). Prepends the current output position
 //!   to a label's fixup list.
@@ -66,6 +69,11 @@
 //!   +0x20 type (u8)              +0x08 kind (u8)
 //!                                +0x09 opcode (u8)
 //!                                +0x0c first derived field
+//!
+//! cg_codegen_t                 cg_label_t (12 bytes)
+//!   +0x08 heap                   +0x00 next
+//!   +0x0c labels (head)          +0x04 fixups (head)
+//!   +0x10 output                 +0x08 offset (all-ones while unbound)
 //! ```
 //!
 //! The instruction kinds are a dense enum spanning 0-22: the visitor
@@ -186,14 +194,27 @@ pub struct CgVirtualRegList {
 pub const CG_MODULE_HEAP: usize = 0;
 /// `cg_codegen_t + 0x08` — the JIT arena used for label metadata.
 pub const CG_CODEGEN_HEAP: usize = 2;
+/// `cg_codegen_t + 0x0c` — head of the codegen's label list, built by
+/// [`cg_label_create`].
+pub const CG_CODEGEN_LABELS: usize = 3;
 /// `cg_codegen_t + 0x10` — the emitted-code buffer.
 pub const CG_CODEGEN_OUTPUT: usize = 4;
 /// `cg_codegen_buffer_t + 0x804` — current output position, read by
 /// [`cg_buffer_current_offset`].
 pub const CG_CODEGEN_OUTPUT_OFFSET: usize = 0x804 / 4;
 
+/// `cg_label_t + 0x00` — next label in the codegen's list.
+pub const CG_LABEL_NEXT: usize = 0;
 /// `cg_label_t + 0x04` — head of its pending-fixup list.
 pub const CG_LABEL_FIXUPS: usize = 1;
+/// `cg_label_t + 0x08` — emitted-code offset the label is bound to;
+/// [`CG_LABEL_UNBOUND`] until the binder runs.
+pub const CG_LABEL_OFFSET: usize = 2;
+/// Size of `cg_label_t` in target bytes.
+pub const CG_LABEL_BYTES: usize = 12;
+/// The all-ones "not yet bound" marker [`cg_label_create`] stamps into
+/// [`CG_LABEL_OFFSET`] — exactly the original's `mvn r1, #0`.
+pub const CG_LABEL_UNBOUND: usize = !0;
 
 /// `cg_label_fixup_t + 0x00` — next pending fixup.
 pub const CG_LABEL_FIXUP_NEXT: usize = 0;
@@ -396,6 +417,43 @@ unsafe fn module_heap(module: *mut u8) -> *mut CgHeap {
 #[inline(never)]
 pub unsafe extern "C" fn cg_buffer_current_offset(output: *mut CgCodegenBuffer) -> usize {
     word(output as *mut u8, CG_CODEGEN_OUTPUT_OFFSET).read()
+}
+
+/// cg_label_create — original: `FUN_082c0dec` @ 0x082c0dec (52 bytes,
+/// 4 `bl` call sites: 0x082c12dc, 0x082c12e8, 0x082c136c, 0x082cc11c).
+///
+/// The label factory of the JIT's code generator. Allocates a 12-byte
+/// `cg_label_t` from `codegen->heap` (+0x08), initializes its fixup list
+/// head to NULL with an explicit store (`str r1, [r0, #4]` — NOT left to
+/// the arena's zero-fill, unlike the sibling builders' `next` links),
+/// stamps the bound offset with the all-ones "not yet bound" sentinel
+/// (`mvn r1, #0` -> +0x08), and prepends the record to the codegen's
+/// label list (`codegen->labels` at +0x0c): the old head becomes
+/// `label->next`, then the head slot takes the new record.
+///
+/// Ghidra types the return void, but every caller consumes r0
+/// immediately (`bl` followed by `str r0, [...]` at all four sites), so
+/// the port returns the new label. The sentinel is written as the
+/// all-ones word, which on target is exactly 0xffffffff.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_label_create(codegen: *mut CgCodegen) -> *mut CgLabel {
+    let codegen = codegen as *mut u8;
+    let label = cg_heap_alloc(
+        slot(codegen, CG_CODEGEN_HEAP).read() as *mut CgHeap,
+        record_size(CG_LABEL_BYTES),
+    );
+
+    // Same store sequence as the original: fixups = NULL, offset = ~0,
+    // then the two list-linking stores.
+    slot(label, CG_LABEL_FIXUPS).write(core::ptr::null_mut());
+    word(label, CG_LABEL_OFFSET).write(CG_LABEL_UNBOUND);
+
+    let codegen_labels = slot(codegen, CG_CODEGEN_LABELS);
+    slot(label, CG_LABEL_NEXT).write(codegen_labels.read());
+    codegen_labels.write(label);
+
+    label as *mut CgLabel
 }
 
 /// cg_label_add_fixup — original: `FUN_082c17ac` @ 0x082c17ac (64 bytes).
@@ -1295,6 +1353,119 @@ mod tests {
                 "`strb` retains only the tag's low byte"
             );
             assert_eq!(returned, (), "the ARM function has a void return ABI");
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn label_create_allocates_initializes_and_prepends() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        assert_eq!(f.codegen[CG_CODEGEN_LABELS], 0, "the list starts empty");
+
+        unsafe {
+            let block = (*f.heap).current;
+            let expected = (*block).base.add((*block).current);
+            let before = (*block).current;
+            let label = cg_label_create(f.codegen_ptr()) as *mut u8;
+
+            assert_eq!(label, expected, "the 12-byte record comes from codegen->heap");
+            assert_eq!(
+                (*block).current,
+                before + stride(CG_LABEL_BYTES),
+                "cg_heap_alloc advances by its eight-byte-rounded request"
+            );
+            assert_eq!(
+                slot(label, CG_LABEL_FIXUPS).read(),
+                core::ptr::null_mut(),
+                "the fixup head is explicitly NULLed, not just zero-filled"
+            );
+            assert_eq!(
+                word(label, CG_LABEL_OFFSET).read(),
+                CG_LABEL_UNBOUND,
+                "the bound offset starts at the all-ones sentinel (`mvn r1, #0`)"
+            );
+            assert_eq!(
+                slot(label, CG_LABEL_NEXT).read(),
+                core::ptr::null_mut(),
+                "the first label's next is the NULL old head"
+            );
+            assert_eq!(
+                f.codegen[CG_CODEGEN_LABELS], label as usize,
+                "the new record becomes the codegen's label head"
+            );
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn label_create_chains_labels_newest_first() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let first = cg_label_create(f.codegen_ptr()) as *mut u8;
+            let second = cg_label_create(f.codegen_ptr()) as *mut u8;
+
+            assert_eq!(f.codegen[CG_CODEGEN_LABELS], second as usize, "head is the newest");
+            assert_eq!(
+                slot(second, CG_LABEL_NEXT).read(),
+                first,
+                "the second label links to the first"
+            );
+            assert_eq!(
+                slot(first, CG_LABEL_NEXT).read(),
+                core::ptr::null_mut(),
+                "the first label terminates the list"
+            );
+            assert_eq!(
+                word(first, CG_LABEL_OFFSET).read(),
+                CG_LABEL_UNBOUND,
+                "prepending does not disturb an existing record"
+            );
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn created_label_accepts_fixups_through_the_matching_layout() {
+        // Cross-check against cg_label_add_fixup: it must find the fixup
+        // head at +0x04 and leave the creator's next/offset words alone.
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        f.output[CG_CODEGEN_OUTPUT_OFFSET] = 0x200;
+
+        unsafe {
+            let label = cg_label_create(f.codegen_ptr()) as *mut u8;
+            cg_label_add_fixup(f.codegen_ptr(), label as *mut CgLabel, 7);
+            cg_label_add_fixup(f.codegen_ptr(), label as *mut CgLabel, 9);
+
+            let newest = slot(label, CG_LABEL_FIXUPS).read();
+            assert!(!newest.is_null(), "the label's fixup head is live");
+            assert_eq!(newest.add(CG_LABEL_FIXUP_TAG * WORD).read(), 9);
+            assert_eq!(word(newest, CG_LABEL_FIXUP_OFFSET).read(), 0x200);
+            let older = slot(newest, CG_LABEL_FIXUP_NEXT).read();
+            assert!(!older.is_null(), "fixups chain newest-first");
+            assert_eq!(older.add(CG_LABEL_FIXUP_TAG * WORD).read(), 7);
+            assert_eq!(
+                slot(older, CG_LABEL_FIXUP_NEXT).read(),
+                core::ptr::null_mut(),
+                "the oldest fixup links to the creator's NULL head"
+            );
+
+            assert_eq!(
+                word(label, CG_LABEL_OFFSET).read(),
+                CG_LABEL_UNBOUND,
+                "adding fixups never binds the label"
+            );
+            assert_eq!(
+                slot(label, CG_LABEL_NEXT).read(),
+                core::ptr::null_mut(),
+                "adding fixups never touches the label list link"
+            );
+            assert_eq!(f.codegen[CG_CODEGEN_LABELS], label as usize);
         }
         drop(f);
         teardown();

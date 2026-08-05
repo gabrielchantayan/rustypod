@@ -10376,6 +10376,31 @@ functions:
       and writes kind and opcode as BYTES at inst+8 and inst+9.
       inst->next relies on the arena's zero-fill.
 
+  - address: 0x082c0dec
+    ghidra: FUN_082c0dec
+    name: cg_label_create
+    size: 52
+    sig: "cg_label_t *cg_label_create(cg_codegen_t *codegen)"
+    module: codegen/ir
+    status: ported
+    vars: {param_1: codegen, puVar1: label}
+    notes: >-
+      4 bl call sites (0x082c12dc, 0x082c12e8, 0x082c136c, 0x082cc11c),
+      and every one consumes r0 immediately (`bl` + `str r0, [...]`),
+      so the port returns the label even though Ghidra types the
+      function void. The label factory of the JIT: allocates a 12-byte
+      cg_label_t from codegen->heap (+0x08), NULLs label->fixups (+0x04)
+      with an EXPLICIT store (unlike the sibling builders, whose `next`
+      links ride the arena's zero-fill), stamps label+0x08 with the
+      all-ones unbound sentinel (`mvn r1, #0`), and prepends the record
+      to the codegen's label list (codegen+0x0c head; old head becomes
+      label->next at +0x00). This is the creator cg_label_add_fixup's
+      notes pointed at; the +0x00 next / +0x04 fixups / +0x08 offset
+      layout is exactly what the fixup port assumes, cross-checked by
+      the tests. match.py: identical field offsets, immediates and the
+      bl to cg_heap_alloc; LLVM only adds its frame-pointer prologue
+      and swaps the two disjoint constant stores.
+
   - address: 0x082c17ac
     ghidra: FUN_082c17ac
     name: cg_label_add_fixup
