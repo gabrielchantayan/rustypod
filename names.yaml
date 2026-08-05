@@ -18478,39 +18478,80 @@ functions:
       bl 0x080efa38; ldr r1,[r4,#0x4]; add r1,r1,r5; str r1,[r4,#0x4];
       ldmia sp!,{r4,r5,pc}`. 64 `bl` call sites, all in the video
       header parser cluster 0x0807d7xx..0x080f1xxx, passing counts of
-      1, 2, 5, 8 and 0x20. Returns the `bit_count` bits the unported
-      FUN_080efa38 fetches MSB-first from the +0x00 buffer at the
-      +0x04 bit position (bit i is bit 7-((pos+i)&7) of byte
-      (pos+i)>>3; 152 bytes, signed count compares, arithmetic-shift
-      byte index, in-byte fast path plus whole-byte loop and partial
-      tail), then advances +0x04 by `bit_count` — the position word
-      is reloaded AFTER the fetch returns, and the add is a plain
-      wrapping `add` with no bounds test (the stream object is the
-      two-word {data @ +0x00, bit_pos @ +0x04} pair of
+      1, 2, 5, 8 and 0x20. Returns the `bit_count` bits the now-ported
+      bitstream_msb_fetch @ 0x080efa38 reads MSB-first from the +0x00
+      buffer at the +0x04 bit position (bit i is bit 7-((pos+i)&7) of
+      byte (pos+i)>>3), then advances +0x04 by `bit_count` — the
+      position word is reloaded AFTER the fetch returns, and the add is
+      a plain wrapping `add` with no bounds test (the stream object is
+      the two-word {data @ +0x00, bit_pos @ +0x04} pair of
       object_value_set_flags_clear @ 0x08085344; no end word exists
       here). Ghidra types the count `int` and the fetch compares it
-      signed, but this body is sign-agnostic, so the port keeps the
-      u32 of the house BitstreamReadAdvance signature in
-      cxx/object_flags.rs — the type the BITSTREAM_READ_ADVANCE seam
-      there expects of the real FUN_080ebbe0 at integration time.
-      Deviations: the unported fetch rides a BITSTREAM_MSB_FETCH seam
-      (house pattern — OBJECT_FLAGS_FETCH_INCREMENT_LOCK) instead of
-      a direct `bl`; the default spins, host tests install a
-      recording seam and a faithful FUN_080efa38 transcription. Host
-      tests: argument forwarding and result pass-through, advance by
-      bit_count (including the unconditional zero-count fetch call),
-      position reloaded after the fetch (a position-shifting seam
-      proves the ldr-after-bl ordering), i32 wrap on overflow, and a
-      210-case sweep of the faithful transcription against an
-      independent per-bit formulation over positions -8..24
-      (rewound negatives included), counts 0..=32 and every in-byte
-      alignment. match.py structural: the fetch call followed by
-      `ldr r1,[r5,#4]; add; str` is instruction-for-instruction; the
-      diff is the crate's fp frame and the `blx` through the seam
-      word (literal-pool loaded) versus the ADS direct `bl` — the
-      same deviation class bitstream_stuffing_to_byte_check records.
+      signed, but this body is sign-agnostic, so the port keeps the u32
+      of the house BitstreamReadAdvance signature in cxx/object_flags.rs
+      — the type the BITSTREAM_READ_ADVANCE seam there expects at target
+      integration time.
+      The fetch's port retires the BITSTREAM_MSB_FETCH seam: under the
+      house convention for a ported callee (for example,
+      f32_to_fixed16_sat's direct calls to __fscalb and __f2i), this
+      body now calls bitstream_msb_fetch directly, recreating the retail
+      `bl` rather than an indirect `blx`. Both stream words use
+      pointer-sized word indexing, byte-exact at +0x00/+0x04 on the
+      32-bit target and disjoint on a 64-bit host. Host tests now test
+      the exported fetch directly and test this function end to end
+      against an independent per-bit oracle over 210 position/count
+      cases (positions -8..24, counts 0..=32, every in-byte alignment).
       Rust implementation and focused host tests:
+      `src/h264/bitstream.rs::bitstream_msb_fetch` and
       `src/h264/bitstream.rs::bitstream_read_advance`.
+      match.py structural: the direct branch is followed by the same
+      +0x04 load/add/store; only the Rust fp frame and register allocation
+      differ from the retail eight-instruction body.
+
+  # --- MPEG video header parser: MSB-first bit fetch ---
+  - address: 0x080efa38
+    ghidra: FUN_080efa38
+    name: bitstream_msb_fetch
+    size: 152
+    sig: "u32 bitstream_msb_fetch(u8 *stream, u32 bit_count)"
+    module: h264/bitstream
+    status: ported
+    renames:
+      param_1: stream
+      param_2: bit_count
+    notes: >-
+      MSB-first, non-advancing fetch for the two-word MPEG video-header
+      cursor {data @ +0x00, bit_pos @ +0x04}. It returns bit_count bits
+      where result bit i is bit 7-((pos+i)&7) of byte (pos+i)>>3; the
+      caller advances the position separately. The 152-byte body is all
+      code with no literal pool or calls: its `str lr,[sp,#-4]!` prologue
+      has three `ldr pc,[sp],#4` exits (in-byte fast path, partial tail,
+      and a zero-remaining whole-byte-loop exit). Disassembly was checked
+      instruction by instruction: `asr #3` makes negative positions
+      arithmetic, `bic`/`sub` computes pos&7, the double `rsb` is an ADS
+      identity, `cmp`/`movle` and `cmp`/`movge` make both count decisions
+      signed, and the slow path appends bytes with `lsl #8`/`orr` before
+      taking the next byte's partial MSBs. Ghidra misidentifies the two
+      ordinary `ldr pc,[sp],#4` returns at 0x080efac0/0x080efacc as
+      unrecovered jump tables and consequently types the function void.
+      Four direct `bl` sites consume r0: 0x0807d730 (0x20) and
+      0x0807d754 (0x18) in the start-code scan loop @ 0x0807d724,
+      0x080ebbec in bitstream_read_advance, and 0x080f0d10 (0x20).
+      This port lets bitstream_read_advance retire its former
+      BITSTREAM_MSB_FETCH seam and call directly, matching the house
+      convention for ported callees. The stream words are indexed by
+      pointer-sized word (byte-exact on the 32-bit target; disjoint
+      pointer/position slots on a 64-bit host). Deliberate domain
+      deviation: Rust shifts differ from ARM register shifts for counts
+      outside 0..=32; every retail call site is within that range.
+      Host tests compare the export and read-and-advance composition
+      against an independent per-bit reference over 210 cases, including
+      rewound negative positions, all alignments, fast path, whole-byte
+      loop, partial tail, and zero count.
+      match.py structural: LLVM folds the duplicated data/position work,
+      prefetches and rotates the whole-byte loop, and splits the fast and
+      partial-tail exits, while preserving the arithmetic-shift byte
+      address, signed fast/loop tests, byte append, and partial-MSB tail.
 
   # --- retailOS UI: the styled-text view widget ---
   - address: 0x0819b9e0

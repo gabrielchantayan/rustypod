@@ -21,9 +21,11 @@
 //! read-and-advance primitive [`bitstream_read_advance`] @ 0x080ebbe0
 //! (start codes 0x000001B5/B3/B2), which runs over the same
 //! `{data @ +0x00, bit_pos @ +0x04}` word pair but knows no `end`
-//! word: it fetches `bit_count` bits MSB-first through the
-//! [`BITSTREAM_MSB_FETCH`] seam (`FUN_080efa38`, unported) and commits
-//! them with a plain `bit_pos += bit_count`, bounds-check free.
+//! word: it fetches `bit_count` bits MSB-first through
+//! [`bitstream_msb_fetch`] @ 0x080efa38 and commits them with a plain
+//! `bit_pos += bit_count`, bounds-check free. Both functions address
+//! the stream object's words by pointer-sized word index (byte-exact
+//! +0x00/+0x04 on the 32-bit target, disjoint slots on a 64-bit host).
 
 use core::ptr::{addr_of, addr_of_mut};
 
@@ -98,36 +100,80 @@ pub unsafe extern "C" fn h264_bitstream_advance(
     data.wrapping_offset((bit_pos >> 3) as isize) < end
 }
 
-/// MSB-first bit fetch `FUN_080efa38` (unported): 152 bytes @
-/// 0x080efa38, all code — no literal pool, no calls; a
-/// `str lr,[sp,#-0x4]!` prologue and three `ldr pc,[sp],#0x4` exits
-/// (in-byte fast path, whole-byte loop tail, zero-remaining tail).
-/// Returns the `bit_count` bits MSB-first from the +0x00 buffer at
-/// the +0x04 bit position — bit `i` of the result is bit
+/// Pointer-sized word index of the bit-position word: byte +0x04 on
+/// the 32-bit target, byte +0x08 on a 64-bit host. This is the house
+/// word-index model: byte-exact on target while keeping the position
+/// disjoint from the host's 8-byte data pointer.
+const STREAM_BIT_POS_WORD: usize = 1;
+
+/// bitstream_msb_fetch — original: `FUN_080efa38` @ 0x080efa38
+/// (152 bytes, all code — no literal pool, no calls; a
+/// `str lr,[sp,#-0x4]!` prologue and three `ldr pc,[sp],#0x4` exits:
+/// the in-byte fast path, the whole-byte loop's zero-remaining exit,
+/// and the partial tail. 4 `bl` call sites: 0x0807d730 and
+/// 0x0807d754 in the start-code scan loop @ 0x0807d724 (counts 0x20
+/// and 0x18), 0x080f0d10 (count 0x20), and 0x080ebbec inside
+/// [`bitstream_read_advance`]. Ghidra treats the two `ldr pc,[sp],#0x4`
+/// returns as unrecovered jump tables and loses the r0 result, but all
+/// callers consume the returned bits.)
+///
+/// Returns the `bit_count` bits MSB-first from the +0x00 buffer at the
+/// +0x04 bit position — bit `i` of the result is bit
 /// `7 - ((pos + i) & 7)` of byte `(pos + i) >> 3` — WITHOUT moving
-/// the position; [`bitstream_read_advance`] pays for the advance.
+/// the position; [`bitstream_read_advance`] or the scan loop's own
+/// `ldr`/`add`/`str` pays for the advance.
+///
 /// The byte index is an arithmetic shift (`asr #0x3`), so rewound
-/// (negative) positions stay correct, and the `bit_count` compares
-/// are signed (`cmp`/`movle` fast path, `movge` loop). The double
-/// `rsb r12,r12,#0x8` is an ADS identity leaving `r12 = pos & 7`.
-pub type BitstreamMsbFetch = unsafe extern "C" fn(stream: *mut u8, bit_count: u32) -> u32;
+/// (negative) positions stay correct, and `pos & 7` falls out of a
+/// `bic`/`sub` pair — the double `rsb r12,r12,#0x8` is an ADS identity
+/// leaving `r12 = pos & 7`. The `bit_count` compares are signed
+/// (`cmp r1,r3`/`movle` fast path, `cmp r1,#0x8`/`movge` loop): an
+/// in-byte count returns `((first << (pos & 7)) & 0xff) >> (8 - count)`;
+/// otherwise whole bytes shift into the accumulator eight at a time and
+/// the partial tail takes the next byte's high `remaining` bits.
+///
+/// Deviations: the stream words use pointer-sized word indexing
+/// (+0x00/+0x04 byte-exact on the 32-bit target, disjoint slots on a
+/// 64-bit host — the `pfr_face_done` house model). Rust shifts also
+/// differ from ARM register shifts for counts outside 0..=32: retail
+/// uses the low eight shift-count bits and yields zero for 32..=255,
+/// whereas a debug Rust build rejects an out-of-range shift. Every
+/// retail call site passes 1, 2, 5, 8, 0x18, or 0x20.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn bitstream_msb_fetch(stream: *mut u8, bit_count: u32) -> u32 {
+    let stream_words = stream.cast::<*const u8>();
+    let data = stream_words.read();
+    let bit_pos = stream_words
+        .add(STREAM_BIT_POS_WORD)
+        .cast::<i32>()
+        .read();
+    let in_byte = (bit_pos & 7) as u32;
+    let available = 8 - in_byte as i32;
+    let first = u32::from(data.offset((bit_pos >> 3) as isize).read());
+    let count = bit_count as i32;
+    let shifted = (first << in_byte) & 0xff;
 
-/// Spins forever: [`bitstream_read_advance`] must not run before
-/// target integration installs the retailOS `FUN_080efa38`.
-unsafe extern "C" fn missing_bitstream_msb_fetch(_stream: *mut u8, _bit_count: u32) -> u32 {
-    loop {
-        core::hint::spin_loop();
+    if count <= available {
+        return shifted >> (8 - count);
     }
-}
 
-/// RetailOS dependency of [`bitstream_read_advance`]. Target
-/// integration must install the real `FUN_080efa38`; focused host
-/// tests replace it with a scripted seam.
-pub static mut BITSTREAM_MSB_FETCH: BitstreamMsbFetch = missing_bitstream_msb_fetch;
-
-#[inline(always)]
-unsafe fn bitstream_msb_fetch() -> BitstreamMsbFetch {
-    core::ptr::read_volatile(addr_of!(BITSTREAM_MSB_FETCH))
+    let mut value = shifted >> in_byte;
+    let mut next_byte = data.offset((bit_pos >> 3) as isize + 1);
+    let mut remaining = count - available;
+    loop {
+        if remaining == 0 {
+            return value;
+        }
+        if remaining >= 8 {
+            value = (value << 8) | u32::from(next_byte.read());
+            next_byte = next_byte.add(1);
+            remaining -= 8;
+        } else {
+            return (value << remaining)
+                | (u32::from(next_byte.read()) >> (8 - remaining));
+        }
+    }
 }
 
 /// bitstream_read_advance — original: `FUN_080ebbe0` @ 0x080ebbe0
@@ -138,9 +184,9 @@ unsafe fn bitstream_msb_fetch() -> BitstreamMsbFetch {
 ///
 /// The read-and-advance primitive of the MPEG-style video header
 /// parser (32-bit start codes 0x000001B5/B3/B2): returns the
-/// `bit_count` bits the [`BITSTREAM_MSB_FETCH`] fetch (`FUN_080efa38`)
-/// reads MSB-first from the +0x00 buffer at the +0x04 bit position,
-/// then advances +0x04 by `bit_count`. The complete retail body is
+/// `bit_count` bits [`bitstream_msb_fetch`] @ 0x080efa38 reads
+/// MSB-first from the +0x00 buffer at the +0x04 bit position, then
+/// advances +0x04 by `bit_count`. The complete retail body is
 /// eight instructions: `stmdb sp!,{r4,r5,lr}; mov r5,r1; mov r4,r0;
 /// bl 0x080efa38; ldr r1,[r4,#0x4]; add r1,r1,r5; str r1,[r4,#0x4];
 /// ldmia sp!,{r4,r5,pc}`.
@@ -163,14 +209,20 @@ unsafe fn bitstream_msb_fetch() -> BitstreamMsbFetch {
 /// signature (cxx/object_flags.rs) and wraps on overflow like the
 /// original's `add`.
 ///
-/// Deviations: the unported fetch rides the [`BITSTREAM_MSB_FETCH`]
-/// seam (house pattern — see `OBJECT_FLAGS_FETCH_INCREMENT_LOCK` in
-/// cxx/object_flags.rs) instead of a direct `bl`.
+/// Deviations: none in the body. The fetch is now ported in this module
+/// and called directly, retiring the `BITSTREAM_MSB_FETCH` seam under the
+/// house convention that a ported callee takes a direct call (as
+/// `f32_to_fixed16_sat` does for its ported helpers). The position word
+/// uses the shared pointer-sized word-index model, byte-exact at +0x04
+/// on the 32-bit target and disjoint from the host pointer word.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn bitstream_read_advance(stream: *mut u8, bit_count: u32) -> u32 {
-    let bits = bitstream_msb_fetch()(stream, bit_count);
-    let position = stream.add(4).cast::<i32>();
+    let bits = bitstream_msb_fetch(stream, bit_count);
+    let position = stream
+        .cast::<*const u8>()
+        .add(STREAM_BIT_POS_WORD)
+        .cast::<i32>();
     position.write(position.read().wrapping_add(bit_count as i32));
     bits
 }
@@ -314,215 +366,119 @@ mod tests {
         assert_eq!(r.bit_pos, i32::MAX.wrapping_add(9));
     }
 
-    // --- bitstream_read_advance ---
+    // --- bitstream_msb_fetch / bitstream_read_advance ---
 
-    extern crate std;
-    use std::sync::{Mutex as StdMutex, MutexGuard as StdMutexGuard};
-
-    /// Serializes the tests that swap the MSB-fetch seam and the
-    /// scripted stream data.
-    static READ_ADVANCE_TEST_LOCK: StdMutex<()> = StdMutex::new(());
-
-    /// Scripted payload the host fetch seams read. Byte index -1 maps
-    /// to entry 0 (see [`fetch_data_base`]), so rewound (negative)
-    /// bit positions are covered too.
-    static mut READ_DATA: [u8; 12] = [0; 12];
-
-    /// One recorded fetch call: the stream pointer and the requested
-    /// bit count.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    struct FetchCall {
-        stream: usize,
-        bit_count: u32,
-    }
-
-    const NO_FETCH: FetchCall = FetchCall { stream: 0, bit_count: 0 };
-
-    static mut FETCH_CALLS: [FetchCall; 8] = [NO_FETCH; 8];
-    static mut FETCH_COUNT: usize = 0;
-    static mut FETCH_RESULT: u32 = 0;
-
-    fn record_fetch(stream: *mut u8, bit_count: u32) {
-        unsafe {
-            let count = FETCH_COUNT;
-            assert!(count < 8, "MSB-fetch seam called more than 8 times");
-            FETCH_CALLS[count] = FetchCall { stream: stream as usize, bit_count };
-            FETCH_COUNT = count + 1;
-        }
-    }
-
-    /// A seam that only records the call and returns the scripted
-    /// result: isolates the ported body's forwarding and advance.
-    unsafe extern "C" fn recording_msb_fetch(stream: *mut u8, bit_count: u32) -> u32 {
-        record_fetch(stream, bit_count);
-        FETCH_RESULT
-    }
-
-    /// Byte-address base for the scripted payload: entry 1, so byte
-    /// index -1 (a rewound position) lands on entry 0.
-    unsafe fn fetch_data_base() -> *const u8 {
-        addr_of!(READ_DATA).cast::<u8>().add(1)
-    }
-
-    /// A faithful host stand-in for `FUN_080efa38`, transcribed from
-    /// the disassembly: signed count compares, arithmetic-shift byte
-    /// index, the in-byte fast path, the whole-byte loop and the
-    /// partial tail. Reads the scripted payload and records the call.
-    /// Only bit counts 0..=32 are exercised: a larger signed count
-    /// would take the fast path with an out-of-range shift, which the
-    /// retail `lsr` by register survives but Rust does not.
-    unsafe extern "C" fn real_bitstream_msb_fetch(stream: *mut u8, bit_count: u32) -> u32 {
-        let n = bit_count as i32;
-        let bit_pos = stream.add(4).cast::<i32>().read_volatile();
-        let k = (bit_pos & 7) as u32;
-        let avail = 8 - k as i32;
-        let first = u32::from(fetch_data_base().offset((bit_pos >> 3) as isize).read_volatile());
-        let value = if n <= avail {
-            ((first << k) & 0xff) >> (8 - n)
-        } else {
-            let mut acc = ((first << k) & 0xff) >> k;
-            let mut remaining = n - avail;
-            let mut ptr = fetch_data_base().offset((bit_pos >> 3) as isize + 1);
-            while remaining != 0 {
-                if remaining >= 8 {
-                    acc = (acc << 8) | u32::from(ptr.read_volatile());
-                    ptr = ptr.add(1);
-                    remaining -= 8;
-                } else {
-                    acc = (acc << remaining) | u32::from(ptr.read_volatile() >> (8 - remaining));
-                    break;
-                }
-            }
-            acc
-        };
-        record_fetch(stream, bit_count);
-        value
-    }
-
-    /// An aligned stand-in for the two-word stream object: +0x00
-    /// unused by the host seams (retail's fetch would read the data
-    /// pointer here), +0x04 the bit position.
-    #[repr(C, align(4))]
+    /// An aligned stand-in for the two-word stream object: a real data
+    /// pointer at +0x00 and its position at pointer-sized word 1 (+0x04
+    /// on the target, +0x08 on a 64-bit host).
+    #[repr(C)]
     struct ReadStream {
-        words: [u32; 2],
+        data: *const u8,
+        bit_pos: i32,
     }
 
-    /// Installs the fetch seam and seeds the scripted payload and
-    /// result, returning the guard serializing the swap.
-    fn install_fetch_seam(
-        data: [u8; 12],
-        fetch: BitstreamMsbFetch,
-        result: u32,
-    ) -> StdMutexGuard<'static, ()> {
-        let guard = READ_ADVANCE_TEST_LOCK.lock().unwrap();
-        unsafe {
-            READ_DATA = data;
-            FETCH_COUNT = 0;
-            FETCH_RESULT = result;
-            BITSTREAM_MSB_FETCH = fetch;
+    /// Creates a stream whose data base is entry 1, so byte index -1
+    /// (a rewound position) addresses `payload[0]`.
+    fn stream_at(payload: &[u8], bit_pos: i32) -> ReadStream {
+        ReadStream {
+            data: unsafe { payload.as_ptr().add(1) },
+            bit_pos,
         }
-        guard
     }
 
-    fn uninstall_fetch_seam() {
-        unsafe { BITSTREAM_MSB_FETCH = missing_bitstream_msb_fetch };
-    }
-
-    fn fetch_calls() -> (usize, [FetchCall; 8]) {
-        unsafe { (FETCH_COUNT, FETCH_CALLS) }
-    }
-
-    /// Independent formulation of the fetch: bit `i` of the result is
-    /// bit `7 - ((pos + i) & 7)` of byte `(pos + i) >> 3` of the
-    /// scripted payload (byte -1 = entry 0).
-    fn reference_fetch(bit_pos: i32, bit_count: u32) -> u32 {
+    /// Independent per-bit formulation: bit `i` of the result is bit
+    /// `7 - ((pos + i) & 7)` of byte `(pos + i) >> 3`. `payload[0]` is
+    /// byte -1 relative to the stream's data pointer.
+    fn reference_fetch(payload: &[u8], bit_pos: i32, bit_count: u32) -> u32 {
         let mut value = 0u32;
         for i in 0..bit_count as i32 {
-            let p = bit_pos + i;
-            let byte = unsafe { READ_DATA[((p >> 3) + 1) as usize] };
-            value = (value << 1) | u32::from(byte >> (7 - (p & 7)) & 1);
+            let position = bit_pos + i;
+            let byte = payload[((position >> 3) + 1) as usize];
+            value = (value << 1) | u32::from(byte >> (7 - (position & 7)) & 1);
         }
         value
     }
 
-    /// The fetch result is returned unchanged and the arguments are
-    /// forwarded verbatim — the retail `bl 0x080efa38` passes r0/r1
-    /// through untouched.
+    const FETCH_PAYLOAD: [u8; 12] = [
+        0b1011_0011,
+        0b0100_1101,
+        0xA5,
+        0xFF,
+        0x00,
+        0x5A,
+        0b1100_0011,
+        0x69,
+        0x96,
+        0x0F,
+        0xF0,
+        0b0101_1010,
+    ];
+
+    /// A concrete four-byte fetch crosses the whole-byte loop and takes
+    /// its zero-remaining exit, the path start-code scanners use.
     #[test]
-    fn forwards_stream_and_count_and_returns_the_fetch_result() {
-        let _guard = install_fetch_seam([0; 12], recording_msb_fetch, 0xA5A5_005A);
-        let mut stream = ReadStream { words: [0, 24] };
-        let stream_ptr = stream.words.as_mut_ptr().cast::<u8>();
-        let got = unsafe { bitstream_read_advance(stream_ptr, 0x20) };
-        assert_eq!(got, 0xA5A5_005A);
-        let (count, calls) = fetch_calls();
-        assert_eq!(count, 1);
-        assert_eq!(calls[0], FetchCall { stream: stream_ptr as usize, bit_count: 0x20 });
-        uninstall_fetch_seam();
+    fn fetches_a_32_bit_start_code() {
+        let bytes = [0xEE, 0x00, 0x00, 0x01, 0xB5];
+        let mut stream = stream_at(&bytes, 0);
+        assert_eq!(
+            unsafe { bitstream_msb_fetch((&mut stream as *mut ReadStream).cast(), 32) },
+            0x0000_01B5
+        );
+        assert_eq!(stream.bit_pos, 0, "the fetch does not advance");
     }
 
-    /// The position word advances by exactly `bit_count` — the retail
-    /// `ldr r1,[r4,#0x4]; add r1,r1,r5; str r1,[r4,#0x4]`.
+    /// Promotes the former seam's 210-case transcription check to the
+    /// exported port: all in-byte alignments, fast/whole-byte/partial
+    /// tails, and rewound negative positions agree with an independent
+    /// per-bit model.
     #[test]
-    fn advances_the_position_by_the_bit_count() {
-        for (start, n) in [(0u32, 1u32), (3, 5), (7, 1), (8, 8), (24, 32), (100, 0)] {
-            let _guard = install_fetch_seam([0; 12], recording_msb_fetch, 0);
-            let mut stream = ReadStream { words: [0, start] };
-            unsafe { bitstream_read_advance(stream.words.as_mut_ptr().cast(), n) };
-            assert_eq!(stream.words[1], start.wrapping_add(n), "{start} + {n}");
-            let (count, calls) = fetch_calls();
-            assert_eq!(count, 1, "the fetch runs even for a zero count");
-            assert_eq!(calls[0].bit_count, n);
-            uninstall_fetch_seam();
-        }
-    }
-
-    /// The position is read back AFTER the fetch returns — the retail
-    /// `ldr r1,[r4,#0x4]` follows the `bl` — so a fetch that moved
-    /// the position advances from the value it left behind.
-    #[test]
-    fn reads_the_position_back_after_the_fetch() {
-        unsafe extern "C" fn position_shifting_fetch(stream: *mut u8, _n: u32) -> u32 {
-            stream.add(4).cast::<u32>().write_volatile(100);
-            7
-        }
-        let _guard = install_fetch_seam([0; 12], position_shifting_fetch, 0);
-        let mut stream = ReadStream { words: [0, 3] };
-        let got = unsafe { bitstream_read_advance(stream.words.as_mut_ptr().cast(), 5) };
-        assert_eq!(got, 7);
-        assert_eq!(stream.words[1], 105);
-        uninstall_fetch_seam();
-    }
-
-    /// Overflow wraps like the original's `add`, and does not panic.
-    #[test]
-    fn position_add_wraps_like_the_original() {
-        let _guard = install_fetch_seam([0; 12], recording_msb_fetch, 0);
-        let mut stream = ReadStream { words: [0, (i32::MAX - 1) as u32] };
-        unsafe { bitstream_read_advance(stream.words.as_mut_ptr().cast(), 4) };
-        assert_eq!(stream.words[1] as i32, i32::MAX.wrapping_add(3));
-        uninstall_fetch_seam();
-    }
-
-    /// End to end with the faithful `FUN_080efa38` transcription: the
-    /// returned bits match an independent per-bit formulation over
-    /// positions (including rewound negative ones), counts 0..=32 and
-    /// every in-byte alignment, and each call advances the position
-    /// by the count.
-    #[test]
-    fn matches_reference_over_positions_counts_and_alignments() {
-        let data: [u8; 12] =
-            [0b1011_0011, 0b0100_1101, 0xA5, 0xFF, 0x00, 0x5A, 0b1100_0011, 0x69, 0x96, 0x0F, 0xF0, 0b0101_1010];
+    fn fetch_matches_reference_over_positions_counts_and_alignments() {
         for start in [-8i32, -4, -1, 0, 1, 2, 3, 6, 7, 8, 9, 13, 16, 24] {
-            for n in [0u32, 1, 2, 3, 4, 5, 7, 8, 9, 12, 16, 17, 24, 31, 32] {
-                let _guard = install_fetch_seam(data, real_bitstream_msb_fetch, 0);
-                let mut stream = ReadStream { words: [0, start as u32] };
-                let got = unsafe { bitstream_read_advance(stream.words.as_mut_ptr().cast(), n) };
-                assert_eq!(got, reference_fetch(start, n), "pos {start} n {n}");
-                assert_eq!(stream.words[1] as i32, start.wrapping_add(n as i32), "pos {start} n {n}");
-                let (count, _) = fetch_calls();
-                assert_eq!(count, 1);
-                uninstall_fetch_seam();
+            for count in [0u32, 1, 2, 3, 4, 5, 7, 8, 9, 12, 16, 17, 24, 31, 32] {
+                let mut stream = stream_at(&FETCH_PAYLOAD, start);
+                let got = unsafe {
+                    bitstream_msb_fetch((&mut stream as *mut ReadStream).cast(), count)
+                };
+                assert_eq!(
+                    got,
+                    reference_fetch(&FETCH_PAYLOAD, start, count),
+                    "pos {start} count {count}"
+                );
+                assert_eq!(stream.bit_pos, start, "pos {start} count {count}");
+            }
+        }
+    }
+
+    #[test]
+    fn zero_bit_fetch_returns_zero_without_moving_the_cursor() {
+        let mut stream = stream_at(&FETCH_PAYLOAD, 5);
+        assert_eq!(
+            unsafe { bitstream_msb_fetch((&mut stream as *mut ReadStream).cast(), 0) },
+            0
+        );
+        assert_eq!(stream.bit_pos, 5);
+    }
+
+    /// The direct `bl 0x080efa38` equivalent returns the fetched bits
+    /// then reloads and advances the stream position, end to end.
+    #[test]
+    fn read_advance_matches_reference_and_commits_the_count() {
+        for start in [-8i32, -4, -1, 0, 1, 2, 3, 6, 7, 8, 9, 13, 16, 24] {
+            for count in [0u32, 1, 2, 3, 4, 5, 7, 8, 9, 12, 16, 17, 24, 31, 32] {
+                let mut stream = stream_at(&FETCH_PAYLOAD, start);
+                let got = unsafe {
+                    bitstream_read_advance((&mut stream as *mut ReadStream).cast(), count)
+                };
+                assert_eq!(
+                    got,
+                    reference_fetch(&FETCH_PAYLOAD, start, count),
+                    "pos {start} count {count}"
+                );
+                assert_eq!(
+                    stream.bit_pos,
+                    start.wrapping_add(count as i32),
+                    "pos {start} count {count}"
+                );
             }
         }
     }
