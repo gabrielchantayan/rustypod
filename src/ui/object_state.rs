@@ -724,6 +724,94 @@ pub unsafe extern "C" fn object_nested_companion_word(object: *const u8) -> u32 
     (nested_object.add(NESTED_OBJECT_COMPANION_WORD_OFFSET) as *const u32).read()
 }
 
+type ObjectKindTable = unsafe extern "C" fn(*const u8, u32) -> *const u64;
+
+/// Calls the stock kind-indexed mask-table getter, which remains in
+/// retailOS.
+///
+/// This is deliberately a boundary rather than a port of 0x080e4e64. Host
+/// tests replace the one function pointer below; ARM builds call its fixed
+/// firmware load address. The original takes `(object, kind)`: for `kind ==
+/// 1` with bit 0 of the byte at `object + 0x18c` set it returns the override
+/// table pointer at literal 0x080e4e84; otherwise it tail-calls the kind
+/// switch 0x080d8948, which returns one of the per-kind table pointers
+/// 0x080d8b68..0x080d8c10 (null for kinds 0, 1 without the flag, and any
+/// kind above 0x2c).
+unsafe extern "C" fn firmware_object_kind_table(
+    object: *const u8,
+    kind: u32,
+) -> *const u64 {
+    #[cfg(target_os = "none")]
+    {
+        let object_kind_table: ObjectKindTable =
+            core::mem::transmute(0x080e_4e64usize);
+        object_kind_table(object, kind)
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        let _ = (object, kind);
+        core::ptr::null()
+    }
+}
+
+/// Narrow boundary for the unported 0x080e4e64 dependency.
+static mut OBJECT_KIND_TABLE: ObjectKindTable = firmware_object_kind_table;
+
+#[inline(always)]
+unsafe fn object_kind_table_fn() -> ObjectKindTable {
+    core::ptr::read_volatile(core::ptr::addr_of!(OBJECT_KIND_TABLE))
+}
+
+/// object_kind_mask_union — original: `FUN_08055db8` @ `0x08055db8` (72
+/// bytes).
+///
+/// Source: `/home/gabe/Programming/ipod-decomp/decomp/c/003/08055db8_FUN_08055db8.c`;
+/// assembly: `decomp/osos.asm` @ `0x08055db8..0x08055dfc`.
+///
+/// Folds the per-kind mask table into a 64-bit union. The original forwards
+/// `(object, kind)` untouched in r0/r1 to the retailOS table getter
+/// 0x080e4e64 (`bl 0x080e4e64` with no argument setup — Ghidra's
+/// zero-argument `FUN_08055db8(void)` decompilation is an artifact; the
+/// single stock call site at 0x08067968 passes its record owner in r0 and
+/// the word at `record + 0x14` in r1). With a null table it returns 0 in
+/// r0:r1; otherwise it walks the table of 64-bit entries with `ldrd`,
+/// OR-ing each entry's low word into one accumulator and its high word into
+/// another (`orr r5,r5,r0` / `orr r6,r6,r1`), advancing eight bytes at a
+/// time until a zero doubleword terminator, and returns the two
+/// accumulators in r0:r1 — modeled here as one `u64`. The call site ORs
+/// the result into the 64-bit field at `object + 0x1d0`, alongside a
+/// sibling fold through 0x08054b0c, so the function aggregates the table's
+/// entries into a combined mask; the masks' concrete meaning is not
+/// recovered. The redundant `ldrdne r0,r1,[r4,#0x0]` reload inside the
+/// loop is an ADS artifact — the zero test clobbers no register — and is
+/// not reproduced. The table getter stays in retailOS behind the
+/// [`OBJECT_KIND_TABLE`] boundary.
+///
+/// # Safety
+///
+/// Like the original, there is no null guard on `object`: the stock getter
+/// may dereference it (`ldrb r0,[r0,#0x18c]` for `kind == 1`). A non-null
+/// table must be a readable, 8-byte-aligned run of 64-bit entries ending in
+/// a zero doubleword, as every stock table is.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn object_kind_mask_union(object: *const u8, kind: u32) -> u64 {
+    let mut union: u64 = 0;
+    let mut entry = object_kind_table_fn()(object, kind);
+    if !entry.is_null() {
+        loop {
+            let mask = entry.read();
+            if mask == 0 {
+                break;
+            }
+            union |= mask;
+            entry = entry.add(1);
+        }
+    }
+    union
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1659,6 +1747,119 @@ mod tests {
             unsafe { context_mode_flag() },
             0,
             "a set word with bit 0 clear yields 0 (`and r0,r0,#0x1`)"
+        );
+    }
+
+    static KIND_TABLE_LOCK: Mutex<()> = Mutex::new(());
+    static mut KIND_TABLE_CALLS: u32 = 0;
+    static mut KIND_TABLE_OBJECT: usize = 0;
+    static mut KIND_TABLE_KIND: u32 = u32::MAX;
+    static mut MOCK_KIND_TABLE: *const u64 = core::ptr::null();
+
+    unsafe extern "C" fn recording_object_kind_table(
+        object: *const u8,
+        kind: u32,
+    ) -> *const u64 {
+        KIND_TABLE_CALLS += 1;
+        KIND_TABLE_OBJECT = object as usize;
+        KIND_TABLE_KIND = kind;
+        MOCK_KIND_TABLE
+    }
+
+    /// Restores the stock-call boundary before another test uses it.
+    struct KindTableReset;
+
+    impl Drop for KindTableReset {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(OBJECT_KIND_TABLE)
+                    .write(firmware_object_kind_table);
+            }
+        }
+    }
+
+    fn install_recording_kind_table(table: *const u64) -> MutexGuard<'static, ()> {
+        let guard = KIND_TABLE_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        unsafe {
+            KIND_TABLE_CALLS = 0;
+            KIND_TABLE_OBJECT = 0;
+            KIND_TABLE_KIND = u32::MAX;
+            MOCK_KIND_TABLE = table;
+            core::ptr::addr_of_mut!(OBJECT_KIND_TABLE).write(recording_object_kind_table);
+        }
+        guard
+    }
+
+    #[test]
+    fn null_table_returns_zero_and_forwards_both_arguments() {
+        let _guard = install_recording_kind_table(core::ptr::null());
+        let _reset = KindTableReset;
+        let mut object = [0u8; 0x1a0];
+
+        assert_eq!(unsafe { object_kind_mask_union(object.as_mut_ptr(), 7) }, 0);
+        assert_eq!(unsafe { KIND_TABLE_CALLS }, 1, "the getter is called once");
+        assert_eq!(
+            unsafe { KIND_TABLE_OBJECT },
+            object.as_mut_ptr() as usize,
+            "r0 is forwarded untouched to the getter"
+        );
+        assert_eq!(
+            unsafe { KIND_TABLE_KIND },
+            7,
+            "r1 is forwarded untouched to the getter"
+        );
+    }
+
+    #[test]
+    fn immediate_terminator_returns_zero() {
+        let table = [0u64; 1];
+        let _guard = install_recording_kind_table(table.as_ptr());
+        let _reset = KindTableReset;
+        let mut object = [0u8; 0x1a0];
+
+        assert_eq!(
+            unsafe { object_kind_mask_union(object.as_mut_ptr(), 2) },
+            0,
+            "a zero first doubleword ends the walk before any OR"
+        );
+    }
+
+    #[test]
+    fn unions_every_entry_until_the_zero_doubleword() {
+        let table = [
+            0x0000_0001_0000_0002u64,
+            0x0000_0004_0000_0008,
+            0xffff_0000_0000_0000,
+            0,
+            // Past the terminator: must never be read.
+            0xdead_beef_dead_beef,
+        ];
+        let _guard = install_recording_kind_table(table.as_ptr());
+        let _reset = KindTableReset;
+        let mut object = [0u8; 0x1a0];
+
+        assert_eq!(
+            unsafe { object_kind_mask_union(object.as_mut_ptr(), 0x2c) },
+            0xffff_0005_0000_000a,
+            "the result is the bitwise OR of all entries up to the terminator"
+        );
+    }
+
+    #[test]
+    fn terminator_requires_both_words_zero() {
+        // A half-zero entry is not the terminator: the original tests the
+        // full doubleword (`cmp r1,#0x0; cmpeq r0,r2`).
+        let table = [0x0000_0000_1111_1111u64, 0x2222_2222_0000_0000, 0];
+        let _guard = install_recording_kind_table(table.as_ptr());
+        let _reset = KindTableReset;
+        let mut object = [0u8; 0x1a0];
+
+        assert_eq!(
+            unsafe { object_kind_mask_union(object.as_mut_ptr(), 1) },
+            0x2222_2222_1111_1111,
+            "entries with one zero word still contribute to the union"
         );
     }
 }

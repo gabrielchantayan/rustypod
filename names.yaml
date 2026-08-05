@@ -19370,6 +19370,45 @@ functions:
       original is exactly the 1-instruction branch; the body diff is
       the unlock itself, which is the resolution.
 
+  # --- retailOS per-kind mask-table union fold ---
+  - address: 0x08055db8
+    ghidra: FUN_08055db8
+    name: object_kind_mask_union
+    size: 72
+    sig: "u64 object_kind_mask_union(const void *object, u32 kind)"
+    module: ui/object_state
+    status: ported
+    renames:
+      FUN_080e4e64: object_kind_table
+      uVar2: union_lo
+      uVar3: union_hi
+      puVar1: entry
+    notes: >-
+      OR-fold of a per-kind mask table into a 64-bit union returned in
+      r0:r1: push {r4,r5,r6,lr}; zero r5/r6; bl 0x080e4e64; null table
+      returns 0:0; otherwise ldrd-walk the table OR-ing each entry's low
+      word into r5 and high word into r6, advancing 8 bytes until a zero
+      doubleword terminator. Ghidra's `FUN_08055db8(void)` with a
+      zero-argument `FUN_080e4e64()` call is an artifact — the bl has no
+      argument setup, so the original forwards its own r0/r1 untouched;
+      the single `bl 0x08055db8` call site (grep -c on decomp/osos.asm),
+      at 0x08067968 in FUN_0806786c, passes the record owner in r0 and
+      the word at record+0x14 in r1, then ORs the result into the 64-bit
+      field at owner+0x1d0 (alongside a sibling fold through 0x08054b0c),
+      so the function aggregates the table's entries into a combined
+      mask; the masks' concrete meaning is not recovered. The getter
+      0x080e4e64 stays in retailOS behind the OBJECT_KIND_TABLE boundary:
+      kind==1 with bit 0 of the byte at object+0x18c set returns the
+      override table at literal 0x080e4e84, otherwise the kind switch
+      0x080d8948 returns one of the per-kind tables 0x080d8b68..0x080d8c10
+      (null for kind 0, flagless kind 1, and kinds above 0x2c). The
+      redundant in-loop `ldrdne` reload is an ADS artifact not
+      reproduced. match.py (structural, exit 1 expected) shows the same
+      null guard, two-accumulator OR fold, 8-byte stride and
+      zero-doubleword termination; diffs are the boundary blx and LLVM's
+      ldm word pairs in place of ldrd. Rust implementation and focused
+      host tests: `src/ui/object_state.rs::object_kind_mask_union`.
+
   # --- retailOS UI object state-to-kind mapping ---
   - address: 0x08055e00
     ghidra: FUN_08055e00
