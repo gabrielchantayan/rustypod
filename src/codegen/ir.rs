@@ -36,6 +36,11 @@
 //!   (16 bytes; 9 `bl` + 2 tail `b` call sites). The bounded-store
 //!   helper the register collectors append through: store at the
 //!   cursor and advance it, unless it already equals `end`.
+//! - `cg_proc_create` — original: `FUN_082c2268` @ 0x082c2268
+//!   (40 bytes; 6 `bl` call sites — the JIT's procedure-lowering
+//!   drivers at 0x082439b0/0x082465bc/0x08248728/0x082498d4/
+//!   0x0824a478/0x0824af94). Allocates a 52-byte procedure record and
+//!   prepends it to the module's procedure list.
 //! - `cg_label_create` — original: `FUN_082c0dec` @ 0x082c0dec
 //!   (52 bytes; 4 `bl` call sites). Allocates and initializes a label
 //!   record and prepends it to the codegen's label list.
@@ -103,10 +108,11 @@
 //! stay disjoint on a 64-bit test host, as in heap/block_region.rs):
 //!
 //! ```text
-//! cg_module_t                 cg_proc_t                    cg_block_t
-//!   +0x00 heap                  +0x04 module                 +0x04 proc
-//!                               +0x10 registers (head)       +0x0c insts (head)
-//!                               +0x14 last_register (tail)   +0x10 last_inst (tail)
+//! cg_module_t                 cg_proc_t (52 bytes)         cg_block_t
+//!   +0x00 heap                  +0x00 next                   +0x04 proc
+//!   +0x04 procs (head)          +0x04 module                 +0x0c insts (head)
+//!                               +0x10 registers (head)       +0x10 last_inst (tail)
+//!                               +0x14 last_register (tail)
 //!                               +0x20 num_registers
 //!
 //! cg_virtual_reg_t (40 bytes)  cg_inst_t (base of every instruction)
@@ -277,6 +283,9 @@ pub struct CgVirtualRegList {
 
 /// `cg_module_t + 0x00` — the IR arena.
 pub const CG_MODULE_HEAP: usize = 0;
+/// `cg_module_t + 0x04` — head of the module's procedure list, built
+/// by [`cg_proc_create`].
+pub const CG_MODULE_PROCS: usize = 1;
 /// `cg_codegen_t + 0x00` — pointer to the caller's ten-entry table of
 /// runtime-helper addresses. Every driver
 /// (`FUN_08243138` and its six clones) hands in the same 0x28-byte
@@ -375,6 +384,10 @@ pub const CG_LABEL_FIXUP_OFFSET: usize = 2;
 /// Size of `cg_label_fixup_t` in target bytes.
 pub const CG_LABEL_FIXUP_BYTES: usize = 12;
 
+/// `cg_proc_t + 0x00` — next procedure in the module's list, written
+/// by [`cg_proc_create`] (NULL in the oldest one by the arena's
+/// zero-fill).
+pub const CG_PROC_NEXT: usize = 0;
 /// `cg_proc_t + 0x04` — owning module.
 pub const CG_PROC_MODULE: usize = 1;
 /// `cg_proc_t + 0x10` — first virtual register.
@@ -383,6 +396,9 @@ pub const CG_PROC_REGISTERS: usize = 4;
 pub const CG_PROC_LAST_REGISTER: usize = 5;
 /// `cg_proc_t + 0x20` — number of registers created so far.
 pub const CG_PROC_NUM_REGISTERS: usize = 8;
+/// Size of `cg_proc_t` in target bytes — the factory's
+/// `mov r1, #0x34` (FUN_082c2268 @ 0x082c2274).
+pub const CG_PROC_BYTES: usize = 0x34;
 
 /// `cg_block_t + 0x04` — owning procedure.
 pub const CG_BLOCK_PROC: usize = 1;
@@ -1235,6 +1251,47 @@ pub unsafe extern "C" fn cg_codegen_resolve_label_fixups(codegen: *mut CgCodegen
     }
 }
 
+/// cg_proc_create — original: `FUN_082c2268` @ 0x082c2268 (40 bytes,
+/// 6 `bl` call sites: 0x082439c4 inside `FUN_082439b0`, 0x082465d0
+/// inside `FUN_082465bc`, 0x0824873c inside `FUN_08248728`, 0x082498e8
+/// inside `FUN_082498d4`, 0x0824a488 inside `FUN_0824a478` and
+/// 0x0824afa4 inside `FUN_0824af94` — the JIT's procedure-lowering
+/// drivers, one record per compiled procedure).
+///
+/// The procedure factory of the JIT's code generator. Allocates a
+/// 52-byte `cg_proc_t` from `module->heap` (+0x00) and PREPENDS it to
+/// the module's procedure list (+0x04), in the original's exact store
+/// order: the old head becomes `proc->next` (+0x00), the head slot
+/// takes the new record, and the record back-points to the owning
+/// module at +0x04. Everything else — the register list head/tail at
+/// +0x10/+0x14 and the register counter at +0x20 — stays NULL by the
+/// arena's zero-fill, exactly what [`cg_virtual_reg_create`]'s append
+/// and numbering need.
+///
+/// Ghidra types the return void, but callers consume r0 immediately
+/// (`FUN_082465bc` feeds it straight to [`cg_virtual_reg_create`] and
+/// stores 3 at proc+0x24), so the port returns the new procedure —
+/// the same precedent as [`cg_label_create`]. The 52-byte record's
+/// identification as `cg_proc_t` is pinned by that call: only a proc
+/// is a legal first argument to `cg_virtual_reg_create`, and the
+/// record's +0x04 back-pointer matches the `proc->module` dereference
+/// in `cg_virtual_reg_create` and [`cg_inst_create_base`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_proc_create(module: *mut CgModule) -> *mut CgProc {
+    let module = module as *mut u8;
+    let proc = cg_heap_alloc(module_heap(module), record_size(CG_PROC_BYTES));
+
+    // Same store sequence as the original: proc->next = old head,
+    // module->procs = proc, proc->module = module.
+    let module_procs = slot(module, CG_MODULE_PROCS);
+    slot(proc, CG_PROC_NEXT).write(module_procs.read());
+    module_procs.write(proc);
+    slot(proc, CG_PROC_MODULE).write(module);
+
+    proc as *mut CgProc
+}
+
 /// cg_virtual_reg_create — original: `FUN_082c23dc` @ 0x082c23dc
 /// (80 bytes, 835 `bl` call sites).
 ///
@@ -1934,7 +1991,7 @@ mod tests {
     /// A module, a procedure and a block over one real arena.
     struct Fixture {
         heap: *mut CgHeap,
-        module: [usize; 1],
+        module: [usize; 2],
         proc: [usize; 9],
         block: [usize; 5],
         codegen: [usize; 5],
@@ -1946,7 +2003,7 @@ mod tests {
             let heap = unsafe { cg_heap_create(block_size) };
             let mut f = std::boxed::Box::new(Fixture {
                 heap,
-                module: [0; 1],
+                module: [0; 2],
                 proc: [0; 9],
                 block: [0; 5],
                 codegen: [0; 5],
@@ -1962,6 +2019,10 @@ mod tests {
 
         fn proc_ptr(&mut self) -> *mut CgProc {
             self.proc.as_mut_ptr() as *mut CgProc
+        }
+
+        fn module_ptr(&mut self) -> *mut CgModule {
+            self.module.as_mut_ptr() as *mut CgModule
         }
 
         fn block_ptr(&mut self) -> *mut CgBlock {
@@ -3559,6 +3620,120 @@ mod tests {
                     poisoning_free(page);
                 }
             }
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn proc_create_allocates_from_module_heap_and_prepends() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        assert_eq!(f.module[CG_MODULE_PROCS], 0, "the list starts empty");
+
+        unsafe {
+            let block = (*f.heap).current;
+            let expected = (*block).base.add((*block).current);
+            let before = (*block).current;
+            let proc = cg_proc_create(f.module_ptr()) as *mut u8;
+
+            assert_eq!(proc, expected, "the 52-byte record comes from module->heap");
+            assert_eq!(
+                (*block).current,
+                before + stride(CG_PROC_BYTES),
+                "cg_heap_alloc advances by its eight-byte-rounded request"
+            );
+            assert_eq!(
+                slot(proc, CG_PROC_NEXT).read(),
+                core::ptr::null_mut(),
+                "the first procedure's next is the NULL old head"
+            );
+            assert_eq!(
+                f.module[CG_MODULE_PROCS], proc as usize,
+                "the new record becomes the module's procedure head"
+            );
+            assert_eq!(
+                slot(proc, CG_PROC_MODULE).read(),
+                f.module.as_mut_ptr() as *mut u8,
+                "the record back-points to the owning module"
+            );
+            assert_eq!(
+                word(proc, CG_PROC_REGISTERS).read(),
+                0,
+                "the register list head stays NULL by the arena's zero-fill"
+            );
+            assert_eq!(
+                word(proc, CG_PROC_LAST_REGISTER).read(),
+                0,
+                "the register list tail stays NULL by the arena's zero-fill"
+            );
+            assert_eq!(
+                word(proc, CG_PROC_NUM_REGISTERS).read(),
+                0,
+                "the register counter starts at zero"
+            );
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn proc_create_chains_procedures_newest_first() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let first = cg_proc_create(f.module_ptr()) as *mut u8;
+            let second = cg_proc_create(f.module_ptr()) as *mut u8;
+
+            assert_eq!(f.module[CG_MODULE_PROCS], second as usize, "head is the newest");
+            assert_eq!(
+                slot(second, CG_PROC_NEXT).read(),
+                first,
+                "the second procedure links to the first"
+            );
+            assert_eq!(
+                slot(first, CG_PROC_NEXT).read(),
+                core::ptr::null_mut(),
+                "the first procedure terminates the list"
+            );
+            assert_eq!(
+                slot(first, CG_PROC_MODULE).read(),
+                f.module.as_mut_ptr() as *mut u8,
+                "prepending does not disturb an existing record"
+            );
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn created_proc_accepts_virtual_registers_through_the_matching_layout() {
+        // Cross-check against cg_virtual_reg_create: the freshly created
+        // procedure must be a legal proc — module back-pointer at +0x04,
+        // zeroed register list at +0x10/+0x14, zeroed counter at +0x20.
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let proc = cg_proc_create(f.module_ptr());
+            let reg = cg_virtual_reg_create(proc, 7) as *mut u8;
+
+            assert_eq!(
+                slot(proc as *mut u8, CG_PROC_REGISTERS).read(),
+                reg,
+                "the first register becomes the head"
+            );
+            assert_eq!(
+                slot(proc as *mut u8, CG_PROC_LAST_REGISTER).read(),
+                reg,
+                "...and the tail"
+            );
+            assert_eq!(
+                word(proc as *mut u8, CG_PROC_NUM_REGISTERS).read(),
+                1,
+                "the counter advanced from its zero-filled start"
+            );
+            assert_eq!(reg_no(reg as *mut CgVirtualReg), 0, "first number is 0");
+            assert_eq!(reg_type(reg as *mut CgVirtualReg), 7);
         }
         drop(f);
         teardown();

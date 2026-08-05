@@ -10339,6 +10339,34 @@ functions:
       check. match.py: body identical (cmp/strne/mov), LLVM only adds a
       frame-pointer prologue/epilogue.
 
+  - address: 0x082c2268
+    ghidra: FUN_082c2268
+    name: cg_proc_create
+    size: 40
+    sig: "cg_proc_t *cg_proc_create(cg_module_t *module)"
+    module: codegen/ir
+    status: ported
+    vars: {param_1: module, puVar1: proc}
+    notes: >-
+      6 bl call sites (binary-scanned): 0x082439c4 / 0x082465d0 /
+      0x0824873c / 0x082498e8 / 0x0824a488 / 0x0824afa4 - the JIT's
+      procedure-lowering drivers (FUN_082439b0, FUN_082465bc,
+      FUN_08248728, FUN_082498d4, FUN_0824a478, FUN_0824af94), one
+      record per compiled procedure. The procedure factory: carves a
+      52-byte (mov r1, #0x34) cg_proc_t out of module->heap (+0x00)
+      and PREPENDS it to the module's procedure list (+0x04) - old
+      head becomes proc->next (+0x00), head slot takes the record,
+      record back-points to the module at +0x04. Register list
+      head/tail (+0x10/+0x14) and the counter (+0x20) stay NULL by
+      the arena's zero-fill. Ghidra types the return void, but r0
+      survives the epilogue and FUN_082465bc feeds it straight to
+      cg_virtual_reg_create (FUN_082c23dc) - which pins the record
+      as cg_proc_t (only a proc is legal there) and the +0x04 field
+      as proc->module. Physically adjacent to the emitted-code
+      buffer pocket but semantically an IR builder. match.py: body
+      identical, only LLVM's frame-pointer prologue/epilogue
+      differs.
+
   - address: 0x082c23dc
     ghidra: FUN_082c23dc
     name: cg_virtual_reg_create
