@@ -1568,6 +1568,131 @@ pub static mut VTABLE_QUERY_4C_SCALAR_FINISH: unsafe extern "C" fn(
     forwarded: usize,
 ) -> u32 = crate::util::vtable_query::vtable_query_4c_kind4;
 
+/// vtable_query_4c_read_scalar_kind2 — original: `FUN_0811d70c` @
+/// 0x0811d70c (12 bytes per `decomp/functions.csv`: the kind-2 entry
+/// thunk only; the shared 80-byte body at 0x0811d5ac it tail-calls
+/// belongs to the kind-4 sibling's csv row; **1 `bl` call site**,
+/// grep on `decomp/osos.asm`: 0x08136810 in `FUN_08136520` — it
+/// passes the handle in r0 (`add r0, sp, #0x48`) and a pointer to
+/// the caller's out word in r1 (`add r1, r5, #0x18`), does not set
+/// r3, branches on a zero status (`movs r4, r0; beq`) and maps the
+/// unsupported status 5 to success (`cmp r4, #0x5; moveq r4, #0x0`).
+///
+/// The u16-width sibling of [`vtable_query_4c_read_scalar_kind4`] —
+/// the kind-encodes-value-width convention of the write stages
+/// [`vtable_set_50_write_kind4`] / [`vtable_set_50_write_kind2`]
+/// applied to the scalar (single-word) property read of the slot
+/// +0x4c message family. The 12-byte entry thunk binds kind 2 and
+/// tail-calls the same shared 80-byte body the kind-4 sibling binds
+/// kind 4 into:
+///
+/// ```text
+/// 0811d70c  mov   r2, r1            @ arg2 (out) -> body's r2
+/// 0811d710  mov   r1, #0x2          @ bind kind 2
+/// 0811d714  b     0x0811d5ac        @ tail: shared scalar-read body
+/// ```
+///
+/// The shared body (disassembled in
+/// [`vtable_query_4c_read_scalar_kind4`]'s header) is identical for
+/// both entries: the probe's `mov r1, #0x4` is hardcoded there, so
+/// only the **read** dispatch carries the thunk-bound width — here
+/// kind 2, telling the method to deliver a u16 property through the
+/// caller's out word. Probe → dispatch → finish-thunk shape, status
+/// 5 = "unsupported" and any other nonzero probe status a hard
+/// error (both returning verbatim), and the closing
+/// `bleq 0x0811d46c` finish (the ported kind-4 query thunk
+/// `util/vtable_query.rs` `vtable_query_4c_kind4`) firing only on a
+/// zero read status — exactly as the kind-4 sibling.
+///
+/// # Deviations
+///
+/// - **The shared body is NOT duplicated**: the port models the
+///   whole 0x0811d70c + 0x0811d5ac path in one function behind the
+///   existing [`VTABLE_QUERY_4C_SCALAR_DISPATCH`] /
+///   [`VTABLE_QUERY_4C_SCALAR_FINISH`] seams, exactly as the kind-4
+///   sibling does (the body itself remains unported as a standalone
+///   function — one function per commit).
+/// - **The read dispatch binds kind 2** (`mov r1, r5` with r5 = the
+///   thunk's `mov r1, #0x2`); the probe still binds kind 4
+///   (hardcoded in the shared body).
+/// - **arg3 (r3) is modeled as `forwarded`** — the family
+///   convention: the single call site does not set r3 deliberately.
+///   It doubles as the INITIAL content of the probe out-slot
+///   `pair[1]` (the entry spill) and as the word the probe
+///   dispatcher's `stmdb sp!, {r3}` spill exposes to the method.
+/// - **r3 is DEAD for the read dispatch and the finish call** (the
+///   [`vtable_set_50_write_indirect_kind4`] refinement): the probe
+///   method clobbers r0–r3 across the first `bl`, nothing reloads
+///   r3, and the spill slot it came from is the probe's
+///   (method-written) out-slot — so the port passes a pointer to a
+///   zero stack word for the read's extra and 0 for the thunk's
+///   `forwarded` / `_unused` (r2 is likewise dead and the thunk
+///   discards it with `mov r2, r1`).
+/// - **The return type is `u32`**, not the reference C's `void`:
+///   the call site branches on r0 (`movs r4, r0; beq`), and the
+///   original returns the failing dispatch's status — or the
+///   finish's — in r0.
+/// - **The reference C is followed only where it matches the
+///   disassembly**: `decomp/c/010/0811d70c_FUN_0811d70c.c` gets the
+///   shape right (scratch probe out-slot, hardcoded kind-4 probe,
+///   kind-2 read) but types `param_2` as `undefined4` — the
+///   disassembly's `mov r2, r6` data path and the call site's
+///   `add r1, r5, #0x18` show a pointer — and hides the entry thunk
+///   / shared-body split (it decompiles the 0x0811d5ac body under
+///   this entry's name).
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_query_4c_read_scalar_kind2(
+    handle: *mut *mut u8,
+    out: *mut u32,
+    forwarded: usize,
+) -> u32 {
+    let dispatch =
+        core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_QUERY_4C_SCALAR_DISPATCH));
+    let finish =
+        core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_QUERY_4C_SCALAR_FINISH));
+    // The shared body's entry `stmdb sp!, {r2, r3, ...}` spill:
+    // pair[0] = out (sp+0), pair[1] = forwarded (sp+4, the probe
+    // out-slot's initial word).
+    let mut pair = [out as usize, forwarded];
+    let forwarded_slot = forwarded;
+    // Probe: dispatch(handle, 4, &pair[1]) — kind 4 is hardcoded in
+    // the shared body; the out word is never read back. 5 =
+    // "unsupported", any other nonzero a hard error — both return
+    // the status verbatim.
+    let status = dispatch(
+        handle,
+        MESSAGE_KIND_4,
+        core::ptr::addr_of!(pair[1]) as usize,
+        core::ptr::addr_of!(forwarded_slot),
+    );
+    if status == STATUS_UNSUPPORTED {
+        return status;
+    }
+    if status != 0 {
+        return status;
+    }
+    // Read: dispatch(handle, 2, out) — r1 = r5 is THIS thunk's bound
+    // kind (2, the u16 width). r3 is dead across the probe
+    // (method-clobbered, and its spill slot was the probe's
+    // method-written out-slot); a zero word stands in for the
+    // unobservable extra (the 0x0811d874 dead-slot precedent).
+    let dead_slot = 0usize;
+    let status = dispatch(
+        handle,
+        MESSAGE_KIND_2,
+        out as usize,
+        core::ptr::addr_of!(dead_slot),
+    );
+    if status != 0 {
+        return status;
+    }
+    // Finish: vtable_query_4c_kind4(handle, &pair[0]); r2/r3 are dead
+    // across the read dispatch (the thunk discards r2 with `mov r2,
+    // r1`), so 0 stands in for both unobservable arguments.
+    finish(handle, core::ptr::addr_of_mut!(pair[0]) as *mut u32, 0, 0)
+}
+
 /// vtable_query_4c_read_scalar_kind4 — original: `FUN_0811d718` @
 /// 0x0811d718 (92 bytes per `decomp/functions.csv`: the 12-byte
 /// kind-4 entry thunk at 0x0811d718 plus the shared 80-byte body at
@@ -3641,6 +3766,202 @@ mod tests {
             FINISH_RESULT = FINISH_CODE;
 
             let status = vtable_query_4c_read_scalar_kind4(
+                fixture.handle_ptr(),
+                core::ptr::addr_of_mut!(out),
+                FORWARDED,
+            );
+
+            assert_eq!(
+                status, FINISH_CODE,
+                "the finish thunk's error code is the function's return value"
+            );
+            assert_eq!(FINISH_CALLS, 1);
+            assert_eq!(FINISH_HANDLE, fixture.handle_ptr(), "moveq r0, r4");
+            assert!(!FINISH_OUT.is_null(), "moveq r1, sp — out is the pair base");
+            assert_eq!(
+                FINISH_UNUSED, 0,
+                "r2 is dead across the read dispatch and the thunk discards \
+                 it (mov r2, r1); the port passes 0"
+            );
+            assert_eq!(
+                FINISH_FORWARDED, 0,
+                "r3 is likewise dead (method-clobbered across the read \
+                 dispatch); the port passes 0"
+            );
+        }
+    }
+
+    // ---- vtable_query_4c_read_scalar_kind2 (0x0811d70c) -------------
+
+    #[test]
+    fn scalar_kind2_read_unsupported_status_bails_before_the_read() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let mut out: u32 = 0;
+        unsafe {
+            install_scalar_mocks();
+            SCALAR_RESULTS[0] = UNSUPPORTED_ERR;
+
+            let status = vtable_query_4c_read_scalar_kind2(
+                fixture.handle_ptr(),
+                core::ptr::addr_of_mut!(out),
+                FORWARDED,
+            );
+
+            assert_eq!(
+                status, UNSUPPORTED_ERR,
+                "cmp r0, #0x5; beq — the unsupported status returns verbatim"
+            );
+            assert_eq!(SCALAR_CALLS, 1, "no read dispatch after a 5");
+            assert_eq!(FINISH_CALLS, 0, "no finish call after a 5");
+            assert_eq!(out, 0, "the out word is untouched");
+        }
+    }
+
+    #[test]
+    fn scalar_kind2_read_probe_error_bails_before_the_read() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let mut out: u32 = 0;
+        unsafe {
+            install_scalar_mocks();
+            SCALAR_RESULTS[0] = METHOD_ERR;
+
+            let status = vtable_query_4c_read_scalar_kind2(
+                fixture.handle_ptr(),
+                core::ptr::addr_of_mut!(out),
+                FORWARDED,
+            );
+
+            assert_eq!(
+                status, METHOD_ERR,
+                "cmp r0, #0x0; bne — a hard error returns verbatim"
+            );
+            assert_eq!(SCALAR_CALLS, 1, "no read dispatch after an error");
+            assert_eq!(FINISH_CALLS, 0, "no finish call after an error");
+            assert_eq!(out, 0, "the out word is untouched");
+        }
+    }
+
+    #[test]
+    fn scalar_kind2_read_probe_args_and_initial_out_slot() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let mut out: u32 = 0;
+        unsafe {
+            install_scalar_mocks();
+
+            let status = vtable_query_4c_read_scalar_kind2(
+                fixture.handle_ptr(),
+                core::ptr::addr_of_mut!(out),
+                FORWARDED,
+            );
+
+            assert_eq!(status, MOCK_OK);
+            assert_eq!(
+                SCALAR_KIND[0], MESSAGE_KIND_4,
+                "mov r1, #0x4 — the probe is hardcoded kind 4 in the shared body"
+            );
+            assert_eq!(SCALAR_HANDLE[0], fixture.handle_ptr(), "r0 passes through");
+            assert_eq!(
+                SCALAR_DATA_WORD[0], FORWARDED as u32,
+                "the probe out-slot's initial word is the entry r3 spill \
+                 (stmdb {{r2, r3, ...}})"
+            );
+            assert_eq!(
+                SCALAR_EXTRA[0], FORWARDED,
+                "the dispatcher's stmdb sp!, {{r3}} spill forwards the same word"
+            );
+        }
+    }
+
+    #[test]
+    fn scalar_kind2_read_read_args_and_value_delivery() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let mut out: u32 = 0;
+        unsafe {
+            install_scalar_mocks();
+
+            let status = vtable_query_4c_read_scalar_kind2(
+                fixture.handle_ptr(),
+                core::ptr::addr_of_mut!(out),
+                FORWARDED,
+            );
+
+            assert_eq!(status, MOCK_OK);
+            assert_eq!(SCALAR_CALLS, 2, "probe then read");
+            assert_eq!(
+                SCALAR_KIND[1], MESSAGE_KIND_2,
+                "mov r1, r5 — the read's kind is THIS thunk's binding (2, u16)"
+            );
+            assert_eq!(SCALAR_HANDLE[1], fixture.handle_ptr());
+            assert_eq!(
+                SCALAR_DATA[1],
+                core::ptr::addr_of_mut!(out) as usize,
+                "mov r2, r6 — the read's data is the caller's out pointer (arg2)"
+            );
+            assert_eq!(
+                SCALAR_EXTRA[1], 0,
+                "r3 is dead across the probe (method-clobbered); a zero word \
+                 stands in for the unobservable extra"
+            );
+            assert_eq!(
+                out, SCALAR_VALUE,
+                "the read method's store through the out pointer reaches the caller"
+            );
+            assert_eq!(FINISH_CALLS, 1);
+            assert_eq!(
+                FINISH_BUFFER,
+                core::ptr::addr_of_mut!(out) as usize,
+                "pair[0] is the entry r2 spill — the caller's out pointer"
+            );
+        }
+    }
+
+    #[test]
+    fn scalar_kind2_read_read_error_skips_the_finish() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let mut out: u32 = 0;
+        unsafe {
+            install_scalar_mocks();
+            SCALAR_RESULTS[1] = READ_ERR;
+
+            let status = vtable_query_4c_read_scalar_kind2(
+                fixture.handle_ptr(),
+                core::ptr::addr_of_mut!(out),
+                FORWARDED,
+            );
+
+            assert_eq!(
+                status, READ_ERR,
+                "the read dispatch's error returns verbatim"
+            );
+            assert_eq!(SCALAR_CALLS, 2);
+            assert_eq!(
+                FINISH_CALLS, 0,
+                "bleq — the finish fires only on a zero read status"
+            );
+        }
+    }
+
+    #[test]
+    fn scalar_kind2_read_finish_args_and_final_return() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let mut out: u32 = 0;
+        unsafe {
+            install_scalar_mocks();
+            FINISH_RESULT = FINISH_CODE;
+
+            let status = vtable_query_4c_read_scalar_kind2(
                 fixture.handle_ptr(),
                 core::ptr::addr_of_mut!(out),
                 FORWARDED,

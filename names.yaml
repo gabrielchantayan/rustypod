@@ -21581,6 +21581,68 @@ functions:
       and cg_codegen_output/cg_label_create layout consistency) and
       ::codegen_create_stores_a_null_output_when_the_buffer_alloc_fails.
 
+  - address: 0x0811d70c
+    ghidra: FUN_0811d70c
+    name: vtable_query_4c_read_scalar_kind2
+    size: 12
+    sig: "u32 vtable_query_4c_read_scalar_kind2(handle: *mut *mut u8, out: *mut u32, forwarded: usize)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r4: handle
+      param_2/r6: out
+      param_4/r3: forwarded
+      r5: kind (entry-thunk binding, 2 here)
+    notes: >-
+      1 bl call site (grep on decomp/osos.asm): 0x08136810 in
+      FUN_08136520 - it passes the handle in r0 (add r0, sp, #0x48)
+      and a pointer to the caller's out word in r1 (add r1, r5,
+      #0x18), does not set r3, branches on a zero status (movs r4,
+      r0; beq) and maps the unsupported status 5 to success (cmp r4,
+      #0x5; moveq r4, #0x0). The 12 bytes (decomp/functions.csv)
+      are the kind-2 entry thunk only (mov r2,r1; mov r1,#2; b
+      0x0811d5ac); the shared 80-byte body at 0x0811d5ac it
+      tail-calls belongs to the kind-4 sibling's csv row
+      (vtable_query_4c_read_scalar_kind4, 0x0811d718, 92 bytes) and
+      is NOT separately ported - the port models the whole thunk +
+      body path in one function behind the existing
+      VTABLE_QUERY_4C_SCALAR_DISPATCH / VTABLE_QUERY_4C_SCALAR_FINISH
+      seams, exactly as the kind-4 sibling does. The u16-width
+      sibling of the kind-4 scalar read: the
+      kind-encodes-value-width convention of the write stages
+      (vtable_set_50_write_kind4 / vtable_set_50_write_kind2) applied
+      to the scalar (single-word) property read of the slot +0x4c
+      message family. The shared body is identical for both entries:
+      the probe's mov r1,#0x4 is hardcoded there, so only the READ
+      dispatch carries the thunk-bound width (kind 2 here, telling
+      the method to deliver a u16 property through the caller's out
+      word); probe status 5 = "unsupported" and any other nonzero a
+      hard error (both returning verbatim), and the closing bleq
+      0x0811d46c finish (the ported kind-4 query thunk
+      util/vtable_query.rs vtable_query_4c_kind4) fires only on a
+      zero read status. Deviations: arg3 (r3) is modeled as
+      forwarded (the family convention - the single call site does
+      not set r3 deliberately), doubling as the probe out-slot's
+      initial word and the probe dispatcher's stmdb sp!,{r3} spill;
+      r3 is DEAD for the read dispatch and the finish call (the
+      0x0811d874 dead-slot refinement), so a zero stack word and 0
+      stand in for those unobservable arguments (r2 likewise dead -
+      discarded by the thunk's mov r2,r1). The return type is u32,
+      not the reference C's void - the call site branches on r0.
+      Reference C (decomp/c/010/0811d70c_FUN_0811d70c.c) gets the
+      shape right (scratch probe out-slot, hardcoded kind-4 probe,
+      kind-2 read) but types param_2 as undefined4 (the disassembly
+      and the call site show a pointer) and hides the entry-thunk /
+      shared-body split - the port follows the disassembly. Host
+      tests (the kind-4 sibling's recording mocks through the two
+      shared seams, SLOT_TEST_LOCK serialized):
+      src/app/vtable_set.rs::scalar_kind2_read_unsupported_status_bails_before_the_read
+      / ::scalar_kind2_read_probe_error_bails_before_the_read /
+      ::scalar_kind2_read_probe_args_and_initial_out_slot /
+      ::scalar_kind2_read_read_args_and_value_delivery /
+      ::scalar_kind2_read_read_error_skips_the_finish /
+      ::scalar_kind2_read_finish_args_and_final_return.
+
   - address: 0x0811d718
     ghidra: FUN_0811d718
     name: vtable_query_4c_read_scalar_kind4
