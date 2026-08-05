@@ -39,6 +39,9 @@
 //! - `cg_label_add_fixup` — original: `FUN_082c17ac` @ 0x082c17ac
 //!   (64 bytes; 4 `bl` call sites). Prepends the current output position
 //!   to a label's fixup list.
+//! - `cg_buffer_current_offset` — original: `FUN_082c23d4` @ 0x082c23d4
+//!   (8 bytes; 8 `bl` call sites). Pure getter for the emitted-code
+//!   buffer's current write offset at +0x804.
 //! - `cg_inst_visit_by_kind` — original: `FUN_082c1adc` @ 0x082c1adc
 //!   (288 bytes; 4 `bl` call sites). Collects the registers an
 //!   instruction DEFINES into a bounded output array, dispatching on the
@@ -126,6 +129,14 @@ pub struct CgCodegen {
     _opaque: [u8; 0],
 }
 
+/// `cg_codegen_buffer_t` — the emitted-code buffer owned by
+/// `cg_codegen_t::output`: a lazily allocated table of 0x1000-byte code
+/// pages plus the current write offset at +0x804.
+#[repr(C)]
+pub struct CgCodegenBuffer {
+    _opaque: [u8; 0],
+}
+
 /// `cg_label_t` — a generated-code label and its pending fixups.
 #[repr(C)]
 pub struct CgLabel {
@@ -178,7 +189,7 @@ pub const CG_CODEGEN_HEAP: usize = 2;
 /// `cg_codegen_t + 0x10` — the emitted-code buffer.
 pub const CG_CODEGEN_OUTPUT: usize = 4;
 /// `cg_codegen_buffer_t + 0x804` — current output position, read by
-/// `FUN_082c23d4`.
+/// [`cg_buffer_current_offset`].
 pub const CG_CODEGEN_OUTPUT_OFFSET: usize = 0x804 / 4;
 
 /// `cg_label_t + 0x04` — head of its pending-fixup list.
@@ -370,17 +381,30 @@ unsafe fn module_heap(module: *mut u8) -> *mut CgHeap {
     slot(module, CG_MODULE_HEAP).read() as *mut CgHeap
 }
 
+/// cg_buffer_current_offset — original: `FUN_082c23d4` @ 0x082c23d4
+/// (8 bytes, 8 `bl` call sites).
+///
+/// A pure field getter — the entire body is `ldr r0, [r0, #0x804];
+/// bx lr`: returns `output->current_offset`, the current write position
+/// inside the emitted-code buffer. The emitters keep it as a running
+/// byte offset across the buffer's lazily allocated 0x1000-byte pages:
+/// `FUN_082c2290` aligns it, the word emitters (0x082c231c, 0x082beb4c,
+/// ...) store through it and post-increment it by 4, and
+/// `FUN_082c5b1c` maps it to a pointer as `page[offset >> 12] +
+/// (offset & 0xfff)`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_buffer_current_offset(output: *mut CgCodegenBuffer) -> usize {
+    word(output as *mut u8, CG_CODEGEN_OUTPUT_OFFSET).read()
+}
+
 /// cg_label_add_fixup — original: `FUN_082c17ac` @ 0x082c17ac (64 bytes).
 ///
 /// Allocates a 12-byte pending-label-fixup record from `codegen->heap`,
-/// obtains the current emitted-code position through `FUN_082c23d4`
-/// (`codegen->output->current_offset`), and prepends the record to
-/// `label->fixups`. The tag is intentionally stored as one byte, exactly as
-/// the original's `strb`.
-///
-/// `FUN_082c23d4` itself remains unported: its complete 4-byte body is the
-/// one load of `output + 0x804` performed here at its sole ported call site;
-/// no second exported function is introduced.
+/// obtains the current emitted-code position through
+/// [`cg_buffer_current_offset`] (`codegen->output->current_offset`), and
+/// prepends the record to `label->fixups`. The tag is intentionally
+/// stored as one byte, exactly as the original's `strb`.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn cg_label_add_fixup(
@@ -396,8 +420,8 @@ pub unsafe extern "C" fn cg_label_add_fixup(
     );
 
     // `bl FUN_082c23d4`: return output->current_offset (+0x804).
-    let output = slot(codegen, CG_CODEGEN_OUTPUT).read();
-    word(fixup, CG_LABEL_FIXUP_OFFSET).write(word(output, CG_CODEGEN_OUTPUT_OFFSET).read());
+    let output = slot(codegen, CG_CODEGEN_OUTPUT).read() as *mut CgCodegenBuffer;
+    word(fixup, CG_LABEL_FIXUP_OFFSET).write(cg_buffer_current_offset(output));
 
     let label_fixups = slot(label, CG_LABEL_FIXUPS);
     slot(fixup, CG_LABEL_FIXUP_NEXT).write(label_fixups.read());
@@ -1197,6 +1221,42 @@ mod tests {
     }
 
     #[test]
+    fn buffer_current_offset_returns_the_word_at_0x804() {
+        const POISON: usize = 0xAAAA_AAAA_AAAA_AAAA;
+        let mut output = [POISON; CG_CODEGEN_OUTPUT_OFFSET + 2];
+
+        unsafe {
+            let buffer = output.as_mut_ptr() as *mut CgCodegenBuffer;
+
+            output[CG_CODEGEN_OUTPUT_OFFSET] = 0;
+            assert_eq!(
+                cg_buffer_current_offset(buffer),
+                0,
+                "a NULL offset comes back as-is"
+            );
+
+            let sentinel = output.as_mut_ptr() as usize;
+            output[CG_CODEGEN_OUTPUT_OFFSET] = sentinel;
+            assert_eq!(
+                cg_buffer_current_offset(buffer),
+                sentinel,
+                "a pointer-sized word at +0x804 comes back exactly"
+            );
+
+            assert_eq!(
+                output[CG_CODEGEN_OUTPUT_OFFSET - 1],
+                POISON,
+                "the getter reads no neighboring word"
+            );
+            assert_eq!(
+                output[CG_CODEGEN_OUTPUT_OFFSET + 1],
+                POISON,
+                "the getter reads no neighboring word"
+            );
+        }
+    }
+
+    #[test]
     fn label_fixup_allocates_stamps_and_prepends_with_a_unit_return() {
         let _g = setup();
         let mut f = Fixture::new(4096);
@@ -1222,7 +1282,7 @@ mod tests {
             assert_eq!(
                 word(fixup, CG_LABEL_FIXUP_OFFSET).read(),
                 0x1234_5678,
-                "the value returned by FUN_082c23d4 is the patch position"
+                "the value returned by cg_buffer_current_offset is the patch position"
             );
             assert_eq!(
                 slot(fixup, CG_LABEL_FIXUP_NEXT).read(),
