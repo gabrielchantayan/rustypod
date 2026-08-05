@@ -21879,3 +21879,45 @@ functions:
       ported cg_buffer_page_pointer @ 0x082c5b1c, with the documented
       deviations that the page allocation goes through the swappable
       CG_BUFFER_ALLOC slot and a failed allocation returns NULL.
+
+  - address: 0x0811d2f8
+    ghidra: FUN_0811d2f8
+    name: vtable_set_50_indirect_kind4
+    size: 72
+    sig: "u32 vtable_set_50_indirect_kind4(handle: *mut *mut u8, selector: u32, data: *const u8, write_selector: u32)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r4: handle
+      param_2/r5: selector
+      param_3/r6: data
+      param_4/r7: write_selector
+    notes: >-
+      4 bl call sites (0x08136600, 0x081b00fc, 0x081bc6e4,
+      0x08271478), all checking the returned r0 status. The
+      indirect-write sibling of vtable_set_50_kind4 @ 0x0811d68c:
+      calls the ported vtable_set_50_open_kind4 @ 0x0811d458 directly,
+      bails with its nonzero status, calls ported
+      vtable_set_50_write_indirect_kind4 @ 0x0811d874 directly with
+      (handle, arg4, arg3), bails with its nonzero status, then
+      tail-calls ported vtable_set_50_commit_kind4 @ 0x0811d340 with
+      (handle, selector). arg2 is the property selector used by open
+      and commit; arg3 is the data pointer consumed only by the
+      indirect write; arg4 is the indirect write's selector/kind
+      word. Unlike the older vtable_set_50_kind4 port, no
+      VTABLE_SET_50_KIND4_OPS stage seam is used because all three
+      callees are now ported; their retained VTABLE_SLOT_50_DISPATCH
+      seam keeps the firmware vtable-method boundary hookable. The
+      r3 spill each stage exposes is modeled exactly: open sees arg4,
+      its ldmia {r2,r3,r4,pc} epilogue makes the write see selector,
+      and the write's str r1,[sp] overwrites its r3 spill so its
+      ldmia {r3,...} makes commit see arg4. Reference C
+      decomp/c/010/0811d2f8_FUN_0811d2f8.c mis-decompiles this as void,
+      drops open's arguments, and inlines commit as the raw dispatcher;
+      the port follows osos.asm. match.py (exit 1, diff expected): the
+      same two error branches and direct three-stage call/tail-call
+      structure remain; crate frame, Rust ABI argument reshuffling, and
+      same-section relocations account for the diff. Host tests:
+      src/app/vtable_set.rs::indirect_pipeline_open_error_short_circuits_before_write_and_commit /
+      indirect_pipeline_write_error_skips_commit /
+      indirect_pipeline_runs_in_order_with_exact_argument_routing.

@@ -959,6 +959,117 @@ pub unsafe extern "C" fn vtable_set_50_write_indirect_kind4(
     result
 }
 
+/// vtable_set_50_indirect_kind4 — original: `FUN_0811d2f8` @
+/// 0x0811d2f8 (72 bytes; **4 `bl` call sites**, grep on
+/// `decomp/osos.asm`: 0x08136600, 0x081b00fc, 0x081bc6e4 and
+/// 0x08271478 — all four set r1 to a small property selector
+/// (0x35 / 0x44 / 0x3e / 0x3c), r2 to a pointer returned by the
+/// accessor 0x082a50b0, r3 to a value word returned by 0x08275e20 /
+/// 0x082770e0, and all branch on the returned status).
+///
+/// The INDIRECT-write variant of this module's
+/// [`vtable_set_50_kind4`] (0x0811d68c): the identical three-stage
+/// guarded property-write pipeline — open → write → tail-call
+/// commit, the first nonzero status short-circuiting and propagating
+/// — with the by-pointer write stage
+/// [`vtable_set_50_write_indirect_kind4`] (0x0811d874) in place of
+/// the by-value 0x0811d56c, and **arg4 (r3) feeding the write stage
+/// as its selector argument**:
+///
+/// ```text
+/// 0811d2f8  stmdb sp!, {r4, r5, r6, r7, r8, lr}
+/// 0811d2fc  mov   r7, r3            @ save write-selector (arg4)
+/// 0811d300  mov   r6, r2            @ save data pointer (arg3)
+/// 0811d304  mov   r5, r1            @ save selector (arg2)
+/// 0811d308  mov   r4, r0            @ save handle (arg1)
+/// 0811d30c  bl    0x0811d458        @ open(handle, selector)
+/// 0811d310  cmp   r0, #0x0
+/// 0811d314  ldmiane sp!, {r4, r5, r6, r7, r8, pc}  @ bail: open's status
+/// 0811d318  mov   r2, r6            @ data (arg3) -> write's arg3
+/// 0811d31c  mov   r1, r7            @ write-selector (arg4) -> write's arg2
+/// 0811d320  mov   r0, r4
+/// 0811d324  bl    0x0811d874        @ write_indirect(handle, arg4, arg3)
+/// 0811d328  cmp   r0, #0x0
+/// 0811d32c  moveq r1, r5            @ selector -> commit's arg2
+/// 0811d330  moveq r0, r4
+/// 0811d334  ldmiaeq sp!, {r4, r5, r6, r7, r8, lr}
+/// 0811d338  beq   0x0811d340        @ tail: commit(handle, selector)
+/// 0811d33c  ldmia sp!, {r4, r5, r6, r7, r8, pc}  @ write's status returns
+/// ```
+///
+/// The argument routing mirrors [`vtable_set_50_kind4`]'s with one
+/// twist: **arg2 (r1, the selector) reaches stages 1 and 3**, **arg3
+/// (r2, the caller's data pointer) reaches only stage 2 as its data
+/// argument**, and **arg4 (r3) reaches stage 2 as its SELECTOR
+/// argument** (`mov r1, r7`) — the by-pointer write binds the
+/// caller's value word as its second dispatch's kind, where the
+/// by-value sibling dereferences its arg3 instead.
+///
+/// # Deviations
+///
+/// - **All three callees are ported in this module and called
+///   DIRECTLY** — [`vtable_set_50_open_kind4`] (0x0811d458),
+///   [`vtable_set_50_write_indirect_kind4`] (0x0811d874) and
+///   [`vtable_set_50_commit_kind4`] (0x0811d340). This deliberately
+///   diverges from [`vtable_set_50_kind4`]'s shape: that port routes
+///   its stages through the [`VTABLE_SET_50_KIND4_OPS`] seam because
+///   they were unported at the time (its notes flag rewiring as a
+///   follow-up); here no new seam is introduced (the
+///   `app/class_6800.rs` precedent calls ported callees directly).
+///   The thunks still reach the dispatcher through the retained
+///   [`VTABLE_SLOT_50_DISPATCH`] seam, so host tests observe every
+///   stage by swapping that one static.
+/// - **Each stage's forwarded r3 is modeled EXACTLY, not as one
+///   `forwarded` parameter** — tracing the register through the
+///   callees' epilogues: at entry r3 = arg4 and nothing touches it
+///   before open's `bl`, so open's dispatcher spill exposes **arg4**
+///   verbatim; open's epilogue (`ldmia sp!, {r2, r3, r4, pc}`)
+///   reloads r3 from its spilled r1, so the write stage's entry r3
+///   is the **selector**; the write stage's epilogue (`ldmia sp!,
+///   {r3, ...}`) reloads r3 from its entry spill slot, which its own
+///   `str r1, [sp, #0x0]` overwrote with its arg2, so the commit's
+///   entry r3 is **arg4** again. (This refines the sibling's
+///   "forwarded verbatim to every stage" approximation.)
+/// - **The return type is `u32`**, not the reference C's `void`:
+///   every call site branches on r0 (`movs r4, r0; bne` / `cmp r0,
+///   #0`), and the original returns the failing stage's status — or
+///   the commit's, via the tail call — in r0.
+/// - **The reference C is not followed where it mis-decompiles**:
+///   `decomp/c/010/0811d2f8_FUN_0811d2f8.c` drops every argument of
+///   the open call and inlines the commit tail call as
+///   `FUN_0811d7fc(param_1, 4, &stack0xfffffff4)`, hiding the
+///   0x0811d340 thunk and its `| 0x80000000` tag. The port follows
+///   the disassembly.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_set_50_indirect_kind4(
+    handle: *mut *mut u8,
+    selector: u32,
+    data: *const u8,
+    write_selector: u32,
+) -> u32 {
+    // r3 (arg4) is untouched up to open's `bl`, so open's dispatcher
+    // spill exposes it verbatim.
+    let result = vtable_set_50_open_kind4(handle, selector, write_selector as usize);
+    if result != 0 {
+        return result;
+    }
+    // open's epilogue reloads r3 from its spilled r1: the write
+    // stage's forwarded r3 is the selector.
+    let result = vtable_set_50_write_indirect_kind4(
+        handle,
+        write_selector,
+        data,
+        selector as usize,
+    );
+    if result != 0 {
+        return result;
+    }
+    // The write stage's epilogue reloads r3 from its overwritten
+    // spill slot: the commit's forwarded r3 is arg4 again.
+    vtable_set_50_commit_kind4(handle, selector, write_selector as usize)
+}
+
 /// The status [`vtable_query_4c_kind4_read`] treats as "unsupported —
 /// bail silently" (`cmp r0, #0x5; beq`): it returns verbatim, exactly
 /// like any hard error, but the caller convention distinguishes it
@@ -2708,6 +2819,144 @@ mod tests {
                 result, WRITE_ERR,
                 "ldmia sp!, {{r3, r4, r5, r6, r7, pc}} returns the last \
                  dispatch's r0 verbatim"
+            );
+        }
+    }
+    // ---- vtable_set_50_indirect_kind4 (0x0811d2f8) -------------------
+
+    const WRITE_SELECTOR: u32 = 0x0dec_0ade;
+
+    #[test]
+    fn indirect_pipeline_open_error_short_circuits_before_write_and_commit() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let payload = [VALUE_WORD, 0xa5a5_a5a5];
+        unsafe {
+            install_recording_dispatch();
+            DISPATCH_RESULTS[0] = OPEN_ERR;
+
+            let result = vtable_set_50_indirect_kind4(
+                fixture.handle_ptr(),
+                SELECTOR,
+                payload.as_ptr() as *const u8,
+                WRITE_SELECTOR,
+            );
+
+            assert_eq!(result, OPEN_ERR, "open's status propagates verbatim");
+            assert_eq!(DISPATCH_CALLS, 1, "write and commit are not reached");
+            assert_eq!(DISPATCH_HANDLE[0], fixture.handle_ptr());
+            assert_eq!(DISPATCH_KIND[0], MESSAGE_KIND_4);
+            assert_eq!(DISPATCH_WORD0[0], SELECTOR, "open receives arg2 (r1)");
+            assert_eq!(
+                DISPATCH_EXTRA[0],
+                WRITE_SELECTOR as usize,
+                "entry arg4 (r3) reaches open's dispatcher spill"
+            );
+        }
+    }
+
+    #[test]
+    fn indirect_pipeline_write_error_skips_commit() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let payload = [VALUE_WORD, 0xa5a5_a5a5];
+        unsafe {
+            install_recording_dispatch();
+            DISPATCH_RESULTS[2] = WRITE_ERR;
+
+            let result = vtable_set_50_indirect_kind4(
+                fixture.handle_ptr(),
+                SELECTOR,
+                payload.as_ptr() as *const u8,
+                WRITE_SELECTOR,
+            );
+
+            assert_eq!(result, WRITE_ERR, "write's status propagates verbatim");
+            assert_eq!(
+                DISPATCH_CALLS, 3,
+                "open plus both write dispatches run; commit is skipped"
+            );
+            assert_eq!(DISPATCH_KIND[2], WRITE_SELECTOR);
+            assert_eq!(
+                DISPATCH_WORD0[2], payload[0],
+                "arg3 (r2) routes to write's data argument"
+            );
+        }
+    }
+
+    #[test]
+    fn indirect_pipeline_runs_in_order_with_exact_argument_routing() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let payload = [VALUE_WORD, 0xa5a5_a5a5];
+        unsafe {
+            install_recording_dispatch();
+            DISPATCH_RESULTS[3] = COMMIT_CODE;
+
+            let result = vtable_set_50_indirect_kind4(
+                fixture.handle_ptr(),
+                SELECTOR,
+                payload.as_ptr() as *const u8,
+                WRITE_SELECTOR,
+            );
+
+            assert_eq!(
+                result, COMMIT_CODE,
+                "the commit tail call's status becomes this function's return"
+            );
+            assert_eq!(DISPATCH_CALLS, 4, "open 1 + indirect write 2 + commit 1");
+            for call in 0..4 {
+                assert_eq!(DISPATCH_HANDLE[call], fixture.handle_ptr());
+            }
+
+            assert_eq!(DISPATCH_KIND[0], MESSAGE_KIND_4, "open binds kind 4");
+            assert_eq!(DISPATCH_WORD0[0], SELECTOR, "arg2 routes to open");
+            assert_eq!(
+                DISPATCH_EXTRA[0],
+                WRITE_SELECTOR as usize,
+                "entry arg4 is open's forwarded r3"
+            );
+
+            assert_eq!(
+                DISPATCH_KIND[1], MESSAGE_KIND_4,
+                "the indirect write's first message binds kind 4"
+            );
+            assert_eq!(
+                DISPATCH_WORD0[1], WRITE_SELECTOR,
+                "arg4 routes to the indirect write's selector message"
+            );
+            assert_eq!(
+                DISPATCH_EXTRA[1], SELECTOR as usize,
+                "open's pop reloads r3 from its selector spill before the write"
+            );
+
+            assert_eq!(
+                DISPATCH_KIND[2], WRITE_SELECTOR,
+                "the indirect write routes arg4 as its generic-dispatch kind"
+            );
+            assert_eq!(
+                DISPATCH_WORD0[2], payload[0],
+                "arg3 routes as the indirect write's data pointer"
+            );
+            assert_eq!(DISPATCH_WORD1[2], payload[1]);
+            assert_eq!(
+                DISPATCH_EXTRA[2], 0,
+                "the indirect write's second dispatch models its dead r3"
+            );
+
+            assert_eq!(DISPATCH_KIND[3], MESSAGE_KIND_4, "commit binds kind 4");
+            assert_eq!(
+                DISPATCH_WORD0[3],
+                SELECTOR | COMMIT_TAG,
+                "the original selector is restored for the tagged commit"
+            );
+            assert_eq!(
+                DISPATCH_EXTRA[3],
+                WRITE_SELECTOR as usize,
+                "the write's overwritten entry spill restores arg4 into r3"
             );
         }
     }
