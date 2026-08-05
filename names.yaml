@@ -21581,6 +21581,80 @@ functions:
       and cg_codegen_output/cg_label_create layout consistency) and
       ::codegen_create_stores_a_null_output_when_the_buffer_alloc_fails.
 
+  - address: 0x0811d718
+    ghidra: FUN_0811d718
+    name: vtable_query_4c_read_scalar_kind4
+    size: 92
+    sig: "u32 vtable_query_4c_read_scalar_kind4(handle: *mut *mut u8, out: *mut u32, forwarded: usize)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r4: handle
+      param_2/r6: out
+      param_4/r3: forwarded
+      r5: kind (entry-thunk binding, 4 here)
+    notes: >-
+      15 bl call sites (grep on decomp/osos.asm): the 5-site cluster
+      0x0811b008..0x0811b1c0, 0x0811e914, the 3-site cluster
+      0x081afe70..0x081aff7c, 0x081bc790, 0x081d10d8, 0x081d1584 and
+      the 3-site cluster 0x08271528..0x08271560 - every site passes
+      the handle in r0 and a pointer to the caller's out word in r1
+      (&local_34, local_20 + 8 ...), none sets r3; e.g. FUN_081afdb8
+      reads local_34 as the delivered value after a zero status. The
+      92 bytes (decomp/functions.csv) are the 12-byte kind-4 entry
+      thunk at 0x0811d718 (mov r2,r1; mov r1,#4; b 0x0811d5ac) plus
+      the shared 80-byte body at 0x0811d5ac it tail-calls - the
+      unported 12-byte sibling thunk FUN_0811d70c @ 0x0811d70c binds
+      kind 2 into the same body (the write stages'
+      kind-encodes-value-width convention). The scalar
+      (single-word) property read of the slot +0x4c message family -
+      the little sibling of vtable_query_4c_kind4_read (0x0811d818,
+      the sized-buffer read): the same probe -> dispatch ->
+      finish-thunk shape through vtable_slot_4c_dispatch (0x0811d7b0,
+      ported in this module) minus the size clamp. The body's entry
+      stmdb sp!,{r2,r3,r4,r5,r6,lr} spills arg2 (out) and arg4 (r3)
+      into a two-word stack pair: the PROBE sends kind 4 (hardcoded
+      mov r1,#0x4 in the shared body - only the read carries the
+      thunk-bound width) with &pair[1] as a scratch out-slot whose
+      word is never read back; status 5 = "unsupported" and any other
+      nonzero = hard error, both returning verbatim (cmp r0,#0x5;
+      beq / cmp r0,#0; bne). The READ re-dispatches with the
+      thunk-bound kind (mov r1,r5) and the caller's out pointer as
+      data; the method stores the property word through it. Only on
+      a zero read status does the FINISH bleq fire: 0x0811d46c is
+      the PORTED kind-4 query thunk util/vtable_query.rs
+      vtable_query_4c_kind4, re-dispatching kind 4 with the one-word
+      {out} pair as the message; its error code becomes the return
+      value. Deviations: both callees are ported and route through
+      the new VTABLE_QUERY_4C_SCALAR_DISPATCH /
+      VTABLE_QUERY_4C_SCALAR_FINISH seams (the
+      VTABLE_QUERY_4C_READ_DISPATCH / _FINISH pattern - hookability
+      plus host-test interception without racing the sibling's or
+      util's own parallel tests). arg3 is modeled as forwarded per
+      family convention - it doubles as the probe out-slot's INITIAL
+      word (the entry spill) and as the probe dispatcher's stmdb r3
+      spill. r3 is DEAD for the read dispatch and the finish call
+      (the 0x0811d874 refinement): method-clobbered across the
+      probe, never reloaded, and its spill slot is the probe's
+      method-written out-slot - the port passes a pointer to a zero
+      stack word for the read's extra and 0 for the thunk's
+      forwarded, plus 0 for the thunk's _unused (r2 likewise dead,
+      discarded by the thunk's mov r2,r1). The return type is u32,
+      not the reference C's void - every call site branches on r0.
+      Reference C (decomp/c/010/0811d718_FUN_0811d718.c) gets the
+      shape right (scratch probe out-slot, kind-4 constants) but
+      types param_2 as undefined4 (the disassembly and every call
+      site show a pointer) and hides the entry-thunk / shared-body
+      split - the port follows the disassembly. Host tests
+      (recording mocks through the two seams, SLOT_TEST_LOCK
+      serialized):
+      src/app/vtable_set.rs::scalar_read_unsupported_status_bails_before_the_read
+      / scalar_read_probe_error_bails_before_the_read /
+      scalar_read_probe_args_and_initial_out_slot /
+      scalar_read_read_args_and_value_delivery /
+      scalar_read_read_error_skips_the_finish /
+      scalar_read_finish_args_and_final_return.
+
   - address: 0x0811d7b0
     ghidra: FUN_0811d7b0
     name: vtable_slot_4c_dispatch
