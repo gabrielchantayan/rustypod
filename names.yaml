@@ -22667,3 +22667,84 @@ functions:
       kind2_write_error_skips_commit_and_routes_the_value_pointer /
       kind2_loads_the_value_as_a_halfword /
       kind2_runs_in_order_with_exact_argument_routing.
+
+  - address: 0x0811d478
+    ghidra: FUN_0811d478
+    name: vtable_query_4c_walk_alloc
+    size: 180
+    sig: "u32 vtable_query_4c_walk_alloc(handle: *mut *mut u8, selector: u32, scratch: usize, forwarded: usize)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r5: handle
+      param_2/r1: selector (tag in the top byte, 24-bit selector under it)
+      param_3/r2: scratch (only the query out-slot pair[0]'s initial content)
+      param_4/r3: forwarded (reaches only the bare-branch size query and the FIRST walk query)
+      r4: "bare_selector (bic r1, #0xff000000)"
+      local_18 (sp+0): pair[0] (walk-query out-slot)
+      local_14 (sp+4): pair[1] (size-query out-slot, zeroed at entry)
+    notes: >-
+      11 bl call sites (grep on decomp/osos.asm): 0x0810aac4,
+      0x0811e954, 0x08136824, 0x081affa0, 0x081bc810, 0x081d0f10,
+      0x081d110c, 0x081d15e4, 0x08271590, 0x0828595c - plus the
+      recursive self-call at 0x0811d4f4 inside its own body. NOT
+      called from the multi-message routine 0x0811d360 (that
+      cluster's eight 0x0811d390..0x0811d440 sites all target the
+      slot +0x50 dispatcher 0x0811d7fc). The stream-walking callers
+      share one pattern: query a journal word via the kind-4 thunk,
+      return 0 when its tag byte is 0xc0000000 (0x0811e930..,
+      0x081d15cc.., 0x0828592c..), otherwise call THIS function with
+      the word in r1 and branch on the status. The recursive
+      tagged-word walker of the slot +0x4c vtable message family -
+      the largest family member, between vtable_query_4c_kind4
+      (0x0811d46c) and vtable_set_50_write_kind2 (0x0811d52c). The
+      selector word is split into a top-byte tag (ands #0xff000000)
+      and a 24-bit selector (bic); the tag picks the branch. Tag 0
+      (bare): one kind-4 size query through the slot +0x4c
+      dispatcher 0x0811d7b0 with &pair[1] as the out-slot, then on a
+      zero status the object's vtable slot +0x54 method is invoked
+      DIRECTLY as method(object, size + 4, 1) - the only family
+      member that calls a vtable method without the dispatcher; any
+      nonzero query status returns verbatim (status 5 gets NO
+      special case, unlike the read siblings). Tag 0x40000000
+      (PROBE_TAG): a walk loop queries the next journal word through
+      the ported kind-4 thunk 0x0811d46c with &pair[0] as the
+      out-slot (nonzero status returns verbatim); a word tagged
+      0xc0000000 (COMMIT_PROBE_TAG) whose 24-bit selector matches
+      closes the walk with 0, every other word is RECURSED into with
+      the full tagged word as the new selector, its error
+      propagating. Any other tag: return 0 with no message sent.
+      Deviations: the ported callees route through the new
+      role-specific seams VTABLE_QUERY_4C_WALK_DISPATCH (wired to
+      the ported vtable_slot_4c_dispatch) and
+      VTABLE_QUERY_4C_WALK_QUERY (wired to the ported util
+      vtable_query_4c_kind4) - the VTABLE_QUERY_4C_SCALAR_DISPATCH /
+      VTABLE_QUERY_4C_SCALAR_FINISH precedent; the slot +0x54 method
+      has no seam (a firmware vtable method reached by blx; host
+      tests install it on a fake vtable; read_unaligned slot load -
+      0x54 is 4-aligned, not 8-aligned). arg3 (r2) is only the
+      pair[0] out-slot's initial content, never read back - modeled
+      as scratch. arg4 (r3) reaches only the bare-branch size-query
+      dispatch and the FIRST walk query verbatim - modeled as
+      forwarded; its spill slot is zeroed at entry (pair[1] starts
+      at 0), and for later iterations / the recursion r3 is dead
+      (method-clobbered), so 0 stands in (the
+      vtable_set_50_write_indirect_kind4 dead-slot precedent); r2
+      into the recursion is likewise dead, so scratch = 0 there.
+      The pair is modeled as two u32 words (both slots only ever
+      consumed as 32-bit ldr/str). The recursion is a direct
+      self-call. Reference C decomp/c/010/0811d478_FUN_0811d478.c
+      is accurate (tag split, size + 4 bump, slot +0x54 call, walk
+      loop, recursion) - it only hides the r2/r3 register routing.
+      Host tests (recording mocks through the two seams plus a fake
+      vtable slot +0x54 method, SLOT_TEST_LOCK serialized):
+      src/app/vtable_set.rs::walk_alloc_bare_selector_queries_size_and_allocs_via_slot_54
+      / walk_alloc_bare_size_query_error_skips_the_alloc /
+      walk_alloc_bare_status_5_gets_no_special_case /
+      walk_alloc_other_tags_return_zero_without_any_message /
+      walk_alloc_probe_walks_recurses_and_stops_at_the_matching_marker
+      / walk_alloc_probe_recurses_into_foreign_commit_probe_markers /
+      walk_alloc_probe_query_error_returns_verbatim /
+      walk_alloc_probe_recursion_error_propagates /
+      walk_alloc_default_seams_are_wired_to_the_ported_callees /
+      walk_alloc_default_dispatch_seam_runs_the_ported_dispatcher.

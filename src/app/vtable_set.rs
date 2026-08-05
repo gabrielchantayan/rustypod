@@ -2075,6 +2075,267 @@ pub unsafe extern "C" fn vtable_query_4c_read_scalar_kind4(
     vtable_query_4c_read_scalar_body(handle, MESSAGE_KIND_4, out, forwarded)
 }
 
+/// Byte offset of the allocate method inside the object's vtable —
+/// the slot [`vtable_query_4c_walk_alloc`] loads for its bare-selector
+/// branch (`ldr r3, [r2, #0x54]`); one slot past [`VTABLE_SLOT_50`].
+const VTABLE_SLOT_54: usize = 0x54;
+
+/// The top-byte mask [`vtable_query_4c_walk_alloc`] splits its
+/// selector word with (`and`/`bic #0xff000000`): the family's tag
+/// bits ([`PROBE_TAG`], [`COMMIT_TAG`], [`COMMIT_PROBE_TAG`]) live in
+/// the top byte.
+const MESSAGE_TAG_MASK: u32 = 0xff00_0000;
+
+/// The vtable method signature at slot +0x54: `method(object, size,
+/// mode)`, returning an error code (0 = success). The original's
+/// `blx r3` passes r0 = the object, r1 = the queried size + 4 and r2
+/// = the constant 1; r3 holds the method pointer itself at the `blx`
+/// (dead — the [`VtableSlot04Method`] precedent).
+type VtableSlot54Method = unsafe extern "C" fn(object: *mut u8, size: u32, mode: u32) -> u32;
+
+/// Indirect dispatch for the bare-branch size query of
+/// [`vtable_query_4c_walk_alloc`], wired to this module's ported
+/// [`vtable_slot_4c_dispatch`] (original: `FUN_0811d7b0` @ 0x0811d7b0;
+/// the [`VTABLE_QUERY_4C_SCALAR_DISPATCH`] pattern — the seam is
+/// retained for hookability, the dispatcher's `blx` targets are
+/// firmware vtable methods, and a role-specific name keeps host tests
+/// from racing the siblings' parallel tests).
+pub static mut VTABLE_QUERY_4C_WALK_DISPATCH: unsafe extern "C" fn(
+    handle: *mut *mut u8,
+    kind: u32,
+    data: usize,
+    extra: *const usize,
+) -> u32 = vtable_slot_4c_dispatch;
+
+/// Indirect dispatch for the walk-loop query-thunk call of
+/// [`vtable_query_4c_walk_alloc`], wired to the ported
+/// `util/vtable_query.rs` `vtable_query_4c_kind4` (original:
+/// `FUN_0811d46c` @ 0x0811d46c; the [`VTABLE_QUERY_4C_SCALAR_FINISH`]
+/// pattern — a module-local seam keeps host tests able to intercept
+/// it without swapping util's `VTABLE_SLOT_4C_DISPATCH` static, which
+/// would race util's own parallel tests).
+pub static mut VTABLE_QUERY_4C_WALK_QUERY: unsafe extern "C" fn(
+    handle: *mut *mut u8,
+    out: *mut u32,
+    unused: usize,
+    forwarded: usize,
+) -> u32 = crate::util::vtable_query::vtable_query_4c_kind4;
+
+/// vtable_query_4c_walk_alloc — original: `FUN_0811d478` @ 0x0811d478
+/// (180 bytes; **11 `bl` call sites**, grep on `decomp/osos.asm`:
+/// 0x0810aac4, 0x0811e954, 0x08136824, 0x081affa0, 0x081bc810,
+/// 0x081d0f10, 0x081d110c, 0x081d15e4, 0x08271590 and 0x0828595c —
+/// plus the recursive self-call at 0x0811d4f4 inside its own body.
+/// It is NOT called from the multi-message routine 0x0811d360: that
+/// cluster's eight 0x0811d390..0x0811d440 sites all target the slot
+/// +0x50 dispatcher 0x0811d7fc. The stream-walking callers share one
+/// pattern — query a journal word, return 0 when its tag byte is
+/// 0xc0000000 (e.g. 0x0811e930..0x0811e954, 0x081d15cc..0x081d15e4,
+/// 0x0828592c..0x0828595c), otherwise call THIS function with the
+/// word in r1 and branch on the status. Reference C
+/// `decomp/c/010/0811d478_FUN_0811d478.c` is accurate in shape.)
+///
+/// The recursive tagged-word walker of the slot +0x4c message family
+/// — the largest family member, sitting between the query thunk
+/// 0x0811d46c and the kind-2 write stage 0x0811d52c:
+///
+/// ```text
+/// 0811d478  stmdb sp!, {r2, r3, r4, r5, r6, lr}  @ pair = {arg3, arg4}
+/// 0811d47c  mov   r5, r0            @ save handle
+/// 0811d480  mov   r0, #0x0
+/// 0811d484  str   r0, [sp, #0x4]    @ pair[1] = 0 (arg4's slot dies)
+/// 0811d488  ands  r0, r1, #0xff000000  @ tag = selector's top byte
+/// 0811d48c  bic   r4, r1, #0xff000000  @ r4 = 24-bit selector
+/// 0811d490  bne   0x0811d4d0        @ tagged -> walk branch
+/// 0811d494  add   r2, sp, #0x4      @ out-slot = &pair[1]
+/// 0811d498  mov   r1, #0x4          @ kind 4
+/// 0811d49c  mov   r0, r5
+/// 0811d4a0  bl    0x0811d7b0        @ size query: dispatch(handle, 4, &pair[1])
+/// 0811d4a4  cmp   r0, #0x0
+/// 0811d4a8  bne   0x0811d4cc        @ any nonzero status returns verbatim
+/// 0811d4ac  ldr   r0, [sp, #0x4]    @ size = pair[1] (method-written)
+/// 0811d4b0  add   r1, r0, #0x4      @ size + 4
+/// 0811d4b4  str   r1, [sp, #0x4]    @ pair[1] = size + 4
+/// 0811d4b8  ldr   r0, [r5, #0x0]    @ object = *handle
+/// 0811d4bc  ldr   r2, [r0, #0x0]    @ vtable = *object
+/// 0811d4c0  ldr   r3, [r2, #0x54]   @ method = vtable->slot_54
+/// 0811d4c4  mov   r2, #0x1
+/// 0811d4c8  blx   r3                @ method(object, size + 4, 1)
+/// 0811d4cc  ldmia sp!, {r2, r3, r4, r5, r6, pc}
+/// 0811d4d0  cmp   r0, #0x40000000   @ tag == PROBE_TAG?
+/// 0811d4d4  bne   0x0811d524        @ no -> return 0, no message
+/// 0811d4d8  b     0x0811d500
+/// 0811d4dc  ldr   r1, [sp, #0x0]    @ word = pair[0] (queried)
+/// 0811d4e0  and   r0, r1, #0xff000000
+/// 0811d4e4  bic   r1, r1, #0xff000000
+/// 0811d4e8  b     0x0811d518
+/// 0811d4ec  ldr   r1, [sp, #0x0]    @ the FULL tagged word
+/// 0811d4f0  mov   r0, r5
+/// 0811d4f4  bl    0x0811d478        @ recurse: self(handle, word)
+/// 0811d4f8  cmp   r0, #0x0
+/// 0811d4fc  ldmiane sp!, {r2, r3, r4, r5, r6, pc}
+/// 0811d500  mov   r1, sp            @ out = &pair[0]
+/// 0811d504  mov   r0, r5
+/// 0811d508  bl    0x0811d46c        @ query: vtable_query_4c_kind4(handle, &pair[0])
+/// 0811d50c  cmp   r0, #0x0
+/// 0811d510  beq   0x0811d4dc        @ success -> examine the word
+/// 0811d514  ldmia sp!, {r2, r3, r4, r5, r6, pc}
+/// 0811d518  cmp   r0, #0xc0000000   @ word's tag == COMMIT_PROBE_TAG...
+/// 0811d51c  cmpeq r1, r4            @ ...and selector matches?
+/// 0811d520  bne   0x0811d4ec        @ no -> recurse into the word
+/// 0811d524  mov   r0, #0x0          @ match / other tag -> return 0
+/// 0811d528  ldmia sp!, {r2, r3, r4, r5, r6, pc}
+/// ```
+///
+/// The selector word is split into its top-byte tag (`ands
+/// #0xff000000`) and the remaining 24-bit selector (`bic`), and the
+/// tag picks the branch:
+///
+/// - **tag 0 (bare selector)** — one kind-4 size query through the
+///   slot +0x4c dispatcher with `&pair[1]` as the out-slot; on a zero
+///   status the method-written size is bumped by 4 (`pair[1]` updated
+///   too) and the object's vtable slot **+0x54** method is invoked
+///   DIRECTLY as `method(object, size + 4, 1)` — the only family
+///   member that calls a vtable method without the dispatcher. The
+///   method's r0 returns; any nonzero query status returns verbatim
+///   (status 5 gets NO special case here, unlike the read siblings).
+/// - **tag 0x40000000 ([`PROBE_TAG`])** — a walk loop: query the next
+///   journal word through the kind-4 query thunk 0x0811d46c with
+///   `&pair[0]` as the out-slot; a nonzero status returns verbatim. A
+///   word tagged 0xc0000000 ([`COMMIT_PROBE_TAG`]) whose 24-bit
+///   selector matches this call's selector ends the walk with 0 —
+///   the matching commit+probe marker closes the scope the probe tag
+///   opened (the set family's probe → ... → commit+probe sequence,
+///   replayed); every other word is RECURSED into with the full
+///   tagged word as the new selector (`r1 = pair[0]` verbatim), its
+///   error propagating.
+/// - **any other tag** — return 0 with no message sent (the
+///   0x80000000/0xc0000000 terminators the callers already filter).
+///
+/// # Deviations
+///
+/// - **The ported callees route through new role-specific seams** —
+///   the size query's dispatcher 0x0811d7b0 (ported in this module as
+///   [`vtable_slot_4c_dispatch`]) behind
+///   [`VTABLE_QUERY_4C_WALK_DISPATCH`] and the walk loop's query
+///   thunk 0x0811d46c (ported in `util/vtable_query.rs` as
+///   `vtable_query_4c_kind4`) behind [`VTABLE_QUERY_4C_WALK_QUERY`]
+///   (the [`VTABLE_QUERY_4C_SCALAR_DISPATCH`] /
+///   [`VTABLE_QUERY_4C_SCALAR_FINISH`] precedent — hookability plus
+///   host-test interception without racing the siblings' or util's
+///   own parallel tests).
+/// - **The slot +0x54 method has no seam** — it is one more firmware
+///   vtable method reached by `blx`, exactly like the dispatcher's
+///   own targets; host tests install it on a fake vtable (the
+///   [`vtable_slot_04_dispose`] no-seam precedent). Its slot load
+///   uses `read_unaligned` so the layout stays byte-exact on a 64-bit
+///   host (0x54 is 4-aligned but not 8-aligned — the
+///   [`vtable_slot_50_dispatch`] precedent).
+/// - **arg3 (r2) is modeled as `scratch`** — it is only the INITIAL
+///   content of the query out-slot `pair[0]` (the entry spill), which
+///   the walk-loop query method overwrites on every iteration; it is
+///   never read back. No observed call site sets r2 deliberately.
+/// - **arg4 (r3) is modeled as `forwarded` and reaches only two
+///   places** — the bare branch's size-query dispatch and the walk
+///   loop's FIRST query (nothing between entry and either `bl`
+///   touches r3, so the dispatcher's `stmdb sp!, {r3}` spill exposes
+///   it verbatim). Its spill slot itself is zeroed at entry: the
+///   size out-slot `pair[1]` starts at 0, not at arg4. For later
+///   loop iterations and the recursive call r3 is DEAD (the query
+///   thunk's method clobbers r0–r3 across the first `bl` and nothing
+///   reloads it), so 0 stands in for those unobservable arguments
+///   (the [`vtable_set_50_write_indirect_kind4`] dead-slot
+///   precedent); r2 into the recursion is likewise dead
+///   (method-clobbered, and the thunk discards r2 with `mov r2, r1`),
+///   so the recursion passes `scratch = 0`.
+/// - **The pair is modeled as two `u32` words** — both slots are only
+///   ever consumed as 32-bit words (ARM `ldr`/`str`), unlike
+///   [`vtable_query_4c_kind4_read`]'s pair whose first word held an
+///   address.
+/// - **The recursion is a direct self-call** — the original's
+///   `bl 0x0811d478` at 0x0811d4f4 targets this same entry; no seam
+///   (the ported body IS the callee).
+/// - **The reference C is followed — it is accurate**:
+///   `decomp/c/010/0811d478_FUN_0811d478.c` catches the tag split,
+///   the size + 4 bump, the slot +0x54 call, the walk loop and the
+///   recursion; it only hides the r2/r3 register routing above (its
+///   `local_18 = param_3` initial store is the `pair[0]` spill).
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_query_4c_walk_alloc(
+    handle: *mut *mut u8,
+    selector: u32,
+    scratch: usize,
+    forwarded: usize,
+) -> u32 {
+    let dispatch =
+        core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_QUERY_4C_WALK_DISPATCH));
+    let query = core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_QUERY_4C_WALK_QUERY));
+    // The entry `stmdb sp!, {r2, r3, ...}` spill: pair[0] = arg3
+    // (sp+0, the query out-slot's initial content), pair[1] = arg4's
+    // slot (sp+4), immediately zeroed by `str r0, [sp, #0x4]`.
+    let mut pair = [scratch as u32, 0u32];
+    let tag = selector & MESSAGE_TAG_MASK;
+    // r4 = bic r1, #0xff000000: the 24-bit selector under the tag.
+    let bare_selector = selector & !MESSAGE_TAG_MASK;
+    if tag == 0 {
+        // Bare selector: size query dispatch(handle, 4, &pair[1]).
+        // r3 is the caller's arg4 here (nothing touches it before the
+        // bl), so the dispatcher's spill exposes `forwarded`.
+        let forwarded_slot = forwarded;
+        let status = dispatch(
+            handle,
+            MESSAGE_KIND_4,
+            core::ptr::addr_of!(pair[1]) as usize,
+            core::ptr::addr_of!(forwarded_slot),
+        );
+        if status != 0 {
+            return status;
+        }
+        // Bump the method-written size by 4 (pair[1] updated too),
+        // then method(object, size + 4, 1) through vtable slot +0x54.
+        let size = pair[1].wrapping_add(4);
+        pair[1] = size;
+        let object = handle.read();
+        let vtable = (object as *const *const u8).read();
+        let method =
+            (vtable.add(VTABLE_SLOT_54) as *const VtableSlot54Method).read_unaligned();
+        method(object, size, 1)
+    } else if tag == PROBE_TAG {
+        // Probe-tagged: walk the journal until the matching
+        // commit+probe marker, recursing into every other word. r3
+        // reaches the FIRST query verbatim; afterwards it is dead
+        // (method-clobbered across the query), so 0 stands in (the
+        // dead-slot precedent).
+        let mut query_forwarded = forwarded;
+        loop {
+            let status =
+                query(handle, core::ptr::addr_of_mut!(pair[0]), 0, query_forwarded);
+            if status != 0 {
+                return status;
+            }
+            query_forwarded = 0;
+            let word = pair[0];
+            if word & MESSAGE_TAG_MASK == COMMIT_PROBE_TAG
+                && word & !MESSAGE_TAG_MASK == bare_selector
+            {
+                return 0;
+            }
+            // Recurse with the FULL tagged word; r2/r3 are dead
+            // across the query (method-clobbered, and the thunk
+            // discards r2 with `mov r2, r1`), so 0 stands in for both.
+            let status = vtable_query_4c_walk_alloc(handle, word, 0, 0);
+            if status != 0 {
+                return status;
+            }
+        }
+    } else {
+        // COMMIT_TAG / COMMIT_PROBE_TAG / any other tag: no message,
+        // return 0 (the callers already filter those terminators).
+        0
+    }
+}
+
 /// The store-object size [`vtable_file_open`] allocates (`mov r0,
 /// #0x34` ahead of the `bl 0x082aadd4`).
 const STORE_OBJECT_SIZE: usize = 0x34;
@@ -2370,6 +2631,10 @@ mod tests {
                 core::ptr::addr_of_mut!(VTABLE_QUERY_4C_BUFFER_DISPATCH)
                     .write_volatile(vtable_slot_4c_dispatch);
                 core::ptr::addr_of_mut!(VTABLE_QUERY_4C_BUFFER_FINISH)
+                    .write_volatile(crate::util::vtable_query::vtable_query_4c_kind4);
+                core::ptr::addr_of_mut!(VTABLE_QUERY_4C_WALK_DISPATCH)
+                    .write_volatile(vtable_slot_4c_dispatch);
+                core::ptr::addr_of_mut!(VTABLE_QUERY_4C_WALK_QUERY)
                     .write_volatile(crate::util::vtable_query::vtable_query_4c_kind4);
                 core::ptr::addr_of_mut!(VTABLE_FILE_OPEN_REMOVE)
                     .write_volatile(store_remove_unported);
@@ -3332,11 +3597,13 @@ mod tests {
     /// `default_dispatch_body_loads_slot_50_and_calls_it` precedent).
     /// The vtable is a raw byte buffer so the +0x50 slot sits at a
     /// 4-aligned (not 8-aligned) offset exactly as on the 32-bit
-    /// target; the buffer is 0x60 bytes, not the 0x54 the slot needs
+    /// target; the buffer is 0x68 bytes, not the 0x54 the slot needs
     /// on the target, because on a 64-bit host each method pointer
-    /// written into it is 8 bytes wide.
+    /// written into it is 8 bytes wide — 0x68 leaves room for the
+    /// slot +0x54 alloc method's pointer (0x54..0x5c) and an upper
+    /// decoy at 0x5c.
     struct FakeChain {
-        vtable: [u8; 0x60],
+        vtable: [u8; 0x68],
         object: *const u8,
         handle: *mut u8,
     }
@@ -3344,7 +3611,7 @@ mod tests {
     impl FakeChain {
         fn new() -> Self {
             FakeChain {
-                vtable: [0; 0x60],
+                vtable: [0; 0x68],
                 object: core::ptr::null(),
                 handle: core::ptr::null_mut(),
             }
@@ -3657,6 +3924,14 @@ mod tests {
         fn install_dispose(&mut self, slot: usize, method: VtableSlot04Method) {
             unsafe {
                 (self.vtable.as_mut_ptr().add(slot) as *mut VtableSlot04Method)
+                    .write_unaligned(method);
+            }
+        }
+        /// Writes `method` into the vtable at byte offset `slot`,
+        /// typed for the slot +0x54 alloc signature.
+        fn install_alloc(&mut self, slot: usize, method: VtableSlot54Method) {
+            unsafe {
+                (self.vtable.as_mut_ptr().add(slot) as *mut VtableSlot54Method)
                     .write_unaligned(method);
             }
         }
@@ -4703,6 +4978,506 @@ mod tests {
         let _lock = SLOT_TEST_LOCK.lock().unwrap();
         let _restore = SlotGuard;
         assert_scalar_thunk_end_to_end(MESSAGE_KIND_2, true);
+    }
+
+    // ---- recording mocks for the walk-alloc seams -------------------
+
+    const SIZE_ERR: u32 = 0x0bad_0011;
+    const WALK_QUERY_ERR: u32 = 0x0bad_0012;
+    const ALLOC_CODE: u32 = 0x0bad_0013;
+    const SCRATCH: usize = 0x1bad_b002;
+    const QUERIED_SIZE: u32 = 0x20;
+    const JOURNAL_BARE: u32 = 0x77;
+    const FOREIGN_SELECTOR: u32 = 0x99;
+
+    /// Global event order across the three walk-alloc recording mocks
+    /// (the STAGE_LOG precedent).
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    enum WalkEvent {
+        Query,
+        SizeDispatch,
+        Alloc,
+    }
+
+    static mut WALK_EVENTS: [WalkEvent; 8] = [WalkEvent::Query; 8];
+    static mut WALK_EVENT_COUNT: usize = 0;
+
+    unsafe fn record_walk_event(event: WalkEvent) {
+        WALK_EVENTS[WALK_EVENT_COUNT] = event;
+        WALK_EVENT_COUNT += 1;
+    }
+
+    static mut WALK_QUERY_CALLS: usize = 0;
+    static mut WALK_QUERY_HANDLE: [*mut *mut u8; 8] = [core::ptr::null_mut(); 8];
+    static mut WALK_QUERY_OUT_INITIAL: [u32; 8] = [0; 8];
+    static mut WALK_QUERY_UNUSED: [usize; 8] = [0; 8];
+    static mut WALK_QUERY_FORWARDED: [usize; 8] = [0; 8];
+    static mut WALK_QUERY_WORDS: [u32; 8] = [0; 8];
+    static mut WALK_QUERY_RESULTS: [u32; 8] = [MOCK_OK; 8];
+
+    /// The walk-loop query thunk: records the call, then answers the
+    /// scripted journal word through the out-slot (the query method's
+    /// store).
+    unsafe extern "C" fn walk_recording_query(
+        handle: *mut *mut u8,
+        out: *mut u32,
+        unused: usize,
+        forwarded: usize,
+    ) -> u32 {
+        let call = WALK_QUERY_CALLS;
+        WALK_QUERY_CALLS += 1;
+        record_walk_event(WalkEvent::Query);
+        WALK_QUERY_HANDLE[call] = handle;
+        // The out-slot's content BEFORE the answer: the body's pair[0].
+        WALK_QUERY_OUT_INITIAL[call] = out.read();
+        WALK_QUERY_UNUSED[call] = unused;
+        WALK_QUERY_FORWARDED[call] = forwarded;
+        out.write(WALK_QUERY_WORDS[call]);
+        WALK_QUERY_RESULTS[call]
+    }
+
+    static mut WALK_SIZE_CALLS: usize = 0;
+    static mut WALK_SIZE_HANDLE: [*mut *mut u8; 8] = [core::ptr::null_mut(); 8];
+    static mut WALK_SIZE_KIND: [u32; 8] = [0; 8];
+    static mut WALK_SIZE_EXTRA: [usize; 8] = [0; 8];
+    static mut WALK_SIZE_SIZES: [u32; 8] = [0; 8];
+    static mut WALK_SIZE_RESULTS: [u32; 8] = [MOCK_OK; 8];
+
+    /// The bare-branch size query: records the call, then answers the
+    /// scripted size through the out-slot (the method's store).
+    unsafe extern "C" fn walk_recording_size_dispatch(
+        handle: *mut *mut u8,
+        kind: u32,
+        data: usize,
+        extra: *const usize,
+    ) -> u32 {
+        let call = WALK_SIZE_CALLS;
+        WALK_SIZE_CALLS += 1;
+        record_walk_event(WalkEvent::SizeDispatch);
+        WALK_SIZE_HANDLE[call] = handle;
+        WALK_SIZE_KIND[call] = kind;
+        WALK_SIZE_EXTRA[call] = extra.read();
+        (data as *mut u32).write(WALK_SIZE_SIZES[call]);
+        WALK_SIZE_RESULTS[call]
+    }
+
+    static mut ALLOC_CALLS: usize = 0;
+    static mut ALLOC_OBJECT: *mut u8 = core::ptr::null_mut();
+    static mut ALLOC_SIZE: u32 = 0;
+    static mut ALLOC_MODE: u32 = 0;
+    static mut ALLOC_RESULT: u32 = MOCK_OK;
+    static mut WRONG_ALLOC_CALLS: usize = 0;
+
+    /// The vtable slot +0x54 alloc method, recording.
+    unsafe extern "C" fn alloc_method(object: *mut u8, size: u32, mode: u32) -> u32 {
+        ALLOC_CALLS += 1;
+        record_walk_event(WalkEvent::Alloc);
+        ALLOC_OBJECT = object;
+        ALLOC_SIZE = size;
+        ALLOC_MODE = mode;
+        ALLOC_RESULT
+    }
+
+    /// Decoy for the slots neighbouring +0x54: any call through it
+    /// proves the body loaded the wrong offset.
+    unsafe extern "C" fn wrong_slot_alloc(_object: *mut u8, _size: u32, _mode: u32) -> u32 {
+        WRONG_ALLOC_CALLS += 1;
+        0xdead_0000
+    }
+
+    /// Resets every walk-alloc recording static WITHOUT touching the
+    /// seams (the end-to-end default-seam tests need the wiring kept).
+    unsafe fn reset_walk_logs() {
+        WALK_EVENT_COUNT = 0;
+        WALK_QUERY_CALLS = 0;
+        WALK_QUERY_WORDS = [0; 8];
+        WALK_QUERY_RESULTS = [MOCK_OK; 8];
+        WALK_SIZE_CALLS = 0;
+        WALK_SIZE_SIZES = [0; 8];
+        WALK_SIZE_RESULTS = [MOCK_OK; 8];
+        ALLOC_CALLS = 0;
+        ALLOC_OBJECT = core::ptr::null_mut();
+        ALLOC_SIZE = 0;
+        ALLOC_MODE = 0;
+        ALLOC_RESULT = MOCK_OK;
+        WRONG_ALLOC_CALLS = 0;
+    }
+
+    unsafe fn install_walk_mocks() {
+        reset_walk_logs();
+        core::ptr::addr_of_mut!(VTABLE_QUERY_4C_WALK_QUERY)
+            .write_volatile(walk_recording_query);
+        core::ptr::addr_of_mut!(VTABLE_QUERY_4C_WALK_DISPATCH)
+            .write_volatile(walk_recording_size_dispatch);
+    }
+
+    // ---- walk-alloc: the bare (tag 0) branch ------------------------
+
+    #[test]
+    fn walk_alloc_bare_selector_queries_size_and_allocs_via_slot_54() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut chain = FakeChain::new();
+        chain.install_alloc(VTABLE_SLOT_54, alloc_method);
+        // Decoys at the adjacent non-overlapping host slots: method
+        // pointers are 8 bytes wide on the 64-bit host, so 0x4c (the
+        // target's preceding slot) spans 0x4c..0x54 and 0x5c is the
+        // nearest offset above the 0x54..0x5c pointer.
+        chain.install_alloc(VTABLE_SLOT_54 - 8, wrong_slot_alloc);
+        chain.install_alloc(VTABLE_SLOT_54 + 8, wrong_slot_alloc);
+        chain.link();
+        unsafe {
+            install_walk_mocks();
+            WALK_SIZE_SIZES[0] = QUERIED_SIZE;
+            ALLOC_RESULT = ALLOC_CODE;
+
+            let status = vtable_query_4c_walk_alloc(
+                chain.handle_ptr(),
+                SELECTOR,
+                SCRATCH,
+                FORWARDED,
+            );
+
+            assert_eq!(status, ALLOC_CODE, "the blx method's r0 returns verbatim");
+            assert_eq!(WALK_QUERY_CALLS, 0, "no journal query on the bare branch");
+            assert_eq!(WALK_SIZE_CALLS, 1, "one size query");
+            assert_eq!(WALK_SIZE_HANDLE[0], chain.handle_ptr(), "mov r0, r5");
+            assert_eq!(WALK_SIZE_KIND[0], MESSAGE_KIND_4, "mov r1, #0x4");
+            assert_eq!(
+                WALK_SIZE_EXTRA[0], FORWARDED,
+                "r3 (arg4) is live into the size query's dispatcher spill"
+            );
+            assert_eq!(ALLOC_CALLS, 1, "exactly one blx");
+            assert_eq!(
+                WRONG_ALLOC_CALLS, 0,
+                "only vtable slot +0x54 is loaded (ldr r3, [r2, #0x54])"
+            );
+            assert_eq!(
+                ALLOC_OBJECT,
+                core::ptr::addr_of_mut!(chain.object) as *mut u8,
+                "ldr r0, [r5] — the method receives *handle"
+            );
+            assert_eq!(
+                ALLOC_SIZE,
+                QUERIED_SIZE + 4,
+                "add r1, r0, #0x4 — the queried size + 4"
+            );
+            assert_eq!(ALLOC_MODE, 1, "mov r2, #0x1");
+            assert_eq!(WALK_EVENT_COUNT, 2);
+            assert_eq!(WALK_EVENTS[0], WalkEvent::SizeDispatch);
+            assert_eq!(WALK_EVENTS[1], WalkEvent::Alloc);
+        }
+    }
+
+    #[test]
+    fn walk_alloc_bare_size_query_error_skips_the_alloc() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut chain = FakeChain::new();
+        chain.install_alloc(VTABLE_SLOT_54, alloc_method);
+        chain.link();
+        unsafe {
+            install_walk_mocks();
+            WALK_SIZE_RESULTS[0] = SIZE_ERR;
+
+            let status = vtable_query_4c_walk_alloc(
+                chain.handle_ptr(),
+                SELECTOR,
+                SCRATCH,
+                FORWARDED,
+            );
+
+            assert_eq!(status, SIZE_ERR, "cmp r0, #0x0; bne — the status returns verbatim");
+            assert_eq!(WALK_SIZE_CALLS, 1);
+            assert_eq!(ALLOC_CALLS, 0, "no blx past a failed size query");
+            assert_eq!(WALK_EVENT_COUNT, 1);
+            assert_eq!(WALK_EVENTS[0], WalkEvent::SizeDispatch);
+        }
+    }
+
+    #[test]
+    fn walk_alloc_bare_status_5_gets_no_special_case() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut chain = FakeChain::new();
+        chain.install_alloc(VTABLE_SLOT_54, alloc_method);
+        chain.link();
+        unsafe {
+            install_walk_mocks();
+            WALK_SIZE_RESULTS[0] = STATUS_UNSUPPORTED;
+
+            let status = vtable_query_4c_walk_alloc(
+                chain.handle_ptr(),
+                SELECTOR,
+                SCRATCH,
+                FORWARDED,
+            );
+
+            assert_eq!(
+                status, STATUS_UNSUPPORTED,
+                "unlike the read siblings, the bare branch has no cmp #0x5 — \
+                 5 returns verbatim like any error"
+            );
+            assert_eq!(ALLOC_CALLS, 0);
+        }
+    }
+
+    #[test]
+    fn walk_alloc_other_tags_return_zero_without_any_message() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        unsafe {
+            for tag in [COMMIT_TAG, COMMIT_PROBE_TAG, 0x0100_0000] {
+                install_walk_mocks();
+
+                let status = vtable_query_4c_walk_alloc(
+                    fixture.handle_ptr(),
+                    tag | SELECTOR,
+                    SCRATCH,
+                    FORWARDED,
+                );
+
+                assert_eq!(status, 0, "bne 0x0811d524 — mov r0, #0x0");
+                assert_eq!(WALK_QUERY_CALLS, 0, "no query for tag {tag:#x}");
+                assert_eq!(WALK_SIZE_CALLS, 0, "no size query for tag {tag:#x}");
+                assert_eq!(ALLOC_CALLS, 0);
+            }
+        }
+    }
+
+    // ---- walk-alloc: the probe-tag walk loop ------------------------
+
+    #[test]
+    fn walk_alloc_probe_walks_recurses_and_stops_at_the_matching_marker() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut chain = FakeChain::new();
+        chain.install_alloc(VTABLE_SLOT_54, alloc_method);
+        chain.link();
+        unsafe {
+            install_walk_mocks();
+            // Journal: a bare word (recursed into -> size query + alloc),
+            // then the matching commit+probe marker closing the walk.
+            WALK_QUERY_WORDS[0] = JOURNAL_BARE;
+            WALK_QUERY_WORDS[1] = COMMIT_PROBE_TAG | SELECTOR;
+            WALK_SIZE_SIZES[0] = QUERIED_SIZE;
+
+            let status = vtable_query_4c_walk_alloc(
+                chain.handle_ptr(),
+                PROBE_TAG | SELECTOR,
+                SCRATCH,
+                FORWARDED,
+            );
+
+            assert_eq!(status, 0, "the matching marker closes the walk with 0");
+            assert_eq!(WALK_QUERY_CALLS, 2, "one query per journal word");
+            assert_eq!(WALK_QUERY_HANDLE[0], chain.handle_ptr(), "mov r0, r5");
+            assert_eq!(WALK_QUERY_HANDLE[1], chain.handle_ptr());
+            assert_eq!(
+                WALK_QUERY_OUT_INITIAL[0],
+                SCRATCH as u32,
+                "pair[0]'s initial content is the arg3 spill"
+            );
+            assert_eq!(
+                WALK_QUERY_OUT_INITIAL[1], JOURNAL_BARE,
+                "the out-slot is not re-initialized between iterations"
+            );
+            assert_eq!(WALK_QUERY_UNUSED[0], 0, "the thunk discards r2 (mov r2, r1)");
+            assert_eq!(
+                WALK_QUERY_FORWARDED[0], FORWARDED,
+                "r3 (arg4) reaches the FIRST query verbatim"
+            );
+            assert_eq!(
+                WALK_QUERY_FORWARDED[1], 0,
+                "r3 is dead across the first query (method-clobbered)"
+            );
+            assert_eq!(WALK_SIZE_CALLS, 1, "the recursion's bare branch runs once");
+            assert_eq!(
+                WALK_SIZE_EXTRA[0], 0,
+                "the recursion's r3 is dead across the walk query"
+            );
+            assert_eq!(ALLOC_CALLS, 1);
+            assert_eq!(ALLOC_SIZE, QUERIED_SIZE + 4);
+            assert_eq!(ALLOC_MODE, 1);
+            assert_eq!(WALK_EVENT_COUNT, 4);
+            assert_eq!(WALK_EVENTS[0], WalkEvent::Query);
+            assert_eq!(WALK_EVENTS[1], WalkEvent::SizeDispatch);
+            assert_eq!(WALK_EVENTS[2], WalkEvent::Alloc);
+            assert_eq!(WALK_EVENTS[3], WalkEvent::Query);
+        }
+    }
+
+    #[test]
+    fn walk_alloc_probe_recurses_into_foreign_commit_probe_markers() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        unsafe {
+            install_walk_mocks();
+            // A commit+probe marker for a DIFFERENT selector: the
+            // cmpeq r1, r4 fails, the walk recurses into it, and the
+            // recursion's tag is 0xc0000000 — the return-0 branch.
+            WALK_QUERY_WORDS[0] = COMMIT_PROBE_TAG | FOREIGN_SELECTOR;
+            WALK_QUERY_WORDS[1] = COMMIT_PROBE_TAG | SELECTOR;
+
+            let status = vtable_query_4c_walk_alloc(
+                fixture.handle_ptr(),
+                PROBE_TAG | SELECTOR,
+                SCRATCH,
+                FORWARDED,
+            );
+
+            assert_eq!(status, 0);
+            assert_eq!(WALK_QUERY_CALLS, 2, "the foreign marker does not close the walk");
+            assert_eq!(WALK_SIZE_CALLS, 0, "a foreign marker allocs nothing");
+            assert_eq!(ALLOC_CALLS, 0);
+            assert_eq!(WALK_EVENT_COUNT, 2);
+            assert_eq!(WALK_EVENTS[0], WalkEvent::Query);
+            assert_eq!(WALK_EVENTS[1], WalkEvent::Query);
+        }
+    }
+
+    #[test]
+    fn walk_alloc_probe_query_error_returns_verbatim() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        unsafe {
+            install_walk_mocks();
+            WALK_QUERY_RESULTS[0] = WALK_QUERY_ERR;
+
+            let status = vtable_query_4c_walk_alloc(
+                fixture.handle_ptr(),
+                PROBE_TAG | SELECTOR,
+                SCRATCH,
+                FORWARDED,
+            );
+
+            assert_eq!(status, WALK_QUERY_ERR, "cmp r0, #0x0 after the query bl");
+            assert_eq!(WALK_QUERY_CALLS, 1, "the error ends the walk");
+            assert_eq!(WALK_SIZE_CALLS, 0);
+            assert_eq!(ALLOC_CALLS, 0);
+        }
+    }
+
+    #[test]
+    fn walk_alloc_probe_recursion_error_propagates() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut chain = FakeChain::new();
+        chain.install_alloc(VTABLE_SLOT_54, alloc_method);
+        chain.link();
+        unsafe {
+            install_walk_mocks();
+            WALK_QUERY_WORDS[0] = JOURNAL_BARE;
+            WALK_SIZE_RESULTS[0] = SIZE_ERR;
+
+            let status = vtable_query_4c_walk_alloc(
+                chain.handle_ptr(),
+                PROBE_TAG | SELECTOR,
+                SCRATCH,
+                FORWARDED,
+            );
+
+            assert_eq!(
+                status, SIZE_ERR,
+                "ldmiane — the recursion's status propagates verbatim"
+            );
+            assert_eq!(WALK_QUERY_CALLS, 1, "no further queries past the error");
+            assert_eq!(WALK_SIZE_CALLS, 1);
+            assert_eq!(ALLOC_CALLS, 0, "the size query failed before the blx");
+            assert_eq!(WALK_EVENT_COUNT, 2);
+            assert_eq!(WALK_EVENTS[0], WalkEvent::Query);
+            assert_eq!(WALK_EVENTS[1], WalkEvent::SizeDispatch);
+        }
+    }
+
+    // ---- walk-alloc: the wired defaults -----------------------------
+
+    #[test]
+    fn walk_alloc_default_seams_are_wired_to_the_ported_callees() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        unsafe {
+            let dispatch =
+                core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_QUERY_4C_WALK_DISPATCH));
+            let query =
+                core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_QUERY_4C_WALK_QUERY));
+            let expected_dispatch: unsafe extern "C" fn(
+                *mut *mut u8,
+                u32,
+                usize,
+                *const usize,
+            ) -> u32 = vtable_slot_4c_dispatch;
+            let expected_query: unsafe extern "C" fn(
+                *mut *mut u8,
+                *mut u32,
+                usize,
+                usize,
+            ) -> u32 = crate::util::vtable_query::vtable_query_4c_kind4;
+            assert_eq!(
+                dispatch as usize, expected_dispatch as usize,
+                "the size query defaults to the ported slot +0x4c dispatcher"
+            );
+            assert_eq!(
+                query as usize, expected_query as usize,
+                "the walk query defaults to the ported kind-4 query thunk"
+            );
+        }
+    }
+
+    /// End-to-end through the wired-default dispatch seam: the ported
+    /// slot +0x4c dispatcher double-dereferences the fake chain and
+    /// the slot +0x4c method answers the size, then the body's own
+    /// slot +0x54 load performs the alloc.
+    static mut WALK_DIRECT_CALLS: usize = 0;
+    static mut WALK_DIRECT_KIND: u32 = 0;
+    static mut WALK_DIRECT_EXTRA: usize = 0;
+
+    unsafe extern "C" fn walk_direct_method(
+        _object: *mut u8,
+        kind: u32,
+        data: usize,
+        extra: *const usize,
+    ) -> u32 {
+        WALK_DIRECT_CALLS += 1;
+        WALK_DIRECT_KIND = kind;
+        WALK_DIRECT_EXTRA = extra.read();
+        (data as *mut u32).write(QUERIED_SIZE);
+        MOCK_OK
+    }
+
+    #[test]
+    fn walk_alloc_default_dispatch_seam_runs_the_ported_dispatcher() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut chain = FakeChain::new();
+        chain.install(VTABLE_SLOT_4C, walk_direct_method);
+        chain.install_alloc(VTABLE_SLOT_54, alloc_method);
+        chain.link();
+        unsafe {
+            reset_walk_logs();
+            WALK_DIRECT_CALLS = 0;
+
+            let status = vtable_query_4c_walk_alloc(
+                chain.handle_ptr(),
+                SELECTOR,
+                SCRATCH,
+                FORWARDED,
+            );
+
+            assert_eq!(status, MOCK_OK);
+            assert_eq!(WALK_DIRECT_CALLS, 1, "the size query reached the vtable method");
+            assert_eq!(WALK_DIRECT_KIND, MESSAGE_KIND_4);
+            assert_eq!(
+                WALK_DIRECT_EXTRA, FORWARDED,
+                "the ported dispatcher's stmdb sp!, {{r3}} spill exposes arg4"
+            );
+            assert_eq!(ALLOC_CALLS, 1);
+            assert_eq!(ALLOC_SIZE, QUERIED_SIZE + 4);
+            assert_eq!(ALLOC_MODE, 1);
+        }
     }
 
     // ---- recording mocks for the buffer-size-out read seams ---------
