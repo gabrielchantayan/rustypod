@@ -21381,6 +21381,64 @@ functions:
       / write_short_circuits_the_value_message_on_a_first_error /
       write_forwards_the_second_dispatch_return_verbatim.
 
+  - address: 0x0811d52c
+    ghidra: FUN_0811d52c
+    name: vtable_set_50_write_kind2
+    size: 64
+    sig: "u32 vtable_set_50_write_kind2(handle: *mut *mut u8, value: *const u16, forwarded: usize)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1: handle
+      param_2: value
+    notes: >-
+      1 bl call site (grep on decomp/osos.asm): 0x0811d670, the
+      second stage of the unported kind-2 three-stage sibling
+      FUN_0811d64c (open 0x0811d458 -> this call -> tail commit
+      0x0811d340, the vtable_set_50_kind4 shape with this u16 write
+      stage in place of the u32 0x0811d56c) - its nonzero result
+      short-circuits the commit tail call (cmp r0,#0 at 0x0811d674).
+      The 0x0811d550 from the cluster ledger is the bl 0x0811d7fc
+      INSIDE this body (decomp/functions.csv lists no function
+      there), not a separate entry point - not ported separately. The
+      write thunk of the kind-2 (u16) vtable message family (slot
+      +0x50) - the exact 64-byte shape of vtable_set_50_write_kind4
+      (0x0811d56c, one instruction later) with three deltas: mov
+      r0,#0x2 (message word, was #0x4), ldrh r0,[r1] (u16 load, was
+      ldr) and moveq r1,#0x2 on the second dispatch (was #0x4). The
+      FIRST dispatch's r1 stays kind 4 in both siblings (mov r1,#0x4)
+      - the kind-4 body cannot distinguish "first kind = 4" from
+      "first kind = the message word", but this body's #0x4 beside
+      the #0x2 message word proves the first dispatch binds a fixed
+      command kind 4 while the width kind travels in the payload; the
+      value is loaded once as a halfword and zero-extended into the
+      32-bit message word 0. Message layout identical otherwise: stmdb
+      sp!,{r2,r3,r4,lr} spill slots become the two-word message;
+      dispatch(handle, 4, sp+4) sends the kind word alone and, only
+      on 0, dispatch(handle, 2, sp) sends {*value, 2}; nonzero first
+      status returns verbatim, else the second dispatch's status.
+      Deviations: both dispatches route through the retained
+      VTABLE_SLOT_50_DISPATCH read_volatile seam (vtable_slot_50_dispatch
+      is ported; rewiring is a follow-up); the caller's r3 is
+      forwarded verbatim, modeled as a 3rd parameter `forwarded`
+      (vtable_set_50_write_kind4 precedent). Reference C
+      decomp/c/010/0811d52c_FUN_0811d52c.c invents phantom 4th/5th
+      arguments on the first call (FUN_0811d7fc(param_1, 4,
+      &local_c, param_4, *param_2)) and drops the second call's
+      message pointer entirely (FUN_0811d7fc(param_1, 2)) - the
+      dispatcher consumes r0..r3 only (its undefined2 *param_2 does
+      catch the u16 value pointer); the port follows the disassembly.
+      Host tests: two-dispatch count + argument routing (handle
+      verbatim, first kind 4, first message = the kind-2 word, second
+      kind 2, second message = {*value zero-extended, 2}, r3
+      forwarding), ldrh halfword semantics (no high-half junk),
+      first-error short-circuit skipping the value message, and
+      verbatim forwarding of the second dispatch's return -
+      src/app/vtable_set.rs::write_kind2_sends_kind_word_then_value_message_and_routes_arguments
+      / write_kind2_loads_a_halfword_not_a_word /
+      write_kind2_short_circuits_the_value_message_on_a_first_error /
+      write_kind2_forwards_the_second_dispatch_return_verbatim.
+
   - address: 0x082c17ec
     ghidra: FUN_082c17ec
     name: cg_codegen_output

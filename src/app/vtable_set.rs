@@ -138,6 +138,12 @@ const VTABLE_SLOT_4C: usize = 0x4c;
 /// the sibling 0x0811d64c/0x0811d52c pair binds kind 2 for u16 values).
 const MESSAGE_KIND_4: u32 = 4;
 
+/// The message kind the kind-2 sibling binds (the value width, 2
+/// bytes) — the message word and the SECOND dispatch of
+/// [`vtable_set_50_write_kind2`] (0x0811d52c); its first dispatch
+/// still goes out with kind 4, exactly like the kind-4 sibling.
+const MESSAGE_KIND_2: u32 = 2;
+
 /// The top-bit tag the commit stage (0x0811d340) ORs into the selector.
 const COMMIT_TAG: u32 = 0x8000_0000;
 
@@ -843,6 +849,106 @@ pub unsafe extern "C" fn vtable_set_50_write_kind4(
         result = dispatch(
             handle,
             MESSAGE_KIND_4,
+            core::ptr::addr_of!(message[0]) as usize,
+            core::ptr::addr_of!(forwarded_slot),
+        );
+    }
+    result
+}
+
+/// vtable_set_50_write_kind2 — original: `FUN_0811d52c` @ 0x0811d52c
+/// (64 bytes; **1 `bl` call site** — grep on `decomp/osos.asm`:
+/// 0x0811d670, the second stage of the unported kind-2 three-stage
+/// sibling `FUN_0811d64c` (open 0x0811d458 → this call → tail commit
+/// 0x0811d340, the [`vtable_set_50_kind4`] shape with this u16 write
+/// stage in place of the u32 0x0811d56c). The 0x0811d550 noted in the
+/// cluster ledger is the `bl 0x0811d7fc` **inside** this body —
+/// `decomp/functions.csv` lists no function there, so it is not a
+/// separate entry point).
+///
+/// The write thunk of the kind-2 (u16) vtable message family — the
+/// exact 64-byte shape of [`vtable_set_50_write_kind4`] (0x0811d56c,
+/// one instruction later), with three deltas:
+///
+/// ```text
+/// 0811d52c  stmdb sp!, {r2, r3, r4, lr}  @ spill slots become the message
+/// 0811d530  mov   r4, r0                 @ save handle
+/// 0811d534  mov   r0, #0x2               @ (was #0x4)
+/// 0811d538  str   r0, [sp, #0x4]         @ message[1] = kind word 2
+/// 0811d53c  ldrh  r0, [r1, #0x0]         @ r0 = *value (u16, was ldr)
+/// 0811d540  mov   r1, #0x4               @ kind 4 — UNCHANGED!
+/// 0811d544  add   r2, sp, #0x4           @ r2 = &message[1]
+/// 0811d548  str   r0, [sp, #0x0]         @ message[0] = zero-extended *value
+/// 0811d54c  mov   r0, r4
+/// 0811d550  bl    0x0811d7fc             @ dispatch(handle, 4, &kind2)
+/// 0811d554  cmp   r0, #0x0
+/// 0811d558  moveq r2, sp                 @ r2 = &message[0]
+/// 0811d55c  moveq r1, #0x2               @ kind 2 (was #0x4)
+/// 0811d560  moveq r0, r4
+/// 0811d564  bleq  0x0811d7fc             @ dispatch(handle, 2, &{*value, 2})
+/// 0811d568  ldmia sp!, {r2, r3, r4, pc}  @ return the last result
+/// ```
+///
+/// Two messages to the slot +0x50 dispatcher, exactly as the kind-4
+/// sibling: first the kind word alone (r2 points at the stack slot
+/// holding 2), then — only when that returns 0 — the two-word
+/// `{*value, 2}` message starting at `sp`. The value arrives by
+/// pointer in r1 and is loaded ONCE as a HALFWORD (`ldrh`,
+/// zero-extended into the 32-bit message word) before the first
+/// dispatch. The subtle part: the FIRST dispatch's r1 stays kind 4 in
+/// both siblings — where the kind-4 body cannot distinguish "first
+/// kind = 4" from "first kind = the message word", this body's
+/// `mov r1, #0x4` beside `mov r0, #0x2` proves the first dispatch
+/// binds a fixed command kind 4 while the width kind travels in the
+/// message payload; only the SECOND dispatch's r1 carries the width
+/// (`moveq r1, #0x2`). A nonzero first result short-circuits and
+/// returns verbatim; otherwise the second dispatch's error code
+/// returns. The one caller, `FUN_0811d64c`, branches on it
+/// (`cmp r0, #0` at 0x0811d674): nonzero skips the commit tail call
+/// and propagates.
+///
+/// # Deviations
+///
+/// - **The callee 0x0811d7fc is ported** in this module as
+///   [`vtable_slot_50_dispatch`]; both calls still route through the
+///   [`VTABLE_SLOT_50_DISPATCH`] `read_volatile` seam (retained for
+///   hookability — rewiring to a direct call is a follow-up), exactly
+///   as the ported siblings do.
+/// - **The caller's r3 is forwarded verbatim** (nothing between entry
+///   and the dispatcher's `stmdb sp!, {r3}` spill touches it), modeled
+///   as a third parameter `forwarded` — the
+///   [`vtable_set_50_write_kind4`] precedent. No call site sets r3
+///   deliberately.
+/// - **The reference C is not followed where it mis-decompiles**:
+///   `decomp/c/010/0811d52c_FUN_0811d52c.c` invents phantom fourth and
+///   fifth arguments on the first call (`FUN_0811d7fc(param_1, 4,
+///   &local_c, param_4, *param_2)`) and drops the second call's
+///   message pointer entirely (`FUN_0811d7fc(param_1, 2)`) — the
+///   dispatcher consumes r0..r3 only. The port follows the
+///   disassembly. (Its `undefined2 *param_2` does catch the u16 value
+///   pointer.)
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_set_50_write_kind2(
+    handle: *mut *mut u8,
+    value: *const u16,
+    forwarded: usize,
+) -> u32 {
+    let dispatch = core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_SLOT_50_DISPATCH));
+    let mut message = [0u32; 2];
+    message[1] = MESSAGE_KIND_2;
+    message[0] = value.read() as u32;
+    let forwarded_slot = forwarded;
+    let mut result = dispatch(
+        handle,
+        MESSAGE_KIND_4,
+        core::ptr::addr_of!(message[1]) as usize,
+        core::ptr::addr_of!(forwarded_slot),
+    );
+    if result == 0 {
+        result = dispatch(
+            handle,
+            MESSAGE_KIND_2,
             core::ptr::addr_of!(message[0]) as usize,
             core::ptr::addr_of!(forwarded_slot),
         );
@@ -2057,6 +2163,132 @@ mod tests {
 
             let result =
                 vtable_set_50_write_kind4(fixture.handle_ptr(), &value, FORWARDED);
+
+            assert_eq!(DISPATCH_CALLS, 2);
+            assert_eq!(
+                result, WRITE_ERR,
+                "ldmia sp!, {{r2, r3, r4, pc}} returns the second dispatch's r0"
+            );
+        }
+    }
+
+    // ---- vtable_set_50_write_kind2 (0x0811d52c) -------------------
+
+    const VALUE_HALFWORD: u16 = 0x3344;
+
+    #[test]
+    fn write_kind2_sends_kind_word_then_value_message_and_routes_arguments() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let value: u16 = VALUE_HALFWORD;
+        unsafe {
+            install_recording_dispatch();
+
+            let result =
+                vtable_set_50_write_kind2(fixture.handle_ptr(), &value, FORWARDED);
+
+            assert_eq!(result, MOCK_OK);
+            assert_eq!(
+                DISPATCH_CALLS, 2,
+                "two dispatches (bl 0x0811d7fc + bleq 0x0811d7fc)"
+            );
+            // First dispatch: the kind word alone (r2 = sp + 4).
+            assert_eq!(
+                DISPATCH_HANDLE[0],
+                fixture.handle_ptr(),
+                "r0 (handle) passes through untouched"
+            );
+            assert_eq!(
+                DISPATCH_KIND[0], MESSAGE_KIND_4,
+                "r1 stays kind 4 (mov r1, #0x4) even beside the kind-2 message word"
+            );
+            assert_eq!(
+                DISPATCH_WORD0[0], MESSAGE_KIND_2,
+                "the first message is the kind-2 word itself (str r0, [sp, #4] with r0 = 2)"
+            );
+            assert_eq!(
+                DISPATCH_EXTRA[0], FORWARDED,
+                "the caller's r3 reaches the dispatcher's spill"
+            );
+            // Second dispatch: the two-word {*value, 2} message (r2 = sp).
+            assert_eq!(DISPATCH_HANDLE[1], fixture.handle_ptr());
+            assert_eq!(
+                DISPATCH_KIND[1], MESSAGE_KIND_2,
+                "the second dispatch's r1 carries the width kind (moveq r1, #0x2)"
+            );
+            assert_eq!(
+                DISPATCH_WORD0[1], VALUE_HALFWORD as u32,
+                "message word 0 is *value zero-extended (ldrh r0, [r1])"
+            );
+            assert_eq!(
+                DISPATCH_WORD1[1], MESSAGE_KIND_2,
+                "message word 1 is the kind-2 word ([sp+4] = 2)"
+            );
+            assert_eq!(DISPATCH_EXTRA[1], FORWARDED);
+        }
+    }
+
+    #[test]
+    fn write_kind2_loads_a_halfword_not_a_word() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        // The word under the value pointer has junk in its high half;
+        // an `ldr` port would leak it into the message, `ldrh` must not.
+        let wide: u32 = 0xaabb_0000 | VALUE_HALFWORD as u32;
+        let value: *const u16 = core::ptr::addr_of!(wide) as *const u16;
+        unsafe {
+            install_recording_dispatch();
+
+            let result = vtable_set_50_write_kind2(fixture.handle_ptr(), value, FORWARDED);
+
+            assert_eq!(result, MOCK_OK);
+            assert_eq!(DISPATCH_CALLS, 2);
+            assert_eq!(
+                DISPATCH_WORD0[1], VALUE_HALFWORD as u32,
+                "ldrh zero-extends: no high-half junk in message word 0"
+            );
+        }
+    }
+
+    #[test]
+    fn write_kind2_short_circuits_the_value_message_on_a_first_error() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let value: u16 = VALUE_HALFWORD;
+        unsafe {
+            install_recording_dispatch();
+            DISPATCH_RESULTS[0] = WRITE_ERR;
+
+            let result =
+                vtable_set_50_write_kind2(fixture.handle_ptr(), &value, FORWARDED);
+
+            assert_eq!(
+                result, WRITE_ERR,
+                "a nonzero first result returns verbatim (cmp r0, #0; no bleq)"
+            );
+            assert_eq!(
+                DISPATCH_CALLS, 1,
+                "the {{*value, 2}} message is gated on the first dispatch's success"
+            );
+            assert_eq!(DISPATCH_WORD0[0], MESSAGE_KIND_2);
+        }
+    }
+
+    #[test]
+    fn write_kind2_forwards_the_second_dispatch_return_verbatim() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        let value: u16 = VALUE_HALFWORD;
+        unsafe {
+            install_recording_dispatch();
+            DISPATCH_RESULTS[1] = WRITE_ERR;
+
+            let result =
+                vtable_set_50_write_kind2(fixture.handle_ptr(), &value, FORWARDED);
 
             assert_eq!(DISPATCH_CALLS, 2);
             assert_eq!(
