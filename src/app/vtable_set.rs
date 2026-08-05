@@ -3835,6 +3835,223 @@ pub unsafe extern "C" fn vtable_file_record_destruct(record: *mut u8) -> *mut u8
     record
 }
 
+/// The node size [`vtable_file_record_insert`] allocates (`mov r0,
+/// #0x8` ahead of the `bl 0x080eb67c`) — the two-word `{payload, data}`
+/// node [`vtable_file_record_teardown`] later frees twice (the +0x04
+/// data word, then the node itself).
+const FILE_RECORD_NODE_SIZE: usize = 8;
+
+/// The caller tag [`vtable_file_record_insert`] hands `malloc_wrapper`
+/// (`mov r1, #0x19` at 0x0811d0cc) — the same 0x19
+/// [`vtable_file_record_teardown`] frees the nodes with
+/// ([`FILE_RECORD_NODE_FREE_TAG`]).
+const FILE_RECORD_NODE_ALLOC_TAG: usize = 0x19;
+
+/// The bucket lookup behind the `bl 0x0812d160` inside
+/// [`vtable_file_record_insert`]'s inlined tail body. `FUN_0812d160` @
+/// 0x0812d160 (16 bytes; **6 `bl` call sites**, grep on
+/// `decomp/osos.asm`, all inside this registry-facade thunk cluster
+/// 0x0812d178..0x0812d254 — the inner-iterator begin `FUN_0821c4c8`
+/// [`vtable_file_record_teardown`] documents routes through it too;
+/// **unported**):
+///
+/// ```text
+/// 0812d160  stmdb sp!, {r3, lr}   @ spill slot = the value out-slot
+/// 0812d164  mov   r2, sp
+/// 0812d168  bl    0x0810e4c8      @ registry_lookup(registry, key, &slot)
+/// 0812d16c  cmp   r0, #0x0
+/// 0812d170  ldrne r0, [sp, #0x0]  @ hit -> r0 = the registered value
+/// 0812d174  ldmia sp!, {r12, pc}  @ miss -> r0 stays 0 (NULL)
+/// ```
+///
+/// A spill-slot wrapper over the PORTED `app/registry.rs`
+/// `registry_lookup` (0x0810e4c8): the value registered under `key`,
+/// or NULL on a miss. The wired default models the exact chain (the
+/// [`VTABLE_SET_50_KIND4_OPS`] pattern); on firmware it bottoms out in
+/// the registry's vtable dispatches (+0x4c `index_of` / +0x3c
+/// `entry_at` inside `registry_find`), so host tests install a
+/// scripted mock via `core::ptr::addr_of_mut!` instead of running the
+/// default against a real container.
+pub static mut VTABLE_FILE_RECORD_INSERT_LOOKUP: unsafe extern "C" fn(
+    registry: *mut u8,
+    key: u32,
+) -> *mut u8 = insert_lookup_default;
+
+/// Default bucket lookup: the exact 16-byte body of `FUN_0812d160` —
+/// the ported `registry_lookup` (0x0810e4c8) into a stack out-slot,
+/// the value on a hit, NULL on a miss. The original's out-slot is its
+/// uninitialized r3 spill, but the slot is only loaded on a hit
+/// (`ldrne`), after `registry_lookup` wrote it, so seeding NULL here
+/// is exact for the miss path's r0 (the `app/registry.rs`
+/// zeroed-stack-pair deviation precedent).
+unsafe extern "C" fn insert_lookup_default(registry: *mut u8, key: u32) -> *mut u8 {
+    let mut value: *mut u8 = core::ptr::null_mut();
+    let found =
+        crate::app::registry::registry_lookup(registry.cast(), key, &mut value);
+    if found != 0 { value } else { core::ptr::null_mut() }
+}
+
+/// vtable_file_record_insert — original: `FUN_0811d0b8` @ 0x0811d0b8
+/// (160 bytes per `decomp/functions.csv`: the 76-byte body at
+/// 0x0811d0b8 plus the 84-byte shared tail body at 0x0812d1b8 it
+/// tail-branches into — see the deviations; **1 `bl` call site**, grep
+/// on `decomp/osos.asm`: 0x0811ca40 in `FUN_0811c9f0`, which
+/// `malloc_wrapper`s a byte-count-sized block, `memcpy`s (0x08037db0)
+/// its arg4 into it and hands this function the block as arg4 and the
+/// byte count as the stacked arg5 — arg4 is the node PAYLOAD pointer,
+/// arg5 its length. The tag-0x1a sibling `FUN_0811cefc` reaches the
+/// same shared tail with its own `b 0x0812d1b8` at 0x0811cf68, reading
+/// the registry from its record's +0x18 instead of +0x04).
+///
+/// The insert/append operation of the tagged 0x1c-byte file-record
+/// family — the counterpart of the constructors
+/// [`vtable_file_record_construct_kind1`] (0x0811d148) /
+/// [`vtable_file_record_construct_kind2`] (0x0811d104), the teardown
+/// [`vtable_file_record_teardown`] (0x0811d008, which walks exactly
+/// the two-level registry this function builds) and the destructor
+/// [`vtable_file_record_destruct`] (0x0811d188):
+///
+/// ```text
+/// 0811d0b8  stmdb sp!, {r4, r5, r6, r7, r8, r9, r10, lr}
+/// 0811d0bc  mov   r7, r1            @ save key (arg2)
+/// 0811d0c0  mov   r5, r0            @ save record (arg1)
+/// 0811d0c4  ldr   r9, [sp, #0x20]   @ payload (arg5, the stacked word)
+/// 0811d0c8  mov   r0, #0x8
+/// 0811d0cc  mov   r1, #0x19
+/// 0811d0d0  mov   r8, r2            @ save inner_key (arg3)
+/// 0811d0d4  mov   r6, r3            @ save data (arg4)
+/// 0811d0d8  bl    0x080eb67c        @ malloc_wrapper(8, 0x19)
+/// 0811d0dc  mov   r4, r0            @ node
+/// 0811d0e0  bl    0x080edb74        @ checked-alloc guard(node)
+/// 0811d0e4  str   r6, [r4, #0x4]    @ node.+0x04 = data
+/// 0811d0e8  str   r9, [r4, #0x0]    @ node.+0x00 = payload
+/// 0811d0ec  ldr   r0, [r5, #0x4]    @ registry = record.+0x04
+/// 0811d0f0  mov   r3, r4            @ arg4 = node
+/// 0811d0f4  mov   r2, r8            @ arg3 = inner_key
+/// 0811d0f8  mov   r1, r7            @ arg2 = key
+/// 0811d0fc  ldmia sp!, {r4, r5, r6, r7, r8, r9, r10, lr}
+/// 0811d100  b     0x0812d1b8        @ tail: the shared insert body
+///
+/// 0812d1b8  stmdb sp!, {r4, r5, r6, r7, r8, lr}
+/// 0812d1bc  mov   r8, r3            @ save node
+/// 0812d1c0  mov   r7, r2            @ save inner_key
+/// 0812d1c4  mov   r6, r1            @ save key
+/// 0812d1c8  mov   r5, r0            @ save registry
+/// 0812d1cc  bl    0x0812d160        @ bucket = lookup(registry, key)
+/// 0812d1d0  movs  r4, r0
+/// 0812d1d4  bne   0x0812d1f8        @ hit -> insert straight away
+/// 0812d1d8  mov   r0, #0x28
+/// 0812d1dc  bl    0x082aadd4        @ miss: operator_new(0x28)
+/// 0812d1e0  bl    0x0810e64c        @ bucket = class_registry_construct(block)
+/// 0812d1e4  mov   r4, r0
+/// 0812d1e8  mov   r2, r0
+/// 0812d1ec  mov   r0, r5
+/// 0812d1f0  mov   r1, r6
+/// 0812d1f4  bl    0x0810e4ac        @ registry_insert(registry, key, bucket)
+/// 0812d1f8  mov   r2, r8
+/// 0812d1fc  mov   r1, r7
+/// 0812d200  mov   r0, r4
+/// 0812d204  ldmia sp!, {r4, r5, r6, r7, r8, lr}
+/// 0812d208  b     0x0810e4ac        @ tail: registry_insert(bucket, inner_key, node)
+/// ```
+///
+/// An 8-byte node is allocated through the checked wrapper
+/// `malloc_wrapper(8, 0x19)` (0x080eb67c) and handed to the
+/// checked-construct guard 0x080edb74, then filled: **arg4 (data) at
+/// node +0x04, arg5 (payload) at node +0x00**. The registry at record
+/// +0x04 is then looked up for the arg2 key through the thunk
+/// 0x0812d160; on a miss a fresh 0x28 registry is allocated
+/// (`operator_new`), constructed (0x0810e64c, the ported
+/// `app/class_registry.rs` `class_registry_construct`) and itself
+/// inserted into the outer registry keyed by arg2 (0x0810e4ac, the
+/// ported `app/registry.rs` `registry_insert` — its vtable slot +0x1c
+/// dispatch with the `{key, value}` pair on the stack). Either way the
+/// node is finally inserted into the bucket keyed by arg3, through the
+/// same `registry_insert` tail.
+///
+/// # Deviations
+///
+/// - **The port inlines the shared tail body 0x0812d1b8.**
+///   `decomp/functions.csv` lumps it into this function's 160-byte row
+///   (76 + 84) and Ghidra decompiles the pair as one C function; the
+///   tail's only other reach is the tag-0x1a sibling's `b 0x0812d1b8`
+///   at 0x0811cf68. One function per commit — the sibling stays
+///   unported.
+/// - **`malloc_wrapper` (0x080eb67c), `operator_new` (0x082aadd4) and
+///   `registry_insert` (0x0810e4ac) are called DIRECTLY** — all three
+///   ported (`heap/veneers.rs`, `app/registry.rs`; the
+///   app/class_6800.rs ported-callees-called-directly precedent).
+///   Host tests observe the allocations through the `HEAP_OPS.alloc`
+///   slot and drive the insert's vtable +0x1c dispatch with fake
+///   registry vtables.
+/// - **The checked-alloc guard 0x080edb74 and the registry construct
+///   0x0810e64c reuse the EXISTING [`VTABLE_FILE_RECORD_KIND1_GUARD`]
+///   / [`VTABLE_FILE_RECORD_KIND1_CTOR`] seams** — the same callees
+///   the kind-1 constructor seamed (no duplicate seam under a second
+///   name). Note the original here `bl`s 0x0810e64c DIRECTLY (not
+///   through the kind-1's 0x0812d2fc thunk), so the seam's wired
+///   default — which calls the ported `class_registry_construct`
+///   straight — models this call chain even more exactly than the
+///   kind-1 one. The guard's r0 (the node) is dead after the call, so
+///   the seam returns nothing (the kind-1 precedent).
+/// - **The lookup thunk 0x0812d160 is unported** and sits behind the
+///   new [`VTABLE_FILE_RECORD_INSERT_LOOKUP`] seam, whose wired
+///   default models its exact 16-byte body over the ported
+///   `registry_lookup` (see the seam's doc).
+/// - **The record's +0x04 registry field is read POINTER-SIZED**, a
+///   host-representation deviation from the original's 32-bit `ldr
+///   r0, [r5, #0x4]`: the miss path dereferences the registry through
+///   `registry_insert`'s vtable read, so a truncated host pointer
+///   would fault (the [`vtable_file_record_teardown`] node out-slot
+///   precedent). On the 32-bit target the read is byte-identical.
+/// - **The node field stores keep the original's 32-bit `str`
+///   widths** (the [`vtable_file_record_init`] byte-exact precedent):
+///   both words are plain data words — teardown forwards +0x04 to
+///   `free_wrapper` and +0x00 is never dereferenced by the family.
+/// - **The return type is `()`** — the tail chain leaves
+///   `registry_insert`'s result in r0, but the sole call site
+///   discards it (`ldmia sp!, {r3..r9, pc}` at 0x0811ca44 never
+///   touches r0), and the reference C agrees (`void`).
+/// - **No `forwarded` parameter**: the entry `stmdb` spills no
+///   argument registers; r1..r3 are saved into r6..r8 and the stacked
+///   fifth argument is a REAL argument (the [`vtable_file_open`]
+///   record-function precedent, not a message thunk).
+/// - **The reference C is not followed where it mis-decompiles**:
+///   `decomp/c/010/0811d0b8_FUN_0811d0b8.c` gets the node shape right
+///   but drops every argument of the inlined tail — `FUN_0812d160()`
+///   takes the registry and the arg2 key, `FUN_0810e64c()` takes the
+///   fresh `operator_new` block, `FUN_0810e4ac(uVar2, param_2,
+///   piVar3)` is the OUTER insert of the new bucket under arg2 — and
+///   its closing `(**(code **)(*piVar3 + 0x1c))(piVar3,
+///   &stack0xfffffff0)` hides that there are TWO `registry_insert`
+///   calls and that the final one's stack pair is `{arg3, node}`
+///   built inside 0x0810e4ac itself. The port follows the
+///   disassembly.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_file_record_insert(
+    record: *mut u8,
+    key: u32,
+    inner_key: u32,
+    data: u32,
+    payload: u32,
+) {
+    let node = crate::heap::veneers::malloc_wrapper(FILE_RECORD_NODE_SIZE, FILE_RECORD_NODE_ALLOC_TAG);
+    let guard = core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_FILE_RECORD_KIND1_GUARD));
+    guard(node);
+    node.cast::<u32>().add(1).write(data);
+    node.cast::<u32>().write(payload);
+    let registry = record.add(4).cast::<*mut u8>().read();
+    let lookup = core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_FILE_RECORD_INSERT_LOOKUP));
+    let mut bucket = lookup(registry, key);
+    if bucket.is_null() {
+        let ctor = core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_FILE_RECORD_KIND1_CTOR));
+        bucket = ctor(crate::heap::veneers::operator_new(REGISTRY_OBJECT_SIZE));
+        crate::app::registry::registry_insert(registry.cast(), key, bucket);
+    }
+    crate::app::registry::registry_insert(bucket.cast(), inner_key, node);
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -3909,6 +4126,8 @@ mod tests {
                     .write_volatile(destruct_container_teardown_default);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_DESTRUCT_KIND2_DISPOSE)
                     .write_volatile(teardown_registry_dispose_unported);
+                core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_INSERT_LOOKUP)
+                    .write_volatile(insert_lookup_default);
             }
         }
     }
@@ -9127,6 +9346,470 @@ mod tests {
             );
             assert_eq!(DT_FREE_COUNT, 0);
             assert_eq!(record[0], FILE_RECORD_TAG_KIND2);
+        }
+    }
+
+    // ---- vtable_file_record_insert (0x0811d0b8) -----------
+
+    use crate::app::registry::{Registry, RegistryEntry, RegistryVtable};
+
+    const INS_KEY: u32 = 0x1234_5678;
+    const INS_INNER_KEY: u32 = 0x9abc_def0;
+    const INS_DATA: u32 = 0x0daa_0000;
+    const INS_PAYLOAD: u32 = 0x40;
+
+    /// The block the stub allocator hands out for the 8-byte node
+    /// (0x10 bytes, so the test can pin the untouched tail).
+    static mut INS_NODE_ARENA: [u8; 0x10] = [0xa5; 0x10];
+    /// The block it hands out for the miss path's `operator_new(0x28)`.
+    static mut INS_REG_ARENA: [u8; 0x28] = [0; 0x28];
+
+    /// The (size, tag) pairs the stub allocator observed, in order.
+    static mut INS_ALLOC_LOG: [(usize, usize); 4] = [(0, 0); 4];
+    static mut INS_ALLOC_COUNT: usize = 0;
+
+    static mut INS_LOOKUP_CALLS: usize = 0;
+    static mut INS_LOOKUP_REGISTRY: *mut u8 = core::ptr::null_mut();
+    static mut INS_LOOKUP_KEY: u32 = 0;
+    /// The scripted lookup result (NULL = the miss path).
+    static mut INS_LOOKUP_RESULT: *mut u8 = core::ptr::null_mut();
+
+    static mut INS_CTOR_CALLS: usize = 0;
+    static mut INS_CTOR_THIS: *mut u8 = core::ptr::null_mut();
+
+    static mut INS_GUARD_CALLS: usize = 0;
+    static mut INS_GUARD_OBJECT: *mut u8 = core::ptr::null_mut();
+    /// The node's first 8 bytes AS THE GUARD SAW THEM — pins the
+    /// guard-before-stores ordering (0x0811d0e0 before the `str`s).
+    static mut INS_GUARD_NODE_SNAPSHOT: [u8; 8] = [0; 8];
+
+    /// The (registry, key, instance) triples the vtable +0x1c insert
+    /// slot observed, in order.
+    static mut INS_DISPATCH_LOG: [(usize, u32, usize); 4] = [(0, 0, 0); 4];
+    static mut INS_DISPATCH_COUNT: usize = 0;
+
+    /// The recording vtable +0x1c insert slot: captures the container
+    /// and the CONTENTS of the stack pair it is handed ({class_id,
+    /// instance} — the out-buffer the original builds inside
+    /// 0x0810e4ac with `stmia sp, {r1, r2}`).
+    unsafe extern "C" fn recording_insert_slot(
+        this: *mut Registry,
+        entry: *const RegistryEntry,
+    ) -> usize {
+        let entry = entry.read();
+        INS_DISPATCH_LOG[INS_DISPATCH_COUNT] =
+            (this as usize, entry.class_id, entry.instance as usize);
+        INS_DISPATCH_COUNT += 1;
+        0
+    }
+
+    unsafe extern "C" fn ins_stub_assign_at(
+        _this: *mut Registry,
+        _index: i32,
+        _entry: *const RegistryEntry,
+    ) -> usize {
+        unreachable!("the insert paths never dispatch +0x24 assign_at");
+    }
+
+    unsafe extern "C" fn ins_stub_entry_at(
+        _this: *mut Registry,
+        _index: i32,
+        _out: *mut RegistryEntry,
+    ) -> *mut RegistryEntry {
+        unreachable!("the insert paths never dispatch +0x3c entry_at");
+    }
+
+    unsafe extern "C" fn ins_stub_index_of(_this: *mut Registry, _key: *const u32) -> i32 {
+        unreachable!("the insert paths never dispatch +0x4c index_of");
+    }
+
+    unsafe extern "C" fn ins_stub_notify(_this: *mut Registry) -> *mut u8 {
+        unreachable!("the insert paths never dispatch the notification slots");
+    }
+
+    /// The fake registry vtable both stand-in registries share: only
+    /// the +0x1c insert slot is live (the recording mock); every other
+    /// slot traps.
+    static INS_RECORDING_VTABLE: RegistryVtable = RegistryVtable {
+        unresolved_00: [0; 7],
+        insert: recording_insert_slot,
+        unresolved_20: 0,
+        assign_at: ins_stub_assign_at,
+        unresolved_28: [0; 5],
+        entry_at: ins_stub_entry_at,
+        unresolved_40: [0; 3],
+        index_of: ins_stub_index_of,
+        unresolved_50: [0; 4],
+        has_pending_changes: ins_stub_notify,
+        notify_deferred: ins_stub_notify,
+        notify_changed: ins_stub_notify,
+    };
+
+    /// The stand-in OUTER registry (what record.+0x04 points at) and
+    /// the stand-in BUCKET registry (what the lookup / ctor hands back).
+    static mut INS_OUTER_REGISTRY: Registry = Registry {
+        vtable: core::ptr::null(),
+        container: [0; 7],
+        changed: 0,
+        notify_enabled: 0,
+        reserved: [0; 2],
+        observer: core::ptr::null_mut(),
+    };
+    static mut INS_BUCKET_REGISTRY: Registry = Registry {
+        vtable: core::ptr::null(),
+        container: [0; 7],
+        changed: 0,
+        notify_enabled: 0,
+        reserved: [0; 2],
+        observer: core::ptr::null_mut(),
+    };
+
+    unsafe extern "C" fn stub_insert_alloc(
+        _heap: *mut crate::heap::types::HeapDescriptorDescriptor,
+        size: usize,
+        _tag: usize,
+    ) -> *mut u8 {
+        INS_ALLOC_LOG[INS_ALLOC_COUNT] = (size, _tag);
+        INS_ALLOC_COUNT += 1;
+        if size == FILE_RECORD_NODE_SIZE {
+            core::ptr::addr_of_mut!(INS_NODE_ARENA).cast()
+        } else {
+            assert_eq!(size, REGISTRY_OBJECT_SIZE, "only the node and the bucket allocate");
+            core::ptr::addr_of_mut!(INS_REG_ARENA).cast()
+        }
+    }
+
+    /// Swaps the recording allocator in and pre-seeds DEFAULT_HEAP (the
+    /// install_stub_heap precedent).
+    unsafe fn install_insert_heap() {
+        let mut ops = core::ptr::addr_of!(crate::heap::veneers::HEAP_OPS).read_volatile();
+        ops.alloc = stub_insert_alloc;
+        ops.create = stub_open_create;
+        core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS).write_volatile(ops);
+        core::ptr::addr_of_mut!(crate::heap::types::DEFAULT_HEAP)
+            .write_volatile(0x2222_0000 as *mut crate::heap::types::HeapDescriptorDescriptor);
+        INS_ALLOC_COUNT = 0;
+        INS_ALLOC_LOG = [(0, 0); 4];
+        INS_NODE_ARENA = [0xa5; 0x10];
+    }
+
+    unsafe extern "C" fn recording_insert_lookup(registry: *mut u8, key: u32) -> *mut u8 {
+        INS_LOOKUP_CALLS += 1;
+        INS_LOOKUP_REGISTRY = registry;
+        INS_LOOKUP_KEY = key;
+        INS_LOOKUP_RESULT
+    }
+
+    unsafe extern "C" fn recording_insert_ctor(allocation: *mut u8) -> *mut u8 {
+        INS_CTOR_CALLS += 1;
+        INS_CTOR_THIS = allocation;
+        core::ptr::addr_of_mut!(INS_BUCKET_REGISTRY).cast()
+    }
+
+    unsafe extern "C" fn recording_insert_guard(object: *mut u8) {
+        INS_GUARD_CALLS += 1;
+        INS_GUARD_OBJECT = object;
+        core::ptr::copy_nonoverlapping(object, INS_GUARD_NODE_SNAPSHOT.as_mut_ptr(), 8);
+    }
+
+    /// Resets the recorders, installs the lookup/ctor/guard recording
+    /// mocks and the recording heap, and points both stand-in
+    /// registries at the recording vtable (the install_recording_kind1
+    /// precedent). `lookup_result` scripts the hit (a bucket) or the
+    /// miss (NULL).
+    unsafe fn install_recording_insert(lookup_result: *mut u8) {
+        INS_LOOKUP_CALLS = 0;
+        INS_LOOKUP_REGISTRY = core::ptr::null_mut();
+        INS_LOOKUP_KEY = 0;
+        INS_LOOKUP_RESULT = lookup_result;
+        INS_CTOR_CALLS = 0;
+        INS_CTOR_THIS = core::ptr::null_mut();
+        INS_GUARD_CALLS = 0;
+        INS_GUARD_OBJECT = core::ptr::null_mut();
+        INS_GUARD_NODE_SNAPSHOT = [0; 8];
+        INS_DISPATCH_COUNT = 0;
+        INS_DISPATCH_LOG = [(0, 0, 0); 4];
+        install_insert_heap();
+        INS_OUTER_REGISTRY.vtable = &INS_RECORDING_VTABLE;
+        INS_BUCKET_REGISTRY.vtable = &INS_RECORDING_VTABLE;
+        core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_INSERT_LOOKUP)
+            .write_volatile(recording_insert_lookup);
+        core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_KIND1_CTOR)
+            .write_volatile(recording_insert_ctor);
+        core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_KIND1_GUARD)
+            .write_volatile(recording_insert_guard);
+    }
+
+    /// Builds a record whose +0x04 registry field points at the stand-in
+    /// outer registry (pointer-sized — the port's host-representation
+    /// deviation).
+    unsafe fn insert_record(record: &mut [u8; 0x20]) -> *mut u8 {
+        record
+            .as_mut_ptr()
+            .add(4)
+            .cast::<*mut u8>()
+            .write(core::ptr::addr_of_mut!(INS_OUTER_REGISTRY).cast());
+        record.as_mut_ptr()
+    }
+
+    #[test]
+    fn file_record_insert_hit_path_reuses_the_existing_bucket() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = [0xa5u8; 0x20];
+        unsafe {
+            let bucket = core::ptr::addr_of_mut!(INS_BUCKET_REGISTRY).cast::<u8>();
+            install_recording_insert(bucket);
+            let record = insert_record(&mut record);
+
+            vtable_file_record_insert(record, INS_KEY, INS_INNER_KEY, INS_DATA, INS_PAYLOAD);
+
+            assert_eq!(INS_LOOKUP_CALLS, 1, "one bucket lookup");
+            assert_eq!(
+                INS_LOOKUP_REGISTRY,
+                core::ptr::addr_of_mut!(INS_OUTER_REGISTRY).cast::<u8>(),
+                "the lookup gets record.+0x04"
+            );
+            assert_eq!(INS_LOOKUP_KEY, INS_KEY, "keyed by arg2");
+            assert_eq!(INS_ALLOC_COUNT, 1, "a hit allocates ONLY the node");
+            assert_eq!(
+                INS_ALLOC_LOG[0],
+                (FILE_RECORD_NODE_SIZE, FILE_RECORD_NODE_ALLOC_TAG),
+                "malloc_wrapper(8, 0x19)"
+            );
+            assert_eq!(INS_CTOR_CALLS, 0, "no operator_new(0x28), no construct");
+            assert_eq!(INS_DISPATCH_COUNT, 1, "no outer keyed insert on a hit");
+            assert_eq!(
+                INS_DISPATCH_LOG[0],
+                (
+                    bucket as usize,
+                    INS_INNER_KEY,
+                    core::ptr::addr_of_mut!(INS_NODE_ARENA) as usize
+                ),
+                "the node goes into the looked-up bucket keyed by arg3"
+            );
+        }
+    }
+
+    #[test]
+    fn file_record_insert_miss_path_allocates_constructs_and_keyed_inserts_the_bucket() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = [0xa5u8; 0x20];
+        unsafe {
+            install_recording_insert(core::ptr::null_mut()); // the miss
+            let record = insert_record(&mut record);
+
+            vtable_file_record_insert(record, INS_KEY, INS_INNER_KEY, INS_DATA, INS_PAYLOAD);
+
+            assert_eq!(INS_LOOKUP_CALLS, 1);
+            assert_eq!(INS_ALLOC_COUNT, 2, "the node, then the 0x28 bucket");
+            assert_eq!(
+                INS_ALLOC_LOG[0],
+                (FILE_RECORD_NODE_SIZE, FILE_RECORD_NODE_ALLOC_TAG),
+                "malloc_wrapper(8, 0x19)"
+            );
+            assert_eq!(
+                INS_ALLOC_LOG[1],
+                (REGISTRY_OBJECT_SIZE, 2),
+                "operator_new(0x28) — the tag-2 veneer"
+            );
+            assert_eq!(INS_CTOR_CALLS, 1, "class_registry_construct runs once");
+            assert_eq!(
+                INS_CTOR_THIS,
+                core::ptr::addr_of_mut!(INS_REG_ARENA).cast::<u8>(),
+                "the fresh block feeds the construct in r0"
+            );
+            let outer = core::ptr::addr_of_mut!(INS_OUTER_REGISTRY) as usize;
+            let bucket = core::ptr::addr_of_mut!(INS_BUCKET_REGISTRY) as usize;
+            let node = core::ptr::addr_of_mut!(INS_NODE_ARENA) as usize;
+            assert_eq!(INS_DISPATCH_COUNT, 2, "outer bucket insert, then the node insert");
+            assert_eq!(
+                INS_DISPATCH_LOG[0],
+                (outer, INS_KEY, bucket),
+                "registry_insert(registry, arg2, bucket) — the new bucket is \
+                 keyed into the outer registry first"
+            );
+            assert_eq!(
+                INS_DISPATCH_LOG[1],
+                (bucket, INS_INNER_KEY, node),
+                "registry_insert(bucket, arg3, node) — the tail"
+            );
+        }
+    }
+
+    #[test]
+    fn file_record_insert_stores_arg4_and_arg5_into_the_node() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = [0xa5u8; 0x20];
+        unsafe {
+            let bucket = core::ptr::addr_of_mut!(INS_BUCKET_REGISTRY).cast::<u8>();
+            install_recording_insert(bucket);
+            let record = insert_record(&mut record);
+
+            vtable_file_record_insert(record, INS_KEY, INS_INNER_KEY, INS_DATA, INS_PAYLOAD);
+
+            let node = core::ptr::addr_of_mut!(INS_NODE_ARENA).cast::<u8>();
+            assert_eq!(
+                node.cast::<u32>().read(),
+                INS_PAYLOAD,
+                "str r9, [r4, #0x0] — arg5 at node +0x00"
+            );
+            assert_eq!(
+                node.cast::<u32>().add(1).read(),
+                INS_DATA,
+                "str r6, [r4, #0x4] — arg4 at node +0x04"
+            );
+            assert_eq!(
+                &INS_NODE_ARENA[8..],
+                &[0xa5; 8],
+                "bytes past the 8-byte node are untouched"
+            );
+        }
+    }
+
+    #[test]
+    fn file_record_insert_dispatches_vtable_slot_1c_with_the_stack_pair() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = [0xa5u8; 0x20];
+        unsafe {
+            install_recording_insert(core::ptr::null_mut()); // the miss: TWO dispatches
+            let record = insert_record(&mut record);
+
+            vtable_file_record_insert(record, INS_KEY, INS_INNER_KEY, INS_DATA, INS_PAYLOAD);
+
+            // The recording slot captures the CONTENTS of the {key,
+            // value} pair 0x0810e4ac builds on its stack (`stmia sp,
+            // {r1, r2}`) and hands to vtable[+0x1c]: first the outer
+            // {arg2, bucket}, then the bucket's {arg3, node}.
+            assert_eq!(INS_DISPATCH_COUNT, 2);
+            let outer = core::ptr::addr_of_mut!(INS_OUTER_REGISTRY) as usize;
+            let bucket = core::ptr::addr_of_mut!(INS_BUCKET_REGISTRY) as usize;
+            let node = core::ptr::addr_of_mut!(INS_NODE_ARENA) as usize;
+            assert_eq!(INS_DISPATCH_LOG[0].0, outer, "the outer registry's vtable");
+            assert_eq!(
+                (INS_DISPATCH_LOG[0].1, INS_DISPATCH_LOG[0].2),
+                (INS_KEY, bucket),
+                "the stack pair is {{arg2, new bucket}}"
+            );
+            assert_eq!(INS_DISPATCH_LOG[1].0, bucket, "the bucket registry's vtable");
+            assert_eq!(
+                (INS_DISPATCH_LOG[1].1, INS_DISPATCH_LOG[1].2),
+                (INS_INNER_KEY, node),
+                "the stack pair is {{arg3, node}}"
+            );
+        }
+    }
+
+    #[test]
+    fn file_record_insert_runs_the_checked_alloc_guard_on_the_node() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = [0xa5u8; 0x20];
+        unsafe {
+            let bucket = core::ptr::addr_of_mut!(INS_BUCKET_REGISTRY).cast::<u8>();
+            install_recording_insert(bucket);
+            let record = insert_record(&mut record);
+
+            vtable_file_record_insert(record, INS_KEY, INS_INNER_KEY, INS_DATA, INS_PAYLOAD);
+
+            assert_eq!(INS_GUARD_CALLS, 1, "the 0x080edb74 guard runs once");
+            assert_eq!(
+                INS_GUARD_OBJECT,
+                core::ptr::addr_of_mut!(INS_NODE_ARENA).cast::<u8>(),
+                "the guard checks the fresh node (r0 out of malloc_wrapper)"
+            );
+            assert_eq!(
+                INS_GUARD_NODE_SNAPSHOT, [0xa5; 8],
+                "the guard runs BEFORE the node field stores (bl at 0x0811d0e0 \
+                 precedes the strs at 0x0811d0e4/0x0811d0e8)"
+            );
+        }
+    }
+
+    // ---- the VTABLE_FILE_RECORD_INSERT_LOOKUP default ------
+
+    static mut INS_SCRIPTED_INDEX_OF_RESULT: i32 = -1;
+    static mut INS_SCRIPTED_INDEX_OF_KEY: u32 = 0;
+    static mut INS_SCRIPTED_INSTANCE: *mut u8 = core::ptr::null_mut();
+    static mut INS_SCRIPTED_ENTRY_AT_CALLS: usize = 0;
+
+    unsafe extern "C" fn scripted_index_of(_this: *mut Registry, key: *const u32) -> i32 {
+        INS_SCRIPTED_INDEX_OF_KEY = key.read();
+        INS_SCRIPTED_INDEX_OF_RESULT
+    }
+
+    unsafe extern "C" fn scripted_entry_at(
+        _this: *mut Registry,
+        _index: i32,
+        out: *mut RegistryEntry,
+    ) -> *mut RegistryEntry {
+        INS_SCRIPTED_ENTRY_AT_CALLS += 1;
+        out.write(RegistryEntry {
+            class_id: INS_SCRIPTED_INDEX_OF_KEY,
+            instance: INS_SCRIPTED_INSTANCE,
+        });
+        out
+    }
+
+    /// The scripted vtable for the lookup-default test: +0x4c index_of
+    /// and +0x3c entry_at answer, +0x1c insert traps (the lookup never
+    /// inserts).
+    static INS_SCRIPTED_VTABLE: RegistryVtable = RegistryVtable {
+        unresolved_00: [0; 7],
+        insert: recording_insert_slot,
+        unresolved_20: 0,
+        assign_at: ins_stub_assign_at,
+        unresolved_28: [0; 5],
+        entry_at: scripted_entry_at,
+        unresolved_40: [0; 3],
+        index_of: scripted_index_of,
+        unresolved_50: [0; 4],
+        has_pending_changes: ins_stub_notify,
+        notify_deferred: ins_stub_notify,
+        notify_changed: ins_stub_notify,
+    };
+
+    static mut INS_LOOKUP_FAKE: Registry = Registry {
+        vtable: core::ptr::null(),
+        container: [0; 7],
+        changed: 0,
+        notify_enabled: 0,
+        reserved: [0; 2],
+        observer: core::ptr::null_mut(),
+    };
+
+    #[test]
+    fn file_record_insert_lookup_default_chains_the_ported_registry_lookup() {
+        unsafe {
+            let registry = core::ptr::addr_of_mut!(INS_LOOKUP_FAKE);
+            (*registry).vtable = &INS_SCRIPTED_VTABLE;
+
+            // Hit: index_of answers, entry_at fills the pair, the
+            // pair's VALUE word returns (ldrne r0, [sp, #0x0]).
+            INS_SCRIPTED_INDEX_OF_RESULT = 3;
+            INS_SCRIPTED_INSTANCE = 0x5500_0000 as *mut u8;
+            INS_SCRIPTED_ENTRY_AT_CALLS = 0;
+            let hit = insert_lookup_default(registry.cast(), 0x777);
+            assert_eq!(hit, INS_SCRIPTED_INSTANCE);
+            assert_eq!(INS_SCRIPTED_INDEX_OF_KEY, 0x777, "the key reaches index_of");
+            assert_eq!(INS_SCRIPTED_ENTRY_AT_CALLS, 1);
+
+            // Miss: index_of answers -1, entry_at never runs, NULL
+            // returns (r0 stays 0 — the slot is never loaded).
+            INS_SCRIPTED_INDEX_OF_RESULT = -1;
+            INS_SCRIPTED_ENTRY_AT_CALLS = 0;
+            let miss = insert_lookup_default(registry.cast(), 0x888);
+            assert!(miss.is_null());
+            assert_eq!(INS_SCRIPTED_INDEX_OF_KEY, 0x888);
+            assert_eq!(INS_SCRIPTED_ENTRY_AT_CALLS, 0);
         }
     }
 }

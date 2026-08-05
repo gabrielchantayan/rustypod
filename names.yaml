@@ -23561,3 +23561,96 @@ functions:
       / file_record_destruct_kind1_tears_down_and_deletes_both_containers_in_order
       / file_record_destruct_kind2_deletes_the_block_then_disposes_and_deletes_the_registry
       / file_record_destruct_kind2_null_members_is_a_noop.
+
+  - address: 0x0811d0b8
+    ghidra: FUN_0811d0b8
+    name: vtable_file_record_insert
+    size: 160
+    sig: "void vtable_file_record_insert(record: *mut u8, key: u32, inner_key: u32, data: u32, payload: u32)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r0/r5: record
+      param_2/r1/r7: key (the OUTER registry key)
+      param_3/r2/r8: inner_key (the bucket key)
+      param_4/r3/r6: data (stored at node +0x04; the sole call site passes a fresh memcpy'd block)
+      param_5/stack-arg/r9: payload (stored at node +0x00; the sole call site passes the data block's byte count)
+      FUN_080eb67c: malloc_wrapper (direct, ported in heap/veneers) - the checked wrapper, called (8, 0x19)
+      FUN_080edb74: checked-alloc guard (unported; the EXISTING VTABLE_FILE_RECORD_KIND1_GUARD seam - same callee the kind-1 constructor seamed, no duplicate seam)
+      FUN_0812d1b8: the shared 84-byte tail body (lookup-or-create-bucket then insert node), INLINED - functions.csv's 160-byte row lumps it into this function and Ghidra decompiles the pair as one C function; its only other reach is the tag-0x1a sibling FUN_0811cefc's `b 0x0812d1b8` at 0x0811cf68 (that sibling reads the registry at +0x18 and stays unported)
+      FUN_0812d160: bucket lookup thunk (16-byte spill-slot wrapper over the ported registry_lookup 0x0810e4c8, 6 bl sites; unported; new VTABLE_FILE_RECORD_INSERT_LOOKUP seam, wired default models the exact body over registry_lookup)
+      FUN_082aadd4: operator_new (direct, ported in heap/veneers) - the miss path's 0x28 bucket allocation
+      FUN_0810e64c: class_registry_construct (the EXISTING VTABLE_FILE_RECORD_KIND1_CTOR seam - same callee the kind-1 constructor seamed; note the original here bls 0x0810e64c DIRECTLY, not through the kind-1's 0x0812d2fc thunk, so the seam's wired default models this chain exactly)
+      FUN_0810e4ac: registry_insert (direct, ported in app/registry) - the vtable +0x1c dispatch building the {key, value} pair on its stack (stmia sp, {r1, r2}); called twice on a miss (outer keyed bucket insert, then the node insert tail), once on a hit
+    notes: >-
+      1 bl call site (grep on decomp/osos.asm): 0x0811ca40 in
+      FUN_0811c9f0, which malloc_wrappers a byte-count-sized block,
+      memcpys (0x08037db0) its arg4 into it and hands this function
+      the block as arg4 and the byte count as the stacked arg5 - arg4
+      is the node PAYLOAD pointer, arg5 its length. The insert/append
+      operation of the tagged 0x1c-byte file-record family - the
+      counterpart of vtable_file_record_construct_kind1 @ 0x0811d148 /
+      vtable_file_record_construct_kind2 @ 0x0811d104 /
+      vtable_file_record_teardown @ 0x0811d008 (which walks exactly
+      the two-level registry this builds) /
+      vtable_file_record_destruct @ 0x0811d188 (all ported in the
+      same module). An 8-byte node is allocated through
+      malloc_wrapper(8, 0x19) and handed to the checked-alloc guard
+      0x080edb74, then filled (arg4 at node +0x04, arg5 at node +0x00,
+      both 32-bit str); the registry at record +0x04 is looked up for
+      the arg2 key through the thunk 0x0812d160; on a miss a fresh
+      0x28 registry is operator_new'd, constructed (0x0810e64c) and
+      itself inserted into the outer registry keyed by arg2
+      (0x0810e4ac); either way the node is finally inserted into the
+      bucket keyed by arg3 through the same registry_insert tail.
+      Deviations: the port INLINES the shared tail body 0x0812d1b8
+      (see its renames entry); malloc_wrapper, operator_new and
+      registry_insert are called DIRECTLY (all ported - the
+      app/class_6800.rs ported-callees-called-directly precedent;
+      host tests observe the allocations through HEAP_OPS.alloc and
+      drive the +0x1c dispatch with fake registry vtables); the guard
+      and the registry construct REUSE the existing
+      VTABLE_FILE_RECORD_KIND1_GUARD / VTABLE_FILE_RECORD_KIND1_CTOR
+      read_volatile seams (same callees the kind-1 constructor seamed
+      - no duplicate seam under a second name); the unported lookup
+      thunk 0x0812d160 sits behind the new
+      VTABLE_FILE_RECORD_INSERT_LOOKUP seam whose wired default
+      models its exact 16-byte body over the ported registry_lookup
+      (the original's uninitialized r3 spill out-slot is seeded NULL
+      - exact for the miss path's r0, the app/registry.rs
+      zeroed-stack-pair precedent); the record's +0x04 registry field
+      is read POINTER-SIZED, a host-representation deviation from the
+      32-bit `ldr r0, [r5, #0x4]` (the miss path dereferences the
+      registry through registry_insert's vtable read, so a truncated
+      host pointer would fault - the vtable_file_record_teardown node
+      out-slot precedent; byte-identical on the 32-bit target); the
+      node field stores keep the 32-bit str widths (the
+      vtable_file_record_init byte-exact precedent); the return type
+      is () - the tail chain leaves registry_insert's result in r0
+      but the sole call site discards it; no forwarded parameter (the
+      entry stmdb spills no argument registers and the stacked fifth
+      argument is REAL). Reference C
+      (decomp/c/010/0811d0b8_FUN_0811d0b8.c) gets the node shape
+      right but drops every argument of the inlined tail -
+      FUN_0812d160() takes (registry, arg2), FUN_0810e64c() takes the
+      fresh operator_new block, FUN_0810e4ac(uVar2, param_2, piVar3)
+      is the OUTER keyed insert of the new bucket - and its closing
+      `(**(code **)(*piVar3 + 0x1c))(piVar3, &stack0xfffffff0)` hides
+      that there are TWO registry_insert calls and that the final
+      one's stack pair is {arg3, node} built inside 0x0810e4ac
+      itself; the port follows the disassembly. match.py: same chain
+      - malloc (the ported veneer's inlined lazy-init body standing
+      in for bl 0x080eb67c), guard blx (the KIND1_GUARD seam), the
+      two node stores fused into one stm, the record +0x04 load, the
+      lookup blx (the INSERT_LOOKUP seam), the cmp/bne hit branch,
+      the miss path's mov r0,#0x28 -> operator_new -> ctor blx (the
+      KIND1_CTOR seam) -> keyed insert, and the tail b to the final
+      insert; the diff is the crate fp frame, the three seam ldr/blx
+      pairs and the direct ported calls' unresolved bl relocations
+      (match.py prints them as bl 0). Host tests:
+      src/app/vtable_set.rs::file_record_insert_hit_path_reuses_the_existing_bucket
+      / file_record_insert_miss_path_allocates_constructs_and_keyed_inserts_the_bucket
+      / file_record_insert_stores_arg4_and_arg5_into_the_node
+      / file_record_insert_dispatches_vtable_slot_1c_with_the_stack_pair
+      / file_record_insert_runs_the_checked_alloc_guard_on_the_node
+      / file_record_insert_lookup_default_chains_the_ported_registry_lookup.
