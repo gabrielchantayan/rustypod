@@ -36,6 +36,9 @@
 //!   (16 bytes; 9 `bl` + 2 tail `b` call sites). The bounded-store
 //!   helper the register collectors append through: store at the
 //!   cursor and advance it, unless it already equals `end`.
+//! - `cg_label_add_fixup` — original: `FUN_082c17ac` @ 0x082c17ac
+//!   (64 bytes; 4 `bl` call sites). Prepends the current output position
+//!   to a label's fixup list.
 //! - `cg_inst_visit_by_kind` — original: `FUN_082c1adc` @ 0x082c1adc
 //!   (288 bytes; 4 `bl` call sites). Collects the registers an
 //!   instruction DEFINES into a bounded output array, dispatching on the
@@ -114,6 +117,25 @@ pub struct CgModule {
     _opaque: [u8; 0],
 }
 
+/// `cg_codegen_t` — owns the arena and the emitted-code buffer used by
+/// label fixups.
+#[repr(C)]
+pub struct CgCodegen {
+    _opaque: [u8; 0],
+}
+
+/// `cg_label_t` — a generated-code label and its pending fixups.
+#[repr(C)]
+pub struct CgLabel {
+    _opaque: [u8; 0],
+}
+
+/// `cg_label_fixup_t` — one pending patch position on a [`CgLabel`].
+#[repr(C)]
+pub struct CgLabelFixup {
+    _opaque: [u8; 0],
+}
+
 /// `cg_proc_t` — one procedure being built: owns the virtual registers.
 #[repr(C)]
 pub struct CgProc {
@@ -149,6 +171,25 @@ pub struct CgVirtualRegList {
 
 /// `cg_module_t + 0x00` — the IR arena.
 pub const CG_MODULE_HEAP: usize = 0;
+/// `cg_codegen_t + 0x08` — the JIT arena used for label metadata.
+pub const CG_CODEGEN_HEAP: usize = 2;
+/// `cg_codegen_t + 0x10` — the emitted-code buffer.
+pub const CG_CODEGEN_OUTPUT: usize = 4;
+/// `cg_codegen_buffer_t + 0x804` — current output position, read by
+/// `FUN_082c23d4`.
+pub const CG_CODEGEN_OUTPUT_OFFSET: usize = 0x804 / 4;
+
+/// `cg_label_t + 0x04` — head of its pending-fixup list.
+pub const CG_LABEL_FIXUPS: usize = 1;
+
+/// `cg_label_fixup_t + 0x00` — next pending fixup.
+pub const CG_LABEL_FIXUP_NEXT: usize = 0;
+/// `cg_label_fixup_t + 0x04` — one-byte patch encoding tag.
+pub const CG_LABEL_FIXUP_TAG: usize = 1;
+/// `cg_label_fixup_t + 0x08` — emitted-code offset to patch.
+pub const CG_LABEL_FIXUP_OFFSET: usize = 2;
+/// Size of `cg_label_fixup_t` in target bytes.
+pub const CG_LABEL_FIXUP_BYTES: usize = 12;
 
 /// `cg_proc_t + 0x04` — owning module.
 pub const CG_PROC_MODULE: usize = 1;
@@ -322,6 +363,41 @@ unsafe fn word(record: *mut u8, index: usize) -> *mut usize {
 #[inline(always)]
 unsafe fn module_heap(module: *mut u8) -> *mut CgHeap {
     slot(module, CG_MODULE_HEAP).read() as *mut CgHeap
+}
+
+/// cg_label_add_fixup — original: `FUN_082c17ac` @ 0x082c17ac (64 bytes).
+///
+/// Allocates a 12-byte pending-label-fixup record from `codegen->heap`,
+/// obtains the current emitted-code position through `FUN_082c23d4`
+/// (`codegen->output->current_offset`), and prepends the record to
+/// `label->fixups`. The tag is intentionally stored as one byte, exactly as
+/// the original's `strb`.
+///
+/// `FUN_082c23d4` itself remains unported: its complete 4-byte body is the
+/// one load of `output + 0x804` performed here at its sole ported call site;
+/// no second exported function is introduced.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_label_add_fixup(
+    codegen: *mut CgCodegen,
+    label: *mut CgLabel,
+    tag: u32,
+) {
+    let codegen = codegen as *mut u8;
+    let label = label as *mut u8;
+    let fixup = cg_heap_alloc(
+        slot(codegen, CG_CODEGEN_HEAP).read() as *mut CgHeap,
+        record_size(CG_LABEL_FIXUP_BYTES),
+    );
+
+    // `bl FUN_082c23d4`: return output->current_offset (+0x804).
+    let output = slot(codegen, CG_CODEGEN_OUTPUT).read();
+    word(fixup, CG_LABEL_FIXUP_OFFSET).write(word(output, CG_CODEGEN_OUTPUT_OFFSET).read());
+
+    let label_fixups = slot(label, CG_LABEL_FIXUPS);
+    slot(fixup, CG_LABEL_FIXUP_NEXT).write(label_fixups.read());
+    fixup.add(CG_LABEL_FIXUP_TAG * WORD).write(tag as u8);
+    label_fixups.write(fixup);
 }
 
 /// cg_virtual_reg_create — original: `FUN_082c23dc` @ 0x082c23dc
@@ -892,6 +968,8 @@ mod tests {
         module: [usize; 1],
         proc: [usize; 9],
         block: [usize; 5],
+        codegen: [usize; 5],
+        output: [usize; CG_CODEGEN_OUTPUT_OFFSET + 1],
     }
 
     impl Fixture {
@@ -902,10 +980,14 @@ mod tests {
                 module: [0; 1],
                 proc: [0; 9],
                 block: [0; 5],
+                codegen: [0; 5],
+                output: [0; CG_CODEGEN_OUTPUT_OFFSET + 1],
             });
             f.module[CG_MODULE_HEAP] = heap as usize;
             f.proc[CG_PROC_MODULE] = f.module.as_ptr() as usize;
             f.block[CG_BLOCK_PROC] = f.proc.as_ptr() as usize;
+            f.codegen[CG_CODEGEN_HEAP] = heap as usize;
+            f.codegen[CG_CODEGEN_OUTPUT] = f.output.as_mut_ptr() as usize;
             f
         }
 
@@ -915,6 +997,10 @@ mod tests {
 
         fn block_ptr(&mut self) -> *mut CgBlock {
             self.block.as_mut_ptr() as *mut CgBlock
+        }
+
+        fn codegen_ptr(&mut self) -> *mut CgCodegen {
+            self.codegen.as_mut_ptr() as *mut CgCodegen
         }
     }
 
@@ -928,6 +1014,7 @@ mod tests {
         let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             core::ptr::addr_of_mut!(CG_HEAP_OPS).write(CgHeapOps {
+
                 alloc: poisoning_alloc,
                 free: poisoning_free,
                 zero: DEFAULT_CG_HEAP_OPS.zero,
@@ -968,6 +1055,50 @@ mod tests {
     /// to 8 bytes.
     fn stride(target_bytes: usize) -> usize {
         (record_size(target_bytes) + 7) & !7
+    }
+
+    #[test]
+    fn label_fixup_allocates_stamps_and_prepends_with_a_unit_return() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        let mut label = [0usize; 3];
+        let mut prior_fixup = [0usize; 3];
+        label[CG_LABEL_FIXUPS] = prior_fixup.as_mut_ptr() as usize;
+        f.output[CG_CODEGEN_OUTPUT_OFFSET] = 0x1234_5678;
+
+        unsafe {
+            let block = (*f.heap).current;
+            let expected = (*block).base.add((*block).current);
+            let before = (*block).current;
+            let returned: () =
+                cg_label_add_fixup(f.codegen_ptr(), label.as_mut_ptr() as *mut CgLabel, 0xfeed_be5a);
+            let fixup = label[CG_LABEL_FIXUPS] as *mut u8;
+
+            assert_eq!(fixup, expected, "the 12-byte record comes from codegen->heap");
+            assert_eq!(
+                (*block).current,
+                before + stride(CG_LABEL_FIXUP_BYTES),
+                "cg_heap_alloc advances by its eight-byte-rounded request"
+            );
+            assert_eq!(
+                word(fixup, CG_LABEL_FIXUP_OFFSET).read(),
+                0x1234_5678,
+                "the value returned by FUN_082c23d4 is the patch position"
+            );
+            assert_eq!(
+                slot(fixup, CG_LABEL_FIXUP_NEXT).read(),
+                prior_fixup.as_mut_ptr() as *mut u8,
+                "the prior label head is linked before the label head changes"
+            );
+            assert_eq!(
+                fixup.add(CG_LABEL_FIXUP_TAG * WORD).read(),
+                0x5a,
+                "`strb` retains only the tag's low byte"
+            );
+            assert_eq!(returned, (), "the ARM function has a void return ABI");
+        }
+        drop(f);
+        teardown();
     }
 
     #[test]

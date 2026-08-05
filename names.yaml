@@ -10355,6 +10355,8 @@ functions:
       back to label->fixups. The label creator @ 0x082c0dec has the
       matching 12-byte layout: next label at +0x00, fixup head at
       +0x04, and bound offset at +0x08.
+      The Rust port preserves that store sequence and scales pointer slots
+      by word width so the target layout remains disjoint on host tests.
 
   - address: 0x082c17f4
     ghidra: FUN_082c17f4
