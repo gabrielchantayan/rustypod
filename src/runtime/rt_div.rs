@@ -122,7 +122,11 @@ pub unsafe extern "C" fn __rt_udiv(num: u32, den: u32) -> u32 {
 
 /// `__rt_udiv` @ 0x08036f14 — unsigned divide, quotient returned and
 /// remainder stored through `rem`.
+// `#[inline(never)]` like the quotient-only variant above: intra-crate
+// callers (btree_parse_cell_ptr's overflow split) keep the original's
+// `bl` call boundary for match.py review.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn __rt_udivmod(num: u32, den: u32, rem: *mut u32) -> u32 {
     let (quot, r) = udiv_entry(num, den);
     *rem = r;

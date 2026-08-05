@@ -17,7 +17,8 @@
 //!
 //! The whole body is one call and one halfword load: build a `CellInfo`
 //! on the stack, hand it to `sqlite3BtreeParseCellPtr` @ 0x083727ec
-//! (identified, not yet ported), and return the `u16` at info +0x1e —
+//! (ported in `sqlite/parse_cell.rs`), and return the `u16` at info
+//! +0x1e —
 //! `nSize`, the total number of bytes the cell occupies on the b-tree
 //! page. The +0x1e offset is from the disassembly (`ldrh r0,[sp,#0x1e]`
 //! @ 0x082c0a60), not Ghidra's `local_a` bookkeeping.
@@ -48,11 +49,13 @@
 //! Deviations:
 //!
 //! - The parse call goes through the [`BTREE_CELL_OPS`] dispatch
-//!   boundary (house pattern — see `sqlite/blob_to_hex.rs`) because
-//!   0x083727ec is not ported yet. The default slot zeroes the whole
-//!   `CellInfo`, so an unconfigured build reports every cell as size 0
-//!   rather than reading an uninitialized stack slot; nothing in the
-//!   shipped firmware consumes this port yet (no hooks.yaml entry).
+//!   boundary (house pattern — see `sqlite/blob_to_hex.rs`). The shipped
+//!   default is now the ported parser in `sqlite/parse_cell.rs`, whose
+//!   own unported reaches (the varint readers 0x0837ac30 and 0x0837aab0)
+//!   are sibling slots on the same static with zero-writing stand-ins;
+//!   the zero-fill parser stand-in (`missing_parse_cell`) remains for
+//!   tests. Nothing in the shipped firmware consumes this port yet (no
+//!   hooks.yaml entry).
 //! - The original's stack frame is 0x24 bytes (0x20 of `CellInfo` plus
 //!   alignment slop) and is NOT initialized; the port zero-initializes
 //!   its 0x20-byte buffer so the default slot's `nSize` is defined
@@ -65,13 +68,21 @@ const CELL_INFO_SIZE: usize = 0x20;
 /// Byte offset of `CellInfo.nSize` (original: `ldrh r0,[sp,#0x1e]`).
 const N_SIZE_OFFSET: usize = 0x1e;
 
-/// The one unported service `cell_size_ptr` reaches: the b-tree cell
-/// parser @ 0x083727ec.
+/// The unported services the b-tree cell cluster reaches: the parser
+/// itself (ported — that slot's default is the real thing), plus the
+/// two varint readers the parser calls, which are identified but not
+/// yet ported and so ride the same seam.
 #[derive(Clone, Copy)]
 pub struct BtreeCellOps {
-    /// `sqlite3BtreeParseCellPtr`: parse the cell at `cell` on `page`
-    /// and fill the 0x20-byte `CellInfo` at `info`.
+    /// `sqlite3BtreeParseCellPtr` @ 0x083727ec: parse the cell at
+    /// `cell` on `page` and fill the 0x20-byte `CellInfo` at `info`.
     pub parse_cell: unsafe extern "C" fn(page: *const u8, cell: *const u8, info: *mut u8),
+    /// `sqlite3GetVarint` @ 0x0837ac30 (identified, unported): decode
+    /// the 64-bit varint at `p` into `out`, return the byte count.
+    pub get_varint: unsafe extern "C" fn(p: *const u8, out: *mut u64) -> u32,
+    /// `sqlite3GetVarint32` @ 0x0837aab0 (identified, unported): decode
+    /// the 32-bit varint at `p` into `out`, return the byte count.
+    pub get_varint32: unsafe extern "C" fn(p: *const u8, out: *mut u32) -> u32,
 }
 
 /// Default boundary while 0x083727ec is unported. Zero-filling is the
@@ -82,14 +93,32 @@ unsafe extern "C" fn missing_parse_cell(_page: *const u8, _cell: *const u8, info
     core::ptr::write_bytes(info, 0, CELL_INFO_SIZE);
 }
 
-/// Wired default for [`BTREE_CELL_OPS`].
+/// Stand-in for the unported `sqlite3GetVarint` @ 0x0837ac30: a single
+/// zero byte is a complete varint (value 0, length 1), which is the
+/// only honest answer a reader that does not exist yet can give.
+unsafe extern "C" fn missing_get_varint(_p: *const u8, out: *mut u64) -> u32 {
+    *out = 0;
+    1
+}
+
+/// Stand-in for the unported `sqlite3GetVarint32` @ 0x0837aab0, same
+/// reasoning as [`missing_get_varint`].
+unsafe extern "C" fn missing_get_varint32(_p: *const u8, out: *mut u32) -> u32 {
+    *out = 0;
+    1
+}
+
+/// Wired default for [`BTREE_CELL_OPS`]: the ported parser, zero
+/// stand-ins for its unported varint readers.
 pub const DEFAULT_BTREE_CELL_OPS: BtreeCellOps = BtreeCellOps {
-    parse_cell: missing_parse_cell,
+    parse_cell: crate::sqlite::parse_cell::btree_parse_cell_ptr,
+    get_varint: missing_get_varint,
+    get_varint32: missing_get_varint32,
 };
 
-/// Active model of the parser call in [`cell_size_ptr`]. Host tests
-/// replace it to observe the exact arguments; a later port of 0x083727ec
-/// replaces the default without touching this caller.
+/// Active model of the parser call in [`cell_size_ptr`] and of the
+/// varint reads in `sqlite::parse_cell`. Host tests replace slots to
+/// observe the exact arguments.
 pub static mut BTREE_CELL_OPS: BtreeCellOps = DEFAULT_BTREE_CELL_OPS;
 
 /// Reads the hook slot. Volatile so LLVM cannot constant-fold the load
@@ -97,6 +126,20 @@ pub static mut BTREE_CELL_OPS: BtreeCellOps = DEFAULT_BTREE_CELL_OPS;
 #[inline(always)]
 unsafe fn parse_cell_op() -> unsafe extern "C" fn(*const u8, *const u8, *mut u8) {
     core::ptr::read_volatile(core::ptr::addr_of!(BTREE_CELL_OPS.parse_cell))
+}
+
+/// Reads the `sqlite3GetVarint` slot. Volatile, same rationale as
+/// `parse_cell_op` above.
+#[inline(always)]
+pub(crate) unsafe fn get_varint_op() -> unsafe extern "C" fn(*const u8, *mut u64) -> u32 {
+    core::ptr::read_volatile(core::ptr::addr_of!(BTREE_CELL_OPS.get_varint))
+}
+
+/// Reads the `sqlite3GetVarint32` slot. Volatile, same rationale as
+/// `parse_cell_op` above.
+#[inline(always)]
+pub(crate) unsafe fn get_varint32_op() -> unsafe extern "C" fn(*const u8, *mut u32) -> u32 {
+    core::ptr::read_volatile(core::ptr::addr_of!(BTREE_CELL_OPS.get_varint32))
 }
 
 /// cell_size_ptr — original: `FUN_082c0a50` @ 0x082c0a50 (28 bytes;
@@ -118,13 +161,11 @@ mod tests {
     extern crate std;
 
     use super::*;
+    use crate::testing::BTREE_CELL_TEST_LOCK;
     use std::sync::atomic::{AtomicU16, Ordering};
     use std::sync::{Mutex, MutexGuard};
     use std::vec;
     use std::vec::Vec;
-
-    /// Serializes the hook-swapping tests.
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     /// Arguments the mock parser saw, as raw pointer values.
     static SEEN: Mutex<Vec<(usize, usize)>> = Mutex::new(Vec::new());
@@ -165,15 +206,15 @@ mod tests {
         }
     }
 
-    /// Installs the mock parser and restores the shipped default on
-    /// drop.
+    /// Installs the mock parser and restores the shipped default (the
+    /// ported parser in `sqlite::parse_cell`) on drop.
     struct Fixture {
         _guard: MutexGuard<'static, ()>,
     }
 
     impl Fixture {
         fn new() -> Self {
-            let guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let guard = BTREE_CELL_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             SEEN.lock().unwrap().clear();
             unsafe {
                 (*core::ptr::addr_of_mut!(BTREE_CELL_OPS)).parse_cell = mock_parse_cell;
@@ -189,7 +230,8 @@ mod tests {
     impl Drop for Fixture {
         fn drop(&mut self) {
             unsafe {
-                (*core::ptr::addr_of_mut!(BTREE_CELL_OPS)).parse_cell = missing_parse_cell;
+                (*core::ptr::addr_of_mut!(BTREE_CELL_OPS)).parse_cell =
+                    DEFAULT_BTREE_CELL_OPS.parse_cell;
             }
         }
     }
@@ -233,11 +275,24 @@ mod tests {
     }
 
     #[test]
-    fn shipped_default_reports_zero() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    fn zero_fill_stand_in_reports_zero() {
+        let _guard = BTREE_CELL_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             (*core::ptr::addr_of_mut!(BTREE_CELL_OPS)).parse_cell = missing_parse_cell;
         }
         assert_eq!(unsafe { cell_size_ptr(PAGE.as_ptr(), CELL.as_ptr()) }, 0);
+    }
+
+    #[test]
+    fn shipped_default_is_the_ported_parser() {
+        let _guard = BTREE_CELL_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            assert_eq!(
+                core::ptr::read_volatile(core::ptr::addr_of!(BTREE_CELL_OPS.parse_cell))
+                    as usize,
+                crate::sqlite::parse_cell::btree_parse_cell_ptr as *const () as usize,
+                "the shipped parse_cell slot is the ported sqlite3BtreeParseCellPtr"
+            );
+        }
     }
 }

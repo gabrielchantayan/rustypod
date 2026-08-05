@@ -83,6 +83,7 @@ pub mod mem_finalize;
 pub mod mem_release;
 pub mod name_from_token;
 pub mod parse;
+pub mod parse_cell;
 pub mod parse_expr;
 pub mod select_height;
 pub mod set_string_formatted;

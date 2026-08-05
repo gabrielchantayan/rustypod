@@ -13236,9 +13236,12 @@ functions:
       pCell +0x00, nKey/nData pair +0x08/+0x0c, payload u32s +0x10/+0x14,
       then u16s nHeader +0x18, nLocal +0x1a, iOverflow +0x1c, nSize +0x1e.
       The parse call goes through the BTREE_CELL_OPS dispatch boundary
-      (house pattern) with a zero-filling default while 0x083727ec is
-      unported — an unconfigured build reports nSize 0 for every cell;
-      nothing in the firmware consumes the port yet (no hooks.yaml entry).
+      (house pattern). Follow-up: 0x083727ec is now ported
+      (sqlite/parse_cell.rs) and is the shipped parse_cell default; the
+      zero-fill stand-in remains for tests and the two unported varint
+      readers (0x0837ac30/0x0837aab0) joined the same seam static.
+      Nothing in the firmware consumes the port yet (no hooks.yaml
+      entry).
       Deviations: the port zero-initializes its 0x20-byte buffer (the
       original's stack slot is uninitialized) so the default slot's
       result is defined. match.py: same stack CellInfo and the identical
@@ -13247,7 +13250,75 @@ functions:
       direct bl (callee unported). Host tests:
       returns_the_n_size_halfword_at_0x1e,
       passes_page_and_cell_through_verbatim,
-      result_tracks_only_the_0x1e_field, shipped_default_reports_zero.
+      result_tracks_only_the_0x1e_field, zero_fill_stand_in_reports_zero,
+      shipped_default_is_the_ported_parser.
+
+  # ---- B-tree cell parser (src/sqlite/parse_cell.rs) ----
+  - address: 0x083727ec
+    ghidra: FUN_083727ec
+    name: btree_parse_cell_ptr
+    size: 296
+    sig: "void btree_parse_cell_ptr(const MemPage *page, const u8 *cell, CellInfo *info)"
+    module: sqlite/parse_cell
+    status: ported
+    vars: {param_1: page, param_2: cell, param_3: info}
+    notes: >-
+      SQLite 3.5.x sqlite3BtreeParseCellPtr (btree.c's parseCellPtr):
+      decode one b-tree cell's header into the 0x20-byte CellInfo
+      (layout in the cell_size_ptr entry above). 9 bl call sites:
+      0x082b6624, 0x082b6914, 0x082c0a5c (the ported cell_size_ptr),
+      0x082c2ad8, 0x082c3468, 0x082cdfe0, 0x082d6924, 0x082d98c4,
+      0x082e87b0. MemPage fields read: intKey +0x03, leaf +0x07,
+      childPtrSize +0x09, maxLocal +0x0a (u16), minLocal +0x0c (u16),
+      pBt +0x40 (u32; BtShared.usableSize at its +0x1e). Algorithm,
+      verified against osos.asm (Ghidra's decompile obscures the
+      __rt_udiv remainder as extraout_r1 and flips the signed
+      strhgt/strhle): info.pCell = cell; header cursor starts at
+      childPtrSize; leaf pages decode the payload varint — first byte
+      < 0x80 is inlined (value = byte, len 1), multi-byte calls
+      sqlite3GetVarint @ 0x0837ac30 — internal pages skip it (0);
+      table pages (intKey != 0) decode the rowid varint ALWAYS through
+      sqlite3GetVarint32 @ 0x0837aab0 (no inline fast path) into +0x08,
+      +0x0c untouched; index pages decode the nData varint through the
+      same inline/GetVarint pair into +0x08, zero +0x0c, and add nData
+      to the payload; +0x10 = payload varint, +0x14 = total payload,
+      +0x18 = header length. nPayload <= maxLocal: nLocal = nPayload,
+      iOverflow = 0, nSize = max(nPayload + header, 4) (signed movlt
+      clamp). Overflow: nLocal = minLocal + (nPayload - minLocal) %
+      (usableSize - 4) via __rt_udiv @ 0x08036f14 (the original uses
+      the r1 remainder, not the r0 quotient), collapsed to minLocal
+      when the surplus exceeds maxLocal; iOverflow = nLocal + header,
+      nSize = iOverflow + 4. Callees: sqlite3GetVarint 0x0837ac30 and
+      sqlite3GetVarint32 0x0837aab0 are identified but unported — they
+      ride the BTREE_CELL_OPS seam (same house static cell_size_ptr
+      dispatches through; zero-writing stand-in defaults returning
+      length 1); __rt_udiv 0x08036f14 is ported (runtime/rt_div) and is
+      called as __rt_udivmod for the remainder, which gained
+      #[inline(never)] so the bl call boundary survives for match.py
+      (the __rt_udiv precedent). Deviations: CellInfo writes go through
+      unaligned accessors (the port's *mut u8 carries no alignment
+      promise; LLVM lowers them to byte stores where the original has
+      aligned str/strh — the shipped caller's stack CellInfo is
+      aligned, so this is host-defensiveness only), and info.pCell
+      stores the 32-bit pointer value (host fixtures live below 4 GiB
+      to round-trip). match.py (--size 296): same branch skeleton —
+      leaf fast path (LLVM: ldrsb/cmn/ble sign trick for the < 0x80
+      test), blx through the seam slots where the original has direct
+      bl 0x0837ac30/0x0837aab0 (unported), bl __rt_udivmod for the
+      original's bl 0x08036f14, unsigned-equivalent compares (bls/movhi
+      for bcc/strhgt-strhle, movls for the movlt floor — inputs are
+      u16-bounded so signed/unsigned coincide), strb-expanded CellInfo
+      stores. Host tests:
+      int_key_internal_cell_is_rowid_varint_only,
+      table_leaf_cell_single_byte_varints_skip_the_seam,
+      table_leaf_multi_byte_payload_varint_calls_get_varint,
+      index_leaf_cell_adds_n_data_to_the_payload,
+      index_internal_cell_skips_the_payload_varint,
+      payload_at_max_local_stays_local,
+      overflow_collapses_to_min_local_when_surplus_exceeds_max_local,
+      overflow_keeps_the_surplus_when_it_fits_max_local,
+      n_size_is_clamped_to_four,
+      n_size_lands_at_0x1e_where_cell_size_ptr_reads.
 
   # ---- Connection allocator (src/sqlite/mem.rs) ----
   - address: 0x083749bc

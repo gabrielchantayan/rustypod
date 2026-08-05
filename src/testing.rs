@@ -43,6 +43,7 @@ pub mod hints {
     pub const LIST_SPLICE: usize = 0x0d00_0000;
     pub const EVENT_LIST: usize = 0x0e00_0000;
     pub const CONTEXT_SCOPE: usize = 0x0f00_0000;
+    pub const BTREE_PARSE_CELL: usize = 0x1000_0000;
     // `heap/pool.rs` maps its own arena at 0x0800_0000 through a separate
     // path: it needs only bit 31 clear, not full u32 addressability.
 }
@@ -111,3 +112,10 @@ pub static CLASS_REGISTRY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::ne
 /// `app::context_scope` and `app::scoped_context`, so a per-module lock would
 /// let one module's teardown NULL the root while the other is walking it.
 pub static APP_ROOT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serializes every host test that installs mocks into
+/// `sqlite::cell_size::BTREE_CELL_OPS`. That dispatch static is shared by
+/// `sqlite::cell_size`'s own wrapper tests and `sqlite::parse_cell`'s
+/// varint-seam tests (both swap slots on it), so a per-module lock would
+/// let one module's teardown restore defaults under the other's mock.
+pub static BTREE_CELL_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
