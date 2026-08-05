@@ -19070,6 +19070,41 @@ functions:
       word at object+0xe38. The owning UI object remains unidentified;
       no null or alignment guard is present in the original.
 
+  # --- retailOS null-guarded scaled-total thunk ---
+  - address: 0x08055f24
+    ghidra: FUN_08055f24
+    name: object_scaled_total
+    size: 24
+    sig: "i64 object_scaled_total(const void *object)"
+    module: ui/object_state
+    status: ported
+    renames:
+      param_1: object
+      thunk_EXT_FUN_22000020: memcpy_8
+      FUN_08064980: scaled_field_total
+    notes: >-
+      Null-guarded thunk (cmp r0,#0; addne r0,r0,#0x18; bne 0x08064980;
+      moveq r0,#0; moveq r1,#0; bx lr): a null object returns 0 in r0:r1,
+      otherwise it tail-calls retailOS helper 0x08064980 with object+0x18,
+      which folds the three doublewords at object offsets 0x18/0x20/0x28
+      into base + count * scale (plain base when count is zero); the
+      degenerate object+0x18 == 0 wraparound also returns 0. Ghidra
+      decompiles the thunk with the callee body inlined, hence the full
+      arithmetic in the reference C; the callee stays in retailOS behind
+      the SCALED_FIELD_TOTAL boundary, same pattern as
+      indexed_object_offset's 0x080aa828. The adjacent 0x08055f3c is the
+      same thunk without the +0x18 offset and is a separate function. One
+      `bl 0x08055f24` call site (grep -c on decomp/osos.asm), at
+      0x080aaf44: it applies the thunk to a 0x44-byte descriptor copied by
+      0x08054d28 and forwards the result together with the sibling
+      0x08055f3c's to 0x08045174; the field triple's concrete meaning is
+      not recovered. match.py (structural, exit 1 expected) shows the same
+      guard/add/conditional-branch/zero-return shape; diffs are LLVM's
+      push {fp,lr} frame, flag-setting addsne for addne, and the indirect
+      call through the boundary static instead of the direct b 0x08064980.
+      Rust implementation and focused host tests:
+      `src/ui/object_state.rs::object_scaled_total`.
+
   # --- retailOS nested UI-object flag accessor ---
   - address: 0x08055f90
     ghidra: FUN_08055f90

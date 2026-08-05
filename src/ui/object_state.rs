@@ -227,6 +227,82 @@ pub unsafe extern "C" fn indexed_object_offset(
     )
 }
 
+/// Calls the stock 64-bit multiply-accumulate helper, which remains in
+/// retailOS.
+///
+/// This is deliberately a boundary rather than a port of 0x08064980. Host
+/// tests replace the one function pointer below; ARM builds call its fixed
+/// firmware load address. The original null-guards `fields`, then reads
+/// three consecutive little-endian doublewords `base = fields[0]`,
+/// `count = fields[1]`, `scale = fields[2]` and returns `base` when
+/// `count` is zero, otherwise the wrapping 64-bit product-sum
+/// `base + count * scale` (`umull`/`mla`/`mla` for the product, then
+/// `adds`/`adc` for the accumulate).
+type ScaledFieldTotal = unsafe extern "C" fn(*const u8) -> i64;
+
+unsafe extern "C" fn firmware_scaled_field_total(fields: *const u8) -> i64 {
+    #[cfg(target_os = "none")]
+    {
+        let scaled_field_total: ScaledFieldTotal = core::mem::transmute(0x0806_4980usize);
+        scaled_field_total(fields)
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        let _ = fields;
+        0
+    }
+}
+
+/// Narrow boundary for the unported 0x08064980 dependency.
+static mut SCALED_FIELD_TOTAL: ScaledFieldTotal = firmware_scaled_field_total;
+
+#[inline(always)]
+unsafe fn scaled_field_total_fn() -> ScaledFieldTotal {
+    core::ptr::read_volatile(core::ptr::addr_of!(SCALED_FIELD_TOTAL))
+}
+
+/// object_scaled_total — original: `FUN_08055f24` @ `0x08055f24` (24
+/// bytes).
+///
+/// Source: `/home/gabe/Programming/ipod-decomp/decomp/c/003/08055f24_FUN_08055f24.c`;
+/// assembly: `decomp/osos.asm` @ `0x08055f24..0x08055f38`.
+///
+/// Null-guarded thunk over the retailOS multiply-accumulate helper
+/// 0x08064980: with a null `object` it returns 0 in r0:r1
+/// (`moveq r0,#0x0; moveq r1,#0x0`); otherwise it tail-calls the helper
+/// with `object + 0x18` (`addne r0,r0,#0x18; bne 0x08064980`), which folds
+/// the three doublewords at object offsets 0x18/0x20/0x28 into
+/// `base + count * scale` (plain `base` when `count` is zero). The
+/// degenerate `object + 0x18 == 0` wraparound also returns 0, matching the
+/// flags the `addne` leaves for the `bne`. Ghidra decompiles the thunk
+/// with the callee body inlined, which is why the reference C shows the
+/// full arithmetic; the callee itself stays in retailOS behind the
+/// [`SCALED_FIELD_TOTAL`] boundary. The adjacent 0x08055f3c is the same
+/// thunk without the +0x18 offset and is a separate function. The single
+/// stock call site (0x080aaf44) applies it to a 0x44-byte descriptor
+/// copied by 0x08054d28 and forwards the result together with the
+/// sibling's to 0x08045174; the concrete meaning of the field triple is
+/// not recovered.
+///
+/// # Safety
+///
+/// With a non-null `object`, the firmware helper reads the three
+/// doublewords at `object + 0x18..0x30`; `object` must stay readable for
+/// at least 0x30 bytes, as at the single stock call site.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn object_scaled_total(object: *const u8) -> i64 {
+    if object.is_null() {
+        return 0;
+    }
+    let fields = object.wrapping_add(0x18);
+    if fields.is_null() {
+        return 0;
+    }
+    scaled_field_total_fn()(fields)
+}
+
 /// Sampled-clock interface index the original passes to 0x0809b60c
 /// (`mov r0,#0x0` before the `bl`).
 const TIMESTAMP_INTERFACE: u32 = 0;
@@ -402,6 +478,7 @@ mod tests {
 
     static SEQUENCE_ID_LOCK: Mutex<()> = Mutex::new(());
     static INDEXED_OBJECT_STORAGE_BASE_LOCK: Mutex<()> = Mutex::new(());
+    static SCALED_FIELD_TOTAL_LOCK: Mutex<()> = Mutex::new(());
     static CLOCK_SAMPLE_LOCK: Mutex<()> = Mutex::new(());
     static BASELINE_CLOCK_SAMPLE_LOCK: Mutex<()> = Mutex::new(());
     static mut CLOCK_SAMPLE_CALLS: u32 = 0;
@@ -505,6 +582,40 @@ mod tests {
             STORAGE_BASE_OBJECT = 0;
             MOCK_STORAGE_BASE = storage_base;
             core::ptr::addr_of_mut!(INDEXED_OBJECT_STORAGE_BASE).write(recording_storage_base);
+        }
+        guard
+    }
+
+    static mut SCALED_TOTAL_CALLS: u32 = 0;
+    static mut SCALED_TOTAL_FIELDS: usize = 0;
+    static mut MOCK_SCALED_TOTAL: i64 = 0;
+
+    unsafe extern "C" fn recording_scaled_field_total(fields: *const u8) -> i64 {
+        SCALED_TOTAL_CALLS += 1;
+        SCALED_TOTAL_FIELDS = fields as usize;
+        MOCK_SCALED_TOTAL
+    }
+
+    /// Restores the stock-call boundary before another test uses it.
+    struct ScaledFieldTotalReset;
+
+    impl Drop for ScaledFieldTotalReset {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(SCALED_FIELD_TOTAL).write(firmware_scaled_field_total);
+            }
+        }
+    }
+
+    fn install_recording_scaled_field_total(total: i64) -> MutexGuard<'static, ()> {
+        let guard = SCALED_FIELD_TOTAL_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        unsafe {
+            SCALED_TOTAL_CALLS = 0;
+            SCALED_TOTAL_FIELDS = 0;
+            MOCK_SCALED_TOTAL = total;
+            core::ptr::addr_of_mut!(SCALED_FIELD_TOTAL).write(recording_scaled_field_total);
         }
         guard
     }
@@ -665,6 +776,55 @@ mod tests {
         );
         assert_eq!(unsafe { STORAGE_BASE_CALLS }, 2);
         assert_eq!(unsafe { STORAGE_BASE_OBJECT }, &object as *const IndexedObject as usize);
+    }
+
+    #[test]
+    fn null_object_returns_zero_without_querying_the_field_triple() {
+        let _guard = install_recording_scaled_field_total(0x1122_3344_5566_7788);
+        let _reset = ScaledFieldTotalReset;
+
+        assert_eq!(unsafe { object_scaled_total(core::ptr::null()) }, 0);
+        assert_eq!(unsafe { SCALED_TOTAL_CALLS }, 0);
+    }
+
+    #[test]
+    fn wrapped_field_pointer_returns_zero_without_querying_the_field_triple() {
+        let _guard = install_recording_scaled_field_total(0x1122_3344_5566_7788);
+        let _reset = ScaledFieldTotalReset;
+        // The degenerate `addne`/`bne` case: a non-null object whose
+        // object + 0x18 wraps to null also yields 0 in r0:r1.
+        let object = 0usize.wrapping_sub(0x18) as *const u8;
+
+        assert_eq!(unsafe { object_scaled_total(object) }, 0);
+        assert_eq!(unsafe { SCALED_TOTAL_CALLS }, 0);
+    }
+
+    #[test]
+    fn forwards_the_shifted_field_pointer_and_the_helper_result() {
+        let _guard = install_recording_scaled_field_total(0);
+        let _reset = ScaledFieldTotalReset;
+        let object = [0xa5u8; 0x30];
+
+        for total in [
+            0i64,
+            1,
+            -1,
+            i64::MIN,
+            i64::MAX,
+            0x1122_3344_5566_7788,
+            -0x1122_3344_5566_7788,
+        ] {
+            unsafe {
+                MOCK_SCALED_TOTAL = total;
+            }
+            assert_eq!(unsafe { object_scaled_total(object.as_ptr()) }, total);
+            assert_eq!(
+                unsafe { SCALED_TOTAL_FIELDS },
+                object.as_ptr() as usize + 0x18,
+                "the helper must receive object + 0x18"
+            );
+        }
+        assert_eq!(unsafe { SCALED_TOTAL_CALLS }, 7);
     }
     #[test]
     fn follows_the_object_pointer_to_the_nested_flag() {
