@@ -22668,24 +22668,52 @@ functions:
     size: 52
     sig: "u8 *cg_buffer_page_slot(cg_codegen_buffer_t *output, u32 index)"
     module: codegen/ir
-    status: identified
-    vars: {param_1: output, param_2: index}
+    status: ported
+    renames:
+      param_1/r0: output
+      param_2/r1: index
+      r5: page_slot (output + index*4, the pages[index] slot address)
+      r4: page
     notes: >-
-      2 bl call sites (0x082c5b30 inside the page accessor @ 0x082c5b1c
-      and one more; grep on decomp/osos.asm). The lazy page-slot
-      accessor of the emitted-code buffer: reads buffer->pages[index]
-      at +0x04+index*4; when NULL, mallocs one 0x1000-byte page
-      (bl 0x0802edac = malloc, ported), zero-fills it through the IRAM
-      veneer 0x08037dc8 (-> 0x220002d4, the relocated copy of memzero @
-      0x080002d4, ported in libc/memzero), stores it into the slot and
-      returns it; a resident slot comes back unchanged. No NULL check
-      after malloc (a failure memzeroes 0x1000 bytes at address 0) and
-      no bounds check on the 512-slot table. NOT separately ported:
-      modeled as the wired default (default_cg_buffer_page_slot) of the
-      CG_BUFFER_PAGE_SLOT seam in src/codegen/ir.rs, called by the
-      ported cg_buffer_page_pointer @ 0x082c5b1c, with the documented
-      deviations that the page allocation goes through the swappable
-      CG_BUFFER_ALLOC slot and a failed allocation returns NULL.
+      2 bl call sites: 0x082c2384 inside cg_buffer_copy_out @ 0x082c2350
+      (ported) and 0x082c5b30 inside cg_buffer_page_pointer @ 0x082c5b1c
+      (ported). The lazy page-slot accessor of the emitted-code buffer:
+      reads buffer->pages[index] at +0x04+index*4; when NULL, mallocs
+      one 0x1000-byte page (bl 0x0802edac = malloc, ported), zero-fills
+      it through the IRAM veneer 0x08037dc8 (-> 0x220002d4, the
+      relocated copy of memzero @ 0x080002d4, ported in libc/memzero),
+      stores it into the slot and returns it; a resident slot comes back
+      unchanged. No NULL check after malloc (a failure memzeroes 0x1000
+      bytes at address 0) and no bounds check on the 512-slot table.
+      PORTED in src/codegen/ir.rs. The body is exactly the former wired
+      default of the CG_BUFFER_PAGE_SLOT seam, promoted to the export
+      and kept as that seam's wired default (the app/vtable_set.rs
+      vtable_slot_50_dispatch precedent): both callers keep routing
+      through the seam, retained for hookability; rewiring to direct
+      calls is a deliberate follow-up (one function per commit).
+      DEVIATIONS (carried forward from the seam default, documented in
+      the module header): the page allocation goes through the
+      swappable CG_BUFFER_ALLOC slot (default: the ported malloc) where
+      the original bls malloc directly, and a failed allocation returns
+      NULL where the original would memzero 0x1000 bytes at address 0.
+      match.py (exit 1, diff expected): the slot read
+      (add r7,r0,r1,lsl #2 / ldr r0,[r7,#4]), NULL check, malloc
+      through the CG_BUFFER_ALLOC static (ldr/blx in place of
+      bl 0x0802edac, the documented seam scheme), zero-fill, store-back
+      (str r0,[r7,#4]) and return structure all remain; LLVM inlined
+      the ported memzero and idiom-lowered the fixed 0x1000-byte
+      zero-fill to __aeabi_memclr/__aeabi_memclr4 calls, and the crate
+      fp frame accounts for the rest. Host tests:
+      src/codegen/ir.rs::buffer_page_slot_returns_a_resident_page_unchanged
+      (hit path: returned unchanged, no store-back, no zero-fill),
+      buffer_page_slot_lazy_allocates_zeroes_and_stores_back (miss:
+      0x1000-byte allocation, zero-fill over the allocator poison,
+      slot store-back, resident reuse, index-511 slot arithmetic,
+      untouched slots stay NULL),
+      buffer_page_slot_returns_null_and_never_stores_when_allocation_fails
+      (the deviation end to end: NULL, slot never stored), plus the
+      updated page_pointer_seam_stays_wired_to_the_ported_accessor
+      (the port is the CG_BUFFER_PAGE_SLOT seam's wired default).
 
   - address: 0x0811d2f8
     ghidra: FUN_0811d2f8

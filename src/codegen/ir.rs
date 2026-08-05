@@ -211,8 +211,9 @@
 //!   seam is retained for hookability, rewiring the emitter to a direct
 //!   call is a deliberate follow-up. The accessor's `bl` target, the
 //!   lazy page-slot accessor `FUN_082b7edc` @ 0x082b7edc (52 bytes),
-//!   stays identified behind the [`CG_BUFFER_PAGE_SLOT`] seam, whose
-//!   wired default models its exact body. The default's page allocation
+//!   is ported as [`cg_buffer_page_slot`], which stays the wired
+//!   default of the [`CG_BUFFER_PAGE_SLOT`] seam it already modeled
+//!   (same precedent). The port's page allocation
 //!   goes through [`CG_BUFFER_ALLOC`] and a failed allocation returns
 //!   NULL, where the original calls `malloc` directly and would memzero
 //!   0x1000 bytes at address 0
@@ -631,10 +632,10 @@ pub static mut CG_BUFFER_PAGE_POINTER: unsafe extern "C" fn(
 /// and intra-page byte, the page base comes from the page-slot
 /// accessor, and the intra offset is added on.
 ///
-/// The `bl` target — `FUN_082b7edc` @ 0x082b7edc (52 bytes) — stays
-/// identified/unported and sits behind the [`CG_BUFFER_PAGE_SLOT`]
-/// seam, whose wired default models its exact body (the same scheme as
-/// this function's own [`CG_BUFFER_PAGE_POINTER`] seam).
+/// The `bl` target — `FUN_082b7edc` @ 0x082b7edc (52 bytes) — is
+/// ported as [`cg_buffer_page_slot`], which stays the wired default of
+/// the [`CG_BUFFER_PAGE_SLOT`] seam (the same scheme as this
+/// function's own [`CG_BUFFER_PAGE_POINTER`] seam).
 ///
 /// SEAM DECISION (the `app/vtable_set.rs` `vtable_slot_50_dispatch`
 /// precedent): this port stays the wired default of
@@ -667,30 +668,42 @@ pub unsafe extern "C" fn cg_buffer_page_pointer(
     page.add(offset & (CG_BUFFER_PAGE_BYTES - 1))
 }
 
-/// The page-slot boundary for [`cg_buffer_page_pointer`]: resolves a
-/// page index to the base of that code page, allocating it lazily. The
-/// wired default ([`default_cg_buffer_page_slot`]) models the exact
-/// body of the identified-but-unported `FUN_082b7edc` @ 0x082b7edc
-/// (52 bytes); host tests swap in a recording fake, and porting
-/// 0x082b7edc later replaces the default without touching the
-/// accessor.
+/// The page-slot boundary for [`cg_buffer_page_pointer`] and
+/// [`cg_buffer_copy_out`]: resolves a page index to the base of that
+/// code page, allocating it lazily. The wired default is the ported
+/// accessor [`cg_buffer_page_slot`] (`FUN_082b7edc` @ 0x082b7edc,
+/// 52 bytes) — the `app/vtable_set.rs` `vtable_slot_50_dispatch`
+/// precedent: the seam is retained for hookability and host-test
+/// interception; host tests swap in a recording fake.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub static mut CG_BUFFER_PAGE_SLOT: unsafe extern "C" fn(
     *mut CgCodegenBuffer,
     usize,
-) -> *mut u8 = default_cg_buffer_page_slot;
+) -> *mut u8 = cg_buffer_page_slot;
 
-/// The wired default of [`CG_BUFFER_PAGE_SLOT`]: the exact body of the
-/// identified page-slot accessor `FUN_082b7edc` @ 0x082b7edc (52 bytes:
-/// `add r5, r0, r1, lsl #0x2; ldr r4, [r5, #0x4]; cmp r4, #0x0;
-/// bne 0x082b7f08; mov r0, #0x1000; bl malloc; mov r4, r0; mov r1,
-/// #0x1000; bl 0x08037dc8; str r4, [r5, #0x4]; mov r0, r4`) — read
-/// `buffer->pages[index]`; when NULL, allocate one 0x1000-byte page,
-/// zero-fill it through the IRAM veneer 0x08037dc8 (-> 0x220002d4, the
-/// relocated copy of `memzero` @ 0x080002d4 — [`crate::libc::memzero::
-/// memzero`] here), store it into the slot and return it; a non-NULL
-/// slot comes back unchanged. Like the original, there is no bounds
-/// check on the 512-slot page table.
+/// cg_buffer_page_slot — original: `FUN_082b7edc` @ 0x082b7edc
+/// (52 bytes, 2 `bl` call sites: 0x082c2384 inside
+/// [`cg_buffer_copy_out`] and 0x082c5b30 inside
+/// [`cg_buffer_page_pointer`]).
+///
+/// The lazy page-slot accessor of the emitted-code buffer: reads
+/// `buffer->pages[index]`, the word at +0x04 + index*4 (`add r5, r0,
+/// r1, lsl #0x2; ldr r4, [r5, #0x4]`); when NULL, allocates one
+/// 0x1000-byte page (`mov r0, #0x1000; bl 0x0802edac` = malloc,
+/// ported in [`crate::runtime::malloc_rt`]), zero-fills it through the
+/// IRAM veneer 0x08037dc8 (-> 0x220002d4, the relocated copy of
+/// `memzero` @ 0x080002d4 — [`crate::libc::memzero::memzero`] here),
+/// stores it into the slot (`str r4, [r5, #0x4]`) and returns it
+/// (`mov r0, r4`); a resident slot comes back unchanged (`cmp r4,
+/// #0x0; bne 0x082b7f08`). Like the original, there is no bounds check
+/// on the 512-slot page table.
+///
+/// SEAM DECISION (the `app/vtable_set.rs` `vtable_slot_50_dispatch`
+/// precedent): this port stays the wired default of
+/// [`CG_BUFFER_PAGE_SLOT`] and both callers keep routing through the
+/// seam — retained for hookability and host-test interception;
+/// rewiring to direct calls is a deliberate follow-up (one function
+/// per commit).
 ///
 /// DEVIATIONS (module header): the page allocation goes through the
 /// swappable [`CG_BUFFER_ALLOC`] slot where the original `bl`s `malloc`
@@ -698,7 +711,9 @@ pub static mut CG_BUFFER_PAGE_SLOT: unsafe extern "C" fn(
 /// failed allocation returns NULL where the original has no NULL check
 /// and would memzero 0x1000 bytes at address 0 (same deviation as
 /// [`cg_codegen_buffer_create`]).
-unsafe extern "C" fn default_cg_buffer_page_slot(
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_buffer_page_slot(
     output: *mut CgCodegenBuffer,
     index: usize,
 ) -> *mut u8 {
@@ -3452,8 +3467,8 @@ mod tests {
         );
         assert_eq!(
             hook(core::ptr::addr_of!(CG_BUFFER_PAGE_SLOT)) as usize,
-            default_cg_buffer_page_slot as usize,
-            "0x082b7edc stays identified behind its own seam"
+            cg_buffer_page_slot as usize,
+            "the ported 0x082b7edc stays the wired default of its own seam"
         );
     }
 
@@ -3540,8 +3555,8 @@ mod tests {
             let buffer = record as *mut CgCodegenBuffer;
             // The ported accessor itself (also the wired default of
             // CG_BUFFER_PAGE_POINTER), running through the
-            // CG_BUFFER_PAGE_SLOT seam's wired default — the exact-body
-            // model of FUN_082b7edc.
+            // CG_BUFFER_PAGE_SLOT seam's wired default — the ported
+            // cg_buffer_page_slot @ 0x082b7edc.
             let accessor = cg_buffer_page_pointer;
 
             let first = accessor(buffer, 0x1234);
@@ -3600,6 +3615,124 @@ mod tests {
                 slot(output.as_mut_ptr() as *mut u8, CG_BUFFER_PAGES + 2)
                     .read()
                     .is_null(),
+                "the failed page is never stored into the slot"
+            );
+        }
+    }
+
+    // --- cg_buffer_page_slot (0x082b7edc) ---------------------------
+
+    #[test]
+    fn buffer_page_slot_returns_a_resident_page_unchanged() {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut output = [0usize; CG_CODEGEN_OUTPUT_OFFSET + 1];
+        let mut page = [0xabu8; CG_BUFFER_PAGE_BYTES];
+
+        unsafe {
+            let saved_alloc = hook(core::ptr::addr_of!(CG_BUFFER_ALLOC));
+            // Any allocation on the hit path yields NULL and fails the
+            // pointer assertions below.
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = failing_alloc;
+
+            let record = output.as_mut_ptr() as *mut u8;
+            let buffer = record as *mut CgCodegenBuffer;
+            slot(record, CG_BUFFER_PAGES + 3).write(page.as_mut_ptr());
+
+            assert_eq!(
+                cg_buffer_page_slot(buffer, 3),
+                page.as_mut_ptr(),
+                "a non-NULL slot comes back unchanged (cmp r4,#0x0; bne 0x082b7f08)"
+            );
+            assert_eq!(
+                slot(record, CG_BUFFER_PAGES + 3).read(),
+                page.as_mut_ptr(),
+                "no store-back on the hit path"
+            );
+            assert!(
+                page.iter().all(|&b| b == 0xab),
+                "no zero-fill on the hit path"
+            );
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = saved_alloc;
+        }
+    }
+
+    #[test]
+    fn buffer_page_slot_lazy_allocates_zeroes_and_stores_back() {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // Zeroed record: every page slot NULL, offset 0.
+        let mut output = [0usize; CG_CODEGEN_OUTPUT_OFFSET + 1];
+
+        unsafe {
+            let saved_alloc = hook(core::ptr::addr_of!(CG_BUFFER_ALLOC));
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = poisoning_alloc;
+
+            let record = output.as_mut_ptr() as *mut u8;
+            let buffer = record as *mut CgCodegenBuffer;
+
+            let page2 = cg_buffer_page_slot(buffer, 2);
+            assert!(!page2.is_null(), "a miss lazy-allocates the page");
+            assert_eq!(
+                slot(record, CG_BUFFER_PAGES + 2).read(),
+                page2,
+                "the fresh page is stored into pages[index] (str r4,[r5,#0x4])"
+            );
+            assert!(
+                core::slice::from_raw_parts(page2, record_size(CG_BUFFER_PAGE_BYTES))
+                    .iter()
+                    .all(|&b| b == 0),
+                "the fresh page is zero-filled over the allocator's 0x5c poison,\
+                 as through the original's IRAM memzero veneer"
+            );
+            assert_eq!(
+                cg_buffer_page_slot(buffer, 2),
+                page2,
+                "a resident page is reused, not reallocated"
+            );
+
+            // Index arithmetic: pages[index] is the word at
+            // +0x04 + index*4 — index 511 is the last table slot (the
+            // word right before current_offset at +0x804).
+            let page511 = cg_buffer_page_slot(buffer, 511);
+            assert_eq!(
+                slot(record, CG_BUFFER_PAGES + 511).read(),
+                page511,
+                "index 511 lands in the last table slot, not on current_offset"
+            );
+            assert_ne!(page2, page511, "distinct slots are distinct allocations");
+            assert!(
+                slot(record, CG_BUFFER_PAGES).read().is_null()
+                    && slot(record, CG_BUFFER_PAGES + 3).read().is_null(),
+                "untouched slots stay NULL"
+            );
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = saved_alloc;
+            poisoning_free(page2);
+            poisoning_free(page511);
+        }
+    }
+
+    #[test]
+    fn buffer_page_slot_returns_null_and_never_stores_when_allocation_fails() {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut output = [0usize; CG_CODEGEN_OUTPUT_OFFSET + 1];
+
+        unsafe {
+            let saved_alloc = hook(core::ptr::addr_of!(CG_BUFFER_ALLOC));
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = failing_alloc;
+
+            let record = output.as_mut_ptr() as *mut u8;
+            let buffer = record as *mut CgCodegenBuffer;
+            assert!(
+                cg_buffer_page_slot(buffer, 7).is_null(),
+                "the deviation: NULL where the original would memzero 0x1000 \
+                 bytes at address 0"
+            );
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_ALLOC) = saved_alloc;
+
+            assert!(
+                slot(record, CG_BUFFER_PAGES + 7).read().is_null(),
                 "the failed page is never stored into the slot"
             );
         }
