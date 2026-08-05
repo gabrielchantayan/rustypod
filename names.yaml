@@ -8416,15 +8416,16 @@ functions:
       the dispatch and the observer is re-loaded after it. Then
       0x08135040(this, observer) swaps it in for the container's default
       observer and 0x08134ff8(this, 1) enables notifications, firing
-      the first change notification. operator_new and
-      observable_set_notify_enabled are already ported and called
-      directly; the container ctor, observer ctor and observer swap sit
-      behind the CLASS_REGISTRY_OPS dispatch table (the
-      app/singletons.rs SINGLETON_CTORS pattern) whose documented
-      default stubs make the port NOT hook-ready: the zeroing observer
-      stub installs no vtable, so the attach dispatch would fault where
-      the original succeeds. match.py: identical shape; the only deltas
-      are the blx-through-slot indirections and the frame layout.
+      the first change notification. operator_new,
+      registry_container_construct, and observable_set_notify_enabled are
+      already ported and called directly; the observer ctor and observer
+      swap sit behind the CLASS_REGISTRY_OPS dispatch table (the
+      app/singletons.rs SINGLETON_CTORS pattern). The documented remaining
+      container-state initializer stub makes the port NOT hook-ready: it
+      does not create the container's default observer, so the registry
+      cannot faithfully enter stock's normal observer-swap path until
+      0x08135110 is ported. match.py: identical call/store/dispatch
+      structure; the only deltas are the observer seams and frame layout.
 
   - address: 0x08135308
     ghidra: FUN_08135308

@@ -53,28 +53,26 @@
 //!   notification through the freshly installed vtable.
 //!
 //! `operator new` @ 0x082aadd4 is already ported
-//! (`heap::veneers::operator_new`), so it is called directly. The
-//! container-state initializer @ 0x08135110 and observer swap are
-//! unported C++ machinery, so they sit behind the
-//! [`CLASS_REGISTRY_OPS`] dispatch table — the `app/singletons.rs`
-//! pattern. The observer's own 20-byte constructor is ported; its
-//! distinct base constructor @ 0x0810dddc remains a dispatch boundary.
-//! The documented stubs are:
+//! (`heap::veneers::operator_new`) and
+//! [`registry_container_construct`] @ 0x08135308 is its direct dependency,
+//! so both calls reproduce the original's direct `bl`s. The
+//! container-state initializer @ 0x08135110 and observer swap are unported
+//! C++ machinery, so they sit behind the [`CLASS_REGISTRY_OPS`] dispatch
+//! table — the `app/singletons.rs` pattern. The observer's own 20-byte
+//! constructor is ported; its distinct base constructor @ 0x0810dddc remains
+//! a dispatch boundary. The documented stubs are:
 //!
-//! - `container_construct`: returns `this` **unchanged** — its shipped
-//!   default remains conservative because `FUN_08135110`, called by the
-//!   now-ported wrapper, has not been ported;
 //! - `container_initialize`: no-op, leaving its object's post-base state
 //!   intact;
 //! - `observer_base_construct`: returns `this` unchanged; the port then
 //!   installs the observer's literal firmware vtable at +0x00;
 //! - `set_observer`: a no-op.
 //!
-//! **Not hook-ready.** The shipped container slot remains the conservative
-//! stub until `FUN_08135110` is separately ported. Its default observer
-//! construction is outside this assignment; wiring the wrapper through a
-//! no-op initializer would instead produce an object that deviates from
-//! stock firmware.
+//! **Not hook-ready.** The container state-initializer slot remains a
+//! conservative stub until `FUN_08135110` is separately ported. Its default
+//! observer construction is outside this assignment; wiring the wrapper
+//! through a no-op initializer would instead produce an object that deviates
+//! from stock firmware.
 //!
 //! ## Deviations
 //!
@@ -147,13 +145,6 @@ pub static mut REGISTRY_OBSERVER: *mut RegistryObserver = core::ptr::null_mut();
 /// (see the module header).
 #[derive(Clone, Copy)]
 pub struct ClassRegistryOps {
-    /// The container base ctor @ 0x08135308
-    /// `(this, capacity, growth) -> this`.
-    pub container_construct: unsafe extern "C" fn(
-        this: *mut Registry,
-        capacity: u32,
-        growth: u32,
-    ) -> *mut Registry,
     /// The state/default-observer initializer @ 0x08135110, called by
     /// [`registry_container_construct`] after it installs the registry
     /// vtable. It returns `void`; this call's container observer work is
@@ -181,16 +172,6 @@ pub struct ClassRegistryOps {
     ) -> *mut u8,
 }
 
-/// Default container-ctor stub: returns `this` untouched — fail
-/// closed, leaving the object in its pre-init all-zero state (see the
-/// module header).
-unsafe extern "C" fn stub_container_construct(
-    this: *mut Registry,
-    _capacity: u32,
-    _growth: u32,
-) -> *mut Registry {
-    this
-}
 
 /// Default state-initializer stub: preserves the base object's state until
 /// `FUN_08135110` is ported. It must remain separate from the constructor
@@ -214,9 +195,9 @@ unsafe extern "C" fn stub_container_initialize(_this: *mut Registry, _capacity: 
 ///
 /// The state initializer itself is intentionally an explicit ops boundary:
 /// it constructs a capacity-selected observer and is not part of this
-/// assigned function. Therefore the wrapper is tested directly but is not
-/// installed as the shipped `container_construct` default until that callee
-/// has a faithful port.
+/// assigned function. It is nevertheless called by this constructor's
+/// direct [`registry_container_construct`] dependency so stock's call order
+/// and ABI are preserved.
 ///
 /// # Safety
 ///
@@ -285,9 +266,9 @@ unsafe extern "C" fn stub_set_observer(
 }
 
 /// Wired defaults. The complete registry-observer constructor is ported;
-/// its base and the two container operations are documented stubs.
+/// its base and the container's state initializer/observer swap are
+/// documented stubs.
 pub(crate) const DEFAULT_CLASS_REGISTRY_OPS: ClassRegistryOps = ClassRegistryOps {
-    container_construct: stub_container_construct,
     container_initialize: stub_container_initialize,
     observer_construct: registry_observer_construct,
     observer_base_construct: stub_observer_base_construct,
@@ -336,7 +317,7 @@ macro_rules! ops {
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn class_registry_construct(registry: *mut Registry) -> *mut Registry {
-    let registry = (ops!(container_construct))(
+    let registry = registry_container_construct(
         registry,
         REGISTRY_INITIAL_CAPACITY,
         REGISTRY_GROWTH_STEP,
@@ -384,8 +365,6 @@ mod tests {
     /// Ordered trace of the mock calls.
     static mut TRACE: Vec<&'static str> = Vec::new();
 
-    /// The container-ctor arguments, recorded on every call.
-    static mut CONTAINER_ARGS: Vec<(*mut Registry, u32, u32)> = Vec::new();
 
     /// The unported state-initializer arguments, recorded on every call.
     static mut CONTAINER_INITIALIZE_ARGS: Vec<(*mut Registry, u32, u32)> = Vec::new();
@@ -393,8 +372,6 @@ mod tests {
     /// The observer/set_observer arguments, recorded on every call.
     static mut OBSERVER_ARGS: Vec<*mut RegistryObserver> = Vec::new();
 
-    /// What the mock container ctor returns.
-    static mut CONTAINER_RESULT: *mut Registry = ptr::null_mut();
 
     /// Attachments dispatched through the observer vtable, in order.
     static mut ATTACHED: Vec<*mut RegistryObserver> = Vec::new();
@@ -420,15 +397,6 @@ mod tests {
         unreachable!("DEFAULT_HEAP is pre-seeded, so the lazy init must not run");
     }
 
-    unsafe extern "C" fn mock_container_construct(
-        this: *mut Registry,
-        capacity: u32,
-        growth: u32,
-    ) -> *mut Registry {
-        trace().push("container_construct");
-        (*ptr::addr_of_mut!(CONTAINER_ARGS)).push((this, capacity, growth));
-        ptr::read_volatile(ptr::addr_of!(CONTAINER_RESULT))
-    }
 
     unsafe extern "C" fn mock_container_initialize(
         this: *mut Registry,
@@ -442,6 +410,12 @@ mod tests {
         );
         trace().push("container_initialize");
         (*ptr::addr_of_mut!(CONTAINER_INITIALIZE_ARGS)).push((this, capacity, growth));
+        if this == constructed() {
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!((*this).vtable),
+                ptr::addr_of!(MOCK_REGISTRY_VTABLE),
+            );
+        }
     }
 
     unsafe extern "C" fn mock_observer_construct(this: *mut u8) -> *mut u8 {
@@ -476,7 +450,7 @@ mod tests {
         attach: mock_attach,
     };
 
-    // ---- the registry the mock container ctor "builds" ----
+    // ---- the registry the real container constructor builds ----
 
     /// Ordered trace of the registry vtable's notification pair.
     unsafe extern "C" fn mock_notify_deferred(_this: *mut Registry) -> *mut u8 {
@@ -535,8 +509,7 @@ mod tests {
         notify_changed: mock_notify_changed,
     };
 
-    /// The registry object the mock container ctor returns (distinct
-    /// from the argument, so the r5 threading is observable).
+    /// The registry object passed through the real container constructor.
     static mut CONSTRUCTED_REGISTRY: Registry = Registry {
         vtable: ptr::null(),
         container: [0; 7],
@@ -569,7 +542,6 @@ mod tests {
             HEAP_OPS = heap;
             DEFAULT_HEAP = ptr::addr_of_mut!(FAKE_HEAP) as *mut HeapDescriptorDescriptor;
             CLASS_REGISTRY_OPS = ClassRegistryOps {
-                container_construct: mock_container_construct,
                 container_initialize: mock_container_initialize,
                 observer_construct: mock_observer_construct,
                 observer_base_construct: stub_observer_base_construct,
@@ -583,10 +555,8 @@ mod tests {
                 reserved: [0; 2],
                 observer: ptr::null_mut(),
             });
-            CONTAINER_RESULT = constructed();
             REGISTRY_OBSERVER = ptr::null_mut();
             (*ptr::addr_of_mut!(ALLOC_SIZES)).clear();
-            (*ptr::addr_of_mut!(CONTAINER_ARGS)).clear();
             (*ptr::addr_of_mut!(CONTAINER_INITIALIZE_ARGS)).clear();
             (*ptr::addr_of_mut!(OBSERVER_ARGS)).clear();
             (*ptr::addr_of_mut!(ATTACHED)).clear();
@@ -615,18 +585,19 @@ mod tests {
         drop(guard);
     }
 
-    /// A scratch registry passed in as the constructor argument.
+    /// A writable registry passed through the constructor's direct
+    /// container-construction call.
     fn argument() -> *mut Registry {
-        0x2000 as *mut Registry
+        constructed()
     }
 
     #[test]
     fn construct_builds_the_container_with_capacity_8_and_growth_4() {
         let guard = mock();
         unsafe {
-            assert_eq!(class_registry_construct(argument()), constructed());
+            assert_eq!(class_registry_construct(argument()), argument());
             assert_eq!(
-                *ptr::addr_of!(CONTAINER_ARGS),
+                *ptr::addr_of!(CONTAINER_INITIALIZE_ARGS),
                 std::vec![(argument(), 8, 4)],
                 "the original's mov r1, #0x8 / mov r2, #0x4"
             );
@@ -680,7 +651,7 @@ mod tests {
             assert_eq!(
                 *trace(),
                 std::vec![
-                    "container_construct",
+                    "container_initialize",
                     "observer_construct",
                     "attach",
                     "set_observer",
@@ -694,7 +665,7 @@ mod tests {
             class_registry_construct(argument());
             assert_eq!(
                 *trace(),
-                std::vec!["container_construct", "set_observer", "notify_deferred", "notify_changed"],
+                std::vec!["container_initialize", "set_observer", "notify_deferred", "notify_changed"],
                 "the second call hits the cache: no allocation, no ctor, no attach"
             );
             assert_eq!((*ptr::addr_of!(ALLOC_SIZES)).len(), 1, "allocated exactly once");
@@ -774,7 +745,7 @@ mod tests {
             assert!((*ptr::addr_of!(ATTACHED)).is_empty(), "no attach");
             assert_eq!(
                 *trace(),
-                std::vec!["container_construct", "set_observer", "notify_deferred", "notify_changed"]
+                std::vec!["container_initialize", "set_observer", "notify_deferred", "notify_changed"]
             );
             assert_eq!(*ptr::addr_of!(OBSERVER_ARGS), std::vec![seeded]);
             assert_eq!(ptr::read_volatile(observer_cache()), seeded, "the cache is untouched");
@@ -783,11 +754,10 @@ mod tests {
     }
 
     #[test]
-    fn everything_downstream_runs_on_the_container_ctors_result() {
-        // r5, not the raw argument: `argument()` is never dereferenced.
+    fn construction_enables_notifications_on_the_constructed_registry() {
         let guard = mock();
         unsafe {
-            assert_eq!(class_registry_construct(argument()), constructed());
+            assert_eq!(class_registry_construct(argument()), argument());
             assert_eq!(
                 ptr::read_volatile(ptr::addr_of!(CONSTRUCTED_REGISTRY.notify_enabled)),
                 1,
@@ -855,39 +825,6 @@ mod tests {
         restore(guard);
     }
 
-    // ---- the unported-operation stubs ----
-
-    #[test]
-    fn the_default_container_stub_returns_this_unchanged() {
-        let guard = CONSTRUCT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe {
-            let mut registry = Registry {
-                vtable: ptr::null(),
-                container: [0xdead_beef; 7],
-                changed: 0xa5,
-                notify_enabled: 0x5a,
-                reserved: [0; 2],
-                observer: 0x1234 as *mut u8,
-            };
-            let this = ptr::addr_of_mut!(registry);
-            assert_eq!(stub_container_construct(this, 8, 4), this);
-            assert_eq!(registry.container, [0xdead_beef; 7], "nothing is written");
-            assert_eq!(registry.changed, 0xa5);
-            assert_eq!(registry.notify_enabled, 0x5a);
-        }
-        restore(guard);
-    }
-
-    #[test]
-    fn the_default_observer_base_stub_returns_this_unchanged() {
-        let guard = CONSTRUCT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe {
-            let this = ptr::addr_of_mut!(ARENA) as *mut u8;
-            assert_eq!(stub_observer_base_construct(this), this);
-            assert!(stub_observer_base_construct(ptr::null_mut()).is_null(), "forwards NULL");
-        }
-        restore(guard);
-    }
 
     #[test]
     fn the_default_set_observer_stub_is_a_noop() {
