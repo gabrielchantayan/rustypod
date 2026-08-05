@@ -22969,3 +22969,64 @@ functions:
       src/app/vtable_set.rs::file_record_dispose_calls_through_and_returns_the_handle
       / file_record_dispose_null_handle_is_a_noop_and_still_returns_it
       / file_record_dispose_discards_the_dispose_status.
+
+  - address: 0x0811d148
+    ghidra: FUN_0811d148
+    name: vtable_file_record_construct_kind1
+    size: 64
+    sig: "*mut u8 vtable_file_record_construct_kind1(record: *mut u8)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r4: record
+      r5: zero (the NULL immediate reused by every trailing store)
+      FUN_082aadd4: operator_new (direct, ported in heap/veneers)
+      FUN_0812d2fc: registry-construct thunk (bare b 0x0810e64c -> class_registry_construct, VTABLE_FILE_RECORD_KIND1_CTOR slot)
+      thunk_FUN_0810e64c: class_registry_construct (the thunk's target, ported in app/class_registry)
+      FUN_080edb74: checked-construct guard (VTABLE_FILE_RECORD_KIND1_GUARD slot)
+    notes: >-
+      2 bl call sites (grep on decomp/osos.asm): 0x0815a808 and
+      0x081a0b70 - both allocate the 0x1c-byte record with
+      operator_new(0x1c) immediately before the call and consume the
+      returned record pointer (str r0,[r4,#0xcc] / stmib r4,{r0,r5}).
+      The kind-1 constructor of the tagged file-record family (the
+      kind-2 sibling constructor FUN_0811d104 @ 0x0811d104, 68 bytes,
+      and the tag-dispatching dispose FUN_0811d188 @ 0x0811d188, 128
+      bytes, are unported; NOT the six-byte file-open record of
+      vtable_file_record_init / vtable_file_open): tag byte 1 at +0x00
+      (strb), NULL word at +0x18, operator_new(0x28) whose block passes
+      straight through the 0x0812d2fc thunk's tail branch in r0 as the
+      registry constructor's this - the argument the reference C drops
+      (it shows FUN_082aadd4(0x28) discarded and thunk_FUN_0810e64c()
+      argument-less) - the construct result stored at +0x04 (32-bit
+      str), checked by the unported guard 0x080edb74 (cmp r0,#0; on
+      NULL a tail call to report_allocation_failure(4, lit@0x080edb88)
+      - 8 bl sites in the constructor cluster, its r0 dead here since
+      the continuation overwrites r0 with the record pointer), then
+      NULL words at +0x08/+0x10, a zero halfword at +0x14 (strh), and
+      the record pointer returns (mov r0,r4). +0x0c is NEVER written
+      (a gap in the 0x1c layout). Deviations: operator_new called
+      directly (vtable_file_open precedent); the construct routes
+      through the new VTABLE_FILE_RECORD_KIND1_CTOR seam wired to the
+      exact original chain (host-test interception - the real
+      class_registry_construct ends in raw firmware-vtable dispatches
+      through literal vtables 0x089910ac / 0x08984770 that cannot run
+      on a 64-bit host, and swapping CLASS_REGISTRY_OPS from this
+      module's tests would race class_registry.rs's own parallel
+      tests; the VTABLE_SET_50_KIND4_OPS pattern); the guard sits
+      behind the new VTABLE_FILE_RECORD_KIND1_GUARD seam with a no-op
+      default (the non-NULL path is a bare bx lr and the NULL path's
+      only effect is the unported diagnostic - the class_6800.rs
+      unported_report_allocation_failure no-op precedent); every store
+      keeps the original's width (strb/str/strh; the registry pointer
+      truncates to its low 32 bits on a 64-bit host - the
+      vtable_file_record_init byte-exact precedent); no forwarded
+      parameter (the entry stmdb spills no argument registers and
+      r1..r3 are never read). match.py: same store/alloc/construct/
+      guard/zero/return structure; the diff is the crate fp frame, the
+      two seam ldr/blx pairs standing in for the direct bl 0x0812d2fc
+      / bl 0x080edb74 (the documented seams), and LLVM's reordering of
+      the independent trailing zero stores. Host tests:
+      src/app/vtable_set.rs::file_record_kind1_initializes_the_record_and_returns_it
+      / file_record_kind1_allocates_the_registry_and_feeds_it_to_the_ctor
+      / file_record_kind1_default_guard_is_a_noop.

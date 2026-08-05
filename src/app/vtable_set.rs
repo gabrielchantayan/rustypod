@@ -2820,6 +2820,165 @@ pub unsafe extern "C" fn vtable_file_record_dispose(
     handle
 }
 
+/// The tag byte [`vtable_file_record_construct_kind1`] writes at
+/// record +0x00 (`mov r0, #0x1; strb r0, [r4]`) — the kind the
+/// tag-dispatching dispose `FUN_0811d188` (unported) branches on.
+const FILE_RECORD_TAG_KIND1: u8 = 1;
+
+/// The allocation size feeding the registry constructor (`mov r0,
+/// #0x28` ahead of the `bl 0x082aadd4`) — the
+/// `app/class_registry.rs` `Registry` object's 0x28 bytes.
+const REGISTRY_OBJECT_SIZE: usize = 0x28;
+
+/// The registry construct behind the `bl 0x0812d2fc` site inside
+/// [`vtable_file_record_construct_kind1`]. 0x0812d2fc is a 4-byte
+/// thunk (`b 0x0810e64c`) tail-branching to the PORTED
+/// `app/class_registry.rs` `class_registry_construct` (0x0810e64c), so
+/// the wired default is the exact original call chain. The call still
+/// routes through a seam — the [`VTABLE_SET_50_KIND4_OPS`]
+/// host-test-interception pattern — because the real construct ends
+/// in raw firmware-vtable dispatches (the observer attach and the
+/// first change notification through the literal vtables 0x089910ac /
+/// 0x08984770) that cannot run on a 64-bit host, and swapping
+/// `CLASS_REGISTRY_OPS` from this module's tests would race
+/// class_registry.rs's own parallel tests. Host tests install a
+/// recording mock via `core::ptr::addr_of_mut!`.
+pub static mut VTABLE_FILE_RECORD_KIND1_CTOR: unsafe extern "C" fn(
+    allocation: *mut u8,
+) -> *mut u8 = kind1_registry_ctor_default;
+
+/// Default registry construct: the exact original chain — the
+/// 0x0812d2fc thunk's bare tail branch into the ported
+/// `class_registry_construct` (0x0810e64c), with the `operator_new`
+/// block arriving in r0 as the constructor's `this` (the argument the
+/// reference C drops).
+unsafe extern "C" fn kind1_registry_ctor_default(allocation: *mut u8) -> *mut u8 {
+    crate::app::class_registry::class_registry_construct(
+        allocation.cast::<crate::app::registry::Registry>(),
+    )
+    .cast::<u8>()
+}
+
+/// The checked-construct guard @ 0x080edb74 (12 bytes; **8 `bl` call
+/// sites**, grep on `decomp/osos.asm` — the surrounding constructor
+/// cluster, including the kind-2 sibling `FUN_0811d104`'s site
+/// 0x0811d13c and [`vtable_file_record_construct_kind1`]'s 0x0811d170):
+///
+/// ```text
+/// 080edb74  cmp   r0, #0x0
+/// 080edb78  ldreq r1, [0x80edb88]   @ diagnostic message pointer
+/// 080edb7c  moveq r0, #0x4          @ failure code 4
+/// 080edb80  beq   0x081b53e4        @ tail: report_allocation_failure(4, msg)
+/// 080edb84  bx    lr
+/// ```
+///
+/// A NULL construct result is reported to the unported
+/// report_allocation_failure (0x081b53e4 — the `app/class_6800.rs`
+/// `FRAMEWORK_BASE_INITIALIZE_OPS` slot) and the diagnostic's
+/// fall-through continues exactly as the non-NULL path does; the
+/// literal @ 0x080edb88 is a runtime-relocated pointer whose target
+/// content is not established. The wired default is a no-op: the
+/// non-NULL path IS a bare `bx lr`, and the NULL path's only
+/// observable effect is the unported diagnostic (the class_6800.rs
+/// `unported_report_allocation_failure` no-op precedent); the guard's
+/// r0 is dead at every call site, so the seam returns nothing.
+pub static mut VTABLE_FILE_RECORD_KIND1_GUARD: unsafe extern "C" fn(
+    object: *mut u8,
+) = construct_guard_unported;
+
+/// Default guard stub: a no-op (see the seam's doc).
+unsafe extern "C" fn construct_guard_unported(_object: *mut u8) {}
+
+/// vtable_file_record_construct_kind1 — original: `FUN_0811d148` @
+/// 0x0811d148 (64 bytes; **2 `bl` call sites**, grep on
+/// `decomp/osos.asm`: 0x0815a808 and 0x081a0b70 — both allocate the
+/// 0x1c-byte record with `operator_new(0x1c)` (0x082aadd4) immediately
+/// before the call, and both consume the returned record pointer
+/// (`str r0, [r4, #0xcc]` / `stmib r4, {r0, r5}`).
+///
+/// The kind-1 constructor of the tagged file-record family — the
+/// sibling of the kind-2 constructor `FUN_0811d104` (68 bytes,
+/// unported: tag 2, a 0x14 allocation feeding 0x0815bdbc) and of the
+/// tag-dispatching dispose `FUN_0811d188` (128 bytes, unported),
+/// operating on the SAME 0x1c-byte record layout:
+///
+/// ```text
+/// 0811d148  stmdb sp!, {r4, r5, r6, lr}
+/// 0811d14c  mov   r4, r0            @ save record (arg1)
+/// 0811d150  mov   r0, #0x1
+/// 0811d154  strb  r0, [r4, #0x0]    @ record.tag = 1 (kind 1)
+/// 0811d158  mov   r5, #0x0
+/// 0811d15c  mov   r0, #0x28
+/// 0811d160  str   r5, [r4, #0x18]   @ record.+0x18 = NULL
+/// 0811d164  bl    0x082aadd4        @ operator_new(0x28)
+/// 0811d168  bl    0x0812d2fc        @ thunk -> class_registry_construct(block)
+/// 0811d16c  str   r0, [r4, #0x4]    @ record.registry = construct result
+/// 0811d170  bl    0x080edb74        @ checked-construct guard
+/// 0811d174  str   r5, [r4, #0x8]    @ record.+0x08 = NULL
+/// 0811d178  str   r5, [r4, #0x10]   @ record.+0x10 = NULL
+/// 0811d17c  mov   r0, r4            @ return the record
+/// 0811d180  strh  r5, [r4, #0x14]   @ record.+0x14 = 0 (u16)
+/// 0811d184  ldmia sp!, {r4, r5, r6, pc}
+/// ```
+///
+/// The record layout is 0x1c bytes: a kind tag at +0x00 (u8), the
+/// registry pointer at +0x04, NULL words at +0x08, +0x10 and +0x18, a
+/// zero halfword at +0x14 — and +0x0c is NEVER written (a gap the
+/// caller's `operator_new(0x1c)` block carries in uninitialized). The
+/// `operator_new(0x28)` result feeds the registry constructor as its
+/// `this` (r0 passes straight through the 0x0812d2fc thunk's tail
+/// branch); the constructor's result is stored at +0x04 and handed to
+/// the checked-construct guard, and the record pointer returns
+/// regardless of the guard's outcome.
+///
+/// # Deviations
+///
+/// - **`operator_new` (0x082aadd4) is called directly** — the ported
+///   `crate::heap::veneers::operator_new` (the [`vtable_file_open`]
+///   precedent).
+/// - **The registry construct routes through the new
+///   [`VTABLE_FILE_RECORD_KIND1_CTOR`] seam** — the original's `bl
+///   0x0812d2fc` targets a 4-byte thunk (`b 0x0810e64c`) into the
+///   ported `app/class_registry.rs` `class_registry_construct`, so
+///   the wired default IS the exact call chain; the seam exists for
+///   host-test interception (see the seam's doc).
+/// - **The checked-construct guard 0x080edb74 is unported** and sits
+///   behind the new [`VTABLE_FILE_RECORD_KIND1_GUARD`] seam (no-op
+///   default; see the seam's doc). Its r0 is dead here — the
+///   continuation overwrites r0 with the record pointer — so the
+///   seam returns nothing.
+/// - **Every field store keeps the original's width**: `strb` for the
+///   tag, 32-bit `str` for the pointer and NULL words (the registry
+///   pointer is truncated to its low 32 bits on a 64-bit host — the
+///   [`vtable_file_record_init`] byte-exact precedent), `strh` for
+///   the +0x14 halfword.
+/// - **No `forwarded` parameter**: the entry `stmdb` spills no
+///   argument registers and r1..r3 are never read — this is a record
+///   constructor, not a message thunk (the [`vtable_file_open`]
+///   dead-r3 precedent).
+/// - **The reference C is followed only where it matches the
+///   disassembly**: `decomp/c/010/0811d148_FUN_0811d148.c` gets the
+///   stores and the return right but shows the allocation result as
+///   discarded (`FUN_082aadd4(0x28);`) and the construct as
+///   argument-less (`thunk_FUN_0810e64c()`) — the disassembly's `bl
+///   0x0812d2fc` passes the fresh block straight through in r0. The
+///   port follows the disassembly.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_file_record_construct_kind1(record: *mut u8) -> *mut u8 {
+    record.write(FILE_RECORD_TAG_KIND1);
+    record.add(0x18).cast::<u32>().write(0);
+    let ctor = core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_FILE_RECORD_KIND1_CTOR));
+    let registry = ctor(crate::heap::veneers::operator_new(REGISTRY_OBJECT_SIZE));
+    record.add(4).cast::<u32>().write(registry as u32);
+    let guard = core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_FILE_RECORD_KIND1_GUARD));
+    guard(registry);
+    record.add(0x08).cast::<u32>().write(0);
+    record.add(0x10).cast::<u32>().write(0);
+    record.add(0x14).cast::<u16>().write(0);
+    record
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -2868,6 +3027,10 @@ mod tests {
                     .write_volatile(store_remove_unported);
                 core::ptr::addr_of_mut!(VTABLE_FILE_OPEN_CTOR)
                     .write_volatile(store_ctor_unported);
+                core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_KIND1_CTOR)
+                    .write_volatile(kind1_registry_ctor_default);
+                core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_KIND1_GUARD)
+                    .write_volatile(construct_guard_unported);
             }
         }
     }
@@ -7056,6 +7219,154 @@ mod tests {
                 result as usize, 0,
                 "the dispose's 0 status never reaches the caller"
             );
+        }
+    }
+
+    // ---- vtable_file_record_construct_kind1 (0x0811d148) -----------
+
+    /// The block the recording kind-1 ctor returns as the registry.
+    static mut KIND1_REGISTRY: [u8; 0x28] = [0; 0x28];
+
+    static mut KIND1_CTOR_CALLS: usize = 0;
+    static mut KIND1_CTOR_THIS: *mut u8 = core::ptr::null_mut();
+    static mut KIND1_GUARD_CALLS: usize = 0;
+    static mut KIND1_GUARD_OBJECT: *mut u8 = core::ptr::null_mut();
+    /// The record under construction, so the recording mocks can pin
+    /// the store/call ordering against it.
+    static mut KIND1_RECORD: *const u8 = core::ptr::null();
+
+    unsafe extern "C" fn recording_kind1_ctor(allocation: *mut u8) -> *mut u8 {
+        KIND1_CTOR_CALLS += 1;
+        KIND1_CTOR_THIS = allocation;
+        // Order pins: the tag and the +0x18 NULL store precede the
+        // allocation/construct (`strb` / `str` before the `bl`s).
+        assert_eq!(
+            KIND1_RECORD.read(),
+            FILE_RECORD_TAG_KIND1,
+            "the tag store precedes the allocation"
+        );
+        assert_eq!(
+            KIND1_RECORD.add(0x18).cast::<u32>().read(),
+            0,
+            "+0x18 is zeroed before the allocation"
+        );
+        core::ptr::addr_of_mut!(KIND1_REGISTRY).cast()
+    }
+
+    unsafe extern "C" fn recording_kind1_guard(object: *mut u8) {
+        KIND1_GUARD_CALLS += 1;
+        KIND1_GUARD_OBJECT = object;
+        // Order pins: the registry store at +0x04 precedes the guard
+        // (`str r0, [r4, #0x4]` before the `bl`), and the trailing
+        // field zeroing follows it.
+        assert_eq!(
+            KIND1_RECORD.add(4).cast::<u32>().read(),
+            object as u32,
+            "the +0x04 store precedes the guard"
+        );
+        assert_eq!(
+            KIND1_RECORD.add(0x08).cast::<u32>().read(),
+            0xa5a5_a5a5,
+            "+0x08 is still untouched when the guard runs"
+        );
+    }
+
+    /// Resets the recording state and installs both recording mocks
+    /// plus the stub heap (the `install_recording_open` precedent).
+    unsafe fn install_recording_kind1(record: *const u8) {
+        KIND1_CTOR_CALLS = 0;
+        KIND1_CTOR_THIS = core::ptr::null_mut();
+        KIND1_GUARD_CALLS = 0;
+        KIND1_GUARD_OBJECT = core::ptr::null_mut();
+        KIND1_RECORD = record;
+        install_stub_heap();
+        core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_KIND1_CTOR)
+            .write_volatile(recording_kind1_ctor);
+        core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_KIND1_GUARD)
+            .write_volatile(recording_kind1_guard);
+    }
+
+    #[test]
+    fn file_record_kind1_initializes_the_record_and_returns_it() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = [0xa5u8; 0x20];
+        unsafe {
+            install_recording_kind1(record.as_ptr());
+
+            let result = vtable_file_record_construct_kind1(record.as_mut_ptr());
+
+            assert_eq!(
+                result,
+                record.as_mut_ptr(),
+                "mov r0, r4 — the record pointer returns"
+            );
+            assert_eq!(record[0], FILE_RECORD_TAG_KIND1, "strb: the kind-1 tag");
+            let registry = core::ptr::addr_of_mut!(KIND1_REGISTRY).cast::<u8>();
+            assert_eq!(
+                record.as_ptr().add(4).cast::<u32>().read(),
+                registry as u32,
+                "str: the construct result at +0x04 (32-bit on a 64-bit host)"
+            );
+            assert_eq!(record.as_ptr().add(0x08).cast::<u32>().read(), 0);
+            assert_eq!(
+                record.as_ptr().add(0x0c).cast::<u32>().read(),
+                0xa5a5_a5a5,
+                "the +0x0c gap is never written"
+            );
+            assert_eq!(record.as_ptr().add(0x10).cast::<u32>().read(), 0);
+            assert_eq!(
+                record.as_ptr().add(0x14).cast::<u16>().read(),
+                0,
+                "strh: the +0x14 halfword"
+            );
+            assert_eq!(record.as_ptr().add(0x18).cast::<u32>().read(), 0);
+            assert_eq!(
+                &record[0x1c..],
+                &[0xa5; 4],
+                "bytes past the 0x1c record are untouched"
+            );
+        }
+    }
+
+    #[test]
+    fn file_record_kind1_allocates_the_registry_and_feeds_it_to_the_ctor() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = [0xa5u8; 0x20];
+        unsafe {
+            install_recording_kind1(record.as_ptr());
+
+            vtable_file_record_construct_kind1(record.as_mut_ptr());
+
+            assert_eq!(OPEN_ALLOC_SIZE, REGISTRY_OBJECT_SIZE, "operator_new(0x28)");
+            assert_eq!(KIND1_CTOR_CALLS, 1, "the registry construct runs once");
+            assert_eq!(
+                KIND1_CTOR_THIS,
+                core::ptr::addr_of_mut!(OPEN_ARENA).cast::<u8>(),
+                "the fresh block feeds the construct in r0 — the argument the \
+                 reference C drops"
+            );
+            let registry = core::ptr::addr_of_mut!(KIND1_REGISTRY).cast::<u8>();
+            assert_eq!(KIND1_GUARD_CALLS, 1, "the checked-construct guard runs once");
+            assert_eq!(
+                KIND1_GUARD_OBJECT, registry,
+                "the guard checks the construct's result, not the raw allocation"
+            );
+        }
+    }
+
+    #[test]
+    fn file_record_kind1_default_guard_is_a_noop() {
+        // The non-NULL path is a bare `bx lr`; the NULL path's only
+        // effect is the unported diagnostic, so the wired default does
+        // nothing on either (the file_open_default_remove_stub_is_a_noop
+        // precedent).
+        unsafe {
+            construct_guard_unported(core::ptr::null_mut());
+            construct_guard_unported(0x1c as *mut u8);
         }
     }
 }
