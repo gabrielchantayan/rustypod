@@ -15359,6 +15359,35 @@ functions:
       same accepted deviation as vector_size_elem4, plus LLVM's fp
       frame.
 
+  - address: 0x083d79b4
+    ghidra: FUN_083d79b4
+    name: vector_bool_iter_not_equal
+    size: 40
+    sig: "u32 vector_bool_iter_not_equal(const VectorBoolIter *a, const VectorBoolIter *b)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      `std::vector<bool>` bit-iterator `operator!=`: two `{word, bit}`
+      iterators compare unequal when their word pointers differ or,
+      the pointers being equal, their bit offsets do. The original is
+      a single branchless predicated run (`ldr r2,[r0]; ldr r3,[r1];
+      cmp r2,r3; ldreq r0,[r0,#4]; ldreq r1,[r1,#4]; cmpeq r0,r1`) and
+      computes the EQUALITY first (`movne r0,#0` / `moveq r0,#1`) before
+      inverting it with a final `eor r0,r0,#1` - the same never-folded
+      ADS idiom as not_equal_deref. Ghidra's `if (iVar1 == iVar2)`
+      rewrite of the predication is noise; the semantics are
+      `word_a != word_b || bit_a != bit_b`. Identification: sits in
+      the bit-iterator cluster between vector_size_bool @ 0x083d7968
+      and the mask-reference ctor @ 0x083d79dc (see the 0x083d7968
+      entry for the neighborhood). 2 bl call sites (0x083e5dc4,
+      0x083e5f40), both in the vector<bool> storage-grow path; the
+      only copy. match.py - same compare-words-then-bits structure;
+      the word loads come out as byte loads from the family's
+      read_unaligned host-testing idiom, the same accepted deviation
+      as vector_size_bool, plus LLVM's fp frame and a subs/movne
+      fold of the equality-invert.
+
   - address: 0x083d7708
     ghidra: FUN_083d7708
     name: vector_capacity_elem12

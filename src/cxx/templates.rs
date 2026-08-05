@@ -37,6 +37,8 @@
 //!   difference over the `{begin_word, begin_bit, end_word, end_bit}`
 //!   head: whole words times 32, plus the end bit offset, minus the
 //!   begin bit offset.
+//! - [`vector_bool_iter_not_equal`] — the `vector<bool>` bit-iterator
+//!   `operator!=`: the word pointers differ, or the bit offsets do.
 //! - [`vector_capacity`] / [`vector_capacity_elem12`] /
 //!   [`vector_capacity_elem16`] / [`vector_capacity_elem24_copy_77ec`]
 //!   / [`vector_capacity_elem40`] / [`vector_capacity_elem8`] /
@@ -719,6 +721,17 @@ pub unsafe extern "C" fn vector_size_elem40(vector: *const VectorBounds) -> i32 
     __rt_sdiv(span, 40)
 }
 
+/// A `vector<bool>` bit iterator — the `{word, bit}` pair that
+/// [`vector_bool_iter_not_equal`] compares. Addressed by field, so the
+/// port is layout-correct on both the 32-bit target and a 64-bit host.
+#[repr(C)]
+pub struct VectorBoolIter {
+    /// Word containing the referenced bit.
+    pub word: *mut u32,
+    /// Bit offset within `word` (0..32).
+    pub bit: u32,
+}
+
 /// The `{begin_word, begin_bit, end_word, end_bit}` head of a
 /// `vector<bool>` — two bit iterators, each a word pointer plus a bit
 /// offset within that word. Addressed by field, so the port is
@@ -776,6 +789,44 @@ pub unsafe extern "C" fn vector_size_bool(bits: *const VectorBoolBounds) -> i32 
     // `lsl #5` + wrapping add/sub: 32 bits per word, 32-bit register
     // arithmetic exactly as the ARM body.
     (end_bit as i32).wrapping_add(words << 5).wrapping_sub(begin_bit as i32)
+}
+
+/// vector_bool_iter_not_equal — original: `FUN_083d79b4` @ 0x083d79b4
+/// (40 bytes; 2 `bl` call sites, both in the `vector<bool>`
+/// storage-grow path at 0x083e5dc4 / 0x083e5f40; the only copy —
+/// `ipod-decomp/decomp/c/037/083d79b4_FUN_083d79b4.c`).
+///
+/// `std::vector<bool>` bit-iterator `operator!=`: two iterators
+/// compare unequal when their word pointers differ or, the pointers
+/// being equal, their bit offsets do. The original is a single
+/// branchless predicated run — `ldreq` reloads the bit offsets only
+/// when the word compare came out equal, then the shared `cmpeq`
+/// finishes either comparison — and computes the EQUALITY first
+/// (`movne r0, #0` / `moveq r0, #1`) before inverting it with a final
+/// `eor r0, r0, #1`, the same never-folded ADS idiom as
+/// [`not_equal_deref`].
+///
+/// Identification: it sits between [`vector_size_bool`] @ 0x083d7968
+/// and the `{word, 1 << bit}` mask-reference ctor @ 0x083d79dc in the
+/// bit-iterator cluster (see that entry for the neighborhood).
+///
+/// # Safety
+/// `a` and `b` must point at readable [`VectorBoolIter`]s. The word
+/// storage itself is never accessed, so either word pointer may be
+/// NULL.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_bool_iter_not_equal(
+    a: *const VectorBoolIter,
+    b: *const VectorBoolIter,
+) -> u32 {
+    // `read_unaligned`: same 4-but-not-8-aligned firmware head hazard
+    // as `vector_size_bool` on a 64-bit host.
+    let a_word = core::ptr::read_unaligned(core::ptr::addr_of!((*a).word));
+    let a_bit = core::ptr::read_unaligned(core::ptr::addr_of!((*a).bit));
+    let b_word = core::ptr::read_unaligned(core::ptr::addr_of!((*b).word));
+    let b_bit = core::ptr::read_unaligned(core::ptr::addr_of!((*b).bit));
+    u32::from(a_word != b_word || a_bit != b_bit)
 }
 
 /// The `{begin, end, end_of_storage}` head of a vector — the three
@@ -1810,6 +1861,44 @@ mod tests {
                 end_bit: 0,
             };
             assert_eq!(vector_size_bool(&partial), -5 * 32, "-20 >> 2 (asr) is -5");
+        }
+    }
+
+    // ---- vector_bool_iter_not_equal --------------------------------
+
+    #[test]
+    fn vector_bool_iter_not_equal_is_zero_only_when_both_fields_match() {
+        unsafe {
+            let storage = [0u32; 4];
+            let base = storage.as_ptr() as *mut u32;
+            for a_word in 0..4usize {
+                for b_word in 0..4usize {
+                    for a_bit in 0..32u32 {
+                        for b_bit in 0..32u32 {
+                            let a = VectorBoolIter { word: base.add(a_word), bit: a_bit };
+                            let b = VectorBoolIter { word: base.add(b_word), bit: b_bit };
+                            let want = u32::from(a_word != b_word || a_bit != b_bit);
+                            assert_eq!(
+                                vector_bool_iter_not_equal(&a, &b),
+                                want,
+                                "a=({a_word},{a_bit}) b=({b_word},{b_bit})"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The word storage is never dereferenced, so NULL word pointers
+    /// compare like any other address.
+    #[test]
+    fn vector_bool_iter_not_equal_never_touches_the_word_storage() {
+        unsafe {
+            let null_iter = VectorBoolIter { word: core::ptr::null_mut(), bit: 0 };
+            assert_eq!(vector_bool_iter_not_equal(&null_iter, &null_iter), 0);
+            let other = VectorBoolIter { word: core::ptr::null_mut(), bit: 1 };
+            assert_eq!(vector_bool_iter_not_equal(&null_iter, &other), 1);
         }
     }
 
