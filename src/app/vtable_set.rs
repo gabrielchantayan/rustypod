@@ -50,9 +50,10 @@
 //!   (`dispatch(handle, 4, &4)`) and, only when that returns 0, the
 //!   two-word `{*value, 4}` message (`dispatch(handle, 4, sp)`),
 //!   returning the last result.
-//! - **commit** — `FUN_0811d340` @ 0x0811d340 (28 bytes; the tail-call
-//!   thunk Ghidra's reference C shows inlined as
-//!   `FUN_0811d7fc(param_1, 4, &stack)`): `push {r0, r1, r4, lr};
+//! - **commit** — `FUN_0811d340` @ 0x0811d340 (32 bytes; ported in
+//!   this module as [`vtable_set_50_commit_kind4`], with the
+//!   [`VTABLE_SET_50_KIND4_OPS`] default `vtable_set_commit` still
+//!   modeling the identical body): `push {r0, r1, r4, lr};
 //!   orr [sp+4], #0x80000000; mov r1, #4; bl 0x0811d7fc` sends the
 //!   selector with the top bit set: `dispatch(handle, 4,
 //!   &(selector | 0x80000000))`.
@@ -506,6 +507,80 @@ pub unsafe extern "C" fn vtable_set_50_probe_kind4(
 ) -> u32 {
     let dispatch = core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_SLOT_50_DISPATCH));
     let tagged_slot = selector | PROBE_TAG;
+    let forwarded_slot = forwarded;
+    dispatch(
+        handle,
+        MESSAGE_KIND_4,
+        core::ptr::addr_of!(tagged_slot) as usize,
+        core::ptr::addr_of!(forwarded_slot),
+    )
+}
+
+/// vtable_set_50_commit_kind4 — original: `FUN_0811d340` @ 0x0811d340
+/// (32 bytes; **4 conditional-branch sites, no `bl` callers** — grep
+/// on `decomp/osos.asm`; every reach is a tail `beq`/`bleq`:
+/// 0x0811d338 from `FUN_0811d2f8`'s third stage, 0x0811d450 (`bleq`)
+/// from the multi-message routine `FUN_0811d360`, 0x0811d684 from the
+/// kind-2 three-stage sibling `FUN_0811d64c`, and 0x0811d6c4, the
+/// tail call of [`vtable_set_50_kind4`] (0x0811d68c).
+///
+/// The commit thunk of the kind-4 vtable message family — the exact
+/// shape of [`vtable_set_50_commit_probe_kind4`] (0x0811d6cc) and
+/// [`vtable_set_50_probe_kind4`] (0x0811d6ec) with the lone top commit
+/// bit in place of their wider/narrower tags:
+///
+/// ```text
+/// 0811d340  stmdb sp!, {r0, r1, r4, lr}  @ spill handle, selector
+/// 0811d344  ldr   r1, [sp, #0x4]         @ r1 = selector
+/// 0811d348  add   r2, sp, #0x4           @ r2 = &spilled selector
+/// 0811d34c  orr   r1, r1, #0x80000000    @ tag the commit bit
+/// 0811d350  str   r1, [sp, #0x4]         @ spilled selector = tagged
+/// 0811d354  mov   r1, #0x4               @ kind 4
+/// 0811d358  bl    0x0811d7fc             @ dispatch(handle, 4, &tagged)
+/// 0811d35c  ldmia sp!, {r2, r3, r4, pc}  @ return dispatch's r0
+/// ```
+///
+/// A single message to the slot +0x50 dispatcher: the handle passes
+/// through in r0 untouched, kind 4 in r1, and r2 points at the stack
+/// slot holding `selector | 0x80000000` ([`COMMIT_TAG`]; the tag bits'
+/// exact protocol meaning is not established, see the module header).
+/// This is the third and final stage of the guarded write —
+/// [`vtable_set_50_kind4`] tail-calls it after a successful open and
+/// write (its `beq 0x0811d340` at 0x0811d6c4), as does the kind-2
+/// sibling — and its error code returns unbranched.
+///
+/// # Deviations
+///
+/// - **The callee 0x0811d7fc is ported** in this module as
+///   [`vtable_slot_50_dispatch`]; the call still routes through the
+///   [`VTABLE_SLOT_50_DISPATCH`] `read_volatile` seam (retained for
+///   hookability — rewiring to a direct call is a follow-up), exactly
+///   as the two ported tag-thunk siblings do (the three bodies differ
+///   only in the `orr` immediate, so no new seam is needed).
+/// - **The caller's r3 is forwarded verbatim** (nothing between entry
+///   and the dispatcher's `stmdb sp!, {r3}` spill touches it), modeled
+///   as a third parameter `forwarded` — the
+///   [`vtable_set_50_commit_probe_kind4`] precedent. No call site sets
+///   r3 deliberately.
+/// - **The reference C is not followed where it mis-decompiles**:
+///   `decomp/c/010/0811d340_FUN_0811d340.c` invents a phantom fifth
+///   argument (`FUN_0811d7fc(param_1, 4, &local_c, param_4, param_1)`)
+///   — the dispatcher consumes r0..r3 only. The port follows the
+///   disassembly.
+/// - **This export duplicates the [`VTABLE_SET_50_KIND4_OPS`] commit
+///   default** `vtable_set_commit` (both are the exact body above);
+///   the private model stays wired as that table's default for now —
+///   pointing the table at this export is a deliberate follow-up (one
+///   function per commit).
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_set_50_commit_kind4(
+    handle: *mut *mut u8,
+    selector: u32,
+    forwarded: usize,
+) -> u32 {
+    let dispatch = core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_SLOT_50_DISPATCH));
+    let tagged_slot = selector | COMMIT_TAG;
     let forwarded_slot = forwarded;
     dispatch(
         handle,
@@ -1064,6 +1139,88 @@ mod tests {
 
             assert_eq!(
                 result, OPEN_ERR,
+                "ldmia sp!, {{r2, r3, r4, pc}} returns the dispatcher's r0 unbranched"
+            );
+        }
+    }
+
+    // ---- vtable_set_50_commit_kind4 (0x0811d340) -------------------
+
+    #[test]
+    fn commit_tags_selector_and_routes_arguments() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        unsafe {
+            install_recording_dispatch();
+
+            let result =
+                vtable_set_50_commit_kind4(fixture.handle_ptr(), SELECTOR, FORWARDED);
+
+            assert_eq!(result, MOCK_OK);
+            assert_eq!(DISPATCH_CALLS, 1, "exactly one dispatch (bl 0x0811d7fc)");
+            assert_eq!(
+                DISPATCH_HANDLE[0],
+                fixture.handle_ptr(),
+                "r0 (handle) passes through untouched"
+            );
+            assert_eq!(DISPATCH_KIND[0], MESSAGE_KIND_4, "r1 is the kind word (mov r1, #0x4)");
+            assert_eq!(
+                DISPATCH_WORD0[0],
+                SELECTOR | COMMIT_TAG,
+                "the message word is selector | 0x80000000 (ldr/orr/str on the spill slot)"
+            );
+            assert_ne!(
+                DISPATCH_WORD0[0], SELECTOR,
+                "the raw selector is never sent - the data pointer reaches the \
+                 tagged stack slot, not the argument (add r2, sp, #0x4 indirection)"
+            );
+            assert_ne!(
+                DISPATCH_WORD0[0],
+                SELECTOR | COMMIT_PROBE_TAG,
+                "the commit sets ONLY 0x80000000, not the sibling's 0xc0000000"
+            );
+            assert_eq!(
+                DISPATCH_EXTRA[0], FORWARDED,
+                "the caller's r3 reaches the dispatcher's spill"
+            );
+        }
+    }
+
+    #[test]
+    fn commit_ors_instead_of_replacing_the_high_bits() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        unsafe {
+            install_recording_dispatch();
+
+            // A selector that already carries the commit bit, and one
+            // carrying the sibling's probe bit: the original's `orr`
+            // keeps whatever is there and adds 0x80000000.
+            vtable_set_50_commit_kind4(fixture.handle_ptr(), SELECTOR | 0x8000_0000, 0);
+            vtable_set_50_commit_kind4(fixture.handle_ptr(), SELECTOR | 0x4000_0000, 0);
+
+            assert_eq!(DISPATCH_CALLS, 2);
+            assert_eq!(DISPATCH_WORD0[0], SELECTOR | COMMIT_TAG);
+            assert_eq!(DISPATCH_WORD0[1], SELECTOR | COMMIT_PROBE_TAG);
+        }
+    }
+
+    #[test]
+    fn commit_forwards_the_dispatch_return_verbatim() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        unsafe {
+            install_recording_dispatch();
+            DISPATCH_RESULTS[0] = WRITE_ERR;
+
+            let result =
+                vtable_set_50_commit_kind4(fixture.handle_ptr(), SELECTOR, FORWARDED);
+
+            assert_eq!(
+                result, WRITE_ERR,
                 "ldmia sp!, {{r2, r3, r4, pc}} returns the dispatcher's r0 unbranched"
             );
         }

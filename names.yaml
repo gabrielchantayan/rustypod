@@ -21195,3 +21195,56 @@ functions:
       cells 8 bytes apart, cursor advances by exactly the rounded
       word), cell_is_zero_filled_and_back_patchable (fresh cell NULL
       despite poisoned allocator, writable back-patch).
+
+  - address: 0x0811d340
+    ghidra: FUN_0811d340
+    name: vtable_set_50_commit_kind4
+    size: 32
+    sig: "u32 vtable_set_50_commit_kind4(handle: *mut *mut u8, selector: u32, forwarded: usize)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1: handle
+      param_2: selector
+    notes: >-
+      4 conditional-branch sites, no bl callers (grep on
+      decomp/osos.asm) - every reach is a tail beq/bleq: 0x0811d338
+      from FUN_0811d2f8's third stage, 0x0811d450 (bleq) from the
+      multi-message routine FUN_0811d360, 0x0811d684 from the kind-2
+      three-stage sibling FUN_0811d64c, and 0x0811d6c4, the tail call
+      of vtable_set_50_kind4 (0x0811d68c). The commit thunk of the
+      kind-4 vtable message family (slot +0x50) - the exact shape of
+      vtable_set_50_commit_probe_kind4 @ 0x0811d6cc and
+      vtable_set_50_probe_kind4 @ 0x0811d6ec with the lone top commit
+      bit: stmdb sp!,{r0,r1,r4,lr}; ldr r1,[sp,#4]; add r2,sp,#4;
+      orr r1,r1,#0x80000000; str r1,[sp,#4]; mov r1,#4; bl 0x0811d7fc;
+      ldmia sp!,{r2,r3,r4,pc} - handle passes through in r0 untouched,
+      kind 4 in r1, r2 points at the stack slot holding
+      selector | 0x80000000 (COMMIT_TAG; exact protocol meaning not
+      established, see the module header), and the dispatcher's r0
+      returns unbranched. This is the third and final stage of the
+      guarded write: vtable_set_50_kind4 tail-calls it after a
+      successful open and write. Deviations: callee 0x0811d7fc is
+      ported in-module as vtable_slot_50_dispatch; like the two
+      ported tag-thunk siblings the call still routes through the
+      VTABLE_SLOT_50_DISPATCH read_volatile seam (retained for
+      hookability - rewiring to a direct call is a follow-up), and the
+      VTABLE_SET_50_KIND4_OPS commit default stays the private
+      identical-body model vtable_set_commit for now (pointing the
+      table at this export is a deliberate follow-up; one function
+      per commit). The caller's r3 is forwarded verbatim, modeled as
+      a 3rd parameter `forwarded` (vtable_set_50_commit_probe_kind4
+      precedent). Reference C decomp/c/010/0811d340_FUN_0811d340.c
+      invents a phantom 5th argument (FUN_0811d7fc(param_1, 4,
+      &local_c, param_4, param_1)) - the dispatcher consumes r0..r3
+      only; the port follows the disassembly. match.py (exit 1, diff
+      expected): same orr 0x80000000 / mov r1,#4 / tagged-stack-slot /
+      single-dispatch structure; the diff is the crate fp frame and
+      the seam's ldr/blx standing in for bl 0x0811d7fc. Host tests:
+      0x80000000 tagging + argument routing (handle verbatim, kind 4,
+      stack-slot indirection, r3 forwarding), orr-not-replace on
+      selectors already carrying each tag bit, and verbatim return
+      forwarding -
+      src/app/vtable_set.rs::commit_tags_selector_and_routes_arguments /
+      commit_ors_instead_of_replacing_the_high_bits /
+      commit_forwards_the_dispatch_return_verbatim.
