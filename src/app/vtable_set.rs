@@ -344,8 +344,9 @@ type VtableSlot04Method = unsafe extern "C" fn(object: *mut u8);
 /// vtable_slot_04_dispose — original: `FUN_0811d7cc` @ 0x0811d7cc
 /// (48 bytes; **14 `bl` call sites**, grep on `decomp/osos.asm`:
 /// 0x0810ab00, 0x0811b278, 0x0811c798, 0x0811d8c8 — inside the
-/// unported wrapper thunk 0x0811d8c0, which disposes and then
-/// returns the handle — 0x08136840, 0x0815e904, 0x081affb4,
+/// wrapper thunk [`vtable_file_record_dispose`] (0x0811d8c0, ported
+/// in this module), which disposes and then returns the handle —
+/// 0x08136840, 0x0815e904, 0x081affb4,
 /// 0x081b0174, 0x081bc82c and the 5-site cluster
 /// 0x08285738..0x08285938; several sit in the same routines that
 /// drive this family's kind-4 probe/set thunks — this is the
@@ -2636,7 +2637,8 @@ pub unsafe extern "C" fn vtable_file_open(
 ///   function ends in a real `bx lr` at 0x0811d8bc. The sibling is
 ///   the dispose-and-return-handle wrapper (`push {r4, lr}; mov r4,
 ///   r0; bl 0x0811d7cc; mov r0, r4; pop {r4, pc}`) already documented
-///   under [`vtable_slot_04_dispose`]; it is NOT ported here.
+///   under [`vtable_slot_04_dispose`]; it is ported below as
+///   [`vtable_file_record_dispose`].
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn vtable_file_record_init(record: *mut u8) -> *mut u8 {
@@ -2644,6 +2646,61 @@ pub unsafe extern "C" fn vtable_file_record_init(record: *mut u8) -> *mut u8 {
     record.add(4).write(0);
     record.add(5).write(0);
     record
+}
+
+/// vtable_file_record_dispose — original: `FUN_0811d8c0` @ 0x0811d8c0
+/// (20 bytes; **8 `bl` call sites**, grep on `decomp/osos.asm`:
+/// 0x0810a96c, 0x0810ab08, 0x0811c9cc, 0x08136558, 0x08136848,
+/// 0x0815eb58, 0x081bc658 and 0x081bc834 — the teardown
+/// counterpart of [`vtable_file_record_init`]: 0x08136558 /
+/// 0x08136848 sit in `FUN_08136520`, which inits the SAME
+/// `auStack_28` record at 0x0813653c and opens it through
+/// [`vtable_file_open`]; 0x081bc658 / 0x081bc834 do the same in
+/// `FUN_081bc620` (init at 0x081bc63c); 0x0810a96c / 0x0810ab08
+/// (`FUN_081010d0`) and 0x081bc658 run the raw
+/// [`vtable_slot_04_dispose`] on the record FIRST and then this
+/// wrapper, so the wrapper's NULL-handle path is exercised by real
+/// callers; the remaining sites pass interior record pointers
+/// (`FUN_0811c98c`: `iVar2 - 0x20`, `FUN_0815eb20`: `param_1 +
+/// 0x21`) and consume the RETURNED pointer for further
+/// container-of arithmetic (`FUN_0839ca74(iVar2 - 0x3c)`,
+/// `FUN_081d0f58(iVar3 - 0x58)`).
+///
+/// The dispose-and-return-handle wrapper over
+/// [`vtable_slot_04_dispose`] — a separate routine from its
+/// predecessor [`vtable_file_record_init`] (0x0811d8ac), which
+/// ends in a real `bx lr` at 0x0811d8bc:
+///
+/// ```text
+/// 0811d8c0  stmdb sp!, {r4, lr}   @ frame
+/// 0811d8c4  mov   r4, r0          @ save the handle/record pointer
+/// 0811d8c8  bl    0x0811d7cc      @ vtable_slot_04_dispose(handle)
+/// 0811d8cc  mov   r0, r4          @ discard the 0 status, return the handle
+/// 0811d8d0  ldmia sp!, {r4, pc}
+/// ```
+///
+/// The record's first word IS the handle word ([`vtable_file_open`]
+/// stores the object at record +0x0), so the record pointer feeds
+/// the dispose verbatim; the dispose's always-0 status is
+/// overwritten by the saved pointer and the pointer returns.
+///
+/// # Deviations
+///
+/// - **The reference C is exact** (`decomp/c/011/
+///   0811d8c0_FUN_0811d8c0.c`: `FUN_0811d7cc(); return param_1;`);
+///   the port only gives the untyped `undefined4` its concrete
+///   handle-pointer type, matching [`vtable_slot_04_dispose`].
+/// - **The ported [`vtable_slot_04_dispose`] is called directly** —
+///   the original itself is a `bl 0x0811d7cc`, so the direct call
+///   reproduces the call chain exactly (the app/class_6800.rs
+///   ported-callees-called-directly precedent); no seam.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_file_record_dispose(
+    handle: *mut *mut u8,
+) -> *mut *mut u8 {
+    vtable_slot_04_dispose(handle);
+    handle
 }
 
 #[cfg(test)]
@@ -6680,6 +6737,102 @@ mod tests {
             assert_eq!(&object[..8], &[0xa5; 8], "the prefix is untouched");
             assert_eq!(&object[8..14], &[0; 6], "the six record bytes are cleared");
             assert_eq!(&object[14..], &[0xa5; 10], "the tail is untouched");
+        }
+    }
+
+    // ---- vtable_file_record_dispose (0x0811d8c0) --------------------
+
+    #[test]
+    fn file_record_dispose_calls_through_and_returns_the_handle() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let mut chain = FakeChain::new();
+        chain.install_dispose(VTABLE_SLOT_04, dispose_method);
+        chain.install_dispose(VTABLE_SLOT_04 + 8, wrong_slot_dispose);
+        chain.link();
+        unsafe {
+            reset_dispose_log();
+            DISPOSE_HANDLE_PTR = chain.handle_ptr() as *const *mut u8;
+
+            let result = vtable_file_record_dispose(chain.handle_ptr());
+
+            assert_eq!(
+                result,
+                chain.handle_ptr(),
+                "mov r0, r4 — the argument returns, not the dispose's 0 status"
+            );
+            assert_eq!(
+                DISPOSE_CALLS, 1,
+                "bl 0x0811d7cc — the dispose runs exactly once"
+            );
+            assert_eq!(
+                WRONG_SLOT_CALLS, 0,
+                "only vtable slot +0x4 is loaded"
+            );
+            assert_eq!(
+                DISPOSE_OBJECT,
+                core::ptr::addr_of_mut!(chain.object) as *mut u8,
+                "the dispose received *handle (the record's first word)"
+            );
+            assert_eq!(
+                chain.handle_ptr().read(),
+                core::ptr::null_mut(),
+                "the dispose NULLed the handle, yet the POINTER still returns"
+            );
+        }
+    }
+
+    #[test]
+    fn file_record_dispose_null_handle_is_a_noop_and_still_returns_it() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let mut handle: *mut u8 = core::ptr::null_mut();
+        unsafe {
+            reset_dispose_log();
+            let handle_ptr = core::ptr::addr_of_mut!(handle);
+
+            let result = vtable_file_record_dispose(handle_ptr);
+
+            assert_eq!(
+                result, handle_ptr,
+                "mov r0, r4 runs on the NULL path too: the pointer returns"
+            );
+            assert_eq!(
+                DISPOSE_CALLS, 0,
+                "the dispose's cmp r0, #0; beq skips the blx on a NULL handle"
+            );
+            assert_eq!(
+                handle,
+                core::ptr::null_mut(),
+                "the NULL store is skipped as well"
+            );
+        }
+    }
+
+    #[test]
+    fn file_record_dispose_discards_the_dispose_status() {
+        // vtable_slot_04_dispose always returns 0, and every observed
+        // caller consumes the wrapper's return as the RECORD pointer —
+        // pin the mov r0, r4 overwrite even when the record lives
+        // inside a larger object (the 0x0811c9cc / 0x0815eb58 sites,
+        // which do container-of arithmetic on the returned pointer).
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let mut chain = FakeChain::new();
+        chain.install_dispose(VTABLE_SLOT_04, dispose_method);
+        chain.link();
+        unsafe {
+            reset_dispose_log();
+            DISPOSE_HANDLE_PTR = chain.handle_ptr() as *const *mut u8;
+
+            let handle_ptr = chain.handle_ptr();
+            let result = vtable_file_record_dispose(handle_ptr);
+
+            assert_eq!(
+                result, handle_ptr,
+                "the returned pointer is bit-identical to the argument"
+            );
+            assert_ne!(
+                result as usize, 0,
+                "the dispose's 0 status never reaches the caller"
+            );
         }
     }
 }

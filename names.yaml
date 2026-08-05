@@ -22827,7 +22827,50 @@ functions:
       0x0811d8c0 (20 bytes) is a SEPARATE routine, not one body split
       by Ghidra: this function ends in a real bx lr at 0x0811d8bc; the
       sibling is the dispose-and-return-handle wrapper over
-      vtable_slot_04_dispose (0x0811d7cc) and is NOT ported here.
+      vtable_slot_04_dispose (0x0811d7cc), ported in the same module
+      as vtable_file_record_dispose.
       Host tests:
       src/app/vtable_set.rs::file_record_init_zeroes_the_record_and_returns_the_pointer
       / file_record_init_clears_a_field_inside_a_larger_object.
+
+  - address: 0x0811d8c0
+    ghidra: FUN_0811d8c0
+    name: vtable_file_record_dispose
+    size: 20
+    sig: "*mut *mut u8 vtable_file_record_dispose(handle: *mut *mut u8)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r0: handle
+    notes: >-
+      8 bl call sites (grep on decomp/osos.asm): 0x0810a96c,
+      0x0810ab08, 0x0811c9cc, 0x08136558, 0x08136848, 0x0815eb58,
+      0x081bc658 and 0x081bc834 - the teardown counterpart of
+      vtable_file_record_init: 0x08136558 / 0x08136848 sit in
+      FUN_08136520, which inits the SAME auStack_28 record at
+      0x0813653c and opens it through vtable_file_open; 0x081bc658 /
+      0x081bc834 do the same in FUN_081bc620 (init at 0x081bc63c);
+      0x0810a96c / 0x0810ab08 (FUN_081010d0) and 0x081bc658 run the
+      raw vtable_slot_04_dispose on the record FIRST and then this
+      wrapper, so real callers exercise the NULL-handle path; the
+      remaining sites pass interior record pointers (FUN_0811c98c:
+      iVar2 - 0x20, FUN_0815eb20: param_1 + 0x21) and consume the
+      RETURNED pointer for further container-of arithmetic
+      (FUN_0839ca74(iVar2 - 0x3c), FUN_081d0f58(iVar3 - 0x58)). No b
+      (tail) sites. A SEPARATE routine from its predecessor
+      vtable_file_record_init (0x0811d8ac), which ends in a real bx
+      lr at 0x0811d8bc. The dispose-and-return-handle wrapper over
+      the ported vtable_slot_04_dispose: push {r4, lr}; mov r4, r0;
+      bl 0x0811d7cc; mov r0, r4; pop {r4, pc} - the record's first
+      word IS the handle word (vtable_file_open stores the object at
+      record +0x0), the dispose's always-0 status is discarded and
+      the handle/record pointer returns. Deviations: the reference C
+      (decomp/c/011/0811d8c0_FUN_0811d8c0.c) is exact (FUN_0811d7cc();
+      return param_1;), only the untyped undefined4 gets the concrete
+      handle-pointer type; the ported vtable_slot_04_dispose is called
+      directly, reproducing the original bl 0x0811d7cc exactly (the
+      app/class_6800.rs ported-callees-called-directly precedent), no
+      seam. Host tests:
+      src/app/vtable_set.rs::file_record_dispose_calls_through_and_returns_the_handle
+      / file_record_dispose_null_handle_is_a_noop_and_still_returns_it
+      / file_record_dispose_discards_the_dispose_status.
