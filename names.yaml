@@ -21863,6 +21863,41 @@ functions:
       buffer_page_pointer_returns_null_when_the_page_allocation_fails
       (the deviation: NULL, slot never stored).
 
+  - address: 0x082c23b0
+    ghidra: FUN_082c23b0
+    name: cg_buffer_read_word
+    size: 16
+    sig: "u32 cg_buffer_read_word(cg_codegen_buffer_t *output, u32 offset)"
+    module: codegen/ir
+    status: ported
+    vars: {param_1: output, param_2: offset}
+    notes: >-
+      2 bl call sites (grep on decomp/osos.asm): 0x082c1720 and
+      0x082c174c, both inside the label-fixup resolver FUN_082c16e0 -
+      reading back the previously emitted instruction word at a fixup
+      position so the resolver can splice the resolved branch offset
+      into it while preserving the opcode/condition bits. The
+      read-side mirror of cg_buffer_emit_word @ 0x082c231c: the whole
+      body is `bl 0x082c5b1c` (resolve offset to a pointer through the
+      code-page accessor cg_buffer_page_pointer - ported, call routed
+      through the CG_BUFFER_PAGE_POINTER seam wired to that port, the
+      documented seam scheme same as the emitter) followed by
+      `ldr r0, [r0, #0x0]` (load the word). The saved r4 in the frame
+      (`stmdb sp!, {r4, lr}` / `ldmia sp!, {r4, pc}`) is never
+      written - the pair only keeps the stack 8-byte aligned across
+      the bl. Unlike the emitter the offset is NOT aligned first (no
+      bl 0x082c2290): the resolver's fixup positions are word-aligned
+      by construction. No NULL check on the accessor's result, same
+      failure semantics as cg_buffer_emit_word. Host tests:
+      src/codegen/ir.rs::buffer_read_word_loads_through_the_page_pointer_seam_with_the_offset_verbatim
+      (recording fake: word bit-exact, accessor receives (buffer,
+      offset) verbatim - offset 6 NOT aligned up, unlike the emitter,
+      cell untouched, current_offset never read),
+      buffer_read_word_reads_back_words_emitted_across_a_page_boundary
+      (end-to-end through the wired defaults: 0x404 words emitted via
+      cg_buffer_emit_word across the 0x1000-byte page boundary, every
+      word reads back bit-exact, offset unmoved).
+
   - address: 0x082c2350
     ghidra: FUN_082c2350
     name: cg_buffer_copy_out
