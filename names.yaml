@@ -14476,7 +14476,29 @@ functions:
     notes: >-
       vector_size_elem4 with `asr #3`. 4 byte-identical copies, 50 bl
       sites - 0x083d7860 14, 0x083d76a4 14, 0x083d7a88 13,
-      0x083d7664 9.
+      0x083d7664 9 (0x083d7664 is ported below and hooks this same
+      symbol).
+
+  - address: 0x083d7664
+    ghidra: FUN_083d7664
+    name: vector_size_elem8
+    size: 16
+    sig: "i32 vector_size_elem8(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      Byte-identical copy of vector_size_elem8 @ 0x083d7860 (same `ldm
+      r0,{r0,r1}; sub r0,r1,r0; asr r0,r0,#3; bx lr` - verified against
+      Ghidra's `return param_1[1] - *param_1 >> 3` and the vector_capacity_elem20
+      port's per-address osos.asm read, which pins this shift
+      immediately after 0x083d7650). Served by the existing
+      cxx/templates port - hook this address to the vector_size_elem8
+      symbol (the vector_size_elem16 copy-at-0x083d78b4 precedent). 9 bl
+      call sites. Source C: decomp/c/037/083d7664_FUN_083d7664.c.
+      match.py - the ldm comes out as byte loads from the family's
+      read_unaligned host-testing idiom, the same accepted deviation as
+      vector_size_elem4; the sub/asr#3 structure matches.
 
   - address: 0x083d7884
     ghidra: FUN_083d7884

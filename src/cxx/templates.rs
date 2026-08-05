@@ -544,6 +544,12 @@ pub unsafe extern "C" fn vector_size_elem4_alias_7a68(vector: *const VectorBound
 /// (16 bytes; 14 `bl` call sites there, 50 across 4 byte-identical
 /// copies). [`vector_size_elem4`] with `>> 3`.
 ///
+/// The copy at 0x083d7664 (`FUN_083d7664`, 9 `bl` call sites;
+/// `ipod-decomp/decomp/c/037/083d7664_FUN_083d7664.c`) is byte-identical
+/// — verified against osos.asm and Ghidra's `return param_1[1] - *param_1
+/// >> 3` — so it is served by this port: any hook at that address points
+/// here (the `vector_size_elem16` copy-at-0x083d78b4 ledger precedent).
+///
 /// # Safety
 /// `vector` must point at a readable `{begin, end}` pair.
 #[cfg_attr(target_os = "none", no_mangle)]
@@ -1275,6 +1281,8 @@ mod tests {
             let begin = storage.as_ptr() as *mut u8;
             let reversed = VectorBounds { begin: begin.add(16), end: begin };
             assert_eq!(vector_size_elem4(&reversed), -4);
+            // -16 bytes / asr #3 = -2 — the 0x083d7664 copy's exact body.
+            assert_eq!(vector_size_elem8(&reversed), -2);
             assert_eq!(vector_size_elem16(&reversed), -1);
         }
     }
