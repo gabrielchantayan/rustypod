@@ -15024,6 +15024,33 @@ functions:
       family's read_unaligned host-testing idiom, the same accepted
       deviation as vector_size_elem4.
 
+  - address: 0x083d772c
+    ghidra: FUN_083d772c
+    name: vector_size_elem12
+    size: 16
+    sig: "i32 vector_size_elem12(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      Byte-identical copy of vector_size_elem12 @ 0x083d76f8 (same
+      `ldm r0,{r0,r1}; sub r0,r1,r0; mov r1,#0xc; b 0x08031568` -
+      verified against osos.asm per address; it sits immediately after
+      the vector_size_elem20 copy at 0x083d771c and immediately before
+      the vector_capacity_elem12 copy at 0x083d773c, exactly like the
+      primary sits between vector_size_elem12's own divide siblings).
+      Served by the existing cxx/templates port - hook this address to
+      the one vector_size_elem12 symbol (the vector_size_elem20
+      copy-at-0x083d771c precedent). 3 bl call sites: 0x083e184c,
+      0x083e18a0, 0x083e1934. Source C:
+      decomp/c/037/083d772c_FUN_083d772c.c - Ghidra inlines the ADS
+      signed divide through the tail branch; the real body is the
+      4-instruction size/12 head. match.py against vector_size_elem12
+      at this address - same structure (sub / mov r1,#12 / b
+      __rt_sdiv); the ldm comes out as byte loads from the family's
+      read_unaligned host-testing idiom, the same accepted deviation
+      as vector_size_elem4.
+
   - address: 0x083d7894
     ghidra: FUN_083d7894
     name: vector_size_elem28
