@@ -19130,6 +19130,53 @@ functions:
       guard/add/conditional-branch/zero-return shape; diffs are LLVM's
       push {fp,lr} frame, flag-setting addsne for addne, and the indirect
       call through the boundary static instead of the direct b 0x08064980.
+
+  # --- retailOS object counted-text install from the shared context's dotted-triple word ---
+  - address: 0x08055f50
+    ghidra: FUN_08055f50
+    name: object_set_version_text
+    size: 64
+    sig: "void object_set_version_text(void *object)"
+    module: ui/object_state
+    status: ported
+    renames:
+      param_1: object
+      iVar1: context
+      auStack_208: counted
+      auStack_108: formatted
+      FUN_08369bec: shared_context
+      FUN_0806e0a4: format_dotted_triple
+      FUN_08045f14: cstr_to_counted_u8
+      FUN_08046a88: object_counted_text
+    notes: >-
+      Fetches the process-wide shared context through the lazy getter
+      0x08369bec, reads the word at context+0x48, and formats it through
+      stock helper 0x0806e0a4 — sprintf(dst, "%d.%d.%d", word >> 24,
+      (word >> 16) & 0xff, word & 0xffff) over the format string at
+      0x0806e0d4 — into the upper of two uninitialized 256-byte stack
+      buffers (sub sp,sp,#0x200). Ported cstr_to_counted_u8 (0x08045f14)
+      converts the text into a byte-counted string in the lower buffer
+      with limit 0xff, and stock setter 0x08046a88 installs it on the
+      object (halfword count at object+0, expanded halfword payload at
+      object+2 via 0x08046b44). The context word's identity as a version
+      is inferred from the dotted-triple format and the byte-identical
+      sibling 0x08052228, which reads context+0x4c and is a separate
+      function. One `bl 0x08055f50` call site (grep -c on
+      decomp/osos.asm), at 0x08112800: a dispatch chain of field setters
+      (0x08052228, 0x08054d78, 0x08054ea0, 0x080539f0) filling a stack
+      object at sp+0x5c before 0x081131a8 merges it into the record at
+      r5+0xf8 — an about/diagnostics-style text field; the concrete
+      field is not recovered. Ghidra declares the original void; its r0
+      residue is 0x08046a88's return, which the call site ignores. The
+      three stock helpers stay in retailOS behind the SHARED_CONTEXT,
+      FORMAT_DOTTED_TRIPLE and OBJECT_COUNTED_TEXT boundaries. match.py
+      (structural, exit 1 expected) shows the same four-call sequence
+      with the same +0x48 load, 0xff limit and 0x200 frame; diffs are
+      LLVM's larger push {r4-r6,sl,fp,lr} frame, blx through the
+      boundary statics instead of direct bl, swapped stack-buffer order,
+      and the in-crate bl to cstr_to_counted_u8. Rust implementation
+      and focused host tests:
+      `src/ui/object_state.rs::object_set_version_text`.
       Rust implementation and focused host tests:
       `src/ui/object_state.rs::object_scaled_total`.
 

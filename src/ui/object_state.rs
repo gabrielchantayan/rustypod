@@ -303,6 +303,166 @@ pub unsafe extern "C" fn object_scaled_total(object: *const u8) -> i64 {
     scaled_field_total_fn()(fields)
 }
 
+/// Byte offset of the version word inside the retailOS shared context
+/// (`ldr r0,[r0,#0x48]` on the context getter's result).
+const CONTEXT_VERSION_WORD_OFFSET: usize = 0x48;
+
+/// Counted-payload limit handed to [`crate::libc::counted_copy::cstr_to_counted_u8`]
+/// (`mov r2,#0xff`).
+const COUNTED_TEXT_LIMIT: u32 = 0xff;
+
+type SharedContext = unsafe extern "C" fn() -> *mut u8;
+
+/// Calls the stock lazy shared-context getter, which remains in retailOS.
+///
+/// This is deliberately a boundary rather than a port of 0x08369bec. Host
+/// tests replace the one function pointer below; ARM builds call its fixed
+/// firmware load address. The original publishes a default context pointer
+/// into its slot when zero, then returns the slot's context base.
+unsafe extern "C" fn firmware_shared_context() -> *mut u8 {
+    #[cfg(target_os = "none")]
+    {
+        let shared_context: SharedContext = core::mem::transmute(0x0836_9becusize);
+        shared_context()
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        core::ptr::null_mut()
+    }
+}
+
+/// Narrow boundary for the unported 0x08369bec dependency.
+static mut SHARED_CONTEXT: SharedContext = firmware_shared_context;
+
+#[inline(always)]
+unsafe fn shared_context_fn() -> SharedContext {
+    core::ptr::read_volatile(core::ptr::addr_of!(SHARED_CONTEXT))
+}
+
+type FormatDottedTriple = unsafe extern "C" fn(u32, *mut u8);
+
+/// Calls the stock dotted-triple formatter, which remains in retailOS.
+///
+/// This is deliberately a boundary rather than a port of 0x0806e0a4. Host
+/// tests replace the one function pointer below; ARM builds call its fixed
+/// firmware load address. The original splits `word` into `(word >> 24)`,
+/// `((word >> 16) & 0xff)` and `(word & 0xffff)` and `sprintf`s them into
+/// `dst` through the format string at 0x0806e0d4, `"%d.%d.%d"`.
+unsafe extern "C" fn firmware_format_dotted_triple(word: u32, dst: *mut u8) {
+    #[cfg(target_os = "none")]
+    {
+        let format_dotted_triple: FormatDottedTriple =
+            core::mem::transmute(0x0806_e0a4usize);
+        format_dotted_triple(word, dst)
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        let _ = (word, dst);
+    }
+}
+
+/// Narrow boundary for the unported 0x0806e0a4 dependency.
+static mut FORMAT_DOTTED_TRIPLE: FormatDottedTriple = firmware_format_dotted_triple;
+
+#[inline(always)]
+unsafe fn format_dotted_triple_fn() -> FormatDottedTriple {
+    core::ptr::read_volatile(core::ptr::addr_of!(FORMAT_DOTTED_TRIPLE))
+}
+
+type ObjectCountedText = unsafe extern "C" fn(*const u8, *mut u8);
+
+/// Calls the stock counted-text setter, which remains in retailOS.
+///
+/// This is deliberately a boundary rather than a port of 0x08046a88. Host
+/// tests replace the one function pointer below; ARM builds call its fixed
+/// firmware load address. The original clears the halfword at `object + 0`,
+/// expands the counted string's payload bytes into halfwords at `object + 2`
+/// through 0x08046b44, then stores the resulting halfword count at
+/// `object + 0`; a null object (or null counted string with a non-null
+/// object) makes it return -0x31 after the clear.
+unsafe extern "C" fn firmware_object_counted_text(counted: *const u8, object: *mut u8) {
+    #[cfg(target_os = "none")]
+    {
+        let object_counted_text: ObjectCountedText =
+            core::mem::transmute(0x0804_6a88usize);
+        object_counted_text(counted, object)
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        let _ = (counted, object);
+    }
+}
+
+/// Narrow boundary for the unported 0x08046a88 dependency.
+static mut OBJECT_COUNTED_TEXT: ObjectCountedText = firmware_object_counted_text;
+
+#[inline(always)]
+unsafe fn object_counted_text_fn() -> ObjectCountedText {
+    core::ptr::read_volatile(core::ptr::addr_of!(OBJECT_COUNTED_TEXT))
+}
+
+/// object_set_version_text — original: `FUN_08055f50` @ `0x08055f50` (64
+/// bytes).
+///
+/// Source: `/home/gabe/Programming/ipod-decomp/decomp/c/003/08055f50_FUN_08055f50.c`;
+/// assembly: `decomp/osos.asm` @ `0x08055f50..0x08055f8c`.
+///
+/// Installs the shared context's dotted-triple word as an object's counted
+/// text. It fetches the process-wide context through the retailOS lazy
+/// getter 0x08369bec, reads the word at `context + 0x48`, and formats it
+/// through stock helper 0x0806e0a4 — a `sprintf(dst, "%d.%d.%d", word >> 24,
+/// (word >> 16) & 0xff, word & 0xffff)` wrapper over the format string at
+/// 0x0806e0d4 — into the upper of two uninitialized 256-byte stack buffers
+/// (`sub sp,sp,#0x200`). The ported
+/// [`crate::libc::counted_copy::cstr_to_counted_u8`] (0x08045f14) then
+/// converts that NUL-terminated text into a byte-counted string in the lower
+/// buffer with limit [`COUNTED_TEXT_LIMIT`], and stock setter 0x08046a88
+/// installs the counted text on `object` (halfword count at `object + 0`,
+/// expanded halfword payload at `object + 2`). The context word's identity
+/// as a version is inferred from the dotted-triple format and from the
+/// byte-identical sibling 0x08052228, which reads `context + 0x4c` and is a
+/// separate function. The single stock call site (0x08112800) sits in a
+/// dispatch chain of field setters (0x08052228, 0x08054d78, 0x08054ea0,
+/// 0x080539f0) that fill a stack object at `sp + 0x5c` before 0x081131a8
+/// merges it into the record at `r5 + 0xf8` — an about/diagnostics-style
+/// text field; the concrete field is not recovered. Ghidra declares the
+/// original `void`; its r0 residue is 0x08046a88's return, which the call
+/// site ignores, so the port returns nothing. The original's `mov r4,r0`
+/// keeps `object` in a callee-saved register across the calls — a register
+/// allocation detail, not observable state. The three stock helpers stay in
+/// retailOS behind the [`SHARED_CONTEXT`], [`FORMAT_DOTTED_TRIPLE`] and
+/// [`OBJECT_COUNTED_TEXT`] boundaries.
+///
+/// # Safety
+///
+/// Like the original, there is no null guard: the context getter must return
+/// a pointer readable at `+0x48`, and `object` must be valid for the stock
+/// setter's halfword writes (the setter itself tolerates a null `object` by
+/// returning -0x31 after no write).
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn object_set_version_text(object: *mut u8) {
+    let context = shared_context_fn()();
+    let version_word =
+        (context.add(CONTEXT_VERSION_WORD_OFFSET) as *const u32).read();
+
+    // The original reserves two uninitialized 256-byte stack buffers
+    // (`sub sp,sp,#0x200`) and never clears them.
+    let mut formatted = core::mem::MaybeUninit::<[u8; 256]>::uninit();
+    let mut counted = core::mem::MaybeUninit::<[u8; 256]>::uninit();
+
+    format_dotted_triple_fn()(version_word, formatted.as_mut_ptr() as *mut u8);
+    crate::libc::counted_copy::cstr_to_counted_u8(
+        formatted.as_ptr() as *const u8,
+        counted.as_mut_ptr() as *mut u8,
+        COUNTED_TEXT_LIMIT,
+    );
+    object_counted_text_fn()(counted.as_ptr() as *const u8, object);
+}
+
 /// Sampled-clock interface index the original passes to 0x0809b60c
 /// (`mov r0,#0x0` before the `bl`).
 const TIMESTAMP_INTERFACE: u32 = 0;
@@ -1120,5 +1280,147 @@ mod tests {
 
         assert_eq!(unsafe { timestamp_baseline() }, 9 << 10);
         assert_eq!(unsafe { BASELINE_SAMPLE_CALLS }, 2);
+    }
+
+    static VERSION_TEXT_LOCK: Mutex<()> = Mutex::new(());
+    static mut MOCK_CONTEXT: *mut u8 = core::ptr::null_mut();
+    static mut SHARED_CONTEXT_CALLS: u32 = 0;
+    static mut FORMAT_CALLS: u32 = 0;
+    static mut FORMAT_WORD: u32 = 0;
+    static mut FORMAT_PAYLOAD: [u8; 512] = [0; 512];
+    static mut FORMAT_PAYLOAD_LEN: usize = 0;
+    static mut SET_TEXT_CALLS: u32 = 0;
+    static mut SET_TEXT_OBJECT: usize = 0;
+    static mut SET_TEXT_COUNTED: [u8; 300] = [0; 300];
+
+    unsafe extern "C" fn recording_shared_context() -> *mut u8 {
+        SHARED_CONTEXT_CALLS += 1;
+        MOCK_CONTEXT
+    }
+
+    unsafe extern "C" fn recording_format_dotted_triple(word: u32, dst: *mut u8) {
+        FORMAT_CALLS += 1;
+        FORMAT_WORD = word;
+        core::ptr::copy_nonoverlapping(FORMAT_PAYLOAD.as_ptr(), dst, FORMAT_PAYLOAD_LEN);
+    }
+
+    unsafe extern "C" fn recording_object_counted_text(counted: *const u8, object: *mut u8) {
+        SET_TEXT_CALLS += 1;
+        SET_TEXT_OBJECT = object as usize;
+        let len = usize::from(counted.read());
+        core::ptr::copy_nonoverlapping(counted, SET_TEXT_COUNTED.as_mut_ptr(), len + 1);
+    }
+
+    /// Restores the stock-call boundaries before another test uses them.
+    struct VersionTextReset;
+
+    impl Drop for VersionTextReset {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(SHARED_CONTEXT).write(firmware_shared_context);
+                core::ptr::addr_of_mut!(FORMAT_DOTTED_TRIPLE)
+                    .write(firmware_format_dotted_triple);
+                core::ptr::addr_of_mut!(OBJECT_COUNTED_TEXT)
+                    .write(firmware_object_counted_text);
+            }
+        }
+    }
+
+    fn install_version_text_mocks(
+        context: *mut u8,
+        payload: &[u8],
+    ) -> MutexGuard<'static, ()> {
+        let guard = VERSION_TEXT_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        unsafe {
+            MOCK_CONTEXT = context;
+            SHARED_CONTEXT_CALLS = 0;
+            FORMAT_CALLS = 0;
+            FORMAT_WORD = 0;
+            FORMAT_PAYLOAD = [0; 512];
+            FORMAT_PAYLOAD[..payload.len()].copy_from_slice(payload);
+            FORMAT_PAYLOAD_LEN = payload.len();
+            SET_TEXT_CALLS = 0;
+            SET_TEXT_OBJECT = 0;
+            SET_TEXT_COUNTED = [0; 300];
+            core::ptr::addr_of_mut!(SHARED_CONTEXT).write(recording_shared_context);
+            core::ptr::addr_of_mut!(FORMAT_DOTTED_TRIPLE)
+                .write(recording_format_dotted_triple);
+            core::ptr::addr_of_mut!(OBJECT_COUNTED_TEXT)
+                .write(recording_object_counted_text);
+        }
+        guard
+    }
+
+    #[test]
+    fn reads_the_context_version_word_and_installs_the_counted_text() {
+        let mut context = [0xa5u8; 0x50];
+        context[0x44..0x48].copy_from_slice(&0x1122_3344u32.to_le_bytes());
+        context[0x48..0x4c].copy_from_slice(&0x0200_0004u32.to_le_bytes());
+        context[0x4c..0x50].copy_from_slice(&0x5566_7788u32.to_le_bytes());
+        let _guard = install_version_text_mocks(context.as_mut_ptr(), b"2.0.4\0");
+        let _reset = VersionTextReset;
+        let mut object = [0u8; 0x5c];
+
+        unsafe { object_set_version_text(object.as_mut_ptr()) };
+
+        assert_eq!(unsafe { SHARED_CONTEXT_CALLS }, 1);
+        assert_eq!(unsafe { FORMAT_CALLS }, 1);
+        assert_eq!(
+            unsafe { FORMAT_WORD },
+            0x0200_0004,
+            "the formatter must receive the word at context + 0x48 (`ldr r0,[r0,#0x48]`)"
+        );
+        assert_eq!(unsafe { SET_TEXT_CALLS }, 1);
+        assert_eq!(
+            unsafe { SET_TEXT_OBJECT },
+            object.as_mut_ptr() as usize,
+            "the setter must receive the caller's object unchanged (`mov r1,r4`)"
+        );
+        assert_eq!(
+            &unsafe { SET_TEXT_COUNTED }[..6],
+            b"\x052.0.4",
+            "the counted text is the formatted string with a length byte"
+        );
+    }
+
+    #[test]
+    fn counted_conversion_stops_at_the_ff_limit() {
+        let mut context = [0u8; 0x4c];
+        let mut payload = std::vec::Vec::from([0x61u8; 300]);
+        payload.push(0);
+        let _guard = install_version_text_mocks(context.as_mut_ptr(), &payload);
+        let _reset = VersionTextReset;
+        let mut object = [0u8; 0x5c];
+
+        unsafe { object_set_version_text(object.as_mut_ptr()) };
+
+        let counted = unsafe { SET_TEXT_COUNTED };
+        assert_eq!(
+            counted[0], 0xff,
+            "the 0xff limit caps the counted length (`mov r2,#0xff`)"
+        );
+        assert!(
+            counted[1..=0xff].iter().all(|&byte| byte == 0x61),
+            "exactly 255 payload bytes survive the limit"
+        );
+    }
+
+    #[test]
+    fn empty_formatted_text_installs_a_zero_length_counted_text() {
+        let mut context = [0u8; 0x4c];
+        let _guard = install_version_text_mocks(context.as_mut_ptr(), b"\0");
+        let _reset = VersionTextReset;
+        let mut object = [0u8; 0x5c];
+
+        unsafe { object_set_version_text(object.as_mut_ptr()) };
+
+        assert_eq!(unsafe { SET_TEXT_CALLS }, 1);
+        assert_eq!(
+            unsafe { SET_TEXT_COUNTED }[0],
+            0,
+            "an immediate source NUL leaves the counted length at zero"
+        );
     }
 }
