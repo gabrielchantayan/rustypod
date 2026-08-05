@@ -697,6 +697,33 @@ pub unsafe extern "C" fn context_mode_flag() -> u32 {
     (shared_context_fn()().add(CONTEXT_MODE_FLAG_OFFSET) as *const u32).read() & 1
 }
 
+/// Byte offset of the companion word inside the nested object
+/// (`ldr r0, [r0, #0xb54]`).
+const NESTED_OBJECT_COMPANION_WORD_OFFSET: usize = 0xb54;
+
+/// object_nested_companion_word — original: `FUN_0805603c` @ `0x0805603c`
+/// (12 bytes).
+///
+/// Source: `/home/gabe/Programming/ipod-decomp/decomp/c/003/0805603c_FUN_0805603c.c`;
+/// raw ARM: `ldr r0, [r0, #0xf00]; ldr r0, [r0, #0xb54]; bx lr`.
+/// The leaf follows the pointer at `object + 0xf00` (the same nested object
+/// [`object_nested_flag`], [`object_nested_property`] and
+/// [`object_nested_attribute`] dereference), then loads and returns that
+/// nested object's full 32-bit word at `+0xb54` — a word `ldr`, unlike the
+/// zero-extending `ldrb` of the byte accessors. Neither pointer is
+/// null-checked, matching the original. The single stock call site
+/// (0x08160278, in the tail-dispatch setup at 0x08160254) obtains the owner
+/// through 0x08289690()->+0x28->+0x30, stores the sibling
+/// `rtc_context_handle` @ 0x08056124 (the nested object's `+0x0c` handle
+/// word) result at its `+0x54`, then passes this `+0xb54` companion word as
+/// `r1` to its vtable `+0x84` method; the word's concrete meaning remains
+/// unidentified.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn object_nested_companion_word(object: *const u8) -> u32 {
+    let nested_object = (object.add(NESTED_OBJECT_POINTER_OFFSET) as *const *const u8).read();
+    (nested_object.add(NESTED_OBJECT_COMPANION_WORD_OFFSET) as *const u32).read()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1230,6 +1257,64 @@ mod tests {
                     u32::from(object_nested_attribute(outer.0.as_ptr())),
                     u32::from(byte),
                     "the ldrb result must be zero-extended for {byte:#04x}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn follows_the_object_pointer_to_the_nested_companion_word() {
+        #[repr(align(8))]
+        struct OuterObject(
+            [u8; NESTED_OBJECT_POINTER_OFFSET + core::mem::size_of::<*const u8>()],
+        );
+        #[repr(align(8))]
+        struct NestedObject([u8; NESTED_OBJECT_COMPANION_WORD_OFFSET + 8]);
+
+        let mut outer = OuterObject([0xa5; NESTED_OBJECT_POINTER_OFFSET + core::mem::size_of::<*const u8>()]);
+        let mut nested = NestedObject([0xa5; NESTED_OBJECT_COMPANION_WORD_OFFSET + 8]);
+        let neighbors = [0x1122_3344u32, 0x5566_7788, 0x99aa_bbcc];
+        for (slot, word) in neighbors.iter().enumerate() {
+            unsafe {
+                (nested.0.as_mut_ptr().add(NESTED_OBJECT_COMPANION_WORD_OFFSET - 4 + slot * 4)
+                    as *mut u32)
+                    .write_unaligned(word.to_le());
+            }
+        }
+
+        unsafe {
+            (outer.0.as_mut_ptr().add(NESTED_OBJECT_POINTER_OFFSET) as *mut *const u8)
+                .write(nested.0.as_ptr());
+            assert_eq!(
+                object_nested_companion_word(outer.0.as_ptr()),
+                neighbors[1],
+                "the ldr must read the word at +0xb54, little-endian"
+            );
+        }
+    }
+
+    #[test]
+    fn nested_companion_word_is_a_full_word() {
+        #[repr(align(8))]
+        struct OuterObject(
+            [u8; NESTED_OBJECT_POINTER_OFFSET + core::mem::size_of::<*const u8>()],
+        );
+        #[repr(align(8))]
+        struct NestedObject([u8; NESTED_OBJECT_COMPANION_WORD_OFFSET + 4]);
+
+        let mut outer = OuterObject([0; NESTED_OBJECT_POINTER_OFFSET + core::mem::size_of::<*const u8>()]);
+        let mut nested = NestedObject([0; NESTED_OBJECT_COMPANION_WORD_OFFSET + 4]);
+
+        unsafe {
+            (outer.0.as_mut_ptr().add(NESTED_OBJECT_POINTER_OFFSET) as *mut *const u8)
+                .write(nested.0.as_ptr());
+            for word in [0x0000_0000u32, 0x0000_0001, 0x8000_0000, 0xffff_ffff, 0xdead_beef] {
+                (nested.0.as_mut_ptr().add(NESTED_OBJECT_COMPANION_WORD_OFFSET) as *mut u32)
+                    .write_unaligned(word.to_le());
+                assert_eq!(
+                    object_nested_companion_word(outer.0.as_ptr()),
+                    word,
+                    "the ldr result must keep all 32 bits for {word:#010x}"
                 );
             }
         }

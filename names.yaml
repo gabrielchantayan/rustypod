@@ -19684,6 +19684,36 @@ functions:
       implementation and focused host tests:
       `src/ui/object_state.rs::context_mode_flag`.
 
+  # --- nested-object companion-word accessor ---
+  - address: 0x0805603c
+    ghidra: FUN_0805603c
+    name: object_nested_companion_word
+    size: 12
+    sig: "u32 object_nested_companion_word(const void *object)"
+    module: ui/object_state
+    status: ported
+    renames:
+      param_1: object
+    notes: >-
+      Leaf read-only accessor: ldr r0,[r0,#0xf00]; ldr r0,[r0,#0xb54];
+      bx lr. Follows the nested-object pointer at object+0xf00 (the same
+      nested object object_nested_flag/property/attribute @
+      0x08055f90/0x08055f9c/0x08055fa8 dereference) and returns the full
+      32-bit word at +0xb54 — a word ldr, unlike the zero-extending ldrb
+      of those byte accessors. One `bl 0x0805603c` call site (grep -c on
+      decomp/osos.asm), at 0x08160278 in the tail-dispatch setup
+      FUN_08160254: obtains the owner through FUN_08289690()->+0x28->+0x30,
+      stores the sibling rtc_context_handle @ 0x08056124 (the nested
+      object's +0x0c handle word) result at its +0x54, then passes this
+      +0xb54 companion word as r1 to its vtable +0x84 method; the word's
+      concrete meaning is not recovered. ABI: r0 is the sole pointer
+      argument and return register; no stack access, writes, or null
+      check. match.py confirms the structural shape — both ldr loads are
+      instruction-identical (offsets 0xf00 and 0xb54); the diff is only
+      LLVM's push {fp,lr}/pop {fp,pc} frame versus the ADS bx lr leaf.
+      Rust implementation and focused host tests:
+      `src/ui/object_state.rs::object_nested_companion_word`.
+
   # --- C++ object-header low-flag predicate ---
   - address: 0x0808539c
     ghidra: FUN_0808539c
