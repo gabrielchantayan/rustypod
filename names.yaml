@@ -10345,6 +10345,7 @@ functions:
     sig: "cg_virtual_reg_t *cg_virtual_reg_create(cg_proc_t *proc, cg_virtual_reg_type_t type)"
     module: codegen/ir
     status: ported
+    vars: {param_1: proc, param_2: reg_type, iVar1: reg, bVar2: list_was_nonempty}
     notes: >-
       835 bl call sites, binary-verified - THE most-called unported
       function in the image before this port. Carves a 40-byte
