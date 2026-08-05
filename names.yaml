@@ -18842,6 +18842,33 @@ functions:
       frame.
 
 
+  # --- Silver UI framework: linkage parent constructor ---
+
+  - address: 0x08125234
+    ghidra: FUN_08125234
+    name: framework_linkage_parent_construct
+    size: 32
+    sig: "Class6800 *framework_linkage_parent_construct(Class6800 *storage)"
+    module: app/class_6800
+    status: ported
+    vars:
+      param_1: storage
+      puVar1: this
+      FUN_08275bb8: framework_object_construct
+      DAT_08125254: FRAMEWORK_LINKAGE_PARENT_VTABLE_ADDRESS
+    notes: >-
+      The unnamed parent of the class-0x6800 linkage base. Raw ARM is
+      `push {r4,lr}; bl 0x08275bb8; ldr r1,[pc,#16]; str r1,[r0];
+      mov r1,#0; str r1,[r0,#4]; str r1,[r0,#8]; pop {r4,pc}`, with
+      vtable literal 0x089830b8 at 0x08125254. The root child returns
+      r0 untouched; this constructor uses that result for all three
+      stores and returns it unchanged. It has no NULL guard. The parent
+      vtable is overwritten immediately by 0x081110d0 before a virtual
+      call, so the port models its identity while preserving the direct
+      root call and exact store order. Focused host coverage verifies the
+      returned storage, vtable replacement, cleared +0x04/+0x08, and
+      preservation of every child/derived word.
+
   # --- Silver UI framework: link-owning base constructor ---
 
   - address: 0x081110d0

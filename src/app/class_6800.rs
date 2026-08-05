@@ -91,15 +91,15 @@
 //!   through `this->vtable`, so a test (or a later real vtable) is
 //!   picked up without touching this function.
 //! - `framework_base_construct` @ 0x081110d0 and
-//!   `framework_root_instance` @ 0x081d2204 are now ported directly. Its
-//!   two unported children, the parent constructor @ 0x08125234 and
-//!   link/target initializer @ 0x081108b4, remain distinct
-//!   [`CLASS_6800_OPS`] dispatch slots. The modeled
-//!   [`FRAMEWORK_ROOT_HOLDER`] is the crate stand-in for the runtime global
-//!   @ 0x089cc858 whose +4 slot the root getter returns, following
-//!   `app/context.rs`'s modeled-global precedent. The wired child defaults
-//!   preserve the previous modeled zero state but do not provide either
-//!   child's vtable, allocation, or target-adoption behavior, so the
+//!   `framework_root_instance` @ 0x081d2204 are ported directly. Its
+//!   parent constructor @ 0x08125234 is likewise direct and chains the
+//!   shared root constructor @ 0x08275bb8. The unported link/target
+//!   initializer @ 0x081108b4 remains the sole [`CLASS_6800_OPS`]
+//!   dispatch slot. The modeled [`FRAMEWORK_ROOT_HOLDER`] is the crate
+//!   stand-in for the runtime global @ 0x089cc858 whose +4 slot the root
+//!   getter returns, following `app/context.rs`'s modeled-global
+//!   precedent. The wired child default preserves the modeled zero state
+//!   but does not provide allocation or target-adoption behavior, so the
 //!   complete construction chain is still not hook-ready.
 //! - `demo_mode_instance` @ 0x081883fc **is** ported
 //!   (`app/registry.rs`), so it is called directly rather than through a
@@ -202,9 +202,9 @@ pub static mut FRAMEWORK_ROOT_HOLDER: FrameworkRootHolder = FrameworkRootHolder 
     instance: core::ptr::null_mut(),
 };
 
-/// Injection point for the parent constructor @ 0x08125234. It receives
-/// the caller-owned storage in `r0` and returns the base subobject in `r0`;
-/// the outer constructor must use that return rather than its input.
+/// Injection point for the parent constructor @ 0x08125234. Host tests
+/// may replace it to prove the outer constructor honours a relocated
+/// return; the wired default is [`framework_linkage_parent_construct`].
 pub type FrameworkBaseParentConstruct =
     unsafe extern "C" fn(storage: *mut Class6800) -> *mut Class6800;
 
@@ -217,25 +217,59 @@ pub type FrameworkBaseInitialize = unsafe extern "C" fn(
     owner: u32,
 );
 
-/// The unported retailOS dependencies reached while constructing this
-/// class family. [`framework_base_construct`] itself and
-/// [`framework_root_instance`] are direct code, not dispatch seams.
+/// The remaining unported retailOS dependency reached while constructing
+/// this class family. [`framework_linkage_parent_construct`],
+/// [`framework_base_construct`], and [`framework_root_instance`] are
+/// direct code, not dispatch seams.
 #[derive(Clone, Copy)]
 pub struct Class6800Ops {
-    /// `FUN_08125234` — parent constructor.
+    /// `FUN_08125234` parent-constructor test seam. The wired default is
+    /// [`framework_linkage_parent_construct`].
     pub parent_construct: FrameworkBaseParentConstruct,
     /// `FUN_081108b4` — allocates/initializes the base link and adopts
     /// the initial target.
     pub base_initialize: FrameworkBaseInitialize,
 }
 
-/// Wired default for [`Class6800Ops::parent_construct`]. It models just
-/// the observed cleared +0x04/+0x08 words; its own vtable remains
-/// unresolved and is immediately superseded by the direct port.
-unsafe extern "C" fn unported_parent_construct(storage: *mut Class6800) -> *mut Class6800 {
-    core::ptr::addr_of_mut!((*storage).base_04).write_volatile(0);
-    core::ptr::addr_of_mut!((*storage).base_08).write_volatile(0);
-    storage
+/// The vtable literal `FUN_08125234` plants after it chains the shared
+/// framework root constructor (pool word @ 0x08125254). The outer
+/// `framework_base_construct` overwrites this immediately, so only
+/// pointer identity is modeled.
+pub const FRAMEWORK_LINKAGE_PARENT_VTABLE_ADDRESS: u32 = 0x0898_30b8;
+
+/// Crate stand-in for [`FRAMEWORK_LINKAGE_PARENT_VTABLE_ADDRESS`]. No
+/// behavior is dispatched through this vtable before the direct child
+/// constructor replaces it with [`FRAMEWORK_BASE_VTABLE`].
+pub static FRAMEWORK_LINKAGE_PARENT_VTABLE: Class6800Vtable = Class6800Vtable {
+    unresolved_00: [0; 11],
+    set_target: unported_set_target,
+};
+
+/// framework_linkage_parent_construct — original: `FUN_08125234` @
+/// 0x08125234 (32 bytes of code; literal-pool word at 0x08125254).
+///
+/// Constructs the unnamed parent of the class-0x6800 linkage base. It
+/// first calls the shared root `framework_object_construct` @ 0x08275bb8,
+/// replaces that root vtable with 0x089830b8, then clears its two words at
+/// +0x04 and +0x08. It returns the root constructor's result in `r0`.
+/// There is no NULL check: either the child or the first store faults for
+/// NULL exactly as the ARM code does.
+///
+/// The physical vtable is runtime data; its modeled pointer is immediately
+/// superseded by `framework_base_construct`, matching the only observed
+/// behavior before any virtual dispatch.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn framework_linkage_parent_construct(
+    storage: *mut Class6800,
+) -> *mut Class6800 {
+    let this = crate::cxx::observable_array::framework_object_construct(storage.cast())
+        .cast::<Class6800>();
+    core::ptr::addr_of_mut!((*this).vtable)
+        .write_volatile(core::ptr::addr_of!(FRAMEWORK_LINKAGE_PARENT_VTABLE));
+    core::ptr::addr_of_mut!((*this).base_04).write_volatile(0);
+    core::ptr::addr_of_mut!((*this).base_08).write_volatile(0);
+    this
 }
 
 /// Wired default for [`Class6800Ops::base_initialize`]. The real child
@@ -269,12 +303,12 @@ pub unsafe extern "C" fn framework_root_instance() -> *mut u8 {
 
 /// Wired defaults for [`CLASS_6800_OPS`].
 pub const DEFAULT_CLASS_6800_OPS: Class6800Ops = Class6800Ops {
-    parent_construct: unported_parent_construct,
+    parent_construct: framework_linkage_parent_construct,
     base_initialize: unported_base_initialize,
 };
 
-/// Active model of the two unported callees. Target integration replaces a
-/// slot when its callee is ported; host tests install recording mocks.
+/// Active model of the remaining unported child. Target integration
+/// replaces its slot when ported; host tests install recording mocks.
 pub static mut CLASS_6800_OPS: Class6800Ops = DEFAULT_CLASS_6800_OPS;
 
 /// Wired default for [`CLASS_6800_VTABLE`]'s only modeled slot: the real
@@ -309,14 +343,13 @@ unsafe fn class_6800_ops() -> Class6800Ops {
 /// framework_base_construct — original: `FUN_081110d0` @ 0x081110d0
 /// (52 bytes; two direct `bl` calls).
 ///
-/// Constructs the unnamed framework linkage base of the class-0x6800
 /// addon. It first chains to parent constructor `FUN_08125234`, plants
 /// its vtable at +0x00 (`0x08981958`), then calls
 /// `FUN_081108b4(this, initial_target, create_link, 0)`. The returned
 /// pointer is exactly the parent constructor's return, forwarded after
 /// the initializer; there are no NULL checks before either the vtable
-/// store or child call. The parent/base-init children remain dispatch
-/// seams, so this port covers this 52-byte wrapper only. No deviations.
+/// store or child call. The link/target child remains a dispatch seam; no
+/// deviations.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn framework_base_construct(
@@ -562,6 +595,44 @@ mod tests {
             base_10: 0xa5a5_a5a5,
             default_target: 0xa5a5_a5a5usize as *mut u8,
             demo_mode: 0xa5a5_a5a5usize as *mut u8,
+        }
+    }
+
+    #[test]
+    fn linkage_parent_construct_replaces_root_vtable_and_clears_its_two_words() {
+        let mut object = poisoned();
+        let storage = ptr::addr_of_mut!(object);
+
+        unsafe {
+            let this = framework_linkage_parent_construct(storage);
+
+            assert_eq!(this, storage, "the root constructor's r0 is returned");
+            assert_eq!(
+                object.vtable,
+                ptr::addr_of!(FRAMEWORK_LINKAGE_PARENT_VTABLE),
+                "the derived parent overwrites the root vtable"
+            );
+            assert_eq!(object.base_04, 0, "exact store at +0x04");
+            assert_eq!(object.base_08, 0, "exact store at +0x08");
+            assert_eq!(
+                object.base_link,
+                0xa5a5_a5a5usize as *mut u8,
+                "the parent leaves +0x0c for its child"
+            );
+            assert_eq!(
+                object.base_10, 0xa5a5_a5a5,
+                "the parent leaves +0x10 for its child"
+            );
+            assert_eq!(
+                object.default_target,
+                0xa5a5_a5a5usize as *mut u8,
+                "the parent does not touch derived state"
+            );
+            assert_eq!(
+                object.demo_mode,
+                0xa5a5_a5a5usize as *mut u8,
+                "the parent does not touch derived state"
+            );
         }
     }
 
