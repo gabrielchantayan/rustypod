@@ -21273,3 +21273,87 @@ functions:
       src/app/vtable_set.rs::commit_tags_selector_and_routes_arguments /
       commit_ors_instead_of_replacing_the_high_bits /
       commit_forwards_the_dispatch_return_verbatim.
+
+  - address: 0x0811d458
+    ghidra: FUN_0811d458
+    name: vtable_set_50_open_kind4
+    size: 20
+    sig: "u32 vtable_set_50_open_kind4(handle: *mut *mut u8, selector: u32, forwarded: usize)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1: handle
+      param_2: selector
+    notes: >-
+      4 bl call sites (grep on decomp/osos.asm): 0x0811d30c, the first
+      stage of the three-stage routine FUN_0811d2f8; 0x0811d370, from
+      the multi-message routine FUN_0811d360; 0x0811d65c, the first
+      stage of the kind-2 three-stage sibling FUN_0811d64c; and
+      0x0811d69c, the first stage of vtable_set_50_kind4 (0x0811d68c).
+      The open thunk of the kind-4 vtable message family (slot +0x50)
+      - the smallest family member: the exact shape of
+      vtable_set_50_commit_kind4 @ 0x0811d340 and the two tag thunks
+      0x0811d6cc / 0x0811d6ec minus their ldr/orr/str tag sequence, so
+      the selector goes out BARE: stmdb sp!,{r0,r1,r4,lr}; add
+      r2,sp,#4; mov r1,#4; bl 0x0811d7fc; ldmia sp!,{r2,r3,r4,pc} -
+      handle passes through in r0 untouched, kind 4 in r1, r2 points
+      at the stack slot holding the untagged selector (see the module
+      header for the tag-bit family convention), and the dispatcher's
+      r0 returns unbranched. First stage of the guarded write:
+      vtable_set_50_kind4 calls it before the write stage and
+      propagates its error code (cmp r0,#0; popne). Deviations:
+      callee 0x0811d7fc is ported in-module as
+      vtable_slot_50_dispatch; like the ported tag-thunk siblings the
+      call still routes through the VTABLE_SLOT_50_DISPATCH
+      read_volatile seam (retained for hookability - rewiring to a
+      direct call is a follow-up; this body is their shape minus the
+      tag sequence, so no new seam), and the VTABLE_SET_50_KIND4_OPS
+      open default stays the private identical-body model
+      vtable_set_open for now (pointing the table at this export is a
+      deliberate follow-up; one function per commit). The caller's r3
+      is forwarded verbatim, modeled as a 3rd parameter `forwarded`
+      (vtable_set_50_commit_kind4 precedent). Reference C
+      decomp/c/010/0811d458_FUN_0811d458.c invents a phantom 5th
+      argument (FUN_0811d7fc(param_1, 4, &uStack_c, param_4,
+      param_1)) - the dispatcher consumes r0..r3 only; the port
+      follows the disassembly. match.py (exit 1, diff expected): same
+      spill-pair / add r2,sp,#4 / mov r1,#4 / single-dispatch
+      structure; the diff is the crate fp frame and the seam's ldr/blx
+      standing in for bl 0x0811d7fc. Host tests: bare selector (no
+      tag bits) + argument routing (handle verbatim, kind 4,
+      stack-slot indirection, r3 forwarding), verbatim pass-through
+      of selectors already carrying each sibling's tag bit, and
+      verbatim return forwarding -
+      src/app/vtable_set.rs::open_sends_the_bare_selector_and_routes_arguments
+      / open_passes_even_tagged_selectors_through_untouched /
+      open_forwards_the_dispatch_return_verbatim.
+
+  - address: 0x082c17ec
+    ghidra: FUN_082c17ec
+    name: cg_codegen_output
+    size: 8
+    sig: "cg_codegen_buffer_t *cg_codegen_output(cg_codegen_t *codegen)"
+    module: codegen/ir
+    status: ported
+    vars: {param_1: codegen}
+    notes: >-
+      1 bl call site: 0x0824320c in FUN_08243138, the JIT's
+      compile-and-patch driver. A pure leaf getter - the whole body is
+      `ldr r0,[r0,#0x10]; bx lr` - returning codegen->output, the
+      emitted-code buffer at +0x10 of cg_codegen_t
+      (CG_CODEGEN_OUTPUT, word index 4). Identification: the
+      constructor FUN_082c0d7c allocates the 0x220-byte cg_codegen_t
+      and fills +0x10 with the buffer FUN_082c22b0 builds; the caller
+      invokes the getter back-to-back with the label-fixup resolver
+      FUN_082c16e0 (which itself reads codegen+0x10 as the buffer it
+      patches words into) on the same object in r6, then feeds the
+      returned pointer straight to cg_buffer_current_offset @
+      0x082c23d4 - so +0x10 is the output buffer, not a label's bound
+      offset. Sits immediately after cg_label_add_fixup @ 0x082c17ac
+      in the image. match.py (exit 1, diff expected): the single
+      `ldr r0,[r0,#16]` is verbatim; the diff is the crate fp frame
+      push/pop. Host test:
+      src/codegen/ir.rs::codegen_output_returns_the_word_at_0x10 -
+      NULL/0 and a live pointer-sized word at +0x10 come back
+      exactly, with poisoned neighbours proving no adjacent word is
+      read.

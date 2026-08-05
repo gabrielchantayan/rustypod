@@ -45,6 +45,9 @@
 //! - `cg_buffer_current_offset` — original: `FUN_082c23d4` @ 0x082c23d4
 //!   (8 bytes; 8 `bl` call sites). Pure getter for the emitted-code
 //!   buffer's current write offset at +0x804.
+//! - `cg_codegen_output` — original: `FUN_082c17ec` @ 0x082c17ec
+//!   (8 bytes; 1 `bl` call site). Pure getter for the codegen's
+//!   emitted-code buffer at +0x10.
 //! - `cg_inst_visit_by_kind` — original: `FUN_082c1adc` @ 0x082c1adc
 //!   (288 bytes; 4 `bl` call sites). Collects the registers an
 //!   instruction DEFINES into a bounded output array, dispatching on the
@@ -417,6 +420,26 @@ unsafe fn module_heap(module: *mut u8) -> *mut CgHeap {
 #[inline(never)]
 pub unsafe extern "C" fn cg_buffer_current_offset(output: *mut CgCodegenBuffer) -> usize {
     word(output as *mut u8, CG_CODEGEN_OUTPUT_OFFSET).read()
+}
+
+/// cg_codegen_output — original: `FUN_082c17ec` @ 0x082c17ec
+/// (8 bytes, 1 `bl` call site: 0x0824320c).
+///
+/// A pure field getter — the entire body is `ldr r0, [r0, #0x10];
+/// bx lr`: returns `codegen->output`, the emitted-code buffer owned by
+/// the codegen. The identification is pinned by the object's lifetime:
+/// the constructor `FUN_082c0d7c` allocates the 0x220-byte
+/// `cg_codegen_t` and fills +0x10 with the buffer `FUN_082c22b0`
+/// builds, and the single caller (`FUN_08243138`, the JIT's
+/// compile-and-patch driver) invokes this getter back-to-back with the
+/// label-fixup resolver `FUN_082c16e0` — which itself reads
+/// `codegen + 0x10` as the buffer it patches words into — and with
+/// [`cg_buffer_current_offset`] on the returned pointer, matching
+/// `output` exactly.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_codegen_output(codegen: *mut CgCodegen) -> *mut CgCodegenBuffer {
+    slot(codegen as *mut u8, CG_CODEGEN_OUTPUT).read() as *mut CgCodegenBuffer
 }
 
 /// cg_label_create — original: `FUN_082c0dec` @ 0x082c0dec (52 bytes,
@@ -1308,6 +1331,42 @@ mod tests {
             );
             assert_eq!(
                 output[CG_CODEGEN_OUTPUT_OFFSET + 1],
+                POISON,
+                "the getter reads no neighboring word"
+            );
+        }
+    }
+
+    #[test]
+    fn codegen_output_returns_the_word_at_0x10() {
+        const POISON: usize = 0xAAAA_AAAA_AAAA_AAAA;
+        let mut codegen = [POISON; CG_CODEGEN_OUTPUT + 2];
+
+        unsafe {
+            let record = codegen.as_mut_ptr() as *mut CgCodegen;
+
+            codegen[CG_CODEGEN_OUTPUT] = 0;
+            assert_eq!(
+                cg_codegen_output(record),
+                core::ptr::null_mut(),
+                "a NULL output buffer comes back as-is"
+            );
+
+            let sentinel = codegen.as_mut_ptr() as usize;
+            codegen[CG_CODEGEN_OUTPUT] = sentinel;
+            assert_eq!(
+                cg_codegen_output(record),
+                sentinel as *mut CgCodegenBuffer,
+                "a live buffer pointer at +0x10 comes back exactly"
+            );
+
+            assert_eq!(
+                codegen[CG_CODEGEN_OUTPUT - 1],
+                POISON,
+                "the getter reads no neighboring word"
+            );
+            assert_eq!(
+                codegen[CG_CODEGEN_OUTPUT + 1],
                 POISON,
                 "the getter reads no neighboring word"
             );
