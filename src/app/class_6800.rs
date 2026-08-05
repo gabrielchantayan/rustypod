@@ -90,19 +90,18 @@
 //!   [`CLASS_6800_VTABLE_ADDRESS`]. The +0x2c dispatch still goes
 //!   through `this->vtable`, so a test (or a later real vtable) is
 //!   picked up without touching this function.
-//! - **0x081110d0 and 0x081d2204 are unported**, so they go through the
-//!   [`CLASS_6800_OPS`] `read_volatile` dispatch table (house pattern —
-//!   see `cxx/string_object.rs`'s `STRING_OBJECT_ASSIGN_CSTR_OPS`).
-//!   The wired base-constructor default zeroes the four base words and
-//!   returns the storage unchanged: it builds **no** base vtable and
-//!   **no** link node, so this port is **NOT HOOK-READY** — branching
-//!   stock code at 0x08177e84 today would hand the controller an object
-//!   whose base is inert. The wired root-instance default reads the
-//!   modeled static [`FRAMEWORK_ROOT_HOLDER`], the crate's stand-in for
-//!   the global @ 0x089cc858 whose +4 slot 0x081d2204 loads
-//!   (`ldr r0,[pc]; ldr r0,[r0,#4]; bx lr`, pool word @ 0x081d2210) —
-//!   the same modeled-global deviation `app/context.rs` makes for
-//!   `APP_CONTEXT`.
+//! - `framework_base_construct` @ 0x081110d0 is now ported directly.
+//!   Its two unported children, the parent constructor @ 0x08125234 and
+//!   link/target initializer @ 0x081108b4, remain distinct
+//!   [`CLASS_6800_OPS`] dispatch slots. The wired child defaults preserve
+//!   the previous modeled zero state but do not provide either child's
+//!   vtable, allocation, or target-adoption behavior, so the complete
+//!   construction chain is still not hook-ready.
+//!   The wired root-instance default reads the modeled static
+//!   [`FRAMEWORK_ROOT_HOLDER`], the crate's stand-in for the global @
+//!   0x089cc858 whose +4 slot 0x081d2204 loads (`ldr r0,[pc]; ldr
+//!   r0,[r0,#4]; bx lr`, pool word @ 0x081d2210) — the same
+//!   modeled-global deviation `app/context.rs` makes for `APP_CONTEXT`.
 //! - `demo_mode_instance` @ 0x081883fc **is** ported (`app/registry.rs`),
 //!   so it is called directly rather than through a seam.
 //! - `this` is taken from the base constructor's **return value**, not
@@ -123,6 +122,12 @@ pub const CLASS_6800_SIZE: usize = 28;
 /// 0x08177ecc). Unreadable in the decrypted image — see the module
 /// deviations.
 pub const CLASS_6800_VTABLE_ADDRESS: u32 = 0x0898_908c;
+
+/// The vtable literal `FUN_081110d0` plants after its parent constructor
+/// returns (pool word @ 0x08111104). The bytes at the target address are
+/// runtime vtable data, so the port uses [`FRAMEWORK_BASE_VTABLE`] as its
+/// dispatchable model.
+pub const FRAMEWORK_BASE_VTABLE_ADDRESS: u32 = 0x0898_1958;
 
 /// Address of the global whose +4 slot 0x081d2204 returns (pool word @
 /// 0x081d2210). Modeled by [`FRAMEWORK_ROOT_HOLDER`].
@@ -197,41 +202,59 @@ pub static mut FRAMEWORK_ROOT_HOLDER: FrameworkRootHolder = FrameworkRootHolder 
     instance: core::ptr::null_mut(),
 };
 
-/// Injection point for the base constructor @ 0x081110d0. It receives
-/// the raw storage plus the two constants the original passes (0 and 1)
-/// and returns the constructed object — which the caller then uses in
-/// place of its own argument.
-pub type Class6800BaseConstruct = unsafe extern "C" fn(
-    storage: *mut Class6800,
-    arg1: u32,
-    arg2: u32,
-) -> *mut Class6800;
+/// Injection point for the parent constructor @ 0x08125234. It receives
+/// the caller-owned storage in `r0` and returns the base subobject in `r0`;
+/// the outer constructor must use that return rather than its input.
+pub type FrameworkBaseParentConstruct =
+    unsafe extern "C" fn(storage: *mut Class6800) -> *mut Class6800;
+
+/// Injection point for the link/target initializer @ 0x081108b4. Its
+/// fourth argument is the literal zero `r3` that `FUN_081110d0` supplies.
+pub type FrameworkBaseInitialize = unsafe extern "C" fn(
+    this: *mut Class6800,
+    initial_target: u32,
+    create_link: u32,
+    owner: u32,
+);
 
 /// Injection point for the root-instance getter @ 0x081d2204.
 pub type FrameworkRootInstance = unsafe extern "C" fn() -> *mut u8;
 
-/// The two unported retailOS dependencies of [`class_6800_new`].
+/// The unported retailOS dependencies reached while constructing this
+/// class family. [`framework_base_construct`] itself is direct code, not
+/// a dispatch seam.
 #[derive(Clone, Copy)]
 pub struct Class6800Ops {
-    /// `FUN_081110d0` — the base constructor chain.
-    pub base_construct: Class6800BaseConstruct,
-    /// `FUN_081d2204` — the framework root instance getter.
+    /// `FUN_08125234` — parent constructor.
+    pub parent_construct: FrameworkBaseParentConstruct,
+    /// `FUN_081108b4` — allocates/initializes the base link and adopts
+    /// the initial target.
+    pub base_initialize: FrameworkBaseInitialize,
+    /// `FUN_081d2204` — framework root-instance getter.
     pub framework_root_instance: FrameworkRootInstance,
 }
 
-/// Wired default for [`Class6800Ops::base_construct`]: clears the four
-/// base words and hands the storage back. It plants no base vtable and
-/// allocates no link node — see the module's NOT-HOOK-READY note.
-unsafe extern "C" fn unported_base_construct(
-    storage: *mut Class6800,
-    _arg1: u32,
-    _arg2: u32,
-) -> *mut Class6800 {
+/// Wired default for [`Class6800Ops::parent_construct`]. It models just
+/// the observed cleared +0x04/+0x08 words; its own vtable remains
+/// unresolved and is immediately superseded by the direct port.
+unsafe extern "C" fn unported_parent_construct(storage: *mut Class6800) -> *mut Class6800 {
     core::ptr::addr_of_mut!((*storage).base_04).write_volatile(0);
     core::ptr::addr_of_mut!((*storage).base_08).write_volatile(0);
-    core::ptr::addr_of_mut!((*storage).base_link).write_volatile(core::ptr::null_mut());
-    core::ptr::addr_of_mut!((*storage).base_10).write_volatile(0);
     storage
+}
+
+/// Wired default for [`Class6800Ops::base_initialize`]. The real child
+/// allocates a 16-byte node when `create_link != 0`, invokes vtable slot
+/// +0x2c, and writes +0x10. Those effects remain intentionally unported;
+/// the default only retains the old inert zero state.
+unsafe extern "C" fn unported_base_initialize(
+    this: *mut Class6800,
+    _initial_target: u32,
+    _create_link: u32,
+    _owner: u32,
+) {
+    core::ptr::addr_of_mut!((*this).base_link).write_volatile(core::ptr::null_mut());
+    core::ptr::addr_of_mut!((*this).base_10).write_volatile(0);
 }
 
 /// Wired default for [`Class6800Ops::framework_root_instance`]: the +4
@@ -243,11 +266,12 @@ unsafe extern "C" fn framework_root_instance_from_holder() -> *mut u8 {
 
 /// Wired defaults for [`CLASS_6800_OPS`].
 pub const DEFAULT_CLASS_6800_OPS: Class6800Ops = Class6800Ops {
-    base_construct: unported_base_construct,
+    parent_construct: unported_parent_construct,
+    base_initialize: unported_base_initialize,
     framework_root_instance: framework_root_instance_from_holder,
 };
 
-/// Active model of the two unported callees. Target integration replaces
+/// Active model of the three unported callees. Target integration replaces
 /// a slot when its callee is ported; host tests install recording mocks.
 pub static mut CLASS_6800_OPS: Class6800Ops = DEFAULT_CLASS_6800_OPS;
 
@@ -267,9 +291,43 @@ pub static mut CLASS_6800_VTABLE: Class6800Vtable = Class6800Vtable {
     set_target: unported_set_target,
 };
 
+/// Crate stand-in for the base vtable at
+/// [`FRAMEWORK_BASE_VTABLE_ADDRESS`]. Only its +0x2c operation is
+/// represented; `FUN_081108b4` is still an operation seam.
+pub static mut FRAMEWORK_BASE_VTABLE: Class6800Vtable = Class6800Vtable {
+    unresolved_00: [0; 11],
+    set_target: unported_set_target,
+};
+
 #[inline(always)]
 unsafe fn class_6800_ops() -> Class6800Ops {
     core::ptr::read_volatile(core::ptr::addr_of!(CLASS_6800_OPS))
+}
+
+/// framework_base_construct — original: `FUN_081110d0` @ 0x081110d0
+/// (52 bytes; two direct `bl` calls).
+///
+/// Constructs the unnamed framework linkage base of the class-0x6800
+/// addon. It first chains to parent constructor `FUN_08125234`, plants
+/// its vtable at +0x00 (`0x08981958`), then calls
+/// `FUN_081108b4(this, initial_target, create_link, 0)`. The returned
+/// pointer is exactly the parent constructor's return, forwarded after
+/// the initializer; there are no NULL checks before either the vtable
+/// store or child call. The parent/base-init children remain dispatch
+/// seams, so this port covers this 52-byte wrapper only. No deviations.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn framework_base_construct(
+    storage: *mut Class6800,
+    initial_target: u32,
+    create_link: u32,
+) -> *mut Class6800 {
+    let ops = class_6800_ops();
+    let this = (ops.parent_construct)(storage);
+    core::ptr::addr_of_mut!((*this).vtable)
+        .write_volatile(core::ptr::addr_of!(FRAMEWORK_BASE_VTABLE));
+    (ops.base_initialize)(this, initial_target, create_link, 0);
+    this
 }
 
 /// class_6800_new — original: `FUN_08177e84` @ 0x08177e84
@@ -293,13 +351,13 @@ unsafe fn class_6800_ops() -> Class6800Ops {
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn class_6800_new(storage: *mut Class6800) -> *mut Class6800 {
-    let ops = class_6800_ops();
-    let this = (ops.base_construct)(storage, 0, 1);
+    let this = framework_base_construct(storage, 0, 1);
 
     core::ptr::addr_of_mut!((*this).vtable)
         .write_volatile(core::ptr::addr_of!(CLASS_6800_VTABLE));
+    let framework_root_instance = class_6800_ops().framework_root_instance;
     core::ptr::addr_of_mut!((*this).default_target)
-        .write_volatile((ops.framework_root_instance)());
+        .write_volatile(framework_root_instance());
     core::ptr::addr_of_mut!((*this).demo_mode).write_volatile(demo_mode_instance());
 
     let vtable = core::ptr::read_volatile(core::ptr::addr_of!((*this).vtable));
@@ -393,29 +451,57 @@ mod tests {
         notify_changed: unreachable_notify,
     };
 
-    static mut BASE_CALLS: usize = 0;
-    static mut BASE_STORAGE: *mut Class6800 = ptr::null_mut();
-    static mut BASE_ARGS: (u32, u32) = (0xffff_ffff, 0xffff_ffff);
-    static mut BASE_RESULT: *mut Class6800 = ptr::null_mut();
+    const PARENT_CALL: u8 = 1;
+    const BASE_INITIALIZE_CALL: u8 = 2;
+    const ROOT_CALL: u8 = 3;
+    const SET_TARGET_CALL: u8 = 4;
+
+    static mut PARENT_CALLS: usize = 0;
+    static mut PARENT_STORAGE: *mut Class6800 = ptr::null_mut();
+    static mut PARENT_RESULT: *mut Class6800 = ptr::null_mut();
+    static mut BASE_INITIALIZE_CALLS: usize = 0;
+    static mut BASE_INITIALIZE_ARGS: (*mut Class6800, u32, u32, u32) =
+        (ptr::null_mut(), 0xffff_ffff, 0xffff_ffff, 0xffff_ffff);
+    static mut OBSERVED_BASE_VTABLE: *const Class6800Vtable = ptr::null();
     static mut ROOT_CALLS: usize = 0;
     static mut ROOT_RESULT: *mut u8 = ptr::null_mut();
     static mut SET_TARGET_CALLS: usize = 0;
     static mut SET_TARGET_ARGS: (*mut Class6800, *mut u8) =
         (ptr::null_mut(), ptr::null_mut());
     static mut OBSERVED_DEMO_MODE_AT_DISPATCH: *mut u8 = ptr::null_mut();
+    static mut CALL_ORDER: [u8; 4] = [0; 4];
+    static mut CALL_COUNT: usize = 0;
 
-    unsafe extern "C" fn record_base_construct(
-        storage: *mut Class6800,
-        arg1: u32,
-        arg2: u32,
-    ) -> *mut Class6800 {
-        BASE_CALLS += 1;
-        BASE_STORAGE = storage;
-        BASE_ARGS = (arg1, arg2);
-        if BASE_RESULT.is_null() { storage } else { BASE_RESULT }
+    unsafe fn record_call(kind: u8) {
+        CALL_ORDER[CALL_COUNT] = kind;
+        CALL_COUNT += 1;
+    }
+
+    fn call_order() -> [u8; 4] {
+        unsafe { core::ptr::read_volatile(core::ptr::addr_of!(CALL_ORDER)) }
+    }
+
+    unsafe extern "C" fn record_parent_construct(storage: *mut Class6800) -> *mut Class6800 {
+        record_call(PARENT_CALL);
+        PARENT_CALLS += 1;
+        PARENT_STORAGE = storage;
+        if PARENT_RESULT.is_null() { storage } else { PARENT_RESULT }
+    }
+
+    unsafe extern "C" fn record_base_initialize(
+        this: *mut Class6800,
+        initial_target: u32,
+        create_link: u32,
+        owner: u32,
+    ) {
+        record_call(BASE_INITIALIZE_CALL);
+        BASE_INITIALIZE_CALLS += 1;
+        BASE_INITIALIZE_ARGS = (this, initial_target, create_link, owner);
+        OBSERVED_BASE_VTABLE = ptr::read_volatile(ptr::addr_of!((*this).vtable));
     }
 
     unsafe extern "C" fn record_root_instance() -> *mut u8 {
+        record_call(ROOT_CALL);
         ROOT_CALLS += 1;
         ROOT_RESULT
     }
@@ -424,6 +510,7 @@ mod tests {
         this: *mut Class6800,
         target: *mut u8,
     ) -> *mut u8 {
+        record_call(SET_TARGET_CALL);
         SET_TARGET_CALLS += 1;
         SET_TARGET_ARGS = (this, target);
         // Both stores must already be visible when the seeding dispatch
@@ -446,17 +533,22 @@ mod tests {
     unsafe fn install_mocks() -> MutexGuard<'static, ()> {
         let guard = OPS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         install_registry(ptr::addr_of_mut!(DEMO_MODE_OBJECT));
-        BASE_CALLS = 0;
-        BASE_STORAGE = ptr::null_mut();
-        BASE_ARGS = (0xffff_ffff, 0xffff_ffff);
-        BASE_RESULT = ptr::null_mut();
+        PARENT_CALLS = 0;
+        PARENT_STORAGE = ptr::null_mut();
+        PARENT_RESULT = ptr::null_mut();
+        BASE_INITIALIZE_CALLS = 0;
+        BASE_INITIALIZE_ARGS = (ptr::null_mut(), 0xffff_ffff, 0xffff_ffff, 0xffff_ffff);
+        OBSERVED_BASE_VTABLE = ptr::null();
         ROOT_CALLS = 0;
         ROOT_RESULT = ptr::null_mut();
         SET_TARGET_CALLS = 0;
         SET_TARGET_ARGS = (ptr::null_mut(), ptr::null_mut());
         OBSERVED_DEMO_MODE_AT_DISPATCH = ptr::null_mut();
+        CALL_ORDER = [0; 4];
+        CALL_COUNT = 0;
         CLASS_6800_OPS = Class6800Ops {
-            base_construct: record_base_construct,
+            parent_construct: record_parent_construct,
+            base_initialize: record_base_initialize,
             framework_root_instance: record_root_instance,
         };
         CLASS_6800_VTABLE.set_target = record_set_target;
@@ -484,6 +576,36 @@ mod tests {
     }
 
     #[test]
+    fn a_null_storage_is_forwarded_to_the_parent_and_its_result_is_initialized() {
+        // This wrapper itself has no NULL branch. A parent that handles a
+        // NULL input and returns a real replacement therefore reaches both
+        // the vtable store and the child initializer.
+        let mut relocated = poisoned();
+        let replacement = ptr::addr_of_mut!(relocated);
+
+        unsafe {
+            let guard = install_mocks();
+            PARENT_RESULT = replacement;
+
+            let result = framework_base_construct(ptr::null_mut(), 0x1234, 0);
+
+            assert_eq!(result, replacement, "parent r0 is forwarded unchanged");
+            assert_eq!(PARENT_CALLS, 1);
+            assert!(PARENT_STORAGE.is_null(), "no wrapper NULL guard");
+            assert_eq!(BASE_INITIALIZE_CALLS, 1);
+            assert_eq!(BASE_INITIALIZE_ARGS, (replacement, 0x1234, 0, 0));
+            assert_eq!(
+                OBSERVED_BASE_VTABLE,
+                ptr::addr_of!(FRAMEWORK_BASE_VTABLE),
+                "the base vtable is planted between the two child calls"
+            );
+            assert_eq!(call_order()[..2], [PARENT_CALL, BASE_INITIALIZE_CALL]);
+            restore();
+            drop(guard);
+        }
+    }
+
+    #[test]
     fn constructs_through_the_base_and_seeds_the_default_target() {
         let mut object = poisoned();
         let storage = ptr::addr_of_mut!(object);
@@ -494,10 +616,16 @@ mod tests {
 
             let this = class_6800_new(storage);
 
-            assert_eq!(this, storage, "the base constructor's return is `this`");
-            assert_eq!(BASE_CALLS, 1);
-            assert_eq!(BASE_STORAGE, storage);
-            assert_eq!(BASE_ARGS, (0, 1), "the original passes r1=0, r2=1");
+            assert_eq!(this, storage, "the parent constructor's return is `this`");
+            assert_eq!(PARENT_CALLS, 1);
+            assert_eq!(PARENT_STORAGE, storage);
+            assert_eq!(BASE_INITIALIZE_CALLS, 1);
+            assert_eq!(
+                BASE_INITIALIZE_ARGS,
+                (storage, 0, 1, 0),
+                "0x08177e84 supplies r1=0/r2=1; 0x081110d0 supplies r3=0"
+            );
+            assert_eq!(OBSERVED_BASE_VTABLE, ptr::addr_of!(FRAMEWORK_BASE_VTABLE));
             assert_eq!(ROOT_CALLS, 1);
             assert_eq!(object.vtable, ptr::addr_of!(CLASS_6800_VTABLE));
             assert_eq!(object.default_target, 0x1234_0000usize as *mut u8);
@@ -512,15 +640,20 @@ mod tests {
                 OBSERVED_DEMO_MODE_AT_DISPATCH, object.demo_mode,
                 "+0x18 is stored before the seeding dispatch, not after"
             );
+            assert_eq!(
+                call_order(),
+                [PARENT_CALL, BASE_INITIALIZE_CALL, ROOT_CALL, SET_TARGET_CALL],
+                "parent, base link initializer, root getter, then derived dispatch"
+            );
             restore();
             drop(guard);
         }
     }
 
     #[test]
-    fn a_relocating_base_constructor_wins() {
-        // `mov r4, r0` runs *after* the bl: everything downstream keys off
-        // the base constructor's return, never the incoming storage.
+    fn a_relocating_parent_constructor_wins() {
+        // `mov r4, r0` runs after the parent call: both constructors key
+        // everything downstream off that return, never the input storage.
         let mut storage_object = poisoned();
         let mut relocated = poisoned();
         let storage = ptr::addr_of_mut!(storage_object);
@@ -528,7 +661,7 @@ mod tests {
 
         unsafe {
             let guard = install_mocks();
-            BASE_RESULT = elsewhere;
+            PARENT_RESULT = elsewhere;
             ROOT_RESULT = 0x2222_0000usize as *mut u8;
 
             let this = class_6800_new(storage);
@@ -584,7 +717,7 @@ mod tests {
             assert_eq!(this, storage);
             assert_eq!(object.base_04, 0);
             assert_eq!(object.base_08, 0);
-            assert!(object.base_link.is_null(), "no link node without 0x081110d0");
+            assert!(object.base_link.is_null(), "no link node without 0x081108b4");
             assert_eq!(object.base_10, 0);
             assert_eq!(object.default_target, 0x7777_0000usize as *mut u8);
             assert!(
