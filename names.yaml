@@ -20831,3 +20831,34 @@ functions:
       exhaustive 256x256 sweep against a reference `u8 < u8`:
       src/cxx/templates.rs::less_unsigned_byte_edges /
       less_unsigned_byte_matches_reference_exhaustively.
+
+  - address: 0x083d73d4
+    ghidra: FUN_083d73d4
+    name: less_unsigned_byte_alias_73d4
+    size: 24
+    sig: "u32 less_unsigned_byte_alias_73d4(void *this, const u8 *a, const u8 *b)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: this, param_2: a, param_3: b}
+    notes: >-
+      ALIAS — byte-identical second instantiation of less_unsigned_byte
+      @ 0x083d73bc (all 24 bytes: `ldrb r0,[r1]; ldrb r1,[r2]; cmp
+      r0,r1; movcs r0,#0; movcc r0,#1; bx lr`), the same
+      `std::less<unsigned char>::operator()(const u8 &, const u8 &)`
+      functor. 3 `bl 0x083d73d4` sites (grep on decomp/osos.asm):
+      0x083b9bec and 0x083b9d10 in FUN_083b9bac, 0x083b9de4 in
+      FUN_083b9d38 — both callers sit in the byte-key-tree cluster
+      beside byte_key_tree_insert_node @ 0x083b8844 and use it as the
+      key-ordering predicate (walk `ldreq right(+0xc)` / `ldrne
+      left(+0x8)`; insert child pick `streq`/`strne`). Reference C:
+      decomp/c/037/083d73d4_FUN_083d73d4.c. Ported as its own exported
+      symbol with an identical body under a distinct link_section (the
+      vector_size_elem4_alias_76c8 precedent, NOT the ledger-only
+      not_equal_deref aliases) so LLVM's identical-function folding
+      keeps both labels hookable. match.py (exit 1, diff expected):
+      same ldrb/ldrb/cmp + predicated 0/1 return shape as the primary;
+      byte-identical inputs make the diff identical (LLVM frame +
+      scheduling). Host tests: truth-table spot checks plus an
+      exhaustive 256x256 equivalence sweep against the primary —
+      src/cxx/templates.rs::less_unsigned_byte_alias_73d4_truth_table /
+      less_unsigned_byte_alias_73d4_matches_primary_exhaustively.

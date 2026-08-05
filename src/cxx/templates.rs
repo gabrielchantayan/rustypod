@@ -122,7 +122,8 @@ pub unsafe extern "C" fn less_unsigned(_this: *const u8, a: *const u32, b: *cons
 
 /// less_unsigned_byte — original: `FUN_083d73bc` @ 0x083d73bc
 /// (24 bytes; 10 `bl` call sites at this copy; the byte-identical
-/// twin @ 0x083d73d4 has 3 more and is a separate future port).
+/// twin @ 0x083d73d4 has 3 more and is ported below as
+/// [`less_unsigned_byte_alias_73d4`]).
 ///
 /// `std::less<unsigned char>::operator()(const u8 &a, const u8 &b)`
 /// — the byte-width member of the [`less_signed`] / [`less_unsigned`]
@@ -139,6 +140,40 @@ pub unsafe extern "C" fn less_unsigned(_this: *const u8, a: *const u32, b: *cons
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn less_unsigned_byte(_this: *const u8, a: *const u8, b: *const u8) -> u32 {
+    u32::from(a.read() < b.read())
+}
+
+/// less_unsigned_byte_alias_73d4 — original: `FUN_083d73d4` @ 0x083d73d4
+/// (24 bytes; 3 `bl` call sites — 0x083b9bec and 0x083b9d10 in
+/// `FUN_083b9bac`, 0x083b9de4 in `FUN_083b9d38`;
+/// `ipod-decomp/decomp/c/037/083d73d4_FUN_083d73d4.c`).
+///
+/// A second, byte-identical instantiation of [`less_unsigned_byte`] @
+/// 0x083d73bc — all 24 bytes: `ldrb r0,[r1]; ldrb r1,[r2]; cmp r0,r1;
+/// movcs r0,#0; movcc r0,#1; bx lr`. Same
+/// `std::less<unsigned char>::operator()(const u8 &, const u8 &)`
+/// functor, same by-reference operands, same r0 `this` overwrite. Its
+/// callers sit in the byte-key-tree cluster beside
+/// `byte_key_tree_insert_node` @ 0x083b8844 and use it the same way —
+/// the key-ordering predicate: `FUN_083b9bac` walks `cmp r0,#0` /
+/// `ldreq r4,[r4,#0xc]` (right) / `ldrne r4,[r4,#0x8]` (left) and
+/// re-tests at the insertion point, `FUN_083b9d38` picks the child
+/// slot with `streq`/`strne`. Ported as its own exported symbol (the
+/// [`vector_size_elem4_alias_76c8`] precedent: identical body under a
+/// distinct `link_section` so LLVM's identical-function folding keeps
+/// both labels hookable), NOT folded into the primary the way the
+/// ledger-only `not_equal_deref` aliases are.
+///
+/// # Safety
+/// `a` and `b` must be valid readable `u8` pointers.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.less_unsigned_byte_alias_73d4")]
+#[inline(never)]
+pub unsafe extern "C" fn less_unsigned_byte_alias_73d4(
+    _this: *const u8,
+    a: *const u8,
+    b: *const u8,
+) -> u32 {
     u32::from(a.read() < b.read())
 }
 
@@ -1590,6 +1625,34 @@ mod tests {
                     assert_eq!(
                         less_unsigned_byte(core::ptr::null(), &a, &b),
                         reference(a, b),
+                        "{a} vs {b}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn less_unsigned_byte_alias_73d4_truth_table() {
+        unsafe {
+            // equal / less / greater, plus the unsigned edges
+            assert_eq!(less_unsigned_byte_alias_73d4(core::ptr::null(), &7, &7), 0, "strict");
+            assert_eq!(less_unsigned_byte_alias_73d4(core::ptr::null(), &3, &9), 1);
+            assert_eq!(less_unsigned_byte_alias_73d4(core::ptr::null(), &9, &3), 0);
+            assert_eq!(less_unsigned_byte_alias_73d4(core::ptr::null(), &255, &0), 0);
+            assert_eq!(less_unsigned_byte_alias_73d4(core::ptr::null(), &0, &255), 1);
+            assert_eq!(less_unsigned_byte_alias_73d4(core::ptr::null(), &0, &0), 0, "strict");
+        }
+    }
+
+    #[test]
+    fn less_unsigned_byte_alias_73d4_matches_primary_exhaustively() {
+        unsafe {
+            for a in 0..=u8::MAX {
+                for b in 0..=u8::MAX {
+                    assert_eq!(
+                        less_unsigned_byte_alias_73d4(core::ptr::null(), &a, &b),
+                        less_unsigned_byte(core::ptr::null(), &a, &b),
                         "{a} vs {b}"
                     );
                 }
