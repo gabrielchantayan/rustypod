@@ -3169,6 +3169,424 @@ pub unsafe extern "C" fn vtable_file_record_construct_kind2(
     record
 }
 
+/// The caller tag [`vtable_file_record_teardown`] hands
+/// `free_wrapper` for both node frees (`mov r1, #0x19` at 0x0811d03c
+/// and 0x0811d04c).
+const FILE_RECORD_NODE_FREE_TAG: usize = 0x19;
+
+/// The word count of each iterator scratch object on the original's
+/// 0x40-byte frame: the outer iterator at sp+0x24 abuts the key
+/// out-slot at sp+0x3c, the inner iterator at sp+0x04 abuts the node
+/// out-slot at sp+0x1c — six words each (word 0 the registry/bucket
+/// pointer, the state object at iter+4).
+const ITERATOR_WORDS: usize = 6;
+
+/// The outer-iterator begin behind the `bl 0x08212a5c` at 0x0811d01c
+/// inside [`vtable_file_record_teardown`]. 0x08212a5c is a 4-byte
+/// thunk (`b 0x081dde18`) into `FUN_081dde18` @ 0x081dde18 (28 bytes;
+/// **5 `bl` call sites**, grep on `decomp/osos.asm`; **unported**):
+///
+/// ```text
+/// 081dde18  stmdb sp!, {r4, lr}
+/// 081dde1c  mvn   r2, #0x1          @ r2 = 0xfffffffe
+/// 081dde20  str   r1, [r0], #0x4    @ iter[0] = registry
+/// 081dde24  bl    0x08155e80        @ state_init(iter + 4, registry, -2)
+/// 081dde28  sub   r0, r0, #0x4      @ return iter
+/// 081dde2c  ldmia sp!, {r4, pc}
+/// ```
+///
+/// Stores the registry pointer in the iterator's first word and
+/// initializes the state object at iter+4 through the unported
+/// 0x08155e80; the returned iter pointer is discarded at this call
+/// site. The wired default is a no-op: the state-machine init is an
+/// unported registry-iterator subsystem, and paired with the
+/// 0-returning [`VTABLE_FILE_RECORD_TEARDOWN_OUTER_NEXT`] default it
+/// yields an empty traversal (the `store_remove_unported` no-op
+/// precedent). Host tests install a recording mock via
+/// `core::ptr::addr_of_mut!`.
+pub static mut VTABLE_FILE_RECORD_TEARDOWN_OUTER_BEGIN: unsafe extern "C" fn(
+    iter: *mut u32,
+    registry: *mut u8,
+) = teardown_outer_begin_unported;
+
+/// Default outer-iterator begin: a no-op (see the seam's doc).
+unsafe extern "C" fn teardown_outer_begin_unported(_iter: *mut u32, _registry: *mut u8) {}
+
+/// The outer-iterator step behind the `bl 0x08212a4c` at 0x0811d07c
+/// inside [`vtable_file_record_teardown`]. `FUN_08212a4c` @ 0x08212a4c
+/// (16 bytes; **1 `bl` call site** — this function's; **unported**):
+///
+/// ```text
+/// 08212a4c  stmdb sp!, {r3, lr}   @ spill slot = dead node out-slot
+/// 08212a50  mov   r2, sp
+/// 08212a54  bl    0x081ddde8      @ iterator_next(iter, key_out, &scratch)
+/// 08212a58  ldmia sp!, {r12, pc}
+/// ```
+///
+/// A spill-slot wrapper over the shared iterator step `FUN_081ddde8`
+/// (see [`VTABLE_FILE_RECORD_TEARDOWN_INNER_NEXT`]): the node out-slot
+/// is bound to the dead r3 spill because the outer loop consumes only
+/// the key. Returns nonzero while keys remain. The wired default
+/// returns 0 — no keys — so an unswapped table yields an empty
+/// traversal (the `store_remove_unported` no-op precedent). Host tests
+/// install a scripted mock via `core::ptr::addr_of_mut!`.
+pub static mut VTABLE_FILE_RECORD_TEARDOWN_OUTER_NEXT: unsafe extern "C" fn(
+    iter: *mut u32,
+    key_out: *mut u32,
+) -> u32 = teardown_outer_next_unported;
+
+/// Default outer-iterator step: returns 0, no keys (see the seam's
+/// doc).
+unsafe extern "C" fn teardown_outer_next_unported(_iter: *mut u32, _key_out: *mut u32) -> u32 {
+    0
+}
+
+/// The inner-iterator begin behind the `bl 0x0821c4c8` at 0x0811d030
+/// inside [`vtable_file_record_teardown`]. `FUN_0821c4c8` @ 0x0821c4c8
+/// (36 bytes; **3 `bl` call sites**, grep on `decomp/osos.asm`;
+/// **unported**):
+///
+/// ```text
+/// 0821c4c8  stmdb sp!, {r4, lr}
+/// 0821c4cc  mov   r4, r0            @ save iter
+/// 0821c4d0  mov   r0, r1
+/// 0821c4d4  mov   r1, r2
+/// 0821c4d8  bl    0x0812d160        @ bucket = lookup(registry, key)
+/// 0821c4dc  mov   r1, r0
+/// 0821c4e0  mov   r0, r4
+/// 0821c4e4  ldmia sp!, {r4, lr}
+/// 0821c4e8  b     0x081dde18        @ tail: iterator_begin(iter, bucket)
+/// ```
+///
+/// Looks the outer key up in the registry through the unported
+/// 0x0812d160 and tail-branches into the shared iterator begin
+/// `FUN_081dde18` (see [`VTABLE_FILE_RECORD_TEARDOWN_OUTER_BEGIN`])
+/// over the resulting bucket. The wired default is a no-op (the
+/// [`VTABLE_FILE_RECORD_TEARDOWN_OUTER_BEGIN`] rationale). Host tests
+/// install a recording mock via `core::ptr::addr_of_mut!`.
+pub static mut VTABLE_FILE_RECORD_TEARDOWN_INNER_BEGIN: unsafe extern "C" fn(
+    iter: *mut u32,
+    registry: *mut u8,
+    key: u32,
+) = teardown_inner_begin_unported;
+
+/// Default inner-iterator begin: a no-op (see the seam's doc).
+unsafe extern "C" fn teardown_inner_begin_unported(
+    _iter: *mut u32,
+    _registry: *mut u8,
+    _key: u32,
+) {
+}
+
+/// The inner-iterator step behind the `bl 0x081ddde8` at 0x0811d060
+/// inside [`vtable_file_record_teardown`]. `FUN_081ddde8` @ 0x081ddde8
+/// (48 bytes; **10 `bl` call sites**, grep on `decomp/osos.asm`, among
+/// them the outer step wrapper 0x08212a4c's; **unported**):
+///
+/// ```text
+/// 081ddde8  stmdb sp!, {r2, r3, r4, r5, r6, lr}  @ pair = out words
+/// 081dddec  mov   r4, r1            @ save key_out
+/// 081dddf0  mov   r1, sp
+/// 081dddf4  mov   r5, r2            @ save node_out
+/// 081dddf8  add   r0, r0, #0x4      @ step the state object
+/// 081dddfc  bl    0x08155d6c        @ state_step(iter + 4, &pair)
+/// 081dde00  cmp   r0, #0x0
+/// 081dde04  ldrne r1, [sp, #0x0]
+/// 081dde08  strne r1, [r4, #0x0]    @ *key_out = pair[0]
+/// 081dde0c  ldrne r1, [sp, #0x4]
+/// 081dde10  strne r1, [r5, #0x0]    @ *node_out = pair[1]
+/// 081dde14  ldmia sp!, {r2, r3, r4, r5, r6, pc}
+/// ```
+///
+/// Steps the state object at iter+4 through the unported 0x08155d6c
+/// and, only on a nonzero status, copies the yielded key and node
+/// words into the caller's out-slots. The wired default returns 0 —
+/// the bucket is empty — so an unswapped table yields an empty
+/// traversal (the `store_remove_unported` no-op precedent). `node_out`
+/// is modeled pointer-sized (the [`vtable_file_record_teardown`]
+/// host-representation deviation: the body dereferences the node).
+/// Host tests install a scripted mock via `core::ptr::addr_of_mut!`.
+pub static mut VTABLE_FILE_RECORD_TEARDOWN_INNER_NEXT: unsafe extern "C" fn(
+    iter: *mut u32,
+    key_out: *mut u32,
+    node_out: *mut *mut u8,
+) -> u32 = teardown_inner_next_unported;
+
+/// Default inner-iterator step: returns 0, the bucket is empty (see
+/// the seam's doc).
+unsafe extern "C" fn teardown_inner_next_unported(
+    _iter: *mut u32,
+    _key_out: *mut u32,
+    _node_out: *mut *mut u8,
+) -> u32 {
+    0
+}
+
+/// The iterator-state cleanup behind the `bl 0x08155ec0` sites at
+/// 0x0811d070 (inner, on sp+0x08) and 0x0811d08c (outer, on sp+0x28)
+/// inside [`vtable_file_record_teardown`]. `FUN_08155ec0` @ 0x08155ec0
+/// (48 bytes; **69 `bl` call sites**, grep on `decomp/osos.asm`;
+/// **unported**):
+///
+/// ```text
+/// 08155ec0  stmdb sp!, {r4, lr}
+/// 08155ec4  mov   r4, r0
+/// 08155ec8  ldr   r0, [r0, #0x8]
+/// 08155ecc  cmn   r0, #0x5          @ state->+0x08 == -5?
+/// 08155ed0  beq   0x08155ee8        @ yes -> nothing to release
+/// 08155ed4  ldr   r0, [r4, #0x0]
+/// 08155ed8  mov   r1, r4
+/// 08155edc  bl    0x08271724        @ release(*state, state)
+/// 08155ee0  mvn   r0, #0x0
+/// 08155ee4  str   r0, [r4, #0x8]    @ state->+0x08 = -1
+/// 08155ee8  mov   r0, r4            @ return state
+/// 08155eec  ldmia sp!, {r4, pc}
+/// ```
+///
+/// Both call sites pass the iterator's STATE OBJECT (iter + 4), not
+/// the iterator itself. Unless the state's +0x08 word is -5, the
+/// backing is released through the unported 0x08271724 and the word
+/// poisoned with -1. The wired default is a no-op (the release
+/// subsystem is unported; the
+/// [`VTABLE_FILE_RECORD_TEARDOWN_OUTER_BEGIN`] no-op precedent). Host
+/// tests install a recording mock via `core::ptr::addr_of_mut!`.
+pub static mut VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP: unsafe extern "C" fn(
+    state: *mut u32,
+) = teardown_iter_cleanup_unported;
+
+/// Default iterator-state cleanup: a no-op (see the seam's doc).
+unsafe extern "C" fn teardown_iter_cleanup_unported(_state: *mut u32) {}
+
+/// The registry dispose behind the `bl 0x0812d300` at 0x0811d09c
+/// inside [`vtable_file_record_teardown`]. `FUN_0812d300` @ 0x0812d300
+/// (24 bytes; **2 `bl` call sites**, grep on `decomp/osos.asm` — this
+/// function's and 0x0811d1c4, the kind-2 branch of the tag-dispatching
+/// dispose `FUN_0811d188`; **unported**):
+///
+/// ```text
+/// 0812d300  stmdb sp!, {r4, lr}
+/// 0812d304  mov   r4, r0
+/// 0812d308  bl    0x0812d294        @ drain the remaining entries
+/// 0812d30c  mov   r0, r4
+/// 0812d310  ldmia sp!, {r4, lr}
+/// 0812d314  b     0x0810e6b0        @ tail: object teardown
+/// ```
+///
+/// 0x0812d294 walks the registry with the same begin/step pair
+/// (`FUN_081dde18` / `FUN_081ddde8`) disposing each remaining entry
+/// (0x0810e6b0 + `operator_delete`); the tail 0x0810e6b0 (a 4-byte
+/// thunk, `b 0x08135380`) tears the object itself down (vtable-pointer
+/// store, a vtable slot +0x1c call on the +0x24 member, the +0x1c
+/// member freed and both words zeroed). The reference C's
+/// "Subroutine does not return" on this callee is a Ghidra
+/// mis-analysis: the tail chain returns (0x08135380 ends in its own
+/// returning tail `b 0x08271d2c`), and the sibling call site runs
+/// `bl 0x082aad24` immediately after it at 0x0811d1c8. The wired
+/// default is a no-op — the registry-object subsystem is unported and
+/// the object's words are unobservable until then (the
+/// `construct_guard_unported` no-op precedent); the following
+/// `operator_delete` still frees the block. Host tests install a
+/// recording mock via `core::ptr::addr_of_mut!`.
+pub static mut VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE: unsafe extern "C" fn(
+    registry: *mut u8,
+) = teardown_registry_dispose_unported;
+
+/// Default registry dispose: a no-op (see the seam's doc).
+unsafe extern "C" fn teardown_registry_dispose_unported(_registry: *mut u8) {}
+
+/// vtable_file_record_teardown — original: `FUN_0811d008` @ 0x0811d008
+/// (176 bytes; **1 `bl` call site**, grep on `decomp/osos.asm`:
+/// 0x0811d200, the tail of the kind-1 branch of the tag-dispatching
+/// dispose `FUN_0811d188` (128 bytes, unported), which first deletes a
+/// non-NULL +0x08 (0x08212a60 + `operator_delete`) and a non-NULL
+/// +0x10 (0x0821c4ec + `operator_delete`), then calls THIS function
+/// and returns the record).
+///
+/// The teardown/destructor of the tagged 0x1c-byte file-record
+/// family's registry half — the counterpart of the constructors
+/// [`vtable_file_record_construct_kind1`] (0x0811d148) and
+/// [`vtable_file_record_construct_kind2`] (0x0811d104) and the big
+/// sibling of [`vtable_file_record_dispose`] (0x0811d8c0), operating
+/// on the SAME 0x1c-byte record layout (tag at +0x00, registry at
+/// +0x04):
+///
+/// ```text
+/// 0811d008  stmdb sp!, {r4, lr}
+/// 0811d00c  ldr   r1, [r0, #0x4]    @ registry = record.+0x04
+/// 0811d010  sub   sp, sp, #0x40
+/// 0811d014  mov   r4, r0            @ save record
+/// 0811d018  add   r0, sp, #0x24     @ outer iterator (6 words)
+/// 0811d01c  bl    0x08212a5c        @ outer_begin(&outer, registry)
+/// 0811d020  b     0x0811d074
+/// 0811d024  ldr   r1, [r4, #0x4]    @ registry (reloaded per key)
+/// 0811d028  ldr   r2, [sp, #0x3c]   @ the yielded key
+/// 0811d02c  add   r0, sp, #0x4      @ inner iterator (6 words)
+/// 0811d030  bl    0x0821c4c8        @ inner_begin(&inner, registry, key)
+/// 0811d034  b     0x0811d054
+/// 0811d038  ldr   r0, [sp, #0x1c]   @ node
+/// 0811d03c  mov   r1, #0x19
+/// 0811d040  ldr   r0, [r0, #0x4]    @ node.+0x04 (the payload)
+/// 0811d044  bl    0x080e7970        @ free_wrapper(payload, 0x19)
+/// 0811d048  ldr   r0, [sp, #0x1c]
+/// 0811d04c  mov   r1, #0x19
+/// 0811d050  bl    0x080e7970        @ free_wrapper(node, 0x19)
+/// 0811d054  add   r2, sp, #0x1c     @ &node
+/// 0811d058  add   r1, sp, #0x20     @ &inner key (dead)
+/// 0811d05c  add   r0, sp, #0x4
+/// 0811d060  bl    0x081ddde8        @ inner_next(&inner, &ikey, &node)
+/// 0811d064  cmp   r0, #0x0
+/// 0811d068  bne   0x0811d038
+/// 0811d06c  add   r0, sp, #0x8      @ inner state object (iter + 4)
+/// 0811d070  bl    0x08155ec0        @ iter_cleanup(inner + 4)
+/// 0811d074  add   r1, sp, #0x3c     @ &key
+/// 0811d078  add   r0, sp, #0x24
+/// 0811d07c  bl    0x08212a4c        @ outer_next(&outer, &key)
+/// 0811d080  cmp   r0, #0x0
+/// 0811d084  bne   0x0811d024
+/// 0811d088  add   r0, sp, #0x28     @ outer state object (iter + 4)
+/// 0811d08c  bl    0x08155ec0        @ iter_cleanup(outer + 4)
+/// 0811d090  ldr   r0, [r4, #0x4]    @ registry (reloaded)
+/// 0811d094  cmp   r0, #0x0
+/// 0811d098  beq   0x0811d0a4        @ NULL -> skip dispose + delete
+/// 0811d09c  bl    0x0812d300        @ registry_dispose(registry)
+/// 0811d0a0  bl    0x082aad24        @ operator_delete(registry)
+/// 0811d0a4  mov   r0, #0x0
+/// 0811d0a8  str   r0, [r4, #0x4]    @ record.+0x04 = NULL
+/// 0811d0ac  strb  r0, [r4, #0x0]    @ record.tag = 0
+/// 0811d0b0  add   sp, sp, #0x40
+/// 0811d0b4  ldmia sp!, {r4, pc}
+/// ```
+///
+/// A nested walk of the registry at record +0x04: the OUTER iterator
+/// (begin thunk 0x08212a5c → `FUN_081dde18`; step 0x08212a4c, a
+/// spill-slot wrapper over the shared step `FUN_081ddde8` with a dead
+/// node out-slot) yields each key; for every key the INNER iterator
+/// (begin 0x0821c4c8 = key lookup 0x0812d160 + tail `FUN_081dde18`;
+/// step `FUN_081ddde8` directly) walks that key's bucket, and every
+/// node is freed TWICE through `free_wrapper` with caller tag 0x19 —
+/// first the node's +0x04 payload word, then the node itself. Each
+/// iterator is released by the cleanup 0x08155ec0 on its state object
+/// (iter + 4). Finally, if record +0x04 is non-NULL, the registry
+/// dispose 0x0812d300 runs and the object is `operator_delete`d; the
+/// field and the tag byte are then zeroed on every path.
+///
+/// # Deviations
+///
+/// - **The six unported callees sit behind seams** — the outer begin
+///   0x08212a5c behind [`VTABLE_FILE_RECORD_TEARDOWN_OUTER_BEGIN`],
+///   the outer step 0x08212a4c behind
+///   [`VTABLE_FILE_RECORD_TEARDOWN_OUTER_NEXT`], the inner begin
+///   0x0821c4c8 behind [`VTABLE_FILE_RECORD_TEARDOWN_INNER_BEGIN`],
+///   the inner step `FUN_081ddde8` behind
+///   [`VTABLE_FILE_RECORD_TEARDOWN_INNER_NEXT`], the iterator cleanup
+///   0x08155ec0 behind [`VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP`]
+///   and the registry dispose 0x0812d300 behind
+///   [`VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE`]. Unlike
+///   [`VTABLE_SET_50_KIND4_OPS`], the wired defaults do NOT model the
+///   exact bodies — the callees are an unported registry-iterator
+///   (red-black-tree) subsystem, not message thunks; the defaults
+///   yield an EMPTY traversal (no-op begins and cleanups, 0-returning
+///   steps, no-op dispose), so an unswapped table runs straight to
+///   the guard/delete/zero tail (the `store_remove_unported` /
+///   `construct_guard_unported` no-op precedent). Host tests install
+///   scripted recording mocks.
+/// - **`free_wrapper` (0x080e7970) and `operator_delete` (0x082aad24)
+///   are called directly** — both ported in `heap/veneers.rs` (the
+///   app/class_6800.rs ported-callees-called-directly precedent);
+///   host tests observe the frees through the `HEAP_OPS.free` slot.
+/// - **The node out-slot is modeled pointer-sized** (`*mut *mut u8`),
+///   although the original's `ldr r0, [sp, #0x1c]` is a 32-bit load:
+///   the body DEREFERENCES the node (`ldr r0, [r0, #0x4]`), so a
+///   truncated host pointer would fault — the [`vtable_file_open`]
+///   host-representation deviation. The node's +0x04 payload word is
+///   only forwarded to `free_wrapper`, so it stays a byte-exact
+///   32-bit read.
+/// - **The record's +0x04 registry field stays a 32-bit word** (the
+///   [`vtable_file_record_construct_kind1`] byte-exact precedent) —
+///   on a 64-bit host the pointer truncates to its low 32 bits, the
+///   exact inverse of the constructors' u32 store.
+/// - **The return type is `()`** — the epilogue's r0 is the zero
+///   immediate of the two clearing stores, and the sole caller
+///   overwrites r0 with the record pointer (`mov r0, r4` at
+///   0x0811d1fc) before the call.
+/// - **No `forwarded` parameter**: the entry `stmdb` spills no
+///   argument registers and r1..r3 are never read — this is a record
+///   destructor, not a message thunk (the
+///   [`vtable_file_record_construct_kind1`] precedent).
+/// - **The reference C is not followed where it mis-decompiles**:
+///   `decomp/c/010/0811d008_FUN_0811d008.c` gets the loop shape and
+///   the double free right, but its "Subroutine does not return" on
+///   `FUN_0812d300` is a Ghidra mis-analysis (the callee's tail chain
+///   returns — see the [`VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE`]
+///   doc — and the operator delete after it is live code here and at
+///   the sibling site 0x0811d1c8), and its stack naming hides that
+///   the outer step's node out-slot is the 0x08212a4c wrapper's dead
+///   r3 spill. The port follows the disassembly.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_file_record_teardown(record: *mut u8) {
+    // The original's 0x40-byte frame, modeled as locals: the outer
+    // iterator (sp+0x24, six words), the outer key out-slot (sp+0x3c),
+    // the inner iterator (sp+0x04, six words), the inner key out-slot
+    // (sp+0x20, dead — nothing reads the inner key back) and the node
+    // out-slot (sp+0x1c).
+    let mut outer = [0u32; ITERATOR_WORDS];
+    let mut key = 0u32;
+    let mut inner = [0u32; ITERATOR_WORDS];
+    let mut inner_key = 0u32;
+    let mut node: *mut u8 = core::ptr::null_mut();
+
+    let outer_begin =
+        core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_FILE_RECORD_TEARDOWN_OUTER_BEGIN));
+    outer_begin(
+        outer.as_mut_ptr(),
+        record.add(4).cast::<u32>().read() as *mut u8,
+    );
+    loop {
+        let outer_next =
+            core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_FILE_RECORD_TEARDOWN_OUTER_NEXT));
+        if outer_next(outer.as_mut_ptr(), &mut key) == 0 {
+            break;
+        }
+        let inner_begin =
+            core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_FILE_RECORD_TEARDOWN_INNER_BEGIN));
+        inner_begin(
+            inner.as_mut_ptr(),
+            record.add(4).cast::<u32>().read() as *mut u8,
+            key,
+        );
+        loop {
+            let inner_next = core::ptr::read_volatile(core::ptr::addr_of!(
+                VTABLE_FILE_RECORD_TEARDOWN_INNER_NEXT
+            ));
+            if inner_next(inner.as_mut_ptr(), &mut inner_key, &mut node) == 0 {
+                break;
+            }
+            crate::heap::veneers::free_wrapper(
+                node.add(4).cast::<u32>().read() as *mut u8,
+                FILE_RECORD_NODE_FREE_TAG,
+            );
+            crate::heap::veneers::free_wrapper(node, FILE_RECORD_NODE_FREE_TAG);
+        }
+        let cleanup =
+            core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP));
+        cleanup(inner.as_mut_ptr().add(1));
+    }
+    let cleanup =
+        core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP));
+    cleanup(outer.as_mut_ptr().add(1));
+    let registry = record.add(4).cast::<u32>().read() as *mut u8;
+    if !registry.is_null() {
+        let dispose = core::ptr::read_volatile(core::ptr::addr_of!(
+            VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE
+        ));
+        dispose(registry);
+        crate::heap::veneers::operator_delete(registry);
+    }
+    record.add(4).cast::<u32>().write(0);
+    record.write(0);
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -3225,6 +3643,18 @@ mod tests {
                     .write_volatile(kind2_block_ctor_default);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_KIND2_GUARD)
                     .write_volatile(construct_guard_unported);
+                core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_OUTER_BEGIN)
+                    .write_volatile(teardown_outer_begin_unported);
+                core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_OUTER_NEXT)
+                    .write_volatile(teardown_outer_next_unported);
+                core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_INNER_BEGIN)
+                    .write_volatile(teardown_inner_begin_unported);
+                core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_INNER_NEXT)
+                    .write_volatile(teardown_inner_next_unported);
+                core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP)
+                    .write_volatile(teardown_iter_cleanup_unported);
+                core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE)
+                    .write_volatile(teardown_registry_dispose_unported);
             }
         }
     }
@@ -7768,6 +8198,390 @@ mod tests {
                 &[0xa5; 4],
                 "bytes past the 0x14 block are untouched"
             );
+        }
+    }
+
+    // ---- vtable_file_record_teardown (0x0811d008) ------------------
+
+    /// Event tokens for the teardown walk log; data words (key,
+    /// registry, free tag) follow their token in the stream.
+    const TD_EV_OUTER_BEGIN: u32 = 0x0b00_0001;
+    const TD_EV_OUTER_NEXT: u32 = 0x0b00_0002;
+    const TD_EV_INNER_BEGIN: u32 = 0x0b00_0003;
+    const TD_EV_INNER_NEXT: u32 = 0x0b00_0004;
+    const TD_EV_CLEANUP: u32 = 0x0b00_0005;
+    const TD_EV_FREE: u32 = 0x0b00_0006;
+    const TD_EV_DISPOSE: u32 = 0x0b00_0007;
+
+    /// The tag operator_delete (0x082aad24) frees with.
+    const TD_DELETE_TAG: u32 = 2;
+
+    /// The scripted outer keys and their buckets: key 0 -> nodes 0
+    /// and 1, key 1 -> node 2.
+    const TD_KEYS: [u32; 2] = [0x1111_0001, 0x2222_0002];
+    const TD_PAYLOADS: [u32; 3] = [0x1eaf_0001, 0x1eaf_0002, 0x1eaf_0003];
+
+    static mut TD_EVENTS: [u32; 96] = [0; 96];
+    static mut TD_EVENT_COUNT: usize = 0;
+    static mut TD_FREE_PTRS: [*mut u8; 16] = [core::ptr::null_mut(); 16];
+    static mut TD_FREE_TAGS: [usize; 16] = [0; 16];
+    static mut TD_FREE_COUNT: usize = 0;
+
+    /// The stand-in registry object and the three fake bucket nodes
+    /// (a payload word at +0x04, planted by the installer).
+    static mut TD_REGISTRY: [u8; 0x28] = [0; 0x28];
+    static mut TD_NODES: [[u8; 0x10]; 3] = [[0; 0x10]; 3];
+
+    /// The outer/inner script cursors: how many keys the outer step
+    /// still yields, and the current bucket's pending nodes.
+    static mut TD_OUTER_KEY_COUNT: usize = 0;
+    static mut TD_OUTER_NEXT_CALLS: usize = 0;
+    static mut TD_INNER_PENDING: [*mut u8; 3] = [core::ptr::null_mut(); 3];
+    static mut TD_INNER_PENDING_LEN: usize = 0;
+    static mut TD_INNER_NEXT_CALLS: usize = 0;
+
+    unsafe fn td_push(event: u32) {
+        let count = TD_EVENT_COUNT;
+        TD_EVENTS[count] = event;
+        TD_EVENT_COUNT = count + 1;
+    }
+
+    unsafe fn td_node(index: usize) -> *mut u8 {
+        core::ptr::addr_of_mut!(TD_NODES).cast::<u8>().add(index * 0x10)
+    }
+
+    unsafe extern "C" fn recording_td_outer_begin(iter: *mut u32, registry: *mut u8) {
+        assert!(!iter.is_null(), "the outer iterator scratch is passed in r0");
+        td_push(TD_EV_OUTER_BEGIN);
+        td_push(registry as u32);
+    }
+
+    unsafe extern "C" fn recording_td_outer_next(_iter: *mut u32, key_out: *mut u32) -> u32 {
+        td_push(TD_EV_OUTER_NEXT);
+        let call = TD_OUTER_NEXT_CALLS;
+        TD_OUTER_NEXT_CALLS = call + 1;
+        if call < TD_OUTER_KEY_COUNT {
+            // FUN_081ddde8's strne: the out-slot is written only on success.
+            key_out.write(TD_KEYS[call]);
+            1
+        } else {
+            0
+        }
+    }
+
+    unsafe extern "C" fn recording_td_inner_begin(
+        _iter: *mut u32,
+        registry: *mut u8,
+        key: u32,
+    ) {
+        td_push(TD_EV_INNER_BEGIN);
+        td_push(key);
+        td_push(registry as u32);
+        TD_INNER_NEXT_CALLS = 0;
+        if key == TD_KEYS[0] {
+            TD_INNER_PENDING[0] = td_node(0);
+            TD_INNER_PENDING[1] = td_node(1);
+            TD_INNER_PENDING_LEN = 2;
+        } else if key == TD_KEYS[1] {
+            TD_INNER_PENDING[0] = td_node(2);
+            TD_INNER_PENDING_LEN = 1;
+        } else {
+            TD_INNER_PENDING_LEN = 0;
+        }
+    }
+
+    unsafe extern "C" fn recording_td_inner_next(
+        _iter: *mut u32,
+        key_out: *mut u32,
+        node_out: *mut *mut u8,
+    ) -> u32 {
+        td_push(TD_EV_INNER_NEXT);
+        let call = TD_INNER_NEXT_CALLS;
+        TD_INNER_NEXT_CALLS = call + 1;
+        if call < TD_INNER_PENDING_LEN {
+            key_out.write(0x5eed_0000 + call as u32);
+            node_out.write(TD_INNER_PENDING[call]);
+            1
+        } else {
+            0
+        }
+    }
+
+    unsafe extern "C" fn recording_td_cleanup(_state: *mut u32) {
+        td_push(TD_EV_CLEANUP);
+    }
+
+    unsafe extern "C" fn recording_td_dispose(registry: *mut u8) {
+        td_push(TD_EV_DISPOSE);
+        td_push(registry as u32);
+    }
+
+    unsafe extern "C" fn recording_td_free(
+        _heap: *mut crate::heap::types::HeapDescriptorDescriptor,
+        ptr: *mut u8,
+        tag: usize,
+    ) {
+        td_push(TD_EV_FREE);
+        td_push(tag as u32);
+        let count = TD_FREE_COUNT;
+        TD_FREE_PTRS[count] = ptr;
+        TD_FREE_TAGS[count] = tag;
+        TD_FREE_COUNT = count + 1;
+    }
+
+    /// Resets the walk state, plants the node payloads, swaps in the
+    /// recording free and installs the six recording seam mocks (the
+    /// `install_recording_kind1` precedent).
+    unsafe fn install_recording_teardown() {
+        TD_EVENT_COUNT = 0;
+        TD_FREE_COUNT = 0;
+        TD_OUTER_KEY_COUNT = TD_KEYS.len();
+        TD_OUTER_NEXT_CALLS = 0;
+        TD_INNER_PENDING_LEN = 0;
+        TD_INNER_NEXT_CALLS = 0;
+        install_stub_heap();
+        let mut ops = core::ptr::addr_of!(crate::heap::veneers::HEAP_OPS).read_volatile();
+        ops.free = recording_td_free;
+        core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS).write_volatile(ops);
+        for index in 0..3 {
+            td_node(index).add(4).cast::<u32>().write(TD_PAYLOADS[index]);
+        }
+        core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_OUTER_BEGIN)
+            .write_volatile(recording_td_outer_begin);
+        core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_OUTER_NEXT)
+            .write_volatile(recording_td_outer_next);
+        core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_INNER_BEGIN)
+            .write_volatile(recording_td_inner_begin);
+        core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_INNER_NEXT)
+            .write_volatile(recording_td_inner_next);
+        core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP)
+            .write_volatile(recording_td_cleanup);
+        core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE)
+            .write_volatile(recording_td_dispose);
+    }
+
+    /// Builds a 0xa5-filled record with the stand-in registry at +0x04
+    /// (32-bit, the constructors' byte-exact precedent) and the kind-1
+    /// tag at +0x00.
+    unsafe fn td_record(record: &mut [u8; 0x20]) -> *mut u8 {
+        let registry = core::ptr::addr_of_mut!(TD_REGISTRY).cast::<u8>();
+        record.as_mut_ptr().add(4).cast::<u32>().write(registry as u32);
+        record[0] = FILE_RECORD_TAG_KIND1;
+        registry
+    }
+
+    #[test]
+    fn file_record_teardown_empty_registry_runs_straight_to_the_dispose_delete_tail() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = [0xa5u8; 0x20];
+        unsafe {
+            install_recording_teardown();
+            TD_OUTER_KEY_COUNT = 0;
+            let registry = td_record(&mut record);
+            let registry32 = registry as u32;
+
+            vtable_file_record_teardown(record.as_mut_ptr());
+
+            let events = &TD_EVENTS[..TD_EVENT_COUNT];
+            assert_eq!(
+                events,
+                &[
+                    TD_EV_OUTER_BEGIN,
+                    registry32,
+                    TD_EV_OUTER_NEXT, // -> 0: no keys, no inner iterator at all
+                    TD_EV_CLEANUP,    // the outer state object only
+                    TD_EV_DISPOSE,
+                    registry32,
+                    TD_EV_FREE,
+                    TD_DELETE_TAG,
+                ],
+                "begin -> next(0) -> cleanup -> dispose -> operator_delete"
+            );
+            assert_eq!(TD_FREE_COUNT, 1, "only the registry object is freed");
+            assert_eq!(
+                TD_FREE_PTRS[0],
+                registry32 as *mut u8,
+                "operator_delete frees the +0x04 word (32-bit on a 64-bit host)"
+            );
+            assert_eq!(record.as_ptr().add(4).cast::<u32>().read(), 0, "+0x04 zeroed");
+            assert_eq!(record[0], 0, "the tag byte zeroed");
+        }
+    }
+
+    #[test]
+    fn file_record_teardown_populated_registry_walks_keys_and_frees_nodes_in_order() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = [0xa5u8; 0x20];
+        unsafe {
+            install_recording_teardown();
+            let registry = td_record(&mut record);
+            let registry32 = registry as u32;
+
+            vtable_file_record_teardown(record.as_mut_ptr());
+
+            let events = &TD_EVENTS[..TD_EVENT_COUNT];
+            assert_eq!(
+                events,
+                &[
+                    TD_EV_OUTER_BEGIN,
+                    registry32,
+                    TD_EV_OUTER_NEXT, // -> key 0
+                    TD_EV_INNER_BEGIN,
+                    TD_KEYS[0],
+                    registry32,
+                    TD_EV_INNER_NEXT, // -> node 0
+                    TD_EV_FREE,
+                    0x19, // free_wrapper(node0.+0x04, 0x19)
+                    TD_EV_FREE,
+                    0x19, // free_wrapper(node0, 0x19)
+                    TD_EV_INNER_NEXT, // -> node 1
+                    TD_EV_FREE,
+                    0x19,
+                    TD_EV_FREE,
+                    0x19,
+                    TD_EV_INNER_NEXT, // -> 0: bucket drained
+                    TD_EV_CLEANUP,    // the inner state object
+                    TD_EV_OUTER_NEXT, // -> key 1
+                    TD_EV_INNER_BEGIN,
+                    TD_KEYS[1],
+                    registry32,
+                    TD_EV_INNER_NEXT, // -> node 2
+                    TD_EV_FREE,
+                    0x19,
+                    TD_EV_FREE,
+                    0x19,
+                    TD_EV_INNER_NEXT, // -> 0
+                    TD_EV_CLEANUP,
+                    TD_EV_OUTER_NEXT, // -> 0: no more keys
+                    TD_EV_CLEANUP,    // the outer state object
+                    TD_EV_DISPOSE,
+                    registry32,
+                    TD_EV_FREE,
+                    TD_DELETE_TAG,
+                ],
+                "the nested walk: per key begin -> [next -> double free] -> cleanup"
+            );
+            assert_eq!(TD_FREE_COUNT, 7, "six node frees plus the registry delete");
+            let expected_ptrs = [
+                TD_PAYLOADS[0] as *mut u8, // node0.+0x04 (32-bit payload word)
+                td_node(0),
+                TD_PAYLOADS[1] as *mut u8,
+                td_node(1),
+                TD_PAYLOADS[2] as *mut u8,
+                td_node(2),
+                registry32 as *mut u8,
+            ];
+            assert_eq!(
+                &TD_FREE_PTRS[..7],
+                &expected_ptrs,
+                "payload first, then the node — the 0x0811d038..0x0811d050 order"
+            );
+            assert_eq!(
+                &TD_FREE_TAGS[..7],
+                &[0x19, 0x19, 0x19, 0x19, 0x19, 0x19, TD_DELETE_TAG as usize],
+                "mov r1, #0x19 on every node free, tag 2 for operator_delete"
+            );
+        }
+    }
+
+    #[test]
+    fn file_record_teardown_null_registry_skips_the_dispose_and_delete() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = [0xa5u8; 0x20];
+        unsafe {
+            install_recording_teardown();
+            TD_OUTER_KEY_COUNT = 0;
+            // +0x04 left at the 0xa5 fill? No: the NULL case — write 0.
+            record.as_mut_ptr().add(4).cast::<u32>().write(0);
+            record[0] = FILE_RECORD_TAG_KIND1;
+
+            vtable_file_record_teardown(record.as_mut_ptr());
+
+            let events = &TD_EVENTS[..TD_EVENT_COUNT];
+            assert_eq!(
+                events,
+                &[
+                    TD_EV_OUTER_BEGIN,
+                    0, // the NULL registry still feeds the begin (ldr at 0x0811d00c)
+                    TD_EV_OUTER_NEXT,
+                    TD_EV_CLEANUP,
+                ],
+                "the iterator prologue runs; cmp r0, #0; beq skips dispose + delete"
+            );
+            assert_eq!(TD_FREE_COUNT, 0, "no operator_delete on the NULL path");
+            assert_eq!(record[0], 0, "the tag byte is still zeroed");
+            assert_eq!(record.as_ptr().add(4).cast::<u32>().read(), 0);
+        }
+    }
+
+    #[test]
+    fn file_record_teardown_zeroes_only_the_registry_word_and_the_tag() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = [0xa5u8; 0x20];
+        unsafe {
+            install_recording_teardown();
+            TD_OUTER_KEY_COUNT = 0;
+            td_record(&mut record);
+
+            vtable_file_record_teardown(record.as_mut_ptr());
+
+            assert_eq!(record[0], 0, "strb r0, [r4, #0x0] — tag = 0");
+            assert_eq!(
+                &record[1..4],
+                &[0xa5; 3],
+                "bytes +0x01..+0x04 are untouched"
+            );
+            assert_eq!(
+                record.as_ptr().add(4).cast::<u32>().read(),
+                0,
+                "str r0, [r4, #0x4] — registry = NULL"
+            );
+            assert_eq!(
+                &record[8..],
+                &[0xa5; 0x18],
+                "bytes past +0x08 are untouched"
+            );
+        }
+    }
+
+    #[test]
+    fn file_record_teardown_default_seams_yield_an_empty_traversal() {
+        // The wired defaults (reinstalled by the guard) are the
+        // documented empty-traversal stubs: no-op begins/cleanups,
+        // 0-returning steps, no-op dispose — but operator_delete still
+        // frees the registry block.
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = [0xa5u8; 0x20];
+        unsafe {
+            install_stub_heap();
+            let mut ops = core::ptr::addr_of!(crate::heap::veneers::HEAP_OPS).read_volatile();
+            ops.free = recording_td_free;
+            core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS).write_volatile(ops);
+            TD_EVENT_COUNT = 0;
+            TD_FREE_COUNT = 0;
+            let registry = td_record(&mut record);
+
+            vtable_file_record_teardown(record.as_mut_ptr());
+
+            assert_eq!(
+                &TD_EVENTS[..TD_EVENT_COUNT],
+                &[TD_EV_FREE, TD_DELETE_TAG],
+                "no iteration, no dispose — straight to the delete"
+            );
+            assert_eq!(TD_FREE_COUNT, 1);
+            assert_eq!(TD_FREE_PTRS[0], (registry as u32) as *mut u8);
+            assert_eq!(record[0], 0);
+            assert_eq!(record.as_ptr().add(4).cast::<u32>().read(), 0);
         }
     }
 }

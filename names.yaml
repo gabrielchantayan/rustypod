@@ -23214,3 +23214,100 @@ functions:
       src/app/vtable_set.rs::file_record_kind2_initializes_the_record_and_returns_it
       / file_record_kind2_allocates_the_block_and_feeds_it_to_the_ctor
       / file_record_kind2_default_ctor_fills_the_five_words.
+
+  - address: 0x0811d008
+    ghidra: FUN_0811d008
+    name: vtable_file_record_teardown
+    size: 176
+    sig: "void vtable_file_record_teardown(record: *mut u8)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r4: record
+      local_c (sp+0x3c): key (the outer iterator's yielded key out-slot)
+      local_2c (sp+0x1c): node (the inner iterator's yielded node out-slot)
+      auStack_24 (sp+0x24): outer iterator scratch, six words (state object at +4)
+      auStack_44 (sp+0x04): inner iterator scratch, six words (state object at +4)
+      auStack_28 (sp+0x20): inner_key (dead - nothing reads the inner key back)
+      thunk_FUN_081dde18 (0x08212a5c): outer-iterator begin thunk (bare b 0x081dde18; unported; VTABLE_FILE_RECORD_TEARDOWN_OUTER_BEGIN seam)
+      FUN_08212a4c: outer-iterator step (spill-slot wrapper over FUN_081ddde8 with a dead node out-slot; unported; VTABLE_FILE_RECORD_TEARDOWN_OUTER_NEXT seam)
+      FUN_0821c4c8: inner-iterator begin (key lookup 0x0812d160 + tail FUN_081dde18; unported; VTABLE_FILE_RECORD_TEARDOWN_INNER_BEGIN seam)
+      FUN_081ddde8: inner-iterator step (unported; VTABLE_FILE_RECORD_TEARDOWN_INNER_NEXT seam)
+      FUN_08155ec0: iterator-state cleanup (unported; VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP seam)
+      FUN_080e7970: free_wrapper (direct, ported in heap/veneers; caller tag 0x19)
+      FUN_0812d300: registry dispose (unported; VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE seam)
+      FUN_082aad24: operator_delete (direct, ported in heap/veneers)
+    notes: >-
+      1 bl call site (grep on decomp/osos.asm): 0x0811d200, the tail
+      of the kind-1 branch of the tag-dispatching dispose FUN_0811d188
+      @ 0x0811d188 (128 bytes, unported), which first deletes a
+      non-NULL +0x08 (0x08212a60 + operator_delete) and a non-NULL
+      +0x10 (0x0821c4ec + operator_delete), then calls THIS function
+      and returns the record. The teardown/destructor of the tagged
+      0x1c-byte file-record family's registry half - the counterpart
+      of vtable_file_record_construct_kind1 @ 0x0811d148 and
+      vtable_file_record_construct_kind2 @ 0x0811d104 (both ported in
+      the same module), operating on the SAME record layout (tag at
+      +0x00, registry at +0x04). A nested walk of the registry: the
+      OUTER iterator (begin thunk 0x08212a5c -> FUN_081dde18, 5 bl
+      sites; step FUN_08212a4c, 1 bl site, wrapping the shared step
+      FUN_081ddde8 with the node out-slot bound to its dead r3 spill)
+      yields each key at sp+0x3c; for every key the INNER iterator
+      (begin FUN_0821c4c8, 3 bl sites = key lookup 0x0812d160 + tail
+      FUN_081dde18; step FUN_081ddde8 directly, 10 bl sites) walks
+      that key's bucket, and every node is freed TWICE through
+      free_wrapper with caller tag 0x19 - first the node's +0x04
+      payload word (ldr r0,[sp,#0x1c]; ldr r0,[r0,#0x4]), then the
+      node itself. Each iterator is released by the cleanup
+      FUN_08155ec0 (69 bl sites) on its state object (iter + 4:
+      sp+0x08 inner / sp+0x28 outer). Finally, if record +0x04 is
+      non-NULL (cmp r0,#0; beq), the registry dispose FUN_0812d300 (2
+      bl sites - this one and 0x0811d1c4 in the caller's kind-2
+      branch; it drains remaining entries via 0x0812d294 and tail-
+      branches to the object teardown 0x0810e6b0 -> b 0x08135380)
+      runs and the object is operator_deleted; record +0x04 (32-bit
+      str) and the tag byte (strb) are then zeroed on every path.
+      Deviations: the six unported callees sit behind the new
+      VTABLE_FILE_RECORD_TEARDOWN_OUTER_BEGIN / _OUTER_NEXT /
+      _INNER_BEGIN / _INNER_NEXT / _ITER_CLEANUP / _REGISTRY_DISPOSE
+      read_volatile seams whose wired defaults do NOT model the exact
+      bodies - the callees are an unported registry-iterator
+      (red-black-tree) subsystem, so the defaults yield an EMPTY
+      traversal (no-op begins/cleanups/dispose, 0-returning steps)
+      and an unswapped table runs straight to the guard/delete/zero
+      tail (the store_remove_unported / construct_guard_unported
+      no-op precedent, unlike VTABLE_SET_50_KIND4_OPS's exact-body
+      defaults); free_wrapper and operator_delete are called directly
+      (both ported in heap/veneers - the app/class_6800.rs
+      ported-callees-called-directly precedent), host tests observe
+      the frees through the HEAP_OPS.free slot; the node out-slot is
+      modeled pointer-sized (*mut *mut u8) although the original's
+      ldr is 32-bit, because the body DEREFERENCES the node (the
+      vtable_file_open host-representation deviation), while the
+      node's +0x04 payload word stays a byte-exact 32-bit read; the
+      record's +0x04 registry field stays a 32-bit word (the kind-1/
+      kind-2 constructors' byte-exact precedent - the exact inverse
+      of their u32 store); the return type is void - the epilogue's
+      r0 is the zero immediate of the clearing stores and the sole
+      caller overwrites r0 with the record pointer (mov r0,r4 at
+      0x0811d1fc) before the call; no forwarded parameter (the entry
+      stmdb spills no argument registers and r1..r3 are never read).
+      Reference C (decomp/c/010/0811d008_FUN_0811d008.c) gets the
+      loop shape and the double free right, but its "Subroutine does
+      not return" on FUN_0812d300 is a Ghidra mis-analysis - the
+      callee's tail chain returns (0x08135380 ends in a returning
+      tail b 0x08271d2c) and the operator delete after it is live
+      code here and at the sibling site 0x0811d1c8 - and its stack
+      naming hides that the outer step's node out-slot is the
+      0x08212a4c wrapper's dead r3 spill. match.py: same
+      begin/next/cmp loop structure, the payload-then-node double
+      free with tag 0x19, the guard/delete/zero tail; the diff is the
+      crate fp frame, the six seam ldr/blx pairs standing in for the
+      direct bls (the documented seams) and LLVM's inlining of the
+      ported free_wrapper/operator_delete bodies (their documented
+      HEAP_OPS dispatch). Host tests:
+      src/app/vtable_set.rs::file_record_teardown_empty_registry_runs_straight_to_the_dispose_delete_tail
+      / file_record_teardown_populated_registry_walks_keys_and_frees_nodes_in_order
+      / file_record_teardown_null_registry_skips_the_dispose_and_delete
+      / file_record_teardown_zeroes_only_the_registry_word_and_the_tag
+      / file_record_teardown_default_seams_yield_an_empty_traversal.
