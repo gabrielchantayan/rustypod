@@ -42,6 +42,10 @@
 //! - [`vector_bool_reference_init`] — the `vector<bool>` mask-reference
 //!   constructor: copies the iterator's word pointer and stores the
 //!   single-bit mask `1 << bit`.
+//! - [`vector_bool_iter_minus`] — the `vector<bool>` bit-iterator
+//!   `operator-(iter, n)`: advances a copy of the iterator by `-n`
+//!   through the in-place advance @ 0x083e5f84 and returns it through
+//!   the hidden sret pointer.
 //! - [`vector_bool_reference_test`] — the `vector<bool>` mask-reference
 //!   dereference: reads the storage word and returns whether the masked
 //!   bit is set.
@@ -899,6 +903,121 @@ pub unsafe extern "C" fn vector_bool_reference_init(
     mask_ref
 }
 
+/// Indirect dispatch for the not-yet-ported in-place bit-iterator
+/// advance @ 0x083e5f84 that [`vector_bool_iter_minus`] calls (the
+/// `PAIR_HEADER_OPS` precedent in `cxx/pair_header.rs`).
+#[derive(Clone, Copy)]
+pub struct VectorBoolIterOps {
+    /// Stock 0x083e5f84(iter, distance): advances a `{word, bit}`
+    /// iterator by a signed bit distance in place, folding `bit +
+    /// distance` into whole words plus a 0..32 bit remainder with
+    /// floor division. Not yet ported.
+    pub advance: unsafe extern "C" fn(iter: *mut VectorBoolIter, distance: i32),
+}
+
+/// Default for the advance slot: a private model of the stock body @
+/// 0x083e5f84, NOT a port of that address (it stays unported in
+/// `names.yaml`; its future port can replace this default). The stock
+/// sequence — `ldr r2,[r0,#4]` / `ldr r12,[r0]` / `add r1,r2,r1`,
+/// then a floor-division fold of the sum into words and a 0..32
+/// remainder (`asr #0x1f` / `lsr #0x1b` sign bias, `asr #0x5`, `bic
+/// #0x1f`, with a conditional `+0x20` / `-4` fixup when the remainder
+/// comes out negative) — is pure arithmetic and fully recovered, so
+/// modeling it keeps [`vector_bool_iter_minus`] hook-ready instead of
+/// stubbing to a silently-wrong identity.
+unsafe extern "C" fn stock_iter_advance_model(iter: *mut VectorBoolIter, distance: i32) {
+    // `read_unaligned`/`write_unaligned`: same 4-but-not-8-aligned
+    // firmware head hazard as the rest of the family on a 64-bit host.
+    let word = core::ptr::read_unaligned(core::ptr::addr_of!((*iter).word));
+    let bit = core::ptr::read_unaligned(core::ptr::addr_of!((*iter).bit));
+    // `add r1, r2, r1`: wrapping 32-bit register arithmetic.
+    let total = (bit as i32).wrapping_add(distance);
+    // `asr #0x1f` + `lsr #0x1b`: bias of 31 for a negative sum, else 0.
+    let bias = (((total >> 31) as u32) >> 27) as i32;
+    let biased = total.wrapping_add(bias);
+    // `asr #0x5` (arithmetic) and `bic #0x1f`.
+    let words = biased >> 5;
+    let mut rem = total.wrapping_sub(biased & !0x1f);
+    // `add r3, r12, r3, lsl #0x2`: whole words of 4 bytes each.
+    let mut new_word = word.wrapping_offset(words as isize);
+    // `addmi r1, r1, #0x20` / `submi r1, r3, #0x4` (flags from the
+    // `subs` above): a negative remainder borrows one more word.
+    if rem < 0 {
+        rem += 32;
+        new_word = new_word.wrapping_sub(1);
+    }
+    core::ptr::write_unaligned(core::ptr::addr_of_mut!((*iter).word), new_word);
+    core::ptr::write_unaligned(core::ptr::addr_of_mut!((*iter).bit), rem as u32);
+}
+
+/// The active bit-iterator advance slot. Defaults to the documented
+/// stock-semantics model above; replaced by host tests (mocks) and
+/// eventually by the ported 0x083e5f84. Written once at init on
+/// target; tests serialize access.
+pub static mut VECTOR_BOOL_ITER_OPS: VectorBoolIterOps = VectorBoolIterOps {
+    advance: stock_iter_advance_model,
+};
+
+/// vector_bool_iter_minus — original: `FUN_083d79f8` @ 0x083d79f8
+/// (40 bytes; 2 `bl` call sites — 0x0826a3e8 and 0x083e5d6c, the
+/// latter in the `vector<bool>` storage-grow path; the only copy —
+/// `ipod-decomp/decomp/c/037/083d79f8_FUN_083d79f8.c`).
+///
+/// `std::vector<bool>` bit-iterator `operator-(iter, n)`: copies the
+/// `{word, bit}` iterator to a stack temp (`ldmia r1,{r0,r1}` /
+/// `stmia sp,{r0,r1}` — the temp reuses the pushed r2/r3 slots),
+/// advances the temp by the NEGATED distance (`rsb r1, r2, #0`, a
+/// wrapping 32-bit negate) through the in-place advance @ 0x083e5f84,
+/// and stores the result through the hidden sret pointer saved in r4
+/// (`ldmia sp,{r0,r1}` / `stmia r4,{r0,r1}`). The reload leaves r0
+/// holding the result's **word pointer**, not the sret pointer, so
+/// the port returns that; both call sites recompute every pointer
+/// they need and never consume r0.
+///
+/// The advance @ 0x083e5f84 is not yet ported, so the call rides the
+/// [`VECTOR_BOOL_ITER_OPS`] seam (blx-for-bl, the `PAIR_HEADER_OPS`
+/// precedent); its default models the fully recovered stock body (see
+/// [`stock_iter_advance_model`]), keeping this port hook-ready.
+///
+/// Identification: sits between [`vector_bool_reference_init`] @
+/// 0x083d79dc and [`vector_bool_reference_test`] @ 0x083d7a20 in the
+/// bit-iterator cluster (see [`vector_size_bool`] @ 0x083d7968 for the
+/// neighborhood). The 0x0826a3e8 call site follows an `operator++` @
+/// 0x083e5fc0 with `operator-(iter, 1)` plus the mask-reference ctor
+/// and the set/clear-bit store @ 0x083e5fe8 — write-back of the bit
+/// just stepped past.
+///
+/// # Safety
+/// `result` must point at a writable [`VectorBoolIter`] and `iter` at
+/// a readable one; they may alias (the original round-trips through a
+/// stack temp, so an in-place `it = it - n` works). The word storage
+/// itself is never accessed, so either word pointer may be NULL.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_bool_iter_minus(
+    result: *mut VectorBoolIter,
+    iter: *const VectorBoolIter,
+    distance: i32,
+) -> *mut u32 {
+    // `read_unaligned`: same 4-but-not-8-aligned firmware head hazard
+    // as `vector_bool_reference_init` on a 64-bit host.
+    let mut local = VectorBoolIter {
+        word: core::ptr::read_unaligned(core::ptr::addr_of!((*iter).word)),
+        bit: core::ptr::read_unaligned(core::ptr::addr_of!((*iter).bit)),
+    };
+    // Reads the fn-pointer field directly rather than through a
+    // whole-table read (the timer_schedule_shim gotcha).
+    let advance = core::ptr::addr_of!(VECTOR_BOOL_ITER_OPS.advance).read_volatile();
+    // `rsb r1, r2, #0`: the advance runs on the NEGATED distance, as
+    // wrapping 32-bit register arithmetic.
+    advance(&mut local, distance.wrapping_neg());
+    core::ptr::write_unaligned(core::ptr::addr_of_mut!((*result).word), local.word);
+    core::ptr::write_unaligned(core::ptr::addr_of_mut!((*result).bit), local.bit);
+    // The original returns with r0 holding the result's word pointer
+    // (reloaded from the stack temp), not the sret pointer.
+    local.word
+}
+
 /// vector_bool_reference_test — original: `FUN_083d7a20` @ 0x083d7a20
 /// (24 bytes; 3 `bl` call sites — 0x08269edc plus 0x083e5dac and
 /// 0x083e5f28 in the `vector<bool>` storage-grow path; the only copy —
@@ -1264,7 +1383,9 @@ pub unsafe extern "C" fn pair_assign_guarded(dst: *mut u32, src: *const u32) -> 
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use super::*;
+    use std::sync::Mutex as StdMutex;
 
     #[test]
     fn pair_assign_copies_two_words_and_returns_dst() {
@@ -2074,6 +2195,217 @@ mod tests {
             let mask = core::ptr::read_unaligned(core::ptr::addr_of!((*unaligned).mask));
             assert_eq!(word, iter.word);
             assert_eq!(mask, 0x20);
+        }
+    }
+
+    // ---- vector_bool_iter_minus -----------------------------------
+
+    /// Ops-table swaps are global; serialize the tests.
+    static VECTOR_BOOL_OPS_LOCK: StdMutex<()> = StdMutex::new(());
+
+    struct VectorBoolOpsGuard;
+
+    impl VectorBoolOpsGuard {
+        fn install(ops: VectorBoolIterOps) -> Self {
+            unsafe {
+                core::ptr::addr_of_mut!(VECTOR_BOOL_ITER_OPS).write_volatile(ops);
+            }
+            VectorBoolOpsGuard
+        }
+    }
+
+    impl Drop for VectorBoolOpsGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(VECTOR_BOOL_ITER_OPS).write_volatile(
+                    VectorBoolIterOps {
+                        advance: stock_iter_advance_model,
+                    },
+                );
+            }
+        }
+    }
+
+    /// The advance runs on a COPY of the input with the NEGATED
+    /// distance; the result is whatever the advance leaves in the
+    /// copy, and r0 comes back as the result's word pointer (the
+    /// original's reload from the stack temp, not the sret pointer).
+    #[test]
+    fn vector_bool_iter_minus_advances_a_copy_by_the_negated_distance() {
+        let _lock = VECTOR_BOOL_OPS_LOCK.lock().unwrap();
+
+        static mut SEEN_DISTANCE: i32 = 0;
+        static mut SEEN_WORD: usize = 0;
+        static mut SEEN_BIT: u32 = 0;
+        unsafe extern "C" fn recording_advance(iter: *mut VectorBoolIter, distance: i32) {
+            unsafe {
+                core::ptr::addr_of_mut!(SEEN_DISTANCE).write_volatile(distance);
+                core::ptr::addr_of_mut!(SEEN_WORD)
+                    .write_volatile(core::ptr::addr_of!((*iter).word).read_unaligned() as usize);
+                core::ptr::addr_of_mut!(SEEN_BIT)
+                    .write_volatile(core::ptr::addr_of!((*iter).bit).read_unaligned());
+                core::ptr::write_unaligned(
+                    core::ptr::addr_of_mut!((*iter).word),
+                    0xdead0usize as *mut u32,
+                );
+                core::ptr::write_unaligned(core::ptr::addr_of_mut!((*iter).bit), 9);
+            }
+        }
+
+        let _guard = VectorBoolOpsGuard::install(VectorBoolIterOps {
+            advance: recording_advance,
+        });
+        unsafe {
+            let storage = [0u32; 4];
+            let iter =
+                VectorBoolIter { word: storage.as_ptr().add(2) as *mut u32, bit: 7 };
+            let mut result = VectorBoolIter { word: core::ptr::null_mut(), bit: 0xaa };
+            let returned = vector_bool_iter_minus(
+                core::ptr::addr_of_mut!(result),
+                core::ptr::addr_of!(iter),
+                5,
+            );
+            // The advance saw a copy of the input and -distance.
+            assert_eq!(core::ptr::addr_of!(SEEN_DISTANCE).read_volatile(), -5);
+            assert_eq!(
+                core::ptr::addr_of!(SEEN_WORD).read_volatile(),
+                storage.as_ptr().add(2) as usize
+            );
+            assert_eq!(core::ptr::addr_of!(SEEN_BIT).read_volatile(), 7);
+            // The result is whatever the advance left in the copy...
+            assert_eq!(result.word, 0xdead0usize as *mut u32);
+            assert_eq!(result.bit, 9);
+            // ...and r0 returns the result's word pointer, not the
+            // sret pointer.
+            assert_eq!(returned, result.word);
+            // The input iterator is untouched.
+            assert_eq!(iter.word, storage.as_ptr().add(2) as *mut u32);
+            assert_eq!(iter.bit, 7);
+        }
+    }
+
+    /// i32::MIN negates to itself under the original's wrapping `rsb`.
+    #[test]
+    fn vector_bool_iter_minus_negates_the_distance_wrapping() {
+        let _lock = VECTOR_BOOL_OPS_LOCK.lock().unwrap();
+
+        static mut SEEN_DISTANCE: i32 = 0;
+        unsafe extern "C" fn recording_advance(_iter: *mut VectorBoolIter, distance: i32) {
+            unsafe {
+                core::ptr::addr_of_mut!(SEEN_DISTANCE).write_volatile(distance);
+            }
+        }
+
+        let _guard = VectorBoolOpsGuard::install(VectorBoolIterOps {
+            advance: recording_advance,
+        });
+        unsafe {
+            let iter = VectorBoolIter { word: core::ptr::null_mut(), bit: 0 };
+            let mut result = VectorBoolIter { word: core::ptr::null_mut(), bit: 0 };
+            vector_bool_iter_minus(
+                core::ptr::addr_of_mut!(result),
+                core::ptr::addr_of!(iter),
+                i32::MIN,
+            );
+            assert_eq!(core::ptr::addr_of!(SEEN_DISTANCE).read_volatile(), i32::MIN);
+        }
+    }
+
+    /// Straight-line reference for the default advance model:
+    /// subtract `distance` bits from the absolute bit position
+    /// `word_index * 32 + bit`, folding with floor division.
+    fn reference_minus(word_index: isize, bit: u32, distance: i32) -> (isize, u32) {
+        let total = (bit as i32).wrapping_sub(distance);
+        (
+            word_index + total.div_euclid(32) as isize,
+            total.rem_euclid(32) as u32,
+        )
+    }
+
+    /// End to end through the default advance model: the result is the
+    /// input iterator shifted back by `distance` bits, across word
+    /// boundaries, exact multiples of 32 and a negative fold.
+    #[test]
+    fn vector_bool_iter_minus_default_model_matches_floor_division() {
+        let _lock = VECTOR_BOOL_OPS_LOCK.lock().unwrap();
+        let _guard = VectorBoolOpsGuard::install(VectorBoolIterOps {
+            advance: stock_iter_advance_model,
+        });
+        unsafe {
+            let storage = [0u32; 8];
+            let base = storage.as_ptr() as *mut u32;
+            let mut result = VectorBoolIter { word: core::ptr::null_mut(), bit: 0 };
+            for bit in 0..32u32 {
+                for distance in [-65, -32, -31, -1, 0, 1, 5, 31, 32, 33, 65] {
+                    let iter = VectorBoolIter { word: base.add(3), bit };
+                    vector_bool_iter_minus(
+                        core::ptr::addr_of_mut!(result),
+                        core::ptr::addr_of!(iter),
+                        distance,
+                    );
+                    let (want_word, want_bit) = reference_minus(3, bit, distance);
+                    assert_eq!(result.word, base.offset(want_word), "word for {bit} - {distance}");
+                    assert_eq!(result.bit, want_bit, "bit for {bit} - {distance}");
+                    assert_eq!(iter.bit, bit, "input untouched");
+                }
+            }
+            // Wrapping extremes: i32::MIN / i32::MAX distances fold
+            // through the same floor division (the pointer lands far
+            // out of bounds but is never dereferenced).
+            let iter = VectorBoolIter { word: base, bit: 7 };
+            for distance in [i32::MIN, i32::MAX] {
+                vector_bool_iter_minus(
+                    core::ptr::addr_of_mut!(result),
+                    core::ptr::addr_of!(iter),
+                    distance,
+                );
+                let (want_word, want_bit) = reference_minus(0, 7, distance);
+                assert_eq!(result.word, base.wrapping_offset(want_word), "word for 7 - {distance}");
+                assert_eq!(result.bit, want_bit, "bit for 7 - {distance}");
+            }
+        }
+    }
+
+    /// result == iter round-trips through the original's stack temp,
+    /// so an in-place `it = it - n` works.
+    #[test]
+    fn vector_bool_iter_minus_allows_in_place_update() {
+        let _lock = VECTOR_BOOL_OPS_LOCK.lock().unwrap();
+        let _guard = VectorBoolOpsGuard::install(VectorBoolIterOps {
+            advance: stock_iter_advance_model,
+        });
+        unsafe {
+            let storage = [0u32; 4];
+            let base = storage.as_ptr() as *mut u32;
+            let mut iter = VectorBoolIter { word: base.add(2), bit: 3 };
+            vector_bool_iter_minus(core::ptr::addr_of_mut!(iter), core::ptr::addr_of!(iter), 35);
+            assert_eq!(iter.word, base.add(1));
+            assert_eq!(iter.bit, 0);
+        }
+    }
+
+    /// 4-but-not-8-aligned heads, the firmware hazard the
+    /// `read_unaligned`/`write_unaligned` accesses exist for.
+    #[test]
+    fn vector_bool_iter_minus_reads_and_writes_unaligned_heads() {
+        let _lock = VECTOR_BOOL_OPS_LOCK.lock().unwrap();
+        let _guard = VectorBoolOpsGuard::install(VectorBoolIterOps {
+            advance: stock_iter_advance_model,
+        });
+        unsafe {
+            let mut buf = [0u8; 48];
+            let storage = [0u32; 8];
+            let base = storage.as_ptr() as *mut u32;
+            let iter = buf.as_mut_ptr().add(4) as *mut VectorBoolIter;
+            let result = buf.as_mut_ptr().add(24) as *mut VectorBoolIter;
+            core::ptr::write_unaligned(core::ptr::addr_of_mut!((*iter).word), base.add(2));
+            core::ptr::write_unaligned(core::ptr::addr_of_mut!((*iter).bit), 20u32);
+            let returned = vector_bool_iter_minus(result, iter, 45);
+            let word = core::ptr::read_unaligned(core::ptr::addr_of!((*result).word));
+            let bit = core::ptr::read_unaligned(core::ptr::addr_of!((*result).bit));
+            assert_eq!(word, base.add(1));
+            assert_eq!(bit, 7);
+            assert_eq!(returned, base.add(1));
         }
     }
 
