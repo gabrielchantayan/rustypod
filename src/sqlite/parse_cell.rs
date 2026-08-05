@@ -1,6 +1,7 @@
-//! The b-tree cell parser — SQLite 3.5.x's `sqlite3BtreeParseCellPtr`,
-//! the routine every b-tree walk runs to decode one cell's on-page
-//! header into the 0x20-byte `CellInfo` whose layout is documented in
+//! The b-tree cell parser — SQLite 3.5.x's `sqlite3BtreeParseCellPtr`
+//! and its index-based entry `sqlite3BtreeParseCell`, the routine every
+//! b-tree walk runs to decode one cell's on-page header into the
+//! 0x20-byte `CellInfo` whose layout is documented in
 //! `sqlite/cell_size.rs`'s module header.
 //!
 //! `btree_parse_cell_ptr` — original: `FUN_083727ec` @ 0x083727ec (296
@@ -8,8 +9,29 @@
 //! ported `cell_size_ptr`], 0x082c2ad8, 0x082c3468, 0x082cdfe0,
 //! 0x082d6924, 0x082d98c4, 0x082e87b0).
 //!
+//! `btree_parse_cell` — original: `FUN_083727c8` @ 0x083727c8 (36
+//! bytes; 5 `bl` call sites: 0x082b29d4, 0x082cdf08, 0x08370eb8,
+//! 0x08371d18, 0x08371d88). SQLite's `sqlite3BtreeParseCell`: translate
+//! a cell index to the cell pointer through the page's big-endian
+//! cell-pointer array, then FALL THROUGH into `btree_parse_cell_ptr` —
+//! the two original functions share one body (the trailing `mov r0,r0`
+//! at 0x083727e8 is ADS padding, not logic). The port hands
+//! `(page, cell, info)` to the ported [`btree_parse_cell_ptr`] export
+//! directly, NOT through the `BTREE_CELL_OPS` parse_cell slot: the
+//! house precedent is direct calls for ported callees (`expr_new` →
+//! `db_malloc_zero`, `btree_parse_cell_ptr` → [`__rt_udivmod`]) with
+//! the seam reserved for identified-but-unported ones, and the original
+//! has no call here at all. LLVM tail-calls the export, which is
+//! exactly the fall-through shape. functions.csv's 36-byte size and
+//! Ghidra's standalone C body
+//! (`decomp/c/033/083727c8_FUN_083727c8.c`) are misleading: Ghidra
+//! decompiled THROUGH the fall-through, so that file shows the whole
+//! parse body that actually lives at 0x083727ec; the function's true
+//! extent ends at the fall-through.
+//!
 //! ```c
 //! void sqlite3BtreeParseCellPtr(MemPage *pPage, u8 *pCell, CellInfo *pInfo);
+//! void sqlite3BtreeParseCell(MemPage *pPage, int iCell, CellInfo *pInfo);
 //! ```
 //!
 //! Algorithm (verified against osos.asm — Ghidra's decompile obscures
@@ -68,7 +90,13 @@ const MP_LEAF: usize = 0x07;
 const MP_CHILD_PTR_SIZE: usize = 0x09;
 const MP_MAX_LOCAL: usize = 0x0a;
 const MP_MIN_LOCAL: usize = 0x0c;
+/// `cellOffset` (u16): offset of the cell-pointer array within the
+/// page data (upstream SQLite 3.5.x `MemPage.cellOffset`).
+const MP_CELL_OFFSET: usize = 0x0e;
 const MP_P_BT: usize = 0x40;
+/// `aData`: base of the page's data block (upstream
+/// `MemPage.aData`); cell offsets in the array are relative to it.
+const MP_A_DATA: usize = 0x44;
 
 /// `BtShared.usableSize` — the divisor base of the overflow split.
 const BT_USABLE_SIZE: usize = 0x1e;
@@ -205,6 +233,31 @@ pub unsafe extern "C" fn btree_parse_cell_ptr(page: *const u8, cell: *const u8, 
     }
 }
 
+/// btree_parse_cell — original: `FUN_083727c8` @ 0x083727c8 (36
+/// bytes; 5 `bl` call sites).
+///
+/// SQLite's `sqlite3BtreeParseCell`: translate the cell index `index`
+/// on `page` to the cell pointer and parse that cell into the
+/// 0x20-byte `CellInfo` at `info`. The original FALLS THROUGH into
+/// `btree_parse_cell_ptr` — the two share one body — so this port
+/// calls the ported export directly (the house direct-call precedent
+/// for ported callees, NOT the `BTREE_CELL_OPS` seam reserved for
+/// unported ones); see the module header.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn btree_parse_cell(page: *const u8, index: u32, info: *mut u8) {
+    // `ldrh r3,[r0,#0xe]` / `add r3,r3,r1,lsl #0x1`: the array entry
+    // for `index` sits at aData + cellOffset + index*2.
+    let entry = rd_u16(page, MP_CELL_OFFSET) as usize + 2 * index as usize;
+    // `ldr r1,[r0,#0x44]`: aData, the page data base.
+    let data = rd_u32(page, MP_A_DATA) as *const u8;
+    // The ldrb pair + `orr r3,r12,r3,lsl #0x8`: a BIG-ENDIAN u16 cell
+    // offset — data[entry] is the high byte, data[entry+1] the low.
+    let cell_off = (rd_u8(data, entry) as u16) << 8 | rd_u8(data, entry + 1) as u16;
+    // `add r1,r3,r1`, then fall through: r0 = page, r2 = info already.
+    btree_parse_cell_ptr(page, data.add(cell_off as usize), info);
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -230,6 +283,7 @@ mod tests {
     const OFF_PAGE: usize = 0x1000; // 0x60 — fake MemPage
     const OFF_CELL: usize = 0x2000; // 0x40 — cell bytes
     const OFF_INFO: usize = 0x3000; // 0x20 CellInfo + 8 guard bytes
+    const OFF_DATA: usize = 0x4000; // fake page data block (aData)
     const GUARD_LEN: usize = 8;
 
     /// Seam call counters, for the inline-fast-path fidelity checks.
@@ -338,6 +392,43 @@ mod tests {
         fn set_cell(&self, bytes: &[u8]) {
             unsafe {
                 core::ptr::copy_nonoverlapping(bytes.as_ptr(), self.cell(), bytes.len());
+            }
+        }
+
+        fn data(&self) -> *mut u8 {
+            unsafe { self.base.add(OFF_DATA) }
+        }
+
+        /// Points MemPage +0x44 (aData) at the slab's data region and
+        /// sets +0x0e (cellOffset), the cell-pointer array's offset
+        /// within it.
+        fn page_data(&self, cell_offset: u16) {
+            unsafe {
+                let page = self.page();
+                wr_u16(page, MP_CELL_OFFSET, cell_offset);
+                wr_u32(page, MP_A_DATA, self.data() as usize as u32);
+            }
+        }
+
+        /// Writes one cell-pointer array entry the way the page format
+        /// stores it: big-endian, at cellOffset + index*2.
+        fn set_ptr_entry(&self, cell_offset: u16, index: usize, off: u16) {
+            unsafe {
+                let e = self.data().add(cell_offset as usize + 2 * index);
+                *e = (off >> 8) as u8;
+                *e.add(1) = off as u8;
+            }
+        }
+
+        /// Plants cell bytes inside the data region at `off` (relative
+        /// to aData, like a real cell offset).
+        fn set_data_cell(&self, off: u16, bytes: &[u8]) {
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    bytes.as_ptr(),
+                    self.data().add(off as usize),
+                    bytes.len(),
+                );
             }
         }
 
@@ -576,5 +667,83 @@ mod tests {
         // dispatches through; this exercises the seam end to end.
         let got = unsafe { cell_size_ptr(f.page(), f.cell()) };
         assert_eq!(got, 66, "cell_size_ptr returns CellInfo +0x1e");
+    }
+
+    // ---- btree_parse_cell (0x083727c8, the index-based entry) ----
+
+    #[test]
+    fn cell_pointer_array_entry_is_decoded_big_endian() {
+        let Some(f) = Fixture::new() else { return };
+        f.page_fields(1, 1, 0, MAX_LOCAL, MIN_LOCAL, USABLE);
+        f.page_data(0x40);
+        // Entry bytes [0x02, 0x01]: big-endian 0x0201. A little-endian
+        // swap would read 0x0102 and hand the parser the wrong cell.
+        f.set_ptr_entry(0x40, 0, 0x0201);
+        // Table-leaf cell at aData + 0x0201: payload 0x40, rowid 0x07.
+        f.set_data_cell(0x0201, &[0x40, 0x07]);
+        unsafe { btree_parse_cell(f.page(), 0, f.info()) };
+        assert_eq!(
+            f.info_u32(CI_P_CELL),
+            f.data() as usize as u32 + 0x0201,
+            "cell ptr = aData + big-endian entry"
+        );
+        assert_eq!(f.info_u32(CI_N_KEY), 7, "parser ran on the computed cell");
+        f.assert_guard_untouched();
+    }
+
+    #[test]
+    fn index_steps_the_cell_pointer_array_by_two() {
+        let Some(f) = Fixture::new() else { return };
+        f.page_fields(1, 1, 0, MAX_LOCAL, MIN_LOCAL, USABLE);
+        // A nonzero cellOffset, so the +0x0e field read is on trial too.
+        f.page_data(0x0100);
+        let offsets = [0x0200u16, 0x0300, 0x0400, 0x0008];
+        for (i, &off) in offsets.iter().enumerate() {
+            f.set_ptr_entry(0x0100, i, off);
+            // Table-leaf cells: payload 0x40, rowid i+1.
+            f.set_data_cell(off, &[0x40, (i + 1) as u8]);
+        }
+        for (i, &off) in offsets.iter().enumerate() {
+            unsafe {
+                core::ptr::write_bytes(f.info(), 0xaa, CELL_INFO_LEN + GUARD_LEN);
+                btree_parse_cell(f.page(), i as u32, f.info());
+            }
+            assert_eq!(
+                f.info_u32(CI_P_CELL),
+                f.data() as usize as u32 + off as u32,
+                "index {i}: entry at cellOffset + {}*2",
+                i
+            );
+            assert_eq!(f.info_u32(CI_N_KEY), (i + 1) as u32, "index {i} parsed its own cell");
+        }
+        f.assert_guard_untouched();
+    }
+
+    #[test]
+    fn page_cell_and_info_reach_the_parser_verbatim() {
+        let Some(f) = Fixture::new() else { return };
+        // Table-leaf page: the parse result depends on THIS page's
+        // intKey/leaf/maxLocal, so a wrong page pointer is observable.
+        f.page_fields(1, 1, 0, MAX_LOCAL, MIN_LOCAL, USABLE);
+        f.page_data(0x40);
+        f.set_ptr_entry(0x40, 2, 0x0300);
+        f.set_data_cell(0x0300, &[0x40, 0x07]);
+        unsafe { btree_parse_cell(f.page(), 2, f.info()) };
+        let cell = f.data() as usize as u32 + 0x0300;
+        assert_eq!(f.info_u32(CI_P_CELL), cell, "cell ptr verbatim at CellInfo +0x00");
+        // The full parse of the planted cell on the planted page:
+        // payload varint 0x40, rowid varint 0x07.
+        assert_eq!(f.info_u32(CI_N_KEY), 7);
+        assert_eq!(f.info_u32(CI_N_KEY_HI), 0);
+        assert_eq!(f.info_u32(CI_PAYLOAD_VARINT), 64);
+        assert_eq!(f.info_u32(CI_N_PAYLOAD), 64);
+        assert_eq!(f.info_u16(CI_N_HEADER), 2);
+        assert_eq!(f.info_u16(CI_N_LOCAL), 64);
+        assert_eq!(f.info_u16(CI_I_OVERFLOW), 0);
+        assert_eq!(f.info_u16(CI_N_SIZE), 66);
+        // info verbatim: the exact buffer we passed was filled, its
+        // padding and guard bytes untouched.
+        f.assert_pad_untouched();
+        f.assert_guard_untouched();
     }
 }

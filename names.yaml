@@ -13257,6 +13257,57 @@ functions:
       are their slots' shipped defaults; the get_varint32 slot's type
       was corrected to *mut u64 for 0x0837aab0's true u64 out-param.
 
+  # ---- B-tree cell parser, by index (src/sqlite/parse_cell.rs) ----
+  - address: 0x083727c8
+    ghidra: FUN_083727c8
+    name: btree_parse_cell
+    size: 36
+    sig: "void btree_parse_cell(const MemPage *page, u32 index, CellInfo *info)"
+    module: sqlite/parse_cell
+    status: ported
+    vars: {param_1: page, param_2: index, param_3: info}
+    notes: >-
+      SQLite 3.5.x sqlite3BtreeParseCell: the index-based cell-parse
+      entry — translate a cell index to the cell pointer, then parse.
+      5 bl call sites: 0x082b29d4, 0x082cdf08, 0x08370eb8, 0x08371d18,
+      0x08371d88. Algorithm (9 instructions, verified against
+      osos.asm): r3 = MemPage +0x0e u16 (cellOffset — the cell-pointer
+      array's offset within the page data) + index*2; r1 = MemPage
+      +0x44 (aData — the page data base); the array entry is a
+      BIG-ENDIAN u16 cell offset (ldrb pair + `orr r3,r12,r3,lsl #0x8`:
+      data[entry] is the high byte); r1 = aData + offset = cell
+      pointer; then FALLS THROUGH (the `mov r0,r0` at 0x083727e8 is ADS
+      padding, not logic) into 0x083727ec, the ported
+      btree_parse_cell_ptr — the two original functions share one body.
+      WARNING — functions.csv/Ghidra mis-size: the 36-byte extent and
+      the standalone C body in
+      decomp/c/033/083727c8_FUN_083727c8.c are misleading; Ghidra
+      decompiled THROUGH the fall-through, so that file shows the whole
+      parse body that actually lives at 0x083727ec. This function's
+      true extent ends at the fall-through. The port calls the ported
+      btree_parse_cell_ptr export directly, NOT through the
+      BTREE_CELL_OPS parse_cell slot: the house precedent is direct
+      calls for ported callees (expr_new -> db_malloc_zero,
+      btree_parse_cell_ptr -> __rt_udivmod) with the seam reserved for
+      identified-but-unported callees, and the original has no call
+      here at all — the fall-through IS a direct hand-off of
+      (page, cell, info) in r0/r1/r2. MemPage field names per upstream
+      SQLite 3.5.x (cellOffset +0x0e, aData +0x44), now documented in
+      the parse_cell.rs constants. Deviation: the +0x0e/+0x44 field
+      reads go through the module's unaligned accessors (the port's
+      *const u8 carries no alignment promise; LLVM lowers them to byte
+      loads where the original has aligned ldrh/ldr — same house
+      defensiveness as btree_parse_cell_ptr's CellInfo writes).
+      match.py (--size 36): same structure — cellOffset + index*2 add
+      (LLVM schedules it after the aData load), the big-endian ldrb
+      pair + orr lsl #8 decode, aData + offset sum, then a TAIL CALL
+      (pop; b btree_parse_cell_ptr) — the exact fall-through shape;
+      expected diffs are the fp frame and the byte-expanded unaligned
+      field reads. Host tests:
+      cell_pointer_array_entry_is_decoded_big_endian,
+      index_steps_the_cell_pointer_array_by_two,
+      page_cell_and_info_reach_the_parser_verbatim.
+
   # ---- B-tree cell parser (src/sqlite/parse_cell.rs) ----
   - address: 0x083727ec
     ghidra: FUN_083727ec
