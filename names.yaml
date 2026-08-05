@@ -19144,6 +19144,38 @@ functions:
       instruction-identical. Rust implementation and focused host tests:
       `src/ui/object_state.rs::object_nested_attribute`.
 
+  # --- retailOS fixed-point timestamp accessor ---
+  - address: 0x08055fb4
+    ghidra: FUN_08055fb4
+    name: scaled_timestamp_now
+    size: 28
+    sig: "i64 scaled_timestamp_now(void)"
+    module: ui/object_state
+    status: ported
+    renames:
+      lVar1: sample
+      FUN_0809b60c: clock_sample
+    notes: >-
+      Calls retailOS sampled-clock getter 0x0809b60c with interface index
+      0 (`mov r0,#0x0`) and returns its 64-bit sample shifted left by 10
+      (`lsl r1,#10; orr r1,r1,r0,lsr #22; lsl r0,#10`) — a fixed-point
+      timestamp 2^10 finer than the raw getter's unit; the concrete unit
+      is not recovered. Three `bl 0x08055fb4` call sites (grep -c on
+      decomp/osos.asm), at 0x08141640, 0x081417a8, and 0x081eb42c: each
+      subtracts a lazily snapshotted baseline from the result (0x08055ff8
+      reads the doubleword at global 0x089ca5e0 + 0x20, first populated by
+      0x08055fd0, which stores the identically scaled sample of sibling
+      getter 0x08090b88) and converts the 64-bit delta to double, so the
+      function behaves as the "now" half of an elapsed-time measurement.
+      The 0x0809b60c dependency stays in retailOS behind a replaceable
+      function-pointer boundary (same pattern as indexed_object_offset's
+      0x080aa828 seam). match.py confirms the structural shape: `mov
+      r0,#0` and the three shift instructions are instruction-identical;
+      the diff is only LLVM's push {fp,lr}/pop {fp,pc} frame and the
+      indirect `blx` through the boundary static versus the ADS direct
+      `bl`. Rust implementation and focused host tests:
+      `src/ui/object_state.rs::scaled_timestamp_now`.
+
   # --- C++ object-header low-flag predicate ---
   - address: 0x0808539c
     ghidra: FUN_0808539c

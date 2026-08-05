@@ -227,6 +227,70 @@ pub unsafe extern "C" fn indexed_object_offset(
     )
 }
 
+/// Sampled-clock interface index the original passes to 0x0809b60c
+/// (`mov r0,#0x0` before the `bl`).
+const TIMESTAMP_INTERFACE: u32 = 0;
+
+/// Fixed-point scale applied to the raw sample: a 64-bit left shift by 10
+/// (`mov r1,r1,lsl #0xa; orr r1,r1,r0,lsr #0x16; mov r0,r0,lsl #0xa`).
+const TIMESTAMP_SCALE_SHIFT: u32 = 10;
+
+type ClockSample = unsafe extern "C" fn(u32) -> i64;
+
+/// Calls the stock sampled-clock getter, which remains in retailOS.
+///
+/// This is deliberately a boundary rather than a port of 0x0809b60c. Host
+/// tests replace the one function pointer below; ARM builds call its fixed
+/// firmware load address. The original constructs a temporary stack object
+/// around interface `interface` (0x08206e40), reads its current sample via
+/// 0x08296f18, destroys the object (0x08206e6c), and returns the sample
+/// zero-extended to 64 bits in r0:r1.
+unsafe extern "C" fn firmware_clock_sample(interface: u32) -> i64 {
+    #[cfg(target_os = "none")]
+    {
+        let clock_sample: ClockSample = core::mem::transmute(0x0809_b60cusize);
+        clock_sample(interface)
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        let _ = interface;
+        0
+    }
+}
+
+/// Narrow boundary for the unported 0x0809b60c dependency.
+static mut CLOCK_SAMPLE: ClockSample = firmware_clock_sample;
+
+#[inline(always)]
+unsafe fn clock_sample_fn() -> ClockSample {
+    core::ptr::read_volatile(core::ptr::addr_of!(CLOCK_SAMPLE))
+}
+
+/// scaled_timestamp_now — original: `FUN_08055fb4` @ `0x08055fb4` (28
+/// bytes).
+///
+/// Source: `/home/gabe/Programming/ipod-decomp/decomp/c/003/08055fb4_FUN_08055fb4.c`;
+/// assembly: `decomp/osos.asm` @ `0x08055fb4..0x08055fcc`.
+///
+/// Calls retailOS sampled-clock getter 0x0809b60c with interface index
+/// [`TIMESTAMP_INTERFACE`] and returns its 64-bit sample shifted left by
+/// [`TIMESTAMP_SCALE_SHIFT`] bits in r0:r1 — a fixed-point timestamp 2^10
+/// times finer than the raw getter's unit (the concrete unit is not
+/// recovered). All three stock call sites (0x08141640, 0x081417a8,
+/// 0x081eb42c) subtract a lazily snapshotted baseline from the result:
+/// 0x08055ff8 returns the doubleword at global 0x089c_a5e0 + 0x20, first
+/// populated by 0x08055fd0, which stores the identically scaled sample of
+/// sibling getter 0x08090b88; the callers then convert the 64-bit delta to
+/// `double`, so the function behaves as the "now" half of an elapsed-time
+/// measurement. The original's `push {r4,lr}` never uses r4 — an ADS frame
+/// artifact not reproduced here.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn scaled_timestamp_now() -> i64 {
+    clock_sample_fn()(TIMESTAMP_INTERFACE) << TIMESTAMP_SCALE_SHIFT
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,6 +300,40 @@ mod tests {
 
     static SEQUENCE_ID_LOCK: Mutex<()> = Mutex::new(());
     static INDEXED_OBJECT_STORAGE_BASE_LOCK: Mutex<()> = Mutex::new(());
+    static CLOCK_SAMPLE_LOCK: Mutex<()> = Mutex::new(());
+    static mut CLOCK_SAMPLE_CALLS: u32 = 0;
+    static mut CLOCK_SAMPLE_INTERFACE: u32 = u32::MAX;
+    static mut MOCK_SAMPLE: i64 = 0;
+
+    unsafe extern "C" fn recording_clock_sample(interface: u32) -> i64 {
+        CLOCK_SAMPLE_CALLS += 1;
+        CLOCK_SAMPLE_INTERFACE = interface;
+        MOCK_SAMPLE
+    }
+
+    /// Restores the stock-call boundary before another test uses it.
+    struct ClockSampleReset;
+
+    impl Drop for ClockSampleReset {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(CLOCK_SAMPLE).write(firmware_clock_sample);
+            }
+        }
+    }
+
+    fn install_recording_clock_sample(sample: i64) -> MutexGuard<'static, ()> {
+        let guard = CLOCK_SAMPLE_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        unsafe {
+            CLOCK_SAMPLE_CALLS = 0;
+            CLOCK_SAMPLE_INTERFACE = u32::MAX;
+            MOCK_SAMPLE = sample;
+            core::ptr::addr_of_mut!(CLOCK_SAMPLE).write(recording_clock_sample);
+        }
+        guard
+    }
     static mut STORAGE_BASE_CALLS: u32 = 0;
     static mut STORAGE_BASE_OBJECT: usize = 0;
     static mut MOCK_STORAGE_BASE: *mut u8 = core::ptr::null_mut();
@@ -570,5 +668,42 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn queries_interface_zero_and_scales_the_sample_by_two_to_the_tenth() {
+        let _guard = install_recording_clock_sample(0x0012_3456_789a_bcde);
+        let _reset = ClockSampleReset;
+
+        assert_eq!(
+            unsafe { scaled_timestamp_now() },
+            0x0012_3456_789a_bcdei64 << 10
+        );
+        assert_eq!(unsafe { CLOCK_SAMPLE_CALLS }, 1);
+        assert_eq!(
+            unsafe { CLOCK_SAMPLE_INTERFACE },
+            0,
+            "the original passes interface index 0 (`mov r0,#0x0`)"
+        );
+    }
+
+    #[test]
+    fn scale_shift_carries_across_the_word_boundary() {
+        let _guard = install_recording_clock_sample(0x003f_ffff_ffff_ffff);
+        let _reset = ClockSampleReset;
+
+        assert_eq!(
+            unsafe { scaled_timestamp_now() },
+            0x003f_ffff_ffff_ffffi64 << 10,
+            "the top ten bits of r0 must shift into r1 (`orr r1,r1,r0,lsr #0x16`)"
+        );
+    }
+
+    #[test]
+    fn scale_shift_drops_bits_above_sixty_four() {
+        let _guard = install_recording_clock_sample(-1);
+        let _reset = ClockSampleReset;
+
+        assert_eq!(unsafe { scaled_timestamp_now() }, -1i64 << 10);
     }
 }
