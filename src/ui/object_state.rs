@@ -10,6 +10,36 @@
 pub unsafe extern "C" fn object_state_word(object: *const u8) -> u32 {
     (object.add(0xe38) as *const u32).read()
 }
+
+/// object_state_kind — original: `FUN_08055e00` @ `0x08055e00` (128 bytes).
+///
+/// Source: `/home/gabe/Programming/ipod-decomp/decomp/c/003/08055e00_FUN_08055e00.c`;
+/// assembly: `decomp/osos.asm` @ `0x08055e00..0x08055e7c`.
+///
+/// Loads the 32-bit state word at object offset `0xe38` (the same word
+/// [`object_state_word`] exposes) and maps it through a ten-entry branch
+/// table (`addls pc,pc,r0,lsl #2` after `cmp r0,#9`) to a small kind code:
+/// state 0 -> 9, 2 -> 0x18, 3 -> 6, 4 -> 5, 5 -> 1, 6 -> 0x24, 7 -> 0x28,
+/// 9 -> 0x2a. States 1 and 8, plus any state word above 9 (the `addls`
+/// guard makes the comparison unsigned), fall through to the default code
+/// 7. The meaning of the individual kind codes is not recovered; the nine
+/// stock call sites forward the code to other UI helpers. Like the original
+/// `ldr` at entry, there is no null or alignment guard on `object`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn object_state_kind(object: *const u8) -> u32 {
+    match object_state_word(object) {
+        0 => 0x09,
+        2 => 0x18,
+        3 => 0x06,
+        4 => 0x05,
+        5 => 0x01,
+        6 => 0x24,
+        7 => 0x28,
+        9 => 0x2a,
+        _ => 0x07,
+    }
+}
 /// Byte offset of the nested object pointer (`ldr r0, [r0, #0xf00]`).
 const NESTED_OBJECT_POINTER_OFFSET: usize = 0xf00;
 
@@ -220,6 +250,38 @@ mod tests {
         object[0xe38..0xe3c].copy_from_slice(&0x89ab_cdefu32.to_le_bytes());
 
         assert_eq!(unsafe { object_state_word(object.as_ptr()) }, 0x89ab_cdef);
+    }
+
+    #[test]
+    fn maps_every_jump_table_state_to_its_kind_code() {
+        let mut object = [0u8; 0xe3c];
+        let expected = [
+            (0u32, 0x09u32),
+            (1, 0x07),
+            (2, 0x18),
+            (3, 0x06),
+            (4, 0x05),
+            (5, 0x01),
+            (6, 0x24),
+            (7, 0x28),
+            (8, 0x07),
+            (9, 0x2a),
+        ];
+
+        for (state, kind) in expected {
+            object[0xe38..0xe3c].copy_from_slice(&state.to_le_bytes());
+            assert_eq!(unsafe { object_state_kind(object.as_ptr()) }, kind);
+        }
+    }
+
+    #[test]
+    fn out_of_range_states_fall_through_to_the_default_kind() {
+        let mut object = [0u8; 0xe3c];
+
+        for state in [10u32, 11, 0xffff, 0x8000_0000, u32::MAX] {
+            object[0xe38..0xe3c].copy_from_slice(&state.to_le_bytes());
+            assert_eq!(unsafe { object_state_kind(object.as_ptr()) }, 0x07);
+        }
     }
 
     #[test]
