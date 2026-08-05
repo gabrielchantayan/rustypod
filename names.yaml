@@ -10610,6 +10610,26 @@ functions:
       tests with the helper inlined (cmp/strne pairs) - same dispatch
       sets, same store sequence.
 
+  - address: 0x082c1bfc
+    ghidra: FUN_082c1bfc
+    name: cg_inst_collect_used_regs
+    size: 388
+    sig: "cg_virtual_reg_t **cg_inst_collect_used_regs(cg_inst_t *inst, cg_virtual_reg_t **cursor, cg_virtual_reg_t **end)"
+    module: codegen/ir
+    status: ported
+    vars: {param_1: inst, param_2: cursor, param_3: end, iVar1: source_reg, uVar2: intermediate_cursor, puVar3: reg_list_node, piVar4: result_cursor}
+    notes: >-
+      8 bl + 2 tail b call sites. Collects instruction INPUT registers into
+      cursor..end through cg_reg_append_bounded and returns the advanced
+      cursor. The 25-entry kind table (0-24) selects source fields and exact
+      order: 1/14/15: +0x14; 2/13/17: +0x14,+0x18; 3/20/22:
+      +0x10,+0x14; 4/8/18/21: +0x10; 5/19/23: +0xc,+0x10; 9/10:
+      each `{next,reg}` cell from the +0x10 list; 11: non-NULL +0xc;
+      16: +0x14,+0x18,+0x1c; 24: +0xc,+0x10,+0x14. Kinds 0, 6, 7,
+      12 and >24 append nothing. All selected values except kind 11's
+      optional return register are passed unconditionally, so a NULL selected
+      field is stored and advances the cursor when capacity remains.
+
   - address: 0x0827233c
     ghidra: FUN_0827233c
     name: task_ctx_field_0x30
@@ -18826,21 +18846,18 @@ functions:
       is the only reference to that word in the image, so the port plants
       the modeled static CLASS_6800_VTABLE and keeps the address as
       CLASS_6800_VTABLE_ADDRESS; the +0x2c dispatch still goes through
-      `this->vtable`, so a real vtable is picked up unchanged. The three
-      remaining unported callees go through CLASS_6800_OPS read_volatile
-      slots: framework_base_construct's parent (0x08125234) and
-      link/target initializer (0x081108b4). framework_root_instance
-      (0x081d2204) is direct and reads the modeled root-holder global.
-      Their wired defaults retain the modeled zero state, but the base is
-      not hook-ready until the two constructor children are ported. Host
-      tests cover the direct base wrapper's call order, return forwarding,
-      NULL storage forwarding through a cooperating parent, full derived
-      construction order, relocation, NULL root, and the defaults.
-      match.py structural: identical mov #1 / mov #0 / call / mov r4,r0 /
-      str vtable / call / str +20 / call / str +24 / ldr vtable / ldr +20 /
-      ldr +0x2c / blx / mov r0,r4 sequence; the diff is the ops-table
-      ldrd+blx in place of the two unported child calls and the crate's fp
-      frame.
+      `this->vtable`, so a real vtable is picked up unchanged. The parent
+      constructor remains a CLASS_6800_OPS seam, while the base link
+      initializer @ 0x081108b4, root getter, and demo lookup are direct
+      ports. Its initializer retains only the allocation diagnostic and
+      context getters as separate seams. Host tests cover the direct base
+      wrapper's call order, return forwarding, NULL storage forwarding
+      through a cooperating parent, full derived construction order,
+      relocation, NULL root, and both explicit/implicit link-owner paths.
+      match.py structural: the outer constructor retains its mov #1 /
+      mov #0 / parent call / vtable store / direct initializer call /
+      return sequence; the expected diff is the parent ops-table call and
+      the crate frame.
 
 
   # --- Silver UI framework: linkage parent constructor ---
@@ -18886,7 +18903,7 @@ functions:
       puVar1: this
       FUN_08125234: parent_construct (CLASS_6800_OPS slot)
       DAT_08111104: FRAMEWORK_BASE_VTABLE_ADDRESS
-      FUN_081108b4: base_initialize (CLASS_6800_OPS slot)
+      FUN_081108b4: framework_base_initialize (direct)
     notes: >-
       This unnamed framework linkage base is identified by behavior rather
       than an image class name. Raw ARM is exactly: save r1/r2; bl
@@ -18897,14 +18914,53 @@ functions:
       create_link is nonzero, allocates/zeros a 16-byte node at +0x0c,
       dispatches vtable +0x2c with initial_target, and writes +0x10.
       Thus this wrapper owns only the vtable store and exact child-call
-      ordering; both children are separate dispatch seams. It has no NULL
-      checks: a NULL parent result faults at the vtable store exactly as
-      retail ARM does. The parent return is forwarded after initialization,
-      even when it differs from storage. Host tests prove the vtable is
-      visible to the second child, all four child-call registers, order,
+      ordering; the parent is its sole dispatch seam and the second child
+      is a direct port. It has no NULL checks: a NULL parent result faults
+      at the vtable store exactly as retail ARM does. The parent return is
+      forwarded after initialization, even when it differs from storage.
+      Host tests prove the vtable is visible to the direct child,
       relocation, and a NULL storage argument forwarded to a cooperating
       parent. match.py structural: parent bl, vtable store, base-init bl,
-      and r4 return forwarding; expected diff is indirect seam calls.
+      and r4 return forwarding; expected diff is the parent seam call.
+
+  # --- Silver UI framework: link and owner initializer ---
+
+  - address: 0x081108b4
+    ghidra: FUN_081108b4
+    name: framework_base_initialize
+    size: 188
+    sig: "void framework_base_initialize(Class6800 *this, void *initial_target, u32 create_link, FrameworkBaseOwner *owner)"
+    module: app/class_6800
+    status: ported
+    vars:
+      param_1: this
+      param_2: initial_target
+      param_3: create_link
+      param_4: owner
+      puVar1: link
+      iVar2: link_context_or_active_owner
+      FUN_080eb67c: malloc_wrapper (direct, 16 bytes, tag 0)
+      FUN_081b53e4: report_allocation_failure (FRAMEWORK_BASE_INITIALIZE_OPS slot)
+      FUN_080cb828: implicit_link_context (FRAMEWORK_BASE_INITIALIZE_OPS slot)
+      FUN_0809444c: active_link_owner (FRAMEWORK_BASE_INITIALIZE_OPS slot)
+    notes: >-
+      Raw ARM saves r4-r8, branches on r2, and returns void with r0 dead.
+      For nonzero create_link it calls malloc_wrapper(16, 0); if r0 is
+      NULL it calls FUN_081b53e4(4, "nil") then intentionally falls
+      through to store the pointer at this+0x0c and zero node +0x0c,
+      +0x08, +0x04, then byte +0x00. It dynamically calls
+      this->vtable+0x2c(this, initial_target). For a non-NULL owner it
+      reads owner+0x0c and writes context+0x24 only if empty; for NULL it
+      gets FUN_080cb828() and overwrites its +0x24. It writes this+0x10
+      to the explicit owner, or to FUN_0809444c() when owner is NULL. If
+      create_link is zero it clears only +0x0c before the same final owner
+      selection. No NULL path is added: every ARM dereference/store after
+      allocation, vtable, context, or owner lookup remains unconditional.
+      The direct malloc veneer and virtual dispatch are retained, while
+      exactly the three unported direct callees use a read-volatile ops
+      table. Focused host tests cover no-link explicit/implicit ownership,
+      16-byte tag-0 allocation and exact node bytes, dynamic dispatch,
+      implicit overwrite, and empty-versus-occupied explicit contexts.
 
   # --- Silver UI framework: the "SLst" resource-backed item table ---
 

@@ -90,17 +90,16 @@
 //!   [`CLASS_6800_VTABLE_ADDRESS`]. The +0x2c dispatch still goes
 //!   through `this->vtable`, so a test (or a later real vtable) is
 //!   picked up without touching this function.
-//! - `framework_base_construct` @ 0x081110d0 and
-//!   `framework_root_instance` @ 0x081d2204 are ported directly. Its
-//!   parent constructor @ 0x08125234 is likewise direct and chains the
-//!   shared root constructor @ 0x08275bb8. The unported link/target
-//!   initializer @ 0x081108b4 remains the sole [`CLASS_6800_OPS`]
-//!   dispatch slot. The modeled [`FRAMEWORK_ROOT_HOLDER`] is the crate
-//!   stand-in for the runtime global @ 0x089cc858 whose +4 slot the root
-//!   getter returns, following `app/context.rs`'s modeled-global
-//!   precedent. The wired child default preserves the modeled zero state
-//!   but does not provide allocation or target-adoption behavior, so the
-//!   complete construction chain is still not hook-ready.
+//! - `framework_base_construct` @ 0x081110d0,
+//!   `framework_base_initialize` @ 0x081108b4, and
+//!   `framework_root_instance` @ 0x081d2204 are ported directly. The base
+//!   initializer retains only its three unported direct callees as
+//!   [`FRAMEWORK_BASE_INITIALIZE_OPS`] seams: the allocation diagnostic and
+//!   the two context getters. The modeled [`FRAMEWORK_ROOT_HOLDER`] is the
+//!   crate stand-in for the runtime global @ 0x089cc858 whose +4 slot the
+//!   root getter returns, following `app/context.rs`'s modeled-global
+//!   precedent. The complete chain remains unhookable only where those
+//!   retained callees or the vtable implementation are unported.
 //! - `demo_mode_instance` @ 0x081883fc **is** ported
 //!   (`app/registry.rs`), so it is called directly rather than through a
 //!   seam.
@@ -108,6 +107,7 @@
 //!   from the incoming storage (the original's `mov r4, r0` after the
 //!   `bl`), so a base constructor that relocates its object is honoured.
 
+use crate::heap::veneers::malloc_wrapper;
 use crate::app::registry::demo_mode_instance;
 
 /// Runtime class id of the object built here. It is both the registry
@@ -165,10 +165,11 @@ pub struct Class6800 {
     pub base_04: u32,
     /// +0x08: base-class word.
     pub base_08: u32,
-    /// +0x0c: the 16-byte node `FUN_081108b4` allocates for the base.
-    pub base_link: *mut u8,
-    /// +0x10: base-class word.
-    pub base_10: u32,
+    /// +0x0c: the 16-byte link state `framework_base_initialize` allocates.
+    pub base_link: *mut FrameworkBaseLink,
+    /// +0x10: explicit link owner, or the active framework owner returned
+    /// by `FUN_0809444c` when the caller supplies no owner.
+    pub link_owner: *mut u8,
     /// +0x14: the fallback target this object adopts on construction and
     /// falls back to in its sibling methods.
     pub default_target: *mut u8,
@@ -176,8 +177,60 @@ pub struct Class6800 {
     pub demo_mode: *mut u8,
 }
 
+/// The 16-byte state node stored in [`Class6800::base_link`].
+///
+/// `framework_base_initialize` writes the byte at +0x00 and the three
+/// words at +0x04, +0x08, and +0x0c to zero, in that order. The later
+/// unported routine @ 0x081109a0 reads the first byte as a state value and
+/// the word at +0x08 as a collection handle; the remaining node semantics
+/// are not recovered, so they intentionally remain unresolved.
+#[repr(C)]
+pub struct FrameworkBaseLink {
+    /// +0x00: state byte; initialized to zero.
+    pub state: u8,
+    /// +0x01..+0x03: untouched by the initializer.
+    pub unresolved_01: [u8; 3],
+    /// +0x04: initialized to zero.
+    pub unresolved_04: u32,
+    /// +0x08: collection handle, initialized to zero.
+    pub unresolved_08: u32,
+    /// +0x0c: initialized to zero.
+    pub unresolved_0c: u32,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 16] = [0; core::mem::size_of::<FrameworkBaseLink>()];
+
+/// The explicit owner supplied in r3 to [`framework_base_initialize`].
+/// Only its +0x0c context pointer is observed here.
+#[repr(C)]
+pub struct FrameworkBaseOwner {
+    /// +0x00..+0x08: not read by this initializer.
+    pub unresolved_00: [u32; 3],
+    /// +0x0c: context holding the first linked base at +0x24.
+    pub link_context: *mut FrameworkBaseLinkContext,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x0c] = [0; core::mem::offset_of!(FrameworkBaseOwner, link_context)];
+
+/// Context reached through an explicit link owner. Its +0x24 slot is
+/// populated only if it does not already point at a base object.
+#[repr(C)]
+pub struct FrameworkBaseLinkContext {
+    /// +0x00..+0x20: not read by this initializer.
+    pub unresolved_00: [u32; 9],
+    /// +0x24: first linked framework base, if any.
+    pub linked_base: *mut Class6800,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x24] = [0; core::mem::offset_of!(FrameworkBaseLinkContext, linked_base)];
+
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x0c] = [0; core::mem::offset_of!(Class6800, base_link)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x10] = [0; core::mem::offset_of!(Class6800, link_owner)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x14] = [0; core::mem::offset_of!(Class6800, default_target)];
 #[cfg(target_pointer_width = "32")]
@@ -202,33 +255,36 @@ pub static mut FRAMEWORK_ROOT_HOLDER: FrameworkRootHolder = FrameworkRootHolder 
     instance: core::ptr::null_mut(),
 };
 
+
+/// The unported direct callees of [`framework_base_initialize`]. Allocation
+/// and vtable dispatch are already-portable direct paths, so they are not
+/// duplicated as seams.
+#[derive(Clone, Copy)]
+pub struct FrameworkBaseInitializeOps {
+    /// `FUN_081b53e4(4, "nil")`, reached only after a failed 16-byte
+    /// allocation. RetailOS then continues into the unconditional NULL
+    /// stores if this diagnostic happens to return.
+    pub report_allocation_failure: unsafe extern "C" fn(code: u32, message: *const u8),
+    /// `FUN_080cb828()`: returns the implicit context whose +0x24 slot
+    /// receives this base when r3 is NULL.
+    pub implicit_link_context: unsafe extern "C" fn() -> *mut FrameworkBaseLinkContext,
+    /// `FUN_0809444c()`: returns the active framework owner stored at
+    /// `this + 0x10` whenever r3 is NULL.
+    pub active_link_owner: unsafe extern "C" fn() -> *mut u8,
+}
+
 /// Injection point for the parent constructor @ 0x08125234. Host tests
 /// may replace it to prove the outer constructor honours a relocated
 /// return; the wired default is [`framework_linkage_parent_construct`].
 pub type FrameworkBaseParentConstruct =
     unsafe extern "C" fn(storage: *mut Class6800) -> *mut Class6800;
 
-/// Injection point for the link/target initializer @ 0x081108b4. Its
-/// fourth argument is the literal zero `r3` that `FUN_081110d0` supplies.
-pub type FrameworkBaseInitialize = unsafe extern "C" fn(
-    this: *mut Class6800,
-    initial_target: u32,
-    create_link: u32,
-    owner: u32,
-);
-
-/// The remaining unported retailOS dependency reached while constructing
-/// this class family. [`framework_linkage_parent_construct`],
-/// [`framework_base_construct`], and [`framework_root_instance`] are
-/// direct code, not dispatch seams.
+/// Remaining unported dependency of `framework_base_construct`.
 #[derive(Clone, Copy)]
 pub struct Class6800Ops {
     /// `FUN_08125234` parent-constructor test seam. The wired default is
     /// [`framework_linkage_parent_construct`].
     pub parent_construct: FrameworkBaseParentConstruct,
-    /// `FUN_081108b4` — allocates/initializes the base link and adopts
-    /// the initial target.
-    pub base_initialize: FrameworkBaseInitialize,
 }
 
 /// The vtable literal `FUN_08125234` plants after it chains the shared
@@ -272,19 +328,36 @@ pub unsafe extern "C" fn framework_linkage_parent_construct(
     this
 }
 
-/// Wired default for [`Class6800Ops::base_initialize`]. The real child
-/// allocates a 16-byte node when `create_link != 0`, invokes vtable slot
-/// +0x2c, and writes +0x10. Those effects remain intentionally unported;
-/// the default only retains the old inert zero state.
-unsafe extern "C" fn unported_base_initialize(
-    this: *mut Class6800,
-    _initial_target: u32,
-    _create_link: u32,
-    _owner: u32,
-) {
-    core::ptr::addr_of_mut!((*this).base_link).write_volatile(core::ptr::null_mut());
-    core::ptr::addr_of_mut!((*this).base_10).write_volatile(0);
+/// The literal passed in r1 to `FUN_081b53e4` after a failed allocation.
+/// The ARM instruction `addeq r1, pc, #136` computes 0x08110970, whose
+/// bytes are `b"nil\0"`.
+const BASE_LINK_ALLOCATION_FAILURE_MESSAGE: &[u8; 4] = b"nil\0";
+
+/// Default diagnostic and context seams. These paths are separately
+/// unported; returning from the diagnostic preserves the ARM fall-through
+/// rather than adding a Rust-only recovery branch.
+unsafe extern "C" fn unported_report_allocation_failure(_code: u32, _message: *const u8) {}
+
+unsafe extern "C" fn unported_implicit_link_context() -> *mut FrameworkBaseLinkContext {
+    core::ptr::null_mut()
 }
+
+unsafe extern "C" fn unported_active_link_owner() -> *mut u8 {
+    core::ptr::null_mut()
+}
+
+/// Wired defaults for [`FRAMEWORK_BASE_INITIALIZE_OPS`].
+pub const DEFAULT_FRAMEWORK_BASE_INITIALIZE_OPS: FrameworkBaseInitializeOps =
+    FrameworkBaseInitializeOps {
+        report_allocation_failure: unported_report_allocation_failure,
+        implicit_link_context: unported_implicit_link_context,
+        active_link_owner: unported_active_link_owner,
+    };
+
+/// Active seams for the unported direct callees of
+/// [`framework_base_initialize`].
+pub static mut FRAMEWORK_BASE_INITIALIZE_OPS: FrameworkBaseInitializeOps =
+    DEFAULT_FRAMEWORK_BASE_INITIALIZE_OPS;
 
 /// framework_root_instance — original: `FUN_081d2204` @ 0x081d2204
 /// (12 bytes).
@@ -304,11 +377,10 @@ pub unsafe extern "C" fn framework_root_instance() -> *mut u8 {
 /// Wired defaults for [`CLASS_6800_OPS`].
 pub const DEFAULT_CLASS_6800_OPS: Class6800Ops = Class6800Ops {
     parent_construct: framework_linkage_parent_construct,
-    base_initialize: unported_base_initialize,
 };
 
-/// Active model of the remaining unported child. Target integration
-/// replaces its slot when ported; host tests install recording mocks.
+/// Active model of the parent constructor. Host tests install a recording
+/// parent to prove return forwarding.
 pub static mut CLASS_6800_OPS: Class6800Ops = DEFAULT_CLASS_6800_OPS;
 
 /// Wired default for [`CLASS_6800_VTABLE`]'s only modeled slot: the real
@@ -328,8 +400,8 @@ pub static mut CLASS_6800_VTABLE: Class6800Vtable = Class6800Vtable {
 };
 
 /// Crate stand-in for the base vtable at
-/// [`FRAMEWORK_BASE_VTABLE_ADDRESS`]. Only its +0x2c operation is
-/// represented; `FUN_081108b4` is still an operation seam.
+/// [`FRAMEWORK_BASE_VTABLE_ADDRESS`]. Its +0x2c operation is dispatched
+/// directly by [`framework_base_initialize`].
 pub static mut FRAMEWORK_BASE_VTABLE: Class6800Vtable = Class6800Vtable {
     unresolved_00: [0; 11],
     set_target: unported_set_target,
@@ -340,16 +412,92 @@ unsafe fn class_6800_ops() -> Class6800Ops {
     core::ptr::read_volatile(core::ptr::addr_of!(CLASS_6800_OPS))
 }
 
+#[inline(always)]
+unsafe fn framework_base_initialize_ops() -> FrameworkBaseInitializeOps {
+    core::ptr::read_volatile(core::ptr::addr_of!(FRAMEWORK_BASE_INITIALIZE_OPS))
+}
+
+/// framework_base_initialize — original: `FUN_081108b4` @ 0x081108b4
+/// (188 bytes).
+///
+/// Initializes the linkage portion of a framework base. When
+/// `create_link != 0`, it allocates exactly 16 bytes through
+/// `malloc_wrapper(16, 0)`, reports `FUN_081b53e4(4, "nil")` on failure
+/// but deliberately falls through to the original's unconditional stores,
+/// publishes the node at `this + 0x0c`, then zeros node +0x0c, +0x08,
+/// +0x04, and +0x00 in that order. It dynamically dispatches vtable slot
+/// +0x2c with `initial_target`; with an explicit `owner`, it fills that
+/// owner's context +0x24 only when empty, while without one it overwrites
+/// the implicit context +0x24. Finally it stores either the explicit owner
+/// or the current active owner at `this + 0x10`. With `create_link == 0`,
+/// it only clears +0x0c and performs that final owner selection.
+///
+/// There are no NULL guards: null `this`, a returning allocation-failure
+/// handler, null vtable/context, and an invalid explicit owner all reach
+/// the same subsequent dereference/store as the ARM body. The void ABI
+/// returns with r0 dead.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn framework_base_initialize(
+    this: *mut Class6800,
+    initial_target: *mut u8,
+    create_link: u32,
+    owner: *mut FrameworkBaseOwner,
+) {
+    let ops = framework_base_initialize_ops();
+
+    if create_link == 0 {
+        core::ptr::addr_of_mut!((*this).base_link).write_volatile(core::ptr::null_mut());
+    } else {
+        let link = malloc_wrapper(core::mem::size_of::<FrameworkBaseLink>(), 0)
+            .cast::<FrameworkBaseLink>();
+        if link.is_null() {
+            (ops.report_allocation_failure)(4, BASE_LINK_ALLOCATION_FAILURE_MESSAGE.as_ptr());
+        }
+        core::ptr::addr_of_mut!((*this).base_link).write_volatile(link);
+        core::ptr::addr_of_mut!((*link).unresolved_0c).write_volatile(0);
+        core::ptr::addr_of_mut!((*link).unresolved_08).write_volatile(0);
+        core::ptr::addr_of_mut!((*link).unresolved_04).write_volatile(0);
+        core::ptr::addr_of_mut!((*link).state).write_volatile(0);
+
+        // ARM loads owner+0x0c before the virtual call (r5 is live across
+        // blx), so a dispatch that mutates owner state cannot redirect the
+        // later +0x24 test.
+        let explicit_context = if owner.is_null() {
+            core::ptr::null_mut()
+        } else {
+            core::ptr::read_volatile(core::ptr::addr_of!((*owner).link_context))
+        };
+
+        let vtable = core::ptr::read_volatile(core::ptr::addr_of!((*this).vtable));
+        ((*vtable).set_target)(this, initial_target);
+
+        if owner.is_null() {
+            let context = (ops.implicit_link_context)();
+            core::ptr::addr_of_mut!((*context).linked_base).write_volatile(this);
+        } else {
+            let context = explicit_context;
+            if core::ptr::read_volatile(core::ptr::addr_of!((*context).linked_base)).is_null() {
+                core::ptr::addr_of_mut!((*context).linked_base).write_volatile(this);
+            }
+        }
+    }
+
+    let link_owner = if owner.is_null() {
+        (ops.active_link_owner)()
+    } else {
+        owner.cast()
+    };
+    core::ptr::addr_of_mut!((*this).link_owner).write_volatile(link_owner);
+}
+
 /// framework_base_construct — original: `FUN_081110d0` @ 0x081110d0
 /// (52 bytes; two direct `bl` calls).
 ///
-/// addon. It first chains to parent constructor `FUN_08125234`, plants
-/// its vtable at +0x00 (`0x08981958`), then calls
-/// `FUN_081108b4(this, initial_target, create_link, 0)`. The returned
-/// pointer is exactly the parent constructor's return, forwarded after
-/// the initializer; there are no NULL checks before either the vtable
-/// store or child call. The link/target child remains a dispatch seam; no
-/// deviations.
+/// `framework_base_initialize(this, initial_target, create_link, NULL)`.
+/// The returned pointer is exactly the parent constructor's return,
+/// forwarded after the initializer; there are no NULL checks before either
+/// the vtable store or child call. No deviations.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn framework_base_construct(
@@ -361,7 +509,7 @@ pub unsafe extern "C" fn framework_base_construct(
     let this = (ops.parent_construct)(storage);
     core::ptr::addr_of_mut!((*this).vtable)
         .write_volatile(core::ptr::addr_of!(FRAMEWORK_BASE_VTABLE));
-    (ops.base_initialize)(this, initial_target, create_link, 0);
+    framework_base_initialize(this, initial_target as usize as *mut u8, create_link, core::ptr::null_mut());
     this
 }
 
@@ -486,29 +634,41 @@ mod tests {
     };
 
     const PARENT_CALL: u8 = 1;
-    const BASE_INITIALIZE_CALL: u8 = 2;
-    const SET_TARGET_CALL: u8 = 3;
+    const SET_TARGET_CALL: u8 = 2;
 
     static mut PARENT_CALLS: usize = 0;
     static mut PARENT_STORAGE: *mut Class6800 = ptr::null_mut();
     static mut PARENT_RESULT: *mut Class6800 = ptr::null_mut();
-    static mut BASE_INITIALIZE_CALLS: usize = 0;
-    static mut BASE_INITIALIZE_ARGS: (*mut Class6800, u32, u32, u32) =
-        (ptr::null_mut(), 0xffff_ffff, 0xffff_ffff, 0xffff_ffff);
-    static mut OBSERVED_BASE_VTABLE: *const Class6800Vtable = ptr::null();
     static mut SET_TARGET_CALLS: usize = 0;
-    static mut SET_TARGET_ARGS: (*mut Class6800, *mut u8) =
-        (ptr::null_mut(), ptr::null_mut());
+    static mut SET_TARGET_ARGS: [(*mut Class6800, *mut u8); 2] =
+        [(ptr::null_mut(), ptr::null_mut()); 2];
     static mut OBSERVED_DEMO_MODE_AT_DISPATCH: *mut u8 = ptr::null_mut();
-    static mut CALL_ORDER: [u8; 3] = [0; 3];
+    static mut CALL_ORDER: [u8; 4] = [0; 4];
     static mut CALL_COUNT: usize = 0;
+    static mut ALLOC_CALLS: usize = 0;
+    static mut ALLOC_ARGS: (usize, usize) = (usize::MAX, usize::MAX);
+    static mut TEST_HEAP: usize = 0;
+    static mut TEST_LINK: FrameworkBaseLink = FrameworkBaseLink {
+        state: 0xa5,
+        unresolved_01: [0xa5; 3],
+        unresolved_04: 0xa5a5_a5a5,
+        unresolved_08: 0xa5a5_a5a5,
+        unresolved_0c: 0xa5a5_a5a5,
+    };
+    static mut IMPLICIT_CONTEXT: FrameworkBaseLinkContext = FrameworkBaseLinkContext {
+        unresolved_00: [0; 9],
+        linked_base: ptr::null_mut(),
+    };
+    static mut ACTIVE_OWNER: u8 = 0;
+    static mut IMPLICIT_CONTEXT_CALLS: usize = 0;
+    static mut ACTIVE_OWNER_CALLS: usize = 0;
 
     unsafe fn record_call(kind: u8) {
         CALL_ORDER[CALL_COUNT] = kind;
         CALL_COUNT += 1;
     }
 
-    fn call_order() -> [u8; 3] {
+    fn call_order() -> [u8; 4] {
         unsafe { core::ptr::read_volatile(core::ptr::addr_of!(CALL_ORDER)) }
     }
 
@@ -519,28 +679,33 @@ mod tests {
         if PARENT_RESULT.is_null() { storage } else { PARENT_RESULT }
     }
 
-    unsafe extern "C" fn record_base_initialize(
-        this: *mut Class6800,
-        initial_target: u32,
-        create_link: u32,
-        owner: u32,
-    ) {
-        record_call(BASE_INITIALIZE_CALL);
-        BASE_INITIALIZE_CALLS += 1;
-        BASE_INITIALIZE_ARGS = (this, initial_target, create_link, owner);
-        OBSERVED_BASE_VTABLE = ptr::read_volatile(ptr::addr_of!((*this).vtable));
+    unsafe extern "C" fn record_alloc(
+        _heap: *mut crate::heap::types::HeapDescriptorDescriptor,
+        size: usize,
+        tag: usize,
+    ) -> *mut u8 {
+        ALLOC_CALLS += 1;
+        ALLOC_ARGS = (size, tag);
+        ptr::addr_of_mut!(TEST_LINK).cast()
     }
 
+    unsafe extern "C" fn record_implicit_context() -> *mut FrameworkBaseLinkContext {
+        IMPLICIT_CONTEXT_CALLS += 1;
+        ptr::addr_of_mut!(IMPLICIT_CONTEXT)
+    }
+
+    unsafe extern "C" fn record_active_owner() -> *mut u8 {
+        ACTIVE_OWNER_CALLS += 1;
+        ptr::addr_of_mut!(ACTIVE_OWNER)
+    }
 
     unsafe extern "C" fn record_set_target(
         this: *mut Class6800,
         target: *mut u8,
     ) -> *mut u8 {
         record_call(SET_TARGET_CALL);
+        SET_TARGET_ARGS[SET_TARGET_CALLS] = (this, target);
         SET_TARGET_CALLS += 1;
-        SET_TARGET_ARGS = (this, target);
-        // Both stores must already be visible when the seeding dispatch
-        // runs: the original stores +0x14 and +0x18 before the blx.
         OBSERVED_DEMO_MODE_AT_DISPATCH =
             ptr::read_volatile(ptr::addr_of!((*this).demo_mode));
         0x5eed_0000usize as *mut u8
@@ -562,25 +727,48 @@ mod tests {
         PARENT_CALLS = 0;
         PARENT_STORAGE = ptr::null_mut();
         PARENT_RESULT = ptr::null_mut();
-        BASE_INITIALIZE_CALLS = 0;
-        BASE_INITIALIZE_ARGS = (ptr::null_mut(), 0xffff_ffff, 0xffff_ffff, 0xffff_ffff);
-        OBSERVED_BASE_VTABLE = ptr::null();
         SET_TARGET_CALLS = 0;
-        SET_TARGET_ARGS = (ptr::null_mut(), ptr::null_mut());
+        SET_TARGET_ARGS = [(ptr::null_mut(), ptr::null_mut()); 2];
         OBSERVED_DEMO_MODE_AT_DISPATCH = ptr::null_mut();
-        CALL_ORDER = [0; 3];
+        CALL_ORDER = [0; 4];
         CALL_COUNT = 0;
-        CLASS_6800_OPS = Class6800Ops {
-            parent_construct: record_parent_construct,
-            base_initialize: record_base_initialize,
+        ALLOC_CALLS = 0;
+        ALLOC_ARGS = (usize::MAX, usize::MAX);
+        TEST_LINK = FrameworkBaseLink {
+            state: 0xa5,
+            unresolved_01: [0xa5; 3],
+            unresolved_04: 0xa5a5_a5a5,
+            unresolved_08: 0xa5a5_a5a5,
+            unresolved_0c: 0xa5a5_a5a5,
         };
+        IMPLICIT_CONTEXT.linked_base = ptr::null_mut();
+        IMPLICIT_CONTEXT_CALLS = 0;
+        ACTIVE_OWNER_CALLS = 0;
+        CLASS_6800_OPS = Class6800Ops { parent_construct: record_parent_construct };
+        FRAMEWORK_BASE_INITIALIZE_OPS = FrameworkBaseInitializeOps {
+            report_allocation_failure: unported_report_allocation_failure,
+            implicit_link_context: record_implicit_context,
+            active_link_owner: record_active_owner,
+        };
+        let defaults = crate::heap::veneers::DEFAULT_HEAP_OPS;
+        crate::heap::veneers::HEAP_OPS = crate::heap::veneers::HeapVeneerOps {
+            alloc: record_alloc,
+            ..defaults
+        };
+        crate::heap::types::DEFAULT_HEAP =
+            ptr::addr_of_mut!(TEST_HEAP).cast::<crate::heap::types::HeapDescriptorDescriptor>();
         CLASS_6800_VTABLE.set_target = record_set_target;
+        FRAMEWORK_BASE_VTABLE.set_target = record_set_target;
         guard
     }
 
     unsafe fn restore() {
         CLASS_6800_OPS = DEFAULT_CLASS_6800_OPS;
+        FRAMEWORK_BASE_INITIALIZE_OPS = DEFAULT_FRAMEWORK_BASE_INITIALIZE_OPS;
+        crate::heap::veneers::HEAP_OPS = crate::heap::veneers::DEFAULT_HEAP_OPS;
+        crate::heap::types::DEFAULT_HEAP = ptr::null_mut();
         CLASS_6800_VTABLE.set_target = unported_set_target;
+        FRAMEWORK_BASE_VTABLE.set_target = unported_set_target;
         FRAMEWORK_ROOT_HOLDER.instance = ptr::null_mut();
         REGISTERED = RegistryEntry { class_id: 0, instance: ptr::null_mut() };
         CLASS_REGISTRY.vtable = ptr::null();
@@ -591,8 +779,8 @@ mod tests {
             vtable: 0xa5a5_a5a5usize as *const Class6800Vtable,
             base_04: 0xa5a5_a5a5,
             base_08: 0xa5a5_a5a5,
-            base_link: 0xa5a5_a5a5usize as *mut u8,
-            base_10: 0xa5a5_a5a5,
+            base_link: 0xa5a5_a5a5usize as *mut FrameworkBaseLink,
+            link_owner: 0xa5a5_a5a5usize as *mut u8,
             default_target: 0xa5a5_a5a5usize as *mut u8,
             demo_mode: 0xa5a5_a5a5usize as *mut u8,
         }
@@ -616,11 +804,11 @@ mod tests {
             assert_eq!(object.base_08, 0, "exact store at +0x08");
             assert_eq!(
                 object.base_link,
-                0xa5a5_a5a5usize as *mut u8,
+                0xa5a5_a5a5usize as *mut FrameworkBaseLink,
                 "the parent leaves +0x0c for its child"
             );
             assert_eq!(
-                object.base_10, 0xa5a5_a5a5,
+                object.link_owner, 0xa5a5_a5a5usize as *mut u8,
                 "the parent leaves +0x10 for its child"
             );
             assert_eq!(
@@ -653,14 +841,18 @@ mod tests {
             assert_eq!(result, replacement, "parent r0 is forwarded unchanged");
             assert_eq!(PARENT_CALLS, 1);
             assert!(PARENT_STORAGE.is_null(), "no wrapper NULL guard");
-            assert_eq!(BASE_INITIALIZE_CALLS, 1);
-            assert_eq!(BASE_INITIALIZE_ARGS, (replacement, 0x1234, 0, 0));
+            assert!((*replacement).base_link.is_null(), "create_link=0 clears +0x0c");
             assert_eq!(
-                OBSERVED_BASE_VTABLE,
-                ptr::addr_of!(FRAMEWORK_BASE_VTABLE),
-                "the base vtable is planted between the two child calls"
+                (*replacement).link_owner,
+                ptr::addr_of_mut!(ACTIVE_OWNER),
+                "the NULL owner selects FUN_0809444c's result"
             );
-            assert_eq!(call_order()[..2], [PARENT_CALL, BASE_INITIALIZE_CALL]);
+            assert_eq!(
+                (*replacement).vtable,
+                ptr::addr_of!(FRAMEWORK_BASE_VTABLE),
+                "the base vtable is planted before the direct initializer"
+            );
+            assert_eq!(call_order()[..1], [PARENT_CALL]);
             restore();
             drop(guard);
         }
@@ -680,13 +872,17 @@ mod tests {
             assert_eq!(this, storage, "the parent constructor's return is `this`");
             assert_eq!(PARENT_CALLS, 1);
             assert_eq!(PARENT_STORAGE, storage);
-            assert_eq!(BASE_INITIALIZE_CALLS, 1);
-            assert_eq!(
-                BASE_INITIALIZE_ARGS,
-                (storage, 0, 1, 0),
-                "0x08177e84 supplies r1=0/r2=1; 0x081110d0 supplies r3=0"
-            );
-            assert_eq!(OBSERVED_BASE_VTABLE, ptr::addr_of!(FRAMEWORK_BASE_VTABLE));
+            assert_eq!(ALLOC_CALLS, 1);
+            assert_eq!(ALLOC_ARGS, (16, 0), "FUN_080eb67c(16, 0)");
+            assert_eq!(object.base_link, ptr::addr_of_mut!(TEST_LINK));
+            assert_eq!(TEST_LINK.state, 0);
+            assert_eq!(TEST_LINK.unresolved_01, [0xa5; 3], "bytes +1..+3 are untouched");
+            assert_eq!(TEST_LINK.unresolved_04, 0);
+            assert_eq!(TEST_LINK.unresolved_08, 0);
+            assert_eq!(TEST_LINK.unresolved_0c, 0);
+            assert_eq!(IMPLICIT_CONTEXT_CALLS, 1);
+            assert_eq!(IMPLICIT_CONTEXT.linked_base, storage);
+            assert_eq!(ACTIVE_OWNER_CALLS, 1);
             assert_eq!(object.vtable, ptr::addr_of!(CLASS_6800_VTABLE));
             assert_eq!(object.default_target, 0x1234_0000usize as *mut u8);
             assert_eq!(
@@ -694,16 +890,17 @@ mod tests {
                 ptr::addr_of_mut!(DEMO_MODE_OBJECT).cast::<u8>(),
                 "+0x18 is the registered TCDemoMode singleton"
             );
-            assert_eq!(SET_TARGET_CALLS, 1, "slot +0x2c is dispatched exactly once");
-            assert_eq!(SET_TARGET_ARGS, (storage, 0x1234_0000usize as *mut u8));
+            assert_eq!(SET_TARGET_CALLS, 2, "base and derived slots each dispatch once");
+            assert_eq!(SET_TARGET_ARGS[0], (storage, ptr::null_mut()));
+            assert_eq!(SET_TARGET_ARGS[1], (storage, 0x1234_0000usize as *mut u8));
             assert_eq!(
                 OBSERVED_DEMO_MODE_AT_DISPATCH, object.demo_mode,
-                "+0x18 is stored before the seeding dispatch, not after"
+                "+0x18 is stored before the derived seeding dispatch"
             );
             assert_eq!(
                 call_order(),
-                [PARENT_CALL, BASE_INITIALIZE_CALL, SET_TARGET_CALL],
-                "parent, base link initializer, then derived dispatch"
+                [PARENT_CALL, SET_TARGET_CALL, SET_TARGET_CALL, 0],
+                "parent, base-link dispatch, then derived dispatch"
             );
             restore();
             drop(guard);
@@ -733,7 +930,7 @@ mod tests {
                 storage_object.default_target, 0xa5a5_a5a5usize as *mut u8,
                 "the abandoned storage is untouched after the base call"
             );
-            assert_eq!(SET_TARGET_ARGS.0, elsewhere);
+            assert_eq!(SET_TARGET_ARGS[1].0, elsewhere);
             restore();
             drop(guard);
         }
@@ -753,8 +950,8 @@ mod tests {
             class_6800_new(storage);
 
             assert!(object.default_target.is_null());
-            assert_eq!(SET_TARGET_CALLS, 1, "NULL does not skip the dispatch");
-            assert_eq!(SET_TARGET_ARGS.1, ptr::null_mut());
+            assert_eq!(SET_TARGET_CALLS, 2, "NULL does not skip either dispatch");
+            assert_eq!(SET_TARGET_ARGS[1].1, ptr::null_mut());
             restore();
             drop(guard);
         }
@@ -786,29 +983,73 @@ mod tests {
     }
 
     #[test]
-    fn the_wired_defaults_clear_the_base_and_read_the_modeled_global() {
-        let mut object = poisoned();
-        let storage = ptr::addr_of_mut!(object);
+    fn initialize_without_link_clears_only_the_link_and_selects_the_owner_path() {
+        let mut implicit = poisoned();
+        let mut explicit = poisoned();
+        let mut context = FrameworkBaseLinkContext {
+            unresolved_00: [0; 9],
+            linked_base: 0x1usize as *mut Class6800,
+        };
+        let mut owner = FrameworkBaseOwner {
+            unresolved_00: [0; 3],
+            link_context: ptr::addr_of_mut!(context),
+        };
 
         unsafe {
-            let guard = OPS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-            install_registry(ptr::null_mut());
-            CLASS_6800_OPS = DEFAULT_CLASS_6800_OPS;
-            CLASS_6800_VTABLE.set_target = unported_set_target;
-            FRAMEWORK_ROOT_HOLDER.instance = 0x7777_0000usize as *mut u8;
-
-            let this = class_6800_new(storage);
-
-            assert_eq!(this, storage);
-            assert_eq!(object.base_04, 0);
-            assert_eq!(object.base_08, 0);
-            assert!(object.base_link.is_null(), "no link node without 0x081108b4");
-            assert_eq!(object.base_10, 0);
-            assert_eq!(object.default_target, 0x7777_0000usize as *mut u8);
-            assert!(
-                object.demo_mode.is_null(),
-                "with nothing registered under 0x8080 the singleton is NULL"
+            let guard = install_mocks();
+            framework_base_initialize(ptr::addr_of_mut!(implicit), 0x1234usize as *mut u8, 0, ptr::null_mut());
+            framework_base_initialize(
+                ptr::addr_of_mut!(explicit),
+                0x5678usize as *mut u8,
+                0,
+                ptr::addr_of_mut!(owner),
             );
+
+            assert!(implicit.base_link.is_null());
+            assert_eq!(implicit.link_owner, ptr::addr_of_mut!(ACTIVE_OWNER));
+            assert!(explicit.base_link.is_null());
+            assert_eq!(explicit.link_owner, ptr::addr_of_mut!(owner).cast());
+            assert_eq!(ALLOC_CALLS, 0);
+            assert_eq!(SET_TARGET_CALLS, 0);
+            assert_eq!(IMPLICIT_CONTEXT_CALLS, 0);
+            assert_eq!(ACTIVE_OWNER_CALLS, 1, "only the NULL-owner path calls 0x0809444c");
+            assert_eq!(context.linked_base, 0x1usize as *mut Class6800);
+            restore();
+            drop(guard);
+        }
+    }
+
+    #[test]
+    fn initialize_with_explicit_owner_allocates_dispatches_and_only_fills_an_empty_context() {
+        let mut object = poisoned();
+        let storage = ptr::addr_of_mut!(object);
+        let mut context = FrameworkBaseLinkContext {
+            unresolved_00: [0; 9],
+            linked_base: ptr::null_mut(),
+        };
+        let mut owner = FrameworkBaseOwner {
+            unresolved_00: [0; 3],
+            link_context: ptr::addr_of_mut!(context),
+        };
+
+        unsafe {
+            let guard = install_mocks();
+            object.vtable = ptr::addr_of!(FRAMEWORK_BASE_VTABLE);
+            framework_base_initialize(storage, 0x2468usize as *mut u8, 1, ptr::addr_of_mut!(owner));
+
+            assert_eq!(ALLOC_CALLS, 1);
+            assert_eq!(ALLOC_ARGS, (16, 0));
+            assert_eq!(object.base_link, ptr::addr_of_mut!(TEST_LINK));
+            assert_eq!(object.link_owner, ptr::addr_of_mut!(owner).cast());
+            assert_eq!(SET_TARGET_ARGS[0], (storage, 0x2468usize as *mut u8));
+            assert_eq!(context.linked_base, storage, "empty owner context is filled");
+            assert_eq!(IMPLICIT_CONTEXT_CALLS, 0);
+            assert_eq!(ACTIVE_OWNER_CALLS, 0);
+
+            context.linked_base = 0x1usize as *mut Class6800;
+            framework_base_initialize(storage, ptr::null_mut(), 1, ptr::addr_of_mut!(owner));
+            assert_eq!(context.linked_base, 0x1usize as *mut Class6800, "occupied context is retained");
+            assert_eq!(SET_TARGET_ARGS[1], (storage, ptr::null_mut()));
             restore();
             drop(guard);
         }
