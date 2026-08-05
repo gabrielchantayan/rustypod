@@ -19216,6 +19216,46 @@ functions:
       focused host tests:
       `src/ui/object_state.rs::snapshot_timestamp_baseline`.
 
+  # --- retailOS elapsed-time lazy baseline getter ---
+  - address: 0x08055ff8
+    ghidra: FUN_08055ff8
+    name: timestamp_baseline
+    size: 44
+    sig: "i64 timestamp_baseline(void)"
+    module: ui/object_state
+    status: ported
+    renames:
+      iVar1: baseline_slot
+      uVar2: scaled_sample
+      DAT_08056024: TIMESTAMP_BASELINE
+      FUN_08055fd0: snapshot_timestamp_baseline
+    notes: >-
+      Lazily initializes and returns the elapsed-time baseline doubleword
+      at global 0x089ca5e0 + 0x20 (the 0x08056024 literal holds
+      0x089ca5e0, same as snapshot_timestamp_baseline's 0x08055ff4
+      literal): loads the slot (`ldrd r0,r1,[r4,#0x20]`), treats a zero
+      doubleword as "not yet snapshotted" (`cmp r1,#0; cmpeq r0,r2`),
+      calls snapshot_timestamp_baseline @ 0x08055fd0 only then, stores
+      its r0:r1 result back (`strd r0,r1,[r4,#0x20]`) and returns the
+      slot. A nonzero slot short-circuits, so the baseline is sampled
+      exactly once over uptime. Three `bl 0x08055ff8` call sites (grep -c
+      on decomp/osos.asm): 0x0814164c, 0x081417b4, and 0x081eb418 — each
+      subtracts the result from a following scaled_timestamp_now sample
+      and converts the 64-bit delta to double, so this is the "zero
+      point" half of the firmware's elapsed-time measurement. The port
+      calls the ported snapshot_timestamp_baseline rather than
+      re-implementing it; the baseline-clock dependency behind it stays
+      in retailOS behind the same replaceable function-pointer boundary
+      as its siblings, and the slot is modeled by the TIMESTAMP_BASELINE
+      static. match.py confirms the structural shape — ldrd, zero
+      doubleword test, conditional bl, strd, final ldrd — 13 versus 11
+      instructions; the diff is only LLVM's push {r4,sl,fp,lr} frame, an
+      `orrs` fusion of the cmp/cmpeq pair, the direct in-crate `bl` to
+      the ported snapshot versus the ADS inter-function `bl`, and
+      strd/ldrd against the modeled static (offset 0) versus the
+      0x089ca5e0 literal at offset 0x20. Rust implementation and focused
+      host tests: `src/ui/object_state.rs::timestamp_baseline`.
+
   # --- C++ object-header low-flag predicate ---
   - address: 0x0808539c
     ghidra: FUN_0808539c

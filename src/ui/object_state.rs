@@ -363,6 +363,36 @@ pub unsafe extern "C" fn snapshot_timestamp_baseline() -> i64 {
     scaled_sample
 }
 
+/// timestamp_baseline — original: `FUN_08055ff8` @ `0x08055ff8` (44
+/// bytes).
+///
+/// Source: `/home/gabe/Programming/ipod-decomp/decomp/c/003/08055ff8_FUN_08055ff8.c`;
+/// assembly: `decomp/osos.asm` @ `0x08055ff8..0x08056020`.
+///
+/// Lazily initializes and returns the elapsed-time baseline doubleword at
+/// global 0x089c_a5e0 + 0x20 (modeled by [`TIMESTAMP_BASELINE`]). It loads
+/// the slot (`ldrd r0,r1,[r4,#0x20]`), treats a zero doubleword as "not
+/// yet snapshotted" (`cmp r1,#0; cmpeq r0,r2`), and only then calls
+/// [`snapshot_timestamp_baseline`] (0x08055fd0), storing its r0:r1 result
+/// back into the slot (`strd r0,r1,[r4,#0x20]`) before returning it
+/// (`ldrd` again). A nonzero slot is returned untouched, so the baseline
+/// is sampled exactly once over the device's uptime. All three stock call
+/// sites (0x0814164c, 0x081417b4, 0x081eb418) subtract the result from a
+/// following [`scaled_timestamp_now`] sample and convert the 64-bit delta
+/// to `double`, so this is the "zero point" half of the firmware's
+/// elapsed-time measurement. The original's `push {r4,lr}` holds the
+/// global pointer in r4 across the call — a register-allocation detail,
+/// not observable state — and is not reproduced here.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn timestamp_baseline() -> i64 {
+    if core::ptr::addr_of!(TIMESTAMP_BASELINE).read_volatile() == 0 {
+        let scaled_sample = snapshot_timestamp_baseline();
+        core::ptr::addr_of_mut!(TIMESTAMP_BASELINE).write_volatile(scaled_sample);
+    }
+    core::ptr::addr_of!(TIMESTAMP_BASELINE).read_volatile()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -865,6 +895,70 @@ mod tests {
 
         assert_eq!(unsafe { snapshot_timestamp_baseline() }, 7 << 10);
         assert_eq!(unsafe { snapshot_timestamp_baseline() }, 7 << 10);
+        assert_eq!(unsafe { BASELINE_SAMPLE_CALLS }, 2);
+    }
+
+    #[test]
+    fn zero_baseline_is_snapshotted_once_then_reused() {
+        let _guard = install_recording_baseline_clock_sample(0x0012_3456_789a_bcde);
+        let _reset = BaselineClockSampleReset;
+        unsafe { core::ptr::addr_of_mut!(TIMESTAMP_BASELINE).write(0) };
+
+        assert_eq!(
+            unsafe { timestamp_baseline() },
+            0x0012_3456_789a_bcdei64 << 10,
+            "a zero slot triggers the snapshot call (`cmpeq r0,r2` after `cmp r1,#0`)"
+        );
+        assert_eq!(unsafe { BASELINE_SAMPLE_CALLS }, 1);
+        assert_eq!(
+            unsafe { core::ptr::addr_of!(TIMESTAMP_BASELINE).read() },
+            0x0012_3456_789a_bcdei64 << 10,
+            "the snapshot result is stored back into the slot (`strd r0,r1,[r4,#0x20]`)"
+        );
+
+        assert_eq!(
+            unsafe { timestamp_baseline() },
+            0x0012_3456_789a_bcdei64 << 10,
+            "the populated slot is returned without resampling"
+        );
+        assert_eq!(
+            unsafe { BASELINE_SAMPLE_CALLS },
+            1,
+            "the baseline is lazily sampled exactly once"
+        );
+    }
+
+    #[test]
+    fn nonzero_baseline_returns_without_sampling() {
+        let _guard = install_recording_baseline_clock_sample(0x0012_3456_789a_bcde);
+        let _reset = BaselineClockSampleReset;
+
+        for baseline in [1, -1, i64::MIN, i64::MAX] {
+            unsafe { core::ptr::addr_of_mut!(TIMESTAMP_BASELINE).write(baseline) };
+
+            assert_eq!(
+                unsafe { timestamp_baseline() },
+                baseline,
+                "any nonzero doubleword short-circuits the lazy snapshot"
+            );
+        }
+        assert_eq!(unsafe { BASELINE_SAMPLE_CALLS }, 0);
+    }
+
+    #[test]
+    fn resampling_after_zeroing_replaces_the_baseline() {
+        let _guard = install_recording_baseline_clock_sample(3);
+        let _reset = BaselineClockSampleReset;
+        unsafe { core::ptr::addr_of_mut!(TIMESTAMP_BASELINE).write(0) };
+
+        assert_eq!(unsafe { timestamp_baseline() }, 3 << 10);
+
+        unsafe {
+            core::ptr::addr_of_mut!(TIMESTAMP_BASELINE).write(0);
+            core::ptr::addr_of_mut!(MOCK_BASELINE_SAMPLE).write(9);
+        }
+
+        assert_eq!(unsafe { timestamp_baseline() }, 9 << 10);
         assert_eq!(unsafe { BASELINE_SAMPLE_CALLS }, 2);
     }
 }
