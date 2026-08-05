@@ -19193,3 +19193,32 @@ functions:
       are clear (otherwise 0). The complete retail body is 20 bytes:
       ldr; tst #7; moveq #1; movne #0; bx lr. The owning object type and
       individual flag meanings remain unidentified.
+
+  # --- C++ object-header value store + flag reset ---
+  - address: 0x08085344
+    ghidra: FUN_08085344
+    name: object_value_set_flags_clear
+    size: 16
+    sig: "void object_value_set_flags_clear(void *object, u32 value)"
+    module: cxx/object_flags
+    status: ported
+    renames:
+      param_1: object
+      param_2: value
+    notes: >-
+      Pure leaf initializer for the two-word object header: stores `value`
+      into the aligned 32-bit word at +0x00 and clears the entire 32-bit
+      flag word at +0x04 (the same flag word object_low_flags_clear @
+      0x0808539c tests). The complete retail body is 16 bytes:
+      str r1,[r0]; mov r1,#0; str r1,[r0,#4]; bx lr. Three `bl
+      0x08085344` call sites (grep -c on decomp/osos.asm), at 0x081b0594,
+      0x081b05c4, and 0x081b06f4: all apply it to the sub-header at
+      object+0xb8 with a value advanced through a data cursor (caller
+      r6+0x34, bumped by consumed bytes), so the header reads as {
+      position-or-pointer, flags }; the concrete object type remains
+      unidentified, hence the field-level name. match.py confirms the
+      structural shape: both stores and the `mov r1,#0` are
+      instruction-identical; the diff is only LLVM's push {fp,lr}/pop
+      {fp,pc} frame versus the ADS `bx lr` leaf. Rust implementation and
+      focused host tests:
+      `src/cxx/object_flags.rs::object_value_set_flags_clear`.
