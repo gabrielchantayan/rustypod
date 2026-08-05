@@ -14593,6 +14593,30 @@ functions:
       the same accepted deviation as vector_size_elem4; the sub/asr#4
       structure matches.
 
+  - address: 0x083d76b4
+    ghidra: FUN_083d76b4
+    name: vector_capacity_elem8
+    size: 20
+    sig: "i32 vector_capacity_elem8(const VectorStorage *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      Byte-identical copy of vector_capacity_elem8 @ 0x083d7870 (same
+      `ldr r1,[r0,#0x8]; ldr r0,[r0,#0x0]; sub r0,r1,r0; mov r0,r0,
+      asr #0x3; bx lr` - verified against osos.asm per address; it
+      sits immediately after the vector_size_elem8 copy at 0x083d76a4,
+      exactly like the primary capacity sits after its own size
+      sibling at 0x083d7860). Served by the existing cxx/templates
+      port - hook this address to the vector_capacity_elem8 symbol
+      (the vector_size_elem16 copy-at-0x083d78b4 precedent). 2 bl
+      call sites: 0x083e07fc, 0x083e09f8; no tail branches. Source C:
+      decomp/c/037/083d76b4_FUN_083d76b4.c - Ghidra's
+      `return param_1[2] - *param_1 >> 3`. match.py - the ldr head
+      comes out as byte loads from the family's read_unaligned
+      host-testing idiom, the same accepted deviation as the primary;
+      the sub/asr#3 structure matches.
+
   - address: 0x083d7884
     ghidra: FUN_083d7884
     name: vector_size_elem16
