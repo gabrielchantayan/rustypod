@@ -13209,6 +13209,46 @@ functions:
       the flag still set (the original's assert(wantToLock>0) is
       compiled out).
 
+  # ---- B-tree cell size query (src/sqlite/cell_size.rs) ----
+  - address: 0x082c0a50
+    ghidra: FUN_082c0a50
+    name: cell_size_ptr
+    size: 28
+    sig: "u16 cell_size_ptr(const MemPage *page, const u8 *cell)"
+    module: sqlite/cell_size
+    status: ported
+    vars: {param_1: page, param_2: cell}
+    notes: >-
+      SQLite 3.5.x cellSizePtr (btree.c): parse the cell and return
+      CellInfo.nSize. The whole body is one call and one halfword load:
+      stack CellInfo (0x24-byte frame; struct is 0x20), bl
+      sqlite3BtreeParseCellPtr @ 0x083727ec, `ldrh r0,[sp,#0x1e]` — the
+      +0x1e (nSize) offset is from the disassembly, NOT Ghidra's local_a
+      arithmetic. 11 bl call sites: 0x082b6090, 0x082b6128, 0x082b6698,
+      0x082b68a0, 0x082b6af4 (the b-tree insert/drop/defragment cluster),
+      0x082c2dcc, 0x082c5ec0, 0x08371064, 0x083710ac, 0x08371154,
+      0x08371768. The callee (identified, not yet ported) is SQLite's
+      parseCellPtr: MemPage fields leaf +0x07 / intKey +0x03 /
+      childPtrSize +0x09 / maxLocal +0x0a / minLocal +0x0c / pBt +0x40
+      (whose +0x1e is usableSize), varint readers 0x0837ac30
+      (sqlite3GetVarint) and 0x0837aab0 (sqlite3GetVarint32), overflow
+      divisor via __rt_udiv @ 0x08036f14. CellInfo as it writes it:
+      pCell +0x00, nKey/nData pair +0x08/+0x0c, payload u32s +0x10/+0x14,
+      then u16s nHeader +0x18, nLocal +0x1a, iOverflow +0x1c, nSize +0x1e.
+      The parse call goes through the BTREE_CELL_OPS dispatch boundary
+      (house pattern) with a zero-filling default while 0x083727ec is
+      unported — an unconfigured build reports nSize 0 for every cell;
+      nothing in the firmware consumes the port yet (no hooks.yaml entry).
+      Deviations: the port zero-initializes its 0x20-byte buffer (the
+      original's stack slot is uninitialized) so the default slot's
+      result is defined. match.py: same stack CellInfo and the identical
+      `ldrh r0,[sp,#30]` tail; expected frame diff — LLVM fp frame, the
+      eight zero-init stores, and blx through the ops slot instead of the
+      direct bl (callee unported). Host tests:
+      returns_the_n_size_halfword_at_0x1e,
+      passes_page_and_cell_through_verbatim,
+      result_tracks_only_the_0x1e_field, shipped_default_reports_zero.
+
   # ---- Connection allocator (src/sqlite/mem.rs) ----
   - address: 0x083749bc
     ghidra: FUN_083749bc

@@ -63,6 +63,7 @@
 pub mod aux_sweep;
 pub mod blob_to_hex;
 pub mod btree_lock;
+pub mod cell_size;
 pub mod dequote;
 pub mod ephemeral_fn;
 pub mod error_msg;
