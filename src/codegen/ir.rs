@@ -102,6 +102,16 @@
 //!   kind byte through two branch tables.
 //! - `cg_inst_collect_used_regs` — original: `FUN_082c1bfc` @ 0x082c1bfc
 //!   (388 bytes). Collects an instruction's input registers.
+//! - `cg_resolve_phis` — original: `FUN_082c21b8` @ 0x082c21b8 (176
+//!   bytes; 2 `bl` call sites — the compile-and-patch driver's fourth
+//!   pass and the register-allocation pass `FUN_082c1d4c`, which
+//!   re-runs it internally). The SSA-deconstruction pass: self-links
+//!   every register's parent word, unions each phi's (opcode 0x2f)
+//!   source registers into the destination's web through the private
+//!   union-find find [`cg_reg_find`] (`FUN_082ce51c` @ 0x082ce51c,
+//!   44 bytes, no call site outside the pass), then path-compresses
+//!   every web into a star. Wired as the `pass_resolve_phis` default
+//!   of [`CG_COMPILE_AND_PATCH_OPS`].
 //! - `cg_compile_and_patch` — original: `FUN_08243138` @ 0x08243138
 //!   (348 bytes; 0 `bl` callers, 6 tail `b` sites — the clones). The
 //!   JIT's compile-and-patch driver, the top of the ported codegen
@@ -130,17 +140,18 @@
 //!
 //! ```text
 //! cg_module_t                 cg_proc_t (52 bytes)         cg_block_t
-//!   +0x00 heap                  +0x00 next                   +0x04 proc
-//!   +0x04 procs (head)          +0x04 module                 +0x0c insts (head)
+//!   +0x00 heap                  +0x00 next                   +0x00 next
+//!   +0x04 procs (head)          +0x04 module                 +0x04 proc
+//!                               +0x08 blocks (head)          +0x0c insts (head)
 //!                               +0x10 registers (head)       +0x10 last_inst (tail)
 //!                               +0x14 last_register (tail)
 //!                               +0x20 num_registers
 //!
 //! cg_virtual_reg_t (40 bytes)  cg_inst_t (base of every instruction)
 //!   +0x00 next                   +0x00 next
-//!   +0x10 reg_no                 +0x04 block
-//!   +0x20 type (u8)              +0x08 kind (u8)
-//!                                +0x09 opcode (u8)
+//!   +0x04 parent (phi web)       +0x04 block
+//!   +0x10 reg_no                 +0x08 kind (u8)
+//!   +0x20 type (u8)              +0x09 opcode (u8)
 //!                                +0x0c first derived field
 //!
 //! cg_codegen_t (0x220 bytes)   cg_label_t (12 bytes)
@@ -412,6 +423,9 @@ pub const CG_LABEL_FIXUP_BYTES: usize = 12;
 pub const CG_PROC_NEXT: usize = 0;
 /// `cg_proc_t + 0x04` — owning module.
 pub const CG_PROC_MODULE: usize = 1;
+/// `cg_proc_t + 0x08` — head of the procedure's block list, walked by
+/// [`cg_resolve_phis`] (recovered from its `ldr r6,[r7,#0x8]`).
+pub const CG_PROC_BLOCKS: usize = 2;
 /// `cg_proc_t + 0x10` — first virtual register.
 pub const CG_PROC_REGISTERS: usize = 4;
 /// `cg_proc_t + 0x14` — last virtual register.
@@ -422,6 +436,9 @@ pub const CG_PROC_NUM_REGISTERS: usize = 8;
 /// `mov r1, #0x34` (FUN_082c2268 @ 0x082c2274).
 pub const CG_PROC_BYTES: usize = 0x34;
 
+/// `cg_block_t + 0x00` — next block in the procedure's list, walked by
+/// [`cg_resolve_phis`] (recovered from its `ldr r6,[r6,#0x0]`).
+pub const CG_BLOCK_NEXT: usize = 0;
 /// `cg_block_t + 0x04` — owning procedure.
 pub const CG_BLOCK_PROC: usize = 1;
 /// `cg_block_t + 0x0c` — first instruction.
@@ -431,6 +448,12 @@ pub const CG_BLOCK_LAST_INST: usize = 4;
 
 /// `cg_virtual_reg_t + 0x00` — next register in the procedure's list.
 pub const CG_VREG_NEXT: usize = 0;
+/// `cg_virtual_reg_t + 0x04` — the SSA-web parent link of the phi
+/// resolver: [`cg_resolve_phis`] self-links it per register, unions
+/// point a source web's representative at the phi destination's, and
+/// [`cg_reg_find`] follows it (`ldr r0,[r0,#0x4]`) with path
+/// compression (`strne r0,[r4,#0x4]`).
+pub const CG_VREG_PARENT: usize = 1;
 /// `cg_virtual_reg_t + 0x10` — the register's number.
 pub const CG_VREG_NO: usize = 4;
 /// `cg_virtual_reg_t + 0x20` — the register's type, a single byte.
@@ -446,6 +469,11 @@ pub const CG_INST_BLOCK: usize = 1;
 pub const CG_INST_KIND: usize = 2;
 /// Byte offset of the opcode inside the kind word (`cg_inst_t + 0x09`).
 const CG_INST_OPCODE_IN_KIND_WORD: usize = 1;
+/// The opcode byte [`cg_resolve_phis`] matches to find phi instructions
+/// — its `ldrb r0,[r4,#0x9]; cmp r0,#0x2f` (the kind byte is NOT
+/// consulted). The stock `cg_create_inst_phi` call sites all pass
+/// 0x2f.
+pub const CG_INST_OPCODE_PHI: u32 = 0x2f;
 
 /// `cg_inst_binary_t + 0x0c` — destination register.
 pub const CG_INST_BINARY_DEST: usize = 3;
@@ -1994,6 +2022,109 @@ unsafe fn append_defined_reg(
     }
 }
 
+// --- cg_resolve_phis (0x082c21b8) and its union-find find ----------
+
+/// cg_reg_find — original: `FUN_082ce51c` @ 0x082ce51c (44 bytes; 3
+/// `bl` call sites, ALL inside [`cg_resolve_phis`], plus its own
+/// recursion). The union-find FIND of the phi-resolution webs: follows
+/// the register's parent link ([`CG_VREG_PARENT`], +0x04) until a
+/// register whose parent is NULL or itself, and returns that
+/// representative; on the way back it path-compresses, re-pointing the
+/// argument's parent at the representative when it differs — the
+/// original reloads the parent after the recursive call and stores
+/// conditionally (`ldr r1,[r4,#0x4]; cmp r1,r0; strne r0,[r4,#0x4]`).
+///
+/// Ghidra renders the return void, but every caller consumes r0
+/// (`mov r9,r0`, then `str r9,[r0,#0x4]`), so the port returns the
+/// representative — the [`cg_proc_create`] precedent. Kept private:
+/// the original has no call site outside the phi pass.
+unsafe fn cg_reg_find(reg: *mut u8) -> *mut u8 {
+    let parent = slot(reg, CG_VREG_PARENT).read();
+    if parent.is_null() || parent == reg {
+        return reg;
+    }
+    let representative = cg_reg_find(parent);
+    let link = slot(reg, CG_VREG_PARENT);
+    if link.read() != representative {
+        link.write(representative);
+    }
+    representative
+}
+
+/// cg_resolve_phis — original: `FUN_082c21b8` @ 0x082c21b8 (176
+/// bytes; 2 `bl` call sites — the compile-and-patch driver's fourth
+/// pass (`bl 0x082c21b8` @ 0x08243168) and the register-allocation
+/// pass `FUN_082c1d4c`, which re-runs it before allocating).
+/// SSA deconstruction: unions every phi's source registers into the
+/// phi destination's web, so the register allocator sees one
+/// coalesced web per phi.
+///
+/// Per procedure in `module->procs`, in the original's exact order:
+///
+/// 1. Self-link every virtual register's parent word — each register
+///    starts as the representative of its own web.
+/// 2. Walk every block (`proc->blocks`, +0x08) and every instruction;
+///    for each instruction whose OPCODE byte (+0x09) is
+///    [`CG_INST_OPCODE_PHI`] (the kind byte is NOT consulted), walk the
+///    phi's `{next, reg}` source list (+0x10) and, per cell, point the
+///    source representative's parent at the destination
+///    representative's. `find(dest)` is recomputed for EVERY cell —
+///    the original's exact call order; idempotent, because a union
+///    never changes the destination's web.
+/// 3. Re-walk the register list calling [`cg_reg_find`] on every
+///    register, path-compressing each web into a star (unions alone
+///    leave two-hop chains when a phi destination is itself another
+///    phi's source).
+///
+/// Like the rest of the cluster there are no NULL guards beyond the
+/// list-termination checks: a phi with a NULL dest or a source cell
+/// holding NULL would dereference address 4 in the original and does
+/// the same here.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_resolve_phis(module: *mut CgModule) {
+    let module = module as *mut u8;
+    let mut proc = slot(module, CG_MODULE_PROCS).read();
+    while !proc.is_null() {
+        // 1. Every register starts as its own web representative.
+        let mut reg = slot(proc, CG_PROC_REGISTERS).read();
+        while !reg.is_null() {
+            slot(reg, CG_VREG_PARENT).write(reg);
+            reg = slot(reg, CG_VREG_NEXT).read();
+        }
+        // 2. Union each phi's sources into the destination's web.
+        let mut block = slot(proc, CG_PROC_BLOCKS).read();
+        while !block.is_null() {
+            let mut inst = slot(block, CG_BLOCK_INSTS).read();
+            while !inst.is_null() {
+                let opcode = inst
+                    .add(CG_INST_KIND * WORD + CG_INST_OPCODE_IN_KIND_WORD)
+                    .read();
+                if opcode == CG_INST_OPCODE_PHI as u8 {
+                    let mut cell = slot(inst, CG_INST_PHI_REGS).read();
+                    while !cell.is_null() {
+                        let dest_rep =
+                            cg_reg_find(slot(inst, CG_INST_PHI_DEST).read());
+                        let source_rep =
+                            cg_reg_find(slot(cell, CG_VREG_LIST_REG).read());
+                        slot(source_rep, CG_VREG_PARENT).write(dest_rep);
+                        cell = slot(cell, CG_VREG_LIST_NEXT).read();
+                    }
+                }
+                inst = slot(inst, CG_INST_NEXT).read();
+            }
+            block = slot(block, CG_BLOCK_NEXT).read();
+        }
+        // 3. Path-compress every web into a star.
+        let mut reg = slot(proc, CG_PROC_REGISTERS).read();
+        while !reg.is_null() {
+            cg_reg_find(reg);
+            reg = slot(reg, CG_VREG_NEXT).read();
+        }
+        proc = slot(proc, CG_PROC_NEXT).read();
+    }
+}
+
 // --- cg_compile_and_patch (0x08243138) and its seams -----------------
 
 /// `cg_compile_driver_t + 0x00` — the driver object's vtable. The
@@ -2097,8 +2228,8 @@ pub struct CgCompileAndPatchOps {
     /// `FUN_082c21b8` @ 0x082c21b8 (176 bytes). Rewrites the phi runs
     /// at block heads (opcode 0x2f) and self-links register word 1 —
     /// the SSA-deconstruction step. Called TWICE overall: directly
-    /// here and again inside the next pass. Default: no graph
-    /// mutation.
+    /// here and again inside the next pass. Default: the ported
+    /// [`cg_resolve_phis`].
     pub pass_resolve_phis: CgGraphPass,
     /// `FUN_082c1d4c` @ 0x082c1d4c (44 bytes). Invokes `FUN_082c21b8`
     /// (the phi pass) once more, then runs the per-procedure register
@@ -2162,20 +2293,22 @@ pub struct CgCompileAndPatchOps {
     pub codegen_destroy: unsafe extern "C" fn(codegen: *mut CgCodegen),
 }
 
-/// Wired default for every analysis-pass slot of
+/// Wired default for the seven still-unported analysis-pass slots of
 /// [`CgCompileAndPatchOps`]: performs NO graph mutation.
 ///
-/// DEVIATION (documented, deliberate): the eight originals are
+/// DEVIATION (documented, deliberate): the seven originals are
 /// identified (address, size and recovered behavior on each field of
-/// [`CgCompileAndPatchOps`]) but stay unported in this commit — each
-/// is a whole-graph walker with its own deep callee tree
-/// (`FUN_082d6a90`, `FUN_082d90ec`, `FUN_082e72d8`, `FUN_082b2f60`,
-/// ...), and modeling half of a mark-and-sweep or a register
-/// allocator would be worse than modeling none. Porting a pass later
-/// replaces its slot without touching the driver. With the defaults
-/// wired, the driver's own pipeline — construct, lower (label
-/// creation only), resolve, reserve, copy out, flush, destroy — runs
-/// exactly as the original's; only the graph rewrites are absent.
+/// [`CgCompileAndPatchOps`]) but stay unported — each is a whole-graph
+/// walker with its own deep callee tree (`FUN_082d6a90`,
+/// `FUN_082d90ec`, `FUN_082e72d8`, `FUN_082b2f60`, ...), and modeling
+/// half of a mark-and-sweep or a register allocator would be worse
+/// than modeling none. The eighth pass, `FUN_082c21b8`, is ported as
+/// [`cg_resolve_phis`] and wired directly as its slot's default —
+/// porting a pass replaces its slot without touching the driver. With
+/// these defaults wired, the driver's own pipeline — construct, lower
+/// (label creation only), resolve, reserve, copy out, flush, destroy
+/// — runs exactly as the original's; only the remaining graph
+/// rewrites are absent.
 unsafe extern "C" fn default_cg_graph_pass(_module: *mut CgModule) {}
 
 /// The per-procedure emitter boundary for [`default_cg_lower_and_emit`]:
@@ -2295,7 +2428,7 @@ pub const DEFAULT_CG_COMPILE_AND_PATCH_OPS: CgCompileAndPatchOps =
         pass_link_defining_insts: default_cg_graph_pass,
         pass_canonicalize_insts: default_cg_graph_pass,
         pass_eliminate_dead_insts: default_cg_graph_pass,
-        pass_resolve_phis: default_cg_graph_pass,
+        pass_resolve_phis: cg_resolve_phis,
         pass_allocate_registers: default_cg_graph_pass,
         pass_link_use_insts: default_cg_graph_pass,
         pass_link_branch_edges: default_cg_graph_pass,
@@ -2336,7 +2469,9 @@ pub static mut CG_COMPILE_AND_PATCH_OPS: CgCompileAndPatchOps =
     /// `driver->module`, each `bl`'d with the module as sole argument:
 ///    `FUN_082c2008`, `FUN_082c1d78`, `FUN_082c1f04`, `FUN_082c21b8`,
 ///    `FUN_082c1d4c`, `FUN_082c2098`, `FUN_082c1ddc`, `FUN_082c214c`
-///    (unported — the [`CG_COMPILE_AND_PATCH_OPS`] pass slots).
+///    (the [`CG_COMPILE_AND_PATCH_OPS`] pass slots; `FUN_082c21b8` is
+///    ported as [`cg_resolve_phis`] and wired as its slot's default,
+///    the other seven stay unported behind no-op defaults).
 /// 2. Build the ten-word runtime-helper table [`CG_HELPER_TABLE`] and
 ///    a zero-initialized status cell on the stack.
 /// 3. `codegen = cg_codegen_create(*module, &helpers, &status)` — the
@@ -2368,9 +2503,11 @@ pub static mut CG_COMPILE_AND_PATCH_OPS: CgCompileAndPatchOps =
 /// DEVIATIONS: the helper table is a shared static instead of a
 /// stack copy (the original's 0x28-byte `memzero` at sp+4 is dead —
 /// all ten words are stored before any read — and the table is only
-/// ever read from); the eight analysis passes, the per-procedure
-/// emitter, the reserve stage and the cache flush default to no-ops
-/// as documented on [`CgCompileAndPatchOps`] / [`CG_PROC_EMIT`];
+/// ever read from); seven of the eight analysis passes, the
+/// per-procedure emitter, the reserve stage and the cache flush
+/// default to no-ops as documented on [`CgCompileAndPatchOps`] /
+/// [`CG_PROC_EMIT`] (the eighth pass is the ported
+/// [`cg_resolve_phis`]);
 /// [`default_cg_codegen_destroy`] adds a NULL-output guard and routes
 /// frees through [`CG_BUFFER_FREE`]. Everything else — stage order,
 /// argument routing, the three `current_offset` re-reads, the vtable
@@ -5059,6 +5196,247 @@ mod tests {
         }
         drop(f);
         teardown();
+    }
+
+    // --- cg_resolve_phis ------------------------------------------------
+
+    unsafe fn reg_parent(reg: *mut CgVirtualReg) -> *mut CgVirtualReg {
+        slot(reg as *mut u8, CG_VREG_PARENT).read() as *mut CgVirtualReg
+    }
+
+    /// Links the fixture's inline proc into its module and its inline
+    /// block into the proc — the list heads [`cg_resolve_phis`] walks.
+    fn wire_graph(f: &mut Fixture) {
+        f.module[CG_MODULE_PROCS] = f.proc.as_ptr() as usize;
+        f.proc[CG_PROC_BLOCKS] = f.block.as_ptr() as usize;
+    }
+
+    #[test]
+    fn resolve_phis_empty_module_is_a_no_op() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            // NULL module->procs: the outermost loop never runs.
+            cg_resolve_phis(f.module_ptr());
+            // A proc with no registers and no blocks: every inner loop
+            // falls through at its NULL head.
+            f.module[CG_MODULE_PROCS] = f.proc.as_ptr() as usize;
+            cg_resolve_phis(f.module_ptr());
+            assert!(f.proc[CG_PROC_REGISTERS] == 0);
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn resolve_phis_self_links_every_register_and_overwrites_stale_parents() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            f.module[CG_MODULE_PROCS] = f.proc.as_ptr() as usize;
+            // No blocks: only the self-link and compression walks run.
+            let r0 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let r1 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let r2 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            // A stale, non-NULL parent (valid memory, no crash risk):
+            // the pass MUST overwrite it before any find runs.
+            slot(r0 as *mut u8, CG_VREG_PARENT).write(r1 as *mut u8);
+            slot(r1 as *mut u8, CG_VREG_PARENT).write(r1 as *mut u8);
+
+            cg_resolve_phis(f.module_ptr());
+
+            for reg in [r0, r1, r2] {
+                assert_eq!(reg_parent(reg), reg, "every web starts self-linked");
+            }
+            // The register list itself is not touched.
+            assert_eq!(reg_next(r0), r1);
+            assert_eq!(reg_next(r1), r2);
+            assert!(reg_next(r2).is_null());
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn resolve_phis_ignores_instructions_without_the_phi_opcode() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            wire_graph(&mut f);
+            let dest = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let source = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let args = [source, core::ptr::null_mut()];
+            let list = cg_virtual_reg_list_create(f.heap, args.as_ptr());
+            // A binary instruction (any opcode) and a phi-KIND record
+            // whose opcode is NOT 0x2f: the pass matches the opcode
+            // byte only, so neither may be treated as a phi.
+            cg_create_inst_binary(f.block_ptr(), 0x0f, dest, source, source);
+            cg_create_inst_phi(f.block_ptr(), 0x30, dest, list);
+
+            cg_resolve_phis(f.module_ptr());
+
+            assert_eq!(reg_parent(dest), dest);
+            assert_eq!(reg_parent(source), source, "no union without opcode 0x2f");
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn resolve_phis_unions_a_single_source_phi_into_its_dest() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            wire_graph(&mut f);
+            let dest = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let source = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let unrelated = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let args = [source, core::ptr::null_mut()];
+            let list = cg_virtual_reg_list_create(f.heap, args.as_ptr());
+            cg_create_inst_phi(f.block_ptr(), CG_INST_OPCODE_PHI, dest, list);
+
+            cg_resolve_phis(f.module_ptr());
+
+            assert_eq!(reg_parent(source), dest, "source joins the dest's web");
+            assert_eq!(reg_parent(dest), dest, "the dest stays the representative");
+            assert_eq!(reg_parent(unrelated), unrelated, "other webs are untouched");
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn resolve_phis_unions_every_source_of_a_multi_source_phi() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            wire_graph(&mut f);
+            let dest = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let a = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let b = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let args = [a, b, core::ptr::null_mut()];
+            let list = cg_virtual_reg_list_create(f.heap, args.as_ptr());
+            cg_create_inst_phi(f.block_ptr(), CG_INST_OPCODE_PHI, dest, list);
+
+            cg_resolve_phis(f.module_ptr());
+
+            assert_eq!(reg_parent(a), dest);
+            assert_eq!(reg_parent(b), dest, "every cell unions into the dest web");
+            assert_eq!(reg_parent(dest), dest);
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn resolve_phis_compresses_two_hop_chains_into_a_star() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            wire_graph(&mut f);
+            let r = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let d1 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let d2 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            // d1 = phi(r); d2 = phi(d1) — after the unions r's parent is
+            // d1 and d1's is d2: a TWO-HOP chain only the final
+            // compression walk flattens.
+            let args1 = [r, core::ptr::null_mut()];
+            let list1 = cg_virtual_reg_list_create(f.heap, args1.as_ptr());
+            cg_create_inst_phi(f.block_ptr(), CG_INST_OPCODE_PHI, d1, list1);
+            let args2 = [d1, core::ptr::null_mut()];
+            let list2 = cg_virtual_reg_list_create(f.heap, args2.as_ptr());
+            cg_create_inst_phi(f.block_ptr(), CG_INST_OPCODE_PHI, d2, list2);
+
+            cg_resolve_phis(f.module_ptr());
+
+            assert_eq!(reg_parent(d2), d2, "the web root stays self-linked");
+            assert_eq!(reg_parent(d1), d2);
+            assert_eq!(
+                reg_parent(r),
+                d2,
+                "the compression walk flattens the two-hop chain — without \
+                 it r's parent would still be d1"
+            );
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn resolve_phis_phi_with_an_empty_source_list_leaves_the_web_alone() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            wire_graph(&mut f);
+            let dest = cg_virtual_reg_create(f.proc_ptr(), 1);
+            // A NULL regs list: the cell loop never runs (the phi
+            // factory stores the head verbatim).
+            cg_create_inst_phi(
+                f.block_ptr(),
+                CG_INST_OPCODE_PHI,
+                dest,
+                core::ptr::null_mut(),
+            );
+
+            cg_resolve_phis(f.module_ptr());
+
+            assert_eq!(reg_parent(dest), dest);
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn resolve_phis_walks_every_block_and_every_proc() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            wire_graph(&mut f);
+            // A second block chained off the fixture's inline one.
+            let mut block2 = [0usize; 5];
+            block2[CG_BLOCK_PROC] = f.proc.as_ptr() as usize;
+            f.block[CG_BLOCK_NEXT] = block2.as_ptr() as usize;
+            // A second, arena-allocated proc: its factory prepends it
+            // to module->procs, chaining it to the fixture's inline
+            // one.
+            let proc2 = cg_proc_create(f.module_ptr());
+
+            let d1 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let s1 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let args1 = [s1, core::ptr::null_mut()];
+            let list1 = cg_virtual_reg_list_create(f.heap, args1.as_ptr());
+            // The phi lives in the SECOND block.
+            cg_create_inst_phi(
+                block2.as_mut_ptr() as *mut CgBlock,
+                CG_INST_OPCODE_PHI,
+                d1,
+                list1,
+            );
+            // The second proc only gets registers (no blocks).
+            let p2_reg = cg_virtual_reg_create(proc2, 1);
+
+            cg_resolve_phis(f.module_ptr());
+
+            assert_eq!(reg_parent(s1), d1, "the second block's phi is resolved");
+            assert_eq!(reg_parent(d1), d1);
+            assert_eq!(
+                reg_parent(p2_reg),
+                p2_reg,
+                "the second proc's registers are self-linked"
+            );
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn resolve_phis_is_the_wired_default_of_its_pass_slot() {
+        assert_eq!(
+            DEFAULT_CG_COMPILE_AND_PATCH_OPS.pass_resolve_phis as usize,
+            cg_resolve_phis as usize,
+            "porting the pass replaces the no-op default without touching \
+             the driver"
+        );
     }
 
     // --- cg_inst_visit_by_kind ------------------------------------------
