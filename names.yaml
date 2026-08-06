@@ -10719,6 +10719,80 @@ functions:
       optional return register are passed unconditionally, so a NULL selected
       field is stored and advances the cursor when capacity remains.
 
+  - address: 0x082c21b8
+    ghidra: FUN_082c21b8
+    name: cg_resolve_phis
+    size: 176
+    sig: "void cg_resolve_phis(cg_module_t *module)"
+    module: codegen/ir
+    status: ported
+    vars: {param_1: module, r7: proc, r6: block, r4: inst (reg in the self-link/compression walks), r5: phi_source_cell, r8: cell_reg, r9: dest_representative, puVar7: proc, puVar6: block, puVar4: inst, puVar5: source_cell, piVar1: reg}
+    notes: >-
+      2 bl call sites - the compile-and-patch driver's fourth pass
+      (bl @ 0x08243168) and the register-allocation pass FUN_082c1d4c
+      (bl @ 0x082c1d54), which re-runs it internally before allocating.
+      SSA deconstruction: per proc in module->procs (+0x04), (1)
+      self-link every register's +0x04 parent word (str r0,[r0,#0x4]
+      over the +0x10 register list), (2) walk proc->blocks (+0x08, the
+      ldr r6,[r7,#0x8] - first recovery of that field) and every
+      instruction, matching ONLY the opcode byte at inst+0x09 against
+      0x2f (ldrb/cmp - the kind byte is not consulted), and per
+      {next,reg} source cell of the phi's +0x10 list union the source
+      representative into the destination's: find(inst+0x0c dest) is
+      recomputed for EVERY cell, then str dest_rep,[src_rep,#0x4];
+      (3) re-walk the register list running find on every register to
+      path-compress each web into a star (unions alone leave two-hop
+      chains when a phi dest is itself another phi's source). The find
+      helper is FUN_082ce51c, ported as the private cg_reg_find (all
+      of its call sites are inside this pass). No NULL guards beyond
+      list termination - a phi with NULL dest/source dereferences
+      address 4 exactly as the original. Wired as the pass_resolve_phis
+      default of CG_COMPILE_AND_PATCH_OPS (replacing the no-op stub
+      without touching the driver). match.py structural: same four
+      nested walks, same offsets (#4 procs, #16 registers, #8 blocks,
+      #12 insts, #9 opcode byte vs 0x2f, #16 phi regs, #12 dest, #4
+      cell reg/parent), same union store; the bls render as `bl 0`
+      because the private cg_reg_find sits at offset 0 of its own
+      archive member. Host tests:
+      src/codegen/ir.rs::resolve_phis_empty_module_is_a_no_op (NULL
+      procs; proc with no registers/blocks),
+      ::resolve_phis_self_links_every_register_and_overwrites_stale_parents
+      (stale non-NULL parents reset before any find; list links
+      untouched),
+      ::resolve_phis_ignores_instructions_without_the_phi_opcode
+      (binary inst, and phi-KIND record with opcode 0x30, both
+      skipped),
+      ::resolve_phis_unions_a_single_source_phi_into_its_dest,
+      ::resolve_phis_unions_every_source_of_a_multi_source_phi,
+      ::resolve_phis_compresses_two_hop_chains_into_a_star (d1=phi(r);
+      d2=phi(d1) - fails without the stage-3 compression walk),
+      ::resolve_phis_phi_with_an_empty_source_list_leaves_the_web_alone,
+      ::resolve_phis_walks_every_block_and_every_proc (second block via
+      block+0x00, second proc via cg_proc_create prepend),
+      ::resolve_phis_is_the_wired_default_of_its_pass_slot.
+
+  - address: 0x082ce51c
+    ghidra: FUN_082ce51c
+    name: cg_reg_find
+    size: 44
+    sig: "cg_virtual_reg_t *cg_reg_find(cg_virtual_reg_t *reg)"
+    module: codegen/ir
+    status: ported
+    vars: {param_1/r4: reg, r0: parent, then representative}
+    notes: >-
+      3 bl call sites, ALL inside FUN_082c21b8 (plus its own
+      recursion), so the port is a private fn of codegen/ir, not an
+      export. Union-find FIND over the register parent word (+0x04):
+      if the parent is NULL or self, return the register itself
+      (cmpne/moveq); else recurse, then path-compress - the parent is
+      RELOADED after the recursive call and stored only when it
+      differs (ldr r1,[r4,#0x4]; cmp r1,r0; strne r0,[r4,#0x4]).
+      Ghidra renders the return void, but every caller consumes r0
+      (mov r9,r0 / str r9,[r0,#0x4]) - the port returns the
+      representative. Exercised through every cg_resolve_phis host
+      test (single-hop unions, the two-hop chain, the compression
+      walk).
+
   - address: 0x0827233c
     ghidra: FUN_0827233c
     name: task_ctx_field_0x30
@@ -14415,6 +14489,46 @@ functions:
       (default slot always fails, mimicking OOM); the AddOp0 helper is
       semantically vdbe_add_op3(v, op, 0, 0, 0), so the ported
       vdbe_add_op3 is called directly.
+
+  - address: 0x0837ad2c
+    ghidra: FUN_0837ad2c
+    name: hash_clear
+    size: 92
+    sig: "void hash_clear(Hash *hash)"
+    module: sqlite/hash_clear
+    status: ported
+    vars: {param_1: hash, piVar2: elem, iVar3: next, iVar1: key, bVar4: copy_key}
+    notes: >-
+      SQLite 3.4.x/3.5.x hash.c's sqlite3HashClear, the destructor half
+      of the Hash machinery hash_init @ 0x0837ade8 (ported, see its
+      entry) constructs. 7 bl call sites in two functions, both
+      binary-verified: sqlite3SchemaClear @ 0x08382c58 (4 sites -
+      fkeyHash @ +0x40 and idxHash @ +0x18 directly, plus the two
+      stack snapshots of tblHash/trigHash at sp+0x04/sp+0x18 taken
+      before the delete loops; the live Schema hashes are re-stamped
+      by hash_init right after) and closeDatabase @ 0x0838f890 (3
+      sites - the db handle's +0x128/+0xf4/+0x114 aCollSeq/aModule/
+      aFunc-family hashes on the sqlite3_close path). Body: detach
+      first @ +0x0c and NULL it, free the ht bucket array @ +0x10
+      through sqlite3_free @ 0x083906f4 (the ported
+      heap::tracked::tracked_free, called directly - LLVM inlines it
+      into the body, as in sqlite/mem.rs; same bytes, different shape
+      in the match.py diff), NULL ht and zero htsize @ +0x08, then
+      walk the chain: next = elem->next @ +0x00, and iff copyKey
+      @ +0x01 (ldrb, reloaded each round) and elem->pKey @ +0x0c are
+      both non-NULL (fused ldrne/cmpne/blne) free the key first, then
+      free the node; count @ +0x04 is the final zero store. Confirms
+      the 20-byte Hash layout hash_init pins and pins this build's
+      HashElem node layout: next @ +0x00 and the strdup'd key @ +0x0c
+      (the pKey of 3.4.x's {next, prev, data, pKey, nKey}). Deviation
+      from upstream: no `if( pH->ht )` wrapper - the free runs
+      unconditionally and tracked_free's internal NULL guard is the
+      original's own. Host tests (5) cover the empty hash (nothing
+      freed, flags survive), ht-first-then-chain free order, copyKey
+      key-before-node order with a NULL-key node, the copyKey-clear
+      never-loads-the-key case, and full field zeroing; they route
+      frees through the shared veneers::tests::mock_heap with a
+      recording free, against hand-built tag-57 tracked blocks.
 
   - address: 0x0837ade8
     ghidra: FUN_0837ade8
