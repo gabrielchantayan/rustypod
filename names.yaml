@@ -14530,6 +14530,60 @@ functions:
       frees through the shared veneers::tests::mock_heap with a
       recording free, against hand-built tag-57 tracked blocks.
 
+  - address: 0x0837ad88
+    ghidra: FUN_0837ad88
+    name: hash_find
+    size: 96
+    sig: "void *hash_find(const Hash *hash, const void *key, int key_len)"
+    module: sqlite/hash_find
+    status: ported
+    vars: {param_1: hash, param_2: key, param_3: key_len, iVar1: elem,
+      pcVar2: hashfn, uVar3: data}
+    notes: >-
+      SQLite 3.4.x/3.5.x hash.c's sqlite3HashFind, the read path of the
+      Hash machinery hash_init @ 0x0837ade8 and hash_clear @ 0x0837ad2c
+      (both ported) bracket. 11 bl call sites, binary-scanned: the
+      find-or-create helper @ 0x082ce220 (db +0x128 aCollSeq-family
+      hash by strlen'd name, malloc+fill+sqlite3HashInsert on miss -
+      the sqlite3FindFunction shape), the db +0xf4 aModule-family
+      lookup @ 0x0838d52c (result stored at caller +0x3c), a +0x2c
+      trigHash-style lookup @ 0x0836fecc, and 0x082c52d8 / 0x08375c98 /
+      0x083761bc / 0x08378bbc / 0x08378ffc / 0x08379094 / 0x083794e0 /
+      0x08385354. Body: NULL hash or NULL ht @ +0x10 -> NULL
+      (predicated movs/ldrne/cmpne/moveq); otherwise ldrb keyClass
+      @ +0x00, bl hash_function @ 0x082d2a1c (ported), blx the result
+      with (pKey, nKey), bl __rt_sdiv @ 0x08031568 against htsize
+      @ +0x08 and take the REMAINDER (mov r3,r1 - upstream's inlined
+      sqlite3HashValue `% pH->htsize`, not a mask; both key hashes
+      return h & 0x7fffffff, so the signed remainder is the unsigned
+      one on every reachable path), then bl findElementGivenHash
+      @ 0x082ce2e8 with (hash, pKey, nKey, bucket) and return
+      elem ? elem->data @ +0x08 : NULL. Pins HashElem.data at +0x08
+      (upstream 3.4.x {next, prev, data, pKey, nKey}, agreeing with
+      hash_clear's next @ +0x00 / key @ +0x0c); the walker's disasm
+      (bucket = ht + h*8 of {count, chain} pairs, comparator blx'd
+      with (elem->key @ +0x0c, elem->nKey @ +0x10, pKey, nKey)) also
+      pins HashElem.nKey @ +0x10 for its future port. findElementGivenHash
+      @ 0x082ce2e8 is identified but unported - reached through the
+      find_elem slot of HASH_FIND_HOOKS, whose shipped default is a
+      "not found" stand-in; the hash_dispatch slot defaults to the real
+      ported hash_function and exists so host tests can substitute a
+      host-callable dispatcher (the real one returns firmware runtime
+      addresses, callable on-target only). Deviations: both callees go
+      through the volatile hook slots (indirect blx replaces two direct
+      bls - the house seam convention, cf. sqlite/cell_size); LLVM
+      inlines the ported __rt_sdivmod into the body, so the
+      bl 0x08031568 boundary does not survive (the hash_clear /
+      tracked_free precedent). match.py: same NULL-guard prologue,
+      same key-hash blx, same cmp/ldrne data-or-NULL tail; the diff is
+      LLVM's fp frame, the slot indirection, and the inlined divide.
+      Host tests (8): default slot wiring, NULL-hash / NULL-ht
+      short-circuits that never reach the hooks, keyClass dispatch
+      verbatim (3 = STRING and 4 = BINARY), negative-nKey pass-through
+      (the strlen probe contract), bucket = h % htsize as a remainder
+      (13 % 8 = 5; htsize 1 buckets 0x7fffffff to 0), found element ->
+      data word @ +0x08, not-found -> NULL.
+
   - address: 0x0837ade8
     ghidra: FUN_0837ade8
     name: hash_init
