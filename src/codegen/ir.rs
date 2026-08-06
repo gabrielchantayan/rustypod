@@ -112,6 +112,14 @@
 //!   44 bytes, no call site outside the pass), then path-compresses
 //!   every web into a star. Wired as the `pass_resolve_phis` default
 //!   of [`CG_COMPILE_AND_PATCH_OPS`].
+//! - `cg_index_registers` — original: `FUN_082c214c` @ 0x082c214c (108
+//!   bytes; 1 `bl` call site — the compile-and-patch driver's eighth
+//!   and last analysis pass). Per procedure, arena-allocates a
+//!   `num_registers`-entry pointer table at proc `+0x18`, fills
+//!   `table[reg_no] = reg`, then visits every block through the
+//!   identified-but-unported liveness visitor `FUN_082b7bbc` (the
+//!   [`CG_BLOCK_LIVENESS`] seam). Wired as the `pass_index_registers`
+//!   default of [`CG_COMPILE_AND_PATCH_OPS`].
 //! - `cg_compile_and_patch` — original: `FUN_08243138` @ 0x08243138
 //!   (348 bytes; 0 `bl` callers, 6 tail `b` sites — the clones). The
 //!   JIT's compile-and-patch driver, the top of the ported codegen
@@ -145,6 +153,7 @@
 //!                               +0x08 blocks (head)          +0x0c insts (head)
 //!                               +0x10 registers (head)       +0x10 last_inst (tail)
 //!                               +0x14 last_register (tail)
+//!                               +0x18 reg_table (reg_no -> reg)
 //!                               +0x20 num_registers
 //!
 //! cg_virtual_reg_t (40 bytes)  cg_inst_t (base of every instruction)
@@ -430,6 +439,12 @@ pub const CG_PROC_BLOCKS: usize = 2;
 pub const CG_PROC_REGISTERS: usize = 4;
 /// `cg_proc_t + 0x14` — last virtual register.
 pub const CG_PROC_LAST_REGISTER: usize = 5;
+/// `cg_proc_t + 0x18` — the register-index table [`cg_index_registers`]
+/// builds (its `str r0,[r4,#0x18]`): a `num_registers`-entry arena
+/// array mapping `reg_no` to the register pointer, consumed by the
+/// per-block liveness visitor `FUN_082b7bbc` (its
+/// `ldr r0,[r0,#0x18]; ldr r2,[r0,r5,lsl #0x2]` reloads).
+pub const CG_PROC_REG_TABLE: usize = 6;
 /// `cg_proc_t + 0x20` — number of registers created so far.
 pub const CG_PROC_NUM_REGISTERS: usize = 8;
 /// Size of `cg_proc_t` in target bytes — the factory's
@@ -2125,6 +2140,96 @@ pub unsafe extern "C" fn cg_resolve_phis(module: *mut CgModule) {
     }
 }
 
+// --- cg_index_registers (0x082c214c) and its block-visitor seam ------
+
+/// The per-block visitor boundary for [`cg_index_registers`]: one call
+/// per block, in the procedure's list order — the original's in-loop
+/// `bl 0x082b7bbc`. `FUN_082b7bbc` @ 0x082b7bbc (800 bytes; **1 `bl`
+/// call site** — this pass's block loop) is the per-block
+/// liveness/interference analysis: builds a bitset record through
+/// `FUN_082c0c54` (over the first word of the block's `+0x1c` record),
+/// `malloc`s (`bl 0x0802edac`) and zeroes a `num_registers`-entry
+/// counter table, counts every instruction's USED registers into it
+/// (through the ported [`cg_inst_collect_used_regs`]), folds the set
+/// through `FUN_082c0c20`, then for every SET-BIT PAIR `(i, j)`,
+/// `i < j`, looks both numbers up in this pass's proc `+0x18` table
+/// and calls `FUN_082b2e98(heap, table[i], table[j])` twice with the
+/// register arguments swapped — the interference-edge linker — and
+/// finally re-walks the instructions over their DEFINED registers
+/// (through the ported [`cg_inst_visit_by_kind`]). It stays unported;
+/// the wired default ([`default_cg_block_liveness`]) performs no work
+/// (same documented deviation as [`default_cg_graph_pass`]). Host
+/// tests swap in a recording fake; porting 0x082b7bbc later replaces
+/// the default without touching the pass (the [`CG_PROC_EMIT`]
+/// precedent).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub static mut CG_BLOCK_LIVENESS: unsafe extern "C" fn(*mut CgBlock) =
+    default_cg_block_liveness;
+
+/// The wired default of [`CG_BLOCK_LIVENESS`]: no analysis. See the
+/// seam's doc for the deviation.
+unsafe extern "C" fn default_cg_block_liveness(_block: *mut CgBlock) {}
+
+/// cg_index_registers — original: `FUN_082c214c` @ 0x082c214c (108
+/// bytes; **1 `bl` call site** — the compile-and-patch driver's eighth
+/// and last analysis pass, `bl 0x082c214c` @ 0x08243188). Builds the
+/// register-number index the per-block liveness visitor
+/// (`FUN_082b7bbc`) and the register allocator consume.
+///
+/// Per procedure in `module->procs`, in the original's exact order:
+///
+/// 1. Arena-allocate a `num_registers`-entry pointer table out of the
+///    module's heap (`ldr r0,[r4,#0x20]; mov r1,r0,lsl #0x2;
+///    ldr r0,[r6,#0x0]; bl 0x082c1a08` — [`cg_heap_alloc`], called
+///    directly) and store it at proc `+0x18` ([`CG_PROC_REG_TABLE`]).
+///    A procedure with ZERO registers still gets a table:
+///    `cg_heap_alloc(heap, 0)` rounds the request up to one
+///    eight-byte granule.
+/// 2. Walk the register list (proc `+0x10`) storing
+///    `table[reg->reg_no] = reg` (`ldrne r2,[r0,#0x10];
+///    strne r0,[r1,r2,lsl #0x2]`).
+/// 3. Walk the block list (proc `+0x08`) invoking the visitor
+///    `FUN_082b7bbc` on every block (the [`CG_BLOCK_LIVENESS`] seam —
+///    identified but unported; the default performs no analysis).
+///
+/// Like the rest of the cluster there are no NULL guards beyond the
+/// list-termination checks. The arena's zero-fill leaves a NULL table
+/// entry for any register number no register claims.
+///
+/// DEVIATION: the block visitor goes through the swappable
+/// [`CG_BLOCK_LIVENESS`] slot where the original `bl`s `FUN_082b7bbc`
+/// directly — the slot defaults to no analysis (same scheme as
+/// [`CG_PROC_EMIT`]); the table build itself is the original's exact
+/// body. Wired as the `pass_index_registers` default of
+/// [`CG_COMPILE_AND_PATCH_OPS`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_index_registers(module: *mut CgModule) {
+    let module = module as *mut u8;
+    let mut proc = slot(module, CG_MODULE_PROCS).read();
+    while !proc.is_null() {
+        // 1. One arena-carved pointer table per procedure.
+        let table = cg_heap_alloc(
+            module_heap(module),
+            record_size(word(proc, CG_PROC_NUM_REGISTERS).read() * 4),
+        );
+        slot(proc, CG_PROC_REG_TABLE).write(table);
+        // 2. Index every register by its number.
+        let mut reg = slot(proc, CG_PROC_REGISTERS).read();
+        while !reg.is_null() {
+            slot(table, word(reg, CG_VREG_NO).read()).write(reg);
+            reg = slot(reg, CG_VREG_NEXT).read();
+        }
+        // 3. Run the liveness visitor over every block.
+        let mut block = slot(proc, CG_PROC_BLOCKS).read();
+        while !block.is_null() {
+            hook(core::ptr::addr_of!(CG_BLOCK_LIVENESS))(block as *mut CgBlock);
+            block = slot(block, CG_BLOCK_NEXT).read();
+        }
+        proc = slot(proc, CG_PROC_NEXT).read();
+    }
+}
+
 // --- cg_compile_and_patch (0x08243138) and its seams -----------------
 
 /// `cg_compile_driver_t + 0x00` — the driver object's vtable. The
@@ -2250,7 +2355,8 @@ pub struct CgCompileAndPatchOps {
     /// `FUN_082c214c` @ 0x082c214c (108 bytes). Per procedure,
     /// arena-allocates a `num_registers`-entry pointer table at
     /// proc `+0x18`, fills `table[reg_no] = reg`, then visits every
-    /// block through `FUN_082b7bbc`. Default: no graph mutation.
+    /// block through `FUN_082b7bbc`. Default: the ported
+    /// [`cg_index_registers`].
     pub pass_index_registers: CgGraphPass,
     /// `FUN_082c12c4` @ 0x082c12c4 (92 bytes) — lowering and emission:
     /// creates the two per-procedure codegen labels, then emits every
@@ -2293,17 +2399,18 @@ pub struct CgCompileAndPatchOps {
     pub codegen_destroy: unsafe extern "C" fn(codegen: *mut CgCodegen),
 }
 
-/// Wired default for the seven still-unported analysis-pass slots of
+/// Wired default for the six still-unported analysis-pass slots of
 /// [`CgCompileAndPatchOps`]: performs NO graph mutation.
 ///
-/// DEVIATION (documented, deliberate): the seven originals are
+/// DEVIATION (documented, deliberate): the six originals are
 /// identified (address, size and recovered behavior on each field of
 /// [`CgCompileAndPatchOps`]) but stay unported — each is a whole-graph
 /// walker with its own deep callee tree (`FUN_082d6a90`,
 /// `FUN_082d90ec`, `FUN_082e72d8`, `FUN_082b2f60`, ...), and modeling
 /// half of a mark-and-sweep or a register allocator would be worse
-/// than modeling none. The eighth pass, `FUN_082c21b8`, is ported as
-/// [`cg_resolve_phis`] and wired directly as its slot's default —
+/// than modeling none. The other two passes are ported and wired
+/// directly as their slots' defaults — `FUN_082c21b8` as
+/// [`cg_resolve_phis`] and `FUN_082c214c` as [`cg_index_registers`] —
 /// porting a pass replaces its slot without touching the driver. With
 /// these defaults wired, the driver's own pipeline — construct, lower
 /// (label creation only), resolve, reserve, copy out, flush, destroy
@@ -2432,7 +2539,7 @@ pub const DEFAULT_CG_COMPILE_AND_PATCH_OPS: CgCompileAndPatchOps =
         pass_allocate_registers: default_cg_graph_pass,
         pass_link_use_insts: default_cg_graph_pass,
         pass_link_branch_edges: default_cg_graph_pass,
-        pass_index_registers: default_cg_graph_pass,
+        pass_index_registers: cg_index_registers,
         lower_and_emit: default_cg_lower_and_emit,
         reserve_dst: default_cg_reserve_dst,
         flush_caches: default_cg_flush_caches,
@@ -2470,8 +2577,9 @@ pub static mut CG_COMPILE_AND_PATCH_OPS: CgCompileAndPatchOps =
 ///    `FUN_082c2008`, `FUN_082c1d78`, `FUN_082c1f04`, `FUN_082c21b8`,
 ///    `FUN_082c1d4c`, `FUN_082c2098`, `FUN_082c1ddc`, `FUN_082c214c`
 ///    (the [`CG_COMPILE_AND_PATCH_OPS`] pass slots; `FUN_082c21b8` is
-///    ported as [`cg_resolve_phis`] and wired as its slot's default,
-///    the other seven stay unported behind no-op defaults).
+///    ported as [`cg_resolve_phis`] and `FUN_082c214c` as
+///    [`cg_index_registers`], each wired as its slot's default — the
+///    other six stay unported behind no-op defaults).
 /// 2. Build the ten-word runtime-helper table [`CG_HELPER_TABLE`] and
 ///    a zero-initialized status cell on the stack.
 /// 3. `codegen = cg_codegen_create(*module, &helpers, &status)` — the
@@ -2503,11 +2611,11 @@ pub static mut CG_COMPILE_AND_PATCH_OPS: CgCompileAndPatchOps =
 /// DEVIATIONS: the helper table is a shared static instead of a
 /// stack copy (the original's 0x28-byte `memzero` at sp+4 is dead —
 /// all ten words are stored before any read — and the table is only
-/// ever read from); seven of the eight analysis passes, the
+/// ever read from); six of the eight analysis passes, the
 /// per-procedure emitter, the reserve stage and the cache flush
 /// default to no-ops as documented on [`CgCompileAndPatchOps`] /
-/// [`CG_PROC_EMIT`] (the eighth pass is the ported
-/// [`cg_resolve_phis`]);
+/// [`CG_PROC_EMIT`] (the other two passes are the ported
+/// [`cg_resolve_phis`] and [`cg_index_registers`]);
 /// [`default_cg_codegen_destroy`] adds a NULL-output guard and routes
 /// frees through [`CG_BUFFER_FREE`]. Everything else — stage order,
 /// argument routing, the three `current_offset` re-reads, the vtable
@@ -5439,6 +5547,167 @@ mod tests {
         );
     }
 
+    // --- cg_index_registers --------------------------------------------
+
+    /// Blocks observed by the recording mock, in visit order.
+    static mut BLOCK_LIVENESS_LOG: std::vec::Vec<*mut CgBlock> = std::vec::Vec::new();
+
+    unsafe extern "C" fn recording_block_liveness(block: *mut CgBlock) {
+        BLOCK_LIVENESS_LOG.push(block);
+    }
+
+    unsafe fn proc_reg_table(proc: *mut CgProc) -> *mut *mut u8 {
+        slot(proc as *mut u8, CG_PROC_REG_TABLE).read() as *mut *mut u8
+    }
+
+    #[test]
+    fn index_registers_empty_module_is_a_no_op() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            // NULL module->procs: the outermost loop never runs.
+            cg_index_registers(f.module_ptr());
+            assert_eq!(f.proc[CG_PROC_REG_TABLE], 0, "no proc, no table");
+            // A proc with no registers and no blocks: the fill and
+            // visitor loops fall through at their NULL heads, but the
+            // table is still allocated — the original's
+            // cg_heap_alloc(heap, 0) rounds up to one granule.
+            f.module[CG_MODULE_PROCS] = f.proc.as_ptr() as usize;
+            cg_index_registers(f.module_ptr());
+            assert!(
+                !proc_reg_table(f.proc_ptr()).is_null(),
+                "the zero-register proc still gets its (empty) table"
+            );
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn index_registers_fills_the_table_by_register_number() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            f.module[CG_MODULE_PROCS] = f.proc.as_ptr() as usize;
+            // No blocks: only the table build runs.
+            let r0 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let r1 = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let r2 = cg_virtual_reg_create(f.proc_ptr(), 1);
+
+            cg_index_registers(f.module_ptr());
+
+            let table = proc_reg_table(f.proc_ptr());
+            assert!(!table.is_null());
+            for (i, reg) in [r0, r1, r2].iter().enumerate() {
+                assert_eq!(*table.add(i), *reg as *mut u8, "table[{i}] is reg {i}");
+            }
+            // The register list itself is untouched.
+            assert_eq!(reg_next(r0), r1);
+            assert_eq!(reg_next(r1), r2);
+            assert!(reg_next(r2).is_null());
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn index_registers_visits_every_block_in_list_order() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            let saved = hook(core::ptr::addr_of!(CG_BLOCK_LIVENESS));
+            *core::ptr::addr_of_mut!(CG_BLOCK_LIVENESS) = recording_block_liveness;
+            BLOCK_LIVENESS_LOG.clear();
+
+            wire_graph(&mut f);
+            // A second block chained off the fixture's inline one.
+            let mut block2 = [0usize; 5];
+            block2[CG_BLOCK_PROC] = f.proc.as_ptr() as usize;
+            f.block[CG_BLOCK_NEXT] = block2.as_ptr() as usize;
+
+            cg_index_registers(f.module_ptr());
+
+            *core::ptr::addr_of_mut!(CG_BLOCK_LIVENESS) = saved;
+            assert_eq!(
+                BLOCK_LIVENESS_LOG.as_slice(),
+                &[f.block_ptr(), block2.as_mut_ptr() as *mut CgBlock],
+                "every block is visited once, in list order"
+            );
+            // ...and the table was still built for the register-less proc.
+            assert!(!proc_reg_table(f.proc_ptr()).is_null());
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn index_registers_walks_every_proc_and_indexes_each_procs_own_registers() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            f.module[CG_MODULE_PROCS] = f.proc.as_ptr() as usize;
+            let p1_reg = cg_virtual_reg_create(f.proc_ptr(), 1);
+            // A second, arena-allocated proc (its factory prepends it,
+            // so it becomes the list head) with two registers of its
+            // own — numbered from zero AGAIN, per proc.
+            let proc2 = cg_proc_create(f.module_ptr());
+            let p2_r0 = cg_virtual_reg_create(proc2, 1);
+            let p2_r1 = cg_virtual_reg_create(proc2, 1);
+
+            cg_index_registers(f.module_ptr());
+
+            let table1 = proc_reg_table(f.proc_ptr());
+            let table2 = proc_reg_table(proc2);
+            assert_ne!(table1, table2, "each proc gets its own arena table");
+            assert_eq!(*table1, p1_reg as *mut u8);
+            assert_eq!(*table2, p2_r0 as *mut u8);
+            assert_eq!(*table2.add(1), p2_r1 as *mut u8, "numbers are per proc");
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn index_registers_composes_with_resolve_phis_in_ops_table_order() {
+        let _g = setup();
+        let mut f = Fixture::new(4096);
+        unsafe {
+            wire_graph(&mut f);
+            let dest = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let source = cg_virtual_reg_create(f.proc_ptr(), 1);
+            let args = [source, core::ptr::null_mut()];
+            let list = cg_virtual_reg_list_create(f.heap, args.as_ptr());
+            cg_create_inst_phi(f.block_ptr(), CG_INST_OPCODE_PHI, dest, list);
+
+            // The driver's stage-1 order, through the ops table:
+            // resolve the phi webs first, then build the index.
+            let ops = hook(core::ptr::addr_of!(CG_COMPILE_AND_PATCH_OPS));
+            (ops.pass_resolve_phis)(f.module_ptr());
+            (ops.pass_index_registers)(f.module_ptr());
+
+            assert_eq!(reg_parent(source), dest, "the phi web is resolved first");
+            let table = proc_reg_table(f.proc_ptr());
+            assert_eq!(*table.add(reg_no(dest)), dest as *mut u8);
+            assert_eq!(
+                *table.add(reg_no(source)),
+                source as *mut u8,
+                "the index still maps every register by its number"
+            );
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn index_registers_is_the_wired_default_of_its_pass_slot() {
+        assert_eq!(
+            DEFAULT_CG_COMPILE_AND_PATCH_OPS.pass_index_registers as usize,
+            cg_index_registers as usize,
+            "porting the pass replaces the no-op default without touching \
+             the driver"
+        );
+    }
+
     // --- cg_inst_visit_by_kind ------------------------------------------
 
     /// Fabricates a raw instruction record with the given kind byte and
@@ -6316,6 +6585,11 @@ mod tests {
                 hook(core::ptr::addr_of!(CG_PROC_EMIT)) as usize,
                 default_cg_proc_emit as usize,
                 "the nested emitter seam stays wired to its documented default"
+            );
+            assert_eq!(
+                hook(core::ptr::addr_of!(CG_BLOCK_LIVENESS)) as usize,
+                default_cg_block_liveness as usize,
+                "the block-visitor seam stays wired to its documented default"
             );
             assert_eq!(
                 hook(core::ptr::addr_of!(CG_BUFFER_FREE)) as usize,
