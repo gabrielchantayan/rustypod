@@ -72,12 +72,14 @@
 //!   bodies — see its own doc header); those pointers are only
 //!   callable on-target, so host tests substitute a dispatcher whose
 //!   tables are host-resident.
-//! - `findElementGivenHash` @ 0x082ce2e8 — identified, unported,
-//!   reached through the `find_elem` seam (see [`HashFindHooks`]).
-//!   Its disassembly (bucket = `ht + h*8` of {count, chain} pairs,
-//!   keyClass-selected comparator blx'd with (elem->key @ +0x0c,
-//!   elem->nKey @ +0x10, pKey, nKey), chain walked via `next` @
-//!   +0x00) pins `HashElem.nKey` at +0x10 for its future port.
+//! - `findElementGivenHash` @ 0x082ce2e8 — ported as
+//!   [`super::find_element_given_hash::find_element_given_hash`], the
+//!   shipped default of this module's `find_elem` seam (see
+//!   [`HashFindHooks`]). Its disassembly (bucket = `ht + h*8` of
+//!   {count, chain} pairs, keyClass-selected comparator blx'd with
+//!   (elem->key @ +0x0c, elem->nKey @ +0x10, pKey, nKey), chain
+//!   walked via `next` @ +0x00) pinned `HashElem.nKey` at +0x10 —
+//!   the field its port added to [`super::hash_clear`]'s struct.
 //!
 //! Callers (11 `bl` sites, all binary-scanned; none of the enclosing
 //! functions is named yet — the `Hash`-offset evidence is what
@@ -104,8 +106,8 @@
 //!   [`HASH_FIND_HOOKS`] (the house seam convention —
 //!   `sqlite/cell_size.rs`), so the shipped image's indirect `blx`
 //!   replaces two direct `bl`s. The defaults make the indirection
-//!   behaviorally transparent: the real ported dispatcher, and a NULL
-//!   ("not found") stand-in for the unported walker.
+//!   behaviorally transparent: the real ported dispatcher and the
+//!   real ported walker.
 //! - The remainder comes out of the ported
 //!   [`__rt_sdivmod`]'s out-param where the original reads r1 after
 //!   `bl 0x08031568`; same divide, same div0 funnel on the
@@ -114,6 +116,7 @@
 //!   different shape), so the original's `bl 0x08031568` boundary
 //!   does not survive in the match.py diff.
 
+use super::find_element_given_hash::find_element_given_hash;
 use super::hash_clear::{Hash, HashElem};
 use super::hash_function::{hash_function, HashFn};
 use crate::runtime::rt_div::__rt_sdivmod;
@@ -130,12 +133,17 @@ pub struct HashFindHooks {
     /// original's `blx r2`; with the default slot that pointer names
     /// firmware code and is only callable on-target.
     pub hash_dispatch: unsafe extern "C" fn(key_class: i32) -> HashFn,
-    /// `findElementGivenHash` @ 0x082ce2e8 (UNPORTED —
-    /// [`missing_find_elem`] is the shipped default): walk bucket
-    /// `h`'s chain comparing `(key, key_len)` against each element's
-    /// key @ +0x0c / nKey @ +0x10 through the keyClass-selected
-    /// comparator, and return the matching `HashElem` or NULL. See
-    /// `decomp/c/032/082ce2e8_FUN_082ce2e8.c`.
+    /// `findElementGivenHash` @ 0x082ce2e8 (ported —
+    /// [`super::find_element_given_hash::find_element_given_hash`] is
+    /// the shipped default): walk bucket `h`'s chain comparing
+    /// `(key, key_len)` against each element's key @ +0x0c / nKey
+    /// @ +0x10 through the keyClass-selected comparator, and return
+    /// the matching `HashElem` or NULL. See
+    /// `decomp/c/031/082ce2e8_FUN_082ce2e8.c`. The walker's own
+    /// comparator select goes through its `FIND_ELEMENT_HOOKS` seam,
+    /// whose stock-address defaults are callable on-target only —
+    /// host tests of the real walker substitute host comparators
+    /// there, not in this slot.
     pub find_elem: unsafe extern "C" fn(
         hash: *const Hash,
         key: *const u8,
@@ -144,32 +152,19 @@ pub struct HashFindHooks {
     ) -> *mut HashElem,
 }
 
-/// Default boundary while 0x082ce2e8 is unported. "Not found" is the
-/// only honest stand-in for a chain walker that does not exist yet —
-/// an empty table finds nothing, and no caller-visible state depends
-/// on the walk (the original's walker is side-effect free).
-unsafe extern "C" fn missing_find_elem(
-    _hash: *const Hash,
-    _key: *const u8,
-    _key_len: i32,
-    _h: u32,
-) -> *mut HashElem {
-    core::ptr::null_mut()
-}
-
 /// Wired default for [`HASH_FIND_HOOKS`]: the real ported
 /// `hashFunction` (its returned pointers resolve on-target through
 /// the stock-address hooks, as its own doc header describes) and the
-/// not-found stand-in for the unported walker @ 0x082ce2e8.
+/// real ported walker @ 0x082ce2e8.
 pub const DEFAULT_HASH_FIND_HOOKS: HashFindHooks = HashFindHooks {
     hash_dispatch: hash_function,
-    find_elem: missing_find_elem,
+    find_elem: find_element_given_hash,
 };
 
 /// Active model of the dispatcher and walker calls in [`hash_find`].
-/// Host tests replace both slots to observe the exact arguments; a
-/// later port of 0x082ce2e8 replaces the `find_elem` default without
-/// touching this caller.
+/// Host tests replace both slots to observe the exact arguments; the
+/// walker's own comparator seam lives one module down, in
+/// [`super::find_element_given_hash`].
 pub static mut HASH_FIND_HOOKS: HashFindHooks = DEFAULT_HASH_FIND_HOOKS;
 
 /// Reads the dispatcher slot. Volatile so LLVM cannot constant-fold
@@ -331,7 +326,7 @@ mod tests {
     }
 
     #[test]
-    fn default_slots_are_the_ported_dispatch_and_the_not_found_stand_in() {
+    fn default_slots_are_the_ported_dispatch_and_the_ported_walker() {
         assert_eq!(
             DEFAULT_HASH_FIND_HOOKS.hash_dispatch as usize,
             hash_function as *const () as usize,
@@ -339,15 +334,8 @@ mod tests {
         );
         assert_eq!(
             DEFAULT_HASH_FIND_HOOKS.find_elem as usize,
-            missing_find_elem as *const () as usize,
-            "the walker slot ships the not-found stand-in while 0x082ce2e8 is unported"
-        );
-        // The stand-in itself: "not found" for any input.
-        assert!(
-            unsafe {
-                missing_find_elem(core::ptr::null(), core::ptr::null(), 0, 0).is_null()
-            },
-            "the default walker reports an empty table's answer: NULL"
+            find_element_given_hash as *const () as usize,
+            "the walker slot ships the real ported findElementGivenHash"
         );
     }
 
@@ -415,6 +403,7 @@ mod tests {
             prev: core::ptr::null_mut(),
             data: payload,
             key: core::ptr::null_mut(),
+            n_key: 0,
         };
         unsafe {
             *core::ptr::addr_of_mut!(FIND_RESULT) = &mut elem;
@@ -446,5 +435,146 @@ mod tests {
             0,
             "the largest strHash output mod 1: the remainder path, not a mask"
         );
+    }
+
+    // --- Integration through the real default walker ---------------
+    //
+    // `hash_find` with its shipped `find_elem` default — the ported
+    // findElementGivenHash — over a hand-built live table. Only the
+    // two firmware-address boundaries are stubbed host-side: the key
+    // hash (a dispatcher returning the ported string_hash_tabled) and
+    // the comparators (the stock strCompare/binCompare shapes over the
+    // ported str_nicmp / a slice compare).
+
+    use crate::sqlite::find_element_given_hash::tests::FIND_ELEMENT_TEST_LOCK;
+    use crate::sqlite::find_element_given_hash::{
+        Bucket, CompareFn, FindElementHooks, DEFAULT_FIND_ELEMENT_HOOKS, FIND_ELEMENT_HOOKS,
+    };
+    use crate::sqlite::strhash::string_hash_tabled;
+    use crate::sqlite::stricmp::str_nicmp;
+
+    /// The stock `strCompare` shape, host-resident.
+    unsafe extern "C" fn host_str_compare(
+        key1: *const u8,
+        len1: i32,
+        key2: *const u8,
+        len2: i32,
+    ) -> i32 {
+        if len1 != len2 {
+            return 1;
+        }
+        str_nicmp(key1, key2, len1)
+    }
+
+    /// The stock `binCompare` shape, host-resident.
+    unsafe extern "C" fn host_bin_compare(
+        key1: *const u8,
+        len1: i32,
+        key2: *const u8,
+        len2: i32,
+    ) -> i32 {
+        if len1 != len2 {
+            return 1;
+        }
+        let a = core::slice::from_raw_parts(key1, len1 as usize);
+        let b = core::slice::from_raw_parts(key2, len2 as usize);
+        (a != b) as i32
+    }
+
+    /// A dispatcher whose string hash is the ported `strHash` body.
+    unsafe extern "C" fn host_string_dispatch(_key_class: i32) -> HashFn {
+        string_hash_tabled
+    }
+
+    /// Holds the walker module's seam lock and restores its stock
+    /// defaults on drop (the HookGuard pattern, one module down).
+    struct FindElemGuard {
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl Drop for FindElemGuard {
+        fn drop(&mut self) {
+            unsafe {
+                *core::ptr::addr_of_mut!(FIND_ELEMENT_HOOKS) = DEFAULT_FIND_ELEMENT_HOOKS;
+            }
+        }
+    }
+
+    fn with_host_comparators() -> FindElemGuard {
+        let guard = FindElemGuard {
+            _guard: FIND_ELEMENT_TEST_LOCK
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()),
+        };
+        unsafe {
+            *core::ptr::addr_of_mut!(FIND_ELEMENT_HOOKS) = FindElementHooks {
+                str_compare: host_str_compare as CompareFn as usize,
+                bin_compare: host_bin_compare as CompareFn as usize,
+            };
+        }
+        guard
+    }
+
+    #[test]
+    fn hash_find_through_the_real_default_walker() {
+        let _hooks = with_mock_hooks();
+        let _comparators = with_host_comparators();
+        unsafe {
+            (*core::ptr::addr_of_mut!(HASH_FIND_HOOKS)).hash_dispatch = host_string_dispatch;
+            // The shipped default slot — the function under test.
+            (*core::ptr::addr_of_mut!(HASH_FIND_HOOKS)).find_elem = find_element_given_hash;
+        }
+
+        // A live 8-bucket table, laid out exactly as the firmware's
+        // sqlite3HashInsert would: bucket = strHash(key) % htsize,
+        // newest element at the chain head.
+        let keys: [&'static [u8]; 3] = [b"alpha", b"beta", b"gamma"];
+        let mut elems: Vec<HashElem> = keys
+            .iter()
+            .enumerate()
+            .map(|(i, key)| HashElem {
+                next: core::ptr::null_mut(),
+                prev: core::ptr::null_mut(),
+                data: (0x1000 + i) as *mut u8,
+                key: key.as_ptr() as *mut u8,
+                n_key: key.len() as i32,
+            })
+            .collect();
+        let mut buckets: Vec<Bucket> = (0..8)
+            .map(|_| Bucket {
+                count: 0,
+                chain: core::ptr::null_mut(),
+            })
+            .collect();
+        for elem in elems.iter_mut() {
+            let bucket =
+                unsafe { string_hash_tabled(elem.key, elem.n_key) } % 8;
+            elem.next = buckets[bucket as usize].chain;
+            buckets[bucket as usize].chain = elem;
+            buckets[bucket as usize].count += 1;
+        }
+        let mut hash: Hash = unsafe { core::mem::zeroed() };
+        hash.key_class = 3; // SQLITE_HASH_STRING
+        hash.count = 3;
+        hash.htsize = 8;
+        hash.ht = buckets.as_mut_ptr() as *mut u8;
+
+        for (i, key) in keys.iter().enumerate() {
+            let found = unsafe { hash_find(&hash, key.as_ptr(), key.len() as i32) };
+            assert_eq!(
+                found,
+                (0x1000 + i) as *mut u8,
+                "the real walker recovers {:?}'s payload",
+                core::str::from_utf8(key).unwrap()
+            );
+        }
+        // Case folds end to end: the ported strHash buckets "ALPHA"
+        // with "alpha", and the stock strCompare shape (over the
+        // ported str_nicmp) matches it.
+        let found = unsafe { hash_find(&hash, b"ALPHA".as_ptr(), 5) };
+        assert_eq!(found, 0x1000 as *mut u8, "case-insensitive hit");
+        // An absent key hashes, walks its bucket, and misses.
+        let found = unsafe { hash_find(&hash, b"delta".as_ptr(), 5) };
+        assert!(found.is_null(), "absent key: the walk ends in NULL");
     }
 }

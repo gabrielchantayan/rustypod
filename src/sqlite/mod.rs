@@ -75,6 +75,7 @@ pub mod expr_list_delete;
 pub mod expr_list_height;
 pub mod expr_new;
 pub mod expr_span;
+pub mod find_element_given_hash;
 pub mod free_p4;
 pub mod get_varint;
 pub mod get_varint64;

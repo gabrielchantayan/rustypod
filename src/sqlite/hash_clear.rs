@@ -112,11 +112,14 @@ pub struct Hash {
     pub ht: *mut u8,
 }
 
-/// A hash chain node (`sqlite3 HashElem`), only the fields this
-/// destructor touches are pinned by its disassembly: the singly-linked
-/// `next` at +0x00 and the key at +0x0c. The middle words are named per
-/// upstream 3.4.x's `{next, prev, data, pKey, nKey}`; nothing in this
-/// function reads them.
+/// A hash chain node (`sqlite HashElem`). Its disassembly pins the
+/// singly-linked `next` at +0x00 and the strdup'd key at +0x0c (freed
+/// iff `copy_key`); the chain walker
+/// [`super::find_element_given_hash`] pins `n_key` at +0x10. The
+/// layout is upstream 3.4.x's `{next, prev, data, pKey, nKey}`;
+/// `prev` and `data` are named per upstream — `data` is the payload
+/// [`super::hash_find`] returns — and nothing in this destructor
+/// reads the middle words.
 #[repr(C)]
 pub struct HashElem {
     /// Next element in the chain (original: `ldr r6,[r4,#0x0]`).
@@ -129,6 +132,9 @@ pub struct HashElem {
     /// The strdup'd key, freed iff `copy_key` (original:
     /// `ldrne r0,[r4,#0xc]`).
     pub key: *mut u8,
+    /// Key length in bytes (original: `ldr r1,[r4,#0x10]` in the
+    /// chain walker @ 0x082ce2e8); never touched by clear.
+    pub n_key: i32,
 }
 
 // Target-exact layout (the offsets the original's ldr/str literals
@@ -147,6 +153,8 @@ const _: [u8; 0x10] = [0; core::mem::offset_of!(Hash, ht)];
 const _: [u8; 0x00] = [0; core::mem::offset_of!(HashElem, next)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x0c] = [0; core::mem::offset_of!(HashElem, key)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x10] = [0; core::mem::offset_of!(HashElem, n_key)];
 
 /// hash_clear — original: `FUN_0837ad2c` @ 0x0837ad2c (92 bytes; 7 `bl`
 /// call sites).

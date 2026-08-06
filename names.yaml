@@ -10719,6 +10719,48 @@ functions:
       optional return register are passed unconditionally, so a NULL selected
       field is stored and advances the cursor when capacity remains.
 
+  - address: 0x082c214c
+    ghidra: FUN_082c214c
+    name: cg_index_registers
+    size: 108
+    sig: "void cg_index_registers(cg_module_t *module)"
+    module: codegen/ir
+    status: ported
+    vars: {param_1: module, r6: module, r4: proc, r5: block, r0: reg (fill walk), r1: table, r2: reg_no, puVar3: proc, uVar1: table, piVar2: reg, puVar4: block}
+    notes: >-
+      1 bl call site - the compile-and-patch driver's eighth and last
+      analysis pass (bl @ 0x08243188). Builds the register-number
+      index the per-block liveness visitor FUN_082b7bbc (800 bytes,
+      identified-but-unported; this pass's block loop is its only bl
+      site) and the register allocator consume. Per proc in
+      module->procs (+0x04): arena-allocate a num_registers-entry
+      pointer table (ldr r0,[r4,#0x20]; mov r1,r0,lsl #0x2; ldr
+      r0,[r6,#0x0]; bl 0x082c1a08 = cg_heap_alloc, called directly)
+      and store it at proc +0x18 (first recovery of that field,
+      CG_PROC_REG_TABLE); walk the register list (+0x10) storing
+      table[reg->reg_no] = reg (ldrne r2,[r0,#0x10]; strne
+      r0,[r1,r2,lsl #0x2]); then walk the block list (+0x08) invoking
+      the visitor per block. A zero-register proc still gets a table
+      - cg_heap_alloc(heap, 0) rounds up to one 8-byte granule - and
+      the arena zero-fill leaves NULL entries for unclaimed numbers.
+      No NULL guards beyond list termination. Port deviation: the
+      visitor goes through the swappable CG_BLOCK_LIVENESS slot
+      (default: no analysis, the CG_PROC_EMIT scheme) where the
+      original bls FUN_082b7bbc directly; the table build is the
+      original's exact body. Wired as the pass_index_registers default
+      of CG_COMPILE_AND_PATCH_OPS (replacing the no-op stub without
+      touching the driver). Host tests:
+      src/codegen/ir.rs::index_registers_empty_module_is_a_no_op
+      (NULL procs; zero-register proc still gets a table),
+      ::index_registers_fills_the_table_by_register_number,
+      ::index_registers_visits_every_block_in_list_order (recording
+      mock behind the seam),
+      ::index_registers_walks_every_proc_and_indexes_each_procs_own_registers
+      (per-proc tables, per-proc numbering),
+      ::index_registers_composes_with_resolve_phis_in_ops_table_order
+      (driver stage-1 order through the ops table),
+      ::index_registers_is_the_wired_default_of_its_pass_slot.
+
   - address: 0x082c21b8
     ghidra: FUN_082c21b8
     name: cg_resolve_phis
@@ -14259,6 +14301,67 @@ functions:
       sub/cmp/str/movle/strble budget tail - the diff is LLVM's fp
       frame, register shuffling, and ALLOC_DENY_TOTAL addressed
       directly (no +0x18, documented deviation).
+
+  - address: 0x082ce2e8
+    ghidra: FUN_082ce2e8
+    name: find_element_given_hash
+    size: 120
+    sig: "HashElem *find_element_given_hash(const Hash *hash, const void *key, int key_len, uint h)"
+    module: sqlite/find_element_given_hash
+    status: ported
+    vars: {param_1: hash, param_2: key, param_3: key_len, param_4: h,
+      piVar2: bucket, puVar3: elem, iVar4: count, pcVar5: compare,
+      DAT_082ce360: BIN_COMPARE_ADDR (pool word 0x082ac998),
+      DAT_082ce364: STR_COMPARE_ADDR (pool word 0x08386ef8)}
+    notes: >-
+      SQLite 3.5.x hash.c's findElementGivenHash with
+      findCompareFunction inlined (cmp keyClass,#3 / ldreq strCompare
+      / ldrne binCompare). 2 bl call sites, binary-scanned:
+      sqlite3HashFind @ 0x0837ad88 (bl @ 0x0837add8 - the ported
+      hash_find, whose HASH_FIND_HOOKS find_elem slot now defaults to
+      this port, replacing the not-found stand-in; the port is the
+      point of this entry) and sqlite3HashInsert @ 0x0837ae08 (bl @
+      0x0837ae64 - the duplicate-key probe of the insert/replace
+      path). Body: ht @ +0x10 NULL -> NULL (hash itself is never
+      NULL-checked, both callers pass a live Hash); bucket = ht + h*8
+      of {count @ +0x00, chain @ +0x04} pairs; while (count-- && elem)
+      compare(elem->pKey @ +0x0c, elem->nKey @ +0x10, pKey, nKey) == 0
+      -> return elem, else elem = elem->next @ +0x00; exhausted ->
+      NULL. Pins HashElem.nKey @ +0x10 (exactly where hash_find's
+      scouting note predicted; the field was added to hash_clear's
+      HashElem struct with a 32-bit offset assert) and the 8-byte
+      bucket pair (exported as the Bucket struct). The two comparator
+      pool words are runtime addresses in Ghidra-undecoded gaps,
+      decoded by hand to the same 28-byte upstream shape (if (n1 !=
+      n2) return 1; return cmp(p1, p2, n1)): strCompare runtime
+      0x08386ef8 / image 0x08391dd0 (directly before strHash @ image
+      0x08391dec), tail-calling the ported str_nicmp @ 0x08384fa0;
+      binCompare runtime 0x082ac998 / image 0x082b7870 (directly
+      before binHash @ image 0x082b788c), tail-calling the ported
+      memcmp @ 0x08030f64. Both identified, not yet ported - kept
+      behind FIND_ELEMENT_HOOKS, which models the two literal-pool
+      words as raw usize addresses (a host const cannot hold a fn
+      pointer to firmware; the transmute happens at the call site,
+      the hash_function convention), defaults transparent to
+      on-target hooks. Deviations: the seam slot load replaces the
+      two literal-pool ldrs but keeps the single indirect blx;
+      `hash` is not NULL-checked, like the original. match.py
+      structural: same ht NULL guard, ldrb keyClass / cmp #3 select,
+      ht + h*8 bucket index, comparator blx'd with (elem+0x0c,
+      elem+0x10, pKey, nKey), count-- chain walk, elem-or-NULL tail -
+      the diff is LLVM's fp frame, register shuffling, and a rotated
+      loop pre-test (count != 0 && elem != 0 hoisted, same semantics).
+      Host tests (11): stock-address defaults, NULL-ht short-circuit,
+      empty bucket (count == 0 never consults a live chain), single
+      hit with exact comparator args, chain walk first/middle/last
+      with stop-at-first-match, mismatch skip, not-found NULL,
+      short-count truncation, long-count stopped by the NULL link,
+      bucket-index selection, and binCompare selection for every
+      class != 3 (incl. the length gate). hash_find gained an
+      integration test through the real default walker: a live
+      8-bucket table laid out via the ported string_hash_tabled,
+      comparators stubbed as the stock shapes over the ported
+      str_nicmp - hits, a case-folded hit, and an absent-key miss.
 
   - address: 0x082d2a1c
     ghidra: FUN_082d2a1c
