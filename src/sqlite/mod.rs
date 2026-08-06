@@ -79,6 +79,7 @@ pub mod free_p4;
 pub mod get_varint;
 pub mod get_varint64;
 pub mod hash_function;
+pub mod hash_init;
 pub mod hex_to_int;
 pub mod mem;
 pub mod mem_extern_release;

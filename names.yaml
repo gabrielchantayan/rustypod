@@ -14416,6 +14416,39 @@ functions:
       semantically vdbe_add_op3(v, op, 0, 0, 0), so the ported
       vdbe_add_op3 is called directly.
 
+  - address: 0x0837ade8
+    ghidra: FUN_0837ade8
+    name: hash_init
+    size: 32
+    sig: "void hash_init(Hash *hash, u8 key_class, u8 copy_key)"
+    module: sqlite/hash_init
+    status: ported
+    vars: {param_1: hash, param_2: key_class, param_3: copy_key}
+    notes: >-
+      SQLite 3.4.x/3.5.x hash.c's sqlite3HashInit. 9 bl call sites in
+      three functions: openDatabase @ 0x082dbda8 (3 sites - the fresh
+      0x180-byte sqlite3 handle's aModule/aFunc/aCollSeq-family hashes
+      at +0xf4/+0x114/+0x128, all (SQLITE_HASH_STRING, 0)),
+      sqlite3SchemaClear @ 0x08382c58 (trigHash @ +0x2c and tblHash
+      @ +0x04, re-initialized to pristine after the trigger/table
+      delete loops), and sqlite3SchemaGet @ 0x08382d18 (all four
+      Schema hashes @ +0x04/+0x18/+0x2c/+0x40 when file_format==0;
+      fkeyHash alone gets copyKey=1). Body: strb keyClass @ +0x00,
+      strb copyKey @ +0x01, zero the words at +0x04 (count), +0x08
+      (htsize), +0x0c (first), +0x10 (ht) - 8 stores, no prologue.
+      Pins this build's Hash layout (20 bytes; hence the 0x14-spaced
+      Schema hashes and the 0x14 memcpys in sqlite3SchemaClear). The
+      field order deviates from upstream's count/first/htsize: htsize
+      is at +0x08 and first at +0x0c here, proven by sqlite3HashInsert
+      @ 0x0837ae08 doubling the +0x08 word and by sqlite3HashClear
+      @ 0x0837ad2c walking the +0x0c list and freeing the +0x10
+      bucket array. Deviation from upstream: copyKey is stored
+      verbatim (upstream ANDs it with keyClass>=SQLITE_HASH_STRING;
+      the asserts are compiled out NDEBUG) - every observed caller
+      passes the final 0/1 already. match.py structural: same two
+      strb + four str-zero shape; the diff is LLVM's fp frame and
+      register allocation.
+
   - address: 0x0837d7ac
     ghidra: FUN_0837d7ac
     name: name_from_token
