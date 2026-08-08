@@ -458,13 +458,36 @@ pub unsafe extern "C" fn namespace_provider_count(providers: *const u32) -> i32 
     }
 }
 
-/// Namespace-provider table index `FUN_08369864` (unported): 20 bytes
-/// of `cmp r0,#0x0; ldrne r0,[r0,#0x4]; ldrne r0,[r0,r1,lsl #0x2];
-/// moveq r0,#0x0; bx lr` — the provider object at `table[index]` of
-/// the providers object's +0x04 table, or null. Its `index` argument
-/// arrives in r1 as the key's +0x00 word (loaded @ 0x080855bc).
-pub type RegistryProviderAt =
-    unsafe extern "C" fn(providers: *const u32, index: u32) -> *const u32;
+/// namespace_provider_at — original: `FUN_08369864` @ `0x08369864`
+/// (20 bytes; source:
+/// `ipod-decomp/decomp/c/033/08369864_FUN_08369864.c`).
+///
+/// Returns `table[index]`, where `table` is the provider-pointer table at
+/// `providers + 0x04`, or null when `providers` is null. The raw
+/// `cmp/ldrne/ldrne/moveq/bx lr` guards only `providers`: a non-null object
+/// with a null table pointer is invalid and the second load faults, just as
+/// it does in retailOS. The second load scales `index` by four (`lsl #2`).
+/// On 64-bit host tests, the pointer stored at target byte offset `+0x04`
+/// is deliberately unaligned; `read_unaligned` preserves that target layout.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn namespace_provider_at(
+    providers: *const u32,
+    index: u32,
+) -> *const u32 {
+    if providers.is_null() {
+        core::ptr::null()
+    } else {
+        #[cfg(target_os = "none")]
+        let table = providers.add(1).cast::<*const u32>().read_volatile();
+        #[cfg(not(target_os = "none"))]
+        let table = core::ptr::read_unaligned(providers.add(1).cast::<*const u32>());
+        table
+            .cast::<*const u32>()
+            .wrapping_add(index as usize)
+            .read_volatile()
+    }
+}
 
 /// The registry's default name hash `FUN_082d7e54` (unported): 88
 /// bytes @ 0x082d7e54. Walks the NUL-terminated name with a per-byte
@@ -477,22 +500,11 @@ pub type RegistryProviderAt =
 /// @ 0x080855d8).
 pub type RegistryNameHash = unsafe extern "C" fn(name: *const u8) -> u32;
 
-/// The unported callees of [`registry_key_hash`], grouped in the house
-/// ops-struct pattern (app/node_list.rs's NODE_LIST_ENQUEUE_OPS).
+/// The unported default-name hash dependency of [`registry_key_hash`],
+/// kept in the house ops-struct pattern (app/node_list.rs's
+/// NODE_LIST_ENQUEUE_OPS).
 pub struct RegistryKeyHashOps {
-    pub provider_at: RegistryProviderAt,
     pub default_name_hash: RegistryNameHash,
-}
-
-/// Spins forever: [`registry_key_hash`] must not run before target
-/// integration installs the retailOS provider-table accessor.
-unsafe extern "C" fn missing_provider_at(
-    _providers: *const u32,
-    _index: u32,
-) -> *const u32 {
-    loop {
-        core::hint::spin_loop();
-    }
 }
 
 /// Spins forever: [`registry_key_hash`] must not run before target
@@ -503,13 +515,13 @@ unsafe extern "C" fn missing_default_name_hash(_name: *const u8) -> u32 {
     }
 }
 
-/// RetailOS dependencies of [`registry_key_hash`]. Target integration
-/// must install the real `FUN_08369864` / `FUN_082d7e54`; focused host
-/// tests replace them with recording seams.
+/// RetailOS dependency of [`registry_key_hash`]. Target integration must
+/// install the real `FUN_082d7e54`; [`namespace_provider_at`] is ported and
+/// called directly.
 pub static mut REGISTRY_KEY_HASH_OPS: RegistryKeyHashOps = RegistryKeyHashOps {
-    provider_at: missing_provider_at,
     default_name_hash: missing_default_name_hash,
 };
+
 
 #[inline(always)]
 unsafe fn registry_key_hash_ops() -> RegistryKeyHashOps {
@@ -583,14 +595,14 @@ unsafe fn registry_providers_word() -> *mut *const u32 {
 /// subsystem's own name is unlocated, so "registry" names only this
 /// observed insert/lookup/notify cluster.
 ///
-/// Deviations: the two unported callees ride the
-/// [`REGISTRY_KEY_HASH_OPS`] seam (house pattern — see
-/// [`DFONT_FALLBACK_OPS`]) instead of direct `bl`s; host builds
-/// substitute test storage for the firmware singleton @ 0x08a0ea6c;
-/// and the key and singleton words are addressed by pointer-sized
-/// word index (byte-exact +0x00/+0x08 on the 32-bit target, disjoint
-/// slots on a 64-bit host — the same model as [`pfr_face_done`]'s
-/// face words).
+/// Deviation: only the unported default-name hash rides
+/// [`REGISTRY_KEY_HASH_OPS`] (house pattern — see
+/// [`DFONT_FALLBACK_OPS`]) instead of a direct `bl`;
+/// [`namespace_provider_at`] is ported and called directly. Host builds
+/// substitute test storage for the firmware singleton @ 0x08a0ea6c; and the
+/// key and singleton words are addressed by pointer-sized word index
+/// (byte-exact +0x00/+0x08 on the 32-bit target, disjoint slots on a 64-bit
+/// host — the same model as [`pfr_face_done`]'s face words).
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn registry_key_hash(key: *const usize) -> u32 {
@@ -603,7 +615,7 @@ pub unsafe extern "C" fn registry_key_hash(key: *const usize) -> u32 {
         let index = key.read_volatile();
         if count > index as i32 {
             let providers = registry_providers_word().read_volatile();
-            let provider = (ops.provider_at)(providers, index as u32);
+            let provider = namespace_provider_at(providers, index as u32);
             let hash_name = provider.cast::<RegistryNameHash>().read_volatile();
             hash_name(key.add(2).read_volatile() as *const u8)
         } else {
@@ -1551,17 +1563,16 @@ mod tests {
     /// singleton's providers word, and the scripted callee results.
     static REGISTRY_KEY_HASH_TEST_LOCK: StdMutex<()> = StdMutex::new(());
 
-    /// One recorded seam or provider-vtable invocation, in call order.
+    /// One recorded default-hash seam or provider-vtable invocation, in call
+    /// order. The table accessor itself is now the direct port.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum RegistryEvent {
-        ProviderAt { providers: usize, index: u32 },
         DefaultHash { name: usize },
         VtableHash { name: usize },
     }
 
     static mut REGISTRY_EVENTS: [Option<RegistryEvent>; 8] = [None; 8];
     static mut REGISTRY_EVENT_COUNT: usize = 0;
-    static mut PROVIDER_AT_RESULT: *const u32 = core::ptr::null();
     static mut DEFAULT_HASH_RESULT: u32 = 0;
     static mut VTABLE_HASH_RESULT: u32 = 0;
     /// When non-null, the recording default hash rewrites the key's
@@ -1584,16 +1595,6 @@ mod tests {
     }
 
 
-    unsafe extern "C" fn recording_provider_at(
-        providers: *const u32,
-        index: u32,
-    ) -> *const u32 {
-        record_registry_event(RegistryEvent::ProviderAt {
-            providers: providers as usize,
-            index,
-        });
-        PROVIDER_AT_RESULT
-    }
 
     unsafe extern "C" fn recording_default_hash(name: *const u8) -> u32 {
         record_registry_event(RegistryEvent::DefaultHash { name: name as usize });
@@ -1613,20 +1614,18 @@ mod tests {
         unsafe { (REGISTRY_EVENT_COUNT, REGISTRY_EVENTS) }
     }
 
-    /// Installs the recording sibling seams, points the host singleton's
-    /// providers word at `providers`, zeroes the recorders, and returns
-    /// the guard serializing the swap.
+    /// Installs the recording default-name-hash seam, points the host
+    /// singleton's providers word at `providers`, zeroes the recorders, and
+    /// returns the guard serializing the swap.
     fn install_registry_seam(providers: *const u32) -> StdMutexGuard<'static, ()> {
         let guard = REGISTRY_KEY_HASH_TEST_LOCK.lock().unwrap();
         unsafe {
             REGISTRY_EVENT_COUNT = 0;
-            PROVIDER_AT_RESULT = core::ptr::null();
             DEFAULT_HASH_RESULT = 0;
             VTABLE_HASH_RESULT = 0;
             KEY_INDEX_ALIAS = core::ptr::null_mut();
             registry_providers_word().write_volatile(providers);
             REGISTRY_KEY_HASH_OPS = RegistryKeyHashOps {
-                provider_at: recording_provider_at,
                 default_name_hash: recording_default_hash,
             };
         }
@@ -1637,7 +1636,6 @@ mod tests {
         unsafe {
             registry_providers_word().write_volatile(core::ptr::null());
             REGISTRY_KEY_HASH_OPS = RegistryKeyHashOps {
-                provider_at: missing_provider_at,
                 default_name_hash: missing_default_name_hash,
             };
         }
@@ -1648,10 +1646,30 @@ mod tests {
         [index, 0, name.as_ptr() as usize]
     }
 
-    #[repr(C)]
-    struct NamespaceProviders {
-        entry_count: u32,
-        table_word: u32,
+    /// Target-layout namespace providers: count at byte +0x00 and its table
+    /// pointer at byte +0x04. The 8-byte alignment makes the base stable;
+    /// the pointer field is deliberately unaligned on a 64-bit host.
+    #[repr(align(8))]
+    struct NamespaceProviders([u8; 4 + core::mem::size_of::<*const u32>()]);
+
+    impl NamespaceProviders {
+        fn new(entry_count: u32, table: *const u32) -> Self {
+            let mut providers = Self([0; 4 + core::mem::size_of::<*const u32>()]);
+            unsafe {
+                providers.0.as_mut_ptr().cast::<u32>().write_unaligned(entry_count);
+                providers
+                    .0
+                    .as_mut_ptr()
+                    .add(4)
+                    .cast::<*const u32>()
+                    .write_unaligned(table);
+            }
+            providers
+        }
+
+        fn ptr(&self) -> *const u32 {
+            self.0.as_ptr().cast()
+        }
     }
 
     #[test]
@@ -1661,22 +1679,40 @@ mod tests {
 
     #[test]
     fn namespace_provider_count_reads_the_signed_entry_count_word() {
-        let empty = NamespaceProviders {
-            entry_count: 0,
-            table_word: 0xdead_beef,
-        };
-        let populated = NamespaceProviders {
-            entry_count: 7,
-            table_word: 0,
-        };
-        let negative = NamespaceProviders {
-            entry_count: u32::MAX,
-            table_word: 0xfeed_face,
-        };
+        let empty = NamespaceProviders::new(0, core::ptr::null());
+        let populated = NamespaceProviders::new(7, core::ptr::null());
+        let negative = NamespaceProviders::new(u32::MAX, core::ptr::null());
 
-        assert_eq!(unsafe { namespace_provider_count(&empty.entry_count) }, 0);
-        assert_eq!(unsafe { namespace_provider_count(&populated.entry_count) }, 7);
-        assert_eq!(unsafe { namespace_provider_count(&negative.entry_count) }, -1);
+        assert_eq!(unsafe { namespace_provider_count(empty.ptr()) }, 0);
+        assert_eq!(unsafe { namespace_provider_count(populated.ptr()) }, 7);
+        assert_eq!(unsafe { namespace_provider_count(negative.ptr()) }, -1);
+    }
+
+    #[test]
+    fn namespace_provider_at_returns_null_for_null_providers() {
+        assert!(unsafe { namespace_provider_at(core::ptr::null(), 3) }.is_null());
+    }
+
+    #[test]
+    fn namespace_provider_at_reads_multiple_table_indices_and_null_entries() {
+        let first = 0x1111_1111u32;
+        let second = 0x2222_2222u32;
+        let third = 0x3333_3333u32;
+        let table = [
+            core::ptr::addr_of!(first),
+            core::ptr::null(),
+            core::ptr::addr_of!(second),
+            core::ptr::addr_of!(third),
+        ];
+        let providers = NamespaceProviders::new(4, table.as_ptr().cast());
+
+        assert_eq!(unsafe { namespace_provider_at(providers.ptr(), 0) }, table[0]);
+        assert!(
+            unsafe { namespace_provider_at(providers.ptr(), 1) }.is_null(),
+            "a null table entry returns null verbatim"
+        );
+        assert_eq!(unsafe { namespace_provider_at(providers.ptr(), 2) }, table[2]);
+        assert_eq!(unsafe { namespace_provider_at(providers.ptr(), 3) }, table[3]);
     }
 
     #[test]
@@ -1700,8 +1736,9 @@ mod tests {
     #[test]
     fn count_not_above_index_uses_default_name_hash() {
         for (provider_count, index) in [(-1i32, 0usize), (0, 0), (1, 1), (2, 7)] {
-            let providers_word = provider_count as u32;
-            let providers = core::ptr::addr_of!(providers_word);
+            let providers_layout =
+                NamespaceProviders::new(provider_count as u32, core::ptr::null());
+            let providers = providers_layout.ptr();
             let _guard = install_registry_seam(providers);
             unsafe {
                 DEFAULT_HASH_RESULT = 0x0101_0101;
@@ -1719,21 +1756,21 @@ mod tests {
             assert_eq!(
                 events[0],
                 Some(RegistryEvent::DefaultHash { name: name.as_ptr() as usize }),
-                "provider_at is never reached when count <= index"
+                "namespace_provider_at is never reached when count <= index"
             );
             uninstall_registry_seam();
         }
     }
 
     #[test]
-    fn count_above_index_uses_provider_vtable_slot_zero() {
+    fn count_above_index_uses_the_direct_provider_table_accessor() {
         for index in [0usize, 1, 7] {
             let provider_count = index as u32 + 1;
-            let providers = core::ptr::addr_of!(provider_count);
-            let _guard = install_registry_seam(providers);
+            let table = [core::ptr::addr_of!(PROVIDER_VTABLE_SLOT).cast::<u32>(); 8];
+            let providers_layout = NamespaceProviders::new(provider_count, table.as_ptr().cast());
+            let _guard = install_registry_seam(providers_layout.ptr());
             let vtable_hash = 0x5555_0000 | index as u32;
             unsafe {
-                PROVIDER_AT_RESULT = core::ptr::addr_of!(PROVIDER_VTABLE_SLOT).cast::<u32>();
                 VTABLE_HASH_RESULT = vtable_hash;
             }
             let name = b"diag\0";
@@ -1741,48 +1778,16 @@ mod tests {
             let result = unsafe { registry_key_hash(key.as_ptr()) };
             assert_eq!(result, index as u32 ^ vtable_hash, "index={index:#x}");
             let (count, events) = registry_events();
-            assert_eq!(count, 2, "index={index:#x}");
+            assert_eq!(count, 1, "index={index:#x}");
             assert_eq!(
                 events[0],
-                Some(RegistryEvent::ProviderAt {
-                    providers: providers as usize,
-                    index: index as u32,
-                })
-            );
-            assert_eq!(
-                events[1],
                 Some(RegistryEvent::VtableHash { name: name.as_ptr() as usize }),
-                "vtable slot +0x00 of the indexed provider hashes the name"
+                "vtable slot +0x00 of the directly indexed provider hashes the name"
             );
             uninstall_registry_seam();
         }
     }
 
-    #[test]
-    fn signed_gate_treats_high_bit_index_as_negative() {
-        let provider_count = 1u32;
-        let providers = core::ptr::addr_of!(provider_count);
-        let _guard = install_registry_seam(providers);
-        unsafe {
-            PROVIDER_AT_RESULT = core::ptr::addr_of!(PROVIDER_VTABLE_SLOT).cast::<u32>();
-            VTABLE_HASH_RESULT = 0x1234_5678;
-        }
-        let name = b"x\0";
-        let key = mock_key(0x8000_0000, name);
-        let result = unsafe { registry_key_hash(key.as_ptr()) };
-        assert_eq!(result, 0x8000_0000 ^ 0x1234_5678);
-        let (count, events) = registry_events();
-        assert_eq!(count, 2, "a negative-as-i32 index passes the signed ble gate");
-        assert_eq!(
-            events[0],
-            Some(RegistryEvent::ProviderAt {
-                providers: providers as usize,
-                index: 0x8000_0000,
-            }),
-            "the unsigned table index is the raw key word"
-        );
-        uninstall_registry_seam();
-    }
 
 
     #[test]

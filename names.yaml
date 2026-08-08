@@ -12753,25 +12753,15 @@ functions:
     status: ported
     vars: {param_1: slot}
     notes: >-
-      90 bl call sites (mostly the 0x0822xxxx application layer
-      releasing stack- and member-slot handles). The drop counterpart
-      of refcounted_ptr_assign @ 0x0839eda0: hands the slot to the
-      refcount-drop teardown @ 0x0839cd98 and returns the slot
-      unchanged (the ADS destroy-and-return-this idiom; the teardown
-      NULLs the slot on every path). The 136-byte teardown @
-      0x0839cd98 is NOT ported - it locks the body mutex, drops the
-      refcount at +4 and, at zero, runs the impl destructor through
-      vtable slot 7 (+0x1c) of the impl pointer at body+0, then
-      mutex_delete (0x0807f650, ported) + tag-2 operator delete
-      (0x082aad24) on the mutex and the body - so the call goes
-      through the REFCOUNTED_RELEASE_OPS dispatch slot whose default
-      stub NULLs the slot and leaks the body (cxx/release.rs
-      missing_release_object house rule). Filed under cxx/handle, not
-      src/sqlite: 0x0839cd98 sits above the SQLite span and is the
-      same RefcountedBody family as the assign. match.py structural:
-      same push/mov-r4/call/return-this frame; the bl becomes a
-      slot-indirected blx (documented deviation) plus LLVM's
-      frame-pointer setup.
+      90 bl call sites (mostly the 0x0822xxxx application layer releasing
+      stack- and member-slot handles). The drop counterpart of
+      refcounted_ptr_assign @ 0x0839eda0 calls the ported
+      refcounted_body_release @ 0x0839cd98 and returns its slot unchanged
+      (the ADS destroy-and-return-this idiom). The teardown NULLs the slot
+      on every non-NULL-body path. Filed under cxx/handle, not src/sqlite:
+      0x0839cd98 sits above the SQLite span and is the same RefcountedBody
+      family as the assign. match.py structural: same push/mov-r4/call/
+      return-this frame; LLVM may inline the teardown helpers.
 
   # --- Embedded SQLite, 0x08360000-0x0838ffff (agent media) ---
   # The whole span is an amalgamated SQLite ~3.5.x - see src/sqlite/mod.rs
@@ -14847,21 +14837,21 @@ functions:
 
   - address: 0x08369864
     ghidra: FUN_08369864
-    name: ata_handle_table_entry
+    name: namespace_provider_at
     size: 20
-    sig: "u32 ata_handle_table_entry(const u32 *handle, u32 index)"
-    module: drivers/ata_cmd
+    sig: "const u32 *namespace_provider_at(const u32 *providers, u32 index)"
+    module: cxx/object_flags
     status: ported
-    vars: {param_1: handle, param_2: index}
+    vars: {param_1: providers, param_2: index, uVar1: provider}
     notes: >-
-      99 bl + 7 tail b call sites. `p ? ((u32 *)p[1])[i] : 0` - indexes
-      a table hanging off the handle's second word. Where the sibling
-      ata_handle_first_word_or_minus1 reports "no device" as -1, this
-      one folds a missing handle into a zero entry. match.py: same
-      structure (cmp / moveq / ldr [r0,#4] / ldr [r0,r1,lsl #2]); LLVM
-      uses an early-return layout with a frame instead of predicated
-      loads. Host tests mmap a low arena so the 32-bit embedded table
-      pointer survives the u32 round-trip (heap/pool.rs precedent).
+      Namespace-provider table accessor called by registry_key_hash after its
+      signed count gate. The raw `cmp/ldrne/ldrne/moveq/bx lr` returns
+      `((const u32 *const *)providers[1])[index]`, with index scaled by four,
+      or null when providers is null. The table pointer itself has no null
+      guard: a non-null providers object with a null table faults at the
+      second load, as in retailOS. match.py: same null guard, +0x04 table
+      load, and scaled indexed load shape; host tests represent the target's
+      unaligned +0x04 pointer field explicitly.
 
   - address: 0x08369778
     ghidra: FUN_08369778

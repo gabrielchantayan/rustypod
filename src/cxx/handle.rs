@@ -40,12 +40,12 @@
 //! Also here: [`refcounted_ptr_assign`], the mutex-guarded shared-body
 //! assign that backs the C++ layer's refcounted handles (it sits outside
 //! the 0x083c0000-0x083dffff block, at 0x0839eda0, so it is not one of
-//! the byte-identical families above), and [`refcounted_ptr_release`],
-//! the assign's drop counterpart @ 0x0816cd44, which hands the slot to
-//! the (unported) refcount-drop teardown @ 0x0839cd98 through the
-//! [`REFCOUNTED_RELEASE_OPS`] dispatch boundary.
+//! the byte-identical families above), and [`refcounted_body_release`],
+//! its refcount-drop teardown @ 0x0839cd98. [`refcounted_ptr_release`]
+//! is the thin destroy-and-return-this wrapper @ 0x0816cd44.
 
-use crate::kernel::sync_mutex::{mutex_lock, mutex_unlock, Mutex};
+use crate::heap::veneers::operator_delete;
+use crate::kernel::sync_mutex::{mutex_delete, mutex_lock, mutex_unlock, Mutex};
 
 /// handle_deref_or_null — original: `FUN_083d604c` @ 0x083d604c
 /// (16 bytes; 253 `bl` call sites at that address, 725 across all 22
@@ -93,16 +93,18 @@ pub unsafe extern "C" fn handle_deref_field12(slot: *const *const *mut u8) -> *m
 }
 
 /// Shared body of the C++ layer's refcounted handles — the object a
-/// `*mut RefcountedBody` slot points at. [`refcounted_ptr_assign`]
-/// touches only the two trailing fields; the leading word is
-/// owner-defined (a vtable or first datum) and opaque to the assign.
+/// `*mut RefcountedBody` slot points at. On the ARM target its three words
+/// are the implementation pointer (+0), signed reference count (+4), and
+/// optional [`Mutex`] pointer (+8). Host fixtures widen each target pointer
+/// word to `usize`, keeping pointers intact and the fields disjoint.
 #[repr(C)]
 pub struct RefcountedBody {
-    /// +0: owner-defined word; never read or written by the assign.
-    pub opaque0: u32,
-    /// +4: intrusive reference count, bumped under the mutex.
+    /// Target +0: implementation pointer. Its first word is the vtable
+    /// pointer used by [`refcounted_body_release`] at the final drop.
+    pub opaque0: usize,
+    /// Target +4: intrusive reference count, changed under the mutex.
     pub refcount: i32,
-    /// +8: optional mutex guarding the refcount (NULL = unguarded).
+    /// Target +8: optional mutex guarding the refcount (NULL = unguarded).
     pub mutex: *mut Mutex,
 }
 
@@ -156,73 +158,87 @@ pub unsafe extern "C" fn refcounted_ptr_assign(
     dst
 }
 
-/// Indirect dispatch for the unported refcount-drop teardown
-/// @ 0x0839cd98 (see [`refcounted_ptr_release`]).
-#[derive(Clone, Copy)]
-pub struct RefcountedReleaseOps {
-    /// The teardown the release wrapper calls: drop the body's
-    /// refcount at +4 under the mutex at +8 and, at zero, run the impl
-    /// destructor (vtable slot 7 — byte offset +0x1c — of the impl
-    /// pointer at body+0, invoked on that impl pointer), delete the
-    /// mutex and the body through the tag-2 operator delete
-    /// @ 0x082aad24, and NULL the slot. Always NULLs the slot: the
-    /// original's only early-out is a cell that is NULL already.
-    pub release_body: unsafe extern "C" fn(slot: *mut *mut RefcountedBody),
-}
+/// refcounted_body_release — original: `FUN_0839cd98` @ 0x0839cd98
+/// (144 bytes; called by the refcounted-handle release wrappers).
+///
+/// Drops the shared body's signed refcount under its optional mutex. A
+/// non-final drop simply unlocks and NULLs the caller's slot. On the final
+/// transition, it invokes the implementation's virtual destructor at vtable
+/// slot 7 (+0x1c), unlocks, deletes the mutex (including its semaphore
+/// cell), then tag-2-deletes the mutex object and body. The final slot store
+/// happens on every non-NULL-body path. The target's plain `subs` wraps on
+/// underflow, so only a result of exactly zero is final.
+///
+/// The target body layout is documented on [`RefcountedBody`]. `opaque0`
+/// must be a valid implementation pointer when nonzero; its first word must
+/// be a valid vtable containing a virtual destructor at word index 7.
+///
+/// # Safety
+/// `slot` must be a valid aligned pointer slot. Its non-NULL body, mutex,
+/// implementation, vtable, and virtual destructor must all be live and
+/// valid for the operations encoded by the original.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_release(slot: *mut *mut RefcountedBody) {
+    let body = slot.read();
+    if body.is_null() {
+        return;
+    }
 
-/// Default stub: NULLs the slot — the real teardown's final store on
-/// every path — but performs no refcount drop: the body is leaked, not
-/// freed (the `cxx/release.rs` `missing_release_object` house rule for
-/// unported C++ destructors; the real teardown walks a vtable chain,
-/// and guessing wrong corrupts).
-unsafe extern "C" fn missing_release_body(slot: *mut *mut RefcountedBody) {
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_lock(mutex);
+    }
+
+    let remaining = (*body).refcount.wrapping_sub(1);
+    (*body).refcount = remaining;
+    if remaining == 0 {
+        let implementation = (*body).opaque0 as *mut u8;
+        if !implementation.is_null() {
+            let vtable = (implementation as *const usize).read() as *const usize;
+            let destructor: unsafe extern "C" fn(*mut u8) =
+                core::mem::transmute(vtable.add(7).read());
+            destructor(implementation);
+        }
+
+        // The original re-reads the slot after the destructor before
+        // releasing and destroying the body it still names.
+        let body = slot.read();
+        if !body.is_null() {
+            let mutex = (*body).mutex;
+            if !mutex.is_null() {
+                mutex_unlock(mutex);
+                mutex_delete(mutex);
+                // Reload after mutex_delete, exactly as the ARM does before
+                // the tag-2 delete, then clear the field after that delete.
+                let mutex = (*body).mutex;
+                operator_delete(mutex.cast());
+                (*body).mutex = core::ptr::null_mut();
+            }
+            operator_delete(body.cast());
+        }
+    } else {
+        // This helper call is reached with a fresh load from the slot in the
+        // ARM body; the mutex helper performs its own NULL guards.
+        let body = slot.read();
+        if !body.is_null() {
+            let mutex = (*body).mutex;
+            if !mutex.is_null() {
+                mutex_unlock(mutex);
+            }
+        }
+    }
+
     slot.write(core::ptr::null_mut());
-}
-
-/// Wired default (documented leak until 0x0839cd98 is ported).
-pub const DEFAULT_REFCOUNTED_RELEASE_OPS: RefcountedReleaseOps = RefcountedReleaseOps {
-    release_body: missing_release_body,
-};
-
-/// The active teardown. Host tests install recording mocks.
-pub static mut REFCOUNTED_RELEASE_OPS: RefcountedReleaseOps = DEFAULT_REFCOUNTED_RELEASE_OPS;
-
-/// Reads the release_body slot (volatile — the slot is meant to be
-/// swapped at runtime, and a plain read lets LLVM const-fold the
-/// default away).
-#[inline(always)]
-pub(crate) unsafe fn release_body_op() -> unsafe extern "C" fn(*mut *mut RefcountedBody) {
-    core::ptr::read_volatile(core::ptr::addr_of!(REFCOUNTED_RELEASE_OPS.release_body))
 }
 
 /// refcounted_ptr_release — original: `FUN_0816cd44` @ 0x0816cd44
 /// (20 bytes; 90 `bl` call sites, mostly the 0x0822xxxx application
 /// layer releasing stack- and member-slot handles).
 ///
-/// The drop counterpart of [`refcounted_ptr_assign`]: hands `slot` to
-/// the refcount-drop teardown @ 0x0839cd98 and returns `slot`
-/// unchanged — the ADS destroy-and-return-this idiom:
-///
-/// ```text
-/// stmdb sp!,{r4,lr}
-/// mov   r4, r0
-/// bl    0x0839cd98      ; teardown(slot) — drops the refcount, NULLs the slot
-/// mov   r0, r4
-/// ldmia sp!,{r4,pc}
-/// ```
-///
-/// The teardown itself (136 bytes, unported) locks the body mutex,
-/// decrements the refcount at +4 and, at zero, invokes the impl
-/// destructor through the vtable at body+0, deletes the mutex and the
-/// body, then NULLs the slot; a shared body is only decremented.
-///
-/// Deviations:
-/// - The teardown @ 0x0839cd98 is not ported, so the call goes through
-///   the [`REFCOUNTED_RELEASE_OPS`] dispatch boundary. The default
-///   stub NULLs the slot — the teardown's final store on every path —
-///   but performs no refcount drop: the body is leaked, exactly the
-///   `cxx/release.rs` house rule for unported destructors. Host tests
-///   install a recording mock.
+/// The drop counterpart of [`refcounted_ptr_assign`]: drops the body in
+/// `slot` through [`refcounted_body_release`] and returns `slot` unchanged
+/// — the ADS destroy-and-return-this idiom.
 ///
 /// # Safety
 /// `slot` must be a valid, aligned pointer slot; when the body pointer
@@ -233,7 +249,7 @@ pub(crate) unsafe fn release_body_op() -> unsafe extern "C" fn(*mut *mut Refcoun
 pub unsafe extern "C" fn refcounted_ptr_release(
     slot: *mut *mut RefcountedBody,
 ) -> *mut *mut RefcountedBody {
-    (release_body_op())(slot);
+    refcounted_body_release(slot);
     slot
 }
 
@@ -393,118 +409,204 @@ mod tests {
         }
     }
 
-    /// Release-wrapper tests: the ops table and the recorder are shared
-    /// globals, serialized by this lock (and restored on drop).
+    /// Direct tests of the body release use the ported mutex and heap
+    /// surfaces with recording kernel/heap hooks. The crate's test
+    /// configuration serializes hook-swapping tests; this atomic also keeps
+    /// the fixture safe when a runner overrides that configuration.
     mod release {
         extern crate std;
+
         use super::super::*;
-        use std::sync::{Mutex, MutexGuard};
+        use crate::heap::types::HeapDescriptorDescriptor;
+        use crate::heap::veneers::{HeapVeneerOps, HEAP_OPS};
+        use crate::kernel::sync_mutex::{RomKernelOps, ROM_KERNEL};
+        use core::sync::atomic::{AtomicBool, Ordering};
         use std::vec::Vec;
 
-        static OPS_LOCK: Mutex<()> = Mutex::new(());
+        static OPS_LOCK: AtomicBool = AtomicBool::new(false);
+        static mut EVENTS: Vec<Event> = Vec::new();
 
-        /// Slots handed to the recording teardown, in call order.
-        static mut CALLS: Vec<usize> = Vec::new();
+        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+        enum Event {
+            Wait(u32),
+            Destructor(usize),
+            Signal(u32),
+            Delete(u32),
+            MutexCellFree(usize),
+            HeapFree(usize, usize),
+        }
 
-        unsafe extern "C" fn recording_release(slot: *mut *mut RefcountedBody) {
-            (*core::ptr::addr_of_mut!(CALLS)).push(slot as usize);
-            // Mimic the real teardown's final store.
-            slot.write(core::ptr::null_mut());
+        unsafe extern "C" fn recording_wait(handle: u32) {
+            (*core::ptr::addr_of_mut!(EVENTS)).push(Event::Wait(handle));
+        }
+
+        unsafe extern "C" fn recording_signal(handle: u32) {
+            (*core::ptr::addr_of_mut!(EVENTS)).push(Event::Signal(handle));
+        }
+
+        unsafe extern "C" fn recording_delete(_kind: u32, cell: *mut u32) {
+            (*core::ptr::addr_of_mut!(EVENTS)).push(Event::Delete(cell.read()));
+            cell.write(0);
+        }
+
+        unsafe extern "C" fn recording_mutex_cell_free(cell: *mut u8) {
+            (*core::ptr::addr_of_mut!(EVENTS)).push(Event::MutexCellFree(cell as usize));
+        }
+
+        unsafe extern "C" fn recording_body_free(
+            _heap: *mut HeapDescriptorDescriptor,
+            ptr: *mut u8,
+            tag: usize,
+        ) {
+            (*core::ptr::addr_of_mut!(EVENTS)).push(Event::HeapFree(ptr as usize, tag));
+        }
+
+        unsafe extern "C" fn recording_destructor(implementation: *mut u8) {
+            (*core::ptr::addr_of_mut!(EVENTS)).push(Event::Destructor(implementation as usize));
         }
 
         struct Bench {
-            _lock: MutexGuard<'static, ()>,
+            old_kernel: RomKernelOps,
+            old_heap: HeapVeneerOps,
         }
 
         fn bench() -> Bench {
-            let lock = OPS_LOCK.lock().unwrap();
+            while OPS_LOCK
+                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_err()
+            {
+                std::thread::yield_now();
+            }
             unsafe {
-                (*core::ptr::addr_of_mut!(CALLS)).clear();
+                (*core::ptr::addr_of_mut!(EVENTS)).clear();
+                let old_kernel = core::ptr::read_volatile(core::ptr::addr_of!(ROM_KERNEL));
+                let old_heap = core::ptr::read_volatile(core::ptr::addr_of!(HEAP_OPS));
                 core::ptr::write_volatile(
-                    core::ptr::addr_of_mut!(REFCOUNTED_RELEASE_OPS),
-                    RefcountedReleaseOps {
-                        release_body: recording_release,
+                    core::ptr::addr_of_mut!(ROM_KERNEL),
+                    RomKernelOps {
+                        sema_wait: recording_wait,
+                        sema_signal: recording_signal,
+                        sema_delete: recording_delete,
+                        heap_free: recording_mutex_cell_free,
+                        ..old_kernel
                     },
                 );
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(HEAP_OPS),
+                    HeapVeneerOps {
+                        free: recording_body_free,
+                        ..old_heap
+                    },
+                );
+                Bench {
+                    old_kernel,
+                    old_heap,
+                }
             }
-            Bench { _lock: lock }
         }
 
         impl Drop for Bench {
             fn drop(&mut self) {
                 unsafe {
-                    core::ptr::write_volatile(
-                        core::ptr::addr_of_mut!(REFCOUNTED_RELEASE_OPS),
-                        DEFAULT_REFCOUNTED_RELEASE_OPS,
-                    );
+                    core::ptr::write_volatile(core::ptr::addr_of_mut!(ROM_KERNEL), self.old_kernel);
+                    core::ptr::write_volatile(core::ptr::addr_of_mut!(HEAP_OPS), self.old_heap);
                 }
+                OPS_LOCK.store(false, Ordering::Release);
             }
         }
 
-        fn calls() -> Vec<usize> {
-            unsafe { (*core::ptr::addr_of!(CALLS)).clone() }
+        fn events() -> Vec<Event> {
+            unsafe { (*core::ptr::addr_of!(EVENTS)).clone() }
         }
 
-        /// A slot holding a live body is handed to the teardown, which
-        /// NULLs it; the wrapper returns the slot address unchanged.
+        /// A non-final reference is decremented and unlocked; neither the
+        /// virtual destructor nor either heap delete runs, but the slot is
+        /// always cleared.
         #[test]
-        fn release_forwards_slot_to_teardown_and_returns_slot() {
+        fn shared_reference_decrements_unlocks_and_nulls_slot() {
             let _bench = bench();
-            let mut body = RefcountedBody {
-                opaque0: 0,
-                refcount: 1,
-                mutex: core::ptr::null_mut(),
+            let mut semaphore = 0x42;
+            let mut mutex = Mutex {
+                sem_cell: &mut semaphore,
+                unused: 0,
             };
-            let mut slot: *mut RefcountedBody = &mut body;
-            let slot_addr = core::ptr::addr_of_mut!(slot);
-
-            let ret = unsafe { refcounted_ptr_release(slot_addr) };
-
-            assert_eq!(calls(), std::vec![slot_addr as usize]);
-            assert_eq!(ret, slot_addr, "destroy-and-return-this");
-            assert!(slot.is_null(), "the teardown NULLed the slot");
-        }
-
-        /// A NULL cell is still forwarded — the teardown's own early-out
-        /// handles it (`ldr r0,[r0]; cmp; ldmiaeq`).
-        #[test]
-        fn release_forwards_a_null_cell() {
-            let _bench = bench();
-            let mut slot: *mut RefcountedBody = core::ptr::null_mut();
-            let slot_addr = core::ptr::addr_of_mut!(slot);
-
-            let ret = unsafe { refcounted_ptr_release(slot_addr) };
-
-            assert_eq!(calls(), std::vec![slot_addr as usize]);
-            assert_eq!(ret, slot_addr);
-            assert!(slot.is_null());
-        }
-
-        /// The shipped default stub NULLs the slot like the real
-        /// teardown's final store, but leaks the body (no refcount
-        /// drop, no destructor).
-        #[test]
-        fn default_stub_nulls_the_slot_and_leaks_the_body() {
-            let _lock = OPS_LOCK.lock().unwrap();
-            unsafe {
-                core::ptr::write_volatile(
-                    core::ptr::addr_of_mut!(REFCOUNTED_RELEASE_OPS),
-                    DEFAULT_REFCOUNTED_RELEASE_OPS,
-                );
-            }
             let mut body = RefcountedBody {
                 opaque0: 0,
                 refcount: 2,
+                mutex: &mut mutex,
+            };
+            let mut slot = &mut body as *mut RefcountedBody;
+
+            unsafe { refcounted_body_release(&mut slot) };
+
+            assert_eq!(body.refcount, 1);
+            assert!(slot.is_null(), "the non-final path still clears the slot");
+            assert_eq!(events(), std::vec![Event::Wait(0x42), Event::Signal(0x42)]);
+        }
+
+        /// The final reference dispatches vtable[7], unlocks before semaphore
+        /// teardown, releases the mutex before its body, and preserves the
+        /// wrapper's destroy-and-return-this postcondition.
+        #[test]
+        fn final_reference_cleans_up_in_firmware_order_and_returns_slot() {
+            let _bench = bench();
+            let mut semaphore = 0x42;
+            let mut mutex = Mutex {
+                sem_cell: &mut semaphore,
+                unused: 0,
+            };
+            let mut vtable = [0usize; 8];
+            vtable[7] = recording_destructor as usize;
+            let mut implementation = [vtable.as_mut_ptr() as usize];
+            let mut body = RefcountedBody {
+                opaque0: implementation.as_mut_ptr() as usize,
+                refcount: 1,
+                mutex: &mut mutex,
+            };
+            let body_ptr = &mut body as *mut RefcountedBody;
+            let mutex_ptr = &mut mutex as *mut Mutex;
+            let cell_ptr = &mut semaphore as *mut u32;
+            let implementation_ptr = implementation.as_mut_ptr() as *mut u8;
+            let mut slot = body_ptr;
+            let slot_ptr = &mut slot as *mut *mut RefcountedBody;
+
+            let returned = unsafe { refcounted_ptr_release(slot_ptr) };
+
+            assert_eq!(returned, slot_ptr, "destroy-and-return-this");
+            assert!(slot.is_null(), "the final store clears the caller slot");
+            assert!(mutex.sem_cell.is_null(), "mutex_delete clears its cell");
+            assert_eq!(
+                events(),
+                std::vec![
+                    Event::Wait(0x42),
+                    Event::Destructor(implementation_ptr as usize),
+                    Event::Signal(0x42),
+                    Event::Delete(0x42),
+                    Event::MutexCellFree(cell_ptr as usize),
+                    Event::HeapFree(mutex_ptr as *mut u8 as usize, 2),
+                    Event::HeapFree(body_ptr as *mut u8 as usize, 2),
+                ],
+                "lock/destructor/unlock/delete ordering follows the ARM body"
+            );
+        }
+
+        /// The target's `subs` treats zero as an underflow, not a final
+        /// release. It wraps and takes the shared-reference path.
+        #[test]
+        fn zero_refcount_wraps_without_running_cleanup() {
+            let _bench = bench();
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: 0,
                 mutex: core::ptr::null_mut(),
             };
-            let mut slot: *mut RefcountedBody = &mut body;
-            let slot_addr = core::ptr::addr_of_mut!(slot);
+            let mut slot = &mut body as *mut RefcountedBody;
 
-            let ret = unsafe { refcounted_ptr_release(slot_addr) };
+            unsafe { refcounted_body_release(&mut slot) };
 
-            assert_eq!(ret, slot_addr);
-            assert!(slot.is_null(), "the stub preserves the slot postcondition");
-            assert_eq!(body.refcount, 2, "no refcount drop — the body is leaked");
+            assert_eq!(body.refcount, -1);
+            assert!(slot.is_null());
+            assert!(events().is_empty());
         }
     }
 }
