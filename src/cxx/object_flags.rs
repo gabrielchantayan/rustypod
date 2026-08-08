@@ -650,39 +650,114 @@ const FACE_PHY_FONT_WORD: usize = 0x120 / 4;
 /// `pfrface->driver->root.memory`.
 const MODULE_MEMORY_WORD: usize = 0x08 / 4;
 
-/// Physical-font teardown `FUN_080a3554` (unported): upstream
-/// FreeType `pfr_phy_font_done` (pfrload.c). Frees and zeroes the
-/// PFR physical-font record's owned fields — the pointer fields at
-/// +0x3c..+0x80 plus the extra-items `FT_List` at +0x88, whose nodes
-/// it walks and frees — all through `ft_mem_free`. Identified by its
-/// sole call site (@ 0x0808561c, inside [`pfr_face_done`]) matching
-/// upstream's `pfr_phy_font_done( &face->phy_font, FT_FACE_MEMORY )
-///`, and by its sibling `FUN_080a3624` = `pfr_phy_font_load` (whose
-/// trace string reads "pfr_phy_font_load: invalid physical font" and
-/// which `FT_LIST`-initializes the same +0x88 list: `head = NULL;
-/// tail = &head`).
-pub type PfrPhyFontDone =
-    unsafe extern "C" fn(phys: *mut *mut u8, memory: *mut crate::ft::memory::FtMemory);
+/// `PFR_PhyFontRec.horizontal.num_stem_snaps` (+0x3c).
+const PFR_HORIZONTAL_STEM_COUNT_WORD: usize = 0x3c / 4;
+/// `PFR_PhyFontRec.horizontal.stem_snaps` (+0x40): an alias into the
+/// vertical allocation, so it is cleared but never freed separately.
+const PFR_HORIZONTAL_STEM_SNAPS_WORD: usize = 0x40 / 4;
+/// `PFR_PhyFontRec.vertical.num_stem_snaps` (+0x48).
+const PFR_VERTICAL_STEM_COUNT_WORD: usize = 0x48 / 4;
+/// `PFR_PhyFontRec.vertical.stem_snaps` (+0x4c), the sole snap allocation.
+const PFR_VERTICAL_STEM_SNAPS_WORD: usize = 0x4c / 4;
+const PFR_FONT_ID_WORD: usize = 0x50 / 4;
+const PFR_FAMILY_NAME_WORD: usize = 0x54 / 4;
+const PFR_STYLE_NAME_WORD: usize = 0x58 / 4;
+const PFR_NUM_STRIKES_WORD: usize = 0x5c / 4;
+const PFR_MAX_STRIKES_WORD: usize = 0x60 / 4;
+const PFR_STRIKES_WORD: usize = 0x64 / 4;
+const PFR_NUM_BLUE_VALUES_WORD: usize = 0x68 / 4;
+const PFR_BLUE_VALUES_WORD: usize = 0x6c / 4;
+const PFR_NUM_CHARS_WORD: usize = 0x78 / 4;
+const PFR_CHARS_OFFSET_WORD: usize = 0x7c / 4;
+const PFR_CHARS_WORD: usize = 0x80 / 4;
+const PFR_NUM_KERN_PAIRS_WORD: usize = 0x84 / 4;
+/// `PFR_PhyFontRec.kern_items` (+0x88); each item starts with its next link.
+const PFR_KERN_ITEMS_WORD: usize = 0x88 / 4;
+const PFR_KERN_ITEMS_TAIL_WORD: usize = 0x8c / 4;
 
-/// Spins forever: [`pfr_face_done`] must not run before target
-/// integration installs the retailOS `FUN_080a3554`.
-unsafe extern "C" fn missing_pfr_phy_font_done(
-    _phys: *mut *mut u8,
-    _memory: *mut crate::ft::memory::FtMemory,
+/// pfr_phy_font_done — original: `FUN_080a3554` @ `0x080a3554`
+/// (208 bytes; source:
+/// `ipod-decomp/decomp/c/006/080a3554_FUN_080a3554.c`).
+///
+/// Tears down the owned allocations in an embedded `PFR_PhyFontRec`.
+/// In the exact retail order, it `FT_FREE`s the font ID, family name, style
+/// name, vertical stem-snap allocation, strikes, character records, and blue
+/// values; after each free it writes that slot to zero.  It then clears the
+/// associated counts and aliases, walks the +0x88 kerning-item forward list
+/// by loading each node's first-word `next` link *before* freeing that node,
+/// and finally zeros the list head, tail, and pair count.  The horizontal
+/// snap pointer is only an interior alias of the vertical allocation and is
+/// consequently cleared, not freed.
+///
+/// This is FreeType's upstream `pfr_phy_font_done` from `pfrload.c`; the
+/// ARM offsets agree with `PFR_PhyFontRec` on 32-bit ARM.  The function has
+/// no entry null guard: `phys` and `memory` must be valid, as in retailOS.
+/// Individual allocation slots and the list head may be null because
+/// [`crate::ft::memory::ft_mem_free`] suppresses the allocator callback for
+/// a null block.  Target-byte offsets are represented as word indices so
+/// host fixtures retain disjoint 32-bit target slots.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn pfr_phy_font_done(
+    phys: *mut *mut u8,
+    memory: *mut crate::ft::memory::FtMemory,
 ) {
-    loop {
-        core::hint::spin_loop();
+    let field = phys.add(PFR_FONT_ID_WORD);
+    crate::ft::memory::ft_mem_free(memory, field.read_volatile());
+    field.write_volatile(core::ptr::null_mut());
+
+    let field = phys.add(PFR_FAMILY_NAME_WORD);
+    crate::ft::memory::ft_mem_free(memory, field.read_volatile());
+    field.write_volatile(core::ptr::null_mut());
+
+    let field = phys.add(PFR_STYLE_NAME_WORD);
+    crate::ft::memory::ft_mem_free(memory, field.read_volatile());
+    field.write_volatile(core::ptr::null_mut());
+
+    let field = phys.add(PFR_VERTICAL_STEM_SNAPS_WORD);
+    crate::ft::memory::ft_mem_free(memory, field.read_volatile());
+    field.write_volatile(core::ptr::null_mut());
+    phys.add(PFR_VERTICAL_STEM_COUNT_WORD)
+        .write_volatile(core::ptr::null_mut());
+    phys.add(PFR_HORIZONTAL_STEM_SNAPS_WORD)
+        .write_volatile(core::ptr::null_mut());
+    phys.add(PFR_HORIZONTAL_STEM_COUNT_WORD)
+        .write_volatile(core::ptr::null_mut());
+
+    let field = phys.add(PFR_STRIKES_WORD);
+    crate::ft::memory::ft_mem_free(memory, field.read_volatile());
+    field.write_volatile(core::ptr::null_mut());
+    phys.add(PFR_NUM_STRIKES_WORD)
+        .write_volatile(core::ptr::null_mut());
+    phys.add(PFR_MAX_STRIKES_WORD)
+        .write_volatile(core::ptr::null_mut());
+
+    let field = phys.add(PFR_CHARS_WORD);
+    crate::ft::memory::ft_mem_free(memory, field.read_volatile());
+    field.write_volatile(core::ptr::null_mut());
+    phys.add(PFR_NUM_CHARS_WORD)
+        .write_volatile(core::ptr::null_mut());
+    phys.add(PFR_CHARS_OFFSET_WORD)
+        .write_volatile(core::ptr::null_mut());
+
+    let field = phys.add(PFR_BLUE_VALUES_WORD);
+    crate::ft::memory::ft_mem_free(memory, field.read_volatile());
+    field.write_volatile(core::ptr::null_mut());
+    phys.add(PFR_NUM_BLUE_VALUES_WORD)
+        .write_volatile(core::ptr::null_mut());
+
+    let mut item = phys.add(PFR_KERN_ITEMS_WORD).read_volatile();
+    while !item.is_null() {
+        let next = item.cast::<*mut u8>().read_volatile();
+        crate::ft::memory::ft_mem_free(memory, item);
+        item = next;
     }
-}
-
-/// RetailOS dependency of [`pfr_face_done`]. Target integration must
-/// install the real `FUN_080a3554`; focused host tests replace it with
-/// a recording seam.
-pub static mut PFR_PHY_FONT_DONE: PfrPhyFontDone = missing_pfr_phy_font_done;
-
-#[inline(always)]
-unsafe fn pfr_phy_font_done() -> PfrPhyFontDone {
-    core::ptr::read_volatile(core::ptr::addr_of!(PFR_PHY_FONT_DONE))
+    phys.add(PFR_KERN_ITEMS_WORD)
+        .write_volatile(core::ptr::null_mut());
+    phys.add(PFR_KERN_ITEMS_TAIL_WORD)
+        .write_volatile(core::ptr::null_mut());
+    phys.add(PFR_NUM_KERN_PAIRS_WORD)
+        .write_volatile(core::ptr::null_mut());
 }
 
 /// pfr_face_done (FreeType `pfr_face_done`, pfrdrivr.c) — original:
@@ -713,16 +788,13 @@ unsafe fn pfr_phy_font_done() -> PfrPhyFontDone {
 /// `PFR_Face` +0x84 (the `header` right after the 0x84-byte
 /// `FT_FaceRec`), plus `pfr_phy_font_load`'s trace string.
 ///
-/// Deviations: the unported `pfr_phy_font_done` rides the
-/// [`PFR_PHY_FONT_DONE`] seam (house pattern — see
-/// [`OBJECT_FLAGS_FETCH_INCREMENT_LOCK`]) instead of a direct `bl`;
-/// the already-ported [`ft_mem_free`](crate::ft::memory::ft_mem_free)
+/// Deviations: the already-ported [`ft_mem_free`](crate::ft::memory::ft_mem_free)
 /// @ 0x082cfae8 takes the `FT_FREE` half directly (LLVM inlines its
 /// null-guarded `blx [memory,#8]` body — the same inlining deviation
-/// ft_mem_alloc's entry records); and the face
-/// fields are addressed by word index (byte-exact +0x14..+0x120 on
-/// the 32-bit target; each field stays disjoint on a 64-bit host —
-/// the same model as cxx/handle.rs's handle_deref_field12).
+/// ft_mem_alloc's entry records); and the face fields are addressed by word
+/// index (byte-exact +0x14..+0x120 on the 32-bit target; each field stays
+/// disjoint on a 64-bit host — the same model as
+/// cxx/handle.rs's handle_deref_field12).
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn pfr_face_done(face: *mut *mut u8) {
@@ -733,7 +805,7 @@ pub unsafe extern "C" fn pfr_face_done(face: *mut *mut u8) {
         .read_volatile();
     face.add(FACE_FAMILY_NAME_WORD).write_volatile(core::ptr::null_mut());
     face.add(FACE_STYLE_NAME_WORD).write_volatile(core::ptr::null_mut());
-    pfr_phy_font_done()(
+    pfr_phy_font_done(
         face.add(FACE_PHY_FONT_WORD),
         face.add(FACE_MEMORY_WORD).read_volatile().cast::<crate::ft::memory::FtMemory>(),
     );
@@ -1342,42 +1414,33 @@ mod tests {
         }
     }
 
-    // --- pfr_face_done ---
+    // --- PFR physical-font and face teardown ---
 
-    /// Serializes the tests that swap the phy-font-teardown seam and
-    /// the recording allocator below.
+    /// Serializes the tests using the recording allocator below.
     static PFR_FACE_DONE_TEST_LOCK: StdMutex<()> = StdMutex::new(());
 
-    /// Word count of the mock face: the highest touched field is
-    /// `phy_font` at word 0x48, whose address is only passed on.
-    const FACE_WORDS: usize = FACE_PHY_FONT_WORD + 1;
+    /// Target-word count sufficient for every pfr_phy_font_done field through
+    /// `kern_items_tail` at +0x8c.
+    const PFR_PHY_FONT_WORDS: usize = 0x90 / 4;
+    /// The physical-font record is embedded at face word 0x48.
+    const FACE_WORDS: usize = FACE_PHY_FONT_WORD + PFR_PHY_FONT_WORDS;
 
-    static mut SEAM_PHYS: *mut *mut u8 = core::ptr::null_mut();
-    static mut SEAM_MEMORY: *mut crate::ft::memory::FtMemory = core::ptr::null_mut();
-    static mut SEAM_CALLS: usize = 0;
-    /// Allocator free-call count observed when the seam ran: pins the
-    /// phy-font teardown ahead of the `available_sizes` free.
-    static mut SEAM_FREE_COUNT_AT_CALL: usize = 0;
     static mut FREE_CALLS: usize = 0;
     static mut FREE_MEMORY_ARG: *mut crate::ft::memory::FtMemory = core::ptr::null_mut();
     static mut FREE_BLOCK_ARG: *mut u8 = core::ptr::null_mut();
-
-    unsafe extern "C" fn recording_phy_font_done(
-        phys: *mut *mut u8,
-        memory: *mut crate::ft::memory::FtMemory,
-    ) {
-        SEAM_PHYS = phys;
-        SEAM_MEMORY = memory;
-        SEAM_FREE_COUNT_AT_CALL = FREE_CALLS;
-        SEAM_CALLS += 1;
-    }
+    /// Complete ordered callback trace; every test here has at most ten calls.
+    static mut FREE_BLOCKS: [usize; 12] = [0; 12];
+    static mut FREE_MEMORIES: [usize; 12] = [0; 12];
 
     unsafe extern "C" fn recording_free(
         memory: *mut crate::ft::memory::FtMemory,
         block: *mut u8,
     ) {
+        let slot = FREE_CALLS;
         FREE_MEMORY_ARG = memory;
         FREE_BLOCK_ARG = block;
+        FREE_BLOCKS[slot] = block as usize;
+        FREE_MEMORIES[slot] = memory as usize;
         FREE_CALLS += 1;
     }
 
@@ -1385,7 +1448,7 @@ mod tests {
         _memory: *mut crate::ft::memory::FtMemory,
         _size: i32,
     ) -> *mut u8 {
-        panic!("pfr_face_done never allocates")
+        panic!("PFR teardown never allocates")
     }
 
     unsafe extern "C" fn unused_realloc(
@@ -1394,7 +1457,7 @@ mod tests {
         _new: i32,
         _block: *mut u8,
     ) -> *mut u8 {
-        panic!("pfr_face_done never reallocates")
+        panic!("PFR teardown never reallocates")
     }
 
     fn recording_memory() -> crate::ft::memory::FtMemory {
@@ -1442,25 +1505,134 @@ mod tests {
         }
     }
 
-    /// Installs the recording seam and zeroes the recorders; returns
-    /// the guard serializing the swap.
+    /// Clears the callback trace and returns the lock which makes the shared
+    /// recording allocator safe for this module's parallel tests.
     fn install_recording_teardown() -> StdMutexGuard<'static, ()> {
         let guard = PFR_FACE_DONE_TEST_LOCK.lock().unwrap();
         unsafe {
-            SEAM_PHYS = core::ptr::null_mut();
-            SEAM_MEMORY = core::ptr::null_mut();
-            SEAM_CALLS = 0;
-            SEAM_FREE_COUNT_AT_CALL = usize::MAX;
             FREE_CALLS = 0;
             FREE_MEMORY_ARG = core::ptr::null_mut();
             FREE_BLOCK_ARG = core::ptr::null_mut();
-            PFR_PHY_FONT_DONE = recording_phy_font_done;
+            FREE_BLOCKS = [0; 12];
+            FREE_MEMORIES = [0; 12];
         }
         guard
     }
 
-    fn uninstall_recording_teardown() {
-        unsafe { PFR_PHY_FONT_DONE = missing_pfr_phy_font_done };
+    #[test]
+    fn pfr_phy_font_done_skips_null_blocks_and_zeros_teardown_fields() {
+        let _guard = install_recording_teardown();
+        let mut memory = recording_memory();
+        let sentinel = 0x5a5a_5a5ausize as *mut u8;
+        let mut phys = [sentinel; PFR_PHY_FONT_WORDS];
+        for word in [
+            PFR_FONT_ID_WORD,
+            PFR_FAMILY_NAME_WORD,
+            PFR_STYLE_NAME_WORD,
+            PFR_VERTICAL_STEM_SNAPS_WORD,
+            PFR_STRIKES_WORD,
+            PFR_CHARS_WORD,
+            PFR_BLUE_VALUES_WORD,
+            PFR_KERN_ITEMS_WORD,
+        ] {
+            phys[word] = core::ptr::null_mut();
+        }
+
+        unsafe { pfr_phy_font_done(phys.as_mut_ptr(), &mut memory) };
+
+        assert_eq!(unsafe { FREE_CALLS }, 0, "null FT_FREE slots do not call free");
+        for word in [
+            PFR_HORIZONTAL_STEM_COUNT_WORD,
+            PFR_HORIZONTAL_STEM_SNAPS_WORD,
+            PFR_VERTICAL_STEM_COUNT_WORD,
+            PFR_VERTICAL_STEM_SNAPS_WORD,
+            PFR_FONT_ID_WORD,
+            PFR_FAMILY_NAME_WORD,
+            PFR_STYLE_NAME_WORD,
+            PFR_NUM_STRIKES_WORD,
+            PFR_MAX_STRIKES_WORD,
+            PFR_STRIKES_WORD,
+            PFR_NUM_BLUE_VALUES_WORD,
+            PFR_BLUE_VALUES_WORD,
+            PFR_NUM_CHARS_WORD,
+            PFR_CHARS_OFFSET_WORD,
+            PFR_CHARS_WORD,
+            PFR_NUM_KERN_PAIRS_WORD,
+            PFR_KERN_ITEMS_WORD,
+            PFR_KERN_ITEMS_TAIL_WORD,
+        ] {
+            assert!(phys[word].is_null(), "target field +{:#x}", word * 4);
+        }
+        assert_eq!(phys[0x70 / 4], sentinel, "blue_fuzz is not cleared");
+        assert_eq!(phys[0x74 / 4], sentinel, "blue_scale is not cleared");
+    }
+
+    #[test]
+    fn pfr_phy_font_done_frees_owned_fields_and_kerning_list_in_retail_order() {
+        let _guard = install_recording_teardown();
+        let mut memory = recording_memory();
+        let mut owned = [0u8; 7];
+        let mut first_kern: [*mut u8; 1] = [core::ptr::null_mut(); 1];
+        let mut second_kern: [*mut u8; 1] = [core::ptr::null_mut(); 1];
+        let first = first_kern.as_mut_ptr().cast::<u8>();
+        let second = second_kern.as_mut_ptr().cast::<u8>();
+        first_kern[0] = second;
+        let mut phys = [core::ptr::null_mut(); PFR_PHY_FONT_WORDS];
+        let fields = [
+            PFR_FONT_ID_WORD,
+            PFR_FAMILY_NAME_WORD,
+            PFR_STYLE_NAME_WORD,
+            PFR_VERTICAL_STEM_SNAPS_WORD,
+            PFR_STRIKES_WORD,
+            PFR_CHARS_WORD,
+            PFR_BLUE_VALUES_WORD,
+        ];
+        for (index, field) in fields.into_iter().enumerate() {
+            phys[field] = unsafe { owned.as_mut_ptr().add(index) };
+        }
+        phys[PFR_KERN_ITEMS_WORD] = first;
+
+        unsafe { pfr_phy_font_done(phys.as_mut_ptr(), &mut memory) };
+
+        let expected = [
+            owned.as_mut_ptr() as usize,
+            unsafe { owned.as_mut_ptr().add(1) as usize },
+            unsafe { owned.as_mut_ptr().add(2) as usize },
+            unsafe { owned.as_mut_ptr().add(3) as usize },
+            unsafe { owned.as_mut_ptr().add(4) as usize },
+            unsafe { owned.as_mut_ptr().add(5) as usize },
+            unsafe { owned.as_mut_ptr().add(6) as usize },
+            first as usize,
+            second as usize,
+        ];
+        assert_eq!(unsafe { FREE_CALLS }, expected.len());
+        assert_eq!(unsafe { &FREE_BLOCKS[..expected.len()] }, expected);
+        assert!(
+            unsafe { FREE_MEMORIES[..expected.len()].iter().all(|&seen| seen == &mut memory as *mut _ as usize) },
+            "every allocation uses the supplied FT_Memory"
+        );
+        for word in [
+            PFR_HORIZONTAL_STEM_COUNT_WORD,
+            PFR_HORIZONTAL_STEM_SNAPS_WORD,
+            PFR_VERTICAL_STEM_COUNT_WORD,
+            PFR_VERTICAL_STEM_SNAPS_WORD,
+            PFR_FONT_ID_WORD,
+            PFR_FAMILY_NAME_WORD,
+            PFR_STYLE_NAME_WORD,
+            PFR_NUM_STRIKES_WORD,
+            PFR_MAX_STRIKES_WORD,
+            PFR_STRIKES_WORD,
+            PFR_NUM_BLUE_VALUES_WORD,
+            PFR_BLUE_VALUES_WORD,
+            PFR_NUM_CHARS_WORD,
+            PFR_CHARS_OFFSET_WORD,
+            PFR_CHARS_WORD,
+            PFR_NUM_KERN_PAIRS_WORD,
+            PFR_KERN_ITEMS_WORD,
+            PFR_KERN_ITEMS_TAIL_WORD,
+        ] {
+            assert!(phys[word].is_null(), "target field +{:#x}", word * 4);
+        }
     }
 
     #[test]
@@ -1479,65 +1651,34 @@ mod tests {
             "FT_FREE nulls the pointer after freeing"
         );
         assert_eq!(unsafe { FREE_BLOCK_ARG }, available);
-        uninstall_recording_teardown();
     }
 
     #[test]
-    fn tears_down_phy_font_with_face_memory() {
+    fn pfr_face_done_uses_face_memory_for_embedded_physical_font() {
         let _guard = install_recording_teardown();
         let mut mock = mock_face();
         mock.wire();
-        let face_ptr = mock.words.as_mut_ptr();
-        let face_memory = core::ptr::addr_of_mut!(mock.face_memory);
-        unsafe { pfr_face_done(face_ptr) };
-        assert_eq!(unsafe { SEAM_CALLS }, 1);
-        assert_eq!(
-            unsafe { SEAM_PHYS },
-            unsafe { face_ptr.add(FACE_PHY_FONT_WORD) },
-            "the embedded physical-font record is at word 0x48 (+0x120)"
-        );
-        assert_eq!(
-            unsafe { SEAM_MEMORY },
-            face_memory,
-            "the teardown runs under FT_FACE_MEMORY (face +0x64)"
-        );
-        uninstall_recording_teardown();
-    }
-
-    #[test]
-    fn frees_available_sizes_through_driver_root_memory() {
-        let _guard = install_recording_teardown();
-        let mut mock = mock_face();
-        mock.wire();
-        let driver_memory = core::ptr::addr_of_mut!(mock.driver_memory);
-        let face_memory = core::ptr::addr_of_mut!(mock.face_memory);
-        let block = mock.words[FACE_AVAILABLE_SIZES_WORD];
+        let mut physical_block = 0u8;
+        let phys = unsafe { mock.words.as_mut_ptr().add(FACE_PHY_FONT_WORD) };
+        unsafe { phys.add(PFR_FONT_ID_WORD).write(core::ptr::addr_of_mut!(physical_block)) };
+        let face_memory = core::ptr::addr_of_mut!(mock.face_memory) as usize;
         unsafe { pfr_face_done(mock.words.as_mut_ptr()) };
-        assert_eq!(unsafe { FREE_CALLS }, 1);
-        assert_eq!(
-            unsafe { FREE_MEMORY_ARG },
-            driver_memory,
-            "FT_FREE uses driver->root.memory, not the face memory"
-        );
-        assert_ne!(unsafe { FREE_MEMORY_ARG }, face_memory);
-        assert_eq!(unsafe { FREE_BLOCK_ARG }, block);
-        uninstall_recording_teardown();
+        assert_eq!(unsafe { FREE_BLOCKS[0] }, core::ptr::addr_of_mut!(physical_block) as usize);
+        assert_eq!(unsafe { FREE_MEMORIES[0] }, face_memory);
     }
 
     #[test]
-    fn phy_font_teardown_precedes_available_sizes_free() {
+    fn physical_font_teardown_precedes_available_sizes_free() {
         let _guard = install_recording_teardown();
         let mut mock = mock_face();
         mock.wire();
+        let mut physical_block = 0u8;
+        let phys = unsafe { mock.words.as_mut_ptr().add(FACE_PHY_FONT_WORD) };
+        unsafe { phys.add(PFR_FONT_ID_WORD).write(core::ptr::addr_of_mut!(physical_block)) };
+        let available = mock.words[FACE_AVAILABLE_SIZES_WORD];
         unsafe { pfr_face_done(mock.words.as_mut_ptr()) };
-        assert_eq!(unsafe { SEAM_CALLS }, 1);
-        assert_eq!(
-            unsafe { SEAM_FREE_COUNT_AT_CALL },
-            0,
-            "the free has not run yet when pfr_phy_font_done is called"
-        );
-        assert_eq!(unsafe { FREE_CALLS }, 1);
-        uninstall_recording_teardown();
+        assert_eq!(unsafe { FREE_CALLS }, 2);
+        assert_eq!(unsafe { FREE_BLOCKS[1] }, available as usize);
     }
 
     #[test]
@@ -1552,12 +1693,9 @@ mod tests {
             0,
             "ft_mem_free short-circuits a null block"
         );
-        assert_eq!(unsafe { SEAM_CALLS }, 1, "the phy teardown still runs");
         assert!(mock.words[FACE_FAMILY_NAME_WORD].is_null());
         assert!(mock.words[FACE_STYLE_NAME_WORD].is_null());
-        uninstall_recording_teardown();
     }
-
     // --- registry_key_hash ---
 
     /// Serializes tests that replace the host singleton's providers word and

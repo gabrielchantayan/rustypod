@@ -21508,6 +21508,41 @@ functions:
       implementation and focused host tests:
       `src/cxx/object_flags.rs::ft_open_face_dfont_fallback`.
 
+  # --- FreeType PFR physical-font finalizer ---
+  - address: 0x080a3554
+    ghidra: FUN_080a3554
+    name: pfr_phy_font_done
+    size: 208
+    sig: "void pfr_phy_font_done(void **phys, FT_Memory memory)"
+    module: cxx/object_flags
+    status: ported
+    renames:
+      param_1: phys
+      param_2: memory
+      piVar1: kern_item
+      iVar2: next_kern_item
+    notes: >-
+      Upstream FreeType pfr_phy_font_done (pfrload.c), called once by
+      pfr_face_done at 0x0808561c with the embedded PFR_PhyFontRec at
+      face+0x120 and FT_FACE_MEMORY (face+0x64). The 208-byte ARM body
+      FT_FREEs, in order, font_id (+0x50), family_name (+0x54), style_name
+      (+0x58), vertical.stem_snaps (+0x4c), strikes (+0x64), chars (+0x80),
+      blue_values (+0x6c), then every +0x88 kern_items list node after
+      loading its +0x00 next link. It zeroes each freed slot and precisely
+      the associated counts/aliases: vertical count (+0x48), horizontal
+      stem pointer/count (+0x40/+0x3c), strike count/capacity (+0x5c/+0x60),
+      character count/offset (+0x78/+0x7c), blue-value count (+0x68), and
+      kern list head/tail/pair count (+0x88/+0x8c/+0x84). Horizontal snaps
+      is an interior alias into the vertical allocation and is therefore
+      cleared without being freed. There is no entry null guard; null owned
+      slots are valid because ft_mem_free @ 0x082cfae8 suppresses its
+      callback. Raw ARM, the Ghidra C, and the upstream PFR_PhyFontRec
+      layout agree on every field. match.py confirms the ordered loads,
+      free calls, stores, and next-before-free list traversal; the expected
+      LLVM diff is ft_mem_free inlining (null cmp / callback blx) and frame
+      allocation. Rust implementation and focused host tests:
+      `src/cxx/object_flags.rs::pfr_phy_font_done`.
+
   # --- FreeType PFR driver face finalizer ---
   - address: 0x080855f8
     ghidra: FUN_080855f8
@@ -21527,7 +21562,7 @@ functions:
       and style_name (+0x18) so no dangling pointers outlive the face,
       tears down the embedded physical-font record at +0x120 with the
       face's own memory (+0x64) through pfr_phy_font_done
-      (FUN_080a3554, unported — 1 `bl 0x080a3554` site, @ 0x0808561c,
+      (FUN_080a3554 — 1 `bl 0x080a3554` site, @ 0x0808561c,
       here), then FT_FREEs available_sizes (+0x20) with the driver
       memory: ft_mem_free(memory, available_sizes) plus the macro's own
       NULL store. The complete retail body is 60 bytes: push
@@ -21551,24 +21586,21 @@ functions:
       here (pfr_face_init finds the PFR header at face+0x84), and the
       statement-for-statement match with upstream pfr_face_done —
       driver@+0x60, family/style@+0x14/+0x18, available_sizes@+0x20,
-      memory@+0x64, phy_font@+0x120 — pins each field. Deviations: the
-      unported
-      pfr_phy_font_done rides the PFR_PHY_FONT_DONE seam (house
-      pattern — OBJECT_FLAGS_FETCH_INCREMENT_LOCK) instead of a direct
-      `bl`; the already-ported ft_mem_free @ 0x082cfae8 takes the
-      FT_FREE half directly (LLVM inlines its null-guarded `blx
-      [memory,#8]` body — the same inlining deviation ft_mem_alloc's
-      entry records); and the face fields are addressed by word index
-      (byte-exact +0x14..+0x120 on the 32-bit target, disjoint words on
-      a 64-bit host — cxx/handle.rs's handle_deref_field12 model).
-      match.py confirms the structural shape: the ldr-@+0x60 / ldr-@+8
-      allocator chain, both NULL stores, the +0x64 load and face+0x120
-      add, the +0x20 load/store bracket around the free are
-      instruction-identical; the diff is LLVM's push {r4-r6,sl,fp,lr}
-      frame, the indirect `blx` through the seam versus the ADS direct
-      `bl`, and the inlined ft_mem_free (cmp/beq guard plus `blx
-      [memory,#8]`) replacing the `bl 0x082cfae8`. Rust implementation
-      and focused host tests:
+      memory@+0x64, phy_font@+0x120 — pins each field. The port now calls
+      pfr_phy_font_done directly. Deviations: the already-ported
+      ft_mem_free @ 0x082cfae8 takes the FT_FREE half directly (LLVM
+      inlines its null-guarded `blx [memory,#8]` body — the same inlining
+      deviation ft_mem_alloc's entry records); and the face fields are
+      addressed by word index (byte-exact +0x14..+0x120 on the 32-bit
+      target, disjoint words on a 64-bit host —
+      cxx/handle.rs's handle_deref_field12 model). match.py confirms the
+      structural shape: the ldr-@+0x60 / ldr-@+8 allocator chain, both
+      NULL stores, the +0x64 load and face+0x120 add, direct pfr_phy_font_done
+      call, and +0x20 load/store bracket around the free. The diff is
+      LLVM's push {r4-r6,sl,fp,lr} frame and inlined ft_mem_free
+      (cmp/beq guard plus `blx [memory,#8]`) replacing the
+      `bl 0x082cfae8`.
+      Rust implementation and focused host tests:
       `src/cxx/object_flags.rs::pfr_face_done`.
 
 
