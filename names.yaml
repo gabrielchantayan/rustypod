@@ -19005,22 +19005,46 @@ functions:
       param_1: resolver
       param_2: context
       param_3: value
-      FUN_0811ca58: app_string_resolve_operation
+      FUN_0811ca58: app_string_resolver_resolve
     notes: >-
       The reference C falsely infers a void no-argument wrapper. Assembly
       preserves r0-r2, reserves one uninitialized stack word, passes its
-      address in r3 to FUN_0811ca58, and leaves the callee return in r0.
-
-      Known callers consume that result as a C string. The unported resolver
-      is a volatile app-string-resolver seam; this wrapper neither reads nor
-      alters the output slot. Reference C: decomp/c/010/0811ca48_FUN_0811ca48.c;
-      callee and callers: decomp/c/010/0811ca58_FUN_0811ca58.c,
+      address in r3 to app_string_resolver_resolve, and leaves the callee
+      return in r0. Known callers consume that result as a C string. Reference
+      C: decomp/c/010/0811ca48_FUN_0811ca48.c; resolver and callers:
+      decomp/c/010/0811ca58_FUN_0811ca58.c,
       decomp/c/028/0829a124_FUN_0829a124.c, and
       decomp/c/028/0829a4dc_FUN_0829a4dc.c; assembly: osos.asm 0x0811ca48.
-      Focused host test proves one invocation, argument order, distinct stack
-      output slot, and unchanged callee return. match.py structural report
-      preserves the stack slot and call route via the operation seam (exit 1
-      expected).
+      Focused host tests cover the resolver's output-slot and return behavior.
+  - address: 0x0811ca58
+    ghidra: FUN_0811ca58
+    name: app_string_resolver_resolve
+    size: 172
+    sig: "void *app_string_resolver_resolve(void *resolver, void *context, void *value, void **output_slot)"
+    module: app/string_resolve
+    status: ported
+    renames:
+      param_1: resolver
+      param_2: context
+      param_3: value
+      param_4: output_slot
+      FUN_0812d20c: provider_lookup
+      FUN_0815bcd4: primary_fallback_lookup
+      local_18: resolved_record_slot
+    notes: >-
+      A tagged app-string resolver: tag 1 resolves its +0x04 provider source;
+      tag 2 first tries its optional +0x18 parent source, then delegates its
+      +0x04 source to the range-table fallback. A successful provider lookup
+      yields a two-word borrowed record: word 0 is stored through output_slot
+      and word 1 is returned. A failed tag-1 lookup clears output_slot; an
+      unknown tag returns NULL without writing it. Tag-2 fallback result and
+      output are propagated unchanged. Provider and range-table formats are
+      deliberately retained behind their original 0x0812d20c/0x0815bcd4 call
+      boundaries. Raw ARM is authoritative over the reference C for the
+      four-register ABI and control flow. Focused host tests cover provider
+      output/return propagation, tag-1 failure, parent precedence, fallback,
+      and unknown-tag output preservation. match.py structural report differs
+      as expected (exit 1).
 
   - address: 0x08003e00
     ghidra: FUN_08003e00
