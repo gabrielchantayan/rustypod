@@ -28,10 +28,11 @@
 //!
 //! `xFinalize(ctx)` is `blx`'d, then `value->zMalloc` at +0x24 is
 //! freed raw (`ldr r0,[r4,#0x24]; bl sqlite3_free` @ 0x083906f4, here
-//! [`tracked_free`]), the 0x28-byte scratch `Mem` is `memcpy`'d over
-//! `value` (`mov r2,#0x28; add r1,sp,#0x8; mov r0,r4; bl 0x08037df8`
-//! — the ROM memcpy veneer, here the ported [`memcpy`]) — landing
-//! flags = 1 (MEM_Null) unless `xFinalize` set a result, which is
+//!   [`tracked_free`]), the 0x28-byte scratch `Mem` is copied over
+//!   `value` (`mov r2,#0x28; add r1,sp,#0x8; mov r0,r4; bl 0x08037df8`
+//!   — the ROM copy veneer, here the ported
+//!   [`memcpy_forward_words`](crate::libc::memcpy::memcpy_forward_words)) —
+//!   landing flags = 1 (MEM_Null) unless `xFinalize` set a result, which is
 //! what clears `MEM_Agg` for the re-entered extern release — and the
 //! return is `isError != 0` normalized to 0/1 (`ldr r0,[sp,#0x34];
 //! cmp; movne r0,#0x1`).
@@ -46,8 +47,9 @@
 //!   ([`tracked_free`](crate::heap::tracked::tracked_free)) and is
 //!   called directly, per the porting rules. Its NULL guard stands in
 //!   for the original's, which also runs unconditionally on `zMalloc`.
-//! - The ROM veneer @ 0x08037df8 targets `memcpy`; the ported
-//!   [`memcpy`](crate::libc::memcpy::memcpy) is called directly.
+//! - The ROM veneer @ 0x08037df8 targets `memcpy_forward_words`; the ported
+//!   [`memcpy_forward_words`](crate::libc::memcpy::memcpy_forward_words) is
+//!   called directly.
 //! - On 64-bit hosts the port additionally clears the upper half of
 //!   the widened `zMalloc` field after the 0x28-byte result copy
 //!   (`#[cfg(target_pointer_width = "64")]`, compiled out on the ARM
@@ -61,7 +63,7 @@
 //!   than guess a destructor).
 
 use crate::heap::tracked::tracked_free;
-use crate::libc::memcpy::memcpy;
+use crate::libc::memcpy::memcpy_forward_words;
 use crate::sqlite::mem_release::Z_MALLOC_OFFSET;
 
 /// Byte offset of `Mem.db` (original: `ldr r0,[r4,#0x10]`).
@@ -150,7 +152,7 @@ pub unsafe extern "C" fn mem_finalize(value: *mut u8, func_def: *mut u8) -> i32 
     // finalized result replaces the aggregate context (landing
     // flags = MEM_Null, which clears MEM_Agg for the re-entered
     // extern release).
-    memcpy(value, ctx.add(CTX_SCRATCH_OFFSET), MEM_SIZE);
+    memcpy_forward_words(value, ctx.add(CTX_SCRATCH_OFFSET), MEM_SIZE);
     // Host accommodation: this crate reads `Mem`'s pointer fields
     // host-sized, and the 0x28-byte ARM struct copy leaves the upper
     // half of the widened `zMalloc` at +0x24 stale — it is the only

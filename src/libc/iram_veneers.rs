@@ -38,9 +38,9 @@
 //!    block; it reaches it only through the veneer table. That is precisely
 //!    the shape of a region whose runtime home is elsewhere.
 //! 3. **The offsets line up on real entry points.** 0x22000188 and
-//!    0x220002d4 land exactly on `memcpy` @ 0x08000188 and `memzero` @
-//!    0x080002d4 — two independently identified ADS runtime entries (see
-//!    names.yaml), not arbitrary mid-function addresses.
+//!    0x220002d4 land exactly on `memcpy_forward_words` @ 0x08000188 and
+//!    `memzero` @ 0x080002d4 — two independently identified ADS runtime
+//!    entries (see names.yaml), not arbitrary mid-function addresses.
 //!
 //! Bucketing the call sites confirms the split with no exceptions: all 24
 //! direct B/BL references to the in-image bodies (0x08000020, 0x080000d4,
@@ -55,36 +55,33 @@
 //! `hooks.yaml` entry can plant a branch on to route all 477 (resp. 106)
 //! call sites through the Rust implementation with a single 4-byte patch.
 //!
-//! # Deviations
+//! # ABI details
 //!
-//! - The ARM bodies clobber r0 and effectively return `dst + len`; the ports
-//!   (`memcpy`, `memzero`) return the original `dst`. This is safe here: the
-//!   ADS-generated call sites do not consume the result. Sampling 24 call
-//!   sites spread across the image, every instruction following the `bl`
-//!   either overwrites r0 (`mov r0,#N` / `ldr r0,[..]`) or does not reference
-//!   it (`add r5,r5,#20`, `strb`, `pop`); none reads r0 as a source.
-//! - `memcpy` @ 0x08000188 requires both pointers word-aligned (it is the
+//! - `memcpy_forward_words` @ 0x08000188 advances r0 and returns
+//!   `dst + len`; it also advances caller-saved r1. The veneer is a tail
+//!   transfer, so it preserves that result exactly.
+//! - `memcpy_forward_words` requires both pointers word-aligned (it is the
 //!   aligned fast path of `__rt_memcpy`, broken out as its own entry). The
 //!   veneer inherits that precondition unchanged.
 //! - Each port loads its callee through `read_volatile` before calling it.
-//!   Written as a plain call, LLVM recognises `memcpy` as the C library
-//!   routine and re-lowers the veneer to `bl __aeabi_memcpy`, and inlines
-//!   `memzero` outright — either way the veneer stops reaching the ported
-//!   body, which is its entire purpose. The volatile load also happens to be
-//!   the closer analogue of the original: `ldr pc, [pc, #-4]` is itself an
-//!   indirect jump through a literal, not a direct branch. Both ports compile
-//!   to `ldr rN, [pc, #8]; ldr rN, [rN]; bx rN` — the original's shape plus
-//!   one indirection and a `push {fp, lr}` / `pop {fp, lr}` frame, with
-//!   r0-r2 passed through untouched.
+//!   Written as a plain call, LLVM recognises a memcpy-shaped body as the C
+//!   library routine and re-lowers the veneer to `bl __aeabi_memcpy`, and
+//!   inlines `memzero` outright — either way the veneer stops reaching the
+//!   ported body, which is its entire purpose. The volatile load also happens
+//!   to be the closer analogue of the original: `ldr pc, [pc, #-4]` is itself
+//!   an indirect jump through a literal, not a direct branch. Both ports
+//!   compile to `ldr rN, [pc, #8]; ldr rN, [rN]; bx rN` — the original's
+//!   shape plus one indirection and a `push {fp, lr}` / `pop {fp, lr}` frame,
+//!   with r0-r2 passed through untouched.
 
-use crate::libc::memcpy::memcpy;
+use crate::libc::memcpy::memcpy_forward_words;
 use crate::libc::memzero::memzero;
 
-/// Veneer @ 0x08037df8 -> IRAM 0x22000188 = `memcpy` (477 `bl`, 11 `b`).
+/// Veneer @ 0x08037df8 -> IRAM 0x22000188 = `memcpy_forward_words`
+/// (477 `bl`, 11 `b`).
 ///
 /// # Safety
-/// `dst` and `src` must both be word-aligned, valid for `len` bytes, and
-/// non-overlapping — the contract of the body it forwards to.
+/// `dst` and `src` must both be word-aligned and valid for `len` bytes.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn iram_memcpy_veneer(
@@ -93,7 +90,7 @@ pub unsafe extern "C" fn iram_memcpy_veneer(
     len: usize,
 ) -> *mut u8 {
     let body = core::ptr::read_volatile(
-        &(memcpy as unsafe extern "C" fn(*mut u8, *const u8, usize) -> *mut u8),
+        &(memcpy_forward_words as unsafe extern "C" fn(*mut u8, *const u8, usize) -> *mut u8),
     );
     body(dst, src, len)
 }
@@ -141,13 +138,13 @@ mod tests {
                             src.as_ptr().add(src_off),
                             len,
                         );
-                        let d = memcpy(
+                        let d = memcpy_forward_words(
                             direct.as_mut_ptr().add(dst_off),
                             src.as_ptr().add(src_off),
                             len,
                         );
-                        assert_eq!(v, through_veneer.as_mut_ptr().add(dst_off));
-                        assert_eq!(d, direct.as_mut_ptr().add(dst_off));
+                        assert_eq!(v, through_veneer.as_mut_ptr().add(dst_off + len));
+                        assert_eq!(d, direct.as_mut_ptr().add(dst_off + len));
                     }
                     assert_eq!(
                         through_veneer, direct,

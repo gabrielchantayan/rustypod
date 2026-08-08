@@ -904,11 +904,9 @@ pub unsafe extern "C" fn ft_stream_read_at(
         Some(read) => read(stream, pos, buffer, count),
         None => {
             let available = (size - pos).min(count);
-            crate::libc::memcpy::memcpy(
-                buffer,
-                (*stream).base.add(pos as usize),
-                available as usize,
-            );
+            crate::libc::memcpy::memcpy_forward_words(buffer,
+            (*stream).base.add(pos as usize),
+            available as usize,);
             available
         }
     };
@@ -967,11 +965,9 @@ pub unsafe extern "C" fn ft_stream_try_read(
         Some(read) => read(stream, pos, buffer, count),
         None => {
             let available = (size - pos).min(count);
-            crate::libc::memcpy::memcpy(
-                buffer,
-                (*stream).base.add(pos as usize),
-                available as usize,
-            );
+            crate::libc::memcpy::memcpy_forward_words(buffer,
+            (*stream).base.add(pos as usize),
+            available as usize,);
             available
         }
     };

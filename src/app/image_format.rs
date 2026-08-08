@@ -57,7 +57,7 @@
 //! builder `FUN_08105b58` (ported below as
 //! [`image_format_descriptor`]).
 
-use crate::libc::memcpy::memcpy;
+use crate::libc::memcpy::memcpy_forward_words;
 
 /// The "no format" answer (`mvn r0, #0`) — kinds 9, 11, 13 and every
 /// kind above [`IMAGE_KIND_COUNT`].
@@ -290,9 +290,9 @@ fn put_u16(descriptor: &mut [u8; DESCRIPTOR_SIZE], offset: usize, value: u16) {
 ///   This port zero-fills the whole descriptor instead (strictly
 ///   safer; a caller reading those bytes sees 0, not stack garbage).
 ///   Every byte the original does store is reproduced exactly.
-/// - The ROM veneer @ 0x08037df8 targets `memcpy`; the ported
-///   [`memcpy`](crate::libc::memcpy::memcpy) is called directly, per
-///   house pattern.
+/// - The ROM veneer @ 0x08037df8 targets `memcpy_forward_words`; the
+///   ported [`memcpy_forward_words`](crate::libc::memcpy::memcpy_forward_words)
+///   is called directly, per house pattern.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn image_format_descriptor(descriptor: *mut u8, format: u32) {
@@ -305,7 +305,7 @@ pub unsafe extern "C" fn image_format_descriptor(descriptor: *mut u8, format: u3
         put_u32(&mut local, BIT_DEPTH_OFFSET, fields.bit_depth);
         put_u16(&mut local, PIXEL_FORMAT_OFFSET, fields.pixel_format);
     }
-    memcpy(descriptor, local.as_ptr(), DESCRIPTOR_SIZE);
+    memcpy_forward_words(descriptor, local.as_ptr(), DESCRIPTOR_SIZE);
 }
 
 /// image_format_descriptor_for_kind — original: `FUN_08105b38` @

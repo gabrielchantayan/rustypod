@@ -31,15 +31,18 @@ functions:
 
   - address: 0x08000188
     ghidra: FUN_08000188
-    name: memcpy
+    name: memcpy_forward_words
     size: 108
-    sig: "void *memcpy(void *dst, const void *src, size_t len)"
-    module: memcpy
+    sig: "void *memcpy_forward_words(void *dst, const void *src, size_t len) -> dst + len"
+    module: libc/memcpy
     status: ported
-    vars: {param_1: dst, param_2: src, param_3: len}
-    notes: Forward word copy (32/16/8/4-byte blocks + tail). Assumes
-      word-aligned pointers; memmove's aligned fast path as its own entry.
-      Original advances and returns the end pointer; port returns dst.
+    vars: {param_1/r0: dst, param_2/r1: src, param_3/r2: len, param_4/r3: scratch}
+    notes: >-
+      Word-aligned forward body of the ADS copy runtime. Two 16-byte
+      ldmia/stmia pairs stream each 32-byte block, followed by 16/8/4-byte
+      groups and a fully loaded 0-3 byte tail. r0 returns dst + len; r1 is
+      also advanced but is caller-saved. Overlap is not repaired: each load
+      group completes before its stores, so dst > src can consume prior stores.
 
   - address: 0x080005fc
     ghidra: FUN_080005fc
@@ -52,6 +55,26 @@ functions:
     notes: Forward byte-at-a-time copy helper. The pre-decrement/CMN loop
       skips all reads and writes when len is zero; overlapping ranges retain
       forward-copy (not memmove) behavior.
+
+  # --- stack-sensitive literal tail dispatch ---
+  - address: 0x08003818
+    ghidra: FUN_08003818
+    name: kernel_indirect_dispatch
+    size: 8
+    sig: "noreturn void kernel_indirect_dispatch(void *argument)"
+    module: kernel/thunks
+    status: ported
+    renames:
+      param_1: argument
+      DAT_0800381c: kernel_indirect_dispatch_target
+    notes: >-
+      Raw ARM is `ldr pc, [pc, #-4]` followed by literal 0x0815ca7c, a
+      tail dispatch rather than Ghidra's inferred indirect call and return.
+      The recovered caller 0x08005cf4 passes its pointer in r0; the target
+      immediately pops {r4, lr} and branches to 0x0812b9a4, so it never
+      returns to the veneer’s immediate caller. The ARM port is verbatim
+      global assembly; the host-only shim terminates because that stack
+      transfer cannot be represented in a normal host call.
 
   # --- first event-handler dispatch ---
   - address: 0x080076cc
