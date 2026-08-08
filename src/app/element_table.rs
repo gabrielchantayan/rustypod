@@ -75,12 +75,12 @@
 //! - The cache is the crate static [`ELEMENT_TABLE`] rather than the
 //!   word @ 0x089ca3bc (the `block_mgr.rs` precedent: runtime-
 //!   initialized RW). It defaults to NULL — the pre-init state.
-//! - The nine constructors are unported and sit behind the
-//!   [`ELEMENT_ARRAY_CTORS`] dispatch table, the house pattern, with
-//!   documented zeroing stubs. With the stubs every array reports
-//!   `slots = 0`, so every accessor returns NULL: safe, and honest
-//!   about knowing nothing. **Not hook-ready** until the container
-//!   constructors land.
+//! - The first constructor, [`element_array0_construct`], is ported and is
+//!   wired as array 0's default. The other eight constructors remain behind
+//!   documented zeroing stubs. Thus array 0 is an empty, ten-slot container
+//!   after default construction; arrays 1 through 8 still report zero slots.
+//!   The tracker-registration helper the constructor calls is a four-byte
+//!   `mov pc, lr` stub in retailOS, so no registration seam is required.
 //! - Sub-object and field offsets are computed by WORD INDEX rather
 //!   than as literal byte offsets, so the 0x18 stride and the +0x00 /
 //!   +0x04 fields are exact on the 32-bit target while a 64-bit host
@@ -127,6 +127,17 @@ const ARRAY_DATA_INDEX: usize = 0;
 /// Word index of an array's slot count (byte offset 0x04) — the bound
 /// the accessors test, and signed.
 const ARRAY_SLOTS_INDEX: usize = 1;
+/// Word index of the array's live-element count (byte offset 0x08).
+const ARRAY_USED_INDEX: usize = 2;
+
+/// Word index of the caller's options word (byte offset 0x0c).
+const ARRAY_OPTIONS_INDEX: usize = 3;
+
+/// Word index of the growth step (byte offset 0x10).
+const ARRAY_GROWTH_INDEX: usize = 4;
+
+/// Word index of the tracker-label allocation (byte offset 0x14).
+const ARRAY_TRACKER_LABEL_INDEX: usize = 5;
 
 /// One of the nine container constructors: takes the sub-object, returns
 /// it (the ADS C++ convention the getter's `+0x18` chain relies on).
@@ -137,10 +148,9 @@ pub type ElementArrayCtor = unsafe extern "C" fn(
     growth: u32,
 ) -> *mut u8;
 
-/// Default stub for a container constructor: zeroes the sub-object and
-/// returns it. A faithful *subset* — the real constructors also zero
-/// the whole object — but it leaves `slots = 0`, so every accessor
-/// reports NULL (see the module header).
+/// Default stub for each still-unported container constructor: zeroes the
+/// sub-object and returns it. This intentionally leaves `slots = 0`, so the
+/// corresponding accessor reports NULL (see the module header).
 ///
 /// Volatile stores: a plain loop is rewritten by LLVM into a call to
 /// `__aeabi_memclr`, a symbol that does not exist in this build (the
@@ -159,16 +169,127 @@ unsafe extern "C" fn zeroing_array_ctor(
     this
 }
 
-/// Indirect dispatch table for the nine unported container constructors,
-/// in the order the getter calls them (array 0 first).
+/// Host-test source for the dynamic `fTable` name. On hardware, the original
+/// loads the source pointer from `DAT_083d3f2c + 4` (0x0897baac + 4).
+#[cfg(not(target_os = "none"))]
+static HOST_ARRAY0_TRACKER_NAME_EMPTY: [u8; 1] = [0];
+
+#[cfg(not(target_os = "none"))]
+static mut HOST_ARRAY0_TRACKER_NAME: *const u8 = HOST_ARRAY0_TRACKER_NAME_EMPTY.as_ptr();
+
+/// Returns the fTable name whose shortened copy is retained for the inert
+/// tracker record. `FUN_082a7774` is exactly `ldr r0, [r0, #4]; bx lr`.
+#[inline(always)]
+unsafe fn array0_tracker_name() -> *const u8 {
+    #[cfg(target_os = "none")]
+    {
+        // The firmware completes this runtime-data record before this
+        // constructor can be called; preserve its direct +4 load.
+        return (0x0897_baac as *const *const u8).add(1).read();
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        core::ptr::read_volatile(core::ptr::addr_of!(HOST_ARRAY0_TRACKER_NAME))
+    }
+}
+
+/// Counts a NUL-terminated tracker name, matching `FUN_08392478`.
+#[inline(always)]
+unsafe fn tracker_name_len(name: *const u8) -> usize {
+    let mut len = 0;
+    while name.add(len).read_volatile() != 0 {
+        len += 1;
+    }
+    len
+}
+
+/// Copies exactly `len` bytes like `strncpy`: after the first NUL, remaining
+/// destination bytes are zero-padded. Volatile byte operations keep ARM LLVM
+/// from replacing this loop with an unavailable libc call.
+#[inline(always)]
+unsafe fn copy_tracker_name(dst: *mut u8, src: *const u8, len: usize) {
+    let mut saw_nul = false;
+    for index in 0..len {
+        let byte = if saw_nul {
+            0
+        } else {
+            let byte = src.add(index).read_volatile();
+            saw_nul = byte == 0;
+            byte
+        };
+        dst.add(index).write_volatile(byte);
+    }
+}
+
+/// element_array0_construct — original: `FUN_083d3e8c` @ 0x083d3e8c
+/// (160 bytes).
+///
+/// Constructs the first 0x18-byte element-array container. It stores its
+/// capacity, empty live count, options, and growth word; allocates and
+/// zeroes `slots` pointer-width slot bytes; then allocates a shortened copy
+/// of the runtime fTable name at +0x14 for the `Tracker<%s> fTable=%x,
+/// fSize=%d` instrumentation call. The final tracker helper
+/// (`FUN_083d3cec`) is a four-byte no-op, and the constructor returns
+/// `this` unconditionally. There is no allocation-failure branch: allocation
+/// results are stored and passed onward exactly as returned.
+///
+/// On target the fTable name is read from the retailOS runtime-data word
+/// 0x0897baac + 4. The host-only source is swappable by tests because that
+/// firmware address is not mapped there.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn element_array0_construct(
+    this: *mut u8,
+    options: u32,
+    slots: u32,
+    growth: u32,
+) -> *mut u8 {
+    (this.add(ARRAY_DATA_INDEX * WORD) as *mut *mut u8).write(core::ptr::null_mut());
+    (this.add(ARRAY_SLOTS_INDEX * WORD) as *mut u32).write(slots);
+    (this.add(ARRAY_USED_INDEX * WORD) as *mut u32).write(0);
+    (this.add(ARRAY_OPTIONS_INDEX * WORD) as *mut u32).write(options);
+    (this.add(ARRAY_GROWTH_INDEX * WORD) as *mut u32).write(growth);
+    (this.add(ARRAY_TRACKER_LABEL_INDEX * WORD) as *mut *mut u8).write(core::ptr::null_mut());
+
+    // `mov r0, r2, lsl #2` on ARM. WORD is four on target and scales only
+    // the host fixture's pointer slots to keep its layout sound.
+    let slot_bytes = (slots as usize).wrapping_mul(WORD);
+    let data = operator_new(slot_bytes);
+    (this.add(ARRAY_DATA_INDEX * WORD) as *mut *mut u8).write(data);
+    for offset in 0..slot_bytes {
+        data.add(offset).write_volatile(0);
+    }
+
+    let name = array0_tracker_name();
+    let name_len = tracker_name_len(name);
+    let label = operator_new(name_len);
+    (this.add(ARRAY_TRACKER_LABEL_INDEX * WORD) as *mut *mut u8).write(label);
+
+    // The two strlen calls after the allocation feed r6 and the `<= 10`
+    // predicate separately in ARM; their common pure result is name_len.
+    let source_offset = if name_len <= 10 { 1 } else { 2 };
+    copy_tracker_name(label, name.add(source_offset), name_len);
+    this
+}
+
+/// Indirect dispatch table for the nine container constructors, in the order
+/// the getter calls them (array 0 first).
 pub type ElementArrayCtors = [ElementArrayCtor; ELEMENT_ARRAY_COUNT];
 
-/// Wired defaults (documented zeroing stubs until the nine container
-/// constructors — 0x083d3e8c, 0x083d4354, 0x083d40f0, 0x083d3c28,
-/// 0x083d56b8, 0x083d51dc, 0x083d4cf4, 0x083d4a94, 0x083d45b4 — are
-/// ported).
-pub(crate) const DEFAULT_ELEMENT_ARRAY_CTORS: ElementArrayCtors =
-    [zeroing_array_ctor; ELEMENT_ARRAY_COUNT];
+/// Wired defaults: array 0 uses its retailOS constructor; the remaining
+/// constructors are documented zeroing stubs until their own ports land.
+pub(crate) const DEFAULT_ELEMENT_ARRAY_CTORS: ElementArrayCtors = [
+    element_array0_construct,
+    zeroing_array_ctor,
+    zeroing_array_ctor,
+    zeroing_array_ctor,
+    zeroing_array_ctor,
+    zeroing_array_ctor,
+    zeroing_array_ctor,
+    zeroing_array_ctor,
+    zeroing_array_ctor,
+];
 
 /// The active constructors. Host tests install recording mocks; the
 /// real ports replace the defaults when they exist.
@@ -365,6 +486,10 @@ mod tests {
     /// Sizes passed to `operator new`, in order.
     static mut ALLOC_SIZES: Vec<usize> = Vec::new();
 
+    /// Per-call override results for the allocator. An unset entry preserves
+    /// the ordinary table fixture's `arena()` result.
+    static mut ALLOC_RESULTS: [*mut u8; 3] = [ptr::null_mut(); 3];
+
     /// `(this, options, slots, growth)` per constructor call, in order.
     static mut CTOR_CALLS: Vec<(usize, u32, u32, u32)> = Vec::new();
 
@@ -392,10 +517,16 @@ mod tests {
         size: usize,
         _tag: usize,
     ) -> *mut u8 {
+        let index = alloc_sizes().len();
         alloc_sizes().push(size);
-        arena()
-    }
+        let result = (*ptr::addr_of!(ALLOC_RESULTS))[index];
+        if result.is_null() {
+            arena()
+        } else {
+            result
+        }
 
+    }
     unsafe extern "C" fn stub_create(
         _desc: *mut HeapDescriptor,
         _start: *mut u8,
@@ -439,6 +570,8 @@ mod tests {
             MOCK_SLOTS = 4;
             alloc_sizes().clear();
             ctor_calls().clear();
+            ALLOC_RESULTS = [ptr::null_mut(); 3];
+            HOST_ARRAY0_TRACKER_NAME = HOST_ARRAY0_TRACKER_NAME_EMPTY.as_ptr();
             for array in 0..ELEMENT_ARRAY_COUNT {
                 for slot in 0..4 {
                     SLOT_BUFFERS[array][slot] = (0x1000 + array * 0x100 + slot * 8) as *mut u8;
@@ -459,6 +592,8 @@ mod tests {
             ELEMENT_TABLE = ptr::null_mut();
             alloc_sizes().clear();
             ctor_calls().clear();
+            ALLOC_RESULTS = [ptr::null_mut(); 3];
+            HOST_ARRAY0_TRACKER_NAME = HOST_ARRAY0_TRACKER_NAME_EMPTY.as_ptr();
         }
         drop(guard);
     }
@@ -615,6 +750,66 @@ mod tests {
     }
 
     #[test]
+    fn array0_constructor_lays_out_and_zeroes_its_two_allocations() {
+        let guard = mock();
+        let tracker_name = *b"TrackerArray0\0";
+        unsafe {
+            let this = arena().add(0x100);
+            let slot_data = arena().add(0x200);
+            let tracker_label = arena().add(0x300);
+            for offset in 0..ELEMENT_ARRAY_STRIDE {
+                this.add(offset).write(0xa5);
+            }
+            for offset in 0..(3 * WORD + 1) {
+                slot_data.add(offset).write(0xa5);
+            }
+            for offset in 0..tracker_name.len() {
+                tracker_label.add(offset).write(0xa5);
+            }
+            HOST_ARRAY0_TRACKER_NAME = tracker_name.as_ptr();
+            ALLOC_RESULTS[0] = slot_data;
+            ALLOC_RESULTS[1] = tracker_label;
+
+            assert_eq!(
+                element_array0_construct(this, 0x1122_3344, 3, 0x5566_7788),
+                this,
+                "the constructor returns its this pointer"
+            );
+            assert_eq!(*alloc_sizes(), std::vec![3 * WORD, 13]);
+            assert_eq!(
+                (this.add(ARRAY_DATA_INDEX * WORD) as *const *mut u8).read(),
+                slot_data
+            );
+            assert_eq!((this.add(ARRAY_SLOTS_INDEX * WORD) as *const u32).read(), 3);
+            assert_eq!((this.add(ARRAY_USED_INDEX * WORD) as *const u32).read(), 0);
+            assert_eq!(
+                (this.add(ARRAY_OPTIONS_INDEX * WORD) as *const u32).read(),
+                0x1122_3344
+            );
+            assert_eq!(
+                (this.add(ARRAY_GROWTH_INDEX * WORD) as *const u32).read(),
+                0x5566_7788
+            );
+            assert_eq!(
+                (this.add(ARRAY_TRACKER_LABEL_INDEX * WORD) as *const *mut u8).read(),
+                tracker_label
+            );
+            assert_eq!(
+                core::slice::from_raw_parts(slot_data, 3 * WORD),
+                &[0u8; 3 * WORD],
+                "the complete slot allocation is zeroed"
+            );
+            assert_eq!(slot_data.add(3 * WORD).read(), 0xa5, "slot zeroing stops at capacity");
+            assert_eq!(
+                core::slice::from_raw_parts(tracker_label, 13),
+                b"ackerArray0\0\0",
+                "the long fTable name skips two bytes and strncpy-pads"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
     fn the_default_ctor_stub_zeroes_one_sub_object_and_returns_it() {
         let guard = TABLE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
@@ -633,12 +828,17 @@ mod tests {
     }
 
     #[test]
-    fn the_wired_defaults_leave_every_array_empty() {
+    fn wired_defaults_construct_array0_but_leave_all_slots_empty() {
         let guard = mock();
         unsafe {
+            // The table block is allocation 0; array 0's data and tracker
+            // label are allocations 1 and 2, and must not alias the table.
+            ALLOC_RESULTS[1] = arena().add(0x200);
+            ALLOC_RESULTS[2] = arena().add(0x300);
             ELEMENT_ARRAY_CTORS = DEFAULT_ELEMENT_ARRAY_CTORS;
             assert!(element_array0_at(0).is_null());
-            assert!(element_array6_at(0).is_null());
+            assert_eq!(array_slots(ELEMENT_TABLE), 10, "array 0 has its retail capacity");
+            assert!(element_array6_at(0).is_null(), "unported array 6 remains a zero stub");
             assert!(!ELEMENT_TABLE.is_null(), "the table itself is still built");
         }
         restore(guard);
