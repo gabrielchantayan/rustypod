@@ -16999,6 +16999,30 @@ functions:
       drop the rotation and branch to the timer pointer - the port
       reads the fn-pointer field directly to sidestep it.
 
+  - address: 0x0810ebbc
+    ghidra: FUN_0810ebbc
+    name: pair_header_base_construct
+    size: 56
+    sig: "u32 *pair_header_base_construct(u32 *base)"
+    module: cxx/pair_header
+    status: ported
+    vars: {param_1: base, iVar1: grand_base}
+    notes: >-
+      Structural name: the concrete 0xb8-byte base embedded at +12 in
+      pair_header_construct's otherwise unidentified 200-byte service
+      object. Raw ARM stores literal vtable 0x08981630 at +0, calls the
+      grand-base ctor 0x0813eee0 at +4, clears +0xac/+0xb0 and the low
+      byte at +0xb4, zeroes +4..+0x97 (0x94 bytes through
+      0x08037db8), and returns the grand-base result minus four. There
+      are no null checks or failure branches. The direct grand-base call
+      is a PAIR_HEADER_BASE_OPS seam until 0x0813eee0 is ported; its
+      default preserves only that function's pointer-return contract.
+      Host tests prove vtable-before-chain ordering, post-chain clears
+      and zero-fill, and dataflow from a shifted grand-base result.
+      match.py structural: vtable store, grand-base call (table-load blx
+      for the unresolved direct bl), relative field stores, memclear,
+      and result-minus-one-word return are retained.
+
   - address: 0x08124a38
     ghidra: FUN_08124a38
     name: pair_header_construct
@@ -17019,14 +17043,10 @@ functions:
       The class is unidentified, so the name is STRUCTURAL. The scouted
       notes here originally described the three-way pointer clamp - that
       was a mis-addressed note: the clamp lives at 0x083d5eb4/0x083d5ed8
-      and is already ported as util/three_pointer_select. 0x0810ebbc is
-      not yet ported, so the port dispatches through a new
-      PairHeaderOps::construct_base slot (TimerOps precedent; default
-      stub returns its argument). match.py structural: stm of the two
-      header words, cursor advance, indirect ctor call (table-load blx
-      instead of bl), the +0xc4/+8 clears and the -12 recovery - LLVM
-      emits the clears relative to the base pointer (base+0xb8, base-4)
-      before the sub, same offsets; frame is {fp,lr} vs {r4,lr}.
+      and is already ported as util/three_pointer_select. The former
+      PairHeaderOps base-constructor seam is now cut over to the direct
+      pair_header_base_construct port; only its unported grand-base
+      dependency 0x0813eee0 remains behind PAIR_HEADER_BASE_OPS.
 
   - address: 0x083dc0e0
     ghidra: FUN_083dc0e0

@@ -26,32 +26,59 @@
 //! derived trailing word at +0xc4. The class itself is unidentified —
 //! the name is structural (see the names.yaml notes).
 
-/// Indirect dispatch for the not-yet-ported base-class constructor
-/// (the `TimerOps` precedent in `drivers/timer.rs`).
+/// Indirect dispatch for the unported grand-base constructor at
+/// 0x0813eee0. The concrete pair-header base constructor below calls it
+/// directly in the firmware; the slot keeps this one unresolved dependency
+/// explicit until its own port lands.
 #[derive(Clone, Copy)]
-pub struct PairHeaderOps {
-    /// Base-class constructor @ 0x0810ebbc(base) -> base: stores the
-    /// class vtable at +0, chains to the grand-base ctor @ 0x0813eee0
-    /// at +4, clears the words at +0xac/+0xb0 and the byte at +0xb4,
-    /// zeroes 0x94 bytes at +4 (memset @ 0x08037db8), and returns its
-    /// argument. Not yet ported.
-    pub construct_base: unsafe extern "C" fn(base: *mut u32) -> *mut u32,
+pub struct PairHeaderBaseOps {
+    /// Grand-base constructor: receives `base + 4` and returns that pointer.
+    pub construct_grand_base: unsafe extern "C" fn(base: *mut u32) -> *mut u32,
 }
 
-/// Default stub: leaves the subobject untouched but preserves the
-/// return-its-argument dataflow (which the real ctor has), so the
-/// derived-class field clears below still land on `this`. On real
-/// hardware PAIR_HEADER_OPS must be installed before this port runs.
-unsafe extern "C" fn missing_construct_base(base: *mut u32) -> *mut u32 {
+/// Default stand-in for 0x0813eee0. It preserves the pointer-return
+/// contract, but does not initialize that grand-base's fields.
+unsafe extern "C" fn missing_construct_grand_base(base: *mut u32) -> *mut u32 {
     base
 }
 
-/// The active base-constructor slot. Defaults to the documented stub
-/// above; replaced by host tests (mocks) and eventually by the ported
-/// 0x0810ebbc. Written once at init on target; tests serialize access.
-pub static mut PAIR_HEADER_OPS: PairHeaderOps = PairHeaderOps {
-    construct_base: missing_construct_base,
+/// The active grand-base-constructor slot. Target initialization must replace
+/// this model before a complete pair-header-base construction is required.
+pub static mut PAIR_HEADER_BASE_OPS: PairHeaderBaseOps = PairHeaderBaseOps {
+    construct_grand_base: missing_construct_grand_base,
 };
+
+/// PairHeaderBase's vtable literal at 0x0810ebf4.
+const PAIR_HEADER_BASE_VTABLE: u32 = 0x0898_1630;
+
+/// pair_header_base_construct — original: `FUN_0810ebbc` @ 0x0810ebbc
+/// (56 bytes).
+///
+/// Initializes the 0xb8-byte PairHeaderBase subobject. It stores vtable
+/// `0x08981630` at +0, chains to the grand-base constructor at +4, clears
+/// the two words at +0xac/+0xb0 and the low byte at +0xb4, then zeroes the
+/// 0x94-byte interval +4..+0x97. The grand-base result is backed up by one
+/// word and returned exactly as the ARM `sub r4, r0, #4` / `mov r0, r4`
+/// sequence does. There is no null check or failure branch.
+///
+/// # Safety
+/// `base` and the pointer returned by the installed grand-base constructor
+/// must describe writable PairHeaderBase storage through the offsets above;
+/// the returned pointer must be one `u32` beyond that storage's start.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn pair_header_base_construct(base: *mut u32) -> *mut u32 {
+    base.write(PAIR_HEADER_BASE_VTABLE);
+    let construct_grand_base =
+        core::ptr::addr_of!(PAIR_HEADER_BASE_OPS.construct_grand_base).read_volatile();
+    let grand_base = construct_grand_base(base.add(1));
+    let object = grand_base.sub(1);
+    object.add(0xac / 4).write(0);
+    object.add(0xb0 / 4).write(0);
+    object.cast::<u8>().add(0xb4).write(0);
+    core::ptr::write_bytes(grand_base.cast::<u8>(), 0, 0x94);
+    object
+}
 
 /// pair_header_construct — original: `FUN_08124a38` @ 0x08124a38
 /// (36 bytes; 90 `bl` call sites, the only copy).
@@ -63,15 +90,14 @@ pub static mut PAIR_HEADER_OPS: PairHeaderOps = PairHeaderOps {
 /// up by 12 to recover `this`, clears the word at +0xc4 and the byte
 /// at +8, and returns `this`.
 ///
-/// The base-ctor result is used exactly as in the original — the
-/// returned pointer minus 12 is the object — so an override that does
-/// not return its argument relocates the trailing clears the same way
-/// the firmware would.
+/// The base-ctor result is used exactly as in the original — the returned
+/// pointer minus 12 is the object — so the concrete base port's return
+/// value controls where these trailing clears land.
 ///
 /// # Safety
-/// `this` must point at 0xc8 writable, 4-byte-aligned bytes. The
-/// installed `construct_base` must accept the subobject pointer
-/// `this + 12`.
+/// `this` must point at 0xc8 writable, 4-byte-aligned bytes; its base
+/// subobject's grand-base dependency must be configured as documented by
+/// [`pair_header_base_construct`].
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn pair_header_construct(
@@ -81,11 +107,7 @@ pub unsafe extern "C" fn pair_header_construct(
 ) -> *mut u32 {
     this.write(header_first);
     this.add(1).write(header_second);
-    // Reads the fn-pointer field directly rather than through a
-    // whole-table read (the timer_schedule_shim gotcha).
-    let construct_base =
-        core::ptr::addr_of!(PAIR_HEADER_OPS.construct_base).read_volatile();
-    let object = construct_base(this.add(3)).sub(3);
+    let object = pair_header_base_construct(this.add(3)).sub(3);
     object.add(0xc4 / 4).write(0);
     object.cast::<u8>().add(8).write(0);
     object
@@ -95,22 +117,41 @@ pub unsafe extern "C" fn pair_header_construct(
 mod tests {
     extern crate std;
     use super::*;
-    use std::sync::Mutex as StdMutex;
+    use core::sync::atomic::{AtomicBool, Ordering};
     use std::vec;
 
-    /// Ops-table swaps are global; serialize the tests.
-    static OPS_LOCK: StdMutex<()> = StdMutex::new(());
+    /// Constructor dependency swaps are global; serialize the tests.
+    static OPS_LOCKED: AtomicBool = AtomicBool::new(false);
 
-    /// Objects are 200 bytes (0xc8) at the call sites.
+    struct OpsLock;
+
+    fn lock_ops() -> OpsLock {
+        while OPS_LOCKED
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            std::thread::yield_now();
+        }
+        OpsLock
+    }
+
+    impl Drop for OpsLock {
+        fn drop(&mut self) {
+            OPS_LOCKED.store(false, Ordering::Release);
+        }
+    }
+
+    /// Objects are 200 bytes (0xc8) at the derived constructor's call sites.
     const OBJECT_WORDS: usize = 0xc8 / 4;
+    const BASE_WORDS: usize = 0xb8 / 4;
+    const FILL: u32 = 0xaaaa_5555;
 
     struct OpsGuard;
 
     impl OpsGuard {
-        fn install(ops: PairHeaderOps) -> Self {
+        fn install(ops: PairHeaderBaseOps) -> Self {
             unsafe {
-                core::ptr::addr_of_mut!(PAIR_HEADER_OPS)
-                    .write_volatile(ops);
+                core::ptr::addr_of_mut!(PAIR_HEADER_BASE_OPS).write_volatile(ops);
             }
             OpsGuard
         }
@@ -119,67 +160,122 @@ mod tests {
     impl Drop for OpsGuard {
         fn drop(&mut self) {
             unsafe {
-                core::ptr::addr_of_mut!(PAIR_HEADER_OPS).write_volatile(
-                    PairHeaderOps {
-                        construct_base: missing_construct_base,
+                core::ptr::addr_of_mut!(PAIR_HEADER_BASE_OPS).write_volatile(
+                    PairHeaderBaseOps {
+                        construct_grand_base: missing_construct_grand_base,
                     },
                 );
             }
         }
     }
 
-    /// With the default stub the header words land, the flag byte and
-    /// trailing word are cleared, and `this` comes back.
+    static mut SEEN_GRAND_BASE: usize = 0;
+    static mut SEEN_VTABLE: u32 = 0;
+    static mut SEEN_PREZERO_WORD: u32 = 0;
+    static mut SEEN_PRECLEAR_WORD: u32 = 0;
+
+    unsafe extern "C" fn recording_grand_base(base: *mut u32) -> *mut u32 {
+        core::ptr::addr_of_mut!(SEEN_GRAND_BASE).write_volatile(base as usize);
+        core::ptr::addr_of_mut!(SEEN_VTABLE).write_volatile(base.sub(1).read());
+        core::ptr::addr_of_mut!(SEEN_PREZERO_WORD).write_volatile(base.read());
+        core::ptr::addr_of_mut!(SEEN_PRECLEAR_WORD)
+            .write_volatile(base.add((0xac - 4) / 4).read());
+        base
+    }
+
+    unsafe extern "C" fn shifted_grand_base(base: *mut u32) -> *mut u32 {
+        base.add(4)
+    }
+
+    /// The vtable plant precedes the grand-base chain; the field clears and
+    /// zero-fill follow it, with the original base-pointer return.
     #[test]
-    fn default_stub_constructs_header_and_clears_fields() {
-        let _lock = OPS_LOCK.lock().unwrap();
-        let _guard = OpsGuard::install(PairHeaderOps {
-            construct_base: missing_construct_base,
+    fn base_constructor_orders_vtable_chain_and_clears() {
+        let _lock = lock_ops();
+        let _guard = OpsGuard::install(PairHeaderBaseOps {
+            construct_grand_base: recording_grand_base,
         });
         unsafe {
-            let mut object = vec![0xaaaa_5555u32; OBJECT_WORDS];
-            let this = object.as_mut_ptr();
-            let ret = pair_header_construct(this, 0x1111_2222, 0x3333_4444);
+            let mut base = vec![FILL; BASE_WORDS];
+            let this = base.as_mut_ptr();
+            let ret = pair_header_base_construct(this);
+
             assert_eq!(ret, this);
-            assert_eq!(object[0], 0x1111_2222);
-            assert_eq!(object[1], 0x3333_4444);
-            // Flag byte at +8 cleared, the other three bytes untouched.
-            assert_eq!(object[2], 0xaaaa_5500);
-            // Trailing word at +0xc4 cleared.
-            assert_eq!(object[0xc4 / 4], 0);
-            // The base subobject (+12..+0xc4) is the stub's no-op zone.
-            assert_eq!(object[3], 0xaaaa_5555);
-            assert_eq!(object[0xc0 / 4], 0xaaaa_5555);
+            assert_eq!(
+                core::ptr::addr_of!(SEEN_GRAND_BASE).read_volatile(),
+                this.add(1) as usize,
+                "grand-base receives base + 4"
+            );
+            assert_eq!(
+                core::ptr::addr_of!(SEEN_VTABLE).read_volatile(),
+                PAIR_HEADER_BASE_VTABLE,
+                "vtable is planted before the chain"
+            );
+            assert_eq!(
+                core::ptr::addr_of!(SEEN_PREZERO_WORD).read_volatile(),
+                FILL,
+                "zero-fill has not started during the chain"
+            );
+            assert_eq!(
+                core::ptr::addr_of!(SEEN_PRECLEAR_WORD).read_volatile(),
+                FILL,
+                "trailing fields are cleared after the chain"
+            );
+            assert_eq!(base[0], PAIR_HEADER_BASE_VTABLE);
+            assert!(
+                base[1..1 + 0x94 / 4].iter().all(|&word| word == 0),
+                "+4..+0x97 is zero-filled"
+            );
+            assert_eq!(base[0xac / 4], 0);
+            assert_eq!(base[0xb0 / 4], 0);
+            assert_eq!(base[0xb4 / 4], 0xaaaa_5500);
         }
     }
 
-    /// The base ctor receives this+12 and its return value minus 12 is
-    /// the object the trailing clears land on.
+    /// The ARM constructor derives both its stores and return from the
+    /// grand-base result, rather than assuming that result equals its input.
     #[test]
-    fn base_ctor_gets_subobject_and_return_value_is_used() {
-        let _lock = OPS_LOCK.lock().unwrap();
-
-        static mut SEEN_BASE: usize = 0;
-        unsafe extern "C" fn recording_construct_base(base: *mut u32) -> *mut u32 {
-            core::ptr::addr_of_mut!(SEEN_BASE).write_volatile(base as usize);
-            base
-        }
-
-        let _guard = OpsGuard::install(PairHeaderOps {
-            construct_base: recording_construct_base,
+    fn base_constructor_preserves_grand_base_return_dataflow() {
+        let _lock = lock_ops();
+        let _guard = OpsGuard::install(PairHeaderBaseOps {
+            construct_grand_base: shifted_grand_base,
         });
         unsafe {
-            let mut object = vec![0u32; OBJECT_WORDS];
+            let mut storage = vec![FILL; BASE_WORDS + 8];
+            let base = storage.as_mut_ptr().add(1);
+            let ret = pair_header_base_construct(base);
+            let shifted_object = base.add(4);
+
+            assert_eq!(ret, shifted_object);
+            assert_eq!(base.read(), PAIR_HEADER_BASE_VTABLE);
+            assert_eq!(shifted_object.add(0xac / 4).read(), 0);
+            assert_eq!(shifted_object.add(0xb0 / 4).read(), 0);
+            assert_eq!(shifted_object.cast::<u8>().add(0xb4).read(), 0);
+        }
+    }
+
+    /// The derived constructor now calls the concrete base port and retains
+    /// its own header/flag/trailing-field behavior.
+    #[test]
+    fn derived_constructor_uses_ported_base_layout() {
+        let _lock = lock_ops();
+        let _guard = OpsGuard::install(PairHeaderBaseOps {
+            construct_grand_base: missing_construct_grand_base,
+        });
+        unsafe {
+            let mut object = vec![FILL; OBJECT_WORDS];
             let this = object.as_mut_ptr();
-            let ret = pair_header_construct(this, 1, 2);
+            let ret = pair_header_construct(this, 0x1111_2222, 0x3333_4444);
+
             assert_eq!(ret, this);
-            assert_eq!(
-                core::ptr::addr_of!(SEEN_BASE).read_volatile(),
-                this.add(3) as usize
-            );
-            assert_eq!(object[0], 1);
-            assert_eq!(object[1], 2);
-            assert_eq!(object[2], 0);
+            assert_eq!(object[0], 0x1111_2222);
+            assert_eq!(object[1], 0x3333_4444);
+            assert_eq!(object[2], 0xaaaa_5500);
+            assert_eq!(object[3], PAIR_HEADER_BASE_VTABLE);
+            assert!(object[4..4 + 0x94 / 4].iter().all(|&word| word == 0));
+            assert_eq!(object[(12 + 0xac) / 4], 0);
+            assert_eq!(object[(12 + 0xb0) / 4], 0);
+            assert_eq!(object[(12 + 0xb4) / 4], 0xaaaa_5500);
             assert_eq!(object[0xc4 / 4], 0);
         }
     }
