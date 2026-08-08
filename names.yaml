@@ -8420,6 +8420,26 @@ functions:
       6 bl call sites, binary-scanned. Same body as element_array0_at;
       reads the array at +0xc0.
 
+  - address: 0x0810dddc
+    ghidra: FUN_0810dddc
+    name: registry_observer_base_construct
+    size: 20
+    sig: "RegistryObserver *registry_observer_base_construct(RegistryObserver *this)"
+    module: app/class_registry
+    status: ported
+    vars: {param_1: this, puVar1: observer}
+    notes: >-
+      Common 8-byte registry-observer C++ base constructor; 24 direct bl
+      call sites. Raw ARM calls parent constructor 0x08147288, loads
+      literal 0x089814fc from 0x0810ddf0, stores it at this+0x00, then
+      returns the parent's unchanged r0. The parent store sequence is
+      vtable 0x08986408 at +0x00 followed by zero at +0x04, so this port
+      preserves the complete ordered base layout: parent vtable, cleared
+      state, derived base vtable. Callers allocate/pass 8-byte observer
+      objects and immediately overwrite +0x00 with their own vtables;
+      0x082028a4 is the registry observer's derived constructor
+      (0x089910ac). No null check exists; this must be writable.
+
   - address: 0x0810e64c
     ghidra: FUN_0810e64c
     name: class_registry_construct
@@ -14834,19 +14854,18 @@ functions:
   # (already ported) belongs to this island, not to the database engine.
   - address: 0x08369780
     ghidra: FUN_08369780
-    name: ata_handle_first_word_or_minus1
+    name: namespace_provider_count
     size: 16
-    sig: "u32 ata_handle_first_word_or_minus1(const u32 *handle)"
-    module: drivers/ata_cmd
+    sig: "i32 namespace_provider_count(const u32 *providers)"
+    module: cxx/object_flags
     status: ported
-    vars: {param_1: handle}
+    vars: {param_1: providers, uVar1: entry_count}
     notes: >-
-      106 bl + 2 tail b call sites - the most-called leaf in the ATA
-      island. `cmp/ldrne/mvneq/bx lr`: NULL-guarded read of the handle's
-      first word, `handle ? handle[0] : -1`. Callers cmp the result
-      against a count with SIGNED bgt/ble (@ 0x0803b924, 0x080438f4...),
-      so -1 sorts below every real count. match.py: identical body, only
-      the LLVM frame prologue differs.
+      Namespace-provider array accessor used by registry_key_hash. The raw
+      `cmp/ldrne/mvneq/bx lr` body returns the signed +0x00 entry-count
+      word, or -1 when the providers object is NULL. The -1 sentinel keeps
+      the registry's signed `count > index` gate closed for non-negative
+      indices. match.py: same null guard and field-0 load shape.
 
   - address: 0x08369864
     ghidra: FUN_08369864
