@@ -5,6 +5,7 @@
 //! |---|---|---:|---:|
 //! | 0x0810dddc | [`registry_observer_base_construct`] | 20 | 24 `bl` |
 //! | 0x0810e64c | [`class_registry_construct`] | 96 | 9 `bl` + 1 tail `b` |
+//! | 0x08135110 | [`registry_container_initialize`] | 168 | 4 `bl` + 3 virtual calls |
 //! | 0x08135308 | [`registry_container_construct`] | 48 | 6 `bl` |
 //! | 0x082028a4 | [`registry_observer_construct`] | 20 | 3 `bl` |
 //! (Call-site counts are binary-scanned over osos.dec; one of the nine
@@ -31,11 +32,14 @@
 //!   concrete observable-array constructor. It invokes the ported
 //!   [`observable_array_construct`] base @ 0x08271cec (vtable + three
 //!   zero words at +0x00..+0x0c), overwrites the returned object's vtable
-//!   with 0x08984770, then calls `FUN_08135110` with the original capacity
-//!   and growth. That latter container-state/default-observer initializer
-//!   remains an explicit dispatch boundary: it initializes +0x10..+0x24
-//!   and constructs the capacity-selected default observer, which is
-//!   outside this one-function port.
+//!   with 0x08984770, then calls [`registry_container_initialize`] with
+//!   the original capacity and growth.
+//! - [`registry_container_initialize`] initializes the container words at
+//!   +0x10..+0x24 and chooses one of two lazily allocated default observers:
+//!   the 0x08988eb0 class only for capacity 4, and the 0x08989ca4 class for
+//!   every other capacity. It caches an observer before its first +0x18
+//!   dispatch, stores it at +0x24, and dispatches +0x18 again; a newly
+//!   allocated observer is therefore attached twice.
 //! - The second singleton is the registry's own observer: an 8-byte
 //!   object (vtable 0x089910ac + one word) constructed lazily by
 //!   `FUN_082028a4` over `operator_new(8)`, cached in the global word @
@@ -56,30 +60,24 @@
 //! `operator new` @ 0x082aadd4 is already ported
 //! (`heap::veneers::operator_new`) and
 //! [`registry_container_construct`] @ 0x08135308 is its direct dependency,
-//! so both calls reproduce the original's direct `bl`s. The
-//! container-state initializer @ 0x08135110 remains an explicit dispatch
-//! boundary: it initializes +0x10..+0x24 and constructs the
-//! capacity-selected default observer, which is outside this one-function
-//! port. The observer swap is ported below and wired directly into
-//! [`CLASS_REGISTRY_OPS`].
-//!
-//! **Not hook-ready.** The container state-initializer slot remains a
-//! conservative stub until `FUN_08135110` is separately ported. Its default
-//! observer construction is outside this assignment; wiring the wrapper
-//! through a no-op initializer would instead produce an object that deviates
-//! from stock firmware.
+//! so both calls reproduce the original's direct `bl`s. The observer swap is
+//! ported below and wired directly into [`CLASS_REGISTRY_OPS`].
 //!
 //! ## Deviations
 //!
-//! - The observer cache word is the crate static [`REGISTRY_OBSERVER`]
-//!   instead of the global @ 0x089d01ac (the `block_mgr.rs` /
-//!   `singletons.rs` deviation: the 0x089dxxxx RW page is
+//! - The observer cache words are crate statics rather than the globals at
+//!   0x089cc904/0x089cc908. They are NULL until first construction, matching
+//!   the runtime state observed by the stock initializer.
+//! - The registry observer cache word is the crate static
+//!   [`REGISTRY_OBSERVER`] instead of the global @ 0x089d01ac (the
+//!   `block_mgr.rs` / `singletons.rs` deviation: the 0x089dxxxx RW page is
 //!   runtime-initialized; the decrypted image holds stale data there).
 //!   NULL until first construction, exactly the pre-init state.
 //! - A NULL-returning observer ctor caches NULL and faults on the
 //!   attach dispatch — precisely what the original's
 //!   `ldr r1, [r0]; ldr r1, [r1, #0x18]; blx r1` does. No guard added;
 //!   adding one would be a behavior change.
+//!
 
 use crate::app::registry::{observable_set_notify_enabled, Registry};
 use crate::cxx::observable_array::{observable_array_construct, ObservableArray};
@@ -149,15 +147,27 @@ pub const REGISTRY_OBSERVER_VTABLE_ADDRESS: usize = 0x0899_10ac;
 /// 0x089d01ac — see the module-header deviation). NULL until
 /// [`class_registry_construct`] first runs.
 pub static mut REGISTRY_OBSERVER: *mut RegistryObserver = core::ptr::null_mut();
+/// The two caches addressed by the literal at 0x081351b8. The first is
+/// selected only when [`registry_container_initialize`] receives capacity 4;
+/// the other is selected for all remaining capacities.
+static mut CAPACITY_FOUR_CONTAINER_OBSERVER: *mut RegistryObserver = core::ptr::null_mut();
+static mut OTHER_CONTAINER_OBSERVER: *mut RegistryObserver = core::ptr::null_mut();
 
-/// Indirect dispatch table for the unported container-state initializer and
-/// observer constructor (see the module header).
+/// Vtable installed by the capacity-four default observer constructor
+/// (`FUN_0816f70c`).
+pub const CAPACITY_FOUR_CONTAINER_OBSERVER_VTABLE_ADDRESS: usize = 0x0898_8eb0;
+
+/// Vtable installed by the non-four-capacity default observer constructor
+/// (`FUN_081991f4`).
+pub const OTHER_CONTAINER_OBSERVER_VTABLE_ADDRESS: usize = 0x0898_9ca4;
+
+/// Indirect dispatch table for the registry observer constructor and observer
+/// replacement (see the module header).
 #[derive(Clone, Copy)]
 pub struct ClassRegistryOps {
     /// The state/default-observer initializer @ 0x08135110, called by
     /// [`registry_container_construct`] after it installs the registry
-    /// vtable. It returns `void`; this call's container observer work is
-    /// deliberately outside the assigned function.
+    /// vtable. The shipped default is [`registry_container_initialize`].
     pub container_initialize: unsafe extern "C" fn(
         this: *mut Registry,
         capacity: u32,
@@ -175,12 +185,112 @@ pub struct ClassRegistryOps {
         observer: *mut RegistryObserver,
     ) -> *mut u8,
 }
+/// Constructs either capacity-selected observer over an allocation. Both
+/// original derived constructors call [`registry_observer_base_construct`]
+/// then overwrite +0x00 with their own vtable literal.
+unsafe extern "C" fn construct_container_observer(
+    this: *mut RegistryObserver,
+    vtable: *const RegistryObserverVtable,
+) -> *mut RegistryObserver {
+    let observer = registry_observer_base_construct(this);
+    core::ptr::write_volatile(core::ptr::addr_of_mut!((*observer).vtable), vtable);
+    observer
+}
 
+#[cfg(test)]
+type ContainerObserverConstruct =
+    unsafe extern "C" fn(*mut RegistryObserver, *const RegistryObserverVtable) -> *mut RegistryObserver;
 
-/// Default state-initializer stub: preserves the base object's state until
-/// `FUN_08135110` is ported. It must remain separate from the constructor
-/// wrapper, whose call ordering is recovered below.
-unsafe extern "C" fn stub_container_initialize(_this: *mut Registry, _capacity: u32, _growth: u32) {}
+/// Host tests substitute the derived constructor solely because firmware
+/// vtable literals are not valid host addresses. Firmware builds directly
+/// execute the construction sequence above.
+#[cfg(test)]
+static mut CONTAINER_OBSERVER_CONSTRUCT: ContainerObserverConstruct = construct_container_observer;
+
+#[cfg(test)]
+unsafe fn container_observer_construct(
+    this: *mut RegistryObserver,
+    vtable: *const RegistryObserverVtable,
+) -> *mut RegistryObserver {
+    let construct = core::ptr::read_volatile(core::ptr::addr_of!(CONTAINER_OBSERVER_CONSTRUCT));
+    construct(this, vtable)
+}
+
+#[cfg(not(test))]
+unsafe fn container_observer_construct(
+    this: *mut RegistryObserver,
+    vtable: *const RegistryObserverVtable,
+) -> *mut RegistryObserver {
+    construct_container_observer(this, vtable)
+}
+
+/// registry_container_initialize — original: `FUN_08135110` @ 0x08135110
+/// (168 bytes; 4 direct `bl` calls and 3 +0x18 vtable dispatches).
+///
+/// Initializes the concrete container portion of `this`: capacity at +0x10,
+/// count at +0x14, growth at +0x18, and an auxiliary word at +0x1c. It marks
+/// the observable changed (+0x20), disables notifications (+0x21), and clears
+/// its observer slot (+0x24). Capacity exactly four selects the lazily cached
+/// `0x08988eb0` observer; every other capacity selects `0x08989ca4`.
+///
+/// On a cache miss, stock allocates eight bytes, calls the selected derived
+/// constructor (each calls `FUN_0810dddc`), caches the result, and dispatches
+/// its +0x18 initializer. It then stores the selected observer at +0x24 and
+/// dispatches that same initializer a second time. Both dispatch results are
+/// discarded. There are no allocation, cache, or vtable NULL guards.
+///
+/// Raw ARM stores capacity and growth before zeroing the count/auxiliary
+/// words, then clears +0x24 before selecting the cache. The volatile stores
+/// and cache reloads retain that externally observable ordering.
+///
+/// Deviation: host-only tests inject the two derived constructors because
+/// firmware vtable literal addresses are not host-callable; target builds
+/// call [`construct_container_observer`] directly.
+///
+/// # Safety
+///
+/// `this` must be a writable registry object. The selected cache and its
+/// observer must be valid; NULL allocations and invalid vtables fault in
+/// stock and are likewise invalid here.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn registry_container_initialize(
+    this: *mut Registry,
+    capacity: u32,
+    growth: u32,
+) {
+    core::ptr::write_volatile(core::ptr::addr_of_mut!((*this).container[3]), capacity as usize);
+    core::ptr::write_volatile(core::ptr::addr_of_mut!((*this).container[5]), growth as usize);
+    core::ptr::write_volatile(core::ptr::addr_of_mut!((*this).container[4]), 0);
+    core::ptr::write_volatile(core::ptr::addr_of_mut!((*this).container[6]), 0);
+    core::ptr::write_volatile(core::ptr::addr_of_mut!((*this).changed), 1);
+    core::ptr::write_volatile(core::ptr::addr_of_mut!((*this).notify_enabled), 0);
+    core::ptr::write_volatile(core::ptr::addr_of_mut!((*this).observer), core::ptr::null_mut());
+
+    let (cache, vtable) = if capacity == 4 {
+        (
+            core::ptr::addr_of_mut!(CAPACITY_FOUR_CONTAINER_OBSERVER),
+            CAPACITY_FOUR_CONTAINER_OBSERVER_VTABLE_ADDRESS as *const RegistryObserverVtable,
+        )
+    } else {
+        (
+            core::ptr::addr_of_mut!(OTHER_CONTAINER_OBSERVER),
+            OTHER_CONTAINER_OBSERVER_VTABLE_ADDRESS as *const RegistryObserverVtable,
+        )
+    };
+
+    let mut observer = core::ptr::read_volatile(cache);
+    if observer.is_null() {
+        observer = container_observer_construct(operator_new(REGISTRY_OBSERVER_SIZE).cast(), vtable);
+        core::ptr::write_volatile(cache, observer);
+        let observer_vtable = core::ptr::read_volatile(core::ptr::addr_of!((*observer).vtable));
+        ((*observer_vtable).attach)(observer);
+    }
+
+    core::ptr::write_volatile(core::ptr::addr_of_mut!((*this).observer), observer.cast());
+    let observer_vtable = core::ptr::read_volatile(core::ptr::addr_of!((*observer).vtable));
+    ((*observer_vtable).attach)(observer);
+}
 
 /// registry_container_construct — original: `FUN_08135308` @ 0x08135308
 /// (48 bytes; 6 `bl` call sites).
@@ -188,20 +298,14 @@ unsafe extern "C" fn stub_container_initialize(_this: *mut Registry, _capacity: 
 /// Constructs the registry's concrete observable-array base. It first calls
 /// [`observable_array_construct`] (`FUN_08271cec`) on `this`, overwrites the
 /// vtable at +0x00 of *that returned pointer* with literal `0x08984770`,
-/// then calls `FUN_08135110` with the original capacity and growth values.
-/// The saved base-constructor return, rather than the state initializer's
-/// return, is returned in r0.
+/// then invokes [`registry_container_initialize`] with the original capacity
+/// and growth values. The saved base-constructor return, rather than the
+/// state initializer's return, is returned in r0.
 ///
 /// Raw ARM saves r1/r2 before `bl 0x08271cec`, stores the vtable before
 /// restoring them for `bl 0x08135110`, then returns r4. There is no NULL
 /// guard: the base constructor's first store faults for an invalid `this`,
 /// exactly as stock firmware does.
-///
-/// The state initializer itself is intentionally an explicit ops boundary:
-/// it constructs a capacity-selected observer and is not part of this
-/// assigned function. It is nevertheless called by this constructor's
-/// direct [`registry_container_construct`] dependency so stock's call order
-/// and ABI are preserved.
 ///
 /// # Safety
 ///
@@ -346,16 +450,16 @@ pub unsafe extern "C" fn registry_set_observer(
     ((*vtable).notify_changed)(observable)
 }
 
-/// Wired defaults. The complete registry-observer constructor and observer
-/// swap are ported; the container's state initializer remains a documented
-/// dispatch boundary.
+/// Wired defaults for the three ported construction operations. The ops table
+/// remains swappable for parent-constructor tests and callers that replace a
+/// firmware class implementation.
 pub(crate) const DEFAULT_CLASS_REGISTRY_OPS: ClassRegistryOps = ClassRegistryOps {
-    container_initialize: stub_container_initialize,
+    container_initialize: registry_container_initialize,
     observer_construct: registry_observer_construct,
     set_observer: registry_set_observer,
 };
 
-/// the base or container ports replace their defaults when they exist.
+/// Runtime-replaceable construction operations.
 pub static mut CLASS_REGISTRY_OPS: ClassRegistryOps = DEFAULT_CLASS_REGISTRY_OPS;
 
 /// Reads one op (volatile — same rationale as every dispatch table: the
@@ -446,7 +550,22 @@ mod tests {
     static mut TRACE: Vec<&'static str> = Vec::new();
 
 
-    /// The unported state-initializer arguments, recorded on every call.
+    /// Vtable literals selected by direct container-initializer tests.
+    static mut CONTAINER_OBSERVER_VTABLE_LITERALS: Vec<usize> = Vec::new();
+
+    unsafe extern "C" fn mock_container_observer_construct(
+        this: *mut RegistryObserver,
+        vtable: *const RegistryObserverVtable,
+    ) -> *mut RegistryObserver {
+        trace().push("container_observer_construct");
+        (*ptr::addr_of_mut!(CONTAINER_OBSERVER_VTABLE_LITERALS)).push(vtable as usize);
+        this.write(RegistryObserver {
+            vtable: ptr::addr_of!(MOCK_OBSERVER_VTABLE),
+            state: 0,
+        });
+        this
+    }
+    /// Arguments observed through the constructor-wrapper test seam.
     static mut CONTAINER_INITIALIZE_ARGS: Vec<(*mut Registry, u32, u32)> = Vec::new();
 
     /// The observer/set_observer arguments, recorded on every call.
@@ -715,10 +834,14 @@ mod tests {
                 observer: ptr::null_mut(),
             });
             REGISTRY_OBSERVER = ptr::null_mut();
+            CAPACITY_FOUR_CONTAINER_OBSERVER = ptr::null_mut();
+            OTHER_CONTAINER_OBSERVER = ptr::null_mut();
+            CONTAINER_OBSERVER_CONSTRUCT = construct_container_observer;
             (*ptr::addr_of_mut!(ALLOC_SIZES)).clear();
             (*ptr::addr_of_mut!(CONTAINER_INITIALIZE_ARGS)).clear();
             (*ptr::addr_of_mut!(OBSERVER_ARGS)).clear();
             (*ptr::addr_of_mut!(ATTACHED)).clear();
+            (*ptr::addr_of_mut!(CONTAINER_OBSERVER_VTABLE_LITERALS)).clear();
             trace().clear();
             SWAP_OBSERVABLE = ptr::null_mut();
             SWAP_PENDING = ptr::null_mut();
@@ -736,6 +859,9 @@ mod tests {
             DEFAULT_HEAP = ptr::null_mut();
             CLASS_REGISTRY_OPS = DEFAULT_CLASS_REGISTRY_OPS;
             REGISTRY_OBSERVER = ptr::null_mut();
+            CAPACITY_FOUR_CONTAINER_OBSERVER = ptr::null_mut();
+            OTHER_CONTAINER_OBSERVER = ptr::null_mut();
+            CONTAINER_OBSERVER_CONSTRUCT = construct_container_observer;
             ptr::addr_of_mut!(CONSTRUCTED_REGISTRY).write(Registry {
                 vtable: ptr::null(),
                 container: [0; 7],
@@ -801,6 +927,86 @@ mod tests {
                 *trace(),
                 std::vec!["container_initialize"],
                 "the state initializer is called only after both vtable stores"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn container_initializer_writes_every_state_field_and_builds_capacity_four_observer() {
+        let guard = mock();
+        unsafe {
+            CONTAINER_OBSERVER_CONSTRUCT = mock_container_observer_construct;
+            let mut registry = Registry {
+                vtable: ptr::addr_of!(MOCK_REGISTRY_VTABLE),
+                container: [usize::MAX; 7],
+                changed: 0xa5,
+                notify_enabled: 0x5a,
+                reserved: [0x31, 0x62],
+                observer: usize::MAX as *mut u8,
+            };
+            let this = ptr::addr_of_mut!(registry);
+
+            registry_container_initialize(this, 4, 0x17);
+
+            assert_eq!(registry.container, [usize::MAX, usize::MAX, usize::MAX, 4, 0, 0x17, 0]);
+            assert_eq!(registry.changed, 1);
+            assert_eq!(registry.notify_enabled, 0);
+            assert_eq!(registry.reserved, [0x31, 0x62], "the initializer does not touch +0x22..+0x23");
+
+            let observer = ptr::addr_of_mut!(ARENA) as *mut RegistryObserver;
+            assert_eq!(registry.observer, observer.cast());
+            assert_eq!(CAPACITY_FOUR_CONTAINER_OBSERVER, observer);
+            assert!(OTHER_CONTAINER_OBSERVER.is_null());
+            assert_eq!(*ptr::addr_of!(ALLOC_SIZES), std::vec![REGISTRY_OBSERVER_SIZE]);
+            assert_eq!(
+                *ptr::addr_of!(CONTAINER_OBSERVER_VTABLE_LITERALS),
+                std::vec![CAPACITY_FOUR_CONTAINER_OBSERVER_VTABLE_ADDRESS]
+            );
+            assert_eq!(*ptr::addr_of!(ATTACHED), std::vec![observer, observer]);
+            assert_eq!(
+                *trace(),
+                std::vec!["container_observer_construct", "attach", "attach"],
+                "a cache miss initializes through +0x18 before and after the +0x24 store"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn container_initializer_selects_and_reuses_the_non_four_observer() {
+        let guard = mock();
+        unsafe {
+            CONTAINER_OBSERVER_CONSTRUCT = mock_container_observer_construct;
+            let mut registry = Registry {
+                vtable: ptr::addr_of!(MOCK_REGISTRY_VTABLE),
+                container: [0; 7],
+                changed: 0,
+                notify_enabled: 1,
+                reserved: [0; 2],
+                observer: ptr::null_mut(),
+            };
+            let this = ptr::addr_of_mut!(registry);
+
+            registry_container_initialize(this, 6, 3);
+            registry_container_initialize(this, 0, 9);
+
+            let observer = ptr::addr_of_mut!(ARENA) as *mut RegistryObserver;
+            assert_eq!(OTHER_CONTAINER_OBSERVER, observer);
+            assert!(CAPACITY_FOUR_CONTAINER_OBSERVER.is_null());
+            assert_eq!(registry.container[3..], [0, 0, 9, 0]);
+            assert_eq!(registry.observer, observer.cast());
+            assert_eq!(*ptr::addr_of!(ALLOC_SIZES), std::vec![REGISTRY_OBSERVER_SIZE]);
+            assert_eq!(
+                *ptr::addr_of!(CONTAINER_OBSERVER_VTABLE_LITERALS),
+                std::vec![OTHER_CONTAINER_OBSERVER_VTABLE_ADDRESS],
+                "every capacity other than four selects FUN_081991f4"
+            );
+            assert_eq!(*ptr::addr_of!(ATTACHED), std::vec![observer, observer, observer]);
+            assert_eq!(
+                *trace(),
+                std::vec!["container_observer_construct", "attach", "attach", "attach"],
+                "the cached observer skips allocation but still receives the final +0x18 dispatch"
             );
         }
         restore(guard);

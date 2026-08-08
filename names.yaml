@@ -8472,6 +8472,25 @@ functions:
       0x08135110 is ported. match.py: identical call/store/dispatch
       structure; the only deltas are the observer seams and frame layout.
 
+  - address: 0x08135110
+    ghidra: FUN_08135110
+    name: registry_container_initialize
+    size: 168
+    sig: "void registry_container_initialize(Registry *this, u32 capacity, u32 growth)"
+    module: app/class_registry
+    status: ported
+    vars: {param_1: this, param_2: capacity, param_3: growth, piVar1: observer, piVar2: observer_cache}
+    notes: >-
+      Initializes the registry container fields: capacity +0x10, zero count
+      +0x14, growth +0x18, zero auxiliary +0x1c, changed +0x20, disabled
+      notifications +0x21, and null observer +0x24. Capacity 4 selects the
+      lazily allocated/cached observer whose constructor 0x0816f70c installs
+      vtable 0x08988eb0; every other capacity selects 0x081991f4 /
+      0x08989ca4. On a cache miss raw ARM allocates eight bytes, constructs,
+      caches, and dispatches vtable +0x18, then stores the observer at +0x24
+      and dispatches +0x18 again. Neither allocation nor either dispatch is
+      null-guarded; all returns are discarded.
+
   - address: 0x08135308
     ghidra: FUN_08135308
     name: registry_container_construct
@@ -21503,6 +21522,7 @@ functions:
       [memory,#8]`) replacing the `bl 0x082cfae8`. Rust implementation
       and focused host tests:
       `src/cxx/object_flags.rs::pfr_face_done`.
+
 
   # --- String-registry key hash (namespace index XOR name hash) ---
   - address: 0x080855a0
