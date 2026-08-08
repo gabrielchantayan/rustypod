@@ -157,9 +157,15 @@ pub unsafe extern "C" fn app_string_resolver_resolve(
 
 /// app_string_resolve — original: `FUN_0811ca48` @ 0x0811ca48 (16 bytes).
 ///
-/// The adapter preserves its three incoming arguments, provides the one-word
-/// stack output slot required by [`app_string_resolver_resolve`], and returns
-/// the resolver's `r0` unchanged.
+/// ABI adapter for callers that need only the resolver's returned string.
+/// Raw ARM saves `r3`/`lr`, uses the saved `r3` word as the resolver's fourth
+/// `output_slot` argument, then restores into `ip`/`pc`; it therefore forwards
+/// `resolver`, `context`, and `value` in `r0`–`r2`, discards the secondary
+/// output, and propagates the resolver's `r0` unchanged. It neither reads nor
+/// initializes the stack output word itself.
+///
+/// Source: raw ARM at `decomp/osos.asm` 0x0811ca48; reference C at
+/// `decomp/c/010/0811ca48_FUN_0811ca48.c` (which loses the ABI arguments).
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn app_string_resolve(
@@ -186,6 +192,9 @@ mod tests {
     static mut LOOKUP_RECORD: *mut AppStringResolveRecord = core::ptr::null_mut();
     static mut FALLBACK_RESULT: *mut u8 = core::ptr::null_mut();
     static mut FALLBACK_OUTPUT: *mut u8 = core::ptr::null_mut();
+    static mut LAST_FALLBACK_CONTEXT: *mut u8 = core::ptr::null_mut();
+    static mut LAST_FALLBACK_VALUE: *mut u8 = core::ptr::null_mut();
+    static mut LAST_FALLBACK_OUTPUT_SLOT: *mut *mut u8 = core::ptr::null_mut();
 
     unsafe extern "C" fn mock_lookup(
         source: u32,
@@ -205,12 +214,15 @@ mod tests {
 
     unsafe extern "C" fn mock_fallback(
         source: u32,
-        _context: *mut u8,
-        _value: *mut u8,
+        context: *mut u8,
+        value: *mut u8,
         output_slot: *mut *mut u8,
     ) -> *mut u8 {
         FALLBACK_CALLS += 1;
         LAST_FALLBACK_SOURCE = source;
+        LAST_FALLBACK_CONTEXT = context;
+        LAST_FALLBACK_VALUE = value;
+        LAST_FALLBACK_OUTPUT_SLOT = output_slot;
         output_slot.write(FALLBACK_OUTPUT);
         FALLBACK_RESULT
     }
@@ -238,6 +250,9 @@ mod tests {
             LOOKUP_RECORD = core::ptr::null_mut();
             FALLBACK_RESULT = core::ptr::null_mut();
             FALLBACK_OUTPUT = core::ptr::null_mut();
+            LAST_FALLBACK_CONTEXT = core::ptr::null_mut();
+            LAST_FALLBACK_VALUE = core::ptr::null_mut();
+            LAST_FALLBACK_OUTPUT_SLOT = core::ptr::null_mut();
             APP_STRING_RESOLVE_OPS = AppStringResolveOps {
                 lookup: mock_lookup,
                 fallback: mock_fallback,
@@ -348,6 +363,37 @@ mod tests {
             assert_eq!(LOOKUP_CALLS, 0);
             assert_eq!(FALLBACK_CALLS, 1);
             assert_eq!(LAST_FALLBACK_SOURCE, 0x1020_3040);
+        }
+    }
+
+    #[test]
+    fn adapter_forwards_three_arguments_discards_output_and_returns_value() {
+        let (_lock, _restore) = mock_ops();
+        let mut fixture = resolver(2, 0x1020_3040, 0);
+        let context = 0x102usize as *mut u8;
+        let value = 0x203usize as *mut u8;
+
+        unsafe {
+            FALLBACK_OUTPUT = 0x1122_3344usize as *mut u8;
+            FALLBACK_RESULT = 0x5566_7788usize as *mut u8;
+
+            assert_eq!(
+                app_string_resolve(fixture.as_mut_ptr().cast(), context, value),
+                FALLBACK_RESULT,
+            );
+            assert_eq!(FALLBACK_CALLS, 1);
+            assert_eq!(LAST_FALLBACK_SOURCE, 0x1020_3040);
+            assert_eq!(LAST_FALLBACK_CONTEXT, context);
+            assert_eq!(LAST_FALLBACK_VALUE, value);
+            assert!(
+                !LAST_FALLBACK_OUTPUT_SLOT.is_null(),
+                "the adapter supplies its own writable output slot"
+            );
+            assert_eq!(
+                (LAST_FALLBACK_OUTPUT_SLOT as usize) % core::mem::align_of::<*mut u8>(),
+                0,
+                "the ARM stack word is naturally pointer-aligned"
+            );
         }
     }
 

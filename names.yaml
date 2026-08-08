@@ -19007,15 +19007,17 @@ functions:
       param_3: value
       FUN_0811ca58: app_string_resolver_resolve
     notes: >-
-      The reference C falsely infers a void no-argument wrapper. Assembly
-      preserves r0-r2, reserves one uninitialized stack word, passes its
-      address in r3 to app_string_resolver_resolve, and leaves the callee
-      return in r0. Known callers consume that result as a C string. Reference
-      C: decomp/c/010/0811ca48_FUN_0811ca48.c; resolver and callers:
+      The reference C falsely infers a void no-argument wrapper. Raw ARM is
+      `push {r3,lr}; mov r3,sp; bl 0x0811ca58; pop {ip,pc}`: it preserves
+      r0-r2, reserves one uninitialized stack word, passes its address in r3
+      to app_string_resolver_resolve, and leaves the callee return in r0.
+      Known callers consume that result as a C string. Reference C:
+      decomp/c/010/0811ca48_FUN_0811ca48.c; resolver and callers:
       decomp/c/010/0811ca58_FUN_0811ca58.c,
       decomp/c/028/0829a124_FUN_0829a124.c, and
       decomp/c/028/0829a4dc_FUN_0829a4dc.c; assembly: osos.asm 0x0811ca48.
-      Focused host tests cover the resolver's output-slot and return behavior.
+      Focused host tests prove argument forwarding, an aligned writable
+      output slot, discarded secondary output, and return propagation.
   - address: 0x0811ca58
     ghidra: FUN_0811ca58
     name: app_string_resolver_resolve
