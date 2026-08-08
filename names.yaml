@@ -8420,6 +8420,7 @@ functions:
       6 bl call sites, binary-scanned. Same body as element_array0_at;
       reads the array at +0xc0.
 
+
   - address: 0x0810e64c
     ghidra: FUN_0810e64c
     name: class_registry_construct
@@ -14834,19 +14835,18 @@ functions:
   # (already ported) belongs to this island, not to the database engine.
   - address: 0x08369780
     ghidra: FUN_08369780
-    name: ata_handle_first_word_or_minus1
+    name: namespace_provider_count
     size: 16
-    sig: "u32 ata_handle_first_word_or_minus1(const u32 *handle)"
-    module: drivers/ata_cmd
+    sig: "i32 namespace_provider_count(const u32 *providers)"
+    module: cxx/object_flags
     status: ported
-    vars: {param_1: handle}
+    vars: {param_1: providers, uVar1: entry_count}
     notes: >-
-      106 bl + 2 tail b call sites - the most-called leaf in the ATA
-      island. `cmp/ldrne/mvneq/bx lr`: NULL-guarded read of the handle's
-      first word, `handle ? handle[0] : -1`. Callers cmp the result
-      against a count with SIGNED bgt/ble (@ 0x0803b924, 0x080438f4...),
-      so -1 sorts below every real count. match.py: identical body, only
-      the LLVM frame prologue differs.
+      Namespace-provider array accessor used by registry_key_hash. The raw
+      `cmp/ldrne/mvneq/bx lr` body returns the signed +0x00 entry-count
+      word, or -1 when the providers object is NULL. The -1 sentinel keeps
+      the registry's signed `count > index` gate closed for non-negative
+      indices. match.py: same null guard and field-0 load shape.
 
   - address: 0x08369864
     ghidra: FUN_08369864
