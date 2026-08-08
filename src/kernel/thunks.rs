@@ -57,9 +57,9 @@
 //!   (memmove: thunks 0x08037dd8 / 0x08037e00). Thunk addresses
 //!   themselves are unique and sorted.
 //!
-//! This module is pure data: no behavior is ported. Host tests assert
-//! the table's shape (entry count, 8-byte stride, sortedness, ROM target
-//! range) and the known-target name mapping extracted from osos.dec.
+//! This module is primarily pure data. It also carries the one early-boot
+//! literal tail-dispatch veneer at 0x08003818; its target is outside the
+//! mask-ROM thunk table, so it is modeled as verbatim ARM below.
 
 /// Instruction word every thunk stub is built from: `ldr pc, [pc, #-4]`
 /// (loads PC with the target word stored immediately after the stub).
@@ -77,6 +77,60 @@ pub const THUNK_STRIDE: u32 = 8;
 /// Base of the S5L8702 mask ROM the thunks jump into (RTXC Quadros
 /// kernel + ARM ADS runtime copy).
 pub const ROM_BASE: u32 = 0x2200_0000;
+
+/// ARM instruction word and literal used by `kernel_indirect_dispatch`.
+///
+/// The raw 8-byte body at 0x08003818 is `ldr pc, [pc, #-4]` followed by
+/// this literal. Loading PC makes it a tail dispatch, not the indirect call
+/// and return inferred by Ghidra.
+pub const KERNEL_INDIRECT_DISPATCH_INSN: u32 = 0xe51f_f004;
+pub const KERNEL_INDIRECT_DISPATCH_TARGET: u32 = 0x0815_ca7c;
+
+// The literal target is a stack-sensitive continuation, not a normal C
+// callee: it immediately executes `pop {r4, lr}; b 0x0812b9a4`. Keep the
+// veneer verbatim so it forwards every register and the caller's frame
+// unchanged. `global_asm!` avoids the unstable naked-functions feature.
+#[cfg(target_arch = "arm")]
+extern "C" {
+    /// kernel_indirect_dispatch — original: `FUN_08003818` @ 0x08003818
+    /// (8 bytes).
+    ///
+    /// Loads the literal target 0x0815ca7c directly into PC. The only
+    /// recovered caller passes its pointer argument in r0; the target
+    /// unwinds that caller's `{r4, lr}` frame and tail-branches onward, so
+    /// this veneer never returns to its immediate caller.
+    ///
+    /// Deviation: none on ARM; this is the original instruction and literal.
+    pub fn kernel_indirect_dispatch(argument: *mut u8) -> !;
+}
+
+/// Host-only stand-in for the stack-sensitive ARM tail dispatch.
+///
+/// The retailOS target is unmapped on hosts and consumes its caller's saved
+/// frame, so a normal host call cannot represent the transfer. It terminates
+/// instead of returning, matching the veneer’s no-return-to-immediate-caller
+/// contract.
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn kernel_indirect_dispatch(argument: *mut u8) -> ! {
+    let _ = argument;
+    unreachable!("kernel_indirect_dispatch tail target unavailable on host")
+}
+
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl kernel_indirect_dispatch
+    .type kernel_indirect_dispatch, %function
+kernel_indirect_dispatch:
+    ldr     pc, [pc, #-4]
+    .word   0x0815ca7c
+    .size kernel_indirect_dispatch, . - kernel_indirect_dispatch
+"#
+);
 
 /// One thunk-table entry: the osos-side stub and its ROM target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -416,4 +470,14 @@ mod tests {
         assert_eq!(named, 14);
         let _: std::string::String = ROM_THUNKS[0].name.unwrap().to_string();
     }
+
+    /// The raw veneer is one instruction plus its PC-relative target word;
+    /// `ldr pc` is a tail dispatch rather than Ghidra's inferred call/return.
+    #[test]
+    fn kernel_indirect_dispatch_matches_its_literal_veneer() {
+        assert_eq!(KERNEL_INDIRECT_DISPATCH_INSN, 0xe51f_f004);
+        assert_eq!(KERNEL_INDIRECT_DISPATCH_TARGET, 0x0815_ca7c);
+        assert_eq!(KERNEL_INDIRECT_DISPATCH_TARGET & 3, 0);
+    }
+
 }

@@ -61,7 +61,7 @@ functions:
     ghidra: FUN_08003818
     name: kernel_indirect_dispatch
     size: 8
-    sig: "noreturn void kernel_indirect_dispatch(void *argument)"
+    sig: "void kernel_indirect_dispatch(void *argument) __attribute__((noreturn))"
     module: kernel/thunks
     status: ported
     renames:
