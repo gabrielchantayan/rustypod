@@ -9477,54 +9477,31 @@ functions:
     status: ported
     notes: >-
       1 bl call site. `strb r1, [r0, #0x20]; bx lr` - the observable's
-      changed byte. Its neighbour 0x08135040 installs the observer at
-      this+0x24 (ported as observable_set_observer).
+      changed byte. Its neighbour 0x08135040 installs the registry observer
+      at this+0x24 (ported as registry_set_observer).
 
   - address: 0x08135040
     ghidra: FUN_08135040
-    name: observable_set_observer
+    name: registry_set_observer
     size: 96
-    sig: "void *observable_set_observer(Registry *observable, Observer *observer)"
-    module: app/registry
+    sig: "void *registry_set_observer(Registry *observable, RegistryObserver *observer)"
+    module: app/class_registry
     status: ported
     renames:
       param_1: observable
       param_2: observer
+      iVar1: pending_changes
     notes: >-
-      10 bl call sites (binary-scanned over osos.dec, no tail b) - the
-      operator_new(8) + observer-ctor + set_observer +
-      observable_set_notify_enabled construction idiom (the registry
-      ctor 0x0810e64c / 0x0810e5e8, plus 0x080ffd94, 0x081b9e0c,
-      0x081d263c, 0x08213a9c and the 0x0828dfxx family). Swaps the
-      observable's observer word at this+0x24: detach the OLD observer
-      through its vtable[+0x1c] (only when non-NULL), store the new one,
-      attach it through its vtable[+0x18] (result discarded), then
-      consult the observable's own vtable[+0x60] and TAIL-CALL
-      vtable[+0x68] (notify_changed) when that returns non-NULL;
-      otherwise returns the failed +0x60 result (NULL). Returns the
-      +0x68 result on the notify path. The +0x24 store lands BEFORE the
-      attach dispatch (an attach reading the word back sees the new
-      observer - reproduced); the new observer is dereferenced
-      unconditionally, so a NULL observer faults exactly like the
-      original. A base-class method of the framework's observable,
-      ported against the registry layout (which is that base layout).
-      The vtable[+0x60] slot is newly named has_pending_changes (role
-      INFERRED, like the +0x64/+0x68 pair: non-NULL fires the +0x68
-      notification); the RegistryVtable +0x50..+0x60 filler shrank to
-      +0x50..+0x5c to name it, which forced a one-line mock-vtable
-      update in app/class_registry.rs's tests. The observer's attach
-      (+0x18) / detach (+0x1c) slot names follow the registry-observer
-      ctor evidence in app/class_registry.rs; the container vtable page
-      in the cold image is 0x55-fill, so the slot targets are not
-      recoverable from it. r6 is pushed but never used (ADS artifact).
-      The CLASS_REGISTRY_OPS set_observer stub in app/class_registry.rs
-      deliberately stays a stub (documented dispatch boundary); this
-      port is the real implementation that can replace it.
-      match.py structural: same detach-old-conditionally / store /
-      attach / +0x60 check / conditional +0x68 tail-call shape; the
-      diff is LLVM's fp frame, branch forms of the predicated
-      ldrne/blxne, and a materialized `mov r0, #0` for the NULL return
-      - the accepted house deviations.
+      10 direct call sites. Conditional old-observer vtable[+0x1c] detach,
+      then `str r5,[r4,#0x24]`, unconditional new-observer
+      vtable[+0x18] attach, observable vtable[+0x60] query, and conditional
+      vtable[+0x68] tail dispatch. The old detach and new attach results are
+      discarded; NULL from +0x60 returns directly, otherwise the +0x68
+      result returns. The +0x24 write precedes attach, and the notification
+      path re-loads the observable vtable after the query. `r6` is saved but
+      unused. Ported in app/class_registry to cut over the constructor seam;
+      the 10 call-site families show the underlying base-observable ABI, but
+      the local signature models its registry-observer caller.
 
   - address: 0x08105a34
     ghidra: FUN_08105a34
