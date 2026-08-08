@@ -21524,6 +21524,41 @@ functions:
       `src/cxx/object_flags.rs::pfr_face_done`.
 
 
+  # --- String-registry fallback name hash ---
+  - address: 0x082d7e54
+    ghidra: FUN_082d7e54
+    name: registry_default_name_hash
+    size: 88
+    sig: "u32 registry_default_name_hash(const u8 *name)"
+    module: cxx/object_flags
+    status: ported
+    renames:
+      param_1: name
+      param_2: unused
+      param_3: first_byte
+      uVar1: rotation
+      pbVar2: next_byte
+      uVar3: hash
+      uVar4: salt
+      uVar5: salted_byte
+    notes: >-
+      Default NUL-terminated name hash called by registry_key_hash's
+      fallback branch at 0x080855e4. The raw ARM body is 88 bytes:
+      it returns 0 for a null pointer or an initial NUL; otherwise it
+      begins with hash=0 and salt=0x100, and for each unsigned input byte
+      b forms c = b | salt, rotates hash left by
+      (c ^ (c >> 2)) & 0xf (the `rsb #0; ror` pair), XORs the
+      low 32 bits of c*c, and advances salt by 0x100 modulo 2^32.
+      It stops at the first subsequent NUL and returns hash ^ (hash >> 16).
+      Ghidra's param_2/param_3 are not ABI inputs: the raw code overwrites
+      r1 with the zero accumulator and r2 with the first byte/salt. No
+      deviations. match.py (expected exit 1) confirms the null/empty
+      guard, byte loop, xor/lsr-and rotation count, negated ROR, multiply,
+      next-byte termination check, salt increment, and final 16-bit fold.
+      Focused host tests cover null, NUL-only/terminated input, non-ASCII
+      bytes, and distinct byte-position salts in
+      `src/cxx/object_flags.rs::registry_default_name_hash`.
+
   # --- String-registry key hash (namespace index XOR name hash) ---
   - address: 0x080855a0
     ghidra: FUN_080855a0
