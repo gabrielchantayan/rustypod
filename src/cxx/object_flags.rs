@@ -164,14 +164,73 @@ const OUTCOME_FAILED: &[u8; 7] = b"failed\0";
 /// @ 0x08085428).
 const OUTCOME_FORMAT: &[u8; 4] = b"%s\n\0";
 
-/// Resource-fork probe `FUN_08076510` (unported): reads the Mac resource
-/// header off the stream and, when it parses, delegates to the dfont
-/// open with the computed data-fork offset.
+/// Call ABI used by the FT_Open_Face fallback seam for the MacBinary
+/// resource-fork probe.
 pub type ResourceForkProbe =
     unsafe extern "C" fn(library: *mut u32, stream: *mut u32, face_index: i32, face_out: *mut u32) -> u32;
-/// Dfont open `FUN_0807f478` (unported): tries two resource tags through
-/// the sfnt drivers; [`ft_open_face_dfont_fallback`] always passes
-/// `offset` 0 (`mov r2, #0x0` @ 0x080853f8).
+
+/// resource_fork_probe — original: `FUN_08076510` @ `0x08076510`
+/// (220 bytes; source: `ipod-decomp/decomp/c/005/08076510_FUN_08076510.c`).
+///
+/// Probes a stream for a MacBinary header before dispatching the flattened
+/// resource fork to `FUN_0807f478`. It seeks to zero and reads 128 bytes,
+/// propagating either `FT_Stream_*` error unchanged. It accepts exactly the
+/// MacBinary checks in the ARM: bytes 0, 74, 82, and 63 are zero; the
+/// filename length at byte 1 is 1..=33; and the byte immediately after the
+/// filename is zero. On a malformed header it returns status class 2
+/// (`FT_Err_Unknown_File_Format`). Otherwise, it reads the big-endian
+/// data-fork length at bytes 83..86 and passes
+/// `128 + align_up(data_fork_length, 128)` as the resource-fork offset to
+/// the dfont opener, returning that call's result unchanged. The ARM body is
+/// `seek(0); read(128); header tests; ldrb 0x53..0x56; add #127; bic #127;
+/// add #128; bl 0x0807f478`.
+///
+/// The actual resource-map validation (repeated/zero resource header and
+/// `POST`/`sfnt` lookup) remains in unported `FUN_0807f478`; it is retained
+/// as the [`DFONT_FALLBACK_OPS`] `open_dfont` seam. This function is the
+/// installed `probe_resource_fork` default, so the ported fallback reaches
+/// the real probe while target integration still supplies that dependency.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn resource_fork_probe(
+    library: *mut u32,
+    stream: *mut u32,
+    face_index: i32,
+    face_out: *mut u32,
+) -> u32 {
+    let stream_record = stream.cast::<crate::ft::stream::FtStream>();
+    let seek_error = crate::ft::stream::ft_stream_seek(stream_record, 0);
+    if seek_error != 0 {
+        return seek_error as u32;
+    }
+
+    let mut header = core::mem::MaybeUninit::<[u8; 128]>::uninit();
+    let read_error =
+        crate::ft::stream::ft_stream_read(stream_record, header.as_mut_ptr().cast(), 128);
+    if read_error != 0 {
+        return read_error as u32;
+    }
+    let header = header.as_ptr().cast::<u8>();
+    let filename_length = header.add(1).read() as usize;
+    if header.read() != 0
+        || header.add(74).read() != 0
+        || header.add(82).read() != 0
+        || filename_length == 0
+        || filename_length > 33
+        || header.add(63).read() != 0
+        || header.add(2 + filename_length).read() != 0
+    {
+        return STATUS_UNKNOWN_FILE_FORMAT;
+    }
+
+    let data_fork_length = (u32::from(header.add(83).read()) << 24)
+        | (u32::from(header.add(84).read()) << 16)
+        | (u32::from(header.add(85).read()) << 8)
+        | u32::from(header.add(86).read());
+    let resource_fork_offset = (data_fork_length.wrapping_add(127) & !127).wrapping_add(128);
+    (dfont_fallback_ops().open_dfont)(library, stream, resource_fork_offset, face_index, face_out)
+}
+
 pub type DfontOpen = unsafe extern "C" fn(
     library: *mut u32,
     stream: *mut u32,
@@ -189,28 +248,19 @@ pub type FallbackRuleChain = unsafe extern "C" fn(
     open_args: *const u32,
 ) -> u32;
 
-/// The unported callees of [`ft_open_face_dfont_fallback`], grouped in
-/// the house ops-struct pattern (app/node_list.rs's NODE_LIST_ENQUEUE_OPS).
+/// The dfont opener and fallback-rule chain still unported from
+/// [`ft_open_face_dfont_fallback`], grouped in the house ops-struct pattern
+/// (app/node_list.rs's NODE_LIST_ENQUEUE_OPS). `probe_resource_fork` now
+/// defaults to the ported [`resource_fork_probe`].
 pub struct DfontFallbackOps {
     pub probe_resource_fork: ResourceForkProbe,
     pub open_dfont: DfontOpen,
     pub run_fallback_rules: FallbackRuleChain,
 }
 
-/// Spins forever: [`ft_open_face_dfont_fallback`] must not run before
-/// target integration installs the retailOS callees.
-unsafe extern "C" fn missing_resource_fork_probe(
-    _library: *mut u32,
-    _stream: *mut u32,
-    _face_index: i32,
-    _face_out: *mut u32,
-) -> u32 {
-    loop {
-        core::hint::spin_loop();
-    }
-}
-
-/// Spins forever: see [`missing_resource_fork_probe`].
+/// Spins forever: the dfont opening dependency must be installed before a
+/// valid MacBinary header reaches [`resource_fork_probe`] or
+/// [`ft_open_face_dfont_fallback`].
 unsafe extern "C" fn missing_dfont_open(
     _library: *mut u32,
     _stream: *mut u32,
@@ -223,7 +273,7 @@ unsafe extern "C" fn missing_dfont_open(
     }
 }
 
-/// Spins forever: see [`missing_resource_fork_probe`].
+/// Spins forever: see [`missing_dfont_open`].
 unsafe extern "C" fn missing_fallback_rule_chain(
     _library: *mut u32,
     _stream: *mut u32,
@@ -236,11 +286,12 @@ unsafe extern "C" fn missing_fallback_rule_chain(
     }
 }
 
-/// RetailOS dependencies of [`ft_open_face_dfont_fallback`]. Target
-/// integration must install the real `FUN_08076510` / `FUN_0807f478` /
-/// `FUN_080db8ac`; focused host tests replace them with recording seams.
+/// RetailOS dependencies of [`ft_open_face_dfont_fallback`]. The ported
+/// [`resource_fork_probe`] is installed for the first call; target
+/// integration must still install `FUN_0807f478` / `FUN_080db8ac`.
+/// Focused host tests replace all three slots with recording seams.
 pub static mut DFONT_FALLBACK_OPS: DfontFallbackOps = DfontFallbackOps {
-    probe_resource_fork: missing_resource_fork_probe,
+    probe_resource_fork: resource_fork_probe,
     open_dfont: missing_dfont_open,
     run_fallback_rules: missing_fallback_rule_chain,
 };
@@ -1167,7 +1218,7 @@ mod tests {
     fn uninstall_recording_fallback(trace: bool) {
         unsafe {
             DFONT_FALLBACK_OPS = DfontFallbackOps {
-                probe_resource_fork: missing_resource_fork_probe,
+                probe_resource_fork: resource_fork_probe,
                 open_dfont: missing_dfont_open,
                 run_fallback_rules: missing_fallback_rule_chain,
             };
@@ -1224,6 +1275,91 @@ mod tests {
         let mut bytes = [0u8; 24];
         bytes[..nul_terminated.len()].copy_from_slice(nul_terminated);
         bytes
+    }
+
+    fn macbinary_header(data_fork_length: u32) -> [u8; 128] {
+        let mut header = [0u8; 128];
+        header[1] = 1;
+        header[83..87].copy_from_slice(&data_fork_length.to_be_bytes());
+        header
+    }
+
+    fn memory_stream(bytes: &mut [u8]) -> crate::ft::stream::FtStream {
+        crate::ft::stream::FtStream {
+            base: bytes.as_mut_ptr(),
+            size: bytes.len() as u32,
+            pos: 0,
+            descriptor: core::ptr::null_mut(),
+            pathname: core::ptr::null_mut(),
+            read: None,
+            close: None,
+            memory: core::ptr::null_mut(),
+            cursor: core::ptr::null_mut(),
+            limit: core::ptr::null_mut(),
+        }
+    }
+
+    #[test]
+    fn resource_fork_probe_rejects_malformed_macbinary_headers() {
+        let _guards = install_recording_fallback(0, 0xdead_beef, 0, 0, false);
+        for (byte, value) in [(0, 1), (1, 0), (1, 34), (63, 1), (74, 1), (82, 1), (3, 1)] {
+            let mut header = macbinary_header(0);
+            header[byte] = value;
+            let mut stream = memory_stream(&mut header);
+            let result = unsafe {
+                resource_fork_probe(
+                    LIBRARY as *mut u32,
+                    (&mut stream as *mut crate::ft::stream::FtStream).cast(),
+                    FACE_INDEX,
+                    FACE_OUT as *mut u32,
+                )
+            };
+            assert_eq!(result, STATUS_UNKNOWN_FILE_FORMAT, "header[{byte}]={value}");
+            assert_eq!(unsafe { FALLBACK_EVENT_COUNT }, 0, "header[{byte}]={value}");
+        }
+        uninstall_recording_fallback(false);
+    }
+
+    #[test]
+    fn resource_fork_probe_propagates_stream_read_failure() {
+        let _guards = install_recording_fallback(0, 0xdead_beef, 0, 0, false);
+        let mut bytes = [0u8; 127];
+        let mut stream = memory_stream(&mut bytes);
+        let result = unsafe {
+            resource_fork_probe(
+                LIBRARY as *mut u32,
+                (&mut stream as *mut crate::ft::stream::FtStream).cast(),
+                FACE_INDEX,
+                FACE_OUT as *mut u32,
+            )
+        };
+        assert_eq!(result, STATUS_FALLBACK_RULE_CLASS);
+        assert_eq!(unsafe { FALLBACK_EVENT_COUNT }, 0);
+        uninstall_recording_fallback(false);
+    }
+
+    #[test]
+    fn resource_fork_probe_aligns_data_fork_and_propagates_dfont_result() {
+        let _guards = install_recording_fallback(0, 0xdead_beef, 0, 0, false);
+        let mut header = macbinary_header(0x101);
+        let mut stream = memory_stream(&mut header);
+        let stream_ptr = (&mut stream as *mut crate::ft::stream::FtStream).cast::<u32>();
+        let result = unsafe {
+            resource_fork_probe(LIBRARY as *mut u32, stream_ptr, FACE_INDEX, FACE_OUT as *mut u32)
+        };
+        assert_eq!(result, 0xdead_beef);
+        assert_eq!(unsafe { FALLBACK_EVENT_COUNT }, 1);
+        assert_eq!(
+            unsafe { FALLBACK_EVENTS[0] },
+            FallbackEvent::Dfont {
+                library: LIBRARY,
+                stream: stream_ptr as usize,
+                offset: 0x200,
+                face_index: FACE_INDEX,
+                face_out: FACE_OUT,
+            }
+        );
+        uninstall_recording_fallback(false);
     }
 
     #[test]

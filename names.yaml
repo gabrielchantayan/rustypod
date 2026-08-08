@@ -21500,6 +21500,42 @@ functions:
       focused host tests:
       `src/cxx/object_flags.rs::object_flags_fetch_increment`.
 
+  # --- FreeType MacBinary resource-fork probe ---
+  - address: 0x08076510
+    ghidra: FUN_08076510
+    name: resource_fork_probe
+    size: 220
+    sig: "u32 resource_fork_probe(void *library, FT_Stream stream, i32 face_index, void *face_out)"
+    module: cxx/object_flags
+    status: ported
+    renames:
+      param_1: library
+      param_2: stream
+      param_3: face_index
+      param_4: face_out
+      iVar1: error
+      uVar2: data_fork_length
+      local_94: macbinary_header
+      local_93: filename_length
+      bVar3: header_byte_valid
+      bVar4: header_valid
+    notes: >-
+      FreeType's IsMacBinary probe, immediately called by the FT_Open_Face
+      dfont fallback at 0x080853bc. It seeks stream to zero, reads the
+      128-byte MacBinary header, and propagates either stream error
+      unchanged. Bytes 0, 74, 82, and 63 must be zero; the filename length
+      at byte 1 must be 1..33 and byte 2+length must be zero. Invalid input
+      returns class 2 (unknown file format). It builds the big-endian
+      data-fork length from bytes 83..86 and delegates
+      128 + ((length + 127) & ~127) to FUN_0807f478, returning its result
+      unchanged. The 220-byte ARM is `seek(0); read(128); header checks;
+      ldrb 0x53..0x56; add #127; bic #127; add #128; bl 0x0807f478`.
+      The unported dfont opener retains resource-map validation and rides
+      DFONT_FALLBACK_OPS.open_dfont; resource_fork_probe is now the default
+      probe seam. Focused tests cover malformed headers, read-error
+      propagation, offset derivation, delegated arguments, and result
+      propagation in src/cxx/object_flags.rs.
+
   # --- FreeType FT_Open_Face dfont / fallback-rule retry stage ---
   - address: 0x080853b0
     ghidra: FUN_080853b0
