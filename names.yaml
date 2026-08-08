@@ -3414,6 +3414,30 @@ functions:
       match.py structural (trace call goes through the ops table, the
       str to +4 is verbatim).
 
+  - address: 0x08074ba0
+    ghidra: FUN_08074ba0
+    name: retail_vsnprintf
+    size: 60
+    sig: "i32 retail_vsnprintf(u8 *buf, usize size, const u8 *format, VaList args)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1: buf
+      param_2: size
+      param_3: format
+      param_4: args
+      local_c: cursor
+    notes: >-
+      Second firmware vsnprintf veneer (distinct from the ported
+      0x08032f94 implementation), named retail_vsnprintf to avoid that
+      symbol collision. Raw ARM: size==0 returns 0 before touching buf or
+      calling the core; otherwise it writes args to sp+0 and buf to sp+4,
+      calls 0x08077c94 as (sink descriptor 0x0807ca58, &cursor, size-1,
+      format, args), NUL-terminates at the final cursor, and returns the
+      core count untouched. The 0x08077c94 conversion core remains an
+      injectable RETAIL_VSNPRINTF_ENGINE seam; tests cover forwarding,
+      bounded truncation/NUL, count propagation, and the zero-size path.
+
   - address: 0x0807a228
     ghidra: FUN_0807a228
     name: timer_arm

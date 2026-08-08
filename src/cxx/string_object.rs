@@ -54,6 +54,13 @@
 //!   duplicates the source's payload through
 //!   `string_object_assign_payload` @ 0x08276474; returns `this`. It is
 //!   the wired default of the [`STRING_OBJECT_COPY_CONSTRUCT`] slot.
+//! - `retail_vsnprintf` — original: `FUN_08074ba0` @ 0x08074ba0
+//!   (60 bytes, all code). A second bounded `vsnprintf` veneer: for a
+//!   nonzero size it passes the string sink descriptor, a mutable output
+//!   cursor, `size - 1`, format, and va_list to conversion core
+//!   0x08077c94; then writes one NUL at the core's final cursor and
+//!   returns the core's count. A zero size returns zero without calling
+//!   the core or touching the buffer.
 //! - `string_object_format` — original: `FUN_082769d4` @ 0x082769d4
 //!   (68 bytes, all code; 117 `bl` call sites, binary-scanned). The
 //!   class's printf-style assignment, `int format(const char *fmt,
@@ -276,7 +283,7 @@ use crate::heap::veneers::{free_wrapper, operator_delete};
 use crate::libc::strcpy::strcpy;
 use crate::libc::strlen_safe::strlen_safe;
 use crate::libc::strlen_safe_plus1::strlen_safe_plus1;
-use crate::printf::printf_api::{vsnprintf, VaList};
+use crate::printf::printf_api::VaList;
 
 /// Original load address of the class vtable the constructor plants
 /// (`ldr r1, [0x08277454]` in every sibling). See the module header for
@@ -497,33 +504,75 @@ pub unsafe extern "C" fn string_object_assign_payload(
 /// alignment pad, and `mov r1, #512` is the length handed to vsnprintf).
 pub const STRING_OBJECT_FORMAT_BUFFER_LEN: usize = 512;
 
-/// The bounded formatter @ 0x08074ba0 that [`string_object_format`] runs.
-/// Signature decoded from its prologue: `(buf, size, format, args)`, the
-/// classic `vsnprintf` shape — it saves `buf` and the va_list on the
-/// stack, passes `size - 1` and a sink descriptor (literal-pool word
-/// @ 0x08074bdc holds 0x0807ca58) to the conversion core @ 0x08077c94,
-/// NUL-terminates at the final cursor, and returns the core's count
-/// (0 when `size` is zero, with nothing written).
-pub type StringObjectFormatVsnprintfFn = unsafe extern "C" fn(
-    buf: *mut u8,
-    size: usize,
+/// Firmware sink descriptor passed to the conversion core by
+/// [`retail_vsnprintf`] (the literal-pool word at 0x08074bdc).
+pub const RETAIL_VSNPRINTF_SINK_ADDRESS: usize = 0x0807ca58;
+
+/// The unported conversion core @ 0x08077c94 used by [`retail_vsnprintf`].
+///
+/// It receives the sink descriptor, an in/out cursor, the maximum number of
+/// non-NUL bytes, format, and the va_list. It owns conversion and bounded
+/// emission; this module only ports the veneer around it.
+pub type RetailVsnprintfEngineFn = unsafe extern "C" fn(
+    sink: usize,
+    cursor: *mut *mut u8,
+    maximum: usize,
     format: *const u8,
     args: VaList,
 ) -> i32;
 
-/// Dispatch slot for the unported formatter @ 0x08074ba0.
-///
-/// Wired default: the ported `vsnprintf` @ 0x08032f94, retailOS's *other*
-/// bounded formatter — same `(buf, size, format, args)` contract and the
-/// same NUL-termination, differing only in which conversion engine runs
-/// underneath. Swapping in a port of 0x08074ba0 later needs no change
-/// here. (Note the ported sibling's own [`crate::printf_api::PRINTF_ENGINE`]
-/// is still a stub, so today the default yields an empty string.)
-pub static mut STRING_OBJECT_FORMAT_VSNPRINTF: StringObjectFormatVsnprintfFn = vsnprintf;
+/// Placeholder for the unported conversion core. It emits nothing, leaving
+/// the cursor intact; [`retail_vsnprintf`] therefore supplies the empty
+/// C string its original veneer guarantees.
+unsafe extern "C" fn retail_vsnprintf_engine_stub(
+    _sink: usize,
+    _cursor: *mut *mut u8,
+    _maximum: usize,
+    _format: *const u8,
+    _args: VaList,
+) -> i32 {
+    0
+}
 
-#[inline(always)]
-unsafe fn format_vsnprintf_op() -> StringObjectFormatVsnprintfFn {
-    core::ptr::read_volatile(core::ptr::addr_of!(STRING_OBJECT_FORMAT_VSNPRINTF))
+/// Active conversion core for [`retail_vsnprintf`]. Host tests replace this
+/// seam because the 0x08077c94 conversion engine has not been ported.
+pub static mut RETAIL_VSNPRINTF_ENGINE: RetailVsnprintfEngineFn = retail_vsnprintf_engine_stub;
+
+/// retail_vsnprintf — original: `FUN_08074ba0` @ 0x08074ba0 (60 bytes).
+///
+/// The firmware's second `vsnprintf` implementation, named
+/// `retail_vsnprintf` here to distinguish it from the separately ported
+/// standard-library veneer at 0x08032f94. For a nonzero `size`, create a
+/// local output cursor at `buf`, call conversion core 0x08077c94 with its
+/// serialized string sink descriptor and `size - 1` byte budget, then put a
+/// NUL at the cursor the core leaves behind. Return the core's result
+/// unchanged. With `size == 0`, return zero before invoking the core or
+/// accessing `buf`.
+///
+/// Register usage: r0 = buf, r1 = size, r2 = format, r3 = ap. The explicit
+/// [`VaList`] is ABI-exact: this is C's `vsnprintf`, not a variadic veneer.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn retail_vsnprintf(
+    buf: *mut u8,
+    size: usize,
+    format: *const u8,
+    args: VaList,
+) -> i32 {
+    if size == 0 {
+        return 0;
+    }
+
+    let mut cursor = buf;
+    let count = core::ptr::read_volatile(core::ptr::addr_of!(RETAIL_VSNPRINTF_ENGINE))(
+        RETAIL_VSNPRINTF_SINK_ADDRESS,
+        &mut cursor,
+        size - 1,
+        format,
+        args,
+    );
+    cursor.write(0);
+    count
 }
 
 /// string_object_format — original: `FUN_082769d4` @ 0x082769d4
@@ -569,8 +618,10 @@ unsafe fn format_vsnprintf_op() -> StringObjectFormatVsnprintfFn {
 /// - The variadic `...` becomes an explicit [`VaList`] (house convention,
 ///   see `printf/printf_api.rs`): stable Rust cannot define C-variadic
 ///   functions, and `args` IS the pointer the original's spill builds.
-/// - The formatter @ 0x08074ba0 is unported and goes through the
-///   [`STRING_OBJECT_FORMAT_VSNPRINTF`] slot.
+/// - The veneer @ 0x08074ba0 is ported directly as [`retail_vsnprintf`].
+///   Its conversion core @ 0x08077c94 remains an explicit
+///   [`RETAIL_VSNPRINTF_ENGINE`] seam; the default emits no text, rather than
+///   borrowing the distinct 0x08032f94 printf engine.
 /// - The scratch buffer is [`core::mem::MaybeUninit`], matching the
 ///   original's unwritten stack frame; the formatter's NUL termination is
 ///   what makes it readable.
@@ -584,7 +635,7 @@ pub unsafe extern "C" fn string_object_format(
     let mut scratch = MaybeUninit::<[u8; STRING_OBJECT_FORMAT_BUFFER_LEN]>::uninit();
     let scratch = scratch.as_mut_ptr() as *mut u8;
 
-    let length = format_vsnprintf_op()(scratch, STRING_OBJECT_FORMAT_BUFFER_LEN, format, args);
+    let length = retail_vsnprintf(scratch, STRING_OBJECT_FORMAT_BUFFER_LEN, format, args);
     string_object_assign_payload(this, scratch);
     length
 }
@@ -1584,39 +1635,45 @@ mod tests {
         (*core::ptr::addr_of_mut!(ASSIGN_CSTR_CLEAR_CALLS)).push(this as usize);
     }
 
-    /// `(scratch, size, format, args)` seen by the formatter slot @ 0x08074ba0.
-    static mut FORMAT_VSNPRINTF_CALLS: Vec<(usize, usize, usize, usize)> = Vec::new();
-    /// Canned formatter output. Always NUL-terminated: the original's scratch
-    /// buffer is uninitialized stack, and the NUL is what makes it readable.
-    static mut FORMAT_VSNPRINTF_OUTPUT: &[u8] = b"\0";
-    static mut FORMAT_VSNPRINTF_RESULT: i32 = 0;
+    /// `(sink, cursor, maximum, format, args)` received by conversion core
+    /// 0x08077c94 through `retail_vsnprintf`.
+    static mut FORMAT_ENGINE_CALLS: Vec<(usize, usize, usize, usize, usize)> = Vec::new();
+    /// Canned conversion output. The recorder models the core's bounded write
+    /// protocol; the veneer under test appends the terminator itself.
+    static mut FORMAT_ENGINE_OUTPUT: &[u8] = b"\0";
+    static mut FORMAT_ENGINE_RESULT: i32 = 0;
 
-    unsafe extern "C" fn recording_format_vsnprintf(
-        scratch: *mut u8,
-        size: usize,
+    unsafe extern "C" fn recording_format_engine(
+        sink: usize,
+        cursor: *mut *mut u8,
+        maximum: usize,
         format: *const u8,
         args: VaList,
     ) -> i32 {
-        (*core::ptr::addr_of_mut!(FORMAT_VSNPRINTF_CALLS)).push((
-            scratch as usize,
-            size,
+        let initial_cursor = *cursor;
+        (*core::ptr::addr_of_mut!(FORMAT_ENGINE_CALLS)).push((
+            sink,
+            initial_cursor as usize,
+            maximum,
             format as usize,
             args as usize,
         ));
-        let output = core::ptr::read_volatile(core::ptr::addr_of!(FORMAT_VSNPRINTF_OUTPUT));
-        assert!(output.len() <= size, "the canned output must fit the scratch");
-        core::ptr::copy_nonoverlapping(output.as_ptr(), scratch, output.len());
-        core::ptr::read_volatile(core::ptr::addr_of!(FORMAT_VSNPRINTF_RESULT))
+        let output = core::ptr::read_volatile(core::ptr::addr_of!(FORMAT_ENGINE_OUTPUT));
+        let text_len = output.len() - 1;
+        let written = if text_len < maximum { text_len } else { maximum };
+        core::ptr::copy_nonoverlapping(output.as_ptr(), initial_cursor, written);
+        *cursor = initial_cursor.add(written);
+        core::ptr::read_volatile(core::ptr::addr_of!(FORMAT_ENGINE_RESULT))
     }
 
-    /// Arms the formatter slot's canned output for the next
-    /// [`string_object_format`] run. Only valid while the bench guard —
-    /// which owns the lock and installed the recorder — is alive.
+    /// Arms conversion-core output for the next formatter invocation. Only
+    /// valid while the bench guard — which owns the lock and installs the
+    /// recorder — is alive.
     fn arm_format_output(output: &'static [u8], result: i32) {
         assert_eq!(output.last(), Some(&0), "canned output must be NUL-terminated");
         unsafe {
-            core::ptr::addr_of_mut!(FORMAT_VSNPRINTF_OUTPUT).write(output);
-            core::ptr::addr_of_mut!(FORMAT_VSNPRINTF_RESULT).write(result);
+            core::ptr::addr_of_mut!(FORMAT_ENGINE_OUTPUT).write(output);
+            core::ptr::addr_of_mut!(FORMAT_ENGINE_RESULT).write(result);
         }
     }
 
@@ -1630,7 +1687,8 @@ mod tests {
             unsafe {
                 core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS)
                     .write_volatile(DEFAULT_STRING_OBJECT_ASSIGN_CSTR_OPS);
-                core::ptr::addr_of_mut!(STRING_OBJECT_FORMAT_VSNPRINTF).write_volatile(vsnprintf);
+                core::ptr::addr_of_mut!(RETAIL_VSNPRINTF_ENGINE)
+                    .write_volatile(retail_vsnprintf_engine_stub);
             }
         }
     }
@@ -1640,7 +1698,7 @@ mod tests {
         unsafe {
             (*core::ptr::addr_of_mut!(ASSIGN_CSTR_ALLOCATE_CALLS)).clear();
             (*core::ptr::addr_of_mut!(ASSIGN_CSTR_CLEAR_CALLS)).clear();
-            (*core::ptr::addr_of_mut!(FORMAT_VSNPRINTF_CALLS)).clear();
+            (*core::ptr::addr_of_mut!(FORMAT_ENGINE_CALLS)).clear();
             core::ptr::addr_of_mut!(ASSIGN_CSTR_ALLOCATE_RESULT).write(allocation_result);
             core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS).write_volatile(
                 StringObjectAssignCstrOps {
@@ -1648,8 +1706,7 @@ mod tests {
                     clear_payload: recording_assign_cstr_clear,
                 },
             );
-            core::ptr::addr_of_mut!(STRING_OBJECT_FORMAT_VSNPRINTF)
-                .write_volatile(recording_format_vsnprintf);
+            core::ptr::addr_of_mut!(RETAIL_VSNPRINTF_ENGINE).write_volatile(recording_format_engine);
         }
         arm_format_output(b"\0", 0);
         AssignCstrOpsGuard { _lock: lock }
@@ -1817,15 +1874,44 @@ mod tests {
     const FORMAT_ARGS: VaList = 0x4444_4444 as VaList;
 
     #[test]
-    fn format_slot_defaults_to_the_ported_bounded_formatter() {
-        let wired = unsafe { core::ptr::read_volatile(core::ptr::addr_of!(
-            STRING_OBJECT_FORMAT_VSNPRINTF
-        )) };
+    fn retail_vsnprintf_forwards_engine_arguments_truncates_and_terminates() {
+        let mut buf = [0xa5u8; 4];
+        let format = b"%s\0";
+        let _bench = assign_cstr_bench(core::ptr::null_mut());
+        arm_format_output(b"album\0", 5);
+
+        let count = unsafe { retail_vsnprintf(buf.as_mut_ptr(), buf.len(), format.as_ptr(), FORMAT_ARGS) };
+
+        assert_eq!(count, 5, "the conversion core's would-be count survives truncation");
+        assert_eq!(&buf, b"alb\0", "the veneer writes the NUL at the final bounded cursor");
         assert_eq!(
-            wired as usize, vsnprintf as usize,
-            "0x08074ba0 stands in as the ported vsnprintf @ 0x08032f94"
+            unsafe { (*core::ptr::addr_of!(FORMAT_ENGINE_CALLS)).clone() },
+            std::vec![(
+                RETAIL_VSNPRINTF_SINK_ADDRESS,
+                buf.as_mut_ptr() as usize,
+                3,
+                format.as_ptr() as usize,
+                FORMAT_ARGS as usize,
+            )],
+            "the ARM shuffle is sink, cursor, size - 1, format, va_list"
         );
-        assert_eq!(STRING_OBJECT_FORMAT_BUFFER_LEN, 512, "mov r1, #512");
+    }
+
+    #[test]
+    fn retail_vsnprintf_zero_size_skips_engine_and_buffer() {
+        let mut buf = [0xa5u8; 2];
+        let _bench = assign_cstr_bench(core::ptr::null_mut());
+        arm_format_output(b"x\0", 1);
+
+        assert_eq!(
+            unsafe { retail_vsnprintf(buf.as_mut_ptr(), 0, b"%s\0".as_ptr(), FORMAT_ARGS) },
+            0
+        );
+        assert_eq!(buf, [0xa5; 2], "size zero takes the early return before any store");
+        assert!(
+            unsafe { (*core::ptr::addr_of!(FORMAT_ENGINE_CALLS)).is_empty() },
+            "size zero must not call 0x08077c94"
+        );
     }
 
     #[test]
@@ -1843,10 +1929,11 @@ mod tests {
         let length = unsafe { string_object_format(this, format.as_ptr(), FORMAT_ARGS) };
 
         assert_eq!(length, 13, "the formatter's count is returned, not `this`");
-        let formatter = unsafe { (*core::ptr::addr_of!(FORMAT_VSNPRINTF_CALLS)).clone() };
+        let formatter = unsafe { (*core::ptr::addr_of!(FORMAT_ENGINE_CALLS)).clone() };
         assert_eq!(formatter.len(), 1);
-        let (scratch, size, seen_format, seen_args) = formatter[0];
-        assert_eq!(size, STRING_OBJECT_FORMAT_BUFFER_LEN);
+        let (sink, scratch, maximum, seen_format, seen_args) = formatter[0];
+        assert_eq!(sink, RETAIL_VSNPRINTF_SINK_ADDRESS);
+        assert_eq!(maximum, STRING_OBJECT_FORMAT_BUFFER_LEN - 1);
         assert_eq!(seen_format, format.as_ptr() as usize, "format passed verbatim");
         assert_eq!(seen_args, FORMAT_ARGS as usize, "va_list passed verbatim");
 
@@ -2046,6 +2133,7 @@ mod tests {
             "it reaches vtable slot +0xc through the ported assign_payload"
         );
     }
+
 
     // ---- string_object_construct_from_cstr ----------------------------
 
