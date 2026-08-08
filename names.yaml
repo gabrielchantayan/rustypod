@@ -16667,16 +16667,10 @@ functions:
       (`ldmia sp,{r0,r1}` / `stmia r4,{r0,r1}`). The reload leaves r0
       holding the result's word pointer, NOT the sret pointer, so the
       port returns it; both call sites recompute every pointer they
-      need and never consume r0. The advance @ 0x083e5f84 (60 bytes,
-      the `_Vb_iterator::operator+=` floor-division fold) is not yet
-      ported, so the call rides the new VECTOR_BOOL_ITER_OPS.advance
-      seam (blx for bl, the PAIR_HEADER_OPS precedent); its default
-      stock_iter_advance_model is a private model of the fully
-      recovered stock arithmetic (add bit+distance, `asr #0x1f` /
-      `lsr #0x1b` sign bias, `asr #0x5`, `bic #0x1f`, conditional
-      +0x20/-4 fixup), keeping the port hook-ready - the address
-      itself stays unported here and its future port can replace the
-      default. Identification: sits between the mask-reference ctor @
+      need and never consume r0. The direct `bl 0x083e5f84` now calls
+      ported `vector_bool_iter_advance`, the `_Vb_iterator::operator+=`
+      floor-division fold. Identification: sits between the
+      mask-reference ctor @
       0x083d79dc and the `*word & mask` bit test @ 0x083d7a20 in the
       bit-iterator cluster (see the 0x083d7968 entry for the
       neighborhood); the 0x0826a3e8 call site pairs `operator++` @
@@ -16684,11 +16678,34 @@ functions:
       set/clear-bit store @ 0x083e5fe8 - write-back of the bit just
       stepped past. 2 bl call sites (0x0826a3e8, 0x083e5d6c), the
       latter in the vector<bool> storage-grow path; the only copy.
-      match.py - same rsb-negate / call / copy-out structure; the diff
-      is blx-through-slot for the unported callee, the head loads and
-      stores coming out as byte accesses from the family's
-      read_unaligned/write_unaligned host-testing idiom (the accepted
-      vector_bool_reference_init deviation), plus LLVM's fp frame.
+      match.py - same rsb-negate / direct call / copy-out structure;
+      the head loads and stores come out as byte accesses from the
+      family's read_unaligned/write_unaligned host-testing idiom (the
+      accepted vector_bool_reference_init deviation), plus LLVM's fp
+      frame.
+
+  - address: 0x083e5f84
+    ghidra: FUN_083e5f84
+    name: vector_bool_iter_advance
+    size: 60
+    sig: "void vector_bool_iter_advance(VectorBoolIter *iter, i32 distance)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: iter, param_2: distance, iVar1: remainder, iVar2: advanced_word, bVar3: remainder_negative}
+    notes: >-
+      `std::vector<bool>` bit-iterator `_Vb_iterator::operator+=`:
+      adds signed `distance` to `iter.bit` with 32-bit wrapping, then
+      folds the total through a sign bias (`asr #31` / `lsr #27`), `asr
+      #5`, and `bic #31`. A negative residual triggers `+32` and one
+      preceding 4-byte storage word, yielding floor division with a
+      0..31 bit remainder. The 60-byte leaf body reads and writes only
+      the `{word, bit}` head; r0 remains `iter` incidentally but the
+      recovered C return ABI is void. Its direct caller is
+      vector_bool_iter_minus @ 0x083d79f8 (`bl` at 0x083d7a10), which
+      advances a stack copy by wrapping-negated distance. match.py -
+      same sign-bias/floor-fold and conditional `+32` / `-4`
+      structure; LLVM expands host-safe unaligned head accesses to byte
+      operations and adds a frame.
 
   - address: 0x083d7a20
     ghidra: FUN_083d7a20
