@@ -185,11 +185,9 @@ pub type ResourceForkProbe =
 /// `seek(0); read(128); header tests; ldrb 0x53..0x56; add #127; bic #127;
 /// add #128; bl 0x0807f478`.
 ///
-/// The actual resource-map validation (repeated/zero resource header and
-/// `POST`/`sfnt` lookup) remains in unported `FUN_0807f478`; it is retained
-/// as the [`DFONT_FALLBACK_OPS`] `open_dfont` seam. This function is the
-/// installed `probe_resource_fork` default, so the ported fallback reaches
-/// the real probe while target integration still supplies that dependency.
+/// The resource-map validation and `POST`/`sfnt` dispatch now run through
+/// the ported [`dfont_open`]. Its still-unported resource-header/type lookup
+/// and driver dependencies remain behind [`DFONT_OPEN_OPS`] seams.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn resource_fork_probe(
@@ -228,16 +226,208 @@ pub unsafe extern "C" fn resource_fork_probe(
         | (u32::from(header.add(85).read()) << 8)
         | u32::from(header.add(86).read());
     let resource_fork_offset = (data_fork_length.wrapping_add(127) & !127).wrapping_add(128);
-    (dfont_fallback_ops().open_dfont)(library, stream, resource_fork_offset, face_index, face_out)
+    dfont_open(library, stream, resource_fork_offset, face_index, face_out)
 }
 
-pub type DfontOpen = unsafe extern "C" fn(
+/// `FUN_0804e38c` (`ft_raccess_get_header_info`): validates the repeated
+/// resource header at `offset`, then returns the absolute resource-map and
+/// resource-data offsets. The function remains unported.
+pub type DfontResourceHeader = unsafe extern "C" fn(
+    library: *mut u32,
+    stream: *mut u32,
+    offset: u32,
+    resource_map_offset: *mut u32,
+    resource_data_offset: *mut u32,
+) -> u32;
+
+/// `FUN_0804e17c` (`ft_raccess_get_data_offsets`): looks up one resource
+/// type in the resource map, allocating its resource-data offset array.
+/// The function remains unported.
+pub type DfontResourceTypeLookup = unsafe extern "C" fn(
+    library: *mut u32,
+    stream: *mut u32,
+    resource_map_offset: u32,
+    resource_data_offset: u32,
+    resource_tag: u32,
+    resource_offsets_out: *mut *mut u32,
+    resource_count_out: *mut u32,
+) -> u32;
+
+/// `FUN_080c63cc` / `FUN_080c6634`: driver-specific openers for `POST` and
+/// `sfnt` resources. Both consume the offset array but do not own it.
+pub type DfontDriverOpen = unsafe extern "C" fn(
+    library: *mut u32,
+    stream: *mut u32,
+    resource_offsets: *mut u32,
+    resource_count: u32,
+    face_index: i32,
+    face_out: *mut u32,
+) -> u32;
+
+/// Unported dependencies of [`dfont_open`]. Their signatures and ordering
+/// are pinned by the four direct `bl`s in its ARM body; target integration
+/// installs the retail functions until they are ported.
+pub struct DfontOpenOps {
+    pub read_resource_header: DfontResourceHeader,
+    pub find_resource_type: DfontResourceTypeLookup,
+    pub open_post: DfontDriverOpen,
+    pub open_sfnt: DfontDriverOpen,
+}
+
+unsafe extern "C" fn missing_dfont_resource_header(
+    _library: *mut u32,
+    _stream: *mut u32,
+    _offset: u32,
+    _resource_map_offset: *mut u32,
+    _resource_data_offset: *mut u32,
+) -> u32 {
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
+unsafe extern "C" fn missing_dfont_resource_type(
+    _library: *mut u32,
+    _stream: *mut u32,
+    _resource_map_offset: u32,
+    _resource_data_offset: u32,
+    _resource_tag: u32,
+    _resource_offsets_out: *mut *mut u32,
+    _resource_count_out: *mut u32,
+) -> u32 {
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
+unsafe extern "C" fn missing_dfont_driver(
+    _library: *mut u32,
+    _stream: *mut u32,
+    _resource_offsets: *mut u32,
+    _resource_count: u32,
+    _face_index: i32,
+    _face_out: *mut u32,
+) -> u32 {
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
+/// Target integration must replace these slots with retailOS
+/// `FUN_0804e38c`, `FUN_0804e17c`, `FUN_080c63cc`, and `FUN_080c6634`
+/// respectively until those functions are ported.
+pub static mut DFONT_OPEN_OPS: DfontOpenOps = DfontOpenOps {
+    read_resource_header: missing_dfont_resource_header,
+    find_resource_type: missing_dfont_resource_type,
+    open_post: missing_dfont_driver,
+    open_sfnt: missing_dfont_driver,
+};
+
+#[inline(always)]
+unsafe fn dfont_open_ops() -> DfontOpenOps {
+    core::ptr::read_volatile(core::ptr::addr_of!(DFONT_OPEN_OPS))
+}
+
+/// `POST` and `sfnt`, interpreted as the big-endian resource-type words
+/// returned by `FT_Stream_ReadLong`.
+const RESOURCE_TAG_POST: u32 = 0x504f_5354;
+const RESOURCE_TAG_SFNT: u32 = 0x7366_6e74;
+
+/// dfont_open — original: `FUN_0807f478` @ `0x0807f478` (228 bytes;
+/// source: `ipod-decomp/decomp/c/005/0807f478_FUN_0807f478.c`; the
+/// adjacent resource-tag literals are at 0x0807f55c and 0x0807f560).
+///
+/// Opens one font face from a flattened Mac resource fork. It first
+/// validates the resource header at `offset`, recovering its absolute map
+/// and data offsets. It then searches for `POST` resources; if found, that
+/// offset array is dispatched to the PostScript resource driver
+/// (`FUN_080c63cc`). Only a nonzero `POST` lookup result triggers the
+/// second, `sfnt`, lookup and its TrueType/OpenType driver
+/// (`FUN_080c6634`). A header error, or the second lookup error, returns
+/// unchanged. After either driver returns (success or failure), the
+/// resource-offset array is released through the library's `FT_Memory`.
+/// Thus a `POST` driver error is final and cannot fall through to `sfnt`.
+///
+/// The ARM sequence is `bl 0x0804e38c; bl 0x0804e17c(POST);
+/// bl 0x080c63cc | bl 0x0804e17c(sfnt); bl 0x080c6634;
+/// bl 0x082cfae8`, with face index and output passed unchanged to the
+/// selected driver. Deviations: the four unported callees use
+/// [`DFONT_OPEN_OPS`] (the house ops-struct seam) while the already-ported
+/// [`crate::ft::memory::ft_mem_free`] is called directly.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn dfont_open(
     library: *mut u32,
     stream: *mut u32,
     offset: u32,
     face_index: i32,
     face_out: *mut u32,
-) -> u32;
+) -> u32 {
+    let ops = dfont_open_ops();
+    let mut resource_map_offset = 0;
+    let mut resource_data_offset = 0;
+    let mut result = (ops.read_resource_header)(
+        library,
+        stream,
+        offset,
+        &mut resource_map_offset,
+        &mut resource_data_offset,
+    );
+    if result != 0 {
+        return result;
+    }
+
+    let mut resource_offsets = core::ptr::null_mut();
+    let mut resource_count = 0;
+    result = (ops.find_resource_type)(
+        library,
+        stream,
+        resource_map_offset,
+        resource_data_offset,
+        RESOURCE_TAG_POST,
+        &mut resource_offsets,
+        &mut resource_count,
+    );
+    if result == 0 {
+        result = (ops.open_post)(
+            library,
+            stream,
+            resource_offsets,
+            resource_count,
+            face_index,
+            face_out,
+        );
+    } else {
+        result = (ops.find_resource_type)(
+            library,
+            stream,
+            resource_map_offset,
+            resource_data_offset,
+            RESOURCE_TAG_SFNT,
+            &mut resource_offsets,
+            &mut resource_count,
+        );
+        if result != 0 {
+            return result;
+        }
+        result = (ops.open_sfnt)(
+            library,
+            stream,
+            resource_offsets,
+            resource_count,
+            face_index,
+            face_out,
+        );
+    }
+
+    if !resource_offsets.is_null() {
+        let memory = library
+            .cast::<*mut crate::ft::memory::FtMemory>()
+            .read_volatile();
+        crate::ft::memory::ft_mem_free(memory, resource_offsets.cast());
+    }
+    result
+}
 /// Fallback-rule chain `FUN_080db8ac` (unported): walks the rule table
 /// derived from the pathname, re-opening through FT_Open_Face per rule.
 pub type FallbackRuleChain = unsafe extern "C" fn(
@@ -248,32 +438,17 @@ pub type FallbackRuleChain = unsafe extern "C" fn(
     open_args: *const u32,
 ) -> u32;
 
-/// The dfont opener and fallback-rule chain still unported from
+/// The fallback-rule chain remains unported from
 /// [`ft_open_face_dfont_fallback`], grouped in the house ops-struct pattern
-/// (app/node_list.rs's NODE_LIST_ENQUEUE_OPS). `probe_resource_fork` now
-/// defaults to the ported [`resource_fork_probe`].
+/// (app/node_list.rs's NODE_LIST_ENQUEUE_OPS). The ported
+/// [`resource_fork_probe`] and [`dfont_open`] are installed by default.
 pub struct DfontFallbackOps {
     pub probe_resource_fork: ResourceForkProbe,
-    pub open_dfont: DfontOpen,
     pub run_fallback_rules: FallbackRuleChain,
 }
 
-/// Spins forever: the dfont opening dependency must be installed before a
-/// valid MacBinary header reaches [`resource_fork_probe`] or
-/// [`ft_open_face_dfont_fallback`].
-unsafe extern "C" fn missing_dfont_open(
-    _library: *mut u32,
-    _stream: *mut u32,
-    _offset: u32,
-    _face_index: i32,
-    _face_out: *mut u32,
-) -> u32 {
-    loop {
-        core::hint::spin_loop();
-    }
-}
-
-/// Spins forever: see [`missing_dfont_open`].
+/// Spins forever: [`ft_open_face_dfont_fallback`] must not run the optional
+/// fallback-rule chain before target integration installs `FUN_080db8ac`.
 unsafe extern "C" fn missing_fallback_rule_chain(
     _library: *mut u32,
     _stream: *mut u32,
@@ -286,15 +461,15 @@ unsafe extern "C" fn missing_fallback_rule_chain(
     }
 }
 
-/// RetailOS dependencies of [`ft_open_face_dfont_fallback`]. The ported
-/// [`resource_fork_probe`] is installed for the first call; target
-/// integration must still install `FUN_0807f478` / `FUN_080db8ac`.
-/// Focused host tests replace all three slots with recording seams.
+/// RetailOS dependency of [`ft_open_face_dfont_fallback`]. The ported
+/// [`resource_fork_probe`] remains in the existing probe seam for target
+/// integration and focused host tests; the ported [`dfont_open`] is called
+/// directly. Target integration must still install `FUN_080db8ac`.
 pub static mut DFONT_FALLBACK_OPS: DfontFallbackOps = DfontFallbackOps {
     probe_resource_fork: resource_fork_probe,
-    open_dfont: missing_dfont_open,
     run_fallback_rules: missing_fallback_rule_chain,
 };
+
 
 #[inline(always)]
 unsafe fn dfont_fallback_ops() -> DfontFallbackOps {
@@ -353,13 +528,14 @@ unsafe fn dfont_trace_level() -> i32 {
 /// `bl 0x08076510; bl 0x0807f478; bl 0x080db8ac; mov r0,r4;
 /// ldmia sp!,{r3-r11,pc}`.
 ///
-/// Deviations: the three unported callees ride the [`DFONT_FALLBACK_OPS`]
-/// seam (house pattern) instead of direct `bl`s; the ported
-/// [`ft_error_trace`](crate::ft::trace::ft_error_trace) takes the two
-/// trace calls directly (its retail varargs shim is already ported); the
-/// unused r2/r3 slots of the trace calls, garbage in retail, are passed
-/// as 0; and host builds substitute test storage for the firmware
-/// trace-level block @ 0x08b209dc.
+/// Deviations: the ported resource-fork probe and unported fallback-rule
+/// callee ride [`DFONT_FALLBACK_OPS`] (house pattern) instead of direct
+/// `bl`s; the ported [`dfont_open`] and
+/// [`ft_error_trace`](crate::ft::trace::ft_error_trace) take their calls
+/// directly (its retail varargs shim is already ported); the unused r2/r3
+/// slots of the trace calls, garbage in retail, are passed as 0; and host
+/// builds substitute test storage for the firmware trace-level block @
+/// 0x08b209dc.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn ft_open_face_dfont_fallback(
@@ -380,7 +556,7 @@ pub unsafe extern "C" fn ft_open_face_dfont_fallback(
                 0,
             );
         }
-        result = (ops.open_dfont)(library, stream, 0, face_index, face_out);
+        result = dfont_open(library, stream, 0, face_index, face_out);
         if dfont_trace_level() > 2 {
             let outcome = if result == 0 {
                 OUTCOME_SUCCESSFUL.as_ptr()
@@ -1067,6 +1243,301 @@ mod tests {
         }
     }
 
+    // --- dfont_open ---
+
+    /// Serializes tests that replace the four unported dfont-open
+    /// dependencies and records the offset-array release.
+    static DFONT_OPEN_TEST_LOCK: StdMutex<()> = StdMutex::new(());
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum DfontOpenEvent {
+        Header { offset: u32 },
+        Lookup { tag: u32, resource_map: u32, resource_data: u32 },
+        Post { offsets: usize, count: u32, face_index: i32, face_out: usize },
+        Sfnt { offsets: usize, count: u32, face_index: i32, face_out: usize },
+    }
+
+    const NO_DFONT_OPEN_EVENT: DfontOpenEvent = DfontOpenEvent::Header { offset: 0 };
+    static mut DFONT_OPEN_EVENTS: [DfontOpenEvent; 8] = [NO_DFONT_OPEN_EVENT; 8];
+    static mut DFONT_OPEN_EVENT_COUNT: usize = 0;
+    static mut HEADER_RESULT: u32 = 0;
+    static mut POST_LOOKUP_RESULT: u32 = 0;
+    static mut SFNT_LOOKUP_RESULT: u32 = 0;
+    static mut POST_DRIVER_RESULT: u32 = 0;
+    static mut SFNT_DRIVER_RESULT: u32 = 0;
+    static mut DFONT_OPEN_FREE_MEMORY: usize = 0;
+    static mut DFONT_OPEN_FREE_BLOCK: usize = 0;
+    static mut POST_RESOURCE_OFFSETS: [u32; 2] = [0; 2];
+    static mut SFNT_RESOURCE_OFFSETS: [u32; 3] = [0; 3];
+
+    const DFONT_RESOURCE_MAP_OFFSET: u32 = 0x1234_5000;
+    const DFONT_RESOURCE_DATA_OFFSET: u32 = 0x1234_6000;
+    const DFONT_FACE_INDEX: i32 = -1;
+    const DFONT_FACE_OUT: usize = 0x4444_1234;
+
+    fn record_dfont_open(event: DfontOpenEvent) {
+        unsafe {
+            let count = DFONT_OPEN_EVENT_COUNT;
+            assert!(count < DFONT_OPEN_EVENTS.len(), "dfont open called too many seams");
+            DFONT_OPEN_EVENTS[count] = event;
+            DFONT_OPEN_EVENT_COUNT = count + 1;
+        }
+    }
+
+    unsafe extern "C" fn recording_resource_header(
+        _library: *mut u32,
+        _stream: *mut u32,
+        offset: u32,
+        resource_map_offset: *mut u32,
+        resource_data_offset: *mut u32,
+    ) -> u32 {
+        record_dfont_open(DfontOpenEvent::Header { offset });
+        if HEADER_RESULT == 0 {
+            resource_map_offset.write(DFONT_RESOURCE_MAP_OFFSET);
+            resource_data_offset.write(DFONT_RESOURCE_DATA_OFFSET);
+        }
+        HEADER_RESULT
+    }
+
+    unsafe extern "C" fn recording_resource_type_lookup(
+        _library: *mut u32,
+        _stream: *mut u32,
+        resource_map_offset: u32,
+        resource_data_offset: u32,
+        tag: u32,
+        resource_offsets_out: *mut *mut u32,
+        resource_count_out: *mut u32,
+    ) -> u32 {
+        record_dfont_open(DfontOpenEvent::Lookup {
+            tag,
+            resource_map: resource_map_offset,
+            resource_data: resource_data_offset,
+        });
+        let (result, offsets, count) = if tag == RESOURCE_TAG_POST {
+            (POST_LOOKUP_RESULT, core::ptr::addr_of_mut!(POST_RESOURCE_OFFSETS).cast(), 2)
+        } else {
+            assert_eq!(tag, RESOURCE_TAG_SFNT);
+            (SFNT_LOOKUP_RESULT, core::ptr::addr_of_mut!(SFNT_RESOURCE_OFFSETS).cast(), 3)
+        };
+        if result == 0 {
+            resource_offsets_out.write(offsets);
+            resource_count_out.write(count);
+        }
+        result
+    }
+
+    unsafe extern "C" fn recording_post_driver(
+        _library: *mut u32,
+        _stream: *mut u32,
+        offsets: *mut u32,
+        count: u32,
+        face_index: i32,
+        face_out: *mut u32,
+    ) -> u32 {
+        record_dfont_open(DfontOpenEvent::Post {
+            offsets: offsets as usize,
+            count,
+            face_index,
+            face_out: face_out as usize,
+        });
+        POST_DRIVER_RESULT
+    }
+
+    unsafe extern "C" fn recording_sfnt_driver(
+        _library: *mut u32,
+        _stream: *mut u32,
+        offsets: *mut u32,
+        count: u32,
+        face_index: i32,
+        face_out: *mut u32,
+    ) -> u32 {
+        record_dfont_open(DfontOpenEvent::Sfnt {
+            offsets: offsets as usize,
+            count,
+            face_index,
+            face_out: face_out as usize,
+        });
+        SFNT_DRIVER_RESULT
+    }
+
+    unsafe extern "C" fn recording_dfont_free(
+        memory: *mut crate::ft::memory::FtMemory,
+        block: *mut u8,
+    ) {
+        DFONT_OPEN_FREE_MEMORY = memory as usize;
+        DFONT_OPEN_FREE_BLOCK = block as usize;
+    }
+
+    unsafe extern "C" fn dfont_unused_alloc(
+        _memory: *mut crate::ft::memory::FtMemory,
+        _size: i32,
+    ) -> *mut u8 {
+        core::ptr::null_mut()
+    }
+
+    unsafe extern "C" fn dfont_unused_realloc(
+        _memory: *mut crate::ft::memory::FtMemory,
+        _current_size: i32,
+        _new_size: i32,
+        _block: *mut u8,
+    ) -> *mut u8 {
+        core::ptr::null_mut()
+    }
+
+    fn dfont_recording_memory() -> crate::ft::memory::FtMemory {
+        crate::ft::memory::FtMemory {
+            user: core::ptr::null_mut(),
+            alloc: dfont_unused_alloc,
+            free: recording_dfont_free,
+            realloc: dfont_unused_realloc,
+        }
+    }
+
+    fn install_recording_dfont_open(
+        header: u32,
+        post_lookup: u32,
+        sfnt_lookup: u32,
+        post_driver: u32,
+        sfnt_driver: u32,
+    ) -> StdMutexGuard<'static, ()> {
+        let guard = DFONT_OPEN_TEST_LOCK.lock().unwrap();
+        unsafe {
+            HEADER_RESULT = header;
+            POST_LOOKUP_RESULT = post_lookup;
+            SFNT_LOOKUP_RESULT = sfnt_lookup;
+            POST_DRIVER_RESULT = post_driver;
+            SFNT_DRIVER_RESULT = sfnt_driver;
+            DFONT_OPEN_EVENT_COUNT = 0;
+            DFONT_OPEN_FREE_MEMORY = 0;
+            DFONT_OPEN_FREE_BLOCK = 0;
+            DFONT_OPEN_OPS = DfontOpenOps {
+                read_resource_header: recording_resource_header,
+                find_resource_type: recording_resource_type_lookup,
+                open_post: recording_post_driver,
+                open_sfnt: recording_sfnt_driver,
+            };
+        }
+        guard
+    }
+
+    fn uninstall_recording_dfont_open() {
+        unsafe {
+            DFONT_OPEN_OPS = DfontOpenOps {
+                read_resource_header: missing_dfont_resource_header,
+                find_resource_type: missing_dfont_resource_type,
+                open_post: missing_dfont_driver,
+                open_sfnt: missing_dfont_driver,
+            };
+        }
+    }
+
+    fn invoke_dfont_open(offset: u32) -> (u32, usize, [DfontOpenEvent; 8], usize, usize, usize) {
+        let mut memory = dfont_recording_memory();
+        // The firmware library's first word is an FT_Memory pointer. This
+        // pointer-sized host fixture keeps that target word representable.
+        let mut library = [core::ptr::addr_of_mut!(memory)];
+        let result = unsafe {
+            dfont_open(
+                library.as_mut_ptr().cast(),
+                STREAM as *mut u32,
+                offset,
+                DFONT_FACE_INDEX,
+                DFONT_FACE_OUT as *mut u32,
+            )
+        };
+        unsafe {
+            (
+                result,
+                DFONT_OPEN_EVENT_COUNT,
+                DFONT_OPEN_EVENTS,
+                DFONT_OPEN_FREE_MEMORY,
+                DFONT_OPEN_FREE_BLOCK,
+                (&mut memory as *mut crate::ft::memory::FtMemory) as usize,
+            )
+        }
+    }
+
+    #[test]
+    fn dfont_open_dispatches_post_at_header_offsets_and_releases_after_driver_error() {
+        let _guard = install_recording_dfont_open(0, 0, 0, 0x55, 0);
+        let (result, count, events, free_memory, free_block, memory) = invoke_dfont_open(0x180);
+        assert_eq!(result, 0x55, "POST driver status is propagated unchanged");
+        assert_eq!(count, 3);
+        assert_eq!(events[0], DfontOpenEvent::Header { offset: 0x180 });
+        assert_eq!(
+            events[1],
+            DfontOpenEvent::Lookup {
+                tag: RESOURCE_TAG_POST,
+                resource_map: DFONT_RESOURCE_MAP_OFFSET,
+                resource_data: DFONT_RESOURCE_DATA_OFFSET,
+            }
+        );
+        assert_eq!(
+            events[2],
+            DfontOpenEvent::Post {
+                offsets: core::ptr::addr_of_mut!(POST_RESOURCE_OFFSETS).cast::<u32>() as usize,
+                count: 2,
+                face_index: DFONT_FACE_INDEX,
+                face_out: DFONT_FACE_OUT,
+            }
+        );
+        assert_eq!(free_memory, memory, "offset array uses library FT_Memory");
+        assert_eq!(
+            free_block,
+            core::ptr::addr_of_mut!(POST_RESOURCE_OFFSETS).cast::<u8>() as usize
+        );
+        uninstall_recording_dfont_open();
+    }
+
+    #[test]
+    fn dfont_open_tries_sfnt_only_after_post_lookup_error() {
+        let _guard = install_recording_dfont_open(0, 2, 0, 0, 0xdead_beef);
+        let (result, count, events, _free_memory, free_block, _memory) = invoke_dfont_open(0);
+        assert_eq!(result, 0xdead_beef, "sfnt driver status is propagated unchanged");
+        assert_eq!(count, 4);
+        assert_eq!(events[0], DfontOpenEvent::Header { offset: 0 });
+        assert_eq!(events[1], DfontOpenEvent::Lookup {
+            tag: RESOURCE_TAG_POST,
+            resource_map: DFONT_RESOURCE_MAP_OFFSET,
+            resource_data: DFONT_RESOURCE_DATA_OFFSET,
+        });
+        assert_eq!(events[2], DfontOpenEvent::Lookup {
+            tag: RESOURCE_TAG_SFNT,
+            resource_map: DFONT_RESOURCE_MAP_OFFSET,
+            resource_data: DFONT_RESOURCE_DATA_OFFSET,
+        });
+        assert_eq!(
+            events[3],
+            DfontOpenEvent::Sfnt {
+                offsets: core::ptr::addr_of_mut!(SFNT_RESOURCE_OFFSETS).cast::<u32>() as usize,
+                count: 3,
+                face_index: DFONT_FACE_INDEX,
+                face_out: DFONT_FACE_OUT,
+            }
+        );
+        assert_eq!(
+            free_block,
+            core::ptr::addr_of_mut!(SFNT_RESOURCE_OFFSETS).cast::<u8>() as usize
+        );
+        uninstall_recording_dfont_open();
+    }
+
+    #[test]
+    fn dfont_open_propagates_header_and_second_lookup_errors_without_freeing() {
+        for (header, post_lookup, sfnt_lookup, expected, expected_events) in [
+            (0x23, 0, 0, 0x23, 1),
+            (0, 2, 0x57, 0x57, 3),
+        ] {
+            let _guard = install_recording_dfont_open(header, post_lookup, sfnt_lookup, 0, 0);
+            let (result, count, _events, free_memory, free_block, _memory) = invoke_dfont_open(0x77);
+            assert_eq!(result, expected);
+            assert_eq!(count, expected_events);
+            assert_eq!(free_memory, 0, "no offset array exists on lookup failure");
+            assert_eq!(free_block, 0, "no offset array exists on lookup failure");
+            uninstall_recording_dfont_open();
+        }
+    }
+
     // --- ft_open_face_dfont_fallback ---
 
     /// Serializes the tests that swap the dfont-fallback ops seam, the
@@ -1127,20 +1598,54 @@ mod tests {
         PROBE_RESULT
     }
 
-    unsafe extern "C" fn recording_dfont(
+    /// Drives the real dfont port through its header-error path for
+    /// nonzero scripted outcomes; zero continues through the harmless
+    /// null-offset `POST` path below. The fallback caller observes exactly
+    /// the same status and ordering either way.
+    unsafe extern "C" fn recording_fallback_dfont_header(
         library: *mut u32,
         stream: *mut u32,
         offset: u32,
-        face_index: i32,
-        face_out: *mut u32,
+        resource_map_offset: *mut u32,
+        resource_data_offset: *mut u32,
     ) -> u32 {
         record(FallbackEvent::Dfont {
             library: library as usize,
             stream: stream as usize,
             offset,
-            face_index,
-            face_out: face_out as usize,
+            face_index: FACE_INDEX,
+            face_out: FACE_OUT,
         });
+        if DFONT_RESULT != 0 {
+            return DFONT_RESULT;
+        }
+        resource_map_offset.write(0);
+        resource_data_offset.write(0);
+        0
+    }
+
+    unsafe extern "C" fn recording_fallback_dfont_lookup(
+        _library: *mut u32,
+        _stream: *mut u32,
+        _resource_map_offset: u32,
+        _resource_data_offset: u32,
+        _tag: u32,
+        resource_offsets_out: *mut *mut u32,
+        resource_count_out: *mut u32,
+    ) -> u32 {
+        resource_offsets_out.write(core::ptr::null_mut());
+        resource_count_out.write(0);
+        0
+    }
+
+    unsafe extern "C" fn recording_fallback_dfont_driver(
+        _library: *mut u32,
+        _stream: *mut u32,
+        _resource_offsets: *mut u32,
+        _resource_count: u32,
+        _face_index: i32,
+        _face_out: *mut u32,
+    ) -> u32 {
         DFONT_RESULT
     }
 
@@ -1178,18 +1683,23 @@ mod tests {
         record(FallbackEvent::Trace { format: bytes, arg1 });
     }
 
-    /// Installs the recording seams with scripted results, seeds the host
-    /// trace level, and optionally hooks the trace sink. Returns the
-    /// guards serializing the swaps (dfont lock first, then the trace
-    /// lock, always in that order).
+    /// Installs recording seams with scripted results, seeds the host trace
+    /// level, and optionally hooks the trace sink. The real dfont port is
+    /// driven through its dependency seams; guards serialize the fallback,
+    /// dfont, and trace swaps in that order.
     fn install_recording_fallback(
         probe: u32,
         dfont: u32,
         rules: u32,
         level: i32,
         trace: bool,
-    ) -> (StdMutexGuard<'static, ()>, Option<StdMutexGuard<'static, ()>>) {
+    ) -> (
+        StdMutexGuard<'static, ()>,
+        StdMutexGuard<'static, ()>,
+        Option<StdMutexGuard<'static, ()>>,
+    ) {
         let guard = DFONT_FALLBACK_TEST_LOCK.lock().unwrap();
+        let dfont_guard = DFONT_OPEN_TEST_LOCK.lock().unwrap();
         let trace_guard = if trace {
             let trace_guard = crate::ft::trace::TEST_TRACE_LOCK.lock().unwrap();
             unsafe { crate::ft::trace::ft_set_trace_sink(Some(recording_trace_sink)) };
@@ -1208,19 +1718,29 @@ mod tests {
                 .write_volatile(level);
             DFONT_FALLBACK_OPS = DfontFallbackOps {
                 probe_resource_fork: recording_probe,
-                open_dfont: recording_dfont,
                 run_fallback_rules: recording_rules,
             };
+            DFONT_OPEN_OPS = DfontOpenOps {
+                read_resource_header: recording_fallback_dfont_header,
+                find_resource_type: recording_fallback_dfont_lookup,
+                open_post: recording_fallback_dfont_driver,
+                open_sfnt: recording_fallback_dfont_driver,
+            };
         }
-        (guard, trace_guard)
+        (guard, dfont_guard, trace_guard)
     }
 
     fn uninstall_recording_fallback(trace: bool) {
         unsafe {
             DFONT_FALLBACK_OPS = DfontFallbackOps {
                 probe_resource_fork: resource_fork_probe,
-                open_dfont: missing_dfont_open,
                 run_fallback_rules: missing_fallback_rule_chain,
+            };
+            DFONT_OPEN_OPS = DfontOpenOps {
+                read_resource_header: missing_dfont_resource_header,
+                find_resource_type: missing_dfont_resource_type,
+                open_post: missing_dfont_driver,
+                open_sfnt: missing_dfont_driver,
             };
             if trace {
                 crate::ft::trace::ft_set_trace_sink(None);

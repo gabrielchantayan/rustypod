@@ -21584,6 +21584,49 @@ functions:
       propagation, offset derivation, delegated arguments, and result
       propagation in src/cxx/object_flags.rs.
 
+  # --- FreeType flattened resource-fork dfont opener ---
+  - address: 0x0807f478
+    ghidra: FUN_0807f478
+    name: dfont_open
+    size: 228
+    sig: "u32 dfont_open(void *library, FT_Stream stream, u32 offset, i32 face_index, void *face_out)"
+    module: cxx/object_flags
+    status: ported
+    renames:
+      param_1: library
+      param_2: stream
+      param_3: resource_fork_offset
+      param_4: face_index
+      param_5: face_out
+      uVar2: memory
+      iVar1: result
+      local_24: resource_map_offset
+      local_28: resource_data_offset
+      local_2c: resource_offsets
+      local_30: resource_count
+      DAT_0807f55c: RESOURCE_TAG_POST
+      DAT_0807f560: RESOURCE_TAG_SFNT
+    notes: >-
+      FreeType's dfont opener, invoked by resource_fork_probe after its
+      MacBinary-derived offset and directly by the FT_Open_Face fallback
+      with offset zero. First calls FT_Raccess_Get_HeaderInfo
+      (FUN_0804e38c) to validate the resource fork and recover absolute
+      map/data offsets. It looks up `POST` (0x504f5354) using
+      FT_Raccess_Get_DataOffsets (FUN_0804e17c); when found, calls the
+      PostScript resource driver FUN_080c63cc and returns that result.
+      Only a POST lookup failure tries `sfnt` (0x73666e74), then dispatches
+      to FUN_080c6634. Header and second lookup failures propagate unchanged;
+      a POST driver error never falls through to sfnt. Whichever driver was
+      selected is followed by ft_mem_free(library->memory, offsets), even on
+      driver error. ARM sequence: header; lookup POST; POST driver or lookup
+      sfnt; sfnt driver; free. The 228-byte body is 0x0807f478..0x0807f55b;
+      the two adjacent tag literals are at 0x0807f55c/0x0807f560. The four
+      still-unported dependencies use the DFONT_OPEN_OPS seam; ft_mem_free
+      @ 0x082cfae8 is ported and direct. Focused tests cover both tags,
+      resource-map/data offset forwarding, driver and setup error
+      propagation, and the exact offset-array release in
+      src/cxx/object_flags.rs::tests.
+
   # --- FreeType FT_Open_Face dfont / fallback-rule retry stage ---
   - address: 0x080853b0
     ghidra: FUN_080853b0
