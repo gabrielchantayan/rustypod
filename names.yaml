@@ -20090,6 +20090,41 @@ functions:
       16-byte tag-0 allocation and exact node bytes, dynamic dispatch,
       implicit overwrite, and empty-versus-occupied explicit contexts.
 
+  - address: 0x081109a0
+    ghidra: FUN_081109a0
+    name: framework_base_transition_link_state
+    size: 192
+    sig: "void framework_base_transition_link_state(Class6800 *this, void *target)"
+    module: app/class_6800
+    status: ported
+    vars:
+      param_1: this
+      param_2: target
+      puVar1: link
+      uVar2: current_target
+      uVar3: collection_handle
+      local_18: FrameworkBaseLinkIterator
+      local_4: FrameworkBaseLinkCollectionEntry
+      FUN_08155e80: collection_iterator_begin (FRAMEWORK_BASE_STATE_OPS slot)
+      FUN_08155d6c: collection_iterator_next (FRAMEWORK_BASE_STATE_OPS slot)
+      FUN_08155ec0: collection_iterator_drop (FRAMEWORK_BASE_STATE_OPS slot)
+    notes: >-
+      Raw ARM reads the state byte at this+0x0c, returning immediately
+      when it is 2. Otherwise it invokes vtable+0x1c twice when the
+      first result is non-NULL, recursively transitions that second
+      result with the same target, then handles the optional link+0x08
+      collection. The collection iterator local is exactly 20 bytes:
+      FUN_08155e80(iterator, handle, -2), then FUN_08155d6c(iterator,
+      &entry) until zero, clearing the byte through entry+0x0c on every
+      yielded element, followed by FUN_08155ec0(iterator). It writes
+      state 2 and tail-dispatches vtable+0x4c(this, target). Callers
+      treat r0 as dead, so the recovered Rust ABI is void. Collection and
+      iterator internals remain opaque local seams; only their recovered
+      ABI and the entry +0x0c state-byte pointer are modeled. Focused
+      host tests cover the terminal short circuit, repeated +0x1c read,
+      recursion, iterator start -2, per-entry byte clears, state writes,
+      and final +0x4c dispatch order.
+
   # --- Silver UI framework: the "SLst" resource-backed item table ---
 
   - address: 0x081473c0

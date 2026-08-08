@@ -133,23 +133,39 @@ pub const FRAMEWORK_BASE_VTABLE_ADDRESS: u32 = 0x0898_1958;
 /// 0x081d2210). Modeled by [`FRAMEWORK_ROOT_HOLDER`].
 pub const FRAMEWORK_ROOT_HOLDER_ADDRESS: u32 = 0x089c_c858;
 
-/// The object's vtable, modeled down to the one slot the constructor
-/// dispatches. The filler reproduces the original byte offsets on the
-/// 32-bit target and keeps the named slot disjoint on a 64-bit host.
+/// The object's vtable, modeled down to the slots observed in the base
+/// constructor and state-transition routine. The filler reproduces the
+/// original byte offsets on the 32-bit target and keeps named slots
+/// disjoint on a 64-bit host.
 #[repr(C)]
 pub struct Class6800Vtable {
-    /// Slots +0x00..+0x28: not dispatched here.
-    pub unresolved_00: [usize; 11],
+    /// Slots +0x00..+0x18: not dispatched here.
+    pub unresolved_00_18: [usize; 7],
+    /// +0x1c: returns the currently adopted target, if any.
+    pub current_target: unsafe extern "C" fn(this: *mut Class6800) -> *mut Class6800,
+    /// Slots +0x20..+0x28: not dispatched here.
+    pub unresolved_20_28: [usize; 3],
     /// +0x2c: `set_target(this, target)` — the base operation the
     /// constructor seeds with `this->default_target`, and the same slot
     /// the sibling methods @ 0x08177e14 / 0x08177e24 re-dispatch. Its
     /// result is discarded.
     pub set_target:
         unsafe extern "C" fn(this: *mut Class6800, target: *mut u8) -> *mut u8,
+    /// Slots +0x30..+0x48: not dispatched here.
+    pub unresolved_30_48: [usize; 7],
+    /// +0x4c: applies a link-state transition to this object.
+    ///
+    /// The caller does not consume its return register, so this modeled
+    /// ABI is `void`, matching the only recoverable contract.
+    pub apply_link_state: unsafe extern "C" fn(this: *mut Class6800, target: *mut u8),
 }
 
 #[cfg(target_pointer_width = "32")]
+const _: [u8; 0x1c] = [0; core::mem::offset_of!(Class6800Vtable, current_target)];
+#[cfg(target_pointer_width = "32")]
 const _: [u8; 0x2c] = [0; core::mem::offset_of!(Class6800Vtable, set_target)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x4c] = [0; core::mem::offset_of!(Class6800Vtable, apply_link_state)];
 
 /// The 28-byte class-0x6800 object.
 ///
@@ -180,10 +196,10 @@ pub struct Class6800 {
 /// The 16-byte state node stored in [`Class6800::base_link`].
 ///
 /// `framework_base_initialize` writes the byte at +0x00 and the three
-/// words at +0x04, +0x08, and +0x0c to zero, in that order. The later
-/// unported routine @ 0x081109a0 reads the first byte as a state value and
-/// the word at +0x08 as a collection handle; the remaining node semantics
-/// are not recovered, so they intentionally remain unresolved.
+/// words at +0x04, +0x08, and +0x0c to zero, in that order.
+/// [`framework_base_transition_link_state`] reads the state byte and
+/// iterates the collection handle at +0x08; the other words remain
+/// unresolved.
 #[repr(C)]
 pub struct FrameworkBaseLink {
     /// +0x00: state byte; initialized to zero.
@@ -192,14 +208,42 @@ pub struct FrameworkBaseLink {
     pub unresolved_01: [u8; 3],
     /// +0x04: initialized to zero.
     pub unresolved_04: u32,
-    /// +0x08: collection handle, initialized to zero.
-    pub unresolved_08: u32,
+    /// +0x08: handle accepted by the collection iterator.
+    pub collection_handle: u32,
     /// +0x0c: initialized to zero.
     pub unresolved_0c: u32,
 }
 
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 16] = [0; core::mem::size_of::<FrameworkBaseLink>()];
+
+/// The opaque 20-byte iterator local used by
+/// [`framework_base_transition_link_state`].
+///
+/// `FUN_08155e80` initializes this object from the link's collection
+/// handle with start position -2; `FUN_08155d6c` advances it; and
+/// `FUN_08155ec0` releases it. No internal iterator fields are named.
+#[repr(C)]
+pub struct FrameworkBaseLinkIterator {
+    raw: [u32; 5],
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 20] = [0; core::mem::size_of::<FrameworkBaseLinkIterator>()];
+
+/// The only recovered portion of one collection entry: the state-byte
+/// pointer loaded from +0x0c by `FUN_081109a0`.
+#[repr(C)]
+pub struct FrameworkBaseLinkCollectionEntry {
+    /// +0x00..+0x08: not read by this routine.
+    pub unresolved_00: [u32; 3],
+    /// +0x0c: byte cleared for every entry the iterator yields.
+    pub state: *mut u8,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x0c] =
+    [0; core::mem::offset_of!(FrameworkBaseLinkCollectionEntry, state)];
 
 /// The explicit owner supplied in r3 to [`framework_base_initialize`].
 /// Only its +0x0c context pointer is observed here.
@@ -273,6 +317,27 @@ pub struct FrameworkBaseInitializeOps {
     pub active_link_owner: unsafe extern "C" fn() -> *mut u8,
 }
 
+/// The unported collection helpers called only by
+/// [`framework_base_transition_link_state`].
+///
+/// These seams preserve the recovered ABI without assigning names or
+/// layouts to the collection implementation: iterator construction
+/// (`FUN_08155e80`), advancement (`FUN_08155d6c`), and destruction
+/// (`FUN_08155ec0`).
+#[derive(Clone, Copy)]
+pub struct FrameworkBaseStateOps {
+    pub collection_iterator_begin: unsafe extern "C" fn(
+        iterator: *mut FrameworkBaseLinkIterator,
+        collection: *mut u8,
+        start: i32,
+    ) -> *mut FrameworkBaseLinkIterator,
+    pub collection_iterator_next: unsafe extern "C" fn(
+        iterator: *mut FrameworkBaseLinkIterator,
+        entry: *mut *mut FrameworkBaseLinkCollectionEntry,
+    ) -> u32,
+    pub collection_iterator_drop: unsafe extern "C" fn(iterator: *mut FrameworkBaseLinkIterator),
+}
+
 /// Injection point for the parent constructor @ 0x08125234. Host tests
 /// may replace it to prove the outer constructor honours a relocated
 /// return; the wired default is [`framework_linkage_parent_construct`].
@@ -293,12 +358,21 @@ pub struct Class6800Ops {
 /// pointer identity is modeled.
 pub const FRAMEWORK_LINKAGE_PARENT_VTABLE_ADDRESS: u32 = 0x0898_30b8;
 
+unsafe extern "C" fn unported_current_target(_this: *mut Class6800) -> *mut Class6800 {
+    core::ptr::null_mut()
+}
+
+unsafe extern "C" fn unported_apply_link_state(_this: *mut Class6800, _target: *mut u8) {}
 /// Crate stand-in for [`FRAMEWORK_LINKAGE_PARENT_VTABLE_ADDRESS`]. No
 /// behavior is dispatched through this vtable before the direct child
 /// constructor replaces it with [`FRAMEWORK_BASE_VTABLE`].
 pub static FRAMEWORK_LINKAGE_PARENT_VTABLE: Class6800Vtable = Class6800Vtable {
-    unresolved_00: [0; 11],
+    unresolved_00_18: [0; 7],
+    current_target: unported_current_target,
+    unresolved_20_28: [0; 3],
     set_target: unported_set_target,
+    unresolved_30_48: [0; 7],
+    apply_link_state: unported_apply_link_state,
 };
 
 /// framework_linkage_parent_construct — original: `FUN_08125234` @
@@ -383,9 +457,9 @@ pub const DEFAULT_CLASS_6800_OPS: Class6800Ops = Class6800Ops {
 /// parent to prove return forwarding.
 pub static mut CLASS_6800_OPS: Class6800Ops = DEFAULT_CLASS_6800_OPS;
 
-/// Wired default for [`CLASS_6800_VTABLE`]'s only modeled slot: the real
-/// +0x2c body is not ported, so the constructor's seeding dispatch is a
-/// no-op that reports "no target adopted".
+/// Wired default for [`CLASS_6800_VTABLE`]'s +0x2c operation. The real
+/// virtual body is not ported, so this no-op makes that seam explicit
+/// without inventing class behavior.
 unsafe extern "C" fn unported_set_target(
     _this: *mut Class6800,
     _target: *mut u8,
@@ -393,18 +467,56 @@ unsafe extern "C" fn unported_set_target(
     core::ptr::null_mut()
 }
 
+unsafe extern "C" fn unported_collection_iterator_begin(
+    iterator: *mut FrameworkBaseLinkIterator,
+    _collection: *mut u8,
+    _start: i32,
+) -> *mut FrameworkBaseLinkIterator {
+    iterator
+}
+
+unsafe extern "C" fn unported_collection_iterator_next(
+    _iterator: *mut FrameworkBaseLinkIterator,
+    _entry: *mut *mut FrameworkBaseLinkCollectionEntry,
+) -> u32 {
+    0
+}
+
+unsafe extern "C" fn unported_collection_iterator_drop(_iterator: *mut FrameworkBaseLinkIterator) {}
+
+/// Wired defaults for the three unported collection calls in
+/// [`framework_base_transition_link_state`].
+pub const DEFAULT_FRAMEWORK_BASE_STATE_OPS: FrameworkBaseStateOps = FrameworkBaseStateOps {
+    collection_iterator_begin: unported_collection_iterator_begin,
+    collection_iterator_next: unported_collection_iterator_next,
+    collection_iterator_drop: unported_collection_iterator_drop,
+};
+
+/// Active local seam for `FUN_08155e80`, `FUN_08155d6c`, and
+/// `FUN_08155ec0`.
+pub static mut FRAMEWORK_BASE_STATE_OPS: FrameworkBaseStateOps =
+    DEFAULT_FRAMEWORK_BASE_STATE_OPS;
+
 /// Crate stand-in for the vtable at [`CLASS_6800_VTABLE_ADDRESS`].
 pub static mut CLASS_6800_VTABLE: Class6800Vtable = Class6800Vtable {
-    unresolved_00: [0; 11],
+    unresolved_00_18: [0; 7],
+    current_target: unported_current_target,
+    unresolved_20_28: [0; 3],
     set_target: unported_set_target,
+    unresolved_30_48: [0; 7],
+    apply_link_state: unported_apply_link_state,
 };
 
 /// Crate stand-in for the base vtable at
 /// [`FRAMEWORK_BASE_VTABLE_ADDRESS`]. Its +0x2c operation is dispatched
 /// directly by [`framework_base_initialize`].
 pub static mut FRAMEWORK_BASE_VTABLE: Class6800Vtable = Class6800Vtable {
-    unresolved_00: [0; 11],
+    unresolved_00_18: [0; 7],
+    current_target: unported_current_target,
+    unresolved_20_28: [0; 3],
     set_target: unported_set_target,
+    unresolved_30_48: [0; 7],
+    apply_link_state: unported_apply_link_state,
 };
 
 #[inline(always)]
@@ -415,6 +527,11 @@ unsafe fn class_6800_ops() -> Class6800Ops {
 #[inline(always)]
 unsafe fn framework_base_initialize_ops() -> FrameworkBaseInitializeOps {
     core::ptr::read_volatile(core::ptr::addr_of!(FRAMEWORK_BASE_INITIALIZE_OPS))
+}
+
+#[inline(always)]
+unsafe fn framework_base_state_ops() -> FrameworkBaseStateOps {
+    core::ptr::read_volatile(core::ptr::addr_of!(FRAMEWORK_BASE_STATE_OPS))
 }
 
 /// framework_base_initialize — original: `FUN_081108b4` @ 0x081108b4
@@ -456,7 +573,7 @@ pub unsafe extern "C" fn framework_base_initialize(
         }
         core::ptr::addr_of_mut!((*this).base_link).write_volatile(link);
         core::ptr::addr_of_mut!((*link).unresolved_0c).write_volatile(0);
-        core::ptr::addr_of_mut!((*link).unresolved_08).write_volatile(0);
+        core::ptr::addr_of_mut!((*link).collection_handle).write_volatile(0);
         core::ptr::addr_of_mut!((*link).unresolved_04).write_volatile(0);
         core::ptr::addr_of_mut!((*link).state).write_volatile(0);
 
@@ -489,6 +606,69 @@ pub unsafe extern "C" fn framework_base_initialize(
         owner.cast()
     };
     core::ptr::addr_of_mut!((*this).link_owner).write_volatile(link_owner);
+}
+
+/// framework_base_transition_link_state — original: `FUN_081109a0` @
+/// 0x081109a0 (192 bytes).
+///
+/// Transitions a framework base's link state for `target`. State value 2 is
+/// terminal: it returns before every virtual or collection operation. Any
+/// other state first obtains vtable slot +0x1c; if a current target exists,
+/// it reads that slot again and recursively transitions the returned target
+/// with the same `target`. It then walks the optional collection handle at
+/// link +0x08 using the opaque `FUN_08155e80`/`FUN_08155d6c`/`FUN_08155ec0`
+/// iterator triplet, clearing the byte reached through each yielded entry's
+/// +0x0c pointer. Finally it writes 2 to link +0x00 and tail-dispatches
+/// vtable slot +0x4c with `(this, target)`.
+///
+/// The ARM caller treats r0 as dead in both the terminal and tail-dispatch
+/// paths, so the recovered ABI is `void`. There are deliberately no NULL
+/// guards: every null or malformed pointer reaches the same dereference as
+/// the retailOS body. The iterator and collection internals are not
+/// fabricated; their three direct calls remain the local
+/// [`FRAMEWORK_BASE_STATE_OPS`] seam.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn framework_base_transition_link_state(
+    this: *mut Class6800,
+    target: *mut u8,
+) {
+    let link = core::ptr::read_volatile(core::ptr::addr_of!((*this).base_link));
+    if core::ptr::read_volatile(core::ptr::addr_of!((*link).state)) == 2 {
+        return;
+    }
+
+    let vtable = core::ptr::read_volatile(core::ptr::addr_of!((*this).vtable));
+    if !((*vtable).current_target)(this).is_null() {
+        let vtable = core::ptr::read_volatile(core::ptr::addr_of!((*this).vtable));
+        let current_target = ((*vtable).current_target)(this);
+        framework_base_transition_link_state(current_target, target);
+    }
+
+    let collection = core::ptr::read_volatile(core::ptr::addr_of!((*link).collection_handle));
+    if collection != 0 {
+        let ops = framework_base_state_ops();
+        let mut iterator = FrameworkBaseLinkIterator { raw: [0; 5] };
+        (ops.collection_iterator_begin)(
+            core::ptr::addr_of_mut!(iterator),
+            collection as usize as *mut u8,
+            -2,
+        );
+
+        let mut entry = core::ptr::null_mut();
+        while (ops.collection_iterator_next)(
+            core::ptr::addr_of_mut!(iterator),
+            core::ptr::addr_of_mut!(entry),
+        ) != 0
+        {
+            (*entry).state.write_volatile(0);
+        }
+        (ops.collection_iterator_drop)(core::ptr::addr_of_mut!(iterator));
+    }
+
+    core::ptr::addr_of_mut!((*link).state).write_volatile(2);
+    let vtable = core::ptr::read_volatile(core::ptr::addr_of!((*this).vtable));
+    ((*vtable).apply_link_state)(this, target);
 }
 
 /// framework_base_construct — original: `FUN_081110d0` @ 0x081110d0
@@ -652,7 +832,7 @@ mod tests {
         state: 0xa5,
         unresolved_01: [0xa5; 3],
         unresolved_04: 0xa5a5_a5a5,
-        unresolved_08: 0xa5a5_a5a5,
+        collection_handle: 0xa5a5_a5a5,
         unresolved_0c: 0xa5a5_a5a5,
     };
     static mut IMPLICIT_CONTEXT: FrameworkBaseLinkContext = FrameworkBaseLinkContext {
@@ -663,6 +843,20 @@ mod tests {
     static mut IMPLICIT_CONTEXT_CALLS: usize = 0;
     static mut ACTIVE_OWNER_CALLS: usize = 0;
 
+    static mut STATE_CALL_LOG: [u8; 16] = [0; 16];
+    static mut STATE_CALL_COUNT: usize = 0;
+    static mut CURRENT_TARGET_SEQUENCE: [*mut Class6800; 3] = [ptr::null_mut(); 3];
+    static mut CURRENT_TARGET_COUNT: usize = 0;
+    static mut CURRENT_TARGET_INDEX: usize = 0;
+    static mut ITERATOR_BEGIN_ARGS: (*mut u8, i32) = (ptr::null_mut(), 0);
+    static mut ITERATOR_NEXT_INDEX: usize = 0;
+    static mut ITERATOR_ENTRY_COUNT: usize = 0;
+    static mut ITERATOR_ENTRIES: [*mut FrameworkBaseLinkCollectionEntry; 2] =
+        [ptr::null_mut(); 2];
+    static mut APPLY_ARGS: [(*mut Class6800, *mut u8); 2] =
+        [(ptr::null_mut(), ptr::null_mut()); 2];
+    static mut APPLY_COUNT: usize = 0;
+
     unsafe fn record_call(kind: u8) {
         CALL_ORDER[CALL_COUNT] = kind;
         CALL_COUNT += 1;
@@ -670,6 +864,15 @@ mod tests {
 
     fn call_order() -> [u8; 4] {
         unsafe { core::ptr::read_volatile(core::ptr::addr_of!(CALL_ORDER)) }
+    }
+
+    unsafe fn record_state_call(kind: u8) {
+        STATE_CALL_LOG[STATE_CALL_COUNT] = kind;
+        STATE_CALL_COUNT += 1;
+    }
+
+    fn state_call_log() -> [u8; 16] {
+        unsafe { core::ptr::read_volatile(core::ptr::addr_of!(STATE_CALL_LOG)) }
     }
 
     unsafe extern "C" fn record_parent_construct(storage: *mut Class6800) -> *mut Class6800 {
@@ -711,6 +914,47 @@ mod tests {
         0x5eed_0000usize as *mut u8
     }
 
+    unsafe extern "C" fn record_current_target(_this: *mut Class6800) -> *mut Class6800 {
+        record_state_call(1);
+        CURRENT_TARGET_COUNT += 1;
+        let current = CURRENT_TARGET_SEQUENCE[CURRENT_TARGET_INDEX];
+        CURRENT_TARGET_INDEX += 1;
+        current
+    }
+
+    unsafe extern "C" fn record_iterator_begin(
+        iterator: *mut FrameworkBaseLinkIterator,
+        collection: *mut u8,
+        start: i32,
+    ) -> *mut FrameworkBaseLinkIterator {
+        record_state_call(2);
+        ITERATOR_BEGIN_ARGS = (collection, start);
+        iterator
+    }
+
+    unsafe extern "C" fn record_iterator_next(
+        _iterator: *mut FrameworkBaseLinkIterator,
+        entry: *mut *mut FrameworkBaseLinkCollectionEntry,
+    ) -> u32 {
+        record_state_call(3);
+        if ITERATOR_NEXT_INDEX == ITERATOR_ENTRY_COUNT {
+            return 0;
+        }
+        entry.write(ITERATOR_ENTRIES[ITERATOR_NEXT_INDEX]);
+        ITERATOR_NEXT_INDEX += 1;
+        1
+    }
+
+    unsafe extern "C" fn record_iterator_drop(_iterator: *mut FrameworkBaseLinkIterator) {
+        record_state_call(4);
+    }
+
+    unsafe extern "C" fn record_apply_link_state(this: *mut Class6800, target: *mut u8) {
+        record_state_call(5);
+        APPLY_ARGS[APPLY_COUNT] = (this, target);
+        APPLY_COUNT += 1;
+    }
+
     /// Stands the class registry up with `demo_mode` registered under
     /// 0x8080 (or nothing registered when it is NULL).
     unsafe fn install_registry(demo_mode: *mut FrameworkObject) {
@@ -738,12 +982,23 @@ mod tests {
             state: 0xa5,
             unresolved_01: [0xa5; 3],
             unresolved_04: 0xa5a5_a5a5,
-            unresolved_08: 0xa5a5_a5a5,
+            collection_handle: 0xa5a5_a5a5,
             unresolved_0c: 0xa5a5_a5a5,
         };
         IMPLICIT_CONTEXT.linked_base = ptr::null_mut();
         IMPLICIT_CONTEXT_CALLS = 0;
         ACTIVE_OWNER_CALLS = 0;
+        STATE_CALL_LOG = [0; 16];
+        STATE_CALL_COUNT = 0;
+        CURRENT_TARGET_SEQUENCE = [ptr::null_mut(); 3];
+        CURRENT_TARGET_COUNT = 0;
+        CURRENT_TARGET_INDEX = 0;
+        ITERATOR_BEGIN_ARGS = (ptr::null_mut(), 0);
+        ITERATOR_NEXT_INDEX = 0;
+        ITERATOR_ENTRY_COUNT = 0;
+        ITERATOR_ENTRIES = [ptr::null_mut(); 2];
+        APPLY_ARGS = [(ptr::null_mut(), ptr::null_mut()); 2];
+        APPLY_COUNT = 0;
         CLASS_6800_OPS = Class6800Ops { parent_construct: record_parent_construct };
         FRAMEWORK_BASE_INITIALIZE_OPS = FrameworkBaseInitializeOps {
             report_allocation_failure: unported_report_allocation_failure,
@@ -757,8 +1012,17 @@ mod tests {
         };
         crate::heap::types::DEFAULT_HEAP =
             ptr::addr_of_mut!(TEST_HEAP).cast::<crate::heap::types::HeapDescriptorDescriptor>();
+        CLASS_6800_VTABLE.current_target = record_current_target;
         CLASS_6800_VTABLE.set_target = record_set_target;
+        CLASS_6800_VTABLE.apply_link_state = record_apply_link_state;
+        FRAMEWORK_BASE_VTABLE.current_target = record_current_target;
         FRAMEWORK_BASE_VTABLE.set_target = record_set_target;
+        FRAMEWORK_BASE_VTABLE.apply_link_state = record_apply_link_state;
+        FRAMEWORK_BASE_STATE_OPS = FrameworkBaseStateOps {
+            collection_iterator_begin: record_iterator_begin,
+            collection_iterator_next: record_iterator_next,
+            collection_iterator_drop: record_iterator_drop,
+        };
         guard
     }
 
@@ -769,6 +1033,11 @@ mod tests {
         crate::heap::types::DEFAULT_HEAP = ptr::null_mut();
         CLASS_6800_VTABLE.set_target = unported_set_target;
         FRAMEWORK_BASE_VTABLE.set_target = unported_set_target;
+        CLASS_6800_VTABLE.current_target = unported_current_target;
+        CLASS_6800_VTABLE.apply_link_state = unported_apply_link_state;
+        FRAMEWORK_BASE_VTABLE.current_target = unported_current_target;
+        FRAMEWORK_BASE_VTABLE.apply_link_state = unported_apply_link_state;
+        FRAMEWORK_BASE_STATE_OPS = DEFAULT_FRAMEWORK_BASE_STATE_OPS;
         FRAMEWORK_ROOT_HOLDER.instance = ptr::null_mut();
         REGISTERED = RegistryEntry { class_id: 0, instance: ptr::null_mut() };
         CLASS_REGISTRY.vtable = ptr::null();
@@ -878,7 +1147,7 @@ mod tests {
             assert_eq!(TEST_LINK.state, 0);
             assert_eq!(TEST_LINK.unresolved_01, [0xa5; 3], "bytes +1..+3 are untouched");
             assert_eq!(TEST_LINK.unresolved_04, 0);
-            assert_eq!(TEST_LINK.unresolved_08, 0);
+            assert_eq!(TEST_LINK.collection_handle, 0);
             assert_eq!(TEST_LINK.unresolved_0c, 0);
             assert_eq!(IMPLICIT_CONTEXT_CALLS, 1);
             assert_eq!(IMPLICIT_CONTEXT.linked_base, storage);
@@ -1050,6 +1319,104 @@ mod tests {
             framework_base_initialize(storage, ptr::null_mut(), 1, ptr::addr_of_mut!(owner));
             assert_eq!(context.linked_base, 0x1usize as *mut Class6800, "occupied context is retained");
             assert_eq!(SET_TARGET_ARGS[1], (storage, ptr::null_mut()));
+            restore();
+            drop(guard);
+        }
+    }
+    #[test]
+    fn terminal_link_state_skips_all_dispatch_and_collection_work() {
+        let mut object = poisoned();
+        let mut link = FrameworkBaseLink {
+            state: 2,
+            unresolved_01: [0xa5; 3],
+            unresolved_04: 0xa5a5_a5a5,
+            collection_handle: 0x1234_5678,
+            unresolved_0c: 0xa5a5_a5a5,
+        };
+
+        unsafe {
+            let guard = install_mocks();
+            object.vtable = ptr::addr_of!(FRAMEWORK_BASE_VTABLE);
+            object.base_link = ptr::addr_of_mut!(link);
+
+            framework_base_transition_link_state(
+                ptr::addr_of_mut!(object),
+                0x0bad_f00dusize as *mut u8,
+            );
+
+            assert_eq!(link.state, 2, "terminal state is not rewritten");
+            assert_eq!(CURRENT_TARGET_COUNT, 0, "no +0x1c dispatch");
+            assert_eq!(STATE_CALL_COUNT, 0, "no iterator or +0x4c dispatch");
+            assert_eq!(APPLY_COUNT, 0);
+            restore();
+            drop(guard);
+        }
+    }
+
+    #[test]
+    fn state_transition_recurses_clears_entries_and_dispatches_after_marking_terminal() {
+        let mut root = poisoned();
+        let mut child = poisoned();
+        let mut root_link = FrameworkBaseLink {
+            state: 0,
+            unresolved_01: [0; 3],
+            unresolved_04: 0,
+            collection_handle: 0x1234_5678,
+            unresolved_0c: 0,
+        };
+        let mut child_link = FrameworkBaseLink {
+            state: 1,
+            unresolved_01: [0; 3],
+            unresolved_04: 0,
+            collection_handle: 0,
+            unresolved_0c: 0,
+        };
+        let mut first_state = 0x5a;
+        let mut second_state = 0xa5;
+        let mut first_entry = FrameworkBaseLinkCollectionEntry {
+            unresolved_00: [0; 3],
+            state: ptr::addr_of_mut!(first_state),
+        };
+        let mut second_entry = FrameworkBaseLinkCollectionEntry {
+            unresolved_00: [0; 3],
+            state: ptr::addr_of_mut!(second_state),
+        };
+        let target = 0x0bad_f00dusize as *mut u8;
+
+        unsafe {
+            let guard = install_mocks();
+            root.vtable = ptr::addr_of!(FRAMEWORK_BASE_VTABLE);
+            root.base_link = ptr::addr_of_mut!(root_link);
+            child.vtable = ptr::addr_of!(FRAMEWORK_BASE_VTABLE);
+            child.base_link = ptr::addr_of_mut!(child_link);
+            CURRENT_TARGET_SEQUENCE = [
+                ptr::addr_of_mut!(child),
+                ptr::addr_of_mut!(child),
+                ptr::null_mut(),
+            ];
+            ITERATOR_ENTRY_COUNT = 2;
+            ITERATOR_ENTRIES = [
+                ptr::addr_of_mut!(first_entry),
+                ptr::addr_of_mut!(second_entry),
+            ];
+
+            framework_base_transition_link_state(ptr::addr_of_mut!(root), target);
+
+            assert_eq!(CURRENT_TARGET_COUNT, 3, "root reads +0x1c twice, child once");
+            assert_eq!(
+                state_call_log()[..10],
+                [1, 1, 1, 5, 2, 3, 3, 3, 4, 5],
+                "recursion completes before the root collection is begun"
+            );
+            assert_eq!(ITERATOR_BEGIN_ARGS, (0x1234_5678usize as *mut u8, -2));
+            assert_eq!(first_state, 0);
+            assert_eq!(second_state, 0);
+            assert_eq!(child_link.state, 2, "child marked before its +0x4c dispatch");
+            assert_eq!(root_link.state, 2, "root marked before its +0x4c dispatch");
+            assert_eq!(
+                APPLY_ARGS,
+                [(ptr::addr_of_mut!(child), target), (ptr::addr_of_mut!(root), target)]
+            );
             restore();
             drop(guard);
         }
