@@ -428,48 +428,221 @@ pub unsafe extern "C" fn dfont_open(
     }
     result
 }
-/// Fallback-rule chain `FUN_080db8ac` (unported): walks the rule table
-/// derived from the pathname, re-opening through FT_Open_Face per rule.
-pub type FallbackRuleChain = unsafe extern "C" fn(
+/// Number of pathname/offset guesses produced by FreeType's
+/// `FT_Raccess_Guess` in this retail build.  The copied rule-function table
+/// at `0x0804e5c8` is exactly 0x20 bytes: eight function pointers.
+const FALLBACK_RULE_COUNT: usize = 8;
+
+/// `FT_Raccess_Guess` (`FUN_0804e53c`): derive all candidate resource-fork
+/// locations from the pathname.  Each same-index triplet is `{new_name,
+/// offset, error}`; a null `new_name` means use `base_name`, and a nonzero
+/// error makes the other two values invalid.
+pub type FallbackRuleGuess = unsafe extern "C" fn(
     library: *mut u32,
     stream: *mut u32,
-    face_index: i32,
-    face_out: *mut u32,
-    open_args: *const u32,
-) -> u32;
+    base_name: *const u8,
+    new_names: *mut *mut u8,
+    offsets: *mut u32,
+    errors: *mut u32,
+);
 
-/// The fallback-rule chain remains unported from
-/// [`ft_open_face_dfont_fallback`], grouped in the house ops-struct pattern
-/// (app/node_list.rs's NODE_LIST_ENQUEUE_OPS). The ported
-/// [`resource_fork_probe`] and [`dfont_open`] are installed by default.
-pub struct DfontFallbackOps {
-    pub probe_resource_fork: ResourceForkProbe,
-    pub run_fallback_rules: FallbackRuleChain,
+/// `FT_Stream_New` (`FUN_0804f250`), called with an `FT_OPEN_PATHNAME`
+/// argument record for each usable pathname guess.
+pub type FallbackStreamOpen =
+    unsafe extern "C" fn(library: *mut u32, open_args: *const u32, stream_out: *mut *mut u32) -> u32;
+
+/// `FT_Stream_Free` (`FUN_0804ed9c`), called after every successfully opened
+/// candidate stream, whether its dfont attempt succeeds or fails.
+pub type FallbackStreamClose = unsafe extern "C" fn(stream: *mut u32);
+
+/// Unported dependencies directly called by `fallback_rule_chain`.  They
+/// remain an ops seam until their own retail functions are ported; dfont
+/// parsing and allocation release are already direct ports.
+pub struct FallbackRuleOps {
+    pub guess: FallbackRuleGuess,
+    pub open_stream: FallbackStreamOpen,
+    pub close_stream: FallbackStreamClose,
 }
 
-/// Spins forever: [`ft_open_face_dfont_fallback`] must not run the optional
-/// fallback-rule chain before target integration installs `FUN_080db8ac`.
-unsafe extern "C" fn missing_fallback_rule_chain(
+unsafe extern "C" fn missing_fallback_rule_guess(
     _library: *mut u32,
     _stream: *mut u32,
-    _face_index: i32,
-    _face_out: *mut u32,
+    _base_name: *const u8,
+    _new_names: *mut *mut u8,
+    _offsets: *mut u32,
+    _errors: *mut u32,
+) {
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
+unsafe extern "C" fn missing_fallback_stream_open(
+    _library: *mut u32,
     _open_args: *const u32,
+    _stream_out: *mut *mut u32,
 ) -> u32 {
     loop {
         core::hint::spin_loop();
     }
 }
 
-/// RetailOS dependency of [`ft_open_face_dfont_fallback`]. The ported
-/// [`resource_fork_probe`] remains in the existing probe seam for target
-/// integration and focused host tests; the ported [`dfont_open`] is called
-/// directly. Target integration must still install `FUN_080db8ac`.
-pub static mut DFONT_FALLBACK_OPS: DfontFallbackOps = DfontFallbackOps {
-    probe_resource_fork: resource_fork_probe,
-    run_fallback_rules: missing_fallback_rule_chain,
+unsafe extern "C" fn missing_fallback_stream_close(_stream: *mut u32) {
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
+/// Retail dependencies of [`fallback_rule_chain`]. Target integration must
+/// install `FUN_0804e53c`, `FUN_0804f250`, and `FUN_0804ed9c` until those
+/// functions are ported.
+pub static mut FALLBACK_RULE_OPS: FallbackRuleOps = FallbackRuleOps {
+    guess: missing_fallback_rule_guess,
+    open_stream: missing_fallback_stream_open,
+    close_stream: missing_fallback_stream_close,
 };
 
+#[inline(always)]
+unsafe fn fallback_rule_ops() -> FallbackRuleOps {
+    core::ptr::read_volatile(core::ptr::addr_of!(FALLBACK_RULE_OPS))
+}
+
+/// Fallback-rule chain — original: `FUN_080db8ac` @ `0x080db8ac` (360
+/// bytes: 356 bytes of code plus the trace-level literal @ `0x080dba14`).
+///
+/// FreeType's final resource-fork recovery stage.  It first asks
+/// `FT_Raccess_Guess` for all eight pathname/offset/error triplets derived
+/// from `open_args[3]`.  It skips every failed rule; for each successful
+/// rule it opens either that rule's allocated pathname or the original
+/// pathname through `FT_Stream_New`, opens the resulting stream as a dfont
+/// at the rule's offset, then frees the stream regardless of dfont's
+/// result.  A successful dfont open exits the traversal early; otherwise it
+/// continues to the next rule.  Every non-null guessed pathname is released
+/// through `library->memory` after traversal, including entries belonging to
+/// skipped rules and entries after an early success.  The result is
+/// `FT_Err_Ok` on any match and `FT_Err_Unknown_File_Format` (2) otherwise:
+/// individual rule, stream-open, and dfont errors select control flow but
+/// are deliberately not propagated.
+///
+/// The ARM body calls `FT_Raccess_Guess`; loops over the three 8-word
+/// arrays; calls `FT_Stream_New`, `dfont_open`, and `FT_Stream_Free` for
+/// each usable rule; then loops again to `ft_mem_free` every allocated name.
+/// Its `FT_TRACE3` diagnostics use the same `0x08b209dc + 0x34` level as
+/// [`ft_open_face_dfont_fallback`].
+///
+/// Deviations: the three still-unported stream/rule helpers use
+/// [`FALLBACK_RULE_OPS`] (the established local seam pattern); `dfont_open`,
+/// `ft_mem_free`, and `ft_error_trace` are direct ports.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn fallback_rule_chain(
+    library: *mut u32,
+    stream: *mut u32,
+    face_index: i32,
+    face_out: *mut u32,
+    open_args: *const u32,
+) -> u32 {
+    const OPEN_PATHNAME: u32 = 4;
+    const TRACE_RULE_ERROR: &[u8; 35] = b"Error[%d] has occurred in rule %d\n\0";
+    const TRACE_TRY_RULE: &[u8; 32] = b"Try rule %d: %s (offset=%d) ...\0";
+    const TRACE_SUCCESSFUL: &[u8; 11] = b"successful\0";
+    const TRACE_FAILED: &[u8; 7] = b"failed\0";
+
+    let ops = fallback_rule_ops();
+    let mut new_names = [core::ptr::null_mut::<u8>(); FALLBACK_RULE_COUNT];
+    let mut offsets = [0u32; FALLBACK_RULE_COUNT];
+    let mut errors = [0u32; FALLBACK_RULE_COUNT];
+    let base_name = open_args.add(3).read_volatile() as *const u8;
+    (ops.guess)(
+        library,
+        stream,
+        base_name,
+        new_names.as_mut_ptr(),
+        offsets.as_mut_ptr(),
+        errors.as_mut_ptr(),
+    );
+
+    let mut result = STATUS_UNKNOWN_FILE_FORMAT;
+    for rule_index in 0..FALLBACK_RULE_COUNT {
+        if errors[rule_index] != 0 {
+            if dfont_trace_level() > 2 {
+                crate::ft::trace::ft_error_trace(
+                    TRACE_RULE_ERROR.as_ptr(),
+                    errors[rule_index],
+                    rule_index as u32,
+                    0,
+                );
+            }
+            continue;
+        }
+
+        let pathname = if new_names[rule_index].is_null() {
+            base_name
+        } else {
+            new_names[rule_index].cast_const()
+        };
+        if dfont_trace_level() > 2 {
+            crate::ft::trace::ft_error_trace(
+                TRACE_TRY_RULE.as_ptr(),
+                rule_index as u32,
+                pathname as u32,
+                offsets[rule_index],
+            );
+        }
+
+        // `FUN_0804f250` reads only flags and pathname under OPEN_PATHNAME;
+        // the ARM leaves the other FT_Open_Args words stack-indeterminate.
+        let stream_args = [OPEN_PATHNAME, 0, 0, pathname as u32];
+        let mut candidate_stream = core::ptr::null_mut();
+        result = (ops.open_stream)(library, stream_args.as_ptr(), &mut candidate_stream);
+        if result != 0 {
+            if dfont_trace_level() > 2 {
+                crate::ft::trace::ft_error_trace(OUTCOME_FORMAT.as_ptr(), TRACE_FAILED.as_ptr() as u32, 0, 0);
+            }
+            continue;
+        }
+
+        result = dfont_open(
+            library,
+            candidate_stream,
+            offsets[rule_index],
+            face_index,
+            face_out,
+        );
+        (ops.close_stream)(candidate_stream);
+        if dfont_trace_level() > 2 {
+            let outcome = if result == 0 {
+                TRACE_SUCCESSFUL.as_ptr()
+            } else {
+                TRACE_FAILED.as_ptr()
+            };
+            crate::ft::trace::ft_error_trace(OUTCOME_FORMAT.as_ptr(), outcome as u32, 0, 0);
+        }
+        if result == 0 {
+            break;
+        }
+    }
+
+    for name in new_names {
+        if !name.is_null() {
+            let memory = library.cast::<*mut crate::ft::memory::FtMemory>().read_volatile();
+            crate::ft::memory::ft_mem_free(memory, name);
+        }
+    }
+    u32::from(result != 0) * STATUS_UNKNOWN_FILE_FORMAT
+}
+
+/// RetailOS dependency of [`ft_open_face_dfont_fallback`]. The ported
+/// [`resource_fork_probe`] remains in the existing probe seam for target
+/// integration and focused host tests; the ported [`dfont_open`] and
+/// [`fallback_rule_chain`] are called directly.
+pub struct DfontFallbackOps {
+    pub probe_resource_fork: ResourceForkProbe,
+}
+
+pub static mut DFONT_FALLBACK_OPS: DfontFallbackOps = DfontFallbackOps {
+    probe_resource_fork: resource_fork_probe,
+};
 
 #[inline(always)]
 unsafe fn dfont_fallback_ops() -> DfontFallbackOps {
@@ -571,7 +744,7 @@ pub unsafe extern "C" fn ft_open_face_dfont_fallback(
         return result;
     }
     if open_args.read_volatile() & OPEN_ARGS_FALLBACK_RULES != 0 {
-        result = (ops.run_fallback_rules)(library, stream, face_index, face_out, open_args);
+        result = fallback_rule_chain(library, stream, face_index, face_out, open_args);
     }
     result
 }
@@ -1566,6 +1739,7 @@ mod tests {
     static mut PROBE_RESULT: u32 = 0;
     static mut DFONT_RESULT: u32 = 0;
     static mut RULES_RESULT: u32 = 0;
+    static mut FALLBACK_DFONT_IS_RULE: bool = false;
 
     /// Never-dereferenced sentinels pinned by the recorded arguments.
     const LIBRARY: usize = 0x1111_0000;
@@ -1616,8 +1790,14 @@ mod tests {
             face_index: FACE_INDEX,
             face_out: FACE_OUT,
         });
-        if DFONT_RESULT != 0 {
-            return DFONT_RESULT;
+        FALLBACK_DFONT_IS_RULE = offset == 0xf00d;
+        let result = if FALLBACK_DFONT_IS_RULE {
+            RULES_RESULT
+        } else {
+            DFONT_RESULT
+        };
+        if result != 0 {
+            return result;
         }
         resource_map_offset.write(0);
         resource_data_offset.write(0);
@@ -1646,24 +1826,46 @@ mod tests {
         _face_index: i32,
         _face_out: *mut u32,
     ) -> u32 {
-        DFONT_RESULT
+        if FALLBACK_DFONT_IS_RULE {
+            RULES_RESULT
+        } else {
+            DFONT_RESULT
+        }
     }
 
     unsafe extern "C" fn recording_rules(
         library: *mut u32,
         stream: *mut u32,
-        face_index: i32,
-        face_out: *mut u32,
-        open_args: *const u32,
-    ) -> u32 {
+        base_name: *const u8,
+        _new_names: *mut *mut u8,
+        offsets: *mut u32,
+        errors: *mut u32,
+    ) {
         record(FallbackEvent::Rules {
             library: library as usize,
             stream: stream as usize,
-            face_index,
-            face_out: face_out as usize,
-            open_args: open_args as usize,
+            face_index: FACE_INDEX,
+            face_out: FACE_OUT,
+            open_args: base_name as usize,
         });
-        RULES_RESULT
+        offsets.write(0xf00d);
+        for rule in 1..FALLBACK_RULE_COUNT {
+            errors.add(rule).write(1);
+        }
+    }
+
+    unsafe extern "C" fn recording_fallback_stream_open(
+        _library: *mut u32,
+        open_args: *const u32,
+        stream_out: *mut *mut u32,
+    ) -> u32 {
+        assert_eq!(open_args.read(), 4);
+        stream_out.write(0x3333_0000 as *mut u32);
+        0
+    }
+
+    unsafe extern "C" fn recording_fallback_stream_close(stream: *mut u32) {
+        assert_eq!(stream as usize, 0x3333_0000);
     }
 
     unsafe extern "C" fn recording_trace_sink(
@@ -1711,6 +1913,7 @@ mod tests {
             PROBE_RESULT = probe;
             DFONT_RESULT = dfont;
             RULES_RESULT = rules;
+            FALLBACK_DFONT_IS_RULE = false;
             FALLBACK_EVENT_COUNT = 0;
             core::ptr::addr_of_mut!(HOST_TRACE_LEVELS)
                 .cast::<i32>()
@@ -1718,7 +1921,11 @@ mod tests {
                 .write_volatile(level);
             DFONT_FALLBACK_OPS = DfontFallbackOps {
                 probe_resource_fork: recording_probe,
-                run_fallback_rules: recording_rules,
+            };
+            FALLBACK_RULE_OPS = FallbackRuleOps {
+                guess: recording_rules,
+                open_stream: recording_fallback_stream_open,
+                close_stream: recording_fallback_stream_close,
             };
             DFONT_OPEN_OPS = DfontOpenOps {
                 read_resource_header: recording_fallback_dfont_header,
@@ -1734,7 +1941,11 @@ mod tests {
         unsafe {
             DFONT_FALLBACK_OPS = DfontFallbackOps {
                 probe_resource_fork: resource_fork_probe,
-                run_fallback_rules: missing_fallback_rule_chain,
+            };
+            FALLBACK_RULE_OPS = FallbackRuleOps {
+                guess: missing_fallback_rule_guess,
+                open_stream: missing_fallback_stream_open,
+                close_stream: missing_fallback_stream_close,
             };
             DFONT_OPEN_OPS = DfontOpenOps {
                 read_resource_header: missing_dfont_resource_header,
@@ -1925,20 +2136,21 @@ mod tests {
         for rules_result in [0u32, 7, 0x55, 0xdead_beef] {
             let _guards = install_recording_fallback(2, 2, rules_result, 0, false);
             let (result, count, events) = invoke_fallback(OPEN_ARGS_FALLBACK_RULES);
-            assert_eq!(result, rules_result, "rules_result={rules_result:#010x}");
-            assert_eq!(count, 3, "rules_result={rules_result:#010x}");
+            assert_eq!(result, u32::from(rules_result != 0) * STATUS_UNKNOWN_FILE_FORMAT);
+            assert_eq!(count, 4, "rules_result={rules_result:#010x}, events={events:?}");
             assert_eq!(events[0], probe_event());
             assert_eq!(events[1], dfont_event());
-            match events[2] {
-                FallbackEvent::Rules { library, stream, face_index, face_out, .. } => {
-                    assert_eq!(
-                        (library, stream, face_index, face_out),
-                        (LIBRARY, STREAM, FACE_INDEX, FACE_OUT),
-                        "rules_result={rules_result:#010x}"
-                    );
+            assert!(matches!(events[2], FallbackEvent::Rules { .. }));
+            assert_eq!(
+                events[3],
+                FallbackEvent::Dfont {
+                    library: LIBRARY,
+                    stream: 0x3333_0000,
+                    offset: 0xf00d,
+                    face_index: FACE_INDEX,
+                    face_out: FACE_OUT,
                 }
-                other => panic!("expected rule-chain call, got {other:?}"),
-            }
+            );
             uninstall_recording_fallback(false);
         }
     }
@@ -1960,10 +2172,11 @@ mod tests {
     fn rule_class_skips_dfont_and_runs_chain() {
         let _guards = install_recording_fallback(0x55, 0xdead, 9, 0, false);
         let (result, count, events) = invoke_fallback(OPEN_ARGS_FALLBACK_RULES);
-        assert_eq!(result, 9);
-        assert_eq!(count, 2);
+        assert_eq!(result, STATUS_UNKNOWN_FILE_FORMAT);
+        assert_eq!(count, 3);
         assert_eq!(events[0], probe_event());
         assert!(matches!(events[1], FallbackEvent::Rules { .. }));
+        assert!(matches!(events[2], FallbackEvent::Dfont { offset: 0xf00d, .. }));
         uninstall_recording_fallback(false);
         drop(_guards);
 
@@ -1989,14 +2202,15 @@ mod tests {
         // 0x...55 behaves exactly like class 0x55: straight to the chain.
         let _guards = install_recording_fallback(0xffff_ff55, 0xdead, 3, 0, false);
         let (result, count, events) = invoke_fallback(OPEN_ARGS_FALLBACK_RULES);
-        assert_eq!(result, 3);
-        assert_eq!(count, 2);
+        assert_eq!(result, STATUS_UNKNOWN_FILE_FORMAT);
+        assert_eq!(count, 3);
         assert!(matches!(events[1], FallbackEvent::Rules { .. }));
+        assert!(matches!(events[2], FallbackEvent::Dfont { offset: 0xf00d, .. }));
         uninstall_recording_fallback(false);
     }
 
     #[test]
-    fn rule_chain_receives_original_open_args_pointer() {
+    fn rule_chain_receives_pathname_from_open_args() {
         let _guards = install_recording_fallback(2, 2, 0, 0, false);
         let open_args = [OPEN_ARGS_FALLBACK_RULES, 0, 0, PATHNAME.as_ptr() as u32];
         let result = unsafe {
@@ -2010,8 +2224,8 @@ mod tests {
         };
         assert_eq!(result, 0);
         unsafe {
-            assert_eq!(FALLBACK_EVENT_COUNT, 3);
-            assert_eq!(FALLBACK_EVENTS[2], rules_event(open_args.as_ptr() as usize));
+            assert_eq!(FALLBACK_EVENT_COUNT, 4);
+            assert_eq!(FALLBACK_EVENTS[2], rules_event(PATHNAME.as_ptr() as u32 as usize));
         }
         uninstall_recording_fallback(false);
     }

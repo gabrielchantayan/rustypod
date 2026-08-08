@@ -8420,6 +8420,30 @@ functions:
       fTable +4 accessor/tracker no-op rather than their retailOS calls.
 
 
+  - address: 0x083d4cf4
+    ghidra: FUN_083d4cf4
+    name: element_array7_construct
+    size: 160
+    sig: "void *element_array7_construct(void *this, u32 options, u32 slots, u32 growth)"
+    module: app/element_table
+    status: ported
+    vars: {param_1: this, param_2: options, param_3: slots, param_4: growth, uVar1: allocation, iVar2: tracker_name, uVar3: tracker_name_len, iVar4: tracker_source_offset}
+    notes: >-
+      Eighth constructor called by element_table, so it creates the array-7
+      container (the contained element type is still unknown). Stores
+      {data=0, slots, used=0, options, growth, tracker_label=0}, allocates
+      and zeroes slots * 4 bytes for data, then copies a shortened fTable
+      name into a second allocation at +0x14. The source is read from
+      DAT_083d4d94 + 4 (0x0897cbac + 4); `strlen <= 10` skips one source
+      byte, otherwise it skips two, and `strncpy` copies the original
+      length. It calls FUN_083d4b58 with `Tracker<%s> fTable=%x,
+      fSize=%d`, but that helper is a four-byte no-op. No allocation-failure
+      branch exists; it returns this after storing and using each allocation
+      result. match.py: structural match; both bodies initialize six words,
+      allocate and zero the slot buffer, allocate/copy tracker metadata, and
+      return this. Rust emits explicit byte loops and inlines the trivial
+      fTable +4 accessor/tracker no-op rather than their retailOS calls.
+
   - address: 0x083d4a94
     ghidra: FUN_083d4a94
     name: element_array6_construct
@@ -21730,6 +21754,51 @@ functions:
       and the direct call into the ported ft_error_trace. Rust
       implementation and focused host tests:
       `src/cxx/object_flags.rs::ft_open_face_dfont_fallback`.
+
+  # --- FreeType embedded resource-fork fallback-rule chain ---
+  - address: 0x080db8ac
+    ghidra: FUN_080db8ac
+    name: fallback_rule_chain
+    size: 360
+    sig: "u32 fallback_rule_chain(void *library, FT_Stream stream, i32 face_index, void *face_out, const u32 *open_args)"
+    module: cxx/object_flags
+    status: ported
+    renames:
+      param_1: library
+      param_2: stream
+      param_3: face_index
+      param_4: face_out
+      param_5: open_args
+      uVar5: memory
+      iVar2: rule_index
+      iVar3: trace_levels
+      iVar4: result
+      pcVar1: outcome
+      local_54: new_names
+      auStack_74: offsets
+      local_94: errors
+      local_b4: stream_open_args
+      local_b8: candidate_stream
+      local_a8: pathname
+      DAT_080dba14: TRACE_LEVELS
+    notes: >-
+      FreeType FT_Raccess_Guess fallback after the dfont/MacBinary attempts.
+      FT_Raccess_Guess (FUN_0804e53c) fills eight parallel pathname, offset,
+      and error slots; each zero-error slot reopens its guessed pathname (or
+      the original pathname when the guess is null) via FT_Stream_New
+      (FUN_0804f250), attempts dfont_open at the corresponding offset, and
+      calls FT_Stream_Free (FUN_0804ed9c) regardless of that attempt's
+      outcome. The first successful dfont open exits the loop. Every
+      non-null guessed pathname is released with ft_mem_free(library->memory,
+      name), including skipped and post-success entries. Failure of every
+      rule, stream open, or dfont attempt returns class 2; only a dfont
+      success returns 0. ARM 0x080db8ac..0x080dba0f derives the arrays,
+      traverses eight slots, then performs the independent cleanup loop;
+      0x080dba14 is the trace-level literal. The unported guess/open/close
+      helpers use FALLBACK_RULE_OPS; dfont_open, ft_mem_free, and
+      ft_error_trace are direct. Focused object_flags host tests cover
+      matching and failed multi-rule traversal, stream-open failure,
+      pathname forwarding, and final status behavior.
 
   # --- FreeType PFR physical-font finalizer ---
   - address: 0x080a3554
