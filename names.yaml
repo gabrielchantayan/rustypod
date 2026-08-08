@@ -8347,6 +8347,30 @@ functions:
       return this. Rust emits explicit byte loops and inlines the trivial
       fTable +4 accessor/tracker no-op rather than their retailOS calls.
 
+  - address: 0x083d3c28
+    ghidra: FUN_083d3c28
+    name: element_array3_construct
+    size: 160
+    sig: "void *element_array3_construct(void *this, u32 options, u32 slots, u32 growth)"
+    module: app/element_table
+    status: ported
+    vars: {param_1: this, param_2: options, param_3: slots, param_4: growth, uVar1: allocation, iVar2: tracker_name, uVar3: tracker_name_len, iVar4: tracker_source_offset}
+    notes: >-
+      Fourth constructor called by element_table, so it creates the array-3
+      container (the contained element type is still unknown). Stores
+      {data=0, slots, used=0, options, growth, tracker_label=0}, allocates
+      and zeroes slots * 4 bytes for data, then copies a shortened fTable
+      name into a second allocation at +0x14. The source is read from
+      DAT_083d3cc8 + 4 (0x0897b904 + 4); `strlen <= 10` skips one source
+      byte, otherwise it skips two, and `strncpy` copies the original
+      length. It calls FUN_083d3a8c with `Tracker<%s> fTable=%x,
+      fSize=%d`, but that helper is a four-byte no-op. No allocation-failure
+      branch exists; it returns this after storing and using each allocation
+      result. match.py: structural match; both bodies initialize six words,
+      allocate and zero the slot buffer, allocate/copy tracker metadata, and
+      return this. Rust emits explicit byte loops and inlines the trivial
+      fTable +4 accessor/tracker no-op rather than their retailOS calls.
+
   - address: 0x08105ffc
     ghidra: FUN_08105ffc
     name: element_table
