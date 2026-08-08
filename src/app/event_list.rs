@@ -1,10 +1,10 @@
 //! Lazily-built event tree of a retailOS view's event source object.
 //!
-//! Two halves of one protocol, ported from the pair @ 0x081e04b0 /
-//! 0x081e054c. [`event_list_acquire`] builds the collection on demand and
+//! The source owns an event declaration collection and a transient
+//! libstdc++ red-black tree. [`event_list_populate_from_registry`] resolves
+//! each declaration through the application registry and materializes the
+//! descriptors in that tree. [`event_list_acquire`] builds it on demand and
 //! [`event_list_release`] clears it after its consumer has copied it out.
-//! The collection's historical name is "event list", but its 28-byte ADS
-//! implementation is a libstdc++ red-black tree.
 //!
 //! # The object
 //!
@@ -29,13 +29,25 @@
 //! `event_list_release`. This is acquire / copy-out / release, not a lock:
 //! every release clears the transient collection so the next acquire rebuilds
 //! against fresh registry state.
-//!
-//! The builder @ 0x081e0280 remains unported because it resolves registry
-//! values keyed by `'TEVT'` and `'CEVT'`; it alone remains behind the
-//! [`EVENT_LIST_OPS`] dispatch boundary. The range-erase port calls its
-//! three lower, still-unported tree-runtime dependencies through that same
-//! boundary: iterator increment @ 0x083b5bb0, single-node erase @
-//! 0x083c17d8, and subtree destruction/recycling @ 0x083c1f10.
+
+/// Byte offset of the source's mandatory single event declaration.
+pub const EVENT_SOURCE_PRIMARY_EVENT_OFFSET: usize = 0x08;
+/// Byte offsets of the contiguous `void *` declaration vector.
+pub const EVENT_SOURCE_EVENT_BEGIN_OFFSET: usize = 0x10;
+pub const EVENT_SOURCE_EVENT_END_OFFSET: usize = 0x14;
+/// Byte offset of a declaration object's lookup value.
+pub const EVENT_DECLARATION_VALUE_OFFSET: usize = 0x08;
+/// Byte offset of the optional supplementary declaration object.
+pub const EVENT_SOURCE_OPTIONAL_EVENT_OFFSET: usize = 0x58;
+/// Byte offset of that supplementary object's lookup value.
+pub const OPTIONAL_EVENT_VALUE_OFFSET: usize = 0x04;
+
+/// Multi-character registry keys stored in the literal pool at
+/// 0x081e04a4..0x081e04ac. They are native-endian ARM `u32` values, so
+/// `0x5445_5654` is the bytes `TEVT` in memory.
+pub const EVENT_DECLARATION_KEY: u32 = 0x5445_5654; // 'TEVT'
+pub const EVENT_SOURCE_KEY: u32 = 0x5345_5654; // 'SEVT'
+pub const OPTIONAL_EVENT_KEY: u32 = 0x4345_5654; // 'CEVT'
 
 /// Byte offset of the embedded event tree inside the source object
 /// (original: `add r0, r4, #56` @ 0x081e04d4).
@@ -63,14 +75,146 @@ unsafe fn word(at: *const u8) -> u32 {
     unsafe { at.cast::<u32>().read() }
 }
 
-/// Lower runtime dependencies that are still unported. `build` is the
-/// separate event-build seam. The other slots are the direct callees of
-/// [`event_list_tree_erase_range`], not a replacement erase seam.
+/// Registry operations below the one function ported here.
+///
+/// A resolver returns the descriptor's bytes and writes their byte length to
+/// `length_out`; NULL means that no descriptor exists. The concrete resolver
+/// is `app_string_resolver_resolve` at 0x0811ca58, whose lower provider
+/// table remains independently opaque. Appending owns the temporary
+/// descriptor/string construction, insertion, and destruction sequence
+/// below 0x081e0280.
+#[derive(Clone, Copy)]
+pub struct EventListBuildOps {
+    pub registry: unsafe extern "C" fn() -> *mut u8,
+    pub resolve: unsafe extern "C" fn(*mut u8, u32, u32, *mut u32) -> *const u8,
+    pub append: unsafe extern "C" fn(*mut u8, *const u8, u32),
+    /// RetailOS's 0x08030f44 does not return. Host test replacements may
+    /// return, in which case the builder stops at the failed lookup.
+    pub fail: unsafe extern "C" fn(),
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_event_registry() -> *mut u8 {
+    let getter: unsafe extern "C" fn() -> *mut u8 = unsafe { core::mem::transmute(0x0819_fdb0usize) };
+    unsafe { getter() }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_event_registry() -> *mut u8 {
+    panic!("event_list_populate_from_registry requires registry getter 0x0819fdb0")
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_event_resolve(
+    registry: *mut u8,
+    key: u32,
+    value: u32,
+    length_out: *mut u32,
+) -> *const u8 {
+    let resolve: unsafe extern "C" fn(*mut u8, u32, u32, *mut u32) -> *const u8 =
+        unsafe { core::mem::transmute(0x0811_ca58usize) };
+    unsafe { resolve(registry, key, value, length_out) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_event_resolve(
+    _registry: *mut u8,
+    _key: u32,
+    _value: u32,
+    _length_out: *mut u32,
+) -> *const u8 {
+    panic!("event_list_populate_from_registry requires resolver 0x0811ca58")
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_append_event_descriptor(
+    event_list: *mut u8,
+    bytes: *const u8,
+    length: u32,
+) {
+    #[repr(C, align(4))]
+    struct EventDescriptor([u8; 0x7c]);
+    #[repr(C, align(4))]
+    struct EventDescriptorTree([u8; 0x1c]);
+
+    let construct_tree: unsafe extern "C" fn(*mut u8, *mut u8) =
+        unsafe { core::mem::transmute(0x083d_b2d4usize) };
+    let construct_descriptor: unsafe extern "C" fn(*mut u8, *mut u8, u32) -> *mut u8 =
+        unsafe { core::mem::transmute(0x082a_7dacusize) };
+    let store_descriptor: unsafe extern "C" fn(*mut u8, *mut u8) =
+        unsafe { core::mem::transmute(0x082a_af10usize) };
+    let append_tree: unsafe extern "C" fn(*mut u8, *mut u8) =
+        unsafe { core::mem::transmute(0x080e_40c8usize) };
+    let destroy_descriptor: unsafe extern "C" fn(*mut u8, u32, u32) =
+        unsafe { core::mem::transmute(0x082a_7e10usize) };
+    let destroy_tree: unsafe extern "C" fn(*mut u8) =
+        unsafe { core::mem::transmute(0x082a_7fd8usize) };
+
+    let mut comparator = 0u8;
+    let mut temporary_tree = EventDescriptorTree([0; 0x1c]);
+    let mut descriptor = EventDescriptor([0; 0x7c]);
+    let mut string = core::ptr::null_mut();
+
+    unsafe {
+        construct_tree(temporary_tree.0.as_mut_ptr(), &mut comparator);
+        crate::cxx::string::cxx_string_from_buffer(&mut string, bytes, length);
+        let stored = construct_descriptor(descriptor.0.as_mut_ptr(), string, 12);
+        crate::cxx::string::cxx_string_release(&mut string);
+        store_descriptor(stored, temporary_tree.0.as_mut_ptr());
+        append_tree(temporary_tree.0.as_mut_ptr(), event_list);
+        destroy_descriptor(descriptor.0.as_mut_ptr(), 2, 0);
+        destroy_tree(temporary_tree.0.as_mut_ptr());
+    }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_append_event_descriptor(
+    _event_list: *mut u8,
+    _bytes: *const u8,
+    _length: u32,
+) {
+    panic!("event_list_populate_from_registry requires event descriptor insertion")
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_event_list_fail() {
+    let fail: unsafe extern "C" fn() -> ! = unsafe { core::mem::transmute(0x0803_0f44usize) };
+    unsafe { fail() }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_event_list_fail() {
+    panic!("event_list_populate_from_registry encountered an unresolved event")
+}
+
+/// Active registry and descriptor operations for
+/// [`event_list_populate_from_registry`]. Host tests replace this table;
+/// retailOS defaults invoke its remaining firmware dependencies directly.
+#[cfg(target_os = "none")]
+pub static mut EVENT_LIST_BUILD_OPS: EventListBuildOps = EventListBuildOps {
+    registry: firmware_event_registry,
+    resolve: firmware_event_resolve,
+    append: firmware_append_event_descriptor,
+    fail: firmware_event_list_fail,
+};
+
+#[cfg(not(target_os = "none"))]
+pub static mut EVENT_LIST_BUILD_OPS: EventListBuildOps = EventListBuildOps {
+    registry: missing_event_registry,
+    resolve: missing_event_resolve,
+    append: missing_append_event_descriptor,
+    fail: missing_event_list_fail,
+};
+
+#[inline(always)]
+unsafe fn build_ops() -> EventListBuildOps {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(EVENT_LIST_BUILD_OPS)) }
+}
+
+/// Lower tree-runtime dependencies used only by
+/// [`event_list_tree_erase_range`].
 #[derive(Clone, Copy)]
 pub struct EventListOps {
-    /// Original 0x081e0280: populate the source's event tree from the
-    /// registry. Runs once per acquire/release cycle.
-    pub build: unsafe extern "C" fn(source: *mut u8),
     /// Original 0x083b5bb0: advance the one-word in-order iterator.
     pub advance_iterator: unsafe extern "C" fn(iterator: *mut u32),
     /// Original 0x083c17d8: rebalance, destroy, recycle, and decrement for
@@ -80,10 +224,6 @@ pub struct EventListOps {
     /// allocator/value cleanup performed by 0x083c1648 for each node.
     pub destroy_subtree: unsafe extern "C" fn(tree: *mut u8, root: u32),
 }
-
-/// Default boundary before 0x081e0280 is ported. Building needs the registry
-/// that does not exist on the host; an empty tree is the honest stand-in.
-unsafe extern "C" fn missing_event_list_build(_source: *mut u8) {}
 
 /// Defaults for lower tree-runtime dependencies. They deliberately do no
 /// ownership work: their production implementations remain unported.
@@ -95,21 +235,14 @@ unsafe extern "C" fn missing_destroy_subtree(_tree: *mut u8, _root: u32) {}
 
 /// Wired defaults for [`EVENT_LIST_OPS`].
 pub const DEFAULT_EVENT_LIST_OPS: EventListOps = EventListOps {
-    build: missing_event_list_build,
     advance_iterator: missing_advance_iterator,
     erase_node: missing_erase_node,
     destroy_subtree: missing_destroy_subtree,
 };
 
-/// Active model for the separate build seam and the erase port's lower
-/// runtime dependencies. Tests replace these slots to observe the exact
-/// protocol.
+/// Active model for the erase port's lower runtime dependencies. Tests
+/// replace these slots to observe the exact protocol.
 pub static mut EVENT_LIST_OPS: EventListOps = DEFAULT_EVENT_LIST_OPS;
-
-#[inline(always)]
-unsafe fn build_op() -> unsafe extern "C" fn(*mut u8) {
-    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(EVENT_LIST_OPS.build)) }
-}
 
 #[inline(always)]
 unsafe fn advance_iterator_op() -> unsafe extern "C" fn(*mut u32) {
@@ -126,6 +259,80 @@ unsafe fn destroy_subtree_op() -> unsafe extern "C" fn(*mut u8, u32) {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(EVENT_LIST_OPS.destroy_subtree)) }
 }
 
+/// event_list_populate_from_registry — original: `FUN_081e0280` @
+/// 0x081e0280 (548 bytes).
+///
+/// Clears the transient event tree, then resolves the source's declaration
+/// vector under `'TEVT'`, its mandatory +0x08 declaration under `'SEVT'`,
+/// and (when non-NULL) the +0x58 object's +0x04 declaration under `'CEVT'`.
+/// Each successful resolution is a `{ byte_length, bytes }` descriptor;
+/// its bytes are copied into a temporary owned descriptor, inserted into a
+/// temporary tree, appended to the source's tree, and then destroyed. A
+/// failed lookup calls retailOS's non-returning error path immediately:
+/// later declarations are not considered. The function itself returns no
+/// value and retains no borrow of the resolved descriptor.
+///
+/// Sources: raw ARM at `ipod-decomp/decomp/osos.asm` 0x081e0280; reference C
+/// at `decomp/c/020/081e0280_FUN_081e0280.c`; resolver 0x0811ca58; string
+/// construction 0x083d8bac; descriptor insertion sequence 0x083db2d4 /
+/// 0x082a7dac / 0x082aaf10 / 0x080e40c8 / 0x082a7e10 / 0x082a7fd8.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn event_list_populate_from_registry(source: *mut u8) {
+    let ops = unsafe { build_ops() };
+    let tree = unsafe { source.add(EVENT_LIST_OFFSET) };
+    let header = unsafe { word(tree.add(TREE_HEADER_OFFSET)) };
+    let mut first = unsafe { word((header as usize as *const u8).add(TREE_LEFTMOST_OFFSET)) };
+    let mut last = header;
+    let mut erased = 0;
+    unsafe { event_list_tree_erase_range(&mut erased, tree, &mut first, &mut last) };
+
+    let registry = unsafe { (ops.registry)() };
+    let mut declaration = unsafe { word(source.add(EVENT_SOURCE_EVENT_BEGIN_OFFSET)) };
+    let declaration_end = unsafe { word(source.add(EVENT_SOURCE_EVENT_END_OFFSET)) };
+    while declaration != declaration_end {
+        let value = unsafe {
+            word((word(declaration as usize as *const u8) as usize as *const u8)
+                .add(EVENT_DECLARATION_VALUE_OFFSET))
+        };
+        if !unsafe { event_list_append_resolved(tree, registry, EVENT_DECLARATION_KEY, value, ops) } {
+            return;
+        }
+        declaration = declaration.wrapping_add(4);
+    }
+
+    let primary = unsafe { word(source.add(EVENT_SOURCE_PRIMARY_EVENT_OFFSET)) };
+    if !unsafe { event_list_append_resolved(tree, registry, EVENT_SOURCE_KEY, primary, ops) } {
+        return;
+    }
+
+    let optional = unsafe { word(source.add(EVENT_SOURCE_OPTIONAL_EVENT_OFFSET)) };
+    if optional != 0 {
+        let value = unsafe {
+            word((optional as usize as *const u8).add(OPTIONAL_EVENT_VALUE_OFFSET))
+        };
+        unsafe { event_list_append_resolved(tree, registry, OPTIONAL_EVENT_KEY, value, ops) };
+    }
+}
+
+#[inline(always)]
+unsafe fn event_list_append_resolved(
+    tree: *mut u8,
+    registry: *mut u8,
+    key: u32,
+    value: u32,
+    ops: EventListBuildOps,
+) -> bool {
+    let mut length = 0;
+    let bytes = unsafe { (ops.resolve)(registry, key, value, &mut length) };
+    if bytes.is_null() {
+        unsafe { (ops.fail)() };
+        return false;
+    }
+    unsafe { (ops.append)(tree, bytes, length) };
+    true
+}
+
 /// event_list_acquire — original: `FUN_081e04b0` @ 0x081e04b0 (44 bytes,
 /// 125 `bl` call sites).
 ///
@@ -137,7 +344,7 @@ unsafe fn destroy_subtree_op() -> unsafe extern "C" fn(*mut u8, u32) {
 pub unsafe extern "C" fn event_list_acquire(source: *mut u8) -> *mut u8 {
     let built = unsafe { source.add(EVENT_LIST_BUILT_OFFSET) };
     if unsafe { built.read() } == 0 {
-        unsafe { (build_op())(source) };
+        unsafe { event_list_populate_from_registry(source) };
         unsafe { built.write(1) };
     }
     unsafe { source.add(EVENT_LIST_OFFSET) }
@@ -235,22 +442,56 @@ mod tests {
     use std::vec::Vec;
 
     static OPS_LOCK: Mutex<()> = Mutex::new(());
-    static mut BUILD_CALLS: u32 = 0;
-    static mut BUILD_SOURCE: usize = 0;
     static mut EVENTS: Vec<Call> = Vec::new();
+    static mut FAIL_VALUE: u32 = 0;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     enum Call {
+        Registry,
+        Resolve { key: u32, value: u32 },
+        Append { tree: usize, bytes: usize, length: u32 },
+        Fail,
         Advance(u32),
         Erase { tree: usize, node: u32 },
         Destroy { tree: usize, root: u32 },
     }
 
-    unsafe extern "C" fn recording_build(source: *mut u8) {
+    unsafe extern "C" fn recording_registry() -> *mut u8 {
         unsafe {
-            BUILD_CALLS += 1;
-            BUILD_SOURCE = source as usize;
+            EVENTS.push(Call::Registry);
+            0x1111_0000usize as *mut u8
         }
+    }
+
+    unsafe extern "C" fn recording_resolve(
+        registry: *mut u8,
+        key: u32,
+        value: u32,
+        length_out: *mut u32,
+    ) -> *const u8 {
+        assert_eq!(registry as usize, 0x1111_0000);
+        unsafe {
+            EVENTS.push(Call::Resolve { key, value });
+            if value == FAIL_VALUE {
+                return core::ptr::null();
+            }
+            length_out.write(value.wrapping_add(0x40));
+            (0x2222_0000usize.wrapping_add(value as usize)) as *const u8
+        }
+    }
+
+    unsafe extern "C" fn recording_append(tree: *mut u8, bytes: *const u8, length: u32) {
+        unsafe {
+            EVENTS.push(Call::Append {
+                tree: tree as usize,
+                bytes: bytes as usize,
+                length,
+            });
+        }
+    }
+
+    unsafe extern "C" fn recording_fail() {
+        unsafe { EVENTS.push(Call::Fail) };
     }
 
     unsafe extern "C" fn recording_advance_iterator(iterator: *mut u32) {
@@ -292,18 +533,30 @@ mod tests {
 
     impl Drop for Bench {
         fn drop(&mut self) {
-            unsafe { EVENT_LIST_OPS = DEFAULT_EVENT_LIST_OPS };
+            unsafe {
+                EVENT_LIST_BUILD_OPS = EventListBuildOps {
+                    registry: missing_event_registry,
+                    resolve: missing_event_resolve,
+                    append: missing_append_event_descriptor,
+                    fail: missing_event_list_fail,
+                };
+                EVENT_LIST_OPS = DEFAULT_EVENT_LIST_OPS;
+            }
         }
     }
 
     fn bench() -> Bench {
         let lock = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         unsafe {
-            BUILD_CALLS = 0;
-            BUILD_SOURCE = 0;
+            FAIL_VALUE = u32::MAX;
             EVENTS.clear();
+            EVENT_LIST_BUILD_OPS = EventListBuildOps {
+                registry: recording_registry,
+                resolve: recording_resolve,
+                append: recording_append,
+                fail: recording_fail,
+            };
             EVENT_LIST_OPS = EventListOps {
-                build: recording_build,
                 advance_iterator: recording_advance_iterator,
                 erase_node: recording_erase_node,
                 destroy_subtree: recording_destroy_subtree,
@@ -314,40 +567,6 @@ mod tests {
 
     fn events() -> Vec<Call> {
         unsafe { EVENTS.clone() }
-    }
-
-    /// The acquire half never follows target pointers, so it needs no
-    /// below-4-GiB backing allocation.
-    fn source_object() -> Vec<u8> {
-        std::vec![0u8; EVENT_LIST_BUILT_OFFSET + 1]
-    }
-
-    #[test]
-    fn acquire_builds_once_and_raises_the_flag() {
-        let _bench = bench();
-        let mut object = source_object();
-        let source = object.as_mut_ptr();
-
-        let tree = unsafe { event_list_acquire(source) };
-
-        assert_eq!(tree, unsafe { source.add(EVENT_LIST_OFFSET) });
-        assert_eq!(unsafe { BUILD_CALLS }, 1);
-        assert_eq!(unsafe { BUILD_SOURCE }, source as usize);
-        assert_eq!(object[EVENT_LIST_BUILT_OFFSET], 1);
-        unsafe { event_list_acquire(source) };
-        assert_eq!(unsafe { BUILD_CALLS }, 1, "a non-zero flag skips the builder");
-    }
-
-    #[test]
-    fn acquire_treats_every_nonzero_flag_as_built() {
-        let _bench = bench();
-        let mut object = source_object();
-        object[EVENT_LIST_BUILT_OFFSET] = 0xff;
-
-        unsafe { event_list_acquire(object.as_mut_ptr()) };
-
-        assert_eq!(unsafe { BUILD_CALLS }, 0);
-        assert_eq!(object[EVENT_LIST_BUILT_OFFSET], 0xff, "the flag is not normalized");
     }
 
     const SLAB_HINT: usize = crate::testing::hints::EVENT_LIST;
@@ -417,6 +636,157 @@ mod tests {
         let slab = try_slab()?;
         unsafe { install_tree(slab, count) };
         Some(slab)
+    }
+
+    /// Builds a source with an empty tree, a vector of declaration pointers,
+    /// its mandatory event value, and optionally the supplementary object.
+    unsafe fn install_build_source(slab: *mut u8, declarations: &[u32], optional: bool) {
+        unsafe {
+            install_tree(slab, 0);
+            let vector = slab.add(0x500);
+            put_word(
+                slab.add(EVENT_SOURCE_EVENT_BEGIN_OFFSET),
+                vector as usize as u32,
+            );
+            put_word(
+                slab.add(EVENT_SOURCE_EVENT_END_OFFSET),
+                vector.add(declarations.len() * 4) as usize as u32,
+            );
+            for (index, &value) in declarations.iter().enumerate() {
+                let declaration = slab.add(0x600 + index * 0x10);
+                put_word(vector.add(index * 4), declaration as usize as u32);
+                put_word(declaration.add(EVENT_DECLARATION_VALUE_OFFSET), value);
+            }
+            put_word(slab.add(EVENT_SOURCE_PRIMARY_EVENT_OFFSET), 0x30);
+            if optional {
+                let extra = slab.add(0x700);
+                put_word(slab.add(EVENT_SOURCE_OPTIONAL_EVENT_OFFSET), extra as usize as u32);
+                put_word(extra.add(OPTIONAL_EVENT_VALUE_OFFSET), 0x40);
+            }
+        }
+    }
+
+    #[test]
+    fn populate_empty_declaration_vector_keeps_the_mandatory_source_event() {
+        let _bench = bench();
+        let Some(slab) = try_slab() else {
+            assert!(note_missing_u32_fixture("app::event_list"));
+            return;
+        };
+        unsafe {
+            install_build_source(slab, &[], false);
+            event_list_populate_from_registry(slab);
+        }
+
+        assert_eq!(
+            events(),
+            std::vec![
+                Call::Registry,
+                Call::Resolve {
+                    key: EVENT_SOURCE_KEY,
+                    value: 0x30,
+                },
+                Call::Append {
+                    tree: unsafe { slab.add(EVENT_LIST_OFFSET) } as usize,
+                    bytes: 0x2222_0030,
+                    length: 0x70,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn populate_walks_multiple_declarations_then_source_and_optional_event() {
+        let _bench = bench();
+        let Some(slab) = try_slab() else {
+            assert!(note_missing_u32_fixture("app::event_list"));
+            return;
+        };
+        unsafe {
+            install_build_source(slab, &[0x11, 0x22], true);
+            event_list_populate_from_registry(slab);
+        }
+
+        let tree = unsafe { slab.add(EVENT_LIST_OFFSET) } as usize;
+        assert_eq!(
+            events(),
+            std::vec![
+                Call::Registry,
+                Call::Resolve {
+                    key: EVENT_DECLARATION_KEY,
+                    value: 0x11,
+                },
+                Call::Append {
+                    tree,
+                    bytes: 0x2222_0011,
+                    length: 0x51,
+                },
+                Call::Resolve {
+                    key: EVENT_DECLARATION_KEY,
+                    value: 0x22,
+                },
+                Call::Append {
+                    tree,
+                    bytes: 0x2222_0022,
+                    length: 0x62,
+                },
+                Call::Resolve {
+                    key: EVENT_SOURCE_KEY,
+                    value: 0x30,
+                },
+                Call::Append {
+                    tree,
+                    bytes: 0x2222_0030,
+                    length: 0x70,
+                },
+                Call::Resolve {
+                    key: OPTIONAL_EVENT_KEY,
+                    value: 0x40,
+                },
+                Call::Append {
+                    tree,
+                    bytes: 0x2222_0040,
+                    length: 0x80,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn populate_stops_at_the_first_unresolved_declaration() {
+        let _bench = bench();
+        let Some(slab) = try_slab() else {
+            assert!(note_missing_u32_fixture("app::event_list"));
+            return;
+        };
+        unsafe {
+            install_build_source(slab, &[0x11, 0x22], true);
+            FAIL_VALUE = 0x22;
+            event_list_populate_from_registry(slab);
+        }
+
+        let tree = unsafe { slab.add(EVENT_LIST_OFFSET) } as usize;
+        assert_eq!(
+            events(),
+            std::vec![
+                Call::Registry,
+                Call::Resolve {
+                    key: EVENT_DECLARATION_KEY,
+                    value: 0x11,
+                },
+                Call::Append {
+                    tree,
+                    bytes: 0x2222_0011,
+                    length: 0x51,
+                },
+                Call::Resolve {
+                    key: EVENT_DECLARATION_KEY,
+                    value: 0x22,
+                },
+                Call::Fail,
+            ],
+            "the retail error path is reached before later vector, source, or optional entries"
+        );
     }
 
     #[test]
@@ -571,6 +941,25 @@ mod tests {
         assert_eq!(unsafe { word(tree.add(TREE_NODE_COUNT_OFFSET)) }, 0);
         assert_eq!(unsafe { slab.add(EVENT_LIST_BUILT_OFFSET).read() }, 0);
         unsafe { event_list_acquire(slab) };
-        assert_eq!(unsafe { BUILD_CALLS }, 1, "release made the next acquire rebuild");
+        assert_eq!(
+            events(),
+            std::vec![
+                Call::Destroy {
+                    tree: tree as usize,
+                    root,
+                },
+                Call::Registry,
+                Call::Resolve {
+                    key: EVENT_SOURCE_KEY,
+                    value: 0,
+                },
+                Call::Append {
+                    tree: tree as usize,
+                    bytes: 0x2222_0000,
+                    length: 0x40,
+                },
+            ],
+            "release made the next acquire populate the source again"
+        );
     }
 }
