@@ -75,14 +75,15 @@
 //! - The cache is the crate static [`ELEMENT_TABLE`] rather than the
 //!   word @ 0x089ca3bc (the `block_mgr.rs` precedent: runtime-
 //!   initialized RW). It defaults to NULL — the pre-init state.
-//! - The first four constructors, [`element_array0_construct`],
-//!   [`element_array1_construct`], [`element_array2_construct`], and
-//!   [`element_array3_construct`], are ported and wired as arrays 0 through
-//!   3's defaults. The other five constructors remain behind documented
-//!   zeroing stubs. Thus arrays 0 through 3 are empty, ten-slot containers
-//!   after default construction; arrays 4 through 8 still report zero slots.
-//!   The tracker-registration helper each constructor calls is a four-byte
-//!   `mov pc, lr` stub in retailOS, so no registration seam is required.
+//! - The first five constructors, [`element_array0_construct`],
+//!   [`element_array1_construct`], [`element_array2_construct`],
+//!   [`element_array3_construct`], and [`element_array4_construct`], are
+//!   ported and wired as arrays 0 through 4's defaults. The other four
+//!   constructors remain behind documented zeroing stubs. Thus arrays 0
+//!   through 4 are empty, ten-slot containers after default construction;
+//!   arrays 5 through 8 still report zero slots. The tracker-registration
+//!   helper each constructor calls is a four-byte `mov pc, lr` stub in
+//!   retailOS, so no registration seam is required.
 //! - Sub-object and field offsets are computed by WORD INDEX rather
 //!   than as literal byte offsets, so the 0x18 stride and the +0x00 /
 //!   +0x04 fields are exact on the 32-bit target while a 64-bit host
@@ -197,6 +198,12 @@ static mut HOST_ARRAY2_TRACKER_NAME: *const u8 = HOST_ARRAY0_TRACKER_NAME_EMPTY.
 #[cfg(not(target_os = "none"))]
 static mut HOST_ARRAY3_TRACKER_NAME: *const u8 = HOST_ARRAY0_TRACKER_NAME_EMPTY.as_ptr();
 
+/// Host-test source for the fifth constructor's independent runtime fTable
+/// record. It must not alias the first four: retailOS loads 0x0897cc8c + 4
+/// for this array.
+#[cfg(not(target_os = "none"))]
+static mut HOST_ARRAY4_TRACKER_NAME: *const u8 = HOST_ARRAY0_TRACKER_NAME_EMPTY.as_ptr();
+
 /// Returns the fTable name whose shortened copy is retained for the inert
 /// tracker record. `FUN_082a7774` is exactly `ldr r0, [r0, #4]; bx lr`.
 #[inline(always)]
@@ -256,6 +263,21 @@ unsafe fn array3_tracker_name() -> *const u8 {
     #[cfg(not(target_os = "none"))]
     {
         core::ptr::read_volatile(core::ptr::addr_of!(HOST_ARRAY3_TRACKER_NAME))
+    }
+}
+
+/// Returns the fTable name associated with the fifth array's independent
+/// runtime-data record. `FUN_082a7774` loads the record's word at +4.
+#[inline(always)]
+unsafe fn array4_tracker_name() -> *const u8 {
+    #[cfg(target_os = "none")]
+    {
+        return (0x0897_cc8c as *const *const u8).add(1).read();
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        core::ptr::read_volatile(core::ptr::addr_of!(HOST_ARRAY4_TRACKER_NAME))
     }
 }
 
@@ -482,11 +504,59 @@ pub unsafe extern "C" fn element_array3_construct(
     this
 }
 
+/// element_array4_construct — original: `FUN_083d56b8` @ 0x083d56b8
+/// (160 bytes).
+///
+/// Constructs the fifth 0x18-byte element-array container. It initializes
+/// `{data, slots, used, options, growth, tracker_label}` at offsets
+/// `{+0x00, +0x04, +0x08, +0x0c, +0x10, +0x14}`, allocates and zeroes
+/// `slots * 4` bytes for its data buffer, and allocates a shortened copy of
+/// the fTable name from its own runtime record for inert
+/// `Tracker<%s> fTable=%x, fSize=%d` instrumentation. `FUN_083d551c` is a
+/// four-byte no-op, so it has no port seam. The constructor contains no
+/// allocation-failure branch: it stores and uses allocation results exactly
+/// as returned, then returns `this`.
+///
+/// On target the fTable name comes from 0x0897cc8c + 4. The host-only source
+/// is independently swappable in tests because firmware runtime data is not
+/// mapped there.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn element_array4_construct(
+    this: *mut u8,
+    options: u32,
+    slots: u32,
+    growth: u32,
+) -> *mut u8 {
+    (this.add(ARRAY_DATA_INDEX * WORD) as *mut *mut u8).write(core::ptr::null_mut());
+    (this.add(ARRAY_SLOTS_INDEX * WORD) as *mut u32).write(slots);
+    (this.add(ARRAY_USED_INDEX * WORD) as *mut u32).write(0);
+    (this.add(ARRAY_OPTIONS_INDEX * WORD) as *mut u32).write(options);
+    (this.add(ARRAY_GROWTH_INDEX * WORD) as *mut u32).write(growth);
+    (this.add(ARRAY_TRACKER_LABEL_INDEX * WORD) as *mut *mut u8).write(core::ptr::null_mut());
+
+    let slot_bytes = (slots as usize).wrapping_mul(WORD);
+    let data = operator_new(slot_bytes);
+    (this.add(ARRAY_DATA_INDEX * WORD) as *mut *mut u8).write(data);
+    for offset in 0..slot_bytes {
+        data.add(offset).write_volatile(0);
+    }
+
+    let name = array4_tracker_name();
+    let name_len = tracker_name_len(name);
+    let label = operator_new(name_len);
+    (this.add(ARRAY_TRACKER_LABEL_INDEX * WORD) as *mut *mut u8).write(label);
+
+    let source_offset = if name_len <= 10 { 1 } else { 2 };
+    copy_tracker_name(label, name.add(source_offset), name_len);
+    this
+}
+
 /// Indirect dispatch table for the nine container constructors, in the order
 /// the getter calls them (array 0 first).
 pub type ElementArrayCtors = [ElementArrayCtor; ELEMENT_ARRAY_COUNT];
 
-/// Wired defaults: arrays 0 through 3 use their retailOS constructors; the
+/// Wired defaults: arrays 0 through 4 use their retailOS constructors; the
 /// remaining constructors are documented zeroing stubs until their own ports
 /// land.
 
@@ -495,7 +565,7 @@ pub(crate) const DEFAULT_ELEMENT_ARRAY_CTORS: ElementArrayCtors = [
     element_array1_construct,
     element_array2_construct,
     element_array3_construct,
-    zeroing_array_ctor,
+    element_array4_construct,
     zeroing_array_ctor,
     zeroing_array_ctor,
     zeroing_array_ctor,
@@ -699,7 +769,7 @@ mod tests {
 
     /// Per-call override results for the allocator. An unset entry preserves
     /// the ordinary table fixture's `arena()` result.
-    static mut ALLOC_RESULTS: [*mut u8; 9] = [ptr::null_mut(); 9];
+    static mut ALLOC_RESULTS: [*mut u8; 19] = [ptr::null_mut(); 19];
 
     /// `(this, options, slots, growth)` per constructor call, in order.
     static mut CTOR_CALLS: Vec<(usize, u32, u32, u32)> = Vec::new();
@@ -781,11 +851,12 @@ mod tests {
             MOCK_SLOTS = 4;
             alloc_sizes().clear();
             ctor_calls().clear();
-            ALLOC_RESULTS = [ptr::null_mut(); 9];
+            ALLOC_RESULTS = [ptr::null_mut(); 19];
             HOST_ARRAY0_TRACKER_NAME = HOST_ARRAY0_TRACKER_NAME_EMPTY.as_ptr();
             HOST_ARRAY1_TRACKER_NAME = HOST_ARRAY0_TRACKER_NAME_EMPTY.as_ptr();
             HOST_ARRAY2_TRACKER_NAME = HOST_ARRAY0_TRACKER_NAME_EMPTY.as_ptr();
             HOST_ARRAY3_TRACKER_NAME = HOST_ARRAY0_TRACKER_NAME_EMPTY.as_ptr();
+            HOST_ARRAY4_TRACKER_NAME = HOST_ARRAY0_TRACKER_NAME_EMPTY.as_ptr();
             for array in 0..ELEMENT_ARRAY_COUNT {
                 for slot in 0..4 {
                     SLOT_BUFFERS[array][slot] = (0x1000 + array * 0x100 + slot * 8) as *mut u8;
@@ -806,11 +877,12 @@ mod tests {
             ELEMENT_TABLE = ptr::null_mut();
             alloc_sizes().clear();
             ctor_calls().clear();
-            ALLOC_RESULTS = [ptr::null_mut(); 9];
+            ALLOC_RESULTS = [ptr::null_mut(); 19];
             HOST_ARRAY0_TRACKER_NAME = HOST_ARRAY0_TRACKER_NAME_EMPTY.as_ptr();
             HOST_ARRAY1_TRACKER_NAME = HOST_ARRAY0_TRACKER_NAME_EMPTY.as_ptr();
             HOST_ARRAY2_TRACKER_NAME = HOST_ARRAY0_TRACKER_NAME_EMPTY.as_ptr();
             HOST_ARRAY3_TRACKER_NAME = HOST_ARRAY0_TRACKER_NAME_EMPTY.as_ptr();
+            HOST_ARRAY4_TRACKER_NAME = HOST_ARRAY0_TRACKER_NAME_EMPTY.as_ptr();
         }
         drop(guard);
     }
@@ -1192,6 +1264,58 @@ mod tests {
     }
 
     #[test]
+    fn array4_constructor_lays_out_its_independent_record_and_returns_this() {
+        let guard = mock();
+        let tracker_name = *b"TrackerArray4\0";
+        unsafe {
+            let this = arena().add(0x100);
+            let slot_data = arena().add(0x200);
+            let tracker_label = arena().add(0x300);
+            for offset in 0..ELEMENT_ARRAY_STRIDE {
+                this.add(offset).write(0xa5);
+            }
+            for offset in 0..(6 * WORD + 1) {
+                slot_data.add(offset).write(0xa5);
+            }
+            for offset in 0..tracker_name.len() {
+                tracker_label.add(offset).write(0xa5);
+            }
+            HOST_ARRAY4_TRACKER_NAME = tracker_name.as_ptr();
+            ALLOC_RESULTS[0] = slot_data;
+            ALLOC_RESULTS[1] = tracker_label;
+
+            assert_eq!(element_array4_construct(this, 0x1122_3344, 6, 0x5566_7788), this);
+            assert_eq!(*alloc_sizes(), std::vec![6 * WORD, 13]);
+            assert_eq!(
+                (this.add(ARRAY_DATA_INDEX * WORD) as *const *mut u8).read(),
+                slot_data
+            );
+            assert_eq!((this.add(ARRAY_SLOTS_INDEX * WORD) as *const u32).read(), 6);
+            assert_eq!((this.add(ARRAY_USED_INDEX * WORD) as *const u32).read(), 0);
+            assert_eq!(
+                (this.add(ARRAY_OPTIONS_INDEX * WORD) as *const u32).read(),
+                0x1122_3344
+            );
+            assert_eq!(
+                (this.add(ARRAY_GROWTH_INDEX * WORD) as *const u32).read(),
+                0x5566_7788
+            );
+            assert_eq!(
+                (this.add(ARRAY_TRACKER_LABEL_INDEX * WORD) as *const *mut u8).read(),
+                tracker_label
+            );
+            assert_eq!(core::slice::from_raw_parts(slot_data, 6 * WORD), &[0u8; 6 * WORD]);
+            assert_eq!(slot_data.add(6 * WORD).read(), 0xa5, "slot zeroing stops at capacity");
+            assert_eq!(
+                core::slice::from_raw_parts(tracker_label, 13),
+                b"ackerArray4\0\0",
+                "the long fTable name skips two bytes and strncpy-pads"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
     fn the_default_ctor_stub_zeroes_one_sub_object_and_returns_it() {
         let guard = TABLE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
@@ -1210,10 +1334,10 @@ mod tests {
     }
 
     #[test]
-    fn wired_defaults_construct_arrays0_through3_but_leave_all_slots_empty() {
+    fn wired_defaults_construct_arrays0_through4_but_leave_all_slots_empty() {
         let guard = mock();
         unsafe {
-            // The table block is allocation 0; arrays 0 through 3 each
+            // The table block is allocation 0; arrays 0 through 4 each
             // allocate data plus a tracker label, so none may alias it.
             ALLOC_RESULTS[1] = arena().add(0x200);
             ALLOC_RESULTS[2] = arena().add(0x300);
@@ -1223,6 +1347,8 @@ mod tests {
             ALLOC_RESULTS[6] = arena().add(0x700);
             ALLOC_RESULTS[7] = arena().add(0x800);
             ALLOC_RESULTS[8] = arena().add(0x900);
+            ALLOC_RESULTS[9] = arena().add(0xa00);
+            ALLOC_RESULTS[10] = arena().add(0xb00);
             ELEMENT_ARRAY_CTORS = DEFAULT_ELEMENT_ARRAY_CTORS;
             assert!(element_array0_at(0).is_null());
             assert_eq!(array_slots(ELEMENT_TABLE), 10, "array 0 has its retail capacity");
@@ -1243,6 +1369,12 @@ mod tests {
                 array_slots(ELEMENT_TABLE.add(3 * ELEMENT_ARRAY_STRIDE)),
                 10,
                 "array 3 has its retail capacity"
+            );
+            assert!(element_array4_at(0).is_null());
+            assert_eq!(
+                array_slots(ELEMENT_TABLE.add(4 * ELEMENT_ARRAY_STRIDE)),
+                10,
+                "array 4 has its retail capacity"
             );
             assert!(element_array6_at(0).is_null(), "unported array 6 remains a zero stub");
             assert!(!ELEMENT_TABLE.is_null(), "the table itself is still built");
