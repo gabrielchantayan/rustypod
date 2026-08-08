@@ -14771,21 +14771,33 @@ functions:
     status: ported
     vars: {param_1: owner}
     notes: >-
-      51 bl call sites. `if (owner) tail-call 0x0837ee98(owner->[0x48])` -
-      a NULL-guarded release forwarder into retailOS' C++ object model.
-      Only the owner is guarded; a NULL child is forwarded to the callee,
-      which NULL-guards on its own (`movs r5,r0 / bne`). The teardown
-      target 0x0837ee98 (200 bytes, 22 bl + 1 tail b, UNPORTED) drops a
-      16-bit refcount at +0x22 and, at zero, runs C++ teardown through
-      0x082dd3d8 / 0x082d7fdc; every path returns 0, so the forwarder
-      always returns NULL. The tail call goes through the CXX_RELEASE_OPS
-      dispatch boundary (house VDBE_P4_OPS pattern); the default stub
-      returns NULL but leaks, no refcount drop. The child field is
-      addressed by word index 18 (block_region.rs precedent) so a 64-bit
-      host keeps the pointer pointer-sized. match.py: same structure
-      (cmp NULL guard, ldr +0x48, tail bx to the teardown); the extra
-      prologue/literal-pool indirection is the dispatch boundary, an
-      intentional deviation.
+      51 bl call sites. Raw ARM is exactly `cmp r0,#0; ldrne
+      r0,[r0,#0x48]; bne 0x0837ee98; bx lr`: NULL owner returns NULL;
+      otherwise the child is tail-called into release_object. The child is
+      deliberately not guarded because the callee handles NULL. Ghidra
+      incorrectly inlines the 200-byte tail target into this 16-byte
+      forwarder. The child pointer field is addressed by word index 18 in
+      host fixtures so widened pointers do not overlap adjacent fields.
+
+  - address: 0x0837ee98
+    ghidra: FUN_0837ee98
+    name: release_object
+    size: 200
+    sig: "*mut u8 release_object(object: *mut u8)"
+    module: cxx/release
+    status: ported
+    vars: {param_1: object, iVar3: context, iVar2: remaining_refcount, iVar1: remaining_children}
+    notes: >-
+      NULL returns NULL. Otherwise acquires the context at object+0x00,
+      decrements the plain u16 refcount at object+0x22, and only at zero
+      detaches the object nodes at +0x10 and (when context+0x14 is zero)
+      +0x2c via 0x082d7fdc; invokes the optional context+0xc4 destructor
+      with object and context+0x40; then decrements context+0x48. A zero
+      child count calls 0x082dd800 when context+0x17 is zero or the signed
+      i64 at +0x98 is positive. Finally it drops the context activity count
+      at +0xe0 and returns NULL. Target builds call the three unported
+      context helpers at their fixed retailOS addresses; host-only mocks
+      exercise the direct function's transitions and virtual dispatch.
 
   - address: 0x0806f1a0
     ghidra: switchD_0807a000::caseD_7
