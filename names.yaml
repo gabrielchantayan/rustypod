@@ -20294,6 +20294,31 @@ functions:
       stack iterator slots / add r1,r4,#0x38 / erase call / strb 0 to
       +0x54; the diff is the seam's literal-pool indirect call and the
       crate's fp frame.
+  - address: 0x083c1c3c
+    ghidra: FUN_083c1c3c
+    name: event_list_tree_erase_range
+    size: 224
+    sig: "u32 *event_list_tree_erase_range(u32 *out, void *tree, u32 *first, u32 *last)"
+    module: app/event_list
+    status: ported
+    vars: {param_1: out, param_2: tree, param_3: first, param_4: last, iVar1: first_is_begin, iVar2: last_is_end, piVar3: current_node, local_24: successor}
+    notes: >-
+      libstdc++ _Rb_tree::erase(first,last) specialization behind the event
+      source's historical "event list" name, not std::list::erase. The header
+      pointer is tree+0x10; root/leftmost/rightmost are header+4/+8/+0xc and
+      count is tree+0x14. Writes header through the sret out pointer before
+      every path and returns out. Whole nonempty ranges (first == leftmost,
+      last == header) call subtree destruction @ 0x083c1f10 on root, then
+      restore root=0, leftmost=rightmost=header, and count=0. Other ranges
+      save each node, advance its iterator @ 0x083b5bb0 before invalidating
+      it, and call single-node erase @ 0x083c17d8, forwarding its successor
+      to out. Those three lower runtime calls remain EVENT_LIST_OPS seams;
+      their allocator/value cleanup belongs to 0x083c1648. Host tests cover
+      empty, partial single, partial multiple, and whole-tree releases plus
+      successor, destruction ordering, and header bookkeeping. match.py:
+      original 56 instructions vs Rust 55; same initial header sret,
+      full-range predicate/destruction/reset, and advance-then-erase loop.
+
   - address: 0x082769d4
     ghidra: FUN_082769d4
     name: string_object_format
