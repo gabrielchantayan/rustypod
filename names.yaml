@@ -20415,6 +20415,31 @@ functions:
       strb, return this) with LLVM keeping the flag in r4 and the crate's
       frame-pointer prologue.
 
+  - address: 0x08284118
+    ghidra: FUN_08284118
+    name: context_scope_init_from_handle
+    size: 52
+    sig: "void *context_scope_init_from_handle(void *scope, const void *handle, u8 flag)"
+    module: app/context_scope
+    status: ported
+    vars: {param_1: scope, param_2: handle, param_3: flag}
+    notes: >-
+      Handle-taking constructor for the 20-byte application context-scope
+      record. The 48 code bytes plant descriptor 0x089a6600 at +0x00, clear
+      +0x04, call 0x08283e80 with handle still in r1, store r2's low byte
+      at +0x10, and return scope. The callee is exactly five instructions:
+      ldrb handle+4; cmp zero; ldrne handle+8; moveq zero; tail-b
+      context_scope_capture @ 0x08283f3c. Thus a zero tag selects NULL and
+      does not read handle+8 or APP_ROOT_OBJECT; every nonzero tag selects
+      the 32-bit subject word. Ghidra's 48 omits the descriptor literal at
+      0x08284148, so the true extent is 52 bytes. The name distinguishes
+      this constructor's handle-to-subject adaptation from the direct-subject
+      context_scope_init. Direct callsites pass 12-byte stack handles
+      produced by vtable slot +0x1c0 and scope records to subsequent scoped
+      calls. match.py structural: the port preserves descriptor, +0x04,
+      selected capture, flag, and return ordering while folding the
+      state-free unexported tail adapter at 0x08283e80 into this one port.
+
   - address: 0x08283f3c
     ghidra: FUN_08283f3c
     name: context_scope_capture

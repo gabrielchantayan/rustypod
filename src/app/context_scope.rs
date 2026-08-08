@@ -1,15 +1,15 @@
 //! The application framework's 20-byte **context scope** — the stack-local
 //! RAII record 110 functions build on entry and tear down on exit.
 //!
-//! Three functions live here, all decoded from the raw words in
+//! Four functions live here, all decoded from the raw words in
 //! `work/firmware/osos.dec` (load base 0x08000000) rather than from Ghidra:
 //!
 //! | address | bytes | `bl` | `b` | role |
 //! |---|---|---|---|---|
-//! | 0x082840e8 | 44 code + 4 literal | 110 | 1 | [`context_scope_init`] — the constructor |
-//! | 0x08283f3c | 52 code + 4 literal | 1 | 1 | [`context_scope_capture`] — its one callee |
+//! | 0x082840e8 | 44 code + 4 literal | 110 | 1 | [`context_scope_init`] — the direct-subject constructor |
+//! | 0x08284118 | 48 code + 4 literal | 12 | 0 | [`context_scope_init_from_handle`] — the handle constructor |
+//! | 0x08283f3c | 52 code + 4 literal | 1 | 1 | [`context_scope_capture`] — the shared capture body |
 //! | 0x08284188 | 4 | 120 | 0 | [`context_scope_drop`] — the trivial destructor |
-//!
 //! ## What the record is
 //!
 //! Every one of the 110 constructor sites has the same shape: reserve a
@@ -104,7 +104,7 @@ const WORD_CONTEXT: usize = 2;
 /// Word index of the captured owner id (+0x0c).
 const WORD_OWNER: usize = 3;
 
-/// Byte offset of the flag the constructor stores with `strb r2, [r3, #16]`.
+/// Byte offset of the flag the constructors store with `strb r2, [r3, #16]`.
 pub const CONTEXT_SCOPE_FLAG: usize = 0x10;
 
 /// Offset of the application context inside the root object
@@ -117,6 +117,13 @@ pub const CONTEXT_OWNER_OFFSET: usize = 0xf60;
 
 /// Offset of the id inside the owner record (`ldrne r1, [r1, #0x18]`).
 pub const OWNER_ID_OFFSET: usize = 0x18;
+
+/// Byte offset of the subject-present tag in the handle accepted by
+/// [`context_scope_init_from_handle`] (`ldrb r2, [r1, #4]`).
+const HANDLE_SUBJECT_PRESENT_OFFSET: usize = 0x04;
+
+/// Byte offset of the subject pointer in that handle (`ldrne r1, [r1, #8]`).
+const HANDLE_SUBJECT_OFFSET: usize = 0x08;
 
 /// The application root object: the firmware's global word @ 0x089ca674,
 /// modeled as a crate static (see the module header's deviation note).
@@ -200,8 +207,9 @@ pub unsafe extern "C" fn context_scope_capture(scope: *mut u8, subject: *mut u8)
 /// before the `bl`), and dropping it would change what a mocked or
 /// re-entrant capture observes.
 ///
-/// The sibling constructor @ 0x08284118 (12 `bl` sites) is the same body with
-/// a handle-unwrapping adapter in front; it is not ported here.
+/// The sibling constructor [`context_scope_init_from_handle`] @ 0x08284118
+/// accepts a 12-byte handle, whose byte at +0x04 selects the subject pointer
+/// at +0x08 before this same capture path.
 ///
 /// # Safety
 /// As [`context_scope_capture`]: `scope` must point at
@@ -217,6 +225,51 @@ pub unsafe extern "C" fn context_scope_init(
     words.write(CONTEXT_SCOPE_DESCRIPTOR);
     words.add(WORD_SUBJECT).write(0);
     context_scope_capture(scope, subject);
+    scope.add(CONTEXT_SCOPE_FLAG).write(flag);
+    scope
+}
+
+/// context_scope_init_from_handle — original: `FUN_08284118` @ 0x08284118
+/// (52 bytes: 48 code, 0x08284118..0x08284144, plus the 4-byte descriptor
+/// literal at 0x08284148; **12 direct `bl` call sites**).
+///
+/// Constructs a context scope from a 12-byte handle. It plants the descriptor
+/// at +0x00, clears +0x04, then unwraps `handle`: a zero byte at +0x04 makes
+/// the subject NULL, while any nonzero byte selects the 32-bit subject pointer
+/// at +0x08. It captures that selected subject through
+/// [`context_scope_capture`], stores the low byte of `flag` at +0x10, and
+/// returns `scope` in the ADS C++ constructor convention.
+///
+/// The raw body calls the five-instruction tail adapter at 0x08283e80
+/// (`ldrb/cmp/ldrne/moveq/b context_scope_capture`). That adapter is folded
+/// here instead of exported as another port: it has no state or independent
+/// caller-visible result, and its exact input selection is reproduced before
+/// the existing capture body. There is intentionally no NULL-handle check;
+/// the original first loads `handle + 0x04`.
+///
+/// # Safety
+/// `scope` must point at [`CONTEXT_SCOPE_SIZE`] writable, word-aligned bytes.
+/// `handle` must point at at least 12 readable bytes. If its +0x04 tag is
+/// nonzero, its +0x08 word must be a live 32-bit firmware subject pointer and
+/// [`APP_ROOT_OBJECT`] must name a live root object.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn context_scope_init_from_handle(
+    scope: *mut u8,
+    handle: *const u8,
+    flag: u8,
+) -> *mut u8 {
+    let words = scope.cast::<u32>();
+    words.write(CONTEXT_SCOPE_DESCRIPTOR);
+    words.add(WORD_SUBJECT).write(0);
+
+    let subject = if handle.add(HANDLE_SUBJECT_PRESENT_OFFSET).read() == 0 {
+        core::ptr::null_mut()
+    } else {
+        field(handle, HANDLE_SUBJECT_OFFSET) as usize as *mut u8
+    };
+    context_scope_capture(scope, subject);
+
     scope.add(CONTEXT_SCOPE_FLAG).write(flag);
     scope
 }
@@ -266,6 +319,21 @@ mod tests {
             let mut bytes = [0u8; 4];
             bytes.copy_from_slice(&self.0[index * 4..index * 4 + 4]);
             u32::from_le_bytes(bytes)
+        }
+    }
+
+    /// The adapter reads only the tag byte at +0x04 and the 32-bit subject
+    /// word at +0x08; all other bytes model opaque handle state.
+    #[repr(align(4))]
+    struct Handle([u8; 12]);
+
+    impl Handle {
+        fn new(subject_present: bool, subject: u32) -> Self {
+            let mut handle = Self([FILL; 12]);
+            handle.0[HANDLE_SUBJECT_PRESENT_OFFSET] = u8::from(subject_present);
+            handle.0[HANDLE_SUBJECT_OFFSET..HANDLE_SUBJECT_OFFSET + 4]
+                .copy_from_slice(&subject.to_le_bytes());
+            handle
         }
     }
 
@@ -385,6 +453,68 @@ mod tests {
         assert_eq!(record.word(2), context);
         assert_eq!(record.word(3), 0xdead_beef);
         assert_eq!(record.0[CONTEXT_SCOPE_FLAG], 1);
+    }
+
+    #[test]
+    fn handle_constructor_null_tag_ignores_its_subject_word_and_root_global() {
+        let _lock = APP_ROOT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut record = Record::new();
+        let handle = Handle::new(false, 0xfeed_face);
+
+        let returned = unsafe {
+            // A root that would fault if the adapter's NULL branch touched it.
+            APP_ROOT_OBJECT = 0x1 as *mut u8;
+            let returned =
+                context_scope_init_from_handle(record.0.as_mut_ptr(), handle.0.as_ptr(), 0xa7);
+            APP_ROOT_OBJECT = core::ptr::null_mut();
+            returned
+        };
+
+        assert_eq!(returned, record.0.as_mut_ptr(), "the ADS constructor returns this");
+        assert_eq!(record.word(0), CONTEXT_SCOPE_DESCRIPTOR);
+        assert_eq!(record.word(1), 0, "zero tag selects no subject");
+        assert_eq!(record.word(2), 0, "NULL subject skips root -> context");
+        assert_eq!(record.word(3), 0, "NULL subject has no owner id");
+        assert_eq!(record.0[CONTEXT_SCOPE_FLAG], 0xa7);
+        assert_eq!(
+            &record.0[CONTEXT_SCOPE_FLAG + 1..],
+            &[FILL; 7],
+            "the flag store is one byte wide"
+        );
+    }
+
+    #[test]
+    fn handle_constructor_nonzero_tag_unwraps_and_captures_the_subject() {
+        let _lock = APP_ROOT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(fixture) = RootFixture::map() else {
+            assert!(note_missing_u32_fixture("app::context_scope"));
+            return;
+        };
+
+        let subject = fixture.at(SUBJECT_AT) as usize as u32;
+        let context = fixture.at(CONTEXT_AT) as usize as u32;
+        let owner = fixture.at(OWNER_AT) as usize as u32;
+        fixture.put(ROOT_AT, ROOT_CONTEXT_OFFSET, context);
+        fixture.put(CONTEXT_AT, CONTEXT_OWNER_OFFSET, owner);
+        fixture.put(OWNER_AT, OWNER_ID_OFFSET, 0x0bad_c0de);
+        let handle = Handle::new(true, subject);
+        let mut record = Record::new();
+
+        unsafe {
+            APP_ROOT_OBJECT = fixture.at(ROOT_AT);
+            context_scope_init_from_handle(record.0.as_mut_ptr(), handle.0.as_ptr(), 3);
+            APP_ROOT_OBJECT = core::ptr::null_mut();
+        }
+
+        assert_eq!(record.word(0), CONTEXT_SCOPE_DESCRIPTOR);
+        assert_eq!(record.word(1), subject, "nonzero tag selects handle +0x08");
+        assert_eq!(record.word(2), context);
+        assert_eq!(record.word(3), 0x0bad_c0de);
+        assert_eq!(record.0[CONTEXT_SCOPE_FLAG], 3);
     }
 
     #[test]
