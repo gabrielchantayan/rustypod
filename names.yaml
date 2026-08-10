@@ -8660,7 +8660,6 @@ functions:
       6 bl call sites, binary-scanned. Same body as element_array0_at;
       reads the array at +0xc0.
 
-
   - address: 0x0810dddc
     ghidra: FUN_0810dddc
     name: registry_observer_base_construct
