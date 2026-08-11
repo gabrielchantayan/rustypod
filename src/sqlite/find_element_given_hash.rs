@@ -83,8 +83,8 @@
 //!   struct, the house struct-port convention).
 //!
 //! The two comparators (the literal-pool words are runtime addresses;
-//! both targets sit in Ghidra-undecoded gaps and decode by hand to
-//! the same 28-byte shape, upstream 3.5.x verbatim):
+//! `binCompare` remains unported, while `strCompare` is this module's
+//! `sqlite_hash_str_compare`):
 //!
 //! ```c
 //! static int strCompare(const void *pKey1, int n1, const void *pKey2, int n2){
@@ -97,12 +97,13 @@
 //! }
 //! ```
 //!
-//! - `strCompare` — runtime 0x08386ef8, image 0x08391dd0 (28 bytes,
-//!   directly before strHash @ image 0x08391dec): `mov r12,r1 /
+//! - `strCompare` — runtime 0x08386ef8, whose raw-ARM body is at image
+//!   0x08391dd0 under this subsystem's +0xaed8 skew (28 bytes): `mov r12,r1 /
 //!   cmp r12,r3 / mov r1,r2 / moveq r2,r12 / beq str_nicmp /
-//!   mov r0,#1 / bx lr`, the tail call landing on the ported
-//!   [`super::stricmp::str_nicmp`] @ 0x08384fa0. Identified, not yet
-//!   ported.
+//!   mov r0,#1 / bx lr`. The decompiler's `FUN_08386ef8` 15996-byte extent
+//!   is the unrelated raw image function at that unskewed address, not this
+//!   runtime target. The tail call lands on the ported
+//!   [`super::stricmp::str_nicmp`] @ 0x08384fa0.
 //! - `binCompare` — runtime 0x082ac998, image 0x082b7870 (28 bytes,
 //!   directly before binHash @ image 0x082b788c): the identical shape
 //!   tail-calling the ported `memcmp` @ 0x08030f64. Identified, not
@@ -141,11 +142,38 @@ use super::hash_function::SQLITE_HASH_STRING;
 pub type CompareFn =
     unsafe extern "C" fn(key1: *const u8, len1: i32, key2: *const u8, len2: i32) -> i32;
 
-/// Runtime address of `strCompare` (image 0x08391dd0 under the
-/// +0xaed8 skew — see [`super`]); identified, not yet ported. This is
-/// the word stored in the original's literal pool at 0x082ce364,
-/// selected for [`SQLITE_HASH_STRING`].
+/// Runtime address of `strCompare` in `findElementGivenHash`'s pool.
+/// Its raw-ARM body is the 28-byte sequence at image 0x08391dd0; applying
+/// SQLite's +0xaed8 image/runtime skew produces this address.
 pub const STR_COMPARE_ADDR: usize = 0x0838_6ef8;
+/// sqlite_hash_str_compare — retailOS SQLite `strCompare`, runtime
+/// 0x08386ef8; raw ARM source: `work/firmware/osos.dec` image
+/// 0x08391dd0..0x08391dec (28 bytes).
+///
+/// Preserves the four-register C ABI
+/// `int (const void *key1, int len1, const void *key2, int len2)`.
+/// `ip` holds `len1` for the length gate; unequal lengths return exactly
+/// 1 without dereferencing either key. Equal lengths tail-call SQLite's
+/// ASCII-only [`super::stricmp::str_nicmp`], preserving its NUL-stop and
+/// folded-byte-difference return convention. No deviations.
+///
+/// # Safety
+/// When `len1 == len2`, both key pointers must be valid for the comparison
+/// `str_nicmp` performs. As in retailOS, a NUL in `key1` can terminate the
+/// comparison before that byte count is reached.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn sqlite_hash_str_compare(
+    key1: *const u8,
+    len1: i32,
+    key2: *const u8,
+    len2: i32,
+) -> i32 {
+    if len1 != len2 {
+        return 1;
+    }
+    super::stricmp::str_nicmp(key1, key2, len1)
+}
 
 /// Runtime address of `binCompare` (image 0x082b7870); identified, not
 /// yet ported. This is the word stored in the original's literal pool
@@ -172,22 +200,21 @@ const _: [u8; 0x08] = [0; core::mem::size_of::<Bucket>()];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x04] = [0; core::mem::offset_of!(Bucket, chain)];
 
-/// The unported comparators `find_element_given_hash` selects
-/// between, modeled as the two words of the original's literal pool
-/// (0x082ce360/0x082ce364) so host tests can substitute host-resident
-/// bodies (the stock addresses are only callable on-target). The
-/// slots are raw addresses — a host `const` cannot hold a fn pointer
-/// to firmware — transmuted to [`CompareFn`] at the call site,
-/// exactly the [`super::hash_function`] convention.
+/// The comparators `find_element_given_hash` selects between, modeled as
+/// the two words of the original's literal pool (0x082ce360/0x082ce364)
+/// so host tests can substitute host-resident bodies. The slots are raw
+/// addresses — a host `const` cannot hold a fn pointer to firmware — and
+/// are transmuted to [`CompareFn`] at the call site, exactly the
+/// [`super::hash_function`] convention. `strCompare` itself is now
+/// ported as [`sqlite_hash_str_compare`]; the stock-address default keeps
+/// the caller transparent to a hook planted at the original target.
 #[derive(Clone, Copy)]
 pub struct FindElementHooks {
     /// The `ldreq r6,[0x82ce364]` word: `strCompare` @ runtime
-    /// 0x08386ef8 (UNPORTED — [`STR_COMPARE_ADDR`] is the shipped
-    /// default), the length-gated case-insensitive compare selected
-    /// when `key_class == SQLITE_HASH_STRING`. Its body is
-    /// `if (n1 != n2) return 1; return str_nicmp(p1, p2, n1)` — the
-    /// tail call reaches the ported [`super::stricmp::str_nicmp`], so
-    /// a host substitute is one line of glue.
+    /// 0x08386ef8, the length-gated case-insensitive comparator selected
+    /// when `key_class == SQLITE_HASH_STRING`. Its 28-byte raw body sits
+    /// at image 0x08391dd0 under the +0xaed8 skew and is ported as
+    /// [`sqlite_hash_str_compare`].
     pub str_compare: usize,
     /// The `ldrne r6,[0x82ce360]` word: `binCompare` @ runtime
     /// 0x082ac998 (UNPORTED — [`BIN_COMPARE_ADDR`] is the shipped
@@ -207,10 +234,10 @@ pub const DEFAULT_FIND_ELEMENT_HOOKS: FindElementHooks = FindElementHooks {
     bin_compare: BIN_COMPARE_ADDR,
 };
 
-/// Active model of the comparator select in
 /// [`find_element_given_hash`]. Host tests replace both slots with
-/// host-resident comparators; a later port of the two stock bodies
-/// replaces the defaults without touching this caller.
+/// host-resident comparators. The string slot keeps the stock runtime
+/// address so a target hook at that entry reaches
+/// [`sqlite_hash_str_compare`] without changing this caller.
 pub static mut FIND_ELEMENT_HOOKS: FindElementHooks = DEFAULT_FIND_ELEMENT_HOOKS;
 
 /// Reads a comparator slot and retypes it for the call. Volatile so
@@ -316,9 +343,7 @@ pub(crate) mod tests {
         unsafe { (*core::ptr::addr_of!(COMPARE_CALLS)).clone() }
     }
 
-    /// Host-resident `strCompare` substitute, faithful to the stock
-    /// shape: length gate first, then a case-insensitive byte compare
-    /// through the ported [`crate::sqlite::stricmp::str_nicmp`].
+    /// Host-resident recording wrapper around the ported `strCompare`.
     unsafe extern "C" fn host_str_compare(
         key1: *const u8,
         len1: i32,
@@ -326,10 +351,7 @@ pub(crate) mod tests {
         len2: i32,
     ) -> i32 {
         record((key1, len1, key2, len2));
-        if len1 != len2 {
-            return 1;
-        }
-        crate::sqlite::stricmp::str_nicmp(key1, key2, len1)
+        sqlite_hash_str_compare(key1, len1, key2, len2)
     }
 
     /// Host-resident `binCompare` substitute: length gate, then a raw
@@ -436,6 +458,41 @@ pub(crate) mod tests {
             DEFAULT_FIND_ELEMENT_HOOKS.bin_compare,
             BIN_COMPARE_ADDR,
             "bin_compare ships the stock binCompare runtime address (pool word @ 0x082ce360)"
+        );
+    }
+
+    #[test]
+    fn sqlite_hash_str_compare_returns_one_on_length_mismatch_before_reads() {
+        let invalid = core::ptr::dangling::<u8>();
+        assert_eq!(
+            unsafe { sqlite_hash_str_compare(invalid, 2, invalid, 3) },
+            1,
+            "the cmp n1,n2 gate returns literal 1 without loading either key"
+        );
+    }
+
+    #[test]
+    fn sqlite_hash_str_compare_folds_ascii_only_at_equal_lengths() {
+        assert_eq!(
+            unsafe { sqlite_hash_str_compare(b"AlPhA".as_ptr(), 5, b"aLpHa".as_ptr(), 5) },
+            0,
+            "ASCII case differences fold through sqlite3UpperToLower"
+        );
+        assert_eq!(
+            unsafe { sqlite_hash_str_compare(b"\xc0".as_ptr(), 1, b"\xe0".as_ptr(), 1) },
+            -0x20,
+            "bytes outside ASCII do not use a locale or Latin-1 collation"
+        );
+    }
+
+    #[test]
+    fn sqlite_hash_str_compare_preserves_str_nicmp_nul_boundary() {
+        assert_eq!(
+            unsafe {
+                sqlite_hash_str_compare(b"A\0tail".as_ptr(), 6, b"a\0other".as_ptr(), 6)
+            },
+            0,
+            "the delegated str_nicmp stops at key1's NUL despite the equal length"
         );
     }
 

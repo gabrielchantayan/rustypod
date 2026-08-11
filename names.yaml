@@ -12854,6 +12854,33 @@ functions:
       BOTH addresses to the single `load_be32` symbol in util/beload.rs.
       Its write twin is store_be32 @ 0x083816cc (sqlite3Put4byte).
 
+  - address: 0x08391dd0
+    ghidra: raw ARM entry (runtime 0x08386ef8)
+    name: sqlite_hash_str_compare
+    size: 28
+    sig: "int sqlite_hash_str_compare(const void *key1, int len1, const void *key2, int len2)"
+    module: sqlite/find_element_given_hash
+    status: ported
+    vars: {param_1: key1, param_2: len1, param_3: key2, param_4: len2,
+      r12: saved_len1}
+    notes: >-
+      SQLite 3.5.x hash.c's strCompare, selected for SQLITE_HASH_STRING
+      by findElementGivenHash's literal at 0x082ce364. The literal is
+      the runtime address 0x08386ef8; its actual raw body is at image
+      0x08391dd0 under sqlite/mod.rs's +0xaed8 image/runtime skew. This
+      distinction resolves the decompiler's erroneous 15996-byte
+      FUN_08386ef8 extent: raw ARM at unskewed 0x08386ef8 is unrelated
+      code. `osos.dec` 0x08391dd0..0x08391dec is exactly seven ARM
+      instructions: mov r12,r1; cmp r12,r3; mov r1,r2; moveq r2,r12;
+      beq sqlite3StrNICmp @ 0x08384fa0; movne r0,#1; bx lr. Thus it
+      preserves the ABI `int(const void*,int,const void*,int)`, returns
+      literal 1 when the lengths differ without reading either key, and
+      otherwise tail-calls SQLite's ASCII-only str_nicmp with
+      (key1,key2,len1). The port reuses sqlite::stricmp::str_nicmp,
+      including its left-NUL stop and folded-byte-difference convention.
+      Host tests cover the unequal-length no-read gate, equal-length ASCII
+      folding, non-Latin-1 byte boundary, and the delegated NUL boundary.
+
   # --- Scouted in 0x08300000-0x083fffff, identified only ---
   - address: 0x08391dec
     ghidra: FUN_08391dec
