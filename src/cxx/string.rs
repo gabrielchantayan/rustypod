@@ -362,6 +362,31 @@ pub unsafe extern "C" fn cxx_string_pair_destroy(
     cxx_string_release(core::ptr::addr_of_mut!((*record).first));
     record
 }
+/// cxx_string_pair_assign — original @ 0x0825c91c (36 bytes).
+///
+/// Source: `ipod-decomp/decomp/c/025/0825c91c_FUN_0825c91c.c`. The raw ARM
+/// ABI accepts `destination` in r0 and `source` in r1, calls
+/// [`cxx_string_assign`] on their +0x00 members and then their +0x04 members,
+/// restores the saved destination pointer to r0, and returns it. Delegating
+/// both calls preserves the COW string assignment's ownership and
+/// self-assignment behavior without reimplementing it.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_string_pair_assign(
+    destination: *mut CxxStringPair,
+    source: *const CxxStringPair,
+) -> *mut CxxStringPair {
+    cxx_string_assign(
+        core::ptr::addr_of_mut!((*destination).first),
+        core::ptr::addr_of!((*source).first),
+    );
+    cxx_string_assign(
+        core::ptr::addr_of_mut!((*destination).second),
+        core::ptr::addr_of!((*source).second),
+    );
+    destination
+}
+
 
 /// cxx_string_pair_range_destroy — original @ 0x083e2f48 (48 bytes).
 ///
@@ -809,6 +834,7 @@ pub unsafe extern "C" fn cxx_string_assign_cstr(
 /// is copied through the mutation core instead, and only that path needs
 /// (and has) the `this == &src` guard. Returns `string`.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn cxx_string_assign(
     string: *mut *mut u8,
     src: *const *mut u8,
@@ -1243,6 +1269,67 @@ mod tests {
             assert_eq!(freed(), &[second_rep.cast(), first_rep.cast()]);
         }
     }
+    #[test]
+    fn pair_assigns_matching_members_in_first_then_second_order_and_returns_destination() {
+        let _guard = arena();
+        unsafe {
+            let mut source_first: *mut u8 = core::ptr::null_mut();
+            let mut source_second: *mut u8 = core::ptr::null_mut();
+            let mut destination_first: *mut u8 = core::ptr::null_mut();
+            let mut destination_second: *mut u8 = core::ptr::null_mut();
+            build(&mut source_first, b"source first");
+            build(&mut source_second, b"source second");
+            build(&mut destination_first, b"destination first");
+            build(&mut destination_second, b"destination second");
+            let destination_first_rep = data_rep(destination_first);
+            let destination_second_rep = data_rep(destination_second);
+            let source = CxxStringPair {
+                first: source_first,
+                second: source_second,
+            };
+            let mut destination = CxxStringPair {
+                first: destination_first,
+                second: destination_second,
+            };
+            let destination_ptr = core::ptr::addr_of_mut!(destination);
+
+            assert_eq!(
+                cxx_string_pair_assign(destination_ptr, &source),
+                destination_ptr
+            );
+            assert_eq!(destination.first, source.first);
+            assert_eq!(destination.second, source.second);
+            assert_eq!((*data_rep(source.first)).refcount, 1);
+            assert_eq!((*data_rep(source.second)).refcount, 1);
+            assert_eq!(
+                freed(),
+                &[destination_first_rep.cast(), destination_second_rep.cast()]
+            );
+        }
+    }
+
+    #[test]
+    fn pair_assign_to_self_preserves_both_members() {
+        let _guard = arena();
+        unsafe {
+            let mut first: *mut u8 = core::ptr::null_mut();
+            let mut second: *mut u8 = core::ptr::null_mut();
+            build(&mut first, b"first");
+            build(&mut second, b"second");
+            let first_data = first;
+            let second_data = second;
+            let mut record = CxxStringPair { first, second };
+            let record_ptr = core::ptr::addr_of_mut!(record);
+
+            assert_eq!(cxx_string_pair_assign(record_ptr, record_ptr), record_ptr);
+            assert_eq!(record.first, first_data);
+            assert_eq!(record.second, second_data);
+            assert_eq!((*data_rep(record.first)).refcount, 0);
+            assert_eq!((*data_rep(record.second)).refcount, 0);
+            assert!(freed().is_empty());
+        }
+    }
+
 
     #[test]
     fn pair_range_destroy_leaves_an_empty_range_untouched() {

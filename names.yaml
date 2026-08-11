@@ -12286,6 +12286,23 @@ functions:
       record + 4 then record + 0, restores the saved record pointer to r0,
       and returns it. The pair fields are otherwise untouched.
 
+  - address: 0x0825c91c
+    ghidra: FUN_0825c91c
+    name: cxx_string_pair_assign
+    size: 36
+    sig: "CxxStringPair *cxx_string_pair_assign(CxxStringPair *destination, const CxxStringPair *source)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: destination, param_2: source}
+    renames: {FUN_083d8d1c: cxx_string_assign}
+    notes: >-
+      Raw ARM receives destination in r0 and source in r1, calls
+      cxx_string_assign @ 0x083d8d1c first for their COW-string fields at
+      +0x00 and then for their fields at +0x04, restores the saved
+      destination pointer to r0, and returns it. It deliberately delegates
+      to the COW assignment so source-reference ownership and
+      self-assignment behavior are unchanged.
+
   - address: 0x083e2f48
     ghidra: FUN_083e2f48
     name: cxx_string_pair_range_destroy
