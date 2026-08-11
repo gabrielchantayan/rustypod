@@ -1,4 +1,5 @@
 //! ADS stdio stream layer (fread et al., semihost-backed).
+pub mod cg_stack_slot;
 pub mod fread;
 pub mod ftell;
 pub mod fwrite;

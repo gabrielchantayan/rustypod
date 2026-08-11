@@ -25448,3 +25448,28 @@ INS.PRE 24609:
       src/app/vtable_set.rs::record_read_full_chain_dispatches_all_fields_in_protocol_order
       / record_read_short_circuits_at_every_failing_stage
       / record_read_finish_result_is_the_return_value.
+
+  - address: 0x082cf274
+    ghidra: FUN_082cf274
+    name: cg_operand_stack_offset
+    size: 84
+    sig: "i32 cg_operand_stack_offset(cg_codegen_t *codegen, cg_stack_operand_t *operand)"
+    module: stdio/cg_stack_slot
+    status: ported
+    vars: {param_1/r0: codegen, param_2/r1: operand, "[codegen + 0x208]": stack_slot_context, "[operand + 0x04]": canonical_parent, "[operand + 0x14]": cached_stack_offset, "[context + 0x04]": stack_slot_allocator, "[allocator + 0x28]": stack_slot_cursor}
+    notes: >-
+      JIT operand stack-slot resolver. A signed cached frame offset at
+      operand+0x14 is returned directly once bound. Otherwise the
+      canonical parent (operand+0x04) owns the cache; when that too is
+      -1, the stack-slot allocator through codegen+0x208 advances its
+      +0x28 cursor by four and the parent receives -(new_cursor + 0x28).
+      The child copies that parent value, so every operand in one
+      canonical set shares one lazily allocated four-byte frame slot.
+      Raw ARM, Ghidra C, and both emitters (0x082ccbb0 / 0x083685f0)
+      agree on the loads, stores, sentinel, and signed result. Host tests
+      cover existing-parent reuse, first allocation and sibling sharing,
+      poisoned adjacent target-word slots, and 32-bit cursor wraparound.
+      match.py (exit 1, diff expected): same 21-instruction control/data
+      shape and every recovered target offset; LLVM emits an early
+      `bxne lr` for the already-bound path and materializes
+      `-(cursor + 0x28)` as `mvn #43; sub` rather than `add #40; rsb`.
