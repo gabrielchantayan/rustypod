@@ -12145,6 +12145,33 @@ functions:
       reproduced by the port. Direct glyph-loader callers at 0x0803d068,
       0x08080254, 0x08086ad8, and 0x080ae5dc pass a metrics record.
 
+  - address: 0x082cfe68
+    ghidra: FUN_082cfe68
+    name: ft_validator_init
+    size: 20
+    sig: "void ft_validator_init(FtValidatorPrefix *validator, u32 base, u32 limit, u8 level)"
+    module: util/validator
+    status: ported
+    vars:
+      param_1/r0: validator
+      param_2/r1: base
+      param_3/r2: limit
+      param_4/r3: level
+      param_1[0]: base
+      param_1[1]: limit
+      param_1[2]+0: level
+      param_1[3]: error
+    notes: >-
+      FreeType `ft_validator_init` from ftobjs.c. Raw ARM is exactly
+      `stmia r0,{r1,r2}; strb r3,[r0,#8]; str r1,[r0,#12]; bx lr`,
+      initializing the 16-byte prefix of FT_ValidatorRec: two target-width
+      table-bound addresses, the one-byte FT_ValidationLevel, and
+      FT_Err_Ok. Bytes +9..+11 (the word-alignment padding) are deliberately
+      untouched. The two direct CMap-table callers at 0x08078c70 and
+      0x080b1bf4 pass a subtable base, its limit, and level 0. Its adjacent
+      0x082cfe58 sibling first allocates a containing record, then invokes
+      this routine on the validator prefix at +0x10.
+
 
   - address: 0x08292e6c
     ghidra: FUN_08292e6c

@@ -24,5 +24,6 @@ pub mod u16_pair_copy;
 pub mod u8_pair_copy;
 pub mod utoa;
 pub mod video_engine;
+pub mod validator;
 pub mod vtable_query;
 pub mod wstr_casecmp;
