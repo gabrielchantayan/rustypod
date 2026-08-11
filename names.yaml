@@ -6669,9 +6669,9 @@ functions:
 
   - address: 0x082d3d7c
     ghidra: FUN_082d3d7c
-    name: ft_platform_stream_io
+    name: ft_platform_stream_read
     size: 96
-    sig: "u32 ft_platform_stream_io(FtStream *stream, u32 offset, u8 *buffer, u32 count)"
+    sig: "u32 ft_platform_stream_read(FtStream *stream, u32 offset, u8 *buffer, u32 count)"
     module: ft/system
     status: ported
     vars: {param_1: stream, param_2: offset, param_3: buffer, param_4: count, uVar2: handle, local_1c: transferred, iVar1: read_status}
