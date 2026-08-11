@@ -17072,14 +17072,33 @@ functions:
       grand-base ctor 0x0813eee0 at +4, clears +0xac/+0xb0 and the low
       byte at +0xb4, zeroes +4..+0x97 (0x94 bytes through
       0x08037db8), and returns the grand-base result minus four. There
-      are no null checks or failure branches. The direct grand-base call
-      is a PAIR_HEADER_BASE_OPS seam until 0x0813eee0 is ported; its
-      default preserves only that function's pointer-return contract.
-      Host tests prove vtable-before-chain ordering, post-chain clears
-      and zero-fill, and dataflow from a shifted grand-base result.
-      match.py structural: vtable store, grand-base call (table-load blx
-      for the unresolved direct bl), relative field stores, memclear,
-      and result-minus-one-word return are retained.
+      are no null checks or failure branches. The now-ported grand-base
+      wrapper calls its own unresolved body constructor through
+      PAIR_HEADER_BASE_OPS. Host tests prove vtable-before-chain ordering,
+      post-chain clears and zero-fill, and dataflow from a shifted
+      grand-base-body result. match.py structural: vtable store,
+      grand-base call, relative field stores, memclear, and
+      result-minus-one-word return are retained.
+
+  - address: 0x0813eee0
+    ghidra: FUN_0813eee0
+    name: pair_header_grand_base_construct
+    size: 20
+    sig: "u32 *pair_header_grand_base_construct(u32 *base)"
+    module: cxx/pair_header
+    status: ported
+    vars: {param_1: base, iVar1: grand_base_body}
+    notes: >-
+      Five-instruction wrapper around the unported constructor
+      FUN_08185b98. It calls that constructor on the +0x2c embedded
+      subobject and returns the callee's pointer minus 0x2c; no null or
+      error path exists. Reference C is
+      decomp/c/012/0813eee0_FUN_0813eee0.c. Raw retail disassembly is
+      `push {r4,lr}; add r0,#0x2c; bl 0x08185b98; sub r0,#0x2c; pop
+      {r4,pc}`. Focused host tests install the body seam, prove it receives
+      base+0x2c, and prove its shifted return is rebased by -0x2c.
+      match.py structural confirms the call and matching add/sub pointer
+      dataflow; the seam replaces only the unresolved direct call.
 
   - address: 0x08124a38
     ghidra: FUN_08124a38
@@ -17103,8 +17122,9 @@ functions:
       was a mis-addressed note: the clamp lives at 0x083d5eb4/0x083d5ed8
       and is already ported as util/three_pointer_select. The former
       PairHeaderOps base-constructor seam is now cut over to the direct
-      pair_header_base_construct port; only its unported grand-base
-      dependency 0x0813eee0 remains behind PAIR_HEADER_BASE_OPS.
+      pair_header_base_construct and pair_header_grand_base_construct
+      ports; only the grand-base body dependency 0x08185b98 remains
+      behind PAIR_HEADER_BASE_OPS.
 
   - address: 0x083dc0e0
     ghidra: FUN_083dc0e0
