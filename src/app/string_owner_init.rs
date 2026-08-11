@@ -1,39 +1,63 @@
-//! `app_string_owner_initialize` — original: `FUN_0811c138` @ 0x0811c138
-//! (32 bytes: 28 code + the 4-byte vtable literal at 0x0811c158).
+//! `string_owner_embedded_init` — original: `FUN_0827735c` @ 0x0827735c
+//! (44 bytes: 40 code + the 4-byte vtable literal at 0x08277384).
 //!
-//! This is the initializer paired with `app_string_owner_destroy` at
-//! 0x0811c15c: both plant the same outer vtable at +0, leave the opaque
-//! caller-supplied word at +4, and operate on the embedded string-like object
-//! at +8. It stores its second argument at +4, forwards its third argument to
-//! the unported `FUN_0827735c` constructor for that embedded object, and
-//! returns the helper result less eight. The subtraction uses ARM's wrapping
-//! pointer arithmetic.
+//! The StringObject constructor used by application StringOwner instances.
+//! It plants the class vtable, clears the raw payload word, then forwards the
+//! caller's C-string payload through `string_object_assign_payload` @
+//! 0x08276474. ARM preserves `r1` from entry to the `bl`, although Ghidra's C
+//! declaration omits it; the raw ABI is therefore `(StringObject *this, const
+//! char *payload) -> StringObject *`. It returns its saved `this` after the
+//! helper, rather than the helper's (void) result.
 //!
-//! `FUN_0827735c` is intentionally not ported here. Its operation slot is the
-//! application-layer dispatch boundary: the default establishes the known
-//! `StringObject` base layout, while a complete string-construction port can
-//! replace the slot with the exact argument-consuming constructor. Sources:
-//! `ipod-decomp/decomp/c/010/0811c138_FUN_0811c138.c`,
-//! `ipod-decomp/decomp/c/026/0827735c_FUN_0827735c.c`, and the instruction
-//! sequence at 0x0811c138 in `ipod-decomp/decomp/osos.asm`.
+//! `app_string_owner_initialize` @ 0x0811c138 owns the outer object: it
+//! stores its vtable and owner word, invokes this constructor at its embedded
+//! StringObject +8, then returns the result less eight. The application
+//! operation seam below represents that entire already-ported constructor so
+//! wrapper tests can record its ABI without substituting the payload helper.
 
 use crate::app::string_owner::{APP_STRING_OWNER_STRING, APP_STRING_OWNER_VTABLE};
-use crate::cxx::string_object::{string_default_construct, StringObject};
+use crate::cxx::string_object::{
+    string_object_assign_payload, StringObject, STRING_OBJECT_VTABLE,
+};
 
-/// ABI of the unported embedded-object constructor at 0x0827735c.
+/// string_owner_embedded_init — original: `FUN_0827735c` @ 0x0827735c
+/// (44 bytes: 40 code + the 4-byte vtable literal at 0x08277384).
+///
+/// Initializes raw StringObject storage from `payload`: first plant the
+/// 0x089a6044 class-vtable literal, then clear the payload word so the shared
+/// assignment path cannot release uninitialized storage, then call
+/// [`string_object_assign_payload`] @ 0x08276474. The saved `this` is
+/// returned regardless of the assignment result.
+///
+/// Deviation: as elsewhere in `cxx/string_object.rs`, the ROM vtable literal
+/// is represented by [`STRING_OBJECT_VTABLE`] so host tests have a valid
+/// callable-object layout.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_owner_embedded_init(
+    this: *mut StringObject,
+    payload: *const u8,
+) -> *mut StringObject {
+    // Volatile preserves the firmware's vtable-then-payload store order; LLVM
+    // otherwise legally swaps independent non-volatile field stores.
+    core::ptr::addr_of_mut!((*this).vtable).write_volatile(&STRING_OBJECT_VTABLE);
+    core::ptr::addr_of_mut!((*this).payload).write_volatile(core::ptr::null_mut());
+    string_object_assign_payload(this, payload);
+    this
+}
+
+/// ABI of the ported embedded-object constructor at 0x0827735c.
 pub type StringObjectInitialize = unsafe extern "C" fn(
     string: *mut StringObject,
     argument: *mut u8,
 ) -> *mut StringObject;
 
-/// Minimal default for the unported constructor: the verified base layout at
-/// +0/+4 is established by the already-ported default constructor. Its
-/// argument-consuming virtual dispatch remains owned by this operation seam.
+/// Default embedded-object constructor: the exact port at 0x0827735c.
 unsafe extern "C" fn default_string_object_initialize(
     string: *mut StringObject,
-    _argument: *mut u8,
+    argument: *mut u8,
 ) -> *mut StringObject {
-    string_default_construct(string)
+    string_owner_embedded_init(string, argument)
 }
 
 /// External operation used by [`app_string_owner_initialize`].
@@ -42,8 +66,8 @@ pub struct AppStringOwnerInitializeOps {
     pub initialize_string_object: StringObjectInitialize,
 }
 
-/// Active embedded-object constructor. Host tests install a recording helper
-/// to prove the wrapper ABI without claiming to port 0x0827735c.
+/// Active embedded-object constructor. Host tests install a recording
+/// constructor to prove the wrapper ABI; firmware uses the exact port.
 pub static mut APP_STRING_OWNER_INITIALIZE_OPS: AppStringOwnerInitializeOps =
     AppStringOwnerInitializeOps {
         initialize_string_object: default_string_object_initialize,
@@ -119,6 +143,22 @@ mod tests {
             };
         }
         (lock, RestoreOps)
+    }
+
+    #[test]
+    fn embedded_constructor_plants_the_vtable_clears_raw_payload_and_returns_this() {
+        let mut storage = core::mem::MaybeUninit::<StringObject>::uninit();
+        let this = storage.as_mut_ptr();
+        unsafe {
+            assert_eq!(
+                string_owner_embedded_init(this, core::ptr::null()),
+                this,
+                "the post-call mov r0, r4 returns the saved receiver"
+            );
+            let object = storage.assume_init();
+            assert_eq!(object.vtable, &STRING_OBJECT_VTABLE as *const _);
+            assert!(object.payload.is_null(), "the payload clear precedes the NULL helper path");
+        }
     }
 
     #[test]

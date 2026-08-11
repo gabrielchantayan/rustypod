@@ -19988,6 +19988,34 @@ functions:
       match.py structural: same save-this / plant-vtable / NULL-payload /
       call-assign / return-this shape; the diff is LLVM reordering the
       two stores and adding the crate's fp frame.
+  - address: 0x0827735c
+    ghidra: FUN_0827735c
+    name: string_owner_embedded_init
+    size: 44
+    sig: "StringObject *string_owner_embedded_init(StringObject *this, const char *payload)"
+    module: app/string_owner_init
+    status: ported
+    renames:
+      param_1: this
+      param_2: payload
+      DAT_08277384: STRING_OBJECT_VTABLE_ADDRESS
+      FUN_08276474: string_object_assign_payload
+    notes: >-
+      Source: decomp/c/026/0827735c_FUN_0827735c.c. Raw ARM is
+      `push {r4,lr}; mov r4,r0; ldr r0,[0x08277384] (0x089a6044);
+      str r0,[r4]; mov r0,#0; str r0,[r4,#4]; mov r0,r4; bl
+      0x08276474; mov r0,r4; pop {r4,pc}`: 40 code bytes plus the
+      vtable literal at 0x08277384. Ghidra omits param_2, but r1 is
+      unchanged from entry through the call, so the incoming C-string
+      payload is passed directly to the already-ported
+      string_object_assign_payload. The vtable store and payload clear
+      precede that call, making raw storage safe for the helper's virtual
+      replacement path; this is returned regardless of its void result.
+      The port uses the cxx module's modeled STRING_OBJECT_VTABLE rather
+      than the ROM pointer. Focused tests cover vtable/payload initialization,
+      returned receiver, and the existing outer-wrapper forwarding seam.
+      match.py structural: save-this, vtable store, payload clear, payload
+      helper call, and saved-this return.
   - address: 0x082773e0
     ghidra: FUN_082773e0
     name: string_object_copy_construct
