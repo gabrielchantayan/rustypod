@@ -26,50 +26,88 @@
 //! derived trailing word at +0xc4. The class itself is unidentified —
 //! the name is structural (see the names.yaml notes).
 
-/// Indirect dispatch for the unported grand-base body constructor
-/// `FUN_08185b98`. [`pair_header_grand_base_construct`] wraps this target:
-/// it passes the base's +0x2c subobject and rebases the returned pointer.
+/// Host-test dispatch for the still-unported `FUN_082ab398` grand-base-body
+/// constructor. `pair_header_grand_base_body_construct` is the direct port
+/// of its caller and supplies this fixed ARM ABI argument set.
 #[derive(Clone, Copy)]
-pub struct PairHeaderBaseOps {
-    /// Constructor for the grand-base body at `base + 0x2c`.
-    pub construct_grand_base_body: unsafe extern "C" fn(base: *mut u32) -> *mut u32,
+pub struct PairHeaderGrandBaseBodyOps {
+    /// Constructs `this` with the original fixed arguments.
+    pub construct: unsafe extern "C" fn(
+        this: *mut u32,
+        field_count: u32,
+        field_size: u32,
+        type_descriptor: u32,
+        flags: u32,
+    ) -> *mut u32,
 }
 
-/// Default stand-in for `FUN_08185b98`. It preserves that function's
-/// pointer-return contract but does not initialize its fields.
-unsafe extern "C" fn missing_construct_grand_base_body(base: *mut u32) -> *mut u32 {
-    base
+/// Default stand-in for the still-unported `FUN_082ab398`. It preserves the
+/// pointer-return contract but does not initialize any fields.
+unsafe extern "C" fn missing_construct_grand_base_body(
+    this: *mut u32,
+    _field_count: u32,
+    _field_size: u32,
+    _type_descriptor: u32,
+    _flags: u32,
+) -> *mut u32 {
+    this
 }
 
-/// The active unported-grand-base-body slot. Target initialization must
-/// replace this model before complete grand-base construction is required.
-pub static mut PAIR_HEADER_BASE_OPS: PairHeaderBaseOps = PairHeaderBaseOps {
-    construct_grand_base_body: missing_construct_grand_base_body,
-};
+/// The active `FUN_082ab398` host-test seam. It remains only because that
+/// callee has not yet been ported.
+pub static mut PAIR_HEADER_GRAND_BASE_BODY_OPS: PairHeaderGrandBaseBodyOps =
+    PairHeaderGrandBaseBodyOps {
+        construct: missing_construct_grand_base_body,
+    };
 
 /// Byte offset of the `FUN_08185b98` subobject in the grand base.
 const GRAND_BASE_BODY_OFFSET_WORDS: usize = 0x2c / 4;
+/// Fixed direct-call arguments recovered from the retail ARM ABI.
+const GRAND_BASE_BODY_FIELD_COUNT: u32 = 4;
+const GRAND_BASE_BODY_FIELD_SIZE: u32 = 0x14;
+const GRAND_BASE_BODY_TYPE_DESCRIPTOR: u32 = 0x0828_3a74;
+const GRAND_BASE_BODY_FLAGS: u32 = 0;
+
+/// pair_header_grand_base_body_construct — original: `FUN_08185b98` @
+/// `0x08185b98` (16 bytes; source:
+/// `ipod-decomp/decomp/c/015/08185b98_FUN_08185b98.c`).
+///
+/// Tail-calls the grand-base body constructor: the retail entry loads
+/// `0x08283a74`, sets the remaining fixed arguments to `4`, `0x14`, and
+/// `0`, enters the ARM ABI adapter at `0x082ab234`, and returns the exact
+/// result from its direct `0x082ab398` call. This port calls that still
+/// unported target through the narrow host-test seam with the same argument
+/// order and return dataflow; it performs no stores or null checks.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn pair_header_grand_base_body_construct(this: *mut u32) -> *mut u32 {
+    let construct = core::ptr::addr_of!(PAIR_HEADER_GRAND_BASE_BODY_OPS.construct).read_volatile();
+    construct(
+        this,
+        GRAND_BASE_BODY_FIELD_COUNT,
+        GRAND_BASE_BODY_FIELD_SIZE,
+        GRAND_BASE_BODY_TYPE_DESCRIPTOR,
+        GRAND_BASE_BODY_FLAGS,
+    )
+}
 
 /// pair_header_grand_base_construct — original: `FUN_0813eee0` @
 /// `0x0813eee0` (20 bytes; source:
 /// `ipod-decomp/decomp/c/012/0813eee0_FUN_0813eee0.c`).
 ///
-/// Constructs the grand base by calling its unported body constructor
-/// `FUN_08185b98` on the +0x2c subobject, then returns that callee's result
-/// rebased by -0x2c. The complete ARM body is `push {r4,lr}; add r0,#0x2c;
-/// bl 0x08185b98; sub r0,#0x2c; pop {r4,pc}`: it has no null check and
-/// preserves the callee's returned pointer rather than assuming it equals
-/// the argument.
+/// Constructs the grand base by calling [`pair_header_grand_base_body_construct`]
+/// on the +0x2c subobject, then returns that callee's result rebased by -0x2c.
+/// The complete ARM body is `push {r4,lr}; add r0,#0x2c; bl 0x08185b98; sub
+/// r0,#0x2c; pop {r4,pc}`: it has no null check and preserves the callee's
+/// returned pointer rather than assuming it equals the argument.
 ///
-/// Deviation: the unported direct callee uses [`PAIR_HEADER_BASE_OPS`], the
-/// established local seam; the function's +0x2c argument and -0x2c return
-/// rebase are otherwise direct translations.
+/// Deviation: the still-unported direct callee `FUN_082ab398` is isolated
+/// behind [`PAIR_HEADER_GRAND_BASE_BODY_OPS`] for host tests; the +0x2c
+/// argument and -0x2c return rebase are otherwise direct translations.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn pair_header_grand_base_construct(base: *mut u32) -> *mut u32 {
-    let construct_grand_base_body =
-        core::ptr::addr_of!(PAIR_HEADER_BASE_OPS.construct_grand_base_body).read_volatile();
-    construct_grand_base_body(base.add(GRAND_BASE_BODY_OFFSET_WORDS))
+    pair_header_grand_base_body_construct(base.add(GRAND_BASE_BODY_OFFSET_WORDS))
         .sub(GRAND_BASE_BODY_OFFSET_WORDS)
 }
 
@@ -170,9 +208,9 @@ mod tests {
     struct OpsGuard;
 
     impl OpsGuard {
-        fn install(ops: PairHeaderBaseOps) -> Self {
+        fn install(ops: PairHeaderGrandBaseBodyOps) -> Self {
             unsafe {
-                core::ptr::addr_of_mut!(PAIR_HEADER_BASE_OPS).write_volatile(ops);
+                core::ptr::addr_of_mut!(PAIR_HEADER_GRAND_BASE_BODY_OPS).write_volatile(ops);
             }
             OpsGuard
         }
@@ -181,22 +219,48 @@ mod tests {
     impl Drop for OpsGuard {
         fn drop(&mut self) {
             unsafe {
-                core::ptr::addr_of_mut!(PAIR_HEADER_BASE_OPS).write_volatile(
-                    PairHeaderBaseOps {
-                        construct_grand_base_body: missing_construct_grand_base_body,
+                core::ptr::addr_of_mut!(PAIR_HEADER_GRAND_BASE_BODY_OPS).write_volatile(
+                    PairHeaderGrandBaseBodyOps {
+                        construct: missing_construct_grand_base_body,
                     },
                 );
             }
         }
     }
 
+    static mut BODY_CALLS: usize = 0;
     static mut SEEN_GRAND_BASE: usize = 0;
+    static mut SEEN_FIELD_COUNT: u32 = 0;
+    static mut SEEN_FIELD_SIZE: u32 = 0;
+    static mut SEEN_TYPE_DESCRIPTOR: u32 = 0;
+    static mut SEEN_FLAGS: u32 = 0;
     static mut SEEN_VTABLE: u32 = 0;
     static mut SEEN_PREZERO_WORD: u32 = 0;
     static mut SEEN_PRECLEAR_WORD: u32 = 0;
 
-    unsafe extern "C" fn recording_grand_base_body(base: *mut u32) -> *mut u32 {
+    unsafe fn reset_recording() {
+        core::ptr::addr_of_mut!(BODY_CALLS).write_volatile(0);
+        core::ptr::addr_of_mut!(SEEN_GRAND_BASE).write_volatile(0);
+        core::ptr::addr_of_mut!(SEEN_FIELD_COUNT).write_volatile(0);
+        core::ptr::addr_of_mut!(SEEN_FIELD_SIZE).write_volatile(0);
+        core::ptr::addr_of_mut!(SEEN_TYPE_DESCRIPTOR).write_volatile(0);
+        core::ptr::addr_of_mut!(SEEN_FLAGS).write_volatile(0);
+    }
+
+    unsafe extern "C" fn recording_grand_base_body(
+        base: *mut u32,
+        field_count: u32,
+        field_size: u32,
+        type_descriptor: u32,
+        flags: u32,
+    ) -> *mut u32 {
+        let calls = core::ptr::addr_of!(BODY_CALLS).read_volatile();
+        core::ptr::addr_of_mut!(BODY_CALLS).write_volatile(calls + 1);
         core::ptr::addr_of_mut!(SEEN_GRAND_BASE).write_volatile(base as usize);
+        core::ptr::addr_of_mut!(SEEN_FIELD_COUNT).write_volatile(field_count);
+        core::ptr::addr_of_mut!(SEEN_FIELD_SIZE).write_volatile(field_size);
+        core::ptr::addr_of_mut!(SEEN_TYPE_DESCRIPTOR).write_volatile(type_descriptor);
+        core::ptr::addr_of_mut!(SEEN_FLAGS).write_volatile(flags);
         let grand_base = base.sub(GRAND_BASE_BODY_OFFSET_WORDS);
         let pair_header_base = grand_base.sub(1);
         core::ptr::addr_of_mut!(SEEN_VTABLE).write_volatile(pair_header_base.read());
@@ -206,33 +270,79 @@ mod tests {
         base
     }
 
-    unsafe extern "C" fn shifted_grand_base_body(base: *mut u32) -> *mut u32 {
+    unsafe extern "C" fn shifted_grand_base_body(
+        base: *mut u32,
+        _field_count: u32,
+        _field_size: u32,
+        _type_descriptor: u32,
+        _flags: u32,
+    ) -> *mut u32 {
         base.add(4)
     }
 
-    unsafe extern "C" fn recording_shifted_grand_base_body(base: *mut u32) -> *mut u32 {
-        core::ptr::addr_of_mut!(SEEN_GRAND_BASE).write_volatile(base as usize);
-        base.add(4)
+    unsafe extern "C" fn recording_shifted_grand_base_body(
+        base: *mut u32,
+        field_count: u32,
+        field_size: u32,
+        type_descriptor: u32,
+        flags: u32,
+    ) -> *mut u32 {
+        recording_grand_base_body(base, field_count, field_size, type_descriptor, flags).add(4)
     }
 
-    /// `FUN_0813eee0` calls the +0x2c body constructor first, then returns
-    /// that exact pointer rebased by -0x2c.
+    /// `FUN_08185b98` forwards the precise five-argument ABI for
+    /// `FUN_082ab398` and returns that target's pointer unchanged.
+    #[test]
+    fn grand_base_body_construct_forwards_abi_and_return() {
+        let _lock = lock_ops();
+        let _guard = OpsGuard::install(PairHeaderGrandBaseBodyOps {
+            construct: recording_grand_base_body,
+        });
+        unsafe {
+            reset_recording();
+            let mut storage = vec![FILL; BASE_WORDS + 8];
+            let grand_base = storage.as_mut_ptr().add(1);
+            let body = grand_base.add(GRAND_BASE_BODY_OFFSET_WORDS);
+
+            assert_eq!(pair_header_grand_base_body_construct(body), body);
+            assert_eq!(core::ptr::addr_of!(BODY_CALLS).read_volatile(), 1);
+            assert_eq!(core::ptr::addr_of!(SEEN_GRAND_BASE).read_volatile(), body as usize);
+            assert_eq!(
+                core::ptr::addr_of!(SEEN_FIELD_COUNT).read_volatile(),
+                GRAND_BASE_BODY_FIELD_COUNT
+            );
+            assert_eq!(
+                core::ptr::addr_of!(SEEN_FIELD_SIZE).read_volatile(),
+                GRAND_BASE_BODY_FIELD_SIZE
+            );
+            assert_eq!(
+                core::ptr::addr_of!(SEEN_TYPE_DESCRIPTOR).read_volatile(),
+                GRAND_BASE_BODY_TYPE_DESCRIPTOR
+            );
+            assert_eq!(core::ptr::addr_of!(SEEN_FLAGS).read_volatile(), GRAND_BASE_BODY_FLAGS);
+        }
+    }
+
+    /// `FUN_0813eee0` reaches the direct `FUN_08185b98` port only after
+    /// forming its +0x2c body pointer, then rebases that exact result.
     #[test]
     fn grand_base_constructor_forwards_body_result_and_rebases() {
         let _lock = lock_ops();
-        let _guard = OpsGuard::install(PairHeaderBaseOps {
-            construct_grand_base_body: recording_shifted_grand_base_body,
+        let _guard = OpsGuard::install(PairHeaderGrandBaseBodyOps {
+            construct: recording_shifted_grand_base_body,
         });
         unsafe {
+            reset_recording();
             let mut storage = vec![FILL; GRAND_BASE_BODY_OFFSET_WORDS + 8];
             let grand_base = storage.as_mut_ptr();
             let result = pair_header_grand_base_construct(grand_base);
 
             assert_eq!(result, grand_base.add(4));
+            assert_eq!(core::ptr::addr_of!(BODY_CALLS).read_volatile(), 1);
             assert_eq!(
                 core::ptr::addr_of!(SEEN_GRAND_BASE).read_volatile(),
                 grand_base.add(GRAND_BASE_BODY_OFFSET_WORDS) as usize,
-                "the body seam receives exactly grand_base + 0x2c"
+                "the body port forwards exactly grand_base + 0x2c"
             );
         }
     }
@@ -242,8 +352,8 @@ mod tests {
     #[test]
     fn base_constructor_orders_vtable_chain_and_clears() {
         let _lock = lock_ops();
-        let _guard = OpsGuard::install(PairHeaderBaseOps {
-            construct_grand_base_body: recording_grand_base_body,
+        let _guard = OpsGuard::install(PairHeaderGrandBaseBodyOps {
+            construct: recording_grand_base_body,
         });
         unsafe {
             let mut base = vec![FILL; BASE_WORDS];
@@ -287,8 +397,8 @@ mod tests {
     #[test]
     fn base_constructor_preserves_grand_base_return_dataflow() {
         let _lock = lock_ops();
-        let _guard = OpsGuard::install(PairHeaderBaseOps {
-            construct_grand_base_body: shifted_grand_base_body,
+        let _guard = OpsGuard::install(PairHeaderGrandBaseBodyOps {
+            construct: shifted_grand_base_body,
         });
         unsafe {
             let mut storage = vec![FILL; BASE_WORDS + 8];
@@ -309,8 +419,8 @@ mod tests {
     #[test]
     fn derived_constructor_uses_ported_base_layout() {
         let _lock = lock_ops();
-        let _guard = OpsGuard::install(PairHeaderBaseOps {
-            construct_grand_base_body: missing_construct_grand_base_body,
+        let _guard = OpsGuard::install(PairHeaderGrandBaseBodyOps {
+            construct: missing_construct_grand_base_body,
         });
         unsafe {
             let mut object = vec![FILL; OBJECT_WORDS];

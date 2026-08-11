@@ -17073,11 +17073,12 @@ functions:
       byte at +0xb4, zeroes +4..+0x97 (0x94 bytes through
       0x08037db8), and returns the grand-base result minus four. There
       are no null checks or failure branches. The now-ported grand-base
-      wrapper calls its own unresolved body constructor through
-      PAIR_HEADER_BASE_OPS. Host tests prove vtable-before-chain ordering,
-      post-chain clears and zero-fill, and dataflow from a shifted
-      grand-base-body result. match.py structural: vtable store,
-      grand-base call, relative field stores, memclear, and
+      wrapper calls the now-ported 0x08185b98 body adaptor; only its direct
+      0x082ab398 dependency remains behind PAIR_HEADER_GRAND_BASE_BODY_OPS.
+      Host tests prove vtable-before-chain ordering, post-chain clears and
+      zero-fill, and dataflow from a shifted grand-base-body result.
+      match.py structural: vtable store, grand-base call, relative field
+      stores, memclear, and
       result-minus-one-word return are retained.
 
   - address: 0x0813eee0
@@ -17089,16 +17090,36 @@ functions:
     status: ported
     vars: {param_1: base, iVar1: grand_base_body}
     notes: >-
-      Five-instruction wrapper around the unported constructor
-      FUN_08185b98. It calls that constructor on the +0x2c embedded
-      subobject and returns the callee's pointer minus 0x2c; no null or
-      error path exists. Reference C is
-      decomp/c/012/0813eee0_FUN_0813eee0.c. Raw retail disassembly is
-      `push {r4,lr}; add r0,#0x2c; bl 0x08185b98; sub r0,#0x2c; pop
-      {r4,pc}`. Focused host tests install the body seam, prove it receives
-      base+0x2c, and prove its shifted return is rebased by -0x2c.
-      match.py structural confirms the call and matching add/sub pointer
-      dataflow; the seam replaces only the unresolved direct call.
+      Five-instruction wrapper around the now-ported constructor
+      0x08185b98. It calls that constructor on the +0x2c embedded subobject
+      and returns the callee's pointer minus 0x2c; no null or error path
+      exists. Reference C is decomp/c/012/0813eee0_FUN_0813eee0.c. Raw
+      retail disassembly is `push {r4,lr}; add r0,#0x2c; bl 0x08185b98;
+      sub r0,#0x2c; pop {r4,pc}`. Focused host tests prove the direct port
+      receives base+0x2c, forwards the body ABI once, and rebases a shifted
+      return by -0x2c. match.py structural confirms the call and matching
+      add/sub pointer dataflow; the sole seam is now 0x082ab398.
+
+  - address: 0x08185b98
+    ghidra: FUN_08185b98
+    name: pair_header_grand_base_body_construct
+    size: 16
+    sig: "u32 *pair_header_grand_base_body_construct(u32 *this)"
+    module: cxx/pair_header
+    status: ported
+    vars: {param_1: this, DAT_08185ba8: type_descriptor}
+    notes: >-
+      Grand-base body constructor adaptor. Raw retail ARM loads literal
+      0x08283a74, sets r3=4 and r2=0x14, then tail-branches to the ABI
+      adapter at 0x082ab234. That adapter calls 0x082ab398 with
+      (this, 4, 0x14, 0x08283a74, 0) and returns its r0 unchanged.
+      Reference C is decomp/c/015/08185b98_FUN_08185b98.c; its apparent
+      direct 0x082ab398 call is reached through this compiler-generated
+      five-argument adapter. The port keeps only 0x082ab398 behind
+      PAIR_HEADER_GRAND_BASE_BODY_OPS for host tests. Focused tests prove
+      exact pointer, constants, one-call sequencing, and return dataflow.
+      match.py structural: literal load and fixed-argument tail-call shape
+      are retained, with the host seam replacing the unresolved callee.
 
   - address: 0x08124a38
     ghidra: FUN_08124a38
@@ -17122,9 +17143,9 @@ functions:
       was a mis-addressed note: the clamp lives at 0x083d5eb4/0x083d5ed8
       and is already ported as util/three_pointer_select. The former
       PairHeaderOps base-constructor seam is now cut over to the direct
-      pair_header_base_construct and pair_header_grand_base_construct
-      ports; only the grand-base body dependency 0x08185b98 remains
-      behind PAIR_HEADER_BASE_OPS.
+      pair_header_base_construct, pair_header_grand_base_construct, and
+      pair_header_grand_base_body_construct ports; only grand-base-body
+      dependency 0x082ab398 remains behind PAIR_HEADER_GRAND_BASE_BODY_OPS.
 
   - address: 0x083dc0e0
     ghidra: FUN_083dc0e0
