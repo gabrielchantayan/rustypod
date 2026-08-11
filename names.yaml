@@ -24528,6 +24528,35 @@ functions:
       src/app/vtable_set.rs::kind2_block_constructs_five_words_without_a_diagnostic
       / kind2_block_reports_bad_descriptor_and_still_constructs.
 
+  - address: 0x08155ec0
+    ghidra: FUN_08155ec0
+    name: iterator_state_cleanup
+    size: 48
+    sig: "*mut u32 iterator_state_cleanup(state: *mut u32)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r4: state
+      FUN_08271724: iterator_state_release (unported observer-list unlink; ITERATOR_STATE_RELEASE seam)
+      param_1[0]: owner (release arg1)
+      param_1[2]: release_state (state word at +0x08)
+    notes: >-
+      The 48-byte body at 0x08155ec0 was verified against the assembly:
+      `ldr r0,[r0,#8]; cmn r0,#5; beq` makes -5 the no-release sentinel;
+      otherwise `ldr r0,[r4]; mov r1,r4; bl 0x08271724` invokes the
+      unported observer-list unlink as release(*state, state), then
+      `mvn r0,#0; str r0,[r4,#8]` poisons the state word with -1 and
+      `mov r0,r4` returns the original state pointer. Reference C
+      decomp/c/013/08155ec0_FUN_08155ec0.c agrees; the callee's C
+      decomp/c/026/08271724_FUN_08271724.c confirms its two pointer
+      arguments. The release is isolated behind ITERATOR_STATE_RELEASE
+      with a no-op default because that callee remains unported. The
+      existing file-record teardown seam defaults to this direct port,
+      and the two container-teardown defaults call it directly. Focused
+      host evidence: iterator_state_cleanup_sentinel_skips_release_and_returns_the_state
+      / iterator_state_cleanup_releases_owner_then_poisons_state_and_returns_it
+      / iterator_state_cleanup_is_the_wired_teardown_and_container_default.
+
   - address: 0x0811d008
     ghidra: FUN_0811d008
     name: vtable_file_record_teardown

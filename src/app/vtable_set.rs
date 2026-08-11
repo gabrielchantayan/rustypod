@@ -3553,40 +3553,54 @@ unsafe extern "C" fn teardown_inner_next_unported(
     0
 }
 
+/// Indirect call to the unported observer-list release
+/// `FUN_08271724`. The target walks the owner list at +0x0c and unlinks
+/// `state` by its +0x10 next link; its return value is discarded.
+///
+/// The seam keeps that unported list implementation outside this one-function
+/// port while retaining the target's `release(*state, state)` ABI.
+pub static mut ITERATOR_STATE_RELEASE: unsafe extern "C" fn(
+    owner: *mut u8,
+    state: *mut u32,
+) = iterator_state_release_unported;
+
+/// Default for [`ITERATOR_STATE_RELEASE`]: the observer-list release is
+/// unported, so it has no local effect.
+unsafe extern "C" fn iterator_state_release_unported(_owner: *mut u8, _state: *mut u32) {}
+
+/// iterator_state_cleanup — original: `FUN_08155ec0` @ 0x08155ec0 (48
+/// bytes; 69 `bl` call sites).
+///
+/// Returns the iterator state object unchanged. Its state word at +0x08 is
+/// a sentinel: when it is -5, no release occurs and the state remains
+/// untouched. Otherwise it first calls `FUN_08271724(*state, state)`, then
+/// writes -1 to that word. The release call's result is discarded; loading
+/// word 0 before the call and returning the saved state pointer after it
+/// matches the target's r0/r1 routing.
+///
+/// `FUN_08271724` is the sole unported callee. Its observer-list unlink is
+/// represented by [`ITERATOR_STATE_RELEASE`], a narrow seam wired to a
+/// no-op default. The vtable-file-record teardown seam and its two
+/// container-teardown defaults call this port directly.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iterator_state_cleanup(state: *mut u32) -> *mut u32 {
+    if state.add(2).read() != (-5i32) as u32 {
+        let release = core::ptr::read_volatile(core::ptr::addr_of!(ITERATOR_STATE_RELEASE));
+        release(state.read() as *mut u8, state);
+        state.add(2).write(u32::MAX);
+    }
+    state
+}
+
 /// The iterator-state cleanup behind the `bl 0x08155ec0` sites at
 /// 0x0811d070 (inner, on sp+0x08) and 0x0811d08c (outer, on sp+0x28)
-/// inside [`vtable_file_record_teardown`]. `FUN_08155ec0` @ 0x08155ec0
-/// (48 bytes; **69 `bl` call sites**, grep on `decomp/osos.asm`;
-/// **unported**):
-///
-/// ```text
-/// 08155ec0  stmdb sp!, {r4, lr}
-/// 08155ec4  mov   r4, r0
-/// 08155ec8  ldr   r0, [r0, #0x8]
-/// 08155ecc  cmn   r0, #0x5          @ state->+0x08 == -5?
-/// 08155ed0  beq   0x08155ee8        @ yes -> nothing to release
-/// 08155ed4  ldr   r0, [r4, #0x0]
-/// 08155ed8  mov   r1, r4
-/// 08155edc  bl    0x08271724        @ release(*state, state)
-/// 08155ee0  mvn   r0, #0x0
-/// 08155ee4  str   r0, [r4, #0x8]    @ state->+0x08 = -1
-/// 08155ee8  mov   r0, r4            @ return state
-/// 08155eec  ldmia sp!, {r4, pc}
-/// ```
-///
-/// Both call sites pass the iterator's STATE OBJECT (iter + 4), not
-/// the iterator itself. Unless the state's +0x08 word is -5, the
-/// backing is released through the unported 0x08271724 and the word
-/// poisoned with -1. The wired default is a no-op (the release
-/// subsystem is unported; the
-/// [`VTABLE_FILE_RECORD_TEARDOWN_OUTER_BEGIN`] no-op precedent). Host
-/// tests install a recording mock via `core::ptr::addr_of_mut!`.
+/// inside [`vtable_file_record_teardown`]. The ported
+/// [`iterator_state_cleanup`] remains behind this role-specific seam so host
+/// teardown tests can script the nested iteration independently.
 pub static mut VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP: unsafe extern "C" fn(
     state: *mut u32,
-) = teardown_iter_cleanup_unported;
-
-/// Default iterator-state cleanup: a no-op (see the seam's doc).
-unsafe extern "C" fn teardown_iter_cleanup_unported(_state: *mut u32) {}
+) -> *mut u32 = iterator_state_cleanup;
 
 /// The registry dispose behind the `bl 0x0812d300` at 0x0811d09c
 /// inside [`vtable_file_record_teardown`]. `FUN_0812d300` @ 0x0812d300
@@ -3703,21 +3717,20 @@ unsafe extern "C" fn teardown_registry_dispose_unported(_registry: *mut u8) {}
 ///
 /// # Deviations
 ///
-/// - **The six unported callees sit behind seams** — the outer begin
+/// - **Five unported callees sit behind seams** — the outer begin
 ///   0x08212a5c behind [`VTABLE_FILE_RECORD_TEARDOWN_OUTER_BEGIN`],
 ///   the outer step 0x08212a4c behind
 ///   [`VTABLE_FILE_RECORD_TEARDOWN_OUTER_NEXT`], the inner begin
 ///   0x0821c4c8 behind [`VTABLE_FILE_RECORD_TEARDOWN_INNER_BEGIN`],
 ///   the inner step `FUN_081ddde8` behind
-///   [`VTABLE_FILE_RECORD_TEARDOWN_INNER_NEXT`], the iterator cleanup
-///   0x08155ec0 behind [`VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP`]
-///   and the registry dispose 0x0812d300 behind
-///   [`VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE`]. Unlike
-///   [`VTABLE_SET_50_KIND4_OPS`], the wired defaults do NOT model the
-///   exact bodies — the callees are an unported registry-iterator
-///   (red-black-tree) subsystem, not message thunks; the defaults
-///   yield an EMPTY traversal (no-op begins and cleanups, 0-returning
-///   steps, no-op dispose), so an unswapped table runs straight to
+///   [`VTABLE_FILE_RECORD_TEARDOWN_INNER_NEXT`], and the registry
+///   dispose 0x0812d300 behind
+///   [`VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE`]. The ported
+///   [`iterator_state_cleanup`] remains behind
+///   [`VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP`] for host-test
+///   interception, wired directly as its default. The unported defaults
+///   yield an EMPTY traversal (no-op begins/dispose and 0-returning
+///   steps), so an unswapped table runs through cleanup then straight to
 ///   the guard/delete/zero tail (the `store_remove_unported` /
 ///   `construct_guard_unported` no-op precedent). Host tests install
 ///   scripted recording mocks.
@@ -3838,19 +3851,14 @@ pub unsafe extern "C" fn vtable_file_record_teardown(record: *mut u8) {
 /// pointer returns so the caller's following `operator_delete` frees
 /// the block. The reference C's "Subroutine does not return" on this
 /// callee is a Ghidra mis-analysis: the body ends in a real `ldmia
-/// sp!, {r4, pc}` and the `bl 0x082aad24` after it (0x0811d1e4) is
-/// live code. The wired default models the exact chain minus the
-/// unported cleanup — the no-op [`teardown_iter_cleanup_unported`]
-/// stands in for `FUN_08155ec0` (its no-op rationale lives on
-/// [`VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP`]), then returns the
-/// container, so an unswapped table still runs the caller's
-/// `operator_delete` on the right block (the
-/// [`VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE`] "delete still
-/// frees the block" precedent). The default calls the no-op DIRECTLY
-/// rather than through the teardown's seam: a module-local name keeps
-/// host tests from racing the sibling's parallel tests (the
-/// [`VTABLE_QUERY_4C_SCALAR_DISPATCH`] precedent). Host tests install
-/// a recording mock via `core::ptr::addr_of_mut!`.
+/// sp!, {r4, pc}` and the `bl 0x082aad24` after it (0x0811d1e4) is live
+/// code. The wired default models the exact chain: it calls the ported
+/// [`iterator_state_cleanup`] directly on the state object, then returns the
+/// container so the caller's following `operator_delete` frees the right
+/// block. It intentionally does not route through the teardown's
+/// role-specific seam, which keeps host tests able to script those nested
+/// calls independently (the [`VTABLE_QUERY_4C_SCALAR_DISPATCH`] precedent).
+/// Host tests install a recording mock via `core::ptr::addr_of_mut!`.
 pub static mut VTABLE_FILE_RECORD_DESTRUCT_KIND1_CONTAINER08_TEARDOWN: unsafe extern "C" fn(
     container: *mut u8,
 ) -> *mut u8 = destruct_container_teardown_default;
@@ -3883,15 +3891,13 @@ pub static mut VTABLE_FILE_RECORD_DESTRUCT_KIND1_CONTAINER10_TEARDOWN: unsafe ex
 ) -> *mut u8 = destruct_container_teardown_default;
 
 /// Default kind-1 container teardown: the exact 16-byte body of
-/// `FUN_08212a60` / `FUN_0821c4ec` minus the unported iterator-state
-/// cleanup — [`teardown_iter_cleanup_unported`] (the no-op modeling
-/// `FUN_08155ec0`, see [`VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP`])
-/// runs on the state object at container + 4, and the container
-/// pointer returns so the caller's `operator_delete` frees the right
-/// block. Shared by both kind-1 container seams (the
+/// `FUN_08212a60` / `FUN_0821c4ec`. The ported
+/// [`iterator_state_cleanup`] runs on the state object at container + 4,
+/// then the container pointer returns so the caller's `operator_delete`
+/// frees the right block. Shared by both kind-1 container seams (the
 /// `construct_guard_unported` shared-default precedent).
 unsafe extern "C" fn destruct_container_teardown_default(container: *mut u8) -> *mut u8 {
-    teardown_iter_cleanup_unported(container.add(4).cast::<u32>());
+    iterator_state_cleanup(container.add(4).cast::<u32>());
     container
 }
 
@@ -3985,13 +3991,11 @@ pub static mut VTABLE_FILE_RECORD_DESTRUCT_KIND2_DISPOSE: unsafe extern "C" fn(
 ///   0x0821c4ec behind
 ///   [`VTABLE_FILE_RECORD_DESTRUCT_KIND1_CONTAINER10_TEARDOWN`] and
 ///   0x0812d300 behind [`VTABLE_FILE_RECORD_DESTRUCT_KIND2_DISPOSE`].
-///   The container seams' wired default models the callees' exact
-///   16-byte bodies minus the unported `FUN_08155ec0` cleanup (the
-///   no-op [`teardown_iter_cleanup_unported`] stands in — its
-///   rationale lives on [`VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP`]),
-///   returning the container so the following `operator_delete` frees
-///   the right block; the kind-2 dispose seam shares the teardown
-///   sibling's no-op default (see each seam's doc).
+///   The container seams' wired default models the exact 16-byte bodies:
+///   direct [`iterator_state_cleanup`] on container + 4, then return the
+///   container so the following `operator_delete` frees the right block.
+///   The kind-2 dispose seam shares the teardown sibling's no-op default
+///   (see each seam's doc).
 /// - **[`vtable_file_record_teardown`] is called DIRECTLY** (the
 ///   original's `bl 0x0811d008` at 0x0811d200 targets the ported
 ///   body — the app/class_6800.rs ported-callees-called-directly
@@ -4387,7 +4391,9 @@ mod tests {
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_INNER_NEXT)
                     .write_volatile(teardown_inner_next_unported);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP)
-                    .write_volatile(teardown_iter_cleanup_unported);
+                    .write_volatile(iterator_state_cleanup);
+                core::ptr::addr_of_mut!(ITERATOR_STATE_RELEASE)
+                    .write_volatile(iterator_state_release_unported);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE)
                     .write_volatile(teardown_registry_dispose_unported);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_DESTRUCT_KIND1_CONTAINER08_TEARDOWN)
@@ -4528,6 +4534,96 @@ mod tests {
         }
         fn handle_ptr(&mut self) -> *mut *mut u8 {
             core::ptr::addr_of_mut!(self.handle) as *mut *mut u8
+        }
+    }
+
+    // ---- iterator_state_cleanup (0x08155ec0) ------------------------
+
+    static mut ITERATOR_RELEASE_CALLS: usize = 0;
+    static mut ITERATOR_RELEASE_OWNER: *mut u8 = core::ptr::null_mut();
+    static mut ITERATOR_RELEASE_STATE: *mut u32 = core::ptr::null_mut();
+    static mut ITERATOR_RELEASE_STATE_WORD: u32 = 0;
+
+    unsafe extern "C" fn recording_iterator_state_release(owner: *mut u8, state: *mut u32) {
+        ITERATOR_RELEASE_CALLS += 1;
+        ITERATOR_RELEASE_OWNER = owner;
+        ITERATOR_RELEASE_STATE = state;
+        ITERATOR_RELEASE_STATE_WORD = state.add(2).read();
+    }
+
+    unsafe fn install_recording_iterator_state_release() {
+        ITERATOR_RELEASE_CALLS = 0;
+        ITERATOR_RELEASE_OWNER = core::ptr::null_mut();
+        ITERATOR_RELEASE_STATE = core::ptr::null_mut();
+        ITERATOR_RELEASE_STATE_WORD = 0;
+        core::ptr::addr_of_mut!(ITERATOR_STATE_RELEASE)
+            .write_volatile(recording_iterator_state_release);
+    }
+
+    #[test]
+    fn iterator_state_cleanup_sentinel_skips_release_and_returns_the_state() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut state = [0x1122_3344, 0xa5a5_a5a5, (-5i32) as u32];
+        unsafe {
+            install_recording_iterator_state_release();
+            let state_ptr = state.as_mut_ptr();
+            let returned = iterator_state_cleanup(state_ptr);
+
+            assert_eq!(returned, state_ptr, "mov r0, r4 returns the input state");
+            assert_eq!(ITERATOR_RELEASE_CALLS, 0, "cmn r0, #5; beq skips the release");
+            assert_eq!(state, [0x1122_3344, 0xa5a5_a5a5, (-5i32) as u32]);
+        }
+    }
+
+    #[test]
+    fn iterator_state_cleanup_releases_owner_then_poisons_state_and_returns_it() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut state = [0x5566_7788, 0xa5a5_a5a5, 0x1234_5678];
+        unsafe {
+            install_recording_iterator_state_release();
+            let state_ptr = state.as_mut_ptr();
+            let returned = iterator_state_cleanup(state_ptr);
+
+            assert_eq!(ITERATOR_RELEASE_CALLS, 1, "one non-sentinel release");
+            assert_eq!(
+                ITERATOR_RELEASE_OWNER as usize,
+                0x5566_7788,
+                "ldr r0, [r4] supplies release arg1"
+            );
+            assert_eq!(ITERATOR_RELEASE_STATE, state_ptr, "mov r1, r4 supplies release arg2");
+            assert_eq!(
+                ITERATOR_RELEASE_STATE_WORD, 0x1234_5678,
+                "the release sees +0x08 before the following poison store"
+            );
+            assert_eq!(state[2], u32::MAX, "mvn r0, #0; str r0, [r4, #8]");
+            assert_eq!(returned, state_ptr, "mov r0, r4 returns the input state");
+        }
+    }
+
+    #[test]
+    fn iterator_state_cleanup_is_the_wired_teardown_and_container_default() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut container = [0u32; 4];
+        unsafe {
+            let teardown_cleanup =
+                core::ptr::addr_of!(VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP).read_volatile();
+            assert_eq!(
+                teardown_cleanup as usize,
+                iterator_state_cleanup as usize,
+                "the file-record teardown seam defaults to the ported cleanup"
+            );
+
+            let container_ptr = container.as_mut_ptr().cast::<u8>();
+            let returned = destruct_container_teardown_default(container_ptr);
+            assert_eq!(returned, container_ptr, "the wrapper returns the original container");
+            assert_eq!(
+                container[3],
+                u32::MAX,
+                "the direct default cleans state object at container + 4"
+            );
         }
     }
 
@@ -9178,8 +9274,9 @@ mod tests {
         }
     }
 
-    unsafe extern "C" fn recording_td_cleanup(_state: *mut u32) {
+    unsafe extern "C" fn recording_td_cleanup(state: *mut u32) -> *mut u32 {
         td_push(TD_EV_CLEANUP);
+        state
     }
 
     unsafe extern "C" fn recording_td_dispose(registry: *mut u8) {
