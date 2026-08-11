@@ -1,30 +1,29 @@
-//! The b-tree cursor data-size accessor — SQLite 3.5.x's
-//! `sqlite3BtreeDataSize`, the routine `OP_Column` (non-index branch)
-//! and `OP_RowData` run to learn how many payload bytes the cursor's
-//! current cell carries.
+//! The b-tree cursor payload-size accessors — SQLite 3.5.x's
+//! `sqlite3BtreeDataSize` and `sqlite3BtreeKeySize`. `OP_Column` and
+//! `OP_RowData` use the former for table payloads; `OP_Column` uses the
+//! latter for index keys.
 //!
 //! `btree_data_size` — original: `FUN_08370e6c` @ 0x08370e6c (104
 //! bytes; 2 `bl` call sites, binary-scanned: 0x083881e4, 0x08389a20).
+//! `btree_key_size` — original: `FUN_08371cc4` @ 0x08371cc4 (112
+//! bytes; binary-scanned).
 //!
 //! ```c
 //! int sqlite3BtreeDataSize(BtCursor *pCur, u32 *pSize);
+//! int sqlite3BtreeKeySize(BtCursor *pCur, i64 *pSize);
 //! ```
 //!
-//! IDENTIFICATION NOTE — this is `sqlite3BtreeDataSize`, not
-//! `sqlite3BtreeKeySize`. The two are textually identical in upstream
-//! 3.5.9 except for the out-param width and the field read, and the
-//! disassembly is decisive: this function stores ONE word
+//! IDENTIFICATION NOTE — `sqlite3BtreeDataSize` stores ONE word
 //! (`str r0,[r5]`) read from cursor +0x30 = `CellInfo` +0x10 =
 //! `nData` (the leaf payload varint — see `sqlite/cell_size.rs`'s
-//! layout), while the i64 key-size sibling `sqlite3BtreeKeySize`
-//! lives at 0x08371cc4 (unported) and is byte-for-byte the same body
-//! except it reads `ldrd r0,r1,[r4,#0x28]` (`CellInfo` +0x08, nKey)
-//! and stores both words (`strd`). The callers agree: 0x083881e4 sits
-//! in `vdbeExec`'s `OP_Column` exactly where upstream calls
+//! layout), while the i64 `sqlite3BtreeKeySize` sibling at 0x08371cc4
+//! reads `ldrd r0,r1,[r4,#0x28]` (`CellInfo` +0x08, nKey) and stores
+//! both words (`strd`). The callers agree: 0x083881e4 sits in
+//! `vdbeExec`'s `OP_Column` exactly where upstream calls
 //! `sqlite3BtreeDataSize` for non-index cursors (the `isIndex` branch
-//! beside it calls 0x08371cc4 — the KeySize sibling), and 0x08389a20
-//! is `OP_RowData`'s `sqlite3BtreeDataSize` + length-limit check
-//! (upstream 3.5.9 vdbe.c lines 1938 and 3531).
+//! beside it calls 0x08371cc4), and 0x08389a20 is `OP_RowData`'s
+//! `sqlite3BtreeDataSize` + length-limit check (upstream 3.5.9 vdbe.c
+//! lines 1938 and 3531).
 //!
 //! Algorithm (verified instruction-by-instruction against osos.asm;
 //! Ghidra's `decomp/c/033/08370e6c_FUN_08370e6c.c` matches it
@@ -85,6 +84,8 @@ const CUR_IDX: usize = 0x1c;
 /// The cursor's cached `CellInfo` (0x20 bytes; layout in
 /// `sqlite/cell_size.rs`).
 const CUR_INFO: usize = 0x20;
+/// `info.nKey` (CellInfo +0x08): the signed 64-bit key-size pair.
+const CUR_INFO_N_KEY: usize = 0x28;
 /// `info.nData` (CellInfo +0x10): the word this accessor returns.
 const CUR_INFO_N_DATA: usize = 0x30;
 /// `info.nSize` (CellInfo +0x1e): the cache-valid flag — zero means
@@ -155,6 +156,58 @@ pub unsafe extern "C" fn btree_data_size(cursor: *mut u8, out: *mut u32) -> i32 
             rd_u32(cursor, CUR_INFO_N_DATA)
         };
         *out = size;
+    }
+    rc
+}
+
+/// btree_key_size — original: `FUN_08371cc4` @ 0x08371cc4 (112
+/// bytes; binary-scanned).
+///
+/// SQLite's `sqlite3BtreeKeySize`: set `*out` to the signed 64-bit key
+/// size of the entry the cursor currently points at, or zero when it
+/// points at no entry. The AAPCS ABI passes the `i64 *` out-parameter in
+/// r1; the original writes its low and high words with `strd`, so this
+/// port copies the two target-little-endian words separately rather than
+/// introducing a host alignment assumption. As with
+/// [`btree_data_size`], a nonzero cursor-state validator result is
+/// returned and leaves all eight output bytes untouched.
+///
+/// Algorithm: validate REQUIRESEEK/FAULT cursors, re-read `eState`,
+/// parse the cached `CellInfo` on an `nSize == 0` cache miss and set
+/// `validNKey`, then copy `CellInfo.nKey` (+0x08) to the out-parameter.
+/// The parser is the direct ported [`btree_parse_cell`] callee; the
+/// unported validator uses [`restore_cursor_position_op`]'s shared
+/// dispatch seam.
+///
+/// Deviations: raw cursor fields use the same unaligned little-endian
+/// accessors as the neighboring data-size port. The two output-word
+/// stores preserve the original `strd` value and order on the ARM target
+/// while permitting its four-byte-aligned out-pointer contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn btree_key_size(cursor: *mut u8, out: *mut i64) -> i32 {
+    let rc = if rd_u8(cursor, CUR_E_STATE) < CURSOR_REQUIRESEEK {
+        0
+    } else {
+        restore_cursor_position_op()(cursor)
+    };
+    if rc == 0 {
+        let out = out.cast::<u32>();
+        if rd_u8(cursor, CUR_E_STATE) == CURSOR_INVALID {
+            // `strd r0,r0,[r5]`, with the zeroed state byte in r0.
+            out.write(0);
+            out.add(1).write(0);
+        } else {
+            if rd_u16(cursor, CUR_INFO_N_SIZE) == 0 {
+                let page = rd_u32(cursor, CUR_P_PAGE) as *const u8;
+                let index = rd_u32(cursor, CUR_IDX);
+                btree_parse_cell(page, index, cursor.add(CUR_INFO));
+                *cursor.add(CUR_VALID_N_KEY) = 1;
+            }
+            // `ldrd r0,r1,[r4,#0x28]; strd r0,r1,[r5]`.
+            out.write(rd_u32(cursor, CUR_INFO_N_KEY));
+            out.add(1).write(rd_u32(cursor, CUR_INFO_N_KEY + 4));
+        }
     }
     rc
 }
@@ -574,6 +627,93 @@ mod tests {
             f.restore_seen().is_empty(),
             "the default slot is not the mock"
         );
+    }
+
+    /// The i64 sibling has the same early INVALID path, but must clear
+    /// both words of its out-parameter (`strd r0,r0,[r5]`).
+    #[test]
+    fn key_size_invalid_skips_restore_and_clears_both_words() {
+        let Some(f) = Fixture::new() else { return };
+        f.wire_cursor(0, 0, true);
+        f.poison_info();
+        let mut out = -1i64;
+        let rc = unsafe { btree_key_size(f.cursor(), &mut out) };
+        assert_eq!(rc, 0);
+        assert_eq!(out, 0);
+        assert!(f.restore_seen().is_empty());
+        assert_eq!(
+            f.info_word(CI_N_KEY),
+            0x1111_1111,
+            "an invalid cursor must not parse or alter cached nKey"
+        );
+    }
+
+    /// Validator failures reach the shared `BTREE_CELL_OPS` seam and
+    /// return before either word of the i64 out-parameter is written.
+    #[test]
+    fn key_size_restore_failure_propagates_and_leaves_i64_untouched() {
+        let Some(f) = Fixture::new() else { return };
+        f.wire_cursor(2, 0, true);
+        f.poison_info();
+        RESTORE_RC.store(6, Ordering::Relaxed);
+        let mut out = 0x7ead_beef_dead_cafeu64 as i64;
+        let rc = unsafe { btree_key_size(f.cursor(), &mut out) };
+        assert_eq!(rc, 6);
+        assert_eq!(out as u64, 0x7ead_beef_dead_cafe);
+        assert_eq!(f.restore_seen(), vec![f.cursor() as usize]);
+        assert_eq!(unsafe { *f.cursor().add(CUR_VALID_N_KEY) }, 0);
+    }
+
+    /// A successful restore can leave the cursor invalid; the re-read
+    /// state gate then writes an all-zero i64 without parsing stale info.
+    #[test]
+    fn key_size_restore_to_invalid_clears_i64_without_parsing() {
+        let Some(f) = Fixture::new() else { return };
+        f.wire_cursor(2, 0, true);
+        f.poison_info();
+        RESTORE_NEW_STATE.store(0, Ordering::Relaxed);
+        let mut out = -1i64;
+        let rc = unsafe { btree_key_size(f.cursor(), &mut out) };
+        assert_eq!(rc, 0);
+        assert_eq!(out, 0);
+        assert_eq!(f.restore_seen(), vec![f.cursor() as usize]);
+        assert_eq!(f.info_word(CI_N_KEY), 0x1111_1111);
+    }
+
+    /// Cache hits copy the full nKey pair in target low-word/high-word
+    /// order, preserving the signed i64 bit pattern rather than nData.
+    #[test]
+    fn key_size_cache_hit_reads_full_signed_n_key() {
+        let Some(f) = Fixture::new() else { return };
+        f.wire_cursor(1, 0, true);
+        f.poison_info();
+        unsafe {
+            f.cursor()
+                .add(CUR_INFO_N_KEY + 4)
+                .cast::<u32>()
+                .write_unaligned(0xfedc_ba98u32.to_le());
+        }
+        let mut out = 0;
+        let rc = unsafe { btree_key_size(f.cursor(), &mut out) };
+        assert_eq!(rc, 0);
+        assert_eq!(out as u64, 0xfedc_ba98_1111_1111);
+        assert_eq!(unsafe { *f.cursor().add(CUR_VALID_N_KEY) }, 0);
+    }
+
+    /// Cache misses parse into `cursor + 0x20`, set `validNKey`, and
+    /// return the parser-populated nKey rather than the payload nData.
+    #[test]
+    fn key_size_cache_miss_parses_and_marks_n_key_valid() {
+        let Some(f) = Fixture::new() else { return };
+        f.wire_cursor(1, 1, false);
+        let mut out = -1i64;
+        let rc = unsafe { btree_key_size(f.cursor(), &mut out) };
+        assert_eq!(rc, 0);
+        assert_eq!(out, CELL1_NKEY as i64);
+        assert_eq!(unsafe { *f.cursor().add(CUR_VALID_N_KEY) }, 1);
+        assert_eq!(f.info_word(CI_N_KEY), CELL1_NKEY as u32);
+        assert_eq!(f.info_word(CI_N_KEY + 4), 0);
+        assert_ne!(f.info_word(CI_N_PAYLOAD), 0xa5a5_a5a5);
     }
 
     /// The slot really is one of the shared cluster's ops (catches a

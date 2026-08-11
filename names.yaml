@@ -13636,7 +13636,7 @@ functions:
       the flag still set (the original's assert(wantToLock>0) is
       compiled out).
 
-  # ---- B-tree cursor data-size accessor (src/sqlite/data_size.rs) ----
+  # ---- B-tree cursor data/key-size accessors (src/sqlite/data_size.rs) ----
   - address: 0x08370e6c
     ghidra: FUN_08370e6c
     name: btree_data_size
@@ -13655,10 +13655,10 @@ functions:
       decomp/c/033/08370e6c_FUN_08370e6c.c. This is SQLite 3.5.x
       sqlite3BtreeDataSize, NOT sqlite3BtreeKeySize: `ldr r0,[r4,#0x30]`
       / `str r0,[r5]` transfers one u32 from cursor +0x30 = cached
-      CellInfo +0x10 = nData (the leaf payload varint); the i64 KeySize
-      sibling is UNPORTED FUN_08371cc4, whose otherwise-identical body
-      does `ldrd r0,r1,[r4,#0x28]` (CellInfo.nKey at +0x08) and `strd`
-      to its eight-byte out-param. The two call sites prove the split:
+      CellInfo +0x10 = nData (the leaf payload varint); its ported i64
+      KeySize sibling at 0x08371cc4 does `ldrd r0,r1,[r4,#0x28]`
+      (CellInfo.nKey at +0x08) and `strd` to its eight-byte out-param.
+      The two call sites prove the split:
       0x083881e4 is vdbeExec OP_Column's non-index branch (the isIndex
       branch immediately beside it calls 0x08371cc4), and 0x08389a20 is
       OP_RowData's data-size/length-limit path.
@@ -13700,6 +13700,40 @@ functions:
       unresolved `bl 0` relocation, and LLVM expanding raw u16/u32
       reads to little-endian byte loads/orrs on ARMv5 rather than the
       original's aligned ldrh/ldrd/ldr.
+
+  - address: 0x08371cc4
+    ghidra: FUN_08371cc4
+    name: btree_key_size
+    size: 112
+    sig: "i32 btree_key_size(cursor: *mut BtCursor, out: *mut i64)"
+    module: sqlite/data_size
+    status: ported
+    vars:
+      param_1/r0/r4: cursor
+      param_2/r1/r5: out
+      iVar1/r6: rc
+      uVar2/r1: n_key_high_word
+      FUN_08372ae0: restore_cursor_position (BTREE_CELL_OPS.restore_cursor_position seam)
+      FUN_083727c8: btree_parse_cell (direct ported callee)
+    notes: >-
+      SQLite 3.5.x sqlite3BtreeKeySize, verified against
+      decomp/c/033/08371cc4_FUN_08371cc4.c and the 112-byte function
+      range. This is the 64-bit sibling of sqlite3BtreeDataSize:
+      `ldrd r0,r1,[r4,#0x28]` loads cached CellInfo.nKey (+0x08; cursor
+      +0x28) and `strd r0,r1,[r5]` writes the target-little-endian low
+      and high words to the i64 out-parameter. eState +0x43 below 2
+      skips validation; otherwise the shared unported-validator seam
+      sqlite3BtreeRestoreOrClearCursorPosition @ 0x08372ae0 runs. A
+      nonzero rc returns immediately without touching either output word.
+      On success, eState is re-read: INVALID writes i64 zero; otherwise
+      CellInfo.nSize at +0x3e is the cache flag, and a zero causes the
+      direct ported sqlite3BtreeParseCell @ 0x083727c8 call with
+      (pPage +0x18, idx +0x1c, CellInfo +0x20), followed by
+      validNKey +0x42 = 1. Host tests cover invalid-state zeroing,
+      validator error propagation and no-write behavior, post-restore
+      INVALID handling, signed pair cache hits, and parse/cache-state
+      updates. match.py diff is expected because the Rust port uses the
+      shared validator seam and unaligned raw-layout reads.
 
   # ---- B-tree cell size query (src/sqlite/cell_size.rs) ----
   - address: 0x082c0a50
