@@ -8,6 +8,7 @@ pub mod calc;
 pub mod error;
 pub mod memory;
 pub mod outline;
+pub mod service;
 pub mod stream;
 pub mod system;
 pub mod selection;

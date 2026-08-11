@@ -1496,6 +1496,23 @@ functions:
     module: strtod
     status: ported
     notes: Was misidentified as a strtod wrapper; it IS the ADS bsearch.
+  - address: 0x082cf348
+    ghidra: FUN_082cf348
+    name: store_u16_le
+    size: 16
+    sig: "void store_u16_le(u8 *p, u32 value)"
+    module: sqlite/store_u16_le
+    status: ported
+    vars: {param_1: p, param_2: value}
+    notes: >-
+      Alignment-free two-byte little-endian store. The original is exactly
+      strb r1,[r0]; lsr r1,r1,#8; strb r1,[r0,#1]; bx lr: AAPCS arguments
+      are destination p in r0 and value in r1, the low sixteen bits are
+      stored at p+0 and p+1, and no NULL check occurs. The two recovered
+      callers (0x082e39f4 and 0x082e3bcc) use this shared helper for their
+      two-byte output path. Host tests cover byte order, high-bit truncation,
+      every byte alignment, both buffer boundaries, and untouched neighbours.
+
 
   - address: 0x0802f9c4
     ghidra: FUN_0802f9c4
@@ -12080,6 +12097,29 @@ functions:
       followed by FT_MEM_ZERO of the grown tail when the call succeeded
       and new_count > cur_count. 116 bl call sites (binary-scanned). Not
       ported - no ported caller needs it yet.
+  - address: 0x082cfdc0
+    ghidra: FUN_082cfdc0
+    name: ft_service_list_lookup
+    size: 76
+    sig: >-
+      void *ft_service_list_lookup(const FtServiceDesc *service_descriptors,
+      const char *service_id)
+    module: ft/service
+    status: ported
+    renames:
+      param_1: service_descriptors
+      param_2: service_id
+      iVar1: strcmp_result
+    notes: >-
+      FreeType's internal ft_service_list_lookup (ftobjs.c): returns the
+      service_data word from the first FT_ServiceDescRec whose serv_id
+      strcmp-equals service_id. Raw ARM verifies r0/r1 NULL guards, an
+      8-byte (two-word) record stride, a NULL serv_id terminator, and the
+      call through thunk 0x08391e38 to retailOS strcmp @ 0x08391e44.
+      The return is NULL for null inputs or no match. Host tests pin null
+      inputs, a second-record match, missing identifiers, and case-sensitive
+      strcmp comparison. match.py confirms the same guarded linear scan.
+
 
   - address: 0x08292e6c
     ghidra: FUN_08292e6c
