@@ -15376,6 +15376,36 @@ functions:
   #   container_is_empty     9 copies   92 calls  -> identified
   #   not_equal_deref        5 copies   35 calls  -> identified
 
+  - address: 0x083e35a4
+    ghidra: FUN_083e35a4
+    name: cxx_record_range_destroy_8
+    size: 40
+    sig: "void cxx_record_range_destroy_8(void *unused, CxxStringPair *first, CxxStringPair *last)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: unused, param_2: first, param_3: last}
+    renames:
+      FUN_0825c8fc: cxx_string_pair_destroy
+      FUN_083d8b04: cxx_string_release
+      iVar1: current
+      param_2: first
+      param_3: last
+    notes: >-
+      Structural half-open range destructor for an 8-byte vector element:
+      raw ARM saves r1 as current and r2 as last, compares them before
+      dereferencing, then calls 0x0825c8fc(current) and adds 8. That
+      recovered element destructor is exactly `cxx_string_release(this + 4)`
+      followed by `cxx_string_release(this)`, where the established release
+      port is 0x083d8b04. The range port transcribes those two calls directly
+      rather than inventing a second exported wrapper. Five decompiled direct
+      callers use it as vector teardown: 0x083e35cc and 0x083e3724 destroy
+      `{begin,end}` before freeing at an 8-byte capacity, while the outer
+      destructor 0x0825c790 tears down its +4 vector the same way and releases
+      adjacent COW strings at +0/+0x10. This identifies each element as two
+      one-word COW string objects. Host tests validate an empty NULL range,
+      all four releases across two records, and that the final free is the
+      final record's first member, proving reverse member order.
+
   - address: 0x083e38a0
     ghidra: FUN_083e38a0
     name: cxx_record_range_destroy_16

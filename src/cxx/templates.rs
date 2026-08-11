@@ -21,6 +21,9 @@
 //!   sites (the largest family in the block after the handle accessor).
 //! - [`array_at_checked`] — bounds-checked lookup in a
 //!   {base, count} pointer array, 2 copies, 43 call sites.
+//! - [`cxx_record_range_destroy_8`] — elementwise destruction of a
+//!   half-open vector range whose 8-byte records contain two COW string
+//!   objects.
 //! - [`cxx_record_range_destroy_16`] — elementwise destruction of a
 //!   half-open vector range whose 16-byte records contain two
 //!   [`StringObject`] values.
@@ -67,6 +70,7 @@
 //! with the **source in r2**, and it exists exactly once.
 
 use crate::runtime::rt_div::__rt_sdiv;
+use crate::cxx::string::cxx_string_release;
 use crate::cxx::string_object::{string_object_destroy, StringObject};
 
 /// A 16-byte retailOS record containing two adjacent [`StringObject`]s.
@@ -79,6 +83,52 @@ use crate::cxx::string_object::{string_object_destroy, StringObject};
 pub struct StringObjectPair {
     pub first: StringObject,
     pub second: StringObject,
+}
+
+/// An 8-byte retailOS record containing two adjacent COW string objects.
+///
+/// Each COW string object is its one-word data pointer, so `second` is at
+/// target offset +4. Host pointers are wider, but iterating typed records
+/// preserves the target's two-string stride without conflating host and ARM
+/// pointer widths.
+#[repr(C)]
+pub struct CxxStringPair {
+    pub first: *mut u8,
+    pub second: *mut u8,
+}
+
+/// cxx_record_range_destroy_8 — original: `FUN_083e35a4` @ 0x083e35a4
+/// (40 bytes; 5 direct `bl` callers).
+///
+/// Destroys the half-open `[first, last)` range of 8-byte [`CxxStringPair`]
+/// records. The first ABI argument in r0 is unused; r1 and r2 are the
+/// current and end iterators. The raw ARM loop first compares them, then
+/// calls `FUN_0825c8fc(current)` and advances by 8. That element destructor
+/// releases `current + 4` followed by `current`, so this port uses the
+/// established [`cxx_string_release`] seam @ 0x083d8b04 in the same reverse
+/// member order. It terminates solely on iterator equality.
+///
+/// The call sites at 0x0825c790 and 0x083e35cc pass a `{begin, end}` vector
+/// head and then free its storage as 8-byte elements. `FUN_0825c790` also
+/// destroys COW strings on either side of that vector, independently
+/// identifying these records as pairs of the same one-word string object.
+///
+/// # Safety
+/// `first` and `last` must delimit a valid contiguous range of
+/// [`CxxStringPair`]s. Each COW string object must be valid for
+/// [`cxx_string_release`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_record_range_destroy_8(
+    _unused: *mut u8,
+    mut first: *mut CxxStringPair,
+    last: *mut CxxStringPair,
+) {
+    while first != last {
+        cxx_string_release(core::ptr::addr_of_mut!((*first).second));
+        cxx_string_release(core::ptr::addr_of_mut!((*first).first));
+        first = first.add(1);
+    }
 }
 
 /// cxx_record_range_destroy_16 — original: `FUN_083e38a0` @ 0x083e38a0
@@ -1534,6 +1584,7 @@ mod tests {
     use super::*;
     use crate::cxx::string_object::{StringObjectOps, STRING_OBJECT_OPS, STRING_OBJECT_VTABLE};
     use crate::cxx::string_object::tests::STRING_OBJECT_OPS_TEST_LOCK;
+    use crate::cxx::string::StringRep;
     use std::sync::MutexGuard;
     use std::vec::Vec;
 
@@ -1589,6 +1640,74 @@ mod tests {
 
     fn string_object_releases() -> Vec<usize> {
         unsafe { (*core::ptr::addr_of!(STRING_OBJECT_RELEASES)).clone() }
+    }
+
+    #[repr(C)]
+    struct StringRepStorage {
+        rep: StringRep,
+        data: u8,
+    }
+
+    fn string_rep_storage() -> StringRepStorage {
+        StringRepStorage {
+            rep: StringRep {
+                refcount: 0,
+                capacity: 0,
+                length: 0,
+            },
+            data: 0,
+        }
+    }
+
+    fn string_slot(storage: &mut StringRepStorage) -> *mut u8 {
+        core::ptr::addr_of_mut!(storage.data)
+    }
+
+    #[test]
+    fn record_range_destroy_8_releases_every_pair_second_then_first() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let mut first0 = string_rep_storage();
+        let mut second0 = string_rep_storage();
+        let mut first1 = string_rep_storage();
+        let mut second1 = string_rep_storage();
+        let mut records = [
+            CxxStringPair {
+                first: string_slot(&mut first0),
+                second: string_slot(&mut second0),
+            },
+            CxxStringPair {
+                first: string_slot(&mut first1),
+                second: string_slot(&mut second1),
+            },
+        ];
+        let first = records.as_mut_ptr();
+
+        unsafe {
+            cxx_record_range_destroy_8(core::ptr::null_mut(), first, first.add(records.len()));
+        }
+
+        assert_eq!(first0.rep.refcount, -1);
+        assert_eq!(second0.rep.refcount, -1);
+        assert_eq!(first1.rep.refcount, -1);
+        assert_eq!(second1.rep.refcount, -1);
+        let (free_calls, last_freed, _tag) = crate::heap::veneers::tests::free_log();
+        assert_eq!(free_calls, 4);
+        assert_eq!(
+            last_freed,
+            core::ptr::addr_of_mut!(first1.rep).cast::<u8>(),
+            "the last release is the final record's first string"
+        );
+    }
+
+    #[test]
+    fn record_range_destroy_8_empty_does_not_dereference_bounds() {
+        unsafe {
+            cxx_record_range_destroy_8(
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+            );
+        }
     }
 
     #[test]
