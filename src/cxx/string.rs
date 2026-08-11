@@ -138,6 +138,27 @@ pub struct StringRep {
     /// Characters currently stored.
     pub length: u32,
 }
+/// One target-layout record consumed by [`cxx_string_pair_range_destroy`].
+///
+/// On ARM this is exactly 12 bytes: two one-word COW string objects at
+/// +0x00/+0x04 followed by an unexamined word at +0x08. Host pointers are
+/// wider, so the fields remain disjoint there while the iterator's target
+/// stride is validated below.
+#[repr(C)]
+pub struct CxxStringPairRangeEntry {
+    /// First COW string object at target offset +0x00.
+    pub first: *mut u8,
+    /// Second COW string object at target offset +0x04.
+    pub second: *mut u8,
+    /// Unexamined target word at +0x08.
+    pub trailing: u32,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x04] = [0; core::mem::offset_of!(CxxStringPairRangeEntry, second)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x0c] = [0; core::mem::size_of::<CxxStringPairRangeEntry>()];
+
 
 /// Storage for the shared empty representation. Original: the `_Rep` at
 /// 0x08b31804 with its (always NUL) data byte at 0x08b31810.
@@ -284,6 +305,7 @@ pub unsafe extern "C" fn cxx_string_rep_reserve(
 /// `*string`. The shared empty rep is never touched. A refcount that is
 /// already -1, or that reaches -1 on this release, destroys the rep.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn cxx_string_release(string: *mut *mut u8) {
     let data = *string;
     if data == empty_rep_data() {
@@ -307,6 +329,27 @@ pub unsafe extern "C" fn cxx_string_release(string: *mut *mut u8) {
     // which reads only the pointer.
     operator_delete(data_rep(*string) as *mut u8);
 }
+/// cxx_string_pair_range_destroy — original @ 0x083e2f48 (48 bytes).
+///
+/// Source: `ipod-decomp/decomp/c/038/083e2f48_FUN_083e2f48.c`. The raw ARM
+/// ABI leaves `_unused` in r0 and accepts the half-open record range in r1/r2.
+/// It walks `[first, last)` at the target's 12-byte stride and, for each
+/// record, releases the +0x04 string before the +0x00 string. There is no
+/// NULL or ordering guard: termination is pointer equality alone.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_string_pair_range_destroy(
+    _unused: *mut u8,
+    mut first: *mut CxxStringPairRangeEntry,
+    last: *mut CxxStringPairRangeEntry,
+) {
+    while first != last {
+        cxx_string_release(core::ptr::addr_of_mut!((*first).second));
+        cxx_string_release(core::ptr::addr_of_mut!((*first).first));
+        first = first.add(1);
+    }
+}
+
 
 /// cxx_string_from_cstr — original @ 0x083d8b5c.
 ///
@@ -1149,6 +1192,91 @@ mod tests {
             assert_eq!(freed(), &[rep as *mut u8]);
         }
     }
+    #[test]
+    fn pair_range_destroy_leaves_an_empty_range_untouched() {
+        let _guard = arena();
+        unsafe {
+            let mut first: *mut u8 = core::ptr::null_mut();
+            cxx_string_from_cstr(&mut first, b"kept\0".as_ptr());
+            let rep = data_rep(first);
+            let mut record = CxxStringPairRangeEntry {
+                first,
+                second: empty_rep_data(),
+                trailing: 0xa5a5_a5a5,
+            };
+            let boundary = core::ptr::addr_of_mut!(record);
+
+            cxx_string_pair_range_destroy(core::ptr::null_mut(), boundary, boundary);
+
+            assert_eq!((*rep).refcount, 0);
+            assert!(freed().is_empty());
+            cxx_string_release(core::ptr::addr_of_mut!(record.first));
+        }
+    }
+
+    #[test]
+    fn pair_range_destroy_releases_second_before_first() {
+        let _guard = arena();
+        unsafe {
+            let mut first: *mut u8 = core::ptr::null_mut();
+            let mut second: *mut u8 = core::ptr::null_mut();
+            cxx_string_from_cstr(&mut first, b"first\0".as_ptr());
+            cxx_string_from_cstr(&mut second, b"second\0".as_ptr());
+            let first_rep = data_rep(first);
+            let second_rep = data_rep(second);
+            let mut record = CxxStringPairRangeEntry { first, second, trailing: 0 };
+            let range_start = core::ptr::addr_of_mut!(record);
+
+            cxx_string_pair_range_destroy(
+                core::ptr::null_mut(),
+                range_start,
+                range_start.add(1),
+            );
+
+            assert_eq!(freed(), &[second_rep.cast(), first_rep.cast()]);
+        }
+    }
+
+    #[test]
+    fn pair_range_destroy_advances_through_multiple_records() {
+        let _guard = arena();
+        unsafe {
+            let mut first0: *mut u8 = core::ptr::null_mut();
+            let mut second0: *mut u8 = core::ptr::null_mut();
+            let mut first1: *mut u8 = core::ptr::null_mut();
+            let mut second1: *mut u8 = core::ptr::null_mut();
+            cxx_string_from_cstr(&mut first0, b"first0\0".as_ptr());
+            cxx_string_from_cstr(&mut second0, b"second0\0".as_ptr());
+            cxx_string_from_cstr(&mut first1, b"first1\0".as_ptr());
+            cxx_string_from_cstr(&mut second1, b"second1\0".as_ptr());
+            let first0_rep = data_rep(first0);
+            let second0_rep = data_rep(second0);
+            let first1_rep = data_rep(first1);
+            let second1_rep = data_rep(second1);
+            let mut records = [
+                CxxStringPairRangeEntry { first: first0, second: second0, trailing: 1 },
+                CxxStringPairRangeEntry { first: first1, second: second1, trailing: 2 },
+            ];
+            let range_start = records.as_mut_ptr();
+
+            cxx_string_pair_range_destroy(
+                core::ptr::null_mut(),
+                range_start,
+                range_start.add(records.len()),
+            );
+
+            assert_eq!(
+                freed(),
+                &[
+                    second0_rep.cast(),
+                    first0_rep.cast(),
+                    second1_rep.cast(),
+                    first1_rep.cast(),
+                ]
+            );
+        }
+    }
+
 
     /// A rep already marked -1 is destroyed without a further decrement
     /// (`adds r3, r2, #1; beq destroy` on entry).

@@ -12271,6 +12271,21 @@ functions:
   # (12 header + NUL + 1 spare) via operator_new_checked @ 0x08266c70;
   # deallocation via the 4-byte veneer 0x08266f2c = `b 0x082aad24`
   # (plain operator delete - the size and third argument are discarded).
+  - address: 0x083e2f48
+    ghidra: FUN_083e2f48
+    name: cxx_string_pair_range_destroy
+    size: 48
+    sig: "void cxx_string_pair_range_destroy(void *unused, CxxStringPairRangeEntry *first, CxxStringPairRangeEntry *last)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: unused, param_2: first, param_3: last}
+    notes: >-
+      A 12-byte-record half-open range destructor. The raw ARM entry leaves
+      r0 unused and moves r2/r1 into the saved last/current registers before
+      its first equality check. For every record it releases the COW string
+      word at +4 via cxx_string_release @ 0x083d8b04, then the word at +0,
+      advances current by 12, and terminates only when current == last.
+
   - address: 0x083d8b04
     ghidra: FUN_083d8b04
     name: cxx_string_release
