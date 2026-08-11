@@ -2713,31 +2713,33 @@ pub struct CgCellTable {
     _opaque: [u8; 0],
 }
 
-/// The cell-init boundary for [`cg_cell_table_create`]: one call per
-/// cell, in index order — the original's in-loop `bl 0x08256c10`.
-/// `FUN_08256c10` @ 0x08256c10 (24 bytes, leaf) stays unported; the
-/// wired default ([`default_cg_cell_table_cell_init`]) models its
-/// exact body, so the seam exists for hookability and host-test
-/// interception (the [`CG_PROC_EMIT`] precedent) and porting
-/// 0x08256c10 later replaces the default without touching the
-/// constructor.
+/// Replaceable cell-init call boundary for [`cg_cell_table_create`]: one
+/// call per cell, in index order — the original's in-loop `bl 0x08256c10`.
+/// Its default is the ported [`cg_cell_table_cell_init`], while tests may
+/// install a recording replacement.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub static mut CG_CELL_TABLE_CELL_INIT: unsafe extern "C" fn(*mut u8) =
-    default_cg_cell_table_cell_init;
+    cg_cell_table_cell_init;
 
-/// The wired default of [`CG_CELL_TABLE_CELL_INIT`]: the exact body
-/// of `FUN_08256c10` @ 0x08256c10 — store 0 at cell +0x00, store
-/// 0xff at cell +0x0c, store 0 at cell +0x10, nothing else (every
-/// other cell byte keeps whatever the allocator left). The two words
-/// are genuine 32-bit target stores at fixed byte offsets — the
-/// record's ABI is pinned by its unported users (the caller's
-/// `operator_new(0x110)` and the mirror destructor's identical
-/// 0x14-stride loop), so the module's word-index convention does not
-/// apply and the record is 0x110 bytes on any host.
-unsafe extern "C" fn default_cg_cell_table_cell_init(cell: *mut u8) {
-    (cell.add(CG_CELL_BUFFER) as *mut u32).write(0);
-    cell.add(CG_CELL_TAG).write(0xffu8);
-    (cell.add(CG_CELL_ALLOCATOR) as *mut u32).write(0);
+/// `cg_cell_table_cell_init` — retailOS `FUN_08256c10` @ `0x08256c10`
+/// (24 bytes; leaf).
+///
+/// Source: `ipod-decomp/decomp/osos.asm`, raw ARM at `0x08256c10`:
+/// `mov r1,#0; mov r2,#0xff; str r1,[r0]; strb r2,[r0,#0xc]; str
+/// r1,[r0,#0x10]; bx lr`. It initializes one 0x14-byte cell by clearing
+/// its 32-bit buffer and allocator words and stamping its tag byte `0xff`,
+/// in that store order; all other bytes are untouched. `r0` is the cell
+/// pointer and `bx lr` returns `void`.
+///
+/// No deliberate deviations. The word stores require the same 4-byte
+/// alignment as retailOS; the fixed-width ABI fields deliberately do not
+/// use host pointer-width slots.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_cell_table_cell_init(cell: *mut u8) {
+    (cell.add(CG_CELL_BUFFER) as *mut u32).write_volatile(0);
+    cell.add(CG_CELL_TAG).write_volatile(0xff);
+    (cell.add(CG_CELL_ALLOCATOR) as *mut u32).write_volatile(0);
 }
 
 /// cg_cell_table_create — original: `FUN_082430c4` @ 0x082430c4
@@ -6618,7 +6620,26 @@ mod tests {
     }
 
     #[test]
-    fn cell_table_create_stamps_flags_and_every_cell_through_the_default_init() {
+    fn cell_init_writes_its_three_abi_fields_and_returns_void() {
+        #[repr(align(4))]
+        struct Cell([u8; CG_CELL_TABLE_CELL_BYTES]);
+
+        let mut cell = Cell([0x5c; CG_CELL_TABLE_CELL_BYTES]);
+        let returned = unsafe { cg_cell_table_cell_init(cell.0.as_mut_ptr()) };
+
+        assert_eq!(returned, (), "the leaf returns with bx lr and no value");
+        let mut expected = [0x5c; CG_CELL_TABLE_CELL_BYTES];
+        expected[CG_CELL_BUFFER..CG_CELL_BUFFER + 4].copy_from_slice(&0u32.to_le_bytes());
+        expected[CG_CELL_TAG] = 0xff;
+        expected[CG_CELL_ALLOCATOR..CG_CELL_ALLOCATOR + 4].copy_from_slice(&0u32.to_le_bytes());
+        assert_eq!(
+            cell.0, expected,
+            "only +0x00..+0x03, +0x0c, and +0x10..+0x13 are written"
+        );
+    }
+
+    #[test]
+    fn cell_table_create_stamps_flags_and_every_cell_through_the_ported_init() {
         let _g = setup();
         unsafe {
             let record = poisoned_cell_table();
@@ -6874,13 +6895,13 @@ mod tests {
     }
 
     #[test]
-    fn cell_table_cell_init_seam_stays_wired_to_the_default() {
+    fn cell_table_cell_init_seam_stays_wired_to_the_ported_function() {
         let _g = setup();
         unsafe {
             assert_eq!(
                 hook(core::ptr::addr_of!(CG_CELL_TABLE_CELL_INIT)) as usize,
-                default_cg_cell_table_cell_init as usize,
-                "the cell-init seam stays wired to the exact-body model of FUN_08256c10"
+                cg_cell_table_cell_init as usize,
+                "the cell-init seam stays wired to the ported FUN_08256c10"
             );
         }
         teardown();

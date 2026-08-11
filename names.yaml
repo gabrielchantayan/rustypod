@@ -17073,10 +17073,10 @@ functions:
       byte at +0xb4, zeroes +4..+0x97 (0x94 bytes through
       0x08037db8), and returns the grand-base result minus four. There
       are no null checks or failure branches. The now-ported grand-base
-      wrapper calls the now-ported 0x08185b98 body adaptor; only its direct
-      0x082ab398 dependency remains behind PAIR_HEADER_GRAND_BASE_BODY_OPS.
-      Host tests prove vtable-before-chain ordering, post-chain clears and
-      zero-fill, and dataflow from a shifted grand-base-body result.
+      wrapper calls the now-ported 0x08185b98 body adaptor and its ported
+      0x082ab398 reset dependency. Host tests prove vtable-before-chain
+      ordering, post-chain clears, zero-fill, and the fixed grand-base
+      reset ABI.
       match.py structural: vtable store, grand-base call, relative field
       stores, memclear, and
       result-minus-one-word return are retained.
@@ -17095,10 +17095,10 @@ functions:
       and returns the callee's pointer minus 0x2c; no null or error path
       exists. Reference C is decomp/c/012/0813eee0_FUN_0813eee0.c. Raw
       retail disassembly is `push {r4,lr}; add r0,#0x2c; bl 0x08185b98;
-      sub r0,#0x2c; pop {r4,pc}`. Focused host tests prove the direct port
-      receives base+0x2c, forwards the body ABI once, and rebases a shifted
-      return by -0x2c. match.py structural confirms the call and matching
-      add/sub pointer dataflow; the sole seam is now 0x082ab398.
+      sub r0,#0x2c; pop {r4,pc}`. Focused tests prove it receives base+0x2c,
+      invokes the ported reset through the body adaptor, and rebases that
+      pointer by -0x2c. match.py structural confirms the call and matching
+      add/sub pointer dataflow.
 
   - address: 0x08185b98
     ghidra: FUN_08185b98
@@ -17111,15 +17111,37 @@ functions:
     notes: >-
       Grand-base body constructor adaptor. Raw retail ARM loads literal
       0x08283a74, sets r3=4 and r2=0x14, then tail-branches to the ABI
-      adapter at 0x082ab234. That adapter calls 0x082ab398 with
-      (this, 4, 0x14, 0x08283a74, 0) and returns its r0 unchanged.
-      Reference C is decomp/c/015/08185b98_FUN_08185b98.c; its apparent
-      direct 0x082ab398 call is reached through this compiler-generated
-      five-argument adapter. The port keeps only 0x082ab398 behind
-      PAIR_HEADER_GRAND_BASE_BODY_OPS for host tests. Focused tests prove
-      exact pointer, constants, one-call sequencing, and return dataflow.
-      match.py structural: literal load and fixed-argument tail-call shape
-      are retained, with the host seam replacing the unresolved callee.
+      adapter at 0x082ab234. That adapter calls the ported 0x082ab398 with
+      (this, 4, 0x14, 0x08283a74, 0); its non-allocating helper path leaves
+      this in r0. Reference C is decomp/c/015/08185b98_FUN_08185b98.c; its
+      apparent direct 0x082ab398 call is reached through this
+      compiler-generated five-argument adapter. Focused tests prove exact
+      pointer, constants, one-call sequencing, and the enclosing return
+      dataflow. match.py structural: literal load and fixed-argument
+      tail-call shape are retained.
+
+  - address: 0x082ab398
+    ghidra: FUN_082ab398
+    name: pair_header_grand_base_reset
+    size: 84
+    sig: "void pair_header_grand_base_reset(u32 *this, u32 field_count, u32 field_size, u32 element_initializer, u32 initializer_context)"
+    module: cxx/pair_header
+    status: ported
+    vars: {param_1: this, param_2: field_count, param_3: field_size, param_4: element_initializer, param_5: initializer_context}
+    notes: >-
+      Eleven-word array-helper adapter for the pair-header grand base.
+      Reference C is decomp/c/029/082ab398_FUN_082ab398.c. Raw ARM saves
+      incoming r1/r2/r3 and incoming stack word 5, then calls 0x082b498c
+      as (this, field_count, field_size, 0, 0, element_initializer,
+      initializer_context, 0, 0, 0, 0). This proves the original 11-word
+      ARM placement: first four words in r0-r3 and the remaining seven at
+      successive stack slots. The wrapper discards 0x082b498c's pointer
+      result. That unported helper is isolated in the accurately typed
+      PAIR_HEADER_ELEMENT_ARRAY_OPS::reset seam. Focused host tests record
+      every forwarded word, all six literal defaults, one-call order, unit
+      return behavior, and 0x08185b98's fixed direct dependency. match.py
+      structural: save/stack-argument materialization and one helper call
+      match the retail wrapper.
 
   - address: 0x08124a38
     ghidra: FUN_08124a38
@@ -17143,9 +17165,10 @@ functions:
       was a mis-addressed note: the clamp lives at 0x083d5eb4/0x083d5ed8
       and is already ported as util/three_pointer_select. The former
       PairHeaderOps base-constructor seam is now cut over to the direct
-      pair_header_base_construct, pair_header_grand_base_construct, and
-      pair_header_grand_base_body_construct ports; only grand-base-body
-      dependency 0x082ab398 remains behind PAIR_HEADER_GRAND_BASE_BODY_OPS.
+      pair_header_base_construct, pair_header_grand_base_construct,
+      pair_header_grand_base_body_construct, and
+      pair_header_grand_base_reset ports; only the 0x082b498c helper remains
+      behind PAIR_HEADER_ELEMENT_ARRAY_OPS.
 
   - address: 0x083dc0e0
     ghidra: FUN_083dc0e0
@@ -23224,7 +23247,7 @@ functions:
       1} in that store order, then initializes thirteen 0x14-byte
       cells in index order (addressing `add r0,r3,r3,lsl #0x2; add
       r0,r4,r0,lsl #0x2` = record + index*0x14) through the cell init
-      FUN_08256c10 @ 0x08256c10 (24 bytes, leaf, unported: word +0x00
+      cg_cell_table_cell_init @ 0x08256c10 (24 bytes, leaf: word +0x00
       = 0, byte +0x0c = 0xff, word +0x10 = 0), and returns the record
       - the C++ constructor convention. Each cell is an
       optionally-owned heap buffer: the mirror destructor FUN_0824310c
@@ -23234,16 +23257,14 @@ functions:
       caller's operator_new argument (the constructor touches 0x109
       bytes; the tail is allocator padding). Deviation: the per-cell
       init routes through the CG_CELL_TABLE_CELL_INIT seam (the
-      CG_PROC_EMIT precedent) whose wired default is FUN_08256c10's
-      exact body, so default behavior is the original's; the two
-      cell words are genuine 32-bit stores at fixed byte offsets
-      (record ABI pinned by the unported caller/destructor), not the
-      module's word-index convention. Host tests:
-      src/codegen/ir.rs::cell_table_create_stamps_flags_and_every_cell_through_the_default_init
+      CG_PROC_EMIT precedent), whose default is the ported
+      cg_cell_table_cell_init; the two cell words are genuine 32-bit
+      stores at fixed byte offsets (record ABI pinned by the unported
+      caller/destructor), not the module's word-index convention. Host
+      tests: src/codegen/ir.rs::cell_table_create_stamps_flags_and_every_cell_through_the_ported_init
       (return-this, exact flag bytes, per-cell writes, poison on
-      untouched bytes),
-      ::cell_table_create_routes_thirteen_cells_in_index_order_through_the_seam
-      and ::cell_table_cell_init_seam_stays_wired_to_the_default.
+      untouched bytes), ::cell_table_create_routes_thirteen_cells_in_index_order_through_the_seam,
+      and ::cell_table_cell_init_seam_stays_wired_to_the_ported_function.
 
   - address: 0x0824310c
     ghidra: FUN_0824310c
@@ -23278,6 +23299,28 @@ functions:
       ::cell_table_destroy_frees_all_owned_cells_in_order_and_pairs_with_create,
       ::cell_table_destroy_routes_all_cells_in_index_order_through_the_seam,
       and ::cell_table_destroy_seam_stays_wired_to_the_host_model.
+
+  - address: 0x08256c10
+    ghidra: FUN_08256c10
+    name: cg_cell_table_cell_init
+    size: 24
+    sig: "void cg_cell_table_cell_init(u8 *cell)"
+    module: codegen/ir
+    status: ported
+    renames:
+      param_1/r0: cell (4-byte-aligned 0x14-byte cell)
+      r1: zero (shared value for the two 32-bit stores)
+      r2: tag_value (0xff, stored at cell +0x0c)
+    notes: >-
+      Leaf helper called once for each cell by cg_cell_table_create.
+      Raw ARM at 0x08256c10 is `mov r1,#0; mov r2,#0xff; str
+      r1,[r0]; strb r2,[r0,#0xc]; str r1,[r0,#0x10]; bx lr`; it takes
+      cell in r0, returns void, clears its 32-bit buffer and allocator
+      fields at +0x00 and +0x10, and stamps byte +0x0c to 0xff in that
+      store order, leaving every other byte untouched. Source:
+      ipod-decomp/decomp/osos.asm. No deviations. Host test:
+      src/codegen/ir.rs::cell_init_writes_its_three_abi_fields_and_returns_void
+      verifies the void return and all 20 cell bytes.
 
   - address: 0x0811d5ac
     ghidra: (absent from functions.csv)
@@ -24586,25 +24629,56 @@ functions:
     status: ported
     renames:
       param_1/r4: state
-      FUN_08271724: iterator_state_release (unported observer-list unlink; ITERATOR_STATE_RELEASE seam)
+      FUN_08271724: iterator_state_release (ported direct observer-list unlink)
       param_1[0]: owner (release arg1)
       param_1[2]: release_state (state word at +0x08)
     notes: >-
       The 48-byte body at 0x08155ec0 was verified against the assembly:
       `ldr r0,[r0,#8]; cmn r0,#5; beq` makes -5 the no-release sentinel;
       otherwise `ldr r0,[r4]; mov r1,r4; bl 0x08271724` invokes the
-      unported observer-list unlink as release(*state, state), then
-      `mvn r0,#0; str r0,[r4,#8]` poisons the state word with -1 and
-      `mov r0,r4` returns the original state pointer. Reference C
-      decomp/c/013/08155ec0_FUN_08155ec0.c agrees; the callee's C
-      decomp/c/026/08271724_FUN_08271724.c confirms its two pointer
-      arguments. The release is isolated behind ITERATOR_STATE_RELEASE
-      with a no-op default because that callee remains unported. The
-      existing file-record teardown seam defaults to this direct port,
-      and the two container-teardown defaults call it directly. Focused
-      host evidence: iterator_state_cleanup_sentinel_skips_release_and_returns_the_state
-      / iterator_state_cleanup_releases_owner_then_poisons_state_and_returns_it
-      / iterator_state_cleanup_is_the_wired_teardown_and_container_default.
+      ported observer-list unlink as release(*state, state), then `mvn
+      r0,#0; str r0,[r4,#8]` poisons the state word with -1 and `mov
+      r0,r4` returns the original state pointer. Reference C
+      decomp/c/013/08155ec0_FUN_08155ec0.c agrees. The existing
+      file-record teardown seam defaults to this direct port, and the two
+      container-teardown defaults call it directly. Focused host evidence:
+      iterator_state_cleanup_sentinel_skips_release_and_returns_the_state /
+      iterator_state_cleanup_unlinks_its_state_then_poisons_it_and_returns_it /
+      iterator_state_cleanup_is_the_wired_teardown_and_container_default.
+INS.PRE 24609:
+  - address: 0x08271724
+    ghidra: FUN_08271724
+    name: iterator_state_release
+    size: 64
+    sig: "void iterator_state_release(owner: *mut u8, target: *mut u8)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1: owner
+      param_2: target
+      iVar1: current
+      iVar2: candidate
+      iVar3: predecessor
+      param_1 + 0x0c: observer_head
+      param_2 + 0x10: next_observer
+    notes: >-
+      The ARM ABI takes owner and target in r0/r1. The 64-byte body reads
+      only 32-bit words: owner +0x0c is the observer-list head and each
+      node +0x10 is its next link. It walks from the head, returns without
+      stores if target is absent, and otherwise copies target +0x10 to the
+      owner head for a head match or predecessor +0x10 for any later match.
+      Reference C decomp/c/026/08271724_FUN_08271724.c and the
+      functions.csv 64-byte entry agree on the control-flow bounds. The
+      direct caller iterator_state_cleanup now calls this export rather than
+      an unported seam. Focused host evidence uses a sub-4-GiB fixture so
+      raw u32 pointers round-trip:
+      iterator_state_release_leaves_an_empty_list_unchanged /
+      iterator_state_release_leaves_an_absent_target_unchanged /
+      iterator_state_release_replaces_the_head_with_its_successor /
+      iterator_state_release_splices_an_interior_target_from_its_predecessor /
+      iterator_state_release_unlinks_a_tail_target /
+      iterator_state_release_copies_the_target_next_word_without_reencoding.
+
 
   - address: 0x0811d008
     ghidra: FUN_0811d008
