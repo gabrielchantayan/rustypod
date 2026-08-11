@@ -14879,6 +14879,23 @@ functions:
       comparators stubbed as the stock shapes over the ported
       str_nicmp - hits, a case-folded hit, and an absent-key miss.
 
+  - address: 0x082cf328
+    ghidra: FUN_082cf328
+    name: store_u32_le
+    size: 32
+    sig: "void store_u32_le(u8 *p, u32 value)"
+    module: sqlite/store_u32_le
+    status: ported
+    vars: {param_1: p, param_2: value}
+    notes: >-
+      Alignment-free four-byte little-endian store. The original shifts
+      value right by 8, 16, and 24, then issues strb to p+0 through p+3,
+      placing bits 7..0 first. It has no NULL check and writes precisely
+      that four-byte range. The two recovered callers (0x082e39f4 and
+      0x082e3bcc) use it to materialize a 32-bit temporary before their
+      format-specific writer. A scan of every 32-byte function in
+      functions.csv found no byte-identical alias.
+
   - address: 0x082d2a1c
     ghidra: FUN_082d2a1c
     name: hash_function

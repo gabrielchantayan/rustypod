@@ -98,6 +98,7 @@ pub mod str_accum;
 pub mod strdup;
 pub mod strhash;
 pub mod stricmp;
+pub mod store_u32_le;
 pub mod table_affinity;
 pub mod table_lock;
 pub mod value_free;
