@@ -11970,6 +11970,32 @@ functions:
       volatile-read literal instead of the original's direct b (the
       documented deviation).
 
+  - address: 0x082cf9e4
+    ghidra: FUN_082cf9e4
+    name: ft_glyphslot_free_bitmap
+    size: 72
+    sig: "void ft_glyphslot_free_bitmap(FtGlyphSlot *slot)"
+    module: ft/glyph_slot
+    status: ported
+    vars:
+      param_1: slot
+      uVar1: bitmap_flags
+      uVar2: memory
+    notes: >-
+      FreeType ft_glyphslot_free_bitmap (ftobjs.c). FT_GlyphSlotRec has
+      face at +0x04, bitmap.buffer at +0x58, and internal at +0x9c;
+      FT_FaceRec::memory is +0x64 and FT_GlyphSlot_InternalRec::flags is
+      +0x04. When FT_GLYPH_OWN_BITMAP (bit 0) is set, it calls
+      ft_mem_free(memory, bitmap.buffer), zeros bitmap.buffer, then clears
+      that bit. Otherwise it only zeros bitmap.buffer, preserving flags and
+      never touching face or memory. Raw ARM confirms the conditional store
+      before the early return and the ordered free/store/bic/store owned
+      path. Four direct callers are 0x0804cbe8, 0x080a1f7c, 0x080a797c,
+      and ft_glyphslot_set_bitmap @ 0x082cfa2c; the latter calls this
+      helper before storing its replacement buffer and asserting no
+      ownership bit remains. Host tests cover owned and non-owned paths,
+      callback ABI, pointer clearing, and flag transition.
+
   - address: 0x082cfae8
     ghidra: FUN_082cfae8
     name: ft_mem_free
