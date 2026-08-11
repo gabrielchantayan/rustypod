@@ -176,6 +176,25 @@ functions:
       fixed-record accessor; 0x080aa828 verifies the same tag and reads
       its storage word at +24.
 
+  # --- retailOS indexed-object storage base ---
+  - address: 0x080aa828
+    ghidra: FUN_080aa828
+    name: indexed_object_storage_base
+    size: 28
+    sig: "void *indexed_object_storage_base(const IndexedObject *object)"
+    module: ui/object_state
+    status: ported
+    renames:
+      param_1: indexed_object
+      param_1[6]: storage_pointer_slot
+      uVar1: storage_base
+      DAT_080aa844: indexed_object_tag
+    notes: >-
+      Reference C and raw ARM agree: compare word +0 to literal
+      0x61726179, then only on equality load the pointer slot at +0x18 and
+      return its stored base pointer; otherwise return NULL. The literal's
+      raw osos.dec word is 0x61726179.
+
   - address: 0x08003178
     ghidra: FUN_08003178
     name: sctlr_disable_mmu

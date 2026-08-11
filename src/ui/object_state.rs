@@ -136,11 +136,12 @@ pub unsafe extern "C" fn sequence_id_next() -> u32 {
 }
 
 /// The three words inspected by [`indexed_object_offset`], followed by the
-/// storage word consumed by its unported base-address callee.
+/// pointer slot consumed by [`indexed_object_storage_base`].
 ///
 /// Call sites at 0x08066bb8, 0x080e2d70, and 0x080e2dc8 pass this header and
-/// use a one-based index to address fixed-size records. The callee at
-/// 0x080aa828 verifies the same tag and reads `storage` at byte offset 24.
+/// use a one-based index to address fixed-size records. The base helper at
+/// 0x080aa828 verifies the same tag, loads this slot at byte offset 24, and
+/// returns the pointer stored in that slot.
 #[repr(C)]
 pub struct IndexedObject {
     /// Fixed object-format tag: the literal at 0x08055f20 is `0x6172_6179`.
@@ -151,8 +152,8 @@ pub struct IndexedObject {
     pub element_count: u32,
     /// Header words not inspected by this helper.
     pub reserved: [u32; 3],
-    /// Storage pointer read by the unported 0x080aa828 base-address helper.
-    pub storage: *mut u8,
+    /// Pointer to the word holding the records' storage base.
+    pub storage_pointer_slot: *const *mut u8,
 }
 
 /// Object tag loaded from the literal pool at 0x08055f20.
@@ -160,34 +161,43 @@ pub const INDEXED_OBJECT_TAG: u32 = 0x6172_6179;
 
 type IndexedObjectStorageBase = unsafe extern "C" fn(*const IndexedObject) -> *mut u8;
 
-/// Calls the stock object-storage-base helper, which remains in retailOS.
+/// indexed_object_storage_base — original: `FUN_080aa828` @ `0x080aa828`
+/// (28 bytes).
 ///
-/// This is deliberately a boundary rather than a port of 0x080aa828. Host
-/// tests replace the one function pointer below; ARM builds call its fixed
-/// firmware load address.
-unsafe extern "C" fn firmware_indexed_object_storage_base(
+/// Source: `/home/gabe/Programming/ipod-decomp/decomp/c/006/080aa828_FUN_080aa828.c`;
+/// assembly: `decomp/osos.asm` @ `0x080aa828..0x080aa840`.
+///
+/// Compares the object's word-zero magic tag (`0x6172_6179`) with the
+/// literal at 0x080aa844. On a match, the ARM leaf loads the 32-bit pointer
+/// slot at object offset `+0x18`, then returns that slot's 32-bit storage
+/// base; on a mismatch it returns null without dereferencing the slot. The
+/// pointer slot must be readable when the tag matches, exactly as required
+/// by the two consecutive `ldr` instructions.
+///
+/// # Safety
+///
+/// `object` must be readable as an aligned [`IndexedObject`]. When its tag
+/// matches [`INDEXED_OBJECT_TAG`], its `storage_pointer_slot` must designate
+/// a readable storage-base pointer.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn indexed_object_storage_base(
     object: *const IndexedObject,
 ) -> *mut u8 {
-    #[cfg(target_os = "none")]
-    {
-        let storage_base: IndexedObjectStorageBase =
-            core::mem::transmute(0x080a_a828usize);
-        storage_base(object)
-    }
-
-    #[cfg(not(target_os = "none"))]
-    {
-        let _ = object;
+    if (*object).type_tag == INDEXED_OBJECT_TAG {
+        (*object).storage_pointer_slot.read()
+    } else {
         core::ptr::null_mut()
     }
 }
 
-/// Narrow boundary for the unported 0x080aa828 dependency.
+/// Replaceable dispatch retained so [`indexed_object_offset`] host tests can
+/// intercept the base lookup; production defaults to the direct port above.
 static mut INDEXED_OBJECT_STORAGE_BASE: IndexedObjectStorageBase =
-    firmware_indexed_object_storage_base;
+    indexed_object_storage_base;
 
 #[inline(always)]
-unsafe fn indexed_object_storage_base() -> IndexedObjectStorageBase {
+unsafe fn indexed_object_storage_base_fn() -> IndexedObjectStorageBase {
     core::ptr::read_volatile(core::ptr::addr_of!(INDEXED_OBJECT_STORAGE_BASE))
 }
 
@@ -199,8 +209,8 @@ unsafe fn indexed_object_storage_base() -> IndexedObjectStorageBase {
 ///
 /// Addresses one-based fixed-size records in an [`IndexedObject`]. It first
 /// requires the literal [`INDEXED_OBJECT_TAG`], a nonzero index, and
-/// `index <= element_count`; only then does it call retailOS helper
-/// 0x080aa828 for the storage base and add `element_size * (index - 1)`.
+/// `index <= element_count`; only then does it call
+/// [`indexed_object_storage_base`] and add `element_size * (index - 1)`.
 ///
 /// # Safety
 ///
@@ -219,7 +229,7 @@ pub unsafe extern "C" fn indexed_object_offset(
         return core::ptr::null_mut();
     }
 
-    let storage_base = indexed_object_storage_base()(object);
+    let storage_base = indexed_object_storage_base_fn()(object);
     storage_base.wrapping_add(
         (*object)
             .element_size
@@ -1138,7 +1148,7 @@ mod tests {
         fn drop(&mut self) {
             unsafe {
                 core::ptr::addr_of_mut!(INDEXED_OBJECT_STORAGE_BASE)
-                    .write(firmware_indexed_object_storage_base);
+                    .write(indexed_object_storage_base);
             }
         }
     }
@@ -1200,7 +1210,7 @@ mod tests {
             element_size,
             element_count,
             reserved: [0; 3],
-            storage: core::ptr::null_mut(),
+            storage_pointer_slot: core::ptr::null(),
         }
     }
 
@@ -1284,6 +1294,36 @@ mod tests {
         assert_eq!(sequence_id(), 0);
         assert_eq!(unsafe { sequence_id_next() }, 0);
         assert_eq!(sequence_id(), 1);
+    }
+
+    #[test]
+    fn indexed_storage_base_rejects_a_mismatched_magic_tag() {
+        let object = indexed_object(INDEXED_OBJECT_TAG ^ 1, 0, 0);
+
+        assert_eq!(
+            unsafe { indexed_object_storage_base(&object) },
+            core::ptr::null_mut(),
+            "tag mismatch must not dereference the null storage-pointer slot"
+        );
+    }
+
+    #[test]
+    fn indexed_storage_base_returns_the_pointer_held_by_the_storage_slot() {
+        let mut storage = [0u8; 32];
+        let storage_pointer = storage.as_mut_ptr();
+        let object = IndexedObject {
+            type_tag: INDEXED_OBJECT_TAG,
+            element_size: 0,
+            element_count: 0,
+            reserved: [0; 3],
+            storage_pointer_slot: &storage_pointer,
+        };
+
+        assert_eq!(
+            unsafe { indexed_object_storage_base(&object) },
+            storage.as_mut_ptr(),
+            "matching tag follows object +0x18 to the storage-base pointer"
+        );
     }
     #[test]
     fn wrong_type_tag_returns_null_without_querying_storage() {
