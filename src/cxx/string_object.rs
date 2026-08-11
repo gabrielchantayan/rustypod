@@ -1308,6 +1308,64 @@ pub unsafe extern "C" fn utf8_next_codepoint(cursor: *mut *const u8) -> u32 {
     0
 }
 
+/// Encodes a codepoint into the retail UTF-8-like byte form — original:
+/// `FUN_0825c870` @ 0x0825c870 (140 bytes, all code; source:
+/// `ipod-decomp/decomp/c/025/0825c870_FUN_0825c870.c`).
+///
+/// The raw ARM first uses an **unsigned** `<= 0x7f` comparison for the
+/// one-byte form, then signed `blt` comparisons for the remaining
+/// thresholds: `0x800`, `0x10000`, and `0x110000`. Thus normal values encode
+/// as one through four bytes, including surrogate values, while values with
+/// bit 31 set take the signed-less-than two-byte path. Values from
+/// `0x110000` through `0x7fffffff` store only a NUL at `destination[0]`.
+///
+/// The four-byte path has two material retail defects: it reuses the
+/// three-byte form's `codepoint >> 6` continuation at byte 1 (rather than
+/// bits 12..17), and stores bytes 0, 1, and 3 plus the NUL at byte 4, but
+/// **does not write byte 2**. This port retains those effects rather than
+/// repairing it into standard UTF-8. The
+/// destination must point to at least five writable bytes; NULL or unreadable
+/// memory faults just as it does in the firmware. Returns void (the original
+/// only restores `pc`; r0 is not a result).
+///
+/// Deviations: none.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn utf8_encode_codepoint(destination: *mut u8, codepoint: u32) {
+    if codepoint <= 0x7f {
+        destination.write(codepoint as u8);
+        destination.add(1).write(0);
+        return;
+    }
+
+    let final_continuation = (codepoint as u8 & 0x3f) | 0x80;
+    if (codepoint as i32) < 0x800 {
+        destination.write(((codepoint as i32 >> 6) as u8) | 0xc0);
+        destination.add(1).write(final_continuation);
+        destination.add(2).write(0);
+        return;
+    }
+
+    let second_continuation = ((codepoint >> 6) as u8 & 0x3f) | 0x80;
+    if (codepoint as i32) < 0x10000 {
+        destination.write(((codepoint as i32 >> 12) as u8) | 0xe0);
+        destination.add(1).write(second_continuation);
+        destination.add(2).write(final_continuation);
+        destination.add(3).write(0);
+        return;
+    }
+
+    if (codepoint as i32) < 0x110000 {
+        destination.write(((codepoint as i32 >> 18) as u8) | 0xf0);
+        destination.add(1).write(second_continuation);
+        destination.add(3).write(final_continuation);
+        destination.add(4).write(0);
+    } else {
+        destination.write(0);
+    }
+}
+
+
 /// utf8_codepoint_count_safe — original: `FUN_082770e0` @ 0x082770e0
 /// (48 bytes, all code — no literal-pool word; 102 `bl` call sites,
 /// binary-scanned).
@@ -4074,5 +4132,61 @@ pub(crate) mod tests {
             0,
             "a four-byte lead decodes as the comparator's terminator"
         );
+    }
+
+    fn encode_codepoint(codepoint: u32) -> [u8; 5] {
+        let mut output = [0xa5; 5];
+        unsafe { utf8_encode_codepoint(output.as_mut_ptr(), codepoint) };
+        output
+    }
+
+    #[test]
+    fn utf8_encode_codepoint_stores_all_normal_length_terminators() {
+        assert_eq!(encode_codepoint(0), [0, 0, 0xa5, 0xa5, 0xa5]);
+        assert_eq!(encode_codepoint(0x7f), [0x7f, 0, 0xa5, 0xa5, 0xa5]);
+
+        assert_eq!(encode_codepoint(0x80), [0xc2, 0x80, 0, 0xa5, 0xa5]);
+        assert_eq!(encode_codepoint(0x7ff), [0xdf, 0xbf, 0, 0xa5, 0xa5]);
+
+        assert_eq!(encode_codepoint(0x800), [0xe0, 0xa0, 0x80, 0, 0xa5]);
+        assert_eq!(encode_codepoint(0xffff), [0xef, 0xbf, 0xbf, 0, 0xa5]);
+    }
+
+    #[test]
+    fn utf8_encode_codepoint_retains_the_retail_four_byte_hole() {
+        assert_eq!(
+            encode_codepoint(0x10000),
+            [0xf0, 0x80, 0xa5, 0x80, 0],
+            "the raw ARM has no strb to destination + 2"
+        );
+        assert_eq!(
+            encode_codepoint(0x10ffff),
+            [0xf4, 0xbf, 0xa5, 0xbf, 0],
+            "the maximum accepted value follows the same partial-store path"
+        );
+    }
+
+    #[test]
+    fn utf8_encode_codepoint_accepts_surrogates_and_rejects_the_unsigned_range() {
+        assert_eq!(encode_codepoint(0xd7ff), [0xed, 0x9f, 0xbf, 0, 0xa5]);
+        assert_eq!(encode_codepoint(0xd800), [0xed, 0xa0, 0x80, 0, 0xa5]);
+        assert_eq!(encode_codepoint(0xdfff), [0xed, 0xbf, 0xbf, 0, 0xa5]);
+
+        assert_eq!(encode_codepoint(0x110000), [0, 0xa5, 0xa5, 0xa5, 0xa5]);
+        assert_eq!(
+            encode_codepoint(0x7fff_ffff),
+            [0, 0xa5, 0xa5, 0xa5, 0xa5],
+            "rejection writes only the first NUL"
+        );
+    }
+
+    #[test]
+    fn utf8_encode_codepoint_uses_signed_thresholds_after_ascii() {
+        assert_eq!(
+            encode_codepoint(0x8000_0000),
+            [0xc0, 0x80, 0, 0xa5, 0xa5],
+            "a negative signed u32 reaches the two-byte path"
+        );
+        assert_eq!(encode_codepoint(u32::MAX), [0xff, 0xbf, 0, 0xa5, 0xa5]);
     }
 }

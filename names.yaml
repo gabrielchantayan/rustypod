@@ -11575,6 +11575,25 @@ functions:
       deviation), and LLVM forming the id equality as sub/clz/lsr
       instead of cmpeq/moveq/movne (same 0/1 result).
 
+  - address: 0x0825c870
+    ghidra: FUN_0825c870
+    name: utf8_encode_codepoint
+    size: 140
+    sig: "void utf8_encode_codepoint(char *destination, unsigned int codepoint)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1/r0: destination, param_2/r1: codepoint, uVar3/r2: final_continuation, bVar2/r12: second_continuation}
+    notes: >-
+      Raw ARM establishes ordinary one/two/three/four-byte output for
+      normal inputs, but only the ASCII test (`ls`) is unsigned. The
+      0x800, 0x10000, and 0x110000 tests are signed `blt`: values with
+      bit 31 set therefore emit a two-byte prefix derived from an
+      arithmetic right shift, while 0x110000..0x7fffffff stores only
+      destination[0] = NUL. Surrogates are accepted as three-byte
+      forms. The four-byte path reuses the three-byte second
+      continuation (`codepoint >> 6`, rather than bits 12..17), then
+      stores only +0, +1, +3, +4; destination[2] is untouched instead
+      of receiving a third continuation byte. The function returns void.
   - address: 0x08276d64
     ghidra: FUN_08276d64
     name: utf8_strcmp_safe
