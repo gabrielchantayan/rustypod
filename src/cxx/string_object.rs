@@ -350,6 +350,8 @@ pub const DEFAULT_STRING_OBJECT_OPS: StringObjectOps = StringObjectOps {
 /// The active payload release. Host tests install recording mocks.
 pub static mut STRING_OBJECT_OPS: StringObjectOps = DEFAULT_STRING_OBJECT_OPS;
 
+
+
 /// Reads the release_payload slot (volatile — the slot is meant to be
 /// swapped at runtime, and a plain read lets LLVM const-fold the
 /// default away).
@@ -1583,11 +1585,18 @@ pub unsafe extern "C" fn string_id_record_equals(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
     use super::*;
     use std::sync::{Mutex, MutexGuard};
     use std::vec::Vec;
+
+    /// Serializes all host tests that replace [`STRING_OBJECT_OPS`].
+    ///
+    /// The dispatch slot is process-global, so sibling C++ module tests use
+    /// this lock alongside this module's own destruction tests.
+    pub(crate) static STRING_OBJECT_OPS_TEST_LOCK: Mutex<()> = Mutex::new(());
+
 
     #[test]
     fn plants_the_vtable_and_a_null_payload() {
@@ -2391,9 +2400,8 @@ mod tests {
         );
     }
 
-    /// Serializes the destroy tests — the ops table and the recorder
-    /// are shared globals.
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
+    /// The destroy tests share [`STRING_OBJECT_OPS_TEST_LOCK`] with sibling
+    /// C++ module tests because the ops table and recorder are global.
 
     /// Objects handed to the recording release, in call order, paired
     /// with the vtable pointer observed at entry.
@@ -2411,7 +2419,9 @@ mod tests {
     }
 
     fn bench() -> Bench {
-        let lock = OPS_LOCK.lock().unwrap();
+        let lock = STRING_OBJECT_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         unsafe {
             (*core::ptr::addr_of_mut!(RELEASE_CALLS)).clear();
             core::ptr::write_volatile(
@@ -2500,7 +2510,9 @@ mod tests {
     #[test]
     fn release_payload_with_null_payload_frees_nothing() {
         let _heap = crate::heap::veneers::tests::mock_heap();
-        let _lock = OPS_LOCK.lock().unwrap();
+        let _lock = STRING_OBJECT_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         let mut object = StringObject {
             vtable: core::ptr::null(),
             payload: core::ptr::null_mut(),
@@ -2519,7 +2531,9 @@ mod tests {
     #[test]
     fn release_payload_frees_tag_0x34_then_nulls_the_word() {
         let _heap = crate::heap::veneers::tests::mock_heap();
-        let _lock = OPS_LOCK.lock().unwrap();
+        let _lock = STRING_OBJECT_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         let mut payload_storage = [0u8; 8];
         let payload = payload_storage.as_mut_ptr();
         let mut object = StringObject {
@@ -2551,7 +2565,9 @@ mod tests {
     #[test]
     fn destroy_with_the_default_ops_releases_the_payload() {
         let _heap = crate::heap::veneers::tests::mock_heap();
-        let _lock = OPS_LOCK.lock().unwrap();
+        let _lock = STRING_OBJECT_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         let mut payload_storage = [0u8; 8];
         let payload = payload_storage.as_mut_ptr();
         let mut object = StringObject {
@@ -2621,7 +2637,9 @@ mod tests {
     #[test]
     fn delete_with_default_ops_frees_payload_then_this() {
         let _heap = crate::heap::veneers::tests::mock_heap();
-        let _lock = OPS_LOCK.lock().unwrap();
+        let _lock = STRING_OBJECT_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         let mut payload_storage = [0u8; 8];
         let payload = payload_storage.as_mut_ptr();
         let mut object = StringObject {
@@ -2834,7 +2852,9 @@ mod tests {
     #[test]
     fn record_destroy_with_default_ops_releases_the_embedded_payload() {
         let _heap = crate::heap::veneers::tests::mock_heap();
-        let _lock = OPS_LOCK.lock().unwrap();
+        let _lock = STRING_OBJECT_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         let mut payload_storage = [0u8; 8];
         let payload = payload_storage.as_mut_ptr();
         let mut record = StringIdRecord {

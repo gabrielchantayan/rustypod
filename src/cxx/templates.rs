@@ -21,6 +21,9 @@
 //!   sites (the largest family in the block after the handle accessor).
 //! - [`array_at_checked`] — bounds-checked lookup in a
 //!   {base, count} pointer array, 2 copies, 43 call sites.
+//! - [`cxx_record_range_destroy_16`] — elementwise destruction of a
+//!   half-open vector range whose 16-byte records contain two
+//!   [`StringObject`] values.
 //! - [`pair_assign_guarded`] — the self-assignment-guarded two-word
 //!   copy-assign of a pair-shaped value type, the only copy, 14 call
 //!   sites.
@@ -64,6 +67,56 @@
 //! with the **source in r2**, and it exists exactly once.
 
 use crate::runtime::rt_div::__rt_sdiv;
+use crate::cxx::string_object::{string_object_destroy, StringObject};
+
+/// A 16-byte retailOS record containing two adjacent [`StringObject`]s.
+///
+/// On the 32-bit target each string object has a vtable and payload word, so
+/// this pair is exactly 16 bytes. On 64-bit host tests, Rust pointer width
+/// makes it larger; iterating typed records preserves the target's two-object
+/// stride without pretending host pointers fit in target words.
+#[repr(C)]
+pub struct StringObjectPair {
+    pub first: StringObject,
+    pub second: StringObject,
+}
+
+/// cxx_record_range_destroy_16 — original: `FUN_083e38a0` @ 0x083e38a0
+/// (40 bytes; 5 direct `bl` callers).
+///
+/// Destroys the half-open `[first, last)` range of 16-byte
+/// [`StringObjectPair`] records. The first ABI argument in r0 is unused; r1
+/// and r2 are the current and end iterators. Each record destroys `second`
+/// before `first`, matching the element destructor `FUN_082677e0`: it calls
+/// the ported [`string_object_destroy`] @ 0x08277484 on `this + 8`, then
+/// again on `this`. The raw ARM loop advances r4 by 16 only after that pair
+/// of calls and terminates solely on iterator equality.
+///
+/// Callers at 0x083e3aa8 and 0x082679f8 pass a vector head in r0 then load
+/// its `{begin, end}` into r1/r2; `FUN_083e3aa8` frees that same allocation
+/// as 16-byte elements immediately afterward. The record's two-string shape
+/// is independently pinned down by `FUN_082677c8`, which constructs
+/// StringObjects at offsets 0 and 8, and by `FUN_082680d8`, which moves them
+/// individually at those offsets.
+///
+/// # Safety
+/// `first` and `last` must delimit a valid contiguous range of
+/// [`StringObjectPair`]s. Each element is destroyed in place, so its payload
+/// ownership must be valid for [`string_object_destroy`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_record_range_destroy_16(
+    _unused: *mut u8,
+    mut first: *mut StringObjectPair,
+    last: *mut StringObjectPair,
+) {
+    while first != last {
+        string_object_destroy(core::ptr::addr_of_mut!((*first).second));
+        string_object_destroy(core::ptr::addr_of_mut!((*first).first));
+        first = first.add(1);
+    }
+}
+
 
 /// deque_iter_assign — original: `FUN_083da458` @ 0x083da458
 /// (36 bytes; 31 `bl` call sites there, 99 across all 17 byte-identical
@@ -1479,6 +1532,129 @@ pub unsafe extern "C" fn vector_pair_copy_into(
 mod tests {
     extern crate std;
     use super::*;
+    use crate::cxx::string_object::{StringObjectOps, STRING_OBJECT_OPS, STRING_OBJECT_VTABLE};
+    use crate::cxx::string_object::tests::STRING_OBJECT_OPS_TEST_LOCK;
+    use std::sync::MutexGuard;
+    use std::vec::Vec;
+
+    static mut STRING_OBJECT_RELEASES: Vec<usize> = Vec::new();
+
+    unsafe extern "C" fn record_string_object_release(this: *mut StringObject) {
+        (*core::ptr::addr_of_mut!(STRING_OBJECT_RELEASES)).push(this as usize);
+        (*this).payload = core::ptr::null_mut();
+    }
+
+    struct StringObjectReleaseGuard {
+        _lock: MutexGuard<'static, ()>,
+        saved: StringObjectOps,
+    }
+
+    impl Drop for StringObjectReleaseGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::write_volatile(core::ptr::addr_of_mut!(STRING_OBJECT_OPS), self.saved);
+            }
+        }
+    }
+
+    fn record_string_object_releases() -> StringObjectReleaseGuard {
+        let lock = STRING_OBJECT_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        unsafe {
+            (*core::ptr::addr_of_mut!(STRING_OBJECT_RELEASES)).clear();
+            let saved = core::ptr::read_volatile(core::ptr::addr_of!(STRING_OBJECT_OPS));
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!(STRING_OBJECT_OPS),
+                StringObjectOps {
+                    release_payload: record_string_object_release,
+                },
+            );
+            StringObjectReleaseGuard { _lock: lock, saved }
+        }
+    }
+
+    fn string_pair(first_payload: usize, second_payload: usize) -> StringObjectPair {
+        StringObjectPair {
+            first: StringObject {
+                vtable: core::ptr::null(),
+                payload: first_payload as *mut u8,
+            },
+            second: StringObject {
+                vtable: core::ptr::null(),
+                payload: second_payload as *mut u8,
+            },
+        }
+    }
+
+    fn string_object_releases() -> Vec<usize> {
+        unsafe { (*core::ptr::addr_of!(STRING_OBJECT_RELEASES)).clone() }
+    }
+
+    #[test]
+    fn record_range_destroy_empty_does_not_dereference_bounds() {
+        unsafe {
+            cxx_record_range_destroy_16(
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+            );
+        }
+    }
+
+    #[test]
+    fn record_range_destroy_single_destroys_both_strings() {
+        let _guard = record_string_object_releases();
+        let mut records = [string_pair(0x11, 0x22)];
+        let record = records.as_mut_ptr();
+        unsafe {
+            cxx_record_range_destroy_16(core::ptr::null_mut(), record, record.add(1));
+            assert_eq!((*record).first.vtable, &STRING_OBJECT_VTABLE as *const _);
+            assert_eq!((*record).second.vtable, &STRING_OBJECT_VTABLE as *const _);
+            assert!((*record).first.payload.is_null());
+            assert!((*record).second.payload.is_null());
+        }
+        assert_eq!(string_object_releases().len(), 2);
+    }
+
+    #[test]
+    fn record_range_destroy_multiple_visits_each_pair() {
+        let _guard = record_string_object_releases();
+        let mut records = [
+            string_pair(0x11, 0x12),
+            string_pair(0x21, 0x22),
+            string_pair(0x31, 0x32),
+        ];
+        let first = records.as_mut_ptr();
+        unsafe {
+            cxx_record_range_destroy_16(core::ptr::null_mut(), first, first.add(records.len()));
+            for record in &records {
+                assert_eq!(record.first.vtable, &STRING_OBJECT_VTABLE as *const _);
+                assert_eq!(record.second.vtable, &STRING_OBJECT_VTABLE as *const _);
+                assert!(record.first.payload.is_null());
+                assert!(record.second.payload.is_null());
+            }
+        }
+        assert_eq!(string_object_releases().len(), 6);
+    }
+
+    #[test]
+    fn record_range_destroy_releases_second_then_first_per_record() {
+        let _guard = record_string_object_releases();
+        let mut records = [string_pair(0x11, 0x12), string_pair(0x21, 0x22)];
+        let first = records.as_mut_ptr();
+        unsafe {
+            let expected = [
+                core::ptr::addr_of_mut!((*first).second) as usize,
+                core::ptr::addr_of_mut!((*first).first) as usize,
+                core::ptr::addr_of_mut!((*first.add(1)).second) as usize,
+                core::ptr::addr_of_mut!((*first.add(1)).first) as usize,
+            ];
+            cxx_record_range_destroy_16(core::ptr::null_mut(), first, first.add(records.len()));
+            assert_eq!(string_object_releases(), expected);
+        }
+    }
+
 
     #[test]
     fn pair_assign_copies_two_words_and_returns_dst() {
