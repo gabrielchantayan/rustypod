@@ -44,6 +44,21 @@ pub struct FtBBox {
     pub y_max: i32,
 }
 
+/// `FT_Glyph_Metrics` — the eight signed 26.6 metric fields stored by a
+/// glyph slot. 32 bytes on ARM: width through vert_advance at +0x00..+0x1c.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FtGlyphMetrics {
+    pub width: i32,
+    pub height: i32,
+    pub hori_bearing_x: i32,
+    pub hori_bearing_y: i32,
+    pub hori_advance: i32,
+    pub vert_bearing_x: i32,
+    pub vert_bearing_y: i32,
+    pub vert_advance: i32,
+}
+
 /// `FT_Outline` — glyph outline. 20 bytes on ARM: n_contours @ +0 (i16),
 /// n_points @ +2 (i16), points @ +4, tags @ +8, contours @ +12,
 /// flags @ +16.

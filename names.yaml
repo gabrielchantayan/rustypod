@@ -12120,6 +12120,31 @@ functions:
       inputs, a second-record match, missing identifiers, and case-sensitive
       strcmp comparison. match.py confirms the same guarded linear scan.
 
+  - address: 0x082cfe0c
+    ghidra: FUN_082cfe0c
+    name: ft_synthesize_vertical_metrics
+    size: 76
+    sig: "void ft_synthesize_vertical_metrics(FtGlyphMetrics *metrics, i32 advance)"
+    module: ft/metrics
+    status: ported
+    vars:
+      param_1/r4: metrics
+      param_2/r0: advance
+      r5: height
+      param_1[5]: vert_bearing_x
+      param_1[6]: vert_bearing_y
+      param_1[7]: vert_advance
+    notes: >-
+      FreeType 2.3-era ftobjs.c's ft_synthesize_vertical_metrics, exactly
+      matching the historical upstream source and the FT_Glyph_Metrics
+      eight-word layout. When advance is zero, computes wrapped signed
+      `(height * 12) / 10` through __rt_sdiv; then stores only
+      vert_bearing_x = -(width / 2), vert_bearing_y = (advance - height) / 2,
+      and vert_advance = advance. Raw ARM uses signed truncate-toward-zero
+      halves (`add sign-bit; asr #1`) and an ARM wrapping subtraction, both
+      reproduced by the port. Direct glyph-loader callers at 0x0803d068,
+      0x08080254, 0x08086ad8, and 0x080ae5dc pass a metrics record.
+
 
   - address: 0x08292e6c
     ghidra: FUN_08292e6c

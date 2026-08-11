@@ -7,6 +7,7 @@ pub mod buffer;
 pub mod calc;
 pub mod error;
 pub mod memory;
+pub mod metrics;
 pub mod outline;
 pub mod service;
 pub mod stream;
