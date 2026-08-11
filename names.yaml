@@ -15376,6 +15376,35 @@ functions:
   #   container_is_empty     9 copies   92 calls  -> identified
   #   not_equal_deref        5 copies   35 calls  -> identified
 
+  - address: 0x083e38a0
+    ghidra: FUN_083e38a0
+    name: cxx_record_range_destroy_16
+    size: 40
+    sig: "void cxx_record_range_destroy_16(void *unused, StringObjectPair *first, StringObjectPair *last)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: unused, param_2: first, param_3: last}
+    renames:
+      FUN_082677e0: string_object_pair_destroy
+      FUN_08277484: string_object_destroy
+      iVar1: current
+      param_2: first
+      param_3: last
+    notes: >-
+      Structural half-open range destructor for a 16-byte vector element:
+      raw ARM saves r1 as current and r2 as last, does its first
+      `cmp r4,r5` before any dereference, then per iteration passes current
+      in r0 to 0x082677e0 and adds 0x10. The passed r0 argument is otherwise
+      unused. The element destructor is fully recovered and ported: its
+      `string_object_destroy(this + 8)` followed by
+      `string_object_destroy(this)` establishes a pair of adjacent
+      two-word StringObjects, in reverse member destruction order.
+      0x082677c8 constructs that pair at +0/+8 and 0x082680d8 moves those
+      same subobjects separately. Five decompiled direct call sites
+      (0x082679f8, 0x083e38c8, 0x083e3aa8, and two paths in 0x083e3ad8)
+      use r0 as a vector header and its begin/end words as r1/r2;
+      0x083e3aa8 immediately frees the storage as 16-byte elements.
+
   - address: 0x083da458
     ghidra: FUN_083da458
     name: deque_iter_assign
@@ -23378,23 +23407,24 @@ functions:
       immediately call operator_delete @ 0x082aad24 after this routine
       returns, proving this is a destructor rather than a deleting
       destructor. It walks all thirteen cells at record + index*0x14
-      in ascending order through sibling cell helper FUN_08256c28
-      (36 bytes, unported). That helper loads +0x00 into r1, skips
-      NULL, loads +0x10 into r0, calls allocator-aware
-      FUN_0807f234(r0 = allocator, r1 = buffer), then clears +0x00.
-      Thus +0x00 is the owned buffer pointer and +0x10 the allocator
-      handle (NULL selects FUN_0807f234's default heap); no
-      operator_delete occurs in this body. Target behavior retains the
-      original direct call to stock FUN_08256c28 through the
-      CG_CELL_TABLE_CELL_DESTROY seam. Host behavior models its
-      default-allocator branch via free_wrapper(ptr, 0x38); the
-      unported non-NULL allocator registry path remains target-only,
-      and tests replace the seam if needed. The fixed ABI words use
-      u32 loads/stores at byte offsets, not host pointer-width slots.
-      Host tests: src/codegen/ir.rs::cell_table_destroy_skips_null_buffers,
+      in ascending order through ported sibling cell helper
+      cg_cell_table_cell_destroy (FUN_08256c28, 40 bytes). That helper
+      loads +0x00 into r1, skips NULL, loads +0x10 into r0, calls
+      allocator-aware FUN_0807f234(r0 = allocator, r1 = buffer), then
+      clears +0x00. Thus +0x00 is the owned buffer pointer and +0x10
+      the allocator handle (NULL selects FUN_0807f234's default heap);
+      no operator_delete occurs in this body. The
+      CG_CELL_TABLE_CELL_DESTROY seam defaults to the ported helper.
+      On target its allocator-registry call stays at the stock helper
+      address; host behavior models every non-NULL buffer with
+      free_wrapper(ptr, 0x38) because the registry is unported. The
+      fixed ABI words use u32 loads/stores at byte offsets, not host
+      pointer-width slots. Host tests:
+      src/codegen/ir.rs::cell_table_cell_destroy_skips_a_null_buffer_without_mutating_the_cell,
+      ::cell_table_cell_destroy_releases_then_clears_only_the_owned_buffer_word,
       ::cell_table_destroy_frees_all_owned_cells_in_order_and_pairs_with_create,
       ::cell_table_destroy_routes_all_cells_in_index_order_through_the_seam,
-      and ::cell_table_destroy_seam_stays_wired_to_the_host_model.
+      and ::cell_table_destroy_seam_stays_wired_to_the_ported_helper.
 
   - address: 0x08256c10
     ghidra: FUN_08256c10
@@ -23417,6 +23447,41 @@ functions:
       ipod-decomp/decomp/osos.asm. No deviations. Host test:
       src/codegen/ir.rs::cell_init_writes_its_three_abi_fields_and_returns_void
       verifies the void return and all 20 cell bytes.
+
+  - address: 0x08256c28
+    ghidra: FUN_08256c28
+    name: cg_cell_table_cell_destroy
+    size: 40
+    sig: "void cg_cell_table_cell_destroy(u8 *cell)"
+    module: codegen/ir
+    status: ported
+    renames:
+      param_1/r0/r4: cell (4-byte-aligned 0x14-byte cell; retained in r4
+        across the allocator release)
+      r1: buffer (cell +0x00, NULL-checked before the call)
+      r0: allocator (cell +0x10, first argument to FUN_0807f234)
+    notes: >-
+      Direct destruction seam for one CgCellTable cell. Raw ARM is `push
+      {r4,lr}; ldr r1,[r0]; mov r4,r0; cmp r1,#0; popeq {r4,pc}; ldr
+      r0,[r4,#0x10]; bl 0x0807f234; mov r0,#0; str r0,[r4]; pop
+      {r4,pc}`. A NULL buffer returns without changing any cell byte.
+      Otherwise it invokes allocator-registry release with r0=the
+      target-width allocator handle and r1=the target-width buffer,
+      then clears only buffer word +0x00 after return. The callee's
+      NULL allocator path initializes/uses the process default allocator;
+      its non-NULL registry path clears a matched live-entry bit or frees
+      through the registered heap, while a zero registry heap returns
+      without freeing. The cell helper still clears +0x00 in all such
+      non-NULL-buffer cases. Source:
+      ipod-decomp/decomp/osos.asm and
+      decomp/c/024/08256c28_FUN_08256c28.c. Target calls the unported
+      FUN_0807f234 directly with its recovered two-register ABI. Host
+      deviation: no allocator-registry representation exists, so its
+      default model releases every non-NULL buffer via
+      free_wrapper(buffer, 0x38); a non-default host registry requires
+      replacing CG_CELL_TABLE_CELL_DESTROY. Host tests:
+      src/codegen/ir.rs::cell_table_cell_destroy_skips_a_null_buffer_without_mutating_the_cell
+      and ::cell_table_cell_destroy_releases_then_clears_only_the_owned_buffer_word.
 
   - address: 0x0811d5ac
     ghidra: (absent from functions.csv)

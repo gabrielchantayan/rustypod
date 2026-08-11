@@ -2800,45 +2800,66 @@ pub unsafe extern "C" fn cg_cell_table_create(record: *mut CgCellTable) -> *mut 
 /// The cell-destroy boundary for [`cg_cell_table_destroy`]: one call
 /// per cell, in index order — the original's in-loop `bl 0x08256c28`.
 ///
-/// On firmware, the wired default branches directly to the stock,
-/// unported helper, preserving its allocator-aware
-/// `FUN_0807f234(allocator, buffer)` path. On hosts it models the
-/// helper's default-allocator branch through the ported
-/// [`crate::heap::veneers::free_wrapper`] so tests can safely observe
-/// the free; host tests that need a non-default allocator replace this
-/// seam.
+/// Its default is the ported [`cg_cell_table_cell_destroy`]. Tests may
+/// replace it to observe the outer destructor's thirteen calls.
 #[cfg_attr(target_os = "none", no_mangle)]
-#[cfg(target_os = "none")]
 pub static mut CG_CELL_TABLE_CELL_DESTROY: unsafe extern "C" fn(*mut u8) =
-    stock_cg_cell_table_cell_destroy;
-#[cfg_attr(target_os = "none", no_mangle)]
-#[cfg(not(target_os = "none"))]
-pub static mut CG_CELL_TABLE_CELL_DESTROY: unsafe extern "C" fn(*mut u8) =
-    host_cg_cell_table_cell_destroy;
+    cg_cell_table_cell_destroy;
 
-/// Firmware default for [`CG_CELL_TABLE_CELL_DESTROY`]: keep the
-/// original direct call to unported `FUN_08256c28` at its load address.
-#[cfg(target_os = "none")]
-unsafe extern "C" fn stock_cg_cell_table_cell_destroy(cell: *mut u8) {
-    let destroy: unsafe extern "C" fn(*mut u8) = core::mem::transmute(0x0825_6c28usize);
-    destroy(cell);
+/// `cg_cell_table_cell_destroy` — retailOS `FUN_08256c28` @ `0x08256c28`
+/// (40 bytes).
+///
+/// Source: `ipod-decomp/decomp/osos.asm`, raw ARM at `0x08256c28`:
+/// `push {r4,lr}; ldr r1,[r0]; mov r4,r0; cmp r1,#0; popeq {r4,pc};
+/// ldr r0,[r4,#0x10]; bl 0x0807f234; mov r0,#0; str r0,[r4]; pop
+/// {r4,pc}`. This direct destruction seam owns the fixed-width buffer word
+/// at `cell + 0x00`: a NULL buffer returns without touching the cell;
+/// otherwise it passes `cell + 0x10`'s allocator handle in r0 and the buffer
+/// in r1 to the allocator-registry release helper `FUN_0807f234`, then clears
+/// the buffer word only after that helper returns. It leaves the allocator
+/// handle, tag byte, and all other cell bytes untouched.
+///
+/// `FUN_0807f234` has two target paths. A NULL handle initializes and uses
+/// the process default allocator; a non-NULL handle is an allocator-registry
+/// object, whose live-entry match merely clears its allocation bit and whose
+/// unmatched entry frees through that object's heap. A zero heap in a
+/// non-NULL registry returns without a free; this helper still clears the
+/// cell buffer, exactly as the ARM caller does.
+///
+/// DEVIATION: the allocator-registry helper is not ported. On target this
+/// body calls its stock address with the recovered two-register ABI. Hosts
+/// have no representation for that registry, so every non-NULL buffer uses
+/// the established default-heap `free_wrapper` model (tag `0x38`); tests
+/// needing a non-default registry install [`CG_CELL_TABLE_CELL_DESTROY`].
+/// The cell's pointer fields remain target-width `u32` words on hosts.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_cell_table_cell_destroy(cell: *mut u8) {
+    let buffer = (cell.add(CG_CELL_BUFFER) as *const u32).read_volatile() as usize as *mut u8;
+    if buffer.is_null() {
+        return;
+    }
+
+    #[cfg(target_os = "none")]
+    {
+        let allocator =
+            (cell.add(CG_CELL_ALLOCATOR) as *const u32).read_volatile() as usize as *mut u8;
+        allocator_registry_release(allocator, buffer);
+    }
+    #[cfg(not(target_os = "none"))]
+    crate::heap::veneers::free_wrapper(buffer, 0x38);
+
+    (cell.add(CG_CELL_BUFFER) as *mut u32).write_volatile(0);
 }
 
-/// Host model of `FUN_08256c28`'s default-allocator path. It reads the
-/// ABI-fixed 32-bit buffer word, skips NULL, frees non-NULL through
-/// `free_wrapper` with the original's tag 0x38, then clears that word.
-///
-/// DEVIATION: the stock helper's non-NULL allocator path is left at
-/// its target address above because its `FUN_0807f234` registry
-/// machinery is unported; host tests requiring it install the public
-/// cell-destroy seam.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn host_cg_cell_table_cell_destroy(cell: *mut u8) {
-    let buffer = (cell.add(CG_CELL_BUFFER) as *const u32).read() as usize as *mut u8;
-    if !buffer.is_null() {
-        crate::heap::veneers::free_wrapper(buffer, 0x38);
-        (cell.add(CG_CELL_BUFFER) as *mut u32).write(0);
-    }
+/// Target-only bridge to the still-stock allocator-registry release helper
+/// `FUN_0807f234`. Its ABI is `r0 = allocator, r1 = buffer`.
+#[cfg(target_os = "none")]
+#[inline(never)]
+unsafe fn allocator_registry_release(allocator: *mut u8, buffer: *mut u8) {
+    let release: unsafe extern "C" fn(*mut u8, *mut u8) =
+        core::mem::transmute(0x0807_f234usize);
+    release(allocator, buffer);
 }
 
 /// cg_cell_table_destroy — original: `FUN_0824310c` @ 0x0824310c
@@ -2853,9 +2874,9 @@ unsafe extern "C" fn host_cg_cell_table_cell_destroy(cell: *mut u8) {
 ///
 /// Signature from the register moves: `record` arrives in r0, stays in
 /// r5 across all calls, then moves back to r0 for the return. The
-/// target implementation reaches `FUN_08256c28` directly through
-/// [`CG_CELL_TABLE_CELL_DESTROY`]; the replaceable seam is a documented
-/// host-test boundary whose target default is that exact stock call.
+/// [`CG_CELL_TABLE_CELL_DESTROY`] seam defaults to the ported direct
+/// helper [`cg_cell_table_cell_destroy`]; it remains replaceable solely
+/// as a host-test boundary.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn cg_cell_table_destroy(record: *mut CgCellTable) -> *mut CgCellTable {
@@ -6796,21 +6817,53 @@ mod tests {
     }
 
     #[test]
-    fn cell_table_destroy_skips_null_buffers() {
+    fn cell_table_cell_destroy_skips_a_null_buffer_without_mutating_the_cell() {
+        #[repr(align(4))]
+        struct Cell([u8; CG_CELL_TABLE_CELL_BYTES]);
+
         let _g = setup();
         unsafe {
             let _heap = install_cell_table_fake_heap();
-            let record = poisoned_cell_table();
-            cg_cell_table_create(record.cast());
+            let mut cell = Cell([0xa5; CG_CELL_TABLE_CELL_BYTES]);
+            (cell.0.as_mut_ptr().add(CG_CELL_BUFFER) as *mut u32).write(0);
+            let before = cell.0;
 
-            let returned = cg_cell_table_destroy(record.cast());
+            cg_cell_table_cell_destroy(cell.0.as_mut_ptr());
 
-            assert_eq!(returned, record.cast(), "a destructor returns this");
+            assert_eq!(cell.0, before, "the ARM early return writes nothing");
             assert!(
                 CELL_TABLE_FAKE_FREE_LOG.is_empty(),
-                "the cell helper skips every NULL buffer"
+                "a NULL buffer must not enter the allocator"
             );
-            poisoning_free(record);
+        }
+        teardown();
+    }
+
+    #[test]
+    fn cell_table_cell_destroy_releases_then_clears_only_the_owned_buffer_word() {
+        #[repr(align(4))]
+        struct Cell([u8; CG_CELL_TABLE_CELL_BYTES]);
+
+        let _g = setup();
+        unsafe {
+            let _heap = install_cell_table_fake_heap();
+            let mut cell = Cell([0xa5; CG_CELL_TABLE_CELL_BYTES]);
+            let buffer = crate::heap::veneers::malloc_wrapper(0x40, 0x38);
+            (cell.0.as_mut_ptr().add(CG_CELL_BUFFER) as *mut u32).write(buffer as usize as u32);
+            (cell.0.as_mut_ptr().add(CG_CELL_ALLOCATOR) as *mut u32).write(0x1234_5678);
+
+            cg_cell_table_cell_destroy(cell.0.as_mut_ptr());
+
+            assert_eq!(CELL_TABLE_FAKE_FREE_LOG.as_slice(), &[buffer as usize]);
+            assert!(CELL_TABLE_FAKE_LIVE.is_empty());
+            let mut expected = [0xa5; CG_CELL_TABLE_CELL_BYTES];
+            expected[CG_CELL_BUFFER..CG_CELL_BUFFER + 4].copy_from_slice(&0u32.to_le_bytes());
+            expected[CG_CELL_ALLOCATOR..CG_CELL_ALLOCATOR + 4]
+                .copy_from_slice(&0x1234_5678u32.to_le_bytes());
+            assert_eq!(
+                cell.0, expected,
+                "release clears only +0x00; the allocator/tag/other bytes survive"
+            );
         }
         teardown();
     }
@@ -6882,13 +6935,13 @@ mod tests {
     }
 
     #[test]
-    fn cell_table_destroy_seam_stays_wired_to_the_host_model() {
+    fn cell_table_destroy_seam_stays_wired_to_the_ported_helper() {
         let _g = setup();
         unsafe {
             assert_eq!(
                 hook(core::ptr::addr_of!(CG_CELL_TABLE_CELL_DESTROY)) as usize,
-                host_cg_cell_table_cell_destroy as usize,
-                "the host seam models FUN_08256c28's default-allocator path"
+                cg_cell_table_cell_destroy as usize,
+                "the seam must invoke the ported FUN_08256c28"
             );
         }
         teardown();
