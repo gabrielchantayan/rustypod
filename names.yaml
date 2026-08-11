@@ -21354,6 +21354,34 @@ functions:
       word at object+0xe38. The owning UI object remains unidentified;
       no null or alignment guard is present in the original.
 
+  # --- retailOS scaled-field multiply-accumulate ---
+  - address: 0x08064980
+    ghidra: FUN_08064980
+    name: scaled_field_total
+    size: 148
+    sig: "i64 scaled_field_total(const void *fields)"
+    module: ui/object_state
+    status: ported
+    renames:
+      param_1: fields
+      r4: fields
+      sp_10: base
+      sp_8: count_or_scale
+      sp_0: count_for_multiply
+    notes: >-
+      Assembly evidence at 0x08064980..0x08064a10: null fields return
+      zero; otherwise four 8-byte copies load base, count, scale, and count
+      again. A zero count branches directly to the copied base. The nonzero
+      path performs the unsigned 64-bit product using umull/mla/mla, then
+      adds base with adds/adc, so the i64 result is the wrapping bit pattern
+      of base + count * scale. Ghidra did not emit a standalone
+      functions.csv row at this internal boundary; the next indexed function
+      starts at 0x08064a14, establishing the 148-byte extent. Tail callers
+      object_scaled_total @ 0x08055f24 and object_scaled_total_base @
+      0x08055f3c, plus their reference C, corroborate the three field
+      offsets and arithmetic. Rust implementation and focused host tests:
+      `src/ui/object_state.rs::scaled_field_total`.
+
   # --- retailOS null-guarded scaled-total thunk ---
   - address: 0x08055f24
     ghidra: FUN_08055f24

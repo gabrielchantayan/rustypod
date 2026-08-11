@@ -237,35 +237,50 @@ pub unsafe extern "C" fn indexed_object_offset(
     )
 }
 
-/// Calls the stock 64-bit multiply-accumulate helper, which remains in
-/// retailOS.
-///
-/// This is deliberately a boundary rather than a port of 0x08064980. Host
-/// tests replace the one function pointer below; ARM builds call its fixed
-/// firmware load address. The original null-guards `fields`, then reads
-/// three consecutive little-endian doublewords `base = fields[0]`,
-/// `count = fields[1]`, `scale = fields[2]` and returns `base` when
-/// `count` is zero, otherwise the wrapping 64-bit product-sum
-/// `base + count * scale` (`umull`/`mla`/`mla` for the product, then
-/// `adds`/`adc` for the accumulate).
+/// Function-pointer signature shared by [`scaled_field_total`] and the
+/// host-test interception slot used by its two stock thunks.
 type ScaledFieldTotal = unsafe extern "C" fn(*const u8) -> i64;
 
-unsafe extern "C" fn firmware_scaled_field_total(fields: *const u8) -> i64 {
-    #[cfg(target_os = "none")]
-    {
-        let scaled_field_total: ScaledFieldTotal = core::mem::transmute(0x0806_4980usize);
-        scaled_field_total(fields)
+/// scaled_field_total — original: `FUN_08064980` @ `0x08064980` (148 bytes).
+///
+/// Assembly: `/home/gabe/Programming/ipod-decomp/decomp/osos.asm` @
+/// `0x08064980..0x08064a10`; recovered through the two tail-call thunks at
+/// `0x08055f24` and `0x08055f3c`, whose Ghidra C reproduces the arithmetic.
+///
+/// Returns zero for a null field triple. Otherwise it copies the unaligned
+/// little-endian doublewords `base`, `count`, and (only when `count != 0`)
+/// `scale` from offsets 0, 8, and 16. It returns the `i64` bit pattern of
+/// `base + count * scale`, with both operations wrapping modulo $2^{64}$.
+/// The count-zero branch returns `base` without reading `scale`, exactly as
+/// the stock `ldrd`/conditional branch does.
+///
+/// # Safety
+///
+/// A non-null `fields` must point to readable bytes through offset 15; when
+/// its `count` doubleword is nonzero, it must be readable through offset 23.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn scaled_field_total(fields: *const u8) -> i64 {
+    if fields.is_null() {
+        return 0;
     }
 
-    #[cfg(not(target_os = "none"))]
-    {
-        let _ = fields;
-        0
+    let base = u64::from_le_bytes(fields.cast::<[u8; 8]>().read());
+    let count = u64::from_le_bytes(fields.add(8).cast::<[u8; 8]>().read());
+    if count == 0 {
+        return base as i64;
     }
+
+    let scale = u64::from_le_bytes(fields.add(16).cast::<[u8; 8]>().read());
+    base.wrapping_add(count.wrapping_mul(scale)) as i64
 }
 
-/// Narrow boundary for the unported 0x08064980 dependency.
-static mut SCALED_FIELD_TOTAL: ScaledFieldTotal = firmware_scaled_field_total;
+/// Volatile host-test interception slot retained for the two stock thunks.
+///
+/// Its default is the direct port; tests may replace it to observe each
+/// thunk's pointer transformation without coupling those tests to this
+/// helper's arithmetic.
+static mut SCALED_FIELD_TOTAL: ScaledFieldTotal = scaled_field_total;
 
 #[inline(always)]
 unsafe fn scaled_field_total_fn() -> ScaledFieldTotal {
@@ -278,28 +293,20 @@ unsafe fn scaled_field_total_fn() -> ScaledFieldTotal {
 /// Source: `/home/gabe/Programming/ipod-decomp/decomp/c/003/08055f24_FUN_08055f24.c`;
 /// assembly: `decomp/osos.asm` @ `0x08055f24..0x08055f38`.
 ///
-/// Null-guarded thunk over the retailOS multiply-accumulate helper
-/// 0x08064980: with a null `object` it returns 0 in r0:r1
-/// (`moveq r0,#0x0; moveq r1,#0x0`); otherwise it tail-calls the helper
-/// with `object + 0x18` (`addne r0,r0,#0x18; bne 0x08064980`), which folds
-/// the three doublewords at object offsets 0x18/0x20/0x28 into
-/// `base + count * scale` (plain `base` when `count` is zero). The
-/// degenerate `object + 0x18 == 0` wraparound also returns 0, matching the
-/// flags the `addne` leaves for the `bne`. Ghidra decompiles the thunk
-/// with the callee body inlined, which is why the reference C shows the
-/// full arithmetic; the callee itself stays in retailOS behind the
-/// [`SCALED_FIELD_TOTAL`] boundary. The adjacent 0x08055f3c is the same
-/// thunk without the +0x18 offset and is a separate function. The single
-/// stock call site (0x080aaf44) applies it to a 0x44-byte descriptor
-/// copied by 0x08054d28 and forwards the result together with the
-/// sibling's to 0x08045174; the concrete meaning of the field triple is
-/// not recovered.
+/// Null-guarded thunk over [`scaled_field_total`]: with a null `object` it
+/// returns 0 in r0:r1 (`moveq r0,#0x0; moveq r1,#0x0`); otherwise it
+/// tail-calls the helper with `object + 0x18` (`addne r0,r0,#0x18; bne
+/// 0x08064980`). The degenerate `object + 0x18 == 0` wraparound also
+/// returns zero, matching the `addne` flags used by `bne`. The single stock
+/// call site (0x080aaf44) applies it to a 0x44-byte descriptor copied by
+/// 0x08054d28 and forwards the result together with the sibling's to
+/// 0x08045174; the field triple's concrete meaning is not recovered.
 ///
 /// # Safety
 ///
-/// With a non-null `object`, the firmware helper reads the three
-/// doublewords at `object + 0x18..0x30`; `object` must stay readable for
-/// at least 0x30 bytes, as at the single stock call site.
+/// With a non-null `object`, [`scaled_field_total`] reads the first two
+/// doublewords at `object+0x18..0x28` and reads the third through `+0x30`
+/// only when the second is nonzero; `object` must have those readable bytes.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn object_scaled_total(object: *const u8) -> i64 {
@@ -321,26 +328,20 @@ pub unsafe extern "C" fn object_scaled_total(object: *const u8) -> i64 {
 /// Source: `/home/gabe/Programming/ipod-decomp/decomp/c/003/08055f3c_FUN_08055f3c.c`;
 /// assembly: `decomp/osos.asm` @ `0x08055f3c..0x08055f50`.
 ///
-/// Null-guarded thunk over the same retailOS multiply-accumulate helper
-/// 0x08064980 that [`object_scaled_total`] uses: with a null `object` it
+/// Null-guarded thunk over [`scaled_field_total`]: with a null `object` it
 /// returns 0 in r0:r1 (`moveq r0,#0x0; moveq r1,#0x0`); otherwise it
-/// tail-calls the helper with `object` itself (`cmp r0,#0x0;
-/// bne 0x08064980`), which folds the three doublewords at object offsets
-/// 0/8/0x10 into `base + count * scale` (plain `base` when `count` is
-/// zero). Ghidra decompiles the thunk with the callee body inlined, which
-/// is why the reference C shows the full arithmetic; the callee itself
-/// stays in retailOS behind the [`SCALED_FIELD_TOTAL`] boundary. This is
-/// the sibling [`object_scaled_total`] @ 0x08055f24 without the +0x18
-/// offset. The single stock call site (0x080aaf54) applies it to the same
-/// 0x44-byte descriptor copied by 0x08054d28 as [`object_scaled_total`]
-/// and forwards both results together to 0x08045174; the concrete meaning
-/// of the field triple is not recovered.
+/// tail-calls the helper with `object` itself (`cmp r0,#0x0; bne
+/// 0x08064980`). This is the sibling [`object_scaled_total`] @ 0x08055f24
+/// without the +0x18 offset. The single stock call site (0x080aaf54)
+/// applies it to the same 0x44-byte descriptor copied by 0x08054d28 and
+/// forwards both results together to 0x08045174; the field triple's
+/// concrete meaning is not recovered.
 ///
 /// # Safety
 ///
-/// With a non-null `object`, the firmware helper reads the three
-/// doublewords at `object..0x18`; `object` must stay readable for at
-/// least 0x18 bytes, as at the single stock call site.
+/// With a non-null `object`, [`scaled_field_total`] reads the first two
+/// doublewords at `object..0x10` and reads the third at `object+0x10` only
+/// when the second is nonzero; `object` must have those readable bytes.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn object_scaled_total_base(object: *const u8) -> i64 {
@@ -1182,7 +1183,7 @@ mod tests {
     impl Drop for ScaledFieldTotalReset {
         fn drop(&mut self) {
             unsafe {
-                core::ptr::addr_of_mut!(SCALED_FIELD_TOTAL).write(firmware_scaled_field_total);
+                core::ptr::addr_of_mut!(SCALED_FIELD_TOTAL).write(scaled_field_total);
             }
         }
     }
@@ -1198,6 +1199,14 @@ mod tests {
             core::ptr::addr_of_mut!(SCALED_FIELD_TOTAL).write(recording_scaled_field_total);
         }
         guard
+    }
+
+    fn scaled_fields(base: u64, count: u64, scale: u64) -> [u8; 24] {
+        let mut fields = [0u8; 24];
+        fields[0..8].copy_from_slice(&base.to_le_bytes());
+        fields[8..16].copy_from_slice(&count.to_le_bytes());
+        fields[16..24].copy_from_slice(&scale.to_le_bytes());
+        fields
     }
 
     fn indexed_object(
@@ -1472,6 +1481,43 @@ mod tests {
             );
         }
         assert_eq!(unsafe { SCALED_TOTAL_CALLS }, 7);
+    }
+
+    #[test]
+    fn scaled_field_total_null_fields_returns_zero() {
+        assert_eq!(unsafe { scaled_field_total(core::ptr::null()) }, 0);
+    }
+
+    #[test]
+    fn scaled_field_total_returns_base_without_reading_the_scale_for_zero_count() {
+        for (base, scale) in [
+            (0u64, 0),
+            (1, u64::MAX),
+            (0x8000_0000_0000_0000, 0x1122_3344_5566_7788),
+            (u64::MAX, 1),
+        ] {
+            let fields = scaled_fields(base, 0, scale);
+            assert_eq!(unsafe { scaled_field_total(fields.as_ptr()) } as u64, base);
+        }
+    }
+
+    #[test]
+    fn scaled_field_total_uses_unaligned_little_endian_64_bit_product_and_sum() {
+        // The stock helper uses four memcpy-style 8-byte loads, so its field
+        // triple is permitted to be unaligned. These operands exercise both
+        // product cross terms and the carry from the final base addition.
+        let fields = scaled_fields(
+            0xffff_fff0_ffff_fffa,
+            0x0000_0002_0000_0003,
+            0x0000_0005_0000_0007,
+        );
+        let mut unaligned = [0xa5u8; 25];
+        unaligned[1..].copy_from_slice(&fields);
+
+        assert_eq!(
+            unsafe { scaled_field_total(unaligned[1..].as_ptr()) } as u64,
+            0x0000_000e_0000_000f,
+        );
     }
     #[test]
     fn follows_the_object_pointer_to_the_nested_flag() {
