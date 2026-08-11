@@ -30,6 +30,8 @@
 //! - [`pair_assign_guarded`] — the self-assignment-guarded two-word
 //!   copy-assign of a pair-shaped value type, the only copy, 14 call
 //!   sites.
+//! - [`cxx_vector_find_equal`] — searches the COW-string-keyed records
+//!   within the `{unknown, begin, end}` owner shape used by the UI data.
 //! - [`vector_size_elem2`] / [`vector_size_elem4`] /
 //!   [`vector_size_elem8`] / [`vector_size_elem16`] /
 //!   [`vector_size_elem32`] —
@@ -69,9 +71,10 @@
 //! ported in `heap/block_deque`): that one is the same four-word copy
 //! with the **source in r2**, and it exists exactly once.
 
-use crate::runtime::rt_div::__rt_sdiv;
 use crate::cxx::string::cxx_string_release;
 use crate::cxx::string_object::{string_object_destroy, StringObject};
+use crate::libc::memcmp::memcmp;
+use crate::runtime::rt_div::__rt_sdiv;
 
 /// A 16-byte retailOS record containing two adjacent [`StringObject`]s.
 ///
@@ -95,6 +98,84 @@ pub struct StringObjectPair {
 pub struct CxxStringPair {
     pub first: *mut u8,
     pub second: *mut u8,
+}
+
+/// The three target words consumed by [`cxx_vector_find_equal`].
+///
+/// The preceding word is not inspected, while `begin` and `end` are the
+/// 8-byte-record bounds at target offsets +4 and +8. Keeping it as a typed
+/// field makes those offsets exact on ARM and keeps host pointers disjoint.
+#[repr(C)]
+pub struct CxxStringPairVector {
+    /// Unexamined owner word at target offset +0.
+    pub prefix: u32,
+    /// First 8-byte COW-string-pair record at target offset +4.
+    pub begin: *mut CxxStringPair,
+    /// One past the final record at target offset +8.
+    pub end: *mut CxxStringPair,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x04] = [0; core::mem::offset_of!(CxxStringPairVector, begin)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x08] = [0; core::mem::offset_of!(CxxStringPairVector, end)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x0c] = [0; core::mem::size_of::<CxxStringPairVector>()];
+
+/// COW-string equality used by [`cxx_vector_find_equal`]'s private
+/// `FUN_083eac08` callee.
+///
+/// The string object's word is its character-data pointer and its `_Rep`
+/// length is the u32 immediately before that data. The ARM helper gates on
+/// equal lengths, calls `memcmp(data_a, data_b, length)`, then turns a zero
+/// comparison result into 1. The redundant post-`memcmp` length ordering in
+/// its raw body cannot change the result after the initial equality gate.
+#[inline(always)]
+unsafe fn cxx_string_equal(left: *const *mut u8, right: *const *mut u8) -> bool {
+    let left_data = left.read();
+    let right_data = right.read();
+    let left_length = (left_data as *const u32).sub(1).read();
+    let right_length = (right_data as *const u32).sub(1).read();
+    left_length == right_length && memcmp(left_data, right_data, left_length as usize) == 0
+}
+
+/// cxx_vector_find_equal — original: `FUN_0825c2c0` @ 0x0825c2c0
+/// (80 bytes; reference:
+/// `ipod-decomp/decomp/c/025/0825c2c0_FUN_0825c2c0.c`).
+///
+/// Searches the 8-byte [`CxxStringPair`] records in `owner.begin..owner.end`
+/// for the first record whose first COW-string word equals `*needle`. The
+/// raw ARM body loads its bounds from `this + 4` and `this + 8`, advances the
+/// record cursor by 8 only after a failed comparison, writes the found record
+/// to `out`, and returns the widened C++ bool 1; a miss returns 0 without
+/// touching `out`. Its direct callee `FUN_083eac08` @ 0x083eac08 (152 bytes)
+/// is an unported `basic_string::operator==`: raw ARM establishes that it
+/// reads the `_Rep` lengths at `data - 4`, rejects unequal lengths, and calls
+/// the ported [`memcmp`] @ 0x08030f64 over that length. This is represented
+/// exactly by the established `memcmp` seam; no comparator stub or
+/// approximation is introduced.
+///
+/// # Safety
+/// `owner` must contain valid `begin..end` bounds over contiguous
+/// [`CxxStringPair`] records. `needle` must point to a valid COW-string word,
+/// every compared string must have a readable `_Rep` length at `data - 4`,
+/// and `out` must be writable on a match.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_vector_find_equal(
+    owner: *const CxxStringPairVector,
+    needle: *const *mut u8,
+    out: *mut *mut CxxStringPair,
+) -> i32 {
+    let mut record = (*owner).begin;
+    while record != (*owner).end {
+        if cxx_string_equal(core::ptr::addr_of!((*record).first), needle) {
+            out.write(record);
+            return 1;
+        }
+        record = record.add(1);
+    }
+    0
 }
 
 /// cxx_record_range_destroy_8 — original: `FUN_083e35a4` @ 0x083e35a4
@@ -3304,6 +3385,104 @@ mod tests {
             assert!(array_at_checked(&array, 0).is_null());
             let negative = PtrArray { base: 0x5555 as *mut *mut u8, count: -1 };
             assert!(array_at_checked(&negative, 0).is_null());
+        }
+    }
+
+    #[repr(C)]
+    struct SearchString<const N: usize> {
+        rep: StringRep,
+        data: [u8; N],
+    }
+
+    fn search_string<const N: usize>(data: [u8; N]) -> SearchString<N> {
+        SearchString {
+            rep: StringRep { refcount: 0, capacity: N as u32, length: N as u32 },
+            data,
+        }
+    }
+
+    fn search_owner(
+        records: &mut [CxxStringPair],
+        length: usize,
+    ) -> CxxStringPairVector {
+        CxxStringPairVector {
+            prefix: 0,
+            begin: records.as_mut_ptr(),
+            end: unsafe { records.as_mut_ptr().add(length) },
+        }
+    }
+
+    #[test]
+    fn cxx_vector_find_equal_writes_the_matching_record() {
+        let mut first = search_string(*b"one");
+        let mut second = search_string(*b"two");
+        let mut needle_data = search_string(*b"two");
+        let mut records = [
+            CxxStringPair { first: first.data.as_mut_ptr(), second: core::ptr::null_mut() },
+            CxxStringPair { first: second.data.as_mut_ptr(), second: core::ptr::null_mut() },
+        ];
+        let record_count = records.len();
+        let owner = search_owner(&mut records, record_count);
+        let mut needle = needle_data.data.as_mut_ptr();
+        let mut out = core::ptr::null_mut();
+        unsafe {
+            assert_eq!(cxx_vector_find_equal(&owner, &mut needle, &mut out), 1);
+            assert_eq!(out as usize, (&mut records[1] as *mut CxxStringPair) as usize);
+        }
+    }
+
+    #[test]
+    fn cxx_vector_find_equal_leaves_out_on_a_miss() {
+        let mut first = search_string(*b"one");
+        let mut needle_data = search_string(*b"two");
+        let mut records =
+            [CxxStringPair { first: first.data.as_mut_ptr(), second: core::ptr::null_mut() }];
+        let record_count = records.len();
+        let owner = search_owner(&mut records, record_count);
+        let mut needle = needle_data.data.as_mut_ptr();
+        let sentinel = 0x4321usize as *mut CxxStringPair;
+        let mut out = sentinel;
+        unsafe {
+            assert_eq!(cxx_vector_find_equal(&owner, &mut needle, &mut out), 0);
+            assert_eq!(out, sentinel);
+        }
+    }
+
+    #[test]
+    fn cxx_vector_find_equal_returns_the_first_equal_record() {
+        let mut first = search_string(*b"key");
+        let mut second = search_string(*b"key");
+        let mut needle_data = search_string(*b"key");
+        let mut records = [
+            CxxStringPair { first: first.data.as_mut_ptr(), second: core::ptr::null_mut() },
+            CxxStringPair { first: second.data.as_mut_ptr(), second: core::ptr::null_mut() },
+        ];
+        let record_count = records.len();
+        let owner = search_owner(&mut records, record_count);
+        let mut needle = needle_data.data.as_mut_ptr();
+        let mut out = core::ptr::null_mut();
+        unsafe {
+            assert_eq!(cxx_vector_find_equal(&owner, &mut needle, &mut out), 1);
+            assert_eq!(out, records.as_mut_ptr());
+        }
+    }
+
+    #[test]
+    fn cxx_vector_find_equal_stops_at_the_end_bound() {
+        let mut first = search_string(*b"one");
+        let mut excluded = search_string(*b"key");
+        let mut needle_data = search_string(*b"key");
+        let mut records = [
+            CxxStringPair { first: first.data.as_mut_ptr(), second: core::ptr::null_mut() },
+            CxxStringPair { first: excluded.data.as_mut_ptr(), second: core::ptr::null_mut() },
+        ];
+        let owner = search_owner(&mut records, 1);
+        let mut needle = needle_data.data.as_mut_ptr();
+        let sentinel = 0x4321usize as *mut CxxStringPair;
+        let mut out = sentinel;
+        unsafe {
+            assert_eq!(cxx_vector_find_equal(&owner, &mut needle, &mut out), 0);
+            assert_eq!(out, sentinel);
         }
     }
 }

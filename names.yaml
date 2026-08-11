@@ -11575,6 +11575,32 @@ functions:
       deviation), and LLVM forming the id equality as sub/clz/lsr
       instead of cmpeq/moveq/movne (same 0/1 result).
 
+  - address: 0x0825c2c0
+    ghidra: FUN_0825c2c0
+    name: cxx_vector_find_equal
+    size: 80
+    sig: "int cxx_vector_find_equal(const CxxStringPairVector *owner, const char *const *needle, CxxStringPair **out)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1/r0: owner, param_2/r1: needle, param_3/r2: out, iVar2/r4: record}
+    notes: >-
+      Raw ARM (0x0825c2c0-0x0825c30f) loads begin/end from owner+4/+8,
+      scans the half-open range as 8-byte records, and returns exactly 1
+      after writing the first match to *out; a miss returns 0 without
+      storing. The 4-byte prefix is not read. The only callee,
+      FUN_083eac08 @ 0x083eac08, is the unported COW
+      basic_string::operator==: it reads both _Rep lengths from data-4,
+      rejects unequal lengths, then calls the ported memcmp @ 0x08030f64
+      over the common length and maps a zero result to 1. Its redundant
+      post-compare length ordering cannot change the result after the
+      equality gate, so cxx_vector_find_equal represents it exactly with
+      the established memcmp seam rather than a comparator stub. Callers
+      in 0x0815aeac, 0x0815b31c, and 0x0815b478 construct a one-word COW
+      string needle, release it after the call, and consume the found
+      record's +4 string word, independently identifying the record and
+      needle ABI. Host tests cover found, miss/no out-store, first match,
+      and the exclusive end bound.
+
   - address: 0x0825c870
     ghidra: FUN_0825c870
     name: utf8_encode_codepoint
