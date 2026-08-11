@@ -12271,6 +12271,21 @@ functions:
   # (12 header + NUL + 1 spare) via operator_new_checked @ 0x08266c70;
   # deallocation via the 4-byte veneer 0x08266f2c = `b 0x082aad24`
   # (plain operator delete - the size and third argument are discarded).
+  - address: 0x0825c8fc
+    ghidra: FUN_0825c8fc
+    name: cxx_string_pair_destroy
+    size: 32
+    sig: "CxxStringPair *cxx_string_pair_destroy(CxxStringPair *record)"
+    module: cxx/string
+    status: ported
+    vars: {param_1: record}
+    renames: {FUN_083d8b04: cxx_string_release}
+    notes: >-
+      C++ destructor for one 8-byte record containing two one-word COW
+      strings. Raw ARM takes record in r0, calls cxx_string_release on
+      record + 4 then record + 0, restores the saved record pointer to r0,
+      and returns it. The pair fields are otherwise untouched.
+
   - address: 0x083e2f48
     ghidra: FUN_083e2f48
     name: cxx_string_pair_range_destroy
@@ -12895,6 +12910,31 @@ functions:
       including its left-NUL stop and folded-byte-difference convention.
       Host tests cover the unequal-length no-read gate, equal-length ASCII
       folding, non-Latin-1 byte boundary, and the delegated NUL boundary.
+
+  - address: 0x082b7870
+    ghidra: raw ARM entry (runtime 0x082ac998)
+    name: sqlite_hash_bin_compare
+    size: 28
+    sig: "int sqlite_hash_bin_compare(const void *key1, int len1, const void *key2, int len2)"
+    module: sqlite/find_element_given_hash
+    status: ported
+    vars: {param_1: key1, param_2: len1, param_3: key2, param_4: len2,
+      r12: saved_len1}
+    notes: >-
+      SQLite 3.5.x hash.c's binCompare, selected for every non-string
+      keyClass by findElementGivenHash's literal at 0x082ce360. That
+      literal holds runtime address 0x082ac998, while its actual raw body
+      is at image 0x082b7870 under sqlite/mod.rs's +0xaed8 image/runtime
+      skew. `osos.dec` 0x082b7870..0x082b788c is exactly seven ARM
+      instructions: mov r12,r1; cmp r12,r3; mov r1,r2; moveq r2,r12; beq
+      memcmp @ 0x08030f64; movne r0,#1; bx lr. Thus it preserves
+      int(const void*,int,const void*,int): unequal lengths return literal
+      1 without reading either key; equal lengths tail-call the ported
+      memcmp(key1,key2,len1), preserving its first-differing-byte signed
+      subtraction result. Equal zero lengths are null-safe through
+      memcmp's no-load zero-length path. Host tests cover the no-read
+      length gate, equality, first-difference magnitude/sign, and this
+      zero-length boundary.
 
   # --- Scouted in 0x08300000-0x083fffff, identified only ---
   - address: 0x08391dec

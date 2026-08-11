@@ -138,6 +138,23 @@ pub struct StringRep {
     /// Characters currently stored.
     pub length: u32,
 }
+/// An 8-byte C++ record containing two one-word COW string objects.
+///
+/// The fields are destroyed by [`cxx_string_pair_destroy`] in reverse member
+/// order. On the ARM target they occupy offsets +0x00 and +0x04.
+#[repr(C)]
+pub struct CxxStringPair {
+    /// First COW string object at target offset +0x00.
+    pub first: *mut u8,
+    /// Second COW string object at target offset +0x04.
+    pub second: *mut u8,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x04] = [0; core::mem::offset_of!(CxxStringPair, second)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x08] = [0; core::mem::size_of::<CxxStringPair>()];
+
 /// One target-layout record consumed by [`cxx_string_pair_range_destroy`].
 ///
 /// On ARM this is exactly 12 bytes: two one-word COW string objects at
@@ -329,6 +346,23 @@ pub unsafe extern "C" fn cxx_string_release(string: *mut *mut u8) {
     // which reads only the pointer.
     operator_delete(data_rep(*string) as *mut u8);
 }
+/// cxx_string_pair_destroy — original @ 0x0825c8fc (32 bytes).
+///
+/// Source: `ipod-decomp/decomp/c/025/0825c8fc_FUN_0825c8fc.c`. The raw ARM
+/// ABI accepts the 8-byte record in r0, calls [`cxx_string_release`] for its
+/// +0x04 member and then its +0x00 member, restores the original record
+/// pointer to r0, and returns it. The port uses the established release
+/// implementation directly; neither field is rewritten.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_string_pair_destroy(
+    record: *mut CxxStringPair,
+) -> *mut CxxStringPair {
+    cxx_string_release(core::ptr::addr_of_mut!((*record).second));
+    cxx_string_release(core::ptr::addr_of_mut!((*record).first));
+    record
+}
+
 /// cxx_string_pair_range_destroy — original @ 0x083e2f48 (48 bytes).
 ///
 /// Source: `ipod-decomp/decomp/c/038/083e2f48_FUN_083e2f48.c`. The raw ARM
@@ -1192,6 +1226,24 @@ mod tests {
             assert_eq!(freed(), &[rep as *mut u8]);
         }
     }
+    #[test]
+    fn pair_destroy_releases_second_before_first_and_returns_the_record() {
+        let _guard = arena();
+        unsafe {
+            let mut first: *mut u8 = core::ptr::null_mut();
+            let mut second: *mut u8 = core::ptr::null_mut();
+            cxx_string_from_cstr(&mut first, b"first\0".as_ptr());
+            cxx_string_from_cstr(&mut second, b"second\0".as_ptr());
+            let first_rep = data_rep(first);
+            let second_rep = data_rep(second);
+            let mut record = CxxStringPair { first, second };
+            let record_ptr = core::ptr::addr_of_mut!(record);
+
+            assert_eq!(cxx_string_pair_destroy(record_ptr), record_ptr);
+            assert_eq!(freed(), &[second_rep.cast(), first_rep.cast()]);
+        }
+    }
+
     #[test]
     fn pair_range_destroy_leaves_an_empty_range_untouched() {
         let _guard = arena();
