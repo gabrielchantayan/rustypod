@@ -24384,7 +24384,7 @@ functions:
       param_2/r5: descriptor (the block 0x0815bdbc reads as u32 words)
       param_3/r6: extra (the verbatim word 0x0815bdbc stores at block +0x04)
       FUN_082aadd4: operator_new (direct, ported in heap/veneers)
-      FUN_0815bdbc: kind-2 record-block constructor (UNPORTED and UNIDENTIFIED - absent from names.yaml; VTABLE_FILE_RECORD_KIND2_CTOR seam, exact-body default)
+      FUN_0815bdbc: vtable_file_record_construct_kind2_block (ported directly in app/vtable_set)
       FUN_080edb74: checked-construct guard (unported; VTABLE_FILE_RECORD_KIND2_GUARD seam, same no-op default as the kind-1 sibling's guard)
     notes: >-
       21 bl call sites (grep on decomp/osos.asm), ALL inside the
@@ -24410,25 +24410,22 @@ functions:
       dead here - the continuation overwrites r0 with the record
       pointer), then the record pointer returns (mov r0,r4). UNLIKE
       kind 1 there are NO trailing field stores: +0x08..+0x17 are
-      never written. The callee 0x0815bdbc (68 bytes; 1 bl site -
-      this constructor's 0x0811d134) fills the five-word block:
-      {descriptor, extra, descriptor + descriptor[1], descriptor[2],
-      descriptor + 0xc}, with a descriptor[0] == 3 magic check whose
-      only effect is the unported 0x081b53e4 diagnostic (blne -
-      execution falls through identically). Deviations: operator_new
-      called directly (the vtable_file_record_construct_kind1
-      precedent); the 0x0815bdbc call routes through the new
-      VTABLE_FILE_RECORD_KIND2_CTOR seam whose wired default models
-      the callee's exact store body minus the unported diagnostic
-      (the VTABLE_SET_50_KIND4_OPS pattern / the class_6800.rs
-      unported_report_allocation_failure no-op precedent); the guard
-      sits behind the new VTABLE_FILE_RECORD_KIND2_GUARD seam with
-      the same construct_guard_unported no-op default as the kind-1
-      sibling (the VTABLE_QUERY_4C_READ_DISPATCH /
+      never written. The callee 0x0815bdbc (72 bytes; 1 bl site at
+      0x0811d134) is ported directly as
+      vtable_file_record_construct_kind2_block: it fills the five-word
+      block {descriptor, extra, descriptor + descriptor[1],
+      descriptor[2], descriptor + 0xc}, with a descriptor[0] == 3
+      check whose mismatch diagnostic (0x081b53e4) is the target
+      function's narrow seam. Deviations: operator_new and the block
+      constructor are called directly (the
+      vtable_file_record_construct_kind1 precedent); the guard remains
+      behind VTABLE_FILE_RECORD_KIND2_GUARD with the same
+      construct_guard_unported no-op default as the kind-1 sibling
+      (the VTABLE_QUERY_4C_READ_DISPATCH /
       VTABLE_QUERY_4C_SCALAR_DISPATCH role-specific-name precedent);
       every store keeps the original's width (strb/str; the block
-      pointer truncates to its low 32 bits on a 64-bit host - the
-      vtable_file_record_init byte-exact precedent); arg2 typed
+      pointer truncates to its low 32 bits on a 64-bit host -
+      the vtable_file_record_init byte-exact precedent); arg2 typed
       *const u32 (the callee dereferences it as words), arg3 a
       verbatim u32 (only stored, stmia r0,{r1,r2}); no forwarded
       parameter (the entry stmdb spills no argument registers and r3
@@ -24436,14 +24433,38 @@ functions:
       (decomp/c/010/0811d104_FUN_0811d104.c) is accurate - it catches
       the allocation feeding FUN_0815bdbc(alloc, param_2, param_3),
       the +0x04 store, the guard and the return; only the untyped
-      undefined4 parameters get concrete types. match.py: same
-      store/alloc/construct/store/guard/return structure; the diff is
-      the crate fp frame and the two seam ldr/blx pairs standing in
-      for the direct bl 0x0815bdbc / bl 0x080edb74 (the documented
-      seams). Host tests:
-      src/app/vtable_set.rs::file_record_kind2_initializes_the_record_and_returns_it
-      / file_record_kind2_allocates_the_block_and_feeds_it_to_the_ctor
-      / file_record_kind2_default_ctor_fills_the_five_words.
+      undefined4 parameters get concrete types. The directly called
+      block constructor's focused tests are recorded in its entry below.
+
+  - address: 0x0815bdbc
+    ghidra: FUN_0815bdbc
+    name: vtable_file_record_construct_kind2_block
+    size: 72
+    sig: "*mut u8 vtable_file_record_construct_kind2_block(block: *mut u8, descriptor: *const u32, extra: u32)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r4: block (the caller's fresh five-word allocation)
+      param_2/r5: descriptor (kind, byte offset, and count words)
+      param_3/r2: extra (verbatim word stored at block +0x04)
+      r0: descriptor_kind / descriptor_relative_address / count / return block
+      DAT_0815be04: diagnostic_message (literal pointer 0x088f8c4c)
+      FUN_081b53e4: report_diagnostic (unported; VTABLE_FILE_RECORD_KIND2_BLOCK_DIAGNOSTIC seam)
+    notes: >-
+      The kind-2 file-record descriptor-block constructor, called only
+      from vtable_file_record_construct_kind2 at 0x0811d134 after
+      operator_new(0x14). Reference C
+      decomp/c/014/0815bdbc_FUN_0815bdbc.c and the 72-byte ARM body
+      agree: stmia first stores {descriptor, extra}; descriptor[0] is
+      compared with 3; only a mismatch calls FUN_081b53e4(0,
+      0x088f8c4c), then both paths fill {descriptor + descriptor[1],
+      descriptor[2], descriptor + 0xc} and return block. The diagnostic
+      is the sole unported dependency and is isolated behind a
+      role-specific seam; focused host tests verify all five word stores
+      without a diagnostic and the mismatch diagnostic plus fall-through
+      construction:
+      src/app/vtable_set.rs::kind2_block_constructs_five_words_without_a_diagnostic
+      / kind2_block_reports_bad_descriptor_and_still_constructs.
 
   - address: 0x0811d008
     ghidra: FUN_0811d008
