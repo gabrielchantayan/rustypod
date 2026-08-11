@@ -144,6 +144,73 @@ fn error_handler() -> Option<CxxErrorHandler> {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(CXX_ERROR_HANDLER)) }
 }
 
+/// Code passed to the allocation-failure reporter — original:
+/// `moveq r0, #4` @ 0x080edb7c.
+const ALLOCATION_FAILURE_CODE: usize = 4;
+
+/// The literal descriptor passed to `report_allocation_failure` on the NULL
+/// path — original literal pool word @ 0x080edb88. It is runtime data, so
+/// the guard forwards its address without inspecting it.
+const ALLOCATION_FAILURE_DESCRIPTOR: *const u8 = 0x088f_8c48 as *const u8;
+
+/// Indirection for `report_allocation_failure` @ 0x081b53e4. That C++
+/// allocation-failure path is not ported; the table is the established heap
+/// diagnostic seam so host tests can observe the exact code and descriptor.
+#[derive(Clone, Copy)]
+pub struct AllocationConstructGuardOps {
+    pub report_allocation_failure: unsafe extern "C" fn(code: usize, descriptor: *const u8),
+}
+
+/// Stock's allocation-failure reporter constructs and throws a runtime
+/// failure object. Until that runtime is ported, the default is deliberately
+/// inert, matching the other unported allocation-diagnostic seam.
+unsafe extern "C" fn report_allocation_failure_unported(_code: usize, _descriptor: *const u8) {}
+
+/// Wired default for [`ALLOCATION_CONSTRUCT_GUARD_OPS`].
+pub(crate) const DEFAULT_ALLOCATION_CONSTRUCT_GUARD_OPS: AllocationConstructGuardOps =
+    AllocationConstructGuardOps {
+        report_allocation_failure: report_allocation_failure_unported,
+    };
+
+/// Active allocation-failure diagnostic. It is written during target setup;
+/// focused host tests replace it with a recorder.
+pub static mut ALLOCATION_CONSTRUCT_GUARD_OPS: AllocationConstructGuardOps =
+    DEFAULT_ALLOCATION_CONSTRUCT_GUARD_OPS;
+
+/// Reads the allocation-failure seam through a volatile load so LLVM cannot
+/// erase the NULL path by folding the documented default no-op.
+#[inline(always)]
+fn allocation_construct_guard_ops() -> AllocationConstructGuardOps {
+    unsafe {
+        core::ptr::read_volatile(core::ptr::addr_of!(ALLOCATION_CONSTRUCT_GUARD_OPS))
+    }
+}
+
+/// allocation_construct_guard — original: `FUN_080edb74` @ 0x080edb74
+/// (20 bytes).
+///
+/// C++ constructor call sites retain an allocation result in a callee-saved
+/// register, then call this guard with that result live in `r0`. A non-NULL
+/// result returns immediately. A NULL result overwrites the dead argument
+/// registers with `(4, 0x088f8c48)` and tail-calls
+/// `report_allocation_failure` @ 0x081b53e4. The reporter's result is dead;
+/// the caller continues only if it returns.
+///
+/// The reporter is unported and therefore reaches the existing-style
+/// diagnostic seam above; its default is inert rather than inventing a Rust
+/// recovery path.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn allocation_construct_guard(constructed: *mut u8) {
+    if constructed.is_null() {
+        (allocation_construct_guard_ops().report_allocation_failure)(
+            ALLOCATION_FAILURE_CODE,
+            ALLOCATION_FAILURE_DESCRIPTOR,
+        );
+    }
+}
+
+
 /// cxx_new_handler_dispatch — original: `FUN_08266abc` @ 0x08266abc
 /// (164 bytes). See the module header for the algorithm and the
 /// message-builder deviation.
@@ -245,6 +312,10 @@ mod tests {
     static mut FORMAT_CALLS: usize = 0;
     static mut LAST_FORMAT_CODE: usize = 0;
     static mut LAST_FORMAT_ARGS: [usize; 3] = [0; 3];
+    static mut ALLOCATION_FAILURE_REPORTS: usize = 0;
+    static mut LAST_ALLOCATION_FAILURE_CODE: usize = 0;
+    static mut LAST_ALLOCATION_FAILURE_DESCRIPTOR: *const u8 = core::ptr::null();
+
 
     /// The C string the mock builder "formats".
     static MOCK_TEXT: &[u8] = b"mock error text\0";
@@ -261,6 +332,32 @@ mod tests {
         LAST_FORMAT_ARGS = [*args, *args.add(1), *args.add(2)];
         MOCK_TEXT.as_ptr() as *mut u8
     }
+    unsafe extern "C" fn mock_allocation_failure_report(
+        code: usize,
+        descriptor: *const u8,
+    ) {
+        ALLOCATION_FAILURE_REPORTS += 1;
+        LAST_ALLOCATION_FAILURE_CODE = code;
+        LAST_ALLOCATION_FAILURE_DESCRIPTOR = descriptor;
+    }
+
+    /// Installs a recorder for the allocation/construct guard's only
+    /// observable side effect.
+    fn mock_allocation_construct_guard() -> MutexGuard<'static, ()> {
+        let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            ALLOCATION_FAILURE_REPORTS = 0;
+            LAST_ALLOCATION_FAILURE_CODE = 0;
+            LAST_ALLOCATION_FAILURE_DESCRIPTOR = core::ptr::null();
+            core::ptr::addr_of_mut!(ALLOCATION_CONSTRUCT_GUARD_OPS).write(
+                AllocationConstructGuardOps {
+                    report_allocation_failure: mock_allocation_failure_report,
+                },
+            );
+        }
+        guard
+    }
+
 
     /// Resets the log, installs the mock handler + mock builder, and
     /// puts veneers.rs's heap on its mock (the code>3 dtor frees the
@@ -295,8 +392,61 @@ mod tests {
             LAST_FORMAT_ARGS = [0; 3];
             core::ptr::addr_of_mut!(CXX_ERROR_HANDLER).write(None);
             core::ptr::addr_of_mut!(CXX_NEW_HANDLER_OPS).write(DEFAULT_CXX_NEW_HANDLER_OPS);
+            ALLOCATION_FAILURE_REPORTS = 0;
+            LAST_ALLOCATION_FAILURE_CODE = 0;
+            LAST_ALLOCATION_FAILURE_DESCRIPTOR = core::ptr::null();
+            core::ptr::addr_of_mut!(ALLOCATION_CONSTRUCT_GUARD_OPS)
+                .write(DEFAULT_ALLOCATION_CONSTRUCT_GUARD_OPS);
         }
     }
+    // --- allocation_construct_guard ---
+
+    #[test]
+    fn construct_guard_leaves_every_non_null_allocation_untouched() {
+        let _guard = mock_allocation_construct_guard();
+        unsafe {
+            for allocation in [1usize, 0x1234_5678, usize::MAX] {
+                allocation_construct_guard(allocation as *mut u8);
+            }
+            assert_eq!(
+                ALLOCATION_FAILURE_REPORTS, 0,
+                "cmp r0,#0 returns before loading the reporter for non-NULL"
+            );
+        }
+        teardown();
+    }
+
+    #[test]
+    fn construct_guard_reports_null_with_the_stock_code_and_descriptor() {
+        let _guard = mock_allocation_construct_guard();
+        unsafe {
+            allocation_construct_guard(core::ptr::null_mut());
+            assert_eq!(ALLOCATION_FAILURE_REPORTS, 1);
+            assert_eq!(LAST_ALLOCATION_FAILURE_CODE, ALLOCATION_FAILURE_CODE);
+            assert_eq!(
+                LAST_ALLOCATION_FAILURE_DESCRIPTOR,
+                ALLOCATION_FAILURE_DESCRIPTOR,
+                "the literal at 0x080edb88 is forwarded without dereference"
+            );
+        }
+        teardown();
+    }
+
+    #[test]
+    fn construct_guard_default_diagnostic_is_the_documented_inert_stub() {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        teardown();
+        unsafe {
+            assert_eq!(
+                DEFAULT_ALLOCATION_CONSTRUCT_GUARD_OPS.report_allocation_failure as usize,
+                report_allocation_failure_unported as usize
+            );
+            allocation_construct_guard(core::ptr::null_mut());
+            assert_eq!(ALLOCATION_FAILURE_REPORTS, 0, "the default returns to its caller");
+        }
+        teardown();
+    }
+
 
     #[test]
     fn no_handler_registered_is_an_immediate_return() {

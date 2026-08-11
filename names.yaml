@@ -2346,6 +2346,29 @@ functions:
     module: heap/veneers
     status: ported
     notes: raise(1,0) -> exit -> terminate @ 0x82b20a0 (non-returning).
+  - address: 0x080edb74
+    ghidra: FUN_080edb74
+    name: allocation_construct_guard
+    size: 20
+    sig: "void allocation_construct_guard(void *constructed)"
+    module: heap/new_handler
+    vars:
+      param_1: constructed
+      DAT_080edb88: allocation_failure_descriptor
+      FUN_081b53e4: report_allocation_failure
+    status: ported
+    notes: >-
+      Raw ARM is `cmp r0,#0; ldreq r1,[pc,#8]; moveq r0,#4; beq
+      0x081b53e4; bx lr`, with literal 0x088f8c48 at 0x080edb88.
+      Thus non-NULL constructed allocations have no side effects; NULL
+      reports allocation failure with code 4 and that opaque descriptor,
+      then returns only if the reporter returns. The reporter remains an
+      established-style replaceable diagnostic seam with an inert default
+      until its C++ exception machinery is ported. Focused host tests pin
+      the non-NULL no-report path, the NULL code/descriptor forwarding, and
+      the default seam wiring. match.py confirms the guard/report shape
+      structurally (the indirect seam is the documented deviation).
+
 
   - address: 0x08266abc
     ghidra: FUN_08266abc
