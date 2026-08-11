@@ -82,9 +82,7 @@
 //!   widens and the stride follows — all access goes through the
 //!   struct, the house struct-port convention).
 //!
-//! The two comparators (the literal-pool words are runtime addresses;
-//! `binCompare` remains unported, while `strCompare` is this module's
-//! `sqlite_hash_str_compare`):
+//! The two comparators (the literal-pool words are runtime addresses):
 //!
 //! ```c
 //! static int strCompare(const void *pKey1, int n1, const void *pKey2, int n2){
@@ -105,9 +103,9 @@
 //!   runtime target. The tail call lands on the ported
 //!   [`super::stricmp::str_nicmp`] @ 0x08384fa0.
 //! - `binCompare` — runtime 0x082ac998, image 0x082b7870 (28 bytes,
-//!   directly before binHash @ image 0x082b788c): the identical shape
-//!   tail-calling the ported `memcmp` @ 0x08030f64. Identified, not
-//!   yet ported.
+//!   directly before binHash @ image 0x082b788c): the same seven-instruction
+//!   length gate and tail-call shape, targeting the ported `memcmp` @
+//!   0x08030f64. It is exported here as [`sqlite_hash_bin_compare`].
 //!
 //! Callers (both `bl` sites binary-scanned):
 //!
@@ -175,10 +173,59 @@ pub unsafe extern "C" fn sqlite_hash_str_compare(
     super::stricmp::str_nicmp(key1, key2, len1)
 }
 
-/// Runtime address of `binCompare` (image 0x082b7870); identified, not
-/// yet ported. This is the word stored in the original's literal pool
-/// at 0x082ce360, selected for every other key class.
+/// Runtime address of `binCompare` (image 0x082b7870). This is the word
+/// stored in `findElementGivenHash`'s original literal pool at 0x082ce360,
+/// selected for every non-string key class.
 pub const BIN_COMPARE_ADDR: usize = 0x082a_c998;
+
+/// sqlite_hash_bin_compare — retailOS SQLite `binCompare`, runtime
+/// 0x082ac998; raw ARM source: `work/firmware/osos.dec` image
+/// 0x082b7870..0x082b788c (28 bytes).
+///
+/// Preserves the four-register C ABI
+/// `int (const void *key1, int len1, const void *key2, int len2)`. The
+/// seven ARM instructions save `len1` in `ip`, compare it with `len2`, move
+/// `key2` and the saved length into `memcmp`'s `r1`/`r2`, then tail-branch
+/// to [`crate::libc::memcmp::memcmp`] when equal; unequal lengths return
+/// literal 1 without reading either key. Thus equal keys return 0 and a
+/// byte difference retains `memcmp`'s signed `u8` subtraction magnitude.
+///
+/// Deviation: the target build loads the existing `memcmp` export through a
+/// volatile function pointer so release LTO cannot inline it. This retains
+/// the distinct compare call boundary but emits an indirect tail branch
+/// rather than the retail body's direct branch; behavior and ABI are
+/// unchanged.
+///
+/// # Safety
+/// When the lengths are equal, `key1` and `key2` must each be valid for
+/// `len1` bytes as interpreted by the C ABI. Equal zero lengths are safe
+/// with null pointers because the tail-called `memcmp` performs no load.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn sqlite_hash_bin_compare(
+    key1: *const u8,
+    len1: i32,
+    key2: *const u8,
+    len2: i32,
+) -> i32 {
+    if len1 != len2 {
+        return 1;
+    }
+    #[cfg(target_os = "none")]
+    {
+        // A volatile function-pointer load keeps LTO from absorbing the
+        // existing `memcmp` body, preserving the comparator's distinct
+        // compare-call boundary.
+        let memcmp = core::ptr::read_volatile(
+            &(crate::libc::memcmp::memcmp
+                as unsafe extern "C" fn(*const u8, *const u8, usize) -> i32),
+        );
+        return memcmp(key1, key2, len1 as usize);
+    }
+
+    #[cfg(not(target_os = "none"))]
+    crate::libc::memcmp::memcmp(key1, key2, len1 as usize)
+}
 
 /// One bucket of the `Hash.ht` array: the 8-byte `{count, chain}` pair
 /// the original indexes as `ht + h*8` (`add r1,r1,r3, lsl #3`), the
@@ -217,11 +264,10 @@ pub struct FindElementHooks {
     /// [`sqlite_hash_str_compare`].
     pub str_compare: usize,
     /// The `ldrne r6,[0x82ce360]` word: `binCompare` @ runtime
-    /// 0x082ac998 (UNPORTED — [`BIN_COMPARE_ADDR`] is the shipped
-    /// default), the length-gated raw compare selected for every
-    /// other key class. Its body is
-    /// `if (n1 != n2) return 1; return memcmp(p1, p2, n1)`,
-    /// tail-calling the ported `memcmp` @ 0x08030f64.
+    /// 0x082ac998, the length-gated raw comparator selected for every
+    /// other key class. Its 28-byte body is image 0x082b7870, and is
+    /// ported as [`sqlite_hash_bin_compare`]: equal-length keys tail-call
+    /// `memcmp`, while unequal lengths return 1 without a key load.
     pub bin_compare: usize,
 }
 
@@ -354,8 +400,7 @@ pub(crate) mod tests {
         sqlite_hash_str_compare(key1, len1, key2, len2)
     }
 
-    /// Host-resident `binCompare` substitute: length gate, then a raw
-    /// byte compare.
+    /// Host-resident recording wrapper around the ported `binCompare`.
     unsafe extern "C" fn host_bin_compare(
         key1: *const u8,
         len1: i32,
@@ -363,12 +408,7 @@ pub(crate) mod tests {
         len2: i32,
     ) -> i32 {
         record((key1, len1, key2, len2));
-        if len1 != len2 {
-            return 1;
-        }
-        let a = core::slice::from_raw_parts(key1, len1 as usize);
-        let b = core::slice::from_raw_parts(key2, len2 as usize);
-        (a != b) as i32
+        sqlite_hash_bin_compare(key1, len1, key2, len2)
     }
 
     /// Installs the host comparators and clears the call log; the
@@ -468,6 +508,52 @@ pub(crate) mod tests {
             unsafe { sqlite_hash_str_compare(invalid, 2, invalid, 3) },
             1,
             "the cmp n1,n2 gate returns literal 1 without loading either key"
+        );
+    }
+
+    #[test]
+    fn sqlite_hash_bin_compare_returns_one_on_length_mismatch_before_reads() {
+        let invalid = core::ptr::dangling::<u8>();
+        assert_eq!(
+            unsafe { sqlite_hash_bin_compare(invalid, 2, invalid, 3) },
+            1,
+            "the cmp n1,n2 gate returns literal 1 without loading either key"
+        );
+    }
+
+    #[test]
+    fn sqlite_hash_bin_compare_equal_bytes_return_zero() {
+        let key = b"\x00binary\xff";
+        assert_eq!(
+            unsafe { sqlite_hash_bin_compare(key.as_ptr(), key.len() as i32, key.as_ptr(), key.len() as i32) },
+            0
+        );
+    }
+
+    #[test]
+    fn sqlite_hash_bin_compare_preserves_first_difference_sign_and_magnitude() {
+        let left = [0x10u8, 0xff, 0x00];
+        let right = [0xf0u8, 0x00, 0x00];
+        assert_eq!(
+            unsafe { sqlite_hash_bin_compare(left.as_ptr(), 3, right.as_ptr(), 3) },
+            0x10 - 0xf0,
+            "the first difference is signed u8 subtraction"
+        );
+        assert_eq!(
+            unsafe { sqlite_hash_bin_compare(right.as_ptr(), 3, left.as_ptr(), 3) },
+            0xf0 - 0x10,
+            "reversing operands reverses the difference"
+        );
+    }
+
+    #[test]
+    fn sqlite_hash_bin_compare_zero_length_is_null_safe() {
+        assert_eq!(
+            unsafe {
+                sqlite_hash_bin_compare(core::ptr::null(), 0, core::ptr::null(), 0)
+            },
+            0,
+            "equal zero lengths tail-call memcmp without dereferencing either key"
         );
     }
 

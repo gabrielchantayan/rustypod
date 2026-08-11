@@ -12932,7 +12932,10 @@ functions:
       1 without reading either key; equal lengths tail-call the ported
       memcmp(key1,key2,len1), preserving its first-differing-byte signed
       subtraction result. Equal zero lengths are null-safe through
-      memcmp's no-load zero-length path. Host tests cover the no-read
+      memcmp's no-load zero-length path. The target-only volatile function
+      pointer prevents release LTO from inlining `memcmp`, preserving the
+      call boundary at the cost of an indirect rather than direct tail
+      branch; behavior and ABI are unchanged. Host tests cover the no-read
       length gate, equality, first-difference magnitude/sign, and this
       zero-length boundary.
 
