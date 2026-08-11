@@ -18133,6 +18133,29 @@ functions:
       derives (u16 >> 9) as ldrb of the high byte + lsr #1, and adds
       the crate-standard frame-pointer prologue.
 
+  - address: 0x08138460
+    ghidra: FUN_08138460
+    name: refcounted_base_init
+    size: 36
+    sig: "void refcounted_base_init(FixedValue *this)"
+    module: app/fixed_value
+    status: ported
+    renames:
+      param_1: this
+      DAT_08138484: REFCOUNTED_BASE_VTABLE
+    notes: >-
+      Shared base-class constructor for the refcounted UI object family
+      (22 bl call sites): first stores the 0x08984ca0 base-vtable word
+      at +0x00, then performs ldrb/bic #3/strb at +0x14 and
+      ldr/and #3/str at +0x14. Clearing the flag byte before masking the
+      word makes the final flags/refcount word zero for every input,
+      without writing +0x04..+0x13. Raw ARM proves the function is 36
+      instruction bytes: nine instructions through bx lr at
+      0x08138480; the separate 4-byte vtable literal is at 0x08138484.
+      The reported 16-byte size covers only its first four instructions.
+      The port uses volatile byte/word accesses and a u32 vtable field
+      so its host layout remains the target's 0x18-byte ARM object
+      layout.
   - address: 0x081523b8
     ghidra: FUN_081523b8
     name: fixed_value_init
@@ -18166,21 +18189,19 @@ functions:
       and the refcount in bits 2.., release dispatches the deleting
       destructor at vtable +0x04) and keeps the maximum of their +0x08
       words, so +0x08 is an aux/rank word a plain scalar leaves 0.
-      Deviations - the base ctor @ 0x08138460 is unported; its behavior
-      is reproduced by the private refcounted_base_init helper (not
-      exported, not a separate port), keeping the call structure. Both
-      vtables are address constants: their contents in the decrypted
-      image are stale (the app/registry.rs 0x08989718 caveat - that
-      page does not match what the device runs; the slots there point
-      into 16-bit data tables, not code), so only the stored pointer
-      value is reproduced. The sibling default ctor FUN_081523dc
-      (20 bytes, same base ctor and vtable, stores no value) is
-      identified but not ported. match.py: same structure - push, value
-      saved in r4, bl to the base-ctor helper, vtable literal
+      The base constructor @ 0x08138460 is ported independently as
+      refcounted_base_init. Both vtables are address constants: their
+      contents in the decrypted image are stale (the app/registry.rs
+      0x08989718 caveat - that page does not match what the device runs;
+      the slots there point into 16-bit data tables, not code), so only
+      the stored pointer value is reproduced. The sibling default ctor
+      FUN_081523dc (20 bytes, same base ctor and vtable, stores no
+      value) is ported in this module. match.py: same structure - push,
+      value saved in r4, bl to the base-ctor function, vtable literal
       (0x08986998) loaded from the pool, stm {vtable, value}, zero
       store to +8, return this; LLVM adds the crate-standard frame-
       pointer prologue and keeps `this` in r5 across the call (the
-      original relies on the helper preserving r0).
+      original relies on the base constructor preserving r0).
 
   - address: 0x08076370
     ghidra: FUN_08076370
@@ -18300,10 +18321,9 @@ functions:
     notes: >-
       The default constructor of the same refcounted Q16.16 scalar
       class as fixed_value_init (FUN_081523b8, ported beside it in
-      app/fixed_value.rs): runs the refcounted base constructor @
-      0x08138460 (base vtable 0x08984ca0, flags/refcount word +0x14
-      landed at 0 via the byte-clear-then-word-mask sequence -
-      reproduced by the private refcounted_base_init helper), then
+      app/fixed_value.rs): runs the exported refcounted base constructor
+      @ 0x08138460 (base vtable 0x08984ca0, flags/refcount word +0x14
+      landed at 0 via the byte-clear-then-word-mask sequence), then
       overrides the vtable with 0x08986998 and returns this. Stores NO
       value: the +0x04 scalar and +0x08 aux word keep whatever the
       storage held. Pool literal @ 0x081523f0 binary-verified against
@@ -18316,11 +18336,11 @@ functions:
       constants: contents stale in the decrypted image (the
       app/registry.rs 0x08989718 caveat); only the stored pointer value
       is reproduced. match.py: same structure - push, bl to the
-      base-ctor helper, vtable literal (0x08986998) from the pool, str
-      to [this], return this; LLVM adds the crate-standard
+      exported base constructor, vtable literal (0x08986998) from the
+      pool, str to [this], return this; LLVM adds the crate-standard
       frame-pointer prologue and keeps this in r4 across the call (the
-      original relies on the helper preserving r0) - the accepted house
-      deviations.
+      original relies on the base constructor preserving r0) - the
+      accepted house deviations.
 
   - address: 0x08067ca4
     ghidra: FUN_08067ca4

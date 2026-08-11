@@ -36,50 +36,37 @@
 //! arguments keeping the maximum — so +0x08 is an aux/rank word that a
 //! plain scalar leaves 0.
 //!
-//! The refcounted base constructor @ 0x08138460 (36 bytes, 22 call
-//! sites — shared by every class in this family, among them the
-//! animation object `FUN_08166b88` and the default scalar ctor
-//! `FUN_081523dc` next door) installs the base vtable 0x08984ca0 at
-//! +0x00 and zeroes the flags/refcount word at +0x14 with an odd
+//! The refcounted base constructor [`refcounted_base_init`] @
+//! 0x08138460 (36 instruction bytes; the separate 4-byte vtable
+//! literal is at 0x08138484; 22 call sites) is shared by every class,
+//! among them the animation object `FUN_08166b88` and the default
+//! scalar ctor `FUN_081523dc`. It installs the base vtable 0x08984ca0
+//! at +0x00 and zeroes the flags/refcount word at +0x14 with an odd
 //! two-step sequence — `ldrb/bic #3/strb` on the flags byte, then
 //! `ldr/and #3/str` on the word — which always lands 0: the byte clear
 //! kills flag bits 0..1, and the word mask then keeps only those
-//! (now-zero) bits, dropping any count the word held. Reproduced
-//! exactly by [`refcounted_base_init`].
+//! (now-zero) bits, dropping any count the word held.
 //!
 //! ## Deviations
 //!
-//! - The base constructor @ 0x08138460 is unported; its behavior is
-//!   reproduced by the private [`refcounted_base_init`] helper (not
-//!   exported, not a separate port), keeping the original's
-//!   call-the-base-then-override structure.
-//! - Both vtables are kept as **address constants**. Their contents in
-//!   the decrypted image are stale — the `app/registry.rs` caveat
-//!   (0x08989718: "that one page of the image does not match what the
-//!   device runs") covers this whole 0x0898xxxx page; the slots there
-//!   point into what the image holds as 16-bit data tables, not code.
-//!   What the port must reproduce is the stored pointer value, which is
-//!   exact.
-//! - The default constructor `FUN_081523dc` @ 0x081523dc (20 bytes)
-//!   is ported here as [`fixed_value_default_init`]. It runs the same
-//!   base constructor and installs the same scalar vtable but stores
-//!   no value and touches no other word — its array-builder callers
-//!   (e.g. `FUN_08280fc0`, `FUN_081eadec`, `FUN_081b8e74`) chain it
-//!   over consecutive objects at a 0x18 stride. Verified against
-//!   osos.dec: the pool literal @ 0x081523f0 holds 0x08986998, the
-//!   same [`FIXED_VALUE_VTABLE`] the value ctor's literal @ 0x081523d8
-//!   holds.
+//! Both vtables are kept as **address constants**. Their contents in
+//! the decrypted image are stale — the `app/registry.rs` caveat
+//! (0x08989718: "that one page of the image does not match what the
+//! device runs") covers this whole 0x0898xxxx page; the slots there
+//! point into what the image holds as 16-bit data tables, not code.
+//! What the ports reproduce are the stored 32-bit pointer values,
+//! which are exact.
 
 /// The derived (Q16.16 scalar) vtable, installed by [`fixed_value_init`]
-/// (original: the literal @ 0x081523d8). An address constant — see the
-/// module header's deviation.
-pub const FIXED_VALUE_VTABLE: usize = 0x0898_6998;
+/// (original literal @ 0x081523d8). An address constant — see the
+/// module header's vtable caveat.
+pub const FIXED_VALUE_VTABLE: u32 = 0x0898_6998;
 
-/// The refcounted base class's vtable, installed by the base
-/// constructor @ 0x08138460 (original: the literal @ 0x08138484) and
+/// The refcounted base class's vtable, installed by
+/// [`refcounted_base_init`] (original literal @ 0x08138484) and
 /// immediately overridden by [`FIXED_VALUE_VTABLE`] in
-/// [`fixed_value_init`]. An address constant, same deviation.
-pub const REFCOUNTED_BASE_VTABLE: usize = 0x0898_4ca0;
+/// [`fixed_value_init`]. An address constant, same caveat.
+pub const REFCOUNTED_BASE_VTABLE: u32 = 0x0898_4ca0;
 
 /// The refcounted Q16.16 scalar object: 0x18 bytes on the 32-bit
 /// target (every caller allocates `operator_new(0x18)`; the default
@@ -90,7 +77,7 @@ pub struct FixedValue {
     /// constructor, [`FIXED_VALUE_VTABLE`] after it. A raw address
     /// word: the table's contents are stale in the decrypted image
     /// (see the module header).
-    pub vtable: usize,
+    pub vtable: u32,
     /// +0x04: the scalar, Q16.16 fixed point (callers pass `x << 16`).
     pub value_q16: i32,
     /// +0x08: zeroed here. The animation constructor `FUN_08166b88`
@@ -106,29 +93,41 @@ pub struct FixedValue {
     pub flags: u32,
 }
 
-// Target-exact layout.
-#[cfg(target_pointer_width = "32")]
-mod layout_checks {
-    use super::*;
-    const _: [u8; 0x04] = [0; core::mem::offset_of!(FixedValue, value_q16)];
-    const _: [u8; 0x08] = [0; core::mem::offset_of!(FixedValue, aux)];
-    const _: [u8; 0x14] = [0; core::mem::offset_of!(FixedValue, flags)];
-    const _: [u8; 0x18] = [0; core::mem::size_of::<FixedValue>()];
-}
+// The target layout is deliberately also preserved on 64-bit test hosts:
+// vtable fields in firmware objects are always 32-bit ARM addresses.
+const _: [u8; 0x04] = [0; core::mem::offset_of!(FixedValue, value_q16)];
+const _: [u8; 0x08] = [0; core::mem::offset_of!(FixedValue, aux)];
+const _: [u8; 0x14] = [0; core::mem::offset_of!(FixedValue, flags)];
+const _: [u8; 0x18] = [0; core::mem::size_of::<FixedValue>()];
 
-/// The refcounted base constructor @ 0x08138460, reproduced as a
-/// private helper (see the module header's deviation): install the base
-/// vtable, then land the flags/refcount word at 0 through the
-/// original's byte-clear-then-word-mask sequence.
+/// `refcounted_base_init` — original: `FUN_08138460` @ 0x08138460
+/// (36 bytes: nine ARM instructions; the vtable literal is separately
+/// at 0x08138484).
+///
+/// Installs the base-class vtable at +0x00, then clears the
+/// flags/refcount word at +0x14. The raw ARM sequence is `str` of the
+/// literal vtable, `ldrb/bic/strb` to clear the low two flag bits, then
+/// `ldr/and/str` to retain only those now-clear bits. The final word is
+/// consequently zero for every initial state. Every access is a
+/// volatile 32-bit-target-layout access so the byte/word store ordering
+/// and offsets remain explicit under LLVM.
+///
+/// # Safety
+///
+/// `this` must identify a live, 4-byte-aligned firmware object with at
+/// least 0x18 writable bytes. Its +0x00 word and +0x14 byte/word must be
+/// valid for the target's plain stores.
+#[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
-unsafe fn refcounted_base_init(this: *mut FixedValue) {
-    (*this).vtable = REFCOUNTED_BASE_VTABLE;
-    // ldrb r1,[r0,#0x14]; bic r1,r1,#0x3; strb r1,[r0,#0x14]
-    // ldr  r1,[r0,#0x14]; and r1,r1,#0x3; str  r1,[r0,#0x14]
-    let flags = core::ptr::addr_of_mut!((*this).flags);
-    let flags_low_byte = flags as *mut u8;
-    flags_low_byte.write(flags_low_byte.read() & !0x3);
-    flags.write(flags.read() & 0x3);
+pub unsafe extern "C" fn refcounted_base_init(this: *mut FixedValue) {
+    let object = this.cast::<u8>();
+    (object as *mut u32).write_volatile(REFCOUNTED_BASE_VTABLE);
+
+    let flags_byte = object.add(0x14);
+    flags_byte.write_volatile(flags_byte.read_volatile() & !0x3);
+
+    let flags_word = flags_byte.cast::<u32>();
+    flags_word.write_volatile(flags_word.read_volatile() & 0x3);
 }
 
 /// fixed_value_init — original: `FUN_081523b8` @ 0x081523b8 (32 bytes).
@@ -221,6 +220,35 @@ mod tests {
         assert_eq!(object.value_q16, 0x0bad_f00d_u32 as i32);
         assert_eq!(object.aux, 0xcafe_babe);
         assert_eq!(object.opaque, [0x1111_1111, 0x2222_2222]);
+    }
+
+    #[test]
+    fn refcounted_base_init_uses_the_target_word_and_byte_offsets() {
+        let mut object = dirty();
+        let raw = unsafe {
+            core::slice::from_raw_parts(
+                core::ptr::addr_of!(object).cast::<u8>(),
+                core::mem::size_of::<FixedValue>(),
+            )
+        };
+        unsafe { refcounted_base_init(core::ptr::addr_of_mut!(object)) };
+
+        assert_eq!(
+            &raw[0x00..0x04],
+            &REFCOUNTED_BASE_VTABLE.to_le_bytes(),
+            "first is the 32-bit vtable str at +0x00"
+        );
+        assert_eq!(
+            &raw[0x04..0x14],
+            &[
+                0x0d, 0xf0, 0xad, 0x0b, // value_q16
+                0xbe, 0xba, 0xfe, 0xca, // aux
+                0x11, 0x11, 0x11, 0x11, // opaque[0]
+                0x22, 0x22, 0x22, 0x22, // opaque[1]
+            ],
+            "no byte between the two target stores is touched"
+        );
+        assert_eq!(&raw[0x14..0x18], &[0; 4], "the final word str is +0x14");
     }
 
     #[test]
