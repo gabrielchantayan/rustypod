@@ -31,24 +31,29 @@
 //! the open closed. [`ft_platform_stream_close`] @ 0x082d3d40 is ported:
 //! it destroys the descriptor through the object's own vtable (slot 1),
 //! which — like [`ft_platform_file_open`]'s failure path — is a property
-//! of the object, not a hard-coded address, so no dispatch slot is
-//! needed. Still not ported:
+//! of the object, not a hard-coded address, so no dispatch slot is needed.
+//! The length query [`ft_platform_file_length`] @ 0x082a5418 is ported:
+//! it takes the counted mutex embedded at +0x44 of the object's
+//! synchronization owner (+4), rejects a nonzero state byte with error 2,
+//! and otherwise returns the open-status word when the directory-entry
+//! index is -1 or writes the cached entry length. The remaining unported
+//! operation is:
 //!
-//! - 0x082a5418, the length query, which locks a mutex and walks the
-//!   object's directory entry.
 //! - 0x082d3d7c, the read callback, which goes through 0x082787b8
 //!   (seek) and 0x082784b8 (read).
 //!
-//! So the opener takes *those* as an installable [`FtPlatformFileOps`],
-//! the same shape `ft/trace.rs` uses for the unported logger: every
-//! entry is one of the opener's own `bl` targets or stored literals,
-//! nothing about the layer below is invented, and the opener's logic —
-//! which is what was actually recovered — is reproduced exactly. With
-//! no ops installed every open fails with [`FT_PLATFORM_OPEN_FAILED`],
-//! which is what the hardware does when the volume is not mounted.
+//! So the opener takes its remaining dependencies as an installable
+//! [`FtPlatformFileOps`], the same shape `ft/trace.rs` uses for the
+//! unported logger: every entry is one of the opener's own `bl` targets
+//! or stored literals, nothing about the layer below is invented, and the
+//! opener's logic — which is what was actually recovered — is reproduced
+//! exactly. With no ops installed every open fails with
+//! [`FT_PLATFORM_OPEN_FAILED`], which is what the hardware does when the
+//! volume is not mounted.
 
 use crate::ft::stream::{FtStream, FtStreamCloseFunc, FtStreamIoFunc};
 use crate::heap::veneers::operator_new;
+use crate::kernel::sync_mutex::{mutex_lock_counted, mutex_unlock_counted, CountedMutex};
 
 /// The opener's `moveq r0, #9` @ 0x082d3de4 — a null `FT_Stream`. These
 /// two codes are the firmware's own numbering, not FreeType's;
@@ -60,8 +65,9 @@ pub const FT_PLATFORM_NULL_STREAM: i32 = 9;
 /// leaving a null handle.
 pub const FT_PLATFORM_OPEN_FAILED: i32 = 20;
 
-/// The firmware file API [`ft_platform_stream_open`] is built on. Each
-/// field names one address in the original opener.
+/// The firmware file API [`ft_platform_stream_open`] is built on. The
+/// length query is ported directly; each field names one remaining
+/// dependency in the original opener.
 #[derive(Clone, Copy)]
 pub struct FtPlatformFileOps {
     /// 0x082d3cb4 — open `path` on `volume`, storing the file object in
@@ -72,9 +78,6 @@ pub struct FtPlatformFileOps {
         path: *const u8,
         handle: *mut *mut core::ffi::c_void,
     ) -> i32,
-    /// 0x082a5418 — store the open file's length through `size`. Its
-    /// return value is discarded by the opener.
-    pub size: unsafe extern "C" fn(handle: *mut core::ffi::c_void, size: *mut u32) -> i32,
     /// 0x082d3d7c — the `FT_Stream_IoFunc` the opener plants in
     /// `stream->read`.
     pub read: FtStreamIoFunc,
@@ -84,7 +87,8 @@ pub struct FtPlatformFileOps {
 }
 
 /// The installed file layer, or `None` for "no volume". ADDITION — the
-/// original hard-codes the four addresses; see the module header.
+/// original hard-codes the three remaining dependencies; see the module
+/// header.
 static mut PLATFORM_FILE_OPS: Option<FtPlatformFileOps> = None;
 
 /// Installs (or with `None` removes) the platform file layer, returning
@@ -150,7 +154,7 @@ pub unsafe extern "C" fn ft_platform_stream_open(
         return FT_PLATFORM_OPEN_FAILED;
     }
 
-    (ops.size)(handle, &mut (*stream).size);
+    ft_platform_file_length(handle, &mut (*stream).size);
     (*stream).pathname = path as *mut core::ffi::c_void;
     (*stream).descriptor = handle;
     (*stream).pos = 0;
@@ -158,6 +162,51 @@ pub unsafe extern "C" fn ft_platform_stream_open(
     (*stream).close = Some(ops.close);
     0
 }
+
+/// The platform C++ file object is 84 bytes on the ARM target. Only the
+/// fields exercised by [`ft_platform_file_length`] are named; the others
+/// remain padding rather than invented filesystem state.
+///
+/// On the target, the synchronization owner pointer is at +0x04, its
+/// state byte at +0x08, the directory-entry index at +0x18, the
+/// open-status word at +0x1c, and the cached directory-entry length at
+/// +0x20. The native-pointer host model intentionally lets the pointer
+/// fields expand, while field access preserves the same behavior in tests.
+#[repr(C)]
+pub struct FtPlatformFile {
+    _vtable: *const u8,
+    synchronization_owner: *mut FtPlatformFileSynchronizationOwner,
+    length_query_state: u8,
+    _unknown_09: [u8; 0x0f],
+    directory_entry_index: i32,
+    open_status: i32,
+    cached_entry_length: u32,
+    _unknown_24: [u8; 0x30],
+}
+
+/// The only recovered part of the object reached through
+/// [`FtPlatformFile::synchronization_owner`]: a counted mutex at +0x44.
+#[repr(C)]
+pub struct FtPlatformFileSynchronizationOwner {
+    _unknown_00: [u8; 0x44],
+    length_query_lock: CountedMutex,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x04] = [0; core::mem::offset_of!(FtPlatformFile, synchronization_owner)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x08] = [0; core::mem::offset_of!(FtPlatformFile, length_query_state)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x18] = [0; core::mem::offset_of!(FtPlatformFile, directory_entry_index)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x1c] = [0; core::mem::offset_of!(FtPlatformFile, open_status)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x20] = [0; core::mem::offset_of!(FtPlatformFile, cached_entry_length)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; FT_FILE_OBJECT_SIZE] = [0; core::mem::size_of::<FtPlatformFile>()];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x44] =
+    [0; core::mem::offset_of!(FtPlatformFileSynchronizationOwner, length_query_lock)];
 
 /// Allocation size of the firmware's file object (`mov r0, #0x54` @
 /// 0x082d3cbc).
@@ -278,6 +327,58 @@ pub unsafe extern "C" fn ft_platform_file_open(
     0
 }
 
+/// ft_platform_file_length — original: `FUN_082a5418` @ 0x082a5418
+/// (116 bytes; 20 `bl` call sites, including
+/// [`ft_platform_stream_open`] @ 0x082d3ddc).
+///
+/// Acquires the counted mutex at `handle->synchronization_owner + 0x44`,
+/// then reads the platform file object's cached directory-entry metadata.
+/// A nonzero state byte returns 2. If the directory-entry index is -1,
+/// the output pointer is untouched and the file's open-status word is
+/// returned. Otherwise the cached entry length is stored through `size`
+/// before releasing the lock and returning 0. Every path releases the
+/// same lock; the counted unlock decrements its hold counter before it
+/// signals the ROM semaphore.
+///
+/// The target ABI is exactly `(void *handle, u32 *size) -> i32`: despite
+/// Ghidra preserving two phantom parameters, the raw ARM body only reads
+/// r0/r1. It performs no null checks on either pointer.
+///
+/// # Host model
+///
+/// Native host pointers expand the two pointer-bearing layouts, so tests
+/// access their semantic fields rather than pretending that a 64-bit
+/// address fits in the target's 32-bit words. The target-only layout
+/// assertions above pin every observed ARM offset.
+///
+/// # Safety
+///
+/// `handle` must point to an initialized [`FtPlatformFile`] whose
+/// synchronization owner is non-null and has an initialized counted
+/// mutex. `size` must be a valid writable `u32` on the success path.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_platform_file_length(
+    handle: *mut core::ffi::c_void,
+    size: *mut u32,
+) -> i32 {
+    let file = handle.cast::<FtPlatformFile>();
+    let lock = core::ptr::addr_of_mut!((*(*file).synchronization_owner).length_query_lock);
+    mutex_lock_counted(lock);
+
+    let result = if (*file).length_query_state != 0 {
+        2
+    } else if (*file).directory_entry_index == -1 {
+        (*file).open_status
+    } else {
+        size.write((*file).cached_entry_length);
+        0
+    };
+
+    mutex_unlock_counted(lock);
+    result
+}
+
 /// ft_platform_stream_close (the firmware's `FT_Stream_CloseFunc`) —
 /// original: `FUN_082d3d40` @ 0x082d3d40 (60 bytes; no direct `bl` call
 /// site — planted in `stream->close` by [`ft_platform_stream_open`] @
@@ -338,9 +439,28 @@ mod tests {
     static mut OPEN_PATH: [u8; 64] = [0; 64];
     static mut OPEN_CALLS: usize = 0;
     static mut OPEN_SUCCEEDS: bool = true;
-    static mut SIZE_CALLS: usize = 0;
-    /// The made-up file object the mock hands back.
-    static mut FILE_OBJECT: u32 = 0;
+    /// The target-layout file and its separately reached lock owner.
+    static mut FILE_OBJECT: FtPlatformFile = FtPlatformFile {
+        _vtable: core::ptr::null(),
+        synchronization_owner: core::ptr::null_mut(),
+        length_query_state: 0,
+        _unknown_09: [0; 0x0f],
+        directory_entry_index: 0,
+        open_status: 0,
+        cached_entry_length: 0,
+        _unknown_24: [0; 0x30],
+    };
+    static mut FILE_LOCK_OWNER: FtPlatformFileSynchronizationOwner =
+        FtPlatformFileSynchronizationOwner {
+            _unknown_00: [0; 0x44],
+            length_query_lock: CountedMutex {
+                mutex: crate::kernel::sync_mutex::Mutex {
+                    sem_cell: core::ptr::null_mut(),
+                    unused: 0,
+                },
+                hold_count: 0,
+            },
+        };
 
     unsafe extern "C" fn mock_open(
         volume: i32,
@@ -365,11 +485,6 @@ mod tests {
         }
     }
 
-    unsafe extern "C" fn mock_size(_handle: *mut core::ffi::c_void, size: *mut u32) -> i32 {
-        *core::ptr::addr_of_mut!(SIZE_CALLS) += 1;
-        *size = 4242;
-        0
-    }
 
     unsafe extern "C" fn mock_read(
         _stream: *mut FtStream,
@@ -384,12 +499,17 @@ mod tests {
 
     unsafe fn install(succeeds: bool) -> FtPlatformFileOps {
         *core::ptr::addr_of_mut!(OPEN_CALLS) = 0;
-        *core::ptr::addr_of_mut!(SIZE_CALLS) = 0;
         *core::ptr::addr_of_mut!(OPEN_VOLUME) = -99;
         *core::ptr::addr_of_mut!(OPEN_SUCCEEDS) = succeeds;
+        (*core::ptr::addr_of_mut!(FILE_LOCK_OWNER)).length_query_lock.hold_count = 0;
+        (*core::ptr::addr_of_mut!(FILE_OBJECT)).synchronization_owner =
+            core::ptr::addr_of_mut!(FILE_LOCK_OWNER);
+        (*core::ptr::addr_of_mut!(FILE_OBJECT)).length_query_state = 0;
+        (*core::ptr::addr_of_mut!(FILE_OBJECT)).directory_entry_index = 0;
+        (*core::ptr::addr_of_mut!(FILE_OBJECT)).open_status = 0;
+        (*core::ptr::addr_of_mut!(FILE_OBJECT)).cached_entry_length = 4242;
         let ops = FtPlatformFileOps {
             open: mock_open,
-            size: mock_size,
             read: mock_read,
             close: mock_close,
         };
@@ -433,7 +553,6 @@ mod tests {
             assert_eq!(ft_platform_stream_open(&mut stream, path.as_ptr()), 0);
             assert_eq!(*core::ptr::addr_of!(OPEN_VOLUME), 3);
             assert_eq!(opened_path(), "/Fonts/Helvetica.ttf");
-            assert_eq!(*core::ptr::addr_of!(SIZE_CALLS), 1);
             assert_eq!(stream.size, 4242);
             assert_eq!(stream.pos, 0);
             assert_eq!(stream.descriptor, core::ptr::addr_of_mut!(FILE_OBJECT).cast());
@@ -490,7 +609,6 @@ mod tests {
                 FT_PLATFORM_OPEN_FAILED
             );
             assert_eq!(*core::ptr::addr_of!(OPEN_CALLS), 1);
-            assert_eq!(*core::ptr::addr_of!(SIZE_CALLS), 0);
             assert_eq!((stream.size, stream.pos), (0xdead, 0xbeef));
             assert!(stream.read.is_none() && stream.close.is_none());
             ft_set_platform_file_ops(None);
@@ -508,6 +626,64 @@ mod tests {
                 FT_PLATFORM_OPEN_FAILED
             );
             assert!(stream.read.is_none());
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // ft_platform_file_length.
+
+    /// Sets up the semantic host model; the target assertions above pin
+    /// the physical 32-bit layout this same field access compiles to.
+    unsafe fn prepare_length_query(
+        state: u8,
+        directory_entry_index: i32,
+        open_status: i32,
+        cached_entry_length: u32,
+    ) -> *mut core::ffi::c_void {
+        let owner = core::ptr::addr_of_mut!(FILE_LOCK_OWNER);
+        (*owner).length_query_lock.mutex.sem_cell = core::ptr::null_mut();
+        (*owner).length_query_lock.hold_count = 0x51;
+        let file = core::ptr::addr_of_mut!(FILE_OBJECT);
+        (*file).synchronization_owner = owner;
+        (*file).length_query_state = state;
+        (*file).directory_entry_index = directory_entry_index;
+        (*file).open_status = open_status;
+        (*file).cached_entry_length = cached_entry_length;
+        file.cast()
+    }
+
+    #[test]
+    fn length_query_writes_the_cached_length_for_every_non_sentinel_entry() {
+        let _guard = TEST_OPS_LOCK.lock().unwrap();
+        unsafe {
+            for (entry, length) in [(0, 0), (7, 0x1234_5678), (-2, u32::MAX)] {
+                let handle = prepare_length_query(0, entry, -99, length);
+                let mut size = 0xdead_beef;
+                assert_eq!(ft_platform_file_length(handle, &mut size), 0);
+                assert_eq!(size, length, "entry {entry}");
+                assert_eq!(
+                    (*core::ptr::addr_of!(FILE_LOCK_OWNER)).length_query_lock.hold_count,
+                    0x51,
+                    "the acquire/release pair balances on success"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn length_query_preserves_the_output_on_state_and_missing_entry_errors() {
+        let _guard = TEST_OPS_LOCK.lock().unwrap();
+        unsafe {
+            let mut size = 0xdead_beef;
+            let handle = prepare_length_query(1, 4, -99, 42);
+            assert_eq!(ft_platform_file_length(handle, &mut size), 2);
+            assert_eq!(size, 0xdead_beef, "state error does not write size");
+            assert_eq!((*core::ptr::addr_of!(FILE_LOCK_OWNER)).length_query_lock.hold_count, 0x51);
+
+            let handle = prepare_length_query(0, -1, -37, 42);
+            assert_eq!(ft_platform_file_length(handle, &mut size), -37);
+            assert_eq!(size, 0xdead_beef, "missing entry does not write size");
+            assert_eq!((*core::ptr::addr_of!(FILE_LOCK_OWNER)).length_query_lock.hold_count, 0x51);
         }
     }
 

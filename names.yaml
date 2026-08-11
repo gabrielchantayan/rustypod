@@ -6613,10 +6613,34 @@ functions:
       until ft_stream_enter_frame allocates one. The stored callback
       literals are RUNTIME addresses (0x082c8ea4 / 0x082c8e68), 0xaed8
       below their file positions; the 9 and 20 are the firmware's own
-      status numbering, not FreeType's. PORT DEVIATION: the four
-      firmware routines it stands on are unported, so they are taken as
-      an installable FtPlatformFileOps table (the ft/trace.rs sink
-      pattern); the opener's own logic is reproduced exactly.
+      status numbering, not FreeType's. PORT DEVIATION: its three wired
+      file-layer entries remain an installable FtPlatformFileOps table
+      (the ft/trace.rs sink pattern) while the file constructor/read
+      subsystem is incomplete; the length query at 0x082a5418 is now
+      ported directly and no longer has a dispatch entry. The opener's
+      own logic is reproduced exactly.
+
+  - address: 0x082a5418
+    ghidra: FUN_082a5418
+    name: ft_platform_file_length
+    size: 116
+    sig: "i32 ft_platform_file_length(void *handle, u32 *size)"
+    module: ft/system
+    status: ported
+    vars: {param_1: handle, param_2: size, local_10: counted_lock, iVar1: query_result, uVar2: result}
+    notes: >-
+      Platform C++ file length query. Raw ARM proves the two-argument ABI
+      r0=handle/r1=size despite Ghidra retaining two unused phantom
+      parameters. It builds a counted-lock guard from *(handle+4)+0x44,
+      acquires it, and reads the state byte at +8. A nonzero state returns
+      2 after unlock. Otherwise it tests the directory-entry index at
+      +0x18 against -1: on -1, size is untouched and the +0x1c open-status
+      word is returned; on every other signed value, +0x20 cached entry
+      length is written through size before unlock and return 0. Every exit
+      calls mutex_unlock_counted, whose hold-counter decrement precedes
+      semaphore signal. The target layouts assert the recovered offsets;
+      the host model uses native pointers while exercising the same named
+      fields. 20 bl call sites, binary-scanned.
 
   - address: 0x082d3cb4
     ghidra: FUN_082d3cb4
