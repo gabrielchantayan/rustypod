@@ -21755,6 +21755,65 @@ functions:
       guard byte, all-zero, all-ones, and the cluster's {2, 5, 0x3a00}
       error shape.
 
+  - address: 0x0826467c
+    ghidra: FUN_0826467c
+    name: draw_state_construct
+    size: 44
+    sig: "u8 *draw_state_construct(u8 *this)"
+    module: cxx/draw_state
+    status: ported
+    renames:
+      param_1: this
+      iVar1: this (recovered from the member ctor's return minus 0x20)
+      FUN_081598a4: embedded_pair_construct
+      FUN_082630f0: body_init
+      FUN_08264518: surface_attach
+      DAT_082646a8: DRAW_STATE_DEFAULT_SURFACE_ADDRESS (0x08a77c3c, binary-verified)
+    notes: >-
+      The constructor of the scoped 0x44-byte draw-state record every
+      drawing call builds on its stack, fills, hands to a draw routine,
+      and destroys at scope exit through trivial_destructor @ 0x082646ac
+      (the module sibling; call-site pair 0x0810245c..0x081024ec). 50 bl
+      call sites, 0 b, binary-scanned. Class unidentified; name is
+      evidence-based. The consumers establish the layout: 0x0826e250 /
+      0x0826eb5c store the render context's +0x5c bitmap surface at
+      +0x1c and a clip rect at +0x34 (setter 0x08264550), 0x08262d70
+      writes the style byte at +0x10, and the draw call 0x08262bdc
+      offsets two rects by the record's +0x2c/+0x30 origin and invokes
+      the text/layout draw engine 0x080f1600 with the surface pointers
+      *(this+0x1c)+4, the two colors at +0x11/+0x15, the style byte and
+      the clip rect. The 44 bytes: `add r0,r0,#0x20; bl 0x081598a4`
+      (the embedded two-word member ctor at +0x20 - 12 bytes, fully
+      decoded: zero two words, return r0), `sub r4,r0,#0x20` (recover
+      this from the callee's RETURN, not the entry argument - the
+      string_id_record.rs return-derivation contract, host-tested with
+      a shifted canned return), `bl 0x082630f0` (body init: +0/+4 = 0,
+      +8/+0xc = 1, style byte and first color 0, five 0xff bytes
+      +0x14..+0x18, +0x20/+0x24 re-copied from a global pair,
+      +0x28..+0x43 = 0), `ldr r1,[0x82646a8]` (the default draw-target
+      surface descriptor 0x08a77c3c, an RW-region address identity
+      carrying the default clip rect at its own +0x98), `bl 0x08264518`
+      (stores the surface at +0x1c and copies its +0x98 rect,
+      origin-moved by the ported rect_move_to_origin @ 0x0826c2e8, into
+      +0x34..+0x40), `mov r0,r4` return. Deviations (the settings.rs
+      SETTINGS_CTOR pattern): the three callees ride the
+      DRAW_STATE_CONSTRUCT_OPS dispatch slots; the
+      embedded_pair_construct default is faithful (the callee is fully
+      decoded), the body_init default is a documented zeroing stub, the
+      surface_attach default stores only the surface identity at +0x1c
+      (pointer-sized on host, the pfr_face_done face-word model) and
+      skips the rect copy a host cannot reproduce - NOT HOOK-READY
+      until the two larger callees are ported and wired in. Host tests:
+      chain order (pair at this+0x20, body, surface with the default
+      surface address), the return-minus-0x20 recovery under a shifted
+      member-ctor return, and the exact final bytes under the default
+      stubs (zeroed record, surface identity at +0x1c, guard bytes
+      intact). match.py structural: identical dataflow - add #0x20,
+      call, sub #0x20, call, literal 0x08a77c3c in the Rust pool, call,
+      mov r0,r4; the diff is the crate fp frame and the three
+      blx-through-volatile-slot dispatches standing in for the direct
+      bl's.
+
   - address: 0x082646ac
     ghidra: FUN_082646ac
     name: trivial_destructor
