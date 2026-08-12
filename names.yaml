@@ -27376,3 +27376,57 @@ functions:
       finish -> strbne [r4,#0x1e] tail; the diff is the crate fp frame
       and the seam's ldr/blx static dispatch in place of the direct bl
       0x0839788c.
+
+  - address: 0x08261d1c
+    ghidra: FUN_08261d1c
+    name: cxx_mutexattr_init
+    size: 20
+    sig: "usize *cxx_mutexattr_init(usize *attr)"
+    module: cxx/mutex_attr_init
+    status: ported
+    renames:
+      param_1: attr (saved in r4 and returned)
+      FUN_082e84a4: pthread_mutexattr_init (the wrapped initializer)
+    notes: >-
+      20 bytes, all code, no literal pool (0x08261d1c..0x08261d30; the
+      pthread_mutexattr_destroy wrapper @ 0x08261d30 follows
+      immediately). 2 bl call sites, binary-scanned: 0x08261e34 in
+      cxx_mutex_construct (cxx/mutex.rs) and 0x082621bc in the twin
+      constructor FUN_082621b0. Five-instruction C++-layer veneer over
+      pthread_mutexattr_init @ 0x082e84a4: save attr in r4, bl the
+      initializer, return the SAVED pointer (mov r0,r4) - the
+      initializer's status (0 or 0x1a) is discarded; no NULL guard of
+      its own. The wrapped initializer (0x082e84a4..0x082e84d4, still
+      unported): NULL attr -> 0x1a with no stores; otherwise plants the
+      attr magic 0x4d545841 "MTXA" (literal @ 0x082e84d8,
+      binary-verified in osos.dec; the destroy/settype literals @
+      0x082e84a0/0x082e852c hold the same word) at attr+0x00, the
+      default halfword 0xffc2 at +0x04 (mvn r1,#0x3d via strh), RMWs
+      the +0x06 halfword (bic #0x3f clears bits 0..5 - including the
+      type field bits 4..5 -> NORMAL, the field pthread_mutexattr_
+      settype @ 0x082e84dc rewrites and the PosixMutex layout records
+      at mutex+0x0e - then orr #0x8 sets bit 3, the process-scope
+      default; the mutex initializer @ 0x082e82f8 copies the whole
+      attr+0x04 word into mutex+0x0c), and returns 0. Deviations: the
+      callee rides the CXX_MUTEXATTR_INIT_OPS dispatch slot (the
+      facade_registry_walk fixed-address pattern) - the wired default
+      transmutes 0x082e84a4 on target (hook-ready), the host default is
+      a behavioral model of the decoded stores so tests can observe the
+      planted fields; attr is passed as *mut usize matching
+      cxx/mutex.rs's two-word stack scope model (byte-exact on the
+      32-bit target). The port is wired as cxx/mutex.rs's
+      CXX_MUTEX_CONSTRUCT_OPS.attr_init default (that module's
+      documented "a later port replaces its default" pattern; the
+      pointer return is discarded there, matching the original call
+      site whose next instruction overwrites r0). Host tests: pointer
+      forwarding and identity return with the callee status discarded
+      (a recording mock returns 0x1a and the veneer still returns the
+      pointer), NULL forwarded unguarded and returned, the default
+      model's planted fields compared byte-exact against an independent
+      byte-level reference across +0x06 halfword seeds (0x0000, 0xffff,
+      0x003f, 0xffc0, 0xaa95 - bits 0..5 cleared, bit 3 set, upper bits
+      preserved), bytes past the 8-byte attr untouched, and the host
+      model's 0/0x1a statuses. match.py (exit 1, diff expected): same
+      save-r0-in-r4 -> call -> mov r0,r4 -> pop structure; the diff is
+      the crate fp frame and the seam's ldr/blx static dispatch in
+      place of the direct bl 0x082e84a4.

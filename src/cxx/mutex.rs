@@ -57,11 +57,14 @@
 //! methods route the member through the posix_mutex_lock/unlock
 //! veneers @ 0x08261e20/0x08261e24 (0x0815331c).
 //!
-//! Deviations: all three callees are unported, so they ride the
+//! Deviations: the settype+init operation @ 0x08261de8 and the attr
+//! destroy wrapper @ 0x08261d30 are unported, so they ride the
 //! [`CXX_MUTEX_CONSTRUCT_OPS`] dispatch slots (the settings.rs
 //! `SETTINGS_CTOR` pattern) with no-op defaults — **not hook-ready**
-//! until the wrappers are ported (with the defaults the mutex is never
-//! initialized and the status word is never written). The scope is
+//! until they are ported (with the defaults the mutex is never
+//! initialized and the status word is never written). The attr init
+//! wrapper @ 0x08261d1c is ported ([`super::mutex_attr_init`]) and
+//! wired as the `attr_init` default. The scope is
 //! modeled as two pointer-sized words (the pfr_face_done face-word
 //! model): byte-exact on the 32-bit target, disjoint slots on a 64-bit
 //! host. `param_2` exists only to keep the register shape — the
@@ -72,8 +75,13 @@
 /// is 0x1c bytes total: 24-byte PosixMutex + this word).
 pub const CXX_MUTEX_STATUS_OFFSET: usize = 0x18;
 
-/// No-op default for the unported scope attr init wrapper @ 0x08261d1c.
-unsafe extern "C" fn attr_init_stub(_scope: *mut usize) {}
+/// Wired default for the scope attr init wrapper @ 0x08261d1c: the
+/// ported [`super::mutex_attr_init::cxx_mutexattr_init`]. Its returned
+/// pointer is discarded here — the original call site's next
+/// instruction overwrites r0, so this slot stays unit-returning.
+unsafe extern "C" fn attr_init_port(scope: *mut usize) {
+    super::mutex_attr_init::cxx_mutexattr_init(scope);
+}
 
 /// No-op default for the unported settype+init operation @ 0x08261de8.
 /// Intentionally not a substitute: it neither initializes the mutex nor
@@ -91,7 +99,7 @@ unsafe extern "C" fn attr_destroy_stub(_scope: *mut usize) {}
 #[derive(Clone, Copy)]
 pub struct CxxMutexConstructOps {
     /// Original 0x08261d1c: the pthread_mutexattr_init wrapper over the
-    /// two-word stack scope.
+    /// two-word stack scope (ported in [`super::mutex_attr_init`]).
     pub attr_init: unsafe extern "C" fn(scope: *mut usize),
     /// Original 0x08261de8: mutexattr_settype(scope, NORMAL) then, on
     /// success, the mutex initializer @ 0x082e82f8 — either status
@@ -102,9 +110,10 @@ pub struct CxxMutexConstructOps {
     pub attr_destroy: unsafe extern "C" fn(scope: *mut usize),
 }
 
-/// Wired defaults: three documented no-ops (see the module header).
+/// Wired defaults: the ported attr-init wrapper plus two documented
+/// no-ops (see the module header).
 pub const DEFAULT_CXX_MUTEX_CONSTRUCT_OPS: CxxMutexConstructOps = CxxMutexConstructOps {
-    attr_init: attr_init_stub,
+    attr_init: attr_init_port,
     mutex_init: mutex_init_stub,
     attr_destroy: attr_destroy_stub,
 };
@@ -259,8 +268,9 @@ mod tests {
 
     #[test]
     fn default_stubs_leave_the_wrapper_untouched() {
-        // No bench: the wired defaults are no-ops, so the constructor
-        // only builds and discards the scope and returns this — the
+        // No bench: the mutex_init/attr_destroy defaults are no-ops and
+        // the ported attr-init default writes only the stack scope, so
+        // the constructor leaves the wrapper itself untouched — the
         // documented NOT-hook-ready shape.
         let mut wrapper = [0x5au8; 0x1c];
         let this = wrapper.as_mut_ptr();
