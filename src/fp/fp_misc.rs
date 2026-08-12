@@ -372,6 +372,26 @@ pub unsafe extern "C" fn fixed16_div(mut numerator: i32, divisor: i32) -> i32 {
     crate::util::fixed::fixed16_mul(numerator, reciprocal)
 }
 
+/// fixed16_mul_indirect — original: `FUN_082a188c` @ 0x082a188c (28
+/// bytes; 57 bl call sites, binary-scanned: 0x080fxxxx/0x0816xxxx and the
+/// 0x0825xxxx/0x0827xxxx geometry code).
+///
+/// Q16.16 fixed-point multiply returning exactly what `fixed16_mul`
+/// (@ 0x080e9878) returns, except the multiplicand is fetched through a
+/// pointer: `ldr r2,[r0]` then `smull r0,r1,r2,<b>` followed by the same
+/// `(hi << 16) | (lo >> 16)` funnel that yields signed product bits
+/// [47:16] — arithmetic-shift semantics (negative products truncate toward
+/// minus infinity) and silent 32-bit wrap of the returned word. The
+/// original's stmdb/ldmia frame only spills both arguments so `b` can be
+/// reloaded after the pointer load (an ADS register-allocation artifact);
+/// it has no semantic effect. Call sites materialize the first operand on
+/// the stack and pass `sp + N` (e.g. 0x08257354/0x0825735c), which is why
+/// the operand is indirect at all.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn fixed16_mul_indirect(a: *const i32, b: i32) -> i32 {
+    (((*a as i64) * (b as i64)) >> 16) as i32
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -820,6 +840,132 @@ mod tests {
         );
         unsafe {
             assert_eq!(LAST_RECIPROCAL_INPUT, divisor);
+        }
+    }
+
+    // ---- fixed16_mul_indirect ----
+
+    /// Q16.16 one (1.0), the multiplicative identity of this format.
+    const FIX_ONE: i32 = 0x0001_0000;
+
+    /// Call through a real by-value copy so the pointer load is exercised.
+    fn mul_indirect(a: i32, b: i32) -> i32 {
+        unsafe { fixed16_mul_indirect(&a, b) }
+    }
+
+    /// Reference: full signed 64-bit product, arithmetic >> 16, truncate
+    /// to 32 bits — equal to the original's (hi << 16) | (lo >> 16) funnel
+    /// for every input.
+    fn ref_mul_indirect(a: i32, b: i32) -> i32 {
+        (((a as i64) * (b as i64)) >> 16) as i32
+    }
+
+    #[test]
+    fn fixed16_mul_indirect_zero_and_identity() {
+        assert_eq!(mul_indirect(0, FIX_ONE), 0);
+        assert_eq!(mul_indirect(FIX_ONE, 0), 0);
+        assert_eq!(mul_indirect(0, 0), 0);
+        // 1.0 * 1.0 = 1.0: 0x10000 * 0x10000 = 2^32, >> 16 = 0x10000.
+        assert_eq!(mul_indirect(FIX_ONE, FIX_ONE), FIX_ONE);
+        // 2.5 * 4.0 = 10.0, exact.
+        assert_eq!(mul_indirect(0x0002_8000, 0x0004_0000), 0x000a_0000);
+    }
+
+    #[test]
+    fn fixed16_mul_indirect_negative_operands() {
+        assert_eq!(mul_indirect(-FIX_ONE, FIX_ONE), -FIX_ONE);
+        assert_eq!(mul_indirect(FIX_ONE, -FIX_ONE), -FIX_ONE);
+        assert_eq!(mul_indirect(-FIX_ONE, -FIX_ONE), FIX_ONE);
+        // -1.5 * 2.0 = -3.0, exact.
+        assert_eq!(mul_indirect(-0x0001_8000, 0x0002_0000), -0x0003_0000);
+    }
+
+    #[test]
+    fn fixed16_mul_indirect_sign_extends_the_product_high_half() {
+        // product = -1: smull high half is 0xffffffff. The funnel keeps
+        // the sign extension: 0xffff_0000 | 0xffff = -1. Dropping it
+        // (zero-extended high half) would give 0x0000_ffff.
+        assert_eq!(mul_indirect(-1, 1), -1);
+        assert_eq!(mul_indirect(1, -1), -1);
+        // -2.0 * 1.0: product 0xfffffffe_00000000 -> 0xfffe_0000.
+        assert_eq!(mul_indirect(-0x0002_0000, FIX_ONE), -0x0002_0000);
+    }
+
+    #[test]
+    fn fixed16_mul_indirect_truncates_toward_negative_infinity() {
+        // 1 ulp * 1 ulp = 2^-32, below resolution: truncates to 0.
+        assert_eq!(mul_indirect(1, 1), 0);
+        // Negative fraction floors, it does not truncate toward zero:
+        // -1 ulp * 1 ulp = -2^-32 -> -1 (0xffffffff), NOT 0.
+        assert_eq!(mul_indirect(-1, 1), -1);
+        assert_eq!(mul_indirect(-3, 1), -1);
+        // -0.5 ulp of the result still floors to -1.
+        assert_eq!(mul_indirect(-1, 2), -1);
+        // Exact negative products are unaffected by the shift direction.
+        assert_eq!(mul_indirect(-0x0001_8000, FIX_ONE), -0x0001_8000);
+    }
+
+    #[test]
+    fn fixed16_mul_indirect_wraps_the_low_32_bits() {
+        // i32::MAX^2 = 0x3fffffff_00000001; bits [47:16] = 0xffff_0000.
+        // The original wraps to -65536, no clamping or saturation.
+        assert_eq!(mul_indirect(i32::MAX, i32::MAX), -FIX_ONE);
+        // i32::MIN^2 = 0x40000000_00000000; bits [47:16] = 0.
+        assert_eq!(mul_indirect(i32::MIN, i32::MIN), 0);
+        // 1.0 * -32768.0 = -2^47; bits [47:16] = 0x8000_0000 (i32::MIN).
+        assert_eq!(mul_indirect(FIX_ONE, i32::MIN), i32::MIN);
+        // i32::MIN * i32::MAX = 0xc0000000_80000000; bits [47:16] =
+        // 0x0000_8000 (positive despite the negative product).
+        assert_eq!(mul_indirect(i32::MIN, i32::MAX), 0x0000_8000);
+    }
+
+    #[test]
+    fn fixed16_mul_indirect_equals_the_original_register_assembly() {
+        // Mirror the original instruction by instruction: smull, then
+        // (hi << 16) | (lo >> 16) on the raw halves (the funnel_product
+        // helper used by the fixed16_div tests).
+        for &(a, b) in &[
+            (0x1234_5678i32, 0x0000_1000i32),
+            (-0x1234_5678, 0x0000_1000),
+            (0x1234_5678, -0x0000_1000),
+            (-0x1234_5678, -0x0000_1000),
+            (i32::MAX, i32::MAX),
+            (i32::MIN, i32::MIN),
+            (i32::MIN, i32::MAX),
+            (-1, -1),
+        ] {
+            assert_eq!(mul_indirect(a, b), funnel_product(a, b), "a={a:#x} b={b:#x}");
+        }
+    }
+
+    #[test]
+    fn fixed16_mul_indirect_matches_reference() {
+        let values = [
+            0i32,
+            1,
+            -1,
+            2,
+            FIX_ONE,
+            -FIX_ONE,
+            0x8000,
+            -0x8000,
+            0x0001_0001,
+            -0x0001_0001,
+            0x1234_5678,
+            -0x1234_5678,
+            0x7fff_ffff,
+            i32::MIN,
+        ];
+        for &a in &values {
+            for &b in &values {
+                assert_eq!(mul_indirect(a, b), ref_mul_indirect(a, b), "a={a:#x} b={b:#x}");
+            }
+        }
+        let mut rng = Rng(0xfeed_5eed_c0ff_ee11);
+        for _ in 0..100_000 {
+            let a = rng.next() as i32;
+            let b = rng.next() as i32;
+            assert_eq!(mul_indirect(a, b), ref_mul_indirect(a, b), "a={a:#x} b={b:#x}");
         }
     }
 }

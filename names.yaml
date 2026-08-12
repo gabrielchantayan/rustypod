@@ -18351,6 +18351,33 @@ functions:
       truncated by the false no-return edge;
       actual code is 0x080e988c-0x080e98ff plus literals 0x080e9900-0x080e990b.
 
+  - address: 0x082a188c
+    ghidra: FUN_082a188c
+    name: fixed16_mul_indirect
+    size: 28
+    sig: "i32 fixed16_mul_indirect(a: *const i32, b: i32) -> i32"
+    module: fp/fp_misc
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      Q16.16 fixed-point multiply with the multiplicand fetched through a
+      pointer: ldr r2,[r0]; smull r0,r1,r2,<b>; then the same
+      (hi << 16) | (lo >> 16) funnel as fixed16_mul @ 0x080e9878,
+      returning signed product bits [47:16] - arithmetic-shift semantics
+      (negative products truncate toward minus infinity) with silent
+      32-bit wrap, no clamping. The stmdb sp!,{r0,r1,lr} frame only
+      spills both arguments so b can be reloaded after the pointer load
+      (ADS register-allocation artifact); no semantic effect. Call sites
+      materialize the first operand on the stack and pass sp + N (e.g.
+      0x08257354/0x0825735c), which is why the operand is indirect. 57 bl
+      call sites, binary-scanned (0x080fxxxx, 0x0816xxxx, and the
+      0x0825xxxx/0x0827xxxx geometry code). Result-equivalent to
+      fixed16_mul @ 0x080e9878 on the dereferenced value; ported as a
+      separate symbol because the hook must replace this distinct
+      address. match.py structural: same 7-instruction shape (pointer
+      load, smull, lsl/lsr funnel, orr); frame setup and register
+      allocation differ (LLVM push {fp,lr} vs ADS arg spill).
+
   - address: 0x080e97ac
     ghidra: FUN_080e97ac
     name: fixed16_cos
