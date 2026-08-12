@@ -154,10 +154,20 @@
 //!   machine). The binding↔register re-point of the binding machine:
 //!   installs the register at the binding's +0x10 slot, clears the
 //!   bound/block-entry flag pair when the register's phi web changes,
-//!   and back-points the register's +0x08 binding slot. Ported, but
+//!   back-points the register's +0x08 binding slot. Ported, but
 //!   the [`CG_BLOCK_BIND_OPS`]`::binding_rebind` slot keeps its
 //!   documented no-op default (rewiring is a documented follow-up,
 //!   alongside the two sibling slots).
+//! - `cg_binding_unlink` — original: `FUN_083673b0` @ 0x083673b0
+//!   (64 bytes; 8 `bl` call sites — the block-entry binder
+//!   [`cg_block_bind_registers`], the block-exit flush
+//!   `FUN_082ccae4`, the spill path `FUN_082d7870` and the
+//!   unlink-then-push move `FUN_08367390`). The runtime's intrusive
+//!   doubly-linked-list REMOVE: unlinks a node from its `{head,
+//!   tail}` anchor and clears the node's next/prev/anchor words.
+//!   Ported, but the [`CG_BLOCK_BIND_OPS`]`::binding_unlink` slot
+//!   keeps its documented no-op default (rewiring is a documented
+//!   follow-up once the last sibling slot is ported).
 //! - `cg_cell_table_create` / `cg_cell_table_destroy` — originals
 //!   `FUN_082430c4` @ 0x082430c4 (72 bytes; 1 `bl` caller) /
 //!   `FUN_0824310c` @ 0x0824310c (44 bytes; 2 `bl` callers). The video
@@ -3006,12 +3016,31 @@ pub const CG_BITSET_BITS: usize = 1;
 /// binder's `ldr r5,[r0,#0x8]`, written by the rebind helper
 /// `FUN_082b5234`'s `str r1,[r2,#0x8]`).
 pub const CG_VREG_BINDING: usize = 0x08 / 4;
+/// `cg_binding_t + 0x00` — the intrusive-list link toward the
+/// anchor's head end (the end the list push `FUN_08367358` inserts
+/// at): NULL in the node seated at the head. The unlink helper's
+/// `ldr r3,[r1,#0x0]`.
+pub const CG_BINDING_NEXT: usize = 0x00 / 4;
+/// `cg_binding_t + 0x04` — the intrusive-list link toward the
+/// anchor's tail end (the end the block-exit flush `FUN_082ccae4`
+/// drains from): NULL in the node seated at the tail. The unlink
+/// helper's `ldr r2,[r1,#0x4]`.
+pub const CG_BINDING_PREV: usize = 0x04 / 4;
 /// `cg_binding_t + 0x08` — back-pointer to the `{head, tail}` list
 /// anchor the binding currently hangs from (a hardware-register
 /// descriptor anchor's list head at anchor +0x10 per the module
 /// header, or one of the codegen's embedded anchors). Passed as the
 /// first argument to the unlink helper (`ldr r0,[r5,#0x8]`).
 pub const CG_BINDING_ANCHOR: usize = 0x08 / 4;
+/// Head word of a binding-list `{head, tail}` anchor — the end the
+/// list push inserts at (the codegen's embedded anchors at +0x1f0,
+/// +0x1f8 and +0x200, and the hardware-register descriptor anchors'
+/// list head at anchor +0x10).
+pub const CG_BINDING_LIST_HEAD: usize = 0x00 / 4;
+/// Tail word of a binding-list `{head, tail}` anchor — the end the
+/// block-exit flush `FUN_082ccae4` drains from (`ldr r4,[r5,#0x204]`
+/// over the +0x200 pending-bindings anchor).
+pub const CG_BINDING_LIST_TAIL: usize = 0x04 / 4;
 /// `cg_binding_t + 0x10` — the register the binding is currently
 /// bound to (written by the rebind helper's `str r2,[r1,#0x10]`,
 /// read by its back-pointer guard `ldr r0,[r0,#0x10]`).
@@ -3064,7 +3093,10 @@ pub struct CgBlockBindOps {
     /// runtime's intrusive doubly-linked-list REMOVE: unlinks `node`
     /// from `anchor`'s `{head +0x00, tail +0x04}` list and clears the
     /// node's next/prev/anchor words. Called with the binding's
-    /// current anchor (binding +0x08). Default: no unlink.
+    /// current anchor (binding +0x08). PORTED as
+    /// [`cg_binding_unlink`]; the slot KEEPS its no-op default (the
+    /// seam decision of [`cg_block_bind_registers`] — rewire once
+    /// sibling `FUN_08367358` is also ported). Default: no unlink.
     pub binding_unlink: unsafe extern "C" fn(anchor: *mut u8, node: *mut CgBinding),
     /// `FUN_082b5234` @ 0x082b5234 (100 bytes; 13 `bl` call sites,
     /// all inside the register-binding machine) — the
@@ -3115,6 +3147,73 @@ pub const DEFAULT_CG_BLOCK_BIND_OPS: CgBlockBindOps = CgBlockBindOps {
 /// [`CgBlockBindOps`].
 #[cfg_attr(target_os = "none", no_mangle)]
 pub static mut CG_BLOCK_BIND_OPS: CgBlockBindOps = DEFAULT_CG_BLOCK_BIND_OPS;
+
+/// cg_binding_unlink — original: `FUN_083673b0` @ 0x083673b0 (64
+/// bytes; **8 `bl` call sites**: 0x082b3bac/0x082b3bf8/0x082b3cac in
+/// the block-entry binder [`cg_block_bind_registers`], 0x082c5cec,
+/// 0x082ccb28/0x082ccb6c in the block-exit flush `FUN_082ccae4`,
+/// 0x082d7848 in the spill path `FUN_082d7870` and 0x0836739c in the
+/// unlink-then-push move `FUN_08367390`). Leaf.
+///
+/// The runtime's intrusive doubly-linked-list REMOVE: unlinks `node`
+/// from the `{head, tail}` anchor it hangs from and clears the node's
+/// next/prev/anchor words, in the original's exact order:
+///
+/// 1. **Head-side fixup** (`ldr r3,[r1,#0x0]` / `ldr r2,[r1,#0x4]` /
+///    `cmp r3,#0x0`): when the node's next ([`CG_BINDING_NEXT`],
+///    +0x00 — the link toward the anchor's head end, the end the list
+///    push inserts at) is NULL, the node sits at the head and the
+///    anchor's head word takes the node's prev (`streq r2,[r0,#0x0]`);
+///    otherwise the next node's prev takes it (`strne r2,[r3,#0x4]`).
+/// 2. **Tail-side fixup** (`ldr r2,[r1,#0x4]` — a genuine RELOAD —
+///    / `cmp r2,#0x0`): when the node's prev ([`CG_BINDING_PREV`],
+///    +0x04 — the link toward the anchor's tail end, the end the
+///    block-exit flush drains from) is NULL, the node sits at the
+///    tail and the anchor's tail word takes the node's next
+///    (reloaded: `ldreq r2,[r1,#0x0]` / `streq r2,[r0,#0x4]`);
+///    otherwise the prev node's next takes it (`ldrne r0,[r1,#0x0]`
+///    / `strne r0,[r2,#0x0]`).
+/// 3. **Clear the node** (`mov r0,#0x0`): prev, then next, then the
+///    anchor back-pointer ([`CG_BINDING_ANCHOR`], +0x08) — the
+///    original's `str r0,[r1,#0x4]` / `str r0,[r1,#0x0]` /
+///    `str r0,[r1,#0x8]` store order.
+///
+/// The reloads of both link words after the head-side fixup are kept
+/// verbatim: only a self-referential node could alias them, and the
+/// original pays for the reloads anyway. No NULL guard on `anchor`,
+/// like the rest of the cluster.
+///
+/// SEAM DECISION (the [`cg_binding_rebind`] precedent): ported but
+/// NOT wired — the [`CG_BLOCK_BIND_OPS`]`::binding_unlink` slot keeps
+/// its documented no-op default (the seam decision of
+/// [`cg_block_bind_registers`] — rewire once the last sibling,
+/// `FUN_08367358`, is also ported; noted in names.yaml).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_binding_unlink(anchor: *mut u8, node: *mut CgBinding) {
+    let node = node as *mut u8;
+    let next = slot(node, CG_BINDING_NEXT).read();
+    let prev = slot(node, CG_BINDING_PREV).read();
+    if next.is_null() {
+        // The node sits at the head: the anchor's head word takes
+        // the node's prev.
+        slot(anchor, CG_BINDING_LIST_HEAD).write(prev);
+    } else {
+        slot(next, CG_BINDING_PREV).write(prev);
+    }
+    let prev = slot(node, CG_BINDING_PREV).read();
+    let next = slot(node, CG_BINDING_NEXT).read();
+    if prev.is_null() {
+        // The node sits at the tail: the anchor's tail word takes
+        // the node's next.
+        slot(anchor, CG_BINDING_LIST_TAIL).write(next);
+    } else {
+        slot(prev, CG_BINDING_NEXT).write(next);
+    }
+    slot(node, CG_BINDING_PREV).write(core::ptr::null_mut());
+    slot(node, CG_BINDING_NEXT).write(core::ptr::null_mut());
+    slot(node, CG_BINDING_ANCHOR).write(core::ptr::null_mut());
+}
 
 /// cg_binding_rebind — original: `FUN_082b5234` @ 0x082b5234 (100
 /// bytes; **13 `bl` call sites**, all inside the register-binding
@@ -8263,6 +8362,178 @@ mod tests {
                 "FUN_08367358 stays a documented no-op until ported"
             );
         }
+        teardown();
+    }
+
+    // --- cg_binding_unlink ------------------------------------------
+
+    /// A `{head, tail}` anchor plus three list nodes. Each node
+    /// carries a trailing sentinel word proving the unlink writes
+    /// nothing past the anchor back-pointer at +0x08.
+    struct UnlinkFixture {
+        anchor: [usize; 2],
+        nodes: [[usize; 4]; 3],
+    }
+
+    /// Marks a node slot's untouched tail.
+    const UNLINK_SENTINEL: usize = 0x5e7716e1;
+
+    impl UnlinkFixture {
+        /// Builds the three-node list the list push (`FUN_08367358`)
+        /// produces pushing node 0, then 1, then 2: anchor
+        /// `{head: node2, tail: node0}` with node2.next = NULL,
+        /// node2.prev = node1, node1.next = node2, node1.prev =
+        /// node0, node0.next = node1, node0.prev = NULL, and every
+        /// node's anchor back-pointer set.
+        fn new() -> std::boxed::Box<UnlinkFixture> {
+            let mut f = std::boxed::Box::new(UnlinkFixture {
+                anchor: [0; 2],
+                nodes: [[UNLINK_SENTINEL; 4]; 3],
+            });
+            for i in 0..3 {
+                f.nodes[i][CG_BINDING_ANCHOR] = f.anchor.as_mut_ptr() as usize;
+            }
+            // Head end: the last pushed node has next == NULL.
+            f.nodes[2][CG_BINDING_NEXT] = 0;
+            f.nodes[2][CG_BINDING_PREV] = f.nodes[1].as_mut_ptr() as usize;
+            f.nodes[1][CG_BINDING_NEXT] = f.nodes[2].as_mut_ptr() as usize;
+            f.nodes[1][CG_BINDING_PREV] = f.nodes[0].as_mut_ptr() as usize;
+            // Tail end: the first pushed node has prev == NULL.
+            f.nodes[0][CG_BINDING_NEXT] = f.nodes[1].as_mut_ptr() as usize;
+            f.nodes[0][CG_BINDING_PREV] = 0;
+            f.anchor[CG_BINDING_LIST_HEAD] = f.nodes[2].as_mut_ptr() as usize;
+            f.anchor[CG_BINDING_LIST_TAIL] = f.nodes[0].as_mut_ptr() as usize;
+            f
+        }
+
+        fn node_ptr(&mut self, i: usize) -> *mut CgBinding {
+            self.nodes[i].as_mut_ptr() as *mut CgBinding
+        }
+
+        /// Asserts node `i`'s three list words are cleared and its
+        /// sentinel survived.
+        fn assert_cleared(&self, i: usize) {
+            assert_eq!(self.nodes[i][CG_BINDING_NEXT], 0, "node {i}: next cleared");
+            assert_eq!(self.nodes[i][CG_BINDING_PREV], 0, "node {i}: prev cleared");
+            assert_eq!(
+                self.nodes[i][CG_BINDING_ANCHOR], 0,
+                "node {i}: anchor back-pointer cleared"
+            );
+            assert_eq!(self.nodes[i][3], UNLINK_SENTINEL, "node {i}: no write past +0x08");
+        }
+
+        /// Asserts every node's sentinel survived.
+        fn assert_sentinels(&self) {
+            for i in 0..3 {
+                assert_eq!(self.nodes[i][3], UNLINK_SENTINEL, "node {i}: sentinel");
+            }
+        }
+    }
+
+    #[test]
+    fn binding_unlink_unlinks_a_middle_node() {
+        let _g = setup();
+        let mut f = UnlinkFixture::new();
+        let node0 = f.nodes[0].as_mut_ptr() as usize;
+        let node2 = f.nodes[2].as_mut_ptr() as usize;
+        unsafe {
+            cg_binding_unlink(f.anchor.as_mut_ptr() as *mut u8, f.node_ptr(1));
+
+            assert_eq!(f.nodes[2][CG_BINDING_PREV], node0, "next node's prev re-points");
+            assert_eq!(f.nodes[0][CG_BINDING_NEXT], node2, "prev node's next re-points");
+            assert_eq!(
+                f.anchor[CG_BINDING_LIST_HEAD], node2,
+                "the anchor's head word is untouched"
+            );
+            assert_eq!(
+                f.anchor[CG_BINDING_LIST_TAIL], node0,
+                "the anchor's tail word is untouched"
+            );
+            f.assert_cleared(1);
+            f.assert_sentinels();
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn binding_unlink_unlinks_the_head_node() {
+        let _g = setup();
+        let mut f = UnlinkFixture::new();
+        let node0 = f.nodes[0].as_mut_ptr() as usize;
+        let node1 = f.nodes[1].as_mut_ptr() as usize;
+        unsafe {
+            cg_binding_unlink(f.anchor.as_mut_ptr() as *mut u8, f.node_ptr(2));
+
+            assert_eq!(
+                f.anchor[CG_BINDING_LIST_HEAD], node1,
+                "a NULL next seats the node's prev as the new head"
+            );
+            assert_eq!(
+                f.nodes[1][CG_BINDING_NEXT], 0,
+                "the new head's next is the removed node's (NULL)"
+            );
+            assert_eq!(f.nodes[1][CG_BINDING_PREV], node0, "the new head's prev survives");
+            assert_eq!(
+                f.anchor[CG_BINDING_LIST_TAIL], node0,
+                "the anchor's tail word is untouched"
+            );
+            f.assert_cleared(2);
+            f.assert_sentinels();
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn binding_unlink_unlinks_the_tail_node() {
+        let _g = setup();
+        let mut f = UnlinkFixture::new();
+        let node1 = f.nodes[1].as_mut_ptr() as usize;
+        let node2 = f.nodes[2].as_mut_ptr() as usize;
+        unsafe {
+            cg_binding_unlink(f.anchor.as_mut_ptr() as *mut u8, f.node_ptr(0));
+
+            assert_eq!(
+                f.anchor[CG_BINDING_LIST_TAIL], node1,
+                "a NULL prev seats the node's next as the new tail"
+            );
+            assert_eq!(
+                f.nodes[1][CG_BINDING_PREV], 0,
+                "the new tail's prev is the removed node's (NULL)"
+            );
+            assert_eq!(f.nodes[1][CG_BINDING_NEXT], node2, "the new tail's next survives");
+            assert_eq!(
+                f.anchor[CG_BINDING_LIST_HEAD], node2,
+                "the anchor's head word is untouched"
+            );
+            f.assert_cleared(0);
+            f.assert_sentinels();
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn binding_unlink_unlinks_the_only_node() {
+        let _g = setup();
+        let mut f = UnlinkFixture::new();
+        unsafe {
+            // Collapse the list to node 1 alone: both links NULL,
+            // both anchor words pointing at it.
+            f.nodes[1][CG_BINDING_NEXT] = 0;
+            f.nodes[1][CG_BINDING_PREV] = 0;
+            let node1 = f.nodes[1].as_mut_ptr() as usize;
+            f.anchor[CG_BINDING_LIST_HEAD] = node1;
+            f.anchor[CG_BINDING_LIST_TAIL] = node1;
+
+            cg_binding_unlink(f.anchor.as_mut_ptr() as *mut u8, f.node_ptr(1));
+
+            assert_eq!(f.anchor[CG_BINDING_LIST_HEAD], 0, "the head word drains to NULL");
+            assert_eq!(f.anchor[CG_BINDING_LIST_TAIL], 0, "the tail word drains to NULL");
+            f.assert_cleared(1);
+        }
+        drop(f);
         teardown();
     }
 

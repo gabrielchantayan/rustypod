@@ -28160,3 +28160,75 @@ functions:
       ::binding_rebind_respects_a_consistent_back_pointer
       (self-consistent rival kept via the bxeq guard, stale rival
       replaced).
+
+  - address: 0x083673b0
+    ghidra: FUN_083673b0
+    name: cg_binding_unlink
+    size: 64
+    sig: "void cg_binding_unlink(u8 *anchor, CgBinding *node)"
+    module: codegen/ir
+    status: ported
+    renames:
+      param_1/r0: anchor (the {head +0x00, tail +0x04} list anchor the
+        node hangs from - a hardware-register descriptor anchor's list
+        head at anchor +0x10, or one of the codegen's embedded anchors
+        at +0x1f0/+0x1f8/+0x200 CG_CODEGEN_PENDING_BINDINGS)
+      param_2/r1: node (the cg_binding_t list node - next +0x00
+        CG_BINDING_NEXT toward the head/push end, prev +0x04
+        CG_BINDING_PREV toward the tail/drain end, anchor back-pointer
+        +0x08 CG_BINDING_ANCHOR)
+      r3: the node's next link (ldr r3,[r1,#0x0])
+      r2: the node's prev link (ldr r2,[r1,#0x4]), reloaded for the
+        tail-side fixup (ldr r2,[r1,#0x4]), then the reloaded next
+        (ldreq r2,[r1,#0x0])
+      r0 (tail-side, non-NULL prev): the reloaded next link
+        (ldrne r0,[r1,#0x0]), then constant 0 for the node clears
+    notes: >-
+      8 bl call sites: 0x082b3bac/0x082b3bf8/0x082b3cac in
+      cg_block_bind_registers (PORTED, codegen/ir), 0x082c5cec,
+      0x082ccb28/0x082ccb6c in the block-exit flush FUN_082ccae4,
+      0x082d7848 in the spill path FUN_082d7870 and 0x0836739c in the
+      unlink-then-push move FUN_08367390. Leaf. The runtime's
+      intrusive doubly-linked-list REMOVE: unlinks node from its
+      {head, tail} anchor and clears the node's next/prev/anchor
+      words. Head-side fixup: when the node's next (+0x00, the link
+      toward the anchor's head end - the end sibling push
+      FUN_08367358 inserts at) is NULL the node sits at the head and
+      the anchor's head word takes the node's prev (streq
+      r2,[r0,#0x0]); otherwise the next node's prev takes it (strne
+      r2,[r3,#0x4]). Tail-side fixup: the node's prev (+0x04) is
+      RELOADED (ldr r2,[r1,#0x4]); when NULL the node sits at the
+      tail and the anchor's tail word takes the reloaded next (ldreq
+      r2,[r1,#0x0] / streq r2,[r0,#0x4]); otherwise the prev node's
+      next takes it (ldrne r0,[r1,#0x0] / strne r0,[r2,#0x0]). Then
+      prev, next and the anchor back-pointer (+0x08) are cleared in
+      that store order (str r0,[r1,#0x4] / str r0,[r1,#0x0] / str
+      r0,[r1,#0x8]). Both link reloads are kept verbatim (only a
+      self-referential node could alias them). No NULL guard on
+      anchor, like the rest of the cluster. The port is NOT wired:
+      CG_BLOCK_BIND_OPS::binding_unlink keeps its documented no-op
+      default (cg_block_bind_registers' seam decision, the
+      cg_binding_rebind precedent). REWIRING OPPORTUNITY
+      (deliberately NOT done here): this slot can now default to the
+      ported cg_binding_unlink once the last sibling FUN_08367358
+      (binding_push) is also ported - and only then should
+      CG_BLOCK_EMIT_OPS::bind_registers bind cg_block_bind_registers.
+      match.py (exit 1, diff expected): 16 instructions on both
+      sides; the head/tail fixup conditions, the link reloads, both
+      anchor-word stores and the three node clears all line up; the
+      diff is the crate fp prologue, LLVM folding the tail-side
+      reload pair into one ldm r1,{r2,r3} (semantically identical:
+      prev compared, next stored), a swapped streq/strne order in the
+      head-side fixup and the next/prev clear stores exchanged. Host
+      tests:
+      src/codegen/ir.rs::binding_unlink_unlinks_a_middle_node
+      (neighbor re-link in both directions, anchor words untouched,
+      node words cleared),
+      ::binding_unlink_unlinks_the_head_node (NULL next seats the
+      node's prev as the new head, new head's next takes the removed
+      node's NULL),
+      ::binding_unlink_unlinks_the_tail_node (NULL prev seats the
+      node's next as the new tail, mirror fixup),
+      ::binding_unlink_unlinks_the_only_node (both anchor words
+      drain to NULL) - every test also proves no write lands past
+      the +0x08 anchor back-pointer via per-node sentinel words.
