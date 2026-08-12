@@ -12120,6 +12120,45 @@ functions:
       volatile-read literal instead of the original's direct b (the
       documented deviation).
 
+  - address: 0x082a5370
+    ghidra: FUN_082a5370
+    name: string_object_is_empty
+    size: 28
+    sig: "bool string_object_is_empty(const StringObject *this)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1: this
+      pcVar2: payload
+      cVar1: first_byte
+    notes: >-
+      The emptiness predicate of the two-word string class (vtable @
+      +0, payload @ +4), `bool StringObject::is_empty()`. 28 bytes,
+      all code, no literal-pool word (0x082a5370..0x082a538c). 55 bl
+      call sites, binary-scanned. Raw ARM: `ldr r0,[r0,#4]; cmp r0,#0;
+      ldrbne r0,[r0]; cmpne r0,#0; moveq r0,#1; movne r0,#0; bx lr` -
+      true exactly when the payload word is NULL (the
+      default-constructed/cleared state) or points at a NUL byte; a
+      NULL payload is never dereferenced (the ldrbne/cmpne are
+      predicated on the pointer test). No NULL guard on `this`. Ghidra
+      (decomp/c/029/082a5370_FUN_082a5370.c) matches the raw ARM
+      exactly. Sits in the class's accessor cluster
+      0x082a5368-0x082a5398 (payload -> utf8_strcmp_safe chain, the raw
+      payload accessor `ldr r0,[r0,#4]; bx lr` @ 0x082a538c, payload
+      -> utf8_codepoint_count_safe chain @ 0x082a5394). Call sites pin
+      the class: at 0x0807a528/0x0807a53c the receiver is the object
+      string_object_assign_cstr @ 0x0827639c just wrote, and at
+      0x0810034c/0x08100354 the same receiver flows to
+      string_object_c_str @ 0x082a50b0. ALIAS SCAN: the exact 7-word
+      instruction pattern occurs exactly ONCE in osos.dec - unlike
+      handle_deref_or_null and container_is_empty, this body has NO
+      byte-identical twins. Host tests: NULL payload (true), payload
+      pointing at NUL (true), nonempty payload (false; only the first
+      byte is read, object untouched). match.py structural: same
+      load/guard/return-1-or-0 flow; the diff is LLVM computing
+      `byte == 0` as clz+lsr#5 behind the crate fp frame instead of
+      ADS's predicated cmpne/movne pair.
+
   - address: 0x082cf9e4
     ghidra: FUN_082cf9e4
     name: ft_glyphslot_free_bitmap

@@ -132,6 +132,12 @@
 //!   buffer. Its 8-byte sibling @ 0x082a50a8 (`ldr r0,[r0,#4]; b
 //!   0x0827609c`) runs the 84-byte FUN_0827609c over the payload and
 //!   is NOT ported here.
+//! - `string_object_is_empty` — original: `FUN_082a5370` @ 0x082a5370
+//!   (28 bytes, all code — no literal-pool word; 55 `bl` call sites,
+//!   binary-scanned). The emptiness predicate of the same string
+//!   class: true when the payload word at +4 is NULL or points at a
+//!   NUL byte. Byte-identical-alias scan: the exact 7-word pattern
+//!   occurs ONCE in osos.dec — this function has no twins.
 //! - `string_id_record_destroy` — original: `FUN_08258c80` @
 //!   0x08258c80 (24 bytes: 20 code + the 4-byte vtable literal @
 //!   0x08258c98; 113 `bl` call sites, binary-scanned). The plain
@@ -1085,6 +1091,55 @@ pub unsafe extern "C" fn string_object_len_plus1(this: *const StringObject) -> u
     let len_plus1: unsafe extern "C" fn(*const u8) -> usize =
         core::ptr::read_volatile(&(strlen_safe_plus1 as unsafe extern "C" fn(*const u8) -> usize));
     len_plus1((*this).payload as *const u8)
+}
+
+/// string_object_is_empty — original: `FUN_082a5370` @ 0x082a5370
+/// (28 bytes, all code — the next function starts at 0x082a538c; 55
+/// `bl` call sites, binary-scanned).
+///
+/// Source: `ipod-decomp/decomp/c/029/082a5370_FUN_082a5370.c` (matches
+/// the raw ARM exactly).
+///
+/// The emptiness predicate of the two-word string class,
+/// `bool StringObject::is_empty()`. Decoded from the raw ARM at
+/// 0x082a5370:
+///
+/// ```text
+/// ldr    r0, [r0, #4]   ; r0 = this->payload
+/// cmp    r0, #0
+/// ldrbne r0, [r0]       ; non-NULL payload: r0 = payload[0]
+/// cmpne  r0, #0
+/// moveq  r0, #1         ; NULL payload or empty string -> 1
+/// movne  r0, #0         ; nonempty -> 0
+/// bx     lr
+/// ```
+///
+/// Returns true exactly when the payload word at `this + 4` is NULL
+/// (the default-constructed/cleared state) or points at a NUL byte —
+/// i.e. the object holds no characters. A NULL payload never
+/// dereferences (the `ldrbne`/`cmpne` are predicated on the pointer
+/// test), matching [`string_object_c_str`]'s treatment of NULL as the
+/// empty string. No NULL guard on `this` — the original faults on a
+/// NULL `this`, and so does the port.
+///
+/// It sits in the class's accessor cluster at 0x082a5368-0x082a5398
+/// (a payload -> `utf8_strcmp_safe` chain, the raw payload accessor
+/// `ldr r0,[r0,#4]; bx lr` @ 0x082a538c, and a payload ->
+/// [`utf8_codepoint_count_safe`] chain @ 0x082a5394). Call sites pin
+/// the class: at 0x0807a528/0x0807a53c the receiver is the object
+/// [`string_object_assign_cstr`] @ 0x0827639c just wrote, and at
+/// 0x0810034c/0x08100354 the same receiver flows to
+/// [`string_object_c_str`] @ 0x082a50b0.
+///
+/// Alias scan: the exact 7-word instruction pattern occurs exactly
+/// once in osos.dec (0x082a5370 itself) — unlike
+/// `handle_deref_or_null` and `container_is_empty`, this body has NO
+/// byte-identical twins.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_is_empty(this: *const StringObject) -> bool {
+    let payload = (*this).payload as *const u8;
+    payload.is_null() || payload.read() == 0
 }
 
 /// Original load address of the 0x08258cxx-class vtable
@@ -3112,6 +3167,45 @@ pub(crate) mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn is_empty_is_true_for_a_null_payload() {
+        let object = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        unsafe {
+            assert!(string_object_is_empty(&object));
+        }
+    }
+
+    #[test]
+    fn is_empty_is_true_for_a_payload_pointing_at_nul() {
+        let storage = *b"\0trail";
+        let object = StringObject {
+            vtable: core::ptr::null(),
+            payload: storage.as_ptr() as *mut u8,
+        };
+        unsafe {
+            assert!(string_object_is_empty(&object));
+        }
+    }
+
+    #[test]
+    fn is_empty_is_false_for_a_nonempty_payload_and_reads_one_byte_only() {
+        // A multi-byte payload: only the first byte decides, and the
+        // object itself is untouched.
+        let storage = *b"x\0";
+        let object = StringObject {
+            vtable: 0xdead_beef as *const StringObjectVtable,
+            payload: storage.as_ptr() as *mut u8,
+        };
+        unsafe {
+            assert!(!string_object_is_empty(&object));
+            assert_eq!(object.vtable, 0xdead_beef as *const StringObjectVtable);
+        }
+        assert_eq!(storage, *b"x\0");
     }
 
     #[test]
