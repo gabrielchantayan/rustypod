@@ -27214,3 +27214,64 @@ functions:
       frame, the hook seam's blx dispatch in place of the direct bls,
       frame, the hook seam's blx dispatch in place of the direct bls,
       and LLVM outlining the zero path into the else branch.
+  - address: 0x0818a0bc
+    ghidra: FUN_0818a0bc
+    name: facade_for_selector
+    size: 8
+    sig: "FacadeObject *facade_for_selector(InterfaceGuard *guard, u32 selector)"
+    module: app/facade_for_selector
+    status: ported
+    renames:
+      param_1/r0: guard (the 16-byte scoped interface guard; only its
+        +0x04 interface word is read - ldr r0,[r0,#4])
+      param_2/r1: selector (untouched by the veneer, flows to the walk
+        in r1; 0 = accept any published facade, nonzero = accept only a
+        state-0/kind-1 match)
+      FUN_08296ec0: "FACADE_REGISTRY_WALK seam (the facade registry
+        walk the veneer tail-branches to; modeled on host)"
+    notes: >-
+      8-byte veneer: ldr r0,[r0,#4] (the guard's interface word, planted
+      by guard ctor 0x08206e40 via 0x0818a06c/0x0814a130); b 0x08296ec0
+      (a true tail branch - lr never saved, the walk's r0 return reaches
+      the caller directly). Ghidra's decomp/c/016/0818a0bc_FUN_0818a0bc.c
+      shows a LOOP because it inlined the tail callee; the 8-byte
+      function itself is only the veneer.
+      34 bl call sites (grep on decomp/osos.asm): 0x08084d70, 0x0808911c,
+      0x080891ac, 0x08089234, 0x08089284, 0x080892e0, 0x08090c18,
+      0x0809b6c0, 0x080a8ef8, 0x080b6b70, 0x080f4af0
+      (path_probe_via_facade), 0x080f4b8c, 0x081ef64c, 0x081ef688,
+      0x081ef804, 0x081efa00, 0x08277a60, 0x08277b1c, 0x08277c48,
+      0x08277d9c, 0x08277df4, 0x0827843c, 0x08278488, 0x08278588,
+      0x082786bc, 0x082788dc, 0x08278908, 0x08278974, 0x08278a58,
+      0x08278ad8, 0x08278c20, 0x08278d98, 0x08278e50 and 0x08278f10.
+      Observed selectors: 33 sites pass 1 (mov r1,#0x1 immediately ahead
+      of the bl); the lone selector-0 site is 0x082788dc (facade vtable
+      slot +0x18 dispatch, immediately followed by a selector-1 fetch at
+      0x08278908 for slot +0x30 on the same facade). Every site
+      indirect-calls a facade vtable slot with the result - slots +0x18,
+      +0x1c, +0x30, +0x34, +0x38, +0x3c, +0x40, +0x44, +0x50, +0x54,
+      +0x5c, +0x60, +0x64, +0x68, +0x6c, +0x70, +0x78, +0x7c, +0x80 and
+      +0x9c observed.
+      The registry the walk @ 0x08296ec0 reads: node->field_0x08 is the
+      published facade, node->byte_0x19 the interface state byte,
+      facade->byte_0x08 the kind byte; a nonzero selector matches only
+      state==0 AND kind==1 (32-bit residue: kind 0 wraps to 0xffffffff
+      and never matches). On a miss the walk calls FUN_0814a08c (trace
+      static accessor - never reads its argument, the residue in r0 is
+      dead) and retries against the registry's DEFAULT interface root,
+      the fixed object @ 0x08a778f4 handed out by the ADS local-static
+      accessor FUN_0814a030 (guard page 0x089cb1ec, its word at +0x08;
+      ctor 0x082973bc, dtor 0x0828c580), with the selector relaxed to 0.
+      The default root's ctor publishes field +0x08 (str r0,[r4,#0x8] @
+      0x08297430) BEFORE the guard release - born published, which is
+      what makes the stock spin terminate; the host model keeps that
+      (publication is instantaneous), so the modeled chain is total.
+      The walk rides the FACADE_REGISTRY_WALK seam (wired default calls
+      0x08296ec0 on target_os=none - hook-ready; host default is the
+      modeled walk over house statics). Verified by
+      src/app/facade_for_selector.rs::tests (guard+4 reload and selector
+      passthrough via a recording mock; modeled-walk accept/miss/
+      fallback for selectors 0 and 1, kind 0 wrap, busy state, NULL
+      facade). match.py (exit 1, diff expected): same ldr r0,[r0,#4] +
+      tail-branch structure; the diff is the crate fp frame and the
+      seam's ldr/bx static dispatch in place of the direct b 0x08296ec0.
