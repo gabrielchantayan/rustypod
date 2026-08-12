@@ -11,6 +11,7 @@ pub mod handle;
 pub mod list_splice;
 pub mod mutex;
 pub mod mutex_attr_init;
+pub mod mutex_settype_init;
 pub mod observable_array;
 pub mod object_flags;
 pub mod pair_header;

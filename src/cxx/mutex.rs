@@ -57,14 +57,16 @@
 //! methods route the member through the posix_mutex_lock/unlock
 //! veneers @ 0x08261e20/0x08261e24 (0x0815331c).
 //!
-//! Deviations: the settype+init operation @ 0x08261de8 and the attr
-//! destroy wrapper @ 0x08261d30 are unported, so they ride the
-//! [`CXX_MUTEX_CONSTRUCT_OPS`] dispatch slots (the settings.rs
-//! `SETTINGS_CTOR` pattern) with no-op defaults — **not hook-ready**
-//! until they are ported (with the defaults the mutex is never
-//! initialized and the status word is never written). The attr init
-//! wrapper @ 0x08261d1c is ported ([`super::mutex_attr_init`]) and
-//! wired as the `attr_init` default. The scope is
+//! Deviations: the attr destroy wrapper @ 0x08261d30 is unported, so
+//! it rides the [`CXX_MUTEX_CONSTRUCT_OPS`] dispatch slot (the
+//! settings.rs `SETTINGS_CTOR` pattern) with a no-op default — **not
+//! hook-ready** until it is ported (with the default the scope attr is
+//! never torn down; the mutex itself IS initialized by the wired
+//! defaults). The attr init wrapper @ 0x08261d1c is ported
+//! ([`super::mutex_attr_init`]) and wired as the `attr_init` default,
+//! and the settype+init operation @ 0x08261de8 is ported
+//! ([`super::mutex_settype_init`]) and wired as the `mutex_init`
+//! default. The scope is
 //! modeled as two pointer-sized words (the pfr_face_done face-word
 //! model): byte-exact on the 32-bit target, disjoint slots on a 64-bit
 //! host. `param_2` exists only to keep the register shape — the
@@ -82,11 +84,6 @@ pub const CXX_MUTEX_STATUS_OFFSET: usize = 0x18;
 unsafe extern "C" fn attr_init_port(scope: *mut usize) {
     super::mutex_attr_init::cxx_mutexattr_init(scope);
 }
-
-/// No-op default for the unported settype+init operation @ 0x08261de8.
-/// Intentionally not a substitute: it neither initializes the mutex nor
-/// writes the status word.
-unsafe extern "C" fn mutex_init_stub(_this: *mut u8, _scope: *mut usize) {}
 
 /// No-op default for the unported scope attr destroy wrapper @
 /// 0x08261d30.
@@ -110,11 +107,12 @@ pub struct CxxMutexConstructOps {
     pub attr_destroy: unsafe extern "C" fn(scope: *mut usize),
 }
 
-/// Wired defaults: the ported attr-init wrapper plus two documented
-/// no-ops (see the module header).
+/// Wired defaults: the ported attr-init wrapper and the ported
+/// settype+init operation, plus one documented no-op (see the module
+/// header).
 pub const DEFAULT_CXX_MUTEX_CONSTRUCT_OPS: CxxMutexConstructOps = CxxMutexConstructOps {
     attr_init: attr_init_port,
-    mutex_init: mutex_init_stub,
+    mutex_init: super::mutex_settype_init::cxx_mutex_settype_init,
     attr_destroy: attr_destroy_stub,
 };
 
@@ -267,17 +265,47 @@ mod tests {
     }
 
     #[test]
-    fn default_stubs_leave_the_wrapper_untouched() {
-        // No bench: the mutex_init/attr_destroy defaults are no-ops and
-        // the ported attr-init default writes only the stack scope, so
-        // the constructor leaves the wrapper itself untouched — the
-        // documented NOT-hook-ready shape.
-        let mut wrapper = [0x5au8; 0x1c];
-        let this = wrapper.as_mut_ptr();
+    fn wired_defaults_initialize_the_wrapper_on_host() {
+        // No bench: the attr_init default is the ported veneer and the
+        // mutex_init default is the ported cxx_mutex_settype_init
+        // (whose callees default to the host models); only
+        // attr_destroy is still a no-op stub. The constructor
+        // therefore initializes the embedded mutex and records the
+        // status, end to end.
+        #[repr(align(8))]
+        struct Wrapper([u8; 0x1c]);
+        let mut wrapper = Wrapper([0x5au8; 0x1c]);
+        let this = wrapper.0.as_mut_ptr();
 
         let returned = unsafe { cxx_mutex_construct(this, 1, 2, 3) };
 
         assert_eq!(returned, this);
-        assert_eq!(wrapper, [0x5au8; 0x1c]);
+        let word = |offset: usize| {
+            u32::from_le_bytes(wrapper.0[offset..offset + 4].try_into().unwrap())
+        };
+        assert_eq!(
+            word(0x00),
+            super::super::mutex_settype_init::MUTEX_LIVE_MAGIC,
+            "the wired defaults ran the modeled initializer"
+        );
+        assert_eq!(word(0x04), 0, "owner zeroed");
+        assert_eq!(word(0x08), 0, "reserved word zeroed");
+        assert_eq!(
+            word(0x0c),
+            0x0008_ffc2,
+            "the attr+0x04 word copied to mutex+0x0c: default halfword 0xffc2, \
+             scope halfword with bits 0..5 cleared, bit 3 set, type NORMAL"
+        );
+        assert_eq!(
+            word(0x14),
+            super::super::mutex_settype_init::HOST_MODEL_SEM_HANDLE,
+            "the (modeled) semaphore handle"
+        );
+        assert_eq!(word(0x18), 0, "settype 0 overwritten by init 0");
+        assert_eq!(
+            &wrapper.0[0x10..0x12],
+            &[0x5au8; 2],
+            "the +0x10 halfword is nobody's business"
+        );
     }
 }

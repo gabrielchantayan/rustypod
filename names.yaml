@@ -27552,3 +27552,84 @@ functions:
       blx-through-volatile-slot ctor dispatch standing in for the
       direct bl 0x0816566c (the documented deviation), and LLVM folding
       the post-store slot reload into the just-stored r0.
+
+  - address: 0x08261de8
+    ghidra: FUN_08261de8
+    name: cxx_mutex_settype_init
+    size: 56
+    sig: "void cxx_mutex_settype_init(u8 *this, usize *attr)"
+    module: cxx/mutex_settype_init
+    status: ported
+    renames:
+      param_1/r0: this (the 0x1c-byte C++ mutex wrapper - 24-byte
+        PosixMutex at +0x00 plus the status word at +0x18; saved in r4)
+      param_2/r1: attr (the two-word stack scope attr object built by
+        cxx_mutex_construct; saved in r5)
+      iVar1: settype_status (stored at this+0x18 before the branch)
+      uVar2: init_status (stored at this+0x18 on the success path)
+      FUN_082e84dc: pthread_mutexattr_settype
+      FUN_082e82f8: posix_mutex_init (the lazy initializer
+        src/kernel/posix_mutex.rs documents)
+    notes: >-
+      56 bytes, all code, no literal pool (0x08261de8..0x08261e20; the
+      posix_mutex_lock/unlock veneers @ 0x08261e20/0x08261e24 follow
+      immediately). 1 bl call site, binary-scanned: 0x08261e40 in
+      cxx_mutex_construct (cxx/mutex.rs); the twin constructor
+      FUN_082621b0 inlines the same settype/init pair itself at
+      0x08262184/0x0826219c instead of calling this veneer. The middle
+      operation of the C++ mutex wrapper's scoped-attribute
+      construction: pthread_mutexattr_settype(attr, 0=NORMAL), status
+      stored at this+0x18 BEFORE the branch on it (cmp sets flags, str
+      does not clobber them), bail when nonzero; on 0 the mutex
+      initializer @ 0x082e82f8 runs with (this, attr) and ITS status
+      overwrites the recorded 0. The wrapped callees (both still
+      unported, decoded from the raw ARM, literals binary-verified in
+      osos.dec): settype @ 0x082e84dc (80 bytes) rejects a NULL attr, a
+      bad magic at attr+0x00 (literal @ 0x082e852c = 0x4d545841 "MTXA",
+      the word pthread_mutexattr_init plants) and kinds outside {0,1,2}
+      with 0x1a, else rewrites bits 4..5 of the attr+0x06 halfword with
+      0x30 & (kind << 4) and returns 0 - kind 0 CLEARS the type field
+      (recorded at mutex+0x0e by the PosixMutex layout). The
+      initializer @ 0x082e82f8 (140 bytes) returns 0x1a for a NULL
+      mutex or a bad attr magic (literal @ 0x082e8384 = "MTXA"); a NULL
+      attr selects the process-wide default attr object @ 0x089cfcbc
+      (literal @ 0x082e8388; its static image bytes are "act\0", so it
+      is lazily run through pthread_mutexattr_init first); it allocates
+      the inline semaphore via the kernel-object allocator @ 0x0808b1c0
+      (object type 3; handle to mutex+0x14, failure -> 0x27), copies
+      the whole attr+0x04 word to mutex+0x0c, zeroes mutex+0x04/+0x08
+      and the +0x12 halfword, and plants the live-object magic
+      0x4d555458 "MUTX" (literal @ 0x082e838c - distinct from the
+      0x4d545853 "MTXS" static-init magic the lock/unlock pair @
+      0x082e8390/0x082e83d8 match for lazy init, literals @
+      0x082e83d4/0x082e8470) at mutex+0x00. Deviations: both callees
+      ride the CXX_MUTEX_SETTYPE_INIT_OPS dispatch slots (the
+      facade_registry_walk fixed-address pattern) - the wired defaults
+      transmute 0x082e84dc/0x082e82f8 on target (hook-ready); the host
+      defaults are behavioral models of the decoded bodies with one
+      simplification: the mask-ROM kernel allocator is replaced by a
+      fixed nonzero sentinel handle at mutex+0x14. attr is *mut usize,
+      matching cxx/mutex.rs's two-word stack scope model. The port is
+      wired as cxx/mutex.rs's CXX_MUTEX_CONSTRUCT_OPS.mutex_init
+      default (that module's documented "a later port replaces its
+      default" pattern; its defaults test now asserts the end-to-end
+      initialized wrapper). Host tests: settype receives (attr,
+      0=NORMAL); a settype failure is recorded at this+0x18 with the
+      mutex bytes untouched and init never called; on success init
+      receives (this, attr), observes the already-planted 0 status, and
+      its status (tested with 0x27 and 0) overwrites it; end-to-end
+      with the default models from a reference-initialized attr
+      pre-set to kind 2 - the type bits return to NORMAL, the attr+0x04
+      word lands at mutex+0x0c, MUTX/zeroed fields/sentinel handle
+      planted, status 0, bytes past the 8-byte attr and the +0x10
+      halfword untouched; NULL attr records 0x1a with no stores; the
+      default settype model matches an independent byte-level reference
+      across kinds 0..=2 and +0x06 seeds (0x0000, 0xffff, 0xffcf,
+      0x0008, 0xaa95) and rejects kind 3/bad magic/NULL with 0x1a and
+      no stores; the default init model rejects NULL mutex/bad magic
+      with 0x1a and lazily initializes the default attr object for a
+      NULL attr. match.py (exit 1, diff expected): same
+      save-this-in-r4/attr-in-r5 -> settype(attr, #0) -> cmp/str
+      [r4,#0x18] -> popne -> init(this, attr) -> str [r4,#0x18] -> pop
+      structure; the diff is the crate fp frame and the seam's ldr/blx
+      static dispatch in place of the direct bl 0x082e84dc/0x082e82f8.
