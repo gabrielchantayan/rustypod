@@ -28,8 +28,9 @@
 //!
 //! ## The facade registry the walk reads
 //!
-//! The tail callee @ 0x08296ec0 (unported, rides the
-//! [`FACADE_REGISTRY_WALK`] seam) is the registry walk:
+//! The tail callee @ 0x08296ec0 is the ported
+//! [`crate::app::facade_registry_walk::facade_registry_walk`]; this veneer
+//! retains [`FACADE_REGISTRY_WALK`] only as an injectable test seam.
 //!
 //! ```text
 //! node = interface;  sel = selector;
@@ -79,16 +80,11 @@
 //! +0x50 (path_probe_via_facade), +0x54, +0x5c, +0x60, +0x64, +0x68,
 //! +0x6c, +0x70, +0x78, +0x7c, +0x80, +0x9c observed.
 //!
-//! ## The seam
-//!
-//! The walk @ 0x08296ec0 remains in retailOS, so — the
-//! ui/object_state.rs `firmware_clock_sample` precedent — the seam's
-//! wired default calls the fixed firmware load address on
-//! `target_os = "none"` and this symbol IS hook-ready. Host builds
-//! cannot call retailOS: the default is a faithful MODEL of the walk
-//! over house statics (the media_command_facade.rs statics pattern),
-//! with the default root born published like the stock 0x08a778f4
-//! object, so the modeled chain is total on host.
+//! The seam's wired default is the ported
+//! [`crate::app::facade_registry_walk::facade_registry_walk`]. That port
+//! calls the fixed retailOS local-static accessors on `target_os = "none"`
+//! and uses their faithful house-static model on host; the veneer keeps this
+//! narrow dispatch only so its tail-call data flow can be tested directly.
 //!
 //! ## Faithful details
 //!
@@ -101,41 +97,18 @@
 //! - The veneer does not save lr: it is a true tail branch, so the
 //!   walk returns directly to the accessor's caller.
 //!
-//! ## Deviations
-//!
-//! - The walk rides the [`FACADE_REGISTRY_WALK`] seam (read_volatile
-//!   dispatch; host tests install a recording mock). On
-//!   `target_os = "none"` the default calls the fixed retailOS
-//!   address; on host the default is the documented model.
+//! - [`FACADE_REGISTRY_WALK`] remains a read-volatile dispatch seam only for
+//!   veneer tests; its wired default is the ported walk, not a retailOS
+//!   boundary. The walk owns the target accessor boundaries and host model.
 //! - Model struct pointer fields are native-width (the
-//!   drivers/display_layer.rs parked-pointer rule): on the 32-bit
-//!   target every offset is literal; on 64-bit hosts the guard view's
-//!   interface word parks at +0x08.
+//!   drivers/display_layer.rs parked-pointer rule): on the 32-bit target
+//!   every offset is literal; on 64-bit hosts the guard view's interface
+//!   word parks at +0x08.
 
+use crate::app::facade_registry_walk::{facade_registry_walk, RegistryNode, RegistryWalk};
+#[cfg(test)]
+use crate::app::facade_registry_walk::{RegistryFacade, SELECTOR_ANY, SELECTOR_MATCHING};
 use crate::app::path_probe::{FacadeObject, InterfaceGuard};
-
-/// Firmware load address of the facade registry walk (the `b` @
-/// 0x0818a0c0): the loop documented in the module header.
-pub const REGISTRY_WALK_ADDRESS: usize = 0x0829_6ec0;
-
-/// Firmware load address of the registry's default interface root —
-/// the fixed object `FUN_0814a030` hands the walk's retry path (pool
-/// word @ 0x0814a080; ADS static, ctor 0x082973bc, guard word
-/// 0x089cb1f4).
-pub const REGISTRY_DEFAULT_ROOT_ADDRESS: usize = 0x08a7_78f4;
-
-/// Byte offset of the facade kind byte the walk tests (`ldrb r3,
-/// [r2, #0x8]` @ 0x08296ed0): a selector-1 match requires kind == 1.
-pub const FACADE_KIND_OFFSET: usize = 0x08;
-
-/// The selector value 33 of 34 call sites pass (`mov r1, #0x1`):
-/// accept the interface's own facade only when it matches (state 0,
-/// kind 1).
-pub const SELECTOR_MATCHING: u32 = 1;
-
-/// The selector value the lone 0x082788dc site passes (`mov r1, #0x0`):
-/// accept any published facade.
-pub const SELECTOR_ANY: u32 = 0;
 
 /// The guard frame as the accessor reads it: only the interface word
 /// (+0x04 on the target, `ldr r0, [r0, #0x4]`) is decoded;
@@ -153,150 +126,10 @@ pub struct GuardInterface {
     pub interface: *mut RegistryNode,
 }
 
-/// The facade object as the registry walk reads it: path_probe.rs's
-/// [`FacadeObject`] models +0x00 (the vtable word the probe
-/// dereferences); the walk additionally reads the kind byte at
-/// +0x08.
-#[repr(C)]
-pub struct RegistryFacade {
-    /// +0x00 — the class vtable word (the [`FacadeObject`] model; the
-    /// walk never reads it).
-    pub vtable: usize,
-    /// +0x04 — opaque to the walk.
-    pub opaque_04: u32,
-    /// +0x08 — the facade kind byte; a nonzero-selector match requires
-    /// 1 (`ldrb r3, [r2, #0x8]` @ 0x08296ed0).
-    pub kind_08: u8,
-    /// +0x09..+0x0c — pad back to the word.
-    pub pad_09: [u8; 3],
-}
-
-/// The interface object as the registry walk reads it: +0x08 the
-/// published facade (field_8), +0x19 the interface state byte. Every
-/// other byte is opaque to the walk. The facade field is native-width
-/// (byte-exact +0x08 on the 32-bit target — it is eight-aligned, so
-/// the host layout coincides through +0x0c).
-#[repr(C)]
-pub struct RegistryNode {
-    /// +0x00..+0x08 — opaque to the walk (the stock object's own
-    /// data; the default root's ctor plants the class vtable at +0x00).
-    pub opaque_00: [u32; 2],
-    /// +0x08 — field_8: the published facade, NULL until publication
-    /// (`ldr r2, [r0, #0x8]` @ 0x08296ec4).
-    pub facade: *mut RegistryFacade,
-    /// +0x0c..+0x18 — opaque to the walk.
-    pub opaque_0c: [u32; 3],
-    /// +0x19 — the interface state byte; a nonzero-selector match
-    /// requires 0 (`ldrbne r0, [r0, #0x19]` @ 0x08296ed8).
-    pub state_19: u8,
-    /// +0x1a..+0x1c — pad back to the word.
-    pub pad_1a: [u8; 2],
-}
-
-/// The facade registry walk @ 0x08296ec0: takes the interface object
-/// in r0 and the selector in r1, returns the accepted facade.
-pub type RegistryWalk =
-    unsafe extern "C" fn(interface: *mut RegistryNode, selector: u32) -> *mut RegistryFacade;
-
-/// Boundary default for the registry walk: calls the stock 0x08296ec0,
-/// which remains in retailOS (the ui/object_state.rs
-/// `firmware_clock_sample` precedent). The host default is the modeled
-/// walk over house statics below.
-unsafe extern "C" fn registry_walk_default(
-    interface: *mut RegistryNode,
-    selector: u32,
-) -> *mut RegistryFacade {
-    #[cfg(target_os = "none")]
-    {
-        let walk: RegistryWalk = core::mem::transmute(REGISTRY_WALK_ADDRESS);
-        walk(interface, selector)
-    }
-
-    #[cfg(not(target_os = "none"))]
-    {
-        modeled_registry_walk(interface, selector)
-    }
-}
-
-/// The modeled registry default root (original: the fixed object @
-/// 0x08a778f4). Same crate-static deviation as the
-/// media_command_facade.rs object statics: the 0x08axxxxx pages are
-/// runtime-initialized, and zero is the exact pre-construction state.
-/// `registry_default_root` publishes the facade before handing the
-/// node out, matching the stock ctor's publish-before-release.
-#[cfg(not(target_os = "none"))]
-static mut REGISTRY_DEFAULT_NODE: RegistryNode = RegistryNode {
-    opaque_00: [0; 2],
-    facade: core::ptr::null_mut(),
-    opaque_0c: [0; 3],
-    state_19: 0,
-    pad_1a: [0; 2],
-};
-
-/// The modeled default root's facade (original: the 0x081bc95c-built
-/// object the default root's ctor publishes into field +0x08). Its
-/// kind byte is never read — the walk's retry relaxes the selector to
-/// 0 before reaching this node.
-#[cfg(not(target_os = "none"))]
-static mut REGISTRY_DEFAULT_FACADE: RegistryFacade = RegistryFacade {
-    vtable: 0,
-    opaque_04: 0,
-    kind_08: 1,
-    pad_09: [0; 3],
-};
-
-/// The modeled `FUN_0814a030`: returns the registry's default
-/// interface root with its facade published (the stock static is born
-/// published — the ctor's `str r0, [r4, #0x8]` runs before the guard
-/// release — so publication here is instantaneous, not lazy).
-#[cfg(not(target_os = "none"))]
-unsafe fn registry_default_root() -> *mut RegistryNode {
-    let node = core::ptr::addr_of_mut!(REGISTRY_DEFAULT_NODE);
-    (*node).facade = core::ptr::addr_of_mut!(REGISTRY_DEFAULT_FACADE);
-    node
-}
-
-/// Host model of the registry walk @ 0x08296ec0, over house statics:
-/// the exact stock loop, with `FUN_0814a08c` (the trace static
-/// accessor) elided — it never reads its argument and its return is
-/// discarded, so it has no observable effect on the walk — and
-/// `FUN_0814a030` answered by [`registry_default_root`]. Total on
-/// host: the default root is always published, so a miss on the
-/// interface's own facade resolves on the first retry.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn modeled_registry_walk(
-    interface: *mut RegistryNode,
-    selector: u32,
-) -> *mut RegistryFacade {
-    let mut node = interface;
-    let mut selector = selector;
-    loop {
-        // ldr r2, [r0, #0x8]: the interface's published facade.
-        let child = (*node).facade;
-        if !child.is_null() {
-            if selector == 0 {
-                // moveq r0, r2: accept any published facade.
-                return child;
-            }
-            // ldrb r3, [r2, #0x8]; ldrbne r0, [r0, #0x19]; subne/orrnes:
-            // 32-bit match residue — kind 0 wraps to 0xffff_ffff.
-            let residue =
-                ((*node).state_19 as u32) | ((*child).kind_08 as u32).wrapping_sub(1);
-            if residue == 0 {
-                return child;
-            }
-        }
-        // bl 0x0814a08c (trace accessor: no observable effect);
-        // bl 0x0814a030 (the default root); mov r1, #0x0 (relax).
-        node = registry_default_root();
-        selector = SELECTOR_ANY;
-    }
-}
-
 /// The active registry walk — the dispatch seam for 0x08296ec0 (the
-/// `b` @ 0x0818a0c0). Host tests install a recording mock; the wired
-/// default is the retailOS boundary (the model on host).
-pub static mut FACADE_REGISTRY_WALK: RegistryWalk = registry_walk_default;
+/// `b` @ 0x0818a0c0). Host veneer tests install a recording mock; the wired
+/// default is the ported registry walk.
+pub static mut FACADE_REGISTRY_WALK: RegistryWalk = facade_registry_walk;
 
 #[inline(always)]
 unsafe fn registry_walk_fn() -> RegistryWalk {
@@ -347,7 +180,7 @@ pub(crate) mod tests {
         fn drop(&mut self) {
             unsafe {
                 core::ptr::addr_of_mut!(FACADE_REGISTRY_WALK)
-                    .write_volatile(registry_walk_default);
+                    .write_volatile(facade_registry_walk);
             }
         }
     }
@@ -390,6 +223,7 @@ pub(crate) mod tests {
         opaque_00: [0; 2],
         facade: core::ptr::null_mut(),
         opaque_0c: [0; 3],
+        opaque_18: 0,
         state_19: 0,
         pad_1a: [0; 2],
     };
@@ -472,8 +306,8 @@ pub(crate) mod tests {
         }
     }
 
-    /// The modeled-walk tests run the wired default (the host model)
-    /// against caller-built interface nodes.
+    /// These integration tests run the wired default (the ported walk and
+    /// its host accessor model) against caller-built interface nodes.
 
     /// Builds a node publishing `facade` with the given state byte.
     unsafe fn node_with(facade: *mut RegistryFacade, state_19: u8) -> *mut RegistryNode {
@@ -481,6 +315,7 @@ pub(crate) mod tests {
             opaque_00: [0; 2],
             facade: core::ptr::null_mut(),
             opaque_0c: [0; 3],
+            opaque_18: 0,
             state_19: 0,
             pad_1a: [0; 2],
         };
@@ -502,7 +337,7 @@ pub(crate) mod tests {
     }
 
     unsafe fn default_facade() -> *mut RegistryFacade {
-        core::ptr::addr_of_mut!(REGISTRY_DEFAULT_FACADE)
+        crate::app::facade_registry_walk::host_default_facade()
     }
 
     #[test]

@@ -7,6 +7,7 @@ pub mod context_scope;
 pub mod flag_2c_is_one;
 pub mod element_table;
 pub mod event_list;
+pub mod facade_registry_walk;
 pub mod facade_for_selector;
 pub mod fixed_value;
 pub mod image_format;
