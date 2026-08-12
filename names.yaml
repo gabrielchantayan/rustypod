@@ -26510,8 +26510,6 @@ functions:
       structure; the diff is the crate fp frame and the two seams' blx
       dispatch in place of the direct bls.
 
-
-INS.PRE 24609:
   - address: 0x08271724
     ghidra: FUN_08271724
     name: iterator_state_release
