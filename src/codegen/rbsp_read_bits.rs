@@ -74,12 +74,14 @@
 //!   away (`lsl (8-first)`; `and #0xff`; `lsr (8-count)`), so the
 //!   returned value is identical and the port never touches bytes the
 //!   result does not use.
-//! - The emulation-prevention probe @ 0x082c319c is unported and sits
-//!   behind the [`CG_RBSP_READ_BITS_OPS`] `read_volatile` dispatch
-//!   seam (the house pattern — see `super::heap::CG_HEAP_OPS`). The
-//!   default is a `missing_*` spin-loop stub, matching
+//! - The emulation-prevention probe @ 0x082c319c is now ported as
+//!   [`cg_rbsp_emulation_probe`], but the call still rides the
+//!   [`CG_RBSP_READ_BITS_OPS`] `read_volatile` dispatch seam (the
+//!   house pattern — see `super::heap::CG_HEAP_OPS`). The default is
+//!   a `missing_*` spin-loop stub, matching
 //!   `super::timer_wait::CG_TIMER_WAIT_OPS`; host tests install a
-//!   faithful transcription of the original.
+//!   faithful transcription of the original. Retiring the seam to a
+//!   direct call is a deliberate follow-up.
 //! - Shift amounts here are all provably in 0..8 (counts are gated to
 //!   1..=32 and `first` to 1..=8), so plain Rust shifts stand in for
 //!   the ARM register forms; no wrapping operators are needed.
@@ -114,6 +116,57 @@ pub static mut CG_RBSP_READ_BITS_OPS: CgRbspReadBitsOps = CgRbspReadBitsOps {
 #[inline(always)]
 fn cg_rbsp_read_bits_ops() -> CgRbspReadBitsOps {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(CG_RBSP_READ_BITS_OPS)) }
+}
+
+/// cg_rbsp_emulation_probe — original: `FUN_082c319c` @ 0x082c319c
+/// (64 bytes, all code — no literal pool, no stack traffic, a leaf
+/// ending `bx lr`; 5 `bl` call sites, all in the RBSP read
+/// primitives: two in `h264_bitstream_count_leading_zeros` @
+/// 0x0809b040, three in `cg_rbsp_read_bits` @ 0x082d0630).
+///
+/// The H.264 emulation-prevention probe: returns 1 iff the byte at
+/// `p` is the `0x03` of a `00 00 03 xx` escape sequence — a byte the
+/// RBSP reader must skip — and 0 otherwise. The sequence must fit
+/// before `end`: the original requires `p + 1 < end` as an UNSIGNED
+/// pointer comparison (`add r2,r0,#1; cmp r2,r1; bcs` — the byte
+/// after `p` must exist), so a `00 00 03` whose 0x03 is the last
+/// readable byte is data, not an escape. The trailing byte is gated
+/// to `xx <= 3` (`cmp r0,#3; movls` — unsigned), exactly the values
+/// H.264 permits after an emulation-prevention byte.
+///
+/// Algorithm, as the 16-instruction body has it:
+///
+/// ```text
+/// if p + 1 >= end (unsigned): return 0
+/// return p[-2] == 0 && p[-1] == 0 && p[0] == 3 && p[1] <= 3
+/// ```
+///
+/// The two bytes BEFORE `p` are read once the bounds test passes —
+/// `p[-2]` unconditionally (`ldrb r1,[r0,#-2]`), `p[-1]` under
+/// predicate. In the firmware that is always sound because the NAL
+/// payload follows the `00 00 01` start code in flat DRAM; callers
+/// (and host tests) must guarantee two readable bytes before `data`.
+///
+/// Deviations: the `&&` chain short-circuits the `p[-1]`/`p[0]`/
+/// `p[1]` loads where the original predicates them; only `p[-2]` is
+/// unconditional in both. No byte the verdict does not depend on is
+/// ever read past `p[-2]`.
+///
+/// Note: [`CG_RBSP_READ_BITS_OPS`]' `emulation_probe` seam and the
+/// private `emulation_prevention_probe` helper in
+/// `crate::h264::bitstream` are binary-verified transcriptions of
+/// this same body, kept deliberately in place for this commit; both
+/// can now be retired to direct calls of this export.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_rbsp_emulation_probe(p: *const u8, end: *const u8) -> u32 {
+    if p.wrapping_add(1) >= end {
+        return 0;
+    }
+    (p.wrapping_sub(2).read() == 0
+        && p.wrapping_sub(1).read() == 0
+        && p.read() == 3
+        && p.wrapping_add(1).read() <= 3) as u32
 }
 
 /// cg_rbsp_read_bits — original: `FUN_082d0630` @ 0x082d0630
@@ -596,5 +649,128 @@ mod tests {
         assert_eq!(value, 0x8000_0040);
         assert_eq!(flag, 0);
         teardown();
+    }
+
+    // ----- cg_rbsp_emulation_probe @ 0x082c319c -----
+
+    /// Calls the ported probe at payload-relative index `i`; negative
+    /// reaches the two 0xff guard bytes, indices at/past the payload
+    /// reach the 0xff slack (both always readable).
+    fn probe(payload: &Payload, i: isize) -> u32 {
+        let reader = payload.reader();
+        unsafe { cg_rbsp_emulation_probe(reader.data.wrapping_offset(i), reader.end) }
+    }
+
+    #[test]
+    fn probe_fires_on_00_00_03_at_various_offsets() {
+        // The sequence at payload offset 0, 1, and mid-payload; every
+        // legal trailing value 0..=3.
+        for xx in 0..=3u8 {
+            for off in [0usize, 1, 7] {
+                let mut bytes = std::vec![0xaau8; off];
+                bytes.extend_from_slice(&[0x00, 0x00, 0x03, xx]);
+                bytes.extend_from_slice(&[0xbb; 4]);
+                let payload = Payload::new(&bytes);
+                assert_eq!(probe(&payload, (off + 2) as isize), 1, "off={off} xx={xx}");
+            }
+            // p + 1 == end - 1: the last position that can still fire.
+            let payload = Payload::new(&[0xcc, 0x00, 0x00, 0x03, xx]);
+            assert_eq!(probe(&payload, 3), 1, "xx={xx} at end - 2");
+        }
+    }
+
+    #[test]
+    fn probe_rejects_03_without_two_preceding_zeros() {
+        // One or both predecessors non-zero: never an EP byte.
+        for (a, b) in [(0x01u8, 0x00u8), (0x00, 0x01), (0xff, 0xff), (0x03, 0x03)] {
+            let payload = Payload::new(&[a, b, 0x03, 0x00, 0xee]);
+            assert_eq!(probe(&payload, 2), 0, "predecessors {a:#04x} {b:#04x}");
+        }
+        // A lone 0x03 as the FIRST payload byte with 0xff guards: the
+        // lookback finds no zeros.
+        let payload = Payload::new(&[0x03, 0x00, 0x11]);
+        assert_eq!(probe(&payload, 0), 0);
+    }
+
+    #[test]
+    fn probe_looks_back_two_bytes_before_data_start() {
+        // The firmware layout: the NAL payload follows the 00 00 01
+        // start code, so the bytes before `data` are real and the
+        // lookback crosses the boundary — a 0x03 as the first payload
+        // byte probes positive. Built by hand because Payload's guard
+        // bytes are 0xff.
+        let buf = [0x00u8, 0x00, 0x03, 0x01, 0xff, 0xff];
+        let data = unsafe { buf.as_ptr().add(2) };
+        let end = unsafe { data.add(4) };
+        assert_eq!(unsafe { cg_rbsp_emulation_probe(data, end) }, 1);
+        // Only ONE zero before `data` (the start code's 01 sits
+        // between): no match.
+        let buf = [0x01u8, 0x00, 0x03, 0x01, 0xff, 0xff];
+        let data = unsafe { buf.as_ptr().add(2) };
+        let end = unsafe { data.add(4) };
+        assert_eq!(unsafe { cg_rbsp_emulation_probe(data, end) }, 0);
+    }
+
+    #[test]
+    fn probe_needs_one_byte_after_p_before_end() {
+        // 00 00 03 with the 0x03 as the LAST readable byte: p + 1 ==
+        // end fails the unsigned bounds test — the 0x03 is data.
+        let payload = Payload::new(&[0x11, 0x00, 0x00, 0x03]);
+        assert_eq!(probe(&payload, 3), 0);
+        // p == end and p past end also fail, even when the bytes
+        // there are a matching sequence: the bounds test short-
+        // circuits before any read. Hand-built so the out-of-range
+        // memory is controlled.
+        let buf = [0x00u8, 0x00, 0x03, 0x01, 0x00, 0x00, 0x03, 0x01];
+        let data = buf.as_ptr();
+        let end = unsafe { data.add(4) };
+        // In-bounds twin fires, proving the pattern itself matches.
+        assert_eq!(unsafe { cg_rbsp_emulation_probe(unsafe { data.add(2) }, end) }, 1);
+        assert_eq!(unsafe { cg_rbsp_emulation_probe(end, end) }, 0);
+        assert_eq!(unsafe { cg_rbsp_emulation_probe(unsafe { data.add(6) }, end) }, 0);
+    }
+
+    #[test]
+    fn probe_rejects_non_03_current_byte_and_trailing_above_3() {
+        // 00 00 followed by anything but 0x03 is not a sequence.
+        for cur in [0x00u8, 0x01, 0x02, 0x04, 0xff] {
+            let payload = Payload::new(&[0x00, 0x00, cur, 0x00, 0x99]);
+            assert_eq!(probe(&payload, 2), 0, "current {cur:#04x}");
+        }
+        // 00 00 03 xx with xx > 3 is not a legal EP sequence: the
+        // trailing gate is xx <= 3, unsigned (0x80/0xff count as
+        // above, not as negative).
+        for xx in [0x04u8, 0x7f, 0x80, 0xff] {
+            let payload = Payload::new(&[0x00, 0x00, 0x03, xx, 0x99]);
+            assert_eq!(probe(&payload, 2), 0, "trailing {xx:#04x}");
+        }
+        // Boundary: xx == 3 fires.
+        let payload = Payload::new(&[0x00, 0x00, 0x03, 0x03, 0x99]);
+        assert_eq!(probe(&payload, 2), 1);
+    }
+
+    #[test]
+    fn probe_matches_index_space_predicate_on_seeded_streams() {
+        // Seeded xorshift stream with spliced 00 00 03 0x sequences
+        // (some legal, some with xx > 3); every payload index is
+        // probed against the independent index-space predicate plus
+        // the p + 1 < end bound. The 0xff guards keep the lookback
+        // consistent with the predicate's `i >= 2`.
+        let mut state = 0x9e37_79b9u32;
+        let mut raw = std::vec::Vec::new();
+        while raw.len() < 256 {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            raw.push((state >> 24) as u8);
+            if raw.len() % 17 == 0 {
+                raw.extend_from_slice(&[0x00, 0x00, 0x03, (state & 7) as u8]);
+            }
+        }
+        let payload = Payload::new(&raw);
+        for i in 0..raw.len() {
+            let expect = (i + 1 < raw.len() && is_ep_byte(&raw, i)) as u32;
+            assert_eq!(probe(&payload, i as isize), expect, "index {i}");
+        }
     }
 }

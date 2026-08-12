@@ -26729,6 +26729,66 @@ functions:
       iterator_state_cleanup_unlinks_its_state_then_poisons_it_and_returns_it /
       iterator_state_cleanup_is_the_wired_teardown_and_container_default.
 
+  # --- H.264 / MPEG-4 AVC video decoder: emulation-prevention probe ---
+  - address: 0x082c319c
+    ghidra: FUN_082c319c
+    name: cg_rbsp_emulation_probe
+    size: 64
+    sig: "u32 cg_rbsp_emulation_probe(const u8 *p, const u8 *end)"
+    module: codegen/rbsp_read_bits
+    vars: {param_1: p, param_2: end}
+    status: ported
+    notes: >-
+      The H.264 emulation-prevention probe: returns 1 iff the byte at
+      `p` is the 0x03 of a `00 00 03 xx` escape sequence the RBSP
+      reader must skip, 0 otherwise. 64 bytes, 16 instructions, all
+      code — no literal pool, no stack traffic, a leaf ending `bx lr`;
+      5 `bl` call sites, all in the RBSP read primitives: two in
+      h264_bitstream_count_leading_zeros @ 0x0809b040, three in
+      cg_rbsp_read_bits @ 0x082d0630. It lives in the Vincent JIT's
+      0x082cxxxx block, so it is ported under the codegen/ roof with
+      the cg_ prefix, beside its caller.
+      Algorithm: if p + 1 >= end (UNSIGNED pointer comparison —
+      `add r2,r0,#1; cmp r2,r1; bcs` — the byte after p must exist,
+      so a 00 00 03 whose 0x03 is the last readable byte is data, not
+      an escape) return 0; else return p[-2] == 0 && p[-1] == 0 &&
+      p[0] == 3 && p[1] <= 3 (the trailing gate is `cmp r0,#3; movls`
+      — unsigned <= 3, exactly the values H.264 permits after an
+      emulation-prevention byte). The lookback reads p[-2]
+      unconditionally once the bounds test passes (`ldrb r1,[r0,#-2]`),
+      p[-1] under predicate; in the firmware that is always sound
+      because the NAL payload follows the 00 00 01 start code in flat
+      DRAM, so callers must guarantee two readable bytes before
+      `data`.
+      Deviations: the && chain short-circuits the p[-1]/p[0]/p[1]
+      loads where the original predicates them; only p[-2] is
+      unconditional in both. Verified against osos.asm and the Ghidra
+      C (decomp/c/030/082c319c_FUN_082c319c.c): exact boundary
+      conditions (p + 1 < end unsigned, follower <= 3 unsigned) match.
+      FOLLOW-UPS (deliberately NOT done in this commit, one function
+      per commit): the CG_RBSP_READ_BITS_OPS.emulation_probe /
+      CG_EXP_GOLOMB_OPS.read_bits seam stubs and the private
+      emulation_prevention_probe helper in src/h264/bitstream.rs
+      (binary-verified transcription of this same body) can now be
+      retired/rewired to direct calls of this export.
+      Rust port and host tests: src/codegen/rbsp_read_bits.rs —
+      00 00 03 firing at payload offsets 0/1/7 and at end - 2 with
+      every legal trailer 0..=3, 0x03 without two preceding zeros
+      (incl. a lone 0x03 at the payload start), the unconditional
+      two-byte lookback across the data boundary (start-code layout:
+      fires with 00 00 before `data`, fails with 01 00), the
+      p + 1 >= end bound (0x03 as the last byte, p == end, p past
+      end with a matching sequence in reach), non-0x03 current bytes,
+      trailers above 3 (incl. 0x80/0xff proving the gate unsigned),
+      and a seeded xorshift sweep with spliced 00 00 03 0x sequences
+      checked per-index against the independent index-space
+      predicate.
+      match.py structural: same +1/cmp/bcs bounds test, same [-2]/
+      [-1]/[0] lookback loads, same cmp #3 / follower-gate verdict
+      shape; the diff is the crate fp frame and LLVM branching where
+      ADS predicated (ldrbEQ/cmpeq/movls), with the follower compare
+      as `cmp #4; movcc` instead of `cmp #3; movls`.
+
   # --- H.264 / MPEG-4 AVC video decoder: Exp-Golomb ue(v) reader ---
   - address: 0x082c5df0
     ghidra: FUN_082c5df0
