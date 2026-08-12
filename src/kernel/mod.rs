@@ -15,3 +15,4 @@ pub mod task;
 pub mod task_lock;
 pub mod task_message;
 pub mod thunks;
+pub mod wheel_sample;

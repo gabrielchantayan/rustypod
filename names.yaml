@@ -12349,6 +12349,57 @@ functions:
       this routine on the validator prefix at +0x10.
 
 
+  - address: 0x08292a88
+    ghidra: FUN_08292a88
+    name: wheel_sample_capture
+    size: 64
+    sig: "i32 wheel_sample_capture(u8 *sample)"
+    module: kernel/wheel_sample
+    status: ported
+    vars:
+      param_1: sample
+      FUN_080dc8a4: sample_capture (WHEEL_SAMPLE_OPS.capture slot) -
+        latches elapsed ticks + wheel state into sample+0xc/+0x10
+      FUN_080bd8f0: wheel_rate (WHEEL_SAMPLE_OPS.rate slot) - the
+        16-sample averaged inter-event tick delta
+    notes: >-
+      Lazy capture of the click-wheel event sample the control
+      subsystem hands to UI controllers. 64 bytes exactly,
+      0x08292a88..0x08292ac8, no literal pool (the next body opens at
+      0x08292ac8). 54 bl call sites. Algorithm: if the flag byte at
+      sample+8 is 0, call 0x080dc8a4(&sample[0xc], &sample[0x10])
+      (elapsed + state), store 0x080bd8f0() at sample+0x14 (rate), set
+      the flag to 1; then ALWAYS return the sign-extended low halfword
+      of the word at +0xc (`ldr r0,[r4,#0xc]; mov r0,r0,lsl#16; mov
+      r0,r0,asr#16`).
+      The object is a wheel event sample: +0x10's bit 0x40000000 is
+      the finger-on-wheel gate every consuming site tests (`tst
+      r0,#0x40000000`, e.g. 0x0810c9f0); +0x14 is a velocity measure
+      (0x080bd8f0 averages the 16 u32 inter-event tick deltas in the
+      ring @ 0x08a755fc against the 0xf4240 = 1,000,000 scale); the
+      ring is fed by sampler 0x080877a0 whose only caller 0x0809e550
+      unwraps a 96-count rotary position delta (cmp #0x48; subgt
+      #0x60; cmn #0x48; addlt #0x60) off timer 0x3c700000+0xb4 - the
+      click-wheel evidence. Consumers are vtable-reached UI controller
+      methods ("EnterVolume"/"EnterDefault" handlers, e.g.
+      0x0810c9dc, which has no direct reference image-wide).
+      NO CALL SITE CONSUMES THE RETURN: at all 54 sites the next
+      instruction ignores r0 and re-reads the record's fields (binary
+      survey) - the call's observable job is the lazy fill, hence the
+      capture name; the halfword return is preserved because the
+      original produces it. The sibling @ 0x08292adc (bl here; ldr
+      r0,[r4,#0x14]) is the rate getter built on this capture.
+      Deviations: the two unported helpers ride the WHEEL_SAMPLE_OPS
+      seam (event_list.rs pattern - transmuted firmware defaults on
+      target, panicking defaults on host); the slot reads stay on the
+      cold path. Host tests: first call runs capture then rate in
+      order and sets the flag, second call skips both helpers, a
+      pre-seeded flag skips everything, and the return sign-extends
+      the low halfword (0x8000 -> -0x8000, high halfword ignored).
+      match.py structural: identical flag-test/capture/rate/store/
+      reload/lsl/asr shape; the diff is the ops-table ldrd+blx pair
+      standing in for the two bls and the crate fp frame.
+
   - address: 0x08292e6c
     ghidra: FUN_08292e6c
     name: control_state_flags
