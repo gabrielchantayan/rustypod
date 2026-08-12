@@ -11633,6 +11633,59 @@ functions:
       deviation), and LLVM forming the id equality as sub/clz/lsr
       instead of cmpeq/moveq/movne (same 0/1 result).
 
+  - address: 0x08259928
+    ghidra: FUN_08259928
+    name: settings_get
+    size: 44
+    sig: "void *settings_get(void)"
+    module: cxx/settings
+    status: ported
+    renames:
+      piVar1: cache (pointer to the cache word @ 0x089cc948)
+      iVar2: constructed (the ctor's return)
+      FUN_082aadd4: operator_new (ported in heap/veneers, called directly)
+      FUN_08259eac: settings_ctor (unported; SETTINGS_CTOR dispatch slot, documented zeroing default)
+    vars: {DAT_08259954: SETTINGS_INSTANCE_PTR (the pool literal holding &SETTINGS_INSTANCE; the cache word itself lives @ 0x089cc948)}
+    notes: >-
+      Lazy singleton getter, 61 bl call sites. If the cache word @
+      0x089cc948 (pool literal @ 0x08259954) is 0, allocates 0x84 bytes
+      via operator_new @ 0x082aadd4 (already ported, called directly),
+      constructs via FUN_08259eac, caches the ctor's return and RELOADS
+      the slot before returning (a NULL ctor result caches NULL, so the
+      next call re-allocates - no failure memory). The 0x84-byte object
+      is the firmware's SETTINGS STORE: its virtual setters (the
+      0x08259970/0x082599d4/0x08259a64/0x08259da8/0x08259e18 family -
+      no direct bl sites, so vtable-only) clamp small enum values into
+      byte fields and post change notifications 0x50009-0x50013 to the
+      listener list the ctor builds at +0x04 (dispatch through vtable
+      slot +0x14), a string-keyed byte map sits at +0x40 (read @
+      0x08259ac8/0x08259d24, write @ 0x08259b3c, iterate @ 0x08259b5c),
+      and 0x08259e48 posts the 0x50001/0x50002 pair through slot +0x10.
+      The event consumer @ 0x08172744 is a settings view: it re-reads
+      the changed value (slots +0xc0..+0x108), repaints rows
+      (resources 0x60bd/0x60f0-0x60f3), and mirrors enum values into
+      the media-player interface (slot +0x30) - the repeat/shuffle
+      style playback settings. The ctor plants primary vtable
+      0x089a75c8 at +0x00 (the SAME interface base the TPodMediaPlayer
+      carries at +0x14, see 0x0817ceb4) and the extended vtable
+      0x089a7b14 over it, and names nothing (no class-name-factory
+      call), so settings is the semantic name, not a recovered class
+      name. Sibling getters fill the block: 0x082598f8 (0x44 bytes,
+      ctor 0x08259450), 0x0825a16c / 0x0825a6b8 / 0x0825a6e8 (0x44,
+      ctors 0x08259648 / 0x0825a8d4 / 0x0825aa58). Deviations (the
+      app/singletons.rs contract): the cache is the crate static
+      SETTINGS_INSTANCE - the 0x089cxxxx RW pages are
+      runtime-initialized and the image holds stale UI strings there -
+      and the ctor rides the SETTINGS_CTOR dispatch slot (house
+      pattern) with a documented zeroing stub default. NOT HOOK-READY -
+      until FUN_08259eac is ported the default hands out a zeroed block
+      with no vtable and no listener list, so branching stock code at
+      0x08259928 would break it. match.py structural: same
+      push/ldr-pool/ldr/cmp/bne/mov-0x84/bl/bl/str/ldr/pop skeleton;
+      the diff is the crate fp frame, the intra-archive bl for
+      operator_new, and the blx-through-volatile-slot dispatch standing
+      in for the direct bl 0x08259eac (the documented deviation).
+
   - address: 0x0825c2c0
     ghidra: FUN_0825c2c0
     name: cxx_vector_find_equal
