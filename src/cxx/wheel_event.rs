@@ -47,8 +47,14 @@
 //! ALIASES: the exact 4-word pattern occurs exactly TWICE in osos.dec —
 //! here and at 0x082a4f68 (26 `bl` call sites, binary-scanned), a
 //! byte-identical twin ADS emitted for a second translation unit (the
-//! handle_deref_or_null alias phenomenon). The twin is NOT ported
-//! separately; hook it to this symbol. The halfword sibling @
+//! handle_deref_or_null alias phenomenon), ported below as
+//! [`wheel_event_button_code_alias_4f68`]. The twin's call sites are
+//! the SAME wheel-event handler cluster extracting the SAME button-code
+//! byte: the 0x57/0x58/0x5d value-adjust dispatch @ 0x0812eb1c, the
+//! vtable prev/next/select dispatch @ 0x081408c0 (slots +0x16c/+0x170/
+//! +0x160), the 0x4a..0x4c skip filter @ 0x0810bdd4, the command-table
+//! walk @ 0x08110868, and the wheel-sample statistics dispatch @
+//! 0x0811a0e8. The halfword sibling @
 //! 0x082a4f58 (`ldr; lsl #0x10; lsr #0x10` — the low u16 of the same
 //! state word, 5 `bl` call sites) is a DIFFERENT body, not an alias,
 //! and is not ported here either.
@@ -72,6 +78,40 @@ pub const WHEEL_EVENT_STATE_OFFSET: usize = 0x10;
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn wheel_event_button_code(this: *const u8) -> u32 {
+    let state = (this.add(WHEEL_EVENT_STATE_OFFSET) as *const u32).read_unaligned();
+    (state & 0xff0000) >> 0x10
+}
+
+/// wheel_event_button_code_alias_4f68 — original: `FUN_082a4f68` @
+/// 0x082a4f68 (16 bytes; 26 `bl` call sites, binary-scanned).
+///
+/// Byte-identical twin of [`wheel_event_button_code`] @ 0x082a4f78:
+/// the same `ldr r0,[r0,#0x10]; and r0,r0,#0xff0000; mov r0,r0,lsr
+/// #0x10; bx lr` body extracting the same button-code byte (bits
+/// 16..23) of the same wheel event sample's state word at +0x10. ADS
+/// emitted the accessor twice (the parse_result_init_alias_3134
+/// phenomenon); the twin's 26 call sites show no semantic split —
+/// they are the same control-subsystem event handlers keyed on the
+/// same codes: 0x57/0x58/0x5d value adjust @ 0x0812eb1c, vtable
+/// prev/next/select dispatch @ 0x081408c0, the 0x4a..0x4c skip filter
+/// @ 0x0810bdd4, the command-table walk @ 0x08110868, and the
+/// wheel-sample statistics dispatch @ 0x0811a0e8.
+///
+/// An independent body, not a delegation to
+/// [`wheel_event_button_code`], exactly as the original is a second
+/// emitted copy rather than a branch to the first. (At release opt
+/// LLVM's MergeFunctions may fold the two byte-identical bodies; this
+/// symbol remains in the archive's symbol table at the merged
+/// address, so hooks resolve it normally — the
+/// parse_result_init_alias_3134 precedent.)
+///
+/// # Safety
+///
+/// Same contract as [`wheel_event_button_code`]: reads one word at
+/// `this + 0x10`, writes nothing, no NULL guard on `this`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn wheel_event_button_code_alias_4f68(this: *const u8) -> u32 {
     let state = (this.add(WHEEL_EVENT_STATE_OFFSET) as *const u32).read_unaligned();
     (state & 0xff0000) >> 0x10
 }
@@ -126,5 +166,37 @@ mod tests {
         let before = sample;
         assert_eq!(unsafe { wheel_event_button_code(sample.as_ptr()) }, 0);
         assert_eq!(sample, before, "the accessor writes nothing");
+    }
+
+    #[test]
+    fn the_twin_also_extracts_only_byte_two() {
+        for position in 0..4u32 {
+            let state = 0x5au32 << (position * 8);
+            let sample = sample_with_state(state);
+            let expected = if position == 2 { 0x5a } else { 0 };
+            assert_eq!(
+                unsafe { wheel_event_button_code_alias_4f68(sample.as_ptr()) },
+                expected,
+                "twin: state={state:#010x} (value at byte {position})"
+            );
+        }
+    }
+
+    #[test]
+    fn the_twin_covers_the_zero_and_ff_boundaries() {
+        let zero = sample_with_state(0);
+        assert_eq!(unsafe { wheel_event_button_code_alias_4f68(zero.as_ptr()) }, 0);
+        let ff = sample_with_state(0x00ff_0000);
+        assert_eq!(unsafe { wheel_event_button_code_alias_4f68(ff.as_ptr()) }, 0xff);
+        let all = sample_with_state(0xffff_ffff);
+        assert_eq!(unsafe { wheel_event_button_code_alias_4f68(all.as_ptr()) }, 0xff);
+    }
+
+    #[test]
+    fn the_twin_is_read_only_and_masks_the_flag_byte() {
+        let sample = sample_with_state(0xff00_ffff);
+        let before = sample;
+        assert_eq!(unsafe { wheel_event_button_code_alias_4f68(sample.as_ptr()) }, 0);
+        assert_eq!(sample, before, "the twin also writes nothing");
     }
 }
