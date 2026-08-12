@@ -15440,6 +15440,53 @@ functions:
       vs fall-through return 0; LLVM renders the loop as a countdown
       with post-increment pointer walk in place of ADS' index form.
 
+  - address: 0x08376bf4
+    ghidra: FUN_08376bf4
+    name: expr_code
+    size: 52
+    sig: "int expr_code(Parse *parse, Expr *expr, int target)"
+    module: sqlite/expr_code
+    status: ported
+    renames:
+      param_1: parse
+      param_2: expr
+      param_3: target
+      iVar1: in_reg
+      iVar2: p_vdbe
+    notes: >-
+      SQLite 3.5.9's sqlite3ExprCode (expr.c) - the "guaranteed
+      placement" wrapper over the expression code generator: evaluate
+      expr so the result ALWAYS sits in VDBE register target, and
+      return target verbatim. 23 bl call sites, no tail b sites
+      (binary-scanned): 0x082c3b24, 0x082c3b34, 0x082c3b44 (all in
+      FUN_082c3a38), 0x082c4a7c, 0x082c4af8 (both in FUN_082c4a30),
+      0x08373424 (FUN_08373180), 0x08376c38 (FUN_08376c28,
+      sqlite3ExprCodeAndCache), 0x08376ccc
+      (FUN_08376c94), 0x08377a28, 0x08377a78 (both in FUN_08376ef0,
+      sqlite3ExprCodeTarget itself), 0x08379974 (FUN_083797fc),
+      0x0837c2cc, 0x0837c398, 0x0837c55c, 0x0837c7a4 (all in
+      FUN_0837b9ec), 0x08383850 (FUN_08382e28), 0x08385e70,
+      0x08385f0c (both in FUN_0838581c), 0x0838e1e4, 0x0838e4ec,
+      0x0838e7c0, 0x0838e8b0 (all in FUN_0838d8a4), 0x083962d0
+      (FUN_08396130). Algorithm: in_reg = sqlite3ExprCodeTarget(parse,
+      expr, target) @ 0x08376ef0; if in_reg != target, load pVdbe
+      (Parse +0x0c - the ldrne) and when non-NULL append
+      OP_SCopy in_reg, target via vdbe_add_op2 @ 0x08386824 (opcode
+      literal 8, the movne r1,#0x8); return target unconditionally.
+      The two upstream asserts (target in range, pVdbe or mallocFailed)
+      are compiled out of the firmware (NDEBUG) and not modeled.
+      Callee 0x08376ef0 (3168 bytes, the code generator proper) is
+      UNPORTED and rides the EXPR_CODE_OPS seam; the shipped default
+      stand-in reports "value already in target" (returns target), so
+      no OP_SCopy is emitted. Callee vdbe_add_op2 is ported
+      (sqlite/vdbe) and called directly. Ghidra's decompile drops the
+      4th argument to vdbe_add_op2 (r3 = target, set by movne r3,r5);
+      the disassembly is authoritative. match.py (exit 1, diff
+      expected): same structure - generator call, in_reg vs target
+      compare, conditional pVdbe load at +0xc, opcode-8 vdbe_add_op2
+      call, return target; LLVM uses a branch + the seam's blx where
+      ADS predicated (ldrne/cmpne/movne/blne).
+
   # ---- Big-endian byte stores (src/util/beload.rs) ----
   - address: 0x08046b1c
     ghidra: FUN_08046b1c

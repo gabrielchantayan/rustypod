@@ -72,6 +72,7 @@ pub mod data_size;
 pub mod dequote;
 pub mod ephemeral_fn;
 pub mod error_msg;
+pub mod expr_code;
 pub mod expr_delete;
 pub mod expr_height;
 pub mod expr_height_of;
