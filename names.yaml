@@ -25816,3 +25816,63 @@ INS.PRE 24609:
       (wraps) degenerate cases. match.py (exit 1, diff expected): LLVM
       folds ~(align-1) into -align via rsb/and (algebraically identical)
       and adds the crate's fp frame; core add/sub/mask structure matches.
+
+  - address: 0x08299368
+    ghidra: FUN_08299368
+    name: bitmap_query_bounds
+    size: 76
+    sig: "u64 bitmap_query_bounds(u32 *out, u8 *wrapper, u32 arg3, u32 arg4)"
+    module: drivers/bitmap
+    status: ported
+    renames:
+      param_1: out
+      param_2: wrapper
+      param_3: arg3
+      param_4: arg4
+      local_20: bounds (the r0..r3 spill slots doubling as the query block)
+      FUN_082993b4: bitmap_ensure_loaded (lazy BMap loader; BITMAP_HOOKS.ensure_loaded seam, no-op default)
+      FUN_082a1dbc: bitmap_object_read_bounds (parsed object's bounds getter; BITMAP_HOOKS.read_bounds seam, no-op default)
+      DAT_08299400: 'the "BMap" kind literal (0x424d6170 big-endian, ResourceKind::BITMAP in app/resource_chain)'
+    notes: >-
+      59 bl call sites, no tail branches (binary-scanned). The bitmap
+      resource wrapper's bounding-rectangle query, part of the lazy
+      "BMap" handle cluster at 0x08299xxx: wrapper layout +0x00
+      provider chain head, +0x04 resource id, +0x08 loaded flag, +0x0c
+      inline parser argument block, +0xc4 parsed bitmap object.
+      Algorithm: call the lazy loader FUN_082993b4(wrapper) FIRST and
+      unconditionally (it resolves the ("BMap", id) pair through
+      resource_chain_find @ 0x0827216c, parses into an
+      operator_new(0x44) object via FUN_082645a0, stores it at +0xc4
+      and raises the +0x08 flag; a failed lookup leaves the flag
+      clear); if the flag is still clear, zero all four words of out
+      (four streq word stores); otherwise dispatch FUN_082a1dbc
+      (*(wrapper+0xc4), &block) - which copies the four words at
+      +0x98..+0xa4 of the inner object *(object+0x1c) - and copy the
+      block into out (ldmia/stmia). The stack block IS the entry's
+      r0..r3 spill (stmdb sp!,{r0,r1,r2,r3,...}), so the epilogue's
+      pop returns the first two words in r0/r1: the bounds words on
+      the query path, the incoming (out, wrapper) pointers on the zero
+      path - a quirk the port keeps verbatim (u64 return, low half =
+      r0). Callers read the result as a rectangle of four signed words
+      (the layout code @ 0x08141e30 subtracts word[1] from word[3] for
+      a height and hands the block to the draw-in-rect helper
+      FUN_082991a4 - edges, not origin/size [INFERENCE from that
+      caller's arithmetic]). Sibling accessors: FUN_082991a4 (draw in
+      rect) and FUN_08299404 run the same loader-then-flag-check shape.
+      Deviations - arg3/arg4 exist only because the original spills all
+      four argument registers into the block; with the real
+      FUN_082a1dbc (writes all four words) they are unobservable, and
+      with the default no-op read_bounds stub the loaded path copies
+      the spill words (out, wrapper, arg3, arg4) into out, exactly what
+      the original's stack block would hand a getter that stored
+      nothing. Both callees ride the new BITMAP_HOOKS seam (documented
+      no-op defaults, NOT hook-ready - the stock loader must be ported
+      or the wrapper pre-loaded before the query path runs on target).
+      +0xc4 is read as a native-width pointer; 0xc4 is not
+      eight-aligned, so on 64-bit hosts the field is parked at 0xc8 in
+      the wrapper's unaccounted tail (the drivers/display_layer.rs
+      parked-pointer rule); on target every offset is literal. match.py
+      (exit 1, diff expected): same spill-block / loader-call /
+      flag-test / zero-or-query structure; the diff is the crate fp
+      frame, the hook seam's blx dispatch in place of the direct bls,
+      and LLVM outlining the zero path into the else branch.
