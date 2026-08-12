@@ -3553,6 +3553,92 @@ unsafe extern "C" fn teardown_inner_next_unported(
     0
 }
 
+/// Indirect call to the unported observer-list link `FUN_08271710` @
+/// 0x08271710 (12 bytes: `ldr r2, [r0, #0xc]; str r2, [r1, #0x10];
+/// str r1, [r0, #0xc]; bx lr` — push `state` onto the head of the
+/// owner's observer list, the exact inverse of the 0x08271724 unlink
+/// behind [`ITERATOR_STATE_RELEASE`]). The constructor
+/// [`iterator_state_construct`] calls it after zeroing the state's own
+/// link word, so a wired no-op leaves the list empty-headed, matching
+/// the unported-collection contract of every sibling seam.
+pub static mut ITERATOR_STATE_LINK: unsafe extern "C" fn(
+    owner: *mut u8,
+    state: *mut u32,
+) = iterator_state_link_unported;
+
+/// Default for [`ITERATOR_STATE_LINK`]: the observer-list link is
+/// unported, so it has no local effect (the
+/// `iterator_state_release_unported` precedent).
+unsafe extern "C" fn iterator_state_link_unported(_owner: *mut u8, _state: *mut u32) {}
+
+/// Indirect call to the unported iterator seek `FUN_08155dc4` @
+/// 0x08155dc4. The target normalizes the requested position (-2 =
+/// before-first, -3 = end, past-the-end clamps to -3) into the state
+/// word at +0x08 and derives the prev/next index words at +0x04/+0x0c
+/// from the owner's count word; it is the constructor's final step and
+/// its return value is discarded.
+///
+/// The seam keeps that unported positioning outside this one-function
+/// port while retaining the target's `seek(state, position)` ABI.
+pub static mut ITERATOR_STATE_SEEK: unsafe extern "C" fn(
+    state: *mut u32,
+    position: i32,
+) = iterator_state_seek_unported;
+
+/// Default for [`ITERATOR_STATE_SEEK`]: the seek is unported, so it has
+/// no local effect.
+unsafe extern "C" fn iterator_state_seek_unported(_state: *mut u32, _position: i32) {}
+
+/// iterator_state_construct — original: `FUN_08155e80` @ 0x08155e80
+/// (64 bytes; 54 `bl` call sites, 0 `b`, binary-scanned).
+///
+/// Constructs the 20-byte collection-iterator state object (the same
+/// class [`iterator_state_cleanup`] @ 0x08155ec0 tears down) and
+/// positions it:
+///
+/// ```text
+/// state.owner  = owner        ; +0x00  str r1, [r4]
+/// state.link   = 0            ; +0x10  str 0, [r4, #0x10]
+/// FUN_08271710(owner, state)  ; push state onto owner's +0x0c list
+/// state.pos    = -2           ; +0x08  mvn r0, #1 — "before first"
+/// FUN_08155dc4(state, start)  ; seek — normalizes pos, derives
+///                             ; prev +0x04 / next +0x0c
+/// return state                ; mov r0, r4
+/// ```
+///
+/// The zero of the link word lands BEFORE the link call, so the link
+/// observes the cleared word exactly as the original's
+/// `str r1, [r4, #0x10]` ahead of `bl 0x08271710` does. The -2 position
+/// store sits between the link and the seek, matching the original's
+/// order. Both callees are unported and ride the
+/// [`ITERATOR_STATE_LINK`] / [`ITERATOR_STATE_SEEK`] seams (no-op
+/// defaults — the `ITERATOR_STATE_RELEASE` precedent). Call-site shape:
+/// `FUN_08155e80(iterator, handle, -2)` on a 20-byte frame local,
+/// followed by 0x08155d6c steps and an 0x08155ec0 drop (the
+/// `framework_base_transition_link_state` survey, which knows this
+/// function as `collection_iterator_begin`).
+///
+/// # Safety
+///
+/// `state` must address five writable 32-bit words (+0x00..+0x13).
+/// `owner` flows to the link callee unchecked, as in the original.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iterator_state_construct(
+    state: *mut u32,
+    owner: *mut u8,
+    start: i32,
+) -> *mut u32 {
+    state.write(owner as u32);
+    state.add(4).write(0);
+    let link = core::ptr::read_volatile(core::ptr::addr_of!(ITERATOR_STATE_LINK));
+    link(owner, state);
+    state.add(2).write((-2i32) as u32);
+    let seek = core::ptr::read_volatile(core::ptr::addr_of!(ITERATOR_STATE_SEEK));
+    seek(state, start);
+    state
+}
+
 /// Indirect call to the unported observer-list release
 /// `FUN_08271724`. The target walks the owner list at +0x0c and unlinks
 /// `state` by its +0x10 next link; its return value is discarded.
@@ -4394,6 +4480,10 @@ mod tests {
                     .write_volatile(iterator_state_cleanup);
                 core::ptr::addr_of_mut!(ITERATOR_STATE_RELEASE)
                     .write_volatile(iterator_state_release_unported);
+                core::ptr::addr_of_mut!(ITERATOR_STATE_LINK)
+                    .write_volatile(iterator_state_link_unported);
+                core::ptr::addr_of_mut!(ITERATOR_STATE_SEEK)
+                    .write_volatile(iterator_state_seek_unported);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE)
                     .write_volatile(teardown_registry_dispose_unported);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_DESTRUCT_KIND1_CONTAINER08_TEARDOWN)
@@ -4624,6 +4714,119 @@ mod tests {
                 u32::MAX,
                 "the direct default cleans state object at container + 4"
             );
+        }
+    }
+
+    // ---- iterator_state_construct (0x08155e80) ------------------------
+
+    static mut ITERATOR_LINK_CALLS: usize = 0;
+    static mut ITERATOR_LINK_OWNER: *mut u8 = core::ptr::null_mut();
+    static mut ITERATOR_LINK_STATE: *mut u32 = core::ptr::null_mut();
+    static mut ITERATOR_SEEK_CALLS: usize = 0;
+    static mut ITERATOR_SEEK_STATE: *mut u32 = core::ptr::null_mut();
+    static mut ITERATOR_SEEK_POSITION: i32 = 0;
+    /// Constructor-callee invocation order, e.g. ["link", "seek"].
+    static mut ITERATOR_CTOR_ORDER: [u8; 4] = [0; 4];
+    static mut ITERATOR_CTOR_ORDER_LEN: usize = 0;
+
+    unsafe extern "C" fn recording_iterator_state_link(owner: *mut u8, state: *mut u32) {
+        ITERATOR_LINK_CALLS += 1;
+        ITERATOR_LINK_OWNER = owner;
+        ITERATOR_LINK_STATE = state;
+        if ITERATOR_CTOR_ORDER_LEN < ITERATOR_CTOR_ORDER.len() {
+            ITERATOR_CTOR_ORDER[ITERATOR_CTOR_ORDER_LEN] = b'L';
+            ITERATOR_CTOR_ORDER_LEN += 1;
+        }
+    }
+
+    unsafe extern "C" fn recording_iterator_state_seek(state: *mut u32, position: i32) {
+        ITERATOR_SEEK_CALLS += 1;
+        ITERATOR_SEEK_STATE = state;
+        ITERATOR_SEEK_POSITION = position;
+        if ITERATOR_CTOR_ORDER_LEN < ITERATOR_CTOR_ORDER.len() {
+            ITERATOR_CTOR_ORDER[ITERATOR_CTOR_ORDER_LEN] = b'S';
+            ITERATOR_CTOR_ORDER_LEN += 1;
+        }
+    }
+
+    unsafe fn install_recording_iterator_state_ops() {
+        ITERATOR_LINK_CALLS = 0;
+        ITERATOR_LINK_OWNER = core::ptr::null_mut();
+        ITERATOR_LINK_STATE = core::ptr::null_mut();
+        ITERATOR_SEEK_CALLS = 0;
+        ITERATOR_SEEK_STATE = core::ptr::null_mut();
+        ITERATOR_SEEK_POSITION = 0;
+        ITERATOR_CTOR_ORDER_LEN = 0;
+        core::ptr::addr_of_mut!(ITERATOR_STATE_LINK)
+            .write_volatile(recording_iterator_state_link);
+        core::ptr::addr_of_mut!(ITERATOR_STATE_SEEK)
+            .write_volatile(recording_iterator_state_seek);
+    }
+
+    #[test]
+    fn iterator_state_construct_stores_fields_links_then_seeks_and_returns_the_state() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut state = [0xa5a5_a5a5u32; 5];
+        let owner = 0x0855_0000usize as *mut u8;
+        unsafe {
+            install_recording_iterator_state_ops();
+            let state_ptr = state.as_mut_ptr();
+            let returned = iterator_state_construct(state_ptr, owner, -2);
+
+            assert_eq!(returned, state_ptr, "mov r0, r4 returns the input state");
+            assert_eq!(state[0], owner as u32, "owner stored at +0x00");
+            assert_eq!(state[2], (-2i32) as u32, "before-first sentinel at +0x08");
+            assert_eq!(ITERATOR_LINK_CALLS, 1, "one observer-list link");
+            assert_eq!(ITERATOR_LINK_OWNER, owner, "link(owner, state)");
+            assert_eq!(ITERATOR_LINK_STATE, state_ptr);
+            assert_eq!(ITERATOR_SEEK_CALLS, 1, "one seek");
+            assert_eq!(ITERATOR_SEEK_STATE, state_ptr, "seek(state, start)");
+            assert_eq!(ITERATOR_SEEK_POSITION, -2);
+            assert_eq!(
+                &ITERATOR_CTOR_ORDER[..ITERATOR_CTOR_ORDER_LEN],
+                b"LS",
+                "the link runs strictly before the seek"
+            );
+        }
+    }
+
+    #[test]
+    fn iterator_state_construct_zeroes_the_link_word_before_linking() {
+        // The original's `str r1, [r4, #0x10]` sits ahead of the
+        // `bl 0x08271710`, so the link callee observes a cleared +0x10.
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        static mut LINK_OBSERVED: u32 = u32::MAX;
+        unsafe extern "C" fn observing_link(_owner: *mut u8, state: *mut u32) {
+            LINK_OBSERVED = state.add(4).read();
+        }
+        let mut state = [0xa5a5_a5a5u32; 5];
+        unsafe {
+            install_recording_iterator_state_ops();
+            core::ptr::addr_of_mut!(ITERATOR_STATE_LINK).write_volatile(observing_link);
+            LINK_OBSERVED = u32::MAX;
+            let state_ptr = state.as_mut_ptr();
+            iterator_state_construct(state_ptr, 0x0855_0000usize as *mut u8, 0);
+
+            assert_eq!(LINK_OBSERVED, 0, "+0x10 cleared before the link call");
+            assert_eq!(state[4], 0, "and left clear by the no-op link");
+        }
+    }
+
+    #[test]
+    fn iterator_state_construct_forwards_any_start_position() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut state = [0u32; 5];
+        unsafe {
+            install_recording_iterator_state_ops();
+            let state_ptr = state.as_mut_ptr();
+            for start in [-3, 0, 7] {
+                iterator_state_construct(state_ptr, core::ptr::null_mut(), start);
+                assert_eq!(ITERATOR_SEEK_POSITION, start, "start {start} forwarded verbatim");
+            }
+            assert_eq!(ITERATOR_SEEK_CALLS, 3);
         }
     }
 

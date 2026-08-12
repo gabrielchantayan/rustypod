@@ -12101,8 +12101,9 @@ functions:
       4-word pattern occurs exactly TWICE in osos.dec - here and at
       0x082a4f68 (26 bl call sites, binary-scanned), a byte-identical
       twin ADS emitted for a second translation unit (the
-      handle_deref_or_null alias phenomenon); NOT ported separately -
-      hook that address to this symbol. The halfword sibling @
+      handle_deref_or_null alias phenomenon), ported as
+      wheel_event_button_code_alias_4f68 (its own entry below). The
+      halfword sibling @
       0x082a4f58 (`ldr; lsl #0x10; lsr #0x10` - the low u16 of the
       same state word, 5 bl call sites) is a DIFFERENT body, not an
       alias, also unported. Host tests: a distinct value at each byte
@@ -12111,6 +12112,43 @@ functions:
       proving the mask. match.py structural: LLVM folds and+lsr into a
       single `ldrb [r0,#18]` - the same little-endian byte - behind
       the crate fp frame; 4 instructions vs the original's 4.
+
+  - address: 0x082a4f68
+    ghidra: FUN_082a4f68
+    name: wheel_event_button_code_alias_4f68
+    size: 16
+    sig: "u32 wheel_event_button_code_alias_4f68(const u8 *this)"
+    module: cxx/wheel_event
+    status: ported
+    renames:
+      param_1: this
+    notes: >-
+      Byte-identical twin of wheel_event_button_code @ 0x082a4f78 - the
+      same `ldr r0,[r0,#0x10]; and r0,r0,#0xff0000; mov r0,r0,lsr
+      #0x10; bx lr` body extracting the same button-code byte (bits
+      16..23) of the same wheel event sample's state word at +0x10.
+      26 bl call sites, binary-scanned. ADS emitted the accessor twice
+      (the parse_result_init_alias_3134 phenomenon); the call-site
+      evidence shows NO semantic split - the twin's sites are the same
+      control-subsystem event handlers keyed on the same codes: the
+      0x57/0x58/0x5d value-adjust dispatch @ 0x0812eb1c (negate/add
+      the halfword at r4+0xe8), the vtable prev/next/select dispatch @
+      0x081408c0 (slots +0x16c/+0x170 on 0x57/0x58, +0x160 on 0x6f),
+      the 0x4a..0x4c skip filter @ 0x0810bdd4, the command-table walk
+      @ 0x08110868, and the wheel-sample statistics dispatch @
+      0x0811a0e8 (which also flag-tests byte 3 of the same state word
+      and gates on kind 0xd at +0x04). Ported as an independent body,
+      not a delegation, exactly as the original is a second emitted
+      copy rather than a branch to the first. Release-build note:
+      LLVM MergeFunctions folds the two byte-identical bodies;
+      wheel_event_button_code_alias_4f68 stays in the archive symbol
+      table at the merged address (verified with nm), so hooks resolve
+      it normally - match.py is therefore run as `match.py 0x082a4f68
+      wheel_event_button_code`, which shows the same single-ldrb fold
+      behind the crate fp frame, 4 instructions vs the original's 4.
+      Host tests: same coverage as the canonical - per-byte-position
+      extraction (only byte 2 survives), 0x00/0xff boundaries, and the
+      read-only/mask proof with byte 3 and the low halfword at 0xff.
 
   - address: 0x08277440
     ghidra: FUN_08277440
@@ -25738,6 +25776,52 @@ functions:
       construction:
       src/app/vtable_set.rs::kind2_block_constructs_five_words_without_a_diagnostic
       / kind2_block_reports_bad_descriptor_and_still_constructs.
+
+  - address: 0x08155e80
+    ghidra: FUN_08155e80
+    name: iterator_state_construct
+    size: 64
+    sig: "*mut u32 iterator_state_construct(state: *mut u32, owner: *mut u8, start: i32)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r4: state
+      param_2/r0-then-r1: owner
+      param_3/r5: start
+      FUN_08271710: iterator_state_link (ITERATOR_STATE_LINK seam) -
+        pushes state onto owner+0x0c's observer list via the +0x10 next
+        link (the exact inverse of the 0x08271724 unlink)
+      FUN_08155dc4: iterator_state_seek (ITERATOR_STATE_SEEK seam) -
+        normalizes start (-2 before-first / -3 end / clamp) into the
+        +0x08 position word and derives prev +0x04 / next +0x0c
+    notes: >-
+      Constructs the 20-byte collection-iterator state object (the
+      class iterator_state_cleanup @ 0x08155ec0 tears down and
+      iterator_state_release @ 0x08271724 unlinks) and positions it.
+      64 bytes exactly, 0x08155e80..0x08155ec0, 16 instructions, no
+      literal pool; 54 bl call sites, 0 b, binary-scanned by decoding
+      every B/BL word in osos.dec. Store/call order verified against
+      osos.asm: owner to +0x00, ZERO the +0x10 link word, link(owner,
+      state), position -2 to +0x08 (mvn r0, #1), seek(state, start),
+      return state (mov r0, r4). The link word's zero lands before the
+      link call so the callee observes it cleared; the -2 store sits
+      between link and seek. Both callees unported - they ride new
+      ITERATOR_STATE_LINK / ITERATOR_STATE_SEEK seams with no-op
+      defaults (the ITERATOR_STATE_RELEASE precedent), so an unswapped
+      table leaves the state object field-initialized but unlinked and
+      unpositioned, matching every sibling seam's opaque-collection
+      contract. class_6800's FRAMEWORK_BASE_STATE_OPS knows this
+      function as collection_iterator_begin (call shape
+      (iterator, handle, -2) on a 20-byte frame local, then 0x08155d6c
+      steps and the 0x08155ec0 drop); that local seam keeps its
+      modeling default, as it did after iterator_state_cleanup landed.
+      Host tests: field stores at +0x00/+0x08/+0x10, link-before-seek
+      invocation order with (owner, state) / (state, start) argument
+      routing, the link word observed cleared inside the link callee,
+      start forwarded verbatim for -3/0/7, and the state returned.
+      match.py structural: identical store/store/link/store/seek/
+      return sequence; the diff is the two seam blx indirections and
+      the crate fp frame.
 
   - address: 0x08155ec0
     ghidra: FUN_08155ec0
