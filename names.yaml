@@ -21200,6 +21200,56 @@ functions:
       variadic spill (the explicit VaList) and the blx-through-volatile-
       slot dispatch standing in for the direct bl 0x08074ba0.
 
+  - address: 0x08276a18
+    ghidra: FUN_08276a18
+    name: string_object_insert_cstr
+    size: 68
+    sig: "void string_object_insert_cstr(StringObject *this, int index, const char *source)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      FUN_08275e20: strlen_safe_plus1
+      param_1: this
+      param_2: index
+      param_3: source
+    notes: >-
+      The guard wrapper of the StringObject insert operation, `void
+      StringObject::insert(int index, const char *source)`. 68 bytes,
+      all code (0x08276a18..0x08276a5c; no literal-pool word; the next
+      function is the insert-buffer sibling @ 0x08276a5c). 61 bl call
+      sites, binary-scanned. Ghidra's decompile
+      (decomp/c/026/08276a18_FUN_08276a18.c) INLINES the tail-branch
+      target 0x08275f48 into the body - the vtable grow, codepoint-walk
+      position resolve (0x082a50c4 over utf8_next_codepoint @
+      0x08276214), memmove/memcpy splice and final NUL all belong to
+      that callee, NOT to this function. The raw 17 instructions:
+      `movs r4,r2 / ldrbne r0,[r4] / cmpne r0,#0 / popeq` (return when
+      source == NULL or source[0] == 0), `cmp r5,#0 / poplt` (return
+      when index < 0), `bl 0x08275e20` (strlen_safe_plus1, ported),
+      `sub r3,r0,#1`, then tail `b 0x08275f48` with (this, index,
+      source, strlen(source)). `index` is a UTF-8 CHARACTER position
+      (the callee walks codepoints to resolve it; a past-the-end index
+      appends) while the length argument is a plain BYTE count. Sampled
+      call sites pass `mvn r1,#0x80000000` (0x7fffffff, INT_MAX) as the
+      append-at-end idiom (0x08053a34, 0x08074258). Deviations (the
+      string_object_format contract): the insert core @ 0x08275f48 is
+      NOT ported, so the tail branch dispatches through the
+      STRING_OBJECT_INSERT_CORE slot whose default no-op reproduces only
+      the core's own early-return paths - NOT HOOK-READY until the core
+      is ported and wired in; the strlen keeps its call shape through a
+      volatile fn-pointer read (the string_object_len_plus1 convention).
+      Host tests: NULL and empty source and negative index dispatch
+      nothing and touch nothing; a nonempty source with index 0/7/
+      INT_MAX reaches the core with (this, index, source, strlen) -
+      proven a byte count with the 6-byte/5-codepoint "h\xc3\xa9llo";
+      the wired default leaves the object untouched. match.py
+      structural: same guard set (NULL, empty-first-byte, negative
+      index), the length call, `sub r3,r0,#1`, the (this, index,
+      source, len) argument shuffle and the tail branch; the diff is
+      the crate's fp frame and the two blx-through-volatile-slot
+      dispatches standing in for the direct bl 0x08275e20 / b
+      0x08275f48.
+
   - address: 0x082770e0
     ghidra: FUN_082770e0
     name: utf8_codepoint_count_safe
