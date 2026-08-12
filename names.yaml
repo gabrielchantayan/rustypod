@@ -18038,6 +18038,63 @@ functions:
       pair_header_grand_base_reset ports; only the 0x082b498c helper remains
       behind PAIR_HEADER_ELEMENT_ARRAY_OPS.
 
+  - address: 0x08124a5c
+    ghidra: FUN_08124a5c
+    name: pair_header_destruct
+    size: 52
+    sig: "u8 *pair_header_destruct(u8 *this)"
+    module: app/pair_header_destruct
+    status: ported
+    vars:
+      param_1/r4: this
+      FUN_082646ac: trivial_destructor (direct, ported in
+        cxx/trivial_destructor - the shared empty dtor body)
+      FUN_082aad24: operator_delete (direct, ported in heap/veneers -
+        the tag-2 delete)
+      FUN_0810ec10: pair_header_base_teardown (PAIR_HEADER_BASE_DESTRUCT
+        seam; unported) - the base subobject's own destructor chain
+    notes: >-
+      The NON-DELETING destructor of the 200-byte pair-header service
+      object - the exact counterpart of pair_header_construct @
+      0x08124a38 (ported, cxx/pair_header; same translation unit, 0x24
+      bytes earlier). 52 bytes exactly, 0x08124a5c..0x08124a90,
+      thirteen instructions, no literal pool; the timer-area thunk
+      opens immediately after. 63 bl call sites in the disassembly
+      listing, 0 b (three further words @ 0x081990e0/0xf4/0x08199108
+      decode as bl here but sit outside every Ghidra function extent -
+      likely data).
+      Algorithm: if the word at this+0xc4 (the owned heap sub-object)
+      is non-NULL, run trivial_destructor then operator_delete on it
+      (the crate's documented destruct-then-free pair); clear the word
+      UNCONDITIONALLY (Ghidra's "Subroutine does not return" marking
+      on 0x082aad24 distorts this - the raw ARM falls through); then
+      chain to the base subobject's teardown 0x0810ec10(this + 0xc)
+      and return its result minus 0xc - the multiple-inheritance
+      destructor-chain container_of adjustment. The class layout comes
+      from the ported constructor: vtable + two header words at
+      +0x00/+0x04, the 0x0810ebbc base subobject at +0x0c, the owned
+      pointer at +0xc4 (cleared at construction - NULL is its born
+      state), 0xc8 bytes total. Every call site is itself a destructor
+      deleting an owner-class member (`ldr r0,[r4,#FIELD]; cmp; beq;
+      bl 0x08124a5c; bl 0x082aad24` - e.g. the 0x0814219c class's
+      +0xec/+0xf0/+0xf4 triple, the 0x0811dce8 class's +0xa4), which
+      is what makes this the non-deleting variant: the caller supplies
+      the operator delete.
+      Deviations: the two ported callees are called directly; only
+      0x0810ec10 rides a seam (PAIR_HEADER_BASE_DESTRUCT - the
+      event_list.rs pattern, transmuted firmware default on target,
+      panicking default on host), so the port is hook-ready on target.
+      Host tests: owned word set - destruct+free fire once with the
+      +0xc4 pointer (tag 2, observed through the veneers.rs mock
+      heap), the word is cleared, the base teardown receives
+      this+0xc, and its result returns minus 0xc; owned word clear -
+      no free, word still stored, chain still runs; the -0xc
+      adjustment is exact across three fixture results. match.py
+      structural: same load-test/conditional-delete/clear/chain/
+      subtract shape - LLVM folds the empty trivial_destructor into
+      the operator_delete blne; the diff is the seam blx and the crate
+      fp frame.
+
   - address: 0x083dc0e0
     ghidra: FUN_083dc0e0
     name: pair_assign_guarded
