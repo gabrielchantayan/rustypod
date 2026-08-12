@@ -17,7 +17,7 @@ use crate::drivers::interrupts::cpsr_irq_enabled;
 use crate::drivers::timer::{usec_timer_elapsed, usec_timer_read};
 
 /// S5L8702 I2C bus-0 controller base (the firmware literal at 0x08000500).
-const I2C0_REGISTER_BASE: usize = 0x3c60_0000;
+pub const I2C0_REGISTER_BASE: usize = 0x3c60_0000;
 /// `IICSTAT` control/status offset within the controller.
 const I2C0_STAT_OFFSET: usize = 0x04;
 /// Physical address of the I2C0 `IICSTAT` word.
