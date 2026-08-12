@@ -26,3 +26,4 @@ pub mod string_resolve;
 pub mod string_owner_init;
 pub mod template_binding;
 pub mod vtable_set;
+pub mod view_event;

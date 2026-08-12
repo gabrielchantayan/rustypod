@@ -8743,6 +8743,51 @@ functions:
       6 bl call sites, binary-scanned. Same body as element_array0_at;
       reads the array at +0xc0.
 
+  - address: 0x0810dfc0
+    ghidra: FUN_0810dfc0
+    name: view_event_complete
+    size: 40
+    sig: "u32 view_event_complete(u8 *this)"
+    module: app/view_event
+    status: ported
+    vars:
+      param_1: this (the view/controller)
+      FUN_0810dfe8: stop_view_timer (VIEW_EVENT_OPS slot; the next
+        function - fetches this+0x50 and tail-branches to the ported
+        timer_stop @ 0x0812c6b0 when non-NULL)
+      FUN_0810e170: commit_staged_flags (VIEW_EVENT_OPS slot; cursor
+        walk of the +0x60 collection storing item.byte2 into the
+        global byte table @ 0x08a77a8f[item.byte0] via 0x0819c9d0)
+    notes: >-
+      The shared event-handler epilogue of the retailOS
+      view/controller base class. 40 bytes exactly (ten instructions,
+      no literal pool; the timer-stop wrapper opens immediately at
+      0x0810dfe8). 98 call sites binary-scanned by decoding every B/BL
+      word in osos.dec: 52 bl + 46 b. Algorithm: if the word at
+      this+0x50 (the view's timer) is non-NULL, call 0x0810dfe8(this)
+      to stop it; then call 0x0810e170(this) unconditionally to commit
+      the staged flag bytes from the +0x60 collection into the global
+      byte table @ 0x08a77a8f; return 1 - the framework's "handled"
+      verdict, which consuming sites forward verbatim (e.g.
+      0x0839f6d0, 0x08125678). r1 is never touched: the handler
+      argument tail-callers leave in r1 is dead (both callees ignore
+      or overwrite it), so the recovered ABI takes one argument.
+      Every one of the 98 sites is a UI view/controller event handler
+      (0x080fxxxx..0x0827xxxx) finishing `mov r1, arg; mov r0, this;
+      b/bl 0x0810dfc0` - each does its specific work then tails into
+      this epilogue. Note the original tests this+0x50 here and the
+      wrapper re-tests it; the double test is reproduced. Extent is
+      exact on both sides (0x0810dfc0..0x0810dfe8). Deviations: both
+      callees are unported and ride the VIEW_EVENT_OPS seam
+      (event_list.rs pattern - transmuted firmware defaults on target,
+      panicking defaults on host), so the port is hook-ready on
+      target. Host tests: timer word set - both callees fire in order
+      (stop before commit) with `this` passed through, return 1; timer
+      word clear - only the commit fires, return 1. match.py
+      structural: same load-test/conditional-call/unconditional-call/
+      mov r0,#1 shape; the diff is the ops-table blx indirection and
+      the crate fp frame.
+
   - address: 0x0810dddc
     ghidra: FUN_0810dddc
     name: registry_observer_base_construct
