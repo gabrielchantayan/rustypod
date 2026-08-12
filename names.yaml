@@ -28024,3 +28024,72 @@ functions:
       ::block_bind_registers_empty_copy_list_is_a_no_op (NULL copy
       list: no calls, pending anchor and published block untouched)
       and ::block_bind_registers_seams_stay_wired_to_the_defaults.
+
+  - address: 0x082b5234
+    ghidra: FUN_082b5234
+    name: cg_binding_rebind
+    size: 100
+    sig: "void cg_binding_rebind(CgCodegen *codegen, CgBinding *binding, CgVirtualReg *reg)"
+    module: codegen/ir
+    status: ported
+    renames:
+      param_1/r0: codegen (never read - the register-binding machine's
+        uniform (codegen, binding, reg) call shape; kept for the
+        signature)
+      param_2/r1: binding
+      param_3/r2: reg
+      iVar1/r0: old (the binding's current register, binding +0x10
+        CG_BINDING_REG), then the old register's phi-web parent, the
+        flags word, reg->binding and the rival binding's reg
+      r3: the new register's phi-web parent (reg +0x04 CG_VREG_PARENT),
+        then the 0x200 mask of the dead shift-insert
+      binding +0x18: flags (CG_BINDING_FLAGS; bit 0x100 =
+        CG_BINDING_FLAG_BOUND, bit 0x200 = CG_BINDING_FLAG_BLOCK_ENTRY)
+    notes: >-
+      13 bl call sites, all inside the register-binding machine:
+      0x082b3bbc/0x082b3c08 in cg_block_bind_registers (PORTED,
+      codegen/ir) plus 0x082c10bc, 0x082c115c, 0x082c1204, 0x082c1634,
+      0x082c1688, 0x082cb768, 0x082cbc9c, 0x082cc8d4, 0x082cc8fc,
+      0x082d78f4, 0x082d8160 in the hardware-register allocators. The
+      binding machine's binding<->register re-point, a leaf. Step 1:
+      if the binding's register (binding +0x10) is not reg, install it
+      (str r2,[r1,#0x10] ahead of the old-NULL test), and when the old
+      register is NULL or the two registers' phi-web parents (+0x04,
+      CG_VREG_PARENT) differ, rewrite the flags word (binding +0x18):
+      clear 0x100, then clear 0x200 and OR in 0x200 & (flags << 1)
+      computed from the ALREADY-cleared word - the bic #0x100 at
+      0x082b5264 precedes the and r3,r3,r0,lsl #1 at 0x082b5268, so
+      the bit-move is provably dead and the net effect is flags &=
+      ~0x300 (a latent firmware quirk: the intended 0x100 -> 0x200
+      move never happens; Ghidra folds it to & 0xfffffcff). The port
+      mirrors the instruction sequence verbatim; LLVM folds the dead
+      insert to a single bic #0x300. Step 2: back-point reg +0x08
+      (CG_VREG_BINDING) at the binding UNLESS the register already
+      carries a self-consistent binding (reg +0x08 non-NULL whose
+      +0x10 points back at the register), left in place via bxeq lr.
+      The port is NOT wired: CG_BLOCK_BIND_OPS::binding_rebind keeps
+      its documented no-op default (cg_block_bind_registers' seam
+      decision). REWIRING OPPORTUNITY (deliberately NOT done here):
+      this slot can now default to the ported cg_binding_rebind once
+      siblings FUN_083673b0 (binding_unlink) and FUN_08367358
+      (binding_push) are also ported - and only then should
+      CG_BLOCK_EMIT_OPS::bind_registers bind cg_block_bind_registers.
+      match.py (exit 1, diff expected): the repoint guard/store, the
+      NULL/parent-compare flags condition, the +0x18 flags rewrite,
+      the back-pointer guard (reg +0x08, rival +0x10) and final store
+      all line up; the diff is the crate fp prologue, LLVM folding the
+      dead shift-insert into bic #0x300 (the documented quirk), a
+      swapped ldr order in the parent compare and a strne merge of the
+      guarded store. Host tests:
+      src/codegen/ir.rs::binding_rebind_web_crossing_repoints_and_clears_flags
+      (NULL codegen proves the argument unread; install, flags 0x700
+      -> 0x400, back-pointer on a NULL slot),
+      ::binding_rebind_same_web_keeps_flags (matching parents skip the
+      flags rewrite only),
+      ::binding_rebind_first_bind_clears_flags (NULL old register
+      forces the clear with no parent compare),
+      ::binding_rebind_same_register_skips_the_repoint (old == new
+      short-circuits step 1, step 2 still runs) and
+      ::binding_rebind_respects_a_consistent_back_pointer
+      (self-consistent rival kept via the bxeq guard, stale rival
+      replaced).

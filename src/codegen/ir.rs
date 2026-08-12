@@ -149,6 +149,15 @@
 //!   [`CG_BLOCK_BIND_OPS`] ops-table seam; the
 //!   [`CG_BLOCK_EMIT_OPS`]`::bind_registers` slot keeps its no-op
 //!   default (rewiring is a documented follow-up).
+//! - `cg_binding_rebind` — original: `FUN_082b5234` @ 0x082b5234
+//!   (100 bytes; 13 `bl` call sites, all in the register-binding
+//!   machine). The binding↔register re-point of the binding machine:
+//!   installs the register at the binding's +0x10 slot, clears the
+//!   bound/block-entry flag pair when the register's phi web changes,
+//!   and back-points the register's +0x08 binding slot. Ported, but
+//!   the [`CG_BLOCK_BIND_OPS`]`::binding_rebind` slot keeps its
+//!   documented no-op default (rewiring is a documented follow-up,
+//!   alongside the two sibling slots).
 //! - `cg_cell_table_create` / `cg_cell_table_destroy` — originals
 //!   `FUN_082430c4` @ 0x082430c4 (72 bytes; 1 `bl` caller) /
 //!   `FUN_0824310c` @ 0x0824310c (44 bytes; 2 `bl` callers). The video
@@ -3003,10 +3012,20 @@ pub const CG_VREG_BINDING: usize = 0x08 / 4;
 /// header, or one of the codegen's embedded anchors). Passed as the
 /// first argument to the unlink helper (`ldr r0,[r5,#0x8]`).
 pub const CG_BINDING_ANCHOR: usize = 0x08 / 4;
+/// `cg_binding_t + 0x10` — the register the binding is currently
+/// bound to (written by the rebind helper's `str r2,[r1,#0x10]`,
+/// read by its back-pointer guard `ldr r0,[r0,#0x10]`).
+pub const CG_BINDING_REG: usize = 0x10 / 4;
 /// `cg_binding_t + 0x18` — the binding's flags word (bit 0x100 =
-/// bound/installed, released by the block-exit walker `FUN_082cea24`;
-/// bit 0x200 = [`CG_BINDING_FLAG_BLOCK_ENTRY`]).
+/// [`CG_BINDING_FLAG_BOUND`], released by the block-exit walker
+/// `FUN_082cea24`; bit 0x200 = [`CG_BINDING_FLAG_BLOCK_ENTRY`]).
 pub const CG_BINDING_FLAGS: usize = 0x18 / 4;
+/// Binding-flags bit marking the binding bound/installed: cleared by
+/// [`cg_binding_rebind`] when the re-seat crosses a phi web
+/// (`bic r0,r0,#0x100`), released by the block-exit walker
+/// `FUN_082cea24`, and shifted into [`CG_BINDING_FLAG_BLOCK_ENTRY`]
+/// per drained record by the block-exit flush `FUN_082ccae4`.
+pub const CG_BINDING_FLAG_BOUND: usize = 0x100;
 /// Binding-flags bit [`cg_block_bind_registers`] sets when the copy's
 /// register is in the current block's live-IN set (`orr r0,r0,#0x200`)
 /// and clears when it is only in live-OUT (`bic r0,r0,#0x200`) — marks
@@ -3050,10 +3069,13 @@ pub struct CgBlockBindOps {
     /// `FUN_082b5234` @ 0x082b5234 (100 bytes; 13 `bl` call sites,
     /// all inside the register-binding machine) — the
     /// binding↔register re-point: installs `reg` at binding +0x10
-    /// (unless already there), shifts flags bit 0x100 into 0x200 when
-    /// the old and new registers' phi-web parents (+0x04) differ, and
-    /// back-points reg +0x08 ([`CG_VREG_BINDING`]) at the binding.
-    /// Default: no rebind.
+    /// (unless already there), clears flags bits 0x100/0x200 when the
+    /// old and new registers' phi-web parents (+0x04) differ, and
+    /// back-points reg +0x08 ([`CG_VREG_BINDING`]) at the binding
+    /// unless the register already has a self-consistent binding.
+    /// PORTED as [`cg_binding_rebind`]; the slot KEEPS its no-op
+    /// default (the seam decision of [`cg_block_bind_registers`] —
+    /// rewire once all three callees are ported). Default: no rebind.
     pub binding_rebind:
         unsafe extern "C" fn(codegen: *mut CgCodegen, binding: *mut CgBinding, reg: *mut CgVirtualReg),
     /// `FUN_08367358` @ 0x08367358 (56 bytes; 8 `bl` + 2 tail `b`
@@ -3093,6 +3115,76 @@ pub const DEFAULT_CG_BLOCK_BIND_OPS: CgBlockBindOps = CgBlockBindOps {
 /// [`CgBlockBindOps`].
 #[cfg_attr(target_os = "none", no_mangle)]
 pub static mut CG_BLOCK_BIND_OPS: CgBlockBindOps = DEFAULT_CG_BLOCK_BIND_OPS;
+
+/// cg_binding_rebind — original: `FUN_082b5234` @ 0x082b5234 (100
+/// bytes; **13 `bl` call sites**, all inside the register-binding
+/// machine — two in [`cg_block_bind_registers`], the rest in the
+/// hardware-register allocators at 0x082c10bc-0x082d8160).
+///
+/// The binding machine's binding↔register re-point. Leaf (no calls);
+/// the `codegen` argument is never read — it only shapes the uniform
+/// `(codegen, binding, reg)` call the binding machine uses. Two
+/// steps:
+///
+/// 1. **Re-point** (`ldr r0,[r1,#0x10]` / `str r2,[r1,#0x10]`): if
+///    the binding's current register ([`CG_BINDING_REG`], +0x10) is
+///    not `reg`, install `reg`, and when the re-seat is the first
+///    bind (old register NULL) or crosses a phi web — the old and new
+///    registers' parents (+0x04, [`CG_VREG_PARENT`]) differ — rewrite
+///    the flags word ([`CG_BINDING_FLAGS`], +0x18): clear
+///    [`CG_BINDING_FLAG_BOUND`] (0x100), then clear
+///    [`CG_BINDING_FLAG_BLOCK_ENTRY`] (0x200) and OR in `0x200 &
+///    (flags << 1)` computed from the ALREADY-cleared word — so the
+///    inserted bit is provably zero and the net effect is `flags &=
+///    !0x300`. The caller's own orr/bic of bit 0x200 then applies to
+///    this post-rebind value.
+/// 2. **Back-point** (`str r1,[r2,#0x8]`): point the register's
+///    binding slot ([`CG_VREG_BINDING`], +0x08) at the binding —
+///    UNLESS the register already carries a self-consistent binding
+///    (reg +0x08 non-NULL whose +0x10 points back at the register),
+///    which is left in place (`bxeq lr`).
+///
+/// DEVIATIONS: none structural — the port mirrors the disassembly
+/// instruction-for-instruction, including the dead shift-insert of
+/// step 1: the original's `bic r0,r0,#0x100` at 0x082b5264 runs
+/// BEFORE `and r3,r3,r0, lsl #0x1` at 0x082b5268, so the bit-move
+/// samples the cleared word and always yields zero (a latent firmware
+/// quirk — the intended bit 0x100 → 0x200 move never happens).
+/// Ghidra folds the rewrite to `& 0xfffffcff`, matching the executed
+/// semantics; LLVM folds the dead insert the same way. The unused
+/// `codegen` parameter is kept for the original's signature. Ported
+/// but NOT wired: the [`CG_BLOCK_BIND_OPS`]`::binding_rebind` slot
+/// keeps its documented no-op default (the seam decision of
+/// [`cg_block_bind_registers`] — rewiring is a follow-up once all
+/// three callees are ported).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_binding_rebind(
+    _codegen: *mut CgCodegen,
+    binding: *mut CgBinding,
+    reg: *mut CgVirtualReg,
+) {
+    let binding = binding as *mut u8;
+    let reg = reg as *mut u8;
+    let old = slot(binding, CG_BINDING_REG).read();
+    if old != reg {
+        slot(binding, CG_BINDING_REG).write(reg);
+        if old.is_null() || slot(reg, CG_VREG_PARENT).read() != slot(old, CG_VREG_PARENT).read() {
+            let flags = word(binding, CG_BINDING_FLAGS);
+            let mut value = flags.read() & !CG_BINDING_FLAG_BOUND;
+            // The original's `and r3,r3,r0, lsl #0x1` samples the
+            // ALREADY-cleared word: the bit-move into 0x200 is dead
+            // (firmware quirk), kept verbatim.
+            let moved = CG_BINDING_FLAG_BLOCK_ENTRY & (value << 1);
+            value = (value & !CG_BINDING_FLAG_BLOCK_ENTRY) | moved;
+            flags.write(value);
+        }
+    }
+    let current = slot(reg, CG_VREG_BINDING).read();
+    if current.is_null() || slot(current, CG_BINDING_REG).read() != reg {
+        slot(reg, CG_VREG_BINDING).write(binding);
+    }
+}
 
 /// cg_block_bind_registers — original: `FUN_082b3b5c` @ 0x082b3b5c
 /// (216 bytes; **1 `bl` call site** — 0x082c0ef0 inside
@@ -8171,6 +8263,214 @@ mod tests {
                 "FUN_08367358 stays a documented no-op until ported"
             );
         }
+        teardown();
+    }
+
+    // --- cg_binding_rebind ------------------------------------------
+
+    /// A binding, its old and new registers and a rival binding for
+    /// the back-pointer guard.
+    struct RebindFixture {
+        /// Binding record (+0x10 reg, +0x18 flags).
+        binding: [usize; 7],
+        /// Register records (+0x04 parent, +0x08 binding).
+        old_reg: [usize; 3],
+        new_reg: [usize; 3],
+        /// Rival binding already hanging off the new register.
+        rival: [usize; 7],
+    }
+
+    impl RebindFixture {
+        fn new() -> std::boxed::Box<RebindFixture> {
+            std::boxed::Box::new(RebindFixture {
+                binding: [0; 7],
+                old_reg: [0; 3],
+                new_reg: [0; 3],
+                rival: [0; 7],
+            })
+        }
+
+        fn binding_ptr(&mut self) -> *mut CgBinding {
+            self.binding.as_mut_ptr() as *mut CgBinding
+        }
+
+        fn new_reg_ptr(&mut self) -> *mut CgVirtualReg {
+            self.new_reg.as_mut_ptr() as *mut CgVirtualReg
+        }
+
+        /// Seats the binding on `old_reg` with the given phi-web
+        /// parents and flags, no back-pointer on the new register.
+        fn seat(&mut self, old_parent: usize, new_parent: usize, flags: usize) {
+            self.old_reg[CG_VREG_PARENT] = old_parent;
+            self.new_reg[CG_VREG_PARENT] = new_parent;
+            self.binding[CG_BINDING_REG] = self.old_reg.as_mut_ptr() as usize;
+            self.binding[CG_BINDING_FLAGS] = flags;
+            self.new_reg[CG_VREG_BINDING] = 0;
+        }
+    }
+
+    #[test]
+    fn binding_rebind_web_crossing_repoints_and_clears_flags() {
+        let _g = setup();
+        let mut f = RebindFixture::new();
+        f.seat(0x1111, 0x2222, 0x700); // different phi webs, both flag bits set
+        unsafe {
+            // A NULL codegen proves the argument is never read.
+            cg_binding_rebind(
+                core::ptr::null_mut(),
+                f.binding_ptr(),
+                f.new_reg_ptr(),
+            );
+
+            assert_eq!(
+                f.binding[CG_BINDING_REG],
+                f.new_reg.as_mut_ptr() as usize,
+                "the new register is installed at binding +0x10"
+            );
+            assert_eq!(
+                f.binding[CG_BINDING_FLAGS], 0x400,
+                "a web-crossing re-seat clears bits 0x100/0x200, keeps the rest"
+            );
+            assert_eq!(
+                f.new_reg[CG_VREG_BINDING],
+                f.binding.as_mut_ptr() as usize,
+                "the register's NULL binding slot back-points at the binding"
+            );
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn binding_rebind_same_web_keeps_flags() {
+        let _g = setup();
+        let mut f = RebindFixture::new();
+        f.seat(0x1111, 0x1111, 0x300); // same phi web
+        unsafe {
+            cg_binding_rebind(
+                core::ptr::null_mut(),
+                f.binding_ptr(),
+                f.new_reg_ptr(),
+            );
+
+            assert_eq!(
+                f.binding[CG_BINDING_REG],
+                f.new_reg.as_mut_ptr() as usize,
+                "the new register is still installed"
+            );
+            assert_eq!(
+                f.binding[CG_BINDING_FLAGS], 0x300,
+                "same-web re-seat never touches the flags word"
+            );
+            assert_eq!(
+                f.new_reg[CG_VREG_BINDING],
+                f.binding.as_mut_ptr() as usize,
+                "the back-pointer is still written"
+            );
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn binding_rebind_first_bind_clears_flags() {
+        let _g = setup();
+        let mut f = RebindFixture::new();
+        f.seat(0x1111, 0x1111, 0x300);
+        f.binding[CG_BINDING_REG] = 0; // never bound: old register NULL
+        unsafe {
+            cg_binding_rebind(
+                core::ptr::null_mut(),
+                f.binding_ptr(),
+                f.new_reg_ptr(),
+            );
+
+            assert_eq!(
+                f.binding[CG_BINDING_REG],
+                f.new_reg.as_mut_ptr() as usize,
+                "the first bind installs the register"
+            );
+            assert_eq!(
+                f.binding[CG_BINDING_FLAGS], 0,
+                "a NULL old register forces the flags clear (no parent compare)"
+            );
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn binding_rebind_same_register_skips_the_repoint() {
+        let _g = setup();
+        let mut f = RebindFixture::new();
+        f.seat(0x1111, 0x2222, 0x300);
+        // The binding already points at the NEW register: even with
+        // different parents the repoint/flags step is skipped.
+        f.binding[CG_BINDING_REG] = f.new_reg.as_mut_ptr() as usize;
+        unsafe {
+            cg_binding_rebind(
+                core::ptr::null_mut(),
+                f.binding_ptr(),
+                f.new_reg_ptr(),
+            );
+
+            assert_eq!(
+                f.binding[CG_BINDING_FLAGS], 0x300,
+                "old == new short-circuits before the flags word"
+            );
+            assert_eq!(
+                f.new_reg[CG_VREG_BINDING],
+                f.binding.as_mut_ptr() as usize,
+                "the back-pointer step still runs"
+            );
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn binding_rebind_respects_a_consistent_back_pointer() {
+        let _g = setup();
+        let mut f = RebindFixture::new();
+        f.seat(0x1111, 0x2222, 0x100);
+        // The new register already carries a SELF-CONSISTENT rival
+        // binding: the guard's `bxeq lr` leaves it in place.
+        f.new_reg[CG_VREG_BINDING] = f.rival.as_mut_ptr() as usize;
+        f.rival[CG_BINDING_REG] = f.new_reg.as_mut_ptr() as usize;
+        unsafe {
+            cg_binding_rebind(
+                core::ptr::null_mut(),
+                f.binding_ptr(),
+                f.new_reg_ptr(),
+            );
+
+            assert_eq!(
+                f.new_reg[CG_VREG_BINDING],
+                f.rival.as_mut_ptr() as usize,
+                "a self-consistent binding is not stolen"
+            );
+            assert_eq!(
+                f.binding[CG_BINDING_REG],
+                f.new_reg.as_mut_ptr() as usize,
+                "the repoint step is unaffected by the guard"
+            );
+
+            // A STALE rival (points at a different register) is
+            // overwritten.
+            f.rival[CG_BINDING_REG] = f.old_reg.as_mut_ptr() as usize;
+            cg_binding_rebind(
+                core::ptr::null_mut(),
+                f.binding_ptr(),
+                f.new_reg_ptr(),
+            );
+
+            assert_eq!(
+                f.new_reg[CG_VREG_BINDING],
+                f.binding.as_mut_ptr() as usize,
+                "a stale back-pointer is replaced"
+            );
+        }
+        drop(f);
         teardown();
     }
 }
