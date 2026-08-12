@@ -23,7 +23,8 @@
 //! SQLite sources of that era:
 //!
 //! ```text
-//! sqlite3 (db):  +0x1e mallocFailed (u8)
+//! sqlite3 (db):  +0x14 errCode (i32), +0x1e mallocFailed (u8),
+//!                +0xc8 pErr (*mut Mem)
 //! Vdbe:          +0x00 db,   +0x0c nOp,     +0x10 nOpAlloc, +0x14 aOp,
 //!                +0x18 nLabel, +0x1c nLabelAlloc, +0x20 aLabel,
 //!                +0xff expired
@@ -71,6 +72,7 @@ pub mod cell_size;
 pub mod data_size;
 pub mod dequote;
 pub mod ephemeral_fn;
+pub mod error;
 pub mod error_msg;
 pub mod expr_code;
 pub mod expr_delete;

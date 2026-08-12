@@ -15518,6 +15518,30 @@ functions:
       load_be32 / sqlite3Get4byte @ 0x0837a158.
 
   # ---- Scouted in 0x08360000-0x0838ffff, identified only ----
+  - address: 0x083766f4
+    ghidra: FUN_083766f4
+    name: sqlite_error
+    size: 136
+    sig: "void sqlite_error(sqlite3 *db, int err_code, const char *format, ...)"
+    module: sqlite/error
+    status: ported
+    vars: {param_1: db, param_2: err_code, param_3: format, param_4: "variadic word 0 (args[0])", r4: db, r5: err_code, iVar1: error_value}
+    notes: >-
+      SQLite 3.5.9's sqlite3Error (util.c). 27 unconditional bl call
+      sites plus conditional blne 0x082c443c and bleq 0x082dc074 (29
+      total binary-scanned): NULL db returns; otherwise pErr (+0xc8) is
+      created through sqlite3ValueNew @ 0x083866c0 if absent, and an OOM
+      return leaves even errCode unchanged. On success errCode (+0x14)
+      receives err_code. A NULL format calls sqlite3ValueSetStr @
+      0x083866ec with (pErr, 0, NULL, SQLITE_UTF8, SQLITE_STATIC); a
+      format is expanded through sqlite3VMPrintf @ 0x08386454 with a
+      va_list at the spilled r3 word, then installed with length -1 and
+      the firmware's xDel pool literal 0x0838581c (upstream passes
+      sqlite3_free). The post-format pErr reload is deliberate. ValueNew
+      and ValueSetStr are unported house dispatch seams (OOM and no-op
+      defaults); VMPrintf uses the existing SQLITE_VM_PRINTF seam. Host
+      tests cover NULL db, cached/create/OOM pErr paths, clear versus
+      formatted results, xDel, and the reload.
   - address: 0x083767a0
     ghidra: FUN_083767a0
     name: sqlite_error_msg
@@ -27275,3 +27299,31 @@ functions:
       facade). match.py (exit 1, diff expected): same ldr r0,[r0,#4] +
       tail-branch structure; the diff is the crate fp frame and the
       seam's ldr/bx static dispatch in place of the direct b 0x08296ec0.
+  - address: 0x08296ec0
+    ghidra: FUN_08296ec0
+    name: facade_registry_walk
+    size: 60
+    sig: "FacadeObject *facade_registry_walk(InterfaceNode *interface, u32 selector)"
+    module: app/facade_registry_walk
+    status: ported
+    vars: {param_1: interface, param_2: selector, r0: node, r1: selector}
+    notes: >-
+      60 bytes. The facade registry walk the 8-byte facade_for_selector
+      veneer @ 0x0818a0bc tail-branches to (Ghidra inlines it there,
+      which is why 0818a0bc's decomp shows a loop). node = interface;
+      facade = node->field_0x08; if facade != NULL and (selector == 0 or
+      (node->state_0x19 | (facade->kind_0x08 - 1)) == 0) return facade;
+      on a miss call trace-static accessor FUN_0814a08c (dead argument,
+      result discarded) and node = FUN_0814a030() (fixed default root
+      0x08a778f4, born published), selector = 0, loop. Kind 0 wraps its
+      subtraction to 0xffff_ffff, so only kind 1 + state 0 accepts a
+      nonzero selector. 9 direct bl call sites (0x080a28cc, 0x0813a34c,
+      0x0813a3ec, 0x0813a6d4, 0x0813a9d8, 0x08296f50, 0x082971a8,
+      0x08297200, 0x08297288) plus the 0x0818a0c0 tail branch. The two
+      ADS local-static accessors are fixed-address target calls; host
+      builds use a no-op trace accessor and a born-published
+      house-static default root with test seams replacing both.
+      Verified by src/app/facade_registry_walk.rs::tests (accept with
+      selector 0, kind-1/state-0 match, kind-0 wrap rejection, busy
+      state rejection, NULL facade fallback, trace accessor invoked per
+      miss, loop terminates at the default root).
