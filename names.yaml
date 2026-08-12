@@ -27895,3 +27895,38 @@ functions:
       SQLITE_OK and SQLITE_NOMEM; shipped error.rs slot default is the
       port while the callee seam ships the SQLITE_NOMEM stub).
       match.py not run (host-only verification this round).
+
+  - address: 0x08003d44
+    ghidra: FUN_08003d44
+    name: task_delay
+    size: 44
+    sig: "void task_delay(u32 task, u32 ticks)"
+    module: kernel/task_delay
+    status: ported
+    vars: {param_1: task, param_2: ticks, local_14: request_selector, local_10: request_task, uStack_c: request_ticks, local_8: scratch_pointer, auStack_34: scratch, FUN_08003660: gateway_dispatch}
+    notes: >-
+      RTXC timed task-delay gateway stub, service 0x14 (20): builds a
+      0x34-byte frame — pushed-lr slot, uninitialized 32-byte scratch at
+      sp+4..sp+0x24, then the 4-word request {0x14, task (r0), ticks (r1),
+      scratch_pointer = sp+4} — and hands &request to the foreign gateway
+      dispatcher 0x08003660, returning void (nothing read back). osos
+      mirror of mask ROM 0x22003d44, aliased by thunk 0x08037e88
+      (kernel/task_lock.rs rom_svc_22003d44: 15 osos callers, always
+      r0 = 0 = current task, r1 = small tick count 1/0x64) and standing
+      behind kernel/task.rs task_sleep's nonzero-ticks path. The mirror's
+      only direct bl caller is the ROM tick-housekeeping path @ 0x08002dc4
+      (delays the current task 100 ticks). Reference C:
+      decomp/c/000/08003d44_FUN_08003d44.c; assembly 0x08003d44..0x08003d70.
+      Deviations (heap/gateway_service1.rs precedent): indirect dispatch
+      through the shared volatile heap::rom_task_start::ROM_GATEWAY_OPS
+      hook (unwired default spins); scratch and pushed-lr slot modeled with
+      MaybeUninit, never written. Host tests prove one dispatch, the exact
+      request words, scratch geometry (word 3 = &request - 0x20), edge
+      argument forwarding (task u32::MAX, ticks 0/u32::MAX), and void
+      survival of a full frame clobber. match.py structural diff expected
+      (hook indirection). Rewiring opportunity (deliberately NOT done here
+      — src/runtime is another porter's territory): runtime/i2c0_idle.rs
+      and runtime/i2c0_transfer.rs reach this routine as task_delay(0, 1)
+      through their target-default seams (ROM_TASK_DELAY = 0x08003d44);
+      those defaults can now bind the ported kernel::task_delay symbol
+      instead of the raw ROM address.
