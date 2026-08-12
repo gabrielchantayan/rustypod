@@ -60,6 +60,12 @@
 //! - Additions wrap (`wrapping_add`/`wrapping_sub`), matching the
 //!   original's `add`/`sub`; a debug build must not panic where the
 //!   ARM body wraps.
+//!
+//! The sibling `se(v)` wrapper `FUN_082c5dcc` @ 0x082c5dcc is ported
+//! below as [`cg_exp_golomb_se_read`]; it calls the ue reader
+//! directly (a ported callee retires its seam) and is a pure
+//! sign-fold of the returned code number — it never touches the
+//! cursor, `bits_out`, or the flag itself.
 
 use crate::h264::bitstream::{h264_bitstream_advance, RbspBitReader};
 
@@ -158,6 +164,54 @@ pub unsafe extern "C" fn cg_exp_golomb_ue_read(
     top_bit
         .wrapping_add(suffix & !top_bit)
         .wrapping_sub(1)
+}
+
+/// cg_exp_golomb_se_read — original: `FUN_082c5dcc` @ 0x082c5dcc
+/// (36 bytes, 9 instructions, no literal pool).
+///
+/// The H.264 `se(v)` signed Exp-Golomb wrapper over
+/// [`cg_exp_golomb_ue_read`]: reads one unsigned code number through
+/// the shared RBSP cursor, then folds it to a signed value:
+///
+/// ```text
+/// code_num = ue_read(reader, bits_out, flag)
+/// if code_num == 0: return 0                 // popeq {pc}
+/// half = code_num asr 1                      // mov r0, r0, asr #1
+/// return -half     if code_num is even       // rsbeq r0, r0, #0
+/// return  half + 1 if code_num is odd        // addne r0, r0, #1
+/// ```
+///
+/// which is the standard `se(v)` mapping 0→0, 1→1, 2→−1, 3→2, 4→−2,
+/// 5→3, … The three arguments arrive in r0/r1/r2 and reach the ue
+/// reader untouched — the wrapper forwards them verbatim and never
+/// moves the cursor, writes `bits_out`, or clears the flag itself;
+/// every bitstream side effect (including the stored `n + 1` the
+/// caller advances by) is the callee's, even on the `code_num == 0`
+/// early return.
+///
+/// Deviations: none. The fold uses `as i32` + arithmetic `>> 1` for
+/// the original's `asr`, and plain negation/addition: no overflow is
+/// reachable (the extreme folds are `code_num = 0xffff_fffe → 1` and
+/// `0xffff_ffff → 0`), so wrapping operators would be dead weight.
+/// The ue callee is ported, so per the house convention it takes a
+/// direct call and no new seam is introduced.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_exp_golomb_se_read(
+    reader: *mut RbspBitReader,
+    bits_out: *mut i32,
+    emulation_byte_pending: *mut u8,
+) -> i32 {
+    let code_num = cg_exp_golomb_ue_read(reader, bits_out, emulation_byte_pending);
+    if code_num == 0 {
+        return 0;
+    }
+    let half = (code_num as i32) >> 1;
+    if code_num & 1 == 0 {
+        -half
+    } else {
+        half + 1
+    }
 }
 
 #[cfg(test)]
@@ -729,6 +783,151 @@ mod tests {
         let (bytes, _total) = pack_ue_words(&values, 5);
         let payload = Payload::new(&bytes);
         decode_and_compare(&payload, &values, 5, &bytes);
+        teardown();
+        drop(guard);
+    }
+
+    // ----- se(v) wrapper tests -----
+
+    /// Script the ue seam mocks to yield `code_num`: pick the natural
+    /// prefix length and hand back `code_num + 1` as the suffix word
+    /// (its mandatory leading 1 is masked off by the fold).
+    fn setup_code_num(code_num: u32) -> MutexGuard<'static, ()> {
+        let lz = 31 - code_num.wrapping_add(1).leading_zeros();
+        setup_mocks(lz, code_num.wrapping_add(1))
+    }
+
+    /// Textbook H.264 `se(v)` mapping, computed independently of the
+    /// port's instruction-level fold. Only valid for code numbers
+    /// without the sign bit set (conforming range); the degenerate
+    /// folds are asserted literally in the sweep below.
+    fn reference_se(code_num: u32) -> i32 {
+        assert!(code_num < 0x8000_0000);
+        let k = ((code_num + 1) / 2) as i32;
+        if code_num & 1 == 1 { k } else { -k }
+    }
+
+    #[test]
+    fn se_maps_code_nums_like_the_original() {
+        // Conforming range: 0→0, 1→1, 2→−1, 3→2, 4→−2, …
+        for code_num in 0u32..=64 {
+            let _g = setup_code_num(code_num);
+            let (_buf, mut reader) = scratch_reader(24);
+            let mut bits_out = BITS_OUT_SENTINEL;
+            let mut flag = 0xA5u8;
+            unsafe {
+                core::ptr::addr_of_mut!(BITS_OUT_FOR_MOCKS).write(&mut bits_out);
+                let got = cg_exp_golomb_se_read(&mut reader, &mut bits_out, &mut flag);
+                assert_eq!(got, reference_se(code_num), "code_num {code_num}");
+                // bits_out parity with the ue path: n + 1 stored by
+                // the callee even on the code_num == 0 early return.
+                let lz = 31 - (code_num + 1).leading_zeros();
+                assert_eq!(bits_out, (lz + 1) as i32, "bits_out {code_num}");
+                // Cursor parity: exactly the prefix is committed.
+                assert_eq!(reader.bit_pos, 24 + lz as i32, "cursor {code_num}");
+            }
+            teardown();
+        }
+        // Degenerate folds, expected values from the ARM sequence
+        // (asr #1, then rsbeq/addne) — NOT the textbook mapping. The
+        // (lz, suffix) scripts are chosen so the ue fold yields the
+        // target code number (code_num + 1 is unrepresentable for
+        // 0xffff_ffff, and the fold's top bit is masked out of the
+        // suffix, so lz = 31 cannot produce it directly either).
+        for (lz, suffix, code_num, want) in [
+            (31u32, 0xffff_ffffu32, 0xffff_fffeu32, 1i32), // even: -((-2) asr 1)
+            (32, 0, 0xffff_ffff, 0),                       // odd:  ((-1) asr 1) + 1
+            (31, 0x8000_0001, 0x8000_0000, 0x4000_0000),   // even: -(i32::MIN asr 1)
+            (31, 0x8000_0002, 0x8000_0001, -0x3fff_ffff),  // odd:  (i32::MIN+1 asr 1) + 1
+        ] {
+            let _g = setup_mocks(lz, suffix);
+            let (_buf, mut reader) = scratch_reader(0);
+            let mut bits_out = 0i32;
+            let mut flag = 0u8;
+            unsafe {
+                core::ptr::addr_of_mut!(BITS_OUT_FOR_MOCKS).write(&mut bits_out);
+                // Sanity: the scripted seam really yields code_num.
+                assert_eq!(reference_fold(lz, suffix), code_num, "script {code_num:#x}");
+                let got = cg_exp_golomb_se_read(&mut reader, &mut bits_out, &mut flag);
+                assert_eq!(got, want, "code_num {code_num:#x}");
+            }
+            teardown();
+        }
+    }
+
+    #[test]
+    fn se_forwards_arguments_verbatim_to_ue() {
+        let _g = setup_code_num(5); // lz = 2, suffix = 6
+        let (_buf, mut reader) = scratch_reader(16);
+        let mut bits_out = BITS_OUT_SENTINEL;
+        let mut flag = 0u8;
+        let flag_addr = &mut flag as *mut u8 as usize;
+        unsafe {
+            core::ptr::addr_of_mut!(BITS_OUT_FOR_MOCKS).write(&mut bits_out);
+            let got = cg_exp_golomb_se_read(&mut reader, &mut bits_out, &mut flag);
+            assert_eq!(got, 3);
+            assert_eq!(reader.bit_pos, 16 + 2, "only the ue-side prefix commit");
+        }
+        let log = calls();
+        // Exactly the two ue-primitive seam calls — the wrapper adds
+        // no bitstream traffic of its own.
+        assert_eq!(log.len(), 2, "lz then read, nothing else");
+        assert_eq!(log[0].0, "lz");
+        assert_eq!(log[1].0, "read");
+        assert_eq!(log[1].1, 3, "forwarded read count n + 1");
+        for rec in log {
+            assert_eq!(rec.2, flag_addr, "verbatim flag pointer");
+        }
+        teardown();
+    }
+
+    /// Independent naive `se(v)` decode over the RBSP, layered on the
+    /// naive ue reference.
+    fn reference_se_rbsp(rbsp: &[u8], bit_pos: usize) -> (i32, usize) {
+        let (code_num, len) = reference_ue(rbsp, bit_pos);
+        let k = ((code_num + 1) / 2) as i32;
+        (if code_num & 1 == 1 { k } else { -k }, len)
+    }
+
+    #[test]
+    fn se_decodes_known_words_end_to_end() {
+        let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            core::ptr::addr_of_mut!(CG_EXP_GOLOMB_OPS).write(MODEL_OPS);
+        }
+        // code_nums 0..=20 cover se values -10..=10 incl. 0, ±1; the
+        // large ones force the long zero prefixes that guarantee
+        // 00 00 xx byte triples (emulation prevention).
+        let code_nums: std::vec::Vec<u32> = (0..=20)
+            .chain([100, 1000, 1001, 65_535, 65_536, 1_000_000])
+            .collect();
+        let (ebsp, _total) = pack_ue_words(&code_nums, 3);
+        let raw = insert_emulation_prevention(&ebsp);
+        assert!(raw.len() > ebsp.len(), "must exercise EP bytes");
+        let payload = Payload::new(&raw);
+        let rbsp = rbsp_of(&raw);
+        assert_eq!(rbsp, ebsp, "rbsp round-trip");
+
+        let mut reader = payload.reader();
+        reader.bit_pos = 3; // misaligned start
+        let mut flag = 0u8;
+        let mut rbsp_pos = 3usize;
+        for (idx, &code_num) in code_nums.iter().enumerate() {
+            let mut bits_out = 0i32;
+            let got = unsafe {
+                let value = cg_exp_golomb_se_read(&mut reader, &mut bits_out, &mut flag);
+                // The caller side of the shared contract: advance
+                // n + 1. Cursor parity with the ue path is asserted
+                // exactly in the mock tests above; here the proof is
+                // that every subsequent element still decodes.
+                h264_bitstream_advance(&mut reader, bits_out, &mut flag);
+                value
+            };
+            let (want, len) = reference_se_rbsp(&rbsp, rbsp_pos);
+            assert_eq!(got, want, "value {idx} (code_num {code_num})");
+            assert_eq!(bits_out as usize, (len - 1) / 2 + 1, "bits_out {idx}");
+            rbsp_pos += len;
+        }
         teardown();
         drop(guard);
     }

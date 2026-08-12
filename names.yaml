@@ -26708,6 +26708,47 @@ functions:
       top + (suffix & ~top) into an orr with a cmp/#31 guard for the
       32..=255 shift case (value-identical: a single-bit addend turns
       add into or).
+
+  # --- H.264 / MPEG-4 AVC video decoder: Exp-Golomb se(v) wrapper ---
+  - address: 0x082c5dcc
+    ghidra: FUN_082c5dcc
+    name: cg_exp_golomb_se_read
+    size: 36
+    sig: "i32 cg_exp_golomb_se_read(RbspBitReader *reader, i32 *bits_out, u8 *emulation_byte_pending)"
+    module: codegen/exp_golomb
+    vars: {param_1: reader, param_2: bits_out, param_3: emulation_byte_pending}
+    status: ported
+    notes: >-
+      The H.264 se(v) signed Exp-Golomb wrapper over
+      cg_exp_golomb_ue_read @ 0x082c5df0 (see its entry for the shared
+      RbspBitReader cursor layout and the CG_EXP_GOLOMB_OPS seam
+      conventions). 36 bytes, 9 instructions, no literal pool. Ghidra
+      shows FUN_082c5dcc(void) — wrong: the body is push {lr};
+      bl 0x082c5df0; cmp r0,#0; popeq {pc}; tst r0,#1;
+      mov r0, r0, asr #1; rsbeq r0, r0, #0; addne r0, r0, #1;
+      pop {pc}, so r0/r1/r2 flow into the callee untouched and the
+      wrapper forwards reader/bits_out/emulation_byte_pending
+      verbatim, verified against the raw words in osos.dec.
+      Algorithm: code_num = ue_read(...); if code_num == 0 return 0;
+      half = code_num asr 1; return -half when code_num is even,
+      half + 1 when odd — the standard se(v) mapping 0→0, 1→1, 2→−1,
+      3→2, 4→−2, … Every bitstream side effect (cursor commit, the
+      stored n + 1, flag passthrough) is the callee's, including on
+      the code_num == 0 early return.
+      Deviations: none. The ue callee is ported, so it takes a direct
+      call and no new seam is introduced; plain (non-wrapping)
+      negation/addition since no overflow is reachable (extreme folds:
+      0xfffffffe → 1, 0xffffffff → 0). Rust port and host tests:
+      src/codegen/exp_golomb.rs — mock-driven sweep of code_nums
+      0..=64 against the textbook mapping plus the four degenerate
+      sign-bit folds scripted at the seam, argument-forwarding and
+      bits_out/cursor parity probes with the ue path, and an
+      end-to-end decode of known se words over the faithful primitive
+      transcriptions with emulation-prevention bytes inserted, checked
+      against a naive RBSP-space reference. match.py: same
+      push/bl/cmp/tst/asr/rsbeq/addne structure; the diff is the crate
+      fp frame and LLVM turning the popeq early return into a branch
+      to a shared mov r0,#0 / pop epilogue.
   - address: 0x080f4aa8
     ghidra: FUN_080f4aa8
     name: path_exists
