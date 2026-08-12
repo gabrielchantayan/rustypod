@@ -31,10 +31,12 @@
 //! This factory then overwrites the vtable with its derived literal
 //! `DAT_081034ac = 0x08980744`.
 //!
-//! The base/message-kind constructor and payload constructor are not ported
-//! and therefore ride [`QUEUED_MESSAGE_OPS`]. `operator_new(0x10)` is already
-//! ported and is called directly. Target defaults call the firmware helpers;
-//! host defaults panic, so test callers must install explicit recording ops.
+//! The base/message-kind constructor is now ported
+//! ([`crate::app::message_kind::message_kind_construct`]) and is the wired
+//! default for the base slot; only the payload constructor still rides
+//! [`QUEUED_MESSAGE_OPS`]. `operator_new(0x10)` is already ported and is
+//! called directly. The payload host default panics, so test callers must
+//! install an explicit recording payload op.
 
 use core::ptr::addr_of_mut;
 
@@ -76,20 +78,22 @@ const _: [u8; 0x0c] = [0; core::mem::size_of::<QueuedMessage>()];
 pub struct QueuedMessageOps {
     /// `FUN_08266a48(storage, 0x16)`: runs the message-kind base
     /// constructor over caller-owned storage and returns its object.
+    /// Ported as [`crate::app::message_kind::message_kind_construct`];
+    /// the slot remains replaceable for host-side recording.
     pub construct_base: unsafe extern "C" fn(*mut QueuedMessage, u32) -> *mut QueuedMessage,
     /// `FUN_081b9248(block, code, bytes, byte_count)`: constructs and
     /// possibly copies the payload, returning the nested object.
     pub construct_payload: unsafe extern "C" fn(*mut u8, u32, *const u8, u32) -> *mut u8,
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_construct_base(
+/// Wired default for the base-constructor slot: the ported
+/// [`crate::app::message_kind::message_kind_construct`] @ 0x08266a48,
+/// adapted to this module's envelope pointer type (ABI-identical).
+unsafe extern "C" fn ported_construct_base(
     storage: *mut QueuedMessage,
     kind: u32,
 ) -> *mut QueuedMessage {
-    let f: unsafe extern "C" fn(*mut QueuedMessage, u32) -> *mut QueuedMessage =
-        unsafe { core::mem::transmute(0x0826_6a48usize) };
-    unsafe { f(storage, kind) }
+    unsafe { crate::app::message_kind::message_kind_construct(storage.cast(), kind) }.cast()
 }
 
 #[cfg(target_os = "none")]
@@ -105,14 +109,6 @@ unsafe extern "C" fn firmware_construct_payload(
 }
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_construct_base(
-    _storage: *mut QueuedMessage,
-    _kind: u32,
-) -> *mut QueuedMessage {
-    panic!("queued_message_construct requires base constructor 0x08266a48")
-}
-
-#[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_construct_payload(
     _block: *mut u8,
     _code: u32,
@@ -124,18 +120,19 @@ unsafe extern "C" fn missing_construct_payload(
 
 #[cfg(target_os = "none")]
 const DEFAULT_QUEUED_MESSAGE_OPS: QueuedMessageOps = QueuedMessageOps {
-    construct_base: firmware_construct_base,
+    construct_base: ported_construct_base,
     construct_payload: firmware_construct_payload,
 };
 
 #[cfg(not(target_os = "none"))]
 const DEFAULT_QUEUED_MESSAGE_OPS: QueuedMessageOps = QueuedMessageOps {
-    construct_base: missing_construct_base,
+    construct_base: ported_construct_base,
     construct_payload: missing_construct_payload,
 };
 
-/// Active construction operations. Host tests replace these slots; retailOS
-/// defaults call the exact firmware addresses until their ports land.
+/// Active construction operations. Host tests replace these slots; the
+/// base-constructor default is the ported 0x08266a48, while the payload
+/// default still calls the firmware address on target (panics on host).
 pub static mut QUEUED_MESSAGE_OPS: QueuedMessageOps = DEFAULT_QUEUED_MESSAGE_OPS;
 
 /// queued_message_construct — original: `FUN_08103464` @ 0x08103464

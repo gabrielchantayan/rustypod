@@ -9681,9 +9681,13 @@ functions:
       message code and byte count and, only when byte_count != 0,
       retains a 0x27-tagged owned copy of bytes; its dtor
       0x081b92ac releases that copy and the outer dtor 0x0810351c
-      virtual-dispatches that payload dtor. The two constructors are
-      unported and use QUEUED_MESSAGE_OPS (firmware-address defaults on
-      target, panicking defaults on host); operator_new is direct.
+      virtual-dispatches that payload dtor. The base constructor
+      0x08266a48 is now ported (app/message_kind,
+      message_kind_construct) and is the wired default for the
+      QUEUED_MESSAGE_OPS.construct_base slot; only the payload
+      constructor 0x081b9248 remains behind the seam
+      (firmware-address default on target, panicking default on
+      host); operator_new is direct.
       Host tests pin the 0x16 kind argument, base-result adoption,
       derived vtable store, direct operator_new(0x10), full nested
       argument routing, returned payload store, and the zero-length
@@ -9691,6 +9695,50 @@ functions:
       retains the base ctor/vtable/allocate/payload ctor/store/return
       sequence; expected differences are the two seam loads/blx calls
       and LLVM's frame/register allocation.
+
+  - address: 0x08266a48
+    ghidra: FUN_08266a48
+    name: message_kind_construct
+    size: 24
+    sig: "MessageKind *message_kind_construct(MessageKind *storage, u32 kind)"
+    module: app/message_kind
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r1/r4: kind
+      puVar1: this
+      DAT_08266a60: MESSAGE_KIND_VTABLE
+      FUN_08275bb8: framework_object_construct
+    notes: >-
+      24 bytes of code (0x08266a48..0x08266a60) plus the 4-byte
+      vtable literal 0x089a3788 @ 0x08266a60, so 28 bytes of true
+      extent; 45 bl call sites, 0 b, in decomp/osos.asm. Base
+      constructor of the framework's kind-tagged message class, the
+      class every task-queue message envelope descends from: push
+      {r4,lr}; mov r4,r1; bl 0x08275bb8 (the already-ported
+      framework_object_construct root ctor); ldr r1,[pc,#4]; stmia
+      r0,{r1,r4}; pop {r4,pc} — overwrite the root vtable with the
+      base message vtable and store the kind tag at +0x04, then
+      return the root ctor's r0 for the caller's own derived-vtable
+      store. Not an allocator: all 45 call sites pass storage they
+      already own (FUN_0826c0d8 arena blocks, FUN_08266aa4(8)
+      operator_new blocks, or stack slots) and immediately plant
+      their own vtable over this one, keeping only the +0x04 kind
+      store. Observed kind immediates: 0 (x4), 1, 2, 3, 4, 0x16
+      (queued_message), 0x17, 0x22, 0x28, 0x20003, plus DAT-loaded
+      tags. The vtable @ 0x089a3788 points its live slots at
+      0x0828ef34 and the 0x08102f60..0x08103348 cluster beside the
+      queued-message machinery, corroborating the message-base
+      reading. The port calls framework_object_construct directly
+      (no seam — the root ctor is ported in cxx/observable_array);
+      its root-vtable store is dead exactly as in the original.
+      queued_message.rs's QUEUED_MESSAGE_OPS.construct_base default
+      is now this port on both target and host. Deviations - none
+      beyond emitting the single stmia as two ordered volatile
+      stores (the observable_array_construct idiom). match.py
+      structural - identical push/mov/bl/ldr-literal/store/store/pop
+      shape with the literal after the body; the diff is the crate's
+      fp frame and the stm split.
 
   - address: 0x08103584
     ghidra: FUN_08103584

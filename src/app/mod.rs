@@ -11,6 +11,7 @@ pub mod fixed_value;
 pub mod image_format;
 pub mod media_command_facade;
 pub mod media_ext;
+pub mod message_kind;
 pub mod node_list;
 pub mod object_dispatch_entry;
 pub mod pair_header_destruct;
