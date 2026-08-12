@@ -115,6 +115,7 @@ pub mod used_as_column_cache;
 pub mod value_free;
 pub mod value_new;
 pub mod value_set_str;
+pub mod value_text;
 pub mod vdbe;
 pub mod vdbe_op;
 pub mod vm_printf;

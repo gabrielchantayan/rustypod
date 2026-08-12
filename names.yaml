@@ -27896,6 +27896,73 @@ functions:
       port while the callee seam ships the SQLITE_NOMEM stub).
       match.py not run (host-only verification this round).
 
+  - address: 0x08386718
+    ghidra: FUN_08386718
+    name: sqlite_value_text
+    size: 160
+    sig: "const void *sqlite_value_text(Mem *value, u8 enc)"
+    module: sqlite/value_text
+    status: ported
+    vars: {param_1: value, param_2: enc, uVar1: flags, uVar2: z, iVar3: make_writeable_rc, bVar4: aligned, FUN_0838bbb4: sqlite3VdbeMemExpandBlob, FUN_083869f4: sqlite3VdbeChangeEncoding, FUN_0838bb30: sqlite3VdbeMemMakeWriteable, FUN_0838bfb0: sqlite3VdbeMemNulTerminate, FUN_0838c32c: sqlite3VdbeMemStringify}
+    notes: >-
+      SQLite 3.5.9's sqlite3ValueText (vdbemem.c) - the text extractor
+      that renders a Mem/sqlite3_value as a NUL-terminated string in a
+      requested encoding and returns its z pointer. 160 bytes
+      (0x08386718..0x083867b8; follows sqlite3ValueSetStr @ 0x083866ec
+      immediately). Verified line-for-line against the public 3.5.9
+      source, including the final pVal->enc == (enc &
+      ~SQLITE_UTF16_ALIGNED) guard, which IS upstream (only the
+      asserts are compiled out of the firmware). Algorithm: NULL value
+      or MEM_Null (0x1) yields NULL; otherwise (MEM_Blob >> 3) ==
+      MEM_Str promotes a blob's flag into MEM_Str (0x2) at +0x1c so
+      blobs take the recode path; MEM_Zero (0x800, zero-tail blob) is
+      materialized through the inlined expandBlob(P) macro guard
+      (sqlite3VdbeMemExpandBlob @ 0x0838bbb4); with MEM_Str set
+      (re-read after expansion) the string is recoded to enc & ~8 by
+      sqlite3VdbeChangeEncoding @ 0x083869f4, an SQLITE_UTF16_ALIGNED
+      (8) request with an odd z at +0x14 must survive
+      sqlite3VdbeMemMakeWriteable @ 0x0838bb30 (the only callee whose
+      return code is checked) or the call fails to NULL, then
+      sqlite3VdbeMemNulTerminate @ 0x0838bfb0 guarantees the double
+      NUL; without MEM_Str (int/real) sqlite3VdbeMemStringify @
+      0x0838c32c renders with the FULL enc (aligned bit not masked,
+      mov r1,r5). The text is returned only when the enc byte at +0x1f
+      matches enc & ~8 afterwards - a recode that could not land (OOM
+      in a callee) leaves the byte stale and NULL comes out instead of
+      a mis-encoded buffer. Callee identities cross-checked against
+      3.5.9 and their decompiles: 0x0838bbb4 grows via 0x0838bdb0,
+      zero-fills the tail, n += i, clears MEM_Zero|MEM_Term (& 0xf7df);
+      0x0838bb30 expands zero-blobs then copies MEM_Str|MEM_Blob (0x12)
+      content off zMalloc (+0x24); 0x0838bfb0 grows n+2 and appends the
+      double NUL when MEM_Str without MEM_Term; 0x0838c32c grows 0x20,
+      prints, sets enc=1 and MEM_Str|MEM_Term (0x22), recodes through
+      0x083869f4. 8 bl call sites, binary-scanned: 0x082bea9c in
+      FUN_082be9e8 (user-function result bridge - converts the value
+      filled by sqlite3ValueSetStr before the callback); 0x0837d5e4,
+      0x0837d5fc, 0x0837d630, 0x0837d63c in sqlite3MemCompare @
+      0x0837d47c (both operands to pColl->enc at +0x04 and back);
+      0x083864d4 in sqlite3ValueBytes @ 0x083864c0; 0x0838a718 in
+      sqlite3VdbeExec @ 0x08386ecc (enc = SQLITE_UTF8 = 1); 0x0838fed4
+      in FUN_0838fe88. Deviations: all five callees are unported and
+      dispatched through statics whose defaults are documented stubs
+      reproducing the original's failure/no-op end states (the
+      sqlite/value_set_str.rs seam pattern); enc is typed u8 like
+      upstream - the firmware's full-width bic/cmp on r1 are identical
+      for the zero-extended arguments every observed call site passes.
+      Verified by src/sqlite/value_text.rs::tests (NULL value short
+      circuit; a 10-flag-shape x 6-encoding x 2-initial-enc x 2-z-parity
+      x 5-callee-effect matrix - 2400 cases - compared against an
+      independent reference model for result pointer, exact callee
+      sequence, and final flags/enc; shipped stub defaults reproduce
+      the documented no-recode/recode-OOM/stringify-OOM/make-writeable-OOM
+      end states; slot defaults are the documented stubs). match.py
+      (exit 1, diff expected): same NULL guard -> MEM_Null test ->
+      and/orr/strh blob promotion -> MEM_Zero test + call -> flags
+      reload -> MEM_Str path split with bic-masked change-encoding and
+      full-enc stringify -> ldrb/cmp/ldreq final check structure; the
+      diff is the crate fp frame and the seams' ldr/blx static dispatch
+      in place of the direct bls.
+
   - address: 0x08003d44
     ghidra: FUN_08003d44
     name: task_delay
