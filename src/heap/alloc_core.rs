@@ -824,6 +824,53 @@ mod tests {
         }
     }
 
+    /// Assignment-specified boundary table: every edge of the rounding
+    /// `((n + 3) & SIZE_MASK) + 8`, clamp 16, 8-align chain. Requests
+    /// 0..=8 all collapse to the 0x10 minimum block; 9..=0x10 round to
+    /// 0x18. Each row runs on a fresh single-block heap; the carved block
+    /// size, the 8-aligned return contract and the returned remainder are
+    /// all checked.
+    #[test]
+    fn size_rounding_boundary_table() {
+        const TABLE: [(u32, u32); 8] = [
+            (0, 0x10),
+            (1, 0x10),
+            (3, 0x10),
+            (4, 0x10),
+            (5, 0x10),
+            (8, 0x10),
+            (9, 0x18),
+            (0x10, 0x18),
+        ];
+        for &(request, expected) in TABLE.iter() {
+            let heap = unsafe { single_block_heap() };
+            let _lock = setup(&heap);
+            unsafe {
+                let result =
+                    heap_alloc_core(heap.desc(), request, 0, 0, core::ptr::null_mut(), 0, 0);
+                let tail = 0x420 + (0x40 - expected as usize);
+                assert_eq!(
+                    result,
+                    heap.base().add(tail + 8),
+                    "request {request:#x}: carved tail user pointer"
+                );
+                assert_eq!(result as usize & 7, 0, "request {request:#x}: 8-aligned");
+                assert_eq!(
+                    heap.r32(tail) & SIZE_MASK,
+                    expected,
+                    "request {request:#x}: block size"
+                );
+                assert_eq!(
+                    heap.free_list_sizes(),
+                    vec![(0x40 - expected, 0x420)],
+                    "request {request:#x}: remainder back on the free list"
+                );
+                assert_eq!(LOCK_CALLS, 1, "request {request:#x}: one lock");
+                assert_eq!(UNLOCK_CALLS, 1, "request {request:#x}: one unlock");
+            }
+        }
+    }
+
     #[test]
     fn split_keeps_free_list_size_sorted() {
         let heap = unsafe { standard_heap() };

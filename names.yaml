@@ -2180,8 +2180,32 @@ functions:
     size: 668
     module: heap/alloc_core
     status: ported
-    notes: Combined alloc+realloc engine; round (n+3)&~3+8 min 16; in-place
-      merge on realloc; ROM memcpy for copies (= __rt_memcpy).
+    sig: "void *heap_alloc_core(HeapDescriptor *desc, u32 size, u32 zero_fill, u32 tag, void *old_ptr, u32 copy_flag, u32 oom_trace_disable)"
+    vars: {param_1: desc, param_2: size, param_3: zero_fill, param_4: tag, param_5: old_ptr, param_6: copy_flag, param_7: oom_trace_disable, uVar1: raw_size, uVar8: alloc_size, puVar3: result, puVar7: block, unaff_r10: old_size, uVar5: next_flags, puVar2: absorbed, FUN_0819cf68: heap_add_region, FUN_0819d6cc: heap_lock, FUN_0819cde4: heap_unlock, FUN_0819ce28: heap_freelist_alloc, FUN_0819cd5c: heap_stats_sub, FUN_0819d314: heap_free_insert, FUN_0819d4dc: heap_free, FUN_08037db0: __rt_memcpy, FUN_08030f44: heap_panic, FUN_082bc4fc: cg_timer_wait, DAT_0819d2e4: oom_trace_gate_ptr, DAT_0819d2e8: oom_trace_event, DAT_0819d2ec: oom_trace_ticks}
+    notes: >-
+      Combined alloc+realloc engine; round (n+3)&~3+8 min 16 then 8-align;
+      in-place merge on realloc grow, tail split on shrink/merged; ROM
+      memcpy for copies (= __rt_memcpy). Register contract: r0-r3 then
+      three stack args (old_ptr, copy_flag, oom_trace_disable). Every
+      callee is ported and called through the ALLOC_ENGINE_HOOKS /
+      HEAP_LOCK_HOOKS dispatch tables whose defaults are the real ports:
+      heap_add_region 0x0819cf68 (first-use init, auto_init slot),
+      heap_lock 0x0819d6cc / heap_unlock 0x0819cde4 (lock pair),
+      heap_freelist_alloc 0x0819ce28 (direct call), heap_stats_sub
+      0x0819cd5c (stats_retag slot), heap_free_insert 0x0819d314
+      (freelist_insert slot; host cfg(test) uses offset links and mocks
+      this slot), heap_free 0x0819d4dc (free_core slot), __rt_memcpy
+      0x08037db0 (direct, libc.rs), heap_panic 0x08030f44 (non-returning,
+      veneers.rs; hook takes a port-added HEAP_PANIC_* reason the default
+      shim drops; panic paths do not unlock, like the original).
+      Deviation: the OOM low-memory trace — three cg_timer_wait 0x082bc4fc
+      calls @ 0x0819d278/0x0819d284/0x0819d290 (ticks 0x4b0 / a global /
+      0x960 against one event handle), gated by stack arg oom_trace_disable
+      == 0, result == NULL and the byte @ 0x089caf6e — is omitted; it only
+      emits debug output on failure. Host tests: size-rounding boundary
+      table (0,1,3,4,5,8,9,0x10), 8-align return contract, auto-init
+      taken/not-taken, NULL vs non-NULL old_ptr, panic routing captured
+      via a siglongjmp seam.
 
   - address: 0x0819ce28
     ghidra: FUN_0819ce28
@@ -24324,7 +24348,9 @@ functions:
     status: ported
     vars: {param_1: ticks, param_2: event, uVar1: version, uVar2: channel, FUN_080e624c: board_version, FUN_0836dc14: timer_channel_arm, FUN_0836d854: notify_wait_enter, FUN_0836dd90: timer_channel_start, thunk_EXT_FUN_22001f78: event_wait, FUN_0836ddbc: timer_channel_stop, FUN_0836d82c: notify_wait_exit}
     notes: >-
-      3 bl call sites, all from the unported FUN_0819d048 @
+      3 bl call sites, all from heap_alloc_core (FUN_0819d048 @
+      0x0819d048, now ported in heap/alloc_core — the port deliberately
+      omits this OOM low-memory trace as a documented deviation) @
       0x0819d278/0x0819d284/0x0819d290 (tick counts 0x4b0, a global,
       0x960 against one event handle). A timed wait on an event handle
       built on an S5L8702 timer channel (block at 0x3c700000, 0x20-byte
