@@ -23190,6 +23190,35 @@ functions:
       exactly, with poisoned neighbours proving no adjacent word is
       read.
 
+  - address: 0x082c0d2c
+    ghidra: FUN_082c0d2c
+    name: cg_block_create
+    size: 64
+    sig: "cg_block_t *cg_block_create(cg_proc_t *proc, cg_block_kind_t kind)"
+    module: codegen/block
+    status: ported
+    vars:
+      param_1: proc
+      param_2: kind
+      iVar1: block
+      bVar2: has_blocks
+    notes: >-
+      66 bl call sites. Allocates exactly 0x30 bytes through
+      proc->module->heap (ldr r0,[r0,#4]; ldr r0,[r0,#0]; mov r1,#0x30;
+      bl cg_heap_alloc), then appends the new cg_block_t to the procedure's
+      intrusive FIFO list: proc+0x08 is its head, proc+0x0c its tail, and
+      block+0x00 its next link. For a nonempty list it first stores the new
+      block through old_tail->next; every append makes it the tail, and the
+      first append also assigns the head. It stores proc at block+0x04 and
+      the caller's block-kind enum at block+0x2c. The function returns the
+      block despite Ghidra's void signature: callers retain r0, pass it to
+      instruction factories, and back-patch cg_block_ref_create cells with
+      it for forward branches (e.g. 0x082401cc: `*cell = block`). Observed
+      kind arguments include 1, 2, 3, 4, 5, and 9. The port relies on
+      cg_heap_alloc's matching zero-fill for the fresh next link. Host
+      tests: src/codegen/block.rs::empty_append_sets_head_tail_owner_and_kind
+      and nonempty_append_preserves_head_links_old_tail_and_advances_tail.
+
   - address: 0x082c0d6c
     ghidra: FUN_082c0d6c
     name: cg_block_ref_create
