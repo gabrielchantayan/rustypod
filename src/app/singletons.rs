@@ -1,4 +1,4 @@
-//! The nine lazily-constructed framework singletons. Every one is the
+//! The ten lazily-constructed framework singletons. Every one is the
 //! same four-step idiom over its own cache word, its own allocation
 //! size and its own constructor:
 //!
@@ -18,13 +18,14 @@
 //! | 0x0816df60 | [`lazy_singleton_0x3c`] | 0x3c | 0x089d0130 | 0x0816e2ac | 38 |
 //! | 0x081a5500 | [`singleton_class_8c00`] | 0xdc | 0x089cc7c0 | 0x081a71fc | 82 |
 //! | 0x081dfa20 | [`command_dispatcher_get`] | 0x20 | 0x089cc828 | 0x081dfc1c | 69 |
+//! | 0x081f77a4 | [`volume_controller_get`] | 0x3bc | 0x089cc288 | 0x081fa070 | 52 |
 //!
 //! (Call-site counts binary-scanned; the earlier scouting notes said 86
 //! / 38 / 37 / 36 for the bottom four.)
 //!
 //! `operator new` @ 0x082aadd4 is already ported
 //! (`heap::veneers::operator_new`), so it is called directly. None of
-//! the nine constructors is — they are large C++ constructors — so
+//! the ten constructors is — they are large C++ constructors — so
 //! they sit behind the [`SINGLETON_CTORS`] dispatch table, the house
 //! pattern.
 //!
@@ -96,6 +97,22 @@
 //!   the rsrc volume, not addresses). Class NOT named: the ctor never
 //!   reaches a name factory, so the symbol names the role the call
 //!   sites prove.
+//! - The 0x3BC object is the **volume controller** — registry class
+//!   0x7f00 (`bl 0x081d23f8` with id 0x7f00 in the ctor @ 0x081fa070).
+//!   The identification rests on its adjuster `FUN_081f9120`: a signed
+//!   delta is clamped into a 0..100 range with a 100 cap (`if (uVar4 <
+//!   100U - param_2) ... else param_2 = 100`) and committed through the
+//!   player-side setter `FUN_081116e0`, with `FUN_081f77fc` the
+//!   elapsed-paced sibling; the getter's 52 call sites feed it wheel
+//!   deltas from the "EnterVolume" menu handler (@ 0x0810c9dc, one of
+//!   the wheel_sample_capture consumers), and the ctor queries the
+//!   media player interface (media_player_interface_get @ 0x08259594,
+//!   twice, plus 0x0825a0c0) and stores its vtable+0x108 answer as a
+//!   byte. Class NOT named in the image (no name-factory call), so the
+//!   symbol names the proven role; the registry id says 0x7f00.
+//!   Unlike its siblings the cache is the `+0x1c` slot of its globals
+//!   word (DAT_081f77d0 = 0x089cc26c, so the cache is 0x089cc288),
+//!   and the size is an immediate (`mov r0, #0x3bc`).
 //!
 //! **None of these symbols is hook-ready.** Until the constructors are
 //! ported, the dispatch defaults hand out a zeroed block — no vtable,
@@ -113,7 +130,7 @@
 //! - The cache slots are the crate statics below rather than words in
 //!   the 0x089cxxxx / 0x089dxxxx pages (the block_mgr.rs deviation:
 //!   those RW pages are runtime-initialized; the image holds stale UI
-//!   strings there). All nine default to NULL, exactly the pre-init
+//!   strings there). All ten default to NULL, exactly the pre-init
 //!   state.
 
 use crate::heap::veneers::operator_new;
@@ -153,10 +170,14 @@ pub const CLASS_8C00_SIZE: usize = 0xdc;
 /// (`mov r0, #0x20`).
 pub const COMMAND_DISPATCHER_SIZE: usize = 0x20;
 
+/// Allocation size of the volume-controller singleton
+/// (`mov r0, #0x3bc`).
+pub const VOLUME_CONTROLLER_SIZE: usize = 0x3bc;
+
 /// An ADS C++ constructor: takes the raw block, returns `this`.
 pub type Constructor = unsafe extern "C" fn(this: *mut u8) -> *mut u8;
 
-/// Indirect dispatch table for the nine unported constructors (see the
+/// Indirect dispatch table for the ten unported constructors (see the
 /// module header for the default-stub contract).
 #[derive(Clone, Copy)]
 pub struct SingletonCtors {
@@ -178,6 +199,8 @@ pub struct SingletonCtors {
     pub class_8c00: Constructor,
     /// Command-dispatcher ctor @ 0x081dfc1c.
     pub command_dispatcher: Constructor,
+    /// Volume-controller ctor @ 0x081fa070.
+    pub volume_controller: Constructor,
 }
 
 /// Defines one default constructor stub: zeroes the block and returns
@@ -201,6 +224,7 @@ zeroing_ctor!(zeroing_class_7f80_ctor, CLASS_7F80_SIZE);
 zeroing_ctor!(zeroing_singleton_0x3c_ctor, SINGLETON_0X3C_SIZE);
 zeroing_ctor!(zeroing_class_8c00_ctor, CLASS_8C00_SIZE);
 zeroing_ctor!(zeroing_command_dispatcher_ctor, COMMAND_DISPATCHER_SIZE);
+zeroing_ctor!(zeroing_volume_controller_ctor, VOLUME_CONTROLLER_SIZE);
 
 /// Zeroes `size` bytes and returns the block. Volatile stores: a plain
 /// loop is rewritten by LLVM into a call to `__aeabi_memclr`, a symbol
@@ -225,6 +249,7 @@ pub(crate) const DEFAULT_SINGLETON_CTORS: SingletonCtors = SingletonCtors {
     singleton_0x3c: zeroing_singleton_0x3c_ctor,
     class_8c00: zeroing_class_8c00_ctor,
     command_dispatcher: zeroing_command_dispatcher_ctor,
+    volume_controller: zeroing_volume_controller_ctor,
 };
 
 /// The active constructors. Host tests install recording mocks; the
@@ -276,7 +301,12 @@ pub static mut CLASS_8C00_INSTANCE: *mut u8 = core::ptr::null_mut();
 /// DAT_081dfa4c).
 pub static mut COMMAND_DISPATCHER_INSTANCE: *mut u8 = core::ptr::null_mut();
 
-/// The body all nine getters share: test the cache, allocate, construct,
+/// The volume-controller singleton (original: the word @ 0x089cc288,
+/// the `+0x1c` slot of the global @ 0x089cc26c — the pool literal
+/// DAT_081f77d0).
+pub static mut VOLUME_CONTROLLER_INSTANCE: *mut u8 = core::ptr::null_mut();
+
+/// The body all ten getters share: test the cache, allocate, construct,
 /// store, and re-load the cache (the original's second `ldr r0, [r4,
 /// #N]`, which is what makes a self-caching ctor observable).
 ///
@@ -471,6 +501,30 @@ pub unsafe extern "C" fn command_dispatcher_get() -> *mut u8 {
     })
 }
 
+/// volume_controller_get — original: `FUN_081f77a4` @ 0x081f77a4
+/// (44 bytes of code + one pool word @ 0x081f77d0 = 48 bytes total;
+/// 52 `bl` call sites).
+///
+/// Returns the volume-controller singleton — registry class 0x7f00 —
+/// constructing it on first use: `operator_new(0x3bc)` (`mov r0,
+/// #0x3bc`) then the constructor @ 0x081fa070, cached in the `+0x1c`
+/// slot of the global @ 0x089cc26c (the pool literal DAT_081f77d0),
+/// one slot deeper than this family's usual `+4`. The 0..100-clamped,
+/// wheel-driven adjuster `FUN_081f9120` and the "EnterVolume" menu
+/// handler are what identify the object — see the module header.
+/// Ghidra reports the extent as 44 bytes because it drops the trailing
+/// literal word; the true extent runs to 0x081f77d4, where the next
+/// function opens `push {r4, lr}`. Same NOT-HOOK-READY caveat as its
+/// siblings — see the module header.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn volume_controller_get() -> *mut u8 {
+    let cache = core::ptr::addr_of_mut!(VOLUME_CONTROLLER_INSTANCE);
+    lazy_singleton(cache, VOLUME_CONTROLLER_SIZE, || unsafe {
+        ctor!(volume_controller)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -543,6 +597,7 @@ mod tests {
                 singleton_0x3c: recording_ctor,
                 class_8c00: recording_ctor,
                 command_dispatcher: recording_ctor,
+                volume_controller: recording_ctor,
             };
             CTOR_RESULT = ctor_result;
             (*ptr::addr_of_mut!(ALLOC_SIZES)).clear();
@@ -575,6 +630,7 @@ mod tests {
         SINGLETON_0X3C = ptr::null_mut();
         CLASS_8C00_INSTANCE = ptr::null_mut();
         COMMAND_DISPATCHER_INSTANCE = ptr::null_mut();
+        VOLUME_CONTROLLER_INSTANCE = ptr::null_mut();
     }
 
     fn arena() -> *mut u8 {
@@ -929,6 +985,43 @@ mod tests {
             assert_eq!((*ptr::addr_of!(CTOR_BLOCKS)).len(), 1, "constructed exactly once");
             assert_eq!(
                 ptr::read_volatile(ptr::addr_of!(COMMAND_DISPATCHER_INSTANCE)),
+                constructed(),
+                "the cache still holds the first construction"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_volume_controller_is_allocated_constructed_and_cached_on_first_call() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(volume_controller_get(), constructed());
+            assert_eq!(
+                *ptr::addr_of!(ALLOC_SIZES),
+                std::vec![VOLUME_CONTROLLER_SIZE],
+                "the `mov r0, #0x3bc` immediate, allocated exactly once"
+            );
+            assert_eq!(*ptr::addr_of!(CTOR_BLOCKS), std::vec![arena()], "constructed on the raw block");
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(VOLUME_CONTROLLER_INSTANCE)),
+                constructed(),
+                "the ctor result is cached"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_volume_controller_second_call_returns_the_cache() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(volume_controller_get(), constructed());
+            assert_eq!(volume_controller_get(), constructed());
+            assert_eq!((*ptr::addr_of!(ALLOC_SIZES)).len(), 1, "allocated exactly once");
+            assert_eq!((*ptr::addr_of!(CTOR_BLOCKS)).len(), 1, "constructed exactly once");
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(VOLUME_CONTROLLER_INSTANCE)),
                 constructed(),
                 "the cache still holds the first construction"
             );
