@@ -3215,6 +3215,51 @@ functions:
       region_block_size (verified against osos.asm); 1 bl caller. No
       separate port; hook this address to the region_block_size symbol.
 
+  - address: 0x081a8204
+    ghidra: FUN_081a8204
+    name: aligned_buffer_reset
+    size: 40
+    sig: "u8 *aligned_buffer_reset(u8 *buffer)"
+    module: heap/aligned_buffer
+    status: ported
+    vars:
+      param_1: buffer
+      FUN_082aad14: operator_delete_tag3 (direct, ported in
+        heap/veneers - no seam)
+    notes: >-
+      The reset half of the firmware's 32-byte aligned-buffer owner, a
+      two-word value type {+0x00 data (the 32-aligned view into the
+      block), +0x04 allocation (the raw owned block)}. 40 bytes
+      exactly, 0x081a8204..0x081a822c, ten instructions, no literal
+      pool. 53 bl call sites, 0 b, binary-scanned by decoding every
+      B/BL word in osos.dec. Algorithm: if the allocation word is
+      non-NULL, operator_delete_tag3(allocation); then zero the
+      allocation word FIRST and the data word second (the original's
+      store order); return buffer. The class occupies
+      0x081a8198..0x081a8228: the align-up helper 0x081a8198 (pad =
+      0x20 - (block & 0x1f), returns (block + 0x1f) & !0x1f), the
+      alignment query 0x081a81bc (`mov r0, #0x20; bx lr` - a
+      byte-pattern scan lumps it with the 17 deque_seg_capacity
+      copies, but in this translation unit it is the buffer's
+      alignment constant), the constructor 0x081a81c4 (29 bl sites:
+      zero both words, operator_new_tag3(size + 0x20), raw block to
+      +4, aligned view to +0), and this reset. 0x20 is the ARM926EJ-S
+      cache-line size; observed users match - 0x0804fe68 (a
+      FreeType-area file reader, cf. the 0x08278xxx stream functions)
+      fills the buffer with a whole file via __rt_memcpy, the
+      0x08072xxx cluster resets it on error paths. Deviation: none of
+      substance - the callee is ported and called directly; the
+      original's own cmp/blne guard is kept even though
+      operator_delete_tag3 NULL-guards internally (the double guard is
+      faithful). Both words are 32-bit target words. Host tests: an
+      installed allocation is freed exactly once with the ALLOCATION
+      word (tag 3, observed through the veneers.rs mock heap) and both
+      words zeroed, object returned; a NULL allocation frees nothing
+      and still zeroes both words. match.py structural: same
+      test/conditional-delete/zero-both/return shape with the +4-then-+0
+      store order; the diff is LLVM rotating the NULL path out of line
+      and the crate fp frame.
+
   - address: 0x0818b0c4
     ghidra: FUN_0818b0c4
     name: manager_take_blocks
