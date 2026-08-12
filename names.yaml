@@ -27930,3 +27930,97 @@ functions:
       through their target-default seams (ROM_TASK_DELAY = 0x08003d44);
       those defaults can now bind the ported kernel::task_delay symbol
       instead of the raw ROM address.
+
+  - address: 0x082b3b5c
+    ghidra: FUN_082b3b5c
+    name: cg_block_bind_registers
+    size: 216
+    sig: "void cg_block_bind_registers(CgCodegen *codegen)"
+    module: codegen/ir
+    status: ported
+    renames:
+      param_1/r0->r7: codegen
+      iVar5/r6: block (codegen->current_block, codegen +0x208
+        CG_CODEGEN_CURRENT_BLOCK, published by cg_block_emit)
+      puVar4/r4: cell (register-copy list cursor, proc +0x1c
+        CG_PROC_REG_COPIES; cells are {next, reg}, the
+        CG_VREG_LIST_NEXT/CG_VREG_LIST_REG layout)
+      r8: constant 1 (the bit-shift base, mov r8,#0x1)
+      iVar2/r0: reg (the cell's register), then binding
+      uVar3/r1: set word index (reg_no >> 5), then the new flags value
+      uVar1/r2: set bit (1 << (reg_no & 0x1f)), then the rebind call's
+        reg argument (reloaded from the cell, ldr r2,[r4,#0x4])
+      r3: live-in (block +0x1c CG_BLOCK_LIVE_IN) / live-out (block
+        +0x20 CG_BLOCK_LIVE_OUT) bitset record, then the bitmap word
+      r5: binding (reg +0x08 CG_VREG_BINDING)
+      FUN_083673b0: binding_unlink slot (CG_BLOCK_BIND_OPS; 64 bytes,
+        8 bl sites - the runtime's intrusive doubly-linked-list REMOVE)
+      FUN_082b5234: binding_rebind slot (CG_BLOCK_BIND_OPS; 100 bytes,
+        13 bl sites, all in the register-binding machine)
+      FUN_08367358: binding_push slot (CG_BLOCK_BIND_OPS; 56 bytes,
+        8 bl + 2 tail b sites - the runtime's list PUSH-HEAD)
+    notes: >-
+      1 bl call site: 0x082c0ef0 inside cg_block_emit (PORTED,
+      codegen/ir), called right after the use-list tail table is freed
+      - the block-entry register binder, the bind_registers slot of
+      CG_BLOCK_EMIT_OPS. The JIT's block-entry binder: re-seats the
+      bindings of every register copy whose register crosses the
+      current block's boundary. Walks the procedure's register-copy
+      list (proc +0x1c); per cell tests the register number (vreg
+      +0x10 CG_VREG_NO) against the block's live-IN bitset (block
+      +0x1c) and, only when that fails, the live-OUT bitset (block
+      +0x20); both bitset records have word 0 = capacity and the
+      bitmap from +0x04 (CG_BITSET_BITS; word reg_no >> 5, bit
+      1 << (reg_no & 0x1f)). Live-IN: the register's binding (vreg
+      +0x08) is unlinked from its current anchor (binding +0x08
+      CG_BINDING_ANCHOR) through FUN_083673b0, re-pointed at the
+      register through FUN_082b5234(codegen, binding, reg), pushed
+      onto the codegen's pending-bindings anchor at +0x200
+      (CG_CODEGEN_PENDING_BINDINGS; {head +0x200, tail +0x204},
+      drained from the tail by the block-exit flush FUN_082ccae4)
+      through FUN_08367358, and its flags word (binding +0x18
+      CG_BINDING_FLAGS) gains bit 0x200 CG_BINDING_FLAG_BLOCK_ENTRY
+      (orr). Live-OUT only: the same unlink/rebind/push sequence (the
+      original's second full copy at 0x082b3bec-0x082b3c20) but the
+      flag is CLEARED (bic). In neither set: the cell is skipped
+      entirely (beq 0x082b3c24 straight to the list advance). The
+      flags word is re-read AFTER the three calls in both branches
+      (ldr r0,[r5,#0x18] @ 0x082b3bcc/0x082b3c18) - FUN_082b5234
+      itself rewrites flags bits 0x100/0x200 - and the register is
+      reloaded from the cell for the rebind argument; both reloads are
+      kept verbatim (through the ops seam a replacement could legally
+      rewrite the cell/flags). Deviations: the three callees route
+      through the swappable CG_BLOCK_BIND_OPS table with no-op
+      defaults (the CgBlockEmitOps/default_cg_graph_pass deviation),
+      so with the defaults wired the walk, bit tests and flag updates
+      run exactly as the original's but no list re-linking happens;
+      porting a callee replaces its slot. Ghidra folds the two call
+      sequences into one shared LAB_082b3c20 and drops the second
+      register reload; the raw disassembly's two copies are
+      authoritative and the port mirrors them. SEAM DECISION /
+      REWIRING OPPORTUNITY: CG_BLOCK_EMIT_OPS.bind_registers KEEPS
+      its documented no-op default - wiring this port in would turn
+      cg_block_emit's default pipeline into a half-running binder
+      (walk and flag stores live, the three callees no-ops), worse
+      than no binder. Rewire once FUN_083673b0 / FUN_082b5234 /
+      FUN_08367358 are ported and wired as the CG_BLOCK_BIND_OPS
+      defaults. match.py (exit 1, diff expected): the walk
+      (codegen +0x208, block +0x04, proc +0x1c, cell +0x04, vreg
+      +0x10, the >>5/&0x1f bit math, bitmap reads at record +0x04),
+      both full unlink/rebind/push copies, the +0x200 push anchor and
+      the post-call flags orr/bic #0x200 at binding +0x18 all line up;
+      the diff is the crate fp prologue, the ops-table ldrd/blx
+      dispatch in place of the direct bls (the documented scheme),
+      LLVM merging the list advance into the live-in path, and its
+      lsl/lsr re-expressions. Host tests:
+      src/codegen/ir.rs::block_bind_registers_reseats_boundary_copies_in_list_order
+      (live-in precedence when a register is in BOTH sets, live-out-
+      only clearing, neither-set skip, unlink/rebind/push order per
+      copy, all pushes on the +0x200 anchor, flags updated from the
+      POST-rebind value via a flags-rewriting rebind fake),
+      ::block_bind_registers_with_defaults_walks_and_updates_flags_only
+      (no-op defaults: flags still orr/bic'd, anchors never re-linked,
+      walk terminates),
+      ::block_bind_registers_empty_copy_list_is_a_no_op (NULL copy
+      list: no calls, pending anchor and published block untouched)
+      and ::block_bind_registers_seams_stay_wired_to_the_defaults.
