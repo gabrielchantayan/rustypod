@@ -24,10 +24,14 @@
 //! ```
 //!
 //! Deviations:
-//! - `sqlite3ValueNew` @ 0x083866c0 and `sqlite3ValueSetStr` @
-//!   0x083866ec are unported and cross [`SQLITE_VALUE_NEW`] and
-//!   [`SQLITE_VALUE_SET_STR`] dispatch seams. The value-new default
-//!   reports allocation failure; the value-set-string default is a no-op.
+//! - `sqlite3ValueNew` @ 0x083866c0 *is* ported
+//!   ([`sqlite_value_new`](super::value_new::sqlite_value_new)) and is
+//!   the shipped default of the [`SQLITE_VALUE_NEW`] dispatch slot
+//!   (the slot stays so host tests can install recording mocks; the
+//!   old OOM-shaped stub is retained for them as
+//!   [`missing_value_new`]). `sqlite3ValueSetStr` @ 0x083866ec is
+//!   unported and crosses the [`SQLITE_VALUE_SET_STR`] dispatch seam
+//!   with a no-op default.
 //! - `sqlite3VMPrintf` @ 0x08386454 uses the shared
 //!   [`super::error_msg::SQLITE_VM_PRINTF`] seam. The C varargs home area
 //!   becomes explicit [`VaList`], the pointer to the first variadic word.
@@ -57,14 +61,17 @@ pub const SQLITE_FREE_X_DEL: *mut u8 = 0x0838_581cusize as *mut u8;
 /// `Mem` value for the connection's `pErr` slot.
 pub type ValueNewFn = unsafe extern "C" fn(db: *mut u8) -> *mut u8;
 
-/// The OOM-shaped default for an unported `sqlite3ValueNew`.
+/// OOM-shaped stub retained for host tests. The shipped default is
+/// the real port, [`super::value_new::sqlite_value_new`].
 pub(crate) unsafe extern "C" fn missing_value_new(_db: *mut u8) -> *mut u8 {
     core::ptr::null_mut()
 }
 
-/// Active `sqlite3ValueNew` dispatch slot. Host tests install a recording
-/// replacement; the real port should replace this default when it lands.
-pub static mut SQLITE_VALUE_NEW: ValueNewFn = missing_value_new;
+/// Active `sqlite3ValueNew` dispatch slot. The default is the real
+/// port, [`super::value_new::sqlite_value_new`]; host tests still
+/// install recording replacements through the slot
+/// ([`missing_value_new`] is retained for them).
+pub static mut SQLITE_VALUE_NEW: ValueNewFn = super::value_new::sqlite_value_new;
 
 /// Read the value-new slot volatile so its default remains replaceable.
 #[inline(always)]
@@ -233,7 +240,10 @@ mod tests {
         );
         core::ptr::write_volatile(core::ptr::addr_of_mut!(SQLITE_VM_PRINTF), recording_vm_printf);
         body();
-        core::ptr::write_volatile(core::ptr::addr_of_mut!(SQLITE_VALUE_NEW), missing_value_new);
+        core::ptr::write_volatile(
+            core::ptr::addr_of_mut!(SQLITE_VALUE_NEW),
+            super::super::value_new::sqlite_value_new,
+        );
         core::ptr::write_volatile(
             core::ptr::addr_of_mut!(SQLITE_VALUE_SET_STR),
             missing_value_set_str,
@@ -352,14 +362,31 @@ mod tests {
     }
 
     #[test]
-    fn the_default_value_new_stub_has_the_original_oom_effect() {
+    fn the_shipped_value_new_port_preserves_the_oom_effect() {
+        use super::super::mem::tests::install_recorder;
+        use super::super::mem::{DB_MEM_OPS, DEFAULT_DB_MEM_OPS, MALLOC_FAILED_OFFSET};
+
         let mut db = DbStorage([0; DB_P_ERR_OFFSET + core::mem::size_of::<*mut u8>()]);
         let db_ptr = db.0.as_mut_ptr();
+        // The shipped default is the real port; drive its allocator to
+        // failure so the exact OOM path runs end to end.
+        assert_eq!(
+            unsafe { value_new_op() } as usize,
+            super::super::value_new::sqlite_value_new as usize,
+        );
+        let guard = install_recorder(core::ptr::null_mut());
         unsafe {
             err_code_slot(db_ptr).write(22);
             sqlite_error(db_ptr, 23, b"x\0".as_ptr(), core::ptr::null());
             assert!(error_value_slot(db_ptr).read().is_null());
             assert_eq!(err_code_slot(db_ptr).read(), 22);
+            assert_eq!(
+                db_ptr.add(MALLOC_FAILED_OFFSET).read(),
+                1,
+                "the ported allocator latches the sticky OOM byte",
+            );
+            core::ptr::write_volatile(core::ptr::addr_of_mut!(DB_MEM_OPS), DEFAULT_DB_MEM_OPS);
         }
+        drop(guard);
     }
 }

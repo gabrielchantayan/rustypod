@@ -27633,3 +27633,57 @@ functions:
       [r4,#0x18] -> popne -> init(this, attr) -> str [r4,#0x18] -> pop
       structure; the diff is the crate fp frame and the seam's ldr/blx
       static dispatch in place of the direct bl 0x082e84dc/0x082e82f8.
+
+  - address: 0x083866c0
+    ghidra: FUN_083866c0
+    name: sqlite_value_new
+    size: 44
+    sig: "Mem *sqlite_value_new(sqlite3 *db)"
+    module: sqlite/value_new
+    status: ported
+    vars: {param_1: db, iVar1: value, r4: db, FUN_08374998: db_malloc_zero}
+    notes: >-
+      SQLite 3.5.9's sqlite3ValueNew (vdbemem.c) - the constructor for a
+      fresh NULL Mem/sqlite3_value. 44 bytes, no literal pool
+      (0x083866c0..0x083866ec; the sqlite3ValueSetStr wrapper @
+      0x083866ec follows immediately). 5 bl call sites, binary-scanned:
+      0x08376718 in sqlite_error (ported, sqlite/error.rs - lazily
+      creates the connection's cached pErr); 0x08386578 and 0x08386640
+      in FUN_08386524 (408 bytes - formats a message into a fresh value,
+      installs it with sqlite3ValueSetStr @ 0x083866ec, and on a NULL
+      here latches db->mallocFailed itself, frees through
+      sqlite3ValueFree @ 0x08386504, returns SQLITE_NOMEM=7);
+      0x082bea64 in FUN_082be9e8 (232 bytes - a user-function result
+      bridge: with the callback word at +0xc0 set it builds a value,
+      fills it with sqlite3ValueSetStr, converts with sqlite3ValueText @
+      0x08386718, hands the text to the callback, frees the value); and
+      0x0838fe98 in FUN_0838fe88 (120 bytes - the only caller passing
+      db == NULL). Algorithm: allocate a zeroed 0x28-byte Mem on the
+      connection with sqlite3DbMallocZero @ 0x08374998 (PORTED,
+      sqlite::mem::db_malloc_zero, called directly - the only callee)
+      and return NULL verbatim when it fails; the sticky
+      db->mallocFailed latch is the allocator's job, so the whole OOM
+      contract is the NULL return. On success stamp the NULL datum:
+      flags = MEM_Null (1) at +0x1c (strhne), type = SQLITE_NULL (5) at
+      +0x1e (strbne), owning connection at +0x10 (strne) - every other
+      field stays zero from the allocator's zero-fill. A NULL db is
+      legal: db_malloc_zero goes straight to the heap with nothing to
+      latch, and the back-pointer store lands NULL. Deviations: no
+      dispatch seam in this file (the allocator is ported and called
+      directly). The port is the shipped default of the
+      SQLITE_VALUE_NEW slot in sqlite/error.rs (that module's documented
+      "the real port should replace this default when it lands" pattern,
+      same swap expr_new made when expr_delete landed); the old
+      OOM-shaped stub missing_value_new is retained for host tests.
+      Verified by src/sqlite/value_new.rs::tests (success shape across
+      buffer seeds 0x00/0xa5/0xff/0x5a compared byte-for-byte against an
+      independent zero-fill+stamp reference model, one 0x28-byte
+      allocation logged, mallocFailed clear; OOM returns NULL with the
+      latch set by the ported allocator; an already-failed connection
+      short-circuits without touching the heap; db == NULL allocates
+      with a NULL back-pointer; db == NULL with a down heap returns NULL
+      with the heap still tried, no flag to latch) and
+      src/sqlite/error.rs::tests::the_shipped_value_new_port_preserves_the_oom_effect
+      (end-to-end: shipped default is the port, forced allocator failure
+      leaves pErr NULL and errCode untouched with mallocFailed latched).
+      match.py not run (host-only verification this round).
