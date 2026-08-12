@@ -27490,3 +27490,65 @@ functions:
       push / bl base-ctor / ldr-literal / str [r0] / pop structure
       with the same 0x089a60d8 literal-pool word; the diff is the
       crate fp frame.
+
+  - address: 0x081655e0
+    ghidra: FUN_081655e0
+    name: service_manager_get
+    size: 52
+    sig: "void *service_manager_get(void)"
+    module: util/service_manager_get
+    status: ported
+    renames:
+      DAT_08165614: SERVICE_MANAGER_HOLDER (pool literal holding &holder @ 0x089ca948; instance in its +4 slot)
+      iVar1: holder
+      iVar2: constructed (the ctor's return)
+      FUN_082aadd4: operator_new (ported in heap/veneers, called directly)
+      FUN_0816566c: service_manager_ctor (unported; SERVICE_MANAGER_CTOR dispatch slot, documented zeroing default)
+      FUN_08030f44: heap_panic (ported in heap/veneers, called directly)
+    notes: >-
+      Lazy constructor-getter for the service-manager singleton - the
+      publisher half of the app/service_manager.rs pair (its asserting
+      accessor service_manager_instance @ 0x08165520 is already ported
+      and names this address as the only thing that fills the slot).
+      1 bl call site: 0x08258030 inside the boot-time singleton checker
+      FUN_08258028, which calls this getter first and then nine sibling
+      getters (0x08259740, 0x08257f34, 0x082598f8, 0x08259564,
+      0x08257f04, 0x08259534, 0x0825a16c, 0x08259770) and falls into
+      heap_panic unless every one returns non-NULL. Algorithm: load the
+      holder global @ 0x089ca948, return its +4 instance word if
+      non-NULL; otherwise operator_new(0xe8) (mov r0,#0xe8; bl
+      0x082aadd4), construct via the unported ctor @ 0x0816566c, cache
+      the ctor's return into holder+4 UNCONDITIONALLY, and - unlike the
+      ten app/singletons.rs getters - fall into heap_panic @ 0x08030f44
+      (bleq, non-returning) when the ctor returned NULL, so the getter
+      never hands out NULL; the live path RELOADS holder+4 before
+      returning (observable because the ctor itself stores the instance
+      into holder+4 and sets the holder's +0/+1 flag bytes). The
+      0xE8-byte object owns retailOS's per-hardware subsystem handlers:
+      its ctor reads the hardware model id through the
+      settings/platform-info singleton (FUN_08259928, vtable slot
+      +0x34), indexes a 26-entry capability table by it (default mask
+      0x1fbf @ 0x0816592c) and builds up to thirteen handler objects
+      into the slot table at this+4 (see app/service_manager.rs for the
+      full object write-up; no class name survives in the image).
+      Deviations (the app/singletons.rs / cxx/settings.rs contract):
+      the cache slot is the crate static SERVICE_MANAGER_INSTANCE owned
+      by app/service_manager.rs rather than the word @ 0x089ca94c (the
+      0x089caxxx RW pages are runtime-initialized; the image holds
+      stale UI strings there); the ctor rides the SERVICE_MANAGER_CTOR
+      dispatch slot with a documented zeroing stub default. The fatal
+      NULL-ctor path is not host-tested (heap_panic is -> !), the
+      cxx/list_splice.rs precedent. NOT HOOK-READY until FUN_0816566c
+      is ported - the default hands out a zeroed block with no vtable
+      and no handler slot table. Host tests: first call allocates 0xe8
+      exactly once, constructs with the raw operator_new block, caches
+      and returns the ctor result; second/third calls hit the cache
+      with no realloc; a pre-populated cache takes the bne fast path
+      with no allocation; the return is the reloaded slot, not the raw
+      block; the zeroing default ctor clears the whole 0xe8 block.
+      match.py: same push/ldr-pool/ldr/cmp/branch/mov-0xe8/bl/ctor/
+      cmp/str/bleq-panic skeleton; the diff is the crate fp frame, the
+      intra-archive bl relocations for operator_new/heap_panic, the
+      blx-through-volatile-slot ctor dispatch standing in for the
+      direct bl 0x0816566c (the documented deviation), and LLVM folding
+      the post-store slot reload into the just-stored r0.
