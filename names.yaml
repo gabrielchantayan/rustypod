@@ -27687,3 +27687,62 @@ functions:
       (end-to-end: shipped default is the port, forced allocator failure
       leaves pErr NULL and errCode untouched with mallocFailed latched).
       match.py not run (host-only verification this round).
+
+  - address: 0x083866ec
+    ghidra: FUN_083866ec
+    name: sqlite_value_set_str
+    size: 44
+    sig: "void sqlite_value_set_str(Mem *value, int n, const void *z, u8 enc, void *x_del)"
+    module: sqlite/value_set_str
+    status: ported
+    vars: {param_1: value, param_2: n, param_3: z, param_4: enc, param_5: x_del, r12: n, FUN_0838c158: sqlite3VdbeMemSetStr}
+    notes: >-
+      SQLite 3.5.9's sqlite3ValueSetStr (vdbemem.c) - a pure
+      register-shuffle wrapper with a NULL guard, 44 bytes
+      (0x083866ec..0x08386718; sqlite3ValueText @ 0x08386718 follows
+      immediately). The outgoing registers are rebuilt
+      (mov r12,r1 / mov r1,r2 / mov r2,r3), the fifth argument xDel is
+      pulled from the caller's stack into the outgoing slot
+      (ldr r3,[sp,#0x8] / strne r3,[sp,#0x0]), and only when value is
+      non-NULL does control reach sqlite3VdbeMemSetStr @ 0x0838c158
+      (blne) with (value, z, n, enc, xDel) - the wrapper's n and z
+      swapped into the callee's order. A NULL value skips the call
+      entirely; nothing else is validated (a NULL z with a live value
+      is forwarded - the callee turns that into MemSetNull @
+      0x0838c13c). No epilogue write to r0, so the callee's
+      SQLITE_OK/SQLITE_NOMEM leaks out (the NULL path leaks the 0 left
+      by cmp r0,#0, which is SQLITE_OK anyway); no caller reads it and
+      the port is void like the decompile. Callee semantics (unported,
+      seam-modeled as SQLITE_VDBE_MEM_SET_STR with a
+      SQLITE_NOMEM-shaped default, from FUN_0838c158's decompile): base
+      flags MEM_Str (0x2), or MEM_Blob (0x10) when enc == 0; n < 0
+      measures z in place (NUL scan for UTF-8, double-NUL in two-byte
+      steps otherwise) and sets MEM_Term (0x20); xDel == (void*)-1
+      (SQLITE_TRANSIENT) grows the Mem (0x0838bdb0) and copies,
+      anything else releases old content (0x0838c04c) and marks
+      MEM_Static (0x80, xDel NULL) or MEM_Dyn (0x40) with xDel at +0x20
+      and z at +0x14; n lands at +0x18, a zero enc becomes 1,
+      flags/enc/type (SQLITE_TEXT=3 / SQLITE_BLOB=4) at
+      +0x1c/+0x1f/+0x1e, non-UTF-8 recoded through 0x0838be98. 7 bl
+      call sites, binary-scanned: 0x082bea7c in FUN_082be9e8
+      (user-function result bridge: value from sqlite3ValueNew,
+      n=param_3, z=param_2, enc=1, xDel=0 = SQLITE_STATIC); 0x0837676c
+      in sqlite_error (PORTED, sqlite/error.rs); 0x083865a8 in
+      FUN_08386524 (n=-1, enc=1, xDel = pool literal 0x0838581c);
+      0x0838cb68 and 0x0838cbc8 in FUN_0838cb28 (n=-1, enc=1, same
+      0x0838581c destructor literal - both pool words read from
+      osos.dec); 0x0838fec4 in FUN_0838fe88 (n=-1, caller-chosen enc,
+      xDel=0); 0x08390318 in FUN_08390294 (n=-1, enc=1, xDel=0). The
+      port is the shipped default of the SQLITE_VALUE_SET_STR slot in
+      sqlite/error.rs (that module's documented "the real port should
+      replace this default when it lands" pattern, the same swap
+      sqlite_value_new made); the old no-op stub missing_value_set_str
+      is retained for host tests. Verified by
+      src/sqlite/value_set_str.rs::tests (NULL value never reaches the
+      callee across n/enc/xDel shapes; non-NULL forwards exactly one
+      call with n/z swapped against an independent reference model -
+      length -1 vs explicit, STATIC/TRANSIENT/pool-literal xDel, NULL
+      z, blob and UTF-16 encodings; callee result discarded for both
+      SQLITE_OK and SQLITE_NOMEM; shipped error.rs slot default is the
+      port while the callee seam ships the SQLITE_NOMEM stub).
+      match.py not run (host-only verification this round).

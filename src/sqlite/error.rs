@@ -29,9 +29,13 @@
 //!   the shipped default of the [`SQLITE_VALUE_NEW`] dispatch slot
 //!   (the slot stays so host tests can install recording mocks; the
 //!   old OOM-shaped stub is retained for them as
-//!   [`missing_value_new`]). `sqlite3ValueSetStr` @ 0x083866ec is
-//!   unported and crosses the [`SQLITE_VALUE_SET_STR`] dispatch seam
-//!   with a no-op default.
+//!   [`missing_value_new`]). `sqlite3ValueSetStr` @ 0x083866ec *is*
+//!   ported
+//!   ([`sqlite_value_set_str`](super::value_set_str::sqlite_value_set_str))
+//!   and is the shipped default of the [`SQLITE_VALUE_SET_STR`]
+//!   dispatch slot (the slot stays so host tests can install recording
+//!   mocks; the old no-op stub is retained for them as
+//!   [`missing_value_set_str`]).
 //! - `sqlite3VMPrintf` @ 0x08386454 uses the shared
 //!   [`super::error_msg::SQLITE_VM_PRINTF`] seam. The C varargs home area
 //!   becomes explicit [`VaList`], the pointer to the first variadic word.
@@ -81,8 +85,9 @@ pub(crate) unsafe fn value_new_op() -> ValueNewFn {
 
 /// `sqlite3ValueSetStr(value, n, z, enc, x_del)` @ 0x083866ec.
 ///
-/// This preserves the wrapper's argument order. Its unported body swaps
-/// `n` and `z` while forwarding to `sqlite3VdbeMemSetStr`.
+/// This preserves the wrapper's argument order. Its body (ported as
+/// [`super::value_set_str::sqlite_value_set_str`]) swaps `n` and `z`
+/// while forwarding to `sqlite3VdbeMemSetStr`.
 pub type ValueSetStrFn = unsafe extern "C" fn(
     value: *mut u8,
     n: i32,
@@ -91,7 +96,8 @@ pub type ValueSetStrFn = unsafe extern "C" fn(
     x_del: *mut u8,
 );
 
-/// The no-op default for an unported `sqlite3ValueSetStr`.
+/// No-op stub retained for host tests. The shipped default is the
+/// real port, [`super::value_set_str::sqlite_value_set_str`].
 pub(crate) unsafe extern "C" fn missing_value_set_str(
     _value: *mut u8,
     _n: i32,
@@ -101,10 +107,12 @@ pub(crate) unsafe extern "C" fn missing_value_set_str(
 ) {
 }
 
-/// Active `sqlite3ValueSetStr` dispatch slot. Host tests install a
-/// recording replacement; the real port should replace this default when
-/// it lands.
-pub static mut SQLITE_VALUE_SET_STR: ValueSetStrFn = missing_value_set_str;
+/// Active `sqlite3ValueSetStr` dispatch slot. The default is the real
+/// port, [`super::value_set_str::sqlite_value_set_str`]; host tests
+/// still install recording replacements through the slot
+/// ([`missing_value_set_str`] is retained for them).
+pub static mut SQLITE_VALUE_SET_STR: ValueSetStrFn =
+    super::value_set_str::sqlite_value_set_str;
 
 /// Read the value-set-string slot volatile so its default remains
 /// replaceable.
@@ -246,7 +254,7 @@ mod tests {
         );
         core::ptr::write_volatile(
             core::ptr::addr_of_mut!(SQLITE_VALUE_SET_STR),
-            missing_value_set_str,
+            super::super::value_set_str::sqlite_value_set_str,
         );
         core::ptr::write_volatile(core::ptr::addr_of_mut!(SQLITE_VM_PRINTF), missing_vm_printf);
     }
