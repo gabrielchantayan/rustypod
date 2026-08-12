@@ -24,4 +24,6 @@
 //! `adaptive_ref_pic_marking_mode_flag` and then loops over
 //! `memory_management_control_operation` values, pulling one extra
 //! `ue(v)` for ops 1/3, 2 and 3/6 exactly as the standard prescribes.
+//! It is ported in [`dec_ref_pic_marking`].
 pub mod bitstream;
+pub mod dec_ref_pic_marking;

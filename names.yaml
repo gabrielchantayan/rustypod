@@ -21451,6 +21451,76 @@ functions:
       crate frame, LLVM folding `bic`/`sub` into `ands #7`, and the
       inlined helper standing in for the two direct `bl 0x082c319c`.
 
+  # --- H.264 / MPEG-4 AVC video decoder: dec_ref_pic_marking parser ---
+  - address: 0x08365640
+    ghidra: FUN_08365640
+    name: dec_ref_pic_marking
+    size: 464
+    sig: "bool dec_ref_pic_marking(RbspBitReader *reader, DecRefPicMarking *marking, i32 nal_unit_type, i32 bits_out_init)"
+    module: h264/dec_ref_pic_marking
+    vars: {param_1: reader, param_2: marking, param_3: nal_unit_type, param_4: bits_out_init, local_14: emulation_byte_pending, local_10: bits_out}
+    renames:
+      param_2[0]: no_output_of_prior_pics_flag (+0x00, IDR u(1))
+      param_2[1]: long_term_reference_flag (+0x01, IDR u(1))
+      param_2[2]: adaptive_ref_pic_marking_mode_flag (+0x02, non-IDR u(1))
+      param_2[3]: memory_management_control_operation (+0x03, ue(v), strb-truncated)
+      "*(u32 *)(param_2 + 4)": difference_of_pic_nums_minus1 (MMCO 1/3 operand)
+      "*(u32 *)(param_2 + 8)": long_term_pic_num (MMCO 2 operand)
+      "*(u32 *)(param_2 + 0xc)": long_term_frame_idx (MMCO 3/6 operand)
+      "*(u32 *)(param_2 + 0x10)": max_long_term_frame_idx_plus1 (MMCO 4 operand)
+      FUN_082d0630: cg_rbsp_read_bits (u(1) flag reads; ported)
+      FUN_082c5df0: cg_exp_golomb_ue_read (ue(v); ported)
+      FUN_082b3258: h264_bitstream_advance (read commit; ported)
+    status: ported
+    notes: >-
+      The H.264 dec_ref_pic_marking() syntax parser (spec section
+      7.3.3.3), one `bl` call site — the slice-header parser @
+      0x08366b8c passes the shared RBSP cursor, slice_header + 0x2c as
+      the output record, nal_unit_type in r2 and a STALE r3. 464
+      bytes, all code, no literal pool. nal_unit_type == 5 (IDR)
+      reads no_output_of_prior_pics_flag and long_term_reference_flag
+      (u(1) each); anything else reads
+      adaptive_ref_pic_marking_mode_flag and, while the last stored
+      mmco byte is nonzero, loops:
+      memory_management_control_operation (ue(v), stored with strb —
+      values above 255 wrap mod 256), then an extra ue(v) operand for
+      mmco 1/3 (difference_of_pic_nums_minus1 @ +0x04), 2
+      (long_term_pic_num @ +0x08), 3/6 (long_term_frame_idx @ +0x0c)
+      and 4 (max_long_term_frame_idx_plus1 @ +0x10). Every read is
+      committed by h264_bitstream_advance @ 0x082b3258; the function
+      returns 1 only when every commit kept the cursor inside the NAL
+      payload, 0 on the first exhaustion — with the failed element
+      already stored (every strb/str precedes its bl 0x082b3258). One
+      u8 emulation-prevention flag local serves every read and advance
+      (zeroed once at entry); one i32 slot carries each ue(v) bit
+      count from reader to advance.
+      Callees — all ported, all direct calls, no seams:
+      cg_rbsp_read_bits @ 0x082d0630 (u(1) reads),
+      cg_exp_golomb_ue_read @ 0x082c5df0 (ue(v) reads),
+      h264_bitstream_advance @ 0x082b3258 (commits). The ue reader's
+      internal CG_EXP_GOLOMB_OPS seam is unchanged (its own entry).
+      Deviations: r3 (bits_out_init) seeds the bits-count slot exactly
+      like the original's spilled argument but is dead — the ue reader
+      always stores the slot before this function loads it, and the
+      call site's r3 is stale. Ghidra's break-then-return-0 on the
+      mmco commit failure is the same mov r0,#0 exit every other
+      failed commit branches to; the port returns false directly.
+      Host tests: synthetic RBSP bitstreams through the REAL ported
+      primitives end to end (CG_EXP_GOLOMB_OPS wired to
+      h264_bitstream_count_leading_zeros + cg_rbsp_read_bits,
+      CG_RBSP_READ_BITS_OPS to a faithful 0x082c319c transcription):
+      IDR flag pairs, IDR commit failures with the failed flag stored
+      and the other untouched, adaptive flag clear/set, an immediate
+      end mmco, a full MMCO loop over commands 0/1/2/3/4/6 with field
+      overwrite precedence, a 2^26-1 operand crossing two
+      emulation-prevention bytes (prefix scan and suffix read pay one
+      each), mid-mmco and mid-operand exhaustion, and raw-cursor
+      end-state parity (rbsp bits + 8 per inserted EP byte).
+      match.py structural: same cmp #5 split, same +0x00..+0x03 strb
+      and +0x04..+0x10 str offsets, same read-then-commit interleave
+      and 0/1 exits; the diff is the crate frame, LLVM register
+      allocation, and the restructured loop-condition branch.
+
   # --- MPEG video header parser: bitstream read-and-advance ---
   - address: 0x080ebbe0
     ghidra: FUN_080ebbe0
