@@ -13924,8 +13924,8 @@ functions:
      size: 16, module: cxx/handle, status: ported,
      notes: "ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c; 13 bl sites. No separate port exists; hook this address to the single handle_deref_or_null symbol (the load_be32 alias precedent)."}
   - {address: 0x083d6190, ghidra: FUN_083d6190, name: handle_deref_or_null_alias_6190,
-     size: 16, module: cxx/handle, status: ported,
-     notes: "ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c; 69 bl sites. No separate port exists; hook this address to the single handle_deref_or_null symbol (the load_be32 alias precedent)."}
+     size: 16, sig: "void *handle_deref_or_null(void ***slot)", module: cxx/handle, status: ported,
+     notes: "ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c (verified: same 16 bytes in osos.dec); 68 bl sites in decomp/osos.asm, 69 binary-scanned - the 69th site at 0x08236e48 (word 0xeb067cd0) sits in a block Ghidra left undisassembled. No separate port exists; hook this address to the single handle_deref_or_null symbol (the load_be32 alias precedent)."}
   - {address: 0x083d61a0, ghidra: FUN_083d61a0, name: handle_deref_or_null_alias_61a0,
      size: 16, module: cxx/handle, status: ported,
      notes: "ALIAS - byte-identical to handle_deref_or_null @ 0x083d604c; 16 bl sites. No separate port exists; hook this address to the single handle_deref_or_null symbol (the load_be32 alias precedent)."}
