@@ -129,6 +129,16 @@
 //!   flush caches, tear down. Its unported callees sit behind the
 //!   [`CG_COMPILE_AND_PATCH_OPS`] ops-table seam (plus the nested
 //!   [`CG_PROC_EMIT`] and [`CG_BUFFER_FREE`] seams).
+//! - `cg_block_emit` — original: `FUN_082c0e28` @ 0x082c0e28 (292
+//!   bytes; 1 `bl` call site — the per-procedure emitter
+//!   `FUN_082c1320`'s block loop). The JIT's per-block code
+//!   generator: binds the block's label, rebuilds every register's
+//!   in-block use list (the lists the emitters drain use-by-use to
+//!   learn when a register dies), runs the block-entry register
+//!   binder, skips leading phis and dispatches the rest to the
+//!   per-instruction emitter, then releases block-boundary bindings.
+//!   Its unported callees and malloc/free boundary sit behind the
+//!   [`CG_BLOCK_EMIT_OPS`] ops-table seam.
 //! - `cg_cell_table_create` / `cg_cell_table_destroy` — originals
 //!   `FUN_082430c4` @ 0x082430c4 (72 bytes; 1 `bl` caller) /
 //!   `FUN_0824310c` @ 0x0824310c (44 bytes; 2 `bl` callers). The video
@@ -2671,6 +2681,275 @@ pub unsafe extern "C" fn cg_compile_and_patch(
     // Stages 11-12: buffer teardown, then the whole arena.
     (ops.codegen_destroy)(codegen);
     cg_heap_destroy(module_heap(module as *mut u8));
+}
+
+// --- cg_block_emit (0x082c0e28) and its ops-table seam --------------
+
+/// `cg_codegen_t + 0x208` — the basic block currently being emitted.
+/// Stored on entry and cleared on exit by [`cg_block_emit`]; read by
+/// the block-entry binder `FUN_082b3b5c` (its `ldr r6,[r0,#0x208]`),
+/// the spill path `FUN_082d7870` and the emitter helpers (e.g.
+/// `ldr r0,[r5,#0x208]` @ 0x082c5c7c inside `FUN_082c5c58`).
+pub const CG_CODEGEN_CURRENT_BLOCK: usize = 0x208 / 4;
+/// `cg_codegen_t + 0x21c` — base of the per-register USE-LIST head
+/// array: one pointer slot per virtual register, carved from the
+/// codegen heap by the per-procedure emitter (`FUN_082c1320`:
+/// `cg_heap_alloc(codegen->heap, proc->num_registers << 2)`, stored at
+/// codegen `+0x21c`). [`cg_block_emit`] rebuilds the lists at block
+/// entry; the emitters then consume them use-by-use — `FUN_082beb4c`
+/// unlinks each `{next, inst}` record as it emits the instruction that
+/// uses the register, and releases the register's binding when its
+/// list runs empty (verified in the raw disassembly at
+/// 0x082bec18-0x082becc8).
+pub const CG_CODEGEN_REG_USES: usize = 0x21c / 4;
+/// `cg_block_t + 0x08` — the block's codegen label, created per block
+/// by the per-procedure emitter's label loop (`FUN_082c1320`:
+/// `block[2] = cg_label_create(codegen)`) and bound to the current
+/// output offset by [`cg_block_emit`].
+pub const CG_BLOCK_LABEL: usize = 0x08 / 4;
+/// `cg_block_t + 0x20` — the block's live-OUT register bitset record
+/// (word 0 = capacity, bits from +0x04; the liveness pass
+/// `FUN_082b7bbc` keeps a register's bit set past its last in-block
+/// use exactly when the register is in this set). Forwarded verbatim
+/// by [`cg_block_emit`] to the binding-release walker `FUN_082cea24`.
+/// The live-IN twin sits at block `+0x1c` (it seeds the liveness
+/// pass's interference set and is read by `FUN_082b3b5c`).
+pub const CG_BLOCK_LIVE_OUT: usize = 0x20 / 4;
+
+/// `cg_reg_use_t + 0x00` — next use record of the same register;
+/// written only when a LATER use of the register is appended, so the
+/// tail record's link stays NULL by the arena's zero-fill.
+pub const CG_REG_USE_NEXT: usize = 0;
+/// `cg_reg_use_t + 0x04` — the instruction using the register.
+pub const CG_REG_USE_INST: usize = 1;
+/// Size of `cg_reg_use_t` in target bytes — the use-list builder's
+/// `mov r1,#0x8` arena request.
+pub const CG_REG_USE_BYTES: usize = 8;
+/// Pointer-slot capacity of the on-stack used-register buffer the
+/// builder hands to [`cg_inst_collect_used_regs`]: the original's
+/// `sub sp,sp,#0x100` frame, bounded by `add r2,sp,#0x100` — 64 slots.
+const CG_BLOCK_EMIT_USE_SLOTS: usize = 64;
+
+/// The allocation boundary and the unported direct callees of
+/// [`cg_block_emit`], modeled as an ops table (the
+/// [`CgCompileAndPatchOps`] precedent). Fields are in the original's
+/// exact call order. The allocator slots exist so host tests can
+/// substitute an allocator without racing malloc's global ops table
+/// (the [`CG_BUFFER_ALLOC`] precedent); their defaults are the real
+/// ports. The four callee slots default to no work — each original is
+/// a register-binding machine with its own deep callee tree, and
+/// modeling half of it would be worse than modeling none (the
+/// documented [`default_cg_graph_pass`] deviation). Host tests swap in
+/// recording fakes; porting a callee later replaces its slot without
+/// touching the emitter.
+#[derive(Clone, Copy)]
+pub struct CgBlockEmitOps {
+    /// The tail-pointer table allocation — the original's direct
+    /// `bl 0x0802edac` (`malloc`), called with `num_registers * 4`
+    /// target bytes. Default: the ported `malloc`.
+    pub alloc_use_tails: unsafe extern "C" fn(size: usize) -> *mut u8,
+    /// The tail-pointer table release — the original's direct
+    /// `bl 0x0802edc8` (`free`), called once the use lists hang from
+    /// the codegen's heads array and the table is dead. Default: the
+    /// ported `free`.
+    pub free_use_tails: unsafe extern "C" fn(ptr: *mut u8),
+    /// `FUN_082b3b5c` @ 0x082b3b5c (216 bytes) — the block-entry
+    /// register binder. Walks the procedure's register-copy list
+    /// (`proc + 0x1c`, a list of `{next, reg}` cells) against the
+    /// current block's live-in/live-out bitsets (block `+0x1c` /
+    /// `+0x20`) and sets or clears flag `0x200` on each copy's binding
+    /// record, re-linking the binding chains through `FUN_083673b0` /
+    /// `FUN_082b5234` / `FUN_08367358`. Default: no binding work.
+    pub bind_registers: unsafe extern "C" fn(codegen: *mut CgCodegen),
+    /// `FUN_082c0f4c` @ 0x082c0f4c (1428 bytes) — the per-instruction
+    /// emitter: a 25-way dispatch on the OPCODE byte (inst `+0x09`)
+    /// into the ARM word emitters, reading runtime-helper addresses
+    /// out of the codegen's helper table. Default: no code emitted.
+    pub emit_inst: unsafe extern "C" fn(codegen: *mut CgCodegen, inst: *mut CgInst),
+    /// `FUN_082cea24` @ 0x082cea24 (152 bytes) — the block-exit
+    /// binding-release walker: for each of the 16 hardware-register
+    /// descriptor anchors (codegen `+0x14 + i*0x1c`) carrying flag
+    /// `0x100`, releases the register's binding through `FUN_083685f0`
+    /// when the passed bitset is NULL or names the bound register.
+    /// Called with the block's live-OUT set. Default: no releases.
+    pub release_hw_reg_bindings:
+        unsafe extern "C" fn(codegen: *mut CgCodegen, live_out: *mut u8),
+    /// `FUN_082ccae4` @ 0x082ccae4 (204 bytes) — the block-exit
+    /// pending-binding flush: drains the spill/reload work lists at
+    /// codegen `+0x1fc` / `+0x204` (re-listing each orphaned record or
+    /// emitting it through `FUN_082c5c58`), clears binding-flag bits
+    /// `0x300` per record, and resets the codegen's embedded anchor
+    /// bookkeeping at `+0x1d4`..`+0x1ec`. Default: no flush.
+    pub flush_pending_bindings: unsafe extern "C" fn(codegen: *mut CgCodegen),
+}
+
+/// The wired default of [`CgBlockEmitOps::bind_registers`]: no binding
+/// work. See the field's doc for the original.
+unsafe extern "C" fn default_cg_bind_registers(_codegen: *mut CgCodegen) {}
+
+/// The wired default of [`CgBlockEmitOps::emit_inst`]: no emission.
+/// See the field's doc for the original.
+unsafe extern "C" fn default_cg_emit_inst(_codegen: *mut CgCodegen, _inst: *mut CgInst) {}
+
+/// The wired default of [`CgBlockEmitOps::release_hw_reg_bindings`]:
+/// no releases. See the field's doc for the original.
+unsafe extern "C" fn default_cg_release_hw_reg_bindings(
+    _codegen: *mut CgCodegen,
+    _live_out: *mut u8,
+) {
+}
+
+/// The wired default of [`CgBlockEmitOps::flush_pending_bindings`]:
+/// no flush. See the field's doc for the original.
+unsafe extern "C" fn default_cg_flush_pending_bindings(_codegen: *mut CgCodegen) {}
+
+/// The wired defaults of [`CG_BLOCK_EMIT_OPS`].
+pub const DEFAULT_CG_BLOCK_EMIT_OPS: CgBlockEmitOps = CgBlockEmitOps {
+    alloc_use_tails: crate::runtime::malloc_rt::malloc,
+    free_use_tails: crate::runtime::malloc_rt::free,
+    bind_registers: default_cg_bind_registers,
+    emit_inst: default_cg_emit_inst,
+    release_hw_reg_bindings: default_cg_release_hw_reg_bindings,
+    flush_pending_bindings: default_cg_flush_pending_bindings,
+};
+
+/// The active ops table of [`cg_block_emit`]; see [`CgBlockEmitOps`].
+#[cfg_attr(target_os = "none", no_mangle)]
+pub static mut CG_BLOCK_EMIT_OPS: CgBlockEmitOps = DEFAULT_CG_BLOCK_EMIT_OPS;
+
+/// cg_block_emit — original: `FUN_082c0e28` @ 0x082c0e28 (292 bytes;
+/// **1 `bl` call site** — 0x082c13ac, inside the per-procedure emitter
+/// `FUN_082c1320`'s block loop). The JIT's per-block code generator.
+/// Given the codegen and one basic block, in the original's exact
+/// order:
+///
+/// 1. **Publish the block**: codegen `+0x208`
+///    ([`CG_CODEGEN_CURRENT_BLOCK`]) = block.
+/// 2. **Bind the block's label** (block `+0x08`, [`CG_BLOCK_LABEL`],
+///    created per block by the proc emitter):
+///    `label->offset = cg_buffer_current_offset(codegen->output)`
+///    (ported, direct).
+/// 3. **Seed the per-register use lists**:
+///    `malloc(block->proc->num_registers * 4)` (the
+///    [`CgBlockEmitOps::alloc_use_tails`] slot), then per register
+///    `tails[r] = &heads[r]; heads[r] = NULL`, where `heads` is the
+///    codegen's per-procedure array at `+0x21c`
+///    ([`CG_CODEGEN_REG_USES`]).
+/// 4. **Build the use lists**: for every instruction in the block
+///    (list head block `+0x0c`), collect its USED registers into a
+///    64-slot stack buffer through the ported
+///    [`cg_inst_collect_used_regs`], then append one 8-byte arena
+///    record (`cg_heap_alloc(codegen->heap, 8)` — direct) per use
+///    through the register's tail pointer, in the original's exact
+///    store order: `*tail = record`, `record->inst = inst`,
+///    `tail = record`. The tail record's `next` stays NULL by the
+///    arena's zero-fill. The result: `heads[r]` lists, in instruction
+///    order, every instruction in the block that uses register `r` —
+///    the lists the emitters drain use-by-use to learn when a
+///    register dies (see [`CG_CODEGEN_REG_USES`]).
+/// 5. **Free the tail table** (the [`CgBlockEmitOps::free_use_tails`]
+///    slot) and run the block-entry register binder (the
+///    [`CgBlockEmitOps::bind_registers`] slot).
+/// 6. **Emit**: skip LEADING phi instructions (kind byte 9 — phis
+///    emit no code), then dispatch EVERY remaining instruction,
+///    including any phi later in the list, to the per-instruction
+///    emitter (the [`CgBlockEmitOps::emit_inst`] slot).
+/// 7. **Block-exit epilogue**: release hardware-register bindings
+///    against the block's live-out set (the
+///    [`CgBlockEmitOps::release_hw_reg_bindings`] slot, handed block
+///    `+0x20` verbatim), flush the pending spill/reload work lists
+///    (the [`CgBlockEmitOps::flush_pending_bindings`] slot), then
+///    clear codegen `+0x208`.
+///
+/// No NULL guards beyond list termination; a zero-instruction block
+/// still runs the allocator pair, the binder and the epilogue, and a
+/// zero-register procedure still gets its (empty) tail table from
+/// `malloc(0)`.
+///
+/// DEVIATIONS: the caller passes a third argument in r2 — 0 for the
+/// procedure's first block, 1 for the rest — which the original NEVER
+/// reads (r2's first use in the body is a clobber, `ldr r2,[r7,...]`
+/// @ 0x082c0ec0); the ported signature drops it. The four unported
+/// callees and the malloc/free boundary route through
+/// [`CG_BLOCK_EMIT_OPS`] (see the table's doc); every ported callee is
+/// called directly.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_block_emit(codegen: *mut CgCodegen, block: *mut CgBlock) {
+    let codegen = codegen as *mut u8;
+    let block = block as *mut u8;
+    let ops = hook(core::ptr::addr_of!(CG_BLOCK_EMIT_OPS));
+
+    // 1-2. Publish the block; bind its label at the emit position.
+    slot(codegen, CG_CODEGEN_CURRENT_BLOCK).write(block);
+    let label = slot(block, CG_BLOCK_LABEL).read();
+    let output = slot(codegen, CG_CODEGEN_OUTPUT).read() as *mut CgCodegenBuffer;
+    word(label, CG_LABEL_OFFSET).write(cg_buffer_current_offset(output));
+
+    // 3. Seed the per-register tail pointers; clear the list heads.
+    let proc = slot(block, CG_BLOCK_PROC).read();
+    let num_registers = word(proc, CG_PROC_NUM_REGISTERS).read();
+    let tails = (ops.alloc_use_tails)(record_size(num_registers * 4));
+    let heads = slot(codegen, CG_CODEGEN_REG_USES).read();
+    let mut index = 0usize;
+    while index != num_registers {
+        slot(tails, index).write(slot(heads, index) as *mut u8);
+        slot(heads, index).write(core::ptr::null_mut());
+        index += 1;
+    }
+
+    // 4. Append a use record per (instruction, used register) pair.
+    // The collection buffer is the original's raw 0x100-byte stack
+    // frame: every slot the loop reads lies below the collector's
+    // returned cursor and was therefore stored by it, so the buffer
+    // needs no initialization.
+    let mut inst = slot(block, CG_BLOCK_INSTS).read();
+    while !inst.is_null() {
+        let mut used: [core::mem::MaybeUninit<*mut CgVirtualReg>; CG_BLOCK_EMIT_USE_SLOTS] =
+            unsafe { core::mem::MaybeUninit::uninit().assume_init() };
+        let end = cg_inst_collect_used_regs(
+            inst as *mut CgInst,
+            used.as_mut_ptr() as *mut *mut CgVirtualReg,
+            used.as_mut_ptr().add(CG_BLOCK_EMIT_USE_SLOTS) as *mut *mut CgVirtualReg,
+        );
+        let mut cursor = used.as_mut_ptr() as *mut *mut CgVirtualReg;
+        while cursor != end {
+            let record = cg_heap_alloc(
+                slot(codegen, CG_CODEGEN_HEAP).read() as *mut CgHeap,
+                record_size(CG_REG_USE_BYTES),
+            );
+            let reg_no = word(cursor.read() as *mut u8, CG_VREG_NO).read();
+            let tail = slot(tails, reg_no).read();
+            slot(tail, CG_REG_USE_NEXT).write(record);
+            slot(record, CG_REG_USE_INST).write(inst);
+            slot(tails, reg_no).write(record);
+            cursor = cursor.add(1);
+        }
+        inst = slot(inst, CG_INST_NEXT).read();
+    }
+
+    // 5. The lists now hang from the heads array; the table is dead.
+    (ops.free_use_tails)(tails);
+    (ops.bind_registers)(codegen as *mut CgCodegen);
+
+    // 6. Leading phis emit no code; everything from the first non-phi
+    // onward is dispatched, phis included.
+    let mut inst = slot(block, CG_BLOCK_INSTS).read();
+    while !inst.is_null() && inst.add(CG_INST_KIND * WORD).read() == CG_INST_KIND_PHI as u8 {
+        inst = slot(inst, CG_INST_NEXT).read();
+    }
+    while !inst.is_null() {
+        (ops.emit_inst)(codegen as *mut CgCodegen, inst as *mut CgInst);
+        inst = slot(inst, CG_INST_NEXT).read();
+    }
+
+    // 7. Block-exit epilogue; unpublish the block.
+    (ops.release_hw_reg_bindings)(
+        codegen as *mut CgCodegen,
+        slot(block, CG_BLOCK_LIVE_OUT).read(),
+    );
+    (ops.flush_pending_bindings)(codegen as *mut CgCodegen);
+    slot(codegen, CG_CODEGEN_CURRENT_BLOCK).write(core::ptr::null_mut());
 }
 
 // --- cg_cell_table_create (0x082430c4) and its cell-init seam -------
@@ -6955,6 +7234,432 @@ mod tests {
                 hook(core::ptr::addr_of!(CG_CELL_TABLE_CELL_INIT)) as usize,
                 cg_cell_table_cell_init as usize,
                 "the cell-init seam stays wired to the ported FUN_08256c10"
+            );
+        }
+        teardown();
+    }
+
+    // --- cg_block_emit -------------------------------------------------
+
+    /// One observed ops-table call, in order.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    enum EmitStage {
+        /// (requested size, returned pointer).
+        Alloc(usize, *mut u8),
+        Free(*mut u8),
+        /// `codegen->current_block` at the time the binder runs.
+        Bind(*mut u8),
+        Emit(*mut CgInst),
+        /// The verbatim live-out argument.
+        Release(*mut u8),
+        Flush,
+    }
+
+    /// Ops-table calls observed by the recording fakes, in order.
+    static mut EMIT_LOG: std::vec::Vec<EmitStage> = std::vec::Vec::new();
+
+    unsafe extern "C" fn recording_emit_alloc(size: usize) -> *mut u8 {
+        let ptr = poisoning_alloc(size);
+        EMIT_LOG.push(EmitStage::Alloc(size, ptr));
+        ptr
+    }
+
+    unsafe extern "C" fn recording_emit_free(ptr: *mut u8) {
+        EMIT_LOG.push(EmitStage::Free(ptr));
+        poisoning_free(ptr);
+    }
+
+    unsafe extern "C" fn recording_bind_registers(codegen: *mut CgCodegen) {
+        let current = slot(codegen as *mut u8, CG_CODEGEN_CURRENT_BLOCK).read();
+        EMIT_LOG.push(EmitStage::Bind(current));
+    }
+
+    unsafe extern "C" fn recording_emit_inst(_codegen: *mut CgCodegen, inst: *mut CgInst) {
+        EMIT_LOG.push(EmitStage::Emit(inst));
+    }
+
+    unsafe extern "C" fn recording_release_bindings(
+        _codegen: *mut CgCodegen,
+        live_out: *mut u8,
+    ) {
+        EMIT_LOG.push(EmitStage::Release(live_out));
+    }
+
+    unsafe extern "C" fn recording_flush_bindings(_codegen: *mut CgCodegen) {
+        EMIT_LOG.push(EmitStage::Flush);
+    }
+
+    /// Installs the recording ops and returns the saved table. The
+    /// alloc/free fakes poison like the heap-ops allocator, so an
+    /// uninitialized tail slot would fault on the first append.
+    unsafe fn install_emit_ops() -> CgBlockEmitOps {
+        let saved = hook(core::ptr::addr_of!(CG_BLOCK_EMIT_OPS));
+        *core::ptr::addr_of_mut!(CG_BLOCK_EMIT_OPS) = CgBlockEmitOps {
+            alloc_use_tails: recording_emit_alloc,
+            free_use_tails: recording_emit_free,
+            bind_registers: recording_bind_registers,
+            emit_inst: recording_emit_inst,
+            release_hw_reg_bindings: recording_release_bindings,
+            flush_pending_bindings: recording_flush_bindings,
+        };
+        EMIT_LOG.clear();
+        saved
+    }
+
+    /// A codegen, proc, block, label, output buffer and live-out record
+    /// over one real arena, sized for cg_block_emit's deep codegen
+    /// offsets (`+0x208` / `+0x21c`).
+    struct EmitFixture {
+        heap: *mut CgHeap,
+        module: [usize; 2],
+        proc: [usize; 9],
+        block: [usize; 9],
+        codegen: [usize; record_size(CG_CODEGEN_BYTES) / WORD],
+        output: [usize; CG_CODEGEN_OUTPUT_OFFSET + 1],
+        label: [usize; 3],
+        live_out: [usize; 2],
+        /// The per-register use-list heads array (codegen `+0x21c`).
+        heads: std::vec::Vec<usize>,
+    }
+
+    impl EmitFixture {
+        fn new() -> std::boxed::Box<EmitFixture> {
+            let heap = unsafe { cg_heap_create(4096) };
+            let mut f = std::boxed::Box::new(EmitFixture {
+                heap,
+                module: [0; 2],
+                proc: [0; 9],
+                block: [0; 9],
+                codegen: [0; record_size(CG_CODEGEN_BYTES) / WORD],
+                output: [0; CG_CODEGEN_OUTPUT_OFFSET + 1],
+                label: [0; 3],
+                live_out: [0; 2],
+                heads: std::vec::Vec::new(),
+            });
+            f.module[CG_MODULE_HEAP] = heap as usize;
+            f.proc[CG_PROC_MODULE] = f.module.as_ptr() as usize;
+            f.block[CG_BLOCK_PROC] = f.proc.as_ptr() as usize;
+            f.block[CG_BLOCK_LABEL] = f.label.as_ptr() as usize;
+            f.block[CG_BLOCK_LIVE_OUT] = f.live_out.as_ptr() as usize;
+            f.label[CG_LABEL_OFFSET] = CG_LABEL_UNBOUND;
+            f.codegen[CG_CODEGEN_HEAP] = heap as usize;
+            f.codegen[CG_CODEGEN_OUTPUT] = f.output.as_mut_ptr() as usize;
+            f
+        }
+
+        /// Sizes the heads array to `count` poison-filled slots.
+        fn set_heads(&mut self, count: usize) {
+            self.heads = std::vec![0x5c5c_5c5c_5c5c_5c5cusize; count];
+            self.codegen[CG_CODEGEN_REG_USES] = self.heads.as_mut_ptr() as usize;
+        }
+
+        fn proc_ptr(&mut self) -> *mut CgProc {
+            self.proc.as_mut_ptr() as *mut CgProc
+        }
+
+        fn block_ptr(&mut self) -> *mut CgBlock {
+            self.block.as_mut_ptr() as *mut CgBlock
+        }
+
+        fn codegen_ptr(&mut self) -> *mut CgCodegen {
+            self.codegen.as_mut_ptr() as *mut CgCodegen
+        }
+
+        /// The instructions recorded on register `reg_no`'s use list,
+        /// in link order.
+        unsafe fn use_chain(&self, reg_no: usize) -> std::vec::Vec<*mut u8> {
+            let mut chain = std::vec::Vec::new();
+            let mut record = self.heads[reg_no] as *mut u8;
+            while !record.is_null() {
+                chain.push(slot(record, CG_REG_USE_INST).read());
+                record = slot(record, CG_REG_USE_NEXT).read();
+            }
+            chain
+        }
+    }
+
+    impl Drop for EmitFixture {
+        fn drop(&mut self) {
+            unsafe { cg_heap_destroy(self.heap) };
+        }
+    }
+
+    #[test]
+    fn block_emit_binds_label_publishes_block_and_runs_the_empty_pipeline_in_order() {
+        let _g = setup();
+        let mut f = EmitFixture::new();
+        unsafe {
+            let saved = install_emit_ops();
+            f.output[CG_CODEGEN_OUTPUT_OFFSET] = 0x864;
+            // No registers: the heads pointer is poison and must not be
+            // dereferenced or overwritten.
+            f.codegen[CG_CODEGEN_REG_USES] = 0x5c5c_5c5c_5c5c_5c5cusize;
+
+            cg_block_emit(f.codegen_ptr(), f.block_ptr());
+
+            let alloc = match EMIT_LOG[0] {
+                EmitStage::Alloc(size, ptr) => {
+                    assert_eq!(size, 0, "a zero-register proc mallocs a zero-length table");
+                    ptr
+                }
+                other => panic!("stage 0 must be the tail-table alloc, got {other:?}"),
+            };
+            assert_eq!(
+                EMIT_LOG[1],
+                EmitStage::Free(alloc),
+                "the freed pointer is exactly the allocated table"
+            );
+            assert_eq!(
+                EMIT_LOG[2],
+                EmitStage::Bind(f.block.as_mut_ptr() as *mut u8),
+                "the block is published at codegen +0x208 before the binder runs"
+            );
+            assert_eq!(
+                EMIT_LOG[3],
+                EmitStage::Release(f.live_out.as_mut_ptr() as *mut u8),
+                "the release walker gets the block's live-out set verbatim"
+            );
+            assert_eq!(EMIT_LOG[4], EmitStage::Flush);
+            assert_eq!(
+                EMIT_LOG.len(),
+                5,
+                "an instruction-less block emits nothing but still runs the epilogue"
+            );
+
+            assert_eq!(
+                f.label[CG_LABEL_OFFSET], 0x864,
+                "the block's label is bound at the current output offset"
+            );
+            assert_eq!(
+                f.codegen[CG_CODEGEN_CURRENT_BLOCK], 0,
+                "the block is unpublished on exit"
+            );
+            assert_eq!(
+                f.codegen[CG_CODEGEN_REG_USES], 0x5c5c_5c5c_5c5c_5c5cusize,
+                "a zero-register proc never touches the heads pointer"
+            );
+
+            *core::ptr::addr_of_mut!(CG_BLOCK_EMIT_OPS) = saved;
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn block_emit_builds_in_order_use_lists_per_register() {
+        let _g = setup();
+        let mut f = EmitFixture::new();
+        unsafe {
+            let saved = install_emit_ops();
+            let a = cg_virtual_reg_create(f.proc_ptr(), 0);
+            let b = cg_virtual_reg_create(f.proc_ptr(), 0);
+            let c = cg_virtual_reg_create(f.proc_ptr(), 0);
+            f.set_heads(3);
+
+            let i0 = cg_create_inst_load_immed(f.block_ptr(), 0x28, a, 7);
+            let i1 = cg_create_inst_binary(f.block_ptr(), 0x0f, b, a, c);
+            let i2 = cg_create_inst_unary(f.block_ptr(), 0x05, c, b);
+            let i3 = cg_create_inst_binary(f.block_ptr(), 0x10, a, c, b);
+
+            cg_block_emit(f.codegen_ptr(), f.block_ptr());
+
+            assert_eq!(
+                f.use_chain(0),
+                std::vec![i1 as *mut u8],
+                "a's only in-block user is i1"
+            );
+            assert_eq!(
+                f.use_chain(1),
+                std::vec![i2 as *mut u8, i3 as *mut u8],
+                "b's users chain in instruction order"
+            );
+            assert_eq!(
+                f.use_chain(2),
+                std::vec![i1 as *mut u8, i3 as *mut u8],
+                "c's users chain in instruction order"
+            );
+
+            let alloc = match EMIT_LOG[0] {
+                EmitStage::Alloc(size, ptr) => {
+                    assert_eq!(
+                        size,
+                        record_size(3 * 4),
+                        "the tail table is num_registers * 4 target bytes"
+                    );
+                    ptr
+                }
+                other => panic!("stage 0 must be the tail-table alloc, got {other:?}"),
+            };
+            assert_eq!(EMIT_LOG[1], EmitStage::Free(alloc));
+            assert_eq!(EMIT_LOG[2], EmitStage::Bind(f.block.as_mut_ptr() as *mut u8));
+            assert_eq!(
+                &EMIT_LOG[3..7],
+                &[
+                    EmitStage::Emit(i0),
+                    EmitStage::Emit(i1),
+                    EmitStage::Emit(i2),
+                    EmitStage::Emit(i3),
+                ],
+                "with no leading phi, every instruction is dispatched in order"
+            );
+            assert_eq!(EMIT_LOG[7], EmitStage::Release(f.live_out.as_mut_ptr() as *mut u8));
+            assert_eq!(EMIT_LOG[8], EmitStage::Flush);
+            assert_eq!(EMIT_LOG.len(), 9);
+
+            *core::ptr::addr_of_mut!(CG_BLOCK_EMIT_OPS) = saved;
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn block_emit_skips_leading_phis_emits_later_ones_and_collects_every_use() {
+        let _g = setup();
+        let mut f = EmitFixture::new();
+        unsafe {
+            let saved = install_emit_ops();
+            let d = cg_virtual_reg_create(f.proc_ptr(), 0);
+            let s = cg_virtual_reg_create(f.proc_ptr(), 0);
+            f.set_heads(2);
+            let phi_args = [s, core::ptr::null_mut()];
+            let p0 = cg_create_inst_phi(
+                f.block_ptr(),
+                CG_INST_OPCODE_PHI,
+                d,
+                cg_virtual_reg_list_create(f.heap, phi_args.as_ptr()),
+            );
+            let p1 = cg_create_inst_phi(
+                f.block_ptr(),
+                CG_INST_OPCODE_PHI,
+                d,
+                cg_virtual_reg_list_create(f.heap, phi_args.as_ptr()),
+            );
+            let i2 = cg_create_inst_load_immed(f.block_ptr(), 0x28, s, 0x40);
+            let p3 = cg_create_inst_phi(
+                f.block_ptr(),
+                CG_INST_OPCODE_PHI,
+                d,
+                cg_virtual_reg_list_create(f.heap, phi_args.as_ptr()),
+            );
+            let i4 = cg_create_inst_binary(f.block_ptr(), 0x0f, d, d, s);
+
+            cg_block_emit(f.codegen_ptr(), f.block_ptr());
+
+            assert_eq!(EMIT_LOG[2], EmitStage::Bind(f.block.as_mut_ptr() as *mut u8));
+            assert_eq!(
+                &EMIT_LOG[3..6],
+                &[
+                    EmitStage::Emit(i2),
+                    EmitStage::Emit(p3),
+                    EmitStage::Emit(i4),
+                ],
+                "leading phis are skipped, but a phi AFTER the first non-phi is dispatched"
+            );
+            assert_eq!(EMIT_LOG[6], EmitStage::Release(f.live_out.as_mut_ptr() as *mut u8));
+            assert_eq!(EMIT_LOG[7], EmitStage::Flush);
+            assert_eq!(EMIT_LOG.len(), 8);
+
+            assert_eq!(
+                f.use_chain(1),
+                std::vec![p0 as *mut u8, p1 as *mut u8, p3 as *mut u8, i4 as *mut u8],
+                "the skipped phis' source uses are still collected, in order"
+            );
+            assert_eq!(
+                f.use_chain(0),
+                std::vec![i4 as *mut u8],
+                "d's only use is i4's first source"
+            );
+
+            *core::ptr::addr_of_mut!(CG_BLOCK_EMIT_OPS) = saved;
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn block_emit_all_phi_block_emits_nothing_but_still_builds_use_lists() {
+        let _g = setup();
+        let mut f = EmitFixture::new();
+        unsafe {
+            let saved = install_emit_ops();
+            let d = cg_virtual_reg_create(f.proc_ptr(), 0);
+            let s = cg_virtual_reg_create(f.proc_ptr(), 0);
+            f.set_heads(2);
+            let phi_args = [s, core::ptr::null_mut()];
+            let p0 = cg_create_inst_phi(
+                f.block_ptr(),
+                CG_INST_OPCODE_PHI,
+                d,
+                cg_virtual_reg_list_create(f.heap, phi_args.as_ptr()),
+            );
+            let p1 = cg_create_inst_phi(
+                f.block_ptr(),
+                CG_INST_OPCODE_PHI,
+                d,
+                cg_virtual_reg_list_create(f.heap, phi_args.as_ptr()),
+            );
+
+            cg_block_emit(f.codegen_ptr(), f.block_ptr());
+
+            assert!(
+                EMIT_LOG.iter().all(|stage| !matches!(stage, EmitStage::Emit(_))),
+                "a block of nothing but phis dispatches no instruction"
+            );
+            assert_eq!(
+                EMIT_LOG.len(),
+                5,
+                "alloc, free, bind, release, flush still run"
+            );
+            assert_eq!(
+                f.use_chain(1),
+                std::vec![p0 as *mut u8, p1 as *mut u8],
+                "the phi sources are collected even though nothing is emitted"
+            );
+            assert_eq!(
+                f.heads[0], 0,
+                "a register nobody uses keeps a NULL head"
+            );
+            assert_eq!(
+                f.codegen[CG_CODEGEN_CURRENT_BLOCK], 0,
+                "the block is unpublished on exit"
+            );
+
+            *core::ptr::addr_of_mut!(CG_BLOCK_EMIT_OPS) = saved;
+        }
+        drop(f);
+        teardown();
+    }
+
+    #[test]
+    fn block_emit_seams_stay_wired_to_the_defaults() {
+        let _g = setup();
+        unsafe {
+            let ops = hook(core::ptr::addr_of!(CG_BLOCK_EMIT_OPS));
+            assert_eq!(
+                ops.alloc_use_tails as usize, crate::runtime::malloc_rt::malloc as usize,
+                "the alloc slot stays wired to the ported malloc — the original's direct bl"
+            );
+            assert_eq!(
+                ops.free_use_tails as usize, crate::runtime::malloc_rt::free as usize,
+                "the free slot stays wired to the ported free — the original's direct bl"
+            );
+            assert_eq!(
+                ops.bind_registers as usize, default_cg_bind_registers as usize,
+                "FUN_082b3b5c stays a documented no-op until ported"
+            );
+            assert_eq!(
+                ops.emit_inst as usize, default_cg_emit_inst as usize,
+                "FUN_082c0f4c stays a documented no-op until ported"
+            );
+            assert_eq!(
+                ops.release_hw_reg_bindings as usize,
+                default_cg_release_hw_reg_bindings as usize,
+                "FUN_082cea24 stays a documented no-op until ported"
+            );
+            assert_eq!(
+                ops.flush_pending_bindings as usize,
+                default_cg_flush_pending_bindings as usize,
+                "FUN_082ccae4 stays a documented no-op until ported"
             );
         }
         teardown();

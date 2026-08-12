@@ -24979,6 +24979,92 @@ functions:
       ::codegen_destroy_default_frees_pages_in_order_then_the_buffer
       and ::compile_and_patch_seams_stay_wired_to_the_defaults.
 
+  - address: 0x082c0e28
+    ghidra: FUN_082c0e28
+    name: cg_block_emit
+    size: 292
+    sig: "void cg_block_emit(CgCodegen *codegen, CgBlock *block)"
+    module: codegen/ir
+    status: ported
+    renames:
+      param_1/r0->r5: codegen
+      param_2/r1->r8: block
+      r4: block->label (prologue), then num_registers, then the used-reg cursor
+      r7: tails (the malloc'd per-register tail-pointer table)
+      r6: inst (both list walks)
+      r9: collector end cursor
+      aiStack_120: used (64-entry on-stack used-register buffer, sp..sp+0x100)
+      FUN_082c23d4: cg_buffer_current_offset (ported, direct)
+      FUN_0802edac: malloc (the CG_BLOCK_EMIT_OPS.alloc_use_tails slot)
+      FUN_082c1bfc: cg_inst_collect_used_regs (ported, direct)
+      FUN_082c1a08: cg_heap_alloc (ported, direct)
+      FUN_0802edc8: free (the CG_BLOCK_EMIT_OPS.free_use_tails slot)
+      FUN_082b3b5c: bind_registers slot (unported; no-op default)
+      FUN_082c0f4c: emit_inst slot (unported; no-op default)
+      FUN_082cea24: release_hw_reg_bindings slot (unported; no-op default)
+      FUN_082ccae4: flush_pending_bindings slot (unported; no-op default)
+    notes: >-
+      1 bl call site: 0x082c13ac, the per-procedure emitter
+      FUN_082c1320's block loop (its r2 - 0 for the proc's first
+      block, 1 for the rest - is NEVER read by the callee: r2's first
+      use in the body is a clobber, ldr r2,[r7,...] @ 0x082c0ec0; the
+      ported signature drops it). The JIT's per-block code generator.
+      (1) Publishes the block at codegen +0x208 (CG_CODEGEN_CURRENT_BLOCK,
+      read by FUN_082b3b5c/FUN_082d7870/FUN_082c5c58). (2) Binds the
+      block's label (block +0x08 = CG_BLOCK_LABEL, created per block
+      by FUN_082c1320's label loop): label->offset (+0x08) =
+      cg_buffer_current_offset(codegen->output). (3) mallocs a
+      num_registers-entry tail table (num from block->proc +0x20),
+      then per register tails[r] = &heads[r], heads[r] = NULL, heads
+      = codegen +0x21c (CG_CODEGEN_REG_USES, the per-proc array
+      FUN_082c1320 carves from the codegen heap). (4) Walks the
+      block's instructions; per instruction collects USED registers
+      into the 64-slot stack frame (sub sp,sp,#0x100; bounded by
+      add r2,sp,#0x100) through the ported cg_inst_collect_used_regs
+      and appends one 8-byte arena record {next, inst} per use
+      through the tail pointer, exact store order *tail = record,
+      record->inst = inst, tail = record (tail's next stays NULL by
+      the arena zero-fill). Result: heads[r] = the in-order list of
+      the block's instructions using register r - the use lists the
+      emitters drain use-by-use (FUN_082beb4c unlinks each record as
+      the using instruction is emitted and releases the register's
+      binding when its list runs empty; binary-verified at
+      0x082bec18-0x082becc8). (5) free(tails), then the block-entry
+      register binder FUN_082b3b5c (216 bytes, unported). (6)
+      Emission: skips LEADING phi instructions (kind byte 9), then
+      dispatches EVERY remaining instruction - including any phi
+      later in the list - to the per-instruction emitter FUN_082c0f4c
+      (1428 bytes, unported; a 25-way dispatch on the OPCODE byte
+      inst+0x09). (7) Epilogue: FUN_082cea24(codegen, block +0x20
+      live-out bitset record, 152 bytes, unported), FUN_082ccae4
+      (codegen) (204 bytes, unported), then codegen +0x208 = NULL.
+      Deviations: the four unported callees and the malloc/free
+      boundary route through the swappable CG_BLOCK_EMIT_OPS table
+      (the CgCompileAndPatchOps precedent; alloc/free default to the
+      real ports so host tests avoid racing malloc's global HEAP_OPS,
+      the CG_BUFFER_ALLOC precedent; the four callee slots default to
+      no work, the documented default_cg_graph_pass deviation); every
+      ported callee is called directly. match.py (exit 1, diff
+      expected): field offsets (0x208 store first, +0x10/+0x08 label
+      bind, +0x20 num_registers, 0x21c heads, +0x10 reg_no, the
+      three-store append, +0x08 kind byte cmp #9, +0x20 live-out,
+      0x208 clear) and both loop structures line up; the diff is the
+      crate fp prologue, the ops-table ldrd/blx dispatch in place of
+      the direct bls, and LLVM's pointer-incrementing loop
+      re-expressions. Host tests:
+      src/codegen/ir.rs::block_emit_binds_label_publishes_block_and_runs_the_empty_pipeline_in_order
+      (label binding, publish-before-binder, alloc(0)/free identity,
+      epilogue order, zero-register heads never touched),
+      ::block_emit_builds_in_order_use_lists_per_register (per-register
+      chains in instruction order, single- and multi-use registers,
+      alloc size, full stage order),
+      ::block_emit_skips_leading_phis_emits_later_ones_and_collects_every_use
+      (leading-phi skip vs later-phi dispatch, skipped phis still
+      contribute uses),
+      ::block_emit_all_phi_block_emits_nothing_but_still_builds_use_lists
+      (no dispatch, NULL head for an unused register, unpublished on
+      exit) and ::block_emit_seams_stay_wired_to_the_defaults.
+
   - address: 0x082430c4
     ghidra: FUN_082430c4
     name: cg_cell_table_create
