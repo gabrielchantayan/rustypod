@@ -9597,6 +9597,57 @@ functions:
       accessor for class id 0x6600, registered @ 0x08101aa4. CLASS NOT
       IDENTIFIED, same reason as 0x08172124.
 
+  - address: 0x08103464
+    ghidra: FUN_08103464
+    name: queued_message_construct
+    size: 72
+    sig: "QueuedMessage *queued_message_construct(QueuedMessage *storage, u32 message_code, const u8 *bytes, u32 byte_count)"
+    module: app/queued_message
+    status: ported
+    renames:
+      param_1: storage
+      param_2/r5: message_code
+      param_3/r6: bytes
+      param_4/r7: byte_count
+      puVar1/r4: message
+      DAT_081034ac: QUEUED_MESSAGE_VTABLE
+      FUN_08266a48: queued_message_base_construct
+      FUN_082aadd4: operator_new
+      FUN_081b9248: queued_message_payload_construct
+      uVar2: payload
+    notes: >-
+      72-byte factory (0x08103464..0x081034ac, eighteen ARM
+      instructions) with 56 bl call sites, no tail branches. It builds
+      the standard queued-message envelope in caller-provided arena
+      storage: FUN_08266a48(storage, 0x16), installs the derived
+      vtable literal DAT_081034ac = 0x08980744, allocates exactly 0x10
+      bytes through the already-ported tag-2 operator_new, constructs
+      the nested payload with the caller's message_code/bytes/
+      byte_count unchanged and in r1/r2/r3 order, stores the returned
+      payload pointer at +0x08, and returns the base constructor's
+      result. FUN_08266a48 is a base constructor, not an allocator:
+      its five-instruction body runs framework_object_construct,
+      installs its own vtable, and stores the 0x16 kind/tag at +0x04.
+      The outer constructor then overwrites that vtable for this
+      derived envelope. All inspected callers allocate the 12-byte
+      outer storage from the current message arena
+      (FUN_08103400 + FUN_0826c0d8(..., 0xc)) then hand this result
+      directly to FUN_08110fdc, which posts it to a task queue.
+      The 16-byte nested payload's constructor 0x081b9248 stores the
+      message code and byte count and, only when byte_count != 0,
+      retains a 0x27-tagged owned copy of bytes; its dtor
+      0x081b92ac releases that copy and the outer dtor 0x0810351c
+      virtual-dispatches that payload dtor. The two constructors are
+      unported and use QUEUED_MESSAGE_OPS (firmware-address defaults on
+      target, panicking defaults on host); operator_new is direct.
+      Host tests pin the 0x16 kind argument, base-result adoption,
+      derived vtable store, direct operator_new(0x10), full nested
+      argument routing, returned payload store, and the zero-length
+      NULL-payload forwarding path. match.py structural comparison
+      retains the base ctor/vtable/allocate/payload ctor/store/return
+      sequence; expected differences are the two seam loads/blx calls
+      and LLVM's frame/register allocation.
+
   - address: 0x08103584
     ghidra: FUN_08103584
     name: instance_of_class_8300
