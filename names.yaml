@@ -25777,6 +25777,58 @@ functions:
       src/app/vtable_set.rs::kind2_block_constructs_five_words_without_a_diagnostic
       / kind2_block_reports_bad_descriptor_and_still_constructs.
 
+  - address: 0x08155d6c
+    ghidra: FUN_08155d6c
+    name: iterator_state_next
+    size: 44
+    sig: "u32 iterator_state_next(state: *mut u32, out: *mut u8)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r4: state
+      param_2/r5: out
+      FUN_08155bac: iterator_state_refresh (ITERATOR_STATE_REFRESH
+        seam) - rederives next +0x0c / prev +0x04 from the position
+        word and the owner's count
+      FUN_08155e30: iterator_state_fetch (ITERATOR_STATE_FETCH seam) -
+        the shared guarded fetch (valid-iterator check 0x0829baa8,
+        0 <= pos < count guard, vtable+0x3c item_at(owner, pos, out))
+    notes: >-
+      The advance half of the collection iterator's next, same state
+      class as iterator_state_construct @ 0x08155e80 /
+      iterator_state_cleanup @ 0x08155ec0. 44 bytes exactly,
+      0x08155d6c..0x08155d98, eleven instructions, no literal pool;
+      the previous-index sibling opens immediately after. 55 bl call
+      sites binary-scanned (54 unconditional + 1 conditional), 0 b.
+      Algorithm: adopt the buffered next index as the position (ldr
+      [r0,#0xc]; str [r4,#8]), refresh the prev/next bookkeeping
+      (0x08155bac), then TAIL into the shared guarded fetch
+      0x08155e30 (mov r1, out; mov r0, state; b). GHIDRA ILLUSION:
+      the decompile inlines the fetch body, making 0x08155d6c look
+      like it owns the valid-index guard and the vtable+0x3c dispatch;
+      the raw ARM shows both live in 0x08155e30, a separately called
+      function (bl @ 0x08213728, plus the seek's b @ 0x08155dc0).
+      This port is exactly the 44-byte advance; both callees ride new
+      ITERATOR_STATE_REFRESH / ITERATOR_STATE_FETCH seams (no-op /
+      0-returning defaults - the family precedent; an unswapped table
+      advances the position and reports an empty traversal). The tail
+      branch is a plain call in the source (Rust has no guaranteed
+      tail calls); release LLVM happens to emit a real pop+bx r2 tail
+      call, matching the original's shape. class_6800's local seam
+      knows this function as collection_iterator_next;
+      vtable_file_record_teardown's inner step (@ 0x081dddf8) is one
+      of the 55 sites. Host tests: next-at-+0x0c adopted as the
+      position at +0x08, refresh strictly before fetch with state
+      routed to both, out forwarded verbatim, the fetch's verdict
+      returned for both 1 and 0, and a faithful scripted fetch pinning
+      the seam-boundary contract end to end (index guard boundaries
+      -2/-1/0/2/3 against count 3, vtable slot +0x3c read, item_at
+      args) over a sub-4-GiB mapped fixture (new testing.rs hint
+      VTABLE_SET_ITERATOR). match.py structural: identical
+      load/store/refresh/tail-fetch sequence - LLVM even emitted the
+      pop+bx tail call; the diff is the two seam blx indirections and
+      the crate fp frame.
+
   - address: 0x08155e80
     ghidra: FUN_08155e80
     name: iterator_state_construct

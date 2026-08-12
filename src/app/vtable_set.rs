@@ -3639,6 +3639,95 @@ pub unsafe extern "C" fn iterator_state_construct(
     state
 }
 
+/// Indirect call to the unported prev/next refresh `FUN_08155bac` @
+/// 0x08155bac — the seek's second half factored out: from the state
+/// word at +0x08 and the owner's count word it rederives the next
+/// (+0x0c) and prev (+0x04) index words (2 `bl` + 1 `b` sites: this
+/// family's advance, the seek @ 0x08155dc4, and a tail @ 0x08155e2c).
+/// Its return value is discarded.
+///
+/// The seam keeps that unported bookkeeping outside this one-function
+/// port while retaining the target's `refresh(state)` ABI.
+pub static mut ITERATOR_STATE_REFRESH: unsafe extern "C" fn(
+    state: *mut u32,
+) = iterator_state_refresh_unported;
+
+/// Default for [`ITERATOR_STATE_REFRESH`]: the refresh is unported, so
+/// it has no local effect (the `iterator_state_release_unported`
+/// precedent).
+unsafe extern "C" fn iterator_state_refresh_unported(_state: *mut u32) {}
+
+/// Indirect call to the unported guarded fetch `FUN_08155e30` @
+/// 0x08155e30 — the shared tail of this family's advance (here), seek
+/// (`b` @ 0x08155dc0) and one outside caller (`bl` @ 0x08213728):
+/// unless the iterator is valid (0x0829baa8: position word != -1 and
+/// != -5) and 0 <= position < owner count, it returns 0; otherwise it
+/// dispatches the owner collection's vtable slot +0x3c —
+/// `item_at(owner, position, out)`, the same slot util/cursor's
+/// ported cursor_advance uses — and returns its result.
+///
+/// The seam keeps that unported fetch outside this one-function port
+/// while retaining the target's `fetch(state, out) -> status` ABI.
+pub static mut ITERATOR_STATE_FETCH: unsafe extern "C" fn(
+    state: *mut u32,
+    out: *mut u8,
+) -> u32 = iterator_state_fetch_unported;
+
+/// Default for [`ITERATOR_STATE_FETCH`]: returns 0, the empty
+/// traversal (the `teardown_inner_next_unported` precedent).
+unsafe extern "C" fn iterator_state_fetch_unported(_state: *mut u32, _out: *mut u8) -> u32 {
+    0
+}
+
+/// iterator_state_next — original: `FUN_08155d6c` @ 0x08155d6c (44
+/// bytes exactly, 0x08155d6c..0x08155d98 — eleven instructions, no
+/// literal pool; the previous-index sibling opens immediately after.
+/// 55 `bl` call sites binary-scanned — 54 unconditional plus one
+/// conditional — 0 `b`).
+///
+/// The advance half of the collection iterator's next: adopt the
+/// buffered next index as the position, refresh the bookkeeping, and
+/// tail into the shared guarded fetch:
+///
+/// ```text
+/// state.pos = state.next      ; ldr r0, [r0, #0xc]; str r0, [r4, #8]
+/// FUN_08155bac(state)         ; refresh prev +0x04 / next +0x0c
+/// return FUN_08155e30(state, out)   ; the original's `b` tail — the
+///                             ; valid-index guard and the vtable+0x3c
+///                             ; item_at dispatch live THERE, not here
+/// ```
+///
+/// Ghidra's decompile of 0x08155d6c inlines the fetch body, which makes
+/// the function look like it owns the index guard; the raw ARM shows
+/// the guard belongs to 0x08155e30, a separately called function
+/// (binary-verified: `bl` @ 0x08213728, plus the seek's `b` @
+/// 0x08155dc0). This port is exactly the 44-byte advance; both
+/// callees ride the [`ITERATOR_STATE_REFRESH`] / [`ITERATOR_STATE_FETCH`]
+/// seams (no-op / 0-returning defaults — the family precedent, so an
+/// unswapped table advances the position and reports an empty
+/// traversal). The tail branch is a plain call here (Rust has no
+/// guaranteed tail calls — the operator_delete_tag3 deviation).
+///
+/// `class_6800`'s local seam knows this function as
+/// `collection_iterator_next`; `vtable_file_record_teardown`'s inner
+/// step (@ 0x081dddf8) is one of the 55 sites.
+///
+/// # Safety
+///
+/// `state` must address the five-word iterator state (+0x00..+0x13);
+/// it is read and written unchecked, as in the original. `out` flows
+/// to the fetch callee unchecked.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iterator_state_next(state: *mut u32, out: *mut u8) -> u32 {
+    let next = state.add(3).read();
+    state.add(2).write(next);
+    let refresh = core::ptr::read_volatile(core::ptr::addr_of!(ITERATOR_STATE_REFRESH));
+    refresh(state);
+    let fetch = core::ptr::read_volatile(core::ptr::addr_of!(ITERATOR_STATE_FETCH));
+    fetch(state, out)
+}
+
 /// Indirect call to the unported observer-list release
 /// `FUN_08271724`. The target walks the owner list at +0x0c and unlinks
 /// `state` by its +0x10 next link; its return value is discarded.
@@ -4484,6 +4573,10 @@ mod tests {
                     .write_volatile(iterator_state_link_unported);
                 core::ptr::addr_of_mut!(ITERATOR_STATE_SEEK)
                     .write_volatile(iterator_state_seek_unported);
+                core::ptr::addr_of_mut!(ITERATOR_STATE_REFRESH)
+                    .write_volatile(iterator_state_refresh_unported);
+                core::ptr::addr_of_mut!(ITERATOR_STATE_FETCH)
+                    .write_volatile(iterator_state_fetch_unported);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE)
                     .write_volatile(teardown_registry_dispose_unported);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_DESTRUCT_KIND1_CONTAINER08_TEARDOWN)
@@ -4827,6 +4920,170 @@ mod tests {
                 assert_eq!(ITERATOR_SEEK_POSITION, start, "start {start} forwarded verbatim");
             }
             assert_eq!(ITERATOR_SEEK_CALLS, 3);
+        }
+    }
+
+    // ---- iterator_state_next (0x08155d6c) -----------------------------
+
+    static mut NEXT_REFRESH_CALLS: usize = 0;
+    static mut NEXT_FETCH_CALLS: usize = 0;
+    static mut NEXT_FETCH_STATE: *mut u32 = core::ptr::null_mut();
+    static mut NEXT_FETCH_OUT: *mut u8 = core::ptr::null_mut();
+    static mut NEXT_FETCH_RESULT: u32 = 0;
+    /// Callee invocation order, e.g. ["refresh", "fetch"].
+    static mut NEXT_ORDER: [u8; 4] = [0; 4];
+    static mut NEXT_ORDER_LEN: usize = 0;
+
+    unsafe extern "C" fn recording_refresh(state: *mut u32) {
+        NEXT_REFRESH_CALLS += 1;
+        assert!(!state.is_null());
+        if NEXT_ORDER_LEN < NEXT_ORDER.len() {
+            NEXT_ORDER[NEXT_ORDER_LEN] = b'R';
+            NEXT_ORDER_LEN += 1;
+        }
+    }
+
+    unsafe extern "C" fn recording_fetch(state: *mut u32, out: *mut u8) -> u32 {
+        NEXT_FETCH_CALLS += 1;
+        NEXT_FETCH_STATE = state;
+        NEXT_FETCH_OUT = out;
+        if NEXT_ORDER_LEN < NEXT_ORDER.len() {
+            NEXT_ORDER[NEXT_ORDER_LEN] = b'F';
+            NEXT_ORDER_LEN += 1;
+        }
+        NEXT_FETCH_RESULT
+    }
+
+    unsafe fn install_recording_next_ops() {
+        NEXT_REFRESH_CALLS = 0;
+        NEXT_FETCH_CALLS = 0;
+        NEXT_FETCH_STATE = core::ptr::null_mut();
+        NEXT_FETCH_OUT = core::ptr::null_mut();
+        NEXT_FETCH_RESULT = 0;
+        NEXT_ORDER_LEN = 0;
+        core::ptr::addr_of_mut!(ITERATOR_STATE_REFRESH).write_volatile(recording_refresh);
+        core::ptr::addr_of_mut!(ITERATOR_STATE_FETCH).write_volatile(recording_fetch);
+    }
+
+    #[test]
+    fn iterator_state_next_adopts_next_as_position_then_refreshes_then_fetches() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        // [owner, prev, pos, next, link]: pos starts at 5, next is 2.
+        let mut state = [0x0855_0000u32, 4, 5, 2, 0];
+        let mut out = [0u8; 4];
+        unsafe {
+            install_recording_next_ops();
+            NEXT_FETCH_RESULT = 1;
+            let state_ptr = state.as_mut_ptr();
+            let out_ptr = out.as_mut_ptr();
+            let status = iterator_state_next(state_ptr, out_ptr);
+
+            assert_eq!(status, 1, "the fetch's verdict is the return");
+            assert_eq!(state[2], 2, "next at +0x0c adopted as the position at +0x08");
+            assert_eq!(state[3], 2, "the refresh (a no-op mock) leaves next alone");
+            assert_eq!(NEXT_REFRESH_CALLS, 1, "one bookkeeping refresh");
+            assert_eq!(NEXT_FETCH_CALLS, 1, "one guarded fetch");
+            assert_eq!(NEXT_FETCH_STATE, state_ptr, "fetch(state, ...)");
+            assert_eq!(NEXT_FETCH_OUT, out_ptr, "out forwarded verbatim");
+            assert_eq!(
+                &NEXT_ORDER[..NEXT_ORDER_LEN],
+                b"RF",
+                "the refresh runs strictly before the fetch"
+            );
+        }
+    }
+
+    #[test]
+    fn iterator_state_next_returns_the_fetchs_zero_verdict() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        let mut state = [0u32; 5];
+        unsafe {
+            install_recording_next_ops();
+            NEXT_FETCH_RESULT = 0;
+            assert_eq!(
+                iterator_state_next(state.as_mut_ptr(), core::ptr::null_mut()),
+                0,
+                "an exhausted fetch propagates as 0"
+            );
+        }
+    }
+
+    #[test]
+    fn iterator_state_next_through_a_faithful_fetch_models_the_index_guard() {
+        // The guard itself lives in 0x08155e30 (seamed, unported): 0
+        // unless 0 <= pos < count, in which case vtable+0x3c
+        // item_at(owner, pos, out). This scripted mock models that
+        // contract exactly, pinning the advance's end-to-end behavior
+        // at the seam boundary. The owner/vtable fixture must sit
+        // below 4 GiB so raw u32 pointers round-trip.
+        let Some(fixture) =
+            crate::testing::try_map_u32_slab(crate::testing::hints::VTABLE_SET_ITERATOR, 0x100)
+        else {
+            assert!(crate::testing::note_missing_u32_fixture("vtable_set iterator_next"));
+            return;
+        };
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        static mut GUARDED_POS: [i32; 8] = [0; 8];
+        static mut GUARD_LEN: usize = 0;
+        static mut DISPATCH_OWNER: u32 = 0;
+        static mut DISPATCH_POS: i32 = -1;
+        static mut DISPATCH_OUT: u32 = 0;
+        /// Slot marker the scripted fetch recognizes: host code pointers
+        /// live above 4 GiB (PIE), so no real fn pointer can round-trip
+        /// through the fixture's u32 slot — the mock models the dispatch
+        /// on the marker instead.
+        const ITEM_AT_SLOT: u32 = 0xCAFE_003C;
+        unsafe extern "C" fn faithful_fetch(state: *mut u32, out: *mut u8) -> u32 {
+            let owner = state.read() as *const u32;
+            let pos = state.add(2).read() as i32;
+            let count = owner.add(1).read() as i32;
+            GUARDED_POS[GUARD_LEN] = pos;
+            GUARD_LEN += 1;
+            if pos >= 0 && pos < count {
+                let slot = (owner.read() as *const u32).add(0x3c / 4).read();
+                assert_eq!(slot, ITEM_AT_SLOT, "vtable slot +0x3c read from the owner");
+                // item_at(owner, pos, out):
+                DISPATCH_OWNER = owner as u32;
+                DISPATCH_POS = pos;
+                DISPATCH_OUT = out as u32;
+                1
+            } else {
+                0
+            }
+        }
+        let mut state = [0u32; 5];
+        let mut out = [0u8; 4];
+        unsafe {
+            install_recording_next_ops();
+            core::ptr::addr_of_mut!(ITERATOR_STATE_FETCH).write_volatile(faithful_fetch);
+            // Fixture layout: vtable at fixture+0x00 (slot +0x3c =
+            // the marker), owner at fixture+0x40 (+0x00 vtable
+            // word, +0x04 count).
+            let vtable = fixture as *mut u32;
+            vtable.add(0x3c / 4).write(ITEM_AT_SLOT);
+            let owner = fixture.add(0x40) as *mut u32;
+            owner.write(fixture as u32);
+            owner.add(1).write(3); // count
+            state[0] = owner as u32;
+            GUARD_LEN = 0;
+            // pos = next beforehand; the refresh mock is a no-op, so the
+            // fetch sees exactly the adopted next value.
+            for (next, expected) in [(-2i32, 0u32), (-1, 0), (0, 1), (2, 1), (3, 0)] {
+                state[3] = next as u32;
+                assert_eq!(
+                    iterator_state_next(state.as_mut_ptr(), out.as_mut_ptr()),
+                    expected,
+                    "next {next}: the guard accepts exactly 0..count"
+                );
+                assert_eq!(state[2], next as u32, "position adopted before the fetch");
+            }
+            assert_eq!(GUARD_LEN, 5, "every advance reaches the fetch");
+            assert_eq!(DISPATCH_OWNER, owner as u32, "item_at(owner, ...)");
+            assert_eq!(DISPATCH_POS, 2, "item_at(..., pos, ...) with the adopted index");
+            assert_eq!(DISPATCH_OUT, out.as_mut_ptr() as u32, "item_at(..., out) verbatim");
         }
     }
 
