@@ -30,8 +30,11 @@
 //! ```
 //!
 //! The guard pair is the StringObject-derived **path object**: the
-//! constructor veneer @ 0x08279284 runs the ported
-//! [`string_object_construct_from_cstr`] @ 0x08277304 and then
+//! constructor veneer @ 0x08279284 (ported as
+//! [`crate::app::path_object_construct::path_object_construct`]) runs
+//! the ported
+//! [`string_object_construct_from_cstr`](crate::cxx::string_object::string_object_construct_from_cstr)
+//! @ 0x08277304 and then
 //! overwrites the vtable word with the derived path-class vtable
 //! 0x089a60d8 (literal pool @ 0x08279298, binary-verified against
 //! osos.dec); the destructor is the ported
@@ -80,13 +83,14 @@
 //!
 //! ## Deviations
 //!
-//! - **The constructor rides the [`PATH_OBJECT_CTOR`] seam** with a
-//!   FAITHFUL default: both of the original's pieces are ported (the
-//!   base [`string_object_construct_from_cstr`]) or known (the derived
-//!   vtable literal), so the default is the exact body — base
-//!   construction, then the [`PATH_OBJECT_VTABLE_ADDRESS`] identity
-//!   word over the vtable slot (the `StringObjectVtable` ROM-identity
-//!   precedent; nothing ported dereferences it).
+//! - **The constructor rides the [`PATH_OBJECT_CTOR`] seam** with the
+//!   ported [`crate::app::path_object_construct::path_object_construct`]
+//!   @ 0x08279284 as the wired default (the
+//!   [`PATH_EXISTS_WORKER`]-to-`path_probe_via_facade` rewiring
+//!   precedent) — base construction, then the
+//!   [`crate::app::path_object_construct::PATH_OBJECT_VTABLE_ADDRESS`]
+//!   identity word over the vtable slot (the `StringObjectVtable`
+//!   ROM-identity precedent; nothing ported dereferences it).
 //! - **The worker rides the [`PATH_EXISTS_WORKER`] seam** with the
 //!   ported [`crate::app::path_probe::path_probe_via_facade`] @
 //!   0x080f4ad8 as the wired default — the mutex-guarded
@@ -102,40 +106,22 @@
 use core::mem::MaybeUninit;
 
 use crate::cxx::string_object::{
-    string_object_construct_from_cstr, string_object_destroy_veneer, StringObject,
-    StringObjectVtable,
+    string_object_destroy_veneer, StringObject, StringObjectVtable,
 };
-
-/// Original load address of the derived path-class vtable the
-/// constructor veneer plants over the base StringObject vtable (the
-/// literal-pool word @ 0x08279298, binary-verified against osos.dec).
-/// Kept as an identity constant: no ported code dispatches through it.
-pub const PATH_OBJECT_VTABLE_ADDRESS: usize = 0x089a60d8;
 
 /// The path-object constructor veneer @ 0x08279284: an ADS C++
 /// converting constructor, takes the raw storage and the source C
-/// string, returns `this`.
+/// string, returns `this`. Ported as
+/// [`crate::app::path_object_construct::path_object_construct`].
 pub type PathObjectCtor =
     unsafe extern "C" fn(this: *mut StringObject, path: *const u8) -> *mut StringObject;
 
-/// The faithful default for the unported veneer @ 0x08279284 — the
-/// original's exact body: base [`string_object_construct_from_cstr`]
-/// (vtable + NULL payload + assign), then the derived path-class
-/// vtable identity over the +0x00 word (`ldr r1, [0x08279298];
-/// str r1, [r0]`), returning the base constructor's result.
-unsafe extern "C" fn path_object_construct(
-    this: *mut StringObject,
-    path: *const u8,
-) -> *mut StringObject {
-    let this = string_object_construct_from_cstr(this, path);
-    (*this).vtable = PATH_OBJECT_VTABLE_ADDRESS as *const StringObjectVtable;
-    this
-}
-
 /// The active path-object constructor — the dispatch seam for
 /// 0x08279284 (`bl` @ 0x080f4ab8). Host tests install a recording mock;
-/// the real port replaces the default when it exists.
-pub static mut PATH_OBJECT_CTOR: PathObjectCtor = path_object_construct;
+/// the wired default is the ported
+/// [`crate::app::path_object_construct::path_object_construct`].
+pub static mut PATH_OBJECT_CTOR: PathObjectCtor =
+    crate::app::path_object_construct::path_object_construct;
 
 /// The exists-query worker @ 0x080f4ad8: takes the constructed path
 /// object (the constructor's RETURN, per the wrapper's r0 flow) and the
@@ -210,7 +196,7 @@ mod tests {
         fn drop(&mut self) {
             unsafe {
                 core::ptr::addr_of_mut!(PATH_OBJECT_CTOR)
-                    .write_volatile(path_object_construct);
+                    .write_volatile(crate::app::path_object_construct::path_object_construct);
                 core::ptr::addr_of_mut!(PATH_EXISTS_WORKER)
                     .write_volatile(crate::app::path_probe::path_probe_via_facade);
                 core::ptr::addr_of_mut!(STRING_OBJECT_OPS).write_volatile(self.saved_ops);
@@ -438,14 +424,14 @@ mod tests {
             // Restore ONLY the ctor seam to its wired default; the
             // recording worker inspects the object the default built.
             core::ptr::addr_of_mut!(PATH_OBJECT_CTOR)
-                .write_volatile(path_object_construct);
+                .write_volatile(crate::app::path_object_construct::path_object_construct);
             WORKER_RESULT = 1;
             let result = path_exists(PATH.as_ptr(), 0);
             assert_eq!(result, 1);
             assert!(!WORKER_PATH_OBJECT.is_null(), "the default ctor ran");
             assert_eq!(
                 WORKER_SEEN_VTABLE as usize,
-                PATH_OBJECT_VTABLE_ADDRESS,
+                crate::app::path_object_construct::PATH_OBJECT_VTABLE_ADDRESS,
                 "the derived path-class vtable replaces the base one"
             );
             assert!(
@@ -488,7 +474,7 @@ mod tests {
             // a NULL-payload no-op, observed by the mock.
             install_recording();
             core::ptr::addr_of_mut!(PATH_OBJECT_CTOR)
-                .write_volatile(path_object_construct);
+                .write_volatile(crate::app::path_object_construct::path_object_construct);
             core::ptr::addr_of_mut!(PATH_EXISTS_WORKER)
                 .write_volatile(crate::app::path_probe::path_probe_via_facade);
             assert_eq!(

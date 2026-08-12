@@ -27430,3 +27430,63 @@ functions:
       save-r0-in-r4 -> call -> mov r0,r4 -> pop structure; the diff is
       the crate fp frame and the seam's ldr/blx static dispatch in
       place of the direct bl 0x082e84a4.
+
+  - address: 0x08279284
+    ghidra: FUN_08279284
+    name: path_object_construct
+    size: 20
+    sig: "StringObject *path_object_construct(StringObject *this, const char *path)"
+    module: app/path_object_construct
+    status: ported
+    renames:
+      param_1/r0: this (raw two-word StringObject storage, forwarded
+        verbatim into the base ctor)
+      param_2/r1: path (caller-owned C string, forwarded verbatim - no
+        register is written between entry and the bl)
+      FUN_08277304: string_object_construct_from_cstr (ported, called
+        directly - the transition_addon.rs ported-callees precedent)
+      DAT_08279298: "PATH_OBJECT_VTABLE_ADDRESS (0x089a60d8, the
+        StringObject-derived path class's vtable; binary-verified
+        against osos.dec)"
+      r4: DEAD - pushed and popped, never written (non-leaf frame
+        etiquette)
+    notes: >-
+      ADS C++ converting constructor PathObject(const char *path) over
+      caller storage: bl the ported base ctor @ 0x08277304 with both
+      arguments forwarded untouched in r0/r1, then ldr the
+      literal-pool word @ 0x08279298 (0x089a60d8, the derived
+      path-class vtable) and str it over the base vtable at +0x00,
+      returning the base ctor's r0 result verbatim (the ADS this
+      convention). The overwrite is unconditional: empty/NULL sources
+      and failed payload allocations still carry the derived vtable
+      over a NULL payload. 24 bl call sites (grep on
+      decomp/osos.asm): 0x0806859c / 0x080685bc / 0x080685dc (the
+      FUN_08068504 database-path trio: Photo Database, ArtworkDB,
+      iTunesDB), 0x08084d38 (the remove wrapper's guard), 0x080890c4,
+      0x08089168, 0x080891f0, 0x08090bd4, 0x0809b688, 0x080a8ec0,
+      0x080f4ab8 (the path_exists wrapper), 0x080f4b2c / 0x080f4b3c
+      (the FUN_080f4b1c pair - Ghidra shows no r1 write for the
+      first, a stale-register empty-path construction), 0x08100980,
+      0x08117914, 0x0811af80, 0x0811c5bc, 0x08136570, 0x081a29b0,
+      0x081a2c54, 0x081afdfc, 0x081b0018, 0x081bc670, 0x081bda2c;
+      every site passes raw two-word storage in r0 and a path C
+      string in r1, and most destroy the object through the ported
+      string_object_destroy_veneer @ 0x082792fc on scope exit.
+      Deviations: the planted vtable is the ROM identity constant
+      (the StringObjectVtable ROM-identity precedent; nothing ported
+      dispatches through it); with this port the path_exists
+      PATH_OBJECT_CTOR seam's wired default switched from its
+      faithful local default to this symbol (same commit - the
+      path_probe_via_facade rewiring precedent), so the symbol IS
+      hook-ready. Host tests:
+      src/app/path_object_construct.rs::tests::returns_the_base_ctors_result_verbatim
+      / plants_the_derived_vtable_over_the_base /
+      base_construction_defines_both_words_from_garbage /
+      empty_and_null_sources_still_carry_the_derived_vtable /
+      fail_closed_assign_leaves_a_null_payload_for_nonempty_sources /
+      matches_the_reference_model_across_sources, plus the rewired
+      src/app/path_exists.rs::tests::default_ctor_builds_the_derived_path_object
+      integration. match.py (exit 1, diff expected): identical
+      push / bl base-ctor / ldr-literal / str [r0] / pop structure
+      with the same 0x089a60d8 literal-pool word; the diff is the
+      crate fp frame.
