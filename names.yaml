@@ -27327,3 +27327,52 @@ functions:
       selector 0, kind-1/state-0 match, kind-0 wrap rejection, busy
       state rejection, NULL facade fallback, trace accessor invoked per
       miss, loop terminates at the default root).
+  - address: 0x08386454
+    ghidra: FUN_08386454
+    name: sqlite_vm_printf
+    size: 100
+    sig: "char *sqlite_vm_printf(sqlite3 *db, const char *format, va_list ap)"
+    module: sqlite/vm_printf
+    status: ported
+    vars: {param_1: db, param_2: format, param_3: ap, uVar1: max_length, auStack_188: accum, local_174: "accum.mallocFailed shadow (sp+0x14)", auStack_170: base, r4: db, r5: ap, r6: format}
+    notes: >-
+      SQLite 3.5.9's sqlite3VMPrintf (util.c) - the va_list printf every
+      formatted diagnostic funnels through. 5 bl call sites
+      (binary-scanned): 0x08376754 (sqlite_error), 0x083767cc
+      (sqlite_error_msg), 0x0837d368 (sqlite_set_string_formatted),
+      0x0837d804 (FUN_0837d7dc = sqlite3NestedParse, which latches
+      db->mallocFailed itself on a NULL result and runs the text through
+      the parser @ 0x08382580), and 0x082c2474 (FUN_082c2438, a
+      refcounted log-string appender - the only caller passing db ==
+      NULL, exercising the literal-default limit). Algorithm: build a
+      stack StrAccum (sp+0) over a 350-byte uninitialized stack base
+      buffer (sp+0x18; size literal 0x15e pooled @ 0x083864bc) via
+      sqlite3StrAccumInit @ 0x08384e84 (ported, sqlite::vdbe_op), with
+      mxAlloc = db->aLimit[SQLITE_LIMIT_LENGTH] (+0x50) or, for a NULL
+      db, SQLITE_MAX_LENGTH = 1,000,000,000 (literal 0x3b9aca00 pooled
+      @ 0x083864b8); run the conversion engine sqlite3VXPrintf @
+      0x0839788c (UNPORTED, 3324 bytes - SQLITE_VXPRINTF dispatch seam
+      with a documented no-op default, house pattern) with useMalloc =
+      1; return sqlite3StrAccumFinish @ 0x08384e14 (ported,
+      sqlite::str_accum) verbatim - a heap-owned NUL-terminated copy or
+      NULL; then, only when accum.mallocFailed (sp+0x14, reloaded AFTER
+      the finish since the finish itself can set it) and db != NULL,
+      store 1 into db->mallocFailed (+0x1e) - the sticky SQLITE_NOMEM
+      latch. A NULL db is never dereferenced (the ldreq/ldrne pair skips
+      the limit load too). Deviations: the C va_list is the house
+      explicit VaList pointer (exactly the &spilled-arg the callers
+      build); StrAccum + base buffer live in the Rust frame; init and
+      finish are called directly per the porting rules. The port is the
+      natural wired default for the shared SQLITE_VM_PRINTF seam in
+      sqlite/error_msg.rs; that swap is deliberately not in this commit
+      (the seam file is untouched). Verified by
+      src/sqlite/vm_printf.rs::tests (limit selection for db and NULL
+      db, argument/capacity forwarding to the engine, heap-copy return
+      with n_char+1 allocation, allocator-failure NULL + latch,
+      latch-never-cleared, formatter-reported failure with and without a
+      db, default-engine empty-string and down-allocator shapes).
+      match.py (exit 1, diff expected): same 376-byte frame, same
+      cmp/ldrne [r4,#0x50]/ldreq limit select, same init -> engine ->
+      finish -> strbne [r4,#0x1e] tail; the diff is the crate fp frame
+      and the seam's ldr/blx static dispatch in place of the direct bl
+      0x0839788c.

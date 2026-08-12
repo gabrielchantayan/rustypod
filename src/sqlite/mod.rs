@@ -115,3 +115,4 @@ pub mod used_as_column_cache;
 pub mod value_free;
 pub mod vdbe;
 pub mod vdbe_op;
+pub mod vm_printf;
