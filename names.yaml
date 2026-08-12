@@ -15320,6 +15320,47 @@ functions:
       the statement. The `cmpne r1,#8` is unsigned, so a counter already
       past the cap cannot overrun the array.
 
+  - address: 0x0837a354
+    ghidra: FUN_0837a354
+    name: get_temp_range
+    size: 104
+    sig: "int get_temp_range(Parse *parse, int n_reg)"
+    module: sqlite/get_temp_range
+    status: ported
+    renames:
+      param_1: parse
+      param_2: n_reg
+      iVar1: cached
+      iVar2: first
+    notes: >-
+      SQLite 3.5.9's sqlite3GetTempRange (expr.c), verbatim - no
+      deviation: reserve n_reg consecutive VDBE registers, from the
+      range pool when possible, else carved off nMem. 11 bl call sites,
+      no tail b sites (binary-scanned): 0x082c3b10, 0x082e8838,
+      0x08368884, 0x083771a8, 0x08379b80, 0x08379f60, 0x0837c328,
+      0x083836c4, 0x08385cb4, 0x0838e11c, 0x08396188. Algorithm: load
+      iRangeReg (i32 @ Parse +0x3c) and nRangeReg (i32 @ +0x38) once at
+      entry; if n_reg <= nRangeReg (signed - the bgt at 0x0837a36c
+      short-circuits past the scan) AND usedAsColumnCache @ 0x083966a0
+      (ported, called directly - no seam: here the verdict is
+      load-bearing, unlike the get_temp_reg sibling) finds no cached
+      register in the probe range, bump iRangeReg += n_reg and
+      nRangeReg -= n_reg and return the old iRangeReg; else return old
+      nMem + 1 and advance nMem (i32 @ +0x48) by n_reg ONLY (upstream's
+      i = pParse->nMem+1; pParse->nMem += nReg;). Two upstream quirks
+      kept: the cache probe covers the WHOLE remaining pool range
+      (iRangeReg, iRangeReg + nRangeReg - 1), not just the requested
+      sub-range, so a cached register anywhere in the pool vetoes it;
+      and the 3.5.9 discarded-verdict bug of get_temp_reg @ 0x0837a3bc
+      does NOT exist here (the cmp/eq-conditioned pool updates after
+      the bl use the verdict). All arithmetic wraps like ARM add/sub.
+      match.py (exit 1, diff expected): same structure - entry loads
+      at +0x38/+0x3c, signed gate over the scan, probe-range add/sub,
+      cmp after the bl, carve path returning old nMem + 1 with
+      nMem += n_reg, pool path storing both pool fields; LLVM splits
+      the eq-conditioned block into straight-line code at a second
+      return instead of ADS' predicated ldr/str chain.
+
   - address: 0x0837a3bc
     ghidra: FUN_0837a3bc
     name: get_temp_reg

@@ -83,6 +83,7 @@ pub mod find_element_given_hash;
 pub mod free_p4;
 pub mod get_varint;
 pub mod get_varint64;
+pub mod get_temp_range;
 pub mod get_temp_reg;
 pub mod hash_clear;
 pub mod hash_find;
