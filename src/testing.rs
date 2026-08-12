@@ -45,6 +45,7 @@ pub mod hints {
     pub const CONTEXT_SCOPE: usize = 0x0f00_0000;
     pub const BTREE_PARSE_CELL: usize = 0x1000_0000;
     pub const BTREE_DATA_SIZE: usize = 0x1100_0000;
+    pub const ELEMENT_REFERENCE: usize = 0x1200_0000;
     // `heap/pool.rs` maps its own arena at 0x0800_0000 through a separate
     // path: it needs only bit 31 clear, not full u32 addressability.
 }

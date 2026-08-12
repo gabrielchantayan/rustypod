@@ -10229,6 +10229,28 @@ functions:
       owner. Representative callers: 0x0812b170, 0x0814274c,
       0x081576a0, and 0x0816d3f0.
 
+  - address: 0x082a6620
+    ghidra: FUN_082a6620
+    name: ui_element_reference_is_current
+    size: 64
+    sig: "u32 ui_element_reference_is_current(const UiElementReference *reference)"
+    module: ui/element_reference
+    status: ported
+    vars: {param_1: reference, "reference+0x4": target, "reference+0x8": context, "reference+0xc": captured_element, "context+0xf60": active, "active+0x18": current_element}
+    notes: >-
+      Staleness predicate over the vtable-headed UI element reference
+      built by 0x082840e8/0x08283f3c (which snapshots
+      *(*(context + 0xf60) + 0x18) into +0xc at creation). Runs the
+      stock class check 0x080613e0 (non-NULL arg whose +0x4 word equals
+      the tag literal at 0x08061404) on the reference's target at +0x4;
+      on success dereferences the context at +0x8 with no NULL guard and
+      returns 1 only when the active sub-object at context+0xf60 is
+      non-NULL and its current element at +0x18 still equals the
+      captured snapshot at +0xc. 65 bl call sites; 0x08060fcc returns
+      error 0xfffeffff when it fails, 0x0816eb38/0x0816f060 gate
+      mutation through the embedded reference on it. The class check
+      stays in retailOS behind the TARGET_CLASS_CHECK seam.
+
   - address: 0x082a2330
     ghidra: FUN_082a2330
     name: rect_height
