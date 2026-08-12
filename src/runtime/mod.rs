@@ -8,6 +8,7 @@ pub mod ctype;
 pub mod cxa_guard;
 pub mod errno;
 pub mod exit;
+pub mod i2c0_idle;
 pub mod lib_init;
 pub mod ll_udiv10;
 pub mod locale;

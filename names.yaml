@@ -522,6 +522,36 @@ functions:
       them (enables clocks). Target uses volatile MMIO; host tests install a
       recording driver-local guard/MMIO seam.
 
+  - address: 0x080003b8
+    ghidra: FUN_080003b8
+    name: i2c0_wait_bus_idle
+    size: 112
+    sig: "u32 i2c0_wait_bus_idle(u32 timeout_usec)"
+    module: runtime/i2c0_idle
+    status: ported
+    vars: {param_1: timeout_usec, DAT_08000500: i2c0_register_base,
+      iVar1: i2c0_register_base, uVar2: start, uVar4: status,
+      iVar3: poll_predicates, FUN_08001edc: usec_timer_read,
+      FUN_08001ee8: usec_timer_elapsed, FUN_08001e98: cpsr_irq_enabled,
+      FUN_08003d44: task_delay}
+    notes: >-
+      Waits for the S5L8702 I2C bus-0 controller (0x3c600000, Rockbox
+      s5l87xx.h IIC_BASE) to go idle: polls IICSTAT (base+4) bit 5, the
+      Samsung bus-busy status, against the ported Timer E microsecond pair
+      usec_timer_read/usec_timer_elapsed (the caller's 100000 literal is
+      100 ms), yielding via the unported RTXC task-delay gateway 0x08003d44
+      as task_delay(0, 1) whenever cpsr_irq_enabled. Returns 0 when busy
+      cleared (immediately when already idle — the entry fast path never
+      snapshots the timer), 0x15 (the I2C family timeout status, cf.
+      FUN_0806418c) after a final confirming IICSTAT re-read. Sibling
+      0x08000428 polls the same IICSTAT bit plus IICSTA2 (base+0x20) bit 8,
+      corroborating the I2C identification. Deviation: the callees and the
+      IICSTAT read dispatch through the I2C0_IDLE_OPS slot (ported defaults;
+      ROM gateway on target, no-op stub on host) and host builds read a
+      driver-local stat seam per the drivers/pwrcon precedent; the algorithm
+      is the original's. Caller startup_wait_for_status_clear @ 0x080004ec
+      keeps its own ROM-default dispatch slot and is not rewired here.
+
   - address: 0x080004ec
     ghidra: FUN_080004ec
     name: startup_wait_for_status_clear
