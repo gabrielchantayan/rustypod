@@ -12338,6 +12338,64 @@ functions:
       branch into the delete; the diff is LLVM's fp frame and the bl
       becoming a blx through the ops slot (the documented deviation).
 
+  - address: 0x08278f60
+    ghidra: FUN_08278f60
+    name: silver_controller_transition_addon_destroy
+    size: 52
+    sig: "u8 *silver_controller_transition_addon_destroy(u8 *this)"
+    module: cxx/transition_addon
+    status: ported
+    renames:
+      param_1: this
+      DAT_08278f94: TRANSITION_ADDON_VTABLE_ADDRESS (0x089a60bc)
+      DAT_0818a124: TRANSITION_ADDON_BASE_VTABLE_ADDRESS (0x0898994c)
+      FUN_08278894: derived cleanup
+      FUN_08278190: vector_destroy
+      FUN_082792fc: string_object_destroy_veneer
+      FUN_0818a0fc: base destructor tail target
+    notes: >-
+      Plain destructor of an as-yet-unidentified Silver-controller
+      transition-addon class. The name is evidence-based, from the
+      base-class descriptor/vtable literal 0x0898994c: the bytes there
+      begin `TSilverCntlrTransitionAddon...` in osos.dec, and the paired
+      constructor @ 0x08278e8c / destructor here both plant that literal
+      or the derived sibling 0x089a60bc at +0. The raw ARM is 48 code
+      bytes + the 4-byte literal pool word @ 0x08278f94 (= 0x089a60bc,
+      binary-verified) and ends with a tail `b 0x0818a0fc`; Ghidra folds
+      that tail target into this function, which is why the decompile
+      appears to contain the base vtable store and deregistration call
+      inline. Decoded from osos.asm, the real sequence is: install the
+      derived vtable at `this+0`, call 0x08278894 for derived cleanup,
+      destroy the embedded vector-like member at `this+0x40` through
+      0x08278190, derive the embedded StringObject address from THAT
+      callee's return (`result - 0x34` = `this+0x0c`) and destroy it
+      through the ported string_object_destroy_veneer @ 0x082792fc, then
+      recover `this` from the StringObject destructor's return
+      (`result - 0x0c`) and tail into the base destructor @ 0x0818a0fc.
+      The tail target installs 0x0898994c at +0 and calls
+      `FUN_081e1fe8(*(this+4) + 0x24, this)`, returning `this`. Layout
+      evidence from the paired constructor @ 0x08278e8c: the owner/base
+      handle lives at +0x04, the embedded StringObject begins at +0x0c,
+      and the vector-like member begins at +0x40 (its begin/end/capacity
+      words are +0x48/+0x4c/+0x50 in 0x08278190's body). Call sites use
+      it as a plain, caller-owned destructor: stack/object temporaries are
+      constructed elsewhere then later passed here, with no operator
+      delete afterward. Port calls the already-ported
+      string_object_destroy_veneer directly, but the other three
+      unresolved calls ride TRANSITION_ADDON_DESTROY_OPS slots with
+      documented inert defaults (vector default faithfully returns its
+      argument). Host tests pin the exact offset arithmetic and call
+      routing via recorder mocks: derived-vtable store before cleanup,
+      vector return -> StringObject via `-0x34`, StringObject return ->
+      outer object via `-0x0c`, base deregistration through the stored
+      owner pointer's +0x24 member, and the default seams preserving the
+      same recovered `this` while the embedded StringObject destructor
+      still plants its own host vtable pointer. match.py structural on
+      the canonical symbol shows the expected widening from the crate
+      frame plus the seam-slot blx calls and the already-ported direct
+      StringObject veneer call, but preserves the same offset/dataflow
+      chain and final return.
+
   - address: 0x082a50b0
     ghidra: FUN_082a50b0
     name: string_object_c_str

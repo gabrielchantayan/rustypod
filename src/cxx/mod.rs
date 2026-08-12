@@ -21,3 +21,4 @@ pub mod string_object;
 pub mod templates;
 pub mod trivial_destructor;
 pub mod wheel_event;
+pub mod transition_addon;
