@@ -5,9 +5,11 @@
 //! away, in 0x0809bxxx / 0x082bxxxx / 0x082cxxxx / 0x082dxxxx:
 //!
 //! - 0x082d0630 — read the next `n` bits as an unsigned value.
-//! - 0x0809b040 — count leading zero bits (the Exp-Golomb prefix).
+//! - 0x0809b040 — count leading zero bits (the Exp-Golomb prefix),
+//!   ported in [`bitstream`].
 //! - 0x082c319c — emulation-prevention probe: is the byte at `p` the
-//!   `0x03` of a `00 00 03` sequence?
+//!   `0x03` of a `00 00 03` sequence? Transcribed in [`bitstream`] as
+//!   a local helper of the leading-zero count.
 //! - 0x082c5df0 — `ue(v)`: leading-zero count `n`, then `n+1` bits,
 //!   folded to `2^n - 1 + suffix`.
 //! - 0x082c5dcc — `se(v)`: `ue(v)` mapped to `+k / -k`.

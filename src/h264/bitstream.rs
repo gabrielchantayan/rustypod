@@ -100,6 +100,157 @@ pub unsafe extern "C" fn h264_bitstream_advance(
     data.wrapping_offset((bit_pos >> 3) as isize) < end
 }
 
+/// Emulation-prevention probe — original: `FUN_082c319c` @ 0x082c319c
+/// (60 bytes, all code — no literal pool, no stack traffic, a leaf
+/// ending `bx lr`; 5 `bl` call sites, all in the RBSP read
+/// primitives: two here, three in read_bits @ 0x082d0630).
+///
+/// Reports whether `p` points at the `0x03` of an H.264
+/// emulation-prevention sequence: the byte after `p` must exist
+/// (`p + 1 < end`, an UNSIGNED comparison — `add r2,r0,#1; cmp r2,r1;
+/// bcs`) and be `<= 3`, and the bytes at `p[-2]`, `p[-1]`, `p[0]`
+/// must be `00 00 03`. The two bytes BEFORE `p` are read
+/// unconditionally once the bounds test passes; in the firmware that
+/// is always sound because the NAL payload follows the `00 00 01`
+/// start code in flat DRAM. Host tests pad two readable bytes before
+/// `data` for the same reason.
+///
+/// Unported elsewhere in the tree, so it is transcribed here as a
+/// small local helper rather than put behind a dispatch seam: its
+/// exact behavior is binary-verified from the 15-instruction body
+/// above.
+unsafe fn emulation_prevention_probe(p: *const u8, end: *const u8) -> bool {
+    if p.wrapping_add(1) >= end {
+        return false;
+    }
+    p.wrapping_sub(2).read() == 0
+        && p.wrapping_sub(1).read() == 0
+        && p.read() == 3
+        && p.wrapping_add(1).read() <= 3
+}
+
+/// h264_bitstream_count_leading_zeros — original: `FUN_0809b040` @
+/// 0x0809b040 (240 bytes, all code — no literal pool; exactly one
+/// `bl` call site, in cg_exp_golomb_ue_read @ 0x082c5df0, which is
+/// why the signature matches that reader's CG_EXP_GOLOMB_OPS slot;
+/// two direct calls to the emulation-prevention probe @ 0x082c319c).
+///
+/// Counts the consecutive zero bits from the cursor's bit position to
+/// the next `1` bit — the Exp-Golomb prefix length — WITHOUT moving
+/// the cursor, stepping over emulation-prevention `0x03` bytes and
+/// reporting through `emulation_byte_pending` each time it does.
+///
+/// Algorithm, exactly as the body has it:
+///
+/// ```text
+/// *flag = 0                             // before any cursor load
+/// p = data + (bit_pos asr 3)            // arithmetic: rewinds work
+/// first = 8 - (bit_pos - (bit_pos & ~7))// bits left in byte, 1..=8
+/// if first == 8 && probe(p, end):       // aligned start on a 0x03
+///     p += 1; *flag = 1
+/// window = (*p << (8 - first)) & 0xff   // low `first` bits, top-aligned
+/// for i in 0..first:                    // zeros in the partial window
+///     if window & 0x80: return count
+///     window = (window & 0x7f) << 1; count += 1
+/// loop:                                 // whole bytes from here on
+///     if probe(p, end): skip = true; *flag = 1
+///     if skip: p += 1; skip = false     // step over the 0x03
+///     byte = *p; p += 1
+///     for i in 0..8:
+///         if byte & 0x80: return count
+///         byte = (byte & 0x7f) << 1; count += 1
+/// ```
+///
+/// Probes happen only at byte boundaries, before the byte is read;
+/// the byte immediately after a skipped `0x03` is never re-probed,
+/// and a misaligned first byte is never probed at all. The flag is a
+/// plain store of 1 on every probe hit, cleared once at entry — never
+/// an accumulation of the old value. The only bounds check anywhere
+/// is inside the probe (`p + 1 < end`): the byte READS are unchecked,
+/// so at `end` the probe fails and the byte at `end` is read anyway —
+/// exactly like the original, and callers treat running out of NAL as
+/// fatal to the whole unit rather than re-reading.
+///
+/// Deviations:
+/// - The `iVar7 == 0` arm of the original (`cmp r7,#0; beq
+///   LAB_0809b0f0`) is dead — `first = 8 - (bit_pos & 7)` lies in
+///   1..=8 for every i32 — and is not reproduced; entering the
+///   whole-byte loop with neither a probe nor a first-byte read is
+///   unreachable.
+/// - The probe @ 0x082c319c is unported; it is transcribed above as
+///   [`emulation_prevention_probe`] (exact 15-instruction behavior
+///   binary-verified), so no dispatch seam is introduced.
+/// - `end` is reloaded from the cursor before every probe call, like
+///   the original's per-call-site `ldr r1,[r6,#8]`.
+/// - `count` wraps (`wrapping_add`) where the original uses `add`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn h264_bitstream_count_leading_zeros(
+    reader: *mut RbspBitReader,
+    emulation_byte_pending: *mut u8,
+) -> u32 {
+    emulation_byte_pending.write(0);
+
+    let data = addr_of!((*reader).data).read();
+    let bit_pos = addr_of!((*reader).bit_pos).read();
+
+    let mut p = data.wrapping_offset((bit_pos >> 3) as isize);
+    // Bits left in the first byte, 1..=8. `bit_pos - (bit_pos & !7)`
+    // is the original's `bic`/`sub` pair: a non-negative bit-in-byte
+    // index even for rewound (negative) positions.
+    let first: i32 = 8 - (bit_pos - (bit_pos & !7));
+    let mut count: u32 = 0;
+
+    if first == 8 && emulation_prevention_probe(p, addr_of!((*reader).end).read()) {
+        p = p.wrapping_add(1);
+        emulation_byte_pending.write(1);
+    }
+
+    // First (possibly partial) byte: its low `first` bits, top-aligned.
+    let mut window = (u32::from(p.read()) << ((8 - first) as u32)) & 0xff;
+    p = p.wrapping_add(1);
+    let mut i: i32 = 0;
+    loop {
+        if i >= first {
+            break;
+        }
+        if window & 0x80 != 0 {
+            return count;
+        }
+        window = (window & 0x7f) << 1;
+        count = count.wrapping_add(1);
+        i += 1;
+    }
+
+    // Whole bytes: probe at each boundary, step over a 0x03, then
+    // count the byte's leading zeros.
+    let mut skip = false;
+    loop {
+        if emulation_prevention_probe(p, addr_of!((*reader).end).read()) {
+            skip = true;
+            emulation_byte_pending.write(1);
+        }
+        if skip {
+            p = p.wrapping_add(1);
+            skip = false;
+        }
+        let mut byte = u32::from(p.read());
+        p = p.wrapping_add(1);
+        let mut i: i32 = 0;
+        loop {
+            if byte & 0x80 != 0 {
+                return count;
+            }
+            byte = (byte & 0x7f) << 1;
+            i += 1;
+            count = count.wrapping_add(1);
+            if i >= 8 {
+                break;
+            }
+        }
+    }
+}
+
 /// Pointer-sized word index of the bit-position word: byte +0x04 on
 /// the 32-bit target, byte +0x08 on a 64-bit host. This is the house
 /// word-index model: byte-exact on target while keeping the position
@@ -268,6 +419,8 @@ pub unsafe extern "C" fn mpeg_skip_user_data_to_start_code(stream: *mut u8) {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+
     use super::*;
 
     /// A payload of `len` bytes with the cursor at `bit_pos`.
@@ -552,6 +705,283 @@ mod tests {
                 0x0000_01B3,
                 "the next parser still owns its start code"
             );
+        }
+    }
+
+    // --- h264_bitstream_count_leading_zeros ---
+
+    /// A cursor over `buf[2..2 + len]`: the two leading bytes give the
+    /// probe's unconditional `p[-2]`/`p[-1]` reads somewhere sound to
+    /// land (in the firmware they are the start code's `00 00`), and
+    /// the allocation extends past `end` so the unchecked reads the
+    /// original performs at/past `end` stay inside readable memory.
+    fn clz_cursor(buf: &[u8], len: usize, bit_pos: i32) -> RbspBitReader {
+        RbspBitReader {
+            data: unsafe { buf.as_ptr().add(2) },
+            bit_pos,
+            end: unsafe { buf.as_ptr().add(2 + len) },
+        }
+    }
+
+    /// Independent model: walks bits MSB-first from the position,
+    /// lazily removing emulation-prevention bytes by the H.264 rule —
+    /// a `0x03` that directly follows two raw zero bytes and is itself
+    /// followed by a readable byte `<= 3` is not RBSP. `len` is the
+    /// payload length (the cursor covers `buf[2..2 + len]`); the
+    /// probe's `p + 1 < end` bounds check is its only use, plain reads
+    /// ignore it, like the original.
+    /// Returns the leading-zero count and the emulation flag.
+    fn reference_clz(buf: &[u8], len: usize, bit_pos: i32) -> (u32, bool) {
+        let end: i32 = 2 + len as i32;
+        let mut index: i32 = 2 + (bit_pos >> 3);
+        let mut bit: i32 = bit_pos - (bit_pos & !7);
+        let mut count: u32 = 0;
+        let mut flag = false;
+        // An aligned start probes its first byte; a misaligned one
+        // begins mid-byte and cannot start on an emulation byte.
+        let mut probe = bit == 0;
+        loop {
+            if probe
+                && index + 1 < end
+                && buf[(index - 2) as usize] == 0
+                && buf[(index - 1) as usize] == 0
+                && buf[index as usize] == 0x03
+                && buf[(index + 1) as usize] <= 3
+            {
+                index += 1;
+                flag = true;
+            }
+            probe = true;
+            let byte = buf[index as usize];
+            index += 1;
+            for position in bit..8 {
+                if byte & (0x80 >> position) != 0 {
+                    return (count, flag);
+                }
+                count += 1;
+            }
+            bit = 0;
+        }
+    }
+
+    /// Runs the port over `buf[2..2 + len]` at `bit_pos` and returns
+    /// the count and the flag.
+    fn run_clz(buf: &[u8], len: usize, bit_pos: i32) -> (u32, u8) {
+        let mut r = clz_cursor(buf, len, bit_pos);
+        let mut flag = 0u8;
+        let count = unsafe { h264_bitstream_count_leading_zeros(&mut r, &mut flag) };
+        assert_eq!(r.bit_pos, bit_pos, "the cursor never moves");
+        (count, flag)
+    }
+
+    /// Hand-computed prefix lengths, including counts that span byte
+    /// boundaries and every first-bit position within a byte. The
+    /// `[0x00, 0x01]` padding mimics the start-code tail, so no
+    /// emulation probe can hit at these positions.
+    #[test]
+    fn clz_counts_known_prefixes_across_byte_boundaries() {
+        // (payload before the 0xFF terminator, bit_pos, expected count)
+        let cases: &[(&[u8], i32, u32)] = &[
+            (&[0x80], 0, 0),                    // leading 1: empty prefix
+            (&[0x40], 0, 1),
+            (&[0x01], 0, 7),                    // full first byte minus one
+            (&[0x00, 0x80], 0, 8),              // exactly one zero byte
+            (&[0x00, 0x40], 0, 9),
+            (&[0x07], 0, 5),
+            (&[0x0F], 2, 2),                    // misaligned: bits 2..8 are 001111
+            (&[0x08], 4, 0),                    // bit 4 is the 1
+            (&[0x00, 0x01], 3, 12),             // 5 + 7, spanning the boundary
+            (&[0x00, 0x00, 0x00, 0x00, 0x10], 0, 35), // 32 + 3, four zero bytes
+        ];
+        for &(payload, bit_pos, expected) in cases {
+            let mut buf = std::vec![0x00, 0x01];
+            buf.extend_from_slice(payload);
+            buf.push(0xFF); // terminator: any overlong walk still stops
+            let len = buf.len() - 2;
+            let (count, flag) = run_clz(&buf, len, bit_pos);
+            assert_eq!(count, expected, "payload {payload:02x?} pos {bit_pos}");
+            assert_eq!(flag, 0, "no emulation bytes here");
+            assert_eq!(
+                reference_clz(&buf, len, bit_pos),
+                (expected, false),
+                "reference agrees, payload {payload:02x?} pos {bit_pos}"
+            );
+        }
+    }
+
+    /// Every alignment 0..=7 (plus a few larger offsets) over three
+    /// payloads agrees with the bit-walking reference.
+    #[test]
+    fn clz_matches_reference_at_every_alignment() {
+        let payloads: &[&[u8]] = &[
+            &[0b0000_0101, 0b1001_0110, 0xFF],
+            &[0x00, 0xA5, 0xFF],
+            &[0xFF],
+        ];
+        for payload in payloads {
+            let mut buf = std::vec![0x00, 0x01];
+            buf.extend_from_slice(payload);
+            let len = buf.len() - 2;
+            // Stay inside the payload: a position past the last byte's
+            // last bit would walk the reference off the allocation.
+            let last_bit = (len as i32 * 8 - 1).min(9);
+            for bit_pos in 0..=last_bit {
+                let (count, flag) = run_clz(&buf, len, bit_pos);
+                let (want_count, want_flag) = reference_clz(&buf, len, bit_pos);
+                assert_eq!(
+                    (count, flag),
+                    (want_count, want_flag as u8),
+                    "payload {payload:02x?} pos {bit_pos}"
+                );
+            }
+        }
+    }
+
+    /// `00 00 03 01` at an aligned start: the `0x03` is skipped, the
+    /// flag is set, and the count covers the RBSP bits only — 16 zeros
+    /// plus the 7 of `0x01`, not the 6 of a data `0x03`.
+    #[test]
+    fn clz_steps_over_emulation_byte_and_sets_the_flag() {
+        let buf = [0x00, 0x01, 0x00, 0x00, 0x03, 0x01, 0xFF];
+        let len = 5;
+        let (count, flag) = run_clz(&buf, len, 0);
+        assert_eq!(count, 23);
+        assert_eq!(flag, 1);
+        assert_eq!(reference_clz(&buf, len, 0), (23, true));
+    }
+
+    /// A misaligned start never probes its first byte; the emulation
+    /// skip happens at the next byte boundary instead. 4 zeros of the
+    /// partial byte, 8 of the next, the `0x03` skipped, 7 of `0x01`.
+    #[test]
+    fn clz_probes_only_at_byte_boundaries() {
+        let buf = [0x00, 0x01, 0x00, 0x00, 0x03, 0x01, 0xFF];
+        let len = 5;
+        let (count, flag) = run_clz(&buf, len, 4);
+        assert_eq!(count, 19);
+        assert_eq!(flag, 1);
+        assert_eq!(reference_clz(&buf, len, 4), (19, true));
+    }
+
+    /// Two emulation sequences in one walk: the byte after a skipped
+    /// `0x03` is data, never re-probed, so the `0x00` following the
+    /// first `0x03` counts, and the second `00 00 03` still skips.
+    #[test]
+    fn clz_multiple_emulation_bytes_each_set_the_flag() {
+        let buf = [0x00, 0x01, 0x00, 0x00, 0x03, 0x00, 0x00, 0x03, 0x02, 0xFF];
+        let len = 8;
+        let (count, flag) = run_clz(&buf, len, 0);
+        // 8 + 8 (two zero bytes) + skip + 8 + 8 (two more) + skip +
+        // 6 zeros of 0x02 = 38.
+        assert_eq!(count, 38);
+        assert_eq!(flag, 1);
+        assert_eq!(reference_clz(&buf, len, 0), (38, true));
+    }
+
+    /// The probe's only bounds check is `p + 1 < end`: a `00 00 03`
+    /// whose `0x03` is the LAST readable byte is not skipped — the
+    /// byte after it does not exist — and the `0x03` counts as data
+    /// (6 leading zeros).
+    #[test]
+    fn clz_emulation_byte_at_end_of_buffer_is_data() {
+        let buf = [0x00, 0x01, 0x00, 0x00, 0x03, 0xFF];
+        let len = 3; // end = buf + 5: the 0x03 is the last readable byte
+        let (count, flag) = run_clz(&buf, len, 0);
+        assert_eq!(count, 8 + 8 + 6);
+        assert_eq!(flag, 0);
+        assert_eq!(reference_clz(&buf, len, 0), (22, false));
+    }
+
+    /// A `00 00 03` followed by a byte above `0x03` is not an
+    /// emulation-prevention sequence: the `0x03` counts as data.
+    #[test]
+    fn clz_emulation_byte_followed_above_three_is_data() {
+        let buf = [0x00, 0x01, 0x00, 0x00, 0x03, 0x04, 0xFF];
+        let len = 5;
+        let (count, flag) = run_clz(&buf, len, 0);
+        assert_eq!(count, 8 + 8 + 6);
+        assert_eq!(flag, 0);
+        assert_eq!(reference_clz(&buf, len, 0), (22, false));
+    }
+
+    /// Byte READS are unchecked — only the probe bounds itself against
+    /// `end`. With `end` after one zero byte, the walk reads the
+    /// (allocated) byte at `end` and stops at its leading 1, exactly
+    /// like the original running off the NAL into flat DRAM.
+    #[test]
+    fn clz_reads_past_end_are_unchecked() {
+        let buf = [0x00, 0x01, 0x00, 0x80];
+        let len = 1; // end = buf + 3: only buf[2] is readable
+        let (count, flag) = run_clz(&buf, len, 0);
+        assert_eq!(count, 8);
+        assert_eq!(flag, 0);
+        assert_eq!(reference_clz(&buf, len, 0), (8, false));
+    }
+
+    /// The flag is cleared at entry even when no probe ever fires, so
+    /// one flag variable serves a whole parse function.
+    #[test]
+    fn clz_clears_the_flag_on_entry() {
+        let buf = [0x00, 0x01, 0xC0, 0xFF];
+        let mut r = clz_cursor(&buf, 2, 0);
+        let mut flag = 1u8;
+        let count = unsafe { h264_bitstream_count_leading_zeros(&mut r, &mut flag) };
+        assert_eq!(count, 0);
+        assert_eq!(flag, 0);
+    }
+
+    /// Rewound positions: `bit_pos asr 3` lands in the byte BEFORE
+    /// `data` (the padding stands in for it) and the bit-in-byte index
+    /// is the non-negative `pos - (pos & !7)`, so -1 counts from bit 7
+    /// of that byte, not from a wrapped-around index.
+    #[test]
+    fn clz_negative_positions_use_the_arithmetic_shift() {
+        let buf = [0x00, 0x02, 0xFF];
+        let len = 1;
+        let (count, flag) = run_clz(&buf, len, -1);
+        // bit 7 of 0x02 is 0 (count 1), then 0xFF stops the walk.
+        assert_eq!(count, 1);
+        assert_eq!(flag, 0);
+        assert_eq!(reference_clz(&buf, len, -1), (1, false));
+    }
+
+    /// Deterministic pseudo-random streams with emulation-prevention
+    /// sequences spliced in, swept over every alignment of the first
+    /// three bytes and compared against the bit-walking reference.
+    #[test]
+    fn clz_matches_reference_over_seeded_streams_with_emulation() {
+        let mut state: u32 = 0x1234_5678;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            (state >> 24) as u8
+        };
+        for _case in 0..40 {
+            let mut buf = std::vec![0x00, 0x01];
+            for _ in 0..24 {
+                buf.push(next());
+            }
+            // Splice `00 00 03 0x` sequences at three spots; the
+            // trailing byte is drawn from 0..=7 so both the skip
+            // (<= 3) and the data (> 3) outcomes occur.
+            for offset in [4usize, 11, 18] {
+                buf[offset] = 0x00;
+                buf[offset + 1] = 0x00;
+                buf[offset + 2] = 0x03;
+                buf[offset + 3] = next() & 0x07;
+            }
+            buf.push(0xFF); // terminator
+            let len = buf.len() - 2;
+            for bit_pos in 0..24i32 {
+                let (count, flag) = run_clz(&buf, len, bit_pos);
+                let (want_count, want_flag) = reference_clz(&buf, len, bit_pos);
+                assert_eq!(
+                    (count, flag),
+                    (want_count, want_flag as u8),
+                    "buf {buf:02x?} pos {bit_pos}"
+                );
+            }
         }
     }
 }

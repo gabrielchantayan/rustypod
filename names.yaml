@@ -21352,6 +21352,81 @@ functions:
       crate's frame-pointer prologue and LLVM fusing two loads into
       `ldmib`.
 
+  # --- H.264 / MPEG-4 AVC video decoder: RBSP Exp-Golomb prefix count ---
+  - address: 0x0809b040
+    ghidra: FUN_0809b040
+    name: h264_bitstream_count_leading_zeros
+    size: 240
+    sig: "u32 h264_bitstream_count_leading_zeros(RbspBitReader *reader, u8 *emulation_byte_pending)"
+    module: h264/bitstream
+    vars: {param_1: reader, param_2: emulation_byte_pending}
+    renames:
+      uVar3 (first): bit_pos, then window (the first byte's low
+        `first` bits, top-aligned)
+      pbVar5: p (byte cursor; post-incremented by every ldrb, like
+        the original)
+      iVar7: first (bits left in the first byte, 1..=8; the
+        `iVar7 == 0` arm is dead — 8 - (pos & 7) never yields 0 — and
+        is not reproduced)
+      iVar6/r4: count (the returned leading-zero count)
+      iVar4/r0: i (bit index within the current byte)
+      bVar1/r5: skip (pending emulation-byte skip in the whole-byte
+        loop)
+      bVar2: byte (current whole byte, shifted left as zeros count)
+      FUN_082c319c: emulation_prevention_probe (unported elsewhere;
+        transcribed as a local helper — exact behavior binary-verified
+        from the 60-byte body, so no dispatch seam)
+    status: ported
+    notes: >-
+      The Exp-Golomb prefix count over the shared RBSP cursor {data @
+      +0x00, bit_pos @ +0x04, end @ +0x08}: consecutive zero bits from
+      the bit position to the next 1, WITHOUT moving the cursor,
+      stepping over emulation-prevention 0x03 bytes and storing 1
+      through *emulation_byte_pending on every skip (the flag is
+      cleared once at entry, before any cursor load). 240 bytes, all
+      code, no literal pool; exactly one `bl` call site —
+      cg_exp_golomb_ue_read @ 0x082c5df0 — and two direct calls to the
+      emulation probe @ 0x082c319c. Its signature matches the
+      CG_EXP_GOLOMB_OPS count_leading_zeros slot so the codegen
+      reader's seam can later retire to a direct call.
+      Algorithm: *flag = 0; p = data + (bit_pos asr 3); first = 8 -
+      (bit_pos - (bit_pos & ~7)) — the bic/sub pair, a non-negative
+      bit-in-byte index even for rewound positions. An aligned start
+      (first == 8) probes p and steps over a 0x03. The first byte's
+      low `first` bits are counted top-aligned via
+      `(*p << (8 - first)) & 0xff`; then a whole-byte loop probes at
+      each boundary, steps over a 0x03 (never re-probing the byte
+      after it), and counts the byte's leading zeros. The only bounds
+      check anywhere is the probe's UNSIGNED `p + 1 < end`; the byte
+      reads themselves are unchecked, so at `end` the probe fails and
+      the byte at `end` is read anyway.
+      Callee: FUN_082c319c @ 0x082c319c (60 bytes, leaf, 5 `bl` call
+      sites, all in the RBSP read primitives) is the
+      emulation-prevention probe: true iff `p + 1 < end` (unsigned)
+      and p[-2..=0] are `00 00 03` and p[1] <= 3; the two bytes before
+      p are read unconditionally once the bounds test passes (in the
+      firmware those are the start code's `00 00`). It is unported, so
+      the port transcribes it as the local helper
+      emulation_prevention_probe — its exact behavior is
+      binary-verified, which the house rules allow in place of a seam.
+      Deviations: the dead `iVar7 == 0` arm is dropped; `end` is
+      reloaded from the cursor before every probe, like the original's
+      per-call-site `ldr r1,[r6,#8]`; count wraps where the original's
+      add does.
+      Host tests: hand-computed prefixes 0..35 across byte boundaries,
+      every alignment 0..=7 against an independent bit-walking
+      reference, aligned/misaligned emulation skips with flag
+      assertions, multiple emulation bytes in one walk, 0x03 as the
+      last readable byte and 0x03 followed by a byte above 3 (both
+      data), unchecked reads past `end`, flag cleared at entry, cursor
+      unmoved, negative positions (asr), and a seeded pseudo-random
+      sweep with spliced `00 00 03 0x` sequences (both skip and
+      data outcomes).
+      match.py structural: same flag-clear/cursor-load/asr#3 prologue,
+      both probe bodies, and both counting loops; the diff is the
+      crate frame, LLVM folding `bic`/`sub` into `ands #7`, and the
+      inlined helper standing in for the two direct `bl 0x082c319c`.
+
   # --- MPEG video header parser: bitstream read-and-advance ---
   - address: 0x080ebbe0
     ghidra: FUN_080ebbe0
