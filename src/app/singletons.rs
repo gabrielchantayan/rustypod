@@ -1,4 +1,4 @@
-//! The eight lazily-constructed framework singletons. Every one is the
+//! The nine lazily-constructed framework singletons. Every one is the
 //! same four-step idiom over its own cache word, its own allocation
 //! size and its own constructor:
 //!
@@ -17,13 +17,14 @@
 //! | 0x081b803c | [`singleton_class_7f80`] | 0x1d4 | 0x089cc61c | 0x081b80b4 | 38 |
 //! | 0x0816df60 | [`lazy_singleton_0x3c`] | 0x3c | 0x089d0130 | 0x0816e2ac | 38 |
 //! | 0x081a5500 | [`singleton_class_8c00`] | 0xdc | 0x089cc7c0 | 0x081a71fc | 82 |
+//! | 0x081dfa20 | [`command_dispatcher_get`] | 0x20 | 0x089cc828 | 0x081dfc1c | 69 |
 //!
 //! (Call-site counts binary-scanned; the earlier scouting notes said 86
 //! / 38 / 37 / 36 for the bottom four.)
 //!
 //! `operator new` @ 0x082aadd4 is already ported
 //! (`heap::veneers::operator_new`), so it is called directly. None of
-//! the seven constructors is — they are large C++ constructors — so
+//! the nine constructors is — they are large C++ constructors — so
 //! they sit behind the [`SINGLETON_CTORS`] dispatch table, the house
 //! pattern.
 //!
@@ -79,6 +80,22 @@
 //!   holds. The last field it writes is +0xd8, which is exactly what
 //!   makes 0xDC the allocation size. Class NOT named: the ctor never
 //!   reaches the name factory @ 0x0820b230.
+//! - The 0x20 object is the **command dispatcher**: its ctor @
+//!   0x081dfc1c plants vtable 0x0898ebac at +0x00 and initializes an
+//!   embedded libstdc++ ordered map at +0x04 (header pointer at +0x14,
+//!   flag +0x1c, comparator byte +0x1d — the container layout
+//!   event_list.rs documents) keyed by command-NAME string. Of the 69
+//!   call sites, 39 dispatch a command: build a temporary Silver list
+//!   table (`FUN_081473d8`, the silver_list_table ctor) for resource
+//!   `id - 1`, take the 'SCST'-resolved name handle at its +0x28, and
+//!   call `FUN_081dfab0` → `FUN_081dfb10`, which inserts into the map
+//!   under that name and invokes the handler at record+0x18; 9 sites
+//!   register handlers by name string through `FUN_081df9ac`. The
+//!   command ids sit in a private 0x0dad0000 namespace (observed
+//!   0x0dad01d7..0x0dad0e01, pool-literal only — they name records in
+//!   the rsrc volume, not addresses). Class NOT named: the ctor never
+//!   reaches a name factory, so the symbol names the role the call
+//!   sites prove.
 //!
 //! **None of these symbols is hook-ready.** Until the constructors are
 //! ported, the dispatch defaults hand out a zeroed block — no vtable,
@@ -96,7 +113,7 @@
 //! - The cache slots are the crate statics below rather than words in
 //!   the 0x089cxxxx / 0x089dxxxx pages (the block_mgr.rs deviation:
 //!   those RW pages are runtime-initialized; the image holds stale UI
-//!   strings there). All seven default to NULL, exactly the pre-init
+//!   strings there). All nine default to NULL, exactly the pre-init
 //!   state.
 
 use crate::heap::veneers::operator_new;
@@ -132,10 +149,14 @@ pub const SINGLETON_0X3C_SIZE: usize = 0x3c;
 /// (`mov r0, #0xdc`).
 pub const CLASS_8C00_SIZE: usize = 0xdc;
 
+/// Allocation size of the command-dispatcher singleton
+/// (`mov r0, #0x20`).
+pub const COMMAND_DISPATCHER_SIZE: usize = 0x20;
+
 /// An ADS C++ constructor: takes the raw block, returns `this`.
 pub type Constructor = unsafe extern "C" fn(this: *mut u8) -> *mut u8;
 
-/// Indirect dispatch table for the six unported constructors (see the
+/// Indirect dispatch table for the nine unported constructors (see the
 /// module header for the default-stub contract).
 #[derive(Clone, Copy)]
 pub struct SingletonCtors {
@@ -155,6 +176,8 @@ pub struct SingletonCtors {
     pub singleton_0x3c: Constructor,
     /// Registry-class-0x8c00 ctor @ 0x081a71fc.
     pub class_8c00: Constructor,
+    /// Command-dispatcher ctor @ 0x081dfc1c.
+    pub command_dispatcher: Constructor,
 }
 
 /// Defines one default constructor stub: zeroes the block and returns
@@ -177,6 +200,7 @@ zeroing_ctor!(zeroing_class_6200_ctor, CLASS_6200_SIZE);
 zeroing_ctor!(zeroing_class_7f80_ctor, CLASS_7F80_SIZE);
 zeroing_ctor!(zeroing_singleton_0x3c_ctor, SINGLETON_0X3C_SIZE);
 zeroing_ctor!(zeroing_class_8c00_ctor, CLASS_8C00_SIZE);
+zeroing_ctor!(zeroing_command_dispatcher_ctor, COMMAND_DISPATCHER_SIZE);
 
 /// Zeroes `size` bytes and returns the block. Volatile stores: a plain
 /// loop is rewritten by LLVM into a call to `__aeabi_memclr`, a symbol
@@ -200,6 +224,7 @@ pub(crate) const DEFAULT_SINGLETON_CTORS: SingletonCtors = SingletonCtors {
     class_7f80: zeroing_class_7f80_ctor,
     singleton_0x3c: zeroing_singleton_0x3c_ctor,
     class_8c00: zeroing_class_8c00_ctor,
+    command_dispatcher: zeroing_command_dispatcher_ctor,
 };
 
 /// The active constructors. Host tests install recording mocks; the
@@ -246,7 +271,12 @@ pub static mut SINGLETON_0X3C: *mut u8 = core::ptr::null_mut();
 /// literal at 0x081a552c).
 pub static mut CLASS_8C00_INSTANCE: *mut u8 = core::ptr::null_mut();
 
-/// The body all seven getters share: test the cache, allocate, construct,
+/// The command-dispatcher singleton (original: the word @ 0x089cc828,
+/// the `+4` slot of the global @ 0x089cc824 — the pool literal
+/// DAT_081dfa4c).
+pub static mut COMMAND_DISPATCHER_INSTANCE: *mut u8 = core::ptr::null_mut();
+
+/// The body all nine getters share: test the cache, allocate, construct,
 /// store, and re-load the cache (the original's second `ldr r0, [r4,
 /// #N]`, which is what makes a self-caching ctor observable).
 ///
@@ -417,6 +447,30 @@ pub unsafe extern "C" fn singleton_class_8c00() -> *mut u8 {
     lazy_singleton(cache, CLASS_8C00_SIZE, || unsafe { ctor!(class_8c00) })
 }
 
+/// command_dispatcher_get — original: `FUN_081dfa20` @ 0x081dfa20
+/// (44 bytes of code + one pool word @ 0x081dfa4c = 48 bytes total;
+/// 69 `bl` call sites).
+///
+/// Returns the command-dispatcher singleton, constructing it on first
+/// use: `operator_new(0x20)` (`mov r0, #0x20`) then the constructor @
+/// 0x081dfc1c, cached in the `+4` slot of the global @ 0x089cc824
+/// (the pool literal DAT_081dfa4c). The object is a vtable
+/// (0x0898ebac) plus an embedded libstdc++ map at +0x04 keyed by
+/// command-name string — the framework's command-handler registry that
+/// 39 of the call sites dispatch through and 9 register into (see the
+/// module header). Ghidra reports the extent as 44 bytes because it
+/// drops the trailing literal word; the true extent runs to
+/// 0x081dfa50, where the next function opens `push {r4, lr}`.
+/// Same NOT-HOOK-READY caveat as its siblings — see the module header.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn command_dispatcher_get() -> *mut u8 {
+    let cache = core::ptr::addr_of_mut!(COMMAND_DISPATCHER_INSTANCE);
+    lazy_singleton(cache, COMMAND_DISPATCHER_SIZE, || unsafe {
+        ctor!(command_dispatcher)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -488,6 +542,7 @@ mod tests {
                 class_7f80: recording_ctor,
                 singleton_0x3c: recording_ctor,
                 class_8c00: recording_ctor,
+                command_dispatcher: recording_ctor,
             };
             CTOR_RESULT = ctor_result;
             (*ptr::addr_of_mut!(ALLOC_SIZES)).clear();
@@ -519,6 +574,7 @@ mod tests {
         CLASS_7F80_INSTANCE = ptr::null_mut();
         SINGLETON_0X3C = ptr::null_mut();
         CLASS_8C00_INSTANCE = ptr::null_mut();
+        COMMAND_DISPATCHER_INSTANCE = ptr::null_mut();
     }
 
     fn arena() -> *mut u8 {
@@ -838,6 +894,43 @@ mod tests {
                 *ptr::addr_of!(ALLOC_SIZES),
                 std::vec![CLASS_7F80_SIZE, CLASS_7F80_SIZE],
                 "no failure memory: it re-allocates every call"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_command_dispatcher_is_allocated_constructed_and_cached_on_first_call() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(command_dispatcher_get(), constructed());
+            assert_eq!(
+                *ptr::addr_of!(ALLOC_SIZES),
+                std::vec![COMMAND_DISPATCHER_SIZE],
+                "the `mov r0, #0x20` immediate, allocated exactly once"
+            );
+            assert_eq!(*ptr::addr_of!(CTOR_BLOCKS), std::vec![arena()], "constructed on the raw block");
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(COMMAND_DISPATCHER_INSTANCE)),
+                constructed(),
+                "the ctor result is cached"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_command_dispatcher_second_call_returns_the_cache_without_reconstructing() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(command_dispatcher_get(), constructed());
+            assert_eq!(command_dispatcher_get(), constructed());
+            assert_eq!((*ptr::addr_of!(ALLOC_SIZES)).len(), 1, "allocated exactly once");
+            assert_eq!((*ptr::addr_of!(CTOR_BLOCKS)).len(), 1, "constructed exactly once");
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(COMMAND_DISPATCHER_INSTANCE)),
+                constructed(),
+                "the cache still holds the first construction"
             );
         }
         restore(guard);
