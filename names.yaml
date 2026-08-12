@@ -21712,6 +21712,49 @@ functions:
       instruction-for-instruction; the diff is only the crate-standard
       fp prologue.
 
+  - address: 0x08283134
+    ghidra: FUN_08283134
+    name: parse_result_init_alias_3134
+    size: 16
+    sig: "u8 *parse_result_init_alias_3134(u8 *out, u8 status, u8 code, u16 detail)"
+    module: app/parse_result
+    status: ported
+    vars:
+      param_1: out
+      param_2: status
+      param_3: code
+      param_4: detail
+    notes: >-
+      Byte-identical twin of parse_result_init @ 0x08283168 - the same
+      `strb r1,[r0]; strb r2,[r0,#1]; strh r3,[r0,#2]; bx lr` body
+      writing the same 4-byte parser result record (status +0x00, code
+      +0x01, detail LE u16 +0x02) and returning out in the preserved
+      r0. 42 call sites binary-scanned by decoding every B/BL word in
+      osos.dec: 37 bl (7 conditional - 6 blne, 1 bleq) plus 5 b (3
+      unconditional, beq @ 0x080f8830, bne @ 0x080f8be0). The
+      call-site evidence shows NO semantic split from 0x08283168: the
+      same record-resource parser cluster (0x080f8xxx-0x080fdxxx)
+      calls this symbol where siblings call the canonical one,
+      including the signature error rewrites ({2, 2, 0x3a00} via the
+      beq tail @ 0x080f8830, {2, 5, <pool constant>} via the bne tail
+      @ 0x080f8be0) and the zero-initializations; the one
+      out-of-cluster site tail-writes an error record {2, 3, detail}
+      from a flags decode @ 0x080a8a74. ADS simply emitted the
+      constructor twice inside the class's translation unit
+      (0x08283120-0x08283178). Ported as an independent exported body
+      (the handle_deref_or_null_alias_64f4 naming precedent) rather
+      than a delegation - the original is a second copy, not a branch.
+      Release-build note: LLVM MergeFunctions folds the two identical
+      bodies into the shared .text.parse_result_init section;
+      parse_result_init_alias_3134 stays in the archive symbol table
+      at the merged address, so hooks resolve it normally - match.py
+      is therefore run as `match.py 0x08283134 parse_result_init`,
+      which shows the store triple matching instruction-for-instruction
+      (diff: the crate-standard fp prologue). Host tests: same layout
+      coverage as the canonical - byte/byte/LE-u16 offsets with a
+      guard byte, all-zero, all-ones, and the cluster's {2, 5, 0x3a00}
+      error shape.
+
   - address: 0x082646ac
     ghidra: FUN_082646ac
     name: trivial_destructor

@@ -12,8 +12,9 @@
 //! 0x08283120  ldrb r0, [r0, #0]; bx lr                 status()
 //! 0x08283124  ldrh r0, [r0, #2]; bx lr                 detail()
 //! 0x0828312c  ldrb r0, [r0, #1]; bx lr                 code()
-//! 0x08283134  strb/strb/strh; bx lr                    init (identical
-//!                                                      twin of ours)
+//! 0x08283134  strb/strb/strh; bx lr                    init —
+//!                                                      [`parse_result_init_alias_3134`],
+//!                                                      the byte-identical twin
 //! 0x08283144  rsbs r0, r0, #1; movcc r0, #0; bx lr     is_ok()
 //! 0x08283154  zero all four bytes; bx lr               clear()
 //! 0x08283168  strb/strb/strh; bx lr                    init — THIS PORT
@@ -82,6 +83,49 @@ pub unsafe extern "C" fn parse_result_init(
     out
 }
 
+/// parse_result_init_alias_3134 — original: `FUN_08283134` @
+/// 0x08283134 (16 bytes; 42 call sites binary-scanned: 37 `bl` — 7 of
+/// them conditional — plus 5 `b`).
+///
+/// Byte-identical twin of [`parse_result_init`] @ 0x08283168: the same
+/// `strb r1,[r0]; strb r2,[r0,#1]; strh r3,[r0,#2]; bx lr` body
+/// writing the same 4-byte parser result record (status +0x00, code
+/// +0x01, detail LE u16 +0x02) and returning `out` in the preserved
+/// r0. ADS emitted the constructor twice in the class's translation
+/// unit (0x08283120–0x08283178); the call-site evidence shows no
+/// semantic split — the same record-resource parser cluster calls this
+/// symbol where its siblings call 0x08283168, including the signature
+/// error-path rewrites (`moveq r1,#2; moveq r2,#2; moveq r3,#0x3a00;
+/// beq 0x08283134` @ 0x080f8830 and `movne r1,#2; movne r2,#5; bne
+/// 0x08283134` @ 0x080f8be0) and the cluster's zero-initializations;
+/// the one out-of-cluster site @ 0x080a8a74 tail-writes an error
+/// record {2, 3, detail} from a flags decode, the same record
+/// record semantics. An independent body, not a delegation to
+/// [`parse_result_init`], exactly as the original is a second emitted
+/// copy rather than a branch to the first. (At release opt LLVM's
+/// MergeFunctions folds the two byte-identical bodies into the shared
+/// `.text.parse_result_init` section; this symbol remains in the
+/// archive's symbol table at the merged address, so hooks resolve it
+/// normally.)
+///
+/// # Safety
+///
+/// Same contract as [`parse_result_init`]: `out` must cover
+/// `out..out+4` writable, halfword-aligned for the `strh`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn parse_result_init_alias_3134(
+    out: *mut u8,
+    status: u8,
+    code: u8,
+    detail: u16,
+) -> *mut u8 {
+    out.write_volatile(status);
+    out.add(1).write_volatile(code);
+    (out.add(2) as *mut u16).write_volatile(detail);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,5 +166,33 @@ mod tests {
         let mut record = Record([0u8; 5]);
         unsafe { parse_result_init(record.0.as_mut_ptr(), 2, 5, 0x2000) };
         assert_eq!(&record.0[..4], &[2, 5, 0x00, 0x20]);
+    }
+
+    #[test]
+    fn the_twin_writes_the_same_layout() {
+        let mut record = Record([0xa5u8; 5]);
+        let out = record.0.as_mut_ptr();
+        let returned = unsafe { parse_result_init_alias_3134(out, 1, 2, 0x3456) };
+        assert_eq!(returned, out, "the twin also returns its out pointer");
+        assert_eq!(&record.0[..4], &[1, 2, 0x56, 0x34], "status, code, detail LE");
+        assert_eq!(record.0[4], 0xa5, "not one byte past the record");
+    }
+
+    #[test]
+    fn the_twin_covers_the_extreme_values() {
+        let mut record = Record([0xffu8; 5]);
+        unsafe { parse_result_init_alias_3134(record.0.as_mut_ptr(), 0, 0, 0) };
+        assert_eq!(&record.0[..4], &[0, 0, 0, 0], "the cluster's zero-init shape");
+        unsafe { parse_result_init_alias_3134(record.0.as_mut_ptr(), 0xff, 0xff, 0xffff) };
+        assert_eq!(&record.0[..4], &[0xff, 0xff, 0xff, 0xff]);
+    }
+
+    #[test]
+    fn the_twin_writes_the_clusters_error_shape() {
+        // The conditional-tail-call error rewrite @ 0x080f8be0:
+        // status 2, code 5, detail from a pool constant.
+        let mut record = Record([0u8; 5]);
+        unsafe { parse_result_init_alias_3134(record.0.as_mut_ptr(), 2, 5, 0x3a00) };
+        assert_eq!(&record.0[..4], &[2, 5, 0x00, 0x3a]);
     }
 }
