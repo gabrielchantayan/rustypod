@@ -120,6 +120,44 @@ functions:
       MCR, and returns the stored control word. Host builds use the shared
       replaceable deterministic CP15 seam.
 
+  # --- retailOS UI object backend resolver (kind-1 self / kind-2 proxy) ---
+  - address: 0x08051dc4
+    ghidra: FUN_08051dc4
+    name: object_backend_for_kind
+    size: 28
+    sig: "const void *object_backend_for_kind(const void *object)"
+    module: ui/object_state
+    status: ported
+    vars: {param_1: object, r1: kind}
+    notes: >-
+      Tag-dispatching accessor: `ldrb r1,[r0]; cmp r1,#1; bxeq lr; cmp
+      r1,#2; ldreq r0,[r0,#0xefc]; movne r0,#0; bx lr`. Kind byte at
+      object+0x00; kind 1 returns the object itself, kind 2 returns the
+      pointer field at +0xefc, anything else returns NULL. No null guard,
+      and the +0xefc field is read only for kind 2. Recovered class:
+      the same UI object family ui/object_state.rs already serves — the
+      mode dispatcher 0x0808cec4 reads the state word at +0xe38 (the
+      word object_state_word @ 0x08055e80 exposes) on the very pointer
+      it passes here. The kind-1 backend is the 0xfa4-byte object
+      constructed by 0x08058590 (kind byte planted via base ctor
+      0x080dae7c, instance installed at the app root object's +0x30 by
+      0x08114c40); the kind-2 proxy is the 0xf00-byte object built by
+      0x080586b8, storing the backend pointer at +0xefc — factory
+      0x0813e474 hands out such a proxy for its mode 2. Call-site
+      census: 49 `bl 0x08051dc4` sites in decomp/osos.asm, clustered in
+      the 0x08052xxx..0x08055xxx helpers (20 sites), the
+      0x08066xxx/0x08067xxx selection routines (6), the 0x0808/0x0809
+      mode dispatchers (5), the 0x0813xxxx facade class whose +0x40
+      field carries the argument (11), plus singletons at 0x0805cd54,
+      0x080866b0, 0x080875a8, 0x0808cf04, 0x080ca398, 0x080d1a9c and
+      0x08046xxx. Host tests cover kinds 0/1/2/255 plus other unknown
+      kinds and prove the +0xefc read happens only for kind 2 (one-byte
+      fixtures for non-proxy kinds). match.py structural (exit 1
+      expected): identical dispatch shape — kind-byte load, cmp #1
+      early-return self, cmp #2, ldreq from +0xefc, else 0; diffs are
+      only the crate frame-pointer prologue/epilogue (popeq {fp,pc} for
+      bxeq lr), the same pattern as every leaf in this module.
+
   # --- retailOS state wait ---
   - address: 0x08055e8c
     ghidra: FUN_08055e8c

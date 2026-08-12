@@ -1050,6 +1050,67 @@ pub unsafe extern "C" fn object_kind_mask_union(object: *const u8, kind: u32) ->
     union
 }
 
+/// Byte offset of the kind tag byte (`ldrb r1,[r0,#0x0]`).
+const KIND_TAG_OFFSET: usize = 0x0;
+
+/// Kind tag naming the real backend object: the accessor returns the
+/// object itself (`cmp r1,#0x1; bxeq lr`).
+const KIND_BACKEND: u8 = 1;
+
+/// Kind tag naming the lightweight proxy: the accessor returns the
+/// proxy's backend pointer field (`cmp r1,#0x2; ldreq r0,[r0,#0xefc]`).
+const KIND_PROXY: u8 = 2;
+
+/// Byte offset of the backend pointer inside a kind-2 proxy
+/// (`ldreq r0,[r0,#0xefc]`).
+const PROXY_BACKEND_OFFSET: usize = 0xefc;
+
+/// object_backend_for_kind — original: `FUN_08051dc4` @ `0x08051dc4`
+/// (28 bytes).
+///
+/// Assembly: `/home/gabe/Programming/ipod-decomp/decomp/osos.asm` @
+/// `0x08051dc4..0x08051ddc`: `ldrb r1,[r0,#0x0]; cmp r1,#0x1; bxeq lr;
+/// cmp r1,#0x2; ldreq r0,[r0,#0xefc]; movne r0,#0x0; bx lr`.
+///
+/// Tag-dispatching accessor that resolves the real backend object behind
+/// either entry point of the same UI object family [`object_state_word`]
+/// and [`object_state_kind`] serve (the mode dispatcher at 0x0808cec4
+/// reads the state word at `+0xe38` on the very pointer it passes here):
+/// it loads the kind tag byte at `object + 0x00`, returns `object`
+/// unchanged for kind 1 (the backend itself), returns the pointer field
+/// at `object + 0xefc` for kind 2 (a proxy wrapping the backend), and
+/// returns NULL for every other kind. The kind-1 backend is the
+/// 0xfa4-byte object constructed by 0x08058590 (installed at the app root
+/// object's `+0x30` by 0x08114c40, kind byte planted through base
+/// constructor 0x080dae7c); the kind-2 proxy is the 0xf00-byte object
+/// built by 0x080586b8, which stores the backend pointer at `+0xefc` and
+/// nothing else of note — factory 0x0813e474 hands out such a proxy for
+/// its mode 2. 49 `bl` call sites (binary count of `bl 0x08051dc4` in
+/// osos.asm), clustered in the 0x08052xxx..0x08055xxx helpers, the
+/// 0x08066xxx/0x08067xxx selection routines, the 0x0808/0x0809 mode
+/// dispatchers and the 0x0813xxxx facade class whose `+0x40` field holds
+/// the accessor's argument. Like the original's entry `ldrb`, there is
+/// no null guard on `object`.
+///
+/// # Safety
+///
+/// `object` must be readable at `+0x00`; when its kind byte is 2 it must
+/// additionally be readable as an aligned pointer at `+0xefc`. No other
+/// bytes are touched — the original never reads the proxy's pointer
+/// field for kinds other than 2.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn object_backend_for_kind(object: *const u8) -> *const u8 {
+    let kind = object.add(KIND_TAG_OFFSET).read();
+    if kind == KIND_BACKEND {
+        return object;
+    }
+    if kind == KIND_PROXY {
+        return (object.add(PROXY_BACKEND_OFFSET) as *const *const u8).read();
+    }
+    core::ptr::null()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2428,5 +2489,74 @@ mod tests {
             object.iter().skip(4).all(|&byte| byte == 0xaa),
             "the object is untouched on the failure path"
         );
+    }
+
+    /// Builds the minimal object the accessor inspects: a kind tag byte
+    /// at +0x00 and, for the proxy layout, a backend pointer at +0xefc.
+    /// The fixture is eight bytes past the target's 0xf00 proxy extent so
+    /// the host's 8-byte pointer read at +0xefc stays in bounds.
+    fn backend_probe_object(kind: u8, backend: *const u8) -> [u8; 0xf08] {
+        let mut object = [0xaau8; 0xf08];
+        object[KIND_TAG_OFFSET] = kind;
+        if kind == KIND_PROXY {
+            object[PROXY_BACKEND_OFFSET..PROXY_BACKEND_OFFSET + 8]
+                .copy_from_slice(&(backend as usize).to_le_bytes());
+        }
+        object
+    }
+
+    #[test]
+    fn kind_one_returns_the_object_itself() {
+        let object = backend_probe_object(KIND_BACKEND, core::ptr::null());
+        assert_eq!(
+            unsafe { object_backend_for_kind(object.as_ptr()) },
+            object.as_ptr(),
+            "kind 1 short-circuits before touching +0xefc (`bxeq lr`)"
+        );
+    }
+
+    #[test]
+    fn kind_two_returns_the_pointer_field_at_0xefc() {
+        let backend = [0x11u8; 8];
+        let object = backend_probe_object(KIND_PROXY, backend.as_ptr());
+        assert_eq!(
+            unsafe { object_backend_for_kind(object.as_ptr()) },
+            backend.as_ptr(),
+            "kind 2 resolves through the +0xefc pointer (`ldreq r0,[r0,#0xefc]`)"
+        );
+    }
+
+    #[test]
+    fn kind_two_preserves_a_null_backend_pointer() {
+        let object = backend_probe_object(KIND_PROXY, core::ptr::null());
+        assert!(
+            unsafe { object_backend_for_kind(object.as_ptr()) }.is_null(),
+            "a null +0xefc field is returned as-is, not remapped"
+        );
+    }
+
+    #[test]
+    fn kind_zero_returns_null_without_reading_the_pointer_field() {
+        // A one-byte object: any read of +0xefc would step far outside
+        // the allocation, so passing proves the field is never touched.
+        let object = [KIND_BACKEND - 1];
+        assert!(unsafe { object_backend_for_kind(object.as_ptr()) }.is_null());
+    }
+
+    #[test]
+    fn unknown_kind_255_returns_null_without_reading_the_pointer_field() {
+        let object = [u8::MAX];
+        assert!(unsafe { object_backend_for_kind(object.as_ptr()) }.is_null());
+    }
+
+    #[test]
+    fn every_other_kind_returns_null() {
+        for kind in [3u8, 4, 0x7f, 0x80, 0xfe] {
+            let object = [kind];
+            assert!(
+                unsafe { object_backend_for_kind(object.as_ptr()) }.is_null(),
+                "kind {kind:#04x} falls to `movne r0,#0x0`"
+            );
+        }
     }
 }
