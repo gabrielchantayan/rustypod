@@ -10210,6 +10210,25 @@ functions:
       appears in the image data @ 0x0843a1f8 and 0x084e05e8 -
       bottom = 240, right = 320, the Classic 6G's 320x240 LCD.
 
+  - address: 0x082a2670
+    ghidra: FUN_082a2670
+    name: ui_element_resolve_render_context
+    size: 56
+    sig: "RenderContext *ui_element_resolve_render_context(UiElement *element)"
+    module: ui/render_context
+    status: ported
+    vars: {param_1: element, "element+0x34": parent, "element+0x3c": render_context, "vtable+0x5c": root_render_owner, "owner+0x104": render_context}
+    notes: >-
+      Walks the UI element parent chain (+0x34) and returns the first
+      non-NULL direct render context (+0x3c). If every node's direct
+      context is NULL, calls the root's vtable +0x5c method and returns
+      its result's +0x104 render context. The 76 direct bl call sites
+      use the result for coordinate-origin adjustment (0x0828cb64 /
+      0x0828d9b4), render-enabled state (+0xf0), and bitmap surface
+      access (+0x5c), establishing RenderContext rather than a generic
+      owner. Representative callers: 0x0812b170, 0x0814274c,
+      0x081576a0, and 0x0816d3f0.
+
   - address: 0x082a2330
     ghidra: FUN_082a2330
     name: rect_height
