@@ -2,6 +2,7 @@
 pub mod align;
 pub mod beload;
 pub mod berec;
+pub mod checked_word_block;
 pub mod bswap;
 pub mod context_field;
 pub mod clock_pair;

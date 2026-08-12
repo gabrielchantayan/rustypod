@@ -9585,6 +9585,50 @@ functions:
       the only handle the firmware gives it and the symbol says so
       rather than inventing a name.
 
+  - address: 0x0802b654
+    ghidra: FUN_0802b654
+    name: checked_word_block_convert
+    size: 84
+    sig: "u32 checked_word_block_convert(u32 mode, u32 **input_cursor, u32 **input_cursor_mirror, u32 **output_cursor, u32 **output_cursor_mirror, u32 word_count, u32 *out_leading_word)"
+    module: util/checked_word_block
+    status: ported
+    renames:
+      param_1/r4: mode
+      param_2/r5: input_cursor
+      param_3/r12: input_cursor_mirror
+      param_4/r6: output_cursor
+      param_5/r7: output_cursor_mirror
+      param_6: word_count
+      param_7/r8: out_leading_word
+      FUN_0802b538: transform_word_for_mode
+      FUN_0802b5d4: checked_word_block_convert_core
+      uVar1: leading_word
+    notes: >-
+      84 bytes exactly (0x0802b654..0x0802b6a8), 21 ARM instructions,
+      54 bl call sites, no tail branches. Reads **input_cursor_mirror,
+      transforms that leading word with the local mode helper
+      0x0802b538, stores it through out_leading_word, then calls
+      0x0802b5d4 with mode, input_cursor, input_cursor_mirror,
+      output_cursor, output_cursor_mirror, and word_count VERBATIM and
+      returns its status. 0x0802b538 is mode-controlled byte order:
+      exactly mode 1 reverses all u32 bytes; every other value is
+      identity. The unported core converts word_count source words,
+      accumulates their wrapping transformed sum, compares the next
+      transformed word against that checksum, and returns 0 while
+      advancing both input aliases and both output aliases on a match;
+      it returns 4 without advancing on mismatch. All callers pair
+      aliases to source/output cursors, repeatedly request one word,
+      consume the exposed leading value as a binary-record field, and
+      branch on the 0/4 status - enough to identify a checked
+      binary-word reader/converter, not its higher packet format.
+      Deviation: only the tiny transform is reproduced here; the core
+      rides CHECKED_WORD_BLOCK_OPS (direct firmware address on target,
+      host panic until independently ported). Host tests cover mode 0
+      identity, mode 1 byte reversal, checksum-status forwarding, out
+      store, and every core argument's exact identity/order. match.py
+      preserves load/transform/store/core-call/return shape; expected
+      diff is the seam load/blx and LLVM frame allocation.
+
   - address: 0x08100b74
     ghidra: FUN_08100b74
     name: instance_of_class_6600
