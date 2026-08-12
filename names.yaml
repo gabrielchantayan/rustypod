@@ -15316,9 +15316,51 @@ functions:
       Pushes a finished VDBE register onto the parse context's free list
       - nTempReg (u8) at Parse +0x15, aTempReg[8] at Parse +0x18. Ignores
       register 0 (SQLite's "no register" sentinel) and silently drops the
-      release when the list is full, leaking the register for the rest of
+      the release when the list is full, leaking the register for the rest of
       the statement. The `cmpne r1,#8` is unsigned, so a counter already
       past the cap cannot overrun the array.
+
+  - address: 0x0837a3bc
+    ghidra: FUN_0837a3bc
+    name: get_temp_reg
+    size: 80
+    sig: "int get_temp_reg(Parse *parse)"
+    module: sqlite/get_temp_reg
+    status: ported
+    renames:
+      param_1: parse
+      uVar1: reg
+      iVar2: i
+    notes: >-
+      SQLite 3.5.9's sqlite3GetTempReg (expr.c) - the code generator's
+      single-register draw from the temp-register pool; release_temp_reg
+      @ 0x08381f98 is the companion push. 35 bl call sites, no tail b
+      sites (binary-scanned): 0x082c3d28, 0x082c5fd8, 0x082d0344,
+      0x082d0350, 0x082da4b8, 0x082e8844, 0x0836899c, 0x08368a10,
+      0x08368a54, 0x08368b04, 0x08368bcc, 0x08372e60, 0x083733bc,
+      0x083733c8, 0x08373678, 0x0837746c, 0x083777a8, 0x08377878,
+      0x08377884, 0x08377bac, 0x08379ce4, 0x0837bd30, 0x0837bd3c,
+      0x0837c1f8, 0x0837c3f8, 0x0837d6f4, 0x0837d700, 0x0838195c,
+      0x08383780, 0x08385bfc, 0x08385c08, 0x0838e564, 0x0838e948,
+      0x08399100, 0x0839910c. Algorithm: if nTempReg (u8 @ Parse +0x15)
+      is nonzero, probe every aTempReg[i] (i32[8] @ +0x18) through
+      usedAsColumnCache @ 0x083966a0 as (r, r) - the count byte is
+      re-read every pass (in-loop ldrb) and every verdict is DISCARDED -
+      then return ++nMem (i32 @ +0x48; the incremented value, ARM add
+      wrap semantics). The discarded verdicts and missing pop are not a
+      decompile artifact: upstream 3.5.9's loop `continue` merges with
+      its fall-through at the same i++, so the post-loop
+      `if( i>=nTempReg )` is always true and the pop tail (with its
+      increment-less infinite while) is unreachable - ADS 1.0.1 deleted
+      it, making the famous 3.5.9 temp-register bug permanent: the pool
+      is write-only and every draw bumps nMem. Struct identity is
+      pinned by the callee's offsets: 0x083966a0 walks nColCache (i32 @
+      +0x58) over 16-byte aColCache records (@ +0x60, iReg at record
+      +0x0c, hence the ldr at +0x6c) - exactly SQLite 3.5.9's
+      Parse/yColCache layout (version string "3.5.9" @ image 0x905834).
+      Callee 0x083966a0 is UNPORTED and rides the TEMP_REG_OPS seam
+      with a returns-0 stand-in (safe: the one caller discards the
+      result). Ghidra types the return as void; r0 carries ++nMem.
 
   # ---- Big-endian byte stores (src/util/beload.rs) ----
   - address: 0x08046b1c

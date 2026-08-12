@@ -32,7 +32,11 @@
 //! Btree:         +0x00 db, +0x04 pBt, +0x08 inTrans, +0x09 sharable,
 //!                +0x0a locked, +0x0c wantToLock
 //! Parse:         +0x00 db, +0x04 rc, +0x08 zErrMsg, +0x0c pVdbe,
-//!                +0x40 nErr
+//!                +0x15 nTempReg (u8), +0x18 aTempReg (i32[8]),
+//!                +0x38 nRangeReg, +0x3c iRangeReg, +0x40 nErr,
+//!                +0x44 nTab, +0x48 nMem, +0x58 nColCache,
+//!                +0x60 aColCache (16-byte records: +0 iTable,
+//!                +4 iColumn, +8 affChange (u8), +0xc iReg)
 //! Token:         +0x00 z, +0x04 (dyn:1 | n:31)
 //! ```
 //!
@@ -79,6 +83,7 @@ pub mod find_element_given_hash;
 pub mod free_p4;
 pub mod get_varint;
 pub mod get_varint64;
+pub mod get_temp_reg;
 pub mod hash_clear;
 pub mod hash_find;
 pub mod hash_function;
