@@ -9,6 +9,7 @@ pub mod decoder_cleanup;
 pub mod draw_state;
 pub mod handle;
 pub mod list_splice;
+pub mod mutex;
 pub mod observable_array;
 pub mod object_flags;
 pub mod pair_header;

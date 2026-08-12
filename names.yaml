@@ -22383,8 +22383,74 @@ functions:
       rom_svc_22001cbc_alias_67fc in kernel/task_lock — all single-
       instruction veneers resolved by pointing hooks at the canonical
       port). match.py against posix_mutex_unlock at this address confirms
-      the original is exactly the 1-instruction branch; the body diff is
+      is exactly the 1-instruction branch; the body diff is
       the unlock itself, which is the resolution.
+
+  - address: 0x08261e28
+    ghidra: FUN_08261e28
+    name: cxx_mutex_construct
+    size: 44
+    sig: "u8 *cxx_mutex_construct(u8 *this, usize param_2, usize scope_word0, usize scope_word1)"
+    module: cxx/mutex
+    status: ported
+    renames:
+      param_1: this
+      param_2: (unread - the original never touches r1)
+      param_3: scope_word0 (pushed as the scope's first word)
+      param_4: scope_word1 (pushed as the scope's second word)
+      uStack_10/uStack_c: scope (the two-word stack attr object)
+      FUN_08261d1c: attr_init wrapper (pthread_mutexattr_init @ 0x082e84a4)
+      FUN_08261de8: mutex_init (settype NORMAL @ 0x082e84dc + init @ 0x082e82f8, status to this+0x18)
+      FUN_08261d30: attr_destroy wrapper (pthread_mutexattr_destroy @ 0x082e8474)
+    notes: >-
+      The constructor of the C++ layer's mutex wrapper class: a
+      0x1c-byte object embedding a PosixMutex (kernel/posix_mutex.rs,
+      24 bytes) at +0x00 plus the init status word at +0x18
+      (CXX_MUTEX_STATUS_OFFSET). 44 bytes, all code, no literal pool
+      (0x08261e28..0x08261e54). 52 bl call sites, binary-scanned.
+      Despite its lock-guard SHAPE (scope init / work / scope
+      teardown) it is a constructor, not a guard: the scope is an
+      8-byte pthread_mutexattr built on the stack frame - the `push
+      {r2,r3}` IS the allocation, so the scope's words start as the
+      incoming r2/r3 register values (call sites pass no meaningful
+      seeds; the ADS uninitialized-frame idiom) - and the work is the
+      embedded mutex's one-time init as a NORMAL mutex. The three
+      callees, identified from their bodies and binary-verified
+      literals: 0x08261d1c wraps pthread_mutexattr_init @ 0x082e84a4
+      (plants attr magic 0x4d545841 "MTXA" - the literal @ 0x082e84d8,
+      the same word the destroy/settype literals @ 0x082e84a0/
+      0x082e852c hold, and the attribute twin of the mutex object's
+      0x4d545853 "MTXS" static-init magic - at scope+0, default
+      halfword 0xffc2 at +4, RMW bits 0..5+3 of the +6 halfword);
+      0x08261de8 runs pthread_mutexattr_settype @ 0x082e84dc with
+      kind 0 (NORMAL - bits 4..5 of the attr +6 halfword, the field
+      the PosixMutex layout keeps at mutex+0x0e), stores the status at
+      this+0x18, and only on success calls the mutex initializer @
+      0x082e82f8 (the lazy initializer posix_mutex_lock documents)
+      with (this, &scope) and stores ITS status instead; 0x08261d30
+      wraps pthread_mutexattr_destroy @ 0x082e8474 (magic check, clear
+      scope+0). Returns this (mov r0,r4). Call sites pin the class:
+      0x08153348 constructs the wrapper member at this+0x04 and the
+      next member at return+0x1c (the wrapper size), and the same
+      object's lock/unlock route the member through the
+      posix_mutex_lock/unlock veneers @ 0x08261e20/0x08261e24
+      (0x0815331c). Deviations (the settings.rs SETTINGS_CTOR
+      pattern): the three callees ride the CXX_MUTEX_CONSTRUCT_OPS
+      dispatch slots with no-op defaults - NOT HOOK-READY until the
+      wrappers are ported (with the defaults the mutex is never
+      initialized and the status word never written); the scope is
+      modeled as two pointer-sized words (the pfr_face_done face-word
+      model). Host tests: exact call order (attr_init -> mutex_init ->
+      attr_destroy), the scope's initial words are the incoming
+      param_3/param_4 registers and the SAME mutable scope object flows
+      through all three callees (an attr_init mock's write is visible
+      to the later mocks), this passthrough, and the default stubs
+      leaving the wrapper untouched. match.py structural: the Rust
+      even emits `stm sp,{r2,r3}` for the scope seeding - same scope
+      on stack, same three calls with (scope)/(this,scope)/(scope),
+      same mov r0,r4 return; the diff is the crate fp frame with an
+      explicit sub sp,#8 and the three blx-through-volatile-slot
+      dispatches standing in for the direct bl's.
 
   - address: 0x082621a8
     ghidra: (veneer)
