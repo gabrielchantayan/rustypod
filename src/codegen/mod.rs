@@ -14,6 +14,11 @@
 //! any other unported function in osos.
 pub mod block;
 pub mod block_ref;
+/// `cg_exp_golomb_ue_read` @ 0x082c5df0 — the H.264 decoder's `ue(v)`
+/// Exp-Golomb reader. Not IR either, but it sits inside the JIT's
+/// address block (0x082c5dxx), one function away from `se(v)` @
+/// 0x082c5dcc, and is ported under the same `cg_*` roof.
+pub mod exp_golomb;
 pub mod heap;
 pub mod ir;
 /// `cg_timer_wait` @ 0x082bc4fc — the timer-armed event wait used by

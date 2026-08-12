@@ -26275,6 +26275,61 @@ functions:
       iterator_state_cleanup_sentinel_skips_release_and_returns_the_state /
       iterator_state_cleanup_unlinks_its_state_then_poisons_it_and_returns_it /
       iterator_state_cleanup_is_the_wired_teardown_and_container_default.
+
+  # --- H.264 / MPEG-4 AVC video decoder: Exp-Golomb ue(v) reader ---
+  - address: 0x082c5df0
+    ghidra: FUN_082c5df0
+    name: cg_exp_golomb_ue_read
+    size: 88
+    sig: "u32 cg_exp_golomb_ue_read(RbspBitReader *reader, i32 *bits_out, u8 *emulation_byte_pending)"
+    module: codegen/exp_golomb
+    vars: {param_1: reader, param_2: bits_out, param_3: emulation_byte_pending}
+    status: ported
+    notes: >-
+      The H.264 ue(v) unsigned Exp-Golomb reader over the shared RBSP
+      cursor {data @ +0x00, bit_pos @ +0x04, end @ +0x08} (see
+      h264/bitstream.rs). 88 bytes, 22 instructions, no literal pool;
+      50 `bl` call sites counted in osos.asm — every syntax parser at
+      0x0836xxxx (dec_ref_pic_marking @ 0x08365640 and siblings) plus
+      the se(v) wrapper FUN_082c5dcc @ 0x082c5dcc. It lives inside the
+      Vincent JIT's 0x082cxxxx address block, so it is ported under
+      the codegen/ roof with the cg_ prefix, but it is pure decoder
+      machinery.
+      Algorithm: n = count_leading_zeros @ 0x0809b040 (cursor unmoved);
+      h264_bitstream_advance(reader, n, flag) commits exactly the zero
+      prefix; *bits_out = n + 1; suffix = read_bits @ 0x082d0630
+      (n + 1 bits, cursor unmoved); return
+      (1 << n) + (suffix & ~(1 << n)) - 1 — the textbook
+      2^n - 1 + suffix with the mandatory leading 1 masked off rather
+      than skipped. The caller advances the stored n + 1 afterwards;
+      that is the FUN_082b3258 trailing every call site. The
+      emulation-prevention flag passes verbatim through all three
+      primitives; the port consumes nothing. Observable ordering: the
+      prefix advance precedes the *bits_out store, which precedes the
+      suffix read. The 1 << n shift is the ARM register form
+      (mov r2, r2, lsl r4): amount is n & 0xff, amounts 32..=255 yield
+      0, so a degenerate 32-zero prefix returns 0xffffffff (read_bits
+      refuses counts > 32 and yields 0). All additions wrap like the
+      original's add/sub.
+      Deviations: count_leading_zeros @ 0x0809b040 and read_bits
+      @ 0x082d0630 are unported and ride the CG_EXP_GOLOMB_OPS
+      read_volatile seam (missing_* spin-loop defaults, the
+      codegen/timer_wait.rs convention); h264_bitstream_advance
+      @ 0x082b3258 is ported and takes a direct call, retiring its
+      seam. Rust port and host tests: src/codegen/exp_golomb.rs —
+      controlled-mock sweeps of the fold over prefix lengths
+      0..255 (incl. the ARM-shift degenerate cases) and suffix bit
+      patterns, store-ordering and flag-passthrough probes, and
+      end-to-end decodes over faithful transcriptions of the three
+      unported primitives: byte-aligned and misaligned known code
+      words, and streams with emulation-prevention bytes inserted per
+      the H.264 rule, checked against a naive RBSP-space reference.
+      match.py: same push / lz-call / advance / store / read / combine
+      structure; the diff is the crate fp frame, blx seam dispatch in
+      place of the two direct bls, and LLVM folding
+      top + (suffix & ~top) into an orr with a cmp/#31 guard for the
+      32..=255 shift case (value-identical: a single-bit addend turns
+      add into or).
 INS.PRE 24609:
   - address: 0x08271724
     ghidra: FUN_08271724
@@ -26815,5 +26870,6 @@ INS.PRE 24609:
       parked-pointer rule); on target every offset is literal. match.py
       (exit 1, diff expected): same spill-block / loader-call /
       flag-test / zero-or-query structure; the diff is the crate fp
+      frame, the hook seam's blx dispatch in place of the direct bls,
       frame, the hook seam's blx dispatch in place of the direct bls,
       and LLVM outlining the zero path into the else branch.
