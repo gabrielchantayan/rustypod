@@ -26551,6 +26551,80 @@ functions:
       structure; the diff is the crate fp frame and the two seams' blx
       dispatch in place of the direct bls.
 
+  - address: 0x080f4ad8
+    ghidra: FUN_080f4ad8
+    name: path_probe_via_facade
+    size: 68
+    sig: "u32 path_probe_via_facade(StringObject *path_object, u32 flags)"
+    module: app/path_probe
+    status: ported
+    renames:
+      param_1/r0: path_object (a 0x08279284-family path object; the
+        path_exists wrapper passes the constructor's RETURN)
+      param_2/r1: flags (DEAD - spilled into the guard frame at entry,
+        never reloaded; the vtable call receives only
+        (facade, path_object))
+      param_3/param_4 (r2/r3): DEAD - their spill slots are the top
+        half of the 16-byte guard frame (Ghidra's uStack_10/uStack_c
+        in decomp/c/008/080f4ad8_FUN_080f4ad8.c)
+      FUN_08206e40: "PATH_PROBE_GUARD_CTOR seam (interface-guard ctor:
+        guard-class vtable store over the 0x0818a0c4 base, lock
+        acquire 0x0818a144 on the +0x0c word)"
+      FUN_0818a0bc: "PATH_PROBE_FACADE_FETCH seam (facade accessor
+        veneer: ldr r0,[r0,#4]; b 0x08296ec0 - waits out a NULL
+        interface->field_8 and returns that field, the facade)"
+      FUN_08206e6c: "PATH_PROBE_GUARD_DTOR seam (interface-guard dtor:
+        vtable re-plant, unlock 0x0818a164 on +0x0c, base teardown
+        tail 0x0818a0fc)"
+      r4: saved path_object, then saved query status
+    notes: >-
+      18 bl call sites (grep on decomp/osos.asm): 0x08072b24,
+      0x08097b6c, 0x080ac088, 0x080f4ac0 (the path_exists wrapper),
+      0x080ff940, 0x08100a20, 0x08117938, 0x0811796c, 0x081186e0,
+      0x081ee798, 0x081eeeb0, 0x0827ef64, 0x0827ef80, 0x0827f798,
+      0x0827f7b4, 0x0827fb4c, 0x0827fb98 and 0x08399474; every site
+      passes a path object in r0 and a small flag (0 or a
+      sign-extended byte) in r1 and branches on the returned status
+      being nonzero - the exists semantics the wrapper's name
+      carries. Scoped-lock facade query: construct the 16-byte
+      interface guard over the r0-r3 spill frame (0x08206e40: vtable
+      +0x00, interface +0x04, flag bytes +0x08/+0x09, lock token
+      +0x0c), fetch the facade through it with selector 1
+      (0x0818a0bc), indirect-call the facade vtable slot +0x50 with
+      (facade, path_object), destroy the guard (0x08206e6c), return
+      the query status verbatim (saved across the dtor in r4; the
+      dtor's own return is discarded). The probe runs inside the
+      guard's critical section. The facade class owning slot +0x50 is
+      unidentified (the accessor returns interface->field_8 of an
+      object fetched from a registry via 0x0814a130); the sibling
+      pre-open remove @ 0x08084d58 is slot +0x5c on the same facade.
+      Deviations: the three callees remain in retailOS, so the
+      PATH_PROBE_GUARD_CTOR / PATH_PROBE_FACADE_FETCH /
+      PATH_PROBE_GUARD_DTOR seams' wired defaults call their fixed
+      firmware addresses on target_os = "none" (the
+      ui/object_state.rs firmware_clock_sample boundary precedent) -
+      the symbol IS hook-ready - and fail closed on host (no-op guard
+      boundaries; a stand-in facade whose slot +0x50 answers 0, the
+      vtable_set.rs store_ctor_unported policy). With this port the
+      path_exists PATH_EXISTS_WORKER seam's wired default was
+      switched from its fail-closed stub to this symbol (same
+      commit), making path_exists hook-ready; path_exists's own
+      entry above still documents the stub era. Host tests
+      (recording mocks on all three seams plus a mock facade whose
+      non-+0x50 slots are wrong-slot traps):
+      src/app/path_probe.rs::tests::call_order_is_guard_fetch_query_unguard
+      / the_same_guard_frame_flows_through_ctor_fetch_and_dtor /
+      fetch_receives_selector_one_and_flags_is_dead /
+      query_dispatches_through_slot_50_with_the_fetched_facade_and_path_verbatim
+      / the_query_status_survives_the_guard_dtor_and_returns_verbatim
+      / default_chain_fails_closed_on_host, plus the rewired
+      src/app/path_exists.rs::tests::default_worker_is_the_ported_probe_and_fails_closed_on_host
+      integration. match.py (exit 1, diff expected): same
+      guard-ctor / fetch-selector-1 / slot-+0x50-indirect-call /
+      save-status / guard-dtor / return-verbatim structure; the diff
+      is the crate fp frame and the three seams' blx dispatch in
+      place of the direct bls.
+
   - address: 0x08271724
     ghidra: FUN_08271724
     name: iterator_state_release

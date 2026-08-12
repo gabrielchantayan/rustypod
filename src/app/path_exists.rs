@@ -39,8 +39,9 @@
 //! The object is exactly the two-word [`StringObject`] — the wrapper's
 //! r2/r3 spill slots are its whole storage.
 //!
-//! The worker @ 0x080f4ad8 (unported, modeled by the
-//! [`PATH_EXISTS_WORKER`] seam) is the mutex-guarded
+//! The worker @ 0x080f4ad8 (ported as
+//! [`crate::app::path_probe::path_probe_via_facade`], the
+//! [`PATH_EXISTS_WORKER`] seam's wired default) is the mutex-guarded
 //! (0x08206e40/0x08206e6c) filesystem-facade query the
 //! `vtable_set.rs` family documents: fetch the facade from 0x0818a0bc,
 //! indirect-call its vtable slot **+0x50** with the path object (the
@@ -86,12 +87,14 @@
 //!   construction, then the [`PATH_OBJECT_VTABLE_ADDRESS`] identity
 //!   word over the vtable slot (the `StringObjectVtable` ROM-identity
 //!   precedent; nothing ported dereferences it).
-//! - **The worker rides the [`PATH_EXISTS_WORKER`] seam** with a
-//!   FAIL-CLOSED default returning 0 ("does not exist") — the real
-//!   0x080f4ad8 is a filesystem-facade subsystem (the vtable_set.rs
-//!   `VTABLE_FILE_OPEN_REMOVE` policy). This symbol is therefore **not
-//!   hook-ready**: branched into on hardware with the defaults wired,
-//!   every probe would report a missing path.
+//! - **The worker rides the [`PATH_EXISTS_WORKER`] seam** with the
+//!   ported [`crate::app::path_probe::path_probe_via_facade`] @
+//!   0x080f4ad8 as the wired default — the mutex-guarded
+//!   filesystem-facade vtable-slot-+0x50 query. Its guard ctor/fetch/
+//!   dtor callees remain in retailOS and the ported defaults call
+//!   their fixed firmware addresses on `target_os = "none"` (host
+//!   builds fail closed to 0, "does not exist"), so this symbol IS
+//!   hook-ready.
 //! - **The destructor is called directly** — the ported
 //!   [`string_object_destroy_veneer`] (the transition_addon.rs
 //!   ported-callees-called-directly precedent).
@@ -140,22 +143,14 @@ pub static mut PATH_OBJECT_CTOR: PathObjectCtor = path_object_construct;
 pub type PathExistsWorker =
     unsafe extern "C" fn(path_object: *mut StringObject, flags: u32) -> u32;
 
-/// The fail-closed default for the unported worker @ 0x080f4ad8:
-/// reports "does not exist" (status 0 — the value every call site
-/// treats as absent). The real worker is the filesystem facade's
-/// mutex-guarded vtable-slot-+0x50 query; until it is ported there is
-/// nothing to ask (the vtable_set.rs `store_remove_unported` policy).
-unsafe extern "C" fn path_exists_worker_unported(
-    _path_object: *mut StringObject,
-    _flags: u32,
-) -> u32 {
-    0
-}
-
 /// The active exists-query worker — the dispatch seam for 0x080f4ad8
-/// (`bl` @ 0x080f4ac0). Host tests install a recording mock; the real
-/// port replaces the default when it exists.
-pub static mut PATH_EXISTS_WORKER: PathExistsWorker = path_exists_worker_unported;
+/// (`bl` @ 0x080f4ac0). Host tests install a recording mock; the wired
+/// default is the ported
+/// [`crate::app::path_probe::path_probe_via_facade`] (the
+/// mutex-guarded facade slot-+0x50 query; its own unported callees
+/// are retailOS boundaries that fail closed on host).
+pub static mut PATH_EXISTS_WORKER: PathExistsWorker =
+    crate::app::path_probe::path_probe_via_facade;
 
 /// path_exists — original: `FUN_080f4aa8` @ 0x080f4aa8 (48 bytes;
 /// **66 `bl` call sites**, grep on `decomp/osos.asm`; every site passes
@@ -217,7 +212,7 @@ mod tests {
                 core::ptr::addr_of_mut!(PATH_OBJECT_CTOR)
                     .write_volatile(path_object_construct);
                 core::ptr::addr_of_mut!(PATH_EXISTS_WORKER)
-                    .write_volatile(path_exists_worker_unported);
+                    .write_volatile(crate::app::path_probe::path_probe_via_facade);
                 core::ptr::addr_of_mut!(STRING_OBJECT_OPS).write_volatile(self.saved_ops);
             }
         }
@@ -468,22 +463,41 @@ mod tests {
     }
 
     #[test]
-    fn default_worker_fails_closed_as_does_not_exist() {
+    fn default_worker_is_the_ported_probe_and_fails_closed_on_host() {
         let _locks = take_locks();
+        // This test drives the ported worker through its own seams, so
+        // it serializes against path_probe.rs's tests (taken after the
+        // string-object lock; path_probe tests take only their own
+        // lock, so no order cycle is possible).
+        let _probe_lock = crate::app::path_probe::tests::PATH_PROBE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         let _restore = unsafe { SeamGuard::new() };
         unsafe {
+            // The wired default IS the ported 0x080f4ad8.
+            let wired = core::ptr::addr_of!(PATH_EXISTS_WORKER).read_volatile();
+            assert_eq!(
+                wired as usize,
+                crate::app::path_probe::path_probe_via_facade as usize,
+                "the seam's wired default is the ported probe"
+            );
             // All defaults wired: the faithful ctor builds a real (if
-            // payload-less) path object, the fail-closed worker answers
-            // 0, and the ported destructor tears the object down — its
-            // release is a NULL-payload no-op, observed by the mock.
+            // payload-less) path object, the ported worker's host
+            // boundaries fail closed (0 = "does not exist"), and the
+            // ported destructor tears the object down — its release is
+            // a NULL-payload no-op, observed by the mock.
             install_recording();
             core::ptr::addr_of_mut!(PATH_OBJECT_CTOR)
                 .write_volatile(path_object_construct);
             core::ptr::addr_of_mut!(PATH_EXISTS_WORKER)
-                .write_volatile(path_exists_worker_unported);
-            assert_eq!(path_exists(PATH.as_ptr(), 0), 0, "fail-closed: does not exist");
-            // The default ctor and default worker record nothing; only
-            // the ported destructor's release is observed.
+                .write_volatile(crate::app::path_probe::path_probe_via_facade);
+            assert_eq!(
+                path_exists(PATH.as_ptr(), 0),
+                0,
+                "the ported probe's host boundaries fail closed: does not exist"
+            );
+            // The default ctor and the ported worker record nothing
+            // here; only the ported destructor's release is observed.
             assert_eq!(EVENT_COUNT, 1, "the destructor still ran behind the defaults");
             assert_eq!(EVENTS[0], EVENT_DTOR);
         }
