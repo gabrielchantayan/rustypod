@@ -44,13 +44,13 @@
 //! ```
 //!
 //! Deviations:
-//! - `usedAsColumnCache` @ 0x083966a0 is UNPORTED and rides the
-//!   [`TEMP_REG_OPS`] seam; the shipped default
-//!   [`missing_used_as_column_cache`] reports "not cached" (0). The
-//!   answer cannot change `get_temp_reg`'s observable behavior in any
-//!   way — the original discards it — so the slot exists purely so
-//!   host tests can observe the scan's arguments and iteration count,
-//!   and so the 0x083966a0 port can drop in later.
+//! - The `usedAsColumnCache` scan @ 0x083966a0 rides the
+//!   [`TEMP_REG_OPS`] seam; the shipped default is the ported scan in
+//!   [`crate::sqlite::used_as_column_cache`] (both target and host).
+//!   The answer cannot change `get_temp_reg`'s observable behavior in
+//!   any way — the original discards it — so the slot exists purely
+//!   so host tests can observe the scan's arguments and iteration
+//!   count.
 
 /// Byte offset of `Parse.nTempReg` (original: `ldrb r0,[r0,#0x15]` at
 /// entry and `ldrb r0,[r4,#0x15]` in the loop head).
@@ -68,8 +68,8 @@ pub const N_MEM_OFFSET: usize = 0x48;
 /// `sqlite/cell_size.rs`).
 #[derive(Clone, Copy)]
 pub struct TempRegOps {
-    /// `usedAsColumnCache` @ 0x083966a0 (UNPORTED —
-    /// [`missing_used_as_column_cache`] is the shipped default):
+    /// `usedAsColumnCache` @ 0x083966a0 (ported in
+    /// [`crate::sqlite::used_as_column_cache`], the shipped default):
     /// return 1 when any column-cache entry (`Parse.aColCache` at
     /// +0x60, 16-byte records with `iReg` at record +0x0c, `nColCache`
     /// entries at +0x58) holds a register in `[start, end]`, else 0.
@@ -78,18 +78,20 @@ pub struct TempRegOps {
     pub used_as_column_cache: unsafe extern "C" fn(parse: *mut u8, start: i32, end: i32) -> i32,
 }
 
-/// Stand-in for the unported `usedAsColumnCache` @ 0x083966a0: report
-/// "no column-cache entry uses the register" (0). With the column
-/// cache unmodeled there is nothing to report, and the answer is
-/// behaviorally free anyway — the one caller discards it.
+/// Stand-in kept for tests after the 0x083966a0 port landed (same
+/// reasoning as `sqlite/cell_size.rs`'s kept stand-ins): report "no
+/// column-cache entry uses the register" (0). The shipped default is
+/// now the ported scan in [`crate::sqlite::used_as_column_cache`];
+/// the answer is behaviorally free anyway — the one caller discards
+/// it.
 unsafe extern "C" fn missing_used_as_column_cache(_parse: *mut u8, _start: i32, _end: i32) -> i32 {
     0
 }
 
-/// Wired default for [`TEMP_REG_OPS`]: the "not cached" stand-in while
-/// 0x083966a0 is unported.
+/// Wired default for [`TEMP_REG_OPS`]: the ported column-cache scan @
+/// 0x083966a0 (both target and host).
 pub const DEFAULT_TEMP_REG_OPS: TempRegOps = TempRegOps {
-    used_as_column_cache: missing_used_as_column_cache,
+    used_as_column_cache: super::used_as_column_cache::used_as_column_cache,
 };
 
 /// Active model of the `usedAsColumnCache` scan in [`get_temp_reg`].
@@ -136,6 +138,9 @@ pub unsafe extern "C" fn get_temp_reg(parse: *mut u8) -> i32 {
 mod tests {
     extern crate std;
     use super::*;
+    use crate::sqlite::used_as_column_cache::{
+        A_COL_CACHE_OFFSET, COL_CACHE_I_REG_OFFSET, COL_CACHE_RECORD_SIZE, N_COL_CACHE_OFFSET,
+    };
     use std::sync::{Mutex, MutexGuard};
     use std::vec::Vec;
 
@@ -189,14 +194,15 @@ mod tests {
     }
 
     /// A `Parse` context: word-aligned so the pool reads and the `nMem`
-    /// store are aligned, as they are on target. 0x60 bytes covers the
-    /// highest field touched (`nMem` at +0x48) with headroom.
+    /// store are aligned, as they are on target. 0xe0 bytes covers the
+    /// highest field the real scan can touch (eight 16-byte `aColCache`
+    /// records at +0x60) with headroom.
     #[repr(align(4))]
-    struct ParseContext([u8; 0x60]);
+    struct ParseContext([u8; 0xe0]);
 
     impl ParseContext {
         fn new(count: u8, pool: &[i32], n_mem: i32) -> Self {
-            let mut ctx = ParseContext([0xa5; 0x60]);
+            let mut ctx = ParseContext([0xa5; 0xe0]);
             ctx.0[N_TEMP_REG_OFFSET] = count;
             for (slot, reg) in pool.iter().enumerate() {
                 let at = A_TEMP_REG_OFFSET + slot * 4;
@@ -217,6 +223,16 @@ mod tests {
         }
         fn n_mem(&self) -> i32 {
             i32::from_le_bytes(self.0[N_MEM_OFFSET..N_MEM_OFFSET + 4].try_into().unwrap())
+        }
+        /// Lays out a column cache holding `i_regs` (one `iReg` per
+        /// record) for the ported scan — the shipped seam default.
+        fn set_col_cache(&mut self, i_regs: &[i32]) {
+            self.0[N_COL_CACHE_OFFSET..N_COL_CACHE_OFFSET + 4]
+                .copy_from_slice(&(i_regs.len() as i32).to_le_bytes());
+            for (slot, i_reg) in i_regs.iter().enumerate() {
+                let at = A_COL_CACHE_OFFSET + slot * COL_CACHE_RECORD_SIZE + COL_CACHE_I_REG_OFFSET;
+                self.0[at..at + 4].copy_from_slice(&i_reg.to_le_bytes());
+            }
         }
     }
 
@@ -298,14 +314,23 @@ mod tests {
     }
 
     #[test]
-    fn shipped_default_reports_not_cached_and_is_a_noop() {
+    fn shipped_default_is_the_ported_column_cache_scan() {
         let ops_guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             core::ptr::write_volatile(core::ptr::addr_of_mut!(TEMP_REG_OPS), DEFAULT_TEMP_REG_OPS);
             let op = used_as_column_cache_op();
-            assert_eq!(op(core::ptr::null_mut(), 7, 7), 0);
+            // The wired default is the real scan: a context whose
+            // column cache holds register 9 answers "cached" for
+            // (9, 9) and "not cached" beside it.
+            let mut ctx = ParseContext::new(2, &[9, 10], 50);
+            ctx.set_col_cache(&[9]);
+            assert_eq!(op(ctx.ptr(), 9, 9), 1);
+            assert_eq!(op(ctx.ptr(), 4, 8), 0);
         }
+        // ...and `get_temp_reg`'s outcome is unchanged either way —
+        // the original discards every verdict.
         let mut ctx = ParseContext::new(2, &[9, 10], 50);
+        ctx.set_col_cache(&[9]);
         let reg = unsafe { get_temp_reg(ctx.ptr()) };
         assert_eq!(reg, 51);
         assert_eq!(ctx.n_mem(), 51);

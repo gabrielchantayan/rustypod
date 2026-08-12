@@ -15358,9 +15358,46 @@ functions:
       +0x58) over 16-byte aColCache records (@ +0x60, iReg at record
       +0x0c, hence the ldr at +0x6c) - exactly SQLite 3.5.9's
       Parse/yColCache layout (version string "3.5.9" @ image 0x905834).
-      Callee 0x083966a0 is UNPORTED and rides the TEMP_REG_OPS seam
-      with a returns-0 stand-in (safe: the one caller discards the
-      result). Ghidra types the return as void; r0 carries ++nMem.
+      Callee 0x083966a0 is ported (used_as_column_cache,
+      sqlite/used_as_column_cache) and is the TEMP_REG_OPS seam's
+      shipped default; the returns-0 stand-in remains for tests.
+      Ghidra types the return as void; r0 carries ++nMem.
+
+  - address: 0x083966a0
+    ghidra: FUN_083966a0
+    name: used_as_column_cache
+    size: 64
+    sig: "int used_as_column_cache(Parse *parse, int start, int end)"
+    module: sqlite/used_as_column_cache
+    status: ported
+    renames:
+      param_1: parse
+      param_2: start
+      param_3: end
+      iVar1: i
+      iVar2: i_reg
+    notes: >-
+      SQLite 3.5.9's usedAsColumnCache (expr.c), verbatim - no
+      deviation, including the absence of the iReg != 0 guard later
+      SQLite versions add (no zero test in the 16 instructions).
+      3 bl call sites, no tail b sites (binary-scanned): 0x083774dc
+      in FUN_08376ef0 (unidentified; passes (iCurrent, iCurrent)),
+      0x0837a380 in FUN_0837a354 (sqlite3GetTempRange; passes
+      (iRangeReg, iRangeReg + nRangeReg - 1)), and 0x0837a3e8 in
+      get_temp_reg @ 0x0837a3bc (discards the verdict - see its
+      entry). Algorithm: load nColCache (i32 @ Parse +0x58) ONCE at
+      entry (ldr into lr), walk the 16-byte aColCache records (@
+      +0x60, iReg at record +0x0c, hence the ldr at +0x6c), return 1
+      on the first record whose iReg lies inside the INCLUSIVE signed
+      range [start, end], else 0. All comparisons signed (blt/movle,
+      loop head bgt): a negative nColCache scans nothing. With the
+      port landed, get_temp_reg's TEMP_REG_OPS seam default is now
+      the real scan (both target and host); the returns-0 stand-in
+      remains for tests. match.py (exit 1, diff expected): same
+      structure - count load at +0x58, record walk at 0x10 stride
+      with the iReg ldr at +0x6c, signed range test, early return 1
+      vs fall-through return 0; LLVM renders the loop as a countdown
+      with post-increment pointer walk in place of ADS' index form.
 
   # ---- Big-endian byte stores (src/util/beload.rs) ----
   - address: 0x08046b1c
