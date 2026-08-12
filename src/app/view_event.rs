@@ -152,8 +152,10 @@ mod tests {
     /// The `this` pointer each mock observed, in order.
     static mut SEEN: Vec<*mut u8> = Vec::new();
 
-    /// A stand-in view record (timer word at +0x50).
-    static mut VIEW: [u8; 0x54] = [0; 0x54];
+    #[repr(align(4))]
+    struct View([u8; 0x54]);
+
+    static mut VIEW: View = View([0; 0x54]);
 
     unsafe extern "C" fn recording_stop(this: *mut u8) {
         unsafe {
@@ -179,7 +181,7 @@ mod tests {
             };
             (*addr_of_mut!(CALLS)).clear();
             (*addr_of_mut!(SEEN)).clear();
-            (*addr_of_mut!(VIEW)).fill(0);
+            (*addr_of_mut!(VIEW)).0.fill(0);
             (addr_of_mut!(VIEW) as *mut u32)
                 .add(VIEW_TIMER / 4)
                 .write_volatile(timer);
