@@ -21614,6 +21614,54 @@ functions:
       prologue (push {fp,lr} / mov fp,sp / pop {fp,pc}) that every small
       port in this crate carries, e.g. cxx::handle::handle_deref_or_null.
 
+  - address: 0x08283168
+    ghidra: FUN_08283168
+    name: parse_result_init
+    size: 16
+    sig: "u8 *parse_result_init(u8 *out, u8 status, u8 code, u16 detail)"
+    module: app/parse_result
+    status: ported
+    vars:
+      param_1: out
+      param_2: status
+      param_3: code
+      param_4: detail
+    notes: >-
+      The 4-byte result-record constructor of the fault-tolerant
+      record-resource parsers (the 0x080f8xxx-0x080fexxx cluster,
+      ui/block_map's "record-resource parsers"; 52 of the 53 bl sites
+      sit inside it, the outlier is 0x081d5e48). Three stores and out:
+      `strb r1,[r0]; strb r2,[r0,#1]; strh r3,[r0,#2]; bx lr` -
+      status at +0x00, code at +0x01, detail as a little-endian u16 at
+      +0x02. r0 is never written and callers consume it (`mov r7, r0`
+      &c.), so the port returns the out pointer like the original.
+      The record's class occupies one translation unit at
+      0x08283120-0x08283178, which proves the layout from the reader
+      side: status() 0x08283120 (ldrb +0), detail() 0x08283124 (ldrh
+      +2), code() 0x0828312c (ldrb +1), an IDENTICAL init twin
+      0x08283134, is_ok() 0x08283144 (status == 1), clear() 0x08283154
+      (zeroes all four bytes) and a trivial destructor 0x08283178 (the
+      context_scope_drop phenomenon, a lone `bx lr`). Status values
+      recovered from the sites: 0 = cleared (the canonical call shape
+      zero-initializes, e.g. 0x080f8ef4/0x080f8f08), 1 = ok (is_ok()
+      gates the consumer, e.g. `bl 0x08283144; cmp; beq <bail>` @
+      0x080f8d74), 2 = error with code 5 (FUN_080fc74c writes {2, 5,
+      0x2000}; FUN_080f8ba4's error path writes {2, 5, <pool
+      constant>}). The adjacency to context_scope (0x08283f3c+) is ADS
+      translation-unit packaging only - no context_scope function
+      references the record. Extent exact: 16 bytes, 0x08283168..
+      0x08283178, no literal pool. Deviation: the three stores are
+      volatile so LLVM cannot merge them into one 32-bit str - the
+      original emits three distinct stores, and a merged word store
+      would fault where the original's byte/half stores do not if out
+      were ever unaligned (the strh carries the original's halfword
+      alignment contract). Host tests: field layout (byte, byte, LE
+      u16) with a guard byte past the record, all-zero (the canonical
+      clear shape), all-ones values, and the {2, 5, 0x2000} error
+      shape. match.py structural: the strb/strb/strh triple matches
+      instruction-for-instruction; the diff is only the crate-standard
+      fp prologue.
+
   - address: 0x082646ac
     ghidra: FUN_082646ac
     name: trivial_destructor

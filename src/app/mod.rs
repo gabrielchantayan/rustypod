@@ -13,6 +13,7 @@ pub mod media_command_facade;
 pub mod media_ext;
 pub mod node_list;
 pub mod object_dispatch_entry;
+pub mod parse_result;
 pub mod registry;
 pub mod resource_chain;
 pub mod scoped_context;
