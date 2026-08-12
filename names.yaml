@@ -25591,3 +25591,22 @@ INS.PRE 24609:
       shape and every recovered target offset; LLVM emits an early
       `bxne lr` for the already-bound path and materializes
       `-(cursor + 0x28)` as `mvn #43; sub` rather than `add #40; rsb`.
+
+  - address: 0x08260558
+    ghidra: FUN_08260558
+    name: align_up
+    size: 20
+    sig: "u32 align_up(u32 value, u32 align)"
+    module: util/align
+    status: ported
+    renames:
+      param_1: value
+      param_2: align
+    notes: >-
+      76 bl call sites, a pure leaf: the classic power-of-two round-up
+      (value + align - 1) & ~(align - 1), all wrapping mod 2^32
+      (add/sub/sub/bic/bx). Port preserves the exact original arithmetic
+      including the align == 0 (always 0) and value+align-1 overflow
+      (wraps) degenerate cases. match.py (exit 1, diff expected): LLVM
+      folds ~(align-1) into -align via rsb/and (algebraically identical)
+      and adds the crate's fp frame; core add/sub/mask structure matches.

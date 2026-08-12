@@ -1,4 +1,5 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
+pub mod align;
 pub mod beload;
 pub mod berec;
 pub mod bswap;
