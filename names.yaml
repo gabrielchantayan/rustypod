@@ -12062,6 +12062,56 @@ functions:
       free_wrapper lazy-init + HEAP_OPS dispatch standing in for the
       original's bl 0x080e7970 (the documented deviation).
 
+  - address: 0x082a4f78
+    ghidra: FUN_082a4f78
+    name: wheel_event_button_code
+    size: 16
+    sig: "u32 wheel_event_button_code(const u8 *this)"
+    module: cxx/wheel_event
+    status: ported
+    renames:
+      param_1: this
+    notes: >-
+      Extracts byte 2 (bits 16..23) of the state word at +0x10 of the
+      control subsystem's click-wheel event sample - the record
+      kernel/wheel_sample.rs's wheel_sample_capture @ 0x08292a88 fills
+      (layout: kind +0x04, capture flag +0x08, elapsed +0x0c, state
+      +0x10, rate +0x14). 16 bytes, all code, no literal pool
+      (0x082a4f78..0x082a4f88). 51 bl call sites, binary-scanned. Raw
+      ARM: `ldr r0,[r0,#0x10]; and r0,r0,#0xff0000; mov r0,r0,lsr
+      #0x10; bx lr`; Ghidra (decomp/c/029/082a4f78_FUN_082a4f78.c)
+      matches exactly. Class identification is call-site driven: the
+      same handler cluster (0x0813f6c4.., 0x08140180..) calls
+      wheel_sample_capture @ 0x08292a88 and its rate-getter sibling
+      0x08292adc on the same record (0x0813f7c0/0x0813f7cc) and reads
+      the elapsed word at +0x0c; at 0x0811a0b4 the same +0x10 word's
+      byte 3 is flag-tested (`tst #0xff000000`, `and #0x1000000` -
+      0x40000000 is the documented finger-on-wheel gate) before the
+      kind == 0xd gate and this byte's dispatch. The byte is a
+      small-integer CODE, not a character: range-compared (`cmp #0x59;
+      bgt` @ 0x0811a0ec) and filter/dispatch-compared against
+      0x4a..0x4c (skip filter @ 0x0810bdd4), 0x57/0x58 (list index
+      -1/+1), 0x59/0x5a (select paths), 0x6e/0x6f; the kind word at
+      +0x04 carries 8/0xd/0x15. Enum undecoded; "button code" is the
+      evidenced role. NOT a string operation despite sitting among the
+      StringObject accessors (ADS translation-unit packaging): the COW
+      string rep (cxx/string.rs) is {refcount, capacity, length} plus
+      inline data with no flags byte at +0x10, so the byte plays no
+      part in any short/long string discrimination. ALIASES: the exact
+      4-word pattern occurs exactly TWICE in osos.dec - here and at
+      0x082a4f68 (26 bl call sites, binary-scanned), a byte-identical
+      twin ADS emitted for a second translation unit (the
+      handle_deref_or_null alias phenomenon); NOT ported separately -
+      hook that address to this symbol. The halfword sibling @
+      0x082a4f58 (`ldr; lsl #0x10; lsr #0x10` - the low u16 of the
+      same state word, 5 bl call sites) is a DIFFERENT body, not an
+      alias, also unported. Host tests: a distinct value at each byte
+      position in turn (only byte 2 survives), 0x00/0xff boundaries,
+      and a read-only check with byte 3 and the low halfword at 0xff
+      proving the mask. match.py structural: LLVM folds and+lsr into a
+      single `ldrb [r0,#18]` - the same little-endian byte - behind
+      the crate fp frame; 4 instructions vs the original's 4.
+
   - address: 0x08277440
     ghidra: FUN_08277440
     name: string_default_construct

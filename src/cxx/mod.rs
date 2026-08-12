@@ -19,3 +19,4 @@ pub mod string_map;
 pub mod string_object;
 pub mod templates;
 pub mod trivial_destructor;
+pub mod wheel_event;
