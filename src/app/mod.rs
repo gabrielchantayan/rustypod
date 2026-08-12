@@ -16,6 +16,7 @@ pub mod node_list;
 pub mod object_dispatch_entry;
 pub mod pair_header_destruct;
 pub mod parse_result;
+pub mod path_exists;
 pub mod queued_message;
 pub mod registry;
 pub mod resource_chain;

@@ -26410,6 +26410,70 @@ functions:
       top + (suffix & ~top) into an orr with a cmp/#31 guard for the
       32..=255 shift case (value-identical: a single-bit addend turns
       add into or).
+  - address: 0x080f4aa8
+    ghidra: FUN_080f4aa8
+    name: path_exists
+    size: 48
+    sig: "u32 path_exists(const char *path, u32 flags)"
+    module: app/path_exists
+    status: ported
+    renames:
+      param_1/r0: path (NUL-terminated path C string)
+      param_2/r1: flags (every call site passes 0)
+      param_3/param_4 (r2/r3): DEAD - their spill slots ARE the 8-byte
+        path-object guard on sp, overwritten by the constructor before
+        any read; Ghidra's uStack_10/uStack_c in
+        decomp/c/008/080f4aa8_FUN_080f4aa8.c
+      FUN_08279284: "PATH_OBJECT_CTOR seam (path-object ctor veneer:
+        string_object_construct_from_cstr @ 0x08277304 + derived
+        path-class vtable 0x089a60d8 store, literal @ 0x08279298
+        binary-verified)"
+      FUN_080f4ad8: "PATH_EXISTS_WORKER seam (the exists query:
+        mutex-guarded 0x08206e40/0x08206e6c filesystem facade from
+        0x0818a0bc, vtable slot +0x50 with the path object)"
+      thunk_FUN_082792fc: "string_object_destroy_veneer (ported, called
+        directly)"
+      r4: saved flags, then saved query status
+    notes: >-
+      66 bl call sites (grep on decomp/osos.asm); every site passes a
+      path C string in r0 and 0 in r1 and branches on the returned
+      status being nonzero (FUN_08164bf4 gates reading
+      "iPod_Control/Device/1da_..." on it; FUN_08264c94 enumerates
+      consecutively-indexed paths with `while (path_exists(...) != 0)`;
+      FUN_0811b254 probes "iPod_Control/Device/radio_..."), hence the
+      exists name - the exact facade slot-+0x50 operation beyond that
+      is not established. Scoped-guard wrapper:
+      path_object_construct(&guard, path), then
+      worker(ctor_return, flags), then
+      string_object_destroy_veneer(&guard), returning the worker's
+      status verbatim. Faithful: the worker's first argument is the
+      CONSTRUCTOR'S RETURN (r0 flows straight through), while the
+      destructor is handed sp (the guard STORAGE) unconditionally -
+      pinned by tests with a constructor mock returning a distinct
+      sentinel. The guard object is the two-word StringObject; the
+      r2/r3 spill slots are its whole storage. Deviations: the
+      unported ctor veneer 0x08279284 rides the PATH_OBJECT_CTOR seam
+      with a FAITHFUL default (both pieces known: the ported base ctor
+      plus the derived vtable identity store); the unported worker
+      0x080f4ad8 rides the PATH_EXISTS_WORKER seam with a FAIL-CLOSED
+      default returning 0 ("does not exist") - the symbol is NOT
+      hook-ready until the filesystem-facade worker is ported. Host
+      tests (recording mocks on both seams plus the
+      STRING_OBJECT_OPS.release_payload slot to observe the ported
+      destructor):
+      src/app/path_exists.rs::tests::call_order_is_construct_query_destroy
+      / ctor_receives_the_storage_and_the_path_verbatim /
+      worker_receives_the_ctor_return_not_the_storage /
+      dtor_receives_the_storage_even_when_the_ctor_returns_elsewhere /
+      flags_flow_to_the_worker_verbatim /
+      the_query_status_survives_the_destructor_and_returns_verbatim /
+      default_ctor_builds_the_derived_path_object /
+      default_worker_fails_closed_as_does_not_exist. match.py (exit 1,
+      diff expected): same spill/save-flags/ctor/worker/dtor/return
+      structure; the diff is the crate fp frame and the two seams' blx
+      dispatch in place of the direct bls.
+
+
 INS.PRE 24609:
   - address: 0x08271724
     ghidra: FUN_08271724
