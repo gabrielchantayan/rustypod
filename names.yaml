@@ -26824,6 +26824,75 @@ functions:
       push/bl/cmp/tst/asr/rsbeq/addne structure; the diff is the crate
       fp frame and LLVM turning the popeq early return into a branch
       to a shared mov r0,#0 / pop epilogue.
+
+  # --- H.264 / MPEG-4 AVC video decoder: u(n) RBSP bit reader ---
+  - address: 0x082d0630
+    ghidra: FUN_082d0630
+    name: cg_rbsp_read_bits
+    size: 292
+    sig: "u32 cg_rbsp_read_bits(RbspBitReader *reader, i32 count, u8 *emulation_byte_pending)"
+    module: codegen/rbsp_read_bits
+    vars: {param_1: reader, param_2: count, param_3: emulation_byte_pending}
+    status: ported
+    notes: >-
+      The H.264 u(n) fixed-width bit reader over the shared RBSP
+      cursor {data @ +0x00, bit_pos @ +0x04, end @ +0x08} (see
+      h264/bitstream.rs and the cg_exp_golomb_ue_read entry for the
+      flag protocol). 292 bytes, 73 instructions, no literal pool;
+      55 `bl` call sites counted in osos.asm — the syntax parsers at
+      0x0836xxxx and the Exp-Golomb reader @ 0x082c5df0. It lives
+      inside the Vincent JIT's 0x082dxxxx address block, so it is
+      ported under the codegen/ roof with the cg_ prefix, but it is
+      pure decoder machinery.
+      Algorithm: *flag = 0 FIRST (even a refused count clears it);
+      counts outside 1..=32 return 0. p = data + (bit_pos >> 3)
+      (arithmetic shift); first = 8 - (bit_pos & 7). A byte-ALIGNED
+      entry probes p with the emulation-prevention probe @ 0x082c319c
+      and skips the 00 00 03 byte (setting the flag) before reading;
+      a mid-byte entry never probes the first byte. count <= first is
+      the single-byte path: the original issues a 32-bit unaligned
+      `ldr` at p and reduces it with lsl (8-first) / and #0xff /
+      lsr (8-count) — only *p survives the mask. Longer reads take
+      the low `first` bits, then a whole-byte loop (probe the byte
+      AFTER each consumed byte; defer the verdict in a pending-skip
+      register that makes the NEXT fetch step over the EP byte;
+      report every probe hit through the flag — including a hit on
+      the byte after the last consumed byte, whose pending skip is
+      never consumed), then a 1..7-bit tail that consumes the pending
+      skip before taking the top bits of the last byte.
+      Contract pinned from the asm: the cursor is NEVER advanced (the
+      caller commits n bits plus an 8-bit surcharge per flagged EP
+      byte via h264_bitstream_advance @ 0x082b3258), so bit_pos
+      indexes the RAW (EBSP) stream — EP bytes occupy bit positions,
+      and a mid-byte start inside one reads its bits as data. Byte
+      fetches are not bounds-checked against `end`; only the probe
+      is (p + 1 < end), so a trailing 00 00 03 with the 0x03 as the
+      last byte is not an EP sequence and is read as data.
+      Deviations: the single-byte path reads one byte instead of the
+      original's unaligned word load (the extra bytes are masked off
+      in the original — value-identical, strictly narrower). The
+      probe @ 0x082c319c is unported and rides the new
+      CG_RBSP_READ_BITS_OPS read_volatile seam (missing_* spin-loop
+      default, the codegen/timer_wait.rs convention); host tests
+      install a faithful transcription. NOTE: with read_bits now
+      ported, the read_bits slot of CG_EXP_GOLOMB_OPS in
+      codegen/exp_golomb.rs can be retired in favour of a direct call
+      (per the ported-callee convention) — deliberately NOT rewired
+      here (one function per commit). Rust port and host tests:
+      src/codegen/rbsp_read_bits.rs — width sweep 1..=32 x bit_pos
+      alignments 0..7 against a naive MSB-first reference, refused
+      counts (0, 33, negatives, i32 extremes) with flag-clearing,
+      single-byte isolation, aligned/mid-read/tail EP skips against
+      an RBSP-space reference over prevention-inserted streams, exact
+      flag-fire pinning (incl. the trailing-edge probe hit), the
+      EP-at-end and follower >= 4 non-sequences, unchecked over-end
+      reads, and the cursor-unmoved contract on every call.
+      match.py: same flag-store / count-gate / aligned-probe /
+      single-byte / whole-byte-loop / tail structure; the diff is the
+      crate fp frame, blx seam dispatch in place of the direct bls,
+      LLVM folding the two bound checks into one sub/cmn/bcc, an ldm
+      for the cursor words, and reassociated shift/mask sequences
+      (value-identical).
   - address: 0x080f4aa8
     ghidra: FUN_080f4aa8
     name: path_exists

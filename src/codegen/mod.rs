@@ -21,6 +21,11 @@ pub mod block_ref;
 pub mod exp_golomb;
 pub mod heap;
 pub mod ir;
+/// `cg_rbsp_read_bits` @ 0x082d0630 — the H.264 decoder's `u(n)`
+/// fixed-width RBSP bit reader. Not IR either, but it sits inside the
+/// JIT's address block (0x082dxxxx) and is ported under the same
+/// `cg_*` roof.
+pub mod rbsp_read_bits;
 /// `cg_timer_wait` @ 0x082bc4fc — the timer-armed event wait used by
 /// the display path; not IR, but it lives inside the JIT's address
 /// block and is ported under the same `cg_*` roof.
