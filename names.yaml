@@ -470,6 +470,25 @@ functions:
       install a recording callback and cover both prior-state branch cases and
       the exact context argument.
 
+  - address: 0x08005320
+    ghidra: FUN_08005320
+    name: finalize_state_and_dispatch
+    size: 40
+    sig: "noreturn finalize_state_and_dispatch(StateRecord *record)"
+    module: runtime/state_finalize
+    status: ported
+    renames:
+      param_1: record
+      "record+0x20": current_state
+      "record+0x21": deferred_state
+      thunk_FUN_082aad24: terminal_state_callback
+    notes: >-
+      Reads current_state at record+0x20. When it is 2, calls the ported
+      set_state_and_notify @ 0x080050fc with deferred_state from record+0x21,
+      then reloads and terminally dispatches the resulting current_state through
+      thunk 0x082aad24. Direct target dispatch uses STATE_FINALIZE_OPS so host
+      tests can record the diverging callback; target builds call the ROM thunk.
+
   # --- retailOS state wait ---
   - address: 0x08055e8c
     ghidra: FUN_08055e8c
@@ -612,6 +631,29 @@ functions:
       Ghidra calls the latter Data Synchronization; ARM926EJ-S documents this
       encoding as draining the write buffer. Host builds use the shared
       replaceable deterministic CP15 cache-maintenance seam.
+
+  - address: 0x08005cf4
+    ghidra: FUN_08005cf4
+    name: heap_object_destroy_and_dispatch
+    size: 36
+    sig: "void *heap_object_destroy_and_dispatch(void *object)"
+    module: heap/object_destroy_dispatch
+    status: ported
+    vars:
+      param_1/r0: object
+      iVar1/r0: embedded_result
+      thunk_FUN_081b0f0c: embedded_object_destroy
+      FUN_08005ffc: empty_base_destroy
+      FUN_08003818: kernel_indirect_dispatch
+    notes: >-
+      Calls the 0x081b0f0c virtual destructor on object +0x28, rebases its
+      r0 result by -0x18 through the empty 0x08005ffc base destructor, then
+      passes the result -8 into the literal tail veneer 0x08003818. On ARM
+      that veneer enters 0x0815ca7c, which pops this wrapper's {r4,lr} frame
+      and tail-branches, so the apparent final result -8 is unreachable in
+      retail execution. The device port preserves that sequence in ARM
+      assembly; the host seam exposes Ghidra's normal-return interpretation
+      solely to verify all three offsets and call order.
 
   - address: 0x08005d18
     ghidra: FUN_08005d18
