@@ -636,6 +636,23 @@ functions:
       and host builds use driver-local register seams per the
       drivers/pwrcon precedent; the algorithm is the original's.
 
+  - address: 0x08004ca4
+    ghidra: FUN_08004ca4
+    name: select_i2s_interrupt_register_base
+    size: 28
+    sig: "u32 select_i2s_interrupt_register_base(u32 interface_selector)"
+    module: runtime/timer_constants
+    status: ported
+    vars: {param_1: interface_selector, DAT_08004cc0: i2s1_register_base,
+      DAT_08004cc4: i2s0_register_base}
+    notes: Selects an S5L8702 I2S interface register base for the three-way
+      interrupt-mask updater at 0x0800881c. Decoded literal-pool words are
+      I2S1 (0x3cd00000) and I2S0 (0x3ca00000); selector 2 returns the
+      inlined I2S2 base (0x3d400000). Selector 1 returns I2S1, selector 2
+      returns I2S2, and every other selector returns I2S0. Target volatile-
+      loads the original literal-pool addresses; host builds use a
+      deterministic replaceable literal seam because firmware ROM is unmapped.
+
   - address: 0x080004ec
     ghidra: FUN_080004ec
     name: startup_wait_for_status_clear

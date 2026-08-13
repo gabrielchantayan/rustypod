@@ -21,4 +21,5 @@ pub mod rt_div;
 pub mod setjmp;
 pub mod shutdown_chain;
 pub mod startup_wait;
+pub mod timer_constants;
 pub mod state_wait;
