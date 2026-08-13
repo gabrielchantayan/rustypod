@@ -122,6 +122,28 @@ functions:
       The Rust port preserves the ABI through the target/host operation seam;
       its ARM default is the same literal veneer target.
 
+  # --- callback-target virtual dispatch ---
+  - address: 0x08007788
+    ghidra: FUN_08007788
+    name: callback_target_dispatch
+    size: 32
+    sig: "void callback_target_dispatch(void *unused, void *callback)"
+    module: app/callback_target_dispatch
+    status: ported
+    renames:
+      param_1/r0: unused
+      param_2/r1: callback
+      piVar1: callback_target
+      thunk_FUN_0818c740: callback_target_getter
+    notes: >-
+      Raw ARM preserves r1 across the 0x08003910 literal veneer (target
+      0x0818c740), loads the returned target's vtable and tail-dispatches its
+      +0x1c slot with r0=target and r1=callback. r0 on entry is ignored. The
+      getter returns the same callback target used by neighboring wrappers
+      0x080076d4, 0x080077a8, and 0x08007bd4; its setup path is unported, so
+      the ARM port retains the literal veneer and host tests use a volatile
+      getter seam to exercise the exact virtual callback ABI.
+
   # --- event-loop callback dispatch ---
   - address: 0x080074e8
     ghidra: FUN_080074e8
