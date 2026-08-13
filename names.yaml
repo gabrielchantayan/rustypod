@@ -29255,3 +29255,26 @@ functions:
       retail helper and host builds provide a volatile recorder seam. The
       direct host test proves every passed offset and the complete call order;
       match.py diff reviewed after the ARM release build.
+
+  # --- address-distinct eight-slot byte identity-table initialization alias ---
+  - address: 0x08028490
+    ghidra: FUN_08028490
+    name: initialize_eight_byte_identity_slots_alias
+    size: 36
+    sig: "void initialize_eight_byte_identity_slots_alias(u8 *base)"
+    module: drivers/eight_slot_identity_init_alias
+    status: ported
+    renames:
+      param_1/r0: base
+      iVar1/r4: slot_index
+      FUN_0802b9ec: initialize_byte_identity_slot
+    notes: >-
+      Address-distinct, byte-identical alias of
+      initialize_eight_byte_identity_slots at 0x08028460; it remains its own
+      hookable Rust export because retail callers retain the 0x08028490 load
+      address. Calls the unported byte identity-table initializer at 0x0802b9ec
+      exactly eight times in ascending order, passing base + slot_index * 0x100
+      for slot_index 0 through 7. The target build dispatches directly to the
+      retail helper and host builds provide a volatile recorder seam. The
+      direct host test proves every passed offset and the complete call order;
+      match.py diff reviewed after the ARM release build.
