@@ -29326,3 +29326,31 @@ functions:
       retail helper and host builds provide a volatile recorder seam. The
       direct host test proves every passed offset and the complete call order;
       match.py diff reviewed after the ARM release build.
+
+
+  # --- FreeType word-cursor advance with range-start output ---
+  - address: 0x0802b93c
+    ghidra: FUN_0802b93c
+    name: ft_advance_word_cursor
+    size: 24
+    sig: "void ft_advance_word_cursor(u32 *next_cursor, u32 *cursor, u32 *range_start, u32 word_count)"
+    module: ft/word_cursor
+    status: ported
+    renames:
+      param_1/r0: next_cursor
+      param_2/r1: cursor
+      param_3/r2: range_start
+      param_4/r3: word_count
+      iVar1/r12: old_cursor
+      iVar2/r3: advanced_cursor
+    notes: >-
+      24-byte FreeType parser-layout leaf helper
+      (0x0802b93c..0x0802b954), six ARM instructions. The compound parser
+      builders at 0x08028548, 0x080286c0, 0x08028838, and 0x08028b08 use it
+      to reserve word ranges: it reads cursor, computes cursor + word_count *
+      4 with ARM's wrapping shifted-add arithmetic, writes the advanced cursor
+      to next_cursor and cursor, then writes the pre-advance cursor to
+      range_start. Ordered raw-pointer stores preserve observable output
+      aliasing. No deviations. Focused host tests cover normal reservation,
+      shift/add overflow, and output aliasing; match.py reviewed after the ARM
+      release build.

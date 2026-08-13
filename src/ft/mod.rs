@@ -16,4 +16,5 @@ pub mod system;
 pub mod selection;
 pub mod trace;
 pub mod trig;
+pub mod word_cursor;
 pub mod types;
