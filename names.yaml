@@ -28908,3 +28908,31 @@ functions:
       ::binding_unlink_unlinks_the_only_node (both anchor words
       drain to NULL) - every test also proves no write lands past
       the +0x08 anchor back-pointer via per-node sentinel words.
+
+  # --- stream-buffer refill request ---
+  - address: 0x08004484
+    ghidra: FUN_08004484
+    name: stream_buffer_refill_level_advance
+    size: 32
+    sig: "u32 stream_buffer_refill_level_advance(void)"
+    module: app/buffer_refill_request
+    status: ported
+    renames:
+      DAT_080044a4: stream_buffer_refill_level (target RAM @ 0x2200ad14)
+      DAT_080044a8: stream_buffer_request_controller (target RAM @ 0x2200aebc)
+      iVar5/r0: requested_level
+      FUN_080029ac: stream_buffer_transition_controller
+    notes: >-
+      Sole recovered caller is the stream-buffer consumer
+      FUN_08006b64 at 0x08006de4, when readable distance exceeds half
+      capacity (its low-water sibling 0x080044ac uses the complementary
+      bit-derived level). Raw ARM reads the refill-request level, holds
+      exactly level 3, otherwise adds one with ARM 32-bit wrapping
+      arithmetic, stores the result to request-controller +0x10, then
+      tail-branches to the shared transition controller 0x080029ac.
+      ARM port preserves the two RAM literals and tail transfer through a
+      linker-safe literal veneer. Host builds expose the target RAM word and
+      controller edge as test seams. Host tests cover ordinary advance,
+      the held level, controller result/once-only forwarding, and wrapping
+      from 0xffffffff. match.py diff reviewed; structural shape is
+      literals -> compare -> conditional add -> store -> tail controller.
