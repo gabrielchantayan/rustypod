@@ -29213,6 +29213,29 @@ functions:
       remains intentionally opaque. Host tests cover both pointer states;
       match.py diff reviewed after the ARM release build.
 
+  # --- H.264 CBC decode forwarding adapter ---
+  - address: 0x0802ac10
+    ghidra: FUN_0802ac10
+    name: h264_decode_forwarder
+    size: 40
+    sig: "void h264_decode_forwarder(u32 arg1, u32 arg2, u32 arg3, u32 arg4, u32 arg5, u32 arg6)"
+    module: app/h264_decode_forwarder
+    status: ported
+    renames:
+      param_1/r0: arg1
+      param_2/r1: arg2
+      param_3/r2: arg3
+      param_4/r3: arg4
+      param_5/stack: arg5
+      param_6/stack: arg6
+      FUN_0802ab90: h264_decode_body
+    notes: >-
+      Six-word adapter for the CBC decode body at 0x0802ab90. Raw ARM saves
+      r2/r3 and both incoming stack words, restores them as its callee's r2/r3
+      and stack arguments, calls once, and discards the body status because
+      this wrapper is void. The body remains a retailOS target seam; the host
+      test records every word and verifies their order and the single call.
+
   # --- H.264 aligned-buffer status ---
   - address: 0x080276c8
     ghidra: FUN_080276c8
