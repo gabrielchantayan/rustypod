@@ -119,6 +119,28 @@ functions:
       the stack. The target/host ROM seam retains that exact argument order;
       a host recorder proves one call with the inserted zero and discarded
       callee result.
+
+  # --- Record field configuration ---
+  - address: 0x0800f1b4
+    ghidra: FUN_0800f1b4
+    name: configure_record_fields
+    size: 40
+    sig: "void configure_record_fields(void *record, u32 primary_value, u32 secondary_value)"
+    module: util/record_fields_configure
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: primary_value
+      param_3/r2: secondary_value
+      param_1_plus_0xf0: secondary_value_field
+      param_1_plus_0xf4: primary_value_field
+      param_1_plus_0xf8: ready_flag
+    notes: >-
+      The only recovered callers (0x0801271c and 0x08015f40) are
+      image-processing routines. Both pass a record-like object, a computed
+      primary value, and literal 8. Raw ARM normalizes r1 and r2 through a
+      literal-pool add/sub pair without changing their values, then stores the
+      primary value at +0xf4, the secondary value at +0xf0, and zero at +0xf8.
   # --- I2S transfer-slot teardown ---
   - address: 0x08004c4c
     ghidra: FUN_08004c4c
