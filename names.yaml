@@ -268,6 +268,27 @@ functions:
       only the crate frame-pointer prologue/epilogue (popeq {fp,pc} for
       bxeq lr), the same pattern as every leaf in this module.
 
+  # --- retailOS state transition notifier ---
+  - address: 0x080050fc
+    ghidra: FUN_080050fc
+    name: set_state_and_notify
+    size: 28
+    sig: "void set_state_and_notify(StateRecord *record, u8 new_state)"
+    module: runtime/state_transition
+    status: ported
+    renames:
+      param_1: record
+      param_2: new_state
+      DAT_0800371c: state_notification_callback
+    notes: >-
+      Reads record+0x20 as current_state. Unless it is the special value 2,
+      copies it to previous_state at +0x21; writes new_state to +0x20; then
+      tail-calls the 0x0800371c literal veneer with the context word at
+      record+0x1c. The veneer resolves to runtime-installed callback
+      0x080ea6ec. The target default calls that callback directly; host tests
+      install a recording callback and cover both prior-state branch cases and
+      the exact context argument.
+
   # --- retailOS state wait ---
   - address: 0x08055e8c
     ghidra: FUN_08055e8c
