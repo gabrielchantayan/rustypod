@@ -302,6 +302,29 @@ functions:
       the ARM port retains the literal veneer and host tests use a volatile
       getter seam to exercise the exact virtual callback ABI.
 
+  - address: 0x080077a8
+    ghidra: FUN_080077a8
+    name: callback_target_slot_14_dispatch
+    size: 40
+    sig: "void callback_target_slot_14_dispatch(void *unused, void *arg2, void *arg3)"
+    module: app/callback_target_slot_14_dispatch
+    status: ported
+    renames:
+      param_1/r0: unused
+      param_2/r1: arg2
+      param_3/r2: arg3
+      piVar1: callback_target
+      thunk_FUN_0818c740: callback_target_getter
+    notes: >-
+      Raw ARM preserves r1 and r2 across the 0x08003910 literal veneer
+      (target 0x0818c740), loads the returned target's vtable, and
+      tail-dispatches its +0x14 slot with r0=target, r1=arg2, and r2=arg3.
+      r0 on entry is ignored. The getter is an unported framework setup edge
+      shared with neighboring wrappers 0x080076d4, 0x08007788, and
+      0x08007bd4; the ARM port retains the literal veneer and direct host
+      tests install a volatile getter seam to exercise the exact virtual
+      callback ABI.
+
   - address: 0x08007bd4
     ghidra: FUN_08007bd4
     name: callback_target_slot_20_dispatch

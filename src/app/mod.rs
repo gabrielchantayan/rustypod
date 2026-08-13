@@ -3,6 +3,7 @@
 pub mod class_6800;
 pub mod buffer_refill_request;
 pub mod callback_target_dispatch;
+pub mod callback_target_slot_14_dispatch;
 pub mod callback_target_slot_20_dispatch;
 pub mod class_registry;
 pub mod context;
