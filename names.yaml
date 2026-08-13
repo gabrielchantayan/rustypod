@@ -29349,6 +29349,28 @@ functions:
       entry, and both adjacent guard bytes; match.py reviewed after the ARM
       release build.
 
+  # --- selector-controlled word endian transform ---
+  - address: 0x0802bad0
+    ghidra: FUN_0802bad0
+    name: transform_word_endianness
+    size: 40
+    sig: "u32 transform_word_endianness(u32 selector, u32 word)"
+    module: heap/endian_selector
+    status: ported
+    renames:
+      param_1/r0: selector
+      param_2/r1: word
+      uVar1/r0: transformed_word
+    notes: >-
+      40-byte leaf helper (0x0802bad0..0x0802baf8), ten ARM instructions.
+      It returns word unchanged for selector 0, rotates the word right by
+      8 for selector 1, right by 16 for selector 2, and right by 24 for
+      every other selector. The non-identity arms are direct ARM ror
+      instructions, represented by u32 rotations so shifted-out bits wrap
+      exactly. No deviations. Focused host tests cover each selector class
+      and representative patterns including high/low-bit wrap; match.py
+      reviewed after the ARM release build.
+
   # --- H.264 parse-cursor advance with old-position output ---
   - address: 0x0802b924
     ghidra: FUN_0802b924
