@@ -20,6 +20,7 @@ pub mod record_body_size;
 pub mod raster_profile;
 pub mod service_manager_get;
 pub mod state_flags;
+pub mod stream_buffer_configuration;
 pub mod startup_relocation_offset;
 pub mod str_fold_upper;
 pub mod table_find;

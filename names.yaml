@@ -76,6 +76,26 @@ functions:
       global assembly; the host-only shim terminates because that stack
       transfer cannot be represented in a normal host call.
 
+  # --- RAM stream-buffer configuration ---
+  - address: 0x08006b48
+    ghidra: FUN_08006b48
+    name: stream_buffer_configure_words
+    size: 28
+    sig: "u32 stream_buffer_configure_words(StreamBuffer *stream_buffer, u32 word_count)"
+    module: util/stream_buffer_configuration
+    status: ported
+    renames:
+      param_1/r0: stream_buffer
+      param_2/r1: word_count
+      param_1_plus_0x1c: byte_capacity
+      param_1_plus_0x20: free_word_count
+      param_1_plus_0x30: configured_word_count
+    notes: >-
+      Sole recovered caller 0x080073f0 is the RAM stream-buffer constructor:
+      it zeros the object bookkeeping then passes 0x400. Raw ARM stores the
+      word count at +0x30, logical-left-shifts it by two and stores the
+      resulting byte capacity at +0x1c, clears +0x20, and returns zero.
+
   # --- RAM stream-buffer page contexts ---
   - address: 0x080071b0
     ghidra: FUN_080071b0
