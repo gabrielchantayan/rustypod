@@ -29508,3 +29508,31 @@ functions:
       aliasing. No deviations. Focused host tests cover ordinary advancement,
       multiply/add overflow, and valid output aliases; match.py reviewed after
       the ARM release build.
+
+  # --- byte-block checksum continuation forwarder ---
+  - address: 0x0802c03c
+    ghidra: FUN_0802c03c
+    name: forward_byte_block_checksum_reader
+    size: 28
+    sig: "void forward_byte_block_checksum_reader(void)"
+    module: runtime/byte_block_checksum_forwarder
+    status: ported
+    renames:
+      FUN_0802b6a8: byte_block_checksum_reader
+      r0: inherited_parser_mode
+      r1: inherited_input_cursor
+      r2: inherited_output_cursor
+      r7: inherited_parser_context
+    notes: >-
+      28-byte continuation helper (0x0802c03c..0x0802c058), seven ARM
+      instructions. Its caller has already established parser state in
+      r0-r2 (r0 receives the surrounding frame's r7; r1 and r2 name local
+      input/output cursor slots), then this entry calls the unported
+      byte-block copy/checksum reader at 0x0802b6a8. It compares and discards
+      that reader's status, unwinds its 0x34-byte caller frame, and returns.
+      The recovered C entry has no explicit parameters, so this port preserves
+      the no-argument void ABI and the forwarding/return behavior only.
+      Deviation: target builds call 0x0802b6a8 directly; host tests install a
+      recording seam to verify one invocation and return without executing
+      unmapped firmware. The inherited register/frame state remains the
+      caller's responsibility until the surrounding parser is ported.
