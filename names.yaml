@@ -76,6 +76,24 @@ functions:
       global assembly; the host-only shim terminates because that stack
       transfer cannot be represented in a normal host call.
 
+  # --- display command resource selectors ---
+  - address: 0x0800483c
+    ghidra: FUN_0800483c
+    name: display_index_flags
+    size: 40
+    sig: "u32 display_index_flags(u32 first_resource, u32 second_resource)"
+    module: drivers/display_index_flags
+    status: ported
+    renames:
+      param_1/r0: first_resource
+      param_2/r1: second_resource
+      uVar1/r0: flags
+    notes: >-
+      The display-command builders 0x080048fc and 0x08004a20 use the result
+      to choose table lookup versus direct resource words for each selector.
+      Each unsigned selector below the 28-entry table limit contributes
+      independently: first_resource -> 0x1000 and second_resource -> 0x0800.
+
   # --- RAM stream-buffer configuration ---
   - address: 0x08006b48
     ghidra: FUN_08006b48
@@ -170,6 +188,32 @@ functions:
       call their retailOS addresses and direct host tests prove call order,
       arguments, and the fixed zero return.
 
+
+  # --- no-argument callback veneer ---
+  - address: 0x08003790
+    ghidra: FUN_08003790
+    name: dispatch_no_argument_callback
+    size: 16
+    sig: "void dispatch_no_argument_callback(void)"
+    module: kernel/thunks
+    status: ported
+    renames:
+      DAT_08003794: no_argument_callback_dispatch_target
+      FUN_081b0d08: no_argument_callback_tail_entry
+      FUN_080054a8: media_event_completion_handler
+    notes: >-
+      The first 8 bytes are a literal veneer: `ldr pc, [pc, #-4]` with
+      target 0x081b0d08; the following 8 bytes at 0x08003798 are a distinct
+      adjacent veneer and are not part of this port. The sole recovered
+      caller is `bl 0x08003790` at 0x08005524, after passing record+0x28 to
+      the preceding 0x08003720 veneer; it requires only call-and-return
+      behavior. The target is the tail entry after FUN_081b0cf4: it restores
+      that callback's saved registers, branches to 0x081c8658, and writes
+      the preserved callback words into the process-global context. Thus r0
+      through r3 have no defined ABI at this entry and its return value is
+      ignored. The Rust target implementation keeps the exact `ldr pc`
+      veneer; the host seam calls an injected `unsafe extern "C" fn()`,
+      whose direct test proves a single call and ordinary return.
   # --- event callback dispatch ---
   - address: 0x08005094
     ghidra: FUN_08005094
