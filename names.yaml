@@ -10305,6 +10305,31 @@ functions:
       the only handle the firmware gives it and the symbol says so
       rather than inventing a name.
 
+  - address: 0x0802ad10
+    ghidra: FUN_0802ad10
+    name: operation_dispatch
+    size: 40
+    sig: "i32 operation_dispatch(u32 first, u32 second, u32 third, u32 operation, u32 fifth, u32 sixth)"
+    module: util/operation_dispatch
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: second
+      param_3/r2: third
+      param_4/r3: operation
+      param_5/stack: fifth
+      param_6/stack: sixth
+      FUN_0802ac90: operation_dispatch_core
+    notes: >-
+      A pure 40-byte six-word ABI wrapper. Raw ARM saves r2/r3/r4/lr,
+      reloads its fifth and sixth arguments from the incoming stack at
+      sp+16/sp+20, places them at the outgoing stack positions, and calls
+      0x0802ac90 with all six words unchanged; it returns that core's i32
+      status in r0. The core validates operation +0xfc, validates first/sixth,
+      and on success dispatches an eight-word request. This port uses the
+      target ROM address directly and a replaceable host callback seam; its
+      focused host test records each forwarded word and return status.
+
   - address: 0x0802b654
     ghidra: FUN_0802b654
     name: checked_word_block_convert

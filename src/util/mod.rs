@@ -17,6 +17,7 @@ pub mod le_read;
 pub mod list_find;
 pub mod ptr_vector;
 pub mod pascal_string;
+pub mod operation_dispatch;
 pub mod record_body_size;
 pub mod record_fields_configure;
 pub mod raster_profile;
