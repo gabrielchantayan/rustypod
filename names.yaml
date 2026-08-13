@@ -690,6 +690,23 @@ functions:
       loads the original literal-pool addresses; host builds use a
       deterministic replaceable literal seam because firmware ROM is unmapped.
 
+  - address: 0x080088d8
+    ghidra: FUN_080088d8
+    name: startup_relocation_offset
+    size: 16
+    sig: "u32 startup_relocation_offset(void)"
+    module: util/startup_relocation_offset
+    status: ported
+    vars: {r0: linked_routine_address_then_relocation_offset,
+      r1: relocated_routine_address, DAT_080088f0: relocated_routine_address_literal}
+    notes: >-
+      Position-independent startup relocation helper. `sub r0, pc, #8`
+      materializes the linked entry address 0x080088d8; subtracting it from
+      the decoded literal-pool word 0x220088d8 returns the fixed IRAM offset
+      0x1a000000 in r0. The port represents those two image addresses as
+      explicit u32 constants because its Rust code is linked independently;
+      this preserves the helper's returned firmware offset.
+
   - address: 0x080004ec
     ghidra: FUN_080004ec
     name: startup_wait_for_status_clear
