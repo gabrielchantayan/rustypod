@@ -13,6 +13,7 @@ pub mod mutex;
 pub mod mutex_attr_init;
 pub mod mutex_settype_init;
 pub mod observable_array;
+pub mod mode;
 pub mod object_flags;
 pub mod pair_header;
 pub mod release;

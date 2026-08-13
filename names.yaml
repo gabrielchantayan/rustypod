@@ -334,6 +334,21 @@ functions:
       no NULL checks are present. Its only direct caller invokes it after
       processing a decoder batch and before the paired decoder teardown.
 
+  - address: 0x08005e88
+    ghidra: FUN_08005e88
+    name: media_operation_status_set
+    size: 12
+    sig: "void media_operation_status_set(u8 status)"
+    module: cxx/mode
+    status: ported
+    vars: {param_1: status, DAT_08005e94: media_operation_status}
+    notes: Stores status as one byte to the media-operation status global at
+      0x22008ca0 (the literal pool word at 0x08005e94). The media operation
+      completion path sets status 5 after a callback reports completion; the
+      media metadata-load failure path sets status 3 before error notification.
+      The port preserves the unconditional, non-atomic byte store and uses a
+      private host byte stand-in.
+
   - address: 0x08005e04
     ghidra: FUN_08005e04
     name: decoder_begin_batch
