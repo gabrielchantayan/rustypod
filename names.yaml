@@ -76,6 +76,32 @@ functions:
       global assembly; the host-only shim terminates because that stack
       transfer cannot be represented in a normal host call.
 
+  # --- RAM stream-buffer page contexts ---
+  - address: 0x080071b0
+    ghidra: FUN_080071b0
+    name: stream_buffer_set_page_contexts
+    size: 32
+    sig: "void stream_buffer_set_page_contexts(StreamBuffer *stream_buffer, u32 page_context)"
+    module: kernel/stream_buffer_page_contexts
+    status: ported
+    renames:
+      param_1/r0: stream_buffer
+      param_2/r1: page_context
+      param_1_plus_0x34: page_contexts
+      param_1_plus_0x13c: fallback_page_context
+      iVar2/r2: page_index
+    notes: >-
+      The RAM stream buffer is initialized by 0x080072cc/0x080073b0 and
+      uses 32 4-KiB pages in its 0x20000-byte circular allocation. This
+      leaf stores the supplied page context in every per-page word
+      (+0x34..+0xb0) and the active-event-loop fallback context at +0x13c.
+      0x0800722c reads the fallback when its callback is active; otherwise
+      it selects a per-page word from the producer position. Raw ARM is one
+      +0x13c store followed by a count-up loop of 32 +0x34+i*4 stores.
+      The port uses volatile stores to prevent a freestanding ARM libc fill
+      call while retaining those exact writes. Host tests prove all 33 words
+      receive the context and every byte outside those fields remains intact.
+
   # --- event callback dispatch ---
   - address: 0x08005094
     ghidra: FUN_08005094
