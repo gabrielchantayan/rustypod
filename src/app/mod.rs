@@ -38,6 +38,7 @@ pub mod string_owner;
 pub mod string_resolve;
 pub mod stream_context_reset_notify;
 pub mod string_owner_init;
+pub mod triple_scaled_cursor_advance;
 pub mod template_binding;
 pub mod vtable_set;
 pub mod view_event;

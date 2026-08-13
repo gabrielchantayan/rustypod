@@ -29436,3 +29436,31 @@ functions:
       cover normal advancement, multiply/shift/add overflow, and every
       meaningful output-alias combination; match.py reviewed after the ARM
       release build.
+
+  # --- Application triple-scaled cursor advance with range-start output ---
+  - address: 0x0802b998
+    ghidra: FUN_0802b998
+    name: advance_triple_scaled_cursor_with_start
+    size: 40
+    sig: "void advance_triple_scaled_cursor_with_start(u32 *cursor, u32 *cursor_mirror, u32 *range_start, u32 factor_1, u32 factor_2, u32 factor_3)"
+    module: app/triple_scaled_cursor_advance
+    status: ported
+    renames:
+      param_1/r0: cursor
+      param_2/r1: cursor_mirror
+      param_3/r2: range_start
+      param_4/r3: factor_1
+      param_5/[sp,#4]: factor_2
+      param_6/[sp,#8]: factor_3
+      iVar2/r12: old_cursor
+      iVar1/r3: advanced_cursor
+    notes: >-
+      40-byte application parser-layout leaf helper
+      (0x0802b998..0x0802b9c0), ten ARM instructions. It reads cursor,
+      computes old_cursor + factor_3 * factor_2 * factor_1 with ARM's wrapping
+      32-bit multiply and multiply-accumulate arithmetic, writes the advanced
+      cursor to cursor then cursor_mirror, and finally writes old_cursor to
+      range_start. Ordered raw-pointer stores preserve observable output
+      aliasing. No deviations. Focused host tests cover ordinary advancement,
+      multiply/add overflow, and valid output aliases; match.py reviewed after
+      the ARM release build.
