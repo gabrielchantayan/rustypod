@@ -29358,6 +29358,30 @@ functions:
       coverage records every cursor alias, both stack-carried dimensions, and
       the returned failure status.
 
+  # --- FreeType conditional optional-offset adjustment ---
+  - address: 0x0802de50
+    ghidra: FUN_0802de50
+    name: ft_adjust_offset_if_nonzero
+    size: 40
+    sig: "u32 ft_adjust_offset_if_nonzero(u32 bias_selector, u32 offset, u32 *adjusted_offset)"
+    module: ft/conditional_offset
+    status: ported
+    renames:
+      param_1/r0: bias_selector
+      param_2/r1: offset
+      param_3/r2: adjusted_offset
+      uVar1/r0: adjusted_value
+    notes: >-
+      40-byte FreeType-area leaf helper (0x0802de50..0x0802de78), ten ARM
+      instructions. A zero offset takes the early return, yielding 0 without
+      reading or writing adjusted_offset. Otherwise the selector chooses the
+      fixed adjustment: zero adds 4, nonzero adds 0x1004 (spelled as two ADDs
+      on the latter ARM path); the wrapping u32 result is stored through
+      adjusted_offset and the function returns 1. No deviations. Focused host
+      tests cover both selector arms, wrapping addition, and the zero-offset
+      no-write path including a null output pointer; match.py reviewed after
+      the ARM release build.
+
   # --- sixteen-slot byte identity-table initialization ---
   - address: 0x0802dda8
     ghidra: FUN_0802dda8
