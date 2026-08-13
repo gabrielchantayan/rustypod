@@ -20,6 +20,7 @@ pub mod object_flags;
 pub mod pair_header;
 pub mod release;
 pub mod settings;
+pub mod scaled_cursor;
 pub mod string;
 pub mod string_map;
 pub mod string_object;
