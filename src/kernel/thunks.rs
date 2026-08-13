@@ -131,6 +131,95 @@ kernel_indirect_dispatch:
     .size kernel_indirect_dispatch, . - kernel_indirect_dispatch
 "#
 );
+/// Instruction word and literal in the fixed event-callback target veneer
+/// at 0x08003708.
+pub const EVENT_CALLBACK_DISPATCH_INSN: u32 = 0xe51f_f004;
+pub const EVENT_CALLBACK_DISPATCH_TARGET: u32 = 0x0815_c8a0;
+
+/// ABI of the virtual callback dispatch reached by
+/// [`dispatch_event_callback`].  The callback context is the eight-byte
+/// subobject at the supplied system-context base.
+pub type EventCallbackDispatchFn = unsafe extern "C" fn(callback_context: *mut u8);
+
+/// Host/target dispatch boundary for the unported virtual callback target.
+#[derive(Clone, Copy)]
+pub struct EventCallbackDispatchOps {
+    pub dispatch: EventCallbackDispatchFn,
+}
+
+
+#[cfg(not(target_arch = "arm"))]
+unsafe extern "C" fn missing_event_callback_dispatch(_callback_context: *mut u8) {}
+
+#[cfg(not(target_arch = "arm"))]
+const DEFAULT_EVENT_CALLBACK_DISPATCH_OPS: EventCallbackDispatchOps = EventCallbackDispatchOps {
+    dispatch: missing_event_callback_dispatch,
+};
+
+/// The host dispatch boundary for the unported virtual callback target.
+#[cfg(not(target_arch = "arm"))]
+pub static mut EVENT_CALLBACK_DISPATCH_OPS: EventCallbackDispatchOps =
+    DEFAULT_EVENT_CALLBACK_DISPATCH_OPS;
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(always)]
+fn event_callback_dispatch() -> EventCallbackDispatchFn {
+    unsafe {
+        core::ptr::read_volatile(core::ptr::addr_of!(EVENT_CALLBACK_DISPATCH_OPS.dispatch))
+    }
+}
+
+#[cfg(target_arch = "arm")]
+extern "C" {
+    /// dispatch_event_callback — original: `FUN_08005094` @ 0x08005094
+    /// (12 bytes).
+    ///
+    /// Adds eight bytes to the system event context, selecting its callback
+    /// subobject, then tail-dispatches it through the 0x08003708 literal
+    /// veneer to 0x0815c8a0. That target invokes the subobject's virtual
+    /// callback; r0 is the sole argument and the wrapper has no result. The
+    /// ARM port is the original `add; b` sequence.
+    ///
+    /// # Safety
+    ///
+    /// `system_context` must point to the base of the retailOS context
+    /// object; its callback subobject begins at offset eight, and the target
+    /// owns that object's validity requirements.
+    pub fn dispatch_event_callback(system_context: *mut u8);
+}
+
+/// Host implementation of the same callback-context selection, with the
+/// unported tail target supplied by [`EVENT_CALLBACK_DISPATCH_OPS`].
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn dispatch_event_callback(system_context: *mut u8) {
+    event_callback_dispatch()(system_context.add(8));
+}
+
+// The retailOS wrapper and its literal veneer are kept as one assembly
+// fragment: `add; b` preserves the original tail-dispatch ABI exactly.
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl dispatch_event_callback
+    .type dispatch_event_callback, %function
+dispatch_event_callback:
+    add     r0, r0, #8
+    b       retail_event_callback_dispatch
+    .size dispatch_event_callback, . - dispatch_event_callback
+
+    .p2align 2
+    .type retail_event_callback_dispatch, %function
+retail_event_callback_dispatch:
+    ldr     pc, [pc, #-4]
+    .word   0x0815c8a0
+    .size retail_event_callback_dispatch, . - retail_event_callback_dispatch
+"#
+);
 
 /// One thunk-table entry: the osos-side stub and its ROM target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -478,6 +567,49 @@ mod tests {
         assert_eq!(KERNEL_INDIRECT_DISPATCH_INSN, 0xe51f_f004);
         assert_eq!(KERNEL_INDIRECT_DISPATCH_TARGET, 0x0815_ca7c);
         assert_eq!(KERNEL_INDIRECT_DISPATCH_TARGET & 3, 0);
+    }
+
+    static OPS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static mut CALLBACK_COUNT: u32 = 0;
+    static mut CALLBACK_CONTEXT: *mut u8 = core::ptr::null_mut();
+
+    unsafe extern "C" fn record_event_callback(callback_context: *mut u8) {
+        CALLBACK_COUNT += 1;
+        CALLBACK_CONTEXT = callback_context;
+    }
+
+    #[test]
+    fn dispatch_event_callback_selects_offset_eight_and_calls_once() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            core::ptr::addr_of_mut!(CALLBACK_COUNT).write(0);
+            core::ptr::addr_of_mut!(CALLBACK_CONTEXT).write(core::ptr::null_mut());
+            core::ptr::addr_of_mut!(EVENT_CALLBACK_DISPATCH_OPS).write(
+                EventCallbackDispatchOps {
+                    dispatch: record_event_callback,
+                },
+            );
+        }
+
+        let mut system_context = [0u8; 16];
+        unsafe {
+            dispatch_event_callback(system_context.as_mut_ptr());
+            assert_eq!(core::ptr::addr_of!(CALLBACK_COUNT).read(), 1);
+            assert_eq!(
+                core::ptr::addr_of!(CALLBACK_CONTEXT).read(),
+                system_context.as_mut_ptr().add(8),
+            );
+            core::ptr::addr_of_mut!(EVENT_CALLBACK_DISPATCH_OPS)
+                .write(DEFAULT_EVENT_CALLBACK_DISPATCH_OPS);
+        }
+        drop(guard);
+    }
+
+    #[test]
+    fn event_callback_dispatch_matches_the_literal_veneer() {
+        assert_eq!(EVENT_CALLBACK_DISPATCH_INSN, 0xe51f_f004);
+        assert_eq!(EVENT_CALLBACK_DISPATCH_TARGET, 0x0815_c8a0);
+        assert_eq!(EVENT_CALLBACK_DISPATCH_TARGET & 3, 0);
     }
 
 }

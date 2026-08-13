@@ -76,6 +76,26 @@ functions:
       global assembly; the host-only shim terminates because that stack
       transfer cannot be represented in a normal host call.
 
+  # --- event callback dispatch ---
+  - address: 0x08005094
+    ghidra: FUN_08005094
+    name: dispatch_event_callback
+    size: 12
+    sig: "void dispatch_event_callback(SystemEventContext *system_context)"
+    module: kernel/thunks
+    status: ported
+    renames:
+      param_1/r0: system_context
+      param_1_plus_8: callback_context
+      DAT_0800370c: event_callback_dispatch_target
+    notes: >-
+      Raw ARM is `add r0, r0, #8; b 0x08003708`; the 0x08003708 literal
+      veneer is `ldr pc, [pc, #-4]` with target 0x0815c8a0. This tail
+      dispatch forwards the eight-byte callback subobject as the sole r0
+      argument to the unported virtual callback dispatcher and returns void.
+      The Rust port preserves the ABI through the target/host operation seam;
+      its ARM default is the same literal veneer target.
+
   # --- first event-handler dispatch ---
   - address: 0x080076cc
     ghidra: FUN_080076cc
@@ -328,6 +348,7 @@ functions:
       activation, invokes this before processing, then invokes decoder_end_batch
       at +0x3c. No NULL checks are present; despite Ghidra's void signature,
       the tail branch preserves the virtual method's r0 return value.
+
 
   - address: 0x08005ef0
     ghidra: FUN_08005ef0
