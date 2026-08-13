@@ -27,3 +27,4 @@
 //! It is ported in [`dec_ref_pic_marking`].
 pub mod bitstream;
 pub mod dec_ref_pic_marking;
+pub mod stream_buffer_reset;

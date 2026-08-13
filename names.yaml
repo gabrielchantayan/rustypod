@@ -122,6 +122,28 @@ functions:
       call while retaining those exact writes. Host tests prove all 33 words
       receive the context and every byte outside those fields remains intact.
 
+  # --- RAM stream-buffer producer-page reset ---
+  - address: 0x08007284
+    ghidra: FUN_08007284
+    name: stream_buffer_reset_producer_page_count
+    size: 16
+    sig: "u32 stream_buffer_reset_producer_page_count(StreamBuffer *stream_buffer)"
+    module: h264/stream_buffer_reset
+    status: ported
+    renames:
+      param_1/r0: stream_buffer
+      param_1_plus_0x28: producer_page_count
+      r1: zero
+      r0: success
+    notes: >-
+      One recovered call site is the successful media-startup path at
+      0x080056d0: after initializing the RAM stream buffer through
+      0x08006e88, it calls this leaf with the returned object in r0.
+      The stream-buffer constructor 0x080073f0 initializes +0x28, and the
+      producer path 0x08006b64 increments it when it reaches an exhausted
+      page. Raw ARM is `mov r1,#0; str r1,[r0,#0x28]; mov r0,#0; bx lr`:
+      exactly one word store, then the literal zero success return.
+
   # --- UI startup event-one sequence ---
   - address: 0x080056b0
     ghidra: FUN_080056b0
