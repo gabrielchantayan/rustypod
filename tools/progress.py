@@ -30,10 +30,11 @@ def badge_color(pct):
 def load_functions(path):
     """Parse names.yaml, failing with an actionable message on invalid YAML.
 
-    The usual culprit is a `notes:` written as a plain scalar containing an
-    unquoted ` #` (ARM immediates like `mov r0, #0`), which YAML reads as a
-    comment. Use a `>-` folded block scalar—as every other note does—so the
-    `#` stays literal text.
+    The usual culprit is a `notes:` written as a plain scalar carrying ARM
+    assembly: an unquoted ` #` (immediates like `mov r0, #0`) reads as a
+    comment, and a trailing `:` (e.g. `match.py structural:`) reads as a
+    mapping key. Write free-text notes as a `>-` folded block scalar—as every
+    other note does—so `#` and `:` stay literal text.
     """
     with open(path) as f:
         try:
@@ -42,9 +43,9 @@ def load_functions(path):
             mark = getattr(e, "problem_mark", None)
             where = f" near {path}:{mark.line + 1}" if mark else ""
             raise SystemExit(
-                f"names.yaml is not valid YAML{where}. A ` #` in an unquoted "
-                "notes value is read as a comment—use a `>-` block scalar. "
-                f"Original error: {e}"
+                f"names.yaml is not valid YAML{where}. A note written as a "
+                "plain scalar breaks on an unquoted ` #` or `:`—write it as a "
+                f"`>-` folded block scalar. Original error: {e}"
             )
 
 

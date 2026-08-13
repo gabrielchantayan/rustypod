@@ -836,7 +836,8 @@ functions:
     module: stdio/decoder_initialize
     status: ported
     vars: {param_1: decoder_slot}
-    notes: Media decoder initialization lifecycle wrapper. Dereferences
+    notes: >-
+      Media decoder initialization lifecycle wrapper. Dereferences
       decoder_slot to its object, loads that object's vtable, and tail-dispatches
       slot +0x08 with the object preserved in r0. The recovered callers invoke
       it only when a decoder-owner initialization byte at +0x06 is clear, then

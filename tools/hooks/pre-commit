@@ -19,6 +19,20 @@ export PATH="$HOME/.cargo/bin:$PATH"
 root=$(git rev-parse --show-toplevel)
 cd "$root" || exit 1
 
+# names.yaml must parse. A `notes:` written as a plain scalar silently breaks
+# on an unquoted ` #` or `:` (ARM asm), which only ever surfaced as a red badge
+# job on master. Gate it here, where commits happen. progress.py owns the
+# diagnostic message; we just run it and forward a failure.
+if command -v python3 >/dev/null 2>&1; then
+  if ! yaml_err=$(python3 tools/progress.py 2>&1 >/dev/null); then
+    printf '\n\033[31mpre-commit: REFUSED — names.yaml is not valid YAML.\033[0m\n' >&2
+    printf '%s\n' "$yaml_err" >&2
+    exit 1
+  fi
+else
+  printf 'pre-commit: python3 not found; skipping names.yaml validation\n' >&2
+fi
+
 # Resolve the host triple from inside the crate: rust-toolchain.toml pins
 # nightly here, and the porting VM has no default toolchain outside a project.
 host=$(rustc -vV | awk '/^host:/ {print $2}')
