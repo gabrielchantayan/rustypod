@@ -25,4 +25,5 @@ pub mod shutdown_chain;
 pub mod startup_wait;
 pub mod timer_constants;
 pub mod state_transition;
+pub mod state_finalize;
 pub mod state_wait;
