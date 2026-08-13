@@ -23,6 +23,7 @@ pub type TerminalStateCallback = unsafe fn(state: u8) -> !;
 
 /// Host-test callback ABI. The target callback is terminal; returning test
 /// recorders let host tests inspect the completed dispatch safely.
+#[cfg(test)]
 pub type TerminalStateCallback = unsafe fn(state: u8);
 
 /// Runtime integration seam for the terminal state callback.
