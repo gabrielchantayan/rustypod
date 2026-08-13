@@ -221,6 +221,89 @@ retail_event_callback_dispatch:
 "#
 );
 
+/// Instruction word and literal in the no-argument callback veneer at
+/// 0x08003790.
+pub const NO_ARGUMENT_CALLBACK_DISPATCH_INSN: u32 = 0xe51f_f004;
+pub const NO_ARGUMENT_CALLBACK_DISPATCH_TARGET: u32 = 0x081b_0d08;
+
+/// ABI of the callback reached by [`dispatch_no_argument_callback`].
+///
+/// The literal is an internal tail entry following `FUN_081b0cf4`, and it
+/// accepts no defined C arguments: it recovers its work from the surrounding
+/// ARM continuation before returning to this veneer’s caller.
+pub type NoArgumentCallbackDispatchFn = unsafe extern "C" fn();
+
+/// Host/target dispatch boundary for the unported no-argument callback.
+#[derive(Clone, Copy)]
+pub struct NoArgumentCallbackDispatchOps {
+    pub dispatch: NoArgumentCallbackDispatchFn,
+}
+
+#[cfg(not(target_arch = "arm"))]
+unsafe extern "C" fn missing_no_argument_callback_dispatch() {}
+
+#[cfg(not(target_arch = "arm"))]
+const DEFAULT_NO_ARGUMENT_CALLBACK_DISPATCH_OPS: NoArgumentCallbackDispatchOps =
+    NoArgumentCallbackDispatchOps {
+        dispatch: missing_no_argument_callback_dispatch,
+    };
+
+/// The host dispatch boundary for the unported callback target.
+#[cfg(not(target_arch = "arm"))]
+pub static mut NO_ARGUMENT_CALLBACK_DISPATCH_OPS: NoArgumentCallbackDispatchOps =
+    DEFAULT_NO_ARGUMENT_CALLBACK_DISPATCH_OPS;
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(always)]
+fn no_argument_callback_dispatch() -> NoArgumentCallbackDispatchFn {
+    unsafe {
+        core::ptr::read_volatile(
+            core::ptr::addr_of!(NO_ARGUMENT_CALLBACK_DISPATCH_OPS.dispatch),
+        )
+    }
+}
+
+#[cfg(target_arch = "arm")]
+extern "C" {
+    /// dispatch_no_argument_callback — original: `FUN_08003790` @
+    /// 0x08003790 (16 bytes: two adjacent literal veneers; this port owns
+    /// the first 8-byte veneer).
+    ///
+    /// Loads PC from the literal at 0x08003794, tail-dispatching to
+    /// 0x081b0d08. There are no defined input or output arguments: its one
+    /// recovered `bl` caller at 0x08005524 treats the callback solely as a
+    /// call-and-return notification.
+    ///
+    /// Deviation: none on ARM; this is the original instruction and literal.
+    pub fn dispatch_no_argument_callback();
+}
+
+/// Host implementation of the no-argument callback dispatch.
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn dispatch_no_argument_callback() {
+    no_argument_callback_dispatch()();
+}
+
+// `ldr pc` preserves LR, so the literal target returns directly to this
+// veneer’s caller. Keep the fixed target in assembly rather than materializing
+// it as a Rust function pointer on target.
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl dispatch_no_argument_callback
+    .type dispatch_no_argument_callback, %function
+dispatch_no_argument_callback:
+    ldr     pc, [pc, #-4]
+    .word   0x081b0d08
+    .size dispatch_no_argument_callback, . - dispatch_no_argument_callback
+"#
+);
+
 /// One thunk-table entry: the osos-side stub and its ROM target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RomThunk {
@@ -520,6 +603,7 @@ mod tests {
     #[test]
     fn aliased_thunk_addresses() {
         let memcpy_thunks: Vec<u32> = ROM_THUNKS
+
             .iter()
             .filter(|e| e.rom_target == 0x22000020)
             .map(|e| e.thunk_addr)
@@ -610,6 +694,37 @@ mod tests {
         assert_eq!(EVENT_CALLBACK_DISPATCH_INSN, 0xe51f_f004);
         assert_eq!(EVENT_CALLBACK_DISPATCH_TARGET, 0x0815_c8a0);
         assert_eq!(EVENT_CALLBACK_DISPATCH_TARGET & 3, 0);
+    }
+
+    static mut NO_ARGUMENT_CALLBACK_COUNT: u32 = 0;
+
+    unsafe extern "C" fn record_no_argument_callback() {
+        NO_ARGUMENT_CALLBACK_COUNT += 1;
+    }
+
+    #[test]
+    fn dispatch_no_argument_callback_calls_once_and_returns() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            core::ptr::addr_of_mut!(NO_ARGUMENT_CALLBACK_COUNT).write(0);
+            core::ptr::addr_of_mut!(NO_ARGUMENT_CALLBACK_DISPATCH_OPS).write(
+                NoArgumentCallbackDispatchOps {
+                    dispatch: record_no_argument_callback,
+                },
+            );
+            dispatch_no_argument_callback();
+            assert_eq!(core::ptr::addr_of!(NO_ARGUMENT_CALLBACK_COUNT).read(), 1);
+            core::ptr::addr_of_mut!(NO_ARGUMENT_CALLBACK_DISPATCH_OPS)
+                .write(DEFAULT_NO_ARGUMENT_CALLBACK_DISPATCH_OPS);
+        }
+        drop(guard);
+    }
+
+    #[test]
+    fn no_argument_callback_dispatch_matches_the_literal_veneer() {
+        assert_eq!(NO_ARGUMENT_CALLBACK_DISPATCH_INSN, 0xe51f_f004);
+        assert_eq!(NO_ARGUMENT_CALLBACK_DISPATCH_TARGET, 0x081b_0d08);
+        assert_eq!(NO_ARGUMENT_CALLBACK_DISPATCH_TARGET & 3, 0);
     }
 
 }
