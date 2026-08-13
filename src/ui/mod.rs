@@ -5,6 +5,7 @@ pub mod byte_store;
 pub mod color;
 pub mod flag_2c;
 pub mod startup_sequence;
+pub mod table_slot_allocate;
 pub mod render_context;
 pub mod rect;
 pub mod noop_f7f4;

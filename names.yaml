@@ -162,6 +162,30 @@ functions:
       page. Raw ARM is `mov r1,#0; str r1,[r0,#0x28]; mov r0,#0; bx lr`:
       exactly one word store, then the literal zero success return.
 
+  # --- UI allocation-table slot creation ---
+  - address: 0x08004c78
+    ghidra: FUN_08004c78
+    name: ui_allocate_table_slot
+    size: 40
+    sig: "u32 ui_allocate_table_slot(i32 row, i32 entry)"
+    module: ui/table_slot_allocate
+    status: ported
+    renames:
+      param_1/r0: row
+      param_2/r1: entry
+      thunk_FUN_0804b8b0: allocate_ui_table_entry
+      DAT_08004ca0: ui_allocation_table_base
+      uVar1/r0: allocated_word
+    notes: >-
+      Calls the no-argument veneer at 0x080036c0 (literal target
+      0x0804b8b0), stores its returned word at
+      0x2200ae7c + row*0x20 + entry*4 - 0x20, then returns 0. The sole
+      recovered caller 0x080083c4 passes the selected UI mode as row and a
+      signed entry byte as entry before setting the matching row's control
+      word. The unported allocator remains behind a target/host callback
+      seam; direct host tests prove its return is stored at the exact index
+      and that this wrapper returns zero.
+
   # --- UI startup event-one sequence ---
   - address: 0x080056b0
     ghidra: FUN_080056b0
