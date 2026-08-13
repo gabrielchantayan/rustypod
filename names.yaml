@@ -29169,6 +29169,45 @@ functions:
       drain to NULL) - every test also proves no write lands past
       the +0x08 anchor back-pointer via per-node sentinel words.
 
+  # --- C++ null-pointer status ---
+  - address: 0x08027940
+    ghidra: FUN_08027940
+    name: cxx_null_pointer_status
+    size: 16
+    sig: "u32 cxx_null_pointer_status(const void *pointer)"
+    module: cxx/null_pointer_status
+    status: ported
+    renames:
+      param_1/r0: pointer
+      uVar1/r0: status
+    notes: >-
+      Leaf null-status helper. The raw ARM only compares r0 to zero, returning
+      4 for null and 0 otherwise, without dereferencing the pointer. Seven
+      recovered callers in decoder-related switch cases feed this result into
+      status-derived byte arithmetic; the pointer's pointee type therefore
+      remains intentionally opaque. Host tests cover both pointer states;
+      match.py diff reviewed after the ARM release build.
+
+  # --- H.264 aligned-buffer status ---
+  - address: 0x080276c8
+    ghidra: FUN_080276c8
+    name: h264_aligned_buffer_status
+    size: 40
+    sig: "u32 h264_aligned_buffer_status(const u8 *buffer, i32 aligned_value)"
+    module: h264/aligned_buffer_status
+    status: ported
+    renames:
+      param_1/r0: buffer
+      param_2/r1: aligned_value
+      r0: status
+    notes: >-
+      Leaf validation helper with no direct recovered bl caller in the
+      indexed code graph. Raw ARM returns 2 immediately for a null buffer.
+      Otherwise it evaluates r1 as signed (`cmp r1,#0; ble`), returning 0
+      only for a positive multiple of 16 (`tst r1,#15`), and 3 for zero,
+      negative, or unaligned values. Host tests cover each status boundary;
+      match.py diff reviewed after the ARM release build.
+
   # --- stream-buffer refill request ---
   - address: 0x08004484
     ghidra: FUN_08004484
