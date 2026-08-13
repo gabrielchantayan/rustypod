@@ -26,6 +26,7 @@ pub mod state_flags;
 pub mod stream_buffer_configuration;
 pub mod startup_relocation_offset;
 pub mod str_fold_upper;
+pub mod strided_cursor_advance;
 pub mod table_find;
 pub mod three_pointer_select;
 pub mod u16_pair_copy;

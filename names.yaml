@@ -29379,3 +29379,31 @@ functions:
       aliasing. No deviations. Focused host tests cover normal reservation,
       shift/add overflow, and output aliasing; match.py reviewed after the ARM
       release build.
+
+  # --- strided parser cursor advance with range-start output ---
+  - address: 0x0802b954
+    ghidra: FUN_0802b954
+    name: advance_strided_cursor_with_start
+    size: 32
+    sig: "void advance_strided_cursor_with_start(u32 *cursor, u32 *cursor_mirror, u32 *range_start, u32 stride, u32 count)"
+    module: util/strided_cursor_advance
+    status: ported
+    renames:
+      param_1/r0: cursor
+      param_2/r1: cursor_mirror
+      param_3/r2: range_start
+      param_4/r3: stride
+      param_5/[sp,#4]: count
+      iVar2/r12: old_cursor
+      iVar1/r3: advanced_cursor
+    notes: >-
+      32-byte parser-layout leaf helper (0x0802b954..0x0802b974), eight ARM
+      instructions. The compound parser builders at 0x08028548, 0x080286c0,
+      0x08028838, and 0x08028b08 use it to reserve count entries of stride
+      bytes: it reads cursor, computes cursor + count * stride with ARM's
+      wrapping multiply-accumulate arithmetic, writes the advanced cursor to
+      cursor then cursor_mirror, and finally writes the pre-advance cursor to
+      range_start. Ordered raw-pointer stores preserve observable output
+      aliasing. No deviations. Focused host tests cover normal reservation,
+      multiply/add overflow, and all meaningful output alias combinations;
+      match.py reviewed after the ARM release build.
