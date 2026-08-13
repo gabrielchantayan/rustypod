@@ -29327,6 +29327,28 @@ functions:
       direct host test proves every passed offset and the complete call order;
       match.py diff reviewed after the ARM release build.
 
+  # --- byte identity-table slot initialization ---
+  - address: 0x0802b9ec
+    ghidra: FUN_0802b9ec
+    name: initialize_byte_identity_slot
+    size: 24
+    sig: "void initialize_byte_identity_slot(u8 *slot)"
+    module: drivers/byte_identity_slot_init
+    status: ported
+    renames:
+      param_1/r0: slot
+      iVar1/r1: byte_index
+    notes: >-
+      24-byte leaf helper (0x0802b9ec..0x0802ba04), six ARM instructions.
+      It initializes exactly one 0x100-byte identity table, writing byte i at
+      slot + i for i from 0 through 255, inclusive. The eight-slot driver
+      helpers at 0x08028460 and 0x08028490 are its recovered callers. Rust
+      preserves the r0 pointer ABI and void return; volatile byte stores
+      prevent LLVM from replacing the fixed-width loop with an unavailable
+      libc helper. Focused host coverage verifies the endpoints, every mapping
+      entry, and both adjacent guard bytes; match.py reviewed after the ARM
+      release build.
+
   # --- H.264 parse-cursor advance with old-position output ---
   - address: 0x0802b924
     ghidra: FUN_0802b924
