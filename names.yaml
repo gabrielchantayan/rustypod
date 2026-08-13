@@ -364,6 +364,21 @@ functions:
       at +0x3c. No NULL checks are present; despite Ghidra's void signature,
       the tail branch preserves the virtual method's r0 return value.
 
+  - address: 0x08005e98
+    ghidra: FUN_08005e98
+    name: decoder_complete_event
+    size: 16
+    sig: "uintptr_t decoder_complete_event(void **decoder_slot)"
+    module: cxx/vtable
+    status: ported
+    vars: {param_1: decoder_slot}
+    notes: Media decoder event-completion lifecycle wrapper. Dereferences
+      decoder_slot to its object, loads that object's vtable, and tail-dispatches
+      slot +0x38 with the object preserved in r0. Its only recovered caller
+      invokes it after the +0x20 pending-event dispatch returns zero and after
+      scheduler event work. No NULL checks are present; despite Ghidra's void
+      signature, the tail branch preserves the virtual method's r0 return value.
+
 
   - address: 0x08005ef0
     ghidra: FUN_08005ef0
