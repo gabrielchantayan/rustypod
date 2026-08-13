@@ -11,6 +11,7 @@ pub mod cursor;
 pub mod drive;
 pub mod fixed;
 pub mod inner_state;
+pub mod i2s_transfer_slot;
 pub mod is_tagged_c0;
 pub mod le_read;
 pub mod list_find;

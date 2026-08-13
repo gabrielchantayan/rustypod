@@ -94,6 +94,28 @@ functions:
       Each unsigned selector below the 28-entry table limit contributes
       independently: first_resource -> 0x1000 and second_resource -> 0x0800.
 
+  # --- I2S transfer-slot teardown ---
+  - address: 0x08004c4c
+    ghidra: FUN_08004c4c
+    name: i2s_transfer_slot_cleanup
+    size: 40
+    sig: "void i2s_transfer_slot_cleanup(i32 controller, i32 channel)"
+    module: util/i2s_transfer_slot
+    status: ported
+    renames:
+      param_1/r0: controller
+      param_2/r1: channel
+      DAT_08004c74: i2s_transfer_slot_table_base
+      iVar1: transfer_handle_cell
+      thunk_FUN_0804b614: i2s_transfer_cleanup
+    notes: >-
+      The I2S transfer setup path 0x080083c4 stores a handle through companion
+      setter 0x08004c78; sole recovered teardown caller 0x080085fc invokes
+      this helper before it clears the channel active flag. The literal base is
+      0x2200ae7c and the cell is base + controller*0x20 + channel*4 - 0x20.
+      Raw ARM loads the cell, calls 0x0804b614 only when nonzero (preserving
+      cell value in r0 and channel in r1), and always clears it.
+
   # --- RAM stream-buffer configuration ---
   - address: 0x08006b48
     ghidra: FUN_08006b48
@@ -994,6 +1016,27 @@ functions:
       returns I2S2, and every other selector returns I2S0. Target volatile-
       loads the original literal-pool addresses; host builds use a
       deterministic replaceable literal seam because firmware ROM is unmapped.
+
+  - address: 0x08004ccc
+    ghidra: FUN_08004ccc
+    name: stream_context_reset_and_notify
+    size: 40
+    sig: "void stream_context_reset_and_notify(StreamContext *stream_context)"
+    module: app/stream_context_reset_notify
+    status: ported
+    vars: {param_1/r0: stream_context, param_1_plus_0x05: reset_pending,
+      param_1_plus_0x44: stream_state, thunk_FUN_080746ec: reset_stream_state,
+      DAT_080036dc: notify_stream_state}
+    notes: >-
+      The sole recovered caller, media-startup coordinator 0x080056d0, calls
+      this immediately after its framework setup operation and before the
+      paired renderer step 0x080eade0. Raw ARM preserves the context in r4,
+      invokes veneer 0x080036d0 (literal 0x080746ec) with its embedded stream
+      state at +0x44, clears reset_pending at +0x05, then restores r4/lr and
+      tail-enters veneer 0x080036d8 (literal 0x080747c8) with the same
+      embedded state. Both targets are inside a renderer continuation and rely
+      on inherited framework register/stack context, so target builds retain
+      literal veneer assembly; host builds use an ordered two-callback seam.
 
   - address: 0x080088d8
     ghidra: FUN_080088d8
