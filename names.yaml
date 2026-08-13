@@ -779,6 +779,34 @@ functions:
       volatile MMIO/IRAM accesses and invokes the original dispatch stub;
       host tests use a deterministic driver-local seam.
 
+  - address: 0x08003b6c
+    ghidra: FUN_08003b6c
+    name: dispatch_message_0x17
+    size: 32
+    sig: "u32 dispatch_message_0x17(u32 unused_r0, u32 arg2, u32 arg3, u32 arg4)"
+    module: runtime/message_0x17
+    status: ported
+    renames:
+      param_1/r0: unused_r0
+      param_2/r1: arg2
+      param_3/r2: arg3_and_return_word
+      param_4/r3: arg4
+      local_18: message_command
+      uStack_14: message_arg2
+      local_10: message_arg3_and_return
+      uStack_c: message_arg4
+      FUN_08003660: message_dispatch_veneer
+      DAT_08003664: rom_message_dispatch
+    notes: >-
+      Builds the exact four-word stack record {0x17, r1, r2, r3}, calls the
+      0x08003660 literal veneer (ROM target 0x0802dca8), then reloads word 2
+      at sp+8 as r0. Incoming r0 is saved only to form the stack record and
+      is overwritten by the command tag. The port keeps the unported
+      dispatcher behind a volatile target-default callback seam; the direct
+      host test proves record layout, callback order/count, and that a
+      dispatcher mutation of word 2 becomes the return value. Reference C:
+      decomp/c/000/08003b6c_FUN_08003b6c.c; raw ARM 0x08003b6c..0x08003b8b.
+
   - address: 0x08000318
     ghidra: FUN_08000318
     name: pwrcon_update_masks
