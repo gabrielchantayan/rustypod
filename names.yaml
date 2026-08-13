@@ -96,6 +96,27 @@ functions:
       The Rust port preserves the ABI through the target/host operation seam;
       its ARM default is the same literal veneer target.
 
+  # --- event-loop callback dispatch ---
+  - address: 0x080074e8
+    ghidra: FUN_080074e8
+    name: dispatch_event_loop_callback
+    size: 12
+    sig: "u32 dispatch_event_loop_callback(const EventLoopCallbackSource *source)"
+    module: drivers/event_loop_callback
+    status: ported
+    renames:
+      param_1/r0: source
+      param_1_plus_0x20: callback
+      DAT_08003904: event_loop_callback_dispatch_target
+    notes: >-
+      Raw ARM is `ldr r0, [r0, #0x20]; b 0x08003900`; the 0x08003900 literal
+      veneer is `ldr pc, [pc, #-4]` with target 0x0818c528. This tail
+      dispatch forwards source +0x20 as the sole r0 argument and preserves
+      the target's r0 result. Recovered event-loop callers treat a zero result
+      as not-ready and retry. The Rust port preserves the ARM wrapper and
+      target literal on ARM, with a volatile target/host operation seam for
+      direct host behavioral tests.
+
   # --- first event-handler dispatch ---
   - address: 0x080076cc
     ghidra: FUN_080076cc
@@ -378,6 +399,22 @@ functions:
       invokes it after the +0x20 pending-event dispatch returns zero and after
       scheduler event work. No NULL checks are present; despite Ghidra's void
       signature, the tail branch preserves the virtual method's r0 return value.
+
+  - address: 0x08005ea8
+    ghidra: FUN_08005ea8
+    name: decoder_poll
+    size: 16
+    sig: "uintptr_t decoder_poll(void **decoder_slot)"
+    module: cxx/vtable
+    status: ported
+    vars: {param_1: decoder_slot}
+    notes: Media decoder readiness/status poll wrapper. Dereferences decoder_slot
+      to its object, loads that object's vtable, and tail-dispatches slot +0x1c
+      with the object preserved in r0. The recovered event-loop caller drains
+      queued work, then repeatedly invokes this until its nonzero result signals
+      that processing may continue. No NULL checks are present; despite Ghidra's
+      void signature, the tail branch preserves the virtual method's r0 return
+      value.
 
 
   - address: 0x08005ef0
