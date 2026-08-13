@@ -29235,3 +29235,23 @@ functions:
       the held level, controller result/once-only forwarding, and wrapping
       from 0xffffffff. match.py diff reviewed; structural shape is
       literals -> compare -> conditional add -> store -> tail controller.
+
+  # --- eight-slot byte identity-table initialization ---
+  - address: 0x08028460
+    ghidra: FUN_08028460
+    name: initialize_eight_byte_identity_slots
+    size: 36
+    sig: "void initialize_eight_byte_identity_slots(u8 *base)"
+    module: drivers/eight_slot_identity_init
+    status: ported
+    renames:
+      param_1/r0: base
+      iVar1/r4: slot_index
+      FUN_0802b9ec: initialize_byte_identity_slot
+    notes: >-
+      Calls the unported byte identity-table initializer at 0x0802b9ec exactly
+      eight times in ascending order, passing base + slot_index * 0x100 for
+      slot_index 0 through 7. The target build dispatches directly to the
+      retail helper and host builds provide a volatile recorder seam. The
+      direct host test proves every passed offset and the complete call order;
+      match.py diff reviewed after the ARM release build.

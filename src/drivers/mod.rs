@@ -6,6 +6,7 @@ pub mod cp15;
 pub mod clock_config;
 pub mod display_layer;
 pub mod display_index_flags;
+pub mod eight_slot_identity_init;
 pub mod event_loop_callback;
 pub mod gpio;
 pub mod gpio_cmd;
