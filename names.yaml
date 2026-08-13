@@ -102,6 +102,32 @@ functions:
       call while retaining those exact writes. Host tests prove all 33 words
       receive the context and every byte outside those fields remains intact.
 
+  # --- UI startup event-one sequence ---
+  - address: 0x080056b0
+    ghidra: FUN_080056b0
+    name: ui_startup_sequence
+    size: 32
+    sig: "u32 ui_startup_sequence(void)"
+    module: ui/startup_sequence
+    status: ported
+    renames:
+      thunk_FUN_080037a0: setup_phase_one
+      thunk_FUN_080eade0: setup_phase_two
+      FUN_08007470: event_handler_source
+      FUN_080076cc: dispatch_first_event
+      uVar1/r0: source
+    notes: >-
+      Calls the 0x080037a0 veneer (literal target 0x080ea68c), then the
+      0x080037c8 veneer (literal target 0x080eade0), retrieves the event
+      handler source from 0x08007470, and calls 0x080076cc with that source
+      in r0 and event 1 in r1. The latter's result is discarded and this
+      wrapper returns 0. The neighboring 0x08005690 wrapper has the same
+      orchestration but a different second setup veneer and event 0, which
+      identifies this as the event-one UI startup sequence. Unported calls
+      stay behind a volatile UI target/host ROM-dispatch seam; target defaults
+      call their retailOS addresses and direct host tests prove call order,
+      arguments, and the fixed zero return.
+
   # --- event callback dispatch ---
   - address: 0x08005094
     ghidra: FUN_08005094
