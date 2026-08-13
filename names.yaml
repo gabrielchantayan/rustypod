@@ -29327,6 +29327,31 @@ functions:
       direct host test proves every passed offset and the complete call order;
       match.py diff reviewed after the ARM release build.
 
+  # --- H.264 parse-cursor advance with old-position output ---
+  - address: 0x0802b924
+    ghidra: FUN_0802b924
+    name: h264_cursor_advance_with_start
+    size: 24
+    sig: "void h264_cursor_advance_with_start(i32 *cursor, i32 *cursor_mirror, i32 *start, i32 delta)"
+    module: h264/cursor_advance_with_start
+    status: ported
+    renames:
+      param_1/r0: cursor
+      param_2/r1: cursor_mirror
+      param_3/r2: start
+      param_4/r3: delta
+      iVar1/r12: old_cursor
+    notes: >-
+      24-byte leaf helper (0x0802b924..0x0802b93c), six ARM instructions.
+      The H.264 syntax-header callers at 0x08028838 and 0x08028b08 initialize
+      paired local parse cursors from the input position then call this helper
+      when a flag selects a direct displacement. It reads cursor, applies
+      ARM's wrapping signed 32-bit addition with delta, writes the result to
+      cursor then cursor_mirror, and finally writes the original cursor to
+      start. The ordered raw-pointer stores intentionally preserve the
+      observable result when outputs alias. No deviations. Focused host tests
+      cover ordinary and wrapping displacement plus all meaningful output
+      alias combinations; match.py reviewed after the ARM release build.
 
   # --- FreeType word-cursor advance with range-start output ---
   - address: 0x0802b93c
