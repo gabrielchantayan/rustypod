@@ -2,6 +2,7 @@
 //! and view code is built on.
 pub mod block_map;
 pub mod byte_store;
+pub mod checked_byte_block_forwarder;
 pub mod color;
 pub mod flag_2c;
 pub mod startup_sequence;

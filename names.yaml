@@ -29327,6 +29327,57 @@ functions:
       both adjacent guard bytes remain unchanged; match.py diff reviewed after
       the ARM release build.
 
+  # --- UI checked-byte-block forwarding basic block ---
+  - address: 0x0802dd88
+    ghidra: FUN_0802dd88
+    name: ui_checked_byte_block_forwarder
+    size: 32
+    sig: "u32 ui_checked_byte_block_forwarder(u32 mode, u8 **input_cursor, u8 **input_cursor_mirror, u8 **output_cursor, u8 **output_cursor_mirror, u32 row_count, u32 bytes_per_row)"
+    module: ui/checked_byte_block_forwarder
+    status: ported
+    renames:
+      r5: mode
+      stack+0x30: input_cursor
+      stack+0x34: input_cursor_mirror
+      stack+0x38: output_cursor
+      stack+0x2c: output_cursor_mirror
+      r2/outgoing_stack+0x04: row_count
+      r3/outgoing_stack+0x08: bytes_per_row
+      FUN_0802b6a8: checked_byte_block_reader
+    notes: >-
+      This 32-byte sequence is a basic block in the parser at 0x0802d9c4,
+      reached through the 4-byte thunk at 0x08003480 after the parser has
+      preserved mode in r5. Raw ARM, not Ghidra's stack artifacts, shows it
+      loading the four cursor-slot addresses from the containing frame, then
+      placing live r2 and r3 at outgoing sp+4/sp+8 before calling
+      0x0802b6a8. Thus r2/r3 are the reader's sixth/seventh arguments:
+      row_count and bytes_per_row (normally 0x10 and 0x100), not cursor
+      pointers. The port makes the otherwise implicit frame inputs explicit,
+      forwards all seven reader words and its 0/4 status through a target ROM
+      / host recorder seam, and keeps 0x0802b6a8 unported. Focused host
+      coverage records every cursor alias, both stack-carried dimensions, and
+      the returned failure status.
+
+  # --- sixteen-slot byte identity-table initialization ---
+  - address: 0x0802dda8
+    ghidra: FUN_0802dda8
+    name: initialize_sixteen_byte_identity_slots
+    size: 36
+    sig: "void initialize_sixteen_byte_identity_slots(u8 *base)"
+    module: drivers/sixteen_slot_identity_init
+    status: ported
+    renames:
+      param_1/r0: base
+      iVar1/r4: slot_index
+      FUN_0802b9ec: initialize_byte_identity_slot
+    notes: >-
+      Calls the recovered initialize_byte_identity_slot helper at 0x0802b9ec
+      exactly sixteen times in ascending order, passing base + slot_index *
+      0x100 for slot_index 0 through 15. It preserves the r0 pointer ABI and
+      void return. The direct host test verifies each identity entry in all
+      sixteen 0x100-byte slots and both adjacent guard bytes; match.py
+      structural diff reviewed after the ARM release build.
+
   # --- byte identity-table slot initialization ---
   - address: 0x0802b9ec
     ghidra: FUN_0802b9ec
