@@ -29611,3 +29611,29 @@ functions:
       recording seam to verify one invocation and return without executing
       unmapped firmware. The inherited register/frame state remains the
       caller's responsibility until the surrounding parser is ported.
+
+  # --- transposed four-by-four byte-block XOR ---
+  - address: 0x0802e54c
+    ghidra: FUN_0802e54c
+    name: xor_transposed_4x4
+    size: 32
+    sig: "void xor_transposed_4x4(u8 *dst, const u8 *src)"
+    module: util/xor_transposed_block
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: src
+      iVar2/r3: row
+      iVar1/r2: column
+      iVar3/r12: destination_row
+      iVar4/r4: source_offset
+    notes: >-
+      32-byte leaf helper (0x0802e54c..0x0802e56c), eight ARM instructions.
+      For each row i and column j in row-major order, it immediately stores
+      dst[4*i+j] XOR src[i+4*j]. The source layout is transposed rather than
+      linear. Source and destination ranges may overlap: each source load,
+      destination load, and store remains ordered exactly as the ARM ldrb,
+      ldrb, eor, strb sequence. No deviations. Focused host tests use
+      distinguishable matrix values to prove every mapping, guard the exact
+      16-byte destination range, and model in-place ordering; match.py
+      structural diff reviewed after the ARM release build.

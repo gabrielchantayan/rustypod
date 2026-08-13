@@ -36,3 +36,4 @@ pub mod video_engine;
 pub mod validator;
 pub mod vtable_query;
 pub mod wstr_casecmp;
+pub mod xor_transposed_block;
