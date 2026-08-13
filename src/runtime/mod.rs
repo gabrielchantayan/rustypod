@@ -15,6 +15,7 @@ pub mod ll_udiv10;
 pub mod locale;
 pub mod malloc_rt;
 pub mod message_0x17;
+pub mod message_0x10;
 pub mod qsort;
 pub mod raise;
 pub mod random;

@@ -807,6 +807,30 @@ functions:
       dispatcher mutation of word 2 becomes the return value. Reference C:
       decomp/c/000/08003b6c_FUN_08003b6c.c; raw ARM 0x08003b6c..0x08003b8b.
 
+  - address: 0x08003b8c
+    ghidra: FUN_08003b8c
+    name: ks_alloc_timer
+    size: 36
+    sig: "u32 ks_alloc_timer(void)"
+    module: runtime/message_0x10
+    status: ported
+    renames:
+      local_1c: timer_allocation_request
+      local_1c[0]: timer_alloc_service_selector
+      local_8: timer_handle_and_return
+      FUN_08003660: message_dispatch_veneer
+      DAT_08003664: rom_message_dispatch
+    notes: >-
+      KS_alloc_timer wrapper. Reserves seven stack words, writes RTXC service
+      selector 0x10 at sp+4, and dispatches the six-word request beginning
+      there through the 0x08003660 literal veneer (ROM target 0x0802dca8).
+      The intermediate words remain deliberately uninitialized; after the
+      dispatcher returns, reloads sp+24 (request word five) as the timer
+      handle/result. The port preserves the stack-record ABI with
+      MaybeUninit and uses the shared volatile target-default dispatcher seam
+      from runtime/message_0x17. Reference C:
+      decomp/c/000/08003b8c_FUN_08003b8c.c; raw ARM 0x08003b8c..0x08003baf.
+
   - address: 0x08000318
     ghidra: FUN_08000318
     name: pwrcon_update_masks
