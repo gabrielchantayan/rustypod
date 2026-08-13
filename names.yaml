@@ -94,6 +94,31 @@ functions:
       Each unsigned selector below the 28-entry table limit contributes
       independently: first_resource -> 0x1000 and second_resource -> 0x0800.
 
+
+  # --- I2S transfer submission default mode ---
+  - address: 0x08008648
+    ghidra: FUN_08008648
+    name: queue_transfer_with_default_mode
+    size: 36
+    sig: "void queue_transfer_with_default_mode(u32 first, u32 second, u32 length, u32 transfer_type, u32 transfer_slot)"
+    module: drivers/transfer_default_mode
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: second
+      param_3/r2: length
+      param_4/r3: transfer_type
+      param_5/stack: transfer_slot
+      FUN_08004a20: submit_transfer
+      callee_param_4/r3: control
+    notes: >-
+      The sole recovered caller, 0x080084dc, submits each transfer chunk with
+      source, destination, chunk length, controller kind, and slot. Raw ARM
+      reshuffles its five-word ABI into 0x08004a20's six-word ABI, setting the
+      fourth callee word to literal zero and forwarding the last two words on
+      the stack. The target/host ROM seam retains that exact argument order;
+      a host recorder proves one call with the inserted zero and discarded
+      callee result.
   # --- I2S transfer-slot teardown ---
   - address: 0x08004c4c
     ghidra: FUN_08004c4c
