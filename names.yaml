@@ -191,6 +191,29 @@ functions:
       port retains the literal veneer and direct host tests install a volatile
       getter seam to exercise the exact virtual callback ABI.
 
+  # --- stream-buffer context initialization ---
+  - address: 0x08005e5c
+    ghidra: FUN_08005e5c
+    name: stream_buffer_initialize_and_get_page_context
+    size: 28
+    sig: "u32 stream_buffer_initialize_and_get_page_context(u32 unused_first, u32 unused_second, u32 *page_context_out)"
+    module: drivers/stream_buffer_context
+    status: ported
+    renames:
+      param_1/r0: unused_first
+      param_2/r1: unused_second
+      param_3/r2: page_context_out
+      FUN_08006e88: initialize_stream_buffer
+      FUN_0800722c: current_page_context
+      uVar1/r0: page_context
+    notes: >-
+      Calls the lazy retailOS stream-buffer initializer at 0x08006e88, then
+      obtains the current page or fallback context through 0x0800722c and
+      stores it through r2. The raw ARM saves r2 in r4 across both calls and
+      returns literal zero; r0 and r1 are never read. Both callees remain
+      target/host ROM seams, with a host recorder proving strict call order,
+      output-store value, and fixed-zero return.
+
   # --- event-loop callback dispatch ---
   - address: 0x080074e8
     ghidra: FUN_080074e8
