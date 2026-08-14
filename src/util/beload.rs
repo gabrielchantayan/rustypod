@@ -23,9 +23,10 @@
 //! alignment. Unlike the `berec_*` family @ 0x0813b714 (which reads
 //! through a buffer handle), these take the byte pointer directly.
 //!
-//! A fourth and fifth implementation — `pack_be32` @ 0x08261638 and
-//! `unpack_be32` @ 0x08261770 — live at the bottom of this file; see the
-//! banner there for the wire-format cluster they belong to.
+//! The wire-format overload set @ 0x0826161c..0x082617ec — `pack_be16`,
+//! `pack_be32`, `pack_be64`, `unpack_be16`, `unpack_be32`, `unpack_be64`
+//! and the two register-only byte reversers they share — lives at the
+//! bottom of this file; see the banner there.
 
 /// Big-endian, alignment-free 32-bit load from `p`.
 #[cfg_attr(target_os = "none", no_mangle)]
@@ -76,12 +77,19 @@ pub unsafe extern "C" fn store_u32_be_bytes(p: *mut u8, value: u32) {
 // (words decoded from osos.dec, not Ghidra):
 //
 //   0x0826161c  16-bit pack      0x08261750  16-bit unpack
-//   0x08261638  32-bit pack      0x08261770  32-bit unpack   <- ported here
+//   0x08261638  32-bit pack      0x08261770  32-bit unpack
 //   0x08261670  64-bit pack      0x08261790  64-bit unpack
 //
-// The 32-bit unpack tail-branches (`b`, not `bl`) to a private register-only
-// byte reverse @ 0x082616d4, which the 64-bit pair reaches through its own
-// 64-bit twin @ 0x082616f0.
+// Two register-only byte reversers sit between the two halves and are shared
+// by both: `reverse_bytes32` @ 0x082616d4 and `reverse_bytes64` @ 0x082616f0.
+// The 32- and 64-bit unpacks reach theirs by tail branch (`b`, not `bl`); the
+// 64-bit pack calls its one with a real `bl`. Both are reached by direct `bl`
+// from elsewhere too, so both are genuine firmware entry points, not inlining
+// artefacts.
+//
+// Every function here is exported into its own text section: their bodies are
+// near-identical and LLVM would otherwise fold several onto a single symbol,
+// leaving the rest of the family with no address to hook.
 //
 // Callers identify the domain: every recovered one builds or parses a
 // packet in a small stack/record buffer with a running byte-length cursor
@@ -96,6 +104,27 @@ pub unsafe extern "C" fn store_u32_be_bytes(p: *mut u8, value: u32) {
 // branch at 0x0826178c and swallows the separately-linked 64-bit unpack
 // that starts at 0x08261790.
 // ---------------------------------------------------------------------------
+
+/// pack_be16 — original: `FUN_0826161c` @ 0x0826161c (28 bytes, all code:
+/// 6 instructions plus `bx lr`; 46 `bl` call sites, counted by decoding
+/// every B/BL word in osos.dec).
+///
+/// Writes `value` as two big-endian bytes at `dst`, needing no alignment.
+///
+/// The first member of the overload set, and the same two-step shape as
+/// [`pack_be32`]: reverse the halfword in registers (`lsl #8`, then `orr`
+/// of `value & 0xff00` shifted right 8), then spill its two bytes
+/// least-significant first to ascending addresses. The original ignores
+/// the argument register's top half, which the `u16` parameter states
+/// directly. Its own text section keeps it off the other packers' symbols.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.pack_be16")]
+#[inline(never)]
+pub unsafe extern "C" fn pack_be16(dst: *mut u8, value: u16) {
+    let reversed = value.swap_bytes();
+    dst.write(reversed as u8);
+    dst.add(1).write((reversed >> 8) as u8);
+}
 
 /// pack_be32 — original: `FUN_08261638` @ 0x08261638 (56 bytes, all code:
 /// 13 instructions plus `bx lr`; 49 `bl` call sites, binary-scanned).
@@ -120,6 +149,102 @@ pub unsafe extern "C" fn pack_be32(dst: *mut u8, value: u32) {
     dst.add(3).write((reversed >> 24) as u8);
 }
 
+/// pack_be64 — original: `FUN_08261670` @ 0x08261670 (100 bytes, all code:
+/// 24 instructions between `push {r4, lr}` and `pop {r4, pc}`; 5 `bl` call
+/// sites, counted by decoding every B/BL word in osos.dec).
+///
+/// Writes `value` as eight big-endian bytes at `dst`, needing no
+/// alignment. The widest member of the pack overload set.
+///
+/// Same two-step shape as [`pack_be32`], except that the doubleword
+/// reverse is too large to inline, so the original moves the value from
+/// its `r2`/`r3` argument pair into `r0`/`r1` and calls
+/// [`reverse_bytes64`] with a real `bl` before spilling the eight
+/// least-significant-first bytes to ascending addresses. The port keeps
+/// that call — hence `#[inline(never)]` on the reverser — and unrolls the
+/// spill so LLVM's loop-idiom pass cannot rewrite it into a `memcpy` that
+/// does not exist on the target. Its own text section keeps it off the
+/// other packers' symbols.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.pack_be64")]
+#[inline(never)]
+pub unsafe extern "C" fn pack_be64(dst: *mut u8, value: u64) {
+    let reversed = reverse_bytes64(value);
+    dst.write(reversed as u8);
+    dst.add(1).write((reversed >> 8) as u8);
+    dst.add(2).write((reversed >> 16) as u8);
+    dst.add(3).write((reversed >> 24) as u8);
+    dst.add(4).write((reversed >> 32) as u8);
+    dst.add(5).write((reversed >> 40) as u8);
+    dst.add(6).write((reversed >> 48) as u8);
+    dst.add(7).write((reversed >> 56) as u8);
+}
+
+/// reverse_bytes32 — original: `FUN_082616d4` @ 0x082616d4 (28 bytes, all
+/// code: 6 instructions plus `bx lr`; 2 `bl` call sites plus the tail `b`
+/// from [`unpack_be32`] @ 0x0826178c, counted by decoding every B/BL word
+/// in osos.dec).
+///
+/// Returns `value` with its four bytes reversed.
+///
+/// The private reverser of the wire-format cluster: unlike [`bswap32`]
+/// @ 0x0805dc24, which round-trips the word through a stack slot, this one
+/// stays in registers — `lsl #24`, `orr` of `value & 0xff00` shifted left 8,
+/// `orr` of `value & 0xff0000` shifted right 8, `orr` of `value >> 24`. Same
+/// observable result, separate firmware function, so it keeps its own text
+/// section.
+///
+/// [`bswap32`]: crate::util::bswap::bswap32
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.reverse_bytes32")]
+#[inline(never)]
+pub extern "C" fn reverse_bytes32(value: u32) -> u32 {
+    value.swap_bytes()
+}
+
+/// reverse_bytes64 — original: `FUN_082616f0` @ 0x082616f0 (96 bytes, all
+/// code: 23 instructions plus `bx lr`; 1 `bl` call site from [`pack_be64`]
+/// @ 0x08261680 plus the tail `b` from [`unpack_be64`] @ 0x082617e8,
+/// counted by decoding every B/BL word in osos.dec).
+///
+/// Returns `value` with its eight bytes reversed: the 64-bit twin of
+/// [`reverse_bytes32`], and the only reverser the 64-bit pair uses.
+///
+/// The original takes the doubleword in `r0`/`r1` and returns
+/// `(reverse_bytes32(hi), reverse_bytes32(lo))` — each half reversed and
+/// the two halves swapped. It open-codes the swap as a mask/shift chain
+/// over the whole 64-bit value, which leaves four provably-zero lane terms
+/// in the instruction stream (`(lo & 0xff0000) << 24`, `(hi & 0xff) >> 8`
+/// and friends); those are dead in the original and are simply not written
+/// here. Its own text section keeps it off the other reversers' symbols.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.reverse_bytes64")]
+#[inline(never)]
+pub extern "C" fn reverse_bytes64(value: u64) -> u64 {
+    value.swap_bytes()
+}
+
+/// unpack_be16 — original: `FUN_08261750` @ 0x08261750 (32 bytes, all
+/// code: 7 instructions plus `bx lr`; 35 `bl` call sites, counted by
+/// decoding every B/BL word in osos.dec).
+///
+/// Reads two big-endian bytes at `src` and returns them as a `u16`,
+/// needing no alignment. The read twin of [`pack_be16`].
+///
+/// The original gathers the two bytes into a little-endian halfword and
+/// then reverses it inline (`lsl #24; lsr #16` for the low lane, `orr` of
+/// `gathered & 0xff00` shifted right 8) rather than branching to
+/// [`reverse_bytes32`] the way the wider unpacks do; the result is
+/// zero-extended into the return register. Its own text section keeps it
+/// off the other unpackers' symbols.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.unpack_be16")]
+#[inline(never)]
+pub unsafe extern "C" fn unpack_be16(src: *const u8) -> u16 {
+    let gathered = src.read() as u16 | (src.add(1).read() as u16) << 8;
+    gathered.swap_bytes()
+}
+
 /// unpack_be32 — original: `FUN_08261770` @ 0x08261770 (32 bytes, all
 /// code: 7 instructions plus a tail branch; 60 `bl` call sites,
 /// binary-scanned).
@@ -129,9 +254,9 @@ pub unsafe extern "C" fn pack_be32(dst: *mut u8, value: u32) {
 ///
 /// The original gathers the bytes into a little-endian word (walking `src`
 /// with pre-indexed `ldrb`s) and then tail-branches to the private
-/// register-only byte reverse @ 0x082616d4; the port folds that reverse in,
-/// since LLVM inlines an equal-bodied leaf call anyway and there is no
-/// separate firmware entry point worth preserving here. The observable
+/// register-only byte reverse @ 0x082616d4, ported here as
+/// [`reverse_bytes32`]; the port folds that reverse in, since LLVM inlines
+/// an equal-bodied leaf call anyway. The observable
 /// effect is identical to [`load_be32`], and the dedicated text section
 /// stops LLVM from merging the two onto one address.
 ///
@@ -148,6 +273,45 @@ pub unsafe extern "C" fn unpack_be32(src: *const u8) -> u32 {
         | (src.add(2).read() as u32) << 16
         | (src.add(3).read() as u32) << 24;
     gathered.swap_bytes()
+}
+
+/// unpack_be64 — original: `FUN_08261790` @ 0x08261790 (92 bytes, all
+/// code: 22 instructions plus a tail branch; 3 `bl` call sites, counted by
+/// decoding every B/BL word in osos.dec).
+///
+/// Reads eight big-endian bytes at `src` and returns them as a `u64`,
+/// needing no alignment. The read twin of [`pack_be64`] and the widest
+/// member of the unpack overload set.
+///
+/// The original gathers bytes 0..7 into a little-endian doubleword,
+/// walking `src` with pre-indexed `ldrb`s, then tail-branches (`b`, not
+/// `bl`) to [`reverse_bytes64`] @ 0x082616f0. The port keeps that call
+/// rather than folding it in, matching [`pack_be64`]. Its own text section
+/// keeps it off the other unpackers' symbols.
+///
+/// The original's gather emits several provably-zero terms — an `asr #31`
+/// of a byte just loaded with `ldrb`, and `lsr #24`/`#16`/`#8` of
+/// single-byte values — artefacts of open-coding a 64-bit shift over
+/// register pairs. They are dead there and are not written here.
+///
+/// Ghidra is not to be trusted on this function's neighbours: it folds the
+/// separately-linked 92 bytes here into the preceding [`unpack_be32`]. The
+/// extent above is decoded from the raw words — the tail branch sits at
+/// 0x082617e8 and 0x082617ec starts an unrelated `push {r4, r5, r6, lr}`
+/// function.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.unpack_be64")]
+#[inline(never)]
+pub unsafe extern "C" fn unpack_be64(src: *const u8) -> u64 {
+    let gathered = src.read() as u64
+        | (src.add(1).read() as u64) << 8
+        | (src.add(2).read() as u64) << 16
+        | (src.add(3).read() as u64) << 24
+        | (src.add(4).read() as u64) << 32
+        | (src.add(5).read() as u64) << 40
+        | (src.add(6).read() as u64) << 48
+        | (src.add(7).read() as u64) << 56;
+    reverse_bytes64(gathered)
 }
 
 #[cfg(test)]
@@ -225,6 +389,28 @@ mod tests {
         }
     }
 
+    /// Two bytes, most significant at the lowest address, at every
+    /// misalignment, with the neighbouring packet bytes untouched.
+    #[test]
+    fn pack_be16_writes_exactly_two_big_endian_bytes() {
+        for value in [0u16, 1, 0x00ff, 0xff00, 0x7fff, 0x8001, 0x1234, u16::MAX] {
+            for offset in 0..6usize {
+                let mut actual = [0xa5u8; 12];
+                let mut expected = actual;
+                expected[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
+
+                unsafe { pack_be16(actual.as_mut_ptr().add(offset), value) };
+
+                assert_eq!(actual, expected, "value={value:#06x}, offset={offset}");
+            }
+        }
+
+        // A little-endian store would give [0x34, 0x12].
+        let mut buf = [0u8; 2];
+        unsafe { pack_be16(buf.as_mut_ptr(), 0x1234) };
+        assert_eq!(buf, [0x12, 0x34]);
+    }
+
     /// The most significant byte lands at the lowest address — the property
     /// the wire format depends on, and the one a stray `swap_bytes` would
     /// invert.
@@ -286,6 +472,135 @@ mod tests {
         }
     }
 
+    /// A byte reverse is its own inverse, moves every lane to the mirrored
+    /// lane, and agrees with the independently ported stack-spilling
+    /// `bswap32` @ 0x0805dc24.
+    #[test]
+    fn reverse_bytes32_mirrors_every_lane() {
+        assert_eq!(reverse_bytes32(0x0102_0304), 0x0403_0201);
+        assert_eq!(reverse_bytes32(0), 0);
+        assert_eq!(reverse_bytes32(1), 0x0100_0000);
+        assert_eq!(reverse_bytes32(0x7fff_ffff), 0xffff_ff7f);
+        assert_eq!(reverse_bytes32(u32::MAX), u32::MAX);
+
+        for lane in 0..4 {
+            let value = 0xa5u32 << (8 * lane);
+            assert_eq!(reverse_bytes32(value), 0xa5u32 << (8 * (3 - lane)), "lane={lane}");
+        }
+
+        for value in [0u32, 1, 0x0000_ff00, 0x8000_0001, 0x1234_5678, 0xdead_beef, u32::MAX] {
+            assert_eq!(reverse_bytes32(reverse_bytes32(value)), value);
+            assert_eq!(reverse_bytes32(value), crate::util::bswap::bswap32(value));
+        }
+    }
+
+    /// It is exactly the transform that turns a little-endian gather into a
+    /// big-endian read — the contract `unpack_be32` tail-branches for.
+    #[test]
+    fn reverse_bytes32_converts_a_little_endian_gather_to_big_endian() {
+        let buf = [0xdeu8, 0xad, 0xbe, 0xef];
+        let gathered = u32::from_le_bytes(buf);
+        assert_eq!(reverse_bytes32(gathered), 0xdead_beef);
+        assert_eq!(reverse_bytes32(gathered), unsafe { unpack_be32(buf.as_ptr()) });
+    }
+
+    /// The 64-bit reverse is exactly "reverse each half, then swap the
+    /// halves" — the decomposition the original's register pair encodes,
+    /// and the one a half-swapped port would get subtly wrong.
+    #[test]
+    fn reverse_bytes64_reverses_each_half_and_swaps_them() {
+        assert_eq!(reverse_bytes64(0x0102_0304_0506_0708), 0x0807_0605_0403_0201);
+        assert_eq!(reverse_bytes64(0), 0);
+        assert_eq!(reverse_bytes64(1), 0x0100_0000_0000_0000);
+        assert_eq!(reverse_bytes64(0x7fff_ffff_ffff_ffff), 0xffff_ffff_ffff_ff7f);
+        assert_eq!(reverse_bytes64(u64::MAX), u64::MAX);
+
+        for value in [0u64, 1, 0x8000_0000, 0x0000_0001_0000_0000, 0xdead_beef_cafe_f00d, u64::MAX]
+        {
+            let (lo, hi) = (value as u32, (value >> 32) as u32);
+            let expect = (reverse_bytes32(lo) as u64) << 32 | reverse_bytes32(hi) as u64;
+            assert_eq!(reverse_bytes64(value), expect, "value={value:#018x}");
+            assert_eq!(reverse_bytes64(reverse_bytes64(value)), value);
+        }
+    }
+
+    /// Every single-byte lane travels to its mirror; a port that reversed
+    /// only within each half would pass the all-ones cases and fail here.
+    #[test]
+    fn reverse_bytes64_mirrors_every_lane() {
+        for lane in 0..8 {
+            let value = 0xa5u64 << (8 * lane);
+            assert_eq!(reverse_bytes64(value), 0xa5u64 << (8 * (7 - lane)), "lane={lane}");
+        }
+    }
+
+    /// Reads exactly the two bytes at the cursor, most significant first,
+    /// at every misalignment, and inverts `pack_be16`.
+    #[test]
+    fn unpack_be16_reads_exactly_two_big_endian_bytes() {
+        assert_eq!(unsafe { unpack_be16([0x12u8, 0x34].as_ptr()) }, 0x1234);
+        assert_eq!(unsafe { unpack_be16([0u8, 0].as_ptr()) }, 0);
+        assert_eq!(unsafe { unpack_be16([0u8, 1].as_ptr()) }, 1);
+        assert_eq!(unsafe { unpack_be16([0x80u8, 0].as_ptr()) }, 0x8000);
+        assert_eq!(unsafe { unpack_be16([0x7fu8, 0xff].as_ptr()) }, 0x7fff);
+        assert_eq!(unsafe { unpack_be16([0xffu8, 0xff].as_ptr()) }, u16::MAX);
+
+        let buf: [u8; 10] = core::array::from_fn(|i| (i as u8).wrapping_mul(53).wrapping_add(7));
+        for offset in 0..9usize {
+            let want = u16::from_be_bytes([buf[offset], buf[offset + 1]]);
+            assert_eq!(unsafe { unpack_be16(buf.as_ptr().add(offset)) }, want, "offset={offset}");
+        }
+
+        for value in [0u16, 1, 0x00ff, 0xff00, 0x8001, 0x1234, u16::MAX] {
+            for offset in 0..4usize {
+                let mut packet = [0xa5u8; 8];
+                unsafe { pack_be16(packet.as_mut_ptr().add(offset), value) };
+                assert_eq!(unsafe { unpack_be16(packet.as_ptr().add(offset)) }, value);
+            }
+        }
+    }
+
+    /// Eight bytes, most significant at the lowest address, at every
+    /// misalignment, with the neighbouring packet bytes untouched. The
+    /// single-byte lanes are what catch a half-swapped doubleword.
+    #[test]
+    fn pack_be64_writes_exactly_eight_big_endian_bytes() {
+        let boundaries = [
+            0u64,
+            1,
+            0x7fff_ffff,
+            0xffff_ffff,
+            0x0000_0001_0000_0000,
+            0x7fff_ffff_ffff_ffff,
+            0x0102_0304_0506_0708,
+            u64::MAX,
+        ];
+        let lanes: [u64; 8] = core::array::from_fn(|lane| 0xa5u64 << (8 * lane));
+
+        for value in boundaries.into_iter().chain(lanes) {
+            for offset in 0..8usize {
+                let mut actual = [0x5au8; 24];
+                let mut expected = actual;
+                expected[offset..offset + 8].copy_from_slice(&value.to_be_bytes());
+
+                unsafe { pack_be64(actual.as_mut_ptr().add(offset), value) };
+
+                assert_eq!(actual, expected, "value={value:#018x}, offset={offset}");
+            }
+        }
+    }
+
+    /// The two halves must not be transposed: the low word of the value
+    /// belongs at the *high* addresses.
+    #[test]
+    fn pack_be64_puts_the_high_word_at_the_low_addresses() {
+        let mut buf = [0u8; 8];
+        unsafe { pack_be64(buf.as_mut_ptr(), 0xdead_beef_cafe_f00d) };
+        assert_eq!(buf, [0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe, 0xf0, 0x0d]);
+        assert_eq!(unsafe { unpack_be32(buf.as_ptr()) }, 0xdead_beef);
+        assert_eq!(unsafe { unpack_be32(buf.as_ptr().add(4)) }, 0xcafe_f00d);
+    }
+
     /// The byte at the lowest address is the most significant — if the
     /// folded-in `swap_bytes` were dropped, this would read 0x04030201.
     #[test]
@@ -307,6 +622,51 @@ mod tests {
             let want =
                 u32::from_be_bytes([buf[offset], buf[offset + 1], buf[offset + 2], buf[offset + 3]]);
             assert_eq!(unsafe { unpack_be32(buf.as_ptr().add(offset)) }, want, "offset={offset}");
+        }
+    }
+
+    /// Reads exactly the eight bytes at the cursor, most significant
+    /// first, at every misalignment, and inverts `pack_be64`.
+    #[test]
+    fn unpack_be64_reads_exactly_eight_big_endian_bytes() {
+        let cafe = [0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe, 0xf0, 0x0d];
+        assert_eq!(unsafe { unpack_be64(cafe.as_ptr()) }, 0xdead_beef_cafe_f00d);
+        assert_eq!(unsafe { unpack_be64([0u8; 8].as_ptr()) }, 0);
+        assert_eq!(unsafe { unpack_be64([0, 0, 0, 0, 0, 0, 0, 1].as_ptr()) }, 1);
+        assert_eq!(unsafe { unpack_be64([0x80, 0, 0, 0, 0, 0, 0, 0].as_ptr()) }, 1 << 63);
+        assert_eq!(unsafe { unpack_be64([0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff].as_ptr()) },
+                   i64::MAX as u64);
+        assert_eq!(unsafe { unpack_be64([0xffu8; 8].as_ptr()) }, u64::MAX);
+
+        // A single 0x80 byte in each lane: catches a stray sign-extension of
+        // a gathered byte, which the original open-codes but leaves dead.
+        for lane in 0..8usize {
+            let mut buf = [0u8; 8];
+            buf[lane] = 0x80;
+            assert_eq!(unsafe { unpack_be64(buf.as_ptr()) }, 0x80u64 << (8 * (7 - lane)));
+        }
+
+        let buf: [u8; 24] = core::array::from_fn(|i| (i as u8).wrapping_mul(97).wrapping_add(13));
+        for offset in 0..16usize {
+            let mut want = [0u8; 8];
+            want.copy_from_slice(&buf[offset..offset + 8]);
+            assert_eq!(
+                unsafe { unpack_be64(buf.as_ptr().add(offset)) },
+                u64::from_be_bytes(want),
+                "offset={offset}"
+            );
+        }
+
+        for value in [0u64, 1, 0xffff_ffff, 0x0000_0001_0000_0000, 0x0102_0304_0506_0708, u64::MAX]
+        {
+            for offset in 0..8usize {
+                let mut packet = [0x5au8; 24];
+                unsafe { pack_be64(packet.as_mut_ptr().add(offset), value) };
+                assert_eq!(unsafe { unpack_be64(packet.as_ptr().add(offset)) }, value);
+                // The 64-bit read is the two 32-bit reads, high word first.
+                assert_eq!(unsafe { unpack_be32(packet.as_ptr().add(offset)) } as u64, value >> 32);
+                assert_eq!(unsafe { unpack_be32(packet.as_ptr().add(offset + 4)) }, value as u32);
+            }
         }
     }
 

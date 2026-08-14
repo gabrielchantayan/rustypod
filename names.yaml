@@ -30306,6 +30306,39 @@ functions:
       from the first argument and zero/all-one second-argument bit patterns.
 
   # --- big-endian wire-format packer cluster (src/util/beload.rs) ---
+  - address: 0x0826161c
+    ghidra: FUN_0826161c
+    name: pack_be16
+    size: 28
+    sig: "void pack_be16(u8 *dst, u16 value)"
+    module: util/beload
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: value
+      uVar1/r2: reversed
+    notes: >-
+      Writes value as two big-endian bytes at an unaligned dst - the first
+      member of the pack/unpack overload set. 28 bytes, 7 instructions,
+      0x0826161c..0x08261634 ending in bx lr; the next function (pack_be32)
+      starts at 0x08261638, extent decoded from the raw words rather than
+      taken from Ghidra. 46 bl call sites, counted by decoding every B/BL
+      word in osos.dec. Algorithm - same reverse-then-spill two-step shape
+      as pack_be32: byte-reverse the halfword in registers (lsl #8, orr of
+      value & 0xff00 shifted right 8), then spill the reversed halfword's
+      two bytes least-significant first to ascending addresses, so dst[0]
+      receives value >> 8. The original ignores the argument register's top
+      half, which the u16 parameter states directly. Kept in its own text
+      section so LLVM cannot fold it onto another packer. Deviation - LLVM
+      collapses the reverse into two direct strb and emits them in
+      descending address order (dst[1] before dst[0]); the original writes
+      dst[0] first. Both are plain writes to distinct addresses, so no
+      caller can observe the difference. Host tests cover every single-byte
+      lane at misalignments 0..5, guard the untouched neighbouring bytes,
+      and pin the byte order against a little-endian store. match.py
+      structural diff reviewed - two strb with the most significant byte at
+      the lowest address, plus the crate-wide push {fp, lr} frame.
+
   - address: 0x08261638
     ghidra: FUN_08261638
     name: pack_be32
@@ -30344,6 +30377,146 @@ functions:
       picks the ror idiom over the mask/orr chain, and emits the same
       crate-wide push {fp, lr} frame the accepted store_be32 port has.
 
+  - address: 0x08261670
+    ghidra: FUN_08261670
+    name: pack_be64
+    size: 100
+    sig: "void pack_be64(u8 *dst, u64 value)"
+    module: util/beload
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r2: value_lo
+      param_3/r3: value_hi
+      uVar1/r0+r1: reversed
+      uVar2/r12: lane
+      uVar3/r2: cursor
+    notes: >-
+      Writes value as eight big-endian bytes at an unaligned dst - the
+      widest member of the pack overload set. 100 bytes, 25 instructions,
+      0x08261670..0x082616d0 from push {r4, lr} to pop {r4, pc}; the next
+      function (reverse_bytes32) starts at 0x082616d4, extent decoded from
+      the raw words rather than taken from Ghidra. 5 bl call sites, counted
+      by decoding every B/BL word in osos.dec. ABI - dst in r0, the
+      doubleword in the r2/r3 pair, exactly what AAPCS gives
+      pack_be64(u8*, u64). Algorithm - same two-step shape as pack_be32,
+      but the doubleword reverse is too large to inline, so it moves the
+      value into r0/r1 and calls reverse_bytes64 @ 0x082616f0 with a real
+      bl, then spills the reversed doubleword's eight bytes
+      least-significant first to ascending addresses (dst[0] receives
+      value >> 56). The port keeps that call rather than folding the
+      reverse in, which is why reverse_bytes64 carries #[inline(never)].
+      Deviation - the spill is unrolled so LLVM's loop-idiom pass cannot
+      rewrite it into a memcpy that does not exist on the target, and LLVM
+      addresses dst with constant offsets instead of the original's
+      pre-indexed strb walk. Kept in its own text section so LLVM cannot
+      fold it onto another packer. Host tests cover the eight boundary
+      values and all eight single-byte lanes at misalignments 0..7, guard
+      the untouched neighbouring bytes, and assert the high word lands at
+      the low addresses (the transposition a half-swapped doubleword would
+      produce). match.py structural diff reviewed - save dst, move the
+      value into the argument pair, bl the reverser, eight strb; the frame
+      is the crate-wide push, widened to {r4, sl, fp, lr}.
+
+  - address: 0x082616d4
+    ghidra: FUN_082616d4
+    name: reverse_bytes32
+    size: 28
+    sig: "u32 reverse_bytes32(u32 value)"
+    module: util/beload
+    status: ported
+    renames:
+      param_1/r0: value
+      uVar1/r1: reversed
+      uVar2/r2: lane_mask
+    notes: >-
+      Register-only byte reverse of a 32-bit value - the private reverser
+      the wire-format cluster shares. 28 bytes, 7 instructions,
+      0x082616d4..0x082616ec ending in bx lr; the next function
+      (reverse_bytes64) starts at 0x082616f0, extent decoded from the raw
+      words rather than taken from Ghidra. 2 bl call sites plus the tail b
+      from unpack_be32 @ 0x0826178c, counted by decoding every B/BL word in
+      osos.dec, so it is a genuine firmware entry point and not an inlining
+      artefact. Algorithm - lsl #24, orr of value & 0xff00 shifted left 8,
+      orr of value & 0xff0000 shifted right 8, orr of value >> 24. Same
+      observable result as bswap32 @ 0x0805dc24, which instead round-trips
+      the word through a stack slot, so the two stay separate symbols and
+      this one keeps its own text section (LLVM folds byte-identical bodies
+      otherwise). No deviations. Host tests mirror every single-byte lane,
+      prove the transform is its own inverse, cross-check against bswap32,
+      and confirm it is exactly what turns unpack_be32's little-endian
+      gather into a big-endian read. match.py structural diff reviewed -
+      LLVM picks the ror idiom over the mask/orr chain and adds the
+      crate-wide push {fp, lr} frame.
+
+  - address: 0x082616f0
+    ghidra: FUN_082616f0
+    name: reverse_bytes64
+    size: 96
+    sig: "u64 reverse_bytes64(u64 value)"
+    module: util/beload
+    status: ported
+    renames:
+      param_1/r0: value_lo
+      param_2/r1: value_hi
+      uVar1/r2: saved_hi
+      uVar2/r3: reversed_hi
+      uVar3/r12: lane
+    notes: >-
+      Register-only byte reverse of a 64-bit value - the 64-bit twin of
+      reverse_bytes32 @ 0x082616d4 and the only reverser the 64-bit
+      pack/unpack pair uses. 96 bytes, 24 instructions,
+      0x082616f0..0x0826174c ending in bx lr; the next function
+      (unpack_be16) starts at 0x08261750, extent decoded from the raw words
+      rather than taken from Ghidra. 1 bl call site (pack_be64 @
+      0x08261680) plus the tail b from unpack_be64 @ 0x082617e8, counted by
+      decoding every B/BL word in osos.dec. ABI - doubleword in r0 (low
+      word) / r1 (high word), returned the same way. Algorithm - returns
+      (reverse_bytes32(hi), reverse_bytes32(lo)): each half byte-reversed
+      and the two halves swapped. Deviation - the original open-codes the
+      swap as a mask/shift chain over the whole 64-bit value and so emits
+      four provably-zero lane terms ((lo & 0xff0000) << 24, (lo &
+      0xff000000) << 8, (hi & 0xff) >> 8, (hi & 0xff00) >> 24); those are
+      dead in the original and are not written in the port, which is why it
+      is 12 instructions to the original's 24. Kept in its own text section
+      so LLVM cannot fold it onto another member of the family. Host tests
+      mirror every one of the eight single-byte lanes (a port that reversed
+      only within each half fails there while still passing the all-ones
+      cases), prove the transform is its own inverse, and cross-check the
+      half-swap decomposition against reverse_bytes32. match.py structural
+      diff reviewed - LLVM picks the ror idiom, drops the dead lanes, and
+      adds the crate-wide push {fp, lr} frame.
+
+  - address: 0x08261750
+    ghidra: FUN_08261750
+    name: unpack_be16
+    size: 32
+    sig: "u16 unpack_be16(const u8 *src)"
+    module: util/beload
+    status: ported
+    renames:
+      param_1/r0: src
+      uVar1/r1: gathered
+    notes: >-
+      Reads two big-endian bytes at an unaligned src and returns them as a
+      u16 - the read twin of pack_be16 @ 0x0826161c. 32 bytes, 8
+      instructions, 0x08261750..0x0826176c ending in bx lr; the next
+      function (unpack_be32) starts at 0x08261770, extent decoded from the
+      raw words rather than taken from Ghidra. 35 bl call sites, counted by
+      decoding every B/BL word in osos.dec. Algorithm - gather src[0] and
+      src[1] into a little-endian halfword, then reverse it inline (lsl #24
+      then lsr #16 for the low lane, orr of gathered & 0xff00 shifted right
+      8) instead of branching to reverse_bytes32 the way the 32- and 64-bit
+      unpacks do; the result is zero-extended into the return register.
+      Kept in its own text section so LLVM cannot fold it onto another
+      unpacker. Deviation - LLVM collapses gather-then-reverse into the
+      single orr r0, r0, r1, lsl #8 over the two ldrb, which is bit-exactly
+      the same zero-extended result. Host tests cover misalignments 0..8,
+      the 0 / 1 / 0x7fff / 0x8000 / 0xffff boundaries, and round trips
+      through pack_be16 at every offset. match.py structural diff reviewed
+      - two ldrb with the low address supplying the most significant byte,
+      plus the crate-wide push {fp, lr} frame.
+
   - address: 0x08261770
     ghidra: FUN_08261770
     name: unpack_be32
@@ -30381,6 +30554,48 @@ functions:
       reviewed against the true 32-byte extent - the four ldrb plus the
       shift-8/16/24 orr chain line up, with the byte reverse inlined in
       place of the b and the crate-wide push {fp, lr} frame added.
+
+  - address: 0x08261790
+    ghidra: FUN_08261790
+    name: unpack_be64
+    size: 92
+    sig: "u64 unpack_be64(const u8 *src)"
+    module: util/beload
+    status: ported
+    renames:
+      param_1/r0: src
+      uVar1/r1: gathered_lo
+      uVar2/r2: gathered_hi
+      uVar3/r3: lane_byte
+    notes: >-
+      Reads eight big-endian bytes at an unaligned src and returns them as
+      a u64 - the read twin of pack_be64 @ 0x08261670 and the widest member
+      of the unpack overload set. 92 bytes, 23 instructions,
+      0x08261790..0x082617e8, the last of them a tail branch (ea ff ff c0,
+      an unconditional B, not a BL) to reverse_bytes64 @ 0x082616f0; the
+      next function starts at 0x082617ec with an unrelated push {r4, r5,
+      r6, lr}. Ghidra does not list this address at all - it folds these 92
+      separately-linked bytes into the preceding unpack_be32, so the extent
+      is decoded from the raw words. 3 bl call sites, counted by decoding
+      every B/BL word in osos.dec. Algorithm - gather bytes 0..7 into a
+      little-endian doubleword, walking src with pre-indexed ldrb, then
+      tail-branch to the 64-bit reverse. The port keeps that call rather
+      than folding it in, matching pack_be64; LLVM reproduces the tail
+      branch. Deviation - the original's gather open-codes a 64-bit shift
+      over register pairs and so emits several provably-zero terms (asr #31
+      of a byte just loaded with ldrb, and lsr #24/#16/#8 of single-byte
+      values); those are dead there and are not written in the port, and
+      LLVM addresses src with constant offsets instead of the pre-indexed
+      walk. Kept in its own text section so LLVM cannot fold it onto
+      another unpacker. Host tests cover misalignments 0..15, the 0 / 1 /
+      0x7fffffffffffffff / 0x8000000000000000 / 0xffffffffffffffff
+      boundaries, a lone 0x80 byte in each of the eight lanes (which is
+      what a stray sign-extension of a gathered byte would corrupt), round
+      trips through pack_be64 at every offset, and the split into two
+      unpack_be32 reads with the high word at the low addresses. match.py
+      structural diff reviewed - eight ldrb feeding two orr chains, one per
+      half, then the tail b to the reverser, plus the crate-wide push
+      {fp, lr} frame.
 
   # --- retailOS event source object (see also 0x081e04b0 / 0x081e054c) ---
   - address: 0x081e0ba4
