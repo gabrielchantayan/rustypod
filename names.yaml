@@ -20008,14 +20008,16 @@ functions:
       units/turn phase. It mirrors phase bit 0x400 into index 0..0x3ff,
       reads a u16 amplitude, and negates it for phase bit 0x800. This is
       fixed16_sin: the same routine as fixed16_cos @ 0x080e97ac without
-      that routine's +0x4000 (pi/2) phase offset. Port deferred: every
-      output directly depends on SIN_TABLE's exact 1024 u16 entries at
-      0x083f10b2; direct inspection confirms that all 2048 bytes are zero
-      in osos.dec, inside an undecrypted hole (also recovery/patched), and
-      no duplicate table exists. Do not synthesize it: the unknown entry
-      rounding/clamping changes observable Q16.16 outputs. Revisit only
-      after decrypt fills the table, then embed it and retain an explicit
-      f32_to_fixed16_sat seam for unported 0x080a67dc. Ghidra size 40 is
+      that routine's +0x4000 (pi/2) phase offset. Port remains deferred:
+      every output directly depends on SIN_TABLE's exact 1024 u16 entries
+      at 0x083f10b2. Reinspection of the current osos.dec confirms all
+      2048 table bytes are zero, inside the undecrypted hole (also
+      recovery/patched), and no duplicate table exists. Do not synthesize
+      it: unknown entry rounding/clamping changes observable Q16.16
+      outputs. Revisit only after decrypt fills the table, then embed it
+      and retain an explicit f32_to_fixed16_sat seam for unported
+      0x080a67dc.
+      Ghidra size 40 is
       truncated by the false no-return edge;
       actual code is 0x080e988c-0x080e98ff plus literals 0x080e9900-0x080e990b.
 
