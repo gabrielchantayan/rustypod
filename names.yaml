@@ -4922,6 +4922,73 @@ functions:
       body to sys_stub_ret0 — objdump shows the two ARM symbols at one
       address (match.py finds it under sys_stub_ret0's label).
 
+  # --- retailOS diagnostic printf (stdio/debug_printf) ---
+  - address: 0x082bd4a8
+    ghidra: FUN_082bd4a8
+    name: debug_printf
+    size: 28
+    sig: "int debug_printf(const char *fmt, ...)"
+    module: stdio/debug_printf
+    vars: {param_1: fmt}
+    status: ported
+    renames:
+      param_1/r0: fmt
+      FUN_08396e1c: debug_vprintf (DEBUG_VPRINTF seam, not yet ported)
+    notes: >-
+      The varargs front end of retailOS's semihosting trace printf.
+      Seven instructions, extent 0x082bd4a8..0x082bd4c4 confirmed from
+      the raw words (0x082bd4c4 starts the next function with its own
+      push), no literal pool. push {r0,r1,r2,r3}; push {r4,lr};
+      ldr r0,[sp,#8]; add r1,sp,#12; bl 0x08396e1c; pop {r4};
+      ldr pc,[sp],#20 - the textbook AAPCS variadic prologue (spill
+      r0-r3 into a frame contiguous with the caller's stacked
+      arguments, point a va_list just past the fixed parameter, call
+      the v-flavored worker, then drop lr + the four spill words in one
+      post-indexed load). In C: `int debug_printf(const char *fmt, ...)
+      { return debug_vprintf(fmt, ap); }`.
+      48 call sites, binary-scanned by decoding every B/BL word in
+      osos.dec: 36 bl, 9 blne, 1 bleq, 1 tail b, 1 tail beq. No DATA
+      word holds the address, so it is never dispatched virtually. The
+      ten predicated sites are callers gating a trace on a status
+      BITMASK (e.g. tst r4,#0x400000; addne r0,pc,#0x50; blne @
+      0x08087a88), NOT on a NULL check - this entry point has no guard
+      on the format at all. 43 of the 48 load the format with
+      `add r0,pc,#imm`, i.e. inline PC-relative string literals:
+      "mDS: write data CRC response error\n" @ 0x08087adc (storage
+      driver), "cI: card failed HS_TIMING SWITCH\n" @ 0x08074e14 (card
+      driver).
+      The worker FUN_08396e1c @ 0x08396e1c (380 bytes,
+      0x08396e1c..0x08396f98 plus a 4-byte digit-table literal;
+      0x08396f9c starts the next function) is a hand-rolled mini-printf
+      writing straight to the ARM Angel semihosting console - unrelated
+      to the ADS printf family in printf/printf_api.rs, and
+      debug_printf is its ONLY caller (1 bl, binary-verified). It scans
+      for % and backslash, flushing literal runs through FUN_0808e2b8
+      (parks a NUL over the run's last byte, semihost SYS_WRITE0 op 4,
+      then SYS_WRITEC op 3 via 0x080769a0 for the saved byte, then
+      restores it). Conversions: optional 0-prefixed decimal width,
+      ignored `l`, then d (emit '-', negate, fall into the unsigned
+      printer 0x080944d8), u, x/X (8-digit zero-padded hex built
+      backwards in the spill frame, flushed with SYS_WRITE0), c
+      (SYS_WRITEC - except at width 4, where it dispatches 0x0807a344,
+      the FourCC tag printer, so %4c spells a tag out), s (SYS_WRITE0
+      on the argument), %% literal, and any other letter degrades to a
+      single space. Always returns 0.
+      Deviations - the `...` becomes an explicit args: VaList
+      (*const u32), the house convention already used by
+      printf/printf_api.rs's sprintf/snprintf and cxx/string_object.rs;
+      that IS what the original builds, since the spill frame exists
+      only to manufacture this pointer, and a variadic C caller needs
+      the capture trampoline printf_api.rs documents. The worker rides
+      the DEBUG_VPRINTF slot (firmware-address default on target,
+      panicking default on host). Host tests (4) cover verbatim
+      forwarding of both arguments, propagation of a non-zero result
+      (the port does not synthesize the stock 0), the unguarded NULL
+      format, and the slot being re-read per call. match.py (--size
+      28): same instruction count (7); with the va_list explicit the
+      spill frame is gone, so the port is a tail dispatch through the
+      seam while r0/r1 already hold what the original had to reload.
+
   # --- Batch 10 scouting: identified only (ADS stdio / locale block) ---
   # The region 0x08030004-0x0803097c is the ADS buffered-stdio + setlocale
   # cluster (FILE struct: flags @ +0xc, buffer @ +0x10, size @ +0x1c,
