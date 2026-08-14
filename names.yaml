@@ -31141,3 +31141,73 @@ functions:
       original's order; the differences are the crate fp frame, the
       indirect `blx` hook dispatch in place of three direct `bl`s, and
       LLVM keeping the NULL result in r6 instead of reusing r4.
+  # --- IRAM veneer for the microsecond timer read ---
+  - address: 0x08037e20
+    ghidra: thunk_EXT_FUN_08037e20
+    name: iram_usec_timer_read_veneer
+    size: 8
+    sig: "u32 iram_usec_timer_read_veneer(void)"
+    module: drivers/timer
+    status: ported
+    notes: >-
+      ldr pc,[pc,#-4] -> 0x22001edc = the IRAM copy of usec_timer_read @
+      0x08001edc (the three-word Timer E TECNT read). Ghidra reports 4
+      bytes; the stub is 8 (0xe51ff004 at 0x08037e20 + the target word
+      0x22001edc at 0x08037e24). 47 bl call sites, all unconditional, and
+      0 tail b - binary-verified by decoding every B/BL word in osos.dec
+      for every condition code, not from Ghidra xrefs. The mirror
+      0x2200XXXX = osos 0x0800XXXX holds because the relocator @
+      0x080046e0 memmoves 0xaed8 bytes from 0x08000000 to 0x22000000
+      (S5L8702 internal SRAM, not mask ROM), so the body is recoverable
+      and is ALREADY PORTED - this is a real forwarding call, not a stub.
+      No arguments, no stack, lr untouched: a pure tail transfer returning
+      the counter word in r0. The port loads its callee through
+      read_volatile and carries its own link_section; without either,
+      LLVM inlines the three-instruction body and its identical-function
+      folding collapses the veneer onto usec_timer_read, destroying the
+      separate 0x08037e20 hook seam. Note the mirror region holds three
+      byte-identical 12-byte bodies at 0x08001ec4/0x08001ed0/0x08001edc;
+      the veneer names the third. match.py structural: ldr/ldr/bx through
+      a literal - the original's indirect-jump-through-a-literal shape
+      plus one indirection and the crate's fp frame.
+
+  # --- StringObject: bounded UTF-16 assignment ---
+  - address: 0x082765a8
+    ghidra: FUN_082765a8
+    name: string_object_assign_utf16
+    size: 120
+    sig: "void string_object_assign_utf16(StringObject *this, const unsigned short *utf16, int max_code_units)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: this, param_2: utf16, param_3: max_code_units,
+      iVar3: requested_size, iVar4: destination}
+    notes: >-
+      The UTF-16 sibling of string_object_assign_payload @ 0x08276474 in the
+      same two-word polymorphic string class (vtable 0x089a6044): it
+      transcodes a bounded UTF-16 range into this object's payload. 120
+      bytes, all code, no literal-pool word - the next function's
+      `push {r3,r4,r5,lr}` starts at 0x08276620. 48 bl call sites (47
+      unconditional, 1 predicated) and 0 tail b, binary-verified by decoding
+      every B/BL word in osos.dec for every condition code, not from Ghidra
+      xrefs. Algorithm: `subs r5,r1,#0; cmpne r6,#0` guards on utf16 == NULL
+      or max_code_units <= 0 (signed LE) and tail-dispatches vtable slot
+      +0xc with `this`; otherwise the ported bounded counter
+      utf16_utf8_byte_len_bounded_plus1 @ 0x08276338 gives the inclusive
+      UTF-8 byte length, vtable slot +0x8 is asked for exactly that many
+      bytes as (this, byte_len, 0), a NULL result returns immediately with
+      no copy and no +0xc fallback, the transcoder @ 0x0827675c writes the
+      bytes, and THIS function stores the terminator at
+      destination[byte_len - 1] from the sizing helper's count - the
+      transcoder's return value is discarded. Note the guard tests the COUNT,
+      not the first code unit as the C-string siblings test source[0]: a
+      range whose first code unit is a UTF-16 NUL still allocates one byte.
+      Deviations: vtable slots +0x8/+0xc stay modeled by
+      STRING_OBJECT_ASSIGN_CSTR_OPS and the unported transcoder @ 0x0827675c
+      by the new STRING_OBJECT_UTF16_TRANSCODE slot, because
+      STRING_OBJECT_VTABLE holds ROM identities rather than host-callable
+      pointers; the byte length stays i32 and the terminator is addressed
+      with a signed offset, preserving the counter's documented 32-bit
+      wrapping. match.py structural: same order and same shape - guard,
+      sizing bl, allocating blx, NULL test, transcode blx,
+      `add r0,r7,r6; strb r8,[r0,#-1]` - with the two ops-table
+      indirections and LLVM hoisting the guard ahead of the frame push.

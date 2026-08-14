@@ -39,6 +39,17 @@
 //!   copying the source (including its NUL) into the returned storage.
 //!   A NULL or empty source instead tail-dispatches virtual slot +0xc;
 //!   an allocation failure returns without copying or falling back.
+//! - `string_object_assign_utf16` — original: `FUN_082765a8` @
+//!   0x082765a8 (120 bytes, all code; 48 `bl` call sites — 47
+//!   unconditional, 1 predicated — binary-scanned). The UTF-16 sibling
+//!   of `string_object_assign_payload`: transcodes a bounded UTF-16
+//!   range into the payload. It sizes the storage with the ported
+//!   bounded counter `utf16_utf8_byte_len_bounded_plus1` @ 0x08276338,
+//!   asks virtual slot +0x8 for exactly that many bytes with flag zero,
+//!   runs the (unported) transcoder @ 0x0827675c into the result and
+//!   writes the terminator itself at `byte_len - 1`. Its guard tests the
+//!   COUNT, not the first code unit: only a NULL pointer or a
+//!   non-positive count tail-dispatches virtual slot +0xc.
 //! - `string_object_construct_from_cstr` — original: `FUN_08277304` @
 //!   0x08277304 (44 bytes: 40 code + the 4-byte vtable literal @
 //!   0x0827732c; 143 `bl` call sites, binary-scanned). The converting
@@ -521,6 +532,116 @@ pub unsafe extern "C" fn string_object_assign_payload(
         return;
     }
     strcpy(destination, payload);
+}
+
+/// The unported UTF-16 -> UTF-8 transcoder @ 0x0827675c, the writing half
+/// of [`string_object_assign_utf16`] (124 bytes: 0x0827675c..0x082767d8,
+/// where the next function's `push {r3, r4, lr}` begins; 5 `bl` call
+/// sites, binary-scanned).
+///
+/// It converts at most `max_code_units` UTF-16 units into `destination`
+/// with the same 0x80/0x800 thresholds the sizing helper
+/// [`utf16_utf8_byte_len_bounded_plus1`] @ 0x08276338 counts by (and the
+/// same absence of surrogate pairing), stops early on a UTF-16 NUL after
+/// storing that NUL as a single zero byte, appends no terminator of its
+/// own, and returns the number of code units consumed.
+pub type Utf16ToUtf8Fn = unsafe extern "C" fn(
+    destination: *mut u8,
+    utf16: *const u16,
+    max_code_units: i32,
+) -> i32;
+
+/// Placeholder for the unported transcoder. It writes nothing and reports
+/// zero code units, so the storage [`string_object_assign_utf16`] obtained
+/// keeps whatever the allocation left in it apart from the terminator the
+/// assignment itself writes.
+unsafe extern "C" fn utf16_to_utf8_stub(
+    _destination: *mut u8,
+    _utf16: *const u16,
+    _max_code_units: i32,
+) -> i32 {
+    0
+}
+
+/// Active model of the transcoder @ 0x0827675c. A later port of that
+/// function replaces this default without changing its caller.
+pub static mut STRING_OBJECT_UTF16_TRANSCODE: Utf16ToUtf8Fn = utf16_to_utf8_stub;
+
+#[inline(always)]
+unsafe fn utf16_transcode_op() -> Utf16ToUtf8Fn {
+    core::ptr::read_volatile(core::ptr::addr_of!(STRING_OBJECT_UTF16_TRANSCODE))
+}
+
+/// string_object_assign_utf16 — original: `FUN_082765a8` @ 0x082765a8
+/// (120 bytes, all code — no literal-pool word; the next function's
+/// `push {r3, r4, r5, lr}` starts at 0x08276620). **48 `bl` call sites**
+/// (47 unconditional, 1 predicated) and 0 tail `b`, binary-scanned by
+/// decoding every ARM `B`/`BL` word in `work/firmware/osos.dec` for every
+/// condition code.
+///
+/// The UTF-16 sibling of [`string_object_assign_payload`] @ 0x08276474:
+/// `void assign(const unsigned short *utf16, int max_code_units)`. It
+/// transcodes a bounded UTF-16 range into this object's payload.
+///
+/// ```text
+/// subs  r5, r1, #0        ; utf16
+/// cmpne r6, #0            ; only when utf16 != NULL
+/// ldrle r1, [vtable, #12] ; utf16 == NULL || max_code_units <= 0
+/// bxle  r1                ;   -> tail-dispatch slot +0xc with `this`
+/// bl    0x08276338        ; utf16_utf8_byte_len_bounded_plus1(utf16, n)
+/// blx   [vtable, #8]      ; allocate(this, byte_len, 0)
+/// movs  r4, r0
+/// popeq {..., pc}         ; NULL allocation: no copy, no +0xc fallback
+/// bl    0x0827675c        ; transcode(destination, utf16, n)
+/// add   r1, r4, r7
+/// strb  r0, [r1, #-1]     ; destination[byte_len - 1] = 0
+/// ```
+///
+/// Three details separate it from the C-string siblings. The guard tests
+/// the **count**, not `source[0]`: a NULL pointer or a non-positive
+/// `max_code_units` (the `LE` is signed) is the only path to virtual slot
+/// +0xc, so a range whose first code unit is a UTF-16 NUL still allocates
+/// — one byte, holding just the terminator. The size handed to slot +0x8
+/// is the exact UTF-8 byte length the bounded counter @ 0x08276338
+/// reports, terminator included, so the allocation and the transcoder
+/// agree on the encoding thresholds by construction. And the NUL is
+/// written by *this* function at `destination[byte_len - 1]`, from the
+/// sizing helper's count rather than from the transcoder's return value,
+/// which is discarded.
+///
+/// The two virtual callees remain modeled by
+/// [`STRING_OBJECT_ASSIGN_CSTR_OPS`] (slots +0x8/+0xc) and the transcoder
+/// by [`STRING_OBJECT_UTF16_TRANSCODE`], because [`STRING_OBJECT_VTABLE`]
+/// stores ROM identities rather than host-callable pointers and
+/// 0x0827675c is not yet ported. As in the original, `this` is not
+/// NULL-guarded before virtual dispatch, and the source range stays
+/// caller-owned — the allocation virtual call owns replacing and freeing
+/// any prior payload.
+///
+/// The byte length is kept `i32` and the terminator addressed with a
+/// signed `offset`, preserving the original's 32-bit signed arithmetic:
+/// the counter documents that its sum wraps, and a wrapped count would
+/// index backwards from `destination` on the target exactly as it does
+/// here.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_assign_utf16(
+    this: *mut StringObject,
+    utf16: *const u16,
+    max_code_units: i32,
+) {
+    if utf16.is_null() || max_code_units <= 0 {
+        assign_cstr_clear_op()(this);
+        return;
+    }
+
+    let requested_size = utf16_utf8_byte_len_bounded_plus1(utf16, max_code_units);
+    let destination = assign_cstr_allocate_op()(this, requested_size as usize, 0);
+    if destination.is_null() {
+        return;
+    }
+    utf16_transcode_op()(destination, utf16, max_code_units);
+    destination.offset(requested_size as isize - 1).write(0);
 }
 
 /// Size of the stack scratch buffer [`string_object_format`] formats into
@@ -1923,6 +2044,50 @@ pub(crate) mod tests {
         }
     }
 
+    /// `(destination, utf16, max_code_units)` received by the transcoder
+    /// 0x0827675c through `string_object_assign_utf16`.
+    static mut UTF16_TRANSCODE_CALLS: Vec<(usize, usize, i32)> = Vec::new();
+
+    /// Models the transcoder's writing half well enough to prove the
+    /// terminator lands where the sizing helper says: the same 0x80/0x800
+    /// thresholds, no surrogate pairing, early stop on a UTF-16 NUL (which
+    /// it stores as one zero byte), and no terminator of its own.
+    unsafe extern "C" fn recording_utf16_transcode(
+        destination: *mut u8,
+        utf16: *const u16,
+        max_code_units: i32,
+    ) -> i32 {
+        (*core::ptr::addr_of_mut!(UTF16_TRANSCODE_CALLS)).push((
+            destination as usize,
+            utf16 as usize,
+            max_code_units,
+        ));
+
+        let mut out = destination;
+        let mut consumed = 0;
+        for index in 0..max_code_units.max(0) {
+            let code_unit = *utf16.offset(index as isize);
+            if code_unit < 0x80 {
+                out.write(code_unit as u8);
+                out = out.add(1);
+                if code_unit == 0 {
+                    return consumed;
+                }
+            } else if code_unit < 0x800 {
+                out.write(0xc0 | (code_unit >> 6) as u8);
+                out.add(1).write(0x80 | (code_unit & 0x3f) as u8);
+                out = out.add(2);
+            } else {
+                out.write(0xe0 | (code_unit >> 12) as u8);
+                out.add(1).write(0x80 | ((code_unit >> 6) & 0x3f) as u8);
+                out.add(2).write(0x80 | (code_unit & 0x3f) as u8);
+                out = out.add(3);
+            }
+            consumed += 1;
+        }
+        consumed
+    }
+
     /// Restores the unported virtual-method boundary even when a test panics.
     struct AssignCstrOpsGuard {
         _lock: MutexGuard<'static, ()>,
@@ -1935,6 +2100,8 @@ pub(crate) mod tests {
                     .write_volatile(DEFAULT_STRING_OBJECT_ASSIGN_CSTR_OPS);
                 core::ptr::addr_of_mut!(RETAIL_VSNPRINTF_ENGINE)
                     .write_volatile(retail_vsnprintf_engine_stub);
+                core::ptr::addr_of_mut!(STRING_OBJECT_UTF16_TRANSCODE)
+                    .write_volatile(utf16_to_utf8_stub);
             }
         }
     }
@@ -1945,6 +2112,9 @@ pub(crate) mod tests {
             (*core::ptr::addr_of_mut!(ASSIGN_CSTR_ALLOCATE_CALLS)).clear();
             (*core::ptr::addr_of_mut!(ASSIGN_CSTR_CLEAR_CALLS)).clear();
             (*core::ptr::addr_of_mut!(FORMAT_ENGINE_CALLS)).clear();
+            (*core::ptr::addr_of_mut!(UTF16_TRANSCODE_CALLS)).clear();
+            core::ptr::addr_of_mut!(STRING_OBJECT_UTF16_TRANSCODE)
+                .write_volatile(recording_utf16_transcode);
             core::ptr::addr_of_mut!(ASSIGN_CSTR_ALLOCATE_RESULT).write(allocation_result);
             core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS).write_volatile(
                 StringObjectAssignCstrOps {
@@ -2112,6 +2282,167 @@ pub(crate) mod tests {
             std::vec![this as usize, this as usize]
         );
         assert_eq!(object.payload, 0x2222_2222 as *mut u8);
+    }
+
+    // ---- string_object_assign_utf16 ---------------------------------
+
+    fn utf16_transcode_calls() -> Vec<(usize, usize, i32)> {
+        unsafe { (*core::ptr::addr_of!(UTF16_TRANSCODE_CALLS)).clone() }
+    }
+
+    /// A fresh object for the UTF-16 assignment tests; the payload word is a
+    /// recognizable non-NULL so the tests can assert the port never writes it
+    /// (the +0x8 virtual call owns that word).
+    fn utf16_test_object() -> StringObject {
+        StringObject {
+            vtable: core::ptr::null(),
+            payload: 0x2222_2222 as *mut u8,
+        }
+    }
+
+    #[test]
+    fn assign_utf16_sizes_with_the_bounded_counter_then_terminates_the_transcode() {
+        // 1 + 2 + 3 encoded bytes, plus the terminator this function writes.
+        let code_units: [u16; 3] = [0x41, 0xa9, 0x20ac];
+        let mut destination = [0xa5u8; 16];
+        let mut object = utf16_test_object();
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(destination.as_mut_ptr());
+
+        unsafe { string_object_assign_utf16(this, code_units.as_ptr(), 3) };
+
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
+            std::vec![(this as usize, 7, 0)],
+            "slot +0x8 receives exactly the bounded counter's inclusive length"
+        );
+        assert_eq!(
+            utf16_transcode_calls(),
+            std::vec![(destination.as_ptr() as usize, code_units.as_ptr() as usize, 3)],
+            "0x0827675c gets the allocation, the source and the UNCLAMPED count"
+        );
+        assert_eq!(&destination[..7], b"A\xc2\xa9\xe2\x82\xac\0");
+        assert_eq!(&destination[7..], &[0xa5u8; 9], "nothing past byte_len - 1");
+        assert!(unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty() });
+        assert_eq!(object.payload, 0x2222_2222 as *mut u8, "the port never stores it");
+    }
+
+    /// The bound, not the source's own terminator, is what the guard reads —
+    /// but the counter still stops at an embedded UTF-16 NUL, so a count
+    /// larger than the string sizes only the units before it.
+    #[test]
+    fn assign_utf16_honors_the_bound_and_stops_at_an_embedded_nul() {
+        let code_units: [u16; 4] = [0x41, 0x42, 0, 0x43];
+        let mut destination = [0xa5u8; 16];
+        let mut object = utf16_test_object();
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(destination.as_mut_ptr());
+
+        unsafe { string_object_assign_utf16(this, code_units.as_ptr(), 4) };
+
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
+            std::vec![(this as usize, 3, 0)],
+            "'A' + 'B' + the terminator; the counter never reaches 'C'"
+        );
+        assert_eq!(&destination[..3], b"AB\0");
+    }
+
+    /// The decisive difference from the C-string siblings: a first code unit
+    /// of zero is NOT the empty-source case. It still allocates — one byte,
+    /// holding only the terminator this function writes.
+    #[test]
+    fn assign_utf16_guards_on_the_count_not_the_first_code_unit() {
+        let code_units: [u16; 2] = [0, 0x41];
+        let mut destination = [0xa5u8; 4];
+        let mut object = utf16_test_object();
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(destination.as_mut_ptr());
+
+        unsafe { string_object_assign_utf16(this, code_units.as_ptr(), 2) };
+
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
+            std::vec![(this as usize, 1, 0)],
+            "a leading UTF-16 NUL still takes the allocating path"
+        );
+        assert!(unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty() });
+        assert_eq!(destination[0], 0);
+        assert_eq!(&destination[1..], &[0xa5u8; 3]);
+    }
+
+    /// NULL, and every non-positive count including the signed-negative ones
+    /// the original's `LE` covers, dispatch only virtual slot +0xc.
+    #[test]
+    fn assign_utf16_null_and_nonpositive_counts_dispatch_only_vtable_slot_0xc() {
+        let code_units: [u16; 1] = [0x41];
+        let mut object = utf16_test_object();
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(0x3333_3333 as *mut u8);
+
+        unsafe {
+            string_object_assign_utf16(this, core::ptr::null(), 4);
+            string_object_assign_utf16(this, code_units.as_ptr(), 0);
+            string_object_assign_utf16(this, code_units.as_ptr(), -1);
+            string_object_assign_utf16(this, code_units.as_ptr(), i32::MIN);
+        }
+
+        assert!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty() },
+            "the guarded paths skip 0x08276338 and vtable slot +0x8"
+        );
+        assert!(utf16_transcode_calls().is_empty());
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).clone() },
+            std::vec![this as usize; 4]
+        );
+        assert_eq!(object.payload, 0x2222_2222 as *mut u8);
+    }
+
+    /// A NULL allocation is an immediate return: no transcode, no terminator
+    /// store through the NULL, and no fallback to slot +0xc.
+    #[test]
+    fn assign_utf16_allocation_failure_skips_transcode_and_clear_fallback() {
+        let code_units: [u16; 2] = [0x41, 0x42];
+        let mut object = utf16_test_object();
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(core::ptr::null_mut());
+
+        unsafe { string_object_assign_utf16(this, code_units.as_ptr(), 2) };
+
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
+            std::vec![(this as usize, 3, 0)]
+        );
+        assert!(utf16_transcode_calls().is_empty());
+        assert!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty() },
+            "allocation failure does not fall back to slot +0xc"
+        );
+    }
+
+    /// Self-reference: assigning from storage the allocation itself hands back
+    /// is the aliasing case the original does nothing to prevent. The
+    /// terminator still lands at `byte_len - 1` of the returned block.
+    #[test]
+    fn assign_utf16_terminates_at_byte_len_even_when_source_aliases_destination() {
+        let mut scratch = [0u8; 16];
+        let code_units = scratch.as_mut_ptr() as *mut u16;
+        unsafe {
+            code_units.write(0x41);
+            code_units.add(1).write(0x42);
+        }
+        let mut object = utf16_test_object();
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(scratch.as_mut_ptr());
+
+        unsafe { string_object_assign_utf16(this, code_units, 2) };
+
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
+            std::vec![(this as usize, 3, 0)]
+        );
+        assert_eq!(&scratch[..3], b"AB\0");
     }
 
     // ---- string_object_format ---------------------------------------
