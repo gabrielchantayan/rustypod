@@ -9108,6 +9108,10 @@ functions:
       This porting pass independently confirmed that `cmp -n 16 -i
       0x3f18b2 osos.dec /dev/zero` succeeds, so no behavioral Rust port can
       be verified until the seed bytes are recovered.
+      Deferral reconfirmed 2026-08-14: `cmp -n 16 -i 0x3f18b2
+      osos.dec /dev/zero` still succeeds. The seed table remains
+      unavailable, so retaining `identified` is necessary to avoid
+      publishing a behaviorally unverifiable implementation.
 
   - address: 0x0824980c
     ghidra: FUN_0824980c
