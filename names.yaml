@@ -5783,6 +5783,54 @@ functions:
       sites, binary-verified; among them the pool base-subobject dtor
       (bl @ 0x08214240).
 
+  - address: 0x0808e2b0
+    ghidra: FUN_0808e2b0
+    name: mailbox_slot_signal
+    size: 8
+    sig: "void mailbox_slot_signal(Mailbox **slot)"
+    module: kernel/kobj
+    vars: {param_1: slot}
+    status: ported
+    renames:
+      param_1/r0: slot
+      FUN_0805697c: csem_signal (already ported, kernel/csem.rs)
+    notes: >-
+      Two instructions, extent 0x0808e2b0..0x0808e2b8 confirmed from the
+      raw words (the next function starts at 0x0808e2b8 with its own
+      push {r4,r5,r6,lr}); no trailing literal pool, the tail branch is
+      PC-relative. NOT a veneer — `ldr r0,[r0]` (0xe5900000) then
+      `b 0x0805697c` (0xeaff21b0), i.e. csem_signal(*slot): load the
+      mailbox block out of a caller-owned one-word slot and tail-call the
+      already-ported wake side of the counting semaphore. 52 call sites,
+      binary-scanned by decoding every B/BL word in osos.dec: 44 bl,
+      1 blne, 1 bleq, 4 tail b, 2 tail bne. No DATA word holds the
+      address, so it is never dispatched virtually. The 8 predicated
+      sites are the behavioural fact worth recording: this wrapper has NO
+      NULL guard (the ldr and csem_signal both dereference
+      unconditionally), so callers that can hold an empty slot test it
+      themselves and branch in conditionally.
+      Identification: the slot is the same one mailbox_slot_create
+      @ 0x0808e294 fills (`*slot = mailbox_create()`), and its byte-twin
+      sibling FUN_0808e2a8 (`ldr r0,[r0]; b 0x080567a8`) is the csem_post
+      flavor — construct/post/signal over one member pointer, the
+      framework's "event cell" idiom. This wrapper is what proves the
+      8-byte mailbox block {state @ +0, id @ +4} IS csem.rs's
+      CountingSem {count: i32 @ +0, waiter_id: u32 @ +4}: state is the
+      signed token count, id the RTXC waiter object slept on.
+      Deviations - none in behaviour; the port re-views the Mailbox
+      pointer as a CountingSem at the one call (same 8 bytes, both
+      #[repr(C)] named fields, no literal byte offsets). Host tests
+      (4) cover the token-spending path (count stays >= 0, no ROM
+      entry), the negative-count wake carrying this block's waiter id,
+      repeated signals driving the count further negative without
+      saturating, and re-pointing the slot between calls (nothing is
+      cached — the ldr is per call). match.py (--size 8): LLVM inlines
+      csem_signal's mrs/msr critical section and its conditional wake
+      into the wrapper instead of tail-branching, so the port is the
+      same deref followed by the callee's body verbatim (decrement,
+      cmn #1 / popgt early return, ROM wake through CSEM_ROM_WAKE) —
+      the documented ROM-thunk dispatch deviation, same structure.
+
   - address: 0x08056788
     ghidra: FUN_08056788
     name: waiter_create
