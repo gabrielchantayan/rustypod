@@ -30432,3 +30432,165 @@ functions:
       registers; the no-argument ABI and return_zero name therefore express
       the entire observed behavior. No deviations; focused host tests assert
       the zero word and its all-clear bit representation.
+
+  # --- JPEG decoder: the source byte reader ---
+  # The decoder is one global @ 0x08a0a79c with no instance handle: the
+  # marker scan (0x0807a7b0), the entropy bit reader (0x0807ec24), DHT
+  # (0x080e9eb4) and the unnamed SOF/SOS/DQT blocks in
+  # 0x080ea000-0x080ea400 / 0x080ed100-0x080ed320 all reach it through a
+  # literal-pool word. Identified as JPEG by 0x0807ec24's `0xff 0x00`
+  # unstuffing, 0x080e9eb4's Tc/Th nibble split into separate DC and AC
+  # table arrays, and the "jpeg"/"tiff"/"pict" format-name table
+  # @ 0x08117cec. Source bytes are produced by 0x08086ed0.
+  - address: 0x080e7ed4
+    ghidra: FUN_080e7ed4
+    name: jpeg_source_read_byte
+    size: 96
+    sig: "u32 jpeg_source_read_byte()"
+    module: jpeg/source
+    renames:
+      DAT_080e7f30: JPEG_DECODER_STATE
+      uVar2: position
+      uVar4: queue
+      iVar3: bank
+    status: ported
+    notes: >-
+      The JPEG decoder's "next source byte" primitive, and the consumer
+      end of its 2 KiB circular double buffer. Body decoded from the raw
+      image, not from Ghidra - true extent is 96 bytes (92 of code
+      0x080e7ed4-0x080e7f2c plus the state-pointer literal 0x08a0a79c
+      @ 0x080e7f30); functions.csv reports 92 and drops the pool word,
+      and the next function starts at 0x080e7f34 (`mov r2,r0; mov r0,r1;
+      ldr r1,[r2,#12]; b 0x08065054`). Algorithm - `pos = state+0x84`;
+      when `pos & 3 == 0` reload `state+0x88` with the word at
+      `(pos & 0x400 ? state+0x68 : state+0x64) + (pos & 0x3ff)`; then
+      return `queue & 0xff`, store `pos+1` and `queue >> 8`. So
+      `state+0x88` is a four-byte little-endian byte queue and
+      `state+0x84` a free-running byte counter that is never masked in
+      place - only the buffer index and the bank-select bit are derived
+      from it, which is what lets DHT @ 0x080e9eb4 push a marker back
+      with `queue = queue << 8 | 0xff; pos -= 1`. The bank select is
+      `lsls r2,r1,#21` reading the sign bit, i.e. bit 10 of the position,
+      not a comparison against the fill level. The producer @ 0x08086ed0
+      mirrors it exactly - it memcpys 0x400-byte chunks alternately into
+      `+0x64` and `+0x68`, tracks its own fill position at `+0x8c`,
+      selects the destination bank with the same bit-10 test, and stalls
+      while `fill - read > 0x3ff`. There is no bounds, NULL or
+      end-of-data check anywhere in the body; call sites counted by
+      decoding every ARM B/BL word in osos.dec are 60 plain `bl` with
+      ZERO predicated forms and ZERO `b`, so no caller guards it either -
+      exhaustion is detected by the decoder's marker logic instead.
+      Faithful detail - the original reloads `state+0x84` a second time on
+      the refill path (`add r0,r3,#0; ldr r0,[r0,#0x84]` re-reads what r1
+      already holds), a redundant ADS reload folded to one read.
+      Deviations - the state lives at 0x08a0a79c on device and in host
+      test storage otherwise (cxx/object_flags.rs precedent), and only the
+      four words this function touches are modeled, as a #[repr(C)]
+      window struct with named fields so the target offsets 0x64/0x68/
+      0x84/0x88 are asserted rather than hand-written per access.
+      Host tests (10) - byte order within the reloaded word, a mid-word
+      start consuming the stale queue before the next refill, the bit-10
+      bank switch, the 2 KiB alias, two unrelated bank pointers, the
+      DHT push-back sequence, exact one-per-call position advance, u32
+      position wrap, and all 256 byte values returned zero-extended.
+      match.py structural - `tst r1,#3` refill test, `tst r1,#0x400` with
+      predicated bank selection, masked index, word load, then the
+      `+1` / `>> 8` / `& 0xff` tail, one-to-one with the original;
+      LLVM folds the index mask to `and r3,r1,#0x3fc` (equivalent, since
+      the refill only runs on a word boundary) and adds the crate frame.
+      #[inline(never)] for the 60 `bl` targets.
+
+  # --- OpenSSL object database: the NID lookup ---
+  # Apple vendored OpenSSL; its object-identifier database sits in
+  # 0x0805e000-0x08064000 (OBJ_obj2nid @ 0x0805f074, OBJ_obj2txt @
+  # 0x0805f110, OBJ_ln2nid @ 0x0805edc4, OBJ_sn2nid @ 0x0805f2c4, all
+  # over the generic OBJ_bsearch @ 0x0805eb04) with the lhash machinery
+  # in 0x082d7xxx (lh_retrieve @ 0x082d7e0c, getrn @ 0x080e82cc).
+  # Identifying strings, binary-verified: "ssl2-md5"/"ssl3-md5"/
+  # "ssl3-sha1"/"RSA-SHA1" @ 0x0805f574 and "signature has problems,
+  # re-make with post SSLeay045" @ 0x08063268; Apple's own arc is
+  # "1.3.6.1.4.1.63.42" / "iPod Serial Number" @ 0x080782bc.
+  - address: 0x0805f074
+    ghidra: FUN_0805f074
+    name: obj_obj2nid
+    size: 156
+    sig: "int obj_obj2nid(const ASN1_OBJECT *object)"
+    module: crypto/obj_dat
+    vars: {param_1: object}
+    renames:
+      DAT_0805f100: ADDED_SLOT
+      DAT_0805f104: obj_cmp
+      DAT_0805f108: NUM_OBJ
+      DAT_0805f10c: OBJ_OBJS
+      local_14: key_kind
+      local_10: key_object
+      piVar2: slot
+    status: ported
+    notes: >-
+      OpenSSL's `OBJ_obj2nid` from crypto/objects/obj_dat.c, verbatim -
+      `if (a == NULL) return NID_undef; if (a->nid != 0) return a->nid;
+      if (added != NULL) { ad.type = ADDED_DATA; ad.obj = a; adp =
+      lh_retrieve(added, &ad); if (adp) return adp->obj->nid; } op =
+      OBJ_bsearch(&a, obj_objs, NUM_OBJ, 4, obj_cmp); return op ?
+      (*op)->nid : NID_undef;`. Body decoded from the raw image - true
+      extent is 156 bytes (140 of code 0x0805f074-0x0805f0fc plus the
+      four literal-pool words 0x0805f100-0x0805f10c); functions.csv
+      reports 140 and drops the pool, and the next function
+      (OBJ_obj2txt) starts at 0x0805f110. Evidence for the
+      identification - the layout the body walks is ASN1_OBJECT's, with
+      `nid` @ +0x08 here and `length` @ +0x0c / `data` @ +0x10 read off
+      the same pointer by OBJ_obj2txt @ 0x0805f110, which then decodes
+      the DER OID (`b & 0x7f` accumulated with `<< 7` per continuation
+      byte, first arc split by 40 through __rt_sdiv @ 0x08036f14,
+      formatted with "%d.%lu" @ 0x0805f2b4); 0x082d7e0c is lh_retrieve
+      (clears lh->error @ +0x5c, calls getrn @ 0x080e82cc, bumps
+      num_retrieve_miss @ +0x54 or num_retrieve @ +0x50); 0x0805eb04 is
+      OBJ_bsearch (lo/hi halving, `mla` for base + size*mid, `blx`
+      through the stacked fifth argument); and the siblings share the
+      machinery with a different ADDED_OBJ tag and table - OBJ_sn2nid
+      @ 0x0805f2c4 (tag 1, sn_objs @ 0x08a0c33c, 643 entries) and
+      OBJ_ln2nid @ 0x0805edc4 (tag 2, ln_objs @ 0x08a0cd48, 643
+      entries). NUM_OBJ = 617 with NUM_SN = NUM_LN = 643 dates the
+      vendored copy to the 0.9.6/0.9.7 era, where obj_objs is an array
+      of `ASN1_OBJECT *` rather than the `unsigned int` index array
+      0.9.8 switched to - hence the two-load hit path `(*op)->nid` and
+      hence the table living in RW data @ 0x08a0d754 filled by the ADS
+      runtime initializers. Note the shared tail - the added-hash hit
+      and the table hit both land on `ldr r0,[r0,#8]`, one dereference
+      apart. Call sites counted by decoding every ARM B/BL word in
+      osos.dec - 57 plain `bl`, ZERO predicated forms and ZERO `b`
+      (callers pass possibly-NULL objects and rely on the internal
+      guard). UNRESOLVED ANOMALY, recorded rather than guessed at - the
+      comparator in the literal pool is 0x080e1168, and that address
+      does NOT decode as a function entry in our decrypted image: it
+      lands mid-body in the 0x080df818-0x080e1318 block, on a
+      `bl 0x0804d17c` trace call. The same holds for every comparator
+      this bsearch family passes (0x080de770 for sn_objs, 0x080de478
+      for ln_objs, 0x080e1158 and 0x080e0cf0 for two other tables), and
+      an image-wide scan finds no cluster of comparator-shaped leaf
+      functions near any of them. Since the target cannot be read, the
+      port implements upstream's obj_cmp - encoded length first, then
+      memcmp over `data` - which the +0x0c/+0x10 layout recovered from
+      OBJ_obj2txt corroborates. Other deviations - `added` and
+      `obj_objs` live at 0x08a0c334+4 and 0x08a0d754 on device and in
+      host test storage otherwise (cxx/object_flags.rs precedent), with
+      the host table starting empty so an uninstalled fixture misses
+      instead of dereferencing a null base; the unported lh_retrieve
+      rides the OBJ_ADDED_RETRIEVE seam (house pattern); and
+      OBJ_bsearch plus its comparator are inlined rather than called
+      out, since the generic bsearch is shared with OBJ_sn2nid /
+      OBJ_ln2nid and belongs with them, and the key indirection (`&a`
+      plus the comparator's `*(ASN1_OBJECT * const *)`) folds away to
+      passing the object directly. Host tests (12) - NULL, an
+      already-resolved nid (positive and negative, since the early-out
+      tests `!= 0`), every entry of a sorted table found by its encoded
+      OID, four flavours of miss, the empty table, a full 617-entry
+      table exercising every search path, added-hash hit shadowing the
+      static table with the key's ADDED_DATA tag asserted, added-hash
+      miss falling through, the NULL-`added` short circuit (proven by
+      the spinning seam never being reached), length-before-bytes
+      ordering, and a one-entry table. match.py structural - the NULL
+      and `nid != 0` early-outs correspond one-to-one; the remainder is
+      the inlined added-hash probe (`NUM_OBJ` materialized as
+      `mov r8,#105; orr r8,r8,#512`) and the inlined halving search.
+      #[inline(never)] for the 57 `bl` targets.
