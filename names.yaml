@@ -11199,8 +11199,11 @@ functions:
       code only; the function owns one trailing literal-pool word
       (0x089cc824 @ 0x081dfa4c, reached by `ldr r4, [pc, #32]`), so
       the true extent is 48 bytes, 0x081dfa20..0x081dfa50, where the
-      next function opens `push {r4, lr}`. 69 bl call sites (binary
-      grep over osos.asm).
+      next function opens `push {r4, lr}`. CALL COUNT CORRECTED - 73
+      direct bl, not the 69 an osos.asm grep reported, plus exactly one
+      plain b (the veneer @ 0x0820b230, which carries 125 more bl), so
+      198 call sites in total; re-verified by decoding every B/BL word
+      in osos.dec and resolving its target.
       The object is the framework's command dispatcher: the ctor
       FUN_081dfc1c plants vtable 0x0898ebac at +0x00 and initializes an
       embedded libstdc++ ordered map at +0x04 (header pointer +0x14,
@@ -11232,6 +11235,45 @@ functions:
       the crate fp frame, `blx r5` through SINGLETON_CTORS standing in
       for `bl 0x081dfc1c`, `[r4]` instead of `[r4, #4]` for the crate
       cache, and LLVM rotating the cache-hit exit to the top.
+
+  - address: 0x0820b230
+    ghidra: thunk_FUN_0820b230
+    name: command_dispatcher_get_veneer
+    size: 4
+    sig: "void *command_dispatcher_get_veneer(void)"
+    module: app/singletons
+    status: ported
+    vars:
+      FUN_081dfa20: command_dispatcher_get
+    notes: >-
+      Long-branch veneer to command_dispatcher_get @ 0x081dfa20 - one
+      word, `b 0x081dfa20` (0xeaff51fa). Genuinely 4 bytes, NOT the 8
+      of the `ldr pc, [pc, #-4]` + target-word form and not an empty
+      `bx lr` destructor - the word was decoded from raw bytes, the
+      preceding word 0x0820b22c is the `bx lr` that ends the previous
+      function and the following word 0x0820b234 opens the next with
+      `push {r3, r4, r5, lr}`.
+      125 bl call sites, spanning 0x080ab5a0..0x0828e8d8 - MORE than
+      the 73 that reach 0x081dfa20 directly, so this is the hotter of
+      the dispatcher's two entry points (198 total). Binary-scanned by
+      decoding every B/BL word in osos.dec and resolving its target,
+      not from Ghidra xrefs or an osos.asm grep.
+      Ported as its own #[inline(never)] symbol rather than a Rust
+      alias (the app/service_manager veneer precedent), so a hook at
+      0x0820b230 lands on a real veneer that branches on to the getter
+      exactly as the image has it. No behavior of its own - the target
+      carries the lazy `if (cache == 0) cache =
+      ctor(operator_new(0x20))` and all of its deviations. NOT
+      HOOK-READY for the same reason as its target - the ctor
+      FUN_081dfc1c is unported and rides the zeroing SINGLETON_CTORS
+      default.
+      Host tests - the veneer allocates and constructs exactly once
+      through the shared cache, both entry points hand out the same
+      instance, and the two symbols are distinct addresses. match.py
+      structural (exit 0 here, the bodies are one branch) - the built
+      body is `push {fp, lr}; mov fp, sp; pop {fp, lr}; b
+      command_dispatcher_get`, i.e. the original's tail branch plus the
+      crate's mandatory non-leaf frame pointer.
 
   - address: 0x081f77a4
     ghidra: FUN_081f77a4
@@ -23153,6 +23195,102 @@ functions:
       match.py structural: `push {fp,lr}; mov fp,sp; pop {fp,lr};
       b service_manager_instance` - the original's tail branch plus the
       target's mandatory non-leaf frame pointer.
+
+  - address: 0x081d71c0
+    ghidra: FUN_081d71c0
+    name: iap_incoming_process_thread_instance
+    size: 24
+    sig: "void *iap_incoming_process_thread_instance(void)"
+    module: app/iap_incoming_process_thread
+    status: ported
+    vars:
+      DAT_081d71d4: iap_incoming_process_thread_holder (global @
+        0x089cca0c; the instance is its +4 slot)
+      FUN_08030f44: heap_panic (direct, ported in heap/veneers)
+    notes: >-
+      Asserting accessor for the CIapIncomingProcessThread singleton -
+      the iAP (iPod Accessory Protocol) incoming-packet worker.
+      `ldr r0,[0x081d71d4]; ldr r0,[r0,#4]; cmp r0,#0; bxne lr;
+      bl 0x08030f44`. Never returns NULL - a NULL instance falls into
+      heap_panic (already ported, called directly). Structurally the
+      twin of service_manager_instance @ 0x08165520.
+      EXTENT - 24 bytes, 0x081d71c0..0x081d71d8, NOT the 20 an
+      instruction-only scan reports: the fifth instruction is followed
+      by the holder literal 0x089cca0c at 0x081d71d4, which the first
+      instruction reaches with `ldr r0,[pc,#12]`, and the next function
+      opens at 0x081d71d8 with `push {r4,r5,r6,lr}` - read off the raw
+      bytes, not Ghidra.
+      8 direct `bl` sites and exactly one plain `b`, which is the
+      veneer 0x08139210 (65 more `bl`), so 73 call sites in total;
+      binary-scanned by decoding every B/BL word in osos.dec and
+      resolving its target, not from Ghidra xrefs.
+      CLASS NAMED - unlike its service_manager twin, the class name
+      survives: the lazy creator @ 0x081d68f0 forms a string address
+      with `add r9,pc,#388` @ 0x081d6914, which resolves to 0x081d6aa0,
+      and the bytes there are "CIapIncomingProcessThread". That creator
+      measures the literal, builds a std::string from it,
+      operator_new(0x44)s the object (`mov r0,#0x44` @ 0x081d6970),
+      initializes the sub-object at +0x0c and starts it with
+      FUN_081d7240(object, argument); a non-zero result is failure - the
+      object is destroyed through vtable slot +0x08 and NULL is
+      published, so the holder slot legitimately stays NULL when
+      accessory processing never came up. Only three words in the image
+      name 0x089cca0c (the pool entries 0x081d6a9c, 0x081d6db0,
+      0x081d71d4), all in this one compilation unit, so the holder is
+      private to it.
+      Deviations - the holder's +4 slot is the crate static
+      IAP_INCOMING_PROCESS_THREAD_INSTANCE, since 0x089cca0c is a
+      runtime-initialized RW page (the image holds stale UI data there,
+      the app/singletons.rs 0x089cxxxx cache deviation); the fatal path
+      is not exercised on host (heap_panic is `-> !`), as in
+      app/service_manager and cxx/list_splice. NOT HOOK-READY until
+      something ports the creator 0x081d68f0 and publishes an instance -
+      today all 73 call sites would reach heap_panic.
+      Host tests - the slot starts NULL, the accessor hands back exactly
+      what was published, it re-reads the holder on every call rather
+      than caching, and a misaligned pointer passes through unmasked.
+      match.py structural (exit 1, diff expected) - same global load /
+      `cmp r0,#0` / `bxne lr` / fatal-call shape, the port adding only
+      the cold-path frame push and using `[r0]` instead of `[r0,#4]`
+      for the crate static.
+
+  - address: 0x08139210
+    ghidra: thunk_FUN_08139210
+    name: iap_incoming_process_thread_instance_veneer
+    size: 4
+    sig: "void *iap_incoming_process_thread_instance_veneer(void)"
+    module: app/iap_incoming_process_thread
+    renames:
+      FUN_081d71c0: iap_incoming_process_thread_instance
+    status: ported
+    notes: >-
+      Long-branch veneer to iap_incoming_process_thread_instance @
+      0x081d71c0 - one word, `b 0x081d71c0` (0xea0277ea). Genuinely 4
+      bytes, not the 8 of the `ldr pc,[pc,#-4]` + target-word form and
+      not an empty `bx lr` destructor: the word was decoded from raw
+      bytes, and the following word (0x08139214, `mov r0,#1`) is part
+      of an unrelated function. Sits in the same long-branch veneer
+      region as service_manager_instance_veneer @ 0x081391ec, nine
+      words above it.
+      65 `bl` call sites, 0x08164134..0x08201278 - the bulk in
+      0x081fxxxx (25), 0x0819xxxx (13) and 0x081axxxx (11) - against
+      only 8 that reach the accessor directly; binary-scanned by
+      decoding every B/BL word in osos.dec. The sites share one shape:
+      take the returned pointer as `this`, pull a request word out of
+      the caller's own object and dispatch (`bl veneer; ldr r1,[r6,#8];
+      bl ...` @ 0x08164134).
+      Ported as its own `#[inline(never)]` symbol rather than an alias
+      so a hook here lands on a real forwarding branch; the callee is
+      called directly, not through read_volatile - unlike the
+      libc/iram_veneers, nothing here resembles a compiler builtin, so
+      LLVM cannot re-lower it. Same NOT-HOOK-READY caveat as its
+      target.
+      Host tests - the veneer reaches the same accessor and agrees with
+      it, and the two symbols are distinct addresses. match.py
+      structural (exit 1, diff expected) - `push {fp,lr}; mov fp,sp;
+      pop {fp,lr}; b iap_incoming_process_thread_instance`, the
+      original's tail branch plus the target's mandatory non-leaf frame
+      pointer.
 
   - address: 0x082792fc
     ghidra: thunk_FUN_082792fc
