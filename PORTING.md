@@ -19,6 +19,13 @@ runs on the iPod (tethered boot via wInd3x)
 
 ## Rules of the road
 
+0. **Never run `cargo fmt`.** The crate is not rustfmt-clean: a bare
+   `cargo fmt` reformats 339 files and buries the change you actually made.
+   Ports are reviewed against the original's structure, and the surrounding
+   code's layout is often deliberate (register-order field writes, ARM
+   listings in doc headers). Match the file you are editing by hand.
+
+
 1. **Names say what things do.** `memmove`, `dst`, `src`, `len` — never
    `FUN_080000d4`, `param_1`, `uVar5`, `DAT_3c700000`. This is the point of
    the project.
