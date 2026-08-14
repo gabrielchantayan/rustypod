@@ -19221,6 +19221,58 @@ functions:
       stores, memclear, and
       result-minus-one-word return are retained.
 
+  - address: 0x0810ec10
+    ghidra: FUN_0810ec10
+    name: pair_header_base_destruct
+    size: 44
+    sig: "u32 *pair_header_base_destruct(u32 *base)"
+    module: cxx/pair_header
+    status: ported
+    vars: {param_1/r4: base, iVar1: body (the grand-base body at base+0x30)}
+    notes: >-
+      The NON-DELETING destructor of the same 0xb8-byte concrete base
+      object pair_header_base_construct @ 0x0810ebbc builds. 56 bl call
+      sites and no plain-b tail calls, both verified by decoding every
+      branch word in osos.dec. Ghidra's 40-byte extent drops the trailing
+      literal-pool word at 0x0810ec38 (0x08981630, the vtable, reached by
+      "ldr r0,[pc,#24]" at 0x0810ec18); the next function starts at
+      0x0810ec3c, so the true extent is 44 bytes - ten instructions plus
+      that word. The vtable literal occurs in exactly seven data words in
+      the image (0x0810e9bc, 0x0810ea14, 0x0810ea74, 0x0810eacc,
+      0x0810ebb4, 0x0810ebf4, 0x0810ec38), every one of them a literal
+      pool belonging to that single class's constructors or to this
+      destructor, which is what ties this function to that class. The
+      address 0x0810ec10 itself appears in NO data word, so it fills no
+      vtable slot - all 56 call sites reach it directly, and the deleting
+      form is the separate six-instruction thunk @ 0x0810ebf8
+      ("cmp r0,#0; bl 0x0810ec10; b operator_delete").
+      Algorithm: store the vtable at +0; call 0x0810e908(this), which
+      releases the base's optionally owned 28-byte payload - if the
+      ownership byte at +0xb4 is set and the pointer at +0x04 is non-NULL
+      it hands that pointer either to the ported heap_free (0x0819d4dc)
+      with the pool at +0xb0, or, when there is no pool, to the ported
+      free_wrapper (0x080e7970); then call 0x08185bac(this + 0x30) and
+      return its result minus 0x30. 0x08185bac is the mirror of the ported
+      pair_header_grand_base_body_construct @ 0x08185b98 - it passes
+      (this, 4, 0x14, 0x08283a80) to the array adapter 0x082ab3ec, which
+      drops the call entirely when the element destructor is NULL and
+      otherwise reaches the ported __cpp_finalise (0x080336d8) to destroy
+      the four 20-byte elements. Load-bearing asymmetry: construction goes
+      base -> grand base at +4 -> body at grandbase+0x2c, but destruction
+      SKIPS the middle hop and calls the body teardown at base+0x30
+      directly, because the grand base has nothing of its own to unwind.
+      The port reproduces that collapsed chain rather than re-introducing
+      a wrapper the original does not call. The two unported callees ride
+      a PairHeaderBaseDestructOps table whose host defaults panic rather
+      than no-op, since both free storage. app/pair_header_destruct's
+      PAIR_HEADER_BASE_DESTRUCT seam now defaults to this port on target
+      instead of transmuting the stock address. match.py structural: same
+      shape throughout (vtable literal load, vtable store, release(this),
+      destroy(this + 0x30), sub #0x30, return); the diff is the ops-table
+      indirection emitting blx through loaded pointers instead of direct
+      bl, the crate's fp frame, and LLVM folding the vtable store and the
+      +0x30 pointer bump into one "str r1,[r4],#48".
+
   - address: 0x0813eee0
     ghidra: FUN_0813eee0
     name: pair_header_grand_base_construct
@@ -19323,8 +19375,10 @@ functions:
         cxx/trivial_destructor - the shared empty dtor body)
       FUN_082aad24: operator_delete (direct, ported in heap/veneers -
         the tag-2 delete)
-      FUN_0810ec10: pair_header_base_teardown (PAIR_HEADER_BASE_DESTRUCT
-        seam; unported) - the base subobject's own destructor chain
+      FUN_0810ec10: pair_header_base_destruct (PAIR_HEADER_BASE_DESTRUCT
+        seam, kept so the host tests can observe the chain; now ported in
+        cxx/pair_header, and the target default calls that port instead of
+        the stock address) - the base subobject's own destructor chain
     notes: >-
       The NON-DELETING destructor of the 200-byte pair-header service
       object - the exact counterpart of pair_header_construct @

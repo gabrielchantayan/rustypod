@@ -46,12 +46,14 @@
 //!
 //! # Seams
 //!
-//! Both destruct/delete callees are ported and called directly
-//! (`cxx::trivial_destructor::trivial_destructor`,
-//! `heap::veneers::operator_delete`). Only the base sub-destructor
-//! `FUN_0810ec10` is unported; it rides [`PAIR_HEADER_BASE_DESTRUCT`]
-//! (the event_list.rs pattern: transmuted firmware default on target,
-//! panicking default on host), so this port is hook-ready on target.
+//! Every callee is now ported. The destruct/delete pair is called
+//! directly (`cxx::trivial_destructor::trivial_destructor`,
+//! `heap::veneers::operator_delete`); the base sub-destructor
+//! `FUN_0810ec10` keeps [`PAIR_HEADER_BASE_DESTRUCT`] as its seam so
+//! these host tests can observe the chain in isolation, but its target
+//! default now calls `cxx::pair_header::pair_header_base_destruct`
+//! rather than the stock address. The host default still panics: that
+//! port's own teardown dependencies remain unported.
 
 use core::ptr::addr_of_mut;
 
@@ -65,11 +67,12 @@ pub const PAIR_HEADER_BASE: usize = 0x0c;
 /// (`sub r0, r0, #0xc`).
 pub const PAIR_HEADER_BASE_ADJUST: usize = 0x0c;
 
+/// `FUN_0810ec10` is now ported as
+/// [`crate::cxx::pair_header::pair_header_base_destruct`], so the target
+/// default calls it directly instead of transmuting the stock address.
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_base_destruct(base: *mut u8) -> *mut u8 {
-    let f: unsafe extern "C" fn(*mut u8) -> *mut u8 =
-        unsafe { core::mem::transmute(0x0810_ec10usize) };
-    unsafe { f(base) }
+    unsafe { crate::cxx::pair_header::pair_header_base_destruct(base.cast::<u32>()).cast::<u8>() }
 }
 
 #[cfg(not(target_os = "none"))]
