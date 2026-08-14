@@ -377,6 +377,10 @@ mod tests {
             fn mmap(addr: usize, len: usize, prot: i32, flags: i32, fd: i32, offset: i64)
                 -> usize;
             fn mprotect(addr: usize, len: usize, prot: i32) -> i32;
+            // arm64 macOS uses 16 KiB pages, x86_64 Linux 4 KiB. mprotect
+            // rejects an unaligned base, so a hardcoded 0x1000 silently
+            // fails everywhere the page is larger.
+            fn getpagesize() -> i32;
         }
         #[cfg(target_os = "macos")]
         const MAP_PRIVATE_ANON: i32 = 0x1002;
@@ -384,12 +388,12 @@ mod tests {
         const MAP_PRIVATE_ANON: i32 = 0x22;
         const PROT_READ_WRITE: i32 = 3;
         const PROT_NONE: i32 = 0;
-        const PAGE: usize = 0x1000;
 
         unsafe {
-            let base = mmap(0, 2 * PAGE, PROT_READ_WRITE, MAP_PRIVATE_ANON, -1, 0);
+            let page = getpagesize() as usize;
+            let base = mmap(0, 2 * page, PROT_READ_WRITE, MAP_PRIVATE_ANON, -1, 0);
             assert_ne!(base, usize::MAX, "mmap failed");
-            assert_eq!(mprotect(base + PAGE, PAGE, PROT_NONE), 0, "mprotect failed");
+            assert_eq!(mprotect(base + page, page, PROT_NONE), 0, "mprotect failed");
             for len in 1..=9usize {
                 let (min, max) = length_bounds(len);
                 for v in [min, max] {
@@ -397,7 +401,7 @@ mod tests {
                     assert_eq!(n, len);
                     // End the encoding exactly at the guard page: any
                     // read past the varint faults.
-                    let start = (base + PAGE - n) as *mut u8;
+                    let start = (base + page - n) as *mut u8;
                     core::ptr::copy_nonoverlapping(enc.as_ptr(), start, n);
                     let (value, got) = caller_decode(start as *const u8);
                     let want = if len >= 5 { (v as u32) as u64 } else { v };
