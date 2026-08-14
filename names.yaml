@@ -32024,3 +32024,71 @@ functions:
       mutex (NULL sem cell) and a created-but-undefined cell are both no-ops
       that still report success, the Mutex object is left byte-for-byte
       untouched, and repeated unlocks signal every time.
+
+  # --- sqlite: VDBE result-column names ---
+  - address: 0x0838d004
+    ghidra: FUN_0838d004
+    name: vdbe_set_col_name
+    size: 140
+    sig: "int vdbe_set_col_name(Vdbe *p, int idx, int var, char *z_name, int n)"
+    module: sqlite/vdbe_set_col_name
+    status: ported
+    vars: {param_1: p, param_2/r12: idx, param_3/r2: var, param_4/r1: z_name, param_5/r5: n, FUN_0838c158: sqlite3VdbeMemSetStr}
+    notes: >-
+      Upstream SQLite's sqlite3VdbeSetColName - records the name (var 0) or
+      the declared type (var 1) the prepared statement will report for result
+      column idx. 45 bl call sites, all unconditional; no predicated or tail-b
+      entries.
+      Extent 0x0838d004..0x0838d090 confirmed from the listing, not just
+      Ghidra - 0x0838d08c is ldmia sp!,{r3,r4,r5,pc} and 0x0838d090 is the
+      stmdb entry of sqlite3VdbeSetNumCols, with no literal pool between.
+      Ghidra types this void and drops the early return; the raw words are
+      movne r0,#7 / bne 0x0838d08c, an SQLITE_NOMEM exit, and every other
+      path leaves the callee's r0 alone, so it really does return a result
+      code.
+      Algorithm - refuse up front if p->db->mallocFailed (+0x1e) is any
+      nonzero byte. Otherwise the element for (idx, var) is
+      aColName[idx + var * nResColumn], computed with the no-multiplier
+      sequence mla r0,r2,r0,r12 / add r0,r0,r0 lsl #2 / add r4,r3,r0 lsl #3 -
+      index times five times eight, a 40-byte Mem stride. Upstream's two
+      asserts on idx and var are compiled out, so nothing bounds-checks.
+      n is both a length and a tag, tested with cmn r5,#1 / cmnne r5,#2 -
+      P4_DYNAMIC (-1) and P4_STATIC (-2) install the name as NUL-terminated
+      (length -1) and borrowed (xDel NULL, SQLITE_STATIC); any other value is
+      a real byte count installed with xDel = (void *)-1, SQLITE_TRANSIENT,
+      so the Mem copies. The encoding is always SQLITE_UTF8 (mov r3,#1).
+      Then the P4_DYNAMIC twist - that tag means the caller handed over an
+      sqlite3_malloc buffer, but the install above marked it MEM_Static, so
+      nobody would free it. On rc == SQLITE_OK && n == -1 only (the guard is
+      cmp r0,#0 / cmneq r5,#1) the original clears MEM_Static from flags
+      (+0x1c, bic #0x80) and copies z (+0x14) into zMalloc (+0x24) - the Mem
+      takes ownership with no copy. P4_STATIC deliberately skips this.
+      Struct evidence, all with two witnesses. Vdbe gains aColName at +0x28
+      and nResColumn at +0xec (both read here, both written by
+      sqlite3VdbeSetNumCols @ 0x0838d090). Mem is 40 bytes - SetNumCols
+      allocates mov r0,#0x28 / mul r1,r0,r5 per element, and this function
+      strides by 40 - with z +0x14, n +0x18, flags +0x1c, type +0x1e,
+      enc +0x1f, xDel +0x20, zMalloc +0x24, matching
+      sqlite3VdbeMemSetStr @ 0x0838c158 (sqlite/value_set_str.rs); +0x00..
+      +0x14 is upstream's union u / double r / sqlite3 *db triple.
+      COLNAME_N is 2, not upstream's 5 - SetNumCols sizes the array
+      nResColumn << 1 (mov r1,r0 lsl #1), the name/decltype configuration.
+      MEM_Static is 0x80 in this build's numbering, from
+      sqlite3VdbeMemSetStr's own constants, not upstream's 0x0800.
+      Deviations - sqlite3VdbeMemSetStr @ 0x0838c158 is not ported; the call
+      goes through the existing SQLITE_VDBE_MEM_SET_STR dispatch static that
+      sqlite/value_set_str.rs already owns for the same callee (one seam, not
+      two), whose default is a documented SQLITE_NOMEM stub. Vdbe and Mem are
+      repr(C) structs with named fields rather than byte offsets, so pointer
+      fields stay disjoint on a 64-bit host; the original offsets are
+      statically asserted on 32-bit targets in sqlite/vdbe.rs. p->db is read
+      unconditionally, exactly like the original.
+      Host tests (9) - a failed connection refused before the array is
+      touched, every nonzero mallocFailed byte pattern refusing, the
+      idx + var*nResColumn element swept over both planes and four columns,
+      the -1/-2 borrow vs -3/0/positive/i32 extremes copy boundary against an
+      independent reference model, the P4_DYNAMIC retake clearing only
+      MEM_Static and pointing zMalloc at z, P4_STATIC and the plain lengths
+      never retaking, a failing installer returning its code with no retake,
+      a NULL name forwarded untouched, and the shared callee seam still
+      holding its documented stub.
