@@ -22264,9 +22264,54 @@ functions:
       the port is a call rather than a tail branch (observably identical);
       LLVM still emits `mov r2,r1; ldr r1,=0x53747220; b resource_chain_find`
       around the crate frame, so match.py is instruction-for-instruction on
-      the body. Its 12-byte sibling @ 0x0827238c binds 0x424d6170 ("BMap")
-      the same way (46 bl + 2 b call sites) and is documented but NOT
-      ported; its kind constant is exported as ResourceKind::BITMAP.
+      the body. Its sibling @ 0x0827238c binds 0x424d6170 ("BMap") the same
+      way (46 bl + 2 b call sites) and is now ported alongside it as
+      resource_chain_find_bitmap.
+
+  - address: 0x0827238c
+    ghidra: FUN_0827238c
+    name: resource_chain_find_bitmap
+    size: 16
+    sig: "void *resource_chain_find_bitmap(ResourceProvider *head, u32 id)"
+    module: app/resource_chain
+    status: ported
+    renames:
+      param_1: head
+      param_2: id
+      FUN_0827216c: resource_chain_find
+    notes: >-
+      The "BMap" sibling of resource_chain_find_string @ 0x0827239c:
+      `mov r2,r1; ldr r1,[pc] (=0x424d6170); b 0x0827216c`, binding the
+      bitmap resource kind as the middle argument of resource_chain_find
+      and shifting the caller's id from r2 into place, then tail-branching.
+      So it is "look this bitmap resource id up in the current provider
+      chain", returning the owning provider's raw pointer or NULL.
+      Extent - Ghidra says 12 bytes, which drops the trailing literal
+      word. The real extent is 16 bytes, 0x0827238c..0x0827239c
+      (0x08272398 holds 0x424d6170, and 0x0827239c is the first
+      instruction of the "Str " thunk), confirmed by decoding the raw
+      words rather than trusting the listing. Call sites - 46 bl (all
+      unconditional) plus 2 unconditional b tail calls (0x081eb070,
+      0x081ed150), binary-scanned by decoding every B/BL word in
+      osos.dec; no DATA word in the image holds 0x0827238c, so it is
+      never dispatched virtually. Callers cluster in the UI/resource
+      layers (0x08112xxx, 0x08128xxx-0x08129xxx, 0x08133xxx, 0x0815cxxx,
+      0x08170xxx-0x08176xxx, 0x08186xxx, 0x081ebxxx-0x081f8xxx),
+      consistent with "fetch an artwork bitmap by id". Deviations - the
+      port is a call rather than a tail branch (observably identical);
+      the return type is the chain walker's raw void* because no call
+      site reveals bitmap structure beyond "opaque pointer the drawing
+      code consumes". Codegen note - the two thunks differ only in the
+      literal they load, so LLVM does NOT fold them; the archive shows
+      distinct .text.resource_chain_find_bitmap and
+      .text.resource_chain_find_string sections with the correct
+      constant in each, and a host test asserts the two bind different
+      kinds. Host tests - kind and id forwarded verbatim to the walker,
+      NULL on an empty chain, and the two-thunks-differ guard. match.py
+      structural: mov r2,r1 / ldr r1,[pc] / b / .word 0x424d6170 match
+      instruction-for-instruction; the only diff is the crate-standard
+      fp prologue.
+
   - address: 0x08277304
     ghidra: FUN_08277304
     name: string_object_construct_from_cstr
@@ -23975,6 +24020,67 @@ functions:
       coverage as the canonical - byte/byte/LE-u16 offsets with a
       guard byte, all-zero, all-ones, and the cluster's {2, 5, 0x3a00}
       error shape.
+
+  - address: 0x08283178
+    ghidra: FUN_08283178
+    name: parse_result_destroy
+    size: 4
+    sig: "u8 *parse_result_destroy(u8 *record)"
+    module: app/parse_result
+    status: ported
+    renames:
+      param_1: record
+    notes: >-
+      The trivial destructor of the 4-byte parser result record whose
+      constructors are parse_result_init @ 0x08283168 and its twin @
+      0x08283134 - the last function of that class's translation unit
+      (0x08283120-0x08283178). The whole function is one instruction,
+      0xe12fff1e = `bx lr`, decoded from the raw word. NOT a veneer: a
+      veneer is 0xe51ff004 (`ldr pc,[pc,#-4]`) plus a target word, or a
+      plain `b <target>`, and neither is present. The record holds two
+      u8s and a u16 and owns nothing, so scope exit has nothing to
+      release, but ADS still emits and calls the destructor - hence 46
+      real call sites. Extent exact on both sides, 4 bytes: 0x08283174
+      is the closing `bx lr` of parse_result_init and 0x0828317c is the
+      `push {r4,r5,r6,r7,r8,lr}` of the next function; no literal pool.
+      Call sites - 46 bl, ALL unconditional, and 0 b, binary-scanned by
+      decoding every B/BL word in osos.dec. No DATA word in the image
+      holds 0x08283178, so it is never dispatched virtually - every
+      caller binds it statically, which is what a compiler does for a
+      known-type destructor. 44 of the 46 sit in the record-resource
+      parser cluster 0x080f8xxx-0x080fdxxx in the canonical scope-exit
+      shape `add r0, sp, #N; bl 0x08283178`, destroying a record the
+      parser built on its own frame (e.g. 0x080f8b60, 0x080f8d68,
+      0x080fd9a4); the other two are 0x08160a58 (same stack shape) and
+      0x081d5e5c.
+      r0 passes through, and one caller depends on it - `bx lr` leaves
+      r0 untouched, so the function returns its argument. The outer
+      destructor @ 0x081d5e54 proves that is load-bearing rather than
+      cosmetic: `push {r4,lr}; add r0,r0,#0x34; bl 0x08283178;
+      sub r0,r0,#0x34; pop {r4,pc}` - it destroys an embedded record at
+      member offset +0x34 and rebases r0 to return its own `this`,
+      which only works if r0 survives the call. A void port would
+      compile to the same `bx lr` today but document the wrong
+      contract, so the signature returns record - the same reading
+      cxx/trivial_destructor records for 0x082646ac.
+      Deviations - none behaviorally; the port is the identity
+      function. It reads and writes nothing, so record may be NULL,
+      unaligned or dangling, and the original's missing NULL guard is
+      not a latent fault.
+      Release-build note - the body is byte-identical to the image's
+      other empty destructors, so LLVM MergeFunctions folds it into the
+      shared .text.context_scope_drop section together with
+      trivial_destructor; parse_result_destroy stays in the archive
+      symbol table at the merged address, so hooks resolve it normally.
+      match.py is therefore run as `match.py 0x08283178
+      context_scope_drop` (the parse_result_init_alias_3134 precedent),
+      which shows the body empty on both sides - the only diff is the
+      crate-standard fp prologue/epilogue (push {fp,lr} / mov fp,sp /
+      pop {fp,pc}) that every small port in this crate carries.
+      Host tests (3) - destroying a filled record leaves every byte
+      untouched, the +0x34 embedded-member rebase from 0x081d5e54
+      round-trips through the returned pointer, and NULL and an
+      unaligned record both pass straight through.
 
   - address: 0x0826467c
     ghidra: FUN_0826467c
@@ -30964,6 +31070,75 @@ functions:
       blx/bx-through-volatile-slot dispatches standing in for the direct
       bl / tail b.
 
+  # --- the 4-byte colour value's copy ---
+  - address: 0x082720e8
+    ghidra: FUN_082720e8
+    name: color_copy
+    size: 36
+    sig: "void color_copy(u8 *dst, const u8 *src)"
+    module: cxx/color_copy
+    status: ported
+    renames:
+      param_1/r0: dst (the destination colour)
+      param_2/r1: src (the source colour)
+    notes: >-
+      The copy member of retailOS's 4-byte RGBA colour value class: four
+      forward ldrb/strb pairs then bx lr, decoded from the raw words
+      (ldrb r2,[r1] / strb r2,[r0]; +1; +2; then ldrb r1,[r1,#3] /
+      strb r1,[r0,#3]). Extent - Ghidra's 36 bytes is exact on both
+      sides for once: 0x082720e4 is the closing bx lr of the
+      four-component setter @ 0x082720d0 and 0x0827210c is the push {lr}
+      of the 28-byte record copy that follows; no literal pool. Call
+      sites - 46 bl (44 unconditional plus 2 blne, at 0x0829190c and
+      0x0829193c) and 2 unconditional b, binary-scanned by decoding
+      every B/BL word in osos.dec. The two b sites are 0x08263198 and
+      0x082631a0, the tails of the background and foreground draw-state
+      colour setters. No DATA word in the image holds 0x082720e8, so it
+      is never dispatched virtually.
+      Why the class is a colour - the whole translation unit
+      0x08272018-0x08272108 is one small value type - a pixel-format
+      packer @ 0x08272018 masking its four components with 0xf8/0xfc/
+      0xf0 for RGB565, RGBA4444 and RGB555, the bare RGB565 case @
+      0x08272090 ((R & 0xf8) << 8 | (G & 0xfc) << 3 | (B & 0xf8) >> 3),
+      a byte-identical twin of this function @ 0x082720ac (20 bl + 2 b
+      sites of its own, NOT ported), a four-component setter @
+      0x082720d0 (strb r1,[r0]; strb r2,[r0,#1]; strb r3,[r0,#2];
+      strb [sp],[r0,#3]) and this copy. So the record is four bytes
+      wide, laid out {R,G,B,A}. Two call-site readings confirm alpha is
+      last - 0x080749a8 and 0x080b31f0 build a colour with mov r3,#0xff
+      before the constructor @ 0x08271de4 and copy it here, and
+      cxx/draw_state's body initializer @ 0x082630f0 defaults the
+      foreground to {0,0,0,0xff} and the background to {0xff x 4}.
+      Why byte-at-a-time - draw-state colours are stored unaligned
+      (a style byte at +0x10 sits immediately ahead of colours at +0x11
+      and +0x15), so a 32-bit ldr/str pair would fault where the
+      original does not. That is the entire reason this helper exists
+      instead of a word assignment, and why the two setters reach it by
+      add r0,r0,#0x11 / #0x15 and a tail b.
+      Deviations - the byte moves are read_volatile/write_volatile
+      (PORTING.md's defence against LLVM's loop-idiom pass rewriting a
+      small copy into a memcpy call); this also pins the forward,
+      overlap-propagating order, so an overlapping copy observes each
+      store before the next load exactly as the instruction pairs do.
+      Returns nothing - bx lr leaves r0 = dst, but none of the 46 bl
+      sites reads it; every one overwrites r0 within an instruction or
+      two, and the two that pop {..., pc} straight after the call
+      (0x081ea170, 0x081ea2ec) are void functions whose own callers
+      ignore the value. No NULL or alignment guard on either pointer.
+      The byte-identical twin @ 0x082720ac is left unported - were it
+      ported, LLVM's MergeFunctions would fold the two bodies onto one
+      symbol, the parse_result_init_alias_3134 situation.
+      Host tests (5) - a plain four-byte copy with a guard byte past the
+      end, every-byte-value coverage including NUL and 0xff, all 16
+      source/destination alignment combinations, every overlap of two
+      colours inside one 8-byte buffer against an independent forward
+      model, and a self-copy. cxx/draw_state_color's own 5 tests now
+      exercise this port through the setter. match.py structural - the
+      four ldrb/strb pairs match instruction-for-instruction and in the
+      original's exact register order (r2 for the first three bytes,
+      r1 reused for the fourth); the only diff is the crate-standard fp
+      prologue/epilogue in place of the bare bx lr.
+
   # --- draw-state record: the foreground colour setter ---
   - address: 0x0826319c
     ghidra: FUN_0826319c
@@ -30975,7 +31150,7 @@ functions:
     renames:
       param_1/r0: record (the 0x44-byte draw-state record, cxx/draw_state)
       param_2/r1: color (four colour bytes)
-      FUN_082720e8: copy_color_bytes (the shared unaligned 4-byte copy)
+      FUN_082720e8: color_copy (the shared unaligned 4-byte colour copy)
     notes: >-
       The foreground-colour setter of the 0x44-byte draw-state record
       (cxx/draw_state.rs). Whole function, decoded from the raw words -
@@ -31002,19 +31177,14 @@ functions:
       the pair. (3) The list-row draw path @ 0x0819b80c calls this setter
       with &view+0x22c, the row's text colour, and only when the row's style
       code says "a colour".
-      Deviations - the tail-called helper @ 0x082720e8 is not yet ported
-      under its own name, so the module carries a faithful private
-      copy_color_bytes kept #[inline(never)] so the port still emits the
-      original's add + tail-branch pair; the ARM build shows it assembles to
-      the original's exact ten instructions (ldrb r2,[r1] / strb r2,[r0] x3
-      then ldrb r1,[r1,#3] / strb r1,[r0,#3]) plus the crate fp frame, and
-      the JUMP24 relocation confirms it was not folded into another empty or
-      identical body. When 0x082720e8 is ported this becomes a direct call.
-      The byte moves are read_volatile/write_volatile (PORTING.md's defence
-      against LLVM rewriting a small copy into a memcpy call), which also
-      pins the forward, overlap-propagating order. The original returns
-      nothing - r0 survives the tail call as record+0x11, but no bl site
-      reads it, so the port is void. No NULL guard on either pointer.
+      Deviations - the tail-called helper @ 0x082720e8 is now ported under
+      its own name as cxx/color_copy.rs's color_copy, and this setter calls
+      it; the module's former private copy_color_bytes duplicate is gone.
+      The byte moves, their forward overlap-propagating order and their
+      read_volatile/write_volatile-ness all live in that module now. The
+      original returns nothing - r0 survives the tail call as record+0x11,
+      but no bl site reads it, so the port is void. No NULL guard on either
+      pointer.
       Host tests (5) - the exact 4-byte write at +0x11 with the whole rest of
       the record proven untouched (style byte at +0x10 and background at
       +0x15 included), all 16 source/destination alignment combinations,

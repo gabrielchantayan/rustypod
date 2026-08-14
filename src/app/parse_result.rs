@@ -18,9 +18,9 @@
 //! 0x08283144  rsbs r0, r0, #1; movcc r0, #0; bx lr     is_ok()
 //! 0x08283154  zero all four bytes; bx lr               clear()
 //! 0x08283168  strb/strb/strh; bx lr                    init — THIS PORT
-//! 0x08283178  bx lr                                    ~result() (trivial,
-//!                                                      the context_scope_drop
-//!                                                      phenomenon)
+//! 0x08283178  bx lr                                    ~result() — ALSO
+//!                                                      PORTED HERE, as
+//!                                                      [`parse_result_destroy`]
 //! ```
 //!
 //! so the layout is proven on both sides by the readers, not just by the
@@ -126,6 +126,71 @@ pub unsafe extern "C" fn parse_result_init_alias_3134(
     out
 }
 
+/// parse_result_destroy — original: `FUN_08283178` @ 0x08283178
+/// (4 bytes; **46 `bl` call sites, all unconditional, 0 `b`**,
+/// binary-scanned by decoding every B/BL word in osos.dec).
+///
+/// The record's **trivial destructor**: the whole function is one
+/// instruction, `bx lr`. The record holds two `u8`s and a `u16` and
+/// owns nothing, so scope exit has nothing to release — but ADS still
+/// emits and calls the destructor, so it is a real `bl` target with 46
+/// callers.
+///
+/// # It is a destructor, not a veneer or a stub
+///
+/// Decoded from the raw word: 0x08283178 is `0xe12fff1e`, a lone
+/// `bx lr`. Not a veneer — a veneer is `ldr pc, [pc, #-4]` plus a
+/// target word, or a plain `b <target>`, and neither is present. The
+/// 4-byte extent is exact on both sides: 0x08283174 is the closing
+/// `bx lr` of [`parse_result_init`] and 0x0828317c is the
+/// `push {r4, r5, r6, r7, r8, lr}` of the next function. No literal
+/// pool.
+///
+/// **No DATA word in the image holds 0x08283178**, so it is never
+/// reached through a vtable — every caller binds it statically, which
+/// is what a compiler does for a known-type destructor. 44 of the 46
+/// sites sit inside the record-resource parser cluster
+/// (0x080f8xxx–0x080fdxxx) in the canonical scope-exit shape
+/// `add r0, sp, #N; bl 0x08283178`, destroying a record the parser
+/// built on its own frame; the other two are 0x08160a58 (the same
+/// stack shape) and 0x081d5e5c.
+///
+/// # r0 passes through, and one caller depends on it
+///
+/// `bx lr` leaves r0 untouched, so the function returns its argument.
+/// The outer destructor @ 0x081d5e54 proves that is load-bearing
+/// rather than cosmetic — it destroys an embedded record at member
+/// offset +0x34 and then rebases r0 to return its own `this`:
+///
+/// ```text
+/// 081d5e54  push {r4, lr}
+/// 081d5e58  add  r0, r0, #0x34      @ &this->result
+/// 081d5e5c  bl   0x08283178         @ r0 must survive
+/// 081d5e60  sub  r0, r0, #0x34      @ back to this
+/// 081d5e64  pop  {r4, pc}           @ return this
+/// ```
+///
+/// A `void` port would compile to the same `bx lr` today but document
+/// the wrong contract, so the signature returns `record` — the same
+/// reading `cxx::trivial_destructor` records for 0x082646ac.
+///
+/// # Deviations
+///
+/// None behaviorally: the port is the identity function. It reads and
+/// writes nothing, so `record` may be NULL, unaligned or dangling.
+///
+/// Codegen note: this body is byte-identical to the image's other empty
+/// destructors, so at release opt LLVM's MergeFunctions folds it onto
+/// one shared section with `cxx::trivial_destructor` &c. The symbol
+/// stays in the archive's symbol table at the merged address, so hooks
+/// resolve it normally — the `parse_result_init_alias_3134` situation,
+/// one floor down.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn parse_result_destroy(record: *mut u8) -> *mut u8 {
+    record
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,5 +259,44 @@ mod tests {
         let mut record = Record([0u8; 5]);
         unsafe { parse_result_init_alias_3134(record.0.as_mut_ptr(), 2, 5, 0x3a00) };
         assert_eq!(&record.0[..4], &[2, 5, 0x00, 0x3a]);
+    }
+
+    #[test]
+    fn destroy_leaves_the_record_and_its_neighbours_untouched() {
+        // The canonical scope-exit shape destroys a record the parser
+        // built on its own frame; a destructor that wrote anything
+        // would corrupt the frame it is walking off.
+        let mut record = Record([0xa5u8; 5]);
+        unsafe { parse_result_init(record.0.as_mut_ptr(), 2, 5, 0x2000) };
+        let before = record.0;
+
+        unsafe { parse_result_destroy(record.0.as_mut_ptr()) };
+
+        assert_eq!(record.0, before, "the destructor reads and writes nothing");
+    }
+
+    #[test]
+    fn destroy_returns_its_argument_so_a_caller_can_rebase_it() {
+        // 0x081d5e54 destroys an embedded record at member offset +0x34
+        // and then does `sub r0, r0, #0x34; pop {r4, pc}` to return its
+        // own `this` — which only works because r0 survives the call.
+        const EMBEDDED_RECORD_OFFSET: usize = 0x34;
+        let mut owner = [0u8; EMBEDDED_RECORD_OFFSET + 4];
+        let this = owner.as_mut_ptr();
+
+        let returned = unsafe { parse_result_destroy(this.add(EMBEDDED_RECORD_OFFSET)) };
+
+        assert_eq!(returned, unsafe { this.add(EMBEDDED_RECORD_OFFSET) });
+        assert_eq!(unsafe { returned.sub(EMBEDDED_RECORD_OFFSET) }, this, "rebases to this");
+    }
+
+    #[test]
+    fn destroy_accepts_a_null_or_unaligned_record() {
+        // It dereferences nothing, so the original's missing NULL guard
+        // is not a latent fault.
+        assert!(unsafe { parse_result_destroy(core::ptr::null_mut()) }.is_null());
+        let mut record = Record([0u8; 5]);
+        let odd = unsafe { record.0.as_mut_ptr().add(1) };
+        assert_eq!(unsafe { parse_result_destroy(odd) }, odd);
     }
 }

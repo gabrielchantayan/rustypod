@@ -53,26 +53,18 @@
 //!
 //! # Deviations
 //!
-//! - The tail-called helper @ 0x082720e8 is not yet ported under its own
-//!   name, so this module carries a faithful private
-//!   [`copy_color_bytes`] — the same four byte loads/stores in the same
-//!   order — kept `#[inline(never)]` so the port still emits the
-//!   original's `add`+tail-branch pair. When 0x082720e8 is ported this
-//!   becomes a direct call to it and nothing else changes. Beware: LLVM
-//!   folds byte-identical function bodies, so the helper may share a
-//!   symbol with another 4-byte copy in the crate.
-//! - The byte moves are `read_volatile`/`write_volatile`, the crate's
-//!   standard defence against LLVM rewriting a small copy into a
-//!   `memcpy` call (PORTING.md) — and it also pins the forward,
-//!   overlap-propagating order the original has.
+//! - The tail-called helper @ 0x082720e8 is ported under its own name as
+//!   [`crate::cxx::color_copy::color_copy`], and this setter calls it —
+//!   the byte moves, their order and their volatility all live there.
 //! - The original returns nothing; `r0` happens to survive the tail call
 //!   as `this + 0x11`, but no `bl` site reads it, so the port is `void`.
 //! - No NULL guard on either pointer, matching the original.
 
+use crate::cxx::color_copy::{color_copy, COLOR_BYTES};
 use crate::cxx::draw_state::DRAW_STATE_SIZE;
 
-/// Bytes in a draw-state colour (the helper @ 0x082720e8 copies four).
-pub const DRAW_STATE_COLOR_BYTES: usize = 4;
+/// Bytes in a draw-state colour: the helper @ 0x082720e8 copies four.
+pub const DRAW_STATE_COLOR_BYTES: usize = COLOR_BYTES;
 
 /// Byte offset of the foreground colour: `add r0, r0, #0x11`.
 /// Unaligned by construction — the style byte at +0x10 precedes it.
@@ -88,18 +80,6 @@ pub const DRAW_STATE_BACKGROUND_COLOR_OFFSET: usize = 0x15;
 /// the setter @ 0x08262d70).
 pub const DRAW_STATE_STYLE_OFFSET: usize = 0x10;
 
-/// The shared 4-byte colour copy @ 0x082720e8 (36 bytes; 46 `bl` + 2 `b`
-/// call sites, binary-scanned), reproduced instruction for instruction:
-/// four forward `ldrb`/`strb` pairs, alignment-agnostic, and
-/// overlap-propagating because it never buffers. See the module header
-/// for why it is private.
-#[inline(never)]
-unsafe extern "C" fn copy_color_bytes(dst: *mut u8, src: *const u8) {
-    for i in 0..DRAW_STATE_COLOR_BYTES {
-        dst.add(i).write_volatile(src.add(i).read_volatile());
-    }
-}
-
 /// draw_state_set_foreground_color — original: `FUN_0826319c` @
 /// 0x0826319c (8 bytes; 68 `bl` call sites, binary-scanned).
 ///
@@ -109,7 +89,7 @@ unsafe extern "C" fn copy_color_bytes(dst: *mut u8, src: *const u8) {
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn draw_state_set_foreground_color(record: *mut u8, color: *const u8) {
-    copy_color_bytes(record.add(DRAW_STATE_FOREGROUND_COLOR_OFFSET), color);
+    color_copy(record.add(DRAW_STATE_FOREGROUND_COLOR_OFFSET), color);
 }
 
 #[cfg(test)]
