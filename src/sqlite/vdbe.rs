@@ -119,12 +119,75 @@ pub struct Vdbe {
     pub n_label_alloc: i32,
     /// +0x20: label -> address table (`-1` while unresolved).
     pub a_label: *mut i32,
-    /// +0x24..+0xff: unmodeled.
-    pub _gap_24: [u8; 0xff - 0x24],
+    /// +0x24: unmodeled.
+    pub _gap_24: [u8; 4],
+    /// +0x28: the column-name/decltype array — `n_res_column *
+    /// COLNAME_N` [`Mem`]s laid end to end (`aColName`).
+    pub a_col_name: *mut Mem,
+    /// +0x2c..+0xec: unmodeled.
+    pub _gap_2c: [u8; 0xec - 0x2c],
+    /// +0xec: number of result columns the statement produces
+    /// (`nResColumn`), the stride between the two `a_col_name` planes.
+    pub n_res_column: i32,
+    /// +0xf0..+0xff: unmodeled.
+    pub _gap_f0: [u8; 0xff - 0xf0],
     /// +0xff: set when the schema changed under this statement; every
     /// emitted op clears it.
     pub expired: u8,
 }
+
+/// One dynamically-typed SQL value — the original's 40-byte `Mem`
+/// (`sqlite3_value`), reconstructed from the firmware rather than from
+/// an upstream header.
+///
+/// Every offset below has two independent witnesses. `sqlite3VdbeMemSetStr`
+/// @ 0x0838c158 writes `z` at +0x14, `n` at +0x18, `flags` at +0x1c,
+/// `type` at +0x1e, `enc` at +0x1f, `xDel` at +0x20 and `zMalloc` at
+/// +0x24 (see `sqlite/value_set_str.rs`); `sqlite3VdbeSetNumCols` @
+/// 0x0838d090 allocates `0x28` bytes per element (`mov r0,#0x28; mul
+/// r1,r0,r5`) and stamps each one's +0x1c with `MEM_Null`, and
+/// [`vdbe_set_col_name`](super::vdbe_set_col_name::vdbe_set_col_name)
+/// indexes the same array with a 40-byte stride (`add r0,r0,r0 lsl #2`
+/// then `add r4,r3,r0 lsl #3`). That leaves +0x00..+0x14 for upstream's
+/// `union u` / `double r` / `sqlite3 *db` triple, which is the SQLite
+/// 3.6-era layout exactly.
+#[repr(C)]
+pub struct Mem {
+    /// +0x00: the integer/pointer arm of upstream's value union.
+    pub u: u64,
+    /// +0x08: the floating-point arm.
+    pub r: f64,
+    /// +0x10: the owning connection.
+    pub db: *mut u8,
+    /// +0x14: the string or blob body.
+    pub z: *mut u8,
+    /// +0x18: byte length of `z`.
+    pub n: i32,
+    /// +0x1c: `MEM_*` type and ownership bits.
+    pub flags: u16,
+    /// +0x1e: `SQLITE_NULL`/`SQLITE_TEXT`/... exposed by the API.
+    pub value_type: u8,
+    /// +0x1f: text encoding of `z`.
+    pub enc: u8,
+    /// +0x20: destructor for `z`, when the value owns it externally.
+    pub x_del: *mut u8,
+    /// +0x24: the `sqlite3_malloc` buffer `z` lives in, when the value
+    /// owns it itself.
+    pub z_malloc: *mut u8,
+}
+
+/// `Mem.flags` bit for "`z` points at storage nobody frees"
+/// (`MEM_Static`). This build's `MEM_*` numbering is its own — the
+/// evidence is `sqlite3VdbeMemSetStr`'s own constants (`MEM_Str` 0x2,
+/// `MEM_Blob` 0x10, `MEM_Term` 0x20, `MEM_Dyn` 0x40, `MEM_Static`
+/// 0x80), not upstream's 0x0800.
+pub const MEM_STATIC: u16 = 0x0080;
+
+/// Number of name planes `a_col_name` holds per column — upstream's
+/// `COLNAME_N`. The original's `sqlite3VdbeSetNumCols` @ 0x0838d090
+/// sizes the array `nResColumn << 1`, so this build has the two-plane
+/// (name, decltype) configuration, not the five-plane metadata one.
+pub const COLNAME_N: i32 = 2;
 
 // The original's byte offsets, asserted on the 32-bit target. On a
 // 64-bit host the pointer fields widen and these shift — harmless,
@@ -138,7 +201,19 @@ const _VDBE_A_OP_OFFSET: [u8; 0x14] = [0; core::mem::offset_of!(Vdbe, a_op)];
 #[cfg(target_pointer_width = "32")]
 const _VDBE_A_LABEL_OFFSET: [u8; 0x20] = [0; core::mem::offset_of!(Vdbe, a_label)];
 #[cfg(target_pointer_width = "32")]
+const _VDBE_A_COL_NAME_OFFSET: [u8; 0x28] = [0; core::mem::offset_of!(Vdbe, a_col_name)];
+#[cfg(target_pointer_width = "32")]
+const _VDBE_N_RES_COLUMN_OFFSET: [u8; 0xec] = [0; core::mem::offset_of!(Vdbe, n_res_column)];
+#[cfg(target_pointer_width = "32")]
 const _VDBE_EXPIRED_OFFSET: [u8; 0xff] = [0; core::mem::offset_of!(Vdbe, expired)];
+#[cfg(target_pointer_width = "32")]
+const _MEM_SIZE: [u8; 0x28] = [0; core::mem::size_of::<Mem>()];
+#[cfg(target_pointer_width = "32")]
+const _MEM_Z_OFFSET: [u8; 0x14] = [0; core::mem::offset_of!(Mem, z)];
+#[cfg(target_pointer_width = "32")]
+const _MEM_FLAGS_OFFSET: [u8; 0x1c] = [0; core::mem::offset_of!(Mem, flags)];
+#[cfg(target_pointer_width = "32")]
+const _MEM_Z_MALLOC_OFFSET: [u8; 0x24] = [0; core::mem::offset_of!(Mem, z_malloc)];
 
 /// First op-array capacity when the array is still empty (original:
 /// `mov r1, #51` — SQLite's `1024 / sizeof(Op)` with a 20-byte op).
@@ -182,6 +257,12 @@ pub(crate) unsafe fn free_p4_op() -> unsafe extern "C" fn(i32, *mut u8) {
 pub const P4_NOTUSED: i8 = 0;
 /// `p4` is an owned [`db_str_ndup`] duplicate; released by freeP4.
 pub const P4_DYNAMIC: i32 = -1;
+/// `p4` points at storage the statement never owns (upstream's
+/// P4_STATIC). Named here because
+/// [`vdbe_set_col_name`](super::vdbe_set_col_name::vdbe_set_col_name)
+/// tests for it (`cmnne r5,#2`); `vdbe_change_p4` treats it as an
+/// ordinary negative tag.
+pub const P4_STATIC: i32 = -2;
 /// `p4` is a KeyInfo the statement owns (deep-copied on attach);
 /// released by freeP4.
 pub const P4_KEYINFO: i32 = -6;
@@ -505,7 +586,11 @@ mod tests {
                 n_label: 0,
                 n_label_alloc: 0,
                 a_label: core::ptr::null_mut(),
-                _gap_24: [0; 0xff - 0x24],
+                _gap_24: [0; 4],
+                a_col_name: core::ptr::null_mut(),
+                _gap_2c: [0; 0xec - 0x2c],
+                n_res_column: 0,
+                _gap_f0: [0; 0xff - 0xf0],
                 expired: EXPIRED,
             };
             Statement { vdbe, db }

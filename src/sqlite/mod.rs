@@ -118,4 +118,5 @@ pub mod value_set_str;
 pub mod value_text;
 pub mod vdbe;
 pub mod vdbe_op;
+pub mod vdbe_set_col_name;
 pub mod vm_printf;
