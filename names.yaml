@@ -31402,3 +31402,53 @@ functions:
       two adjacent flag strb into one strh and CSE-ing away the second
       of the original's two header-slot reloads, and the crate's fp
       frame.
+  - address: 0x08262908
+    ghidra: FUN_08262908
+    name: clock_source_destroy
+    size: 4
+    sig: "void *clock_source_destroy(void *this)"
+    module: cxx/clock_source_destroy
+    status: ported
+    vars: {param_1: this}
+    notes: >-
+      One instruction, "bx lr" (the word 0xe12fff1e) - an empty C++
+      destructor, NOT a veneer. Binary-verified from osos.dec: a veneer
+      would be 0xe51ff004 plus a target word or a plain b, and neither
+      is here. The preceding function ends "bx lr" at 0x08262900 with
+      its own literal pool word 0x089a80b0 at 0x08262904, and the next
+      function is the real veneer "b 0x082e8070" at 0x0826290c, so the
+      extent is exactly four bytes with no trailing literal. 45 bl call
+      sites, 0 plain b, 0 predicated forms and 0 occurrences of
+      0x08262908 as a data word - never reached through a vtable, so
+      every caller binds it statically, which is what a compiler does
+      for a known-type destructor. All four counts from decoding every
+      B/BL word in osos.dec. The pairing is the proof - 18 sites are
+      literally "add r0,sp,#N / bl 0x08262958" ... "add r0,sp,#N /
+      bl 0x08262908" on the SAME stack slot, and 2 more pair the same
+      way with the sibling constructor 0x08262a9c; the rest are the
+      same shape with the object pointer materialized a few
+      instructions earlier. No site is followed by operator delete:
+      all 45 destroy a stack temporary. Those two constructors are
+      siblings over the base 0x082628f4, which is the whole object -
+      "str <vtable>,[r0]; strb r1,[r0,#4]" - so the class is
+      { vtable, u8 kind }, 0x08262958 passes kind=1 and 0x08262a9c
+      kind=0, each installing its own vtable, and both share this one
+      empty destructor. The object is a clock: the canonical use (e.g.
+      @ 0x081944b4) constructs it on the stack, calls vtable slot +0xc
+      with an out pointer to a {sec, nsec} pair, converts that through
+      0x082a1c30 - which is sec*1000 + nsec/1000000, dividing by the
+      literal 1000000 @ 0x082a1c58 - and destroys it here; 0x08262ab8
+      subtracts two such pairs field by field and 0x081643cc compares
+      the elapsed result against 500. r0 passing through is the
+      load-bearing detail: bx lr leaves it untouched, the ADS
+      destructor convention, so the signature returns this rather than
+      void even though no caller of this one chains into operator
+      delete. Deviations - none, the port is the identity function. It
+      carries its own link_section because it compiles to bytes
+      identical to cxx::trivial_destructor @ 0x082646ac and LLVM's
+      identical-code folding would otherwise collapse the two exports
+      into one, leaving the two stock addresses sharing a single
+      hookable symbol. match.py structural - one instruction vs three,
+      the difference being only the crate's fp frame
+      (push {fp,lr} / mov fp,sp / pop {fp,pc}) around an empty body
+      that returns r0 unchanged.
