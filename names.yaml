@@ -31330,3 +31330,45 @@ functions:
       sizing bl, allocating blx, NULL test, transcode blx,
       `add r0,r7,r6; strb r8,[r0,#-1]` - with the two ops-table
       indirections and LLVM hoisting the guard ahead of the frame push.
+
+  # --- Vincent JIT: pipeline emission sugar ---
+  - address: 0x082605f0
+    ghidra: FUN_082605f0
+    name: cg_emit_load_word_at_offset
+    size: 136
+    sig: "cg_virtual_reg_t *cg_emit_load_word_at_offset(cg_block_t *block, cg_virtual_reg_t *base, U32 offset)"
+    module: codegen/pipeline_emit
+    status: ported
+    vars: {param_1: block, param_2: base, param_3: offset}
+    notes: >-
+      136 bytes, 34 instruction words, no literal pool - the next
+      function's own `stmdb sp!,{r3,r4,r5,r6,r7,r8,r9,lr}` starts at
+      0x08260678, so the extent is exact. 44 call sites, ALL
+      unconditional bl (0 predicated, 0 tail b), binary-scanned by
+      decoding every B/BL word in osos.dec for every condition code, not
+      from Ghidra xrefs. Callers are the Vincent 3D JIT's pipeline
+      generators in three runs - 0x08243a28-0x082447e8,
+      0x08245680-0x0824575c, 0x08245830-0x08245cc8 - passing offsets like
+      0x1c/0x20/0x24/0x28/0x2c and `n * 4 + 0x6c`, i.e. word-strided
+      structure fields. Algorithm: create three general-purpose virtual
+      registers up front through cg_virtual_reg_create(block->proc, 0),
+      then emit LDI offset_reg, offset / ADD address_reg, base,
+      offset_reg / LDW value_reg, [address_reg] and return value_reg.
+      Registers are therefore numbered in creation order, not use order.
+      Opcode identification: an exhaustive census of the r1 immediate at
+      every call site of each instruction factory gives load_immed = 40
+      unanimously (201/201 sites), load in {38, 39, 41}, store in
+      {42, 43, 44} and binary dominated by 1 (91 sites) - one contiguous
+      alphabetical run ldb/ldh/ldi/ldw/stb/sth/stw at 38..44 anchored by
+      ldi = 40, which fixes ldw = 41, plus add = 1 as the first opcode
+      after nop = 0. The same census pins reg type 0 as the
+      general-purpose class (792 of 835 cg_virtual_reg_create sites).
+      Constants CG_INST_OPCODE_LDI/LDW/ADD and CG_REG_TYPE_GENERAL added
+      to codegen/ir alongside the existing CG_INST_OPCODE_PHI.
+      Deviation: the original reloads block->proc from block+4 before
+      each of the three register creations; the port reads it once (the
+      field is not written in between). match.py structural: identical
+      call order, identical opcode/argument registers and the same
+      `str r7,[sp]` fifth argument to cg_create_inst_binary; the diff is
+      LLVM's frame-pointer prologue and that single hoisted load.
+
