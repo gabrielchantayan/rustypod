@@ -28192,8 +28192,7 @@ functions:
     name: iterator_state_release
     size: 64
     sig: "void iterator_state_release(owner: *mut u8, target: *mut u8)"
-    module: app/vtable_set
-    status: ported
+    status: identified
     renames:
       param_1: owner
       param_2: target
@@ -28219,6 +28218,30 @@ functions:
       iterator_state_release_splices_an_interior_target_from_its_predecessor /
       iterator_state_release_unlinks_a_tail_target /
       iterator_state_release_copies_the_target_next_word_without_reencoding.
+      STATUS CORRECTION - demoted ported -> identified, and the
+      `module: app/vtable_set` dropped, because NO such function exists.
+      The `ported` claim, the module, and the six host-test names above
+      are all unbacked: commit ce10e27 ("Port cg_cell_table_cell_init
+      0x08256c10") introduced this entry as a side effect of porting an
+      unrelated function, and no `fn iterator_state_release` has ever
+      existed in the tree - `git log -S 'fn iterator_state_release('`
+      over all of src/ returns no commit, and none of the six named
+      tests appear anywhere. ce10e27 also emitted a stray top-level
+      `INS.PRE 24609:` key that parked this entry and eight others
+      outside `functions:`, which is why the bad entry went unseen until
+      65ea8a2 repaired the nesting and folded it back in. What DOES
+      exist in app/vtable_set is the no-op `ITERATOR_STATE_RELEASE`
+      dispatch seam, which is not a port of this function. Note that at
+      the one call site that drains a list - the observable-array
+      destructor - the default must NOT be a no-op or the drain spins
+      forever; cxx/observable_array wires
+      OBSERVABLE_ARRAY_DETACH_OBSERVER to the head-match branch, the
+      only branch that site can reach. Re-port this function properly
+      before restoring `ported`. The notes above the correction are the
+      original entry's and describe the ARM target, not any Rust code.
+      Caveat - 0x08155ec0 (iterator_state_cleanup)'s notes were rewritten
+      by the same commit and still say its callee is ported and called
+      directly; it in fact still goes through the no-op seam.
 
 
   - address: 0x0811d008
