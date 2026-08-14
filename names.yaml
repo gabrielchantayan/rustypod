@@ -29708,3 +29708,63 @@ functions:
       block-in-r5 return; the diff is the crate fp frame and the three
       blx/bx-through-volatile-slot dispatches standing in for the direct
       bl / tail b.
+
+  # --- draw-state record: the foreground colour setter ---
+  - address: 0x0826319c
+    ghidra: FUN_0826319c
+    name: draw_state_set_foreground_color
+    size: 8
+    sig: "void draw_state_set_foreground_color(u8 *record, const u8 *color)"
+    module: cxx/draw_state_color
+    status: ported
+    renames:
+      param_1/r0: record (the 0x44-byte draw-state record, cxx/draw_state)
+      param_2/r1: color (four colour bytes)
+      FUN_082720e8: copy_color_bytes (the shared unaligned 4-byte copy)
+    notes: >-
+      The foreground-colour setter of the 0x44-byte draw-state record
+      (cxx/draw_state.rs). Whole function, decoded from the raw words -
+      `add r0,r0,#0x11` then `b 0x082720e8`. NOT a veneer (no
+      `ldr pc,[pc,#-4]` plus target word) and not an empty destructor - a
+      two-instruction member function that binds one field offset and
+      tail-branches into a shared copy helper. 68 bl call sites and 0 b,
+      binary-scanned by decoding every B/BL word in osos.dec. No DATA word
+      holds the address, so it is never dispatched virtually. Its immediate
+      neighbour FUN_08263194 @ 0x08263194 is the identical shape with
+      `#0x15` (22 bl call sites) - the background colour, not ported here.
+      The record packs a style byte at +0x10 immediately ahead of two 4-byte
+      colours, so both colours are UNALIGNED (+0x11..+0x14 and
+      +0x15..+0x18) - which is exactly why the shared helper @ 0x082720e8
+      (36 bytes, 46 bl + 2 b call sites) is four ldrb/strb pairs and a
+      `bx lr` rather than a word move.
+      Which colour is which - three independent readings agree that +0x11 is
+      the foreground. (1) The record's body initializer @ 0x082630f0 writes
+      +0x10..+0x13 = 0 and +0x14..+0x18 = 0xff, so the +0x11 colour defaults
+      to {0,0,0,0xff} (opaque black) and the +0x15 colour to {0xff x 4}
+      (opaque white) - text on paper. (2) The draw call @ 0x08262bdc hands
+      the engine @ 0x080f1600 both colours as `add r2,r12,#0x11;
+      add r3,r12,#0x15; strd r2,[sp]`, so the +0x11 colour is the FIRST of
+      the pair. (3) The list-row draw path @ 0x0819b80c calls this setter
+      with &view+0x22c, the row's text colour, and only when the row's style
+      code says "a colour".
+      Deviations - the tail-called helper @ 0x082720e8 is not yet ported
+      under its own name, so the module carries a faithful private
+      copy_color_bytes kept #[inline(never)] so the port still emits the
+      original's add + tail-branch pair; the ARM build shows it assembles to
+      the original's exact ten instructions (ldrb r2,[r1] / strb r2,[r0] x3
+      then ldrb r1,[r1,#3] / strb r1,[r0,#3]) plus the crate fp frame, and
+      the JUMP24 relocation confirms it was not folded into another empty or
+      identical body. When 0x082720e8 is ported this becomes a direct call.
+      The byte moves are read_volatile/write_volatile (PORTING.md's defence
+      against LLVM rewriting a small copy into a memcpy call), which also
+      pins the forward, overlap-propagating order. The original returns
+      nothing - r0 survives the tail call as record+0x11, but no bl site
+      reads it, so the port is void. No NULL guard on either pointer.
+      Host tests (5) - the exact 4-byte write at +0x11 with the whole rest of
+      the record proven untouched (style byte at +0x10 and background at
+      +0x15 included), all 16 source/destination alignment combinations,
+      every-byte-value coverage including NUL and 0xff, the forward
+      overlap-propagation the byte-at-a-time order implies, and a seeded
+      default-shaped record where repainting the text colour must not smear
+      into the paper. match.py structural - `add r0, r0, #17` then the tail
+      `b` to the helper; the diff is the crate fp frame alone.

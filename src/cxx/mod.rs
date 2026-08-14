@@ -7,6 +7,7 @@ pub mod decoder_begin_batch;
 pub mod decoder_end_batch;
 pub mod decoder_cleanup;
 pub mod draw_state;
+pub mod draw_state_color;
 pub mod handle;
 pub mod list_splice;
 pub mod mutex;
