@@ -275,6 +275,45 @@ pub unsafe extern "C" fn unpack_be32(src: *const u8) -> u32 {
     gathered.swap_bytes()
 }
 
+/// unpack_be64 — original: `FUN_08261790` @ 0x08261790 (92 bytes, all
+/// code: 22 instructions plus a tail branch; 3 `bl` call sites, counted by
+/// decoding every B/BL word in osos.dec).
+///
+/// Reads eight big-endian bytes at `src` and returns them as a `u64`,
+/// needing no alignment. The read twin of [`pack_be64`] and the widest
+/// member of the unpack overload set.
+///
+/// The original gathers bytes 0..7 into a little-endian doubleword,
+/// walking `src` with pre-indexed `ldrb`s, then tail-branches (`b`, not
+/// `bl`) to [`reverse_bytes64`] @ 0x082616f0. The port keeps that call
+/// rather than folding it in, matching [`pack_be64`]. Its own text section
+/// keeps it off the other unpackers' symbols.
+///
+/// The original's gather emits several provably-zero terms — an `asr #31`
+/// of a byte just loaded with `ldrb`, and `lsr #24`/`#16`/`#8` of
+/// single-byte values — artefacts of open-coding a 64-bit shift over
+/// register pairs. They are dead there and are not written here.
+///
+/// Ghidra is not to be trusted on this function's neighbours: it folds the
+/// separately-linked 92 bytes here into the preceding [`unpack_be32`]. The
+/// extent above is decoded from the raw words — the tail branch sits at
+/// 0x082617e8 and 0x082617ec starts an unrelated `push {r4, r5, r6, lr}`
+/// function.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.unpack_be64")]
+#[inline(never)]
+pub unsafe extern "C" fn unpack_be64(src: *const u8) -> u64 {
+    let gathered = src.read() as u64
+        | (src.add(1).read() as u64) << 8
+        | (src.add(2).read() as u64) << 16
+        | (src.add(3).read() as u64) << 24
+        | (src.add(4).read() as u64) << 32
+        | (src.add(5).read() as u64) << 40
+        | (src.add(6).read() as u64) << 48
+        | (src.add(7).read() as u64) << 56;
+    reverse_bytes64(gathered)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -583,6 +622,51 @@ mod tests {
             let want =
                 u32::from_be_bytes([buf[offset], buf[offset + 1], buf[offset + 2], buf[offset + 3]]);
             assert_eq!(unsafe { unpack_be32(buf.as_ptr().add(offset)) }, want, "offset={offset}");
+        }
+    }
+
+    /// Reads exactly the eight bytes at the cursor, most significant
+    /// first, at every misalignment, and inverts `pack_be64`.
+    #[test]
+    fn unpack_be64_reads_exactly_eight_big_endian_bytes() {
+        let cafe = [0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe, 0xf0, 0x0d];
+        assert_eq!(unsafe { unpack_be64(cafe.as_ptr()) }, 0xdead_beef_cafe_f00d);
+        assert_eq!(unsafe { unpack_be64([0u8; 8].as_ptr()) }, 0);
+        assert_eq!(unsafe { unpack_be64([0, 0, 0, 0, 0, 0, 0, 1].as_ptr()) }, 1);
+        assert_eq!(unsafe { unpack_be64([0x80, 0, 0, 0, 0, 0, 0, 0].as_ptr()) }, 1 << 63);
+        assert_eq!(unsafe { unpack_be64([0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff].as_ptr()) },
+                   i64::MAX as u64);
+        assert_eq!(unsafe { unpack_be64([0xffu8; 8].as_ptr()) }, u64::MAX);
+
+        // A single 0x80 byte in each lane: catches a stray sign-extension of
+        // a gathered byte, which the original open-codes but leaves dead.
+        for lane in 0..8usize {
+            let mut buf = [0u8; 8];
+            buf[lane] = 0x80;
+            assert_eq!(unsafe { unpack_be64(buf.as_ptr()) }, 0x80u64 << (8 * (7 - lane)));
+        }
+
+        let buf: [u8; 24] = core::array::from_fn(|i| (i as u8).wrapping_mul(97).wrapping_add(13));
+        for offset in 0..16usize {
+            let mut want = [0u8; 8];
+            want.copy_from_slice(&buf[offset..offset + 8]);
+            assert_eq!(
+                unsafe { unpack_be64(buf.as_ptr().add(offset)) },
+                u64::from_be_bytes(want),
+                "offset={offset}"
+            );
+        }
+
+        for value in [0u64, 1, 0xffff_ffff, 0x0000_0001_0000_0000, 0x0102_0304_0506_0708, u64::MAX]
+        {
+            for offset in 0..8usize {
+                let mut packet = [0x5au8; 24];
+                unsafe { pack_be64(packet.as_mut_ptr().add(offset), value) };
+                assert_eq!(unsafe { unpack_be64(packet.as_ptr().add(offset)) }, value);
+                // The 64-bit read is the two 32-bit reads, high word first.
+                assert_eq!(unsafe { unpack_be32(packet.as_ptr().add(offset)) } as u64, value >> 32);
+                assert_eq!(unsafe { unpack_be32(packet.as_ptr().add(offset + 4)) }, value as u32);
+            }
         }
     }
 
