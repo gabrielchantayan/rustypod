@@ -29269,7 +29269,8 @@ functions:
       body is mov r1,#0; str r1,[r0]; bx lr, so it clears one aligned u32 and
       accesses nothing else. The independent exported Rust symbol preserves
       this address-specific hook target; its focused host test verifies the
-      target becomes zero while adjacent words retain their sentinels.
+      target becomes zero while adjacent words retain their sentinels; match.py
+      structural diff reviewed after the ARM release build.
 
 
   # --- H.264 CBC decode forwarding adapter ---
