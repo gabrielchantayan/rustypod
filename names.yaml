@@ -31499,3 +31499,125 @@ functions:
       call the writer with a stack out-slot, reload and return it -
       inflated because LLVM inlined the crate's five-instruction strlen
       instead of emitting the original's `bl 0x8392478`.
+
+  - address: 0x08134db4
+    ghidra: FUN_08134db4
+    name: silver_controller_construct
+    size: 204
+    sig: "void *silver_controller_construct(void *this, const char *name)"
+    module: app/silver_controller
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: name
+    notes: >-
+      Constructor of the retailOS controller object whose two accessors
+      app/template_binding already ports - same class, proven by the
+      members it writes: its base call reaches
+      string_object_construct_from_cstr @ 0x08277304 on this+0x28
+      (template_binding NAME_OFFSET) and its second inline container
+      construction targets this+0x94 (template_binding
+      BINDING_MAP_OFFSET, whose header word at +0x10 is the this+0xa4
+      the validation walk @ 0x08134938 loads). 92 bl call sites and 1
+      plain-b tail call (a derived constructor chaining in), no
+      predicated branches, and 0 occurrences of 0x08134db4 as a data
+      word, so it is never reached through a vtable - all four counts
+      from decoding every B/BL word in osos.dec, not from Ghidra xrefs.
+      Extent 0x08134db4..0x08134e80 = 204 bytes, 50 instructions plus
+      the single literal-pool word 0x08984570 at 0x08134e7c that
+      "ldr r1,[pc,#184]" @ 0x08134dbc reaches; the previous function
+      ends with "b 0x0810e2a0" at 0x08134db0 and the next starts with
+      "cmp r0,#0" at 0x08134e80. TWO arguments, not one - nothing writes
+      r1 before "bl 0x0810e2e4", so the caller's r1 flows into the base
+      constructor, which opens "mov r6,r1" and hands r6 to the ported
+      string constructor for the name at +0x28. r2/r3 are not arguments:
+      "push {r2,r3,...}" is the ADS idiom for eight bytes of stack
+      scratch and both pushed words are overwritten before any read.
+      Algorithm - base ctor 0x0810e2e4(this, name); overwrite the vtable
+      word at +0 with 0x08984570; inline-construct the auxiliary
+      container at +0x78 (node allocator 0x083c4d30) and then the
+      binding map at +0x94 (node allocator 0x083c14c8, the very
+      allocator app/event_source names for its own event tree); finally
+      0x0810de38(this, demo_mode_instance()), four instructions that
+      store the singleton into this+0x44 and tail-dispatch vtable slot
+      +0x2c. Returns the base constructor's return value, ADS ctor
+      convention. Each container is 28 bytes with an inline node pool -
+      chunk list +0, free list +4, cursor +8, limit +0xc, header node
+      +0x10, count +0x14, two flag bytes +0x18/+0x19 - the same shape
+      app/event_list documents; the 28-byte stride is confirmed by the
+      sibling constructor @ 0x081cdab4, which builds the identical pair
+      at +0x0c and +0x28 through the same two allocators. The header
+      node is closed into an empty circle: parent(+4)=NULL,
+      left(+8)=right(+0xc)=header. Deviations - the pool word 0x08984570
+      is a vtable address in the LOADED image, and the decrypted
+      osos.dec holds unrelated table bytes there, exactly the caveat
+      app/registry records for demo_mode_instance's own vtable
+      0x08989718, so the port stores it as a named constant and claims
+      nothing about its contents; the four unported callees
+      (0x0810e2e4, 0x083c4d30, 0x083c14c8, 0x0810de38) go through the
+      SILVER_CONTROLLER_OPS read_volatile seam (house pattern) while
+      demo_mode_instance @ 0x081883fc is ported and called directly;
+      the original materializes the two zero flag bytes through its
+      stack scratch, and the port stores zero directly with no scratch
+      frame. NOT HOOK-READY - the default allocator boundary returns
+      NULL and neither the original nor the port guards the store
+      through it, so branching stock code here before 0x083c4d30 /
+      0x083c14c8 are ported would fault. match.py structural - same
+      skeleton throughout (base call, vtable store, the eight-store
+      container clear, allocator call, str [+0x10], str [node+4],
+      reload, str [node+8], str [node+0xc], twice; then the singleton
+      fetch, the install and "mov r0,this"); the diff is the four
+      ops-table blx indirections replacing direct bl, LLVM merging the
+      two adjacent flag strb into one strh and CSE-ing away the second
+      of the original's two header-slot reloads, and the crate's fp
+      frame.
+  - address: 0x08262908
+    ghidra: FUN_08262908
+    name: clock_source_destroy
+    size: 4
+    sig: "void *clock_source_destroy(void *this)"
+    module: cxx/clock_source_destroy
+    status: ported
+    vars: {param_1: this}
+    notes: >-
+      One instruction, "bx lr" (the word 0xe12fff1e) - an empty C++
+      destructor, NOT a veneer. Binary-verified from osos.dec: a veneer
+      would be 0xe51ff004 plus a target word or a plain b, and neither
+      is here. The preceding function ends "bx lr" at 0x08262900 with
+      its own literal pool word 0x089a80b0 at 0x08262904, and the next
+      function is the real veneer "b 0x082e8070" at 0x0826290c, so the
+      extent is exactly four bytes with no trailing literal. 45 bl call
+      sites, 0 plain b, 0 predicated forms and 0 occurrences of
+      0x08262908 as a data word - never reached through a vtable, so
+      every caller binds it statically, which is what a compiler does
+      for a known-type destructor. All four counts from decoding every
+      B/BL word in osos.dec. The pairing is the proof - 18 sites are
+      literally "add r0,sp,#N / bl 0x08262958" ... "add r0,sp,#N /
+      bl 0x08262908" on the SAME stack slot, and 2 more pair the same
+      way with the sibling constructor 0x08262a9c; the rest are the
+      same shape with the object pointer materialized a few
+      instructions earlier. No site is followed by operator delete:
+      all 45 destroy a stack temporary. Those two constructors are
+      siblings over the base 0x082628f4, which is the whole object -
+      "str <vtable>,[r0]; strb r1,[r0,#4]" - so the class is
+      { vtable, u8 kind }, 0x08262958 passes kind=1 and 0x08262a9c
+      kind=0, each installing its own vtable, and both share this one
+      empty destructor. The object is a clock: the canonical use (e.g.
+      @ 0x081944b4) constructs it on the stack, calls vtable slot +0xc
+      with an out pointer to a {sec, nsec} pair, converts that through
+      0x082a1c30 - which is sec*1000 + nsec/1000000, dividing by the
+      literal 1000000 @ 0x082a1c58 - and destroys it here; 0x08262ab8
+      subtracts two such pairs field by field and 0x081643cc compares
+      the elapsed result against 500. r0 passing through is the
+      load-bearing detail: bx lr leaves it untouched, the ADS
+      destructor convention, so the signature returns this rather than
+      void even though no caller of this one chains into operator
+      delete. Deviations - none, the port is the identity function. It
+      carries its own link_section because it compiles to bytes
+      identical to cxx::trivial_destructor @ 0x082646ac and LLVM's
+      identical-code folding would otherwise collapse the two exports
+      into one, leaving the two stock addresses sharing a single
+      hookable symbol. match.py structural - one instruction vs three,
+      the difference being only the crate's fp frame
+      (push {fp,lr} / mov fp,sp / pop {fp,pc}) around an empty body
+      that returns r0 unchanged.

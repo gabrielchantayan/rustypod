@@ -53,6 +53,7 @@ pub mod hints {
     pub const OBSERVABLE_ARRAY: usize = 0x1400_0000;
     pub const OBSERVABLE_ARRAY_DRAIN: usize = 0x1500_0000;
     pub const EVENT_SOURCE_DESTRUCT: usize = 0x1600_0000;
+    pub const SILVER_CONTROLLER: usize = 0x1700_0000;
     // `heap/pool.rs` maps its own arena at 0x0800_0000 through a separate
     // path: it needs only bit 31 clear, not full u32 addressability.
 }
