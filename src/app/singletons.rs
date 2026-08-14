@@ -17,11 +17,26 @@
 //! | 0x081b803c | [`singleton_class_7f80`] | 0x1d4 | 0x089cc61c | 0x081b80b4 | 38 |
 //! | 0x0816df60 | [`lazy_singleton_0x3c`] | 0x3c | 0x089d0130 | 0x0816e2ac | 38 |
 //! | 0x081a5500 | [`singleton_class_8c00`] | 0xdc | 0x089cc7c0 | 0x081a71fc | 82 |
-//! | 0x081dfa20 | [`command_dispatcher_get`] | 0x20 | 0x089cc828 | 0x081dfc1c | 69 |
+//! | 0x081dfa20 | [`command_dispatcher_get`] | 0x20 | 0x089cc828 | 0x081dfc1c | 73 |
 //! | 0x081f77a4 | [`volume_controller_get`] | 0x3bc | 0x089cc288 | 0x081fa070 | 52 |
 //!
 //! (Call-site counts binary-scanned; the earlier scouting notes said 86
 //! / 38 / 37 / 36 for the bottom four.)
+//!
+//! One of the ten is also reached through a long-branch veneer, ported
+//! alongside it:
+//!
+//! | address | name | target | `bl` sites |
+//! |---|---|---|---|
+//! | 0x0820b230 | [`command_dispatcher_get_veneer`] | 0x081dfa20 | **125** |
+//!
+//! Re-scanning every ARM `B`/`BL` word in `work/firmware/osos.dec`
+//! (load base 0x08000000) resolves **73** unconditional `BL` to
+//! 0x081dfa20 directly — the header row above previously said 69, an
+//! `osos.asm` grep undercount — plus exactly one plain `B`, which is
+//! the veneer itself, and **125** `BL` to the veneer. 198 call sites
+//! in total, which makes 0x0820b230 the hotter of the two entry
+//! points by a wide margin.
 //!
 //! `operator new` @ 0x082aadd4 is already ported
 //! (`heap::veneers::operator_new`), so it is called directly. None of
@@ -479,7 +494,7 @@ pub unsafe extern "C" fn singleton_class_8c00() -> *mut u8 {
 
 /// command_dispatcher_get — original: `FUN_081dfa20` @ 0x081dfa20
 /// (44 bytes of code + one pool word @ 0x081dfa4c = 48 bytes total;
-/// 69 `bl` call sites).
+/// 73 direct `bl` call sites, 198 counting the veneer).
 ///
 /// Returns the command-dispatcher singleton, constructing it on first
 /// use: `operator_new(0x20)` (`mov r0, #0x20`) then the constructor @
@@ -499,6 +514,28 @@ pub unsafe extern "C" fn command_dispatcher_get() -> *mut u8 {
     lazy_singleton(cache, COMMAND_DISPATCHER_SIZE, || unsafe {
         ctor!(command_dispatcher)
     })
+}
+
+/// command_dispatcher_get_veneer — original: `thunk_FUN_0820b230` @
+/// 0x0820b230 (4 bytes; **125** `bl` call sites, more than the 73 that
+/// reach [`command_dispatcher_get`] directly).
+///
+/// One instruction — `b 0x081dfa20` (0xeaff51fa) — the long-branch
+/// veneer the linker planted so the 0x0820xxxx-and-beyond callers
+/// could reach the dispatcher getter. Genuinely 4 bytes, not the 8 of
+/// the `ldr pc, [pc, #-4]` + target-word form: the word before it
+/// (0x0820b22c) is a `bx lr` ending the previous function and the word
+/// after it (0x0820b234) opens the next with `push {r3, r4, r5, lr}`.
+///
+/// Kept as its own `#[inline(never)]` symbol rather than a Rust alias
+/// so a hook at 0x0820b230 lands on a real veneer that branches on to
+/// the getter, exactly as the image has it (the `app/service_manager`
+/// veneer precedent). Same NOT-HOOK-READY caveat as its target — see
+/// the module header.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn command_dispatcher_get_veneer() -> *mut u8 {
+    command_dispatcher_get()
 }
 
 /// volume_controller_get — original: `FUN_081f77a4` @ 0x081f77a4
@@ -990,6 +1027,37 @@ mod tests {
             );
         }
         restore(guard);
+    }
+
+    #[test]
+    fn the_command_dispatcher_veneer_constructs_and_caches_exactly_like_its_target() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(command_dispatcher_get_veneer(), constructed());
+            assert_eq!(
+                *ptr::addr_of!(ALLOC_SIZES),
+                std::vec![COMMAND_DISPATCHER_SIZE],
+                "the veneer allocates through the same getter, once"
+            );
+            assert_eq!(
+                command_dispatcher_get(),
+                command_dispatcher_get_veneer(),
+                "both entry points hand out the one cached instance"
+            );
+            assert_eq!((*ptr::addr_of!(CTOR_BLOCKS)).len(), 1, "constructed exactly once");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_command_dispatcher_veneer_is_a_distinct_symbol_from_its_target() {
+        // The image has two separate entry points (0x0820b230 branches
+        // to 0x081dfa20); a Rust alias would make a hook at the veneer
+        // address meaningless.
+        assert_ne!(
+            command_dispatcher_get_veneer as *const () as usize,
+            command_dispatcher_get as *const () as usize
+        );
     }
 
     #[test]
