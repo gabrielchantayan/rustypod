@@ -30765,3 +30765,164 @@ functions:
       the inlined added-hash probe (`NUM_OBJ` materialized as
       `mov r8,#105; orr r8,r8,#512`) and the inlined halving search.
       #[inline(never)] for the 57 `bl` targets.
+  # --- display object: the six-layer compositor root ---
+  - address: 0x081d9064
+    ghidra: FUN_081d9064
+    name: display_get_layer
+    size: 96
+    sig: "u8 *display_get_layer(Display *display, u32 index)"
+    module: drivers/display
+    status: ported
+    renames:
+      param_1/r4: display
+      param_2/r5: index
+      cVar1: display_id
+      uVar2: layer
+    notes: >-
+      The display object's lazy per-layer accessor - returns layer `index`
+      of `display`, constructing it on first request under the display's
+      own mutex. EXTENT - 96 bytes, 0x081d9064..0x081d90c4, 24 instructions
+      with no literal pool; the next function opens at 0x081d90c4 with
+      `push {r4, lr}` and Ghidra's function table misses it entirely, so
+      the 96-byte extent is right here only by luck. 63 `bl` and 0 `b` call
+      sites, counted by decoding every branch word in osos.dec (the third
+      largest consumer group is 0x0819a70c..0x0819a818, ten sites in one
+      function).
+      Algorithm - mutex_lock(display + 0x28); if the slot at
+      display[index] (word-indexed, `ldr r0,[r4,r5,lsl #2]`) is NULL,
+      allocate operator_new(0x1d8) and hand it to the layer constructor @
+      0x08120b10 with (display, display+0x94 driver, index, display_id ==
+      1), store the result back in the slot; mutex_unlock; return the slot
+      re-loaded. The slot is genuinely loaded three times - test, store,
+      post-unlock return - so the port keeps volatile accesses instead of
+      caching across the constructor.
+      SUBSYSTEM - the address sits in the app/Silver band but the class is
+      pure display driver, so the port lives in drivers/display.rs beside
+      drivers/display_layer.rs, whose header already names this function as
+      the way a layer is obtained. The constructor @ 0x081d92a4 is
+      decisive - mutex_create(display+0x28), a `i < 6` loop clearing six
+      layer slots at +0x00..+0x17 and six bytes at +0x18..+0x1d,
+      `display+0x90 = param_2` (the display id) and `display+0x94` = the
+      panel driver from 0x0814ece0 (id 0) or 0x08169018 (id 1). The
+      singleton getter 0x081d8870 hands out exactly two displays, id 0
+      (internal LCD) and id 1 (secondary output).
+      Field map recovered - +0x00 six layer slots, +0x18 six per-layer
+      bytes, +0x28 Mutex, +0x90 u8 display id, +0x94 panel driver. Modeled
+      as a repr(C) Display with named fields, so the header offsets hold on
+      the 32-bit target while a 64-bit host test simply gets a larger,
+      self-consistent object. The index is addressed unchecked
+      (addr_of_mut + add), matching the original's unbounded
+      `ldr r0,[r4,r5,lsl #2]`; slice indexing would add a panic path the
+      firmware has not got.
+      NEW FACT for drivers/display_layer.rs - the layer byte at +0x09 that
+      module could only call "(opaque)" is this constructor's fifth
+      argument, i.e. "this layer is on the secondary display".
+      Deviations - mutex_lock @ 0x0807f5c4, mutex_unlock @ 0x0807f6a0 and
+      operator_new @ 0x082aadd4 are all ported and called directly; the
+      layer constructor 0x08120b10 is not ported and dispatches through
+      DISPLAY_HOOKS with an identity default (0x08120b10's body leaves r0
+      alone on the path the accessor observes, so the NULL-block case still
+      behaves). operator_new's result reaches the constructor unchecked and
+      the constructor's result is stored unchecked - the original has no
+      NULL test anywhere.
+      Host tests (5) - first-request construction with every constructor
+      argument checked and the tag-2 operator_new(0x1d8) logged, caching on
+      the second request, the six slots kept independent, the secondary
+      flag proven to be `display_id == 1` and nothing else (ids 0, 1, 2,
+      0xff), a NULL constructor result stored and retried, and a failed
+      allocation still reaching the constructor with the NULL block.
+      match.py structural - the slot addressing (`ldr r0,[r5,r4,lsl #2]`),
+      the +0x90 ldrb, `mov r0,#0x1d8`, the +0x94 load and the slot store
+      are all present in order; LLVM inlines the eight-byte ported
+      mutex_lock/mutex_unlock (so the ROM_KERNEL volatile table read shows
+      up as an ldrd chain) and lowers `display_id == 1` to sub/clz/lsr
+      instead of cmp/moveq.
+
+  # --- iAP (iPod Accessory Protocol): the packet class ---
+  - address: 0x080f6da0
+    ghidra: FUN_080f6da0
+    name: iap_packet_create
+    size: 104
+    sig: "u8 *iap_packet_create(u8 *owner, u8 *context, u8 lingo, u16 command, const u8 *payload, u32 payload_len)"
+    module: app/iap_packet
+    status: ported
+    renames:
+      param_1/r5: owner
+      param_2/r6: context
+      param_3/r7: lingo
+      param_4/r8: command
+      param_5/r9: payload
+      param_6/sl: payload_len
+      iVar1/r4: packet
+    notes: >-
+      The iAP packet factory - allocate, construct and initialize one iPod
+      Accessory Protocol message object, or return NULL.
+      EXTENT - 104 bytes, 0x080f6da0..0x080f6e08, 26 instructions with no
+      literal pool. Ghidra's functions.csv says 100 and is one word short -
+      the word at 0x080f6e04 is this function's own
+      `pop {r1,r2,r3,r4-r11,pc}`, and the next function opens at 0x080f6e08
+      with `mov r2,r0; push {lr}`. Use `match.py --size 0x68`.
+      59 `bl` and 0 `b` call sites, counted by decoding every branch word
+      in osos.dec.
+      Algorithm - packet = construct(operator_new(0x24)); if NULL return
+      NULL; if init(packet, owner, context, lingo, command, payload,
+      payload_len) is nonzero return packet; else
+      operator_delete(destruct(packet)) and return NULL. Two details the
+      port keeps rather than tidies - the NULL test is on the constructor's
+      result, taken only after the constructor has already run over the
+      possibly-NULL block (`bl 0x082aadd4; bl 0x080f745c; movs r4,r0`); and
+      the delete takes the DESTRUCTOR's return value, not the saved r4, the
+      two coinciding only because 0x080f74ac ends in `mov r0,r4`.
+      SUBSYSTEM - iAP, proven three ways. (1) The header parser feeding
+      this factory, 0x080f6d34, uses a 3-byte header with a big-endian u16
+      command when the first byte is 4 and a 2-byte header with a u8
+      command otherwise - the iAP rule that lingo 0x04 (Extended Interface)
+      alone carries 16-bit command ids. (2) Decoding the third argument at
+      all 59 call sites yields the immediates 0..10 and nothing else, the
+      allocated lingo id range. (3) The default constructor 0x080f745c arms
+      +0x0e = 0xff and +0x10 = 0xffff, the "no lingo"/"no command"
+      sentinels. The wire-length helper 0x080f6e08 closes it - it returns
+      3 + payload_len + (lingo == 4 ? 2 : 1) + (payload_len > 0xfd ? 3 : 1)
+      + ..., i.e. sync + length field (one byte, or the 0x00 escape plus a
+      16-bit length) + lingo + command + payload + checksum. Filed under
+      app/ beside app/iap_incoming_process_thread.rs (the consumer), not
+      under drivers/, despite the 0x080fxxxx address band.
+      Packet object (0x24 = 36 bytes), from 0x080f745c / 0x080f73a0 /
+      0x080f7420 - +0x00 owner (the lone field the sibling factory
+      0x080f6f8c sets), +0x04 a second opaque word that is NULL at all 59
+      call sites, +0x08 payload buffer (tag-3 operator_new @ 0x082aad74,
+      released through 0x082aad14), +0x0c u16 payload length, +0x0e u8
+      lingo, +0x10 u16 command, +0x14 a second buffer, +0x18 its u16
+      length, +0x1a flag, +0x1c and +0x20 zeroed by the initializer. The
+      constructor and destructor bump a live-packet counter at the global
+      word 0x089ccc24. The port never dereferences the packet, so it stays
+      an opaque *mut u8 and no host/target layout question arises.
+      Argument mapping verified against the initializer's own prologue -
+      0x080f73a0 does `stm r4,{r7,r8}` (owner, context), `strb r9,[r4,#14]`
+      (lingo), `ldrd sl,[sp,#48]` and `strh sl,[r4,#16]` (command), with
+      the payload pointer in fp and the length in r5; the factory's
+      `stm sp,{r8,r9,sl}` lands its own r3/stack args in exactly those
+      three slots. lingo/command are typed u8/u16 because the initializer
+      truncates them with strb/strh - nothing observable is lost.
+      Deviations - operator_new @ 0x082aadd4 and operator_delete @
+      0x082aad24 are ported and called directly; the constructor
+      (0x080f745c), initializer (0x080f73a0) and destructor (0x080f74ac)
+      are not ported and dispatch through IAP_PACKET_OPS with documented
+      defaults (identity, return 1, identity). The initializer's ARM return
+      is a 64-bit pair (r0 = success flag, r1 = the owner argument passing
+      back out); the factory reads only r0, so the hook returns just that.
+      Host tests (6) - every argument threaded into the initializer in
+      order with the tag-2 operator_new(0x24) logged, all eleven observed
+      lingo ids plus the 0xff sentinel crossed with five command values,
+      a zero-length body treated as success, the failure path proven to
+      destruct then tag-2 operator_delete and return NULL, the delete
+      proven to take the destructor's result rather than the saved
+      pointer, and a NULL constructed packet short-circuiting before the
+      initializer.
+      match.py structural (`--size 0x68`) - `mov r0,#0x24`, the
+      operator_new call, the construct dispatch, `cmp r0,#0` NULL exit, the
+      three stack-marshalled arguments, the init dispatch and its zero
+      test, and the destruct-then-delete teardown all appear in the
+      original's order; the differences are the crate fp frame, the
+      indirect `blx` hook dispatch in place of three direct `bl`s, and
+      LLVM keeping the NULL result in r6 instead of reusing r4.

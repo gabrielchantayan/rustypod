@@ -17,6 +17,7 @@ pub mod facade_for_selector;
 pub mod fixed_value;
 pub mod h264_decode_forwarder;
 pub mod iap_incoming_process_thread;
+pub mod iap_packet;
 pub mod image_format;
 pub mod media_command_facade;
 pub mod media_ext;
