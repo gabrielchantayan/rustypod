@@ -29661,3 +29661,53 @@ functions:
       @ 0x0817f7c0 compares two sources' kinds against 1, 5, 6, 9 and 10
       to decide whether the change animates. No deviations; match.py shows
       the identical ldrb/return pair inside the crate's fp frame.
+
+  - address: 0x081e0bac
+    ghidra: FUN_081e0bac
+    name: event_source_construct
+    size: 136
+    sig: "void *event_source_construct(void *source, int id, u8 kind, void *declaration)"
+    module: app/event_source
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: id
+      param_3/r2: kind
+      param_4/r3: declaration
+    notes: >-
+      Constructor of the 92-byte event source object. 128 bl call sites, no
+      plain-b tail calls; both counts verified by decoding every branch word
+      in osos.dec. Ghidra's 132-byte extent drops the trailing literal-pool
+      word at 0x081e0c30 (0x0898ecb4, the vtable, reached by
+      "ldr r1,[pc,#116]" at 0x081e0bb4); the next function starts at
+      0x081e0c34, so the true extent is 136 bytes - 33 instructions plus
+      that word. Body - install the vtable with "str r1,[r0],#16", then
+      default-construct three sub-objects in ascending order, chaining each
+      constructor's returned this into the next address - the 3-word
+      declaration vector at +0x10 (0x083e4a7c), the 28-byte child
+      collection at +0x1c (0x083db10c, node allocator 0x083b9f4c) and the
+      event tree at +0x38 (0x083db2d4, node allocator 0x083c14c8, the very
+      tree 0x081e04b0 / 0x081e054c manage). Then zero the owning-registry
+      word at +0x58 and store id at +0x08, declaration at +0x04 and the
+      kind byte at +0x0c. Finally, if id is positive, load the declaration
+      vector from the registry through 0x081e059c and clear the built flag
+      at +0x54. Two details are load-bearing - the id test is
+      "cmp r6,#0; ble", signed, so a negative id skips the load exactly
+      like zero; and +0x54 is written only on that path, so a non-positive
+      id leaves it at whatever the storage held. The stack-temporary sites
+      @ 0x0817ead0 and @ 0x08183638 both null-check the id first, so the
+      original never observes the stale flag, and the port adds no store
+      the original does not make. Layout confirmed by the factory
+      @ 0x081472b0 - operator new(92) @ 0x082aadd4, then
+      ctor(obj, declaration[0], declaration[1] & 0xff, declaration),
+      "str r6,[r0,#88]" for the owning registry, and insertion into that
+      registry's map at +12 keyed by the same id. Deviation - the original
+      passes uninitialized stack slots (sp+20, sp+12) as the ignored
+      allocator arguments; the port passes zeroed ones. The comparator
+      bytes at sp+16 and sp+8, which the collection constructors do read,
+      are zero in both. match.py - same store/offset skeleton throughout
+      (str r1,[r0],#16 / add #12 / add #28 / str [r0,#32] /
+      strb [r0,#-44] / str [r7,#-52] / str [r7,#-48] / cmp+ble /
+      strb [r7,#28]); the diff is the ops-table indirection emitting blx
+      through loaded pointers instead of direct bl, plus the crate's fp
+      frame.
