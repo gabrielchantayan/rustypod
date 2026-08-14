@@ -29638,3 +29638,26 @@ functions:
       distinguishable matrix values to prove every mapping, guard the exact
       16-byte destination range, and model in-place ordering; match.py
       structural diff reviewed after the ARM release build.
+
+  # --- retailOS event source object (see also 0x081e04b0 / 0x081e054c) ---
+  - address: 0x081e0ba4
+    ghidra: FUN_081e0ba4
+    name: event_source_kind
+    size: 8
+    sig: "u8 event_source_kind(const void *source)"
+    module: app/event_source
+    status: ported
+    renames:
+      param_1/r0: source
+    notes: >-
+      52 bl call sites, no plain-b tail calls; both counts verified by
+      decoding every branch word in osos.dec. The entire function is
+      "ldrb r0,[r0,#0xc]; bx lr" - an accessor for the byte at +0x0c of the
+      92-byte event source object that 0x081e04b0 / 0x081e054c also operate
+      on, not a veneer (a veneer would be 0xe51ff004 plus a target word).
+      The byte is constructor argument 2 of 0x081e0bac, which the factory
+      @ 0x081472b0 takes from declaration[1] & 0xff. Call sites treat the
+      result as a small enumeration - the view transition state machine
+      @ 0x0817f7c0 compares two sources' kinds against 1, 5, 6, 9 and 10
+      to decide whether the change animates. No deviations; match.py shows
+      the identical ldrb/return pair inside the crate's fp frame.
