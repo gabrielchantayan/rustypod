@@ -89,7 +89,7 @@ unsafe extern "C" fn missing_post_message(
 
 /// The wired default: the not-yet-ported helper is the documented stub
 /// above.
-const DEFAULT_TASK_MESSAGE_OPS: TaskMessageOps = TaskMessageOps {
+pub(crate) const DEFAULT_TASK_MESSAGE_OPS: TaskMessageOps = TaskMessageOps {
     post_message: missing_post_message,
 };
 
@@ -113,6 +113,13 @@ pub static mut TASK_MESSAGE_OPS: TaskMessageOps = DEFAULT_TASK_MESSAGE_OPS;
 /// ported, so the call dispatches through `TASK_MESSAGE_OPS` (the
 /// `TimerOps` pattern); the Ghidra `void (void)` signature is
 /// corrected to four arguments returning `u32` from the call sites.
+///
+/// `#[inline(never)]`: the shim is a distinct `bl` target in the
+/// original, and both its call sites are `bl`s. Without it LLVM folds
+/// the body into `queued_message_post` (0x08110fdc) and merges that
+/// function's two post branches into one call with a computed wait
+/// flag — behaviorally identical, structurally one `bl` short.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn task_message_post_sync(
     reply_queue: usize,
@@ -129,14 +136,15 @@ pub unsafe extern "C" fn task_message_post_sync(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
     use super::*;
     use std::sync::Mutex as StdMutex;
     use std::vec::Vec;
 
-    /// Serializes tests that swap the global ops table / mock state.
-    static OPS_LOCK: StdMutex<()> = StdMutex::new(());
+    /// Serializes every test that swaps [`TASK_MESSAGE_OPS`] — including
+    /// `app::queued_message`'s poster tests, which drive the same slot.
+    pub(crate) static OPS_LOCK: StdMutex<()> = StdMutex::new(());
 
     static CALLS: StdMutex<Vec<(usize, usize, usize, u32, u32)>> = StdMutex::new(Vec::new());
 
