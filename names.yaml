@@ -29238,6 +29238,23 @@ functions:
       slots. Host test proves the target word becomes zero while adjacent words
       retain their sentinels; match.py diff reviewed after the ARM release
       build.
+  - address: 0x08027c88
+    ghidra: FUN_08027c88
+    name: reset_u32_slot_alias_08027c88
+    size: 12
+    sig: "void reset_u32_slot_alias_08027c88(u32 *slot)"
+    module: cxx/slot_reset
+    status: ported
+    renames:
+      param_1/r0: slot
+      r1: zero
+    notes: >-
+      Byte-identical alias of reset_u32_slot at 0x08027c7c. Its 12-byte ARM
+      body is mov r1,#0; str r1,[r0]; bx lr, so it clears one aligned u32 and
+      accesses nothing else. The independent exported Rust symbol preserves
+      this address-specific hook target; its focused host test verifies the
+      target becomes zero while adjacent words retain their sentinels.
+
 
   # --- H.264 CBC decode forwarding adapter ---
   - address: 0x0802ac10
@@ -29682,3 +29699,23 @@ functions:
       u32 argument/result ABI uses r0, matching the C `uint` input and its
       0-or-1 int result. No deviations; focused host tests cover 0, 1, 2,
       and both high unsigned boundaries.
+
+  # --- ARM second-argument return forwarder ---
+  - address: 0x080275f0
+    ghidra: FUN_080275f0
+    name: return_second_argument
+    size: 8
+    sig: "u32 return_second_argument(u32 first_argument, u32 second_argument)"
+    module: cxx/return_forwarder
+    status: ported
+    renames:
+      param_1/r0: first_argument
+      param_2/r1: second_argument
+      r0: returned_second_argument
+    notes: >-
+      8-byte ARM leaf: `mov r0,r1; bx lr`. It returns the raw second 32-bit
+      ABI argument unchanged, never reads the first argument, and performs no
+      memory access. No direct callers were recovered by the codegraph, so
+      return_second_argument is the narrowest semantic name supported by the
+      exact ABI behavior. No deviations; focused host tests cover independence
+      from the first argument and zero/all-one second-argument bit patterns.

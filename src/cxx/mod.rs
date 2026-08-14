@@ -19,6 +19,7 @@ pub mod mode;
 pub mod object_flags;
 pub mod pair_header;
 pub mod release;
+pub mod return_forwarder;
 pub mod settings;
 pub mod scaled_cursor;
 pub mod slot_reset;
