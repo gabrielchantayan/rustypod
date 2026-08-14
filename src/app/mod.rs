@@ -20,6 +20,7 @@ pub mod iap_incoming_process_thread;
 pub mod image_format;
 pub mod media_command_facade;
 pub mod media_ext;
+pub mod message_arena;
 pub mod message_kind;
 pub mod node_list;
 pub mod object_dispatch_entry;

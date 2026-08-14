@@ -10528,6 +10528,62 @@ functions:
       sequence; expected differences are the two seam loads/blx calls
       and LLVM's frame/register allocation.
 
+  - address: 0x08103550
+    ghidra: FUN_08103550
+    name: message_arena_alloc
+    size: 24
+    sig: "void *message_arena_alloc(size_t size)"
+    module: app/message_arena
+    vars: {param_1: size}
+    status: ported
+    renames:
+      param_1/r0/r4: size
+      FUN_08103400: message_arena_pool (the accessor, MESSAGE_ARENA_POOL seam)
+      FUN_0826c0d8: fixed_block_pool_alloc (already ported,
+        heap/fixed_block_pool.rs)
+    notes: >-
+      The queued-message class's class-specific operator new. Six
+      instructions, extent 0x08103550..0x08103568 confirmed from the raw
+      words (the preceding function's literal pool ends at 0x0810354c;
+      0x08103568 starts the next one with `cmp r1,#0x8300`), no trailing
+      literal - the tail branch is PC-relative. push {r4,lr};
+      mov r4,r0; bl 0x08103400; mov r1,r4; pop {r4,lr}; b 0x0826c0d8 -
+      literally `void *operator new(size_t n) { return alloc(pool(), n); }`,
+      the thin call site fixed_block_pool_alloc's own notes predicted.
+      48 bl call sites, 0 tail branches, binary-scanned by decoding every
+      B/BL word in osos.dec. No DATA word holds the address, so it is
+      never dispatched virtually.
+      Which arena - the accessor FUN_08103400 @ 0x08103400 (100 bytes,
+      0x08103400..0x08103464; the next word is queued_message_construct's
+      push) is a textbook ADS C++ function-local static: guard word
+      0x089ca840 (loaded as 0x089ca7fc + 0x44), tst #1 fast path,
+      __cxa_guard_acquire 0x082ab31c, FixedBlockPool ctor 0x0826c134 on
+      0x08a1b1d4 with block_size 12 / block_count 128, __cxa_atexit
+      0x082ab1c8 with (pool, dtor 0x082612d0, __dso_handle 0x089ca09c),
+      __cxa_guard_release 0x082ab338, return 0x08a1b1d4. 128 blocks of
+      12 bytes is exactly the 12-byte envelope queued_message_construct
+      @ 0x08103464 builds (vtable, kind, payload). Every one of the 48
+      call sites loads the size as `mov r0,#12` - verified by decoding
+      the immediate at all 48, not sampled - so the pool's exact-size
+      test always matches here and the global operator_new fallback is
+      unreachable through this entry point. The parameter is still a
+      real parameter and the port forwards it verbatim.
+      Deviations - the accessor is not ported yet, so it rides the
+      MESSAGE_ARENA_POOL slot (app/queued_message.rs precedent):
+      firmware-address default on target, panicking default on host.
+      fixed_block_pool_alloc is called directly, no seam. Host tests (4)
+      cover the stock 12-byte pop and relink, a non-12 size reaching the
+      pool's size test (proving the argument is not folded to a
+      constant), the accessor being re-read on every call rather than
+      cached, and draining the arena to exhaustion in free-list order;
+      the host fixture widens the block stride to the host pointer
+      alignment (FreeBlock.next is 8 bytes here, 4 on target) while
+      keeping the declared block_size at the original's 12 - the
+      allocator only follows next, never a stride. match.py (--size 24):
+      identical skeleton (mov r4,r0 / accessor / mov r1,r4 / pop / tail
+      b); the diffs are the seam's literal load + blx instead of the
+      direct bl, and LLVM's fp frame.
+
   - address: 0x08266a48
     ghidra: FUN_08266a48
     name: message_kind_construct
