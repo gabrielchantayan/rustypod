@@ -30135,6 +30135,39 @@ functions:
       from the first argument and zero/all-one second-argument bit patterns.
 
   # --- big-endian wire-format packer cluster (src/util/beload.rs) ---
+  - address: 0x0826161c
+    ghidra: FUN_0826161c
+    name: pack_be16
+    size: 28
+    sig: "void pack_be16(u8 *dst, u16 value)"
+    module: util/beload
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: value
+      uVar1/r2: reversed
+    notes: >-
+      Writes value as two big-endian bytes at an unaligned dst - the first
+      member of the pack/unpack overload set. 28 bytes, 7 instructions,
+      0x0826161c..0x08261634 ending in bx lr; the next function (pack_be32)
+      starts at 0x08261638, extent decoded from the raw words rather than
+      taken from Ghidra. 46 bl call sites, counted by decoding every B/BL
+      word in osos.dec. Algorithm - same reverse-then-spill two-step shape
+      as pack_be32: byte-reverse the halfword in registers (lsl #8, orr of
+      value & 0xff00 shifted right 8), then spill the reversed halfword's
+      two bytes least-significant first to ascending addresses, so dst[0]
+      receives value >> 8. The original ignores the argument register's top
+      half, which the u16 parameter states directly. Kept in its own text
+      section so LLVM cannot fold it onto another packer. Deviation - LLVM
+      collapses the reverse into two direct strb and emits them in
+      descending address order (dst[1] before dst[0]); the original writes
+      dst[0] first. Both are plain writes to distinct addresses, so no
+      caller can observe the difference. Host tests cover every single-byte
+      lane at misalignments 0..5, guard the untouched neighbouring bytes,
+      and pin the byte order against a little-endian store. match.py
+      structural diff reviewed - two strb with the most significant byte at
+      the lowest address, plus the crate-wide push {fp, lr} frame.
+
   - address: 0x08261638
     ghidra: FUN_08261638
     name: pack_be32

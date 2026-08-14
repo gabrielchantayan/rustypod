@@ -105,6 +105,27 @@ pub unsafe extern "C" fn store_u32_be_bytes(p: *mut u8, value: u32) {
 // that starts at 0x08261790.
 // ---------------------------------------------------------------------------
 
+/// pack_be16 — original: `FUN_0826161c` @ 0x0826161c (28 bytes, all code:
+/// 6 instructions plus `bx lr`; 46 `bl` call sites, counted by decoding
+/// every B/BL word in osos.dec).
+///
+/// Writes `value` as two big-endian bytes at `dst`, needing no alignment.
+///
+/// The first member of the overload set, and the same two-step shape as
+/// [`pack_be32`]: reverse the halfword in registers (`lsl #8`, then `orr`
+/// of `value & 0xff00` shifted right 8), then spill its two bytes
+/// least-significant first to ascending addresses. The original ignores
+/// the argument register's top half, which the `u16` parameter states
+/// directly. Its own text section keeps it off the other packers' symbols.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.pack_be16")]
+#[inline(never)]
+pub unsafe extern "C" fn pack_be16(dst: *mut u8, value: u16) {
+    let reversed = value.swap_bytes();
+    dst.write(reversed as u8);
+    dst.add(1).write((reversed >> 8) as u8);
+}
+
 /// pack_be32 — original: `FUN_08261638` @ 0x08261638 (56 bytes, all code:
 /// 13 instructions plus `bx lr`; 49 `bl` call sites, binary-scanned).
 ///
@@ -275,6 +296,28 @@ mod tests {
                 assert_eq!(actual, expected, "value={value:#010x}, offset={offset}");
             }
         }
+    }
+
+    /// Two bytes, most significant at the lowest address, at every
+    /// misalignment, with the neighbouring packet bytes untouched.
+    #[test]
+    fn pack_be16_writes_exactly_two_big_endian_bytes() {
+        for value in [0u16, 1, 0x00ff, 0xff00, 0x7fff, 0x8001, 0x1234, u16::MAX] {
+            for offset in 0..6usize {
+                let mut actual = [0xa5u8; 12];
+                let mut expected = actual;
+                expected[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
+
+                unsafe { pack_be16(actual.as_mut_ptr().add(offset), value) };
+
+                assert_eq!(actual, expected, "value={value:#06x}, offset={offset}");
+            }
+        }
+
+        // A little-endian store would give [0x34, 0x12].
+        let mut buf = [0u8; 2];
+        unsafe { pack_be16(buf.as_mut_ptr(), 0x1234) };
+        assert_eq!(buf, [0x12, 0x34]);
     }
 
     /// The most significant byte lands at the lowest address — the property
