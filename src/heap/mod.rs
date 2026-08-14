@@ -12,6 +12,7 @@ pub mod dcache;
 pub mod endian_selector;
 pub mod gateway_service1;
 pub mod first_event_dispatch;
+pub mod fixed_block_pool;
 pub mod free_path;
 pub mod init;
 pub mod managed_handle;
