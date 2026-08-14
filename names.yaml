@@ -4922,6 +4922,73 @@ functions:
       body to sys_stub_ret0 — objdump shows the two ARM symbols at one
       address (match.py finds it under sys_stub_ret0's label).
 
+  # --- retailOS diagnostic printf (stdio/debug_printf) ---
+  - address: 0x082bd4a8
+    ghidra: FUN_082bd4a8
+    name: debug_printf
+    size: 28
+    sig: "int debug_printf(const char *fmt, ...)"
+    module: stdio/debug_printf
+    vars: {param_1: fmt}
+    status: ported
+    renames:
+      param_1/r0: fmt
+      FUN_08396e1c: debug_vprintf (DEBUG_VPRINTF seam, not yet ported)
+    notes: >-
+      The varargs front end of retailOS's semihosting trace printf.
+      Seven instructions, extent 0x082bd4a8..0x082bd4c4 confirmed from
+      the raw words (0x082bd4c4 starts the next function with its own
+      push), no literal pool. push {r0,r1,r2,r3}; push {r4,lr};
+      ldr r0,[sp,#8]; add r1,sp,#12; bl 0x08396e1c; pop {r4};
+      ldr pc,[sp],#20 - the textbook AAPCS variadic prologue (spill
+      r0-r3 into a frame contiguous with the caller's stacked
+      arguments, point a va_list just past the fixed parameter, call
+      the v-flavored worker, then drop lr + the four spill words in one
+      post-indexed load). In C: `int debug_printf(const char *fmt, ...)
+      { return debug_vprintf(fmt, ap); }`.
+      48 call sites, binary-scanned by decoding every B/BL word in
+      osos.dec: 36 bl, 9 blne, 1 bleq, 1 tail b, 1 tail beq. No DATA
+      word holds the address, so it is never dispatched virtually. The
+      ten predicated sites are callers gating a trace on a status
+      BITMASK (e.g. tst r4,#0x400000; addne r0,pc,#0x50; blne @
+      0x08087a88), NOT on a NULL check - this entry point has no guard
+      on the format at all. 43 of the 48 load the format with
+      `add r0,pc,#imm`, i.e. inline PC-relative string literals:
+      "mDS: write data CRC response error\n" @ 0x08087adc (storage
+      driver), "cI: card failed HS_TIMING SWITCH\n" @ 0x08074e14 (card
+      driver).
+      The worker FUN_08396e1c @ 0x08396e1c (380 bytes,
+      0x08396e1c..0x08396f98 plus a 4-byte digit-table literal;
+      0x08396f9c starts the next function) is a hand-rolled mini-printf
+      writing straight to the ARM Angel semihosting console - unrelated
+      to the ADS printf family in printf/printf_api.rs, and
+      debug_printf is its ONLY caller (1 bl, binary-verified). It scans
+      for % and backslash, flushing literal runs through FUN_0808e2b8
+      (parks a NUL over the run's last byte, semihost SYS_WRITE0 op 4,
+      then SYS_WRITEC op 3 via 0x080769a0 for the saved byte, then
+      restores it). Conversions: optional 0-prefixed decimal width,
+      ignored `l`, then d (emit '-', negate, fall into the unsigned
+      printer 0x080944d8), u, x/X (8-digit zero-padded hex built
+      backwards in the spill frame, flushed with SYS_WRITE0), c
+      (SYS_WRITEC - except at width 4, where it dispatches 0x0807a344,
+      the FourCC tag printer, so %4c spells a tag out), s (SYS_WRITE0
+      on the argument), %% literal, and any other letter degrades to a
+      single space. Always returns 0.
+      Deviations - the `...` becomes an explicit args: VaList
+      (*const u32), the house convention already used by
+      printf/printf_api.rs's sprintf/snprintf and cxx/string_object.rs;
+      that IS what the original builds, since the spill frame exists
+      only to manufacture this pointer, and a variadic C caller needs
+      the capture trampoline printf_api.rs documents. The worker rides
+      the DEBUG_VPRINTF slot (firmware-address default on target,
+      panicking default on host). Host tests (4) cover verbatim
+      forwarding of both arguments, propagation of a non-zero result
+      (the port does not synthesize the stock 0), the unguarded NULL
+      format, and the slot being re-read per call. match.py (--size
+      28): same instruction count (7); with the va_list explicit the
+      spill frame is gone, so the port is a tail dispatch through the
+      seam while r0/r1 already hold what the original had to reload.
+
   # --- Batch 10 scouting: identified only (ADS stdio / locale block) ---
   # The region 0x08030004-0x0803097c is the ADS buffered-stdio + setlocale
   # cluster (FILE struct: flags @ +0xc, buffer @ +0x10, size @ +0x1c,
@@ -5782,6 +5849,54 @@ functions:
       call site) and zeroes the slot unconditionally. 28 bl/b call
       sites, binary-verified; among them the pool base-subobject dtor
       (bl @ 0x08214240).
+
+  - address: 0x0808e2b0
+    ghidra: FUN_0808e2b0
+    name: mailbox_slot_signal
+    size: 8
+    sig: "void mailbox_slot_signal(Mailbox **slot)"
+    module: kernel/kobj
+    vars: {param_1: slot}
+    status: ported
+    renames:
+      param_1/r0: slot
+      FUN_0805697c: csem_signal (already ported, kernel/csem.rs)
+    notes: >-
+      Two instructions, extent 0x0808e2b0..0x0808e2b8 confirmed from the
+      raw words (the next function starts at 0x0808e2b8 with its own
+      push {r4,r5,r6,lr}); no trailing literal pool, the tail branch is
+      PC-relative. NOT a veneer — `ldr r0,[r0]` (0xe5900000) then
+      `b 0x0805697c` (0xeaff21b0), i.e. csem_signal(*slot): load the
+      mailbox block out of a caller-owned one-word slot and tail-call the
+      already-ported wake side of the counting semaphore. 52 call sites,
+      binary-scanned by decoding every B/BL word in osos.dec: 44 bl,
+      1 blne, 1 bleq, 4 tail b, 2 tail bne. No DATA word holds the
+      address, so it is never dispatched virtually. The 8 predicated
+      sites are the behavioural fact worth recording: this wrapper has NO
+      NULL guard (the ldr and csem_signal both dereference
+      unconditionally), so callers that can hold an empty slot test it
+      themselves and branch in conditionally.
+      Identification: the slot is the same one mailbox_slot_create
+      @ 0x0808e294 fills (`*slot = mailbox_create()`), and its byte-twin
+      sibling FUN_0808e2a8 (`ldr r0,[r0]; b 0x080567a8`) is the csem_post
+      flavor — construct/post/signal over one member pointer, the
+      framework's "event cell" idiom. This wrapper is what proves the
+      8-byte mailbox block {state @ +0, id @ +4} IS csem.rs's
+      CountingSem {count: i32 @ +0, waiter_id: u32 @ +4}: state is the
+      signed token count, id the RTXC waiter object slept on.
+      Deviations - none in behaviour; the port re-views the Mailbox
+      pointer as a CountingSem at the one call (same 8 bytes, both
+      #[repr(C)] named fields, no literal byte offsets). Host tests
+      (4) cover the token-spending path (count stays >= 0, no ROM
+      entry), the negative-count wake carrying this block's waiter id,
+      repeated signals driving the count further negative without
+      saturating, and re-pointing the slot between calls (nothing is
+      cached — the ldr is per call). match.py (--size 8): LLVM inlines
+      csem_signal's mrs/msr critical section and its conditional wake
+      into the wrapper instead of tail-branching, so the port is the
+      same deref followed by the callee's body verbatim (decrement,
+      cmn #1 / popgt early return, ROM wake through CSEM_ROM_WAKE) —
+      the documented ROM-thunk dispatch deviation, same structure.
 
   - address: 0x08056788
     ghidra: FUN_08056788
@@ -10479,6 +10594,62 @@ functions:
       retains the base ctor/vtable/allocate/payload ctor/store/return
       sequence; expected differences are the two seam loads/blx calls
       and LLVM's frame/register allocation.
+
+  - address: 0x08103550
+    ghidra: FUN_08103550
+    name: message_arena_alloc
+    size: 24
+    sig: "void *message_arena_alloc(size_t size)"
+    module: app/message_arena
+    vars: {param_1: size}
+    status: ported
+    renames:
+      param_1/r0/r4: size
+      FUN_08103400: message_arena_pool (the accessor, MESSAGE_ARENA_POOL seam)
+      FUN_0826c0d8: fixed_block_pool_alloc (already ported,
+        heap/fixed_block_pool.rs)
+    notes: >-
+      The queued-message class's class-specific operator new. Six
+      instructions, extent 0x08103550..0x08103568 confirmed from the raw
+      words (the preceding function's literal pool ends at 0x0810354c;
+      0x08103568 starts the next one with `cmp r1,#0x8300`), no trailing
+      literal - the tail branch is PC-relative. push {r4,lr};
+      mov r4,r0; bl 0x08103400; mov r1,r4; pop {r4,lr}; b 0x0826c0d8 -
+      literally `void *operator new(size_t n) { return alloc(pool(), n); }`,
+      the thin call site fixed_block_pool_alloc's own notes predicted.
+      48 bl call sites, 0 tail branches, binary-scanned by decoding every
+      B/BL word in osos.dec. No DATA word holds the address, so it is
+      never dispatched virtually.
+      Which arena - the accessor FUN_08103400 @ 0x08103400 (100 bytes,
+      0x08103400..0x08103464; the next word is queued_message_construct's
+      push) is a textbook ADS C++ function-local static: guard word
+      0x089ca840 (loaded as 0x089ca7fc + 0x44), tst #1 fast path,
+      __cxa_guard_acquire 0x082ab31c, FixedBlockPool ctor 0x0826c134 on
+      0x08a1b1d4 with block_size 12 / block_count 128, __cxa_atexit
+      0x082ab1c8 with (pool, dtor 0x082612d0, __dso_handle 0x089ca09c),
+      __cxa_guard_release 0x082ab338, return 0x08a1b1d4. 128 blocks of
+      12 bytes is exactly the 12-byte envelope queued_message_construct
+      @ 0x08103464 builds (vtable, kind, payload). Every one of the 48
+      call sites loads the size as `mov r0,#12` - verified by decoding
+      the immediate at all 48, not sampled - so the pool's exact-size
+      test always matches here and the global operator_new fallback is
+      unreachable through this entry point. The parameter is still a
+      real parameter and the port forwards it verbatim.
+      Deviations - the accessor is not ported yet, so it rides the
+      MESSAGE_ARENA_POOL slot (app/queued_message.rs precedent):
+      firmware-address default on target, panicking default on host.
+      fixed_block_pool_alloc is called directly, no seam. Host tests (4)
+      cover the stock 12-byte pop and relink, a non-12 size reaching the
+      pool's size test (proving the argument is not folded to a
+      constant), the accessor being re-read on every call rather than
+      cached, and draining the arena to exhaustion in free-list order;
+      the host fixture widens the block stride to the host pointer
+      alignment (FreeBlock.next is 8 bytes here, 4 on target) while
+      keeping the declared block_size at the original's 12 - the
+      allocator only follows next, never a stride. match.py (--size 24):
+      identical skeleton (mov r4,r0 / accessor / mov r1,r4 / pop / tail
+      b); the diffs are the seam's literal load + blx instead of the
+      direct bl, and LLVM's fp frame.
 
   - address: 0x08266a48
     ghidra: FUN_08266a48

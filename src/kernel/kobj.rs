@@ -50,6 +50,34 @@
 //!   dtor @ 0x08214240). NULL-guarded teardown twin: deletes `*slot` via
 //!   `mailbox_delete` (`blne` @ 0x080a6bfc — the 1 mailbox_delete call
 //!   site) when non-NULL, then zeroes the slot unconditionally.
+//! - `mailbox_slot_signal` — `FUN_0808e2b0` @ 0x0808e2b0 (8 bytes,
+//!   0x0808e2b0..0x0808e2b8; **52 call sites**, binary-scanned by
+//!   decoding every B/BL word in osos.dec: 44 `bl`, 1 `blne`, 1 `bleq`,
+//!   4 tail `b`, 2 tail `bne`). Two instructions —
+//!   `ldr r0, [r0]; b 0x0805697c` — i.e. `csem_signal(*slot)`.
+//!
+//! # The mailbox block *is* a counting semaphore
+//!
+//! `mailbox_slot_signal` is what proves it. The 8-byte block
+//! `mailbox_create` allocates is `{state @ +0, id @ +4}`, and this
+//! wrapper hands that exact block to `csem_signal` (kernel/csem.rs),
+//! whose [`crate::kernel::csem::CountingSem`] is `{count: i32 @ +0,
+//! waiter_id: u32 @ +4}`. So `state` is the signed token count and `id`
+//! is the RTXC waiter object slept on — the two names describe one
+//! layout. Its sibling `FUN_0808e2a8` (`ldr r0,[r0]; b 0x080567a8`,
+//! not yet ported) is the `csem_post` flavor of the same wrapper, and
+//! `mailbox_slot_create` @ 0x0808e294 is the constructor of the same
+//! one-word slot; together they are an "event cell" idiom — a member
+//! variable holding a pointer to a lazily created mailbox/semaphore.
+//!
+//! # No NULL guard, by design
+//!
+//! `ldr r0, [r0]` is unconditional and `csem_signal` dereferences what
+//! it gets, so a slot that was never run through `mailbox_slot_create`
+//! faults. The eight predicated call sites (1 `blne`, 1 `bleq`,
+//! 2 `bne`) are callers doing that check themselves before branching in
+//! — the guard lives on the caller's side of the boundary, and the port
+//! keeps it there.
 //!
 //! On the task-lock pair: as documented in kernel/task_lock.rs, ROM
 //! 0x22003ea0 is a table-indexed id -> object-pointer load and ROM
@@ -71,6 +99,8 @@
 //! Wiring note for condvar.rs: `CONDVAR_HOOKS.waiter_create`/`waiter_delete`
 //! type the waiter id as `*mut u32`; the id here is a plain `u32`. Both
 //! are one register on the ARM target — cast at install time.
+
+use crate::kernel::csem::{csem_signal, CountingSem};
 
 /// Dispatcher opcode for this object class (`mov r0, #0x2` at every
 /// create/delete site here; opcode 1 = semaphores in sync_sem.rs).
@@ -258,6 +288,28 @@ pub unsafe extern "C" fn mailbox_slot_delete(slot: *mut *mut Mailbox) {
         mailbox_delete(block);
     }
     *slot = core::ptr::null_mut();
+}
+
+/// mailbox_slot_signal — original: `FUN_0808e2b0` @ 0x0808e2b0
+/// (8 bytes; 52 call sites — 44 `bl`, 1 `blne`, 1 `bleq`, 4 `b`,
+/// 2 `bne` — binary-scanned).
+///
+/// `ldr r0, [r0]; b 0x0805697c`: loads the mailbox block out of the
+/// caller's slot and tail-calls [`crate::kernel::csem::csem_signal`] on
+/// it, which decrements the block's count word and wakes its waiter
+/// object when the count went negative. The block doubles as the
+/// counting semaphore (see the module header), so the pointer is
+/// re-viewed as a [`CountingSem`] — the same 8 bytes under both names.
+///
+/// # Safety
+///
+/// `slot` must point at a live slot whose mailbox was installed by
+/// [`mailbox_slot_create`]. Neither the slot nor the block is
+/// NULL-checked, exactly like the original.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn mailbox_slot_signal(slot: *mut *mut Mailbox) {
+    csem_signal(*slot as *mut CountingSem);
 }
 
 #[cfg(test)]
@@ -536,6 +588,108 @@ pub(crate) mod tests {
             mailbox_slot_delete(&mut slot);
             assert!(slot.is_null());
             assert!(drain().is_empty(), "NULL mailbox never reaches delete");
+        }
+    }
+
+    /// Installs the recording wake over `CSEM_ROM_WAKE` (the ROM entry
+    /// `csem_signal` reaches on the negative-count path) for as long as
+    /// the returned guard lives. Ordering with the csem tests, which mock
+    /// the same slot, comes from `HOOKS_LOCK`.
+    struct CsemWakeGuard(MutexGuard<'static, ()>);
+
+    impl Drop for CsemWakeGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(crate::kernel::csem::CSEM_ROM_WAKE).write(no_wake);
+            }
+        }
+    }
+
+    /// Stand-in for the crate default while the mock is uninstalled.
+    unsafe extern "C" fn no_wake(_id: u32) {}
+
+    fn mock_csem_wake() -> CsemWakeGuard {
+        let guard = mock_hooks();
+        unsafe {
+            core::ptr::addr_of_mut!(crate::kernel::csem::CSEM_ROM_WAKE).write(mock_wake);
+        }
+        CsemWakeGuard(guard)
+    }
+
+    /// A mailbox block seeded with a token count and a waiter id.
+    fn block(state: u32, id: u32) -> Mailbox {
+        Mailbox { state, id }
+    }
+
+    #[test]
+    fn mailbox_slot_signal_spends_a_token_of_the_pointed_to_block() {
+        let _guard = mock_csem_wake();
+        unsafe {
+            let mut owned = block(1, 0x1111_0001);
+            let mut untouched = block(1, 0x1111_0002);
+            let mut slot: *mut Mailbox = &mut owned;
+
+            mailbox_slot_signal(&mut slot);
+
+            assert_eq!(owned.state, 0, "count word decremented in place");
+            assert_eq!(untouched.state, 1, "only the slot's own block moves");
+            assert_eq!(slot, &mut owned as *mut Mailbox, "the slot word is read, never written");
+            assert!(drain().is_empty(), "a count that stays >= 0 never enters the ROM");
+        }
+    }
+
+    #[test]
+    fn mailbox_slot_signal_wakes_the_blocks_waiter_once_the_count_goes_negative() {
+        let _guard = mock_csem_wake();
+        unsafe {
+            let mut cell = block(0, 0x2222_0007);
+            let mut slot: *mut Mailbox = &mut cell;
+
+            mailbox_slot_signal(&mut slot);
+
+            assert_eq!(cell.state, u32::MAX, "0 - 1 = -1, stored as the raw word");
+            assert_eq!(cell.id, 0x2222_0007, "the waiter id is read, never rewritten");
+            assert_eq!(drain(), vec![Call::Wake(0x2222_0007)], "wakes this block's waiter");
+        }
+    }
+
+    #[test]
+    fn mailbox_slot_signal_keeps_driving_the_count_negative() {
+        // The count is a signed word and this op only ever decrements, so
+        // repeated signals keep parking-and-waking; nothing saturates.
+        let _guard = mock_csem_wake();
+        unsafe {
+            let mut cell = block(0u32.wrapping_sub(3), 0x3333_0009);
+            let mut slot: *mut Mailbox = &mut cell;
+
+            mailbox_slot_signal(&mut slot);
+
+            assert_eq!(cell.state as i32, -4);
+            assert_eq!(drain(), vec![Call::Wake(0x3333_0009)]);
+        }
+    }
+
+    #[test]
+    fn mailbox_slot_signal_follows_the_slot_after_it_is_repointed() {
+        // The `ldr r0,[r0]` is per call: nothing about the block is
+        // cached, so re-installing the slot redirects later signals.
+        let _guard = mock_csem_wake();
+        unsafe {
+            let mut first = block(0, 0x4444_0001);
+            let mut second = block(0, 0x4444_0002);
+            let mut slot: *mut Mailbox = &mut first;
+
+            mailbox_slot_signal(&mut slot);
+            slot = &mut second;
+            mailbox_slot_signal(&mut slot);
+
+            assert_eq!(first.state as i32, -1);
+            assert_eq!(second.state as i32, -1);
+            assert_eq!(
+                drain(),
+                vec![Call::Wake(0x4444_0001), Call::Wake(0x4444_0002)],
+                "each call wakes the waiter of the block installed at that moment"
+            );
         }
     }
 
