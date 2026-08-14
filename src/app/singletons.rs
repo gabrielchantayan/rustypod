@@ -1,4 +1,4 @@
-//! The ten lazily-constructed framework singletons. Every one is the
+//! The eleven lazily-constructed framework singletons. Every one is the
 //! same four-step idiom over its own cache word, its own allocation
 //! size and its own constructor:
 //!
@@ -19,11 +19,12 @@
 //! | 0x081a5500 | [`singleton_class_8c00`] | 0xdc | 0x089cc7c0 | 0x081a71fc | 82 |
 //! | 0x081dfa20 | [`command_dispatcher_get`] | 0x20 | 0x089cc828 | 0x081dfc1c | 73 |
 //! | 0x081f77a4 | [`volume_controller_get`] | 0x3bc | 0x089cc288 | 0x081fa070 | 52 |
+//! | 0x0812c72c | [`lazy_singleton_0x58`] | 0x58 | 0x089cc16c | 0x0812ce88 | 46 |
 //!
 //! (Call-site counts binary-scanned; the earlier scouting notes said 86
 //! / 38 / 37 / 36 for the bottom four.)
 //!
-//! One of the ten is also reached through a long-branch veneer, ported
+//! One of the eleven is also reached through a long-branch veneer, ported
 //! alongside it:
 //!
 //! | address | name | target | `bl` sites |
@@ -129,6 +130,30 @@
 //!   word (DAT_081f77d0 = 0x089cc26c, so the cache is 0x089cc288),
 //!   and the size is an immediate (`mov r0, #0x3bc`).
 //!
+//! - The 0x58 object is the newest arrival and sits in a **shared
+//!   three-slot globals block** rather than a private cache word: the
+//!   pool literal @ 0x0812c758 is 0x089cc168, and the block's `+0x00`
+//!   (a 0x68 object, getter @ 0x0819bea8, ctor @ 0x0819c1d4) and
+//!   `+0x08` (a 0x22c object, getter @ 0x081b5440, ctor @ 0x081b6628)
+//!   are two more singletons of exactly this shape — only the `+0x04`
+//!   slot is ported here. Its ctor @ 0x0812ce88 is unusually small (44
+//!   bytes): base ctor @ 0x0819c550, vtable literal 0x08983b7c at
+//!   +0x00, a sub-object initialized at +0x3c (`FUN_08270394(this +
+//!   0x3c, 0, 0)`, the same three-argument initializer the base ctor
+//!   runs at its own +0x18) and a flag byte zeroed at +0x54 — which is
+//!   what makes 0x58 the allocation size. **Class NOT named**: neither
+//!   the ctor nor the base ctor reaches a name factory or the by-id
+//!   registry, and the vtable address falls in the region where the
+//!   decrypted image holds the C++ mangled-name blob instead (the same
+//!   page mismatch app/registry.rs records), so the vtable cannot be
+//!   read for a name either. The 46 call sites use it purely as a
+//!   `this` for virtual dispatch (slots +0x94, +0xac, +0x190) and as
+//!   the first argument of the neighbouring free functions @
+//!   0x0812ce60 / 0x0812ce74 / 0x0812c75c, clustered in the
+//!   0x0822xxxx-0x0823xxxx UI/menu code. Size is the only identifying
+//!   fact, so — like [`lazy_singleton_0x3c`] — the symbol says exactly
+//!   that.
+//!
 //! **None of these symbols is hook-ready.** Until the constructors are
 //! ported, the dispatch defaults hand out a zeroed block — no vtable,
 //! no registry wiring — so branching stock code here would break it.
@@ -145,7 +170,7 @@
 //! - The cache slots are the crate statics below rather than words in
 //!   the 0x089cxxxx / 0x089dxxxx pages (the block_mgr.rs deviation:
 //!   those RW pages are runtime-initialized; the image holds stale UI
-//!   strings there). All ten default to NULL, exactly the pre-init
+//!   strings there). All eleven default to NULL, exactly the pre-init
 //!   state.
 
 use crate::heap::veneers::operator_new;
@@ -189,6 +214,10 @@ pub const COMMAND_DISPATCHER_SIZE: usize = 0x20;
 /// (`mov r0, #0x3bc`).
 pub const VOLUME_CONTROLLER_SIZE: usize = 0x3bc;
 
+/// Allocation size of the unidentified 0x58 singleton
+/// (`mov r0, #0x58`).
+pub const SINGLETON_0X58_SIZE: usize = 0x58;
+
 /// An ADS C++ constructor: takes the raw block, returns `this`.
 pub type Constructor = unsafe extern "C" fn(this: *mut u8) -> *mut u8;
 
@@ -216,6 +245,8 @@ pub struct SingletonCtors {
     pub command_dispatcher: Constructor,
     /// Volume-controller ctor @ 0x081fa070.
     pub volume_controller: Constructor,
+    /// The 0x58 object's ctor @ 0x0812ce88.
+    pub singleton_0x58: Constructor,
 }
 
 /// Defines one default constructor stub: zeroes the block and returns
@@ -240,6 +271,7 @@ zeroing_ctor!(zeroing_singleton_0x3c_ctor, SINGLETON_0X3C_SIZE);
 zeroing_ctor!(zeroing_class_8c00_ctor, CLASS_8C00_SIZE);
 zeroing_ctor!(zeroing_command_dispatcher_ctor, COMMAND_DISPATCHER_SIZE);
 zeroing_ctor!(zeroing_volume_controller_ctor, VOLUME_CONTROLLER_SIZE);
+zeroing_ctor!(zeroing_singleton_0x58_ctor, SINGLETON_0X58_SIZE);
 
 /// Zeroes `size` bytes and returns the block. Volatile stores: a plain
 /// loop is rewritten by LLVM into a call to `__aeabi_memclr`, a symbol
@@ -265,6 +297,7 @@ pub(crate) const DEFAULT_SINGLETON_CTORS: SingletonCtors = SingletonCtors {
     class_8c00: zeroing_class_8c00_ctor,
     command_dispatcher: zeroing_command_dispatcher_ctor,
     volume_controller: zeroing_volume_controller_ctor,
+    singleton_0x58: zeroing_singleton_0x58_ctor,
 };
 
 /// The active constructors. Host tests install recording mocks; the
@@ -320,6 +353,11 @@ pub static mut COMMAND_DISPATCHER_INSTANCE: *mut u8 = core::ptr::null_mut();
 /// the `+0x1c` slot of the global @ 0x089cc26c — the pool literal
 /// DAT_081f77d0).
 pub static mut VOLUME_CONTROLLER_INSTANCE: *mut u8 = core::ptr::null_mut();
+
+/// The unidentified 0x58 singleton (original: the word @ 0x089cc16c,
+/// the `+4` slot of the shared globals block @ 0x089cc168 — the pool
+/// literal @ 0x0812c758).
+pub static mut SINGLETON_0X58: *mut u8 = core::ptr::null_mut();
 
 /// The body all ten getters share: test the cache, allocate, construct,
 /// store, and re-load the cache (the original's second `ldr r0, [r4,
@@ -462,6 +500,44 @@ pub unsafe extern "C" fn singleton_class_7f80() -> *mut u8 {
 pub unsafe extern "C" fn lazy_singleton_0x3c() -> *mut u8 {
     let cache = core::ptr::addr_of_mut!(SINGLETON_0X3C);
     lazy_singleton(cache, SINGLETON_0X3C_SIZE, || unsafe { ctor!(singleton_0x3c) })
+}
+
+/// lazy_singleton_0x58 — original: `FUN_0812c72c` @ **0x0812c72c**
+/// (44 bytes of code + one pool word @ 0x0812c758 = **48 bytes** of
+/// true extent; **46 `bl` call sites, 0 predicated and 0 plain `b`**,
+/// binary-verified by decoding every B/BL word in
+/// `work/firmware/osos.dec`).
+///
+/// ```text
+/// 0812c72c  push {r4, lr}
+/// 0812c730  ldr  r4, [pc, #32]      @ = 0x089cc168 (pool @ 0x0812c758)
+/// 0812c734  ldr  r0, [r4, #4]
+/// 0812c738  cmp  r0, #0
+/// 0812c73c  bne  0x0812c750
+/// 0812c740  mov  r0, #0x58
+/// 0812c744  bl   0x082aadd4         @ operator new
+/// 0812c748  bl   0x0812ce88         @ constructor
+/// 0812c74c  str  r0, [r4, #4]
+/// 0812c750  ldr  r0, [r4, #4]
+/// 0812c754  pop  {r4, pc}
+/// 0812c758  .word 0x089cc168
+/// ```
+///
+/// The 0x58-byte singleton of the shared globals block @ 0x089cc168,
+/// cached in that block's `+0x04` slot and constructed by
+/// `FUN_0812ce88`. Ghidra reports 44 bytes because it drops the
+/// trailing literal word; the true extent runs to 0x0812c75c, where
+/// the next function opens `ldr r0, [r0, #0x30]`. Sitting next to
+/// `timer_stop`/`timer_restart` it is **not** a member of the timer
+/// family — the neighbour at 0x0812c6b0 shares only the address page.
+///
+/// The class could not be named — see the module header. Same
+/// NOT-HOOK-READY caveat as its siblings.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn lazy_singleton_0x58() -> *mut u8 {
+    let cache = core::ptr::addr_of_mut!(SINGLETON_0X58);
+    lazy_singleton(cache, SINGLETON_0X58_SIZE, || unsafe { ctor!(singleton_0x58) })
 }
 
 /// singleton_class_8c00 — original: `FUN_081a5500` @ 0x081a5500
@@ -635,6 +711,7 @@ mod tests {
                 class_8c00: recording_ctor,
                 command_dispatcher: recording_ctor,
                 volume_controller: recording_ctor,
+                singleton_0x58: recording_ctor,
             };
             CTOR_RESULT = ctor_result;
             (*ptr::addr_of_mut!(ALLOC_SIZES)).clear();
@@ -668,6 +745,7 @@ mod tests {
         CLASS_8C00_INSTANCE = ptr::null_mut();
         COMMAND_DISPATCHER_INSTANCE = ptr::null_mut();
         VOLUME_CONTROLLER_INSTANCE = ptr::null_mut();
+        SINGLETON_0X58 = ptr::null_mut();
     }
 
     fn arena() -> *mut u8 {
@@ -1092,6 +1170,53 @@ mod tests {
                 ptr::read_volatile(ptr::addr_of!(VOLUME_CONTROLLER_INSTANCE)),
                 constructed(),
                 "the cache still holds the first construction"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_0x58_singleton_is_allocated_constructed_and_cached_on_first_call() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(lazy_singleton_0x58(), constructed());
+            assert_eq!(
+                *ptr::addr_of!(ALLOC_SIZES),
+                std::vec![SINGLETON_0X58_SIZE],
+                "the `mov r0, #0x58` immediate, allocated exactly once"
+            );
+            assert_eq!(*ptr::addr_of!(CTOR_BLOCKS), std::vec![arena()], "constructed on the raw block");
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(SINGLETON_0X58)),
+                constructed(),
+                "cached in the +4 slot of the 0x089cc168 block"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_0x58_singleton_second_call_returns_the_cache() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(lazy_singleton_0x58(), constructed());
+            assert_eq!(lazy_singleton_0x58(), constructed());
+            assert_eq!((*ptr::addr_of!(ALLOC_SIZES)).len(), 1, "allocated exactly once");
+            assert_eq!((*ptr::addr_of!(CTOR_BLOCKS)).len(), 1, "constructed exactly once");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn a_null_returning_0x58_ctor_caches_null_and_reallocates() {
+        let guard = mock(ptr::null_mut());
+        unsafe {
+            assert!(lazy_singleton_0x58().is_null(), "the ctor's NULL is returned verbatim");
+            assert!(lazy_singleton_0x58().is_null());
+            assert_eq!(
+                (*ptr::addr_of!(ALLOC_SIZES)).len(),
+                2,
+                "a NULL cache re-runs the whole body, exactly as the original does"
             );
         }
         restore(guard);

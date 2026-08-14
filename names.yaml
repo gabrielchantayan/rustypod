@@ -10595,6 +10595,75 @@ functions:
       sequence; expected differences are the two seam loads/blx calls
       and LLVM's frame/register allocation.
 
+  - address: 0x08110fdc
+    ghidra: FUN_08110fdc
+    name: queued_message_post
+    size: 164
+    sig: "u32 queued_message_post(QueuedMessage *message, MessageTarget *target, u32 no_wait, usize reply_queue, u32 flags)"
+    module: app/queued_message
+    status: ported
+    renames:
+      param_1/r4: message
+      param_2/r5: target
+      param_3/r8: no_wait
+      param_4/r0: reply_queue
+      param_5/r9: flags
+      iVar2/r7: target_queue
+      r6: posted
+      DAT_0811107c: TASK_MESSAGE_TAG_MSGS
+      FUN_080cb828: current_task_ctx_block
+      FUN_0812bf70: task_message_post_sync
+      FUN_0812c628: task_message_post_async (unported mirror; wait = 0)
+    notes: >-
+      The poster for the envelope queued_message_construct @ 0x08103464
+      builds - the "hands it directly to FUN_08110fdc" that entry already
+      names. True extent 164 bytes, 0x08110fdc..0x0811107f: 160 bytes of
+      code plus the pool word @ 0x0811107c holding the FourCC tag
+      0x4d736753 = 'MsgS'; the next function is the bare `bx lr` @
+      0x08111080. 45 call sites - 44 unconditional bl and exactly one
+      blne (@ 0x0814b080), no plain b - binary-verified by decoding every
+      B/BL word in work/firmware/osos.dec. The single predicated site is
+      the CALLER's guard; the callee's own NULL guard covers only
+      `message`, and the target chain is dereferenced unguarded before
+      any test. Algorithm - read the destination queue through
+      target->+0x10->+0x0c->+0x1c (object, owner record, task context
+      block, queue pool, the same +0x1c current_task_ctx_block's callers
+      use); default reply_queue to the current task's own queue when the
+      argument is 0, and bail if either queue is 0; build a tagged stack
+      message {'MsgS', -, -, target, message} and post it - fire-and-
+      forget through 0x0812c628 when no_wait != 0, else synchronously
+      through the ported 0x0812bf70; return the helper's result when
+      non-zero, otherwise release the envelope through its vtable +0x04
+      slot (the destructor 0x0810351c occupies) and return 0. So the
+      function takes ownership of the envelope: it is freed on every
+      failure edge rather than leaked. Near-twin @ 0x081251cc is the
+      same shape one level up, stamping 'MsgB' (0x4d736742) and adding a
+      byte field at +0x14. Deviations - (1) the outgoing message is
+      modelled as the full 28-byte cell the post helper's copy
+      FUN_0827210c moves (seven words, three single loads plus one
+      ldm/stm of four), whereas the original reserves only 20 bytes
+      (`sub sp, sp, #0x14`) and lets that fixed copy read two words of
+      its own saved-register area; the port makes every byte the copy
+      reads defined storage. (2) 0x0812c628 is not ported - its whole
+      20-byte body is the same helper call with the wait flag forced to
+      0 - so the no_wait branch makes that call through the existing
+      kernel/task_message TASK_MESSAGE_OPS.post_message slot rather than
+      re-stubbing a function one immediate away from its ported sibling.
+      (3) current_task_ctx_block may report NULL; the original loads
+      +0x1c off it unconditionally, the port reads a NULL context as
+      reply queue 0, which lands on the same cleanup edge the original's
+      `cmp r0,#0; beq` takes. (4) Ghidra names five parameters but drops
+      all four arguments from the FUN_0812c628 call. Host tests (7) pin
+      the 'MsgS' tag and word placement, the wait flag in both branches,
+      the ownership transfer on success, release-exactly-once on a
+      rejected post and on a queue-less target, the NULL-envelope guard,
+      the full owner/context chain, and the 28-byte cell size; the
+      fixture lives in a sub-4GiB slab because the envelope's vtable
+      word is a u32. match.py structural - the branch shape, the three
+      chained loads, the three message stores and the predicated
+      release-dispatch tail all survive; expected differences are the
+      seam load/blx for the async branch and LLVM's register allocation.
+
   - address: 0x08103550
     ghidra: FUN_08103550
     name: message_arena_alloc
@@ -11290,6 +11359,42 @@ functions:
       exactly that. The ctor builds a small object - flag byte 1 at
       +0x10, zeroed +0x14..+0x38, a sub-object at +0x20 handed to
       0x083c78b4.
+
+  - address: 0x0812c72c
+    ghidra: FUN_0812c72c
+    name: lazy_singleton_0x58
+    size: 48
+    sig: "void *lazy_singleton_0x58(void)"
+    module: app/singletons
+    status: ported
+    vars: {iVar1: globals block 0x089cc168, uVar2: instance,
+      DAT_0812c758: cache-pool-word (0x089cc168; the cache is its +4 slot)}
+    notes: >-
+      The eleventh member of the lazy-singleton family, and NOT a member
+      of the timer family it sits next to (timer_stop @ 0x0812c6b0 shares
+      only the address page). 46 bl call sites, 0 predicated and 0 plain
+      b, binary-verified by decoding every B/BL word in
+      work/firmware/osos.dec. True extent 48 bytes - 44 of code plus the
+      pool word @ 0x0812c758 (0x089cc168) that Ghidra drops; the next
+      function opens at 0x0812c75c with `ldr r0, [r0, #0x30]`. Same
+      idiom - if the cache is 0, operator_new(0x58) then the ctor @
+      0x0812ce88, store, then RE-LOAD the cache slot. The cache is the
+      +0x04 slot of a shared three-slot globals block @ 0x089cc168 whose
+      +0x00 (0x68 object, getter 0x0819bea8, ctor 0x0819c1d4) and +0x08
+      (0x22c object, getter 0x081b5440, ctor 0x081b6628) are two more
+      singletons of exactly this shape; only +0x04 is ported here.
+      Class NOT named - the 44-byte ctor @ 0x0812ce88 runs the base ctor
+      0x0819c550, plants vtable 0x08983b7c, initializes a sub-object at
+      +0x3c via 0x08270394(this+0x3c, 0, 0) and zeroes a flag byte at
+      +0x54 (which is what makes 0x58 the size), and neither it nor the
+      base ctor reaches a name factory or the by-id registry; the vtable
+      address lands in the region where the decrypted image holds the C++
+      mangled-name blob (the app/registry.rs page mismatch), so it cannot
+      be read for a name either. Callers use it as a `this` for virtual
+      dispatch (slots +0x94, +0xac, +0x190) and as the first argument of
+      the neighbours 0x0812ce60 / 0x0812ce74 / 0x0812c75c, clustered in
+      the 0x0822xxxx-0x0823xxxx UI/menu code. NOT hook-ready - the ctor
+      slot is a documented zeroing stub, like its ten siblings.
 
   - address: 0x081a5500
     ghidra: FUN_081a5500
