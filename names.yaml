@@ -11291,6 +11291,42 @@ functions:
       +0x10, zeroed +0x14..+0x38, a sub-object at +0x20 handed to
       0x083c78b4.
 
+  - address: 0x0812c72c
+    ghidra: FUN_0812c72c
+    name: lazy_singleton_0x58
+    size: 48
+    sig: "void *lazy_singleton_0x58(void)"
+    module: app/singletons
+    status: ported
+    vars: {iVar1: globals block 0x089cc168, uVar2: instance,
+      DAT_0812c758: cache-pool-word (0x089cc168; the cache is its +4 slot)}
+    notes: >-
+      The eleventh member of the lazy-singleton family, and NOT a member
+      of the timer family it sits next to (timer_stop @ 0x0812c6b0 shares
+      only the address page). 46 bl call sites, 0 predicated and 0 plain
+      b, binary-verified by decoding every B/BL word in
+      work/firmware/osos.dec. True extent 48 bytes - 44 of code plus the
+      pool word @ 0x0812c758 (0x089cc168) that Ghidra drops; the next
+      function opens at 0x0812c75c with `ldr r0, [r0, #0x30]`. Same
+      idiom - if the cache is 0, operator_new(0x58) then the ctor @
+      0x0812ce88, store, then RE-LOAD the cache slot. The cache is the
+      +0x04 slot of a shared three-slot globals block @ 0x089cc168 whose
+      +0x00 (0x68 object, getter 0x0819bea8, ctor 0x0819c1d4) and +0x08
+      (0x22c object, getter 0x081b5440, ctor 0x081b6628) are two more
+      singletons of exactly this shape; only +0x04 is ported here.
+      Class NOT named - the 44-byte ctor @ 0x0812ce88 runs the base ctor
+      0x0819c550, plants vtable 0x08983b7c, initializes a sub-object at
+      +0x3c via 0x08270394(this+0x3c, 0, 0) and zeroes a flag byte at
+      +0x54 (which is what makes 0x58 the size), and neither it nor the
+      base ctor reaches a name factory or the by-id registry; the vtable
+      address lands in the region where the decrypted image holds the C++
+      mangled-name blob (the app/registry.rs page mismatch), so it cannot
+      be read for a name either. Callers use it as a `this` for virtual
+      dispatch (slots +0x94, +0xac, +0x190) and as the first argument of
+      the neighbours 0x0812ce60 / 0x0812ce74 / 0x0812c75c, clustered in
+      the 0x0822xxxx-0x0823xxxx UI/menu code. NOT hook-ready - the ctor
+      slot is a documented zeroing stub, like its ten siblings.
+
   - address: 0x081a5500
     ghidra: FUN_081a5500
     name: singleton_class_8c00
