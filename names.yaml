@@ -29638,3 +29638,73 @@ functions:
       distinguishable matrix values to prove every mapping, guard the exact
       16-byte destination range, and model in-place ordering; match.py
       structural diff reviewed after the ARM release build.
+
+  # --- fixed-block pool (class-specific operator new) ---
+  - address: 0x0826c0d8
+    ghidra: FUN_0826c0d8
+    name: fixed_block_pool_alloc
+    size: 92
+    sig: "void *fixed_block_pool_alloc(FixedBlockPool *pool, size_t size)"
+    module: heap/fixed_block_pool
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_2/r1: size
+      r4: pool (saved)
+      r5: block (the popped free-list head)
+      r6: size (saved across the tail call)
+      FUN_082aadd4: operator_new (already ported, heap/veneers.rs)
+      FUN_0807f5c4: mutex_lock (already ported, kernel/sync_mutex.rs)
+      FUN_0807f6a0: mutex_unlock (already ported, kernel/sync_mutex.rs)
+    notes: >-
+      The allocation entry point of retailOS's fixed-block pool - a small
+      C++ object owning one slab pre-carved into block_count blocks of
+      exactly block_size bytes, chained through a mutex-protected singly
+      linked free list. It backs the class-specific operator new a couple
+      of dozen framework classes install; every call site is
+      `bl <pool accessor>; mov r1,#sizeof(class); bl 0x0826c0d8`, and the
+      thinnest of them (0x08103550, one of the two tail-b sites) is
+      literally `void *operator new(size_t n) { return alloc(pool(), n); }`.
+      Extent 0x0826c0d8..0x0826c134 (23 words, Ghidra's 92 confirmed - the
+      next function starts at 0x0826c134 with its own push). 70 bl + 2 tail
+      b call sites, binary-scanned by decoding every B/BL word in osos.dec.
+      No DATA word holds the address, so it is never dispatched virtually.
+      Algorithm - read pool->block_size (+8) BEFORE locking and compare for
+      exact equality (not "fits") against size; a mismatch tail-branches to
+      the global tag-2 operator_new. On a match, mutex_lock(pool) - the
+      mutex is the object's FIRST member, so `this` is the mutex address -
+      load free_head (+0x18), and if NULL unlock and take the same
+      operator_new fallback (an exhausted pool is not an error, it silently
+      degrades). Otherwise pop - free_head = block->next, the link living
+      at offset 0 of the free block itself - unlock and return the block.
+      Layout recovered from the pool's own ctor/dtor rather than from any
+      symbol - ctor FUN_0826c134 (116 bytes) stores block_size/count at
+      +8/+0xc, zeroes +0x10/+0x14/+0x18, runs mutex_create @ 0x080744a4 on
+      `this` unadjusted, sets +0x10 = block_size * count, allocates the slab
+      with operator_new into +0x14, links block[i].next = block[i+1] with a
+      predicated hi loop terminated by a NULL store, and points free_head at
+      the slab. The dtor FUN_0826c1a8 is operator_delete(+0x14),
+      mutex_delete(this), return this - and is 32 bytes, not the 16 Ghidra
+      reports (0x0826c1a8..0x0826c1c8, the usual dropped `mov r0,r4;
+      pop {r4,pc}` tail).
+      Deviations - field widths follow the host/target pointer width via a
+      #[repr(C)] FixedBlockPool so the port never spells a literal byte
+      offset (on target the layout is exactly +0/+8/+0xc/+0x10/+0x14/+0x18).
+      The three callees ride FIXED_BLOCK_POOL_OPS (heap/pool_client.rs
+      precedent) purely so host tests can observe the lock/pop/unlock
+      bracketing - all three defaults ARE the real ports, so with no mocks
+      installed the original call graph runs end to end (proven by the
+      no-mock test; mutex_lock/unlock no-op on host through their own
+      NULL-cell guard). No NULL guard on pool, matching the original.
+      Host tests (5) - the head pop with the free head snapshotted from
+      inside the lock/unlock recorders, draining a 3-block pool then the
+      exhausted lock-look-unlock-fallback, the exact-equality boundary
+      (0, 1, block_size-1, block_size+1, usize::MAX all bypass the lock
+      entirely and leave the list untouched), NULL propagation from a
+      failing global allocator, and the wired-defaults end-to-end run.
+      match.py structural - same dataflow and the same literal offsets
+      (`ldr r2,[r0,#8]`, `ldr r5,[r0,#24]`, `str r1,[r0,#24]`), same
+      early-mismatch branch, same pop-inside-the-lock ordering, same
+      block-in-r5 return; the diff is the crate fp frame and the three
+      blx/bx-through-volatile-slot dispatches standing in for the direct
+      bl / tail b.
