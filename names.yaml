@@ -30432,3 +30432,76 @@ functions:
       registers; the no-argument ABI and return_zero name therefore express
       the entire observed behavior. No deviations; focused host tests assert
       the zero word and its all-clear bit representation.
+
+  # --- display object: the six-layer compositor root ---
+  - address: 0x081d9064
+    ghidra: FUN_081d9064
+    name: display_get_layer
+    size: 96
+    sig: "u8 *display_get_layer(Display *display, u32 index)"
+    module: drivers/display
+    status: ported
+    renames:
+      param_1/r4: display
+      param_2/r5: index
+      cVar1: display_id
+      uVar2: layer
+    notes: >-
+      The display object's lazy per-layer accessor - returns layer `index`
+      of `display`, constructing it on first request under the display's
+      own mutex. EXTENT - 96 bytes, 0x081d9064..0x081d90c4, 24 instructions
+      with no literal pool; the next function opens at 0x081d90c4 with
+      `push {r4, lr}` and Ghidra's function table misses it entirely, so
+      the 96-byte extent is right here only by luck. 63 `bl` and 0 `b` call
+      sites, counted by decoding every branch word in osos.dec (the third
+      largest consumer group is 0x0819a70c..0x0819a818, ten sites in one
+      function).
+      Algorithm - mutex_lock(display + 0x28); if the slot at
+      display[index] (word-indexed, `ldr r0,[r4,r5,lsl #2]`) is NULL,
+      allocate operator_new(0x1d8) and hand it to the layer constructor @
+      0x08120b10 with (display, display+0x94 driver, index, display_id ==
+      1), store the result back in the slot; mutex_unlock; return the slot
+      re-loaded. The slot is genuinely loaded three times - test, store,
+      post-unlock return - so the port keeps volatile accesses instead of
+      caching across the constructor.
+      SUBSYSTEM - the address sits in the app/Silver band but the class is
+      pure display driver, so the port lives in drivers/display.rs beside
+      drivers/display_layer.rs, whose header already names this function as
+      the way a layer is obtained. The constructor @ 0x081d92a4 is
+      decisive - mutex_create(display+0x28), a `i < 6` loop clearing six
+      layer slots at +0x00..+0x17 and six bytes at +0x18..+0x1d,
+      `display+0x90 = param_2` (the display id) and `display+0x94` = the
+      panel driver from 0x0814ece0 (id 0) or 0x08169018 (id 1). The
+      singleton getter 0x081d8870 hands out exactly two displays, id 0
+      (internal LCD) and id 1 (secondary output).
+      Field map recovered - +0x00 six layer slots, +0x18 six per-layer
+      bytes, +0x28 Mutex, +0x90 u8 display id, +0x94 panel driver. Modeled
+      as a repr(C) Display with named fields, so the header offsets hold on
+      the 32-bit target while a 64-bit host test simply gets a larger,
+      self-consistent object. The index is addressed unchecked
+      (addr_of_mut + add), matching the original's unbounded
+      `ldr r0,[r4,r5,lsl #2]`; slice indexing would add a panic path the
+      firmware has not got.
+      NEW FACT for drivers/display_layer.rs - the layer byte at +0x09 that
+      module could only call "(opaque)" is this constructor's fifth
+      argument, i.e. "this layer is on the secondary display".
+      Deviations - mutex_lock @ 0x0807f5c4, mutex_unlock @ 0x0807f6a0 and
+      operator_new @ 0x082aadd4 are all ported and called directly; the
+      layer constructor 0x08120b10 is not ported and dispatches through
+      DISPLAY_HOOKS with an identity default (0x08120b10's body leaves r0
+      alone on the path the accessor observes, so the NULL-block case still
+      behaves). operator_new's result reaches the constructor unchecked and
+      the constructor's result is stored unchecked - the original has no
+      NULL test anywhere.
+      Host tests (5) - first-request construction with every constructor
+      argument checked and the tag-2 operator_new(0x1d8) logged, caching on
+      the second request, the six slots kept independent, the secondary
+      flag proven to be `display_id == 1` and nothing else (ids 0, 1, 2,
+      0xff), a NULL constructor result stored and retried, and a failed
+      allocation still reaching the constructor with the NULL block.
+      match.py structural - the slot addressing (`ldr r0,[r5,r4,lsl #2]`),
+      the +0x90 ldrb, `mov r0,#0x1d8`, the +0x94 load and the slot store
+      are all present in order; LLVM inlines the eight-byte ported
+      mutex_lock/mutex_unlock (so the ROM_KERNEL volatile table read shows
+      up as an ldrd chain) and lowers `display_id == 1` to sub/clz/lsr
+      instead of cmp/moveq.
