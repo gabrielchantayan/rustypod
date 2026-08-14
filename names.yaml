@@ -30284,6 +30284,71 @@ functions:
       through loaded pointers instead of direct bl, plus the crate's fp
       frame.
 
+  - address: 0x081e0c4c
+    ghidra: FUN_081e0c4c
+    name: event_source_destruct
+    size: 160
+    sig: "void *event_source_destruct(void *source)"
+    module: app/event_source
+    status: ported
+    renames:
+      param_1/r0: source
+      r4: children (the collection at source+0x1c)
+      r5: chunk (the node-pool chunk record being freed)
+      param_2/param_3/param_4: >-
+        not arguments - Ghidra invents them from the
+        "push {r1,r2,r3,r4,r5,lr}" prologue, whose three scratch words are
+        the erase call's iterator slots. The function takes only this.
+    notes: >-
+      Non-deleting destructor of the 92-byte event source object, paired
+      one-for-one with event_source_construct @ 0x081e0bac - 128 bl call
+      sites and no plain-b tail calls, exactly the constructor's 128, both
+      counts verified by decoding every branch word in osos.dec. Ghidra's
+      156-byte extent drops the trailing literal-pool word at 0x081e0ce8
+      (0x0898ecb4, the vtable, reached by "ldr r1,[pc,#144]" at
+      0x081e0c50); the next function starts at 0x081e0cec, so the true
+      extent is 160 bytes - 39 instructions plus that word. The deleting
+      form is the separate six-instruction thunk @ 0x081e0c34
+      ("cmp r0,#0; bl 0x081e0c4c; b operator_delete"). Body - reinstall the
+      vtable with "str r1,[r0],#56", then unwind the three sub-objects in
+      reverse construction order. First the event tree at +0x38 through
+      0x082a7fd8. Then the child collection at +0x1c, whose teardown is
+      inlined here rather than called - 0x082a7fd8 is byte-for-byte this
+      same sequence bound to the other node allocator family (0x083c1c3c /
+      0x083c1648 instead of 0x083ba534 / 0x083b9ffc). That inlined half
+      runs only when the collection's header word at +0x10 is non-zero and
+      does three things - erase the whole range with
+      "erase(&iter, collection, &begin, &end)" where begin is header->left
+      (+0x8) and end is the header itself (0x083ba534); re-read the header
+      word and recycle that node with destroy_value 0, because the sentinel
+      carries no value (0x083b9ffc); then drain the collection's embedded
+      node pool by walking the chunk-record list at collection+0x00,
+      unlinking one record at a time and calling the ported
+      cxx_array_dealloc first on the record's block (+0x8, with the record's
+      capacity at +0x4 as the dead count argument) and then on the 12-byte
+      record itself. That pool layout is pinned by the node allocator
+      0x083b9f4c - +0x00 chunk list, +0x04 recycled-node list threaded
+      through node+0x0c, +0x08/+0x0c bump cursor and limit, 32-byte nodes,
+      12-byte records of "next, capacity, block". Finally the declaration
+      vector at +0x10 through 0x083e4b2c. Load-bearing detail - every
+      sub-object address is formed from the previous callee's returned
+      pointer ("sub r4,r0,#28" then "sub r0,r4,#12" then "sub r0,r0,#16"),
+      never from source, which is what lets the function work on a source
+      reached through a base-class pointer; the port keeps that chain.
+      Deviation - the original reads the header word twice in a row before
+      the erase with no intervening call, to fill both iterator slots; the
+      port reads it once. The four unported firmware callees ride an
+      EventSourceDestructOps table whose host defaults panic rather than
+      no-op, since each of them frees storage and a silent stand-in would
+      let a test claim a teardown that never happened. match.py - same
+      skeleton throughout (str r1,[r0],#56 / ldr [r0,#-12] / cmp+beq to the
+      tail / three stack iterator slots / erase / re-read + recycle with
+      r2=0 / the two-dealloc chunk loop with its unlink store / sub #40 /
+      sub #16); the diff is the ops-table indirection emitting blx through
+      loaded pointers instead of direct bl, the crate's fp frame, and one
+      dropped "ldr r1,[chunk,#4]" - LLVM sees that cxx_array_dealloc
+      ignores its count argument and elides the load.
+
   # --- fixed-block pool (class-specific operator new) ---
   - address: 0x0826c0d8
     ghidra: FUN_0826c0d8

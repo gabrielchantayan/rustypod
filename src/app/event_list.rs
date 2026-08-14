@@ -67,6 +67,25 @@ pub const TREE_ROOT_OFFSET: usize = 0x4;
 pub const TREE_LEFTMOST_OFFSET: usize = 0x8;
 pub const TREE_RIGHTMOST_OFFSET: usize = 0xc;
 
+/// Byte offset of the head of the tree's own node-pool chunk list.
+///
+/// Each of these trees embeds its node allocator rather than calling the
+/// global heap per node. The allocator @ 0x083b9f4c pins the four pool
+/// words down: it pops `+0x04` (the recycled-node list, threaded through
+/// each node's `+0x0c`), else bump-allocates a 32-byte node between the
+/// cursor `+0x08` and the limit `+0x0c`, else `operator new`s a fresh
+/// 12-byte chunk record, pushes it onto the `+0x00` list
+/// (`stm r5, {next, capacity}; str block, [r5, #8]; str r5, [r4]`) and
+/// points the cursor at its `capacity << 5` byte block. The constructor
+/// 0x083db10c clears all four. Tearing a tree down therefore has to walk
+/// `+0x00` and free both halves of every record.
+pub const TREE_POOL_CHUNKS_OFFSET: usize = 0x0;
+
+/// Layout of one 12-byte chunk record, from that same allocator.
+pub const CHUNK_NEXT_OFFSET: usize = 0x0;
+pub const CHUNK_CAPACITY_OFFSET: usize = 0x4;
+pub const CHUNK_BLOCK_OFFSET: usize = 0x8;
+
 /// Reads one u32 word of the opaque target layout. Tree pointers are
 /// 32-bit, so host fixtures backing them must sit below 4 GiB
 /// (`crate::testing::try_map_u32_slab`).
