@@ -31412,3 +31412,49 @@ functions:
       (node alloc + stm of the four fields) and the reloaded object
       literal; LLVM tests id == 1 before id == 0 and inlines the ported
       guard/atexit callees, the accepted intra-crate noise.
+
+  # --- app: mutex service adapters ---
+  - address: 0x08228388
+    ghidra: FUN_08228388
+    name: lock_service_unlock
+    size: 20
+    sig: "int lock_service_unlock(void *service, Mutex *mutex)"
+    module: app/lock_service
+    status: ported
+    vars: {param_1/r0: service, param_2/r1: mutex}
+    notes: >-
+      Member function of a Silver-era service class that adapts the void
+      kernel primitive mutex_unlock @ 0x0807f6a0 (ported, kernel/sync_mutex.rs)
+      to the int method(this, Mutex *) shape the manager classes call. Body is
+      five instructions, binary-verified against osos.asm at 0x08228388:
+      stmdb sp!,{r4,lr} / mov r0,r1 / bl 0x0807f6a0 / mov r0,#0 /
+      ldmia sp!,{r4,pc}. The push of r4 is ADS keeping the stack
+      eight-byte aligned; r4 is never read or written.
+      One of four byte-identical-shaped adapters sitting back to back at
+      0x0822834c (create -> 0x080744a4), 0x08228360 (lock -> 0x0807f5c4),
+      0x08228374 (delete -> 0x0807f650) and 0x08228388 (unlock -> 0x0807f6a0);
+      only unlock is ported here. The next function opens at 0x0822839c with
+      the same prologue over a different callee, so Ghidra's 20-byte extent is
+      correct.
+      The first argument is the caller's this and is dead - the mutex arrives
+      in r1 and r0 is overwritten before it is used. Call sites pass three
+      unrelated kinds of value in it - a loaded field (ldr r0,[r4,#0x28c] @
+      0x081d9ae8, in a 32-iteration constructor loop that only assigns that
+      field AFTER the loop, so the adapter is handed an uninitialized word),
+      an interior pointer (add r0,r4,#0xccc @ 0x081c89b0) and the word next to
+      the mutex (ldr r0,[r4,#0xa08] with r1 = r4 + 0xa00 @ 0x0820c9cc).
+      The zero return is load-bearing, not epilogue noise - 0x0820c9d4 does
+      bl / cmp r0,#0 / moveq r0,r6, and 0x081d9980 tail-branches into the
+      adapter so its zero becomes the caller's return value. The status is
+      unconditional; the kernel primitives are void and nothing can fail.
+      46 call sites total, counted in osos.asm - 45 bl plus the one tail b at
+      0x081d9980 - spread over six manager classes at 0x081c8494, the
+      0x081d95xx..0x081d99xx slot table (32 twenty-byte slots each with an
+      embedded mutex at +0x0c), 0x081e36xx..0x081e5cxx, 0x08206xxx and
+      0x0820cxxx.
+      Deviations - none; mutex_unlock is ported and called directly.
+      Host tests (6) - the mutex comes from the second argument while a
+      garbage this is ignored, a NULL this is equally fine, an uncreated
+      mutex (NULL sem cell) and a created-but-undefined cell are both no-ops
+      that still report success, the Mutex object is left byte-for-byte
+      untouched, and repeated unlocks signal every time.
