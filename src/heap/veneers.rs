@@ -40,6 +40,10 @@
 //!   0x082aad14 (16 bytes, 155 `bl` + 3 `b` call sites). Structurally
 //!   identical pair with tag 3; 0x082aad14 is the neighbour immediately
 //!   below the tag-2 delete @ 0x082aad24, not the same function.
+//! - `free_tag4` — original: `FUN_0805d070` @ 0x0805d070 (8 bytes;
+//!   58 `bl`-form + 13 tail-branch call sites). The tag-4 deallocation
+//!   entry of the "MemH" managed-buffer family @ 0x0805d028..0x0805d1e4:
+//!   `mov r1, #4; b 0x080e7970`, with no NULL guard of its own.
 //! - `cxx_vec_delete` — original: `FUN_0803170c` @ 0x0803170c (16 bytes).
 //!   C++ `delete[]` with destructors: cookie-driven `__cpp_finalise` walk
 //!   via the null-guard veneer @ 0x082ab254, then the tag-3 delete.
@@ -111,6 +115,10 @@ const TAG_OPERATOR_NEW: usize = 2;
 
 /// Caller tag used by the second new/delete pair (0x082aad74 / 0x082aad14).
 const TAG_OPERATOR_NEW_TAG3: usize = 3;
+
+/// Caller tag used by the "MemH" managed-buffer family @ 0x0805d028..
+/// 0x0805d1e4 and its free veneer [`free_tag4`] @ 0x0805d070.
+const TAG_MEM_BUFFER: usize = 4;
 
 /// Default-heap backing storage. Original layout: a 32 KB region @
 /// 0x08a12710 immediately followed by the 0x398-byte descriptor @
@@ -428,6 +436,44 @@ pub unsafe extern "C" fn operator_delete_tag3(ptr: *mut u8) {
     if !ptr.is_null() {
         free_wrapper(ptr, TAG_OPERATOR_NEW_TAG3);
     }
+}
+
+/// free_tag4 — original: `FUN_0805d070` @ 0x0805d070 (8 bytes; 46 `bl`
+/// + 12 `blne` = 58 `bl`-form call sites, plus 9 `b` + 4 `bne` tail
+/// branches = 71 total, all binary-verified by decoding every B/BL word
+/// in osos.dec). Whole body:
+///
+/// ```text
+/// 0805d070:  mov r1, #4        ; caller tag
+/// 0805d074:  b   0x080e7970    ; tail call free_wrapper(ptr, 4)
+/// ```
+///
+/// The tag-4 deallocation entry. It is *not* an `operator delete`: there
+/// is no NULL guard at all, so `free_tag4(NULL)` reaches `free_wrapper`
+/// and the heap core (which ignores NULL) — which is why 12 of the 58
+/// `bl`-form sites are `blne`, guarding on the caller's side. That makes
+/// it the exact structural twin of the tag-2/tag-3 `operator new`
+/// veneers rather than of their deletes.
+///
+/// Tag 4 belongs to the "MemH" managed-buffer family that surrounds this
+/// veneer: the handle constructor @ 0x0805d10c allocates its 16-byte
+/// header and payload with tag 4 and stamps the header's second word
+/// with the magic 0x4d656d48 ("MemH"), the destructor @ 0x0805d028
+/// validates that magic and releases both with tag 4, and the family's
+/// alloc twins sit immediately below the memset/memcmp block at
+/// 0x0805d1d4 (`mov r1, #4; b malloc_wrapper`) and 0x0805d1dc
+/// (`mov r1, #4; b calloc_wrapper`) — both still unported.
+///
+/// Deviations: the original's tail branch is a plain call here (Rust has
+/// no guaranteed tail calls), and `free_wrapper` dispatches through
+/// `HEAP_OPS` instead of branching to 0x080e7970 directly.
+/// `inline(never)`: on device 58 call sites reach this with `bl`, and an
+/// 8-byte body is exactly what LLVM would otherwise inline away, dragging
+/// the whole lazy-heap-init path into every caller.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn free_tag4(ptr: *mut u8) {
+    free_wrapper(ptr, TAG_MEM_BUFFER);
 }
 
 /// cpp_finalise_null_guard — original @ 0x082ab254 (16 bytes:
@@ -922,6 +968,34 @@ pub(crate) mod tests {
             assert_eq!(LAST_FREE_HEAP, core::ptr::addr_of_mut!(FAKE_HANDLE));
             assert_eq!(LAST_FREE_PTR, BLOCK_A as *mut u8);
             assert_eq!(LAST_FREE_TAG, 3, "tag 3, not the tag-2 delete");
+        }
+    }
+
+    #[test]
+    fn free_tag4_releases_with_tag_4_and_runs_the_lazy_init() {
+        let _lock = mock_heap();
+        unsafe {
+            free_tag4(BLOCK_A as *mut u8);
+            assert_eq!(FREE_CALLS, 1);
+            assert_eq!(CREATE_CALLS, 1, "the veneer runs the lazy heap init");
+            assert_eq!(LAST_FREE_HEAP, core::ptr::addr_of_mut!(FAKE_HANDLE));
+            assert_eq!(LAST_FREE_PTR, BLOCK_A as *mut u8);
+            assert_eq!(LAST_FREE_TAG, 4, "tag 4, not the operator-delete tags");
+            assert_eq!(ALLOC_CALLS, 0, "free must never touch the alloc path");
+        }
+    }
+
+    #[test]
+    fn free_tag4_has_no_null_guard() {
+        let _lock = mock_heap();
+        unsafe {
+            // `mov r1,#4; b free_wrapper` — unconditional. Unlike the two
+            // operator deletes, NULL reaches the heap core (which ignores
+            // it); the 12 `blne` call sites guard on their own side.
+            free_tag4(core::ptr::null_mut());
+            assert_eq!(FREE_CALLS, 1, "NULL still reaches the heap");
+            assert!(LAST_FREE_PTR.is_null());
+            assert_eq!(LAST_FREE_TAG, 4);
         }
     }
 

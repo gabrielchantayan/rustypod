@@ -9,6 +9,7 @@ pub mod kobj;
 pub mod mqueue;
 pub mod os_heap;
 pub mod posix_mutex;
+pub mod resource_op;
 pub mod sync_mutex;
 pub mod sync_sem;
 pub mod task;

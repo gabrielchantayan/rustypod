@@ -3097,6 +3097,40 @@ functions:
       init plus the ops-slot free tail call, matching the shape already
       accepted for the tag-2 operator_delete @ 0x082aad24.
 
+  - address: 0x0805d070
+    ghidra: FUN_0805d070
+    name: free_tag4
+    size: 8
+    sig: "void free_tag4(void *ptr)"
+    module: heap/veneers
+    vars: {param_1: ptr}
+    status: ported
+    notes: >-
+      The tag-4 deallocation entry. Whole body, verified against the raw
+      image (words e3a01004 ea022a3d): `mov r1,#4; b 0x080e7970` — an
+      unconditional tail branch into free_wrapper @ 0x080e7970 (already
+      ported) with caller tag 4. Extent confirmed by the neighbours: the
+      word below @ 0x0805d06c is the literal 0x4d656d48 ("MemH") belonging
+      to the handle destructor @ 0x0805d028, and 0x0805d078 starts the
+      memset-style fill, so the function is exactly 8 bytes. Call sites
+      counted by decoding every ARM B/BL word in osos.dec: 46 `bl` + 12
+      `blne` = 58 `bl`-form, plus 9 `b` + 4 `bne` tail branches = 71 total.
+      Unlike the tag-2/tag-3 operator deletes there is NO NULL guard here,
+      which is why a fifth of the `bl`-form sites are `blne` — the callers
+      guard. Tag 4 belongs to the "MemH" managed-buffer family around this
+      veneer, whose header carries the magic 0x4d656d48 at +0x04, whose
+      constructor is 0x0805d10c (16-byte header + payload, both tag 4),
+      whose destructor is 0x0805d028, and whose alloc twins are the
+      identically shaped 8-byte veneers 0x0805d1d4 (`mov r1,#4; b
+      malloc_wrapper`) and 0x0805d1dc (`mov r1,#4; b calloc_wrapper`) —
+      all still unported. Deviations: the tail branch is a plain call, and
+      the free dispatch goes through the HEAP_OPS.free slot instead of
+      branching to 0x080e7970 directly. #[inline(never)] for the 58 `bl`
+      targets. match.py structural: the port is the inlined lazy heap init
+      plus the ops-slot free tail call with `mov r2,#4` carrying the tag —
+      the same shape already accepted for operator_new_tag3 @ 0x082aad74
+      and operator_delete_tag3 @ 0x082aad14.
+
   - address: 0x08030f44
     name: heap_panic
     size: 32
@@ -17234,6 +17268,60 @@ functions:
       unconditional free blx, slot reload, null-checked post-trace
       tail branch with (NULL, 1); LLVM frame and ldrd hook-table loads
       aside.
+
+  - address: 0x08043b94
+    ghidra: FUN_08043b94
+    name: resource_op_dispatch
+    size: 132
+    sig: "void resource_op_dispatch(u32 op, i32 resource, u32 arg0, u32 arg1)"
+    module: kernel/resource_op
+    status: ported
+    vars: {param_1: op, param_2: resource, param_3: arg0, param_4: arg1, iVar3: object}
+    renames:
+      FUN_08043a6c: resource_registry_acquire
+      FUN_080438b0: resource_registry_release
+      FUN_08044174: current_context_id
+    notes: >-
+      SIZE CORRECTION - Ghidra says 128, dropping the trailing literal-pool
+      word 0x08a0e93c @ 0x08043c14 (the services-descriptor pointer). The
+      next function, traced_alloc, starts at 0x08043c18, so the true extent
+      is 132 bytes: 128 of code plus that word. 74 `bl` + 3
+      `bleq` = 77 `bl`-form call sites plus 4 tail `b` = 81 total, counted
+      by decoding every ARM B/BL word in osos.dec. The RAM-side entry
+      point every caller uses to run a lock/unlock-style operation on a
+      numbered resource - callers bracket critical sections with matched
+      pairs, op 9 before and op 10 after (or the shorter op 5 / op 6
+      ownership probes), always with arg0/arg1 zero; e.g. 0x080b6ba4 wraps
+      a counter increment in (9,1)/(10,1) and 0x08092504 probes ownership
+      with (5,0x13)/(6,0x13) before taking (9,0x12). The sign of
+      `resource` is the entire dispatch (`subs r5,r1,#0` / `bge`)-
+      non-negative ids are static resources handed to descriptor slot
+      +0x08 as a tail call with the arguments untouched; negative ids are
+      handles into the descriptor's refcounted registry (slot +0x04),
+      guarded by slot +0x18 BEFORE the registry is touched, then resolved
+      with resource_registry_acquire @ 0x08043a6c (a NULL object is fatal-
+      `bleq heap_panic` @ 0x08030f44), dispatched to a RE-READ slot +0x18
+      (`ldr ip,[r4,#0x18]` @ 0x08043bcc, not the cached guard value) with
+      the object replacing the id in argument 1, and finally tail-branched
+      to resource_registry_release @ 0x080438b0 with the RAW NEGATIVE ID,
+      not the object. Void - the original leaves r0 holding whatever the
+      last path touched (0 from an empty +0x18, `op` from an empty +0x08,
+      the tail callee's result otherwise) and no caller reads it.
+      Descriptor 0x08a0e93c slots seen from this cluster - +0x04 registry
+      vector, +0x08 static handler, +0x10 current-context-id hook (read by
+      0x08044174, which returns 1 when empty), +0x18 registered handler,
+      +0x1c per-object destroy hook (run by the release path). Deviations,
+      the TRACED_ALLOC_HOOKS pattern - the two descriptor slots and the two
+      registry entry points (both unported) live in RESOURCE_OP_HOOKS with
+      no-op/NULL defaults, so the stock all-NULL descriptor is reproduced
+      exactly; the two tail branches are plain calls; and the re-read +0x18
+      slot is called only when still installed, where the original would
+      blx a NULL slot (unreachable in the stock image, nothing clears the
+      slot while a resource is held). match.py structural - same shape,
+      sign test (LLVM picks `cmn r1,#1; ble` for `resource < 0`), both
+      slot-null guards, blx acquire, fatal NULL-object branch, the slot
+      re-read after the acquire returns, blx handler, tail release; LLVM's
+      wider frame and its ldrd hook-table loads aside.
 
   # --- Per-instantiation template members of the C++ block (cxx/templates) ---
   # This block is full of families the compiler emitted once per template
