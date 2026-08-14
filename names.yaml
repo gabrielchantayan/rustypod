@@ -29254,6 +29254,22 @@ functions:
       accesses nothing else. The independent exported Rust symbol preserves
       this address-specific hook target; its focused host test verifies the
       target becomes zero while adjacent words retain their sentinels.
+  - address: 0x08027c94
+    ghidra: FUN_08027c94
+    name: reset_u32_slot_alias_08027c94
+    size: 12
+    sig: "void reset_u32_slot_alias_08027c94(u32 *slot)"
+    module: cxx/slot_reset
+    status: ported
+    renames:
+      param_1/r0: slot
+      r1: zero
+    notes: >-
+      Byte-identical alias of reset_u32_slot at 0x08027c7c. Its 12-byte ARM
+      body is mov r1,#0; str r1,[r0]; bx lr, so it clears one aligned u32 and
+      accesses nothing else. The independent exported Rust symbol preserves
+      this address-specific hook target; its focused host test verifies the
+      target becomes zero while adjacent words retain their sentinels.
 
 
   # --- H.264 CBC decode forwarding adapter ---
@@ -29719,3 +29735,22 @@ functions:
       return_second_argument is the narrowest semantic name supported by the
       exact ABI behavior. No deviations; focused host tests cover independence
       from the first argument and zero/all-one second-argument bit patterns.
+
+  # --- ARM constant-zero return ---
+  - address: 0x080275f8
+    ghidra: FUN_080275f8
+    name: return_zero
+    size: 8
+    sig: "u32 return_zero()"
+    module: runtime/return_zero
+    status: ported
+    renames:
+      r0: zero_result
+    notes: >-
+      8-byte ARM leaf: `mov r0,#0; bx lr`. It unconditionally produces the
+      zero-valued u32 result in r0 and reads neither arguments nor memory.
+      The recovered caller at 0x082fc020 carries six apparent values into
+      this target, but the two-instruction body discards their argument
+      registers; the no-argument ABI and return_zero name therefore express
+      the entire observed behavior. No deviations; focused host tests assert
+      the zero word and its all-clear bit representation.

@@ -19,6 +19,7 @@ pub mod message_0x17;
 pub mod message_0x10;
 pub mod qsort;
 pub mod raise;
+pub mod return_zero;
 pub mod random;
 pub mod rt_div;
 pub mod setjmp;
