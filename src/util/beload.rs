@@ -23,9 +23,10 @@
 //! alignment. Unlike the `berec_*` family @ 0x0813b714 (which reads
 //! through a buffer handle), these take the byte pointer directly.
 //!
-//! A fourth and fifth implementation — `pack_be32` @ 0x08261638 and
-//! `unpack_be32` @ 0x08261770 — live at the bottom of this file; see the
-//! banner there for the wire-format cluster they belong to.
+//! The wire-format overload set @ 0x0826161c..0x082617ec — `pack_be16`,
+//! `pack_be32`, `pack_be64`, `unpack_be16`, `unpack_be32`, `unpack_be64`
+//! and the two register-only byte reversers they share — lives at the
+//! bottom of this file; see the banner there.
 
 /// Big-endian, alignment-free 32-bit load from `p`.
 #[cfg_attr(target_os = "none", no_mangle)]
@@ -76,12 +77,19 @@ pub unsafe extern "C" fn store_u32_be_bytes(p: *mut u8, value: u32) {
 // (words decoded from osos.dec, not Ghidra):
 //
 //   0x0826161c  16-bit pack      0x08261750  16-bit unpack
-//   0x08261638  32-bit pack      0x08261770  32-bit unpack   <- ported here
+//   0x08261638  32-bit pack      0x08261770  32-bit unpack
 //   0x08261670  64-bit pack      0x08261790  64-bit unpack
 //
-// The 32-bit unpack tail-branches (`b`, not `bl`) to a private register-only
-// byte reverse @ 0x082616d4, which the 64-bit pair reaches through its own
-// 64-bit twin @ 0x082616f0.
+// Two register-only byte reversers sit between the two halves and are shared
+// by both: `reverse_bytes32` @ 0x082616d4 and `reverse_bytes64` @ 0x082616f0.
+// The 32- and 64-bit unpacks reach theirs by tail branch (`b`, not `bl`); the
+// 64-bit pack calls its one with a real `bl`. Both are reached by direct `bl`
+// from elsewhere too, so both are genuine firmware entry points, not inlining
+// artefacts.
+//
+// Every function here is exported into its own text section: their bodies are
+// near-identical and LLVM would otherwise fold several onto a single symbol,
+// leaving the rest of the family with no address to hook.
 //
 // Callers identify the domain: every recovered one builds or parses a
 // packet in a small stack/record buffer with a running byte-length cursor
@@ -120,6 +128,28 @@ pub unsafe extern "C" fn pack_be32(dst: *mut u8, value: u32) {
     dst.add(3).write((reversed >> 24) as u8);
 }
 
+/// reverse_bytes32 — original: `FUN_082616d4` @ 0x082616d4 (28 bytes, all
+/// code: 6 instructions plus `bx lr`; 2 `bl` call sites plus the tail `b`
+/// from [`unpack_be32`] @ 0x0826178c, counted by decoding every B/BL word
+/// in osos.dec).
+///
+/// Returns `value` with its four bytes reversed.
+///
+/// The private reverser of the wire-format cluster: unlike [`bswap32`]
+/// @ 0x0805dc24, which round-trips the word through a stack slot, this one
+/// stays in registers — `lsl #24`, `orr` of `value & 0xff00` shifted left 8,
+/// `orr` of `value & 0xff0000` shifted right 8, `orr` of `value >> 24`. Same
+/// observable result, separate firmware function, so it keeps its own text
+/// section.
+///
+/// [`bswap32`]: crate::util::bswap::bswap32
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.reverse_bytes32")]
+#[inline(never)]
+pub extern "C" fn reverse_bytes32(value: u32) -> u32 {
+    value.swap_bytes()
+}
+
 /// unpack_be32 — original: `FUN_08261770` @ 0x08261770 (32 bytes, all
 /// code: 7 instructions plus a tail branch; 60 `bl` call sites,
 /// binary-scanned).
@@ -129,9 +159,9 @@ pub unsafe extern "C" fn pack_be32(dst: *mut u8, value: u32) {
 ///
 /// The original gathers the bytes into a little-endian word (walking `src`
 /// with pre-indexed `ldrb`s) and then tail-branches to the private
-/// register-only byte reverse @ 0x082616d4; the port folds that reverse in,
-/// since LLVM inlines an equal-bodied leaf call anyway and there is no
-/// separate firmware entry point worth preserving here. The observable
+/// register-only byte reverse @ 0x082616d4, ported here as
+/// [`reverse_bytes32`]; the port folds that reverse in, since LLVM inlines
+/// an equal-bodied leaf call anyway. The observable
 /// effect is identical to [`load_be32`], and the dedicated text section
 /// stops LLVM from merging the two onto one address.
 ///
@@ -284,6 +314,38 @@ mod tests {
             assert_eq!(packed, stored, "value={value:#010x}");
             assert_eq!(unsafe { load_be32(packed.as_ptr()) }, value);
         }
+    }
+
+    /// A byte reverse is its own inverse, moves every lane to the mirrored
+    /// lane, and agrees with the independently ported stack-spilling
+    /// `bswap32` @ 0x0805dc24.
+    #[test]
+    fn reverse_bytes32_mirrors_every_lane() {
+        assert_eq!(reverse_bytes32(0x0102_0304), 0x0403_0201);
+        assert_eq!(reverse_bytes32(0), 0);
+        assert_eq!(reverse_bytes32(1), 0x0100_0000);
+        assert_eq!(reverse_bytes32(0x7fff_ffff), 0xffff_ff7f);
+        assert_eq!(reverse_bytes32(u32::MAX), u32::MAX);
+
+        for lane in 0..4 {
+            let value = 0xa5u32 << (8 * lane);
+            assert_eq!(reverse_bytes32(value), 0xa5u32 << (8 * (3 - lane)), "lane={lane}");
+        }
+
+        for value in [0u32, 1, 0x0000_ff00, 0x8000_0001, 0x1234_5678, 0xdead_beef, u32::MAX] {
+            assert_eq!(reverse_bytes32(reverse_bytes32(value)), value);
+            assert_eq!(reverse_bytes32(value), crate::util::bswap::bswap32(value));
+        }
+    }
+
+    /// It is exactly the transform that turns a little-endian gather into a
+    /// big-endian read — the contract `unpack_be32` tail-branches for.
+    #[test]
+    fn reverse_bytes32_converts_a_little_endian_gather_to_big_endian() {
+        let buf = [0xdeu8, 0xad, 0xbe, 0xef];
+        let gathered = u32::from_le_bytes(buf);
+        assert_eq!(reverse_bytes32(gathered), 0xdead_beef);
+        assert_eq!(reverse_bytes32(gathered), unsafe { unpack_be32(buf.as_ptr()) });
     }
 
     /// The byte at the lowest address is the most significant — if the

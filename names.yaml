@@ -30173,6 +30173,37 @@ functions:
       picks the ror idiom over the mask/orr chain, and emits the same
       crate-wide push {fp, lr} frame the accepted store_be32 port has.
 
+  - address: 0x082616d4
+    ghidra: FUN_082616d4
+    name: reverse_bytes32
+    size: 28
+    sig: "u32 reverse_bytes32(u32 value)"
+    module: util/beload
+    status: ported
+    renames:
+      param_1/r0: value
+      uVar1/r1: reversed
+      uVar2/r2: lane_mask
+    notes: >-
+      Register-only byte reverse of a 32-bit value - the private reverser
+      the wire-format cluster shares. 28 bytes, 7 instructions,
+      0x082616d4..0x082616ec ending in bx lr; the next function
+      (reverse_bytes64) starts at 0x082616f0, extent decoded from the raw
+      words rather than taken from Ghidra. 2 bl call sites plus the tail b
+      from unpack_be32 @ 0x0826178c, counted by decoding every B/BL word in
+      osos.dec, so it is a genuine firmware entry point and not an inlining
+      artefact. Algorithm - lsl #24, orr of value & 0xff00 shifted left 8,
+      orr of value & 0xff0000 shifted right 8, orr of value >> 24. Same
+      observable result as bswap32 @ 0x0805dc24, which instead round-trips
+      the word through a stack slot, so the two stay separate symbols and
+      this one keeps its own text section (LLVM folds byte-identical bodies
+      otherwise). No deviations. Host tests mirror every single-byte lane,
+      prove the transform is its own inverse, cross-check against bswap32,
+      and confirm it is exactly what turns unpack_be32's little-endian
+      gather into a big-endian read. match.py structural diff reviewed -
+      LLVM picks the ror idiom over the mask/orr chain and adds the
+      crate-wide push {fp, lr} frame.
+
   - address: 0x08261770
     ghidra: FUN_08261770
     name: unpack_be32
