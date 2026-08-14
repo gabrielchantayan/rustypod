@@ -312,8 +312,16 @@ mod tests {
     extern crate std;
 
     use super::*;
+    use crate::app::registry::{
+        FrameworkObject, FrameworkObjectVtable, Registry, RegistryEntry, RegistryVtable,
+        CLASS_ID_DEMO_MODE, CLASS_REGISTRY,
+    };
+    // The constructor's last act resolves 0x8080 through the one shared
+    // `CLASS_REGISTRY`, so this module takes the crate-wide registry lock
+    // rather than a private one (see `testing::CLASS_REGISTRY_TEST_LOCK`).
+    use crate::testing::CLASS_REGISTRY_TEST_LOCK as OPS_LOCK;
     use crate::testing::{note_missing_u32_fixture, try_map_u32_slab};
-    use std::sync::{LazyLock, Mutex, MutexGuard};
+    use std::sync::{LazyLock, MutexGuard};
     use std::vec::Vec;
 
     /// Whole object plus the two header nodes the allocators hand out.
@@ -328,7 +336,89 @@ mod tests {
         try_map_u32_slab(crate::testing::hints::SILVER_CONTROLLER, FIXTURE_LEN).map(|p| p as usize)
     });
 
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
+    // ---- the class registry `demo_mode_instance` resolves through ----
+
+    /// The one entry the mock registry holds while a test runs.
+    static mut REGISTERED: RegistryEntry =
+        RegistryEntry { class_id: 0, instance: core::ptr::null_mut() };
+
+    unsafe extern "C" fn mock_index_of(_this: *mut Registry, key: *const u32) -> i32 {
+        let entry = core::ptr::read_volatile(core::ptr::addr_of!(REGISTERED));
+        if entry.instance.is_null() || entry.class_id != key.read() {
+            -1
+        } else {
+            0
+        }
+    }
+
+    unsafe extern "C" fn mock_entry_at(
+        _this: *mut Registry,
+        _index: i32,
+        out: *mut RegistryEntry,
+    ) -> *mut RegistryEntry {
+        out.write(core::ptr::read_volatile(core::ptr::addr_of!(REGISTERED)));
+        out
+    }
+
+    /// Every registry slot the constructor must not reach: it only
+    /// resolves the singleton, it never publishes or notifies.
+    unsafe extern "C" fn unreachable_insert(
+        _this: *mut Registry,
+        _entry: *const RegistryEntry,
+    ) -> usize {
+        std::panic!("silver_controller_construct inserts nothing into the registry");
+    }
+
+    unsafe extern "C" fn unreachable_assign_at(
+        _this: *mut Registry,
+        _index: i32,
+        _entry: *const RegistryEntry,
+    ) -> usize {
+        std::panic!("silver_controller_construct writes nothing to the registry");
+    }
+
+    unsafe extern "C" fn unreachable_notify(_this: *mut Registry) -> *mut u8 {
+        std::panic!("silver_controller_construct fires no registry notification");
+    }
+
+    unsafe extern "C" fn mock_cast_to_class(
+        this: *mut FrameworkObject,
+        class_id: u32,
+    ) -> *mut u8 {
+        if class_id == CLASS_ID_DEMO_MODE { this.cast() } else { core::ptr::null_mut() }
+    }
+
+    static DEMO_MODE_VTABLE: FrameworkObjectVtable = FrameworkObjectVtable {
+        unresolved_00: [0; 5],
+        cast_to_class: mock_cast_to_class,
+    };
+    static mut DEMO_MODE_OBJECT: FrameworkObject = FrameworkObject { vtable: &DEMO_MODE_VTABLE };
+
+    static REGISTRY_VTABLE: RegistryVtable = RegistryVtable {
+        unresolved_00: [0; 7],
+        insert: unreachable_insert,
+        unresolved_20: 0,
+        assign_at: unreachable_assign_at,
+        unresolved_28: [0; 5],
+        entry_at: mock_entry_at,
+        unresolved_40: [0; 3],
+        index_of: mock_index_of,
+        unresolved_50: [0; 4],
+        has_pending_changes: unreachable_notify,
+        notify_deferred: unreachable_notify,
+        notify_changed: unreachable_notify,
+    };
+
+    /// Stands the class registry up with the `TCDemoMode` stand-in
+    /// registered under 0x8080, so `demo_mode_instance` resolves to one
+    /// stable pointer for the whole test.
+    unsafe fn install_registry() {
+        REGISTERED = RegistryEntry {
+            class_id: CLASS_ID_DEMO_MODE,
+            instance: core::ptr::addr_of_mut!(DEMO_MODE_OBJECT).cast(),
+        };
+        CLASS_REGISTRY.vtable = &REGISTRY_VTABLE;
+    }
 
     static mut BASE_CALLS: Vec<(*mut u8, *const u8)> = Vec::new();
     static mut ALLOCATOR_CALLS: Vec<(u32, *mut u8)> = Vec::new();
@@ -368,6 +458,8 @@ mod tests {
             unsafe {
                 core::ptr::addr_of_mut!(SILVER_CONTROLLER_OPS)
                     .write_volatile(DEFAULT_SILVER_CONTROLLER_OPS);
+                REGISTERED = RegistryEntry { class_id: 0, instance: core::ptr::null_mut() };
+                CLASS_REGISTRY.vtable = core::ptr::null();
             }
         }
     }
@@ -381,6 +473,7 @@ mod tests {
         let auxiliary_node = unsafe { slab.add(AUXILIARY_NODE_OFFSET) };
         let binding_node = unsafe { slab.add(BINDING_NODE_OFFSET) };
         unsafe {
+            install_registry();
             core::ptr::write_bytes(slab, 0xa5, FIXTURE_LEN);
             (*core::ptr::addr_of_mut!(BASE_CALLS)).clear();
             (*core::ptr::addr_of_mut!(ALLOCATOR_CALLS)).clear();
@@ -474,8 +567,14 @@ mod tests {
         if SLAB.is_none() && note_missing_u32_fixture("app::silver_controller") {
             return;
         }
-        unsafe extern "C" fn relocating_base(this: *mut u8, _name: *const u8) -> *mut u8 {
-            unsafe { this.add(OBJECT_LEN) }
+        /// Relocates `this`, and still records like [`recording_base`] so
+        /// the container allocators' "the base ran first" evidence keeps
+        /// holding.
+        unsafe extern "C" fn relocating_base(this: *mut u8, name: *const u8) -> *mut u8 {
+            unsafe {
+                (*core::ptr::addr_of_mut!(BASE_CALLS)).push((this, name));
+                this.add(OBJECT_LEN)
+            }
         }
         let (_guard, object, _, _) = bench();
         unsafe {
