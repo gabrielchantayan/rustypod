@@ -173,8 +173,13 @@ pub unsafe extern "C" fn resource_chain_find(
 /// Ghidra sizes this at 12 bytes, dropping the trailing literal word.
 /// The real extent runs to 0x0827239c, where the `"Str "` sibling's
 /// first instruction begins.
+/// The two thunks differ only in the literal they load, so LLVM cannot
+/// fold them today — but the explicit `link_section` makes that
+/// structural rather than incidental, the way `util/beload.rs` and
+/// `cxx/templates.rs` pin their near-identical siblings apart.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.resource_chain_find_bitmap")]
 pub unsafe extern "C" fn resource_chain_find_bitmap(
     head: *mut ResourceProvider,
     id: u32,
@@ -189,8 +194,11 @@ pub unsafe extern "C" fn resource_chain_find_bitmap(
 /// Binds [`ResourceKind::STRING`] as the kind of [`resource_chain_find`]:
 /// looks the string resource `id` up in the provider chain and returns
 /// it as a C string (NULL when no provider owns it).
+/// Pinned into its own `link_section` for the reason given on
+/// [`resource_chain_find_bitmap`].
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.resource_chain_find_string")]
 pub unsafe extern "C" fn resource_chain_find_string(
     head: *mut ResourceProvider,
     id: u32,

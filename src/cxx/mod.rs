@@ -4,6 +4,7 @@
 //! the ARM ADS C runtime.
 pub mod bit_set;
 pub mod byte_key_map;
+pub mod color_copy;
 pub mod decoder_begin_batch;
 pub mod decoder_end_batch;
 pub mod decoder_cleanup;

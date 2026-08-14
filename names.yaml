@@ -30904,6 +30904,75 @@ functions:
       blx/bx-through-volatile-slot dispatches standing in for the direct
       bl / tail b.
 
+  # --- the 4-byte colour value's copy ---
+  - address: 0x082720e8
+    ghidra: FUN_082720e8
+    name: color_copy
+    size: 36
+    sig: "void color_copy(u8 *dst, const u8 *src)"
+    module: cxx/color_copy
+    status: ported
+    renames:
+      param_1/r0: dst (the destination colour)
+      param_2/r1: src (the source colour)
+    notes: >-
+      The copy member of retailOS's 4-byte RGBA colour value class: four
+      forward ldrb/strb pairs then bx lr, decoded from the raw words
+      (ldrb r2,[r1] / strb r2,[r0]; +1; +2; then ldrb r1,[r1,#3] /
+      strb r1,[r0,#3]). Extent - Ghidra's 36 bytes is exact on both
+      sides for once: 0x082720e4 is the closing bx lr of the
+      four-component setter @ 0x082720d0 and 0x0827210c is the push {lr}
+      of the 28-byte record copy that follows; no literal pool. Call
+      sites - 46 bl (44 unconditional plus 2 blne, at 0x0829190c and
+      0x0829193c) and 2 unconditional b, binary-scanned by decoding
+      every B/BL word in osos.dec. The two b sites are 0x08263198 and
+      0x082631a0, the tails of the background and foreground draw-state
+      colour setters. No DATA word in the image holds 0x082720e8, so it
+      is never dispatched virtually.
+      Why the class is a colour - the whole translation unit
+      0x08272018-0x08272108 is one small value type - a pixel-format
+      packer @ 0x08272018 masking its four components with 0xf8/0xfc/
+      0xf0 for RGB565, RGBA4444 and RGB555, the bare RGB565 case @
+      0x08272090 ((R & 0xf8) << 8 | (G & 0xfc) << 3 | (B & 0xf8) >> 3),
+      a byte-identical twin of this function @ 0x082720ac (20 bl + 2 b
+      sites of its own, NOT ported), a four-component setter @
+      0x082720d0 (strb r1,[r0]; strb r2,[r0,#1]; strb r3,[r0,#2];
+      strb [sp],[r0,#3]) and this copy. So the record is four bytes
+      wide, laid out {R,G,B,A}. Two call-site readings confirm alpha is
+      last - 0x080749a8 and 0x080b31f0 build a colour with mov r3,#0xff
+      before the constructor @ 0x08271de4 and copy it here, and
+      cxx/draw_state's body initializer @ 0x082630f0 defaults the
+      foreground to {0,0,0,0xff} and the background to {0xff x 4}.
+      Why byte-at-a-time - draw-state colours are stored unaligned
+      (a style byte at +0x10 sits immediately ahead of colours at +0x11
+      and +0x15), so a 32-bit ldr/str pair would fault where the
+      original does not. That is the entire reason this helper exists
+      instead of a word assignment, and why the two setters reach it by
+      add r0,r0,#0x11 / #0x15 and a tail b.
+      Deviations - the byte moves are read_volatile/write_volatile
+      (PORTING.md's defence against LLVM's loop-idiom pass rewriting a
+      small copy into a memcpy call); this also pins the forward,
+      overlap-propagating order, so an overlapping copy observes each
+      store before the next load exactly as the instruction pairs do.
+      Returns nothing - bx lr leaves r0 = dst, but none of the 46 bl
+      sites reads it; every one overwrites r0 within an instruction or
+      two, and the two that pop {..., pc} straight after the call
+      (0x081ea170, 0x081ea2ec) are void functions whose own callers
+      ignore the value. No NULL or alignment guard on either pointer.
+      The byte-identical twin @ 0x082720ac is left unported - were it
+      ported, LLVM's MergeFunctions would fold the two bodies onto one
+      symbol, the parse_result_init_alias_3134 situation.
+      Host tests (5) - a plain four-byte copy with a guard byte past the
+      end, every-byte-value coverage including NUL and 0xff, all 16
+      source/destination alignment combinations, every overlap of two
+      colours inside one 8-byte buffer against an independent forward
+      model, and a self-copy. cxx/draw_state_color's own 5 tests now
+      exercise this port through the setter. match.py structural - the
+      four ldrb/strb pairs match instruction-for-instruction and in the
+      original's exact register order (r2 for the first three bytes,
+      r1 reused for the fourth); the only diff is the crate-standard fp
+      prologue/epilogue in place of the bare bx lr.
+
   # --- draw-state record: the foreground colour setter ---
   - address: 0x0826319c
     ghidra: FUN_0826319c
@@ -30915,7 +30984,7 @@ functions:
     renames:
       param_1/r0: record (the 0x44-byte draw-state record, cxx/draw_state)
       param_2/r1: color (four colour bytes)
-      FUN_082720e8: copy_color_bytes (the shared unaligned 4-byte copy)
+      FUN_082720e8: color_copy (the shared unaligned 4-byte colour copy)
     notes: >-
       The foreground-colour setter of the 0x44-byte draw-state record
       (cxx/draw_state.rs). Whole function, decoded from the raw words -
@@ -30942,19 +31011,14 @@ functions:
       the pair. (3) The list-row draw path @ 0x0819b80c calls this setter
       with &view+0x22c, the row's text colour, and only when the row's style
       code says "a colour".
-      Deviations - the tail-called helper @ 0x082720e8 is not yet ported
-      under its own name, so the module carries a faithful private
-      copy_color_bytes kept #[inline(never)] so the port still emits the
-      original's add + tail-branch pair; the ARM build shows it assembles to
-      the original's exact ten instructions (ldrb r2,[r1] / strb r2,[r0] x3
-      then ldrb r1,[r1,#3] / strb r1,[r0,#3]) plus the crate fp frame, and
-      the JUMP24 relocation confirms it was not folded into another empty or
-      identical body. When 0x082720e8 is ported this becomes a direct call.
-      The byte moves are read_volatile/write_volatile (PORTING.md's defence
-      against LLVM rewriting a small copy into a memcpy call), which also
-      pins the forward, overlap-propagating order. The original returns
-      nothing - r0 survives the tail call as record+0x11, but no bl site
-      reads it, so the port is void. No NULL guard on either pointer.
+      Deviations - the tail-called helper @ 0x082720e8 is now ported under
+      its own name as cxx/color_copy.rs's color_copy, and this setter calls
+      it; the module's former private copy_color_bytes duplicate is gone.
+      The byte moves, their forward overlap-propagating order and their
+      read_volatile/write_volatile-ness all live in that module now. The
+      original returns nothing - r0 survives the tail call as record+0x11,
+      but no bl site reads it, so the port is void. No NULL guard on either
+      pointer.
       Host tests (5) - the exact 4-byte write at +0x11 with the whole rest of
       the record proven untouched (style byte at +0x10 and background at
       +0x15 included), all 16 source/destination alignment combinations,
