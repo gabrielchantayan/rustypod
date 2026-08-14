@@ -22159,9 +22159,54 @@ functions:
       the port is a call rather than a tail branch (observably identical);
       LLVM still emits `mov r2,r1; ldr r1,=0x53747220; b resource_chain_find`
       around the crate frame, so match.py is instruction-for-instruction on
-      the body. Its 12-byte sibling @ 0x0827238c binds 0x424d6170 ("BMap")
-      the same way (46 bl + 2 b call sites) and is documented but NOT
-      ported; its kind constant is exported as ResourceKind::BITMAP.
+      the body. Its sibling @ 0x0827238c binds 0x424d6170 ("BMap") the same
+      way (46 bl + 2 b call sites) and is now ported alongside it as
+      resource_chain_find_bitmap.
+
+  - address: 0x0827238c
+    ghidra: FUN_0827238c
+    name: resource_chain_find_bitmap
+    size: 16
+    sig: "void *resource_chain_find_bitmap(ResourceProvider *head, u32 id)"
+    module: app/resource_chain
+    status: ported
+    renames:
+      param_1: head
+      param_2: id
+      FUN_0827216c: resource_chain_find
+    notes: >-
+      The "BMap" sibling of resource_chain_find_string @ 0x0827239c:
+      `mov r2,r1; ldr r1,[pc] (=0x424d6170); b 0x0827216c`, binding the
+      bitmap resource kind as the middle argument of resource_chain_find
+      and shifting the caller's id from r2 into place, then tail-branching.
+      So it is "look this bitmap resource id up in the current provider
+      chain", returning the owning provider's raw pointer or NULL.
+      Extent - Ghidra says 12 bytes, which drops the trailing literal
+      word. The real extent is 16 bytes, 0x0827238c..0x0827239c
+      (0x08272398 holds 0x424d6170, and 0x0827239c is the first
+      instruction of the "Str " thunk), confirmed by decoding the raw
+      words rather than trusting the listing. Call sites - 46 bl (all
+      unconditional) plus 2 unconditional b tail calls (0x081eb070,
+      0x081ed150), binary-scanned by decoding every B/BL word in
+      osos.dec; no DATA word in the image holds 0x0827238c, so it is
+      never dispatched virtually. Callers cluster in the UI/resource
+      layers (0x08112xxx, 0x08128xxx-0x08129xxx, 0x08133xxx, 0x0815cxxx,
+      0x08170xxx-0x08176xxx, 0x08186xxx, 0x081ebxxx-0x081f8xxx),
+      consistent with "fetch an artwork bitmap by id". Deviations - the
+      port is a call rather than a tail branch (observably identical);
+      the return type is the chain walker's raw void* because no call
+      site reveals bitmap structure beyond "opaque pointer the drawing
+      code consumes". Codegen note - the two thunks differ only in the
+      literal they load, so LLVM does NOT fold them; the archive shows
+      distinct .text.resource_chain_find_bitmap and
+      .text.resource_chain_find_string sections with the correct
+      constant in each, and a host test asserts the two bind different
+      kinds. Host tests - kind and id forwarded verbatim to the walker,
+      NULL on an empty chain, and the two-thunks-differ guard. match.py
+      structural: mov r2,r1 / ldr r1,[pc] / b / .word 0x424d6170 match
+      instruction-for-instruction; the only diff is the crate-standard
+      fp prologue.
+
   - address: 0x08277304
     ghidra: FUN_08277304
     name: string_object_construct_from_cstr

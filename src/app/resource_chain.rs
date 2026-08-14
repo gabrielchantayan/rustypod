@@ -76,8 +76,9 @@
 //!   vtable or a NULL slot faults. The port keeps the unguarded load
 //!   (a NULL `head` is the loop's own exit test, exactly as in the
 //!   original, and is *not* a fault).
-//! - `resource_chain_find_string` is a call here, where the original's
-//!   0x0827239c is a tail `b`; the observable behavior is identical.
+//! - `resource_chain_find_string` and `resource_chain_find_bitmap` are
+//!   calls here, where the originals @ 0x0827239c and 0x0827238c are
+//!   tail `b`s; the observable behavior is identical.
 
 use core::ptr;
 
@@ -156,6 +157,29 @@ pub unsafe extern "C" fn resource_chain_find(
         node = (*node).next;
     }
     found
+}
+
+/// resource_chain_find_bitmap — original: `FUN_0827238c` @ 0x0827238c
+/// (16 bytes: 12 code + the 4-byte `"BMap"` literal @ 0x08272398;
+/// **46 `bl` + 2 `b` call sites**, binary-scanned by decoding every
+/// B/BL word in osos.dec — all 46 `bl` unconditional, the two `b` are
+/// tail calls @ 0x081eb070 and 0x081ed150. No DATA word in the image
+/// holds 0x0827238c, so it is never dispatched virtually).
+///
+/// Binds [`ResourceKind::BITMAP`] as the kind of [`resource_chain_find`]:
+/// looks the bitmap resource `id` up in the provider chain and returns
+/// the provider's raw pointer to it (NULL when no provider owns it).
+///
+/// Ghidra sizes this at 12 bytes, dropping the trailing literal word.
+/// The real extent runs to 0x0827239c, where the `"Str "` sibling's
+/// first instruction begins.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn resource_chain_find_bitmap(
+    head: *mut ResourceProvider,
+    id: u32,
+) -> *mut u8 {
+    resource_chain_find(head, ResourceKind::BITMAP, id)
 }
 
 /// resource_chain_find_string — original: `FUN_0827239c` @ 0x0827239c
@@ -426,6 +450,51 @@ mod tests {
         let mut chain = Chain::new(&[]);
         let head = chain.head();
         assert!(unsafe { resource_chain_find_string(head, 5) }.is_null());
+    }
+
+    #[test]
+    fn bitmap_thunk_binds_the_bmap_kind_and_forwards_the_id() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        let mut chain = Chain::new(&[Script::answers(0xb17a)]);
+        let head = chain.head();
+
+        let found = unsafe { resource_chain_find_bitmap(head, 0x1122_3344) };
+
+        assert_eq!(found as usize, 0xb17a);
+        assert_eq!(
+            chain.calls(),
+            [Call { provider: chain.node(0), kind: ResourceKind::BITMAP, id: 0x1122_3344 }]
+        );
+    }
+
+    #[test]
+    fn bitmap_thunk_on_an_empty_chain_returns_null() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        let mut chain = Chain::new(&[]);
+        let head = chain.head();
+        assert!(unsafe { resource_chain_find_bitmap(head, 5) }.is_null());
+    }
+
+    #[test]
+    fn the_two_thunks_bind_different_kinds() {
+        // The only difference between 0x0827238c and 0x0827239c is the
+        // literal they load into r1; a build that folded the two bodies
+        // onto one symbol would show up right here.
+        let _lock = TEST_LOCK.lock().unwrap();
+        let mut chain = Chain::new(&[Script::passes(), Script::passes()]);
+        let head = chain.head();
+
+        unsafe { resource_chain_find_bitmap(head, 1) };
+        let bitmap_kinds: Vec<ResourceKind> = chain.calls().iter().map(|c| c.kind).collect();
+
+        let mut chain = Chain::new(&[Script::passes(), Script::passes()]);
+        let head = chain.head();
+        unsafe { resource_chain_find_string(head, 1) };
+        let string_kinds: Vec<ResourceKind> = chain.calls().iter().map(|c| c.kind).collect();
+
+        assert_eq!(bitmap_kinds, [ResourceKind::BITMAP; 2]);
+        assert_eq!(string_kinds, [ResourceKind::STRING; 2]);
+        assert_ne!(ResourceKind::BITMAP, ResourceKind::STRING);
     }
 
     #[test]
