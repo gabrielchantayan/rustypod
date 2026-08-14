@@ -120,6 +120,36 @@ pub unsafe extern "C" fn pack_be32(dst: *mut u8, value: u32) {
     dst.add(3).write((reversed >> 24) as u8);
 }
 
+/// unpack_be32 — original: `FUN_08261770` @ 0x08261770 (32 bytes, all
+/// code: 7 instructions plus a tail branch; 60 `bl` call sites,
+/// binary-scanned).
+///
+/// Reads four big-endian bytes at `src` and returns them as a `u32`,
+/// needing no alignment.
+///
+/// The original gathers the bytes into a little-endian word (walking `src`
+/// with pre-indexed `ldrb`s) and then tail-branches to the private
+/// register-only byte reverse @ 0x082616d4; the port folds that reverse in,
+/// since LLVM inlines an equal-bodied leaf call anyway and there is no
+/// separate firmware entry point worth preserving here. The observable
+/// effect is identical to [`load_be32`], and the dedicated text section
+/// stops LLVM from merging the two onto one address.
+///
+/// Ghidra reports this function as 60 bytes, which runs 0x2c bytes past
+/// the tail branch at 0x0826178c and swallows the separately-linked 64-bit
+/// unpack that starts at 0x08261790. The 32-byte extent above is decoded
+/// from the raw words.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.unpack_be32")]
+#[inline(never)]
+pub unsafe extern "C" fn unpack_be32(src: *const u8) -> u32 {
+    let gathered = src.read() as u32
+        | (src.add(1).read() as u32) << 8
+        | (src.add(2).read() as u32) << 16
+        | (src.add(3).read() as u32) << 24;
+    gathered.swap_bytes()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,6 +283,63 @@ mod tests {
             }
             assert_eq!(packed, stored, "value={value:#010x}");
             assert_eq!(unsafe { load_be32(packed.as_ptr()) }, value);
+        }
+    }
+
+    /// The byte at the lowest address is the most significant — if the
+    /// folded-in `swap_bytes` were dropped, this would read 0x04030201.
+    #[test]
+    fn unpack_be32_reads_most_significant_byte_first() {
+        assert_eq!(unsafe { unpack_be32([1u8, 2, 3, 4].as_ptr()) }, 0x0102_0304);
+        assert_eq!(unsafe { unpack_be32([0xde, 0xad, 0xbe, 0xef].as_ptr()) }, 0xdead_beef);
+        assert_eq!(unsafe { unpack_be32([0, 0, 0, 1].as_ptr()) }, 1);
+        assert_eq!(unsafe { unpack_be32([0x80, 0, 0, 0].as_ptr()) }, 0x8000_0000);
+        assert_eq!(unsafe { unpack_be32([0, 0, 0, 0].as_ptr()) }, 0);
+        assert_eq!(unsafe { unpack_be32([0xff; 4].as_ptr()) }, u32::MAX);
+    }
+
+    /// Every misalignment, reading exactly the four bytes at the cursor and
+    /// nothing on either side — packet parsers call this mid-buffer.
+    #[test]
+    fn unpack_be32_reads_exactly_four_bytes_at_every_misalignment() {
+        let buf: [u8; 16] = core::array::from_fn(|i| (i as u8).wrapping_mul(37).wrapping_add(11));
+        for offset in 0..12usize {
+            let want =
+                u32::from_be_bytes([buf[offset], buf[offset + 1], buf[offset + 2], buf[offset + 3]]);
+            assert_eq!(unsafe { unpack_be32(buf.as_ptr().add(offset)) }, want, "offset={offset}");
+        }
+    }
+
+    /// The unpacker is the inverse of the packer over every single-byte
+    /// lane, and agrees with the independently ported load_be32.
+    #[test]
+    fn unpack_be32_inverts_pack_be32_and_agrees_with_load_be32() {
+        for value in [
+            0u32,
+            1,
+            0x0000_00ff,
+            0x0000_ff00,
+            0x00ff_0000,
+            0xff00_0000,
+            0x8000_0001,
+            0x1234_5678,
+            0xdead_beef,
+            u32::MAX,
+        ] {
+            for offset in 0..5usize {
+                let mut buf = [0xa5u8; 12];
+                unsafe { pack_be32(buf.as_mut_ptr().add(offset), value) };
+                assert_eq!(
+                    unsafe { unpack_be32(buf.as_ptr().add(offset)) },
+                    value,
+                    "value={value:#010x}, offset={offset}"
+                );
+                assert_eq!(
+                    unsafe { unpack_be32(buf.as_ptr().add(offset)) },
+                    unsafe { load_be32(buf.as_ptr().add(offset)) },
+                    "value={value:#010x}, offset={offset}"
+                );
+            }
         }
     }
 }
