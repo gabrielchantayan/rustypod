@@ -194,6 +194,49 @@ pub unsafe extern "C" fn usec_timer_read() -> u32 {
         read_usec_timer_counter()
     }
 }
+/// iram_usec_timer_read_veneer — original: `thunk_EXT_FUN_08037e20` @
+/// 0x08037e20 (Ghidra reports 4 bytes; the real stub is **8** — the
+/// `ldr pc, [pc, #-4]` word 0xe51ff004 at 0x08037e20 plus the absolute
+/// target word 0x22001edc at 0x08037e24, binary-decoded).
+///
+/// **47 `bl` call sites and 0 tail `b`** (all unconditional), counted by
+/// decoding every ARM `B`/`BL` word in `work/firmware/osos.dec` for every
+/// condition code and resolving its target — not a Ghidra xref count.
+///
+/// # The target resolves to the already-ported [`usec_timer_read`]
+///
+/// 0x22000000 is S5L8702 internal SRAM, populated from the osos image
+/// itself: the relocator @ 0x080046e0 memmoves 0xaed8 bytes from
+/// 0x08000000 to 0x22000000 (see `libc/iram_veneers.rs` for the full
+/// three-fact argument pinning that mirror). So IRAM 0x22001edc is osos
+/// 0x08001edc, which is `usec_timer_read` @ 0x08001edc — the three-word
+/// Timer E `TECNT` read (`ldr r0,[pc,#1260]; ldr r0,[r0,#0xb4]; bx lr`),
+/// already ported above. This veneer therefore calls it directly rather
+/// than re-stubbing it.
+///
+/// Note the mirror region holds three byte-identical 12-byte bodies at
+/// 0x08001ec4, 0x08001ed0 and 0x08001edc; the veneer table entry names
+/// the third, and only that one has a `names.yaml` identity.
+///
+/// # What the veneer does
+///
+/// Nothing but transfer control: no arguments, no stack, `lr` still points
+/// at the caller, so it is exactly a tail call returning the counter word
+/// in r0. As with the block-memory veneers the callee is loaded through
+/// `read_volatile`: written as a plain call LLVM would inline the
+/// three-instruction body, and since the two bodies would then be
+/// byte-identical its identical-function folding would collapse the veneer
+/// onto `usec_timer_read` — destroying the separate 0x08037e20 hook seam
+/// that is this port's entire purpose. The distinct `link_section` guards
+/// the same invariant at link time.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.iram_usec_timer_read_veneer")]
+#[inline(never)]
+pub unsafe extern "C" fn iram_usec_timer_read_veneer() -> u32 {
+    let body = core::ptr::read_volatile(&(usec_timer_read as unsafe extern "C" fn() -> u32));
+    body()
+}
+
 /// usec_timer_elapsed — original: `FUN_08001ee8` @ 0x08001ee8 (28 bytes).
 /// Reference: `ipod-decomp/decomp/c/000/08001ee8_FUN_08001ee8.c` and
 /// `ipod-decomp/decomp/osos.asm` @ 0x08001ee8..0x08001efc.
@@ -355,6 +398,50 @@ mod usec_timer_tests {
         // and at +10 it succeeds.
         assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 3);
         assert_eq!(HOST_USEC_TIMER_COUNT.load(Ordering::Relaxed), 1_015);
+    }
+
+    /// The IRAM veneer @ 0x08037e20 must be behaviorally transparent: the
+    /// same counter word `usec_timer_read` @ 0x08001edc returns, including
+    /// the wrap-around extremes callers subtract across.
+    #[test]
+    fn iram_veneer_returns_the_same_counter_word_as_the_body() {
+        let _guard = configure_usec_timer(0, 0);
+
+        for count in [0, 1, 0x1234_5678, u32::MAX - 1, u32::MAX] {
+            HOST_USEC_TIMER_COUNT.store(count, Ordering::Relaxed);
+            assert_eq!(unsafe { iram_usec_timer_read_veneer() }, count);
+            assert_eq!(unsafe { usec_timer_read() }, count);
+        }
+    }
+
+    /// The veneer performs exactly one counter read — it forwards, it does
+    /// not re-read or cache.
+    #[test]
+    fn iram_veneer_reads_the_counter_exactly_once_per_call() {
+        let _guard = configure_usec_timer(1_000, 7);
+
+        assert_eq!(unsafe { iram_usec_timer_read_veneer() }, 1_000);
+        assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 1);
+        assert_eq!(unsafe { iram_usec_timer_read_veneer() }, 1_007);
+        assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 2);
+    }
+
+    /// The whole point of the port is that a hook at 0x08037e20 lands on a
+    /// forwarding stub distinct from the body at 0x08001edc. Identical
+    /// three-instruction bodies are exactly what LLVM's identical-function
+    /// folding collapses, so assert the two symbols stay apart.
+    #[test]
+    fn iram_veneer_is_a_distinct_call_target_from_its_body() {
+        let (veneer, body) = unsafe {
+            (
+                core::ptr::read_volatile(
+                    &(iram_usec_timer_read_veneer as unsafe extern "C" fn() -> u32),
+                ),
+                core::ptr::read_volatile(&(usec_timer_read as unsafe extern "C" fn() -> u32)),
+            )
+        };
+        assert_ne!(veneer as usize, 0);
+        assert_ne!(veneer as usize, body as usize);
     }
 }
 

@@ -30432,3 +30432,33 @@ functions:
       registers; the no-argument ABI and return_zero name therefore express
       the entire observed behavior. No deviations; focused host tests assert
       the zero word and its all-clear bit representation.
+
+  # --- IRAM veneer for the microsecond timer read ---
+  - address: 0x08037e20
+    ghidra: thunk_EXT_FUN_08037e20
+    name: iram_usec_timer_read_veneer
+    size: 8
+    sig: "u32 iram_usec_timer_read_veneer(void)"
+    module: drivers/timer
+    status: ported
+    notes: >-
+      ldr pc,[pc,#-4] -> 0x22001edc = the IRAM copy of usec_timer_read @
+      0x08001edc (the three-word Timer E TECNT read). Ghidra reports 4
+      bytes; the stub is 8 (0xe51ff004 at 0x08037e20 + the target word
+      0x22001edc at 0x08037e24). 47 bl call sites, all unconditional, and
+      0 tail b - binary-verified by decoding every B/BL word in osos.dec
+      for every condition code, not from Ghidra xrefs. The mirror
+      0x2200XXXX = osos 0x0800XXXX holds because the relocator @
+      0x080046e0 memmoves 0xaed8 bytes from 0x08000000 to 0x22000000
+      (S5L8702 internal SRAM, not mask ROM), so the body is recoverable
+      and is ALREADY PORTED - this is a real forwarding call, not a stub.
+      No arguments, no stack, lr untouched: a pure tail transfer returning
+      the counter word in r0. The port loads its callee through
+      read_volatile and carries its own link_section; without either,
+      LLVM inlines the three-instruction body and its identical-function
+      folding collapses the veneer onto usec_timer_read, destroying the
+      separate 0x08037e20 hook seam. Note the mirror region holds three
+      byte-identical 12-byte bodies at 0x08001ec4/0x08001ed0/0x08001edc;
+      the veneer names the third. match.py structural: ldr/ldr/bx through
+      a literal - the original's indirect-jump-through-a-literal shape
+      plus one indirection and the crate's fp frame.
