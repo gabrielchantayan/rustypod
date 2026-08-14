@@ -21,7 +21,10 @@
 
 extern crate std;
 
-/// Fixture base addresses, one per module.
+/// Fixture base addresses, one per mapping site — not merely one per
+/// module. [`try_map_u32_slab`] never unmaps, so two tests in the SAME
+/// module that share a hint collide exactly like two modules would: the
+/// second one to run finds the region occupied and skips.
 ///
 /// These MUST be unique. A duplicate does not fail loudly — the second
 /// module to map simply gets some other address, which on a 64-bit host is
@@ -48,6 +51,7 @@ pub mod hints {
     pub const ELEMENT_REFERENCE: usize = 0x1200_0000;
     pub const VTABLE_SET_ITERATOR: usize = 0x1300_0000;
     pub const OBSERVABLE_ARRAY: usize = 0x1400_0000;
+    pub const OBSERVABLE_ARRAY_DRAIN: usize = 0x1500_0000;
     // `heap/pool.rs` maps its own arena at 0x0800_0000 through a separate
     // path: it needs only bit 31 clear, not full u32 addressability.
 }

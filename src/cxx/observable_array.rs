@@ -629,8 +629,12 @@ mod tests {
         // No detach recorder here: this is the DEFAULT seam, and a no-op
         // default would hang instead of returning.
         let _lock = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // Its own hint: the drain test above already holds OBSERVABLE_ARRAY
+        // for the life of the process, and a shared hint would send this
+        // mapping above 4 GiB and skip the one test that proves the wired
+        // default terminates.
         let slab = match crate::testing::try_map_u32_slab(
-            crate::testing::hints::OBSERVABLE_ARRAY,
+            crate::testing::hints::OBSERVABLE_ARRAY_DRAIN,
             NODES * NODE_WORDS * 4,
         ) {
             Some(slab) => slab,
