@@ -193,6 +193,27 @@ pub extern "C" fn reverse_bytes64(value: u64) -> u64 {
     value.swap_bytes()
 }
 
+/// unpack_be16 — original: `FUN_08261750` @ 0x08261750 (32 bytes, all
+/// code: 7 instructions plus `bx lr`; 35 `bl` call sites, counted by
+/// decoding every B/BL word in osos.dec).
+///
+/// Reads two big-endian bytes at `src` and returns them as a `u16`,
+/// needing no alignment. The read twin of [`pack_be16`].
+///
+/// The original gathers the two bytes into a little-endian halfword and
+/// then reverses it inline (`lsl #24; lsr #16` for the low lane, `orr` of
+/// `gathered & 0xff00` shifted right 8) rather than branching to
+/// [`reverse_bytes32`] the way the wider unpacks do; the result is
+/// zero-extended into the return register. Its own text section keeps it
+/// off the other unpackers' symbols.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.unpack_be16")]
+#[inline(never)]
+pub unsafe extern "C" fn unpack_be16(src: *const u8) -> u16 {
+    let gathered = src.read() as u16 | (src.add(1).read() as u16) << 8;
+    gathered.swap_bytes()
+}
+
 /// unpack_be32 — original: `FUN_08261770` @ 0x08261770 (32 bytes, all
 /// code: 7 instructions plus a tail branch; 60 `bl` call sites,
 /// binary-scanned).
@@ -440,6 +461,32 @@ mod tests {
         for lane in 0..8 {
             let value = 0xa5u64 << (8 * lane);
             assert_eq!(reverse_bytes64(value), 0xa5u64 << (8 * (7 - lane)), "lane={lane}");
+        }
+    }
+
+    /// Reads exactly the two bytes at the cursor, most significant first,
+    /// at every misalignment, and inverts `pack_be16`.
+    #[test]
+    fn unpack_be16_reads_exactly_two_big_endian_bytes() {
+        assert_eq!(unsafe { unpack_be16([0x12u8, 0x34].as_ptr()) }, 0x1234);
+        assert_eq!(unsafe { unpack_be16([0u8, 0].as_ptr()) }, 0);
+        assert_eq!(unsafe { unpack_be16([0u8, 1].as_ptr()) }, 1);
+        assert_eq!(unsafe { unpack_be16([0x80u8, 0].as_ptr()) }, 0x8000);
+        assert_eq!(unsafe { unpack_be16([0x7fu8, 0xff].as_ptr()) }, 0x7fff);
+        assert_eq!(unsafe { unpack_be16([0xffu8, 0xff].as_ptr()) }, u16::MAX);
+
+        let buf: [u8; 10] = core::array::from_fn(|i| (i as u8).wrapping_mul(53).wrapping_add(7));
+        for offset in 0..9usize {
+            let want = u16::from_be_bytes([buf[offset], buf[offset + 1]]);
+            assert_eq!(unsafe { unpack_be16(buf.as_ptr().add(offset)) }, want, "offset={offset}");
+        }
+
+        for value in [0u16, 1, 0x00ff, 0xff00, 0x8001, 0x1234, u16::MAX] {
+            for offset in 0..4usize {
+                let mut packet = [0xa5u8; 8];
+                unsafe { pack_be16(packet.as_mut_ptr().add(offset), value) };
+                assert_eq!(unsafe { unpack_be16(packet.as_ptr().add(offset)) }, value);
+            }
         }
     }
 

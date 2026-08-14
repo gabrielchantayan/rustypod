@@ -30275,6 +30275,36 @@ functions:
       diff reviewed - LLVM picks the ror idiom, drops the dead lanes, and
       adds the crate-wide push {fp, lr} frame.
 
+  - address: 0x08261750
+    ghidra: FUN_08261750
+    name: unpack_be16
+    size: 32
+    sig: "u16 unpack_be16(const u8 *src)"
+    module: util/beload
+    status: ported
+    renames:
+      param_1/r0: src
+      uVar1/r1: gathered
+    notes: >-
+      Reads two big-endian bytes at an unaligned src and returns them as a
+      u16 - the read twin of pack_be16 @ 0x0826161c. 32 bytes, 8
+      instructions, 0x08261750..0x0826176c ending in bx lr; the next
+      function (unpack_be32) starts at 0x08261770, extent decoded from the
+      raw words rather than taken from Ghidra. 35 bl call sites, counted by
+      decoding every B/BL word in osos.dec. Algorithm - gather src[0] and
+      src[1] into a little-endian halfword, then reverse it inline (lsl #24
+      then lsr #16 for the low lane, orr of gathered & 0xff00 shifted right
+      8) instead of branching to reverse_bytes32 the way the 32- and 64-bit
+      unpacks do; the result is zero-extended into the return register.
+      Kept in its own text section so LLVM cannot fold it onto another
+      unpacker. Deviation - LLVM collapses gather-then-reverse into the
+      single orr r0, r0, r1, lsl #8 over the two ldrb, which is bit-exactly
+      the same zero-extended result. Host tests cover misalignments 0..8,
+      the 0 / 1 / 0x7fff / 0x8000 / 0xffff boundaries, and round trips
+      through pack_be16 at every offset. match.py structural diff reviewed
+      - two ldrb with the low address supplying the most significant byte,
+      plus the crate-wide push {fp, lr} frame.
+
   - address: 0x08261770
     ghidra: FUN_08261770
     name: unpack_be32
