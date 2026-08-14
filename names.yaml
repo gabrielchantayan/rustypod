@@ -23652,6 +23652,76 @@ functions:
       bl/ldr-literal/str/mov#0/three-str body, differing only by the
       crate's fp frame and the literal being emitted after the body.
 
+  - address: 0x08271d2c
+    ghidra: FUN_08271d2c
+    name: observable_array_destruct
+    size: 92
+    sig: "ObservableArray *observable_array_destruct(ObservableArray *this)"
+    module: cxx/observable_array
+    vars: {param_1: this, DAT_08271d84: OBSERVABLE_ARRAY_VTABLE, FUN_082a4ccc: OBSERVABLE_ARRAY_NOTIFY, FUN_08271724: OBSERVABLE_ARRAY_DETACH_OBSERVER, FUN_0802edc8: free}
+    status: ported
+    notes: >-
+      The destructor of cxx/observable_array's class, the mirror of
+      observable_array_construct @ 0x08271cec.
+      EXTENT - Ghidra's 88 is WRONG, it drops the trailing literal-pool
+      word. Binary-verified from osos.dec - 88 bytes of code
+      (0x08271d2c..0x08271d80) plus the 4-byte vtable literal 0x089a5d0c
+      @ 0x08271d84, and the next function starts at 0x08271d88
+      (`push {r4, r5, r6, lr}`), so the true extent is 92.
+      CALL SITES - 60 `bl` and 42 `b`, 102 total, binary-scanned by
+      decoding every B/BL word in osos.dec. The 42 tail-branches are
+      derived-class destructors chaining into their base.
+      BODY - re-plant vtable 0x089a5d0c at +0x00; notify(this, 0) via
+      0x082a4ccc over the still-intact observer list; drain
+      `while ((head = this[+0x0c])) detach(this, head)` via 0x08271724;
+      `if (this[+0x08]) free(this[+0x08])` via 0x0802edc8; zero +0x04 and
+      +0x08; return this. The +0x0c word is never explicitly zeroed - the
+      loop only exits once it is already 0 - and the vtable word is left
+      planted.
+      GHIDRA IS WRONG TWICE MORE, both load-bearing.
+      decomp/c/026/08271d2c_FUN_08271d2c.c renders the free as
+      `FUN_0802edc8()` with NO argument (the real `ldr r0,[r4,#8]; cmp
+      r0,#0; blne 0x0802edc8` passes the element buffer), and renders the
+      drain as `FUN_08271724(param_1)` with ONE argument when r1 is live
+      across the loop - the `ldr r1,[r4,#0xc]` that tests the loop
+      condition IS the next iteration's second argument, so the call is
+      detach(this, head).
+      The tail `b 0x08275bc8` into the root destructor is binary-verified
+      a bare `bx lr` (already recorded from framework_object_construct's
+      side), i.e. the identity on r0, so the port models it as the plain
+      `return this` it is with no call. Callers depend on that return -
+      the 42 `b` sites are derived destructors tail-chaining, and several
+      `bl` sites feed r0 straight into operator_delete.
+      SEAMS - 0x082a4ccc (broadcast, its own callee 0x08155d30 unported)
+      rides OBSERVABLE_ARRAY_NOTIFY with a no-op default; 0x0802edc8 rides
+      OBSERVABLE_ARRAY_FREE wired to the PORTED free in runtime/malloc_rt
+      (indirected only so host tests can watch the pointer without routing
+      a fixture address into the firmware heap - the SHUTDOWN_FREE /
+      STDIO_FREE precedent). 0x08271724 rides OBSERVABLE_ARRAY_DETACH_OBSERVER
+      whose default is NOT a no-op and must not be - this call site always
+      passes the current head, so the only branch of 0x08271724 it can
+      reach is the head match `owner[+0x0c] = target[+0x10]`, and that
+      store is what makes the drain terminate; a no-op default would hang
+      on any non-empty list. NOTE - this names.yaml records 0x08271724 as
+      `iterator_state_release`, status ported, module app/vtable_set, but
+      NO such function exists in the tree at origin/master (49a7a00); only
+      app/vtable_set's no-op ITERATOR_STATE_RELEASE seam. The entry is
+      ahead of the code.
+      TESTS - 5 host tests, trace-based so the ORDER is proved, not just
+      the effects - empty array (broadcast sees the vtable already
+      re-planted, reason 0, nothing freed, guards intact), nonzero storage
+      handed to free then cleared, NULL storage skipping the call
+      entirely, a three-node chain drained head-first between the
+      broadcast and the free, and the WIRED default draining a one-node
+      list without hanging. Observer nodes live in a sub-4-GiB slab
+      (testing::hints::OBSERVABLE_ARRAY, new).
+      Deviations - none behaviorally. match.py structural - same
+      register allocation (r4 = this), same `ldr r1,[r4,#0xc]; cmp r1,#0`
+      drain, same `ldr r0,[r4,#8]; cmp r0,#0` free guard, same
+      `mov r0,#0` / two stores / `mov r0,r4` epilogue, same vtable
+      literal; differing only by the crate's fp frame and by the three
+      seam calls being `blx` through a static instead of direct `bl`.
+
   - address: 0x08275bb8
     ghidra: FUN_08275bb8
     name: framework_object_construct
@@ -23679,6 +23749,84 @@ functions:
       three instructions would be pure ceremony. Deviations - none.
       match.py structural - same ldr-literal/str body plus the crate's fp
       frame, with the literal after the body.
+
+  # --- C++ layer bit set / character set (0x082746f4..0x082748d8) ---
+  #
+  # Six consecutive unnamed functions describe one 16-byte class: +0x00 a
+  # bit capacity, +0x04 a running cardinality, +0x08 heap storage of
+  # ((bits + 31) >> 5) u32 words, +0x0c an allocator tag byte.
+  #   0x08274834  ctor(this, bit_capacity, tag) - sizes the buffer at
+  #               ((bits + 31) >> 5) * 4, mallocs via 0x080eb67c with the
+  #               tag, stores +0x08/+0x00/+0x0c, then clears
+  #   0x082747b8  clear-all - memzero (0x08037db8) the same span, +0x04 = 0
+  #   0x082747e4  copy ctor - copies +0x00/+0x04/+0x0c, fresh buffer,
+  #               memcpy (0x08037df8) the span
+  #   0x08274874  dtor - `if (words && tag != 0x3a) free_wrapper(words, 0)`,
+  #               returns this; 0x3a marks borrowed storage
+  #   0x082a4ef8  test(this, word_index, bit_index) - index arrives
+  #               PRE-SPLIT; `ldr [words, word << 2]; ands #1 << bit`
+  #   0x082746f4  write(this, bit, value) - splits bit, early-outs when the
+  #               bit already matches, else steps +0x04 by +-1 and ORs/XORs
+  # Indexing it by codepoint is what makes it a character set: the ported
+  # 0x0827489c below is the keyboards' allowed-character-set builder.
+
+  - address: 0x0827489c
+    ghidra: FUN_0827489c
+    name: bit_set_insert_utf8
+    size: 64
+    sig: "BitSet *bit_set_insert_utf8(BitSet *set, const char *text)"
+    module: cxx/bit_set
+    vars: {param_1: set, param_2: text, local_c: cursor, iVar1: codepoint, FUN_08276214: utf8_next_codepoint, FUN_082746f4: BIT_SET_WRITE}
+    status: ported
+    notes: >-
+      Walks `text` as UTF-8 and sets the bit named by each codepoint,
+      i.e. builds a CHARACTER SET out of a string.
+      EXTENT - 64 bytes, 0x0827489c..0x082748d8, binary-verified from
+      osos.dec; the next function starts at 0x082748dc
+      (`push {r4, r5, r6, r7, r8, lr}`) and there is no trailing literal
+      pool, so Ghidra's size is right for once.
+      CALL SITES - 53 `bl` and 0 `b`, binary-scanned by decoding every
+      B/BL word in osos.dec.
+      BODY - `push {r0, r1, r4, lr}` is the ADS "give this argument an
+      address" idiom - it spills `text` so `add r0, sp, #4` can hand the
+      decoder a char** cursor to advance in place; the matching
+      `pop {r2, r3, r4, pc}` throws both slots away (r2/r3 are
+      call-clobbered, so those are stack adjustment, not values). Then
+      `if (text == 0) return this;` and
+      `while ((cp = utf8_next_codepoint(&cursor))) write(set, cp, 1);`,
+      returning this via `mov r0, r4`. The write's third argument is
+      always `mov r2, #1`, so this can only ADD characters to a set.
+      IDENTIFICATION - the class comes from the five siblings listed in
+      the block comment above, not from this function. The call sites
+      confirm the role - of the 53, the two whose argument is a string
+      constant pass "0123456789" (0x08297808 from 0x08297754 and
+      0x08299b1c from 0x08299840, both text-input UI), and 0x081f99e8
+      feeds it the result of string_object_c_str @ 0x082a50b0. These are
+      the on-screen keyboards' allowed-character sets.
+      CALLEES - utf8_next_codepoint @ 0x08276214 is already ported
+      (cxx/string_object) and is called DIRECTLY. 0x082746f4 is unported
+      (its own callee 0x082a4ef8 dereferences the storage word) and rides
+      the BIT_SET_WRITE seam with a no-op default; nothing in this
+      function's control flow depends on the write's effects.
+      INHERITED EDGES, both from the decoder - a 0xf0..0xff or invalid
+      lead byte makes utf8_next_codepoint consume three bytes and return
+      0, which this loop cannot distinguish from the terminator, so an
+      astral-plane character truncates the insert; and codepoint 0 can
+      never be inserted.
+      TESTS - 6 host tests over a recording seam - NULL text (the entry
+      guard keeps the decoder from ever seeing NULL), empty string,
+      the "0123456789" literal from the real call sites (one write per
+      character, value 1, `set` passed through unchanged), mixed
+      1/2/3-byte sequences decoded as single codepoints, a 4-byte lead
+      truncating the walk, and a repeated character written every time
+      (the dedupe lives in 0x082746f4's early-out, not here).
+      Deviations - none. match.py structural - same `mov r4, r0`, NULL
+      guard, `add r0, sp, #4` cursor, decoder call, `cmp r0, #0`, the
+      `mov r1, r0; mov r0, r4; mov r2, #1` write and the `mov r0, r4`
+      return; differing by the crate's fp frame, the guard testing r1
+      before the spill instead of after (LLVM keeps the argument in a
+      register), the write being `blx` through the seam static, and the
+      loop rotated so the first decode is peeled.
 
   # --- C++ layer owner-tracked mutex (0x082e8390 / 0x082e83d8) ---
   #
