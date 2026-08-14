@@ -150,6 +150,28 @@ pub extern "C" fn reverse_bytes32(value: u32) -> u32 {
     value.swap_bytes()
 }
 
+/// reverse_bytes64 — original: `FUN_082616f0` @ 0x082616f0 (96 bytes, all
+/// code: 23 instructions plus `bx lr`; 1 `bl` call site from [`pack_be64`]
+/// @ 0x08261680 plus the tail `b` from [`unpack_be64`] @ 0x082617e8,
+/// counted by decoding every B/BL word in osos.dec).
+///
+/// Returns `value` with its eight bytes reversed: the 64-bit twin of
+/// [`reverse_bytes32`], and the only reverser the 64-bit pair uses.
+///
+/// The original takes the doubleword in `r0`/`r1` and returns
+/// `(reverse_bytes32(hi), reverse_bytes32(lo))` — each half reversed and
+/// the two halves swapped. It open-codes the swap as a mask/shift chain
+/// over the whole 64-bit value, which leaves four provably-zero lane terms
+/// in the instruction stream (`(lo & 0xff0000) << 24`, `(hi & 0xff) >> 8`
+/// and friends); those are dead in the original and are simply not written
+/// here. Its own text section keeps it off the other reversers' symbols.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.reverse_bytes64")]
+#[inline(never)]
+pub extern "C" fn reverse_bytes64(value: u64) -> u64 {
+    value.swap_bytes()
+}
+
 /// unpack_be32 — original: `FUN_08261770` @ 0x08261770 (32 bytes, all
 /// code: 7 instructions plus a tail branch; 60 `bl` call sites,
 /// binary-scanned).
@@ -346,6 +368,36 @@ mod tests {
         let gathered = u32::from_le_bytes(buf);
         assert_eq!(reverse_bytes32(gathered), 0xdead_beef);
         assert_eq!(reverse_bytes32(gathered), unsafe { unpack_be32(buf.as_ptr()) });
+    }
+
+    /// The 64-bit reverse is exactly "reverse each half, then swap the
+    /// halves" — the decomposition the original's register pair encodes,
+    /// and the one a half-swapped port would get subtly wrong.
+    #[test]
+    fn reverse_bytes64_reverses_each_half_and_swaps_them() {
+        assert_eq!(reverse_bytes64(0x0102_0304_0506_0708), 0x0807_0605_0403_0201);
+        assert_eq!(reverse_bytes64(0), 0);
+        assert_eq!(reverse_bytes64(1), 0x0100_0000_0000_0000);
+        assert_eq!(reverse_bytes64(0x7fff_ffff_ffff_ffff), 0xffff_ffff_ffff_ff7f);
+        assert_eq!(reverse_bytes64(u64::MAX), u64::MAX);
+
+        for value in [0u64, 1, 0x8000_0000, 0x0000_0001_0000_0000, 0xdead_beef_cafe_f00d, u64::MAX]
+        {
+            let (lo, hi) = (value as u32, (value >> 32) as u32);
+            let expect = (reverse_bytes32(lo) as u64) << 32 | reverse_bytes32(hi) as u64;
+            assert_eq!(reverse_bytes64(value), expect, "value={value:#018x}");
+            assert_eq!(reverse_bytes64(reverse_bytes64(value)), value);
+        }
+    }
+
+    /// Every single-byte lane travels to its mirror; a port that reversed
+    /// only within each half would pass the all-ones cases and fail here.
+    #[test]
+    fn reverse_bytes64_mirrors_every_lane() {
+        for lane in 0..8 {
+            let value = 0xa5u64 << (8 * lane);
+            assert_eq!(reverse_bytes64(value), 0xa5u64 << (8 * (7 - lane)), "lane={lane}");
+        }
     }
 
     /// The byte at the lowest address is the most significant — if the

@@ -30204,6 +30204,44 @@ functions:
       LLVM picks the ror idiom over the mask/orr chain and adds the
       crate-wide push {fp, lr} frame.
 
+  - address: 0x082616f0
+    ghidra: FUN_082616f0
+    name: reverse_bytes64
+    size: 96
+    sig: "u64 reverse_bytes64(u64 value)"
+    module: util/beload
+    status: ported
+    renames:
+      param_1/r0: value_lo
+      param_2/r1: value_hi
+      uVar1/r2: saved_hi
+      uVar2/r3: reversed_hi
+      uVar3/r12: lane
+    notes: >-
+      Register-only byte reverse of a 64-bit value - the 64-bit twin of
+      reverse_bytes32 @ 0x082616d4 and the only reverser the 64-bit
+      pack/unpack pair uses. 96 bytes, 24 instructions,
+      0x082616f0..0x0826174c ending in bx lr; the next function
+      (unpack_be16) starts at 0x08261750, extent decoded from the raw words
+      rather than taken from Ghidra. 1 bl call site (pack_be64 @
+      0x08261680) plus the tail b from unpack_be64 @ 0x082617e8, counted by
+      decoding every B/BL word in osos.dec. ABI - doubleword in r0 (low
+      word) / r1 (high word), returned the same way. Algorithm - returns
+      (reverse_bytes32(hi), reverse_bytes32(lo)): each half byte-reversed
+      and the two halves swapped. Deviation - the original open-codes the
+      swap as a mask/shift chain over the whole 64-bit value and so emits
+      four provably-zero lane terms ((lo & 0xff0000) << 24, (lo &
+      0xff000000) << 8, (hi & 0xff) >> 8, (hi & 0xff00) >> 24); those are
+      dead in the original and are not written in the port, which is why it
+      is 12 instructions to the original's 24. Kept in its own text section
+      so LLVM cannot fold it onto another member of the family. Host tests
+      mirror every one of the eight single-byte lanes (a port that reversed
+      only within each half fails there while still passing the all-ones
+      cases), prove the transform is its own inverse, and cross-check the
+      half-swap decomposition against reverse_bytes32. match.py structural
+      diff reviewed - LLVM picks the ror idiom, drops the dead lanes, and
+      adds the crate-wide push {fp, lr} frame.
+
   - address: 0x08261770
     ghidra: FUN_08261770
     name: unpack_be32
