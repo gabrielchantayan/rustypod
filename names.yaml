@@ -30206,6 +30206,47 @@ functions:
       picks the ror idiom over the mask/orr chain, and emits the same
       crate-wide push {fp, lr} frame the accepted store_be32 port has.
 
+  - address: 0x08261670
+    ghidra: FUN_08261670
+    name: pack_be64
+    size: 100
+    sig: "void pack_be64(u8 *dst, u64 value)"
+    module: util/beload
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r2: value_lo
+      param_3/r3: value_hi
+      uVar1/r0+r1: reversed
+      uVar2/r12: lane
+      uVar3/r2: cursor
+    notes: >-
+      Writes value as eight big-endian bytes at an unaligned dst - the
+      widest member of the pack overload set. 100 bytes, 25 instructions,
+      0x08261670..0x082616d0 from push {r4, lr} to pop {r4, pc}; the next
+      function (reverse_bytes32) starts at 0x082616d4, extent decoded from
+      the raw words rather than taken from Ghidra. 5 bl call sites, counted
+      by decoding every B/BL word in osos.dec. ABI - dst in r0, the
+      doubleword in the r2/r3 pair, exactly what AAPCS gives
+      pack_be64(u8*, u64). Algorithm - same two-step shape as pack_be32,
+      but the doubleword reverse is too large to inline, so it moves the
+      value into r0/r1 and calls reverse_bytes64 @ 0x082616f0 with a real
+      bl, then spills the reversed doubleword's eight bytes
+      least-significant first to ascending addresses (dst[0] receives
+      value >> 56). The port keeps that call rather than folding the
+      reverse in, which is why reverse_bytes64 carries #[inline(never)].
+      Deviation - the spill is unrolled so LLVM's loop-idiom pass cannot
+      rewrite it into a memcpy that does not exist on the target, and LLVM
+      addresses dst with constant offsets instead of the original's
+      pre-indexed strb walk. Kept in its own text section so LLVM cannot
+      fold it onto another packer. Host tests cover the eight boundary
+      values and all eight single-byte lanes at misalignments 0..7, guard
+      the untouched neighbouring bytes, and assert the high word lands at
+      the low addresses (the transposition a half-swapped doubleword would
+      produce). match.py structural diff reviewed - save dst, move the
+      value into the argument pair, bl the reverser, eight strb; the frame
+      is the crate-wide push, widened to {r4, sl, fp, lr}.
+
   - address: 0x082616d4
     ghidra: FUN_082616d4
     name: reverse_bytes32

@@ -149,6 +149,37 @@ pub unsafe extern "C" fn pack_be32(dst: *mut u8, value: u32) {
     dst.add(3).write((reversed >> 24) as u8);
 }
 
+/// pack_be64 — original: `FUN_08261670` @ 0x08261670 (100 bytes, all code:
+/// 24 instructions between `push {r4, lr}` and `pop {r4, pc}`; 5 `bl` call
+/// sites, counted by decoding every B/BL word in osos.dec).
+///
+/// Writes `value` as eight big-endian bytes at `dst`, needing no
+/// alignment. The widest member of the pack overload set.
+///
+/// Same two-step shape as [`pack_be32`], except that the doubleword
+/// reverse is too large to inline, so the original moves the value from
+/// its `r2`/`r3` argument pair into `r0`/`r1` and calls
+/// [`reverse_bytes64`] with a real `bl` before spilling the eight
+/// least-significant-first bytes to ascending addresses. The port keeps
+/// that call — hence `#[inline(never)]` on the reverser — and unrolls the
+/// spill so LLVM's loop-idiom pass cannot rewrite it into a `memcpy` that
+/// does not exist on the target. Its own text section keeps it off the
+/// other packers' symbols.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.pack_be64")]
+#[inline(never)]
+pub unsafe extern "C" fn pack_be64(dst: *mut u8, value: u64) {
+    let reversed = reverse_bytes64(value);
+    dst.write(reversed as u8);
+    dst.add(1).write((reversed >> 8) as u8);
+    dst.add(2).write((reversed >> 16) as u8);
+    dst.add(3).write((reversed >> 24) as u8);
+    dst.add(4).write((reversed >> 32) as u8);
+    dst.add(5).write((reversed >> 40) as u8);
+    dst.add(6).write((reversed >> 48) as u8);
+    dst.add(7).write((reversed >> 56) as u8);
+}
+
 /// reverse_bytes32 — original: `FUN_082616d4` @ 0x082616d4 (28 bytes, all
 /// code: 6 instructions plus `bx lr`; 2 `bl` call sites plus the tail `b`
 /// from [`unpack_be32`] @ 0x0826178c, counted by decoding every B/BL word
@@ -488,6 +519,47 @@ mod tests {
                 assert_eq!(unsafe { unpack_be16(packet.as_ptr().add(offset)) }, value);
             }
         }
+    }
+
+    /// Eight bytes, most significant at the lowest address, at every
+    /// misalignment, with the neighbouring packet bytes untouched. The
+    /// single-byte lanes are what catch a half-swapped doubleword.
+    #[test]
+    fn pack_be64_writes_exactly_eight_big_endian_bytes() {
+        let boundaries = [
+            0u64,
+            1,
+            0x7fff_ffff,
+            0xffff_ffff,
+            0x0000_0001_0000_0000,
+            0x7fff_ffff_ffff_ffff,
+            0x0102_0304_0506_0708,
+            u64::MAX,
+        ];
+        let lanes: [u64; 8] = core::array::from_fn(|lane| 0xa5u64 << (8 * lane));
+
+        for value in boundaries.into_iter().chain(lanes) {
+            for offset in 0..8usize {
+                let mut actual = [0x5au8; 24];
+                let mut expected = actual;
+                expected[offset..offset + 8].copy_from_slice(&value.to_be_bytes());
+
+                unsafe { pack_be64(actual.as_mut_ptr().add(offset), value) };
+
+                assert_eq!(actual, expected, "value={value:#018x}, offset={offset}");
+            }
+        }
+    }
+
+    /// The two halves must not be transposed: the low word of the value
+    /// belongs at the *high* addresses.
+    #[test]
+    fn pack_be64_puts_the_high_word_at_the_low_addresses() {
+        let mut buf = [0u8; 8];
+        unsafe { pack_be64(buf.as_mut_ptr(), 0xdead_beef_cafe_f00d) };
+        assert_eq!(buf, [0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe, 0xf0, 0x0d]);
+        assert_eq!(unsafe { unpack_be32(buf.as_ptr()) }, 0xdead_beef);
+        assert_eq!(unsafe { unpack_be32(buf.as_ptr().add(4)) }, 0xcafe_f00d);
     }
 
     /// The byte at the lowest address is the most significant — if the
