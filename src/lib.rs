@@ -30,6 +30,7 @@ pub mod testing;
 
 pub mod app;
 pub mod codegen;
+pub mod crypto;
 pub mod cxx;
 pub mod drivers;
 pub mod fp;
