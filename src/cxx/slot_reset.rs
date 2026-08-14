@@ -17,6 +17,23 @@ pub unsafe extern "C" fn reset_u32_slot(slot: *mut u32) {
     slot.write(0);
 }
 
+/// reset_u32_slot_alias_08027c88 — original: `FUN_08027c88` @ 0x08027c88
+/// (12 bytes).
+///
+/// Source: `ipod-decomp/decomp/c/001/08027c88_FUN_08027c88.c`.
+///
+/// Byte-identical retailOS alias of [`reset_u32_slot`]: clears exactly one
+/// aligned, writable 32-bit state slot through the first ARM argument (`r0`).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(
+    target_os = "none",
+    unsafe(link_section = ".text.reset_u32_slot_alias_08027c88")
+)]
+#[inline(never)]
+pub unsafe extern "C" fn reset_u32_slot_alias_08027c88(slot: *mut u32) {
+    slot.write(0);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -41,5 +58,20 @@ mod tests {
         assert_eq!(state.slot, 0);
         assert_eq!(state.before, 0x1122_3344);
         assert_eq!(state.after, 0x5566_7788);
+    }
+
+    #[test]
+    fn alias_clears_only_its_target_word() {
+        let mut state = GuardedSlot {
+            before: 0xdead_beef,
+            slot: 0xfeed_face,
+            after: 0xc001_d00d,
+        };
+
+        unsafe { reset_u32_slot_alias_08027c88(&mut state.slot) };
+
+        assert_eq!(state.slot, 0);
+        assert_eq!(state.before, 0xdead_beef);
+        assert_eq!(state.after, 0xc001_d00d);
     }
 }
