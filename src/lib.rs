@@ -37,6 +37,7 @@ pub mod fs;
 pub mod ft;
 pub mod h264;
 pub mod heap;
+pub mod jpeg;
 pub mod kernel;
 pub mod libm;
 pub mod libc;

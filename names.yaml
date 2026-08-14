@@ -30432,3 +30432,70 @@ functions:
       registers; the no-argument ABI and return_zero name therefore express
       the entire observed behavior. No deviations; focused host tests assert
       the zero word and its all-clear bit representation.
+
+  # --- JPEG decoder: the source byte reader ---
+  # The decoder is one global @ 0x08a0a79c with no instance handle: the
+  # marker scan (0x0807a7b0), the entropy bit reader (0x0807ec24), DHT
+  # (0x080e9eb4) and the unnamed SOF/SOS/DQT blocks in
+  # 0x080ea000-0x080ea400 / 0x080ed100-0x080ed320 all reach it through a
+  # literal-pool word. Identified as JPEG by 0x0807ec24's `0xff 0x00`
+  # unstuffing, 0x080e9eb4's Tc/Th nibble split into separate DC and AC
+  # table arrays, and the "jpeg"/"tiff"/"pict" format-name table
+  # @ 0x08117cec. Source bytes are produced by 0x08086ed0.
+  - address: 0x080e7ed4
+    ghidra: FUN_080e7ed4
+    name: jpeg_source_read_byte
+    size: 96
+    sig: "u32 jpeg_source_read_byte()"
+    module: jpeg/source
+    renames:
+      DAT_080e7f30: JPEG_DECODER_STATE
+      uVar2: position
+      uVar4: queue
+      iVar3: bank
+    status: ported
+    notes: >-
+      The JPEG decoder's "next source byte" primitive, and the consumer
+      end of its 2 KiB circular double buffer. Body decoded from the raw
+      image, not from Ghidra - true extent is 96 bytes (92 of code
+      0x080e7ed4-0x080e7f2c plus the state-pointer literal 0x08a0a79c
+      @ 0x080e7f30); functions.csv reports 92 and drops the pool word,
+      and the next function starts at 0x080e7f34 (`mov r2,r0; mov r0,r1;
+      ldr r1,[r2,#12]; b 0x08065054`). Algorithm - `pos = state+0x84`;
+      when `pos & 3 == 0` reload `state+0x88` with the word at
+      `(pos & 0x400 ? state+0x68 : state+0x64) + (pos & 0x3ff)`; then
+      return `queue & 0xff`, store `pos+1` and `queue >> 8`. So
+      `state+0x88` is a four-byte little-endian byte queue and
+      `state+0x84` a free-running byte counter that is never masked in
+      place - only the buffer index and the bank-select bit are derived
+      from it, which is what lets DHT @ 0x080e9eb4 push a marker back
+      with `queue = queue << 8 | 0xff; pos -= 1`. The bank select is
+      `lsls r2,r1,#21` reading the sign bit, i.e. bit 10 of the position,
+      not a comparison against the fill level. The producer @ 0x08086ed0
+      mirrors it exactly - it memcpys 0x400-byte chunks alternately into
+      `+0x64` and `+0x68`, tracks its own fill position at `+0x8c`,
+      selects the destination bank with the same bit-10 test, and stalls
+      while `fill - read > 0x3ff`. There is no bounds, NULL or
+      end-of-data check anywhere in the body; call sites counted by
+      decoding every ARM B/BL word in osos.dec are 60 plain `bl` with
+      ZERO predicated forms and ZERO `b`, so no caller guards it either -
+      exhaustion is detected by the decoder's marker logic instead.
+      Faithful detail - the original reloads `state+0x84` a second time on
+      the refill path (`add r0,r3,#0; ldr r0,[r0,#0x84]` re-reads what r1
+      already holds), a redundant ADS reload folded to one read.
+      Deviations - the state lives at 0x08a0a79c on device and in host
+      test storage otherwise (cxx/object_flags.rs precedent), and only the
+      four words this function touches are modeled, as a #[repr(C)]
+      window struct with named fields so the target offsets 0x64/0x68/
+      0x84/0x88 are asserted rather than hand-written per access.
+      Host tests (10) - byte order within the reloaded word, a mid-word
+      start consuming the stale queue before the next refill, the bit-10
+      bank switch, the 2 KiB alias, two unrelated bank pointers, the
+      DHT push-back sequence, exact one-per-call position advance, u32
+      position wrap, and all 256 byte values returned zero-extended.
+      match.py structural - `tst r1,#3` refill test, `tst r1,#0x400` with
+      predicated bank selection, masked index, word load, then the
+      `+1` / `>> 8` / `& 0xff` tail, one-to-one with the original;
+      LLVM folds the index mask to `and r3,r1,#0x3fc` (equivalent, since
+      the refill only runs on a word boundary) and adds the crate frame.
+      #[inline(never)] for the 60 `bl` targets.
