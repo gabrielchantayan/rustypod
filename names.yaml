@@ -29642,3 +29642,42 @@ functions:
       distinguishable matrix values to prove every mapping, guard the exact
       16-byte destination range, and model in-place ordering; match.py
       structural diff reviewed after the ARM release build.
+
+  # --- big-endian wire-format packer cluster (src/util/beload.rs) ---
+  - address: 0x08261638
+    ghidra: FUN_08261638
+    name: pack_be32
+    size: 56
+    sig: "void pack_be32(u8 *dst, u32 value)"
+    module: util/beload
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: value
+      uVar1/r2: reversed
+      uVar2/r3: lane_mask
+    notes: >-
+      Writes value as four big-endian bytes at an unaligned dst. 56 bytes,
+      14 instructions, 0x08261638..0x0826166c; the next function starts at
+      0x08261670 (push {r4, lr}), so the Ghidra extent is correct here. 49
+      bl call sites, counted by decoding every B/BL word in osos.dec.
+      Algorithm - byte-reverse the word in registers first (lsl #24, then
+      orr of value & 0xff00 shifted left 8, orr of value & 0xff0000 shifted
+      right 8, orr of value >> 24), then spill the reversed word's four
+      bytes least-significant first to ascending addresses, walking dst with
+      pre-indexed strb. Net effect is a big-endian store, identical in
+      observable behavior to store_be32 @ 0x083816cc and store_u32_be_bytes
+      @ 0x08046b1c, but a separate firmware function with a distinct
+      implementation, so it is kept distinct via its own text section. Third
+      member of the overload set at 0x0826161c (16-bit pack), 0x08261638
+      (32-bit pack), 0x08261670 (64-bit pack), 0x08261750 / 0x08261770 /
+      0x08261790 (the matching unpacks). Callers build big-endian protocol
+      packets - FUN_081ac6f0 fills a six-byte reply body at 0x081ac7bc and
+      hands it to the transport at 0x080f6efc; FUN_081fffac appends four
+      bytes at packet + packet[6] + 7 then bumps packet[6] by 4. No
+      deviations; the port keeps the reverse-then-spill two-step shape.
+      Host tests cover every single-byte lane at misalignments 0..7,
+      guard the untouched neighbouring bytes, and cross-check against
+      store_be32 and load_be32. match.py structural diff reviewed - LLVM
+      picks the ror idiom over the mask/orr chain, and emits the same
+      crate-wide push {fp, lr} frame the accepted store_be32 port has.
