@@ -29220,6 +29220,25 @@ functions:
       remains intentionally opaque. Host tests cover both pointer states;
       match.py diff reviewed after the ARM release build.
 
+  # --- C++ u32 slot reset ---
+  - address: 0x08027c7c
+    ghidra: FUN_08027c7c
+    name: reset_u32_slot
+    size: 12
+    sig: "void reset_u32_slot(u32 *slot)"
+    module: cxx/slot_reset
+    status: ported
+    renames:
+      param_1/r0: slot
+      r1: zero
+    notes: >-
+      Leaf slot reset helper. The 12-byte ARM body is mov r1,#0; str r1,[r0];
+      bx lr, so it clears one aligned u32 and accesses nothing else. Its sole
+      recovered caller invokes it in a batch that clears independent state
+      slots. Host test proves the target word becomes zero while adjacent words
+      retain their sentinels; match.py diff reviewed after the ARM release
+      build.
+
   # --- H.264 CBC decode forwarding adapter ---
   - address: 0x0802ac10
     ghidra: FUN_0802ac10
