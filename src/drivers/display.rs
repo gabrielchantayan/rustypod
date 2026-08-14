@@ -6,6 +6,14 @@
 //! layer is obtained with `FUN_081d9064(display, index)`". This module is
 //! the other side of that sentence: the display class itself.
 //!
+//! Ports:
+//! - [`display_get`] — original: `FUN_081d8870` @ 0x081d8870
+//!   (188 bytes; **123 call sites, 118 `bl` + 5 `bleq`**). The two-panel
+//!   singleton table: `display_get(0)` is the internal LCD,
+//!   `display_get(1)` the secondary output, anything else is NULL.
+//! - [`display_get_layer`] — original: `FUN_081d9064` @ 0x081d9064
+//!   (96 bytes; **63 `bl` call sites**). The lazy per-layer accessor.
+//!
 //! # Why this lives under `drivers/`
 //!
 //! The address (0x081dxxxx) sits in the app/Silver band, but the class is
@@ -24,10 +32,67 @@
 //! else if (param_2 == 1) *(display + 0x94) = FUN_08169018();
 //! ```
 //!
-//! and the singleton getter `FUN_081d8870` @ 0x081d8870 hands out exactly
+//! and the singleton getter [`display_get`] @ 0x081d8870 hands out exactly
 //! two of them, id 0 and id 1 — the internal LCD and the secondary output.
 //! Every field this module touches feeds the layer object, so it belongs
 //! beside the layer, not in `app/`.
+//!
+//! # The two-panel singleton table (`display_get`)
+//!
+//! `FUN_081d8870` is a pair of ADS function-local statics selected by the
+//! argument, the `app/media_command_facade.rs` idiom done twice in one
+//! function. Binary-verified literal pool @ 0x081d8914..0x081d8928 — six
+//! words Ghidra drops, which is why it reports 164 bytes instead of 188:
+//!
+//! ```text
+//! 0x081d8914  0x089ca8b0   guard base / the SECONDARY display's guard
+//! 0x081d8918  0x08a1b6cc   the SECONDARY display object
+//! 0x081d891c  0x089ca09c   __dso_handle
+//! 0x081d8920  0x081ce4d4   the registered "destructor"
+//! 0x081d8924  0x089ca8b4   the INTERNAL display's guard (= base + 4)
+//! 0x081d8928  0x08a1b624   the INTERNAL display object
+//! ```
+//!
+//! The next function opens at 0x081d892c (`mov r3, r0; push {r4, lr}`), so
+//! 0x081d8870..0x081d892c = 188 bytes is the true extent. The two objects
+//! are 0x08a1b6cc − 0x08a1b624 = 0xa8 apart, and the constructor's last
+//! store is `strb r5, [r4, #0xa5]` — two independent witnesses for
+//! [`DISPLAY_OBJECT_SIZE`].
+//!
+//! ```text
+//! movs r4, r0                       @ id; Z = (id == 0)
+//! ldr  r0, =0x089ca8b0              @ the guard base, loaded for both arms
+//! beq  internal                     @ id == 0
+//! cmp  r4, #1
+//! movne r0, #0; popne {r4, pc}      @ id > 1 -> NULL
+//! ldr  r0, [r0]                     @ secondary guard, via the base word
+//! tst  r0, #1; bne done             @ inlined fast path: bit 0
+//! ldr  r0, =0x089ca8b0; bl cxa_guard_acquire
+//! cmp  r0, #0; beq done
+//! ldr  r0, =0x08a1b6cc              @ the object
+//! mov  r1, r4                       @ the id itself, not an immediate
+//! bl   0x081d92a4                   @ the constructor, returns `this`
+//! ldr  r2, =0x089ca09c; ldr r1, =0x081ce4d4; bl cxa_atexit
+//! ldr  r0, =0x089ca8b0; bl cxa_guard_release
+//! done: ldr r0, =0x08a1b6cc; pop {r4, pc}   @ reloaded, not the ctor's r0
+//! ```
+//!
+//! The `internal` arm is the same block over 0x089ca8b4 / 0x08a1b624,
+//! except that its fast path reads the guard as `[base + 4]` while the
+//! slow path loads 0x089ca8b4 as its own literal — one word, two ways of
+//! naming it, a pure ADS pool artifact.
+//!
+//! **The 5 predicated sites are a real behavioural fact.** All five live
+//! in one cluster (0x0828c528, 0x0828c5f4, 0x0828cc2c, 0x0828d0b0,
+//! 0x0828d714) and all five have the shape
+//!
+//! ```text
+//! cmp r0, #0; moveq r0, #1; bleq 0x081d8870
+//! ```
+//!
+//! — "if the caller was handed a NULL display, default to display 1".
+//! `display_get` itself has no NULL-related guard; the callers do the
+//! test, and every predicated site asks for the secondary output.
 //!
 //! # Recovered field map (only the fields this port reads)
 //!
@@ -43,13 +108,20 @@
 //! +0x94  ptr     the panel driver object, handed to every layer this
 //!                accessor builds and landing at the layer's +0x04
 //!                ("display driver object" in display_layer.rs)
+//! +0x98  u8[16]  the constructor's byte block (+0x98..+0xa5: mostly
+//!                zeroes, 1 at +0x9a and 3 at +0xa3), padded to the
+//!                0xa8 object stride
 //! ```
 //!
 //! The layer constructor's fifth argument, `display_id == 1`, is what the
 //! layer keeps at its +0x09 — the byte `display_layer.rs` could only call
 //! "(opaque)". It is the "this layer is on the secondary display" flag.
 
+use core::ffi::c_void;
+
 use crate::kernel::sync_mutex::{mutex_lock, mutex_unlock, Mutex};
+use crate::runtime::cxa_guard::{cxa_guard_acquire, cxa_guard_release};
+use crate::runtime::shutdown_chain::cxa_atexit;
 
 /// Layer slots a display owns (`i < 6` in the constructor's clearing loop;
 /// the accessor's call sites use exactly the immediates 0..5).
@@ -62,6 +134,14 @@ pub const LAYER_OBJECT_SIZE: usize = 0x1d8;
 /// The display id the accessor tests for: id 1 is the secondary output, and
 /// its layers are built with the "secondary display" byte set.
 pub const SECONDARY_DISPLAY_ID: u8 = 1;
+
+/// The internal LCD's id — [`display_get`]'s `movs r4, r0` / `beq` arm.
+pub const INTERNAL_DISPLAY_ID: u32 = 0;
+
+/// One display object's extent, agreed on by two independent witnesses:
+/// the constructor's last store is `strb r5, [r4, #0xa5]`, and the two
+/// static objects sit 0x08a1b6cc − 0x08a1b624 = 0xa8 apart.
+pub const DISPLAY_OBJECT_SIZE: usize = 0xa8;
 
 /// The display object, cut down to the fields [`display_get_layer`] reads.
 ///
@@ -85,6 +165,9 @@ pub struct Display {
     pub reserved_91: [u8; 3],
     /// +0x94: the panel driver object every layer is bound to.
     pub driver: *mut u8,
+    /// +0x98..+0xa7: the constructor's trailing byte block plus the pad
+    /// that rounds the object up to [`DISPLAY_OBJECT_SIZE`].
+    pub reserved_98: [u8; 0x10],
 }
 
 // The header's offsets are only claims about the 32-bit target layout, so
@@ -97,6 +180,8 @@ const _: [u8; 0x28] = [0; core::mem::offset_of!(Display, mutex)];
 const _: [u8; 0x90] = [0; core::mem::offset_of!(Display, display_id)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x94] = [0; core::mem::offset_of!(Display, driver)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; DISPLAY_OBJECT_SIZE] = [0; core::mem::size_of::<Display>()];
 
 /// Indirect dispatch for this cluster's unported callee (the house pattern
 /// — see `drivers/display_layer.rs` and `heap/alloc_core.rs`).
@@ -118,6 +203,21 @@ pub struct DisplayHooks {
         layer_index: u8,
         on_secondary_display: u8,
     ) -> *mut u8,
+
+    /// `FUN_081d92a4` @ 0x081d92a4 (2 `bl` call sites, both of them in
+    /// [`display_get`]): the display constructor. Zeroes the flag bytes
+    /// +0x1e/+0x24/+0x25 and the block +0x98..+0xa5 (1 at +0x9a, 3 at
+    /// +0xa3), creates the display's mutex at +0x28, clears the six layer
+    /// slots and their six bytes, writes the id at +0x90, then binds
+    /// +0x94 to the panel driver — `FUN_0814ece0()` for id 0,
+    /// `FUN_08169018()` for id 1 (plus a vtable +0x10 call and a second
+    /// byte block for id 1) — and returns `this`.
+    ///
+    /// Default: the documented zeroing stub, which is why [`display_get`]
+    /// is **not hook-ready** — a stock caller branched here would get a
+    /// display with no mutex, no panel driver and a zero id.
+    pub display_construct:
+        unsafe extern "C" fn(storage: *mut Display, display_id: u32) -> *mut Display,
 }
 
 unsafe extern "C" fn layer_construct_stub(
@@ -130,10 +230,30 @@ unsafe extern "C" fn layer_construct_stub(
     storage
 }
 
+/// The default for the unported display constructor `FUN_081d92a4`:
+/// zeroes the object and returns `this`.
+///
+/// A faithful *subset* — the original zeroes almost everything this does —
+/// but it installs neither the mutex nor the panel driver nor the id,
+/// which is what makes [`display_get`] not hook-ready. Volatile stores:
+/// a plain loop is rewritten by LLVM into a call to `__aeabi_memclr`,
+/// which does not exist in this build.
+unsafe extern "C" fn display_construct_stub(
+    storage: *mut Display,
+    _display_id: u32,
+) -> *mut Display {
+    let bytes = storage.cast::<u8>();
+    for offset in 0..DISPLAY_OBJECT_SIZE {
+        bytes.add(offset).write_volatile(0);
+    }
+    storage
+}
+
 /// Wired default: the documented identity stub for the unported layer
-/// constructor.
+/// constructor and the zeroing stub for the unported display constructor.
 pub(crate) const DEFAULT_DISPLAY_HOOKS: DisplayHooks = DisplayHooks {
     layer_construct: layer_construct_stub,
+    display_construct: display_construct_stub,
 };
 
 /// The active hooks. Host tests swap in a recording mock and restore.
@@ -144,6 +264,119 @@ pub static mut DISPLAY_HOOKS: DisplayHooks = DEFAULT_DISPLAY_HOOKS;
 #[inline(always)]
 unsafe fn display_hooks() -> DisplayHooks {
     core::ptr::read_volatile(core::ptr::addr_of!(DISPLAY_HOOKS))
+}
+
+/// `__dso_handle` — the pool word @ 0x081d891c (0x089ca09c), the key every
+/// ADS static's `cxa_atexit` registration carries.
+const DSO_HANDLE: i32 = 0x089ca09c;
+
+/// The pre-construction state of a display object: all zero, exactly what
+/// the .bss words at 0x08a1b624 / 0x08a1b6cc hold before the constructor
+/// runs.
+const ZEROED_DISPLAY: Display = Display {
+    layers: [core::ptr::null_mut(); LAYER_SLOT_COUNT],
+    reserved_18: [0; 0x10],
+    mutex: Mutex { sem_cell: core::ptr::null_mut(), unused: 0 },
+    reserved_30: [0; 0x60],
+    display_id: 0,
+    reserved_91: [0; 3],
+    driver: core::ptr::null_mut(),
+    reserved_98: [0; 0x10],
+};
+
+/// The internal LCD (original: the fixed object @ 0x08a1b624, pool word
+/// @ 0x081d8928) and its one-time-initialization guard (@ 0x089ca8b4,
+/// pool word @ 0x081d8924, reached on the fast path as `[0x089ca8b0 + 4]`).
+///
+/// Crate statics rather than the stock words: the 0x089cxxxx and
+/// 0x08a1xxxx pages are runtime-initialized and the decrypted image holds
+/// UI strings at those offsets (the `media_command_facade.rs` deviation).
+/// Zero is the exact pre-init state either way.
+pub static mut INTERNAL_DISPLAY_GUARD: u32 = 0;
+/// The internal LCD object — see [`INTERNAL_DISPLAY_GUARD`].
+pub static mut INTERNAL_DISPLAY: Display = ZEROED_DISPLAY;
+
+/// The secondary output's guard (original: 0x089ca8b0, the pool word
+/// @ 0x081d8914 that both arms load as their base).
+pub static mut SECONDARY_DISPLAY_GUARD: u32 = 0;
+/// The secondary output object (original: 0x08a1b6cc, pool word
+/// @ 0x081d8918).
+pub static mut SECONDARY_DISPLAY: Display = ZEROED_DISPLAY;
+
+/// The destructor registered with `cxa_atexit` — original: the pool word
+/// @ 0x081d8920, 0x081ce4d4.
+///
+/// That address is **not a function entry**: it sits inside a large
+/// function, on the `mov r0, r7` at 0x081ce4d4 that feeds a
+/// `bl 0x08391e38` string compare — run as a shutdown handler it would
+/// execute with r4..r7 belonging to nobody and return through a frame it
+/// never pushed, so the registration could never fire. retailOS never runs
+/// `exit`'s chain anyway (`runtime/shutdown_chain.rs`). The same situation
+/// as `media_command_facade_get`'s 0x0817f190 and `node_list_get`'s
+/// 0x0810516c. A no-op matches every observable path.
+unsafe extern "C" fn display_destructor(_object: *mut c_void) {}
+
+/// One arm of [`display_get`]: the ADS function-local static over a fixed
+/// object, `media_command_facade.rs`'s idiom.
+///
+/// `#[inline(always)]` because the original has both arms written out in
+/// full — this is one source for two emitted blocks, not a shared callee.
+#[inline(always)]
+unsafe fn display_singleton(guard: *mut u32, object: *mut Display, display_id: u32) -> *mut Display {
+    if (core::ptr::read_volatile(guard) & 1) == 0 && cxa_guard_acquire(guard) != 0 {
+        let this = (display_hooks().display_construct)(object, display_id);
+        cxa_atexit(this as *mut c_void, display_destructor, DSO_HANDLE);
+        cxa_guard_release(guard);
+    }
+    object
+}
+
+/// display_get — original: `FUN_081d8870` @ 0x081d8870 (188 bytes,
+/// 0x081d8870..0x081d892c: 164 of code plus the 6-word pool Ghidra drops;
+/// the next function opens at 0x081d892c. **123 call sites — 118 `bl` and
+/// 5 `bleq`** — counted by decoding every branch word in `osos.dec`.)
+///
+/// The image's whole display table: `display_get(0)` is the internal LCD,
+/// `display_get(1)` the secondary output, each constructed once on first
+/// request; every other id is NULL. See the module header for the stock
+/// instruction sequence, the verified literal pool and the object layout.
+///
+/// Faithful details:
+/// - The returned pointer is the object's address *reloaded* after the
+///   init block, never the constructor's return; only the `cxa_atexit`
+///   registration sees the constructor's value.
+/// - The constructor's second argument is the caller's id in r4, not an
+///   immediate — the two arms differ only in which pool words they use.
+/// - The fast path tests bit 0 (`tst r0, #1`) while [`cxa_guard_acquire`]
+///   tests the whole word, so a nonzero guard with bit 0 clear — a state
+///   this pair never produces — takes the slow path and is still refused.
+/// - A refused acquire skips construction and still hands out the object.
+/// - There is no NULL check anywhere: the 5 predicated call sites test
+///   *their own* display pointer and fall back to `display_get(1)`.
+///
+/// # Deviations
+///
+/// - The guard pair and `cxa_atexit` are ported and called directly; the
+///   constructor 0x081d92a4 is not, so it rides
+///   [`DisplayHooks::display_construct`] — whose zeroing default is why
+///   this symbol is **not hook-ready**.
+/// - Guards and objects are crate statics, not the stock .bss words.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn display_get(display_id: u32) -> *mut Display {
+    match display_id {
+        INTERNAL_DISPLAY_ID => display_singleton(
+            core::ptr::addr_of_mut!(INTERNAL_DISPLAY_GUARD),
+            core::ptr::addr_of_mut!(INTERNAL_DISPLAY),
+            display_id,
+        ),
+        id if id == SECONDARY_DISPLAY_ID as u32 => display_singleton(
+            core::ptr::addr_of_mut!(SECONDARY_DISPLAY_GUARD),
+            core::ptr::addr_of_mut!(SECONDARY_DISPLAY),
+            display_id,
+        ),
+        _ => core::ptr::null_mut(),
+    }
 }
 
 /// The slot the original addresses with `ldr r0, [r4, r5, lsl #2]`.
@@ -269,7 +502,8 @@ mod tests {
         let hooks_guard = HOOKS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let heap_guard = mock_heap();
         unsafe {
-            DISPLAY_HOOKS = DisplayHooks { layer_construct: recording_layer_construct };
+            DISPLAY_HOOKS =
+                DisplayHooks { layer_construct: recording_layer_construct, ..DEFAULT_DISPLAY_HOOKS };
             CONSTRUCT_CALLS = 0;
             LAST_STORAGE = core::ptr::null_mut();
             LAST_DISPLAY = core::ptr::null_mut();
@@ -298,6 +532,7 @@ mod tests {
             display_id,
             reserved_91: [0; 3],
             driver,
+            reserved_98: [0; 0x10],
         }
     }
 
@@ -422,5 +657,246 @@ mod tests {
             assert!(LAST_STORAGE.is_null(), "with the NULL block verbatim");
         }
         restore_mocks(guards);
+    }
+
+    // ---- display_get: the two-panel singleton table ----
+
+    use crate::runtime::shutdown_chain::{
+        lib_shutdown_chain, shutdown_chain_head, ShutdownNode, SHUTDOWN_ALLOC, SHUTDOWN_FREE,
+    };
+    use std::boxed::Box;
+    use std::vec::Vec;
+
+    /// (storage, display_id) of every display-constructor call, in order.
+    static mut DISPLAY_CTOR_CALLS: Vec<(*mut Display, u32)> = Vec::new();
+    /// What the recording display constructor hands back.
+    static mut DISPLAY_CTOR_RESULT: *mut Display = core::ptr::null_mut();
+
+    unsafe extern "C" fn recording_display_construct(
+        storage: *mut Display,
+        display_id: u32,
+    ) -> *mut Display {
+        (*core::ptr::addr_of_mut!(DISPLAY_CTOR_CALLS)).push((storage, display_id));
+        if DISPLAY_CTOR_RESULT.is_null() {
+            storage
+        } else {
+            DISPLAY_CTOR_RESULT
+        }
+    }
+
+    /// Box-backed node allocator pair for the shutdown chain: the shipped
+    /// defaults are the firmware malloc/free, wrong for host memory (the
+    /// `media_command_facade.rs` test pattern).
+    unsafe extern "C" fn box_alloc(size: usize) -> *mut u8 {
+        assert_eq!(size, core::mem::size_of::<ShutdownNode>());
+        Box::into_raw(Box::new(ShutdownNode {
+            next: core::ptr::null_mut(),
+            arg: core::ptr::null_mut(),
+            handler: display_destructor,
+            key: 0,
+        })) as *mut u8
+    }
+
+    unsafe extern "C" fn box_free(block: *mut u8) {
+        drop(Box::from_raw(block as *mut ShutdownNode));
+    }
+
+    fn internal() -> *mut Display {
+        unsafe { core::ptr::addr_of_mut!(INTERNAL_DISPLAY) }
+    }
+
+    fn secondary() -> *mut Display {
+        unsafe { core::ptr::addr_of_mut!(SECONDARY_DISPLAY) }
+    }
+
+    /// Returns both guards and objects to their pre-init state. Takes only
+    /// [`HOOKS_LOCK`] — never the heap lock — so it can never self-deadlock
+    /// against [`install_mocks`].
+    fn install_singleton_mocks() -> MutexGuard<'static, ()> {
+        let guard = HOOKS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            DISPLAY_HOOKS = DisplayHooks {
+                display_construct: recording_display_construct,
+                ..DEFAULT_DISPLAY_HOOKS
+            };
+            INTERNAL_DISPLAY_GUARD = 0;
+            SECONDARY_DISPLAY_GUARD = 0;
+            for object in [internal(), secondary()] {
+                let bytes = object.cast::<u8>();
+                for offset in 0..DISPLAY_OBJECT_SIZE {
+                    bytes.add(offset).write(0xa5);
+                }
+            }
+            (*core::ptr::addr_of_mut!(DISPLAY_CTOR_CALLS)).clear();
+            DISPLAY_CTOR_RESULT = core::ptr::null_mut();
+            SHUTDOWN_ALLOC = box_alloc;
+            SHUTDOWN_FREE = box_free;
+            *shutdown_chain_head() = core::ptr::null_mut();
+        }
+        guard
+    }
+
+    fn restore_singleton_mocks(guard: MutexGuard<'static, ()>) {
+        unsafe {
+            // Drain leftover registrations BEFORE restoring the firmware
+            // allocator pair, so the nodes are freed by the allocator that
+            // made them.
+            lib_shutdown_chain(0);
+            SHUTDOWN_ALLOC = crate::malloc_rt::malloc;
+            SHUTDOWN_FREE = crate::malloc_rt::free;
+            DISPLAY_HOOKS = DEFAULT_DISPLAY_HOOKS;
+            INTERNAL_DISPLAY_GUARD = 0;
+            SECONDARY_DISPLAY_GUARD = 0;
+        }
+        drop(guard);
+    }
+
+    #[test]
+    fn each_id_constructs_its_own_object_with_its_own_id() {
+        let guard = install_singleton_mocks();
+        unsafe {
+            assert_eq!(display_get(0), internal(), "id 0 is the internal LCD @ 0x08a1b624");
+            assert_eq!(display_get(1), secondary(), "id 1 is the secondary @ 0x08a1b6cc");
+            assert_eq!(
+                *core::ptr::addr_of!(DISPLAY_CTOR_CALLS),
+                std::vec![(internal(), 0u32), (secondary(), 1u32)],
+                "`mov r1, r4` passes the caller's id, not an immediate"
+            );
+            assert_eq!(core::ptr::read_volatile(core::ptr::addr_of!(INTERNAL_DISPLAY_GUARD)), 1);
+            assert_eq!(core::ptr::read_volatile(core::ptr::addr_of!(SECONDARY_DISPLAY_GUARD)), 1);
+        }
+        restore_singleton_mocks(guard);
+    }
+
+    #[test]
+    fn the_two_guards_are_independent() {
+        let guard = install_singleton_mocks();
+        unsafe {
+            display_get(1);
+            assert_eq!(
+                core::ptr::read_volatile(core::ptr::addr_of!(INTERNAL_DISPLAY_GUARD)),
+                0,
+                "the internal arm is untouched"
+            );
+            assert_eq!(internal().cast::<u8>().read(), 0xa5, "and so is its object");
+            assert_eq!((*core::ptr::addr_of!(DISPLAY_CTOR_CALLS)).len(), 1);
+        }
+        restore_singleton_mocks(guard);
+    }
+
+    #[test]
+    fn every_other_id_is_null_and_constructs_nothing() {
+        let guard = install_singleton_mocks();
+        unsafe {
+            for id in [2u32, 3, 0xff, 0x8000_0000, u32::MAX] {
+                assert!(display_get(id).is_null(), "id {id} -> `movne r0, #0; popne`");
+            }
+            assert!((*core::ptr::addr_of!(DISPLAY_CTOR_CALLS)).is_empty());
+            assert!(shutdown_chain_head().read().is_null(), "no registration either");
+        }
+        restore_singleton_mocks(guard);
+    }
+
+    #[test]
+    fn the_second_request_takes_the_bit0_fast_path() {
+        let guard = install_singleton_mocks();
+        unsafe {
+            display_get(0);
+            // A post-construction mutation must survive: the 123 call sites
+            // after boot must not reconstruct the display.
+            (*internal()).display_id = 0x7e;
+            assert_eq!(display_get(0), internal());
+            assert_eq!(display_get(0), internal());
+            assert_eq!((*core::ptr::addr_of!(DISPLAY_CTOR_CALLS)).len(), 1, "constructed once");
+            assert_eq!((*internal()).display_id, 0x7e, "no reconstruction");
+            assert!((*shutdown_chain_head().read()).next.is_null(), "no second registration");
+        }
+        restore_singleton_mocks(guard);
+    }
+
+    #[test]
+    fn a_guard_with_bit0_set_short_circuits_everything() {
+        let guard = install_singleton_mocks();
+        unsafe {
+            SECONDARY_DISPLAY_GUARD = 3; // `tst r0, #1; bne done`
+            assert_eq!(display_get(1), secondary());
+            assert!((*core::ptr::addr_of!(DISPLAY_CTOR_CALLS)).is_empty(), "no construction");
+            assert!(shutdown_chain_head().read().is_null(), "no registration");
+            assert_eq!(core::ptr::read_volatile(core::ptr::addr_of!(SECONDARY_DISPLAY_GUARD)), 3);
+            assert_eq!(secondary().cast::<u8>().read(), 0xa5, "handed out untouched");
+        }
+        restore_singleton_mocks(guard);
+    }
+
+    #[test]
+    fn a_nonzero_guard_with_bit0_clear_is_still_turned_away_by_acquire() {
+        // The fast path tests bit 0, cxa_guard_acquire the whole word. This
+        // pair never produces the state; the original's two-level test is
+        // what defines the behavior.
+        let guard = install_singleton_mocks();
+        unsafe {
+            INTERNAL_DISPLAY_GUARD = 2;
+            assert_eq!(display_get(0), internal());
+            assert!((*core::ptr::addr_of!(DISPLAY_CTOR_CALLS)).is_empty(), "acquire refused");
+            assert_eq!(
+                core::ptr::read_volatile(core::ptr::addr_of!(INTERNAL_DISPLAY_GUARD)),
+                2,
+                "a refused acquire never writes"
+            );
+        }
+        restore_singleton_mocks(guard);
+    }
+
+    #[test]
+    fn the_object_literal_is_returned_but_the_registration_carries_the_ctors_value() {
+        // The original reloads the pool word 0x081d8918; only the
+        // cxa_atexit registration sees the constructor's r0.
+        let guard = install_singleton_mocks();
+        unsafe {
+            DISPLAY_CTOR_RESULT = internal(); // deliberately the wrong object
+            assert_eq!(display_get(1), secondary(), "the reloaded literal wins");
+
+            let head = shutdown_chain_head().read();
+            assert!(!head.is_null(), "registered with cxa_atexit");
+            assert_eq!((*head).arg as *mut Display, internal(), "the ctor's return");
+            assert_eq!((*head).handler as usize, display_destructor as usize);
+            assert_eq!((*head).key, DSO_HANDLE, "__dso_handle @ 0x089ca09c");
+        }
+        restore_singleton_mocks(guard);
+    }
+
+    #[test]
+    fn the_registration_is_real_and_the_chain_runs_the_noop_destructor() {
+        let guard = install_singleton_mocks();
+        unsafe {
+            display_get(0);
+            (*internal()).display_id = 0x3c;
+            lib_shutdown_chain(0);
+            assert!(shutdown_chain_head().read().is_null(), "the node ran and was freed");
+            assert_eq!((*internal()).display_id, 0x3c, "the no-op destructor touched nothing");
+        }
+        restore_singleton_mocks(guard);
+    }
+
+    #[test]
+    fn the_default_stub_zeroes_exactly_the_objects_extent() {
+        let guard = install_singleton_mocks();
+        unsafe {
+            DISPLAY_HOOKS = DEFAULT_DISPLAY_HOOKS;
+            assert_eq!(display_get(1), secondary());
+            let bytes = secondary().cast::<u8>();
+            assert!((0..DISPLAY_OBJECT_SIZE).all(|offset| bytes.add(offset).read() == 0));
+        }
+        restore_singleton_mocks(guard);
+    }
+
+    #[test]
+    fn the_object_extent_and_pool_words_are_the_binary_verified_ones() {
+        // ctor's last store `strb r5, [r4, #0xa5]`, and the two static
+        // objects 0x08a1b6cc - 0x08a1b624 = 0xa8 apart.
+        assert_eq!(DISPLAY_OBJECT_SIZE, 0xa8);
+        assert_eq!(DSO_HANDLE, 0x089ca09c);
+        assert_eq!(INTERNAL_DISPLAY_ID, 0);
+        assert_eq!(SECONDARY_DISPLAY_ID, 1);
     }
 }

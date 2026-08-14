@@ -31330,3 +31330,85 @@ functions:
       sizing bl, allocating blx, NULL test, transcode blx,
       `add r0,r7,r6; strb r8,[r0,#-1]` - with the two ops-table
       indirections and LLVM hoisting the guard ahead of the frame push.
+
+  # --- display: the two-panel singleton table ---
+  - address: 0x081d8870
+    ghidra: FUN_081d8870
+    name: display_get
+    size: 188
+    sig: "Display *display_get(u32 display_id)"
+    module: drivers/display
+    status: ported
+    vars: {param_1/r4: display_id,
+      DAT_081d8914: guard-base-pool-word (0x089ca8b0 = SECONDARY_DISPLAY_GUARD),
+      DAT_081d8918: object-pool-word (0x08a1b6cc = SECONDARY_DISPLAY),
+      DAT_081d891c: DSO_HANDLE (0x089ca09c = __dso_handle),
+      DAT_081d8920: dtor-pool-word (0x081ce4d4),
+      DAT_081d8924: guard-pool-word (0x089ca8b4 = INTERNAL_DISPLAY_GUARD),
+      DAT_081d8928: object-pool-word (0x08a1b624 = INTERNAL_DISPLAY)}
+    notes: >-
+      The image's whole display table, and the other half of
+      display_get_layer @ 0x081d9064 (same module) - display_get(0) is the
+      internal LCD, display_get(1) the secondary output, every other id is
+      NULL. EXTENT CORRECTED - Ghidra says 164 bytes, which is the code
+      only; the six pool words @ 0x081d8914..0x081d8928 belong to the
+      function and the next one opens at 0x081d892c (mov r3,r0; push
+      {r4,lr}), so the true extent is 0x081d8870..0x081d892c = 188 bytes.
+      123 call sites - 118 bl and 5 bleq, zero plain-b - verified by
+      decoding every branch word in osos.dec for every condition code.
+      Shape - two ADS function-local statics written out in full and
+      selected by the argument, the media_command_facade_get idiom done
+      twice. movs r4,r0 / beq picks the id-0 arm; cmp r4,#1 / movne r0,#0 /
+      popne is the NULL exit for everything else. Each arm - tst guard,#1
+      fast path; cxa_guard_acquire (0x082ab31c); ctor 0x081d92a4(object,
+      r4) returning this in r0, the id coming from r4 and not an
+      immediate; cxa_atexit(this, 0x081ce4d4, __dso_handle 0x089ca09c)
+      (0x082ab1c8); cxa_guard_release (0x082ab338); reload the OBJECT pool
+      word - never the ctor's return - and return it. Pure ADS pool
+      artifact worth knowing - the id-1 fast path reads its guard as
+      [0x089ca8b0], the id-0 fast path as [0x089ca8b0 + 4], while the id-0
+      slow path loads 0x089ca8b4 as its own literal; one word, two names.
+      THE 5 PREDICATED SITES ARE A REAL BEHAVIOURAL FACT. All five
+      (0x0828c528, 0x0828c5f4, 0x0828cc2c, 0x0828d0b0, 0x0828d714) sit in
+      one cluster and all five read `cmp r0,#0; moveq r0,#1; bleq
+      0x081d8870` - "if the caller was handed a NULL display, default to
+      display 1". display_get has no NULL-related guard of its own; the
+      callers do the test, and every predicated site asks for the
+      secondary output.
+      OBJECT SIZE 0xa8, two independent witnesses - the constructor's last
+      store is strb r5,[r4,#0xa5], and the two static objects are
+      0x08a1b6cc - 0x08a1b624 = 0xa8 apart. Display therefore gains a
+      reserved_98 [u8; 0x10] tail and a size_of assert on the 32-bit
+      target; the constructor's block there is zeroes except 1 at +0x9a
+      and 3 at +0xa3.
+      Deviations - the guard pair and cxa_atexit are ported and called
+      directly; the constructor 0x081d92a4 is not, so it rides the new
+      DisplayHooks.display_construct slot whose documented zeroing default
+      installs neither the mutex nor the panel driver nor the id, which is
+      why this symbol is NOT hook-ready. Guards and objects are crate
+      statics rather than the stock .bss words (the media_command_facade
+      deviation - the 0x089cxxxx / 0x08a1xxxx pages are runtime
+      initialized and the decrypted image holds UI strings at those
+      offsets); zero is the exact pre-init state either way. The
+      registered destructor 0x081ce4d4 is NOT a function entry - it is a
+      `mov r0,r7` in the middle of a large function feeding a
+      bl 0x08391e38 string compare, so as a shutdown handler it would run
+      on registers belonging to nobody and return through a frame it never
+      pushed; the registration could never fire (and retailOS never runs
+      exit's chain), so it is modeled as a no-op, same as
+      media_command_facade_get's 0x0817f190 and node_list_get's
+      0x0810516c.
+      Host tests (10) - both arms constructing their own object with their
+      own id, the two guards proven independent, ids 2/3/0xff/0x80000000/
+      0xffffffff returning NULL and constructing nothing, the bit-0 fast
+      path preserving a post-construction mutation, a bit-0-set guard
+      short circuiting everything, a nonzero bit-0-clear guard still
+      refused by acquire, the reloaded object literal winning over the
+      ctor's return while the cxa_atexit node carries the ctor's return,
+      the chain running the no-op destructor, and the zeroing default
+      covering exactly 0xa8 bytes.
+      match.py structural - both arms present with guard test, inlined
+      acquire (cmp/str), the hooked ctor via blx, inlined cxa_atexit
+      (node alloc + stm of the four fields) and the reloaded object
+      literal; LLVM tests id == 1 before id == 0 and inlines the ported
+      guard/atexit callees, the accepted intra-crate noise.
