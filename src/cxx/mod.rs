@@ -27,6 +27,7 @@ pub mod scaled_cursor;
 pub mod slot_reset;
 pub mod string;
 pub mod string_map;
+pub mod stream_write_cstr;
 pub mod string_object;
 pub mod templates;
 pub mod trivial_destructor;
