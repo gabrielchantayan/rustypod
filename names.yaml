@@ -29719,3 +29719,80 @@ functions:
       return_second_argument is the narrowest semantic name supported by the
       exact ABI behavior. No deviations; focused host tests cover independence
       from the first argument and zero/all-one second-argument bit patterns.
+
+  # --- big-endian wire-format packer cluster (src/util/beload.rs) ---
+  - address: 0x08261638
+    ghidra: FUN_08261638
+    name: pack_be32
+    size: 56
+    sig: "void pack_be32(u8 *dst, u32 value)"
+    module: util/beload
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: value
+      uVar1/r2: reversed
+      uVar2/r3: lane_mask
+    notes: >-
+      Writes value as four big-endian bytes at an unaligned dst. 56 bytes,
+      14 instructions, 0x08261638..0x0826166c; the next function starts at
+      0x08261670 (push {r4, lr}), so the Ghidra extent is correct here. 49
+      bl call sites, counted by decoding every B/BL word in osos.dec.
+      Algorithm - byte-reverse the word in registers first (lsl #24, then
+      orr of value & 0xff00 shifted left 8, orr of value & 0xff0000 shifted
+      right 8, orr of value >> 24), then spill the reversed word's four
+      bytes least-significant first to ascending addresses, walking dst with
+      pre-indexed strb. Net effect is a big-endian store, identical in
+      observable behavior to store_be32 @ 0x083816cc and store_u32_be_bytes
+      @ 0x08046b1c, but a separate firmware function with a distinct
+      implementation, so it is kept distinct via its own text section. Third
+      member of the overload set at 0x0826161c (16-bit pack), 0x08261638
+      (32-bit pack), 0x08261670 (64-bit pack), 0x08261750 / 0x08261770 /
+      0x08261790 (the matching unpacks). Callers build big-endian protocol
+      packets - FUN_081ac6f0 fills a six-byte reply body at 0x081ac7bc and
+      hands it to the transport at 0x080f6efc; FUN_081fffac appends four
+      bytes at packet + packet[6] + 7 then bumps packet[6] by 4. No
+      deviations; the port keeps the reverse-then-spill two-step shape.
+      Host tests cover every single-byte lane at misalignments 0..7,
+      guard the untouched neighbouring bytes, and cross-check against
+      store_be32 and load_be32. match.py structural diff reviewed - LLVM
+      picks the ror idiom over the mask/orr chain, and emits the same
+      crate-wide push {fp, lr} frame the accepted store_be32 port has.
+
+  - address: 0x08261770
+    ghidra: FUN_08261770
+    name: unpack_be32
+    size: 32
+    sig: "u32 unpack_be32(const u8 *src)"
+    module: util/beload
+    status: ported
+    renames:
+      param_1/r0: src
+      uVar1/r1: gathered
+      uVar2/r2: lane_byte
+    notes: >-
+      Reads four big-endian bytes at an unaligned src and returns them as a
+      u32. TRUE EXTENT IS 32 BYTES, NOT THE 60 GHIDRA REPORTS - eight words
+      at 0x08261770..0x0826178c, the last of them a tail branch (ea ff ff
+      d0, an unconditional B, not a BL) to the private register-only byte
+      reverse at 0x082616d4. Ghidra's 60 runs 0x2c bytes past that branch
+      and swallows the separately-linked 64-bit unpack that starts at
+      0x08261790. 60 bl call sites, counted by decoding every B/BL word in
+      osos.dec. Algorithm - gather bytes 0..3 into a little-endian word,
+      walking src with pre-indexed ldrb, then tail-branch to the 32-bit byte
+      reverse; net effect is a big-endian load, identical in observable
+      behavior to load_be32 @ 0x081f3b30 / 0x0837a158, but a separate
+      firmware function with a distinct implementation, so it is kept
+      distinct via its own text section. It is the read twin of pack_be32 @
+      0x08261638 and the third member of the unpack overload set at
+      0x08261750 (16-bit), 0x08261770 (32-bit), 0x08261790 (64-bit, which
+      reaches the 64-bit reverse at 0x082616f0 the same way). Deviation -
+      the port folds the tail-branched byte reverse into the body, since
+      LLVM inlines an equal-bodied leaf call regardless and 0x082616d4 is
+      behaviorally the already-ported bswap32; nothing else differs. Host
+      tests cover every single-byte lane at misalignments 0..11, prove the
+      most significant byte sits at the lowest address, and cross-check
+      round trips against pack_be32 and load_be32. match.py structural diff
+      reviewed against the true 32-byte extent - the four ldrb plus the
+      shift-8/16/24 orr chain line up, with the byte reverse inlined in
+      place of the b and the crate-wide push {fp, lr} frame added.
