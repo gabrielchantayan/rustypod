@@ -30505,3 +30505,92 @@ functions:
       mutex_lock/mutex_unlock (so the ROM_KERNEL volatile table read shows
       up as an ldrd chain) and lowers `display_id == 1` to sub/clz/lsr
       instead of cmp/moveq.
+
+  # --- iAP (iPod Accessory Protocol): the packet class ---
+  - address: 0x080f6da0
+    ghidra: FUN_080f6da0
+    name: iap_packet_create
+    size: 104
+    sig: "u8 *iap_packet_create(u8 *owner, u8 *context, u8 lingo, u16 command, const u8 *payload, u32 payload_len)"
+    module: app/iap_packet
+    status: ported
+    renames:
+      param_1/r5: owner
+      param_2/r6: context
+      param_3/r7: lingo
+      param_4/r8: command
+      param_5/r9: payload
+      param_6/sl: payload_len
+      iVar1/r4: packet
+    notes: >-
+      The iAP packet factory - allocate, construct and initialize one iPod
+      Accessory Protocol message object, or return NULL.
+      EXTENT - 104 bytes, 0x080f6da0..0x080f6e08, 26 instructions with no
+      literal pool. Ghidra's functions.csv says 100 and is one word short -
+      the word at 0x080f6e04 is this function's own
+      `pop {r1,r2,r3,r4-r11,pc}`, and the next function opens at 0x080f6e08
+      with `mov r2,r0; push {lr}`. Use `match.py --size 0x68`.
+      59 `bl` and 0 `b` call sites, counted by decoding every branch word
+      in osos.dec.
+      Algorithm - packet = construct(operator_new(0x24)); if NULL return
+      NULL; if init(packet, owner, context, lingo, command, payload,
+      payload_len) is nonzero return packet; else
+      operator_delete(destruct(packet)) and return NULL. Two details the
+      port keeps rather than tidies - the NULL test is on the constructor's
+      result, taken only after the constructor has already run over the
+      possibly-NULL block (`bl 0x082aadd4; bl 0x080f745c; movs r4,r0`); and
+      the delete takes the DESTRUCTOR's return value, not the saved r4, the
+      two coinciding only because 0x080f74ac ends in `mov r0,r4`.
+      SUBSYSTEM - iAP, proven three ways. (1) The header parser feeding
+      this factory, 0x080f6d34, uses a 3-byte header with a big-endian u16
+      command when the first byte is 4 and a 2-byte header with a u8
+      command otherwise - the iAP rule that lingo 0x04 (Extended Interface)
+      alone carries 16-bit command ids. (2) Decoding the third argument at
+      all 59 call sites yields the immediates 0..10 and nothing else, the
+      allocated lingo id range. (3) The default constructor 0x080f745c arms
+      +0x0e = 0xff and +0x10 = 0xffff, the "no lingo"/"no command"
+      sentinels. The wire-length helper 0x080f6e08 closes it - it returns
+      3 + payload_len + (lingo == 4 ? 2 : 1) + (payload_len > 0xfd ? 3 : 1)
+      + ..., i.e. sync + length field (one byte, or the 0x00 escape plus a
+      16-bit length) + lingo + command + payload + checksum. Filed under
+      app/ beside app/iap_incoming_process_thread.rs (the consumer), not
+      under drivers/, despite the 0x080fxxxx address band.
+      Packet object (0x24 = 36 bytes), from 0x080f745c / 0x080f73a0 /
+      0x080f7420 - +0x00 owner (the lone field the sibling factory
+      0x080f6f8c sets), +0x04 a second opaque word that is NULL at all 59
+      call sites, +0x08 payload buffer (tag-3 operator_new @ 0x082aad74,
+      released through 0x082aad14), +0x0c u16 payload length, +0x0e u8
+      lingo, +0x10 u16 command, +0x14 a second buffer, +0x18 its u16
+      length, +0x1a flag, +0x1c and +0x20 zeroed by the initializer. The
+      constructor and destructor bump a live-packet counter at the global
+      word 0x089ccc24. The port never dereferences the packet, so it stays
+      an opaque *mut u8 and no host/target layout question arises.
+      Argument mapping verified against the initializer's own prologue -
+      0x080f73a0 does `stm r4,{r7,r8}` (owner, context), `strb r9,[r4,#14]`
+      (lingo), `ldrd sl,[sp,#48]` and `strh sl,[r4,#16]` (command), with
+      the payload pointer in fp and the length in r5; the factory's
+      `stm sp,{r8,r9,sl}` lands its own r3/stack args in exactly those
+      three slots. lingo/command are typed u8/u16 because the initializer
+      truncates them with strb/strh - nothing observable is lost.
+      Deviations - operator_new @ 0x082aadd4 and operator_delete @
+      0x082aad24 are ported and called directly; the constructor
+      (0x080f745c), initializer (0x080f73a0) and destructor (0x080f74ac)
+      are not ported and dispatch through IAP_PACKET_OPS with documented
+      defaults (identity, return 1, identity). The initializer's ARM return
+      is a 64-bit pair (r0 = success flag, r1 = the owner argument passing
+      back out); the factory reads only r0, so the hook returns just that.
+      Host tests (6) - every argument threaded into the initializer in
+      order with the tag-2 operator_new(0x24) logged, all eleven observed
+      lingo ids plus the 0xff sentinel crossed with five command values,
+      a zero-length body treated as success, the failure path proven to
+      destruct then tag-2 operator_delete and return NULL, the delete
+      proven to take the destructor's result rather than the saved
+      pointer, and a NULL constructed packet short-circuiting before the
+      initializer.
+      match.py structural (`--size 0x68`) - `mov r0,#0x24`, the
+      operator_new call, the construct dispatch, `cmp r0,#0` NULL exit, the
+      three stack-marshalled arguments, the init dispatch and its zero
+      test, and the destruct-then-delete teardown all appear in the
+      original's order; the differences are the crate fp frame, the
+      indirect `blx` hook dispatch in place of three direct `bl`s, and
+      LLVM keeping the NULL result in r6 instead of reusing r4.
