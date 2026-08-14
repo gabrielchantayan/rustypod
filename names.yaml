@@ -31330,3 +31330,81 @@ functions:
       sizing bl, allocating blx, NULL test, transcode blx,
       `add r0,r7,r6; strb r8,[r0,#-1]` - with the two ops-table
       indirections and LLVM hoisting the guard ahead of the frame push.
+
+  # --- time: the packed calendar record ---
+  - address: 0x08093c38
+    ghidra: FUN_08093c38
+    name: datetime_to_unix_seconds
+    size: 104
+    sig: "i32 datetime_to_unix_seconds(DateTime *dt)"
+    module: time/datetime
+    status: ported
+    vars: {param_1/r0/r4: dt, FUN_08093af8: datetime_compare, FUN_0807ea68: datetime_day_number,
+      DAT_08093c94: DATETIME_FLOOR (0x083e2e3e), DAT_08093c98: -719163, DAT_08093c9c: 86400}
+    notes: >-
+      Converts retailOS's packed ten-byte calendar record to a Unix
+      timestamp. This is a second, entirely separate time stack from the ADS
+      struct tm one in time/mktime.rs and time/localtime.rs - the record is
+      byte-wide fields with a 16-bit year, and it is the shape every
+      0x0807exxx / 0x08093xxx calendar helper takes.
+      46 call sites - 45 bl plus one predicated b (condition CC) - counted by
+      decoding every ARM B/BL word in work/firmware/osos.dec and resolving
+      each target, not a Ghidra xref count. The lone b is a predicated tail
+      call, not a veneer.
+      Extent 104 bytes, 0x08093c38..0x08093ca0, not the 92 functions.csv
+      reports. The 92 covers the 23 instructions and stops at the pop @
+      0x08093c90; it drops the three literal-pool words this function's own
+      pc-relative loads reach - 0x08093c94 = 0x083e2e3e (the floor record's
+      address), 0x08093c98 = 0xfff506c5 = -719163, 0x08093c9c = 0x00015180 =
+      86400. The next function opens at 0x08093ca0 with stmdb sp!,{r4,lr}.
+      Algorithm - if datetime_compare(dt, FLOOR) is negative, return 0;
+      otherwise (datetime_day_number(dt) - 719163) * 86400 + hour * 3600 +
+      minute * 60 + second. 719163 is the day number of 1970-01-01 under
+      0x0807ea68's proleptic-Gregorian Rata Die numbering (0001-01-01 = day
+      1), so the add of the negative literal turns a Rata Die day count into
+      days since the Unix epoch. The original strength-reduces both remaining
+      multiplies - hour * 3600 is mov r2,#0xe1 / smulbb r1,r1,r2 then
+      add r0,r0,r1 lsl #4, and minute * 60 is rsb r1,r1,r1 lsl #4 (times 15)
+      then add r0,r0,r1 lsl #2. Every add is flagless ARM arithmetic, so the
+      port wraps rather than panicking on overflow. The day-number call is
+      side-effecting - it rewrites dt->weekday - which is why the argument is
+      a mutable pointer, as in the original, which passes its incoming r0
+      straight through.
+      Record layout, recovered from the three functions that touch it (this
+      converter, the comparator 0x08093af8 and the day-number helper
+      0x0807ea68) - +0x00 second, +0x01 minute, +0x02 hour, +0x03 day of
+      month, +0x04 month (1 = January), +0x05 padding with no reader
+      anywhere, +0x06 u16 full year (ldrh), +0x08 weekday as an OUT field
+      written by 0x0807ea68, +0x09 padding.
+      The floor record is unreadable, so it stays a pointer. The comparator's
+      second argument is the fixed record at runtime 0x083e2e3e; under this
+      image's scatterload skew (image address = runtime address + 0xaed8, the
+      region survey in this file) its bytes sit at image 0x083f1d16, inside
+      the still-undecrypted zero run 0x083ee1c1..0x083f25ec. They read as
+      zeros because that region was never decrypted, not because they are
+      zero. Everything about the function says the record is 1970-01-01
+      00:00:00 - it is the value below which the converter clamps to 0, and 0
+      is exactly that instant's timestamp - but the port does not write the
+      guess down as data. DATETIME_FLOOR holds the address, which is what the
+      original's literal holds, and the comparison goes through the
+      DATETIME_OPS dispatch; on target with the stock comparator wired in
+      that is byte-for-byte the original whatever the record says.
+      Deviations - datetime_compare @ 0x08093af8 (8 bl sites) and
+      datetime_day_number @ 0x0807ea68 (25 bl sites) are not ported and
+      dispatch through DATETIME_OPS, the house pattern (app/iap_packet.rs,
+      heap/alloc_core.rs). The wired default comparator returns 0, "at or
+      after the floor", so the arithmetic path stays live with no hooks
+      installed and nothing dereferences the unmapped host address in
+      DATETIME_FLOOR; the wired default day-number helper returns 0 and
+      writes no weekday.
+      Host tests (7) - the ten-byte record layout with year halfword-aligned
+      at +6, the epoch converting to 0 through the arithmetic path rather
+      than the clamp, ten known instants including a leap day, the 2100
+      century non-leap year and two i32-wrapping post-2038 dates, records
+      below the floor clamping to 0 without running the day-number helper (so
+      the weekday side effect must not fire), the clamp being strict so an
+      equal record takes the arithmetic path, out-of-range time-of-day bytes
+      added verbatim with no validation, and the wired defaults producing the
+      documented result without touching the floor address. The comparator
+      and day-number stand-ins used by the tests are independent
+      re-implementations of the two originals.
