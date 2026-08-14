@@ -31408,3 +31408,94 @@ functions:
       documented result without touching the floor address. The comparator
       and day-number stand-ins used by the tests are independent
       re-implementations of the two originals.
+
+  # --- Vincent JIT: pipeline emission sugar ---
+  - address: 0x082605f0
+    ghidra: FUN_082605f0
+    name: cg_emit_load_word_at_offset
+    size: 136
+    sig: "cg_virtual_reg_t *cg_emit_load_word_at_offset(cg_block_t *block, cg_virtual_reg_t *base, U32 offset)"
+    module: codegen/pipeline_emit
+    status: ported
+    vars: {param_1: block, param_2: base, param_3: offset}
+    notes: >-
+      136 bytes, 34 instruction words, no literal pool - the next
+      function's own `stmdb sp!,{r3,r4,r5,r6,r7,r8,r9,lr}` starts at
+      0x08260678, so the extent is exact. 44 call sites, ALL
+      unconditional bl (0 predicated, 0 tail b), binary-scanned by
+      decoding every B/BL word in osos.dec for every condition code, not
+      from Ghidra xrefs. Callers are the Vincent 3D JIT's pipeline
+      generators in three runs - 0x08243a28-0x082447e8,
+      0x08245680-0x0824575c, 0x08245830-0x08245cc8 - passing offsets like
+      0x1c/0x20/0x24/0x28/0x2c and `n * 4 + 0x6c`, i.e. word-strided
+      structure fields. Algorithm: create three general-purpose virtual
+      registers up front through cg_virtual_reg_create(block->proc, 0),
+      then emit LDI offset_reg, offset / ADD address_reg, base,
+      offset_reg / LDW value_reg, [address_reg] and return value_reg.
+      Registers are therefore numbered in creation order, not use order.
+      Opcode identification: an exhaustive census of the r1 immediate at
+      every call site of each instruction factory gives load_immed = 40
+      unanimously (201/201 sites), load in {38, 39, 41}, store in
+      {42, 43, 44} and binary dominated by 1 (91 sites) - one contiguous
+      alphabetical run ldb/ldh/ldi/ldw/stb/sth/stw at 38..44 anchored by
+      ldi = 40, which fixes ldw = 41, plus add = 1 as the first opcode
+      after nop = 0. The same census pins reg type 0 as the
+      general-purpose class (792 of 835 cg_virtual_reg_create sites).
+      Constants CG_INST_OPCODE_LDI/LDW/ADD and CG_REG_TYPE_GENERAL added
+      to codegen/ir alongside the existing CG_INST_OPCODE_PHI.
+      Deviation: the original reloads block->proc from block+4 before
+      each of the three register creations; the port reads it once (the
+      field is not written in between). match.py structural: identical
+      call order, identical opcode/argument registers and the same
+      `str r7,[sp]` fifth argument to cg_create_inst_binary; the diff is
+      LLVM's frame-pointer prologue and that single hoisted load.
+
+
+  # --- C++ framework: debug/stats dump string writer ---
+  - address: 0x082647c0
+    ghidra: FUN_082647c0
+    name: stream_write_cstr
+    size: 48
+    sig: "U32 stream_write_cstr(void *owner, Stream *stream, const char *text)"
+    module: cxx/stream_write_cstr
+    status: ported
+    vars: {param_1: owner, param_2: stream, param_3: text, param_4: (phantom - the pushed r3 slot), local_10: written}
+    notes: >-
+      48 bytes, twelve instruction words, no literal pool: the body runs
+      0x082647c0..0x082647ec inclusive, `stmdb sp!,{r3,r4,r5,lr}` through
+      `ldmia sp!,{r3,r4,r5,pc}`, and the next function starts at
+      0x082647f0 with `ldrb r1,[r0,#0x19]; strb r1,[r0,#0x18]; bx lr`.
+      This CORRECTS an earlier survey of the big-endian neighbourhood
+      that recorded it as 44 bytes - one word short. That survey's other
+      conclusions hold: it opens push {r3,r4,r5,lr}, calls 0x08392478
+      then 0x0827899c with sp as an out-parameter, returns [sp], and is
+      unrelated to the pack/unpack family @ 0x0826161c-0x082617ec.
+      53 call sites, ALL unconditional bl (0 predicated, 0 tail b),
+      binary-scanned by decoding every B/BL word in osos.dec. They form
+      five runs in 0x08265010-0x08266418, all inside the framework's
+      debug/stats dump methods shaped Dump(this, stream), which build a
+      scratch StringObject (ctor 0x08277440 or 0x08276a18, formatter
+      string_object_format 0x082769d4), take its c_str
+      (string_object_c_str 0x082a50b0) and hand it here - the literals
+      are things like "Max Events In Queue: %d", "\t\t-\t" and "\n".
+      Algorithm: length = strlen(text) through the ported unguarded
+      retailOS strlen 0x08392478, then 0x0827899c(stream, length, text,
+      &written), return written. The NUL is measured but not written.
+      r0 is never read - it is the dump method's `this`, present because
+      the helper is one of its member functions; kept in the signature so
+      call sites transcribe unchanged. Ghidra's phantom fourth parameter
+      and `local_10 = param_4` are only `push {r3,...}` spilling the
+      scratch register whose slot becomes the out-parameter; that value
+      is dead because 0x0827899c's core @ 0x082789b8 stores 0 through the
+      out-pointer (`mov r6,#0; str r6,[r5]`) before any branch.
+      Deviations: 0x0827899c is unported (it zeroes a fifth, stack-passed
+      argument and tail-calls the buffered-stream write core @ 0x082789b8,
+      which takes the lock guard at +0x00, appends length bytes and
+      returns 0x15 when the stream's error byte at +0x14 is set), so it
+      is reached through the new STREAM_WRITE_OPS table rather than a
+      guessed implementation; and the out-parameter word is initialized
+      to 0 in the port so an unwired or partially-writing hook cannot
+      return a stale value. match.py structural: same shape - measure,
+      call the writer with a stack out-slot, reload and return it -
+      inflated because LLVM inlined the crate's five-instruction strlen
+      instead of emitting the original's `bl 0x8392478`.

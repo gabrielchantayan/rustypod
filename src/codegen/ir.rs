@@ -536,6 +536,36 @@ const CG_INST_OPCODE_IN_KIND_WORD: usize = 1;
 /// 0x2f.
 pub const CG_INST_OPCODE_PHI: u32 = 0x2f;
 
+// The opcodes below were pinned by an exhaustive census of the immediate
+// each factory's call sites pass in r1 (every `bl` to the factory in
+// osos.dec, scanning back for the `mov r1,#imm` that feeds it):
+//
+// | factory                   | opcodes seen                    |
+// |---------------------------|---------------------------------|
+// | `cg_create_inst_load_immed` | 40 — all 201 sites            |
+// | `cg_create_inst_load`       | 38, 39, 41                    |
+// | `cg_create_inst_store`      | 42, 43, 44                    |
+// | `cg_create_inst_binary`     | 1 (91 sites, the most common) |
+//
+// So 38..=44 is one contiguous alphabetical run of the memory opcodes —
+// `ldb, ldh, ldi, ldw, stb, sth, stw` — with `ldi` pinned at 40 by the
+// load-immediate factory's unanimous census, which fixes `ldw` at 41 (the
+// widest of the three load widths) and leaves 38/39 as the byte and
+// halfword loads. Opcode 1 is the first opcode after the enum's zero
+// (`nop`) and the dominant binary opcode: `add`.
+
+/// Load-immediate opcode: materialize a constant into a register.
+pub const CG_INST_OPCODE_LDI: u32 = 40;
+/// Word-load opcode: read 32 bits through an address register.
+pub const CG_INST_OPCODE_LDW: u32 = 41;
+/// Integer-add opcode of the binary instruction kind.
+pub const CG_INST_OPCODE_ADD: u32 = 1;
+
+/// `cg_virtual_reg_type_t` — the general-purpose value class, passed by
+/// 792 of the 835 `cg_virtual_reg_create` call sites (42 pass 1, the
+/// flags class; one passes 7).
+pub const CG_REG_TYPE_GENERAL: u32 = 0;
+
 /// `cg_inst_binary_t + 0x0c` — destination register.
 pub const CG_INST_BINARY_DEST: usize = 3;
 /// `cg_inst_binary_t + 0x14` — first source register.
