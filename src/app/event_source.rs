@@ -1,9 +1,10 @@
-//! The 92-byte retailOS event source object: construction and its kind byte.
+//! The 92-byte retailOS event source object: its constructor, its
+//! destructor, and its kind byte.
 //!
 //! [`crate::app::event_list`] ports the lazily-built event tree that lives
 //! at +0x38 of this object. This module ports the object's own constructor
-//! and the accessor for its kind byte, so the two together cover the
-//! source's construction seam.
+//! and destructor and the accessor for its kind byte, so the two together
+//! cover the source's whole lifetime seam.
 //!
 //! # Where the object comes from
 //!
@@ -46,8 +47,10 @@
 //! under `'SEVT'`, which is why that module calls it the primary event.
 
 use crate::app::event_list::{
-    EVENT_LIST_BUILT_OFFSET, EVENT_LIST_OFFSET, EVENT_SOURCE_EVENT_BEGIN_OFFSET,
-    EVENT_SOURCE_OPTIONAL_EVENT_OFFSET, EVENT_SOURCE_PRIMARY_EVENT_OFFSET,
+    CHUNK_BLOCK_OFFSET, CHUNK_CAPACITY_OFFSET, CHUNK_NEXT_OFFSET, EVENT_LIST_BUILT_OFFSET,
+    EVENT_LIST_OFFSET, EVENT_SOURCE_EVENT_BEGIN_OFFSET, EVENT_SOURCE_OPTIONAL_EVENT_OFFSET,
+    EVENT_SOURCE_PRIMARY_EVENT_OFFSET, TREE_HEADER_OFFSET, TREE_LEFTMOST_OFFSET,
+    TREE_POOL_CHUNKS_OFFSET,
 };
 
 /// Byte size of the object, from the `operator new(92)` @ 0x081472fc that
@@ -289,6 +292,239 @@ pub unsafe extern "C" fn event_source_construct(
     source
 }
 
+/// Sub-object teardowns the destructor calls through. Like the
+/// construction table above, each is a distinct unported firmware routine
+/// and each pointer-returning one returns its own `this`.
+#[derive(Clone, Copy)]
+pub struct EventSourceDestructOps {
+    /// Original 0x082a7fd8: destroys the event tree at +0x38. Its body is
+    /// instruction-for-instruction the same tree teardown this function
+    /// inlines for the child collection, but bound to the other node
+    /// allocator family (0x083c1c3c / 0x083c1648).
+    pub destroy_event_list: unsafe extern "C" fn(*mut u8) -> *mut u8,
+    /// Original 0x083ba534: the child collection's range erase,
+    /// `erase(result, tree, first, last)`. `result` is the four-byte
+    /// iterator slot the ARM passes as `add r0, sp, #8`.
+    pub erase_child_range:
+        unsafe extern "C" fn(*mut u32, *mut u8, *mut u32, *mut u32),
+    /// Original 0x083b9ffc: pushes a node onto the collection's
+    /// recycled-node list. The third argument selects value destruction;
+    /// the destructor passes 0 because the node it recycles is the
+    /// collection's valueless header sentinel.
+    pub recycle_child_node: unsafe extern "C" fn(*mut u8, *mut u8, u32),
+    /// Original 0x083e4b2c: destroys the declaration vector at +0x10 —
+    /// the counterpart of `construct_declaration_vector`.
+    pub destroy_declaration_vector: unsafe extern "C" fn(*mut u8) -> *mut u8,
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_destroy_event_list(tree: *mut u8) -> *mut u8 {
+    let destroy: unsafe extern "C" fn(*mut u8) -> *mut u8 =
+        unsafe { core::mem::transmute(0x082a_7fd8usize) };
+    unsafe { destroy(tree) }
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_erase_child_range(
+    result: *mut u32,
+    collection: *mut u8,
+    first: *mut u32,
+    last: *mut u32,
+) {
+    let erase: unsafe extern "C" fn(*mut u32, *mut u8, *mut u32, *mut u32) =
+        unsafe { core::mem::transmute(0x083b_a534usize) };
+    unsafe { erase(result, collection, first, last) }
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_recycle_child_node(
+    collection: *mut u8,
+    node: *mut u8,
+    destroy_value: u32,
+) {
+    let recycle: unsafe extern "C" fn(*mut u8, *mut u8, u32) =
+        unsafe { core::mem::transmute(0x083b_9ffcusize) };
+    unsafe { recycle(collection, node, destroy_value) }
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_destroy_declaration_vector(vector: *mut u8) -> *mut u8 {
+    let destroy: unsafe extern "C" fn(*mut u8) -> *mut u8 =
+        unsafe { core::mem::transmute(0x083e_4b2cusize) };
+    unsafe { destroy(vector) }
+}
+
+/// Host defaults. Unlike the construction table's, these cannot be faked
+/// by returning `this`: every one of them frees storage, and a silent
+/// no-op would let a test claim a teardown happened that did not. Tests
+/// install recording replacements; anything else is a bug worth a panic.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_destroy_event_list(_tree: *mut u8) -> *mut u8 {
+    panic!("event_source_destruct requires event-tree teardown 0x082a7fd8")
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_erase_child_range(
+    _result: *mut u32,
+    _collection: *mut u8,
+    _first: *mut u32,
+    _last: *mut u32,
+) {
+    panic!("event_source_destruct requires child range erase 0x083ba534")
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_recycle_child_node(
+    _collection: *mut u8,
+    _node: *mut u8,
+    _destroy_value: u32,
+) {
+    panic!("event_source_destruct requires node recycle 0x083b9ffc")
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_destroy_declaration_vector(_vector: *mut u8) -> *mut u8 {
+    panic!("event_source_destruct requires vector teardown 0x083e4b2c")
+}
+
+/// Active sub-object teardowns for [`event_source_destruct`].
+#[cfg(target_os = "none")]
+pub static mut EVENT_SOURCE_DESTRUCT_OPS: EventSourceDestructOps = EventSourceDestructOps {
+    destroy_event_list: firmware_destroy_event_list,
+    erase_child_range: firmware_erase_child_range,
+    recycle_child_node: firmware_recycle_child_node,
+    destroy_declaration_vector: firmware_destroy_declaration_vector,
+};
+
+#[cfg(not(target_os = "none"))]
+pub static mut EVENT_SOURCE_DESTRUCT_OPS: EventSourceDestructOps = EventSourceDestructOps {
+    destroy_event_list: missing_destroy_event_list,
+    erase_child_range: missing_erase_child_range,
+    recycle_child_node: missing_recycle_child_node,
+    destroy_declaration_vector: missing_destroy_declaration_vector,
+};
+
+#[inline(always)]
+unsafe fn destruct_ops() -> EventSourceDestructOps {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(EVENT_SOURCE_DESTRUCT_OPS)) }
+}
+
+/// Reads one u32 word of the opaque target layout. These words are 32-bit
+/// target pointers, so host fixtures backing them must sit below 4 GiB
+/// (`crate::testing::try_map_u32_slab`).
+#[inline(always)]
+unsafe fn word(at: *const u8) -> u32 {
+    unsafe { at.cast::<u32>().read() }
+}
+
+/// event_source_destruct — original: `FUN_081e0c4c` @ 0x081e0c4c
+/// (160 bytes: 39 instructions plus the literal pool word at 0x081e0ce8
+/// that Ghidra's 156-byte extent drops; the next function starts at
+/// 0x081e0cec. 128 `bl` call sites and no `b` tail calls, both verified by
+/// decoding every branch word in osos.dec — the very same 128 sites that
+/// call [`event_source_construct`], which is what identifies this as that
+/// constructor's non-deleting destructor. The deleting form is the
+/// six-instruction thunk @ 0x081e0c34: `cmp r0,#0; bl 0x081e0c4c; b
+/// operator_delete`.)
+///
+/// Reinstalls [`EVENT_SOURCE_VTABLE`] — the same literal the constructor
+/// stores, from a second copy of the word — then unwinds the three
+/// sub-objects in reverse construction order:
+///
+/// 1. the event tree at +0x38, through firmware 0x082a7fd8;
+/// 2. the child collection at +0x1c, whose teardown is *inlined* here
+///    rather than called: erase `[begin, end)`, recycle the header
+///    sentinel node, then free every chunk record of the collection's
+///    embedded node pool (see
+///    [`crate::app::event_list::TREE_POOL_CHUNKS_OFFSET`]);
+/// 3. the declaration vector at +0x10, through firmware 0x083e4b2c.
+///
+/// Each step addresses its sub-object relative to the *previous callee's
+/// returned pointer*, never relative to `source` — `sub r4, r0, #28` and
+/// `sub r0, r4, #12` — and the final `sub r0, r0, #16` recovers `source`
+/// from the vector teardown's result. The port keeps that chain intact,
+/// because it is what makes the function work for a `source` the caller
+/// reached through a base-class pointer.
+///
+/// Two details are load-bearing and preserved verbatim:
+///
+/// * the whole collection teardown, chunk-pool walk included, sits under
+///   the single `if header != 0` test on the collection's header word. A
+///   collection whose header was never allocated leaks nothing, because
+///   the pool that would hold chunks is the header's own allocator;
+/// * the header word is re-read from the collection *after* the range
+///   erase, so the node handed to the recycle call is whatever the erase
+///   left behind, not the value captured before it.
+///
+/// Deviation: the original reads the header word twice in a row before
+/// the erase (`ldr r0, [r0, #-12]` then `ldr r0, [r4, #16]`, no call in
+/// between) to form the two iterator slots; the port reads it once.
+///
+/// # Safety
+///
+/// `source` must point at 0x5c writable, word-aligned bytes holding a
+/// constructed event source; the collection's header and pool words must
+/// name live target allocations. All as in the original.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn event_source_destruct(source: *mut u8) -> *mut u8 {
+    let ops = unsafe { destruct_ops() };
+    unsafe { source.cast::<u32>().write(EVENT_SOURCE_VTABLE) };
+
+    let list = unsafe { (ops.destroy_event_list)(source.add(EVENT_LIST_OFFSET)) };
+    let children = unsafe { list.sub(EVENT_LIST_OFFSET - EVENT_SOURCE_CHILDREN_OFFSET) };
+
+    let mut header = unsafe { word(children.add(TREE_HEADER_OFFSET)) };
+    if header != 0 {
+        let mut leftmost =
+            unsafe { word((header as usize as *const u8).add(TREE_LEFTMOST_OFFSET)) };
+        // The four-byte iterator the erase returns; the original reserves
+        // it as a stack slot (`add r0, sp, #8`, one of the words its
+        // prologue pushed) and never looks at it again, so it is never
+        // initialized either.
+        let mut erased = core::mem::MaybeUninit::<u32>::uninit();
+        unsafe {
+            (ops.erase_child_range)(
+                erased.as_mut_ptr(),
+                children,
+                &mut leftmost,
+                &mut header,
+            )
+        };
+
+        let sentinel = unsafe { word(children.add(TREE_HEADER_OFFSET)) };
+        unsafe { (ops.recycle_child_node)(children, sentinel as usize as *mut u8, 0) };
+
+        loop {
+            let chunk = unsafe { word(children.add(TREE_POOL_CHUNKS_OFFSET)) };
+            if chunk == 0 {
+                break;
+            }
+            let chunk = chunk as usize as *mut u8;
+            let next = unsafe { word(chunk.add(CHUNK_NEXT_OFFSET)) };
+            unsafe {
+                children
+                    .add(TREE_POOL_CHUNKS_OFFSET)
+                    .cast::<u32>()
+                    .write(next);
+                crate::heap::veneers::cxx_array_dealloc(
+                    word(chunk.add(CHUNK_BLOCK_OFFSET)) as usize as *mut u8,
+                    word(chunk.add(CHUNK_CAPACITY_OFFSET)) as usize,
+                    0,
+                );
+                crate::heap::veneers::cxx_array_dealloc(chunk, 1, 0);
+            }
+        }
+    }
+
+    let vector = unsafe {
+        (ops.destroy_declaration_vector)(
+            children.sub(EVENT_SOURCE_CHILDREN_OFFSET - EVENT_SOURCE_EVENT_BEGIN_OFFSET),
+        )
+    };
+    unsafe { vector.sub(EVENT_SOURCE_EVENT_BEGIN_OFFSET) }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -473,5 +709,402 @@ mod tests {
         assert!(source.0[EVENT_LIST_OFFSET..EVENT_LIST_BUILT_OFFSET]
             .iter()
             .all(|&b| b == 0xaa));
+    }
+}
+
+#[cfg(test)]
+mod destruct_tests {
+    extern crate std;
+
+    use super::*;
+    use crate::heap::veneers::tests::{free_log, mock_heap};
+    use crate::testing::{note_missing_u32_fixture, try_map_u32_slab};
+    use std::sync::{LazyLock, Mutex, MutexGuard};
+    use std::vec::Vec;
+
+    static DESTRUCT_LOCK: Mutex<()> = Mutex::new(());
+    static mut CALLS: Vec<Call> = Vec::new();
+    /// Non-null forces the matching teardown's return value, which is how
+    /// the tests prove the port rebases off the callee's pointer.
+    static mut EVENT_LIST_RESULT: *mut u8 = core::ptr::null_mut();
+    static mut VECTOR_RESULT: *mut u8 = core::ptr::null_mut();
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum Call {
+        /// `source_vtable` is read back through the argument, so recording
+        /// it proves the vtable store precedes the first teardown.
+        DestroyEventList { at: usize, source_vtable: u32 },
+        EraseChildRange { collection: usize, first: u32, last: u32 },
+        RecycleChildNode { collection: usize, node: u32, destroy_value: u32 },
+        DestroyDeclarationVector { at: usize },
+    }
+
+    unsafe extern "C" fn recording_destroy_event_list(tree: *mut u8) -> *mut u8 {
+        unsafe {
+            CALLS.push(Call::DestroyEventList {
+                at: tree as usize,
+                source_vtable: word(tree.sub(EVENT_LIST_OFFSET)),
+            });
+            let forced = core::ptr::read_volatile(core::ptr::addr_of!(EVENT_LIST_RESULT));
+            if forced.is_null() {
+                tree
+            } else {
+                forced
+            }
+        }
+    }
+
+    unsafe extern "C" fn recording_erase_child_range(
+        result: *mut u32,
+        collection: *mut u8,
+        first: *mut u32,
+        last: *mut u32,
+    ) {
+        unsafe {
+            CALLS.push(Call::EraseChildRange {
+                collection: collection as usize,
+                first: first.read(),
+                last: last.read(),
+            });
+            // The firmware erase writes the surviving iterator here.
+            result.write(0xeeee_eeee);
+        }
+    }
+
+    unsafe extern "C" fn recording_recycle_child_node(
+        collection: *mut u8,
+        node: *mut u8,
+        destroy_value: u32,
+    ) {
+        unsafe {
+            CALLS.push(Call::RecycleChildNode {
+                collection: collection as usize,
+                node: node as usize as u32,
+                destroy_value,
+            })
+        };
+    }
+
+    unsafe extern "C" fn recording_destroy_declaration_vector(vector: *mut u8) -> *mut u8 {
+        unsafe {
+            CALLS.push(Call::DestroyDeclarationVector {
+                at: vector as usize,
+            });
+            let forced = core::ptr::read_volatile(core::ptr::addr_of!(VECTOR_RESULT));
+            if forced.is_null() {
+                vector
+            } else {
+                forced
+            }
+        }
+    }
+
+    const RECORDING_OPS: EventSourceDestructOps = EventSourceDestructOps {
+        destroy_event_list: recording_destroy_event_list,
+        erase_child_range: recording_erase_child_range,
+        recycle_child_node: recording_recycle_child_node,
+        destroy_declaration_vector: recording_destroy_declaration_vector,
+    };
+
+    /// Installs the recording table and the mock heap; both are global, so
+    /// both guards are held for the whole test.
+    fn mock() -> (MutexGuard<'static, ()>, MutexGuard<'static, ()>) {
+        let ops_guard = DESTRUCT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let heap_guard = mock_heap();
+        unsafe {
+            core::ptr::addr_of_mut!(EVENT_SOURCE_DESTRUCT_OPS).write_volatile(RECORDING_OPS);
+            CALLS.clear();
+            EVENT_LIST_RESULT = core::ptr::null_mut();
+            VECTOR_RESULT = core::ptr::null_mut();
+        }
+        (ops_guard, heap_guard)
+    }
+
+    fn restore(guards: (MutexGuard<'static, ()>, MutexGuard<'static, ()>)) {
+        unsafe {
+            core::ptr::addr_of_mut!(EVENT_SOURCE_DESTRUCT_OPS).write_volatile(
+                EventSourceDestructOps {
+                    destroy_event_list: missing_destroy_event_list,
+                    erase_child_range: missing_erase_child_range,
+                    recycle_child_node: missing_recycle_child_node,
+                    destroy_declaration_vector: missing_destroy_declaration_vector,
+                },
+            );
+        }
+        drop(guards);
+    }
+
+    fn calls() -> Vec<Call> {
+        unsafe { CALLS.clone() }
+    }
+
+    /// A source whose child collection has no header. Nothing in this
+    /// object is dereferenced through a u32 word, so it needs no low
+    /// mapping and runs on every host.
+    #[repr(align(4))]
+    struct Source([u8; EVENT_SOURCE_SIZE]);
+
+    #[test]
+    fn a_headerless_collection_only_runs_the_two_sub_object_teardowns() {
+        let guards = mock();
+        let mut source = Source([0xa5; EVENT_SOURCE_SIZE]);
+        // The header word is the single gate on the collection teardown.
+        source.0[EVENT_SOURCE_CHILDREN_OFFSET + TREE_HEADER_OFFSET
+            ..EVENT_SOURCE_CHILDREN_OFFSET + TREE_HEADER_OFFSET + 4]
+            .copy_from_slice(&0u32.to_le_bytes());
+        let this = source.0.as_mut_ptr();
+        unsafe {
+            let returned = event_source_destruct(this);
+
+            assert_eq!(returned, this, "the pointer chain lands back on source");
+            assert_eq!(
+                word(this),
+                EVENT_SOURCE_VTABLE,
+                "the destructor reinstalls the constructor's vtable"
+            );
+            assert_eq!(
+                calls(),
+                std::vec![
+                    Call::DestroyEventList {
+                        at: this.add(EVENT_LIST_OFFSET) as usize,
+                        source_vtable: EVENT_SOURCE_VTABLE,
+                    },
+                    Call::DestroyDeclarationVector {
+                        at: this.add(EVENT_SOURCE_EVENT_BEGIN_OFFSET) as usize,
+                    },
+                ],
+                "no erase, no recycle, no pool walk without a header"
+            );
+            assert_eq!(free_log().0, 0, "and nothing reaches the heap");
+        }
+        restore(guards);
+    }
+
+    #[test]
+    fn every_sub_object_address_comes_from_the_previous_callee_result() {
+        let guards = mock();
+        // A relocated event-tree teardown result puts the collection —
+        // and therefore the declaration vector — somewhere else entirely.
+        let mut elsewhere = Source([0; EVENT_SOURCE_SIZE]);
+        let mut source = Source([0; EVENT_SOURCE_SIZE]);
+        let this = source.0.as_mut_ptr();
+        // `elsewhere + 0x1c` plays the collection; its header word is the
+        // zero the array is already filled with.
+        let relocated_list = unsafe {
+            elsewhere
+                .0
+                .as_mut_ptr()
+                .add(EVENT_LIST_OFFSET - EVENT_SOURCE_CHILDREN_OFFSET)
+        };
+        unsafe {
+            EVENT_LIST_RESULT = relocated_list;
+            let returned = event_source_destruct(this);
+
+            let collection = relocated_list.sub(EVENT_LIST_OFFSET - EVENT_SOURCE_CHILDREN_OFFSET);
+            let vector = collection
+                .sub(EVENT_SOURCE_CHILDREN_OFFSET - EVENT_SOURCE_EVENT_BEGIN_OFFSET);
+            assert_eq!(
+                calls()[1],
+                Call::DestroyDeclarationVector { at: vector as usize },
+                "the vector address is the tree result minus 0x1c minus 0xc"
+            );
+            assert_eq!(
+                returned,
+                vector.sub(EVENT_SOURCE_EVENT_BEGIN_OFFSET),
+                "and the result is the vector teardown's pointer minus 0x10"
+            );
+            assert_ne!(returned, this, "which is deliberately not `source`");
+        }
+        restore(guards);
+    }
+
+    // --- the populated collection path: u32 target pointers, low fixture ---
+
+    const SLAB_HINT: usize = crate::testing::hints::EVENT_SOURCE_DESTRUCT;
+    const SLAB_LEN: usize = 0x1000;
+    /// Where the fixture puts the collection's header sentinel, its
+    /// leftmost node, and the node pool's chunk records and blocks.
+    const HEADER_AT: usize = 0x100;
+    const LEFTMOST_AT: usize = 0x140;
+    const CHUNK_AT: [usize; 2] = [0x200, 0x240];
+    const BLOCK_AT: [usize; 2] = [0x300, 0x400];
+
+    static SLAB: LazyLock<Option<usize>> =
+        LazyLock::new(|| try_map_u32_slab(SLAB_HINT, SLAB_LEN).map(|p| p as usize));
+
+    /// One low mapping serves every populated-collection test; the lock
+    /// each test holds makes the reuse safe.
+    fn try_slab() -> Option<*mut u8> {
+        (*SLAB).map(|p| p as *mut u8)
+    }
+
+    unsafe fn put_word(at: *mut u8, value: u32) {
+        unsafe { at.cast::<u32>().write(value) };
+    }
+
+    /// Builds a source at the slab base whose child collection owns a
+    /// header sentinel plus `chunks` node-pool chunk records. Returns
+    /// `source`.
+    unsafe fn install_source(slab: *mut u8, chunks: usize) -> *mut u8 {
+        unsafe {
+            core::ptr::write_bytes(slab, 0, SLAB_LEN);
+            let collection = slab.add(EVENT_SOURCE_CHILDREN_OFFSET);
+            put_word(
+                collection.add(TREE_HEADER_OFFSET),
+                slab.add(HEADER_AT) as usize as u32,
+            );
+            put_word(
+                slab.add(HEADER_AT + TREE_LEFTMOST_OFFSET),
+                slab.add(LEFTMOST_AT) as usize as u32,
+            );
+            let mut head = 0u32;
+            for index in (0..chunks).rev() {
+                let chunk = slab.add(CHUNK_AT[index]);
+                put_word(chunk.add(CHUNK_NEXT_OFFSET), head);
+                put_word(chunk.add(CHUNK_CAPACITY_OFFSET), 32 + index as u32);
+                put_word(
+                    chunk.add(CHUNK_BLOCK_OFFSET),
+                    slab.add(BLOCK_AT[index]) as usize as u32,
+                );
+                head = chunk as usize as u32;
+            }
+            put_word(collection.add(TREE_POOL_CHUNKS_OFFSET), head);
+            slab
+        }
+    }
+
+    #[test]
+    fn a_populated_collection_is_erased_then_its_header_node_recycled() {
+        let Some(slab) = try_slab() else {
+            assert!(note_missing_u32_fixture("app::event_source::destruct"));
+            return;
+        };
+        let guards = mock();
+        unsafe {
+            let this = install_source(slab, 0);
+            let collection = this.add(EVENT_SOURCE_CHILDREN_OFFSET);
+            let header = word(collection.add(TREE_HEADER_OFFSET));
+
+            event_source_destruct(this);
+
+            assert_eq!(
+                calls()[1],
+                Call::EraseChildRange {
+                    collection: collection as usize,
+                    first: word(slab.add(HEADER_AT + TREE_LEFTMOST_OFFSET)),
+                    last: header,
+                },
+                "erase([begin, end)) — begin is header->left, end is header"
+            );
+            assert_eq!(
+                calls()[2],
+                Call::RecycleChildNode {
+                    collection: collection as usize,
+                    node: header,
+                    destroy_value: 0,
+                },
+                "the valueless sentinel is recycled without value destruction"
+            );
+            assert_eq!(calls().len(), 4, "and the two sub-object teardowns bracket it");
+            assert_eq!(free_log().0, 0, "an empty node pool frees nothing");
+        }
+        restore(guards);
+    }
+
+    #[test]
+    fn the_recycled_node_is_re_read_after_the_erase() {
+        let Some(slab) = try_slab() else {
+            assert!(note_missing_u32_fixture("app::event_source::destruct"));
+            return;
+        };
+        let guards = mock();
+        unsafe {
+            let this = install_source(slab, 0);
+            let collection = this.add(EVENT_SOURCE_CHILDREN_OFFSET);
+            // An erase that swaps the header out must be followed.
+            let replacement = slab.add(LEFTMOST_AT) as usize as u32;
+            unsafe extern "C" fn erase_then_swap_header(
+                result: *mut u32,
+                collection: *mut u8,
+                first: *mut u32,
+                last: *mut u32,
+            ) {
+                unsafe {
+                    recording_erase_child_range(result, collection, first, last);
+                    let swapped = core::ptr::read_volatile(core::ptr::addr_of!(SWAPPED_HEADER));
+                    put_word(collection.add(TREE_HEADER_OFFSET), swapped);
+                }
+            }
+            SWAPPED_HEADER = replacement;
+            core::ptr::addr_of_mut!(EVENT_SOURCE_DESTRUCT_OPS.erase_child_range)
+                .write_volatile(erase_then_swap_header);
+
+            event_source_destruct(this);
+
+            assert_eq!(
+                calls()[2],
+                Call::RecycleChildNode {
+                    collection: collection as usize,
+                    node: replacement,
+                    destroy_value: 0,
+                },
+                "the header word is re-read after the erase, not cached"
+            );
+        }
+        restore(guards);
+    }
+
+    static mut SWAPPED_HEADER: u32 = 0;
+
+    #[test]
+    fn the_node_pool_is_drained_block_before_record_in_list_order() {
+        let Some(slab) = try_slab() else {
+            assert!(note_missing_u32_fixture("app::event_source::destruct"));
+            return;
+        };
+        let guards = mock();
+        unsafe {
+            let this = install_source(slab, 2);
+            let collection = this.add(EVENT_SOURCE_CHILDREN_OFFSET);
+
+            event_source_destruct(this);
+
+            let (frees, last, tag) = free_log();
+            assert_eq!(frees, 4, "two records, each with its block");
+            assert_eq!(
+                last,
+                slab.add(CHUNK_AT[1]),
+                "the last free is the second record — records follow their blocks"
+            );
+            assert_eq!(tag, 2, "through the tag-2 operator delete");
+            assert_eq!(
+                word(collection.add(TREE_POOL_CHUNKS_OFFSET)),
+                0,
+                "the list head is unlinked one record at a time and ends empty"
+            );
+        }
+        restore(guards);
+    }
+
+    #[test]
+    fn a_record_without_a_block_still_frees_the_record() {
+        let Some(slab) = try_slab() else {
+            assert!(note_missing_u32_fixture("app::event_source::destruct"));
+            return;
+        };
+        let guards = mock();
+        unsafe {
+            let this = install_source(slab, 1);
+            // NULL blocks are the guarded `operator delete`'s business;
+            // the record itself must still go.
+            put_word(slab.add(CHUNK_AT[0] + CHUNK_BLOCK_OFFSET), 0);
+
+            event_source_destruct(this);
+
+            let (frees, last, _) = free_log();
+            assert_eq!(frees, 1, "the NULL block is swallowed by operator delete");
+            assert_eq!(last, slab.add(CHUNK_AT[0]), "the record still goes");
+        }
+        restore(guards);
     }
 }

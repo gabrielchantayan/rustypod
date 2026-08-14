@@ -1,5 +1,7 @@
 //! The two-word-header derived-class constructor the application layer
-//! runs to bring up its 200-byte service objects (90 `bl` call sites).
+//! runs to bring up its 200-byte service objects (90 `bl` call sites),
+//! plus the concrete base class's own destructor @ 0x0810ec10 — the
+//! teardown `crate::app::pair_header_destruct` chains into.
 //!
 //! The scouted notes for this address originally described a three-way
 //! pointer clamp — that clamp lives at 0x083d5eb4 / 0x083d5ed8 and is
@@ -189,6 +191,120 @@ pub unsafe extern "C" fn pair_header_base_construct(base: *mut u32) -> *mut u32 
     object.cast::<u8>().add(0xb4).write(0);
     core::ptr::write_bytes(grand_base.cast::<u8>(), 0, 0x94);
     object
+}
+
+/// Byte-offset-in-words of the grand-base body *inside the base object*.
+/// The base stores its vtable in word 0 and puts the grand base at +4, so
+/// this is one word past [`GRAND_BASE_BODY_OFFSET_WORDS`] — 0x30 bytes,
+/// the original's `add r0, r4, #48`.
+const BASE_BODY_OFFSET_WORDS: usize = GRAND_BASE_BODY_OFFSET_WORDS + 1;
+
+/// The two unported teardowns [`pair_header_base_destruct`] calls.
+#[derive(Clone, Copy)]
+pub struct PairHeaderBaseDestructOps {
+    /// Original 0x0810e908 (52 bytes, a standalone function — the word
+    /// before it is a `pop {..., pc}`). It returns the base's optionally
+    /// owned 28-byte payload: if the ownership byte at +0xb4 is set and
+    /// the pointer at +0x04 is non-NULL, it releases that pointer either
+    /// to the pool at +0xb0 through the ported `heap_free` (0x0819d4dc)
+    /// or, when there is no pool, to the global heap through the ported
+    /// `free_wrapper` (0x080e7970). A default-constructed base has all
+    /// three fields cleared by `pair_header_base_construct`, so this is a
+    /// no-op on that path.
+    pub release_owned_payload: unsafe extern "C" fn(*mut u32),
+    /// Original 0x08185bac (32 bytes: seven instructions plus the literal
+    /// pool word 0x08283a80 at 0x08185bcc). The mirror image of the ported
+    /// [`pair_header_grand_base_body_construct`] @ 0x08185b98 — it passes
+    /// `(this, 4, 0x14, 0x08283a80)` to the array-helper adapter at
+    /// 0x082ab3ec, which destroys the four 20-byte elements through the
+    /// ported `__cpp_finalise` (0x080336d8) and skips everything when the
+    /// element destructor is NULL. It returns `this`.
+    pub destroy_grand_base_body: unsafe extern "C" fn(*mut u32) -> *mut u32,
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_release_owned_payload(base: *mut u32) {
+    let release: unsafe extern "C" fn(*mut u32) =
+        unsafe { core::mem::transmute(0x0810_e908usize) };
+    unsafe { release(base) }
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_destroy_grand_base_body(body: *mut u32) -> *mut u32 {
+    let destroy: unsafe extern "C" fn(*mut u32) -> *mut u32 =
+        unsafe { core::mem::transmute(0x0818_5bacusize) };
+    unsafe { destroy(body) }
+}
+
+/// Host defaults. Both callees free storage, so unlike the construction
+/// table's benign stand-ins these panic: a silent no-op would let a test
+/// claim a teardown that never happened.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_release_owned_payload(_base: *mut u32) {
+    panic!("pair_header_base_destruct requires payload release 0x0810e908")
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_destroy_grand_base_body(_body: *mut u32) -> *mut u32 {
+    panic!("pair_header_base_destruct requires body teardown 0x08185bac")
+}
+
+/// Active teardowns for [`pair_header_base_destruct`].
+#[cfg(target_os = "none")]
+pub static mut PAIR_HEADER_BASE_DESTRUCT_OPS: PairHeaderBaseDestructOps =
+    PairHeaderBaseDestructOps {
+        release_owned_payload: firmware_release_owned_payload,
+        destroy_grand_base_body: firmware_destroy_grand_base_body,
+    };
+
+#[cfg(not(target_os = "none"))]
+pub static mut PAIR_HEADER_BASE_DESTRUCT_OPS: PairHeaderBaseDestructOps =
+    PairHeaderBaseDestructOps {
+        release_owned_payload: missing_release_owned_payload,
+        destroy_grand_base_body: missing_destroy_grand_base_body,
+    };
+
+/// pair_header_base_destruct — original: `FUN_0810ec10` @ 0x0810ec10
+/// (44 bytes: ten instructions plus the literal pool word at 0x0810ec38
+/// that Ghidra's 40-byte extent drops; the next function starts at
+/// 0x0810ec3c. 56 `bl` call sites and no `b` tail calls, both verified by
+/// decoding every branch word in osos.dec).
+///
+/// The non-deleting destructor of the same 0xb8-byte base object
+/// [`pair_header_base_construct`] @ 0x0810ebbc builds — the two share the
+/// vtable literal [`PAIR_HEADER_BASE_VTABLE`], which occurs in exactly
+/// seven places in the image, all of them literal pools of that one
+/// class's constructors and this destructor. The address itself occurs in
+/// no data word, so it fills no vtable slot: every call site reaches it
+/// directly, and the deleting form is the separate thunk @ 0x0810ebf8
+/// (`cmp r0,#0; bl 0x0810ec10; b operator_delete`).
+///
+/// It reinstalls the vtable, releases the optionally owned payload, and
+/// destroys the grand base's element array at +0x30, returning `base`
+/// through that teardown's own result (`sub r0, r0, #48`).
+///
+/// The construction and destruction chains are deliberately not mirror
+/// images. Construction goes `base -> grand base at +4 -> body at
+/// grandbase+0x2c`; destruction skips the middle hop and calls the body
+/// teardown at base+0x30 directly, because the grand base has nothing of
+/// its own to unwind. The port reproduces the collapsed chain rather than
+/// re-introducing a wrapper the original does not call.
+///
+/// # Safety
+///
+/// `base` must point at 0xb8 writable, word-aligned bytes holding a
+/// constructed base object, and the pointer returned by
+/// `destroy_grand_base_body` must be 0x30 bytes into that storage. All as
+/// in the original.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn pair_header_base_destruct(base: *mut u32) -> *mut u32 {
+    let ops =
+        unsafe { core::ptr::read_volatile(core::ptr::addr_of!(PAIR_HEADER_BASE_DESTRUCT_OPS)) };
+    unsafe { base.write(PAIR_HEADER_BASE_VTABLE) };
+    unsafe { (ops.release_owned_payload)(base) };
+    unsafe { (ops.destroy_grand_base_body)(base.add(BASE_BODY_OFFSET_WORDS)) }
+        .sub(BASE_BODY_OFFSET_WORDS)
 }
 
 /// pair_header_construct — original: `FUN_08124a38` @ 0x08124a38
@@ -512,5 +628,167 @@ mod tests {
             assert_eq!(object[(12 + 0xb4) / 4], 0xaaaa_5500);
             assert_eq!(object[0xc4 / 4], 0);
         }
+    }
+}
+
+#[cfg(test)]
+mod base_destruct_tests {
+    extern crate std;
+
+    use super::*;
+    use std::sync::{Mutex, MutexGuard};
+    use std::vec::Vec;
+
+    /// The teardown table is one global; serialize the tests that swap it.
+    static DESTRUCT_LOCK: Mutex<()> = Mutex::new(());
+    static mut CALLS: Vec<Call> = Vec::new();
+    /// Non-null forces the body teardown's return value, which is how the
+    /// rebase test proves the port works off the callee's pointer.
+    static mut BODY_RESULT: *mut u32 = core::ptr::null_mut();
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum Call {
+        /// `vtable` is read back through the argument, so recording it
+        /// proves the vtable store precedes the release.
+        ReleaseOwnedPayload { base: usize, vtable: u32 },
+        DestroyGrandBaseBody { body: usize },
+    }
+
+    unsafe extern "C" fn recording_release_owned_payload(base: *mut u32) {
+        unsafe {
+            CALLS.push(Call::ReleaseOwnedPayload {
+                base: base as usize,
+                vtable: base.read(),
+            })
+        };
+    }
+
+    unsafe extern "C" fn recording_destroy_grand_base_body(body: *mut u32) -> *mut u32 {
+        unsafe {
+            CALLS.push(Call::DestroyGrandBaseBody { body: body as usize });
+            let forced = core::ptr::read_volatile(core::ptr::addr_of!(BODY_RESULT));
+            if forced.is_null() {
+                body
+            } else {
+                forced
+            }
+        }
+    }
+
+    fn mock() -> MutexGuard<'static, ()> {
+        let guard = DESTRUCT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            core::ptr::addr_of_mut!(PAIR_HEADER_BASE_DESTRUCT_OPS).write_volatile(
+                PairHeaderBaseDestructOps {
+                    release_owned_payload: recording_release_owned_payload,
+                    destroy_grand_base_body: recording_destroy_grand_base_body,
+                },
+            );
+            CALLS.clear();
+            BODY_RESULT = core::ptr::null_mut();
+        }
+        guard
+    }
+
+    fn restore(guard: MutexGuard<'static, ()>) {
+        unsafe {
+            core::ptr::addr_of_mut!(PAIR_HEADER_BASE_DESTRUCT_OPS).write_volatile(
+                PairHeaderBaseDestructOps {
+                    release_owned_payload: missing_release_owned_payload,
+                    destroy_grand_base_body: missing_destroy_grand_base_body,
+                },
+            );
+        }
+        drop(guard);
+    }
+
+    fn calls() -> Vec<Call> {
+        unsafe { CALLS.clone() }
+    }
+
+    /// The class's whole 0xb8-byte extent, as `pair_header_base_construct`
+    /// fills it (its last field is the ownership byte at +0xb4).
+    #[repr(align(4))]
+    struct Base([u8; 0xb8]);
+
+    #[test]
+    fn the_vtable_is_reinstalled_before_anything_is_released() {
+        let guard = mock();
+        let mut object = Base([0xa5; 0xb8]);
+        let base = object.0.as_mut_ptr().cast::<u32>();
+        unsafe {
+            let returned = pair_header_base_destruct(base);
+
+            assert_eq!(
+                calls(),
+                std::vec![
+                    Call::ReleaseOwnedPayload {
+                        base: base as usize,
+                        vtable: PAIR_HEADER_BASE_VTABLE,
+                    },
+                    Call::DestroyGrandBaseBody {
+                        body: base.add(BASE_BODY_OFFSET_WORDS) as usize,
+                    },
+                ],
+                "vtable store, then release(this), then destroy(this + 0x30)"
+            );
+            assert_eq!(base.read(), PAIR_HEADER_BASE_VTABLE);
+            assert_eq!(returned, base, "and `this` comes back out");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_body_teardown_lands_exactly_0x30_bytes_in() {
+        let guard = mock();
+        let mut object = Base([0; 0xb8]);
+        let base = object.0.as_mut_ptr().cast::<u32>();
+        unsafe {
+            pair_header_base_destruct(base);
+            let Call::DestroyGrandBaseBody { body } = calls()[1] else {
+                unreachable!("the second call is the body teardown")
+            };
+            assert_eq!(
+                body - base as usize,
+                0x30,
+                "the vtable word plus the grand base's own 0x2c offset"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_return_value_is_rebased_off_the_callee_result() {
+        let guard = mock();
+        let mut object = Base([0; 0xb8]);
+        let mut elsewhere = Base([0; 0xb8]);
+        let base = object.0.as_mut_ptr().cast::<u32>();
+        unsafe {
+            for shift in [0usize, 4, 0x30] {
+                let relocated = elsewhere.0.as_mut_ptr().add(shift).cast::<u32>();
+                BODY_RESULT = relocated;
+                assert_eq!(
+                    pair_header_base_destruct(base),
+                    relocated.byte_sub(0x30),
+                    "shift {shift:#x}: the result is the teardown's pointer minus 0x30",
+                );
+            }
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn nothing_outside_the_vtable_word_is_written() {
+        let guard = mock();
+        let mut object = Base([0x5a; 0xb8]);
+        let base = object.0.as_mut_ptr().cast::<u32>();
+        unsafe { pair_header_base_destruct(base) };
+        // Ownership byte, pool word and payload pointer belong to
+        // 0x0810e908; the element array belongs to 0x08185bac.
+        assert!(
+            object.0[4..].iter().all(|&b| b == 0x5a),
+            "the destructor itself stores only the vtable"
+        );
+        restore(guard);
     }
 }
