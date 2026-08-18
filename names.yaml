@@ -9359,6 +9359,51 @@ functions:
       adds/adc/lsr/orr/return core is instruction-identical; LLVM only
       adds an fp frame.
 
+  - address: 0x080377e4
+    ghidra: FUN_080377e4
+    name: fixed16_recip_unguarded
+    size: 48
+    sig: "i32 fixed16_recip_unguarded(i32 x)"
+    module: util/fixed
+    status: ported
+    vars: {param_1: x, iVar1: negative}
+    notes: >-
+      Unguarded Q16.16 reciprocal body, 0xffffffff / |x| with the sign
+      reapplied. CAVEAT: the listed 48 bytes end at the computed jump;
+      osos.asm drops everything past it and Ghidra could not recover the
+      jumptable at 0x08037810 ("Treating indirect jump as call"). The
+      true body, decoded from raw osos.dec words, runs
+      0x080377e4..0x080379a8 (452 bytes): push {r1-r4}; mov r3,r0,asr#31
+      (sign); cmp/movpl/rsbmi folding x to |x| (rsbmi wraps i32::MIN to
+      magnitude 0x80000000, V ignored); clz r0,r1; then add pc,pc,r4
+      with r4 = 12 * (31 - clz(|x|)) jumps into a 32-entry unrolled
+      restoring division at the entry for quotient bit clz(|x|), the
+      highest settable bit. Each 12-byte entry is subs r4,r2,r1,lsl#bit
+      / orrcs r0,r0,#1<<bit / movcs r2,r4 (r2 = remainder seeded with
+      the dividend 0xffffffff, r0 = quotient). The skip is semantic: in
+      skipped entries the shift pushes divisor bits off the register top
+      and would corrupt the trial. Epilogue cmp r3,#0 / rsbne r0,r0,#0 /
+      pop / bx lr. The 2^32-1 dividend truncates every exact reciprocal
+      one ulp low: recip(1.0)=0xffff, recip(2.0)=0x7fff; i32::MIN -> -1.
+      x == 0 is invalid (clz(0)=32 -> wild negative jump offset); the
+      guard lives in the caller fixed16_recip. 11 call sites: the
+      conditional tail bne from fixed16_recip @ 0x08076204 plus 10 bl
+      sites (0x080ea69c, 0x080ea6e0, 0x080eaea0, 0x080eaee4, 0x080ed388,
+      0x08160800, 0x081a0fa0, 0x08224a5c, 0x082537a4, 0x082539f4). The
+      port rolls the division into a loop from bit clz(|x|) down to 0;
+      the computed jump and unrolling are ADS codegen, not semantics.
+      FIXED16_RECIP_UNGUARDED now defaults to this port on both target
+      and host (the seam stays swappable for forwarding tests); the old
+      retail-transmute target path and host panic stub are gone. Host
+      tests: hand-computed reciprocals, all powers of two both signs,
+      i32::MIN/i32::MAX, +/-1, a dense +/-1..=0x20000 sweep plus
+      power-of-two neighbors against plain truncating division, and
+      fixed16_recip end to end through the real body. match.py
+      structural: only the first 12 original instructions survive in
+      osos.asm, so the diff is expectedly wide; the Rust loop body keeps
+      the original's cmp/lsl + orrcs quotient-bit shape and the rsbmi
+      sign reapplication.
+
   - address: 0x08076204
     ghidra: FUN_08076204
     name: fixed16_recip
@@ -9384,10 +9429,12 @@ functions:
       FUN_082a0920 is Gaussian elimination scaling a pivot row by
       recip(pivot) via the open-coded fixed16_mul idiom, and
       FUN_082a06d4 normalizes a 3x3 matrix by its bottom-right term.
-      The callee FUN_080377e4 is a separate function and is left
-      unported; it rides the FIXED16_RECIP_UNGUARDED target/host seam
-      (app/h264_decode_forwarder.rs pattern - retail address on target,
-      recording stub in host tests). Host tests prove x == 0 ->
+      The callee FUN_080377e4 is ported in the same module as
+      fixed16_recip_unguarded (see its entry); fixed16_recip still
+      routes through the FIXED16_RECIP_UNGUARDED seam
+      (app/h264_decode_forwarder.rs pattern), which now defaults to the
+      port on both target and host and stays swappable so host tests
+      can record forwarding. Host tests prove x == 0 ->
       0x7fffffff without touching the body, nonzero inputs forward
       unchanged both ways, and, with a faithful model of the recovered
       division wired in, that fixed16_mul(x, recip(x)) lands within

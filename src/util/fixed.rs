@@ -1,26 +1,31 @@
 //! 16.16 fixed-point and widening integer multiply @ 0x080e9878 / 0x080f0fa4,
 //! the software count-leading-zeros @ 0x0824980c that feeds them, the
-//! 64-bit round-and-extract @ 0x08076214 that closes dot products, and the
-//! guarded reciprocal @ 0x08076204 that divides by a Q16.16 value.
+//! 64-bit round-and-extract @ 0x08076214 that closes dot products, the
+//! guarded reciprocal @ 0x08076204 that divides by a Q16.16 value, and the
+//! unguarded reciprocal body @ 0x080377e4 that it tail-branches to.
 //!
 //! Three pure leaf helpers built on the ARMv5TE `smull` (signed 32x32 -> 64)
-//! instruction, one bit-scan leaf, one 64-bit rounding leaf, and one guard
-//! wrapper. Sizes from decomp/functions.csv; call-site counts from decoding
-//! every `b`/`bl` word in osos.dec (osos.asm drops lines):
+//! instruction, one bit-scan leaf, one 64-bit rounding leaf, one guard
+//! wrapper, and one unrolled-division body. Sizes from decomp/functions.csv;
+//! call-site counts from decoding every `b`/`bl` word in osos.dec (osos.asm
+//! drops lines):
 //!
 //! - `fixed16_mul` — `FUN_080e9878` @ 0x080e9878 (20 bytes; 94 call sites).
 //! - `mul_wide_i64` — `FUN_080f0fa4` @ 0x080f0fa4 (12 bytes; 49 call sites).
 //! - `clz_31` — `FUN_0824980c` @ 0x0824980c (68 bytes; 3 call sites).
 //! - `fixed16_round_64` — `FUN_08076214` @ 0x08076214 (20 bytes; 12 sites).
 //! - `fixed16_recip` — `FUN_08076204` @ 0x08076204 (16 bytes; 36 sites).
+//! - `fixed16_recip_unguarded` — `FUN_080377e4` @ 0x080377e4 (48 bytes
+//!   listed; true extent 452 bytes, 0x080377e4..0x080379a8 — the listing
+//!   ends at the computed jump; 11 sites).
 //!
-//! All but `fixed16_recip` are leaves and touch no hardware, so host tests
-//! against `i64` / `u32::leading_zeros` arithmetic prove complete behavior.
-//! `fixed16_recip` tail-branches to the unguarded reciprocal body @
-//! 0x080377e4 (an unrolled 32-bit restoring division of 0xffffffff by |x|,
-//! sign reapplied), which is not yet ported; it rides a target/host seam
-//! (the `app/h264_decode_forwarder.rs` pattern) that invokes the retailOS
-//! address on hardware and a recording stub in host tests.
+//! All but the two reciprocals are leaves and touch no hardware, so host
+//! tests against `i64` / `u32::leading_zeros` arithmetic prove complete
+//! behavior. `fixed16_recip` tail-branches to `fixed16_recip_unguarded` for
+//! nonzero `x`; the call rides the [`FIXED16_RECIP_UNGUARDED`] seam (the
+//! `app/h264_decode_forwarder.rs` pattern), which now defaults to the port
+//! on both target and host and stays swappable so host tests can record
+//! forwarding.
 //!
 //! `fixed16_mul` is the multiply of retailOS's own Q16.16 fixed-point
 //! arithmetic — *not* FreeType's. FreeType's `FT_MulFix`/`ft_muldiv` (see
@@ -136,37 +141,88 @@ pub extern "C" fn fixed16_round_64(acc: i64) -> i32 {
     (acc.wrapping_add(0x8000) >> 16) as i32
 }
 
+/// fixed16_recip_unguarded — original: `FUN_080377e4` @ 0x080377e4
+/// (48 bytes listed in decomp/functions.csv, but the listing ends at the
+/// computed jump; the true body runs 0x080377e4..0x080379a8, 452 bytes.
+/// osos.asm drops everything past the jump and Ghidra could not recover
+/// the jumptable at 0x08037810 — this decode is verified against the raw
+/// osos.dec words).
+///
+/// Unguarded Q16.16 reciprocal body: `0xffff_ffff / |x|`, quotient
+/// negated when `x` is negative. The original keeps the sign in r3
+/// (`mov r3, r0, asr #0x1f`), folds x to |x| (`cmp` / `movpl` / `rsbmi`),
+/// counts `clz(|x|)`, and jumps (`add pc, pc, r4` with
+/// r4 = 12 * (31 - clz(|x|))) into a 32-entry unrolled restoring division
+/// at the entry for quotient bit `clz(|x|)` — the highest bit the
+/// quotient can set. Each 12-byte entry is `subs r4, r2, r1, lsl #bit` /
+/// `orrcs r0, r0, #1<<bit` / `movcs r2, r4`: trial-subtract the shifted
+/// divisor (r1) from the remainder (r2, seeded with the dividend
+/// 0xffffffff), and on no-borrow keep the subtraction and set the
+/// quotient bit in r0. The skip is semantic, not just speed: in the
+/// skipped entries the left shift pushes divisor bits off the top of the
+/// register, which would corrupt the trial subtraction. After the bit-0
+/// entry, `cmp r3, #0` / `rsbne r0, r0, #0` reapplies the sign, then
+/// `pop {r1-r4}` / `bx lr`.
+///
+/// The dividend is 2^32 - 1 rather than 2^32 because 2^32 does not fit in
+/// a register, so every result truncates up to one ulp low:
+/// recip(1.0) = 0xffff, recip(2.0) = 0x7fff. `x = i32::MIN` wraps under
+/// `rsbmi` to magnitude 0x8000_0000 (the V flag is ignored), giving
+/// quotient 1 negated to -1; the port reproduces this with
+/// `wrapping_neg`. `x = 0` is NOT valid here — the guard lives in
+/// `fixed16_recip`; in the original `clz(0) = 32` makes the jump offset
+/// negative and pc leaves the block entirely, and this port would shift
+/// by 32.
+///
+/// 11 call sites: the conditional tail `bne` from `fixed16_recip` @
+/// 0x08076204 plus 10 direct `bl` sites (0x080ea69c, 0x080ea6e0,
+/// 0x080eaea0, 0x080eaee4, 0x080ed388, 0x08160800, 0x081a0fa0,
+/// 0x08224a5c, 0x082537a4, 0x082539f4), all treating the result as a
+/// divisor inverse.
+///
+/// The port runs the same restoring division as a rolled loop from bit
+/// `clz(|x|)` down to 0; the computed jump and the unrolling are ADS
+/// codegen, not semantics.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn fixed16_recip_unguarded(x: i32) -> i32 {
+    let negative = x < 0;
+    let magnitude = if negative { (x as u32).wrapping_neg() } else { x as u32 };
+    let mut quotient: u32 = 0;
+    let mut remainder: u32 = 0xffff_ffff;
+    // Highest settable quotient bit — the entry the original's computed
+    // jump lands on. magnitude != 0 (the guard is the caller's), so this
+    // is at most 31.
+    let mut bit = magnitude.leading_zeros();
+    loop {
+        let shifted_divisor = magnitude << bit;
+        let trial = remainder.wrapping_sub(shifted_divisor);
+        if shifted_divisor <= remainder {
+            quotient |= 1 << bit;
+            remainder = trial;
+        }
+        if bit == 0 {
+            break;
+        }
+        bit -= 1;
+    }
+    let quotient = quotient as i32;
+    if negative { quotient.wrapping_neg() } else { quotient }
+}
+
 /// ABI of the unguarded reciprocal body at retailOS address `0x080377e4`.
 pub type Fixed16RecipUnguarded = unsafe extern "C" fn(i32) -> i32;
 
-/// RetailOS load address of the unguarded reciprocal body.
-pub const FIXED16_RECIP_UNGUARDED_ADDRESS: usize = 0x0803_77e4;
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_fixed16_recip_unguarded(x: i32) -> i32 {
-    let body: Fixed16RecipUnguarded = core::mem::transmute(FIXED16_RECIP_UNGUARDED_ADDRESS);
-    body(x)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_fixed16_recip_unguarded(_x: i32) -> i32 {
-    panic!("fixed16_recip requires unguarded body 0x080377e4")
-}
-
-/// Active boundary for the unported unguarded reciprocal body @ 0x080377e4.
-/// On the target it calls directly into retailOS; host tests replace it with
-/// a recording implementation.
-#[cfg(target_os = "none")]
-pub static mut FIXED16_RECIP_UNGUARDED: Fixed16RecipUnguarded = retail_fixed16_recip_unguarded;
-
-/// Active host boundary for the unported unguarded reciprocal body.
-#[cfg(not(target_os = "none"))]
-pub static mut FIXED16_RECIP_UNGUARDED: Fixed16RecipUnguarded = missing_fixed16_recip_unguarded;
+/// Dispatch boundary between `fixed16_recip` and its unguarded body.
+/// Defaults to the ported [`fixed16_recip_unguarded`] on both target and
+/// host; kept swappable so host tests can install a recording
+/// implementation and verify the guard's forwarding (the
+/// `app/h264_decode_forwarder.rs` pattern).
+pub static mut FIXED16_RECIP_UNGUARDED: Fixed16RecipUnguarded = fixed16_recip_unguarded;
 
 /// Volatile read so LLVM cannot fold the default in and delete the dispatch
 /// (the `app/h264_decode_forwarder.rs` rationale).
 #[inline(always)]
-fn fixed16_recip_unguarded(x: i32) -> i32 {
+fn dispatch_fixed16_recip_unguarded(x: i32) -> i32 {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(FIXED16_RECIP_UNGUARDED))(x) }
 }
 
@@ -190,14 +246,14 @@ fn fixed16_recip_unguarded(x: i32) -> i32 {
 /// scales a pivot row by `recip(pivot)`, and `FUN_082a06d4` normalizes a
 /// 3x3 matrix by its bottom-right term.
 ///
-/// The body @ 0x080377e4 is a separate function and is NOT ported here;
-/// it remains behind the [`FIXED16_RECIP_UNGUARDED`] target/host seam.
-/// The original's tail `b` becomes a plain call returning the seam's
-/// result unchanged; LLVM decides whether to keep it a tail call (the
-/// `app/message_arena.rs` precedent).
+/// The body @ 0x080377e4 is ported above as [`fixed16_recip_unguarded`];
+/// the call still routes through the [`FIXED16_RECIP_UNGUARDED`] seam so
+/// host tests can observe forwarding. The original's tail `bne` becomes a
+/// plain call returning the seam's result unchanged; LLVM decides whether
+/// to keep it a tail call (the `app/message_arena.rs` precedent).
 #[cfg_attr(target_os = "none", no_mangle)]
 pub extern "C" fn fixed16_recip(x: i32) -> i32 {
-    if x == 0 { 0x7fff_ffff } else { fixed16_recip_unguarded(x) }
+    if x == 0 { 0x7fff_ffff } else { dispatch_fixed16_recip_unguarded(x) }
 }
 
 #[cfg(test)]
@@ -584,14 +640,81 @@ mod tests {
         RECIP_RETURN
     }
 
-    /// Faithful model of the unported body @ 0x080377e4, recovered from its
-    /// raw disassembly: unsigned restoring division of 0xffff_ffff by |x|,
-    /// quotient negated when x is negative (x = i32::MIN wraps its magnitude
-    /// to 0x8000_0000, exactly as the original's rsbmi does).
-    unsafe extern "C" fn reference_fixed16_recip_unguarded(x: i32) -> i32 {
+    /// Independent model of the body @ 0x080377e4, computed with plain
+    /// truncating division: `0xffff_ffff / |x|`, quotient negated when x
+    /// is negative (x = i32::MIN wraps its magnitude to 0x8000_0000,
+    /// exactly as the original's rsbmi does). The port under test uses a
+    /// restoring-division loop instead, so agreement is evidence, not
+    /// tautology.
+    fn reference_recip_unguarded(x: i32) -> i32 {
         let magnitude = if x < 0 { (x as u32).wrapping_neg() } else { x as u32 };
         let quotient = 0xffff_ffffu32 / magnitude;
         if x < 0 { (quotient as i32).wrapping_neg() } else { quotient as i32 }
+    }
+
+    /// Known values, computed by hand from `0xffff_ffff / |x|`: the
+    /// 2^32 - 1 dividend truncates every exact reciprocal one ulp low.
+    #[test]
+    fn fixed16_recip_unguarded_known_reciprocals() {
+        assert_eq!(fixed16_recip_unguarded(ONE), 0xffff); // 1.0
+        assert_eq!(fixed16_recip_unguarded(2 * ONE), 0x7fff); // 2.0
+        assert_eq!(fixed16_recip_unguarded(4 * ONE), 0x3fff); // 4.0
+        assert_eq!(fixed16_recip_unguarded(ONE / 2), 0x1_ffff); // 0.5
+        assert_eq!(fixed16_recip_unguarded(2), 0x7fff_ffff);
+        assert_eq!(fixed16_recip_unguarded(0x7fff_ffff), 2);
+        // Sign reapplied to the magnitude quotient.
+        assert_eq!(fixed16_recip_unguarded(-ONE), -0xffff);
+        assert_eq!(fixed16_recip_unguarded(-2 * ONE), -0x7fff);
+        assert_eq!(fixed16_recip_unguarded(-0x4000_0000), -3);
+        // |x| = 1: the quotient is the whole dividend, -1 as i32.
+        assert_eq!(fixed16_recip_unguarded(1), -1);
+        assert_eq!(fixed16_recip_unguarded(-1), 1);
+    }
+
+    /// Every power of two, both signs: recip(2^k) = (2^32 - 1) >> k with
+    /// the sign reapplied — the entry the original's computed jump selects
+    /// is quotient bit clz(2^k) = 31 - k.
+    #[test]
+    fn fixed16_recip_unguarded_powers_of_two() {
+        for k in 0..31 {
+            let x = 1i32 << k;
+            let q = (0xffff_ffffu32 >> k) as i32;
+            assert_eq!(fixed16_recip_unguarded(x), q, "k={k}");
+            assert_eq!(fixed16_recip_unguarded(-x), q.wrapping_neg(), "k={k}");
+        }
+    }
+
+    /// i32::MIN: the original's rsbmi negation wraps |x| to 0x8000_0000
+    /// (2^31), so the quotient is 0xffffffff / 2^31 = 1, negated back to
+    /// -1. i32::MAX beside it stays well-defined.
+    #[test]
+    fn fixed16_recip_unguarded_i32_min_wraps_like_rsbmi() {
+        assert_eq!(fixed16_recip_unguarded(i32::MIN), -1);
+        assert_eq!(fixed16_recip_unguarded(i32::MAX), 2);
+    }
+
+    /// The restoring-division loop agrees with plain truncating division
+    /// over a dense sweep across both signs, every power-of-two boundary
+    /// and its neighbors, and patterned divisors.
+    #[test]
+    fn fixed16_recip_unguarded_matches_division_reference() {
+        for x in 1..=0x2_0000i32 {
+            assert_eq!(fixed16_recip_unguarded(x), reference_recip_unguarded(x), "x={x:#x}");
+            assert_eq!(fixed16_recip_unguarded(-x), reference_recip_unguarded(-x), "x={x:#x}");
+        }
+        for bit in 0..31 {
+            let p = 1i32 << bit;
+            for x in [p - 1, p, p + 1, p | (p >> 1)] {
+                if x == 0 {
+                    continue; // 0 is the caller-guarded case, never valid here
+                }
+                assert_eq!(fixed16_recip_unguarded(x), reference_recip_unguarded(x), "x={x:#x}");
+                assert_eq!(fixed16_recip_unguarded(-x), reference_recip_unguarded(-x), "x={x:#x}");
+            }
+        }
+        for &x in &[0x1234_5678i32, -0x1234_5678, 0x5555_5555, -0x5555_5555, i32::MAX, i32::MIN] {
+            assert_eq!(fixed16_recip_unguarded(x), reference_recip_unguarded(x), "x={x:#x}");
+        }
     }
 
     struct RecipReset;
@@ -599,7 +722,7 @@ mod tests {
     impl Drop for RecipReset {
         fn drop(&mut self) {
             unsafe {
-                FIXED16_RECIP_UNGUARDED = missing_fixed16_recip_unguarded;
+                FIXED16_RECIP_UNGUARDED = fixed16_recip_unguarded;
                 RECIP_RECEIVED = Vec::new();
                 RECIP_RETURN = 0;
             }
@@ -652,23 +775,28 @@ mod tests {
         }
     }
 
-    /// Call-site sanity against the recovered body semantics: with the
-    /// reference model wired in, the composite is the Q16.16 reciprocal
-    /// (one ulp low from the 2^32 - 1 dividend), so `fixed16_mul(x,
-    /// recip(x))` lands within a couple ulps of 1.0 — the normalization
-    /// idiom FUN_082a06d4 / FUN_082a0920 rely on.
+    /// Call-site sanity, now end to end: the seam's default target IS the
+    /// port, so with nothing installed this exercises the real body @
+    /// 0x080377e4. The composite is the Q16.16 reciprocal (one ulp low
+    /// from the 2^32 - 1 dividend), so `fixed16_mul(x, recip(x))` lands
+    /// within a couple ulps of 1.0 — the normalization idiom
+    /// FUN_082a06d4 / FUN_082a0920 rely on.
     #[test]
     fn fixed16_recip_is_the_q16_reciprocal_callers_expect() {
         let _lock = RECIP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let _reset = RecipReset;
         unsafe {
-            FIXED16_RECIP_UNGUARDED = reference_fixed16_recip_unguarded;
             // recip(1.0) = 0xffff_ffff / 0x1_0000 = 0xffff — one ulp under 1.0.
             assert_eq!(fixed16_recip(ONE), 0xffff);
             // recip(2.0) = 0x7fff, half of 1.0 one ulp low.
             assert_eq!(fixed16_recip(2 * ONE), 0x7fff);
             // Sign handling: recip(-2.0) = -0x7fff.
             assert_eq!(fixed16_recip(-2 * ONE), -0x7fff);
+            // i32::MIN flows through the real rsbmi-wrap path: -1.
+            assert_eq!(fixed16_recip(-0x8000_0000), -1);
+            // |x| = 1 gives the whole dividend: 0xffff_ffff as i32 = -1.
+            assert_eq!(fixed16_recip(1), -1);
+            assert_eq!(fixed16_recip(-1), 1);
             // The division idiom: x * recip(x) ~= 1.0 for exact powers.
             // The quotient's truncation costs up to one ulp of the
             // reciprocal, i.e. up to |x| / 2^16 ulps of the product.
