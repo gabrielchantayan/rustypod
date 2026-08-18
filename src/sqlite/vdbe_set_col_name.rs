@@ -60,12 +60,12 @@
 //!
 //! ### Deviations
 //!
-//! - `sqlite3VdbeMemSetStr` @ 0x0838c158 is not ported. The call goes
-//!   through the existing
+//! - `sqlite3VdbeMemSetStr` @ 0x0838c158 is ported
+//!   ([`vdbe_mem_set_str`](super::vdbe_mem_set_str::vdbe_mem_set_str))
+//!   and is the shipped default of the existing
 //!   [`SQLITE_VDBE_MEM_SET_STR`](super::value_set_str::SQLITE_VDBE_MEM_SET_STR)
-//!   dispatch static that `sqlite/value_set_str.rs` already owns for
-//!   the same callee — one seam, not two — whose default is a
-//!   documented `SQLITE_NOMEM`-shaped stub.
+//!   dispatch static that `sqlite/value_set_str.rs` owns for the same
+//!   callee. The slot remains so host tests can install recording mocks.
 //! - `Vdbe` and [`Mem`] are `#[repr(C)]` structs with named fields
 //!   rather than byte offsets, so the pointer fields stay disjoint on a
 //!   64-bit test host; the original's offsets are statically asserted
@@ -141,7 +141,7 @@ pub unsafe extern "C" fn vdbe_set_col_name(
 #[cfg(test)]
 mod tests {
     extern crate std;
-    use super::super::value_set_str::{missing_vdbe_mem_set_str, SQLITE_VDBE_MEM_SET_STR};
+    use super::super::value_set_str::SQLITE_VDBE_MEM_SET_STR;
     use super::*;
     use core::mem::MaybeUninit;
     use std::vec::Vec;
@@ -181,8 +181,7 @@ mod tests {
     }
 
     /// Install the stand-in installer for `body`, then restore the
-    /// shipped `SQLITE_NOMEM` default (the `sqlite/error.rs`
-    /// convention).
+    /// shipped real port.
     unsafe fn with_installer(result: i32, flags: u16, z: *mut u8, body: impl FnOnce()) {
         (*core::ptr::addr_of_mut!(CALL_LOG)).clear();
         CALLEE_RESULT = result;
@@ -195,7 +194,7 @@ mod tests {
         body();
         core::ptr::write_volatile(
             core::ptr::addr_of_mut!(SQLITE_VDBE_MEM_SET_STR),
-            missing_vdbe_mem_set_str,
+            super::super::vdbe_mem_set_str::vdbe_mem_set_str,
         );
     }
 
@@ -400,12 +399,12 @@ mod tests {
     }
 
     #[test]
-    fn the_callee_seam_ships_the_documented_stub() {
+    fn the_callee_seam_ships_the_real_port() {
         unsafe {
             assert_eq!(
                 vdbe_mem_set_str_op() as usize,
-                missing_vdbe_mem_set_str as usize,
-                "0x0838c158 is still unported; the shared seam keeps its stub",
+                super::super::vdbe_mem_set_str::vdbe_mem_set_str as usize,
+                "the shared seam ships the 0x0838c158 port",
             );
         }
     }

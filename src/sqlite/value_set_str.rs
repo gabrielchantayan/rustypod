@@ -24,19 +24,18 @@
 //! anyway. No caller reads it; the decompiler types the wrapper `void`
 //! and so does this port.
 //!
-//! The callee (unported, seam-modeled below) is upstream
-//! `sqlite3VdbeMemSetStr`: a NULL `z` routes to `MemSetNull` @
-//! 0x0838c13c; otherwise base flags are `MEM_Str` (0x2), or `MEM_Blob`
-//! (0x10) when `enc` is 0. `n < 0` measures `z` in place — a NUL scan
-//! for UTF-8, a double-NUL scan in two-byte steps otherwise — and sets
-//! `MEM_Term` (0x20). `xDel == (void *)-1` (`SQLITE_TRANSIENT`) grows
-//! the `Mem` (0x0838bdb0) and copies; anything else releases the old
-//! content (0x0838c04c) and marks `MEM_Static` (0x80, `xDel` NULL) or
-//! `MEM_Dyn` (0x40), storing `xDel` at +0x20 and `z` at +0x14. Finally
-//! `n` lands at +0x18, a zero `enc` becomes 1, flags/enc/type
-//! (`SQLITE_TEXT` = 3 / `SQLITE_BLOB` = 4) land at +0x1c/+0x1f/+0x1e,
-//! and non-UTF-8 encodings are recoded/NUL-terminated through
-//! 0x0838be98, with any allocation failure returning `SQLITE_NOMEM`.
+//! The callee is the ported [`vdbe_mem_set_str`](super::vdbe_mem_set_str::vdbe_mem_set_str):
+//! a NULL `z` routes to `MemSetNull` @ 0x0838c13c; otherwise base flags
+//! are `MEM_Str` (0x2), or `MEM_Blob` (0x10) when `enc` is 0. `n < 0`
+//! measures `z` in place — a NUL scan for UTF-8, a double-NUL scan in
+//! two-byte steps otherwise — and sets `MEM_Term` (0x20). `xDel == (void
+//! *)-1` (`SQLITE_TRANSIENT`) grows the `Mem` (0x0838bdb0) and copies;
+//! anything else releases the old content (0x0838c04c) and marks
+//! `MEM_Static` (0x80, `xDel` NULL) or `MEM_Dyn` (0x40), storing `xDel`
+//! at +0x20 and `z` at +0x14. Finally `n` lands at +0x18, a zero `enc`
+//! becomes 1, flags/enc/type (`SQLITE_TEXT` = 3 / `SQLITE_BLOB` = 4)
+//! land at +0x1c/+0x1f/+0x1e, and non-UTF-8 text runs the BOM handler
+//! @ 0x0838be98, with any allocation failure returning `SQLITE_NOMEM`.
 //!
 //! Call sites (binary-scanned):
 //!
@@ -54,17 +53,15 @@
 //! - 0x08390318 — FUN_08390294: `n=-1`, `enc=1`, `xDel=0`.
 //!
 //! Deviations:
-//! - `sqlite3VdbeMemSetStr` @ 0x0838c158 is not ported: the call goes
-//!   through the [`SQLITE_VDBE_MEM_SET_STR`] dispatch static whose
-//!   default slot is a documented `SQLITE_NOMEM`-shaped stub — the
-//!   house seam pattern (`sqlite/error.rs`, `sqlite/error_msg.rs`).
-//! - This port is the shipped default of the `SQLITE_VALUE_SET_STR`
-//!   dispatch slot in `sqlite/error.rs` (that module's documented
-//!   "the real port should replace this default when it lands"
-//!   pattern — the same swap this crate made when
-//!   [`sqlite_value_new`](super::value_new::sqlite_value_new) landed);
-//!   the slot stays so host tests can install recording mocks, and the
-//!   old no-op stub is retained there for them.
+//! - `sqlite3VdbeMemSetStr` @ 0x0838c158 is ported
+//!   ([`vdbe_mem_set_str`](super::vdbe_mem_set_str::vdbe_mem_set_str))
+//!   and is the shipped default of [`SQLITE_VDBE_MEM_SET_STR`]. The
+//!   dispatch slot stays so host tests can install recording mocks; the
+//!   old `SQLITE_NOMEM` stub is retained for tests that explicitly need
+//!   it.
+//! - This port remains the shipped default of the `SQLITE_VALUE_SET_STR`
+//!   dispatch slot in `sqlite/error.rs`; both layers retain their slots
+//!   for host recording mocks.
 
 /// `sqlite3VdbeMemSetStr(mem, z, n, enc, xDel)` @ 0x0838c158: install
 /// string/blob `z` into `mem`, returning `SQLITE_OK` (0) or
@@ -77,10 +74,9 @@ pub type VdbeMemSetStrFn =
 /// failure paths), the shape of this dispatch stub's default.
 pub const SQLITE_NOMEM: i32 = 7;
 
-/// The `SQLITE_NOMEM`-shaped default for an unported
-/// `sqlite3VdbeMemSetStr`. The wrapper discards the code, so with this
-/// default a call is observably a no-op that claims OOM — the same
-/// end state the original reaches when the callee's allocation fails.
+/// The `SQLITE_NOMEM`-shaped stub retained for host tests that explicitly
+/// need an unconfigured `sqlite3VdbeMemSetStr`. The shipped default is
+/// the real port, [`super::vdbe_mem_set_str::vdbe_mem_set_str`].
 pub(crate) unsafe extern "C" fn missing_vdbe_mem_set_str(
     _mem: *mut u8,
     _z: *mut u8,
@@ -91,10 +87,12 @@ pub(crate) unsafe extern "C" fn missing_vdbe_mem_set_str(
     SQLITE_NOMEM
 }
 
-/// Active `sqlite3VdbeMemSetStr` dispatch slot. Host tests install a
-/// recording replacement; the real port should replace this default
-/// when it lands.
-pub static mut SQLITE_VDBE_MEM_SET_STR: VdbeMemSetStrFn = missing_vdbe_mem_set_str;
+/// Active `sqlite3VdbeMemSetStr` dispatch slot. The default is the real
+/// port, [`super::vdbe_mem_set_str::vdbe_mem_set_str`]; host tests still
+/// install recording replacements ([`missing_vdbe_mem_set_str`] remains
+/// available for them).
+pub static mut SQLITE_VDBE_MEM_SET_STR: VdbeMemSetStrFn =
+    super::vdbe_mem_set_str::vdbe_mem_set_str;
 
 /// Read the mem-set-string slot volatile so its default remains
 /// replaceable.
@@ -156,7 +154,7 @@ mod tests {
     }
 
     /// Install the recording seam for `body`, then restore the shipped
-    /// `SQLITE_NOMEM`-shaped default (the `sqlite/error.rs` convention).
+    /// real port.
     unsafe fn with_recorder(result: i32, body: impl FnOnce()) {
         (*core::ptr::addr_of_mut!(CALL_LOG)).clear();
         CALLEE_RESULT = result;
@@ -167,7 +165,7 @@ mod tests {
         body();
         core::ptr::write_volatile(
             core::ptr::addr_of_mut!(SQLITE_VDBE_MEM_SET_STR),
-            missing_vdbe_mem_set_str,
+            super::super::vdbe_mem_set_str::vdbe_mem_set_str,
         );
     }
 
@@ -272,8 +270,8 @@ mod tests {
             );
             assert_eq!(
                 vdbe_mem_set_str_op() as usize,
-                missing_vdbe_mem_set_str as usize,
-                "the callee seam ships the SQLITE_NOMEM-shaped stub",
+                super::super::vdbe_mem_set_str::vdbe_mem_set_str as usize,
+                "the callee seam ships the real 0x0838c158 port",
             );
         }
     }

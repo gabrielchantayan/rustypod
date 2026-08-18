@@ -15837,6 +15837,66 @@ functions:
       individually and combined, and every other Mem field
       byte-for-byte untouched.
 
+  - address: 0x0838c158
+    ghidra: FUN_0838c158
+    name: vdbe_mem_set_str
+    size: 304
+    sig: "int vdbe_mem_set_str(Mem *p_mem, const void *z, int n, u8 enc, void *x_del)"
+    module: sqlite/vdbe_mem_set_str
+    status: ported
+    vars:
+      param_1: p_mem
+      param_2: z
+      param_3: n
+      param_4: enc
+      param_5: x_del
+      r4: n
+      r5: p_mem
+      r6: z
+      r7: flags
+      r8: enc
+      r9: x_del_or_copy_len
+      uVar1: value_type
+      uVar2: ownership
+      uVar5: flags
+      iVar3: copy_len
+      iVar4: rc
+      bVar6: is_blob
+    notes: >-
+      Upstream SQLite 3.5.x's sqlite3VdbeMemSetStr (vdbemem.c), the
+      string/blob installer for an existing Mem. Extent is
+      0x0838c158..0x0838c288: 0x0838c280 is mov r0,#0,
+      0x0838c284 is ldmia sp!,{r4-r10,pc}, and 0x0838c288 begins the
+      next function; there is no literal pool. Binary scan of osos.dec
+      finds 24 direct call sites: 23 bl plus the blne @ 0x08386710 in
+      sqlite3ValueSetStr @ 0x083866ec; sqlite3VdbeSetColName @
+      0x0838d004 is another caller through the shared dispatcher.
+      NULL z calls sqlite3VdbeMemSetNull @ 0x0838c13c then returns 0.
+      Otherwise flags start MEM_Str (0x2), or MEM_Blob (0x10) for
+      enc == 0. Negative n scans a single UTF-8 NUL or a double NUL in
+      two-byte units and sets MEM_Term (0x20). SQLITE_TRANSIENT
+      ((void *)-1) calls sqlite3VdbeMemGrow @ 0x0838bdb0 with n plus
+      the measured terminator and memcpy's z into the grown Mem buffer;
+      other xDel values first release old guts via
+      sqlite3VdbeMemRelease @ 0x0838c04c, then install borrowed
+      MEM_Static (0x80) storage for NULL xDel or MEM_Dyn (0x40)
+      external storage otherwise. It stores n, flags, enc, and API
+      type (TEXT 3/BLOB 4) in that order. BLOBs retain UTF-8 encoding
+      after their BLOB type is latched; non-UTF-8 text calls the
+      BOM-strip helper MemHandleBom @ 0x0838be98. A nonzero result
+      from Grow or HandleBom is normalized to SQLITE_NOMEM (7).
+      The Rust port is the shipped default of value_set_str's
+      SQLITE_VDBE_MEM_SET_STR slot, replacing its old NOMEM stub while
+      retaining the slot for test mocks. Grow and HandleBom remain
+      typed dispatch seams: host defaults panic until tests supply
+      mocks, target defaults call their retailOS addresses. The
+      existing MEM_SET_OPS release seam is reused because mem_release
+      speaks raw target offsets. Host tests (10) cover the NULL route,
+      static/dynamic ownership, UTF-8 and UTF-16 measured copies,
+      BLOB tagging, explicit copy lengths, Grow/BOM failure timing,
+      empty strings, helper traces, and untouched union/db fields.
+
+
   - address: 0x0838bc38
     ghidra: FUN_0838bc38
     name: mem_finalize
@@ -30229,9 +30289,9 @@ functions:
       0x0838c13c). No epilogue write to r0, so the callee's
       SQLITE_OK/SQLITE_NOMEM leaks out (the NULL path leaks the 0 left
       by cmp r0,#0, which is SQLITE_OK anyway); no caller reads it and
-      the port is void like the decompile. Callee semantics (unported,
-      seam-modeled as SQLITE_VDBE_MEM_SET_STR with a
-      SQLITE_NOMEM-shaped default, from FUN_0838c158's decompile): base
+      the port is void like the decompile. The callee is now ported as
+      sqlite/vdbe_mem_set_str and is the shipped default of the shared
+      SQLITE_VDBE_MEM_SET_STR dispatcher. Its semantics are: base
       flags MEM_Str (0x2), or MEM_Blob (0x10) when enc == 0; n < 0
       measures z in place (NUL scan for UTF-8, double-NUL in two-byte
       steps otherwise) and sets MEM_Term (0x20); xDel == (void*)-1
@@ -32642,10 +32702,10 @@ functions:
       nResColumn << 1 (mov r1,r0 lsl #1), the name/decltype configuration.
       MEM_Static is 0x80 in this build's numbering, from
       sqlite3VdbeMemSetStr's own constants, not upstream's 0x0800.
-      Deviations - sqlite3VdbeMemSetStr @ 0x0838c158 is not ported; the call
-      goes through the existing SQLITE_VDBE_MEM_SET_STR dispatch static that
-      sqlite/value_set_str.rs already owns for the same callee (one seam, not
-      two), whose default is a documented SQLITE_NOMEM stub. Vdbe and Mem are
+      Deviations - sqlite3VdbeMemSetStr @ 0x0838c158 is now ported
+      (sqlite/vdbe_mem_set_str) and is the shipped default of the
+      existing SQLITE_VDBE_MEM_SET_STR dispatcher; that slot remains
+      solely for host recording mocks. Vdbe and Mem are
       repr(C) structs with named fields rather than byte offsets, so pointer
       fields stay disjoint on a 64-bit host; the original offsets are
       statically asserted on 32-bit targets in sqlite/vdbe.rs. p->db is read
