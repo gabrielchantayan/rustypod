@@ -20481,6 +20481,33 @@ functions:
       truncated by the false no-return edge;
       actual code is 0x080e988c-0x080e98ff plus literals 0x080e9900-0x080e990b.
 
+  - address: 0x082a1864
+    ghidra: FUN_082a1864
+    name: fixed16_lt_indirect
+    size: 24
+    sig: "bool fixed16_lt_indirect(a: *const i32, b: *const i32) -> bool"
+    module: fp/fp_misc
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      Q16.16 less-than comparator with both operands fetched through
+      pointers: ldr r0,[r0]; ldr r1,[r1]; cmp r0,r1; movge r0,#0;
+      movlt r0,#1 - a SIGNED compare returning 1 when *a < *b, else 0
+      (Ghidra: return *param_1 < *param_2). The signed movge/movlt pair
+      makes it an ordering comparator, unlike the raw bit-pattern
+      fixed16_ne_indirect @ 0x082a18a8. Used for range checks:
+      FUN_080fe5fc clamps a freshly multiplied Q16.16 result into
+      [0, 1.0] (if (!lt(&v, &ZERO)) { if (ge(&v, &ONE)) v = ONE }); the
+      FUN_080f79d8/FUN_081529d8 sites compare locals edge-by-edge
+      against live geometry values. 7 bl call sites, binary-scanned
+      (0x080f7a68, 0x080f7b10, 0x080fe630, 0x08152a80, 0x08152bdc,
+      0x08167a34, 0x081977a0). First member of the indirect fixed16
+      helper cluster 0x082a1864-0x082a18c8 (lt, sub, mul, ne, add).
+      match.py structural: identical core (two pointer loads, cmp,
+      movlt #1); LLVM adds a push {fp,lr}/pop {fp,pc} frame and hoists
+      the movge #0 result before the cmp (movlt still overwrites, same
+      semantics).
+
   - address: 0x082a188c
     ghidra: FUN_082a188c
     name: fixed16_mul_indirect

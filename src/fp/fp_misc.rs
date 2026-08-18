@@ -372,6 +372,25 @@ pub unsafe extern "C" fn fixed16_div(mut numerator: i32, divisor: i32) -> i32 {
     crate::util::fixed::fixed16_mul(numerator, reciprocal)
 }
 
+/// fixed16_lt_indirect — original: `FUN_082a1864` @ 0x082a1864 (24
+/// bytes; 7 bl call sites, binary-scanned: 0x080f7a68, 0x080f7b10,
+/// 0x080fe630, 0x08152a80, 0x08152bdc, 0x08167a34, 0x081977a0).
+///
+/// Q16.16 less-than comparator with BOTH operands fetched through
+/// pointers: `ldr r0,[r0]; ldr r1,[r1]; cmp r0,r1; movge r0,#0;
+/// movlt r0,#1` — a SIGNED compare returning 1 when `*a < *b`, else 0
+/// (Ghidra: `return *param_1 < *param_2`). The signed movge/movlt pair
+/// makes it an ordering comparator, unlike the raw bit-pattern
+/// `fixed16_ne_indirect` (@ 0x082a18a8) next to it. Callers use it for
+/// range checks: FUN_080fe5fc clamps a freshly multiplied Q16.16 result
+/// into [0, 1.0] — `if (!lt(&v, &ZERO)) { if (ge(&v, &ONE)) v = ONE }`
+/// — and the FUN_080f79d8/FUN_081529d8 sites compare locals edge-by-edge
+/// against live geometry values.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn fixed16_lt_indirect(a: *const i32, b: *const i32) -> bool {
+    *a < *b
+}
+
 /// fixed16_mul_indirect — original: `FUN_082a188c` @ 0x082a188c (28
 /// bytes; 57 bl call sites, binary-scanned: 0x080fxxxx/0x0816xxxx and the
 /// 0x0825xxxx/0x0827xxxx geometry code).
@@ -858,6 +877,98 @@ mod tests {
         );
         unsafe {
             assert_eq!(LAST_RECIPROCAL_INPUT, divisor);
+        }
+    }
+
+    // ---- fixed16_lt_indirect ----
+
+    /// Call through real by-value copies so both pointer loads are
+    /// exercised.
+    fn lt_indirect(a: i32, b: i32) -> bool {
+        unsafe { fixed16_lt_indirect(&a, &b) }
+    }
+
+    #[test]
+    fn fixed16_lt_indirect_equal_values_are_not_less() {
+        assert!(!lt_indirect(0, 0));
+        assert!(!lt_indirect(FIX_ONE, FIX_ONE));
+        assert!(!lt_indirect(-FIX_ONE, -FIX_ONE));
+        assert!(!lt_indirect(i32::MAX, i32::MAX));
+        assert!(!lt_indirect(i32::MIN, i32::MIN));
+        assert!(!lt_indirect(0x1234_5678, 0x1234_5678));
+    }
+
+    #[test]
+    fn fixed16_lt_indirect_strict_ordering() {
+        assert!(lt_indirect(0, FIX_ONE));
+        assert!(!lt_indirect(FIX_ONE, 0));
+        assert!(lt_indirect(-FIX_ONE, FIX_ONE));
+        assert!(!lt_indirect(FIX_ONE, -FIX_ONE));
+        // 0.5 < 1.0 and -1.5 < -1.0 in Q16.16.
+        assert!(lt_indirect(0x0000_8000, FIX_ONE));
+        assert!(lt_indirect(-0x0001_8000, -FIX_ONE));
+    }
+
+    #[test]
+    fn fixed16_lt_indirect_one_ulp_decides() {
+        // A single ulp of difference (Q16.16 resolution) already flips
+        // the result, in both directions.
+        assert!(lt_indirect(0, 1));
+        assert!(!lt_indirect(1, 0));
+        assert!(lt_indirect(FIX_ONE - 1, FIX_ONE));
+        assert!(!lt_indirect(FIX_ONE, FIX_ONE - 1));
+        assert!(lt_indirect(-FIX_ONE, -FIX_ONE + 1));
+        assert!(!lt_indirect(-FIX_ONE + 1, -FIX_ONE));
+    }
+
+    #[test]
+    fn fixed16_lt_indirect_signed_extremes() {
+        // Signed comparison: every negative is below every non-negative,
+        // unlike an unsigned bit-pattern ordering.
+        assert!(lt_indirect(-1, 0));
+        assert!(!lt_indirect(0, -1));
+        assert!(lt_indirect(i32::MIN, i32::MAX));
+        assert!(!lt_indirect(i32::MAX, i32::MIN));
+        assert!(lt_indirect(i32::MIN, -1));
+        assert!(lt_indirect(0, i32::MAX));
+        assert!(lt_indirect(i32::MAX - 1, i32::MAX));
+        // -32768.0 (i32::MIN) is below 32767.0 (i32::MAX & !0xffff).
+        assert!(lt_indirect(i32::MIN, i32::MAX & !0xffff));
+    }
+
+    #[test]
+    fn fixed16_lt_indirect_matches_reference() {
+        let values = [
+            0i32,
+            1,
+            -1,
+            2,
+            FIX_ONE,
+            -FIX_ONE,
+            0x8000,
+            -0x8000,
+            0x0001_0001,
+            0x1234_5678,
+            -0x1234_5678,
+            0x7fff_ffff,
+            i32::MIN,
+        ];
+        for &a in &values {
+            for &b in &values {
+                assert_eq!(lt_indirect(a, b), a < b, "a={a:#x} b={b:#x}");
+            }
+        }
+        let mut rng = Rng(0x1ea5_1eaf_dead_beef);
+        for _ in 0..100_000 {
+            let a = rng.next() as i32;
+            let b = rng.next() as i32;
+            assert_eq!(lt_indirect(a, b), a < b, "a={a:#x} b={b:#x}");
+        }
+        // Dense sweep across the sign boundary, both directions.
+        for a in -4096i32..4096 {
+            for b in -4096i32..4096 {
+                assert_eq!(lt_indirect(a, b), a < b, "a={a:#x} b={b:#x}");
+            }
         }
     }
 
