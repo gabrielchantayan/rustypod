@@ -21985,6 +21985,75 @@ functions:
       blx-via-literal-pool dispatch and LLVM's push {fp,lr}/pop {fp,pc}
       frame versus the ADS {r4,lr} spill.
 
+  - address: 0x082a1ba4
+    ghidra: FUN_082a1ba4
+    name: class6000_ui32_resource_60a4
+    size: 24
+    sig: "void *class6000_ui32_resource_60a4(void)"
+    module: fp/fp_misc
+    status: ported
+    vars:
+      FUN_08172124: instance_of_class_6000 (ported, app/registry)
+      FUN_0827216c: resource_chain_find (ported, app/resource_chain)
+      DAT_082a1bbc: RESOURCE_ID_60A4 (0x000060a4, the resource id, r2)
+      DAT_082a1bc0: RESOURCE_KIND_UI32 (0x55693332, "Ui32" big-endian,
+        the resource kind, r1)
+    notes: >-
+      No bl call sites in osos.asm and no pointer to the address
+      anywhere in osos.dec (binary-scanned): reached indirectly, a
+      vtable or computed table outside the image body - like the whole
+      diagnostics run 0x082a1918-0x082a1ba4 above it. Extent
+      binary-verified: 24 bytes of code (functions.csv's size is
+      exact), six instructions ending `b 0x0827216c` at 0x082a1bb8,
+      followed by the two-word literal pool @ 0x082a1bbc (0x000060a4)
+      and 0x082a1bc0 (0x55693332) for a true extent of 32 bytes ending
+      where FUN_082a1bc4 begins at 0x082a1bc4.
+      Algorithm: `stmdb sp!,{r4,lr}; bl 0x08172124; ldr r2,=0x000060a4;
+      ldr r1,=0x55693332; ldmia sp!,{r4,lr}; b 0x0827216c` - resolve
+      the registered class-0x6000 singleton through the ported
+      instance_of_class_6000 (registry lookup + checked downcast; the
+      class registers itself @ 0x08173774 but never names itself to the
+      factory, so it is NOT identified) and tail-branch to the ported
+      resource_chain_find with that instance as the provider-chain
+      head, asking for the resource (kind "Ui32", id 0x60a4). So the
+      body is "fetch the Ui32-typed entry 0x60a4 out of the
+      class-0x6000 object's resource-provider chain", answering the
+      owning provider's raw pointer - NULL when the class is
+      unregistered, the cast refuses, or no provider owns the id.
+      Ghidra's decompile inlines the tail-called resource_chain_find
+      body into this function; the listing pins the real shape. What
+      0x60a4 IS is not recovered, but the image gives it a family: the
+      same word @ 0x0817360c sits in a table of 0x60xx ids (0x6097,
+      0x609b, 0x60a0, 0x60a4, 0x60a6, 0x60a7, 0x60a8, 0x60ac, 0x60ae,
+      ...) interleaved with the "BMap"/"Bool" kind literals beside the
+      class-0x6000 registration @ 0x08173774 - the same 0x60xx family
+      the state poller FUN_08172c6c publishes change events for - and
+      the setter-side sibling @ 0x0825b774 runs instance_of_class_6000
+      and then the 4-argument chain variant @ 0x08272230 with the SAME
+      (kind "Ui32", id 0x60a4) pair (literals @ 0x0825b7ac/
+      0x0825b7b0), i.e. 0x60a4 is a mutable Ui32 state entry of the
+      class-0x6000 store. Deviations: both callees are ported and
+      called directly, no seam (the resource_chain_find_string/_bitmap
+      precedent); the "Ui32" ResourceKind constant is kept local to
+      fp/fp_misc.rs (the fourcc word appears at ~40 spots in the
+      decrypted image, binary-scanned, but this port is its first
+      decoded consumer); the pushed r4 is never used (an ADS frame
+      artifact) and the port keeps no frame. Host tests (6): the
+      registered instance heading a two-node provider chain walked in
+      order with the ("Ui32", 0x60a4) pair forwarded verbatim to every
+      provider and the second provider's answer returned; the first
+      answer stopping the walk with kind and id asserted against the
+      raw literals; nobody answering -> NULL; an unregistered class ->
+      NULL with no cast and no find; a registered instance whose own
+      cast refuses 0x6000 -> NULL with the find slot never dispatched;
+      and the kind literal spelling "Ui32" big-endian. match.py
+      structural (exit-1 diff expected): push; bl accessor; set up
+      (kind, id); pop; tail b on both sides - expected differences are
+      LLVM's push {fp,lr}/pop {fp,pc} crate frame versus the ADS
+      {r4,lr} spill and LLVM synthesizing the 0x60a4 id with a
+      mov/orr pair instead of a literal-pool load (the 0x55693332 kind
+      stays a pooled literal on both sides).
+
   - address: 0x080e97ac
     ghidra: FUN_080e97ac
     name: fixed16_cos

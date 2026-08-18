@@ -657,6 +657,8 @@ pub unsafe extern "C" fn message_code_word(message: *const u32) -> u32 {
     *message.add(1)
 }
 
+use crate::app::registry::instance_of_class_6000;
+use crate::app::resource_chain::{resource_chain_find, ResourceKind, ResourceProvider};
 use crate::cxx::string::{cxx_string_default_ctor, cxx_string_rep_create, empty_rep, rep_data};
 use crate::cxx::string_object::{
     string_object_c_str, string_object_release_payload, StringObject, STRING_OBJECT_VTABLE,
@@ -1530,6 +1532,72 @@ pub unsafe extern "C" fn rtc_context_b1c_probe_one() -> u32 {
     let service_context = service_context_get();
     rtc_context_b1c_halfword(service_context);
     1
+}
+
+/// Resource kind literal @ 0x082a1bc0: 0x55693332, `"Ui32"` read
+/// big-endian — a third provider-chain kind beside
+/// [`ResourceKind::STRING`] and [`ResourceKind::BITMAP`]. Kept local to
+/// this module rather than added to app/resource_chain.rs: the fourcc
+/// word appears at ~40 spots in the decrypted image (binary-scanned),
+/// but this port is its first decoded consumer.
+const RESOURCE_KIND_UI32: ResourceKind = ResourceKind(0x5569_3332);
+
+/// Resource id literal @ 0x082a1bbc: the Ui32 state entry the
+/// diagnostics thunk below fetches out of the class-0x6000 store. Its
+/// concrete meaning is NOT recovered (see the function's doc header).
+const RESOURCE_ID_60A4: u32 = 0x60a4;
+
+/// class6000_ui32_resource_60a4 — original: `FUN_082a1ba4` @
+/// 0x082a1ba4 (24 bytes of code, binary-verified: six instructions
+/// ending `b 0x0827216c` at 0x082a1bb8 — functions.csv's size is exact
+/// for the code — followed by the two-word literal pool @ 0x082a1bbc =
+/// 0x000060a4 (the resource id) and 0x082a1bc0 = 0x55693332 (the kind),
+/// for a true extent of 32 bytes ending where `FUN_082a1bc4` begins at
+/// 0x082a1bc4. NO `bl` call sites in osos.asm and no pointer to the
+/// address anywhere in osos.dec (binary-scanned), so — like the whole
+/// diagnostics run 0x082a1918-0x082a1ba4 above it — the original is
+/// reached indirectly, a vtable or computed table outside the image
+/// body).
+///
+/// Resolves the registered class-0x6000 singleton through the ported
+/// `instance_of_class_6000` @ 0x08172124 (app/registry.rs — the class
+/// registers itself @ 0x08173774 but never names itself to the
+/// factory, so it is NOT identified) and tail-branches to the ported
+/// `resource_chain_find` @ 0x0827216c (app/resource_chain.rs) with
+/// that instance as the provider-chain head, asking for the resource
+/// (kind `"Ui32"`, id 0x60a4): `stmdb sp!,{r4,lr}; bl 0x08172124; ldr
+/// r2,=0x000060a4; ldr r1,=0x55693332; ldmia sp!,{r4,lr}; b
+/// 0x0827216c`. So the whole body is "fetch the Ui32-typed entry
+/// 0x60a4 out of the class-0x6000 object's resource-provider chain",
+/// answering the owning provider's raw pointer — NULL when the class
+/// is unregistered, when the checked downcast refuses it, or when no
+/// provider owns the id.
+///
+/// What 0x60a4 IS is not recovered, but the image gives it a family:
+/// the same word @ 0x0817360c sits in a table of 0x60xx ids (0x6097,
+/// 0x609b, 0x60a0, 0x60a4, 0x60a6, 0x60a7, 0x60a8, 0x60ac, 0x60ae,
+/// ...) interleaved with the `"BMap"`/`"Bool"` kind literals beside
+/// the class-0x6000 registration @ 0x08173774 — the same 0x60xx family
+/// the state poller `FUN_08172c6c` publishes change events for — and
+/// the setter-side sibling @ 0x0825b774 runs `instance_of_class_6000`
+/// and then the 4-argument chain variant @ 0x08272230 with the SAME
+/// (kind `"Ui32"`, id 0x60a4) pair (literals @ 0x0825b7ac/
+/// 0x0825b7b0), i.e. 0x60a4 is a mutable Ui32 state entry of the
+/// class-0x6000 store. Ghidra's decompile inlines the tail-called
+/// `resource_chain_find` body into this function; the listing pins the
+/// real shape above.
+///
+/// Deviations:
+/// - Both callees are ported and called directly — no seam (the
+///   resource_chain_find_string/_bitmap precedent in
+///   app/resource_chain.rs).
+/// - The pushed r4 is never used (the `stmdb sp!,{r4,lr}` / `ldmia
+///   sp!,{r4,lr}` pair spills and restores it gratuitously — an ADS
+///   frame artifact); the port keeps no frame.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn class6000_ui32_resource_60a4() -> *mut u8 {
+    let head = instance_of_class_6000() as *mut ResourceProvider;
+    resource_chain_find(head, RESOURCE_KIND_UI32, RESOURCE_ID_60A4)
 }
 
 #[cfg(test)]
@@ -3950,5 +4018,307 @@ mod tests {
                 assert_eq!(RTC_B1C_READER_OWNER, service_context);
             }
         }
+    }
+
+    // ---- class6000_ui32_resource_60a4 ----
+
+    use crate::app::registry::{
+        FrameworkObject, Registry, RegistryEntry, RegistryVtable, CLASS_REGISTRY,
+    };
+    use crate::app::resource_chain::ResourceFindFn;
+    use crate::testing::CLASS_REGISTRY_TEST_LOCK;
+
+    /// Serializes access to the CLASS_REGISTRY vtable and the store
+    /// recorders below (the shared class-registry lock, the
+    /// class_6800.rs precedent).
+    static STORE_LOCK: Mutex<()> = Mutex::new(());
+
+    /// One vtable serving both frameworks the thunk composes: the
+    /// registry's `cast_to_class` at slot 5 (+0x14 on target) and the
+    /// provider chain's `find` at slot 25 (+0x64 on target) — the two
+    /// decoded vtable layouts superimposed (FrameworkObjectVtable's
+    /// [usize; 5] + slot and ResourceProviderVTable's 25 slots + find
+    /// agree on where each lands).
+    #[repr(C)]
+    struct StoreVtable {
+        slots_00: [Option<unsafe extern "C" fn()>; 5],
+        cast_to_class: unsafe extern "C" fn(*mut FrameworkObject, u32) -> *mut u8,
+        slots_18: [Option<unsafe extern "C" fn()>; 19],
+        find: ResourceFindFn,
+    }
+
+    /// A class-0x6000 instance that is simultaneously a
+    /// resource-provider chain node: vtable +0x00, next link at the
+    /// same offset ResourceProvider keeps it.
+    #[repr(C)]
+    struct Store {
+        vtable: *const StoreVtable,
+        state_below_next: [*mut u8; 4],
+        next: *mut ResourceProvider,
+    }
+
+    /// Class ids the cast was asked, in order.
+    static mut STORE_CAST_CALLS: Vec<u32> = Vec::new();
+    /// The one class id the cast accepts.
+    static mut STORE_CAST_ACCEPTS: u32 = 0x6000;
+    /// (provider, kind, id) the find slot was asked, in order.
+    static mut STORE_FIND_CALLS: Vec<(*mut u8, u32, u32)> = Vec::new();
+    /// Which find call index answers (usize::MAX: nobody answers).
+    static mut STORE_FIND_ANSWER_ON: usize = usize::MAX;
+    /// The resource pointer the answering call writes.
+    static mut STORE_FIND_VALUE: usize = 0;
+
+    unsafe extern "C" fn recording_store_cast(
+        this: *mut FrameworkObject,
+        class_id: u32,
+    ) -> *mut u8 {
+        (*core::ptr::addr_of_mut!(STORE_CAST_CALLS)).push(class_id);
+        if class_id == STORE_CAST_ACCEPTS { this as *mut u8 } else { core::ptr::null_mut() }
+    }
+
+    unsafe extern "C" fn recording_store_find(
+        provider: *mut ResourceProvider,
+        kind: ResourceKind,
+        id: u32,
+        found: *mut *mut u8,
+    ) -> u32 {
+        let calls = &mut *core::ptr::addr_of_mut!(STORE_FIND_CALLS);
+        let index = calls.len();
+        calls.push((provider as *mut u8, kind.0, id));
+        if index == STORE_FIND_ANSWER_ON {
+            *found = STORE_FIND_VALUE as *mut u8;
+            return 1;
+        }
+        0
+    }
+
+    static STORE_VTABLE: StoreVtable = StoreVtable {
+        slots_00: [None; 5],
+        cast_to_class: recording_store_cast,
+        slots_18: [None; 19],
+        find: recording_store_find,
+    };
+
+    fn store_node() -> Store {
+        Store {
+            vtable: &STORE_VTABLE,
+            state_below_next: [core::ptr::null_mut(); 4],
+            next: core::ptr::null_mut(),
+        }
+    }
+
+    // ---- the single-entry class registry the accessor resolves through
+    // (the class_6800.rs mockRegistry pattern: index_of/entry_at answer,
+    // every mutating or notifying slot is unreachable) ----
+
+    static mut STORE_REGISTRY_ENTRY: RegistryEntry =
+        RegistryEntry { class_id: 0, instance: core::ptr::null_mut() };
+
+    unsafe extern "C" fn store_registry_index_of(_this: *mut Registry, key: *const u32) -> i32 {
+        let entry = core::ptr::read_volatile(core::ptr::addr_of!(STORE_REGISTRY_ENTRY));
+        if entry.instance.is_null() || entry.class_id != key.read() { -1 } else { 0 }
+    }
+
+    unsafe extern "C" fn store_registry_entry_at(
+        _this: *mut Registry,
+        _index: i32,
+        out: *mut RegistryEntry,
+    ) -> *mut RegistryEntry {
+        out.write(core::ptr::read_volatile(core::ptr::addr_of!(STORE_REGISTRY_ENTRY)));
+        out
+    }
+
+    unsafe extern "C" fn unreachable_registry_insert(
+        _this: *mut Registry,
+        _entry: *const RegistryEntry,
+    ) -> usize {
+        std::panic!("class6000_ui32_resource_60a4 inserts nothing into the registry");
+    }
+
+    unsafe extern "C" fn unreachable_registry_assign_at(
+        _this: *mut Registry,
+        _index: i32,
+        _entry: *const RegistryEntry,
+    ) -> usize {
+        std::panic!("class6000_ui32_resource_60a4 writes nothing to the registry");
+    }
+
+    unsafe extern "C" fn unreachable_registry_notify(_this: *mut Registry) -> *mut u8 {
+        std::panic!("class6000_ui32_resource_60a4 fires no registry notification");
+    }
+
+    static STORE_REGISTRY_VTABLE: RegistryVtable = RegistryVtable {
+        unresolved_00: [0; 7],
+        insert: unreachable_registry_insert,
+        unresolved_20: 0,
+        assign_at: unreachable_registry_assign_at,
+        unresolved_28: [0; 5],
+        entry_at: store_registry_entry_at,
+        unresolved_40: [0; 3],
+        index_of: store_registry_index_of,
+        unresolved_50: [0; 4],
+        has_pending_changes: unreachable_registry_notify,
+        notify_deferred: unreachable_registry_notify,
+        notify_changed: unreachable_registry_notify,
+    };
+
+    struct StoreLookupInstall {
+        _lock: MutexGuard<'static, ()>,
+        _registry_lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for StoreLookupInstall {
+        fn drop(&mut self) {
+            unsafe {
+                CLASS_REGISTRY.vtable = core::ptr::null();
+                core::ptr::addr_of_mut!(STORE_REGISTRY_ENTRY).write(RegistryEntry {
+                    class_id: 0,
+                    instance: core::ptr::null_mut(),
+                });
+            }
+        }
+    }
+
+    /// Stands the class registry up with `registered` published under
+    /// class id 0x6000 (NULL: nothing registered), the store's cast
+    /// accepting `cast_accepts`, and the find slot answering its
+    /// `answer_on`-th call with `answer_value` (usize::MAX: never).
+    fn install_store_lookup(
+        registered: *mut u8,
+        cast_accepts: u32,
+        answer_on: usize,
+        answer_value: usize,
+    ) -> StoreLookupInstall {
+        let lock = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let registry_lock = CLASS_REGISTRY_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            core::ptr::addr_of_mut!(STORE_REGISTRY_ENTRY)
+                .write(RegistryEntry { class_id: 0x6000, instance: registered });
+            CLASS_REGISTRY.vtable = &STORE_REGISTRY_VTABLE;
+            STORE_CAST_ACCEPTS = cast_accepts;
+            (*core::ptr::addr_of_mut!(STORE_CAST_CALLS)).clear();
+            (*core::ptr::addr_of_mut!(STORE_FIND_CALLS)).clear();
+            STORE_FIND_ANSWER_ON = answer_on;
+            STORE_FIND_VALUE = answer_value;
+        }
+        StoreLookupInstall { _lock: lock, _registry_lock: registry_lock }
+    }
+
+    #[test]
+    fn class6000_ui32_resource_60a4_walks_the_registered_store_chain() {
+        let mut first = store_node();
+        let mut second = store_node();
+        first.next = core::ptr::addr_of_mut!(second).cast::<ResourceProvider>();
+        let head = core::ptr::addr_of_mut!(first).cast::<u8>();
+        let second_provider = core::ptr::addr_of_mut!(second).cast::<u8>();
+        // The first provider declines; the second answers with the
+        // resource pointer 0x11223344.
+        let _mock = install_store_lookup(head, 0x6000, 1, 0x0011_2233);
+
+        let found = unsafe { class6000_ui32_resource_60a4() };
+
+        assert_eq!(found as usize, 0x0011_2233);
+        unsafe {
+            assert_eq!(
+                *core::ptr::addr_of!(STORE_CAST_CALLS),
+                [0x6000],
+                "the accessor casts the registered instance to its own class"
+            );
+            assert_eq!(
+                *core::ptr::addr_of!(STORE_FIND_CALLS),
+                [
+                    (head, RESOURCE_KIND_UI32.0, RESOURCE_ID_60A4),
+                    (second_provider, RESOURCE_KIND_UI32.0, RESOURCE_ID_60A4),
+                ],
+                "the registered instance heads the walk and the (kind, id)\
+                 pair is forwarded verbatim to every provider"
+            );
+        }
+    }
+
+    #[test]
+    fn class6000_ui32_resource_60a4_forwards_kind_and_id_verbatim() {
+        let mut only = store_node();
+        let head = core::ptr::addr_of_mut!(only).cast::<u8>();
+        let _mock = install_store_lookup(head, 0x6000, 0, 0x00ab_cdef);
+
+        let found = unsafe { class6000_ui32_resource_60a4() };
+
+        assert_eq!(found as usize, 0x00ab_cdef);
+        unsafe {
+            let calls = &*core::ptr::addr_of!(STORE_FIND_CALLS);
+            assert_eq!(calls.len(), 1, "the first answer stops the walk");
+            assert_eq!(calls[0].0, head);
+            assert_eq!(
+                calls[0].1,
+                0x5569_3332,
+                "kind is the literal @ 0x082a1bc0, r1 of the tail call"
+            );
+            assert_eq!(
+                calls[0].2,
+                0x60a4,
+                "id is the literal @ 0x082a1bbc, r2 of the tail call"
+            );
+        }
+    }
+
+    #[test]
+    fn class6000_ui32_resource_60a4_is_null_when_nobody_owns_the_id() {
+        let mut only = store_node();
+        let head = core::ptr::addr_of_mut!(only).cast::<u8>();
+        let _mock = install_store_lookup(head, 0x6000, usize::MAX, 0);
+
+        let found = unsafe { class6000_ui32_resource_60a4() };
+
+        assert!(found.is_null());
+        unsafe {
+            assert_eq!(
+                (*core::ptr::addr_of!(STORE_FIND_CALLS)).len(),
+                1,
+                "the one provider was asked and declined"
+            );
+        }
+    }
+
+    #[test]
+    fn class6000_ui32_resource_60a4_is_null_when_the_class_is_unregistered() {
+        let _mock = install_store_lookup(core::ptr::null_mut(), 0x6000, 0, 0xdead);
+
+        let found = unsafe { class6000_ui32_resource_60a4() };
+
+        assert!(found.is_null(), "a NULL chain head answers NULL");
+        unsafe {
+            assert!(
+                (*core::ptr::addr_of!(STORE_CAST_CALLS)).is_empty(),
+                "no instance, no cast"
+            );
+            assert!(
+                (*core::ptr::addr_of!(STORE_FIND_CALLS)).is_empty(),
+                "the empty chain asks nobody"
+            );
+        }
+    }
+
+    #[test]
+    fn class6000_ui32_resource_60a4_is_null_when_the_cast_refuses() {
+        let mut only = store_node();
+        let head = core::ptr::addr_of_mut!(only).cast::<u8>();
+        // Registered under 0x6000, but the object's own cast refuses
+        // that id (the registry.rs wrong-class precedent): the checked
+        // downcast yields NULL and the chain walk sees a NULL head.
+        let _mock = install_store_lookup(head, 0x1234, 0, 0xdead);
+
+        let found = unsafe { class6000_ui32_resource_60a4() };
+
+        assert!(found.is_null());
+        unsafe {
+            assert_eq!(*core::ptr::addr_of!(STORE_CAST_CALLS), [0x6000]);
+            assert!((*core::ptr::addr_of!(STORE_FIND_CALLS)).is_empty());
+        }
+    }
+
+    #[test]
+    fn ui32_kind_literal_spells_ui32_big_endian() {
+        assert_eq!(&RESOURCE_KIND_UI32.0.to_be_bytes(), b"Ui32");
     }
 }
