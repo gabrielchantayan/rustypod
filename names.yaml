@@ -22415,6 +22415,74 @@ functions:
       the and unconditionally where ADS predicated it - same value
       semantics).
 
+  - address: 0x082a1bfc
+    ghidra: FUN_082a1bfc
+    name: cond_wait_attr_clock
+    size: 16
+    sig: "u32 cond_wait_attr_clock(const u8 *attr, u8 *out)"
+    module: fp/fp_misc
+    status: ported
+    vars:
+      param_1: attr (the condition-wait attributes record; clock id byte at +1)
+      param_2: out (caller byte slot receiving the clock id)
+      FUN_08261d58: clock_id_validate (0..3 passthrough, -1 otherwise)
+      FUN_082c372c: clock_gettime veneer (dispatch table DAT_082c3788, stride 0x14)
+    notes: >-
+      Two bl call sites, both in the condition-wait creation path:
+      0x082623f4 inside FUN_082623d0 and 0x0826265c inside
+      FUN_0826263c; no pointer to the address anywhere in osos.dec
+      (binary-scanned). Extent binary-verified against osos.dec: 16
+      bytes exactly (functions.csv's size is exact), four
+      instructions `ldrb r0,[r0,#0x1]; strb r0,[r1,#0x0]; mov
+      r0,#0x0; bx lr` ending at 0x082a1c08 with the next function
+      starting at 0x082a1c0c - no literal pool. Algorithm: a byte
+      getter over the condition variable's wait-attributes record -
+      copy the record's +1 byte into the caller's out pointer and
+      answer 0 (success). The record is the two-byte options block
+      the wait path threads through FUN_08261fac, default-constructed
+      to {0, 0} by the trivial ctor @ 0x08261d44 (two strb zeroes)
+      with the empty destructor @ 0x08261d54: { +0 absolute-deadline
+      flag, +1 clock id }. The +1 clock byte this getter answers is
+      consumed as a clock selector: FUN_0826263c copies it into the
+      waiter node at +2, and the timed-wait body @ 0x0826269c feeds
+      node+2 through FUN_08262158, which range-checks it against
+      0..3 (FUN_08261d58, -1 otherwise) and calls the clock_gettime
+      veneer @ 0x082c372c to stamp "now" for a relative timeout.
+      The creation gate in FUN_082623d0 calls this getter first and
+      refuses a nonzero clock with 0x1a (the posix layer's
+      invalid-argument status, the posix_mutex notes), so on this
+      ROM only clock 0 (CLOCK_REALTIME) waiters can be created even
+      though the wait body is generic. The SIBLING getter @
+      0x082a1c0c is the same four-instruction shape reading [r0,#0x0]
+      instead (NOT ported here, reserved for a follow-up): it lands
+      at node+1 and selects deadline arithmetic in the wait body - 1
+      means the caller's {sec, nsec} pair is an absolute deadline
+      copied verbatim into the waiter node at +0x1c/+0x20, 0 means
+      relative, added to the freshly read "now" by the timespec add
+      @ 0x08261ed8. Despite landing in the same ADS
+      template-instantiation run-off as the plist node accessors and
+      nibble-stream cursor just above, this record is NOT a plist
+      node - the call sites pin it to the posix condition-wait
+      machinery (the nibble_stream_current note's area caveat).
+      Deviations: none - a byte load and a byte store have no
+      alignment hazard on any host, so the port dereferences directly
+      and the read_unaligned idiom of the word-loading neighbors does
+      not apply. Ghidra's decompile (`*param_2 = *(undefined1
+      *)(param_1 + 1); return 0;`) matches the listing exactly; both
+      call sites ignore the status return (they re-read the out byte
+      off the stack), but the port preserves it. Host tests (3): the
+      +1 byte forwarded across clock ids 0..3 and 0xff (the getter
+      never validates - the creation gate and the clock_gettime
+      veneer do); the status word always 0; and a poisoned-record
+      test (0x5a at +0, 0xa5 on both sides) pinning the read to
+      offset +1 exactly, the distinguishing feature against the
+      0x082a1c0c sibling. match.py structural (exit-1 diff expected):
+      identical deviation profile to the accepted
+      plist_node_processing_instruction port - the body is
+      instruction-for-instruction the original's (ldrb/strb/mov
+      r0,#0), differing only by the crate's fp frame (push {fp,lr} /
+      mov fp,sp / pop {fp,pc} in place of bx lr).
+
   - address: 0x080e97ac
     ghidra: FUN_080e97ac
     name: fixed16_cos

@@ -1764,6 +1764,62 @@ pub unsafe extern "C" fn nibble_stream_current(state: *const u8) -> u8 {
     if low_half == 0 { packed >> 4 } else { packed & 0xf }
 }
 
+/// cond_wait_attr_clock — original: `FUN_082a1bfc` @ 0x082a1bfc
+/// (16 bytes, binary-verified against osos.dec: four instructions
+/// `ldrb r0,[r0,#0x1]; strb r0,[r1,#0x0]; mov r0,#0x0; bx lr`
+/// ending at 0x082a1c08 with the next function starting at
+/// 0x082a1c0c — functions.csv's 16-byte size is exact and there is
+/// no literal pool. Two direct call sites, both `bl`s in the
+/// condition-wait creation path: 0x082623f4 inside FUN_082623d0 and
+/// 0x0826265c inside FUN_0826263c; no pointer to the address
+/// anywhere in osos.dec (binary-scanned)).
+///
+/// A byte getter over the condition variable's wait-attributes
+/// record: copy the record's +0x01 byte into the caller's out
+/// pointer and answer 0 (success). The record is the two-byte
+/// options block the wait path threads through FUN_08261fac —
+/// default-constructed to {0, 0} by the trivial ctor @ 0x08261d44
+/// (two `strb` zeroes) with the empty destructor @ 0x08261d54:
+/// { +0x00 absolute-deadline flag, +0x01 clock id }.
+///
+/// The +0x01 clock byte this getter answers is consumed as a clock
+/// selector: FUN_0826263c copies it into the waiter node at +0x02,
+/// and the timed-wait body @ 0x0826269c feeds node+0x02 through
+/// FUN_08262158, which range-checks it against 0..3 (FUN_08261d58,
+/// -1 otherwise) and calls the clock_gettime wrapper @ 0x082c372c
+/// (dispatch table DAT_082c3788, stride 0x14, gettime at +8) to
+/// stamp "now" for a relative timeout. The creation gate in
+/// FUN_082623d0 calls this getter first and refuses a nonzero clock
+/// with 0x1a (the posix layer's invalid-argument status — the
+/// posix_mutex notes), so on this ROM only clock 0 (CLOCK_REALTIME)
+/// waiters can be created even though the wait body is generic.
+/// The sibling byte, +0x00, is read by the near-identical getter @
+/// 0x082a1c0c (same four-instruction shape, `ldrb r0,[r0,#0x0]` —
+/// NOT ported here, reserved for a follow-up): it lands at node+0x01
+/// and selects deadline arithmetic in the wait body — 1 means the
+/// caller's {sec, nsec} pair is an absolute deadline copied verbatim
+/// into the waiter node at +0x1c/+0x20, 0 means relative, added to
+/// the freshly read "now" by the timespec add @ 0x08261ed8.
+///
+/// Despite landing in the same ADS template-instantiation run-off as
+/// the plist node accessors and the nibble-stream cursor just above,
+/// this record is NOT a plist node — the call sites pin it to the
+/// posix condition-wait machinery (the nibble_stream_current note's
+/// area caveat).
+///
+/// Deviations: none. A byte load and a byte store have no alignment
+/// hazard on any host, so the port dereferences directly — the
+/// `read_unaligned` idiom of the word-loading neighbors does not
+/// apply. Ghidra's decompile (`*param_2 = *(undefined1 *)(param_1 +
+/// 1); return 0;`) matches the listing exactly. Both call sites
+/// ignore the status return (they re-read the out byte off the
+/// stack), but the port preserves it.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn cond_wait_attr_clock(attr: *const u8, out: *mut u8) -> u32 {
+    *out = *attr.add(1);
+    0
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -4676,5 +4732,52 @@ mod tests {
         buf[4 + word] = 0; // flag clear
         buf[4 + 2 * word] = 0x3c; // packed byte
         assert_eq!(unsafe { nibble_stream_current(buf.as_ptr().add(4)) }, 0x3);
+    }
+
+    // ---- cond_wait_attr_clock ----
+
+    /// Builds a fake two-byte wait-attributes record with `absolute`
+    /// at +0 and `clock` at +1, padded with 0xa5 poison on both
+    /// sides so a stray read is visible.
+    fn wait_attr(absolute: u8, clock: u8) -> Vec<u8> {
+        let mut record = std::vec![0xa5u8; 4];
+        record[1] = absolute;
+        record[2] = clock;
+        record
+    }
+
+    #[test]
+    fn cond_wait_attr_clock_forwards_the_clock_byte() {
+        // The valid clock ids 0..3 (FUN_08261d58's range check) plus
+        // values outside it — the getter itself never validates, the
+        // creation gate and the clock_gettime wrapper do.
+        for clock in [0x00u8, 0x01, 0x02, 0x03, 0xff] {
+            let record = wait_attr(0, clock);
+            let mut out = 0xa5u8;
+            unsafe { cond_wait_attr_clock(record.as_ptr().add(1), &mut out) };
+            assert_eq!(out, clock, "clock {clock:#04x}");
+        }
+    }
+
+    #[test]
+    fn cond_wait_attr_clock_answers_success() {
+        // The status word is always 0; both stock call sites ignore
+        // it, but the register is written.
+        let record = wait_attr(1, 2);
+        let mut out = 0u8;
+        assert_eq!(unsafe { cond_wait_attr_clock(record.as_ptr().add(1), &mut out) }, 0);
+    }
+
+    #[test]
+    fn cond_wait_attr_clock_reads_only_offset_1() {
+        // The sibling getter @ 0x082a1c0c reads +0 instead; poison
+        // there and beside the clock byte pins the offset exactly.
+        let record = wait_attr(0x5a, 0x02);
+        let mut out = 0u8;
+        assert_eq!(record[1], 0x5a, "builder poisoned absolute flag at +0");
+        assert_eq!(record[0], 0xa5, "builder poisoned the byte before the record");
+        assert_eq!(record[3], 0xa5, "builder poisoned the byte after the record");
+        assert_eq!(unsafe { cond_wait_attr_clock(record.as_ptr().add(1), &mut out) }, 0);
+        assert_eq!(out, 0x02);
     }
 }
