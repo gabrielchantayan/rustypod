@@ -16300,13 +16300,18 @@ functions:
       && aSortOrder[i]. Ghidra's decompile drops the third mem_compare
       argument and obscures the endgame as SBORROW4 — the disassembly
       is authoritative (movge r2,#0 / ldrlt r2,[r0,#16] is the coll
-      select). The three unported callees are the
-      VDBE_RECORD_COMPARE_OPS seam (target defaults transmute the
-      retail addresses; host defaults panic). Deviations: the serial
-      type_len jump-table datum at 0x088fce10 is not readable in the
-      decrypted image (runtime-initialized, like the other post-image
-      tables; the disassembly is upstream's aSize[]/(t-12)>>1 shape
-      verbatim); the scratch Mem is 0x30 bytes and zero-filled on host
+      select). The serial_type_len callee @ 0x0838cfe8 has since been
+      ported (sqlite/vdbe_serial_type_len) and is the shipped default
+      of its VDBE_RECORD_COMPARE_OPS slot (the value_set_str pattern);
+      serial_get @ 0x0838cc1c and mem_compare @ 0x0837d47c remain the
+      seam (target defaults transmute the retail addresses; host
+      defaults panic). Deviations: the serial type_len jump-table
+      datum — the pointer 0x088fce10 in the literal-pool word at
+      0x0838d000 — resolves through the +0xaed8 skew documented in
+      sqlite/mod.rs to image offset 0x08907ce8, whose bytes ARE
+      upstream's aSize[] verbatim (binary-verified; see the
+      0x0838cfe8 entry); the scratch Mem is 0x30 bytes and zero-filled
+      on host
       (mem_release's native-width zMalloc NULLing at +0x24 must stay in
       bounds; nothing reads the uninitialized-in-the-original fields
       before serial_get writes them). match.py: original 93 insns vs
@@ -16330,6 +16335,49 @@ functions:
       with 60-byte text + blob, bytewise text order with the prefix
       rule, coll selection past the KeyInfo nField, and zMalloc release
       through the ported mem_release with a recording heap.
+
+  - address: 0x0838cfe8
+    ghidra: FUN_0838cfe8
+    name: vdbe_serial_type_len
+    size: 24
+    sig: "u32 vdbe_serial_type_len(u32 serial_type)"
+    module: sqlite/vdbe_serial_type_len
+    status: ported
+    renames:
+      param_1: serial_type
+      uVar1: payload_len
+      DAT_0838d000: a_size_base_ptr
+    notes: >-
+      Upstream SQLite 3.5.9's sqlite3VdbeSerialTypeLen (vdbeaux.c) —
+      the payload byte length of one packed record field. functions.csv's
+      24 bytes is exact: six instructions (cmp r0,#0xc; ldrcc r1,
+      [0x838d000]; ldrbcc r0,[r1,r0]; subcs r0,r0,#0xc; movcs r0,r0,
+      lsr #0x1; bx lr) plus the 4-byte literal-pool word at 0x0838d000,
+      then the next function's prologue at 0x0838d004. 9 bl call
+      sites, all unconditional, binary-scanned from osos.dec:
+      0x083883bc, 0x083884a0, 0x08388688, 0x0838b534, 0x0838b5bc,
+      0x0838c918 (inside vdbe_record_compare), 0x0838cac0, 0x0838ce38
+      and 0x0838f5f0; no tail b. The pool word holds the table base
+      pointer 0x088fce10 — a post-image address whose raw image bytes
+      are unrelated, but through the +0xaed8 skew documented in
+      sqlite/mod.rs the table sits at image offset 0x08907ce8 and reads
+      00 01 02 03 04 06 08 08 00 00 00 00 (binary-verified against
+      osos.dec), byte-for-byte upstream's aSize[]: type 0 NULL, 1..=4
+      1/2/3/4-byte ints, 5 the 6-byte int, 6 the 8-byte int, 7 the
+      8-byte float, 8/9 the constants 0/1, 10/11 reserved. Serial
+      types >= 12 are the string/blob tail: even t a blob of
+      (t-12)/2 bytes, odd t a text of (t-13)/2 — the single
+      (t-12)>>1 the subcs/movcs pair encodes. The port keeps the
+      unsigned lsr shape so bit 31 of the result stays clear (the
+      property vdbe_record_compare's signed bgt length check relies
+      on) and is the shipped default of vdbe_record_compare's
+      VDBE_RECORD_COMPARE_OPS serial_type_len slot (the
+      value_set_str/vdbe_set_num_cols flip pattern; the missing_
+      panic stub is retained for tests needing an unconfigured
+      callee). Host tests: the table against the recovered bytes,
+      every serial type 0..12, the 12/13 zero-length boundary, an
+      even/odd sweep 12..=4096 against both parities' formulas, and
+      u32::MAX-1/u32::MAX staying unsigned.
 
   - address: 0x0838bc38
     ghidra: FUN_0838bc38
@@ -22258,6 +22306,70 @@ functions:
       from the read_unaligned host-testing idiom, plus the crate fp
       frame; same straight-line no-branch getter shape as the
       original.
+
+  - address: 0x082a1be0
+    ghidra: FUN_082a1be0
+    name: nibble_stream_current
+    size: 28
+    sig: "u8 nibble_stream_current(const u8 *state)"
+    module: fp/fp_misc
+    status: ported
+    vars:
+      param_1: state (the nibble-stream state; cursor word at +0,
+        low-half flag byte at +4)
+    notes: >-
+      Two bl call sites, both in the pixel-format converter
+      FUN_08253158 (0x08253378 and 0x082533ac, the two 4bpp decode
+      loops); no pointer to the address anywhere in osos.dec
+      (binary-scanned). Extent binary-verified against osos.dec: 28
+      bytes exactly (functions.csv's size is exact), seven
+      instructions `ldr r1,[r0]; ldrb r0,[r0,#4]; ldrb r1,[r1]; cmp
+      r0,#0; moveq r0,r1,lsr#4; andne r0,r1,#0xf; bx lr` ending at
+      0x082a1bf8 with the next function starting at 0x082a1bfc - no
+      literal pool. Algorithm: read the current nibble of a packed
+      4-bit element stream without advancing it. The state is an
+      8-byte record { +0 word cursor into the packed bytes, +4
+      low-half flag byte }; the body answers *cursor >> 4 when the
+      flag is 0, *cursor & 0xf otherwise - high nibble first, then
+      the low nibble of the same byte. The paired advance routine @
+      0x0825e3e8 (eleven instructions, binary-verified) toggles the
+      flag and steps the cursor only after the low nibble was
+      consumed, so the pair walks a byte array as a big-endian-nibble
+      stream. Both callers sit in FUN_08253158's 4-bit-per-pixel
+      decode loops: the state lives on the stack at sp+0x18 (cursor
+      seeded from the packed source pointer, flag byte zeroed at
+      0x08253358), each iteration feeds the nibble into a
+      4-byte-entry palette (`add r0,r6,r0,lsl #2`), converts through
+      FUN_082a009c/FUN_082a0074, stores a u16 pixel, then advances
+      via 0x0825e3e8. Despite landing between the two plist node
+      accessors (0x082a1bc4/0x082a1bd8), this record is NOT a plist
+      node - the +0/+4 layout and nibble arithmetic pin it as the
+      converter's nibble cursor. Deviations: the cursor is loaded as
+      a NATIVE-width pointer and the flag byte addressed right behind
+      it (size_of::<*const u8>()), so the record is the byte-exact
+      {+0 word, +4 byte} pair on the 32-bit target and stays
+      dereferenceable on a 64-bit test host (the cxx/templates.rs
+      container_element_at word-index precedent; read_unaligned on
+      the cursor keeps a 4-but-not-8-aligned record head safe, the
+      plist_node_child_count idiom) - unlike the plist accessors just
+      above, this function dereferences the pointer it loads, so the
+      strict u32-word test idiom cannot work on host. Ghidra's
+      decompile otherwise matches the listing exactly (param_1 + 1 in
+      undefined4 * units is byte offset +4). Host tests (3): high
+      nibble answered for a clear flag across edge bytes
+      (0x00/0xab/0xf0/0x0f/0xff); low nibble answered for a set flag
+      incl. 0xff, pinning the `cmp #0`/andne test-against-zero shape;
+      and a poisoned-record test (0xa5 past the flag, plus a
+      4-byte-offset record head) pinning the read to exactly the
+      cursor word and flag byte. match.py structural (exit-1 diff
+      expected): identical deviation profile to the accepted
+      plist_node_child_count port - the cursor load comes out as four
+      byte loads merged with orr shifts from the read_unaligned
+      host-testing idiom, plus the crate fp frame; the flag ldrb at
+      +4, cmp #0, conditional lsr/and selection and the dereferenced
+      packed-byte ldrb all match the original's shape (LLVM computes
+      the and unconditionally where ADS predicated it - same value
+      semantics).
 
   - address: 0x080e97ac
     ghidra: FUN_080e97ac
