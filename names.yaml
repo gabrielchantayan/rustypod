@@ -16029,6 +16029,58 @@ functions:
       flags snapshot, the post-grow value read, and attribute-bit
       survival.
 
+  - address: 0x0838c3cc
+    ghidra: FUN_0838c3cc
+    name: vdbe_mem_too_big
+    size: 76
+    sig: "int vdbe_mem_too_big(const Mem *p_mem)"
+    module: sqlite/vdbe_mem_too_big
+    status: ported
+    vars:
+      param_1: p_mem
+      r4: p_mem
+      r1: flags_snapshot
+      r0: n_total
+      r2: n_scratch
+      iVar1: n_total
+    notes: >-
+      Upstream SQLite 3.5.x's sqlite3VdbeMemTooBig (vdbemem.c),
+      immediately after vdbe_mem_stringify @ 0x0838c32c (and its two
+      inline format literals) in the vdbe Mem helper cluster - the
+      SQLITE_LIMIT_LENGTH gate the vdbe engine runs before
+      materializing an oversized TEXT/BLOB result. Extent
+      0x0838c3cc..0x0838c418 confirmed from raw words (0x0838c414 is
+      ldmia sp!,{r4,pc} and 0x0838c418 is the next function's stmdb);
+      no literal pool. 2 bl call sites, binary-scanned: 0x083874a4
+      and 0x0838aca8, both inside the 16 KB vdbe routine
+      FUN_08386ef8. Algorithm - flags at Mem+0x1c are sampled ONCE
+      (ldrh r1) and both tests run off that halfword; only
+      MEM_Str|MEM_Blob cells (tst #0x12) are checked, anything else
+      returns 0 without touching db; the size is n at +0x18 plus,
+      for a MEM_Zero (0x800) zero-tail blob, low32(Mem.u) at +0x00 -
+      the original's ldrd/adds/adc computes a 64-bit sum but the high
+      half is dead (r1 is reloaded with db before the cmp), so the
+      observable op is the wrapping 32-bit add; the verdict is the
+      signed limit < n_total against aLimit[SQLITE_LIMIT_LENGTH] at
+      db+0x50 (ldr r1,[r4,#0x10]; ldr r1,[r1,#0x50]; cmp; movlt),
+      strictly greater - limit == n_total is small enough.
+      Deviations - the port goes through the typed repr(C) Mem with
+      named fields; the dead 64-bit high half of the adds/adc is not
+      reproduced; the parameter is const (the original never writes
+      through r0). Leaf - no ops seam. match.py structural: same
+      shape - flags sample, tst #0x12 early-out, tst #0x800
+      conditional low-word add (LLVM uses predicated ldrne/addne
+      instead of beq), db+0x50 limit load, signed cmp with movlt;
+      LLVM keeps the frame off the non-zero path instead of pushing
+      r4 up front. Host tests (6) cover the MEM_Str|MEM_Blob mask
+      exhaustively over all 65536 flag values, the strictly-greater
+      boundary (limit == n is OK), signedness on both sides
+      (negative n never too big, negative limit gates), MEM_Zero
+      adding low32(u) to n on both str and blob cells, the dead high
+      half of u (2^32 adds nothing) with the wrapping 32-bit add
+      (i32::MAX + 60 wraps negative), and the cell/connection being
+      read-only.
+
   - address: 0x0838bc38
     ghidra: FUN_0838bc38
     name: mem_finalize
@@ -21458,6 +21510,82 @@ functions:
       cmp r0,#0 -> movne r0,#1 shape; the diffs are the crate fp
       frame and the blx seam dispatch (0x08086e4c visible as a
       literal word), the documented seam deviations.
+
+  - address: 0x082a1a04
+    ghidra: FUN_082a1a04
+    name: context_short_text_to_cxx_string
+    size: 48
+    sig: "void context_short_text_to_cxx_string(string: *mut *mut u8)"
+    module: fp/fp_misc
+    status: ported
+    vars:
+      param_1: string
+      uVar1: string (the default-constructor's r0 return, kept in
+        r4 and threaded into the deserializer)
+      auStack_20c: counted (the 512-byte counted-u16 staging buffer
+        at sp+0x4, a u16 codepoint count plus up to 0xff u16 units)
+      auStack_c: DEAD SLOT (sp+0x204; the add r1,sp,#0x204 aiming at
+        it is clobbered by the constructor's ldr r1,[0x83d8c2c] -
+        ADS scheduling artifact, no reader)
+      FUN_083d8c20: cxx_string_default_ctor (ported, cxx/string)
+      FUN_08054d78: context_short_text_to_counted_u16 (unported,
+        behind the CONTEXT_SHORT_TEXT_TO_COUNTED_U16 seam)
+      FUN_082596f4: counted_u16_to_cxx_string (unported, behind the
+        COUNTED_U16_TO_CXX_STRING seam - the SAME seam
+        context_text_to_cxx_string uses, no duplicate)
+    notes: >-
+      No bl call sites in osos.asm and no pointer to 0x082a1a04
+      anywhere in osos.dec (binary-scanned) - reached indirectly,
+      like its neighbors query_name_to_cxx_string @ 0x082a1918,
+      context_text_to_cxx_string @ 0x082a19bc and
+      pmu_reg87_bit1_clear @ 0x082a19ec (vtable or computed table
+      outside the image body); fourth member of that indirect
+      diagnostics run 0x082a1918-0x082a1a6c. Instruction-for-
+      instruction twin of context_text_to_cxx_string except the
+      serializer address: hands the shared context's SHORT text
+      field back as a COW basic_string<char>, staged through the
+      same counted-u16 (UTF-16) stack buffer:
+      cxx_string_default_ctor @ 0x083d8c20 (ported) parks *string
+      on the shared empty rep; FUN_08054d78 @ 0x08054d78 (104
+      bytes, unported) fetches the shared context (lazy getter
+      0x08369bec) and, when the first byte of the C string at
+      context+0x18 is 0xff (field unset), stores a zero u16 count
+      (moveq r0,#0 / strheq); otherwise it measures the string
+      (strlen @ 0x08392478, ported), masks the length to a byte
+      and truncates to 0x1f (and r0,r0,#0xff / cmp r0,#0x1f /
+      movhi r0,#0x1f), stages the payload byte-counted at sp+0x4
+      (count byte, then the bytes via __rt_memcpy through the ROM
+      veneer @ 0x08037db0, ported - Ghidra mislabels the copy
+      thunk_EXT_FUN_22000020) and expands byte-counted ->
+      counted-u16 through FUN_08046a88 @ 0x08046a88 (zero count,
+      FUN_08046b44 expansion with the 0xff ceiling, count store);
+      FUN_082596f4 @ 0x082596f4 (72 bytes, unported) then rebuilds
+      a StringObject from the counted units (FUN_082773b4 +
+      FUN_08276db4) and assigns its c_str into *string through
+      cxx_string_assign_cstr @ 0x083d8ca0, unconditionally (count
+      0 included). The field is the second of the four fillers of
+      the about/diagnostics record at 0x08112800 (bl 0x08054d78 @
+      0x0811280c; siblings 0x08052228 dotted-triple version from
+      context+0x4c, 0x08054ea0, 0x080539f0 - see
+      object_set_version_text's entry); the concrete field is not
+      recovered - a <=31-byte identifier string at context+0x18.
+      The two text-marshaling callees sit behind host-swappable
+      usize seams (the new CONTEXT_SHORT_TEXT_TO_COUNTED_U16 and
+      the SHARED COUNTED_U16_TO_CXX_STRING, this module's
+      FIXED16_RECIPROCAL pattern): the target build transmutes
+      the fixed firmware addresses, host tests install recording
+      mocks. Deviations: the staging buffer is zero-initialized
+      where the original leaves it uninitialized (unobservable -
+      the serializer writes the count and every unit the
+      deserializer reads); the dead add r1,sp,#0x204, the 4 spare
+      frame bytes at sp+0x204 and the r4 spill are ADS artifacts
+      (the twin's deviations). match.py structural (exit-1 diff
+      expected): same ctor -> serialize -> deserialize three-call
+      shape as the twin, buffer in sp-relative r0, ctor result
+      threaded r4 -> r1; the diffs are the crate fp frame, the
+      blx seam dispatches (0x08054d78/0x082596f4 visible as
+      literal words) and an __aeabi_memclr4 for the zero-init
+      (the documented deviations).
 
   - address: 0x080e97ac
     ghidra: FUN_080e97ac
