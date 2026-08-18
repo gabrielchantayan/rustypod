@@ -118,6 +118,7 @@ pub mod value_set_str;
 pub mod value_text;
 pub mod vdbe;
 pub mod vdbe_mem_set_double;
+pub mod vdbe_mem_realify;
 pub mod vdbe_mem_set_int64;
 pub mod vdbe_mem_set_null;
 pub mod vdbe_op;

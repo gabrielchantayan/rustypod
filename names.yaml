@@ -15542,6 +15542,33 @@ functions:
       the unported release, LLVM inlines tracked_free's stats-update
       prologue and tail-calls free_tag57 instead of b sqlite3_free.
 
+  - address: 0x0838c024
+    ghidra: FUN_0838c024
+    name: vdbe_mem_realify
+    size: 40
+    sig: "i32 vdbe_mem_realify(Mem *p_mem)"
+    module: sqlite/vdbe_mem_realify
+    status: ported
+    vars: {param_1: p_mem}
+    notes: >-
+      Upstream SQLite's sqlite3VdbeMemRealify (vdbemem.c) - the in-place
+      numeric-to-REAL helper immediately before mem_release @ 0x0838c04c.
+      It calls sqlite3VdbeRealValue @ 0x0838c7ec to compute p_mem's value
+      as double, stores the returned f64 into the REAL arm at +0x08, then
+      read-modify-writes flags at +0x1c to (flags & !0x1f) | MEM_Real,
+      preserving every attribute/ownership bit above the five type bits
+      (`MEM_Null`..`MEM_Blob`). Unlike vdbe_mem_set_double @ 0x0838c0c4 it
+      does not release anything and does not stamp value_type at +0x1e; it
+      simply returns SQLITE_OK (0). 2 bl call sites, binary-scanned from
+      osos.dec: @ 0x082b4784 inside FUN_082b46f8 and @ 0x08387e20 inside
+      FUN_08386ef8. The callee sqlite3VdbeRealValue @ 0x0838c7ec is not
+      ported yet, so the Rust module keeps it behind a
+      VDBE_MEM_REALIFY_OPS seam: target builds call the retailOS address
+      directly and host tests install a recording helper. match.py
+      structural: the helper call becomes slot dispatch (literal load +
+      blx) and LLVM adds its fp frame; the flag stamp still lands as one
+      ldrh/orr/bic/strh group, with `bic #23` after `orr #8` standing in
+      for the original `(flags & !0x1f) | 8` mask.
   - address: 0x0838c04c
     ghidra: FUN_0838c04c
     name: mem_release
