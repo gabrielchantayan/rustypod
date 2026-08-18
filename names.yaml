@@ -16238,6 +16238,99 @@ functions:
       integer conversion at both extrema, blob promotion and helper order,
       both checked-error short circuits, and NULL/other zero fallback.
 
+  - address: 0x0838c87c
+    ghidra: FUN_0838c87c
+    name: vdbe_record_compare
+    size: 372
+    sig: "int vdbe_record_compare(int n_key1, const u8 *p_key1, const UnpackedRecord *p_key2)"
+    module: sqlite/vdbe_record_compare
+    status: ported
+    renames:
+      param_1: n_key1
+      param_2: p_key1
+      param_3: p_key2
+      local_34: sz_hdr1
+      local_64: serial_type1
+      local_30: n_key1_stack_copy
+      auStack_60: mem1
+      local_50: mem1_db
+      local_44: mem1_flags
+      local_41: mem1_enc
+      local_3c: mem1_z_malloc
+      uVar2: idx1
+      uVar7: d1
+      iVar5: i
+      iVar8: rc
+      lVar11: compare_result_pair
+      extraout_r1: '[invented — live r1 after the mem_release bl]'
+    notes: >-
+      Upstream SQLite 3.5.9's sqlite3VdbeRecordCompare (vdbeaux.c),
+      verified against the 3.5.9 source: weigh the packed OP_MakeRecord
+      blob {nKey1, pKey1} against a parsed UnpackedRecord key2 during
+      index seeks. functions.csv's 372 bytes is EXACT (the mis-sizing
+      suspicion in the assignment does not hold): the next stmdb is
+      0x0838c9f0, the sqlite3VdbeRecordUnpack analog that builds the
+      UnpackedRecord this one consumes; no literal pool. 3 bl call
+      sites: 0x0837208c/0x083720cc in FUN_08371e54 (the
+      sqlite3BtreeMoveto analog — upstream btree.c's two calls) and
+      0x0838b450 in FUN_0838b380 (the sqlite3VdbeIdxKeyCompare analog).
+      Struct layouts recovered from its own loads (typed repr(C) in the
+      port, 32-bit offset asserts): UnpackedRecord +0x00 pKeyInfo, +0x04
+      nField (u16), +0x05 needFree, +0x06 needDestroy, +0x08 aMem (raw
+      0x28-byte Mems); KeyInfo +0x00 db, +0x04 enc, +0x05 incrKey,
+      +0x06 prefixIsEqual, +0x08 nField (i32), +0x0c aSortOrder, +0x10
+      aColl[i]. Algorithm: seed scratch mem1 (sp+0x08) db/enc from the
+      KeyInfo, clear flags/zMalloc; decode the header-size varint with
+      the build-wide idiom (first byte < 0x80 inline, else
+      sqlite3GetVarint @ 0x0837ac30 — ported, called directly, u64 out
+      truncated to the original's u32 store); while idx1 < szHdr1 && i
+      < pPKey2->nField: decode the serial type the same way, break when
+      the payload is exhausted (d1 >= nKey1, UNSIGNED) and
+      sqlite3VdbeSerialTypeLen @ 0x0838cfe8 reports a nonzero length
+      (SIGNED bgt — exact, the formula never sets bit 31), else
+      sqlite3VdbeSerialGet @ 0x0838cc1c decodes into mem1 (d1 += its
+      return) and sqlite3MemCompare @ 0x0837d47c weighs mem1 against
+      aMem[i] under aColl[i] (NULL coll once i reaches the KeyInfo
+      nField, loaded once before the loop); a nonzero rc breaks. Then
+      mem1.zMalloc, if any, goes to the ported mem_release @ 0x0838c04c
+      (the original's blne; retail serial_get never allocates, so the
+      call is dead but present). Endgame: rc==0 → -1 when incrKey, else
+      stays 0 when prefixIsEqual, else 1 when d1 < nKey1 (unsigned);
+      rc!=0 → negated when aSortOrder exists && i < nField (reloaded)
+      && aSortOrder[i]. Ghidra's decompile drops the third mem_compare
+      argument and obscures the endgame as SBORROW4 — the disassembly
+      is authoritative (movge r2,#0 / ldrlt r2,[r0,#16] is the coll
+      select). The three unported callees are the
+      VDBE_RECORD_COMPARE_OPS seam (target defaults transmute the
+      retail addresses; host defaults panic). Deviations: the serial
+      type_len jump-table datum at 0x088fce10 is not readable in the
+      decrypted image (runtime-initialized, like the other post-image
+      tables; the disassembly is upstream's aSize[]/(t-12)>>1 shape
+      verbatim); the scratch Mem is 0x30 bytes and zero-filled on host
+      (mem_release's native-width zMalloc NULLing at +0x24 must stay in
+      bounds; nothing reads the uninitialized-in-the-original fields
+      before serial_get writes them). match.py: original 93 insns vs
+      139 — same skeleton: ldrsb/cmn/ble sign-trick for the < 0x80
+      fast paths, direct bl to the ported get_varint (×2) and
+      mem_release (the original's predicated blne), blx through the
+      three seam slots where the original has direct bl
+      0x0838cfe8/0x0838cc1c/0x0837d47c, the ldrlt/movge coll select,
+      and the endgame ldrb +0x05/+0x06, mvn rc=-1, movcc rc=1,
+      ldr +0x0c/+0x08, rsbne negation; LLVM extras are the scratch-Mem
+      zero-fill, a branchless clz/lsr/and for prefixIsEqual==0 &&
+      d1<nKey1, and unsigned-equivalent loop compares (u16-bounded).
+      Host tests (16): equal multi-field walks with exact serial_get
+      payload addresses (idx1/d1 tracking), first-difference break,
+      descending negation on both columns, sort order past nField
+      ignored, trailing-payload/incrKey/prefixIsEqual endgames, NULL
+      ordering, real fields, the exhausted-payload break (serial_get
+      never runs), zero-length fields past key1 end still comparing,
+      a 130-field record (two-byte header varint through the ported
+      get_varint; per-field TypeLen(0) checks), two-byte serial types
+      with 60-byte text + blob, bytewise text order with the prefix
+      rule, coll selection past the KeyInfo nField, and zMalloc release
+      through the ported mem_release with a recording heap.
+
   - address: 0x0838bc38
     ghidra: FUN_0838bc38
     name: mem_finalize
@@ -22111,6 +22204,60 @@ functions:
       the same `mov r1,#0x28` and the same tail branch to __rt_sdiv
       (match.py renders the relocated branch as `b 0 <symbol>` for
       both ports).
+
+  - address: 0x082a1bd8
+    ghidra: FUN_082a1bd8
+    name: plist_node_processing_instruction
+    size: 8
+    sig: "u8 *plist_node_processing_instruction(const u8 *node)"
+    module: fp/fp_misc
+    status: ported
+    vars:
+      param_1: node (the plist node; companion-node pointer at +0x20)
+    notes: >-
+      One bl call site (0x0815aec0, in FUN_0815aeac); no pointer to
+      the address anywhere in osos.dec (binary-scanned). Extent
+      binary-verified: 8 bytes exactly (functions.csv's size is
+      exact), two instructions `ldr r0,[r0,#0x20]; bx lr` ending at
+      0x082a1bdc with the next function starting at 0x082a1be0 - no
+      literal pool. Algorithm: answer the plist node's +0x20 word, a
+      pointer to the node's processing-instruction companion node
+      (NULL when none was parsed). The plist node is a 0x28-byte
+      record, layout binary-verified from the stack-node constructor
+      at 0x0815a810-0x0815a848 (two cxx_string_default_ctor calls
+      plus zero stores): +0x00 tag string, +0x04/+0x08/+0x0c
+      attribute string-pair vector, +0x10 value string,
+      +0x14/+0x18/+0x1c child vector (the plist_node_child_count
+      span), +0x20 this companion pointer, +0x24 kind byte. The
+      field is filled only by the lazy accessor @ 0x0825c264, which
+      operator_new(0x28)'s a second record in the same empty-node
+      shape (both strings parked on the shared empty rep data
+      0x08b31810 - the cxx_string_default_ctor literal) and stores
+      it at node+0x20; that accessor's only caller is the XML
+      parser's processing-instruction routine @ 0x0825ceac, which
+      parses `<?target attr="..." ?>` (the '?' = 0x3f terminator at
+      0x0825cf08; the entity literals "lt"/"gt"/"amp"/"apos"/
+      "quot"/"nbsp"/"#xA" @ 0x0825ce84-0x0825ceaa binary-verified)
+      into the companion. The node destructor @ 0x0825c790 recurses
+      into +0x20 (the companion is owned). The sole consumer
+      FUN_0815aeac gates on it: a NULL companion, or wrong values
+      for the two attribute keys it probes via cxx_vector_find_equal
+      (ported, cxx/templates), rejects the document before the
+      node's own tag and attribute map are consulted. Deviations:
+      the load is a plain ABI-aligned ldr; the port reads it with
+      read_unaligned, the cxx/templates.rs host-testing idiom
+      against a 4-but-not-8-aligned node (the
+      plist_node_child_count precedent). Host tests (3): the stored
+      companion word forwarded untouched (three sentinels incl.
+      0xfffffffc); NULL answered for a zeroed field (the no-PI case
+      the consumer rejects); and a poisoned-record test pinning the
+      read to offset +0x20 exactly (0xa5 at +0x1c and the +0x24 kind
+      byte). match.py structural (exit-1 diff expected): identical
+      deviation profile to the accepted plist_node_child_count port
+      - the ldr comes out as four byte loads merged with orr shifts
+      from the read_unaligned host-testing idiom, plus the crate fp
+      frame; same straight-line no-branch getter shape as the
+      original.
 
   - address: 0x080e97ac
     ghidra: FUN_080e97ac
