@@ -1045,6 +1045,108 @@ pub unsafe extern "C" fn pmu_reg87_bit1_clear() -> bool {
     pmu_reg87_bit1_query() != 0
 }
 
+/// Host-swappable entry point for the short-text serializer
+/// `FUN_08054d78` @ 0x08054d78 (104 bytes, unported): fetches the
+/// process-wide shared context (lazy getter @ 0x08369bec) and, when
+/// the first byte of the C string at context+0x18 is 0xff (field
+/// unset), stores a zero u16 count into `counted` (`moveq r0,#0` /
+/// `strheq r0,[r5,#0x0]`). Otherwise it measures the string
+/// ([`strlen`] @ 0x08392478, ported), masks the length to a byte and
+/// truncates it to 0x1f (`and r0,r0,#0xff` / `cmp r0,#0x1f` / `movhi
+/// r0,#0x1f`), stages the payload byte-counted at sp+0x4 (count byte,
+/// then the bytes via [`__rt_memcpy`] through the ROM veneer thunk @
+/// 0x08037db0, ported — Ghidra mislabels the copy
+/// `thunk_EXT_FUN_22000020`), and expands byte-counted to counted-u16
+/// through `FUN_08046a88` @ 0x08046a88 (zero the u16 count, run the
+/// expansion loop `FUN_08046b44` with the 0xff ceiling over the staged
+/// bytes, store the produced count). The target build calls the fixed
+/// firmware address directly; host tests swap this writable cell to
+/// install recording mocks.
+#[cfg(not(target_os = "none"))]
+pub static mut CONTEXT_SHORT_TEXT_TO_COUNTED_U16: usize = 0x0805_4d78;
+
+/// Serializer seam signature: `(counted)` — same contract as
+/// [`ContextTextSerializeFn`], kept as its own alias per this
+/// module's one-alias-per-seam-family convention.
+type ShortTextSerializeFn = unsafe extern "C" fn(*mut u16);
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn short_text_serialize(counted: *mut u16) {
+    let serialize: ShortTextSerializeFn = core::mem::transmute(0x0805_4d78usize);
+    serialize(counted);
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn short_text_serialize(counted: *mut u16) {
+    let address = core::ptr::addr_of!(CONTEXT_SHORT_TEXT_TO_COUNTED_U16).read_volatile();
+    let serialize: ShortTextSerializeFn = core::mem::transmute(address);
+    serialize(counted);
+}
+
+/// context_short_text_to_cxx_string — original: `FUN_082a1a04` @
+/// 0x082a1a04 (48 bytes; NO `bl` call sites in osos.asm and no direct
+/// pointer to the address anywhere in osos.dec (binary-scanned), so —
+/// like its neighbors [`query_name_to_cxx_string`] @ 0x082a1918,
+/// [`context_text_to_cxx_string`] @ 0x082a19bc and
+/// [`pmu_reg87_bit1_clear`] @ 0x082a19ec — the original is reached
+/// indirectly, a vtable or computed table outside the image body).
+/// Fourth member of the indirect diagnostics run
+/// 0x082a1918-0x082a1a6c.
+///
+/// Instruction-for-instruction twin of [`context_text_to_cxx_string`]
+/// @ 0x082a19bc except for the serializer address: hands the shared
+/// context's SHORT text field (the C string at context+0x18, kept to
+/// 0x1f bytes) back as a COW `basic_string<char>` (the class ported
+/// in cxx/string.rs; `string` is the one-word string object, a
+/// `char **`), staged through the same counted-u16 (UTF-16) stack
+/// buffer:
+///
+/// 1. default-construct `*string`, parking it on the shared empty rep
+///    ([`cxx_string_default_ctor`] @ 0x083d8c20, ported) — the
+///    original keeps the constructor's r0 return in r4 and threads
+///    THAT into step 3, so the port binds the return value too,
+/// 2. serialize the context field into the 512-byte stack buffer as a
+///    u16 codepoint count plus that many u16 code units
+///    (`FUN_08054d78` @ 0x08054d78, unported, behind the
+///    [`CONTEXT_SHORT_TEXT_TO_COUNTED_U16`] seam),
+/// 3. deserialize the buffer back into `*string`
+///    (`FUN_082596f4` @ 0x082596f4, unported, behind the EXISTING
+///    [`COUNTED_U16_TO_CXX_STRING`] seam — the same callee
+///    [`context_text_to_cxx_string`] marshals through) — called
+///    unconditionally, count 0 included.
+///
+/// The field is the second of the four fillers of the
+/// about/diagnostics record at 0x08112800 (`bl 0x08054d78` @
+/// 0x0811280c; the siblings: 0x08052228's dotted-triple version from
+/// context+0x4c, 0x08054ea0, and 0x080539f0 — see
+/// object_set_version_text's ledger entry). The concrete field is NOT
+/// recovered: a <=31-byte identifier string lives at context+0x18.
+///
+/// Deviations:
+/// - The two text-marshaling callees are unported firmware; each sits
+///   behind a host-swappable seam (this module's FIXED16_RECIPROCAL
+///   pattern): the target build calls the fixed firmware addresses,
+///   host tests install recording mocks.
+/// - The original's `add r1,sp,#0x204` before the constructor call is
+///   dead — the constructor clobbers r1 with the empty-rep pointer it
+///   loads (`ldr r1,[0x83d8c2c]`), and no later instruction reads it.
+///   An ADS scheduling artifact, omitted (the twin's deviation).
+/// - The staging buffer is zero-initialized where the original leaves
+///   it uninitialized: the serializer writes the count and every unit
+///   the deserializer reads (count 0 writes the count word alone), so
+///   the difference is unobservable.
+/// - The 4 spare frame bytes at sp+0x204 and the r4 spill are ADS
+///   frame artifacts; the port keeps only the 512-byte buffer.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn context_short_text_to_cxx_string(string: *mut *mut u8) {
+    let string = cxx_string_default_ctor(string);
+    let mut counted = [0u16; COUNTED_U16_BUFFER_UNITS];
+    short_text_serialize(counted.as_mut_ptr());
+    counted_u16_deserialize(counted.as_ptr(), string);
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -2801,6 +2903,116 @@ mod tests {
                 let mut slot: *mut u8 = core::ptr::null_mut();
 
                 context_text_to_cxx_string(&mut slot);
+
+                assert_eq!(
+                    *core::ptr::addr_of!(CONTEXT_EVENTS),
+                    Vec::from(["serialize", "deserialize"]),
+                    "count={count:#x}"
+                );
+                assert_eq!(OBSERVED_COUNT, count, "count={count:#x}");
+                assert_eq!(slot, crate::cxx::string::empty_rep_data());
+            }
+        }
+    }
+
+    // ---- context_short_text_to_cxx_string ----
+
+    /// Install guard for the short-text serializer seam. Shares the
+    /// CONTEXT_TEXT_LOCK with the context family (both swap the common
+    /// COUNTED_U16_TO_CXX_STRING cell) and reuses its recording mocks
+    /// and statics — the two serializers have the same `(counted)`
+    /// contract, so `recording_serialize` stands in for both.
+    struct ShortTextMockInstall {
+        previous_serialize: usize,
+        previous_deserialize: usize,
+        _seam_lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for ShortTextMockInstall {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(CONTEXT_SHORT_TEXT_TO_COUNTED_U16)
+                    .write_volatile(self.previous_serialize);
+                core::ptr::addr_of_mut!(COUNTED_U16_TO_CXX_STRING)
+                    .write_volatile(self.previous_deserialize);
+            }
+        }
+    }
+
+    /// Installs the recording mocks on the short-text serializer seam
+    /// and the shared deserializer seam, resetting every log.
+    fn install_short_text_mocks() -> ShortTextMockInstall {
+        let seam_lock = CONTEXT_TEXT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            (*core::ptr::addr_of_mut!(CONTEXT_EVENTS)).clear();
+            SERIALIZE_BUFFER = core::ptr::null_mut();
+            DESERIALIZE_BUFFER = core::ptr::null();
+            DESERIALIZE_STRING = core::ptr::null_mut();
+            SERIALIZE_COUNT = 0;
+            OBSERVED_COUNT = u16::MAX;
+            OBSERVED_UNITS = [0; 8];
+            let previous_serialize =
+                core::ptr::addr_of!(CONTEXT_SHORT_TEXT_TO_COUNTED_U16).read_volatile();
+            core::ptr::addr_of_mut!(CONTEXT_SHORT_TEXT_TO_COUNTED_U16)
+                .write_volatile(recording_serialize as usize);
+            let previous_deserialize =
+                core::ptr::addr_of!(COUNTED_U16_TO_CXX_STRING).read_volatile();
+            core::ptr::addr_of_mut!(COUNTED_U16_TO_CXX_STRING)
+                .write_volatile(recording_deserialize as usize);
+            ShortTextMockInstall {
+                previous_serialize,
+                previous_deserialize,
+                _seam_lock: seam_lock,
+            }
+        }
+    }
+
+    #[test]
+    fn short_text_marshals_in_order_and_threads_the_ctor_result() {
+        let _mocks = install_short_text_mocks();
+        let mut slot: *mut u8 = core::ptr::null_mut();
+
+        unsafe {
+            SERIALIZE_COUNT = 3;
+            context_short_text_to_cxx_string(&mut slot);
+
+            assert_eq!(
+                *core::ptr::addr_of!(CONTEXT_EVENTS),
+                Vec::from(["serialize", "deserialize"])
+            );
+            // The real default constructor parked the caller's slot on
+            // the shared empty rep before the buffer work; the mocks
+            // never reassign it.
+            assert_eq!(slot, crate::cxx::string::empty_rep_data());
+            // One staging buffer travels through both marshaling calls.
+            assert!(!SERIALIZE_BUFFER.is_null());
+            assert_eq!(DESERIALIZE_BUFFER, SERIALIZE_BUFFER as *const u16);
+            // The deserializer receives the constructor's r0 return
+            // (the original's mov r4,r0 / mov r1,r4 thread), which is
+            // the caller's slot.
+            assert_eq!(DESERIALIZE_STRING, &mut slot as *mut *mut u8);
+            // The counted payload round-trips byte-exactly.
+            assert_eq!(OBSERVED_COUNT, 3);
+            assert_eq!(OBSERVED_UNITS[..3], [0x40, 0x41, 0x42]);
+        }
+    }
+
+    #[test]
+    fn short_text_deserializes_unconditionally_from_empty_to_full() {
+        let _mocks = install_short_text_mocks();
+        // The original's bl 0x082596f4 is unconditional: count 0 (the
+        // serializer's unset-field path — first byte 0xff at
+        // context+0x18) is deserialized too, 0x1f is the serializer's
+        // own truncation ceiling for this field, and 0xff is the
+        // byte-counted staging buffer's ceiling.
+        for count in [0u16, 1, 0x1f, 0xff] {
+            unsafe {
+                (*core::ptr::addr_of_mut!(CONTEXT_EVENTS)).clear();
+                OBSERVED_COUNT = u16::MAX;
+                SERIALIZE_COUNT = count;
+                let mut slot: *mut u8 = core::ptr::null_mut();
+
+                context_short_text_to_cxx_string(&mut slot);
 
                 assert_eq!(
                     *core::ptr::addr_of!(CONTEXT_EVENTS),
