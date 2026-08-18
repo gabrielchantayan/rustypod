@@ -372,6 +372,59 @@ pub unsafe extern "C" fn fixed16_div(mut numerator: i32, divisor: i32) -> i32 {
     crate::util::fixed::fixed16_mul(numerator, reciprocal)
 }
 
+/// Host-swappable entry point for the signed-division core
+/// `FUN_08037a84` (344 bytes, unported): the classic ADS quotient-only
+/// sdiv — both operands reduced to magnitude with a sign track
+/// (`sign(dividend) ^ sign(divisor)`), a `clz` difference dispatching
+/// into an unrolled 16-step shift-subtract loop, and the quotient
+/// negated when the signs differed. [`fixed16_div_indirect`] tail-calls
+/// it with the dereferenced dividend and the divisor. The target build
+/// calls the fixed firmware address directly; host tests swap this
+/// writable cell to record the exact dispatch behavior.
+#[cfg(not(target_os = "none"))]
+pub static mut FIXED16_SDIV32: usize = 0x0803_7a84;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn sdiv32(dividend: i32, divisor: i32) -> i32 {
+    let divide: unsafe extern "C" fn(i32, i32) -> i32 = core::mem::transmute(0x0803_7a84usize);
+    divide(dividend, divisor)
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn sdiv32(dividend: i32, divisor: i32) -> i32 {
+    let address = core::ptr::addr_of!(FIXED16_SDIV32).read_volatile();
+    let divide: unsafe extern "C" fn(i32, i32) -> i32 = core::mem::transmute(address);
+    divide(dividend, divisor)
+}
+
+/// fixed16_div_indirect — original: `FUN_082a182c` @ 0x082a182c (8
+/// bytes; 6 bl call sites, binary-scanned: 0x08273e2c, 0x0827403c,
+/// 0x08274140, 0x0827cf54, 0x0827cfa4, 0x0827cfd0).
+///
+/// Truncating signed 32-bit division with the DIVIDEND fetched through
+/// a pointer: the whole body is `ldr r0,[r0,#0x0]; b 0x08037a84` —
+/// load `*a` into r0 and TAIL-CALL the unported ADS quotient-only sdiv
+/// core @ 0x08037a84 (`sdiv32` above) with the divisor passed straight
+/// through in r1, so the callee's quotient returns directly to this
+/// function's caller. Heads the indirect fixed16 helper run
+/// 0x082a182c-0x082a18c8 (div, eq, gt, lt, sub, mul, ne, add); the eq
+/// comparator @ 0x082a1834 sits immediately below it. Unlike
+/// [`fixed16_div`] (@ 0x080e9834), which computes a true Q16.16
+/// quotient by reciprocal-multiply, this helper is a PLAIN integer
+/// sdiv — callers pre-scale: FUN_08273dc8 divides a Q16.16 delta by
+/// `row_count << 16` to get a per-row step, and FUN_0827cf10 forms
+/// ratios of two Q16.16 values (e.g. `d / (300.0 - d)`), the 2^16
+/// scales cancelling. The tail call means there is no frame and no
+/// result handling of its own; the port mirrors that by delegating to
+/// `sdiv32` after the single pointer load, so the only observable
+/// behavior added here is the dereference.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn fixed16_div_indirect(a: *const i32, b: i32) -> i32 {
+    sdiv32(*a, b)
+}
+
 /// fixed16_eq_indirect — original: `FUN_082a1834` @ 0x082a1834 (24
 /// bytes; 4 bl call sites, all in FUN_0827d380: 0x0827d5f4,
 /// 0x0827d608, 0x0827d61c, 0x0827d630).
@@ -1049,6 +1102,106 @@ mod tests {
         );
         unsafe {
             assert_eq!(LAST_RECIPROCAL_INPUT, divisor);
+        }
+    }
+
+    // ---- fixed16_div_indirect ----
+
+    static FIXED16_DIV_INDIRECT_LOCK: Mutex<()> = Mutex::new(());
+    static mut SDIV_RESULT: i32 = 0;
+    static mut SDIV_CALLS: usize = 0;
+    static mut LAST_SDIV_DIVIDEND: i32 = 0;
+    static mut LAST_SDIV_DIVISOR: i32 = 0;
+
+    unsafe extern "C" fn recording_sdiv(dividend: i32, divisor: i32) -> i32 {
+        SDIV_CALLS += 1;
+        LAST_SDIV_DIVIDEND = dividend;
+        LAST_SDIV_DIVISOR = divisor;
+        SDIV_RESULT
+    }
+
+    struct SdivInstall {
+        previous: usize,
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for SdivInstall {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(FIXED16_SDIV32).write_volatile(self.previous);
+            }
+        }
+    }
+
+    fn install_sdiv(
+        implementation: unsafe extern "C" fn(i32, i32) -> i32,
+        result: i32,
+    ) -> SdivInstall {
+        let lock = FIXED16_DIV_INDIRECT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            let previous = core::ptr::addr_of!(FIXED16_SDIV32).read_volatile();
+            core::ptr::addr_of_mut!(FIXED16_SDIV32).write_volatile(implementation as usize);
+            SDIV_RESULT = result;
+            SDIV_CALLS = 0;
+            LAST_SDIV_DIVIDEND = 0;
+            LAST_SDIV_DIVISOR = 0;
+            SdivInstall {
+                previous,
+                _lock: lock,
+            }
+        }
+    }
+
+    #[test]
+    fn fixed16_div_indirect_dereferences_dividend_and_returns_quotient() {
+        let sentinel = -0x0d15_ea5e;
+        let _sdiv = install_sdiv(recording_sdiv, sentinel);
+        let dividend = 0x0012_d000; // 18.8125 in Q16.16
+        let divisor = 0x0002_0000; // 2.0 in Q16.16
+
+        assert_eq!(unsafe { fixed16_div_indirect(&dividend, divisor) }, sentinel);
+        unsafe {
+            assert_eq!(SDIV_CALLS, 1);
+            assert_eq!(LAST_SDIV_DIVIDEND, dividend);
+            assert_eq!(LAST_SDIV_DIVISOR, divisor);
+        }
+    }
+
+    #[test]
+    fn fixed16_div_indirect_loads_current_pointee_each_call() {
+        let _sdiv = install_sdiv(recording_sdiv, 0);
+        let mut slot = 1;
+        for expected in [i32::MIN, -1, 0, 1, 0x7fff_ffff] {
+            slot = expected;
+            assert_eq!(unsafe { fixed16_div_indirect(&slot, 3) }, 0);
+            unsafe {
+                assert_eq!(LAST_SDIV_DIVIDEND, expected);
+                assert_eq!(LAST_SDIV_DIVISOR, 3);
+            }
+        }
+        unsafe {
+            assert_eq!(SDIV_CALLS, 5);
+        }
+    }
+
+    /// With the firmware core swapped for real truncating division the
+    /// helper is exactly `*a / b` (wrapping on the INT_MIN / -1 corner,
+    /// matching the ADS core's unsigned-magnitude loop).
+    #[test]
+    fn fixed16_div_indirect_delegates_truncating_division() {
+        unsafe extern "C" fn truncating_sdiv(dividend: i32, divisor: i32) -> i32 {
+            dividend.wrapping_div(divisor)
+        }
+        let _sdiv = install_sdiv(truncating_sdiv, 0);
+        for (dividend, divisor, expected) in [
+            (0x0012_d000, 0x0002_0000, 9), // ratio of two Q16.16 values: scales cancel
+            (-0x0012_d000, 0x0002_0000, -9),
+            (7, -2, -3),  // truncation toward zero, not floor
+            (-7, 2, -3),
+            (i32::MIN, -1, i32::MIN), // ADS magnitude loop wraps, no trap
+            (0, 5, 0),
+        ] {
+            assert_eq!(unsafe { fixed16_div_indirect(&dividend, divisor) }, expected);
         }
     }
 

@@ -20532,6 +20532,43 @@ functions:
       truncated by the false no-return edge;
       actual code is 0x080e988c-0x080e98ff plus literals 0x080e9900-0x080e990b.
 
+  - address: 0x082a182c
+    ghidra: FUN_082a182c
+    name: fixed16_div_indirect
+    size: 8
+    sig: "i32 fixed16_div_indirect(a: *const i32, b: i32) -> i32"
+    module: fp/fp_misc
+    status: ported
+    vars: {param_1: a, param_2: b, FUN_08037a84: sdiv32}
+    notes: >-
+      Truncating signed 32-bit division with the DIVIDEND fetched
+      through a pointer: the whole body is ldr r0,[r0,#0x0]; b
+      0x08037a84 - load *a into r0 and TAIL-CALL the unported ADS
+      quotient-only sdiv core @ 0x08037a84 (344 bytes: both operands
+      reduced to magnitude with a sign track, a clz difference
+      dispatching into an unrolled 16-step shift-subtract loop,
+      quotient negated when the signs differed), the divisor passed
+      straight through in r1, so the callee's quotient returns directly
+      to this function's caller. Heads the indirect fixed16 helper run
+      0x082a182c-0x082a18c8 (div, eq, gt, lt, sub, mul, ne, add); the
+      eq comparator @ 0x082a1834 sits immediately below it. Unlike
+      fixed16_div (@ 0x080e9834), which computes a true Q16.16 quotient
+      by reciprocal-multiply, this helper is a PLAIN integer sdiv -
+      callers pre-scale: FUN_08273dc8 divides a Q16.16 delta by
+      (row_count << 16) for a per-row step, and FUN_0827cf10 forms
+      ratios of two Q16.16 values (d / (300.0 - d)), the 2^16 scales
+      cancelling. 6 bl call sites, binary-scanned: 0x08273e2c
+      (FUN_08273dc8), 0x0827403c (FUN_08274004), 0x08274140
+      (FUN_08274108), 0x0827cf54/0x0827cfa4/0x0827cfd0 (FUN_0827cf10).
+      The port delegates to a host-swappable sdiv32 seam (the
+      fixed16_reciprocal/FIXED16_RECIPROCAL precedent; FIXED16_SDIV32
+      cell) since the division core itself is unported. match.py
+      structural: same ldr r0,[r0] core; LLVM lowers the
+      absolute-address tail call as a literal-pool word (0x08037a84)
+      plus bx r2 and adds the usual push {fp,lr}/pop {fp,lr} frame
+      instead of the original's direct b - same target, same
+      pass-through of the divisor in r1.
+
   - address: 0x082a1834
     ghidra: FUN_082a1834
     name: fixed16_eq_indirect
