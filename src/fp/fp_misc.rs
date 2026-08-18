@@ -657,7 +657,7 @@ pub unsafe extern "C" fn message_code_word(message: *const u32) -> u32 {
     *message.add(1)
 }
 
-use crate::cxx::string::{cxx_string_rep_create, empty_rep, rep_data};
+use crate::cxx::string::{cxx_string_default_ctor, cxx_string_rep_create, empty_rep, rep_data};
 use crate::cxx::string_object::{
     string_object_c_str, string_object_release_payload, StringObject, STRING_OBJECT_VTABLE,
 };
@@ -840,6 +840,132 @@ pub unsafe extern "C" fn query_name_to_cxx_string(string: *mut *mut u8) {
     name.vtable = &STRING_OBJECT_VTABLE;
     string_object_release_payload(&mut name);
     query_object_destroy(query.as_mut_ptr());
+}
+
+/// Size in u16 units of the stack-local counted-u16 staging buffer
+/// [`context_text_to_cxx_string`] uses: one u16 codepoint count
+/// followed by up to 0xff u16 code units (0x200 bytes total — the
+/// original's `sub sp,sp,#0x208` frame reserves them at sp+0x4). The
+/// serializer truncates to 0xff codepoints (`movhi r1,#0xff` @
+/// 0x08053a44 feeding `FUN_08277044`), so 0x100 u16s always suffices.
+const COUNTED_U16_BUFFER_UNITS: usize = 0x100;
+
+/// Host-swappable entry point for the context-text serializer
+/// `FUN_080539f0` @ 0x080539f0 (156 bytes, unported): fetches the
+/// process-wide shared context (lazy getter @ 0x08369bec), builds a
+/// StringObject from the C string at context+0x98 (a first byte of
+/// 0xff marks the field unset and yields count 0), appends the lookup
+/// name of the u16 code at context+0x92 (`FUN_08068fe8` maps it to
+/// short layout tags — "ABC"/"B19"/"DK"/"CH"/"KH"…), truncates to
+/// 0xff codepoints, and expands the result into `counted` as a u16
+/// codepoint count followed by that many u16 code units
+/// (UTF-8→UTF-16 decode loop @ 0x082767fc). The target build calls
+/// the fixed firmware address directly; host tests swap this writable
+/// cell to install recording mocks.
+#[cfg(not(target_os = "none"))]
+pub static mut CONTEXT_TEXT_TO_COUNTED_U16: usize = 0x0805_39f0;
+
+/// Host-swappable entry point for the counted-u16 deserializer
+/// `FUN_082596f4` @ 0x082596f4 (72 bytes, unported): rebuilds a
+/// StringObject from the counted u16 units (`FUN_082773b4`), converts
+/// it (`FUN_08276db4`), assigns its c_str into `string` through
+/// [`cxx_string_assign_cstr`] @ 0x083d8ca0, then plants the
+/// StringObject vtable (`DAT_0825973c`) and releases the payload
+/// ([`string_object_release_payload`] @ 0x08275d74). The target build
+/// calls the fixed firmware address directly; host tests swap this
+/// writable cell.
+#[cfg(not(target_os = "none"))]
+pub static mut COUNTED_U16_TO_CXX_STRING: usize = 0x0825_96f4;
+
+/// Serializer seam signature: `(counted)` — writes the u16 count at
+/// counted[0] and the code units from counted[1].
+type ContextTextSerializeFn = unsafe extern "C" fn(*mut u16);
+/// Deserializer seam signature: `(counted, string)`.
+type CountedU16DeserializeFn = unsafe extern "C" fn(*const u16, *mut *mut u8);
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn context_text_serialize(counted: *mut u16) {
+    let serialize: ContextTextSerializeFn = core::mem::transmute(0x0805_39f0usize);
+    serialize(counted);
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn context_text_serialize(counted: *mut u16) {
+    let address = core::ptr::addr_of!(CONTEXT_TEXT_TO_COUNTED_U16).read_volatile();
+    let serialize: ContextTextSerializeFn = core::mem::transmute(address);
+    serialize(counted);
+}
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn counted_u16_deserialize(counted: *const u16, string: *mut *mut u8) {
+    let deserialize: CountedU16DeserializeFn = core::mem::transmute(0x0825_96f4usize);
+    deserialize(counted, string);
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn counted_u16_deserialize(counted: *const u16, string: *mut *mut u8) {
+    let address = core::ptr::addr_of!(COUNTED_U16_TO_CXX_STRING).read_volatile();
+    let deserialize: CountedU16DeserializeFn = core::mem::transmute(address);
+    deserialize(counted, string);
+}
+
+/// context_text_to_cxx_string — original: `FUN_082a19bc` @ 0x082a19bc
+/// (48 bytes; NO `bl` call sites in osos.asm and no direct pointer to
+/// the address anywhere in osos.dec, so — like its neighbor
+/// [`query_name_to_cxx_string`] @ 0x082a1918 — the original is reached
+/// indirectly, a vtable or computed table outside the image body).
+///
+/// Hands the shared context's text field back as a COW
+/// `basic_string<char>` (the class ported in cxx/string.rs; `string`
+/// is the one-word string object, a `char **`), staged through a
+/// counted-u16 (UTF-16) stack buffer:
+///
+/// 1. default-construct `*string`, parking it on the shared empty rep
+///    ([`cxx_string_default_ctor`] @ 0x083d8c20, ported) — the
+///    original keeps the constructor's r0 return in r4 and threads
+///    THAT into step 3, so the port binds the return value too,
+/// 2. serialize the context field into the 512-byte stack buffer as a
+///    u16 codepoint count plus that many u16 code units
+///    (`FUN_080539f0` @ 0x080539f0, unported, behind the
+///    [`CONTEXT_TEXT_TO_COUNTED_U16`] seam),
+/// 3. deserialize the buffer back into `*string`
+///    (`FUN_082596f4` @ 0x082596f4, unported, behind the
+///    [`COUNTED_U16_TO_CXX_STRING`] seam) — called unconditionally,
+///    count 0 included.
+///
+/// The field is the same shared-context text the about/diagnostics
+/// record at 0x08112800 collects (0x080539f0 is one of its four
+/// field fillers; see object_set_version_text's ledger entry): the C
+/// string at context+0x98 with the lookup name of the u16 code at
+/// context+0x92 appended — the concrete field is not recovered, but
+/// the code-name table holds short layout tags ("ABC", "B19", "DK",
+/// "CH", "KH"…), pointing at an input/keyboard-layout name.
+///
+/// Deviations:
+/// - The two text-marshaling callees are unported firmware; each sits
+///   behind a host-swappable seam (this module's FIXED16_RECIPROCAL
+///   pattern): the target build calls the fixed firmware addresses,
+///   host tests install recording mocks.
+/// - The original's `add r1,sp,#0x204` before the constructor call is
+///   dead — the constructor clobbers r1 with the empty-rep pointer it
+///   loads (`ldr r1,[0x83d8c2c]`), and no later instruction reads it.
+///   An ADS scheduling artifact, omitted.
+/// - The staging buffer is zero-initialized where the original leaves
+///   it uninitialized: the serializer writes the count and every unit
+///   the deserializer reads (count 0 writes the count word alone), so
+///   the difference is unobservable.
+/// - The 4 spare frame bytes at sp+0x204 and the r4 spill are ADS
+///   frame artifacts; the port keeps only the 512-byte buffer.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn context_text_to_cxx_string(string: *mut *mut u8) {
+    let string = cxx_string_default_ctor(string);
+    let mut counted = [0u16; COUNTED_U16_BUFFER_UNITS];
+    context_text_serialize(counted.as_mut_ptr());
+    counted_u16_deserialize(counted.as_ptr(), string);
 }
 
 #[cfg(test)]
@@ -2467,6 +2593,146 @@ mod tests {
                 (*core::ptr::addr_of!(QUERY_FREES)).is_empty(),
                 "the NULL payload takes release_payload's early-out"
             );
+        }
+    }
+
+    // ---- context_text_to_cxx_string ----
+
+    /// Serializes the tests that swap the two counted-u16 marshaling
+    /// seams (the QUERY_NAME_LOCK precedent above).
+    static CONTEXT_TEXT_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Callee event log: the mocks push their names as they run.
+    static mut CONTEXT_EVENTS: Vec<&'static str> = Vec::new();
+    static mut SERIALIZE_BUFFER: *mut u16 = core::ptr::null_mut();
+    static mut DESERIALIZE_BUFFER: *const u16 = core::ptr::null();
+    static mut DESERIALIZE_STRING: *mut *mut u8 = core::ptr::null_mut();
+    /// Count the serialize mock stamps into the buffer.
+    static mut SERIALIZE_COUNT: u16 = 0;
+    /// What the deserialize mock observed: the count word and the
+    /// first few code units.
+    static mut OBSERVED_COUNT: u16 = 0;
+    static mut OBSERVED_UNITS: [u16; 8] = [0; 8];
+
+    unsafe extern "C" fn recording_serialize(counted: *mut u16) {
+        (*core::ptr::addr_of_mut!(CONTEXT_EVENTS)).push("serialize");
+        SERIALIZE_BUFFER = counted;
+        let count = SERIALIZE_COUNT;
+        *counted = count;
+        for i in 0..count as usize {
+            *counted.add(1 + i) = 0x40 + i as u16;
+        }
+    }
+
+    unsafe extern "C" fn recording_deserialize(counted: *const u16, string: *mut *mut u8) {
+        (*core::ptr::addr_of_mut!(CONTEXT_EVENTS)).push("deserialize");
+        DESERIALIZE_BUFFER = counted;
+        DESERIALIZE_STRING = string;
+        let count = *counted;
+        OBSERVED_COUNT = count;
+        let kept = (count as usize).min(OBSERVED_UNITS.len());
+        for i in 0..kept {
+            OBSERVED_UNITS[i] = *counted.add(1 + i);
+        }
+    }
+
+    struct ContextMockInstall {
+        previous_serialize: usize,
+        previous_deserialize: usize,
+        _seam_lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for ContextMockInstall {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(CONTEXT_TEXT_TO_COUNTED_U16)
+                    .write_volatile(self.previous_serialize);
+                core::ptr::addr_of_mut!(COUNTED_U16_TO_CXX_STRING)
+                    .write_volatile(self.previous_deserialize);
+            }
+        }
+    }
+
+    /// Installs the recording mocks on both seams and resets every log.
+    fn install_context_mocks() -> ContextMockInstall {
+        let seam_lock = CONTEXT_TEXT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            (*core::ptr::addr_of_mut!(CONTEXT_EVENTS)).clear();
+            SERIALIZE_BUFFER = core::ptr::null_mut();
+            DESERIALIZE_BUFFER = core::ptr::null();
+            DESERIALIZE_STRING = core::ptr::null_mut();
+            SERIALIZE_COUNT = 0;
+            OBSERVED_COUNT = u16::MAX;
+            OBSERVED_UNITS = [0; 8];
+            let previous_serialize =
+                core::ptr::addr_of!(CONTEXT_TEXT_TO_COUNTED_U16).read_volatile();
+            core::ptr::addr_of_mut!(CONTEXT_TEXT_TO_COUNTED_U16)
+                .write_volatile(recording_serialize as usize);
+            let previous_deserialize =
+                core::ptr::addr_of!(COUNTED_U16_TO_CXX_STRING).read_volatile();
+            core::ptr::addr_of_mut!(COUNTED_U16_TO_CXX_STRING)
+                .write_volatile(recording_deserialize as usize);
+            ContextMockInstall {
+                previous_serialize,
+                previous_deserialize,
+                _seam_lock: seam_lock,
+            }
+        }
+    }
+
+    #[test]
+    fn context_text_marshals_in_order_and_threads_the_ctor_result() {
+        let _mocks = install_context_mocks();
+        let mut slot: *mut u8 = core::ptr::null_mut();
+
+        unsafe {
+            SERIALIZE_COUNT = 3;
+            context_text_to_cxx_string(&mut slot);
+
+            assert_eq!(
+                *core::ptr::addr_of!(CONTEXT_EVENTS),
+                Vec::from(["serialize", "deserialize"])
+            );
+            // The real default constructor parked the caller's slot on
+            // the shared empty rep before the buffer work; the mocks
+            // never reassign it.
+            assert_eq!(slot, crate::cxx::string::empty_rep_data());
+            // One staging buffer travels through both marshaling calls.
+            assert!(!SERIALIZE_BUFFER.is_null());
+            assert_eq!(DESERIALIZE_BUFFER, SERIALIZE_BUFFER as *const u16);
+            // The deserializer receives the constructor's r0 return
+            // (the original's mov r4,r0 / mov r1,r4 thread), which is
+            // the caller's slot.
+            assert_eq!(DESERIALIZE_STRING, &mut slot as *mut *mut u8);
+            // The counted payload round-trips byte-exactly.
+            assert_eq!(OBSERVED_COUNT, 3);
+            assert_eq!(OBSERVED_UNITS[..3], [0x40, 0x41, 0x42]);
+        }
+    }
+
+    #[test]
+    fn context_text_deserializes_unconditionally_from_empty_to_full() {
+        let _mocks = install_context_mocks();
+        // The original's bl 0x082596f4 is unconditional: count 0 (the
+        // serializer's unset-field path) is deserialized too, and 0xff
+        // is the serializer's truncation ceiling.
+        for count in [0u16, 1, 0xff] {
+            unsafe {
+                (*core::ptr::addr_of_mut!(CONTEXT_EVENTS)).clear();
+                OBSERVED_COUNT = u16::MAX;
+                SERIALIZE_COUNT = count;
+                let mut slot: *mut u8 = core::ptr::null_mut();
+
+                context_text_to_cxx_string(&mut slot);
+
+                assert_eq!(
+                    *core::ptr::addr_of!(CONTEXT_EVENTS),
+                    Vec::from(["serialize", "deserialize"]),
+                    "count={count:#x}"
+                );
+                assert_eq!(OBSERVED_COUNT, count, "count={count:#x}");
+                assert_eq!(slot, crate::cxx::string::empty_rep_data());
+            }
         }
     }
 }

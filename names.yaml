@@ -21271,6 +21271,77 @@ functions:
       words), an __aeabi_memclr4 for the zero-init, and LLVM
       inlining strlen + rep_create (the documented deviations).
 
+  - address: 0x082a19bc
+    ghidra: FUN_082a19bc
+    name: context_text_to_cxx_string
+    size: 48
+    sig: "void context_text_to_cxx_string(string: *mut *mut u8)"
+    module: fp/fp_misc
+    status: ported
+    vars:
+      param_1: string
+      uVar1: string (the default-constructor's r0 return, kept in
+        r4 and threaded into the deserializer)
+      auStack_20c: counted (the 512-byte counted-u16 staging buffer
+        at sp+0x4, a u16 codepoint count plus up to 0xff u16 units)
+      auStack_c: DEAD SLOT (sp+0x204; the add r1,sp,#0x204 aiming at
+        it is clobbered by the constructor's ldr r1,[0x83d8c2c] -
+        ADS scheduling artifact, no reader)
+      FUN_083d8c20: cxx_string_default_ctor (ported, cxx/string)
+      FUN_080539f0: context_text_to_counted_u16 (unported, behind
+        the CONTEXT_TEXT_TO_COUNTED_U16 seam)
+      FUN_082596f4: counted_u16_to_cxx_string (unported, behind the
+        COUNTED_U16_TO_CXX_STRING seam)
+    notes: >-
+      No bl call sites in osos.asm and no pointer to 0x082a19bc
+      anywhere in osos.dec (binary-scanned) - reached indirectly,
+      like its neighbor query_name_to_cxx_string @ 0x082a1918
+      (vtable or computed table outside the image body). Hands the
+      shared context's text field back as a COW basic_string<char>,
+      staged through a counted-u16 (UTF-16) stack buffer:
+      cxx_string_default_ctor @ 0x083d8c20 (ported) parks *string
+      on the shared empty rep; FUN_080539f0 @ 0x080539f0 (156
+      bytes, unported) fetches the shared context (lazy getter
+      0x08369bec), builds a StringObject from the C string at
+      context+0x98 (first byte 0xff = unset -> count 0), appends
+      the lookup name of the u16 code at context+0x92
+      (FUN_08068fe8 maps it to short layout tags "ABC"/"B19"/
+      "DK"/"CH"/"KH"...), truncates to 0xff codepoints and
+      expands UTF-8->UTF-16 into the buffer (decode loop
+      0x082767fc); FUN_082596f4 @ 0x082596f4 (72 bytes, unported)
+      rebuilds a StringObject from the counted u16 units
+      (FUN_082773b4 + FUN_08276db4) and assigns its c_str into
+      *string through cxx_string_assign_cstr @ 0x083d8ca0,
+      unconditionally (count 0 included). The field is the same
+      shared-context text the about/diagnostics record at
+      0x08112800 collects (0x080539f0 is one of its four field
+      fillers - see object_set_version_text's entry); the
+      concrete field is not recovered, but the code-name table
+      points at an input/keyboard-layout name. Register flow
+      verified against the disassembly: Ghidra's extra auStack_c
+      parameter on FUN_083d8c20 is fictitious (r1 dead - the
+      constructor clobbers it), and FUN_080539f0's param_2..
+      param_4 are the pushed r2/r3 stack-reservation words of
+      its stmdb sp!,{r2,r3,r4,r5,r6,lr} frame, not arguments -
+      the true arity of all three calls is one argument each.
+      The two text-marshaling callees sit behind host-swappable
+      usize seams (CONTEXT_TEXT_TO_COUNTED_U16 /
+      COUNTED_U16_TO_CXX_STRING, this module's
+      FIXED16_RECIPROCAL pattern): the target build transmutes
+      the fixed firmware addresses, host tests install recording
+      mocks. Deviations: the staging buffer is zero-initialized
+      where the original leaves it uninitialized (unobservable -
+      the serializer writes the count and every unit the
+      deserializer reads); the 4 spare frame bytes at sp+0x204
+      and the r4 spill are ADS artifacts. match.py structural
+      (exit-1 diff expected): same ctor -> serialize ->
+      deserialize three-call shape with the buffer in sp-relative
+      r0 and the ctor result threaded r4 -> r1; the diffs are
+      the crate fp frame, the blx seam dispatches (0x080539f0/
+      0x082596f4 visible as literal words) and an
+      __aeabi_memclr4 for the zero-init (the documented
+      deviations).
+
   - address: 0x080e97ac
     ghidra: FUN_080e97ac
     name: fixed16_cos
