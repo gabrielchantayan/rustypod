@@ -22540,7 +22540,7 @@ functions:
       ROM only clock 0 (CLOCK_REALTIME) waiters can be created even
       though the wait body is generic. The SIBLING getter @
       0x082a1c0c is the same four-instruction shape reading [r0,#0x0]
-      instead (NOT ported here, reserved for a follow-up): it lands
+      instead (ported as cond_wait_attr_abstime, see its entry): it lands
       at node+1 and selects deadline arithmetic in the wait body - 1
       means the caller's {sec, nsec} pair is an absolute deadline
       copied verbatim into the waiter node at +0x1c/+0x20, 0 means
@@ -22568,6 +22568,62 @@ functions:
       instruction-for-instruction the original's (ldrb/strb/mov
       r0,#0), differing only by the crate's fp frame (push {fp,lr} /
       mov fp,sp / pop {fp,pc} in place of bx lr).
+
+  - address: 0x082a1c0c
+    ghidra: FUN_082a1c0c
+    name: cond_wait_attr_abstime
+    size: 16
+    sig: "u32 cond_wait_attr_abstime(const u8 *attr, u8 *out)"
+    module: fp/fp_misc
+    status: ported
+    vars:
+      param_1: attr (the condition-wait attributes record; absolute-deadline flag byte at +0)
+      param_2: out (caller byte slot receiving the flag)
+      FUN_0826263c: cond_waiter_node_init (copies the flag into the waiter node at +1)
+      FUN_08261f94: cond_timedwait_body (node+1 selects absolute vs relative deadline)
+      FUN_08261ed8: timespec_add (relative timeout, caller delta + freshly read now)
+    notes: >-
+      The +0 sibling of cond_wait_attr_clock @ 0x082a1bfc - same
+      four-instruction shape reading [r0,#0x0] instead of [r0,#0x1].
+      Exactly one bl call site, 0x08262670 inside the waiter-node
+      initializer FUN_0826263c (the sibling getter is the preceding
+      bl at 0x0826265c); no 4-aligned pointer to the address
+      anywhere in osos.dec (binary-scanned). Extent binary-verified
+      against osos.dec: 16 bytes exactly (functions.csv's size is
+      exact), `ldrb r0,[r0,#0x0]; strb r0,[r1,#0x0]; mov r0,#0x0;
+      bx lr` ending at 0x082a1c18; the 20 bytes from 0x082a1c1c
+      decode as an unnamed tail-call thunk (mov r2,r0; mov r0,r1;
+      ldr r1,[r2,#0x8]; ldr r2,[r2,#0x4]; bx r2) before the next
+      csv-listed function at 0x082a1c30 - no literal pool.
+      Algorithm: a byte getter over the condition variable's
+      wait-attributes record - copy the record's +0 byte into the
+      caller's out pointer and answer 0 (success). Same two-byte
+      options block as the sibling - { +0 absolute-deadline flag,
+      +1 clock id } - default-constructed to {0, 0} by the trivial
+      ctor @ 0x08261d44. The +0 flag is consumed as the
+      absolute/relative deadline selector: FUN_0826263c copies it
+      into the waiter node at +1, and the timed-wait body
+      FUN_08261f94 compares node+1 against exactly 1 - 1 means the
+      caller's {sec, nsec} pair is an absolute deadline copied
+      verbatim into the node at +0x1c/+0x20, anything else means
+      relative, added to the freshly read "now" by the timespec
+      add @ 0x08261ed8. Deviations: none - a byte load and a byte
+      store have no alignment hazard on any host, so the port
+      dereferences directly as the sibling does. Ghidra's decompile
+      (`*param_2 = *param_1; return 0;`) matches the listing
+      exactly; the single call site ignores the status return (it
+      re-reads the out byte off the stack), but the port preserves
+      it. Host tests (3): the +0 byte forwarded across 0/1/2/0xff
+      (the getter never validates; the wait body's ==1 compare
+      makes the flag effectively boolean); the status word always
+      0; and a poisoned-record test (0x5a at +1, 0xa5 on both
+      sides) pinning the read to offset +0 exactly, the
+      distinguishing feature against the cond_wait_attr_clock
+      sibling. match.py structural (exit-1 diff expected): the
+      body is instruction-for-instruction the original's
+      (ldrb/strb/mov r0,#0), differing only by the crate's fp
+      frame (push {fp,lr} / mov fp,sp / pop {fp,pc} in place of
+      bx lr).
 
   - address: 0x080e97ac
     ghidra: FUN_080e97ac

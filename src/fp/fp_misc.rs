@@ -1795,7 +1795,7 @@ pub unsafe extern "C" fn nibble_stream_current(state: *const u8) -> u8 {
 /// waiters can be created even though the wait body is generic.
 /// The sibling byte, +0x00, is read by the near-identical getter @
 /// 0x082a1c0c (same four-instruction shape, `ldrb r0,[r0,#0x0]` —
-/// NOT ported here, reserved for a follow-up): it lands at node+0x01
+/// ported just below as `cond_wait_attr_abstime`): it lands at node+0x01
 /// and selects deadline arithmetic in the wait body — 1 means the
 /// caller's {sec, nsec} pair is an absolute deadline copied verbatim
 /// into the waiter node at +0x1c/+0x20, 0 means relative, added to
@@ -1817,6 +1817,49 @@ pub unsafe extern "C" fn nibble_stream_current(state: *const u8) -> u8 {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn cond_wait_attr_clock(attr: *const u8, out: *mut u8) -> u32 {
     *out = *attr.add(1);
+    0
+}
+
+/// cond_wait_attr_abstime — original: `FUN_082a1c0c` @ 0x082a1c0c
+/// (16 bytes, binary-verified against osos.dec: four instructions
+/// `ldrb r0,[r0,#0x0]; strb r0,[r1,#0x0]; mov r0,#0x0; bx lr`
+/// ending at 0x082a1c18 — functions.csv's 16-byte size is exact
+/// and there is no literal pool; the 20 bytes from 0x082a1c1c
+/// decode as an unnamed tail-call thunk (`mov r2,r0; mov r0,r1;
+/// ldr r1,[r2,#0x8]; ldr r2,[r2,#0x4]; bx r2`) before the next
+/// csv-listed function at 0x082a1c30. Exactly one direct call
+/// site, the `bl` at 0x08262670 inside the waiter-node
+/// initializer FUN_0826263c (its sibling `cond_wait_attr_clock`
+/// @ 0x082a1bfc is the preceding `bl` at 0x0826265c); no pointer
+/// to the address anywhere in osos.dec (binary-scanned,
+/// 4-aligned).
+///
+/// A byte getter over the condition variable's wait-attributes
+/// record: copy the record's +0x00 byte into the caller's out
+/// pointer and answer 0 (success). Same two-byte options block
+/// as the sibling getter just above — { +0x00 absolute-deadline
+/// flag, +0x01 clock id } — default-constructed to {0, 0} by the
+/// trivial ctor @ 0x08261d44.
+///
+/// The +0x00 flag this getter answers is consumed as the
+/// absolute/relative deadline selector: FUN_0826263c copies it
+/// into the waiter node at +0x01, and the timed-wait body
+/// FUN_08261f94 tests node+0x01 — 1 means the caller's {sec,
+/// nsec} pair is an absolute deadline copied verbatim into the
+/// node at +0x1c/+0x20, anything else means relative, added to
+/// the freshly read "now" by the timespec add @ 0x08261ed8. The
+/// wait body compares against exactly 1 (`pcVar5[1] == '\x01'`),
+/// so the flag is effectively boolean.
+///
+/// Deviations: none. Byte load, byte store, constant return —
+/// no alignment hazard on any host, so the port dereferences
+/// directly as the sibling does. Ghidra's decompile (`*param_2 =
+/// *param_1; return 0;`) matches the listing exactly. The single
+/// call site ignores the status return (it re-reads the out byte
+/// off the stack), but the port preserves it.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn cond_wait_attr_abstime(attr: *const u8, out: *mut u8) -> u32 {
+    *out = *attr;
     0
 }
 
@@ -4779,5 +4822,44 @@ mod tests {
         assert_eq!(record[3], 0xa5, "builder poisoned the byte after the record");
         assert_eq!(unsafe { cond_wait_attr_clock(record.as_ptr().add(1), &mut out) }, 0);
         assert_eq!(out, 0x02);
+    }
+
+    // ---- cond_wait_attr_abstime ----
+
+    #[test]
+    fn cond_wait_attr_abstime_forwards_the_flag_byte() {
+        // The flag is effectively boolean (the wait body compares
+        // node+1 against exactly 1), but the getter itself never
+        // validates — it forwards any byte verbatim.
+        for absolute in [0x00u8, 0x01, 0x02, 0xff] {
+            let record = wait_attr(absolute, 0);
+            let mut out = 0xa5u8;
+            unsafe { cond_wait_attr_abstime(record.as_ptr().add(1), &mut out) };
+            assert_eq!(out, absolute, "absolute {absolute:#04x}");
+        }
+    }
+
+    #[test]
+    fn cond_wait_attr_abstime_answers_success() {
+        // The status word is always 0; the single stock call site
+        // (FUN_0826263c @ 0x08262670) ignores it and re-reads the
+        // out byte off the stack, but the register is written.
+        let record = wait_attr(1, 2);
+        let mut out = 0u8;
+        assert_eq!(unsafe { cond_wait_attr_abstime(record.as_ptr().add(1), &mut out) }, 0);
+    }
+
+    #[test]
+    fn cond_wait_attr_abstime_reads_only_offset_0() {
+        // The sibling getter cond_wait_attr_clock reads +1 instead;
+        // poison there and beside the flag byte pins the offset
+        // exactly.
+        let record = wait_attr(0x01, 0x5a);
+        let mut out = 0u8;
+        assert_eq!(record[2], 0x5a, "builder poisoned clock byte at +1");
+        assert_eq!(record[0], 0xa5, "builder poisoned the byte before the record");
+        assert_eq!(record[3], 0xa5, "builder poisoned the byte after the record");
+        assert_eq!(unsafe { cond_wait_attr_abstime(record.as_ptr().add(1), &mut out) }, 0);
+        assert_eq!(out, 0x01);
     }
 }
