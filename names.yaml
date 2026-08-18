@@ -21725,6 +21725,57 @@ functions:
       and an __aeabi_memclr4 for the zero-init (the documented
       deviations).
 
+  - address: 0x082a1a70
+    ghidra: FUN_082a1a70
+    name: board_version_halves
+    size: 32
+    sig: "void board_version_halves(_this: *mut u8, high: *mut u16, low: *mut u16)"
+    module: fp/fp_misc
+    status: ported
+    vars:
+      param_1: _this (never read - the original never touches r0; an
+        unused leading argument where every sibling in the diagnostics
+        run takes exactly what it uses, consistent with an implicit
+        this, concrete class not recovered)
+      param_2: high
+      param_3: low
+      uVar1: version (the board_version query's r0 return)
+      thunk_FUN_080e624c: board_version (the veneer @ 0x080515e4,
+        binary-verified word 0xea025318 = `b 0x080e624c`; target
+        FUN_080e624c @ 0x080e624c, 44 bytes, unported - behind the
+        BOARD_VERSION seam; the SAME lazily cached system-info word
+        cg_timer_wait's entry names board_version)
+    notes: >-
+      No bl call sites in osos.asm and no pointer to 0x082a1a70
+      anywhere in osos.dec (binary-scanned) - reached indirectly,
+      like its five neighbors in the indirect diagnostics run
+      0x082a1918-0x082a1a6c (vtable or computed table outside the
+      image body); sits immediately after that run, the u16-pair
+      splitter pmu_reg87_bit1_clear's ledger entry anticipates.
+      The whole body is stmdb sp!,{r4,r5,r6,lr}; mov r5,r2; mov
+      r4,r1; bl 0x080515e4; mov r1,r0,lsr #0x10; strh r1,[r4,#0x0];
+      strh r0,[r5,#0x0]; ldmia sp!,{r4,r5,r6,pc} - queries the
+      lazily cached board-version word FUN_080e624c @ 0x080e624c
+      (44 bytes, unported: cached word at +0x8 of the struct the
+      literal at 0x080e6278 points to, refreshed from context+0x84
+      of the 0x08369bec shared-context object when it still holds
+      the 0x7fffffff sentinel - cmn r0,#0x80000001 / bne) and
+      stores the HIGH halfword into *high, the LOW halfword into
+      *low. The same word drives cg_timer_wait's channel pick
+      (HIGH halfword 0x10 with LOW halfword >= 6 selects timer
+      channel 3). The query callee sits behind the host-swappable
+      BOARD_VERSION usize seam (this module's FIXED16_RECIPROCAL
+      pattern): the target build transmutes the fixed firmware
+      address 0x080e624c (the veneer @ 0x080515e4 folds away - a
+      bare b), host tests install recording mocks. Deviations: the
+      pushed r6 is never used (gratuitous ADS frame spill); the
+      halfword stores are plain strh, modeled by Rust's aligned
+      u16 writes, HIGH first. match.py structural (exit-1 diff
+      expected): same query -> lsr r1,r0,#16 -> strh high -> strh
+      low shape; the diffs are the crate fp frame and the blx seam
+      dispatch (0x080e624c visible as a literal word), the
+      documented seam deviations.
+
   - address: 0x080e97ac
     ghidra: FUN_080e97ac
     name: fixed16_cos

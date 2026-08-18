@@ -1266,6 +1266,88 @@ pub unsafe extern "C" fn version_info_to_cxx_string(string: *mut *mut u8) {
     counted_u16_deserialize(counted.as_ptr(), string);
 }
 
+/// Host-swappable entry point for the board-version query
+/// `FUN_080e624c` @ 0x080e624c (44 bytes, unported; [`board_version_halves`]
+/// reaches it through the 4-byte branch veneer `thunk_FUN_080e624c` @
+/// 0x080515e4 — binary-verified word 0xea025318, a bare
+/// `b 0x080e624c`): answers the lazily cached system-info word at
+/// offset +0x8 of the struct the literal at 0x080e6278 points to.
+/// When the cached word still holds the 0x7fffffff sentinel
+/// (`cmn r0,#0x80000001` / `bne`), it fetches the process-wide
+/// shared context (lazy getter @ 0x08369bec — the same object the
+/// text serializers above use) and caches the word at context+0x84
+/// (`ldrne r0,[r0,#0x84]` / `strne r0,[r4,#0x8]`). The same word
+/// drives [`cg_timer_wait`](crate::codegen::timer_wait)'s channel
+/// pick (HIGH halfword 0x10 with LOW halfword >= 6 selects timer
+/// channel 3 — see its names.yaml ledger entry, which names this
+/// callee board_version). The target build transmutes the fixed
+/// firmware address directly; host tests swap this writable cell to
+/// install recording mocks.
+#[cfg(not(target_os = "none"))]
+pub static mut BOARD_VERSION: usize = 0x080e_624c;
+
+/// Query seam signature: `() -> version word` (HIGH halfword in
+/// bits 31..16, LOW halfword in bits 15..0).
+type BoardVersionFn = unsafe extern "C" fn() -> u32;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn board_version() -> u32 {
+    let query: BoardVersionFn = core::mem::transmute(0x080e_624cusize);
+    query()
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn board_version() -> u32 {
+    let address = core::ptr::addr_of!(BOARD_VERSION).read_volatile();
+    let query: BoardVersionFn = core::mem::transmute(address);
+    query()
+}
+
+/// board_version_halves — original: `FUN_082a1a70` @ 0x082a1a70 (32
+/// bytes; NO `bl` call sites in osos.asm and no pointer to the
+/// address anywhere in osos.dec (binary-scanned), so — like its
+/// neighbors [`query_name_to_cxx_string`] @ 0x082a1918 through
+/// [`version_info_to_cxx_string`] @ 0x082a1a40 — the original is
+/// reached indirectly, a vtable or computed table outside the image
+/// body). Sits immediately after the indirect diagnostics run
+/// 0x082a1918-0x082a1a6c; the u16-pair splitter that run's
+/// [`pmu_reg87_bit1_clear`] ledger entry anticipates.
+///
+/// Splits the lazily cached board-version word into its two u16
+/// halves for the caller. The whole body is `stmdb sp!,{r4,r5,r6,lr};
+/// mov r5,r2; mov r4,r1; bl 0x080515e4; mov r1,r0,lsr #0x10; strh
+/// r1,[r4,#0x0]; strh r0,[r5,#0x0]; ldmia sp!,{r4,r5,r6,pc}` (Ghidra:
+/// `uVar1 = thunk_FUN_080e624c(); *param_2 = (short)(uVar1 >> 0x10);
+/// *param_3 = (short)uVar1`): query the board-version word
+/// (`FUN_080e624c` @ 0x080e624c, unported, behind the
+/// [`BOARD_VERSION`] seam), store the HIGH halfword into `*high` and
+/// the LOW halfword into `*low`. The first argument is never read —
+/// the original never touches r0; every sibling in the diagnostics
+/// run takes exactly the arguments it uses, so an unused leading
+/// argument is consistent with an implicit `this` (concrete class not
+/// recovered).
+///
+/// Deviations:
+/// - The query callee is unported firmware behind a host-swappable
+///   usize seam (this module's FIXED16_RECIPROCAL pattern): the
+///   target build transmutes the fixed firmware address 0x080e624c
+///   (the veneer @ 0x080515e4 is folded away — it is a bare `b`),
+///   host tests install recording mocks.
+/// - The pushed r6 is never used (the `stmdb sp!,{r4,r5,r6,lr}` /
+///   `ldmia sp!,{r4,r5,r6,pc}` pair spills and restores it
+///   gratuitously — an ADS frame artifact); the port keeps no frame.
+/// - The original's halfword stores are plain `strh` (no alignment
+///   fault possible on ABI-aligned u16 out-pointers); Rust's `*high =
+///   ...` / `*low = ...` model them directly, HIGH first.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn board_version_halves(_this: *mut u8, high: *mut u16, low: *mut u16) {
+    let version = board_version();
+    *high = (version >> 16) as u16;
+    *low = version as u16;
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -3335,5 +3417,134 @@ mod tests {
             }
             assert_eq!(unsafe { pmu_reg87_bit1_clear() }, expected, "value={value:#x}");
         }
+    }
+
+    // ---- board_version_halves ----
+
+    /// Serializes access to the BOARD_VERSION seam cell (the
+    /// PMU_FLAG_LOCK precedent above).
+    static BOARD_VERSION_LOCK: Mutex<()> = Mutex::new(());
+    static mut BOARD_VERSION_RESULT: u32 = 0;
+    static mut BOARD_VERSION_CALLS: usize = 0;
+
+    unsafe extern "C" fn recording_board_version() -> u32 {
+        BOARD_VERSION_CALLS += 1;
+        BOARD_VERSION_RESULT
+    }
+
+    struct BoardVersionInstall {
+        previous: usize,
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for BoardVersionInstall {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(BOARD_VERSION).write_volatile(self.previous);
+            }
+        }
+    }
+
+    fn install_board_version(result: u32) -> BoardVersionInstall {
+        let lock = BOARD_VERSION_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            let previous = core::ptr::addr_of!(BOARD_VERSION).read_volatile();
+            core::ptr::addr_of_mut!(BOARD_VERSION)
+                .write_volatile(recording_board_version as usize);
+            BOARD_VERSION_RESULT = result;
+            BOARD_VERSION_CALLS = 0;
+            BoardVersionInstall {
+                previous,
+                _lock: lock,
+            }
+        }
+    }
+
+    #[test]
+    fn board_version_halves_queries_once_and_splits_high_low() {
+        // 0x0010_0006 is cg_timer_wait's channel-3 threshold shape
+        // (HIGH halfword 0x10, LOW halfword >= 6).
+        let _mock = install_board_version(0x0010_0006);
+
+        let mut high = 0xffffu16;
+        let mut low = 0xffffu16;
+        unsafe {
+            board_version_halves(core::ptr::null_mut(), &mut high, &mut low);
+            assert_eq!(BOARD_VERSION_CALLS, 1);
+        }
+        assert_eq!(high, 0x0010);
+        assert_eq!(low, 0x0006);
+    }
+
+    #[test]
+    fn board_version_halves_splits_the_whole_u32_range() {
+        let _mock = install_board_version(0);
+
+        // Every halfword boundary shape, the 0x7fffffff lazy-cache
+        // sentinel the query itself recognizes, and asymmetric bit
+        // patterns that catch a swapped or masked split.
+        for version in [
+            0x0000_0000u32,
+            0x0000_ffff,
+            0xffff_0000,
+            0xffff_ffff,
+            0x7fff_ffff,
+            0x8000_0000,
+            0x1234_5678,
+            0xabcd_ef01,
+            0x0001_0000,
+        ] {
+            unsafe {
+                BOARD_VERSION_RESULT = version;
+                BOARD_VERSION_CALLS = 0;
+            }
+            let mut high = 0u16;
+            let mut low = 0u16;
+            unsafe {
+                board_version_halves(core::ptr::null_mut(), &mut high, &mut low);
+                assert_eq!(BOARD_VERSION_CALLS, 1, "version={version:#010x}");
+            }
+            assert_eq!(high, (version >> 16) as u16, "version={version:#010x}");
+            assert_eq!(low, version as u16, "version={version:#010x}");
+        }
+    }
+
+    #[test]
+    fn board_version_halves_reads_the_live_result_each_call() {
+        let _mock = install_board_version(0);
+
+        for version in [0x0002_0000u32, 0x0002_0004, 0x0010_0005] {
+            unsafe {
+                BOARD_VERSION_RESULT = version;
+            }
+            let mut high = 0u16;
+            let mut low = 0u16;
+            unsafe {
+                board_version_halves(core::ptr::null_mut(), &mut high, &mut low);
+            }
+            assert_eq!(
+                (high, low),
+                ((version >> 16) as u16, version as u16),
+                "version={version:#010x}"
+            );
+        }
+        unsafe {
+            assert_eq!(BOARD_VERSION_CALLS, 3);
+        }
+    }
+
+    #[test]
+    fn board_version_halves_never_reads_the_first_argument() {
+        let _mock = install_board_version(0x00c0_ffee);
+
+        // A dangling first argument must be tolerated: the original
+        // never touches r0.
+        let mut high = 0u16;
+        let mut low = 0u16;
+        unsafe {
+            board_version_halves(1usize as *mut u8, &mut high, &mut low);
+        }
+        assert_eq!(high, 0x00c0);
+        assert_eq!(low, 0xffee);
     }
 }
