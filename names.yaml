@@ -20584,6 +20584,31 @@ functions:
       loads, subs, movne); LLVM adds a push {fp,lr}/pop {fp,pc} frame
       and swaps the load order.
 
+  - address: 0x082a18bc
+    ghidra: FUN_082a18bc
+    name: fixed16_add_indirect
+    size: 16
+    sig: "i32 fixed16_add_indirect(a: *const i32, b: *const i32) -> i32"
+    module: fp/fp_misc
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      Q16.16 addition with both operands fetched through pointers:
+      ldr r0,[r0]; ldr r1,[r1]; add r0,r0,r1; bx lr - returns *a + *b
+      as a plain 32-bit sum (Ghidra: return *param_1 + *param_2). The
+      non-flag-setting add wraps modulo 2^32 with no saturation, so
+      the port uses wrapping_add. FUN_082a5db0 calls it twice to add
+      the +0x8 and +0x4 Q16.16 components of two structs edge-by-edge
+      (the +0x0 component uses an inline add on directly loaded
+      words), packing the fixed-point vector sum into a 12-byte record
+      handed to FUN_0828018c; the two FUN_0827b5a8 sites add
+      stack-materialized locals. 4 bl call sites, binary-scanned
+      (0x0827b8bc, 0x0827b8d0, 0x082a5dc8, 0x082a5dd8). Last member of
+      the indirect fixed16 helper cluster 0x082a1864-0x082a18c8 (lt,
+      sub, mul, ne, add). match.py structural: identical core (two
+      pointer loads, add); LLVM adds a push {fp,lr}/pop {fp,pc} frame
+      and swaps the load order.
+
   - address: 0x080e97ac
     ghidra: FUN_080e97ac
     name: fixed16_cos

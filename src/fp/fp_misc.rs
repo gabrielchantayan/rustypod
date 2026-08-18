@@ -450,6 +450,27 @@ pub unsafe extern "C" fn fixed16_ne_indirect(a: *const i32, b: *const i32) -> bo
     *a != *b
 }
 
+/// fixed16_add_indirect — original: `FUN_082a18bc` @ 0x082a18bc (16
+/// bytes; 4 bl call sites, binary-scanned: 0x0827b8bc, 0x0827b8d0,
+/// 0x082a5dc8, 0x082a5dd8).
+///
+/// Q16.16 addition with BOTH operands fetched through pointers:
+/// `ldr r0,[r0]; ldr r1,[r1]; add r0,r0,r1; bx lr` — returns
+/// `*a + *b` as a plain 32-bit sum (Ghidra:
+/// `return *param_1 + *param_2`). The non-flag-setting `add` wraps
+/// modulo 2^32 with no saturation, so the port uses wrapping_add.
+/// FUN_082a5db0 calls it twice to add the +0x8 and +0x4 Q16.16
+/// components of two structs edge-by-edge (the +0x0 component uses an
+/// inline `add` on directly loaded words), packing the fixed-point
+/// vector sum into a 12-byte record handed to FUN_0828018c; the two
+/// FUN_0827b5a8 sites add stack-materialized locals. Last member of
+/// the indirect fixed16 helper cluster 0x082a1864-0x082a18c8 (lt,
+/// sub, mul, ne, add).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn fixed16_add_indirect(a: *const i32, b: *const i32) -> i32 {
+    (*a).wrapping_add(*b)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -1272,6 +1293,84 @@ mod tests {
         for a in -4096i32..4096 {
             for b in -4096i32..4096 {
                 assert_eq!(ne_indirect(a, b), a != b, "a={a:#x} b={b:#x}");
+            }
+        }
+    }
+
+    // ---- fixed16_add_indirect ----
+
+    /// Call through a real by-value copy so the pointer load is
+    /// exercised.
+    fn add_indirect(a: i32, b: i32) -> i32 {
+        unsafe { fixed16_add_indirect(&a, &b) }
+    }
+
+    #[test]
+    fn fixed16_add_indirect_zero_and_identity() {
+        assert_eq!(add_indirect(0, 0), 0);
+        assert_eq!(add_indirect(FIX_ONE, 0), FIX_ONE);
+        assert_eq!(add_indirect(0, FIX_ONE), FIX_ONE);
+        assert_eq!(add_indirect(FIX_ONE, -FIX_ONE), 0);
+        // 2.5 + 1.0 = 3.5 and 1.0 + -2.5 = -1.5, exact in Q16.16.
+        assert_eq!(add_indirect(0x0002_8000, FIX_ONE), 0x0003_8000);
+        assert_eq!(add_indirect(FIX_ONE, -0x0002_8000), -0x0001_8000);
+    }
+
+    #[test]
+    fn fixed16_add_indirect_one_ulp_is_exact() {
+        // A single ulp (Q16.16 resolution) survives the addition
+        // exactly, in both directions.
+        assert_eq!(add_indirect(1, 0), 1);
+        assert_eq!(add_indirect(0, 1), 1);
+        assert_eq!(add_indirect(1, -1), 0);
+        assert_eq!(add_indirect(FIX_ONE, 1), 0x0001_0001);
+        assert_eq!(add_indirect(0x0001_0001, -FIX_ONE), 1);
+    }
+
+    #[test]
+    fn fixed16_add_indirect_signed_extremes_wrap() {
+        // Plain non-flag-setting `add`: wraps modulo 2^32, no
+        // saturation. 32768.0 + 1ulp wraps to just above -32768.0.
+        assert_eq!(add_indirect(i32::MAX, 1), i32::MIN);
+        assert_eq!(add_indirect(i32::MIN, -1), i32::MAX);
+        assert_eq!(add_indirect(i32::MIN, i32::MIN), 0);
+        assert_eq!(add_indirect(i32::MAX, i32::MAX), -2);
+        // 32767.0 + 32768.0 = 65535.0 wraps to -1.0.
+        assert_eq!(add_indirect(i32::MAX & !0xffff, i32::MIN), -FIX_ONE);
+    }
+
+    #[test]
+    fn fixed16_add_indirect_matches_reference() {
+        let values = [
+            0i32,
+            1,
+            -1,
+            2,
+            FIX_ONE,
+            -FIX_ONE,
+            0x8000,
+            -0x8000,
+            0x0001_0001,
+            0x1234_5678,
+            -0x1234_5678,
+            0x7fff_ffff,
+            i32::MIN,
+        ];
+        for &a in &values {
+            for &b in &values {
+                assert_eq!(add_indirect(a, b), a.wrapping_add(b), "a={a:#x} b={b:#x}");
+            }
+        }
+        let mut rng = Rng(0xadd1_c7ed_f16d_c0de);
+        for _ in 0..100_000 {
+            let a = rng.next() as i32;
+            let b = rng.next() as i32;
+            assert_eq!(add_indirect(a, b), a.wrapping_add(b), "a={a:#x} b={b:#x}");
+        }
+        // Dense sweep across the sign boundary, both directions.
+        for a in -4096i32..4096 {
+            for b in -4096i32..4096 {
+                assert_eq!(add_indirect(a, b), a.wrapping_add(b), "a={a:#x} b={b:#x}");
             }
         }
     }
