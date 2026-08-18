@@ -15557,6 +15557,57 @@ functions:
       finalize slot with blx through a literal-pool load (the slot, not
       the original's bl @ 0x0838bc38) and reloads value into r4 late.
 
+  - address: 0x0838c13c
+    ghidra: FUN_0838c13c
+    name: vdbe_mem_set_null
+    size: 28
+    sig: "void vdbe_mem_set_null(Mem *p_mem)"
+    module: sqlite/vdbe_mem_set_null
+    status: ported
+    vars: {param_1: p_mem}
+    notes: >-
+      Upstream SQLite's sqlite3VdbeMemSetNull (vdbemem.c) - the "set
+      the value stored in *pMem to NULL" primitive; 4 bl call sites
+      plus one tail-b, binary-scanned from osos.dec, no predicated
+      entries: 0x0838c178 inside sqlite3VdbeMemSetStr @ 0x0838c158
+      (the z == NULL route documented in sqlite/value_set_str.rs),
+      0x0838a2d0 and 0x0838ac38 inside the 16 KB vdbe routine
+      FUN_08386ef8, 0x083911b4 inside the out-of-memory marker
+      FUN_083911a8 (NULLs an embedded Mem at +8, stamps SQLITE_NOMEM
+      at +0x34, sets the mallocFailed byte of the connection at
+      +0x18), and a tail b @ 0x0839121c from the thunk @ 0x08391218
+      (add r0,r0,#8; b) that NULLs the Mem eight bytes into its
+      argument. Extent 0x0838c13c..0x0838c158 confirmed from raw
+      words - 0x0838c154 is bx lr and 0x0838c158 is the stmdb entry
+      of sqlite3VdbeMemSetStr; no literal pool.
+      Algorithm - two stores, no branches, no calls: the flags
+      halfword at +0x1c is read-modify-written, ldrh / bic #0x1f /
+      orr #1 / strh - the low five type bits (this build's MEM_Null
+      0x1 / MEM_Str 0x2 / MEM_Int 0x4 / MEM_Real 0x8 / MEM_Blob 0x10)
+      are replaced by MEM_Null while every attribute bit above
+      survives (MEM_Term 0x20, MEM_Dyn 0x40, MEM_Static 0x80, MEM_Agg
+      0x400, MEM_Zero 0x800, per the sibling ports' recovered
+      numbering) - the read-modify-write form of upstream's helper
+      (later upstreams spell it MemSetTypeFlag(pMem, MEM_Null)); the
+      textbook early-3.x form assigns flags = MEM_Null outright,
+      which this binary does not do. Then type at +0x1e becomes
+      SQLITE_NULL (5, mov r1,#0x5 / strb). Nothing is released:
+      z/zMalloc/xDel stay put, so a cell that owns a buffer keeps
+      owning it - releasing is mem_release @ 0x0838c04c's job.
+      Deviations - none beyond the typed repr(C) Mem with named
+      fields (offsets statically asserted on 32-bit targets in
+      sqlite/vdbe.rs); MEM_NULL and SQLITE_NULL are reused from
+      sqlite/value_new.rs, which owns them.
+      match.py structural: same two stores at +0x1c/+0x1e with the
+      same constants (LLVM reassociates (flags & ~0x1f) | 1 into
+      orr #1 / bic #30 - identical - and emits its fp frame; the
+      strb/strh order swap across disjoint offsets is unobservable).
+      Host tests (4) - the flags transform verified exhaustively over
+      all 65536 u16 values, value_type forced to SQLITE_NULL over all
+      256 prior type bytes, the recovered attribute bits surviving
+      individually and combined, and every other Mem field
+      byte-for-byte untouched.
+
   - address: 0x0838bc38
     ghidra: FUN_0838bc38
     name: mem_finalize
