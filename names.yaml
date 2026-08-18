@@ -16081,6 +16081,62 @@ functions:
       (i32::MAX + 60 wraps negative), and the cell/connection being
       read-only.
 
+  - address: 0x0838c7d4
+    ghidra: FUN_0838c7d4
+    name: vdbe_opcode_has_property
+    size: 20
+    sig: "int vdbe_opcode_has_property(int opcode, int mask)"
+    module: sqlite/vdbe_opcode_has_property
+    status: ported
+    vars:
+      param_1: opcode
+      param_2: mask
+      r0: opcode_then_result
+      r1: mask
+      r2: opcode_property_table
+      DAT_0838c7e8: opcode_property_table_ptr
+    notes: >-
+      Upstream SQLite 3.5.9's sqlite3VdbeOpcodeHasProperty (vdbe.c:
+      `return (opcodeProperty[opcode]&mask)!=0;`), identified by exact
+      structural match of both callers against the public 3.5.9
+      source: resolveP2Values (FUN_08368038) and sqlite3VdbeAddOpList
+      (FUN_0838690c), each gating negative-P2 label fixup on
+      (opcode, OPFLG_JUMP). Extent 0x0838c7d4..0x0838c7e8 confirmed
+      from raw words (5 instructions; 0x0838c7ec is the next
+      function's stmdb), plus the literal-pool word @ 0x0838c7e8
+      holding the table pointer 0x08a0994c. 2 bl call sites,
+      binary-scanned: 0x083680e8 and 0x0838699c. Algorithm - ldrb
+      table[opcode], ands full-register mask, movne r0,#0x1:
+      normalized 0/1. The opcodeProperty table (144 bytes, max opcode
+      143, every byte drawn from OPFLG bits 0x01..0x20) is RECOVERED
+      from the image at runtime base +0xaed8 = image 0x08a14824 (the
+      sqlite/mod.rs skew): the 3.5.9 mkopcodeh.awk numbers non-TK
+      opcodes by iterating an awk associative array (unspecified
+      order), so this build's opcode numbering cannot be regenerated
+      from upstream. Recovery cross-checked against vdbe.c property
+      comments via caller-recovered opcode numbers: OP_Function=0x15
+      (0x00), OP_Noop=0x17 (0x00), OP_VRename=0x1d (0x00),
+      OP_Halt=0x26 (0x00), OP_Statement=0x2a (0x00), OP_AggStep=0x61
+      (0x00), OP_VFilter=0x64 (0x01, /* jump */), OP_Destroy=0x6a
+      (0x02, /* out2-prerelease */), OP_VUpdate=0x77 (0x00), plus the
+      0x2c (IN1|IN2|OUT3) arithmetic run at 74..=83 - all consistent.
+      The at-rest bytes at the unskewed pointer 0x08a0994c are a
+      256-byte permutation repeated 16x inside a high-entropy
+      FairPlay/cert region - NOT the runtime table; the +0xaed8 skew
+      resolution is what makes the port possible. Deviations - the
+      ROM table is the crate static OPCODE_PROPERTY; out-of-range
+      opcodes (barred by upstream's compiled-out assert) read beside
+      it via wrapping_offset; mask is i32 (full-register ands), not
+      the decompile's byte. Leaf - no ops seam. match.py structural:
+      same shape - literal-pool table base, ldrb [r2,r0], ands,
+      movne #1; LLVM pushes {fp,lr} it does not need. Host tests (7)
+      cover the skew arithmetic, the recovered table verbatim
+      (independent copy + 6-bit sanity), all 144 opcodes x all 256
+      byte masks exhaustively, full-register mask behavior (bit 8,
+      sign bit, -1, 0), 0/1 normalization on multi-bit ANDs, both
+      boundary opcodes, and the upstream property comments for every
+      caller-recovered opcode number.
+
   - address: 0x0838bc38
     ghidra: FUN_0838bc38
     name: mem_finalize
