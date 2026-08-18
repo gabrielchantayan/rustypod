@@ -21587,6 +21587,88 @@ functions:
       literal words) and an __aeabi_memclr4 for the zero-init
       (the documented deviations).
 
+  - address: 0x082a1a40
+    ghidra: FUN_082a1a40
+    name: version_info_to_cxx_string
+    size: 48
+    sig: "void version_info_to_cxx_string(string: *mut *mut u8)"
+    module: fp/fp_misc
+    status: ported
+    vars:
+      param_1: string
+      uVar1: string (the default-constructor's r0 return, kept in
+        r4 and threaded into the deserializer)
+      auStack_20c: counted (the 512-byte counted-u16 staging buffer
+        at sp+0x4, a u16 codepoint count plus up to 0xff u16 units)
+      auStack_c: DEAD SLOT (sp+0x204; the add r1,sp,#0x204 aiming at
+        it is clobbered by the constructor's ldr r1,[0x83d8c2c] -
+        ADS scheduling artifact, no reader)
+      FUN_083d8c20: cxx_string_default_ctor (ported, cxx/string)
+      FUN_08054ea0: version_info_to_counted_u16 (unported, behind
+        the VERSION_INFO_TO_COUNTED_U16 seam)
+      FUN_082596f4: counted_u16_to_cxx_string (unported, behind the
+        COUNTED_U16_TO_CXX_STRING seam - the SAME seam both
+        context-text twins use, no duplicate)
+    notes: >-
+      No bl call sites in osos.asm and no pointer to 0x082a1a40
+      anywhere in osos.dec (binary-scanned) - reached indirectly,
+      like every other member of the indirect diagnostics run
+      0x082a1918-0x082a1a6c (vtable or computed table outside the
+      image body); fifth and last member of that run.
+      Instruction-for-instruction twin of
+      context_short_text_to_cxx_string @ 0x082a1a04 except the
+      serializer address: hands the build VERSION text back as a
+      COW basic_string<char>, staged through the same counted-u16
+      (UTF-16) stack buffer: cxx_string_default_ctor @ 0x083d8c20
+      (ported) parks *string on the shared empty rep; FUN_08054ea0
+      @ 0x08054ea0 (104 bytes, unported; 2 bl call sites:
+      0x081127ac in the about/diagnostics record builder and
+      0x082a1a58 here) constructs a 28-byte stack-local
+      version-info object (FUN_08165b84 @ 0x08165b84 with args
+      (2, 4, 0x80, 0), internally through FUN_081659cc and
+      FUN_082779c4 - the concrete class is not recovered), reads
+      FIVE vtable getters (+0x8..+0x18) off it and formats a
+      dotted version into a 100-byte stack buffer with the ported
+      snprintf @ 0x0802f768: "%d.%d.%d" when the third getter is
+      nonzero, "%d.%d" when it is zero, each gaining a "%s%d"
+      suffix (suffix word from an 8-byte-stride table whose base
+      literal is 0x083e941c, indexed by the fourth getter) unless
+      the fourth getter is 5 AND the fifth is 0 - the release
+      form, matching this firmware's "2.0.4"; the suffix-table
+      base lands INSIDE the __rt_memcpy copy-loop code region, so
+      the suffixed forms are believed unreachable on retail units
+      and the suffix strings are not recovered. The formatted
+      text is staged byte-counted (ported cstr_to_counted_u8 @
+      0x08045f14, limit 0xff) and expanded into counted u16 by
+      FUN_08046a88 @ 0x08046a88, then the object is destroyed
+      (FUN_08165bfc @ 0x08165bfc, a no-op mov r0,#0; bx lr);
+      FUN_082596f4 @ 0x082596f4 (72 bytes, unported) then rebuilds
+      a StringObject from the counted units (FUN_082773b4 +
+      FUN_08276db4) and assigns its c_str into *string through
+      cxx_string_assign_cstr @ 0x083d8ca0, unconditionally (count
+      0 included). The field is the third of the four fillers of
+      the about/diagnostics record (siblings 0x08052228
+      dotted-triple version from context+0x4c, 0x08054d78 short
+      text, 0x080539f0 context text - see object_set_version_text's
+      entry). The two text-marshaling callees sit behind
+      host-swappable usize seams (the new
+      VERSION_INFO_TO_COUNTED_U16 and the SHARED
+      COUNTED_U16_TO_CXX_STRING, this module's FIXED16_RECIPROCAL
+      pattern): the target build transmutes the fixed firmware
+      addresses, host tests install recording mocks. Deviations:
+      the staging buffer is zero-initialized where the original
+      leaves it uninitialized (unobservable - the serializer
+      writes the count and every unit the deserializer reads); the
+      dead add r1,sp,#0x204, the 4 spare frame bytes at sp+0x204
+      and the r4 spill are ADS artifacts (both twins'
+      deviations). match.py structural (exit-1 diff expected):
+      same ctor -> serialize -> deserialize three-call shape as
+      the twins, buffer in sp-relative r0, ctor result threaded
+      r4 -> r1; the diffs are the crate fp frame, the blx seam
+      dispatches (0x08054ea0/0x082596f4 visible as literal words)
+      and an __aeabi_memclr4 for the zero-init (the documented
+      deviations).
+
   - address: 0x080e97ac
     ghidra: FUN_080e97ac
     name: fixed16_cos
