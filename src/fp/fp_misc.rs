@@ -391,6 +391,27 @@ pub unsafe extern "C" fn fixed16_lt_indirect(a: *const i32, b: *const i32) -> bo
     *a < *b
 }
 
+/// fixed16_sub_indirect — original: `FUN_082a187c` @ 0x082a187c (16
+/// bytes; 3 bl call sites, binary-scanned: 0x08273e1c, 0x082a5d6c,
+/// 0x082a5d7c).
+///
+/// Q16.16 subtraction with BOTH operands fetched through pointers:
+/// `ldr r0,[r0]; ldr r1,[r1]; sub r0,r0,r1; bx lr` — returns
+/// `*a - *b` as a plain 32-bit difference (Ghidra:
+/// `return *param_1 - *param_2`). The non-flag-setting `sub` wraps
+/// modulo 2^32 with no saturation, so the port uses wrapping_sub.
+/// FUN_082a5d54 calls it twice to subtract the +0x8 and +0x4 Q16.16
+/// components of two structs edge-by-edge (the +0x0 component uses an
+/// inline `sub` on directly loaded words), forming a fixed-point
+/// vector delta handed to FUN_0828018c; the 0x08273e1c site subtracts
+/// a stack-materialized zero from a local before calling the
+/// 0x082a182c helper. Second member of the indirect fixed16 helper
+/// cluster 0x082a1864-0x082a18c8 (lt, sub, mul, ne, add).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn fixed16_sub_indirect(a: *const i32, b: *const i32) -> i32 {
+    (*a).wrapping_sub(*b)
+}
+
 /// fixed16_mul_indirect — original: `FUN_082a188c` @ 0x082a188c (28
 /// bytes; 57 bl call sites, binary-scanned: 0x080fxxxx/0x0816xxxx and the
 /// 0x0825xxxx/0x0827xxxx geometry code).
@@ -968,6 +989,83 @@ mod tests {
         for a in -4096i32..4096 {
             for b in -4096i32..4096 {
                 assert_eq!(lt_indirect(a, b), a < b, "a={a:#x} b={b:#x}");
+            }
+        }
+    }
+
+    // ---- fixed16_sub_indirect ----
+
+    /// Call through a real by-value copy so the pointer load is
+    /// exercised.
+    fn sub_indirect(a: i32, b: i32) -> i32 {
+        unsafe { fixed16_sub_indirect(&a, &b) }
+    }
+
+    #[test]
+    fn fixed16_sub_indirect_zero_and_identity() {
+        assert_eq!(sub_indirect(0, 0), 0);
+        assert_eq!(sub_indirect(FIX_ONE, 0), FIX_ONE);
+        assert_eq!(sub_indirect(0, FIX_ONE), -FIX_ONE);
+        assert_eq!(sub_indirect(FIX_ONE, FIX_ONE), 0);
+        // 2.5 - 1.0 = 1.5 and 1.0 - 2.5 = -1.5, exact in Q16.16.
+        assert_eq!(sub_indirect(0x0002_8000, FIX_ONE), 0x0001_8000);
+        assert_eq!(sub_indirect(FIX_ONE, 0x0002_8000), -0x0001_8000);
+    }
+
+    #[test]
+    fn fixed16_sub_indirect_one_ulp_is_exact() {
+        // A single ulp of difference (Q16.16 resolution) survives the
+        // subtraction exactly, in both directions.
+        assert_eq!(sub_indirect(1, 0), 1);
+        assert_eq!(sub_indirect(0, 1), -1);
+        assert_eq!(sub_indirect(0x0001_0001, FIX_ONE), 1);
+        assert_eq!(sub_indirect(FIX_ONE, 0x0001_0001), -1);
+    }
+
+    #[test]
+    fn fixed16_sub_indirect_signed_extremes_wrap() {
+        // Plain non-flag-setting `sub`: wraps modulo 2^32, no
+        // saturation. -32768.0 - 1ulp wraps to just below 32768.0.
+        assert_eq!(sub_indirect(i32::MIN, 1), i32::MAX);
+        assert_eq!(sub_indirect(i32::MAX, -1), i32::MIN);
+        assert_eq!(sub_indirect(i32::MIN, i32::MIN), 0);
+        assert_eq!(sub_indirect(i32::MIN, i32::MAX), 1);
+        // 32767.0 - (-32768.0) = 65535.0 wraps to -1.0.
+        assert_eq!(sub_indirect(i32::MAX & !0xffff, i32::MIN), -FIX_ONE);
+    }
+
+    #[test]
+    fn fixed16_sub_indirect_matches_reference() {
+        let values = [
+            0i32,
+            1,
+            -1,
+            2,
+            FIX_ONE,
+            -FIX_ONE,
+            0x8000,
+            -0x8000,
+            0x0001_0001,
+            0x1234_5678,
+            -0x1234_5678,
+            0x7fff_ffff,
+            i32::MIN,
+        ];
+        for &a in &values {
+            for &b in &values {
+                assert_eq!(sub_indirect(a, b), a.wrapping_sub(b), "a={a:#x} b={b:#x}");
+            }
+        }
+        let mut rng = Rng(0x5eed_c0de_1bad_f00d);
+        for _ in 0..100_000 {
+            let a = rng.next() as i32;
+            let b = rng.next() as i32;
+            assert_eq!(sub_indirect(a, b), a.wrapping_sub(b), "a={a:#x} b={b:#x}");
+        }
+        // Dense sweep across the sign boundary, both directions.
+        for a in -4096i32..4096 {
+            for b in -4096i32..4096 {
+                assert_eq!(sub_indirect(a, b), a.wrapping_sub(b), "a={a:#x} b={b:#x}");
             }
         }
     }

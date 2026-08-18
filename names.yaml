@@ -20508,6 +20508,31 @@ functions:
       the movge #0 result before the cmp (movlt still overwrites, same
       semantics).
 
+  - address: 0x082a187c
+    ghidra: FUN_082a187c
+    name: fixed16_sub_indirect
+    size: 16
+    sig: "i32 fixed16_sub_indirect(a: *const i32, b: *const i32) -> i32"
+    module: fp/fp_misc
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      Q16.16 subtraction with both operands fetched through pointers:
+      ldr r0,[r0]; ldr r1,[r1]; sub r0,r0,r1; bx lr - returns *a - *b
+      as a plain 32-bit difference (Ghidra: return *param_1 - *param_2).
+      The non-flag-setting sub wraps modulo 2^32 with no saturation, so
+      the port uses wrapping_sub. FUN_082a5d54 calls it twice to
+      subtract the +0x8 and +0x4 Q16.16 components of two structs
+      edge-by-edge (the +0x0 component uses an inline sub on directly
+      loaded words), forming a fixed-point vector delta handed to
+      FUN_0828018c; the 0x08273e1c site subtracts a stack-materialized
+      zero from a local before calling the 0x082a182c helper. 3 bl call
+      sites, binary-scanned (0x08273e1c, 0x082a5d6c, 0x082a5d7c).
+      Second member of the indirect fixed16 helper cluster
+      0x082a1864-0x082a18c8 (lt, sub, mul, ne, add). match.py
+      structural: identical core (two pointer loads, sub); LLVM adds a
+      push {fp,lr}/pop {fp,pc} frame and swaps the load order.
+
   - address: 0x082a188c
     ghidra: FUN_082a188c
     name: fixed16_mul_indirect
