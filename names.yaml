@@ -15966,6 +15966,69 @@ functions:
       MEM_Dyn-less flags values with src_type irrelevant, and
       src_type stored verbatim with no mask of its own.
 
+  - address: 0x0838c32c
+    ghidra: FUN_0838c32c
+    name: vdbe_mem_stringify
+    size: 144
+    sig: "int vdbe_mem_stringify(void *p_mem, u8 enc)"
+    module: sqlite/vdbe_mem_stringify
+    status: ported
+    vars:
+      param_1: p_mem
+      param_2: enc
+      r4: p_mem
+      r5: flags_snapshot
+      r6: sqlite_ok
+      r7: enc
+      FUN_0838bdb0: sqlite3VdbeMemGrow
+      FUN_083913b4: sqlite3_snprintf
+      FUN_08392478: strlen
+      FUN_083869f4: sqlite3VdbeChangeEncoding
+    notes: >-
+      Upstream SQLite 3.5.x's sqlite3VdbeMemStringify (vdbemem.c),
+      immediately after vdbe_mem_shallow_copy @ 0x0838c2d0 in the
+      vdbe Mem helper cluster - how sqlite3ValueText-style code
+      materializes text out of a cell that only carries a number.
+      Extent 0x0838c32c..0x0838c3bc confirmed from raw words
+      (0x0838c3b8 is ldmia sp!,{r2,r3,r4,r5,r6,r7,r8,pc}), plus two
+      inline adr-addressed format literals at 0x0838c3bc..0x0838c3cc
+      ("%lld" and "%!.15g", read from the decrypted image); no
+      literal pool. 4 bl call sites, binary-scanned: 0x08386798 in
+      the sqlite3ValueText original, and 0x08387634, 0x08387668,
+      0x0838ad4c inside the 16 KB vdbe routine FUN_08386ef8.
+      Algorithm - flags are sampled once BEFORE the grow (ldrh r5);
+      sqlite3VdbeMemGrow(pMem, 32, 0) failure short-circuits to
+      SQLITE_NOMEM (7) with the cell untouched; the MEM_Int (0x4)
+      snapshot bit picks "%lld" over Mem.u at +0x00 or "%!.15g"
+      over Mem.r at +0x08, read AFTER the grow and passed as the
+      8-byte variadic payload at [sp,#0]; the rendered length
+      (unguarded strlen @ 0x08392478, ported) lands in n at +0x18,
+      enc at +0x1f becomes SQLITE_UTF8 (1), the RELOADED flags gain
+      MEM_Str|MEM_Term (0x22), and sqlite3VdbeChangeEncoding(pMem,
+      enc) recodes with the caller's enc UNMASKED (mov r1,r7 - the
+      SQLITE_UTF16_ALIGNED bit survives), its return code discarded.
+      Deviations - grow/snprintf/changeEncoding stay behind the
+      VDBE_MEM_STRINGIFY_OPS seam (host defaults panic, target
+      defaults transmute the retailOS addresses); the snprintf slot
+      passes the variadic 8-byte payload as raw u64 bits through a
+      non-variadic fourth parameter, ABI-identical under AAPCS
+      (64-bit arg after three word args lands entirely on the stack
+      either way); the format strings live in Rust rodata instead of
+      inline adr literals. match.py structural: same shape - flags
+      sample, grow, NOMEM short-circuit, branchless int/real arm
+      select (addeq +0x8 / ldm / stm sp vs predicated ldrd/strd),
+      inlined strlen byte loop (LLVM), n/enc stores, ldrh-orr #0x22-
+      strh flags restamp, recode tail, SQLITE_OK return; calls go
+      through the ops slots (blx) instead of direct bl. Host tests
+      (10) cover int rendering across edge values (0, +/-1, 42,
+      i64::MIN/MAX), real rendering with bit-exact payload check,
+      MEM_Int winning when both type bits are set, grow-failure
+      atomicity (no formatter/recode, cell untouched), enc passed
+      unmasked (incl. 0x0a with the aligned bit), the discarded
+      recode return code, the post-strlen flags reload, the pre-grow
+      flags snapshot, the post-grow value read, and attribute-bit
+      survival.
+
   - address: 0x0838bc38
     ghidra: FUN_0838bc38
     name: mem_finalize
