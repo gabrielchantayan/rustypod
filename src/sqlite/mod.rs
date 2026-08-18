@@ -127,6 +127,7 @@ pub mod vdbe_mem_stringify;
 pub mod vdbe_mem_too_big;
 pub mod vdbe_op;
 pub mod vdbe_opcode_has_property;
+pub mod vdbe_real_value;
 pub mod vdbe_set_col_name;
 pub mod vdbe_set_num_cols;
 pub mod vm_printf;

@@ -16137,6 +16137,43 @@ functions:
       boundary opcodes, and the upstream property comments for every
       caller-recovered opcode number.
 
+  - address: 0x0838c7ec
+    ghidra: FUN_0838c7ec
+    name: vdbe_real_value
+    size: 136
+    sig: "double vdbe_real_value(Mem *p_mem)"
+    module: sqlite/vdbe_real_value
+    status: ported
+    renames:
+      param_1: p_mem
+      uVar3: integer_low_word
+      uVar5: integer_high_word
+      uVar6: integer_sign_bit
+      local_18: parsed_value_low_word
+      uStack_14: parsed_value_high_word
+      DAT_0838c874: zero_real_low_word
+      DAT_0838c878: zero_real_high_word
+    notes: >-
+      Upstream SQLite 3.5.9's sqlite3VdbeRealValue (vdbe.c), the
+      double-returning helper vdbe_mem_realify @ 0x0838c024 calls before
+      storing Mem.r. Extent 0x0838c7ec..0x0838c874: 33 ARM instructions
+      through the return @ 0x0838c870 plus the 8-byte literal-pool
+      fallback 0.0 @ 0x0838c874. Dispatch samples flags once: MEM_Real
+      (0x8) returns r (+0x08); MEM_Int (0x4) signed-converts u.i (+0x00)
+      to double through the inlined ADS soft-float path; MEM_Str|MEM_Blob
+      (0x12) ORs in MEM_Str, runs sqlite3VdbeChangeEncoding(pMem,
+      SQLITE_UTF8) @ 0x083869f4, then sqlite3VdbeMemNulTerminate(pMem) @
+      0x0838bfb0, and finally sqlite3AtoF(z, &value) @ 0x0836f528,
+      ignoring its consumed-byte return. Either checked helper failure,
+      and all other storage classes including NULL, return literal 0.0.
+      The three unported callees are VDBE_REAL_VALUE_OPS: target defaults
+      call their retailOS addresses and host tests install recorders.
+      5 direct bl callers in osos.asm at 0x0838788c, 0x08387898,
+      0x08387dac, 0x083880b8 and 0x0838c02c; the thunk @ 0x08391774
+      branches here. Host tests cover REAL precedence/no calls, signed
+      integer conversion at both extrema, blob promotion and helper order,
+      both checked-error short circuits, and NULL/other zero fallback.
+
   - address: 0x0838bc38
     ghidra: FUN_0838bc38
     name: mem_finalize
@@ -21775,6 +21812,50 @@ functions:
       low shape; the diffs are the crate fp frame and the blx seam
       dispatch (0x080e624c visible as a literal word), the
       documented seam deviations.
+
+  - address: 0x082a1b2c
+    ghidra: FUN_082a1b2c
+    name: current_datetime_to_record
+    size: 100
+    sig: "void current_datetime_to_record(record: *mut u8)"
+    module: fp/fp_misc
+    status: ported
+    vars:
+      param_1: record (10-byte compact date/time output)
+      iVar1: calendar_valid (the normalized bit-1 status returned by
+        FUN_08056524; zero calls heap_panic and never returns)
+      auStack_1c: calendar (20-byte query record at sp+0xc; its
+        offsets +2..+6 are second/minute/hour/day/month and +8..+9
+        are the little-endian year)
+      local_28: packed_record (10-byte output staging at sp+0; the
+        five calendar bytes and year are assigned individually,
+        leaving its three padding bytes uninitialized in retailOS)
+      FUN_08056524: current_datetime_query (unported 200-byte clock
+        calendar-record builder behind the CURRENT_DATETIME_QUERY seam)
+      FUN_08030f44: heap_panic (ported, non-returning)
+      thunk_EXT_FUN_22000020: __rt_memcpy (the ported ROM veneer
+        thunk @ 0x08037db0)
+    notes: >-
+      No bl call sites in osos.asm: reached indirectly. Allocates a
+      0x20-byte frame, asks FUN_08056524 @ 0x08056524 for a 20-byte
+      calendar record at sp+0xc, and checks its 0/1 valid status with
+      cmp r0,#0 / bleq heap_panic @ 0x08030f44. On success, it copies
+      calendar[2..=6] to packed_record[0..=4] and calendar[8..=9] to
+      packed_record[6..=7], then calls __rt_memcpy @ 0x08037db0 for
+      all ten output bytes. The same extraction appears at 0x0808ea00
+      before FUN_0807ea68's weekday calculation, establishing
+      second/minute/hour/day/month/year field meanings. The three
+      unassigned output slots are ABI padding: the retail stack bytes
+      are indeterminate before memcpy; the Rust port deliberately
+      zero-initializes them, following this module's existing staging
+      buffer convention. FUN_08056524 remains unported behind a
+      host-swappable usize seam (target calls fixed address directly,
+      host tests install a recording mock). Host tests verify a single
+      query, exact field extraction, zeroed padding, and live results
+      on consecutive calls. match.py structural (exit-1 diff expected):
+      query -> zero-status fatal gate -> byte/halfword field staging ->
+      __rt_memcpy; expected differences are the seam blx dispatch,
+      zero-initialization, and Rust frame layout.
 
   - address: 0x080e97ac
     ghidra: FUN_080e97ac
