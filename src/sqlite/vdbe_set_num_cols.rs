@@ -54,16 +54,13 @@
 //!
 //! ### Deviations
 //!
-//! - `releaseMemArray` @ 0x083675c0 is not ported. The call goes
-//!   through the [`SQLITE_MEM_ARRAY_RELEASE`] dispatch static whose
-//!   default is a documented no-op stub — the same end state the
-//!   original reaches on a fresh statement (NULL array or zero old
-//!   count, the callee's own early-out). With a live old array the
-//!   stub leaves the `Mem` guts unreleased: an allocator-ledger
-//!   difference the statement struct never shows, since the array
-//!   block itself is freed either way. The real port should replace
-//!   this default when it lands (the `sqlite/value_set_str.rs`
-//!   pattern).
+//! - `releaseMemArray` @ 0x083675c0 IS ported
+//!   ([`release_mem_array`](super::release_mem_array::release_mem_array))
+//!   and is the shipped default of the [`SQLITE_MEM_ARRAY_RELEASE`]
+//!   dispatch static (the `sqlite/value_set_str.rs` pattern). The slot
+//!   stays so host tests can install recording mocks; the old no-op
+//!   stub ([`missing_mem_array_release`]) is retained for tests that
+//!   explicitly need an unconfigured callee.
 //! - `sqlite3_free` @ 0x083906f4 IS ported
 //!   ([`tracked_free`](crate::heap::tracked::tracked_free)) and
 //!   `sqlite3DbMallocZero` @ 0x08374998 IS ported
@@ -90,10 +87,12 @@ pub const RELEASE_GUTS: i32 = 1;
 /// guard).
 pub type MemArrayReleaseFn = unsafe extern "C" fn(mem: *mut u8, n: i32, freebuffer: i32);
 
-/// The no-op default for an unported `releaseMemArray`. A call is
-/// observably the original's NULL-array/zero-count early-out; the old
-/// array block is freed by the caller either way, so only the `Mem`
-/// guts' ledger entries differ.
+/// The no-op stub retained for host tests that explicitly need an
+/// unconfigured `releaseMemArray` (a call is observably the original's
+/// NULL-array/zero-count early-out; the old array block is freed by
+/// the caller either way, so only the `Mem` guts' ledger entries
+/// differ). The shipped default is the real port,
+/// [`super::release_mem_array::release_mem_array`].
 pub(crate) unsafe extern "C" fn missing_mem_array_release(
     _mem: *mut u8,
     _n: i32,
@@ -101,10 +100,12 @@ pub(crate) unsafe extern "C" fn missing_mem_array_release(
 ) {
 }
 
-/// Active `releaseMemArray` dispatch slot. Host tests install a
-/// recording replacement; the real port should replace this default
-/// when it lands.
-pub static mut SQLITE_MEM_ARRAY_RELEASE: MemArrayReleaseFn = missing_mem_array_release;
+/// Active `releaseMemArray` dispatch slot. The default is the real
+/// port, [`super::release_mem_array::release_mem_array`]; host tests
+/// still install recording replacements ([`missing_mem_array_release`]
+/// remains available for them).
+pub static mut SQLITE_MEM_ARRAY_RELEASE: MemArrayReleaseFn =
+    super::release_mem_array::release_mem_array;
 
 /// Read the array-release slot volatile so its default remains
 /// replaceable.
@@ -227,7 +228,7 @@ mod tests {
         core::ptr::write_volatile(core::ptr::addr_of_mut!(DB_MEM_OPS), DEFAULT_DB_MEM_OPS);
         core::ptr::write_volatile(
             core::ptr::addr_of_mut!(SQLITE_MEM_ARRAY_RELEASE),
-            missing_mem_array_release,
+            super::super::release_mem_array::release_mem_array,
         );
     }
 
@@ -404,12 +405,18 @@ mod tests {
     }
 
     #[test]
-    fn the_callee_seam_ships_the_documented_stub() {
+    fn the_callee_seam_ships_the_real_port() {
+        // Serialize against this module's recording installs: they
+        // hold mem's OPS_LOCK and the mock-heap guard for the whole
+        // swap (in this order), so taking both here makes the read
+        // race-free.
+        let _mem_guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _heap_guard = mock_heap();
         unsafe {
             assert_eq!(
                 mem_array_release_op() as usize,
-                missing_mem_array_release as usize,
-                "0x083675c0 is still unported; the seam keeps its no-op stub",
+                super::super::release_mem_array::release_mem_array as usize,
+                "0x083675c0 is ported and is the seam's shipped default",
             );
         }
     }

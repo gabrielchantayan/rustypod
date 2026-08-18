@@ -15651,6 +15651,70 @@ functions:
       finalize slot with blx through a literal-pool load (the slot, not
       the original's bl @ 0x0838bc38) and reloads value into r4 late.
 
+  - address: 0x083675c0
+    ghidra: FUN_083675c0
+    name: release_mem_array
+    size: 92
+    sig: "void release_mem_array(void *mem, int n, int freebuffer)"
+    module: sqlite/release_mem_array
+    status: ported
+    renames:
+      param_1: mem
+      param_2: n
+      param_3: freebuffer
+      iVar2: db
+      uVar1: saved_malloc_failed
+    notes: >-
+      Upstream SQLite 3.5.9's releaseMemArray (vdbeaux.c) - the Mem
+      array guts teardown; 6 bl call sites, all unconditional,
+      binary-scanned from osos.dec (0x08044ccc, 0x08386db0,
+      0x08386ddc, 0x0838afdc, 0x0838b6b4, and vdbe_set_num_cols @
+      0x0838d0ac), no predicated or tail-b entries; extent
+      0x083675c0..0x0836761c from functions.csv and the listing.
+      Algorithm - NULL mem or zero n returns before anything is
+      touched (movs r4,r0 / cmpne r5,#0 / ldmiaeq). Otherwise the
+      owning connection is taken from the FIRST Mem's db field (ldr
+      r6,[r4,#0x10]) and its sticky mallocFailed byte is saved (ldrb
+      r8,[r6,#0x1e]) so releases mid-teardown never latch OOM into the
+      caller; each of the n Mems then goes to mem_release @ 0x0838c04c
+      when freebuffer is nonzero (cmp r7,#0 / beq) or to
+      mem_extern_release @ 0x0838c074 when it is exactly zero, is
+      stamped flags = MEM_Null (1) at +0x1c (mov r9,#0x1 / strh), and
+      the walk advances 0x28 (add r4,r4,#0x28). The count check is
+      signed (subs r0,r5,#0 / sub / bgt on the pre-decrement value),
+      so a negative n walks nothing but the db save/restore still runs;
+      the byte is restored after the loop (strb r8,[r6,#0x1e]).
+      Deviations - both callees ARE ported (sqlite/mem_release,
+      sqlite/mem_extern_release) and are called directly, no seams.
+      Like the rest of the release cluster the port speaks the
+      original's raw byte offsets (0x28 stride, db at +0x10, flags at
+      +0x1c) rather than the typed repr(C) Mem; the two coincide on
+      the 32-bit target, and on a 64-bit host the pointer-width z at
+      +0x14 overlaps db at +0x10, so host tests never give the
+      db-donor element a z (element 0's destructor identity is
+      asserted instead). The port is the shipped default of
+      vdbe_set_num_cols' SQLITE_MEM_ARRAY_RELEASE dispatch static,
+      replacing the documented no-op stub (missing_mem_array_release
+      is retained for tests); the slot stays for host recording mocks.
+      match.py structural: same NULL/zero early-out (LLVM splits the
+      fused movs/cmpne/popeq), same db load at +0x10 and ldrb/strb of
+      the mallocFailed byte at +0x1e bracketing the walk, same
+      freebuffer two-callee dispatch, same strh #1 at +0x1c and 0x28
+      stride; LLVM recounts the loop as n+1 down to 1 (blt covering
+      n < 1) and leaves the two callee bls as relocations.
+      Host tests (9) - NULL array and zero count early-outs (the zero
+      count provably before the db load), a negative count walking
+      nothing while still bracketing the (empty) walk with the
+      mallocFailed save/restore, freebuffer=1 releasing every zMalloc
+      through the tracked allocator in array order and stamping
+      MEM_Null with z/zMalloc/xDel NULLed, freebuffer=0 invoking each
+      element's xDel in order with no zMalloc free, a destructor that
+      latches OOM mid-walk rolled back to the pre-call byte, the walk
+      matching a reference model on stride/order/flags for n = 1/2/5
+      with untouched sentinel flags past the released prefix, a
+      one-element array walking exactly once, and the shipped
+      SQLITE_MEM_ARRAY_RELEASE default now being this port.
+
   - address: 0x0838c0c4
     ghidra: FUN_0838c0c4
     name: vdbe_mem_set_double
@@ -33539,12 +33603,12 @@ functions:
       0x28 - a signed subs/bgt while (n-- > 0) loop, so a zero or
       negative count stamps nothing. Ghidra's decompile has the shape
       right but reads the store order loosely; the listing pins it.
-      Deviations - releaseMemArray @ 0x083675c0 is not ported; the call
-      goes through a new SQLITE_MEM_ARRAY_RELEASE dispatch static whose
-      default is a documented no-op stub (the same end state as the
-      original's NULL-array/zero-count early-out; with a live old array
-      only the Mem guts' ledger entries differ, since the array block is
-      freed either way). sqlite3_free and sqlite3DbMallocZero ARE ported
+      Deviations - releaseMemArray @ 0x083675c0 has since been ported
+      (sqlite/release_mem_array) and is the shipped default of the
+      SQLITE_MEM_ARRAY_RELEASE dispatch static; the slot is kept so
+      host tests can install recording mocks (the
+      missing_mem_array_release no-op stub is retained for them).
+      sqlite3_free and sqlite3DbMallocZero ARE ported
       and called directly. Vdbe and Mem are repr(C) structs with named
       fields rather than byte offsets; the original's offsets are
       statically asserted on 32-bit targets in sqlite/vdbe.rs.
@@ -33557,4 +33621,5 @@ functions:
       consulted; every fresh Mem stamped MEM_Null with the connection
       back-pointer across 1/2/3/6 columns; a zero-column resize still
       sending the zero-byte request to the heap and stamping nothing;
-      and the release seam still holding its documented stub.
+      and the release seam shipping the ported releaseMemArray as its
+      default.
