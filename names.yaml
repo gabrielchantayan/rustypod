@@ -21857,6 +21857,70 @@ functions:
       __rt_memcpy; expected differences are the seam blx dispatch,
       zero-initialization, and Rust frame layout.
 
+  - address: 0x082a1b90
+    ghidra: FUN_082a1b90
+    name: rtc_context_b1c_probe_one
+    size: 20
+    sig: "u32 rtc_context_b1c_probe_one(void)"
+    module: fp/fp_misc
+    status: ported
+    vars:
+      FUN_080c6348: service_context_get (unported 32-byte asserting
+        getter of the system root's +0x30 slot, behind the
+        SERVICE_CONTEXT_GET seam)
+      FUN_0805129c: rtc_context_b1c_halfword (unported 16-byte getter
+        of the u16 at nested-context(+0xf00)+0xb1c, behind the
+        RTC_CONTEXT_B1C_HALFWORD seam)
+      FUN_0807f254: system_root_get (the asserting root getter
+        0x080c6348 wraps; literal pool 0x089ca674)
+      FUN_08030f44: heap_panic (both assertions' fatal tail)
+    notes: >-
+      No bl call sites in osos.asm and no pointer to the address
+      anywhere in osos.dec (binary-scanned): reached indirectly, a
+      vtable or computed table outside the image body - like the whole
+      diagnostics run 0x082a1918-0x082a1b2c above it. Ghidra's 20-byte
+      size is exact here (binary-verified): five instructions, `stmdb
+      sp!,{r4,lr}; bl 0x080c6348; bl 0x0805129c; mov r0,#1; ldmia
+      sp!,{r4,pc}`, the next function starting at 0x082a1ba4.
+      Algorithm: fetch the service context through FUN_080c6348 @
+      0x080c6348 - the asserting getter of the system root's +0x30 slot
+      (root from FUN_0807f254's 0x089ca674 word, both NULLs fatal via
+      heap_panic @ 0x08030f44; the +0x30 slot is the service context
+      app/scoped_context.rs's ROOT_SERVICE_CONTEXT_SLOT names) - then
+      read the u16 at nested-context(+0xf00)+0xb1c through FUN_0805129c
+      @ 0x0805129c (time/rtc.rs's RtcContextOwner/RTC-context layout),
+      DISCARD the read, and return a constant 1. The discarded read
+      survives because ADS cannot elide a call it cannot prove const;
+      its only observable effect is walking (and thereby validating)
+      the service-context chain. The constant-1 return is consistent
+      with a diagnostics availability/entry-count callback paired with
+      a sibling formatter in the run, but the table is outside the
+      image, so the concrete role is NOT recovered. The +0xb1c
+      halfword's meaning is likewise NOT recovered: its companion
+      setter FUN_08066cf0 @ 0x08066cf0 mirrors it into the global @
+      0x089ca58c+0x4 and runs the change notify @ 0x0805e66c when it
+      moves, and the state poller FUN_08172c6c caches it at its +0x52
+      and publishes events 0x6097/0x609b/0x60a0 when it changes (the
+      same poller publishes 0x60ae for rtc_context_status's +0xb24
+      byte). FUN_0805129c's 4 other bl call sites: 0x0812f3b0 (masks
+      the value bic #0xc / orr #4 and feeds the setter), 0x08173050 /
+      0x08173064 (the poller), 0x0825b71c (the re-publish wrapper @
+      0x0825b710, which reads the halfword and tail-calls the setter
+      with it). Deviations: both callees are unported firmware behind
+      host-swappable usize seams (the module's FIXED16_RECIPROCAL
+      pattern) - the target build transmutes 0x080c6348 and 0x0805129c,
+      host tests install recording mocks; the pushed r4 is never used
+      (an ADS frame artifact), the port keeps no frame. Host tests (3):
+      service-context fetch BEFORE the halfword read with the getter's
+      exact pointer threaded into the reader (one shared event log),
+      the constant-1 return across every halfword boundary shape the
+      reader can produce (the read is discarded), and live
+      service-context pointers re-threaded on consecutive calls.
+      match.py structural (exit-1 diff expected): push; call; call;
+      mov r0,#1; pop on both sides - expected differences are the seam
+      blx-via-literal-pool dispatch and LLVM's push {fp,lr}/pop {fp,pc}
+      frame versus the ADS {r4,lr} spill.
+
   - address: 0x080e97ac
     ghidra: FUN_080e97ac
     name: fixed16_cos

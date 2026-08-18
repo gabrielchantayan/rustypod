@@ -1423,6 +1423,115 @@ pub unsafe extern "C" fn current_datetime_to_record(record: *mut u8) {
     __rt_memcpy(record, packed.as_ptr(), packed.len());
 }
 
+/// Host-swappable entry point for the service-context getter
+/// `FUN_080c6348` @ 0x080c6348 (32 bytes, unported; 2 other `bl` call
+/// sites, both inside the re-publish wrapper @ 0x0825b710): answers the
+/// +0x30 slot of the system root, fetching the root twice through the
+/// asserting getter `FUN_0807f254` @ 0x0807f254 (itself
+/// `ldr r0,[0x807f268]` — the runtime-initialized root word @
+/// 0x089ca674 — with `bl heap_panic` @ 0x08030f44 when the root is
+/// NULL) and treating a NULL slot as fatal too (`cmp r0,#0` / `bleq
+/// heap_panic`, then a fresh fetch and reload on the live path). The
+/// +0x30 slot is the service context — the same field
+/// app/scoped_context.rs's ROOT_SERVICE_CONTEXT_SLOT reads off the same
+/// root word. The target build calls the fixed firmware address
+/// directly; host tests swap this writable cell to install recording
+/// mocks.
+#[cfg(not(target_os = "none"))]
+pub static mut SERVICE_CONTEXT_GET: usize = 0x080c_6348;
+
+/// Host-swappable entry point for the nested-context halfword getter
+/// `FUN_0805129c` @ 0x0805129c (16 bytes, unported; 4 other `bl` call
+/// sites — 0x0812f3b0, 0x08173050, 0x08173064, 0x0825b71c): follows the
+/// owner object's +0xf00 nested-context pointer (time/rtc.rs's
+/// RtcContextOwner/RTC-context layout) and answers the u16 at
+/// nested+0xb1c — `ldr r0,[r0,#0xf00]; add r0,r0,#0xb00; ldrh
+/// r0,[r0,#0x1c]; bx lr`. The companion setter `FUN_08066cf0` @
+/// 0x08066cf0 writes the same halfword (mirroring it into the global @
+/// 0x089ca58c+0x4 and running the change notify @ 0x0805e66c when it
+/// moves), and the state poller `FUN_08172c6c` caches it at its +0x52
+/// and publishes events 0x6097/0x609b/0x60a0 when it changes. The
+/// concrete field meaning is NOT recovered. The target build calls the
+/// fixed firmware address directly; host tests swap this writable cell
+/// to install recording mocks.
+#[cfg(not(target_os = "none"))]
+pub static mut RTC_CONTEXT_B1C_HALFWORD: usize = 0x0805_129c;
+
+/// Service-context getter seam signature: `() -> service_context`.
+type ServiceContextGetFn = unsafe extern "C" fn() -> *mut u8;
+/// Halfword getter seam signature: `(owner) -> halfword`.
+type RtcContextB1cHalfwordFn = unsafe extern "C" fn(*mut u8) -> u16;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn service_context_get() -> *mut u8 {
+    let get: ServiceContextGetFn = core::mem::transmute(0x080c_6348usize);
+    get()
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn service_context_get() -> *mut u8 {
+    let address = core::ptr::addr_of!(SERVICE_CONTEXT_GET).read_volatile();
+    let get: ServiceContextGetFn = core::mem::transmute(address);
+    get()
+}
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn rtc_context_b1c_halfword(owner: *mut u8) -> u16 {
+    let get: RtcContextB1cHalfwordFn = core::mem::transmute(0x0805_129cusize);
+    get(owner)
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn rtc_context_b1c_halfword(owner: *mut u8) -> u16 {
+    let address = core::ptr::addr_of!(RTC_CONTEXT_B1C_HALFWORD).read_volatile();
+    let get: RtcContextB1cHalfwordFn = core::mem::transmute(address);
+    get(owner)
+}
+
+/// rtc_context_b1c_probe_one — original: `FUN_082a1b90` @ 0x082a1b90
+/// (20 bytes, binary-verified: five instructions ending `ldmia
+/// sp!,{r4,pc}` at 0x082a1ba0, the next function starting at 0x082a1ba4
+/// — Ghidra's size is exact here; NO `bl` call sites in osos.asm and no
+/// pointer to the address anywhere in osos.dec (binary-scanned), so —
+/// like the whole diagnostics run 0x082a1918-0x082a1b2c above it — the
+/// original is reached indirectly, a vtable or computed table outside
+/// the image body).
+///
+/// Touches the clock context chain and answers a constant 1: the whole
+/// body is `stmdb sp!,{r4,lr}; bl 0x080c6348; bl 0x0805129c; mov r0,#1;
+/// ldmia sp!,{r4,pc}` (Ghidra: `FUN_080c6348(); FUN_0805129c(); return
+/// 1`). The getter `FUN_080c6348` (unported, behind the
+/// [`SERVICE_CONTEXT_GET`] seam) supplies the service context — fatally
+/// asserting both the system root and its +0x30 slot — and
+/// `FUN_0805129c` (unported, behind the [`RTC_CONTEXT_B1C_HALFWORD`]
+/// seam) reads the u16 at nested-context(+0xf00)+0xb1c. The halfword
+/// read's result is DISCARDED: ADS cannot elide a call it cannot prove
+/// const, so the source-level statement survived as a bare read — its
+/// only observable effect is walking (and thereby validating) the
+/// service-context chain. The constant-1 return is consistent with a
+/// diagnostics availability/entry-count callback paired with a sibling
+/// formatter in the run, but the table is outside the image, so the
+/// concrete role is NOT recovered.
+///
+/// Deviations:
+/// - Both callees are unported firmware behind host-swappable usize
+///   seams (this module's FIXED16_RECIPROCAL pattern): the target build
+///   transmutes the fixed firmware addresses 0x080c6348 and 0x0805129c,
+///   host tests install recording mocks.
+/// - The pushed r4 is never used (the `stmdb sp!,{r4,lr}` / `ldmia
+///   sp!,{r4,pc}` pair spills and restores it gratuitously — an ADS
+///   frame artifact); the port keeps no frame.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn rtc_context_b1c_probe_one() -> u32 {
+    let service_context = service_context_get();
+    rtc_context_b1c_halfword(service_context);
+    1
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -3714,6 +3823,132 @@ mod tests {
         }
         unsafe {
             assert_eq!(CURRENT_DATETIME_QUERY_CALLS, 2);
+        }
+    }
+
+    // ---- rtc_context_b1c_probe_one ----
+
+    /// Serializes access to the SERVICE_CONTEXT_GET and
+    /// RTC_CONTEXT_B1C_HALFWORD seam cells (the BOARD_VERSION_LOCK
+    /// precedent above); the probe's tests always install both mocks.
+    static RTC_B1C_PROBE_LOCK: Mutex<()> = Mutex::new(());
+    static mut RTC_B1C_SERVICE_CONTEXT: *mut u8 = core::ptr::null_mut();
+    static mut RTC_B1C_HALFWORD_RESULT: u16 = 0;
+    static mut RTC_B1C_EVENTS: Vec<u8> = Vec::new();
+    static mut RTC_B1C_READER_OWNER: *mut u8 = core::ptr::null_mut();
+
+    const EVENT_SERVICE_GET: u8 = 1;
+    const EVENT_B1C_READ: u8 = 2;
+
+    unsafe extern "C" fn recording_service_context_get() -> *mut u8 {
+        RTC_B1C_EVENTS.push(EVENT_SERVICE_GET);
+        RTC_B1C_SERVICE_CONTEXT
+    }
+
+    unsafe extern "C" fn recording_rtc_context_b1c_halfword(owner: *mut u8) -> u16 {
+        RTC_B1C_EVENTS.push(EVENT_B1C_READ);
+        RTC_B1C_READER_OWNER = owner;
+        RTC_B1C_HALFWORD_RESULT
+    }
+
+    struct RtcB1cProbeInstall {
+        previous_get: usize,
+        previous_read: usize,
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for RtcB1cProbeInstall {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(SERVICE_CONTEXT_GET).write_volatile(self.previous_get);
+                core::ptr::addr_of_mut!(RTC_CONTEXT_B1C_HALFWORD)
+                    .write_volatile(self.previous_read);
+            }
+        }
+    }
+
+    fn install_rtc_b1c_probe(service_context: *mut u8, halfword: u16) -> RtcB1cProbeInstall {
+        let lock = RTC_B1C_PROBE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            let previous_get = core::ptr::addr_of!(SERVICE_CONTEXT_GET).read_volatile();
+            let previous_read = core::ptr::addr_of!(RTC_CONTEXT_B1C_HALFWORD).read_volatile();
+            core::ptr::addr_of_mut!(SERVICE_CONTEXT_GET)
+                .write_volatile(recording_service_context_get as usize);
+            core::ptr::addr_of_mut!(RTC_CONTEXT_B1C_HALFWORD)
+                .write_volatile(recording_rtc_context_b1c_halfword as usize);
+            RTC_B1C_SERVICE_CONTEXT = service_context;
+            RTC_B1C_HALFWORD_RESULT = halfword;
+            RTC_B1C_READER_OWNER = core::ptr::null_mut();
+            RTC_B1C_EVENTS.clear();
+            RtcB1cProbeInstall {
+                previous_get,
+                previous_read,
+                _lock: lock,
+            }
+        }
+    }
+
+    #[test]
+    fn rtc_context_b1c_probe_one_gets_context_then_reads_halfword_and_returns_one() {
+        let mut fake_service_context = [0xa5u8; 4];
+        let service_context = fake_service_context.as_mut_ptr();
+        let _mock = install_rtc_b1c_probe(service_context, 0x1234);
+
+        let result = unsafe { rtc_context_b1c_probe_one() };
+
+        assert_eq!(result, 1);
+        unsafe {
+            assert_eq!(RTC_B1C_EVENTS, [EVENT_SERVICE_GET, EVENT_B1C_READ]);
+            assert_eq!(RTC_B1C_READER_OWNER, service_context);
+        }
+    }
+
+    #[test]
+    fn rtc_context_b1c_probe_one_discards_every_halfword_value() {
+        let mut fake_service_context = [0x5au8; 4];
+        let service_context = fake_service_context.as_mut_ptr();
+        let _mock = install_rtc_b1c_probe(service_context, 0);
+
+        // Every halfword boundary shape the reader can produce — the
+        // result is discarded and the answer stays the constant 1.
+        for halfword in [0x0000u16, 0x0001, 0x7fff, 0x8000, 0xffff, 0x5a5a, 0xa5a5] {
+            unsafe {
+                RTC_B1C_HALFWORD_RESULT = halfword;
+                RTC_B1C_EVENTS.clear();
+            }
+            let result = unsafe { rtc_context_b1c_probe_one() };
+            assert_eq!(result, 1, "halfword={halfword:#06x}");
+            unsafe {
+                assert_eq!(
+                    RTC_B1C_EVENTS,
+                    [EVENT_SERVICE_GET, EVENT_B1C_READ],
+                    "halfword={halfword:#06x}"
+                );
+                assert_eq!(RTC_B1C_READER_OWNER, service_context);
+            }
+        }
+    }
+
+    #[test]
+    fn rtc_context_b1c_probe_one_threads_the_live_service_context_each_call() {
+        let mut fake_a = [0x11u8; 4];
+        let mut fake_b = [0x22u8; 4];
+        let _mock = install_rtc_b1c_probe(fake_a.as_mut_ptr(), 0);
+
+        for (service_context, halfword) in [
+            (fake_a.as_mut_ptr(), 0x0000u16),
+            (fake_b.as_mut_ptr(), 0xffff),
+            (fake_a.as_mut_ptr(), 0x00c0),
+        ] {
+            unsafe {
+                RTC_B1C_SERVICE_CONTEXT = service_context;
+                RTC_B1C_HALFWORD_RESULT = halfword;
+            }
+            let result = unsafe { rtc_context_b1c_probe_one() };
+            assert_eq!(result, 1);
+            unsafe {
+                assert_eq!(RTC_B1C_READER_OWNER, service_context);
+            }
         }
     }
 }
