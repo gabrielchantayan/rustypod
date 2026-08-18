@@ -20481,6 +20481,35 @@ functions:
       truncated by the false no-return edge;
       actual code is 0x080e988c-0x080e98ff plus literals 0x080e9900-0x080e990b.
 
+  - address: 0x082a184c
+    ghidra: FUN_082a184c
+    name: fixed16_gt_indirect
+    size: 24
+    sig: "bool fixed16_gt_indirect(a: *const i32, b: *const i32) -> bool"
+    module: fp/fp_misc
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      Q16.16 greater-than comparator with both operands fetched through
+      pointers: ldr r0,[r0]; ldr r1,[r1]; cmp r0,r1; movle r0,#0;
+      movgt r0,#1 - a SIGNED compare returning 1 when *a > *b, else 0
+      (Ghidra: return *param_2 < *param_1). Strict ordering: equal
+      values return 0. Used for threshold tests and range folding:
+      FUN_082572e4 folds a Q16.16 angle by comparing against 0xb40000
+      (180.0) and 0x1680000 (360.0); FUN_080fe5fc tests a struct field
+      against the stack-materialized 1.0 constant before clamping;
+      FUN_080f780c compares offsets against -100.0 (0xff9c0000) and a
+      global bound. 11 bl call sites, binary-scanned (0x080f7884,
+      0x080f7938, 0x080fe64c, 0x08152a54, 0x08167a1c, 0x08197788,
+      0x08257300, 0x0825732c, 0x08257408, 0x0825749c, 0x0827b6fc).
+      Sits immediately before the indirect fixed16 helper cluster
+      0x082a1864-0x082a18c8 (lt, sub, mul, ne, add) and is that
+      family's greater-than sibling; the eq comparator @ 0x082a1834
+      just above it is a separate port. match.py structural: identical
+      core (two pointer loads, cmp, conditional result); LLVM adds a
+      push {fp,lr}/pop {fp,pc} frame and hoists the movle #0 result
+      before the cmp (movgt still overwrites, same semantics).
+
   - address: 0x082a1864
     ghidra: FUN_082a1864
     name: fixed16_lt_indirect

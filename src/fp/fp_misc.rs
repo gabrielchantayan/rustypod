@@ -372,6 +372,32 @@ pub unsafe extern "C" fn fixed16_div(mut numerator: i32, divisor: i32) -> i32 {
     crate::util::fixed::fixed16_mul(numerator, reciprocal)
 }
 
+/// fixed16_gt_indirect — original: `FUN_082a184c` @ 0x082a184c (24
+/// bytes; 11 bl call sites, binary-scanned: 0x080f7884, 0x080f7938,
+/// 0x080fe64c, 0x08152a54, 0x08167a1c, 0x08197788, 0x08257300,
+/// 0x0825732c, 0x08257408, 0x0825749c, 0x0827b6fc).
+///
+/// Q16.16 greater-than comparator with BOTH operands fetched through
+/// pointers: `ldr r0,[r0]; ldr r1,[r1]; cmp r0,r1; movle r0,#0;
+/// movgt r0,#1` — a SIGNED compare returning 1 when `*a > *b`, else 0
+/// (Ghidra: `return *param_2 < *param_1`). Strict ordering: equal
+/// values return 0, and the signed movle/movgt pair makes it an
+/// ordering comparator, unlike the raw bit-pattern
+/// `fixed16_ne_indirect` (@ 0x082a18a8). Callers use it for threshold
+/// tests and range folding: FUN_082572e4 folds a Q16.16 angle by
+/// comparing against 0xb40000 (180.0) and 0x1680000 (360.0);
+/// FUN_080fe5fc tests a struct field against the stack-materialized
+/// 1.0 constant (0x10000) before clamping; FUN_080f780c compares
+/// offsets against -100.0 (0xff9c0000) and a global bound. Sits
+/// immediately before the indirect fixed16 helper cluster
+/// 0x082a1864-0x082a18c8 (lt, sub, mul, ne, add) and is that family's
+/// greater-than sibling; the eq comparator @ 0x082a1834 just above it
+/// is a separate port.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn fixed16_gt_indirect(a: *const i32, b: *const i32) -> bool {
+    *a > *b
+}
+
 /// fixed16_lt_indirect — original: `FUN_082a1864` @ 0x082a1864 (24
 /// bytes; 7 bl call sites, binary-scanned: 0x080f7a68, 0x080f7b10,
 /// 0x080fe630, 0x08152a80, 0x08152bdc, 0x08167a34, 0x081977a0).
@@ -919,6 +945,98 @@ mod tests {
         );
         unsafe {
             assert_eq!(LAST_RECIPROCAL_INPUT, divisor);
+        }
+    }
+
+    // ---- fixed16_gt_indirect ----
+
+    /// Call through real by-value copies so both pointer loads are
+    /// exercised.
+    fn gt_indirect(a: i32, b: i32) -> bool {
+        unsafe { fixed16_gt_indirect(&a, &b) }
+    }
+
+    #[test]
+    fn fixed16_gt_indirect_equal_values_are_not_greater() {
+        assert!(!gt_indirect(0, 0));
+        assert!(!gt_indirect(FIX_ONE, FIX_ONE));
+        assert!(!gt_indirect(-FIX_ONE, -FIX_ONE));
+        assert!(!gt_indirect(i32::MAX, i32::MAX));
+        assert!(!gt_indirect(i32::MIN, i32::MIN));
+        assert!(!gt_indirect(0x1234_5678, 0x1234_5678));
+    }
+
+    #[test]
+    fn fixed16_gt_indirect_strict_ordering() {
+        assert!(gt_indirect(FIX_ONE, 0));
+        assert!(!gt_indirect(0, FIX_ONE));
+        assert!(gt_indirect(FIX_ONE, -FIX_ONE));
+        assert!(!gt_indirect(-FIX_ONE, FIX_ONE));
+        // 1.0 > 0.5 and -1.0 > -1.5 in Q16.16.
+        assert!(gt_indirect(FIX_ONE, 0x0000_8000));
+        assert!(gt_indirect(-FIX_ONE, -0x0001_8000));
+    }
+
+    #[test]
+    fn fixed16_gt_indirect_one_ulp_decides() {
+        // A single ulp of difference (Q16.16 resolution) already flips
+        // the result, in both directions.
+        assert!(gt_indirect(1, 0));
+        assert!(!gt_indirect(0, 1));
+        assert!(gt_indirect(FIX_ONE, FIX_ONE - 1));
+        assert!(!gt_indirect(FIX_ONE - 1, FIX_ONE));
+        assert!(gt_indirect(-FIX_ONE + 1, -FIX_ONE));
+        assert!(!gt_indirect(-FIX_ONE, -FIX_ONE + 1));
+    }
+
+    #[test]
+    fn fixed16_gt_indirect_signed_extremes() {
+        // Signed comparison: every non-negative is above every negative,
+        // unlike an unsigned bit-pattern ordering.
+        assert!(gt_indirect(0, -1));
+        assert!(!gt_indirect(-1, 0));
+        assert!(gt_indirect(i32::MAX, i32::MIN));
+        assert!(!gt_indirect(i32::MIN, i32::MAX));
+        assert!(gt_indirect(-1, i32::MIN));
+        assert!(gt_indirect(i32::MAX, 0));
+        assert!(gt_indirect(i32::MAX, i32::MAX - 1));
+        // 32767.0 (i32::MAX & !0xffff) is above -32768.0 (i32::MIN).
+        assert!(gt_indirect(i32::MAX & !0xffff, i32::MIN));
+    }
+
+    #[test]
+    fn fixed16_gt_indirect_matches_reference() {
+        let values = [
+            0i32,
+            1,
+            -1,
+            2,
+            FIX_ONE,
+            -FIX_ONE,
+            0x8000,
+            -0x8000,
+            0x0001_0001,
+            0x1234_5678,
+            -0x1234_5678,
+            0x7fff_ffff,
+            i32::MIN,
+        ];
+        for &a in &values {
+            for &b in &values {
+                assert_eq!(gt_indirect(a, b), a > b, "a={a:#x} b={b:#x}");
+            }
+        }
+        let mut rng = Rng(0x1ea5_1eaf_dead_beef);
+        for _ in 0..100_000 {
+            let a = rng.next() as i32;
+            let b = rng.next() as i32;
+            assert_eq!(gt_indirect(a, b), a > b, "a={a:#x} b={b:#x}");
+        }
+        // Dense sweep across the sign boundary, both directions.
+        for a in -4096i32..4096 {
+            for b in -4096i32..4096 {
+                assert_eq!(gt_indirect(a, b), a > b, "a={a:#x} b={b:#x}");
+            }
         }
     }
 
