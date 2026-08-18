@@ -1,14 +1,16 @@
 //! 16.16 fixed-point and widening integer multiply @ 0x080e9878 / 0x080f0fa4,
-//! plus the software count-leading-zeros @ 0x0824980c that feeds them.
+//! the software count-leading-zeros @ 0x0824980c that feeds them, and the
+//! 64-bit round-and-extract @ 0x08076214 that closes dot products.
 //!
-//! Two pure leaf helpers built on the ARMv5TE `smull` (signed 32x32 -> 64)
-//! instruction, and one bit-scan leaf. Sizes from decomp/functions.csv;
-//! call-site counts from decoding every `b`/`bl` word in osos.dec
-//! (osos.asm drops lines):
+//! Three pure leaf helpers built on the ARMv5TE `smull` (signed 32x32 -> 64)
+//! instruction, one bit-scan leaf, and one 64-bit rounding leaf. Sizes from
+//! decomp/functions.csv; call-site counts from decoding every `b`/`bl` word
+//! in osos.dec (osos.asm drops lines):
 //!
 //! - `fixed16_mul` — `FUN_080e9878` @ 0x080e9878 (20 bytes; 94 call sites).
 //! - `mul_wide_i64` — `FUN_080f0fa4` @ 0x080f0fa4 (12 bytes; 49 call sites).
 //! - `clz_31` — `FUN_0824980c` @ 0x0824980c (68 bytes; 3 call sites).
+//! - `fixed16_round_64` — `FUN_08076214` @ 0x08076214 (20 bytes; 12 sites).
 //!
 //! All are leaves and touch no hardware, so host tests against `i64` /
 //! `u32::leading_zeros` arithmetic prove complete behavior.
@@ -102,6 +104,29 @@ pub extern "C" fn clz_31(x: u32) -> u32 {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub extern "C" fn mul_wide_i64(a: i32, b: i32) -> i64 {
     (a as i64) * (b as i64)
+}
+
+/// fixed16_round_64 — original: `FUN_08076214` @ 0x08076214 (20 bytes).
+///
+/// Round-to-nearest extraction of a 64-bit fixed-point accumulator to
+/// 32-bit Q16.16: add half an ulp (`0x8000`) to the full 64-bit value
+/// with carry propagation across the word boundary (`adds`/`adc`), then
+/// return bits [47:16] of the sum — the original assembles them as
+/// `(hi << 16) | (lo >> 16)`, which is exactly a 32-bit truncation of
+/// `(acc + 0x8000) >> 16`. Ties go toward positive infinity (round half
+/// up, in the `floor(acc + 1/2)` sense), negative fractions included;
+/// results that do not fit in 32 bits after the shift wrap — there is
+/// no clamp, exactly as the original's register assembly wraps.
+///
+/// This is the rounding counterpart to `fixed16_mul`'s truncation: every
+/// one of its 12 call sites (11 `bl` plus one tail `b` at 0x082a0254)
+/// sits at the end of a `mul_wide_i64` dot-product chain in the 0x082a
+/// geometry code — e.g. `FUN_082a1368`/`FUN_082a05d4` are 4x4
+/// matrix-times-vector transforms that `adds`/`adc` four Q16.16 products
+/// into a 64-bit accumulator and round it here to a Q16.16 coordinate.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn fixed16_round_64(acc: i64) -> i32 {
+    (acc.wrapping_add(0x8000) >> 16) as i32
 }
 
 #[cfg(test)]
@@ -325,6 +350,150 @@ mod tests {
             if lz <= 28 {
                 let idx = (x >> (28 - lz)) & 7;
                 assert!(idx <= 7, "x={x:#x} idx={idx}");
+            }
+        }
+    }
+
+    /// The original's register assembly, computed bit by bit:
+    /// `(hi << 16) | (lo >> 16)` over the `adds`/`adc`-incremented pair.
+    fn round_64_register_assembly(acc: i64) -> i32 {
+        let bits = (acc as u64).wrapping_add(0x8000);
+        let lo = bits as u32;
+        let hi = (bits >> 32) as u32;
+        ((hi << 16) | (lo >> 16)) as i32
+    }
+
+    #[test]
+    fn fixed16_round_64_identity_values() {
+        // 1.0 in the accumulator (Q16.16 value shifted left 16) -> 1.0 out.
+        assert_eq!(fixed16_round_64(0x0000_0001_0000_0000), ONE);
+        assert_eq!(fixed16_round_64(-0x0000_0001_0000_0000), -ONE);
+        assert_eq!(fixed16_round_64(0), 0);
+        // 2.5 -> 2.5, exact values pass through unchanged.
+        assert_eq!(fixed16_round_64(0x0000_0002_8000_0000), 5 * ONE / 2);
+    }
+
+    /// Half-ulp ties go up (toward positive infinity); just below half
+    /// truncates down. This is the distinction from `fixed16_mul`.
+    #[test]
+    fn fixed16_round_64_rounds_half_up() {
+        // +0.5 ulp exactly -> rounds up to 1.
+        assert_eq!(fixed16_round_64(0x8000), 1);
+        // Just under half -> 0.
+        assert_eq!(fixed16_round_64(0x7fff), 0);
+        assert_eq!(fixed16_round_64(0x8001), 1);
+        // -0.5 ulp exactly -> ties toward +inf land on 0, not -1.
+        assert_eq!(fixed16_round_64(-0x8000), 0);
+        // Just past -0.5 ulp -> -1.
+        assert_eq!(fixed16_round_64(-0x8001), -1);
+        assert_eq!(fixed16_round_64(-0x7fff), 0);
+    }
+
+    /// The `adds`/`adc` pair: adding 0x8000 to a low word of 0xffff8000
+    /// carries into the high word, and the extraction must see it.
+    #[test]
+    fn fixed16_round_64_carry_crosses_word_boundary() {
+        // hi=0, lo=0xffff_8000: +0x8000 wraps lo to 0 and carries 1 ->
+        // bits [47:16] of 0x1_0000_0000 = 0x1_0000 = 1.0.
+        assert_eq!(fixed16_round_64(0x0000_0000_ffff_8000), ONE);
+        // Without the carry the answer would be 0xffff; the carry into
+        // the high word is what makes the high-word extraction see it.
+        assert_eq!(fixed16_round_64(0x0000_0000_ffff_7fff), 0xffff);
+        // Negative high word: hi=-1, lo=0xffff_8000 -> acc=-0x8000,
+        // +0x8000 = 0 exactly (carry propagates hi -1 -> 0).
+        assert_eq!(fixed16_round_64(-0x8000), 0);
+        // hi=-1 (0xffff_ffff), lo=0xffff_7fff: no carry, result keeps
+        // the sign-extended high bits.
+        assert_eq!(fixed16_round_64(-0x8001), -1);
+    }
+
+    /// The result is bits [47:16] — the high word's low half lands in
+    /// the result's high half, and bits above 47 are discarded (wrap).
+    #[test]
+    fn fixed16_round_64_high_word_extraction_and_wrap() {
+        // acc = 0x1234_5678_9abc_def0: +0x8000 stays within the low
+        // word (0x9abd_5ef0, no carry), so bits [47:16] = 0x5678_9abd.
+        assert_eq!(fixed16_round_64(0x1234_5678_9abc_def0), 0x5678_9abd);
+        // Bits [63:48] never appear: 0x00xx and 0xffxx high bytes give
+        // the same low-32 result modulo sign of the shifted value.
+        assert_eq!(
+            fixed16_round_64(0x00aa_bbcc_ddee_0000),
+            fixed16_round_64(0x11aa_bbcc_ddee_0000)
+        );
+        // i64::MAX wraps on the add, exactly as adds/adc wrap.
+        assert_eq!(fixed16_round_64(i64::MAX), round_64_register_assembly(i64::MAX));
+        assert_eq!(fixed16_round_64(i64::MIN), round_64_register_assembly(i64::MIN));
+    }
+
+    /// The defining property over a grid crossing zero, both word
+    /// boundaries and the carry edge: equality with the original's
+    /// register assembly, computed independently.
+    #[test]
+    fn fixed16_round_64_matches_register_assembly_reference() {
+        let his = [
+            0u32,
+            1,
+            0xffff_ffff,
+            0xffff_0000,
+            0x0000_ffff,
+            0x8000_0000,
+            0x7fff_ffff,
+            0x1234_5678,
+            0xdead_beef,
+        ];
+        let los = [
+            0u32,
+            1,
+            0x7fff,
+            0x8000,
+            0x8001,
+            0xffff_7fff,
+            0xffff_8000,
+            0xffff_ffff,
+            0x9abc_def0,
+        ];
+        for &hi in &his {
+            for &lo in &los {
+                let acc = (((hi as u64) << 32) | lo as u64) as i64;
+                assert_eq!(
+                    fixed16_round_64(acc),
+                    round_64_register_assembly(acc),
+                    "acc={acc:#018x}"
+                );
+            }
+        }
+    }
+
+    /// The call-site idiom: four `mul_wide_i64` products summed with
+    /// adds/adc, then rounded here — the rounding counterpart to
+    /// `fixed16_mul`'s truncation, never off by more than one ulp.
+    #[test]
+    fn fixed16_round_64_rounds_mul_wide_dot_products() {
+        let values = [
+            0i32,
+            1,
+            -1,
+            ONE,
+            -ONE,
+            5 * ONE / 2,
+            -5 * ONE / 2,
+            0x0001_2345,
+            -0x0001_2345,
+            0x7fff_ffff,
+            -0x8000_0000,
+        ];
+        for &a in &values {
+            for &b in &values {
+                let acc = mul_wide_i64(a, b);
+                let rounded = fixed16_round_64(acc);
+                let truncated = fixed16_mul(a, b);
+                assert_eq!(rounded, ((acc + 0x8000) >> 16) as i32, "a={a:#x} b={b:#x}");
+                let diff = (rounded as i64 - truncated as i64).abs();
+                assert!(diff <= 1, "a={a:#x} b={b:#x} diff={diff}");
+                // A product that is exact in Q16.16 rounds to itself.
+                if acc & 0xffff == 0 {
+                    assert_eq!(rounded, truncated);
+                }
             }
         }
     }

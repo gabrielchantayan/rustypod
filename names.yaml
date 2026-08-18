@@ -9329,6 +9329,36 @@ functions:
       unavailable, so retaining `identified` is necessary to avoid
       publishing a behaviorally unverifiable implementation.
 
+  - address: 0x08076214
+    ghidra: FUN_08076214
+    name: fixed16_round_64
+    size: 20
+    sig: "i32 fixed16_round_64(i64 acc)"
+    module: util/fixed
+    status: ported
+    vars: {param_1: "acc (low word, r0)", param_2: "acc (high word, r1)"}
+    notes: >-
+      Round-to-nearest extraction of a 64-bit fixed-point accumulator to
+      32-bit Q16.16: adds r0,r0,#0x8000 / adc r1,r1,#0 adds half an ulp
+      with carry across the word boundary, then
+      mov r0,r0,lsr#16 / orr r0,r0,r1,lsl#16 returns bits [47:16] of the
+      sum - exactly a 32-bit truncation of (acc + 0x8000) >> 16. Ties go
+      toward positive infinity (round half up, floor(acc + 1/2) sense,
+      negative fractions included); results that do not fit in 32 bits
+      wrap, no clamp. The port takes the accumulator as one i64 (AAPCS
+      r0:r1, matching the original register use). This is the rounding
+      counterpart to fixed16_mul @ 0x080e9878's truncation: all 12 call
+      sites (11 bl plus one tail b at 0x082a0254) sit at the end of
+      mul_wide_i64 @ 0x080f0fa4 dot-product chains in the 0x082a
+      geometry code - FUN_082a05d4/FUN_082a1368/FUN_082a1544 are 4x4
+      matrix-times-vector transforms that adds/adc four Q16.16 products
+      into a 64-bit accumulator and round it here to a Q16.16
+      coordinate. Host tests cover carry propagation at the low-word
+      boundary (lo=0xffff8000), half-ulp ties both signs, high-word
+      extraction/wrap, and identity values. match.py structural: the
+      adds/adc/lsr/orr/return core is instruction-identical; LLVM only
+      adds an fp frame.
+
   - address: 0x0824980c
     ghidra: FUN_0824980c
     name: clz_31
