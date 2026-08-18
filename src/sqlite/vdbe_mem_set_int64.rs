@@ -149,13 +149,20 @@ pub(crate) unsafe fn release_op() -> unsafe extern "C" fn(*mut u8) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
     use super::*;
     use std::sync::{Mutex, MutexGuard};
 
     /// Serializes tests that swap the mem-release slot.
     static OPS_LOCK: Mutex<()> = Mutex::new(());
+
+    /// The slot lock, shared with `vdbe_mem_set_double`'s tests —
+    /// both modules swap the same `MEM_SET_OPS` slot and the host
+    /// test harness runs them in one multi-threaded process.
+    pub(crate) fn ops_lock() -> &'static Mutex<()> {
+        &OPS_LOCK
+    }
 
     /// A `Mem` with distinguishable garbage in every field, so an
     /// unintended write shows up as a mismatch. (The ownership

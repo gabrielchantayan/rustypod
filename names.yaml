@@ -15596,6 +15596,80 @@ functions:
       finalize slot with blx through a literal-pool load (the slot, not
       the original's bl @ 0x0838bc38) and reloads value into r4 late.
 
+  - address: 0x0838c0c4
+    ghidra: FUN_0838c0c4
+    name: vdbe_mem_set_double
+    size: 76
+    sig: "void vdbe_mem_set_double(Mem *p_mem, f64 value)"
+    module: sqlite/vdbe_mem_set_double
+    status: ported
+    vars: {param_1: p_mem, param_3: value_lo, param_4: value_hi}
+    notes: >-
+      Upstream SQLite's sqlite3VdbeMemSetDouble (vdbemem.c) - the
+      early-3.x release-store-stamp form with the NaN-to-NULL
+      guard: the helper @ 0x0837cb44 (upstream's sqlite3IsNaN,
+      `return x != x;` spelled as a __dcmpeq @ 0x083eb748 of the
+      value against itself, result normalized to 0/1) runs first;
+      a NaN value tail-calls vdbe_mem_set_null @ 0x0838c13c
+      (ldmiane/bne, so MemSetNull returns straight to this
+      function's caller) and nothing is released, matching
+      upstream's `if( sqlite3IsNaN(val) ){
+      sqlite3VdbeMemSetNull(pMem); }` arm; otherwise mem_release
+      @ 0x0838c04c frees the old guts, the f64 lands in the real
+      arm of the value union at +0x08 (two strs, low word first),
+      flags at +0x1c is ASSIGNED MEM_Real (0x8) outright - like
+      the sibling vdbe_mem_set_int64 @ 0x0838c110 and unlike
+      MemSetNull's read-modify-write, no attribute bit survives -
+      and type at +0x1e becomes SQLITE_FLOAT (2). It sits
+      immediately above vdbe_mem_set_int64 @ 0x0838c110 - the
+      floating-point half of the numeric-datum setter pair.
+      Extent 0x0838c0c4..0x0838c110 confirmed from raw words -
+      0x0838c10c is the ldmia ...,{pc} return and 0x0838c110 is
+      the stmdb entry of MemSetInt64; no literal pool. 8 branch
+      references, binary-scanned from osos.dec (3 bl, 4 tail-b, 1
+      bne): bl @ 0x082d74b4 inside FUN_082d7488; bl @ 0x083682e8
+      inside FUN_08368254; bl @ 0x0838ef70 inside FUN_0838ef38
+      (the counterpart of set-int64's bl @ 0x0838efbc fallback in
+      the same column-Mem store run); tail b @ 0x082b2910 inside
+      FUN_082b28b8; tail b @ 0x082b5ab0 inside FUN_082b5a58; tail
+      b @ 0x08391140 inside FUN_08391124 (in the thunk run beside
+      the embedded-Mem setters @ 0x08391200/0x08391218); tail b @
+      0x083943f4 inside FUN_083943d0; bne @ 0x08392934 inside
+      FUN_083928c8, the value copy whose byte at +0x19
+      discriminates the payload arm (ldrd from +0x08 r and bne
+      here, or from +0x00 u.i and beq to set-int64 @ 0x0838c110).
+      Deviations - the port goes through the typed repr(C) Mem
+      (offsets statically asserted on 32-bit targets in
+      sqlite/vdbe.rs); the NaN predicate is Rust's f64::is_nan,
+      the same self-inequality the unported helper @ 0x0837cb44
+      spells through __dcmpeq (inlining it keeps this port to one
+      function); the NaN route calls the ported vdbe_mem_set_null
+      @ 0x0838c13c directly; mem_release runs through the
+      MEM_SET_OPS slot owned by sqlite/vdbe_mem_set_int64 (its
+      shipped default is the ported release), kept so host tests
+      can intercept it - and that module's test-slot lock was
+      exposed (pub(crate) ops_lock()) so both setter modules'
+      tests serialize on the shared slot. match.py structural:
+      same push/arg-save/NaN-check/cmp/release-call/f64-store
+      @+0x08/strh #8 @+0x1c/strb #2 @+0x1e/pop shape with the NaN
+      tail-branch preserved; LLVM spells is_nan as
+      __aeabi_dcmpun, calls the release through the slot (literal
+      ldr + blx, not the original's bl @ 0x0838c04c), swaps the
+      two value-half strs and the strb/strh across disjoint
+      offsets, and adds its fp frame. Host tests (6) - the value
+      landing bit-for-bit in the real arm over edge cases
+      (+-zero, +-1, subnormal boundaries, the infinities, finite
+      extremes), flags assigned MEM_Real outright exhaustively
+      over all 65536 prior u16 values, value_type forced to
+      SQLITE_FLOAT over all 256 prior type bytes, the guts
+      release running exactly once per non-NaN call on the cell
+      itself (recording mock on MEM_SET_OPS), NaN payloads
+      (canonical/negative/signaling/all-ones) routing to set-null
+      semantics - (flags & !0x1f) | MEM_Null, SQLITE_NULL, no
+      release, real arm untouched - and u/db/n/enc
+      byte-for-byte untouched (z/xDel/zMalloc are the release's
+      own contract, covered by sqlite::mem_release's tests).
+
   - address: 0x0838c110
     ghidra: FUN_0838c110
     name: vdbe_mem_set_int64
