@@ -9359,6 +9359,42 @@ functions:
       adds/adc/lsr/orr/return core is instruction-identical; LLVM only
       adds an fp frame.
 
+  - address: 0x08076204
+    ghidra: FUN_08076204
+    name: fixed16_recip
+    size: 16
+    sig: "i32 fixed16_recip(i32 x)"
+    module: util/fixed
+    status: ported
+    vars: {param_1: x}
+    notes: >-
+      Guarded Q16.16 reciprocal, 1 / x. cmp r0,#0 / bne 0x080377e4 /
+      mvneq r0,#0x80000000 / bx lr: a zero input returns 0x7fffffff
+      (i32::MAX - the mvneq materializes the bitwise NOT of 0x80000000,
+      saturating 1 / 0); any nonzero input tail-branches (b, not bl)
+      unchanged to the unguarded body FUN_080377e4 @ 0x080377e4, which
+      keeps the sign in r3 (mov r3,r0,asr#0x1f), negates x into |x|,
+      and jumps into an unrolled 32-bit restoring division of
+      0xffffffff by |x| at the entry for quotient bit 31 - clz(|x|)
+      (add pc,pc,r4 with 12-byte entries), negating the quotient when
+      x was negative. The dividend is 2^32 - 1 rather than 2^32 because
+      2^32 does not fit in a register, so the result is the Q16.16
+      reciprocal truncated one ulp low. 36 call sites (35 bl plus one
+      tail b), all in the 0x082a geometry / 0x0824 transform code:
+      FUN_082a0920 is Gaussian elimination scaling a pivot row by
+      recip(pivot) via the open-coded fixed16_mul idiom, and
+      FUN_082a06d4 normalizes a 3x3 matrix by its bottom-right term.
+      The callee FUN_080377e4 is a separate function and is left
+      unported; it rides the FIXED16_RECIP_UNGUARDED target/host seam
+      (app/h264_decode_forwarder.rs pattern - retail address on target,
+      recording stub in host tests). Host tests prove x == 0 ->
+      0x7fffffff without touching the body, nonzero inputs forward
+      unchanged both ways, and, with a faithful model of the recovered
+      division wired in, that fixed16_mul(x, recip(x)) lands within
+      |x|/2^16 + 2 ulps of 1.0. match.py structural: the cmp/branch/
+      mvn guard is identical; the tail b becomes an indirect bx through
+      the seam pointer (the known seam deviation).
+
   - address: 0x0824980c
     ghidra: FUN_0824980c
     name: clz_31

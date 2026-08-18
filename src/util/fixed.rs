@@ -1,19 +1,26 @@
 //! 16.16 fixed-point and widening integer multiply @ 0x080e9878 / 0x080f0fa4,
-//! the software count-leading-zeros @ 0x0824980c that feeds them, and the
-//! 64-bit round-and-extract @ 0x08076214 that closes dot products.
+//! the software count-leading-zeros @ 0x0824980c that feeds them, the
+//! 64-bit round-and-extract @ 0x08076214 that closes dot products, and the
+//! guarded reciprocal @ 0x08076204 that divides by a Q16.16 value.
 //!
 //! Three pure leaf helpers built on the ARMv5TE `smull` (signed 32x32 -> 64)
-//! instruction, one bit-scan leaf, and one 64-bit rounding leaf. Sizes from
-//! decomp/functions.csv; call-site counts from decoding every `b`/`bl` word
-//! in osos.dec (osos.asm drops lines):
+//! instruction, one bit-scan leaf, one 64-bit rounding leaf, and one guard
+//! wrapper. Sizes from decomp/functions.csv; call-site counts from decoding
+//! every `b`/`bl` word in osos.dec (osos.asm drops lines):
 //!
 //! - `fixed16_mul` — `FUN_080e9878` @ 0x080e9878 (20 bytes; 94 call sites).
 //! - `mul_wide_i64` — `FUN_080f0fa4` @ 0x080f0fa4 (12 bytes; 49 call sites).
 //! - `clz_31` — `FUN_0824980c` @ 0x0824980c (68 bytes; 3 call sites).
 //! - `fixed16_round_64` — `FUN_08076214` @ 0x08076214 (20 bytes; 12 sites).
+//! - `fixed16_recip` — `FUN_08076204` @ 0x08076204 (16 bytes; 36 sites).
 //!
-//! All are leaves and touch no hardware, so host tests against `i64` /
-//! `u32::leading_zeros` arithmetic prove complete behavior.
+//! All but `fixed16_recip` are leaves and touch no hardware, so host tests
+//! against `i64` / `u32::leading_zeros` arithmetic prove complete behavior.
+//! `fixed16_recip` tail-branches to the unguarded reciprocal body @
+//! 0x080377e4 (an unrolled 32-bit restoring division of 0xffffffff by |x|,
+//! sign reapplied), which is not yet ported; it rides a target/host seam
+//! (the `app/h264_decode_forwarder.rs` pattern) that invokes the retailOS
+//! address on hardware and a recording stub in host tests.
 //!
 //! `fixed16_mul` is the multiply of retailOS's own Q16.16 fixed-point
 //! arithmetic — *not* FreeType's. FreeType's `FT_MulFix`/`ft_muldiv` (see
@@ -127,6 +134,70 @@ pub extern "C" fn mul_wide_i64(a: i32, b: i32) -> i64 {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub extern "C" fn fixed16_round_64(acc: i64) -> i32 {
     (acc.wrapping_add(0x8000) >> 16) as i32
+}
+
+/// ABI of the unguarded reciprocal body at retailOS address `0x080377e4`.
+pub type Fixed16RecipUnguarded = unsafe extern "C" fn(i32) -> i32;
+
+/// RetailOS load address of the unguarded reciprocal body.
+pub const FIXED16_RECIP_UNGUARDED_ADDRESS: usize = 0x0803_77e4;
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn retail_fixed16_recip_unguarded(x: i32) -> i32 {
+    let body: Fixed16RecipUnguarded = core::mem::transmute(FIXED16_RECIP_UNGUARDED_ADDRESS);
+    body(x)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_fixed16_recip_unguarded(_x: i32) -> i32 {
+    panic!("fixed16_recip requires unguarded body 0x080377e4")
+}
+
+/// Active boundary for the unported unguarded reciprocal body @ 0x080377e4.
+/// On the target it calls directly into retailOS; host tests replace it with
+/// a recording implementation.
+#[cfg(target_os = "none")]
+pub static mut FIXED16_RECIP_UNGUARDED: Fixed16RecipUnguarded = retail_fixed16_recip_unguarded;
+
+/// Active host boundary for the unported unguarded reciprocal body.
+#[cfg(not(target_os = "none"))]
+pub static mut FIXED16_RECIP_UNGUARDED: Fixed16RecipUnguarded = missing_fixed16_recip_unguarded;
+
+/// Volatile read so LLVM cannot fold the default in and delete the dispatch
+/// (the `app/h264_decode_forwarder.rs` rationale).
+#[inline(always)]
+fn fixed16_recip_unguarded(x: i32) -> i32 {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(FIXED16_RECIP_UNGUARDED))(x) }
+}
+
+/// fixed16_recip — original: `FUN_08076204` @ 0x08076204 (16 bytes).
+///
+/// Guarded Q16.16 reciprocal, `1 / x`. A zero input returns `0x7fff_ffff`
+/// (i32::MAX — the original's `mvneq r0, #0x80000000` materializes the
+/// bitwise NOT of `0x80000000`); any nonzero input tail-branches (`b`, not
+/// `bl`) unchanged to the unguarded body @ 0x080377e4, which negates `x`
+/// into |x| (keeping the sign in r3), counts `clz(|x|)`, and jumps into an
+/// unrolled 32-bit restoring division of `0xffff_ffff` by |x| at the entry
+/// for quotient bit `31 - clz(|x|)`, negating the quotient when `x` was
+/// negative. The dividend is `2^32 - 1` rather than `2^32` because `2^32`
+/// does not fit in a register, so the result is the Q16.16 reciprocal
+/// truncated one ulp low; the zero guard is the saturation of `1 / 0`.
+///
+/// Callers treat the result as a divisor inverse: all 36 call sites (35
+/// `bl` plus one tail `b`) sit in the 0x082a geometry / 0x0824 transform
+/// code and multiply the result into Q16.16 values with `fixed16_mul` or
+/// its open-coded idiom — e.g. `FUN_082a0920` is Gaussian elimination that
+/// scales a pivot row by `recip(pivot)`, and `FUN_082a06d4` normalizes a
+/// 3x3 matrix by its bottom-right term.
+///
+/// The body @ 0x080377e4 is a separate function and is NOT ported here;
+/// it remains behind the [`FIXED16_RECIP_UNGUARDED`] target/host seam.
+/// The original's tail `b` becomes a plain call returning the seam's
+/// result unchanged; LLVM decides whether to keep it a tail call (the
+/// `app/message_arena.rs` precedent).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn fixed16_recip(x: i32) -> i32 {
+    if x == 0 { 0x7fff_ffff } else { fixed16_recip_unguarded(x) }
 }
 
 #[cfg(test)]
@@ -495,6 +566,122 @@ mod tests {
                     assert_eq!(rounded, truncated);
                 }
             }
+        }
+    }
+
+    extern crate std;
+    use std::sync::Mutex;
+    use std::vec::Vec;
+
+    /// Serializes the tests that swap the unguarded-body seam (the
+    /// h264_decode_forwarder.rs FORWARDER_LOCK precedent).
+    static RECIP_LOCK: Mutex<()> = Mutex::new(());
+    static mut RECIP_RECEIVED: Vec<i32> = Vec::new();
+    static mut RECIP_RETURN: i32 = 0;
+
+    unsafe extern "C" fn recording_fixed16_recip_unguarded(x: i32) -> i32 {
+        RECIP_RECEIVED.push(x);
+        RECIP_RETURN
+    }
+
+    /// Faithful model of the unported body @ 0x080377e4, recovered from its
+    /// raw disassembly: unsigned restoring division of 0xffff_ffff by |x|,
+    /// quotient negated when x is negative (x = i32::MIN wraps its magnitude
+    /// to 0x8000_0000, exactly as the original's rsbmi does).
+    unsafe extern "C" fn reference_fixed16_recip_unguarded(x: i32) -> i32 {
+        let magnitude = if x < 0 { (x as u32).wrapping_neg() } else { x as u32 };
+        let quotient = 0xffff_ffffu32 / magnitude;
+        if x < 0 { (quotient as i32).wrapping_neg() } else { quotient as i32 }
+    }
+
+    struct RecipReset;
+
+    impl Drop for RecipReset {
+        fn drop(&mut self) {
+            unsafe {
+                FIXED16_RECIP_UNGUARDED = missing_fixed16_recip_unguarded;
+                RECIP_RECEIVED = Vec::new();
+                RECIP_RETURN = 0;
+            }
+        }
+    }
+
+    /// The guard itself: x == 0 returns 0x7fffffff (the original's
+    /// `mvneq r0, #0x80000000`) without touching the unguarded body.
+    #[test]
+    fn fixed16_recip_zero_returns_i32_max_without_calling_the_body() {
+        let _lock = RECIP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _reset = RecipReset;
+        unsafe {
+            FIXED16_RECIP_UNGUARDED = recording_fixed16_recip_unguarded;
+            assert_eq!(fixed16_recip(0), 0x7fff_ffff);
+            assert_eq!(fixed16_recip(0), i32::MAX);
+            assert!(RECIP_RECEIVED.is_empty(), "zero input must not reach the body");
+        }
+    }
+
+    /// Every nonzero input forwards unchanged to the body and returns its
+    /// result unchanged — the original's tail `b` is transparent both ways.
+    #[test]
+    fn fixed16_recip_forwards_nonzero_inputs_unchanged() {
+        let _lock = RECIP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _reset = RecipReset;
+        let values = [
+            1i32,
+            -1,
+            2,
+            -2,
+            ONE,
+            -ONE,
+            0x7fff,
+            -0x8000,
+            0x0001_2345,
+            -0x0001_2345,
+            0x7fff_ffff,
+            -0x8000_0000,
+            0x1234_5678,
+            -0x1234_5678,
+        ];
+        unsafe {
+            FIXED16_RECIP_UNGUARDED = recording_fixed16_recip_unguarded;
+            RECIP_RETURN = 0x5a5a_5a5a;
+            for &x in &values {
+                assert_eq!(fixed16_recip(x), 0x5a5a_5a5a, "x={x:#x}");
+            }
+            assert_eq!(RECIP_RECEIVED, values, "arguments forwarded in order, unmodified");
+        }
+    }
+
+    /// Call-site sanity against the recovered body semantics: with the
+    /// reference model wired in, the composite is the Q16.16 reciprocal
+    /// (one ulp low from the 2^32 - 1 dividend), so `fixed16_mul(x,
+    /// recip(x))` lands within a couple ulps of 1.0 — the normalization
+    /// idiom FUN_082a06d4 / FUN_082a0920 rely on.
+    #[test]
+    fn fixed16_recip_is_the_q16_reciprocal_callers_expect() {
+        let _lock = RECIP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _reset = RecipReset;
+        unsafe {
+            FIXED16_RECIP_UNGUARDED = reference_fixed16_recip_unguarded;
+            // recip(1.0) = 0xffff_ffff / 0x1_0000 = 0xffff — one ulp under 1.0.
+            assert_eq!(fixed16_recip(ONE), 0xffff);
+            // recip(2.0) = 0x7fff, half of 1.0 one ulp low.
+            assert_eq!(fixed16_recip(2 * ONE), 0x7fff);
+            // Sign handling: recip(-2.0) = -0x7fff.
+            assert_eq!(fixed16_recip(-2 * ONE), -0x7fff);
+            // The division idiom: x * recip(x) ~= 1.0 for exact powers.
+            // The quotient's truncation costs up to one ulp of the
+            // reciprocal, i.e. up to |x| / 2^16 ulps of the product.
+            for &x in &[ONE / 4, ONE / 2, ONE, 2 * ONE, 4 * ONE, 0x100 * ONE] {
+                let product = fixed16_mul(x, fixed16_recip(x));
+                let tolerance = (x as i64 / ONE as i64) + 2;
+                assert!((ONE as i64 - product as i64).abs() <= tolerance,
+                    "x={x:#x} product={product:#x}");
+                let neg = fixed16_mul(-x, fixed16_recip(-x));
+                assert_eq!(neg, product, "x={x:#x}");
+            }
+            // Zero stays saturated even with a live body behind it.
+            assert_eq!(fixed16_recip(0), 0x7fff_ffff);
         }
     }
 }
