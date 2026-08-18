@@ -20696,6 +20696,38 @@ functions:
       push {fp,lr}/pop {fp,pc} frame, same as the whole fixed16
       cluster.
 
+  - address: 0x082a18d4
+    ghidra: FUN_082a18d4
+    name: message_payload_word
+    size: 8
+    sig: "u32 message_payload_word(message: *const u32) -> u32"
+    module: fp/fp_misc
+    status: ported
+    vars: {param_1: message}
+    notes: >-
+      Union-word getter of the 12-byte UI message envelope
+      constructed @ 0x0825790c (vtable word at +0x0, the
+      message_kind_byte tag at +0x4, this word at +0x8). Body:
+      ldr r0,[r0,#0x8]; bx lr (Ghidra: return *(undefined4
+      *)(param_1 + 8)). The word is a tag-selected union: kind 0
+      makes it a nested-message payload pointer (whose own +0x4
+      message code is compared against 0x500/0x501 by
+      FUN_081d71d8), kind 1 a plain id. 1 bl call site (0x081d6f88
+      in FUN_081d6f7c), the plain-id path: the returned word is
+      handed to FUN_081d70d4 as the id, the resulting index fetches
+      an entry from the 8-byte-stride table at param_1+0x158, and
+      the entry is vtable-dispatched with code 0x20. Middle member
+      of the envelope accessor run 0x082a18cc-0x082a18e0 (kind
+      byte, this word, +0x4 word @ 0x082a18dc, a separate port).
+      Codegen note: body is byte-identical to ft_stream_pos
+      (ldr r0,[r0,#8]; bx lr), so the port carries its own
+      link_section to keep LLVM's identical-code folding from
+      collapsing the two exports into one section (the
+      cxx::clock_source_destroy precedent). match.py structural:
+      identical ldr r0,[r0,#8] core; LLVM adds a push {fp,lr}/
+      pop {fp,pc} frame, same as the whole fixed16 cluster and
+      message_kind_byte.
+
   - address: 0x080e97ac
     ghidra: FUN_080e97ac
     name: fixed16_cos

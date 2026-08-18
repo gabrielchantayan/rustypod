@@ -544,6 +544,38 @@ pub unsafe extern "C" fn message_kind_byte(message: *const u8) -> u8 {
     *message.add(4)
 }
 
+/// message_payload_word — original: `FUN_082a18d4` @ 0x082a18d4 (8
+/// bytes; 1 bl call site: 0x081d6f88 in FUN_081d6f7c).
+///
+/// Union-word getter of the 12-byte UI message envelope constructed
+/// @ 0x0825790c (a vtable word at +0x0, the `message_kind_byte` tag
+/// at +0x4, and this word at +0x8). The whole body is
+/// `ldr r0,[r0,#0x8]; bx lr` (Ghidra:
+/// `return *(undefined4 *)(param_1 + 8)`), so the port is a single
+/// aligned word load at offset 8. The word is a tag-selected union:
+/// kind 0 makes it a nested-message payload pointer (whose own +0x4
+/// message code is compared against 0x500/0x501), kind 1 a plain id.
+/// The sole caller FUN_081d6f7c takes the plain-id path: it hands the
+/// returned word to FUN_081d70d4 as the id, uses the resulting index
+/// to fetch an entry from the 8-byte-stride table at param_1+0x158,
+/// and vtable-dispatches that entry with code 0x20. Middle member of
+/// the envelope accessor run 0x082a18cc-0x082a18e0 (kind byte, this
+/// word, +0x4 word); sits between `message_kind_byte` (@ 0x082a18cc)
+/// and the +0x4 word getter @ 0x082a18dc (a separate port).
+///
+/// Codegen note: the body compiles to bytes identical to
+/// `ft::stream::ft_stream_pos` (`ldr r0,[r0,#8]; bx lr`), so it
+/// carries its own `link_section` — without it LLVM's identical-code
+/// folding collapses the two exports into one section and this symbol
+/// would no longer head its own disassembly (the
+/// `cxx::clock_source_destroy` precedent). They are separate
+/// functions in the original and must stay separately hookable.
+#[cfg_attr(target_os = "none", link_section = ".text.message_payload_word")]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn message_payload_word(message: *const u32) -> u32 {
+    *message.add(2)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -1680,6 +1712,68 @@ mod tests {
             let kind = rng.next() as u8;
             storage[4] = kind;
             assert_eq!(unsafe { message_kind_byte(storage.as_ptr()) }, kind);
+        }
+    }
+
+    // ---- message_payload_word ----
+
+    #[test]
+    fn message_payload_word_reads_the_word_at_offset_8() {
+        for word in [
+            0u32,
+            1,
+            0x20,
+            0x500,
+            0x501,
+            0x0001_0000,
+            0x7fff_ffff,
+            0x8000_0000,
+            0xffff_ffff,
+        ] {
+            let mut storage = [0xaau8; 12];
+            storage[8..12].copy_from_slice(&word.to_le_bytes());
+            assert_eq!(
+                unsafe { message_payload_word(storage.as_ptr() as *const u32) },
+                word
+            );
+        }
+    }
+
+    #[test]
+    fn message_payload_word_returns_all_32_bits() {
+        // The +0x8 accessor is a word load (ldr): unlike the kind
+        // byte's ldrb, the upper bytes are part of the result and the
+        // byte order is little-endian.
+        let mut storage = [0u8; 12];
+        storage[8..12].copy_from_slice(&[0x44, 0x33, 0x22, 0x11]);
+        assert_eq!(
+            unsafe { message_payload_word(storage.as_ptr() as *const u32) },
+            0x1122_3344
+        );
+    }
+
+    #[test]
+    fn message_payload_word_ignores_neighbouring_bytes() {
+        // Only the +0x8 word is read: the vtable word at +0x0 and the
+        // kind byte at +0x4 are irrelevant to the result.
+        let mut storage = [0u8; 12];
+        storage[8..12].copy_from_slice(&0x501u32.to_le_bytes());
+        assert_eq!(
+            unsafe { message_payload_word(storage.as_ptr() as *const u32) },
+            0x501
+        );
+        let mut rng = Rng(0x5eed_8a10_5eed_8a10);
+        for _ in 0..1_000 {
+            let mut storage = [0u8; 12];
+            for byte in &mut storage {
+                *byte = rng.next() as u8;
+            }
+            let word = rng.next() as u32;
+            storage[8..12].copy_from_slice(&word.to_le_bytes());
+            assert_eq!(
+                unsafe { message_payload_word(storage.as_ptr() as *const u32) },
+                word
+            );
         }
     }
 }
