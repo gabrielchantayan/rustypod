@@ -3820,6 +3820,34 @@ functions:
       DCACHE_LINE_OP slot (semihost.rs SEMIHOST_SWI pattern) lets host
       tests record the flushed line addresses.
 
+  - address: 0x08037cd8
+    ghidra: FUN_08037cd8
+    name: dcache_clean_all
+    size: 52
+    sig: "u32 dcache_clean_all(void)"
+    module: heap/dcache
+    status: ported
+    vars: {uVar1: index, uVar2: way}
+    notes: >-
+      Clean ENTIRE D-cache by set/way, then drain write buffer. Inner
+      sweep r0 = 0, 0x20, ... < 0x1000 (128 sets) inside an outer way
+      accumulator r1 stepped 0x2000_0000 until wrap (8 passes), mcr
+      p15,0,(r1|r0),c7,c10,2 per line — 1024 cleans — then mov r0,#0;
+      mcr p15,0,r0,c7,c10,4; bx lr, so the drain's zero operand doubles
+      as the return value. Sole bl caller FUN_0836a990 @ 0x0836aa94.
+      Sibling @ 0x08037d0c is the same sweep with clean+invalidate
+      (c7,c14,2). NOT the Q16.16 div core the ticket guessed — CP15
+      cache maintenance, so it lives in heap/dcache with its neighbors
+      0x08037cc8/0x08037cd0, not runtime/rt_div. Port dispatches the
+      two CP15 ops through DCACHE_SET_WAY_CLEAN_OP and
+      DCACHE_DRAIN_WRITE_BUFFER_OP slots (real mcrs in the slot
+      defaults on target, bit-exact encodings ee070f5a/ee070f9a).
+      match.py structural: LLVM unrolls the constant-trip-count outer
+      loop into 8 inner-loop copies with the way folded into the orr
+      immediate, blx through the slots in place of the inline mcr (the
+      documented dispatch-slot deviation), trailing mov r0,#0 return
+      matches.
+
   - address: 0x08044190
     ghidra: FUN_08044190
     name: strlen_byte_loop

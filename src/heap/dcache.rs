@@ -11,6 +11,15 @@
 //!   (8 bytes): `mcr p15,0,r0,cr7,cr10,1; bx lr` — the "clean D-cache
 //!   single entry (MVA)" op (no invalidate). Sole `bl` caller is the
 //!   clean-only range walk below.
+//! - `dcache_clean_all` — original: `FUN_08037cd8` @ 0x08037cd8
+//!   (52 bytes): cleans the ENTIRE data cache by set/way — an inner
+//!   index sweep (r0 = 0, 0x20, ... < 0x1000; 128 sets at the 32-byte
+//!   line stride) inside an outer way sweep (r1 stepped 0x2000_0000
+//!   until it wraps to zero; 8 passes) of `mcr p15,0,(r1|r0),c7,c10,2`
+//!   — 1024 set/way cleans in all — then drains the write buffer
+//!   (`mcr p15,0,r0,c7,c10,4` with r0 = 0, which is also the return
+//!   value). Sole `bl` caller: FUN_0836a990 @ 0x0836aa94. Its sibling
+//!   @ 0x08037d0c is the same sweep with clean+invalidate (c7,c14,2).
 //! - `dcache_clean_invalidate` — original: `FUN_08044c10` @ 0x08044c10
 //!   (56 bytes; 22 `bl` call sites — DMA buffer prep across the ATA/USB/
 //!   LCD drivers, plus `pool_alloc`'s uncached path via the POOL_OPS
@@ -55,7 +64,10 @@
 //! The range walks reach the line op through the slots (indirect call)
 //! instead of the originals' direct `bl 0x08037cd0` / `bl 0x08037cc8`;
 //! codegen deviates in exactly that one instruction, as with every other
-//! dispatch-slot port.
+//! dispatch-slot port. `dcache_clean_all` likewise reaches its two CP15
+//! ops (the set/way clean and the write-buffer drain, neither of which
+//! is a standalone firmware function) through the
+//! [`DCACHE_SET_WAY_CLEAN_OP`] / [`DCACHE_DRAIN_WRITE_BUFFER_OP`] slots.
 
 /// The per-line boundary: clean+invalidate the D-cache line containing
 /// `mva` (a 32-byte-aligned modified virtual address on target).
@@ -182,6 +194,126 @@ pub unsafe extern "C" fn dcache_clean(addr: *mut u8, len: usize) {
         line_op((addr as usize).wrapping_add(off) & !(DCACHE_LINE_SIZE - 1));
         off += DCACHE_LINE_SIZE;
     }
+}
+
+/// The set/way boundary: clean the D-cache line selected by the set/way
+/// `operand` (the original's `orr r2, r1, r0` of the way accumulator and
+/// the line index), or — for the trailing write-buffer drain — ignore a
+/// zero operand.
+pub type DcacheSetWayFn = unsafe extern "C" fn(operand: u32);
+
+/// Inner index span of the set/way sweep: 0x1000 = 128 sets at the
+/// 0x20 line stride (the original's `cmp r0, #0x1000`).
+const DCACHE_SET_SPAN: u32 = 0x1000;
+
+/// Outer way-accumulator step: 0x2000_0000 per pass, wrapping to zero
+/// after 8 passes (the original's `add r1, r1, #0x20000000; cmp r1, #0`).
+const DCACHE_WAY_STEP: u32 = 0x2000_0000;
+
+/// The set/way clean primitive inside the original's inner loop — not a
+/// standalone firmware function.
+///
+/// Firmware target: the real CP15 op, `mcr p15,0,{operand},c7,c10,2`
+/// (clean D-cache single entry by set/way — no invalidate).
+#[cfg(all(target_os = "none", target_arch = "arm"))]
+unsafe extern "C" fn dcache_set_way_clean(operand: u32) {
+    core::arch::asm!(
+        "mcr p15, 0, {0}, c7, c10, 2",
+        in(reg) operand,
+        options(nostack, preserves_flags),
+    );
+}
+
+/// Host stand-in: no CP15 exists, and the real op does not change memory
+/// contents — no-op. Tests install a recording mock via
+/// [`DCACHE_SET_WAY_CLEAN_OP`] instead (see the module header for what
+/// that does and does not prove).
+#[cfg(not(all(target_os = "none", target_arch = "arm")))]
+unsafe extern "C" fn dcache_set_way_clean(_operand: u32) {}
+
+/// The active set/way clean implementation: the real `mcr` on the
+/// firmware target, a no-op on hosts (tests install recording mocks
+/// here).
+pub static mut DCACHE_SET_WAY_CLEAN_OP: DcacheSetWayFn = dcache_set_way_clean;
+
+/// Reads the set/way clean slot (same volatile rationale as
+/// [`dcache_line_op`]).
+#[inline(always)]
+fn dcache_set_way_clean_op() -> DcacheSetWayFn {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(DCACHE_SET_WAY_CLEAN_OP)) }
+}
+
+/// The write-buffer drain the original runs after the sweep — not a
+/// standalone firmware function.
+///
+/// Firmware target: the real CP15 op, `mcr p15,0,{operand},c7,c10,4`
+/// (ARMv5 drain write buffer; Ghidra labels it "Data Synchronization"),
+/// always with operand 0.
+#[cfg(all(target_os = "none", target_arch = "arm"))]
+unsafe extern "C" fn dcache_drain_write_buffer(operand: u32) {
+    core::arch::asm!(
+        "mcr p15, 0, {0}, c7, c10, 4",
+        in(reg) operand,
+        options(nostack, preserves_flags),
+    );
+}
+
+/// Host stand-in: no CP15 exists — no-op. Tests install a recording mock
+/// via [`DCACHE_DRAIN_WRITE_BUFFER_OP`] instead.
+#[cfg(not(all(target_os = "none", target_arch = "arm")))]
+unsafe extern "C" fn dcache_drain_write_buffer(_operand: u32) {}
+
+/// The active write-buffer drain implementation: the real `mcr` on the
+/// firmware target, a no-op on hosts (tests install recording mocks
+/// here). Kept separate from [`DCACHE_SET_WAY_CLEAN_OP`] so recordings
+/// prove the drain's trailing position in the sweep.
+pub static mut DCACHE_DRAIN_WRITE_BUFFER_OP: DcacheSetWayFn = dcache_drain_write_buffer;
+
+/// Reads the write-buffer drain slot (same volatile rationale as
+/// [`dcache_line_op`]).
+#[inline(always)]
+fn dcache_drain_write_buffer_op() -> DcacheSetWayFn {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(DCACHE_DRAIN_WRITE_BUFFER_OP)) }
+}
+
+/// dcache_clean_all — original: `FUN_08037cd8` @ 0x08037cd8 (52 bytes).
+///
+/// Cleans the ENTIRE data cache by set/way, then drains the write buffer
+/// and returns 0. The original sweeps an inner index r0 = 0, 0x20, ...
+/// < 0x1000 (128 sets at the 32-byte line stride) inside an outer way
+/// accumulator r1 stepped by 0x2000_0000 until it wraps to zero (8
+/// passes), issuing `mcr p15,0,(r1|r0),c7,c10,2` — 1024 set/way cleans
+/// in all — then `mov r0, #0; mcr p15,0,r0,c7,c10,4; bx lr`, so the
+/// drain's zero operand doubles as the return value. Sole `bl` caller:
+/// FUN_0836a990 @ 0x0836aa94. The clean+invalidate sibling sweep sits
+/// right after @ 0x08037d0c (c7,c14,2).
+///
+/// The two CP15 ops go through the [`DCACHE_SET_WAY_CLEAN_OP`] and
+/// [`DCACHE_DRAIN_WRITE_BUFFER_OP`] slots (the module-header deviation):
+/// real `mcr`s on the firmware target, recording mocks in host tests —
+/// which prove the sweep's exact operand sequence and the drain's
+/// trailing position, not cache coherency.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn dcache_clean_all() -> u32 {
+    let set_way_clean = dcache_set_way_clean_op();
+    let drain_write_buffer = dcache_drain_write_buffer_op();
+    let mut way = 0u32;
+    loop {
+        let mut index = 0u32;
+        loop {
+            set_way_clean(way | index);
+            index = index.wrapping_add(DCACHE_LINE_SIZE as u32);
+            if index == DCACHE_SET_SPAN {
+                break;
+            }
+        }
+        way = way.wrapping_add(DCACHE_WAY_STEP);
+        if way == 0 {
+            break;
+        }
+    }
+    drain_write_buffer(0);
+    0
 }
 
 #[cfg(test)]
@@ -368,5 +500,102 @@ mod tests {
         restore_clean_line_op();
         // Nothing observable to assert beyond "returns without effect".
         unsafe { dcache_clean(0x1000 as *mut u8, 0x40) };
+    }
+
+    // ---- dcache_clean_all (0x08037cd8, set/way sweep + drain) ----
+
+    /// Operation tags in the order the sweep records them.
+    const SET_WAY_CLEAN: u32 = 0;
+    const DRAIN_WRITE_BUFFER: u32 = 1;
+
+    /// (tag, operand) pairs the recording mocks saw, in call order.
+    static mut SWEEP_LOG: Vec<(u32, u32)> = Vec::new();
+
+    unsafe extern "C" fn recording_set_way_clean(operand: u32) {
+        (*core::ptr::addr_of_mut!(SWEEP_LOG)).push((SET_WAY_CLEAN, operand));
+    }
+
+    unsafe extern "C" fn recording_drain_write_buffer(operand: u32) {
+        (*core::ptr::addr_of_mut!(SWEEP_LOG)).push((DRAIN_WRITE_BUFFER, operand));
+    }
+
+    /// Locks the slots, installs both recording mocks, clears the log.
+    fn mock_sweep_ops() -> MutexGuard<'static, ()> {
+        let guard = OP_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            DCACHE_SET_WAY_CLEAN_OP = recording_set_way_clean;
+            DCACHE_DRAIN_WRITE_BUFFER_OP = recording_drain_write_buffer;
+            (*core::ptr::addr_of_mut!(SWEEP_LOG)).clear();
+        }
+        guard
+    }
+
+    /// Restores the default (no-op host) ops. Call before dropping the
+    /// guard.
+    fn restore_sweep_ops() {
+        unsafe {
+            DCACHE_SET_WAY_CLEAN_OP = dcache_set_way_clean;
+            DCACHE_DRAIN_WRITE_BUFFER_OP = dcache_drain_write_buffer;
+        }
+    }
+
+    fn sweep_log() -> Vec<(u32, u32)> {
+        unsafe { (*core::ptr::addr_of!(SWEEP_LOG)).clone() }
+    }
+
+    /// Reference sequence straight from the original's loops: inner
+    /// index 0, 0x20, ... < 0x1000 ORed into an outer way accumulator
+    /// stepped 0x2000_0000 until wrap, then one drain of 0.
+    fn expected_sweep() -> Vec<(u32, u32)> {
+        let mut expected = Vec::new();
+        let mut way = 0u32;
+        loop {
+            let mut index = 0u32;
+            loop {
+                expected.push((SET_WAY_CLEAN, way | index));
+                index = index.wrapping_add(0x20);
+                if index == 0x1000 {
+                    break;
+                }
+            }
+            way = way.wrapping_add(0x2000_0000);
+            if way == 0 {
+                break;
+            }
+        }
+        expected.push((DRAIN_WRITE_BUFFER, 0));
+        expected
+    }
+
+    #[test]
+    fn sweep_matches_the_originals_operand_sequence_and_returns_zero() {
+        let _guard = mock_sweep_ops();
+        let returned = unsafe { dcache_clean_all() };
+        assert_eq!(returned, 0, "the drain's zero operand doubles as r0");
+        assert_eq!(sweep_log(), expected_sweep());
+        restore_sweep_ops();
+    }
+
+    #[test]
+    fn sweep_boundaries_cover_every_set_and_way_pass() {
+        let _guard = mock_sweep_ops();
+        unsafe { dcache_clean_all() };
+        let log = sweep_log();
+        // 8 way passes x 128 sets, then exactly one drain.
+        assert_eq!(log.len(), 8 * 128 + 1);
+        assert_eq!(log[0], (SET_WAY_CLEAN, 0));
+        assert_eq!(log[8 * 128 - 1], (SET_WAY_CLEAN, 0xe000_0fe0));
+        assert_eq!(log[8 * 128], (DRAIN_WRITE_BUFFER, 0));
+        // Way passes restart the index at zero.
+        assert_eq!(log[128], (SET_WAY_CLEAN, 0x2000_0000));
+        restore_sweep_ops();
+    }
+
+    #[test]
+    fn sweep_default_host_ops_are_noops() {
+        let _guard = OP_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        restore_sweep_ops();
+        // Nothing observable beyond returning 0 without effect.
+        assert_eq!(unsafe { dcache_clean_all() }, 0);
     }
 }
