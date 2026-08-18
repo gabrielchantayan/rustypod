@@ -122,6 +122,7 @@ pub mod vdbe_mem_realify;
 pub mod vdbe_mem_set_int64;
 pub mod vdbe_mem_set_null;
 pub mod vdbe_mem_set_str;
+pub mod vdbe_mem_shallow_copy;
 pub mod vdbe_op;
 pub mod vdbe_set_col_name;
 pub mod vdbe_set_num_cols;

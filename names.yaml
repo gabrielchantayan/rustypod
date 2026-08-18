@@ -15896,6 +15896,75 @@ functions:
       BLOB tagging, explicit copy lengths, Grow/BOM failure timing,
       empty strings, helper traces, and untouched union/db fields.
 
+  - address: 0x0838c2d0
+    ghidra: FUN_0838c2d0
+    name: vdbe_mem_shallow_copy
+    size: 92
+    sig: "void vdbe_mem_shallow_copy(Mem *p_to, const Mem *p_from, u16 src_type)"
+    module: sqlite/vdbe_mem_shallow_copy
+    status: ported
+    vars:
+      param_1: p_to
+      param_2: p_from
+      param_3: src_type
+      r4: p_to
+      r5: p_from
+      r6: src_type
+      FUN_0838c074: mem_extern_release
+      thunk_EXT_FUN_22000188: memcpy
+    notes: >-
+      Upstream SQLite 3.5.x's sqlite3VdbeMemShallowCopy (vdbemem.c),
+      sitting between sqlite3VdbeMemSetStr @ 0x0838c158 and
+      sqlite3VdbeMemStringify @ 0x0838c32c in the vdbe Mem helper
+      cluster - how OP_Column-style code hands a value from the row
+      cache to an output register without moving the payload. Extent
+      0x0838c2d0..0x0838c32c confirmed from raw words - 0x0838c328 is
+      ldmia sp!,{r4,r5,r6,pc} and 0x0838c32c is the stmdb entry of
+      sqlite3VdbeMemStringify; no literal pool. 3 direct call sites,
+      binary-scanned, all inside the 16 KB vdbe routine FUN_08386ef8:
+      bl @ 0x083874c0 (src_type 0x80 = MEM_Static, column value into
+      the [r5,#0x38] register array), bl @ 0x0838752c (src_type 0x100
+      = MEM_Ephem, the [r5,#0x4c] array, followed by a MEM_Ephem test
+      that makes the copy writeable through 0x0838bb30) and bleq @
+      0x0838851c (src_type 0x80, gated on a sign-extended byte == -8).
+      Algorithm - the extern release @ 0x0838c074
+      (vdbeMemClearExternAndSetNull, ported as mem_extern_release)
+      runs on the DESTINATION only - zMalloc is deliberately not
+      freed, so the destination keeps its allocation buffer (freeing
+      it is mem_release @ 0x0838c04c's job). Then 0x24 bytes are
+      copied - the whole 0x28-byte Mem except zMalloc at +0x24
+      (upstream's MEMCELLSIZE = offsetof(Mem, zMalloc)) - and xDel at
+      +0x20 is NULLed: the destination never owns the source's
+      external storage. The ownership restamp is conditional: when
+      the source's flags have MEM_Dyn (0x40) OR its z == zMalloc
+      (ldr r0,[r5,#0x14]! / ldr r1,[r5,#0x10] / cmp - the writeback
+      reload trick), the copied MEM_Dyn|MEM_Static|MEM_Ephem bits
+      (bic #0x1c0) are replaced by the caller's src_type (orr, no
+      mask of its own); otherwise the copied flags stand and the
+      function returns early (ldmiane). Deviations - the port goes
+      through the typed repr(C) Mem (ptr::read/write of the struct
+      with z_malloc saved and restored is the same field set as the
+      raw 0x24-byte copy, and keeps the host build's wider pointer
+      fields coherent); the ROM veneer @ 0x08037df8 targets
+      memcpy_forward_words, which LLVM lowers itself (to
+      __aeabi_memmove8 of 0x28 bytes with z_malloc held in a
+      callee-saved register). mem_extern_release IS ported and is the
+      shipped default of the SHALLOW_COPY_OPS slot; the slot is kept
+      so host tests can intercept it (the ported release speaks raw
+      target offsets, like MEM_SET_OPS's mem_release). match.py
+      structural: same shape - extern release first (ldr/blx through
+      the ops slot vs bl), struct copy, xDel NULLed, tst #0x40/bne,
+      z==zMalloc cmp with early popne, then the bic #0x1c0 / orr /
+      strh restamp (LLVM folds the mask to and with 0xfe3f). Host
+      tests (6) - every field but z_malloc/x_del copied (z_malloc
+      preserved, x_del NULLed, source untouched), the extern release
+      running exactly once on the destination BEFORE the copy (mock
+      captures the pre-copy flags/u), the MEM_Dyn restamp exhaustive
+      over all 32768 flagged values x 4 src_types, the z==zMalloc
+      restamp without MEM_Dyn (MEM_Agg/MEM_Term bits surviving), the
+      borrowed-payload early return exhaustive over all 32768
+      MEM_Dyn-less flags values with src_type irrelevant, and
+      src_type stored verbatim with no mask of its own.
 
   - address: 0x0838bc38
     ghidra: FUN_0838bc38
