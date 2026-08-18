@@ -392,6 +392,24 @@ pub unsafe extern "C" fn fixed16_mul_indirect(a: *const i32, b: i32) -> i32 {
     (((*a as i64) * (b as i64)) >> 16) as i32
 }
 
+/// fixed16_ne_indirect — original: `FUN_082a18a8` @ 0x082a18a8 (20
+/// bytes; 20 bl call sites, binary-scanned: 0x0810xxxx, 0x0814xxxx,
+/// 0x0820xxxx and the 0x0827xxxx geometry code).
+///
+/// Q16.16 not-equal comparator with BOTH operands fetched through
+/// pointers: `ldr r0,[r0]; ldr r1,[r1]; subs r0,r0,r1; movne r0,#1` —
+/// returns 1 when the two values differ, 0 when they are equal
+/// (Ghidra: `return *param_1 != *param_2`). Callers use it as a
+/// geometry dirty check: FUN_0810da8c compares a cached rectangle
+/// against the live one edge-by-edge and recomputes clipping only when
+/// any edge moved. The subs difference in r0 is dead — only Z feeds
+/// the movne — so the port compares the dereferenced values directly
+/// and never materializes the subtraction.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn fixed16_ne_indirect(a: *const i32, b: *const i32) -> bool {
+    *a != *b
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -966,6 +984,86 @@ mod tests {
             let a = rng.next() as i32;
             let b = rng.next() as i32;
             assert_eq!(mul_indirect(a, b), ref_mul_indirect(a, b), "a={a:#x} b={b:#x}");
+        }
+    }
+
+    // ---- fixed16_ne_indirect ----
+
+    /// Call through real by-value copies so both pointer loads are
+    /// exercised.
+    fn ne_indirect(a: i32, b: i32) -> bool {
+        unsafe { fixed16_ne_indirect(&a, &b) }
+    }
+
+    #[test]
+    fn fixed16_ne_indirect_equal_values() {
+        assert!(!ne_indirect(0, 0));
+        assert!(!ne_indirect(FIX_ONE, FIX_ONE));
+        assert!(!ne_indirect(-FIX_ONE, -FIX_ONE));
+        assert!(!ne_indirect(i32::MAX, i32::MAX));
+        assert!(!ne_indirect(i32::MIN, i32::MIN));
+        // -0 does not exist in two's complement: 0 == 0 bit pattern only.
+        assert!(!ne_indirect(0x1234_5678, 0x1234_5678));
+    }
+
+    #[test]
+    fn fixed16_ne_indirect_one_ulp_differences() {
+        // The comparator is a raw bit-pattern compare: a single ulp of
+        // difference (Q16.16 resolution) already counts as "not equal".
+        assert!(ne_indirect(0, 1));
+        assert!(ne_indirect(1, 0));
+        assert!(ne_indirect(-1, 0));
+        assert!(ne_indirect(FIX_ONE, FIX_ONE + 1));
+        assert!(ne_indirect(FIX_ONE, FIX_ONE - 1));
+        assert!(ne_indirect(-FIX_ONE, -FIX_ONE + 1));
+        // Signs: +0 vs the smallest negative step.
+        assert!(ne_indirect(0, -1));
+    }
+
+    #[test]
+    fn fixed16_ne_indirect_extremes_and_wrap_boundaries() {
+        assert!(ne_indirect(i32::MAX, i32::MIN));
+        assert!(ne_indirect(i32::MIN, i32::MAX));
+        // Adjacent across the sign boundary.
+        assert!(ne_indirect(i32::MAX, -1));
+        assert!(ne_indirect(i32::MIN, 0));
+        // 32767.0 vs -32768.0: the largest representable span.
+        assert!(ne_indirect(i32::MAX & !0xffff, i32::MIN));
+    }
+
+    #[test]
+    fn fixed16_ne_indirect_matches_reference() {
+        let values = [
+            0i32,
+            1,
+            -1,
+            2,
+            FIX_ONE,
+            -FIX_ONE,
+            0x8000,
+            -0x8000,
+            0x0001_0001,
+            0x1234_5678,
+            -0x1234_5678,
+            0x7fff_ffff,
+            i32::MIN,
+        ];
+        for &a in &values {
+            for &b in &values {
+                assert_eq!(ne_indirect(a, b), a != b, "a={a:#x} b={b:#x}");
+            }
+        }
+        let mut rng = Rng(0xb01d_face_cafe_beef);
+        for _ in 0..100_000 {
+            let a = rng.next() as i32;
+            let b = rng.next() as i32;
+            assert_eq!(ne_indirect(a, b), a != b, "a={a:#x} b={b:#x}");
+        }
+        // Dense near-equality sweep: every small delta around zero both ways.
+        for a in -4096i32..4096 {
+            for b in -4096i32..4096 {
+                assert_eq!(ne_indirect(a, b), a != b, "a={a:#x} b={b:#x}");
+            }
         }
     }
 }

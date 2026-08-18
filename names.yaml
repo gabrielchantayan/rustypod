@@ -20508,6 +20508,30 @@ functions:
       load, smull, lsl/lsr funnel, orr); frame setup and register
       allocation differ (LLVM push {fp,lr} vs ADS arg spill).
 
+  - address: 0x082a18a8
+    ghidra: FUN_082a18a8
+    name: fixed16_ne_indirect
+    size: 20
+    sig: "bool fixed16_ne_indirect(a: *const i32, b: *const i32) -> bool"
+    module: fp/fp_misc
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      Q16.16 not-equal comparator with both operands fetched through
+      pointers: ldr r0,[r0]; ldr r1,[r1]; subs r0,r0,r1; movne r0,#1 -
+      returns 1 when the values differ, 0 when equal (Ghidra:
+      return *param_1 != *param_2). The subs difference is dead; only Z
+      feeds the movne, so the port compares the dereferenced values
+      directly. Used as a geometry dirty check: FUN_0810da8c compares a
+      cached rectangle against the live one edge-by-edge and recomputes
+      clipping only when any edge moved (the >> 0x10 shifts there
+      confirm the Q16.16 format). 20 bl call sites, binary-scanned
+      (0x0810xxxx, 0x0814xxxx, 0x0820xxxx, 0x0827xxxx). Sits in the
+      indirect fixed16 helper cluster 0x082a1864-0x082a18c8 (lt, sub,
+      mul, ne, add). match.py structural: identical core (two pointer
+      loads, subs, movne); LLVM adds a push {fp,lr}/pop {fp,pc} frame
+      and swaps the load order.
+
   - address: 0x080e97ac
     ghidra: FUN_080e97ac
     name: fixed16_cos
