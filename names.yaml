@@ -32277,3 +32277,59 @@ functions:
       never retaking, a failing installer returning its code with no retake,
       a NULL name forwarded untouched, and the shared callee seam still
       holding its documented stub.
+
+  - address: 0x0838d090
+    ghidra: FUN_0838d090
+    name: vdbe_set_num_cols
+    size: 112
+    sig: "void vdbe_set_num_cols(Vdbe *p, int n_res_column)"
+    module: sqlite/vdbe_set_num_cols
+    status: ported
+    vars: {param_1/r4: p, param_2/r6: n_res_column, iVar3/r5: n, iVar2/r0: col, FUN_083675c0: releaseMemArray, FUN_083906f4: sqlite3_free, FUN_08374998: sqlite3DbMallocZero}
+    notes: >-
+      Upstream SQLite's sqlite3VdbeSetNumCols - resizes the prepared
+      statement's column-name/decltype array (aColName, +0x28) to
+      n_res_column columns. 20 bl call sites, all unconditional,
+      binary-scanned from osos.dec; no predicated or tail-b entries.
+      Immediately follows sqlite3VdbeSetColName @ 0x0838d004 (ported);
+      extent 0x0838d090..0x0838d100 from functions.csv and the listing -
+      0x0838d0fc is ldmia sp!,{r4,r5,r6,pc} and 0x0838d100 is the next
+      function.
+      Algorithm - releaseMemArray @ 0x083675c0 releases the old array's
+      Mem guts with the OLD count shifted left by one (mov r1,r0 lsl #1 -
+      nResColumn * COLNAME_N, the two name/decltype planes) and
+      freebuffer = 1 (mov r2,#0x1, the per-Mem sqlite3VdbeMemRelease
+      mode); the array block itself is then freed unconditionally through
+      sqlite3_free @ 0x083906f4 (the ported heap::tracked::tracked_free,
+      called directly - its NULL guard covers a fresh statement, exactly
+      like the original's). The NEW count is stored into nResColumn
+      (+0xec) BEFORE the allocation (str r6,[r4,#0xec] ahead of the bl),
+      so a failed resize still leaves the statement claiming the new
+      column count with a NULL array. The replacement is
+      db_malloc_zero(p->db, n * 0x28) where n = nResColumn << 1 and
+      0x28 = sizeof(Mem) (mov r0,#0x28 / mul r1,r0,r5), stored into
+      aColName even when NULL (ldmiaeq early-out). Each fresh Mem is then
+      stamped flags = MEM_Null (1, mov r1,#0x1 / strhgt at +0x1c) and
+      db = p->db (ldrgt/strgt at +0x10, re-loaded every pass), advancing
+      0x28 - a signed subs/bgt while (n-- > 0) loop, so a zero or
+      negative count stamps nothing. Ghidra's decompile has the shape
+      right but reads the store order loosely; the listing pins it.
+      Deviations - releaseMemArray @ 0x083675c0 is not ported; the call
+      goes through a new SQLITE_MEM_ARRAY_RELEASE dispatch static whose
+      default is a documented no-op stub (the same end state as the
+      original's NULL-array/zero-count early-out; with a live old array
+      only the Mem guts' ledger entries differ, since the array block is
+      freed either way). sqlite3_free and sqlite3DbMallocZero ARE ported
+      and called directly. Vdbe and Mem are repr(C) structs with named
+      fields rather than byte offsets; the original's offsets are
+      statically asserted on 32-bit targets in sqlite/vdbe.rs.
+      Host tests (6) - old array released (old count * two planes, guts
+      mode) then freed then the new block allocated, in that order, via
+      one event log across the three seams; the new count stored even
+      when the allocation fails (with the sticky mallocFailed byte
+      latched by the real allocator); a failed connection still releasing
+      and freeing the old array before the short-circuited allocator is
+      consulted; every fresh Mem stamped MEM_Null with the connection
+      back-pointer across 1/2/3/6 columns; a zero-column resize still
+      sending the zero-byte request to the heap and stamping nothing;
+      and the release seam still holding its documented stub.
