@@ -665,6 +665,7 @@ use crate::cxx::string_object::{
 };
 use crate::libc::rt_memcpy::__rt_memcpy;
 use crate::libc::strlen::strlen;
+use crate::runtime::rt_div::__rt_sdiv;
 
 /// Byte size of the stack-local query object the constructor
 /// `FUN_0813e474` builds (the original's frame reserves `sp+0x8` ..
@@ -1598,6 +1599,63 @@ const RESOURCE_ID_60A4: u32 = 0x60a4;
 pub unsafe extern "C" fn class6000_ui32_resource_60a4() -> *mut u8 {
     let head = instance_of_class_6000() as *mut ResourceProvider;
     resource_chain_find(head, RESOURCE_KIND_UI32, RESOURCE_ID_60A4)
+}
+
+/// plist_node_child_count — original: `FUN_082a1bc4` @ 0x082a1bc4
+/// (20 bytes, binary-verified against osos.dec: five instructions
+/// ending `b 0x08031568` at 0x082a1bd4, the next function starting
+/// at 0x082a1bd8 — functions.csv's 20-byte size is exact and there
+/// is NO literal pool, unlike the class6000_ui32_resource_60a4
+/// literal-pool tail just above. 12 direct call sites, all in the
+/// plist code: `bl` at 0x0816765c, 0x081676d8, 0x0829c170,
+/// 0x0829c1ac, 0x0829c1cc, 0x0829c22c, 0x0829c24c, 0x0829c2f8,
+/// 0x0829c318, 0x0829c380 and 0x0829c3a4, plus the `beq 0x082a1bc4`
+/// tail-call at 0x081676cc; no pointer to the address anywhere in
+/// osos.dec (binary-scanned)).
+///
+/// Counts the children of a plist node: the whole body is `ldr
+/// r1,[r0,#0x18]; ldr r0,[r0,#0x14]; sub r0,r1,r0; mov r1,#0x28; b
+/// 0x08031568` — take the span between the embedded child vector's
+/// begin (+0x14) and end (+0x18) word pointers and signed-divide it
+/// by 0x28 = 40 through the ADS signed divide @ 0x08031568 (ported
+/// as [`__rt_sdiv`]), answering the number of 40-byte child records.
+/// This is `vector<T>::size()` for a 40-byte element (the
+/// cxx/templates.rs `vector_size_elem*` family), except the
+/// {begin, end} pair sits at +0x14/+0x18 of an enclosing object
+/// instead of heading it.
+///
+/// The enclosing object is a plist tree node: the callers compare
+/// node tags against the string literals "plist" (@ 0x08167698),
+/// "dict" (@ 0x081676a0), "key" (@ 0x0829c184) and "array" (@
+/// 0x0829c29c), all binary-verified in osos.dec, walk the children
+/// at a 0x28 stride with a C-string pointer at child+0x10, and
+/// FUN_081676a8 returns the count unchanged for node kind byte 1
+/// (array) but `count >> 1` for kind 2 (a dict's interleaved
+/// key/value children halved to pair count). FUN_08167638 recognizes
+/// the canonical `<plist><dict>` shape: tag "plist", exactly one
+/// child, first child's tag "dict".
+///
+/// Deviations:
+/// - Ghidra's decompile inlines the whole tail-called [`__rt_sdiv`]
+///   body (sign fixup, clz dispatch, shift-subtract loop) into
+///   `FUN_082a1bc4`; the listing pins the real 20-byte shape above
+///   (the class6000_ui32_resource_60a4 `resource_chain_find`
+///   inlining precedent).
+/// - The ADS divide also leaves the remainder in r1, but no caller
+///   reads it (every call site consumes r0 alone), so the port
+///   answers the quotient only — the cxx/templates.rs
+///   `vector_size_elem*` precedent.
+/// - The loads are plain `ldr` (ABI-aligned word fields); the port
+///   reads them with `read_unaligned` anyway, the cxx/templates.rs
+///   host-testing idiom against a 4-but-not-8-aligned node.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn plist_node_child_count(node: *const u8) -> i32 {
+    // `read_unaligned`: same 4-but-not-8-aligned firmware head hazard
+    // as cxx/templates.rs's `vector_size` on a 64-bit host.
+    let begin = core::ptr::read_unaligned(node.add(0x14) as *const u32);
+    let end = core::ptr::read_unaligned(node.add(0x18) as *const u32);
+    let span = end.wrapping_sub(begin) as i32;
+    __rt_sdiv(span, 40)
 }
 
 #[cfg(test)]
@@ -4320,5 +4378,71 @@ mod tests {
     #[test]
     fn ui32_kind_literal_spells_ui32_big_endian() {
         assert_eq!(&RESOURCE_KIND_UI32.0.to_be_bytes(), b"Ui32");
+    }
+
+    // ---- plist_node_child_count ----
+
+    /// Builds a fake plist node: a 0x20-byte header whose +0x14/+0x18
+    /// words point at a heap child array of `span` bytes (byte-exact
+    /// so partial-element and negative spans are expressible). The
+    /// returned buffers must outlive the call.
+    fn plist_node_with_span(span: i32) -> (Vec<u8>, Vec<u8>) {
+        let storage = if span > 0 { span as usize } else { 0 };
+        let children = std::vec![0u8; storage.max(1)];
+        let mut node = std::vec![0xa5u8; 0x20];
+        let begin = children.as_ptr() as u32;
+        let end = begin.wrapping_add(span as u32);
+        node[0x14..0x18].copy_from_slice(&begin.to_le_bytes());
+        node[0x18..0x1c].copy_from_slice(&end.to_le_bytes());
+        (node, children)
+    }
+
+    fn child_count(span: i32) -> i32 {
+        let (node, _children) = plist_node_with_span(span);
+        unsafe { plist_node_child_count(node.as_ptr()) }
+    }
+
+    #[test]
+    fn plist_node_child_count_divides_the_span_by_40() {
+        assert_eq!(child_count(0), 0, "empty child vector");
+        for count in 1..=8i32 {
+            assert_eq!(child_count(count * 40), count, "{count} whole children");
+        }
+    }
+
+    #[test]
+    fn plist_node_child_count_drops_a_partial_element() {
+        // The signed divide truncates like any C `/`: a leftover
+        // partial record never rounds the count up.
+        assert_eq!(child_count(39), 0);
+        assert_eq!(child_count(41), 1);
+        assert_eq!(child_count(79), 1);
+        assert_eq!(child_count(80), 2);
+    }
+
+    #[test]
+    fn plist_node_child_count_truncates_a_reversed_span_toward_zero() {
+        // A reversed vector's negative span divides toward zero, the
+        // cxx/templates.rs `vector_size_elem*` divide-half semantics.
+        assert_eq!(child_count(-40), -1);
+        assert_eq!(child_count(-41), -1, "-41/40 truncates toward zero");
+        assert_eq!(child_count(-39), 0);
+    }
+
+    #[test]
+    fn plist_node_child_count_reads_only_offsets_0x14_and_0x18() {
+        // Every other header byte is poisoned with 0xa5 by the builder;
+        // a read of +0x00/+0x04/+0x10/+0x1c instead of +0x14/+0x18
+        // would see the poison pattern and answer differently.
+        let (node, _children) = plist_node_with_span(80);
+        let poison = 0xa5a5_a5a5u32;
+        for offset in [0x00usize, 0x04, 0x10, 0x1c] {
+            assert_eq!(
+                u32::from_le_bytes(node[offset..offset + 4].try_into().unwrap()),
+                poison,
+                "builder poisoned header offset +{offset:#04x}"
+            );
+        }
+        assert_eq!(unsafe { plist_node_child_count(node.as_ptr()) }, 2);
     }
 }

@@ -22054,6 +22054,64 @@ functions:
       mov/orr pair instead of a literal-pool load (the 0x55693332 kind
       stays a pooled literal on both sides).
 
+  - address: 0x082a1bc4
+    ghidra: FUN_082a1bc4
+    name: plist_node_child_count
+    size: 20
+    sig: "i32 plist_node_child_count(const u8 *node)"
+    module: fp/fp_misc
+    status: ported
+    vars:
+      param_1: node (the plist node; embedded child vector at +0x14/+0x18)
+      FUN_08031568: __rt_sdiv (ported, runtime/rt_div)
+    notes: >-
+      12 direct call sites, all in the plist code: bl at 0x0816765c,
+      0x081676d8, 0x0829c170, 0x0829c1ac, 0x0829c1cc, 0x0829c22c,
+      0x0829c24c, 0x0829c2f8, 0x0829c318, 0x0829c380 and 0x0829c3a4,
+      plus the beq tail-call at 0x081676cc; no pointer to the address
+      anywhere in osos.dec (binary-scanned). Extent binary-verified:
+      20 bytes exactly (functions.csv's size is exact), five
+      instructions ending `b 0x08031568` at 0x082a1bd4 with the next
+      function starting at 0x082a1bd8 - NO literal pool, unlike the
+      class6000_ui32_resource_60a4 literal-pool tail just above.
+      Algorithm: `ldr r1,[r0,#0x18]; ldr r0,[r0,#0x14]; sub r0,r1,r0;
+      mov r1,#0x28; b 0x08031568` - take the span between the embedded
+      child vector's begin (+0x14) and end (+0x18) word pointers and
+      signed-divide it by 0x28 = 40 through the ADS signed divide
+      (ported as __rt_sdiv), answering the number of 40-byte child
+      records. This is vector<T>::size() for a 40-byte element (the
+      cxx/templates vector_size_elem* family), except the {begin, end}
+      pair sits at +0x14/+0x18 of an enclosing object instead of
+      heading it. The enclosing object is a plist tree node: callers
+      compare node tags against the string literals "plist" (@
+      0x08167698), "dict" (@ 0x081676a0), "key" (@ 0x0829c184) and
+      "array" (@ 0x0829c29c), all binary-verified in osos.dec, walk
+      children at a 0x28 stride with a C-string pointer at child+0x10,
+      and FUN_081676a8 returns the count unchanged for node kind byte
+      1 (array) but count>>1 for kind 2 (a dict's interleaved
+      key/value children halved to pair count); FUN_08167638
+      recognizes the canonical <plist><dict> shape (tag "plist",
+      exactly one child, first child's tag "dict"). Ghidra's decompile
+      inlines the whole tail-called __rt_sdiv body (sign fixup, clz
+      dispatch, shift-subtract loop) into FUN_082a1bc4; the listing
+      pins the real 20-byte shape (the class6000_ui32_resource_60a4
+      resource_chain_find inlining precedent). Deviations: the ADS
+      divide also leaves the remainder in r1, but no caller reads it,
+      so the port answers the quotient only (the vector_size_elem*
+      precedent); the port reads both fields with read_unaligned (the
+      cxx/templates host-testing idiom against a 4-but-not-8-aligned
+      node). Host tests (4): exact counts 0..8 for whole children; a
+      partial element dropped (span 39 -> 0, 41 -> 1, 79 -> 1, 80 ->
+      2); a reversed span truncating toward zero (-40 -> -1, -41 ->
+      -1, -39 -> 0); and a poisoned-header test pinning the reads to
+      offsets +0x14/+0x18 exactly. match.py structural (exit-1 diff
+      expected): identical deviation profile to the accepted
+      vector_size_elem40 port - the ldr pair comes out as byte loads
+      from the read_unaligned host-testing idiom, with the same sub,
+      the same `mov r1,#0x28` and the same tail branch to __rt_sdiv
+      (match.py renders the relocated branch as `b 0 <symbol>` for
+      both ports).
+
   - address: 0x080e97ac
     ghidra: FUN_080e97ac
     name: fixed16_cos
