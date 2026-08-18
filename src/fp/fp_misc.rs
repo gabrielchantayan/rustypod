@@ -1348,6 +1348,81 @@ pub unsafe extern "C" fn board_version_halves(_this: *mut u8, high: *mut u16, lo
     *low = version as u16;
 }
 
+/// Size of the stack-local calendar record `FUN_08056524` fills before
+/// [`current_datetime_to_record`] extracts its public fields. The callee
+/// writes through +0x13, so its 20-byte destination exactly occupies the
+/// original's `sp + 0xc` through `sp + 0x1f` frame range.
+const CURRENT_DATETIME_QUERY_BUFFER_SIZE: usize = 0x14;
+
+/// Host-swappable entry point for the current-calendar query
+/// `FUN_08056524` @ 0x08056524 (200 bytes, unported): zeroes a 12-byte
+/// temporary, fetches the clock state through `FUN_080642a4`, and builds a
+/// 20-byte calendar record. Its result is bit 1 of the fetched status,
+/// normalized to 0 or 1; its fields at offsets +2..+6 and +8..+9 are,
+/// respectively, second, minute, hour, day, month, and year. The target
+/// build calls the fixed firmware address directly; host tests swap this
+/// writable cell to install recording mocks.
+#[cfg(not(target_os = "none"))]
+pub static mut CURRENT_DATETIME_QUERY: usize = 0x0805_6524;
+
+/// Calendar-query seam signature: `(record) -> valid`. A false result is
+/// fatal to the caller, exactly like the source's `cmp r0,#0; bleq
+/// 0x08030f44`.
+type CurrentDatetimeQueryFn = unsafe extern "C" fn(*mut u8) -> bool;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn current_datetime_query(record: *mut u8) -> bool {
+    let query: CurrentDatetimeQueryFn = core::mem::transmute(0x0805_6524usize);
+    query(record)
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn current_datetime_query(record: *mut u8) -> bool {
+    let address = core::ptr::addr_of!(CURRENT_DATETIME_QUERY).read_volatile();
+    let query: CurrentDatetimeQueryFn = core::mem::transmute(address);
+    query(record)
+}
+
+/// current_datetime_to_record — original: `FUN_082a1b2c` @ 0x082a1b2c
+/// (100 bytes; NO `bl` call sites in osos.asm, so it is reached indirectly).
+///
+/// Queries the current clock calendar state through `FUN_08056524` and
+/// materializes its compact 10-byte date/time record at `record`: seconds,
+/// minutes, hours, day, month, one padding byte, little-endian year, then
+/// two trailing padding bytes. The source calls the 200-byte query into a
+/// 20-byte stack local, treats a zero status as fatal via `heap_panic` @
+/// 0x08030f44, then explicitly transfers source bytes +2 through +6 and
+/// halfword +8 into a separate 10-byte local before copying all ten bytes
+/// to `record` through the ported `__rt_memcpy` veneer @ 0x08037db0. The
+/// same field extraction is independently used by FUN_0808e9e0 before its
+/// calendar weekday calculation @ 0x0807ea68, identifying the fields.
+///
+/// Deliberate deviation: the source assigns only the five byte fields and
+/// the year halfword, leaving its three structure-padding bytes uninitialized
+/// before `__rt_memcpy`; this port zero-initializes both stack locals, so
+/// those padding bytes deterministically become zero. The query remains an
+/// unported firmware callee behind the host-swappable usize seam above; on
+/// target it dispatches directly to 0x08056524.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn current_datetime_to_record(record: *mut u8) {
+    let mut calendar = [0u8; CURRENT_DATETIME_QUERY_BUFFER_SIZE];
+    if !current_datetime_query(calendar.as_mut_ptr()) {
+        crate::heap::veneers::heap_panic();
+    }
+
+    let mut packed = [0u8; 10];
+    packed[0] = calendar[2];
+    packed[1] = calendar[3];
+    packed[2] = calendar[4];
+    packed[3] = calendar[5];
+    packed[4] = calendar[6];
+    packed[6] = calendar[8];
+    packed[7] = calendar[9];
+    __rt_memcpy(record, packed.as_ptr(), packed.len());
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -3546,5 +3621,99 @@ mod tests {
         }
         assert_eq!(high, 0x00c0);
         assert_eq!(low, 0xffee);
+    }
+    // ---- current_datetime_to_record ----
+
+    /// Serializes access to the CURRENT_DATETIME_QUERY seam cell.
+    static CURRENT_DATETIME_QUERY_LOCK: Mutex<()> = Mutex::new(());
+    static mut CURRENT_DATETIME_QUERY_RECORD: [u8; CURRENT_DATETIME_QUERY_BUFFER_SIZE] =
+        [0; CURRENT_DATETIME_QUERY_BUFFER_SIZE];
+    static mut CURRENT_DATETIME_QUERY_RESULT: bool = false;
+    static mut CURRENT_DATETIME_QUERY_CALLS: usize = 0;
+
+    unsafe extern "C" fn recording_current_datetime_query(record: *mut u8) -> bool {
+        core::ptr::copy_nonoverlapping(
+            core::ptr::addr_of!(CURRENT_DATETIME_QUERY_RECORD).cast::<u8>(),
+            record,
+            CURRENT_DATETIME_QUERY_BUFFER_SIZE,
+        );
+        CURRENT_DATETIME_QUERY_CALLS += 1;
+        CURRENT_DATETIME_QUERY_RESULT
+    }
+
+    struct CurrentDatetimeQueryInstall {
+        previous: usize,
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for CurrentDatetimeQueryInstall {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(CURRENT_DATETIME_QUERY).write_volatile(self.previous);
+            }
+        }
+    }
+
+    fn install_current_datetime_query(
+        record: [u8; CURRENT_DATETIME_QUERY_BUFFER_SIZE],
+    ) -> CurrentDatetimeQueryInstall {
+        let lock = CURRENT_DATETIME_QUERY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            let previous = core::ptr::addr_of!(CURRENT_DATETIME_QUERY).read_volatile();
+            core::ptr::addr_of_mut!(CURRENT_DATETIME_QUERY)
+                .write_volatile(recording_current_datetime_query as usize);
+            core::ptr::addr_of_mut!(CURRENT_DATETIME_QUERY_RECORD).write(record);
+            CURRENT_DATETIME_QUERY_RESULT = true;
+            CURRENT_DATETIME_QUERY_CALLS = 0;
+            CurrentDatetimeQueryInstall {
+                previous,
+                _lock: lock,
+            }
+        }
+    }
+
+    #[test]
+    fn current_datetime_to_record_queries_once_and_packs_calendar_fields() {
+        // Include nonzero bytes in every discarded/padding source position:
+        // only +2..+6 and +8..+9 are observable in the ten-byte result.
+        let _mock = install_current_datetime_query([
+            0xa0, 0xa1, 0x3b, 0x2a, 0x17, 0x1e, 0x0c, 0xa7, 0xe8, 0x07,
+            0xaa, 0xab, 0xac, 0xad, 0xae, 0xaf, 0xb0, 0xb1, 0xb2, 0xb3,
+        ]);
+        let mut record = [0xff; 10];
+
+        unsafe {
+            current_datetime_to_record(record.as_mut_ptr());
+            assert_eq!(CURRENT_DATETIME_QUERY_CALLS, 1);
+        }
+        assert_eq!(record, [0x3b, 0x2a, 0x17, 0x1e, 0x0c, 0, 0xe8, 0x07, 0, 0]);
+    }
+
+    #[test]
+    fn current_datetime_to_record_reads_the_live_query_record_each_call() {
+        let _mock = install_current_datetime_query([0; CURRENT_DATETIME_QUERY_BUFFER_SIZE]);
+
+        for (query_record, expected) in [
+            (
+                [0, 0, 59, 58, 23, 31, 12, 0, 0xe7, 0x07, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [59, 58, 23, 31, 12, 0, 0xe7, 0x07, 0, 0],
+            ),
+            (
+                [0, 0, 0, 0, 0, 1, 1, 0, 0xd0, 0x07, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 1, 1, 0, 0xd0, 0x07, 0, 0],
+            ),
+        ] {
+            unsafe {
+                core::ptr::addr_of_mut!(CURRENT_DATETIME_QUERY_RECORD).write(query_record);
+            }
+            let mut record = [0xff; 10];
+            unsafe {
+                current_datetime_to_record(record.as_mut_ptr());
+            }
+            assert_eq!(record, expected);
+        }
+        unsafe {
+            assert_eq!(CURRENT_DATETIME_QUERY_CALLS, 2);
+        }
     }
 }
