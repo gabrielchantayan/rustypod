@@ -521,6 +521,29 @@ pub unsafe extern "C" fn fixed16_add_indirect(a: *const i32, b: *const i32) -> i
     (*a).wrapping_add(*b)
 }
 
+/// message_kind_byte — original: `FUN_082a18cc` @ 0x082a18cc (8
+/// bytes; 2 bl call sites: 0x081d6ad4 in FUN_081d6ac4, 0x081d7e7c in
+/// FUN_081d7e68).
+///
+/// Kind/discriminant byte getter of the 12-byte UI message envelope
+/// constructed @ 0x0825790c (a vtable word at +0x0, this kind byte at
+/// +0x4 — the constructor zeroes it with `strb` — and a union word at
+/// +0x8 holding either a nested message pointer or a plain id). The
+/// whole body is `ldrb r0,[r0,#0x4]; bx lr` (Ghidra:
+/// `return *(undefined1 *)(param_1 + 4)`), so the port is a single
+/// byte load at offset 4. Both callers dispatch on the tag: 0 takes
+/// the nested-message path (the +0x8 word is a payload pointer whose
+/// own +0x4 message code is compared against 0x500/0x501), 1 takes
+/// the plain-id path, and any other value is ignored. Sits
+/// immediately after the indirect fixed16 helper cluster
+/// 0x082a1834-0x082a18c8 and heads a tiny accessor run with the +0x8
+/// word getter @ 0x082a18d4 and the +0x4 word getter @ 0x082a18dc
+/// (separate ports).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn message_kind_byte(message: *const u8) -> u8 {
+    *message.add(4)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -1609,6 +1632,54 @@ mod tests {
             for b in -4096i32..4096 {
                 assert_eq!(add_indirect(a, b), a.wrapping_add(b), "a={a:#x} b={b:#x}");
             }
+        }
+    }
+
+    // ---- message_kind_byte ----
+
+    /// The 12-byte UI message envelope the original reads: vtable word
+    /// at +0x0, kind byte at +0x4, union word at +0x8.
+    fn envelope(kind: u8) -> [u8; 12] {
+        let mut bytes = [0xaau8; 12];
+        bytes[4] = kind;
+        bytes
+    }
+
+    #[test]
+    fn message_kind_byte_reads_the_tag_at_offset_4() {
+        for kind in [0u8, 1, 2, 0x16, 0x7f, 0x80, 0xff] {
+            let storage = envelope(kind);
+            assert_eq!(unsafe { message_kind_byte(storage.as_ptr()) }, kind);
+        }
+    }
+
+    #[test]
+    fn message_kind_byte_reads_only_the_low_byte_of_the_kind_word() {
+        // The +0x4 accessor is a byte load (ldrb): a kind word of
+        // 0x20003 (seen at a message_kind_construct call site) reads
+        // back as its little-endian low byte 0x03, and the upper
+        // bytes of the word are invisible.
+        let mut storage = [0u8; 12];
+        storage[4..8].copy_from_slice(&0x20003u32.to_le_bytes());
+        assert_eq!(unsafe { message_kind_byte(storage.as_ptr()) }, 0x03);
+    }
+
+    #[test]
+    fn message_kind_byte_ignores_neighbouring_bytes() {
+        // Only offset 4 is read: every other byte of the envelope is
+        // irrelevant to the result.
+        let mut storage = [0u8; 12];
+        storage[4] = 1;
+        assert_eq!(unsafe { message_kind_byte(storage.as_ptr()) }, 1);
+        let mut rng = Rng(0x5eed_c0de_5eed_c0de);
+        for _ in 0..1_000 {
+            let mut storage = [0u8; 12];
+            for byte in &mut storage {
+                *byte = rng.next() as u8;
+            }
+            let kind = rng.next() as u8;
+            storage[4] = kind;
+            assert_eq!(unsafe { message_kind_byte(storage.as_ptr()) }, kind);
         }
     }
 }

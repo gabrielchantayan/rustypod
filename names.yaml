@@ -20668,6 +20668,34 @@ functions:
       pointer loads, add); LLVM adds a push {fp,lr}/pop {fp,pc} frame
       and swaps the load order.
 
+  - address: 0x082a18cc
+    ghidra: FUN_082a18cc
+    name: message_kind_byte
+    size: 8
+    sig: "u8 message_kind_byte(message: *const u8) -> u8"
+    module: fp/fp_misc
+    status: ported
+    vars: {param_1: message}
+    notes: >-
+      Kind/discriminant byte getter of the 12-byte UI message
+      envelope constructed @ 0x0825790c (vtable word at +0x0, this
+      kind byte at +0x4 - the constructor zeroes it with strb - and
+      a union word at +0x8 holding either a nested message pointer
+      or a plain id). Body: ldrb r0,[r0,#0x4]; bx lr (Ghidra:
+      return *(undefined1 *)(param_1 + 4)). Both callers dispatch
+      on the tag: 0 takes the nested-message path (the +0x8 word is
+      a payload pointer whose own +0x4 message code is compared
+      against 0x500/0x501 by FUN_081d71d8), 1 takes the plain-id
+      path (FUN_081d6f7c), any other value is ignored. 2 bl call
+      sites (0x081d6ad4 in FUN_081d6ac4, 0x081d7e7c in
+      FUN_081d7e68). Sits immediately after the indirect fixed16
+      helper cluster 0x082a1834-0x082a18c8 and heads a tiny
+      accessor run with the +0x8 word getter @ 0x082a18d4 and the
+      +0x4 word getter @ 0x082a18dc (separate ports). match.py
+      structural: identical ldrb r0,[r0,#4] core; LLVM adds a
+      push {fp,lr}/pop {fp,pc} frame, same as the whole fixed16
+      cluster.
+
   - address: 0x080e97ac
     ghidra: FUN_080e97ac
     name: fixed16_cos
