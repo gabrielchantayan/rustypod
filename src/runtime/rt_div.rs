@@ -17,6 +17,21 @@
 //!   b __rt_raise` — raises signal 2 (SIGFPE) via `__rt_raise` @ 0x080320a8.
 //!   Both cores funnel den==0 here (the `rsbs ip,r1,#0 / bcs` check at
 //!   0x0803164c, after the scaling path forced r1 to 0).
+//! - `FUN_08037a84` @ 0x08037a84 (540 bytes; Ghidra's 344 truncates at the
+//!   computed jump): the Q16.16 fixed-point signed division core, NOT an
+//!   ADS integer div. Computes `(dividend << 16) / divisor`, truncated
+//!   toward zero. Sign-fix prologue (magnitudes in r2/r1, quotient sign
+//!   track in r3), then `shift = clz(den) - clz(num)` dispatches via
+//!   `add pc,pc,r4` into an unrolled cascade: sixteen 3-instruction
+//!   blocks (`subs r4,r2,r1,lsl#s / orrcs r0,#bit / movcs r2,r4`,
+//!   12-byte stride) produce quotient bits 31..16 against the pre-shifted
+//!   divisor, then sixteen 4-instruction blocks (`add r2,r2,r2 / subs /
+//!   orrcs / movcs`) shift the remainder left and produce fractional bits
+//!   15..0. Quotient negated when the signs differed; ONLY r0 is
+//!   returned (the remainder left in r2 is call-clobbered — the sibling
+//!   remainder core ending @ 0x08037a80 shares the layout but keeps r2).
+//!   No div0 funnel: den==0 never traps, every compare succeeds and the
+//!   cascade sets all visited bits (see fixed16_div_core's doc header).
 //!
 //! Simplification: the algorithm is identical restoring division, but the
 //! unrolled-octet structure (and the divisor pre-scaling with quotient
@@ -139,6 +154,92 @@ fn udiv_entry(num: u32, den: u32) -> (u32, u32) {
         return div0_result();
     }
     udiv_core(num, den)
+}
+
+/// fixed16_div_core — original: `FUN_08037a84` @ 0x08037a84 (344 bytes in
+/// Ghidra's functions.csv, but that truncates the body at the computed
+/// jump; real extent 0x08037a84-0x08037c9f = 540 bytes). 6 direct bl call
+/// sites — 0x080ea678/0x080ea820/0x080eae7c (FUN_080ea5a0), 0x080eb024
+/// (FUN_080eade0), 0x080f78ac (FUN_080f780c), 0x080f7a90 (FUN_080f79d8) —
+/// plus the `b` tail call from fixed16_div_indirect @ 0x082a182c.
+///
+/// Q16.16 fixed-point signed division, quotient only: returns
+/// `(dividend << 16) / divisor` truncated toward zero. All callers pass
+/// Q16.16 values (e.g. FUN_080f780c divides by `0xf0000` = 15.0 and uses
+/// `(result >> 16) + 1`). The original reduces both operands to magnitude
+/// with a quotient-sign track (`sign(dividend) ^ sign(divisor)`), computes
+/// `shift = clz(den) - clz(num)`, and dispatches with `add pc,pc,r4` into
+/// an unrolled shift-subtract cascade: the entered block compares the
+/// remainder against `den << shift` and emits quotient bit `16 + shift`,
+/// each following block decrements the shift until bit 16, then sixteen
+/// blocks shift the remainder left one bit at a time to emit fractional
+/// bits 15..0. When `num < den` in magnitude (shift < 0) the original's
+/// `bmi` skips the high blocks entirely — only fractional bits are
+/// produced. The port keeps the identical two-phase structure as loops,
+/// which reproduces every output bit-exactly, including the edge cases:
+///
+/// - Truncation toward zero via the sign track, e.g. -1/3 -> -0x5555
+///   (not floor's -0x5556).
+/// - Divide by zero does NOT trap (no `__rt_div0` funnel here): den == 0
+///   makes every compare succeed, so the cascade sets all visited bits —
+///   the result is `(1 << (17 + shift)) - 1` with `shift =
+///   32 - clz(|dividend|)`, negated when dividend < 0. E.g. 5/0 ->
+///   0x000f_ffff, 1/0 -> 0x0003_ffff, 0/0 -> 0x0001_ffff, -5/0 ->
+///   -0x000f_ffff. The port reproduces this exactly for |dividend| <
+///   32768 (shift <= 15).
+/// - Overflow (shift > 15, i.e. the Q16.16 quotient does not fit in 32
+///   bits): the original's computed jump lands BEFORE its unrolled table
+///   and walks into its own prologue — wild, effectively undefined. The
+///   port clamps the high phase at shift 15 instead; no caller can
+///   observe a difference without the original first hanging.
+///
+/// `|dividend| = |divisor| = 0x8000_0000` (INT_MIN/INT_MIN) is handled:
+/// both magnitudes are 0x8000_0000, shift = 0, quotient 0x1_0000 (1.0).
+// `#[inline(never)]`: fixed16_div_indirect (fp_misc.rs) tail-calls this
+// core in the original; keep the call boundary for match.py review of
+// that port (the __rt_sdiv precedent above).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn fixed16_div_core(dividend: i32, divisor: i32) -> i32 {
+    let mut rem = dividend.unsigned_abs();
+    let den = divisor.unsigned_abs();
+    let negate_quotient = (dividend < 0) != (divisor < 0);
+
+    let mut quotient: u32 = 0;
+    // shift = clz(den) - clz(num): the Q16.16 quotient needs shift + 17
+    // bits; shift > 15 means 32-bit overflow (wild jump in the original,
+    // clamped here — see doc header). shift < 0 (num < den) skips the
+    // high phase, matching the original's `bmi` into the low blocks.
+    let shift = den.leading_zeros() as i32 - rem.leading_zeros() as i32;
+    if shift >= 0 {
+        // High phase: quotient bits 31..16 against the pre-shifted
+        // divisor (`subs r4,r2,r1,lsl#s / orrcs / movcs`). bit_length
+        // (den) + shift <= bit_length(num) <= 32, so `den << s` never
+        // loses a bit on the reachable path.
+        for s in (0..=shift.min(15) as u32).rev() {
+            let scaled = den << s;
+            if rem >= scaled {
+                rem -= scaled;
+                quotient |= 1 << (16 + s);
+            }
+        }
+    }
+    // Low phase: sixteen `add r2,r2,r2 / subs / orrcs / movcs` blocks
+    // shifting the remainder left, producing fractional bits 15..0. The
+    // shift wraps mod 2^32 exactly like the ARM add (observable only on
+    // the den == 0 path, where rem is never reduced).
+    for bit in (0..16u32).rev() {
+        rem <<= 1;
+        if rem >= den {
+            rem -= den;
+            quotient |= 1 << bit;
+        }
+    }
+
+    if negate_quotient {
+        quotient = quotient.wrapping_neg();
+    }
+    quotient as i32
 }
 
 #[cfg(test)]
@@ -349,6 +450,162 @@ mod tests {
             let (snum, sden) = (unum as i32, uden as i32);
             if !(snum == i32::MIN && sden == -1) {
                 assert_eq!(sdivmod(snum, sden), ref_sdiv(snum, sden));
+            }
+        }
+    }
+
+    // ---- fixed16_div_core @ 0x08037a84 (Q16.16 division) ----
+
+    fn fixed16_div(dividend: i32, divisor: i32) -> i32 {
+        unsafe { fixed16_div_core(dividend, divisor) }
+    }
+
+    /// Q16.16 reference: `(dividend << 16) / divisor` in i64, truncated
+    /// toward zero (host `/` on i64). Only called where the quotient
+    /// magnitude fits in 32 bits — outside that the ORIGINAL is undefined
+    /// (computed jump walks off its unrolled table), so there is nothing
+    /// to match. `as u32 as i32` wraps bit-31 results (e.g. 0x8000/1 ->
+    /// 0x8000_0000 == INT_MIN) exactly like the original's r0.
+    fn ref_fixed16_div(dividend: i32, divisor: i32) -> (i32, bool) {
+        if divisor == 0 {
+            return (0, false);
+        }
+        let quotient = ((dividend as i64) << 16) / (divisor as i64);
+        if quotient.unsigned_abs() > u32::MAX as u64 {
+            return (0, false); // original: wild jump, undefined
+        }
+        (quotient as u32 as i32, true)
+    }
+
+    /// Reference for the den == 0 path: no trap in the original; every
+    /// cascade block visited sets its bit, so the quotient magnitude is
+    /// `(1 << (17 + shift)) - 1` with `shift = bit_length(|dividend|)`,
+    /// negated when the dividend is negative. The original defines this
+    /// only for shift <= 15 (|dividend| < 32768); beyond that its
+    /// computed jump is wild (the port clamps, see the doc header).
+    fn ref_fixed16_div0(dividend: i32) -> i32 {
+        let shift = 32 - dividend.unsigned_abs().leading_zeros();
+        assert!(shift <= 15, "original undefined for |dividend| >= 32768");
+        let bits = 17 + shift;
+        let magnitude = if bits == 32 { u32::MAX } else { (1u32 << bits) - 1 };
+        if dividend < 0 { magnitude.wrapping_neg() as i32 } else { magnitude as i32 }
+    }
+
+    /// All four sign quadrants, with truncation-toward-zero checked
+    /// against exact bit patterns (1/3 = 0x5555.55... -> 0x5555, and the
+    /// negative quadrants truncate toward zero rather than floor).
+    #[test]
+    fn fixed16_sign_quadrants() {
+        // (1 << 16) / 3 = 21845.33.. -> 0x5555 in every quadrant.
+        assert_eq!(fixed16_div(1, 3), 0x5555);
+        assert_eq!(fixed16_div(-1, 3), -0x5555);
+        assert_eq!(fixed16_div(1, -3), -0x5555);
+        assert_eq!(fixed16_div(-1, -3), 0x5555);
+        // Exact Q16.16 identities: 1.0/1.0, 15.0 divisor (FUN_080f780c's
+        // 0xf0000), negative one, halves.
+        assert_eq!(fixed16_div(0x1_0000, 0x1_0000), 0x1_0000);
+        assert_eq!(fixed16_div(0xf_0000, 0xf_0000), 0x1_0000);
+        assert_eq!(fixed16_div(-0x1_0000, 0x1_0000), -0x1_0000);
+        assert_eq!(fixed16_div(1, 2), 0x8000);
+        assert_eq!(fixed16_div(3, 2), 0x1_8000);
+        assert_eq!(fixed16_div(-3, 2), -0x1_8000);
+        // Dividend smaller than divisor: pure fraction (the original's
+        // `bmi` path skipping the high blocks).
+        assert_eq!(fixed16_div(2, 3), 0xaaaa); // 0.666.. truncated
+        assert_eq!(fixed16_div(-2, 3), -0xaaaa);
+        assert_eq!(fixed16_div(0, 7), 0);
+        assert_eq!(fixed16_div(0, -7), 0);
+    }
+
+    /// INT_MIN and 32-bit boundary edges. The original returns only r0
+    /// (quotient); the remainder it leaves in r2 is call-clobbered and
+    /// unobservable, so behavioral parity is exactly "r0 matches".
+    #[test]
+    fn fixed16_int_min_and_boundaries() {
+        let cases = [
+            (i32::MIN, i32::MIN),       // 1.0
+            (i32::MIN, 0x1_0000),       // -32768.0 -> 0x8000_0000 wraps
+            (i32::MIN, -0x1_0000),      // +32768.0 -> 0x8000_0000 wraps
+            (i32::MIN, i32::MAX),
+            (0x8000, 1),                // 32768.0 -> 0x8000_0000 (shift 15)
+            (0x8000, -1),
+            (-0x8000, 1),
+            (0xffff, 1),                // shift 15 boundary from below
+            (0xffff, -1),
+            (i32::MIN, 0x2_0000),
+            (i32::MAX, i32::MIN),
+            (1, i32::MIN),              // tiny fraction
+            (-1, i32::MIN),
+            (0x1_0000, 3),
+            (123_456, -789),
+        ];
+        for (num, den) in cases {
+            let (want, defined) = ref_fixed16_div(num, den);
+            assert!(defined, "test case outside the original's defined range");
+            assert_eq!(fixed16_div(num, den), want, "fixed16_div({num}, {den})");
+        }
+    }
+
+    /// Divide by zero: the fixed16 core has NO __rt_div0 funnel (unlike
+    /// the ADS integer cores above) — it never traps. Every compare
+    /// against den == 0 succeeds, so the visited cascade bits all set.
+    #[test]
+    fn fixed16_div_by_zero_does_not_trap() {
+        assert_eq!(fixed16_div(0, 0), 0x0001_ffff);
+        assert_eq!(fixed16_div(1, 0), 0x0003_ffff);
+        assert_eq!(fixed16_div(5, 0), 0x000f_ffff);
+        assert_eq!(fixed16_div(-5, 0), -0x000f_ffff);
+        assert_eq!(fixed16_div(32767, 0), -1); // all 32 bits set
+        assert_eq!(fixed16_div(-32767, 0), 1); // negated all-ones
+        // |dividend| >= 32768 with den == 0 is the original's wild-jump
+        // territory (shift > 15); the port clamps instead — deliberately
+        // not asserted here (see the fixed16_div_core doc header).
+    }
+
+    /// Bit-boundary sweep: Q16.16 dividends/divisors straddling powers of
+    /// two, all sign combinations.
+    #[test]
+    fn fixed16_bit_boundary_sweep() {
+        for shift in 0..16u32 {
+            let base = 1i32 << shift;
+            for num in [base - 1, base, base + 1] {
+                for den in [base, base | 1, -(base), -(base | 1)] {
+                    for num in [num, -num] {
+                        let (want, defined) = ref_fixed16_div(num, den);
+                        if defined {
+                            assert_eq!(fixed16_div(num, den), want, "fixed16_div({num}, {den})");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Pseudorandom sweep (LCG, deterministic) over the full 32-bit
+    /// space, restricted to the original's defined range (quotient fits
+    /// 32 bits), plus a div0 sweep over the defined |dividend| < 32768.
+    #[test]
+    fn fixed16_random_sweep() {
+        let mut state = 0xdead_beefu32;
+        let mut next = move || {
+            state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+            state
+        };
+        let mut compared = 0u32;
+        for _ in 0..200_000 {
+            let (num, den) = (next() as i32, next() as i32);
+            let (want, defined) = ref_fixed16_div(num, den);
+            if defined {
+                assert_eq!(fixed16_div(num, den), want, "fixed16_div({num}, {den})");
+                compared += 1;
+            }
+        }
+        assert!(compared > 1000, "sweep barely covered the defined range");
+        // den == 0 sweep across every defined dividend magnitude class.
+        for _ in 0..20_000 {
+            let num = (next() % 32768) as i32;
+            for num in [num, -num] {
+                assert_eq!(fixed16_div(num, 0), ref_fixed16_div0(num), "fixed16_div({num}, 0)");
             }
         }
     }

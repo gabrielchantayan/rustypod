@@ -1382,6 +1382,45 @@ functions:
       returns __rt_raise's 0 straight to the divide's caller (modeled as
       quotient/remainder 0 in the rt_div funnel).
 
+  - address: 0x08037a84
+    ghidra: FUN_08037a84
+    name: fixed16_div_core
+    size: 540
+    sig: "i32 fixed16_div_core(i32 dividend, i32 divisor) -> i32  // Q16.16 (a<<16)/b"
+    module: rt_div
+    status: ported
+    vars: {param_1: dividend, param_2: divisor}
+    notes: >-
+      Q16.16 fixed-point signed division core, quotient only: returns
+      (dividend << 16) / divisor truncated toward zero. NOT an ADS
+      integer sdiv — all 6 bl call sites pass Q16.16 values
+      (0x080ea678/0x080ea820/0x080eae7c in FUN_080ea5a0, 0x080eb024 in
+      FUN_080eade0, 0x080f78ac in FUN_080f780c which divides by 0xf0000
+      = 15.0, 0x080f7a90 in FUN_080f79d8) plus the b tail call from
+      fixed16_div_indirect @ 0x082a182c, whose sdiv32 seam in fp_misc.rs
+      now targets this port on target_os=none. Ghidra's 344-byte size
+      truncates the body at the computed jump; real extent is
+      0x08037a84-0x08037c9f (540 bytes), recovered by disassembling
+      osos.dec directly (the Ghidra asm export omits 0x08037ad0-0x08037b8f).
+      Structure: sign-magnitude prologue (quotient sign track in r3),
+      shift = clz(den) - clz(num), add pc,pc,r4 dispatch into sixteen
+      12-byte blocks (subs r4,r2,r1,lsl#s / orrcs r0,#bit / movcs r2,r4)
+      emitting quotient bits 31..16 against the pre-shifted divisor, then
+      sixteen 16-byte blocks (add r2,r2,r2 / subs / orrcs / movcs)
+      emitting fractional bits 15..0; bmi into the low blocks when
+      num < den. Quotient negated when signs differed; ONLY r0 returned
+      (remainder left in r2 is call-clobbered — the sibling remainder
+      core ending @ 0x08037a80 shares the layout but keeps r2). No
+      __rt_div0 funnel: den == 0 never traps, every compare succeeds so
+      the result is (1 << (17 + bit_length(|dividend|))) - 1, negated
+      when dividend < 0 (5/0 -> 0x000fffff, 0/0 -> 0x0001ffff). shift >
+      15 (Q16.16 quotient overflows 32 bits) makes the original's
+      computed jump land before its table and walk into its own
+      prologue — undefined; the port clamps the high phase at shift 15.
+      match.py structural: same sign-track prologue, clz dispatch and
+      subs/orrcs conditional-subtract cascade; LLVM rolls the two phases
+      into loops and partially unrolls the low 16 steps.
+
   - address: 0x0802eefc
     ghidra: FUN_0802eefc
     name: __aeabi_uldivmod

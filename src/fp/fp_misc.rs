@@ -373,22 +373,23 @@ pub unsafe extern "C" fn fixed16_div(mut numerator: i32, divisor: i32) -> i32 {
 }
 
 /// Host-swappable entry point for the signed-division core
-/// `FUN_08037a84` (344 bytes, unported): the classic ADS quotient-only
-/// sdiv — both operands reduced to magnitude with a sign track
-/// (`sign(dividend) ^ sign(divisor)`), a `clz` difference dispatching
-/// into an unrolled 16-step shift-subtract loop, and the quotient
-/// negated when the signs differed. [`fixed16_div_indirect`] tail-calls
-/// it with the dereferenced dividend and the divisor. The target build
-/// calls the fixed firmware address directly; host tests swap this
-/// writable cell to record the exact dispatch behavior.
+/// `FUN_08037a84` (344 bytes), ported as
+/// [`crate::runtime::rt_div::fixed16_div_core`]: the Q16.16 quotient-only
+/// shift-subtract sdiv — both operands reduced to magnitude with a sign
+/// track (`sign(dividend) ^ sign(divisor)`), a `clz` difference
+/// dispatching into an unrolled shift-subtract cascade (quotient bits
+/// 31..16 against the pre-shifted divisor, then fractional bits 15..0),
+/// and the quotient negated when the signs differed.
+/// [`fixed16_div_indirect`] tail-calls it with the dereferenced dividend
+/// and the divisor. The target build calls the port directly; host tests
+/// swap this writable cell to record the exact dispatch behavior.
 #[cfg(not(target_os = "none"))]
 pub static mut FIXED16_SDIV32: usize = 0x0803_7a84;
 
 #[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn sdiv32(dividend: i32, divisor: i32) -> i32 {
-    let divide: unsafe extern "C" fn(i32, i32) -> i32 = core::mem::transmute(0x0803_7a84usize);
-    divide(dividend, divisor)
+    crate::runtime::rt_div::fixed16_div_core(dividend, divisor)
 }
 
 #[cfg(not(target_os = "none"))]
@@ -405,8 +406,10 @@ unsafe fn sdiv32(dividend: i32, divisor: i32) -> i32 {
 ///
 /// Truncating signed 32-bit division with the DIVIDEND fetched through
 /// a pointer: the whole body is `ldr r0,[r0,#0x0]; b 0x08037a84` —
-/// load `*a` into r0 and TAIL-CALL the unported ADS quotient-only sdiv
-/// core @ 0x08037a84 (`sdiv32` above) with the divisor passed straight
+/// load `*a` into r0 and TAIL-CALL the Q16.16 quotient-only division
+/// core @ 0x08037a84 (ported as
+/// [`crate::runtime::rt_div::fixed16_div_core`], reached through the
+/// `sdiv32` seam above) with the divisor passed straight
 /// through in r1, so the callee's quotient returns directly to this
 /// function's caller. Heads the indirect fixed16 helper run
 /// 0x082a182c-0x082a18c8 (div, eq, gt, lt, sub, mul, ne, add); the eq
