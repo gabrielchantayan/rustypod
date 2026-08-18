@@ -657,6 +657,191 @@ pub unsafe extern "C" fn message_code_word(message: *const u32) -> u32 {
     *message.add(1)
 }
 
+use crate::cxx::string::{cxx_string_rep_create, empty_rep, rep_data};
+use crate::cxx::string_object::{
+    string_object_c_str, string_object_release_payload, StringObject, STRING_OBJECT_VTABLE,
+};
+use crate::libc::rt_memcpy::__rt_memcpy;
+use crate::libc::strlen::strlen;
+
+/// Byte size of the stack-local query object the constructor
+/// `FUN_0813e474` builds (the original's frame reserves `sp+0x8` ..
+/// `sp+0x50` for it; fields observed out to the mode byte at +0x45).
+const QUERY_OBJECT_SIZE: usize = 0x48;
+
+/// Minimum fresh capacity of the produced string (`mov r0, #0x20` @
+/// 0x082a195c): the original stages 0x20 and the measured length in two
+/// stack slots and picks the larger with an `addhi`/`movls` address
+/// select, so a name of 0x20 characters or fewer gets capacity 0x20.
+const QUERY_NAME_CAPACITY_FLOOR: u32 = 0x20;
+
+/// Host-swappable entry point for the query-object constructor
+/// `FUN_0813e474` @ 0x0813e474 (252 bytes, unported): builds the
+/// 72-byte stack-local query object util/inner_state.rs documents (its
+/// word at +0x40 points at the much larger inner object), storing `id`
+/// as the byte at +0x44 and `mode` as the byte at +0x45. Returns the
+/// object pointer, which the original's caller discards. The target
+/// build calls the fixed firmware address directly; host tests swap
+/// this writable cell to install recording mocks.
+#[cfg(not(target_os = "none"))]
+pub static mut QUERY_OBJECT_CONSTRUCT: usize = 0x0813_e474;
+
+/// Host-swappable entry point for the query-object name getter
+/// `FUN_0813c2ec` @ 0x0813c2ec (160 bytes, unported): resolves the
+/// query object's display name into the two-word [`StringObject`] at
+/// `out` (through the inner object's backend and the id word its +0xf64
+/// pointer carries, defaulting to a static name when the inner object
+/// has none). The target build calls the fixed firmware address
+/// directly; host tests swap this writable cell.
+#[cfg(not(target_os = "none"))]
+pub static mut QUERY_OBJECT_NAME: usize = 0x0813_c2ec;
+
+/// Host-swappable entry point for the query-object destructor
+/// `FUN_0813e5c4` @ 0x0813e5c4 (192 bytes, unported): tears down the
+/// object `FUN_0813e474` built. Its r0:r1 return is discarded by the
+/// original's caller, so the seam models it as void. The target build
+/// calls the fixed firmware address directly; host tests swap this
+/// writable cell.
+#[cfg(not(target_os = "none"))]
+pub static mut QUERY_OBJECT_DESTROY: usize = 0x0813_e5c4;
+
+/// Constructor seam signature: `(this, id, mode) -> this`.
+type QueryConstructFn = unsafe extern "C" fn(*mut u8, u32, u32) -> *mut u8;
+/// Name-getter seam signature: `(out, query)`.
+type QueryNameFn = unsafe extern "C" fn(*mut StringObject, *const u8);
+/// Destructor seam signature: `(query)`.
+type QueryDestroyFn = unsafe extern "C" fn(*mut u8);
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn query_object_construct(query: *mut u8, id: u32, mode: u32) {
+    let construct: QueryConstructFn = core::mem::transmute(0x0813_e474usize);
+    construct(query, id, mode);
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn query_object_construct(query: *mut u8, id: u32, mode: u32) {
+    let address = core::ptr::addr_of!(QUERY_OBJECT_CONSTRUCT).read_volatile();
+    let construct: QueryConstructFn = core::mem::transmute(address);
+    construct(query, id, mode);
+}
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn query_object_name(out: *mut StringObject, query: *const u8) {
+    let name: QueryNameFn = core::mem::transmute(0x0813_c2ecusize);
+    name(out, query);
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn query_object_name(out: *mut StringObject, query: *const u8) {
+    let address = core::ptr::addr_of!(QUERY_OBJECT_NAME).read_volatile();
+    let name: QueryNameFn = core::mem::transmute(address);
+    name(out, query);
+}
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn query_object_destroy(query: *mut u8) {
+    let destroy: QueryDestroyFn = core::mem::transmute(0x0813_e5c4usize);
+    destroy(query);
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn query_object_destroy(query: *mut u8) {
+    let address = core::ptr::addr_of!(QUERY_OBJECT_DESTROY).read_volatile();
+    let destroy: QueryDestroyFn = core::mem::transmute(address);
+    destroy(query);
+}
+
+/// query_name_to_cxx_string — original: `FUN_082a1918` @ 0x082a1918
+/// (156 bytes; NO `bl` call sites in osos.asm and no direct pointer to
+/// the address anywhere in osos.dec, so the original is reached
+/// indirectly — a vtable or computed table outside the image body).
+///
+/// Materializes the DEFAULT query object and hands its name back as a
+/// freshly allocated COW `basic_string<char>` (the class ported in
+/// cxx/string.rs; `string` is the one-word string object, a `char **`):
+///
+/// 1. construct the 72-byte stack-local query object with id byte 0 and
+///    mode 0 (`FUN_0813e474` @ 0x0813e474, unported, behind the
+///    [`QUERY_OBJECT_CONSTRUCT`] seam),
+/// 2. resolve its display name into a two-word [`StringObject`]
+///    (`FUN_0813c2ec` @ 0x0813c2ec, unported, behind the
+///    [`QUERY_OBJECT_NAME`] seam),
+/// 3. read the name's C string ([`string_object_c_str`] @ 0x082a50b0,
+///    ported) and measure it ([`strlen`] @ 0x08392478, ported),
+/// 4. allocate a string rep with capacity max(0x20, length) and the
+///    measured length stamped ([`cxx_string_rep_create`] @ 0x083d8a64,
+///    ported) — an empty name skips the allocation and selects the
+///    shared empty rep 0x08b31804 straight from the literal pool
+///    (`DAT_082a19b4`, binary-verified against osos.dec),
+/// 5. store the data pointer (rep + 0xc) into the one-word string
+///    object BEFORE the copy, then [`__rt_memcpy`] the bytes (ROM
+///    veneer thunk @ 0x08037db0, ported) — the store-ahead order and
+///    the unconditional copy call (length 0 included) match the
+///    original instruction sequence,
+/// 6. plant the StringObject class vtable 0x089a6044 (`DAT_082a19b8`,
+///    binary-verified) and run the shared payload release
+///    ([`string_object_release_payload`] @ 0x08275d74, ported) on the
+///    name holder,
+/// 7. destroy the query object (`FUN_0813e5c4` @ 0x0813e5c4, unported,
+///    behind the [`QUERY_OBJECT_DESTROY`] seam).
+///
+/// Step 4 is `basic_string(const char *)` with the growth policy
+/// inlined: `cxx_string_rep_reserve(this, 0, len, len)` would compute
+/// the same max(0, 32, len) capacity, but the original calls rep_create
+/// DIRECTLY with the floor select staged on its stack (the
+/// `stmia sp,{r0,r4}` / `addhi` / `movls` pointer pick @
+/// 0x082a1964-0x082a1970), so the port calls rep_create too.
+///
+/// Deviations:
+/// - The shared empty rep is the modeled [`empty_rep`] static (the
+///   cxx/string.rs simplification), not the RAM address 0x08b31804.
+/// - The planted vtable is the modeled [`STRING_OBJECT_VTABLE`] static
+///   (the cxx/string_object.rs simplification), not 0x089a6044.
+/// - The three query-class callees are unported firmware; each sits
+///   behind a host-swappable seam (this module's FIXED16_RECIPROCAL
+///   pattern): the target build calls the fixed firmware addresses,
+///   host tests install recording mocks.
+/// - The original's 0x58-byte frame, the r4-r6 spills and the two-slot
+///   capacity staging are ADS register-allocation artifacts; the port
+///   computes max(0x20, length) directly. The two stack objects are
+///   zero-initialized where the original leaves them uninitialized —
+///   the constructor writes every field the later steps read, so the
+///   difference is unobservable.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn query_name_to_cxx_string(string: *mut *mut u8) {
+    let mut query = [0u8; QUERY_OBJECT_SIZE];
+    let mut name = StringObject {
+        vtable: core::ptr::null(),
+        payload: core::ptr::null_mut(),
+    };
+    query_object_construct(query.as_mut_ptr(), 0, 0);
+    query_object_name(&mut name, query.as_ptr());
+    let source = string_object_c_str(&name);
+    let length = strlen(source) as u32;
+    let rep = if length != 0 {
+        let capacity = if length > QUERY_NAME_CAPACITY_FLOOR {
+            length
+        } else {
+            QUERY_NAME_CAPACITY_FLOOR
+        };
+        cxx_string_rep_create(string as *mut u8, capacity, length)
+    } else {
+        empty_rep()
+    };
+    let data = rep_data(rep);
+    *string = data;
+    __rt_memcpy(data, source, length as usize);
+    name.vtable = &STRING_OBJECT_VTABLE;
+    string_object_release_payload(&mut name);
+    query_object_destroy(query.as_mut_ptr());
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -2015,6 +2200,272 @@ mod tests {
             assert_eq!(
                 unsafe { message_code_word(storage.as_ptr() as *const u32) },
                 word
+            );
+        }
+    }
+
+    // ---- query_name_to_cxx_string ----
+
+    use crate::heap::types::{HeapDescriptor, HeapDescriptorDescriptor};
+    use crate::heap::veneers::HEAP_OPS;
+
+    /// Serializes the tests that swap the three QUERY_OBJECT_* seams
+    /// (the FIXED16_DIV_LOCK precedent above).
+    static QUERY_NAME_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Bump arena backing the heap-ops `alloc` slot for these tests
+    /// (the cxx/string.rs precedent): the rep allocation must be
+    /// writable, and the shared mock in heap/veneers hands out a fixed
+    /// fake address.
+    const QUERY_ARENA_SIZE: usize = 4096;
+
+    #[repr(C, align(8))]
+    struct QueryArena([u8; QUERY_ARENA_SIZE]);
+
+    static mut QUERY_ARENA: QueryArena = QueryArena([0; QUERY_ARENA_SIZE]);
+    static mut QUERY_ARENA_USED: usize = 0;
+    /// Every (pointer, tag) the arena `free` slot recorded, in order.
+    static mut QUERY_FREES: Vec<(*mut u8, usize)> = Vec::new();
+
+    unsafe extern "C" fn query_arena_alloc(
+        _heap: *mut HeapDescriptorDescriptor,
+        size: usize,
+        _tag: usize,
+    ) -> *mut u8 {
+        let used = QUERY_ARENA_USED;
+        let aligned = (size + 7) & !7;
+        if used + aligned > QUERY_ARENA_SIZE {
+            return core::ptr::null_mut();
+        }
+        QUERY_ARENA_USED = used + aligned;
+        core::ptr::addr_of_mut!(QUERY_ARENA.0).cast::<u8>().add(used)
+    }
+
+    unsafe extern "C" fn query_arena_free(
+        _heap: *mut HeapDescriptorDescriptor,
+        ptr: *mut u8,
+        tag: usize,
+    ) {
+        (*core::ptr::addr_of_mut!(QUERY_FREES)).push((ptr, tag));
+    }
+
+    unsafe extern "C" fn query_arena_create(
+        desc: *mut HeapDescriptor,
+        _start: *mut u8,
+        _size: usize,
+    ) -> *mut HeapDescriptorDescriptor {
+        desc as *mut HeapDescriptorDescriptor
+    }
+
+    /// Callee event log: the mocks push their names as they run.
+    static mut QUERY_EVENTS: Vec<&'static str> = Vec::new();
+    static mut CONSTRUCT_QUERY: *mut u8 = core::ptr::null_mut();
+    static mut CONSTRUCT_ID: u32 = u32::MAX;
+    static mut CONSTRUCT_MODE: u32 = u32::MAX;
+    static mut NAME_OUT: *mut StringObject = core::ptr::null_mut();
+    static mut NAME_QUERY: *const u8 = core::ptr::null();
+    static mut DESTROY_QUERY: *mut u8 = core::ptr::null_mut();
+    /// Payload the name mock installs into the StringObject; NULL makes
+    /// `string_object_c_str` fall back to the shared empty C string.
+    static mut NAME_PAYLOAD_TO_INSTALL: *mut u8 = core::ptr::null_mut();
+    /// Backing text for the installed payload (a static: the arena
+    /// `free` slot only records, it never actually releases).
+    static mut NAME_TEXT: [u8; 96] = [0; 96];
+
+    unsafe extern "C" fn recording_construct(query: *mut u8, id: u32, mode: u32) -> *mut u8 {
+        (*core::ptr::addr_of_mut!(QUERY_EVENTS)).push("construct");
+        CONSTRUCT_QUERY = query;
+        CONSTRUCT_ID = id;
+        CONSTRUCT_MODE = mode;
+        query
+    }
+
+    unsafe extern "C" fn recording_name(out: *mut StringObject, query: *const u8) {
+        (*core::ptr::addr_of_mut!(QUERY_EVENTS)).push("name");
+        NAME_OUT = out;
+        NAME_QUERY = query;
+        (*out).vtable = &STRING_OBJECT_VTABLE;
+        (*out).payload = NAME_PAYLOAD_TO_INSTALL;
+    }
+
+    unsafe extern "C" fn recording_destroy(query: *mut u8) {
+        (*core::ptr::addr_of_mut!(QUERY_EVENTS)).push("destroy");
+        DESTROY_QUERY = query;
+    }
+
+    struct QueryMockInstall {
+        previous_construct: usize,
+        previous_name: usize,
+        previous_destroy: usize,
+        _seam_lock: MutexGuard<'static, ()>,
+        _heap_lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for QueryMockInstall {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(QUERY_OBJECT_CONSTRUCT)
+                    .write_volatile(self.previous_construct);
+                core::ptr::addr_of_mut!(QUERY_OBJECT_NAME)
+                    .write_volatile(self.previous_name);
+                core::ptr::addr_of_mut!(QUERY_OBJECT_DESTROY)
+                    .write_volatile(self.previous_destroy);
+            }
+        }
+    }
+
+    /// Installs the recording mocks on all three seams plus the arena
+    /// over the shared heap-ops table, and resets every log.
+    fn install_query_mocks() -> QueryMockInstall {
+        let seam_lock = QUERY_NAME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let heap_lock = crate::heap::veneers::tests::mock_heap();
+        unsafe {
+            QUERY_ARENA_USED = 0;
+            (*core::ptr::addr_of_mut!(QUERY_FREES)).clear();
+            (*core::ptr::addr_of_mut!(QUERY_EVENTS)).clear();
+            CONSTRUCT_QUERY = core::ptr::null_mut();
+            CONSTRUCT_ID = u32::MAX;
+            CONSTRUCT_MODE = u32::MAX;
+            NAME_OUT = core::ptr::null_mut();
+            NAME_QUERY = core::ptr::null();
+            DESTROY_QUERY = core::ptr::null_mut();
+            NAME_PAYLOAD_TO_INSTALL = core::ptr::null_mut();
+            let ops = core::ptr::addr_of_mut!(HEAP_OPS);
+            (*ops).alloc = query_arena_alloc;
+            (*ops).free = query_arena_free;
+            (*ops).create = query_arena_create;
+            let previous_construct =
+                core::ptr::addr_of!(QUERY_OBJECT_CONSTRUCT).read_volatile();
+            core::ptr::addr_of_mut!(QUERY_OBJECT_CONSTRUCT)
+                .write_volatile(recording_construct as usize);
+            let previous_name = core::ptr::addr_of!(QUERY_OBJECT_NAME).read_volatile();
+            core::ptr::addr_of_mut!(QUERY_OBJECT_NAME)
+                .write_volatile(recording_name as usize);
+            let previous_destroy =
+                core::ptr::addr_of!(QUERY_OBJECT_DESTROY).read_volatile();
+            core::ptr::addr_of_mut!(QUERY_OBJECT_DESTROY)
+                .write_volatile(recording_destroy as usize);
+            QueryMockInstall {
+                previous_construct,
+                previous_name,
+                previous_destroy,
+                _seam_lock: seam_lock,
+                _heap_lock: heap_lock,
+            }
+        }
+    }
+
+    /// Points the name mock's payload at `text` (a NUL-terminated C
+    /// string, without the trailing NUL in the slice).
+    fn install_name_text(text: &[u8]) {
+        unsafe {
+            let storage = core::ptr::addr_of_mut!(NAME_TEXT).cast::<u8>();
+            core::ptr::copy_nonoverlapping(text.as_ptr(), storage, text.len());
+            storage.add(text.len()).write(0);
+            NAME_PAYLOAD_TO_INSTALL = storage;
+        }
+    }
+
+    /// The rep header below a produced string's data pointer.
+    unsafe fn produced_rep(data: *mut u8) -> (i32, u32, u32) {
+        let rep = crate::cxx::string::data_rep(data);
+        ((*rep).refcount, (*rep).capacity, (*rep).length)
+    }
+
+    #[test]
+    fn query_name_constructs_names_copies_and_destroys_in_order() {
+        let _mocks = install_query_mocks();
+        install_name_text(b"settings");
+        let mut slot: *mut u8 = core::ptr::null_mut();
+
+        unsafe {
+            query_name_to_cxx_string(&mut slot);
+
+            assert_eq!(
+                *core::ptr::addr_of!(QUERY_EVENTS),
+                Vec::from(["construct", "name", "destroy"])
+            );
+            // The default query object: id byte 0, mode byte 0.
+            assert_eq!(CONSTRUCT_ID, 0);
+            assert_eq!(CONSTRUCT_MODE, 0);
+            // One shared query buffer travels through all three calls.
+            assert!(!CONSTRUCT_QUERY.is_null());
+            assert_eq!(NAME_QUERY, CONSTRUCT_QUERY as *const u8);
+            assert_eq!(DESTROY_QUERY, CONSTRUCT_QUERY);
+            assert!(!NAME_OUT.is_null());
+
+            // The produced string owns a fresh rep: refcount 0, the
+            // 0x20 capacity floor (length 8 < 0x20), length stamped.
+            assert!(!slot.is_null());
+            assert_ne!(slot, crate::cxx::string::empty_rep_data());
+            assert_eq!(produced_rep(slot), (0, 0x20, 8));
+            assert_eq!(core::slice::from_raw_parts(slot, 9), b"settings\0");
+
+            // The name holder's payload was released through the
+            // tag-0x34 free path.
+            let payload = core::ptr::addr_of_mut!(NAME_TEXT).cast::<u8>();
+            assert_eq!(
+                *core::ptr::addr_of!(QUERY_FREES),
+                Vec::from([(payload, 0x34usize)])
+            );
+        }
+    }
+
+    #[test]
+    fn query_name_applies_the_capacity_floor_at_0x20() {
+        let _mocks = install_query_mocks();
+        // (name length, expected capacity): the original picks
+        // max(0x20, length) with its addhi/movls slot select.
+        for (length, expected_capacity) in [
+            (1usize, 0x20u32),
+            (0x1f, 0x20),
+            (0x20, 0x20),
+            (0x21, 0x21),
+            (0x40, 0x40),
+        ] {
+            unsafe {
+                QUERY_ARENA_USED = 0;
+                (*core::ptr::addr_of_mut!(QUERY_FREES)).clear();
+                let text: Vec<u8> = (0..length).map(|i| b'a' + (i % 26) as u8).collect();
+                install_name_text(&text);
+                let mut slot: *mut u8 = core::ptr::null_mut();
+
+                query_name_to_cxx_string(&mut slot);
+
+                assert_eq!(
+                    produced_rep(slot),
+                    (0, expected_capacity, length as u32),
+                    "length={length}"
+                );
+                assert_eq!(core::slice::from_raw_parts(slot, length), text.as_slice());
+                assert_eq!(*slot.add(length), 0, "NUL at data[length]");
+            }
+        }
+    }
+
+    #[test]
+    fn query_name_empty_name_parks_on_the_shared_empty_rep() {
+        let _mocks = install_query_mocks();
+        // A NULL payload makes string_object_c_str substitute the
+        // shared empty C string, whose strlen is 0.
+        let mut slot: *mut u8 = core::ptr::null_mut();
+
+        unsafe {
+            query_name_to_cxx_string(&mut slot);
+
+            assert_eq!(
+                *core::ptr::addr_of!(QUERY_EVENTS),
+                Vec::from(["construct", "name", "destroy"])
+            );
+            assert_eq!(slot, crate::cxx::string::empty_rep_data());
+            assert_eq!(*slot, 0);
+            assert_eq!(
+                QUERY_ARENA_USED, 0,
+                "an empty name never allocates a rep"
+            );
+            assert!(
+                (*core::ptr::addr_of!(QUERY_FREES)).is_empty(),
+                "the NULL payload takes release_payload's early-out"
             );
         }
     }

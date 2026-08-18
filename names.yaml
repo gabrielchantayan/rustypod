@@ -21138,6 +21138,70 @@ functions:
       pop {fp,pc} frame, same as the whole fixed16 cluster and
       the two envelope getter siblings.
 
+  - address: 0x082a1918
+    ghidra: FUN_082a1918
+    name: query_name_to_cxx_string
+    size: 156
+    sig: "void query_name_to_cxx_string(string: *mut *mut u8)"
+    module: fp/fp_misc
+    status: ported
+    vars:
+      param_1: string
+      uVar1: source
+      uVar2: length
+      iVar4: rep
+      local_68: capacity_floor_slot
+      uStack_64: capacity_length_slot
+      auStack_60: query
+      local_18: name
+      DAT_082a19b4: SHARED_EMPTY_REP (0x08b31804, binary-verified)
+      DAT_082a19b8: STRING_OBJECT_VTABLE (0x089a6044, binary-verified)
+    notes: >-
+      No bl call sites in osos.asm and no pointer to 0x082a1918
+      anywhere in osos.dec (binary-scanned) - reached indirectly
+      (vtable or computed table outside the image body).
+      Materializes the DEFAULT query object (the 72-byte
+      stack-local class of util/inner_state.rs: constructor
+      FUN_0813e474 @ 0x0813e474 with id byte 0 / mode byte 0,
+      destructor FUN_0813e5c4 @ 0x0813e5c4), resolves its display
+      name into a two-word StringObject (FUN_0813c2ec @
+      0x0813c2ec), then builds a COW basic_string<char> from the
+      name's C string: string_object_c_str @ 0x082a50b0 (ported),
+      strlen @ 0x08392478 (ported), then either the shared empty
+      rep 0x08b31804 (length 0, literal DAT_082a19b4) or
+      cxx_string_rep_create @ 0x083d8a64 (ported) with capacity
+      max(0x20, length) - the original stages 0x20 and the length
+      in two stack slots and picks the larger with an
+      addhi/movls address select (a direct rep_create call, NOT
+      rep_reserve, though reserve(0, len, len) computes the same
+      capacity). Stores the data pointer (rep + 0xc) into the
+      one-word string object BEFORE the copy, then __rt_memcpy
+      (ROM veneer thunk @ 0x08037db0, ported) - unconditional,
+      length 0 included. Plants the StringObject vtable
+      0x089a6044 (DAT_082a19b8) and runs string_object_release_payload
+      @ 0x08275d74 (ported) on the name holder, then destroys
+      the query object. The three query-class callees are
+      unported; each sits behind a host-swappable usize seam
+      (QUERY_OBJECT_CONSTRUCT / QUERY_OBJECT_NAME /
+      QUERY_OBJECT_DESTROY, this module's FIXED16_RECIPROCAL
+      pattern) - the target build transmutes the fixed firmware
+      addresses, host tests install recording mocks. Deviations:
+      modeled empty_rep() / STRING_OBJECT_VTABLE statics stand
+      in for the ROM/RAM addresses (the cxx/string.rs and
+      cxx/string_object.rs simplifications); the two stack
+      objects are zero-initialized where the original leaves
+      them uninitialized (unobservable - the constructor writes
+      every field later steps read); the 0x58-byte frame and
+      two-slot capacity staging are ADS artifacts, computed
+      directly. match.py structural (exit-1 diff expected):
+      same construct -> name -> c_str -> strlen ->
+      empty-or-create -> store -> memcpy -> vtable -> release
+      -> destroy shape and the same cmp/movls 0x20 capacity
+      floor; the diffs are the crate fp frame, the blx seam
+      dispatches (0x0813e474/0x0813c2ec visible as literal
+      words), an __aeabi_memclr4 for the zero-init, and LLVM
+      inlining strlen + rep_create (the documented deviations).
+
   - address: 0x080e97ac
     ghidra: FUN_080e97ac
     name: fixed16_cos
