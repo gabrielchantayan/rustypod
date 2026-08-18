@@ -21342,6 +21342,60 @@ functions:
       __aeabi_memclr4 for the zero-init (the documented
       deviations).
 
+  - address: 0x082a19ec
+    ghidra: FUN_082a19ec
+    name: pmu_reg87_bit1_clear
+    size: 20
+    sig: "bool pmu_reg87_bit1_clear(void)"
+    module: fp/fp_misc
+    status: ported
+    vars:
+      iVar1: query_status
+      thunk_FUN_08086e4c: pmu_reg87_bit1_query (the veneer @
+        0x0805381c, `b 0x08086e4c`; target FUN_08086e4c @ 0x08086e4c,
+        28 bytes, unported - behind the PMU_REG87_BIT1_QUERY seam)
+      FUN_082e55dc: pmu_reg87_bit1_read (68 bytes, unported - the
+        mutexed single-register PMU read the query runs)
+    notes: >-
+      No bl call sites in osos.asm and no pointer to 0x082a19ec
+      anywhere in osos.dec (binary-scanned) - reached indirectly,
+      like its neighbors query_name_to_cxx_string @ 0x082a1918 and
+      context_text_to_cxx_string @ 0x082a19bc (vtable or computed
+      table outside the image body); middle member of that
+      indirect diagnostics run 0x082a1918-0x082a1a6c. The whole
+      body is stmdb sp!,{r4,lr}; bl 0x0805381c; cmp r0,#0; movne
+      r0,#1; ldmia sp!,{r4,pc} - booleanizes the PMU
+      register-0x87 bit-1 query FUN_08086e4c (reached through the
+      4-byte veneer thunk_FUN_08086e4c @ 0x0805381c, binary-
+      verified `b 0x08086e4c`), which stages a u32 stack slot,
+      runs FUN_082e55dc @ 0x082e55dc (sem 0x11/5 lock pair around
+      the raw transfer FUN_0836d3b8: PCF50635 register 0x87, one
+      byte, (byte & 2) >> 1 into the slot, transfer status
+      returned) and answers 1 when the extracted bit is 0, else 0
+      (rsbs r0,r0,#1 / movcc r0,#0: slot 0 -> 1, slot >= 1 -> 0).
+      So this function answers whether that flag is clear. The
+      concrete meaning of PMU register 0x87 bit 1 is NOT
+      recovered: 0x87 lies outside the public PCF5063x register
+      map (ends at DCDCPFM 0x84) and Rockbox's ipod6g PMU driver
+      never touches it; the query's other consumers FUN_080617c0
+      (early-returns when clear, after mapping a charger/
+      accessory-kind enum through a byte table) and FUN_081a5940
+      (flags bit 0x200 + flag clear -> result code 0xf) point at
+      a charger/accessory status flag without pinning it down.
+      The query callee is unported firmware behind the
+      host-swappable PMU_REG87_BIT1_QUERY usize seam (this
+      module's FIXED16_RECIPROCAL pattern): the target build
+      transmutes 0x08086e4c (the veneer folds away - a bare b),
+      host tests install recording mocks. Deviations: the pushed
+      r4 is never used (gratuitous ADS frame spill); the
+      cmp/movne pair is the ADS != 0 bool conversion, modeled by
+      Rust's bool return (every nonzero query value -> true,
+      pinned by host tests over 0/1/2/-1/INT_MIN/INT_MAX).
+      match.py structural (exit-1 diff expected): same call ->
+      cmp r0,#0 -> movne r0,#1 shape; the diffs are the crate fp
+      frame and the blx seam dispatch (0x08086e4c visible as a
+      literal word), the documented seam deviations.
+
   - address: 0x080e97ac
     ghidra: FUN_080e97ac
     name: fixed16_cos

@@ -968,6 +968,83 @@ pub unsafe extern "C" fn context_text_to_cxx_string(string: *mut *mut u8) {
     counted_u16_deserialize(counted.as_ptr(), string);
 }
 
+/// Host-swappable entry point for the PMU register-0x87 bit-1 query
+/// `FUN_08086e4c` @ 0x08086e4c (28 bytes, unported; the original
+/// reaches it through the 4-byte branch veneer `thunk_FUN_08086e4c`
+/// @ 0x0805381c, `b 0x08086e4c`): stages a u32 stack slot, runs the
+/// mutexed single-register PMU I2C read `FUN_082e55dc` @ 0x082e55dc
+/// (68 bytes: sem 0x11 / sem 5 lock pair around the raw transfer
+/// `FUN_0836d3b8` — PCF50635 register 0x87, one byte — extracting
+/// `(byte & 2) >> 1` into the slot and returning the transfer
+/// status), then answers 1 when the extracted bit is 0, else 0
+/// (`rsbs r0,r0,#1` / `movcc r0,#0`: slot 0 -> 1, slot >= 1 -> 0).
+/// The target build calls the fixed firmware address directly; host
+/// tests swap this writable cell to install recording mocks.
+#[cfg(not(target_os = "none"))]
+pub static mut PMU_REG87_BIT1_QUERY: usize = 0x0808_6e4c;
+
+/// Query seam signature: `() -> status` (1 when the bit is clear).
+type PmuReg87Bit1QueryFn = unsafe extern "C" fn() -> i32;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn pmu_reg87_bit1_query() -> i32 {
+    let query: PmuReg87Bit1QueryFn = core::mem::transmute(0x0808_6e4cusize);
+    query()
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn pmu_reg87_bit1_query() -> i32 {
+    let address = core::ptr::addr_of!(PMU_REG87_BIT1_QUERY).read_volatile();
+    let query: PmuReg87Bit1QueryFn = core::mem::transmute(address);
+    query()
+}
+
+/// pmu_reg87_bit1_clear — original: `FUN_082a19ec` @ 0x082a19ec (20
+/// bytes; NO `bl` call sites in osos.asm and no direct pointer to the
+/// address anywhere in osos.dec (binary-scanned), so — like its
+/// neighbors [`query_name_to_cxx_string`] @ 0x082a1918 and
+/// [`context_text_to_cxx_string`] @ 0x082a19bc — the original is
+/// reached indirectly, a vtable or computed table outside the image
+/// body).
+///
+/// Booleanizes the PMU register-0x87 bit-1 query: the whole body is
+/// `stmdb sp!,{r4,lr}; bl 0x0805381c; cmp r0,#0; movne r0,#1;
+/// ldmia sp!,{r4,pc}` (Ghidra: `iVar1 = thunk_FUN_08086e4c(); return
+/// iVar1 != 0`), where the veneer target `FUN_08086e4c` @ 0x08086e4c
+/// (unported, behind the [`PMU_REG87_BIT1_QUERY`] seam) returns 1
+/// when bit 1 of the PCF50635 register 0x87 byte is clear, else 0 —
+/// so this function answers whether that flag is clear. The concrete
+/// meaning of the bit is NOT recovered: register 0x87 lies outside
+/// the public PCF5063x register map (which ends at DCDCPFM 0x84) and
+/// Rockbox's ipod6g PMU driver never touches it. The same query's
+/// other consumers — FUN_080617c0 (early-returns when the flag is
+/// clear after mapping a charger/accessory-kind enum through a byte
+/// table) and FUN_081a5940 (flags bit 0x200 set + flag clear ->
+/// result code 0xf) — are consistent with a charger/accessory status
+/// flag but do not pin it down. Middle member of the indirectly
+/// reached diagnostics run 0x082a1918-0x082a1a6c (query name string,
+/// context text string, this flag, two more *_to_cxx_string
+/// wrappers, a u16-pair splitter).
+///
+/// Deviations:
+/// - The query callee is unported firmware behind a host-swappable
+///   usize seam (this module's FIXED16_RECIPROCAL pattern): the
+///   target build transmutes the fixed firmware address 0x08086e4c
+///   (the veneer @ 0x0805381c is folded away — it is a bare `b`),
+///   host tests install recording mocks.
+/// - The pushed r4 is never used (the `stmdb sp!,{r4,lr}` / `ldmia
+///   sp!,{r4,pc}` pair spills and restores it gratuitously — an ADS
+///   frame artifact); the port keeps no frame.
+/// - The `cmp r0,#0` / `movne r0,#1` pair is the ADS `!= 0` bool
+///   conversion; Rust's `bool` return models it directly, mapping
+///   every nonzero query value to true.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_reg87_bit1_clear() -> bool {
+    pmu_reg87_bit1_query() != 0
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -2733,6 +2810,88 @@ mod tests {
                 assert_eq!(OBSERVED_COUNT, count, "count={count:#x}");
                 assert_eq!(slot, crate::cxx::string::empty_rep_data());
             }
+        }
+    }
+
+    // ---- pmu_reg87_bit1_clear ----
+
+    /// Serializes access to the PMU_REG87_BIT1_QUERY seam cell (the
+    /// QUERY_NAME_LOCK precedent above).
+    static PMU_FLAG_LOCK: Mutex<()> = Mutex::new(());
+    static mut PMU_FLAG_RESULT: i32 = 0;
+    static mut PMU_FLAG_CALLS: usize = 0;
+
+    unsafe extern "C" fn recording_pmu_flag_query() -> i32 {
+        PMU_FLAG_CALLS += 1;
+        PMU_FLAG_RESULT
+    }
+
+    struct PmuFlagInstall {
+        previous: usize,
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for PmuFlagInstall {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(PMU_REG87_BIT1_QUERY).write_volatile(self.previous);
+            }
+        }
+    }
+
+    fn install_pmu_flag(result: i32) -> PmuFlagInstall {
+        let lock = PMU_FLAG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            let previous = core::ptr::addr_of!(PMU_REG87_BIT1_QUERY).read_volatile();
+            core::ptr::addr_of_mut!(PMU_REG87_BIT1_QUERY)
+                .write_volatile(recording_pmu_flag_query as usize);
+            PMU_FLAG_RESULT = result;
+            PMU_FLAG_CALLS = 0;
+            PmuFlagInstall {
+                previous,
+                _lock: lock,
+            }
+        }
+    }
+
+    #[test]
+    fn pmu_reg87_bit1_clear_calls_the_query_once_and_passes_zero_through() {
+        let _mock = install_pmu_flag(0);
+
+        assert!(!unsafe { pmu_reg87_bit1_clear() });
+        unsafe {
+            assert_eq!(PMU_FLAG_CALLS, 1);
+        }
+    }
+
+    #[test]
+    fn pmu_reg87_bit1_clear_maps_every_nonzero_to_true() {
+        let _mock = install_pmu_flag(0);
+
+        // The query's own contract only yields 0/1, but the original's
+        // cmp r0,#0 / movne r0,#1 maps EVERY nonzero value to true -
+        // pin the whole i32 range behavior, not just the 0/1 corner.
+        for value in [1, 2, -1, i32::MAX, i32::MIN] {
+            unsafe {
+                PMU_FLAG_RESULT = value;
+                PMU_FLAG_CALLS = 0;
+            }
+            assert!(unsafe { pmu_reg87_bit1_clear() }, "value={value:#x}");
+            unsafe {
+                assert_eq!(PMU_FLAG_CALLS, 1, "value={value:#x}");
+            }
+        }
+    }
+
+    #[test]
+    fn pmu_reg87_bit1_clear_reads_the_live_result_each_call() {
+        let _mock = install_pmu_flag(0);
+
+        for (value, expected) in [(0, false), (1, true), (0, false), (-1, true)] {
+            unsafe {
+                PMU_FLAG_RESULT = value;
+            }
+            assert_eq!(unsafe { pmu_reg87_bit1_clear() }, expected, "value={value:#x}");
         }
     }
 }
