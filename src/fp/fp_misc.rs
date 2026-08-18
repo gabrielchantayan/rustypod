@@ -1658,6 +1658,56 @@ pub unsafe extern "C" fn plist_node_child_count(node: *const u8) -> i32 {
     __rt_sdiv(span, 40)
 }
 
+/// plist_node_processing_instruction — original: `FUN_082a1bd8` @
+/// 0x082a1bd8 (8 bytes, binary-verified against osos.dec: exactly two
+/// instructions, `ldr r0,[r0,#0x20]` at 0x082a1bd8 and `bx lr` at
+/// 0x082a1bdc, with the next function starting at 0x082a1be0 —
+/// functions.csv's 8-byte size is exact and there is no literal pool.
+/// One call site, the `bl` at 0x0815aec0 inside FUN_0815aeac; no
+/// pointer to the address anywhere in osos.dec (binary-scanned)).
+///
+/// A two-instruction getter answering the plist node's +0x20 word: a
+/// pointer to the node's processing-instruction companion node, NULL
+/// when the document never attached one. The plist node is a 0x28-byte
+/// record — layout binary-verified from the stack-node constructor at
+/// 0x0815a810-0x0815a848, which builds a node inline with
+/// cxx_string_default_ctor and zero stores: +0x00 tag string, +0x04/
+/// +0x08/+0x0c attribute string-pair vector, +0x10 value string,
+/// +0x14/+0x18/+0x1c child vector (the plist_node_child_count span),
+/// +0x20 this companion pointer (zeroed), +0x24 kind byte.
+///
+/// The +0x20 field is filled only by the lazy accessor @ 0x0825c264,
+/// which on first use allocates a second 0x28-byte record with
+/// operator_new(0x28) (ported, heap/veneers), initializes it to the
+/// same empty-node shape (both strings parked on the shared empty rep
+/// data 0x08b31810, all vector words NULL, +0x20 NULL, kind byte 0),
+/// stores it at node+0x20 and returns it. That accessor's only caller
+/// is the XML parser's processing-instruction routine FUN_0825ceac @
+/// 0x0825ceac, which parses a `<?target attr=\"...\" ... ?>` section
+/// (the `'?'` = 0x3f terminator check at 0x0825cf08; the XML entity
+/// literals \"lt\"/\"gt\"/\"amp\"/\"apos\"/\"quot\"/\"nbsp\"/\"#xA\"
+/// at 0x0825ce84-0x0825ceaa binary-verified in osos.dec) into the
+/// companion: the PI target becomes the companion's name and the
+/// pseudo-attributes its pair-vector. The node destructor @
+/// 0x0825c790 recurses into +0x20, so the companion is owned by the
+/// node. The sole consumer, FUN_0815aeac, gates on it: no companion
+/// (NULL) or wrong attribute values in the companion's map rejects
+/// the document before the node's own tag and attribute map are
+/// consulted.
+///
+/// Deviations: none beyond the established host-testing idiom — the
+/// load is a plain ABI-aligned `ldr`; the port reads it with
+/// `read_unaligned` anyway, the cxx/templates.rs precedent against a
+/// 4-but-not-8-aligned node on a 64-bit host (the
+/// plist_node_child_count deviation). Ghidra's decompile (`return
+/// *(undefined4 *)(param_1 + 0x20);`) matches the listing exactly.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn plist_node_processing_instruction(node: *const u8) -> *mut u8 {
+    // `read_unaligned`: same 4-but-not-8-aligned firmware head hazard
+    // as plist_node_child_count just above.
+    core::ptr::read_unaligned(node.add(0x20) as *const u32) as *mut u8
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -4444,5 +4494,60 @@ mod tests {
             );
         }
         assert_eq!(unsafe { plist_node_child_count(node.as_ptr()) }, 2);
+    }
+
+    // ---- plist_node_processing_instruction ----
+
+    /// Builds a fake plist node: the full 0x28-byte record (layout
+    /// from the stack-node constructor at 0x0815a810-0x0815a848)
+    /// poisoned with 0xa5 except the +0x20 companion-node word, which
+    /// carries `companion`.
+    fn plist_node_with_companion(companion: u32) -> Vec<u8> {
+        let mut node = std::vec![0xa5u8; 0x28];
+        node[0x20..0x24].copy_from_slice(&companion.to_le_bytes());
+        node
+    }
+
+    #[test]
+    fn plist_node_processing_instruction_forwards_the_companion_word() {
+        // Whatever node pointer the parser's lazy accessor stored at
+        // +0x20 comes back untouched.
+        for sentinel in [0x0800_0024u32, 0x08ab_cde0, 0xffff_fffc] {
+            let node = plist_node_with_companion(sentinel);
+            assert_eq!(
+                unsafe { plist_node_processing_instruction(node.as_ptr()) },
+                sentinel as *mut u8,
+                "companion {sentinel:#010x}"
+            );
+        }
+    }
+
+    #[test]
+    fn plist_node_processing_instruction_returns_null_when_no_pi_was_parsed() {
+        // The constructor zeroes +0x20; only the lazy accessor @
+        // 0x0825c264 (from the `<?...?>` parser FUN_0825ceac) ever
+        // fills it, and the sole consumer rejects the document on a
+        // NULL answer.
+        let node = plist_node_with_companion(0);
+        assert!(unsafe { plist_node_processing_instruction(node.as_ptr()) }.is_null());
+    }
+
+    #[test]
+    fn plist_node_processing_instruction_reads_only_offset_0x20() {
+        // Every other record byte is 0xa5 poison: a read of +0x1c
+        // (child-vector cap) or the +0x24 kind byte instead of +0x20
+        // would answer poison, not the sentinel.
+        let sentinel = 0x0812_3456u32;
+        let node = plist_node_with_companion(sentinel);
+        assert_eq!(
+            u32::from_le_bytes(node[0x1c..0x20].try_into().unwrap()),
+            0xa5a5_a5a5,
+            "builder poisoned child-vector cap at +0x1c"
+        );
+        assert_eq!(node[0x24], 0xa5, "builder poisoned kind byte at +0x24");
+        assert_eq!(
+            unsafe { plist_node_processing_instruction(node.as_ptr()) },
+            sentinel as *mut u8
+        );
     }
 }
