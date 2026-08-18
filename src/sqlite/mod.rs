@@ -117,6 +117,7 @@ pub mod value_new;
 pub mod value_set_str;
 pub mod value_text;
 pub mod vdbe;
+pub mod vdbe_mem_set_int64;
 pub mod vdbe_mem_set_null;
 pub mod vdbe_op;
 pub mod vdbe_set_col_name;

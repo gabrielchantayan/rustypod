@@ -15557,6 +15557,67 @@ functions:
       finalize slot with blx through a literal-pool load (the slot, not
       the original's bl @ 0x0838bc38) and reloads value into r4 late.
 
+  - address: 0x0838c110
+    ghidra: FUN_0838c110
+    name: vdbe_mem_set_int64
+    size: 44
+    sig: "void vdbe_mem_set_int64(Mem *p_mem, i64 value)"
+    module: sqlite/vdbe_mem_set_int64
+    status: ported
+    vars: {param_1: p_mem, param_3: value, param_4: value_hi}
+    notes: >-
+      Upstream SQLite's sqlite3VdbeMemSetInt64 (vdbemem.c) - the
+      early-3.x release-store-stamp form: mem_release @ 0x0838c04c
+      frees the old guts, the i64 lands in the integer arm of the
+      value union at +0x00 (stmia, low word first), flags at +0x1c is
+      ASSIGNED MEM_Int (0x4) outright - no attribute bit survives,
+      unlike the sibling vdbe_mem_set_null @ 0x0838c13c's
+      read-modify-write - and type at +0x1e becomes SQLITE_INTEGER (1).
+      It sits between sqlite3VdbeMemSetDouble @ 0x0838c0c4 (stores
+      the f64 arm at +0x08 with MEM_Real 0x8 / SQLITE_FLOAT 2) and
+      sqlite3VdbeMemSetNull @ 0x0838c13c - the numeric-datum pair of
+      the vdbeMem setter family. Extent 0x0838c110..0x0838c13c
+      confirmed from raw words - 0x0838c138 is the ldmia ...,{pc}
+      return and 0x0838c13c is the ldrh entry of MemSetNull; no
+      literal pool. 7 branch references, binary-scanned from osos.dec
+      (2 bl, 4 tail-b, 1 beq): bl @ 0x08365590 inside FUN_0836554c
+      (doubles a fetched 64-bit, zeros on overflow, embedded Mem at
+      +8); bl @ 0x0838efbc inside FUN_0838ef84 (fallback path stores
+      into a column-indexed Mem array element, *(p+0x38) + n*0x28 -
+      0x28); tail b @ 0x082b2974 inside FUN_082b28b8 (embedded Mem at
+      +8); tail b @ 0x082c5030 inside FUN_082c5008 (ldrd from a
+      fetched cell, embedded Mem at +8); tail b @ 0x082d7a4c inside
+      FUN_082d79b4 (sign-extends a computed 32-bit count, mov r3,r2,
+      asr #0x1f); tail b @ 0x0839120c from the unlisted thunk @
+      0x08391200 (mov r2,r1; mov r3,r1,asr #0x1f; add r0,r0,#8; b -
+      the 32->64 sign-extending sqlite3VdbeMemSetInt analog, in the
+      embedded-Mem setter run beside the set-null thunk @ 0x08391218);
+      beq @ 0x0839292c inside FUN_083928c8, the value copy whose byte
+      at +0x19 discriminates the payload arm (ldrd from +0x00 u.i and
+      beq here, or from +0x08 r and bne to set-double @ 0x0838c0c4).
+      Deviations - the port goes through the typed repr(C) Mem
+      (offsets statically asserted on 32-bit targets in
+      sqlite/vdbe.rs); mem_release @ 0x0838c04c IS ported
+      (sqlite/mem_release) and is the shipped default of the new
+      MEM_SET_OPS slot, kept so host tests can intercept it - the
+      ported release speaks the original's raw byte offsets, which
+      coincide with the typed Mem only on the 32-bit target (the same
+      reason value_free keeps its VALUE_MEM_OPS slot). match.py
+      structural: same push/arg-save/release-call/i64-store/strh #4
+      @+0x1c/strb #1 @+0x1e/pop shape; LLVM calls the release through
+      the slot (literal-pool ldr + blx, not the original's bl @
+      0x0838c04c), splits the stmia into two strs, swaps the
+      strb/strh order across disjoint offsets and adds its fp frame.
+      Host tests (5) - the value landing bit-for-bit in u over edge
+      cases (0, +-1, sign/word boundaries, i64 extremes), flags
+      assigned MEM_Int outright exhaustively over all 65536 prior u16
+      values (no attribute bit survives), value_type forced to
+      SQLITE_INTEGER over all 256 prior type bytes, the guts release
+      running exactly once per call on the cell itself (recording
+      mock on MEM_SET_OPS), and r/db/n/enc byte-for-byte untouched
+      (z/xDel/zMalloc are the release's own contract, covered by
+      sqlite::mem_release's tests).
+
   - address: 0x0838c13c
     ghidra: FUN_0838c13c
     name: vdbe_mem_set_null
