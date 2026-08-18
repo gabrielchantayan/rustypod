@@ -16300,12 +16300,13 @@ functions:
       && aSortOrder[i]. Ghidra's decompile drops the third mem_compare
       argument and obscures the endgame as SBORROW4 — the disassembly
       is authoritative (movge r2,#0 / ldrlt r2,[r0,#16] is the coll
-      select). The serial_type_len callee @ 0x0838cfe8 has since been
-      ported (sqlite/vdbe_serial_type_len) and is the shipped default
-      of its VDBE_RECORD_COMPARE_OPS slot (the value_set_str pattern);
-      serial_get @ 0x0838cc1c and mem_compare @ 0x0837d47c remain the
-      seam (target defaults transmute the retail addresses; host
-      defaults panic). Deviations: the serial type_len jump-table
+      select). The serial_type_len callee @ 0x0838cfe8 and serial_get
+      callee @ 0x0838cc1c are now ported (sqlite/vdbe_serial_type_len
+      and sqlite/vdbe_serial_get) and are the shipped defaults of their
+      VDBE_RECORD_COMPARE_OPS slots; their missing_ panic stubs remain
+      for tests needing unconfigured callees. Only mem_compare @
+      0x0837d47c remains the seam (target defaults transmute its retail
+      address; host defaults panic). Deviations: the serial type_len
       datum — the pointer 0x088fce10 in the literal-pool word at
       0x0838d000 — resolves through the +0xaed8 skew documented in
       sqlite/mod.rs to image offset 0x08907ce8, whose bytes ARE
@@ -16335,6 +16336,49 @@ functions:
       with 60-byte text + blob, bytewise text order with the prefix
       rule, coll selection past the KeyInfo nField, and zMalloc release
       through the ported mem_release with a recording heap.
+
+  - address: 0x0838cc1c
+    ghidra: FUN_0838cc1c
+    name: vdbe_serial_get
+    size: 484
+    sig: "u32 vdbe_serial_get(const u8 *buf, u32 serial_type, Mem *p_mem)"
+    module: sqlite/vdbe_serial_get
+    status: ported
+    renames:
+      param_1: buf
+      param_2: serial_type
+      param_3: p_mem
+      bVar1: payload_byte_1
+      bVar2: payload_byte_0
+      uVar3: mem_flags
+      uVar4: payload_low_word
+      uVar6: payload_high_word
+      iVar5: is_nan
+      DAT_0838ce00: mem_text_ephem_flags
+    notes: >-
+      Upstream SQLite 3.5.9's sqlite3VdbeSerialGet (vdbeaux.c): deserialize
+      one serial-typed packed-record payload into a Mem. functions.csv's
+      484-byte extent is exact: 121 ARM instructions from 0x0838cc1c
+      through the final ldmia return at 0x0838cdfc; 0x0838ce00 is the
+      following literal-pool word 0x00000102 (MEM_Str|MEM_Ephem), and
+      the next function begins at 0x0838ce04. Binary-verified against
+      osos.dec. Its jump table makes types 0/10/11 NULL; 1..=6 are
+      1/2/3/4/6/8-byte signed big-endian integers; 7 is binary64,
+      becoming NULL only when sqlite3IsNaN @ 0x0837cb44 says so; and
+      8/9 are integer constants 0/1. A type >= 12 aliases buf through
+      Mem.z (+0x14), stores n=(t-12)>>1 at +0x18, clears xDel (+0x20),
+      and sets text|ephemeral 0x102 for odd t or blob|ephemeral 0x110
+      for even t. The port uses the target's raw 0x28-byte Mem layout:
+      host pointer words deliberately truncate to 32 bits at their ARM
+      offsets, target pointers are complete. It is now the shipped
+      serial_get default of vdbe_record_compare's
+      VDBE_RECORD_COMPARE_OPS seam; the missing_ test mock is retained.
+      Host tests use an independent jump-table reference model for every
+      type 0..12, negative sign extension at every integer width, finite
+      and NaN real bit patterns, and odd/even tail pointer/length/flag
+      stamps. match.py structural review: original 121 instructions,
+      Rust 159; both retain the serial-type jump-table split, fixed-width
+      integer/real cases, NaN-to-NULL branch, and tail field stores.
 
   - address: 0x0838cfe8
     ghidra: FUN_0838cfe8

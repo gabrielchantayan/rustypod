@@ -59,11 +59,12 @@
 //!   resolves through the +0xaed8 skew the `sqlite/mod.rs` header
 //!   documents to upstream's `aSize[]` verbatim; see the ported
 //!   module.)
-//! - `sqlite3VdbeSerialGet` @ 0x0838cc1c and `sqlite3MemCompare` @
-//!   0x0837d47c are not ported. They remain on the
-//!   [`VDBE_RECORD_COMPARE_OPS`] seam: target builds branch to the
-//!   retailOS load addresses, host tests install reference
-//!   implementations.
+//! - `sqlite3VdbeSerialGet` @ 0x0838cc1c IS ported
+//!   ([`vdbe_serial_get`](super::vdbe_serial_get::vdbe_serial_get)) and
+//!   is the shipped `serial_get` default. The seam and its old panicking
+//!   stub ([`missing_vdbe_serial_get`]) remain for recording host mocks.
+//!   `sqlite3MemCompare` @ 0x0837d47c remains unported: target builds
+//!   branch to retailOS and host tests install a reference implementation.
 //! - [`get_varint`] and [`mem_release`] ARE ported and are called
 //!   directly, per the porting rules. The varint out-param widens to
 //!   u64 through the port and truncates back (`as u32`) — bit-identical
@@ -164,8 +165,6 @@ pub type SqliteMemCompareFn =
 
 /// RetailOS load address of `sqlite3VdbeSerialTypeLen`.
 pub const VDBE_SERIAL_TYPE_LEN_ADDRESS: usize = 0x0838_cfe8;
-/// RetailOS load address of `sqlite3VdbeSerialGet`.
-pub const VDBE_SERIAL_GET_ADDRESS: usize = 0x0838_cc1c;
 /// RetailOS load address of `sqlite3MemCompare`.
 pub const SQLITE_MEM_COMPARE_ADDRESS: usize = 0x0837_d47c;
 
@@ -178,18 +177,12 @@ pub(crate) unsafe extern "C" fn missing_vdbe_serial_type_len(_serial_type: u32) 
     panic!("vdbe_record_compare requires sqlite3VdbeSerialTypeLen @ 0x0838cfe8")
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_vdbe_serial_get(
-    buf: *const u8,
-    serial_type: u32,
-    p_mem: *mut u8,
-) -> u32 {
-    let serial_get: VdbeSerialGetFn = core::mem::transmute(VDBE_SERIAL_GET_ADDRESS);
-    serial_get(buf, serial_type, p_mem)
-}
 
+/// The pre-port placeholder for the decoder slot. Retained for tests
+/// that explicitly need an unconfigured callee; the shipped default is
+/// the real port, [`super::vdbe_serial_get::vdbe_serial_get`].
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_vdbe_serial_get(
+pub(crate) unsafe extern "C" fn missing_vdbe_serial_get(
     _buf: *const u8,
     _serial_type: u32,
     _p_mem: *mut u8,
@@ -216,9 +209,9 @@ unsafe extern "C" fn missing_sqlite_mem_compare(
     panic!("vdbe_record_compare requires sqlite3MemCompare @ 0x0837d47c")
 }
 
-/// Indirect dispatch for the field decoder and Mem comparator (still
-/// unported) and the serial-type length lookup (ported — the slot
-/// survives so host tests can install recording mocks).
+/// Indirect dispatch for the Mem comparator (still unported) and the
+/// serial-type length and decoder helpers (ported — their slots survive
+/// so host tests can install recording mocks).
 #[derive(Clone, Copy)]
 pub struct VdbeRecordCompareOps {
     /// `sqlite3VdbeSerialTypeLen(serial_type)` @ 0x0838cfe8.
@@ -230,28 +223,27 @@ pub struct VdbeRecordCompareOps {
     pub mem_compare: SqliteMemCompareFn,
 }
 
-/// Target default: the ported length lookup, plus branches to the two
-/// remaining retailOS helpers.
+/// Target default: the two ported record helpers, plus a branch to the
+/// remaining retailOS comparator.
 #[cfg(target_os = "none")]
 pub const DEFAULT_VDBE_RECORD_COMPARE_OPS: VdbeRecordCompareOps = VdbeRecordCompareOps {
     serial_type_len: super::vdbe_serial_type_len::vdbe_serial_type_len,
-    serial_get: retail_vdbe_serial_get,
+    serial_get: super::vdbe_serial_get::vdbe_serial_get,
     mem_compare: retail_sqlite_mem_compare,
 };
 
-/// Host default: the ported length lookup; the unported helpers fail
-/// loudly until a test supplies them.
+/// Host default: the two ported record helpers; the unported comparator
+/// fails loudly until a test supplies it.
 #[cfg(not(target_os = "none"))]
 pub const DEFAULT_VDBE_RECORD_COMPARE_OPS: VdbeRecordCompareOps = VdbeRecordCompareOps {
     serial_type_len: super::vdbe_serial_type_len::vdbe_serial_type_len,
-    serial_get: missing_vdbe_serial_get,
+    serial_get: super::vdbe_serial_get::vdbe_serial_get,
     mem_compare: missing_sqlite_mem_compare,
 };
 
-/// Active length/decoder/comparator triple. The length slot's shipped
-/// default is the real port,
-/// [`super::vdbe_serial_type_len::vdbe_serial_type_len`]; host tests
-/// install reference implementations for all three.
+/// Active length/decoder/comparator triple. The length and decoder slots'
+/// shipped defaults are their real ports; host tests install reference
+/// implementations for all three.
 pub static mut VDBE_RECORD_COMPARE_OPS: VdbeRecordCompareOps =
     DEFAULT_VDBE_RECORD_COMPARE_OPS;
 
@@ -435,13 +427,13 @@ mod tests {
 
     /// The type bits as the retail serial_get @ 0x0838cc1c stamps them:
     /// `MEM_Null`, `MEM_Int` and `MEM_Real` are the upstream numbers;
-    /// text is 0x110 (`moveq r0,#0x110`), blob 0x102 (the literal pool
-    /// entry @ 0x0838ce00, verified in osos.dec).
+    /// text is 0x102 (the literal pool entry @ 0x0838ce00), blob 0x110
+    /// (`moveq r0,#0x110` for an even serial type), both with MEM_Ephem.
     const FLAG_NULL: u16 = 0x1;
     const FLAG_INT: u16 = 0x4;
     const FLAG_REAL: u16 = 0x8;
-    const FLAG_TEXT: u16 = 0x110;
-    const FLAG_BLOB: u16 = 0x102;
+    const FLAG_TEXT: u16 = 0x102;
+    const FLAG_BLOB: u16 = 0x110;
 
     /// `sqlite3VdbeSerialTypeLen`'s upstream `aSize[]` — the very
     /// bytes the ported [`super::super::vdbe_serial_type_len`] module
@@ -528,7 +520,7 @@ mod tests {
                 wr_u16(
                     p_mem,
                     MEM_FLAGS_OFFSET,
-                    if serial_type & 1 != 0 { FLAG_BLOB } else { FLAG_TEXT },
+                    if serial_type & 1 != 0 { FLAG_TEXT } else { FLAG_BLOB },
                 );
                 n as u32
             }
@@ -878,6 +870,23 @@ mod tests {
             assert_eq!(
                 serial_type_len_op() as usize,
                 super::super::vdbe_serial_type_len::vdbe_serial_type_len as usize,
+                "the live slot ships the port too",
+            );
+        }
+    }
+
+    #[test]
+    fn the_ported_serial_get_is_the_seam_default() {
+        let _guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(
+            DEFAULT_VDBE_RECORD_COMPARE_OPS.serial_get as usize,
+            super::super::vdbe_serial_get::vdbe_serial_get as usize,
+            "0x0838cc1c is ported and is the seam's shipped default",
+        );
+        unsafe {
+            assert_eq!(
+                serial_get_op() as usize,
+                super::super::vdbe_serial_get::vdbe_serial_get as usize,
                 "the live slot ships the port too",
             );
         }
