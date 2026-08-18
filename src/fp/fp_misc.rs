@@ -576,6 +576,31 @@ pub unsafe extern "C" fn message_payload_word(message: *const u32) -> u32 {
     *message.add(2)
 }
 
+/// message_code_word — original: `FUN_082a18dc` @ 0x082a18dc (8
+/// bytes; 2 bl call sites: 0x081d71f0 in FUN_081d71d8, 0x081d7eac in
+/// FUN_081d7e68).
+///
+/// Message-code word getter of the UI message object: a vtable word
+/// at +0x0 and this code word at +0x4. The whole body is
+/// `ldr r0,[r0,#0x4]; bx lr` (Ghidra:
+/// `return *(undefined4 *)(param_1 + 4)`), so the port is a single
+/// aligned word load at offset 4. Note this is a WORD load, unlike
+/// the sibling `message_kind_byte` (@ 0x082a18cc) whose `ldrb` reads
+/// only the tag byte of the 12-byte envelope — the two accessors sit
+/// on different object types: FUN_081d7e68 first unwraps the kind-0
+/// envelope with FUN_08257904, then applies THIS getter to the nested
+/// message it yields. Callers dispatch on the code: FUN_081d71d8
+/// compares it against 0x500 (routes the message's +0x0 word to
+/// FUN_081d6b5c) and 0x501 (routes to FUN_081d6760), returning false
+/// for any other code; FUN_081d7e68 proceeds down its
+/// nested-message path only when the code is 0. Last member of the
+/// envelope/message accessor run 0x082a18cc-0x082a18e0 (kind byte,
+/// +0x8 union word, this +0x4 code word).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn message_code_word(message: *const u32) -> u32 {
+    *message.add(1)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -1772,6 +1797,67 @@ mod tests {
             storage[8..12].copy_from_slice(&word.to_le_bytes());
             assert_eq!(
                 unsafe { message_payload_word(storage.as_ptr() as *const u32) },
+                word
+            );
+        }
+    }
+
+    // ---- message_code_word ----
+
+    #[test]
+    fn message_code_word_reads_the_word_at_offset_4() {
+        for word in [
+            0u32,
+            1,
+            0x500,
+            0x501,
+            0x0001_0000,
+            0x7fff_ffff,
+            0x8000_0000,
+            0xffff_ffff,
+        ] {
+            let mut storage = [0xaau8; 12];
+            storage[4..8].copy_from_slice(&word.to_le_bytes());
+            assert_eq!(
+                unsafe { message_code_word(storage.as_ptr() as *const u32) },
+                word
+            );
+        }
+    }
+
+    #[test]
+    fn message_code_word_returns_all_32_bits() {
+        // The +0x4 accessor is a word load (ldr): unlike the kind
+        // byte's ldrb on the envelope, the upper bytes are part of
+        // the result and the byte order is little-endian.
+        let mut storage = [0u8; 12];
+        storage[4..8].copy_from_slice(&[0x44, 0x33, 0x22, 0x11]);
+        assert_eq!(
+            unsafe { message_code_word(storage.as_ptr() as *const u32) },
+            0x1122_3344
+        );
+    }
+
+    #[test]
+    fn message_code_word_ignores_neighbouring_bytes() {
+        // Only the +0x4 word is read: the vtable word at +0x0 and
+        // the union word at +0x8 are irrelevant to the result.
+        let mut storage = [0u8; 12];
+        storage[4..8].copy_from_slice(&0x500u32.to_le_bytes());
+        assert_eq!(
+            unsafe { message_code_word(storage.as_ptr() as *const u32) },
+            0x500
+        );
+        let mut rng = Rng(0x5eed_c04e_5eed_c04e);
+        for _ in 0..1_000 {
+            let mut storage = [0u8; 12];
+            for byte in &mut storage {
+                *byte = rng.next() as u8;
+            }
+            let word = rng.next() as u32;
+            storage[4..8].copy_from_slice(&word.to_le_bytes());
+            assert_eq!(
+                unsafe { message_code_word(storage.as_ptr() as *const u32) },
                 word
             );
         }

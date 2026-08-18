@@ -20728,6 +20728,39 @@ functions:
       pop {fp,pc} frame, same as the whole fixed16 cluster and
       message_kind_byte.
 
+  - address: 0x082a18dc
+    ghidra: FUN_082a18dc
+    name: message_code_word
+    size: 8
+    sig: "u32 message_code_word(message: *const u32) -> u32"
+    module: fp/fp_misc
+    status: ported
+    vars: {param_1: message}
+    notes: >-
+      Message-code word getter of the UI message object (vtable
+      word at +0x0, this code word at +0x4). Body:
+      ldr r0,[r0,#0x4]; bx lr (Ghidra: return *(undefined4
+      *)(param_1 + 4)). A WORD load, unlike the sibling
+      message_kind_byte (@ 0x082a18cc) whose ldrb reads only the
+      tag byte of the 12-byte envelope - the two accessors sit on
+      different object types: FUN_081d7e68 first unwraps the
+      kind-0 envelope with FUN_08257904, then applies THIS getter
+      to the nested message it yields. Callers dispatch on the
+      code: FUN_081d71d8 compares it against 0x500 (routes the
+      message's +0x0 word to FUN_081d6b5c) and 0x501 (routes to
+      FUN_081d6760), returning false for any other code;
+      FUN_081d7e68 proceeds down its nested-message path only
+      when the code is 0. 2 bl call sites (0x081d71f0 in
+      FUN_081d71d8, 0x081d7eac in FUN_081d7e68). Last member of
+      the envelope/message accessor run 0x082a18cc-0x082a18e0
+      (kind byte, +0x8 union word, this +0x4 code word). No
+      link_section needed: no other ported export shares the
+      ldr r0,[r0,#4]; bx lr body, and match.py confirms the
+      symbol heads its own disassembly. match.py structural:
+      identical ldr r0,[r0,#4] core; LLVM adds a push {fp,lr}/
+      pop {fp,pc} frame, same as the whole fixed16 cluster and
+      the two envelope getter siblings.
+
   - address: 0x080e97ac
     ghidra: FUN_080e97ac
     name: fixed16_cos
