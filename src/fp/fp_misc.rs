@@ -1708,6 +1708,62 @@ pub unsafe extern "C" fn plist_node_processing_instruction(node: *const u8) -> *
     core::ptr::read_unaligned(node.add(0x20) as *const u32) as *mut u8
 }
 
+/// nibble_stream_current — original: `FUN_082a1be0` @ 0x082a1be0
+/// (28 bytes, binary-verified against osos.dec: seven instructions
+/// `ldr r1,[r0]; ldrb r0,[r0,#4]; ldrb r1,[r1]; cmp r0,#0; moveq
+/// r0,r1,lsr#4; andne r0,r1,#0xf; bx lr` ending at 0x082a1bf8 with
+/// the next function starting at 0x082a1bfc — functions.csv's
+/// 28-byte size is exact and there is no literal pool. Two direct
+/// call sites, both `bl`s inside the pixel-format converter
+/// FUN_08253158 at 0x08253378 and 0x082533ac; no pointer to the
+/// address anywhere in osos.dec (binary-scanned)).
+///
+/// Reads the current nibble of a packed 4-bit element stream without
+/// advancing it. The state is an 8-byte record — { +0x00 word cursor
+/// into the packed bytes, +0x04 low-half flag byte } — and the body
+/// answers `*cursor >> 4` when the flag is 0, `*cursor & 0xf`
+/// otherwise: a high nibble first, then the low nibble of the same
+/// byte. The paired advance routine @ 0x0825e3e8 (eleven
+/// instructions, binary-verified) toggles the flag and steps the
+/// cursor only after the low nibble was consumed (`flag ? (cursor++,
+/// flag = 0) : (flag = 1)`), so together the pair walks a byte
+/// array as a big-endian-nibble stream.
+///
+/// Both callers sit in FUN_08253158's 4-bit-per-pixel decode loops:
+/// the state lives on the stack at sp+0x18 (cursor seeded from the
+/// packed source pointer, flag byte zeroed at 0x08253358), each
+/// iteration feeds the answered nibble into a 4-byte-entry palette
+/// (`add r0,r6,r0,lsl #2`), converts the entry through
+/// FUN_082a009c/FUN_082a0074, stores a u16 pixel, then advances via
+/// 0x0825e3e8. Despite landing between the two plist node accessors,
+/// this record is NOT a plist node — the +0/+4 layout and the
+/// nibble arithmetic pin it as the converter's nibble cursor.
+///
+/// Deviations:
+/// - The cursor is loaded as a NATIVE-width pointer and the flag
+///   byte addressed right behind it (`size_of::<*const u8>()`), so
+///   the record is the byte-exact { +0 word, +4 byte } pair on the
+///   32-bit target and stays dereferenceable on a 64-bit test host
+///   (the cxx/templates.rs `container_element_at` word-index
+///   precedent; `read_unaligned` on the cursor keeps a
+///   4-but-not-8-aligned record head safe, the
+///   plist_node_child_count idiom). The plist accessors just above
+///   never dereference the words they load, which is why they can
+///   keep strict byte offsets; this one dereferences its cursor.
+/// - Ghidra's decompile (`if (*(char *)(param_1 + 1) == '\0') bVar1
+///   = *(byte *)*param_1 >> 4; else bVar1 = *(byte *)*param_1 &
+///   0xf;`) otherwise matches the listing exactly (param_1 + 1 in
+///   `undefined4 *` units is byte offset +4).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn nibble_stream_current(state: *const u8) -> u8 {
+    // Native-width cursor, flag byte right behind it: byte-exact
+    // +0/+4 on the 32-bit target, dereferenceable on a 64-bit host.
+    let cursor = core::ptr::read_unaligned(state as *const *const u8);
+    let low_half = *state.add(core::mem::size_of::<*const u8>());
+    let packed = *cursor;
+    if low_half == 0 { packed >> 4 } else { packed & 0xf }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -4549,5 +4605,76 @@ mod tests {
             unsafe { plist_node_processing_instruction(node.as_ptr()) },
             sentinel as *mut u8
         );
+    }
+
+    // ---- nibble_stream_current ----
+
+    /// Builds the stream state { +0 cursor word, flag byte right
+    /// behind it } with the cursor aimed at a `packed` byte owned by
+    /// the returned Vec itself (parked one byte past the flag), every
+    /// other record byte 0xa5 poison. The cursor is stored
+    /// native-endian/native-width, matching the port's pointer read.
+    fn nibble_state(packed: u8, low_half: u8) -> Vec<u8> {
+        let word = core::mem::size_of::<*const u8>();
+        let mut state = std::vec![0xa5u8; 2 * word + 1];
+        let cursor = unsafe { state.as_mut_ptr().add(2 * word) };
+        state[0..word].copy_from_slice(&(cursor as usize).to_ne_bytes());
+        state[word] = low_half;
+        state[2 * word] = packed;
+        state
+    }
+
+    #[test]
+    fn nibble_stream_current_answers_the_high_nibble_when_flag_is_clear() {
+        // Flag 0 = a fresh byte: the converter consumes the high
+        // nibble first (the advance routine @ 0x0825e3e8 clears the
+        // flag whenever it steps the cursor).
+        for packed in [0x00u8, 0xab, 0xf0, 0x0f, 0xff] {
+            let state = nibble_state(packed, 0);
+            assert_eq!(
+                unsafe { nibble_stream_current(state.as_ptr()) },
+                packed >> 4,
+                "packed {packed:#04x}"
+            );
+        }
+    }
+
+    #[test]
+    fn nibble_stream_current_answers_the_low_nibble_when_flag_is_set() {
+        // Any nonzero flag selects the low nibble — the original's
+        // `cmp r0,#0` / `andne` tests against zero, not against one
+        // (the firmware only ever writes 0/1, but the 0xff case pins
+        // the actual comparison shape).
+        for low_half in [1u8, 0xff] {
+            for packed in [0x00u8, 0xab, 0xf0, 0x0f, 0xff] {
+                let state = nibble_state(packed, low_half);
+                assert_eq!(
+                    unsafe { nibble_stream_current(state.as_ptr()) },
+                    packed & 0xf,
+                    "packed {packed:#04x} flag {low_half:#04x}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn nibble_stream_current_reads_only_the_cursor_word_and_flag_byte() {
+        // Every byte past the flag is 0xa5 poison: reading one byte
+        // too far right for the flag would answer 0xa5's low nibble
+        // (5), not the packed byte's high nibble (0xa).
+        let state = nibble_state(0xab, 0);
+        let word = core::mem::size_of::<*const u8>();
+        assert_eq!(state[word + 1], 0xa5, "builder poisoned the byte past the flag");
+        assert_eq!(unsafe { nibble_stream_current(state.as_ptr()) }, 0xa);
+        // The on-stack state in FUN_08253158 (sp+0x18) is only
+        // word-aligned: a record head parked 4 bytes into an aligned
+        // buffer must still decode (the read_unaligned cursor idiom).
+        let word = core::mem::size_of::<*const u8>();
+        let mut buf = std::vec![0xa5u8; 4 + 2 * word + 1];
+        let cursor = unsafe { buf.as_mut_ptr().add(4 + 2 * word) };
+        buf[4..4 + word].copy_from_slice(&(cursor as usize).to_ne_bytes());
+        buf[4 + word] = 0; // flag clear
+        buf[4 + 2 * word] = 0x3c; // packed byte
+        assert_eq!(unsafe { nibble_stream_current(buf.as_ptr().add(4)) }, 0x3);
     }
 }
