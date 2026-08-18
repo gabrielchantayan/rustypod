@@ -28704,7 +28704,8 @@ functions:
     name: iterator_state_release
     size: 64
     sig: "void iterator_state_release(owner: *mut u8, target: *mut u8)"
-    status: identified
+    module: app/vtable_set
+    status: ported
     renames:
       param_1: owner
       param_2: target
@@ -28720,40 +28721,36 @@ functions:
       stores if target is absent, and otherwise copies target +0x10 to the
       owner head for a head match or predecessor +0x10 for any later match.
       Reference C decomp/c/026/08271724_FUN_08271724.c and the
-      functions.csv 64-byte entry agree on the control-flow bounds. The
-      direct caller iterator_state_cleanup now calls this export rather than
-      an unported seam. Focused host evidence uses a sub-4-GiB fixture so
-      raw u32 pointers round-trip:
+      functions.csv 64-byte entry agree on the control-flow bounds. 2 bl
+      call sites (grep on decomp/osos.asm): 0x08155edc inside
+      iterator_state_cleanup (0x08155ec0, ported in the same module) and
+      0x08271d50 inside the cxx/observable_array destructor 0x08271d2c,
+      which drains its observer list by repeatedly releasing the current
+      head. Ported as app/vtable_set::iterator_state_release; the list
+      words are modeled as u32 target pointers (zero-extended on read,
+      target compared as its low 32 bits - the cxx/list_splice.rs idiom).
+      The direct caller iterator_state_cleanup now calls this export
+      DIRECTLY - the no-op ITERATOR_STATE_RELEASE seam is removed (the
+      app/class_6800.rs ported-callees-called-directly precedent), and
+      the cxx/observable_array OBSERVABLE_ARRAY_DETACH_OBSERVER seam's
+      head-match default is now replaceable by this export (its drain
+      site can only reach the head-match branch). Host evidence uses a
+      sub-4-GiB fixture slab (crate::testing::hints::VTABLE_SET_ITERATOR_RELEASE)
+      so raw u32 pointers round-trip:
       iterator_state_release_leaves_an_empty_list_unchanged /
       iterator_state_release_leaves_an_absent_target_unchanged /
       iterator_state_release_replaces_the_head_with_its_successor /
       iterator_state_release_splices_an_interior_target_from_its_predecessor /
       iterator_state_release_unlinks_a_tail_target /
-      iterator_state_release_copies_the_target_next_word_without_reencoding.
-      STATUS CORRECTION - demoted ported -> identified, and the
-      `module: app/vtable_set` dropped, because NO such function exists.
-      The `ported` claim, the module, and the six host-test names above
-      are all unbacked: commit ce10e27 ("Port cg_cell_table_cell_init
-      0x08256c10") introduced this entry as a side effect of porting an
-      unrelated function, and no `fn iterator_state_release` has ever
-      existed in the tree - `git log -S 'fn iterator_state_release('`
-      over all of src/ returns no commit, and none of the six named
-      tests appear anywhere. ce10e27 also emitted a stray top-level
-      `INS.PRE 24609:` key that parked this entry and eight others
-      outside `functions:`, which is why the bad entry went unseen until
-      65ea8a2 repaired the nesting and folded it back in. What DOES
-      exist in app/vtable_set is the no-op `ITERATOR_STATE_RELEASE`
-      dispatch seam, which is not a port of this function. Note that at
-      the one call site that drains a list - the observable-array
-      destructor - the default must NOT be a no-op or the drain spins
-      forever; cxx/observable_array wires
-      OBSERVABLE_ARRAY_DETACH_OBSERVER to the head-match branch, the
-      only branch that site can reach. Re-port this function properly
-      before restoring `ported`. The notes above the correction are the
-      original entry's and describe the ARM target, not any Rust code.
-      Caveat - 0x08155ec0 (iterator_state_cleanup)'s notes were rewritten
-      by the same commit and still say its callee is ported and called
-      directly; it in fact still goes through the no-op seam.
+      iterator_state_release_copies_the_target_next_word_without_reencoding,
+      plus the reworked iterator_state_cleanup tests that now drive the
+      real unlink. match.py (exit 1, diff expected): same
+      walk-compare / advance-through-+0x10 / head-vs-predecessor
+      conditional-store structure; the diff is the crate fp frame and
+      block scheduling. HISTORY - this entry previously claimed `ported`
+      with no such function in the tree (commit ce10e27 introduced it as
+      a side effect of an unrelated port) and was demoted to
+      `identified`; the port above is the real one.
 
 
   - address: 0x0811d008

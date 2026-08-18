@@ -3557,7 +3557,7 @@ unsafe extern "C" fn teardown_inner_next_unported(
 /// 0x08271710 (12 bytes: `ldr r2, [r0, #0xc]; str r2, [r1, #0x10];
 /// str r1, [r0, #0xc]; bx lr` — push `state` onto the head of the
 /// owner's observer list, the exact inverse of the 0x08271724 unlink
-/// behind [`ITERATOR_STATE_RELEASE`]). The constructor
+/// ported below as [`iterator_state_release`]). The constructor
 /// [`iterator_state_construct`] calls it after zeroing the state's own
 /// link word, so a wired no-op leaves the list empty-headed, matching
 /// the unported-collection contract of every sibling seam.
@@ -3568,7 +3568,7 @@ pub static mut ITERATOR_STATE_LINK: unsafe extern "C" fn(
 
 /// Default for [`ITERATOR_STATE_LINK`]: the observer-list link is
 /// unported, so it has no local effect (the
-/// `iterator_state_release_unported` precedent).
+/// `iterator_state_seek_unported` precedent).
 unsafe extern "C" fn iterator_state_link_unported(_owner: *mut u8, _state: *mut u32) {}
 
 /// Indirect call to the unported iterator seek `FUN_08155dc4` @
@@ -3612,7 +3612,7 @@ unsafe extern "C" fn iterator_state_seek_unported(_state: *mut u32, _position: i
 /// store sits between the link and the seek, matching the original's
 /// order. Both callees are unported and ride the
 /// [`ITERATOR_STATE_LINK`] / [`ITERATOR_STATE_SEEK`] seams (no-op
-/// defaults — the `ITERATOR_STATE_RELEASE` precedent). Call-site shape:
+/// defaults — the sibling-seam precedent). Call-site shape:
 /// `FUN_08155e80(iterator, handle, -2)` on a 20-byte frame local,
 /// followed by 0x08155d6c steps and an 0x08155ec0 drop (the
 /// `framework_base_transition_link_state` survey, which knows this
@@ -3653,7 +3653,7 @@ pub static mut ITERATOR_STATE_REFRESH: unsafe extern "C" fn(
 ) = iterator_state_refresh_unported;
 
 /// Default for [`ITERATOR_STATE_REFRESH`]: the refresh is unported, so
-/// it has no local effect (the `iterator_state_release_unported`
+/// it has no local effect (the `iterator_state_link_unported`
 /// precedent).
 unsafe extern "C" fn iterator_state_refresh_unported(_state: *mut u32) {}
 
@@ -3728,20 +3728,98 @@ pub unsafe extern "C" fn iterator_state_next(state: *mut u32, out: *mut u8) -> u
     fetch(state, out)
 }
 
-/// Indirect call to the unported observer-list release
-/// `FUN_08271724`. The target walks the owner list at +0x0c and unlinks
-/// `state` by its +0x10 next link; its return value is discarded.
-///
-/// The seam keeps that unported list implementation outside this one-function
-/// port while retaining the target's `release(*state, state)` ABI.
-pub static mut ITERATOR_STATE_RELEASE: unsafe extern "C" fn(
-    owner: *mut u8,
-    state: *mut u32,
-) = iterator_state_release_unported;
+/// Byte offset of the observer-list head word inside the owner object
+/// (`ldr r2, [r0, #0xc]`) — the list [`iterator_state_release`] walks.
+const OBSERVER_HEAD_OFFSET: usize = 0x0c;
 
-/// Default for [`ITERATOR_STATE_RELEASE`]: the observer-list release is
-/// unported, so it has no local effect.
-unsafe extern "C" fn iterator_state_release_unported(_owner: *mut u8, _state: *mut u32) {}
+/// Byte offset of the next link inside every observer-list node
+/// (`ldr`/`str` at `#0x10`) — the word [`iterator_state_release`]
+/// splices with.
+const NEXT_OBSERVER_OFFSET: usize = 0x10;
+
+/// iterator_state_release — original: `FUN_08271724` @ 0x08271724 (64
+/// bytes exactly, 0x08271724..0x08271764 — 16 instructions, no literal
+/// pool; **2 `bl` call sites, 0 `b`**, grep on `decomp/osos.asm`:
+/// 0x08155edc inside [`iterator_state_cleanup`] (0x08155ec0, ported in
+/// this module) and 0x08271d50 inside the cxx/observable_array
+/// destructor 0x08271d2c, which drains its observer list by repeatedly
+/// releasing the current head).
+///
+/// The observer-list unlink of the collection-iterator family — the
+/// exact inverse of the head-push link `FUN_08271710` behind
+/// [`ITERATOR_STATE_LINK`]. `owner + 0x0c` is the list head and every
+/// node's `+0x10` is its next link; all accesses are 32-bit words:
+///
+/// ```text
+/// 08271724  ldr r2, [r0, #0xc]     @ current = owner.head
+/// 08271728  mov r3, #0x0           @ predecessor = NULL
+/// 0827172c  b   0x08271758         @ enter the loop test
+/// 08271730  cmp r2, r1             @ candidate == target?
+/// 08271734  bne 0x08271750         @ no -> advance
+/// 08271738  cmp r3, #0x0
+/// 0827173c  ldrne r0, [r2, #0x10]  @ next = candidate.next
+/// 08271740  ldreq r1, [r2, #0x10]
+/// 08271744  strne r0, [r3, #0x10]  @ predecessor.next = next
+/// 08271748  streq r1, [r0, #0xc]   @ owner.head = next
+/// 0827174c  bx  lr
+/// 08271750  mov r3, r2             @ predecessor = candidate
+/// 08271754  ldr r2, [r2, #0x10]    @ current = candidate.next
+/// 08271758  cmp r2, #0x0
+/// 0827175c  bne 0x08271730
+/// 08271760  bx  lr                 @ absent: return, no stores
+/// ```
+///
+/// A singly linked-list removal by pointer identity: walk from the
+/// head; if `target` is not found, return having stored NOTHING; on a
+/// head match copy `target + 0x10` into the owner's head word, on any
+/// later match copy it into the predecessor's next link. The target's
+/// own next word is never cleared, and the copy is a raw 32-bit word —
+/// no pointer fixup.
+///
+/// # Deviations
+///
+/// - **List words are modeled as `u32` target pointers** (the
+///   cxx/list_splice.rs idiom): zero-extended on read, and `target` is
+///   compared as its low 32 bits — exact on the 32-bit target; host
+///   fixtures must live below 4 GiB so raw u32 pointers round-trip
+///   (`crate::testing::try_map_u32_slab`).
+/// - **The reference C is accurate** in shape
+///   (`decomp/c/026/08271724_FUN_08271724.c`): the walk, the two store
+///   targets and the absent-target early return all match the
+///   disassembly; the port only gives the untyped `int` parameters
+///   their pointer roles.
+///
+/// # Safety
+///
+/// `owner + 0x0c` must address a readable/writable 32-bit head word and
+/// every list node a readable `+0x10` link word, exactly as the
+/// original requires; a `target` absent from the list is never
+/// dereferenced past the word comparisons.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iterator_state_release(owner: *mut u8, target: *mut u8) {
+    let observer_head = owner.add(OBSERVER_HEAD_OFFSET).cast::<u32>();
+    let target_word = target as u32;
+    let mut current = observer_head.read();
+    let mut predecessor = 0u32;
+    let candidate = loop {
+        let candidate = current;
+        if candidate == 0 {
+            return;
+        }
+        if candidate == target_word {
+            break candidate;
+        }
+        predecessor = candidate;
+        current = (candidate as *mut u8).add(NEXT_OBSERVER_OFFSET).cast::<u32>().read();
+    };
+    let next = (candidate as *mut u8).add(NEXT_OBSERVER_OFFSET).cast::<u32>().read();
+    if predecessor == 0 {
+        observer_head.write(next);
+    } else {
+        (predecessor as *mut u8).add(NEXT_OBSERVER_OFFSET).cast::<u32>().write(next);
+    }
+}
 
 /// iterator_state_cleanup — original: `FUN_08155ec0` @ 0x08155ec0 (48
 /// bytes; 69 `bl` call sites).
@@ -3753,16 +3831,17 @@ unsafe extern "C" fn iterator_state_release_unported(_owner: *mut u8, _state: *m
 /// word 0 before the call and returning the saved state pointer after it
 /// matches the target's r0/r1 routing.
 ///
-/// `FUN_08271724` is the sole unported callee. Its observer-list unlink is
-/// represented by [`ITERATOR_STATE_RELEASE`], a narrow seam wired to a
-/// no-op default. The vtable-file-record teardown seam and its two
-/// container-teardown defaults call this port directly.
+/// `FUN_08271724` is ported in this module as [`iterator_state_release`]
+/// and called DIRECTLY (the app/class_6800.rs
+/// ported-callees-called-directly precedent — the no-op
+/// `ITERATOR_STATE_RELEASE` seam is gone now that the unlink exists).
+/// The vtable-file-record teardown seam and its two container-teardown
+/// defaults call this port directly.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn iterator_state_cleanup(state: *mut u32) -> *mut u32 {
     if state.add(2).read() != (-5i32) as u32 {
-        let release = core::ptr::read_volatile(core::ptr::addr_of!(ITERATOR_STATE_RELEASE));
-        release(state.read() as *mut u8, state);
+        iterator_state_release(state.read() as *mut u8, state as *mut u8);
         state.add(2).write(u32::MAX);
     }
     state
@@ -4567,8 +4646,6 @@ mod tests {
                     .write_volatile(teardown_inner_next_unported);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP)
                     .write_volatile(iterator_state_cleanup);
-                core::ptr::addr_of_mut!(ITERATOR_STATE_RELEASE)
-                    .write_volatile(iterator_state_release_unported);
                 core::ptr::addr_of_mut!(ITERATOR_STATE_LINK)
                     .write_volatile(iterator_state_link_unported);
                 core::ptr::addr_of_mut!(ITERATOR_STATE_SEEK)
@@ -4720,28 +4797,247 @@ mod tests {
         }
     }
 
+    // ---- iterator_state_release (0x08271724) ------------------------
+
+    /// The sub-4-GiB fixture slab shared by the iterator_state_release
+    /// tests and the cleanup/container tests that drive the real
+    /// unlink: the list links are 32-bit target words, so every node
+    /// must round-trip through u32 (`crate::testing::try_map_u32_slab`).
+    /// Mapped once and never unmapped (the heap/mod.rs `OnceLock`
+    /// pattern); every test below reinitializes the layout under
+    /// SLOT_TEST_LOCK.
+    fn try_release_slab() -> Option<*mut u8> {
+        static SLAB: std::sync::LazyLock<Option<usize>> = std::sync::LazyLock::new(|| {
+            crate::testing::try_map_u32_slab(
+                crate::testing::hints::VTABLE_SET_ITERATOR_RELEASE,
+                0x200,
+            )
+            .map(|base| base as usize)
+        });
+        (*SLAB).map(|base| base as *mut u8)
+    }
+
+    /// Slab layout: the owner object (head word at +0x0c) at +0x00,
+    /// three list nodes (next word at +0x10) at +0x40/+0x60/+0x80 and
+    /// the five-word iterator state object at +0xc0.
+    const RELEASE_OWNER: usize = 0x00;
+    const RELEASE_NODE_A: usize = 0x40;
+    const RELEASE_NODE_B: usize = 0x60;
+    const RELEASE_NODE_C: usize = 0x80;
+    const RELEASE_STATE: usize = 0xc0;
+
+    /// The owner's observer-list head word (`owner + 0x0c`).
+    unsafe fn release_head(slab: *mut u8) -> *mut u32 {
+        slab.add(RELEASE_OWNER + OBSERVER_HEAD_OFFSET).cast::<u32>()
+    }
+
+    /// The next-link word of the slab node at `node` (`node + 0x10`).
+    unsafe fn release_next(slab: *mut u8, node: usize) -> *mut u32 {
+        slab.add(node + NEXT_OBSERVER_OFFSET).cast::<u32>()
+    }
+
+    /// The slab address of the node at `node`, as a raw u32 list word.
+    fn release_node32(slab: *mut u8, node: usize) -> u32 {
+        slab.wrapping_add(node) as u32
+    }
+
+    #[test]
+    fn iterator_state_release_leaves_an_empty_list_unchanged() {
+        let Some(slab) = try_release_slab() else {
+            assert!(crate::testing::note_missing_u32_fixture("vtable_set iterator_release"));
+            return;
+        };
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        unsafe {
+            core::ptr::write_bytes(slab, 0xa5, 0x200);
+            release_head(slab).write(0);
+            let owner = slab.add(RELEASE_OWNER);
+            let target = slab.add(RELEASE_NODE_A);
+
+            iterator_state_release(owner, target);
+
+            assert_eq!(release_head(slab).read(), 0, "the NULL head ends the walk");
+            assert_eq!(
+                owner.cast::<u32>().read(),
+                0xa5a5_a5a5,
+                "no store touches the owner without a match"
+            );
+            assert_eq!(
+                release_next(slab, RELEASE_NODE_A).read(),
+                0xa5a5_a5a5,
+                "the never-linked target is never written"
+            );
+        }
+    }
+
+    #[test]
+    fn iterator_state_release_leaves_an_absent_target_unchanged() {
+        let Some(slab) = try_release_slab() else {
+            assert!(crate::testing::note_missing_u32_fixture("vtable_set iterator_release"));
+            return;
+        };
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        unsafe {
+            core::ptr::write_bytes(slab, 0xa5, 0x200);
+            let a32 = release_node32(slab, RELEASE_NODE_A);
+            let b32 = release_node32(slab, RELEASE_NODE_B);
+            // A -> B -> NULL; the target C is not on the list.
+            release_head(slab).write(a32);
+            release_next(slab, RELEASE_NODE_A).write(b32);
+            release_next(slab, RELEASE_NODE_B).write(0);
+            let owner = slab.add(RELEASE_OWNER);
+            let target = slab.add(RELEASE_NODE_C);
+
+            iterator_state_release(owner, target);
+
+            assert_eq!(release_head(slab).read(), a32, "the head survives a miss");
+            assert_eq!(release_next(slab, RELEASE_NODE_A).read(), b32, "A.next survives");
+            assert_eq!(release_next(slab, RELEASE_NODE_B).read(), 0, "B.next survives");
+            assert_eq!(
+                release_next(slab, RELEASE_NODE_C).read(),
+                0xa5a5_a5a5,
+                "the walk falling off the end stores nothing"
+            );
+        }
+    }
+
+    #[test]
+    fn iterator_state_release_replaces_the_head_with_its_successor() {
+        let Some(slab) = try_release_slab() else {
+            assert!(crate::testing::note_missing_u32_fixture("vtable_set iterator_release"));
+            return;
+        };
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        unsafe {
+            core::ptr::write_bytes(slab, 0xa5, 0x200);
+            let a32 = release_node32(slab, RELEASE_NODE_A);
+            let b32 = release_node32(slab, RELEASE_NODE_B);
+            // A -> B -> NULL; release the head A.
+            release_head(slab).write(a32);
+            release_next(slab, RELEASE_NODE_A).write(b32);
+            release_next(slab, RELEASE_NODE_B).write(0);
+            let owner = slab.add(RELEASE_OWNER);
+            let target = slab.add(RELEASE_NODE_A);
+
+            iterator_state_release(owner, target);
+
+            assert_eq!(
+                release_head(slab).read(),
+                b32,
+                "streq r1, [r0, #0xc] — the head match copies target.next into the owner head"
+            );
+            assert_eq!(release_next(slab, RELEASE_NODE_B).read(), 0, "B.next untouched");
+            assert_eq!(
+                release_next(slab, RELEASE_NODE_A).read(),
+                b32,
+                "the target's own next word is never rewritten"
+            );
+        }
+    }
+
+    #[test]
+    fn iterator_state_release_splices_an_interior_target_from_its_predecessor() {
+        let Some(slab) = try_release_slab() else {
+            assert!(crate::testing::note_missing_u32_fixture("vtable_set iterator_release"));
+            return;
+        };
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        unsafe {
+            core::ptr::write_bytes(slab, 0xa5, 0x200);
+            let a32 = release_node32(slab, RELEASE_NODE_A);
+            let b32 = release_node32(slab, RELEASE_NODE_B);
+            let c32 = release_node32(slab, RELEASE_NODE_C);
+            // A -> B -> C -> NULL; release the interior B.
+            release_head(slab).write(a32);
+            release_next(slab, RELEASE_NODE_A).write(b32);
+            release_next(slab, RELEASE_NODE_B).write(c32);
+            release_next(slab, RELEASE_NODE_C).write(0);
+            let owner = slab.add(RELEASE_OWNER);
+            let target = slab.add(RELEASE_NODE_B);
+
+            iterator_state_release(owner, target);
+
+            assert_eq!(release_head(slab).read(), a32, "the head is not the match");
+            assert_eq!(
+                release_next(slab, RELEASE_NODE_A).read(),
+                c32,
+                "strne r0, [r3, #0x10] — the predecessor adopts the target's successor"
+            );
+            assert_eq!(release_next(slab, RELEASE_NODE_C).read(), 0, "C.next untouched");
+            assert_eq!(
+                release_next(slab, RELEASE_NODE_B).read(),
+                c32,
+                "the target's own next word is never rewritten"
+            );
+        }
+    }
+
+    #[test]
+    fn iterator_state_release_unlinks_a_tail_target() {
+        let Some(slab) = try_release_slab() else {
+            assert!(crate::testing::note_missing_u32_fixture("vtable_set iterator_release"));
+            return;
+        };
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        unsafe {
+            core::ptr::write_bytes(slab, 0xa5, 0x200);
+            let a32 = release_node32(slab, RELEASE_NODE_A);
+            let b32 = release_node32(slab, RELEASE_NODE_B);
+            // A -> B -> NULL; release the tail B.
+            release_head(slab).write(a32);
+            release_next(slab, RELEASE_NODE_A).write(b32);
+            release_next(slab, RELEASE_NODE_B).write(0);
+            let owner = slab.add(RELEASE_OWNER);
+            let target = slab.add(RELEASE_NODE_B);
+
+            iterator_state_release(owner, target);
+
+            assert_eq!(release_head(slab).read(), a32, "the head is not the match");
+            assert_eq!(
+                release_next(slab, RELEASE_NODE_A).read(),
+                0,
+                "the predecessor's next becomes the target's NULL link — the list ends at A"
+            );
+        }
+    }
+
+    #[test]
+    fn iterator_state_release_copies_the_target_next_word_without_reencoding() {
+        let Some(slab) = try_release_slab() else {
+            assert!(crate::testing::note_missing_u32_fixture("vtable_set iterator_release"));
+            return;
+        };
+        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _restore = SlotGuard;
+        unsafe {
+            core::ptr::write_bytes(slab, 0xa5, 0x200);
+            let a32 = release_node32(slab, RELEASE_NODE_A);
+            let b32 = release_node32(slab, RELEASE_NODE_B);
+            // A -> B; B's next word is a poison pattern, not a node. The
+            // splice copies the raw 32-bit word verbatim and returns
+            // before ever walking it.
+            release_head(slab).write(a32);
+            release_next(slab, RELEASE_NODE_A).write(b32);
+            release_next(slab, RELEASE_NODE_B).write(0xdead_beef);
+            let owner = slab.add(RELEASE_OWNER);
+            let target = slab.add(RELEASE_NODE_B);
+
+            iterator_state_release(owner, target);
+
+            assert_eq!(
+                release_next(slab, RELEASE_NODE_A).read(),
+                0xdead_beef,
+                "ldr/str of the raw word — no pointer fixup, no validation"
+            );
+        }
+    }
+
     // ---- iterator_state_cleanup (0x08155ec0) ------------------------
-
-    static mut ITERATOR_RELEASE_CALLS: usize = 0;
-    static mut ITERATOR_RELEASE_OWNER: *mut u8 = core::ptr::null_mut();
-    static mut ITERATOR_RELEASE_STATE: *mut u32 = core::ptr::null_mut();
-    static mut ITERATOR_RELEASE_STATE_WORD: u32 = 0;
-
-    unsafe extern "C" fn recording_iterator_state_release(owner: *mut u8, state: *mut u32) {
-        ITERATOR_RELEASE_CALLS += 1;
-        ITERATOR_RELEASE_OWNER = owner;
-        ITERATOR_RELEASE_STATE = state;
-        ITERATOR_RELEASE_STATE_WORD = state.add(2).read();
-    }
-
-    unsafe fn install_recording_iterator_state_release() {
-        ITERATOR_RELEASE_CALLS = 0;
-        ITERATOR_RELEASE_OWNER = core::ptr::null_mut();
-        ITERATOR_RELEASE_STATE = core::ptr::null_mut();
-        ITERATOR_RELEASE_STATE_WORD = 0;
-        core::ptr::addr_of_mut!(ITERATOR_STATE_RELEASE)
-            .write_volatile(recording_iterator_state_release);
-    }
 
     #[test]
     fn iterator_state_cleanup_sentinel_skips_release_and_returns_the_state() {
@@ -4749,44 +5045,73 @@ mod tests {
         let _restore = SlotGuard;
         let mut state = [0x1122_3344, 0xa5a5_a5a5, (-5i32) as u32];
         unsafe {
-            install_recording_iterator_state_release();
             let state_ptr = state.as_mut_ptr();
             let returned = iterator_state_cleanup(state_ptr);
 
             assert_eq!(returned, state_ptr, "mov r0, r4 returns the input state");
-            assert_eq!(ITERATOR_RELEASE_CALLS, 0, "cmn r0, #5; beq skips the release");
-            assert_eq!(state, [0x1122_3344, 0xa5a5_a5a5, (-5i32) as u32]);
+            assert_eq!(
+                state,
+                [0x1122_3344, 0xa5a5_a5a5, (-5i32) as u32],
+                "cmn r0, #5; beq skips the release — the ported unlink would \
+                 have dereferenced the bogus owner word 0x1122_3344"
+            );
         }
     }
 
     #[test]
     fn iterator_state_cleanup_releases_owner_then_poisons_state_and_returns_it() {
+        // The release is the ported observer-list unlink, called
+        // directly: the fixture links the state object onto the owner
+        // list's head so the whole `release(*state, state)` path runs
+        // for real. Everything sits in the sub-4-GiB slab so the u32
+        // list words round-trip.
+        let Some(slab) = try_release_slab() else {
+            assert!(crate::testing::note_missing_u32_fixture("vtable_set iterator_release"));
+            return;
+        };
         let _lock = SLOT_TEST_LOCK.lock().unwrap();
         let _restore = SlotGuard;
-        let mut state = [0x5566_7788, 0xa5a5_a5a5, 0x1234_5678];
         unsafe {
-            install_recording_iterator_state_release();
-            let state_ptr = state.as_mut_ptr();
-            let returned = iterator_state_cleanup(state_ptr);
+            core::ptr::write_bytes(slab, 0xa5, 0x200);
+            let owner = slab.add(RELEASE_OWNER);
+            let successor = slab.add(RELEASE_NODE_A);
+            let state = slab.add(RELEASE_STATE).cast::<u32>();
+            // state.owner = owner, the +0x08 word is live (non-sentinel),
+            // state.link (+0x10) = successor; owner.head = state.
+            state.write(owner as u32);
+            state.add(2).write(0x1234_5678);
+            state.add(4).write(successor as u32);
+            release_head(slab).write(state as u32);
+            release_next(slab, RELEASE_NODE_A).write(0);
 
-            assert_eq!(ITERATOR_RELEASE_CALLS, 1, "one non-sentinel release");
+            let returned = iterator_state_cleanup(state);
+
+            assert_eq!(returned, state, "mov r0, r4 returns the input state");
             assert_eq!(
-                ITERATOR_RELEASE_OWNER as usize,
-                0x5566_7788,
-                "ldr r0, [r4] supplies release arg1"
+                release_head(slab).read(),
+                successor as u32,
+                "ldr r0, [r4]; mov r1, r4; bl 0x08271724 — the head match splices \
+                 the state's successor into the owner head"
             );
-            assert_eq!(ITERATOR_RELEASE_STATE, state_ptr, "mov r1, r4 supplies release arg2");
+            assert_eq!(state.add(2).read(), u32::MAX, "mvn r0, #0; str r0, [r4, #8]");
             assert_eq!(
-                ITERATOR_RELEASE_STATE_WORD, 0x1234_5678,
-                "the release sees +0x08 before the following poison store"
+                release_next(slab, RELEASE_NODE_A).read(),
+                0,
+                "the successor's own link is never rewritten"
             );
-            assert_eq!(state[2], u32::MAX, "mvn r0, #0; str r0, [r4, #8]");
-            assert_eq!(returned, state_ptr, "mov r0, r4 returns the input state");
         }
     }
 
     #[test]
     fn iterator_state_cleanup_is_the_wired_teardown_and_container_default() {
+        // The container default runs the ported cleanup for real, so the
+        // container's state object (container + 4) names a live owner
+        // with an EMPTY observer list: the ported unlink walks zero
+        // nodes and stores nothing.
+        let Some(slab) = try_release_slab() else {
+            assert!(crate::testing::note_missing_u32_fixture("vtable_set iterator_release"));
+            return;
+        };
         let _lock = SLOT_TEST_LOCK.lock().unwrap();
         let _restore = SlotGuard;
         let mut container = [0u32; 4];
@@ -4799,6 +5124,9 @@ mod tests {
                 "the file-record teardown seam defaults to the ported cleanup"
             );
 
+            core::ptr::write_bytes(slab, 0xa5, 0x200);
+            release_head(slab).write(0);
+            container[1] = slab.add(RELEASE_OWNER) as u32;
             let container_ptr = container.as_mut_ptr().cast::<u8>();
             let returned = destruct_container_teardown_default(container_ptr);
             assert_eq!(returned, container_ptr, "the wrapper returns the original container");
@@ -4807,6 +5135,7 @@ mod tests {
                 u32::MAX,
                 "the direct default cleans state object at container + 4"
             );
+            assert_eq!(release_head(slab).read(), 0, "the empty list survives the release");
         }
     }
 
@@ -9983,9 +10312,14 @@ mod tests {
     #[test]
     fn file_record_teardown_default_seams_yield_an_empty_traversal() {
         // The wired defaults (reinstalled by the guard) are the
-        // documented empty-traversal stubs: no-op begins/cleanups,
+        // documented empty-traversal stubs: no-op begins,
         // 0-returning steps, no-op dispose — but operator_delete still
-        // frees the registry block.
+        // frees the registry block. The cleanup seam alone is mocked:
+        // its default is the ported iterator_state_cleanup, whose
+        // release now walks the owner list for real, and the teardown's
+        // zeroed stand-in iterators carry a NULL owner word the unlink
+        // would dereference (the ported cleanup is exercised directly
+        // by its own tests).
         let _lock = SLOT_TEST_LOCK.lock().unwrap();
         let _restore = SlotGuard;
         let _heap = HeapGuard;
@@ -9997,13 +10331,15 @@ mod tests {
             core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS).write_volatile(ops);
             TD_EVENT_COUNT = 0;
             TD_FREE_COUNT = 0;
+            core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP)
+                .write_volatile(recording_td_cleanup);
             let registry = td_record(&mut record);
 
             vtable_file_record_teardown(record.as_mut_ptr());
 
             assert_eq!(
                 &TD_EVENTS[..TD_EVENT_COUNT],
-                &[TD_EV_FREE, TD_DELETE_TAG],
+                &[TD_EV_CLEANUP, TD_EV_FREE, TD_DELETE_TAG],
                 "no iteration, no dispose — straight to the delete"
             );
             assert_eq!(TD_FREE_COUNT, 1);
@@ -10075,8 +10411,13 @@ mod tests {
     }
 
     /// Resets the recording state, swaps in the recording free and
-    /// installs the three recording seam mocks (the
-    /// `install_recording_teardown` precedent).
+    /// installs the recording seam mocks (the
+    /// `install_recording_teardown` precedent). The teardown's cleanup
+    /// seam is mocked too: the kind-1 path calls the ported
+    /// `vtable_file_record_teardown` directly, and its default — the
+    /// ported iterator_state_cleanup — now unlinks through a real owner
+    /// list, which the teardown's zeroed stand-in iterators do not
+    /// provide.
     unsafe fn install_recording_destruct() {
         DT_EVENT_COUNT = 0;
         DT_FREE_COUNT = 0;
@@ -10090,6 +10431,8 @@ mod tests {
             .write_volatile(recording_dt_container10);
         core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_DESTRUCT_KIND2_DISPOSE)
             .write_volatile(recording_dt_dispose);
+        core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP)
+            .write_volatile(recording_td_cleanup);
     }
 
     #[test]
