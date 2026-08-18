@@ -16276,7 +16276,7 @@ functions:
       0x0838b450 in FUN_0838b380 (the sqlite3VdbeIdxKeyCompare analog).
       Struct layouts recovered from its own loads (typed repr(C) in the
       port, 32-bit offset asserts): UnpackedRecord +0x00 pKeyInfo, +0x04
-      nField (u16), +0x05 needFree, +0x06 needDestroy, +0x08 aMem (raw
+      nField (u16), +0x06 needFree, +0x07 needDestroy, +0x08 aMem (raw
       0x28-byte Mems); KeyInfo +0x00 db, +0x04 enc, +0x05 incrKey,
       +0x06 prefixIsEqual, +0x08 nField (i32), +0x0c aSortOrder, +0x10
       aColl[i]. Algorithm: seed scratch mem1 (sp+0x08) db/enc from the
@@ -16336,6 +16336,92 @@ functions:
       with 60-byte text + blob, bytewise text order with the prefix
       rule, coll selection past the KeyInfo nField, and zMalloc release
       through the ported mem_release with a recording heap.
+
+  - address: 0x0838c9f0
+    ghidra: FUN_0838c9f0
+    name: vdbe_record_unpack
+    size: 312
+    sig: "UnpackedRecord *vdbe_record_unpack(KeyInfo *key_info, int n_key, const u8 *p_key, void *p_space, int sz_space)"
+    module: sqlite/vdbe_record_unpack
+    status: ported
+    renames:
+      param_1: key_info
+      param_2: n_key
+      param_3: p_key
+      param_4: p_space
+      param_5: sz_space
+      local_38: sz_hdr
+      local_3c: serial_type
+      piStack_34: key_info_stack_copy
+      local_30: n_key_stack_copy
+      pbStack_2c: p_key_stack_copy
+      piStack_28: p_space_stack_copy
+      iVar3: n_byte_then_i
+      piVar4: p_mem
+      uVar1: idx
+      uVar5: d
+      iVar2: varint_or_type_len_scratch
+    notes: >-
+      Upstream SQLite 3.5.9's sqlite3VdbeRecordUnpack (vdbeaux.c),
+      verified against the 3.5.9 source: parse the nKey-byte record at
+      pKey into an UnpackedRecord over pKeyInfo, using pSpace when
+      (nField + 2) * sizeof(Mem) fits in szSpace and
+      sqlite3DbMallocRaw(pKeyInfo->db, nByte) otherwise. THE
+      ASSIGNMENT'S sqlite3VdbeSerialPut SUSPICION DOES NOT HOLD: this
+      is the record UNPACKER (the writer side's inverse) - it calls
+      sqlite3VdbeSerialGet, which a put-side writer never would, and
+      upstream 3.5.9 has no serial-put function in this span at all.
+      functions.csv's 312 bytes is exact: the next stmdb is
+      0x0838cb28; no literal pool. 2 bl call sites (binary-scanned):
+      0x08371f2c in FUN_08371e54 (the sqlite3BtreeMoveto analog) and
+      0x0838b430 in FUN_0838b380 (the sqlite3VdbeIdxKeyCompare
+      analog), each passing a 200-byte stack buffer as pSpace; no
+      tail b. Struct layouts the listing PROVES (and the
+      vdbe_record_compare entry/comment now cite): UnpackedRecord
+      +0x00 pKeyInfo, +0x04 nField (u16, strh), +0x06 needFree (strb,
+      0 for pSpace / 1 for heap), +0x07 needDestroy (strb, always 1),
+      +0x08 aMem = p + 0x28; the earlier +0x05/+0x06 guess in the
+      record_compare port never read them and was wrong. KeyInfo
+      +0x00 db, +0x04 enc, +0x08 nField (i32, ldr). Mem field writes
+      per element: enc byte +0x1f from KeyInfo.enc, db word +0x10
+      from KeyInfo.db, flags hword +0x1c = 0, zMalloc word +0x24 = 0.
+      Algorithm: nByte = (nField + 2) * 0x28; pSpace branch stamps
+      needFree = 0, heap branch needFree = 1 with NULL propagating;
+      pKeyInfo/nField+1/needDestroy = 1/aMem seeded; header-size
+      varint via the build-wide idiom (first byte < 0x80 inline, else
+      the ported get_varint @ 0x0837ac30, u64 out truncated to the
+      original's u32 store - the get_varint32_fast helper is shared
+      with vdbe_record_compare, one idiom one home); while idx <
+      szHdr (unsigned) AND i < p->nField (the u16 at +0x04 reloaded
+      per iteration): decode the serial type the same way, break when
+      d >= nKey (SIGNED blt to skip) and the ported
+      vdbe_serial_type_len @ 0x0838cfe8 reports a nonzero length
+      (SIGNED bgt, exact - the formula never sets bit 31), else seed
+      the field Mem and let the ported vdbe_serial_get @ 0x0838cc1c
+      decode into it (d += its return, pMem += 0x28). The
+      exhausted-payload break stops a short record before the first
+      field that would read past nKey, but trailing zero-length
+      fields (NULL, the 0/1 constants) still unpack. p->nField = i on
+      the way out. All four callees are ported and called directly,
+      per the porting rules. Deviations: the aMem elements stay RAW
+      0x28-byte Mems (the vdbe_serial_get convention), so on a 64-bit
+      host the db word at +0x10 is the pointer's low 32 bits - the
+      original's str is a 4-byte store and a host-width store would
+      clobber z/n at +0x14/+0x18. match.py: 78 original vs 93 LLVM
+      instructions, same structure (LLVM strength-reduces the *0x28
+      to lsl pairs, folds the < 0x80 fast path into ldrsb/cmn, and
+      reproduces the per-iteration ldrh nField reload). Host tests
+      (8): every serial type 0..13 plus 5-byte text and 7-byte blob
+      round-tripped byte-exact against the ported vdbe_serial_get
+      over the same payload pointers (full 0x28-byte Mem compare,
+      seeded buffers); the exact-fit caller-buffer boundary vs the
+      one-byte-short db_malloc_raw path (recording allocator,
+      needFree = 1) and its NULL/failure-latch endgame; the
+      short-record break before the first overrunning field;
+      trailing NULLs unpacking past the exhausted payload; the
+      nField + 1 field cap; a 130-NULL record (two-byte szHdr varint
+      through the ported get_varint); a 93-byte text field (two-byte
+      serial-type varint).
 
   - address: 0x0838cc1c
     ghidra: FUN_0838cc1c

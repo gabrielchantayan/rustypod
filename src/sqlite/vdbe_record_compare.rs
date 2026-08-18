@@ -115,17 +115,19 @@ pub struct KeyInfo {
 
 /// A parsed key — SQLite 3.5.9's `UnpackedRecord`, laid out per this
 /// function's loads (`ldrh r0,[r10,#0x4]`, `ldr r0,[r10,#0x8]`). The
-/// +0x05/+0x06 ownership bytes are the `sqlite3VdbeRecordUnpack`
-/// analog's (@ 0x0838c9f0) writes; this function never reads them.
+/// +0x06/+0x07 ownership bytes are the ported
+/// [`vdbe_record_unpack`](super::vdbe_record_unpack::vdbe_record_unpack)'s
+/// (@ 0x0838c9f0) writes (`strb [r4,#0x6]`/`strb [r4,#0x7]`); this
+/// function never reads them.
 #[repr(C)]
 pub struct UnpackedRecord {
     /// +0x00: collation and sort-order information.
     pub key_info: *const KeyInfo,
     /// +0x04: number of parsed fields in `a_mem`.
     pub n_field: u16,
-    /// +0x05: the record was heap-allocated (upstream `needFree`).
+    /// +0x06: the record was heap-allocated (upstream `needFree`).
     pub need_free: u8,
-    /// +0x06: the `a_mem` values hold resources (upstream
+    /// +0x07: the `a_mem` values hold resources (upstream
     /// `needDestroy`).
     pub need_destroy: u8,
     /// +0x08: the parsed fields — `n_field` raw 0x28-byte `Mem`s.
@@ -269,8 +271,10 @@ unsafe fn mem_compare_op() -> SqliteMemCompareFn {
 /// The build's `getVarint32` idiom: a first byte under 0x80 is the
 /// one-byte case inline (value = byte, length 1); anything else calls
 /// the ported [`get_varint`], whose u64 out-param truncates to the u32
-/// the original's callee stored (see `sqlite/get_varint.rs`).
-unsafe fn get_varint32_fast(p: *const u8, out: *mut u32) -> u32 {
+/// the original's callee stored (see `sqlite/get_varint.rs`). Shared
+/// with [`vdbe_record_unpack`](super::vdbe_record_unpack), whose
+/// original uses the same inline-fast-path/call shape.
+pub(crate) unsafe fn get_varint32_fast(p: *const u8, out: *mut u32) -> u32 {
     let first = *p;
     if first < 0x80 {
         *out = first as u32;
