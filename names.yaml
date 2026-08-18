@@ -20481,6 +20481,36 @@ functions:
       truncated by the false no-return edge;
       actual code is 0x080e988c-0x080e98ff plus literals 0x080e9900-0x080e990b.
 
+  - address: 0x082a1834
+    ghidra: FUN_082a1834
+    name: fixed16_eq_indirect
+    size: 24
+    sig: "bool fixed16_eq_indirect(a: *const i32, b: *const i32) -> bool"
+    module: fp/fp_misc
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      Q16.16 equality comparator with both operands fetched through
+      pointers: ldr r0,[r0]; ldr r1,[r1]; cmp r0,r1; movne r0,#0;
+      moveq r0,#1 - returns 1 when the two values are equal, else 0
+      (Ghidra: return *param_1 == *param_2). Unlike the signed
+      movle/movgt and movge/movlt pairs of fixed16_gt_indirect
+      (@ 0x082a184c) and fixed16_lt_indirect (@ 0x082a1864), the EQ/NE
+      conditions test raw bit-pattern equality, so this is the exact
+      counterpart of fixed16_ne_indirect (@ 0x082a18a8) with the sense
+      inverted. 4 bl call sites, all in FUN_0827d380 (0x0827d5f4,
+      0x0827d608, 0x0827d61c, 0x0827d630): four consecutive Q16.16
+      struct fields (param_1+5..+8) are compared edge-by-edge against
+      the stack-materialized 1.0 constant (0x10000) and the results
+      ANDed - an identity-scale check that skips further work only when
+      every component is exactly 1.0. Heads the indirect fixed16 helper
+      run 0x082a1834-0x082a18c8 (eq, gt, lt, sub, mul, ne, add).
+      match.py structural: same two pointer loads; LLVM computes the
+      equality branchlessly as sub r0,r0,r1 / clz r0,r0 / lsr r0,r0,#5
+      (32>>5 = 1 only when the words are equal - identical semantics)
+      instead of the movne/moveq pair, and adds the usual push
+      {fp,lr}/pop {fp,pc} frame.
+
   - address: 0x082a184c
     ghidra: FUN_082a184c
     name: fixed16_gt_indirect

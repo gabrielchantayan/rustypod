@@ -372,6 +372,30 @@ pub unsafe extern "C" fn fixed16_div(mut numerator: i32, divisor: i32) -> i32 {
     crate::util::fixed::fixed16_mul(numerator, reciprocal)
 }
 
+/// fixed16_eq_indirect — original: `FUN_082a1834` @ 0x082a1834 (24
+/// bytes; 4 bl call sites, all in FUN_0827d380: 0x0827d5f4,
+/// 0x0827d608, 0x0827d61c, 0x0827d630).
+///
+/// Q16.16 equality comparator with BOTH operands fetched through
+/// pointers: `ldr r0,[r0]; ldr r1,[r1]; cmp r0,r1; movne r0,#0;
+/// moveq r0,#1` — returns 1 when the two values are equal, else 0
+/// (Ghidra: `return *param_1 == *param_2`). Unlike the signed
+/// movle/movgt and movge/movlt pairs of `fixed16_gt_indirect`
+/// (@ 0x082a184c) and `fixed16_lt_indirect` (@ 0x082a1864), the
+/// EQ/NE conditions test raw bit-pattern equality, so this is the
+/// exact counterpart of `fixed16_ne_indirect` (@ 0x082a18a8) with the
+/// sense inverted. The sole caller FUN_0827d380 compares four
+/// consecutive Q16.16 struct fields (param_1+5..+8) edge-by-edge
+/// against the stack-materialized 1.0 constant (0x10000) and ANDs the
+/// results — an identity-scale check that skips further work only when
+/// every component is exactly 1.0. Sits immediately above
+/// `fixed16_gt_indirect` and heads the indirect fixed16 helper run
+/// 0x082a1834-0x082a18c8 (eq, gt, lt, sub, mul, ne, add).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn fixed16_eq_indirect(a: *const i32, b: *const i32) -> bool {
+    *a == *b
+}
+
 /// fixed16_gt_indirect — original: `FUN_082a184c` @ 0x082a184c (24
 /// bytes; 11 bl call sites, binary-scanned: 0x080f7884, 0x080f7938,
 /// 0x080fe64c, 0x08152a54, 0x08167a1c, 0x08197788, 0x08257300,
@@ -391,8 +415,8 @@ pub unsafe extern "C" fn fixed16_div(mut numerator: i32, divisor: i32) -> i32 {
 /// offsets against -100.0 (0xff9c0000) and a global bound. Sits
 /// immediately before the indirect fixed16 helper cluster
 /// 0x082a1864-0x082a18c8 (lt, sub, mul, ne, add) and is that family's
-/// greater-than sibling; the eq comparator @ 0x082a1834 just above it
-/// is a separate port.
+/// greater-than sibling; `fixed16_eq_indirect` (@ 0x082a1834) just
+/// above it heads the run.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn fixed16_gt_indirect(a: *const i32, b: *const i32) -> bool {
     *a > *b
@@ -945,6 +969,101 @@ mod tests {
         );
         unsafe {
             assert_eq!(LAST_RECIPROCAL_INPUT, divisor);
+        }
+    }
+
+    // ---- fixed16_eq_indirect ----
+
+    /// Call through real by-value copies so both pointer loads are
+    /// exercised.
+    fn eq_indirect(a: i32, b: i32) -> bool {
+        unsafe { fixed16_eq_indirect(&a, &b) }
+    }
+
+    #[test]
+    fn fixed16_eq_indirect_equal_values_match() {
+        assert!(eq_indirect(0, 0));
+        assert!(eq_indirect(FIX_ONE, FIX_ONE));
+        assert!(eq_indirect(-FIX_ONE, -FIX_ONE));
+        assert!(eq_indirect(i32::MAX, i32::MAX));
+        assert!(eq_indirect(i32::MIN, i32::MIN));
+        assert!(eq_indirect(0x1234_5678, 0x1234_5678));
+    }
+
+    #[test]
+    fn fixed16_eq_indirect_differing_values_do_not_match() {
+        assert!(!eq_indirect(FIX_ONE, 0));
+        assert!(!eq_indirect(0, FIX_ONE));
+        assert!(!eq_indirect(FIX_ONE, -FIX_ONE));
+        // 1.0 != 0.5 and -1.0 != -1.5 in Q16.16.
+        assert!(!eq_indirect(FIX_ONE, 0x0000_8000));
+        assert!(!eq_indirect(-FIX_ONE, -0x0001_8000));
+    }
+
+    #[test]
+    fn fixed16_eq_indirect_one_ulp_decides() {
+        // A single ulp of difference (Q16.16 resolution) already makes
+        // the values unequal, in both directions.
+        assert!(!eq_indirect(1, 0));
+        assert!(!eq_indirect(0, 1));
+        assert!(!eq_indirect(FIX_ONE, FIX_ONE - 1));
+        assert!(!eq_indirect(FIX_ONE - 1, FIX_ONE));
+        assert!(!eq_indirect(-FIX_ONE + 1, -FIX_ONE));
+        assert!(!eq_indirect(-FIX_ONE, -FIX_ONE + 1));
+        // Equal again once the ulp gap is closed.
+        assert!(eq_indirect(FIX_ONE - 1, FIX_ONE - 1));
+    }
+
+    #[test]
+    fn fixed16_eq_indirect_signed_extremes() {
+        // Raw bit-pattern equality: the EQ/NE conditions are
+        // sign-agnostic, so 0 never equals -1 and the extremes only
+        // match themselves.
+        assert!(!eq_indirect(0, -1));
+        assert!(!eq_indirect(-1, 0));
+        assert!(!eq_indirect(i32::MAX, i32::MIN));
+        assert!(!eq_indirect(i32::MIN, i32::MAX));
+        assert!(!eq_indirect(i32::MAX, i32::MAX - 1));
+        assert!(eq_indirect(-1, -1));
+        // 32767.0 (i32::MAX & !0xffff) != -32768.0 (i32::MIN).
+        assert!(!eq_indirect(i32::MAX & !0xffff, i32::MIN));
+    }
+
+    #[test]
+    fn fixed16_eq_indirect_matches_reference() {
+        let values = [
+            0i32,
+            1,
+            -1,
+            2,
+            FIX_ONE,
+            -FIX_ONE,
+            0x8000,
+            -0x8000,
+            0x0001_0001,
+            0x1234_5678,
+            -0x1234_5678,
+            0x7fff_ffff,
+            i32::MIN,
+        ];
+        for &a in &values {
+            for &b in &values {
+                assert_eq!(eq_indirect(a, b), a == b, "a={a:#x} b={b:#x}");
+            }
+        }
+        let mut rng = Rng(0x1ea5_1eaf_dead_beef);
+        for _ in 0..100_000 {
+            let a = rng.next() as i32;
+            // Half the sweep compares two independent words, half forces
+            // equality so the true branch is hit as often as the false.
+            let b = if rng.next() & 1 == 0 { a } else { rng.next() as i32 };
+            assert_eq!(eq_indirect(a, b), a == b, "a={a:#x} b={b:#x}");
+        }
+        // Dense sweep across the sign boundary, both directions.
+        for a in -4096i32..4096 {
+            for b in -4096i32..4096 {
+                assert_eq!(eq_indirect(a, b), a == b, "a={a:#x} b={b:#x}");
+            }
         }
     }
 
