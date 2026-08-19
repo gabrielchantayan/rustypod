@@ -48,15 +48,15 @@
 //! done: mov r0, r4
 //! ```
 //!
-//! The callee `FUN_080aabac` @ 0x080aabac (52 bytes, unported) is the
-//! proleptic-Gregorian leap-year test: `year % 4 == 0` and
-//! `year % 400` not in {100, 200, 300} — i.e. a century year is common
-//! unless it is a 400-year — returning 1 for leap, 0 for common (the
-//! `% 400` runs through `__rt_udiv` @ 0x08036f14, ported in
-//! `runtime/rt_div.rs`). It dispatches through [`IS_LEAP_YEAR`], the
-//! house seam for unported callees (see `time/datetime.rs`'s
-//! `DATETIME_OPS`); the wired default returns 1 so the shipped table
-//! entry passes through unmodified.
+//! The callee `FUN_080aabac` @ 0x080aabac (52 bytes, ported in
+//! `time/leap_year.rs`) is the proleptic-Gregorian leap-year test:
+//! `year % 4 == 0` and `year % 400` not in {100, 200, 300} — i.e. a
+//! century year is common unless it is a 400-year — returning 1 for
+//! leap, 0 for common (the `% 400` runs through `__rt_udiv` @
+//! 0x08036f14, ported in `runtime/rt_div.rs`). It dispatches through
+//! [`IS_LEAP_YEAR`], the house seam for callees reached indirectly
+//! (see `time/datetime.rs`'s `DATETIME_OPS`); the wired default is
+//! the real port.
 //!
 //! The return is the raw table byte (`char`, unsigned under ADS), so
 //! the February decrement is a wrapping u8 subtraction — exactly the
@@ -78,15 +78,15 @@ pub const MONTH_FEBRUARY: u8 = 2;
 pub static mut DAYS_IN_MONTH: [u8; 13] =
     [0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
-/// Wired default for [`IS_LEAP_YEAR`]: 1 ("leap"), so with no hook
-/// installed the table entry passes through unmodified — the unported
-/// callee's correction is disabled rather than guessed at.
-unsafe extern "C" fn leap_year_default(_year: u16) -> i32 {
-    1
+/// Wired default for [`IS_LEAP_YEAR`]: the real port
+/// [`leap_year::is_leap_year`], zero-extending the record's u16 year
+/// (the original's `ldrh`).
+unsafe extern "C" fn leap_year_default(year: u16) -> i32 {
+    super::leap_year::is_leap_year(year as u32)
 }
 
-/// The active `FUN_080aabac` @ 0x080aabac (leap-year test, unported).
-/// Host tests swap in a real implementation and restore
+/// The active `FUN_080aabac` @ 0x080aabac (leap-year test, ported in
+/// `time/leap_year.rs`). Host tests swap in a mock and restore
 /// [`DEFAULT_IS_LEAP_YEAR`]; on target the hook wires in the stock
 /// function.
 pub static mut IS_LEAP_YEAR: unsafe extern "C" fn(year: u16) -> i32 = leap_year_default;
@@ -279,15 +279,19 @@ mod tests {
         restore(guard);
     }
 
-    /// With the wired default (no hook installed) the table passes
-    /// through unmodified, February included.
+    /// With the wired default the real leap-year port drives the
+    /// February correction: 2000 is leap (29), 2001 common (28).
     #[test]
-    fn default_stub_passes_table_through() {
+    fn wired_default_is_the_real_leap_year_test() {
         let _guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             ptr::write_volatile(ptr::addr_of_mut!(IS_LEAP_YEAR), DEFAULT_IS_LEAP_YEAR);
         }
-        let record = dt(2001, MONTH_FEBRUARY);
-        assert_eq!(unsafe { datetime_days_in_month(&record) }, 29);
+        let leap_record = dt(2000, MONTH_FEBRUARY);
+        assert_eq!(unsafe { datetime_days_in_month(&leap_record) }, 29);
+        let common_record = dt(2001, MONTH_FEBRUARY);
+        assert_eq!(unsafe { datetime_days_in_month(&common_record) }, 28);
+        let century_record = dt(1900, MONTH_FEBRUARY);
+        assert_eq!(unsafe { datetime_days_in_month(&century_record) }, 28);
     }
 }
