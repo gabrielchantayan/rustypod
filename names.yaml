@@ -34513,3 +34513,47 @@ functions:
       sending the zero-byte request to the heap and stamping nothing;
       and the release seam shipping the ported releaseMemArray as its
       default.
+
+  # --- Packed-record month length (time/month_length) ---
+  - address: 0x08076074
+    ghidra: FUN_08076074
+    name: datetime_days_in_month
+    size: 52
+    sig: "u8 datetime_days_in_month(const DateTime *dt)"
+    module: time/month_length
+    status: ported
+    vars: {param_1: dt, cVar2: days, iVar1: leap, DAT_080760a8: DAYS_IN_MONTH,
+      FUN_080aabac: is_leap_year (unported)}
+    notes: >-
+      Length of the packed calendar record's month in its year, over the
+      ten-byte DateTime record of time/datetime.rs (reads +0x04 month,
+      1=January, and +0x06 u16 year). The literal pool word @ 0x080760a8
+      holds 0x083e2e48, the RUNTIME address of the packed-calendar stack's
+      days-in-month table; under the scatterload skew (runtime = image -
+      0xaed8, see the region survey) its bytes sit at image 0x083edd20 and
+      are decrypted: {0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31},
+      index 0 an unused pad and FEBRUARY STORED AS 29 - the function
+      subtracts one (subeq + andeq #0xff, a wrapping u8 decrement) when the
+      year is common. The same table literal is shared by three more
+      calendar helpers (literal pools @ 0x080d6d58 / 0x080ff8c8 /
+      0x08158c40). The runtime address overlaps dead C++ vector code in the
+      stored image (mid-FUN_083e2dac); the scatterloader copies the RW block
+      over it at boot. Callee FUN_080aabac @ 0x080aabac (52 bytes, NOT
+      ported) is the proleptic-Gregorian leap-year test: year % 4 == 0 and
+      year % 400 not in {100, 200, 300} (the % 400 through the ported
+      __rt_udiv @ 0x08036f14, runtime/rt_div.rs), returning 1 leap / 0
+      common; it dispatches through the IS_LEAP_YEAR seam whose wired
+      default returns 1 (table entry passes through unmodified). 6 bl call
+      sites: @ 0x081409b0 / 0x081409c0 in FUN_081408a8 (month step rollover
+      clamp), @ 0x081e90c0 / 0x081e9140 in FUN_081e8f78, @ 0x082712f0 /
+      0x08271308 in FUN_082710e0. The table index is the raw month byte with
+      no bounds check (bare ldrb [r2, r1]), mirrored by a pointer read.
+      Host tests (7) - every table index 0..=12, non-February months (incl.
+      0) never consulting the callee, February leap -> 29, February common
+      -> 28, the year handed through zero-extended, the decrement wrapping
+      0 -> 0xff under a temporarily-zeroed table entry, and the wired
+      default passing the table through. match.py structural: same shape -
+      table literal load, ldrb table[month], cmp #2 / bne, ldrh year, cmp
+      #0 / subeq / and #0xff; differences are the crate fp frame, the
+      indirect blx seam dispatch in place of the direct bl, and LLVM
+      applying the byte mask unconditionally (a no-op on byte values).
