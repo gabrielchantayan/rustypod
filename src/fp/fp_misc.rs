@@ -1863,6 +1863,68 @@ pub unsafe extern "C" fn cond_wait_attr_abstime(attr: *const u8, out: *mut u8) -
     0
 }
 
+/// timespec_to_milliseconds — original: `FUN_082a1c30` @ 0x082a1c30
+/// (40 bytes of code per functions.csv, binary-verified against
+/// osos.dec: ten instructions ending `ldmia sp!,{r4,pc}` at
+/// 0x082a1c54, plus a one-word literal pool at 0x082a1c58 =
+/// 0x000f4240 = 1000000 — the divisor — for a true extent of 44
+/// bytes ending where the next csv-listed function starts at
+/// 0x082a1c5c. 30 `bl` call sites; no pointer to the address
+/// anywhere in osos.dec (binary-scanned). The 20 bytes immediately
+/// above (0x082a1c1c-0x082a1c2f) are an unnamed tail-call thunk —
+/// `mov r2,r0; mov r0,r1; ldr r1,[r2,#0x8]; ldr r2,[r2,#0x4]; bx
+/// r2` — sitting between `cond_wait_attr_abstime` (@ 0x082a1c0c,
+/// ported just above) and this function; it belongs to neither and
+/// is left unported.)
+///
+/// Converts a {sec, nsec} timespec pair to milliseconds: the whole
+/// body is `stmdb sp!,{r4,lr}; mov r4,r0; ldr r0,[r0,#0x4]; ldr
+/// r1,[0x82a1c58]; bl 0x08031568; ldr r1,[r4,#0x0]; mov r2,#0x3e8;
+/// mla r0,r2,r1,r0; mov r1,#0x0; ldmia sp!,{r4,pc}` — load nsec
+/// (+0x4), signed-divide it by 1000000 through the ADS signed
+/// divide @ 0x08031568 (ported as [`__rt_sdiv`]), then answer
+/// sec (+0x0) * 1000 + nsec/1000000 computed by the 32-bit
+/// wrapping `mla`. Ghidra decompiles the return as `int`, but the
+/// `mov r1,#0` before the return and the callers' `subs`/`sbc`
+/// 64-bit elapsed-time subtracts (0x081643bc-0x081643cc,
+/// 0x08164f70, 0x081948b8, 0x081d78f8, 0x08201074, 0x082092b4 —
+/// each subtracting a stored 32-bit millisecond stamp and
+/// comparing the result against 500) pin an UNSIGNED 64-bit
+/// return: the 32-bit `mla` result zero-extended into r0:r1,
+/// never sign-extended, so a negative wrap answers
+/// 0x00000000_xxxxxxxx.
+///
+/// The input record is the { +0x00 sec, +0x04 nsec } pair the
+/// clock objects' vtable slot +0xc (gettime) fills on the caller's
+/// stack: the canonical use constructs a clock object (ctor @
+/// 0x08262958), calls the slot with an out pointer, converts
+/// through this function, and destroys the clock (@ 0x08262908) —
+/// see the names.yaml note on the clock-destructor entry. The
+/// sibling @ 0x08262ab8 subtracts two such pairs field by field.
+///
+/// Deviations:
+/// - Ghidra's decompile inlines the whole [`__rt_sdiv`] body (sign
+///   fixup, clz dispatch, shift-subtract loop) into this function;
+///   the listing pins the real `bl` call (the
+///   `plist_node_child_count` precedent), so the port calls the
+///   ported divide directly — no seam.
+/// - The loads are plain `ldr` (ABI-aligned word fields); the port
+///   reads them with `read_unaligned` anyway, the module's
+///   host-testing idiom against a 4-but-not-8-aligned record head
+///   on a 64-bit host (the `plist_node_child_count` deviation).
+/// - The pushed r4 only keeps `ts` alive across the divide call
+///   (an ADS register-allocation artifact); the port binds locals
+///   instead and keeps no frame.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn timespec_to_milliseconds(ts: *const i32) -> u64 {
+    // `read_unaligned`: same 4-but-not-8-aligned record-head hazard
+    // as plist_node_child_count on a 64-bit host.
+    let nsec = core::ptr::read_unaligned(ts.add(1));
+    let millis_part = __rt_sdiv(nsec, 1_000_000);
+    let sec = core::ptr::read_unaligned(ts);
+    (sec.wrapping_mul(1000).wrapping_add(millis_part)) as u32 as u64
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -4861,5 +4923,66 @@ mod tests {
         assert_eq!(record[3], 0xa5, "builder poisoned the byte after the record");
         assert_eq!(unsafe { cond_wait_attr_abstime(record.as_ptr().add(1), &mut out) }, 0);
         assert_eq!(out, 0x01);
+    }
+
+    // ---- timespec_to_milliseconds ----
+
+    /// Builds the { sec @ +0x00, nsec @ +0x04 } word pair the clock
+    /// gettime slot fills, offset 4 bytes into a poisoned buffer so
+    /// the record head exercises the `read_unaligned` idiom and
+    /// stray reads are visible.
+    fn timespec_pair(sec: i32, nsec: i32) -> Vec<u8> {
+        let mut record = std::vec![0xa5u8; 16];
+        record[4..8].copy_from_slice(&sec.to_le_bytes());
+        record[8..12].copy_from_slice(&nsec.to_le_bytes());
+        record
+    }
+
+    fn millis(sec: i32, nsec: i32) -> u64 {
+        let record = timespec_pair(sec, nsec);
+        unsafe { timespec_to_milliseconds(record.as_ptr().add(4) as *const i32) }
+    }
+
+    #[test]
+    fn timespec_to_milliseconds_scales_whole_seconds() {
+        assert_eq!(millis(0, 0), 0);
+        assert_eq!(millis(1, 0), 1000);
+        assert_eq!(millis(2, 0), 2000);
+        assert_eq!(millis(3600, 0), 3_600_000);
+    }
+
+    #[test]
+    fn timespec_to_milliseconds_divides_nsec_by_a_million() {
+        // The nsec field divides by 1000000 through the signed ADS
+        // divide; sub-millisecond leftovers truncate away.
+        assert_eq!(millis(1, 999_999), 1000, "sub-milli truncates");
+        assert_eq!(millis(1, 1_000_000), 1001);
+        assert_eq!(millis(1, 1_999_999), 1001, "still truncates");
+        assert_eq!(millis(1, 500_000_000), 1500);
+        // With sec = 0 the divided field alone produces 2000,
+        // pinning +0x04 as the divided field and +0x00 as the
+        // multiplied one (millis(2, 0) == 2000 above).
+        assert_eq!(millis(0, 2_000_000_000), 2000);
+    }
+
+    #[test]
+    fn timespec_to_milliseconds_truncates_negative_nsec_toward_zero() {
+        // __rt_sdiv is a truncating signed divide: -1.5 ms loses its
+        // fraction toward zero, and a negative sub-milli remainder
+        // vanishes entirely.
+        assert_eq!(millis(2, -1_500_000), 1999);
+        assert_eq!(millis(2, -999_999), 2000);
+    }
+
+    #[test]
+    fn timespec_to_milliseconds_zero_extends_the_wrapped_low_word() {
+        // The original computes in 32 wrapping bits (`mla`) and
+        // returns them zero-extended (mov r1,#0), never
+        // sign-extended: millis(-1, 0) wraps to 0xfffffc18 in the
+        // low word with a ZERO high word.
+        assert_eq!(millis(-1, 0), 0x0000_0000_ffff_fc18);
+        let max = (i32::MAX.wrapping_mul(1000)) as u32 as u64;
+        assert_eq!(millis(i32::MAX, 0), max);
+        assert_eq!(max >> 32, 0, "high word always zero");
     }
 }

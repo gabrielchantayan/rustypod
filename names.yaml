@@ -22966,6 +22966,71 @@ functions:
       frame (push {fp,lr} / mov fp,sp / pop {fp,pc} in place of
       bx lr).
 
+  - address: 0x082a1c30
+    ghidra: FUN_082a1c30
+    name: timespec_to_milliseconds
+    size: 40
+    sig: "u64 timespec_to_milliseconds(const i32 *ts)"
+    module: fp/fp_misc
+    status: ported
+    vars:
+      param_1: ts (pointer to the { +0x00 sec, +0x04 nsec } pair the clock gettime slot fills)
+      DAT_082a1c58: NANOSECONDS_PER_MILLISECOND (literal 0x000f4240 = 1000000, the signed divisor)
+      FUN_08031568: __rt_sdiv (ADS signed divide, ported in runtime/rt_div.rs)
+      FUN_08262908: clock_source_destroy (ported; the canonical caller's destructor)
+    notes: >-
+      Timespec-to-milliseconds conversion: sec*1000 +
+      nsec/1000000, exactly as the clock_source_destroy entry's
+      note anticipated. Extent binary-verified against osos.dec:
+      40 bytes of code (functions.csv's size is exact for the
+      code) - ten instructions ending `ldmia sp!,{r4,pc}` at
+      0x082a1c54 - plus a one-word literal pool at 0x082a1c58 =
+      0x000f4240 = 1000000 (the divisor), for a true extent of
+      44 bytes ending where the next csv-listed function starts
+      at 0x082a1c5c. The 20 bytes immediately above
+      (0x082a1c1c-0x082a1c2f) are an unnamed tail-call thunk
+      (mov r2,r0; mov r0,r1; ldr r1,[r2,#0x8]; ldr r2,[r2,#0x4];
+      bx r2) between cond_wait_attr_abstime @ 0x082a1c0c and
+      this function; it belongs to neither and is left
+      unported. 30 bl call sites; no pointer to the address
+      anywhere in osos.dec (binary-scanned). Algorithm: load
+      nsec (+0x4), signed-divide it by 1000000 through the ADS
+      divide @ 0x08031568 (ported as __rt_sdiv), then answer
+      sec (+0x0) * 1000 + quotient via the 32-bit wrapping mla,
+      zero-extended to 64 bits (mov r1,#0). Return type: Ghidra
+      decompiles `int`, but the mov r1,#0 and the callers'
+      subs/sbc 64-bit elapsed-time subtracts (0x081643bc,
+      0x08164f70, 0x081948b8, 0x081d78f8, 0x08201074,
+      0x082092b4 - each subtracting a stored 32-bit ms stamp
+      and comparing against 500) pin an UNSIGNED 64-bit
+      return, never sign-extended: a negative wrap answers
+      0x00000000_xxxxxxxx. The input record is the
+      { +0x00 sec, +0x04 nsec } pair the clock objects'
+      vtable slot +0xc (gettime) fills on the caller's stack;
+      the canonical use constructs a clock (ctor @ 0x08262958),
+      calls the slot, converts here, and destroys the clock
+      (clock_source_destroy @ 0x08262908, ported); the sibling
+      @ 0x08262ab8 subtracts two such pairs field by field.
+      Deviations: calls the ported __rt_sdiv directly - no seam
+      (Ghidra inlines the whole divide body; the listing pins
+      the real bl, the plist_node_child_count precedent);
+      read_unaligned word loads (the module's host idiom
+      against a 4-but-not-8-aligned record head, which LLVM
+      expands to ldrb/orr funnels on ARMv5 - the accepted
+      plist_node_child_count deviation profile); no frame (the
+      pushed r4 is only an ADS spill keeping ts alive across
+      the divide call). Host tests (4): whole seconds scaled
+      by 1000; nsec divided by a million with sub-milli
+      truncation, the {sec=0, nsec=2e9} case pinning +0x04 as
+      the divided field against +0x00 the multiplied one;
+      negative nsec truncating toward zero (sdiv semantics);
+      and the 32-bit mla wrap zero-extended into a zero high
+      word (millis(-1,0) = 0x00000000fffffc18). match.py
+      structural (exit-1 diff expected): same shape - the
+      divide bl, the mla, the mov r1,#0 - differing by the
+      crate's fp frame and the read_unaligned ldrb/orr
+      funnels, the accepted plist_node_child_count profile.
+
   - address: 0x080e97ac
     ghidra: FUN_080e97ac
     name: fixed16_cos
