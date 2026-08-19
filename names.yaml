@@ -19143,6 +19143,40 @@ functions:
       src/cxx/templates.rs::element_at_alias_68dc_dispatches_through_slot_0x40_and_derefs
       / element_at_alias_68dc_matches_primary.
 
+  - address: 0x083d6908
+    ghidra: FUN_083d6908
+    name: container_element_at_alias_6908
+    size: 24
+    sig: "void *container_element_at_alias_6908(void *this, usize index)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: this, param_2: index}
+    notes: >-
+      ALIAS — byte-identical third instantiation of
+      container_element_at @ 0x083d5efc (all 24 bytes verified against
+      osos.dec: `push {r4,lr}; ldr r2,[r0]; ldr r2,[r2,#0x40]; blx r2;
+      ldr r0,[r0]; pop {r4,pc}`), the same `T *operator[](size_t)`
+      dispatch through the container's own vtable slot 0x40. 5
+      `bl 0x083d6908` sites, no b tail-call (grep on decomp/osos.asm):
+      0x08123ff8, 0x08298b84 and 0x08298cb4 each reach a sub-container
+      at this+0x6c (`add r0,r?,#0x6c` immediately before the bl) —
+      0x08298b84's index is clamped by an `array_at_checked`-shaped
+      signed bound check first — and 0x083d02b4 / 0x083d02f8 in
+      FUN_083d02ac loop r4/r5 as the index and NULL-test each returned
+      element (`cmp r0,#0; beq`) before use — the same usage shape the
+      primary's call sites established. Reference C:
+      decomp/c/037/083d6908_FUN_083d6908.c (Ghidra drops the r1 index
+      parameter; the blx passes it through). Ported as its own exported
+      symbol with an identical body under a distinct link_section (the
+      vector_size_elem4_alias_76c8 / container_element_at_alias_68dc
+      precedent, NOT the ledger-only not_equal_deref aliases) so LLVM's
+      identical-function folding keeps all three labels hookable.
+      match.py: same ldr/ldr/blx r2/ldr dispatch-and-deref shape as the
+      original; LLVM emits its fp frame (push {fp,lr} / mov fp,sp) in
+      place of the original's stack-alignment push {r4,lr}. Host tests:
+      src/cxx/templates.rs::element_at_alias_6908_dispatches_through_slot_0x40_and_derefs
+      / element_at_alias_6908_matches_primary.
+
   - address: 0x083d48dc
     ghidra: FUN_083d48dc
     name: array_at_checked
