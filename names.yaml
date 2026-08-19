@@ -15655,6 +15655,88 @@ functions:
       the unported release, LLVM inlines tracked_free's stats-update
       prologue and tail-calls free_tag57 instead of b sqlite3_free.
 
+  - address: 0x0838bdb0
+    ghidra: FUN_0838bdb0
+    name: vdbe_mem_grow
+    size: 232
+    sig: "i32 vdbe_mem_grow(Mem *p_mem, i32 size, i32 preserve)"
+    module: sqlite/vdbe_mem_grow
+    status: ported
+    renames:
+      param_1: p_mem
+      param_2: size
+      param_3: preserve
+      FUN_0837d374: sqlite3MallocSize
+      FUN_083749f4: sqlite3DbReallocOrFree
+      FUN_083906f4: sqlite3_free
+      FUN_08374960: sqlite3DbMallocRaw
+    notes: >-
+      Upstream SQLite 3.5.9's sqlite3VdbeMemGrow (vdbemem.c),
+      verified line-for-line against the public 3.5.9 source - the
+      payload-space guarantee behind every Mem cell's z: nothing
+      happens while the owned zMalloc block's tracked size covers the
+      request; otherwise the request is floored to 32 bytes (signed
+      movle) and the cell is regrown, by db_realloc_or_free
+      @ 0x083749f4 in place when preserve && z == zMalloc (a failed
+      resize stamps the WHOLE flags halfword MEM_Null (1) via
+      strheq), or by sqlite3_free @ 0x083906f4 of the old block
+      followed by db_malloc_raw @ 0x08374960 (the free runs BEFORE
+      the malloc). A preserve grow with a borrowed payload then
+      copies n payload bytes into the owned block (__rt_memcpy
+      @ 0x08037db0), a MEM_Dyn payload with a non-NULL xDel is
+      destructed with the OLD z (the z = zMalloc store comes later),
+      and the common tail stores z = zMalloc, clears
+      MEM_Static|MEM_Ephem (bic #0x180) UNCONDITIONALLY, NULLs xDel,
+      and returns SQLITE_NOMEM (7) iff zMalloc is NULL. Extent
+      0x0838bdb0..0x0838be98 confirmed from raw words (0x0838be94 is
+      the closing ldmia; 0x0838be98 is MemHandleBom's stmdb; no
+      literal pool). 13 bl call sites, binary-scanned from osos.dec:
+      0x082b3960 in FUN_082b38e0; 0x083876d8, 0x08388788 and
+      0x08389a40 in the 16 KB vdbe routine FUN_08386ef8; 0x0838b7f8
+      and 0x0838b878 in FUN_0838b67c; 0x0838bb70 in
+      sqlite3VdbeMemMakeWriteable @ 0x0838bb30; 0x0838bbec in
+      sqlite3VdbeMemExpandBlob @ 0x0838bbb4; 0x0838bd40 in
+      FUN_0838bcb4; 0x0838bfe4 in the ported vdbe_mem_nul_terminate
+      @ 0x0838bfb0 (its ops-slot default is now this port, on target
+      and host alike - the seam stays for recording mocks, and its
+      test lock is pub(crate) so this module's integration test can
+      serialize against its mock-swapping tests); 0x0838c200 in the
+      ported vdbe_mem_set_str @ 0x0838c158 (left dispatching through
+      its own seam); 0x0838c348 in the ported vdbe_mem_stringify
+      @ 0x0838c32c; and 0x0838eed8 in FUN_0838ee8c. Deviations -
+      sqlite3MallocSize @ 0x0837d374 (20 bytes, unported) is
+      reproduced inline as the private tracked_block_size helper: the
+      original's exact two-word walk of the tag-57 tracked header
+      (pad at payload-4, size at payload-pad-8), NULL yielding 0, no
+      ops slot; the allocator family is called directly through its
+      ported twins (sqlite/mem's db_realloc_or_free and
+      db_malloc_raw, heap/tracked's tracked_free,
+      libc/rt_memcpy's __rt_memcpy). Two firmware deviations from
+      upstream 3.5.9, kept as-is and pinned by host tests: the flags
+      mask is bic #0x180 applied on success AND failure alike
+      (upstream clears MEM_Ephem|MEM_Static|MEM_Dyn on success only),
+      so MEM_Dyn (0x40) survives the grow with xDel NULLed, and a
+      failed free+malloc grow keeps the type bits instead of becoming
+      MEM_Null (only the failed realloc arm stamps MEM_Null).
+      match.py structural: same skeleton - the capacity gate with the
+      malloc-size walk inlined (ldr [r0,#-4]/sub/ldr [r1,#-8]), the
+      cmp/movle #32 floor, the realloc arm with its strheq MEM_Null,
+      the free+malloc arm (LLVM inlines tracked_free's stats update),
+      the four-way cmpne memcpy condition, the xDel blx with the old
+      z, and the unconditional and #0xfe7f/moveq #7 tail. Host tests
+      (10) - sufficient capacity is a no-op (recording allocator
+      proves no call), the 32-byte floor over requests
+      -5..100, the NULL/NULL realloc arm, preserve-realloc in place,
+      the borrowed-payload copy, no-preserve free-then-malloc with
+      the freed raw pointer checked, NOMEM on both arms (realloc
+      stamps MEM_Null, malloc keeps the type bits), the MEM_Dyn
+      destructor running once on the OLD z with MEM_Dyn surviving,
+      and the vdbe_mem_nul_terminate integration through the real
+      grow - in-place and regrown (real tracked headers; the regrow
+      half installs a copy-on-move bump realloc because the ported
+      sqlite3_realloc finds the old payload INSIDE the new raw
+      block, which the veneers recording realloc does not model).
+
   - address: 0x0838bfb0
     ghidra: FUN_0838bfb0
     name: vdbe_mem_nul_terminate
@@ -15690,12 +15772,15 @@ functions:
       FUN_08386ef8, 0x0838b618 in the sqlite3VdbeIntValue-style
       extractor FUN_0838b5c4, and 0x0838c84c in the ported
       sqlite/vdbe_real_value @ 0x0838c7ec. Deviations - the grow
-      callee is unported, so it sits behind the module's
-      VDBE_MEM_NUL_TERMINATE_OPS seam (ABI type and
-      VDBE_MEM_GROW_ADDRESS reused from sqlite/vdbe_mem_set_str):
-      target builds transmute the retailOS address, host tests install
-      a recording mock; vdbe_real_value's own nul_terminate slot can
-      now default to this port but is left untouched here. The port
+      callee @ 0x0838bdb0 has since been ported
+      (sqlite/vdbe_mem_grow) and is the shipped default of the
+      module's VDBE_MEM_NUL_TERMINATE_OPS seam on target and host
+      alike (the ABI type is still reused from
+      sqlite/vdbe_mem_set_str, which owns it); host tests install a
+      recording mock, and the test lock is pub(crate) so
+      vdbe_mem_grow's integration test can serialize against the
+      mock-swapping tests. vdbe_real_value's own nul_terminate slot
+      can now default to this port but is left untouched here. The port
       goes through the typed repr(C) Mem (offsets asserted on 32-bit
       targets in sqlite/vdbe.rs). match.py structural: 29 vs 29
       instructions, same skeleton - single flags ldrh, the guard (LLVM
@@ -16114,7 +16199,9 @@ functions:
       from Grow or HandleBom is normalized to SQLITE_NOMEM (7).
       The Rust port is the shipped default of value_set_str's
       SQLITE_VDBE_MEM_SET_STR slot, replacing its old NOMEM stub while
-      retaining the slot for test mocks. Grow and HandleBom remain
+      retaining the slot for test mocks. Grow @ 0x0838bdb0 has since
+      been ported (sqlite/vdbe_mem_grow) but this module's slot is
+      unchanged: Grow and HandleBom remain
       typed dispatch seams: host defaults panic until tests supply
       mocks, target defaults call their retailOS addresses. The
       existing MEM_SET_OPS release seam is reused because mem_release

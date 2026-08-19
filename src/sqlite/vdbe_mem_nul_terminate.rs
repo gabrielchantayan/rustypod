@@ -89,11 +89,12 @@
 //!
 //! ### Deviations
 //!
-//! - `sqlite3VdbeMemGrow` @ 0x0838bdb0 is not ported. It is the
-//!   [`VDBE_MEM_NUL_TERMINATE_OPS`] seam: target builds call its
-//!   retailOS load address directly, while host tests install a
-//!   recording mock. The ABI type and address constant are reused from
-//!   [`vdbe_mem_set_str`](super::vdbe_mem_set_str), which owns them.
+//! - `sqlite3VdbeMemGrow` @ 0x0838bdb0 has since been ported
+//!   ([`vdbe_mem_grow`](super::vdbe_mem_grow::vdbe_mem_grow)) and is
+//!   the shipped default of the [`VDBE_MEM_NUL_TERMINATE_OPS`] seam on
+//!   both target and host; host tests install a recording mock. The
+//!   ABI type is reused from [`vdbe_mem_set_str`](super::vdbe_mem_set_str),
+//!   which owns it.
 //! - The port goes through the typed `repr(C)` [`Mem`] with named
 //!   fields rather than the original's +0x14/+0x18/+0x1c byte offsets;
 //!   those target offsets are statically asserted on 32-bit targets in
@@ -102,37 +103,21 @@
 use super::value_set_str::SQLITE_NOMEM;
 use super::vdbe::Mem;
 use super::vdbe_mem_realify::SQLITE_OK;
-use super::vdbe_mem_set_str::{VdbeMemGrow, MEM_STR, MEM_TERM, VDBE_MEM_GROW_ADDRESS};
+use super::vdbe_mem_grow::vdbe_mem_grow;
+use super::vdbe_mem_set_str::{VdbeMemGrow, MEM_STR, MEM_TERM};
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_vdbe_mem_grow(p_mem: *mut Mem, size: i32, preserve: i32) -> i32 {
-    let grow: VdbeMemGrow = core::mem::transmute(VDBE_MEM_GROW_ADDRESS);
-    grow(p_mem, size, preserve)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_vdbe_mem_grow(_p_mem: *mut Mem, _size: i32, _preserve: i32) -> i32 {
-    panic!("vdbe_mem_nul_terminate requires sqlite3VdbeMemGrow @ 0x0838bdb0")
-}
-
-/// Indirect dispatch for the unported grow helper this terminator
-/// calls. Host tests install a recording implementation; the target
-/// default branches straight into retailOS.
+/// Indirect dispatch for the grow helper this terminator calls
+/// (ported: [`vdbe_mem_grow`] @ 0x0838bdb0). Host tests install a
+/// recording implementation; the wired default is the real port.
 #[derive(Clone, Copy)]
 pub struct VdbeMemNulTerminateOps {
     /// `sqlite3VdbeMemGrow(pMem, size, preserve)` @ 0x0838bdb0.
     pub grow: VdbeMemGrow,
 }
 
-/// Target default: the remaining retailOS helper.
-#[cfg(target_os = "none")]
+/// Wired default: the ported [`vdbe_mem_grow`] @ 0x0838bdb0.
 pub const DEFAULT_VDBE_MEM_NUL_TERMINATE_OPS: VdbeMemNulTerminateOps =
-    VdbeMemNulTerminateOps { grow: retail_vdbe_mem_grow };
-
-/// Host default: fail loudly until a test supplies the unported helper.
-#[cfg(not(target_os = "none"))]
-pub const DEFAULT_VDBE_MEM_NUL_TERMINATE_OPS: VdbeMemNulTerminateOps =
-    VdbeMemNulTerminateOps { grow: missing_vdbe_mem_grow };
+    VdbeMemNulTerminateOps { grow: vdbe_mem_grow };
 
 /// Active grow helper. Host tests install recording mocks.
 pub static mut VDBE_MEM_NUL_TERMINATE_OPS: VdbeMemNulTerminateOps =
@@ -176,13 +161,15 @@ pub unsafe extern "C" fn vdbe_mem_nul_terminate(p_mem: *mut Mem) -> i32 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
     use super::*;
     use std::sync::{Mutex, MutexGuard};
 
-    /// Serializes tests that swap the grow slot.
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
+    /// Serializes tests that swap the grow slot. pub(crate):
+    /// `vdbe_mem_grow`'s integration test drives this terminator
+    /// through the real grow under the same lock.
+    pub(crate) static OPS_LOCK: Mutex<()> = Mutex::new(());
 
     /// The payload space the recording grow hands out. Big enough that
     /// any test-chosen `n` plus its two-byte trailer fits.
