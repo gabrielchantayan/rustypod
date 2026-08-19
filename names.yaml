@@ -23097,6 +23097,71 @@ functions:
       crate's fp frame and the read_unaligned ldrb/orr
       funnels, the accepted plist_node_child_count profile.
 
+  - address: 0x082a1c5c
+    ghidra: FUN_082a1c5c
+    name: timespec_is_nonzero
+    size: 28
+    sig: "bool timespec_is_nonzero(const i32 *ts)"
+    module: fp/fp_misc
+    status: ported
+    vars:
+      param_1: ts (pointer to the { +0x00 sec, +0x04 nsec } timespec pair under test)
+      DAT_082627fc: NANOSECONDS_PER_SECOND (literal 0x3b9aca00 = 1000000000, the nsec bound the FUN_0826269c caller validates against)
+    notes: >-
+      Timespec-nonzero predicate: answers 1 when either word of
+      the { +0x00 sec, +0x04 nsec } pair differs from 0, 0 only
+      when both are zero. Extent binary-verified against
+      osos.dec: 28 bytes (functions.csv's size is exact) -
+      seven instructions `ldr r1,[r0,#0x0]; cmp r1,#0x0; ldreq
+      r0,[r0,#0x4]; cmpeq r0,#0x0; movne r0,#0x1; moveq
+      r0,#0x0; bx lr` ending at 0x082a1c74, the next
+      csv-listed function starting at 0x082a1c78; no literal
+      pool. Two bl call sites, both in the posix
+      condition-wait machinery: 0x082624ec inside the waiter
+      wake body FUN_08262450 and 0x082626bc inside the
+      timed-wait entry FUN_0826269c (Ghidra decompiles the
+      latter under decomp/c/025/08261f94_FUN_08261f94.c); no
+      pointer to the address anywhere in osos.dec
+      (binary-scanned). Both callers use it as the "deadline
+      supplied" predicate: FUN_0826269c XORs the result with 1
+      (eor r0,r0,#0x1) to mean "no deadline" while validating
+      the caller's {sec, nsec} record (nsec bounds-checked
+      against the 1000000000 literal @ 0x082627fc,
+      binary-verified), then branches on the raw result to
+      pick between copying an absolute deadline verbatim
+      (abstime flag 1, see cond_wait_attr_abstime @
+      0x082a1c0c) and adding the relative pair to the freshly
+      read "now" (the timespec add @ 0x08261ed8);
+      FUN_08262450 tests the waiter node's +0x14 relative pair
+      and, when nonzero, folds it into the +0x1c/+0x20
+      deadline through the same add. Sits immediately below
+      timespec_to_milliseconds (@ 0x082a1c30, ported just
+      above) and heads a run of timespec-pair ordering
+      comparators (0x082a1c78 "a >= b", 0x082a1cac "a > b",
+      0x082a1ce4 - unsigned sec compare with a signed nsec
+      tie-break) that the same wait machinery uses for
+      deadline ordering. Deviations: read_unaligned word loads
+      (the module's host idiom against a 4-but-not-8-aligned
+      record head on a 64-bit host, which LLVM expands to
+      ldrb/orr funnels on ARMv5 - the accepted
+      plist_node_child_count deviation profile); the +0x04
+      word reads ONLY when +0x00 is zero, mirroring the
+      original's ldreq/cmpeq conditional chain exactly; the
+      bool return models the movne/moveq 1/0 answer (the
+      fixed16_eq_indirect precedent). Host tests (3): the {0,
+      0} pair as the sole false case against every
+      one-word-nonzero combination; both words tested
+      independently with sign-bit and MIN/MAX patterns (the
+      poisoned 0xa5 padding around the record refuting stray
+      reads); and the short-circuit pinned - a nonzero sec
+      answers true for every nsec bit pattern including the
+      sec + nsec == 0 cancellation a sum-based rewrite would
+      miss. match.py structural (exit-1 diff expected): same
+      two-word short-circuit shape - first word tested, beq
+      to the second-word path, 1/0 answer - differing by the
+      crate's fp frame and the read_unaligned ldrb/orr
+      funnels, the accepted plist_node_child_count profile.
+
   - address: 0x080e97ac
     ghidra: FUN_080e97ac
     name: fixed16_cos

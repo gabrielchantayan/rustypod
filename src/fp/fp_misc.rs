@@ -1925,6 +1925,62 @@ pub unsafe extern "C" fn timespec_to_milliseconds(ts: *const i32) -> u64 {
     (sec.wrapping_mul(1000).wrapping_add(millis_part)) as u32 as u64
 }
 
+/// timespec_is_nonzero — original: `FUN_082a1c5c` @ 0x082a1c5c
+/// (28 bytes per functions.csv, binary-verified against osos.dec:
+/// seven instructions `ldr r1,[r0,#0x0]; cmp r1,#0x0; ldreq
+/// r0,[r0,#0x4]; cmpeq r0,#0x0; movne r0,#0x1; moveq r0,#0x0; bx
+/// lr` ending at 0x082a1c74 with the next csv-listed function
+/// starting at 0x082a1c78 — the size is exact and there is no
+/// literal pool. Two direct call sites, both `bl`s in the posix
+/// condition-wait machinery: 0x082624ec inside the waiter wake
+/// body FUN_08262450 and 0x082626bc inside the timed-wait entry
+/// FUN_0826269c (Ghidra decompiles the latter under
+/// decomp/c/025/08261f94_FUN_08261f94.c); no pointer to the
+/// address anywhere in osos.dec (binary-scanned)).
+///
+/// Answers whether a { +0x00 sec, +0x04 nsec } timespec pair is
+/// nonzero: 1 when either word differs from 0, 0 only when both
+/// are zero. The +0x04 word loads ONLY when +0x00 is zero — the
+/// original's `ldreq`/`cmpeq` chain makes the second read
+/// conditional — so the port short-circuits the same way.
+///
+/// Both callers use it as the "deadline supplied" predicate of
+/// the posix cond timed-wait path: FUN_0826269c XORs the result
+/// with 1 (`eor r0,r0,#0x1`) to mean "no deadline" while
+/// validating the caller's {sec, nsec} record (nsec
+/// bounds-checked against the 1000000000 literal @ 0x082627fc,
+/// binary-verified), and later branches on the raw result to pick
+/// between copying an absolute deadline verbatim (abstime flag 1)
+/// and adding the relative pair to the freshly read "now" (the
+/// timespec add @ 0x08261ed8); FUN_08262450 tests the waiter
+/// node's +0x14 relative pair and, when nonzero, folds it into
+/// the +0x1c/+0x20 deadline through the same add. Sits
+/// immediately below [`timespec_to_milliseconds`] (@ 0x082a1c30)
+/// and heads a run of timespec-pair ordering comparators
+/// (0x082a1c78, 0x082a1cac, 0x082a1ce4 — unsigned sec compare
+/// with a signed nsec tie-break) that the same wait machinery
+/// uses for deadline ordering.
+///
+/// Deviations: none beyond the established host-testing idiom —
+/// the loads are plain ABI-aligned `ldr`; the port reads them
+/// with `read_unaligned` anyway against a 4-but-not-8-aligned
+/// record head on a 64-bit host (the [`timespec_to_milliseconds`]
+/// deviation). Ghidra's decompile (`iVar1 = *param_1; if (iVar1
+/// == 0) param_1 = (int *)param_1[1]; return iVar1 != 0 ||
+/// param_1 != (int *)0x0;`) matches the listing; the `bool`
+/// return models the movne/moveq 1/0 answer (the
+/// `fixed16_eq_indirect` precedent).
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn timespec_is_nonzero(ts: *const i32) -> bool {
+    // `read_unaligned`: same 4-but-not-8-aligned record-head hazard
+    // as timespec_to_milliseconds on a 64-bit host. The +4 word is
+    // read only when +0 is zero, mirroring the original's ldreq.
+    if core::ptr::read_unaligned(ts) != 0 {
+        return true;
+    }
+    core::ptr::read_unaligned(ts.add(1)) != 0
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -4984,5 +5040,45 @@ mod tests {
         let max = (i32::MAX.wrapping_mul(1000)) as u32 as u64;
         assert_eq!(millis(i32::MAX, 0), max);
         assert_eq!(max >> 32, 0, "high word always zero");
+    }
+
+    // ---- timespec_is_nonzero ----
+
+    fn nonzero(sec: i32, nsec: i32) -> bool {
+        let record = timespec_pair(sec, nsec);
+        unsafe { timespec_is_nonzero(record.as_ptr().add(4) as *const i32) }
+    }
+
+    #[test]
+    fn timespec_is_nonzero_answers_false_only_for_the_zero_pair() {
+        assert!(!nonzero(0, 0), "{{0, 0}} is the sole false case");
+        assert!(nonzero(1, 0));
+        assert!(nonzero(0, 1));
+        assert!(nonzero(1, 1));
+    }
+
+    #[test]
+    fn timespec_is_nonzero_tests_both_words_independently() {
+        // A nonzero sec alone answers true with nsec zero, and a
+        // nonzero nsec alone answers true with sec zero — pinning
+        // +0x00 and +0x04 as the two tested words. The poisoned
+        // 0xa5 padding around the record makes any stray read
+        // outside the pair answer true unconditionally, which the
+        // {0, 0} case above refutes.
+        assert!(nonzero(-1, 0), "sign bits count as nonzero");
+        assert!(nonzero(0, -1));
+        assert!(nonzero(i32::MAX, 0));
+        assert!(nonzero(0, i32::MIN));
+    }
+
+    #[test]
+    fn timespec_is_nonzero_short_circuits_on_a_nonzero_sec() {
+        // The original's ldreq/cmpeq chain loads +0x04 ONLY when
+        // +0x00 is zero, so a nonzero sec answers true for EVERY
+        // nsec bit pattern — including values a "sum != 0" rewrite
+        // would cancel against (sec + nsec == 0 still answers true).
+        assert!(nonzero(1, -1), "not a sum test: 1 + -1 == 0 is still nonzero");
+        assert!(nonzero(i32::MIN, i32::MIN));
+        assert!(nonzero(42, i32::MIN));
     }
 }
