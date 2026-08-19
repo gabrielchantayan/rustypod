@@ -16716,6 +16716,42 @@ functions:
       Rust 159; both retain the serial-type jump-table split, fixed-width
       integer/real cases, NaN-to-NULL branch, and tail field stores.
 
+  - address: 0x0838ce04
+    ghidra: FUN_0838ce04
+    name: vdbe_serial_put
+    size: 188
+    sig: "u32 vdbe_serial_put(u8 *dst, int dst_capacity, Mem *p_mem, int file_format)"
+    module: sqlite/vdbe_serial_put
+    status: ported
+    renames:
+      param_1: dst
+      param_2: dst_capacity
+      param_3: p_mem
+      param_4: file_format
+      uVar1: serial_type
+      uVar2: payload_len
+      uVar3: store_index
+      uVar4: value_low_word
+    notes: >-
+      Upstream SQLite 3.5.9's sqlite3VdbeSerialPut (vdbeaux.c): serialize
+      one Mem into its packed-record payload. functions.csv's 188-byte
+      extent is exact: the final ldmia return is 0x0838cebc and
+      sqlite3VdbeSerialType begins at 0x0838cec0; no literal pool.
+      Binary scan finds one direct bl caller, 0x08388840 inside
+      FUN_08386ef8's sqlite3VdbeExec/OP_MakeRecord loop. The
+      sqlite3VdbeSerialType callee @ 0x0838cec0 is still unported and
+      remains an explicit VDBE_SERIAL_PUT_OPS seam: target builds branch
+      to retailOS and host builds require a test mock. Its serial-type
+      dispatch writes types 1..=6 from Mem.u.i (+0x00) and type 7 from
+      Mem.r (+0x08) in big-endian fixed-width form using ported
+      vdbe_serial_type_len @ 0x0838cfe8; types 0/8/9/10/11 return zero;
+      types >=12 copy Mem.n (+0x18) bytes from the raw 32-bit Mem.z
+      (+0x14) through ported __rt_memcpy and, for MEM_Zero (0x800),
+      append Mem.u.nZero zero bytes clamped to signed nBuf through
+      ported memzero. Host tests mock every dispatch classification:
+      1..=6, 7, 0/8/9/10/11 and both normal/clamped zero-tail >=12
+      paths, comparing against an independent upstream model.
+
   - address: 0x0838cfe8
     ghidra: FUN_0838cfe8
     name: vdbe_serial_type_len
@@ -34523,7 +34559,7 @@ functions:
     module: time/month_length
     status: ported
     vars: {param_1: dt, cVar2: days, iVar1: leap, DAT_080760a8: DAYS_IN_MONTH,
-      FUN_080aabac: is_leap_year (unported)}
+      FUN_080aabac: is_leap_year (ported, time/leap_year)}
     notes: >-
       Length of the packed calendar record's month in its year, over the
       ten-byte DateTime record of time/datetime.rs (reads +0x04 month,
@@ -34538,22 +34574,52 @@ functions:
       calendar helpers (literal pools @ 0x080d6d58 / 0x080ff8c8 /
       0x08158c40). The runtime address overlaps dead C++ vector code in the
       stored image (mid-FUN_083e2dac); the scatterloader copies the RW block
-      over it at boot. Callee FUN_080aabac @ 0x080aabac (52 bytes, NOT
-      ported) is the proleptic-Gregorian leap-year test: year % 4 == 0 and
-      year % 400 not in {100, 200, 300} (the % 400 through the ported
-      __rt_udiv @ 0x08036f14, runtime/rt_div.rs), returning 1 leap / 0
-      common; it dispatches through the IS_LEAP_YEAR seam whose wired
-      default returns 1 (table entry passes through unmodified). 6 bl call
-      sites: @ 0x081409b0 / 0x081409c0 in FUN_081408a8 (month step rollover
-      clamp), @ 0x081e90c0 / 0x081e9140 in FUN_081e8f78, @ 0x082712f0 /
-      0x08271308 in FUN_082710e0. The table index is the raw month byte with
-      no bounds check (bare ldrb [r2, r1]), mirrored by a pointer read.
+      over it at boot. Callee FUN_080aabac @ 0x080aabac (52 bytes, ported in
+      time/leap_year.rs) is the proleptic-Gregorian leap-year test: year % 4
+      == 0 and year % 400 not in {100, 200, 300} (the % 400 through the
+      ported __rt_udiv @ 0x08036f14, reached via its __rt_udivmod wrapper in
+      runtime/rt_div.rs), returning 1 leap / 0 common; it dispatches through
+      the IS_LEAP_YEAR seam whose wired default is now the real port. 6 bl
+      call sites: @ 0x081409b0 / 0x081409c0 in FUN_081408a8 (month step
+      rollover clamp), @ 0x081e90c0 / 0x081e9140 in FUN_081e8f78, @
+      0x082712f0 / 0x08271308 in FUN_082710e0. The table index is the raw
+      month byte with no bounds check (bare ldrb [r2, r1]), mirrored by a
+      pointer read.
       Host tests (7) - every table index 0..=12, non-February months (incl.
       0) never consulting the callee, February leap -> 29, February common
       -> 28, the year handed through zero-extended, the decrement wrapping
       0 -> 0xff under a temporarily-zeroed table entry, and the wired
-      default passing the table through. match.py structural: same shape -
+      default exercising the real port (leap February -> 29, common -> 28).
+      match.py structural: same shape -
       table literal load, ldrb table[month], cmp #2 / bne, ldrh year, cmp
       #0 / subeq / and #0xff; differences are the crate fp frame, the
       indirect blx seam dispatch in place of the direct bl, and LLVM
       applying the byte mask unconditionally (a no-op on byte values).
+
+
+  # --- Proleptic-Gregorian leap-year test (time/leap_year) ---
+  - address: 0x080aabac
+    ghidra: FUN_080aabac
+    name: is_leap_year
+    size: 52
+    sig: "i32 is_leap_year(u32 year)"
+    module: time/leap_year
+    status: ported
+    vars: {param_1: year, extraout_r1: residue, r4: year}
+    notes: >-
+      Proleptic-Gregorian leap-year predicate. Calls the ported
+      __rt_udiv @ 0x08036f14 with (year, 400) unconditionally; its r1
+      remainder result is represented by __rt_udivmod's residue out-pointer
+      in Rust. Returns 1 iff year & 3 is zero and residue is not 100, 200,
+      or 300; otherwise returns 0. Thus 400-year centuries (including year
+      0, 1600, 2000) are leap while the other century residues are common.
+      The ARM input is a u32 register, so sign-bit-set values are treated as
+      large unsigned years; the packed DateTime caller zero-extends its u16
+      year field before the IS_LEAP_YEAR seam. Nine direct bl call sites:
+      0x08076090 in datetime_days_in_month, 0x0807ebb4 in FUN_0807eafc,
+      0x08086e10 in FUN_08086e00, 0x080d6d40 in FUN_080d6d1c, three in
+      FUN_080ff4e4 (0x080ff55c / 0x080ff5e8 / 0x080ff788), 0x08158bec in
+      FUN_08158ba0, and 0x08271338 in FUN_082710e0. Host tests cover the
+      div-by-4 gate, all three excluded century residues, 400-year leaps,
+      zero and sign-bit-set inputs, and exhaustive DateTime-range comparison
+      with the independent textbook Gregorian predicate.

@@ -56,6 +56,7 @@ pub mod hints {
     pub const SILVER_CONTROLLER: usize = 0x1700_0000;
     pub const QUEUED_MESSAGE_POST: usize = 0x1800_0000;
     pub const VTABLE_SET_ITERATOR_RELEASE: usize = 0x1900_0000;
+    pub const VDBE_SERIAL_PUT: usize = 0x1a00_0000;
     // `heap/pool.rs` maps its own arena at 0x0800_0000 through a separate
     // path: it needs only bit 31 clear, not full u32 addressability.
 }
