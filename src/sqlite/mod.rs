@@ -135,6 +135,7 @@ pub mod vdbe_record_compare;
 pub mod vdbe_record_unpack;
 pub mod vdbe_serial_get;
 pub mod vdbe_serial_put;
+pub mod vdbe_serial_type;
 pub mod vdbe_serial_type_len;
 pub mod vdbe_set_col_name;
 pub mod vdbe_set_num_cols;

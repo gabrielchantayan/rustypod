@@ -16752,6 +16752,61 @@ functions:
       1..=6, 7, 0/8/9/10/11 and both normal/clamped zero-tail >=12
       paths, comparing against an independent upstream model.
 
+  - address: 0x0838cec0
+    ghidra: FUN_0838cec0
+    name: vdbe_serial_type
+    size: 288
+    sig: "u32 vdbe_serial_type(Mem *p_mem, int file_format)"
+    module: sqlite/vdbe_serial_type
+    status: ported
+    renames:
+      param_1: p_mem
+      param_2: file_format
+      uVar1: flags
+      uVar2: value_high_word
+      uVar3: magnitude_high_word
+      uVar4: value_low_word
+      bVar5: max_6byte_high_equal
+      bVar6: max_6byte_low_equal
+      bVar7: max_6byte_below
+      DAT_0838cfe0: max_int16_threshold
+      DAT_0838cfe4: max_int24_threshold
+    notes: >-
+      Upstream SQLite 3.5.9's sqlite3VdbeSerialType (vdbeaux.c): classify
+      one Mem into its packed-record serial type. functions.csv's
+      288-byte extent is exact: 72 instructions through the ldmia
+      return at 0x0838cfdc, then the two literal-pool words at
+      0x0838cfe0 (0x00007fff) and 0x0838cfe4 (0x007fffff)
+      (binary-verified against osos.dec), then vdbe_serial_type_len's
+      prologue at 0x0838cfe8. 3 bl call sites, all unconditional,
+      binary-scanned from osos.dec: 0x08388680 and 0x083887d8 inside
+      FUN_08386ef8's sqlite3VdbeExec/OP_MakeRecord loop, 0x0838ce1c
+      inside vdbe_serial_put; no tail b. The Mem.flags (+0x1c)
+      cascade runs MEM_Null (0x1) -> 0, MEM_Int (0x4) -> the integer
+      arm, MEM_Real (0x8) -> 7, else the string/blob tail n*2 + 12 +
+      ((flags & MEM_Str) >> 1) with Mem.n (+0x18) grown by the low
+      word of Mem.u.nZero (+0x00) under MEM_Zero (0x800). The integer
+      arm short-circuits exact 0/1 to types 8/9 when file_format >= 4
+      (SIGNED blt skips; v + 8 via adds/adc, high half dead), then
+      negates negative values (unconditional rsbs/rsc wrap, no
+      upstream i < -MAX_6BYTE guard — the wrapped magnitude exceeds
+      MAX_6BYTE and falls to type 6 anyway, host-test proven across
+      the i64 domain) and walks the UNSIGNED ladder 0x7f / 0x7fff
+      (pool word) / 0x7fffff (pool word) / 0x7fffffff / MAX_6BYTE =
+      (0x8000 << 32) - 1 (the cmp high,#0x7fff / cmpeq low,
+      #0xffffffff pair reusing the r6 literal) answering types 1..=6.
+      Ghidra types the return ulonglong because the adds/adc pairs
+      leave a high word in r1; all three call sites read r0 alone, so
+      the port returns u32 (the narrowing vdbe_serial_put documents).
+      The vdbe_serial_put VDBE_SERIAL_PUT_OPS seam is untouched (this
+      port does not edit sibling files); wiring it to this classifier
+      is a separate change. Host tests: NULL/INT/REAL/tail flag
+      precedence, the 8/9 constants under file_format -1/0/1/3/4/5/
+      100, every ladder rung +/-2 in both signs, i64::MIN/MAX, a
+      4096-sample xorshift sweep of the i64 domain against an
+      independent upstream model (including its -MAX_6BYTE guard),
+      and the string/blob formula over length/zero-tail wrap edges.
+
   - address: 0x0838cfe8
     ghidra: FUN_0838cfe8
     name: vdbe_serial_type_len
