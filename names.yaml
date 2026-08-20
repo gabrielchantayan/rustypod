@@ -500,6 +500,28 @@ functions:
       ownership are not recovered; the port deliberately retains the raw
       dereferences with no NULL or bounds checks.
 
+  # --- opaque FreeType service-context metadata halfword accessor ---
+  - address: 0x0805129c
+    ghidra: FUN_0805129c
+    name: ft_service_metadata_u16_at_b1c
+    size: 16
+    sig: "u16 ft_service_metadata_u16_at_b1c(const void *service_context)"
+    module: ft/service/metadata
+    status: ported
+    vars:
+      param_1: service_context
+      r0_after_ldr: metadata
+    notes: >-
+      Raw ARM is `ldr r0,[r0,#0xf00]; add r0,r0,#0xb00; ldrh
+      r0,[r0,#0x1c]; bx lr`, hence an aligned metadata pointer word at
+      service_context+0xf00 and an unsigned, zero-extended u16 at
+      metadata+0xb1c. Ghidra's C agrees exactly. Direct call sites cache
+      this value in a u16 UI field and compare it with the nested metadata
+      halfword; one wrapper updates the same halfword and its +0xb90 dirty
+      byte. The concrete layouts and ownership are not recovered, so the
+      port deliberately retains raw dereferences with no NULL or bounds
+      checks.
+
   # --- retailOS UI object backend resolver (kind-1 self / kind-2 proxy) ---
   - address: 0x08051dc4
     ghidra: FUN_08051dc4

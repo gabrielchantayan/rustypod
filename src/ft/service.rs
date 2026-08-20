@@ -9,6 +9,7 @@
 //! unsigned-byte `strcmp`; on equality return the record's service pointer,
 //! and return NULL when no descriptor matches.  This is FreeType's internal
 //! `ft_service_list_lookup` from `src/base/ftobjs.c`.
+pub mod metadata;
 
 use crate::libc::strcmp::strcmp;
 
