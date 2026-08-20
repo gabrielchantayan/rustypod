@@ -481,6 +481,25 @@ functions:
       MCR, and returns the stored control word. Host builds use the shared
       replaceable deterministic CP15 seam.
 
+  # --- opaque FreeType-adjacent metadata halfword accessor ---
+  - address: 0x0805128c
+    ghidra: FUN_0805128c
+    name: ft_metadata_u16_at_b26
+    size: 16
+    sig: "u16 ft_metadata_u16_at_b26(const FtMetadataOwner *object)"
+    module: ft/metadata
+    status: ported
+    vars:
+      param_1: object
+      r0_after_ldr: metadata
+    notes: >-
+      Raw ARM is `ldr r0,[r0,#0xf00]; add r0,r0,#0xb00; ldrh
+      r0,[r0,#0x26]; bx lr`, hence an aligned metadata pointer word at
+      object+0xf00 and an unsigned, zero-extended u16 at metadata+0xb26.
+      Ghidra's C agrees exactly. The concrete owner and metadata types and
+      ownership are not recovered; the port deliberately retains the raw
+      dereferences with no NULL or bounds checks.
+
   # --- retailOS UI object backend resolver (kind-1 self / kind-2 proxy) ---
   - address: 0x08051dc4
     ghidra: FUN_08051dc4
@@ -34915,3 +34934,29 @@ functions:
       raw layout behavior. Host tests cover zero, several nonzero byte
       values, the exact three-byte minimum object, a nonzero base offset,
       and preservation of all surrounding bytes.
+
+  # --- Resource callback cache refresh/getter (app/resource/cache) ---
+  - address: 0x08047020
+    ghidra: FUN_08047020
+    name: resource_cache_refresh_get
+    size: 60
+    sig: "u32 resource_cache_refresh_get(void *object, u32 force_refresh)"
+    module: app/resource/cache
+    status: ported
+    vars: {param_1/r0: object, param_2/r1: force_refresh, object_plus_0x40: resource_callback_root, object_plus_0x618: cache_dirty, object_plus_0x61c: cache_auxiliary, object_plus_0x620/r0: cached_value, DAT_0804705c: resource_cache_refresh_callback}
+    notes: >-
+      Raw ARM is `ldrb object+0x618; orrs r0,r0,force_refresh; beq return`;
+      either nonzero input clears the byte and both following words before
+      dispatching FUN_0806b604(resource_callback_root, 0x080db63c, object).
+      Its dispatcher status is ignored and the post-dispatch +0x620 word is
+      returned. The literal 0x080db63c enters a mid-function allocation
+      handler tail, not a normal callable function: the dispatcher holds the
+      root in r4 and leaves object in r2, which that tail stores into the
+      handler before calling FUN_080e1cc8. It is consequently modeled by the
+      RESOURCE_CACHE_CALLBACK_DISPATCH seam rather than guessed as a Rust
+      callback. Recovered forced callers are 0x080687a0 and 0x0806893c in
+      FUN_08068504; the virtual wrapper FUN_082a6040 exercises the same
+      unforced dirty-cache path. Host tests cover clean/no-dispatch, dirty
+      refresh with all cleared fields and exact dispatcher arguments, forced
+      refresh with a high-bit force value, callback-written returned values,
+      and ignored dispatcher status.

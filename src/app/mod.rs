@@ -33,6 +33,7 @@ pub mod path_object_construct;
 pub mod path_probe;
 pub mod queued_message;
 pub mod registry;
+pub mod resource;
 pub mod resource_chain;
 pub mod scoped_context;
 pub mod service_manager;
