@@ -3047,6 +3047,32 @@ functions:
       structural (lazy init + volatile ops-table loads inlined; tail
       branch through the slot).
 
+  - address: 0x0807b280
+    ghidra: FUN_0807b280
+    name: global_indirect_word_get
+    size: 16
+    sig: "u32 global_indirect_word_get(void)"
+    module: heap/state
+    status: ported
+    renames:
+      DAT_0807b290: global_indirect_holder_literal
+      DAT_089d03bc: global_indirect_holder
+      iVar1/r0: opaque_state
+      uVar2/r0: state_word
+    notes: >-
+      The 12-byte instruction body at 0x0807b280 is `ldr r0,[pc,#8]`
+      (literal 0x089d03bc at 0x0807b290), `ldr r0,[r0,#4]`, `ldr
+      r0,[r0,#0x3c]`, `bx lr`; functions.csv's 16-byte extent includes
+      the literal. It performs two unchecked pointer dereferences and
+      returns the +0x3c raw u32, with no ownership or bit meaning inferred.
+      The recovered direct call is `bl 0x0807b280` at 0x080a0ca4 in
+      FUN_080a0c60: its result is held in r7 while that caller clears bit
+      0 of a different object's +0x3c word, then restores the raw value.
+      The 0x089d03bc runtime holder is modeled as a packed crate static
+      preserving its +4 pointer slot; host tests rebind that exact slot,
+      prove +0x38 is not read, retain all u32 bits, and prove each call
+      rereads the indirection.
+
   - address: 0x080edbf0
     ghidra: FUN_080edbf0
     name: realloc_wrapper

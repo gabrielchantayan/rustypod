@@ -31,6 +31,7 @@ pub mod pool;
 pub mod pool_client;
 pub mod queue_wait;
 pub mod stats;
+pub mod state;
 pub mod tracked;
 pub mod types;
 pub mod veneers;
