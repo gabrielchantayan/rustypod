@@ -22,6 +22,7 @@ pub mod pmu;
 pub mod sixteen_slot_identity_init;
 pub mod surface;
 pub mod stream_buffer_context;
+pub mod stream_transfer;
 pub mod transfer_default_mode;
 pub mod timer;
 pub mod uart;

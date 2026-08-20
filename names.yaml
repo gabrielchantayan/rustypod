@@ -35036,3 +35036,33 @@ functions:
       their returned record as global state; table and record ownership remain
       opaque. The unported helper is a target-ROM/host-mock seam; host tests
       prove exact two-word forwarding and first-word result loading.
+
+  # --- Stream transfer-record cursor copy (drivers/stream_transfer) ---
+  - address: 0x08088ed0
+    ghidra: FUN_08088ed0
+    name: stream_transfer_record_to_cursor
+    size: 56
+    sig: "u32 stream_transfer_record_to_cursor(const StreamTransferRecord *record, u8 **cursor)"
+    module: drivers/stream_transfer
+    status: ported
+    vars: {param_1/r4: record, param_2/r5: cursor, record_plus_0x00/r1: byte_count,
+      record_plus_0x08/r1: source, cursor_deref/r0: destination,
+      FUN_08037db0: __rt_memcpy}
+    notes: >-
+      Raw ARM is `movs r5,r1; mov r4,r0; beq return; ldr r1,[r4,#8];
+      ldr r2,[r4]; ldr r0,[r5]; bl 0x08037db0; ldr r0,[r5]; ldr
+      r1,[r4]; add r0,r0,r1; str r0,[r5]; ldr r0,[r4]; return`.
+      Thus record+0 is a byte count, record+8 the copy source, and the
+      nullable second argument is a destination-cursor slot: the copy ABI
+      is exactly (cursor_deref, source, byte_count), and cursor advancement
+      occurs only after the call, with 32-bit wrapping addition. Veneer
+      0x08037db0 dispatches to IRAM 0x22000020, the established
+      __rt_memcpy mirror at osos 0x08000020; the port uses the existing
+      runtime-copy seam and an exact-u32 ABI recorder in host tests. A raw
+      decode of every ARM B/BL instruction in osos.dec found no direct branch
+      to this untracked leaf. The same decode finds 788 branches to veneer
+      0x08037db0 (761 bl, 27 tail b), corroborating its recovered runtime
+      memcpy role. Host tests cover the null-cursor no-call return, exact
+      destination/source/count forwarding and old-cursor observation during
+      the call, post-call cursor advancement, and the default runtime copy's
+      exact written span.
