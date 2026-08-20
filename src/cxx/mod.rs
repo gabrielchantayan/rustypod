@@ -36,6 +36,7 @@ pub mod stream_write_cstr;
 pub mod string_object;
 pub mod templates;
 pub mod three_word_clear;
+pub mod three_word_clear_alt;
 pub mod trivial_destructor;
 pub mod wheel_event;
 pub mod transition_addon;

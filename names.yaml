@@ -35675,3 +35675,31 @@ functions:
       nonzero guard and target fixtures to prove only those three words
       change. Reference C: decomp/c/038/083e0aa4_FUN_083e0aa4.c; assembly:
       osos.asm 0x083e0aa4. match.py: structural match reviewed.
+
+  # --- byte-identical alternate three-word clear ---
+  - address: 0x083e0e68
+    ghidra: FUN_083e0e68
+    name: three_word_clear_alt
+    size: 20
+    sig: "u32 *three_word_clear_alt(u32 *target)"
+    module: cxx/three_word_clear_alt
+    status: ported
+    renames:
+      param_1/r0: target
+      return/r0: target
+      param_1_plus_0x00: target_word_0
+      param_1_plus_0x04: target_word_1
+      param_1_plus_0x08: target_word_2
+    notes: >-
+      Byte-identical alternate of 0x083e0aa4: unconditionally stores zero to
+      exactly the three consecutive u32 words at target +0x00, +0x04, and
+      +0x08. It has no NULL guard, no target reads, and no other stores.
+      Though the standalone C decompile declares void, its two direct
+      decompiled callers, 0x0811f050 and 0x0811f4f4, consume the preserved r0
+      destination after the call; the Rust signature returns target to preserve
+      that observed ABI behavior. Focused host test verifies the returned
+      destination and nonzero guard words. Reference C:
+      decomp/c/038/083e0e68_FUN_083e0e68.c; caller evidence:
+      decomp/c/011/0811f050_FUN_0811f050.c and
+      decomp/c/011/0811f4f4_FUN_0811f4f4.c; assembly: osos.asm 0x083e0e68.
+      match.py: structural match reviewed.
