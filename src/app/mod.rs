@@ -40,6 +40,7 @@ pub mod service_manager;
 pub mod silver_controller;
 pub mod silver_list_table;
 pub mod singletons;
+pub mod singleton_state;
 pub mod slot_table;
 pub mod string_owner;
 pub mod string_resolve;
