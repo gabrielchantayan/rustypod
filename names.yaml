@@ -21982,6 +21982,32 @@ functions:
       `byte == 0` to clz/lsr instead of rsbs/movcc - same load-and-test
       structure.
 
+
+  - address: 0x0829d3a0
+    ghidra: FUN_0829d3a0
+    name: flag_bit_2_at_4
+    size: 16
+    sig: "u32 flag_bit_2_at_4(const void *object)"
+    module: ui/flag_bit_2_at_4
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0x4": flags
+    notes: >-
+      One direct `bl` site (0x0826b858) in the shared collection-navigation
+      body calls it after a virtual callback produces an otherwise
+      unidentified UI object. The 16-byte sibling entry at 0x0826b784
+      tail-branches to that body before inspecting its follow-up display data.
+      ABI: r0 is a readable
+      object pointer and the normalized u32 result returns in r0. Exact
+      16-byte sequence: `ldrb r0,[r0,#4]; and r0,r0,#4; lsr r0,r0,#2; bx lr`.
+      Thus bit 2 of byte +0x4 is returned as precisely 0 or 1, not as the
+      mask 0 or 4. The object family and flag meaning are still unidentified,
+      so the descriptive field-and-bit name is deliberate. Reference C:
+      decomp/c/028/0829d3a0_FUN_0829d3a0.c; assembly: osos.asm
+      0x0829d3a0. Focused host tests exhaust all flag-byte values, vary every
+      unrelated object byte, and prove const-pointer aliases leave the object
+      byte-identical.
   - address: 0x0811f704
     ghidra: FUN_0811f704
     name: width_0c_minus_inset

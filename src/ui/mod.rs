@@ -5,6 +5,7 @@ pub mod byte_store;
 pub mod checked_byte_block_forwarder;
 pub mod color;
 pub mod flag_2c;
+pub mod flag_bit_2_at_4;
 pub mod startup_sequence;
 pub mod table_slot_allocate;
 pub mod render_context;
