@@ -40,6 +40,7 @@ pub mod three_word_clear;
 pub mod three_word_clear_alt;
 pub mod three_word_clear_third;
 pub mod three_word_clear_fourth;
+pub mod three_word_clear_sixth;
 pub mod trivial_destructor;
 pub mod trivial_vector8_destruct;
 pub mod wheel_event;
