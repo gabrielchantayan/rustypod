@@ -35542,3 +35542,27 @@ functions:
       object or field type, so the port retains the offset-based name. No
       deviations. Host tests cover arbitrary words, zero/all-ones boundaries,
       pointer aliasing, and the absence of mutation.
+
+  # --- opaque object +0x0d equality-to-one predicate ---
+  - address: 0x0813af44
+    ghidra: FUN_0813af44
+    name: byte_flag_at_d_is_one
+    size: 20
+    sig: "u32 byte_flag_at_d_is_one(const void *object)"
+    module: app/byte_flag_at_d_is_one
+    status: ported
+    renames:
+      param_1/r0: object
+      param_1_plus_0x0d: flag_byte
+      r0: is_one
+    notes: >-
+      20-byte leaf predicate: `ldrb r0,[r0,#0xd]; cmp r0,#1; movne/moveq;
+      bx lr`. It reads only byte +0x0d of an otherwise opaque application
+      object and returns 1 only when that byte is exactly 1; values 0 and 2
+      through 255 return 0. The two direct callers, FUN_080f87ac @ 0x080f87ac
+      and FUN_080fca98 @ 0x080fca98, poll it on subobjects at their respective
+      +0x08 and +0x08 word offsets; that does not establish a concrete object
+      type or a semantic name for the byte. No deviations. Focused host tests
+      cover 0, 1, 2, and 0xff; neighboring-byte guards; aliased access; and
+      no mutation. Reference C: decomp/c/012/0813af44_FUN_0813af44.c;
+      assembly: osos.asm 0x0813af44.
