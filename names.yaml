@@ -35176,6 +35176,29 @@ functions:
       refresh with a high-bit force value, callback-written returned values,
       and ignored dispatcher status.
 
+  # --- Resource callback dispatcher (app/resource/cache) ---
+  - address: 0x0806b604
+    ghidra: FUN_0806b604
+    name: resource_callback_dispatch
+    size: 136
+    sig: "i32 resource_callback_dispatch(void *resource_callback_root, ResourceCallback callback, void *context)"
+    module: app/resource/cache
+    status: ported
+    vars: {param_1/r0: resource_callback_root, param_2/r1: callback, param_3/r2: context, iVar1/r0: callback_status, iVar2/r0: child_status, param_1_plus_0x08: next_sibling, param_1_plus_0x1d: node_flags, param_1_plus_0x20: first_child}
+    notes: >-
+      Rejects a null root or callback with -0x32. Otherwise calls the root
+      first with (node, context); a nonzero status returns immediately. Only
+      a root whose +0x1d bit 0 is set exposes the +0x20 child chain. Each
+      chain node comes from +0x08: unmarked nodes call the callback directly,
+      while marked nodes recurse before their parent chain advances, producing
+      a depth-first traversal. Every child or recursive nonzero status returns
+      unchanged and prevents later siblings. Firmware's recovered call state
+      also preserves the active node in r4 and context in r2 for the
+      0x080db63c allocation-handler-tail callback used by
+      resource_cache_refresh_get; ordinary callbacks use r0/r1. Host tests
+      cover null rejection, marked depth-first traversal, root/direct/nested
+      failure propagation, skipped siblings, and context forwarding.
+
   # --- Selected paired-buffer capacity predicate (runtime/buffer_state) ---
   - address: 0x0807595c
     ghidra: FUN_0807595c
