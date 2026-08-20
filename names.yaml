@@ -33520,6 +33520,32 @@ functions:
       host tests exhaust the dense low range, every bit position, and
       high-bit boundary values against the recovered C expression.
 
+  # --- 32-bit word equality predicate ---
+  - address: 0x082a7884
+    ghidra: FUN_082a7884
+    name: u32_value_eq
+    size: 24
+    sig: "u32 u32_value_eq(const u32 *left, const u32 *right)"
+    module: util/value_predicate
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      "*param_1": left_value
+      "*param_2": right_value
+      r0 return: equality_result
+    notes: >-
+      24-byte, six-instruction ARM leaf: load one aligned 32-bit word from
+      each input pointer, compare them, and materialize the condition into
+      the normalized 0-or-1 C-ABI result in r0. Ghidra assigns `int *` to
+      both inputs, but the sole recovered caller at 0x083d820c passes
+      unsigned state words and compares against the 0xffffffff sentinel;
+      signedness cannot affect equality, so the Rust ABI uses `const u32 *`.
+      Neither input is written. No deviations; focused host tests prove
+      equality, inequality, identical-pointer aliasing, both u32 boundaries,
+      and preservation of both input values. match.py structural diff
+      reviewed after the ARM release build.
+
 
   # --- ARM second-argument return forwarder ---
   - address: 0x080275f0

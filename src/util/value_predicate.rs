@@ -25,6 +25,19 @@ pub extern "C" fn is_zero_or_power_of_two(value: u32) -> u32 {
     u32::from(value & value.wrapping_sub(1) == 0)
 }
 
+/// u32_value_eq — original: `FUN_082a7884` @ 0x082a7884 (24 bytes).
+///
+/// Loads both aligned word inputs and returns the normalized C-ABI truth word:
+/// one when their complete 32-bit representations are equal, otherwise zero.
+/// Ghidra types the inputs as `int *`, but the sole recovered caller compares
+/// unsigned words with the `0xffff_ffff` sentinel, so this port names and
+/// exposes the type as `u32`; equality itself has identical signed semantics.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn u32_value_eq(left: *const u32, right: *const u32) -> u32 {
+    u32::from(left.read() == right.read())
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,5 +94,42 @@ mod tests {
                 "value {value:#010x}"
             );
         }
+    }
+
+    #[test]
+    fn equal_u32_words_return_one_at_boundaries() {
+        for value in [0, 1, 0x7fff_ffff, 0x8000_0000, u32::MAX] {
+            assert_eq!(
+                unsafe { u32_value_eq(&value, &value) },
+                1,
+                "equal value {value:#010x}"
+            );
+        }
+    }
+
+    #[test]
+    fn unequal_u32_words_return_zero() {
+        for (left, right) in [(0, 1), (u32::MAX, 0), (0x8000_0000, 0x7fff_ffff)] {
+            assert_eq!(
+                unsafe { u32_value_eq(&left, &right) },
+                0,
+                "{left:#010x} must not equal {right:#010x}"
+            );
+        }
+    }
+
+    #[test]
+    fn aliased_input_is_equal() {
+        let value = 0xa5a5_5a5a;
+        assert_eq!(unsafe { u32_value_eq(&value, &value) }, 1);
+    }
+
+    #[test]
+    fn comparison_does_not_mutate_either_input() {
+        let left = 0x0123_4567;
+        let right = 0x89ab_cdef;
+        let before = (left, right);
+        assert_eq!(unsafe { u32_value_eq(&left, &right) }, 0);
+        assert_eq!((left, right), before);
     }
 }
