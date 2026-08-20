@@ -35445,3 +35445,27 @@ functions:
       0x08161258 (`cmp r1,#0; cmpne #1; cmpne #2; moveq/movne; bx lr`).
       Focused host tests cover categories 0, 1, 2, 3, and u32::MAX and prove
       that arbitrary first-argument values do not affect the result.
+
+  # --- opaque object +0x04 word accessor ---
+  - address: 0x080fe4c4
+    ghidra: FUN_080fe4c4
+    name: object_word_at_4
+    size: 8
+    sig: "u32 object_word_at_4(const u32 *object)"
+    module: runtime/object_word
+    status: ported
+    renames:
+      param_1/r0: object
+      param_1_plus_0x04: word_at_0x04
+      r0: word_at_0x04
+    notes: >-
+      Eight-byte leaf: `ldr r0,[r0,#4]; bx lr`. It returns the complete
+      untyped word at byte offset +0x04 from an opaque, word-aligned object,
+      with no null check or mutation. All seven direct callers first obtain
+      the object pointer from FUN_083d602c and preserve it in r0 for this
+      load: 0x0812f9c0, 0x081425cc, 0x081b5860, 0x081b5d2c, 0x081f8a70,
+      0x081f8b50, and 0x081f8f9c. Their consumers use the result as an
+      opaque pointer/value, so neither the object type nor this field's
+      semantic meaning is recoverable. No deviations. Host tests cover
+      arbitrary words, zero/all-ones extremes, pointer aliasing, and the
+      absence of mutation.
