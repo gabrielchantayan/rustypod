@@ -35819,3 +35819,34 @@ functions:
       change. Reference C: decomp/c/038/083e1ad0_FUN_083e1ad0.c;
       disassembly: osos.dec 0x083e1ad0 (mov r1, #0; str r1,
       [r0, #0/#4/#8]). match.py: structural match reviewed.
+
+  # --- trivial eight-byte vector destructor ---
+  - address: 0x083e1ae4
+    ghidra: FUN_083e1ae4
+    name: trivial_vector8_destruct
+    size: 64
+    sig: "u8 ** trivial_vector8_destruct(u8 **vector)"
+    module: cxx/trivial_vector8_destruct
+    status: ported
+    renames:
+      param_1/r0: vector
+      param_1_plus_0x00: begin
+      param_1_plus_0x04: end
+      param_1_plus_0x08: capacity
+      iVar1/r2: begin
+      iVar2/r0: current
+      return/r0: vector
+    notes: >-
+      Walks the half-open [begin, end) range in eight-byte increments; the
+      element destructor is trivial, so the walk has no body. It calculates
+      (capacity - begin) >> 3, clears r2, then calls FUN_08266f2c to release
+      begin and returns vector. The recovered C signature for FUN_08266f2c
+      uses only r0, so the port retains the descriptor reads and calculation
+      while routing its sole live cleanup argument through the existing free
+      seam. The descriptor is never written; the focused host test uses guard
+      words and a recording cleanup seam to prove that exact write footprint
+      and released pointer. Four direct ARM callers at 0x0813a638,
+      0x0813a65c, 0x0813acc8, and 0x0813adcc pass stack-local descriptors.
+      functions.csv correctly records 64 bytes; the 20-byte task metadata was
+      stale. Reference C: decomp/c/038/083e1ae4_FUN_083e1ae4.c; disassembly:
+      osos.dec 0x083e1ae4. match.py: structural match reviewed.
