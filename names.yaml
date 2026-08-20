@@ -94,7 +94,6 @@ functions:
       Each unsigned selector below the 28-entry table limit contributes
       independently: first_resource -> 0x1000 and second_resource -> 0x0800.
 
-
   # --- I2S transfer submission default mode ---
   - address: 0x08008648
     ghidra: FUN_08008648
@@ -3570,6 +3569,7 @@ functions:
 
   - address: 0x083dd9e4
     ghidra: FUN_083dd9e4
+
     name: deque_iter_copy
     size: 36
     sig: "void deque_iter_copy(DequeIter *dst, usize r1_unused, const DequeIter *src)"
@@ -35570,6 +35570,27 @@ functions:
       the call, post-call cursor advancement, and the default runtime copy's
       exact written span.
 
+  # --- Singleton state base accessor (app/singleton_state) ---
+  - address: 0x08127954
+    ghidra: FUN_08127954
+    name: singleton_state_base_get
+    size: 12
+    sig: "void *singleton_state_base_get(void)"
+    module: app/singleton_state
+    status: ported
+    vars:
+      DAT_08127960: singleton_state_globals
+      DAT_089cfda0: singleton_state_base_slot
+      iVar1/r0: singleton_state_base
+    notes: >-
+      Raw ARM is `ldr r0,[0x08127960]; ldr r0,[r0,#0x4]; bx lr`; the
+      pool word at 0x08127960 is 0x089cfda0, and the accessor returns the
+      untyped pointer held at that globals block's +0x04 slot. It does not
+      construct, cache, or validate the object. The ARM port reads that
+      exact 32-bit firmware slot; host tests model the +0x04 slot directly
+      with a native-width pointer, so two successive stores prove no result
+      is cached.
+
   # --- Opaque singleton state-word accessor (app/singleton_state) ---
   - address: 0x08086df0
     ghidra: FUN_08086df0
@@ -35579,24 +35600,22 @@ functions:
     module: app/singleton_state
     status: ported
     vars:
-      FUN_08127954: singleton_object_get
+      FUN_08127954: singleton_state_base_get
       iVar1/r0: singleton_object
       singleton_object_plus_0x18/r0: singleton_state_word
     notes: >-
       Raw ARM is `push {r4,lr}; bl 0x08127954; ldr r0,[r0,#0x18];
-      pop {r4,pc}`: it calls the 12-byte singleton-object accessor before
-      loading the object's untyped +0x18 word, with no null check. That
-      accessor simply returns the +0x04 word of its globals block, so it is
-      the existing unported singleton seam rather than a constructor or a
-      new lazy path. The two direct callers (0x08140464 and 0x081404b4)
-      use the returned word as an object pointer, invoking its vtable +0x84
-      after staging their three-word operation records. The state object's
-      concrete class is otherwise unknown, so the port uses the conservative
-      singleton_state_get name and preserves a raw u32 result. Host tests
-      prove the accessor call occurs before the +0x18 load (the mock changes
-      that word during its call) and that the returned value is the complete
-      raw word. The unported 0x08127954 accessor is a target-ROM/host-mock
-      seam.
+      pop {r4,pc}`: it calls the 12-byte singleton-state base accessor
+      before loading the object's untyped +0x18 word, with no null check.
+      The accessor reads the +0x04 word of the globals block at 0x089cfda0,
+      so it is neither a constructor nor a lazy path. The two direct callers
+      (0x08140464 and 0x081404b4) use the returned word as an object pointer,
+      invoking its vtable +0x84 after staging their three-word operation
+      records. The state object's concrete class is otherwise unknown, so
+      the port uses the conservative singleton_state_get name and preserves
+      a raw u32 result. Host tests prove the base accessor reads its current
+      modeled global slot and that the wrapper returns the complete raw
+      +0x18 word.
 
   # --- opaque object flag low-nibble accessor ---
   - address: 0x08160cfc
