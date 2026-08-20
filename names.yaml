@@ -522,6 +522,27 @@ functions:
       port deliberately retains raw dereferences with no NULL or bounds
       checks.
 
+  # --- opaque FreeType service-context metadata byte accessor ---
+  - address: 0x080512ac
+    ghidra: FUN_080512ac
+    name: ft_service_metadata_byte_at_b50
+    size: 12
+    sig: "u32 ft_service_metadata_byte_at_b50(const void *service_context)"
+    module: ft/service/metadata
+    status: ported
+    vars:
+      param_1: service_context
+      r0_after_ldr: metadata
+    notes: >-
+      Raw ARM is `ldr r0,[r0,#0xf00]; ldrb r0,[r0,#0xb50]; bx lr`, hence an
+      aligned metadata pointer word at service_context+0xf00 and an unsigned,
+      zero-extended byte at metadata+0xb50. Ghidra's C agrees exactly. The
+      sole recovered direct caller reads this byte from its +0xa8
+      service-context field, compares it against a cached byte at +0x58, and
+      re-reads it to update that cache before notifying its vtable callback.
+      The concrete layouts and ownership are not recovered, so the port
+      deliberately retains raw dereferences with no NULL or bounds checks.
+
   # --- retailOS UI object backend resolver (kind-1 self / kind-2 proxy) ---
   - address: 0x08051dc4
     ghidra: FUN_08051dc4
