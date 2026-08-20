@@ -34985,3 +34985,28 @@ functions:
       selector 0. Host tests cover exact selector one, representative
       non-one u32 values, and equal/unequal words including zero and
       u32::MAX.
+
+  # --- Opaque global-state table getter (util/global_state) ---
+  - address: 0x080781b0
+    ghidra: FUN_080781b0
+    name: global_state_get
+    size: 16
+    sig: "void *global_state_get(const u8 *global_name, const void *global_state_table)"
+    module: util/global_state
+    status: ported
+    renames:
+      param_1/r0: global_name
+      param_2/r1: global_state_table
+      FUN_08077ff0: global_state_slot_find
+      puVar1/r0: global_state_record
+    notes: >-
+      Raw ARM is exactly `push {r4,lr}; bl 0x08077ff0; ldr r0,[r0];
+      pop {r4,pc}`. The 140-byte helper at 0x08077ff0 hashes the NUL-ended
+      name, searches an opaque table supplied in r1, and returns its matching
+      slot; this wrapper forwards both words unchanged and loads only that
+      slot's first word, with no null check or validation. Six direct calls
+      were recovered at 0x0807b2fc, 0x0809fc9c, 0x0809fd78, 0x0809fda8,
+      0x080ae028, and 0x080bfbb4. The 0x0807b294 and 0x0809fc74 callers use
+      their returned record as global state; table and record ownership remain
+      opaque. The unported helper is a target-ROM/host-mock seam; host tests
+      prove exact two-word forwarding and first-word result loading.
