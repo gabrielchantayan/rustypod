@@ -604,6 +604,24 @@ functions:
       the full unmodified u32. The concrete layouts and ownership are not
       recovered, so the port deliberately retains the raw dereferences with
       no NULL or bounds checks.
+
+  # --- opaque FreeType service metadata word accessor ---
+  - address: 0x080514fc
+    ghidra: FUN_080514fc
+    name: ft_service_metadata_word_at_af4
+    size: 12
+    sig: "u32 ft_service_metadata_word_at_af4(const void *object)"
+    module: ft/service_metadata
+    status: ported
+    vars:
+      param_1: object
+      r0_after_ldr: metadata
+    notes: >-
+      Raw ARM is `ldr r0,[r0,#0xf00]; ldr r0,[r0,#0xaf4]; bx lr`, hence
+      aligned pointer and u32 word loads at object+0xf00 and metadata+0xaf4.
+      Ghidra's C agrees exactly. The concrete layouts and ownership are not
+      recovered, so the port deliberately retains the raw dereferences with
+      no NULL or bounds checks.
   # --- retailOS UI object backend resolver (kind-1 self / kind-2 proxy) ---
   - address: 0x08051dc4
     ghidra: FUN_08051dc4
