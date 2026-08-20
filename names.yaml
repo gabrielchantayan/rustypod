@@ -35495,3 +35495,26 @@ functions:
       semantic meaning is recoverable. No deviations. Host tests cover
       arbitrary words, zero/all-ones extremes, pointer aliasing, and the
       absence of mutation.
+
+  # --- opaque object +0x08 word accessor ---
+  - address: 0x0811e82c
+    ghidra: FUN_0811e82c
+    name: object_word_at_8
+    size: 8
+    sig: "u32 object_word_at_8(const u32 *object)"
+    module: runtime/object_word
+    status: ported
+    renames:
+      param_1/r0: object
+      param_1_plus_0x08: word_at_0x08
+      r0: word_at_0x08
+    notes: >-
+      Eight-byte leaf: `ldr r0,[r0,#8]; bx lr`. It returns the complete
+      untyped word at byte offset +0x08 from an opaque, word-aligned object,
+      with no null check or mutation. The two direct callers are
+      FUN_0816f75c @ 0x0816f75c and FUN_08171ae4 @ 0x08171ae4. The former
+      narrows the value to signed 16 bits before passing it onward; the latter
+      compares it to a signed 16-bit value. Neither use establishes a stronger
+      object or field type, so the port retains the offset-based name. No
+      deviations. Host tests cover arbitrary words, zero/all-ones boundaries,
+      pointer aliasing, and the absence of mutation.
