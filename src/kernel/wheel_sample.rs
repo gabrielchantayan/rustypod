@@ -27,14 +27,15 @@
 //! ```text
 //! if sample.captured == 0:
 //!     FUN_080dc8a4(&sample.elapsed, &sample.state)  ; capture elapsed + state
-//!     sample.rate     = FUN_080bd8f0()              ; averaged wheel rate
+//!     sample.rate     = wheel_sample_rate()         ; averaged wheel rate
 //!     sample.captured = 1
 //! return (i32)(i16)sample.elapsed    ; ldr + lsl#16 + asr#16
 //! ```
 //!
-//! Both helpers are unported and ride the [`WHEEL_SAMPLE_OPS`] seam (the
-//! event_list.rs pattern: firmware defaults on target, panicking
-//! defaults on host, tests install recording mocks):
+//! `FUN_080dc8a4` remains unported and rides the [`WHEEL_SAMPLE_OPS`] seam
+//! (the event_list.rs pattern: firmware default on target, panicking default
+//! on host, tests install a recording mock). `wheel_sample_rate` is ported
+//! below; it uses the same seam only for the ROM tick-deadline check.
 //!
 //! - `FUN_080dc8a4` @ 0x080dc8a4 latches the system tick source (global
 //!   0x089ca550 via `FUN_080e5c64`) into `elapsed`, transforms the wheel
@@ -43,14 +44,15 @@
 //!   `state`, and — when the wheel timer object at [0x089caedc+0x10]
 //!   exists — accumulates its pending latch delta (`FUN_08282a70`) into
 //!   `elapsed` as well.
-//! - `FUN_080bd8f0` @ 0x080bd8f0 averages the 16 u32 inter-event tick
-//!   deltas in the ring buffer @ 0x08a755fc (sum >> 4) against the
-//!   1,000,000 scale constant (0xf4240). The ring is fed by the wheel
-//!   position sampler @ 0x080877a0, whose only caller (0x0809e550)
-//!   unwraps a 96-count rotary position delta (`cmp r0, #0x48; subgt
-//!   r0, r0, #0x60; cmn r0, #0x48; addlt r0, r0, #0x60`) — the
-//!   click-wheel evidence: 96-sector rotation, timer 0x3c700000+0xb4
-//!   inter-event ticks, per-second rate, touch bit.
+//! - `wheel_sample_rate` @ 0x080bd8f0 shifts the current deadline-check tick
+//!   at 0x089caee0 into its previous slot at +0x08. If the previous tick is
+//!   at least 1,000,000 kernel ticks old, it clears the 16 u32 inter-event
+//!   deltas at 0x08a755fc and returns zero. Otherwise it returns their
+//!   wrapping sum divided by 16. The ring is fed by the wheel position sampler
+//!   @ 0x080877a0, whose only caller (0x0809e550) unwraps a 96-count rotary
+//!   position delta (`cmp r0, #0x48; subgt r0, #0x60; cmn r0, #0x48; addlt
+//!   r0, #0x60`) — the click-wheel evidence: 96-sector rotation, timer
+//!   0x3c700000+0xb4 inter-event ticks, per-second rate, touch bit.
 //!
 //! # Why "capture" and not a getter name
 //!
@@ -82,15 +84,36 @@ pub const SAMPLE_RATE: usize = 0x14;
 /// consuming call site (`tst r0, #0x40000000`).
 pub const WHEEL_TOUCHED_BIT: u32 = 0x4000_0000;
 
-/// Unported firmware helpers below the capture (see the module header).
+/// Address of the three wheel timing words read by `wheel_sample_rate`.
+///
+/// The port only touches +0x04 (current deadline-check tick) and +0x08
+/// (previous tick); +0x00 belongs to the unported position sampler.
+#[cfg(target_os = "none")]
+const WHEEL_TIMING_HISTORY: *mut u32 = 0x089c_aedc as *mut u32;
+
+/// Host backing for the firmware timing words. It replaces the fixed RAM
+/// location only in host tests; target code uses [`WHEEL_TIMING_HISTORY`].
+#[cfg(not(target_os = "none"))]
+static mut WHEEL_TIMING_HISTORY: [u32; 3] = [0; 3];
+
+/// The sixteen u32 inter-event deltas averaged by `wheel_sample_rate`.
+#[cfg(target_os = "none")]
+const WHEEL_DELTA_RING: *mut u32 = 0x08a7_55fc as *mut u32;
+
+/// Host backing for the firmware delta ring.
+#[cfg(not(target_os = "none"))]
+static mut WHEEL_DELTA_RING: [u32; 16] = [0; 16];
+
+/// Firmware dependencies needed by the capture and rate helpers.
 #[derive(Clone, Copy)]
 pub struct WheelSampleOps {
     /// `FUN_080dc8a4` @ 0x080dc8a4: latch elapsed ticks into
     /// `elapsed_out` and the transformed wheel state word into
     /// `state_out`.
     pub capture: unsafe extern "C" fn(elapsed_out: *mut u32, state_out: *mut u32),
-    /// `FUN_080bd8f0` @ 0x080bd8f0: the 16-sample averaged wheel rate.
-    pub rate: unsafe extern "C" fn() -> u32,
+    /// ROM 0x22001ee8 via thunk 0x08037eb8: returns nonzero when
+    /// `(kernel_ticks() - start) >= span`.
+    pub tick_elapsed: unsafe extern "C" fn(start: usize, span: usize) -> usize,
 }
 
 #[cfg(target_os = "none")]
@@ -105,31 +128,62 @@ unsafe extern "C" fn missing_sample_capture(_elapsed_out: *mut u32, _state_out: 
     panic!("wheel_sample_capture requires sample helper 0x080dc8a4")
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_wheel_rate() -> u32 {
-    let f: unsafe extern "C" fn() -> u32 = unsafe { core::mem::transmute(0x080b_d8f0usize) };
-    unsafe { f() }
-}
-
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_wheel_rate() -> u32 {
-    panic!("wheel_sample_capture requires rate helper 0x080bd8f0")
+unsafe extern "C" fn missing_tick_elapsed(_start: usize, _span: usize) -> usize {
+    panic!("wheel_sample_rate requires tick_elapsed")
 }
 
-/// Active helpers. retailOS defaults invoke the firmware functions
-/// directly; host tests replace the table with recording mocks.
+/// Active firmware dependencies. retailOS defaults invoke the firmware
+/// functions directly; host tests replace the table with recording mocks.
 #[cfg(target_os = "none")]
 pub static mut WHEEL_SAMPLE_OPS: WheelSampleOps = WheelSampleOps {
     capture: firmware_sample_capture,
-    rate: firmware_wheel_rate,
+    tick_elapsed: crate::kernel::task_lock::tick_elapsed,
 };
 
 #[cfg(not(target_os = "none"))]
 pub static mut WHEEL_SAMPLE_OPS: WheelSampleOps = WheelSampleOps {
     capture: missing_sample_capture,
-    rate: missing_wheel_rate,
+    tick_elapsed: missing_tick_elapsed,
 };
 
+/// wheel_sample_rate — original: `FUN_080bd8f0` @ 0x080bd8f0 (96 bytes,
+/// followed by its 12-byte literal pool at 0x080bd950..0x080bd95c).
+///
+/// Copies the wheel timing word at +0x04 to +0x08 before testing whether the
+/// old +0x08 value has aged by 1,000,000 kernel ticks. An expired history
+/// clears all sixteen u32 entries of the delta ring and yields zero; otherwise
+/// the function accumulates the entries in wrapping u32 arithmetic and returns
+/// `sum >> 4`. It neither samples hardware nor advances the ring cursor.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn wheel_sample_rate() -> u32 {
+    #[cfg(target_os = "none")]
+    let timing = WHEEL_TIMING_HISTORY;
+    #[cfg(not(target_os = "none"))]
+    let timing = unsafe { addr_of_mut!(WHEEL_TIMING_HISTORY).cast::<u32>() };
+    #[cfg(target_os = "none")]
+    let ring = WHEEL_DELTA_RING;
+    #[cfg(not(target_os = "none"))]
+    let ring = unsafe { addr_of_mut!(WHEEL_DELTA_RING).cast::<u32>() };
+    let old_tick = unsafe { timing.add(2).read_volatile() };
+    let current_tick = unsafe { timing.add(1).read_volatile() };
+    unsafe { timing.add(2).write_volatile(current_tick) };
+
+    let ops = unsafe { core::ptr::read_volatile(addr_of_mut!(WHEEL_SAMPLE_OPS)) };
+    if unsafe { (ops.tick_elapsed)(old_tick as usize, 1_000_000) } != 0 {
+        for i in 0..16 {
+            unsafe { ring.add(i).write_volatile(0) };
+        }
+        return 0;
+    }
+
+    let mut sum = 0u32;
+    for i in 0..16 {
+        sum = sum.wrapping_add(unsafe { ring.add(i).read_volatile() });
+    }
+    sum >> 4
+}
 /// wheel_sample_capture — original: `FUN_08292a88` @ 0x08292a88
 /// (64 bytes; 54 `bl` call sites).
 ///
@@ -159,7 +213,7 @@ pub unsafe extern "C" fn wheel_sample_capture(sample: *mut u8) -> i32 {
                 sample.add(SAMPLE_ELAPSED) as *mut u32,
                 sample.add(SAMPLE_STATE) as *mut u32,
             );
-            let rate = (ops.rate)();
+            let rate = wheel_sample_rate();
             (sample.add(SAMPLE_RATE) as *mut u32).write_volatile(rate);
             sample.add(SAMPLE_CAPTURED).write_volatile(1);
         }
@@ -175,50 +229,46 @@ mod tests {
     use std::sync::{Mutex, MutexGuard};
     use std::vec::Vec;
 
-    /// Serializes the tests that swap the ops table.
+    /// Serializes tests that swap the ops table and fixed-address host backing.
     static SAMPLE_LOCK: Mutex<()> = Mutex::new(());
-
-    /// Calls into the mock helpers, in order.
     static mut CALLS: Vec<&'static str> = Vec::new();
-
-    /// The 0x18-byte sample record, word-aligned as at every call site.
     static mut SAMPLE: [u8; 0x1c] = [0xa5; 0x1c];
-
-    /// What the mock capture writes into elapsed/state.
     static mut MOCK_ELAPSED: u32 = 0;
     static mut MOCK_STATE: u32 = 0;
-    /// What the mock rate helper returns.
-    static mut MOCK_RATE: u32 = 0;
+    static mut MOCK_TICK_ELAPSED: usize = 0;
+    static mut LAST_TICK_ARGS: (usize, usize) = (0, 0);
 
     unsafe extern "C" fn recording_capture(elapsed_out: *mut u32, state_out: *mut u32) {
         unsafe {
             (*addr_of_mut!(CALLS)).push("capture");
-            elapsed_out.write_volatile(core::ptr::read_volatile(core::ptr::addr_of!(MOCK_ELAPSED)));
-            state_out.write_volatile(core::ptr::read_volatile(core::ptr::addr_of!(MOCK_STATE)));
+            elapsed_out.write_volatile(core::ptr::read_volatile(addr_of!(MOCK_ELAPSED)));
+            state_out.write_volatile(core::ptr::read_volatile(addr_of!(MOCK_STATE)));
         }
     }
 
-    unsafe extern "C" fn recording_rate() -> u32 {
+    unsafe extern "C" fn recording_tick_elapsed(start: usize, span: usize) -> usize {
         unsafe {
-            (*addr_of_mut!(CALLS)).push("rate");
-            core::ptr::read_volatile(core::ptr::addr_of!(MOCK_RATE))
+            (*addr_of_mut!(CALLS)).push("tick_elapsed");
+            *addr_of_mut!(LAST_TICK_ARGS) = (start, span);
+            core::ptr::read_volatile(addr_of!(MOCK_TICK_ELAPSED))
         }
     }
 
-    /// Installs the recording mocks and a cleared sample; returns the
-    /// lock guard.
-    fn mock(elapsed: u32, state: u32, rate: u32) -> MutexGuard<'static, ()> {
+    fn mock(elapsed: u32, state: u32, tick_elapsed: usize) -> MutexGuard<'static, ()> {
         let guard = SAMPLE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             WHEEL_SAMPLE_OPS = WheelSampleOps {
                 capture: recording_capture,
-                rate: recording_rate,
+                tick_elapsed: recording_tick_elapsed,
             };
             MOCK_ELAPSED = elapsed;
             MOCK_STATE = state;
-            MOCK_RATE = rate;
+            MOCK_TICK_ELAPSED = tick_elapsed;
+            LAST_TICK_ARGS = (0, 0);
             (*addr_of_mut!(CALLS)).clear();
             (*addr_of_mut!(SAMPLE)).fill(0);
+            WHEEL_TIMING_HISTORY = [0; 3];
+            WHEEL_DELTA_RING = [0; 16];
         }
         guard
     }
@@ -227,7 +277,7 @@ mod tests {
         unsafe {
             WHEEL_SAMPLE_OPS = WheelSampleOps {
                 capture: missing_sample_capture,
-                rate: missing_wheel_rate,
+                tick_elapsed: missing_tick_elapsed,
             };
         }
         drop(guard);
@@ -242,18 +292,54 @@ mod tests {
     }
 
     #[test]
+    fn rate_averages_the_ring_and_shifts_the_deadline_tick() {
+        let guard = mock(0, 0, 0);
+        let deltas = [1, 7, 3, 15, 2, 8, 5, 9, 4, 12, 6, 10, 11, 13, 14, 16];
+        unsafe {
+            WHEEL_TIMING_HISTORY = [0, 0x1234_5678, 0x8765_4321];
+            WHEEL_DELTA_RING = deltas;
+            assert_eq!(wheel_sample_rate(), deltas.iter().sum::<u32>() >> 4);
+            assert_eq!(WHEEL_TIMING_HISTORY[2], 0x1234_5678, "current tick shifts to +0x08");
+            assert_eq!(LAST_TICK_ARGS, (0x8765_4321, 1_000_000));
+            assert_eq!(*addr_of!(CALLS), std::vec!["tick_elapsed"]);
+            assert_eq!(WHEEL_DELTA_RING, deltas, "live history leaves the ring untouched");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn expired_history_clears_every_delta_and_returns_zero() {
+        let guard = mock(0, 0, 1);
+        unsafe {
+            WHEEL_TIMING_HISTORY = [0, 0x91, 0x42];
+            WHEEL_DELTA_RING = [u32::MAX; 16];
+            assert_eq!(wheel_sample_rate(), 0);
+            assert_eq!(WHEEL_TIMING_HISTORY[2], 0x91);
+            assert_eq!(LAST_TICK_ARGS, (0x42, 1_000_000));
+            assert_eq!(WHEEL_DELTA_RING, [0; 16]);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn rate_sum_wraps_as_the_arm_add_loop_does() {
+        let guard = mock(0, 0, 0);
+        unsafe {
+            WHEEL_DELTA_RING = [u32::MAX; 16];
+            assert_eq!(wheel_sample_rate(), 0x0fff_ffff);
+        }
+        restore(guard);
+    }
+
+    #[test]
     fn the_first_call_captures_in_order_and_sets_the_flag() {
-        let guard = mock(7, WHEEL_TOUCHED_BIT, 0x1234);
+        let guard = mock(7, WHEEL_TOUCHED_BIT, 0);
         unsafe {
             wheel_sample_capture(sample());
-            assert_eq!(
-                *addr_of!(CALLS),
-                std::vec!["capture", "rate"],
-                "elapsed/state capture strictly before the rate sample"
-            );
+            assert_eq!(*addr_of!(CALLS), std::vec!["capture", "tick_elapsed"]);
             assert_eq!(word(SAMPLE_ELAPSED), 7);
             assert_eq!(word(SAMPLE_STATE), WHEEL_TOUCHED_BIT);
-            assert_eq!(word(SAMPLE_RATE), 0x1234, "the rate() result lands at +0x14");
+            assert_eq!(word(SAMPLE_RATE), 0, "the rate() result lands at +0x14");
             assert_eq!(sample().add(SAMPLE_CAPTURED).read_volatile(), 1, "flag set last");
         }
         restore(guard);
@@ -261,12 +347,12 @@ mod tests {
 
     #[test]
     fn the_second_call_skips_the_capture() {
-        let guard = mock(3, 0, 9);
+        let guard = mock(3, 0, 0);
         unsafe {
             wheel_sample_capture(sample());
             wheel_sample_capture(sample());
             wheel_sample_capture(sample());
-            assert_eq!((*addr_of!(CALLS)).len(), 2, "capture+rate exactly once");
+            assert_eq!(*addr_of!(CALLS), std::vec!["capture", "tick_elapsed"]);
         }
         restore(guard);
     }

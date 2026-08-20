@@ -14339,8 +14339,8 @@ functions:
       param_1: sample
       FUN_080dc8a4: sample_capture (WHEEL_SAMPLE_OPS.capture slot) -
         latches elapsed ticks + wheel state into sample+0xc/+0x10
-      FUN_080bd8f0: wheel_rate (WHEEL_SAMPLE_OPS.rate slot) - the
-        16-sample averaged inter-event tick delta
+      wheel_sample_rate: ported direct call - the 16-sample averaged
+        inter-event tick delta
     notes: >-
       Lazy capture of the click-wheel event sample the control
       subsystem hands to UI controllers. 64 bytes exactly,
@@ -14354,8 +14354,8 @@ functions:
       The object is a wheel event sample: +0x10's bit 0x40000000 is
       the finger-on-wheel gate every consuming site tests (`tst
       r0,#0x40000000`, e.g. 0x0810c9f0); +0x14 is a velocity measure
-      (0x080bd8f0 averages the 16 u32 inter-event tick deltas in the
-      ring @ 0x08a755fc against the 0xf4240 = 1,000,000 scale); the
+      (0x080bd8f0 shifts the current deadline tick to its previous slot,
+      expires the ring after a 1,000,000-tick gap, else averages it);
       ring is fed by sampler 0x080877a0 whose only caller 0x0809e550
       unwraps a 96-count rotary position delta (cmp #0x48; subgt
       #0x60; cmn #0x48; addlt #0x60) off timer 0x3c700000+0xb4 - the
@@ -14368,16 +14368,46 @@ functions:
       capture name; the halfword return is preserved because the
       original produces it. The sibling @ 0x08292adc (bl here; ldr
       r0,[r4,#0x14]) is the rate getter built on this capture.
-      Deviations: the two unported helpers ride the WHEEL_SAMPLE_OPS
-      seam (event_list.rs pattern - transmuted firmware defaults on
-      target, panicking defaults on host); the slot reads stay on the
-      cold path. Host tests: first call runs capture then rate in
-      order and sets the flag, second call skips both helpers, a
-      pre-seeded flag skips everything, and the return sign-extends
-      the low halfword (0x8000 -> -0x8000, high halfword ignored).
-      match.py structural: identical flag-test/capture/rate/store/
-      reload/lsl/asr shape; the diff is the ops-table ldrd+blx pair
-      standing in for the two bls and the crate fp frame.
+      Deviation: only unported 0x080dc8a4 rides the WHEEL_SAMPLE_OPS seam;
+      the ported rate helper uses that table solely to mock its ROM
+      tick_elapsed dependency on host. Host tests prove the direct rate call
+      follows capture, second/pre-seeded calls skip it, and the return
+      sign-extends the low halfword (0x8000 -> -0x8000, high halfword
+      ignored). match.py structural: flag-test/capture/rate/store/reload/lsl/
+      asr shape; the capture dependency table and rate's deadline seam stand
+      in for their direct firmware calls.
+
+  - address: 0x080bd8f0
+    ghidra: FUN_080bd8f0
+    name: wheel_sample_rate
+    size: 96
+    sig: "u32 wheel_sample_rate(void)"
+    module: kernel/wheel_sample
+    status: ported
+    vars:
+      DAT_080bd950: inactivity_span_ticks (1000000)
+      DAT_080bd954: wheel_timing_history (0x089caedc)
+      DAT_080bd958: wheel_delta_ring (0x08a755fc)
+      uVar3: previous_tick
+      iVar4: history_expired
+      uVar5: delta_sum
+    notes: >-
+      96 code bytes at 0x080bd8f0..0x080bd950 followed by a 12-byte
+      literal pool. The direct control-subsystem caller is
+      wheel_sample_capture @ 0x08292a88 (its 54 vtable-reached UI
+      callers consume the stored result at sample+0x14); the sibling
+      wheel position sampler @ 0x080877a0 feeds the ring but is not
+      ported here. The function loads timing history +0x08, copies +0x04
+      over it, then calls thunk 0x08037eb8 / ROM 0x22001ee8 with the old
+      tick and 1000000. A nonzero result clears all 64 bytes at
+      0x08a755fc through thunk 0x08037db8 / ROM 0x2200027c and returns
+      zero. Otherwise it adds all sixteen u32 entries with ARM wrapping
+      arithmetic and returns sum >> 4. It does not sample hardware or
+      mutate the ring cursor. The Rust port reads those fixed RAM globals
+      only on target; host tests provide backing storage and mock the ROM
+      deadline check. They prove the history shift, deadline arguments,
+      live average, expiration clear, and wrapping sum. match.py
+      structural diff reviewed after the release ARM build.
 
   - address: 0x08292e6c
     ghidra: FUN_08292e6c
