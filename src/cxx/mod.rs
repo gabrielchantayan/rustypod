@@ -36,4 +36,5 @@ pub mod templates;
 pub mod trivial_destructor;
 pub mod wheel_event;
 pub mod transition_addon;
+pub mod value_compare;
 pub mod vtable;

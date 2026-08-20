@@ -25,6 +25,7 @@ pub mod media_ext;
 pub mod message_arena;
 pub mod message_kind;
 pub mod node_list;
+pub mod object_flag_nibble;
 pub mod object_dispatch_entry;
 pub mod pair_header_destruct;
 pub mod parse_result;

@@ -14659,6 +14659,23 @@ functions:
       field as `(pin_id << 13) & 0xffff0000` instead of
       `(pin_id >> 3) << 16`; same bits.
 
+  # --- shared-cell handle slot comparison ---
+  - address: 0x083b5120
+    ghidra: FUN_083b5120
+    name: shared_cell_slot_ne
+    size: 20
+    sig: "bool shared_cell_slot_ne(const SharedCellSlot *left, const SharedCellSlot *right)"
+    module: cxx/value_compare
+    status: ported
+    vars: {param_1/r0: left, param_2/r1: right}
+    notes: >-
+      Compares the 32-bit cell-pointer words in two shared-cell handle slots
+      and returns true when they differ. The adjacent constructor 0x083b5090
+      allocates an eight-byte {value, refcount} cell and stores its address in
+      a slot; the neighboring copy/release helpers 0x083b50e4 / 0x083b524c
+      retain and release that cell. Direct application callers compare member
+      slot +0x894 with a temporary slot before replacing or forwarding it.
+
   # --- C++ COW basic_string<char> core (cluster 0x083d8518..0x083d8bac) ---
   # String object = one word, the char data pointer. 12-byte _Rep header
   # sits at data-12: {refcount i32 @0, capacity u32 @4, length u32 @8}
@@ -33458,6 +33475,31 @@ functions:
       u32 argument/result ABI uses r0, matching the C `uint` input and its
       0-or-1 int result. No deviations; focused host tests cover 0, 1, 2,
       and both high unsigned boundaries.
+  # --- zero-inclusive single-bit predicate ---
+  - address: 0x0825ebb4
+    ghidra: FUN_0825ebb4
+    name: is_zero_or_power_of_two
+    size: 24
+    sig: "u32 is_zero_or_power_of_two(u32 value)"
+    module: util/value_predicate
+    status: ported
+    renames:
+      param_1/r0: value
+      r1: negated_value
+      r0: predicate_result
+    notes: >-
+      24-byte ARM leaf: `mvn r1,r0; add r1,r1,#1; bics r0,r0,r1; movne
+      r0,#0; moveq r0,#1; bx lr`. It clears value's least-significant set
+      bit and returns one when the result is zero, so zero and every
+      single-bit u32 value are true. The u32 input/result ABI both use r0;
+      Ghidra's `bool` return is the normalized 0-or-1 word result. All three
+      recovered callers (0x0824de50, 0x08251630, and 0x08253158) first
+      require their signed dimension-like inputs to be nonnegative, then
+      accept this predicate's nonzero result; because they do not separately
+      reject zero, zero is an intentional accepted input. No deviations;
+      host tests exhaust the dense low range, every bit position, and
+      high-bit boundary values against the recovered C expression.
+
 
   # --- ARM second-argument return forwarder ---
   - address: 0x080275f0
@@ -33488,31 +33530,6 @@ functions:
     module: util/beload
     status: ported
     renames:
-  # --- zero-inclusive single-bit predicate ---
-  - address: 0x0825ebb4
-    ghidra: FUN_0825ebb4
-    name: is_zero_or_power_of_two
-    size: 24
-    sig: "u32 is_zero_or_power_of_two(u32 value)"
-    module: util/value_predicate
-    status: ported
-    renames:
-      param_1/r0: value
-      r1: negated_value
-      r0: predicate_result
-    notes: >-
-      24-byte ARM leaf: `mvn r1,r0; add r1,r1,#1; bics r0,r0,r1; movne
-      r0,#0; moveq r0,#1; bx lr`. It clears value's least-significant set
-      bit and returns one when the result is zero, so zero and every
-      single-bit u32 value are true. The u32 input/result ABI both use r0;
-      Ghidra's `bool` return is the normalized 0-or-1 word result. All three
-      recovered callers (0x0824de50, 0x08251630, and 0x08253158) first
-      require their signed dimension-like inputs to be nonnegative, then
-      accept this predicate's nonzero result; because they do not separately
-      reject zero, zero is an intentional accepted input. No deviations;
-      host tests exhaust the dense low range, every bit position, and
-      high-bit boundary values against the recovered C expression.
-
       param_1/r0: dst
       param_2/r1: value
       uVar1/r2: reversed
@@ -35336,3 +35353,24 @@ functions:
       that word during its call) and that the returned value is the complete
       raw word. The unported 0x08127954 accessor is a target-ROM/host-mock
       seam.
+
+  # --- opaque object flag low-nibble accessor ---
+  - address: 0x08160cfc
+    ghidra: FUN_08160cfc
+    name: object_flag_low_nibble
+    size: 12
+    sig: "u8 object_flag_low_nibble(const u8 *object)"
+    module: app/object_flag_nibble
+    status: ported
+    renames:
+      param_1/r0: object
+      param_1_plus_0x0d: flag_byte
+      r0: flag_low_nibble
+    notes: >-
+      12-byte leaf: `ldrb r0,[r0,#0xd]; and r0,r0,#0xf; bx lr`. It reads
+      only byte +0x0d of an otherwise opaque application object and returns
+      its low four bits. The direct recovered caller 0x08160888 uses this
+      value as an index into its table at +0x18; that does not establish a
+      broader object layout or a meaning for the high nibble. No deviations;
+      host tests exhaust all 256 high/low-nibble combinations and prove the
+      byte load leaves the complete surrounding object untouched.
