@@ -35720,6 +35720,27 @@ functions:
       index-product and result-addition wraparound. Reference C:
       decomp/c/038/083e0298_FUN_083e0298.c; assembly: osos.asm 0x083e0298.
 
+  # --- signed stride-24 index arithmetic ---
+  - address: 0x083e20b0
+    ghidra: FUN_083e20b0
+    name: array_index_stride24
+    size: 16
+    sig: "i32 array_index_stride24(const i32 *base_word, i32 index)"
+    module: cxx/array_index_stride24
+    status: ported
+    renames:
+      param_1/r0: base_word
+      param_2/r1: index
+      iVar1/r0: result
+    notes: >-
+      Loads the signed 32-bit base word and returns base_word + index * 24,
+      with multiplication and addition wrapping modulo 2^32. It reads only
+      the initial word, so neither a containing array type nor a stronger
+      semantic meaning for its stride can be recovered. No deviations.
+      Focused host tests cover zero index, positive and negative inputs, and
+      both signed-boundary wrap directions. Reference C:
+      decomp/c/038/083e20b0_FUN_083e20b0.c; assembly: osos.asm 0x083e20b0.
+
   # --- three consecutive word clear ---
   - address: 0x083e0aa4
     ghidra: FUN_083e0aa4
