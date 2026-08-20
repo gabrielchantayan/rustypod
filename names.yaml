@@ -7881,9 +7881,10 @@ functions:
       Platform C++ file object's directory-entry-index sentinel predicate.
       Its constructor at 0x08278dc4 initializes file+0x18 to -1, and its
       close path at 0x08278894 restores that value after closing the
-      directory-entry-backed handle. The 16-byte ARM body loads the signed
-      word, adds one with flags, then conditionally writes 1 on nonzero:
-      returns 0 only for -1 and 1 for every other i32 value, including both
+      directory-entry-backed handle. Its exact 16-byte ARM body is `ldr
+      r0, [r0, #0x18]; adds r0, r0, #1; movne r0, #1; bx lr`: the
+      flag-setting wrapping addition leaves zero only for -1 and the
+      conditional move returns 1 for every other i32 value, including both
       signed extremes. It is a read-only r0=file -> r0=i32 ABI leaf; 11
       direct C call sites use it before file virtual I/O or return the
       file's open-status word at +0x1c.

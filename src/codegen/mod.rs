@@ -19,6 +19,9 @@ pub mod block_ref;
 /// address block (0x082c5dxx), one function away from `se(v)` @
 /// 0x082c5dcc, and is ported under the same `cg_*` roof.
 pub mod exp_golomb;
+/// `file_has_directory_entry` @ 0x082a548c — platform-file directory-entry
+/// sentinel predicate in the JIT address block.
+pub mod file_directory_entry;
 pub mod heap;
 pub mod ir;
 /// `cg_emit_load_word_at_offset` @ 0x082605f0 — emission sugar the
