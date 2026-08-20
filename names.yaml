@@ -564,6 +564,26 @@ functions:
       layouts and ownership are not recovered, so the port deliberately
       retains raw dereferences with no NULL or bounds checks.
 
+  # --- opaque FreeType service-context metadata pointer accessor ---
+  - address: 0x080512c4
+    ghidra: FUN_080512c4
+    name: ft_service_metadata_pointer
+    size: 8
+    sig: "const void *ft_service_metadata_pointer(const void *service_context)"
+    module: ft/service/metadata
+    status: ported
+    vars:
+      param_1: service_context
+      r0_after_ldr: metadata_pointer
+    notes: >-
+      Raw ARM is `ldr r0,[r0,#0xf00]; bx lr`, hence this returns the aligned
+      metadata pointer word at service_context+0xf00 without dereferencing it.
+      Ghidra's C agrees exactly. The recovered direct caller obtains this
+      pointer from the value it had tested nonzero, then updates the u64
+      counter at metadata+0xc30/+0xc34. The concrete layouts and ownership
+      are not recovered; the port deliberately retains the raw load with no
+      NULL or bounds checks.
+
   # --- retailOS UI object backend resolver (kind-1 self / kind-2 proxy) ---
   - address: 0x08051dc4
     ghidra: FUN_08051dc4

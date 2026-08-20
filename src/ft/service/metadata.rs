@@ -74,12 +74,29 @@ pub unsafe extern "C" fn ft_service_metadata_byte_at_b89(
     (metadata.add(METADATA_BYTE_B89_OFFSET) as *const u8).read() as u32
 }
 
+/// ft_service_metadata_pointer — original: `FUN_080512c4` @ `0x080512c4`
+/// (8 bytes).
+///
+/// Returns the raw metadata pointer word at `service_context + 0xf00`. The
+/// entire ARM body is `ldr r0,[r0,#0xf00]; bx lr`, so this neither dereferences
+/// the returned pointer nor adds NULL, bounds, or ownership handling.
+///
+/// Register usage: `r0 = service_context`; `r0 = metadata pointer`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_service_metadata_pointer(service_context: *const u8) -> *const u8 {
+    (service_context.add(SERVICE_CONTEXT_METADATA_OFFSET) as *const *const u8).read()
+}
+
+
+
 
 
 #[cfg(test)]
 mod tests {
     use super::{
         ft_service_metadata_byte_at_b50, ft_service_metadata_u16_at_b1c,
+        ft_service_metadata_pointer,
         METADATA_BYTE_B50_OFFSET, METADATA_U16_B1C_OFFSET,
         SERVICE_CONTEXT_METADATA_OFFSET,
         ft_service_metadata_byte_at_b89,
@@ -231,6 +248,21 @@ mod tests {
             0x83,
             "the raw load needs exactly the recovered one byte",
         );
+    }
+
+    #[test]
+    fn returns_the_raw_metadata_pointer_word() {
+        let metadata = [0xa5u8; 1];
+        let service_context = ServiceContextFixture {
+            before_metadata: [0x5a; SERVICE_CONTEXT_METADATA_OFFSET],
+            metadata: metadata.as_ptr(),
+        };
+
+        let result = unsafe {
+            ft_service_metadata_pointer((&service_context as *const ServiceContextFixture).cast())
+        };
+        assert_eq!(result, metadata.as_ptr(), "ldr returns the pointer word, not its contents");
+        assert_eq!(core::mem::offset_of!(ServiceContextFixture, metadata), SERVICE_CONTEXT_METADATA_OFFSET);
     }
 }
 
