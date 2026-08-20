@@ -33458,6 +33458,31 @@ functions:
     module: util/beload
     status: ported
     renames:
+  # --- zero-inclusive single-bit predicate ---
+  - address: 0x0825ebb4
+    ghidra: FUN_0825ebb4
+    name: is_zero_or_power_of_two
+    size: 24
+    sig: "u32 is_zero_or_power_of_two(u32 value)"
+    module: util/value_predicate
+    status: ported
+    renames:
+      param_1/r0: value
+      r1: negated_value
+      r0: predicate_result
+    notes: >-
+      24-byte ARM leaf: `mvn r1,r0; add r1,r1,#1; bics r0,r0,r1; movne
+      r0,#0; moveq r0,#1; bx lr`. It clears value's least-significant set
+      bit and returns one when the result is zero, so zero and every
+      single-bit u32 value are true. The u32 input/result ABI both use r0;
+      Ghidra's `bool` return is the normalized 0-or-1 word result. All three
+      recovered callers (0x0824de50, 0x08251630, and 0x08253158) first
+      require their signed dimension-like inputs to be nonnegative, then
+      accept this predicate's nonzero result; because they do not separately
+      reject zero, zero is an intentional accepted input. No deviations;
+      host tests exhaust the dense low range, every bit position, and
+      high-bit boundary values against the recovered C expression.
+
       param_1/r0: dst
       param_2/r1: value
       uVar1/r2: reversed
