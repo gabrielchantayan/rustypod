@@ -35612,3 +35612,24 @@ functions:
       Host tests cover the full 0..=255 byte range, neighboring-byte guards,
       pointer aliasing, and absence of mutation. Reference C:
       decomp/c/012/0813b0a4_FUN_0813b0a4.c; assembly: osos.asm 0x0813b0a4.
+
+  # --- unsigned stride-20 index arithmetic ---
+  - address: 0x083e0298
+    ghidra: FUN_083e0298
+    name: array_index_stride20
+    size: 16
+    sig: "u32 array_index_stride20(const u32 *base_word, u32 index)"
+    module: cxx/array_index_stride20
+    status: ported
+    renames:
+      param_1/r0: base_word
+      param_2/r1: index
+      uVar1/r0: result
+    notes: >-
+      Loads the unsigned 32-bit base word and returns base_word + index * 20,
+      with multiplication and addition wrapping modulo 2^32. It reads only
+      the initial word, so neither a containing array type nor a stronger
+      semantic meaning for its stride can be recovered. No deviations.
+      Focused host tests cover distinct base words, zero index, and both
+      index-product and result-addition wraparound. Reference C:
+      decomp/c/038/083e0298_FUN_083e0298.c; assembly: osos.asm 0x083e0298.
