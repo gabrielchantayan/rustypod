@@ -7869,6 +7869,25 @@ functions:
       the host model uses native pointers while exercising the same named
       fields. 20 bl call sites, binary-scanned.
 
+  - address: 0x082a548c
+    ghidra: FUN_082a548c
+    name: file_has_directory_entry
+    size: 16
+    sig: "i32 file_has_directory_entry(const void *file)"
+    module: codegen/file_directory_entry
+    status: ported
+    vars: {param_1: file}
+    notes: >-
+      Platform C++ file object's directory-entry-index sentinel predicate.
+      Its constructor at 0x08278dc4 initializes file+0x18 to -1, and its
+      close path at 0x08278894 restores that value after closing the
+      directory-entry-backed handle. The 16-byte ARM body loads the signed
+      word, adds one with flags, then conditionally writes 1 on nonzero:
+      returns 0 only for -1 and 1 for every other i32 value, including both
+      signed extremes. It is a read-only r0=file -> r0=i32 ABI leaf; 11
+      direct C call sites use it before file virtual I/O or return the
+      file's open-status word at +0x1c.
+
   - address: 0x082d3cb4
     ghidra: FUN_082d3cb4
     name: ft_platform_file_open
@@ -35374,3 +35393,28 @@ functions:
       broader object layout or a meaning for the high nibble. No deviations;
       host tests exhaust all 256 high/low-nibble combinations and prove the
       byte load leaves the complete surrounding object untouched.
+
+  # --- three-category table-domain predicate ---
+  - address: 0x08161258
+    ghidra: FUN_08161258
+    name: category_is_below_three
+    size: 24
+    sig: "u32 category_is_below_three(u32 context, u32 category)"
+    module: app/category_is_below_three
+    status: ported
+    renames:
+      param_1/r0: context_ignored
+      param_2/r1: category
+      r0: is_below_three
+    notes: >-
+      24-byte leaf predicate. The original compares r1 independently with 0,
+      1, and 2, then returns one only for those three values; all other u32
+      values return zero. It never reads r0. Direct callers at 0x08161068 and
+      0x08161208 pass an owning context in r0 and the category in r1; each
+      subsequently indexes that context's +0x04 table with the category.
+      This establishes table-domain category values but not a more specific
+      category meaning, so the port retains the conservative category name.
+      Reference C: decomp/c/014/08161258_FUN_08161258.c; assembly: osos.asm
+      0x08161258 (`cmp r1,#0; cmpne #1; cmpne #2; moveq/movne; bx lr`).
+      Focused host tests cover categories 0, 1, 2, 3, and u32::MAX and prove
+      that arbitrary first-argument values do not affect the result.
