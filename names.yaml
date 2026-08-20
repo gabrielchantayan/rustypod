@@ -7208,6 +7208,32 @@ functions:
       binary-scanned. Port uses write_volatile against memset idiom
       recognition; LLVM unrolls the 3-step alignment prologue.
 
+
+  # --- FreeType 2 character-map API ---
+  - address: 0x0804c4d0
+    ghidra: FUN_0804c4d0
+    name: ft_get_char_index
+    size: 48
+    sig: "u32 ft_get_char_index(FtFace *face, u32 charcode)"
+    module: ft/glyph_slot
+    status: ported
+    vars:
+      param_1: face
+      param_2: charcode
+      iVar1: charmap
+      uVar2: result
+    notes: >-
+      FreeType 2.3.0 FT_Get_Char_Index (src/base/ftobjs.c). The retail
+      ARM body has the identical source shape: cmp face,#0; conditionally
+      loads face->charmap at +0x5c; returns zero on either null; otherwise
+      casts its FT_CharMapRec prefix to FT_CMapRec, loads cmap->clazz at
+      +0x0c and clazz->char_index at +0x0c, then blx. Direct callers at
+      0x080770d4/0x080770e4 put a byte character code in r1 before the
+      call, confirming the decompiler-missed FT_ULong charcode argument.
+      FT_CMap_ClassRec's third callback is char_index, so no callback-null
+      gate exists in the original or port. Host tests cover a null face,
+      absent selected charmap, and callback receiver, character code, and
+      return propagation.
   # --- FreeType 2 ftcalc fixed-point kernels ---
   - address: 0x0804d2cc
     ghidra: FUN_0804d2cc
@@ -35703,3 +35729,28 @@ functions:
       decomp/c/011/0811f050_FUN_0811f050.c and
       decomp/c/011/0811f4f4_FUN_0811f4f4.c; assembly: osos.asm 0x083e0e68.
       match.py: structural match reviewed.
+
+  # --- byte-identical third three-word clear ---
+  - address: 0x083e143c
+    ghidra: FUN_083e143c
+    name: three_word_clear_third
+    size: 20
+    sig: "void three_word_clear_third(u32 *target)"
+    module: cxx/three_word_clear_third
+    status: ported
+    renames:
+      param_1/r0: target
+      param_1_plus_0x00: target_word_0
+      param_1_plus_0x04: target_word_1
+      param_1_plus_0x08: target_word_2
+    notes: >-
+      Byte-identical third instance of the 20-byte three-word-clear helper:
+      moves zero into r1, then stores it at target +0x00, +0x04, and +0x08.
+      It has no NULL guard, no target reads, and no other stores. A dedicated
+      link section keeps this separately hookable export from LLVM's
+      identical-code folding; no behavioral deviations. The focused host test
+      uses nonzero guard and target fixtures to prove only those three words
+      change. Reference C:
+      decomp/c/038/083e143c_FUN_083e143c.c; disassembly: osos.dec
+      0x083e143c (mov r1, #0; str r1, [r0, #0/#4/#8]). match.py:
+      structural match reviewed.
