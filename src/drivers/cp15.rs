@@ -154,6 +154,37 @@ pub extern "C" fn invalidate_entire_data_cache_and_drain_write_buffer() -> u32 {
     data_synchronization_barrier(0);
     0
 }
+/// Invalidates the ARM926EJ-S data-cache line selected by a modified virtual
+/// address.
+///
+/// Original: `FUN_08037cc0` @ 0x08037cc0 (8 bytes).
+/// Reference: `/home/gabe/Programming/ipod-decomp/decomp/c/001/08037cc0_FUN_08037cc0.c`.
+/// The two-instruction firmware leaf sends its argument in `r0` through
+/// `MCR p15,0,r0,c7,c6,1` (`0xee070f36`, Invalidate Data Cache Line by MVA)
+/// and returns with `BX lr`; it deliberately performs no alignment check or
+/// follow-up barrier.
+///
+/// The firmware-target naked function emits exactly that operation and return,
+/// preserving the original AAPCS ABI. Non-firmware builds use the
+/// cache-maintenance seam so the supplied MVA is observable; cache coherency
+/// itself is target-only.
+#[cfg(all(target_os = "none", target_arch = "arm"))]
+#[unsafe(naked)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn invalidate_data_cache_line_by_mva(_mva: u32) {
+    core::arch::naked_asm!(
+        "mcr p15, 0, r0, c7, c6, 1",
+        "bx lr",
+    );
+}
+
+#[cfg(not(all(target_os = "none", target_arch = "arm")))]
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn invalidate_data_cache_line_by_mva(mva: u32) {
+    invalidate_data_cache_line_by_mva_impl(mva);
+}
+
 
 /// Target implementation of `MCR p15,0,r0,c7,c6,0`.
 #[cfg(all(target_os = "none", target_arch = "arm"))]
@@ -310,6 +341,8 @@ pub struct HostCacheMaintenanceHooks {
     pub invalidate_instruction_cache: fn(u32),
     /// Replacement for `MCR p15,0,<Rt>,c7,c6,0`.
     pub invalidate_data_cache: fn(u32),
+    /// Replacement for `MCR p15,0,<Rt>,c7,c6,1`.
+    pub invalidate_data_cache_line_by_mva: fn(u32),
     /// Replacement for `MCR p15,0,<Rt>,c7,c10,4`.
     pub data_synchronization_barrier: fn(u32),
 }
@@ -324,9 +357,13 @@ fn default_invalidate_data_cache(_: u32) {}
 
 
 #[cfg(not(all(target_os = "none", target_arch = "arm")))]
+fn default_invalidate_data_cache_line_by_mva(_: u32) {}
+
+#[cfg(not(all(target_os = "none", target_arch = "arm")))]
 static mut HOST_CACHE_MAINTENANCE_HOOKS: HostCacheMaintenanceHooks = HostCacheMaintenanceHooks {
     invalidate_instruction_cache: default_invalidate_instruction_cache,
     invalidate_data_cache: default_invalidate_data_cache,
+    invalidate_data_cache_line_by_mva: default_invalidate_data_cache_line_by_mva,
     data_synchronization_barrier: default_data_synchronization_barrier,
 };
 /// Replaces the host CP15 cache-maintenance seam and returns the prior hooks.
@@ -376,11 +413,22 @@ fn data_synchronization_barrier(operand: u32) {
     }
 }
 
+#[cfg(not(all(target_os = "none", target_arch = "arm")))]
+#[inline(always)]
+fn invalidate_data_cache_line_by_mva_impl(mva: u32) {
+    // SAFETY: callers of replace_host_cache_maintenance_hooks serialize hook
+    // replacement with cache-maintenance use, as its safety contract requires.
+    unsafe {
+        (core::ptr::read_volatile(core::ptr::addr_of!(HOST_CACHE_MAINTENANCE_HOOKS))
+            .invalidate_data_cache_line_by_mva)(mva)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
     use super::{
-        invalidate_entire_data_cache_and_drain_write_buffer,
+        invalidate_data_cache_line_by_mva, invalidate_entire_data_cache_and_drain_write_buffer,
         invalidate_entire_instruction_cache, replace_host_cache_maintenance_hooks,
         replace_host_sctlr_hooks, sctlr_disable_data_cache, sctlr_disable_instruction_cache,
         sctlr_disable_mmu, sctlr_enable_data_cache, sctlr_enable_instruction_cache,
@@ -396,6 +444,7 @@ mod tests {
 
     const INVALIDATE_INSTRUCTION_CACHE: u32 = 1;
     const INVALIDATE_DATA_CACHE: u32 = 3;
+    const INVALIDATE_DATA_CACHE_LINE_BY_MVA: u32 = 4;
     const DATA_SYNCHRONIZATION_BARRIER: u32 = 2;
     static CACHE_OPERATION_COUNT: AtomicUsize = AtomicUsize::new(0);
     static CACHE_OPERATION_CODES: [AtomicU32; 2] = [AtomicU32::new(0), AtomicU32::new(0)];
@@ -426,6 +475,10 @@ mod tests {
     fn recording_invalidate_data_cache(operand: u32) {
         record_cache_operation(INVALIDATE_DATA_CACHE, operand);
     }
+    fn recording_invalidate_data_cache_line_by_mva(mva: u32) {
+        record_cache_operation(INVALIDATE_DATA_CACHE_LINE_BY_MVA, mva);
+    }
+
     fn recording_data_synchronization_barrier(operand: u32) {
         record_cache_operation(DATA_SYNCHRONIZATION_BARRIER, operand);
     }
@@ -479,6 +532,7 @@ mod tests {
             replace_host_cache_maintenance_hooks(HostCacheMaintenanceHooks {
                 invalidate_instruction_cache: recording_invalidate_instruction_cache,
                 invalidate_data_cache: recording_invalidate_data_cache,
+                invalidate_data_cache_line_by_mva: recording_invalidate_data_cache_line_by_mva,
                 data_synchronization_barrier: recording_data_synchronization_barrier,
             })
         };
@@ -603,6 +657,22 @@ mod tests {
         assert_eq!(CONTROL.load(Ordering::SeqCst), 0xabcd_1002);
         assert_eq!(READS.load(Ordering::SeqCst), 1);
         assert_eq!(WRITES.load(Ordering::SeqCst), 1);
+    }
+    #[test]
+    fn invalidating_data_cache_line_passes_mva_without_barrier() {
+        let (_lock, _restore) = install_recording_cache_maintenance();
+
+        invalidate_data_cache_line_by_mva(0x1234_5678);
+
+        assert_eq!(CACHE_OPERATION_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            CACHE_OPERATION_CODES[0].load(Ordering::SeqCst),
+            INVALIDATE_DATA_CACHE_LINE_BY_MVA
+        );
+        assert_eq!(
+            CACHE_OPERATION_OPERANDS[0].load(Ordering::SeqCst),
+            0x1234_5678
+        );
     }
     #[test]
     fn invalidating_entire_instruction_cache_uses_zero_operand_then_synchronizes() {

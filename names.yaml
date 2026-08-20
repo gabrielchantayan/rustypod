@@ -4015,6 +4015,22 @@ functions:
       MODE_STATE_OBJECT_TABLE target-global seam; no bounds or null checks
       are present in the original or port.
 
+  - address: 0x08037cc0
+    ghidra: FUN_08037cc0
+    name: invalidate_data_cache_line_by_mva
+    size: 8
+    sig: "void invalidate_data_cache_line_by_mva(u32 mva)"
+    module: drivers/cp15
+    status: ported
+    renames:
+      param_1/r0: mva
+    notes: >-
+      Sends the supplied MVA through ARM926EJ-S CP15 MCR p15,0,r0,c7,c6,1
+      (Invalidate Data Cache Line by MVA, 0xee070f36) then returns directly;
+      it has no alignment guard or follow-up barrier. The target is a naked
+      function so match.py is instruction-exact; host builds route the MVA
+      through the shared replaceable cache-maintenance seam for testing.
+
   - address: 0x08037cd0
     ghidra: FUN_08037cd0
     name: dcache_line_clean_invalidate
