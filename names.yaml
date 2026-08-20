@@ -3848,6 +3848,25 @@ functions:
       documented dispatch-slot deviation), trailing mov r0,#0 return
       matches.
 
+  # --- opaque resource-object field access ---
+  - address: 0x0804482c
+    ghidra: FUN_0804482c
+    name: opaque_object_flags
+    size: 8
+    sig: "u32 opaque_object_flags(const u8 *object)"
+    module: util/field_access
+    status: ported
+    vars: {"param_1/r0": object, "r0 (return)": flags}
+    notes: >-
+      Raw ARM is exactly `ldr r0,[r0,#0xc]; bx lr`: an unchecked,
+      unaligned-capable flags-word read. The immediately preceding
+      0x0804472c tests bit 0 of the same +0x0c word on its 0x44-byte
+      opaque object in r0 and tests returned mask 0x2; direct caller
+      0x082a2e60 reaches a selected child through +0x14 and tests returned
+      mask 0x1.
+      The shared flag use establishes the field role, but not a stable
+      ownership type; port therefore keeps the object opaque.
+
   - address: 0x08044190
     ghidra: FUN_08044190
     name: strlen_byte_loop
@@ -34874,3 +34893,25 @@ functions:
       div-by-4 gate, all three excluded century residues, 400-year leaps,
       zero and sign-bit-set inputs, and exhaustive DateTime-range comparison
       with the independent textbook Gregorian predicate.
+
+  # --- Raw object-state byte predicate (cxx/object_state) ---
+  - address: 0x080395d8
+    ghidra: FUN_080395d8
+    name: object_byte2_is_nonzero
+    size: 16
+    sig: "u32 object_byte2_is_nonzero(const u8 *object)"
+    module: cxx/object_state
+    status: ported
+    vars: {param_1/r0: object, object_plus_0x02: byte2, r0: boolean_result}
+    notes: >-
+      Raw ARM is `ldrb r0,[r0,#2]; cmp r0,#0; movne r0,#1; bx lr`: it
+      returns the exact u32 ABI values 0 for byte2 == 0 and 1 for every
+      nonzero byte, with no null guard and no writes. The sole recovered
+      direct call is 0x080a55ec in FUN_080a5420: r0 receives the 16-byte
+      input-record cursor r5 and the result is stored as one byte at
+      output-record +0x14; the caller loads r1 from its own stack just
+      before the call, but this leaf does not read it. The object type and
+      byte's meaning remain unlocated, so the name records only the verified
+      raw layout behavior. Host tests cover zero, several nonzero byte
+      values, the exact three-byte minimum object, a nonzero base offset,
+      and preservation of all surrounding bytes.
