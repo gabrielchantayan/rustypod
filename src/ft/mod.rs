@@ -9,6 +9,7 @@ pub mod conditional_offset;
 pub mod error;
 pub mod glyph_slot;
 pub mod memory;
+pub mod module;
 pub mod metrics;
 pub mod outline;
 pub mod service;

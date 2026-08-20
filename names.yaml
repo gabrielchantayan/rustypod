@@ -35754,3 +35754,29 @@ functions:
       decomp/c/038/083e143c_FUN_083e143c.c; disassembly: osos.dec
       0x083e143c (mov r1, #0; str r1, [r0, #0/#4/#8]). match.py:
       structural match reviewed.
+
+  # --- byte-identical fourth three-word clear ---
+  - address: 0x083e1ad0
+    ghidra: FUN_083e1ad0
+    name: three_word_clear_fourth
+    size: 20
+    sig: "void three_word_clear_fourth(u32 *target)"
+    module: cxx/three_word_clear_fourth
+    status: ported
+    renames:
+      param_1/r0: target
+      param_1_plus_0x00: target_word_0
+      param_1_plus_0x04: target_word_1
+      param_1_plus_0x08: target_word_2
+    notes: >-
+      Byte-identical fourth instance of the 20-byte three-word-clear helper:
+      moves zero into r1, then stores it at target +0x00, +0x04, and +0x08.
+      It has no NULL guard, no target reads, and no other stores. Two
+      decompiled callers (0x0813a500 and 0x0813abf8) pass the start of
+      stack-local three-word ranges; neither consumes a return value. A
+      dedicated link section keeps this separately hookable export from LLVM's
+      identical-code folding; no behavioral deviations. The focused host test
+      uses nonzero guard and target fixtures to prove only those three words
+      change. Reference C: decomp/c/038/083e1ad0_FUN_083e1ad0.c;
+      disassembly: osos.dec 0x083e1ad0 (mov r1, #0; str r1,
+      [r0, #0/#4/#8]). match.py: structural match reviewed.
