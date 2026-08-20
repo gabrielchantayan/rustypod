@@ -13786,6 +13786,29 @@ functions:
       free_wrapper lazy-init + HEAP_OPS dispatch standing in for the
       original's bl 0x080e7970 (the documented deviation).
 
+  - address: 0x082a4f58
+    ghidra: FUN_082a4f58
+    name: field_10_low_u16
+    size: 16
+    sig: "u32 field_10_low_u16(const u8 *this)"
+    module: codegen/field_10_low_u16
+    status: ported
+    renames:
+      param_1: this
+    notes: >-
+      Source: decomp/c/029/082a4f58_FUN_082a4f58.c. Raw ARM is
+      `ldr r0,[r0,#0x10]; mov r0,r0,lsl #0x10; mov r0,r0,lsr #0x10;
+      bx lr`, so the port loads the opaque record's word at +0x10 and
+      returns exactly its low 16 bits, zero-extended to u32; it neither
+      NULL-checks nor modifies the record. Its five direct call sites are
+      the comparisons in FUN_08295e9c, against 0x6e, 0x10, 0x5a, 0x59,
+      and 0x6f; that gives the recovered field an event/control-code role,
+      but not enough object evidence to name the containing type. This
+      body is distinct from the adjacent state-word byte-2 accessor
+      wheel_event_button_code @ 0x082a4f78, not an alias. Host tests cover
+      high/low-halfword combinations, boundary patterns, and aliased
+      read-only access.
+
   - address: 0x082a4f78
     ghidra: FUN_082a4f78
     name: wheel_event_button_code

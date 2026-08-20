@@ -22,6 +22,9 @@ pub mod exp_golomb;
 /// `file_has_directory_entry` @ 0x082a548c — platform-file directory-entry
 /// sentinel predicate in the JIT address block.
 pub mod file_directory_entry;
+/// `field_10_low_u16` @ 0x082a4f58 — opaque record state-word low-halfword
+/// accessor in the codegen address block.
+pub mod field_10_low_u16;
 pub mod heap;
 pub mod ir;
 /// `cg_emit_load_word_at_offset` @ 0x082605f0 — emission sugar the
