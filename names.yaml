@@ -3590,6 +3590,7 @@ functions:
       read (both call sites happen to leave the deque pointer there) —
       the export keeps the 3-argument ABI. 2 bl call sites @ 0x0826f5b0 /
       0x0826f61c (pool_seed_regions), binary-verified. A byte-pattern
+
       scan of the whole image finds this r2 form EXACTLY ONCE; the
       src-in-r1 twin has 17 byte-identical copies and is ported
       separately as deque_iter_assign (canonical 0x083da458).
@@ -35891,6 +35892,29 @@ functions:
       disassembly: osos.dec 0x083e41fc (mov r1, #0; str r1,
       [r0, #0/#4/#8]). match.py: structural match reviewed.
 
+  # --- byte-identical seventh three-word clear ---
+  - address: 0x083e472c
+    ghidra: FUN_083e472c
+    name: three_word_clear_seventh
+    size: 20
+    sig: "void three_word_clear_seventh(u32 *target)"
+    module: cxx/three_word_clear_seventh
+    status: ported
+    renames:
+      param_1/r0: target
+      param_1_plus_0x00: target_word_0
+      param_1_plus_0x04: target_word_1
+      param_1_plus_0x08: target_word_2
+    notes: >-
+      Byte-identical seventh instance of the 20-byte three-word-clear helper:
+      moves zero into r1, then stores it at target +0x00, +0x04, and +0x08.
+      It has no NULL guard, no target reads, and no other stores. A dedicated
+      link section keeps this separately hookable export from LLVM's
+      identical-code folding; no behavioral deviations. The focused host test
+      proves the +0/+4/+8 words are cleared while the surrounding bytes remain
+      unchanged. Reference C: decomp/c/038/083e472c_FUN_083e472c.c;
+      disassembly: osos.dec 0x083e472c (mov r1, #0; str r1,
+      [r0, #0/#4/#8]). match.py: structural match reviewed.
   # --- trivial eight-byte vector destructor ---
   - address: 0x083e1ae4
     ghidra: FUN_083e1ae4
