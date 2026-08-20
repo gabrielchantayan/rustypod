@@ -34960,3 +34960,28 @@ functions:
       refresh with all cleared fields and exact dispatcher arguments, forced
       refresh with a high-bit force value, callback-written returned values,
       and ignored dispatcher status.
+
+  # --- Selected paired-buffer capacity predicate (runtime/buffer_state) ---
+  - address: 0x0807595c
+    ghidra: FUN_0807595c
+    name: buffer_state_is_full
+    size: 36
+    sig: "u32 buffer_state_is_full(u32 selector)"
+    module: runtime/buffer_state
+    status: ported
+    vars: {param_1/r0: selector, DAT_08075980: paired_buffer_states, iVar1/r1: selected_buffer_state,
+      selected_buffer_state_plus_0x40/r0: item_count, selected_buffer_state_plus_0x44/r1: capacity,
+      r0: is_full}
+    notes: >-
+      Raw ARM loads the fixed paired-state BSS object 0x08b1c858 through the
+      literal at 0x08075980, applies `addeq #0x48` only when selector == 1,
+      then compares the selected record's +0x40 and +0x44 words and returns
+      exact u32 0/1 with `movne`/`moveq`. The shared-state users
+      FUN_08090c48, FUN_08092230, FUN_0809ae44, FUN_080b0fbc, and
+      FUN_080b8228 establish two 0x48-byte records whose +0x40 word is an
+      item count and +0x44 is capacity (initialized to 16); equality is
+      therefore the conservative full predicate, not an empty-count test.
+      The only direct ARM `bl` is 0x081c0eb8 in FUN_081c0b18 and passes
+      selector 0. Host tests cover exact selector one, representative
+      non-one u32 values, and equal/unequal words including zero and
+      u32::MAX.

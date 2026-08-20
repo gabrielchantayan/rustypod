@@ -4,6 +4,7 @@ pub mod aeabi_64shift;
 pub mod atexit;
 pub mod byteswap;
 pub mod byte_block_checksum_forwarder;
+pub mod buffer_state;
 pub mod chval;
 pub mod ctype;
 pub mod cxa_guard;
