@@ -7428,6 +7428,28 @@ functions:
       through the real symbol. 2 bl call sites, binary-scanned:
       ft_divfix @ 0x0804c34c and ft_muldiv @ 0x0804d2ac.
 
+  - address: 0x0804c1a0
+    ghidra: FUN_0804c1a0
+    name: ft_angle_diff
+    size: 36
+    sig: "i32 ft_angle_diff(i32 angle1, i32 angle2)"
+    module: ft/trig
+    status: ported
+    vars: {param_1: angle1, param_2: angle2, extraout_r1: remainder, iVar1: delta}
+    notes: >-
+      FreeType 2.3 FT_Angle_Diff (fttrigon.c, VER-2-3-0) - computes the
+      ARM-wrapping angle2-angle1, calls the retail signed-remainder helper
+      FUN_08031568 with FT_ANGLE_2PI (0x1680000), lifts a negative
+      remainder by one turn, then subtracts one turn only when delta is
+      strictly above FT_ANGLE_PI (0xb40000). Thus the result is
+      (-180,180] in 16.16 degrees and both half-turn representations
+      normalize to +180. Reference C:
+      decomp/c/003/0804c1a0_FUN_0804c1a0.c; source identity and semantics
+      confirmed against FreeType VER-2-3-0 fttrigon.c. Focused host tests
+      cover negative remainders, both half-turn boundaries, and wrapped
+      subtraction; match.py confirms the structural subtract/remainder/
+      repair sequence.
+
   - address: 0x0804c1c4
     ghidra: FUN_0804c1c4
     name: ft_atan2

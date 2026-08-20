@@ -17,6 +17,31 @@ use crate::ft::types::FtVector;
 /// 180 degrees in 16.16 — upstream `FT_ANGLE_PI` (`2 * FT_ANGLE_PI2`).
 /// The original materializes it as `movlt ip, #0xb40000`.
 pub const FT_ANGLE_PI: i32 = 0x00b4_0000;
+/// 360 degrees in 16.16 — upstream `FT_ANGLE_2PI`.
+const FT_ANGLE_2PI: i32 = 0x0168_0000;
+
+/// ft_angle_diff (FreeType `FT_Angle_Diff`) — original: `FUN_0804c1a0`
+/// @ 0x0804c1a0 (36 bytes; 1 call to the retail signed remainder helper
+/// `FUN_08031568`).
+///
+/// Returns `angle2 - angle1` reduced modulo 360 degrees into `(-180, 180]`
+/// in 16.16 fixed-point degrees. The ARM `sub` wraps before the signed
+/// remainder operation; the negative remainder is lifted by one full turn,
+/// then a value strictly above +180 degrees is folded back one turn. Thus
+/// both -180 and +180 normalize to +180, matching FreeType 2.3
+/// `FT_Angle_Diff`. No deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn ft_angle_diff(angle1: i32, angle2: i32) -> i32 {
+    let mut delta = angle2.wrapping_sub(angle1) % FT_ANGLE_2PI;
+    if delta < 0 {
+        delta += FT_ANGLE_2PI;
+    }
+    if delta > FT_ANGLE_PI {
+        delta -= FT_ANGLE_2PI;
+    }
+    delta
+}
+
 
 /// Number of pseudo-rotations after the fixed `arctan(2)` pre-rotation —
 /// upstream `FT_TRIG_MAX_ITERS`; the original's `cmp lr, #23; blt`.
@@ -314,9 +339,64 @@ mod tests {
         move || {
             s ^= s << 13;
             s ^= s >> 17;
+
             s ^= s << 5;
             s
         }
+    }
+    /// Independent modulo normalization of the hardware-wrapped ARM
+    /// subtraction; `rem_euclid` makes the negative-remainder repair
+    /// explicit without duplicating the port's branches.
+    fn angle_diff_ref(angle1: i32, angle2: i32) -> i32 {
+        let mut delta = (angle2.wrapping_sub(angle1) as i64).rem_euclid(FT_ANGLE_2PI as i64);
+        if delta > FT_ANGLE_PI as i64 {
+            delta -= FT_ANGLE_2PI as i64;
+        }
+        delta as i32
+    }
+
+    #[test]
+    fn angle_diff_repairs_negative_signed_remainders() {
+        const TURN: i32 = FT_ANGLE_2PI;
+        for (angle1, angle2, expected) in [
+            (0, 0, 0),
+            (0, -1, -1),
+            (1, 0, -1),
+            (0, TURN, 0),
+            (0, -TURN, 0),
+            (0, 3 * TURN + 5, 5),
+            (0, -3 * TURN - 5, -5),
+        ] {
+            assert_eq!(
+                ft_angle_diff(angle1, angle2),
+                expected,
+                "angle1={angle1:#x}, angle2={angle2:#x}"
+            );
+        }
+    }
+
+    #[test]
+    fn angle_diff_keeps_positive_half_turn_and_folds_negative_half_turn() {
+        assert_eq!(ft_angle_diff(0, FT_ANGLE_PI), FT_ANGLE_PI);
+        assert_eq!(ft_angle_diff(0, -FT_ANGLE_PI), FT_ANGLE_PI);
+        assert_eq!(ft_angle_diff(0, FT_ANGLE_PI + 1), -FT_ANGLE_PI + 1);
+        assert_eq!(ft_angle_diff(0, -FT_ANGLE_PI - 1), FT_ANGLE_PI - 1);
+    }
+
+    #[test]
+    fn angle_diff_matches_wrapped_modular_reference() {
+        let mut rnd = rng(0xc001_d00d);
+        for _ in 0..100_000 {
+            let (angle1, angle2) = (rnd() as i32, rnd() as i32);
+            assert_eq!(
+                ft_angle_diff(angle1, angle2),
+                angle_diff_ref(angle1, angle2),
+                "angle1={angle1:#x}, angle2={angle2:#x}"
+            );
+        }
+        // ARM's `sub` wraps before it reaches the signed remainder helper.
+        assert_eq!(ft_angle_diff(i32::MIN, i32::MAX), -1);
+        assert_eq!(ft_angle_diff(i32::MAX, i32::MIN), 1);
     }
 
     #[test]
