@@ -584,6 +584,26 @@ functions:
       are not recovered; the port deliberately retains the raw load with no
       NULL or bounds checks.
 
+
+  # --- opaque FreeType service metadata flag-word accessor ---
+  - address: 0x080514e0
+    ghidra: FUN_080514e0
+    name: ft_service_metadata_flags_at_b00
+    size: 12
+    sig: "u32 ft_service_metadata_flags_at_b00(const void *object)"
+    module: ft/service_metadata
+    status: ported
+    vars:
+      param_1: object
+      r0_after_ldr: metadata
+    notes: >-
+      Raw ARM is `ldr r0,[r0,#0xf00]; ldr r0,[r0,#0xb00]; bx lr`, hence
+      aligned pointer and u32 word loads at object+0xf00 and metadata+0xb00.
+      Ghidra's C agrees exactly. Recovered direct callers use bits 0 and 1
+      independently as service state flags, but the accessor itself returns
+      the full unmodified u32. The concrete layouts and ownership are not
+      recovered, so the port deliberately retains the raw dereferences with
+      no NULL or bounds checks.
   # --- retailOS UI object backend resolver (kind-1 self / kind-2 proxy) ---
   - address: 0x08051dc4
     ghidra: FUN_08051dc4
@@ -3956,6 +3976,26 @@ functions:
       csem_wait. match.py structural: ldr r0,[r0] then blx-in-place-of-
       bl, the mapping folded to cmp #1 + moveq #3 (0/else -> 0) — the
       original's two-compare structure rendered branchless.
+
+  # --- indexed UI mode-state flag ---
+  - address: 0x080b649c
+    ghidra: FUN_080b649c
+    name: indexed_mode_flag
+    size: 28
+    sig: "u32 indexed_mode_flag(i16 index)"
+    module: ui/mode_state
+    status: ported
+    renames:
+      param_1/r0: index
+      DAT_080b64b8: mode_state_object_table
+      uVar1/r0: mode_flag
+    notes: >-
+      Raw ARM uses smulbb with 99 then an indexed ldr shifted by two, so
+      the signed low halfword index selects an object-pointer table entry
+      at 0x08b2f648 + index * 0x18c. It reads that object's word +0x860
+      and returns only its low five bits. The table is modeled by the
+      MODE_STATE_OBJECT_TABLE target-global seam; no bounds or null checks
+      are present in the original or port.
 
   - address: 0x08037cd0
     ghidra: FUN_08037cd0
