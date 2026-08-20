@@ -7234,6 +7234,29 @@ functions:
       gate exists in the original or port. Host tests cover a null face,
       absent selected charmap, and callback receiver, character code, and
       return propagation.
+
+  # --- FreeType 2 module API ---
+  - address: 0x0804c560
+    ghidra: FUN_0804c560
+    name: ft_get_module_interface
+    size: 24
+    sig: "const void *ft_get_module_interface(FtLibrary *library, const char *module_name)"
+    module: ft/module
+    status: ported
+    vars:
+      param_1: library
+      param_2: module_name
+      piVar1: module
+      uVar2: module_interface
+    notes: >-
+      FreeType 2.3.0 FT_Get_Module_Interface (src/base/ftobjs.c).
+      FUN_0804c500 is the unported FT_Get_Module: it consumes r0/r1, and
+      0x0804c560 preserves both registers through its bl before returning
+      NULL on a null module or module->clazz->module_interface. The ARM
+      body is push; bl 0x0804c500; cmp; ldrne [module]; ldrne [clazz,#0x14];
+      pop. The target port calls the resident lookup at 0x0804c500; host
+      tests inject it and cover lookup failure plus argument forwarding and
+      the nested class-interface read.
   # --- FreeType 2 ftcalc fixed-point kernels ---
   - address: 0x0804d2cc
     ghidra: FUN_0804d2cc
@@ -22219,18 +22242,17 @@ functions:
       units/turn phase. It mirrors phase bit 0x400 into index 0..0x3ff,
       reads a u16 amplitude, and negates it for phase bit 0x800. This is
       fixed16_sin: the same routine as fixed16_cos @ 0x080e97ac without
-      that routine's +0x4000 (pi/2) phase offset. Port remains deferred:
-      every output directly depends on SIN_TABLE's exact 1024 u16 entries
-      at 0x083f10b2. Reinspection of the current osos.dec confirms all
-      2048 table bytes are zero, inside the undecrypted hole (also
-      recovery/patched), and no duplicate table exists. Do not synthesize
-      it: unknown entry rounding/clamping changes observable Q16.16
-      outputs. Revisit only after decrypt fills the table, then embed it
-      and retain an explicit f32_to_fixed16_sat seam for unported
-      0x080a67dc.
-      Ghidra size 40 is
-      truncated by the false no-return edge;
-      actual code is 0x080e988c-0x080e98ff plus literals 0x080e9900-0x080e990b.
+      that routine's +0x4000 (pi/2) phase offset. Deferred 2026-08-20:
+      direct raw-osOS disassembly confirms the complete 0x080e988c-0x080e98ff
+      body and its literal pool, but every output directly depends on
+      SIN_TABLE's exact 1024 u16 entries at 0x083f10b2. Reinspection of the
+      current osos.dec confirms all 2048 table bytes are zero, inside the
+      undecrypted hole (also recovery/patched), and no duplicate table exists.
+      Do not synthesize it: unknown entry rounding/clamping changes observable
+      Q16.16 outputs. Revisit only after decrypt fills the table, then embed it
+      and retain an explicit f32_to_fixed16_sat seam for unported 0x080a67dc.
+      Ghidra size 40 is truncated by the false no-return edge; actual code is
+      0x080e988c-0x080e98ff plus literals 0x080e9900-0x080e990b.
 
   - address: 0x082a182c
     ghidra: FUN_082a182c
@@ -35681,6 +35703,7 @@ functions:
       Focused host tests cover distinct base words, zero index, and both
       index-product and result-addition wraparound. Reference C:
       decomp/c/038/083e0298_FUN_083e0298.c; assembly: osos.asm 0x083e0298.
+
   # --- three consecutive word clear ---
   - address: 0x083e0aa4
     ghidra: FUN_083e0aa4
