@@ -3069,6 +3069,28 @@ functions:
       structural (lazy init + volatile ops-table loads inlined; tail
       branch through the slot).
 
+  - address: 0x0807b180
+    ghidra: FUN_0807b180
+    name: default_heap_free_bytes_get
+    size: 24
+    sig: "u32 default_heap_free_bytes_get(void)"
+    module: runtime/global_state
+    status: ported
+    renames:
+      DAT_0807b198: default_heap_global_literal
+      DAT_089ca638: default_heap_descriptor
+      r0: default_heap_free_bytes
+    notes: >-
+      Raw ARM is `bl 0x08077250; ldr r0,[pc,#8]; ldr r0,[r0]; ldr
+      r0,[r0]`: it first runs lazy_init_default_heap, then performs two
+      unchecked loads through the default-heap global at 0x089ca638.
+      The established HeapDescriptor layout names word zero free_bytes.
+      The port calls the existing guard and follows the existing
+      DEFAULT_HEAP seam with a raw u32 load; it has no null check,
+      cache, or ownership behavior. Recovered callers include the
+      photo-database metric code at 0x08068504 and the threshold check
+      at 0x080765ec.
+
   - address: 0x0807b280
     ghidra: FUN_0807b280
     name: global_indirect_word_get
