@@ -7273,6 +7273,31 @@ functions:
       pop. The target port calls the resident lookup at 0x0804c500; host
       tests inject it and cover lookup failure plus argument forwarding and
       the nested class-interface read.
+  - address: 0x0804c578
+    ghidra: FUN_0804c578
+    name: ft_get_next_char
+    size: 80
+    sig: "u32 ft_get_next_char(FtFace *face, u32 charcode, u32 *agindex)"
+    module: ft/charmap
+    status: ported
+    vars:
+      param_1: face
+      param_2: charcode
+      param_3: agindex
+      iVar1: glyph_index
+      iVar3: charmap
+      local_10: code
+      uVar2: result
+    notes: >-
+      FreeType 2.3.0 FT_Get_Next_Char (src/base/ftobjs.c). The ARM body
+      loads face->charmap at +0x5c, its private FT_CMapRec class at +0x0c,
+      and FT_CMap_ClassRec::char_next at +0x10, then invokes it with the
+      mutable 32-bit character code. It writes the callback's glyph index
+      to agindex when supplied and returns the resulting code only for a
+      nonzero glyph index. The upstream FT_Get_First_Char calls this API
+      after an unmapped character zero. Host tests cover both null gates,
+      callback receiver and input, mutated-code propagation, and zero-index
+      suppression.
   # --- FreeType 2 ftcalc fixed-point kernels ---
   - address: 0x0804d2cc
     ghidra: FUN_0804d2cc
