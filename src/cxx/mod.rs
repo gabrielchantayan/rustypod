@@ -42,6 +42,7 @@ pub mod three_word_clear_third;
 pub mod three_word_clear_fourth;
 pub mod three_word_clear_sixth;
 pub mod three_word_clear_seventh;
+pub mod three_word_clear_eighth;
 pub mod trivial_destructor;
 pub mod trivial_vector8_destruct;
 pub mod wheel_event;
