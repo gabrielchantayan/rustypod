@@ -35633,3 +35633,23 @@ functions:
       Focused host tests cover distinct base words, zero index, and both
       index-product and result-addition wraparound. Reference C:
       decomp/c/038/083e0298_FUN_083e0298.c; assembly: osos.asm 0x083e0298.
+  # --- three consecutive word clear ---
+  - address: 0x083e0aa4
+    ghidra: FUN_083e0aa4
+    name: three_word_clear
+    size: 20
+    sig: "void three_word_clear(u32 *target)"
+    module: cxx/three_word_clear
+    status: ported
+    renames:
+      param_1/r0: target
+      param_1_plus_0x00: target_word_0
+      param_1_plus_0x04: target_word_1
+      param_1_plus_0x08: target_word_2
+    notes: >-
+      Unconditionally stores zero to exactly the three consecutive u32 words
+      at target +0x00, +0x04, and +0x08. It has no NULL guard, no target
+      reads, and no other stores. No deviations. Focused host test uses
+      nonzero guard and target fixtures to prove only those three words
+      change. Reference C: decomp/c/038/083e0aa4_FUN_083e0aa4.c; assembly:
+      osos.asm 0x083e0aa4. match.py: structural match reviewed.
