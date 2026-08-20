@@ -26953,6 +26953,30 @@ functions:
       instruction-for-instruction; the diff is only the crate-standard
       fp prologue.
 
+  - address: 0x0828312c
+    ghidra: FUN_0828312c
+    name: parse_result_code
+    size: 8
+    sig: "u8 parse_result_code(const u8 *record)"
+    module: cxx/parse_result_code
+    status: ported
+    vars:
+      param_1: record
+    notes: >-
+      The code() accessor of the four-byte C++ parser-result value type:
+      `ldrb r0,[r0,#1]; bx lr`, so it returns the unsigned byte at +0x01
+      and neither writes memory nor null-checks its argument. The sibling
+      constructor FUN_08283168 establishes the record layout as {status
+      u8 @ +0x00, code u8 @ +0x01, detail u16 @ +0x02}; the adjacent
+      readers are status() FUN_08283120 and detail() FUN_08283124. Its sole
+      recovered direct caller, FUN_080fb68c @ 0x080fb68c, passes the
+      embedded record at param_2 + 0x5c and emits the returned byte into
+      output byte +0x02, confirming it is serialized as the result code.
+      Eight-byte extent is exact from functions.csv (0x0828312c..0x08283133);
+      no literal pool. Host tests cover every u8 return value, guard bytes
+      around the record, and aliasing/nonmutation. match.py structural
+      review compares the ldrb/bx-lr leaf against the target.
+
   - address: 0x08283134
     ghidra: FUN_08283134
     name: parse_result_init_alias_3134

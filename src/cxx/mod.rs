@@ -22,6 +22,7 @@ pub mod null_pointer_status;
 pub mod mode;
 pub mod object_flags;
 mod object_state;
+pub mod parse_result_code;
 pub mod pair_header;
 pub mod release;
 pub mod return_forwarder;
