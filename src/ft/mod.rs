@@ -10,7 +10,6 @@ pub mod error;
 pub mod glyph_slot;
 pub mod memory;
 pub mod metrics;
-pub mod metadata;
 pub mod outline;
 pub mod service;
 pub mod service_metadata;
