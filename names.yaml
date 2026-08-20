@@ -21982,6 +21982,30 @@ functions:
       `byte == 0` to clz/lsr instead of rsbs/movcc - same load-and-test
       structure.
 
+  - address: 0x0829d3a0
+    ghidra: FUN_0829d3a0
+    name: flag_bit_2_at_4
+    size: 16
+    sig: "u32 flag_bit_2_at_4(const void *object)"
+    module: ui/flag_bit_2_at_4
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0x4": flags
+    notes: >-
+      Two direct call sites (0x0826b7e4 and 0x0826b878) obtain a UI object
+      from a collection-navigation callback and branch on this pure leaf
+      before inspecting its follow-up display data. ABI: r0 is a readable
+      object pointer and the normalized u32 result returns in r0. Exact
+      16-byte sequence: `ldrb r0,[r0,#4]; and r0,r0,#4; lsr r0,r0,#2; bx lr`.
+      Thus bit 2 of byte +0x4 is returned as precisely 0 or 1, not as the
+      mask 0 or 4. The object family and flag meaning are still unidentified,
+      so the descriptive field-and-bit name is deliberate. Reference C:
+      decomp/c/028/0829d3a0_FUN_0829d3a0.c; assembly: osos.asm
+      0x0829d3a0. Focused host tests exhaust all flag-byte values, vary every
+      unrelated object byte, and prove const-pointer aliases leave the object
+      byte-identical.
+
   - address: 0x0811f704
     ghidra: FUN_0811f704
     name: width_0c_minus_inset
@@ -35445,3 +35469,27 @@ functions:
       0x08161258 (`cmp r1,#0; cmpne #1; cmpne #2; moveq/movne; bx lr`).
       Focused host tests cover categories 0, 1, 2, 3, and u32::MAX and prove
       that arbitrary first-argument values do not affect the result.
+
+  # --- opaque object +0x04 word accessor ---
+  - address: 0x080fe4c4
+    ghidra: FUN_080fe4c4
+    name: object_word_at_4
+    size: 8
+    sig: "u32 object_word_at_4(const u32 *object)"
+    module: runtime/object_word
+    status: ported
+    renames:
+      param_1/r0: object
+      param_1_plus_0x04: word_at_0x04
+      r0: word_at_0x04
+    notes: >-
+      Eight-byte leaf: `ldr r0,[r0,#4]; bx lr`. It returns the complete
+      untyped word at byte offset +0x04 from an opaque, word-aligned object,
+      with no null check or mutation. All seven direct callers first obtain
+      the object pointer from FUN_083d602c and preserve it in r0 for this
+      load: 0x0812f9c0, 0x081425cc, 0x081b5860, 0x081b5d2c, 0x081f8a70,
+      0x081f8b50, and 0x081f8f9c. Their consumers use the result as an
+      opaque pointer/value, so neither the object type nor this field's
+      semantic meaning is recoverable. No deviations. Host tests cover
+      arbitrary words, zero/all-ones extremes, pointer aliasing, and the
+      absence of mutation.
