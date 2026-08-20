@@ -543,6 +543,27 @@ functions:
       The concrete layouts and ownership are not recovered, so the port
       deliberately retains raw dereferences with no NULL or bounds checks.
 
+  # --- opaque FreeType service-context metadata byte accessor ---
+  - address: 0x080512b8
+    ghidra: FUN_080512b8
+    name: ft_service_metadata_byte_at_b89
+    size: 12
+    sig: "u32 ft_service_metadata_byte_at_b89(const void *service_context)"
+    module: ft/service/metadata
+    status: ported
+    vars:
+      param_1: service_context
+      r0_after_ldr: metadata
+    notes: >-
+      Raw ARM is `ldr r0,[r0,#0xf00]; ldrb r0,[r0,#0xb89]; bx lr`, hence an
+      aligned metadata pointer word at service_context+0xf00 and an unsigned,
+      zero-extended byte at metadata+0xb89. Ghidra's C agrees exactly. Its
+      recovered direct caller reads this byte from its +0xa8 service-context
+      field, compares it against a cached byte at +0x8d, and re-reads it to
+      update that cache before notifying its vtable callback. The concrete
+      layouts and ownership are not recovered, so the port deliberately
+      retains raw dereferences with no NULL or bounds checks.
+
   # --- retailOS UI object backend resolver (kind-1 self / kind-2 proxy) ---
   - address: 0x08051dc4
     ghidra: FUN_08051dc4
@@ -35131,3 +35152,31 @@ functions:
       destination/source/count forwarding and old-cursor observation during
       the call, post-call cursor advancement, and the default runtime copy's
       exact written span.
+
+  # --- Opaque singleton state-word accessor (app/singleton_state) ---
+  - address: 0x08086df0
+    ghidra: FUN_08086df0
+    name: singleton_state_get
+    size: 16
+    sig: "u32 singleton_state_get(void)"
+    module: app/singleton_state
+    status: ported
+    vars:
+      FUN_08127954: singleton_object_get
+      iVar1/r0: singleton_object
+      singleton_object_plus_0x18/r0: singleton_state_word
+    notes: >-
+      Raw ARM is `push {r4,lr}; bl 0x08127954; ldr r0,[r0,#0x18];
+      pop {r4,pc}`: it calls the 12-byte singleton-object accessor before
+      loading the object's untyped +0x18 word, with no null check. That
+      accessor simply returns the +0x04 word of its globals block, so it is
+      the existing unported singleton seam rather than a constructor or a
+      new lazy path. The two direct callers (0x08140464 and 0x081404b4)
+      use the returned word as an object pointer, invoking its vtable +0x84
+      after staging their three-word operation records. The state object's
+      concrete class is otherwise unknown, so the port uses the conservative
+      singleton_state_get name and preserves a raw u32 result. Host tests
+      prove the accessor call occurs before the +0x18 load (the mock changes
+      that word during its call) and that the returned value is the complete
+      raw word. The unported 0x08127954 accessor is a target-ROM/host-mock
+      seam.
