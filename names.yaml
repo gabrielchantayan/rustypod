@@ -35589,3 +35589,26 @@ functions:
       cover 0, 1, 2, and 0xff; neighboring-byte guards; aliased access; and
       no mutation. Reference C: decomp/c/012/0813af44_FUN_0813af44.c;
       assembly: osos.asm 0x0813af44.
+
+  # --- opaque object +0x05 byte accessor ---
+  - address: 0x0813b0a4
+    ghidra: FUN_0813b0a4
+    name: object_byte_at_5
+    size: 8
+    sig: "u8 object_byte_at_5(const u8 *object)"
+    module: app/object_byte_at_5
+    status: ported
+    renames:
+      param_1/r0: object
+      param_1_plus_0x05: byte_at_0x05
+      r0: byte_at_0x05
+    notes: >-
+      Eight-byte leaf: `ldrb r0,[r0,#5]; bx lr`. It returns the raw unsigned
+      byte at +0x05 of an otherwise opaque application object, with no null
+      check or mutation. The recovered direct callers FUN_081c08b8 @
+      0x081c08b8 and FUN_081ee314 @ 0x081ee314 respectively distinguish zero
+      from nonzero and compare this value to one; neither use establishes a
+      concrete object type or a domain meaning for the field. No deviations.
+      Host tests cover the full 0..=255 byte range, neighboring-byte guards,
+      pointer aliasing, and absence of mutation. Reference C:
+      decomp/c/012/0813b0a4_FUN_0813b0a4.c; assembly: osos.asm 0x0813b0a4.
