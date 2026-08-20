@@ -1,8 +1,7 @@
 //! FreeType module lookup interfaces.
 //!
-//! `FT_Get_Module_Interface` is deliberately separate from the module-table
-//! search at 0x0804c500. The retail function calls that still-unported lookup
-//! and then reads the returned module's class interface pointer.
+//! The module-table search at 0x0804c500 underlies
+//! `FT_Get_Module_Interface` at 0x0804c560.
 
 use core::ffi::c_void;
 
@@ -29,57 +28,103 @@ pub struct FtModule {
     pub clazz: *const FtModuleClass,
 }
 
-type FtGetModule = unsafe extern "C" fn(*mut FtLibrary, *const u8) -> *mut FtModule;
-
-/// Uses the original `FT_Get_Module` while only this interface wrapper is
-/// hooked. Its address is a load address in the resident retailOS image, not
-/// a Rust port or a second implementation of 0x0804c500.
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn ft_get_module(library: *mut FtLibrary, module_name: *const u8) -> *mut FtModule {
-    let module: *mut FtModule;
-    core::arch::asm!(
-        "ldr r12, =0x0804c500",
-        "blx r12",
-        inlateout("r0") library => module,
-        in("r1") module_name,
-        clobber_abi("C"),
-    );
-    module
+/// `FT_LibraryRec` fields used by `FT_Get_Module`.
+///
+/// The retail ARM record has `num_modules` at +0x18 and its 32-entry module
+/// table at +0x1c. `FtLibrary` intentionally exposes only its shared prefix,
+/// so this private view preserves the remainder needed by this one API.
+#[repr(C)]
+struct FtLibraryModuleTable {
+    _memory: *mut c_void,
+    _generic_data: *mut c_void,
+    _generic_finalizer: *const c_void,
+    _version_major: i32,
+    _version_minor: i32,
+    _version_patch: i32,
+    num_modules: u32,
+    modules: [*mut FtModule; 32],
 }
 
-/// Host builds have no resident retailOS lookup routine. Tests install a
-/// lookup seam, while an unconfigured host call has the same null result as a
-/// failed stock lookup.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn ft_get_module_unavailable(
-    _library: *mut FtLibrary,
-    _module_name: *const u8,
+/// FreeType 2.3 `FT_Get_Module` (`src/base/ftobjs.c`) — retailOS
+/// `FUN_0804c500` at load address 0x0804c500, 96 bytes.
+///
+/// Returns null for a null library or module name. Otherwise it traverses
+/// exactly `library->num_modules` entries from `library->modules`, comparing
+/// each `module->clazz->module_name` NUL-terminated byte string to
+/// `module_name`, and returns the first equal module. This is the direct
+/// port of `/home/gabe/Programming/ipod-decomp/decomp/c/003/0804c500_FUN_0804c500.c`;
+/// the ARM calls the resident `strcmp` at 0x08391e38 for each comparison.
+///
+/// # Safety
+/// `library` must point to a valid retail `FT_LibraryRec` with at least
+/// `num_modules` initialized table entries. Each examined module, its class,
+/// and both name strings must be valid; the names must be NUL-terminated.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_get_module(
+    library: *mut FtLibrary,
+    module_name: *const u8,
 ) -> *mut FtModule {
+    if library.is_null() || module_name.is_null() {
+        return core::ptr::null_mut();
+    }
+
+    let library_record = &*library.cast::<FtLibraryModuleTable>();
+
+    #[cfg(target_os = "none")]
+    {
+        let mut current = library_record.modules.as_ptr();
+        let limit = current.add(library_record.num_modules as usize);
+
+        while current < limit {
+            let module = core::ptr::read_volatile(current);
+            let mut comparison = (*(*module).clazz).module_name as usize;
+            core::arch::asm!(
+                "ldr r12, =0x08391e38",
+                "blx r12",
+                inlateout("r0") comparison,
+                in("r1") module_name,
+                clobber_abi("C"),
+            );
+            if comparison == 0 {
+                return module;
+            }
+            current = current.add(1);
+        }
+    }
+
+    #[cfg(not(target_os = "none"))]
+    for index in 0..library_record.num_modules as usize {
+        let module = core::ptr::read_volatile(library_record.modules.as_ptr().add(index));
+        let mut candidate = (*(*module).clazz).module_name;
+        let mut requested = module_name;
+
+        loop {
+            let candidate_byte = core::ptr::read_volatile(candidate);
+            let requested_byte = core::ptr::read_volatile(requested);
+            if candidate_byte != requested_byte {
+                break;
+            }
+            if candidate_byte == 0 {
+                return module;
+            }
+            candidate = candidate.add(1);
+            requested = requested.add(1);
+        }
+    }
+
     core::ptr::null_mut()
-}
-
-#[cfg(not(target_os = "none"))]
-static mut FT_GET_MODULE: FtGetModule = ft_get_module_unavailable;
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn ft_get_module(library: *mut FtLibrary, module_name: *const u8) -> *mut FtModule {
-    core::ptr::read_volatile(core::ptr::addr_of!(FT_GET_MODULE))(library, module_name)
 }
 
 /// FreeType 2.3 `FT_Get_Module_Interface` (ftobjs.c) — original:
 /// `FUN_0804c560` @ 0x0804c560 (24 bytes).
 ///
-/// Delegates the library/module-name lookup to the resident `FT_Get_Module`
-/// at 0x0804c500. A failed lookup returns NULL; otherwise this performs the
-/// same nested `module->clazz->module_interface` read as the ARM `ldrne` pair
-/// (+0x00 then +0x14). No deviations.
+/// Delegates to [`ft_get_module`]. A failed lookup returns NULL; otherwise
+/// this performs the same nested `module->clazz->module_interface` read as
+/// the ARM `ldrne` pair (+0x00 then +0x14). No deviations.
 ///
 /// # Safety
-/// `library` and `module_name` are passed unchanged to `FT_Get_Module`. If
-/// that lookup returns non-NULL, it must designate a valid `FtModule` whose
-/// class pointer designates a valid `FtModuleClass`, as the original requires.
+/// `library` and `module_name` must meet [`ft_get_module`]'s requirements.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ft_get_module_interface(
@@ -98,70 +143,88 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use core::ptr::{addr_of, addr_of_mut, null, null_mut};
+    use core::ptr::{null, null_mut};
 
-    static mut LOOKUP_LIBRARY: *mut FtLibrary = null_mut();
-    static mut LOOKUP_NAME: *const u8 = null();
-    static mut MODULE: FtModule = FtModule { clazz: null() };
-    static mut CLASS: FtModuleClass = FtModuleClass {
-        module_flags: 0,
-        module_size: 0,
-        module_name: null(),
-        module_version: 0,
-        module_requires: 0,
-        module_interface: null(),
-    };
-
-    unsafe extern "C" fn lookup_returns_null(
-        library: *mut FtLibrary,
-        module_name: *const u8,
-    ) -> *mut FtModule {
-        LOOKUP_LIBRARY = library;
-        LOOKUP_NAME = module_name;
-        null_mut()
+    fn library_with_modules(
+        count: u32,
+        modules: [*mut FtModule; 32],
+    ) -> FtLibraryModuleTable {
+        FtLibraryModuleTable {
+            _memory: null_mut(),
+            _generic_data: null_mut(),
+            _generic_finalizer: null(),
+            _version_major: 0,
+            _version_minor: 0,
+            _version_patch: 0,
+            num_modules: count,
+            modules,
+        }
     }
 
-    unsafe extern "C" fn lookup_returns_module(
-        library: *mut FtLibrary,
-        module_name: *const u8,
-    ) -> *mut FtModule {
-        LOOKUP_LIBRARY = library;
-        LOOKUP_NAME = module_name;
-        addr_of_mut!(MODULE)
-    }
-
-    unsafe fn install_lookup(lookup: FtGetModule) -> FtGetModule {
-        let prior = core::ptr::read_volatile(addr_of!(FT_GET_MODULE));
-        core::ptr::write_volatile(addr_of_mut!(FT_GET_MODULE), lookup);
-        prior
+    fn module_with_name(name: *const u8) -> (FtModuleClass, FtModule) {
+        (
+            FtModuleClass {
+                module_flags: 0,
+                module_size: 0,
+                module_name: name,
+                module_version: 0,
+                module_requires: 0,
+                module_interface: null(),
+            },
+            FtModule { clazz: null() },
+        )
     }
 
     #[test]
-    fn module_interface_returns_null_when_module_lookup_fails() {
+    fn module_lookup_rejects_null_arguments() {
         unsafe {
-            let prior = install_lookup(lookup_returns_null);
-            let mut library = FtLibrary { memory: null_mut() };
-            let name = b"missing\0";
-            assert!(ft_get_module_interface(&mut library, name.as_ptr()).is_null());
-            assert_eq!(LOOKUP_LIBRARY, &mut library as *mut FtLibrary);
-            assert_eq!(LOOKUP_NAME, name.as_ptr());
-            install_lookup(prior);
+            assert!(ft_get_module(null_mut(), b"truetype\0".as_ptr()).is_null());
+            assert!(ft_get_module(1usize as *mut FtLibrary, null()).is_null());
         }
     }
 
     #[test]
-    fn module_interface_reads_the_returned_modules_class_interface() {
+    fn module_lookup_returns_the_first_exact_name_match() {
         unsafe {
-            let prior = install_lookup(lookup_returns_module);
+            let (class_type1, mut module_type1) = module_with_name(b"type1\0".as_ptr());
+            let (class_truetype, mut module_truetype) =
+                module_with_name(b"truetype\0".as_ptr());
+            module_type1.clazz = &class_type1;
+            module_truetype.clazz = &class_truetype;
+
+            let mut modules = [null_mut(); 32];
+            modules[0] = &mut module_type1;
+            modules[1] = &mut module_truetype;
+            let mut library = library_with_modules(2, modules);
+            let library_ptr = (&mut library as *mut FtLibraryModuleTable).cast::<FtLibrary>();
+
+            assert!(
+                core::ptr::eq(
+                    ft_get_module(library_ptr, b"truetype\0".as_ptr()),
+                    &mut module_truetype
+                )
+            );
+            assert!(ft_get_module(library_ptr, b"true\0".as_ptr()).is_null());
+        }
+    }
+
+    #[test]
+    fn module_interface_uses_the_ported_module_lookup() {
+        unsafe {
+            let (mut class, mut module) = module_with_name(b"truetype\0".as_ptr());
             let interface = 0x1234usize as *const c_void;
-            CLASS.module_interface = interface;
-            MODULE.clazz = addr_of!(CLASS);
-            let mut library = FtLibrary { memory: null_mut() };
-            let name = b"truetype\0";
-            assert_eq!(ft_get_module_interface(&mut library, name.as_ptr()), interface);
-            assert_eq!(LOOKUP_LIBRARY, &mut library as *mut FtLibrary);
-            assert_eq!(LOOKUP_NAME, name.as_ptr());
-            install_lookup(prior);
+            class.module_interface = interface;
+            module.clazz = &class;
+
+            let mut modules = [null_mut(); 32];
+            modules[0] = &mut module;
+            let mut library = library_with_modules(1, modules);
+            let library_ptr = (&mut library as *mut FtLibraryModuleTable).cast::<FtLibrary>();
+
+            assert_eq!(
+                ft_get_module_interface(library_ptr, b"truetype\0".as_ptr()),
+                interface
+            );
         }
     }
 }
