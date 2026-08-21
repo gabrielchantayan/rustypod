@@ -33679,6 +33679,45 @@ functions:
       16-byte destination range, and model in-place ordering; match.py
       structural diff reviewed after the ARM release build.
 
+  # --- proprietary AES-like cipher: name gate ---
+  - address: 0x0802ddcc
+    ghidra: FUN_0802ddcc
+    name: cipher_name_is_standard
+    size: 72
+    sig: "u64 cipher_name_is_standard(const u8 *name)"
+    module: crypto/cipher_name
+    status: ported
+    renames:
+      param_1/r0: name
+      iVar1: name_length
+      uVar2: status
+      local_18/acStack_14/uStack_10: standard_string
+      s_STANDARD_0802e0c4: STANDARD_STRING
+      ram0x0802e0cc: STANDARD_STRING_pad_word
+      FUN_08392478: strlen_unguarded
+      FUN_08030f64: memcmp
+    notes: >-
+      72-byte validator (0x0802ddcc..0x0802de14, two bl call sites:
+      0x0802de28, 0x0802e928) gating the proprietary AES-like cipher
+      cluster (SubBytes 0x0802e118, ShiftRows-family 0x0802e190+,
+      xor_transposed_4x4 0x0802e54c). Copies the 12 bytes at s_STANDARD
+      @ 0x0802e0c4 ("STANDARD\0" + zero word @ 0x0802e0cc) onto its stack
+      frame (ldmia/stmia of three words), takes unguarded strlen of name,
+      fails unless exactly 8, then memcmps 8 bytes against the stack copy.
+      Returns CONCAT44(local_18, status): low word r0 is 0 on success / 1
+      on failure; high word r1 is always "STAN" (0x4E414154 LE) because
+      the stmia overwrites the saved-r1 slot its pop epilogue reloads —
+      both callers test only r0. Deviations: strlen callee is a private
+      read_volatile byte loop with identical semantics instead of a call
+      into crate::libc::strlen (that module concurrently in flight by
+      another porter); memcmp goes through an inline(never) seam so the
+      ARM build keeps the original's call boundary; the packed return is
+      an explicit u64 rather than save-slot aliasing. Host tests cover
+      exact/wrong/short/long names, post-NUL bytes ignored, the
+      unterminated-8-byte-buffer edge (accepted only when the following
+      byte is NUL), return packing, and a reference-model sweep;
+      match.py structural diff reviewed after the ARM release build.
+
   # --- unsigned zero predicate ---
   - address: 0x08027afc
     ghidra: FUN_08027afc

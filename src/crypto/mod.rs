@@ -13,5 +13,10 @@
 //! arc shows up as `"1.3.6.1.4.1.63.42"` / `"iPod Serial Number"`
 //! @ 0x080782bc.
 //!
+//! The proprietary AES-like cipher cluster hangs off here too:
+//! [`cipher_name`] ports its name gate, which accepts only the
+//! `"STANDARD"` cipher (`s_STANDARD` @ 0x0802e0c4).
+//!
 //! [`obj_dat`] ports the NID lookup.
+pub mod cipher_name;
 pub mod obj_dat;
