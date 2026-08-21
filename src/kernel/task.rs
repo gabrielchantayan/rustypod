@@ -146,6 +146,12 @@
 //!   `ticks == 0` tail-branches to thunk 0x08037e90 -> ROM 0x220043f4
 //!   (gateway service 28 sub 13, no arguments, exact RTXC op
 //!   unidentified). Both ROM results pass through the tail branch.
+//! - `task_sleep_thunk` — `thunk_FUN_080568e8` @ 0x080e9eb0 (4 bytes:
+//!   `b 0x080568e8`). Pure dispatch alias of `task_sleep` — the veneer
+//!   the polling loops call instead of the sleep itself. 53 branch sites
+//!   verified from raw bytes: 47 plain `bl`, one predicated `blne`
+//!   (@ 0x08093a84), five tail `b`s. Forwards ticks and the ROM result
+//!   unchanged.
 //!
 //! # Simplifications / deviations
 //!
@@ -973,7 +979,10 @@ pub unsafe extern "C" fn kernel_yield() -> i32 {
 /// do; call sites ignore it. The ROM services route through the
 /// `rom_timed_delay` / `rom_reschedule` hook slots (rom_yield
 /// precedent); the ported task_lock wrappers implement them on target.
+/// `#[inline(never)]` keeps it a real `bl` target — 8 stock call sites
+/// route here, and the 0x080e9eb0 veneer below tail-branches onto it.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn task_sleep(ticks: u32) -> usize {
     let h = hooks();
     if ticks == 0 {
@@ -981,6 +990,29 @@ pub unsafe extern "C" fn task_sleep(ticks: u32) -> usize {
     } else {
         (h.rom_timed_delay)(0, ticks as usize)
     }
+}
+
+/// task_sleep_thunk — original: `thunk_FUN_080568e8` @ 0x080e9eb0
+/// (4 bytes: `eafdb28c` = `b 0x080568e8`; the next word, `push
+/// {r4-r6, lr}` @ 0x080e9eb4, starts the following function).
+///
+/// The linker veneer polling loops call instead of `task_sleep` itself.
+/// Call traffic verified by decoding every B/BL word in osos.dec: 53
+/// branch sites reach it — 47 plain `bl`, one predicated `blne`
+/// (@ 0x08093a84: `tst r4, #0x400` gates a 790-tick sleep, so callers do
+/// their own flag checks and there is no NULL guard to inherit), and
+/// five tail `b`s (the sibling veneers @ 0x0805f4a0 / 0x080a6b40, two
+/// `mov r0, #20; b …` sleep(20) epilogues @ 0x081f5c28 / 0x081f5fe0, and
+/// another lone alias @ 0x082c6f90). One DATA word holds its address
+/// (@ 0x08a19800, amid adjacent code pointers), so it is reachable
+/// indirectly too — hence a real exported symbol, not an inlined shim.
+///
+/// The port is a pure forwarding tail call onto the ported `task_sleep`:
+/// r0 passes through unchanged, exactly like the original's bare branch.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn task_sleep_thunk(ticks: u32) -> usize {
+    task_sleep(ticks)
 }
 
 /// task_notify — original: `FUN_08060f80` @ 0x08060f80 (72 bytes).
@@ -1556,6 +1588,44 @@ mod tests {
         unsafe {
             assert_eq!((DEFAULT_TASK_HOOKS.rom_timed_delay)(0, 50), 0);
             assert_eq!((DEFAULT_TASK_HOOKS.rom_reschedule)(), 0);
+        }
+    }
+
+    // ---- task_sleep_thunk (0x080e9eb0) --------------------------------
+
+    /// The veneer forwards both arms of the callee's `cmp r0, #0` split
+    /// and passes the ROM result through unchanged (the r0-passthrough
+    /// semantics of the original's bare `b`).
+    #[test]
+    fn sleep_thunk_forwards_both_service_branches_and_the_result() {
+        let _guard = mock_hooks();
+        unsafe {
+            // Nonzero ticks: timed delay with (current task = 0, ticks).
+            assert_eq!(task_sleep_thunk(10), 0xd31a);
+            assert_eq!(drain(), vec![Call::RomTimedDelay { task: 0, ticks: 10 }]);
+            // Zero ticks: reschedule service; the timed delay is NOT invoked.
+            assert_eq!(task_sleep_thunk(0), 0x28d);
+            assert_eq!(drain(), vec![Call::RomReschedule]);
+            // 790 ticks — the count the predicated blne site @ 0x08093a84
+            // loads into r0 when its 0x400 flag bit is set.
+            assert_eq!(task_sleep_thunk(0x2ee), 0xd31a);
+            assert_eq!(drain(), vec![Call::RomTimedDelay { task: 0, ticks: 0x2ee }]);
+        }
+    }
+
+    /// Alias parity across every tick count observed at the verified
+    /// call sites (1, 10, 0x32, 100) plus the blne site's 790 and the
+    /// extremes: the thunk returns exactly what task_sleep returns.
+    #[test]
+    fn sleep_thunk_matches_task_sleep_on_observed_tick_counts() {
+        let _guard = mock_hooks();
+        unsafe {
+            for ticks in [1u32, 10, 0x32, 100, 790, u32::MAX] {
+                let via_callee = task_sleep(ticks);
+                drain();
+                assert_eq!(task_sleep_thunk(ticks), via_callee, "ticks={ticks}");
+                drain();
+            }
         }
     }
 
