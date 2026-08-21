@@ -1,14 +1,16 @@
 //! 16.16 fixed-point and widening integer multiply @ 0x080e9878 / 0x080f0fa4,
 //! the software count-leading-zeros @ 0x0824980c that feeds them, the
 //! 64-bit round-and-extract @ 0x08076214 that closes dot products, the
-//! guarded reciprocal @ 0x08076204 that divides by a Q16.16 value, and the
-//! unguarded reciprocal body @ 0x080377e4 that it tail-branches to.
+//! guarded reciprocal @ 0x08076204 that divides by a Q16.16 value, the
+//! unguarded reciprocal body @ 0x080377e4 that it tail-branches to, and the
+//! float entry point @ 0x082577bc that feeds Q16.16 values in from f32
+//! literals.
 //!
 //! Three pure leaf helpers built on the ARMv5TE `smull` (signed 32x32 -> 64)
 //! instruction, one bit-scan leaf, one 64-bit rounding leaf, one guard
-//! wrapper, and one unrolled-division body. Sizes from decomp/functions.csv;
-//! call-site counts from decoding every `b`/`bl` word in osos.dec (osos.asm
-//! drops lines):
+//! wrapper, one unrolled-division body, and one float-conversion leaf.
+//! Sizes from decomp/functions.csv; call-site counts from decoding every
+//! `b`/`bl` word in osos.dec (osos.asm drops lines):
 //!
 //! - `fixed16_mul` — `FUN_080e9878` @ 0x080e9878 (20 bytes; 94 call sites).
 //! - `mul_wide_i64` — `FUN_080f0fa4` @ 0x080f0fa4 (12 bytes; 49 call sites).
@@ -18,6 +20,8 @@
 //! - `fixed16_recip_unguarded` — `FUN_080377e4` @ 0x080377e4 (48 bytes
 //!   listed; true extent 452 bytes, 0x080377e4..0x080379a8 — the listing
 //!   ends at the computed jump; 11 sites).
+//! - `f32_to_fixed16_trunc` — `FUN_082577bc` @ 0x082577bc (88 bytes; 43
+//!   sites).
 //!
 //! All but the two reciprocals are leaves and touch no hardware, so host
 //! tests against `i64` / `u32::leading_zeros` arithmetic prove complete
@@ -254,6 +258,72 @@ fn dispatch_fixed16_recip_unguarded(x: i32) -> i32 {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub extern "C" fn fixed16_recip(x: i32) -> i32 {
     if x == 0 { 0x7fff_ffff } else { dispatch_fixed16_recip_unguarded(x) }
+}
+
+/// f32_to_fixed16_trunc — original: `FUN_082577bc` @ 0x082577bc (88 bytes;
+/// true extent 0x082577bc..0x08257814 confirmed from the raw osos.dec words
+/// — the next symbol at 0x08257814 is a separate 4-byte empty destructor,
+/// and there is no literal pool in between).
+///
+/// IEEE-754 binary32 -> Q16.16 fixed point, truncating toward zero, with NO
+/// saturation: results that do not fit in 32 bits wrap modulo 2^32. The
+/// float arrives as its raw bit pattern in the second word; the result is
+/// stored through the first argument, which also passes through untouched in
+/// r0 — callers rely on that and use the "return value" as the out pointer
+/// (`piVar4 = FUN_082577bc(&local_3c, 0x3f000000); *piVar4 ...`), so the
+/// port returns it explicitly.
+///
+/// Algorithm (all arithmetic on the raw bits, no soft-float calls):
+/// exponent = `(bits << 1) >> 24` (the biased exponent field, bits 30..23);
+/// mantissa = `(bits & 0x00ffffff) | 0x00800000` (24-bit significand with
+/// the implicit leading one forced on); then
+/// - exponent < 134 (= 127 + 16): result = mantissa >> (134 - exponent),
+///   arithmetic shift, with a shift of 32 or more yielding 0;
+/// - exponent >= 134: result = mantissa << (exponent - 134), with a shift
+///   of 32 or more yielding 0;
+/// and finally the result is negated when the sign bit is set. Since
+/// mantissa carries 23 fraction bits, this computes exactly
+/// `trunc(bits_as_f32 * 2^16)` for every finite input whose scaled value
+/// fits; denormals (exponent 0) force the implicit bit on but shift right
+/// by 134, so they still land on 0; infinities and NaNs (exponent 255)
+/// shift left by 121, which zeroes them.
+///
+/// Deliberate deviations: the original stores the mantissa to `*out` before
+/// scaling and reloads it through the pointer for the sign negation; nothing
+/// can observe that intermediate store between the two stores, so the port
+/// keeps the value in registers and writes once. The ARM register-shifts
+/// truncate their amount to the low byte (amounts >= 32 give 0); the port
+/// makes both `>= 32` branches explicit instead.
+///
+/// 43 call sites, all plain unconditional `bl`, none predicated — there is
+/// no NULL guard and callers never gate the call (binary-scanned):
+/// 0x081528c8 / 0x08152d84 (audio gain literals 0.995 / 1.33), thirty-six
+/// sites across the Q16.16 rasterizer run at 0x08273a64..0x0827419c (line
+/// walkers that step pixel coordinates by `>> 16`, e.g. FUN_08274004
+/// converting the literal 0.5), and five in the font-metric code at
+/// 0x082ac214..0x082ac41c (converting the points-per-inch literal 72.5).
+///
+/// This is the non-clamping sibling of `f32_to_fixed16_sat` @ 0x080a67dc
+/// (`fp/fp_fixed16`): that one saturates to the i32 range via __fscalb/
+/// __f2i for the cos/sin tables; this one wraps, and overflows are real
+/// outputs — e.g. 40000.0 converts to 0x9c400000 (negative), and +inf
+/// converts to 0 rather than i32::MAX.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.f32_to_fixed16_trunc")]
+pub extern "C" fn f32_to_fixed16_trunc(out: *mut i32, bits: u32) -> *mut i32 {
+    let exponent = (bits << 1) >> 24;
+    let mantissa = (bits & 0x00ff_ffff) | 0x0080_0000;
+    let scaled = if exponent < 134 {
+        let right = 134 - exponent;
+        if right < 32 { (mantissa as i32) >> right } else { 0 }
+    } else {
+        let left = exponent - 134;
+        if left < 32 { (mantissa << left) as i32 } else { 0 }
+    };
+    let value = if bits & 0x8000_0000 != 0 { scaled.wrapping_neg() } else { scaled };
+    unsafe { core::ptr::write(out, value) };
+    out
 }
 
 #[cfg(test)]
@@ -628,6 +698,178 @@ mod tests {
     extern crate std;
     use std::sync::Mutex;
     use std::vec::Vec;
+
+    /// Converts through a stack slot and returns the value.
+    fn conv(bits: u32) -> i32 {
+        let mut slot: i32 = 0x1234_5678;
+        let out = f32_to_fixed16_trunc(&mut slot, bits);
+        assert_eq!(out, &mut slot as *mut i32, "r0 passes through: the out pointer is returned");
+        slot
+    }
+
+    /// Independent model of the original's bit arithmetic, written from the
+    /// objdump listing rather than from the port (shifts >= 32 give 0, the
+    /// sign negation wraps).
+    fn reference(bits: u32) -> i32 {
+        let exponent = ((bits << 1) >> 24) as usize;
+        let mantissa = (bits & 0x00ff_ffff) | 0x0080_0000;
+        let scaled: u32 = if exponent < 134 {
+            let right = 134 - exponent;
+            if right >= 32 { 0 } else { mantissa >> right }
+        } else {
+            let left = exponent - 134;
+            if left >= 32 { 0 } else { mantissa << left }
+        };
+        if bits & 0x8000_0000 != 0 { (scaled as i32).wrapping_neg() } else { scaled as i32 }
+    }
+
+    /// Known values pinned by hand and by callers' literal pools. The
+    /// boundary exponent 134 (= 127 + 16) passes a float through scaled by
+    /// exactly its implicit bit: 128.0 -> 0x0080_0000.
+    #[test]
+    fn f32_to_fixed16_trunc_known_values() {
+        assert_eq!(conv(0x3f80_0000), 0x0001_0000); // 1.0
+        assert_eq!(conv(0xbf80_0000), -0x0001_0000); // -1.0
+        assert_eq!(conv(0x3f00_0000), 0x0000_8000); // 0.5 — FUN_08274004's literal
+        assert_eq!(conv(0x4020_0000), 0x0002_8000); // 2.5
+        assert_eq!(conv(0x4300_0000), 0x0080_0000); // 128.0, the exp==134 identity
+        // The audio-gain literals from the 0x08152xxx call sites.
+        assert_eq!(conv(0x3f7e_b852), 0x0000_feb8); // 0.995 * 65536 = 65208.32
+        assert_eq!(conv(0x3faa_3d71), 0x0001_547a); // 1.33 * 65536 = 87162.88
+        // The points-per-inch literal from the font-metric call sites.
+        assert_eq!(conv(0x4291_0000), 0x0048_8000); // 72.5 * 65536 = 4751360
+    }
+
+    /// Truncation toward zero in both directions: fractions vanish, they do
+    /// not round and negative values do not floor.
+    #[test]
+    fn f32_to_fixed16_trunc_truncates_toward_zero() {
+        // 1.9999... just under 2.0.
+        assert_eq!(conv(0x3fff_ffff), 0x0001_ffff); // 131071.99 -> 131071
+        // Just over 1.0.
+        assert_eq!(conv(0x3f80_0001), 0x0001_0000); // 1.0000001 -> 1.0 exactly
+        // -1.33 truncates to -87162, not floor(-87162.88) = -87163.
+        assert_eq!(conv(0xbfaa_3d71), -0x0001_547a);
+        // Exact negatives pass through unchanged.
+        assert_eq!(conv(0xbfc0_0000), -0x0001_8000); // -1.5 -> -98304
+        assert_eq!(conv(0xbf00_0000), -0x0000_8000); // -0.5 -> -32768
+        // Fractions vanish symmetrically: the original truncates the
+        // magnitude and reapplies the sign bit, which is truncation
+        // toward zero — never a floor past the exact value.
+        assert_eq!(conv(0xbf7f_ffff), -0x0000_ffff); // -0.9999 -> -65535
+        assert_eq!(conv(0x3f7f_ffff), 0x0000_ffff); // +0.9999 -> 65535
+    }
+
+    /// Zero both ways; denormals flush to zero because the forced implicit
+    /// bit still shifts right by 134 (>= 32).
+    #[test]
+    fn f32_to_fixed16_trunc_zero_and_denormals() {
+        assert_eq!(conv(0x0000_0000), 0); // +0.0
+        assert_eq!(conv(0x8000_0000), 0); // -0.0: negate of zero stays zero
+        for frac_bit in 0..23 {
+            let bits = 1u32 << frac_bit; // every denormal pattern
+            assert_eq!(conv(bits), 0, "denormal {bits:#010x}");
+            assert_eq!(conv(bits | 0x8000_0000), 0);
+        }
+        // Largest denormal and smallest normal alike.
+        assert_eq!(conv(0x007f_ffff), 0);
+        assert_eq!(conv(0x0080_0000), 0); // 2^-126 * 65536 ~ 1.8e-33 -> 0
+    }
+
+    /// Infinities and NaNs have exponent 255, so the left shift amount is
+    /// 121 — 32 or more, hence zero. This converter zeroes non-finites
+    /// instead of saturating like f32_to_fixed16_sat.
+    #[test]
+    fn f32_to_fixed16_trunc_nonfinite_goes_to_zero() {
+        assert_eq!(conv(0x7f80_0000), 0); // +inf
+        assert_eq!(conv(0xff80_0000), 0); // -inf
+        assert_eq!(conv(0x7fc0_0000), 0); // quiet NaN
+        assert_eq!(conv(0x7f80_0001), 0); // signaling NaN
+        assert_eq!(conv(0xffbf_ffff), 0); // negative NaN with payload
+    }
+
+    /// No saturation: results that overflow 32 bits wrap modulo 2^32,
+    /// exactly like the original's register assembly. 40000.0 needs 46
+    /// bits of Q16.16; the top ones are discarded.
+    #[test]
+    fn f32_to_fixed16_trunc_wraps_on_overflow() {
+        // 40000.0 = 0x471c4000: exp 142, mantissa 0x9c4000, shift 8.
+        assert_eq!(conv(0x471c_4000), 0x9c40_0000u32 as i32); // wraps negative
+        // 32768.0 lands exactly on the sign bit.
+        assert_eq!(conv(0x4700_0000), i32::MIN);
+        // The largest finite float shifts left by 120 >= 32: zero.
+        assert_eq!(conv(0x7f7f_ffff), 0);
+        // And one step below the wrap edge: 32767.996 still fits.
+        assert_eq!(conv(0x46ff_ffff), 0x7fff_ff80);
+    }
+
+    /// Agreement with the independent bit-level model over a dense sweep:
+    /// every small-exponent value, all power-of-two exponents with
+    /// mantissa edges, and patterned words including all sign/exp combos.
+    #[test]
+    fn f32_to_fixed16_trunc_matches_bit_model_reference() {
+        for bits in 0..=0x0010_0000u32 {
+            assert_eq!(conv(bits), reference(bits), "bits={bits:#010x}");
+            assert_eq!(conv(bits | 0x8000_0000), reference(bits | 0x8000_0000));
+        }
+        for exp in 0..=255u32 {
+            for &mant in &[0u32, 1, 0x7f_ffff, 0x40_0000, 0x555_555, 0x2a_aaaa] {
+                let bits = (exp << 23) | mant;
+                assert_eq!(conv(bits), reference(bits), "bits={bits:#010x}");
+                assert_eq!(conv(bits | 0x8000_0000), reference(bits | 0x8000_0000));
+            }
+        }
+    }
+
+    /// Semantic agreement with real float arithmetic: for every finite
+    /// input whose Q16.16 value fits an i32, the result equals
+    /// `trunc(f * 65536)` computed in f64. Outside that range the port (per
+    /// the original) wraps or zeroes, which the f64 cast cannot express.
+    #[test]
+    fn f32_to_fixed16_trunc_equals_float_math_in_range() {
+        let samples = [
+            0.0f32, 0.5, 0.995, 1.0, 1.33, 2.5, 3.14159, 72.5, 100.0, 32767.0, -0.5, -0.995,
+            -1.0, -1.33, -2.5, -72.5, -32767.0, 1e-20, -1e-20, 1234.5678, -1234.5678,
+        ];
+        for &f in &samples {
+            let want = (f as f64 * 65536.0).trunc() as i32;
+            assert_eq!(conv(f.to_bits()), want, "f={f}");
+            // The Q16.16 reading back: result / 65536 within half an ulp
+            // of the truncated input.
+            let back = conv(f.to_bits()) as f64 / 65536.0;
+            assert!((back - (f as f64)).abs() <= 1.0 / 65536.0 + 1e-12, "f={f} back={back}");
+        }
+    }
+
+    /// The write really goes through the pointer, and a stale initial value
+    /// is replaced even when the result is zero.
+    #[test]
+    fn f32_to_fixed16_trunc_writes_through_the_pointer() {
+        let mut slot: i32 = 0x1234_5678;
+        f32_to_fixed16_trunc(&mut slot, 0x3f80_0000);
+        assert_eq!(slot, 0x0001_0000);
+        f32_to_fixed16_trunc(&mut slot, 0x0000_0000);
+        assert_eq!(slot, 0);
+        f32_to_fixed16_trunc(&mut slot, 0xbf80_0000);
+        assert_eq!(slot, -0x0001_0000);
+    }
+
+    /// Call-site idiom end to end: convert 0.5 like FUN_08274004 does, then
+    /// feed the Q16.16 result into the family's multiply — the pieces
+    /// compose because they share the representation.
+    #[test]
+    fn f32_to_fixed16_trunc_composes_with_fixed16_mul() {
+        let half = conv(0x3f00_0000);
+        assert_eq!(half, 0x8000);
+        let quarter = fixed16_mul(half, half);
+        assert_eq!(quarter, 0x4000);
+        // And the reciprocal path: mul(x, recip(x)) ~= 1.0 for x = 2.0.
+        let two = conv(0x4000_0000);
+        assert_eq!(two, 2 * ONE);
+        let product = fixed16_mul(two, fixed16_recip(two));
+        assert!((ONE as i64 - product as i64).abs() <= 2);
+    }
+
 
     /// Serializes the tests that swap the unguarded-body seam (the
     /// h264_decode_forwarder.rs FORWARDER_LOCK precedent).

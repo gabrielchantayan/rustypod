@@ -36404,3 +36404,57 @@ functions:
       indirection (`ldr r5,[r0,#0x2c]; blx r5` - slot offset 0x2c = the
       twelfth SingletonCtors field), an fp prologue and the inverted
       branch LLVM chose for the cold path.
+
+  - address: 0x082577bc
+    ghidra: FUN_082577bc
+    name: f32_to_fixed16_trunc
+    size: 88
+    sig: "*mut i32 f32_to_fixed16_trunc(out: *mut i32, bits: u32) -> *mut i32  // *out = trunc(f32(bits) * 65536), wrapping"
+    module: util/fixed
+    status: ported
+    renames:
+      param_1: out
+      param_2: bits
+    notes: >-
+      IEEE-754 binary32 -> Q16.16 fixed point, truncating toward zero, NO
+      saturation - overflowing results wrap modulo 2^32. Pure bit arithmetic,
+      no soft-float calls: exponent = (bits << 1) >> 24, mantissa =
+      (bits & 0x00ffffff) | 0x00800000 (implicit bit forced on even for
+      denormals); exponent < 134 (= 127 + 16) shifts the mantissa right by
+      134 - exponent (arithmetic, >= 32 gives 0), exponent >= 134 shifts left
+      by exponent - 134 (>= 32 gives 0), then the sign bit negates. Equals
+      trunc(f * 65536) for every finite input whose scaled value fits; since
+      the magnitude is truncated and the sign reapplied, negatives truncate
+      toward zero (-0.9999 -> -65535, never -65536). Denormals land on 0;
+      infinities and NaNs (exponent 255, shift 121) land on 0 too - unlike
+      the saturating sibling f32_to_fixed16_sat @ 0x080a67dc (fp/fp_fixed16),
+      which clamps them to the i32 range for the cos/sin tables; this one's
+      overflows are real outputs (40000.0 -> 0x9c400000 negative, +inf ->
+      0). Extent verified from raw osos.dec: exactly 0x082577bc..0x08257814,
+      no literal pool; the next symbol @ 0x08257814 is a separate 4-byte
+      empty destructor, so Ghidra's 88 bytes are correct here. 43 call
+      sites, ALL plain unconditional bl, none predicated - there is no NULL
+      guard and callers never gate the call (binary-scanned): 0x081528c8 /
+      0x08152d84 (audio gain literals 0.995 / 1.33 from pools 0x081529d4 /
+      0x08152e28), thirty-six in the Q16.16 rasterizer run
+      0x08273a64..0x0827419c (line walkers stepping pixel coordinates by
+      >> 16, e.g. FUN_08274004 converts the literal 0.5 then compares and
+      steps with it), five in font-metric code 0x082ac214..0x082ac41c
+      (points-per-inch literal 72.5 @ pool 0x082ac504). ABI quirk preserved:
+      r0 passes through untouched, so the function "returns" its out pointer
+      and callers use that (`piVar4 = FUN_082577bc(&local_3c, 0x3f000000);
+      *piVar4 ...` in FUN_08274004) - the port returns `out` explicitly.
+      Deviations: the original stores the mantissa to *out before scaling
+      and reloads through the pointer for the sign negation; nothing can
+      observe that intermediate store between the two stores, so the port
+      computes in registers and writes once. Own link_section
+      .text.f32_to_fixed16_trunc as fold insurance; symbol resolves
+      separately in the archive (no fold). match.py --lib <worktree
+      archive>: same structure - mantissa mask/orr, exponent extract, two-
+      way branch on 134, shift with zero beyond 32 (LLVM inverts both
+      conditions instead of materializing the >= 32 case), sign negate via
+      cmp/rsbmi, single str through r0; deltas are LLVM extracting the
+      exponent as (bits >> 23) & 0xff (same value), using lsr where ADS used
+      asr (identical: the mantissa's top bit is clear), an fp frame instead
+      of ADS's push {r0,r1,lr} arg-spill, and a trailing literal word for
+      the 0x007fffff mask.
