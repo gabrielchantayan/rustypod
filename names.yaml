@@ -36347,3 +36347,60 @@ functions:
       to traced_free, double head reload after the free; deltas are the
       seam checks, an fp prologue, an equivalent alternate mod-16 sequence
       for the tail, and the store reorder above.
+
+  - address: 0x0825b680
+    ghidra: FUN_0825b680
+    name: lazy_singleton_0x40
+    size: 44
+    sig: "void *lazy_singleton_0x40(void)"
+    module: app/singletons
+    status: ported
+    renames:
+      DAT_0825b6ac: SINGLETON_0X40_CACHE_POOL (the trailing pool word @
+        0x0825b6ac holding 0x089cc94c; the cache word itself is the crate
+        static SINGLETON_0X40, the block_mgr.rs RW-page deviation)
+      FUN_082aadd4: operator_new (direct, ported in heap/veneers)
+      FUN_0825bd20: singleton_0x40_ctor (SINGLETON_CTORS.singleton_0x40 slot)
+    notes: >-
+      The twelfth member of the app/singletons family, idiomatically
+      identical to the other eleven - `if (cache == 0) cache =
+      ctor(operator_new(0x40)); return cache;` over the cache word
+      0x089cc94c, the next word after the settings store's cache
+      0x089cc948 in the 0x089cc9xx globals page. EXTENT: functions.csv's
+      44 bytes is the code only; the function owns one trailing
+      literal-pool word (0x089cc94c @ 0x0825b6ac, reached by `ldr r4,
+      [pc, #32]`), so the true extent is 48 bytes,
+      0x0825b680..0x0825b6b0, where the next function opens `push {r4,
+      lr}`. CALL COUNT: 43 unconditional bl call sites, binary-verified
+      by decoding every B/BL word in work/firmware/osos.dec - 0
+      predicated and 0 plain b. Several sites NULL-check the RESULT
+      (0x08216574 `cmp r0,#0; beq`) because a NULL-returning ctor
+      propagates and leaves no failure memory (reproduced and tested),
+      but none of the calls themselves are predicated.
+      OBJECT: the ctor 0x0825bd20 plants a vtable literal 0x089a7ffc at
+      +0, builds an embedded fixed-block pool at +4 through FUN_083c0ba8
+      (20-byte records, growth n+n/2+n/8, free-list head chained through
+      each node's +12) parking that pool's descriptor pointer at +0x14
+      with the descriptor's +8/+12 self-pointing (circular sentinel),
+      constructs a mutex at +32 via the ported cxx_mutex_construct
+      0x08261e28 and zeroes byte +62 last, which is what makes 0x40 the
+      allocation size. The 43 call sites use it as a hub: registration
+      of sub-objects through vtable slot +8 (service_manager_ctor
+      0x0816566c hands it this+0xd0; the class-8c00 ctor 0x081a71fc
+      hands it this+0x1c) and boolean polls through slots +0x18/+0x48/
+      +0x4c (stopwatch retry loop 0x08216568 gates on +0x4c). CLASS NOT
+      NAMED: no name-factory call or name literal anywhere; worse, the
+      vtable page 0x089axxxx is runtime-initialized and the image holds a
+      stale copy whose slot words land mid-flow of plausible-looking
+      target functions, so the vtable cannot be read for a name either -
+      the symbol names the size only, per the lazy_singleton_0x3c /
+      lazy_singleton_0x58 precedent. Deviations: operator_new called
+      directly; the ctor rides the SINGLETON_CTORS dispatch table with a
+      documented zeroing default (NOT HOOK-READY, the family contract);
+      the cache is the crate static SINGLETON_0X40 rather than the word
+      @ 0x089cc94c. match.py --lib <worktree archive>: same skeleton -
+      cache-ptr load, ldr/cmp/bne test, `mov r0,#0x40`, bl to
+      operator_new, ctor call, store, reload, pop; deltas are the seam
+      indirection (`ldr r5,[r0,#0x2c]; blx r5` - slot offset 0x2c = the
+      twelfth SingletonCtors field), an fp prologue and the inverted
+      branch LLVM chose for the cold path.
