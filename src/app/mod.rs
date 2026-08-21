@@ -35,6 +35,7 @@ pub mod parse_result;
 pub mod path_exists;
 pub mod path_object_construct;
 pub mod path_probe;
+pub mod pending_event_take;
 pub mod queued_message;
 pub mod registry;
 pub mod resource;
