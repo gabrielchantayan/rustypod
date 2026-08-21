@@ -6604,6 +6604,36 @@ functions:
       match.py: LLVM loads the hook table then makes the same two-way
       cmp/beq split into the two indirect calls — same structure.
 
+  - address: 0x080e9eb0
+    ghidra: thunk_FUN_080568e8
+    name: task_sleep_thunk
+    size: 4
+    sig: "u32 task_sleep_thunk(u32 ticks)"
+    module: kernel/task
+    status: ported
+    renames: {}
+    notes: >-
+      Pure dispatch alias of task_sleep - one word, eafdb28c =
+      `b 0x080568e8` (the next word, push {r4-r6, lr} @ 0x080e9eb4,
+      starts the following function, so Ghidra's 4-byte extent is
+      confirmed). Call traffic re-verified by decoding every B/BL word
+      in osos.dec: 53 branch sites reach it - 47 plain bl, 1 predicated
+      blne @ 0x08093a84 (tst r4, #0x400 gates a 790-tick sleep; callers
+      do their own flag checks, no NULL guard involved), and 5 tail b's:
+      the sibling veneers @ 0x0805f4a0 / 0x080a6b40, two mov r0, #20
+      sleep(20) epilogues @ 0x081f5c28 / 0x081f5fe0, and another lone
+      4-byte alias @ 0x082c6f90. One DATA word holds the address
+      (@ 0x08a19800, amid adjacent code pointers), so the veneer is
+      reachable indirectly too - hence a real exported symbol rather
+      than the region_block_size_thunk hook-straight-to-callee pattern.
+      Port is a pure forwarding tail call onto the ported task_sleep;
+      r0 passes through unchanged like the original branch. Deviation:
+      task_sleep gained inline(never) so LLVM stops cloning its body
+      into the thunk and both stay real bl targets; its structure is
+      otherwise unchanged. match.py: same single-tail-branch shape
+      (fp/lr frame + b task_sleep via JUMP24 reloc); the merged
+      task_yield_thunk shows the identical frame shape.
+
   - address: 0x080568fc
     ghidra: FUN_080568fc
     name: kernel_yield
