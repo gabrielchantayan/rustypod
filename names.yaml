@@ -36123,3 +36123,66 @@ functions:
       stale. Reference C: decomp/c/038/083e1ae4_FUN_083e1ae4.c; disassembly:
       osos.dec 0x083e1ae4. match.py: structural match reviewed.
       absence of mutation.
+
+  # --- pending-event queue take ---
+  - address: 0x08138f14
+    ghidra: FUN_08138f14
+    name: pending_event_take
+    size: 188
+    sig: "u32 pending_event_take(u8 *this, u32 key, u16 *tag_a, u16 *tag_b, u32 *payload_out)"
+    module: app/pending_event_take
+    status: ported
+    renames:
+      param_1/r0/r9: this
+      param_2/r1/sl: key
+      param_3/r2/r4: tag_a
+      param_4/r3/r5: tag_b
+      param_5/sp+0x20/r8: payload_out
+      r6: mutex_ptr (this + 0x2ac)
+      r7/iVar3: status
+      piVar2/r0: link (address of the link word)
+      star_piVar2/r1: node
+      DAT_08138fcc: WILDCARD_TAG (0xffff)
+    notes: >-
+      Take-and-cancel of the pending-event queue embedded at the start of
+      the playback session object. True extent 0x08138f14..0x08138fd0 =
+      188 bytes: 184 bytes of code plus the trailing literal-pool word
+      0x0000ffff @ 0x08138fcc; Ghidra's 184 drops that word (next function
+      0x08138fd0). Call count binary-verified by decoding every B/BL word
+      in osos.dec: exactly 45 sites, all unconditional bl (no predicated
+      forms), spread over the playback/IAP cluster 0x08139cb0..0x082091cc;
+      no DATA word references the address, so it is only ever direct-called.
+      Under the PosixMutex at this+0x2ac (veneers 0x08261e20/0x08261e24):
+      find the first live entry whose key matches exactly and whose two tag
+      halfwords match equal-or-0xffff (search FUN_08139190 returns the
+      ADDRESS OF THE LINK WORD, &prev->next); fill each wildcarded tag from
+      the node (+0x0c/+0x0e), copy the payload word (+0x10) out when the
+      caller passed a non-null slot, unlink the node back onto the free
+      list at +0x18 (release FUN_0813908c re-searches by the node's own
+      fields and heap_panics on a corrupt queue), then re-arm the deadline
+      timer from the new head (rearm FUN_0813957c, always returns 0).
+      Returns 0 = taken, 0x52 = no matching entry (out-params untouched);
+      firmware release/rearm can only produce 0 but the port keeps the
+      original's general status chaining. Node layout (20 bytes) recovered
+      from insert FUN_08138fd0 next/key/deadline_ms/tag_a/tag_b/payload;
+      insert stores deadline = now_ms + delta and pops free nodes via
+      FUN_081391f0, so entries are scheduled events serviced by the IAP
+      incoming-process thread's timer queue (thread+0x114 mutex; handle at
+      session+0x2c8). Deviations: the three callees stay unported behind
+      PENDING_EVENT_TAKE_OPS (target transmutes 0x08139190/0x0813908c/
+      0x0813957c, inert host stubs, tests install recording reference
+      models); lock/unlock call the canonical ported posix_mutex symbols
+      directly per the names.yaml veneer-alias resolution; the original's
+      three node reloads from the link word collapse to one load (C
+      aliasing artifact, unobservable for non-aliased stack outs); the
+      defensive node==NULL branch calls ported heap_panic and is not
+      host-tested (unreachable through find-link's contract, terminate
+      spins). Host tests: wildcard fill both/one side, exact tags kept,
+      payload copy and NULL slot, miss path leaves outs untouched and
+      returns 0x52, release-status propagation skips rearm, rearm-status
+      chaining, raw input tags seen by the search, mid-chain unlink plus
+      free-list push, mutex owner held inside the critical section and
+      cleared after every path. match.py --size 184 structural review:
+      identical branch skeleton and predicated ldrh/strh field pairs;
+      deltas are the seam blx indirection, a frame pointer for the spilled
+      ops slot, and 0xffff built from mov/orr instead of a pool load.
