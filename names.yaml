@@ -36245,3 +36245,66 @@ functions:
       identical branch skeleton and predicated ldrh/strh field pairs;
       deltas are the seam blx indirection, a frame pointer for the spilled
       ops slot, and 0xffff built from mov/orr instead of a pool load.
+  - address: 0x08049a84
+    ghidra: FUN_08049a84
+    name: diag_ring_record
+    size: 212
+    sig: "void diag_ring_record(u32 facility, u32 subsystem, u32 code, u32 data0, u32 data1)"
+    module: kernel/diag_ring_record
+    status: ported
+    renames:
+      param_1/r0/r5: facility
+      param_2/r1/r6: subsystem
+      param_3/r2/r7: code
+      param_4/r3/r8: data0
+      param_5/sp+0x20/r9: data1
+      r4: block (per-task DiagEventRing returned by 0x080498f8)
+    notes: >-
+      Extent confirmed from raw bytes: 0x08049a84..0x08049b58, no literal
+      pool, next function at 0x08049b58 - Ghidra's 212 is right. Call
+      count binary-verified by decoding every BL word in osos.dec: exactly
+      197 sites, ALL unconditional bl (no predicated forms) - no caller
+      NULL-guards or gates it, consistent with a logger that is always
+      safe to call. The fifth argument rides the stack (ldr r9,[sp,#32]).
+      Appends one event to the calling task's diagnostic ring: head =
+      (head+1) % 16 in signed C modulo (branchless asr/bic/sub idiom,
+      reproduced instruction-exact); if head lands on tail the ring was
+      full and tail follows, dropping the oldest record; packs
+      facility<<24 | (subsystem & ~0xff000)<<12 | code&0xfff into
+      tags[head] (the bic strips bits 12..19 BEFORE the shift; bits 20+
+      fall off the shift), stores data0/data1 verbatim in parallel arrays,
+      then if pointers[head] != 0 and flags[head] bit 0 is set releases
+      the STALE occupant's block through traced_free @ 0x08043994 and
+      zeroes the pointer, then clears flags[head]. The freed pointer is
+      the record 16 writes ago; the new tag/data are already stored when
+      the free runs (order pinned by a test). Quirk reproduced: head
+      starts at 0 and advances before use, so the first record lands in
+      slot 1 and slot 0 stays empty until the first full wraparound.
+      Block layout (332 bytes, allocated by 0x080498f8) decoded from this
+      function plus reset 0x08049694 and formatter 0x080496f0: owner task
+      id +0x000, five parallel 16-word arrays tags/pointers/flags/data0/
+      data1 at +0x004/+0x044/+0x084/+0x0c4/+0x104 (field bases 0x40 apart,
+      column-major - NOT an array of structs), head +0x144, tail +0x148;
+      reset pre-fills data1 with -1. Deviations: block getter 0x080498f8
+      is unported and sits behind DIAG_RING_BLOCK_GETTER (default None =
+      documented no-op; the real getter never returns NULL, so there is no
+      faithful NULL behavior to inherit; hooks.yaml wires it once ported);
+      traced_free IS ported and called directly as in the original
+      (Ghidra's C drops its argument - r0 still holds the stale word from
+      [r1,#0x44]); slot addressing is raw pointer arithmetic like the
+      original rather than bounds-checked indexing, whose abort path a
+      corrupt head could reach but the firmware cannot; LLVM reorders the
+      three independent slot stores (tag last) and narrows the flags load
+      to a byte - both unobservable. Callers of note: the traced
+      allocator's failure path records (0x22,0x6f,0x41) here via
+      sqlite/blob_to_hex, whose HEX_BLOB_HOOKS seam can now be rewired to
+      diag_ring_record. Host tests: layout offsets, first-record-in-slot-1,
+      packing masks (incl. subsystem bit-12 strip and shift truncation),
+      verbatim data words, wraparound + oldest-drop at full, flagged stale
+      pointer freed and cleared, unflagged/bit-1-only/NULL-pointer slots
+      not freed but flags cleared, store-before-free order, no-getter and
+      null-block no-ops. match.py --lib <worktree archive>: same branch
+      skeleton - identical head-mod idiom, predicated ptr/flag guard, bl
+      to traced_free, double head reload after the free; deltas are the
+      seam checks, an fp prologue, an equivalent alternate mod-16 sequence
+      for the tail, and the store reorder above.
