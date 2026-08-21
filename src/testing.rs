@@ -126,3 +126,11 @@ pub static APP_ROOT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// varint-seam tests (both swap slots on it), so a per-module lock would
 /// let one module's teardown restore defaults under the other's mock.
 pub static BTREE_CELL_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serializes every host test that installs a fixture block into
+/// `kernel::diag_ring_record::DIAG_RING_BLOCK_GETTER`. That seam is one
+/// shared mutable global pointing at the per-task diagnostic ring, and
+/// the sibling ring functions still unported (reset 0x08049694, dump
+/// 0x080496f0) will share it, so they must hold this lock rather than
+/// each keeping a private one.
+pub static DIAG_RING_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
