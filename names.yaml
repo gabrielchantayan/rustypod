@@ -36458,3 +36458,57 @@ functions:
       asr (identical: the mantissa's top bit is clear), an fp frame instead
       of ADS's push {r0,r1,lr} arg-spill, and a trailing literal word for
       the 0x007fffff mask.
+
+  - address: 0x0811b2c0
+    ghidra: FUN_0811b2c0
+    name: singleton_class_6280
+    size: 44
+    sig: "void *singleton_class_6280(void)"
+    module: app/singletons
+    status: ported
+    renames:
+      DAT_0811b2ec: CLASS_6280_CACHE_POOL (the trailing pool word @
+        0x0811b2ec holding 0x089cc30c; the cache word itself is the crate
+        static CLASS_6280_INSTANCE, the block_mgr.rs RW-page deviation)
+      FUN_082aadd4: operator_new (direct, ported in heap/veneers)
+      FUN_0811c7fc: class_6280_ctor (SINGLETON_CTORS.class_6280 slot)
+    notes: >-
+      The thirteenth member of the app/singletons family, idiomatically
+      identical to the other twelve - `if (cache == 0) cache =
+      ctor(operator_new(0xa0)); return cache;` over the cache word
+      0x089cc30c. EXTENT: functions.csv's 44 bytes is the code only; the
+      function owns one trailing literal-pool word (0x089cc30c @
+      0x0811b2ec, reached by `ldr r4, [pc, #32]`), so the true extent is
+      48 bytes, 0x0811b2c0..0x0811b2f0, where the next function opens
+      `push {r4-r8, lr}`. CALL COUNT: Ghidra's 43 confirmed -
+      binary-verified by decoding every B/BL word in
+      work/firmware/osos.dec: exactly 43 unconditional bl call sites, 0
+      predicated and 0 plain b; callers fetch the object then hand it
+      straight to worker functions (0x0811c564 / 0x0811c010 / 0x0811c284
+      at the 0x0822f97c cluster) or park it in a field (+0xbc of the
+      object built @ 0x0811aecc). OBJECT IDENTIFIED BY REGISTRY ID: the
+      ctor 0x0811c7fc plants vtable literal 0x08981d2c at +0 and a
+      secondary vtable 0x08982934 on an embedded sub-object, allocates a
+      0x34-byte sub-block through operator_new built by
+      FUN_081bb450(. , 6, 1, 0x15e) plus an 8-byte pair initialized by
+      FUN_0810dddc, and registers the object in the by-id class registry
+      under id 0x6280 - pool literal @ 0x0811c968 loaded @ 0x0811c884
+      (`ldr r1, [pc, #220]`) immediately before `bl 0x081d23f8` @
+      0x0811c88c. The registered pointer is `this` itself: the compiler
+      forms `(FUN_0811d8ac(this + 0x6c) + 0x20) - 0x8c` through two
+      opaque calls whose arithmetic folds back to this (FUN_0811d8ac
+      returns its argument). Unlike lazy_singleton_0x3c / _0x58 / _0x40
+      the class IS identified - by its own registry id, per the
+      singleton_class_8900 precedent; no name literal survives, so the
+      symbol carries the id only. The image word at the cache address is
+      stale UI string data ("ls_T"), confirming the RW-page deviation.
+      Deviations: operator_new called directly; the ctor rides the
+      SINGLETON_CTORS dispatch table with a documented zeroing default
+      (NOT HOOK-READY, the family contract); the cache is the crate
+      static CLASS_6280_INSTANCE rather than the word @ 0x089cc30c.
+      match.py --lib <worktree archive>: same skeleton - cache-ptr load,
+      ldr/cmp test, `mov r0,#0xa0`, bl to operator_new (R_ARM_CALL
+      relocation verified), ctor call, store, reload, pop; deltas are
+      the seam indirection (`ldr r5,[r0,#0x30]; blx r5` - slot offset
+      0x30 = the thirteenth SingletonCtors field), an fp prologue and
+      the inverted branch LLVM chose for the cold path.
