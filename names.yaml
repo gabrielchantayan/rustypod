@@ -5292,6 +5292,65 @@ functions:
       spill frame is gone, so the port is a tail dispatch through the
       seam while r0/r1 already hold what the original had to reload.
 
+  - address: 0x082dcf7c
+    ghidra: FUN_082dcf7c
+    name: trace_printf
+    size: 48
+    sig: "int trace_printf(const char *fmt, ...)"
+    module: stdio/trace_printf
+    status: ported
+    vars: {param_1: fmt}
+    renames:
+      param_1/r0: fmt
+      DAT_082dcfa8 (0x08a1081c): TRACE_BUF, the static line buffer
+      FUN_082cecfc: trace_format (TRACE_FORMAT seam, not yet ported)
+      uStack_c/uStack_8/uStack_4: the spilled r1-r3 va_list frame
+    notes: >-
+      The trace-LINE printer: renders one diagnostic row into a fixed
+      static buffer and emits it with a single Angel SYS_WRITE0. Sibling
+      of debug_printf @ 0x082bd4a8 but a different channel - that one
+      streams through mini-printf FUN_08396e1c; this one formats via the
+      row interpreter FUN_082cecfc @ 0x082cecfc (formats like
+      "(H'Clock rate is',I5,H' Hz, Tick interval is',I4,H' ms, ',N)"
+      @ 0x082bed98) into buffer 0x08a1081c, then swi 0x123456 with r0=4
+      (SYS_WRITE0) and r1 = buffer base reloaded from the literal -
+      no parameter block, r1 IS the string.
+      Extent verified from raw words: Ghidra says 44 bytes but the true
+      size is 48 - both ldr r?,= share ONE literal word at 0x082dcfa8,
+      which Ghidra dropped the trailing copy of; 0x082dcfac starts the
+      next function with its own cmp r0,#0. Call count verified by
+      decoding every B/BL word in osos.dec: 44 sites, 34 plain bl plus
+      10 predicated blne, no tail b/bcc forms, and no DATA word holds
+      the address (never dispatched virtually). The blne sites gate on
+      VALUE comparisons in their own bodies (cmp r0,r1 then addeq
+      r0,pc,#imm; bleq @ 0x082bfd88), not on a NULL check - like its
+      sibling this entry point has no guard on the format at all.
+      Behaviour facts proven in the raw asm: the formatter's 'N'
+      conversion stores the string terminator itself (cmp r1,#0x4e;
+      moveq r0,#0; strbeq r0,[r5],#1 @ 0x082cee00), so a well-formed
+      row ends in N and the buffer is a C string by SWI time; and the
+      formatter's return count is DISCARDED here (mov r0,#4 clobbers it
+      before the SWI), so the observable result is whatever the SWI
+      leaves in r0 - all 44 callers treat the call as a statement.
+      The buffer's size is encoded nowhere in the image; it is bounded
+      above by the next referenced global at 0x08a10870, giving 0x54 =
+      84 bytes, and only this function's literal pool references
+      0x08a1081c in the whole image.
+      Deviations - the `...` becomes an explicit args: VaList (*const
+      u32), the house convention (that IS what the spill frame
+      manufactures); the formatter rides the TRACE_FORMAT slot
+      (firmware-address default on target, panicking default on host);
+      the SWI goes through the SEMIHOST_SWI dispatch hook (stdio/
+      semihost.rs house pattern); the firmware globals are Rust statics.
+      Host tests (6): render-into-TRACE_BUF-then-WRITE0 with content
+      identity, SWI-result-not-formatter-count return, one static
+      buffer reused across calls, unguarded NULL format with the SWI
+      still firing, empty rendering still issuing WRITE0 on the buffer
+      base, and r1 carrying the buffer pointer directly rather than a
+      parameter block. match.py (--size 48): structural parity modulo
+      the two volatile dispatch slots (house anti-const-fold pattern)
+      and the vanished spill frame.
+
   # --- Batch 10 scouting: identified only (ADS stdio / locale block) ---
   # The region 0x08030004-0x0803097c is the ADS buffered-stdio + setlocale
   # cluster (FILE struct: flags @ +0xc, buffer @ +0x10, size @ +0x1c,
