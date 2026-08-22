@@ -66,6 +66,11 @@
 //!   the end-of-storage sibling of the size family (divide-based for
 //!   24/12/40/20, shift-based for 16/8/4; the 24-byte copy is a
 //!   byte-identical second instantiation of the primary).
+//! - [`vector_push_back_elem12`] — `vector<T>::push_back` for a
+//!   12-byte trivially-copyable element: append at `end` when capacity
+//!   remains, else grow-and-insert through the (unported) helper
+//!   0x083e12dc behind [`VECTOR_PUSH_BACK_ELEM12_OPS`]. One copy, 43
+//!   call sites.
 //!
 //! Not to be confused with `deque_iter_copy` @ 0x083dd9e4 (already
 //! ported in `heap/block_deque`): that one is the same four-word copy
@@ -1633,6 +1638,161 @@ pub unsafe extern "C" fn vector_capacity_elem20(vector: *const VectorStorage) ->
         core::ptr::read_unaligned(core::ptr::addr_of!((*vector).end_of_storage));
     let span = (end_of_storage as isize - begin as isize) as i32;
     __rt_sdiv(span, 20)
+}
+
+/// Firmware load address of `FUN_083e12dc`, the grow-and-insert helper
+/// [`vector_push_back_elem12`] calls when the storage is full. Unported
+/// (its own size/capacity/allocate callees — [`vector_size_elem12`]
+/// 0x083d76f8, [`vector_capacity_elem12`] 0x083d7708 and
+/// `operator_new_checked` 0x08266c70 — are all ported); dispatched
+/// through [`VECTOR_PUSH_BACK_ELEM12_OPS`].
+pub const VECTOR_INSERT_AUX_ELEM12_ADDRESS: usize = 0x083e_12dc;
+
+/// Indirect dispatch for the one unported callee of
+/// [`vector_push_back_elem12`] (the `app/animation.rs` pattern): host
+/// tests install a recording model; a later port of the helper replaces
+/// the default without touching this caller.
+#[derive(Clone, Copy)]
+pub struct VectorPushBackElem12Ops {
+    /// Insert-aux 0x083e12dc `(vector, position, element)`: inserts the
+    /// 12-byte `element` at `position` (the vector's `end` here),
+    /// growing the storage first (capacity + max(capacity/2 +
+    /// capacity/8, 32) elements through `operator_new_checked`, then an
+    /// elementwise move). No return value.
+    pub insert_aux: unsafe extern "C" fn(
+        vector: *mut VectorStorage,
+        position: *mut u8,
+        element: *const u32,
+    ),
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_insert_aux_elem12(
+    vector: *mut VectorStorage,
+    position: *mut u8,
+    element: *const u32,
+) {
+    let f: unsafe extern "C" fn(*mut VectorStorage, *mut u8, *const u32) =
+        core::mem::transmute(VECTOR_INSERT_AUX_ELEM12_ADDRESS);
+    f(vector, position, element)
+}
+
+/// Host default: inert — every test installs its own model.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn firmware_insert_aux_elem12(
+    _vector: *mut VectorStorage,
+    _position: *mut u8,
+    _element: *const u32,
+) {
+}
+
+/// Wired default: the ROM address on target, a documented inert stub on
+/// host.
+pub const DEFAULT_VECTOR_PUSH_BACK_ELEM12_OPS: VectorPushBackElem12Ops =
+    VectorPushBackElem12Ops {
+        insert_aux: firmware_insert_aux_elem12,
+    };
+
+/// The active callee, read through `read_volatile` so LLVM cannot fold
+/// the indirect call to the default.
+pub static mut VECTOR_PUSH_BACK_ELEM12_OPS: VectorPushBackElem12Ops =
+    DEFAULT_VECTOR_PUSH_BACK_ELEM12_OPS;
+
+#[inline(always)]
+fn vector_push_back_elem12_ops() -> VectorPushBackElem12Ops {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(VECTOR_PUSH_BACK_ELEM12_OPS)) }
+}
+
+/// vector_push_back_elem12 — original: `FUN_0816caa4` @ 0x0816caa4
+/// (64 bytes; `ipod-decomp/decomp/c/015/0816caa4_FUN_0816caa4.c`).
+///
+/// `std::vector<T>::push_back` for a 12-byte trivially-copyable element
+/// on the [`VectorStorage`] `{begin, end, end_of_storage}` head. The
+/// element arrives by value in r1/r2/r3:
+///
+/// ```text
+/// 0816caa4  push {r1, r2, r3, lr}   ; spill the 12-byte element
+/// 0816caa8  stm sp, {r1, r2}        ; (already pushed; the strb below
+/// 0816caac  strb r3, [sp, #8]       ;  is redundant — sp+8 holds FULL r3)
+/// 0816cab0  ldmib r0, {r1, r2}      ; end = [+4], cap = [+8]
+/// 0816cab4  cmp r1, r2
+/// 0816cab8  beq slow                ; full: grow & insert
+/// 0816cabc  add r1, r1, #12
+/// 0816cac0  str r1, [r0, #4]        ; end += 12 (UNCONDITIONAL)
+/// 0816cac4  subs r0, r1, #12        ; r0 = old end, Z iff end == NULL
+/// 0816cac8  movne/ldmne/stmne       ; if end != NULL: *end = element
+/// 0816cad4  pop {r2, r3, ip, pc}
+/// slow:
+/// 0816cad8  mov r2, sp
+/// 0816cadc  bl  0x083e12dc          ; insert_aux(vector, end, &element)
+/// 0816cae0  pop {r2, r3, ip, pc}
+/// ```
+///
+/// **Extent**: exactly 64 bytes — the next function opens `push
+/// {r4, r5, r6, lr}` at 0x0816cae4. **Call count**, verified by
+/// decoding every B/BL word in osos.dec: 43 sites, 38 plain `bl` plus
+/// 5 predicated forms (4 `bleq`, 1 `blne` @ 0x0821ec58, 0x0821ec80,
+/// 0x08222f98, 0x08226c18, 0x08239524) — each sits immediately after a
+/// `cmp r0, #0`, so the CALLER skips the push when its preceding lookup
+/// failed; the callee itself carries no such guard. A byte-pattern scan
+/// finds no second instantiation. The observed use binds button
+/// handlers: callers push `{command_id, handler_name, flag}` records
+/// (e.g. FUN_082342b4 pushes `{id, "HandleAddToOTG" + 1, 1}`) into a
+/// stack vector handed to FUN_08134720; push_back interprets none of
+/// the fields.
+///
+/// Two behaviours worth pinning: the end advance happens BEFORE and
+/// independently of the NULL-slot guard (a NULL `end` distinct from
+/// `end_of_storage` still advances to 12 with no store), and the third
+/// element word is the FULL r3, not a byte — the `strb` rewrites the
+/// low byte of the pushed word with the value it already held. Ghidra's
+/// C matches this decode; its `puVar1 + 3` is the +12-byte advance in
+/// 4-byte units.
+///
+/// # Deviations
+///
+/// The grow-and-insert helper `FUN_083e12dc` is unported and dispatches
+/// through [`VECTOR_PUSH_BACK_ELEM12_OPS`]: target builds transmute
+/// [`VECTOR_INSERT_AUX_ELEM12_ADDRESS`], the host default is inert and
+/// every test installs a recording model.
+///
+/// # Safety
+/// `vector` must point at a writable `{begin, end, end_of_storage}`
+/// triple; on the fast path `end` must be NULL or point at 12 writable
+/// bytes inside the storage.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.vector_push_back_elem12")]
+#[inline(never)]
+pub unsafe extern "C" fn vector_push_back_elem12(
+    vector: *mut VectorStorage,
+    word0: u32,
+    word1: u32,
+    word2: u32,
+) {
+    // Plain aligned word accesses: the original's `ldmib r0, {r1, r2}`
+    // / `str r1, [r0, #4]` — every call site heads a word-aligned
+    // vector (stack spill slot or object member), so the family's
+    // `read_unaligned` host-fixture idiom would only pessimize ARMv5TE
+    // codegen into four `ldrb` per word here.
+    let end = (*vector).end;
+    let end_of_storage = (*vector).end_of_storage;
+    if end == end_of_storage {
+        // Full: the original's `push {r1, r2, r3}` spills the element
+        // to the stack and `mov r2, sp` hands the helper its address.
+        let element = [word0, word1, word2];
+        (vector_push_back_elem12_ops().insert_aux)(vector, end, element.as_ptr());
+        return;
+    }
+    // str r1, [r0, #4]: the advance is unconditional — a NULL end still
+    // becomes 12 (`wrapping_add`: `add` on a null pointer is UB on host).
+    (*vector).end = end.wrapping_add(12);
+    if !end.is_null() {
+        // stm r0, {r2, r3, ip}: the whole 12-byte element, word2 in full.
+        let slot = end.cast::<u32>();
+        slot.write(word0);
+        slot.add(1).write(word1);
+        slot.add(2).write(word2);
+    }
 }
 
 /// A `{base, count}` pointer array — the two words [`array_at_checked`]
@@ -3638,5 +3798,187 @@ mod tests {
             assert_eq!(cxx_vector_find_equal(&owner, &mut needle, &mut out), 0);
             assert_eq!(out, sentinel);
         }
+    }
+
+    // ---- vector_push_back_elem12 --------------------------------------
+
+    /// Serializes swaps of [`VECTOR_PUSH_BACK_ELEM12_OPS`] across this
+    /// module's tests.
+    static PUSH_BACK_ELEM12_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Restores the ops seam even if a test panics mid-run.
+    struct PushBackElem12Guard {
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for PushBackElem12Guard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(VECTOR_PUSH_BACK_ELEM12_OPS)
+                    .write_volatile(DEFAULT_VECTOR_PUSH_BACK_ELEM12_OPS);
+            }
+        }
+    }
+
+    fn push_back_elem12_guard() -> PushBackElem12Guard {
+        let lock = PUSH_BACK_ELEM12_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        PushBackElem12Guard { _lock: lock }
+    }
+
+    /// One observed insert_aux call.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    struct InsertAux {
+        vector: usize,
+        position: usize,
+        element: [u32; 3],
+    }
+
+    static mut INSERT_AUX_CALLS: Vec<InsertAux> = Vec::new();
+
+    unsafe extern "C" fn recording_insert_aux(
+        vector: *mut VectorStorage,
+        position: *mut u8,
+        element: *const u32,
+    ) {
+        (*core::ptr::addr_of_mut!(INSERT_AUX_CALLS)).push(InsertAux {
+            vector: vector as usize,
+            position: position as usize,
+            element: [
+                element.read(),
+                element.add(1).read(),
+                element.add(2).read(),
+            ],
+        });
+    }
+
+    unsafe fn install_recording_insert_aux() {
+        (*core::ptr::addr_of_mut!(INSERT_AUX_CALLS)).clear();
+        core::ptr::addr_of_mut!(VECTOR_PUSH_BACK_ELEM12_OPS)
+            .write_volatile(VectorPushBackElem12Ops {
+                insert_aux: recording_insert_aux,
+            });
+    }
+
+    fn insert_aux_calls() -> Vec<InsertAux> {
+        unsafe { (*core::ptr::addr_of!(INSERT_AUX_CALLS)).clone() }
+    }
+
+    /// Vector storage with poison guard words on both sides, so a write
+    /// outside the promised slot shows up as a changed guard.
+    #[repr(C)]
+    struct GuardedStorage {
+        before: u64,
+        elements: [u32; 9], // three 12-byte elements
+        after: u64,
+    }
+
+    const GUARD: u64 = 0x5a5a_5a5a_5a5a_5a5a;
+
+    #[test]
+    fn push_back_elem12_appends_the_full_element_when_capacity_remains() {
+        let _guard = push_back_elem12_guard();
+        unsafe { install_recording_insert_aux() };
+        let mut storage = GuardedStorage {
+            before: GUARD,
+            elements: [0; 9],
+            after: GUARD,
+        };
+        let begin = core::ptr::addr_of_mut!(storage.elements).cast::<u8>();
+        // One element already present, room for two more.
+        storage.elements[0] = 0xaaaa_0001;
+        storage.elements[1] = 0xaaaa_0002;
+        storage.elements[2] = 0xaaaa_0003;
+        let mut vector = VectorStorage {
+            begin,
+            end: unsafe { begin.add(12) },
+            end_of_storage: unsafe { begin.add(36) },
+        };
+
+        unsafe {
+            vector_push_back_elem12(&mut vector, 0x1122_3344, 0x5566_7788, 0xdead_beef);
+        }
+
+        assert_eq!(vector.begin, begin, "begin untouched");
+        assert_eq!(vector.end, unsafe { begin.add(24) }, "end advanced by 12");
+        assert_eq!(vector.end_of_storage, unsafe { begin.add(36) }, "capacity untouched");
+        assert_eq!(
+            storage.elements,
+            [
+                0xaaaa_0001, 0xaaaa_0002, 0xaaaa_0003, // pre-existing element
+                0x1122_3344, 0x5566_7788, 0xdead_beef, // appended element
+                0, 0, 0,                               // spare capacity
+            ],
+            "all three words stored, word2 in FULL (the original's strb is redundant)"
+        );
+        assert_eq!(storage.before, GUARD, "prefix guard");
+        assert_eq!(storage.after, GUARD, "suffix guard");
+        assert!(insert_aux_calls().is_empty(), "no grow on the fast path");
+    }
+
+    #[test]
+    fn push_back_elem12_full_vector_calls_insert_aux_with_the_spilled_element() {
+        let _guard = push_back_elem12_guard();
+        unsafe { install_recording_insert_aux() };
+        let mut storage = GuardedStorage {
+            before: GUARD,
+            elements: [0x1111_2222; 9],
+            after: GUARD,
+        };
+        let begin = core::ptr::addr_of_mut!(storage.elements).cast::<u8>();
+        // Full: end == end_of_storage.
+        let end = unsafe { begin.add(36) };
+        let mut vector = VectorStorage {
+            begin,
+            end,
+            end_of_storage: end,
+        };
+
+        unsafe {
+            vector_push_back_elem12(&mut vector, 0xcafe_0001, 0xcafe_0002, 0xcafe_0003);
+        }
+
+        let calls = insert_aux_calls();
+        assert_eq!(calls.len(), 1, "exactly one grow-and-insert");
+        assert_eq!(
+            calls[0],
+            InsertAux {
+                vector: core::ptr::addr_of_mut!(vector) as usize,
+                position: end as usize,
+                element: [0xcafe_0001, 0xcafe_0002, 0xcafe_0003],
+            },
+            "insert_aux(vector, end, &element) with the full third word"
+        );
+        assert_eq!(vector.end, end, "push_back itself never advances on the slow path");
+        assert_eq!(storage.before, GUARD, "prefix guard");
+        assert_eq!(storage.after, GUARD, "suffix guard");
+        assert!(
+            storage.elements.iter().all(|&word| word == 0x1111_2222),
+            "no store into full storage"
+        );
+    }
+
+    /// The `subs r0, r1, #12` NULL guard: a NULL `end` distinct from
+    /// `end_of_storage` still advances (to 12) but stores nothing. The
+    /// advance being unconditional is the behaviour this pins.
+    #[test]
+    fn push_back_elem12_null_end_advances_without_storing() {
+        let _guard = push_back_elem12_guard();
+        unsafe { install_recording_insert_aux() };
+        let mut vector = VectorStorage {
+            begin: core::ptr::null_mut(),
+            end: core::ptr::null_mut(),
+            // Distinct from end, so the fast path is taken; never
+            // dereferenced.
+            end_of_storage: 0x1000usize as *mut u8,
+        };
+
+        unsafe {
+            vector_push_back_elem12(&mut vector, 1, 2, 3);
+        }
+
+        assert_eq!(vector.end, 12usize as *mut u8, "NULL end still advances by 12");
+        assert!(insert_aux_calls().is_empty(), "end != capacity: no grow");
     }
 }
