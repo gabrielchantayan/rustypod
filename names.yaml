@@ -37072,3 +37072,72 @@ functions:
       round-trip), slow path spills the element and blx through the ops
       slot; deltas are the fp prologue and the seam indirection, the
       accepted animation.rs deviation classes. 24 instructions vs 16.
+
+  - address: 0x08257b60
+    ghidra: FUN_08257b60
+    name: event_hub_broadcast
+    size: 100
+    sig: "void event_hub_broadcast(u32 kind, u32 arg, usize payload, u32 payload_len)"
+    module: app/event_hub
+    status: ported
+    renames:
+      param_1: kind (listener-list selector 0..12, also forwarded to each
+        listener callback)
+      param_2: arg
+      param_3: payload (NOT always a pointer - call sites pass small
+        immediates, e.g. (8, 0, 0xd, 4); typed usize, never dereferenced)
+      param_4: payload_len
+      DAT_08257bc0: EVENT_HUB_STATIC_POOL (the trailing pool word holding
+        0x089cca00; the guard word 0x089cca04 is the crate static
+        EVENT_HUB_GUARD and the instance cache 0x089cca08 is
+        EVENT_HUB_INSTANCE, the media_command_facade.rs deviation)
+      FUN_082ab31c: cxa_guard_acquire (direct, ported in runtime/cxa_guard)
+      FUN_082ab338: cxa_guard_release (direct, ported in runtime/cxa_guard)
+      FUN_082579a0: event_hub_instance_get (EVENT_HUB_OPS.instance_get
+        seam - not yet ported)
+      FUN_082579d0: event_hub_dispatch (EVENT_HUB_OPS.dispatch seam - not
+        yet ported)
+    notes: >-
+      The single public entry into retailOS's process-wide event hub:
+      thirteen listener lists, one per event kind. An ADS function-local
+      static over a CACHED POINTER: guard @ 0x089cca04, instance copy @
+      0x089cca08, while the getter 0x082579a0 keeps its own cache @
+      0x089cca00 (it allocates 0x9c = 13*12 bytes - thirteen
+      begin/end/capacity vector triplets - via the ported operator_new
+      and constructs them through the array-ctor adapter 0x082ab234 with
+      dtor 0x0802df58). Algorithm: tst guard,#1 fast path;
+      cxa_guard_acquire; instance = getter(); store; cxa_guard_release;
+      then ALWAYS reload the cache (ldr r0,[r4,#8] @ 0x08257ba8, never
+      the init return) and tail-call the dispatch 0x082579d0(hub, kind,
+      arg, payload, payload_len) with the 5th argument on the stack (str
+      r8,[sp]). The dispatch walks list `kind` invoking vtable slot +0x04
+      of each listener, and the sibling 0x08257aec is the matching
+      vector-push_back subscribe. EXTENT CORRECTED: Ghidra's 96 bytes is
+      the code only; the function owns one trailing literal-pool word
+      (0x089cca00 @ 0x08257bc0) and the next function opens at
+      0x08257bc4 (an 8-byte `ldr r0,[r0,#12]; bx lr` getter) - true
+      extent 0x08257b60..0x08257bc4, 100 bytes. 42 bl call sites,
+      binary-verified by decoding every B/BL word in osos.dec: 38 plain,
+      4 predicated (blne @ 0x0818f1f8 / 0x08192d58, bleq @ 0x08192420 /
+      0x081931ac); the predicated sites gate on the CALLER's own
+      precondition (a range check, NULL checks), never on hub state - the
+      callee has no NULL guard on the hub and forwards a NULL instance to
+      the dispatch untouched. Ghidra decorates two call sites with
+      phantom 5th/6th arguments; the binary proves only r0-r3 are
+      consumed. Deviations: both callees are unported and ride the
+      EVENT_HUB_OPS seam with inert defaults (NULL getter, no-op
+      dispatch) - NOT hook-ready until they are ported; guard/cache are
+      crate statics rather than the .bss words. Host tests pin the
+      acquire-before-getter ordering, the always-reload (a re-entrant
+      broadcast from inside the getter dispatches the not-yet-stored
+      NULL, exactly like the original), the refused-acquire path (a
+      nonzero guard with bit 0 clear skips init AND release and rides the
+      stale cache), and verbatim four-word forwarding including
+      immediate-valued payloads. match.py --lib <worktree archive>: same
+      skeleton - guard load/test, cold init block (getter blx, store),
+      cache reload, arg shuffle, `str r7,[sp]` stack arg, dispatch blx;
+      deltas are LLVM inlining the ported guard pair (acquire's
+      whole-word test subsumes the tst #1 fast path - net behavior
+      identical, the guard==2 case still skips init), an fp prologue,
+      `ldrd` pair-loads of the two-field ops table, and the seam
+      indirection. 29 instructions vs 24.

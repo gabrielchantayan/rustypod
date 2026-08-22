@@ -13,6 +13,7 @@ pub mod context;
 pub mod context_scope;
 pub mod flag_2c_is_one;
 pub mod element_table;
+pub mod event_hub;
 pub mod event_list;
 pub mod event_source;
 pub mod facade_registry_walk;
