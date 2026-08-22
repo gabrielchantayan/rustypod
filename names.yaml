@@ -26448,6 +26448,71 @@ functions:
       is the ops-table blx indirection, the crate fp frame, and LLVM
       inlining the from_buffer capacity preamble.
 
+  - address: 0x081481ec
+    ghidra: FUN_081481ec
+    name: string_record_range
+    size: 208
+    sig: "void string_record_range(u32 *out, u8 *record, u32 track)"
+    module: cxx/string_record
+    status: ported
+    renames:
+      param_1: out
+      param_2: record
+      param_3: track
+      DAT_081482bc: ACTIVE_CHARACTER_SET_WORD (literal 0x089d00b4)
+      FUN_08147f7c: materialize (STRING_RECORD_OPS slot; sole call site in
+        the image - lazily decodes the record's string into the u16 range
+        words at +0x54/+0x58 behind the done byte at +0x64)
+      FUN_080f020c: string_from_range (STRING_RECORD_OPS slot; UTF-16 range
+        to UTF-8 StringObject converter with quote stripping and backslash
+        unescaping)
+      FUN_082770e0: utf8_codepoint_count_safe (direct, ported)
+      FUN_082a50b0: string_object_c_str (direct, ported)
+      FUN_08276214: utf8_next_codepoint (direct, ported)
+      FUN_082a4ef8: bit_set_test (STRING_RECORD_OPS slot; the BitSet test
+        with PRE-SPLIT word/bit index - host default is a faithful model,
+        not a stub, because the cardinality recount depends on it)
+      FUN_08277484: string_object_destroy (direct, ported)
+      FUN_081bb6a4: range copy tail (inlined as two word stores - the
+        shared 8-byte copy *out = *src, out[1] = src[1], decoded from its
+        own bytes)
+    notes: >-
+      50 bl + 0 b + 0 predicated call sites, binary-verified by decoding
+      every B/BL word in osos.dec. Ghidra's 208-byte extent is exact for
+      code: 0x081481ec..0x081482bc, plus the owned 4-byte literal pool
+      word 0x089d00b4 @ 0x081482bc; the next function opens push
+      {r4, r5, r6, lr} @ 0x081482c0. The string-range accessor of a
+      record object whose UTF-16 string is materialized lazily at
+      +0x54/+0x58 (begin/end u16 pointers). Besides copying that range
+      to out, it is one of the two feeders of the system-wide active
+      character set: the global word @ 0x089d00b4 holds a BitSet* (the
+      16-byte set of cxx/bit_set.rs) installed by the text-system object
+      constructor @ 0x081b2a38 (str r0,[r1] with r0 = this+0xb4) and
+      consumed by the same inlined insert loop @ 0x08094034. When track
+      is nonzero and the set is installed, every codepoint of the
+      string's UTF-8 transcription is added: test (word = cp >> 5, bit
+      = cp & 31), and only a clear bit bumps set->cardinality and ORs
+      the mask - the set path of the BitSet write @ 0x082746f4 with
+      value 1, inlined. The loop runs exactly utf8_codepoint_count_safe
+      iterations (no early stop on a zero decode, unlike
+      bit_set_insert_utf8) and RELOADS the global word every iteration
+      (ldr r4,[sl] in the loop), so a set swapped mid-walk receives the
+      remaining codepoints. Sampled site clusters 0x08135e50..0x081360bc,
+      0x081dc718..0x081dca64, 0x0820fbf8..0x0820fce4 all pass r2 = 1 and
+      forward the range to a sibling consumer. Deviations - the
+      0x081bb6a4 tail copy is inlined; materialize/string_from_range ride
+      seams (target transmutes the retail addresses, host defaults
+      panic); the 0x089d00b4 global is a modeled static on host.
+      match.py structural (exit 1, diff expected): same predicated
+      ldrne/cmpne guard, same global reload inside the loop, same
+      inlined cardinality++/OR block at [r4,#4] / [r1,r5,lsl#2], same
+      0x089d00b4 literal, same +0x54/+0x58 range copy; the diff is the
+      ops-table blx indirection, the crate fp frame, and a count-down
+      loop counter. Host tests: track==0 and NULL-set skips, duplicate
+      codepoint not recounted, multibyte U+00E9 marking, preset bit
+      untouched, mid-walk set swap (the reload), empty string; fixtures
+      in testing::hints::STRING_RECORD (new).
+
   - address: 0x081346e4
     ghidra: FUN_081346e4
     name: template_binding_name_or_default
