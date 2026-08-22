@@ -36581,3 +36581,48 @@ functions:
       fp prologue, inverted beq+blx forms for the three dead releases and
       register-indirect calls for the seams. match.py --lib <worktree>:
       identical skeleton, 63 instructions vs 51.
+
+  - address: 0x0826d64c
+    ghidra: FUN_0826d64c
+    name: task_registry_register
+    size: 156
+    sig: "void task_registry_register(u32 class_id, u8 *instance)"
+    module: app/task_registry
+    status: ported
+    vars: {param_1: class_id, param_2: instance, piVar3: registry, iVar1: query_result, uVar2: observer}
+    notes: >-
+      The per-task class-registry registering writer: registers the
+      (class_id, instance) pair in the current task's ctx+0x38 map,
+      lazily constructing that registry on first use. Extent verified
+      against raw bytes (pop {r0..r6,pc} @ 0x0826d6e4, the sibling
+      FUN_0826d6e8 prologue starts at 0x0826d6e8); Ghidra's 156 is
+      exact. 43 bl call sites binary-scanned over osos.dec, 0
+      predicated forms. Raw ARM: ctx = current_task_ctx_block()
+      (0x080cb828, ported); registry = ctx->+0x38 (the TaskCtx field
+      this port names); if NULL, registry = registry_container_construct
+      (operator_new(0x28), 8, 4) (0x08135308, ported), observer =
+      FUN_081f6b14(operator_new(8)), attach via registry vtable slot
+      +0x54, then ctx RE-FETCHED and the result stored at +0x38 (a task
+      switch mid-construction installs on the current task). Then entry
+      = the spilled r0/r1 pair itself (add r1, sp, #8 addresses the push
+      slots), dispatched to vtable slot +0x48 with the literal operand 4
+      (mov r2, #4); a -1 result (cmn r0, #1) gates slot +0x1c insert of
+      {entry.class_id RE-READ through the query-writable pointer
+      (ldr r0, [sp, #8]), instance from the register copy r5}. Slot
+      roles +0x48 (query)/+0x54 (attach_observer) are inferred - the
+      cold image's container vtable page 0x08984770 is 0x55-fill (the
+      registry.rs caveat); +0x1c is the known insert. No NULL guard on
+      the ctx pointer or the allocations; the vtable is reloaded per
+      dispatch. Ghidra's undefined8 return is the restored spilled pair,
+      not a result - the function returns void. The observer ctor
+      FUN_081f6b14 @ 0x081f6b14 (24 bytes incl. its literal word
+      0x0899073c @ 0x081f6b28; exactly 1 bl call site - this function)
+      is NOT ported; it sits behind the TASK_REGISTRY_OPS seam
+      (CLASS_REGISTRY_OPS pattern) with a faithful default built on the
+      ported registry_observer_base_construct (0x0810dddc) plus the
+      derived vtable store. current_task_ctx_block and
+      registry_container_construct are the ported wired defaults;
+      operator_new (0x082aadd4, ported) is called directly. match.py
+      --lib <worktree>: identical skeleton, 51 instructions vs 39; the
+      deltas are the ops-table ldrd/blx indirection, the crate fp
+      prologue, and archive bl relocations.
