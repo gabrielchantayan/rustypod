@@ -32671,6 +32671,64 @@ functions:
       folds ~(align-1) into -align via rsb/and (algebraically identical)
       and adds the crate's fp frame; core add/sub/mask structure matches.
 
+  - address: 0x082991a4
+    ghidra: FUN_082991a4
+    name: bitmap_draw_in_rect
+    size: 76
+    sig: "void bitmap_draw_in_rect(u8 *wrapper, u8 *ctx, const u32 *rect_a, const u32 *rect_b, u32 alpha)"
+    module: drivers/bitmap
+    status: ported
+    renames:
+      param_1: wrapper
+      param_2: ctx
+      param_3: rect_a
+      param_4: rect_b
+      param_5: alpha (stack-passed; every sampled caller passes 0xff)
+      FUN_082993b4: bitmap_ensure_loaded (lazy BMap loader; BITMAP_HOOKS.ensure_loaded seam, no-op default)
+      FUN_08262bdc: bitmap_draw_helper (rect-offsetting draw helper; BITMAP_HOOKS.draw seam, no-op default)
+    notes: >-
+      42 bl call sites, all plain bl (no predicated forms), no tail
+      branches, no data-word references (binary-scanned). Extent
+      verified against the next function's entry @ 0x082991f0. The
+      bitmap resource wrapper's draw-in-rect accessor, sibling of
+      bitmap_query_bounds @ 0x08299368 running the same
+      loader-then-flag-check shape over the lazy "BMap" handle cluster
+      (wrapper layout: +0x00 provider chain head, +0x04 resource id,
+      +0x08 loaded flag, +0xc4 parsed bitmap object). Algorithm: call
+      the lazy loader FUN_082993b4(wrapper) FIRST and unconditionally;
+      if the +0x08 flag is still clear, return without drawing;
+      otherwise dispatch FUN_08262bdc(ctx, *(wrapper+0xc4), rect_a,
+      rect_b, alpha, 0) - the wrapper itself (r0) is consumed and NOT
+      forwarded; the helper's sixth word is the original's hard zero
+      (mov r3,#0; str r3,[sp,#4]). The helper @ 0x08262bdc (224
+      bytes, 60 bl sites) re-bases both four-word rects and the
+      object's by the draw context's +0x2c/+0x30 origin and invokes
+      the text/layout draw engine @ 0x080f1600 with the surface
+      pointers *(ctx+0x1c)+4 / *(object+0x1c)+4, the ctx +0x11/+0x15
+      colours, the +0x10 style byte and the +0x34 clip rect. Every
+      sampled call site (0x08141f7c, 0x081989fc, 0x082130a8,
+      0x0829930c, 0x081eab20) passes 0xff for the stack argument, so
+      it is the draw opacity/alpha [INFERENCE from the uniform
+      constant]; 0x08141f7c passes the same bounds block
+      bitmap_query_bounds just filled as BOTH rect arguments. Return:
+      the epilogue (pop {r2,r3,...pc}) leaves r0 holding the helper's
+      return on the draw path and the zero flag byte on the skip path,
+      but every sampled call site overwrites r0 with its next
+      instruction, so the port is void (the string_id_record.rs
+      precedent). Deviations - both callees ride the BITMAP_HOOKS seam
+      (a new draw field added beside ensure_loaded/read_bounds;
+      documented no-op default, NOT hook-ready - the stock helper and
+      the engine beneath it must be ported before the draw path runs
+      on target). +0xc4 is read as a native-width pointer; 0xc4 is not
+      eight-aligned, so on 64-bit hosts the field is parked at 0xc8 in
+      the wrapper's unaccounted tail (the module header's
+      parked-pointer rule; on target it is exactly the 4-byte field).
+      match.py (exit 1, diff expected): blx-indirect dispatch through
+      the hooks struct and the crate's fp frame are the seam pattern;
+      the loader-first / flag-check / conditional-draw structure, the
+      +0xc4 object load, the stm {alpha, 0} stack pair and the void
+      epilogue all match.
+
   - address: 0x08299368
     ghidra: FUN_08299368
     name: bitmap_query_bounds

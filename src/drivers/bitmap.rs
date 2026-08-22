@@ -80,16 +80,47 @@ pub struct BitmapHooks {
     /// argument-spill words (see [`bitmap_query_bounds`]); the real
     /// getter always overwrites all four.
     pub read_bounds: unsafe extern "C" fn(object: *mut u8, out: *mut u32),
+    /// `FUN_08262bdc` @ 0x08262bdc (224 bytes; 60 `bl` call sites,
+    /// binary-scanned): the rect-offsetting draw helper — adds the draw
+    /// context's +0x2c/+0x30 origin into both four-word rects and the
+    /// object's, then invokes the text/layout draw engine `0x080f1600`
+    /// with the surface pointers `*(ctx + 0x1c) + 4` and
+    /// `*(object + 0x1c) + 4`, the two colours at ctx +0x11/+0x15, the
+    /// ctx +0x10 style byte, the ctx +0x34 clip rect, and the two
+    /// trailing words (`alpha`, `reserved`) verbatim.
+    /// Default: no-op — an unloaded wrapper never reaches it, and for a
+    /// loaded one the wired build simply draws nothing. NOT hook-ready:
+    /// the helper (and the engine beneath it) must be ported before the
+    /// draw path can run on target.
+    pub draw: unsafe extern "C" fn(
+        ctx: *mut u8,
+        object: *mut u8,
+        rect_a: *const u32,
+        rect_b: *const u32,
+        alpha: u32,
+        reserved: u32,
+    ),
 }
 
 unsafe extern "C" fn ensure_loaded_stub(_wrapper: *mut u8) {}
 
 unsafe extern "C" fn read_bounds_stub(_object: *mut u8, _out: *mut u32) {}
 
-/// Wired defaults: no-op stubs for both unported originals.
+unsafe extern "C" fn draw_stub(
+    _ctx: *mut u8,
+    _object: *mut u8,
+    _rect_a: *const u32,
+    _rect_b: *const u32,
+    _alpha: u32,
+    _reserved: u32,
+) {
+}
+
+/// Wired defaults: no-op stubs for the unported originals.
 pub(crate) const DEFAULT_BITMAP_HOOKS: BitmapHooks = BitmapHooks {
     ensure_loaded: ensure_loaded_stub,
     read_bounds: read_bounds_stub,
+    draw: draw_stub,
 };
 
 /// The active hooks. Host tests swap in recording mocks and restore.
@@ -171,6 +202,66 @@ pub unsafe extern "C" fn bitmap_query_bounds(
     ((bounds[1] as u64) << 32) | bounds[0] as u64
 }
 
+/// bitmap_draw_in_rect — original: `FUN_082991a4` @ 0x082991a4
+/// (76 bytes; 42 `bl` call sites, all plain `bl`, no tail branches,
+/// no data-word references — binary-scanned).
+///
+/// The bitmap wrapper's draw-in-rect accessor, the sibling of
+/// [`bitmap_query_bounds`] running the same loader-then-flag-check
+/// shape. The algorithm:
+///
+/// 1. Run the lazy loader (`FUN_082993b4`, through
+///    [`BITMAP_HOOKS`]) **first, unconditionally** — exactly as the
+///    bounds query does.
+/// 2. If the loaded flag (+0x08) is still clear, return without
+///    drawing anything.
+/// 3. Otherwise dispatch the rect-offsetting draw helper
+///    `FUN_08262bdc` (through [`BITMAP_HOOKS`]) as
+///    `draw(ctx, *(wrapper + 0xc4), rect_a, rect_b, alpha, 0)` — the
+///    helper re-bases both four-word rects and the object's by the
+///    context's +0x2c/+0x30 origin and invokes the text/layout draw
+///    engine @ 0x080f1600. The original passes a hard zero for the
+///    helper's sixth word (`mov r3, #0; str r3, [sp, #4]`).
+///
+/// Argument order: the wrapper is `this` (r0) — it is consumed by the
+/// loader and the field reads, and is NOT forwarded; the draw helper
+/// receives the caller's second argument (`ctx`) as its first. Every
+/// sampled call site (0x08141f7c, 0x081989fc, 0x082130a8, 0x0829930c,
+/// ...) passes `0xff` for `alpha`, so the word is the draw opacity
+/// [INFERENCE from the uniform constant]; `rect_a`/`rect_b` are two
+/// four-word rect blocks (0x08141f7c passes the same block twice, the
+/// bounds block [`bitmap_query_bounds`] just filled).
+///
+/// Return convention: the original's epilogue (`pop {r2, r3, ...pc}`)
+/// leaves r0 holding the draw helper's return on the draw path and
+/// the zero flag byte on the skip path — but every sampled call site
+/// overwrites r0 with its very next instruction, so the port is
+/// `void` (the string_id_record.rs setter precedent).
+///
+/// Deviations:
+///
+/// - +0xc4 is read as a native-width pointer (parked at 0xc8 on
+///   64-bit hosts — see the module header); on target it is exactly
+///   the 4-byte field at +0xc4.
+/// - The draw helper rides the [`BITMAP_HOOKS`] seam with a no-op
+///   default (documented, NOT hook-ready — the stock helper and the
+///   engine beneath it must be ported before the draw path runs on
+///   target). With the default hooks a loaded wrapper draws nothing.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn bitmap_draw_in_rect(
+    wrapper: *mut u8,
+    ctx: *mut u8,
+    rect_a: *const u32,
+    rect_b: *const u32,
+    alpha: u32,
+) {
+    (hooks().ensure_loaded)(wrapper);
+    if byte(wrapper, LOADED) != 0 {
+        let object = ptr_field(wrapper, BITMAP_OBJECT);
+        (hooks().draw)(ctx, object, rect_a, rect_b, alpha, 0);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -214,6 +305,14 @@ mod tests {
     /// (store the fake object at +0xc4, raise the +0x08 flag).
     static LOAD_RESOLVES: AtomicU32 = AtomicU32::new(0);
 
+    static DRAWS: AtomicU32 = AtomicU32::new(0);
+    static LAST_DRAW_CTX: AtomicUsize = AtomicUsize::new(usize::MAX);
+    static LAST_DRAW_OBJECT: AtomicUsize = AtomicUsize::new(usize::MAX);
+    static LAST_DRAW_RECT_A: AtomicUsize = AtomicUsize::new(usize::MAX);
+    static LAST_DRAW_RECT_B: AtomicUsize = AtomicUsize::new(usize::MAX);
+    static LAST_DRAW_ALPHA: AtomicU32 = AtomicU32::new(u32::MAX);
+    static LAST_DRAW_RESERVED: AtomicU32 = AtomicU32::new(u32::MAX);
+
     /// The four recognizable bounds words the query mock plants.
     const BOUNDS: [u32; 4] = [0x1111_0000, 0x2222_0000, 0x3333_0000, 0x4444_0000];
 
@@ -233,6 +332,23 @@ mod tests {
         }
     }
 
+    unsafe extern "C" fn recording_draw(
+        ctx: *mut u8,
+        object: *mut u8,
+        rect_a: *const u32,
+        rect_b: *const u32,
+        alpha: u32,
+        reserved: u32,
+    ) {
+        DRAWS.fetch_add(1, Ordering::SeqCst);
+        LAST_DRAW_CTX.store(ctx as usize, Ordering::SeqCst);
+        LAST_DRAW_OBJECT.store(object as usize, Ordering::SeqCst);
+        LAST_DRAW_RECT_A.store(rect_a as usize, Ordering::SeqCst);
+        LAST_DRAW_RECT_B.store(rect_b as usize, Ordering::SeqCst);
+        LAST_DRAW_ALPHA.store(alpha, Ordering::SeqCst);
+        LAST_DRAW_RESERVED.store(reserved, Ordering::SeqCst);
+    }
+
     /// Plants the +0xc4 object pointer the way the loader's store does.
     unsafe fn set_bitmap_object(wrapper: *mut u8, object: *mut u8) {
         (wrapper.add(BITMAP_OBJECT) as *mut *mut u8).write_volatile(object);
@@ -247,10 +363,18 @@ mod tests {
         QUERIES.store(0, Ordering::SeqCst);
         LAST_QUERIED_OBJECT.store(usize::MAX, Ordering::SeqCst);
         LOAD_RESOLVES.store(0, Ordering::SeqCst);
+        DRAWS.store(0, Ordering::SeqCst);
+        LAST_DRAW_CTX.store(usize::MAX, Ordering::SeqCst);
+        LAST_DRAW_OBJECT.store(usize::MAX, Ordering::SeqCst);
+        LAST_DRAW_RECT_A.store(usize::MAX, Ordering::SeqCst);
+        LAST_DRAW_RECT_B.store(usize::MAX, Ordering::SeqCst);
+        LAST_DRAW_ALPHA.store(u32::MAX, Ordering::SeqCst);
+        LAST_DRAW_RESERVED.store(u32::MAX, Ordering::SeqCst);
         unsafe {
             BITMAP_HOOKS = BitmapHooks {
                 ensure_loaded: recording_ensure_loaded,
                 read_bounds: recording_read_bounds,
+                draw: recording_draw,
             }
         };
         guard
@@ -366,5 +490,105 @@ mod tests {
         unsafe { bitmap_query_bounds(out.ptr(), wrapper.ptr(), 0, 0) };
 
         assert_eq!(out.0, [0; 4], "the no-op loader leaves the wrapper unloaded");
+    }
+
+    /// A fake draw context; only its identity (the pointer value
+    /// reaching `draw`) matters to these tests.
+    static mut FAKE_CTX: [u8; 8] = [0; 8];
+
+    #[test]
+    fn an_unloaded_wrapper_skips_the_draw() {
+        let guard = with_recording_hooks();
+        let mut wrapper = Wrapper::new(); // +0x08 clear: not loaded
+        let rect = Out::new();
+
+        unsafe {
+            bitmap_draw_in_rect(
+                wrapper.ptr(),
+                core::ptr::addr_of_mut!(FAKE_CTX) as *mut u8,
+                rect.0.as_ptr(),
+                rect.0.as_ptr(),
+                0xff,
+            )
+        };
+
+        assert_eq!(LOADS.load(Ordering::SeqCst), 1, "the loader still runs first");
+        assert_eq!(DRAWS.load(Ordering::SeqCst), 0, "nothing is drawn");
+        restore_hooks(guard);
+    }
+
+    #[test]
+    fn a_loaded_wrapper_draws_with_the_object_and_a_hard_zero_reserved_word() {
+        let guard = with_recording_hooks();
+        let mut wrapper = Wrapper::new();
+        wrapper.set_byte(LOADED, 1);
+        let object = core::ptr::addr_of_mut!(FAKE_OBJECT) as *mut u8;
+        wrapper.set_ptr(BITMAP_OBJECT, object);
+        let ctx = core::ptr::addr_of_mut!(FAKE_CTX) as *mut u8;
+        let rect_a = Out::new();
+        let rect_b = Out::new();
+
+        unsafe {
+            bitmap_draw_in_rect(wrapper.ptr(), ctx, rect_a.0.as_ptr(), rect_b.0.as_ptr(), 0xff)
+        };
+
+        assert_eq!(DRAWS.load(Ordering::SeqCst), 1);
+        assert_eq!(LAST_DRAW_CTX.load(Ordering::SeqCst), ctx as usize, "ctx is forwarded first");
+        assert_eq!(
+            LAST_DRAW_OBJECT.load(Ordering::SeqCst),
+            object as usize,
+            "the draw receives the +0xc4 object, not the wrapper"
+        );
+        assert_eq!(LAST_DRAW_RECT_A.load(Ordering::SeqCst), rect_a.0.as_ptr() as usize);
+        assert_eq!(LAST_DRAW_RECT_B.load(Ordering::SeqCst), rect_b.0.as_ptr() as usize);
+        assert_eq!(LAST_DRAW_ALPHA.load(Ordering::SeqCst), 0xff, "alpha passes through");
+        assert_eq!(
+            LAST_DRAW_RESERVED.load(Ordering::SeqCst),
+            0,
+            "the sixth word is the original's hard zero"
+        );
+        restore_hooks(guard);
+    }
+
+    #[test]
+    fn the_loader_runs_before_the_draw_flag_check() {
+        let guard = with_recording_hooks();
+        // Starts unloaded; the loader mock resolves it mid-call, so the
+        // draw path must run on the strength of the loader's stores.
+        LOAD_RESOLVES.store(1, Ordering::SeqCst);
+        let mut wrapper = Wrapper::new();
+        let rect = Out::new();
+
+        unsafe {
+            bitmap_draw_in_rect(
+                wrapper.ptr(),
+                core::ptr::addr_of_mut!(FAKE_CTX) as *mut u8,
+                rect.0.as_ptr(),
+                rect.0.as_ptr(),
+                0x80,
+            )
+        };
+
+        assert_eq!(DRAWS.load(Ordering::SeqCst), 1, "a just-loaded wrapper draws");
+        assert_eq!(LAST_DRAW_ALPHA.load(Ordering::SeqCst), 0x80);
+        restore_hooks(guard);
+    }
+
+    #[test]
+    fn the_default_hooks_draw_nothing_for_a_fresh_wrapper() {
+        let mut wrapper = Wrapper::new();
+        let rect = Out::new();
+
+        // Must simply return: no-op loader leaves the flag clear and
+        // the no-op draw stub is never reached.
+        unsafe {
+            bitmap_draw_in_rect(
+                wrapper.ptr(),
+                core::ptr::addr_of_mut!(FAKE_CTX) as *mut u8,
+                rect.0.as_ptr(),
+                rect.0.as_ptr(),
+                0xff,
+            )
+        };
     }
 }
