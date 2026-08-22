@@ -11307,6 +11307,69 @@ functions:
       release-dispatch tail all survive; expected differences are the
       seam load/blx for the async branch and LLVM's register allocation.
 
+  - address: 0x08103400
+    ghidra: FUN_08103400
+    name: message_arena_pool
+    size: 100
+    sig: "FixedBlockPool *message_arena_pool(void)"
+    module: app/message_arena
+    status: ported
+    renames:
+      FUN_0826c134: fixed_block_pool_construct (the FixedBlockPool ctor,
+        MESSAGE_ARENA_CTOR seam - not yet ported)
+      FUN_082ab31c: cxa_guard_acquire (ported, runtime/cxa_guard.rs)
+      FUN_082ab338: cxa_guard_release (ported, runtime/cxa_guard.rs)
+      FUN_082ab1c8: cxa_atexit (ported, runtime/shutdown_chain.rs)
+    notes: >-
+      The queued-message arena's singleton pool accessor - a textbook
+      ADS C++ function-local static over a fixed .bss object, the
+      node_list_get / media_command_facade_get idiom. EXTENT CORRECTED:
+      Ghidra's 80 bytes is the code only; the five literal-pool words @
+      0x08103450..0x08103460 belong to the function and the next
+      function opens at 0x08103464 (queued_message_construct's push),
+      so the true extent is 100 bytes, 0x08103400..0x08103464. 43 bl
+      call sites, 0 predicated, 0 tail b, no DATA word references -
+      verified by decoding every B/BL word and scanning for the address
+      in osos.dec; never dispatched virtually.
+      Shape: guard word 0x089ca840 (fast path loads it as [0x089ca7fc
+      + 0x44] via pool word @ 0x08103450, slow path via the 0x089ca840
+      literal @ 0x08103454 - same word); tst #1 fast path;
+      cxa_guard_acquire; FixedBlockPool ctor 0x0826c134 on the object
+      0x08a1b1d4 (pool word @ 0x08103458) with block_size 12 /
+      block_count 128; cxa_atexit(ctor's return, dtor 0x082612d0,
+      __dso_handle 0x089ca09c); cxa_guard_release; reload the OBJECT
+      literal - never the ctor's return - and return it. 128 blocks of
+      12 bytes is exactly the 12-byte envelope queued_message_construct
+      @ 0x08103464 builds (vtable, kind, payload).
+      The registered destructor 0x082612d0 is NOT a function entry: it
+      sits 0x140 bytes inside FUN_08261190 (880 bytes per
+      functions.csv) on a `ldr r0, [r6, r0, lsl #2]` - an interior
+      load through its caller's registers, so the registration could
+      never fire (and retailOS never runs exit's chain anyway). Same
+      situation as node_list_get's 0x0810516c and
+      media_command_facade_get's 0x0817f190; modeled as a no-op.
+      The guard pair and cxa_atexit are ported and called directly.
+      The ctor is not, so it rides the MESSAGE_ARENA_CTOR seam:
+      firmware-address default (0x0826c134) on target, panicking
+      default on host. Deviations - the guard word and the pool object
+      are crate statics rather than the .bss words @ 0x089ca840 /
+      0x08a1b1d4 (the block_mgr.rs deviation), both zero-init = the
+      exact pre-init state; on target FixedBlockPool is exactly the
+      original's 0x1c bytes. Host tests (7 for the accessor) pin the
+      construct/register/publish first call with the exact (12, 128)
+      geometry, the bit-0 fast path and no-reconstruction, the
+      bit-0-set short-circuit, the whole-word acquire refusal of a
+      bit-0-clear nonzero guard, the reloaded-object-literal return vs
+      the ctor's return going to the registration, and the real
+      shutdown-chain registration running the no-op destructor.
+      match.py structural: the guard-test / acquire / ctor(12, 128) /
+      register / return-object sequence survives; expected differences
+      are the seam's literal load + blx for the ctor, the ported
+      callees inlined by LLVM (the two-level guard test merges into one
+      whole-word test - outcome-identical in every guard state - and
+      the empty cxa_guard_release call deleted; the node_list_get
+      precedent) and LLVM's register allocation.
+
   - address: 0x08103550
     ghidra: FUN_08103550
     name: message_arena_alloc
@@ -11317,7 +11380,8 @@ functions:
     status: ported
     renames:
       param_1/r0/r4: size
-      FUN_08103400: message_arena_pool (the accessor, MESSAGE_ARENA_POOL seam)
+      FUN_08103400: message_arena_pool (the accessor, ported in the same
+        module)
       FUN_0826c0d8: fixed_block_pool_alloc (already ported,
         heap/fixed_block_pool.rs)
     notes: >-
@@ -11347,21 +11411,20 @@ functions:
       test always matches here and the global operator_new fallback is
       unreachable through this entry point. The parameter is still a
       real parameter and the port forwards it verbatim.
-      Deviations - the accessor is not ported yet, so it rides the
-      MESSAGE_ARENA_POOL slot (app/queued_message.rs precedent):
-      firmware-address default on target, panicking default on host.
+      Deviations - the accessor is now ported (message_arena_pool @
+      0x08103400, same module) and is called directly; the
+      MESSAGE_ARENA_POOL slot it rode while unported is gone.
       fixed_block_pool_alloc is called directly, no seam. Host tests (4)
       cover the stock 12-byte pop and relink, a non-12 size reaching the
       pool's size test (proving the argument is not folded to a
-      constant), the accessor being re-read on every call rather than
-      cached, and draining the arena to exhaustion in free-list order;
-      the host fixture widens the block stride to the host pointer
-      alignment (FreeBlock.next is 8 bytes here, 4 on target) while
-      keeping the declared block_size at the original's 12 - the
+      constant), successive allocations walking the one singleton's
+      free list, and draining the arena to exhaustion in free-list
+      order; the host fixture widens the block stride to the host
+      pointer alignment (FreeBlock.next is 8 bytes here, 4 on target)
+      while keeping the declared block_size at the original's 12 - the
       allocator only follows next, never a stride. match.py (--size 24):
       identical skeleton (mov r4,r0 / accessor / mov r1,r4 / pop / tail
-      b); the diffs are the seam's literal load + blx instead of the
-      direct bl, and LLVM's fp frame.
+      b); the diffs are the accessor's direct bl and LLVM's fp frame.
 
   - address: 0x08266a48
     ghidra: FUN_08266a48
