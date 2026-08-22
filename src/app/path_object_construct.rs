@@ -1,10 +1,16 @@
-//! The path class's converting-constructor veneer: base-construct a
-//! two-word string object from a C string, then re-plant the vtable
-//! word with the StringObject-derived path class's vtable.
+//! The path class's constructors over caller-supplied two-word string
+//! object storage: base-construct from a C string and re-plant the
+//! vtable word with the StringObject-derived path class's vtable, or
+//! default-construct an empty path object directly.
 //!
-//! Port:
+//! Ports:
 //! - [`path_object_construct`] — original: `FUN_08279284` @ 0x08279284
 //!   (20 bytes; **24 `bl` call sites**, grep on `decomp/osos.asm`).
+//! - [`path_object_default_construct`] — original: `FUN_082792cc` @
+//!   0x082792cc (20 bytes: five ARM instructions plus the 4-byte vtable
+//!   literal @ 0x082792e0, so 24 bytes of true extent; **42 `bl`, 0 `b`,
+//!   0 predicated call sites**, binary-scanned by decoding every B/BL
+//!   word in `work/firmware/osos.dec`).
 //!
 //! ## What it is
 //!
@@ -86,6 +92,54 @@
 //!   faithful local default to this symbol (the
 //!   `path_probe_via_facade` rewiring precedent), so this symbol IS
 //!   hook-ready.
+//!
+//! ## The default constructor
+//!
+//! `path_object_default_construct` — original: `FUN_082792cc` @
+//! 0x082792cc — is the same class's DEFAULT constructor,
+//! `PathObject()`, decoded from the raw ARM:
+//!
+//! ```text
+//! 082792cc  mov  r1, #0
+//! 082792d0  str  r1, [r0, #4]     @ this->payload = NULL
+//! 082792d4  ldr  r1, [0x82792e0]  @ 0x089a60d8: path-class vtable
+//! 082792d8  str  r1, [r0, #0x0]   @ this->vtable = it
+//! 082792dc  bx   lr               @ return this (r0 untouched)
+//! 082792e0  .word 0x089a60d8      @ literal pool; the next function
+//!                                   starts at 0x082792e4
+//! ```
+//!
+//! Unlike the converting veneer this is a LEAF: it does not chain the
+//! base StringObject default constructor @ 0x08277440 (same shape —
+//! vtable at +0x00, NULL payload at +0x04, `bx lr` — but with the BASE
+//! vtable 0x089a6044). The base's vtable store would be dead one
+//! instruction later, so the compiler folded base+derived into the two
+//! stores above, with the payload NULL written FIRST (the base
+//! constructor's own order is vtable-then-payload; here it is
+//! payload-then-vtable — unobservable to any caller, reproduced in the
+//! port's store order).
+//!
+//! Call-site census: **42 `bl`, 0 `b`, 0 predicated** sites and ZERO
+//! data-word references (a full-image word scan finds no 0x082792cc
+//! outside the literal-free code stream — the address appears in no
+//! vtable, so the constructor is never dispatched virtually). Sampled
+//! sites default-construct stack-resident path-object guards in pairs
+//! — 0x0805aa08/0x0805aa10 (`add r0, sp, #12` / `add r0, sp, #4`, both
+//! destroyed through the ported `string_object_destroy_veneer` @
+//! 0x082792fc on the error path) and 0x082736ec/0x082736f4
+//! (`add r0, sp, #16` / `add r0, sp, #8`). Every caller passes raw
+//! two-word storage; `this` is never NULL-guarded, exactly like the
+//! base default constructor.
+//!
+//! Faithful details:
+//!
+//! - Both words are written UNCONDITIONALLY: constructing over an
+//!   already-populated object discards its vtable AND its payload
+//!   pointer (the original leaks the old payload — no release — and so
+//!   does the port).
+//! - The return is `this` by register passthrough: r0 is never
+//!   written, so the ADS constructor convention hands the caller its
+//!   own storage pointer back.
 
 use crate::cxx::string_object::{
     string_object_construct_from_cstr, StringObject, StringObjectVtable,
@@ -114,6 +168,35 @@ pub unsafe extern "C" fn path_object_construct(
     path: *const u8,
 ) -> *mut StringObject {
     let this = string_object_construct_from_cstr(this, path);
+    (*this).vtable = PATH_OBJECT_VTABLE_ADDRESS as *const StringObjectVtable;
+    this
+}
+
+/// path_object_default_construct — original: `FUN_082792cc` @
+/// 0x082792cc (20 bytes of code + the 4-byte vtable literal @
+/// 0x082792e0; **42 `bl`, 0 `b`, 0 predicated call sites**,
+/// binary-scanned against `work/firmware/osos.dec`; zero data-word
+/// references, so never virtually dispatched).
+///
+/// Default-constructs the two-word [`StringObject`] at `this` as an
+/// EMPTY path object: NULLs the +0x04 payload word, then plants the
+/// derived path-class vtable identity [`PATH_OBJECT_VTABLE_ADDRESS`]
+/// at +0x00 (the original's store order), returning `this` by r0
+/// passthrough. A leaf — unlike [`path_object_construct`] it does not
+/// chain the base constructor; the folded stores are the whole body.
+/// Neither word survives: both are written unconditionally.
+///
+/// # Safety
+///
+/// `this` must address at least two writable words of raw storage.
+/// The original NULL-`this` faults on the payload store; so does the
+/// port.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn path_object_default_construct(
+    this: *mut StringObject,
+) -> *mut StringObject {
+    (*this).payload = core::ptr::null_mut();
     (*this).vtable = PATH_OBJECT_VTABLE_ADDRESS as *const StringObjectVtable;
     this
 }
@@ -284,6 +367,95 @@ mod tests {
                     "payload word matches the reference composition"
                 );
             }
+        }
+    }
+
+    // --- path_object_default_construct @ 0x082792cc ---
+
+    /// The independent byte-level reference of the original's two
+    /// stores: payload NULL first, derived vtable identity second,
+    /// this returned — over raw 8-byte storage, nothing else touched.
+    unsafe fn default_construct_reference(this: *mut StringObject) -> *mut StringObject {
+        (*this).payload = core::ptr::null_mut();
+        (*this).vtable = PATH_OBJECT_VTABLE_ADDRESS as *const StringObjectVtable;
+        this
+    }
+
+    #[test]
+    fn default_construct_returns_this_verbatim() {
+        let mut storages: Vec<StringObject> =
+            (0..4).map(|_| garbage_storage()).collect();
+        for storage in storages.iter_mut() {
+            let this = storage as *mut StringObject;
+            unsafe {
+                assert_eq!(
+                    path_object_default_construct(this),
+                    this,
+                    "r0 is never written: the caller's storage pointer passes through"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn default_construct_defines_both_words_from_garbage() {
+        let mut storage = garbage_storage();
+        unsafe {
+            path_object_default_construct(&mut storage);
+            assert_eq!(
+                storage.vtable as usize, PATH_OBJECT_VTABLE_ADDRESS,
+                "+0x00 is the literal-pool identity 0x089a60d8, not the modeled base vtable"
+            );
+            assert_ne!(
+                storage.vtable,
+                &STRING_OBJECT_VTABLE as *const _,
+                "no base-constructor vtable ever lands: the leaf folds it away"
+            );
+            assert!(
+                storage.payload.is_null(),
+                "+0x04 is NULLed — the empty path object's payload"
+            );
+        }
+    }
+
+    #[test]
+    fn default_construct_over_an_existing_object_discards_both_words() {
+        // Both stores are unconditional: reconstructing over a live
+        // object overwrites its vtable AND its payload pointer (the
+        // original leaks the old payload; the port reproduces the
+        // overwrite, the leak is the caller's bug either way).
+        let fake_payload = 0x0bad_f00dusize as *mut u8;
+        let mut storage = StringObject {
+            vtable: PATH_OBJECT_VTABLE_ADDRESS as *const StringObjectVtable,
+            payload: fake_payload,
+        };
+        unsafe {
+            path_object_default_construct(&mut storage);
+            assert_eq!(storage.vtable as usize, PATH_OBJECT_VTABLE_ADDRESS);
+            assert!(
+                storage.payload.is_null(),
+                "the prior payload pointer is discarded, not released"
+            );
+        }
+    }
+
+    #[test]
+    fn default_construct_matches_the_byte_reference() {
+        let mut ported = garbage_storage();
+        let mut model = garbage_storage();
+        unsafe {
+            assert_eq!(
+                path_object_default_construct(&mut ported),
+                &mut ported as *mut _,
+                "ported returns its own storage"
+            );
+            assert_eq!(
+                default_construct_reference(&mut model),
+                &mut model as *mut _,
+                "reference returns its own storage"
+            );
+            assert_eq!(ported.vtable as usize, model.vtable as usize);
+            assert_eq!(ported.payload, model.payload);
         }
     }
 }

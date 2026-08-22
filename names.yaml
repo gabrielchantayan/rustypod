@@ -33042,6 +33042,59 @@ functions:
       with the same 0x089a60d8 literal-pool word; the diff is the
       crate fp frame.
 
+  - address: 0x082792cc
+    ghidra: FUN_082792cc
+    name: path_object_default_construct
+    size: 20
+    sig: "StringObject *path_object_default_construct(StringObject *this)"
+    module: app/path_object_construct
+    status: ported
+    renames:
+      param_1/r0: "this (raw two-word StringObject storage; never written
+        to a register, so r0 passes through as the return - the ADS ctor
+        convention Ghidra drops in decomp/c/026/082792cc_FUN_082792cc.c,
+        which shows a void return)"
+      DAT_082792e0: "PATH_OBJECT_VTABLE_ADDRESS (0x089a60d8, the
+        StringObject-derived path class's vtable; binary-verified
+        against osos.dec)"
+      r1: scratch (the NULL, then the vtable literal)
+    notes: >-
+      ADS C++ default constructor PathObject() of the same
+      StringObject-derived path class as path_object_construct @
+      0x08279284: mov r1,#0 / str r1,[r0,#4] (payload = NULL) / ldr
+      r1,[pc,#4] (literal @ 0x082792e0 = 0x089a60d8) / str r1,[r0]
+      (vtable) / bx lr. 20 bytes of code + the 4-byte literal, so 24
+      bytes of true extent; the next function starts at 0x082792e4 (the
+      cmp r0,#0/push NULL-guarded delete helper). A LEAF: unlike the
+      converting veneer it does NOT chain the base default ctor @
+      0x08277440 (ported string_default_construct) - the base's vtable
+      store would be dead one instruction later, so base+derived fold
+      into the two stores, payload NULL written FIRST (the base ctor's
+      own order is vtable-then-payload; unobservable either way,
+      reproduced in the port). 42 bl / 0 b / 0 predicated call sites
+      (binary-scanned by decoding every B/BL word in osos.dec); ZERO
+      data-word references to 0x082792cc in the image, so the ctor is
+      never dispatched through any vtable. Sampled sites build
+      stack-resident path-object guards in pairs: 0x0805aa08/
+      0x0805aa10 (add r0,sp,#12 / add r0,sp,#4, both destroyed through
+      the ported string_object_destroy_veneer @ 0x082792fc on the error
+      path) and 0x082736ec/0x082736f4 (add r0,sp,#16 / add r0,sp,#8).
+      this is never NULL-guarded (the original faults on the payload
+      store); both words are written UNCONDITIONALLY, so constructing
+      over a live object discards vtable AND payload pointer (the
+      original leaks the old payload; so does the port). The planted
+      vtable is the ROM identity constant PATH_OBJECT_VTABLE_ADDRESS
+      shared with path_object_construct (nothing ported dispatches
+      through it). Host tests:
+      src/app/path_object_construct.rs::tests::default_construct_returns_this_verbatim
+      / default_construct_defines_both_words_from_garbage /
+      default_construct_over_an_existing_object_discards_both_words /
+      default_construct_matches_the_byte_reference. match.py (exit 1,
+      diff expected): same two-stores-and-return structure with the
+      same 0x089a60d8 literal-pool word; LLVM folds the two strs into
+      one stm r0,{r1,r2} (value-identical: vtable at +0x00, NULL at
+      +0x04) and adds the crate fp frame.
+
   - address: 0x081655e0
     ghidra: FUN_081655e0
     name: service_manager_get
