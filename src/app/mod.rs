@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod animation;
 pub mod class_6800;
 pub mod buffer_refill_request;
 pub mod byte_flag_at_d_is_one;

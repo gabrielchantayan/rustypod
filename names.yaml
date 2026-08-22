@@ -36512,3 +36512,72 @@ functions:
       the seam indirection (`ldr r5,[r0,#0x30]; blx r5` - slot offset
       0x30 = the thirteenth SingletonCtors field), an fp prologue and
       the inverted branch LLVM chose for the cold path.
+
+  # --- UI animation constructor over three refcounted scalars ---
+  - address: 0x08166b88
+    ghidra: FUN_08166b88
+    name: animation_init
+    size: 212
+    sig: "Animation *animation_init(Animation *this, FixedValue *current_value, FixedValue *from_value, FixedValue *to_value)"
+    module: app/animation
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: current_value
+      param_3/r2: from_value
+      param_4/r3: to_value
+      DAT_08166c54: ANIMATION_VTABLE (pool word 0x08987f00)
+      DAT_08166c58: SCHEDULER_SINGLETON_GLOBAL (word 0x089cc7e0)
+      FUN_08138460: refcounted_base_init (direct, ported in app/fixed_value)
+      FUN_08273a14: retain_value (unported, ops-seam default)
+      FUN_082739e0: release_value (unported, ops-seam default)
+      FUN_082738e0: wheel_remove (unported, ops-seam default)
+      FUN_08273898: wheel_insert (unported, ops-seam default)
+    notes: >-
+      Full constructor of the UI animation object that binds three
+      refcounted Q16.16 scalars (animated value + from/to endpoints) and
+      enqueues itself in the firmware timing wheel. Callers build it as
+      animation_init(operator_new(0x24) @ 0x082aadd4, current, from, to);
+      e.g. 0x08180a54 feeds two fresh fixed_value_init(x << 16) scalars
+      plus the view's stored property slot at +0x30. EXTENT: true size is
+      212 bytes, not Ghidra's 204 - fifty instruction words run
+      0x08166b88..0x08166c50 and the trailing pool holds TWO words (the
+      animation vtable 0x08987f00 @ 0x08166c54 and the scheduler pointer
+      word 0x089cc7e0 @ 0x08166c58); Ghidra dropped the last pool word,
+      and the next real function opens push {lr} at 0x08166c5c (the
+      sibling default ctor, same vtable, never touches the wheel). The
+      preceding setter 0x08166b2c swaps slot +0x20 and raises-but-never-
+      lowers this->rank, confirming the field map. CALL COUNT:
+      binary-verified by decoding every B/BL word in osos.dec - exactly
+      44 call sites, all plain unconditional bl, no predicated forms, no
+      b tail branches, no DATA references; callers invoke the ctor
+      directly on fresh storage with no NULL guard. ALGORITHM:
+      refcounted_base_init(this) @ 0x08138460, override vtable with
+      0x08987f00, zero slots +0x18/+0x1c/+0x20, defensive
+      wheel_remove([0x089cc7e0], this), retain(current)/retain(from)/
+      retain(to) in that order, then the ADS memberwise-assign releases
+      of the old slot values checked +0x20/+0x18/+0x1c order - all three
+      statically dead because the slots were just cleared, reproduced for
+      structure parity and pinned by a test; store stm {from,to,current}
+      at +0x18..+0x20, rank = max(from.aux, to.aux, current.aux) + 1
+      stored at +0x08 (unsigned selects movls/movhi, wraps on aux
+      0xffffffff; plain scalars carry aux 0 so such an animation lands at
+      rank 1 = bucket 0), wheel_insert(table, this), return this. THE
+      WHEEL: insert 0x08273898 buckets a node at table[rank - 1], threads
+      the doubly-linked list through +0x0c/+0x10 and sets linked flag bit
+      0 of byte +0x14; remove 0x082738e0 unlinks only when that flag is
+      set (hence the defensive no-op here); both take the table word
+      stored at global 0x089cc7e0, which the lazy allocator 0x082739a0
+      fills with operator_new(0x34) whose first 48 bytes are 12 bucket
+      heads. retain 0x08273a14 / release 0x082739e0 are flags-bit-1-gated
+      += 4 / -= 4 on the +0x14 word, release dispatching the deleting
+      destructor through vtable +0x04 when the count drains. Deviations:
+      the four callees are unported and dispatch through the
+      ANIMATION_INIT_OPS read_volatile seam (pending_event_take pattern),
+      target defaults transmute the ROM addresses, host defaults inert;
+      the scheduler word is loaded once instead of twice (nothing between
+      the two stock loads can change it); the stale 0x0898xxxx page
+      caveat applies to the vtable (address constant only); LLVM emits an
+      fp prologue, inverted beq+blx forms for the three dead releases and
+      register-indirect calls for the seams. match.py --lib <worktree>:
+      identical skeleton, 63 instructions vs 51.
