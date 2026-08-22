@@ -8,6 +8,8 @@
 //! - [`capture_context_fields`] — `FUN_0826fda0` @ 0x0826fda0.
 //! - [`scoped_context_construct`] — `FUN_08270394` @ 0x08270394.
 //! - [`scoped_context_destroy`] — `FUN_08270414` @ 0x08270414.
+//! - [`scoped_context_owner_flags_any_8062`] — `FUN_082a40c8` @ 0x082a40c8,
+//!   a validity-gated predicate over the token owner's flags word.
 //! ## What the class is
 //!
 //! Every constructor in the family plants the same vtable literal,
@@ -124,8 +126,19 @@ pub const SCOPED_CONTEXT_VTABLE_ADDRESS: usize = 0x089a_5b30;
 
 /// The class vtable, modeled down to the fifteen words the image
 /// serializes at 0x089a5b30..0x089a5b68 (the sixteenth is zero). All
-/// fifteen point into undecoded code; only slot +0x08 has a known
-/// consumer (`FUN_0826fd38` calls it as `this->slot8(this)`).
+/// fifteen point into undecoded code. Slot +0x08 is the token's
+/// validity query: `FUN_0826fd38` calls it as `this->slot8(this)`, and
+/// the whole 0x082a4 predicate family (0x082a3fc4, 0x082a40c8 — ported
+/// below as [`scoped_context_owner_flags_any_8062`] — 0x082a4574,
+/// 0x082a45a4, plus the string getters 0x082a4104/0x082a4188/0x082a420c)
+/// gates on it the same way. Anomaly: the slot's serialized word,
+/// 0x0820ca2c, lands 0x40 bytes INTO `FUN_0820c9ec` (a 96-byte retry
+/// loop @ 0x0820c9ec..0x0820ca4b, Ghidra's own boundary), where the
+/// first instruction is a flags-dependent `ble` — not a callable entry.
+/// The base-class default is therefore effectively undispatchable and
+/// live tokens must carry an overriding derived vtable planted by the
+/// filling call (e.g. the callers' vtable+0x170/vtable+0x22c methods).
+/// Recorded, not invented.
 #[repr(C)]
 pub struct ScopedContextVtable {
     /// The fifteen code pointers at 0x089a5b30..0x089a5b68.
@@ -295,6 +308,89 @@ pub unsafe extern "C" fn scoped_context_construct(
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub extern "C" fn scoped_context_destroy(_this: *mut ScopedContext) {}
+
+/// Vtable-slot index of the token validity query (the original's
+/// `ldr r1, [r0, #8]`): word 2 of the class vtable.
+const VALIDITY_SLOT: usize = 0x08 / 4;
+
+/// Word index of the owner flags word (the original's
+/// `ldr r0, [r0, #0xbc]`). Word-indexed so the aligned read addresses
+/// the same slot on target and host, the ROOT_SERVICE_CONTEXT_SLOT
+/// pattern above.
+const OWNER_FLAGS_SLOT: usize = 0xbc / 4;
+
+/// The mask tested against the owner's +0xbc flags word, serialized as
+/// the original's only literal-pool word @ 0x082a4100: bits 1, 5, 6 and
+/// 15. What the four bits mean does not survive in the image, so the
+/// mask keeps its numeric name.
+const OWNER_FLAGS_MASK_8062: u32 = 0x8062;
+
+/// ABI of the token vtable's slot-+0x08 validity method.
+type ScopedContextValidity = unsafe extern "C" fn(*const ScopedContext) -> u32;
+
+/// scoped_context_owner_flags_any_8062 — original: `FUN_082a40c8` @
+/// 0x082a40c8 (60 bytes: 56 code + the 4-byte mask literal @ 0x082a4100
+/// that Ghidra's 56-byte extent drops; **42 `bl` call sites**,
+/// binary-scanned by decoding every B/BL word in osos.dec — every one an
+/// unconditional `bl`, no predicated forms, so no caller NULL-guards the
+/// token).
+///
+/// ```text
+/// 082a40c8  push  {r4, lr}
+/// 082a40cc  mov   r4, r0
+/// 082a40d0  ldr   r0, [r0]         @ token vtable
+/// 082a40d4  ldr   r1, [r0, #8]     @ slot +0x08 validity method
+/// 082a40d8  mov   r0, r4
+/// 082a40dc  blx   r1
+/// 082a40e0  cmp   r0, #0
+/// 082a40e4  ldrne r0, [r4, #8]     @ owner
+/// 082a40e8  ldrne r1, [pc, #16]    @ 0x082a4100 -> 0x00008062
+/// 082a40ec  ldrne r0, [r0, #0xbc]  @ owner flags word
+/// 082a40f0  tstne r0, r1
+/// 082a40f4  moveq r0, #0
+/// 082a40f8  movne r0, #1
+/// 082a40fc  pop   {r4, pc}
+/// ```
+///
+/// Validity-gated owner-flags predicate over the scoped-context token.
+/// It dispatches the token's vtable slot +0x08 (the same virtual
+/// `FUN_0826fd38` gates on) and, only when that returns nonzero, reads
+/// the owner's flags word at +0xbc and returns 1 when any of the 0x8062
+/// bits is set, else 0. When the slot returns 0 the owner is never
+/// dereferenced, so a NULL-owner token answers 0 instead of faulting.
+/// One of a family of same-shaped predicates over the same owner word —
+/// 0x082a3fc4 tests bit 3, 0x082a45a4 tests bit 21, 0x082a4574 tests
+/// owner byte +0x8f bit 0 — which callers AND together to decide what
+/// an owner supports: the context-menu builder 0x08222eec suppresses an
+/// item only when all four answer 0, and the media-player event
+/// dispatcher 0x0817c468 compares the predicate across two track
+/// tokens. Of the 42 call sites, 39 build their token with
+/// scoped_context_construct within the same function (binary-scanned
+/// correlation); the rest receive it from their own caller.
+///
+/// Deviations: the token and its vtable are this module's `#[repr(C)]`
+/// models, so the vtable load and slot index are struct field accesses
+/// rather than literal byte offsets (the module's standing deviation);
+/// the slot word is transmuted to the call ABI at the dispatch point,
+/// the ui/element_reference.rs idiom. The owner flags read is an
+/// aligned word read — the owner is a 4-aligned framework object and
+/// +0xbc is word-aligned. LLVM narrows that read to an `ldrh` because
+/// the mask fits in 16 bits and the upper half cannot feed the
+/// boolean result; behaviorally identical on plain RAM, noted for the
+/// match.py reviewer.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn scoped_context_owner_flags_any_8062(
+    this: *const ScopedContext,
+) -> u32 {
+    let validity: ScopedContextValidity =
+        core::mem::transmute((*(*this).vtable).slots[VALIDITY_SLOT]);
+    if validity(this) == 0 {
+        return 0;
+    }
+    let flags = ((*this).owner as *const u32).add(OWNER_FLAGS_SLOT).read();
+    (flags & OWNER_FLAGS_MASK_8062 != 0) as u32
+}
 
 #[cfg(test)]
 mod tests {
@@ -529,5 +625,125 @@ mod tests {
         assert_eq!(SCOPED_CONTEXT_VTABLE.slots[2], 0x0820_ca2c);
         assert_eq!(SCOPED_CONTEXT_VTABLE.slots[14], 0x083a_0aa0);
         assert_eq!(SCOPED_CONTEXT_VTABLE_ADDRESS, 0x089a_5b30);
+    }
+
+    static mut VALIDITY_CALLS: u32 = 0;
+    static mut VALIDITY_TOKEN: *const ScopedContext = ptr::null();
+    static mut VALIDITY_RESULT: u32 = 0;
+
+    unsafe extern "C" fn recording_validity(token: *const ScopedContext) -> u32 {
+        VALIDITY_CALLS += 1;
+        VALIDITY_TOKEN = token;
+        VALIDITY_RESULT
+    }
+
+    /// Token + owner fixture with a recording slot-+0x08 method. The
+    /// owner buffer is one word past the flags word so the read cannot
+    /// drift out of bounds. Self-referential: call [`link_fixture`]
+    /// after the fixture is at its final address.
+    struct PredicateFixture {
+        vtable: ScopedContextVtable,
+        owner: [u32; OWNER_FLAGS_SLOT + 2],
+        token: ScopedContext,
+    }
+
+    fn predicate_fixture(flags: u32) -> PredicateFixture {
+        let mut slots = [0usize; 15];
+        slots[VALIDITY_SLOT] = recording_validity as usize;
+        let mut fixture = PredicateFixture {
+            vtable: ScopedContextVtable { slots },
+            owner: [0; OWNER_FLAGS_SLOT + 2],
+            token: ScopedContext {
+                vtable: ptr::null(),
+                owner_valid: 1,
+                owner: ptr::null_mut(),
+                service_context: ptr::null_mut(),
+                registry_token: ptr::null_mut(),
+                mode: 0,
+            },
+        };
+        fixture.owner[OWNER_FLAGS_SLOT] = flags;
+        fixture
+    }
+
+    fn link_fixture(fixture: &mut PredicateFixture, owner_null: bool) {
+        fixture.token.vtable = &fixture.vtable;
+        fixture.token.owner = if owner_null {
+            ptr::null_mut()
+        } else {
+            fixture.owner.as_mut_ptr() as *mut u8
+        };
+    }
+
+    fn reset_validity_recording(result: u32) {
+        unsafe {
+            VALIDITY_CALLS = 0;
+            VALIDITY_TOKEN = ptr::null();
+            VALIDITY_RESULT = result;
+        }
+    }
+
+    #[test]
+    fn predicate_short_circuits_when_the_token_is_not_valid() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        reset_validity_recording(0);
+        // A NULL owner proves the short-circuit: any read of it faults.
+        let mut fixture = predicate_fixture(0xffff_ffff);
+        link_fixture(&mut fixture, true);
+        let result = unsafe { scoped_context_owner_flags_any_8062(&fixture.token) };
+        assert_eq!(result, 0);
+        unsafe {
+            assert_eq!(VALIDITY_CALLS, 1);
+            assert_eq!(VALIDITY_TOKEN as usize, &fixture.token as *const _ as usize);
+        }
+    }
+
+    #[test]
+    fn predicate_is_zero_when_no_mask_bit_is_set() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        for flags in [0u32, !OWNER_FLAGS_MASK_8062, 0x10, 0x8, 0x0020_0000] {
+            reset_validity_recording(1);
+            let mut fixture = predicate_fixture(flags);
+            link_fixture(&mut fixture, false);
+            let result = unsafe { scoped_context_owner_flags_any_8062(&fixture.token) };
+            assert_eq!(result, 0, "flags {flags:#x} must not trip the 0x8062 mask");
+            unsafe {
+                assert_eq!(VALIDITY_CALLS, 1);
+            }
+        }
+    }
+
+    #[test]
+    fn predicate_is_one_for_each_individual_mask_bit() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        // 0x8062 = bits 1, 5, 6, 15 — each alone must answer 1.
+        for flags in [0x0002u32, 0x0020, 0x0040, 0x8000] {
+            reset_validity_recording(1);
+            let mut fixture = predicate_fixture(flags);
+            link_fixture(&mut fixture, false);
+            let result = unsafe { scoped_context_owner_flags_any_8062(&fixture.token) };
+            assert_eq!(result, 1, "single mask bit {flags:#x} must answer 1");
+        }
+    }
+
+    #[test]
+    fn predicate_is_one_with_mask_and_stray_bits_mixed() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        reset_validity_recording(1);
+        let mut fixture = predicate_fixture(OWNER_FLAGS_MASK_8062 | 0x0001_0000);
+        link_fixture(&mut fixture, false);
+        let result = unsafe { scoped_context_owner_flags_any_8062(&fixture.token) };
+        assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn predicate_treats_any_nonzero_validity_as_true() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        // The original gates on `cmp r0, #0`, not on a specific value.
+        reset_validity_recording(0xffff_ffff);
+        let mut fixture = predicate_fixture(0x8000);
+        link_fixture(&mut fixture, false);
+        let result = unsafe { scoped_context_owner_flags_any_8062(&fixture.token) };
+        assert_eq!(result, 1);
     }
 }

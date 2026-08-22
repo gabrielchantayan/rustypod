@@ -27288,6 +27288,59 @@ functions:
       {fp,lr}; mov fp,sp; pop {fp,pc}` - the crate frame around the
       original's bare `bx lr`, identical to ui_noop_f7f4.
 
+  - address: 0x082a40c8
+    ghidra: FUN_082a40c8
+    name: scoped_context_owner_flags_any_8062
+    size: 60
+    sig: "u32 scoped_context_owner_flags_any_8062(const ScopedContext *this)"
+    module: app/scoped_context
+    status: ported
+    vars: {param_1: this, DAT_082a4100: OWNER_FLAGS_MASK_8062}
+    notes: >-
+      42 bl call sites, binary-scanned by decoding every B/BL word in
+      osos.dec - every one an unconditional bl, no predicated forms, so
+      no caller NULL-guards the token (the callee itself faults on a
+      NULL this, exactly like the port). Ghidra's 56-byte extent drops
+      the trailing literal-pool word @ 0x082a4100 (= 0x00008062, the
+      mask), so the true extent is 60. Validity-gated owner-flags
+      predicate over the ScopedContext token (app/scoped_context.rs):
+      dispatches the token's vtable slot +0x08 and, only when it
+      returns nonzero, reads the owner's flags word at +0xbc and
+      returns 1 when any of bits 1, 5, 6, 15 is set, else 0. A failing
+      slot short-circuits, so a NULL-owner token answers 0 without a
+      dereference. One of a family of same-shaped predicates over the
+      same owner word - 0x082a3fc4 tests bit 3, 0x082a45a4 tests bit
+      21, 0x082a4574 tests owner byte +0x8f bit 0 - that callers AND
+      together: the context-menu builder 0x08222eec (the
+      "HandleAddToOTG"/"HandleViewAlbum"/"HandleCancel" literals)
+      suppresses an item only when all four answer 0, and the
+      media-player event dispatcher 0x0817c468 compares the predicate
+      across two track tokens. 39 of the 42 call sites build their
+      token with scoped_context_construct within the same function
+      (binary-scanned correlation); the rest receive it from their own
+      caller. The token argument is NOT virtual-dispatched itself: no
+      data word in the image holds 0x082a40c8. Base-vtable anomaly,
+      recorded not invented: the serialized slot +0x08 word 0x0820ca2c
+      lands 0x40 bytes INSIDE FUN_0820c9ec (a 96-byte retry loop @
+      0x0820c9ec..0x0820ca4b per Ghidra's own boundary) where the first
+      instruction is a flags-dependent ble, so the base-class default
+      is effectively undispatchable and live tokens must carry an
+      overriding derived vtable planted by the filling call (callers'
+      vtable+0x170/vtable+0x22c methods). The port dispatches whatever
+      vtable the token carries, so the anomaly costs it nothing.
+      Deviations: the repr(C) ScopedContext/ScopedContextVtable models
+      stand in for literal offsets; LLVM narrows the +0xbc read to an
+      ldrh because 0x8062 fits in 16 bits (identical on plain RAM);
+      LLVM branches (beq) where ADS predicated (ldrne/tstne/moveq) and
+      synthesizes the mask with mov/orr instead of a literal pool.
+      Host tests: slot-0 short-circuit with a NULL owner (proves no
+      dereference), zero and non-mask bits answer 0, each of bits
+      1/5/6/15 singly answers 1, mask+stray mix answers 1, any nonzero
+      slot result is truthy. match.py structural: same vtable load,
+      same slot +0x08 blx dispatch, same gated owner +0xbc read, same
+      0x8062 mask, same 0/1 result; the diff is the crate fp frame and
+      the three deviations above.
+
   # --- Application context scope (app/context_scope) ---
   - address: 0x082840e8
     ghidra: FUN_082840e8
