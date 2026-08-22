@@ -35115,6 +35115,71 @@ functions:
       original's order; the differences are the crate fp frame, the
       indirect `blx` hook dispatch in place of three direct `bl`s, and
       LLVM keeping the NULL result in r6 instead of reusing r4.
+  - address: 0x080f6efc
+    ghidra: FUN_080f6efc
+    name: iap_packet_reinit
+    size: 48
+    sig: "u32 iap_packet_reinit(u8 *packet, u8 *owner, u8 *context, u8 lingo, u16 command, const u8 *payload, u32 payload_len)"
+    module: app/iap_packet
+    status: ported
+    renames:
+      param_1/r0: packet
+      param_2/r1: owner
+      param_3/r2: context
+      param_4/r3: lingo
+      param_5: command
+      param_6: payload
+      param_7: payload_len
+    notes: >-
+      The reinitialize-in-place entry of the iAP packet class - a pure
+      identity forwarder into the file-local packet initializer @
+      0x080f73a0 (the same init hook iap_packet_create uses).
+      EXTENT - 48 bytes, 0x080f6efc..0x080f6f2c, 12 instructions, no
+      literal pool. Ghidra's 48 is exact: the next function opens at
+      0x080f6f2c with `push {r4-r11,lr}; sub sp,sp,#0x14`.
+      43 `bl` and 0 `b` call sites, ALL unconditional (cond=e, zero
+      predicated forms), counted by decoding every branch word in
+      osos.dec; 0x080f6efc appears in no data word, so it is never
+      dispatched virtually.
+      Algorithm - push {r1-r5,lr} (an 0x18-byte frame), ldm/stm the
+      caller's three stack arguments down into the bottom of it, ride
+      r0-r3 through a three-register shuffle (r4/lr/ip) untouched, bl
+      0x080f73a0, pop and return. Nothing is tested, added or masked;
+      the wrapper exists because the initializer is file-local and the
+      lingo handlers link against this out-of-line copy. There is no
+      NULL guard in the wrapper and none at any call site.
+      Semantics - the 43 call sites are reply paths: each passes its
+      incoming request packet as r0, reloads the packet's own owner
+      field (+0x00) into r1 and passes the reply's
+      lingo/command/payload/length; the Extended Interface handler @
+      0x08139974 reads the lingo back out of the packet's own +0x0e.
+      Since the initializer's first act is releasing any payload the
+      packet already holds (release helper @ 0x080f7420), this call is
+      how a request packet is turned into its reply.
+      Deviations - the initializer @ 0x080f73a0 is not ported; the
+      forward dispatches through IAP_PACKET_OPS.init, same seam
+      iap_packet_create uses. lingo/command are typed u8/u16 because
+      the initializer truncates with strb/strh - nothing observable is
+      lost. The ARM return is the initializer's 64-bit pair (r0 =
+      success flag, r1 = owner passing back out); the wrapper leaves
+      both live, but all 43 call sites discard them, so the port
+      returns just r0.
+      LLVM sibcall hazard - left alone, LLVM lowers this body to a
+      sibling call that materializes the volatile ops read with
+      `ldrd r0,[ip]` and the branch target in r1, clobbering the
+      packet/owner arguments the tail call must forward (verified in
+      the release archive). An empty asm barrier after the call keeps
+      the bl-and-return shape - also what the original does.
+      Host tests (3) - all seven arguments forwarded to the init hook
+      in order with the initializer's success flag returned verbatim,
+      an init failure (0) propagated with no teardown of the wrapper's
+      own, and NULL packet/owner/context passing through unguarded
+      (matching the 43 unconditional call sites).
+      match.py structural - the frame, the three stack-argument bounces
+      ([fp,#8/12/16] -> [sp,#0/4/8]) in the original's order, and the
+      init dispatch followed by a plain return are all present; the
+      differences are the crate fp frame and the indirect `blx r7`
+      hook dispatch in place of the direct `bl 0x080f73a0`.
   # --- IRAM veneer for the microsecond timer read ---
   - address: 0x08037e20
     ghidra: thunk_EXT_FUN_08037e20
