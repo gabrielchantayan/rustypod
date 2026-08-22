@@ -243,8 +243,13 @@ pub struct TaskCtx {
     pub _x18: u32,
     /// +0x1c: queue pool installed by `task_notify`.
     pub queue_pool: *mut u8,
-    /// +0x20..+0x3c: zeroed by the allocator, untouched here.
-    pub _x20: [u32; 7],
+    /// +0x20..+0x38: zeroed by the allocator, untouched here.
+    pub _x20: [u32; 6],
+    /// +0x38: the task's own class registry, lazily constructed and
+    /// installed by `task_registry_register` (app/task_registry.rs —
+    /// the original's `ldr r4, [r0, #0x38]` @ 0x0826d65c and
+    /// `str r4, [r0, #0x38]` @ 0x0826d6a4).
+    pub registry: *mut u8,
     /// +0x3c..+0x54: untouched (calloc-zeroed).
     pub _x3c: [u32; 6],
 }
@@ -266,7 +271,8 @@ impl TaskCtx {
         _x14: 0,
         _x18: 0,
         queue_pool: core::ptr::null_mut(),
-        _x20: [0; 7],
+        _x20: [0; 6],
+        registry: core::ptr::null_mut(),
         _x3c: [0; 6],
     };
 }
@@ -783,7 +789,8 @@ pub unsafe extern "C" fn name_node_alloc() -> *mut NameNode {
     (*ctx)._x08 = 0;
     (*ctx).node = node;
     (*ctx).queue_pool = core::ptr::null_mut();
-    (*ctx)._x20 = [0; 7];
+    (*ctx)._x20 = [0; 6];
+    (*ctx).registry = core::ptr::null_mut();
     (*ctx)._x0c = 0;
     (*ctx)._x10 = 0;
     (*ctx)._x14 = 0;
