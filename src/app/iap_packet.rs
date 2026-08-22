@@ -221,6 +221,93 @@ pub unsafe extern "C" fn iap_packet_create(
     core::ptr::null_mut()
 }
 
+/// iap_packet_reinit — original: `FUN_080f6efc` @ 0x080f6efc
+/// (**48 bytes, 0x080f6efc..0x080f6f2c** — 12 instructions, no literal
+/// pool. Ghidra's 48 is exact this time: the next function opens at
+/// 0x080f6f2c with `push {r4-r11,lr}; sub sp, sp, #0x14`. **43 `bl` and
+/// 0 `b` call sites, none predicated**, counted by decoding every branch
+/// word in `osos.dec`; the address appears in no data word, so it is
+/// never dispatched virtually.)
+///
+/// The reinitialize-in-place entry of the iAP packet class — a pure
+/// identity forwarder into the file-local initializer @ 0x080f73a0:
+///
+/// ```text
+/// 080f6efc  e92d403e  push {r1,r2,r3,r4,r5,lr}
+/// 080f6f00  e1a04003  mov r4, r3
+/// 080f6f04  e28d3018  add r3, sp, #0x18
+/// 080f6f08  e1a0e002  mov lr, r2
+/// 080f6f0c  e1a0c001  mov ip, r1
+/// 080f6f10  e893000e  ldmia r3, {r1,r2,r3}
+/// 080f6f14  e88d000e  stmia sp, {r1,r2,r3}
+/// 080f6f18  e1a03004  mov r3, r4
+/// 080f6f1c  e1a0200e  mov r2, lr
+/// 080f6f20  e1a0100c  mov r1, ip
+/// 080f6f24  eb00011d  bl 0x080f73a0
+/// 080f6f28  e8bd803e  pop {r1,r2,r3,r4,r5,pc}
+/// ```
+///
+/// The push makes a 0x18-byte frame; the `ldmia`/`stmia` pair bounces the
+/// caller's three stack arguments down into the bottom of it, and r0–r3
+/// ride through a three-register shuffle (`r4`/`lr`/`ip`) untouched.
+/// Nothing is tested, added, or masked — the wrapper exists because the
+/// initializer is file-local and the lingo handlers link against this
+/// out-of-line copy.
+///
+/// The 43 call sites are reply paths: each takes its incoming request
+/// packet as r0, reloads the packet's own owner field into r1
+/// (`FUN_080f6efc(param_2, *param_2, 0, lingo, command, reply,
+/// reply_len)` — the Extended Interface handler @ 0x08139974 even reads
+/// the lingo back out of the packet's +0x0e), and hands it here. The
+/// initializer's first act is releasing any payload the packet already
+/// holds (the release helper @ 0x080f7420), so this call is how a request
+/// packet is turned into its reply.
+///
+/// Neither the wrapper nor any of its 43 call sites guards the packet
+/// pointer: every call is unconditional and the wrapper contains no
+/// `cmp`.
+///
+/// # Deviations
+///
+/// - The initializer @ 0x080f73a0 is not ported; the forward dispatches
+///   through [`IAP_PACKET_OPS`]'s `init` hook, same as
+///   [`iap_packet_create`].
+/// - `lingo`/`command` are typed `u8`/`u16` — the initializer truncates
+///   with `strb`/`strh`, so nothing observable is lost.
+/// - The ARM return is the initializer's 64-bit pair (r0 = the success
+///   flag, r1 = the owner passing back out); the wrapper leaves both live
+///   in r0/r1, but all 43 call sites discard them, so the port returns
+///   just r0.
+///
+/// # Safety
+///
+/// Same contract as the initializer: `packet` must point at a live packet
+/// object, and `payload` must be readable for `payload_len` bytes when
+/// nonzero. No NULL guard exists here or at any call site.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn iap_packet_reinit(
+    packet: *mut u8,
+    owner: *mut u8,
+    context: *mut u8,
+    lingo: u8,
+    command: u16,
+    payload: *const u8,
+    payload_len: u32,
+) -> u32 {
+    let result =
+        (iap_packet_ops().init)(packet, owner, context, lingo, command, payload, payload_len);
+    // LLVM's ARM backend breaks the sibling-call this body wants to be:
+    // it materializes the volatile ops read with `ldrd r0, [ip]` and the
+    // branch target in r1, clobbering the r0/r1 arguments the tail call
+    // must forward untouched (verified in the release archive). An empty
+    // barrier after the call keeps the `bl`-and-return shape the
+    // original has; the original is not a tail call either.
+    core::arch::asm!("", options(nomem, nostack, preserves_flags));
+    result
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -492,6 +579,80 @@ mod tests {
             assert_eq!(INIT_CALLS, 0, "and the initializer never runs");
             assert_eq!(DESTRUCT_CALLS, 0, "nor the destructor");
             assert_eq!(free_log().0, 0, "nor operator_delete");
+        }
+        restore_mocks(guards);
+    }
+
+    #[test]
+    fn reinit_forwards_all_seven_arguments_to_the_initializer_in_order() {
+        let guards = install_mocks();
+        let packet = 0x0BEE_F000usize as *mut u8;
+        let owner = 0x0111_1000usize as *mut u8;
+        let context = 0x0222_2000usize as *mut u8;
+        let payload = [0xaau8, 0xbb, 0xcc];
+
+        unsafe {
+            INIT_RESULT = 1;
+
+            let result = iap_packet_reinit(packet, owner, context, 0xa5, 0xbeef, payload.as_ptr(), 0x0eed);
+
+            assert_eq!(result, 1, "the initializer's success flag comes back in r0");
+            assert_eq!(INIT_CALLS, 1);
+            assert_eq!(LAST_INIT_PACKET, packet, "r0 rides the r4/lr/ip shuffle untouched");
+            assert_eq!(LAST_OWNER, owner);
+            assert_eq!(LAST_CONTEXT, context);
+            assert_eq!(LAST_LINGO, 0xa5);
+            assert_eq!(LAST_COMMAND, 0xbeef);
+            assert_eq!(LAST_PAYLOAD, payload.as_ptr(), "stack argument, bounced verbatim");
+            assert_eq!(LAST_PAYLOAD_LEN, 0x0eed, "stack argument, bounced verbatim");
+            assert_eq!(CONSTRUCT_CALLS, 0, "the reinit path allocates nothing");
+            assert_eq!(DESTRUCT_CALLS, 0);
+            assert_eq!(alloc_log().0, 0);
+            assert_eq!(free_log().0, 0);
+        }
+        restore_mocks(guards);
+    }
+
+    #[test]
+    fn reinit_forwards_the_initializers_failure_verbatim() {
+        let guards = install_mocks();
+        let packet = 0x0BEE_F000usize as *mut u8;
+
+        unsafe {
+            INIT_RESULT = 0;
+
+            let result =
+                iap_packet_reinit(packet, core::ptr::null_mut(), core::ptr::null_mut(), 4, 0x3d, core::ptr::null(), 0);
+
+            assert_eq!(result, 0, "a failed init propagates unchanged");
+            assert_eq!(LAST_INIT_PACKET, packet);
+            assert_eq!(DESTRUCT_CALLS, 0, "the wrapper does no teardown of its own");
+            assert_eq!(free_log().0, 0);
+        }
+        restore_mocks(guards);
+    }
+
+    #[test]
+    fn reinit_passes_null_arguments_through_unguarded() {
+        let guards = install_mocks();
+
+        unsafe {
+            INIT_RESULT = 1;
+
+            let result = iap_packet_reinit(
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+                0,
+                0,
+                core::ptr::null(),
+                0,
+            );
+
+            assert_eq!(result, 1);
+            assert_eq!(INIT_CALLS, 1);
+            assert!(LAST_INIT_PACKET.is_null(), "no NULL guard, matching the 43 unconditional call sites");
+            assert!(LAST_OWNER.is_null());
         }
         restore_mocks(guards);
     }
