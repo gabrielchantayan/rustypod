@@ -308,6 +308,61 @@ pub unsafe extern "C" fn iap_packet_reinit(
     result
 }
 
+/// iap_packet_owner_mode — original: `FUN_080f6b3c` @ 0x080f6b3c
+/// (**24 bytes, 0x080f6b3c..0x080f6b54** — 6 instructions, no literal
+/// pool. Ghidra's 24 is exact: the next function opens at 0x080f6b54 with
+/// `mov r1, r0; ldrh r2, [r1, #0x18]`. **43 `bl` and 0 `b` call sites,
+/// none predicated**, counted by decoding every branch word in `osos.dec`;
+/// the address appears in no data word anywhere in the image, so it is
+/// never dispatched virtually.)
+///
+/// The packet class's owner-mode getter:
+///
+/// ```text
+/// 080f6b3c  e1a01000  mov   r1, r0
+/// 080f6b40  e5911000  ldr   r1, [r1]      @ owner = packet->owner (+0x00)
+/// 080f6b44  e3a00000  mov   r0, #0
+/// 080f6b48  e3510000  cmp   r1, #0
+/// 080f6b4c  15910008  ldrne r0, [r1, #8]  @ owner ? owner->mode (+0x08) : 0
+/// 080f6b50  e12fff1e  bx    lr
+/// ```
+///
+/// `owner = *(u32 *)packet; return owner != NULL ? *(u32 *)(owner + 8) : 0;`
+///
+/// What the returned word is, from the call sites: the owner object's
+/// framing mode. The packet serializer @ 0x080f6b70 prepends the 0xff
+/// sync byte ahead of the fixed 0x55 exactly when this returns 1
+/// (`cmp r0, #1; moveq r0, #0xff; strbeq`), and the wire-length helper @
+/// 0x080f6e08 budgets that same one extra byte; the mode remap @
+/// 0x08192124 translates {1→0, 2→1, 4→3, else 0xff}, so the meaningful
+/// range is 0..=4; the reply path @ 0x081fd688 splits on `< 3` vs `>= 3`.
+/// The NULL guard is the callee's own — every one of the 43 calls is an
+/// unconditional `bl` — so an ownerless packet reports mode 0.
+///
+/// The owner object's class is not identified; its +0x08 word is the only
+/// field observed here, read as a raw u32 and returned verbatim.
+///
+/// # Deviations
+///
+/// None. Both loads are aligned word reads, as in the original, and there
+/// is no NULL guard on `packet` itself because the original has none.
+///
+/// # Safety
+///
+/// `packet` must address a readable word (the owner slot); when that slot
+/// is non-NULL it must address at least three readable words
+/// (+0x00..+0x0b). These are the original's preconditions, not added ones.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iap_packet_owner_mode(packet: *const u8) -> u32 {
+    let owner = packet.cast::<u32>().read();
+    let mut mode = 0;
+    if owner != 0 {
+        mode = (owner as usize as *const u32).add(2).read();
+    }
+    mode
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -655,5 +710,81 @@ mod tests {
             assert!(LAST_OWNER.is_null());
         }
         restore_mocks(guards);
+    }
+
+    /// Fixture layout for [`iap_packet_owner_mode`] inside the low slab:
+    /// the packet at +0x00 (only its +0x00 owner slot is read) and the
+    /// owner object at +0x40 (only its +0x08 mode word is read).
+    mod owner_mode {
+        extern crate std;
+
+        use super::super::iap_packet_owner_mode;
+        use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+        use std::sync::LazyLock;
+
+        const SLAB_LEN: usize = 0x1000;
+        const OFF_PACKET: usize = 0x00;
+        const OFF_OWNER: usize = 0x40;
+        /// Tests run on parallel threads against one shared slab, so each
+        /// gets its own 0x80-byte region instead of a lock.
+        const REGION: usize = 0x80;
+
+        static SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
+            try_map_u32_slab(hints::IAP_PACKET_OWNER_MODE, SLAB_LEN).map(|p| p as usize)
+        });
+
+        /// Builds the two-word chain in `region`: packet.owner = owner,
+        /// owner.mode = mode. `owner == 0` models the ownerless packet.
+        fn with_chain(region: usize, owner: bool, mode: u32, body: impl FnOnce(u32)) {
+            let Some(slab) = *SLAB else {
+                assert!(note_missing_u32_fixture("app::iap_packet::owner_mode"));
+                return;
+            };
+            let base = slab + region;
+            unsafe {
+                let packet = (base + OFF_PACKET) as *mut u32;
+                let owner_slot = (base + OFF_OWNER) as u32;
+                packet.write(if owner { owner_slot } else { 0 });
+                ((base + OFF_OWNER + 0x08) as *mut u32).write(mode);
+                body(iap_packet_owner_mode((base + OFF_PACKET) as *const u8));
+            }
+        }
+
+        #[test]
+        fn an_ownerless_packet_reports_mode_zero() {
+            with_chain(0 * REGION, false, 0xdead_beef, |result| {
+                assert_eq!(result, 0, "NULL owner short-circuits to 0 without touching the mode word");
+            });
+        }
+
+        #[test]
+        fn the_sync_framing_mode_passes_through() {
+            with_chain(1 * REGION, true, 1, |result| {
+                assert_eq!(result, 1, "mode 1 is what makes the serializer emit the 0xff sync byte");
+            });
+        }
+
+        #[test]
+        fn a_present_owner_with_zero_mode_reports_zero_through_the_load_path() {
+            with_chain(2 * REGION, true, 0, |result| {
+                assert_eq!(result, 0, "same answer as the NULL case, but via ldrne, not the guard");
+            });
+        }
+
+        #[test]
+        fn boundary_modes_pass_through() {
+            for mode in [2u32, 3, 4] {
+                with_chain(3 * REGION, true, mode, |result| {
+                    assert_eq!(result, mode, "the remap table's meaningful range is 0..=4");
+                });
+            }
+        }
+
+        #[test]
+        fn the_mode_word_is_returned_verbatim_at_full_width() {
+            with_chain(4 * REGION, true, 0xffff_ffff, |result| {
+                assert_eq!(result, 0xffff_ffff, "a full 32-bit word, no truncation or sign play");
+            });
+        }
     }
 }
