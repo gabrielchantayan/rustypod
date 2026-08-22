@@ -277,6 +277,28 @@ pub unsafe extern "C" fn ata_cmd_set_device(cmd: *mut u8, device: u8) {
     set_byte(cmd, DEVICE_INDEX, device);
 }
 
+/// ata_device_get_index — original: `FUN_08105a2c` @ 0x08105a2c
+/// (8 bytes; **42 `bl` call sites**, binary-scanned, ALL unconditional
+/// — callers @ 0x082794f4..0x0827b160, every one an ATA command-block
+/// builder; not a single predicated form, so the callers pass the
+/// device object unconditionally and never NULL).
+///
+/// The device object's index getter: `ldrsb r0, [r0, #8]; bx lr` —
+/// returns the SIGNED byte at device+8 sign-extended to 32 bits. The
+/// builders consume it two ways, both visible in the same builder @
+/// 0x082794cc: verbatim as the command block's device index ([`ata_cmd_set_device`],
+/// whose "none" is -1), and as `(index & 0xf) << 4` for the
+/// device-select nibble of the taskfile's device/head byte.
+///
+/// The load is a `read_volatile` byte read so the port keeps the
+/// original's single `ldrsb`; this is an in-memory object field, not a
+/// hardware register.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_device_get_index(device: *const u8) -> i32 {
+    (device.add(8) as *const i8).read_volatile() as i32
+}
+
 /// ata_cmd_set_timeout_ms — original: `FUN_081212c0` @ 0x081212c0
 /// (8 bytes; 23 call sites, binary-scanned).
 ///
@@ -1159,6 +1181,41 @@ mod tests {
         let mut block = poisoned();
         unsafe { ata_cmd_set_device(block.0.as_mut_ptr(), DEVICE_NONE) };
         assert_eq!(block.0[DEVICE_INDEX] as i8, -1);
+    }
+
+    // ---- the device object's index getter (0x08105a2c) -------------------
+
+    #[test]
+    fn the_index_getter_reads_only_byte_8() {
+        // A poisoned device object: every byte but +8 differs, so a
+        // wrong offset or width reads the wrong value.
+        let mut device = [0x5au8; 0x10];
+        device[8] = 1;
+        assert_eq!(unsafe { ata_device_get_index(device.as_ptr()) }, 1);
+        device[8] = 0;
+        assert_eq!(unsafe { ata_device_get_index(device.as_ptr()) }, 0);
+    }
+
+    #[test]
+    fn the_index_getter_sign_extends() {
+        // `ldrsb`, not `ldrb`: 0xff comes back as -1 (the command
+        // block's DEVICE_NONE sentinel), and 0x80 stays negative
+        // instead of widening to 128.
+        let mut device = [0u8; 0x10];
+        device[8] = 0xff;
+        assert_eq!(unsafe { ata_device_get_index(device.as_ptr()) }, -1);
+        device[8] = 0x80;
+        assert_eq!(unsafe { ata_device_get_index(device.as_ptr()) }, -128);
+        device[8] = 0x7f;
+        assert_eq!(unsafe { ata_device_get_index(device.as_ptr()) }, 127);
+    }
+
+    #[test]
+    fn the_index_getter_leaves_the_object_untouched() {
+        let device = poisoned();
+        let before = device;
+        unsafe { ata_device_get_index(device.0.as_ptr()) };
+        assert_eq!(device, before, "a getter must not write");
     }
 
     #[test]

@@ -8638,6 +8638,29 @@ functions:
       The store itself is a plain strb, so the port's parameter is u8.
       #[inline(never)].
 
+  - address: 0x08105a2c
+    ghidra: FUN_08105a2c
+    name: ata_device_get_index
+    size: 8
+    sig: "i32 ata_device_get_index(const u8 *device)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: device}
+    notes: >-
+      `ldrsb r0, [r0, #8]; bx lr` - the device object's index getter,
+      returning the SIGNED byte at device+8 sign-extended to 32 bits.
+      42 bl call sites, verified by decoding every B/BL word in
+      osos.dec: ALL unconditional, callers @ 0x082794f4..0x0827b160,
+      every one an ATA command-block builder. The builders consume the
+      result two ways, both visible in the builder @ 0x082794cc:
+      verbatim as the command block's device index (ata_cmd_set_device,
+      whose "none" is the -1 that the reset's 0xff reads back as), and
+      as `(index & 0xf) << 4` for the device-select nibble of the
+      taskfile's device/head byte. Ghidra's 8-byte extent is right for
+      once: 0x08105a34 starts a different function (a 17-way jump
+      table, `cmp r0, #0x11; addls pc, pc, r0, lsl #2`).
+      #[inline(never)].
+
   - address: 0x081212c0
     ghidra: FUN_081212c0
     name: ata_cmd_set_timeout_ms
