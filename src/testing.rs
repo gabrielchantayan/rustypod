@@ -58,6 +58,7 @@ pub mod hints {
     pub const VTABLE_SET_ITERATOR_RELEASE: usize = 0x1900_0000;
     pub const VDBE_SERIAL_PUT: usize = 0x1a00_0000;
     pub const PENDING_EVENT_TAKE: usize = 0x1b00_0000;
+    pub const ANIMATION_INIT: usize = 0x1c00_0000;
     // `heap/pool.rs` maps its own arena at 0x0800_0000 through a separate
     // path: it needs only bit 31 clear, not full u32 addressability.
 }
