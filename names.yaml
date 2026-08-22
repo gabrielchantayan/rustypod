@@ -35291,6 +35291,55 @@ functions:
       init dispatch followed by a plain return are all present; the
       differences are the crate fp frame and the indirect `blx r7`
       hook dispatch in place of the direct `bl 0x080f73a0`.
+  - address: 0x080f6b3c
+    ghidra: FUN_080f6b3c
+    name: iap_packet_owner_mode
+    size: 24
+    sig: "u32 iap_packet_owner_mode(const u8 *packet)"
+    module: app/iap_packet
+    status: ported
+    renames:
+      param_1/r0: packet
+      r1: owner
+    notes: >-
+      The iAP packet class's owner-mode getter - `owner = packet->owner`
+      (+0x00); return `owner != NULL ? *(u32 *)(owner + 8) : 0`.
+      EXTENT - 24 bytes, 0x080f6b3c..0x080f6b54, 6 instructions, no
+      literal pool. Ghidra's 24 is exact: the next function opens at
+      0x080f6b54 with `mov r1,r0; ldrh r2,[r1,#0x18]` (a sibling getter
+      over the packet's +0x14/+0x18 second-buffer pair). Body verified
+      from osos.dec word by word: `mov r1,r0; ldr r1,[r1]; mov r0,#0;
+      cmp r1,#0; ldrne r0,[r1,#8]; bx lr`.
+      CALL SITES - 43 `bl` and 0 `b`, ALL unconditional (cond=e, zero
+      predicated forms), counted by decoding every branch word in
+      osos.dec; the address appears in no data word anywhere in the
+      image, so it is never dispatched virtually. The NULL guard is the
+      callee's own - no caller pre-checks the owner.
+      SEMANTICS from the call sites - the returned word is the owner
+      (transport) object's framing mode. The packet serializer @
+      0x080f6b70 prepends the 0xff sync byte ahead of the fixed 0x55
+      exactly when this returns 1 (`cmp r0,#1; moveq r0,#0xff;
+      strbeq`), and the wire-length helper @ 0x080f6e08 budgets that
+      same extra byte; the mode remap @ 0x08192124 translates {1->0,
+      2->1, 4->3, else 0xff}, so the meaningful range is 0..=4; the
+      reply path @ 0x081fd688 splits on `< 3` vs `>= 3`. The owner
+      object's class is NOT identified - only its +0x08 word is
+      observed here, read as a raw u32 and returned verbatim.
+      Deviations - none. Both loads are aligned word reads, as in the
+      original, and there is no NULL guard on `packet` itself because
+      the original has none.
+      Host tests (5, app::iap_packet::tests::owner_mode, low-slab
+      fixture at hints::IAP_PACKET_OWNER_MODE) - a NULL owner
+      short-circuits to 0, mode 1 (the sync-framing case) passes
+      through, a present owner with mode 0 returns 0 through the load
+      path rather than the guard, the boundary modes 2/3/4 pass
+      through, and 0xffffffff round-trips at full width.
+      match.py structural - the owner load, the NULL test, and the
+      guarded +0x08 load are all present; the differences are LLVM
+      laying the two exits out as separate blocks (an early
+      `moveq r0,#0; bxeq lr` and a framed `ldr r0,[r0,#8]; pop` tail)
+      instead of the original's single branchless predicated block -
+      semantically identical, expected under the crate's fp frame.
   # --- IRAM veneer for the microsecond timer read ---
   - address: 0x08037e20
     ghidra: thunk_EXT_FUN_08037e20

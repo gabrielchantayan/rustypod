@@ -60,6 +60,7 @@ pub mod hints {
     pub const PENDING_EVENT_TAKE: usize = 0x1b00_0000;
     pub const ANIMATION_INIT: usize = 0x1c00_0000;
     pub const STRING_RECORD: usize = 0x1d00_0000;
+    pub const IAP_PACKET_OWNER_MODE: usize = 0x1e00_0000;
     // `heap/pool.rs` maps its own arena at 0x0800_0000 through a separate
     // path: it needs only bit 31 clear, not full u32 addressability.
 }
