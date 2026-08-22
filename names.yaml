@@ -26299,6 +26299,92 @@ functions:
       structural: identical `add r0,r0,#12` / `add r1,sp,#4` / call /
       `ldr r0,[r0]` core; the diff is the explicit spill store ADS folded
       into its push, the ops-table indirection and the crate's fp frame.
+
+  - address: 0x081473d8
+    ghidra: FUN_081473d8
+    name: silver_list_table_ctor
+    size: 224
+    sig: "SilverListTable *silver_list_table_ctor(SilverListTable *table, u32 resource_id, i32 populate)"
+    module: app/silver_list_table
+    status: ported
+    renames:
+      param_1: table
+      param_2: resource_id
+      param_3: populate
+      DAT_081474ac: vtable_literal (0x08986434, runtime data - class not named)
+      DAT_081474b0: empty_string_rep_data (0x08b31810)
+      DAT_081474b4: silver_list_name_tag ('SCST', 0x53435354)
+      FUN_083c8404: map_header_alloc (SILVER_LIST_TABLE_CTOR_OPS slot; the
+        map container's embedded chunk-pool node allocator - initial chunk
+        32 nodes, 1.625x growth - NOT a constructor, it returns an
+        uninitialized node)
+      FUN_081472b0: populate (SILVER_LIST_TABLE_CTOR_OPS slot; the "SLst"
+        list loader documented under silver_list_table_item)
+      FUN_0819fdb0: registry (SILVER_LIST_TABLE_CTOR_OPS slot; the tagged
+        string registry getter - the FUN_0819fe10 provider's +4 object or
+        NULL, same getter event_list_populate_from_registry uses)
+      FUN_0811ca58: resolve (SILVER_LIST_TABLE_CTOR_OPS slot; ported as
+        app_string_resolver_resolve)
+      FUN_08030f44: fail (SILVER_LIST_TABLE_CTOR_OPS slot; ported as
+        heap_panic, non-returning)
+      FUN_083d8bac: cxx_string_from_buffer (direct, ported in cxx/string)
+      FUN_083d8d1c: cxx_string_assign (direct, ported in cxx/string)
+      FUN_083d8b04: cxx_string_release (direct, ported in cxx/string)
+    notes: >-
+      132 bl + 0 b call sites, binary-scanned by decoding every B/BL word
+      in osos.dec; all 132 are unconditional (no predicated forms - the
+      NULL discipline lives inside the callee, not at the sites).
+      Ghidra's 212-byte extent drops the owned three-word literal pool:
+      true extent 224 bytes, 0x081473d8..0x081474b8 (vtable 0x08986434 @
+      0x081474ac, empty-rep data 0x08b31810 @ 0x081474b0, 'SCST'
+      0x53435354 @ 0x081474b4), where the next function opens
+      push {r4, lr}. The constructor of the Silver framework's
+      resource-backed item table whose accessor is silver_list_table_item
+      @ 0x081473c0 (the immediately preceding function): plants the
+      vtable and resource_id, clears +0x08 and the whole embedded
+      red-black map at +0x0c (pool words, header word, flag byte +0x24,
+      comparator byte +0x25), pool-allocates the map's header node and
+      links it as the empty sentinel (+4 parent = 0, +8 left = self, +12
+      right = self - the node layout FUN_083c8aa8 descends), stores 2 at
+      +0x2c, parks the +0x28 COW string on the shared empty rep, and only
+      when populate is nonzero (cmp r7,#0 / blne - any nonzero value)
+      runs the "SLst" populator FUN_081472b0. It then resolves ('SCST',
+      resource_id) through the registry getter FUN_0819fdb0 and the
+      tagged resolver FUN_0811ca58 - RE-READING resource_id from +0x04
+      after the populator ran (ldr r2,[r5,#4] @ 0x08147460), so a
+      populator that rewrites the id changes the resolution - and a
+      failed lookup is fatal (bleq heap_panic @ 0x08030f44). On success
+      the borrowed (byte_length, bytes) record becomes a temporary COW
+      string (cxx_string_from_buffer), is assigned to the +0x28 name
+      (cxx_string_assign) and the temporary released (cxx_string_release);
+      returns this. The +0x28 field was mis-described as a vtable'd
+      handle in the accessor's notes: it is an ADS COW basic_string word,
+      proven by the assign/release pair and the 0x08b31810 empty-rep
+      literal. The three string callees are ported and called directly;
+      the map node allocator, populator and registry getter are unported
+      and resolve/fail ride the seam beside them anyway (the same
+      call-boundary decision app/event_list makes for this exact
+      dependency triple), so the port is hook-ready on device without
+      wiring APP_STRING_RESOLVE_OPS - the firmware defaults transmute
+      0x083c8404 / 0x081472b0 / 0x0819fdb0 / 0x0811ca58 / 0x08030f44.
+      Deviations: the empty name parks on the crate's own shared empty
+      rep (cxx/string.rs's standing deviation from the firmware word
+      0x08b31810); the string temporary is zero-initialized where the
+      original passes its saved-resource_id stack word (from_buffer never
+      reads the old slot value - unobservable); a swapped-in fail hook
+      that returns stops construction at the failed resolution (retailOS
+      never returns). Host tests: full word-by-word initialization and
+      sentinel self-links, call order alloc -> populate -> registry ->
+      resolve, populate=0 skips the load but still resolves, any-nonzero
+      populate truthiness, the post-populate resource_id reload, and the
+      fatal path (fail fires immediately after the failed resolve, no
+      string rep allocated, name stays on the empty rep). match.py
+      structural (exit 1, diff expected): same store sequence at
+      +0x0c..+0x2c, header self-link triple, conditional populate,
+      resource_id reload, 'SCST' literal resolve and NULL gate; the diff
+      is the ops-table blx indirection, the crate fp frame, and LLVM
+      inlining the from_buffer capacity preamble.
+
   - address: 0x081346e4
     ghidra: FUN_081346e4
     name: template_binding_name_or_default
