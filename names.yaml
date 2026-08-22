@@ -36712,3 +36712,59 @@ functions:
       --lib <worktree>: identical skeleton, 51 instructions vs 39; the
       deltas are the ops-table ldrd/blx indirection, the crate fp
       prologue, and archive bl relocations.
+  # --- vector<T>::push_back, 12-byte element ---
+  - address: 0x0816caa4
+    ghidra: FUN_0816caa4
+    name: vector_push_back_elem12
+    size: 64
+    sig: "void vector_push_back_elem12(VectorStorage *vector, u32 word0, u32 word1, u32 word2)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: vector
+      param_2/r1: word0
+      param_3/r2: word1
+      param_4/r3: word2
+      FUN_083e12dc: insert_aux (unported, VECTOR_PUSH_BACK_ELEM12_OPS seam)
+    notes: >-
+      std::vector<T>::push_back for a 12-byte trivially-copyable element
+      on the {begin, end, end_of_storage} VectorStorage head; the
+      element arrives BY VALUE in r1/r2/r3. EXTENT: exactly 64 bytes -
+      Ghidra's size is right this time; the next function opens push
+      {r4, r5, r6, lr} at 0x0816cae4, and a byte-pattern scan of
+      osos.dec finds no second instantiation (unique copy). CALL COUNT:
+      verified by decoding every B/BL word in osos.dec - exactly 43
+      sites, 38 plain bl plus 5 predicated forms (4 bleq @ 0x0821ec80,
+      0x08222f98, 0x08226c18, 0x08239524 and 1 blne @ 0x0821ec58), each
+      immediately after a `cmp r0, #0`: the CALLER skips the push when
+      its preceding lookup returned NULL, the callee carries no such
+      guard. ALGORITHM: push {r1, r2, r3, lr} spills the 12-byte element
+      (the strb r3, [sp, #8] is redundant - sp+8 already holds FULL r3,
+      so the third element word is the whole word2, not a byte); ldmib
+      r0, {r1, r2} loads end (+4) and end_of_storage (+8); if equal
+      (full) r2 = sp and bl 0x083e12dc (insert_aux(vector, end,
+      &element), the grow-and-insert helper, UNPORTED - its own
+      size/capacity/allocate callees vector_size_elem12 0x083d76f8,
+      vector_capacity_elem12 0x083d7708 and operator_new_checked
+      0x08266c70 are all ported); otherwise end += 12 stored back
+      UNCONDITIONALLY (str before the guard), then subs r0, r1, #12
+      skips the 12-byte element store when the OLD end is NULL (the ADS
+      placement-new null check), leaving end = 12. Ghidra's C matches
+      this decode; its puVar1 + 3 is the +12-byte advance in 4-byte
+      units. OBSERVED USE: binds button handlers - callers push
+      {command_id, handler_name, flag} records (e.g. FUN_082342b4 pushes
+      {id, "HandleAddToOTG" + 1, 1}) into a stack vector handed to
+      FUN_08134720; push_back interprets none of the fields. Deviations:
+      insert_aux dispatches through the VECTOR_PUSH_BACK_ELEM12_OPS
+      read_volatile seam (animation.rs pattern), target default
+      transmutes 0x083e12dc, host default inert; head loads/stores are
+      plain aligned word accesses (the original's ldmib/str - the
+      family's read_unaligned host-fixture idiom would only pessimize
+      ARMv5TE codegen into ldrb quads here, and every call site heads a
+      word-aligned vector). match.py --lib <worktree archive>: same
+      skeleton - ldmib head load, cmp/beq, +12 advance, str [r0,#4],
+      predicated 3-word element store (LLVM emits strne + stmibne direct
+      from registers instead of the original's ldmne/stmne stack
+      round-trip), slow path spills the element and blx through the ops
+      slot; deltas are the fp prologue and the seam indirection, the
+      accepted animation.rs deviation classes. 24 instructions vs 16.
