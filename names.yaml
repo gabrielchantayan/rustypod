@@ -27772,6 +27772,87 @@ functions:
       original's tail branch plus the target's mandatory non-leaf frame
       pointer.
 
+  - address: 0x081d7270
+    ghidra: FUN_081d7270
+    name: iap_incoming_process_thread_slot_poll
+    size: 68
+    sig: "u32 iap_incoming_process_thread_slot_poll(u8 *this, u32 index)"
+    module: app/iap_incoming_process_thread
+    status: ported
+    renames:
+      param_1: this (the 0x240-byte iAP incoming-process context, NOT
+        the 0x44-byte CIapIncomingProcessThread wrapper - see notes)
+      param_2: index (registration slot, 0..28)
+      FUN_08030f44: heap_panic (direct, ported in heap/veneers)
+      FUN_08257cb4: slot_object_condvar_poll (unported; zero-timeout
+        condition wait on the slot object's condvar at +0x10, behind
+        the IAP_THREAD_SLOT_POLL_OPS seam)
+    notes: >-
+      68 bytes, 0x081d7270..0x081d72b4, all code, no literal pool;
+      Ghidra's 68 is exact (the next function opens at 0x081d72b4
+      with `mov r1,#0`). Byte-decoded from osos.dec. Call count
+      binary-verified by decoding every B/BL word in osos.dec: 36
+      unconditional `bl` plus exactly one plain tail `b` @ 0x081f2210,
+      zero predicated forms, and no DATA word anywhere references the
+      address - only ever direct-called, never virtual.
+      Ghidra's reference C inlines the posix_mutex_unlock body at the
+      tail (the veneer 0x08261e24 is a bare `b`), which is also what
+      proves the return value IS the unlock's status.
+      Algorithm: under the context's registry mutex at this+0x114
+      (veneers 0x08261e20/0x08261e24, resolved to the canonical
+      posix_mutex_lock/unlock per the names.yaml alias resolution):
+      refuse index >= 29 and a NULL slot-object word at
+      this+0x154+index*8 - both fatal via heap_panic WITH THE MUTEX
+      HELD (it never returns, there is no unlock on that path) -
+      then call 0x08257cb4(slot_object) and tail-branch to the
+      unlock. The callee is a 4-instruction veneer (`add r0,r0,#16;
+      b 0x8261f78`) running a ZERO-TIMEOUT condition wait on the
+      registration object's condvar: 0x8261f78 stacks a zeroed
+      {sec,nsec} and chains 0x8261f28 -> 0x8261f94 -> the posix
+      timed-wait body @ 0x0826269c (the cond_wait_attr_clock notes).
+      A pending signal is drained, an empty condvar times out
+      immediately; the wait status is discarded. Callers hold their
+      own session mutex around `iap_incoming_process_thread_instance();
+      slot_poll(thread, session->slot_index)` (e.g. @ 0x081f1ca8,
+      index from [r5,#0x30]).
+      OBJECT IDENTITY - `this` is the 0x240-byte context object the
+      ported accessor hands out, and the existing module doc's
+      0x44-byte story needs the correction the module header now
+      carries: the creator @ 0x081d68f0 publishes thread->+0x00 (`ldr
+      r4,[r4]` @ 0x081d69fc, `str r4,[r6,#4]` @ 0x081d6a38), which the
+      spawn helper 0x0839e874 fills with the factory-0x081d7058
+      (`operator new(0x240)`, ctor 0x081d72c8, vtable 0x0898e05c)
+      product; FUN_081d7240 is that context's locked +0x150 setter
+      (it touches this+0x114/+0x150), and the failed-start destroy @
+      0x081d6a24 runs the context's vtable slot +0x08. Layout from
+      the ctor: vtable +0x000, ctor arg +0x110, mutex wrapper (0x1c)
+      +0x114, second wrapper +0x130, byte +0x14c, object ptr +0x150,
+      29 slots of 8 bytes {object, context} at +0x154, count 30 at
+      +0x23c. The sibling @ 0x081d6e68 has the IDENTICAL guard shape
+      but calls the two-argument setter 0x08257ca0; the register path
+      @ 0x081d6dbc news the 0x24-byte slot object (ctor 0x08257cc8,
+      owner=this, condvar at its +0x10) into a free slot found by the
+      29-bound linear search @ 0x081d70d4.
+      Deviations - 0x08257cb4 is unported and rides the
+      IAP_THREAD_SLOT_POLL_OPS seam: target default transmutes the
+      ROM address (hook-ready), host default is inert and tests
+      install a recording model; the fatal paths are not host-tested
+      (heap_panic is `-> !`, the pending_event_take precedent).
+      Host tests (4, app::iap_incoming_process_thread::slot_poll_tests,
+      low-slab fixture at hints::IAP_THREAD_SLOT_POLL): the poll runs
+      under the held mutex with the slot's +0 pointer verbatim and the
+      unlock status 0 returned; edge indices 0 and 28 both resolve;
+      the index strides by 8 and the slot's +4 context word is never
+      read (poison-pinned); the unlock status is forwarded as the
+      return value (mock drops the owner word, the function's own
+      unlock then reports 0x05 non-owner, surfaced verbatim).
+      match.py structural (exit 1, diff expected): same lock /
+      bounds-check / lsl-#3 + 0x154 slot load / NULL-check / poll /
+      mov r0,r4 / tail-unlock skeleton; deltas are the crate fp
+      frame, `cmp #28/bhi` for `cmp #29/bcs`, a predicated `bleq`
+      heap_panic, and the seam's literal-load + blx for the unported
+      poll callee.
+
   - address: 0x082792fc
     ghidra: thunk_FUN_082792fc
     name: string_object_destroy_veneer
