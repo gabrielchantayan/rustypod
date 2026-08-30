@@ -69,6 +69,67 @@ pub unsafe extern "C" fn cg_emit_load_word_at_offset(
     value_reg
 }
 
+/// cg_emit_load_matrix4x4_word — original: `FUN_082469b8` @ 0x082469b8
+/// (144 bytes: 36 instruction words 0x082469b8-0x08246a44, no literal
+/// pool — the next function starts at 0x08246a48 with its own
+/// `stmdb sp!,{r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,sl,fp,lr}`).
+///
+/// 36 call sites, all unconditional `bl` (no predicated forms, no tail
+/// `b`), verified by decoding every branch word in osos.dec; they sit in
+/// one run inside the pipeline generators 0x082470d4-0x08248494, which
+/// call it as `FUN_082469b8(ctx, block, base, col, row)` with both
+/// indices in 0..=3 — the fragment pipeline's 4x4 matrix state.
+///
+/// The computed-offset sibling of [`cg_emit_load_word_at_offset`]:
+/// emits the three-instruction "load element `col + 4*row` of a
+/// row-major 4-column word matrix" idiom into `block` and returns the
+/// register holding the loaded value:
+///
+/// ```text
+/// LDI  offset_reg, 4 * (col + 4 * row)
+/// ADD  address_reg, base, offset_reg
+/// LDW  value_reg, [address_reg]
+/// ```
+///
+/// All three destination registers are general-purpose and are created
+/// up front (three back-to-back `cg_virtual_reg_create` calls into
+/// r6/r7/r8), before any instruction is appended, so they are numbered
+/// in creation order rather than in use order.
+///
+/// # Deviations
+///
+/// - The original takes a leading argument in r0 that is dead on
+///   arrival: the first instruction after the prologue overwrites r0
+///   with the stacked fifth argument (`ldr r0,[sp,#0x20]`) and the
+///   incoming value is never read. Every caller passes its own context
+///   pointer there. The port keeps the parameter for ABI parity and
+///   never touches it.
+/// - The original reloads `block->proc` from `block + 4` before each of
+///   the three register creations; the port reads it once. The field is
+///   not written in between, so the observable call sequence is
+///   identical (same deviation as the sibling helper).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_emit_load_matrix4x4_word(
+    _ctx: *mut u8,
+    block: *mut CgBlock,
+    base: *mut CgVirtualReg,
+    col: usize,
+    row: usize,
+) -> *mut CgVirtualReg {
+    let offset = (col + row * 4) * 4;
+    let proc = block_proc(block);
+    let offset_reg = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+    let address_reg = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+    let value_reg = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+
+    cg_create_inst_load_immed(block, CG_INST_OPCODE_LDI, offset_reg, offset);
+    cg_create_inst_binary(block, CG_INST_OPCODE_ADD, address_reg, base, offset_reg);
+    cg_create_inst_load(block, CG_INST_OPCODE_LDW, value_reg, address_reg);
+
+    value_reg
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -291,6 +352,122 @@ mod tests {
                 std::vec![0x1c, usize::MAX],
                 "both offsets reached their load-immediate in call order"
             );
+        }
+    }
+
+    #[test]
+    fn matrix_load_emits_ldi_add_ldw_with_computed_offset() {
+        const BASE: usize = 0xdead_be00;
+
+        let mut f = Fixture::new();
+        let block = f.block_ptr();
+        // col = 3, row = 2 -> element 11 -> byte offset 44.
+        let value = unsafe {
+            cg_emit_load_matrix4x4_word(usize::MAX as *mut u8, block, BASE as *mut CgVirtualReg, 3, 2)
+        };
+
+        unsafe {
+            let [ldi, add, ldw] = emitted(&mut f);
+
+            assert_eq!(inst_kind(ldi), CG_INST_KIND_LOAD_IMMED as u8);
+            assert_eq!(inst_opcode(ldi), CG_INST_OPCODE_LDI as u8);
+            assert_eq!(field(ldi, CG_INST_LOAD_IMMED_VALUE), 44);
+
+            assert_eq!(inst_kind(add), CG_INST_KIND_BINARY as u8);
+            assert_eq!(inst_opcode(add), CG_INST_OPCODE_ADD as u8);
+            assert_eq!(field(add, CG_INST_BINARY_SOURCE0), BASE);
+            assert_eq!(
+                field(add, CG_INST_BINARY_SOURCE1),
+                field(ldi, CG_INST_LOAD_IMMED_DEST)
+            );
+
+            assert_eq!(inst_kind(ldw), CG_INST_KIND_LOAD as u8);
+            assert_eq!(inst_opcode(ldw), CG_INST_OPCODE_LDW as u8);
+            assert_eq!(field(ldw, CG_INST_LOAD_ADDRESS), field(add, CG_INST_BINARY_DEST));
+            assert_eq!(field(ldw, CG_INST_LOAD_DEST), value as usize);
+        }
+    }
+
+    #[test]
+    fn matrix_load_offset_is_col_plus_4_times_row_scaled_by_word() {
+        let mut f = Fixture::new();
+        let block = f.block_ptr();
+        for row in 0..4usize {
+            for col in 0..4usize {
+                unsafe {
+                    cg_emit_load_matrix4x4_word(
+                        core::ptr::null_mut(),
+                        block,
+                        core::ptr::null_mut(),
+                        col,
+                        row,
+                    )
+                };
+            }
+        }
+
+        assert_eq!(f.proc[CG_PROC_NUM_REGISTERS], 48, "16 loads x 3 registers");
+
+        unsafe {
+            let mut inst = f.block[CG_BLOCK_INSTS] as *mut u8;
+            let mut immediates = std::vec::Vec::new();
+            while !inst.is_null() {
+                if inst_kind(inst) == CG_INST_KIND_LOAD_IMMED as u8 {
+                    immediates.push(field(inst, CG_INST_LOAD_IMMED_VALUE));
+                }
+                inst = field(inst, CG_INST_NEXT) as *mut u8;
+            }
+            let expected: std::vec::Vec<usize> =
+                (0..4).flat_map(|row| (0..4).map(move |col| (col + row * 4) * 4)).collect();
+            assert_eq!(immediates, expected, "row-major byte offsets in call order");
+        }
+    }
+
+    #[test]
+    fn matrix_load_registers_are_general_and_numbered_in_creation_order() {
+        let mut f = Fixture::new();
+        let block = f.block_ptr();
+        unsafe { cg_emit_load_matrix4x4_word(core::ptr::null_mut(), block, core::ptr::null_mut(), 0, 0) };
+
+        assert_eq!(f.proc[CG_PROC_NUM_REGISTERS], 3);
+
+        unsafe {
+            let [ldi, add, ldw] = emitted(&mut f);
+            let offset_reg = field(ldi, CG_INST_LOAD_IMMED_DEST) as *mut u8;
+            let address_reg = field(add, CG_INST_BINARY_DEST) as *mut u8;
+            let value_reg = field(ldw, CG_INST_LOAD_DEST) as *mut u8;
+
+            for (index, reg) in [offset_reg, address_reg, value_reg].iter().enumerate() {
+                assert_eq!(field(*reg, CG_VREG_NO), index);
+                assert_eq!(reg.add(CG_VREG_TYPE * WORD).read(), CG_REG_TYPE_GENERAL as u8);
+            }
+            assert_eq!(field(offset_reg, CG_VREG_NEXT) as *mut u8, address_reg);
+            assert_eq!(field(address_reg, CG_VREG_NEXT) as *mut u8, value_reg);
+        }
+    }
+
+    #[test]
+    fn matrix_load_ignores_its_leading_argument() {
+        // The original's r0 is dead on arrival; a dangling value must not
+        // be dereferenced. Two calls with different garbage produce
+        // byte-identical instruction streams.
+        let mut f = Fixture::new();
+        let block = f.block_ptr();
+        unsafe {
+            cg_emit_load_matrix4x4_word(1 as *mut u8, block, core::ptr::null_mut(), 1, 1);
+            cg_emit_load_matrix4x4_word(usize::MAX as *mut u8, block, core::ptr::null_mut(), 1, 1);
+        }
+
+        unsafe {
+            let mut inst = f.block[CG_BLOCK_INSTS] as *mut u8;
+            let mut immediates = std::vec::Vec::new();
+            while !inst.is_null() {
+                if inst_kind(inst) == CG_INST_KIND_LOAD_IMMED as u8 {
+                    immediates.push(field(inst, CG_INST_LOAD_IMMED_VALUE));
+                }
+                inst = field(inst, CG_INST_NEXT) as *mut u8;
+            }
+            assert_eq!(immediates, std::vec![20, 20]);
         }
     }
 }
