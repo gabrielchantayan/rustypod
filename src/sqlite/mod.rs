@@ -103,6 +103,7 @@ pub mod parse;
 pub mod parse_cell;
 pub mod parse_expr;
 pub mod release_mem_array;
+pub mod schema_to_index;
 pub mod select_height;
 pub mod set_string_formatted;
 pub mod snprintf;
