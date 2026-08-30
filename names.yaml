@@ -17268,6 +17268,38 @@ functions:
       original's bl pair - match.py shows the same guard/bump/guard
       structure inside a larger body.
 
+  - address: 0x0839ed38
+    ghidra: FUN_0839ed38
+    name: refcounted_ptr_construct
+    size: 104
+    sig: "RefcountedBody **refcounted_ptr_construct(RefcountedBody **slot, usize implementation, u32 want_mutex)"
+    module: cxx/handle
+    status: ported
+    vars: {param_1: slot, param_2: implementation, param_3: want_mutex, piVar1: body, puVar2: mutex}
+    notes: >-
+      30 bl call sites, all unconditional (verified by decoding every
+      branch word in osos.dec): no b sites, no predicated forms, and the
+      address appears in no data word - never virtually dispatched.
+      Ghidra's 104-byte extent is exact this time: refcounted_ptr_assign
+      @ 0x0839eda0 starts immediately after. Birth counterpart of
+      refcounted_body_release @ 0x0839cd98: NULLs the slot first, and
+      when the implementation word is non-NULL wraps it in a fresh tag-2
+      operator_new(12) RefcountedBody { +0 impl, +4 refcount = 1, +8
+      mutex = NULL }, optionally adding a tag-2 operator_new(8) Mutex
+      (both words zeroed, then mutex_create @ 0x080744a4 fills the
+      semaphore cell) at body+8; stores the body into the slot last and
+      returns the slot (construct-and-return-this, mirroring
+      refcounted_ptr_assign). Both callees were already ported
+      (heap/veneers operator_new, kernel/sync_mutex mutex_create).
+      Byte-identical siblings (modulo bl displacements to the same two
+      callees) sit at 0x0839eca0 and 0x0839ee14 - per-type template
+      instantiations, unported. Codegen deviation: LLVM inlines the
+      ported mutex_create (ROM_KERNEL dispatch included), so the ARM
+      body is larger but keeps the same alloc/init/store sequence -
+      match.py structural confirms. Host tests back the 12/8-byte
+      allocations with oversized arenas, since the host structs are
+      wider than the 32-bit target layout.
+
   - address: 0x0816cd44
     ghidra: FUN_0816cd44
     name: refcounted_ptr_release

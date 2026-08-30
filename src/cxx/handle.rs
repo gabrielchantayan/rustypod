@@ -37,15 +37,18 @@
 //! address this port cites. Note the NULL test is on the *inner* pointer,
 //! not on `slot`: a NULL `slot` faults in the original, and does here.
 //!
-//! Also here: [`refcounted_ptr_assign`], the mutex-guarded shared-body
+//! Also here: [`refcounted_ptr_construct`], the birth counterpart
+//! @ 0x0839ed38 that wraps an implementation pointer in a fresh
+//! [`RefcountedBody`] (refcount 1, optional mutex) and installs it in a
+//! handle slot; [`refcounted_ptr_assign`], the mutex-guarded shared-body
 //! assign that backs the C++ layer's refcounted handles (it sits outside
 //! the 0x083c0000-0x083dffff block, at 0x0839eda0, so it is not one of
 //! the byte-identical families above), and [`refcounted_body_release`],
 //! its refcount-drop teardown @ 0x0839cd98. [`refcounted_ptr_release`]
 //! is the thin destroy-and-return-this wrapper @ 0x0816cd44.
 
-use crate::heap::veneers::operator_delete;
-use crate::kernel::sync_mutex::{mutex_delete, mutex_lock, mutex_unlock, Mutex};
+use crate::heap::veneers::{operator_delete, operator_new};
+use crate::kernel::sync_mutex::{mutex_create, mutex_delete, mutex_lock, mutex_unlock, Mutex};
 
 /// handle_deref_or_null — original: `FUN_083d604c` @ 0x083d604c
 /// (16 bytes; 253 `bl` call sites at that address, 725 across all 22
@@ -106,6 +109,64 @@ pub struct RefcountedBody {
     pub refcount: i32,
     /// Target +8: optional mutex guarding the refcount (NULL = unguarded).
     pub mutex: *mut Mutex,
+}
+
+/// refcounted_ptr_construct — original: `FUN_0839ed38` @ 0x0839ed38
+/// (104 bytes; 30 `bl` call sites, all unconditional — verified by
+/// decoding every branch word in osos.dec: no `b` sites, no predicated
+/// forms, and the address appears in no data word, so it is never
+/// virtually dispatched).
+///
+/// The birth counterpart of [`refcounted_body_release`]: NULLs the
+/// handle slot first, then, when `implementation` is non-NULL, allocates
+/// a 12-byte [`RefcountedBody`] with tag-2 `operator_new` (0x082aadd4),
+/// fills it as `{ implementation, refcount = 1, mutex = NULL }` and, only
+/// when `want_mutex` is nonzero, allocates an 8-byte [`Mutex`] the same
+/// way, zeroes both its words, installs it at body+8, and initializes
+/// its semaphore cell with `mutex_create` (0x080744a4, ported in
+/// kernel/sync_mutex.rs). The finished body is stored into the slot last
+/// and the slot is returned — the ADS construct-and-return-this idiom,
+/// mirroring [`refcounted_ptr_assign`]. A NULL `implementation` leaves
+/// the slot NULL with no allocation at all.
+///
+/// The allocation sizes are the original's immediates (12 and 8 — the
+/// 32-bit target sizes of [`RefcountedBody`] and [`Mutex`]); on a
+/// 64-bit host the structs are wider, so host fixtures must back the
+/// mock allocations with oversized arenas.
+///
+/// Codegen deviation: LLVM inlines the ported `mutex_create` (ROM_KERNEL
+/// dispatch included) instead of emitting the original's `bl`, so the
+/// ARM body is larger but keeps the same alloc/init/store sequence.
+///
+/// # Safety
+/// `slot` must be a valid, aligned pointer slot; it is not NULL-checked,
+/// as in the original. `implementation` becomes the body's opaque word
+/// verbatim and is only ever compared against NULL here. Allocation
+/// failure behavior is whatever the active heap provides — the original
+/// does not check either `operator_new` result.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_ptr_construct(
+    slot: *mut *mut RefcountedBody,
+    implementation: usize,
+    want_mutex: u32,
+) -> *mut *mut RefcountedBody {
+    slot.write(core::ptr::null_mut());
+    if implementation != 0 {
+        let body = operator_new(12).cast::<RefcountedBody>();
+        (*body).opaque0 = implementation;
+        (*body).refcount = 1;
+        (*body).mutex = core::ptr::null_mut();
+        if want_mutex != 0 {
+            let mutex = operator_new(8).cast::<Mutex>();
+            (*mutex).sem_cell = core::ptr::null_mut();
+            (*mutex).unused = 0;
+            (*body).mutex = mutex;
+            mutex_create(mutex);
+        }
+        slot.write(body);
+    }
+    slot
 }
 
 /// refcounted_ptr_assign — original: `FUN_0839eda0` @ 0x0839eda0
@@ -607,6 +668,211 @@ mod tests {
             assert_eq!(body.refcount, -1);
             assert!(slot.is_null());
             assert!(events().is_empty());
+        }
+    }
+
+    /// Direct tests of the constructor use recording heap/kernel hooks
+    /// over the ported `operator_new` and `mutex_create` surfaces — the
+    /// same bench pattern as `release`.
+    mod construct {
+        extern crate std;
+
+        use super::super::*;
+        use crate::heap::types::{HeapDescriptor, HeapDescriptorDescriptor};
+        use crate::heap::veneers::{HeapVeneerOps, HEAP_OPS};
+        use crate::kernel::sync_mutex::{RomKernelOps, ROM_KERNEL};
+        use core::sync::atomic::{AtomicBool, Ordering};
+        use std::vec::Vec;
+
+        static OPS_LOCK: AtomicBool = AtomicBool::new(false);
+        static mut EVENTS: Vec<Event> = Vec::new();
+
+        /// Writable stand-ins for the two tag-2 allocations (body, then
+        /// mutex) and the 4-byte kernel semaphore cell. Oversized on
+        /// purpose: the original's immediates (12/8/4) are the 32-bit
+        /// target sizes; the host structs are wider.
+        static mut ARENAS: [[usize; 8]; 3] = [[0; 8]; 3];
+        static mut FAKE_HEAP_HANDLE: usize = 0;
+
+        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+        enum Event {
+            Alloc(usize, usize),
+            KernelAlloc(usize),
+            SemaDefine(u32, usize),
+        }
+
+        /// Kernel semaphore handle the mock define writes into `*cell`.
+        const KERNEL_SEM_HANDLE: u32 = 0x5e4a_0007;
+
+        unsafe extern "C" fn recording_alloc(
+            _heap: *mut HeapDescriptorDescriptor,
+            size: usize,
+            tag: usize,
+        ) -> *mut u8 {
+            let events = &mut *core::ptr::addr_of_mut!(EVENTS);
+            let index = events
+                .iter()
+                .filter(|event| matches!(event, Event::Alloc(..)))
+                .count();
+            events.push(Event::Alloc(size, tag));
+            assert!(index < 2, "the constructor allocates at most twice");
+            (*core::ptr::addr_of_mut!(ARENAS))[index].as_mut_ptr().cast()
+        }
+
+        /// The lazy default-heap init runs through the swapped table too;
+        /// hand back a fake handle so the real heap core stays untouched.
+        unsafe extern "C" fn recording_create(
+            _desc: *mut HeapDescriptor,
+            _start: *mut u8,
+            _size: usize,
+        ) -> *mut HeapDescriptorDescriptor {
+            core::ptr::addr_of_mut!(FAKE_HEAP_HANDLE).cast()
+        }
+
+        unsafe extern "C" fn recording_sema_define(initial_count: u32, cell: *mut u32) {
+            (*core::ptr::addr_of_mut!(EVENTS)).push(Event::SemaDefine(initial_count, cell as usize));
+            cell.write(KERNEL_SEM_HANDLE);
+        }
+
+        unsafe extern "C" fn recording_kernel_alloc(size: usize) -> *mut u8 {
+            (*core::ptr::addr_of_mut!(EVENTS)).push(Event::KernelAlloc(size));
+            (*core::ptr::addr_of_mut!(ARENAS))[2].as_mut_ptr().cast()
+        }
+
+        unsafe extern "C" fn heap_is_past_early_boot() -> u32 {
+            0
+        }
+
+        struct Bench {
+            old_kernel: RomKernelOps,
+            old_heap: HeapVeneerOps,
+        }
+
+        fn bench() -> Bench {
+            while OPS_LOCK
+                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_err()
+            {
+                std::thread::yield_now();
+            }
+            unsafe {
+                (*core::ptr::addr_of_mut!(EVENTS)).clear();
+                (*core::ptr::addr_of_mut!(ARENAS)) = [[0; 8]; 3];
+                let old_kernel = core::ptr::read_volatile(core::ptr::addr_of!(ROM_KERNEL));
+                let old_heap = core::ptr::read_volatile(core::ptr::addr_of!(HEAP_OPS));
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(ROM_KERNEL),
+                    RomKernelOps {
+                        sema_define: recording_sema_define,
+                        heap_early_flag: heap_is_past_early_boot,
+                        heap_alloc: recording_kernel_alloc,
+                        ..old_kernel
+                    },
+                );
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(HEAP_OPS),
+                    HeapVeneerOps {
+                        alloc: recording_alloc,
+                        create: recording_create,
+                        ..old_heap
+                    },
+                );
+                Bench {
+                    old_kernel,
+                    old_heap,
+                }
+            }
+        }
+
+        impl Drop for Bench {
+            fn drop(&mut self) {
+                unsafe {
+                    core::ptr::write_volatile(core::ptr::addr_of_mut!(ROM_KERNEL), self.old_kernel);
+                    core::ptr::write_volatile(core::ptr::addr_of_mut!(HEAP_OPS), self.old_heap);
+                }
+                OPS_LOCK.store(false, Ordering::Release);
+            }
+        }
+
+        fn events() -> Vec<Event> {
+            unsafe { (*core::ptr::addr_of!(EVENTS)).clone() }
+        }
+
+        /// NULL implementation: the slot is cleared and handed back with
+        /// no allocation at all — even when `want_mutex` is nonzero.
+        #[test]
+        fn null_implementation_clears_slot_without_allocating() {
+            let _bench = bench();
+            let mut slot = 0xdead_beefusize as *mut RefcountedBody;
+            let slot_ptr = &mut slot as *mut *mut RefcountedBody;
+
+            let returned = unsafe { refcounted_ptr_construct(slot_ptr, 0, 1) };
+
+            assert_eq!(returned, slot_ptr, "construct-and-return-this");
+            assert!(slot.is_null(), "the unconditional first store wins");
+            assert!(events().is_empty());
+        }
+
+        /// `want_mutex == 0`: one tag-2 `operator_new(12)` whose block
+        /// becomes `{ implementation, refcount = 1, mutex = NULL }`.
+        #[test]
+        fn construct_without_mutex_builds_unguarded_body() {
+            let _bench = bench();
+            let body_arena = unsafe { (*core::ptr::addr_of_mut!(ARENAS))[0].as_mut_ptr() as usize };
+            let mut slot: *mut RefcountedBody = core::ptr::null_mut();
+            let slot_ptr = &mut slot as *mut *mut RefcountedBody;
+
+            let returned = unsafe { refcounted_ptr_construct(slot_ptr, 0x1122_3344, 0) };
+
+            assert_eq!(returned, slot_ptr);
+            assert_eq!(slot as usize, body_arena);
+            let body = unsafe { &*(body_arena as *const RefcountedBody) };
+            assert_eq!(body.opaque0, 0x1122_3344);
+            assert_eq!(body.refcount, 1);
+            assert!(body.mutex.is_null());
+            assert_eq!(events(), std::vec![Event::Alloc(12, 2)]);
+        }
+
+        /// `want_mutex != 0`: a second tag-2 `operator_new(8)` becomes the
+        /// mutex, is installed at body+8, and is then initialized by
+        /// `mutex_create` — observed as the ROM define filling the fresh
+        /// 4-byte cell after both allocations.
+        #[test]
+        fn construct_with_mutex_installs_created_mutex() {
+            let _bench = bench();
+            let (body_arena, mutex_arena, cell_arena) = unsafe {
+                let arenas = &mut *core::ptr::addr_of_mut!(ARENAS);
+                (
+                    arenas[0].as_mut_ptr() as usize,
+                    arenas[1].as_mut_ptr() as usize,
+                    arenas[2].as_mut_ptr() as usize,
+                )
+            };
+            let mut slot: *mut RefcountedBody = core::ptr::null_mut();
+            let slot_ptr = &mut slot as *mut *mut RefcountedBody;
+
+            let returned = unsafe { refcounted_ptr_construct(slot_ptr, 0xaabb_ccdd, 1) };
+
+            assert_eq!(returned, slot_ptr);
+            assert_eq!(slot as usize, body_arena);
+            let body = unsafe { &*(body_arena as *const RefcountedBody) };
+            assert_eq!(body.opaque0, 0xaabb_ccdd);
+            assert_eq!(body.refcount, 1);
+            assert_eq!(body.mutex as usize, mutex_arena);
+            let mutex = unsafe { &*(mutex_arena as *const Mutex) };
+            assert_eq!(mutex.sem_cell as usize, cell_arena);
+            assert_eq!(unsafe { *(cell_arena as *const u32) }, KERNEL_SEM_HANDLE);
+            assert_eq!(mutex.unused, 0);
+            assert_eq!(
+                events(),
+                std::vec![
+                    Event::Alloc(12, 2),
+                    Event::Alloc(8, 2),
+                    Event::KernelAlloc(4),
+                    Event::SemaDefine(1, cell_arena),
+                ],
+                "both allocations precede the mutex cell create, in ARM order"
+            );
         }
     }
 }
