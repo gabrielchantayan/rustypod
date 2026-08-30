@@ -38,12 +38,13 @@
 //! and otherwise returns the open-status word when the directory-entry
 //! index is -1 or writes the cached entry length.
 //!
-//! [`ft_platform_stream_read`] @ 0x082d3d7c is ported too. Its two direct
-//! C++ file-method branches — seek @ 0x082787b8 and read @ 0x082784b8 —
-//! remain the exact [`FT_PLATFORM_FILE_SEEK`] / [`FT_PLATFORM_FILE_READ`]
-//! dispatch seams because that file subsystem is not yet ported. The
-//! default seek is a no-op and the default read reports an error, so an
-//! uninstalled file layer cannot fabricate I/O.
+//! [`ft_platform_stream_read`] @ 0x082d3d7c is ported too. Its direct
+//! C++ file-method seek branch @ 0x082787b8 remains the exact
+//! [`FT_PLATFORM_FILE_SEEK`] dispatch seam because that subsystem is not yet
+//! ported. Its read branch @ 0x082784b8 now calls
+//! [`crate::fs::file_read::retail_file_read`], which supplies the stock zero
+//! control word to the unrecovered 0x082784d4 body; that body remains a
+//! fail-closed host boundary.
 //!
 //! The opener takes its file-open dependency as an installable
 //! [`FtPlatformFileOps`], the same shape `ft/trace.rs` uses for the
@@ -114,16 +115,6 @@ pub type FtPlatformFileSeekFn = unsafe extern "C" fn(
     origin: u32,
 ) -> i32;
 
-/// ABI of the file object's read wrapper @ 0x082784b8: `(handle, count,
-/// buffer, &mut transferred) -> status`. The wrapper supplies a fifth zero
-/// argument to 0x082784d4 internally; it is not a callback argument.
-pub type FtPlatformFileReadFn = unsafe extern "C" fn(
-    handle: *mut core::ffi::c_void,
-    count: u32,
-    buffer: *mut u8,
-    transferred: *mut u32,
-) -> i32;
-
 /// Default seek for the unported C++ file layer. It deliberately has no
 /// observable effect; the retailOS call's return value is ignored.
 unsafe extern "C" fn file_seek_unported(
@@ -136,25 +127,10 @@ unsafe extern "C" fn file_seek_unported(
     0
 }
 
-/// Default read for the unported C++ file layer. The callback initializes its
-/// local transfer count to zero before this call, so returning a file-layer
-/// error faithfully leaves it at zero.
-unsafe extern "C" fn file_read_unported(
-    _handle: *mut core::ffi::c_void,
-    _count: u32,
-    _buffer: *mut u8,
-    _transferred: *mut u32,
-) -> i32 {
-    2
-}
-
 /// Direct 0x082787b8 branch used by [`ft_platform_stream_read`]. Install the
 /// real C++ file seek when that class is ported; host tests install a recorder.
 pub static mut FT_PLATFORM_FILE_SEEK: FtPlatformFileSeekFn = file_seek_unported;
 
-/// Direct 0x082784b8 branch used by [`ft_platform_stream_read`]. Install the
-/// real C++ file read when that class is ported; host tests install a recorder.
-pub static mut FT_PLATFORM_FILE_READ: FtPlatformFileReadFn = file_read_unported;
 
 /// ft_platform_stream_read — original: `FUN_082d3d7c` @ 0x082d3d7c
 /// (96 bytes; stored as the `FT_Stream_IoFunc` literal by
@@ -172,14 +148,14 @@ pub static mut FT_PLATFORM_FILE_READ: FtPlatformFileReadFn = file_read_unported;
 /// The callback never dereferences the file object itself: the sole recovered
 /// layout fact is its opaque pointer at `FtStream + 0x0c`, passed unchanged to
 /// both file methods. The target-only `FtStream` layout assertions pin that
-/// offset. The C++ methods are not yet ported, so their two direct firmware
-/// branches use the exact ABI dispatch seams above; their defaults fail
+/// offset. Seek remains an installable ABI seam; the now-ported read wrapper
+/// delegates to its unrecovered 0x082784d4 body, whose host default fails
 /// closed rather than inventing filesystem I/O.
 ///
 /// # Safety
-/// `stream` must be a valid `FtStream` with a descriptor valid for the
-/// installed file-method slots. When `buffer` and `count` are nonzero,
-/// `buffer` must name `count` writable bytes.
+/// `stream` must be a valid `FtStream` with a descriptor valid for the seek
+/// seam and read body. When `buffer` and `count` are nonzero, `buffer` must
+/// name `count` writable bytes.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn ft_platform_stream_read(
@@ -194,8 +170,7 @@ pub unsafe extern "C" fn ft_platform_stream_read(
 
     let mut transferred = 0;
     if !buffer.is_null() && count != 0 {
-        let read = core::ptr::addr_of!(FT_PLATFORM_FILE_READ).read_volatile();
-        if read(handle, count, buffer, &mut transferred) != 0 {
+        if crate::fs::file_read::retail_file_read(handle, count, buffer, &mut transferred) != 0 {
             transferred = 0;
         }
     }
@@ -531,6 +506,7 @@ pub(crate) static TEST_OPS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(()
 mod tests {
     use super::*;
     use std::{string::String, vec, vec::Vec};
+    use crate::fs::file_read::{reset_retail_file_read_body, RETAIL_FILE_READ_BODY};
 
     static mut OPEN_VOLUME: i32 = -99;
     static mut OPEN_PATH: [u8; 64] = [0; 64];
@@ -595,6 +571,7 @@ mod tests {
             handle: usize,
             count: u32,
             buffer: usize,
+            control: u32,
         },
     }
 
@@ -624,11 +601,13 @@ mod tests {
         count: u32,
         buffer: *mut u8,
         transferred: *mut u32,
+        control: u32,
     ) -> i32 {
         (*core::ptr::addr_of_mut!(IO_CALLS)).push(IoCall::Read {
             handle: handle as usize,
             count,
             buffer: buffer as usize,
+            control,
         });
         *transferred = *core::ptr::addr_of!(READ_TRANSFERRED);
         *core::ptr::addr_of!(READ_STATUS)
@@ -639,12 +618,12 @@ mod tests {
         *core::ptr::addr_of_mut!(READ_STATUS) = read_status;
         *core::ptr::addr_of_mut!(READ_TRANSFERRED) = read_transferred;
         core::ptr::addr_of_mut!(FT_PLATFORM_FILE_SEEK).write_volatile(recording_seek);
-        core::ptr::addr_of_mut!(FT_PLATFORM_FILE_READ).write_volatile(recording_read);
+        core::ptr::addr_of_mut!(RETAIL_FILE_READ_BODY).write_volatile(recording_read);
     }
 
     unsafe fn reset_io() {
         core::ptr::addr_of_mut!(FT_PLATFORM_FILE_SEEK).write_volatile(file_seek_unported);
-        core::ptr::addr_of_mut!(FT_PLATFORM_FILE_READ).write_volatile(file_read_unported);
+        reset_retail_file_read_body();
     }
 
     unsafe fn io_calls() -> Vec<IoCall> {
@@ -815,6 +794,7 @@ mod tests {
                         handle: handle as usize,
                         count: 8,
                         buffer: buffer.as_mut_ptr() as usize,
+                        control: 0,
                     },
                 ]
             );
@@ -846,6 +826,7 @@ mod tests {
                         handle: handle as usize,
                         count: 4,
                         buffer: buffer.as_mut_ptr() as usize,
+                        control: 0,
                     },
                 ]
             );
