@@ -19,6 +19,7 @@ pub mod event_list;
 pub mod event_source;
 pub mod facade_registry_walk;
 pub mod facade_for_selector;
+pub mod fixed3_assign;
 pub mod fixed_value;
 pub mod global_flag_table;
 pub mod h264_decode_forwarder;
