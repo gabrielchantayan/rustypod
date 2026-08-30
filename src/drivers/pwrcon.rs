@@ -143,6 +143,57 @@ pub unsafe extern "C" fn pwrcon_update_masks(
     0
 }
 
+/// iram_pwrcon_update_masks_veneer — original: `thunk_EXT_FUN_22000318` @
+/// 0x08037de8 (Ghidra reports 4 bytes; the real stub is **8** — the
+/// `ldr pc, [pc, #-4]` word 0xe51ff004 at 0x08037de8 plus the absolute
+/// target word 0x22000318 at 0x08037dec, binary-decoded from osos.dec).
+///
+/// **31 `bl` call sites, all unconditional, plus 3 tail `b`
+/// (0x080923b4 / 0x080ce0c4 / 0x0836d8c4) and 1 `beq` (0x0836e0a0)**,
+/// counted by decoding every ARM `B`/`BL` word in
+/// `work/firmware/osos.dec` for every condition code and resolving its
+/// target — not a Ghidra xref count. No DATA word holds the thunk
+/// address, so it is not virtually dispatched. The predicated `beq` is a
+/// caller-side branch choice, not a NULL guard on this callee — the
+/// veneer and its target take pointer-less mask arguments.
+///
+/// # The target resolves to the already-ported [`pwrcon_update_masks`]
+///
+/// 0x22000000 is S5L8702 internal SRAM, populated from the osos image
+/// itself: the relocator @ 0x080046e0 memmoves 0xaed8 bytes from
+/// 0x08000000 to 0x22000000 (see `libc/iram_veneers.rs` for the full
+/// three-fact argument pinning that mirror). So IRAM 0x22000318 is osos
+/// 0x08000318, which is [`pwrcon_update_masks`] @ 0x08000318 — the
+/// IRQ/FIQ-guarded PWRCON0/PWRCON1 read-modify-write above. This veneer
+/// therefore forwards to it directly rather than re-stubbing it.
+/// (kernel/thunks.rs's ROM_THUNKS registry lists the 0x08037de8 ->
+/// 0x22000318 pair with name None; the name is recorded here per the
+/// iram_usec_timer_read_veneer precedent.)
+///
+/// # What the veneer does
+///
+/// Nothing but transfer control: r0/r1/r2 pass through untouched, no
+/// stack is used, `lr` still points at the caller, so it is exactly a
+/// tail call returning the body's r0 (always 0). The callee is loaded
+/// through `read_volatile`: written as a plain call LLVM could inline
+/// the body, and its identical-function folding could collapse the
+/// veneer onto another call of the same shape — destroying the separate
+/// 0x08037de8 hook seam that is this port's entire purpose. The distinct
+/// `link_section` guards the same invariant at link time.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.iram_pwrcon_update_masks_veneer")]
+#[inline(never)]
+pub unsafe extern "C" fn iram_pwrcon_update_masks_veneer(
+    pwrcon0_mask: u32,
+    pwrcon1_mask: u32,
+    enable: u32,
+) -> u32 {
+    let body = core::ptr::read_volatile(
+        &(pwrcon_update_masks as unsafe extern "C" fn(u32, u32, u32) -> u32),
+    );
+    body(pwrcon0_mask, pwrcon1_mask, enable)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -268,5 +319,56 @@ mod tests {
                 "the two volatile read-modify-writes remain inside the guard",
             );
         }
+    }
+
+    /// The IRAM veneer @ 0x08037de8 must be behaviorally transparent on
+    /// the gate path: the same guarded set-mask transaction the body @
+    /// 0x08000318 performs, and the same r0 result (always 0).
+    #[test]
+    fn iram_veneer_forwards_the_set_masks_transaction() {
+        let _ops = install(0x1200_0001, 0x00a0_0002);
+        unsafe {
+            assert_eq!(iram_pwrcon_update_masks_veneer(0x0000_0c20, 0x8000_1004, 0), 0);
+            assert_eq!(*addr_of!(TEST_PWRCON0), 0x1200_0c21, "PWRCON0 sets its mask");
+            assert_eq!(*addr_of!(TEST_PWRCON1), 0x80a0_1006, "PWRCON1 sets its mask");
+            assert_eq!(
+                *addr_of!(CALL_LOG),
+                ["enter", "read0", "write0", "read1", "write1", "exit"],
+                "exactly one guarded transaction per veneer call",
+            );
+        }
+    }
+
+    /// The clear path (enable != 0) must pass `enable` through verbatim —
+    /// any nonzero value clears the masks, matching the original's
+    /// `cmp r6, #0` / orreq / bicne predication.
+    #[test]
+    fn iram_veneer_forwards_the_clear_masks_transaction() {
+        let _ops = install(0xf00f_0f0f, 0xffff_1234);
+        unsafe {
+            assert_eq!(iram_pwrcon_update_masks_veneer(0x000f_0c03, 0xf000_1034, 2), 0);
+            assert_eq!(*addr_of!(TEST_PWRCON0), 0xf000_030c, "PWRCON0 clears its mask");
+            assert_eq!(*addr_of!(TEST_PWRCON1), 0x0fff_0200, "PWRCON1 clears its mask");
+        }
+    }
+
+    /// The whole point of the port is that a hook at 0x08037de8 lands on
+    /// a forwarding stub distinct from the body at 0x08000318. Identical
+    /// bodies are exactly what LLVM's identical-function folding
+    /// collapses, so assert the two symbols stay apart.
+    #[test]
+    fn iram_veneer_is_a_distinct_call_target_from_its_body() {
+        let (veneer, body) = unsafe {
+            (
+                core::ptr::read_volatile(
+                    &(iram_pwrcon_update_masks_veneer as unsafe extern "C" fn(u32, u32, u32) -> u32),
+                ),
+                core::ptr::read_volatile(
+                    &(pwrcon_update_masks as unsafe extern "C" fn(u32, u32, u32) -> u32),
+                ),
+            )
+        };
+        assert_ne!(veneer as usize, 0);
+        assert_ne!(veneer as usize, body as usize);
     }
 }

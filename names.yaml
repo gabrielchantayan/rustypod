@@ -1203,6 +1203,43 @@ functions:
       them (enables clocks). Target uses volatile MMIO; host tests install a
       recording driver-local guard/MMIO seam.
 
+  - address: 0x08037de8
+    ghidra: thunk_EXT_FUN_22000318
+    name: iram_pwrcon_update_masks_veneer
+    size: 8
+    sig: "u32 iram_pwrcon_update_masks_veneer(u32 pwrcon0_mask, u32 pwrcon1_mask, u32 enable)"
+    module: drivers/pwrcon
+    status: ported
+    renames: {thunk_EXT_FUN_22000318: iram_pwrcon_update_masks_veneer}
+    notes: >-
+      One stub of the osos -> IRAM thunk table (ROM_THUNKS in
+      kernel/thunks.rs, registry name slot left None per the
+      0x08037e20 precedent): ldr pc,[pc,#-4] + literal word 0x22000318,
+      binary-decoded from osos.dec (0xe51ff004 @ 0x08037de8, target word
+      @ 0x08037dec). Ghidra reports 4 bytes; the stub is 8 (next stub
+      starts at 0x08037df0). Call count binary-verified by decoding
+      every B/BL word in osos.dec for every condition code: 31 bl, ALL
+      unconditional, plus 3 tail b (0x080923b4 / 0x080ce0c4 /
+      0x0836d8c4) and 1 beq (0x0836e0a0 - a caller-side branch choice,
+      not a NULL guard: the callee takes pointer-less mask arguments).
+      No DATA word holds the thunk address, so it is not virtually
+      dispatched. Target identified via the relocator mirror (0x080046e0
+      copies 0xaed8 bytes from 0x08000000 to 0x22000000), so IRAM
+      0x22000318 is byte-identical to the ALREADY PORTED
+      pwrcon_update_masks @ 0x08000318 in this module; the veneer calls
+      it directly (the iram_usec_timer_read_veneer precedent). Pure tail
+      transfer: r0-r2 pass through untouched, no stack, lr preserved,
+      returns the body's r0 (always 0). The callee is loaded through
+      read_volatile and the veneer carries its own link_section, so LLVM
+      can neither inline the body nor ICF-fold the veneer onto another
+      same-shaped call - verified: both symbols resolve in
+      librustypod.a. Host tests prove set-mask and clear-mask
+      transparency through the pwrcon host seam (identical guarded
+      transaction and r0 as a direct call) and symbol distinctness.
+      match.py structural (exit 1, expected): the port is ldr/ldr/bx
+      through a literal plus the crate's fp frame, r0-r2 untouched;
+      the original's literal word shows as a data-decoded andcs.
+
   - address: 0x080003b8
     ghidra: FUN_080003b8
     name: startup_wait_status_clear
