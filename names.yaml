@@ -28831,6 +28831,41 @@ functions:
       (ldr pc,[pc,#-4]); only diff line is the literal word shown as
       .word vs data-decoded-andcs.
 
+  - address: 0x08038060
+    ghidra: thunk_EXT_FUN_22007470
+    name: event_handler_source
+    size: 8
+    sig: "void *event_handler_source(void)"
+    module: kernel/thunks
+    status: ported
+    renames:
+      thunk_EXT_FUN_22007470: event_handler_source
+      FUN_08007470: event_handler_source
+      DAT_080074d4: event_handler_source_guard
+      DAT_080074d8: event_handler_source_instance
+      DAT_080074e4: event_handler_source_initialized
+    notes: >-
+      One stub of the osos -> IRAM thunk table (ROM_THUNKS in
+      kernel/thunks.rs): ldr pc,[pc,#-4] + literal word 0x22007470.
+      Ghidra reports 4 bytes; the stub is 8 (next stub starts at
+      0x08038068). Call count binary-verified by decoding every B/BL word
+      in osos.dec: 30 bl, all unconditional, zero predicated forms, zero
+      tail b. Target identification is exact: the boot relocator at
+      0x080046e0 copies 0xaed8 bytes from 0x08000000 to 0x22000000, so
+      IRAM 0x22007470 is byte-identical to FUN_08007470 @ 0x08007470
+      (100 bytes of code + 20-byte literal pool; next function at
+      0x080074e8). The target lazily constructs/registers the object at
+      0x22010318 under guard word 0x22008c84, then calls FUN_08007e38
+      once under byte flag 0x2200aed4 before returning that object pointer.
+      Class identity remains unrecovered; `event_handler_source` records
+      that callers pass the result as the source argument to IRAM
+      event-dispatch routines. Port retains the verbatim ARM veneer through
+      global_asm (ldr pc preserves LR); host builds dispatch through the
+      volatile EVENT_HANDLER_SOURCE_OPS seam, default NULL. match.py
+      structural result: instruction stream identical (ldr pc,[pc,#-4]);
+      only the literal differs in display as .word versus a data-decoded
+      andcs.
+
   - address: 0x08037dc8
     ghidra: thunk_EXT_FUN_220002d4
     name: iram_memzero_veneer
