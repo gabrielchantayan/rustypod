@@ -34755,6 +34755,45 @@ functions:
       folds ~(align-1) into -align via rsb/and (algebraically identical)
       and adds the crate's fp frame; core add/sub/mask structure matches.
 
+  # --- opaque application-object dispatch-target word accessor ---
+  - address: 0x0829919c
+    ghidra: FUN_0829919c
+    name: object_dispatch_target
+    size: 8
+    sig: "u32 object_dispatch_target(const void *object)"
+    module: app/object_dispatch_target
+    status: ported
+    renames:
+      param_1: object
+      r0: dispatch_target_word
+    notes: >-
+      8-byte leaf: `ldr r0,[r0,#0x18]; bx lr` - returns the complete raw
+      u32 word at object+0x18 with no NULL guard and no writes. Extent
+      verified against the next function's entry @ 0x082991a4
+      (bitmap_draw_in_rect). Call-site census (binary-scanned over every
+      B/BL word in osos.dec): 30 plain bl sites, zero predicated forms,
+      plus one tail b from the already-ported singleton_state_get wrapper
+      @ 0x08086df0 (app/singleton_state), which fetches the singleton
+      base and tail-branches here for the same +0x18 load. No data-word
+      references to 0x0829919c, so the accessor is never itself
+      dispatched virtually. Every sampled caller treats the returned word
+      as a vtable-bearing object pointer: the settings dispatcher @
+      0x0816f8ac and the command cluster @ 0x08203a44 invoke its vtable
+      slots +0x88/+0x8c with staged three-word operation records, and
+      singleton_state_get's callers do the same through slot +0x84. The
+      producing objects are heterogeneous (registry class-0x6180
+      instances via instance_of_class_6180 @ 0x08284e2c, dispatcher this
+      pointers, the singleton base), so +0x18 is a shared dispatch-target
+      member of this controller family [INFERENCE from the uniform
+      vtable-dispatch usage]; the concrete target class is not recovered.
+      No deviations: the port returns the raw word and adds no NULL
+      check; +0x18 is word-aligned in every recovered owner, so the port
+      uses an aligned load, not read_unaligned. match.py (exit 1, diff
+      expected): the single ldr matches; the crate's fp frame accounts
+      for the extra push/pop. Host tests prove the exact word at +0x18 is
+      returned for extreme values, the rest of the object is untouched,
+      and distinct objects yield their own word (no caching).
+
   - address: 0x082991a4
     ghidra: FUN_082991a4
     name: bitmap_draw_in_rect
