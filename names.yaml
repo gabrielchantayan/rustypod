@@ -15007,6 +15007,111 @@ functions:
       StringObject veneer call, but preserves the same offset/dataflow
       chain and final return.
 
+  - address: 0x08278e8c
+    ghidra: FUN_08278e8c
+    name: silver_controller_transition_addon_construct
+    size: 188
+    sig: "u8 *silver_controller_transition_addon_construct(u8 *this, const u8 *source, u32 flag, u32 base_hint, u32 quantum_arg, u32 scale_arg, u32 context)"
+    module: cxx/transition_addon
+    status: ported
+    renames:
+      param_1: this
+      param_2: source
+      param_3: flag
+      param_4: base_hint
+      param_5: quantum_arg
+      param_6: scale_arg
+      param_7: context
+      DAT_08278f44: TRANSITION_ADDON_VTABLE_ADDRESS (0x089a60bc)
+      DAT_082792c8: TRANSITION_ADDON_STRING_MEMBER_VTABLE_ADDRESS (0x089a60d8)
+      FUN_0818a0c4: base_construct (base transition-addon constructor)
+      FUN_082792b4: string_member_construct (derived string member veneer)
+      FUN_08296efc: owner_capacity_query
+      FUN_08277b64: transfer_quantum
+      FUN_08277bd0: scale_class
+      FUN_0818a0bc: facade_for_selector (ported, called directly)
+      FUN_081a81bc: deque_seg_capacity (byte-identical copy, called directly)
+      FUN_08278104: vector_member_construct
+      FUN_08278250: register_with_owner
+    notes: >-
+      184 code bytes + the 4-byte literal-pool word @ 0x08278f44 (=
+      0x089a60bc, binary-verified against osos.dec); the next function
+      starts at 0x08278f48. 31 bl call sites, binary-scanned by decoding
+      every B/BL word in osos.dec - all plain bl, no predicated forms and
+      no tail b: 0x08047508, 0x0804fec0, 0x08058928, 0x080fe2e4,
+      0x080ff974, 0x08104380, 0x08104660, 0x08104754, 0x08119dec,
+      0x0813a578, 0x0813a5c0, 0x0813aca4, 0x0813ad00, 0x08149504,
+      0x08149d34, 0x0814c470, 0x0815abfc, 0x081b1d4c, 0x081e1ec4,
+      0x08210348, 0x08264b64, 0x08264d54, 0x08265860, 0x0826c630,
+      0x0826c73c, 0x0827eff4, 0x0827f04c, 0x0827f824, 0x0827fbc0,
+      0x0828fb00 and 0x082c7180. The seven-argument derived constructor
+      paired with silver_controller_transition_addon_destroy @ 0x08278f60:
+      four register arguments plus three stack arguments lifted by
+      `ldm r8,{r6,r7,r8}` after `add r8,sp,#24`. The caller owns the
+      storage (the ft/system.rs vtable_set call site operator_new(0x54)s
+      it - 0x54 matches the vector member's +0x50 capacity word - and
+      stashes the constructed object at its record+0x30). Sequence:
+      base_construct(this, base_hint, flag ^ 1) @ 0x0818a0c4 plants the
+      base vtable 0x0898994c, resolves the interface word at +0x04
+      through the guard accessor 0x0818a06c (which forwards base_hint in
+      r1 to the resolver 0x0814a130 - so param_4 is LIVE, not dead as
+      Ghidra's base-ctor-only view suggests) and stores the inverted flag
+      at byte +0x09; the constructor then overwrites +0x00 with the
+      derived vtable 0x089a60bc and runs the string-member veneer
+      0x082792b4 on this+0x0c (StringObject copy-ctor chain 0x082773e0
+      plus the derived string vtable 0x089a60d8), storing the raw flag
+      byte at the member's +8 (= this+0x14). Fields: +0x18 = 0xffffffff,
+      +0x20 = 0, +0x24 = owner_capacity_query(+0x04 word) @ 0x08296efc
+      (owner +0x04 interface NULL -> 0x200, else interface vtable slot
+      +0x2c), +0x28 = context (stored BEFORE the helpers, which read it),
+      +0x2c = transfer_quantum(this, quantum_arg) @ 0x08277b64 (context
+      re-query 0x081a8198, 0x40000 clamp, capacity rounding through the
+      divider 0x08036f14), +0x30 = scale_class(this, scale_arg) @
+      0x08277bd0 (fully decoded: NULL context and scale-1 < 16 unsigned
+      yields scale, else 1), +0x34 = 0, +0x38 = byte +9 of
+      facade_for_selector(this, 1), +0x3c = the 0x081a81bc alignment
+      constant 0x20, then the vector member constructor 0x08278104 on
+      this+0x40 (owner word + zeroed +0x04/+0x08/+0x0c/+0x10 prologue,
+      then an operator_new(24) node-fill loop through node ctor
+      0x08277e2c) and the registration step 0x08278250 (result
+      discarded). Every intermediate object address derives from the
+      previous callee's RETURN (`sub r4,r0,#12` / `sub r4,r0,#64`),
+      never from the entry this. Deviations: the seven unresolved
+      callees cross TRANSITION_ADDON_CONSTRUCT_OPS slots - scale_class's
+      default is the faithful decoded body, the base/string/vector
+      defaults reproduce their decoded stores (interface-resolution
+      result modeled as zero; the string default is the
+      empty-construction prefix per the STRING_OBJECT_COPY_CONSTRUCT
+      stub precedent; the vector default omits the node-fill loop), the
+      capacity default reproduces the NULL-interface 0x200 fallback
+      without dereferencing the owner, and the quantum/registration
+      defaults are inert - while the two already-ported callees
+      (facade_for_selector; deque_seg_capacity as the byte-identical
+      0x081a81bc body, which the 0x083d9fc0 ledger entry sanctions
+      hooking any copy to) are called directly. NOT hook-ready until
+      the five non-faithful boundaries are ported and wired in. All
+      object stores are 32-bit like the original's strs. Class identity
+      caveat: the name rides the base class's TSilverCntlrTransitionAddon
+      typeinfo string @ 0x0898994c; the derived vtable's RTTI pointer
+      0x0897c5f4 does not decode as a typeinfo object (small-integer
+      array bytes - recorded as an anomaly, not a named class), and the
+      image string 21TCntlrTransitionAddonI11TCntlrBasicE @ 0x0898881c
+      is unlinked. Host tests pin the call order and argument routing
+      via recorder mocks with shifted string/vector returns (proving
+      both container-of steps), the store-before-helper ordering of the
+      context word, every default boundary's decoded stores end to end
+      (with only the facade walk mocked - the default zero interface
+      word would NULL-deref the real host walk), and the scale truth
+      table including the arg-0 unsigned wrap. No construct-then-destroy
+      round trip: on 64-bit hosts the string member's native payload
+      word overlaps the +0x14 flag byte (the crate's face-word
+      artifact). match.py (exit 1, diff expected): same seven-dispatch
+      sequence, offsets and return-threading; the diff is the crate fp
+      frame, the seam slots' ldr/blx dispatch standing in for the
+      direct bls, and LLVM lowering the unaligned u32 stores/loads to
+      strb/ldrb quads on ARMv5TE (the destructor sibling's accepted
+      widening).
+
   - address: 0x082a50b0
     ghidra: FUN_082a50b0
     name: string_object_c_str
