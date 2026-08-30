@@ -194,6 +194,30 @@ pub unsafe extern "C" fn usec_timer_read() -> u32 {
         read_usec_timer_counter()
     }
 }
+
+/// usec_timer_read_seconds — original: `FUN_0826c5e8` @ 0x0826c5e8
+/// (**28 bytes**, 0x0826c5e8..0x0826c604, binary-decoded).
+///
+/// **38 direct `bl` call sites, all unconditional; 0 predicated `bl` call
+/// sites**, verified by decoding every ARM `B`/`BL` word in `osos.dec`.
+///
+/// Samples Timer E's free-running microsecond counter once, then returns its
+/// unsigned whole-second count: `counter / 1000`. Raw ARM passes its stack
+/// slot to the 20-byte helper @ 0x08086e38, which calls the four-byte thunk
+/// @ 0x08056658 and stores its Timer E sample; this body reloads the slot,
+/// loads 1000, then tail-branches to the ported unsigned ADS divider
+/// [`crate::runtime::rt_div::__rt_udiv`] @ 0x08036f14.
+///
+/// Deviation: the unported out-pointer helper is collapsed to the already
+/// ported [`usec_timer_read`], because raw disassembly shows both paths take
+/// exactly one volatile read of Timer E `TECNT` @ 0x3c7000b4. The divider is
+/// called directly; Rust has no representation of the original tail branch.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn usec_timer_read_seconds() -> u32 {
+    unsafe { crate::runtime::rt_div::__rt_udiv(usec_timer_read(), 1_000) }
+}
+
 /// iram_usec_timer_read_veneer — original: `thunk_EXT_FUN_08037e20` @
 /// 0x08037e20 (Ghidra reports 4 bytes; the real stub is **8** — the
 /// `ldr pc, [pc, #-4]` word 0xe51ff004 at 0x08037e20 plus the absolute
@@ -380,6 +404,34 @@ mod usec_timer_tests {
             HOST_USEC_TIMER_COUNT.store(count, Ordering::Relaxed);
             assert_eq!(unsafe { usec_timer_read() }, count);
         }
+    }
+
+    #[test]
+    fn seconds_reader_truncates_microseconds_and_samples_once() {
+        let _guard = configure_usec_timer(0, 0);
+
+        for (counter, expected) in [
+            (0, 0),
+            (999, 0),
+            (1_000, 1),
+            (1_999, 1),
+            (2_000, 2),
+            (u32::MAX, 4_294_967),
+        ] {
+            HOST_USEC_TIMER_COUNT.store(counter, Ordering::Relaxed);
+            assert_eq!(
+                unsafe { usec_timer_read_seconds() },
+                expected,
+                "counter={counter:#010x}"
+            );
+        }
+
+        HOST_USEC_TIMER_COUNT.store(1_999, Ordering::Relaxed);
+        HOST_USEC_TIMER_INCREMENT.store(1, Ordering::Relaxed);
+        HOST_USEC_TIMER_READS.store(0, Ordering::Relaxed);
+        assert_eq!(unsafe { usec_timer_read_seconds() }, 1);
+        assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 1);
+        assert_eq!(HOST_USEC_TIMER_COUNT.load(Ordering::Relaxed), 2_000);
     }
 
     #[test]

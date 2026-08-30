@@ -12949,6 +12949,30 @@ functions:
       the crate-wide frame prologue + return, structurally a no-op
       either way.
 
+  # --- Timer E whole-second counter ---
+  - address: 0x0826c5e8
+    ghidra: FUN_0826c5e8
+    name: usec_timer_read_seconds
+    size: 28
+    sig: "u32 usec_timer_read_seconds(void)"
+    module: drivers/timer
+    status: ported
+    renames:
+      local_stack_word: counter_usec
+      FUN_08086e38: read_usec_timer_into
+      FUN_08036f14: __rt_udiv
+    notes: >-
+      Binary extent is 0x0826c5e8..0x0826c604; Ghidra incorrectly absorbs
+      the tail branch into the 1000-divider. It takes one Timer E TECNT
+      sample through the out-pointer wrapper at 0x08086e38 (which calls
+      0x08056658 -> 0x0836af80), then tail-branches to __rt_udiv with the
+      literal 1000, returning truncated unsigned whole seconds. 38 direct
+      bl call sites, all unconditional, and no predicated bl call sites,
+      verified by decoding every ARM B/BL word in osos.dec. The Rust port
+      calls the already-ported usec_timer_read directly: raw bytes prove it
+      performs the same single volatile TECNT read, while avoiding a new
+      dispatch seam for the unported wrapper.
+
   # --- Vincent 3D software JIT: IR arena + node builders -------------
   # 0x082b0000-0x082e0000 is a mixed third-party block (SQLite, zlib,
   # OpenSSL, RTXCbug, FreeType). The cluster below belongs to the
