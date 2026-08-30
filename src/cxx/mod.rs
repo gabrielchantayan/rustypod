@@ -16,6 +16,7 @@ pub mod decoder_cleanup;
 pub mod draw_state;
 pub mod draw_state_color;
 pub mod draw_state_line;
+pub mod draw_state_style;
 pub mod handle;
 pub mod list_splice;
 pub mod mutex;
