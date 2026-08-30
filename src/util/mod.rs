@@ -45,3 +45,4 @@ pub mod word_list;
 pub mod wstr_casecmp;
 pub mod value_predicate;
 pub mod xor_transposed_block;
+pub mod xor_c6_in_place;

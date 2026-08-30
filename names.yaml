@@ -38916,3 +38916,23 @@ functions:
       write call); LLVM adds an fp frame and routes both calls as blx
       through the slot literals. Reference C:
       decomp/c/007/080d5170_FUN_080d5170.c.
+
+  - address: 0x0833dd48
+    ghidra: FUN_0833dd48
+    name: xor_c6_in_place
+    size: 48
+    sig: "void xor_c6_in_place(u8 *bytes, i32 len)"
+    module: util/xor_c6_in_place
+    status: ported
+    renames:
+      param_1/r0: bytes
+      param_2/r1: len
+      iVar1/r2: offset
+    notes: >-
+      XORs each byte in the signed range [0, len) with 0xc6. Raw ARM confirms
+      Ghidra's 48-byte extent: the next sibling opens at 0x0833dd78. The
+      byte-at-a-time ldrb/eor/strb loop has no NULL guard and skips all memory
+      accesses when len <= 0. Decoding every B/BL word in osos.dec finds 33
+      direct call sites: all are plain unconditional bl instructions, with no
+      predicated bl or direct B sites. Deliberate deviations: none. Reference
+      C: decomp/c/032/0833dd48_FUN_0833dd48.c.
