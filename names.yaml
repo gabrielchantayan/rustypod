@@ -14953,6 +14953,33 @@ functions:
       `byte == 0` as clz+lsr#5 behind the crate fp frame instead of
       ADS's predicated cmpne/movne pair.
 
+  - address: 0x082a538c
+    ghidra: FUN_082a538c
+    name: string_object_raw_payload
+    size: 8
+    sig: "char * string_object_raw_payload(const StringObject *this)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1: this
+    notes: >-
+      The raw payload accessor of the two-word StringObject class
+      (vtable @ +0, payload @ +4). 8 bytes, all code
+      (0x082a538c..0x082a5394): `ldr r0,[r0,#4]; bx lr` returns the
+      payload word unchanged, including NULL. Unlike string_object_c_str
+      @ 0x082a50b0, this accessor never substitutes the shared empty
+      C string; it has no NULL guard on `this`. 34 direct bl call sites,
+      all unconditional, plus 2 tail b callers (0x081a42b0 and
+      0x081a4bfc), binary-scanned by decoding every ARM B/BL word in
+      osos.dec. Those tail callers return a temporary StringObject's
+      payload after their caller-side cleanup. The exact two-word body
+      occurs 35 times in osos.dec, so the port has its own text section
+      to preserve its exported hook seam if LLVM folds identical code.
+      Host tests prove an invalid non-NULL payload is returned without
+      dereference and NULL passes through rather than becoming the
+      modeled empty C string. match.py structural review: same load of
+      the second object word and immediate return.
+
   - address: 0x082cf9e4
     ghidra: FUN_082cf9e4
     name: ft_glyphslot_free_bitmap

@@ -156,6 +156,12 @@
 //!   class: true when the payload word at +4 is NULL or points at a
 //!   NUL byte. Byte-identical-alias scan: the exact 7-word pattern
 //!   occurs ONCE in osos.dec — this function has no twins.
+//! - `string_object_raw_payload` — original: `FUN_082a538c` @
+//!   0x082a538c (8 bytes, all code; 34 `bl` call sites — all
+//!   unconditional — plus 2 tail `b` callers, binary-scanned). The raw
+//!   payload accessor: returns the payload word unchanged, including
+//!   NULL; unlike `string_object_c_str`, it never substitutes the shared
+//!   empty C string.
 //! - `string_id_record_destroy` — original: `FUN_08258c80` @
 //!   0x08258c80 (24 bytes: 20 code + the 4-byte vtable literal @
 //!   0x08258c98; 113 `bl` call sites, binary-scanned). The plain
@@ -1321,6 +1327,38 @@ pub unsafe extern "C" fn string_object_utf8_strcmp_safe(
 pub unsafe extern "C" fn string_object_is_empty(this: *const StringObject) -> bool {
     let payload = (*this).payload as *const u8;
     payload.is_null() || payload.read() == 0
+}
+
+/// string_object_raw_payload — original: `FUN_082a538c` @ 0x082a538c
+/// (8 bytes, all code — the next function starts at 0x082a5394; **34
+/// `bl` call sites**, all unconditional, binary-scanned; two additional
+/// callers tail-branch with `b`).
+///
+/// Source: `ipod-decomp/decomp/c/029/082a538c_FUN_082a538c.c` (matches
+/// the raw ARM exactly).
+///
+/// The raw payload accessor of the two-word string class:
+///
+/// ```text
+/// ldr r0, [r0, #4]     ; r0 = this->payload
+/// bx  lr
+/// ```
+///
+/// Returns the payload word at `this + 4` unchanged — including NULL.
+/// This deliberately differs from [`string_object_c_str`], which replaces
+/// NULL with the shared empty C string. No NULL guard exists for `this`;
+/// the original faults on a NULL `this`, and so does the port. The two tail
+/// callers (0x081a42b0 and 0x081a4bfc) return the payload of temporary
+/// StringObjects after their caller-side cleanup.
+///
+/// Deviation: none. The function has its own text section because the exact
+/// `ldr r0,[r0,#4]; bx lr` body occurs 35 times in osos.dec; this keeps the
+/// exported hook seam distinct if LLVM performs identical-code folding.
+#[cfg_attr(target_os = "none", link_section = ".text.string_object_raw_payload")]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_raw_payload(this: *const StringObject) -> *mut u8 {
+    (*this).payload
 }
 
 /// Original load address of the 0x08258cxx-class vtable
@@ -3703,6 +3741,43 @@ pub(crate) mod tests {
             assert_eq!(object.vtable, 0xdead_beef as *const StringObjectVtable);
         }
         assert_eq!(storage, *b"x\0");
+    }
+
+    #[test]
+    fn raw_payload_returns_the_nonnull_word_without_dereferencing_it() {
+        // Deliberately invalid for dereference: the two-word leaf returns
+        // this bit-pattern directly, rather than inspecting a C string.
+        let payload = 1usize as *mut u8;
+        let object = StringObject {
+            vtable: 0xdead_beef as *const StringObjectVtable,
+            payload,
+        };
+        unsafe {
+            assert_eq!(
+                string_object_raw_payload(&object),
+                payload,
+                "ldr r0,[r0,#4]; bx lr returns the exact payload word"
+            );
+            assert_eq!(
+                object.vtable,
+                0xdead_beef as *const StringObjectVtable,
+                "the accessor reads only +4"
+            );
+        }
+    }
+
+    #[test]
+    fn raw_payload_passes_null_through_instead_of_substituting_empty_cstr() {
+        let object = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        unsafe {
+            assert!(
+                string_object_raw_payload(&object).is_null(),
+                "unlike string_object_c_str, this two-word leaf has no NULL fallback"
+            );
+        }
     }
 
     #[test]
