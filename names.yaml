@@ -14431,6 +14431,63 @@ functions:
       volatile-read literal instead of the original's direct b (the
       documented deviation).
 
+  - address: 0x082a5368
+    ghidra: FUN_082a5368
+    name: string_object_utf8_strcmp_safe
+    size: 8
+    sig: "int string_object_utf8_strcmp_safe(const StringObject *this, const char *other)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1: this
+      param_2: other
+      iStack_c: a_cursor
+      iStack_10: b_cursor
+      iVar1: codepoint_a
+      iVar2: codepoint_b
+      DAT_08276db0: UTF8_STRCMP_SAFE_EMPTY_CSTR_ADDRESS
+    notes: >-
+      The compare-against-C-string accessor of the two-word string
+      class (vtable @ +0, payload @ +4), `int
+      StringObject::utf8_strcmp(const char *other)`. 8 bytes, all
+      code (0x082a5368..0x082a5370). 39 bl call sites, binary-scanned
+      over every B/BL word in osos.dec, ZERO predicated (matches
+      Ghidra's count). Raw ARM: `ldr r0,[r0,#4]; b 0x08276d64` - a
+      two-instruction thunk loading the payload word and tail-
+      branching to the ported utf8_strcmp_safe @ 0x08276d64 with the
+      caller's r1 passed through untouched. Returns the first unequal
+      decoded codepoints' difference, 0 on equality; a NULL payload
+      reads as the shared empty string (the thunk guards nothing; the
+      NULL substitution guard lives inside the callee, the same
+      asymmetry string_id_record_equals @ 0x08258cc4 documents). No
+      NULL guard on `this`. Ghidra's C
+      (decomp/c/029/082a5368_FUN_082a5368.c) shows the callee's body
+      inlined and matches once the tail branch is followed. Opens the
+      class's accessor cluster 0x082a5368-0x082a5398
+      (string_object_is_empty @ 0x082a5370, the raw payload accessor
+      `ldr r0,[r0,#4]; bx lr` @ 0x082a538c, payload ->
+      utf8_codepoint_count_safe chain @ 0x082a5394). Call sites pin
+      the use: twenty consecutive sites @ 0x0809f7b4-0x0809fa60
+      compare a stack-built StringObject (constructed from a u16
+      string through FUN_082765a8) against literal keywords
+      ("Acoustic", ... @ 0x0809faa4 on, binary-verified), each result
+      consumed by `cmp r0,#0; bne` - a genre-name -> ID dispatch
+      chain (0x64 on the first match); a second nineteen-site cluster
+      @ 0x0813ba04-0x0813cb88 runs the same shape, plus singletons @
+      0x0809fb8c, 0x08118b84, 0x08118be0, 0x081192d4. Port calls the
+      ported callee through a volatile read (the house
+      anti-const-fold trick, same as string_object_len_plus1) purely
+      to stop LLVM inlining utf8_strcmp_safe and dissolving the
+      thunk. Host tests: equal strings compare 0 with the object and
+      payload untouched, NULL payload passes through untouched (vs
+      "" -> 0, vs "a" -> -97, vs NULL -> 0), multibyte comparison is
+      decoded-codepoint (caf+e-acute vs caf+e-grave -> 1), and an
+      8x8 sweep over ASCII/multibyte cases matches utf8_strcmp_safe
+      called directly. match.py structural (worktree --lib): same
+      ldr-@+4 + tail-branch shape; the diff is LLVM's fp frame and
+      the branch becoming a bx through the volatile-read literal
+      instead of the original's direct b (the documented deviation).
+
   - address: 0x082a5370
     ghidra: FUN_082a5370
     name: string_object_is_empty

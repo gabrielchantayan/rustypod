@@ -143,6 +143,13 @@
 //!   buffer. Its 8-byte sibling @ 0x082a50a8 (`ldr r0,[r0,#4]; b
 //!   0x0827609c`) runs the 84-byte FUN_0827609c over the payload and
 //!   is NOT ported here.
+//! - `string_object_utf8_strcmp_safe` — original: `FUN_082a5368` @
+//!   0x082a5368 (8 bytes; 39 `bl` call sites, binary-scanned, zero
+//!   predicated). A two-instruction thunk (`ldr r0,[r0,#4]; b
+//!   0x08276d64`) that tail-branches to the ported
+//!   [`utf8_strcmp_safe`] over the payload word at +4 with the second
+//!   argument passed through in r1 — the class's compare-against-C-
+//!   string, consumed by keyword-dispatch chains as an equality test.
 //! - `string_object_is_empty` — original: `FUN_082a5370` @ 0x082a5370
 //!   (28 bytes, all code — no literal-pool word; 55 `bl` call sites,
 //!   binary-scanned). The emptiness predicate of the same string
@@ -1214,6 +1221,58 @@ pub unsafe extern "C" fn string_object_len_plus1(this: *const StringObject) -> u
     len_plus1((*this).payload as *const u8)
 }
 
+/// string_object_utf8_strcmp_safe — original: `FUN_082a5368` @
+/// 0x082a5368 (8 bytes, all code — the next function starts at
+/// 0x082a5370; **39 `bl` call sites**, binary-scanned, zero of them
+/// predicated).
+///
+/// Source: `ipod-decomp/decomp/c/029/082a5368_FUN_082a5368.c` (the
+/// callee inlined — matches the raw ARM once the tail branch is
+/// followed).
+///
+/// The compare-against-C-string accessor of the two-word string
+/// class, `int StringObject::utf8_strcmp(const char *other)`: a
+/// two-instruction thunk — `ldr r0, [r0, #4]; b 0x08276d64` — that
+/// loads the payload word at `this + 4` and tail-branches to the
+/// ported [`utf8_strcmp_safe`] @ 0x08276d64 with the caller's second
+/// argument passed through untouched in r1. Returns the first
+/// unequal decoded codepoints' difference, 0 on equality; a NULL
+/// payload reads as the shared empty string (the thunk guards
+/// nothing — the substitution guard lives inside the callee, exactly
+/// the asymmetry [`string_id_record_equals`] documents). No NULL
+/// guard on `this` — the original faults on a NULL `this`, and so
+/// does the port.
+///
+/// It opens the class's accessor cluster at 0x082a5368-0x082a5398
+/// ([`string_object_is_empty`] @ 0x082a5370, the raw payload
+/// accessor `ldr r0,[r0,#4]; bx lr` @ 0x082a538c, and a payload ->
+/// [`utf8_codepoint_count_safe`] chain @ 0x082a5394). Call sites pin
+/// the use: twenty consecutive sites @ 0x0809f7b4-0x0809fa60 compare
+/// a stack-built StringObject (constructed from a u16 string through
+/// FUN_082765a8) against a series of literal keywords ("Acoustic",
+/// ... @ 0x0809faa4 on), each result consumed by `cmp r0,#0; bne` —
+/// a genre-name -> ID dispatch chain (0x64 on the first match); a
+/// second nineteen-site cluster @ 0x0813ba04-0x0813cb88 runs the
+/// same shape, plus singletons @ 0x0809fb8c, 0x08118b84, 0x08118be0
+/// and 0x081192d4. The callee is ported, so it is called directly.
+///
+/// Deviation: the callee address is read through a volatile pointer
+/// (the same anti-const-fold trick as [`string_object_len_plus1`])
+/// purely to stop LLVM from inlining [`utf8_strcmp_safe`] and
+/// dissolving the thunk; codegen stays a load plus a tail branch.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_utf8_strcmp_safe(
+    this: *const StringObject,
+    other: *const u8,
+) -> i32 {
+    let compare: unsafe extern "C" fn(*const u8, *const u8) -> i32 =
+        core::ptr::read_volatile(
+            &(utf8_strcmp_safe as unsafe extern "C" fn(*const u8, *const u8) -> i32),
+        );
+    compare((*this).payload as *const u8, other)
+}
+
 /// string_object_is_empty — original: `FUN_082a5370` @ 0x082a5370
 /// (28 bytes, all code — the next function starts at 0x082a538c; 55
 /// `bl` call sites, binary-scanned).
@@ -1244,8 +1303,9 @@ pub unsafe extern "C" fn string_object_len_plus1(this: *const StringObject) -> u
 /// NULL `this`, and so does the port.
 ///
 /// It sits in the class's accessor cluster at 0x082a5368-0x082a5398
-/// (a payload -> `utf8_strcmp_safe` chain, the raw payload accessor
-/// `ldr r0,[r0,#4]; bx lr` @ 0x082a538c, and a payload ->
+/// (the ported [`string_object_utf8_strcmp_safe`] chain @ 0x082a5368,
+/// the raw payload accessor `ldr r0,[r0,#4]; bx lr` @ 0x082a538c, and
+/// a payload ->
 /// [`utf8_codepoint_count_safe`] chain @ 0x082a5394). Call sites pin
 /// the class: at 0x0807a528/0x0807a53c the receiver is the object
 /// [`string_object_assign_cstr`] @ 0x0827639c just wrote, and at
@@ -3495,6 +3555,112 @@ pub(crate) mod tests {
                         "align={align} len={len}"
                     );
                     assert_eq!(string_object_len_plus1(&object), len + 1);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn utf8_strcmp_safe_thunk_compares_the_payload_against_the_cstr() {
+        let mut payload_storage = *b"Acoustic\0";
+        let object = StringObject {
+            vtable: core::ptr::null(),
+            payload: payload_storage.as_mut_ptr(),
+        };
+        unsafe {
+            assert_eq!(
+                string_object_utf8_strcmp_safe(&object, b"Acoustic\0".as_ptr()),
+                0,
+                "the genre-dispatch shape: equal strings compare 0"
+            );
+            assert_eq!(
+                string_object_utf8_strcmp_safe(&object, b"Acoustid\0".as_ptr()),
+                'c' as i32 - 'd' as i32,
+                "the first unequal codepoints' difference"
+            );
+            assert_eq!(object.payload, payload_storage.as_mut_ptr());
+        }
+        assert_eq!(
+            payload_storage, *b"Acoustic\0",
+            "the comparator never writes"
+        );
+    }
+
+    #[test]
+    fn utf8_strcmp_safe_thunk_passes_a_null_payload_through_untouched() {
+        let object = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        unsafe {
+            // The thunk guards nothing; the callee's own NULL
+            // substitution makes a NULL payload read as "".
+            assert_eq!(
+                string_object_utf8_strcmp_safe(&object, b"\0".as_ptr()),
+                0
+            );
+            assert_eq!(
+                string_object_utf8_strcmp_safe(&object, b"a\0".as_ptr()),
+                -(b'a' as i32)
+            );
+            assert_eq!(
+                string_object_utf8_strcmp_safe(&object, core::ptr::null()),
+                0,
+                "NULL vs NULL: both sides substitute the shared empty"
+            );
+        }
+    }
+
+    #[test]
+    fn utf8_strcmp_safe_thunk_compares_decoded_multibyte_codepoints() {
+        // U+00E9 (é) = 0xc3 0xa9 vs U+00E8 (è) = 0xc3 0xa8: the
+        // difference is the decoded codepoints', not the raw bytes'.
+        let mut payload_storage = *b"caf\xc3\xa9\0";
+        let object = StringObject {
+            vtable: core::ptr::null(),
+            payload: payload_storage.as_mut_ptr(),
+        };
+        unsafe {
+            assert_eq!(
+                string_object_utf8_strcmp_safe(&object, b"caf\xc3\xa8\0".as_ptr()),
+                1,
+                "0xe9 - 0xe8, decoded"
+            );
+            assert_eq!(
+                string_object_utf8_strcmp_safe(&object, b"caf\xc3\xa9\0".as_ptr()),
+                0
+            );
+        }
+    }
+
+    /// Short strings over ASCII plus multibyte leads through the
+    /// object, checked against the ported utf8_strcmp_safe directly.
+    #[test]
+    fn utf8_strcmp_safe_thunk_matches_the_callee_on_a_sweep() {
+        let cases: [&[u8]; 8] = [
+            b"\0",
+            b"a\0",
+            b"ab\0",
+            b"b\0",
+            b"\xc3\xa9\0",
+            b"\xc3\xa8x\0",
+            b"abc\0",
+            b"abd\0",
+        ];
+        for a in cases {
+            for b in cases {
+                let mut storage = [0u8; 8];
+                storage[..a.len()].copy_from_slice(a);
+                let object = StringObject {
+                    vtable: core::ptr::null(),
+                    payload: storage.as_mut_ptr(),
+                };
+                unsafe {
+                    assert_eq!(
+                        string_object_utf8_strcmp_safe(&object, b.as_ptr()),
+                        utf8_strcmp_safe(a.as_ptr(), b.as_ptr()),
+                        "a={a:?} b={b:?}"
+                    );
                 }
             }
         }
