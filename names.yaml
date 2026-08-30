@@ -12864,6 +12864,33 @@ functions:
       owner. Representative callers: 0x0812b170, 0x0814274c,
       0x081576a0, and 0x0816d3f0.
 
+  - address: 0x082a26c8
+    ghidra: FUN_082a26c8
+    name: ui_element_is_shown
+    size: 24
+    sig: "u32 ui_element_is_shown(UiElement *element)"
+    module: ui/shown_state
+    status: ported
+    vars: {param_1: element, "element+0x48": flags_48, "flags_48 bits 11-12": shown_state}
+    notes: >-
+      Pure leaf flag query: returns (flags_48 & 0x1800) == 0x800, i.e. 1
+      when the two-bit shown-state field (bits 11-12 of the element flag
+      word at +0x48) holds value 1, 0 for the other three states. Extent
+      binary-verified: sibling flag query at 0x082a26a8 precedes it and
+      the next function's push {r4, lr} opens at 0x082a26e0. Exactly 32
+      direct bl call sites, none predicated, no data-word references
+      (verified by decoding every B/BL word and scanning every word of
+      osos.dec) - never dispatched virtually, no NULL guard, callers
+      pass a live element. The setter at 0x0811e294 assigns the field
+      with bic 0x1800; orr 0x800 when its state argument is non-zero and
+      notifies vtable +0xa8; value 0x800 is the state in which an
+      element participates in redraw (ui_element_invalidate's region
+      form 0x0826ec14 gates dirty-rect accumulation on this exact test,
+      0x0816e5bc early-outs on it). The compound sibling query at
+      0x082a26a8 additionally requires bits 9-10 == 0x200. Host tests
+      cover all four field values, neighbouring-bit independence, and
+      read extent.
+
   - address: 0x0826ec9c
     ghidra: FUN_0826ec9c
     name: ui_element_invalidate
