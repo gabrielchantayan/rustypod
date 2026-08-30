@@ -39435,6 +39435,81 @@ functions:
       0x30 = the thirteenth SingletonCtors field), an fp prologue and
       the inverted branch LLVM chose for the cold path.
 
+  # --- Stage progress tracker lazy singleton ---
+  - address: 0x081fa3b0
+    ghidra: FUN_081fa3b0
+    name: stage_progress_tracker_get
+    size: 56
+    sig: "void *stage_progress_tracker_get(void)"
+    module: app/singletons
+    status: ported
+    renames:
+      DAT_081fa3e8: TRACKER_GLOBALS_POOL (the trailing pool word @
+        0x081fa3e8 holding 0x089ca58c; the cache is that global's +0x48
+        slot 0x089ca5d4, the crate static STAGE_PROGRESS_TRACKER, the
+        block_mgr.rs RW-page deviation)
+      FUN_082aadd4: operator_new (direct, ported in heap/veneers)
+      FUN_081fa440: stage_progress_tracker_ctor
+        (SINGLETON_CTORS.stage_progress_tracker slot)
+      FUN_08030f44: heap_panic (direct, ported in heap/veneers)
+    notes: >-
+      The fifteenth app/singletons member and the only one that breaks
+      the idiom. EXTENT: Ghidra's 56 bytes is exact for the code
+      (0x081fa3b0..0x081fa3e8); the function owns one trailing
+      literal-pool word (0x089ca58c @ 0x081fa3e8, reached by `ldr r4,
+      [pc, #44]`), so the true extent is 60 bytes, ending where the
+      sibling stage wait FUN_081fa3ec opens `push {r4, r5, r6, lr}`.
+      CALL COUNT: exactly 30 unconditional bl call sites, 0 predicated
+      and 0 plain b, binary-verified by decoding every B/BL word in
+      work/firmware/osos.dec; Ghidra's count of 30 confirmed. STRUCTURE
+      (verified against the raw words): cache test on the +0x48 slot of
+      the global 0x089ca58c; on NULL, `mov r0,#0x2c; bl operator_new`,
+      the raw allocation kept in r5 across the ctor `bl 0x081fa440`,
+      then `cmp r5,#0; str r5,[r4,#72]; bleq heap_panic`, then reload
+      and return the slot. TWO BREAKS FROM THE FAMILY: (1) the RAW
+      allocation is cached, not the ctor's return - and it must be,
+      because the ctor 0x081fa440 returns `[this+0xc]` (the
+      just-zeroed total-budget word it hands to the deadline keeper via
+      veneer 0x081b9150 -> 0x081593f4), NOT `this`; (2) OOM is fatal:
+      the NULL is stored first, then heap_panic 0x08030f44 runs and
+      never returns (the other fourteen cache a NULL ctor result and
+      retry). The ctor is invoked on the NULL block BEFORE the panic
+      (unpredicated bl); reproduced, unreachable in practice behind the
+      ported heap_panic. OBJECT: a 0x2c-byte stage progress tracker for
+      the long database-commit/copy paths - byte +0x00 current stage
+      (0..7), word +0x04 progress counter, word +0x08 accumulated base,
+      word +0x0c total budget, seven per-stage budget words
+      +0x10..+0x2b. The ctor zeroes the object and resets the global
+      deadline keeper 0x089cc79c (running deadline keeper+0x24 = 0 via
+      veneer 0x081b9154 -> 0x0815940c; total keeper+0x2c = 0 via
+      0x081593f4). Siblings: FUN_081fa2e8 advances the stage (waiting
+      out the in-flight one via FUN_081fa3ec, which polls in 10-tick
+      yields through the wait_or_yield veneer 0x080e9eb0), FUN_081fa36c
+      bumps progress and falls into FUN_081fa378 (pushes a fresh running
+      deadline base+progress to the keeper when inside the stage
+      budget), FUN_081fa33c commits the seven-budget total to
+      keeper+0x2c. CALLERS: 22 sites in the database-commit path
+      FUN_08068504 (stage budgets set from the Photo Database /
+      ArtworkDB / iTunesDB file sizes in KiB via FUN_080ac06c), five in
+      the copy loops FUN_081b9878 / FUN_081b979c (byte-count-derived
+      progress into stages 5 and 6), plus one each at 0x0807fca0,
+      0x0808781c, 0x080ac0b4. CLASS NOT NAMED: no name factory or
+      registry id reachable from the ctor, so the symbol names the
+      proven role. Deviations: operator_new and heap_panic called
+      directly (both ported); the ctor rides the SINGLETON_CTORS
+      dispatch table with a documented zeroing default (the zeroing IS
+      faithful to the ctor's object writes but skips the keeper reset -
+      NOT HOOK-READY, the family contract); the cache is the crate
+      static STAGE_PROGRESS_TRACKER rather than 0x089ca5d4; the pushed
+      r6 is an unused ADS frame artifact. match.py --lib <worktree
+      archive> (exit-1 diff expected): same skeleton - cache-ptr load,
+      ldr/cmp/bne test, `mov r0,#0x2c`, bl operator_new (R_ARM_CALL
+      verified), ctor call, cmp/str, panic gate, reload, pop; deltas
+      are the seam indirection (`ldr r1,[r0,#0x38]; blx r1` - slot
+      offset 0x38 = the fifteenth SingletonCtors field), an fp
+      prologue, and LLVM splitting the predicated `bleq heap_panic`
+      into `beq` + a tail bl after the pop.
+
   # --- UI animation constructor over three refcounted scalars ---
   - address: 0x08166b88
     ghidra: FUN_08166b88
