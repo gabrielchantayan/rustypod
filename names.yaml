@@ -38077,3 +38077,30 @@ functions:
       occupied inside the callback, error status propagating while the
       slot still clears and counts, callback writes overwritten by the
       trailing clear, and u32 counter wrap.
+
+  # --- Platform C++ file read wrapper (fs/file_read) ---
+  - address: 0x082784b8
+    ghidra: FUN_082784b8
+    name: retail_file_read
+    size: 28
+    sig: "i32 retail_file_read(void *handle, u32 count, u8 *buffer, u32 *transferred)"
+    module: fs/file_read
+    status: ported
+    renames:
+      param_1/r0: handle
+      param_2/r1: count
+      param_3/r2: buffer
+      param_4/r3: transferred
+      param_5/stack: control
+    notes: >-
+      Verified as exactly 28 bytes (seven ARM words) by raw disassembly:
+      0x082784d4 begins a distinct 740-byte function immediately after the
+      wrapper. Decoding every ARM B/BL word in osos.dec found 38 direct
+      callsites: all 38 are unconditional bl, with zero predicated forms and
+      zero plain B branches. Algorithm: preserve transferred from r3 in ip,
+      push its stack slot, overwrite that fifth callee argument with zero,
+      restore transferred to r3, bl 0x082784d4, and return the body status
+      unchanged. The fifth word's meaning and 0x082784d4's deeper identity are
+      not recovered or invented. Deliberate deviation: the Rust port calls the
+      resident target through a volatile typed boundary so host tests can
+      record it; target builds dispatch to its fixed 0x082784d4 address.
