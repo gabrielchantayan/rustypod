@@ -6546,6 +6546,33 @@ functions:
       ctx+0x1c; returns 1. Sole caller: kernel_running 0x0809444c
       (= sync_mutex ROM_KERNEL.notify — wire to this port).
 
+  - address: 0x080613e0
+    ghidra: FUN_080613e0
+    name: ui_element_is_plst_class
+    size: 40
+    sig: "u32 ui_element_is_plst_class(const u8 *target)"
+    module: ui/plst_class_check
+    status: ported
+    notes: >-
+      NULL-guarded 'plst' UI-element class-tag predicate: returns 1 iff
+      target is non-NULL and the word at target+0x4 equals the tag
+      0x706c7374 ('plst'), held in the literal pool at 0x08061404.
+      Ghidra's 36-byte extent drops that literal word; the true extent
+      is 40 (the next function's stmdb prologue starts at 0x08061408).
+      Call count verified by decoding every B/BL word in osos.dec: 32
+      unconditional bl, zero predicated - the internal NULL guard is
+      what all callers rely on. The tag is stamped at object+0x4 by the
+      'plst' factory 0x0805e36c, copied from word +1 of the class
+      descriptor at 0x0805e508 ({size 0x628, tag, fn words}). Callers
+      pass the typed target of a UI element reference, e.g.
+      ui_element_reference_is_current 0x082a6620 via its
+      TARGET_CLASS_CHECK seam. Byte-shape-identical sibling 0x0806aa3c
+      checks the 'tdat' tag 0x74646174 instead; the port's own
+      link_section keeps the two hook seams unfolded. match.py: crate
+      fp frame plus LLVM clz equality lowering vs ADS cmp/moveq; the
+      core cmp r0,#0 / beq / ldr r0,[r0,#4] / ldr r1,[pc] sequence
+      matches verbatim.
+
   - address: 0x080e4348
     ghidra: FUN_080e4348
     name: task_priority_map
