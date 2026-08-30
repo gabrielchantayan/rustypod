@@ -40144,3 +40144,52 @@ functions:
       mov pc,lr. Host tests cover the +0x4 word read, independence from
       word +0x0, zero/all-ones extremes, no mutation, and a guard-page
       fixture proving no byte past +0x8 is read.
+  - address: 0x08281000
+    ghidra: FUN_08281000
+    name: fixed3_assign
+    size: 48
+    sig: "FixedValue *fixed3_assign(FixedValue *dst, const FixedValue *src)"
+    module: app/fixed3_assign
+    status: ported
+    renames:
+      param_1: dst
+      param_2: src
+      FUN_08152410: fixed_value_assign
+    notes: >-
+      Copy-assignment operator of retailOS's three-FixedValue record
+      (0x48 bytes): three sequential bl calls to the member operator
+      FUN_08152410 @ 0x08152410 at strides 0/0x18/0x30, then returns
+      dst. FixedValue is the refcounted Q16.16 scalar of
+      app/fixed_value (ported there). 30 bl call sites, 0 predicated
+      forms, 0 plain b, and 0 word-aligned occurrences of 0x08281000
+      as a data word (all binary-scanned) - never dispatched
+      virtually, statically bound everywhere, as a compiler binds a
+      known-type operator=. Ghidra's 48-byte extent is exact:
+      0x08281030 opens the next function (push {r4,r5,r6,lr}), no
+      literal pool. The member operator (104 bytes, exactly 3 bl
+      sites - the three here, 0 data words) is FixedValue::operator=:
+      copies +0x04/+0x08/+0x0c/+0x10 word-wise, then rebuilds the
+      +0x14 flags/refcount word from the source's via bit-0 and bit-1
+      byte merges followed by (dst & 3) | (src & ~3) - where dst & 3
+      already holds the source's two bits, so the net effect is a
+      plain word copy of +0x14 (ADS bitfield-assignment codegen for
+      {flags: 2, refcount: 30}); only the +0x00 vtable word is
+      preserved, exactly what a C++ copy-assignment must do. Ported in
+      place as the private helper fixed_value_assign (wstr_case_eq
+      house precedent, no separate ledger entry); the byte-partial
+      intermediate states the merge skips are observable to no one.
+      Callers copy from static template records into view-object slots
+      at a 0x18 stride: FUN_08152728's pools @ 0x081528ac/0x081528b0
+      hold 0x08a79840/0x08a79918, and it reads a template's +0x04 word
+      as a Q16.16 scalar (adding 0x730000 = 115.0) right after the
+      copy; FUN_08167498 fills four slots from DAT_081675ac/b4/b8/bc
+      templates. Template addresses sit above the decrypted body's end
+      (0x08a1c3e8), so their contents are not binary-verifiable. No
+      NULL guard on either pointer, matching the original. match.py
+      (exit 1, diff expected): identical structure - push, three bls
+      at +0x18/+0x30 strides, return dst; the diff is the crate's fp
+      frame and LLVM swapping the r4/r5 saves, the accepted house
+      deviations. Host tests: all three members' payload words copied,
+      each dst vtable preserved, flags word copied wholesale including
+      refcount bits (dst's old low bits do not survive), source
+      untouched, dst returned, self-assignment a no-op.
