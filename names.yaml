@@ -4901,6 +4901,34 @@ functions:
       match.py shows an expected structural diff (indirect call through
       hook slot 1, `mov r0, #5` intact).
 
+  - address: 0x0806a4b0
+    ghidra: FUN_0806a4b0
+    name: kernel_sem17_wait
+    size: 8
+    sig: "usize kernel_sem17_wait()"
+    module: kernel/task_lock
+    status: ported
+    notes: >-
+      Fixed-id semaphore-acquire shim: `mov r0, #0x11; b 0x08037e08`
+      (rom_sem_wait veneer -> ROM 0x22003fd0), the r0 result word passing
+      back through the tail branch. Semaphore 0x11 is PMU_I2C_OUTER_SEM,
+      the OUTER lock of the wait(0x11)/wait(5) bracket around every raw
+      PMU transfer (kernel_sem5_wait @ 0x0806a4a0 is the INNER lock; see
+      drivers/i2c). Extent verified: the next function's
+      `ldr r1, [pc, #156]` prologue starts at 0x0806a4b8; sibling shims
+      0x0806a498 (`mov r0, #18`, unported), 0x0806a4a0 (ported) and
+      0x0806a4a8 (`mov r0, #1`, unported) share the same branch target as
+      separate 8-byte functions. No data word in osos references
+      0x0806a4b0 - the shim is never dispatched virtually. 31 bl call
+      sites (binary-verified, all unconditional; zero predicated bl and
+      zero b - callers never flag-gate the acquire): 28 in the PMU I2C
+      family 0x082e53dc..0x082e5bf8, plus 0x080671a8, 0x08067f8c,
+      0x0836d41c. Deviation: dispatches through the ported rom_sem_wait
+      (the ROM_KERNEL hook) instead of branching to the ROM veneer - same
+      family pattern as kernel_sem5_wait, so match.py shows an expected
+      structural diff (indirect call through hook slot 1,
+      `mov r0, #0x11` intact).
+
   - address: 0x0806aa3c
     ghidra: FUN_0806aa3c
     name: ui_element_is_tdat_class

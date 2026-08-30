@@ -428,6 +428,32 @@ pub unsafe extern "C" fn kernel_sem5_signal() -> usize {
     rom_sem_signal(5)
 }
 
+/// kernel_sem17_wait — original: `FUN_0806a4b0` @ 0x0806a4b0 (8 bytes):
+/// `mov r0, #0x11; b 0x08037e08` — a fixed-id shim that acquires kernel
+/// semaphore 0x11 (17, PMU_I2C_OUTER_SEM) through the rom_sem_wait veneer
+/// (ROM 0x22003fd0), the r0 result word passing back through the tail
+/// branch. Extent verified: the next function's `ldr r1, [pc, #156]`
+/// prologue starts at 0x0806a4b8; sibling shims 0x0806a498 (`mov r0,
+/// #18`), 0x0806a4a0 (`mov r0, #5`, ported as kernel_sem5_wait) and
+/// 0x0806a4a8 (`mov r0, #1`, unported) share the same branch target as
+/// separate 8-byte functions. No data word in osos references 0x0806a4b0
+/// — the shim is never dispatched virtually.
+///
+/// 31 `bl` call sites (binary-verified, all unconditional — no
+/// predicated `bl` and no `b`; callers never flag-gate the acquire): 28
+/// in the PMU I2C family 0x082e53dc..0x082e5bf8, where semaphore 0x11 is
+/// the OUTER lock of the wait(0x11)/wait(5) bracket around every raw
+/// transfer (see drivers/i2c), plus 0x080671a8, 0x08067f8c, 0x0836d41c.
+///
+/// Deviation: dispatches through the ported rom_sem_wait (the ROM_KERNEL
+/// hook) instead of branching to the 8-byte ROM veneer; the original
+/// tail-branch becomes a call whose r0 result is returned verbatim.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn kernel_sem17_wait() -> usize {
+    rom_sem_wait(0x11)
+}
+
 /// rom_svc_2200418c — original: thunk @ 0x08037e18 -> ROM gateway stub,
 /// service 4. Args per call sites, e.g. (1, ptr, 5) from the create path
 /// @ 0x08047dd0.
@@ -949,6 +975,21 @@ pub(crate) mod tests {
             check(2, ret, &[5]);
             let ret = kernel_sem5_signal();
             check(2, ret, &[5]);
+        }
+    }
+
+    /// kernel_sem17_wait (shim @ 0x0806a4b0): the id is forced to
+    /// semaphore 0x11 before the ROM wait fires — the caller's r0 is
+    /// dead — and the hook's r0 result word comes back. No other slot
+    /// may fire.
+    #[test]
+    fn kernel_sem17_wait_forces_id_17() {
+        let _lock = mock_kernel();
+        unsafe {
+            let ret = kernel_sem17_wait();
+            check(1, ret, &[0x11]);
+            let ret = kernel_sem17_wait();
+            check(1, ret, &[0x11]);
         }
     }
 
