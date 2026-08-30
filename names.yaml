@@ -36407,6 +36407,49 @@ functions:
       `str r7,[sp]` fifth argument to cg_create_inst_binary; the diff is
       LLVM's frame-pointer prologue and that single hoisted load.
 
+  - address: 0x082469b8
+    ghidra: FUN_082469b8
+    name: cg_emit_load_matrix4x4_word
+    size: 144
+    sig: "cg_virtual_reg_t *cg_emit_load_matrix4x4_word(void *ctx, cg_block_t *block, cg_virtual_reg_t *base, U32 col, U32 row)"
+    module: codegen/pipeline_emit
+    status: ported
+    vars: {param_1: ctx, param_2: block, param_3: base, param_4: col, param_5: row}
+    notes: >-
+      144 bytes, 36 instruction words 0x082469b8-0x08246a44, no literal
+      pool - the next function's own
+      `stmdb sp!,{r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,sl,fp,lr}` starts at
+      0x08246a48, so Ghidra's 144-byte extent is exact for once.
+      36 call sites, ALL unconditional bl (0 predicated, 0 tail b),
+      verified by decoding every B/BL word in osos.dec for every
+      condition code; they sit in one run inside the pipeline
+      generators 0x082470d4-0x08248494, called as
+      `FUN_082469b8(ctx, block, base, col, row)` with both indices in
+      0..=3 (FUN_08247870 and FUN_082473c4 sweep the full 4x4) - the
+      fragment pipeline's 4x4 matrix state. Algorithm: the
+      computed-offset sibling of cg_emit_load_word_at_offset @
+      0x082605f0 - create three general-purpose virtual registers up
+      front (three back-to-back cg_virtual_reg_create(block->proc, 0)
+      calls into r6/r7/r8), then emit LDI offset_reg, 4*(col + 4*row)
+      (opcode 40) / ADD address_reg, base, offset_reg (opcode 1, the
+      offset register passed on the stack as source1) / LDW value_reg,
+      [address_reg] (opcode 41), and return value_reg. All four
+      callees were already ported (cg_virtual_reg_create @ 0x082c23dc,
+      cg_create_inst_load_immed @ 0x082c18ec, cg_create_inst_binary @
+      0x082c17f4, cg_create_inst_load @ 0x082c18c4). Deviations: (1)
+      the leading r0 argument is dead on arrival - the first
+      instruction after the prologue overwrites r0 with the stacked
+      fifth argument (`ldr r0,[sp,#0x20]`) and the incoming value is
+      never read; the port keeps the parameter for ABI parity and
+      never touches it. (2) The original reloads block->proc from
+      block+4 before each register creation; the port reads it once
+      (same deviation as the sibling). match.py structural: identical
+      call order, opcodes and argument wiring including the
+      `str r5,[sp]` fifth argument to cg_create_inst_binary; LLVM
+      recomputes the offset as row*16 + col*4 (`lsl r0,#4; add r3,r0,
+      r9,lsl #2`, arithmetically identical), adds its frame-pointer
+      prologue, and hoists the single block->proc load.
+
 
   # --- C++ framework: debug/stats dump string writer ---
   - address: 0x082647c0
