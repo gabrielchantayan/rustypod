@@ -4815,6 +4815,32 @@ functions:
       kernel_create_dispatch (e70), tick_elapsed (eb8), irq_fiq_disable
       (ed8), tick_delay (ef0, 23 callers).
 
+  - address: 0x0806a4a0
+    ghidra: FUN_0806a4a0
+    name: kernel_sem5_wait
+    size: 8
+    sig: "usize kernel_sem5_wait()"
+    module: kernel/task_lock
+    status: ported
+    notes: >-
+      Fixed-id semaphore-acquire shim: `mov r0, #5; b 0x08037e08`
+      (rom_sem_wait veneer -> ROM 0x22003fd0), the r0 result word passing
+      back through the tail branch. Extent verified against the sibling
+      shims that follow immediately: 0x0806a4a8 (`mov r0, #1`) and
+      0x0806a4b0 (`mov r0, #0x11`, the PMU OUTER lock), both separate
+      8-byte functions with the same branch target, both unported. 37 bl
+      call sites (binary-verified, all unconditional; zero predicated bl
+      and zero b — callers never flag-gate the acquire): 28 in the PMU
+      I2C family 0x082e53xx-0x082e5bxx, where semaphore 5 is the INNER
+      lock of the wait(0x11)/wait(5) bracket around every raw transfer
+      (see drivers/i2c pmu_i2c_read_regs), plus 0x080671ac, 0x08067f90,
+      0x080aa06c, 0x080b28a0, 0x080da17c, 0x080da658, 0x0836d420,
+      0x0836e380, 0x0836e3dc. Deviation: dispatches through the ported
+      rom_sem_wait (the ROM_KERNEL hook) instead of branching to the ROM
+      veneer — same family pattern as the other task_lock wrappers, so
+      match.py shows an expected structural diff (indirect call through
+      hook slot 1, `mov r0, #5` intact).
+
   - address: 0x08047f40
     ghidra: FUN_08047f40
     name: gateway_request_timed
