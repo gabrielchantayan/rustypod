@@ -9160,6 +9160,36 @@ functions:
       SINGLETON_CTORS dispatch table with a zeroing stub default and the
       cache is the crate static MEDIA_PLAYER_INSTANCE.
 
+  - address: 0x08160148
+    ghidra: FUN_08160148
+    name: lazy_singleton_0x8c
+    size: 48
+    sig: "void *lazy_singleton_0x8c(void)"
+    module: app/singletons
+    status: ported
+    renames:
+      DAT_08160174: singleton_cache (0x089ca7f0)
+      FUN_082aadd4: operator_new
+      FUN_08160534: singleton_0x8c_ctor (SINGLETON_CTORS.singleton_0x8c slot)
+    notes: >-
+      Raw-byte extent is 48 bytes: 44 bytes of code followed by the
+      literal-pool cache address 0x089ca7f0 at 0x08160174; the next
+      function starts at 0x08160178. It is the four-step lazy singleton
+      idiom: load cache, allocate 0x8c with the ported operator_new when
+      NULL, call the unported constructor, store its returned pointer,
+      then reload and return the cache. Decoding every ARM B/BL word in
+      osos.dec finds exactly 32 call sites, all unconditional bl (zero
+      predicated forms and zero plain b tails). The constructor plants the
+      media-player interface vtable 0x089a75c8 and connects to
+      TMediaNowPlayingCntlr, but no class name or registry id survives;
+      lazy_singleton_0x8c therefore records only the verified shape. The
+      port uses the app/singletons dispatch seam and crate-static cache
+      instead of runtime-initialized RAM; its zeroing constructor default
+      means it is not hook-ready until FUN_08160534 is ported. Host tests
+      prove exact allocation, constructor argument, returned-pointer cache
+      reload, cache hit, and NULL-result retries. match.py structural
+      review requested for lazy_singleton_0x8c.
+
   - address: 0x08259594
     ghidra: FUN_08259594
     name: media_player_interface_get
