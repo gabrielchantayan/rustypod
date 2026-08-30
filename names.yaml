@@ -8724,6 +8724,46 @@ functions:
       @ 0x081bc9f8..0x081bded8 (owns the literal
       "iPod_Control/Device/PlayCounts" @ 0x081bc840).
 
+  - address: 0x082e19cc
+    ghidra: FUN_082e19cc
+    name: path_node_release
+    size: 32
+    sig: "u8 *path_node_release(u8 *node)"
+    module: fs/path_node
+    status: ported
+    renames:
+      param_1: node
+      FUN_082e1960: shared_data_release
+      FUN_082e2f04: path_node_pool_recycle
+    notes: >-
+      NULL-guarded release of a path-resolution node (0x1c bytes; the
+      pool pop path zeroes exactly 0x1c): hands the shared refcounted
+      0x54-byte data block at node +0x04 to the release @ 0x082e1960
+      (refcount at data +0x24, unlinked from the list headed at
+      0x08a0a720 and pushed to the data pool at 0x08a0a738 on the
+      zero transition), then tail-calls the pool recycle-or-pop @
+      0x082e2f04, which pushes the node onto the freelist headed at
+      0x08a0a73c (pointer literal @ 0x082e2f70). Returns NULL on every
+      path: the pool's push path returns NULL, and a NULL node
+      short-circuits before either call (movs r4,r0; popeq {r4,pc}).
+      Size byte-verified: next function's push {r4,r5,r6,lr} sits at
+      0x082e19ec, so Ghidra's 32 is exact. 32 call sites, verified by
+      decoding every B/BL word in osos.dec: 23 plain bl + 9 blne
+      (0x082e1950, 0x082e1d10, 0x082e1d1c, 0x082e20c4, 0x082e3690,
+      0x082e369c, 0x082e36a8, 0x082e41d4, 0x082e6530) - the predicated
+      sites are callers already gating on their own non-NULL check;
+      the callee's own guard makes the skip semantics identical.
+      Cluster context: node factory FUN_082e0100 (pool pop + data alloc
+      0x082e00f8), cloning lookup FUN_082e1f74 (bumps data +0x24 under
+      the cluster lock), path walk FUN_082e15d8. Deviation: both
+      callees are unported, so the target build calls their retailOS
+      load addresses directly through transmuted literals (LLVM emits
+      blx/bx register-indirect against .word literals instead of
+      bl/b); host builds route them through PATH_NODE_HOST_OPS
+      recording boundaries. match.py structural: same NULL guard with
+      early return, same ldr of node +4, same call order, same
+      pass-through return of the pool result.
+
   - address: 0x0812120c
     ghidra: (absent from functions.csv)
     name: ata_cmd_reset
