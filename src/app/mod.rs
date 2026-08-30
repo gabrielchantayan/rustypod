@@ -30,6 +30,7 @@ pub mod media_command_facade;
 pub mod media_ext;
 pub mod message_arena;
 pub mod message_kind;
+pub mod message_kind_arena;
 pub mod node_list;
 pub mod object_byte_at_5;
 pub mod object_flag_nibble;

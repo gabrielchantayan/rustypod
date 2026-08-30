@@ -11513,6 +11513,92 @@ functions:
       identical skeleton (mov r4,r0 / accessor / mov r1,r4 / pop / tail
       b); the diffs are the accessor's direct bl and LLVM's fp frame.
 
+  - address: 0x082669e4
+    ghidra: FUN_082669e4
+    name: message_kind_arena_pool
+    size: 100
+    sig: "FixedBlockPool *message_kind_arena_pool(void)"
+    module: app/message_kind_arena
+    status: ported
+    renames:
+      DAT_08266a34: guard base 0x089ca7fc (fast path reads [+0x38] = the
+        guard word 0x089ca834)
+      DAT_08266a38: MESSAGE_KIND_ARENA_GUARD (0x089ca834)
+      DAT_08266a3c: MESSAGE_KIND_ARENA (the pool object, 0x08a1b180)
+      DAT_08266a40: DSO_HANDLE (__dso_handle, 0x089ca09c)
+      DAT_08266a44: the registered "destructor" 0x082612d0 (not a
+        function entry - see notes)
+      FUN_0826c134: fixed_block_pool_construct (the FixedBlockPool ctor,
+        MESSAGE_KIND_ARENA_CTOR seam - not yet ported)
+      FUN_082ab31c: cxa_guard_acquire (ported, runtime/cxa_guard.rs)
+      FUN_082ab338: cxa_guard_release (ported, runtime/cxa_guard.rs)
+      FUN_082ab1c8: cxa_atexit (ported, runtime/shutdown_chain.rs)
+    notes: >-
+      The MessageKind arena's singleton pool accessor - a textbook ADS
+      C++ function-local static over a fixed .bss object, the exact
+      shape of its message_arena_pool sibling @ 0x08103400 (Ghidra's C
+      in decomp/c/025/082669e4_FUN_082669e4.c matches the raw ARM
+      instruction for instruction). EXTENT CORRECTED: Ghidra's 80
+      bytes is the code only; the five literal-pool words @
+      0x08266a34..0x08266a48 belong to the function and the next
+      function opens at 0x08266a48 (message_kind_construct's push,
+      already ported), so the true extent is 100 bytes,
+      0x082669e4..0x08266a48. 37 bl call sites, 0 predicated, 0 tail
+      b, no DATA word references - verified by decoding every B/BL
+      word and scanning for the address in osos.dec; never dispatched
+      virtually.
+      Shape: guard word 0x089ca834 (fast path loads it as [0x089ca7fc
+      + 0x38] via pool word @ 0x08266a34, slow path via the 0x089ca834
+      literal @ 0x08266a38 - same word); tst #1 fast path;
+      cxa_guard_acquire; FixedBlockPool ctor 0x0826c134 on the object
+      0x08a1b180 (pool word @ 0x08266a3c) with block_size 8 /
+      block_count 256; cxa_atexit(ctor's return, dtor 0x082612d0,
+      __dso_handle 0x089ca09c); cxa_guard_release; reload the OBJECT
+      literal - never the ctor's return - and return it. 256 blocks of
+      8 bytes is exactly the 8-byte object message_kind_construct @
+      0x08266a48 builds (vtable word + the +0x04 kind tag); the
+      class's operator new/delete pair 0x08266aa4 / 0x08266a84 sits
+      immediately after the ctor and calls this accessor (both
+      unported).
+      Who calls it: all 37 sites feed the result to
+      fixed_block_pool_alloc @ 0x0826c0d8 (ported) or its free
+      counterpart. Decoding the r1 immediate at every site: exactly 8
+      sites request 8 bytes and can hit the pool; the rest request
+      12/16/20/24/28/32 or a variable size and always take the
+      allocator's exact-equality fallback to the global operator_new
+      (the `cmp r0, r1; beq` @ 0x0826c0e8, binary-verified) - sibling
+      message classes sharing the accessor, where the mismatch costs
+      only a redundant pool fetch.
+      The registered destructor 0x082612d0 is NOT a function entry: it
+      sits 0x140 bytes inside FUN_08261190 (880 bytes per
+      functions.csv) on a `ldr r0, [r6, r0, lsl #2]` - an interior
+      load through its caller's registers, so the registration could
+      never fire (and retailOS never runs exit's chain anyway). The
+      same registration every FixedBlockPool static carries
+      (message_arena_pool @ 0x08103400); modeled as a no-op.
+      The guard pair and cxa_atexit are ported and called directly.
+      The ctor is not, so it rides the MESSAGE_KIND_ARENA_CTOR seam:
+      firmware-address default (0x0826c134) on target, panicking
+      default on host. Deviations - the guard word and the pool object
+      are crate statics rather than the .bss words @ 0x089ca834 /
+      0x08a1b180 (the block_mgr.rs deviation), both zero-init = the
+      exact pre-init state; on target FixedBlockPool is exactly the
+      original's 0x1c bytes. Host tests (7) pin the
+      construct/register/publish first call with the exact (8, 256)
+      geometry, the bit-0 fast path and no-reconstruction, the
+      bit-0-set short-circuit, the whole-word acquire refusal of a
+      bit-0-clear nonzero guard, the reloaded-object-literal return vs
+      the ctor's return going to the registration, the real
+      shutdown-chain registration running the no-op destructor, and
+      the stock geometry/dso literals. match.py structural: the
+      guard-test / acquire / ctor(8, 256) / register / return-object
+      sequence survives; expected differences are the seam's literal
+      load + blx for the ctor, the ported callees inlined by LLVM (the
+      two-level guard test merges into one whole-word test -
+      outcome-identical in every guard state - and the empty
+      cxa_guard_release call deleted; the node_list_get precedent) and
+      LLVM's register allocation.
+
   - address: 0x08266a48
     ghidra: FUN_08266a48
     name: message_kind_construct
