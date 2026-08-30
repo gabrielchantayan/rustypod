@@ -251,6 +251,53 @@ pub unsafe extern "C" fn iram_usec_timer_read_veneer() -> u32 {
 pub unsafe extern "C" fn usec_timer_elapsed(start: u32, interval: u32) -> bool {
     unsafe { usec_timer_read() }.wrapping_sub(start) >= interval
 }
+
+/// iram_usec_timer_elapsed_veneer — original: `thunk_EXT_FUN_22001ee8` @
+/// 0x08037eb8 (Ghidra reports 4 bytes; the real stub is **8** — the
+/// `ldr pc, [pc, #-4]` word 0xe51ff004 at 0x08037eb8 plus the absolute
+/// target word 0x22001ee8 at 0x08037ebc, binary-decoded).
+///
+/// **42 `bl` call sites and 0 tail `b`** (all unconditional — zero
+/// predicated forms), counted by decoding every ARM `B`/`BL` word in
+/// `work/firmware/osos.dec` for every condition code and resolving its
+/// target — not a Ghidra xref count.
+///
+/// # The target resolves to the already-ported [`usec_timer_elapsed`]
+///
+/// 0x22000000 is S5L8702 internal SRAM, populated from the osos image
+/// itself: the relocator @ 0x080046e0 memmoves 0xaed8 bytes from
+/// 0x08000000 to 0x22000000 (see `libc/iram_veneers.rs` for the full
+/// three-fact argument pinning that mirror). So IRAM 0x22001ee8 is osos
+/// 0x08001ee8, which is `usec_timer_elapsed` @ 0x08001ee8 — the
+/// microsecond deadline predicate `(TECNT - start) >= interval -> 0/1`
+/// (`ldr r2,[pc,#1248]; ldr r2,[r2,#0xb4]; sub r0,r2,r0; cmp r0,r1;
+/// movcc r0,#0; movcs r0,#1; bx lr`, 28 bytes), already ported above.
+/// This veneer therefore forwards to it directly rather than re-stubbing
+/// it. (kernel/task_lock.rs's THUNK_CATALOG labels this target
+/// "tick_elapsed"/"kernel_ticks" — stale: the body reads the Timer E
+/// microsecond counter at 0x3c70_00b4, exactly like usec_timer_elapsed.)
+///
+/// # What the veneer does
+///
+/// Nothing but transfer control: r0/r1 pass through untouched, no stack
+/// is used, `lr` still points at the caller, so it is exactly a tail call
+/// returning the predicate in r0. As with the sibling veneers the callee
+/// is loaded through `read_volatile`: written as a plain call LLVM could
+/// inline the small predicate body, and its identical-function folding
+/// risks collapsing the veneer onto another call site of the same shape —
+/// destroying the separate 0x08037eb8 hook seam that is this port's
+/// entire purpose. The distinct `link_section` guards the same invariant
+/// at link time.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.iram_usec_timer_elapsed_veneer")]
+#[inline(never)]
+pub unsafe extern "C" fn iram_usec_timer_elapsed_veneer(start: u32, interval: u32) -> bool {
+    let body = core::ptr::read_volatile(
+        &(usec_timer_elapsed as unsafe extern "C" fn(u32, u32) -> bool),
+    );
+    body(start, interval)
+}
+
 /// usec_timer_elapsed_millis — original: `FUN_08001f04` @ 0x08001f04
 /// (52 bytes).
 /// Reference: `ipod-decomp/decomp/c/000/08001f04_FUN_08001f04.c` and
@@ -438,6 +485,73 @@ mod usec_timer_tests {
                     &(iram_usec_timer_read_veneer as unsafe extern "C" fn() -> u32),
                 ),
                 core::ptr::read_volatile(&(usec_timer_read as unsafe extern "C" fn() -> u32)),
+            )
+        };
+        assert_ne!(veneer as usize, 0);
+        assert_ne!(veneer as usize, body as usize);
+    }
+
+    /// The IRAM veneer @ 0x08037eb8 must be behaviorally transparent: the
+    /// same 0/1 predicate `usec_timer_elapsed` @ 0x08001ee8 returns,
+    /// including the exact-boundary and counter-wrap cases.
+    #[test]
+    fn elapsed_veneer_returns_the_same_predicate_as_the_body() {
+        let _guard = configure_usec_timer(0, 0);
+
+        const INTERVAL: u32 = 10;
+        for start in [0, 1_000, u32::MAX - 4] {
+            for (elapsed, expected) in [
+                (0, false),
+                (INTERVAL - 1, false),
+                (INTERVAL, true),
+                (INTERVAL + 1, true),
+                (u32::MAX, true),
+            ] {
+                HOST_USEC_TIMER_COUNT.store(start.wrapping_add(elapsed), Ordering::Relaxed);
+                assert_eq!(
+                    unsafe { iram_usec_timer_elapsed_veneer(start, INTERVAL) },
+                    expected,
+                    "start={start:#010x}, elapsed={elapsed:#010x}"
+                );
+                HOST_USEC_TIMER_COUNT.store(start.wrapping_add(elapsed), Ordering::Relaxed);
+                assert_eq!(
+                    unsafe { usec_timer_elapsed(start, INTERVAL) },
+                    expected,
+                    "body disagrees: start={start:#010x}, elapsed={elapsed:#010x}"
+                );
+            }
+        }
+        // interval == 0 is elapsed immediately, even at wrap.
+        HOST_USEC_TIMER_COUNT.store(u32::MAX, Ordering::Relaxed);
+        assert!(unsafe { iram_usec_timer_elapsed_veneer(u32::MAX, 0) });
+    }
+
+    /// The veneer forwards — exactly one counter read per call, no
+    /// re-read, no caching.
+    #[test]
+    fn elapsed_veneer_reads_the_counter_exactly_once_per_call() {
+        let _guard = configure_usec_timer(1_000, 7);
+
+        assert!(!unsafe { iram_usec_timer_elapsed_veneer(1_000, 10) });
+        assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 1);
+        assert!(unsafe { iram_usec_timer_elapsed_veneer(1_000, 7) });
+        assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 2);
+    }
+
+    /// The port exists so a hook at 0x08037eb8 lands on a forwarding stub
+    /// distinct from the body at 0x08001ee8. Small predicate bodies are
+    /// exactly what LLVM's identical-function folding collapses, so assert
+    /// the two symbols stay apart.
+    #[test]
+    fn elapsed_veneer_is_a_distinct_call_target_from_its_body() {
+        let (veneer, body) = unsafe {
+            (
+                core::ptr::read_volatile(
+                    &(iram_usec_timer_elapsed_veneer as unsafe extern "C" fn(u32, u32) -> bool),
+                ),
+                core::ptr::read_volatile(
+                    &(usec_timer_elapsed as unsafe extern "C" fn(u32, u32) -> bool),
+                ),
             )
         };
         assert_ne!(veneer as usize, 0);
