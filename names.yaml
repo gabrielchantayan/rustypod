@@ -11642,6 +11642,48 @@ functions:
       preserves load/transform/store/core-call/return shape; expected
       diff is the seam load/blx and LLVM frame allocation.
 
+  - address: 0x0802b6a8
+    ghidra: FUN_0802b6a8
+    name: checked_byte_block_reader
+    size: 132
+    sig: "u32 checked_byte_block_reader(u32 mode, u8 **input_cursor, u8 **input_cursor_mirror, u8 **output_cursor, u8 **output_cursor_mirror, i32 row_count, i32 bytes_per_row)"
+    module: util/checked_byte_block
+    status: ported
+    renames:
+      param_1/r0: mode
+      param_2/r12: input_cursor
+      param_3/r4: input_cursor_mirror
+      param_4/r3: output_cursor
+      param_5/stack: output_cursor_mirror
+      param_6/stack: row_count
+      param_7/stack: bytes_per_row
+      pbVar2/r1: source
+      pbVar4/r5: target
+      iVar5/r6: byte_sum
+      FUN_0802b538: transform_checksum_for_mode
+    notes: >-
+      Raw ARM is exactly 132 bytes (0x0802b6a8..0x0802b72c): the following
+      word starts the distinct three-dimensional word-block reader. Decoding
+      every ARM B/BL word in osos.dec finds exactly 30 call sites, all plain
+      unconditional bl, with zero predicated bl and zero direct B entries.
+      It reads initial source/output cursors from input_cursor_mirror and
+      output_cursor_mirror, respectively, copies row_count * bytes_per_row
+      bytes in row-major order while accumulating their unsigned wrapping
+      sum, then transforms the following aligned u32 via 0x0802b538 and
+      compares it to that sum. Exactly mode 1 byte-reverses that checksum;
+      all other modes preserve it. A match advances input_cursor,
+      input_cursor_mirror, output_cursor, then output_cursor_mirror and
+      returns 0. A mismatch returns 4 without advancing any alias, although
+      copied bytes remain in output. Both loop bounds use signed blt, making
+      zero or negative bounds an empty block that accepts only transformed
+      zero. Deliberate deviation: the one transform call is reproduced
+      inline, matching sibling checked-word-block ports. Host tests cover
+      row copy/sum/ordered alias advances, mode-1 checksum reversal,
+      mismatch-after-copy, and a negative bound. match.py reviewed against
+      the ARM release build; expected differences are the inlined transform
+      and LLVM loop shape. Reference:
+      decomp/c/001/0802b6a8_FUN_0802b6a8.c.
+
   - address: 0x0802b868
     ghidra: FUN_0802b868
     name: checked_word_block_convert_3d
@@ -36136,7 +36178,7 @@ functions:
     ghidra: FUN_0802dd88
     name: ui_checked_byte_block_forwarder
     size: 32
-    sig: "u32 ui_checked_byte_block_forwarder(u32 mode, u8 **input_cursor, u8 **input_cursor_mirror, u8 **output_cursor, u8 **output_cursor_mirror, u32 row_count, u32 bytes_per_row)"
+    sig: "u32 ui_checked_byte_block_forwarder(u32 mode, u8 **input_cursor, u8 **input_cursor_mirror, u8 **output_cursor, u8 **output_cursor_mirror, i32 row_count, i32 bytes_per_row)"
     module: ui/checked_byte_block_forwarder
     status: ported
     renames:
@@ -36156,11 +36198,10 @@ functions:
       placing live r2 and r3 at outgoing sp+4/sp+8 before calling
       0x0802b6a8. Thus r2/r3 are the reader's sixth/seventh arguments:
       row_count and bytes_per_row (normally 0x10 and 0x100), not cursor
-      pointers. The port makes the otherwise implicit frame inputs explicit,
-      forwards all seven reader words and its 0/4 status through a target ROM
-      / host recorder seam, and keeps 0x0802b6a8 unported. Focused host
-      coverage records every cursor alias, both stack-carried dimensions, and
-      the returned failure status.
+      pointers. The port makes the otherwise implicit frame inputs explicit
+      and forwards all seven reader words to the ported
+      checked_byte_block_reader, returning its 0/4 status unchanged. Focused
+      host coverage drives the reader through this forwarding entry.
 
   # --- FreeType conditional optional-offset adjustment ---
   - address: 0x0802de50
@@ -36397,7 +36438,7 @@ functions:
     module: runtime/byte_block_checksum_forwarder
     status: ported
     renames:
-      FUN_0802b6a8: byte_block_checksum_reader
+      FUN_0802b6a8: checked_byte_block_reader
       r0: inherited_parser_mode
       r1: inherited_input_cursor
       r2: inherited_output_cursor
@@ -36406,15 +36447,15 @@ functions:
       28-byte continuation helper (0x0802c03c..0x0802c058), seven ARM
       instructions. Its caller has already established parser state in
       r0-r2 (r0 receives the surrounding frame's r7; r1 and r2 name local
-      input/output cursor slots), then this entry calls the unported
-      byte-block copy/checksum reader at 0x0802b6a8. It compares and discards
-      that reader's status, unwinds its 0x34-byte caller frame, and returns.
-      The recovered C entry has no explicit parameters, so this port preserves
+      input/output cursor slots), then this entry calls the ported
+      checked-byte-block reader at 0x0802b6a8. It compares and discards that
+      reader's status, unwinds its 0x34-byte caller frame, and returns. The
+      recovered C entry has no explicit parameters, so this port preserves
       the no-argument void ABI and the forwarding/return behavior only.
-      Deviation: target builds call 0x0802b6a8 directly; host tests install a
-      recording seam to verify one invocation and return without executing
-      unmapped firmware. The inherited register/frame state remains the
-      caller's responsibility until the surrounding parser is ported.
+      Deviation: target builds retain the direct target call; host tests
+      install a recording seam because the inherited register/frame state
+      remains the caller's responsibility until the surrounding parser is
+      ported.
 
   # --- transposed four-by-four byte-block XOR ---
   - address: 0x0802e54c
