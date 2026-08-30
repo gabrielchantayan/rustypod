@@ -6267,6 +6267,54 @@ functions:
       sites, binary-verified; among them the pool base-subobject dtor
       (bl @ 0x08214240).
 
+  - address: 0x0808e2a8
+    ghidra: FUN_0808e2a8
+    name: mailbox_slot_post
+    size: 8
+    sig: "void mailbox_slot_post(Mailbox **slot)"
+    module: kernel/kobj
+    vars: {param_1: slot}
+    status: ported
+    renames:
+      param_1/r0: slot
+      FUN_080567a8: csem_post (already ported, kernel/csem.rs)
+    notes: >-
+      Two instructions, extent 0x0808e2a8..0x0808e2b0 confirmed from
+      the raw words (the sibling mailbox_slot_signal starts at
+      0x0808e2b0, its own entry at 0x0808e2b8 with push {r4,r5,r6,lr});
+      no trailing literal pool, the tail branch is PC-relative. NOT a
+      veneer — `ldr r0,[r0]` (0xe5900000) then `b 0x080567a8`
+      (0xeaff213d), i.e. csem_post(*slot): load the mailbox block out
+      of a caller-owned one-word slot and tail-call the already-ported
+      add-and-wake V op of the counting semaphore. 59 branch sites,
+      binary-scanned by decoding every B/BL word in osos.dec: 29 bl,
+      7 predicated bl, 18 tail b, 5 predicated tail b — Ghidra's "36
+      bl" counts only the link forms. No DATA word holds the address,
+      so it is never dispatched virtually. The 12 predicated sites are
+      the behavioural fact worth recording: this wrapper has NO NULL
+      guard (the ldr and csem_post both dereference unconditionally),
+      so callers that can hold an empty slot test it themselves and
+      branch in conditionally.
+      Identification: byte-twin sibling of mailbox_slot_signal @
+      0x0808e2b0 (`ldr r0,[r0]; b 0x0805697c`, the csem_signal
+      flavor); with mailbox_slot_create @ 0x0808e294 filling the slot
+      they form the framework's construct/post/signal "event cell"
+      idiom over one member pointer. Deviations — none in behaviour;
+      the port re-views the Mailbox pointer as a CountingSem at the
+      one call (same 8 bytes, both #[repr(C)] named fields, no literal
+      byte offsets). Host tests (4) cover the token-adding path (count
+      was >= 0, no ROM entry), the exact -1 -> 0 wake transition
+      carrying this block's waiter id, deeper negative counts NOT
+      waking (-3 -> -2, sleepers stay parked), and re-pointing the
+      slot between calls (nothing is cached — the ldr is per call).
+      match.py (--size 8): LLVM inlines csem_post's mrs/msr critical
+      section and its conditional wake into the wrapper instead of
+      tail-branching, so the port is the same deref followed by the
+      callee's body verbatim (increment, adds/EQ early return, hook
+      wake through KOBJ_HOOKS.rom_waiter_signal) — the documented
+      hook-table dispatch deviation, same structure, identical to the
+      mailbox_slot_signal precedent.
+
   - address: 0x0808e2b0
     ghidra: FUN_0808e2b0
     name: mailbox_slot_signal
@@ -6296,7 +6344,8 @@ functions:
       Identification: the slot is the same one mailbox_slot_create
       @ 0x0808e294 fills (`*slot = mailbox_create()`), and its byte-twin
       sibling FUN_0808e2a8 (`ldr r0,[r0]; b 0x080567a8`) is the csem_post
-      flavor — construct/post/signal over one member pointer, the
+      flavor (ported as mailbox_slot_post) — construct/post/signal over
+      one member pointer, the
       framework's "event cell" idiom. This wrapper is what proves the
       8-byte mailbox block {state @ +0, id @ +4} IS csem.rs's
       CountingSem {count: i32 @ +0, waiter_id: u32 @ +4}: state is the
@@ -6926,7 +6975,7 @@ functions:
       thunk 0x08037ea8 / ROM 0x22004368 (csem.rs's CSEM_ROM_WAKE),
       and the condition is equality with -1, not a signed < 0.
       2 call sites: tail `b` @ 0x0808e2ac (deref wrapper
-      FUN_0808e2a8), bl @ 0x080b26b8. Twin 0x080567d0 (same shape,
+      FUN_0808e2a8, ported as kobj::mailbox_slot_post), bl @ 0x080b26b8. Twin 0x080567d0 (same shape,
       wakes via thunk 0x08037e80) ported as csem_post_deferred.
       match.py: LLVM inlines the atomic (identical mrs/msr critical
       section), tests old+1 via the adds carry flag (cc = old != -1
