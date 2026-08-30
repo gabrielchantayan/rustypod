@@ -37655,3 +37655,55 @@ functions:
       delimiter exhaustion, and the returned out pointer; fixtures in
       testing::hints::TOKENIZER (new), one process-wide slab shared via
       LazyLock because the mapper never unmaps.
+
+  # --- Managed two-word entry release (app/managed_entry) ---
+  - address: 0x080645b8
+    ghidra: FUN_080645b8
+    name: managed_entry_release
+    size: 76
+    sig: "i32 managed_entry_release(ManagedEntryManager *manager, ManagedEntry *entry)"
+    module: app/managed_entry
+    status: ported
+    renames:
+      param_1/r0/r4: manager
+      param_2/r1/r5: entry
+      param_2_deref: entry_record
+      param_1_plus_0x04/r0: release_context
+      param_1_plus_0x40/r3: release_callback
+      param_1_plus_0x50: release_count
+      uVar1/r0: status
+    notes: >-
+      Verified 76 bytes (19 instructions) ending at 0x08064604, where the
+      next function begins; Ghidra's extent and C agree with the raw bytes
+      exactly. 40 call sites verified by decoding every B/BL word in
+      osos.dec: all 40 are unconditional `bl`, zero predicated forms, so
+      callers never gate the call on a flag themselves. Algorithm: if
+      entry->record (+0x00) is non-NULL, invoke the manager's object-carried
+      release callback (+0x40) as (manager->+0x04 context, entry, flags=0),
+      bump the manager's +0x50 release counter, and keep the callback
+      status; then unconditionally zero both entry words and return the
+      status (0 for an already-empty slot). The trailing clear wins over
+      anything the callback wrote into the slot mid-call. Sibling
+      FUN_0806ce40 is the flagged variant: same callback with flags | 2,
+      its own counter at +0x54, and it KEEPS the slot filled when the
+      callback fails; 0x080645b8 is the unconditional error-path cleanup
+      (callers such as 0x08044f20, 0x0805921c, 0x08068288 invoke it on
+      failure edges). Records recovered from callers carry two big-endian
+      u32 ids at +0x00/+0x04 (BE word helpers 0x08031140/0x08031160), a
+      state byte at +0x08 (-1 special), a kind byte at +0x09, and a u16
+      count at +0x0a; the owning subsystem is not recovered, so the name
+      describes the mechanism only. The callback is an object-carried code
+      word, not a fixed firmware address, so no dispatch seam was needed
+      or added. Deviations: manager and entry are #[repr(C)] models with
+      named fields replacing raw byte offsets (the crate's standing idiom
+      for object-carried callbacks); every touched field is a single
+      4-byte word, so the target layout is exact. match.py structural
+      (exit 1, diff expected): identical shape — same +0x04/+0x40/+0x50
+      offsets, empty-slot branch skipping callback and count, blx through
+      the callback field, flags=0, unconditional two-word clear; deltas
+      are LLVM register allocation and its sl/fp frame. Host tests (5):
+      empty slot skips callback and counter yet clears both words, exact
+      (context, entry, flags=0) forwarding with the slot observed still
+      occupied inside the callback, error status propagating while the
+      slot still clears and counts, callback writes overwritten by the
+      trailing clear, and u32 counter wrap.
