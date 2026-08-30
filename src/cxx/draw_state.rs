@@ -123,10 +123,11 @@ unsafe extern "C" fn surface_attach_stub(this: *mut u8, surface: usize) {
     (this.add(DRAW_STATE_SURFACE_OFFSET) as *mut usize).write(surface);
 }
 
-/// Indirect dispatch for the three member initializers
-/// [`draw_state_construct`] chains (the settings.rs `SETTINGS_CTOR`
-/// pattern). Host tests install recording mocks; a later port of each
-/// callee replaces its default without changing this caller.
+/// Indirect dispatch for the three member initializers both
+/// [`draw_state_construct`] and [`draw_state_construct_with_surface`]
+/// chain (the settings.rs `SETTINGS_CTOR` pattern). Host tests install
+/// recording mocks; a later port of each callee replaces its default
+/// without changing either caller.
 #[derive(Clone, Copy)]
 pub struct DrawStateConstructOps {
     /// Original 0x081598a4: construct the embedded two-word member at
@@ -188,6 +189,37 @@ pub unsafe extern "C" fn draw_state_construct(this: *mut u8) -> *mut u8 {
     let this = member.sub(DRAW_STATE_EMBEDDED_PAIR_OFFSET);
     body_init_op()(this);
     surface_attach_op()(this, DRAW_STATE_DEFAULT_SURFACE_ADDRESS);
+    this
+}
+
+/// draw_state_construct_with_surface — original: `FUN_08264570` @
+/// 0x08264570 (48 bytes, 0x08264570..0x082645a0; 35 unconditional
+/// `bl` call sites, no predicated branches, binary-scanned).
+///
+/// Source: `ipod-decomp/decomp/c/025/08264570_FUN_08264570.c`.
+///
+/// Constructs the scoped draw-state record at `this` with
+/// caller-selected `surface`: construct its embedded two-word member at
+/// +0x20, derive `this` from that call's return minus 0x20, initialize
+/// the body, then attach `surface`. The function has no NULL guard,
+/// matching its unconditional `add r0, r0, #0x20`.
+///
+/// Deliberate deviation: it uses the existing
+/// [`DRAW_STATE_CONSTRUCT_OPS`] boundary shared with
+/// [`draw_state_construct`]. Its embedded-pair default is faithful, but
+/// `body_init` and `surface_attach` retain their documented partial
+/// defaults until those larger callees are ported; consequently this is
+/// not hook-ready with the defaults.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn draw_state_construct_with_surface(
+    this: *mut u8,
+    surface: usize,
+) -> *mut u8 {
+    let member = embedded_pair_construct_op()(this.add(DRAW_STATE_EMBEDDED_PAIR_OFFSET));
+    let this = member.sub(DRAW_STATE_EMBEDDED_PAIR_OFFSET);
+    body_init_op()(this);
+    surface_attach_op()(this, surface);
     this
 }
 
@@ -323,6 +355,66 @@ mod tests {
         expected[surface_slot..surface_slot + core::mem::size_of::<usize>()]
             .copy_from_slice(&DRAW_STATE_DEFAULT_SURFACE_ADDRESS.to_ne_bytes());
         // The guard bytes past the record stay 0xa5.
+        expected[DRAW_STATE_SIZE..].copy_from_slice(&[0xa5u8; 0x10]);
+        assert_eq!(record, expected);
+    }
+
+    #[test]
+    fn construct_with_surface_chains_pair_body_and_given_surface_in_order() {
+        let mut record = [0xa5u8; DRAW_STATE_SIZE];
+        let this = record.as_mut_ptr();
+        let surface = 0x0812_3456;
+        let _bench = draw_state_bench(unsafe { this.add(DRAW_STATE_EMBEDDED_PAIR_OFFSET) });
+
+        let returned = unsafe { draw_state_construct_with_surface(this, surface) };
+
+        assert_eq!(returned, this, "the constructor returns this");
+        assert_eq!(
+            init_calls(),
+            std::vec![
+                ("pair", unsafe { this.add(DRAW_STATE_EMBEDDED_PAIR_OFFSET) } as usize, 0),
+                ("body", this as usize, 0),
+                ("surface", this as usize, surface),
+            ],
+            "member at this+0x20 first, then body, then the supplied surface"
+        );
+    }
+
+    #[test]
+    fn construct_with_surface_derives_this_from_pair_ctor_return() {
+        let mut record = [0xa5u8; DRAW_STATE_SIZE + 0x10];
+        let this = record.as_mut_ptr();
+        let shifted = unsafe { this.add(DRAW_STATE_EMBEDDED_PAIR_OFFSET + 8) };
+        let surface = 0x08ab_cdef;
+        let _bench = draw_state_bench(shifted);
+
+        let returned = unsafe { draw_state_construct_with_surface(this, surface) };
+
+        let expected_this = unsafe { shifted.sub(DRAW_STATE_EMBEDDED_PAIR_OFFSET) };
+        assert_eq!(returned, expected_this);
+        assert_eq!(
+            init_calls(),
+            std::vec![
+                ("pair", unsafe { this.add(DRAW_STATE_EMBEDDED_PAIR_OFFSET) } as usize, 0),
+                ("body", expected_this as usize, 0),
+                ("surface", expected_this as usize, surface),
+            ],
+            "the original's `sub r4, r0, #0x20` propagates the returned base"
+        );
+    }
+
+    #[test]
+    fn construct_with_surface_default_stubs_preserve_guard_and_surface() {
+        let mut record = [0xa5u8; DRAW_STATE_SIZE + 0x10];
+        let this = record.as_mut_ptr();
+        let surface = 0x0876_5432;
+
+        let returned = unsafe { draw_state_construct_with_surface(this, surface) };
+
+        assert_eq!(returned, this);
+        let mut expected = [0u8; DRAW_STATE_SIZE + 0x10];
+        expected[DRAW_STATE_SURFACE_OFFSET..DRAW_STATE_SURFACE_OFFSET + core::mem::size_of::<usize>()]
+            .copy_from_slice(&surface.to_ne_bytes());
         expected[DRAW_STATE_SIZE..].copy_from_slice(&[0xa5u8; 0x10]);
         assert_eq!(record, expected);
     }
