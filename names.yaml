@@ -3256,6 +3256,29 @@ functions:
       the rest is the inlined lazy-init + ops-slot free tail call, the
       documented deviation.
 
+  - address: 0x082aad4c
+    ghidra: FUN_082aad4c
+    name: string_object_equals
+    size: 40
+    sig: "int string_object_equals(const StringObject *this, const StringObject *other)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1/r0: this, param_2/r1: other, r4: this_saved, uVar2/r0: compare_result}
+    notes: >-
+      Raw ARM is exactly ten code words at 0x082aad4c..0x082aad70; the
+      adjacent operator_new_tag3 starts at 0x082aad74. It saves this in r4,
+      calls string_object_c_str @ 0x082a50b0 over other, then loads this's
+      raw payload word and calls utf8_strcmp_safe @ 0x08276d64. The
+      `rsbs r0,r0,#1; movcc r0,#0` result is 1 only when the comparator
+      returned 0, otherwise 0. No object-pointer guard exists; NULL this or
+      other faults. Decoding every B/BL word in osos.dec found 31 direct
+      calls, all unconditional `bl` (none predicated), including
+      0x0827eb80's compare of two enclosing StringObjects before its state
+      transition. Both callees are ported, so the Rust port calls them
+      directly; there is no dispatch seam or other deviation. Host tests
+      cover equal decoded UTF-8, unequal decoded codepoints and lengths,
+      both NULL payloads, and one NULL payload.
+
   - address: 0x082aad74
     ghidra: FUN_082aad74
     name: operator_new_tag3

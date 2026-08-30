@@ -132,6 +132,11 @@
 //!   @ 0x082a50a0 (`ldr r0,[r0,#4]; b 0x08275e20`) runs the count+1
 //!   strlen variant over it, while the 0x08279338 neighbor scans the
 //!   class's characters for the path separators ':', '/' and '\\'.
+//! - `string_object_equals` — original: `FUN_082aad4c` @ 0x082aad4c
+//!   (40 bytes, all code; 31 `bl` call sites, binary-scanned). The
+//!   equality predicate for two StringObjects: compares this's raw
+//!   payload with the other's C-string accessor through the UTF-8
+//!   comparator and widens equality to an `i32` bool.
 //! - `string_object_len_plus1` — original: `FUN_082a50a0` @ 0x082a50a0
 //!   (8 bytes; 1 `bl` call site, binary-scanned). The length-plus-one
 //!   accessor: a two-instruction thunk (`ldr r0,[r0,#4]; b 0x08275e20`)
@@ -1207,6 +1212,40 @@ pub unsafe extern "C" fn string_object_c_str(this: *const StringObject) -> *cons
         return &STRING_OBJECT_EMPTY_CSTR;
     }
     payload
+}
+
+/// string_object_equals — original: `FUN_082aad4c` @ 0x082aad4c (40 bytes,
+/// all code; the next function starts at 0x082aad74; 31 `bl` call sites,
+/// all unconditional, binary-scanned by decoding every ARM B/BL word in
+/// osos.dec).
+///
+/// The equality predicate for two StringObjects: `mov r4,r0; mov r0,r1; bl
+/// 0x082a50b0` obtains the other's C string (substituting the shared empty
+/// string for a NULL payload), then `ldr r0,[r4,#4]; bl 0x08276d64` compares
+/// this's raw payload through the ported UTF-8 comparator. `rsbs r0,r0,#1;
+/// movcc r0,#0` returns exactly 1 when that comparator returns zero and 0
+/// for every nonzero result. Neither object pointer is guarded, so NULL
+/// `this` or `other` faults as in the firmware.
+///
+/// The 31 plain call sites include 0x0827eb80, where the predicate compares
+/// StringObjects at an enclosing object's +0x7c and +0x6c before choosing
+/// the state transition; no predicated calls check either object first.
+///
+/// Deviation: none — both original callees, [`string_object_c_str`] @
+/// 0x082a50b0 and [`utf8_strcmp_safe`] @ 0x08276d64, are ported and called
+/// directly.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_equals(
+    this: *const StringObject,
+    other: *const StringObject,
+) -> i32 {
+    let other_cstr = string_object_c_str(other);
+    if utf8_strcmp_safe((*this).payload as *const u8, other_cstr) == 0 {
+        1
+    } else {
+        0
+    }
 }
 
 /// string_object_len_plus1 — original: `FUN_082a50a0` @ 0x082a50a0
@@ -3726,6 +3765,69 @@ pub(crate) mod tests {
             payload_storage, *b"Acoustic\0",
             "the comparator never writes"
         );
+    }
+
+    #[test]
+    fn string_object_equals_uses_utf8_payload_equality() {
+        let mut first_payload = *b"caf\xc3\xa9\0";
+        let mut second_payload = *b"caf\xc3\xa9\0";
+        let first = StringObject {
+            vtable: core::ptr::null(),
+            payload: first_payload.as_mut_ptr(),
+        };
+        let second = StringObject {
+            vtable: core::ptr::null(),
+            payload: second_payload.as_mut_ptr(),
+        };
+
+        unsafe {
+            assert_eq!(string_object_equals(&first, &second), 1);
+        }
+        assert_eq!(first_payload, *b"caf\xc3\xa9\0");
+        assert_eq!(second_payload, *b"caf\xc3\xa9\0");
+    }
+
+    #[test]
+    fn string_object_equals_rejects_first_codepoint_and_length_differences() {
+        let mut accented_payload = *b"caf\xc3\xa9\0";
+        let mut lower_payload = *b"caf\xc3\xa8\0";
+        let mut prefix_payload = *b"caf\0";
+        let accented = StringObject {
+            vtable: core::ptr::null(),
+            payload: accented_payload.as_mut_ptr(),
+        };
+        let lower = StringObject {
+            vtable: core::ptr::null(),
+            payload: lower_payload.as_mut_ptr(),
+        };
+        let prefix = StringObject {
+            vtable: core::ptr::null(),
+            payload: prefix_payload.as_mut_ptr(),
+        };
+
+        unsafe {
+            assert_eq!(string_object_equals(&accented, &lower), 0);
+            assert_eq!(string_object_equals(&accented, &prefix), 0);
+        }
+    }
+
+    #[test]
+    fn string_object_equals_keeps_the_callees_null_payload_semantics() {
+        let empty = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        let mut text_payload = *b"x\0";
+        let text = StringObject {
+            vtable: core::ptr::null(),
+            payload: text_payload.as_mut_ptr(),
+        };
+
+        unsafe {
+            assert_eq!(string_object_equals(&empty, &empty), 1);
+            assert_eq!(string_object_equals(&empty, &text), 0);
+            assert_eq!(string_object_equals(&text, &empty), 0);
+        }
     }
 
     #[test]
