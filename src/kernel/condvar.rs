@@ -42,17 +42,23 @@
 //! 0x080ed9c8 (20 bytes, 21 bl call sites). The no-allocation initializer:
 //! stores a caller-provided lock word into `lock_obj` and clears the wait
 //! queue (the queue-pool initializer @ 0x0809eab8 calls it twice).
+//! `condvar_wait_forever` — `FUN_080ed9dc` @ 0x080ed9dc (76 bytes, 30
+//! unconditional `bl` call sites) — is the unbounded counterpart: it
+//! creates and enqueues a stack waiter, drops the associated semaphore,
+//! waits through the raw csem service, destroys the waiter, then relocks.
 //!
 //! # Hook routing
 //!
-//! Every kernel/ROM call goes through the `CONDVAR_HOOKS` fn-pointer table
-//! (pattern from heap/wrappers.rs): the stock semaphore/object wrappers
-//! (0x08056510/0x08056710/0x08056724/0x0805646c/0x08056788/0x0805695c/
-//! 0x080564ec/0x080567f8/0x080568fc) and the deliver helper 0x080b4a88 are
-//! ported by other modules, so they cannot be imported here. The default
-//! stubs model "kernel not present": creates return NULL, the sleep reports
-//! success, deliver accepts the first node, everything else is a no-op.
-//! Host tests install mocks; the ARM build replaces the table at link time.
+//! Every timeout-capable kernel/ROM call goes through the `CONDVAR_HOOKS`
+//! fn-pointer table (pattern from heap/wrappers.rs): the stock
+//! semaphore/object wrappers (0x08056510/0x08056710/0x08056724/0x0805646c/
+//! 0x08056788/0x0805695c/0x080564ec/0x080567f8/0x080568fc) and the deliver
+//! helper 0x080b4a88 are ported by other modules, so they cannot be imported
+//! here. The default stubs model "kernel not present": creates return NULL,
+//! the sleep reports success, deliver accepts the first node, everything else
+//! is a no-op. Host tests install mocks; the ARM build replaces the table at
+//! link time. `condvar_wait_forever` directly calls its already-ported
+//! wrappers instead of duplicating those bindings in a new seam.
 //!
 //! # Simplifications / deviations
 //!
@@ -75,6 +81,11 @@
 //!   32-bit target; host tests go through field accesses and are
 //!   layout-independent.
 
+use crate::kernel::{
+    csem::csem_wake,
+    kobj::{waiter_create, waiter_delete},
+    sync_sem::{sem_signal, sem_wait},
+};
 use core::ptr::null_mut;
 
 /// Return code: operation completed (signaled / node delivered).
@@ -402,6 +413,35 @@ pub unsafe extern "C" fn condvar_bind(condvar: *mut CondVar, lock_obj: *mut u32)
     (*condvar).waiters.tail = null_mut();
 }
 
+/// condvar_wait_forever — original: `FUN_080ed9dc` @ 0x080ed9dc (76 bytes;
+/// 30 verified unconditional `bl` call sites).
+///
+/// Creates a stack waiter, appends it to `condvar`'s wait queue, releases the
+/// associated semaphore, enters the raw csem service, deletes the waiter,
+/// clears the stack object's handle, and reacquires the semaphore. The raw
+/// csem call must not return until a waker has removed this stack node; the
+/// original performs no trailing unlink. Deliberate deviations: none. Calls
+/// to the already-ported semaphore, waiter, and csem wrappers are direct so
+/// this port introduces no duplicate dispatch seam.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn condvar_wait_forever(condvar: *mut CondVar) {
+    let lock_obj = (*condvar).lock_obj;
+    let mut node = WaitNode {
+        next: null_mut(),
+        object: waiter_create() as *mut u32,
+    };
+    list_push_back(
+        &mut (*condvar).waiters,
+        &mut node as *mut WaitNode as *mut ListNode,
+    );
+    sem_signal(lock_obj.read() as *mut u32);
+    csem_wake(node.object as usize as u32);
+    waiter_delete(node.object as usize as u32);
+    node.object = null_mut();
+    sem_wait(lock_obj.read() as *mut u32);
+}
+
 /// rtxc_semaphore_signal — original: `FUN_0807f6a0` @ 0x0807f6a0
 /// (8 bytes).
 ///
@@ -457,6 +497,10 @@ pub unsafe extern "C" fn condvar_wait(condvar: *mut CondVar, timeout: u32) -> i3
 mod tests {
     extern crate std;
     use super::*;
+    use crate::kernel::csem::CSEM_ROM_WAKE;
+    use crate::kernel::kobj::{KobjHooks, KOBJ_HOOKS};
+    use crate::kernel::sync_sem::{RomKernel, ROM_KERNEL};
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use std::boxed::Box;
     use std::format;
     use std::string::String;
@@ -573,6 +617,141 @@ mod tests {
         } else {
             s.deliver_rcs.remove(0)
         }
+    }
+
+    struct DirectKernelGuard {
+        kobj: KobjHooks,
+        sem: RomKernel,
+        csem_wake: unsafe extern "C" fn(u32),
+    }
+
+    impl Drop for DirectKernelGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::write_volatile(core::ptr::addr_of_mut!(KOBJ_HOOKS), self.kobj);
+                core::ptr::write_volatile(core::ptr::addr_of_mut!(ROM_KERNEL), self.sem);
+                core::ptr::write_volatile(core::ptr::addr_of_mut!(CSEM_ROM_WAKE), self.csem_wake);
+            }
+        }
+    }
+
+    unsafe extern "C" fn direct_waiter_create(_op: u32, slot: *mut u32) {
+        slot.write(0xa001);
+        state().as_mut().unwrap().events.push("waiter_create".into());
+    }
+
+    unsafe extern "C" fn direct_waiter_delete(_op: u32, slot: *mut u32) {
+        state()
+            .as_mut()
+            .unwrap()
+            .events
+            .push(format!("waiter_delete:{:x}", slot.read()));
+    }
+
+    unsafe extern "C" fn direct_task_lock(id: u32) {
+        state()
+            .as_mut()
+            .unwrap()
+            .events
+            .push(format!("task_lock:{id:x}"));
+    }
+
+    unsafe extern "C" fn direct_task_unlock(id: u32) {
+        state()
+            .as_mut()
+            .unwrap()
+            .events
+            .push(format!("task_unlock:{id:x}"));
+    }
+
+    unsafe extern "C" fn direct_heap_alloc(_size: usize) -> *mut u8 {
+        null_mut()
+    }
+
+    unsafe extern "C" fn direct_heap_free(_ptr: *mut u8) {}
+
+    unsafe extern "C" fn direct_waiter_wait(_id: u32, _timeout: u32) -> u32 {
+        0
+    }
+
+    unsafe extern "C" fn direct_waiter_signal(_id: u32) {}
+
+    unsafe extern "C" fn direct_sem_create(_op: u32, _slot: *mut u32) {}
+
+    unsafe extern "C" fn direct_sem_delete(_op: u32, _slot: *mut u32) {}
+
+    unsafe extern "C" fn direct_sem_wait(id: u32) {
+        state()
+            .as_mut()
+            .unwrap()
+            .events
+            .push(format!("sem_wait:{id:x}"));
+    }
+
+    unsafe extern "C" fn direct_sem_signal(id: u32) {
+        state()
+            .as_mut()
+            .unwrap()
+            .events
+            .push(format!("sem_signal:{id:x}"));
+    }
+
+    unsafe extern "C" fn direct_in_isr_context() -> u32 {
+        0
+    }
+
+    unsafe extern "C" fn direct_sem_alloc(_size: usize) -> *mut u32 {
+        null_mut()
+    }
+
+    unsafe extern "C" fn direct_sem_free(_ptr: *mut u32) {}
+
+    unsafe extern "C" fn direct_csem_wake(id: u32) {
+        let condvar = state().as_ref().unwrap().wait_condvar;
+        let node = if condvar.is_null() {
+            null_mut()
+        } else {
+            list_pop_front(&mut (*condvar).waiters)
+        };
+        let mut g = state();
+        let s = g.as_mut().unwrap();
+        s.events.push(format!("csem_wake:{id:x}"));
+        s.wakes.push(node as usize);
+    }
+
+    unsafe fn install_direct_kernel_mocks() -> DirectKernelGuard {
+        let guard = DirectKernelGuard {
+            kobj: core::ptr::read_volatile(core::ptr::addr_of!(KOBJ_HOOKS)),
+            sem: core::ptr::read_volatile(core::ptr::addr_of!(ROM_KERNEL)),
+            csem_wake: core::ptr::read_volatile(core::ptr::addr_of!(CSEM_ROM_WAKE)),
+        };
+        core::ptr::write_volatile(
+            core::ptr::addr_of_mut!(KOBJ_HOOKS),
+            KobjHooks {
+                op_create: direct_waiter_create,
+                op_delete: direct_waiter_delete,
+                task_lock: direct_task_lock,
+                task_unlock: direct_task_unlock,
+                heap_alloc: direct_heap_alloc,
+                heap_free: direct_heap_free,
+                rom_waiter_wait: direct_waiter_wait,
+                rom_waiter_signal: direct_waiter_signal,
+            },
+        );
+        core::ptr::write_volatile(
+            core::ptr::addr_of_mut!(ROM_KERNEL),
+            RomKernel {
+                op_create: direct_sem_create,
+                op_delete: direct_sem_delete,
+                wait: direct_sem_wait,
+                signal: direct_sem_signal,
+                in_isr_context: direct_in_isr_context,
+                heap_alloc: direct_sem_alloc,
+                heap_free: direct_sem_free,
+            },
+        );
+        core::ptr::write_volatile(core::ptr::addr_of_mut!(CSEM_ROM_WAKE), direct_csem_wake);
+        guard
     }
 
     const MOCK_HOOKS: CondvarHooks = CondvarHooks {
@@ -865,6 +1044,75 @@ mod tests {
             assert_eq!(popped.len(), 1);
             assert!(!popped.contains(&0));
         }
+    }
+
+    #[test]
+    fn condvar_wait_forever_cycles_the_waiter_and_lock_after_wake() {
+        let Some(slab) = try_map_u32_slab(hints::CONDVAR_WAIT_FOREVER_SIGNALED, 0x1000) else {
+            note_missing_u32_fixture("kernel::condvar::condvar_wait_forever_signaled");
+            return;
+        };
+        let semaphore_slot = slab.cast::<u32>();
+        unsafe {
+            semaphore_slot.write(0x1234);
+        }
+        let mut lock_obj_word = semaphore_slot as usize as u32;
+        let _condvar_guard = install(MockState::default());
+        let _kernel_guard = unsafe { install_direct_kernel_mocks() };
+        let mut cv = make_condvar();
+        cv.lock_obj = &mut lock_obj_word;
+        state().as_mut().unwrap().wait_condvar = &mut cv;
+        unsafe {
+            condvar_wait_forever(&mut cv);
+        }
+        assert!(cv.waiters.head.is_null(), "the raw csem waker popped the stack node");
+        assert!(cv.waiters.tail.is_null());
+        assert_eq!(
+            take_events(),
+            Vec::<String>::from([
+                "waiter_create".into(),
+                "sem_signal:1234".into(),
+                "csem_wake:a001".into(),
+                "task_lock:a001".into(),
+                "task_unlock:a001".into(),
+                "waiter_delete:a001".into(),
+                "sem_wait:1234".into(),
+            ])
+        );
+        assert_eq!(state().as_ref().unwrap().wakes.len(), 1);
+    }
+
+    #[test]
+    fn condvar_wait_forever_skips_null_semaphore_id() {
+        let Some(slab) = try_map_u32_slab(hints::CONDVAR_WAIT_FOREVER_EMPTY, 0x1000) else {
+            note_missing_u32_fixture("kernel::condvar::condvar_wait_forever_empty");
+            return;
+        };
+        let semaphore_slot = slab.cast::<u32>();
+        unsafe {
+            semaphore_slot.write(0);
+        }
+        let mut lock_obj_word = semaphore_slot as usize as u32;
+        let _condvar_guard = install(MockState::default());
+        let _kernel_guard = unsafe { install_direct_kernel_mocks() };
+        let mut cv = make_condvar();
+        cv.lock_obj = &mut lock_obj_word;
+        state().as_mut().unwrap().wait_condvar = &mut cv;
+        unsafe {
+            condvar_wait_forever(&mut cv);
+        }
+        assert!(cv.waiters.head.is_null());
+        assert!(cv.waiters.tail.is_null());
+        assert_eq!(
+            take_events(),
+            Vec::<String>::from([
+                "waiter_create".into(),
+                "csem_wake:a001".into(),
+                "task_lock:a001".into(),
+                "task_unlock:a001".into(),
+                "waiter_delete:a001".into(),
+            ])
+        );
     }
 
     // ---- broadcast -----------------------------------------------------

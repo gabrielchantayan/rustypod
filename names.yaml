@@ -4812,6 +4812,26 @@ functions:
       (0x0809eadc backref pool base, 0x0809eb44 backref pool+0x2c).
       match.py exact modulo frame-pointer noise.
 
+  - address: 0x080ed9dc
+    ghidra: FUN_080ed9dc
+    name: condvar_wait_forever
+    size: 76
+    sig: "void condvar_wait_forever(CondVar *condvar)"
+    module: kernel/condvar
+    status: ported
+    renames:
+      param_1: condvar
+    notes: >-
+      Verified extent 0x080ed9dc..0x080eda24 (next entry 0x080eda28).
+      Creates a stack waiter, appends it to condvar+4, signals the semaphore
+      slot at *condvar->lock_obj, calls csem_wake (0x080569a4) on the waiter
+      id, deletes the waiter, clears its stack handle, then waits on the same
+      semaphore slot. It deliberately does not unlink the stack node: the
+      raw csem service must return only after a waker removed it. Binary scan:
+      30 unconditional bl call sites and zero predicated forms. Port directly
+      calls existing waiter_create/waiter_delete, csem_wake, sem_signal, and
+      sem_wait entries; no duplicate dispatch seam.
+
   - address: 0x08003080
     name: irq_entry
     size: 120
