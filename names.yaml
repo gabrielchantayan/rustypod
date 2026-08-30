@@ -9478,6 +9478,33 @@ functions:
       less than 32 can never reach. Always zero, so the port drops them;
       returned value unchanged.
 
+  - address: 0x080743b8
+    ghidra: FUN_080743b8
+    name: read_u32_be
+    size: 24
+    sig: "u32 read_u32_be(const u8 *p)"
+    module: util/be_read
+    status: ported
+    vars: {param_1: p}
+    notes: >-
+      Unaligned big-endian u32 load: bl read_u32_le (0x080ed748), then a
+      register-only byte reverse of the result - lsl #24, orr of
+      (v & 0xff00) << 8, orr of (v & 0xff0000) >> 8, orr of v >> 24.
+      Behaviorally identical to load_be32 (0x081f3b30/0x0837a158) and
+      unpack_be32 (0x08261770) in util/beload, but a distinct firmware
+      function from another object, so it keeps its own symbol and text
+      section. Ghidra reports 36 bytes; the raw words show pop {pc} at
+      0x080743d8 and a separately-linked sibling (bl read_u64_le + tail
+      branch, the 64-bit twin) at 0x080743dc - extent decoded from
+      osos.dec. 41 bl call sites, all unpredicated, binary-scanned;
+      recovered callers (0x0813xxxx, 0x08155xxx, 0x081c5xxx, 0x08202xxx)
+      walk packed big-endian record arrays with strides 4/8/0xc. LLVM
+      inlines the read_u32_le call (codegen-units=1) and lowers
+      swap_bytes to its rotate idiom instead of the original mask/shift
+      chain, so match.py shows the folded gather+reverse rather than the
+      bl; behavior is unchanged and host-tested against
+      u32::from_be_bytes over every offset.
+
   - address: 0x08076f48
     ghidra: FUN_08076f48
     name: byteswap16
