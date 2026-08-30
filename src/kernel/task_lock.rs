@@ -375,6 +375,31 @@ pub unsafe extern "C" fn rom_sem_signal(sem: usize) -> usize {
     (hook!(rom_sem_signal))(sem)
 }
 
+/// kernel_sem5_wait — original: `FUN_0806a4a0` @ 0x0806a4a0 (8 bytes):
+/// `mov r0, #5; b 0x08037e08` — a fixed-id shim that acquires kernel
+/// semaphore 5 through the rom_sem_wait veneer (ROM 0x22003fd0), the r0
+/// result word passing back through the tail branch.
+///
+/// 37 `bl` call sites (binary-verified, all unconditional — no predicated
+/// `bl` and no `b`; callers never flag-gate the acquire): 28 in the PMU
+/// I2C family 0x082e53xx..0x082e5bxx, where semaphore 5 is the INNER lock
+/// of the wait(0x11)/wait(5) bracket around every raw transfer (see
+/// drivers/i2c), plus 0x080671ac, 0x08067f90, 0x080aa06c, 0x080b28a0,
+/// 0x080da17c, 0x080da658, 0x0836d420, 0x0836e380, 0x0836e3dc.
+///
+/// Sibling shims @ 0x0806a4a8 (`mov r0, #1`) and 0x0806a4b0 (`mov r0,
+/// #0x11`, the PMU OUTER lock) share the same branch target but are
+/// separate 8-byte functions, not part of this port.
+///
+/// Deviation: dispatches through the ported rom_sem_wait (the ROM_KERNEL
+/// hook) instead of branching to the 8-byte ROM veneer; the original
+/// tail-branch becomes a call whose r0 result is returned verbatim.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn kernel_sem5_wait() -> usize {
+    rom_sem_wait(5)
+}
+
 /// rom_svc_2200418c — original: thunk @ 0x08037e18 -> ROM gateway stub,
 /// service 4. Args per call sites, e.g. (1, ptr, 5) from the create path
 /// @ 0x08047dd0.
@@ -868,6 +893,20 @@ pub(crate) mod tests {
             check(10, ret, &[0x3f]);
             let ret = task_unlock(usize::MAX); // the -1 sentinel seen at 0x0809c7b8
             check(10, ret, &[usize::MAX]);
+        }
+    }
+
+    /// kernel_sem5_wait (shim @ 0x0806a4a0): the id is forced to
+    /// semaphore 5 before the ROM wait fires — the caller's r0 is dead —
+    /// and the hook's r0 result word comes back. No other slot may fire.
+    #[test]
+    fn kernel_sem5_wait_forces_id_5() {
+        let _lock = mock_kernel();
+        unsafe {
+            let ret = kernel_sem5_wait();
+            check(1, ret, &[5]);
+            let ret = kernel_sem5_wait();
+            check(1, ret, &[5]);
         }
     }
 
