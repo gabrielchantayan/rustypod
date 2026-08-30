@@ -14644,6 +14644,40 @@ functions:
       reproduced by the port. Direct glyph-loader callers at 0x0803d068,
       0x08080254, 0x08086ad8, and 0x080ae5dc pass a metrics record.
 
+  - address: 0x082cfe58
+    ghidra: FUN_082cfe58
+    name: ft_validator_error
+    size: 16
+    sig: "void ft_validator_error(FtValidator *validator, i32 error) -> !"
+    module: util/validator
+    status: ported
+    vars:
+      param_1/r0: validator
+      param_2/r1: error
+      param_1[3]: error
+      param_1+0x10: jump_buffer
+    notes: >-
+      FreeType ft_validator_error from ftobjs.c: stores error into the
+      record at +0xc, then longjmp(&validator->jump_buffer @ +0x10, 1) —
+      noreturn. Raw ARM body is exactly str r1,[r0,#12]; mov r1,#1;
+      add r0,r0,#16; bl longjmp (0x08031748, already ported). Ghidra's
+      16-byte extent is CORRECT: the 20 bytes after the bl are the adjacent
+      out-of-line ft_validator_init body @ 0x082cfe68, not dead tail —
+      Ghidra's decompile misreads them as this function's continuation,
+      which is where its phantom param_3/param_4 come from; the real
+      signature has two arguments. Call census from osos.dec: 41 sites, 8
+      plain bl + 33 predicated (blcc/blhi/blne/...) — callers raise only
+      when their own bounds/tag check fails; zero data-word references, so
+      never dispatched indirectly. Port keeps the error store before the
+      transfer and the val==1 argument; the divergence is modeled as -> !.
+      Host tests drive a factored non-extern body with a mock longjmp
+      dispatch (catch_unwind can't cross the extern frame — same pattern as
+      runtime::exit's TERMINATE_HOOK) and pin the 60-byte record layout,
+      the +0xc/+0x10 offsets, the env pointer, val==1, and store-before-
+      transfer ordering. match.py: structural match modulo the crate-wide
+      frame-pointer prologue (push {fp,lr}; mov fp,sp) that the accepted
+      ft_validator_init sibling also emits.
+
   - address: 0x082cfe68
     ghidra: FUN_082cfe68
     name: ft_validator_init
@@ -14668,8 +14702,8 @@ functions:
       FT_Err_Ok. Bytes +9..+11 (the word-alignment padding) are deliberately
       untouched. The two direct CMap-table callers at 0x08078c70 and
       0x080b1bf4 pass a subtable base, its limit, and level 0. Its adjacent
-      0x082cfe58 sibling first allocates a containing record, then invokes
-      this routine on the validator prefix at +0x10.
+      0x082cfe58 sibling is ft_validator_error: it stores an FT_Error into
+      the record at +0xc and longjmps through the jump buffer at +0x10.
 
 
   - address: 0x08292a88
