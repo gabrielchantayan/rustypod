@@ -37560,3 +37560,71 @@ functions:
       engine dispatch in place of the direct bl 0x0839788c, finish
       tail; deltas are the crate fp frame and register shuffling. 29
       instructions vs 21.
+
+  # --- UTF-16 tokenizer: next-token step ---
+  - address: 0x081613d8
+    ghidra: FUN_081613d8
+    name: tokenizer_next
+    size: 120
+    sig: "u32 *tokenizer_next(u32 *out, Tokenizer *state)"
+    module: cxx/tokenizer
+    status: ported
+    renames:
+      param_1: out
+      param_2: state
+      FUN_08161364: scan_token_end (ported as a private helper - its only
+        call site in the image is the bl @ 0x0816141c inside this function)
+      FUN_081bb6b8: empty-pair zero (inlined as two zero word stores)
+      FUN_081bb6a4: range copy tail (inlined as two word stores - the
+        shared 8-byte copy *out = *src, out[1] = src[1], decoded from its
+        own bytes)
+      FUN_08161464: tokenizer_init (constructor, unported, 17 bl sites)
+      FUN_08161494: tokenizer_init_empty (constructor, unported, 1 bl site)
+    notes: >-
+      41 bl + 0 b + 0 predicated call sites, binary-verified by decoding
+      every B/BL word in osos.dec. Ghidra's 120-byte extent is exact: the
+      body ends in pop {r0-r3, r4, r5, r6, pc} @ 0x0816144c and the next
+      function, a standalone 20-byte three-word copy reached only by a
+      tail b from 0x081e8764, opens at 0x08161450 with ldm r1,{r2,r3};
+      no trailing literal pool. The next-token step of retailOS's UTF-16
+      string tokenizer over a 21-byte cursor object (begin/end u16 range
+      at +0x00/+0x04, delimiter u16 at +0x08, cursor at +0x0c, signed
+      countdown at +0x10, allow_quotes byte at +0x14) built by the two
+      unported constructors @ 0x08161464/0x08161494. Algorithm: cursor ==
+      NULL or cursor >= end (unsigned) writes the empty pair {0, 0} and
+      leaves the object untouched; otherwise, when remaining < 1 (signed
+      movlt/blt against 1) the token is {cursor, end} with NO scan and NO
+      decrement; otherwise scan_token_end finds the first delimiter code
+      unit that is neither inside a double-quoted region (only when the
+      allow_quotes byte, re-read every non-quoted character, is nonzero)
+      nor backslash-escaped, remaining is decremented (scan path only),
+      and the token is {cursor, found}. Either way the cursor advances to
+      stop + 2 and the pair is written through out; the pop {r0, ...}
+      epilogue restores r0 to out, which the port returns. Inside quotes
+      a backslash is INERT (only '"' toggles the region), and a scan that
+      finds nothing returns end, so a trailing delimiter leaves the
+      cursor sitting ON end and the next call reports exhaustion - no
+      zero-width tail token is ever produced. remaining is a count of
+      delimited scans, so a constructor remaining of N yields up to N+1
+      tokens, the last absorbing the rest; the canonical caller
+      0x081ba9ac passes remaining = 0x7fffffff and allow_quotes = 1 to
+      split HH:MM:SS on ':' for the number parser @ 0x080f01c4. Ghidra's
+      C drops the scan helper's arguments (FUN_08161364(param_2, uVar1))
+      - the asm passes (state, cursor, end, delimiter) in r0-r3.
+      Deviations: the two shared 8-byte helpers (0x081bb6b8 zero,
+      0x081bb6a4 copy) are inlined per precedent; scan_token_end is a
+      private fn (no seam - sole call site); pointer fields are u32
+      firmware addresses in a #[repr(C)] Tokenizer with offset asserts.
+      match.py structural (exit 1, diff expected): same NULL/end guards,
+      same signed countdown (cmp #0/ble vs cmp #1/movlt), the scan loop
+      inlined with its 0x22/0x5c/delimiter compares and quote/escape
+      flags, decrement only on the scan path, cursor = stop + 2 only on
+      the token path, {0, 0} empty pair skipping the cursor store;
+      deltas are the crate fp frame and LLVM's clz/tst boolean
+      arithmetic. Host tests (13): NULL and >= end cursors, the
+      HH:MM:SS split idiom, countdown semantics (remaining = 0 and 2),
+      quoted delimiters on/off, escaped delimiter, double backslash,
+      inert backslash inside quotes, unterminated quote, trailing
+      delimiter exhaustion, and the returned out pointer; fixtures in
+      testing::hints::TOKENIZER (new), one process-wide slab shared via
+      LazyLock because the mapper never unmaps.
