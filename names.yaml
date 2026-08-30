@@ -35923,6 +35923,73 @@ functions:
       (push {fp,lr} / mov fp,sp / pop {fp,pc}) around an empty body
       that returns r0 unchanged.
 
+  - address: 0x08262958
+    ghidra: FUN_08262958
+    name: clock_source_construct
+    size: 28
+    sig: "void *clock_source_construct(void *this)"
+    module: cxx/clock_source_construct
+    status: ported
+    vars: {param_1: this}
+    notes: >-
+      The kind-1 clock constructor, sibling of clock_source_destroy @
+      0x08262908 (ported) and of the kind-0 constructor @ 0x08262a9c
+      (identified, not ported). Ghidra's 24 bytes dropped the trailing
+      literal pool word again: the body is push {r4,lr} / mov r1,#1 /
+      bl 0x082628f4 / ldr r1,[pc,#4] / str r1,[r0] / pop {r4,pc} plus
+      the literal 0x089a80d0 @ 0x08262970, and the next function's
+      prologue @ 0x08262974 pins the extent at 28 bytes. Call count
+      from decoding every B/BL word in osos.dec: 41 bl call sites, 0
+      plain b, 0 predicated forms, and 0 occurrences of 0x08262958 as
+      a data word - always bound statically, never through a vtable,
+      as a compiler calls a known-type constructor. Algorithm: the
+      canonical derived-class constructor over the base @ 0x082628f4
+      (identified, not ported; its own 16-byte body is binary-verified
+      as "str 0x089a80b0,[r0]; strb r1,[r0,#4]; bx lr" with its
+      literal @ 0x08262904), so the object is { u32 vtable, u8 kind }
+      and this constructor builds it with kind=1, then replaces the
+      base vtable with the derived one 0x089a80d0. r0 is live across
+      the bl, so the vtable store and the return both follow the
+      base's r0, not the argument - the port keeps that contract and a
+      test pins it with a redirecting base. The object is a clock (the
+      clock_source_destroy analysis, independently re-verified): the
+      canonical use @ 0x081944b4 constructs it on the stack, calls
+      vtable +0xc into a { sec, nsec } out pair, converts through
+      0x082a1c30 (sec*1000 + nsec/1000000) and destroys it; the only
+      other reference to 0x089a80d0 in the image is the literal pool @
+      0x08190a34 of a function inlining this constructor, whose next
+      pool word is 0x000f4240 = 1000000. ANOMALY, documented not
+      invented: the installed vtable 0x089a80d0 does not fully decode
+      - slots +0x04/+0x08/+0x0c (0x081c0030, 0x081c0038, 0x081c0028)
+      are the middle of one conditional path inside FUN_081bff64
+      (fallen into from beq @ 0x081c0024, never an entry), +0x14 and
+      +0x18 are inside FUN_0810301c / FUN_08102f44, only +0x00
+      (0x083a5a54) and +0x10 (0x0810301c) decode as entries, and the
+      kind-0 vtable @ 0x089a80f0 has literal zeros at +0x00, +0x08,
+      +0x0c, +0x10, +0x14 - yet call sites blx the +0x0c slot. A
+      whole-image scan finds no data word or code reference that could
+      patch the slots at runtime, and the region is not a decryption
+      artifact (the surrounding code's internal branches are
+      self-consistent). The resolution is unknown; the port encodes
+      nothing about it - the constructor's contract is only to install
+      the pointer, which it does verbatim. Deviations: the unported
+      base goes through the CLOCK_SOURCE_OPS read_volatile seam (house
+      pattern), whose default is NOT a stub but a binary-verified
+      reproduction of the base's four instructions, so with the
+      default wired the port is behaviorally identical and hook-ready;
+      a future port of 0x082628f4 replaces the default without
+      touching this caller. Host tests (4): default-ops construction
+      yields { vtable = 0x089a80d0, kind = 1 }, returns this, and
+      touches no other byte; a recording base proves the base runs
+      exactly once with kind=1 and the derived store lands after it;
+      a redirecting base proves the store and the return follow the
+      base's r0; the default base reproduces the stock four
+      instructions for an arbitrary kind byte. match.py structural
+      (exit-1 diff expected): same skeleton - the base call, mov
+      r1,#1, the 0x089a80d0 literal, str r1,[r0] - differing by the
+      ops-table blx indirection replacing the direct bl and the
+      crate's fp frame, the accepted silver_controller profile.
+
   # --- display: the two-panel singleton table ---
   - address: 0x081d8870
     ghidra: FUN_081d8870
