@@ -400,6 +400,34 @@ pub unsafe extern "C" fn kernel_sem5_wait() -> usize {
     rom_sem_wait(5)
 }
 
+/// kernel_sem5_signal — original: `FUN_080645a8` @ 0x080645a8 (8 bytes):
+/// `mov r0, #5; b 0x08037e10` — a fixed-id shim that releases kernel
+/// semaphore 5 through the rom_sem_signal veneer (ROM 0x220042b4), the r0
+/// result word passing back through the tail branch. Extent verified: the
+/// previous function's `pop {.., pc}` lands at 0x080645a4 and the sibling
+/// shim 0x080645b0 (`mov r0, #1`, same branch target, unported) starts
+/// immediately after. No data word in osos references 0x080645a8 — the
+/// shim is never dispatched virtually.
+///
+/// 37 `bl` call sites (binary-verified against osos.dec, all
+/// unconditional — no predicated `bl` and no `b`; callers never flag-gate
+/// the release): 28 in the PMU I2C family 0x082e53xx..0x082e5cxx, the
+/// inner-lock release of the wait(0x11)/wait(5) bracket around every raw
+/// transfer (mirror of kernel_sem5_wait; see drivers/i2c), plus
+/// 0x080671b8, 0x08068030, 0x080aa090, 0x080b28b4, 0x080da190,
+/// 0x080da66c, 0x0836d434, 0x0836e3b0, 0x0836e3f4. Ghidra's listing
+/// missed two of them (e.g. 0x082e5a14).
+///
+/// Deviation: dispatches through the ported rom_sem_signal (the
+/// ROM_KERNEL hook) instead of branching to the 8-byte ROM veneer; the
+/// original tail-branch becomes a call whose r0 result is returned
+/// verbatim.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn kernel_sem5_signal() -> usize {
+    rom_sem_signal(5)
+}
+
 /// rom_svc_2200418c — original: thunk @ 0x08037e18 -> ROM gateway stub,
 /// service 4. Args per call sites, e.g. (1, ptr, 5) from the create path
 /// @ 0x08047dd0.
@@ -907,6 +935,20 @@ pub(crate) mod tests {
             check(1, ret, &[5]);
             let ret = kernel_sem5_wait();
             check(1, ret, &[5]);
+        }
+    }
+
+    /// kernel_sem5_signal (shim @ 0x080645a8): the id is forced to
+    /// semaphore 5 before the ROM signal fires — the caller's r0 is dead —
+    /// and the hook's r0 result word comes back. No other slot may fire.
+    #[test]
+    fn kernel_sem5_signal_forces_id_5() {
+        let _lock = mock_kernel();
+        unsafe {
+            let ret = kernel_sem5_signal();
+            check(2, ret, &[5]);
+            let ret = kernel_sem5_signal();
+            check(2, ret, &[5]);
         }
     }
 
