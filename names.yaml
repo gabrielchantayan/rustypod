@@ -25496,6 +25496,53 @@ functions:
       and unknown-tag output preservation. match.py structural report differs
       as expected (exit 1).
 
+  - address: 0x08101edc
+    ghidra: FUN_08101edc
+    name: string_table_has_string
+    size: 184
+    sig: "u32 string_table_has_string(u8 *table, const u32 *key)"
+    module: app/string_table
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: key
+      FUN_083db55c: string_map_find
+      FUN_083cf848: iter_eq
+      FUN_083d6f0c: cxx_string_empty
+    notes: >-
+      Localized-string table membership test on the singleton callers load
+      as DAT_08219384/DAT_081de518: 1 iff key maps to a NON-EMPTY string in
+      the current table (index word at this+0x54, inline StringKeyMap array,
+      0x1c stride, header-node pointer at map+0x10), else in the fallback
+      table at this+0x38 (table[2], the default language). A hit with an
+      empty value also falls through to the fallback. Extent confirmed from
+      raw bytes: next function's push at 0x08101f94, so Ghidra's 184 is
+      exact. Call census by decoding every B/BL word in osos.dec: 38 bl,
+      zero predicated, matching the scouting figure. Ghidra's C is WRONG
+      about the first callee: FUN_083db55c is not a copy but
+      map<string,string>::find (lower_bound via the ported cxx_string_less
+      @ 0x083d74f4, equal-range recheck through the node-key accessor
+      node+16 @ 0x083b6acc; writes the found node, or the header on a miss,
+      through arg 1). FUN_083cf848 is iterator equality (*a == *b, the
+      equal twin of the ported not_equal_deref family @ 0x083d6f40).
+      FUN_083d6f0c is basic_string::empty (size word at (*string)-4 == 0).
+      All three are unported and ride the STRING_TABLE_OPS seam table;
+      target defaults transmute the retail addresses 0x083db55c /
+      0x083cf848 / 0x083d6f0c, so the port is hook-ready on device.
+      Faithful detail: the current-index word is re-read across the first
+      find call for the header compare (the original reloads ldr r0,
+      [r4, #84]); a host test proves the reload. Deviations: the original
+      spills r0-r3 and reuses those slots as the find out-slots, the port
+      uses locals; seam dispatch is blx through the ops table instead of
+      direct bl. Host tests (u32 slab fixture, faithful-semantics
+      eq/empty mocks, scripted find) cover hit/miss x empty/non-empty in
+      both tables, index selection for 0..2, the mid-call index reload,
+      and the miss short-circuit (no value probe on a miss). match.py
+      structural: same rsb+lsl#2 index math, same [#84] reload, same
+      header fetch and cmp/bne-cmp/beq skeleton; diff is the ops-table
+      blx, LLVM's fp frame, and a clz/lsr booleanize tail (exit 1, the
+      expected ADS-vs-LLVM noise).
+
   - address: 0x08003e00
     ghidra: FUN_08003e00
     name: rom_task_start
