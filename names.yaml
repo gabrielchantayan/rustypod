@@ -21666,6 +21666,64 @@ functions:
       bl, the crate's fp frame, and LLVM folding the vtable store and the
       +0x30 pointer bump into one "str r1,[r4],#48".
 
+  - address: 0x0810e6b4
+    ghidra: FUN_0810e6b4
+    name: pair_header_base_bind_payload
+    size: 68
+    sig: "u32 pair_header_base_bind_payload(u32 *base, const u32 *descriptor, u32 tag, u32 context)"
+    module: cxx/pair_header
+    status: ported
+    vars: {param_1/r4: base, param_2/r5: descriptor, param_3/r6: tag, param_4/r7: context}
+    notes: >-
+      The NON-OWNING payload-assignment method of the same 0xb8-byte
+      PairHeaderBase object pair_header_base_construct @ 0x0810ebbc
+      builds and pair_header_base_destruct @ 0x0810ec10 tears down.
+      Ghidra's 68-byte extent is right for once: the last word at
+      0x0810e6f4 is "pop {r3, r4, r5, r6, r7, pc}" and the next
+      function starts at 0x0810e6f8. 40 bl call sites, zero predicated
+      or tail branches, and zero data-word occurrences, all verified by
+      decoding every branch word and comparing every word in osos.dec,
+      so it is reached only by direct non-virtual calls. Algorithm:
+      release the currently owned payload through 0x0810e908(base) - the
+      same release the destructor chains - then copy the 16-byte
+      descriptor at descriptor+8 into base+0x98..+0xa4 with one
+      ldm/stm pair (all four words loaded before any store, which the
+      port reproduces with four reads then four writes), store tag at
+      base+0xa8, and tail-delegate to the image-payload loader
+      0x08094168(base+4, descriptor+8, descriptor, base, context) with
+      the fifth argument on the stack. Unlike its owning sibling @
+      0x0810e6f8 - which allocates a private copy through the pool at
+      +0xb0 and sets the +0xb4 ownership byte - this variant never
+      touches +0xb4: the payload it installs stays borrowed. The loader
+      0x08094168 (172 bytes; Ghidra's 164 drops the two literal words
+      0x00001888 and 0x00000555 at 0x0809420c/10) reads the u16 format
+      override at descriptor+0, else maps the s16 depth at descriptor+6
+      (1/2/4/8 stay, 16 becomes 0x555, 32 and everything else becomes
+      0x1888 - the same pixel-format tags app/image_format uses), picks
+      descriptor+28 as pixel data exactly when the flag word at
+      descriptor+24 is non-zero, and tail-calls the format decoder @
+      0x08094214, which maps the tag to bits per pixel (32/8/16/0).
+      Ghidra's void return is a C-level fiction: the original's pop
+      leaves the loader's r0 untouched, so the port forwards it even
+      though the decompiled call sites ignore it. Both callees are
+      unported and ride a PairHeaderBaseBindPayloadOps table whose host
+      defaults panic rather than no-op, since a skipped release leaks
+      and a skipped load fakes a rebind; on target the release shares
+      the destruct table's transmuted 0x0810e908 default and the loader
+      transmutes 0x08094168. Host tests prove release-before-rebind
+      ordering (the old descriptor word is read back through the
+      release), the exact +0x98..+0xa8 store window with nothing else
+      written, the five-word loader ABI including the stack context,
+      unchanged forwarding of the loader's result (0/8/16/32 and
+      0xffffffff), and ldm/stm load-before-store semantics on an
+      overlapping descriptor. match.py structural: release-call,
+      four-word copy into +0x98, tag store at +0xa8, stack context
+      word, loader call with (base+4, descriptor+8, descriptor, base),
+      and result forwarding are all retained; the diff is the
+      ops-table blx indirection, the crate's fp frame, and LLVM
+      splitting the original's single five-register stm into a
+      four-word stm plus a separate tag str.
+
   - address: 0x0813eee0
     ghidra: FUN_0813eee0
     name: pair_header_grand_base_construct

@@ -1,7 +1,8 @@
 //! The two-word-header derived-class constructor the application layer
 //! runs to bring up its 200-byte service objects (90 `bl` call sites),
 //! plus the concrete base class's own destructor @ 0x0810ec10 — the
-//! teardown `crate::app::pair_header_destruct` chains into.
+//! teardown `crate::app::pair_header_destruct` chains into — and the
+//! base's non-owning payload-assignment method @ 0x0810e6b4.
 //!
 //! The scouted notes for this address originally described a three-way
 //! pointer clamp — that clamp lives at 0x083d5eb4 / 0x083d5ed8 and is
@@ -270,6 +271,83 @@ pub static mut PAIR_HEADER_BASE_DESTRUCT_OPS: PairHeaderBaseDestructOps =
         destroy_grand_base_body: missing_destroy_grand_base_body,
     };
 
+/// The two unported callees [`pair_header_base_bind_payload`] chains.
+#[derive(Clone, Copy)]
+pub struct PairHeaderBaseBindPayloadOps {
+    /// The same optionally-owned-payload release @ 0x0810e908 that
+    /// [`PairHeaderBaseDestructOps::release_owned_payload`] models; the
+    /// bind calls it first so the old owned payload is freed before the
+    /// new borrowed one is installed.
+    pub release_owned_payload: unsafe extern "C" fn(*mut u32),
+    /// Original 0x08094168 (172 bytes: 41 instructions plus the two
+    /// literal-pool words 0x00001888 and 0x00000555 at 0x0809420c/10 that
+    /// Ghidra's 164-byte extent drops; the next function starts at
+    /// 0x08094214). The image-payload loader. It reads the u16 format
+    /// override at descriptor+0 and, when that is zero, maps the s16 bit
+    /// depth at descriptor+6 (1, 2, 4 and 8 stay themselves, 16 becomes
+    /// 0x555, 32 and everything else becomes 0x1888), reads the s16 at
+    /// descriptor+4, and chooses descriptor+28 as the pixel data pointer
+    /// exactly when the flag word at descriptor+24 is non-zero. It then
+    /// tail-calls the format decoder @ 0x08094214 with three stack words
+    /// (the format, the base, and `context`), and forwards that decoder's
+    /// r0 result — a word derived from the pixel format's bits per pixel
+    /// (32, 8, 16 or 0), not a pointer.
+    pub load_payload: unsafe extern "C" fn(
+        grand_base: *mut u32,
+        descriptor_fields: *const u32,
+        descriptor: *const u32,
+        base: *mut u32,
+        context: u32,
+    ) -> u32,
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_load_payload(
+    grand_base: *mut u32,
+    descriptor_fields: *const u32,
+    descriptor: *const u32,
+    base: *mut u32,
+    context: u32,
+) -> u32 {
+    let load: unsafe extern "C" fn(*mut u32, *const u32, *const u32, *mut u32, u32) -> u32 =
+        unsafe { core::mem::transmute(0x0809_4168usize) };
+    unsafe { load(grand_base, descriptor_fields, descriptor, base, context) }
+}
+
+/// Host defaults. The release frees storage and the loader rebinds the
+/// grand base's pixel pointer, so both panic: a silent no-op would let a
+/// test claim a rebind that never happened.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_bind_release_owned_payload(_base: *mut u32) {
+    panic!("pair_header_base_bind_payload requires payload release 0x0810e908")
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_load_payload(
+    _grand_base: *mut u32,
+    _descriptor_fields: *const u32,
+    _descriptor: *const u32,
+    _base: *mut u32,
+    _context: u32,
+) -> u32 {
+    panic!("pair_header_base_bind_payload requires payload loader 0x08094168")
+}
+
+/// Active callees for [`pair_header_base_bind_payload`].
+#[cfg(target_os = "none")]
+pub static mut PAIR_HEADER_BASE_BIND_PAYLOAD_OPS: PairHeaderBaseBindPayloadOps =
+    PairHeaderBaseBindPayloadOps {
+        release_owned_payload: firmware_release_owned_payload,
+        load_payload: firmware_load_payload,
+    };
+
+#[cfg(not(target_os = "none"))]
+pub static mut PAIR_HEADER_BASE_BIND_PAYLOAD_OPS: PairHeaderBaseBindPayloadOps =
+    PairHeaderBaseBindPayloadOps {
+        release_owned_payload: missing_bind_release_owned_payload,
+        load_payload: missing_load_payload,
+    };
+
 /// pair_header_base_destruct — original: `FUN_0810ec10` @ 0x0810ec10
 /// (44 bytes: ten instructions plus the literal pool word at 0x0810ec38
 /// that Ghidra's 40-byte extent drops; the next function starts at
@@ -311,6 +389,72 @@ pub unsafe extern "C" fn pair_header_base_destruct(base: *mut u32) -> *mut u32 {
     unsafe { (ops.release_owned_payload)(base) };
     unsafe { (ops.destroy_grand_base_body)(base.add(BASE_BODY_OFFSET_WORDS)) }
         .sub(BASE_BODY_OFFSET_WORDS)
+}
+
+/// pair_header_base_bind_payload — original: `FUN_0810e6b4` @ 0x0810e6b4
+/// (68 bytes, 17 instructions; Ghidra's extent is right — the last word
+/// at 0x0810e6f4 is `pop {r3, r4, r5, r6, r7, pc}` and the next function
+/// starts at 0x0810e6f8. 40 `bl` call sites, zero predicated or tail
+/// branches, and zero data-word occurrences, all verified by decoding
+/// every branch word and comparing every word in osos.dec — so it is
+/// reached only by direct non-virtual calls).
+///
+/// The non-owning payload-assignment method of the same 0xb8-byte
+/// PairHeaderBase object [`pair_header_base_construct`] builds and
+/// [`pair_header_base_destruct`] tears down:
+///
+/// 1. Release the currently owned payload: 0x0810e908(base) — the same
+///    release the destructor uses.
+/// 2. Copy the 16-byte descriptor at `descriptor + 8` into base+0x98..
+///    +0xa4 with one `ldm`/`stm` pair: all four words are loaded before
+///    any is stored, so overlapping source and destination still behave
+///    like the original.
+/// 3. Store `tag` at base+0xa8.
+/// 4. Tail-delegate to the image-payload loader 0x08094168(base + 4,
+///    descriptor + 8, descriptor, base, context) — the fifth argument
+///    rides the stack in the original — and forward its r0 result.
+///
+/// Unlike its owning sibling @ 0x0810e6f8 (which allocates a private
+/// copy and sets the +0xb4 ownership byte), this variant never touches
+/// +0xb4: the payload it installs stays borrowed from `descriptor`.
+///
+/// Ghidra's `void` return is a C-level fiction: the original's
+/// `pop {…, pc}` leaves the loader's r0 untouched, so the port forwards
+/// it, even though the decompiled call sites ignore it.
+///
+/// # Safety
+/// `base` must point at 0xb8 writable, word-aligned bytes holding a
+/// constructed base object; `descriptor` must be readable for the four
+/// words at `descriptor + 8`; the loader's own requirements (descriptor
+/// header fields through +28) are its own contract, as in the original.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn pair_header_base_bind_payload(
+    base: *mut u32,
+    descriptor: *const u32,
+    tag: u32,
+    context: u32,
+) -> u32 {
+    let ops = unsafe {
+        core::ptr::read_volatile(core::ptr::addr_of!(PAIR_HEADER_BASE_BIND_PAYLOAD_OPS))
+    };
+    unsafe { (ops.release_owned_payload)(base) };
+    let source = unsafe { descriptor.add(8 / 4) };
+    let destination = unsafe { base.add(0x98 / 4) };
+    // The original's `ldm r3, {r0-r3}` / `stm ip, {r0-r3, r6}`: load the
+    // whole descriptor first, then store it plus the tag word.
+    let w0 = unsafe { source.add(0).read() };
+    let w1 = unsafe { source.add(1).read() };
+    let w2 = unsafe { source.add(2).read() };
+    let w3 = unsafe { source.add(3).read() };
+    unsafe {
+        destination.add(0).write(w0);
+        destination.add(1).write(w1);
+        destination.add(2).write(w2);
+        destination.add(3).write(w3);
+        base.add(0xa8 / 4).write(tag);
+        (ops.load_payload)(base.add(1), source, descriptor, base, context)
+    }
 }
 
 /// pair_header_construct — original: `FUN_08124a38` @ 0x08124a38
@@ -782,6 +926,213 @@ mod base_destruct_tests {
             object.0[4..].iter().all(|&b| b == 0x5a),
             "the destructor itself stores only the vtable"
         );
+        restore(guard);
+    }
+}
+
+#[cfg(test)]
+mod base_bind_payload_tests {
+    extern crate std;
+
+    use super::*;
+    use std::sync::{Mutex, MutexGuard};
+    use std::vec::Vec;
+
+    /// The bind table is one global; serialize the tests that swap it.
+    static BIND_LOCK: Mutex<()> = Mutex::new(());
+    static mut CALLS: Vec<Call> = Vec::new();
+    /// Forces the loader's return value so the forwarding test proves the
+    /// port works off the callee's r0.
+    static mut LOAD_RESULT: u32 = 0;
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum Call {
+        /// `old_descriptor_word` is base+0x98 read back through the
+        /// argument, so recording it proves the release runs before the
+        /// new descriptor is copied in.
+        ReleaseOwnedPayload { base: usize, old_descriptor_word: u32 },
+        LoadPayload {
+            grand_base: usize,
+            descriptor_fields: usize,
+            descriptor: usize,
+            base: usize,
+            context: u32,
+        },
+    }
+
+    unsafe extern "C" fn recording_release_owned_payload(base: *mut u32) {
+        unsafe {
+            CALLS.push(Call::ReleaseOwnedPayload {
+                base: base as usize,
+                old_descriptor_word: base.add(0x98 / 4).read(),
+            })
+        };
+    }
+
+    unsafe extern "C" fn recording_load_payload(
+        grand_base: *mut u32,
+        descriptor_fields: *const u32,
+        descriptor: *const u32,
+        base: *mut u32,
+        context: u32,
+    ) -> u32 {
+        unsafe {
+            CALLS.push(Call::LoadPayload {
+                grand_base: grand_base as usize,
+                descriptor_fields: descriptor_fields as usize,
+                descriptor: descriptor as usize,
+                base: base as usize,
+                context,
+            });
+            core::ptr::read_volatile(core::ptr::addr_of!(LOAD_RESULT))
+        }
+    }
+
+    fn mock() -> MutexGuard<'static, ()> {
+        let guard = BIND_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            core::ptr::addr_of_mut!(PAIR_HEADER_BASE_BIND_PAYLOAD_OPS).write_volatile(
+                PairHeaderBaseBindPayloadOps {
+                    release_owned_payload: recording_release_owned_payload,
+                    load_payload: recording_load_payload,
+                },
+            );
+            CALLS.clear();
+            LOAD_RESULT = 0;
+        }
+        guard
+    }
+
+    fn restore(guard: MutexGuard<'static, ()>) {
+        unsafe {
+            core::ptr::addr_of_mut!(PAIR_HEADER_BASE_BIND_PAYLOAD_OPS).write_volatile(
+                PairHeaderBaseBindPayloadOps {
+                    release_owned_payload: missing_bind_release_owned_payload,
+                    load_payload: missing_load_payload,
+                },
+            );
+        }
+        drop(guard);
+    }
+
+    fn calls() -> Vec<Call> {
+        unsafe { CALLS.clone() }
+    }
+
+    /// The class's whole 0xb8-byte extent, as `pair_header_base_construct`
+    /// fills it (its last field is the ownership byte at +0xb4).
+    #[repr(align(4))]
+    struct Base([u8; 0xb8]);
+
+    /// A source descriptor: the wrapper reads the four words at +8..+0x18
+    /// itself; the loader is mocked, so nothing past +0x18 is needed.
+    #[repr(align(4))]
+    struct Descriptor([u8; 0x18]);
+
+    #[test]
+    fn the_old_payload_is_released_before_anything_is_rebound() {
+        let guard = mock();
+        let mut object = Base([0; 0xb8]);
+        let mut source = Descriptor([0; 0x18]);
+        let base = object.0.as_mut_ptr().cast::<u32>();
+        let descriptor = source.0.as_ptr().cast::<u32>();
+        unsafe {
+            base.add(0x98 / 4).write(0xdead_beef);
+            pair_header_base_bind_payload(base, descriptor, 0, 0);
+            assert_eq!(
+                calls(),
+                std::vec![
+                    Call::ReleaseOwnedPayload {
+                        base: base as usize,
+                        old_descriptor_word: 0xdead_beef,
+                    },
+                    Call::LoadPayload {
+                        grand_base: base.add(1) as usize,
+                        descriptor_fields: descriptor.add(2) as usize,
+                        descriptor: descriptor as usize,
+                        base: base as usize,
+                        context: 0,
+                    },
+                ],
+                "release(base) while the old descriptor is still in place, then load"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_descriptor_and_tag_land_at_0x98_through_0xa8() {
+        let guard = mock();
+        let mut object = Base([0xa5; 0xb8]);
+        let mut source = Descriptor([0; 0x18]);
+        let base = object.0.as_mut_ptr().cast::<u32>();
+        let descriptor = source.0.as_mut_ptr().cast::<u32>();
+        unsafe {
+            descriptor.add(2).write(0x1111_2222);
+            descriptor.add(3).write(0x3333_4444);
+            descriptor.add(4).write(0x5555_6666);
+            descriptor.add(5).write(0x7777_8888);
+            pair_header_base_bind_payload(base, descriptor, 0xcafe_f00d, 0x1234_5678);
+
+            assert_eq!(base.add(0x98 / 4).read(), 0x1111_2222);
+            assert_eq!(base.add(0x9c / 4).read(), 0x3333_4444);
+            assert_eq!(base.add(0xa0 / 4).read(), 0x5555_6666);
+            assert_eq!(base.add(0xa4 / 4).read(), 0x7777_8888);
+            assert_eq!(base.add(0xa8 / 4).read(), 0xcafe_f00d);
+
+            // The wrapper itself stores only those five words: everything
+            // else — vtable, grand base, pool word, ownership byte — is
+            // the callees' business.
+            let bytes = &object.0;
+            assert!(bytes[..0x98].iter().all(|&b| b == 0xa5));
+            assert!(bytes[0xac..].iter().all(|&b| b == 0xa5));
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_loader_result_is_forwarded_unchanged() {
+        let guard = mock();
+        let mut object = Base([0; 0xb8]);
+        let mut source = Descriptor([0; 0x18]);
+        let base = object.0.as_mut_ptr().cast::<u32>();
+        let descriptor = source.0.as_ptr().cast::<u32>();
+        unsafe {
+            // 0, 8, 16 and 32 are the pixel-format decoder's real answers;
+            // 0xffff_ffff proves no truncation or clamping.
+            for result in [0u32, 8, 16, 32, 0xffff_ffff] {
+                LOAD_RESULT = result;
+                assert_eq!(
+                    pair_header_base_bind_payload(base, descriptor, 0, 0),
+                    result,
+                    "the original's `pop {{…, pc}}` leaves the loader's r0 untouched"
+                );
+            }
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn an_overlapping_descriptor_still_copies_like_ldm_stm() {
+        let guard = mock();
+        // All four source words are loaded before any store, exactly like
+        // the original's `ldm r3, {r0-r3}` / `stm ip, {r0-r3, r6}` — so a
+        // descriptor whose +8 window overlaps the destination one word up
+        // still copies the pre-copy values, not smeared ones.
+        let mut storage = [0u32; 0x30];
+        let base = storage.as_mut_ptr();
+        let descriptor = unsafe { base.add(0x98 / 4 - 3) };
+        for (index, word) in storage.iter_mut().enumerate() {
+            *word = index as u32;
+        }
+        unsafe {
+            pair_header_base_bind_payload(base, descriptor, 0, 0);
+            // A word-at-a-time copy would smear 0x25 into every slot.
+            assert_eq!(base.add(0x98 / 4).read(), 0x25);
+            assert_eq!(base.add(0x9c / 4).read(), 0x26);
+            assert_eq!(base.add(0xa0 / 4).read(), 0x27);
+            assert_eq!(base.add(0xa4 / 4).read(), 0x28);
+        }
         restore(guard);
     }
 }
