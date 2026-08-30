@@ -38294,3 +38294,37 @@ functions:
       not recovered or invented. Deliberate deviation: the Rust port calls the
       resident target through a volatile typed boundary so host tests can
       record it; target builds dispatch to its fixed 0x082784d4 address.
+
+  # --- RTXC message-dispatch veneer (runtime/message_dispatch_veneer) ---
+  - address: 0x08003660
+    ghidra: FUN_08003660
+    name: message_dispatch_veneer
+    size: 8
+    sig: "void message_dispatch_veneer(u32 *request)"
+    module: runtime/message_dispatch_veneer
+    status: ported
+    renames:
+      DAT_08003664: rom_service_dispatch_target
+    notes: >-
+      Literal veneer: ldr pc, [pc, #-4] at 0x08003660 tail-branches through
+      the target word 0x0802dca8 at 0x08003664. Ghidra reports 4 bytes; the
+      true extent is 8 (instruction + literal) since the next veneer opens at
+      0x08003668. Binary-verified call count: 37 sites (36 plain bl plus one
+      blne at 0x08003e38, a caller-side NULL guard on its own r0 before
+      dispatching selector 0x11; the veneer itself has no guard). Zero plain
+      B and zero data-word references: never tail-branched to from osos, never
+      dispatched virtually. Every caller builds a stack record with an RTXC
+      selector in word 0 (observed 0x0e..0x1e range), passes r0 = &record,
+      and reloads result words from the record afterwards; all 37 sites
+      discard the dispatcher's r0, so the port's observable ABI is a void
+      call on one writable record pointer. The target 0x0802dca8 is unported:
+      it decodes as add r1, sp, #0x30; mov r0, r5; bl 0x0802b56c, one entry
+      in the multi-entry RTXC service-stub family at 0x0802d9c4..0x0802ddb0
+      (Ghidra lumps it into FUN_0802d9c4/FUN_0802dcd8; nine sibling veneers
+      0x08003428..0x080034a0 jump to neighbouring entries). No call site
+      writes r5 near its bl (checked all 37), so r5 is a firmware-wide
+      reserved context register, not a per-call input. Deliberate deviation:
+      the unported target sits behind an installable volatile dispatch seam
+      (house foreign-service pattern) whose target default transmutes the
+      retail literal; Rust's call adds a return edge the bare tail branch
+      lacks. Reference C: decomp/c/000/08003660_FUN_08003660.c.
