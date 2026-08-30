@@ -40061,3 +40061,47 @@ functions:
       table for observable tests; target builds retain the literal address
       and unguarded byte write. Reference C:
       decomp/c/016/0819c9d0_FUN_0819c9d0.c.
+
+  # --- two-word runtime-data record name accessor ---
+  - address: 0x082a7774
+    ghidra: FUN_082a7774
+    name: tracker_record_name
+    size: 8
+    sig: "u32 tracker_record_name(const u32 *record)"
+    module: app/tracker_record
+    status: ported
+    renames:
+      param_1/r0: record
+      param_1_plus_0x04: name
+      r0: name
+    notes: >-
+      Eight-byte leaf: `ldr r0,[r0,#4]; mov pc,lr`. Returns the full word
+      at byte offset +0x04 of a two-word runtime-data record - the record's
+      name pointer; word +0x0 is never read. Ghidra's 8-byte extent is
+      exact: the sibling identity comparator FUN_082a777c opens with
+      `push {r4,r5,r6,lr}` at 0x082a777c and calls this accessor twice.
+      Call count verified by decoding every B/BL word in osos.dec: exactly
+      30 unconditional bl sites (matching Ghidra's 30), zero predicated
+      forms, zero tail b references, and no data word in the image holds
+      0x082a7774 - never dispatched virtually, and no caller NULL-gates
+      the call, so records are always live. Established semantics: the
+      nine element_arrayN_construct instantiations (0x083d3c28 ..
+      0x083d56b8, ported in app/element_table, which inlines this
+      accessor as its arrayN_tracker_name helpers) call it on
+      runtime-data record literals (0x0897baac, 0x0897bbc4, 0x0897bab8,
+      0x0897b904, 0x0897cc8c, 0x0897cbec, 0x0897cba0, 0x0897cbac,
+      0x0897bc00) and immediately strlen the result as the container's
+      tracker/fTable name; the comparator at 0x082a777c and the
+      keyed-insert path at 0x0807d93c compare two records' returned words
+      for identity. The word is written at runtime (the image's record
+      slots hold garbage), so no static name string is recoverable. No
+      deviations: one aligned word load like the original. The port
+      carries its own link_section because runtime/object_word.rs's
+      object_word_at_4 is a byte-identical body and LLVM identical-code
+      folding must not collapse the two hook seams; both symbols verified
+      present in librustypod.a. match.py (exit 1, diff expected): the
+      `ldr r0,[r0,#4]` survives verbatim; LLVM wraps it in the crate's
+      fp frame (push {fp,lr}/pop {fp,pc}) instead of the original's bare
+      mov pc,lr. Host tests cover the +0x4 word read, independence from
+      word +0x0, zero/all-ones extremes, no mutation, and a guard-page
+      fixture proving no byte past +0x8 is read.
