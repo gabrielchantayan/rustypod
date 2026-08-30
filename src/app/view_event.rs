@@ -140,11 +140,9 @@ pub unsafe extern "C" fn view_event_complete(this: *mut u8) -> u32 {
 mod tests {
     extern crate std;
     use super::*;
-    use std::sync::{Mutex, MutexGuard};
+    use crate::testing::VIEW_EVENT_OPS_TEST_LOCK as VIEW_LOCK;
+    use std::sync::MutexGuard;
     use std::vec::Vec;
-
-    /// Serializes the tests that swap the ops table.
-    static VIEW_LOCK: Mutex<()> = Mutex::new(());
 
     /// Calls into the mock helpers, in order.
     static mut CALLS: Vec<&'static str> = Vec::new();

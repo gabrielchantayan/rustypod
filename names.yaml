@@ -10400,6 +10400,43 @@ functions:
       mov r0,#1 shape; the diff is the ops-table blx indirection and
       the crate fp frame.
 
+  - address: 0x0810e02c
+    ghidra: FUN_0810e02c
+    name: view_timer_start_after
+    size: 92
+    sig: "void view_timer_start_after(u8 *view, u32 delay)"
+    module: app/view_timer
+    status: ported
+    renames:
+      param_1: view
+      param_2: delay
+    notes: >-
+      Whole 92-byte extent, verified from osos.dec as
+      0x0810e02c..0x0810e088; the `mov r0,#1; bx lr` leaf at
+      0x0810e088 is the next function. A complete ARM B/BL-word scan
+      finds 41 direct callers: 39 bl (38 unconditional bl + 1 bleq)
+      and 2 tail b. The single predicated caller is caller-side gating;
+      this routine has only the view.timer NULL test. On NULL it calls
+      operator_new(0x2c) @ 0x082aadd4, stores the target pointer at
+      view+0x50, then invokes timer_schedule_shim(view, timer, 0, 0)
+      @ 0x0811108c, making the view the timer constructor's config
+      word. It stores delay at view+0x54, calls the unported
+      stop_view_timer wrapper @ 0x0810dfe8, reloads +0x50 for
+      timer_start_after(timer, delay) @ 0x0812c63c, reloads it again
+      for the tail branch to timer_restart @ 0x0812bf4c. The +0x54
+      sibling re-armer @ 0x0810e090 establishes delay's meaning.
+      No allocation-failure guard exists in stock or the port. The
+      unported wrapper uses the existing VIEW_EVENT_OPS firmware-default
+      seam; all other callees are already ported and direct. Rust
+      represents the final tail branch as a call. Host tests use one
+      unique low-4-GiB slab for the view/timer u32 target pointers:
+      allocation constructs/sets/arms the timer, and a wrapper that
+      replaces +0x50 proves both post-wrapper reloads use the
+      replacement without allocating. match.py structural review against
+      this worktree archive: LLVM inlines timer_schedule_shim,
+      timer_start_after, and timer_restart plus their ops-table paths,
+      but retains the stock lazy load/test/allocation/store ordering.
+
   - address: 0x0810dddc
     ghidra: FUN_0810dddc
     name: registry_observer_base_construct

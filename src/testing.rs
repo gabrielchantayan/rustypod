@@ -62,6 +62,7 @@ pub mod hints {
     pub const STRING_RECORD: usize = 0x1d00_0000;
     pub const IAP_PACKET_OWNER_MODE: usize = 0x1e00_0000;
     pub const TOKENIZER: usize = 0x1f00_0000;
+    pub const VIEW_TIMER: usize = 0x2000_0000;
     // `heap/pool.rs` maps its own arena at 0x0800_0000 through a separate
     // path: it needs only bit 31 clear, not full u32 addressability.
 }
@@ -146,3 +147,13 @@ pub static CPP_ARRAY_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new
 /// 0x080496f0) will share it, so they must hold this lock rather than
 /// each keeping a private one.
 pub static DIAG_RING_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serializes every host test that swaps `app::view_event::VIEW_EVENT_OPS`.
+/// The view-event epilogue and `app::view_timer` both invoke the unported
+/// view-timer-stop wrapper through this one dispatch table.
+pub static VIEW_EVENT_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serializes every host test that swaps `drivers::timer::TIMER_OPS`.
+/// The timer module and view-timer callers both drive the ported timer
+/// helpers through this one dispatch table.
+pub static TIMER_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
