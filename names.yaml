@@ -15152,6 +15152,7 @@ functions:
   #     two runtime-init phenomena. The same applies to
   #     heap/block_region.rs's 0x089cb1b8 fallback.
   #   * Every pointer literal into 0x088e0000-0x08920000 resolves to a
+
   #     readable C string only at +0xaed8.
   # Rule of thumb for anything above ~0x088e0000: read the image at
   # `addr + 0xaed8`, not at `addr`.
@@ -15252,6 +15253,37 @@ functions:
       a slot; the neighboring copy/release helpers 0x083b50e4 / 0x083b524c
       retain and release that cell. Direct application callers compare member
       slot +0x894 with a temporary slot before replacing or forwarding it.
+  # --- shared-cell handle release ---
+  - address: 0x083b524c
+    ghidra: FUN_083b524c
+    name: shared_cell_release
+    size: 84
+    sig: "void shared_cell_release(SharedCell **slot)"
+    module: cxx/shared_cell
+    status: ported
+    renames:
+      param_1: slot
+      iVar1: cell
+      iVar2: remaining
+    notes: >-
+      Raw ARM is 84 bytes ending immediately before sibling 0x083b52a0.
+      It drops the intrusive signed refcount in an eight-byte
+      {value, refcount} cell held by slot: an empty slot returns untouched;
+      every non-empty path clears slot. A nonzero decrement result only
+      releases this reference; the 1 -> 0 transition calls value's virtual
+      deleting destructor through vtable word 1 (+4) when value is non-NULL,
+      reloads slot after that call, and tag-2 operator_delete's the reloaded
+      cell when it remains non-NULL. The ARM SUBS wraps: refcount 0 becomes
+      -1 and does not clean up. Binary scan found exactly 38 incoming bl
+      call sites, all unconditional (no predicated forms and no tail b).
+      Ghidra's noreturn warning after the virtual call is wrong; raw control
+      flow falls through to the cell delete. Sibling 0x083b52a0 has identical
+      semantics (only its relative BL encoding differs); 0x083b52f4 is the
+      distinct direct-destructor specialization. Structural review found
+      LLVM's 30 instructions preserve the decrement, vtable[1] BLX,
+      post-destructor slot reload, guarded cell delete, and final NULL store;
+      its early BXEQ return and larger prologue differ from the 21-word ARM
+      body.
 
   # --- C++ COW basic_string<char> core (cluster 0x083d8518..0x083d8bac) ---
   # String object = one word, the char data pointer. 12-byte _Rep header
