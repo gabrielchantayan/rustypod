@@ -7551,6 +7551,43 @@ functions:
       stashed, xx=divfix(yy,delta), yy=divfix(xx_old,delta); returns 0.
       1 call site, binary-scanned.
 
+  # --- FreeType 2 cffgload glyph-outline builder ---
+  - address: 0x080bfd14
+    ghidra: FUN_080bfd14
+    name: cff_builder_add_point
+    size: 100
+    sig: "void cff_builder_add_point(CffBuilder *builder, i32 x, i32 y, i32 on_curve)"
+    module: ft/cff_builder
+    status: ported
+    vars: {param_1: builder, param_2: x, param_3: y, param_4: on_curve}
+    notes: >-
+      FreeType cff_builder_add_point (cffgload.c) - the point recorder the
+      Type 2 charstring interpreter cff_parse_charstrings (unported @
+      0x080df818; scaled siblings 0x080ea434/0x080ea5a0/0x080eade0 share
+      the LAB_080e0928/LAB_080e0c48 tails) feeds per decoded point:
+      rrcurveto triplets pass on_curve=0 for the two cubic control points
+      and 1 for the endpoint. Body decodes verbatim from raw ARM (extent
+      0x080bfd14..0x080bfd78 confirmed by the next function's push
+      prologue): outline = builder->current @ +0x14; if load_points byte
+      @ +0x51 is set, store x>>16/y>>16 (ARITHMETIC shifts = floor for
+      negatives) at points[n_points] (n_points sign-extended via ldrsh,
+      so a negative count indexes backwards), tag = on_curve ?
+      FT_CURVE_TAG_ON(1) : FT_CURVE_TAG_CUBIC(2) at tags[n_points],
+      builder->last @ +0x18/+0x1c = the truncated point (stored, then
+      reloaded via ldm); n_points @ outline+2 is incremented
+      (ldrh/add/strh, 16-bit wrap) OUTSIDE the load_points guard, so the
+      counting pass still advances it. 36 call sites verified by decoding
+      every B/BL word in osos.dec: 35 bl + ONE bleq @ 0x080c8a54 (wrapper
+      0x080c8a28 calls it with on_curve=1 only when the 0x0807ba0c
+      point-capacity check returns 0 - a gated call, not a missing NULL
+      guard; this function itself has no NULL guards). No DATA word holds
+      the address: not virtually dispatched. Host tests (8) prove floor
+      truncation of 16.16 inputs, tag selection, the counting-pass
+      no-store path, nonzero and NEGATIVE n_points indexing, i16 wrap of
+      the count, and that no other builder/outline bytes move. match.py
+      differs only in the crate frame-pointer prologue and register
+      allocation.
+
   # --- FreeType 2 ftoutln outline helpers ---
   - address: 0x0804fe08
     ghidra: FUN_0804fe08
