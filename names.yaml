@@ -12055,8 +12055,37 @@ functions:
       0x0820b230, so the port names the id CLASS_ID_8700 (the
       0x6000/0x6600 precedent). Four siblings remain identified, all
       the same shape - 0x0827f218 (0x5780, 28), 0x08284e2c (0x6180,
-      28), 0x08289690 (0x3280, 24), 0x0828ae68 (0x4180
+      0x08289690 (0x3280, 24), 0x0828ae68 (0x4180
       TCNotesDispatcher, 28).
+    renames: {}
+
+  - address: 0x08160000
+    ghidra: FUN_08160000
+    name: instance_8700_owned_object
+    size: 16
+    sig: "void *instance_8700_owned_object(void)"
+    module: app/registry
+    status: ported
+    notes: >-
+      31 bl call sites (binary-scanned over osos.dec, zero predicated
+      forms - Ghidra's 31 is exact). `push {r4,lr}; bl 0x0815ff34; ldr
+      r0,[r0,#0x2c]; pop {r4,pc}` - returns the pointer field at +0x2c
+      of the class-0x8700 singleton resolved through the ported
+      instance_of_class_8700. The class's constructor @ 0x08160024
+      fills +0x2c with a fresh operator_new(0xe4) block run through the
+      constructor @ 0x081a4f64 (second argument = the 0x8700 object;
+      that ctor registers the finished sub-object under class id
+      0x8780), so the returned pointer is the 0x8780 sub-object the
+      singleton owns; callers hand it back to the 0x081a3xxx/0x081a4xxx
+      method cluster. Neither class is named to the class-name factory,
+      so the port claims only the offset and the ownership. No NULL
+      guard in the original and none in the port: an unregistered
+      0x8700 faults on the ldr. Size 16 confirmed - next function @
+      0x08160010 (a lone `bx lr` empty destructor, then the +0x34 byte
+      flag getter/setter pair @ 0x08160014/0x0816001c). match.py diff
+      shows only the LLVM frame-pointer prologue (push {fp,lr}; mov
+      fp,sp) vs ADS's push {r4,lr}; the bl and the ldr [r0,#0x2c] line
+      up.
     renames: {}
 
   - address: 0x0827f218
