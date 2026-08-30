@@ -37095,3 +37095,19 @@ functions:
       round-trip), slow path spills the element and blx through the ops
       slot; deltas are the fp prologue and the seam indirection, the
       accepted animation.rs deviation classes. 24 instructions vs 16.
+
+  - address: 0x080377d8
+    ghidra: FUN_080377d8
+    name: highest_set_bit
+    size: 12
+    sig: "int highest_set_bit(u32 value)"
+    module: util/highest_set_bit
+    status: ported
+    renames:
+      param_1/r0: value
+    notes: >-
+      31 - clz(x): the 0-based index of the most-significant set bit, or -1
+      when no bit is set (clz(0) = 32) — integer floor(log2) for nonzero
+      inputs with a defined -1 for zero. Instruction-faithful: leading_zeros
+      lowers to ARM clz, matching the original `clz r0,r0; rsb r0,r0,#0x1f;
+      bx lr`. 5 bl call sites.
