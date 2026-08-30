@@ -7,6 +7,7 @@ pub mod string_record;
 pub mod array_index_stride20;
 pub mod array_index_stride24;
 pub mod byte_key_map;
+pub mod clock_source_construct;
 pub mod clock_source_destroy;
 pub mod color_copy;
 pub mod decoder_begin_batch;
