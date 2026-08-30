@@ -11548,6 +11548,66 @@ functions:
       preserves load/transform/store/core-call/return shape; expected
       diff is the seam load/blx and LLVM frame allocation.
 
+  - address: 0x0802b868
+    ghidra: FUN_0802b868
+    name: checked_word_block_convert_3d
+    size: 188
+    sig: "u32 checked_word_block_convert_3d(u32 mode, u32 **input_cursor, u32 **input_cursor_mirror, u32 **output_cursor, u32 **output_cursor_mirror, i32 dim0, i32 dim1, i32 dim2)"
+    module: util/checked_word_block
+    status: ported
+    renames:
+      param_1/r0: mode
+      param_2: input_cursor
+      param_3: input_cursor_mirror
+      param_4: output_cursor
+      param_5/stack: output_cursor_mirror
+      param_6/stack: dim0
+      param_7/stack: dim1
+      param_8/stack: dim2
+      FUN_0802b538: transform_word_for_mode
+      puVar3/r4: source
+      piVar8/r12: target
+      iVar6/r7: sum
+      iVar7/r8: i
+      iVar5/r6: j
+      iVar4/r5: k
+    notes: >-
+      188 bytes exactly (0x0802b868..0x0802b924; Ghidra's extent is right
+      this time - the body ends in pop {.., pc} and the next function
+      opens at 0x0802b924, no literal pool). Decoding every ARM B/BL word
+      in osos.dec finds exactly 31 call sites, all plain unconditional
+      bl, zero predicated forms, zero direct B sites; all sampled callers
+      pass stack-local input/output cursor alias pairs and positive
+      constant dimensions (typically 8/2/256). This is the
+      three-dimensional variant of the checked word-block family: the
+      flat core 0x0802b5d4 (checked_word_block_convert_core, still
+      unported) converts word_count words, this one converts
+      dim0*dim1*dim2 words in a three-level nest. Each word passes the
+      mode-controlled transform 0x0802b538 (exactly mode 1 reverses all
+      four bytes, anything else is identity - byte-verified), is stored
+      through the output cursor in row-major order, and accumulates into
+      a wrapping 32-bit sum; the next input word is then transformed and
+      compared against that sum. On a match it returns 0 and advances
+      BOTH input aliases to one word past the checksum and BOTH output
+      aliases past the last written word (store order: input cursor,
+      input mirror, output cursor, output mirror); on a mismatch it
+      returns 4 with all four aliases untouched, the transformed words
+      already sitting in the output buffer. Initial positions are read
+      once, input from input_cursor_mirror and output from
+      output_cursor_mirror. Loop bounds are signed (blt): a zero or
+      negative dimension empties its nest, leaving a zero-length block
+      whose checksum word must transform to 0. Deliberate deviation:
+      the three bl 0x0802b538 sites (inner loop plus checksum word) are
+      reproduced inline like the sibling checked_word_block_convert port
+      rather than exported as a second function. match.py shows the same
+      nest/sum/checksum/quad-store shape; expected diffs are LLVM's
+      count-down inner loop, its own stack-arg frame, and the inlined
+      transform. Host tests cover mode 0 copy/sum/advance, mode 1 byte
+      reversal with transformed checksum, mismatch (status 4, no advance,
+      output still written), zero and negative dimension empty blocks,
+      and mod-2^32 sum wraparound. Reference C:
+      decomp/c/001/0802b868_FUN_0802b868.c.
+
   - address: 0x08100b74
     ghidra: FUN_08100b74
     name: instance_of_class_6600
