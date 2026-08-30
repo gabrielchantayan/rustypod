@@ -32,6 +32,7 @@ pub mod release;
 pub mod return_forwarder;
 pub mod settings;
 pub mod scaled_cursor;
+pub mod shared_cell;
 pub mod slot_reset;
 pub mod string;
 pub mod string_map;
