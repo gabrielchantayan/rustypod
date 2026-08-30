@@ -24999,7 +24999,9 @@ functions:
       class-0x6000 registration @ 0x08173774 - the same 0x60xx family
       the state poller FUN_08172c6c publishes change events for - and
       the setter-side sibling @ 0x0825b774 runs instance_of_class_6000
-      and then the 4-argument chain variant @ 0x08272230 with the SAME
+      and then the 4-argument chain variant @ 0x08272230 (ported
+      alongside as resource_chain_write in app/resource_chain.rs) with
+      the SAME
       (kind "Ui32", id 0x60a4) pair (literals @ 0x0825b7ac/
       0x0825b7b0), i.e. 0x60a4 is a mutable Ui32 state entry of the
       class-0x6000 store. Deviations: both callees are ported and
@@ -27212,8 +27214,9 @@ functions:
       link at +0x14 is refcounted by its setter @ 0x082722a0 (release old,
       retain new). The 4-argument sibling @ 0x082721c0 is the same walk
       with an extra bool* "did anyone answer" out parameter, and
-      0x08272230 is the slot +0x68 variant that falls back to slot +0x58;
-      neither is ported here. Deviations - the provider object and its
+      0x08272230 is the slot +0x68 variant that falls back to slot +0x58
+      (ported alongside as resource_chain_write); the sibling is not
+      ported here. Deviations - the provider object and its
       vtable are modeled as #[repr(C)] structs with real Rust pointers, so
       offsets are the original's on the 32-bit target (vtable +0x00, next
       +0x14, find = the 26th vtable word = +0x64) and self-consistent on
@@ -27304,6 +27307,77 @@ functions:
       structural: mov r2,r1 / ldr r1,[pc] / b / .word 0x424d6170 match
       instruction-for-instruction; the only diff is the crate-standard
       fp prologue.
+
+  - address: 0x08272230
+    ghidra: FUN_08272230
+    name: resource_chain_write
+    size: 112
+    sig: "u32 resource_chain_write(ResourceProvider *head, ResourceKind kind, u32 id, u32 value, u32 flags)"
+    module: app/resource_chain
+    status: ported
+    renames:
+      param_1: head
+      param_2: kind
+      param_3: id
+      param_4: value
+      "param_5 (stack)": flags
+    notes: >-
+      28 bl + 2 blne call sites, binary-scanned over the whole decrypted
+      image by decoding every B/BL word - Ghidra's "30" is the sum; the
+      predicated pair @ 0x0813427c and 0x0816b380 gates the call on a
+      caller-side condition, all other sites are unconditional. No DATA
+      word in the image holds 0x08272230, so it is never dispatched
+      virtually. Extent binary-verified at exactly 112 bytes: the body
+      ends `pop {r3,r4,r5,r6,r7,r8,r9,pc}` @ 0x0827229c and the next
+      function (the refcounting `next`-link setter @ 0x082722a0) begins
+      at 0x082722a0, matching Ghidra's size for once. The write variant
+      of resource_chain_find: walk the provider chain and offer each
+      node the entry (kind, id) a new value with flags through vtable
+      slot +0x68 (27th vtable word, five arguments - the fifth rides
+      the stack per the AAPCS, `ldr r8,[sp,#32]; str r8,[sp]`); the
+      first provider whose write slot answers non-zero is then asked
+      through slot +0x58 (22nd word) for the entry's (kind, id) value
+      via a tail `bx r3`, and that answer is the return. Decline
+      (`ldreq r4,[r4,#0x14]`) walks the +0x14 next link; a NULL link
+      returns 0. Three load-bearing details are reproduced exactly.
+      First, unlike the find sibling, entry falls INTO the loop body -
+      the NULL test guards only the next link, so a NULL head faults on
+      the vtable load; the port keeps the unguarded first dereference
+      (and the unguarded slot loads). Second, the accept test is a
+      plain non-zero test (cmp r0,#0 / ldreq / beq), not a comparison
+      with 1. Third, the read-back slot gets (kind, id) only - value
+      and flags are not forwarded - and its result is returned
+      verbatim, including 0. Identification - the setter-side caller @
+      0x0825b734 (disassembled from raw bytes: `mov r3,#4; str r3,[sp];
+      ldr r2,=0x000060a4; ldr r1,=0x55693332; mov r3,r5; bl
+      0x08272230`) offers ("Ui32", 0x60a4, the new value, 4) on the
+      class-0x6000 singleton's provider chain right after the state
+      store - the write-side sibling of the ported
+      class6000_ui32_resource_60a4 getter, which reads the same
+      (kind, id) pair through resource_chain_find. Other callers (@
+      0x081407b0, 0x0816b208, 0x081db908) pass flags 4 or 0 and ignore
+      the return. Deviations - the provider object and its vtable are
+      modeled as #[repr(C)] structs with real Rust pointers (the same
+      model resource_chain_find uses, extended: slots_below split so
+      `read` lands on +0x58 and `write` on +0x68; a compile-time
+      offset_of test pins all three decoded slots), so offsets are the
+      original's on the 32-bit target and self-consistent on the 64-bit
+      host; the original tail-branches into slot +0x58, the port calls
+      it and returns the result (observably identical, and LLVM in fact
+      emits the same tail `bx r3`). Host tests (6 new, 21 in the
+      module): the first acceptor is read back and stops the walk with
+      all five arguments forwarded verbatim and the read-back seeing
+      (kind, id) only; declining providers are walked in order with
+      kind/id/value/flags verbatim per node; nobody accepting returns 0
+      with the read-back never running; every non-zero accept (1, 2,
+      0x80000000, 0xffffffff) stops the walk; a zero read-back is still
+      the result (the read ran); a mixed-class chain dispatches both
+      slots through each node's OWN vtable. match.py structural:
+      identical loop - same slot +0x68 load/blx/cmp, same `ldr
+      [node,#20]` link walk, same slot +0x58 tail `bx r3`; the diff is
+      the crate fp prologue/epilogue, LLVM's register allocation, and
+      an explicit `mov r0,#0` on the nobody-accepted path where the
+      original lets the failed call's r0=0 fall through.
 
   - address: 0x08277304
     ghidra: FUN_08277304
