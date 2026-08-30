@@ -38102,6 +38102,57 @@ functions:
       slot still clears and counts, callback writes overwritten by the
       trailing clear, and u32 counter wrap.
 
+  # --- UI font handle query wrapper (ui/font_handle) ---
+  - address: 0x082756fc
+    ghidra: FUN_082756fc
+    name: ui_font_handle_for_name
+    size: 44
+    sig: "void ui_font_handle_for_name(u64 *out, const u8 *name, u32 size, u32 style)"
+    module: ui/font_handle
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: name
+      r2: size
+      r3: style
+      FUN_08275044: font_handle_resolver
+    notes: >-
+      Extent verified from raw bytes: 44 bytes, 0x082756fc..0x08275728, the
+      sibling at 0x08275728 opening with `push {r3,r4,r5,r6,r7,lr}` - no
+      swallowed trailing words. Decoding every ARM B/BL word in osos.dec
+      found exactly 38 direct call sites, all unconditional `bl`, zero
+      predicated forms and zero plain B branches (Ghidra's count of 38
+      confirmed). Algorithm: zero an 8-byte stack local, and only when the
+      font name in r1 is non-NULL call the resolver at 0x08275044 as
+      (&local, name, size, style) - the `movne r0, sp; blne` pair leaves
+      r2/r3 untouched, so the caller's point size (0xc / 0x14 / 6) and
+      style selector (0 or 2) reach the resolver even though Ghidra drops
+      them from the call; then store the local's two words to out
+      unconditionally (`ldrd r0, [sp]; stm r4, {r0, r1}`), so a NULL name
+      yields a zero handle. No NULL guard on out; the stm contract means
+      out needs only 4-byte alignment. Identity: the 8-byte result is the
+      current-font pair of the draw state - the setter at 0x0826421c
+      copies it verbatim into the draw-state record at +0x20/+0x24 (the
+      member zero-initialized by embedded_pair_construct) and derives the
+      style byte at +0x28 from the first word; call-site names are fonts
+      ("Helvetica" @ 0x08186a38, "MonoHope LCD" / "MonoHope TV" @
+      0x081cde5c). The resolver at 0x08275044 (its own 108-byte function:
+      hash, registry lookup via 0x0829bea4, register-on-miss via
+      0x08275490, one-time init flag at 0x089cc8d4) remains unported
+      behind a volatile typed boundary (FONT_HANDLE_RESOLVER); its r0:r1
+      register return is discarded exactly as the original discards it in
+      favor of the stack local. Deviation: blx through the seam instead of
+      the stock `blne 0x08275044`. match.py cannot run from a sibling
+      worktree (it hardcodes ../rustypod), so its exact steps were
+      reproduced manually against the worktree archive: structurally
+      identical - same zero-init pair, conditional call with r0 = sp,
+      unconditional two-word stm to out; deltas are the crate sl/fp frame,
+      blx-through-seam, and ldm/stm in place of ldrd/stm. Host tests (4):
+      NULL name stores zero without calling the resolver, named font
+      forwards (name, size, style) verbatim and stores the resolver's
+      canned handle, empty string still reaches the resolver, and a
+      4-byte-aligned (not 8) out is stored without touching guard words.
+
   # --- Platform C++ file read wrapper (fs/file_read) ---
   - address: 0x082784b8
     ghidra: FUN_082784b8
