@@ -72,6 +72,7 @@
 //! | 0x0815ff34 | [`instance_of_class_8700`] | 24 | 14 `bl` |
 //! | 0x0827f218 | [`instance_of_class_5780`] | 28 | 10 `bl` |
 //! | 0x08284e2c | [`instance_of_class_6180`] | 28 | 15 `bl` |
+//! | 0x08289690 | [`instance_of_class_3280`] | 24 | 37 `bl` |
 //!
 //! All call-site counts are binary-scanned over osos.dec (every `bl`/`b`
 //! whose computed target is the function), not read off osos.asm — the
@@ -786,6 +787,29 @@ pub unsafe extern "C" fn instance_of_class_6180() -> *mut u8 {
     instance_of_class(CLASS_ID_6180)
 }
 
+/// The class id of `TMediaNowPlayingCntlr` (recovered from the literal
+/// "TMediaNowPlayingCntlr" @ 0x08289f1c, handed to the class-name
+/// factory @ 0x0820b230 by the constructor @ 0x08289ce4 that registers
+/// its `this` under 0x3280 @ 0x08289d18).
+pub const CLASS_ID_MEDIA_NOW_PLAYING_CNTLR: u32 = 0x3280;
+
+/// instance_of_class_3280 — original: `FUN_08289690` @ 0x08289690
+/// (24 bytes; 37 `bl` call sites, binary-scanned over osos.dec, no tail
+/// `b`, no predicated form).
+///
+/// `push {r4,lr}; mov r0,#0x3280; bl 0x081d2184; pop {r4,lr}; mov
+/// r1,#0x3280; b 0x08275b9c` — the 24-byte sibling shape: re-loads the
+/// class id from an immediate after the registry lookup, then
+/// tail-branches to [`object_cast_to_class`]. Resolves the registered
+/// `TMediaNowPlayingCntlr` singleton under id 0x3280 through the global
+/// class registry, then lets the object's own vtable confirm it really
+/// is that class (NULL when either step fails).
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn instance_of_class_3280() -> *mut u8 {
+    instance_of_class(CLASS_ID_MEDIA_NOW_PLAYING_CNTLR)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -1348,6 +1372,10 @@ mod tests {
                 instance_of_class_6180().is_null(),
                 "0x6180 was never registered"
             );
+            assert!(
+                instance_of_class_3280().is_null(),
+                "0x3280 was never registered"
+            );
         }
         restore(guard);
     }
@@ -1432,6 +1460,18 @@ mod tests {
             let this = ptr::addr_of_mut!(object) as *mut u8;
             registry_register(this, CLASS_ID_6180);
             assert_eq!(instance_of_class_6180(), this);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_3280_accessor_looks_up_and_casts_its_own_id() {
+        let guard = mock();
+        unsafe {
+            let mut object = object_accepting(CLASS_ID_MEDIA_NOW_PLAYING_CNTLR);
+            let this = ptr::addr_of_mut!(object) as *mut u8;
+            registry_register(this, CLASS_ID_MEDIA_NOW_PLAYING_CNTLR);
+            assert_eq!(instance_of_class_3280(), this);
         }
         restore(guard);
     }

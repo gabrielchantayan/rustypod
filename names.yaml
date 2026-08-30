@@ -11726,6 +11726,32 @@ functions:
       TCNotesDispatcher, 28).
     renames: {}
 
+  - address: 0x08289690
+    ghidra: FUN_08289690
+    name: instance_of_class_3280
+    size: 24
+    sig: "void *instance_of_class_3280(void)"
+    module: app/registry
+    status: ported
+    notes: >-
+      37 bl call sites (binary-scanned over osos.dec, no tail b, no
+      predicated form). Same lookup-then-cast accessor as the ported
+      0x081883fc for class id 0x3280 - `push {r4,lr}; mov r0,#0x3280;
+      bl 0x081d2184; pop {r4,lr}; mov r1,#0x3280; b 0x08275b9c`.
+      functions.csv's 24 bytes is correct: 6 instructions, next
+      function @ 0x082896a8. Class identified as TMediaNowPlayingCntlr:
+      the constructor @ 0x08289ce4 registers its `this` under 0x3280 @
+      0x08289d18 and hands the literal "TMediaNowPlayingCntlr" @
+      0x08289f1c to the class-name factory @ 0x0820b230 in the same
+      body (@ 0x08289e2c, the first of seven naming calls - the other
+      six name its nested state classes _Music/_Video/_Play/_Idle/
+      _TVOutAsk/_TVOutCableConnect); the port names it
+      CLASS_ID_MEDIA_NOW_PLAYING_CNTLR. Callers dereference the
+      returned singleton's +0x28->+0x30 (e.g. FUN_08160254). One
+      sibling remains identified, same shape - 0x0828ae68 (0x4180
+      TCNotesDispatcher, 28).
+    renames: {}
+
   - address: 0x081d23f8
     ghidra: FUN_081d23f8
     name: registry_register
