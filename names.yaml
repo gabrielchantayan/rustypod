@@ -15157,6 +15157,40 @@ functions:
   # Rule of thumb for anything above ~0x088e0000: read the image at
   # `addr + 0xaed8`, not at `addr`.
 
+  - address: 0x0835443c
+    ghidra: FUN_0835443c
+    name: copy_encoded_word_block
+    size: 124
+    sig: "u32 copy_encoded_word_block(EncodedWordBlock *destination, const EncodedWordBlock *source)"
+    module: util/encoded_word_block
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: source
+      param_2_plus_0: encoded_count
+      param_2_plus_4: words
+      DAT_083544b8: encoded_count_multiplier
+      iVar1/r0: decoded_count
+      iVar2/r12: word_count
+    notes: >-
+      Raw ARM confirms the 124-byte instruction body at
+      0x0835443c..0x083544b8, followed by its literal-pool multiplier
+      0x0a7e377f at 0x083544b8; the next function starts at 0x083544bc.
+      A complete B/BL decode of osos.dec finds exactly 38 direct call
+      sites, all unconditional bl (no predicated calls or tail branches).
+      The source header is {encoded_count, words}: `muls` decodes its
+      signed count modulo 2^32, `rsbmi` takes the wrapping signed
+      magnitude, and `cmp #0x1c; movgt` rejects magnitudes above 28 with
+      status 1 before any destination write. A non-aliasing destination
+      receives the raw encoded count then every decoded word in descending
+      index order; aliasing headers succeed without a write. The
+      otherwise-unidentified object family warrants a structural name.
+      i32::MIN preserves the ARM wrapping-absolute-value corner case:
+      its signed compare accepts it and a non-aliasing call attempts
+      2^31 descending copies. match.py is structurally equivalent
+      (multiply/range guard, backwards copy loop); its exit-1 mnemonic
+      diff is expected.
+
   - address: 0x08391e44
     ghidra: FUN_08391e44
     name: strcmp
