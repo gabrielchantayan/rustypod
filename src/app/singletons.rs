@@ -1,4 +1,4 @@
-//! The fourteen lazily-constructed framework singletons. Every one is the
+//! The fifteen lazily-constructed framework singletons. Every one is the
 //! same four-step idiom over its own cache word, its own allocation
 //! size and its own constructor:
 //!
@@ -23,6 +23,7 @@
 //! | 0x0812c72c | [`lazy_singleton_0x58`] | 0x58 | 0x089cc16c | 0x0812ce88 | 46 |
 //! | 0x0825b680 | [`lazy_singleton_0x40`] | 0x40 | 0x089cc94c | 0x0825bd20 | 43 |
 //! | 0x0811b2c0 | [`singleton_class_6280`] | 0xa0 | 0x089cc30c | 0x0811c7fc | **43** |
+//! | 0x081fa3b0 | [`stage_progress_tracker_get`] | 0x2c | 0x089ca5d4 | 0x081fa440 | 30 |
 //!
 //! (Call-site counts binary-scanned; the earlier scouting notes said 86
 //! / 38 / 37 / 36 for the bottom four.)
@@ -44,7 +45,7 @@
 //!
 //! `operator new` @ 0x082aadd4 is already ported
 //! (`heap::veneers::operator_new`), so it is called directly. None of
-//! the fourteen constructors is — they are large C++ constructors — so
+//! the fifteen constructors is — they are large C++ constructors — so
 //! they sit behind the [`SINGLETON_CTORS`] dispatch table, the house
 //! pattern.
 //!
@@ -165,6 +166,13 @@
 //!   Class NOT named.
 //! - The 0xA0 object is registry class **0x6280** — see
 //!   [`singleton_class_6280`] below.
+//! - The 0x2C object is the **stage progress tracker** — see
+//!   [`stage_progress_tracker_get`] below. It breaks the family mould
+//!   twice: it caches the RAW allocation rather than the constructor's
+//!   return (its constructor @ 0x081fa440 returns `[this + 0xc]`, a
+//!   budget word it just zeroed — NOT `this`), and a NULL allocation is
+//!   fatal via `heap_panic` @ 0x08030f44 instead of being cached and
+//!   retried.
 //!
 //! **None of these symbols is hook-ready.** Until the constructors are
 //! ported, the dispatch defaults hand out a zeroed block — no vtable,
@@ -182,7 +190,7 @@
 //! - The cache slots are the crate statics below rather than words in
 //!   the 0x089cxxxx / 0x089dxxxx pages (the block_mgr.rs deviation:
 //!   those RW pages are runtime-initialized; the image holds stale UI
-//!   strings there). All thirteen default to NULL, exactly the pre-init
+//!   strings there). All fifteen default to NULL, exactly the pre-init
 //!   state.
 
 use crate::heap::veneers::operator_new;
@@ -241,6 +249,10 @@ pub const SINGLETON_0X40_SIZE: usize = 0x40;
 /// (`mov r0, #0xa0`).
 pub const CLASS_6280_SIZE: usize = 0xa0;
 
+/// Allocation size of the stage-progress-tracker singleton
+/// (`mov r0, #0x2c`).
+pub const STAGE_PROGRESS_TRACKER_SIZE: usize = 0x2c;
+
 /// An ADS C++ constructor: takes the raw block, returns `this`.
 pub type Constructor = unsafe extern "C" fn(this: *mut u8) -> *mut u8;
 
@@ -276,6 +288,8 @@ pub struct SingletonCtors {
     pub singleton_0x40: Constructor,
     /// Registry-class-0x6280 ctor @ 0x0811c7fc.
     pub class_6280: Constructor,
+    /// Stage-progress-tracker ctor @ 0x081fa440.
+    pub stage_progress_tracker: Constructor,
 }
 
 /// Defines one default constructor stub: zeroes the block and returns
@@ -304,6 +318,7 @@ zeroing_ctor!(zeroing_volume_controller_ctor, VOLUME_CONTROLLER_SIZE);
 zeroing_ctor!(zeroing_singleton_0x58_ctor, SINGLETON_0X58_SIZE);
 zeroing_ctor!(zeroing_singleton_0x40_ctor, SINGLETON_0X40_SIZE);
 zeroing_ctor!(zeroing_class_6280_ctor, CLASS_6280_SIZE);
+zeroing_ctor!(zeroing_stage_progress_tracker_ctor, STAGE_PROGRESS_TRACKER_SIZE);
 
 /// Zeroes `size` bytes and returns the block. Volatile stores: a plain
 /// loop is rewritten by LLVM into a call to `__aeabi_memclr`, a symbol
@@ -333,6 +348,7 @@ pub(crate) const DEFAULT_SINGLETON_CTORS: SingletonCtors = SingletonCtors {
     singleton_0x58: zeroing_singleton_0x58_ctor,
     singleton_0x40: zeroing_singleton_0x40_ctor,
     class_6280: zeroing_class_6280_ctor,
+    stage_progress_tracker: zeroing_stage_progress_tracker_ctor,
 };
 
 /// The active constructors. Host tests install recording mocks; the
@@ -406,6 +422,11 @@ pub static mut SINGLETON_0X40: *mut u8 = core::ptr::null_mut();
 /// The registry-class-0x6280 singleton (original: the word @
 /// 0x089cc30c, the pool literal @ 0x0811b2ec).
 pub static mut CLASS_6280_INSTANCE: *mut u8 = core::ptr::null_mut();
+
+/// The stage-progress-tracker singleton (original: the word @
+/// 0x089ca5d4, the `+0x48` slot of the global @ 0x089ca58c — the pool
+/// literal @ 0x081fa3e8).
+pub static mut STAGE_PROGRESS_TRACKER: *mut u8 = core::ptr::null_mut();
 
 /// The body all getters share: test the cache, allocate, construct,
 /// store, and re-load the cache (the original's second `ldr r0, [r4, #N]`,
@@ -842,6 +863,104 @@ pub unsafe extern "C" fn singleton_class_6280() -> *mut u8 {
     lazy_singleton(cache, CLASS_6280_SIZE, || unsafe { ctor!(class_6280) })
 }
 
+/// stage_progress_tracker_get — original: `FUN_081fa3b0` @ **0x081fa3b0**
+/// (56 bytes of code + one pool word @ 0x081fa3e8 = **60 bytes** of true
+/// extent; **30 `bl` call sites, all unconditional — 0 predicated, 0 plain
+/// `b`** — binary-verified by decoding every B/BL word in
+/// `work/firmware/osos.dec`).
+///
+/// ```text
+/// 081fa3b0  push {r4, r5, r6, lr}
+/// 081fa3b4  ldr  r4, [pc, #44]      @ = 0x089ca58c (pool @ 0x081fa3e8)
+/// 081fa3b8  ldr  r0, [r4, #72]      @ the +0x48 slot
+/// 081fa3bc  cmp  r0, #0
+/// 081fa3c0  bne  0x081fa3e0
+/// 081fa3c4  mov  r0, #0x2c
+/// 081fa3c8  bl   0x082aadd4         @ operator new
+/// 081fa3cc  mov  r5, r0             @ keep the RAW allocation
+/// 081fa3d0  bl   0x081fa440         @ constructor
+/// 081fa3d4  cmp  r5, #0
+/// 081fa3d8  str  r5, [r4, #72]      @ caches the raw allocation ...
+/// 081fa3dc  bleq 0x08030f44         @ ... then heap_panic on OOM
+/// 081fa3e0  ldr  r0, [r4, #72]      @ reload the slot before returning
+/// 081fa3e4  pop  {r4, r5, r6, pc}
+/// 081fa3e8  .word 0x089ca58c
+/// ```
+///
+/// Ghidra's 56-byte extent is exact for the code but drops the trailing
+/// literal word; the next function (the sibling `FUN_081fa3ec` stage
+/// wait) opens `push {r4, r5, r6, lr}` at 0x081fa3ec.
+///
+/// What the object is: a 0x2c-byte **stage progress tracker** for the
+/// long database-commit/copy paths — byte +0x00 the current stage index
+/// (0..7), word +0x04 the progress counter, word +0x08 the accumulated
+/// base, word +0x0c the total budget, and seven per-stage budget words
+/// at +0x10..+0x2b. Its constructor @ 0x081fa440 zeroes the whole
+/// object, then resets the global deadline keeper @ 0x089cc79c: the
+/// running deadline at keeper+0x24 to 0 (through the veneer 0x081b9154
+/// → 0x0815940c) and the total budget at keeper+0x2c to `[this + 0xc]`
+/// (veneer 0x081b9150 → 0x081593f4). The siblings around the getter
+/// drive it: `FUN_081fa2e8` waits for the in-flight stage
+/// (`FUN_081fa3ec`, which polls in 10-tick yields through the
+/// `wait_or_yield` veneer 0x080e9eb0) then advances the stage byte and
+/// folds the finished stages' budgets into +0x08; `FUN_081fa36c` bumps
+/// the progress counter and falls into `FUN_081fa378`, which pushes a
+/// fresh running deadline (base + progress) to the keeper when the
+/// progress is inside the stage budget; `FUN_081fa33c` commits the
+/// seven-budget total to keeper+0x2c. The 30 call sites: 22 in the
+/// database-commit path `FUN_08068504` (which sets the stage budgets
+/// from the Photo-Database/ArtworkDB/iTunesDB file sizes in KiB through
+/// `FUN_080ac06c` and advances stages around each commit step), five in
+/// the copy loops `FUN_081b9878` / `FUN_081b979c` (feeding
+/// byte-count-derived progress into stages 5 and 6), plus one each at
+/// 0x0807fca0, 0x0808781c and 0x080ac0b4. Class NOT named: no name
+/// factory or registry id is reachable from the constructor, so the
+/// symbol names the proven role.
+///
+/// Two structural breaks from the family idiom, both verified against
+/// the raw words:
+/// - **The raw allocation is cached, not the constructor's return.**
+///   The original keeps `operator_new`'s r0 in r5 across the `bl` and
+///   stores r5 — and it must: the constructor returns `[this + 0xc]`
+///   (the just-zeroed total-budget word it hands to the deadline
+///   keeper), not `this`. The ctor's return value is discarded.
+/// - **OOM is fatal.** `cmp r5, #0; str r5, [r4, #72]; bleq
+///   heap_panic`: the NULL is stored into the cache first, then
+///   `heap_panic` @ 0x08030f44 runs and never returns — unlike the
+///   other fourteen getters, which cache a NULL ctor result and
+///   re-allocate on the next call. Note the constructor is invoked on
+///   the NULL block BEFORE the panic (the `bl 0x081fa440` is
+///   unpredicated); reproduced, though the heap_panic port makes the
+///   path unreachable in practice.
+///
+/// Deviations: the ctor rides the [`SINGLETON_CTORS`] dispatch table
+/// (`stage_progress_tracker` slot, documented zeroing default — the
+/// zeroing IS faithful to the ctor's object writes, but the default
+/// skips the deadline-keeper reset, so NOT HOOK-READY, the family
+/// contract) and the cache is the crate static [`STAGE_PROGRESS_TRACKER`]
+/// rather than the word @ 0x089ca5d4 (the block_mgr.rs RW-page
+/// deviation). `heap_panic` is the ported `heap::veneers::heap_panic`,
+/// called directly like the original's `bleq`. The pushed r6 is never
+/// used (an ADS frame artifact); the port keeps no frame. Same
+/// NOT-HOOK-READY caveat as every sibling — see the module header.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn stage_progress_tracker_get() -> *mut u8 {
+    let cache = core::ptr::addr_of_mut!(STAGE_PROGRESS_TRACKER);
+    if core::ptr::read_volatile(cache).is_null() {
+        let raw = operator_new(STAGE_PROGRESS_TRACKER_SIZE);
+        // The ctor runs even on a NULL block (unpredicated `bl`); its
+        // return is discarded — the original caches r5, the raw
+        // allocation.
+        ctor!(stage_progress_tracker)(raw);
+        core::ptr::write_volatile(cache, raw);
+        if raw.is_null() {
+            crate::heap::veneers::heap_panic();
+        }
+    }
+    core::ptr::read_volatile(cache)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -919,6 +1038,7 @@ mod tests {
                 singleton_0x58: recording_ctor,
                 singleton_0x40: recording_ctor,
                 class_6280: recording_ctor,
+                stage_progress_tracker: recording_ctor,
             };
             CTOR_RESULT = ctor_result;
             (*ptr::addr_of_mut!(ALLOC_SIZES)).clear();
@@ -956,6 +1076,7 @@ mod tests {
         SINGLETON_0X58 = ptr::null_mut();
         SINGLETON_0X40 = ptr::null_mut();
         CLASS_6280_INSTANCE = ptr::null_mut();
+        STAGE_PROGRESS_TRACKER = ptr::null_mut();
     }
 
     fn arena() -> *mut u8 {
@@ -1681,6 +1802,119 @@ mod tests {
             assert!((0..APP_SCREEN_SIZE).all(|offset| block.add(offset).read() == 0));
 
             assert!(zeroing_controller_ctor(ptr::null_mut()).is_null(), "NULL-safe");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_stage_progress_tracker_caches_the_raw_allocation_not_the_ctor_return() {
+        // The defining difference from every sibling: `str r5, [r4,
+        // #72]` stores operator_new's r0, kept in r5 across the ctor
+        // `bl` — the ctor's return (the original's `[this + 0xc]`
+        // budget word) is discarded.
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(
+                stage_progress_tracker_get(),
+                arena(),
+                "the raw block is returned although the ctor produced a different pointer"
+            );
+            assert_eq!(
+                *ptr::addr_of!(ALLOC_SIZES),
+                std::vec![STAGE_PROGRESS_TRACKER_SIZE],
+                "the `mov r0, #0x2c` immediate, allocated exactly once"
+            );
+            assert_eq!(
+                *ptr::addr_of!(CTOR_BLOCKS),
+                std::vec![arena()],
+                "the ctor is constructed on the raw block"
+            );
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(STAGE_PROGRESS_TRACKER)),
+                arena(),
+                "the +0x48 slot of the 0x089ca58c global holds the raw allocation"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_stage_progress_tracker_second_call_returns_the_cache() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(stage_progress_tracker_get(), arena());
+            assert_eq!(stage_progress_tracker_get(), arena());
+            assert_eq!((*ptr::addr_of!(ALLOC_SIZES)).len(), 1, "allocated exactly once");
+            assert_eq!((*ptr::addr_of!(CTOR_BLOCKS)).len(), 1, "constructed exactly once");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn a_pre_seeded_stage_progress_tracker_cache_never_allocates() {
+        // The `cmp r0, #0; bne` fast path.
+        let guard = mock(constructed());
+        unsafe {
+            STAGE_PROGRESS_TRACKER = arena().add(56);
+            assert_eq!(stage_progress_tracker_get(), arena().add(56));
+            assert!((*ptr::addr_of!(ALLOC_SIZES)).is_empty());
+            assert!((*ptr::addr_of!(CTOR_BLOCKS)).is_empty());
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_stage_progress_tracker_store_lands_after_its_ctor_runs() {
+        // Order is alloc -> ctor -> store: a ctor that pokes the cache
+        // slot itself is overwritten by the raw-allocation store (the
+        // original's `str r5` follows the `bl 0x081fa440`).
+        unsafe extern "C" fn cache_poking_ctor(this: *mut u8) -> *mut u8 {
+            (*ptr::addr_of_mut!(CTOR_BLOCKS)).push(this);
+            STAGE_PROGRESS_TRACKER = this.add(24);
+            this.add(40)
+        }
+        let guard = mock(ptr::null_mut());
+        unsafe {
+            SINGLETON_CTORS.stage_progress_tracker = cache_poking_ctor;
+            assert_eq!(stage_progress_tracker_get(), arena(), "the raw-allocation store wins");
+            assert_eq!(ptr::read_volatile(ptr::addr_of!(STAGE_PROGRESS_TRACKER)), arena());
+            assert_eq!(*ptr::addr_of!(CTOR_BLOCKS), std::vec![arena()], "the ctor still ran, once");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_stage_progress_tracker_zeroing_stub_clears_exactly_0x2c_bytes() {
+        // The original ctor zeroes byte +0 and words +4/+8/+0xc
+        // outright, then the 28 budget bytes at +0x10..+0x2b through
+        // the IRAM memclr veneer 0x08037db8 — the whole object.
+        let guard = SINGLETON_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            let block = ptr::addr_of_mut!(ARENA) as *mut u8;
+            for offset in 0..STAGE_PROGRESS_TRACKER_SIZE + 4 {
+                block.add(offset).write(0xa5);
+            }
+            assert_eq!(zeroing_stage_progress_tracker_ctor(block), block);
+            assert!((0..STAGE_PROGRESS_TRACKER_SIZE).all(|offset| block.add(offset).read() == 0));
+            assert_eq!(block.add(STAGE_PROGRESS_TRACKER_SIZE).read(), 0xa5, "not one byte past the object");
+            assert!(zeroing_stage_progress_tracker_ctor(ptr::null_mut()).is_null(), "NULL-safe");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_stage_progress_tracker_cache_is_independent_of_its_siblings() {
+        // The cache word 0x089ca5d4 is the +0x48 slot of a global whose
+        // other words are unrelated state (the +0x4 slot mirrors the
+        // +0xb1c RTC-context halfword); the crate statics keep them
+        // apart.
+        let guard = mock(constructed());
+        unsafe {
+            stage_progress_tracker_get();
+            assert!(ptr::read_volatile(ptr::addr_of!(SINGLETON_0X40)).is_null(), "untouched");
+            assert!(ptr::read_volatile(ptr::addr_of!(CLASS_6280_INSTANCE)).is_null(), "untouched");
+            assert!(ptr::read_volatile(ptr::addr_of!(VOLUME_CONTROLLER_INSTANCE)).is_null(), "untouched");
+            assert_eq!(*ptr::addr_of!(ALLOC_SIZES), std::vec![STAGE_PROGRESS_TRACKER_SIZE]);
         }
         restore(guard);
     }
