@@ -4864,6 +4864,35 @@ functions:
       match.py shows an expected structural diff (indirect call through
       hook slot 1, `mov r0, #5` intact).
 
+  - address: 0x0806aa3c
+    ghidra: FUN_0806aa3c
+    name: ui_element_is_tdat_class
+    size: 40
+    sig: "u32 ui_element_is_tdat_class(const u8 *target)"
+    module: ui/tdat_class_check
+    status: ported
+    notes: >-
+      NULL-guarded 'tdat' UI-element class-tag predicate: returns 1 iff
+      target is non-NULL and the word at target+0x4 equals the tag
+      0x74646174 ('tdat'), held in the literal pool at 0x0806aa60.
+      Ghidra's 36-byte extent drops that literal word; the true extent
+      is 40 (the next function's push {r4, lr} prologue starts at
+      0x0806aa64). Call count verified by decoding every B/BL word in
+      osos.dec: 31 unconditional bl, zero predicated - the internal
+      NULL guard is what all callers rely on. The tag is stamped at
+      object+0x4 by the 'tdat' factory 0x08047bfc, which allocates
+      0x948 bytes and stores the tag (literal word @ 0x08047cbc) via
+      stmib r4, {r0, r6}. Callers gate real field access on the check:
+      sibling wrapper 0x0806aa64 reads a halfword at +0x40, 0x0806aaac
+      bumps the counter at +0x40, 0x0806a994 tears down lists at
+      +0x54/+0x8. Byte-shape-identical sibling 0x080613e0
+      (ui_element_is_plst_class) checks the 'plst' tag 0x706c7374
+      instead; this port's own link_section keeps the two hook seams
+      unfolded (both symbols verified present in librustypod.a).
+      match.py: crate fp frame plus LLVM clz equality lowering vs ADS
+      cmp/moveq; the core cmp r0,#0 / beq / ldr r0,[r0,#4] / ldr r1,[pc]
+      sequence matches verbatim.
+
   - address: 0x080645a8
     ghidra: FUN_080645a8
     name: kernel_sem5_signal
