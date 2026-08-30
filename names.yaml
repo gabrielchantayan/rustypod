@@ -39197,3 +39197,40 @@ functions:
       str -> 0/1 return); LLVM adds an fp frame and routes the seam call as
       blx through a literal slot. Reference C:
       decomp/c/004/08057874_FUN_08057874.c.
+
+  - address: 0x0839179c
+    ghidra: FUN_0839179c
+    name: sqlite3_value_text
+    size: 8
+    sig: "const void *sqlite3_value_text(sqlite3_value *value)"
+    module: sqlite/value_text
+    status: ported
+    renames:
+      param_1/r0: value
+    notes: >-
+      SQLite 3.5.9's public API wrapper sqlite3_value_text (vdbemem.c):
+      a pure 8-byte tail veneer, mov r1,#1; b 0x08386718, forcing
+      enc = SQLITE_UTF8 and branching into the already-ported extractor
+      sqlite_value_text (FUN_08386718) with the r0 value pointer
+      untouched. Raw bytes decoded: e3a01001 eaffd3dc; Ghidra's 8-byte
+      extent is exact - the next function (the sqlite3_value_text16
+      sibling) opens at 0x083917a4. The sibling family confirms the
+      identity: 0x083917c8 is sqlite3_value_text16le (mov r1,#2),
+      0x083917c0 sqlite3_value_text16be (mov r1,#3), 0x083917a4
+      sqlite3_value_text16 (r1 = 2 or 3 by the byte-order flag byte at
+      0x088fa948), each tail-branching to the same extractor. Decoding
+      every B/BL word in osos.dec finds exactly 32 call sites, all
+      plain unconditional bl, zero predicated forms and zero plain B:
+      no caller NULL-guards the value first, the extractor's own
+      NULL/MEM_Null short-circuit is the only guard (verified by test).
+      Deliberate deviations: none - the port is a direct forwarding
+      call; LLVM emits an fp frame around the mov r1,#1 + b
+      sqlite_value_text (R_ARM_JUMP24 reloc), behaviorally identical to
+      the bare veneer. Verified by
+      src/sqlite/value_text.rs::tests::the_api_wrapper_forwards_utf8_unchanged_value_and_result
+      (recode path receives exactly ChangeEncoding(1)+NulTerminate and
+      returns z, stringify path receives Stringify(1), NULL value
+      returns NULL with no callee reached). match.py (exit 1, diff
+      expected): same mov r1,#1 + branch-to-extractor core; the extra
+      push/pop fp frame is the crate-wide LLVM frame-pointer
+      boilerplate.
