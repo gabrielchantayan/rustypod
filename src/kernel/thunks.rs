@@ -43,7 +43,9 @@
 //!   0xaed8 bytes from 0x08000000 to 0x22000000 (literals verified in
 //!   osos.dec), so every target below 0x2200aed8 has a byte-identical
 //!   osos body that CAN be disassembled: 0x22005018 == FUN_08005018,
-//!   which identifies thunk 0x08037f88 as ui_manager_acquire.
+//!   which identifies thunk 0x08037f88 as ui_manager_acquire, and
+//!   0x220060e0 == FUN_080060e0, which identifies thunk 0x08037f58 as
+//!   lazy_singleton_106dc_acquire.
 //!
 //! Caveats / deviations:
 //!
@@ -410,6 +412,118 @@ ui_manager_acquire:
 "#
 );
 
+/// Instruction word and literal in the lazy-singleton accessor thunk
+/// at 0x08037f58.
+///
+/// Identified through the relocator mirror: the boot relocator at
+/// 0x080046e0 copies 0xaed8 bytes from 0x08000000 to 0x22000000 (both
+/// literals verified in osos.dec), so IRAM 0x220060e0 is byte-identical
+/// to osos `FUN_080060e0`.
+pub const LAZY_SINGLETON_106DC_ACQUIRE_INSN: u32 = 0xe51f_f004;
+pub const LAZY_SINGLETON_106DC_ACQUIRE_TARGET: u32 = 0x2200_60e0;
+
+/// ABI of the lazy singleton accessor reached by
+/// [`lazy_singleton_106dc_acquire`]: no arguments, returns the object
+/// pointer.
+pub type LazySingleton106dcAcquireFn = unsafe extern "C" fn() -> *mut u8;
+
+/// Host/target dispatch boundary for the unported IRAM accessor target.
+#[derive(Clone, Copy)]
+pub struct LazySingleton106dcAcquireOps {
+    pub acquire: LazySingleton106dcAcquireFn,
+}
+
+#[cfg(not(target_arch = "arm"))]
+unsafe extern "C" fn missing_lazy_singleton_106dc_acquire() -> *mut u8 {
+    core::ptr::null_mut()
+}
+
+#[cfg(not(target_arch = "arm"))]
+const DEFAULT_LAZY_SINGLETON_106DC_ACQUIRE_OPS: LazySingleton106dcAcquireOps =
+    LazySingleton106dcAcquireOps {
+        acquire: missing_lazy_singleton_106dc_acquire,
+    };
+
+/// The host dispatch boundary for the unported IRAM accessor target.
+#[cfg(not(target_arch = "arm"))]
+pub static mut LAZY_SINGLETON_106DC_ACQUIRE_OPS: LazySingleton106dcAcquireOps =
+    DEFAULT_LAZY_SINGLETON_106DC_ACQUIRE_OPS;
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(always)]
+fn lazy_singleton_106dc_acquire_target() -> LazySingleton106dcAcquireFn {
+    unsafe {
+        core::ptr::read_volatile(core::ptr::addr_of!(
+            LAZY_SINGLETON_106DC_ACQUIRE_OPS.acquire
+        ))
+    }
+}
+
+#[cfg(target_arch = "arm")]
+extern "C" {
+    /// lazy_singleton_106dc_acquire — original: `thunk_EXT_FUN_220060e0`
+    /// @ 0x08037f58 (8 bytes; Ghidra's 4-byte extent drops the trailing
+    /// literal word, the next thunk stub starts at 0x08037f60).
+    ///
+    /// One stub of the osos -> IRAM thunk table (see [`ROM_THUNKS`]):
+    /// `ldr pc, [pc, #-4]` loading the literal 0x220060e0. `ldr pc` is a
+    /// tail dispatch preserving every register including LR, so the target
+    /// returns directly to this stub's caller. All 32 call sites decoded
+    /// from osos.dec are plain unconditional `bl` (no predicated forms,
+    /// no tail `b`); none NULL-checks the result — the accessor always
+    /// hands back the fixed singleton address.
+    ///
+    /// Target behaviour (IRAM mirror of `FUN_080060e0` @ 0x080060e0,
+    /// 88 bytes of code + 16-byte literal pool; the next function opens
+    /// at 0x08006148): lazy accessor for the C++ singleton object at
+    /// 0x220106dc. Under once-guard bit 0 of the word at state+4 (state
+    /// block 0x22008cdc) it runs construct-and-register: glue veneer
+    /// 0x080036e0 -> 0x082a0444(state+4); on success ctor
+    /// 0x08006988(0x220106dc) (plants vtable 0x22008a10, zeroes fields,
+    /// allocates a 0x1000-byte buffer), glue veneer 0x080036e8 ->
+    /// 0x082a02f0(result, dtor 0x22006ab4, __dso_handle 0x089ca09c),
+    /// glue veneer 0x080036f0 -> 0x082a0460(state+4). A second once-flag
+    /// (byte at state+0) is then set to 1 with NO companion init call —
+    /// unlike ui_manager_acquire's target, which runs FUN_08005448 under
+    /// its flag. Returns the object pointer 0x220106dc unchanged.
+    /// The class identity is unrecovered: every vtable slot
+    /// (0x22006ab4/0x22006928/0x220068e0/0x220065dc/0x220065a8/
+    /// 0x220060cc/0x220068b8/0x22006180) is unnamed. Callers (the
+    /// 0x080a5xxx cluster plus 0x080c8bxx, in the FreeType glyph
+    /// rendering region) read flag bytes at +0x47/+0x94 and an 8-valued
+    /// mode byte at +0x58 that selects per-mode pixel-geometry tables.
+    ///
+    /// Deviation: none on ARM; this is the original instruction and literal.
+    pub fn lazy_singleton_106dc_acquire() -> *mut u8;
+}
+
+/// Host implementation of the lazy singleton accessor, with the
+/// unported IRAM target supplied by [`LAZY_SINGLETON_106DC_ACQUIRE_OPS`].
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn lazy_singleton_106dc_acquire() -> *mut u8 {
+    lazy_singleton_106dc_acquire_target()()
+}
+
+// `ldr pc` preserves LR, so the IRAM target returns directly to this
+// stub's caller. Keep the fixed target in assembly rather than
+// materializing it as a Rust function pointer on target.
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl lazy_singleton_106dc_acquire
+    .type lazy_singleton_106dc_acquire, %function
+lazy_singleton_106dc_acquire:
+    ldr     pc, [pc, #-4]
+    .word   0x220060e0
+    .size lazy_singleton_106dc_acquire, . - lazy_singleton_106dc_acquire
+"#
+);
+
 /// One thunk-table entry: the osos-side stub and its ROM target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RomThunk {
@@ -478,7 +592,7 @@ pub static ROM_THUNKS: [RomThunk; 158] = [
     RomThunk { thunk_addr: 0x08037f40, rom_target: 0x220084dc, name: None },
     RomThunk { thunk_addr: 0x08037f48, rom_target: 0x22003f08, name: None },
     RomThunk { thunk_addr: 0x08037f50, rom_target: 0x22003e70, name: None },
-    RomThunk { thunk_addr: 0x08037f58, rom_target: 0x220060e0, name: None },
+    RomThunk { thunk_addr: 0x08037f58, rom_target: 0x220060e0, name: Some("lazy_singleton_106dc_acquire") },
     RomThunk { thunk_addr: 0x08037f60, rom_target: 0x2200200c, name: None },
     RomThunk { thunk_addr: 0x08037f68, rom_target: 0x2200053c, name: None },
     RomThunk { thunk_addr: 0x08037f70, rom_target: 0x220001f4, name: Some("memmove_backward") },
@@ -659,7 +773,7 @@ mod tests {
     /// Known-target name mapping (see module header for the evidence).
     #[test]
     fn known_target_names() {
-        let expected: [(u32, &str); 13] = [
+        let expected: [(u32, &str); 14] = [
             (0x22000020, "__rt_memcpy"),
             (0x220000d4, "memmove"),
             (0x22000188, "memcpy"),
@@ -673,6 +787,7 @@ mod tests {
             (0x22003fd0, "sem_wait"),
             (0x2200408c, "task_unlock"),
             (0x22005018, "ui_manager_acquire"),
+            (0x220060e0, "lazy_singleton_106dc_acquire"),
         ];
         for (target, name) in expected {
             let entry = lookup_by_target(target)
@@ -746,8 +861,8 @@ mod tests {
     #[test]
     fn named_entry_count() {
         let named = ROM_THUNKS.iter().filter(|e| e.name.is_some()).count();
-        // 13 known targets, two of them aliased by two thunks each.
-        assert_eq!(named, 15);
+        // 14 known targets, two of them aliased by two thunks each.
+        assert_eq!(named, 16);
         let _: std::string::String = ROM_THUNKS[0].name.unwrap().to_string();
     }
 
@@ -892,6 +1007,75 @@ mod tests {
         let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         unsafe {
             assert!(ui_manager_acquire().is_null());
+        }
+        drop(guard);
+    }
+
+    /// The stub at 0x08037f58 is the literal veneer `ldr pc, [pc, #-4]`
+    /// with target word 0x220060e0 (raw osos.dec bytes 04 f0 1f e5
+    /// e0 60 00 22); Ghidra's 4-byte extent drops the literal.
+    #[test]
+    fn lazy_singleton_106dc_acquire_matches_the_literal_veneer() {
+        assert_eq!(LAZY_SINGLETON_106DC_ACQUIRE_INSN, 0xe51f_f004);
+        assert_eq!(LAZY_SINGLETON_106DC_ACQUIRE_TARGET, 0x2200_60e0);
+        assert_eq!(LAZY_SINGLETON_106DC_ACQUIRE_TARGET & 3, 0);
+    }
+
+    /// The thunk table resolves 0x08037f58 to the identified IRAM target.
+    #[test]
+    fn lazy_singleton_106dc_acquire_thunk_table_entry_resolves() {
+        let entry = lookup_by_thunk(0x08037f58).expect("thunk entry for 0x08037f58");
+        assert_eq!(entry.rom_target, LAZY_SINGLETON_106DC_ACQUIRE_TARGET);
+        assert_eq!(entry.name, Some("lazy_singleton_106dc_acquire"));
+        // The target is unique in the table: exactly one stub reaches it.
+        assert_eq!(
+            lookup_by_target(LAZY_SINGLETON_106DC_ACQUIRE_TARGET)
+                .unwrap()
+                .thunk_addr,
+            0x08037f58
+        );
+    }
+
+    static mut LAZY_SINGLETON_106DC_ACQUIRE_CALLS: u32 = 0;
+    static mut LAZY_SINGLETON_106DC_SENTINEL: u8 = 0;
+
+    unsafe extern "C" fn record_lazy_singleton_106dc_acquire() -> *mut u8 {
+        LAZY_SINGLETON_106DC_ACQUIRE_CALLS += 1;
+        core::ptr::addr_of_mut!(LAZY_SINGLETON_106DC_SENTINEL)
+    }
+
+    /// The host port forwards to the injected IRAM target exactly once and
+    /// passes its pointer result through unchanged — the veneer's only
+    /// observable contract (no arguments in, object pointer out).
+    #[test]
+    fn lazy_singleton_106dc_acquire_forwards_to_target_and_returns_its_pointer() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            core::ptr::addr_of_mut!(LAZY_SINGLETON_106DC_ACQUIRE_CALLS).write(0);
+            core::ptr::addr_of_mut!(LAZY_SINGLETON_106DC_ACQUIRE_OPS).write(
+                LazySingleton106dcAcquireOps {
+                    acquire: record_lazy_singleton_106dc_acquire,
+                },
+            );
+            let object = lazy_singleton_106dc_acquire();
+            assert_eq!(core::ptr::addr_of!(LAZY_SINGLETON_106DC_ACQUIRE_CALLS).read(), 1);
+            assert_eq!(
+                object,
+                core::ptr::addr_of!(LAZY_SINGLETON_106DC_SENTINEL).cast_mut(),
+            );
+            core::ptr::addr_of_mut!(LAZY_SINGLETON_106DC_ACQUIRE_OPS)
+                .write(DEFAULT_LAZY_SINGLETON_106DC_ACQUIRE_OPS);
+        }
+        drop(guard);
+    }
+
+    /// With no target installed the default seam yields NULL without
+    /// panicking; on device the stub always reaches the IRAM body instead.
+    #[test]
+    fn lazy_singleton_106dc_acquire_default_seam_returns_null() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            assert!(lazy_singleton_106dc_acquire().is_null());
         }
         drop(guard);
     }

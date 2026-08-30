@@ -28291,6 +28291,51 @@ functions:
       indirect-jump-through-a-literal shape plus one indirection and the
       crate's fp frame, r0-r2 passed through untouched.
 
+  - address: 0x08037f58
+    ghidra: thunk_EXT_FUN_220060e0
+    name: lazy_singleton_106dc_acquire
+    size: 8
+    sig: "void *lazy_singleton_106dc_acquire(void)"
+    module: kernel/thunks
+    status: ported
+    renames: {thunk_EXT_FUN_220060e0: lazy_singleton_106dc_acquire}
+    notes: >-
+      One stub of the osos -> IRAM thunk table (ROM_THUNKS in
+      kernel/thunks.rs): ldr pc,[pc,#-4] + literal word 0x220060e0.
+      Ghidra reports 4 bytes; the stub is 8 (next stub starts at
+      0x08037f60). Call count binary-verified by decoding every B/BL word
+      in osos.dec: 32 bl, all unconditional, zero predicated forms, zero
+      tail b - callers never NULL-check the result (the accessor always
+      returns the fixed singleton address). Sites cluster at
+      0x080a56c8-0x080a61dc (29) and 0x080c8be8-0x080c8ca8 (3), the
+      FreeType glyph rendering region; no DATA word holds the thunk
+      address, so it is not virtually dispatched. Target identified via
+      the relocator mirror (0x080046e0 copies 0xaed8 bytes from
+      0x08000000 to 0x22000000, literals verified), so IRAM 0x220060e0 is
+      byte-identical to FUN_080060e0 @ 0x080060e0 (88 bytes of code +
+      16-byte literal pool; next function opens at 0x08006148): lazy
+      accessor for the C++ singleton object at 0x220106dc. Under
+      once-guard bit 0 of the word at state+4 (state block 0x22008cdc) it
+      runs construct-and-register: glue veneer 0x080036e0 ->
+      0x082a0444(state+4); on success ctor 0x08006988(0x220106dc) (plants
+      vtable 0x22008a10, zeroes fields, allocates a 0x1000-byte buffer),
+      glue veneer 0x080036e8 -> 0x082a02f0(result, dtor 0x22006ab4,
+      __dso_handle 0x089ca09c), glue veneer 0x080036f0 ->
+      0x082a0460(state+4). A second once-flag (byte at state+0) is then
+      set to 1 with NO companion init call - unlike ui_manager_acquire's
+      target FUN_08005018, which runs FUN_08005448 under its flag.
+      Returns 0x220106dc unchanged. Class identity unrecovered: every
+      vtable slot (0x22006ab4/0x22006928/0x220068e0/0x220065dc/
+      0x220065a8/0x220060cc/0x220068b8/0x22006180) is unnamed; callers
+      read flag bytes at +0x47/+0x94 and an 8-valued mode byte at +0x58
+      that selects per-mode pixel-geometry tables. Port keeps the
+      verbatim veneer on ARM via global_asm (ldr pc preserves LR, target
+      returns straight to the caller); host builds dispatch through the
+      volatile LAZY_SINGLETON_106DC_ACQUIRE_OPS seam, default NULL.
+      match.py structural: instruction stream identical
+      (ldr pc,[pc,#-4]); only diff line is the literal word shown as
+      .word vs data-decoded-andcs.
+
   - address: 0x08037f88
     ghidra: thunk_EXT_FUN_22005018
     name: ui_manager_acquire
