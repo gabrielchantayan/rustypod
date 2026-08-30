@@ -337,6 +337,55 @@ pub unsafe extern "C" fn animation_init(
     this
 }
 
+/// animation_set_current_value — original: `FUN_08166b2c` @ 0x08166b2c
+/// (88 instruction bytes; the separate literal-pool word at 0x08166b84
+/// holds the scheduler-global address). Binary decoding of every ARM B/BL
+/// word in osos.dec finds 30 call sites: all are plain unconditional `bl`;
+/// there are no predicated calls, tail branches, or DATA-word references.
+///
+/// Replaces the retained current-value slot at +0x20. It unlinks `this`
+/// from the timing wheel, retains `value`, releases the old current value
+/// only when non-NULL, stores `value`, raises `rank` to
+/// `max(rank, value.aux + 1)` using unsigned comparison and wrapping
+/// addition, then reinserts the node. `value` has no NULL guard because
+/// the stock body dereferences `value + 8` unconditionally.
+///
+/// Deliberate deviation: the four unported direct callees use the existing
+/// [`ANIMATION_INIT_OPS`] volatile seam. The scheduler-global word is read
+/// separately for remove and insert, as in the two stock `ldr [r5]` sites.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn animation_set_current_value(
+    this: *mut Animation,
+    value: *mut FixedValue,
+) {
+    let ops = animation_init_ops();
+
+    // 08166b40..08166b44: unlink before changing rank or the slot.
+    (ops.wheel_remove)(scheduler_table(), this);
+    // 08166b48..08166b4c: retain the incoming value before releasing old.
+    (ops.retain_value)(value);
+
+    // 08166b50..08166b5c: memberwise-assign's conditional old-value
+    // release, then the +0x20 replacement.
+    let old_value = (*this).current_value;
+    if old_value != 0 {
+        (ops.release_value)(old_value as usize as *mut FixedValue);
+    }
+    (*this).current_value = value as usize as u32;
+
+    // 08166b60..08166b70: candidate = value->aux + 1; `strcc` only raises
+    // this->rank, using the CPU's unsigned carry-clear condition.
+    let candidate_rank = (*value).aux.wrapping_add(1);
+    if (*this).rank < candidate_rank {
+        (*this).rank = candidate_rank;
+    }
+
+    // 08166b74..08166b80: reload the scheduler word and tail-branch to
+    // wheel_insert(table, this). Its return value is discarded by callers.
+    (ops.wheel_insert)(scheduler_table(), this);
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -831,4 +880,108 @@ mod tests {
             assert_eq!((*f.current).flags, 0b110, "the inert retain wrote nothing");
         }
     }
+    #[test]
+    fn setter_unlinks_retains_releases_replaces_and_relinks() {
+        let _lock = take_lock();
+        let _restore = SeamGuard;
+        let Some(f) = fixture() else {
+            note_missing_u32_fixture("app::animation");
+            return;
+        };
+        unsafe {
+            install_recording_ops();
+            reset_log();
+            dirty_animation(f.animation);
+            counted_scalar(f.current, 3);
+            (*f.current).flags = 0b1010; // count 2: owned slot can release one.
+            counted_scalar(f.from, 9);
+            (*f.animation).current_value = f.current as usize as u32;
+            (*f.animation).rank = 4;
+
+            animation_set_current_value(f.animation, f.from);
+
+            let seen = log();
+            assert_eq!(
+                seen.iter().map(|event| event.kind).collect::<std::vec::Vec<_>>(),
+                std::vec![EVENT_WHEEL_REMOVE, EVENT_RETAIN, EVENT_RELEASE, EVENT_WHEEL_INSERT],
+                "stock order is remove, retain incoming, release old, tail insert"
+            );
+            assert_eq!(seen[0].argument, f.animation as usize);
+            assert_eq!(seen[1].argument, f.from as usize);
+            assert_eq!(seen[2].argument, f.current as usize);
+            assert_eq!(seen[3].argument, f.animation as usize);
+            assert_eq!(seen[0].extra, f.table as usize);
+            assert_eq!(seen[3].extra, f.table as usize);
+            assert_eq!(seen[3].rank_at_insert, Some(10));
+            assert_eq!((*f.animation).current_value, f.from as usize as u32);
+            assert_eq!((*f.animation).rank, 10);
+            assert_eq!((*f.current).flags, 0b110, "old value loses one reference");
+            assert_eq!((*f.from).flags, 0b1010, "incoming value gains one reference");
+            assert_eq!((*f.animation).opaque_04, 0x1111_1111, "+0x04 is untouched");
+            assert_eq!((*f.animation).from_value, 0x4444_4444, "+0x18 is untouched");
+            assert_eq!((*f.animation).to_value, 0x5555_5555, "+0x1c is untouched");
+        }
+    }
+
+    #[test]
+    fn setter_never_lowers_rank_and_wraps_the_aux_candidate() {
+        let _lock = take_lock();
+        let _restore = SeamGuard;
+        let Some(f) = fixture() else {
+            note_missing_u32_fixture("app::animation");
+            return;
+        };
+        unsafe {
+            install_recording_ops();
+            for &(rank, aux, expected) in &[
+                (0, 0, 1),
+                (7, 0, 7),
+                (0x7fff_ffff, 0x8000_0000, 0x8000_0001),
+                (u32::MAX, u32::MAX, u32::MAX),
+                (0, u32::MAX, 0),
+            ] {
+                reset_log();
+                dirty_animation(f.animation);
+                counted_scalar(f.current, 0);
+                counted_scalar(f.from, aux);
+                (*f.current).flags = 0b1010;
+                (*f.animation).current_value = f.current as usize as u32;
+                (*f.animation).rank = rank;
+
+                animation_set_current_value(f.animation, f.from);
+
+                assert_eq!((*f.animation).rank, expected, "rank {rank:#x}, aux {aux:#x}");
+                assert_eq!(log().last().unwrap().rank_at_insert, Some(expected));
+            }
+        }
+    }
+
+    #[test]
+    fn setter_skips_release_for_an_empty_current_slot() {
+        let _lock = take_lock();
+        let _restore = SeamGuard;
+        let Some(f) = fixture() else {
+            note_missing_u32_fixture("app::animation");
+            return;
+        };
+        unsafe {
+            install_recording_ops();
+            reset_log();
+            dirty_animation(f.animation);
+            counted_scalar(f.from, 0);
+            (*f.animation).current_value = 0;
+            (*f.animation).rank = 0;
+
+            animation_set_current_value(f.animation, f.from);
+
+            assert_eq!(
+                log().iter().map(|event| event.kind).collect::<std::vec::Vec<_>>(),
+                std::vec![EVENT_WHEEL_REMOVE, EVENT_RETAIN, EVENT_WHEEL_INSERT],
+                "the only predicated callee inside the body is release(old)"
+            );
+            assert_eq!((*f.animation).current_value, f.from as usize as u32);
+            assert_eq!((*f.animation).rank, 1);
+        }
+    }
+
 }
