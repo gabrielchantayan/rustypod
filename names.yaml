@@ -28354,6 +28354,38 @@ functions:
       b service_manager_instance` - the original's tail branch plus the
       target's mandatory non-leaf frame pointer.
 
+  - address: 0x0818e624
+    ghidra: FUN_0818e624
+    name: service_handler_is_available
+    size: 100
+    sig: "u32 service_handler_is_available(u32 selector)"
+    module: app/service_handler_availability
+    renames:
+      param_1/r0: selector
+      thunk_FUN_08165520: service_manager_instance_veneer
+      DAT_0818e684: service_handler_availability_globals (0x089ca8d0; +0x30 is the gate)
+      FUN_08194080: service_handler_at
+      FUN_08138d8c: service_handler_state_is_ready
+      FUN_08030f44: heap_panic
+    status: ported
+    notes: >-
+      Raw extent is 100 bytes, 0x0818e624..0x0818e688: 24 ARM instructions
+      plus literal 0x089ca8d0 at 0x0818e684. Ghidra's reported 96 omits the
+      literal; 0x0818e688 (`ldr r0,[pc,#4]`) starts the distinct next
+      function. Decoding every ARM B/BL in osos.dec finds exactly 32 direct
+      unconditional bl callers and no predicated calls. The predicate obtains
+      the asserting service-manager singleton, requires the +0x30 word in
+      the otherwise unidentified global 0x089ca8d0 and selector 0..2, then
+      calls service_handler_at(manager+4, selector) and
+      service_handler_state_is_ready(manager, selector). It reloads the
+      global gate after both calls and returns one only if that reload, the
+      handler word, and the state predicate are all nonzero. A zero gate or
+      selector >=3 falls through to heap_panic. The two unported callees use
+      a volatile host dispatch seam; target defaults call their verified stock
+      addresses 0x08194080 and 0x08138d8c. Host tests cover selectors 0 and
+      2, the absent-handler result while still calling the state predicate,
+      and the observable final gate reload.
+
   - address: 0x081d71c0
     ghidra: FUN_081d71c0
     name: iap_incoming_process_thread_instance
