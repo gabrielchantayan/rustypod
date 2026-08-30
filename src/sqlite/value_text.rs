@@ -10,6 +10,17 @@
 //!   ~SQLITE_UTF16_ALIGNED)` guard, which IS upstream (the firmware
 //!   only has the asserts compiled out).
 //!
+//! - `sqlite3_value_text` — original: `FUN_0839179c` @ 0x0839179c
+//!   (8 bytes, 0x0839179c..0x083917a4; 32 `bl` call sites, all
+//!   unconditional, binary-scanned). Upstream SQLite 3.5.9's public
+//!   API wrapper `sqlite3_value_text`: `mov r1,#1; b 0x08386718` —
+//!   a pure tail branch into the extractor with `enc = SQLITE_UTF8`.
+//!   Its three unported siblings confirm the family: 0x083917c8
+//!   (`sqlite3_value_text16le`, `mov r1,#2`), 0x083917c0
+//!   (`sqlite3_value_text16be`, `mov r1,#3`), 0x083917a4
+//!   (`sqlite3_value_text16`, r1 = 2 or 3 by the byte-order flag byte
+//!   at 0x088fa948).
+//!
 //! Algorithm: a NULL value or one flagged `MEM_Null` (0x1) yields NULL
 //! without touching anything else. Otherwise the value is coerced
 //! toward a string: `(MEM_Blob >> 3) == MEM_Str`, so a blob's flag bit
@@ -89,6 +100,7 @@
 //!   every observed call site passes — `mov r1,#1`, `ldrb` of
 //!   `pColl->enc`).
 
+use super::error::SQLITE_UTF8;
 use super::value_new::{MEM_FLAGS_OFFSET, MEM_NULL};
 use super::value_set_str::SQLITE_NOMEM;
 
@@ -294,6 +306,35 @@ pub unsafe extern "C" fn sqlite_value_text(value: *mut u8, enc: u8) -> *mut u8 {
     } else {
         core::ptr::null_mut()
     }
+}
+
+/// sqlite3_value_text — original: `FUN_0839179c` @ 0x0839179c (8
+/// bytes).
+///
+/// Upstream SQLite 3.5.9's public API wrapper
+/// (`const void *sqlite3_value_text(sqlite3_value *pVal)` in
+/// vdbemem.c):
+///
+/// ```text
+/// 0839179c  mov  r1,#0x1        @ enc = SQLITE_UTF8
+/// 083917a0  b    0x08386718     @ tail: sqlite_value_text
+/// ```
+///
+/// The r0 value pointer passes through untouched and the body is a
+/// pure tail branch — the extractor sees exactly what this wrapper
+/// sees, with `enc` forced to `SQLITE_UTF8` (1). 32 `bl` call sites,
+/// all unconditional (no predicated `blne`/`bleq` forms,
+/// binary-scanned): no caller NULL-guards the value first, the
+/// extractor's own NULL/`MEM_Null` checks are the only guard.
+///
+/// # Safety
+/// Same contract as [`sqlite_value_text`]: `value`, when non-NULL,
+/// must name a live 0x28-byte `Mem` whose flags at +0x1c may be
+/// rewritten.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn sqlite3_value_text(value: *mut u8) -> *mut u8 {
+    sqlite_value_text(value, SQLITE_UTF8)
 }
 
 #[cfg(test)]
@@ -668,6 +709,46 @@ mod tests {
             // odd-aligned path outright.
             let mut mem = TestMem::new(MEM_STR | MEM_TERM, 2, true);
             assert_eq!(sqlite_value_text(mem.ptr(), 2 | SQLITE_UTF16_ALIGNED), core::ptr::null_mut());
+        }
+    }
+
+    #[test]
+    fn the_api_wrapper_forwards_utf8_unchanged_value_and_result() {
+        let _guard = SLOT_LOCK.lock().unwrap();
+        unsafe {
+            with_recorders(SQLITE_OK, true, true, || {
+                // The recode path: ChangeEncoding receives SQLITE_UTF8
+                // exactly (the original's `mov r1,#1`); the value
+                // pointer and the result pointer pass through
+                // untouched.
+                let mut mem = TestMem::new(MEM_STR | MEM_TERM, 2, false);
+                let z = mem.z();
+                assert_eq!(sqlite3_value_text(mem.ptr()), z);
+                assert_eq!(
+                    calls(),
+                    [Call::ChangeEncoding(SQLITE_UTF8), Call::NulTerminate],
+                    "the wrapper hands enc = SQLITE_UTF8 (1) down",
+                );
+            });
+
+            // The stringify path sees the same SQLITE_UTF8.
+            with_recorders(SQLITE_OK, true, true, || {
+                let mut mem = TestMem::new(MEM_INT, 1, false);
+                let z = mem.z();
+                assert_eq!(sqlite3_value_text(mem.ptr()), z);
+                assert_eq!(calls(), [Call::Stringify(SQLITE_UTF8)]);
+            });
+
+            // NULL: no caller among the 32 unconditional `bl` sites
+            // guards first, so NULL must reach the extractor's own
+            // short-circuit — NULL out, no callee invoked.
+            with_recorders(SQLITE_OK, true, true, || {
+                assert_eq!(
+                    sqlite3_value_text(core::ptr::null_mut()),
+                    core::ptr::null_mut(),
+                );
+                assert!(calls().is_empty());
+            });
         }
     }
 
