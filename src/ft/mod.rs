@@ -6,6 +6,7 @@ pub mod arith;
 pub mod buffer;
 pub mod calc;
 pub mod charmap;
+pub mod cff_builder;
 pub mod conditional_offset;
 pub mod error;
 pub mod glyph_slot;
