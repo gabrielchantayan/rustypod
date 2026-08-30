@@ -17355,6 +17355,34 @@ functions:
       original's bl pair - match.py shows the same guard/bump/guard
       structure inside a larger body.
 
+  - address: 0x0839f148
+    ghidra: FUN_0839f148
+    name: refcounted_ptr_construct_variant
+    size: 104
+    sig: "RefcountedBody **refcounted_ptr_construct_variant(RefcountedBody **slot, usize implementation, u32 want_mutex)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r5: slot
+      param_2/r1/r6: implementation
+      param_3/r2/r8: want_mutex
+      piVar1/r4: body
+      puVar2: mutex
+    notes: >-
+      29 bl call sites, all unconditional, verified by decoding every ARM
+      B/BL word in osos.dec: no b sites, no predicated forms, and no
+      data-word references, so it is not virtually dispatched. Raw bytes
+      establish the exact 104-byte extent: the next separately linked
+      function begins at 0x0839f1b0. This C++ template instantiation is
+      byte-identical to refcounted_ptr_construct @ 0x0839ed38 after
+      normalizing the three bl displacements. It clears slot first; with a
+      non-NULL implementation, tag-2 operator_new(12) creates
+      RefcountedBody { implementation, 1, NULL }; want_mutex allocates and
+      zeroes tag-2 operator_new(8), stores it at body+8, then calls
+      mutex_create before publishing body. Returns slot. The dedicated
+      .text.refcounted_ptr_construct_variant section prevents LLVM folding
+      this separately hookable export into the canonical template instance.
+
   - address: 0x0839ed38
     ghidra: FUN_0839ed38
     name: refcounted_ptr_construct
