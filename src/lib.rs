@@ -42,6 +42,7 @@ pub mod jpeg;
 pub mod kernel;
 pub mod libm;
 pub mod libc;
+pub mod mov;
 pub mod printf;
 pub mod runtime;
 pub mod scanf;

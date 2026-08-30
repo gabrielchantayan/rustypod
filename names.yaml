@@ -8991,6 +8991,35 @@ functions:
       alignment; identical for every pointer it supported). 8 call
       sites, binary-scanned, callers @ 0x0827a2f4..0x0827b09c.
 
+  - address: 0x081c8034
+    ghidra: FUN_081c8034
+    name: mov_atom_info
+    size: 112
+    sig: "void *mov_atom_info(void *this_unused, void *table, u32 fourcc, u64 *offset_out, u64 *size_out, u8 *flag_out)"
+    module: mov/atom_info
+    status: ported
+    vars: {param_1: this_unused, param_2: table, param_3: fourcc, param_4: offset_out, param_5: size_out, param_6: flag_out}
+    notes: >-
+      MOV/MP4 demuxer per-atom info query. r0 arg dropped unread
+      (mov r0,r1 @ 0x081c8040). Dereferences the table handle
+      (0x08280114, ldr r0,[r0]), searches the fourcc-keyed atom table
+      (0x080a3ea0, populate=1), and unpacks the node via three
+      getters: u64 payload offset @ node+0x10 (0x0814d230), u64 total
+      size @ node+0x18 (0x0814d1ac), u8 flag @ node+0x20 (0x0814d270).
+      NULL node -> writes -1/-1/0 to the outputs and returns NULL;
+      callers test the u64s against -1 for atom presence. All 33 call
+      sites plain bl (0 predicated), binary-verified; no DATA word
+      references the address. Keys are fourccs (elst/tkhd/mdhd/stts/
+      stsd literals @ 0x081c3088..0x081c30a4 in caller FUN_081c2098).
+      Node layout from getters/setters/init 0x0814d2b0: +0x00/+0x04
+      child links, +0x08 duplicate-fourcc chain, +0x21 kind byte 0..5,
+      +0x24 fourcc key; offset setter rejects < 0, size setter
+      rejects < 8, both fields born -1. All five callees unported -
+      port dispatches them through MOV_ATOM_INFO_OPS; target defaults
+      transmute the ROM addresses (hook-ready on device), host
+      defaults inert. Ghidra C faithful here (mvneq r0,#0 is
+      move-NOT, i.e. -1).
+
   - address: 0x081c8a84
     ghidra: FUN_081c8a84
     name: list_find_by_id16
