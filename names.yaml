@@ -15272,6 +15272,77 @@ functions:
       the record at +0xc and longjmps through the jump buffer at +0x10.
 
 
+  - address: 0x08291c24
+    ghidra: FUN_08291c24
+    name: string_view_construct
+    size: 148
+    sig: "StringView *string_view_construct(StringView *view, ResourceProvider *resources, void *controller, void *parent, const StringViewSpec *spec)"
+    module: ui/string_view
+    status: ported
+    renames:
+      param_1: view
+      in_stack_00000000: spec
+      puVar1: view
+      iVar2: member_cursor
+      iVar3: view_recovered
+    notes: >-
+      Constructor of the 0x220-byte 'Str ' string view - the retailOS
+      screen element that displays a resource-resolved string in a
+      resource-resolved typeface and re-evaluates itself on an embedded
+      timer. Ghidra's 148-byte extent is exactly right for once:
+      0x08291c24..0x08291cb8 code ending `ldmia sp!,{r3,r4,r5,pc}`,
+      then the 4-byte vtable literal 0x089a7178 @ 0x08291cb8, and the
+      deleting destructor @ 0x08291cbc (which Ghidra does not list)
+      starts immediately after. 32 bl call sites, all unconditional,
+      verified by decoding every B/BL word in osos.dec; one is the new
+      wrapper @ 0x082907a4 (operator_new(0x220), then this, forwarding
+      all four register arguments with the spec stacked), the rest are
+      inlined copies of that pair in the 0x0821xxxx..0x0826xxxx screen
+      builders. Ghidra's C types it `int FUN_08291c24(void)` - it
+      actually takes four register arguments plus the stacked spec and
+      returns `view` (the closing sub r4,r0,#0x1e0 / mov r0,r4).
+      Class identity comes from the post-construction resolve step
+      0x08290f6c -> 0x08290d7c: it compares the view's class code
+      (view+0x40, from spec+0x04) against 'Str ' (literal 0x53747220 @
+      0x08290f5c), resolves spec+0x58 as 'Str ' or 'StSt'
+      (string-style) and spec+0x5c as 'Type' (typeface) into the
+      three-word resource reference at view+0xf8, and sets the
+      resolved byte at view+0x1f0. Layout (confirmed by the unlisted
+      destructor @ 0x08291cd4, which replants the same vtable from its
+      own literal @ 0x08291d84): vtable +0x00, grand-base view
+      subobject (ctor 0x0826f26c) to +0xa4, draw state +0xa4 (0x54),
+      resource_ref +0xf8 (3 words), StringObjects +0x104/+0x10c, four
+      owned pair-header service objects +0x114..+0x120 (born NULL, dtor
+      pair_header_destruct + operator delete each), PairHeaderBase
+      +0x124 (0xb8), cleared word +0x1dc, ObservableArray +0x1e0 (16),
+      resolved flag +0x1f0, embedded 0x2c-byte timer +0x1f4 built by
+      timer_schedule_shim(view, view+0x1f4, 0, 0) with the view as its
+      config word. Callees: draw_state_construct, string_default_construct
+      x2, pair_header_base_construct, observable_array_construct and
+      timer_schedule_shim are already ported and called directly; the
+      grand-base ctor 0x0826f26c and the resolver 0x08290f6c ride the
+      new STRING_VIEW_OPS seam (firmware transmute on target, panic on
+      host, event_list.rs pattern); the fully decoded 12-byte
+      three-word clear 0x081e170c rides the same seam with a
+      behaviour-identical default rather than a stub. Deviations: the
+      port keeps `view` in hand instead of the original's r0 byte
+      arithmetic (sub r0,r0,#0x10c / #0x124 / sub r4,r0,#0x1e0), which
+      would be wrong on a 64-bit host (styled_text_view precedent);
+      the vtable is the u32 ROM address STRING_VIEW_VTABLE_ADDRESS -
+      the image words at 0x089a7178 are stale RW init data (they
+      decode as mid-function fragments), same finding as
+      styled_text_view's vtable. Host tests use the unique
+      hints::STRING_VIEW slab (0x27000000) with the fixture at slab+4
+      so the ported string_default_construct's host-width pointer
+      stores land 8-aligned; the string payload stores' overlap of the
+      following members on 64-bit hosts is covered by the later
+      construction steps in both the original and the port and is
+      documented in the module header. match.py structural: same
+      offsets (+0xa4/+0xf8/+0x104/+0x10c/+0x114..+0x120/+0x124/+0x1dc/
+      +0x1e0/+0x1f4), same call order, same vtable literal; the diff
+      is the crate fp frame, the ops-table blx indirections and LLVM
+      inlining timer_schedule_shim's argument rotation.
+
   - address: 0x08292a88
     ghidra: FUN_08292a88
     name: wheel_sample_capture
