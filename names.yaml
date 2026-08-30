@@ -32055,6 +32055,36 @@ functions:
       LLVM folding the two bound checks into one sub/cmn/bcc, an ldm
       for the cursor words, and reassociated shift/mask sequences
       (value-identical).
+
+  - address: 0x082d27a8
+    ghidra: FUN_082d27a8
+    name: word_list_copy
+    size: 44
+    sig: "void word_list_copy(const WordList *src, WordList *dst)"
+    module: util/word_list
+    status: ported
+    renames:
+      param_1: src
+      param_2: dst
+    notes: >-
+      Copies the CONTENTS of a small counted u32 list: ldrh src->count,
+      memcpy(dst->entries, src->entries, count*4) via the ROM memcpy
+      veneer @ 0x08037df8, then a SECOND ldrh of src->count stored to
+      dst->count. The container is {u16 count @ +0x00, u16 capacity @
+      +0x02, u32 *entries @ +0x04} with inline storage at +0x08, laid
+      out by constructor FUN_082d81e4 @ 0x082d81e4 (count 0, capacity 6,
+      entries = self+8); dst keeps its own capacity and buffer pointer.
+      Callers snapshot/restore operand lists (e.g. FUN_082cb18c @
+      0x082cb18c). Companion FUN_082d27d4 @ 0x082d27d4 trims trailing
+      zero entries. Extent self-verified: next function starts exactly
+      at 0x082d27d4, so Ghidra's 44 bytes is right. 41 bl call sites,
+      ALL unconditional (0 predicated), verified by decoding every ARM
+      B/BL word in osos.dec. The post-copy count reload is reproduced:
+      if dst->entries overlaps src's header the clobbered count is what
+      gets stored (host-tested). Port calls memcpy_forward_words (the
+      veneer's target body) directly instead of the veneer. match.py:
+      same load/lsl #2/bl memcpy/reload-count/store structure; the diff
+      is the crate fp frame and register allocation.
   - address: 0x080f4aa8
     ghidra: FUN_080f4aa8
     name: path_exists
