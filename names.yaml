@@ -39430,3 +39430,32 @@ functions:
       expected): same mov r1,#1 + branch-to-extractor core; the extra
       push/pop fp frame is the crate-wide LLVM frame-pointer
       boilerplate.
+
+  - address: 0x082728a8
+    ghidra: FUN_082728a8
+    name: bitfield_extract
+    size: 36
+    sig: "u32 bitfield_extract(const u32 *const *word_handle, u32 hi, u32 lo)"
+    module: util/bitfield
+    status: ported
+    vars: {param_1: word_handle, param_2: hi, param_3: lo}
+    notes: >-
+      (word >> lo) & ((1 << (hi - lo + 1)) - 1) - a bit-field pulled
+      out of a word reached through a handle (callers pass &local where
+      local holds the word address; two ldr derefs). Raw bytes decoded:
+      e0411002 e5900000 e2811001 e3a03001 e5900000 e1a01113 e2411001
+      e0010230 e12fff1e - 36 bytes exact, bx lr at +0x20, next
+      function's push opens at 0x082728cc. Call sites verified by
+      decoding every B/BL word in osos.dec: exactly 32, all plain
+      unconditional bl, zero predicated, all from the packed-config
+      decoder FUN_08188b8c @ 0x08188b8c (TCDemoMode area), which pulls
+      32 two-bit fields out of the words at 0x38400044/0x38400048 into
+      a byte struct. Both shifts are by register, so ARM register-shift
+      rules apply (amount = bottom byte, 32..=255 yields 0), replicated
+      via berec::arm_lsl/arm_lsr: width 32 makes the mask all-ones,
+      lo >= 32 returns 0. Sibling FUN_0827288c @ 0x0827288c (28 bytes)
+      is the same handle convention as a single-bit test - a separate
+      port. Deliberate deviations: none. match.py (exit 1, diff
+      expected): same double-ldr + lsr + mask-build + and core; LLVM
+      renders the >=32 clamps as cmp/bhi and bicls, exactly as it does
+      for the already-ported berec_extract_bits.

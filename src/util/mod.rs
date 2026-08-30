@@ -3,6 +3,7 @@ pub mod align;
 pub mod be_read;
 pub mod beload;
 pub mod berec;
+pub mod bitfield;
 pub mod checked_word_block;
 pub mod bswap;
 pub mod context_field;
