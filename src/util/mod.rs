@@ -5,6 +5,7 @@ pub mod beload;
 pub mod berec;
 pub mod bitfield;
 pub mod checked_word_block;
+pub mod checked_byte_block;
 pub mod bswap;
 pub mod context_field;
 pub mod clock_pair;
