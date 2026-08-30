@@ -36,6 +36,7 @@ pub mod node_list;
 pub mod object_byte_at_5;
 pub mod object_flag_nibble;
 pub mod object_dispatch_entry;
+pub mod object_dispatch_target;
 pub mod pair_header_destruct;
 pub mod parse_result;
 pub mod path_exists;
