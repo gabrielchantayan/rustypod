@@ -30,6 +30,7 @@ pub mod raster_profile;
 pub mod service_manager_get;
 pub mod state_flags;
 pub mod stream_buffer_configuration;
+pub mod stream_read_be32;
 pub mod startup_relocation_offset;
 pub mod str_fold_upper;
 pub mod strided_cursor_advance;

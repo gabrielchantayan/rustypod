@@ -38936,3 +38936,37 @@ functions:
       direct call sites: all are plain unconditional bl instructions, with no
       predicated bl or direct B sites. Deliberate deviations: none. Reference
       C: decomp/c/032/0833dd48_FUN_0833dd48.c.
+
+  - address: 0x08057874
+    ghidra: FUN_08057874
+    name: stream_read_be32
+    size: 80
+    sig: "i32 stream_read_be32(u32 ctx, u32 *out)"
+    module: util/stream_read_be32
+    status: ported
+    renames:
+      param_1/r0: ctx
+      param_2/r1: out
+      FUN_0805e754: stream_read_core
+    notes: >-
+      Reads four bytes from a stream context via the unported stream-read
+      core @ 0x0805e754 and stores them big-endian into *out; returns 1 on
+      success, 0 on core failure, leaving *out untouched on failure. Ghidra's
+      80-byte extent verified from raw words: the u16 twin FUN_080578c4
+      (identical shape, len=2, strh) opens immediately after the final pop.
+      Decoding every B/BL word in osos.dec finds exactly 34 call sites, all
+      plain unconditional bl (matches Ghidra's count); callers cluster in
+      0x080570cc-0x080577ac walking big-endian record bodies one u32 field
+      per call. The core dereferences ctx twice (object pointer, then
+      vtable) and tail-calls vtable slot +0x10 with (object, buf, len,
+      mode=2), returning 0 on success or -3 on a short nonzero-length read;
+      it is NOT yet ported, so the port reaches it through the replaceable
+      STREAM_READ_CORE seam (ROM address 0x0805e754 on target, panic on
+      host, same pattern as util/operation_dispatch). Deliberate deviations:
+      the port assembles the word with u32::from_be_bytes; LLVM emits a
+      single word load plus rotate-based reverse instead of the original's
+      four ldrb + lsl/orr chain, same observable result. match.py
+      structural: same shape (core call -> status branch -> BE assembly ->
+      str -> 0/1 return); LLVM adds an fp frame and routes the seam call as
+      blx through a literal slot. Reference C:
+      decomp/c/004/08057874_FUN_08057874.c.
