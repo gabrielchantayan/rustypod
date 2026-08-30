@@ -28217,6 +28217,48 @@ functions:
       (push {fp,lr}/mov fp,sp/pop {fp,pc}) around the same no-op, with r0
       untouched on every path.
 
+  - address: 0x08262d70
+    ghidra: FUN_08262d70
+    name: draw_state_set_style
+    size: 8
+    sig: "void draw_state_set_style(u8 *record, u8 style)"
+    module: cxx/draw_state_style
+    status: ported
+    notes: >-
+      The style-byte setter of the 0x44-byte draw-state record
+      (cxx/draw_state.rs): one instruction, `strb r1, [r0, #16]`, then
+      `bx lr`. Whole function decoded from the raw words (1010 c0e5 /
+      1eff 2fe1). Not a veneer (no `ldr pc,[pc,#-4]` + target word) and
+      not an empty destructor (a real store, not a lone `bx lr`).
+      Ghidra OMITS the function from its C listing entirely - only its
+      callers appear - so the raw bytes are the sole authority. The next
+      function starts at 0x08262d78 (a sibling two-word setter,
+      `str r1,[r0,#8]; str r2,[r0,#12]; bx lr`, unported), confirming
+      the 8-byte extent with no trailing literal word. Call count
+      binary-verified by decoding every B/BL word in osos.dec: 36 `bl`
+      + 2 `blne` = 38, exactly Ghidra's count. No DATA word in the
+      image holds 0x08262d70, so it is never dispatched virtually.
+      The record packs the style byte at +0x10 immediately ahead of the
+      two unaligned 4-byte colours at +0x11/+0x15
+      (cxx/draw_state_color.rs); the draw call @ 0x08262bdc passes the
+      byte to the text/layout draw engine @ 0x080f1600 with both
+      colours and the clip rect. The 2 `blne` sites (0x0826cd10 /
+      0x0826cd3c) guard on a source byte != 0xff before storing 0x22 or
+      a computed code - 0xff is a CALLER-side "no style override"
+      sentinel; the callee itself has no sentinel check and no NULL
+      guard, and stores whatever byte it is handed. Observed style
+      codes: 0x21 ("a colour", the list-row path @ 0x0819b80c then also
+      calls the foreground setter) and 0x22. The original never writes
+      r0, so no caller can depend on a return value and the port is
+      void. Deviations: none behaviorally. match.py structural: the
+      core `strb r1,[r0,#16]` matches; the port adds only the crate's
+      usual fp frame (push {fp,lr}/mov fp,sp/pop {fp,pc}), same as the
+      three_word_clear leaf setters. Host tests (4): the exact byte at
+      +0x10 with the rest of the record proven untouched (both colours
+      included), all byte values incl. 0x00/0x21/0x22/0xff,
+      base-alignment agnosticism, and a seeded-record preservation
+      check.
+
   - address: 0x08271cec
     ghidra: FUN_08271cec
     name: observable_array_construct
