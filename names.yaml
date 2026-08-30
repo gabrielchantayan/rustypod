@@ -36157,6 +36157,33 @@ functions:
       negative, or unaligned values. Host tests cover each status boundary;
       match.py diff reviewed after the ARM release build.
 
+  # --- stream-buffer request flags ---
+  - address: 0x08037fe8
+    ghidra: thunk_EXT_FUN_22004450
+    name: stream_buffer_request_flags_update
+    size: 8
+    sig: "void stream_buffer_request_flags_update(u32 enable, u32 mask)"
+    module: app/buffer_refill_request
+    status: ported
+    renames:
+      param_1/r0: enable
+      param_2/r1: mask
+      DAT_08037fec: stream_buffer_request_flags_update_body (target RAM @ 0x22004450)
+      DAT_08004480: stream_buffer_request_controller_flags (target RAM @ 0x2200aebc)
+      FUN_08001e70: cpsr_disable_irq_fiq
+      FUN_08001e84: cpsr_restore_irq_fiq
+    notes: >-
+      Ghidra's 4-byte size omits the veneer literal: raw osos.dec has
+      e51ff004 at 0x08037fe8 followed by target word 0x22004450 at
+      0x08037fec. The relocator's 0x08000000 to 0x22000000 IRAM mirror
+      resolves that target to 0x08004450. Its 52-byte body saves IRQ/FIQ
+      state, volatile-loads request-controller flags at 0x2200aebc, BICs
+      mask when enable is zero or ORRs it otherwise, stores, and restores
+      the saved state. Decoding every ARM B/BL word found 30 direct calls:
+      28 unconditional bl plus blhi at 0x080f5720 and blls at 0x080f57dc;
+      no tail B caller. Host tests cover the zero and arbitrary-nonzero
+      predicate cases through a target-RAM replacement.
+
   # --- stream-buffer refill request ---
   - address: 0x08004484
     ghidra: FUN_08004484
