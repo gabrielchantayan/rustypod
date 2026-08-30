@@ -16365,6 +16365,31 @@ functions:
       field as `(pin_id << 13) & 0xffff0000` instead of
       `(pin_id >> 3) << 16`; same bits.
 
+  # --- shared-cell handle constructor ---
+  - address: 0x083b5090
+    ghidra: FUN_083b5090
+    name: shared_cell_construct
+    size: 56
+    sig: "SharedCell **shared_cell_construct(SharedCell **slot, void *value)"
+    module: cxx/shared_cell
+    status: ported
+    renames:
+      param_1/r0: slot
+      param_2/r1: value
+      iVar1: cell
+    notes: >-
+      Raw ARM extent is 56 bytes ending immediately before sibling
+      0x083b50c8. It clears the one-word slot, returns without allocating
+      for a NULL payload, otherwise invokes the already-ported tag-2
+      operator_new(8) at 0x082aadd4 and fills the new cell as
+      {value, refcount = 1}. It returns slot, not the cell. A full binary
+      scan found exactly 29 incoming BL calls; every one is unconditional,
+      with no predicated BL forms or direct tail branches. The allocator
+      result is unguarded exactly as raw ARM: allocation failure faults
+      while storing refcount. Host SharedCell uses usize for the payload
+      word so host pointer fixtures remain representable; the allocation
+      request remains the target's 8-byte cell size.
+
   # --- shared-cell handle slot comparison ---
   - address: 0x083b5120
     ghidra: FUN_083b5120

@@ -22,7 +22,7 @@
 //! (+4), then the cell itself is tag-2 `operator_delete`d. The slot is
 //! always cleared, shared reference or not.
 
-use crate::heap::veneers::operator_delete;
+use crate::heap::veneers::{operator_delete, operator_new};
 
 /// Two-word shared cell a slot points at. On the ARM target word 0 (+0)
 /// is the polymorphic payload pointer — its own first word is the vtable
@@ -37,6 +37,60 @@ pub struct SharedCell {
     /// Target +4: intrusive reference count. The constructor stores 1;
     /// a plain ARM `subs` drives the decrement, so it wraps on underflow.
     pub refcount: i32,
+}
+
+/// shared_cell_construct — original: `FUN_083b5090` @ `0x083b5090`
+/// (56 bytes; 29 `bl` call sites, ALL unconditional — zero predicated
+/// forms and zero tail `b`, verified by decoding every B/BL word in
+/// osos.dec). Whole body:
+///
+/// ```text
+/// 083b5090: push  {r4, r5, r6, lr}
+/// 083b5094: mov   r4, r0
+/// 083b5098: mov   r0, #0
+/// 083b509c: movs  r5, r1
+/// 083b50a0: str   r0, [r4]          @ *slot = NULL
+/// 083b50a4: beq   0x083b50c0        @ NULL value: return slot
+/// 083b50a8: mov   r0, #8
+/// 083b50ac: bl    0x082aadd4        @ operator_new(8)
+/// 083b50b0: mov   r1, #1
+/// 083b50b4: str   r1, [r0, #4]      @ cell->refcount = 1
+/// 083b50b8: str   r5, [r0]          @ cell->value = value
+/// 083b50bc: str   r0, [r4]          @ *slot = cell
+/// 083b50c0: mov   r0, r4
+/// 083b50c4: pop   {r4, r5, r6, pc}
+/// ```
+///
+/// Clears `slot`, then, for a non-NULL polymorphic payload, allocates an
+/// 8-byte `{value, refcount}` cell with tag-2 [`operator_new`], sets its
+/// reference count to one, and installs it in the slot. It returns `slot`.
+/// A NULL payload does not allocate. The original has no allocation-failure
+/// guard; its stores through a NULL allocator result fault, so this port
+/// likewise requires a non-NULL allocator result for a non-NULL payload.
+///
+/// Deviation: [`SharedCell::value`] is `usize` on hosts to retain host
+/// pointers in tests, while the target field is one 32-bit word; the
+/// allocation request remains the raw target size of eight bytes.
+///
+/// # Safety
+/// `slot` must be a valid, aligned writable shared-cell slot. For a
+/// non-NULL `value`, `operator_new(8)` must return writable storage for a
+/// [`SharedCell`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.shared_cell_construct")]
+#[inline(never)]
+pub unsafe extern "C" fn shared_cell_construct(
+    slot: *mut *mut SharedCell,
+    value: *mut u8,
+) -> *mut *mut SharedCell {
+    slot.write(core::ptr::null_mut());
+    if !value.is_null() {
+        let cell = operator_new(8).cast::<SharedCell>();
+        core::ptr::addr_of_mut!((*cell).refcount).write_volatile(1);
+        core::ptr::addr_of_mut!((*cell).value).write_volatile(value as usize);
+        slot.write(cell);
+    }
+    slot
 }
 
 /// shared_cell_release — original: `FUN_083b524c` @ `0x083b524c`
@@ -142,11 +196,14 @@ mod tests {
     /// Lets a recording destructor alias the caller's slot, proving the
     /// post-destructor reload.
     static mut SLOT_ALIAS: *mut *mut SharedCell = core::ptr::null_mut();
+    /// The next allocation returned by the mocked tag-2 allocator.
+    static mut NEXT_ALLOCATION: *mut u8 = core::ptr::null_mut();
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     enum Event {
         Destructor(usize),
         HeapFree(usize, usize),
+        HeapAlloc(usize, usize),
     }
 
     unsafe extern "C" fn recording_destructor(value: *mut u8) {
@@ -166,6 +223,15 @@ mod tests {
         (*core::ptr::addr_of_mut!(EVENTS)).push(Event::HeapFree(ptr as usize, tag));
     }
 
+    unsafe extern "C" fn recording_alloc(
+        _heap: *mut HeapDescriptorDescriptor,
+        size: usize,
+        tag: usize,
+    ) -> *mut u8 {
+        (*core::ptr::addr_of_mut!(EVENTS)).push(Event::HeapAlloc(size, tag));
+        core::ptr::read_volatile(core::ptr::addr_of!(NEXT_ALLOCATION))
+    }
+
     struct Bench {
         old_heap: HeapVeneerOps,
     }
@@ -180,10 +246,12 @@ mod tests {
         unsafe {
             (*core::ptr::addr_of_mut!(EVENTS)).clear();
             (*core::ptr::addr_of_mut!(SLOT_ALIAS)) = core::ptr::null_mut();
+            (*core::ptr::addr_of_mut!(NEXT_ALLOCATION)) = core::ptr::null_mut();
             let old_heap = core::ptr::read_volatile(core::ptr::addr_of!(HEAP_OPS));
             core::ptr::write_volatile(
                 core::ptr::addr_of_mut!(HEAP_OPS),
                 HeapVeneerOps {
+                    alloc: recording_alloc,
                     free: recording_free,
                     ..old_heap
                 },
@@ -203,6 +271,45 @@ mod tests {
 
     fn events() -> Vec<Event> {
         unsafe { (*core::ptr::addr_of!(EVENTS)).clone() }
+    }
+
+    /// A NULL payload clears an existing slot, returns that same slot, and
+    /// takes the early path before the allocator call.
+    #[test]
+    fn null_payload_clears_slot_without_allocating() {
+        let _bench = bench();
+        let mut slot = 0x1234usize as *mut SharedCell;
+
+        let result = unsafe { shared_cell_construct(&mut slot, core::ptr::null_mut()) };
+
+        assert_eq!(result, core::ptr::addr_of_mut!(slot));
+        assert!(slot.is_null());
+        assert!(events().is_empty());
+    }
+
+    /// A non-NULL payload requests the raw eight-byte target cell, replaces
+    /// the old slot value, and initializes the new cell in store order.
+    #[test]
+    fn payload_allocates_and_initializes_a_shared_cell() {
+        let _bench = bench();
+        let mut cell = SharedCell {
+            value: 0,
+            refcount: -1,
+        };
+        let cell_ptr = core::ptr::addr_of_mut!(cell);
+        unsafe {
+            (*core::ptr::addr_of_mut!(NEXT_ALLOCATION)) = cell_ptr.cast();
+        }
+        let payload = 0x1234_5678usize as *mut u8;
+        let mut slot = 0xfeed_faceusize as *mut SharedCell;
+
+        let result = unsafe { shared_cell_construct(&mut slot, payload) };
+
+        assert_eq!(result, core::ptr::addr_of_mut!(slot));
+        assert_eq!(slot, cell_ptr);
+        assert_eq!(cell.value, payload as usize);
+        assert_eq!(cell.refcount, 1);
+        assert_eq!(events(), std::vec![Event::HeapAlloc(8, 2)]);
     }
 
     /// NULL cell: the original returns before touching anything, and the
