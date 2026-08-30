@@ -70,6 +70,7 @@
 //! | 0x0812f0a4 | [`instance_of_class_4e00`] | 24 | 7 `bl` |
 //! | 0x081353e8 | [`instance_of_class_8f00`] | 24 | 2 `bl` |
 //! | 0x0815ff34 | [`instance_of_class_8700`] | 24 | 14 `bl` |
+//! | 0x08160000 | [`instance_8700_owned_object`] | 16 | 31 `bl` |
 //! | 0x0827f218 | [`instance_of_class_5780`] | 28 | 10 `bl` |
 //! | 0x08284e2c | [`instance_of_class_6180`] | 28 | 15 `bl` |
 //! | 0x08289690 | [`instance_of_class_3280`] | 24 | 37 `bl` |
@@ -737,6 +738,41 @@ pub const CLASS_ID_8700: u32 = 0x8700;
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn instance_of_class_8700() -> *mut u8 {
     instance_of_class(CLASS_ID_8700)
+}
+
+/// instance_8700_owned_object — original: `FUN_08160000` @ 0x08160000
+/// (16 bytes; **31 `bl` call sites**, binary-scanned over osos.dec —
+/// Ghidra's count of 31 is exact; no predicated forms).
+///
+/// ```text
+/// push {r4, lr}
+/// bl   0x0815ff34        @ instance_of_class_8700
+/// ldr  r0, [r0, #0x2c]
+/// pop  {r4, pc}
+/// ```
+///
+/// Returns the pointer field at +0x2c of the class-0x8700 singleton.
+/// The class's constructor @ 0x08160024 fills that field with a fresh
+/// `operator_new(0xe4)` block run through the constructor @ 0x081a4f64
+/// (which takes the 0x8700 object as its second argument and registers
+/// the finished sub-object under class id 0x8780), so the returned
+/// pointer is the 0x8780 sub-object the singleton owns. Neither class
+/// is named to the class-name factory, so the port claims no more than
+/// the offset and the ownership. Callers hand the result back to the
+/// 0x081a3xxx/0x081a4xxx method cluster of that sub-object's class.
+///
+/// No NULL guard, matching the original: when 0x8700 was never
+/// registered, [`instance_of_class_8700`] returns NULL and the
+/// `ldr [r0, #0x2c]` faults — the port keeps that fault rather than
+/// inventing a guard.
+///
+/// Deviation: none beyond reading the field through an aligned `u32`
+/// load (the object is word-aligned by construction).
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn instance_8700_owned_object() -> *mut u8 {
+    let instance = instance_of_class_8700();
+    (instance as *const u32).add(0x2c / 4).read() as *mut u8
 }
 
 /// The class id 0x5780 (the literal @ 0x0827f234). Nothing registers it
@@ -1436,6 +1472,80 @@ mod tests {
             let this = ptr::addr_of_mut!(object) as *mut u8;
             registry_register(this, CLASS_ID_8700);
             assert_eq!(instance_of_class_8700(), this);
+        }
+        restore(guard);
+    }
+
+    // ---- the 0x8700 singleton's owned-sub-object getter ----
+
+    /// A class-0x8700 instance large enough to carry the +0x2c field
+    /// the getter reads. The head matches [`TestObject`] so the shared
+    /// `test_cast` accepts it; the assertion pins `owned` to +0x2c on
+    /// the host layout (the device layout is fixed by the firmware,
+    /// the fixture only has to agree with it on the field under test).
+    /// `owned` is a `u32` word, not a pointer: on a 64-bit host a
+    /// pointer field could never sit at +0x2c (8-byte alignment), and
+    /// the getter only reads the raw word anyway.
+    #[repr(C)]
+    struct Instance8700 {
+        vtable: *const FrameworkObjectVtable,
+        accepts: u32,
+        before: u32,
+        _pad: [u32; 7],
+        owned: u32,
+        after: u32,
+    }
+
+    const _: [u8; 0x2c] = [0; core::mem::offset_of!(Instance8700, owned)];
+
+    fn instance_8700_with(owned: u32) -> Instance8700 {
+        Instance8700 {
+            vtable: &TEST_OBJECT_VTABLE,
+            accepts: CLASS_ID_8700,
+            before: 0xaaaa_aaaa,
+            _pad: [0xbbbb_bbbb; 7],
+            owned,
+            after: 0xcccc_cccc,
+        }
+    }
+
+    #[test]
+    fn the_owned_object_getter_returns_the_word_at_2c() {
+        let guard = mock();
+        unsafe {
+            let owned = 0x089a_1234;
+            let mut object = instance_8700_with(owned);
+            let this = ptr::addr_of_mut!(object) as *mut u8;
+            registry_register(this, CLASS_ID_8700);
+            assert_eq!(instance_8700_owned_object() as u32, owned);
+            assert_eq!(object.before, 0xaaaa_aaaa, "the read stops at +0x2c");
+            assert_eq!(object.after, 0xcccc_cccc, "the read stops at +0x2c");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_owned_object_getter_rereads_the_field_on_every_call() {
+        let guard = mock();
+        unsafe {
+            let mut object = instance_8700_with(0x1111_1111);
+            let this = ptr::addr_of_mut!(object) as *mut u8;
+            registry_register(this, CLASS_ID_8700);
+            assert_eq!(instance_8700_owned_object() as u32, 0x1111_1111);
+            object.owned = 0x2222_2222;
+            assert_eq!(instance_8700_owned_object() as u32, 0x2222_2222, "no caching");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_owned_object_getter_preserves_a_null_field() {
+        let guard = mock();
+        unsafe {
+            let mut object = instance_8700_with(0);
+            let this = ptr::addr_of_mut!(object) as *mut u8;
+            registry_register(this, CLASS_ID_8700);
+            assert!(instance_8700_owned_object().is_null());
         }
         restore(guard);
     }
