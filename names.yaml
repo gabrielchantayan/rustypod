@@ -39510,6 +39510,39 @@ functions:
       prologue, and LLVM splitting the predicated `bleq heap_panic`
       into `beq` + a tail bl after the pop.
 
+  # --- UI animation current-value setter ---
+  - address: 0x08166b2c
+    ghidra: FUN_08166b2c
+    name: animation_set_current_value
+    size: 88
+    sig: "void animation_set_current_value(Animation *this, FixedValue *value)"
+    module: app/animation
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: value
+      DAT_08166b84: SCHEDULER_SINGLETON_GLOBAL (pool word 0x089cc7e0)
+      FUN_082738e0: wheel_remove (unported, ANIMATION_INIT_OPS seam)
+      FUN_08273a14: retain_value (unported, ANIMATION_INIT_OPS seam)
+      FUN_082739e0: release_value (unported, ANIMATION_INIT_OPS seam)
+      FUN_08273898: wheel_insert (unported, ANIMATION_INIT_OPS seam)
+    notes: >-
+      True extent is the 22 instruction words 0x08166b2c..0x08166b80
+      (88 bytes); the separately linked 4-byte literal pool at
+      0x08166b84 holds 0x089cc7e0, and the next function starts at
+      0x08166b88. Decoding every ARM B/BL word in osos.dec finds exactly
+      30 call sites, all plain unconditional bl: no predicated caller
+      forms, B tail branches, or raw DATA-word references. The setter
+      removes this from the timing wheel, retains value, conditionally
+      releases the previous +0x20 current-value slot, stores value, and
+      updates +0x08 only if its unsigned rank is below value->aux + 1
+      (the ARM add wraps), then reloads the scheduler global and
+      tail-branches to wheel_insert. value has no NULL guard: the stock
+      ldr [value, #8] is unconditional. The four direct firmware callees
+      remain unported and use the existing volatile ANIMATION_INIT_OPS
+      seam; remove and insert each reload the scheduler-global word,
+      matching the two original ldr instructions.
+
   # --- UI animation constructor over three refcounted scalars ---
   - address: 0x08166b88
     ghidra: FUN_08166b88
