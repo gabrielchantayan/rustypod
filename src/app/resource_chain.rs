@@ -108,15 +108,45 @@ pub type ResourceFindFn = unsafe extern "C" fn(
     found: *mut *mut u8,
 ) -> u32;
 
-/// The provider vtable. Only slot +0x64 is decoded; the 25 words below
-/// it are named as a block so that `find` lands on +0x64 on the 32-bit
-/// target without any literal byte offset.
+/// Vtable slot +0x58: "read the entry back".
+///
+/// Invoked on the provider that accepted a write (see
+/// [`resource_chain_write`]); the result is that function's return
+/// value. Only (kind, id) are passed — the written value is not.
+pub type ResourceReadFn = unsafe extern "C" fn(
+    provider: *mut ResourceProvider,
+    kind: ResourceKind,
+    id: u32,
+) -> u32;
+
+/// Vtable slot +0x68: "take this write".
+///
+/// Returns non-zero when the provider accepted the write of `value`
+/// (with `flags`) to the entry `(kind, id)`.
+pub type ResourceWriteFn = unsafe extern "C" fn(
+    provider: *mut ResourceProvider,
+    kind: ResourceKind,
+    id: u32,
+    value: u32,
+    flags: u32,
+) -> u32;
+
+/// The provider vtable. Only slots +0x58, +0x64 and +0x68 are decoded;
+/// the words around them are named as blocks so that the decoded slots
+/// land on their original offsets on the 32-bit target without any
+/// literal byte offset.
 #[repr(C)]
 pub struct ResourceProviderVTable {
-    /// Slots +0x00..+0x60, not decoded by this port.
-    pub slots_below: [Option<unsafe extern "C" fn()>; 25],
+    /// Slots +0x00..+0x54, not decoded by this port.
+    pub slots_below: [Option<unsafe extern "C" fn()>; 22],
+    /// Slot +0x58.
+    pub read: ResourceReadFn,
+    /// Slots +0x5c..+0x60, not decoded by this port.
+    pub slots_between: [Option<unsafe extern "C" fn()>; 2],
     /// Slot +0x64.
     pub find: ResourceFindFn,
+    /// Slot +0x68.
+    pub write: ResourceWriteFn,
 }
 
 /// A node of the provider chain. Only the vtable pointer and the `next`
@@ -157,6 +187,97 @@ pub unsafe extern "C" fn resource_chain_find(
         node = (*node).next;
     }
     found
+}
+
+/// resource_chain_write — original: `FUN_08272230` @ 0x08272230
+/// (112 bytes; **28 `bl` + 2 `blne` call sites**, binary-scanned over
+/// the whole decrypted image by decoding every B/BL word — Ghidra's
+/// "30" is the sum; the predicated pair @ 0x0813427c and 0x0816b380
+/// gates the call on a caller-side condition. No DATA word in the
+/// image holds 0x08272230, so it is never dispatched virtually).
+///
+/// The write variant of [`resource_chain_find`]: offer the entry
+/// `(kind, id)` a new `value` (with `flags`) down the provider chain
+/// through vtable slot +0x68; the first provider that accepts is then
+/// asked through slot +0x58 for the entry's value, and that answer is
+/// the return. Returns 0 when no provider accepts.
+///
+/// ```text
+/// 08272230  push {r3, r4, r5, r6, r7, r8, r9, lr}  @ r3 push = the stack-arg word
+/// 08272234  ldr  r8, [sp, #32]     @ flags (5th argument, passed on the stack)
+/// 08272238  mov  r7, r3            @ value
+/// 0827223c  mov  r6, r2            @ id
+/// 08272240  mov  r5, r1            @ kind
+/// 08272244  mov  r4, r0            @ node = head
+/// 08272248  str  r8, [sp]          @ stack arg for the slot call (once)
+/// 0827224c  ldr  r0, [r4]          @ vtable = node->vtable   <- loop top
+/// 08272250  mov  r3, r7
+/// 08272254  ldr  ip, [r0, #0x68]   @ slot +0x68
+/// 08272258  mov  r0, r4
+/// 0827225c  mov  r2, r6
+/// 08272260  mov  r1, r5
+/// 08272264  blx  ip                @ node->write(node, kind, id, value, flags)
+/// 08272268  cmp  r0, #0
+/// 0827226c  ldreq r4, [r4, #0x14]  @ declined: node = node->next
+/// 08272270  beq  0x8272294
+/// 08272274  ldr  r0, [r4]          @ accepted: tail-call slot +0x58
+/// 08272278  mov  r2, r6
+/// 0827227c  ldr  r3, [r0, #0x58]
+/// 08272280  add  sp, sp, #4
+/// 08272284  mov  r0, r4
+/// 08272288  mov  r1, r5
+/// 0827228c  pop  {r4, r5, r6, r7, r8, r9, lr}
+/// 08272290  bx   r3                @ return node->read(node, kind, id)
+/// 08272294  cmp  r4, #0
+/// 08272298  bne  0x827224c
+/// 0827229c  pop  {r3, r4, r5, r6, r7, r8, r9, pc}  @ r0 = 0: nobody took it
+/// ```
+///
+/// Three details are load-bearing and are reproduced exactly. First,
+/// unlike the find sibling, entry falls INTO the loop body — the NULL
+/// test guards only the `next` link, so a NULL `head` faults on the
+/// vtable load; the port keeps the unguarded first dereference (and the
+/// unguarded slot loads). Second, the accept test is a plain non-zero
+/// test (`cmp r0, #0` / `ldreq`/`beq`), not a comparison with 1. Third,
+/// the accepting provider is asked through slot +0x58 with only
+/// `(kind, id)` — `value` and `flags` are not forwarded — and that
+/// result is returned verbatim, including 0.
+///
+/// ## How it was identified
+///
+/// The setter-side caller @ 0x0825b734 (disassembled from raw bytes)
+/// stores 4 on the stack as the fifth argument and calls with
+/// (kind `"Ui32"` @ 0x0825b7b0, id 0x60a4 @ 0x0825b7ac, the new value,
+/// 4) on the class-0x6000 singleton's provider chain — the write-side
+/// sibling of the ported `class6000_ui32_resource_60a4` getter, which
+/// reads the same (kind, id) pair through [`resource_chain_find`].
+/// Other callers (e.g. @ 0x081407b0, @ 0x0816b208) pass `flags` 4 or 0
+/// and ignore the return. The fifth argument sits on the stack per the
+/// AAPCS; a five-argument `extern "C"` signature reproduces that
+/// exactly.
+///
+/// Deviation: the original tail-branches into slot +0x58 (`bx r3`);
+/// the port calls it and returns the result — observationally identical.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn resource_chain_write(
+    head: *mut ResourceProvider,
+    kind: ResourceKind,
+    id: u32,
+    value: u32,
+    flags: u32,
+) -> u32 {
+    let mut node = head;
+    loop {
+        let vtable = (*node).vtable;
+        if ((*vtable).write)(node, kind, id, value, flags) != 0 {
+            return ((*vtable).read)(node, kind, id);
+        }
+        node = (*node).next;
+        if node.is_null() {
+            return 0;
+        }
+    }
 }
 
 /// resource_chain_find_bitmap — original: `FUN_0827238c` @ 0x0827238c
@@ -243,7 +364,7 @@ mod tests {
     // The recorder is process-global because the callback is a plain
     // `extern "C"` function pointer, exactly like the original's slot;
     // the tests in this module run under one lock.
-    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
     static mut CALLS: Vec<Call> = Vec::new();
     static mut SCRIPTS: Vec<Script> = Vec::new();
 
@@ -264,8 +385,32 @@ mod tests {
         script.answers
     }
 
-    const VTABLE: ResourceProviderVTable =
-        ResourceProviderVTable { slots_below: [None; 25], find: scripted_find };
+    /// The find tests never dispatch the write-path slots; these stubs
+    /// only fill the vtable.
+    unsafe extern "C" fn read_not_called(
+        _provider: *mut ResourceProvider,
+        _kind: ResourceKind,
+        _id: u32,
+    ) -> u32 {
+        0
+    }
+    unsafe extern "C" fn write_not_called(
+        _provider: *mut ResourceProvider,
+        _kind: ResourceKind,
+        _id: u32,
+        _value: u32,
+        _flags: u32,
+    ) -> u32 {
+        0
+    }
+
+    const VTABLE: ResourceProviderVTable = ResourceProviderVTable {
+        slots_below: [None; 22],
+        read: read_not_called,
+        slots_between: [None; 2],
+        find: scripted_find,
+        write: write_not_called,
+    };
 
     /// A chain of `scripts.len()` providers, each running the script at
     /// its own position. Boxed so the node addresses are stable and
@@ -314,7 +459,7 @@ mod tests {
 
     #[test]
     fn empty_chain_returns_null_without_asking_anyone() {
-        let _lock = TEST_LOCK.lock().unwrap();
+        let _lock = TEST_LOCK.lock();
         let mut chain = Chain::new(&[]);
         let head = chain.head();
         assert!(unsafe { resource_chain_find(head, ResourceKind::STRING, 7) }.is_null());
@@ -323,7 +468,7 @@ mod tests {
 
     #[test]
     fn stops_at_the_first_provider_that_answers() {
-        let _lock = TEST_LOCK.lock().unwrap();
+        let _lock = TEST_LOCK.lock();
         let mut chain = Chain::new(&[Script::answers(0xabc), Script::answers(0xdef)]);
         let head = chain.head();
 
@@ -335,7 +480,7 @@ mod tests {
 
     #[test]
     fn walks_the_chain_in_order_forwarding_kind_and_id_verbatim() {
-        let _lock = TEST_LOCK.lock().unwrap();
+        let _lock = TEST_LOCK.lock();
         let mut chain =
             Chain::new(&[Script::passes(), Script::passes(), Script::answers(0x1234)]);
         let head = chain.head();
@@ -355,7 +500,7 @@ mod tests {
 
     #[test]
     fn nobody_answers_returns_null_after_asking_everyone() {
-        let _lock = TEST_LOCK.lock().unwrap();
+        let _lock = TEST_LOCK.lock();
         let mut chain = Chain::new(&[Script::passes(), Script::passes()]);
         let head = chain.head();
 
@@ -365,7 +510,7 @@ mod tests {
 
     #[test]
     fn a_write_from_a_provider_that_declines_survives_to_the_result() {
-        let _lock = TEST_LOCK.lock().unwrap();
+        let _lock = TEST_LOCK.lock();
         // The out word is cleared once, before the loop — so a provider
         // that fills it in and then reports "not mine" still decides the
         // result when nobody else answers. This is the original's
@@ -383,7 +528,7 @@ mod tests {
 
     #[test]
     fn an_answer_without_a_write_yields_null() {
-        let _lock = TEST_LOCK.lock().unwrap();
+        let _lock = TEST_LOCK.lock();
         let mut chain = Chain::new(&[Script { writes: None, answers: 1 }, Script::answers(9)]);
         let head = chain.head();
 
@@ -393,7 +538,7 @@ mod tests {
 
     #[test]
     fn any_nonzero_answer_stops_the_walk() {
-        let _lock = TEST_LOCK.lock().unwrap();
+        let _lock = TEST_LOCK.lock();
         // `cmp r0, #0; bne` — not a comparison with 1.
         for answers in [1u32, 2, 0x8000_0000, u32::MAX] {
             let mut chain = Chain::new(&[
@@ -411,7 +556,7 @@ mod tests {
 
     #[test]
     fn each_providers_own_vtable_is_used() {
-        let _lock = TEST_LOCK.lock().unwrap();
+        let _lock = TEST_LOCK.lock();
         // The slot is re-loaded from `node->vtable` every iteration, so a
         // chain of mixed classes dispatches per node. A second vtable
         // whose slot answers immediately proves the reload.
@@ -424,8 +569,13 @@ mod tests {
             *found = 0x4242 as *mut u8;
             1
         }
-        static OTHER: ResourceProviderVTable =
-            ResourceProviderVTable { slots_below: [None; 25], find: always_answers };
+        static OTHER: ResourceProviderVTable = ResourceProviderVTable {
+            slots_below: [None; 22],
+            read: read_not_called,
+            slots_between: [None; 2],
+            find: always_answers,
+            write: write_not_called,
+        };
 
         let mut chain = Chain::new(&[Script::passes(), Script::passes()]);
         chain.nodes[1].vtable = &OTHER;
@@ -439,7 +589,7 @@ mod tests {
 
     #[test]
     fn string_thunk_binds_the_str_kind_and_forwards_the_id() {
-        let _lock = TEST_LOCK.lock().unwrap();
+        let _lock = TEST_LOCK.lock();
         let mut chain = Chain::new(&[Script::answers(0xc0de)]);
         let head = chain.head();
 
@@ -454,7 +604,7 @@ mod tests {
 
     #[test]
     fn string_thunk_on_an_empty_chain_returns_null() {
-        let _lock = TEST_LOCK.lock().unwrap();
+        let _lock = TEST_LOCK.lock();
         let mut chain = Chain::new(&[]);
         let head = chain.head();
         assert!(unsafe { resource_chain_find_string(head, 5) }.is_null());
@@ -462,7 +612,7 @@ mod tests {
 
     #[test]
     fn bitmap_thunk_binds_the_bmap_kind_and_forwards_the_id() {
-        let _lock = TEST_LOCK.lock().unwrap();
+        let _lock = TEST_LOCK.lock();
         let mut chain = Chain::new(&[Script::answers(0xb17a)]);
         let head = chain.head();
 
@@ -477,7 +627,7 @@ mod tests {
 
     #[test]
     fn bitmap_thunk_on_an_empty_chain_returns_null() {
-        let _lock = TEST_LOCK.lock().unwrap();
+        let _lock = TEST_LOCK.lock();
         let mut chain = Chain::new(&[]);
         let head = chain.head();
         assert!(unsafe { resource_chain_find_bitmap(head, 5) }.is_null());
@@ -488,7 +638,7 @@ mod tests {
         // The only difference between 0x0827238c and 0x0827239c is the
         // literal they load into r1; a build that folded the two bodies
         // onto one symbol would show up right here.
-        let _lock = TEST_LOCK.lock().unwrap();
+        let _lock = TEST_LOCK.lock();
         let mut chain = Chain::new(&[Script::passes(), Script::passes()]);
         let head = chain.head();
 
@@ -511,15 +661,316 @@ mod tests {
         assert_eq!(&ResourceKind::BITMAP.0.to_be_bytes(), b"BMap");
     }
 
+    // ---- resource_chain_write harness -----------------------------
+
+    /// What one scripted provider saw when it was offered a write.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    struct WriteCall {
+        provider: *mut ResourceProvider,
+        kind: ResourceKind,
+        id: u32,
+        value: u32,
+        flags: u32,
+    }
+
+    /// What the read-back slot saw on the accepting provider.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    struct ReadCall {
+        provider: *mut ResourceProvider,
+        kind: ResourceKind,
+        id: u32,
+    }
+
+    /// Scripted behavior of one provider on the write path: whether it
+    /// accepts the write, and (when it does) what its read-back slot
+    /// returns.
+    #[derive(Clone, Copy)]
+    struct WriteScript {
+        accepts: u32,
+        read_result: u32,
+    }
+
+    impl WriteScript {
+        /// Declines the write.
+        const fn declines() -> WriteScript {
+            WriteScript { accepts: 0, read_result: 0 }
+        }
+        /// Accepts the write; the read-back returns `read_result`.
+        const fn accepts(accepts: u32, read_result: u32) -> WriteScript {
+            WriteScript { accepts, read_result }
+        }
+    }
+
+    static mut WRITE_CALLS: Vec<WriteCall> = Vec::new();
+    static mut READ_CALLS: Vec<ReadCall> = Vec::new();
+    static mut WRITE_SCRIPTS: Vec<WriteScript> = Vec::new();
+
+    /// The write tests never dispatch slot +0x64; this stub only fills
+    /// the vtable.
+    unsafe extern "C" fn find_not_called(
+        _provider: *mut ResourceProvider,
+        _kind: ResourceKind,
+        _id: u32,
+        _found: *mut *mut u8,
+    ) -> u32 {
+        0
+    }
+
+    /// The scripted vtable slot +0x68: records the offer, then accepts
+    /// or declines per the script for its position in the chain.
+    unsafe extern "C" fn scripted_write(
+        provider: *mut ResourceProvider,
+        kind: ResourceKind,
+        id: u32,
+        value: u32,
+        flags: u32,
+    ) -> u32 {
+        let index = WRITE_CALLS.len();
+        WRITE_CALLS.push(WriteCall { provider, kind, id, value, flags });
+        WRITE_SCRIPTS[index].accepts
+    }
+
+    /// The scripted vtable slot +0x58: records the read-back and
+    /// returns the script's result for the provider that accepted.
+    unsafe extern "C" fn scripted_read(
+        provider: *mut ResourceProvider,
+        kind: ResourceKind,
+        id: u32,
+    ) -> u32 {
+        READ_CALLS.push(ReadCall { provider, kind, id });
+        // The read runs on the provider whose write accepted; its
+        // script sits at the last write call's position.
+        WRITE_SCRIPTS[WRITE_CALLS.len() - 1].read_result
+    }
+
+    const WRITE_VTABLE: ResourceProviderVTable = ResourceProviderVTable {
+        slots_below: [None; 22],
+        read: scripted_read,
+        slots_between: [None; 2],
+        find: find_not_called,
+        write: scripted_write,
+    };
+
+    /// A chain of write-path providers, each running the script at its
+    /// own position. Boxed so the node addresses are stable.
+    struct WriteChain {
+        nodes: Vec<std::boxed::Box<ResourceProvider>>,
+    }
+
+    impl WriteChain {
+        fn new(scripts: &[WriteScript]) -> WriteChain {
+            unsafe {
+                WRITE_CALLS = Vec::new();
+                READ_CALLS = Vec::new();
+                WRITE_SCRIPTS = scripts.to_vec();
+            }
+            let mut nodes: Vec<std::boxed::Box<ResourceProvider>> = (0..scripts.len())
+                .map(|_| {
+                    std::boxed::Box::new(ResourceProvider {
+                        vtable: &WRITE_VTABLE,
+                        state_below_next: [ptr::null_mut(); 4],
+                        next: ptr::null_mut(),
+                    })
+                })
+                .collect();
+            for i in (1..nodes.len()).rev() {
+                let next = &mut *nodes[i] as *mut ResourceProvider;
+                nodes[i - 1].next = next;
+            }
+            WriteChain { nodes }
+        }
+
+        fn head(&mut self) -> *mut ResourceProvider {
+            match self.nodes.first_mut() {
+                Some(node) => &mut **node as *mut ResourceProvider,
+                None => ptr::null_mut(),
+            }
+        }
+
+        fn node(&mut self, index: usize) -> *mut ResourceProvider {
+            &mut *self.nodes[index] as *mut ResourceProvider
+        }
+
+        fn write_calls(&self) -> Vec<WriteCall> {
+            unsafe { WRITE_CALLS.clone() }
+        }
+
+        fn read_calls(&self) -> Vec<ReadCall> {
+            unsafe { READ_CALLS.clone() }
+        }
+    }
+
     #[test]
-    fn vtable_slot_lands_on_0x64_on_the_32_bit_target() {
+    fn write_first_acceptor_is_read_back_and_stops_the_walk() {
+        let _lock = TEST_LOCK.lock();
+        let mut chain = WriteChain::new(&[
+            WriteScript::accepts(1, 0x1234),
+            WriteScript::accepts(1, 0x5678),
+        ]);
+        let head = chain.head();
+
+        let result = unsafe {
+            resource_chain_write(head, ResourceKind::BITMAP, 3, 0xdead_beef, 4)
+        };
+
+        assert_eq!(result, 0x1234, "the read-back result is the return value");
+        assert_eq!(
+            chain.write_calls(),
+            [WriteCall {
+                provider: chain.node(0),
+                kind: ResourceKind::BITMAP,
+                id: 3,
+                value: 0xdead_beef,
+                flags: 4,
+            }],
+            "the second provider is never offered the write"
+        );
+        assert_eq!(
+            chain.read_calls(),
+            [ReadCall { provider: chain.node(0), kind: ResourceKind::BITMAP, id: 3 }],
+            "the read-back gets (kind, id) only — value and flags are not forwarded"
+        );
+    }
+
+    #[test]
+    fn write_walks_declining_providers_in_order_forwarding_args_verbatim() {
+        let _lock = TEST_LOCK.lock();
+        let mut chain = WriteChain::new(&[
+            WriteScript::declines(),
+            WriteScript::declines(),
+            WriteScript::accepts(1, 0x77),
+        ]);
+        let head = chain.head();
+
+        let result = unsafe {
+            resource_chain_write(head, ResourceKind(0x5569_3332), 0x8000_0001, 0x60a4, 0)
+        };
+
+        assert_eq!(result, 0x77);
+        let expected: Vec<WriteCall> = (0..3)
+            .map(|i| WriteCall {
+                provider: chain.node(i),
+                kind: ResourceKind(0x5569_3332),
+                id: 0x8000_0001,
+                value: 0x60a4,
+                flags: 0,
+            })
+            .collect();
+        assert_eq!(chain.write_calls(), expected);
+        assert_eq!(
+            chain.read_calls(),
+            [ReadCall { provider: chain.node(2), kind: ResourceKind(0x5569_3332), id: 0x8000_0001 }]
+        );
+    }
+
+    #[test]
+    fn write_nobody_accepts_returns_zero_and_never_reads_back() {
+        let _lock = TEST_LOCK.lock();
+        let mut chain = WriteChain::new(&[WriteScript::declines(), WriteScript::declines()]);
+        let head = chain.head();
+
+        let result = unsafe { resource_chain_write(head, ResourceKind::STRING, 1, 9, 4) };
+
+        assert_eq!(result, 0);
+        assert_eq!(chain.write_calls().len(), 2, "every provider was offered the write");
+        assert!(chain.read_calls().is_empty(), "slot +0x58 runs only after an accept");
+    }
+
+    #[test]
+    fn write_any_nonzero_accept_stops_the_walk() {
+        let _lock = TEST_LOCK.lock();
+        // `cmp r0, #0; ldreq/beq` — not a comparison with 1.
+        for accepts in [1u32, 2, 0x8000_0000, u32::MAX] {
+            let mut chain = WriteChain::new(&[
+                WriteScript::accepts(accepts, 0x55),
+                WriteScript::accepts(1, 0x66),
+            ]);
+            let head = chain.head();
+
+            let result = unsafe { resource_chain_write(head, ResourceKind::STRING, 0, 0, 0) };
+
+            assert_eq!(result, 0x55, "accept {accepts:#x} must stop the walk");
+            assert_eq!(chain.write_calls().len(), 1);
+            assert_eq!(chain.read_calls().len(), 1);
+        }
+    }
+
+    #[test]
+    fn write_a_zero_read_back_is_still_the_result() {
+        let _lock = TEST_LOCK.lock();
+        // The accept already happened, so a 0 from slot +0x58 is the
+        // return value — distinguishable from "nobody accepted" only by
+        // the read having run.
+        let mut chain = WriteChain::new(&[WriteScript::accepts(1, 0)]);
+        let head = chain.head();
+
+        let result = unsafe { resource_chain_write(head, ResourceKind::STRING, 1, 2, 4) };
+
+        assert_eq!(result, 0);
+        assert_eq!(chain.read_calls().len(), 1, "the read-back ran, so this is not a decline");
+    }
+
+    #[test]
+    fn write_each_providers_own_vtable_is_used() {
+        let _lock = TEST_LOCK.lock();
+        // Both slots are re-loaded from `node->vtable` every iteration,
+        // so a chain of mixed classes dispatches per node. A second
+        // vtable whose write accepts immediately and whose read answers
+        // 0x4242 proves the reload of both slots.
+        unsafe extern "C" fn always_accepts(
+            _provider: *mut ResourceProvider,
+            _kind: ResourceKind,
+            _id: u32,
+            _value: u32,
+            _flags: u32,
+        ) -> u32 {
+            1
+        }
+        unsafe extern "C" fn answers_0x4242(
+            _provider: *mut ResourceProvider,
+            _kind: ResourceKind,
+            _id: u32,
+        ) -> u32 {
+            0x4242
+        }
+        static OTHER_WRITE: ResourceProviderVTable = ResourceProviderVTable {
+            slots_below: [None; 22],
+            read: answers_0x4242,
+            slots_between: [None; 2],
+            find: find_not_called,
+            write: always_accepts,
+        };
+
+        let mut chain = WriteChain::new(&[WriteScript::declines(), WriteScript::declines()]);
+        chain.nodes[1].vtable = &OTHER_WRITE;
+        let head = chain.head();
+
+        let result = unsafe { resource_chain_write(head, ResourceKind::STRING, 0, 1, 4) };
+
+        assert_eq!(result, 0x4242);
+        assert_eq!(chain.write_calls().len(), 1, "only the first node ran the scripted slot");
+        assert!(chain.read_calls().is_empty(), "the read-back went through the other vtable");
+    }
+
+    #[test]
+    fn vtable_slots_land_on_their_original_offsets() {
         // The decoded offsets are 4-byte-word positions in the original;
         // check them in words so the assertion holds on both widths.
         let word = core::mem::size_of::<*const u8>();
         assert_eq!(
+            core::mem::offset_of!(ResourceProviderVTable, read),
+            0x58 / 4 * word,
+            "vtable slot +0x58"
+        );
+        assert_eq!(
             core::mem::offset_of!(ResourceProviderVTable, find),
             0x64 / 4 * word,
             "vtable slot +0x64"
+        );
+        assert_eq!(
+            core::mem::offset_of!(ResourceProviderVTable, write),
+            0x68 / 4 * word,
+            "vtable slot +0x68"
         );
         assert_eq!(
             core::mem::offset_of!(ResourceProvider, next),
