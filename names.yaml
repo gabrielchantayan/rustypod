@@ -37111,3 +37111,21 @@ functions:
       inputs with a defined -1 for zero. Instruction-faithful: leading_zeros
       lowers to ARM clz, matching the original `clz r0,r0; rsb r0,r0,#0x1f;
       bx lr`. 5 bl call sites.
+
+  - address: 0x08078400
+    ghidra: FUN_08078400
+    name: q15_mul
+    size: 16
+    sig: "int q15_mul(int a, int b)"
+    module: util/q15_mul
+    status: ported
+    renames:
+      param_1/r0: a
+      param_2/r1: b
+    notes: >-
+      Signed Q15 fixed-point multiply `(a * b * 2) >> 16` from the audio
+      interpolation path (callers weight a sample against a Q15 fraction and
+      its 0x8000 complement). Evaluated with 32-bit wrapping: the doubling of
+      the product overflows at the (-0x8000)^2 corner and arithmetic-shifts
+      to -32768 rather than +32768, matching the original `mul r0,r1,r0;
+      mov r0,r0,lsl #1; mov r0,r0,asr #0x10; bx lr`. 12 bl call sites.
