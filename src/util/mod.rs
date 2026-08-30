@@ -9,6 +9,7 @@ pub mod context_field;
 pub mod clock_pair;
 pub mod crc32;
 pub mod cursor;
+pub mod encoded_word_block;
 pub mod drive;
 pub mod fixed;
 pub mod field_access;
