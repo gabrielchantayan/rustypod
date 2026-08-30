@@ -37333,3 +37333,52 @@ functions:
       the product overflows at the (-0x8000)^2 corner and arithmetic-shifts
       to -32768 rather than +32768, matching the original `mul r0,r1,r0;
       mov r0,r0,lsl #1; mov r0,r0,asr #0x10; bx lr`. 12 bl call sites.
+  - address: 0x083913b4
+    ghidra: FUN_083913b4
+    name: sqlite_snprintf
+    size: 84
+    sig: "char *sqlite_snprintf(int n, char *z_buf, const char *format, VaList args)"
+    module: sqlite/snprintf
+    status: ported
+    renames:
+      param_1/r0: n
+      param_2/r1: z_buf
+      param_3/r2: format
+      param_4/r3: args
+      FUN_08384e84: str_accum_init
+      FUN_0839788c: sqlite3VXPrintf
+      FUN_08384e14: str_accum_finish
+    notes: >-
+      SQLite 3.5.9's sqlite3_snprintf (util.c) - the bounded,
+      never-allocating printf that renders into a caller buffer. Extent
+      0x083913b4..0x08391408 confirmed from raw words: 21 instructions,
+      no literal pool, sibling at 0x08391408 opens with its own
+      push {r4,r5,r6,lr}. 41 bl call sites, binary-scanned: 40 plain
+      bl plus 1 blne @ 0x0838f234 whose caller gates the whole call on
+      its own flag (the callee carries no NULL guard and needs none).
+      Algorithm - n <= 0 returns zBuf untouched (movle r0,r1; ble end;
+      nothing written, engine never runs); otherwise the caller buffer
+      IS the accumulator: sqlite3StrAccumInit @ 0x08384e84 (ported,
+      sqlite::vdbe_op) plants zBuf as base+text with capacity n and
+      mxAlloc 0, then an explicit strb at acc+0x15 forces useMalloc
+      back to 0 (the init had set it), so the render truncates in
+      place; sqlite3VXPrintf @ 0x0839788c (UNPORTED, 3324 bytes - the
+      shared SQLITE_VXPRINTF seam in sqlite/vm_printf.rs, documented
+      no-op default) runs with useMalloc = 0 over zFormat (reloaded
+      from the spilled r2) and the variadic words at the spilled r3
+      slot; sqlite3StrAccumFinish @ 0x08384e14 (ported,
+      sqlite::str_accum) takes its no-transfer branch and returns zBuf
+      itself. The va_list is the house explicit VaList pointer, exactly
+      the &spilled-r3 the original builds with push {r0-r3}. Host tests
+      (3) - n in {0, -1, i32::MIN} returns zBuf untouched with the
+      engine never invoked; the engine observes (use_malloc=0, format,
+      ap) and an accumulator with n_alloc=n / mx_alloc=0 /
+      use_malloc=0, the finish returns zBuf verbatim with the text
+      terminated in place and zero allocator traffic; the default
+      no-op engine terminates zBuf[0] and writes nothing else.
+      match.py (exit 1, diff expected): same shape - n<=0 early return
+      (cmp #1/blt vs cmp #0/ble), StrAccum in frame, init with
+      (acc, zBuf, n, 0), strb use_malloc=0 at acc+0x15, seam ldr/blx
+      engine dispatch in place of the direct bl 0x0839788c, finish
+      tail; deltas are the crate fp frame and register shuffling. 29
+      instructions vs 21.
