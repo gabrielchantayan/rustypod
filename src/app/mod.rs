@@ -20,6 +20,7 @@ pub mod event_source;
 pub mod facade_registry_walk;
 pub mod facade_for_selector;
 pub mod fixed_value;
+pub mod global_flag_table;
 pub mod h264_decode_forwarder;
 pub mod iap_incoming_process_thread;
 pub mod iap_packet;
