@@ -219,6 +219,7 @@ unsafe fn semaphore_cell_create() -> *mut u32 {
 /// mutex_lock — original: `FUN_0807f5c4` @ 0x0807f5c4 (8 bytes), with
 /// the guard thunk @ 0x8056510 inlined: only a live ROM handle (cell and
 /// *cell both nonzero) reaches the ROM wait.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn mutex_lock(mutex: *mut Mutex) {
     let cell = (*mutex).sem_cell;

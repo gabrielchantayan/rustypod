@@ -36338,6 +36338,35 @@ functions:
       guard/atexit callees, the accepted intra-crate noise.
 
   # --- app: mutex service adapters ---
+  - address: 0x08228360
+    ghidra: FUN_08228360
+    name: lock_service_lock
+    size: 20
+    sig: "int lock_service_lock(void *service, Mutex *mutex)"
+    module: app/lock_service
+    status: ported
+    vars: {param_1/r0: service, param_2/r1: mutex}
+    notes: >-
+      Member function of a Silver-era service class that adapts the void
+      kernel primitive mutex_lock @ 0x0807f5c4 (ported, kernel/sync_mutex.rs)
+      to the int method(this, Mutex *) shape the manager classes call. Raw
+      body at 0x08228360 is exactly five instructions: stmdb sp!,{r4,lr} /
+      mov r0,r1 / bl 0x0807f5c4 / mov r0,#0 / ldmia sp!,{r4,pc}. The next
+      entry opens at 0x08228374, confirming the 20-byte
+      0x08228360..0x08228374 extent.
+      r0 is dead: the adapter overwrites its this argument before it can be
+      read, and supplies its Mutex argument from r1 to mutex_lock. The
+      unconditional zero result is observable: after calls at 0x0820ca68
+      and 0x081e4998 the callers compare r0 with zero and branch on failure.
+      Binary scanning every ARM B/BL word found 39 callers: all are
+      unconditional bl, with no predicated forms and no tail branches.
+      Deviations - none. mutex_lock is called directly and is marked
+      inline(never) so this adapter retains its original direct-call shape.
+      Host tests (7) prove a garbage or NULL this is ignored, a live mutex
+      reaches the ROM wait through r1, NULL-cell and zero-handle mutexes
+      are no-ops that return success, no mutex word is modified, and
+      repeated waits plus a lock/unlock pair preserve the same handle.
+
   - address: 0x08228388
     ghidra: FUN_08228388
     name: lock_service_unlock
@@ -36356,10 +36385,10 @@ functions:
       eight-byte aligned; r4 is never read or written.
       One of four byte-identical-shaped adapters sitting back to back at
       0x0822834c (create -> 0x080744a4), 0x08228360 (lock -> 0x0807f5c4),
-      0x08228374 (delete -> 0x0807f650) and 0x08228388 (unlock -> 0x0807f6a0);
-      only unlock is ported here. The next function opens at 0x0822839c with
-      the same prologue over a different callee, so Ghidra's 20-byte extent is
-      correct.
+      0x08228374 (delete -> 0x0807f650) and 0x08228388 (unlock -> 0x0807f6a0).
+      Lock and unlock are ported; create and delete remain unported. The next
+      function opens at 0x0822839c with the same prologue over a different
+      callee, so Ghidra's 20-byte extent is correct.
       The first argument is the caller's this and is dead - the mutex arrives
       in r1 and r0 is overwritten before it is used. Call sites pass three
       unrelated kinds of value in it - a loaded field (ldr r0,[r4,#0x28c] @
