@@ -34,7 +34,7 @@
 #[derive(Clone, Copy)]
 pub struct PairHeaderElementArrayOps {
     /// Resets or initializes an element array and returns the helper's raw
-    /// pointer result. `FUN_082ab398` deliberately discards that result.
+    /// pointer result, which `FUN_082ab398` forwards in r0.
     pub reset: unsafe extern "C" fn(
         this: *mut u32,
         field_count: u32,
@@ -99,10 +99,16 @@ const GRAND_BASE_BODY_INITIALIZER_CONTEXT: u32 = 0;
 /// `FUN_082b498c` array-helper ABI. It forwards `this`, `field_count`,
 /// `field_size`, `element_initializer`, and `initializer_context` in slots
 /// 1, 2, 3, 6, and 7; slots 4, 5, and 8 through 11 are literal zero. The
-/// retail wrapper ignores the helper's pointer result, so this function
-/// returns `()`. The unported helper remains behind
-/// [`PAIR_HEADER_ELEMENT_ARRAY_OPS`]; this wrapper performs no stores and no
-/// null checks itself.
+/// retail wrapper performs no stores and no null checks itself, and its ARM
+/// body leaves `FUN_082b498c`'s pointer result in r0 all the way to the
+/// `pop {r4, r5, r6, pc}` — Ghidra's `void` return is a C-level fiction the
+/// binary does not support. That result is load-bearing: the only caller
+/// family is the four-argument adapter @ 0x082ab234 (ported as
+/// `crate::runtime::cpp_array_construct::cpp_array_construct`), whose own
+/// callers chain on the returned array base (e.g. the 0x081b80b4 site
+/// stores into `ret + 0x60` and passes `ret + 100` to the next adapter
+/// call). The port therefore forwards the helper's result. The unported
+/// helper remains behind [`PAIR_HEADER_ELEMENT_ARRAY_OPS`].
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn pair_header_grand_base_reset(
@@ -111,7 +117,7 @@ pub unsafe extern "C" fn pair_header_grand_base_reset(
     field_size: u32,
     element_initializer: u32,
     initializer_context: u32,
-) {
+) -> *mut u32 {
     let reset = core::ptr::addr_of!(PAIR_HEADER_ELEMENT_ARRAY_OPS.reset).read_volatile();
     reset(
         this,
@@ -125,7 +131,7 @@ pub unsafe extern "C" fn pair_header_grand_base_reset(
         ARRAY_ALLOCATOR_CONTEXT,
         ARRAY_ALLOCATION_FLAGS,
         ARRAY_ZERO_INITIALIZE,
-    );
+    )
 }
 
 /// pair_header_grand_base_body_construct — original: `FUN_08185b98` @
@@ -344,28 +350,13 @@ pub unsafe extern "C" fn pair_header_construct(
 mod tests {
     extern crate std;
     use super::*;
-    use core::sync::atomic::{AtomicBool, Ordering};
     use std::vec;
 
-    /// Constructor dependency swaps are global; serialize the tests.
-    static OPS_LOCKED: AtomicBool = AtomicBool::new(false);
-
-    struct OpsLock;
-
-    fn lock_ops() -> OpsLock {
-        while OPS_LOCKED
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
-        {
-            std::thread::yield_now();
-        }
-        OpsLock
-    }
-
-    impl Drop for OpsLock {
-        fn drop(&mut self) {
-            OPS_LOCKED.store(false, Ordering::Release);
-        }
+    /// Constructor dependency swaps are global; the seam is shared with
+    /// `runtime::cpp_array_construct`'s tests, so both serialize on the
+    /// crate-wide lock rather than a module-private one.
+    fn lock_ops() -> std::sync::MutexGuard<'static, ()> {
+        crate::testing::CPP_ARRAY_OPS_TEST_LOCK.lock().unwrap()
     }
 
     /// Objects are 200 bytes (0xc8) at the derived constructor's call sites.
@@ -451,7 +442,7 @@ mod tests {
         core::ptr::addr_of_mut!(SEEN_PRECLEAR_WORD)
             .write_volatile(grand_base.add((0xac - 4) / 4).read());
         // The real helper returns `this` on this non-allocating path. A
-        // distinct result proves the wrapper intentionally discards it.
+        // distinct result proves the wrapper forwards r0 verbatim.
         this.add(4)
     }
 
@@ -459,10 +450,11 @@ mod tests {
         core::ptr::addr_of!(SEEN_ARRAY_ARGS).read_volatile()
     }
 
-    /// `FUN_082ab398` preserves its five incoming words and materializes all
-    /// six literal-zero words in the original eleven-argument helper call.
+    /// `FUN_082ab398` preserves its five incoming words, materializes all
+    /// six literal-zero words in the original eleven-argument helper call,
+    /// and forwards the helper's pointer result in r0 untouched.
     #[test]
-    fn grand_base_reset_forwards_11_word_abi_and_discards_helper_return() {
+    fn grand_base_reset_forwards_11_word_abi_and_helper_return() {
         let _lock = lock_ops();
         let _guard = OpsGuard::install(PairHeaderElementArrayOps {
             reset: recording_element_array_reset,
@@ -472,10 +464,11 @@ mod tests {
             let mut storage = vec![FILL; BASE_WORDS + 8];
             let this = storage.as_mut_ptr().add(1 + GRAND_BASE_BODY_OFFSET_WORDS);
 
-            let returned: () =
+            let returned =
                 pair_header_grand_base_reset(this, 0x11, 0x22, 0x3333_4444, 0x5555_6666);
 
-            assert_eq!(returned, ());
+            // The recording helper returns `this.add(4)`; retail r0 keeps it.
+            assert_eq!(returned, this.add(4));
             assert_eq!(core::ptr::addr_of!(ARRAY_CALLS).read_volatile(), 1);
             assert_eq!(core::ptr::addr_of!(CALL_ORDER).read_volatile()[0], 1);
             assert_eq!(
