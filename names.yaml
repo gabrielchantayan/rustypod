@@ -28409,6 +28409,53 @@ functions:
       0x8062 mask, same 0/1 result; the diff is the crate fp frame and
       the three deviations above.
 
+  - address: 0x082a368c
+    ghidra: FUN_082a368c
+    name: scoped_context_owner_u64_110
+    size: 52
+    sig: "u64 scoped_context_owner_u64_110(const ScopedContext *this)"
+    module: app/scoped_context
+    status: ported
+    vars: {param_1: this}
+    notes: >-
+      33 bl call sites, 0 predicated forms, binary-scanned by decoding
+      every B/BL word in osos.dec - no caller NULL-guards the token.
+      Ghidra's 52-byte extent is exact for once: the thirteen
+      instructions end at 0x082a36bc and the next function starts at
+      0x082a36c0 (its own push {r4,r5,lr}), so there is no trailing
+      literal pool to check. Validity-gated 64-bit owner getter over
+      the ScopedContext token (app/scoped_context.rs), the same shape
+      as scoped_context_owner_flags_any_8062 @ 0x082a40c8: dispatch the
+      token's vtable slot +0x08 and, only when it returns nonzero,
+      load the owner (+0x08) and return its adjacent word pair
+      +0x110 (r0, low) / +0x114 (r1, high) as a u64; an invalid token
+      answers 0 in both halves (moveq r0/r1) without touching the
+      owner, so a NULL-owner token returns 0 instead of faulting. What
+      the pair means does not survive in the image - callers treat it
+      as an opaque identity (0x081688e4's `if (value != 0)` gate,
+      0x08179990 discards it) - so the port keeps its offset name, the
+      OWNER_FLAGS_MASK_8062 precedent. GHIDRA BUG: the recovered C
+      returns only `undefined4` - the decompiler drops the r1 half of
+      the pair; the raw `ldrne r1, [r1, #0x114]` / `moveq r1, #0` are
+      unambiguous that both halves are live on every exit. The
+      function itself is not virtual-dispatched: no data word in the
+      image holds 0x082a368c (binary-scanned). Deviations: the token
+      and vtable are the module's repr(C) models, so the vtable load
+      and slot index are struct field accesses (the module's standing
+      deviation); the slot word is transmuted to the call ABI at the
+      dispatch point, the ui/element_reference.rs idiom; the pair is
+      read as two aligned u32 words rather than one u64 read because
+      the original needs only 4-byte alignment (two plain ldr), which
+      an ldrd's 8-byte requirement would exceed. Host tests: slot-0
+      short-circuit with a NULL owner (proves no dereference), AAPCS
+      lane order (+0x110 low / +0x114 high) with distinctive halves,
+      each half independently, a zero pair, and any nonzero slot
+      result treated as true. match.py structural: same vtable load,
+      same slot +0x08 blx dispatch, same cmp gate, same owner load
+      ldr r1,[r4,#8], same +0x110/+0x114 reads, same zero-both-halves
+      invalid path; the diff is the crate fp frame and LLVM branching
+      (beq) where ADS predicated (ldrne/moveq).
+
   # --- Application context scope (app/context_scope) ---
   - address: 0x082840e8
     ghidra: FUN_082840e8

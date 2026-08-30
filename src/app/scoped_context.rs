@@ -10,6 +10,9 @@
 //! - [`scoped_context_destroy`] — `FUN_08270414` @ 0x08270414.
 //! - [`scoped_context_owner_flags_any_8062`] — `FUN_082a40c8` @ 0x082a40c8,
 //!   a validity-gated predicate over the token owner's flags word.
+//! - [`scoped_context_owner_u64_110`] — `FUN_082a368c` @ 0x082a368c, a
+//!   validity-gated getter returning the token owner's 64-bit word pair at
+//!   +0x110/+0x114.
 //! ## What the class is
 //!
 //! Every constructor in the family plants the same vtable literal,
@@ -392,6 +395,72 @@ pub unsafe extern "C" fn scoped_context_owner_flags_any_8062(
     (flags & OWNER_FLAGS_MASK_8062 != 0) as u32
 }
 
+/// Word index of the owner's 64-bit pair's low word (the original's
+/// `ldrne r0, [r1, #0x110]`); the high word follows at the next index
+/// (`ldrne r1, [r1, #0x114]`). Word-indexed so the aligned reads address
+/// the same slots on target and host, the OWNER_FLAGS_SLOT pattern above.
+const OWNER_U64_110_SLOT: usize = 0x110 / 4;
+
+/// scoped_context_owner_u64_110 — original: `FUN_082a368c` @ 0x082a368c
+/// (52 bytes, exact: the next function starts at 0x082a36c0, so there is
+/// no trailing literal pool for Ghidra's extent to drop; **33 `bl` call
+/// sites, 0 predicated forms**, binary-scanned by decoding every B/BL
+/// word in osos.dec — no caller NULL-guards the token).
+///
+/// ```text
+/// 082a368c  push  {r4, lr}
+/// 082a3690  mov   r4, r0
+/// 082a3694  ldr   r0, [r0]         @ token vtable
+/// 082a3698  ldr   r1, [r0, #8]     @ slot +0x08 validity method
+/// 082a369c  mov   r0, r4
+/// 082a36a0  blx   r1
+/// 082a36a4  cmp   r0, #0
+/// 082a36a8  ldrne r1, [r4, #8]     @ owner
+/// 082a36ac  moveq r0, #0
+/// 082a36b0  ldrne r0, [r1, #0x110] @ low word
+/// 082a36b4  ldrne r1, [r1, #0x114] @ high word
+/// 082a36b8  moveq r1, #0
+/// 082a36bc  pop   {r4, pc}
+/// ```
+///
+/// Validity-gated 64-bit owner getter over the scoped-context token, the
+/// same shape as [`scoped_context_owner_flags_any_8062`]: dispatch the
+/// token's vtable slot +0x08 and, only when it returns nonzero, read the
+/// owner's adjacent word pair at +0x110/+0x114 and return it as a u64
+/// (r0 = low, r1 = high per AAPCS). An invalid token answers 0 in both
+/// halves without touching the owner, so a NULL-owner token returns 0
+/// instead of faulting. What the pair means does not survive in the
+/// image — callers treat it as an opaque identity (e.g. 0x081688e4's
+/// `if (value != 0)` gate) — so the port keeps its offset name, the
+/// OWNER_FLAGS_MASK_8062 precedent.
+///
+/// Ghidra's recovered C returns only the low word (`undefined4`): its
+/// decompiler drops the r1 half of the pair, one more case of Ghidra
+/// dropping a return register. The raw `ldrne r1, [r1, #0x114]` /
+/// `moveq r1, #0` are unambiguous — both halves are live on every exit.
+///
+/// Deviations: the token and its vtable are this module's `#[repr(C)]`
+/// models, so the vtable load and slot index are struct field accesses
+/// rather than literal byte offsets (the module's standing deviation);
+/// the slot word is transmuted to the call ABI at the dispatch point,
+/// the ui/element_reference.rs idiom. The pair is read as two aligned
+/// u32 words, not one u64 read: the original needs only 4-byte
+/// alignment (two plain `ldr`), and two word reads reproduce that
+/// instead of demanding the 8-byte alignment an ldrd would.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn scoped_context_owner_u64_110(this: *const ScopedContext) -> u64 {
+    let validity: ScopedContextValidity =
+        core::mem::transmute((*(*this).vtable).slots[VALIDITY_SLOT]);
+    if validity(this) == 0 {
+        return 0;
+    }
+    let words = (*this).owner as *const u32;
+    let low = words.add(OWNER_U64_110_SLOT).read();
+    let high = words.add(OWNER_U64_110_SLOT + 1).read();
+    (high as u64) << 32 | low as u64
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -745,5 +814,102 @@ mod tests {
         link_fixture(&mut fixture, false);
         let result = unsafe { scoped_context_owner_flags_any_8062(&fixture.token) };
         assert_eq!(result, 1);
+    }
+
+    /// Token + owner fixture for the u64 getter: the owner buffer runs
+    /// one word past the pair's high word so the reads cannot drift out
+    /// of bounds. Self-referential like PredicateFixture: call
+    /// [`link_getter_fixture`] after the fixture is at its final address.
+    struct GetterFixture {
+        vtable: ScopedContextVtable,
+        owner: [u32; OWNER_U64_110_SLOT + 2],
+        token: ScopedContext,
+    }
+
+    fn getter_fixture(low: u32, high: u32) -> GetterFixture {
+        let mut slots = [0usize; 15];
+        slots[VALIDITY_SLOT] = recording_validity as usize;
+        let mut fixture = GetterFixture {
+            vtable: ScopedContextVtable { slots },
+            owner: [0; OWNER_U64_110_SLOT + 2],
+            token: ScopedContext {
+                vtable: ptr::null(),
+                owner_valid: 1,
+                owner: ptr::null_mut(),
+                service_context: ptr::null_mut(),
+                registry_token: ptr::null_mut(),
+                mode: 0,
+            },
+        };
+        fixture.owner[OWNER_U64_110_SLOT] = low;
+        fixture.owner[OWNER_U64_110_SLOT + 1] = high;
+        fixture
+    }
+
+    fn link_getter_fixture(fixture: &mut GetterFixture, owner_null: bool) {
+        fixture.token.vtable = &fixture.vtable;
+        fixture.token.owner = if owner_null {
+            ptr::null_mut()
+        } else {
+            fixture.owner.as_mut_ptr() as *mut u8
+        };
+    }
+
+    #[test]
+    fn getter_short_circuits_when_the_token_is_not_valid() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        reset_validity_recording(0);
+        // A NULL owner proves the short-circuit: any read of it faults.
+        let mut fixture = getter_fixture(0xffff_ffff, 0xffff_ffff);
+        link_getter_fixture(&mut fixture, true);
+        let result = unsafe { scoped_context_owner_u64_110(&fixture.token) };
+        assert_eq!(result, 0);
+        unsafe {
+            assert_eq!(VALIDITY_CALLS, 1);
+            assert_eq!(VALIDITY_TOKEN as usize, &fixture.token as *const _ as usize);
+        }
+    }
+
+    #[test]
+    fn getter_assembles_low_and_high_words_in_aapcs_order() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        // +0x110 is the low half (r0), +0x114 the high half (r1).
+        reset_validity_recording(1);
+        let mut fixture = getter_fixture(0x1122_3344, 0x5566_7788);
+        link_getter_fixture(&mut fixture, false);
+        let result = unsafe { scoped_context_owner_u64_110(&fixture.token) };
+        assert_eq!(result, 0x5566_7788_1122_3344);
+        unsafe {
+            assert_eq!(VALIDITY_CALLS, 1);
+        }
+    }
+
+    #[test]
+    fn getter_reads_each_half_independently() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        // Each half alone must land in its own lane: a swapped or
+        // duplicated read fails one of these.
+        for (low, high, want) in [
+            (0xdead_beefu32, 0, 0x0000_0000_dead_beef),
+            (0, 0xcafe_babe, 0xcafe_babe_0000_0000),
+            (0, 0, 0),
+        ] {
+            reset_validity_recording(1);
+            let mut fixture = getter_fixture(low, high);
+            link_getter_fixture(&mut fixture, false);
+            let result = unsafe { scoped_context_owner_u64_110(&fixture.token) };
+            assert_eq!(result, want, "low {low:#x} high {high:#x}");
+        }
+    }
+
+    #[test]
+    fn getter_treats_any_nonzero_validity_as_true() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        // The original gates on `cmp r0, #0`, not on a specific value.
+        reset_validity_recording(0xffff_ffff);
+        let mut fixture = getter_fixture(7, 9);
+        link_getter_fixture(&mut fixture, false);
+        let result = unsafe { scoped_context_owner_u64_110(&fixture.token) };
+        assert_eq!(result, 0x0000_0009_0000_0007);
     }
 }
