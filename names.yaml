@@ -27533,6 +27533,41 @@ functions:
       the crate frame.
 
 
+  # --- Silver UI framework: root instance getter ---
+
+  - address: 0x081d2204
+    ghidra: FUN_081d2204
+    name: framework_root_instance
+    size: 12
+    sig: "void *framework_root_instance(void)"
+    module: app/class_6800
+    status: ported
+    vars:
+      DAT_081d2210: FRAMEWORK_ROOT_HOLDER_ADDRESS (0x089cc858)
+    notes: >-
+      31 bl + 0 predicated call sites, binary-scanned by decoding every
+      B/BL word in osos.dec (matches Ghidra's count). True extent is 16
+      bytes: Ghidra's 12 bytes of code plus the literal-pool word @
+      0x081d2210 holding the holder address 0x089cc858; the next
+      function starts at 0x081d2214, confirmed from raw bytes. Raw ARM
+      is `ldr r0,[pc,#4]; ldr r0,[r0,#4]; bx lr` - a pure getter that
+      returns the +0x04 slot of the runtime global @ 0x089cc858, the
+      Silver UI framework root object. Every caller uses the result as
+      a C++ object and dispatches a virtual slot on it (offsets +0xf4
+      through +0x1ec observed across the 31 sites), or stores it as an
+      observer/default-target field. There is no NULL guard: the holder
+      address is always loaded, and the instance slot is returned
+      verbatim, including the pre-initialization NULL. The holder page
+      is runtime-initialized RW data, so the image holds nothing usable
+      there; the port models it as the zeroed FRAMEWORK_ROOT_HOLDER
+      static and reads the instance slot with read_volatile. Deviations
+      - none beyond the modeled global. Host tests (in app/class_6800.rs,
+      alongside the class-0x6800 constructor that consumes this getter)
+      prove the +0x04 slot is returned verbatim, a pre-init NULL is not
+      special-cased, and the +0x00 word is neither read nor written.
+      match.py structural: identical load chain (ldr r0,[pc] / ldr
+      r0,[r0,#4]); the diff is only the crate's frame-pointer prologue.
+
   # --- Silver UI framework: linkage parent constructor ---
 
   - address: 0x08125234
