@@ -63,6 +63,7 @@ pub mod hints {
     pub const IAP_PACKET_OWNER_MODE: usize = 0x1e00_0000;
     pub const TOKENIZER: usize = 0x1f00_0000;
     pub const VIEW_TIMER: usize = 0x2000_0000;
+    pub const STRING_TABLE: usize = 0x2100_0000;
     // `heap/pool.rs` maps its own arena at 0x0800_0000 through a separate
     // path: it needs only bit 31 clear, not full u32 addressability.
 }
