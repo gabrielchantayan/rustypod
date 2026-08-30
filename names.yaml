@@ -39486,3 +39486,30 @@ functions:
       expected): same double-ldr + lsr + mask-build + and core; LLVM
       renders the >=32 clamps as cmp/bhi and bicls, exactly as it does
       for the already-ported berec_extract_bits.
+
+  - address: 0x0819c9d0
+    ghidra: FUN_0819c9d0
+    name: set_global_flag_byte
+    size: 16
+    sig: "void set_global_flag_byte(u32 index, u8 value)"
+    module: app/global_flag_table
+    status: ported
+    renames:
+      param_1/r0: index
+      param_2/r1: value
+      DAT_0819c9dc: global flag-byte table at 0x08a77a8f
+    notes: >-
+      Stores value at the unguarded global flag-byte-table offset index.
+      Raw ARM is e59f2004 (ldr r2,[pc,#4]), e7c21000 (strb r1,[r2,r0]),
+      e12fff1e (bx lr), followed by its 0x08a77a8f literal-pool word at
+      0x0819c9dc. The next function opens at 0x0819c9e0, so Ghidra's
+      12-byte extent omits the trailing literal and the actual extent is
+      16 bytes. Decoding every ARM B/BL word in osos.dec finds 32 direct
+      call sites: all plain unconditional bl, with zero predicated forms
+      and zero direct B sites. The callers include staged view-event flag
+      commits and explicit UI writes at indices 0x1d, 0x1e, 0x59, 0x5a,
+      and 0x6f; the existing view_event port identifies this as its global
+      flag table. Deliberate deviation: host builds use a local 0x78-byte
+      table for observable tests; target builds retain the literal address
+      and unguarded byte write. Reference C:
+      decomp/c/016/0819c9d0_FUN_0819c9d0.c.

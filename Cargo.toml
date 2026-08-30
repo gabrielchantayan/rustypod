@@ -21,3 +21,6 @@ panic = "abort"
 # test suite is unaffected.
 [profile.dev]
 panic = "abort"
+
+[dev-dependencies]
+parking_lot = "0.12"
