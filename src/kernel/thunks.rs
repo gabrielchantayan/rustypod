@@ -524,6 +524,99 @@ lazy_singleton_106dc_acquire:
 "#
 );
 
+/// Instruction word and literal in the event-handler-source thunk at
+/// 0x08038060.
+///
+/// The boot relocator at 0x080046e0 copies 0xaed8 bytes from
+/// 0x08000000 to 0x22000000, so IRAM target 0x22007470 is the
+/// byte-identical mirror of osos `FUN_08007470`.
+pub const EVENT_HANDLER_SOURCE_INSN: u32 = 0xe51f_f004;
+pub const EVENT_HANDLER_SOURCE_TARGET: u32 = 0x2200_7470;
+
+/// ABI of the event-handler source accessor reached by
+/// [`event_handler_source`]: no arguments, returns the source pointer.
+pub type EventHandlerSourceFn = unsafe extern "C" fn() -> *mut u8;
+
+/// Host/target dispatch boundary for the unported IRAM accessor target.
+#[derive(Clone, Copy)]
+pub struct EventHandlerSourceOps {
+    pub source: EventHandlerSourceFn,
+}
+
+#[cfg(not(target_arch = "arm"))]
+unsafe extern "C" fn missing_event_handler_source() -> *mut u8 {
+    core::ptr::null_mut()
+}
+
+#[cfg(not(target_arch = "arm"))]
+const DEFAULT_EVENT_HANDLER_SOURCE_OPS: EventHandlerSourceOps = EventHandlerSourceOps {
+    source: missing_event_handler_source,
+};
+
+/// The host dispatch boundary for the unported IRAM accessor target.
+#[cfg(not(target_arch = "arm"))]
+pub static mut EVENT_HANDLER_SOURCE_OPS: EventHandlerSourceOps = DEFAULT_EVENT_HANDLER_SOURCE_OPS;
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(always)]
+fn event_handler_source_target() -> EventHandlerSourceFn {
+    unsafe {
+        core::ptr::read_volatile(core::ptr::addr_of!(EVENT_HANDLER_SOURCE_OPS.source))
+    }
+}
+
+#[cfg(target_arch = "arm")]
+extern "C" {
+    /// event_handler_source — original: `thunk_EXT_FUN_22007470` @
+    /// 0x08038060 (8 bytes; Ghidra's 4-byte extent drops the trailing
+    /// literal word, and the next thunk starts at 0x08038068).
+    ///
+    /// The raw body is `ldr pc, [pc, #-4]` with literal 0x22007470:
+    /// an osos-to-IRAM tail dispatch which preserves every register,
+    /// including LR. Every one of its 30 decoded B/BL call sites is a
+    /// plain unconditional `bl`; there are no predicated forms or tail
+    /// `b` sites. The target returns its event-handler source pointer
+    /// directly to this stub's caller.
+    ///
+    /// The target mirror `FUN_08007470` is 100 bytes of code plus a
+    /// 20-byte literal pool (next function 0x080074e8). It lazily
+    /// constructs and registers the object at 0x22010318 under the
+    /// guard word 0x22008c84, then runs `FUN_08007e38` once under byte
+    /// flag 0x2200aed4 before returning 0x22010318. Its class identity
+    /// remains unrecovered; the name records that callers pass this
+    /// result as the source argument to IRAM event-dispatch routines.
+    ///
+    /// Deviation: none on ARM; this is the original instruction and literal.
+    pub fn event_handler_source() -> *mut u8;
+}
+
+/// Host implementation of the event-handler-source accessor, with the
+/// unported IRAM target supplied by [`EVENT_HANDLER_SOURCE_OPS`].
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn event_handler_source() -> *mut u8 {
+    event_handler_source_target()()
+}
+
+// `ldr pc` preserves LR, so the IRAM target returns directly to this
+// stub's caller. Keep the fixed target in assembly rather than
+// materializing it as a Rust function pointer on target.
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl event_handler_source
+    .type event_handler_source, %function
+event_handler_source:
+    ldr     pc, [pc, #-4]
+    .word   0x22007470
+    .size event_handler_source, . - event_handler_source
+"#
+);
+
 /// One thunk-table entry: the osos-side stub and its ROM target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RomThunk {
@@ -625,7 +718,7 @@ pub static ROM_THUNKS: [RomThunk; 158] = [
     RomThunk { thunk_addr: 0x08038048, rom_target: 0x22001f04, name: None },
     RomThunk { thunk_addr: 0x08038050, rom_target: 0x22006b48, name: None },
     RomThunk { thunk_addr: 0x08038058, rom_target: 0x2200813c, name: None },
-    RomThunk { thunk_addr: 0x08038060, rom_target: 0x22007470, name: None },
+    RomThunk { thunk_addr: 0x08038060, rom_target: 0x22007470, name: Some("event_handler_source") },
     RomThunk { thunk_addr: 0x08038068, rom_target: 0x22007a68, name: None },
     RomThunk { thunk_addr: 0x08038070, rom_target: 0x2200796c, name: None },
     RomThunk { thunk_addr: 0x08038078, rom_target: 0x2200722c, name: None },
@@ -773,7 +866,7 @@ mod tests {
     /// Known-target name mapping (see module header for the evidence).
     #[test]
     fn known_target_names() {
-        let expected: [(u32, &str); 14] = [
+        let expected: [(u32, &str); 15] = [
             (0x22000020, "__rt_memcpy"),
             (0x220000d4, "memmove"),
             (0x22000188, "memcpy"),
@@ -788,6 +881,7 @@ mod tests {
             (0x2200408c, "task_unlock"),
             (0x22005018, "ui_manager_acquire"),
             (0x220060e0, "lazy_singleton_106dc_acquire"),
+            (0x22007470, "event_handler_source"),
         ];
         for (target, name) in expected {
             let entry = lookup_by_target(target)
@@ -861,8 +955,8 @@ mod tests {
     #[test]
     fn named_entry_count() {
         let named = ROM_THUNKS.iter().filter(|e| e.name.is_some()).count();
-        // 14 known targets, two of them aliased by two thunks each.
-        assert_eq!(named, 16);
+        // 15 known targets, two of them aliased by two thunks each.
+        assert_eq!(named, 17);
         let _: std::string::String = ROM_THUNKS[0].name.unwrap().to_string();
     }
 
@@ -1076,6 +1170,70 @@ mod tests {
         let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         unsafe {
             assert!(lazy_singleton_106dc_acquire().is_null());
+        }
+        drop(guard);
+    }
+
+    /// The stub at 0x08038060 is the literal veneer `ldr pc, [pc, #-4]`
+    /// with target word 0x22007470 (raw osos.dec bytes 04 f0 1f e5
+    /// 70 74 00 22); Ghidra's 4-byte extent drops the literal.
+    #[test]
+    fn event_handler_source_matches_the_literal_veneer() {
+        assert_eq!(EVENT_HANDLER_SOURCE_INSN, 0xe51f_f004);
+        assert_eq!(EVENT_HANDLER_SOURCE_TARGET, 0x2200_7470);
+        assert_eq!(EVENT_HANDLER_SOURCE_TARGET & 3, 0);
+    }
+
+    /// The thunk table resolves 0x08038060 to the verified IRAM target.
+    #[test]
+    fn event_handler_source_thunk_table_entry_resolves() {
+        let entry = lookup_by_thunk(0x08038060).expect("thunk entry for 0x08038060");
+        assert_eq!(entry.rom_target, EVENT_HANDLER_SOURCE_TARGET);
+        assert_eq!(entry.name, Some("event_handler_source"));
+        assert_eq!(
+            lookup_by_target(EVENT_HANDLER_SOURCE_TARGET).unwrap().thunk_addr,
+            0x08038060
+        );
+    }
+
+    static mut EVENT_HANDLER_SOURCE_CALLS: u32 = 0;
+    static mut EVENT_HANDLER_SOURCE_SENTINEL: u8 = 0;
+
+    unsafe extern "C" fn record_event_handler_source() -> *mut u8 {
+        EVENT_HANDLER_SOURCE_CALLS += 1;
+        core::ptr::addr_of_mut!(EVENT_HANDLER_SOURCE_SENTINEL)
+    }
+
+    /// The host port forwards to the injected IRAM target exactly once and
+    /// passes its pointer result through unchanged — the veneer's observable
+    /// no-argument/source-pointer contract.
+    #[test]
+    fn event_handler_source_forwards_to_target_and_returns_its_pointer() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            core::ptr::addr_of_mut!(EVENT_HANDLER_SOURCE_CALLS).write(0);
+            core::ptr::addr_of_mut!(EVENT_HANDLER_SOURCE_OPS).write(EventHandlerSourceOps {
+                source: record_event_handler_source,
+            });
+            let source = event_handler_source();
+            assert_eq!(core::ptr::addr_of!(EVENT_HANDLER_SOURCE_CALLS).read(), 1);
+            assert_eq!(
+                source,
+                core::ptr::addr_of!(EVENT_HANDLER_SOURCE_SENTINEL).cast_mut(),
+            );
+            core::ptr::addr_of_mut!(EVENT_HANDLER_SOURCE_OPS)
+                .write(DEFAULT_EVENT_HANDLER_SOURCE_OPS);
+        }
+        drop(guard);
+    }
+
+    /// With no target installed the host seam yields NULL; the device stub
+    /// always tail-dispatches to its mapped IRAM target instead.
+    #[test]
+    fn event_handler_source_default_seam_returns_null() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            assert!(event_handler_source().is_null());
         }
         drop(guard);
     }
