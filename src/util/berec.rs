@@ -41,8 +41,9 @@ pub(crate) fn arm_lsl(value: u32, amount: u32) -> u32 {
 }
 
 /// ARM `lsr` by register: amount is the bottom byte; 32..=255 yields 0.
+/// Shared with util/bitfield.rs, whose original shifts the word the same way.
 #[inline]
-fn arm_lsr(value: u32, amount: u32) -> u32 {
+pub(crate) fn arm_lsr(value: u32, amount: u32) -> u32 {
     let amount = amount & 0xff;
     if amount >= 32 { 0 } else { value >> amount }
 }
