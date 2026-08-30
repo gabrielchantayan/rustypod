@@ -12891,6 +12891,42 @@ functions:
       cover all four field values, neighbouring-bit independence, and
       read extent.
 
+  - address: 0x0826eb5c
+    ghidra: FUN_0826eb5c
+    name: draw_state_configure_for_element
+    size: 184
+    sig: "void draw_state_configure_for_element(UiElement *element, DrawState *draw_state)"
+    module: ui/draw_state_setup
+    status: ported
+    renames:
+      param_1/r4: element
+      param_2/r7: draw_state
+      iVar1/r5: render_context
+      iVar2/r6: render_owner
+      local_24: transformed_bounds_and_clip
+      FUN_082a25d8: ui_element_bounds_in_render_coordinates
+      FUN_08264564: draw_state_set_origin
+      FUN_08264550: draw_state_set_surface_and_clip
+    notes: >-
+      Extent binary-verified from the `push {r4,r5,r6,lr}` at 0x0826eb5c
+      through the `pop {r4,r5,r6,r7,pc}` at 0x0826ec10; the distinct next
+      function starts at 0x0826ec14. Decoding every ARM B/BL word in
+      osos.dec finds exactly 32 unconditional direct bl call sites, zero
+      predicated bl forms, zero tail b references, and no data-word
+      references. Resolves the element render context, obtains its vtable
+      +0x5c render owner, then for shown elements copies and transforms the
+      +0x80 bounds, saves its pre-clip left/top as the draw-state origin,
+      and intersects it with either context +0xb4 (owner byte +0x100 is
+      non-zero) or parent +0xd0. It always stores context +0x5c as the
+      surface and writes the final rectangle as the draw-state clip; hidden
+      elements receive the zero clip without overwriting their origin.
+      Deliberate deviation: FUN_082a25d8's unported tail target
+      FUN_0828cb64 is reached through DRAW_STATE_RENDER_TRANSFORM. Target
+      builds invoke its retail address; ordinary host calls fail loudly and
+      test builds use a deterministic coordinate model. Host tests cover
+      context clipping, hidden-origin preservation, and the parent-clip
+      branch.
+
   - address: 0x0826ec9c
     ghidra: FUN_0826ec9c
     name: ui_element_invalidate

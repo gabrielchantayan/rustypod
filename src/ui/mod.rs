@@ -24,6 +24,7 @@ pub mod object_state;
 pub mod element_reference;
 pub mod font_handle;
 pub mod invalidate;
+pub mod draw_state_setup;
 pub mod shown_state;
 
 pub mod mode_state;
