@@ -16,6 +16,8 @@
 //! model the two observable edges with a request-level cell and controller
 //! callback seam, because neither target RAM address is host-mapped.
 
+
+use crate::drivers::interrupts::{cpsr_disable_irq_fiq, cpsr_restore_irq_fiq};
 /// Request-controller level that is held rather than advanced.
 pub const REFILL_LEVEL_HOLD: u32 = 3;
 
@@ -89,6 +91,71 @@ retail_stream_buffer_transition_controller:
 "#
 );
 
+/// Request-controller flags at target RAM address `0x2200aebc`.
+///
+/// The IRAM body at `0x22004450` reads and writes its first word while IRQ
+/// and FIQ are masked.
+#[cfg(target_os = "none")]
+const STREAM_BUFFER_REQUEST_FLAGS: *mut u32 = 0x2200_aebc as *mut u32;
+
+/// Host-only replacement for the request-controller flags word.
+#[cfg(not(target_os = "none"))]
+pub static mut STREAM_BUFFER_REQUEST_FLAGS: u32 = 0;
+
+#[inline(always)]
+fn stream_buffer_request_flags_ptr() -> *mut u32 {
+    #[cfg(target_os = "none")]
+    {
+        STREAM_BUFFER_REQUEST_FLAGS
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        core::ptr::addr_of_mut!(STREAM_BUFFER_REQUEST_FLAGS)
+    }
+}
+
+/// stream_buffer_request_flags_update — original: `thunk_EXT_FUN_22004450`
+/// @ `0x08037fe8` (Ghidra reports 4 bytes; raw extent is **8** bytes:
+/// `ldr pc, [pc, #-4]` / `0x22004450`). The IRAM mirror makes that target
+/// osos `0x08004450`, whose raw body is 52 bytes including its literal word.
+///
+/// Raw decoding of every ARM `B`/`BL` in `work/firmware/osos.dec` found
+/// **30 direct `bl` call sites** to this veneer: 28 unconditional, one
+/// `blhi` (`0x080f5720`), and one `blls` (`0x080f57dc`); there are no tail
+/// `b` callers. The two predicated calls are caller-side bounds gates, not a
+/// null guard: this function unconditionally masks IRQ/FIQ before accessing
+/// its pointer-free global.
+///
+/// Disables IRQ/FIQ, clears `mask` in the request-controller flags when
+/// `enable` is zero, or sets it for every nonzero `enable`, then restores the
+/// prior CPSR I/F state. This is the exact `bic`/`orr` selection and volatile
+/// read-modify-write at `0x2200aebc` in the mirrored IRAM body.
+///
+/// # Deliberate deviations
+///
+/// The target body reaches the CPSR helpers at `0x08001e70` and
+/// `0x08001e84`; this port calls their existing Rust ports. Host builds
+/// replace only target RAM with [`STREAM_BUFFER_REQUEST_FLAGS`], while those
+/// helpers use their existing deterministic host CPSR seam.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(
+    target_os = "none",
+    link_section = ".text.stream_buffer_request_flags_update"
+)]
+#[inline(never)]
+pub unsafe extern "C" fn stream_buffer_request_flags_update(enable: u32, mask: u32) {
+    let saved_if_mask = cpsr_disable_irq_fiq();
+    let flags = core::ptr::read_volatile(stream_buffer_request_flags_ptr());
+    let updated_flags = if enable == 0 {
+        flags & !mask
+    } else {
+        flags | mask
+    };
+    core::ptr::write_volatile(stream_buffer_request_flags_ptr(), updated_flags);
+    cpsr_restore_irq_fiq(saved_if_mask);
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -114,6 +181,7 @@ mod tests {
                 REFILL_CONTROLLER = missing_refill_controller;
                 CONTROLLER_CALLS = 0;
                 CONTROLLER_RESULT = 0;
+                STREAM_BUFFER_REQUEST_FLAGS = 0;
             }
         }
     }
@@ -125,6 +193,14 @@ mod tests {
             CONTROLLER_CALLS = 0;
             CONTROLLER_RESULT = result;
             REFILL_CONTROLLER = recording_controller;
+        }
+        guard
+    }
+
+    fn arrange_request_flags(flags: u32) -> MutexGuard<'static, ()> {
+        let guard = REFILL_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        unsafe {
+            STREAM_BUFFER_REQUEST_FLAGS = flags;
         }
         guard
     }
@@ -159,6 +235,38 @@ mod tests {
         unsafe {
             assert_eq!(STREAM_BUFFER_REFILL_LEVEL, 0, "addne is a wrapping add");
             assert_eq!(CONTROLLER_CALLS, 1);
+        }
+    }
+
+    #[test]
+    fn clears_only_requested_flags_when_enable_is_zero() {
+        let _guard = arrange_request_flags(0xa5a5_5a5a);
+        let _reset = Reset;
+
+        unsafe { stream_buffer_request_flags_update(0, 0x00f0_0f00) };
+
+        unsafe {
+            assert_eq!(
+                STREAM_BUFFER_REQUEST_FLAGS,
+                0xa505_505a,
+                "zero enable selects the ARM bic path"
+            );
+        }
+    }
+
+    #[test]
+    fn sets_requested_flags_for_every_nonzero_enable_value() {
+        let _guard = arrange_request_flags(0x0000_1001);
+        let _reset = Reset;
+
+        unsafe { stream_buffer_request_flags_update(0x8000_0000, 0x0010_0a04) };
+
+        unsafe {
+            assert_eq!(
+                STREAM_BUFFER_REQUEST_FLAGS,
+                0x0010_1a05,
+                "any nonzero enable selects the ARM orr path"
+            );
         }
     }
 }
