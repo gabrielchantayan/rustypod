@@ -19283,6 +19283,36 @@ functions:
       is blx-through-slot for the two unported callees and LLVM frame
       setup.
 
+  - address: 0x08377e58
+    ghidra: FUN_08377e58
+    name: expr_dup
+    size: 184
+    sig: "Expr *expr_dup(sqlite3 *db, const Expr *source)"
+    module: sqlite/expr_dup
+    status: ported
+    vars: {param_1: db, param_2: source, iVar1: node, uVar2: clone}
+    notes: >-
+      SQLite 3.5.x's sqlite3ExprDup. Binary decoding fixes the function
+      extent at 0x08377f10, so its 0x08377e58..0x08377f0c body is 184
+      bytes. A whole-image ARM branch scan found exactly 34 references:
+      all are unconditional bl instructions (no predicated forms and no
+      tail b). NULL source returns NULL before allocation. Otherwise
+      sqlite3DbMallocRaw @ 0x08374960 allocates 0x44 bytes; the IRAM
+      memcpy veneer @ 0x08037df8 copies the source; non-NULL token text
+      (+0x14) is duplicated with its packed length (+0x18 >> 1) through
+      sqlite3DbStrNDup @ 0x08374a40 and its dyn bit is set; only span.z
+      (+0x1c) is cleared. It then recursively duplicates pLeft (+0x08)
+      and pRight (+0x0c), before cloning pList (+0x10) through
+      sqlite3ExprListDup @ 0x083786c0 and pSelect (+0x38) through
+      sqlite3SelectDup @ 0x08383cc4. Both latter callees were checked
+      absent from names.yaml and src before this port, so their volatile
+      dispatch slots default to NULL-returning stubs pending real ports;
+      that is exact for NULL fields but deliberately drops non-NULL
+      lists/selects until wired. The host test covers NULL, root OOM,
+      token ownership/string copying, recursive child order, and both
+      dispatches. On 64-bit host tests a typed widened Expr is copied;
+      the target executes the original 0x44-byte memcpy.
+
   - address: 0x08377e00
     ghidra: FUN_08377e00
     name: expr_delete
