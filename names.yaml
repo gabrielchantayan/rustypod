@@ -15529,6 +15529,44 @@ functions:
       (multiply/range guard, backwards copy loop); its exit-1 mnemonic
       diff is expected.
 
+  - address: 0x08322bcc
+    ghidra: FUN_08322bcc
+    name: copy_encoded_word_block_from
+    size: 124
+    sig: "u32 copy_encoded_word_block_from(const EncodedWordBlock *source, EncodedWordBlock *destination)"
+    module: util/encoded_word_block
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: destination
+      param_1_plus_0: encoded_count
+      param_1_plus_4: words
+      DAT_08322c44: encoded_count_multiplier
+      iVar1/r2: decoded_count
+      iVar2/r3: word_count
+    notes: >-
+      Raw ARM confirms the 120-byte instruction body at
+      0x08322bcc..0x08322c44 followed by its literal-pool multiplier
+      0x0a7e377f at 0x08322c44; the next function starts at 0x08322c48,
+      so the full extent is 124 bytes (Ghidra's 120 drops the pool word).
+      A complete B/BL decode of osos.dec finds exactly 33 direct call
+      sites, all unconditional bl (no predicated forms); the address
+      occurs in no data word, so it is not dispatched virtually.
+      Same algorithm as copy_encoded_word_block (0x0835443c) with the
+      parameter order swapped: r0 is the source (ldr ip, [r0] reads its
+      header, the loop reads *(r0 + 4)) and r1 is the destination
+      (str ip, [r1] writes its header, the loop writes *(r1 + 4)).
+      Call sites confirm: 0x082ebbcc copies six blocks from an input
+      array into a crypto context's 0x50..0x70 slots, source first.
+      The range guard (signed wrapping magnitude of encoded_count *
+      0x0a7e377f must be <= 28) runs BEFORE the alias check, so an
+      aliased out-of-range header still returns 1; i32::MIN keeps the
+      ARM wrapping-negation corner case. Not folded onto
+      copy_encoded_word_block: both symbols resolve distinctly in
+      librustypod.a. match.py is structurally equivalent
+      (multiply/range guard, alias check, descending copy loop); its
+      exit-1 mnemonic diff is expected.
+
   - address: 0x08391e44
     ghidra: FUN_08391e44
     name: strcmp
