@@ -14857,6 +14857,91 @@ functions:
       return; the diff is LLVM's fp frame and a movne standing in for
       the original's ldreq literal load (the documented deviation).
 
+  - address: 0x082a50a8
+    ghidra: FUN_082a50a8
+    name: string_object_utf8_strcasecmp_safe
+    size: 8
+    sig: "int string_object_utf8_strcasecmp_safe(const StringObject *this, const char *other)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: this, param_2: other, iStack_c: a_cursor, iStack_10: b_cursor, iVar1: folded_codepoint_a, iVar2: folded_codepoint_b, DAT_082760f0: UTF8_STRCASECMP_EMPTY_CSTR_ADDRESS}
+    notes: >-
+      32 bl call sites, binary-scanned over every B/BL word in osos.dec,
+      ZERO predicated (matches Ghidra's count). 8 bytes, all code - the
+      next function (string_object_c_str @ 0x082a50b0) starts right
+      after. The case-folding compare-against-C-string accessor of the
+      two-word string class (vtable @ +0, payload @ +4), `int
+      StringObject::utf8_strcasecmp(const char *other)`: raw ARM is
+      `ldr r0,[r0,#4]; b 0x0827609c` - a two-instruction thunk loading
+      the payload word and tail-branching to the case-folding UTF-8
+      compare core @ 0x0827609c (identified below, NOT ported) with
+      the caller's r1 passed through untouched. No NULL guard on
+      `this`; a NULL payload goes down untouched and the core's own
+      NULL substitution (literal-pool word @ 0x082760f0 holds
+      0x083e2e3a, binary-verified - the SAME shared empty C string
+      string_object_c_str @ 0x082a50b0 and utf8_strcmp_safe @
+      0x08276d64 fall back to) makes it read as "". Call sites pin the
+      intent: nine consecutive sites @ 0x08117b8c-0x08117c38 compare a
+      stack-built StringObject against the pc-relative literals "jpg",
+      "jpeg", "jp2", "tif", "tiff", "png", "gif", "bmp", "pict" @
+      0x08117ce8 on, each result consumed by `cmp r0,#0; beq` - a
+      photo-import extension matcher (matching "JPG" against "jpg"
+      REQUIRES the fold to work); further clusters @ 0x08118bf8 on,
+      0x081193dc-0x0811949c, 0x08178138 on, 0x0826bde8 on, 0x0828aa0c
+      on, 0x08298a0c on. Ghidra's C
+      (decomp/c/029/082a50a8_FUN_082a50a8.c) shows the callee's body
+      inlined and matches once the tail branch is followed. Port
+      dispatches through the STRING_OBJECT_UTF8_STRCASECMP_CORE slot
+      (the STRING_OBJECT_INSERT_CORE pattern) because the core is not
+      ported; the default missing_utf8_strcasecmp_core returns the
+      core's fold-equal exit (0) - arbitrary for real inputs, so this
+      port is NOT hook-ready until 0x0827609c is wired in. match.py
+      structural: same ldr-@+4 + tail-branch shape; the diff is
+      LLVM's fp frame and the branch becoming a bx through the
+      volatile-read slot (the documented deviation, same as
+      string_object_len_plus1 / string_object_utf8_strcmp_safe).
+
+  - address: 0x0827609c
+    ghidra: FUN_0827609c
+    name: utf8_strcasecmp_safe
+    size: 84
+    sig: "int utf8_strcasecmp_safe(const char *a, const char *b)"
+    module: cxx/string_object
+    status: identified
+    vars: {param_1: a, param_2: b, local_c: a_cursor, local_10: b_cursor, iVar1: folded_codepoint_a, iVar2: folded_codepoint_b, DAT_082760f0: UTF8_STRCASECMP_EMPTY_CSTR_ADDRESS, DAT_08276fd0: UTF8_FOLD_TABLE_ADDRESS}
+    notes: >-
+      7 direct bl call sites (binary-scanned: 0x0807a508, 0x080ed89c,
+      0x08102994, 0x08135ca0, 0x08272520, 0x082989ec, 0x0829b8f0) plus
+      the 32 of the string-object thunk @ 0x082a50a8 above. The
+      case-insensitive counterpart of the ported utf8_strcmp_safe @
+      0x08276d64: substitutes the shared empty C string (0x083e2e3a,
+      pool word @ 0x082760f0, binary-verified) for either NULL
+      argument, then walks both strings codepoint by codepoint through
+      the ported utf8_next_codepoint @ 0x08276214, folds EACH decoded
+      codepoint through the byte-map function @ 0x08276fbc (`cmp
+      r0,#0x100; ldrcc r1,[0x08276fd0]; andcc r0,r0,#0xff; ldrbcc
+      r0,[r1,r0]; bx lr` - codepoints >= 0x100 pass through
+      unchanged), and returns the first unequal folded pair's
+      difference (sub r0,r4,r0), 0 at a shared terminator. A bounded
+      variant @ 0x082760f4 (112 bytes) adds a codepoint count limit to
+      the same loop (its NULL default @ 0x08276164 is 0x083e2e3a too).
+      BLOCKER / ANOMALY for a future port: the fold's 256-byte table
+      base is the literal word 0x083ed1dd (pool @ 0x08276fd0,
+      binary-verified; four other users at pool words 0x0806b87c,
+      0x080ca930, 0x080dac54, 0x080f5414 - the last a byte-identical
+      20-byte fold clone @ 0x080f5400, another an in-place
+      string-byte-map loop @ 0x080dac30). In the static osos.dec that
+      address sits MID-CODE inside the fplib region (0x083eae74-
+      0x083ed1ff, the fp trap-control helper: the byte at the base is
+      0xf0) followed by ADS register-dump format strings. fold(0) =
+      0xf0 != 0 would break the compare loop's shared-terminator exit,
+      and no classic 256-byte case table exists anywhere in osos.dec
+      (scanned), so the runtime bytes at 0x083ed1dd almost certainly
+      differ from the static image - patching vs relocation mechanism
+      UNRESOLVED. Do not port the fold by modeling the static bytes.
+      The photo-import call-site cluster on the thunk ("jpg"..."pict")
+      pins the intended semantics as a case-insensitive compare.
+
   - address: 0x082a50a0
     ghidra: FUN_082a50a0
     name: string_object_len_plus1

@@ -141,8 +141,18 @@
 //!   own NULL guard; the thunk itself guards nothing). The lone call
 //!   site @ 0x081ae498 truncates the result to 16 bits, sizing a copy
 //!   buffer. Its 8-byte sibling @ 0x082a50a8 (`ldr r0,[r0,#4]; b
-//!   0x0827609c`) runs the 84-byte FUN_0827609c over the payload and
-//!   is NOT ported here.
+//!   0x0827609c`) is ported below as
+//!   `string_object_utf8_strcasecmp_safe`.
+//! - `string_object_utf8_strcasecmp_safe` — original: `FUN_082a50a8`
+//!   @ 0x082a50a8 (8 bytes; 32 `bl` call sites, binary-scanned, zero
+//!   predicated). A two-instruction thunk (`ldr r0,[r0,#4]; b
+//!   0x0827609c`) that tail-branches over the payload word at +4 to
+//!   the case-folding UTF-8 compare core @ 0x0827609c — the
+//!   case-insensitive counterpart of `string_object_utf8_strcmp_safe`,
+//!   consumed by keyword-dispatch chains (a photo-import extension
+//!   matcher against "jpg"/"png"/... literals). The core is NOT
+//!   ported, so the branch dispatches through the
+//!   [`STRING_OBJECT_UTF8_STRCASECMP_CORE`] slot.
 //! - `string_object_utf8_strcmp_safe` — original: `FUN_082a5368` @
 //!   0x082a5368 (8 bytes; 39 `bl` call sites, binary-scanned, zero
 //!   predicated). A two-instruction thunk (`ldr r0,[r0,#4]; b
@@ -1277,6 +1287,100 @@ pub unsafe extern "C" fn string_object_utf8_strcmp_safe(
             &(utf8_strcmp_safe as unsafe extern "C" fn(*const u8, *const u8) -> i32),
         );
     compare((*this).payload as *const u8, other)
+}
+
+/// The unported case-folding UTF-8 compare core @ 0x0827609c that
+/// [`string_object_utf8_strcasecmp_safe`] tail-branches to. It
+/// substitutes the shared empty C string (the same 0x083e2e3a
+/// [`string_object_c_str`] falls back to) for either NULL argument,
+/// then walks both strings codepoint by codepoint through the ported
+/// [`utf8_next_codepoint`] @ 0x08276214, folds each decoded codepoint
+/// through the byte-map function @ 0x08276fbc (codepoints >= 0x100
+/// pass through unchanged, smaller ones are remapped one byte table
+/// lookup at a time), and returns the first unequal folded pair's
+/// difference, 0 at a shared terminator. The bounded variant @
+/// 0x082760f4 adds a codepoint count limit to the same loop. The
+/// fold's table base is the literal-pool word 0x083ed1dd — see the
+/// anomaly note on [`STRING_OBJECT_UTF8_STRCASECMP_CORE`].
+pub type StringObjectUtf8StrcasecmpCoreFn =
+    unsafe extern "C" fn(a: *const u8, b: *const u8) -> i32;
+
+/// Placeholder for the unported compare core @ 0x0827609c. Returning
+/// 0 reproduces the core's fold-equal exit — the only exit it has for
+/// the degenerate both-empty input — and is arbitrary for any real
+/// pair of strings: this port is NOT hook-ready until 0x0827609c is
+/// ported and wired in as the default.
+unsafe extern "C" fn missing_utf8_strcasecmp_core(_a: *const u8, _b: *const u8) -> i32 {
+    0
+}
+
+/// Active compare core for [`string_object_utf8_strcasecmp_safe`]
+/// (the [`STRING_OBJECT_INSERT_CORE`] pattern). Host tests install a
+/// recording mock; a later port of 0x0827609c replaces the default
+/// without changing this caller.
+///
+/// Anomaly a future port of the core must resolve: its fold function
+/// @ 0x08276fbc (`cmp r0,#0x100; ldrcc r1,[0x08276fd0]; andcc r0,r0,
+/// #0xff; ldrbcc r0,[r1,r0]; bx lr`) reads its 256-byte map at
+/// 0x083ed1dd — the middle of the fplib region's trap-control code
+/// and ADS register-dump format strings in the static image
+/// (binary-verified against osos.dec: byte 0xf0 at the base, so
+/// fold(0) != 0 would break the compare loop's shared-terminator
+/// exit, and no classic case table exists anywhere in osos.dec). The
+/// runtime bytes almost certainly differ from the static image; the
+/// mechanism (patching vs. relocation) is unresolved.
+pub static mut STRING_OBJECT_UTF8_STRCASECMP_CORE: StringObjectUtf8StrcasecmpCoreFn =
+    missing_utf8_strcasecmp_core;
+
+/// string_object_utf8_strcasecmp_safe — original: `FUN_082a50a8` @
+/// 0x082a50a8 (8 bytes, all code — the next function starts at
+/// 0x082a50b0; **32 `bl` call sites**, binary-scanned over every
+/// B/BL word in osos.dec, zero of them predicated — matching
+/// Ghidra's count).
+///
+/// Source: `ipod-decomp/decomp/c/029/082a50a8_FUN_082a50a8.c` (the
+/// callee inlined — matches the raw ARM once the tail branch is
+/// followed).
+///
+/// The case-folding compare-against-C-string accessor of the
+/// two-word string class, `int StringObject::utf8_strcasecmp(const
+/// char *other)`: a two-instruction thunk — `ldr r0, [r0, #4]; b
+/// 0x0827609c` — that loads the payload word at `this + 4` and
+/// tail-branches to the (unported) case-folding UTF-8 compare core
+/// @ 0x0827609c with the caller's second argument passed through
+/// untouched in r1. The thunk guards nothing: a NULL payload goes
+/// down untouched and the core's own NULL substitution makes it
+/// read as the shared empty string — exactly the asymmetry
+/// [`string_object_utf8_strcmp_safe`] documents. No NULL guard on
+/// `this` — the original faults on a NULL `this`, and so does the
+/// port.
+///
+/// Call sites pin the intent: nine consecutive sites @
+/// 0x08117b8c-0x08117c38 compare a stack-built StringObject against
+/// the pc-relative literals "jpg", "jpeg", "jp2", "tif", "tiff",
+/// "png", "gif", "bmp", "pict" @ 0x08117ce8 on, each result
+/// consumed by `cmp r0,#0; beq` — a photo-import extension matcher
+/// (plus clusters @ 0x08118bf8, 0x081193dc-0x0811949c, 0x08178138
+/// on, 0x0826bde8 on, 0x0828aa0c on and 0x08298a0c on; the core
+/// itself has 7 direct `bl` sites). Matching "JPG" against "jpg"
+/// requires the fold to work, which is how the table anomaly above
+/// was caught.
+///
+/// Deviation: the compare core @ 0x0827609c is NOT ported, so the
+/// tail branch dispatches through the
+/// [`STRING_OBJECT_UTF8_STRCASECMP_CORE`] slot whose default
+/// [`missing_utf8_strcasecmp_core`] returns the core's fold-equal
+/// exit — see its note. Codegen stays a load plus a tail call.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_utf8_strcasecmp_safe(
+    this: *const StringObject,
+    other: *const u8,
+) -> i32 {
+    core::ptr::read_volatile(core::ptr::addr_of!(STRING_OBJECT_UTF8_STRCASECMP_CORE))(
+        (*this).payload as *const u8,
+        other,
+    )
 }
 
 /// string_object_is_empty — original: `FUN_082a5370` @ 0x082a5370
@@ -3702,6 +3806,118 @@ pub(crate) mod tests {
                 }
             }
         }
+    }
+
+    /// Serializes the strcasecmp-core seam and its recorder.
+    static STRCASECMP_CORE_LOCK: Mutex<()> = Mutex::new(());
+    /// `(a, b, result)` observed at the compare core @ 0x0827609c
+    /// through the [`STRING_OBJECT_UTF8_STRCASECMP_CORE`] slot.
+    static mut STRCASECMP_CORE_CALLS: Vec<(usize, usize)> = Vec::new();
+    /// The fixed result the recording mock hands back.
+    const STRCASECMP_MOCK_RESULT: i32 = -0x1234;
+
+    unsafe extern "C" fn recording_utf8_strcasecmp_core(a: *const u8, b: *const u8) -> i32 {
+        (*core::ptr::addr_of_mut!(STRCASECMP_CORE_CALLS)).push((a as usize, b as usize));
+        STRCASECMP_MOCK_RESULT
+    }
+
+    /// Restores the unported compare-core boundary even when a test
+    /// panics.
+    struct StrcasecmpCoreGuard {
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for StrcasecmpCoreGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(STRING_OBJECT_UTF8_STRCASECMP_CORE)
+                    .write_volatile(missing_utf8_strcasecmp_core);
+            }
+        }
+    }
+
+    fn strcasecmp_core_bench() -> StrcasecmpCoreGuard {
+        let lock = STRCASECMP_CORE_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        unsafe {
+            (*core::ptr::addr_of_mut!(STRCASECMP_CORE_CALLS)).clear();
+            core::ptr::addr_of_mut!(STRING_OBJECT_UTF8_STRCASECMP_CORE)
+                .write_volatile(recording_utf8_strcasecmp_core);
+        }
+        StrcasecmpCoreGuard { _lock: lock }
+    }
+
+    #[test]
+    fn utf8_strcasecmp_safe_thunk_dispatches_the_payload_and_returns_the_core_result() {
+        let mut payload_storage = *b"JPG\0";
+        let other = *b"jpg\0";
+        let object = StringObject {
+            vtable: core::ptr::null(),
+            payload: payload_storage.as_mut_ptr(),
+        };
+        let _bench = strcasecmp_core_bench();
+
+        let result = unsafe { string_object_utf8_strcasecmp_safe(&object, other.as_ptr()) };
+
+        assert_eq!(result, STRCASECMP_MOCK_RESULT, "the core's result is returned verbatim");
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(STRCASECMP_CORE_CALLS)).clone() },
+            std::vec![(payload_storage.as_ptr() as usize, other.as_ptr() as usize)],
+            "(payload, other) tail-branch arguments"
+        );
+        assert_eq!(
+            payload_storage, *b"JPG\0",
+            "the thunk never writes the payload"
+        );
+    }
+
+    #[test]
+    fn utf8_strcasecmp_safe_thunk_passes_null_arguments_through_untouched() {
+        let other = *b"x\0";
+        let object = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        let _bench = strcasecmp_core_bench();
+
+        unsafe {
+            // The thunk guards nothing: a NULL payload and a NULL
+            // `other` both reach the core, whose own NULL substitution
+            // makes them read as "".
+            string_object_utf8_strcasecmp_safe(&object, other.as_ptr());
+            string_object_utf8_strcasecmp_safe(&object, core::ptr::null());
+        }
+
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(STRCASECMP_CORE_CALLS)).clone() },
+            std::vec![(0usize, other.as_ptr() as usize), (0usize, 0usize)],
+            "no NULL guard anywhere in the thunk"
+        );
+    }
+
+    #[test]
+    fn utf8_strcasecmp_safe_default_core_reports_fold_equal() {
+        // No bench: the wired default is missing_utf8_strcasecmp_core,
+        // reproducing the unported core's fold-equal exit (documented
+        // placeholder — NOT a substitute for the core until 0x0827609c
+        // is ported). The assertion holds even if a sibling test's
+        // recorder is installed concurrently: the recorder's fixed
+        // result is nonzero, so observing 0 pins the default.
+        let mut payload_storage = *b"jpg\0";
+        let object = StringObject {
+            vtable: core::ptr::null(),
+            payload: payload_storage.as_mut_ptr(),
+        };
+
+        // This test must not race a sibling's recorder: take the seam
+        // lock without installing a mock.
+        let _lock = STRCASECMP_CORE_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let result = unsafe { string_object_utf8_strcasecmp_safe(&object, b"jpg\0".as_ptr()) };
+
+        assert_eq!(result, 0);
     }
 
     #[test]
