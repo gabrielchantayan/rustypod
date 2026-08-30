@@ -12307,6 +12307,84 @@ functions:
       command_dispatcher_get`, i.e. the original's tail branch plus the
       crate's mandatory non-leaf frame pointer.
 
+  - address: 0x081dfab0
+    ghidra: FUN_081dfab0
+    name: command_dispatch_by_resource
+    size: 96
+    sig: "void *command_dispatch_by_resource(void *dispatcher, u32 resource_id, u32 command, u32 aux)"
+    module: app/command_dispatch
+    status: ported
+    renames:
+      param_1: dispatcher (this - the command_dispatcher_get singleton)
+      param_2: resource_id (the 'SCST' record selector; call sites pass
+        command_id - 1)
+      param_3: command (the command id itself, 0x0dad0000 namespace)
+      param_4: aux (observed 0 and 6)
+      FUN_081473d8: silver_list_table_ctor (direct, ported in
+        app/silver_list_table)
+      FUN_081dfb10: dispatch_by_name (COMMAND_DISPATCH_BY_RESOURCE_OPS
+        slot; unported - looks the name up in the dispatcher's +0x04
+        string-keyed map via a temporary COW string and
+        cxx_string_from_cstr 0x083d8b5c / FUN_083db41c /
+        cxx_string_release 0x083d8b04, compares the iterator against the
+        map end cached at dispatcher +0x14 through FUN_083cf800,
+        answers NULL on a miss, else invokes the found record's +0x18
+        handler slot with (name, resource_id, command, aux), a NULL
+        slot itself fatal via bleq heap_panic)
+      FUN_081474d0: silver_list_table_dtor
+        (COMMAND_DISPATCH_BY_RESOURCE_OPS slot; unported - 252 bytes,
+        0x081474d0..0x081475cc, re-plants the same vtable 0x08986434
+        the ctor plants and tears down the map and the +0x28 name)
+      FUN_08030f44: fail (COMMAND_DISPATCH_BY_RESOURCE_OPS slot; ported
+        as heap_panic, non-returning)
+    notes: >-
+      40 bl + 0 b call sites, binary-scanned by decoding every B/BL
+      word in osos.dec; all 40 unconditional (no predicated forms).
+      Ghidra's 96-byte extent is CORRECT this time - the next function
+      (dispatch_by_name, unported) opens `push {r0-r3, r4-r8, lr}` @
+      0x081dfb10; Ghidra's C is right too, except its 40-byte
+      `auStack_44` undersizes the 48-byte SilverListTable (it sized the
+      buffer from the ctor's visible writes and missed the +0x2c store,
+      so `local_1c` at sp+52 is really table.name at +0x28).
+      A method of the command dispatcher singleton that dispatches a
+      command selected by RESOURCE ID: stack-constructs a temporary
+      Silver list table for resource_id UNPOPULATED (populate = 0 - no
+      SLst items are ever loaded, the object exists only to carry the
+      'SCST' resolution), reads the resolved name word at table +0x28
+      once (ldr r0, [sp, #52]) and calls dispatch_by_name with the name
+      in BOTH r1 and r2 plus resource_id, command and aux forwarded
+      verbatim; a NULL answer is fatal (cmp r0, #0; bleq heap_panic,
+      non-returning - the destructor never runs on that path),
+      otherwise the temporary table is destroyed and the handler's
+      return handed back untouched. All 40 call sites sit in Silver
+      controller code: command_dispatcher_get, then this with
+      (id-1, id, 0) (aux = 6 observed twice), the result handed to a
+      virtual slot of the controller (vtable +4 / +0xd0 / +0x8c).
+      Deviations - dispatch_by_name, the dtor and fail ride the
+      COMMAND_DISPATCH_BY_RESOURCE_OPS read_volatile seam (the
+      silver_list_table ctor-seam call-boundary decision); the target
+      defaults transmute the real firmware addresses 0x081dfb10 /
+      0x081474d0 / 0x08030f44, so the port IS hook-ready on device. A
+      swapped-in fail hook that returns stops the dispatch at the NULL
+      answer and returns it without running the dtor - faithful in
+      shape, since the original never reaches the dtor on that path
+      either. The temporary table is MaybeUninit stack storage, the
+      original's `sub sp, sp, #60` frame.
+      Host tests - the happy path proves ctor order (alloc -> registry
+      -> resolve, NO populate), the name forwarded in both name slots
+      with the resolved SCST bytes, dispatcher/resource_id/command/aux
+      verbatim, dispatch -> dtor order, and the dtor running on the
+      same table (fields snapshotted inside the mock - the table is
+      dead stack storage once the port returns); the NULL path proves
+      fail fires immediately after the NULL answer and the dtor is
+      skipped; the failed-resolution path proves the dispatch still
+      goes ahead with the shared empty-rep name. match.py structural
+      (exit 1, diff expected) - same construct/load-name/dispatch/
+      NULL-gate/destroy shape; the diff is the ops-table indirection
+      (blx r8/r9/sl for bl 0x081dfb10 / 0x081474d0 / 0x08030f44), the
+      crate fp frame, and LLVM keeping the result in r4 across the
+      cmp.
+
   - address: 0x081f77a4
     ghidra: FUN_081f77a4
     name: volume_controller_get

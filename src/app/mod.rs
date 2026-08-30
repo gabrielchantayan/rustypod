@@ -8,6 +8,7 @@ pub mod category_is_below_three;
 pub mod callback_target_dispatch;
 pub mod callback_target_slot_14_dispatch;
 pub mod callback_target_slot_20_dispatch;
+pub mod command_dispatch;
 pub mod class_registry;
 pub mod context;
 pub mod context_scope;
