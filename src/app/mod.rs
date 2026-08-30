@@ -60,3 +60,4 @@ pub mod task_registry;
 pub mod template_binding;
 pub mod vtable_set;
 pub mod view_event;
+pub mod view_timer;

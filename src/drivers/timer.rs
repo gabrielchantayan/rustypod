@@ -989,12 +989,11 @@ mod tests {
     extern crate std;
     use super::*;
     use crate::kernel::sync_mutex::{RomKernelOps, ROM_KERNEL};
+    use crate::testing::TIMER_OPS_TEST_LOCK as OPS_LOCK;
     use std::sync::Mutex as StdMutex;
     use std::vec;
     use std::vec::Vec;
 
-    /// Serializes tests that swap the global ops tables / mock state.
-    static OPS_LOCK: StdMutex<()> = StdMutex::new(());
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     enum Call {
