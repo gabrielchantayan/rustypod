@@ -40551,3 +40551,26 @@ functions:
       each dst vtable preserved, flags word copied wholesale including
       refcount bits (dst's old low bits do not survive), source
       untouched, dst returned, self-assignment a no-op.
+
+  - address: 0x082e18bc
+    ghidra: FUN_082e18bc
+    name: cache_entry_release
+    size: 60
+    sig: "void cache_entry_release(u32 *entry, u32 detach_owner)"
+    module: fs/cache_entry
+    status: ported
+    renames:
+      param_1: entry
+      param_2: detach_owner
+    notes: >-
+      Releases one reference held on the five-word cache descriptor
+      returned by FUN_082dfdf0: it decrements word +0x10 only if nonzero,
+      and clears the source/owner word +0x08 when detach_owner is
+      nonzero. Both mutations occur between calls to the unported
+      addresses 0x082d7924 and 0x082d7944. Their semantic identities are
+      unverified; the target port calls those retailOS addresses directly,
+      while host tests use recording boundaries only to prove both calls
+      bracket every path, including NULL. Size byte-verified: the next
+      separately entered function begins at 0x082e18f8, so Ghidra's 60
+      bytes is exact. 29 call sites, verified by decoding every B/BL word
+      in osos.dec: all 29 are plain bl, with no predicated forms.
