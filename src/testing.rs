@@ -130,6 +130,14 @@ pub static APP_ROOT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// let one module's teardown restore defaults under the other's mock.
 pub static BTREE_CELL_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Serializes every host test that installs a mock reset into
+/// `cxx::pair_header::PAIR_HEADER_ELEMENT_ARRAY_OPS`. That seam is one
+/// shared mutable global read by the ported `FUN_082ab398` wrapper, and
+/// both `cxx::pair_header`'s own tests and `runtime::cpp_array_construct`'s
+/// adapter tests swap it, so a per-module lock would let one module's
+/// teardown restore defaults under the other's mock.
+pub static CPP_ARRAY_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Serializes every host test that installs a fixture block into
 /// `kernel::diag_ring_record::DIAG_RING_BLOCK_GETTER`. That seam is one
 /// shared mutable global pointing at the per-task diagnostic ring, and

@@ -21604,7 +21604,7 @@ functions:
     ghidra: FUN_082ab398
     name: pair_header_grand_base_reset
     size: 84
-    sig: "void pair_header_grand_base_reset(u32 *this, u32 field_count, u32 field_size, u32 element_initializer, u32 initializer_context)"
+    sig: "u32 *pair_header_grand_base_reset(u32 *this, u32 field_count, u32 field_size, u32 element_initializer, u32 initializer_context)"
     module: cxx/pair_header
     status: ported
     vars: {param_1: this, param_2: field_count, param_3: field_size, param_4: element_initializer, param_5: initializer_context}
@@ -21615,13 +21615,60 @@ functions:
       as (this, field_count, field_size, 0, 0, element_initializer,
       initializer_context, 0, 0, 0, 0). This proves the original 11-word
       ARM placement: first four words in r0-r3 and the remaining seven at
-      successive stack slots. The wrapper discards 0x082b498c's pointer
-      result. That unported helper is isolated in the accurately typed
-      PAIR_HEADER_ELEMENT_ARRAY_OPS::reset seam. Focused host tests record
-      every forwarded word, all six literal defaults, one-call order, unit
-      return behavior, and 0x08185b98's fixed direct dependency. match.py
+      successive stack slots. The retail ARM leaves 0x082b498c's pointer
+      result in r0 untouched through the pop {r4,r5,r6,pc} - Ghidra's void
+      return is a C-level fiction - and the port now forwards it, because
+      the only caller family is the four-argument adapter 0x082ab234
+      (cpp_array_construct, runtime/cpp_array_construct) whose own callers
+      chain on the returned array base. That unported helper is isolated
+      in the accurately typed PAIR_HEADER_ELEMENT_ARRAY_OPS::reset seam.
+      Focused host tests record every forwarded word, all six literal
+      defaults, one-call order, r0 forwarding of a sentinel helper result,
+      and 0x08185b98's fixed direct dependency. match.py
       structural: save/stack-argument materialization and one helper call
       match the retail wrapper.
+
+  - address: 0x082ab234
+    ghidra: FUN_082ab234
+    name: cpp_array_construct
+    size: 32
+    sig: "u32 *cpp_array_construct(u32 *array, u32 element_ctor, u32 element_size, u32 element_count)"
+    module: runtime/cpp_array_construct
+    status: ported
+    renames:
+      param_1: array (base of the object array being constructed)
+      param_2: element_ctor (void (*)(void *) constructor, passed as a raw word)
+      param_3: element_size
+      param_4: element_count
+      FUN_082ab398: pair_header_grand_base_reset (ported callee, cxx/pair_header)
+    notes: >-
+      ARM ADS four-argument array-constructor adapter: 41 bl call sites,
+      zero predicated forms, verified by decoding every B/BL word in
+      osos.dec; callers never gate the call and the adapter has no NULL
+      guard or validation of its own. Ghidra's 32-byte extent is exact:
+      eight instructions, and the next function (cpp_finalise_null_guard @
+      0x082ab254, ported in heap/veneers) starts immediately after. Raw
+      ARM: mov ip,r1; mov r1,r3; push {r3,lr}; mov r3,#0; str r3,[sp];
+      mov r3,ip; bl 0x082ab398; pop {ip,pc} - it rotates the ADS (array,
+      ctor, size, count) convention into the five-word helper ABI (array,
+      count, size, ctor, 0) with the pushed zero as initializer_context,
+      and forwards to the ported pair_header_grand_base_reset. Retail r0
+      carries the helper's pointer result straight through both wrappers
+      (neither clobbers it), and callers depend on it: the 0x081b80b4 site
+      stores into ret+0x60 and feeds ret+100 to the next adapter call, the
+      0x0816a6e4 site returns ret-4 as the finished object - Ghidra's void
+      return type is wrong, so the port returns the pointer. The ctor word
+      is treated as data until the helper calls it, matching the callee
+      port's u32 typing. Deliberate supporting change: the callee port
+      previously discarded the helper result and returned void; it now
+      forwards r0 (names.yaml entry 0x082ab398 updated). Host tests prove
+      the argument rotation and zero-filled helper words, r0 forwarding of
+      a sentinel distinct from array, and verbatim forwarding of extreme
+      words (count 0, size 0xffffffff). match.py structural: the rotation
+      (mov ip,r1; mov r1,r3; mov r3,ip), the pushed zero stack word, and
+      the single helper-writer call are retained; the diff is the crate's
+      fp frame and LLVM's argument setup order. No link_section needed:
+      the body is not byte-identical to any sibling adapter.
 
   - address: 0x08124a38
     ghidra: FUN_08124a38
