@@ -20068,6 +20068,80 @@ functions:
       load, and scaled indexed load shape; host tests represent the target's
       unaligned +0x04 pointer field explicitly.
 
+  - address: 0x083697f0
+    ghidra: FUN_083697f0
+    name: namespace_provider_push
+    size: 8
+    sig: "u32 namespace_provider_push(usize *providers, usize value)"
+    module: cxx/object_flags
+    status: ported
+    vars: {param_1: providers, param_2: value}
+    renames:
+      FUN_0836963c: namespace_provider_insert_at
+    notes: >-
+      SIZE CORRECTION - Ghidra reports 192 bytes, but the next function
+      (the `table[index] = value` accessor 0x083697f8) starts 8 bytes in;
+      the remaining 184 bytes are five separately linked siblings
+      (0x083697f8 set, 0x08369810 comparator swap, 0x0836982c sort,
+      0x08369864 namespace_provider_at, 0x08369878 tail) that Ghidra
+      swallowed into this extent. True body: `ldr r2, [r0]; b
+      0x0836963c` - the append entry point of the namespace-providers
+      table, tail-branching to namespace_provider_insert_at with the
+      entry count as the index. 33 `bl` call sites, all unconditional
+      (0 predicated forms), counted by decoding every ARM B/BL word in
+      osos.dec - no caller NULL- or flag-gates the call, matching the
+      veneer itself: the count load at +0x00 runs BEFORE the callee's
+      NULL guard, so a NULL providers faults on the load. There is no
+      null-safe path through this veneer. Returns the callee's result
+      (the new count, or 0 on grow failure). Deviation: the tail branch
+      to the ported callee is an ordinary returning call, so the count
+      is read twice on the appended path with no intervening store, as
+      in retail. match.py (--size 8): same `ldr r2,[r0]` + tail-branch
+      shape; the LLVM frame prologue is the only addition.
+
+  - address: 0x0836963c
+    ghidra: FUN_0836963c
+    name: namespace_provider_insert_at
+    size: 184
+    sig: "u32 namespace_provider_insert_at(usize *providers, usize value, i32 index)"
+    module: cxx/object_flags
+    status: ported
+    vars: {param_1: providers, param_2: value, param_3: index}
+    notes: >-
+      0 `bl` call sites and exactly 1 inbound branch - the tail `b` from
+      the namespace_provider_push veneer @ 0x083697f4 - counted by
+      decoding every ARM B/BL word in osos.dec; Ghidra's listing has no
+      separate entry for this body at all. Insert into the growable
+      namespace-providers table {count @ +0x00, table @ +0x04,
+      sorted-flag @ +0x08, capacity @ +0x0c, comparator @ +0x10}:
+      NULL providers returns 0. If `capacity <=u count + 1` (unsigned
+      `bgt` skips; grows when capacity == count + 1, keeping one spare
+      slot), the table is reallocated to `capacity << 3` bytes (the
+      doubled capacity) through the unported traced realloc
+      FUN_08043f3c and the capacity word doubled; a failed realloc
+      returns 0 with the object untouched. With the count reloaded:
+      a negative index or `count <=s index` (signed `ble`) appends at
+      table[count]; otherwise `for i in (index..=count).rev(): table[i
+      + 1] = table[i]` shifts the tail up - INCLUDING the one-past-end
+      word table[count], copied to table[count + 1] first, a faithful
+      quirk the grow guarantee keeps in bounds - then table[index] =
+      value. Finally count is stored incremented, the sorted flag at
+      +0x08 is cleared (the sort sibling 0x0836982c sets it after
+      qsorting with the +0x10 comparator), and the NEW count is
+      returned. Deviations: FUN_08043f3c rides the
+      NAMESPACE_PROVIDER_REALLOC seam (house pattern; the default stub
+      fails every grow, the original's own realloc-failure path)
+      instead of a direct `bl`, and the object words are addressed by
+      pointer-sized word index (byte-exact on the 32-bit target,
+      disjoint slots on a 64-bit host - the registry_key_hash key
+      model). match.py (--size 184): same structure - NULL guard,
+      unsigned grow gate with `lsl #3` byte size, seam blx for the
+      realloc, table store + capacity doubling, signed append/shift
+      selection, one-past-end-inclusive downward shift loop, count
+      increment + sorted-flag clear, new-count return; LLVM swapped
+      the two append predicates (both lead to the same path) and uses
+      a pre-indexed ldr in the shift loop.
+
   - address: 0x08369778
     ghidra: FUN_08369778
     name: ata_call_with_zero

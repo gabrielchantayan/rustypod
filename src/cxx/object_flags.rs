@@ -889,6 +889,162 @@ pub unsafe extern "C" fn namespace_provider_at(
     }
 }
 
+/// Word index of the entry count (`ldr/str [r4]` / `[r0]`). Pointer-sized
+/// word indexing: byte-exact on the 32-bit target, disjoint slots on a
+/// 64-bit host — the registry_key_hash key model in this module.
+const PROVIDER_COUNT_WORD: usize = 0;
+/// Word index of the provider-pointer table (`[r4, #4]`).
+const PROVIDER_TABLE_WORD: usize = 1;
+/// Word index of the sorted flag (`[r4, #8]`): insert clears it and the
+/// sort sibling 0x0836982c sets it after qsorting the table with the
+/// +0x10 comparator.
+const PROVIDER_SORTED_WORD: usize = 2;
+/// Word index of the table capacity in entries (`[r4, #12]`).
+const PROVIDER_CAPACITY_WORD: usize = 3;
+
+/// `FUN_08043f3c` (unported): the traced realloc front-end over the same
+/// RAM descriptor as [`traced_alloc`](crate::drivers::ata_cmd::traced_alloc).
+/// The insert grow path passes `(table, capacity * 8, 0, 0)` — the doubled
+/// capacity in bytes plus the two call-site tags.
+pub type NamespaceProviderRealloc =
+    unsafe extern "C" fn(block: *mut usize, new_size: u32, tag1: u32, tag2: u32) -> *mut usize;
+
+/// Fails every grow with NULL: the original's own realloc-failure result,
+/// which `namespace_provider_insert_at` turns into its 0 return. Target
+/// integration must install retailOS `FUN_08043f3c` until it is ported.
+unsafe extern "C" fn missing_namespace_provider_realloc(
+    _block: *mut usize,
+    _new_size: u32,
+    _tag1: u32,
+    _tag2: u32,
+) -> *mut usize {
+    core::ptr::null_mut()
+}
+
+/// RetailOS dependency of [`namespace_provider_insert_at`]'s grow path.
+/// Target integration must install the real `FUN_08043f3c`; focused host
+/// tests replace it with a recording seam.
+pub static mut NAMESPACE_PROVIDER_REALLOC: NamespaceProviderRealloc =
+    missing_namespace_provider_realloc;
+
+#[inline(always)]
+unsafe fn namespace_provider_realloc() -> NamespaceProviderRealloc {
+    core::ptr::read_volatile(core::ptr::addr_of!(NAMESPACE_PROVIDER_REALLOC))
+}
+
+/// namespace_provider_insert_at — original: `FUN_0836963c` @ `0x0836963c`
+/// (184 bytes, 0x0836963c..0x083696f4; the next function, the providers
+/// factory, starts at 0x083696f4 — Ghidra's listing has no separate entry
+/// for this body because the only path to it is the
+/// [`namespace_provider_push`] tail branch; verified by binary scan: 0
+/// `bl` sites, 1 inbound `b` from 0x083697f4).
+///
+/// Inserts `value` into the growable provider table of a
+/// namespace-providers object {count @ +0x00, table @ +0x04, sorted-flag @
+/// +0x08, capacity @ +0x0c, comparator @ +0x10}. Algorithm: NULL `providers`
+/// returns 0. If `capacity <=u count + 1` (unsigned `bgt` skips the grow),
+/// the table is reallocated to `capacity * 8` bytes through the
+/// [`NAMESPACE_PROVIDER_REALLOC`] seam and the capacity word doubled; a
+/// failed realloc returns 0 with the object untouched. Then, with the count
+/// reloaded: if `index` is negative or `count <=s index` (signed `ble`),
+/// `table[count] = value` (append); otherwise the loop
+/// `for i in (index..=count).rev() { table[i + 1] = table[i] }` shifts the
+/// tail up — INCLUDING the one-past-end word `table[count]`, copied to
+/// `table[count + 1]` first, a faithful quirk the grow guarantee
+/// (`capacity >= count + 2` afterwards) keeps in bounds — and
+/// `table[index] = value`. Finally the count is stored incremented, the
+/// sorted flag is cleared, and the NEW count is returned. The retail
+/// sequence is `stmdb sp!,{r4-r6,lr}; movs; beq-ret0; ldr count/cap;
+/// add; cmp; bgt-skip; lsl #3; bl 0x08043f3c; beq-ret0; str table;
+/// cap<<=1; reload count; cmp; ble-append | shift loop {ldr/str
+/// [i+1]<-[i]; sub; cmp; bge}; str value; reload count; add #1; str
+/// count; str #0 @ +0x08; ldmia sp!,{r4-r6,pc}`.
+///
+/// Deviations: the unported traced realloc `FUN_08043f3c` rides the
+/// [`NAMESPACE_PROVIDER_REALLOC`] seam (house pattern — see
+/// [`OBJECT_FLAGS_FETCH_INCREMENT_LOCK`]; the default stub fails every
+/// grow, the original's own realloc-failure path) instead of a direct
+/// `bl`, and the object words are addressed by pointer-sized word index
+/// (byte-exact +0x00..+0x0c on the 32-bit target, disjoint slots on a
+/// 64-bit host — the registry_key_hash key model).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn namespace_provider_insert_at(
+    providers: *mut usize,
+    value: usize,
+    index: i32,
+) -> u32 {
+    if providers.is_null() {
+        return 0;
+    }
+    let count = providers.add(PROVIDER_COUNT_WORD).read_volatile() as u32;
+    let capacity = providers.add(PROVIDER_CAPACITY_WORD).read_volatile() as u32;
+    if capacity <= count.wrapping_add(1) {
+        let table = providers.add(PROVIDER_TABLE_WORD).read_volatile() as *mut usize;
+        let grown = namespace_provider_realloc()(table, capacity << 3, 0, 0);
+        if grown.is_null() {
+            return 0;
+        }
+        providers.add(PROVIDER_TABLE_WORD).write_volatile(grown as usize);
+        providers
+            .add(PROVIDER_CAPACITY_WORD)
+            .write_volatile((capacity << 1) as usize);
+    }
+    let count = providers.add(PROVIDER_COUNT_WORD).read_volatile() as u32;
+    if (count as i32) <= index || index < 0 {
+        let table = providers.add(PROVIDER_TABLE_WORD).read_volatile() as *mut usize;
+        table.wrapping_add(count as usize).write_volatile(value);
+    } else {
+        let table = providers.add(PROVIDER_TABLE_WORD).read_volatile() as *mut usize;
+        let mut i = count as i32;
+        while i >= index {
+            let word = table.wrapping_add(i as usize).read_volatile();
+            table.wrapping_add(i as usize + 1).write_volatile(word);
+            i -= 1;
+        }
+        table.wrapping_add(index as usize).write_volatile(value);
+    }
+    let count = providers.add(PROVIDER_COUNT_WORD).read_volatile() as u32;
+    let new_count = count.wrapping_add(1);
+    providers
+        .add(PROVIDER_COUNT_WORD)
+        .write_volatile(new_count as usize);
+    providers.add(PROVIDER_SORTED_WORD).write_volatile(0);
+    new_count
+}
+
+/// namespace_provider_push — original: `FUN_083697f0` @ `0x083697f0`
+/// (8 bytes: `ldr r2, [r0]; b 0x0836963c`. SIZE CORRECTION — Ghidra
+/// reports 192 bytes, but the next function, the `table[index] = value`
+/// accessor 0x083697f8, starts 8 bytes in; the remaining 184 bytes are
+/// five separately linked siblings Ghidra swallowed into this extent.
+/// 33 `bl` call sites, all unconditional — counted by decoding every
+/// ARM B/BL word in osos.dec; 0 predicated forms, so no caller NULL- or
+/// flag-gates the call.)
+///
+/// The append entry point of the namespace-providers table: loads the
+/// entry count from `providers + 0x00` and tail-branches to
+/// [`namespace_provider_insert_at`] with it as the index, so the value
+/// lands at `table[count]`. The count load happens BEFORE the callee's
+/// NULL guard, so a NULL `providers` faults on the load exactly as in
+/// retailOS — there is no null-safe path through this veneer. Returns
+/// the callee's result: the new count, or 0 on grow failure.
+///
+/// Deviation: the tail branch to the ported
+/// [`namespace_provider_insert_at`] is an ordinary returning call (the
+/// ata_report_error precedent), so the count is read twice on the
+/// appended path — once here, once by the callee's reload — with no
+/// intervening store, matching retail.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn namespace_provider_push(
+    providers: *mut usize,
+    value: usize,
+) -> u32 {
+    let count = providers.add(PROVIDER_COUNT_WORD).read_volatile();
+    namespace_provider_insert_at(providers, value, count as i32)
+}
+
 /// Registry fallback name hash — original: `FUN_082d7e54` @ `0x082d7e54`
 /// (88 bytes; source:
 /// `ipod-decomp/decomp/c/031/082d7e54_FUN_082d7e54.c`).
@@ -2702,6 +2858,244 @@ mod tests {
         );
         assert_eq!(unsafe { namespace_provider_at(providers.ptr(), 2) }, table[2]);
         assert_eq!(unsafe { namespace_provider_at(providers.ptr(), 3) }, table[3]);
+    }
+
+    /// Serializes the namespace_provider_insert_at/push tests: each swaps
+    /// the NAMESPACE_PROVIDER_REALLOC seam and the recording statics.
+    static PROVIDER_INSERT_TEST_LOCK: StdMutex<()> = StdMutex::new(());
+
+    /// Word-indexed providers object for the insert/push ports: five
+    /// pointer-sized slots {count, table, sorted-flag, capacity,
+    /// comparator} — byte-exact +0x00..+0x10 on the 32-bit target,
+    /// disjoint slots on a 64-bit host (the registry_key_hash key model).
+    struct ProvidersFixture {
+        words: [usize; 5],
+        /// Backing allocation for the table word; over-allocated so the
+        /// grow path's one-past-end shift stays in bounds, exactly like
+        /// the retail capacity guarantee.
+        table: std::vec::Vec<usize>,
+    }
+
+    impl ProvidersFixture {
+        fn new(count: u32, capacity: u32, table: std::vec::Vec<usize>, sorted: usize) -> Self {
+            assert!(table.len() >= capacity as usize + 2);
+            let mut fixture = Self { words: [0; 5], table };
+            fixture.words[PROVIDER_COUNT_WORD] = count as usize;
+            fixture.words[PROVIDER_TABLE_WORD] = fixture.table.as_mut_ptr() as usize;
+            fixture.words[PROVIDER_SORTED_WORD] = sorted;
+            fixture.words[PROVIDER_CAPACITY_WORD] = capacity as usize;
+            fixture
+        }
+
+        fn ptr(&mut self) -> *mut usize {
+            self.words.as_mut_ptr()
+        }
+
+        /// Entry `index` through the object's CURRENT table word, so a
+        /// grown table is read from the stub's replacement allocation.
+        fn entry(&self, index: usize) -> usize {
+            unsafe { (self.words[PROVIDER_TABLE_WORD] as *const usize).add(index).read() }
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct ReallocCall {
+        block: *mut usize,
+        new_size: u32,
+        tag1: u32,
+        tag2: u32,
+    }
+
+    const NO_REALLOC_CALL: ReallocCall =
+        ReallocCall { block: core::ptr::null_mut(), new_size: 0, tag1: 0, tag2: 0 };
+
+    static mut REALLOC_CALLS: [ReallocCall; 4] = [NO_REALLOC_CALL; 4];
+    static mut REALLOC_CALL_COUNT: usize = 0;
+    static mut REALLOC_FAIL: bool = false;
+    /// Valid word count of the incoming block, standing in for the retail
+    /// allocator's own block-size knowledge: the stub copies this many
+    /// words into the replacement allocation, like a real realloc.
+    static mut REALLOC_COPY_WORDS: usize = 0;
+
+    unsafe extern "C" fn recording_realloc(
+        block: *mut usize,
+        new_size: u32,
+        tag1: u32,
+        tag2: u32,
+    ) -> *mut usize {
+        let count = REALLOC_CALL_COUNT;
+        assert!(count < 4, "realloc seam called more than 4 times");
+        REALLOC_CALLS[count] = ReallocCall { block, new_size, tag1, tag2 };
+        REALLOC_CALL_COUNT = count + 1;
+        if REALLOC_FAIL {
+            return core::ptr::null_mut();
+        }
+        // new_size is the doubled capacity in TARGET bytes (capacity << 3);
+        // one target entry is 4 bytes.
+        let words = (new_size as usize) / 4;
+        let mut buffer = std::vec![0usize; words];
+        let copy = REALLOC_COPY_WORDS.min(words);
+        core::ptr::copy_nonoverlapping(block, buffer.as_mut_ptr(), copy);
+        let ptr = buffer.as_mut_ptr();
+        core::mem::forget(buffer);
+        ptr
+    }
+
+    /// Installs the recording realloc seam and returns the serializing
+    /// guard. `copy_words` is the incoming table's valid word count.
+    fn install_recording_realloc(copy_words: usize, fail: bool) -> StdMutexGuard<'static, ()> {
+        let guard = PROVIDER_INSERT_TEST_LOCK.lock().unwrap();
+        unsafe {
+            REALLOC_CALL_COUNT = 0;
+            REALLOC_FAIL = fail;
+            REALLOC_COPY_WORDS = copy_words;
+            NAMESPACE_PROVIDER_REALLOC = recording_realloc;
+        }
+        guard
+    }
+
+    fn uninstall_recording_realloc() {
+        unsafe { NAMESPACE_PROVIDER_REALLOC = missing_namespace_provider_realloc };
+    }
+
+    fn recorded_realloc_calls() -> (usize, [ReallocCall; 4]) {
+        unsafe { (REALLOC_CALL_COUNT, REALLOC_CALLS) }
+    }
+
+    #[test]
+    fn insert_at_null_providers_returns_zero_without_realloc() {
+        let _guard = install_recording_realloc(0, false);
+        let returned = unsafe { namespace_provider_insert_at(core::ptr::null_mut(), 0xaa, 2) };
+        assert_eq!(returned, 0);
+        assert_eq!(recorded_realloc_calls().0, 0, "the NULL guard runs before any grow");
+        uninstall_recording_realloc();
+    }
+
+    #[test]
+    fn push_appends_and_clears_sorted_flag_without_grow() {
+        let _guard = install_recording_realloc(0, false);
+        let mut providers = ProvidersFixture::new(2, 4, std::vec![0xaaaa, 0xbbbb, 0, 0, 0, 0], 1);
+
+        let returned = unsafe { namespace_provider_push(providers.ptr(), 0xcccc) };
+
+        assert_eq!(returned, 3, "the new count is returned");
+        assert_eq!(providers.entry(2), 0xcccc, "the value lands at table[count]");
+        assert_eq!(providers.entry(0), 0xaaaa);
+        assert_eq!(providers.entry(1), 0xbbbb);
+        assert_eq!(providers.words[PROVIDER_COUNT_WORD], 3);
+        assert_eq!(providers.words[PROVIDER_SORTED_WORD], 0, "insert clears the sorted flag");
+        assert_eq!(providers.words[PROVIDER_CAPACITY_WORD], 4, "4 > 2 + 1: no grow");
+        assert_eq!(recorded_realloc_calls().0, 0);
+        uninstall_recording_realloc();
+    }
+
+    #[test]
+    fn push_grows_table_when_capacity_equals_count_plus_one() {
+        let _guard = install_recording_realloc(6, false);
+        let mut providers = ProvidersFixture::new(3, 4, std::vec![0xa1, 0xa2, 0xa3, 0, 0, 0], 1);
+        let old_table = providers.words[PROVIDER_TABLE_WORD];
+
+        let returned = unsafe { namespace_provider_push(providers.ptr(), 0xa4) };
+
+        assert_eq!(returned, 4);
+        let (count, calls) = recorded_realloc_calls();
+        assert_eq!(count, 1, "4 <= 3 + 1: exactly one grow");
+        assert_eq!(
+            calls[0],
+            ReallocCall {
+                block: old_table as *mut usize,
+                new_size: 32,
+                tag1: 0,
+                tag2: 0,
+            },
+            "realloc(table, capacity << 3, 0, 0)"
+        );
+        assert_ne!(providers.words[PROVIDER_TABLE_WORD], old_table, "grown table installed");
+        assert_eq!(providers.words[PROVIDER_CAPACITY_WORD], 8, "capacity doubled");
+        assert_eq!(providers.words[PROVIDER_COUNT_WORD], 4);
+        assert_eq!(providers.words[PROVIDER_SORTED_WORD], 0);
+        for (index, expected) in [0xa1, 0xa2, 0xa3, 0xa4].iter().enumerate() {
+            assert_eq!(providers.entry(index), *expected, "entry {index} preserved across grow");
+        }
+        uninstall_recording_realloc();
+    }
+
+    #[test]
+    fn push_returns_zero_and_leaves_object_untouched_when_realloc_fails() {
+        let _guard = install_recording_realloc(6, true);
+        let mut providers = ProvidersFixture::new(3, 4, std::vec![0xa1, 0xa2, 0xa3, 0, 0, 0], 1);
+        let old_table = providers.words[PROVIDER_TABLE_WORD];
+
+        let returned = unsafe { namespace_provider_push(providers.ptr(), 0xa4) };
+
+        assert_eq!(returned, 0, "grow failure is the original's 0 return");
+        assert_eq!(providers.words[PROVIDER_TABLE_WORD], old_table);
+        assert_eq!(providers.words[PROVIDER_CAPACITY_WORD], 4);
+        assert_eq!(providers.words[PROVIDER_COUNT_WORD], 3);
+        assert_eq!(providers.words[PROVIDER_SORTED_WORD], 1, "failed insert keeps the flag");
+        assert_eq!(recorded_realloc_calls().0, 1);
+        uninstall_recording_realloc();
+    }
+
+    #[test]
+    fn push_skips_grow_while_two_slots_remain() {
+        let _guard = install_recording_realloc(0, false);
+        let mut providers = ProvidersFixture::new(3, 5, std::vec![0xa1, 0xa2, 0xa3, 0, 0, 0, 0], 0);
+
+        let returned = unsafe { namespace_provider_push(providers.ptr(), 0xa4) };
+
+        assert_eq!(returned, 4);
+        assert_eq!(providers.entry(3), 0xa4);
+        assert_eq!(providers.words[PROVIDER_CAPACITY_WORD], 5, "5 > 3 + 1: the unsigned bgt skips");
+        assert_eq!(recorded_realloc_calls().0, 0);
+        uninstall_recording_realloc();
+    }
+
+    #[test]
+    fn insert_at_shifts_tail_including_the_one_past_end_word() {
+        let _guard = install_recording_realloc(0, false);
+        // Sentinel 0x5e at table[3], one past the last live entry: the
+        // retail shift loop copies table[count] -> table[count + 1] first.
+        let mut providers =
+            ProvidersFixture::new(3, 8, std::vec![0xb1, 0xb2, 0xb3, 0x5e, 0, 0, 0, 0, 0, 0], 1);
+
+        let returned = unsafe { namespace_provider_insert_at(providers.ptr(), 0xb0, 1) };
+
+        assert_eq!(returned, 4);
+        for (index, expected) in [0xb1, 0xb0, 0xb2, 0xb3, 0x5e].iter().enumerate() {
+            assert_eq!(providers.entry(index), *expected, "table[{index}]");
+        }
+        assert_eq!(providers.words[PROVIDER_COUNT_WORD], 4);
+        assert_eq!(providers.words[PROVIDER_SORTED_WORD], 0);
+        assert_eq!(recorded_realloc_calls().0, 0, "8 > 3 + 1: no grow on the shift path");
+        uninstall_recording_realloc();
+    }
+
+    #[test]
+    fn insert_at_zero_index_shifts_the_whole_table() {
+        let _guard = install_recording_realloc(0, false);
+        let mut providers = ProvidersFixture::new(2, 4, std::vec![0xd1, 0xd2, 0, 0, 0, 0], 0);
+
+        let returned = unsafe { namespace_provider_insert_at(providers.ptr(), 0xd0, 0) };
+
+        assert_eq!(returned, 3);
+        for (index, expected) in [0xd0, 0xd1, 0xd2].iter().enumerate() {
+            assert_eq!(providers.entry(index), *expected, "table[{index}]");
+        }
+        uninstall_recording_realloc();
+    }
+
+    #[test]
+    fn insert_at_negative_or_past_end_index_appends() {
+        let _guard = install_recording_realloc(0, false);
+        let mut negative = ProvidersFixture::new(1, 4, std::vec![0xe1, 0, 0, 0, 0, 0], 0);
+        let mut past_end = ProvidersFixture::new(1, 4, std::vec![0xe1, 0, 0, 0, 0, 0], 0);
+
+        assert_eq!(unsafe { namespace_provider_insert_at(negative.ptr(), 0xe2, -1) }, 2);
+        assert_eq!(unsafe { namespace_provider_insert_at(past_end.ptr(), 0xe2, 9) }, 2);
+        assert_eq!(negative.entry(1), 0xe2, "a negative index appends at table[count]");
+        assert_eq!(past_end.entry(1), 0xe2, "an index past count appends at table[count], not at 9");
+        uninstall_recording_realloc();
     }
 
     #[test]
