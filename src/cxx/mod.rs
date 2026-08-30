@@ -46,6 +46,7 @@ pub mod three_word_clear_seventh;
 pub mod three_word_clear_eighth;
 pub mod three_word_clear_ninth;
 pub mod three_word_clear_tenth;
+pub mod tokenizer;
 pub mod trivial_destructor;
 pub mod trivial_vector8_destruct;
 pub mod wheel_event;
