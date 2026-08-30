@@ -1,2 +1,10 @@
 /target
 Cargo.lock
+
+# Porter scratch: the per-slot brief and its raw stdout. These were once
+# committed by a porter running `git add -A`. Because their content differs
+# per worktree by construction, every subsequent merge conflicted on them and
+# the transpile loop wedged for eight days. The loop now writes briefs outside
+# the worktree entirely; this is the second line of defence.
+.port-task.md
+.port.out
