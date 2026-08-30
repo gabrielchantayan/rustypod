@@ -38663,3 +38663,43 @@ functions:
       (house foreign-service pattern) whose target default transmutes the
       retail literal; Rust's call adds a return edge the bare tail branch
       lacks. Reference C: decomp/c/000/08003660_FUN_08003660.c.
+  - address: 0x080d5170
+    ghidra: FUN_080d5170
+    name: codec_update_bits
+    size: 56
+    sig: "void codec_update_bits(u32 reg, u32 mask, u32 value)"
+    module: drivers/codec
+    status: ported
+    vars: {param_1: reg, param_2: mask, param_3: value}
+    notes: >-
+      Read-modify-write of one byte-wide register on the I2C device at
+      slave address 0x4a, the 6G audio codec: callers are the codec
+      init/power-mode sequencer FUN_080aa0a0 @ 0x080aa0a0 (register 0
+      reset strobed 0x99 -> 0, 0x2e..0x3f register dump, 75 ms delay,
+      four output channels powered via the bit-7 power-down of regs
+      0x1a..0x1d), the route/mute flag decoder FUN_0809393c @ 0x0809393c
+      (mute bits at regs 0x10/0x11 bit 7), and the sibling dispatcher
+      FUN_080d51a8 immediately below. Body: read reg via FUN_080aa060
+      (I2C write of the register index to slave 0x4a, one byte read back,
+      stored with strh), merged = (old & ~mask) | (value & mask) in full
+      32-bit arithmetic over the zero-extended ldrh result, write merged
+      back via FUN_080b2894 (two-byte {reg, value} push to slave 0x4a;
+      keeps only the low byte of r1 itself). Both callees bracket the
+      transaction with an RTXC semaphore pair (0x0806a4a0/0x080645a8) and
+      are unported; the port dispatches them through the CODEC_READ_REG /
+      CODEC_WRITE_REG ops slots whose target defaults transmute the
+      retail addresses 0x080aa060 / 0x080b2894 (bl becomes blx). Verified
+      call count: 36 plain bl, 0 predicated, by decoding every B/BL word
+      in osos.dec (6 in FUN_0809393c, 28 in FUN_080aa0a0, 2 in
+      FUN_080d51a8). Ghidra's 56-byte extent is correct: the next
+      function opens at 0x080d51a8 with push {r4,r5,r6,lr}. Ghidra's C
+      drops the third argument at several call sites
+      (FUN_080d5170(3,0xff) is really codec_update_bits(3, 0xff, r2)
+      with r2 live); the ARM always reads r2. Deliberate deviations: the
+      dead str r1,[sp] before the write call is dropped (the writer
+      takes the value in r1 and never reads the slot); the port
+      zero-initializes the reader's stack slot (inert). match.py
+      structural: same op sequence (read call -> ldrh -> and/bic/orr ->
+      write call); LLVM adds an fp frame and routes both calls as blx
+      through the slot literals. Reference C:
+      decomp/c/007/080d5170_FUN_080d5170.c.

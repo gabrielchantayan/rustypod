@@ -5,6 +5,7 @@ pub mod bitmap;
 pub mod clock;
 pub mod cp15;
 pub mod clock_config;
+pub mod codec;
 pub mod display;
 pub mod display_layer;
 pub mod display_index_flags;
