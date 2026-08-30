@@ -27952,6 +27952,51 @@ functions:
       round-trips through the returned pointer, and NULL and an
       unaligned record both pass straight through.
 
+  - address: 0x0826412c
+    ghidra: FUN_0826412c
+    name: draw_state_line
+    size: 120
+    sig: "void draw_state_line(u8 *draw_state, i32 x1, i32 y1, i32 x2, i32 y2)"
+    module: cxx/draw_state_line
+    status: ported
+    renames:
+      param_1/r0: draw_state (the 0x44-byte scoped draw-state record)
+      param_2/r1: x1 (first local endpoint x)
+      param_3/r2: y1 (first local endpoint y)
+      param_4/r3: x2 (second local endpoint x)
+      param_5/[sp]: y2 (second local endpoint y)
+      FUN_080e7870: draw_line_engine (unported dispatcher)
+    notes: >-
+      Whole 120-byte function binary-verified: 0x0826412c begins
+      `push {r4,r5,r6,r7,lr}` and its post-call `stm r4,{r5,r6}` /
+      `pop {r4,r5,r6,r7,pc}` ends at 0x082641a4, the distinct next
+      function's prologue. 39 unconditional bl call sites, 0 predicated
+      bl and 0 b, verified by decoding every ARM B/BL word in osos.dec;
+      no DATA word holds 0x0826412c, so it is not virtually dispatched.
+      The line-drawing member of the scoped 0x44-byte draw-state record:
+      it translates both local endpoints by origin words +0x2c/+0x30,
+      then calls the unported dispatcher 0x080e7870 with surface body
+      `*(this+0x1c)+4`, translated x1/y1/x2/y2, thickness 1, foreground
+      colour +0x11, style byte +0x10, embedded clip rect +0x34 and
+      scaled selector 0. It finally stores the raw second local endpoint
+      to current-point words +0/+4 AFTER that call. The sibling at
+      0x082641a4 uses current point +0/+4 as its starting endpoint; this
+      explicit-four-coordinate form and 0x0826343c's four-call rectangle
+      outline establish the `draw_state_line` name. The callee is a
+      binary-decoded dispatcher: because this caller's selector is zero,
+      it always selects its integer Bresenham engine 0x080f2efc, never
+      the 16.16 path 0x080ea434. Deviation: 0x080e7870 is unported and
+      rides DRAW_STATE_LINE_OPS; the device default calls that exact
+      address and host tests install a recorder. The surface is read as
+      the record's fixed 32-bit word, rather than a host pointer-width
+      field, so the host does not corrupt or read through the embedded
+      member at +0x20. Host tests (5) prove all ten engine operands,
+      old current-point visibility during the call, post-call endpoint
+      update, wrapping coordinate addition, degenerate endpoints, and
+      untouched record/guard bytes. match.py structural review is run
+      against this symbol; it should differ only in the crate frame and
+      the volatile dispatch seam.
+
   - address: 0x0826467c
     ghidra: FUN_0826467c
     name: draw_state_construct
