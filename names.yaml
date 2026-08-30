@@ -19984,6 +19984,45 @@ functions:
       strb + four str-zero shape; the diff is LLVM's fp frame and
       register allocation.
 
+  - address: 0x08382ddc
+    ghidra: FUN_08382ddc
+    name: schema_to_index
+    size: 72
+    sig: "int schema_to_index(sqlite3 *db, Schema *schema)"
+    module: sqlite/schema_to_index
+    status: ported
+    vars: {param_1: db, param_2: schema}
+    notes: >-
+      SQLite 3.5.x prepare.c's sqlite3SchemaToIndex, identified by the
+      -1000000 (0xfff0bdc0) literal-pool sentinel @ 0x08382e24 that
+      upstream returns for a NULL pSchema (transient sub-select tables
+      in expr.c). 72 bytes of code plus the 4-byte literal; the next
+      function starts at 0x08382e28 (Ghidra omits this one from its C
+      listing entirely - only its callers are decompiled). 33 bl call
+      sites, binary-scanned over every B/BL word in osos.dec, matching
+      Ghidra's count; all unconditional, no predicated forms. Body:
+      if pSchema==NULL return -1000000 WITHOUT dereferencing db (the
+      beq precedes the nDb load - a behavioural fact the host test
+      proves with a NULL db); else scan db->aDb[i].pSchema for i in
+      0..nDb (signed bgt guard), return i on match, nDb on no match
+      (upstream's assert(i<nDb) is compiled out NDEBUG). Pins this
+      build's Db layout: 24-byte stride (upstream 16) with pSchema
+      at +0x14 (upstream +0x0c), proven by openDatabase @ 0x082dbda8
+      pointing the 0x180-byte handle's aDb (+0x08) at handle+0x14c
+      (an inline two-entry array, 2*0x18=0x30) and routing
+      sqlite3SchemaGet's result into aDb[0]+0x14 / aDb[1]+0x14.
+      Caller shape: FUN_082b45d4 and FUN_082b4124 feed the result to
+      sqlite3VdbeAddOp* operands and index aDb[i]+0x00. match.py
+      structural: same NULL-sentinel, same nDb guard, same 24-byte
+      stride scan comparing +0x14, not-found returns nDb; LLVM
+      hoists aDb into a post-increment pointer and splits the signed
+      bgt into cmp/bxlt + bne - not observable. Host tests (7):
+      NULL-schema sentinel with a NULL db, match at every index,
+      first-match-wins on duplicate pSchema words, unknown schema
+      returns nDb, entries past nDb unsearched, nDb==0 and nDb<0
+      both return 0 (signed guard). Fixture: u32-word slab via
+      testing::hints::SCHEMA_TO_INDEX.
+
   - address: 0x0837d7ac
     ghidra: FUN_0837d7ac
     name: name_from_token
