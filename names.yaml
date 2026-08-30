@@ -27970,11 +27970,48 @@ functions:
       120 bl call sites, no b sites, binary-scanned by decoding every B/BL
       word in osos.dec; 87 of the 110 context_scope_init sites have one
       within the following 0x800 bytes, the pairing the RAII reading
-      predicts. r0 is untouched, so the ADS `this` return is preserved and
+      r0 is untouched, so the ADS `this` return is preserved and
       the port returns its argument. match.py structural: the body is
       empty on both sides; LLVM adds the crate-wide frame-pointer
       prologue (push {fp,lr} / mov fp,sp / pop {fp,pc}) that every small
       port in this crate carries, e.g. cxx::handle::handle_deref_or_null.
+
+  - address: 0x0828418c
+    ghidra: FUN_0828418c
+    name: context_scope_assign
+    size: 36
+    sig: "void *context_scope_assign(void *scope, const void *source)"
+    module: app/context_scope
+    status: ported
+    vars: {param_1: scope, param_2: source}
+    notes: >-
+      The context-scope class's assignment operator: a plain memberwise
+      copy of the four payload fields in register order — +0x04 subject,
+      +0x08 context, +0x0c owner id (ldr/str word pairs) and the +0x10
+      flag byte (ldrb/strb) — then bx lr. The +0x00 descriptor is NOT
+      copied (ADS assignment never touches the constructor-planted class
+      word), and +0x08/+0x0c travel verbatim rather than being re-derived
+      through context_scope_capture, so unlike the constructors this
+      function reads no global and APP_ROOT_OBJECT is irrelevant to it.
+      EXTENT: Ghidra's 36 bytes are exact this time — nothing is
+      PC-relative so there is no trailing literal, and 0x082841b0 is the
+      first instruction of the separately listed sibling equality
+      predicate (ldr r0,[r0,#4]; ldr r1,[r1,#4]; cmp; movne r0,#0;
+      moveq r0,#1; bx lr). 37 bl call sites, no b and no predicated
+      forms, binary-scanned by decoding every B/BL word in osos.dec
+      (matches the count in the assignment brief). Call-site shapes
+      confirm the memberwise reading: 0x081b600c copies between scope
+      records embedded in a larger object (r0 = owner+0x58,
+      r1 = owner+0x6c). r0 is untouched, so the ADS `this` return is
+      preserved and the port returns its first argument. No NULL guard
+      anywhere and none needed — with no predicated sites, every caller
+      passes live records. Host tests: payload copy preserves the
+      descriptor and the source record, the flag copy is one byte wide
+      (+0x11 onward untouched), zero/all-ones/pointer-like field values
+      copy verbatim, self-assignment is an identity. match.py structural:
+      the nine-instruction body is instruction-identical; the only diff
+      is the crate-wide frame-pointer prologue (push {fp,lr} / mov fp,sp
+      / pop {fp,pc}), the same shape context_scope_drop carries.
 
   - address: 0x08283168
     ghidra: FUN_08283168
