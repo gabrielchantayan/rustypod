@@ -28609,6 +28609,42 @@ functions:
       against this symbol; it should differ only in the crate frame and
       the volatile dispatch seam.
 
+  - address: 0x08264570
+    ghidra: FUN_08264570
+    name: draw_state_construct_with_surface
+    size: 48
+    sig: "u8 *draw_state_construct_with_surface(u8 *this, usize surface)"
+    module: cxx/draw_state
+    status: ported
+    renames:
+      param_1/r0: this (the 0x44-byte scoped draw-state record)
+      param_2/r1: surface (caller-selected draw-target descriptor identity)
+      iVar1/r4: this (member constructor return minus 0x20)
+      FUN_081598a4: embedded_pair_construct
+      FUN_082630f0: body_init
+      FUN_08264518: surface_attach
+    notes: >-
+      Whole 48-byte function binary-verified: 0x08264570 begins `push
+      {r4,r5,r6,lr}` and 0x082645a0 begins the distinct sibling's `push`;
+      no literal pool lies between. It has 35 unconditional bl call sites,
+      0 predicated bl and 0 b, verified by decoding every ARM B/BL word in
+      osos.dec; no DATA word in the image holds 0x08264570, so every caller
+      binds it statically rather than through a virtual dispatch. This is
+      the caller-selected-surface constructor for the scoped 0x44-byte
+      draw-state record: it saves r1, constructs the embedded pair at
+      this+0x20, derives this from that constructor's r0 return minus
+      0x20, initializes the body, then calls surface_attach with the saved
+      surface and returns the derived this. It differs from
+      draw_state_construct @ 0x0826467c only in taking the surface from r1
+      instead of its 0x08a77c3c literal-pool default. The shared
+      DRAW_STATE_CONSTRUCT_OPS seam already exists for its three unported
+      callees: the pair constructor default is faithful, while body_init
+      and surface_attach are documented partial defaults. This wrapper
+      deliberately shares that seam rather than adding a duplicate; it is
+      not hook-ready until those callees are ported. Host tests (3) prove
+      initializer order with the supplied surface, r0-return-derived base
+      propagation, and the current default stubs' exact record and guard
+      bytes.
   - address: 0x0826467c
     ghidra: FUN_0826467c
     name: draw_state_construct
