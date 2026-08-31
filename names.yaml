@@ -41404,3 +41404,27 @@ functions:
       target, so the freestanding link has no undefined externals. Host
       tests cover enabled and disabled bounds, exact field layout and
       observer registration, including ARM-wrapping tick-deadline addition.
+
+  # --- growable target-word buffer ---
+  - address: 0x082b8174
+    ghidra: FUN_082b8174
+    name: word_buffer_reserve
+    size: 76
+    sig: "WordBuffer *word_buffer_reserve(WordBuffer *buffer, u32 requested_capacity)"
+    module: heap/word_buffer
+    status: ported
+    renames:
+      param_1/r0: buffer
+      param_2/r1: requested_capacity
+      iVar1/r0: new_data
+    notes: >-
+      Raw extent is 0x082b8174..0x082b81c0; the following multiply helper
+      begins immediately at 0x082b81c0. Decoding every B/BL in osos.dec
+      found 27 direct calls, all unconditional BL. When capacity (+0x08) is
+      below requested_capacity it calls the unported 0x080a7f2c, which
+      allocates requested_capacity + 1 words, copies len (+0x04) words and
+      zeroes the new remainder. NULL leaves the header unchanged and returns
+      NULL; success conditionally releases old data (+0x00) through ported
+      traced_free 0x08043994, then stores new data and requested capacity.
+      Deviation: 0x080a7f2c remains a volatile hook (stock target address on
+      firmware, NULL on host) because it is not ported.

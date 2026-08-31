@@ -35,6 +35,7 @@ pub mod state;
 pub mod tracked;
 pub mod types;
 pub mod veneers;
+pub mod word_buffer;
 pub mod wrappers;
 
 /// Cross-module wiring proof: every dispatch table defaults to the real
