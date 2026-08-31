@@ -38533,6 +38533,40 @@ functions:
       and day-number stand-ins used by the tests are independent
       re-implementations of the two originals.
 
+  # --- time: unsigned Unix seconds -> packed calendar record ---
+  - address: 0x080964cc
+    ghidra: FUN_080964cc
+    name: unix_seconds_to_datetime
+    size: 128
+    sig: "void unix_seconds_to_datetime(u32 unix_seconds, DateTime *out)"
+    module: time/unix_to_datetime
+    status: ported
+    renames:
+      param_1/r0/r6: unix_seconds
+      param_2/r1/r4: out
+      iVar3/r5: whole_days
+      FUN_08036f14: __rt_udiv
+      FUN_0807eafc: day_number_to_datetime
+      DAT_08096540: SECONDS_PER_DAY
+      DAT_08096544: UNIX_EPOCH_DAY_NUMBER
+      DAT_08096548: NEGATIVE_DAY_SCALE
+    notes: >-
+      Raw ARM confirms a 116-byte executable body
+      (0x080964cc..0x08096540) and three literal-pool words through
+      0x0809654c; the next push begins at 0x0809654c, so the complete extent
+      is 128 bytes rather than the reported body-only 116. Decoding every
+      B/BL word in osos.dec finds 28 unconditional BL callers, no predicated
+      callers, and two unconditional B tail callers (0x080aa9a4,
+      0x08271398). It treats unix_seconds as unsigned, computes
+      whole_days = unix_seconds / 86400, passes whole_days + 719163 to the
+      unported day-number-to-record converter 0x0807eafc, then writes hour,
+      minute, and second from the residual seconds of the day after that
+      callee returns. The port retains 0x0807eafc behind a volatile
+      target/host seam: the target default calls its verified retailOS load
+      address, while host tests install a recorder that proves day-number
+      input, time boundary values including u32::MAX, call count, date-field
+      preservation, and that the caller overwrites the callee's time fields.
+
   # --- Vincent JIT: pipeline emission sugar ---
   - address: 0x082605f0
     ghidra: FUN_082605f0
