@@ -6,6 +6,12 @@
 //! Ports:
 //! - [`path_object_construct`] — original: `FUN_08279284` @ 0x08279284
 //!   (20 bytes; **24 `bl` call sites**, grep on `decomp/osos.asm`).
+//! - [`path_object_copy_construct`] — original: `FUN_082792b4` @
+//!   0x082792b4 (20 bytes of code plus the 4-byte vtable literal @
+//!   0x082792c8, so 24 bytes of true extent; **28 `bl` call sites: 27
+//!   plain plus ONE predicated `blne` @ 0x083de170, 0 `b`**, binary-
+//!   scanned by decoding every B/BL word in `work/firmware/osos.dec`;
+//!   zero data-word references, so never virtually dispatched).
 //! - [`path_object_default_construct`] — original: `FUN_082792cc` @
 //!   0x082792cc (20 bytes: five ARM instructions plus the 4-byte vtable
 //!   literal @ 0x082792e0, so 24 bytes of true extent; **42 `bl`, 0 `b`,
@@ -140,9 +146,49 @@
 //! - The return is `this` by register passthrough: r0 is never
 //!   written, so the ADS constructor convention hands the caller its
 //!   own storage pointer back.
+//!
+//! ## The copy constructor
+//!
+//! `path_object_copy_construct` — original: `FUN_082792b4` @
+//! 0x082792b4 — is the same class's COPY constructor, `PathObject(const
+//! StringObject &source)` over caller-supplied raw storage, sitting
+//! between the converting and default siblings in the image. Decoded
+//! from the raw ARM:
+//!
+//! ```text
+//! 082792b4  stmdb sp!, {r4, lr}
+//! 082792b8  bl    0x082773e0        @ string_object_copy_construct
+//! 082792bc  ldr   r1, [0x82792c8]   @ 0x089a60d8: path-class vtable
+//! 082792c0  str   r1, [r0, #0x0]    @ over the base StringObject vtable
+//! 082792c4  ldmia sp!, {r4, pc}     @ return the base ctor's result
+//! 082792c8  .word 0x089a60d8        @ literal pool; the next function
+//!                                     (path_object_default_construct)
+//!                                     starts at 0x082792cc
+//! ```
+//!
+//! The exact shape of the converting veneer above with the base COPY
+//! constructor @ 0x082773e0 (ported as
+//! [`string_object_copy_construct`]) in the `bl` slot: both arguments
+//! flow in untouched, the base plants its vtable, duplicates the
+//! source's payload word (its address-not-content self-construction
+//! guard included), and the veneer then overwrites +0x00 with the
+//! derived identity and returns the base's r0 verbatim.
+//!
+//! Call-site census: **28 `bl`, 0 `b`, 0 data-word references**. 27
+//! plain sites: 0x0812bbb4 / 0x0812bbe0, 0x081a2ae0, the 0x081bc9d8 -
+//! 0x081bde78 cluster of thirteen, 0x081ef788 / 0x081ef9a4,
+//! 0x0826c970, 0x08278418, 0x08278eb8 (inside
+//! `silver_controller_transition_addon_construct`, building the
+//! embedded string member at this+0x0c) and the 0x082a55f4 -
+//! 0x082a563c cluster of four. The ONE predicated site is a `blne` @
+//! 0x083de170 under `cmp r0, #0`: that caller NULL-guards the storage
+//! pointer itself, so the veneer — like its siblings — carries no NULL
+//! guard of its own and faults inside the base constructor for a NULL
+//! `this`.
 
 use crate::cxx::string_object::{
-    string_object_construct_from_cstr, StringObject, StringObjectVtable,
+    string_object_construct_from_cstr, string_object_copy_construct,
+    StringObject, StringObjectVtable,
 };
 
 /// Original load address of the StringObject-derived path class's
@@ -168,6 +214,52 @@ pub unsafe extern "C" fn path_object_construct(
     path: *const u8,
 ) -> *mut StringObject {
     let this = string_object_construct_from_cstr(this, path);
+    (*this).vtable = PATH_OBJECT_VTABLE_ADDRESS as *const StringObjectVtable;
+    this
+}
+
+/// path_object_copy_construct — original: `FUN_082792b4` @ 0x082792b4
+/// (20 bytes of code + the 4-byte vtable literal @ 0x082792c8 =
+/// 0x089a60d8, so 24 bytes of true extent; the next function,
+/// [`path_object_default_construct`], starts at 0x082792cc. **28 `bl`
+/// call sites — 27 plain plus ONE predicated `blne` @ 0x083de170, 0
+/// `b`, zero data-word references**, binary-scanned against
+/// `work/firmware/osos.dec`, so never virtually dispatched).
+///
+/// The path class's copy constructor: copy-constructs the two-word
+/// [`StringObject`] at `this` from `source` through the ported base
+/// [`string_object_copy_construct`] (vtable + payload duplication with
+/// its address-not-content self guard), then overwrites the +0x00
+/// vtable word with the derived path-class identity
+/// [`PATH_OBJECT_VTABLE_ADDRESS`] and returns the base constructor's
+/// result verbatim. See the module header for the stock instruction
+/// sequence and the call-site census.
+///
+/// Faithful details, shared with the converting sibling:
+///
+/// - The return is the base constructor's RESULT, not a recomputed
+///   `this` — r0 flows from the `bl` into the epilogue untouched.
+/// - The vtable overwrite is UNCONDITIONAL and runs after the copy:
+///   a NULL-payload source, a failed payload allocation, and the
+///   self-construction guard path all still leave the derived
+///   path-class vtable at +0x00.
+/// - Neither argument is NULL-guarded: the original faults inside the
+///   base constructor's vtable store for a NULL `this` and on the
+///   payload load for a NULL `source`, and so does the port. The one
+///   predicated call site (`blne` @ 0x083de170) shows callers do
+///   their own guarding.
+///
+/// Deviation: the base constructor is ported and called DIRECTLY (the
+/// transition_addon.rs ported-callees-called-directly precedent); the
+/// planted vtable is the ROM identity constant
+/// [`PATH_OBJECT_VTABLE_ADDRESS`], not a host-callable pointer.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn path_object_copy_construct(
+    this: *mut StringObject,
+    source: *const StringObject,
+) -> *mut StringObject {
+    let this = string_object_copy_construct(this, source);
     (*this).vtable = PATH_OBJECT_VTABLE_ADDRESS as *const StringObjectVtable;
     this
 }
@@ -456,6 +548,171 @@ mod tests {
             );
             assert_eq!(ported.vtable as usize, model.vtable as usize);
             assert_eq!(ported.payload, model.payload);
+        }
+    }
+
+    // --- path_object_copy_construct @ 0x082792b4 ---
+
+    static SOURCE_PAYLOAD: &[u8] = b"iPod_Control/Music/F00/track.m4a\0";
+
+    fn source_object(payload: *mut u8) -> StringObject {
+        StringObject {
+            // The base copy constructor reads only the source's +0x04
+            // payload word; its vtable is never consulted.
+            vtable: core::ptr::null(),
+            payload,
+        }
+    }
+
+    /// The independent reference model of the original's two steps:
+    /// base copy-construction semantics, then the unconditional
+    /// derived-identity store over +0x00, returning the base result.
+    /// It runs the same ported base constructor the veneer does — the
+    /// base's own behavior is pinned by cxx/string_object's tests;
+    /// what this model pins is the COMPOSITION.
+    unsafe fn copy_construct_reference(
+        this: *mut StringObject,
+        source: *const StringObject,
+    ) -> *mut StringObject {
+        let result = string_object_copy_construct(this, source);
+        (*result).vtable = PATH_OBJECT_VTABLE_ADDRESS as *const StringObjectVtable;
+        result
+    }
+
+    #[test]
+    fn copy_construct_returns_the_base_ctors_result_verbatim() {
+        let source = source_object(core::ptr::null_mut());
+        let mut storages: Vec<StringObject> =
+            (0..4).map(|_| garbage_storage()).collect();
+        for storage in storages.iter_mut() {
+            let this = storage as *mut StringObject;
+            unsafe {
+                assert_eq!(
+                    path_object_copy_construct(this, &source),
+                    this,
+                    "r0 flows from the bl into the epilogue untouched"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn copy_construct_plants_the_derived_vtable_over_the_base() {
+        let source = source_object(SOURCE_PAYLOAD.as_ptr() as *mut u8);
+        let mut storage = garbage_storage();
+        unsafe {
+            path_object_copy_construct(&mut storage, &source);
+            assert_eq!(
+                storage.vtable as usize, PATH_OBJECT_VTABLE_ADDRESS,
+                "the +0x00 word is the literal-pool identity 0x089a60d8"
+            );
+            assert_ne!(
+                storage.vtable,
+                &STRING_OBJECT_VTABLE as *const _,
+                "the overwrite replaced the modeled base vtable the copy ctor planted"
+            );
+        }
+    }
+
+    #[test]
+    fn copy_construct_from_a_null_payload_source_stays_empty() {
+        let source = source_object(core::ptr::null_mut());
+        let mut storage = garbage_storage();
+        unsafe {
+            assert_eq!(
+                path_object_copy_construct(&mut storage, &source),
+                &mut storage as *mut _
+            );
+            assert_eq!(storage.vtable as usize, PATH_OBJECT_VTABLE_ADDRESS);
+            assert!(
+                storage.payload.is_null(),
+                "the base copy ctor NULLs the garbage word; the clear boundary leaves it"
+            );
+            assert!(
+                source.payload.is_null(),
+                "the source object is never modified"
+            );
+        }
+    }
+
+    #[test]
+    fn copy_construct_fail_closed_assign_leaves_a_null_payload() {
+        // The wired default of the assign allocation boundary returns
+        // NULL (the fail-closed precedent of the converting sibling's
+        // tests): a nonempty source payload still yields a vtable-only
+        // path object. strlen_safe_plus1 DOES read the source payload
+        // before the allocation fails, so it must be real memory.
+        let source = source_object(SOURCE_PAYLOAD.as_ptr() as *mut u8);
+        let mut storage = garbage_storage();
+        unsafe {
+            path_object_copy_construct(&mut storage, &source);
+            assert_eq!(storage.vtable as usize, PATH_OBJECT_VTABLE_ADDRESS);
+            assert!(
+                storage.payload.is_null(),
+                "a failed allocation leaves the freshly-NULLed payload alone"
+            );
+            assert_eq!(
+                source.payload,
+                SOURCE_PAYLOAD.as_ptr() as *mut u8,
+                "the source object is never modified"
+            );
+        }
+    }
+
+    #[test]
+    fn copy_construct_from_self_keeps_the_payload() {
+        // The base copy ctor's address-not-content guard: for
+        // `this == source` it plants its vtable but leaves the payload
+        // word alone, and the veneer then overwrites the vtable with
+        // the derived identity. The garbage payload is never
+        // dereferenced — a missing guard would fault on it.
+        let mut storage = garbage_storage();
+        let this = core::ptr::addr_of_mut!(storage);
+        unsafe {
+            assert_eq!(path_object_copy_construct(this, this), this);
+            assert_eq!(
+                storage.vtable as usize, PATH_OBJECT_VTABLE_ADDRESS,
+                "the unconditional overwrite still runs on the self path"
+            );
+            assert_eq!(
+                storage.payload, GARBAGE_PAYLOAD,
+                "self-construction keeps the existing payload word"
+            );
+        }
+    }
+
+    #[test]
+    fn copy_construct_matches_the_reference_model_across_sources() {
+        let sources = [
+            core::ptr::null_mut(),
+            b"\0".as_ptr() as *mut u8,
+            b"a\0".as_ptr() as *mut u8,
+            SOURCE_PAYLOAD.as_ptr() as *mut u8,
+        ];
+        for payload in sources {
+            let source = source_object(payload);
+            let mut ported = garbage_storage();
+            let mut model = garbage_storage();
+            unsafe {
+                assert_eq!(
+                    path_object_copy_construct(&mut ported, &source),
+                    &mut ported as *mut _,
+                    "ported returns this"
+                );
+                assert_eq!(
+                    copy_construct_reference(&mut model, &source),
+                    &mut model as *mut _,
+                    "model returns this"
+                );
+                assert_eq!(
+                    ported.vtable as usize, model.vtable as usize,
+                    "vtable word matches the reference composition"
+                );
+                assert_eq!(
+                    ported.payload, model.payload,
+                    "payload word matches the reference composition"
+                );
+            }
         }
     }
 }
