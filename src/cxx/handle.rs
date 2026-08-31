@@ -45,8 +45,13 @@
 //! the 0x083c0000-0x083dffff block, at 0x0839eda0, so it is not one of
 //! the byte-identical families above), and [`refcounted_body_release`],
 //! its refcount-drop teardown @ 0x0839cd98. [`refcounted_ptr_release`]
-//! is the thin destroy-and-return-this wrapper @ 0x0816cd44.
+//! is the thin destroy-and-return-this wrapper @ 0x0816cd44, and
+//! [`refcounted_body_release_owned`] is the sibling teardown @ 0x0839d2c0
+//! whose final drop also disposes and tag-2-deletes the implementation
+//! itself.
 
+#[cfg(not(target_os = "none"))]
+use crate::cxx::string_object::{string_object_destroy, StringObject};
 use crate::heap::veneers::{operator_delete, operator_new};
 use crate::kernel::sync_mutex::{mutex_create, mutex_delete, mutex_lock, mutex_unlock, Mutex};
 
@@ -341,6 +346,146 @@ pub unsafe extern "C" fn refcounted_body_release(slot: *mut *mut RefcountedBody)
     slot.write(core::ptr::null_mut());
 }
 
+/// Implementation disposal behind [`refcounted_body_release_owned`]:
+/// original `FUN_0827948c` @ 0x0827948c (44 bytes, unported). The raw
+/// body is `push {r4,lr}; mov r4,r0; ldr r0,[r0]; cmp r0,#0; ldrne r1,[r0];
+/// ldrne r1,[r1,#4]; blxne r1; add r0,r4,#4; bl 0x08277484; sub r0,r0,#4;
+/// pop {r4,pc}` — i.e. when the implementation's first word (a callback
+/// interface pointer) is non-NULL it calls virtual slot 1 (+4) on that
+/// interface, then runs the ported plain destructor
+/// [`string_object_destroy`] on the two-word StringObject member at byte
+/// offset +4 and returns `this` (the destructor returns its argument;
+/// the `sub` undoes the `add`). On the firmware target this is a direct
+/// call to the still-unported ROM address; host builds model it
+/// faithfully — every callee on the chain is either data-driven (the
+/// interface vtable) or ported ([`string_object_destroy`]).
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn dispose_implementation(implementation: *mut u8) -> *mut u8 {
+    let dispose: unsafe extern "C" fn(*mut u8) -> *mut u8 =
+        core::mem::transmute(0x0827_948cusize);
+    dispose(implementation)
+}
+
+/// Host model of the 0x0827948c disposal — see the target twin above.
+/// The StringObject member sits one pointer word into the implementation
+/// (target byte offset +4; host fixtures widen it like every other
+/// pointer field, so the member never overlaps the callback word).
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn dispose_implementation(implementation: *mut u8) -> *mut u8 {
+    let callback = (implementation as *const *mut u8).read();
+    if !callback.is_null() {
+        let vtable = (callback as *const *const usize).read();
+        let release: unsafe extern "C" fn(*mut u8) =
+            core::mem::transmute(vtable.add(1).read());
+        release(callback);
+    }
+    let string = implementation.add(core::mem::size_of::<usize>()) as *mut StringObject;
+    string_object_destroy(string);
+    implementation
+}
+
+/// refcounted_body_release_owned — original: `FUN_0839d2c0` @ 0x0839d2c0
+/// (144 bytes — Ghidra's 136-byte extent drops the trailing
+/// `str r6,[r4]` / `pop {r4,r5,r6,pc}`; the body runs to 0x0839d350,
+/// where the separately linked 16-byte mutex-lock helper starts
+/// (0x0839d350 locks, 0x0839d360 unlocks; each loads body+8, NULL-checks
+/// it and tail-branches to mutex_lock 0x0807f5c4 / mutex_unlock
+/// 0x0807f6a0). 28 `bl` call sites, all unconditional — verified by
+/// decoding every ARM B/BL word in osos.dec: no `b` sites, no predicated
+/// forms, and the address appears in no data word, so it is never
+/// virtually dispatched).
+///
+/// A sibling template instantiation of [`refcounted_body_release`] @
+/// 0x0839cd98 over the same [`RefcountedBody`] layout (+0 implementation,
+/// +4 i32 refcount, +8 Mutex*); the two bodies are byte-identical except
+/// for the final drop's implementation disposal. Where the sibling
+/// invokes vtable slot 7 (+0x1c) on the implementation and never frees
+/// it, this instantiation OWNS its implementation: when the NULL-guarded
+/// word at body+0 is non-NULL it runs the disposal @ 0x0827948c (see
+/// [`dispose_implementation`]) and tag-2-deletes the implementation
+/// block through `operator_delete` (0x082aad24, ported) with the
+/// disposal's return value. Everything else matches the sibling: NULL
+/// body early-out (the slot is left untouched), refcount decremented
+/// under the optional mutex with a plain wrapping `subs` (zero
+/// underflows to -1 and takes the shared path), non-final drop unlocks
+/// and NULLs the slot, final drop unlocks through a FRESH slot load,
+/// then — gated on a second fresh slot load being non-NULL — destroys
+/// the mutex (mutex_delete 0x0807f650, ported), tag-2-deletes the
+/// reloaded mutex word, clears the mutex field, tag-2-deletes the body,
+/// and NULLs the slot on every path that reached the decrement.
+///
+/// Codegen deviation: LLVM inlines the ported mutex lock/unlock/delete
+/// (ROM_KERNEL dispatch included) where the original `bl`s the two
+/// 16-byte helpers and 0x0807f650; match.py shows the same
+/// guard/decrement/dispose/delete structure inside a larger body.
+///
+/// # Safety
+/// `slot` must be a valid aligned pointer slot. A non-NULL body, its
+/// mutex, its implementation, the implementation's callback interface
+/// and that interface's vtable must all be live and valid for the
+/// operations encoded by the original. As in the original, the slot
+/// pointer itself is not NULL-checked, and the lock/unlock helpers
+/// guard only the mutex word — never the body.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_release_owned(slot: *mut *mut RefcountedBody) {
+    let body = slot.read();
+    if body.is_null() {
+        return;
+    }
+
+    // Lock helper @ 0x0839d350, entered with the body's first load.
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_lock(mutex);
+    }
+
+    let remaining = (*body).refcount.wrapping_sub(1);
+    (*body).refcount = remaining;
+    // Fresh slot load; the ARM carries it in r0 across the `bne`.
+    let body = slot.read();
+    if remaining == 0 {
+        let implementation = (*body).opaque0 as *mut u8;
+        if !implementation.is_null() {
+            // The disposal returns `this`, and that return feeds the
+            // tag-2 delete directly (the ARM never reloads r0).
+            let implementation = dispose_implementation(implementation);
+            operator_delete(implementation);
+        }
+
+        // Unlock helper @ 0x0839d360 on its own fresh slot load; like
+        // the lock helper it guards only the mutex word.
+        let body = slot.read();
+        let mutex = (*body).mutex;
+        if !mutex.is_null() {
+            mutex_unlock(mutex);
+        }
+
+        let body = slot.read();
+        if !body.is_null() {
+            let mutex = (*body).mutex;
+            if !mutex.is_null() {
+                mutex_delete(mutex);
+                // Reloaded between the delete and the tag-2 free, exactly
+                // as the ARM does, then cleared after that free.
+                let mutex = (*body).mutex;
+                operator_delete(mutex.cast());
+                (*body).mutex = core::ptr::null_mut();
+            }
+            operator_delete(body.cast());
+        }
+    } else {
+        let mutex = (*body).mutex;
+        if !mutex.is_null() {
+            mutex_unlock(mutex);
+        }
+    }
+
+    slot.write(core::ptr::null_mut());
+}
+
 /// refcounted_ptr_release — original: `FUN_0816cd44` @ 0x0816cd44
 /// (20 bytes; 90 `bl` call sites, mostly the 0x0822xxxx application
 /// layer releasing stack- and member-slot handles).
@@ -539,6 +684,7 @@ mod tests {
         enum Event {
             Wait(u32),
             Destructor(usize),
+            CallbackRelease(usize),
             Signal(u32),
             Delete(u32),
             MutexCellFree(usize),
@@ -572,6 +718,12 @@ mod tests {
 
         unsafe extern "C" fn recording_destructor(implementation: *mut u8) {
             (*core::ptr::addr_of_mut!(EVENTS)).push(Event::Destructor(implementation as usize));
+        }
+
+        /// Records the callback interface's virtual slot 1, dispatched by
+        /// the host model of the 0x0827948c implementation disposal.
+        unsafe extern "C" fn recording_callback_release(callback: *mut u8) {
+            (*core::ptr::addr_of_mut!(EVENTS)).push(Event::CallbackRelease(callback as usize));
         }
 
         struct Bench {
@@ -715,6 +867,205 @@ mod tests {
 
             assert_eq!(body.refcount, -1);
             assert!(slot.is_null());
+            assert!(events().is_empty());
+        }
+
+        /// A NULL body is the early-out: the slot is not even written.
+        #[test]
+        fn owned_null_body_returns_without_touching_anything() {
+            let _bench = bench();
+            let mut slot: *mut RefcountedBody = core::ptr::null_mut();
+
+            unsafe { refcounted_body_release_owned(&mut slot) };
+
+            assert!(slot.is_null());
+            assert!(events().is_empty());
+        }
+
+        /// A non-final owned drop decrements under the mutex, unlocks,
+        /// and NULLs the slot; the implementation is neither disposed
+        /// nor freed.
+        #[test]
+        fn owned_shared_reference_decrements_unlocks_and_nulls_slot() {
+            let _bench = bench();
+            let mut semaphore = 0x42;
+            let mut mutex = Mutex {
+                sem_cell: &mut semaphore,
+                unused: 0,
+            };
+            let mut implementation = [0usize; 3];
+            let mut body = RefcountedBody {
+                opaque0: implementation.as_mut_ptr() as usize,
+                refcount: 2,
+                mutex: &mut mutex,
+            };
+            let mut slot = &mut body as *mut RefcountedBody;
+
+            unsafe { refcounted_body_release_owned(&mut slot) };
+
+            assert_eq!(body.refcount, 1);
+            assert!(slot.is_null(), "the non-final path still clears the slot");
+            assert_eq!(implementation[1], 0, "the StringObject member is untouched");
+            assert_eq!(events(), std::vec![Event::Wait(0x42), Event::Signal(0x42)]);
+        }
+
+        /// The owned final drop runs the full 0x0827948c disposal chain —
+        /// the callback interface's virtual slot 1, then the embedded
+        /// StringObject destructor (observed through its planted vtable
+        /// and its tag-0x34 payload free) — then tag-2-deletes the
+        /// implementation, and only then unlocks and tears the mutex and
+        /// body down in the sibling's order.
+        #[test]
+        fn owned_final_reference_disposes_deletes_and_cleans_up_in_order() {
+            let _bench = bench();
+            let mut semaphore = 0x42;
+            let mut mutex = Mutex {
+                sem_cell: &mut semaphore,
+                unused: 0,
+            };
+            let mut callback_vtable = [0usize; 2];
+            callback_vtable[1] = recording_callback_release as usize;
+            let mut callback = [callback_vtable.as_mut_ptr() as usize];
+            let mut payload = 0x5a_u8;
+            let mut implementation: [usize; 3] = [
+                callback.as_mut_ptr() as usize,
+                0,
+                &mut payload as *mut u8 as usize,
+            ];
+            let mut body = RefcountedBody {
+                opaque0: implementation.as_mut_ptr() as usize,
+                refcount: 1,
+                mutex: &mut mutex,
+            };
+            let callback_ptr = callback.as_mut_ptr() as *mut u8;
+            let payload_ptr = &mut payload as *mut u8;
+            let implementation_ptr = implementation.as_mut_ptr() as *mut u8;
+            let body_ptr = &mut body as *mut RefcountedBody;
+            let mutex_ptr = &mut mutex as *mut Mutex;
+            let cell_ptr = &mut semaphore as *mut u32;
+            let mut slot = body_ptr;
+
+            unsafe { refcounted_body_release_owned(&mut slot) };
+
+            assert!(slot.is_null(), "the final store clears the caller slot");
+            assert!(mutex.sem_cell.is_null(), "mutex_delete clears its cell");
+            assert!(body.mutex.is_null(), "the mutex field is cleared after its free");
+            assert_eq!(
+                implementation[1],
+                &crate::cxx::string_object::STRING_OBJECT_VTABLE
+                    as *const crate::cxx::string_object::StringObjectVtable
+                    as usize,
+                "the StringObject member ran the planted-vtable destructor"
+            );
+            assert_eq!(implementation[2], 0, "the payload release NULLs its word");
+            assert_eq!(
+                events(),
+                std::vec![
+                    Event::Wait(0x42),
+                    Event::CallbackRelease(callback_ptr as usize),
+                    Event::HeapFree(payload_ptr as usize, 0x34),
+                    Event::HeapFree(implementation_ptr as usize, 2),
+                    Event::Signal(0x42),
+                    Event::Delete(0x42),
+                    Event::MutexCellFree(cell_ptr as usize),
+                    Event::HeapFree(mutex_ptr as *mut u8 as usize, 2),
+                    Event::HeapFree(body_ptr as *mut u8 as usize, 2),
+                ],
+                "lock/dispose/delete/unlock/teardown ordering follows the ARM body"
+            );
+        }
+
+        /// A NULL implementation word skips the disposal AND its tag-2
+        /// delete; the unlock and the mutex/body teardown still run.
+        #[test]
+        fn owned_final_reference_with_null_implementation_skips_disposal() {
+            let _bench = bench();
+            let mut semaphore = 0x42;
+            let mut mutex = Mutex {
+                sem_cell: &mut semaphore,
+                unused: 0,
+            };
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: 1,
+                mutex: &mut mutex,
+            };
+            let body_ptr = &mut body as *mut RefcountedBody;
+            let mutex_ptr = &mut mutex as *mut Mutex;
+            let cell_ptr = &mut semaphore as *mut u32;
+            let mut slot = body_ptr;
+
+            unsafe { refcounted_body_release_owned(&mut slot) };
+
+            assert!(slot.is_null());
+            assert!(body.mutex.is_null());
+            assert_eq!(
+                events(),
+                std::vec![
+                    Event::Wait(0x42),
+                    Event::Signal(0x42),
+                    Event::Delete(0x42),
+                    Event::MutexCellFree(cell_ptr as usize),
+                    Event::HeapFree(mutex_ptr as *mut u8 as usize, 2),
+                    Event::HeapFree(body_ptr as *mut u8 as usize, 2),
+                ]
+            );
+        }
+
+        /// A NULL callback word inside the implementation skips only the
+        /// virtual slot-1 call; the StringObject member is still
+        /// destroyed and the implementation still tag-2-deleted. A NULL
+        /// mutex means no kernel interaction at all.
+        #[test]
+        fn owned_final_reference_with_null_callback_and_no_mutex() {
+            let _bench = bench();
+            let mut implementation: [usize; 3] = [0, 0, 0];
+            let mut body = RefcountedBody {
+                opaque0: implementation.as_mut_ptr() as usize,
+                refcount: 1,
+                mutex: core::ptr::null_mut(),
+            };
+            let implementation_ptr = implementation.as_mut_ptr() as *mut u8;
+            let body_ptr = &mut body as *mut RefcountedBody;
+            let mut slot = body_ptr;
+
+            unsafe { refcounted_body_release_owned(&mut slot) };
+
+            assert!(slot.is_null());
+            assert_eq!(
+                implementation[1],
+                &crate::cxx::string_object::STRING_OBJECT_VTABLE
+                    as *const crate::cxx::string_object::StringObjectVtable
+                    as usize,
+                "the StringObject destructor runs even without a callback"
+            );
+            assert_eq!(
+                events(),
+                std::vec![
+                    Event::HeapFree(implementation_ptr as usize, 2),
+                    Event::HeapFree(body_ptr as *mut u8 as usize, 2),
+                ]
+            );
+        }
+
+        /// The target's `subs` wraps: a zero refcount underflows to -1
+        /// and takes the shared path — no disposal, no deletes.
+        #[test]
+        fn owned_zero_refcount_wraps_without_running_cleanup() {
+            let _bench = bench();
+            let mut implementation = [0usize; 3];
+            let mut body = RefcountedBody {
+                opaque0: implementation.as_mut_ptr() as usize,
+                refcount: 0,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot = &mut body as *mut RefcountedBody;
+
+            unsafe { refcounted_body_release_owned(&mut slot) };
+
+            assert_eq!(body.refcount, -1);
+            assert!(slot.is_null());
+            assert_eq!(implementation[1], 0, "the implementation is untouched");
             assert!(events().is_empty());
         }
     }
