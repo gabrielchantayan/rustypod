@@ -41555,3 +41555,35 @@ functions:
       its conditional `beq 0x0828bf10`. The port records this anomaly
       rather than inventing a callee and registers a shutdown-safe no-op,
       matching the observable retail path where this chain is not run.
+
+  # --- current calendar UTC-offset query ---
+  - address: 0x080ab558
+    ghidra: FUN_080ab558
+    name: current_utc_offset_query
+    size: 68
+    sig: "i32 current_utc_offset_query(i16 *base_utc_offset_minutes, u8 *daylight_saving_minutes)"
+    module: time/utc_offset
+    status: ported
+    renames:
+      param_1/r0: base_utc_offset_minutes
+      param_2/r1: daylight_saving_minutes
+      auStack_20: calendar_query_record
+      FUN_08037db8: iram_memzero_aligned_veneer
+      FUN_08056524: current_datetime_query
+    notes: >-
+      Raw extent is exactly 0x080ab558..0x080ab59c: the next separately
+      linked function starts at 0x080ab59c. Decoding every ARM B/BL word in
+      osos.dec finds 27 direct BL call sites, all unconditional plain BL:
+      no predicated BL forms. It also has two unconditional plain-B tail
+      sites at 0x080a6b00 and 0x08259be8. The retail body zeroes a 20-byte
+      aligned stack record through the ported 0x08037db8 veneer, calls
+      unported current_datetime_query (0x08056524), then independently writes
+      its signed little-endian base UTC offset in minutes from record+10 and
+      its daylight-saving adjustment in minutes from record+12 when each
+      output pointer is non-NULL. It returns the provider's 0/1 validity
+      result unchanged; Ghidra's void signature loses this r0 pass-through.
+      The Rust target calls the unported provider's fixed load address; host
+      tests install a deterministic provider. Deliberate code-generation
+      deviation: LLVM emits five aligned word stores for the 20-byte stack
+      clear rather than calling the IRAM memzero veneer; the initialized
+      record and observable behavior are unchanged.
