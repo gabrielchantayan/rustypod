@@ -64,6 +64,7 @@
 //! | 0x081d2184 | [`registry_lookup_by_id`] | 36 | 60 `bl` + 2 `b` |
 //! | 0x081d23f8 | [`registry_register`] | 16 | 45 `bl` |
 //! | 0x08275b9c | [`object_cast_to_class`] | 20 | 414 `bl` + 17 `b` |
+//! | 0x08187ad0 | [`demo_mode_keyed_object`] | 20 | 29 `bl` |
 //! | 0x081883fc | [`demo_mode_instance`] | 28 | 328 `bl` |
 //! | 0x08172124 | [`instance_of_class_6000`] | 24 | 72 `bl` |
 //! | 0x08100b74 | [`instance_of_class_6600`] | 24 | 36 `bl` |
@@ -610,6 +611,91 @@ pub const CLASS_ID_DEMO_MODE: u32 = 0x8080;
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn demo_mode_instance() -> *mut u8 {
     instance_of_class(CLASS_ID_DEMO_MODE)
+}
+
+/// The `TCDemoMode` vtable, modeled down to the one slot
+/// [`demo_mode_keyed_object`] dispatches (+0x100, index 64). The image's
+/// copy of the vtable page (the ctor @ 0x081889c0 installs pointer
+/// 0x08989718) holds the C++ mangled-name blob instead of the runtime
+/// vtable, so the slot's target is not recoverable from the image —
+/// dispatch goes through the object's own vtable pointer and host tests
+/// install a native callback (the `cxx/vtable.rs` precedent).
+#[repr(C)]
+pub struct DemoModeVtable {
+    /// Slots +0x00..+0xfc: not dispatched here.
+    pub unresolved_00: [usize; 64],
+    /// +0x100: the keyed lookup — `resolve(this, keyed_registry, key)`.
+    pub keyed_object: unsafe extern "C" fn(
+        this: *mut DemoMode,
+        keyed_registry: *mut u8,
+        key: u32,
+    ) -> *mut u8,
+}
+
+/// A `TCDemoMode` instance, modeled down to the two words
+/// [`demo_mode_keyed_object`] reads: the vtable pointer and the active
+/// keyed-registry field at +0x30.
+#[repr(C)]
+pub struct DemoMode {
+    /// +0x00: the vtable.
+    pub vtable: *const DemoModeVtable,
+    /// +0x04..+0x2f: the manager's own state. The ctor @ 0x081889c0
+    /// zeroes +0x28/+0x30/+0x34/+0x38/+0x3c; the sibling method @
+    /// 0x8187b14 builds a fresh 300-byte keyed registry and stores it at
+    /// +0x2c (the last filler word here).
+    pub manager: [usize; 11],
+    /// +0x30: the active keyed registry, adopted from +0x2c by the
+    /// sibling setter @ 0x8187b08 (`ldr r1,[r0,#0x2c]; str r1,[r0,#0x30]`).
+    pub keyed_registry: *mut u8,
+}
+
+// Target-exact layout; on a 64-bit host the fields merely stay disjoint.
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x30] = [0; core::mem::offset_of!(DemoMode, keyed_registry)];
+
+// Slot +0x100 = word index 64 on the 32-bit target.
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x100] = [0; core::mem::offset_of!(DemoModeVtable, keyed_object)];
+
+/// demo_mode_keyed_object — original: `FUN_08187ad0` @ 0x08187ad0
+/// (20 bytes; **29 `bl` call sites**, binary-scanned over osos.dec; no
+/// predicated forms, no tail `b` references, no data-word references).
+/// Ghidra's 20-byte extent is exact: the next function starts @
+/// 0x08187ae4.
+///
+/// ```text
+/// ldr r3, [r0]          ; vtable
+/// mov r2, r1            ; the caller's key survives into r2
+/// ldr r3, [r3, #0x100]  ; slot 64
+/// ldr r1, [r0, #0x30]   ; active keyed registry
+/// bx  r3                ; vtable[64](this, this->keyed_registry, key)
+/// ```
+///
+/// A `TCDemoMode` method that resolves the object registered under
+/// `key` in the manager's keyed registry. All 29 call sites share one
+/// idiom — the object comes from [`demo_mode_instance`] (25 sites call
+/// it within the preceding dozen instructions; the other four reuse its
+/// result cached in a callee-saved register), the key is a literal in
+/// the 0x0dad0000..0x0dad0fff resource-id space, and the result is fed
+/// straight to [`object_cast_to_class`].
+///
+/// Faithful details: no NULL guard at either dereference or before `bx`
+/// — a NULL manager or a NULL vtable faults exactly as the original
+/// does. The vtable slot is loaded before the +0x30 field, the
+/// original's order. Deviation: Rust expresses the terminal `bx` as a
+/// final call whose result is propagated; there is no observable work
+/// after the dispatch, so the tail-call contract is preserved.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn demo_mode_keyed_object(
+    demo_mode: *mut DemoMode,
+    key: u32,
+) -> *mut u8 {
+    let vtable = core::ptr::read_volatile(core::ptr::addr_of!((*demo_mode).vtable));
+    let resolve = (*vtable).keyed_object;
+    let keyed_registry =
+        core::ptr::read_volatile(core::ptr::addr_of!((*demo_mode).keyed_registry));
+    resolve(demo_mode, keyed_registry, key)
 }
 
 /// instance_of_class_6000 — original: `FUN_08172124` @ 0x08172124
@@ -1597,5 +1683,124 @@ mod tests {
             assert_eq!(registry_lookup_by_id(0x7a88), instance(1));
         }
         restore(guard);
+    }
+
+    // ---- demo_mode_keyed_object (0x08187ad0) ----
+
+    /// Serializes the keyed-object dispatch tests. They never touch the
+    /// global registry, so they take their own lock rather than a second
+    /// `REGISTRY_LOCK` guard (which would self-deadlock any test already
+    /// holding it).
+    static KEYED_LOCK: Mutex<()> = Mutex::new(());
+
+    /// What the recording slot observed: `(this, keyed_registry, key)`.
+    static mut KEYED_ARGS: (usize, usize, u32) = (0, 0, 0);
+
+    /// Calls into any vtable slot other than +0x100.
+    static mut WRONG_SLOT_CALLS: usize = 0;
+
+    /// The marker the recording slot returns.
+    const KEYED_RESULT: usize = 0x5eed_5eed;
+
+    /// A real key from the 0x0dad0000 resource-id space (the literal @
+    /// 0x0816d3e4, passed by the call site @ 0x0816d2f4).
+    const STOCK_KEY: u32 = 0x0dad_05a9;
+
+    unsafe extern "C" fn recording_keyed_object(
+        this: *mut DemoMode,
+        keyed_registry: *mut u8,
+        key: u32,
+    ) -> *mut u8 {
+        unsafe { KEYED_ARGS = (this as usize, keyed_registry as usize, key) };
+        KEYED_RESULT as *mut u8
+    }
+
+    unsafe extern "C" fn wrong_keyed_slot(
+        _this: *mut DemoMode,
+        _keyed_registry: *mut u8,
+        _key: u32,
+    ) -> *mut u8 {
+        unsafe { WRONG_SLOT_CALLS += 1 };
+        ptr::null_mut()
+    }
+
+    /// A vtable whose 64 undispatched slots all trip the sentinel, with
+    /// `resolve` installed at +0x100.
+    fn keyed_vtable(
+        resolve: unsafe extern "C" fn(*mut DemoMode, *mut u8, u32) -> *mut u8,
+    ) -> DemoModeVtable {
+        DemoModeVtable { unresolved_00: [wrong_keyed_slot as usize; 64], keyed_object: resolve }
+    }
+
+    struct KeyedBench {
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    fn keyed_bench() -> KeyedBench {
+        let lock = KEYED_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            KEYED_ARGS = (0, 0, 0);
+            WRONG_SLOT_CALLS = 0;
+        }
+        KeyedBench { _lock: lock }
+    }
+
+    #[test]
+    fn dispatches_slot_0x100_with_the_field_and_key_and_propagates_the_return() {
+        let _bench = keyed_bench();
+        let vtable = keyed_vtable(recording_keyed_object);
+        let mut registry_word = 0xab_usize;
+        let registry = ptr::addr_of_mut!(registry_word).cast::<u8>();
+        let mut demo = DemoMode {
+            vtable: &vtable,
+            manager: [0x1111_1111; 11],
+            keyed_registry: registry,
+        };
+
+        let result = unsafe { demo_mode_keyed_object(ptr::addr_of_mut!(demo), STOCK_KEY) };
+
+        assert_eq!(
+            unsafe { KEYED_ARGS },
+            (ptr::addr_of_mut!(demo) as usize, registry as usize, STOCK_KEY),
+            "this, the +0x30 field, and the caller's key, in r0/r1/r2 order"
+        );
+        assert_eq!(result as usize, KEYED_RESULT, "the virtual tail return propagates");
+        assert_eq!(unsafe { WRONG_SLOT_CALLS }, 0, "only slot +0x100 dispatches");
+        assert_eq!(demo.manager, [0x1111_1111; 11], "nothing before +0x30 is touched");
+    }
+
+    #[test]
+    fn reloads_the_keyed_registry_field_on_every_call() {
+        let _bench = keyed_bench();
+        let vtable = keyed_vtable(recording_keyed_object);
+        let mut first_word = 1_usize;
+        let mut second_word = 2_usize;
+        let first = ptr::addr_of_mut!(first_word).cast::<u8>();
+        let second = ptr::addr_of_mut!(second_word).cast::<u8>();
+        let mut demo = DemoMode { vtable: &vtable, manager: [0; 11], keyed_registry: first };
+
+        unsafe { demo_mode_keyed_object(ptr::addr_of_mut!(demo), STOCK_KEY) };
+        assert_eq!(unsafe { KEYED_ARGS }.1, first as usize);
+
+        demo.keyed_registry = second;
+        unsafe { demo_mode_keyed_object(ptr::addr_of_mut!(demo), STOCK_KEY) };
+        assert_eq!(unsafe { KEYED_ARGS }.1, second as usize, "the +0x30 load is not cached");
+    }
+
+    #[test]
+    fn dispatches_through_the_objects_own_vtable() {
+        let _bench = keyed_bench();
+        let wrong = keyed_vtable(wrong_keyed_slot);
+        let recording = keyed_vtable(recording_keyed_object);
+        let mut first = DemoMode { vtable: &wrong, manager: [0; 11], keyed_registry: ptr::null_mut() };
+        let mut second =
+            DemoMode { vtable: &recording, manager: [0; 11], keyed_registry: ptr::null_mut() };
+
+        let first_result = unsafe { demo_mode_keyed_object(ptr::addr_of_mut!(first), STOCK_KEY) };
+        assert!(first_result.is_null(), "the first object's own +0x100 slot ran");
+        assert_eq!(unsafe { KEYED_ARGS }, (0, 0, 0), "the other vtable was not consulted");
+
+        unsafe { demo_mode_keyed_object(ptr::addr_of_mut!(second), STOCK_KEY) };
+        assert_eq!(unsafe { KEYED_ARGS }.0, ptr::addr_of_mut!(second) as usize);
     }
 }
