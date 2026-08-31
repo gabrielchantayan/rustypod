@@ -14971,6 +14971,49 @@ functions:
       match.py structural: NULL/empty branch, inclusive-size request,
       NULL-result return, source copy, and +0xc fallback are retained.
 
+  - address: 0x08275d00
+    ghidra: FUN_08275d00
+    name: utf8_strcpy_bounded
+    size: 116
+    sig: "u32 utf8_strcpy_bounded(u8 *dst, const u8 *src, u32 limit)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1: dst
+      param_2: src
+      param_3: limit
+    notes: >-
+      29 bl call sites (binary-scanned, all unconditional - no predicated
+      forms). Ghidra's 116-byte extent confirmed against raw bytes: the
+      next function (string_object_release_payload) starts @ 0x08275d74.
+      Bounded NUL-terminated string copy that never splits a UTF-8
+      sequence. Each iteration decodes one codepoint with the ported
+      utf8_next_codepoint @ 0x08276214, classifies its encoded width
+      with the ported utf8_codepoint_byte_width @ 0x08276380, and copies
+      the sequence's RAW source bytes (trailing pointer to
+      decoder-advanced cursor, not a re-encode) only while
+      width < remaining, so one byte always stays in reserve for the
+      terminator. On overflow it stores a NUL at the write cursor and
+      returns total + 1; on the string terminator the NUL travels the
+      same byte-copy path and is likewise counted, so the return value
+      is bytes WRITTEN including the terminator, not strlcpy's would-be
+      length. limit == 0 writes nothing and returns 0. Quirk retained:
+      a four-byte or otherwise malformed lead makes the decoder consume
+      three bytes and return 0, so the copy loop emits those three raw
+      bytes, ends the copy with NO terminator written, and counts only
+      width(0) == 1 for them. Callers: the 0x080d28e0 cluster copies
+      "Str " resource strings into 0x20/0xa-byte fields (see
+      resource_chain_find_string @ 0x0827239c) and 0x081ed670 fills a
+      0x300-byte field. Both callees are real ports in the same module,
+      called directly - no dispatch seam. match.py structural: same
+      decode/width/truncate-with-NUL/copy-raw/count-and-continue loop;
+      the diff is the crate fp frame and LLVM register allocation.
+      Host tests (10 in cxx::string_object::tests): ASCII copy counts
+      the NUL, empty string, limit 0 writes nothing, last-byte
+      truncation, exact fit, 2- and 3-byte sequences copied whole or
+      not at all, the malformed-lead raw-bytes-count-one quirk,
+      mid-string truncation without splitting, limit 1.
+
   - address: 0x08275d74
     ghidra: FUN_08275d74
     name: string_object_release_payload
