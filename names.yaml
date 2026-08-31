@@ -41366,6 +41366,31 @@ functions:
       callers now use this port directly; only retain and the timing-wheel
       functions remain in their animation seam.
 
+  # --- guarded opaque counter increment ---
+  - address: 0x0808e16c
+    ghidra: FUN_0808e16c
+    name: tagged_counter_try_increment
+    size: 40
+    sig: "int tagged_counter_try_increment(TaggedCounter *counter)"
+    module: util/tagged_counter
+    status: ported
+    renames:
+      param_1/r0: counter
+      DAT_080a7738: crts_tag
+    notes: >-
+      Raw ARM extent is exactly 0x0808e16c..0x0808e190; the next separately
+      entered function starts at 0x0808e194. Ghidra's 40-byte size is exact.
+      The unported 0x080a7714 validates a non-NULL counter's first word
+      against 0x73747263 (in-memory bytes "crts"). Valid counters increment
+      their signed word at +0x30 with ARM wrapping arithmetic and return zero;
+      invalid tags and NULL return -50 unchanged. Decoding every ARM B/BL
+      word in osos.dec finds 27 direct call sites: 26 plain bl and one bleq
+      at 0x0805c1dc, reached only when that caller's preceding increment made
+      its owner count equal one; there are no tail branches. Deliberate
+      deviation: the verified four-instruction guard is inlined because
+      0x080a7714 has no port; no callee identity is invented. Host tests cover
+      NULL, invalid tags, negative values, and signed wrap at i32::MAX.
+
   # --- guarded opaque counter decrement ---
   - address: 0x0809f744
     ghidra: FUN_0809f744
