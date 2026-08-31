@@ -36053,6 +36053,49 @@ functions:
       (self-consistent rival kept via the bxeq guard, stale rival
       replaced).
 
+  - address: 0x082b5298
+    ghidra: FUN_082b5298
+    name: atoi_dead_sign
+    size: 56
+    sig: "i32 atoi_dead_sign(const u8 *s)"
+    module: strto/atoi_dead_sign
+    status: ported
+    renames:
+      param_1/r0: s
+      iVar1/r1: "acc (wrapping decimal accumulator, acc = acc*10 + digit
+        via the add-r1-r1-r1-lsl-2 / add-r1-r2-r1-lsl-1 / sub-0x30
+        shift-add sequence)"
+      iVar2/ip: "sign (1, mvneq #0 sets -1 when *s == '-')"
+      r2: "byte (loaded twice from r0: once for the sign test, once
+        for the digit loop - the pointer is never advanced past '-')"
+    notes: >-
+      Verified call count: 29 bl sites, 0 predicated bl, plus one beq
+      tail-branch @ 0x082d0984 (30 control-flow transfers total); no
+      data word in osos references the address, so it is never
+      dispatched indirectly. Decimal atoi with a DEAD sign flag: the
+      '-' compare sets sign = -1 but the pointer is not advanced, so
+      a leading '-' fails the (byte - '0') <= 9u digit test
+      immediately, acc stays 0 and 0 * -1 == 0. The function can
+      never return a negative value from a '-' string (only from
+      unsigned wrap of long digit runs, e.g. "4294967295" -> -1).
+      Callers such as FUN_0837f25c defensively negate a negative
+      return that a sign can never cause. The port keeps the flag and
+      the final multiply verbatim. Ghidra's decompile of this
+      function is accurate (size 60 includes the first word of the
+      next function FUN_082b52d4; the true extent is 56 bytes, ending
+      at bx lr @ 0x082b52d0). Distinct from libc atoi (ADS strtol
+      wrapper @ 0x0802f990) and from atoi_decimal @ 0x080e9974 (no
+      sign flag at all). match.py (exit 1, diff expected): same byte
+      load, unsigned digit-range test, shift-add x10 accumulation and
+      loop back-branch; LLVM emits a preheader check plus do-while
+      loop and folds the mvneq+mul sign into cmp #0x2d / rsbeq
+      (negate-when-'-'), semantically identical, plus the crate fp
+      prologue. Host tests: leading_minus_is_dead ("-42" -> 0,
+      "42-99" -> 42, result never negative from '-'),
+      every_byte_uses_the_unsigned_decimal_range, overflow_wraps
+      (mod 2^32), digit_boundaries_and_long_runs, digits_then_junk,
+      random_vs_reference.
+
   - address: 0x083673b0
     ghidra: FUN_083673b0
     name: cg_binding_unlink
