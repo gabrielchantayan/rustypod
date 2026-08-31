@@ -34798,6 +34798,37 @@ functions:
       veneer's target body) directly instead of the veneer. match.py:
       same load/lsl #2/bl memcpy/reload-count/store structure; the diff
       is the crate fp frame and register allocation.
+  - address: 0x082ceabc
+    ghidra: FUN_082ceabc
+    name: word_list_modular_multiply_assign
+    size: 80
+    sig: "void word_list_modular_multiply_assign(const WordList *multiplicand, WordList *accumulator, const ModularReductionContext *modulus)"
+    module: util/word_list_modular_multiply
+    status: ported
+    renames:
+      param_1: multiplicand
+      param_2: accumulator
+      param_3: modulus
+    notes: >-
+      Modular multiplication assignment for the small counted-u32 WordList
+      type: construct an empty capacity-10 temporary list on the stack,
+      multiply multiplicand x accumulator into it through FUN_082d9c34,
+      reduce it through FUN_082cdb04 with r2 = 0, then word_list_copy the
+      reduced contents back to accumulator. Raw extent verified: the
+      next distinct function begins at 0x082ceb0c with push {r4-r6,lr}, so
+      the 20 instructions / 80-byte Ghidra extent is correct. The first
+      call is the distinct 20-byte constructor FUN_082d81c8 (not the
+      ported capacity-6 FUN_082d81e4): it stores count 0, capacity 10,
+      and entries = this+8. All 27 decoded B/BL references are plain
+      unconditional BLs (0 predicated). FUN_082d9c34 and FUN_082cdb04
+      have no ported names.yaml entries, so the Rust port uses a volatile
+      operation-table seam that transmutes their exact retail addresses
+      on target and test-installed reference models on host. The capacity-10
+      constructor is inlined rather than introduced as another exported
+      port. Host tests prove multiply -> mode-zero reduce ordering, the
+      capacity-10 empty temporary contract, preservation of a high product
+      limb until reduction, and that word_list_copy preserves accumulator
+      buffer/capacity while assigning only the reduced count/limbs.
   - address: 0x080f4aa8
     ghidra: FUN_080f4aa8
     name: path_exists
