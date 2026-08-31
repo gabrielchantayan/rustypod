@@ -24008,6 +24008,39 @@ functions:
       called directly (LLVM inlines its bounded-cursor wrapper, same
       codegen shape as the sibling's accepted port).
 
+  - address: 0x081239d4
+    ghidra: FUN_081239d4
+    name: formatted_message_close_dict
+    size: 52
+    sig: "void formatted_message_close_dict(MessageStream *stream, uint32 depth)"
+    module: printf/formatted_message
+    status: ported
+    vars: {param_1: stream, param_2: depth}
+    notes: >-
+      29 bl call sites, binary-scanned (all plain bl, no predicated
+      forms - no caller-side gating). The container-closing sibling of
+      formatted_message_emit @ 0x08123600: indent_prepare @ 0x08123a54
+      (stream, depth) fills the +0x215 scratch (r1 forwarded verbatim;
+      the caller's r2/r3 are dead on entry), then the ported snprintf
+      @ 0x0802f768 formats the literal @ 0x08123a08 ("%s</dict>\n",
+      right after the 52-byte body, reached with add r2, pc, #24) into
+      the inline 512-byte buffer at +0x15 with the single argument
+      word (indent) - the original's r3, no stack words - and the
+      stream append @ 0x08123c58(stream, buf) is tail-called. Call
+      sites pass only stream + depth (@ 0x0815032c:
+      formatted_message_close_dict(ctx + 0xc, 1) after a track dict's
+      property batch). Ghidra's 52-byte extent is exact: the format
+      literal sits at +0x34 and the </array> twin @ 0x08123a14 (52
+      bytes, same body, literal "%s</array>\n" @ 0x08123a48, NOT
+      ported) starts at +0x40. INDENT_PREPARE / STREAM_APPEND dispatch
+      slots are shared with the emit siblings; snprintf is called
+      directly. match.py structural: same prepare / format / append
+      chain - LLVM inlines snprintf's bounded-cursor wrapper (the
+      engine blx plus trailing NUL store stand in for the direct bl
+      0x0802f768) and the two dispatch slots are ldr/blx pairs instead
+      of the direct bl/b - the documented deviations of the sibling
+      ports; the crate fp frame accounts for the rest.
+
   - address: 0x08123a54
     ghidra: FUN_08123a54
     name: indent_prepare
