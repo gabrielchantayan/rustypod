@@ -4378,6 +4378,60 @@ functions:
       store order; the diff is LLVM rotating the NULL path out of line
       and the crate fp frame.
 
+  - address: 0x081a81c4
+    ghidra: FUN_081a81c4
+    name: aligned_buffer_init
+    size: 64
+    sig: "u8 *aligned_buffer_init(u8 *buffer, usize size)"
+    module: heap/aligned_buffer
+    status: ported
+    vars:
+      param_1: buffer
+      param_2: size
+      FUN_082aad74: operator_new_tag3 (direct, ported in
+        heap/veneers - no seam)
+      FUN_081a8198: align_up_to_cache_line (private sibling fn)
+    notes: >-
+      The constructor half of the firmware's 32-byte aligned-buffer
+      owner, the two-word value type {+0x00 data (the 32-aligned view
+      into the block), +0x04 allocation (the raw owned block)} whose
+      reset half @ 0x081a8204 is ported in the same module. 64 bytes
+      exactly, 0x081a81c4..0x081a8204, sixteen instructions, no
+      literal pool; the reset body opens immediately after. 29 bl
+      call sites, every one unconditional (0 predicated blne/bleq
+      forms, 0 b), binary-scanned by decoding every B/BL word in
+      osos.dec. Algorithm: zero the data word FIRST and the
+      allocation word second (the original's str order), then raw =
+      operator_new_tag3(size + 0x20), store the raw block at +0x04
+      unconditionally (the str sits between the cmp and the beq), and
+      only when raw is non-NULL store the 32-aligned view
+      (raw + 0x1f) & !0x1f at +0x00 via the 0x081a8198 helper;
+      return buffer. The +0x20 headroom keeps size usable bytes after
+      alignment; 0x20 is the ARM926EJ-S cache-line size (cache/DMA
+      staging buffers - see the reset entry's sibling evidence).
+      Ghidra's C (decomp/c/017/081a81c4_FUN_081a81c4.c) matches the
+      raw decode exactly this time. Deviations: the align-up helper
+      0x081a8198 is a private inline(never) sibling fn rather than
+      its own exported port - its pad out-store (0x20 - (block &
+      0x1f)) targets the constructor's saved-r1 stack slot, which the
+      epilogue pops into a discarded register, so the pad is dead at
+      this call site and unmodeled; operator_new_tag3 is called
+      directly (ported). Both words are 32-bit target words; the
+      block pointer is only stored and masked, never dereferenced, so
+      host tests use small integer stand-ins below 4 GiB (no slab
+      mapping needed). Host tests: the alloc fires once with
+      size + 0x20 and tag 3 and both views are installed on an
+      aligned block; a residue sweep 0..0x1f proves the align-up view
+      for every misalignment; the NULL path stores NULL at +0x04,
+      leaves +0x00 zero, and still returns the object. match.py
+      structural: same zero-both / add #32 / bl alloc / store +4 /
+      guarded bl align / store +0 / return shape; the diff is the
+      crate fp frame, LLVM taking size from r1 directly instead of
+      the original's stack reload, and the two bl targets printing
+      unresolved in the static-archive disassembly (operator_new_tag3
+      and the private helper - both verified in the archive symbol
+      table).
+
   - address: 0x0818b0c4
     ghidra: FUN_0818b0c4
     name: manager_take_blocks
