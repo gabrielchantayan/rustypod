@@ -35765,6 +35765,73 @@ functions:
       with the same 0x089a60d8 literal-pool word; the diff is the
       crate fp frame.
 
+  - address: 0x082792b4
+    ghidra: FUN_082792b4
+    name: path_object_copy_construct
+    size: 20
+    sig: "StringObject *path_object_copy_construct(StringObject *this, const StringObject *source)"
+    module: app/path_object_construct
+    status: ported
+    renames:
+      param_1/r0: this (raw two-word StringObject storage, forwarded
+        verbatim into the base copy ctor)
+      param_2/r1: source (caller-owned StringObject, forwarded verbatim
+        - no register is written between entry and the bl)
+      FUN_082773e0: string_object_copy_construct (ported, called
+        directly - the transition_addon.rs ported-callees precedent)
+      DAT_082792c8: "PATH_OBJECT_VTABLE_ADDRESS (0x089a60d8, the
+        StringObject-derived path class's vtable; binary-verified
+        against osos.dec)"
+      r4: DEAD - pushed and popped, never written (non-leaf frame
+        etiquette)
+    notes: >-
+      ADS C++ copy constructor PathObject(const StringObject &source)
+      of the StringObject-derived path class, sitting between the
+      converting (0x08279284) and default (0x082792cc) siblings:
+      push {r4,lr} / bl the ported base copy ctor @ 0x082773e0 with
+      both arguments forwarded untouched in r0/r1 / ldr r1,[pc,#4]
+      (literal @ 0x082792c8 = 0x089a60d8, the derived path-class
+      vtable) / str r1,[r0] over the base vtable at +0x00 / pop
+      {r4,pc}, returning the base ctor's r0 result verbatim (the ADS
+      this convention). 20 bytes of code + the 4-byte literal-pool
+      word, so 24 bytes of true extent; Ghidra's 20-byte extent drops
+      the literal, and the next function (path_object_default_construct)
+      starts at 0x082792cc. The overwrite is unconditional and runs
+      after the copy: a NULL-payload source, a failed payload
+      allocation and the base's address-not-content self-construction
+      guard path (this == source keeps the existing payload word) all
+      still leave the derived vtable at +0x00. Neither argument is
+      NULL-guarded - the original faults inside the base ctor for a
+      NULL this/source, and so does the port. Call-site census,
+      binary-scanned by decoding every B/BL word in osos.dec: 28 bl
+      (27 plain + ONE predicated blne @ 0x083de170 under cmp r0,#0,
+      where the caller NULL-guards the storage pointer itself), 0
+      tail b, and ZERO data-word references to 0x082792b4, so the ctor
+      is never dispatched virtually. Plain sites: 0x0812bbb4 /
+      0x0812bbe0, 0x081a2ae0, the 0x081bc9d8 - 0x081bde78 cluster of
+      thirteen, 0x081ef788 / 0x081ef9a4, 0x0826c970, 0x08278418,
+      0x08278eb8 (inside silver_controller_transition_addon_construct,
+      building the embedded string member at this+0x0c) and the
+      0x082a55f4 - 0x082a563c cluster of four. Deviations: the planted
+      vtable is the ROM identity constant PATH_OBJECT_VTABLE_ADDRESS
+      shared with both siblings (the StringObjectVtable ROM-identity
+      precedent; nothing ported dispatches through it). The
+      transition_addon.rs TransitionAddonConstructOps
+      string_member_construct seam keeps its faithful local default
+      (derived vtable + NULL payload, source ignored) - its own tests
+      pin that routing, so rewiring it to this symbol is left for the
+      transition-addon porter. Host tests:
+      src/app/path_object_construct.rs::tests::copy_construct_returns_the_base_ctors_result_verbatim
+      / copy_construct_plants_the_derived_vtable_over_the_base /
+      copy_construct_from_a_null_payload_source_stays_empty /
+      copy_construct_fail_closed_assign_leaves_a_null_payload /
+      copy_construct_from_self_keeps_the_payload (the guard pin: a
+      missing self-guard would fault on the garbage payload) /
+      copy_construct_matches_the_reference_model_across_sources.
+      match.py (exit 1, diff expected): identical push / bl base-ctor
+      / ldr-literal / str [r0] / pop structure with the same
+      0x089a60d8 literal-pool word; the diff is the crate fp frame.
+
   - address: 0x082792cc
     ghidra: FUN_082792cc
     name: path_object_default_construct
