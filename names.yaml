@@ -23366,6 +23366,28 @@ functions:
       0x0807a228 first; three dispatch slots for 76 bytes of body, but
       the call count makes it the best next target in this range.
 
+  - address: 0x0812bf84
+    ghidra: FUN_0812bf84
+    name: timer_stop_then_trace
+    size: 24
+    sig: "void timer_stop_then_trace(u8 *timer)"
+    module: drivers/timer
+    status: ported
+    renames:
+      param_1: timer
+    notes: >-
+      26 direct call sites (26 unconditional bl, 0 predicated, 0 tail b),
+      verified by decoding every ARM B/BL word in osos.dec. Raw 24-byte
+      body saves timer in r4, calls timer_stop @ 0x0812c6b0, restores it to
+      r0, and tail-branches to 0x0808747c. That address is a one-instruction
+      b veneer to trace/assert helper @ 0x08076954, not a separately
+      identified callee. Ghidra incorrectly assigns the helper's
+      lock/trace/unlock body to this wrapper. The port reuses the existing
+      TimerOps::trace_assert seam rather than adding one. match.py reports
+      the expected structural diff: LLVM inlines timer_stop and lowers the
+      existing trace dispatch to an indirect call, but preserves the
+      stop-before-second-trace order.
+
   - address: 0x0812bf4c
     ghidra: FUN_0812bf4c
     name: timer_restart
