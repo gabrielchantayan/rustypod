@@ -41276,3 +41276,30 @@ functions:
       four-instruction observable guard is inlined because 0x080a7714 has no
       port; no dispatch seam or callee identity is invented. Host tests cover
       NULL, wrong tag, zero, negative, one, and i32::MAX counters.
+
+  # --- retailOS flag-gated opaque payload accessor ---
+  - address: 0x08054454
+    ghidra: FUN_08054454
+    name: object_payload_if_available
+    size: 20
+    sig: "u32 object_payload_if_available(const void *object)"
+    module: ui/object_payload
+    status: ported
+    renames:
+      param_1/r0: object
+      r1: availability_flags
+      uVar1/r0: payload_address
+    notes: >-
+      Raw ARM extent is exactly 0x08054454..0x08054464: ldrb r1,
+      [r0,#0x1d]; tst r1,#1; ldreq r0,[r0,#0x20]; movne r0,#0; bx lr.
+      The next separately linked function begins at 0x08054468. Decoding
+      every ARM B/BL word in osos.dec finds 28 direct call sites, all plain
+      bl and no predicated forms; no DATA word contains this address. The
+      leaf reads availability bit 0 at object+0x1d: when clear it returns
+      the aligned 32-bit payload address at object+0x20, otherwise zero.
+      It deliberately has no NULL or alignment guard. The owner and payload
+      semantics remain unidentified, so the name describes only this
+      verified behavior. The Rust ABI represents the stored target pointer
+      as u32 to preserve the four-byte firmware layout on 64-bit hosts;
+      focused host tests cover every flag byte, a zero payload, and payload
+      suppression when bit 0 is set.
