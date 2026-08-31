@@ -14938,6 +14938,30 @@ functions:
       continuation (`codepoint >> 6`, rather than bits 12..17), then
       stores only +0, +1, +3, +4; destination[2] is untouched instead
       of receiving a third continuation byte. The function returns void.
+
+  - address: 0x0825d354
+    ghidra: FUN_0825d354
+    name: xml_skip_whitespace
+    size: 48
+    sig: "unsigned int xml_skip_whitespace(void **reader_slot)"
+    module: util/xml_skip_whitespace
+    status: ported
+    renames:
+      param_1/r0/r4: reader_slot
+      uVar1/r2/r0: codepoint
+      FUN_0825d7c4: xml_decode_codepoint_and_reset (unported seam)
+      FUN_0825d2fc: xml_codepoint_is_whitespace (unported seam)
+    notes: >-
+      Raw ARM is exactly 0x0825d354..0x0825d383: save reader_slot,
+      load *reader_slot, call 0x0825d7c4, duplicate its codepoint into
+      r1/r2, call the 0x0825d2fc predicate, and repeat while its result
+      is nonzero. It returns the first non-whitespace codepoint unchanged,
+      including the 0xffffffff decoder error/EOF sentinel. The confirmed
+      extent ends before 0x0825d384. Decoding every B/BL word in osos.dec
+      finds 26 static bl call sites: 25 unconditional plus one blne at
+      0x0825d180. Neither direct callee was already ported (checked in
+      this ledger), so util/xml_skip_whitespace.rs uses a volatile seam:
+      fixed raw addresses on target and test-installed host callbacks.
   - address: 0x08276d64
     ghidra: FUN_08276d64
     name: utf8_strcmp_safe
