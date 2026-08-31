@@ -1932,6 +1932,25 @@ functions:
     status: ported
     notes: Message printer @ 0x08035788 then exit path.
 
+  - address: 0x0803171c
+    ghidra: thunk_FUN_08033720
+    name: rt_exit_thunk
+    size: 4
+    sig: "noreturn rt_exit_thunk(i32 code)"
+    module: exit
+    status: ported
+    renames:
+      param_1/r0: code
+      FUN_08033720: __rt_exit
+    notes: >-
+      Pure dispatch alias: raw ARM word ea0007ff is `b 0x08033720`
+      (`__rt_exit`), preserving code in r0. The next word, `stmia r0!,
+      {r8, r9, r11, lr}` at 0x08031720, begins a separate function, so
+      the 4-byte extent is confirmed. Decoding every ARM B/BL word in
+      osos.dec found 26 direct callers: all unconditional bl, with no
+      predicated bl or tail b callers. No separate Rust symbol; hook
+      0x0803171c to the existing __rt_exit implementation in runtime/exit.rs.
+
   - address: 0x08033720
     name: __rt_exit
     size: 56
