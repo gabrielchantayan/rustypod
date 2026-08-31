@@ -886,6 +886,24 @@ pub unsafe extern "C" fn timer_stop(timer: *mut u8) {
     mutex_unlock(&mut class_mutex);
 }
 
+/// timer_stop_then_trace — original: `FUN_0812bf84` @ 0x0812bf84 (24
+/// bytes; 26 direct call sites, all unconditional `bl`, binary-scanned).
+///
+/// Stops `timer` through `timer_stop` @ 0x0812c6b0, then tail-branches
+/// through the veneer @ 0x0808747c to the trace/assert helper @
+/// 0x08076954 with that same timer. This produces a second trace after
+/// `timer_stop` has written the state word to `TIMER_STATE_STOPPED` and
+/// released its class mutex. The timer is not NULL-checked, as in the
+/// original. Deliberate deviation: Rust represents the final tail branch
+/// as a return-position call through the existing `TimerOps::trace_assert`
+/// seam; no caller can observe the original helper's leftover r0 value.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn timer_stop_then_trace(timer: *mut u8) {
+    timer_stop(timer);
+    (timer_ops().trace_assert)(timer);
+}
+
 /// timer_restart — original: `FUN_0812bf4c` @ 0x0812bf4c (32 bytes).
 ///
 /// Restarts `timer`: stops it (the ported `timer_stop` @ 0x0812c6b0,
@@ -1289,6 +1307,28 @@ mod tests {
             calls().iter().all(|c| !matches!(c, Call::Cancel(..))),
             "already-stopped timer must not cancel"
         );
+    }
+
+    /// The 24-byte wrapper stops first, then tail-branches to the same
+    /// trace/assert helper. An expired timer therefore traces twice, with
+    /// cancellation and the state transition strictly between the calls.
+    #[test]
+    fn stop_then_trace_stops_before_the_second_trace() {
+        let _lock = mock_env();
+        let mut timer = MockTimer::new(TIMER_STATE_EXPIRED, 0x08A0_1234);
+        let timer_ptr = timer.ptr();
+        unsafe { timer_stop_then_trace(timer_ptr) };
+        assert_eq!(
+            calls(),
+            vec![
+                Call::Trace(timer_ptr as usize),
+                Call::Wait(MOCK_HANDLE),
+                Call::Cancel(0x08A0_1234, 0x0812_16b4, timer_ptr as usize),
+                Call::Signal(MOCK_HANDLE),
+                Call::Trace(timer_ptr as usize),
+            ]
+        );
+        assert_eq!(timer.state(), TIMER_STATE_STOPPED);
     }
 
     /// The trace runs before the mutex is taken — the original's first
