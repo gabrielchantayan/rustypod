@@ -13019,6 +13019,35 @@ functions:
       0x081a71fc`, `[r4]` instead of `[r4, #4]` for the crate cache, and
       LLVM rotating the cache-hit exit to the top of the function.
 
+  - address: 0x081ded14
+    ghidra: FUN_081ded14
+    name: lazy_singleton_0x28
+    size: 48
+    sig: "void *lazy_singleton_0x28(void)"
+    module: app/singletons
+    status: ported
+    renames:
+      DAT_081ded40: singleton_0x28_cache (pool word holding 0x089cc7c8)
+      FUN_082aadd4: operator_new (direct, ported in heap/veneers)
+      FUN_081df284: singleton_0x28_ctor (SINGLETON_CTORS.singleton_0x28 slot)
+    notes: >-
+      Raw ARM is the app/singletons lazy-getter shape: load cache word
+      0x089cc7c8; if NULL, operator_new(0x28), construct through
+      FUN_081df284, store its result, reload and return cache. Ghidra's
+      44-byte extent drops the pool word 0x089cc7c8 at 0x081ded40; raw
+      bytes show the next function begins at 0x081ded44, so the true
+      extent is 48 bytes. A full decoded B/BL scan finds exactly 26
+      direct BL callers, all unconditional; there are no predicated BL
+      forms or direct B tail sites. The constructor has no recovered
+      class name; its +0xc queued-work subobject and its callers'
+      tagged 12-byte work records support only the structural
+      singleton_0x28 name. Deviations: the ctor remains behind the
+      singleton_0x28 dispatch slot, whose default zeroes the 0x28-byte
+      block; the cache is a crate static instead of runtime-initialized
+      0x089cc7c8. Host tests prove exact-size first allocation,
+      constructor-return caching, cache-hit no-allocation, and NULL
+      result retry. match.py structural review confirms the
+      test/allocate/construct/store/reload shape.
   - address: 0x081dfa20
     ghidra: FUN_081dfa20
     name: command_dispatcher_get
