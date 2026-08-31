@@ -257,6 +257,72 @@ pub unsafe extern "C" fn h264_bitstream_count_leading_zeros(
 /// disjoint from the host's 8-byte data pointer.
 const STREAM_BIT_POS_WORD: usize = 1;
 
+/// Models ARM's register-controlled logical left shift: only the low
+/// eight bits of the count participate, and counts at least 32 yield zero.
+#[inline(always)]
+fn arm_register_lsl(value: u32, count: u32) -> u32 {
+    match count & 0xff {
+        0 => value,
+        1..=31 => value << (count & 0xff),
+        _ => 0,
+    }
+}
+
+/// bitstream_msb_read_advance — original: `FUN_080ebc00` @ 0x080ebc00
+/// (116 bytes, all code — no literal pool; **26 `bl` call sites**,
+/// verified by decoding every ARM B/BL word in osos.dec. All 26 are
+/// unconditional `bl`, with no predicated call sites.)
+///
+/// Reads `bit_count` MSB-first bits from `data` at `*bit_position`,
+/// packs the first bit into the most-significant requested result bit,
+/// then advances `*bit_position` by `bit_count` with wrapping arithmetic.
+/// Unlike [`bitstream_msb_fetch`], this is a direct `{data, position}`
+/// primitive rather than a two-word stream object. It has no bounds or
+/// null checks: even a zero-bit read loads the preceding byte before
+/// returning zero, exactly as the retail body does.
+///
+/// The tail byte is loaded first and right-shifted until its last requested
+/// bit reaches bit 0. Earlier bytes are ORed into their required positions
+/// while walking backward to the first byte. Counts below 32 apply
+/// `(1 << count) - 1`; counts at least 32 retain the entire u32 result.
+/// The register shifts use ARM's low-eight-bit count and zero-on-32-or-more
+/// behavior through [`arm_register_lsl`].
+///
+/// Deliberate deviations: none.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn bitstream_msb_read_advance(
+    data: *const u8,
+    bit_position: *mut u32,
+    bit_count: u32,
+) -> u32 {
+    let position = bit_position.read();
+    let next_position = position.wrapping_add(bit_count);
+    let last_byte = next_position.wrapping_sub(1) >> 3;
+    let tail_shift = 7 - (next_position.wrapping_sub(1) & 7);
+    let mask = if bit_count < 32 {
+        (1u32 << bit_count).wrapping_sub(1)
+    } else {
+        u32::MAX
+    };
+
+    let mut value = u32::from(data.add(last_byte as usize).read()) >> tail_shift;
+    let mut byte = last_byte;
+    while (position >> 3) < byte {
+        let earlier_byte = u32::from(data.add((byte - 1) as usize).read());
+        let shift = last_byte
+            .wrapping_sub(byte)
+            .wrapping_add(1)
+            .wrapping_mul(8)
+            .wrapping_sub(tail_shift);
+        value |= arm_register_lsl(earlier_byte, shift);
+        byte = byte.wrapping_sub(1);
+    }
+
+    bit_position.write(next_position);
+    value & mask
+}
+
 /// bitstream_msb_fetch — original: `FUN_080efa38` @ 0x080efa38
 /// (152 bytes, all code — no literal pool, no calls; a
 /// `str lr,[sp,#-0x4]!` prologue and three `ldr pc,[sp],#0x4` exits:
@@ -673,6 +739,49 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The direct-data reader starts at a u32 cursor, returns MSB-first
+    /// fields, and commits after every read. Positions start at bit 8 so
+    /// its mandatory preceding-byte load is readable for the zero-bit case.
+    #[test]
+    fn direct_msb_read_advance_matches_fields_and_commits_cursor() {
+        for start in [8u32, 9, 13, 16, 24] {
+            for count in [0u32, 1, 2, 3, 4, 5, 7, 8, 9, 12, 16, 17, 24, 31, 32] {
+                let mut position = start;
+                let got = unsafe {
+                    bitstream_msb_read_advance(
+                        FETCH_PAYLOAD.as_ptr().add(1),
+                        &mut position,
+                        count,
+                    )
+                };
+                assert_eq!(
+                    got,
+                    reference_fetch(&FETCH_PAYLOAD, start as i32, count),
+                    "pos {start} count {count}"
+                );
+                assert_eq!(
+                    position,
+                    start.wrapping_add(count),
+                    "pos {start} count {count}"
+                );
+            }
+        }
+    }
+
+    /// Counts larger than 32 retain the complete result word but ARM's
+    /// register shifts discard earlier bytes once their count reaches 32.
+    #[test]
+    fn direct_msb_read_advance_models_wide_arm_shifts() {
+        let mut position = 8u32;
+        assert_eq!(
+            unsafe {
+                bitstream_msb_read_advance(FETCH_PAYLOAD.as_ptr().add(1), &mut position, 33)
+            },
+            0x4bfe_00b5
+        );
+        assert_eq!(position, 0x29);
     }
 
     #[test]
