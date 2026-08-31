@@ -11603,6 +11603,43 @@ functions:
   #   0x4180 TCNotesDispatcher, 0x5680 TCSportTimer, 0x5800 TRadioCntlr,
   #   0x7600 TSearchCntlr, 0x8080 TCDemoMode.
 
+  - address: 0x08187ad0
+    ghidra: FUN_08187ad0
+    name: demo_mode_keyed_object
+    size: 20
+    sig: "void *demo_mode_keyed_object(DemoMode *demo_mode, u32 key)"
+    module: app/registry
+    status: ported
+    vars: {param_1: demo_mode, param_2: key}
+    notes: >-
+      29 bl call sites, binary-scanned over osos.dec; no predicated
+      forms, no tail b, no data-word references. Ghidra's 20-byte extent
+      is exact (the next function starts @ 0x08187ae4); it emits no C
+      for this one (functions.csv marks it unknown). Body, verbatim:
+      `ldr r3,[r0]; mov r2,r1; ldr r3,[r3,#0x100]; ldr r1,[r0,#0x30]; bx r3`
+      - a TCDemoMode method tail-dispatching vtable slot +0x100 (index
+      64) as `vtable[64](this, this->keyed_registry, key)`, resolving
+      the object registered under key in the manager's keyed registry.
+      All 29 sites share one idiom: this comes from demo_mode_instance
+      @ 0x081883fc (25 call it within the preceding dozen instructions,
+      the other four reuse its result cached in a callee-saved
+      register), every key literal sits in the 0x0dad0000..0x0dad0fff
+      resource-id space, and the result feeds object_cast_to_class @
+      0x08275b9c directly. The +0x30 field is zeroed by the TCDemoMode
+      ctor @ 0x081889c0, filled from the freshly built 300-byte keyed
+      registry at +0x2c by the sibling setter @ 0x8187b08
+      (`ldr r1,[r0,#0x2c]; str r1,[r0,#0x30]`, unported). The slot's
+      target is UNRECOVERABLE: the ctor installs vtable pointer
+      0x08989718, which lands in the C++ mangled-name blob in the
+      decrypted image (the same page mismatch demo_mode_instance's note
+      records), so dispatch goes through the object's own vtable
+      pointer. No NULL guard at either dereference or before bx,
+      reproduced. Deviation: the terminal bx is a final Rust call whose
+      result is propagated - no observable work follows the dispatch
+      (the cxx/vtable.rs decoder_poll precedent). match.py structural:
+      same load order and tail dispatch; LLVM adds the usual {fp,lr}
+      frame that decoder_poll and object_cast_to_class also carry.
+
   - address: 0x081883fc
     ghidra: FUN_081883fc
     name: demo_mode_instance
