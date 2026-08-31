@@ -1,4 +1,4 @@
-//! The fifteen lazily-constructed framework singletons. Every one is the
+//! The sixteen lazily-constructed framework singletons. Every one is the
 //! same four-step idiom over its own cache word, its own allocation
 //! size and its own constructor:
 //!
@@ -24,6 +24,7 @@
 //! | 0x0825b680 | [`lazy_singleton_0x40`] | 0x40 | 0x089cc94c | 0x0825bd20 | 43 |
 //! | 0x0811b2c0 | [`singleton_class_6280`] | 0xa0 | 0x089cc30c | 0x0811c7fc | **43** |
 //! | 0x081fa3b0 | [`stage_progress_tracker_get`] | 0x2c | 0x089ca5d4 | 0x081fa440 | 30 |
+//! | 0x081303a8 | [`singleton_class_9300`] | 0x14c | 0x089cc2bc | 0x08130424 | 28 |
 //!
 //! (Call-site counts binary-scanned; the earlier scouting notes said 86
 //! / 38 / 37 / 36 for the bottom four.)
@@ -45,7 +46,7 @@
 //!
 //! `operator new` @ 0x082aadd4 is already ported
 //! (`heap::veneers::operator_new`), so it is called directly. None of
-//! the fifteen constructors is — they are large C++ constructors — so
+//! the sixteen constructors is — they are large C++ constructors — so
 //! they sit behind the [`SINGLETON_CTORS`] dispatch table, the house
 //! pattern.
 //!
@@ -173,6 +174,11 @@
 //!   budget word it just zeroed — NOT `this`), and a NULL allocation is
 //!   fatal via `heap_panic` @ 0x08030f44 instead of being cached and
 //!   retried.
+//! - The 0x14C object is registry class **0x9300** — see
+//!   [`singleton_class_9300`] below. Its constructor @ 0x08130424 wires
+//!   an embedded timer at +0x44 armed to 2000 ms, which its method
+//!   cluster (0x0812f754..0x08130134, the getter's own neighbours)
+//!   drives. Class NOT named.
 //!
 //! **None of these symbols is hook-ready.** Until the constructors are
 //! ported, the dispatch defaults hand out a zeroed block — no vtable,
@@ -188,9 +194,9 @@
 //! - A ctor returning NULL caches NULL, so the next call re-allocates.
 //!   Reproduced.
 //! - The cache slots are the crate statics below rather than words in
-//!   the 0x089cxxxx / 0x089dxxxx pages (the block_mgr.rs deviation:
+//!   0x089cxxxx / 0x089dxxxx pages (the block_mgr.rs deviation:
 //!   those RW pages are runtime-initialized; the image holds stale UI
-//!   strings there). All fifteen default to NULL, exactly the pre-init
+//!   strings there). All sixteen default to NULL, exactly the pre-init
 //!   state.
 
 use crate::heap::veneers::operator_new;
@@ -253,6 +259,10 @@ pub const CLASS_6280_SIZE: usize = 0xa0;
 /// (`mov r0, #0x2c`).
 pub const STAGE_PROGRESS_TRACKER_SIZE: usize = 0x2c;
 
+/// Allocation size of the registry-class-0x9300 singleton
+/// (`mov r0, #0x14c`).
+pub const CLASS_9300_SIZE: usize = 0x14c;
+
 /// An ADS C++ constructor: takes the raw block, returns `this`.
 pub type Constructor = unsafe extern "C" fn(this: *mut u8) -> *mut u8;
 
@@ -290,6 +300,8 @@ pub struct SingletonCtors {
     pub class_6280: Constructor,
     /// Stage-progress-tracker ctor @ 0x081fa440.
     pub stage_progress_tracker: Constructor,
+    /// Registry-class-0x9300 ctor @ 0x08130424.
+    pub class_9300: Constructor,
 }
 
 /// Defines one default constructor stub: zeroes the block and returns
@@ -319,6 +331,7 @@ zeroing_ctor!(zeroing_singleton_0x58_ctor, SINGLETON_0X58_SIZE);
 zeroing_ctor!(zeroing_singleton_0x40_ctor, SINGLETON_0X40_SIZE);
 zeroing_ctor!(zeroing_class_6280_ctor, CLASS_6280_SIZE);
 zeroing_ctor!(zeroing_stage_progress_tracker_ctor, STAGE_PROGRESS_TRACKER_SIZE);
+zeroing_ctor!(zeroing_class_9300_ctor, CLASS_9300_SIZE);
 
 /// Zeroes `size` bytes and returns the block. Volatile stores: a plain
 /// loop is rewritten by LLVM into a call to `__aeabi_memclr`, a symbol
@@ -349,6 +362,7 @@ pub(crate) const DEFAULT_SINGLETON_CTORS: SingletonCtors = SingletonCtors {
     singleton_0x40: zeroing_singleton_0x40_ctor,
     class_6280: zeroing_class_6280_ctor,
     stage_progress_tracker: zeroing_stage_progress_tracker_ctor,
+    class_9300: zeroing_class_9300_ctor,
 };
 
 /// The active constructors. Host tests install recording mocks; the
@@ -427,6 +441,11 @@ pub static mut CLASS_6280_INSTANCE: *mut u8 = core::ptr::null_mut();
 /// 0x089ca5d4, the `+0x48` slot of the global @ 0x089ca58c — the pool
 /// literal @ 0x081fa3e8).
 pub static mut STAGE_PROGRESS_TRACKER: *mut u8 = core::ptr::null_mut();
+
+/// The registry-class-0x9300 singleton (original: the word @
+/// 0x089cc2bc, the `+4` slot of the global @ 0x089cc2b8 — the pool
+/// literal @ 0x081303d4).
+pub static mut CLASS_9300_INSTANCE: *mut u8 = core::ptr::null_mut();
 
 /// The body all getters share: test the cache, allocate, construct,
 /// store, and re-load the cache (the original's second `ldr r0, [r4, #N]`,
@@ -961,6 +980,78 @@ pub unsafe extern "C" fn stage_progress_tracker_get() -> *mut u8 {
     core::ptr::read_volatile(cache)
 }
 
+/// singleton_class_9300 — original: `FUN_081303a8` @ **0x081303a8**
+/// (44 bytes of code + one pool word @ 0x081303d4 = **48 bytes** of
+/// true extent; **28 `bl` call sites, all unconditional — 0 predicated,
+/// 0 plain `b`** — binary-verified by decoding every B/BL word in
+/// `work/firmware/osos.dec`).
+///
+/// ```text
+/// 081303a8  push {r4, lr}
+/// 081303ac  ldr  r4, [pc, #32]      @ = 0x089cc2b8 (pool @ 0x081303d4)
+/// 081303b0  ldr  r0, [r4, #4]       @ the cache word 0x089cc2bc
+/// 081303b4  cmp  r0, #0
+/// 081303b8  bne  0x081303cc
+/// 081303bc  mov  r0, #0x14c
+/// 081303c0  bl   0x082aadd4         @ operator new
+/// 081303c4  bl   0x08130424         @ constructor
+/// 081303c8  str  r0, [r4, #4]
+/// 081303cc  ldr  r0, [r4, #4]       @ reload the slot before returning
+/// 081303d0  pop  {r4, pc}
+/// 081303d4  .word 0x089cc2b8
+/// ```
+///
+/// The sixteenth member of this family: test the `+4` slot of the
+/// global @ 0x089cc2b8, and when it is NULL allocate exactly 0x14c
+/// bytes with the ported `operator_new`, run the constructor @
+/// 0x08130424 over the raw block, store the ctor's return into the
+/// cache, RELOAD the slot and return it (so a self-caching ctor wins,
+/// and a NULL-returning ctor leaves no failure memory — the next call
+/// re-allocates). Ghidra's 44 bytes is the code only; the true extent
+/// runs to 0x081303d8, where the next function opens
+/// `push {r4, r5, r6, lr}`. Ghidra's own listing is also broken here:
+/// it emits no C file for this getter at all.
+///
+/// What the object is: its constructor @ 0x08130424 (192 bytes,
+/// 0x08130424..0x081304e4, followed by the NULL-guarded deleting
+/// destructor @ 0x081304f0) runs the two-argument base ctor
+/// FUN_08272474(this, 0), plants primary vtable **0x089841e4** at +0,
+/// builds the embedded cxx observable_array sub-object at +0x18
+/// (0x08271cec, ported in cxx/observable_array), plants secondary
+/// vtable **0x089a4b48** at +0x18, sets byte +0x28 = 1 and word
+/// +0x2c = 0, zeroes byte +0x70 and word +0x74, runs FUN_0839ebc4 at
+/// +0x78 and the ported scoped_context_construct @ 0x08270394 at +0x7c,
+/// runs the ported pair_header_base_construct @ 0x0810ebbc at +0x94,
+/// then registers `this` in the by-id class registry under id **0x9300**
+/// (`mov r1, #0x9300; bl 0x081d23f8` @ 0x0813048c, the ported
+/// registry_register). It finishes by wiring an embedded timer: the
+/// ported timer_schedule_shim @ 0x0811108c(this, this+0x44, 0, 0) makes
+/// the object its own timer config word, then the ported
+/// timer_start_after @ 0x0812c63c(this+0x44, 2000) arms a **2000 ms**
+/// timer at +0x44; FUN_0812f6ec(this) and a stack-temp copy into +0x78
+/// (FUN_0839ebc4 / FUN_0839ec70 / FUN_0839cbc0) close it out. The 28
+/// call sites feed the object's own method cluster sitting immediately
+/// around the getter — FUN_0812f754 / FUN_0812fda0 / FUN_0812fb64 /
+/// FUN_0812ff28 / FUN_08130134 — e.g. the menu handler @ 0x081ca278,
+/// which polls FUN_0812f754, runs FUN_08130134 when it answers
+/// non-zero, and gates a command-dispatch pair on FUN_0812fb64(obj, 1).
+/// Class NOT named: neither the ctor nor the base ctors reach a name
+/// factory, so — like [`singleton_class_8900`] & co. — the symbol
+/// carries the registry id only.
+///
+/// Deviations: the ctor rides the [`SINGLETON_CTORS`] dispatch table
+/// (`class_9300` slot, documented zeroing default — NOT HOOK-READY,
+/// the family contract) and the cache is the crate static
+/// [`CLASS_9300_INSTANCE`] rather than the word @ 0x089cc2bc (the
+/// block_mgr.rs RW-page deviation). Same NOT-HOOK-READY caveat as every
+/// sibling — see the module header.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn singleton_class_9300() -> *mut u8 {
+    let cache = core::ptr::addr_of_mut!(CLASS_9300_INSTANCE);
+    lazy_singleton(cache, CLASS_9300_SIZE, || unsafe { ctor!(class_9300) })
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -1039,6 +1130,7 @@ mod tests {
                 singleton_0x40: recording_ctor,
                 class_6280: recording_ctor,
                 stage_progress_tracker: recording_ctor,
+                class_9300: recording_ctor,
             };
             CTOR_RESULT = ctor_result;
             (*ptr::addr_of_mut!(ALLOC_SIZES)).clear();
@@ -1077,6 +1169,7 @@ mod tests {
         SINGLETON_0X40 = ptr::null_mut();
         CLASS_6280_INSTANCE = ptr::null_mut();
         STAGE_PROGRESS_TRACKER = ptr::null_mut();
+        CLASS_9300_INSTANCE = ptr::null_mut();
     }
 
     fn arena() -> *mut u8 {
@@ -1915,6 +2008,127 @@ mod tests {
             assert!(ptr::read_volatile(ptr::addr_of!(CLASS_6280_INSTANCE)).is_null(), "untouched");
             assert!(ptr::read_volatile(ptr::addr_of!(VOLUME_CONTROLLER_INSTANCE)).is_null(), "untouched");
             assert_eq!(*ptr::addr_of!(ALLOC_SIZES), std::vec![STAGE_PROGRESS_TRACKER_SIZE]);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_class_9300_singleton_is_allocated_at_exactly_0x14c_and_constructed_once() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(singleton_class_9300(), constructed());
+            assert_eq!(
+                *ptr::addr_of!(ALLOC_SIZES),
+                std::vec![0x14c],
+                "the `mov r0, #0x14c` immediate"
+            );
+            assert_eq!(*ptr::addr_of!(CTOR_BLOCKS), std::vec![arena()], "constructed on the raw block");
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(CLASS_9300_INSTANCE)),
+                constructed(),
+                "the ctor result is cached in the +4 slot of the word @ 0x089cc2b8"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_class_9300_singleton_second_call_returns_the_cache() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(singleton_class_9300(), constructed());
+            assert_eq!(singleton_class_9300(), constructed());
+            assert_eq!(singleton_class_9300(), constructed());
+            assert_eq!((*ptr::addr_of!(ALLOC_SIZES)).len(), 1, "allocated exactly once");
+            assert_eq!((*ptr::addr_of!(CTOR_BLOCKS)).len(), 1, "constructed exactly once");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn a_pre_seeded_class_9300_cache_never_allocates() {
+        // The `cmp r0, #0; bne` fast path: the 28 call sites after the
+        // first construction never touch the allocator.
+        let guard = mock(constructed());
+        unsafe {
+            CLASS_9300_INSTANCE = arena().add(96);
+            assert_eq!(singleton_class_9300(), arena().add(96));
+            assert!((*ptr::addr_of!(ALLOC_SIZES)).is_empty());
+            assert!((*ptr::addr_of!(CTOR_BLOCKS)).is_empty());
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn a_null_returning_class_9300_ctor_caches_null_and_retries_on_every_call() {
+        let guard = mock(ptr::null_mut());
+        unsafe {
+            assert!(singleton_class_9300().is_null());
+            assert!(ptr::read_volatile(ptr::addr_of!(CLASS_9300_INSTANCE)).is_null());
+            assert!(singleton_class_9300().is_null());
+            assert_eq!(
+                *ptr::addr_of!(ALLOC_SIZES),
+                std::vec![CLASS_9300_SIZE, CLASS_9300_SIZE],
+                "no failure memory: it re-allocates every call"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_class_9300_store_lands_after_its_ctor_runs() {
+        // Order is alloc -> ctor -> store: a ctor that pokes the cache
+        // slot itself is overwritten by the store of the ctor's return
+        // (the original's `str r0, [r4, #4]` follows the `bl
+        // 0x08130424`), and the reload then returns that stored value.
+        unsafe extern "C" fn cache_poking_ctor(this: *mut u8) -> *mut u8 {
+            (*ptr::addr_of_mut!(CTOR_BLOCKS)).push(this);
+            CLASS_9300_INSTANCE = this.add(32);
+            this.add(48)
+        }
+        let guard = mock(ptr::null_mut());
+        unsafe {
+            SINGLETON_CTORS.class_9300 = cache_poking_ctor;
+            assert_eq!(singleton_class_9300(), arena().add(48), "the ctor-return store wins");
+            assert_eq!(ptr::read_volatile(ptr::addr_of!(CLASS_9300_INSTANCE)), arena().add(48));
+            assert_eq!(*ptr::addr_of!(CTOR_BLOCKS), std::vec![arena()], "the ctor still ran, once");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_class_9300_zeroing_stub_clears_exactly_0x14c_bytes() {
+        let guard = SINGLETON_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            let block = ptr::addr_of_mut!(ARENA) as *mut u8;
+            for offset in 0..CLASS_9300_SIZE + 4 {
+                block.add(offset).write(0xa5);
+            }
+            assert_eq!(zeroing_class_9300_ctor(block), block);
+            assert!((0..CLASS_9300_SIZE).all(|offset| block.add(offset).read() == 0));
+            assert_eq!(
+                block.add(CLASS_9300_SIZE).read(),
+                0xa5,
+                "not one byte past the object"
+            );
+            assert!(zeroing_class_9300_ctor(ptr::null_mut()).is_null(), "NULL-safe");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_class_9300_cache_is_independent_of_its_globals_page_neighbours() {
+        // The cache word 0x089cc2bc sits in the same 0x089cc2xx globals
+        // cluster as the volume-controller global (0x089cc26c) and the
+        // class-0x6280 cache (0x089cc30c); the crate statics keep them
+        // apart.
+        let guard = mock(constructed());
+        unsafe {
+            singleton_class_9300();
+            assert!(ptr::read_volatile(ptr::addr_of!(VOLUME_CONTROLLER_INSTANCE)).is_null(), "untouched");
+            assert!(ptr::read_volatile(ptr::addr_of!(CLASS_6280_INSTANCE)).is_null(), "untouched");
+            assert!(ptr::read_volatile(ptr::addr_of!(STAGE_PROGRESS_TRACKER)).is_null(), "untouched");
+            assert_eq!(*ptr::addr_of!(ALLOC_SIZES), std::vec![0x14c]);
         }
         restore(guard);
     }
