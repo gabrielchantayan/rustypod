@@ -41303,3 +41303,45 @@ functions:
       as u32 to preserve the four-byte firmware layout on 64-bit hosts;
       focused host tests cover every flag byte, a zero payload, and payload
       suppression when bit 0 is set.
+
+  # --- adaptive tick accumulator constructor ---
+  - address: 0x081bb450
+    ghidra: FUN_081bb450
+    name: tick_accumulator_construct
+    size: 176
+    sig: "TickAccumulator *tick_accumulator_construct(TickAccumulator *accumulator, u32 input_divisor, u8 mode_enabled, u32 backoff_interval_ms)"
+    module: app/tick_accumulator
+    status: ported
+    renames:
+      param_1/r0: accumulator
+      param_2/r1: input_divisor
+      param_3/r2: mode_enabled
+      param_4/r3: backoff_interval_ms
+      FUN_081bb384: tick_millis
+      FUN_080562ec: system_mode_enabled
+      FUN_080b43e8: observer_getter
+      DAT_081bb500: disabled_lower_input_bound
+      DAT_081bb504: enabled_lower_input_bound
+      DAT_081bb508: disabled_upper_input_bound
+      DAT_081bb50c: enabled_upper_input_bound
+    notes: >-
+      EXTENT: Ghidra's 176 bytes describe code at
+      0x081bb450..0x081bb500; the four trailing literal-pool words belong
+      to this function, so raw bytes establish the true 192-byte extent
+      0x081bb450..0x081bb510, with the next separately linked function
+      opening at 0x081bb510. CALL COUNT: decoding every ARM B/BL word in
+      work/firmware/osos.dec finds exactly 28 direct call sites, all
+      unconditional plain bl and no predicated BL forms. The constructor
+      samples the unported millisecond helper three times, initializes the
+      0x34-byte accumulator's deadlines, scale factor, input fields and
+      flags, then selects 10000/15000 or 17000/20000 input bounds through
+      two unported system-mode queries. It stores the fourth argument as
+      the backoff interval and passes a pointer to the local this pointer
+      to vtable slot +0x1c of the singleton returned by unported
+      observer_getter. The concrete observer identity is not established;
+      the Rust name records only this verified registration role. Deliberate
+      target-compatible deviation: the three unported callees are expressed
+      as an operation table on hosts and as direct retail entry calls on
+      target, so the freestanding link has no undefined externals. Host
+      tests cover enabled and disabled bounds, exact field layout and
+      observer registration, including ARM-wrapping tick-deadline addition.
