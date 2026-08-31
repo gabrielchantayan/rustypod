@@ -2115,6 +2115,92 @@ pub extern "C" fn utf8_codepoint_byte_width(codepoint: u32) -> u32 {
     }
 }
 
+/// utf8_strcpy_bounded — original: `FUN_08275d00` @ 0x08275d00 (116 bytes,
+/// all code — next function @ 0x08275d74 confirms the extent; 29 `bl` call
+/// sites, binary-scanned, every one unconditional).
+///
+/// Bounded NUL-terminated string copy that never splits a UTF-8 sequence.
+/// Decoded from the raw ARM at 0x08275d00:
+///
+/// ```text
+/// push {r3, r4, r5, r6, r7, lr}   ; [sp] IS the source cursor cell
+/// r7 = 0            ; total bytes accounted
+/// r6 = r2           ; remaining space (limit)
+/// r5 = r0           ; dst write pointer
+/// r4 = r1           ; copy-from pointer (trails the cursor)
+/// str r1, [sp]
+/// loop (entered at the remaining != 0 test):
+///   r0 = sp
+///   bl 0x08276214   ; cp = utf8_next_codepoint(&cursor)
+///   r1 = cp
+///   bl 0x08276380   ; width = utf8_codepoint_byte_width(cp)
+///   cmp width, remaining
+///   bcs truncate    ; width >= remaining: *dst = 0, return total + 1
+///   copy: while r4 != cursor: *dst++ = *r4++   ; raw source bytes
+///   total += width; remaining -= width
+///   if cp == 0: done
+///   while remaining != 0
+/// done: return total
+/// ```
+///
+/// Semantics that fall out of that structure:
+///
+/// - A sequence is copied only when `width < remaining`, so one byte always
+///   stays in reserve for the terminator: `dst[0..limit]` can never
+///   overflow, and a multi-byte codepoint is emitted whole or not at all.
+/// - The copy loop moves the RAW source bytes of each sequence
+///   (from the trailing pointer to the decoder-advanced cursor), it does
+///   not re-encode the decoded codepoint.
+/// - The terminating NUL codepoint (`width == 1`) normally travels the same
+///   byte-copy path; only when no room remains does the `bcs` arm store an
+///   explicit NUL at the current write pointer. Both arms count that NUL in
+///   the return value, so the result is the number of bytes written,
+///   INCLUDING the terminator — unlike strlcpy's would-be length.
+/// - `limit == 0` writes nothing and returns 0 (the loop test runs first).
+/// - Quirk: a four-byte or otherwise malformed lead makes
+///   [`utf8_next_codepoint`] consume THREE bytes and return 0. The copy
+///   loop then emits those three raw bytes, the zero codepoint ends the
+///   copy with NO terminator written, yet the return value counts only
+///   `width(0) == 1` for them. Retained exactly.
+///
+/// Both callees are ported in this module, so the port calls them directly.
+/// The original faults for an unreadable source or unwritable destination,
+/// and this raw-pointer port has the same preconditions.
+///
+/// Deviations: none.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn utf8_strcpy_bounded(
+    dst: *mut u8,
+    src: *const u8,
+    limit: u32,
+) -> u32 {
+    let mut total = 0u32;
+    let mut remaining = limit;
+    let mut out = dst;
+    let mut cursor = src;
+    let mut copied_from = src;
+    while remaining != 0 {
+        let codepoint = utf8_next_codepoint(&mut cursor);
+        let width = utf8_codepoint_byte_width(codepoint);
+        if width >= remaining {
+            *out = 0;
+            return total + 1;
+        }
+        while copied_from != cursor {
+            *out = *copied_from;
+            out = out.add(1);
+            copied_from = copied_from.add(1);
+        }
+        total += width;
+        remaining -= width;
+        if codepoint == 0 {
+            return total;
+        }
+    }
+    total
+}
+
 /// utf8_strcmp_safe — original: `FUN_08276d64` @ 0x08276d64 (56 bytes,
 /// all code; source: `ipod-decomp/decomp/c/026/08276d64_FUN_08276d64.c`).
 ///
@@ -5293,6 +5379,108 @@ pub(crate) mod tests {
                 "codepoint {codepoint:#x}"
             );
         }
+    }
+
+
+    // ---- utf8_strcpy_bounded --------------------------------------
+
+    /// Runs the bounded copy over `src` (must be NUL-terminated or otherwise
+    /// decoder-terminated) into a 0xaa-prefilled buffer of `buf_len` bytes,
+    /// returning (bytes accounted, buffer contents).
+    fn bounded_copy(src: &[u8], limit: u32, buf_len: usize) -> (u32, Vec<u8>) {
+        let mut dst = std::vec![0xaau8; buf_len];
+        let accounted = unsafe { utf8_strcpy_bounded(dst.as_mut_ptr(), src.as_ptr(), limit) };
+        (accounted, dst)
+    }
+
+    #[test]
+    fn utf8_strcpy_bounded_copies_ascii_and_counts_the_terminator() {
+        let (accounted, dst) = bounded_copy(b"hello\0", 6, 8);
+        assert_eq!(accounted, 6, "five letters plus the NUL");
+        assert_eq!(&dst[..6], b"hello\0");
+        assert_eq!(&dst[6..], &[0xaa, 0xaa], "bytes past the NUL untouched");
+    }
+
+    #[test]
+    fn utf8_strcpy_bounded_empty_string_writes_only_the_nul() {
+        let (accounted, dst) = bounded_copy(b"\0", 5, 4);
+        assert_eq!(accounted, 1);
+        assert_eq!(&dst[..2], &[0x00, 0xaa]);
+    }
+
+    #[test]
+    fn utf8_strcpy_bounded_zero_limit_writes_nothing_and_returns_zero() {
+        let (accounted, dst) = bounded_copy(b"hello\0", 0, 3);
+        assert_eq!(accounted, 0);
+        assert_eq!(dst, std::vec![0xaau8; 3], "limit 0 never enters the loop");
+    }
+
+    #[test]
+    fn utf8_strcpy_bounded_truncates_with_nul_when_the_last_byte_has_no_room() {
+        // "hello", limit 5: after "hell" one byte remains; the next 'o'
+        // (width 1 >= remaining 1) takes the truncate arm: NUL, count it.
+        let (accounted, dst) = bounded_copy(b"hello\0", 5, 8);
+        assert_eq!(accounted, 5);
+        assert_eq!(&dst[..5], b"hell\0");
+    }
+
+    #[test]
+    fn utf8_strcpy_bounded_exact_fit_still_terminates_through_the_truncate_arm() {
+        // "ab", limit 3: both letters copy (1 < 3, then 1 < 2), then the
+        // terminator's width 1 >= remaining 1, so the NUL comes from the
+        // truncate arm and is counted.
+        let (accounted, dst) = bounded_copy(b"ab\0", 3, 4);
+        assert_eq!(accounted, 3);
+        assert_eq!(&dst[..3], b"ab\0");
+    }
+
+    #[test]
+    fn utf8_strcpy_bounded_never_splits_a_multi_byte_sequence() {
+        // U+00E9 = 0xc3 0xa9. Limit 2 leaves no reserve (width 2 >= 2), so
+        // nothing but the NUL is written.
+        let (accounted, dst) = bounded_copy(b"\xc3\xa9x\0", 2, 4);
+        assert_eq!(accounted, 1);
+        assert_eq!(&dst[..2], &[0x00, 0xaa]);
+
+        // Limit 4: the two-byte sequence copies whole, then "x" and the NUL.
+        let (accounted, dst) = bounded_copy(b"\xc3\xa9x\0", 4, 6);
+        assert_eq!(accounted, 4);
+        assert_eq!(&dst[..4], b"\xc3\xa9x\0");
+    }
+
+    #[test]
+    fn utf8_strcpy_bounded_three_byte_sequence_copies_raw_source_bytes() {
+        // U+20AC = 0xe2 0x82 0xac, limit 8: raw bytes copied, not re-encoded.
+        let (accounted, dst) = bounded_copy(b"\xe2\x82\xac\0", 8, 6);
+        assert_eq!(accounted, 4);
+        assert_eq!(&dst[..4], b"\xe2\x82\xac\0");
+    }
+
+    #[test]
+    fn utf8_strcpy_bounded_malformed_lead_emits_three_raw_bytes_and_counts_one() {
+        // A four-byte lead (0xf0) makes utf8_next_codepoint consume three
+        // bytes and return 0. The copy loop emits all three raw bytes, the
+        // zero codepoint ends the copy with NO terminator, and the return
+        // value counts only width(0) == 1. Retail quirk, retained.
+        let (accounted, dst) = bounded_copy(b"\xf0\x9f\x98\x80\0", 10, 6);
+        assert_eq!(accounted, 1);
+        assert_eq!(&dst[..4], &[0xf0, 0x9f, 0x98, 0xaa], "three raw bytes, no NUL");
+    }
+
+    #[test]
+    fn utf8_strcpy_bounded_truncates_mid_string_without_splitting_a_sequence() {
+        // "a" + U+00E9 + "b", limit 3: 'a' copies (1 < 3, remaining 2),
+        // then width 2 >= remaining 2 -> NUL right after 'a'.
+        let (accounted, dst) = bounded_copy(b"a\xc3\xa9b\0", 3, 6);
+        assert_eq!(accounted, 2);
+        assert_eq!(&dst[..3], &[b'a', 0x00, 0xaa]);
+    }
+
+    #[test]
+    fn utf8_strcpy_bounded_limit_one_writes_only_the_nul() {
+        let (accounted, dst) = bounded_copy(b"hello\0", 1, 3);
+        assert_eq!(accounted, 1);
+        assert_eq!(&dst[..2], &[0x00, 0xaa]);
     }
 
 
