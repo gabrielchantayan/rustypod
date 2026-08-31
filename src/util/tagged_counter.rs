@@ -54,6 +54,29 @@ pub unsafe extern "C" fn tagged_counter_try_decrement(counter: *mut TaggedCounte
     }
 }
 
+/// tagged_counter_try_increment — original: `FUN_0808e16c` @ 0x0808e16c
+/// (40 bytes; 27 direct `bl` call sites: 26 plain `bl`, one `bleq`).
+///
+/// Calls the same NULL-safe, `"crts"` tag guard as
+/// `tagged_counter_try_decrement`. On a valid object, increments the raw
+/// signed word at +0x30 with ARM's wrapping arithmetic and returns zero.
+/// Invalid tags and NULL return -50 without touching the object.
+///
+/// The raw function ends at 0x0808e190, before the separately entered
+/// function at 0x0808e194. Deliberate deviation: the unported guard at
+/// 0x080a7714 is inlined rather than assigned an invented identity or given
+/// a dispatch seam.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn tagged_counter_try_increment(counter: *mut TaggedCounter) -> i32 {
+    if counter.is_null() || (*counter).tag != CRTS_TAG {
+        return -0x32;
+    }
+
+    (*counter).count = (*counter).count.wrapping_add(1);
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,5 +113,32 @@ mod tests {
     #[test]
     fn null_is_rejected_before_any_dereference() {
         assert_eq!(unsafe { tagged_counter_try_decrement(core::ptr::null_mut()) }, -0x32);
+    }
+
+    #[test]
+    fn increments_all_signed_counter_values_with_arm_wrapping() {
+        for (count, expected) in [
+            (0, 1),
+            (1, 2),
+            (-1, 0),
+            (i32::MIN, i32::MIN + 1),
+            (i32::MAX, i32::MIN),
+        ] {
+            let mut value = counter(CRTS_TAG, count);
+            assert_eq!(unsafe { tagged_counter_try_increment(&mut value) }, 0);
+            assert_eq!(value.count, expected);
+        }
+    }
+
+    #[test]
+    fn increment_refuses_an_unrecognised_tag_without_mutating_it() {
+        let mut value = counter(0, i32::MAX);
+        assert_eq!(unsafe { tagged_counter_try_increment(&mut value) }, -0x32);
+        assert_eq!(value.count, i32::MAX);
+    }
+
+    #[test]
+    fn increment_rejects_null_before_any_dereference() {
+        assert_eq!(unsafe { tagged_counter_try_increment(core::ptr::null_mut()) }, -0x32);
     }
 }
