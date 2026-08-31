@@ -88,11 +88,53 @@ pub unsafe extern "C" fn word_list_copy(src: *const WordList, dst: *mut WordList
     (*dst).count = (*src).count;
 }
 
+/// Inline element capacity set by the constructor; the original
+/// hardcodes `mov r2, #6`.
+pub const WORD_LIST_INLINE_CAPACITY: u16 = 6;
+
+/// word_list_init — original: `FUN_082d81e4` @ 0x082d81e4 (28 bytes).
+///
+/// Constructor for the inline-storage form of [`WordList`], placed
+/// directly ahead of its 6-word element buffer:
+///
+/// ```text
+/// mov  r2, #0
+/// strh r2, [r0]        ; this->count = 0
+/// mov  r2, #6
+/// add  r1, r0, #8      ; inline storage = this + 8 (past the 8-byte header)
+/// strh r2, [r0, #2]    ; this->capacity = 6
+/// str  r1, [r0, #4]    ; this->entries = this + 8
+/// bx   lr              ; r0 never clobbered: returns `this`
+/// ```
+///
+/// 29 `bl` call sites, ALL unconditional (0 predicated) — verified by
+/// decoding every ARM B/BL word in osos.dec, not from Ghidra xrefs.
+/// Extent self-verified: 7 words, and the next function's prologue
+/// (`push {r4-r6, lr}`) starts exactly at 0x082d8200, so Ghidra's
+/// 28 bytes is right. No data word in osos.dec holds 0x082d81e4, so the
+/// constructor is not dispatched virtually. Every caller constructs the
+/// list on its own stack frame (e.g. `FUN_082cb18c` @ 0x082cb18c builds
+/// four of them), matching the 8-byte header + 6 inline words = 32-byte
+/// stack slots seen there.
+///
+/// # Safety
+/// `this` must point at 8 + 6*4 = 32 writable bytes: the 8-byte
+/// [`WordList`] header followed by 6 words of inline element storage.
+/// Returns `this` (r0 is preserved by the original).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn word_list_init(this: *mut WordList) -> *mut WordList {
+    (*this).count = 0;
+    (*this).capacity = WORD_LIST_INLINE_CAPACITY;
+    (*this).entries = (this as *mut u8).add(8) as *mut u32;
+    this
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
 
-    use super::{word_list_copy, WordList};
+    use super::{word_list_copy, word_list_init, WordList, WORD_LIST_INLINE_CAPACITY};
     use std::vec;
 
     fn list(buf: &mut [u32], count: u16) -> WordList {
@@ -142,6 +184,48 @@ mod tests {
 
         assert_eq!(src.count, 4);
         assert_eq!(buf, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn init_zeroes_count_sets_capacity_and_points_entries_past_header() {
+        // Firmware layout: 8-byte header + 6 inline words = 32 bytes.
+        let mut slab = [0xffff_ffffu32; 8];
+        let this = slab.as_mut_ptr() as *mut WordList;
+
+        let ret = unsafe { word_list_init(this) };
+
+        assert_eq!(ret, this, "constructor returns this (r0 preserved)");
+        let list = unsafe { &*this };
+        assert_eq!(list.count, 0);
+        assert_eq!(list.capacity, WORD_LIST_INLINE_CAPACITY);
+        assert_eq!(
+            list.entries,
+            unsafe { slab.as_mut_ptr().add(2) },
+            "entries must point at this + 8 bytes"
+        );
+        assert_eq!(
+            list.entries as usize - this as usize,
+            8,
+            "inline storage starts right after the 8-byte header"
+        );
+    }
+
+    #[test]
+    fn init_overwrites_dirty_header_and_scribbles_nowhere_else() {
+        // 32-byte firmware slot: 8-byte header + 6 inline words.
+        let mut slab = [0xdead_beefu32; 8];
+        let this = slab.as_mut_ptr() as *mut WordList;
+
+        unsafe { word_list_init(this) };
+
+        // Header words rewritten: {count=0, capacity=6} in the first word.
+        assert_eq!(slab[0] & 0xffff, 0, "count zeroed");
+        assert_eq!(slab[0] >> 16, 6, "capacity written above count");
+        // The original touches ONLY the 8-byte header; the inline element
+        // words are left dirty. (The `entries` struct field itself lives
+        // at byte 8 on this host's repr(C) layout, so the deepest region
+        // provably untouched on BOTH layouts is slab[4..].)
+        assert_eq!(&slab[4..], &[0xdead_beef; 4], "no scribbling past the header");
     }
 
     #[test]
