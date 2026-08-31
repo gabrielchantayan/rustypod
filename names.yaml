@@ -34371,6 +34371,36 @@ functions:
       for the cursor words, and reassociated shift/mask sequences
       (value-identical).
 
+  - address: 0x082d81e4
+    ghidra: FUN_082d81e4
+    name: word_list_init
+    size: 28
+    sig: "WordList *word_list_init(WordList *this)"
+    module: util/word_list
+    status: ported
+    renames:
+      param_1: this
+    notes: >-
+      Constructor for the inline-storage WordList, the small counted
+      u32 list consumed by word_list_copy @ 0x082d27a8 (same module).
+      Body: count = 0 (strh [r0]), capacity = 6 (strh [r0,#2]),
+      entries = this + 8 (str [r0,#4]), bx lr with r0 never clobbered
+      so `this` is returned. 7 words; extent self-verified: the next
+      function's prologue (push {r4-r6, lr}) starts exactly at
+      0x082d8200, so Ghidra's 28 bytes is right. 29 bl call sites, ALL
+      unconditional (0 predicated), verified by decoding every ARM
+      B/BL word in osos.dec, not from Ghidra xrefs. No data word in
+      osos.dec holds 0x082d81e4, so the constructor is not dispatched
+      virtually. Callers build the list on their own stack frames
+      (e.g. FUN_082cb18c @ 0x082cb18c constructs four), matching the
+      8-byte header + 6 inline words = 32-byte stack slots. The port
+      returns this to match the original's preserved r0. Host tests
+      pin count/capacity/entries == this+8, the this return, and that
+      nothing past the header is scribbled (inline words stay dirty).
+      match.py: LLVM merges the two strh stores into one stm of
+      0x00060000 plus entries (value-identical); the diff is the
+      crate fp frame and the stm merge.
+
   - address: 0x082d27a8
     ghidra: FUN_082d27a8
     name: word_list_copy
