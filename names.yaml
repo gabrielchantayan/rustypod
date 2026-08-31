@@ -28336,6 +28336,40 @@ functions:
       +0x04 load/add/store; only the Rust fp frame and register allocation
       differ from the retail eight-instruction body.
 
+  # --- Direct MSB-first bitstream read-and-advance ---
+  - address: 0x080ebc00
+    ghidra: FUN_080ebc00
+    name: bitstream_msb_read_advance
+    size: 116
+    sig: "u32 bitstream_msb_read_advance(const u8 *data, u32 *bit_position, u32 bit_count)"
+    module: h264/bitstream
+    status: ported
+    renames:
+      param_1: data
+      param_2: bit_position
+      param_3: bit_count
+    notes: >-
+      A direct data-pointer and u32 cursor MSB-first reader. It loads the
+      tail byte for bit_position + bit_count - 1, shifts its requested tail
+      to result bit 0, then walks backward byte by byte ORing each earlier
+      byte into place. It masks the result to bit_count bits below 32 and
+      returns the full u32 for counts at least 32, then stores the wrapping
+      bit_position + bit_count. The 116-byte body is all code with no
+      literal pool. Raw decoding of every ARM B/BL word in osos.dec found
+      exactly 26 call sites: 0x080a89ac, 0x080a89cc, 0x080aeb34,
+      0x080aeb50, 0x080aeb74, 0x080aeb88, 0x080aebc4, 0x080aebf0,
+      0x080aec04, 0x080aec30, 0x080aec4c, 0x080aec68, 0x080aec84,
+      0x080c8cf4, 0x080c8d1c, 0x080c8d30, 0x080c8d78, 0x080c8d9c,
+      0x080c8ed8, 0x080c8ef0, 0x080c8f38, 0x080c8f84, 0x080c8fa0,
+      0x080c8fc4, 0x080c8fe8, and 0x080c9008. Every one is an
+      unconditional bl; there are no predicated call sites. The retail
+      body has no NULL or bounds guard, and even bit_count 0 dereferences
+      the preceding byte before returning zero. ARM register-shift behavior
+      for wide counts is preserved, including the low-eight-bit count and
+      zero result for shifts of 32 or more. Host tests cover all in-byte
+      alignments, zero through 32-bit fields, cursor commits, and a
+      33-bit ARM-shift case. Rust implementation and tests:
+      src/h264/bitstream.rs::bitstream_msb_read_advance.
   # --- MPEG video header parser: MSB-first bit fetch ---
   - address: 0x080efa38
     ghidra: FUN_080efa38
