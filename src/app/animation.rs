@@ -69,15 +69,15 @@
 //!
 //! # Deviations
 //!
-//! - **The four callees are unported** (none appears in names.yaml) and
-//!   dispatch through [`ANIMATION_INIT_OPS`] (the
-//!   `app/pending_event_take.rs` pattern): target builds transmute the ROM
-//!   addresses 0x08273a14 (retain: `flags & 2 ? word(+0x14) += 4 : noop`),
-//!   0x082739e0 (release: subtract 4, dispatch the deleting destructor at
-//!   vtable+4 when the count drains), 0x082738e0/0x08273898; host defaults
-//!   are inert stubs and every test installs recording reference models.
-//!   The shared base constructor IS ported —
-//!   [`crate::app::fixed_value::refcounted_base_init`] — and is called
+//! - **Three callees remain unported** and dispatch through
+//!   [`ANIMATION_INIT_OPS`] (the `app/pending_event_take.rs` pattern):
+//!   target builds transmute the ROM addresses 0x08273a14 (retain:
+//!   `flags & 2 ? word(+0x14) += 4 : noop`) and
+//!   0x082738e0/0x08273898; host defaults are inert stubs and every test
+//!   installs recording reference models. Release 0x082739e0 is now the
+//!   direct [`crate::app::refcounted_value::release_refcounted_value`] port.
+//!   The shared base constructor
+//!   [`crate::app::fixed_value::refcounted_base_init`] is ported and called
 //!   directly, like the original's direct `bl`.
 //! - The scheduler pointer is loaded through the live global word
 //!   0x089cc7e0 on target (the singleton may be created lazily after this
@@ -91,6 +91,7 @@
 //!   select, which changes nothing observable.
 
 use crate::app::fixed_value::{refcounted_base_init, FixedValue};
+use crate::app::refcounted_value::release_refcounted_value;
 
 /// Firmware load address of the animation vtable literal (pool word at
 /// 0x08166c54). Address constant only — see the module header's caveat.
@@ -101,10 +102,9 @@ pub const ANIMATION_VTABLE: u32 = 0x0898_7f00;
 /// both wheel calls).
 pub const SCHEDULER_SINGLETON_GLOBAL: usize = 0x089c_c7e0;
 
-/// Firmware load addresses of the four unported callees, kept beside the
+/// Firmware load addresses of the three unported callees, kept beside the
 /// transmutes below.
 pub const RETAIN_ADDRESS: usize = 0x0827_3a14;
-pub const RELEASE_ADDRESS: usize = 0x0827_39e0;
 pub const WHEEL_REMOVE_ADDRESS: usize = 0x0827_38e0;
 pub const WHEEL_INSERT_ADDRESS: usize = 0x0827_3898;
 
@@ -151,18 +151,14 @@ const _: () = assert!(core::mem::offset_of!(Animation, from_value) == 0x18);
 const _: () = assert!(core::mem::offset_of!(Animation, to_value) == 0x1c);
 const _: () = assert!(core::mem::offset_of!(Animation, current_value) == 0x20);
 
-/// Indirect dispatch for the four unported callees (see the module
-/// header). Host tests install recording models; a later port of each
-/// callee replaces its default without touching this caller.
+/// Indirect dispatch for the three unported callees (see the module header).
+/// Host tests install recording models; a later port of each replaces its
+/// default without touching this caller.
 #[derive(Clone, Copy)]
 pub struct AnimationInitOps {
     /// Retain 0x08273a14 `(value)`: when flag bit 1 is set, add 4 to the
     /// flags/refcount word at +0x14. No return value.
     pub retain_value: unsafe extern "C" fn(value: *mut FixedValue),
-    /// Release 0x082739e0 `(value)`: subtract 4 from the flags/refcount
-    /// word when flag bit 1 is set; when the count bits drain, dispatch
-    /// the deleting destructor at `[[value] + 4]`.
-    pub release_value: unsafe extern "C" fn(value: *mut FixedValue),
     /// Timing-wheel remove 0x082738e0 `(table, node)`: unlink `node`
     /// from bucket `node->rank - 1` iff the linked flag is set.
     pub wheel_remove: unsafe extern "C" fn(table: *mut u8, node: *mut Animation),
@@ -177,11 +173,6 @@ unsafe extern "C" fn firmware_retain(value: *mut FixedValue) {
     f(value)
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_release(value: *mut FixedValue) {
-    let f: unsafe extern "C" fn(*mut FixedValue) = core::mem::transmute(RELEASE_ADDRESS);
-    f(value)
-}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_wheel_remove(table: *mut u8, node: *mut Animation) {
@@ -201,9 +192,6 @@ unsafe extern "C" fn firmware_wheel_insert(table: *mut u8, node: *mut Animation)
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn firmware_retain(_value: *mut FixedValue) {}
 
-/// Host default: inert.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_release(_value: *mut FixedValue) {}
 
 /// Host default: inert.
 #[cfg(not(target_os = "none"))]
@@ -217,7 +205,6 @@ unsafe extern "C" fn firmware_wheel_insert(_table: *mut u8, _node: *mut Animatio
 /// host.
 pub const DEFAULT_ANIMATION_INIT_OPS: AnimationInitOps = AnimationInitOps {
     retain_value: firmware_retain,
-    release_value: firmware_release,
     wheel_remove: firmware_wheel_remove,
     wheel_insert: firmware_wheel_insert,
 };
@@ -295,15 +282,15 @@ pub unsafe extern "C" fn animation_init(
     // compiler must still be free to keep or drop.
     let old_current = (*this).current_value;
     if old_current != 0 {
-        (ops.release_value)(old_current as usize as *mut FixedValue);
+        release_refcounted_value(old_current as usize as *mut u8);
     }
     let old_from = (*this).from_value;
     if old_from != 0 {
-        (ops.release_value)(old_from as usize as *mut FixedValue);
+        release_refcounted_value(old_from as usize as *mut u8);
     }
     let old_to = (*this).to_value;
     if old_to != 0 {
-        (ops.release_value)(old_to as usize as *mut FixedValue);
+        release_refcounted_value(old_to as usize as *mut u8);
     }
 
     // 08166c04..08166c08: stm r0={r6,r7,r8} — from, to, current.
@@ -350,8 +337,9 @@ pub unsafe extern "C" fn animation_init(
 /// addition, then reinserts the node. `value` has no NULL guard because
 /// the stock body dereferences `value + 8` unconditionally.
 ///
-/// Deliberate deviation: the four unported direct callees use the existing
-/// [`ANIMATION_INIT_OPS`] volatile seam. The scheduler-global word is read
+/// Deliberate deviation: the three unported direct callees use the existing
+/// [`ANIMATION_INIT_OPS`] volatile seam. Release is now called through the
+/// direct [`release_refcounted_value`] port. The scheduler-global word is read
 /// separately for remove and insert, as in the two stock `ldr [r5]` sites.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
@@ -370,7 +358,7 @@ pub unsafe extern "C" fn animation_set_current_value(
     // release, then the +0x20 replacement.
     let old_value = (*this).current_value;
     if old_value != 0 {
-        (ops.release_value)(old_value as usize as *mut FixedValue);
+        release_refcounted_value(old_value as usize as *mut u8);
     }
     (*this).current_value = value as usize as u32;
 
@@ -410,7 +398,6 @@ mod tests {
     }
 
     const EVENT_RETAIN: u32 = 1;
-    const EVENT_RELEASE: u32 = 2;
     const EVENT_WHEEL_REMOVE: u32 = 3;
     const EVENT_WHEEL_INSERT: u32 = 4;
 
@@ -463,19 +450,6 @@ mod tests {
         });
     }
 
-    unsafe extern "C" fn recording_release(value: *mut FixedValue) {
-        // Guard/decrement half of 0x082739e0; the drain-dispatch branch
-        // (vtable+4 call) is unreachable on host and never fires here.
-        if (*value).flags as u8 & 2 != 0 {
-            (*value).flags = (*value).flags.wrapping_sub(4);
-        }
-        record(Event {
-            kind: EVENT_RELEASE,
-            argument: value as usize,
-            extra: 0,
-            rank_at_insert: None,
-        });
-    }
 
     unsafe extern "C" fn recording_wheel_remove(table: *mut u8, node: *mut Animation) {
         record(Event {
@@ -505,7 +479,6 @@ mod tests {
     unsafe fn install_recording_ops() {
         core::ptr::addr_of_mut!(ANIMATION_INIT_OPS).write_volatile(AnimationInitOps {
             retain_value: recording_retain,
-            release_value: recording_release,
             wheel_remove: recording_wheel_remove,
             wheel_insert: recording_wheel_insert,
         });
@@ -753,7 +726,7 @@ mod tests {
     }
 
     #[test]
-    fn release_never_fires_even_though_all_three_arguments_are_live() {
+    fn constructor_releases_no_slots_after_clearing_them() {
         let _lock = take_lock();
         let _restore = SeamGuard;
         let Some(f) = fixture() else {
@@ -770,12 +743,8 @@ mod tests {
 
             animation_init(f.animation, f.current, f.from, f.to);
 
-            assert_eq!(
-                log().iter().filter(|e| e.kind == EVENT_RELEASE).count(),
-                0,
-                "the three blne releases sit on slots the constructor zeroed itself"
-            );
-            // And the retained scalars each gained exactly one count of 4:
+            // The three blne releases read slots the constructor zeroed
+            // itself, so release_refcounted_value sees no values to touch.
             assert_eq!((*f.current).flags, 0b1010);
             assert_eq!((*f.from).flags, 0b1010);
             assert_eq!((*f.to).flags, 0b1010);
@@ -903,16 +872,15 @@ mod tests {
             let seen = log();
             assert_eq!(
                 seen.iter().map(|event| event.kind).collect::<std::vec::Vec<_>>(),
-                std::vec![EVENT_WHEEL_REMOVE, EVENT_RETAIN, EVENT_RELEASE, EVENT_WHEEL_INSERT],
-                "stock order is remove, retain incoming, release old, tail insert"
+                std::vec![EVENT_WHEEL_REMOVE, EVENT_RETAIN, EVENT_WHEEL_INSERT],
+                "stock order is remove, retain incoming, direct release old, tail insert"
             );
             assert_eq!(seen[0].argument, f.animation as usize);
             assert_eq!(seen[1].argument, f.from as usize);
-            assert_eq!(seen[2].argument, f.current as usize);
-            assert_eq!(seen[3].argument, f.animation as usize);
+            assert_eq!(seen[2].argument, f.animation as usize);
             assert_eq!(seen[0].extra, f.table as usize);
-            assert_eq!(seen[3].extra, f.table as usize);
-            assert_eq!(seen[3].rank_at_insert, Some(10));
+            assert_eq!(seen[2].extra, f.table as usize);
+            assert_eq!(seen[2].rank_at_insert, Some(10));
             assert_eq!((*f.animation).current_value, f.from as usize as u32);
             assert_eq!((*f.animation).rank, 10);
             assert_eq!((*f.current).flags, 0b110, "old value loses one reference");

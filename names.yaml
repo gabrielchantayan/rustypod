@@ -40236,7 +40236,7 @@ functions:
       DAT_08166b84: SCHEDULER_SINGLETON_GLOBAL (pool word 0x089cc7e0)
       FUN_082738e0: wheel_remove (unported, ANIMATION_INIT_OPS seam)
       FUN_08273a14: retain_value (unported, ANIMATION_INIT_OPS seam)
-      FUN_082739e0: release_value (unported, ANIMATION_INIT_OPS seam)
+      FUN_082739e0: release_refcounted_value (ported in app/refcounted_value)
       FUN_08273898: wheel_insert (unported, ANIMATION_INIT_OPS seam)
     notes: >-
       True extent is the 22 instruction words 0x08166b2c..0x08166b80
@@ -40272,7 +40272,7 @@ functions:
       DAT_08166c58: SCHEDULER_SINGLETON_GLOBAL (word 0x089cc7e0)
       FUN_08138460: refcounted_base_init (direct, ported in app/fixed_value)
       FUN_08273a14: retain_value (unported, ops-seam default)
-      FUN_082739e0: release_value (unported, ops-seam default)
+      FUN_082739e0: release_refcounted_value (ported in app/refcounted_value)
       FUN_082738e0: wheel_remove (unported, ops-seam default)
       FUN_08273898: wheel_insert (unported, ops-seam default)
     notes: >-
@@ -40311,12 +40311,13 @@ functions:
       set (hence the defensive no-op here); both take the table word
       stored at global 0x089cc7e0, which the lazy allocator 0x082739a0
       fills with operator_new(0x34) whose first 48 bytes are 12 bucket
-      heads. retain 0x08273a14 / release 0x082739e0 are flags-bit-1-gated
-      += 4 / -= 4 on the +0x14 word, release dispatching the deleting
-      destructor through vtable +0x04 when the count drains. Deviations:
-      the four callees are unported and dispatch through the
-      ANIMATION_INIT_OPS read_volatile seam (pending_event_take pattern),
-      target defaults transmute the ROM addresses, host defaults inert;
+      retain 0x08273a14 is flags-bit-1-gated += 4; release
+      0x082739e0 is ported directly as release_refcounted_value and is
+      flags-bit-1-gated -= 4 on the +0x14 word, dispatching the deleting
+      destructor through vtable +0x04 when the count drains. The three
+      remaining direct callees use the ANIMATION_INIT_OPS read_volatile
+      seam (pending_event_take pattern): target defaults transmute the ROM
+      addresses; host defaults are inert;
       the scheduler word is loaded once instead of twice (nothing between
       the two stock loads can change it); the stale 0x0898xxxx page
       caveat applies to the vtable (address constant only); LLVM emits an
@@ -41161,3 +41162,35 @@ functions:
       reporting (n_err bumped, SQLITE_AUTH latched, unconditional
       overwrite of a preset rc), positive and negative garbage verdicts
       through both the default stub and a recording seam mock.
+
+  - address: 0x082739e0
+    ghidra: FUN_082739e0
+    name: release_refcounted_value
+    size: 52
+    sig: "void release_refcounted_value(void *object)"
+    module: app/refcounted_value
+    status: ported
+    renames:
+      param_1/r0: object
+      iVar1/r1: flags_refcount
+      FUN_08273a14: retain_value
+    notes: >-
+      The true extent is the thirteen instruction words
+      0x082739e0..0x08273a10 (52 bytes); the next separately linked
+      function, retain_value, begins at 0x08273a14. Ghidra's reported
+      size is exact. Decoding every ARM B/BL word in osos.dec finds 28
+      direct call sites, all blne; there are no plain bl or other
+      predicated BL forms, tail branches, or DATA-word references.
+      Every caller guards the object pointer, matching this function's
+      deliberate absence of a NULL guard. The low byte of object +0x14
+      tests flag bit 1. When set, ARM wrapping arithmetic subtracts four
+      from the whole aligned +0x14 flags/refcount word. If all count bits
+      (bits 2..) then clear, the function dispatches the deleting
+      destructor at vtable +0x04 with object in r0. The port retains
+      volatile target-word accesses, wrapping subtraction, and exact
+      target vtable-slot dispatch. Deliberate host-only deviation: a
+      test callback observes draining destructor dispatch because an ARM
+      32-bit code address cannot be stored in a host function pointer
+      word; target builds have no callback or seam. Existing animation
+      callers now use this port directly; only retain and the timing-wheel
+      functions remain in their animation seam.

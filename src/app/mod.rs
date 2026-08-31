@@ -46,6 +46,7 @@ pub mod path_probe;
 pub mod pending_event_take;
 pub mod queued_message;
 pub mod registry;
+pub mod refcounted_value;
 pub mod resource;
 pub mod resource_chain;
 pub mod scoped_context;
