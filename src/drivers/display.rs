@@ -13,6 +13,10 @@
 //!   `display_get(1)` the secondary output, anything else is NULL.
 //! - [`display_get_layer`] — original: `FUN_081d9064` @ 0x081d9064
 //!   (96 bytes; **63 `bl` call sites**). The lazy per-layer accessor.
+//! - [`display_set_clear_color`] — original: `FUN_081d8cfc` @ 0x081d8cfc
+//!   (16 bytes; **28 `bl` call sites**). Arms the panel clear: the color
+//!   word at +0x20 plus the pending byte at +0x1e, consumed by the flush
+//!   loop @ 0x081d8b3c through the panel driver's vtable slot +0x10.
 //!
 //! # Why this lives under `drivers/`
 //!
@@ -101,6 +105,11 @@
 //!                fills in; the index is the layer id 0..5 (the only
 //!                immediates any of the 63 call sites passes)
 //! +0x18  u8[6]   per-layer bytes, zeroed by the constructor
+//! +0x1e  u8      clear-pending flag, armed by [`display_set_clear_color`]
+//!                and cleared by the flush loop once the panel driver has
+//!                cleared to the color word
+//! +0x20  u32     the clear color, handed verbatim to the panel driver's
+//!                vtable slot +0x10 by the flush loop @ 0x081d8bec
 //! +0x28  Mutex   the display's own mutex (kernel::sync_mutex::Mutex),
 //!                created by the constructor, held across the whole
 //!                lazy-construction window
@@ -116,6 +125,9 @@
 //! The layer constructor's fifth argument, `display_id == 1`, is what the
 //! layer keeps at its +0x09 — the byte `display_layer.rs` could only call
 //! "(opaque)". It is the "this layer is on the secondary display" flag.
+//!
+//! The constructor also zeroes +0x1e (the clear-pending byte), so a fresh
+//! display starts with no clear armed.
 
 use core::ffi::c_void;
 
@@ -153,8 +165,21 @@ pub const DISPLAY_OBJECT_SIZE: usize = 0xa8;
 pub struct Display {
     /// +0x00: the six lazily constructed layer objects.
     pub layers: [*mut u8; LAYER_SLOT_COUNT],
-    /// +0x18..+0x27: the six per-layer bytes and the flags beside them.
-    pub reserved_18: [u8; 0x10],
+    /// +0x18..+0x1d: the six per-layer bytes, zeroed by the constructor.
+    pub per_layer_bytes: [u8; 6],
+    /// +0x1e: clear-pending flag — set by [`display_set_clear_color`],
+    /// cleared by the flush loop @ 0x081d8bf0 once the panel driver has
+    /// cleared to [`Display::clear_color`]. Zeroed by the constructor.
+    pub clear_pending: u8,
+    /// +0x1f: padding ahead of the color word.
+    pub reserved_1f: u8,
+    /// +0x20: the color the panel driver clears to on the next flush —
+    /// handed verbatim to the driver's vtable slot +0x10 @ 0x081d8bec.
+    pub clear_color: u32,
+    /// +0x24..+0x27: the flags beside them (+0x24 is a second pending byte,
+    /// armed by the sibling setter @ 0x081d8d0c; +0x25 is the flush loop's
+    /// "changed" marker).
+    pub reserved_24: [u8; 4],
     /// +0x28: the display's mutex, created by `FUN_081d92a4`.
     pub mutex: Mutex,
     /// +0x30..+0x8f: geometry and state this port does not touch.
@@ -173,7 +198,11 @@ pub struct Display {
 // The header's offsets are only claims about the 32-bit target layout, so
 // assert them there and nowhere else.
 #[cfg(target_pointer_width = "32")]
-const _: [u8; 0x18] = [0; core::mem::offset_of!(Display, reserved_18)];
+const _: [u8; 0x18] = [0; core::mem::offset_of!(Display, per_layer_bytes)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x1e] = [0; core::mem::offset_of!(Display, clear_pending)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x20] = [0; core::mem::offset_of!(Display, clear_color)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x28] = [0; core::mem::offset_of!(Display, mutex)];
 #[cfg(target_pointer_width = "32")]
@@ -275,7 +304,11 @@ const DSO_HANDLE: i32 = 0x089ca09c;
 /// runs.
 const ZEROED_DISPLAY: Display = Display {
     layers: [core::ptr::null_mut(); LAYER_SLOT_COUNT],
-    reserved_18: [0; 0x10],
+    per_layer_bytes: [0; 6],
+    clear_pending: 0,
+    reserved_1f: 0,
+    clear_color: 0,
+    reserved_24: [0; 4],
     mutex: Mutex { sem_cell: core::ptr::null_mut(), unused: 0 },
     reserved_30: [0; 0x60],
     display_id: 0,
@@ -461,6 +494,46 @@ pub unsafe extern "C" fn display_get_layer(display: *mut Display, index: u32) ->
     slot.read_volatile()
 }
 
+/// display_set_clear_color — original: `FUN_081d8cfc` @ 0x081d8cfc
+/// (16 bytes exactly, 0x081d8cfc..0x081d8d0c; the next function opens at
+/// 0x081d8d0c with `cmp r2, #0`. **28 `bl` call sites, 0 predicated** —
+/// counted by decoding every branch word in `osos.dec`; Ghidra's count
+/// and extent are both right here.)
+///
+/// Arms the display's panel clear: stores `color` into the display's
+/// +0x20 word and sets the +0x1e pending byte, in that order:
+///
+/// ```text
+/// mov  r2, #1
+/// strb r2, [r0, #0x1e]      @ clear_pending = 1
+/// str  r1, [r0, #0x20]      @ clear_color = color
+/// bx   lr
+/// ```
+///
+/// The consumer is the flush loop @ 0x081d8b3c: when +0x1e is set it
+/// calls the panel driver's vtable slot +0x10 as
+/// `driver->vtable[0x10](driver, display->clear_color)` (0x081d8bdc..
+/// 0x081d8bec) and then clears the pending byte (0x081d8bf0). The call
+/// sites pass RGB colors — 0x00ff_ffff, 0x00ff_0000, 0xffff_ffff, 0 —
+/// straight from `display_get`'s return, so this is the "clear the panel
+/// to this color on the next flush" request.
+///
+/// Faithful details: the flag is stored *before* the color (the order a
+/// racing flush observes them), there is no NULL guard on `display`, and
+/// r0 passes through unmodified — the declared return is void and no
+/// caller reads one.
+///
+/// # Safety
+///
+/// `display` must point at a live display object, as the original
+/// requires.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn display_set_clear_color(display: *mut Display, color: u32) {
+    core::ptr::addr_of_mut!((*display).clear_pending).write_volatile(1);
+    core::ptr::addr_of_mut!((*display).clear_color).write_volatile(color);
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -526,7 +599,11 @@ mod tests {
     fn display(display_id: u8, driver: *mut u8) -> Display {
         Display {
             layers: [core::ptr::null_mut(); LAYER_SLOT_COUNT],
-            reserved_18: [0; 0x10],
+            per_layer_bytes: [0; 6],
+            clear_pending: 0,
+            reserved_1f: 0,
+            clear_color: 0,
+            reserved_24: [0; 4],
             mutex: Mutex { sem_cell: core::ptr::null_mut(), unused: 0 },
             reserved_30: [0; 0x60],
             display_id,
@@ -898,5 +975,34 @@ mod tests {
         assert_eq!(DSO_HANDLE, 0x089ca09c);
         assert_eq!(INTERNAL_DISPLAY_ID, 0);
         assert_eq!(SECONDARY_DISPLAY_ID, 1);
+    }
+
+    #[test]
+    fn set_clear_color_arms_the_pending_byte_and_stores_the_color() {
+        let mut d = display(0, core::ptr::null_mut());
+        unsafe {
+            // Every immediate any of the 28 call sites passes.
+            for color in [0u32, 0x00ff_ffff, 0x00ff_0000, 0xffff_ffff] {
+                d.clear_pending = 0;
+                d.clear_color = 0xdead_beef;
+                display_set_clear_color(&mut d, color);
+                assert_eq!(d.clear_pending, 1, "the pending byte is armed for {color:#x}");
+                assert_eq!(d.clear_color, color, "the color word is stored verbatim");
+                assert_eq!(d.per_layer_bytes, [0; 6], "the per-layer bytes are untouched");
+                assert_eq!(d.reserved_24, [0; 4], "the neighbouring flags are untouched");
+                assert_eq!(d.reserved_1f, 0, "the pad byte is untouched");
+            }
+        }
+    }
+
+    #[test]
+    fn set_clear_color_rearms_over_an_already_pending_clear() {
+        let mut d = display(0, core::ptr::null_mut());
+        unsafe {
+            display_set_clear_color(&mut d, 0x00ff_ffff);
+            display_set_clear_color(&mut d, 0);
+            assert_eq!(d.clear_pending, 1, "the pending byte stays armed");
+            assert_eq!(d.clear_color, 0, "the last color wins");
+        }
     }
 }

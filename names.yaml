@@ -37983,6 +37983,47 @@ functions:
       up as an ldrd chain) and lowers `display_id == 1` to sub/clz/lsr
       instead of cmp/moveq.
 
+  - address: 0x081d8cfc
+    ghidra: FUN_081d8cfc
+    name: display_set_clear_color
+    size: 16
+    sig: "void display_set_clear_color(Display *display, u32 color)"
+    module: drivers/display
+    status: ported
+    renames:
+      param_1/r0: display
+      param_2/r1: color
+    notes: >-
+      Arms the display's panel clear - stores `color` into the display's
+      +0x20 word and sets the +0x1e pending byte, in that order
+      (`mov r2,#1; strb r2,[r0,#0x1e]; str r1,[r0,#0x20]; bx lr`).
+      EXTENT - exactly 16 bytes, 0x081d8cfc..0x081d8d0c; the next function
+      opens at 0x081d8d0c with `cmp r2,#0`. Ghidra's 16 bytes and its
+      28-site count are both right - verified by decoding every branch
+      word in osos.dec: 28 `bl`, 0 predicated. NO GUARD on `display` and
+      r0 passes through unmodified (declared void; no caller reads a
+      return).
+      SEMANTICS - the consumer is the flush loop @ 0x081d8b3c: when +0x1e
+      is set it calls the panel driver (+0x94) through vtable slot +0x10
+      as driver->vtable[0x10](driver, display->clear_color) (0x081d8bdc..
+      0x081d8bec) and then clears the pending byte (0x081d8bf0). The
+      constructor @ 0x081d92a4 zeroes +0x1e (0x081d92b4), so a fresh
+      display starts with no clear armed. Call sites pass RGB colors
+      (0x00ffffff, 0x00ff0000, 0xffffffff, 0) straight from display_get's
+      return, so this is the "clear the panel to this color on the next
+      flush" request; the sibling setter @ 0x081d8d0c arms the second
+      pending byte at +0x24 instead.
+      NEW FIELDS for drivers/display.rs - reserved_18 split into
+      per_layer_bytes (+0x18..+0x1d), clear_pending (+0x1e), clear_color
+      (+0x20) and reserved_24; 32-bit offset asserts updated to match.
+      Host tests (2) - every call-site immediate (0, 0xffffff, 0xff0000,
+      0xffffffff) arms +0x1e and stores the color verbatim while the
+      neighbouring bytes stay untouched, and a re-arm over an already
+      pending clear leaves the flag set with the last color winning.
+      match.py structural - both stores present in the original's order
+      with the same immediates; the only diff is LLVM's push {fp,lr} /
+      pop {fp,pc} frame around the body.
+
   # --- iAP (iPod Accessory Protocol): the packet class ---
   - address: 0x080f6da0
     ghidra: FUN_080f6da0
