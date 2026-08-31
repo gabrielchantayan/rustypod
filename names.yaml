@@ -17377,6 +17377,47 @@ functions:
       commit b25c610 without this ledger entry; entry added after
       re-verifying extent, call count and tests.
 
+  - address: 0x0839d2c0
+    ghidra: FUN_0839d2c0
+    name: refcounted_body_release_owned
+    size: 144
+    sig: "void refcounted_body_release_owned(RefcountedBody **slot)"
+    module: cxx/handle
+    status: ported
+    vars: {param_1: slot}
+    notes: >-
+      28 bl call sites, all unconditional (verified by decoding every ARM
+      B/BL word in osos.dec): no b sites, no predicated forms, and the
+      address appears in no data word - never virtually dispatched.
+      Ghidra's 136-byte extent is short again: the body runs to
+      0x0839d350 (144 bytes), where the separately linked 16-byte
+      mutex-lock helper starts (0x0839d350 locks, 0x0839d360 unlocks;
+      each loads body+8, NULL-checks it and tail-branches to mutex_lock
+      0x0807f5c4 / mutex_unlock 0x0807f6a0). A sibling template
+      instantiation of refcounted_body_release @ 0x0839cd98 over the same
+      RefcountedBody layout (+0 impl, +4 i32 refcount, +8 Mutex*) - the
+      two bodies are byte-identical modulo bl displacements except for
+      the final drop's implementation disposal. Where the sibling runs
+      vtable slot 7 (+0x1c) and never frees the impl, this instantiation
+      OWNS it: the NULL-guarded impl word is passed through the disposal
+      @ 0x0827948c (44 bytes, unported: calls virtual slot 1 (+4) on the
+      impl's first-word callback interface when non-NULL, then the ported
+      string_object_destroy @ 0x08277484 on the two-word StringObject
+      member at impl+4, returning this) and the disposal's return feeds
+      tag-2 operator_delete @ 0x082aad24 directly. Everything else
+      matches the sibling: NULL body early-out, wrapping subs decrement
+      (zero underflows to -1 and takes the shared path - tested),
+      non-final drop unlocks and NULLs the slot, final drop unlocks
+      through a fresh slot load, then mutex_delete @ 0x0807f650 plus
+      tag-2 delete on the reloaded mutex word, clears the mutex field,
+      tag-2-deletes the body, NULLs the slot. Target dispatch to the
+      unported 0x0827948c goes through a transmuted direct call
+      (release.rs pattern); host builds model it faithfully - its whole
+      chain is data-driven or ported. Codegen deviation: LLVM inlines
+      the ported mutex helpers and deletes (ROM_KERNEL dispatch via
+      literal-pool blx included), so match.py shows a larger body with
+      the same guard/decrement/dispose/unlock/teardown structure.
+
   - address: 0x0839eda0
     ghidra: FUN_0839eda0
     name: refcounted_ptr_assign
