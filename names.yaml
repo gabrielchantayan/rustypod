@@ -17544,6 +17544,35 @@ functions:
       literal-pool blx included), so match.py shows a larger body with
       the same guard/decrement/dispose/unlock/teardown structure.
 
+  - address: 0x0839e0e8
+    ghidra: FUN_0839e0e8
+    name: dma_aligned_byte_array_construct
+    size: 124
+    sig: "DmaAlignedArray *dma_aligned_byte_array_construct(DmaAlignedArray *array, u32 byte_count, u32 allocation_tag)"
+    module: cxx/dma_aligned_array_destroy
+    status: ported
+    renames:
+      param_1/r0/r4: array
+      param_2/r1: byte_count
+      param_3/r2: allocation_tag
+      iVar1/r0: allocation
+      uVar2/r0: aligned_data
+    notes: >-
+      Raw bytes establish the 124-byte extent 0x0839e0e8..0x0839e164: the
+      DMA-aligned-array destructor starts immediately at 0x0839e164. Decoding
+      every ARM B/BL word in osos.dec finds 26 direct bl callers, all
+      unconditional: zero predicated forms and zero tail b sites. The
+      byte-specialized constructor clears raw allocation +0x00 and aligned
+      view +0x04, stores byte_count at +0x08 and clears the construction byte
+      at +0x0c; it allocates byte_count + 0x40 through already ported
+      malloc_wrapper (tag passed through), aligns the raw block up to 32 bytes,
+      and, if bit 27 is set, clean-invalidates the aligned byte range through
+      already ported dcache_clean_invalidate before setting bit 31 in the
+      stored view. A count-sized empty trivial-element loop then completes
+      before construction byte = 1. Port uses black_box to retain that otherwise
+      empty loop; it has no memory effect. No dispatch seam was added because
+      both callees are already ported.
+
   - address: 0x0839e164
     ghidra: FUN_0839e164
     name: dma_aligned_array_destroy
