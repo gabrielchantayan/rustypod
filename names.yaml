@@ -41455,3 +41455,48 @@ functions:
       established, so the name records only its verified role. Deliberate
       deviations: none. Host coverage proves all three valid slot offsets,
       NULL propagation, and the uncached reload.
+
+
+  # --- AppMotor fixed singleton accessor ---
+  - address: 0x08295be0
+    ghidra: FUN_08295be0
+    name: app_motor_get
+    size: 88
+    sig: "void *app_motor_get(void)"
+    module: app/app_motor
+    status: ported
+    renames:
+      DAT_08295c28: APP_MOTOR_GUARD (0x089ca8b8)
+      DAT_08295c2c: APP_MOTOR (0x08a1b774)
+      DAT_08295c30: DSO_HANDLE (0x089ca09c = __dso_handle)
+      DAT_08295c34: dtor-pool-word (0x0828bf04, not a function entry)
+      FUN_08296cc8: APP_MOTOR_CTOR seam (unported AppMotor constructor)
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      EXTENT CORRECTED - Ghidra's 72 bytes are only the instructions at
+      0x08295be0..0x08295c28. Its four literal-pool words
+      0x08295c28..0x08295c38 belong to the accessor; the next separately
+      linked function begins with `push {r4-r8,lr}` at 0x08295c38. The
+      raw extent is therefore 88 bytes. CALL COUNT: decoding every ARM
+      B/BL word in work/firmware/osos.dec finds exactly 27 direct call
+      sites, all unconditional plain bl: no predicated BL forms and no
+      plain-b tail sites.
+      This is the ADS function-local-static accessor for the fixed
+      AppMotor object at 0x08a1b774. It tests guard word 0x089ca8b8 bit
+      0; when clear, cxa_guard_acquire decides whether to call
+      FUN_08296cc8(object), registers the constructor's r0 with
+      cxa_atexit(r0, 0x0828bf04, __dso_handle), then calls the no-op
+      cxa_guard_release. It always reloads and returns the object
+      literal, not the constructor's result. The raw constructor has the
+      `eAppMotor` literal and writes its last word at object+0x2b4, so the
+      object is 0x2b8 bytes.
+      Deliberate deviations: guard and fixed object are crate statics;
+      the unported constructor is APP_MOTOR_CTOR with a host-safe zeroing
+      default, so this accessor is not hook-ready until that constructor
+      is ported or installed. The destructor pool word 0x0828bf04 is NOT
+      a function entry: raw disassembly places it inside FUN_0828bed0 on
+      its conditional `beq 0x0828bf10`. The port records this anomaly
+      rather than inventing a callee and registers a shutdown-safe no-op,
+      matching the observable retail path where this chain is not run.
