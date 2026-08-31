@@ -4,6 +4,9 @@
 //!
 //! - `formatted_message_emit` — original: `FUN_08123600` @ 0x08123600
 //!   (80 bytes; 83 `bl` call sites, binary-scanned).
+//! - `formatted_message_open_dict` — original: `FUN_081236f8` @
+//!   0x081236f8 (68 bytes; 28 `bl` call sites, binary-scanned, all plain
+//!   `bl`).
 //! - `formatted_message_emit_boolean` — original: `FUN_0812395c` @
 //!   0x0812395c (88 bytes; 58 `bl` call sites, binary-scanned).
 //! - `formatted_message_close_dict` — original: `FUN_081239d4` @
@@ -107,6 +110,11 @@ use crate::libc::strcat::strncat;
 /// original with `adr r2, 0x8123650`, right after the 80-byte body).
 /// Consumes four argument words: indent, key, indent, value.
 const PLIST_INTEGER_FORMAT: &[u8] = b"%s<key>%s</key>\n%s<integer>%d</integer>\n\0";
+
+/// The dict-opening sibling's format literal @ 0x0812373c (immediately
+/// after its 68-byte body). Consumes three argument words: indent, key,
+/// indent.
+const PLIST_DICT_OPEN_FORMAT: &[u8] = b"%s<key>%s</key>\n%s<dict>\n\0";
 
 /// The boolean-sibling format literal @ 0x081239b8 (addressed by the
 /// original with `adr r2, 0x81239b8`, right after the 88-byte body and
@@ -315,6 +323,40 @@ pub unsafe extern "C" fn formatted_message_emit(
     (stream_append_op())(stream, text);
 }
 
+/// formatted_message_open_dict — original: `FUN_081236f8` @ 0x081236f8
+/// (68 bytes; 28 `bl` call sites, binary-scanned, all plain `bl` — no
+/// predicated forms, so no caller-side gating).
+///
+/// Emit one indented `<key>key</key>` followed by an opening `<dict>` tag:
+/// prepare the indentation for `depth`, format into the stream's 512-byte
+/// inline buffer with [`PLIST_DICT_OPEN_FORMAT`], then tail-branch to the
+/// stream append operation. The format literal follows the body at
+/// 0x0812373c. There are no deliberate behavioral deviations; Rust calls
+/// rather than tail-branches to the existing swappable append boundary.
+///
+/// Register usage: r0 = stream, r1 = key, r2 = depth; r3 is never read.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn formatted_message_open_dict(
+    stream: *mut MessageStream,
+    key: *const u8,
+    depth: u32,
+) {
+    let stream = &mut *stream;
+    (indent_prepare_op())(stream, depth);
+    let indent = stream.indent.as_ptr();
+    // The original's argument area: r3 = indent, stack = {key, indent}.
+    let args: [u32; 3] = [indent as u32, key as u32, indent as u32];
+    snprintf(
+        stream.buf.as_mut_ptr(),
+        stream.buf.len(),
+        PLIST_DICT_OPEN_FORMAT.as_ptr(),
+        args.as_ptr(),
+    );
+    let text = stream.buf.as_ptr();
+    (stream_append_op())(stream, text);
+}
+
 /// formatted_message_emit_boolean — original: `FUN_0812395c` @
 /// 0x0812395c (88 bytes; 58 `bl` call sites).
 ///
@@ -460,6 +502,25 @@ mod tests {
         0
     }
 
+    /// Snapshot for the dict-opening sibling's exact three-word variadic
+    /// area. Reading four words here would step past its stack array.
+    static mut OPEN_DICT_FORMAT_LEG: Option<(*const u8, usize, usize, [u32; 3])> = None;
+
+    unsafe extern "C" fn snapshot_open_dict_engine(
+        fmt: *const u8,
+        _putc: crate::printf_helpers::PutcFn,
+        ctx: *mut core::ffi::c_void,
+        ap: VaList,
+    ) -> i32 {
+        let w = ctx as *const usize; // BoundedCursor { cursor, end }
+        let mut words = [0u32; 3];
+        for (i, slot) in words.iter_mut().enumerate() {
+            *slot = *ap.add(i);
+        }
+        OPEN_DICT_FORMAT_LEG = Some((fmt, *w, *w.add(1), words));
+        0
+    }
+
     /// (stream, depth) of the last indent-prepare invocation, and a
     /// scratch indent the mock installs (two tabs) so the buffer content
     /// the emitter formats is observably the preparer's product.
@@ -530,6 +591,46 @@ mod tests {
                 words,
                 [indent as u32, key.as_ptr() as u32, indent as u32, 44100],
                 "argument area: (indent, key, indent, value)"
+            );
+
+            let (app_stream, app_text, _) =
+                (*core::ptr::addr_of_mut!(APPEND_LEG)).take().expect("appended");
+            assert_eq!(app_stream, stream);
+            assert_eq!(app_text, buf, "append got the inline buffer");
+        }
+    }
+
+    #[test]
+    fn open_dict_prepares_formats_and_appends_in_order() {
+        let _guard = slot_lock();
+        let mut mem = backing();
+        let stream = stream_of(&mut mem);
+        let key = b"Tracks\0";
+        unsafe {
+            with_mocks(snapshot_open_dict_engine, || {
+                formatted_message_open_dict(stream, key.as_ptr(), 3);
+            });
+            let (prep_stream, prep_depth) = PREPARE_LEG.expect("indent prepared");
+            assert_eq!(prep_stream, stream, "preparer saw the stream");
+            assert_eq!(prep_depth, 3, "preparer saw the depth (original r2)");
+
+            let (fmt, cursor, end, words) =
+                (*core::ptr::addr_of_mut!(OPEN_DICT_FORMAT_LEG)).take().expect("formatter ran");
+            let mut fmt_bytes = std::vec::Vec::new();
+            let mut p = fmt;
+            while *p != 0 {
+                fmt_bytes.push(*p);
+                p = p.add(1);
+            }
+            assert_eq!(fmt_bytes, &PLIST_DICT_OPEN_FORMAT[..PLIST_DICT_OPEN_FORMAT.len() - 1]);
+            let buf = (*stream).buf.as_mut_ptr();
+            assert_eq!(cursor, buf as usize, "snprintf target is the inline buffer at +0x15");
+            assert_eq!(end, buf.add(BUFFER_CAPACITY - 1) as usize, "bounded at +0x15 + 0x200");
+            let indent = (*stream).indent.as_ptr();
+            assert_eq!(
+                words,
+                [indent as u32, key.as_ptr() as u32, indent as u32],
+                "argument area: (indent, key, indent)"
             );
 
             let (app_stream, app_text, _) =
