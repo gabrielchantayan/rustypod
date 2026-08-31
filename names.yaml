@@ -40933,3 +40933,54 @@ functions:
       separately entered function begins at 0x082e18f8, so Ghidra's 60
       bytes is exact. 29 call sites, verified by decoding every B/BL word
       in osos.dec: all 29 are plain bl, with no predicated forms.
+
+  - address: 0x0836f91c
+    ghidra: FUN_0836f91c
+    name: sqlite_auth_check
+    size: 156
+    sig: "int sqlite_auth_check(Parse *parse, int code, const char *z_arg1, const char *z_arg2, const char *z_arg3)"
+    module: sqlite/auth_check
+    status: ported
+    renames:
+      param_1: parse
+      param_2: code
+      param_3: z_arg1
+      param_4: z_arg2
+      param_5: z_arg3
+    notes: >-
+      SQLite 3.5.9's sqlite3AuthCheck (src/auth.c), matched
+      statement-for-statement against the upstream source: the parser's
+      authorization gate, 28 bl call sites verified by decoding every
+      B/BL word in osos.dec (all 28 plain bl, zero predicated forms,
+      zero tail b). Size byte-verified: the literal-pool string "not
+      authorized" follows immediately at 0x0836f9b8 and the next
+      separately entered function begins at 0x0836f9c8, so Ghidra's 156
+      bytes is exact. Skips the check (returns SQLITE_OK) when
+      db->init.busy (db +0x80), pParse->declareVtab (parse +0x198) or no
+      xAuth (db +0xe0); otherwise calls xAuth(pAuthArg (db +0xe4), code,
+      z_arg1, z_arg2, z_arg3, pParse->zAuthContext (parse +0x18c)) and
+      maps the verdict: SQLITE_DENY (1) reports "not authorized" through
+      the ported sqlite_error_msg @ 0x083767a0 and latches parse->rc =
+      SQLITE_AUTH (23); anything other than 0/1/2 is an authorizer
+      protocol violation handled by the unported sqliteAuthBadReturnCode
+      @ 0x083918f4 (32 bytes, sole caller is this function's blne), the
+      SQLITE_AUTH_BAD_RETURN_CODE seam - default stub latches
+      parse->rc = SQLITE_ERROR (the original's unconditional final
+      store) and skips the report. That wrapper's identity is confirmed
+      by its literal-pool format 0x088fd968, whose datum under the
+      documented +0xaed8 image/runtime skew (sqlite/mod.rs) is
+      0x08908840: "illegal return value (%d) from the authorization
+      function - should be SQLITE_OK, SQLITE_IGNORE, or SQLITE_DENY".
+      Deviations: z_arg3 arrives on the stack in the original (plain
+      fifth parameter in the Rust ABI), and the error_msg call passes a
+      NULL VaList where the original passes dead r2/r3 - the format has
+      no conversions, so the formatter never reads ap. match.py (exit 1,
+      diff expected): same skeleton (skip tests, blx ip six-arg call,
+      deny branch with mov #23 store, bad-return tail); the diff is the
+      crate's fp frame, the seam's volatile slot load, and LLVM folding
+      the !=0 && !=2 test into mvn r1,#2 / tst. Host tests: busy /
+      declareVtab / no-authorizer skips, arg pass-through incl.
+      zAuthContext as sixth arg, OK and IGNORE pass-through, deny
+      reporting (n_err bumped, SQLITE_AUTH latched, unconditional
+      overwrite of a preset rc), positive and negative garbage verdicts
+      through both the default stub and a recording seam mock.
