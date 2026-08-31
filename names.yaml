@@ -11219,6 +11219,41 @@ functions:
       load/modify/store - no lock, no LDREX, no interrupt guard, exactly
       as in the original.
 
+  - address: 0x08184bd4
+    ghidra: FUN_08184bd4
+    name: copy_first_entry_payload
+    size: 104
+    sig: "void copy_first_entry_payload(void *owner_input, FirstEntryPayload *output)"
+    module: util/first_entry_payload
+    status: ported
+    renames:
+      param_1/r0: owner_input
+      param_2/r1/r4: output
+      piVar1/r5: temporary_owner
+      iVar2/r0: first_entry
+      FUN_08184b24: temporary_owner_create (unported)
+      FUN_083d78c4: vector_size_elem4_alias_78c4
+      FUN_08184f98: ptr_vector_at
+      thunk_EXT_FUN_22000020: __rt_memcpy
+    notes: >-
+      Verified extent is 0x08184bd4..0x08184c3c: the next function begins
+      with push {r4-r9,sl,lr} at 0x08184c3c. Raw decoding of every ARM B/BL
+      word in osos.dec finds 28 direct calls: 27 unconditional bl plus one
+      blne at 0x0819ef48. It obtains a temporary vector owner through the
+      unported 0x08184b24, checks the elem4 vector at +0x14 through
+      0x083d78c4, then either copies 12 bytes from its first entry +8 to the
+      output through the 0x08037db0 __rt_memcpy veneer or stores 0, 0, and
+      byte 6 at output +0, +4, and +8. The empty path deliberately leaves
+      output +9..+11 untouched. It releases a non-NULL temporary by loading
+      its vtable then tail-calling the function pointer at vtable +4. The
+      factory result is dereferenced without a NULL guard before that tail;
+      the function's callers commonly invoke it unconditionally; the sole
+      blne at 0x0819ef48 guards one call. Rust preserves the result writes and
+      direct calls to already ported vector/memcpy helpers, plus target virtual
+      dispatch; host tests
+      use the factory/release boundary because host pointers are wider than
+      the target vtable words.
+
   - address: 0x08184f84
     ghidra: FUN_08184f84
     name: ptr_vector_count

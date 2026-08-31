@@ -15,6 +15,7 @@ pub mod encoded_word_block;
 pub mod drive;
 pub mod fixed;
 pub mod field_access;
+pub mod first_entry_payload;
 pub mod global_state;
 pub mod highest_set_bit;
 pub mod inner_state;
