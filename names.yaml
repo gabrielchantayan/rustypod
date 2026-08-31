@@ -41428,3 +41428,30 @@ functions:
       traced_free 0x08043994, then stores new data and requested capacity.
       Deviation: 0x080a7f2c remains a volatile hook (stock target address on
       firmware, NULL on host) because it is not ported.
+
+  # --- service-manager secondary handler access ---
+  - address: 0x08193ec0
+    ghidra: FUN_08193ec0
+    name: service_manager_secondary_handler_get
+    size: 20
+    sig: "void *service_manager_secondary_handler_get(const u32 *slot_table, i32 slot)"
+    module: app/service_manager
+    renames:
+      param_1/r0: slot_table
+      param_2/r1: slot
+      FUN_08030f44: heap_panic
+    status: ported
+    notes: >-
+      Raw extent is exactly 0x08193ec0..0x08193ed4: five ARM instructions;
+      the following `cmp r1,#13` opens the separately linked 0x08193ed4
+      setter. Raw ARM is `cmp r1,#3; blge 0x08030f44; add r0,r0,r1,lsl #5;
+      ldr r0,[r0,#8]; bx lr`. It returns word +2 of one of three 8-word
+      secondary handler records. The signed `blge` admits negative slots,
+      which then address unchecked exactly as the retailOS code does; slots
+      >=3 terminate through the ported non-returning heap_panic. Decoding
+      every ARM B/BL word in osos.dec found exactly 27 direct call sites:
+      all are unconditional plain BL, with no predicated forms or tail
+      branches. The secondary table's concrete handler identities are not
+      established, so the name records only its verified role. Deliberate
+      deviations: none. Host coverage proves all three valid slot offsets,
+      NULL propagation, and the uncached reload.

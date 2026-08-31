@@ -79,6 +79,7 @@ pub mod hints {
     // flight take the sequential slots, and a collision skips tests
     // silently on every host.
     pub const VIEW_BASE: usize = 0x2d00_0000;
+    pub const SERVICE_MANAGER_SECONDARY_HANDLER: usize = 0x3600_0000;
     // `heap/pool.rs` maps its own arena at 0x0800_0000 through a separate
     // path: it needs only bit 31 clear, not full u32 addressability.
 }

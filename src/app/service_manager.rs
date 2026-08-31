@@ -145,6 +145,75 @@ pub unsafe extern "C" fn service_manager_instance_veneer() -> *mut u8 {
     service_manager_instance()
 }
 
+/// service_manager_secondary_handler_get — original: `FUN_08193ec0` @
+/// 0x08193ec0 (20 bytes; 27 direct, unconditional `bl` call sites).
+///
+/// Reads the handler word from one of the service manager's three secondary
+/// 0x20-byte records. Raw ARM is `cmp r1,#3; blge 0x08030f44; add
+/// r0,r0,r1,lsl #5; ldr r0,[r0,#8]; bx lr`: signed slots below 3, including
+/// negative values, pass the original's bounds check and are consequently
+/// unsafe exactly as the firmware is. Slots 3 and above terminate through
+/// [`heap_panic`]. The independently decoded B/BL scan found no predicated
+/// calls.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `slot_table` must point to the secondary-table base (`this + 4` in the
+/// original) and, for slots 0 through 2, contain at least three 8-word
+/// records. Negative slots intentionally retain the firmware's unchecked
+/// addressing behavior and are not valid Rust memory accesses.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn service_manager_secondary_handler_get(
+    slot_table: *const u32,
+    slot: i32,
+) -> *mut u8 {
+    if slot >= 3 {
+        heap_panic();
+    }
+    core::ptr::read(slot_table.wrapping_offset(slot.wrapping_shl(3) as isize).add(2))
+        as usize as *mut u8
+}
+
+#[cfg(test)]
+mod secondary_handler_get_tests {
+    extern crate std;
+    use super::*;
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+
+    #[test]
+    fn reads_each_secondary_record_handler_word_without_caching() {
+        let Some(slab) = try_map_u32_slab(hints::SERVICE_MANAGER_SECONDARY_HANDLER, 4096) else {
+            note_missing_u32_fixture("service_manager_secondary_handler_get");
+            return;
+        };
+        let table = slab.cast::<u32>();
+        let first = unsafe { slab.add(0x100) };
+        let replacement = unsafe { slab.add(0x180) };
+        let third = unsafe { slab.add(0x200) };
+
+        unsafe {
+            table.add(2).write(first as usize as u32);
+            table.add(10).write(0);
+            table.add(18).write(third as usize as u32);
+
+            assert_eq!(service_manager_secondary_handler_get(table, 0), first);
+            assert_eq!(service_manager_secondary_handler_get(table, 1), core::ptr::null_mut());
+            assert_eq!(service_manager_secondary_handler_get(table, 2), third);
+
+            table.add(2).write(replacement as usize as u32);
+            assert_eq!(
+                service_manager_secondary_handler_get(table, 0),
+                replacement,
+                "the ARM ldr reloads the handler word on every call"
+            );
+        }
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     extern crate std;
