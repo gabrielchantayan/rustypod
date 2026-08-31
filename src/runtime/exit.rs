@@ -241,6 +241,19 @@ pub unsafe extern "C" fn abort() -> ! {
     exit(abort_body())
 }
 
+/// rt_exit_thunk — original: `thunk_FUN_08033720` @ 0x0803171c (4 bytes).
+///
+/// Raw word `ea0007ff` is `b 0x08033720`, tail-branching to `__rt_exit`
+/// without changing the `code` argument in r0. The following word
+/// (`stmia r0!, {r8, r9, r11, lr}` @ 0x08031720) begins a separate function,
+/// confirming the 4-byte extent. Decoding every ARM B/BL word in osos.dec
+/// found 26 direct callers: all are unconditional `bl`, with no predicated
+/// `bl` or tail `b` callers.
+///
+/// This is a dispatch alias, not a distinct implementation: hook
+/// 0x0803171c to the existing `__rt_exit` symbol below. Deliberate
+/// deviations: none.
+///
 /// __rt_exit — original: `FUN_08033720` @ 0x08033720.
 ///
 /// Runs the registered atexit handler chain (LIFO), then the
