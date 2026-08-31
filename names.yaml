@@ -17544,6 +17544,33 @@ functions:
       literal-pool blx included), so match.py shows a larger body with
       the same guard/decrement/dispose/unlock/teardown structure.
 
+  - address: 0x0839e164
+    ghidra: FUN_0839e164
+    name: dma_aligned_array_destroy
+    size: 72
+    sig: "DmaAlignedArray *dma_aligned_array_destroy(DmaAlignedArray *array)"
+    module: cxx/dma_aligned_array_destroy
+    status: ported
+    renames:
+      param_1/r0/r4: array
+      uVar1/r0: element_index
+    notes: >-
+      The raw body is exactly 72 bytes (0x0839e164..0x0839e1ac); the next
+      separately linked copy helper starts at 0x0839e1ac. Decoding every ARM
+      B/BL word in osos.dec finds 26 direct bl callers, all unconditional:
+      no predicated forms and no tail b sites. No image word equals
+      0x0839e164, so it is statically bound rather than virtually dispatched.
+      The array's 32-bit layout is raw tag-3 allocation +0x00, 32-byte-aligned
+      data view +0x04, element count +0x08, and construction byte +0x0c. When
+      constructed, it performs a count-sized empty trivial-element walk, clears
+      the construction byte, and frees a non-NULL raw allocation through the
+      already ported free_wrapper with tag 3, returning array. The nearby
+      constructor at 0x0839e200 allocates count*4 + 0x40 and conditionally
+      dcache-cleans the 32-byte-aligned view, which establishes the
+      DMA-aligned-array identity. Codegen deliberately uses black_box to retain
+      the original's count-dependent empty busy-wait; all object state and free
+      behavior match the ARM body.
+
   - address: 0x0839eda0
     ghidra: FUN_0839eda0
     name: refcounted_ptr_assign

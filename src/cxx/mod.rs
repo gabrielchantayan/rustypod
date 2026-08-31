@@ -11,6 +11,7 @@ pub mod clock_source_construct;
 pub mod clock_source_destroy;
 pub mod color_copy;
 pub mod decoder_begin_batch;
+pub mod dma_aligned_array_destroy;
 pub mod decoder_end_batch;
 pub mod decoder_cleanup;
 pub mod draw_state;
