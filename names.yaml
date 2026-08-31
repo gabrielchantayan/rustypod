@@ -41639,3 +41639,34 @@ functions:
       deviation: LLVM emits five aligned word stores for the 20-byte stack
       clear rather than calling the IRAM memzero veneer; the initialized
       record and observable behavior are unchanged.
+
+  # --- character-class flag-mask predicate ---
+  - address: 0x082a7258
+    ghidra: FUN_082a7258
+    name: character_class_matches_mask
+    size: 24
+    sig: "u32 character_class_matches_mask(const CharacterClass *class, u16 mask, u32 character)"
+    module: cxx/character_class
+    status: ported
+    renames:
+      param_1/r0: class
+      param_2/r1: mask
+      param_3/r2: character
+      "[class+0x14]": flags
+      "[flags+character*2]": character_flags
+      r0 return: matches_mask
+    notes: >-
+      Raw extent is exactly 0x082a7258..0x082a7270: the next separately
+      linked function starts at 0x082a7270. Decoding every ARM B/BL word in
+      osos.dec finds exactly 26 direct call sites, all unconditional plain
+      BL; there are no predicated BL forms and no plain-B tail sites. The
+      six-instruction leaf loads the aligned u16 table pointer at class+0x14,
+      indexes it by character*2, masks the selected flag word, and
+      normalizes the result to 0 or 1. Callers use masks 0x8 and 0x10 while
+      scanning and case-folding text, so the recovered table is named a
+      character-class flag table; its unread 20-byte object prefix remains
+      explicitly unrecovered. The function has no NULL or bounds guards and
+      performs no writes. No deviations; host tests cover zero and absent
+      masks, a matching bit, a high u16-table index, normalized return
+      values, and input preservation. match.py structural diff reviewed
+      after the ARM release build.
