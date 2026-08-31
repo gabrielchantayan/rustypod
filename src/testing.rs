@@ -75,6 +75,10 @@ pub mod hints {
     pub const STRING_VIEW: usize = 0x2700_0000;
     pub const CONDVAR_WAIT_FOREVER_SIGNALED: usize = 0x2800_0000;
     pub const CONDVAR_WAIT_FOREVER_EMPTY: usize = 0x2900_0000;
+    // 0x2d00_0000, skipping 0x2a00_0000..0x2c00_0000: sibling ports in
+    // flight take the sequential slots, and a collision skips tests
+    // silently on every host.
+    pub const VIEW_BASE: usize = 0x2d00_0000;
     // `heap/pool.rs` maps its own arena at 0x0800_0000 through a separate
     // path: it needs only bit 31 clear, not full u32 addressability.
 }

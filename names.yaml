@@ -28046,6 +28046,84 @@ functions:
       0x224, 0x225, 0x228, 0x22c from spec 0x5c/0x5d/0x60/0x64), same
       vtable literal; the diff is ops-table blx for bl, the folded
       colour word, and the crate's frame-pointer prologue.
+  # --- Silver UI framework: the grand-base view constructor ---
+
+  - address: 0x0826f26c
+    ghidra: FUN_0826f26c
+    name: view_base_construct
+    size: 188
+    sig: "ViewBase *view_base_construct(ViewBase *view, ResourceProvider *resources, void *controller, void *parent, const ViewSpec *spec)"
+    module: ui/view_base
+    vars:
+      param_1: view
+      param_2: resources
+      param_3: controller
+      param_4: parent
+      in_stack_00000000: spec
+      FUN_08103a4c: construct_linkage_base (VIEW_BASE_OPS slot)
+      FUN_0826ee08: initialize (VIEW_BASE_OPS slot)
+      thunk_EXT_FUN_22000188: iram_memcpy_veneer (direct, already ported)
+      DAT_0826f324: VIEW_BASE_VTABLE_ADDRESS
+    status: ported
+    notes: >-
+      The grand-base view constructor - the root of the retailOS
+      screen element hierarchy that ui/string_view.rs and
+      ui/styled_text_view.rs derive from. Ghidra's 184-byte extent
+      drops the trailing literal again: 0x0826f26c..0x0826f324 code
+      ending `ldmia sp!,{r4,r5,r6,r7,r8,pc}`, then the 4-byte vtable
+      literal 0x089a59e8 @ 0x0826f324, and the unlisted deleting
+      destructor @ 0x0826f328 starts immediately after, so the true
+      extent is 188 bytes. 29 bl call sites, all unconditional (no
+      predicated or tail form), verified by decoding every B/BL word
+      in osos.dec - matching Ghidra's 29. Ghidra's C types it `int
+      FUN_0826f26c(void)`; the assembly takes four register arguments
+      plus the stacked spec (`ldr r5,[sp,#24]` past the six saved
+      registers) and returns `view` (`mov r0,r4` before the pop).
+      Body: chain the framework linkage base ctor @ 0x08103a4c with
+      (view, parent, spec+0x18 & 1) - itself a 20-byte wrapper that
+      runs the already-ported framework_base_construct @ 0x081110d0
+      and plants vtable 0x08980854 - then plant this class's own
+      vtable 0x089a59e8 over it, store `resources` at view+0x38, clear
+      +0x3c, copy the class fourcc spec+0x04 to +0x40, spec+0x08 to
+      +0x44, the flag word spec+0x18 to +0x48, spec+0x10 to +0x4c, and
+      the 0x30-byte block spec+0x1c to +0x50 through the ROM memcpy
+      veneer (bl 0x08037df8 = iram_memcpy_veneer, already ported and
+      called directly). Clear +0x80..+0x8c and the bytes +0x94/+0xa0,
+      then set +0x90 to spec+0x58 when the reloaded view+0x48 flag
+      word covers 0x38000 or 0x1c0000 in full (the original's
+      bics/bicsne pair rejects partial masks), else clear it. Finally
+      run the initialiser @ 0x0826ee08 with (view, controller, spec)
+      and return `view`. 0x0826ee08 inherits the resource provider
+      from `controller` when the view's own is NULL and spec+0x0c is
+      -1, registers the view with the provider, applies flag-gated
+      mode words, dispatches vtable slot +0x9c and fills view
+      +0x98/+0x9c. Unlike the derived classes' stale literals, the
+      image data at 0x089a59e8 is a LIVE vtable - real code pointers,
+      slot +0x9c -> 0x08122124 binary-verified by its prologue - and
+      0x0826ee08 dispatches through it while the grand-base vtable is
+      still planted. Deviations: the port keeps `view` in hand instead
+      of threading r0 out of the linkage ctor (the chain is verified
+      to return its argument; wrong on a 64-bit host otherwise, the
+      pool_parent_construct precedent); the vtable is the u32 ROM
+      address VIEW_BASE_VTABLE_ADDRESS; `resources` is stored as its
+      low 32 bits into the target word at +0x38; the two unported
+      callees (0x08103a4c, 0x0826ee08) ride the new VIEW_BASE_OPS seam
+      (firmware transmute on target, panic on host, the
+      ui/string_view.rs pattern). The string_view and styled_text_view
+      construct_base slots can now be wired to this port on target.
+      Host tests use the unique hints::VIEW_BASE slab (0x2d000000):
+      full construction with recording mocks (field-by-field against
+      the spec, the +0x98/+0x9c poison proving the ctor never touches
+      the initialiser's words, call order linkage-before-initialize,
+      the vtable overwrite order via a mock that plants 0x08980854),
+      flag bit 0 -> create_link, and the +0x90 mask coverage over 8
+      flag words including partial masks. match.py structural: same
+      offsets and order (+0x38/+0x3c/+0x40/+0x44/+0x48/+0x4c, the
+      0x30-byte copy, +0x80..+0x8c/+0x94/+0xa0 clears, +0x90 from
+      spec+0x58), same vtable literal 0x089a59e8; the diff is
+      ops-table blx for bl, LLVM's mvn/tst for the bics mask pair, the
+      ldreq+unconditional-str fold of the streq/strne pair, and the
+      crate's frame-pointer prologue.
   # --- Silver UI framework: the class-0x6800 controller addon ---
 
   - address: 0x08177e84

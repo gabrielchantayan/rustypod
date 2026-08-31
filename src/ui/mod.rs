@@ -30,3 +30,4 @@ pub mod draw_state_setup;
 pub mod shown_state;
 
 pub mod mode_state;
+pub mod view_base;
