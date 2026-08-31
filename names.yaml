@@ -31065,6 +31065,33 @@ functions:
       focused host tests:
       `src/ui/object_state.rs::object_scaled_total_base`.
 
+
+  # --- retailOS lazy shared-context getter (ui/object_state) ---
+  - address: 0x08369bec
+    ghidra: FUN_08369bec
+    name: shared_context
+    size: 28
+    sig: "u8 *shared_context(void)"
+    module: ui/object_state
+    status: ported
+    renames:
+      DAT_08369c08: shared_context_slot
+      DAT_08369c0c: default_shared_context
+    notes: >-
+      Raw ARM is ldr r0,[pc,#0x14]; ldr r1,[r0]; cmp r1,#0; ldreq
+      r1,[pc,#0xc]; streq r1,[r0]; ldr r0,[r0]; bx lr. It lazily publishes
+      default context base 0x08a11cd8 into the mutable pointer slot at
+      0x089ca574 only when that slot is zero, then reads and returns the
+      slot. The instruction body is 28 bytes; its two trailing literal-pool
+      words extend the true occupied range through 0x08369c0f, where the
+      next function begins at 0x08369c10. Binary decoding finds 27 direct
+      bl callers, all unconditional: no predicated call sites. The port uses
+      volatile pointer loads/stores so the fixed RAM slot remains observable;
+      host backing storage exercises zero-slot publication and preservation
+      of an existing pointer. Port deviation: none on target. match.py
+      structural review is expected to differ in address materialization and
+      volatile accesses, while retaining the load/zero-test/conditional-store/
+      final-load sequence.
   # --- retailOS object counted-text install from the shared context's dotted-triple word ---
   - address: 0x08055f50
     ghidra: FUN_08055f50
@@ -31102,17 +31129,15 @@ functions:
       r5+0xf8 — an about/diagnostics-style text field; the concrete
       field is not recovered. Ghidra declares the original void; its r0
       residue is 0x08046a88's return, which the call site ignores. The
-      three stock helpers stay in retailOS behind the SHARED_CONTEXT,
-      FORMAT_DOTTED_TRIPLE and OBJECT_COUNTED_TEXT boundaries. match.py
-      (structural, exit 1 expected) shows the same four-call sequence
-      with the same +0x48 load, 0xff limit and 0x200 frame; diffs are
-      LLVM's larger push {r4-r6,sl,fp,lr} frame, blx through the
-      boundary statics instead of direct bl, swapped stack-buffer order,
-      and the in-crate bl to cstr_to_counted_u8. Rust implementation
-      and focused host tests:
+      ported shared_context getter supplies context directly; the formatter
+      and setter remain behind FORMAT_DOTTED_TRIPLE and OBJECT_COUNTED_TEXT
+      boundaries. match.py (structural, exit 1 expected) shows the same
+      four-call sequence with the same +0x48 load, 0xff limit and 0x200
+      frame; diffs are LLVM's larger push {r4-r6,sl,fp,lr} frame, the
+      formatter/setter boundary calls, swapped stack-buffer order, and the
+      in-crate calls to shared_context and cstr_to_counted_u8. Rust
+      implementation and focused host tests:
       `src/ui/object_state.rs::object_set_version_text`.
-      Rust implementation and focused host tests:
-      `src/ui/object_state.rs::object_scaled_total`.
 
   # --- retailOS nested UI-object flag accessor ---
   - address: 0x08055f90

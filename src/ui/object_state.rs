@@ -359,33 +359,70 @@ const CONTEXT_VERSION_WORD_OFFSET: usize = 0x48;
 /// (`mov r2,#0xff`).
 const COUNTED_TEXT_LIMIT: u32 = 0xff;
 
-type SharedContext = unsafe extern "C" fn() -> *mut u8;
+#[cfg(target_os = "none")]
+const SHARED_CONTEXT_SLOT: *mut *mut u8 = 0x089c_a574usize as *mut *mut u8;
 
-/// Calls the stock lazy shared-context getter, which remains in retailOS.
-///
-/// This is deliberately a boundary rather than a port of 0x08369bec. Host
-/// tests replace the one function pointer below; ARM builds call its fixed
-/// firmware load address. The original publishes a default context pointer
-/// into its slot when zero, then returns the slot's context base.
-unsafe extern "C" fn firmware_shared_context() -> *mut u8 {
+#[cfg(target_os = "none")]
+const DEFAULT_SHARED_CONTEXT: *mut u8 = 0x08a1_1cd8usize as *mut u8;
+
+#[cfg(not(target_os = "none"))]
+static mut HOST_SHARED_CONTEXT_SLOT: *mut u8 = core::ptr::null_mut();
+
+#[cfg(not(target_os = "none"))]
+static mut HOST_DEFAULT_SHARED_CONTEXT: *mut u8 = core::ptr::null_mut();
+
+#[inline(always)]
+unsafe fn shared_context_slot() -> *mut *mut u8 {
     #[cfg(target_os = "none")]
     {
-        let shared_context: SharedContext = core::mem::transmute(0x0836_9becusize);
-        shared_context()
+        SHARED_CONTEXT_SLOT
     }
 
     #[cfg(not(target_os = "none"))]
     {
-        core::ptr::null_mut()
+        core::ptr::addr_of_mut!(HOST_SHARED_CONTEXT_SLOT)
     }
 }
 
-/// Narrow boundary for the unported 0x08369bec dependency.
-static mut SHARED_CONTEXT: SharedContext = firmware_shared_context;
-
 #[inline(always)]
-unsafe fn shared_context_fn() -> SharedContext {
-    core::ptr::read_volatile(core::ptr::addr_of!(SHARED_CONTEXT))
+unsafe fn default_shared_context() -> *mut u8 {
+    #[cfg(target_os = "none")]
+    {
+        DEFAULT_SHARED_CONTEXT
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        core::ptr::addr_of!(HOST_DEFAULT_SHARED_CONTEXT).read_volatile()
+    }
+}
+
+/// shared_context — original: `FUN_08369bec` @ `0x08369bec` (28 code bytes;
+/// eight-byte literal pool through `0x08369c0f`).
+///
+/// Raw ARM: `ldr r0,[pc,#0x14]; ldr r1,[r0]; cmp r1,#0; ldreq r1,[pc,#0xc];
+/// streq r1,[r0]; ldr r0,[r0]; bx lr`. Binary decoding verifies 27 direct
+/// `bl` callers, all unconditional; no predicated calls.
+///
+/// Lazily publishes the default shared-context base `0x08a11cd8` to the
+/// pointer slot at `0x089ca574` when that slot is zero, then returns the
+/// slot's current pointer. Host builds provide equivalent replaceable storage
+/// so tests can exercise both paths without mapping retailOS RAM. Deliberate
+/// deviations: none on target.
+///
+/// # Safety
+///
+/// On target, the fixed RAM slot must be writable and the published context
+/// must satisfy the caller's subsequent field access; like the original,
+/// this getter has no null guard for the slot itself.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn shared_context() -> *mut u8 {
+    let slot = shared_context_slot();
+    if slot.read_volatile().is_null() {
+        slot.write_volatile(default_shared_context());
+    }
+    slot.read_volatile()
 }
 
 type FormatDottedTriple = unsafe extern "C" fn(u32, *mut u8);
@@ -479,10 +516,9 @@ unsafe fn object_counted_text_fn() -> ObjectCountedText {
 /// text field; the concrete field is not recovered. Ghidra declares the
 /// original `void`; its r0 residue is 0x08046a88's return, which the call
 /// site ignores, so the port returns nothing. The original's `mov r4,r0`
-/// keeps `object` in a callee-saved register across the calls — a register
-/// allocation detail, not observable state. The three stock helpers stay in
-/// retailOS behind the [`SHARED_CONTEXT`], [`FORMAT_DOTTED_TRIPLE`] and
-/// [`OBJECT_COUNTED_TEXT`] boundaries.
+/// keeps `object` in a callee-saved register across the calls — an allocation
+/// detail, not observable state. The stock dotted-triple formatter and
+/// counted-text setter stay behind their respective boundaries.
 ///
 /// # Safety
 ///
@@ -493,7 +529,7 @@ unsafe fn object_counted_text_fn() -> ObjectCountedText {
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn object_set_version_text(object: *mut u8) {
-    let context = shared_context_fn()();
+    let context = shared_context();
     let version_word =
         (context.add(CONTEXT_VERSION_WORD_OFFSET) as *const u32).read();
 
@@ -686,17 +722,16 @@ const CONTEXT_MODE_FLAG_OFFSET: usize = 0x94;
 /// Source: `/home/gabe/Programming/ipod-decomp/decomp/c/003/08056028_FUN_08056028.c`;
 /// assembly: `decomp/osos.asm` @ `0x08056028..0x08056038`.
 ///
-/// Fetches the process-wide shared context through the retailOS lazy getter
-/// 0x08369bec (the same [`SHARED_CONTEXT`] boundary [`object_set_version_text`]
-/// uses), loads the word at `context + 0x94`, and returns its low bit
-/// (`and r0,r0,#0x1`) — a boolean flag of the shared context. The single
-/// stock call site (0x081602b0, grep -c on `decomp/osos.asm`) lazily caches
-/// a record size selected by the flag into a global slot: 0x100 when the
-/// bit is clear, 0xd8 when set (`moveq r0,#0x100; movne r0,#0xd8`), so the
-/// bit behaves as a two-state layout/capacity mode selector; the concrete
-/// mode is not recovered. The context getter stays in retailOS behind the
-/// [`SHARED_CONTEXT`] boundary. The original's `push {r4,lr}` never uses
-/// r4 — an ADS frame artifact not reproduced here.
+/// Fetches the process-wide context through [`shared_context`] @ 0x08369bec
+/// (the same getter [`object_set_version_text`] uses), loads the word at
+/// `context + 0x94`, and returns its low bit (`and r0,r0,#0x1`) — a boolean
+/// flag of the shared context. The single stock call site (0x081602b0,
+/// grep -c on `decomp/osos.asm`) lazily caches a record size selected by the
+/// flag into a global slot: 0x100 when the bit is clear, 0xd8 when set
+/// (`moveq r0,#0x100; movne r0,#0xd8`), so the bit behaves as a two-state
+/// layout/capacity mode selector; the concrete mode is not recovered. The
+/// original's `push {r4,lr}` never uses r4 — an ADS frame artifact not
+/// reproduced here.
 ///
 /// # Safety
 ///
@@ -705,7 +740,7 @@ const CONTEXT_MODE_FLAG_OFFSET: usize = 0x94;
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn context_mode_flag() -> u32 {
-    (shared_context_fn()().add(CONTEXT_MODE_FLAG_OFFSET) as *const u32).read() & 1
+    (shared_context().add(CONTEXT_MODE_FLAG_OFFSET) as *const u32).read() & 1
 }
 
 /// Byte offset of the companion word inside the nested object
@@ -1935,8 +1970,6 @@ mod tests {
     }
 
     static VERSION_TEXT_LOCK: Mutex<()> = Mutex::new(());
-    static mut MOCK_CONTEXT: *mut u8 = core::ptr::null_mut();
-    static mut SHARED_CONTEXT_CALLS: u32 = 0;
     static mut FORMAT_CALLS: u32 = 0;
     static mut FORMAT_WORD: u32 = 0;
     static mut FORMAT_PAYLOAD: [u8; 512] = [0; 512];
@@ -1944,11 +1977,6 @@ mod tests {
     static mut SET_TEXT_CALLS: u32 = 0;
     static mut SET_TEXT_OBJECT: usize = 0;
     static mut SET_TEXT_COUNTED: [u8; 300] = [0; 300];
-
-    unsafe extern "C" fn recording_shared_context() -> *mut u8 {
-        SHARED_CONTEXT_CALLS += 1;
-        MOCK_CONTEXT
-    }
 
     unsafe extern "C" fn recording_format_dotted_triple(word: u32, dst: *mut u8) {
         FORMAT_CALLS += 1;
@@ -1963,13 +1991,15 @@ mod tests {
         core::ptr::copy_nonoverlapping(counted, SET_TEXT_COUNTED.as_mut_ptr(), len + 1);
     }
 
-    /// Restores the stock-call boundaries before another test uses them.
+    /// Restores the host shared-context backing storage and stock-call
+    /// boundaries before another test uses them.
     struct VersionTextReset;
 
     impl Drop for VersionTextReset {
         fn drop(&mut self) {
             unsafe {
-                core::ptr::addr_of_mut!(SHARED_CONTEXT).write(firmware_shared_context);
+                core::ptr::addr_of_mut!(HOST_SHARED_CONTEXT_SLOT).write(core::ptr::null_mut());
+                core::ptr::addr_of_mut!(HOST_DEFAULT_SHARED_CONTEXT).write(core::ptr::null_mut());
                 core::ptr::addr_of_mut!(FORMAT_DOTTED_TRIPLE)
                     .write(firmware_format_dotted_triple);
                 core::ptr::addr_of_mut!(OBJECT_COUNTED_TEXT)
@@ -1978,16 +2008,26 @@ mod tests {
         }
     }
 
-    fn install_version_text_mocks(
-        context: *mut u8,
-        payload: &[u8],
+    fn install_shared_context(
+        default_context: *mut u8,
+        initial_context: *mut u8,
     ) -> MutexGuard<'static, ()> {
         let guard = VERSION_TEXT_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         unsafe {
-            MOCK_CONTEXT = context;
-            SHARED_CONTEXT_CALLS = 0;
+            core::ptr::addr_of_mut!(HOST_SHARED_CONTEXT_SLOT).write(initial_context);
+            core::ptr::addr_of_mut!(HOST_DEFAULT_SHARED_CONTEXT).write(default_context);
+        }
+        guard
+    }
+
+    fn install_version_text_mocks(
+        context: *mut u8,
+        payload: &[u8],
+    ) -> MutexGuard<'static, ()> {
+        let guard = install_shared_context(context, core::ptr::null_mut());
+        unsafe {
             FORMAT_CALLS = 0;
             FORMAT_WORD = 0;
             FORMAT_PAYLOAD = [0; 512];
@@ -1996,13 +2036,50 @@ mod tests {
             SET_TEXT_CALLS = 0;
             SET_TEXT_OBJECT = 0;
             SET_TEXT_COUNTED = [0; 300];
-            core::ptr::addr_of_mut!(SHARED_CONTEXT).write(recording_shared_context);
             core::ptr::addr_of_mut!(FORMAT_DOTTED_TRIPLE)
                 .write(recording_format_dotted_triple);
             core::ptr::addr_of_mut!(OBJECT_COUNTED_TEXT)
                 .write(recording_object_counted_text);
         }
         guard
+    }
+
+    #[test]
+    fn publishes_the_default_context_when_the_slot_is_zero() {
+        let mut default_context = [0xa5u8; 1];
+        let _guard = install_shared_context(default_context.as_mut_ptr(), core::ptr::null_mut());
+        let _reset = VersionTextReset;
+
+        assert_eq!(
+            unsafe { shared_context() },
+            default_context.as_mut_ptr(),
+            "a zero slot is initialized from the literal-pool default"
+        );
+        assert_eq!(
+            unsafe { core::ptr::addr_of!(HOST_SHARED_CONTEXT_SLOT).read() },
+            default_context.as_mut_ptr(),
+            "the initialized pointer remains published in the slot"
+        );
+    }
+
+    #[test]
+    fn preserves_a_previously_published_context() {
+        let mut default_context = [0xa5u8; 1];
+        let mut existing_context = [0x5au8; 1];
+        let _guard =
+            install_shared_context(default_context.as_mut_ptr(), existing_context.as_mut_ptr());
+        let _reset = VersionTextReset;
+
+        assert_eq!(
+            unsafe { shared_context() },
+            existing_context.as_mut_ptr(),
+            "a nonzero slot bypasses the default publication"
+        );
+        assert_eq!(
+            unsafe { core::ptr::addr_of!(HOST_SHARED_CONTEXT_SLOT).read() },
+            existing_context.as_mut_ptr(),
+            "the existing context is never overwritten"
+        );
     }
 
     #[test]
@@ -2017,7 +2094,6 @@ mod tests {
 
         unsafe { object_set_version_text(object.as_mut_ptr()) };
 
-        assert_eq!(unsafe { SHARED_CONTEXT_CALLS }, 1);
         assert_eq!(unsafe { FORMAT_CALLS }, 1);
         assert_eq!(
             unsafe { FORMAT_WORD },
@@ -2076,20 +2152,12 @@ mod tests {
         );
     }
 
-    /// Installs the recording context getter for [`context_mode_flag`].
+    /// Installs the shared-context default for [`context_mode_flag`].
     ///
     /// Shares `VERSION_TEXT_LOCK` with the version-text tests because both
-    /// suites overwrite the `SHARED_CONTEXT` boundary.
+    /// suites overwrite the host shared-context backing storage.
     fn install_mode_flag_mock(context: *mut u8) -> MutexGuard<'static, ()> {
-        let guard = VERSION_TEXT_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        unsafe {
-            MOCK_CONTEXT = context;
-            SHARED_CONTEXT_CALLS = 0;
-            core::ptr::addr_of_mut!(SHARED_CONTEXT).write(recording_shared_context);
-        }
-        guard
+        install_shared_context(context, core::ptr::null_mut())
     }
 
     #[test]
@@ -2103,11 +2171,6 @@ mod tests {
         let _reset = VersionTextReset;
 
         assert_eq!(unsafe { context_mode_flag() }, 1);
-        assert_eq!(
-            unsafe { SHARED_CONTEXT_CALLS },
-            1,
-            "the context is fetched once (`bl 0x08369bec`)"
-        );
     }
 
     #[test]
