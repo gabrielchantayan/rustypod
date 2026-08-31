@@ -132,6 +132,12 @@
 //!   @ 0x082a50a0 (`ldr r0,[r0,#4]; b 0x08275e20`) runs the count+1
 //!   strlen variant over it, while the 0x08279338 neighbor scans the
 //!   class's characters for the path separators ':', '/' and '\\'.
+//! - `string_object_find_utf8_prefix` — original: `FUN_082a5170` @
+//!   0x082a5170 (176 bytes, all code; 26 plain `bl` call sites,
+//!   binary-scanned). Searches a payload from a codepoint index. The
+//!   comparison length is the needle's codepoint count but feeds directly
+//!   to bytewise `memcmp`, preserving the retail partial-multibyte-prefix
+//!   match.
 //! - `string_object_equals` — original: `FUN_082aad4c` @ 0x082aad4c
 //!   (40 bytes, all code; 31 `bl` call sites, binary-scanned). The
 //!   equality predicate for two StringObjects: compares this's raw
@@ -342,6 +348,7 @@ use core::mem::MaybeUninit;
 
 use crate::heap::veneers::{free_wrapper, operator_delete};
 use crate::libc::strcpy::strcpy;
+use crate::libc::memcmp::memcmp;
 use crate::libc::strlen_safe::strlen_safe;
 use crate::libc::strlen_safe_plus1::strlen_safe_plus1;
 use crate::printf::printf_api::VaList;
@@ -1213,6 +1220,79 @@ pub unsafe extern "C" fn string_object_c_str(this: *const StringObject) -> *cons
     }
     payload
 }
+
+/// Keeps the searcher's comparison as an out-of-line call. Without this
+/// barrier, LLVM absorbs the existing ADS `memcmp` port into the search loop,
+/// erasing the original call boundary at 0x082a51e0.
+#[inline(never)]
+unsafe fn memcmp_codepoint_count(
+    haystack_cursor: *const u8,
+    needle: *const u8,
+    needle_codepoint_count: u32,
+) -> i32 {
+    memcmp(haystack_cursor, needle, needle_codepoint_count as usize)
+}
+/// string_object_find_utf8_prefix — original: `FUN_082a5170` @
+/// 0x082a5170 (176 bytes, all code; the next function begins at
+/// 0x082a5220; **26 plain `bl` call sites and zero predicated**, verified
+/// by decoding every ARM `B`/`BL` word in `osos.dec`).
+///
+/// Searches `this.payload` for `needle`, beginning at the signed
+/// `start_index` codepoint index; returns the matching codepoint index, or
+/// `-1`. A NULL payload returns `-1` before reading `needle`. Negative start
+/// indices begin at zero. The cursor advances with [`utf8_next_codepoint`],
+/// so malformed/four-byte leads terminate the walk exactly as they do in
+/// [`utf8_codepoint_count_safe`].
+///
+/// The raw ARM first counts codepoints in both strings through
+/// `utf8_codepoint_count_safe` @ 0x082770e0. At each candidate it calls ADS
+/// `memcmp` @ 0x08030f64 with the *needle codepoint count* as its byte
+/// length, then advances one haystack codepoint on a mismatch. This is not a
+/// valid UTF-8 substring comparison: a multibyte needle can match only its
+/// leading bytes. The port intentionally preserves that behavior. An empty
+/// (including NULL) needle therefore matches at `start_index` only when that
+/// index addresses a non-NUL haystack codepoint; an empty haystack returns
+/// `-1`.
+///
+/// Deliberate deviations: none. The `u32` counters and wrapping index update
+/// preserve the ARM's 32-bit arithmetic on 64-bit host tests.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_find_utf8_prefix(
+    this: *const StringObject,
+    needle: *const u8,
+    start_index: i32,
+) -> i32 {
+    let mut cursor = (*this).payload as *const u8;
+    if cursor.is_null() {
+        return -1;
+    }
+
+    let needle_codepoint_count = utf8_codepoint_count_safe(needle) as u32;
+    let haystack_codepoint_count = utf8_codepoint_count_safe(cursor) as u32;
+    let mut index = 0i32;
+
+    while index < start_index {
+        if *cursor == 0 {
+            return -1;
+        }
+        utf8_next_codepoint(&mut cursor);
+        index = index.wrapping_add(1);
+    }
+
+    while *cursor != 0
+        && (index as u32).wrapping_add(needle_codepoint_count) <= haystack_codepoint_count
+    {
+        if memcmp_codepoint_count(cursor, needle, needle_codepoint_count) == 0 {
+            return index;
+        }
+        utf8_next_codepoint(&mut cursor);
+        index = index.wrapping_add(1);
+    }
+
+    -1
+}
+
 
 /// string_object_equals — original: `FUN_082aad4c` @ 0x082aad4c (40 bytes,
 /// all code; the next function starts at 0x082aad74; 31 `bl` call sites,
@@ -5638,5 +5718,77 @@ pub(crate) mod tests {
             "a negative signed u32 reaches the two-byte path"
         );
         assert_eq!(encode_codepoint(u32::MAX), [0xff, 0xbf, 0, 0xa5, 0xa5]);
+    }
+    #[test]
+    fn find_utf8_prefix_returns_codepoint_indices_after_the_start() {
+        let mut haystack = [b'a', 0xc3, 0xa9, b'b', 0xc3, 0xa9, b'c', 0];
+        let needle = [0xc3, 0xa9, b'c', 0];
+        let object = StringObject {
+            vtable: core::ptr::null(),
+            payload: haystack.as_mut_ptr(),
+        };
+
+        unsafe {
+            assert_eq!(
+                string_object_find_utf8_prefix(&object, needle.as_ptr(), 2),
+                3,
+                "the start and result count UTF-8 decoder steps, not bytes"
+            );
+        }
+    }
+
+    #[test]
+    fn find_utf8_prefix_preserves_the_multibyte_partial_prefix_match() {
+        let mut haystack = [b'a', 0xc3, 0xa9, b'z', 0];
+        let needle = [0xc3, 0xa9, b'q', 0];
+        let object = StringObject {
+            vtable: core::ptr::null(),
+            payload: haystack.as_mut_ptr(),
+        };
+
+        unsafe {
+            assert_eq!(
+                string_object_find_utf8_prefix(&object, needle.as_ptr(), 0),
+                1,
+                "the raw memcmp length is the two-codepoint needle's count, not three bytes"
+            );
+        }
+    }
+
+    #[test]
+    fn find_utf8_prefix_handles_null_empty_and_out_of_range_inputs() {
+        let empty = [0];
+        let mut single = [b'a', 0];
+        let object_with_null_payload = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        let empty_object = StringObject {
+            vtable: core::ptr::null(),
+            payload: empty.as_ptr() as *mut u8,
+        };
+        let single_object = StringObject {
+            vtable: core::ptr::null(),
+            payload: single.as_mut_ptr(),
+        };
+
+        unsafe {
+            assert_eq!(
+                string_object_find_utf8_prefix(&object_with_null_payload, 1 as *const u8, 0),
+                -1,
+                "a NULL payload exits before inspecting even an invalid needle"
+            );
+            assert_eq!(string_object_find_utf8_prefix(&empty_object, core::ptr::null(), 0), -1);
+            assert_eq!(
+                string_object_find_utf8_prefix(&single_object, core::ptr::null(), -4),
+                0,
+                "negative starts take the same zero-index search path"
+            );
+            assert_eq!(
+                string_object_find_utf8_prefix(&single_object, b"a\0".as_ptr(), 2),
+                -1,
+                "advancing beyond the terminator fails before comparison"
+            );
+        }
     }
 }

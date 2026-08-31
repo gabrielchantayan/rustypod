@@ -15612,6 +15612,36 @@ functions:
       return; the diff is LLVM's fp frame and a movne standing in for
       the original's ldreq literal load (the documented deviation).
 
+  - address: 0x082a5170
+    ghidra: FUN_082a5170
+    name: string_object_find_utf8_prefix
+    size: 176
+    sig: "int string_object_find_utf8_prefix(const StringObject *this, const char *needle, int start_index)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: this, param_2: needle, param_3: start_index, local_20: cursor, iVar1: needle_codepoint_count, uVar2: haystack_codepoint_count, iVar3: comparison, iVar4: index}
+    notes: >-
+      Decoded from raw osos.dec at 0x082a5170..0x082a521f: 176 bytes,
+      all code; 0x082a5220 is the next function. 26 direct call sites,
+      all plain bl and zero predicated, verified by decoding every ARM
+      B/BL word in osos.dec. This is StringObject's UTF-8-cursor search:
+      it NULL-checks the payload word at +4, counts needle and haystack
+      through the ported utf8_codepoint_count_safe @ 0x082770e0, advances
+      to the signed start index through the ported utf8_next_codepoint @
+      0x08276214, then checks each remaining codepoint position. The
+      decisive raw sequence is `mov r2,r7; mov r1,r8; bl 0x08030f64`:
+      it passes the needle's CODEPOINT count to bytewise memcmp, not its
+      byte length. Thus a multibyte needle may match only its initial
+      bytes; this port deliberately preserves that retail behavior rather
+      than implementing a conventional UTF-8 substring search. The
+      unsigned `index + needle_count <= haystack_count` gate and empty
+      needle behavior are likewise retained. No dispatch seam: all three
+      callees are already ported and called directly. Host tests cover
+      codepoint-index starts, the partial-multibyte-prefix result, NULL
+      payload / NULL needle / empty-haystack guards, negative starts, and
+      advance-past-terminator rejection. match.py structural review is
+      expected to differ in frames and loop lowering.
+
   - address: 0x082a50a8
     ghidra: FUN_082a50a8
     name: string_object_utf8_strcasecmp_safe
