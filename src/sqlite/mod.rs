@@ -66,6 +66,7 @@
 //! their targets are readable C strings only at `+0xaed8`.
 
 pub mod aux_sweep;
+pub mod auth_check;
 pub mod blob_to_hex;
 pub mod btree_lock;
 pub mod cell_size;
