@@ -24146,6 +24146,28 @@ functions:
       sites) is the same function with the value looked up from a table
       @ 0x081239b4 instead of passed in.
 
+  - address: 0x081236f8
+    ghidra: FUN_081236f8
+    name: formatted_message_open_dict
+    size: 68
+    sig: "void formatted_message_open_dict(MessageStream *stream, const char *key, uint32 depth)"
+    module: printf/formatted_message
+    status: ported
+    vars: {param_1: stream, param_2: key, param_3: depth, param_4: unused}
+    notes: >-
+      28 bl call sites, binary-scanned: all are unconditional plain bl
+      (zero predicated forms), so callers perform no conditional gating.
+      Opens an indented plist dict property: indent_prepare @ 0x08123a54
+      receives stream and depth (r0/r2; r1 is overwritten from r2), then
+      snprintf @ 0x0802f768 writes the literal at 0x0812373c
+      ("%s<key>%s</key>\n%s<dict>\n") into the stream's +0x15 512-byte
+      buffer with variadic words (indent, key, indent), before a tail b
+      to the existing STREAM_APPEND boundary @ 0x08123c58. Raw bytes prove
+      the 68-byte extent: the following word begins the literal and sibling
+      formatted_message_emit_array @ 0x08123758. Ghidra's four-argument
+      prototype is wrong: r3 is never read. Rust calls and returns from
+      STREAM_APPEND instead of tail-branching, matching the established
+      formatted_message module deviation.
   - address: 0x0812395c
     ghidra: FUN_0812395c
     name: formatted_message_emit_boolean
