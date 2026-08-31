@@ -6,6 +6,9 @@
 //!   (80 bytes; 83 `bl` call sites, binary-scanned).
 //! - `formatted_message_emit_boolean` — original: `FUN_0812395c` @
 //!   0x0812395c (88 bytes; 58 `bl` call sites, binary-scanned).
+//! - `formatted_message_close_dict` — original: `FUN_081239d4` @
+//!   0x081239d4 (52 bytes; 29 `bl` call sites, binary-scanned, all
+//!   plain `bl`).
 //! - `indent_prepare` — original: `FUN_08123a54` @ 0x08123a54 (76
 //!   bytes; 14 `bl` call sites, binary-scanned).
 //!
@@ -40,6 +43,18 @@
 //! table contents are not statically readable from the image; the
 //! pair above is pinned by the call sites and plist syntax, and the
 //! [`BOOLEAN_TAG_TABLE`] slot keeps the indirection faithful.)
+//!
+//! The dict-closing sibling @ 0x081239d4 is the same emitter stripped
+//! to the container close: prepare the indentation for `depth`, format
+//! the literal @ 0x08123a08 (`"%s</dict>\n"`, right after the 52-byte
+//! body and reached with `add r2, pc, #24`) with the single argument
+//! word `(indent)` — the original's r3, no stack words — and tail-
+//! branch to the stream append. Its call sites pass the stream and a
+//! nesting depth only (@ 0x0815032c: `formatted_message_close_dict(
+//! ctx + 0xc, 1)` after the property batch of a track dict); the
+//! caller's r2/r3 are dead on entry. The `</array>` twin @ 0x08123a14
+//! (52 bytes, same body, literal `"%s</array>\n"` @ 0x08123a48) is not
+//! ported.
 //!
 //! `MessageStream` fields used (pinned by this function's `add rX, r4,
 //! #off` sequence):
@@ -98,6 +113,11 @@ const PLIST_INTEGER_FORMAT: &[u8] = b"%s<key>%s</key>\n%s<integer>%d</integer>\n
 /// its literal-pool word). Consumes four argument words: indent, key,
 /// indent, tag — the tag is emitted as an empty element (`<true/>`).
 const PLIST_BOOLEAN_FORMAT: &[u8] = b"%s<key>%s</key>\n%s<%s/>\n\0";
+
+/// The dict-closing format literal @ 0x08123a08 (addressed by the
+/// original with `add r2, pc, #24`, right after the 52-byte body).
+/// Consumes one argument word: indent.
+const PLIST_DICT_CLOSE_FORMAT: &[u8] = b"%s</dict>\n\0";
 
 /// Capacity of the inline format buffer at +0x15 (original: `mov r1,
 /// #0x200`).
@@ -331,6 +351,42 @@ pub unsafe extern "C" fn formatted_message_emit_boolean(
         stream.buf.as_mut_ptr(),
         stream.buf.len(),
         PLIST_BOOLEAN_FORMAT.as_ptr(),
+        args.as_ptr(),
+    );
+    let text = stream.buf.as_ptr();
+    (stream_append_op())(stream, text);
+}
+
+/// formatted_message_close_dict — original: `FUN_081239d4` @
+/// 0x081239d4 (52 bytes; 29 `bl` call sites, binary-scanned, all plain
+/// `bl` — no predicated forms, so no caller-side gating).
+///
+/// Close one indented `<dict>` container on `stream`: prepare the
+/// indentation for nesting `depth`, format the `"</dict>"` close tag
+/// into the stream's inline buffer with [`PLIST_DICT_CLOSE_FORMAT`]
+/// (one argument word: the prepared indent), and append the buffer to
+/// the stream output. Same body as [`formatted_message_emit`] apart
+/// from the format literal and the single-word argument area.
+///
+/// Register usage: r0 = stream, r1 = depth (original forwards r1 as
+/// the preparer's depth argument; the caller's r2/r3 are dead on
+/// entry — the original never touches them before overwriting).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn formatted_message_close_dict(
+    stream: *mut MessageStream,
+    depth: u32,
+) {
+    let stream = &mut *stream;
+    (indent_prepare_op())(stream, depth);
+    let indent = stream.indent.as_ptr();
+    // The original's argument area: r3 = indent, no stack words — here
+    // built as a one-word va_list.
+    let args: [u32; 1] = [indent as u32];
+    snprintf(
+        stream.buf.as_mut_ptr(),
+        stream.buf.len(),
+        PLIST_DICT_CLOSE_FORMAT.as_ptr(),
         args.as_ptr(),
     );
     let text = stream.buf.as_ptr();
@@ -719,6 +775,89 @@ mod tests {
             });
             let (_, _, _, words) = FORMAT_LEG.expect("formatter ran");
             assert_eq!(words[3], b"false\0".as_ptr() as u32, "index 0 -> \"false\"");
+        }
+    }
+
+    #[test]
+    fn close_dict_prepares_formats_and_appends_in_order() {
+        let _guard = slot_lock();
+        let mut mem = backing();
+        let stream = stream_of(&mut mem);
+        unsafe {
+            with_mocks(snapshot_engine, || {
+                formatted_message_close_dict(stream, 2);
+            });
+            let (prep_stream, prep_depth) = PREPARE_LEG.expect("indent prepared");
+            assert_eq!(prep_stream, stream, "preparer saw the stream");
+            assert_eq!(prep_depth, 2, "preparer saw the depth (original r1)");
+
+            let (fmt, cursor, end, words) = FORMAT_LEG.expect("formatter ran");
+            let mut fmt_bytes = std::vec::Vec::new();
+            let mut p = fmt;
+            while *p != 0 {
+                fmt_bytes.push(*p);
+                p = p.add(1);
+            }
+            assert_eq!(
+                fmt_bytes,
+                &PLIST_DICT_CLOSE_FORMAT[..PLIST_DICT_CLOSE_FORMAT.len() - 1]
+            );
+            let buf = (*stream).buf.as_mut_ptr();
+            assert_eq!(cursor, buf as usize, "snprintf target is the inline buffer at +0x15");
+            assert_eq!(end, buf.add(BUFFER_CAPACITY - 1) as usize, "bounded at +0x15 + 0x200");
+            let indent = (*stream).indent.as_ptr();
+            assert_eq!(
+                words[0],
+                indent as u32,
+                "single argument word: the prepared indent (original r3)"
+            );
+
+            let (app_stream, app_text, _) =
+                (*core::ptr::addr_of_mut!(APPEND_LEG)).take().expect("appended");
+            assert_eq!(app_stream, stream);
+            assert_eq!(app_text, buf, "append got the inline buffer");
+        }
+    }
+
+    #[test]
+    fn close_dict_formats_the_close_tag_end_to_end() {
+        let _guard = slot_lock();
+        let mut mem = backing();
+        let stream = stream_of(&mut mem);
+        unsafe {
+            with_mocks(echo_engine, || {
+                formatted_message_close_dict(stream, 1);
+            });
+            // The echo engine emits the literal without expanding the
+            // %s; the observable contract is that the append receives
+            // exactly the formatter's product (the preparer's two tabs
+            // sit in the scratch the %s slot names).
+            let (_, _, text) = (*core::ptr::addr_of_mut!(APPEND_LEG)).take().expect("appended");
+            assert_eq!(text, &PLIST_DICT_CLOSE_FORMAT[..PLIST_DICT_CLOSE_FORMAT.len() - 1]);
+            let stream = &*stream;
+            assert_eq!(&stream.indent[..3], b"\t\t\0".as_slice(), "preparer's product in place");
+        }
+    }
+
+    #[test]
+    fn close_dict_default_slots_prepare_indent_and_drop_the_message() {
+        let _guard = slot_lock();
+        let mut mem = backing();
+        let stream = stream_of(&mut mem);
+        unsafe {
+            (*stream).style = 0; // index the default table's "\t" unit
+            // No mocks installed: ported default preparer, default
+            // table, default append, and the engine stub.
+            formatted_message_close_dict(stream, 2);
+            assert_eq!(
+                &(&(*stream).indent)[..3],
+                b"\t\t\0".as_slice(),
+                "default preparer: depth copies of the default unit"
+            );
+            assert_eq!((*stream).buf[0], 0, "stub engine still NUL-terminates the buffer");
+            // The default append dropped the message: bytes past the
+            // NUL are the untouched backing fill.
+            assert_eq!((*stream).buf[1], 0xAA);
         }
     }
 }
