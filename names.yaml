@@ -21279,6 +21279,30 @@ functions:
       precedent) - slot order, early return and the slot-0 fall-through
       preserved. match.py structural only, as expected.
 
+  - address: 0x082d7954
+    ghidra: FUN_082d7954
+    name: ata_semaphore_signal
+    size: 12
+    sig: "usize ata_semaphore_signal(usize index)"
+    module: drivers/ata_semaphore
+    status: ported
+    renames:
+      param_1/r0: index
+      DAT_082d7960: ata_semaphore_table
+      thunk_EXT_FUN_220042b4: rom_sem_signal
+    notes: >-
+      Raw extent is three code words at 0x082d7954..0x082d7960; the
+      following word is the BSS table literal 0x08adb66c, not code. Loads
+      the unchecked table word at index*4 then tail-branches to veneer
+      0x08037e10 -> ROM 0x220042b4, preserving that result. Binary scan of
+      every ARM B/BL word in osos.dec found 27 unconditional bl call sites
+      plus one unconditional tail b at 0x082e1d28; zero predicated calls.
+      The table occupies 0x20 bytes before the ATA error-record pool at
+      0x08adb68c and has only the wait/signal siblings' two literal
+      references in osos. Device builds access the original BSS address;
+      host tests model its eight words and dispatch through the existing
+      kernel/task_lock rom_sem_signal hook.
+
   - address: 0x083690a8
     ghidra: FUN_083690a8
     name: ata_report_error
