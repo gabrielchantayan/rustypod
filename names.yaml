@@ -26592,6 +26592,37 @@ functions:
       frame and the dispatch-slot ldr/bx standing in for the direct
       `b 0x080542a0` - the documented deviation.
 
+  - address: 0x082597a0
+    ghidra: FUN_082597a0
+    name: query_object_create
+    size: 32
+    sig: "void *query_object_create(u32 mode)"
+    module: util/inner_state
+    status: ported
+    renames:
+      param_1: mode
+      FUN_082aadd4: operator_new
+      FUN_0813e474: query_object_construct
+    notes: >-
+      Raw-byte extent is exactly 32 bytes (0x082597a0..0x082597bf); the
+      next function starts at 0x082597c0. `push {r4,lr}; mov r4,r0; mov
+      r0,#0x48; bl operator_new; mov r2,r4; pop {r4,lr}; mov r1,#0; b
+      0x0813e474` allocates a 72-byte query object, supplies the original
+      mode as constructor r2 and zero as its id r1, then returns the
+      constructor result through the tail branch. Decoding every ARM B/BL
+      word in osos.dec finds exactly 25 call sites, all unconditional bl
+      (zero predicated forms and zero plain-b tails); callers therefore
+      always create this object on their selected paths. Allocation has no
+      NULL guard: the constructor is reached even when operator_new returns
+      NULL. The constructor is unported but already has the shared
+      fp_misc QUERY_OBJECT_CONSTRUCT seam: target calls its fixed
+      0x0813e474 address and host tests substitute it. Deviation: Rust
+      returns normally after that call rather than tail-branching; object,
+      id, mode and return semantics are identical. Host tests prove exact
+      tag-2 size 0x48 allocation, mode (including u32::MAX), id 0,
+      constructor-result return, and unguarded NULL forwarding. match.py
+      structural review requested for query_object_create.
+
   - address: 0x0813b6ec
     ghidra: FUN_0813b6ec
     name: drive_set_last_lba

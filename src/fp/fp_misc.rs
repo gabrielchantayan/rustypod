@@ -717,17 +717,17 @@ type QueryDestroyFn = unsafe extern "C" fn(*mut u8);
 
 #[cfg(target_os = "none")]
 #[inline(always)]
-unsafe fn query_object_construct(query: *mut u8, id: u32, mode: u32) {
+pub(crate) unsafe fn query_object_construct(query: *mut u8, id: u32, mode: u32) -> *mut u8 {
     let construct: QueryConstructFn = core::mem::transmute(0x0813_e474usize);
-    construct(query, id, mode);
+    construct(query, id, mode)
 }
 
 #[cfg(not(target_os = "none"))]
 #[inline(always)]
-unsafe fn query_object_construct(query: *mut u8, id: u32, mode: u32) {
+pub(crate) unsafe fn query_object_construct(query: *mut u8, id: u32, mode: u32) -> *mut u8 {
     let address = core::ptr::addr_of!(QUERY_OBJECT_CONSTRUCT).read_volatile();
     let construct: QueryConstructFn = core::mem::transmute(address);
-    construct(query, id, mode);
+    construct(query, id, mode)
 }
 
 #[cfg(target_os = "none")]
