@@ -1,7 +1,7 @@
 //! `trivial_destructor` — original: `FUN_082646ac` @ 0x082646ac (4 bytes).
 //!
-//! The image's single shared **empty destructor body**: one instruction,
-//! `bx lr`. Binary-verified from `work/firmware/osos.dec` rather than from
+//! A statically bound shared **empty destructor body**: one instruction, `bx
+//! lr`. Binary-verified from `work/firmware/osos.dec` rather than from
 //! Ghidra, because a 4-byte "function" is usually a mis-sized veneer. It is
 //! not one:
 //!

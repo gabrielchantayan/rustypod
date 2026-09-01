@@ -72,7 +72,7 @@ functions:
       tail dispatch rather than Ghidra's inferred indirect call and return.
       The recovered caller 0x08005cf4 passes its pointer in r0; the target
       immediately pops {r4, lr} and branches to 0x0812b9a4, so it never
-      returns to the veneer’s immediate caller. The ARM port is verbatim
+      returns to the veneer's immediate caller. The ARM port is verbatim
       global assembly; the host-only shim terminates because that stack
       transfer cannot be represented in a normal host call.
 
@@ -30572,7 +30572,7 @@ functions:
     module: cxx/trivial_destructor
     status: ported
     notes: >-
-      The image's single shared EMPTY destructor body - one instruction,
+      A statically bound shared EMPTY destructor body - one instruction,
       `bx lr`. Extent binary-verified: 0x082646a8 is the literal pool of
       the ctor @ 0x0826467c and 0x082646b0 starts the next function, so
       the 4-byte size is right and there is no trailing literal word. Not
@@ -41937,3 +41937,33 @@ functions:
       word-zero preservation, and field destination contents,
       the exact four-call order. match.py structural diff reviewed after the
       ARM release build.
+
+  # --- statically bound empty C++ destructor ---
+  - address: 0x0826fc64
+    ghidra: FUN_0826fc64
+    name: empty_destructor
+    size: 4
+    sig: "void *empty_destructor(void *this)"
+    module: cxx/empty_destructor
+    status: ported
+    renames:
+      param_1/r0: this
+      r0 return: this
+    notes: >-
+      Raw extent is exactly 0x0826fc64..0x0826fc68: 0x0826fc60 is the
+      preceding function's literal-pool word and 0x0826fc68 starts the next
+      separately linked function. The sole instruction is `bx lr`
+      (0xe12fff1e), so this is an empty C++ destructor rather than an
+      `ldr pc,[pc,#-4]` veneer or a plain branch. Decoding every ARM B/BL word
+      in osos.dec finds exactly 25 direct call sites: all are unconditional
+      plain BL, with no predicated BL forms and no plain-B tail calls. No image
+      data word contains 0x0826fc64, so it is statically bound, not dispatched
+      through a vtable. The load-bearing r0 pass-through is used by the
+      destroy-then-free sequence at 0x083d4a70..0x083d4a74, where the next BL
+      is operator_delete at 0x082aad24. The port returns this rather than
+      Ghidra's void signature, performs no reads or writes, and permits NULL,
+      unaligned, or dangling input exactly as the raw body does. No deliberate
+      behavioral deviations. Its own .text.empty_destructor section prevents
+      LLVM identical-code folding with other empty destructor exports; host
+      tests cover pointer preservation and no object writes. match.py
+      structural diff reviewed after the ARM release build.
