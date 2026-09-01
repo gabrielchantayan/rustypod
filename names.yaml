@@ -13363,6 +13363,42 @@ functions:
       owner. Representative callers: 0x0812b170, 0x0814274c,
       0x081576a0, and 0x0816d3f0.
 
+  - address: 0x0828c600
+    ghidra: FUN_0828c600
+    name: coordinate_owner_set_origin
+    size: 132
+    sig: "void coordinate_owner_set_origin(CoordinateOwner *owner, const Point *origin)"
+    module: ui/coordinate_origin
+    status: ported
+    renames:
+      param_1/r4: owner
+      param_2/r5: origin
+      "owner+0x00": render_context
+      "owner+0x20": local_bounds
+      "owner+0x30/+0x34": previous_origin_x_y
+      "owner+0xec/+0xed": dirty_and_origin_changed
+      "owner+0xee": active
+      "owner+0xfc": command_index
+      FUN_0828d9b4: render_context_invalidate_rect
+      FUN_0828d110: coordinate_owner_refresh
+    notes: >-
+      Extent is binary-verified from push {r0-r6,lr} at 0x0828c600 to
+      the pop {r0-r6,pc} at 0x0828c680; the distinct next function begins
+      at 0x0828c684. Decoding every ARM B/BL word in osos.dec finds 25
+      direct bl call sites: 19 unconditional and 6 blne, no tail branches.
+      The predicated callers supply nullable owners; this body has no NULL
+      guard. For an active owner with a non-NULL render context, translates
+      its +0x20 rectangle by the old +0x30/+0x34 Point and hands it to
+      FUN_0828d9b4 before committing the incoming Point and setting +0xec
+      and +0xed. A command index other than -1 invokes FUN_0828d110.
+      Both callees are absent from the ledger: target seams call their retail
+      addresses and host tests provide recording models. The +0xd4-lock /
+      +0xdc-dirty-union role of FUN_0828d9b4 is verified from raw bytes;
+      FUN_0828d110 is deliberately named only for its proven post-origin
+      refresh role rather than assigning an unsupported identity. Host tests
+      cover active old-bounds invalidation, inactive/contextless skips,
+      flag stores, the -1 suppression branch, and a live refresh.
+
   - address: 0x082a26c8
     ghidra: FUN_082a26c8
     name: ui_element_is_shown
