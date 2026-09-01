@@ -46,6 +46,17 @@ const LOADED: usize = 0x08;
 const BITMAP_OBJECT: usize = 0xc4;
 #[cfg(target_pointer_width = "64")]
 const BITMAP_OBJECT: usize = 0xc8;
+/// +0x1c on target: the bitmap's inner data object. This is a 4-byte
+/// pointer on target but is parked at +0x20 in the aligned 64-bit
+/// host fixture, just as [`BITMAP_OBJECT`] is parked above.
+#[cfg(target_pointer_width = "32")]
+const BITMAP_INNER_OBJECT: usize = 0x1c;
+#[cfg(target_pointer_width = "64")]
+const BITMAP_INNER_OBJECT: usize = 0x20;
+
+/// +0x98 within the inner object: the first of four bounds words.
+const INNER_BOUNDS: usize = 0x98;
+
 
 #[inline(always)]
 unsafe fn byte(wrapper: *mut u8, offset: usize) -> u8 {
@@ -73,13 +84,6 @@ pub struct BitmapHooks {
     /// loader must be ported (or the wrapper pre-loaded) before the
     /// query path can run on target.
     pub ensure_loaded: unsafe extern "C" fn(wrapper: *mut u8),
-    /// `FUN_082a1dbc` @ 0x082a1dbc (20 bytes; 19 `bl` call sites): the
-    /// parsed bitmap object's bounds getter — copies the four words at
-    /// +0x98..+0xa4 of the inner object `*(object + 0x1c)` into `out`.
-    /// Default: no-op, which leaves the query block holding its
-    /// argument-spill words (see [`bitmap_query_bounds`]); the real
-    /// getter always overwrites all four.
-    pub read_bounds: unsafe extern "C" fn(object: *mut u8, out: *mut u32),
     /// `FUN_08262bdc` @ 0x08262bdc (224 bytes; 60 `bl` call sites,
     /// binary-scanned): the rect-offsetting draw helper — adds the draw
     /// context's +0x2c/+0x30 origin into both four-word rects and the
@@ -104,7 +108,6 @@ pub struct BitmapHooks {
 
 unsafe extern "C" fn ensure_loaded_stub(_wrapper: *mut u8) {}
 
-unsafe extern "C" fn read_bounds_stub(_object: *mut u8, _out: *mut u32) {}
 
 unsafe extern "C" fn draw_stub(
     _ctx: *mut u8,
@@ -119,7 +122,6 @@ unsafe extern "C" fn draw_stub(
 /// Wired defaults: no-op stubs for the unported originals.
 pub(crate) const DEFAULT_BITMAP_HOOKS: BitmapHooks = BitmapHooks {
     ensure_loaded: ensure_loaded_stub,
-    read_bounds: read_bounds_stub,
     draw: draw_stub,
 };
 
@@ -131,6 +133,34 @@ pub static mut BITMAP_HOOKS: BitmapHooks = DEFAULT_BITMAP_HOOKS;
 #[inline(always)]
 unsafe fn hooks() -> BitmapHooks {
     core::ptr::read_volatile(core::ptr::addr_of!(BITMAP_HOOKS))
+}
+
+/// bitmap_object_read_bounds — original: `FUN_082a1dbc` @ 0x082a1dbc
+/// (24 bytes; 25 plain `bl` call sites, no predicated branches or tail
+/// branches, binary-scanned).
+///
+/// Reads the parsed bitmap's inner-object pointer at +0x1c, then copies
+/// its four bounds words at +0x98..+0xa4 into `out`. The original loads
+/// all four words with `ldm` before storing with `stm`; loading every
+/// word before the first store preserves that behavior when `out`
+/// aliases the source bounds.
+///
+/// Deliberate deviation: the target's 4-byte +0x1c pointer is stored
+/// at +0x20 in 64-bit host fixtures to retain alignment; it remains
+/// exactly +0x1c in the ARM build.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn bitmap_object_read_bounds(object: *mut u8, out: *mut u32) {
+    let inner = ptr_field(object, BITMAP_INNER_OBJECT);
+    let bounds = inner.add(INNER_BOUNDS) as *mut u32;
+    let word0 = bounds.read_volatile();
+    let word1 = bounds.add(1).read_volatile();
+    let word2 = bounds.add(2).read_volatile();
+    let word3 = bounds.add(3).read_volatile();
+    out.write_volatile(word0);
+    out.add(1).write_volatile(word1);
+    out.add(2).write_volatile(word2);
+    out.add(3).write_volatile(word3);
 }
 
 /// bitmap_query_bounds — original: `FUN_08299368` @ 0x08299368
@@ -146,10 +176,9 @@ unsafe fn hooks() -> BitmapHooks {
 /// 2. If the loaded flag (+0x08) is still clear (no resource, or the
 ///    lookup failed), zero all four words of `out` with four word
 ///    stores (`streq`).
-/// 3. Otherwise dispatch the parsed object's bounds getter
-///    (`FUN_082a1dbc`, through [`BITMAP_HOOKS`]) on the +0xc4 object,
-///    filling a 16-byte stack block, then copy the four words into
-///    `out` (`ldmia`/`stmia`).
+/// 3. Otherwise invoke the parsed object's bounds getter
+///    (`FUN_082a1dbc`) on the +0xc4 object, filling a 16-byte stack
+///    block, then copy the four words into `out` (`ldmia`/`stmia`).
 ///
 /// Callers read the result as a rectangle of four signed words — the
 /// layout code @ 0x08141e30 subtracts word\[1\] from word\[3\] for a
@@ -170,11 +199,8 @@ unsafe fn hooks() -> BitmapHooks {
 ///
 /// - `arg3`/`arg4` exist only because the original spills all four
 ///   argument registers and uses the spill slots as the query block;
-///   with the real `FUN_082a1dbc` (which writes all four words) they
-///   are unobservable. With the default no-op `read_bounds` stub the
-///   loaded path copies the spill words `(out, wrapper, arg3, arg4)`
-///   into `out` — the exact content the original's stack block would
-///   hand a getter that stored nothing.
+///   the getter always overwrites all four words, making them
+///   unobservable.
 /// - +0xc4 is read as a native-width pointer (parked at 0xc8 on
 ///   64-bit hosts — see the module header); on target it is exactly
 ///   the 4-byte field at +0xc4.
@@ -194,7 +220,7 @@ pub unsafe extern "C" fn bitmap_query_bounds(
         }
     } else {
         let object = ptr_field(wrapper, BITMAP_OBJECT);
-        (hooks().read_bounds)(object, bounds.as_mut_ptr());
+        bitmap_object_read_bounds(object, bounds.as_mut_ptr());
         for slot in 0..4 {
             (out.add(slot)).write_volatile(bounds[slot]);
         }
@@ -292,15 +318,64 @@ mod tests {
         }
     }
 
-    /// A fake parsed bitmap object; only its identity (the pointer
-    /// value reaching `read_bounds`) matters to these tests.
-    static mut FAKE_OBJECT: [u8; 8] = [0; 8];
+    /// The parsed object has an inner-object pointer at +0x1c on target.
+    /// It is parked at +0x20 here, leaving the host's native-width
+    /// pointer aligned; 0x44 is the stock parser allocation size.
+    #[repr(align(8))]
+    struct ParsedBitmap([u8; 0x44]);
 
-    /// Serializes the tests that swap [`BITMAP_HOOKS`].
+    impl ParsedBitmap {
+        fn new() -> Self {
+            ParsedBitmap([0; 0x44])
+        }
+        fn ptr(&mut self) -> *mut u8 {
+            self.0.as_mut_ptr()
+        }
+        fn set_inner_object(&mut self, inner: *mut u8) {
+            unsafe {
+                (self.ptr().add(BITMAP_INNER_OBJECT) as *mut *mut u8).write_volatile(inner);
+            }
+        }
+    }
+
+    /// Four recognizable inner-object bounds words.
+    const BOUNDS: [u32; 4] = [0x1111_0000, 0x2222_0000, 0x3333_0000, 0x4444_0000];
+
+    /// Full inner-object fixture: the getter reads its four-word bounds
+    /// block at +0x98, so it must extend through +0xa4.
+    #[repr(align(8))]
+    struct BitmapInner([u32; (INNER_BOUNDS + 16) / 4]);
+
+    impl BitmapInner {
+        fn new(bounds: [u32; 4]) -> Self {
+            let mut inner = BitmapInner([0; (INNER_BOUNDS + 16) / 4]);
+            inner.0[INNER_BOUNDS / 4..INNER_BOUNDS / 4 + 4].copy_from_slice(&bounds);
+            inner
+        }
+        fn ptr(&mut self) -> *mut u8 {
+            self.0.as_mut_ptr() as *mut u8
+        }
+        fn bounds_ptr(&mut self) -> *mut u32 {
+            unsafe { self.0.as_mut_ptr().add(INNER_BOUNDS / 4) }
+        }
+        fn bounds(&self) -> [u32; 4] {
+            [
+                self.0[INNER_BOUNDS / 4],
+                self.0[INNER_BOUNDS / 4 + 1],
+                self.0[INNER_BOUNDS / 4 + 2],
+                self.0[INNER_BOUNDS / 4 + 3],
+            ]
+        }
+    }
+
+    /// The parsed object and inner bounds that the loader mock resolves.
+    static mut FAKE_OBJECT: ParsedBitmap = ParsedBitmap([0; 0x44]);
+    static mut FAKE_INNER: BitmapInner = BitmapInner([0; (INNER_BOUNDS + 16) / 4]);
+
+    /// Serializes the tests that swap [`BITMAP_HOOKS`] or use the fake
+    /// parsed object.
     static HOOK_LOCK: StdMutex<()> = StdMutex::new(());
     static LOADS: AtomicU32 = AtomicU32::new(0);
-    static QUERIES: AtomicU32 = AtomicU32::new(0);
-    static LAST_QUERIED_OBJECT: AtomicUsize = AtomicUsize::new(usize::MAX);
     /// Set by a test to make the loader mock resolve the wrapper
     /// (store the fake object at +0xc4, raise the +0x08 flag).
     static LOAD_RESOLVES: AtomicU32 = AtomicU32::new(0);
@@ -313,24 +388,14 @@ mod tests {
     static LAST_DRAW_ALPHA: AtomicU32 = AtomicU32::new(u32::MAX);
     static LAST_DRAW_RESERVED: AtomicU32 = AtomicU32::new(u32::MAX);
 
-    /// The four recognizable bounds words the query mock plants.
-    const BOUNDS: [u32; 4] = [0x1111_0000, 0x2222_0000, 0x3333_0000, 0x4444_0000];
-
     unsafe extern "C" fn recording_ensure_loaded(wrapper: *mut u8) {
         LOADS.fetch_add(1, Ordering::SeqCst);
         if LOAD_RESOLVES.load(Ordering::SeqCst) != 0 {
-            set_bitmap_object(wrapper, core::ptr::addr_of_mut!(FAKE_OBJECT) as *mut u8);
+            set_bitmap_object(wrapper, fake_object());
             wrapper.add(LOADED).write_volatile(1);
         }
     }
 
-    unsafe extern "C" fn recording_read_bounds(object: *mut u8, out: *mut u32) {
-        QUERIES.fetch_add(1, Ordering::SeqCst);
-        LAST_QUERIED_OBJECT.store(object as usize, Ordering::SeqCst);
-        for (slot, word) in BOUNDS.into_iter().enumerate() {
-            out.add(slot).write_volatile(word);
-        }
-    }
 
     unsafe extern "C" fn recording_draw(
         ctx: *mut u8,
@@ -354,14 +419,27 @@ mod tests {
         (wrapper.add(BITMAP_OBJECT) as *mut *mut u8).write_volatile(object);
     }
 
+    /// Configures the stock-sized parsed-object fixture with recognizable
+    /// bounds. Every caller holds [`HOOK_LOCK`] before touching it.
+    unsafe fn fake_object() -> *mut u8 {
+        let inner = core::ptr::addr_of_mut!(FAKE_INNER);
+        *inner = BitmapInner::new(BOUNDS);
+        let object = core::ptr::addr_of_mut!(FAKE_OBJECT) as *mut u8;
+        set_bitmap_inner_object(object, (*inner).ptr());
+        object
+    }
+
+    /// Plants the parsed object's +0x1c inner-object pointer.
+    unsafe fn set_bitmap_inner_object(object: *mut u8, inner: *mut u8) {
+        (object.add(BITMAP_INNER_OBJECT) as *mut *mut u8).write_volatile(inner);
+    }
+
     /// Installs the recording hooks and hands back the guard; the
     /// caller restores with [`restore_hooks`] (the seek_core.rs rule:
     /// never shadow a guard).
     fn with_recording_hooks() -> MutexGuard<'static, ()> {
         let guard = HOOK_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         LOADS.store(0, Ordering::SeqCst);
-        QUERIES.store(0, Ordering::SeqCst);
-        LAST_QUERIED_OBJECT.store(usize::MAX, Ordering::SeqCst);
         LOAD_RESOLVES.store(0, Ordering::SeqCst);
         DRAWS.store(0, Ordering::SeqCst);
         LAST_DRAW_CTX.store(usize::MAX, Ordering::SeqCst);
@@ -373,7 +451,6 @@ mod tests {
         unsafe {
             BITMAP_HOOKS = BitmapHooks {
                 ensure_loaded: recording_ensure_loaded,
-                read_bounds: recording_read_bounds,
                 draw: recording_draw,
             }
         };
@@ -399,7 +476,23 @@ mod tests {
     }
 
     #[test]
-    fn an_unloaded_wrapper_zeroes_all_four_words_and_skips_the_query() {
+    fn bitmap_object_read_bounds_copies_all_words_before_an_aliasing_store() {
+        let mut object = ParsedBitmap::new();
+        let mut inner = BitmapInner::new(BOUNDS);
+        object.set_inner_object(inner.ptr());
+        let mut out = Out::new();
+
+        unsafe { bitmap_object_read_bounds(object.ptr(), out.ptr()) };
+        assert_eq!(out.0, BOUNDS, "the four +0x98 words retain their order");
+
+        // `ldm` fetches all four registers before `stm` starts. The
+        // in-place destination is therefore a valid exact-alias edge case.
+        unsafe { bitmap_object_read_bounds(object.ptr(), inner.bounds_ptr()) };
+        assert_eq!(inner.bounds(), BOUNDS);
+    }
+
+    #[test]
+    fn an_unloaded_wrapper_zeroes_all_four_words_without_copying_bounds() {
         let guard = with_recording_hooks();
         let mut wrapper = Wrapper::new(); // +0x08 clear: not loaded
         let mut out = Out::new();
@@ -408,7 +501,6 @@ mod tests {
 
         assert_eq!(out.0, [0; 4], "every bounds word is zeroed");
         assert_eq!(LOADS.load(Ordering::SeqCst), 1, "the loader still runs first");
-        assert_eq!(QUERIES.load(Ordering::SeqCst), 0, "the getter is not dispatched");
         restore_hooks(guard);
     }
 
@@ -417,19 +509,13 @@ mod tests {
         let guard = with_recording_hooks();
         let mut wrapper = Wrapper::new();
         wrapper.set_byte(LOADED, 1);
-        let object = core::ptr::addr_of_mut!(FAKE_OBJECT) as *mut u8;
+        let object = unsafe { fake_object() };
         wrapper.set_ptr(BITMAP_OBJECT, object);
         let mut out = Out::new();
 
         unsafe { bitmap_query_bounds(out.ptr(), wrapper.ptr(), 0, 0) };
 
         assert_eq!(out.0, BOUNDS, "the four getter words land in order");
-        assert_eq!(QUERIES.load(Ordering::SeqCst), 1);
-        assert_eq!(
-            LAST_QUERIED_OBJECT.load(Ordering::SeqCst),
-            object as usize,
-            "the getter receives the +0xc4 object"
-        );
         restore_hooks(guard);
     }
 
@@ -438,7 +524,7 @@ mod tests {
         let guard = with_recording_hooks();
         let mut wrapper = Wrapper::new();
         wrapper.set_byte(LOADED, 1);
-        wrapper.set_ptr(BITMAP_OBJECT, core::ptr::addr_of_mut!(FAKE_OBJECT) as *mut u8);
+        wrapper.set_ptr(BITMAP_OBJECT, unsafe { fake_object() });
         let mut out = Out::new();
 
         let ret = unsafe { bitmap_query_bounds(out.ptr(), wrapper.ptr(), 0, 0) };
