@@ -175,3 +175,8 @@ pub static VIEW_EVENT_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::ne
 /// The timer module and view-timer callers both drive the ported timer
 /// helpers through this one dispatch table.
 pub static TIMER_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serializes host tests that replace
+/// `app::screen_layout::SCREEN_LAYOUT_ASSIGN_OPS`. The notification callback
+/// is a shared dispatch seam, so a module-private lock would race teardown.
+pub static SCREEN_LAYOUT_ASSIGN_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

@@ -42058,3 +42058,32 @@ functions:
       LLVM identical-code folding with other empty destructor exports; host
       tests cover pointer preservation and no object writes. match.py
       structural diff reviewed after the ARM release build.
+
+  # --- screen layout-name setter ---
+  - address: 0x0817434c
+    ghidra: FUN_0817434c
+    name: app_screen_set_layout
+    size: 28
+    sig: "void *app_screen_set_layout(void *screen, const StringObject *layout)"
+    module: app/screen_layout
+    status: ported
+    renames:
+      param_1/r0: screen
+      param_2/r1: layout
+      FUN_082774a8: string_object_assign
+      FUN_081779c8: layout-change notification (unported framework callback)
+    notes: >-
+      Raw extent is exactly 0x0817434c..0x08174368: `push {r4,lr}` saves
+      screen; `add r0,r0,#0x1c; bl 0x082774a8` assigns its embedded
+      StringObject from layout; then `mov r0,r4; pop {r4,lr}; b
+      0x081779c8` tail-enters the layout-change notification and preserves
+      its return. The next separately linked function begins at 0x08174368.
+      Decoding every ARM B/BL word in osos.dec finds exactly 25 direct call
+      sites, all unconditional plain BL (zero predicated forms); no data word
+      contains this address. The raw assignment and notification sequence
+      confirms this sets the app screen's layout name, but 0x081779c8's
+      framework identity remains unrecovered: it dispatches vtable slot +0x58
+      around 0x08177424. Deliberate deviation: ARM calls its fixed retail
+      entry directly; host tests use the injectable SCREEN_LAYOUT_ASSIGN_OPS
+      seam because the ROM callback cannot execute natively. The Rust normal
+      call represents the stock tail branch and returns the callback result.
