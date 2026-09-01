@@ -98,6 +98,24 @@ const STATE_4: u32 = 4;
 /// tail target @ 0x080542a0).
 const RESULT_COUNT: usize = 0xef4;
 
+/// query_object_create — original: `FUN_082597a0` @ 0x082597a0 (32 bytes;
+/// 25 verified `bl` call sites, all unconditional).
+///
+/// Allocates exactly 0x48 bytes with tag-2 [`crate::heap::veneers::operator_new`],
+/// then tail-calls the query-object constructor `FUN_0813e474` with id zero
+/// and the caller's `mode`. The constructor's return, rather than the raw
+/// allocation, is returned. Stock has no allocation NULL guard: construction
+/// is attempted even for a NULL allocator result. The port calls the existing
+/// query-constructor seam; on target it reaches 0x0813e474 directly, while
+/// host tests make its inputs and return observable. This guarded call replaces
+/// the stock tail branch; the result and call arguments are unchanged.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn query_object_create(mode: u32) -> *mut u8 {
+    let object = crate::heap::veneers::operator_new(0x48);
+    crate::fp::fp_misc::query_object_construct(object, 0, mode)
+}
+
 /// inner_set_state_4 — original: `FUN_0813b7c4` @ 0x0813b7c4 (12 bytes).
 ///
 /// Loads the inner object from `object + 0x40` and stores 4 into its
@@ -156,7 +174,44 @@ pub unsafe extern "C" fn inner_result_count(object: *mut u8) -> u32 {
 mod tests {
     extern crate std;
     use super::*;
-    use std::sync::Mutex;
+    use parking_lot::Mutex;
+    use crate::fp::fp_misc::QUERY_OBJECT_CONSTRUCT;
+    use crate::heap::veneers::tests::{alloc_log, mock_block, mock_heap, set_alloc_ret};
+
+    const QUERY_CONSTRUCT_RESULT: usize = 0xa110_0048;
+    static QUERY_FACTORY_TEST_LOCK: Mutex<()> = Mutex::new(());
+    static mut QUERY_CONSTRUCT_CALLS: usize = 0;
+    static mut QUERY_CONSTRUCT_OBJECT: *mut u8 = core::ptr::null_mut();
+    static mut QUERY_CONSTRUCT_ID: u32 = 0;
+    static mut QUERY_CONSTRUCT_MODE: u32 = 0;
+
+    unsafe extern "C" fn mock_query_construct(object: *mut u8, id: u32, mode: u32) -> *mut u8 {
+        QUERY_CONSTRUCT_CALLS += 1;
+        QUERY_CONSTRUCT_OBJECT = object;
+        QUERY_CONSTRUCT_ID = id;
+        QUERY_CONSTRUCT_MODE = mode;
+        QUERY_CONSTRUCT_RESULT as *mut u8
+    }
+
+    struct QueryConstructRestore(usize);
+
+    impl Drop for QueryConstructRestore {
+        fn drop(&mut self) {
+            unsafe { core::ptr::addr_of_mut!(QUERY_OBJECT_CONSTRUCT).write(self.0) };
+        }
+    }
+
+    fn install_query_construct_mock() -> QueryConstructRestore {
+        unsafe {
+            QUERY_CONSTRUCT_CALLS = 0;
+            QUERY_CONSTRUCT_OBJECT = core::ptr::null_mut();
+            QUERY_CONSTRUCT_ID = u32::MAX;
+            QUERY_CONSTRUCT_MODE = u32::MAX;
+            let prior = core::ptr::addr_of!(QUERY_OBJECT_CONSTRUCT).read_volatile();
+            core::ptr::addr_of_mut!(QUERY_OBJECT_CONSTRUCT).write(mock_query_construct as usize);
+            QueryConstructRestore(prior)
+        }
+    }
 
     const INNER_LEN: usize = RESULT_COUNT + 4;
     // The +0x40 slot is pointer-wide: 4 bytes on the target, 8 on a
@@ -190,6 +245,43 @@ mod tests {
         }
         fn state(&self) -> u32 {
             u32::from_le_bytes(self.inner[STATE..STATE + 4].try_into().unwrap())
+        }
+    }
+
+    #[test]
+    fn query_object_create_allocates_72_bytes_and_forwards_mode() {
+        let _query_guard = QUERY_FACTORY_TEST_LOCK.lock();
+        let _heap_guard = mock_heap();
+        let _restore = install_query_construct_mock();
+
+        let result = unsafe { query_object_create(u32::MAX) };
+
+        assert_eq!(result, QUERY_CONSTRUCT_RESULT as *mut u8);
+        assert_eq!(alloc_log(), (1, 0x48, 2), "one tag-2 allocation");
+        unsafe {
+            assert_eq!(QUERY_CONSTRUCT_CALLS, 1);
+            assert_eq!(QUERY_CONSTRUCT_OBJECT, mock_block());
+            assert_eq!(QUERY_CONSTRUCT_ID, 0);
+            assert_eq!(QUERY_CONSTRUCT_MODE, u32::MAX);
+        }
+    }
+
+    #[test]
+    fn query_object_create_constructs_even_when_allocation_is_null() {
+        let _query_guard = QUERY_FACTORY_TEST_LOCK.lock();
+        let _heap_guard = mock_heap();
+        set_alloc_ret(core::ptr::null_mut());
+        let _restore = install_query_construct_mock();
+
+        let result = unsafe { query_object_create(2) };
+
+        assert_eq!(result, QUERY_CONSTRUCT_RESULT as *mut u8);
+        assert_eq!(alloc_log(), (1, 0x48, 2), "allocation remains unguarded");
+        unsafe {
+            assert_eq!(QUERY_CONSTRUCT_CALLS, 1);
+            assert!(QUERY_CONSTRUCT_OBJECT.is_null());
+            assert_eq!(QUERY_CONSTRUCT_ID, 0);
+            assert_eq!(QUERY_CONSTRUCT_MODE, 2);
         }
     }
 
@@ -304,7 +396,7 @@ mod tests {
 
     #[test]
     fn forwards_the_inner_pointer_and_returns_the_count() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
         fixture.link();
@@ -325,7 +417,7 @@ mod tests {
 
     #[test]
     fn default_stub_reads_the_cached_count_word() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let mut fixture = Fixture::new();
         fixture.link();
         // Preload the count the materializer would have cached.
@@ -349,7 +441,7 @@ mod tests {
 
     #[test]
     fn default_stub_returns_a_zero_count_for_a_fresh_object() {
-        let _lock = SLOT_TEST_LOCK.lock().unwrap();
+        let _lock = SLOT_TEST_LOCK.lock();
         let mut fixture = Fixture::new();
         fixture.link();
         fixture.inner = [0; INNER_LEN];
