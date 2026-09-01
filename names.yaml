@@ -16313,6 +16313,32 @@ functions:
       live average, expiration clear, and wrapping sum. match.py
       structural diff reviewed after the release ARM build.
 
+  - address: 0x08292e58
+    ghidra: FUN_08292e58
+    name: controller_history_select_without_callback
+    size: 20
+    sig: "void controller_history_select_without_callback(void)"
+    module: app/controller_history_select
+    status: ported
+    renames:
+      DAT_08292e68: controller_history_resource_id
+      FUN_08292d1c: controller_history_select
+    notes: >-
+      Raw extent is 20 bytes at 0x08292e58..0x08292e6c: four code
+      instructions and the resource-id literal 0x0dad073a, contrary to
+      Ghidra's 16-byte extent. A complete ARM B/BL word scan found 25
+      direct bl callers, all unconditional; no predicated bl or tail b
+      callers. It loads that private controller-history resource id,
+      passes policy flags (0, 1), and tail-branches to the unported shared
+      selection helper 0x08292d1c. Those flags make the helper select the
+      controller but skip its CntrlHistoryFn callback allocation. The ARM
+      port keeps the tail transfer through a literal veneer because the
+      payload cannot retain the source-relative b; host tests replace that
+      helper with a recorder and prove the id and both flags. match.py
+      against this worktree archive and the verified 20-byte extent reports
+      the same ldr/mov/mov shape plus the relocation-safe veneer; its exit 1
+      is the expected structural diff.
+
   - address: 0x08292e6c
     ghidra: FUN_08292e6c
     name: control_state_flags
