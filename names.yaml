@@ -30425,6 +30425,33 @@ functions:
       guard byte, all-zero, all-ones, and the cluster's {2, 5, 0x3a00}
       error shape.
 
+  - address: 0x08283144
+    ghidra: FUN_08283144
+    name: parse_result_is_ok
+    size: 16
+    sig: "u32 parse_result_is_ok(const u8 *record)"
+    module: app/parse_result
+    status: ported
+    renames:
+      param_1: record
+    notes: >-
+      Exact 16-byte extent from 0x08283144 through 0x08283153, bounded
+      by the alias constructor's bx lr at 0x08283140 and clear() at
+      0x08283154; no literal pool. Raw ARM:
+      `ldrb r0,[r0]; rsbs r0,r0,#1; movcc r0,#0; bx lr`. It returns one
+      exactly when the parser-result status byte is one, zero for status
+      zero and every value >= two, and neither writes the record nor
+      NULL-checks it. Every B/BL word in osos.dec was decoded: 25 direct
+      `bl` sites, all unconditional, and 0 tail `b` sites. Each caller
+      gates the success consumer with `bl; cmp r0,#0; beq <bail>` (for
+      example, 0x080f8d74); no predicated calls means the status gate
+      itself, not call conditionality, determines the path. The record
+      layout is established by sibling parse_result_init: status is u8
+      +0x00, code u8 +0x01, detail u16 +0x02. Deviation: none; Rust's
+      equality comparison represents the ARM carry-flag sequence and
+      returns its 0/1 result as u32. Host tests cover cleared, successful,
+      observed error (2), high-byte error (0xff), and nonmutation.
+
   - address: 0x08283178
     ghidra: FUN_08283178
     name: parse_result_destroy
