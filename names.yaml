@@ -41857,3 +41857,38 @@ functions:
       masks, a matching bit, a high u16-table index, normalized return
       values, and input preservation. match.py structural diff reviewed
       after the ARM release build.
+
+  # --- command descriptor layout baseline ---
+  - address: 0x082a4680
+    ghidra: FUN_082a4680
+    name: descriptor_layout_initialize
+    size: 180
+    sig: "void descriptor_layout_initialize(const u32 *source, u32 *layout)"
+    module: app/descriptor_layout
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: layout
+      DAT_082a4730: NONE_TOKEN (0x4e6f6e65)
+      FUN_08270f84: descriptor-field mapper (unported seam)
+    notes: >-
+      Raw extent is 0x082a4680..0x082a4734: Ghidra's reported 176 bytes
+      covers the 44 ARM instructions but drops its final literal-pool word
+      0x4e6f6e65 at 0x082a4730; the next separately linked function starts
+      at 0x082a4734. Decoding every ARM B/BL word in osos.dec finds exactly
+      25 direct call sites, all unconditional plain BL; there are no
+      predicated BL or plain-B tail callers. The body initializes a
+      command-builder descriptor layout with the None token, its source
+      current-value word twice, a -1 sentinel, fixed 0x200 and source-bit
+      derived flags, then optional source metadata and state. It maps four
+      source triples through the real separate function entry 0x08270f84 in
+      source order 1, 0, 2, 3; the fourth is a tail branch. The nested triple
+      format is not identified, so neither it nor the callee receives an
+      invented identity. Deliberate deviation: the Rust port invokes the
+      unported mapper through a target-default fixed-address seam; structural
+      review confirms LLVM retains the fourth mapper invocation as an
+      indirect tail branch. Host tests install a recording mapper and cover
+      zero/nonzero optional metadata, all three source flag bits, output
+      word-zero preservation, and field destination contents,
+      the exact four-call order. match.py structural diff reviewed after the
+      ARM release build.
