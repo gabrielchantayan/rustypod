@@ -126,6 +126,32 @@ pub unsafe extern "C" fn parse_result_init_alias_3134(
     out
 }
 
+/// parse_result_is_ok — original: `FUN_08283144` @ 0x08283144 (16 bytes;
+/// **25 `bl` call sites, all unconditional, 0 `b`**, binary-scanned by
+/// decoding every ARM B/BL word in `osos.dec`).
+///
+/// Loads the record's status byte and returns one only when it is exactly
+/// `1`; returns zero for cleared (`0`) and every error status (`2..=255`).
+/// Raw ARM is `ldrb r0,[r0]; rsbs r0,r0,#1; movcc r0,#0; bx lr`. All 25
+/// callers perform the result gate themselves (`bl; cmp r0,#0; beq <bail>`,
+/// e.g. 0x080f8d74), so there is no NULL guard or conditional-call path to
+/// preserve. The exact extent is 0x08283144..0x08283153: the preceding
+/// function ends at 0x08283140 and `parse_result_clear` begins at
+/// 0x08283154; there is no literal pool.
+///
+/// Deliberate deviations: none. A boolean comparison expresses the ARM
+/// carry-flag sequence without changing its full `u32` return ABI.
+///
+/// # Safety
+///
+/// `record` must point to one readable status byte. The original dereferences
+/// it unconditionally.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn parse_result_is_ok(record: *const u8) -> u32 {
+    (record.read() == 1) as u32
+}
+
 /// parse_result_destroy — original: `FUN_08283178` @ 0x08283178
 /// (4 bytes; **46 `bl` call sites, all unconditional, 0 `b`**,
 /// binary-scanned by decoding every B/BL word in osos.dec).
@@ -259,6 +285,19 @@ mod tests {
         let mut record = Record([0u8; 5]);
         unsafe { parse_result_init_alias_3134(record.0.as_mut_ptr(), 2, 5, 0x3a00) };
         assert_eq!(&record.0[..4], &[2, 5, 0x00, 0x3a]);
+    }
+
+    #[test]
+    fn is_ok_requires_exactly_status_one_and_preserves_record() {
+        // Call sites use this as the parser-result gate: cleared is not
+        // success, and neither are the observed error status nor high bytes.
+        let mut record = Record([0xa5, 0x5a, 0xc3, 0x3c, 0x96]);
+        for (status, expected) in [(0, 0), (1, 1), (2, 0), (0xff, 0)] {
+            record.0[0] = status;
+            let before = record.0;
+            assert_eq!(unsafe { parse_result_is_ok(record.0.as_ptr()) }, expected);
+            assert_eq!(record.0, before, "is_ok only loads the status byte");
+        }
     }
 
     #[test]
