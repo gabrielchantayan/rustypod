@@ -13,6 +13,7 @@ pub mod command_dispatch;
 pub mod class_registry;
 pub mod descriptor_layout;
 pub mod context;
+pub mod controller_history_select;
 pub mod context_scope;
 pub mod flag_2c_is_one;
 pub mod element_table;
