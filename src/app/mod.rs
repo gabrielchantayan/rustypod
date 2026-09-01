@@ -11,6 +11,7 @@ pub mod callback_target_slot_14_dispatch;
 pub mod callback_target_slot_20_dispatch;
 pub mod command_dispatch;
 pub mod class_registry;
+pub mod descriptor_layout;
 pub mod context;
 pub mod context_scope;
 pub mod flag_2c_is_one;
