@@ -1,11 +1,15 @@
 //! The path class's constructors over caller-supplied two-word string
-//! object storage: base-construct from a C string and re-plant the
-//! vtable word with the StringObject-derived path class's vtable, or
-//! default-construct an empty path object directly.
+//! object storage: base-construct from a C string or StringObject and
+//! re-plant the derived vtable word, or default-construct an empty path
+//! object directly.
 //!
 //! Ports:
 //! - [`path_object_construct`] — original: `FUN_08279284` @ 0x08279284
 //!   (20 bytes; **24 `bl` call sites**, grep on `decomp/osos.asm`).
+//! - [`path_object_construct_from_string_object`] — original:
+//!   `FUN_0827929c` @ 0x0827929c (20 bytes of code plus its 4-byte
+//!   vtable literal @ 0x082792b0, so 24 bytes of true extent; **25 plain
+//!   `bl` call sites, 0 `b`, 0 predicated**, binary-scanned).
 //! - [`path_object_copy_construct`] — original: `FUN_082792b4` @
 //!   0x082792b4 (20 bytes of code plus the 4-byte vtable literal @
 //!   0x082792c8, so 24 bytes of true extent; **28 `bl` call sites: 27
@@ -214,6 +218,52 @@ pub unsafe extern "C" fn path_object_construct(
     path: *const u8,
 ) -> *mut StringObject {
     let this = string_object_construct_from_cstr(this, path);
+    (*this).vtable = PATH_OBJECT_VTABLE_ADDRESS as *const StringObjectVtable;
+    this
+}
+
+/// path_object_construct_from_string_object — original: `FUN_0827929c`
+/// @ 0x0827929c (20 bytes of code plus the 4-byte vtable literal @
+/// 0x082792b0 = 0x089a60d8, so 24 bytes of true extent; the next
+/// function, [`path_object_copy_construct`], starts at 0x082792b4.
+/// **25 plain `bl` call sites, 0 `b`, 0 predicated calls, and zero
+/// data-word references**, binary-scanned by decoding every B/BL word in
+/// `work/firmware/osos.dec`; it is never virtually dispatched).
+///
+/// Constructs the StringObject-derived path class at `this` from the
+/// already-constructed base [`StringObject`] `source`: it forwards both
+/// registers unchanged to [`string_object_copy_construct`], overwrites
+/// the returned object's +0x00 base vtable with the derived
+/// [`PATH_OBJECT_VTABLE_ADDRESS`] identity, then returns the base
+/// constructor's result verbatim. The 25 callers construct from
+/// StringObjects—for example, 0x080474d4 takes the StringObject result of
+/// `string_owner_embedded_init` in r1—rather than a C string; the
+/// byte-identical [`path_object_copy_construct`] sibling has the narrower
+/// PathObject-source type at its C++ boundary.
+///
+/// The derived-vtable overwrite is unconditional after the base copy:
+/// null-payload sources, failed payload duplication, and `this == source`
+/// still receive the derived identity. Neither pointer is NULL-guarded,
+/// matching the base constructor's faults; unlike the copy sibling no
+/// caller is predicated, so all 25 callers rely on valid storage.
+///
+/// Deliberate deviations: calls the ported base constructor directly, and
+/// uses the ROM vtable identity constant instead of a host-callable vtable.
+/// A distinct link section prevents LLVM from folding this export into its
+/// byte-identical copy-constructor sibling.
+///
+/// # Safety
+///
+/// `this` must point to writable two-word raw storage; `source` must point
+/// to a readable [`StringObject`], unless it is exactly `this`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[link_section = ".text.path_object_construct_from_string_object"]
+pub unsafe extern "C" fn path_object_construct_from_string_object(
+    this: *mut StringObject,
+    source: *const StringObject,
+) -> *mut StringObject {
+    let this = string_object_copy_construct(this, source);
     (*this).vtable = PATH_OBJECT_VTABLE_ADDRESS as *const StringObjectVtable;
     this
 }
@@ -577,6 +627,55 @@ mod tests {
         let result = string_object_copy_construct(this, source);
         (*result).vtable = PATH_OBJECT_VTABLE_ADDRESS as *const StringObjectVtable;
         result
+    }
+
+    // --- path_object_construct_from_string_object @ 0x0827929c ---
+
+    #[test]
+    fn construct_from_string_object_matches_copy_composition_across_sources() {
+        let payloads = [
+            core::ptr::null_mut(),
+            b"\0".as_ptr() as *mut u8,
+            b"a\0".as_ptr() as *mut u8,
+            SOURCE_PAYLOAD.as_ptr() as *mut u8,
+        ];
+        for payload in payloads {
+            let source = source_object(payload);
+            let mut ported = garbage_storage();
+            let mut model = garbage_storage();
+            unsafe {
+                assert_eq!(
+                    path_object_construct_from_string_object(&mut ported, &source),
+                    &mut ported as *mut _,
+                    "the base copy result flows through r0 unchanged"
+                );
+                assert_eq!(
+                    copy_construct_reference(&mut model, &source),
+                    &mut model as *mut _,
+                    "the independent composition returns its storage"
+                );
+                assert_eq!(ported.vtable as usize, model.vtable as usize);
+                assert_eq!(ported.payload, model.payload);
+                assert_eq!(
+                    source.payload, payload,
+                    "constructing a path never modifies its StringObject source"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn construct_from_string_object_self_preserves_payload() {
+        let mut storage = garbage_storage();
+        let this = core::ptr::addr_of_mut!(storage);
+        unsafe {
+            assert_eq!(path_object_construct_from_string_object(this, this), this);
+            assert_eq!(storage.vtable as usize, PATH_OBJECT_VTABLE_ADDRESS);
+            assert_eq!(
+                storage.payload, GARBAGE_PAYLOAD,
+                "the base copy constructor's address guard skips the payload clear"
+            );
+        }
     }
 
     #[test]
