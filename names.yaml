@@ -36116,6 +36116,51 @@ functions:
       with the same 0x089a60d8 literal-pool word; the diff is the
       crate fp frame.
 
+  - address: 0x0827929c
+    ghidra: FUN_0827929c
+    name: path_object_construct_from_string_object
+    size: 20
+    sig: "StringObject *path_object_construct_from_string_object(StringObject *this, const StringObject *source)"
+    module: app/path_object_construct
+    status: ported
+    renames:
+      param_1/r0: this (raw two-word PathObject storage, forwarded
+        unchanged to the base StringObject copy constructor)
+      param_2/r1: source (already-constructed StringObject, forwarded
+        unchanged to the base copy constructor)
+      FUN_082773e0: string_object_copy_construct (ported, called
+        directly)
+      DAT_082792b0: "PATH_OBJECT_VTABLE_ADDRESS (0x089a60d8, the
+        derived StringObject path-class vtable)"
+      r4: DEAD - pushed and popped but never written (non-leaf frame
+        etiquette)
+    notes: >-
+      ADS C++ StringObject-to-PathObject constructor: raw ARM at
+      0x0827929c..0x082792b0 is push {r4,lr}; bl 0x082773e0; ldr
+      r1,[pc,#4]; str r1,[r0]; pop {r4,pc}, followed by the literal-pool
+      word @ 0x082792b0 = 0x089a60d8. The next separately linked,
+      byte-identical copy-constructor sibling starts at 0x082792b4, so
+      Ghidra's 20-byte extent excludes the literal and the true extent is
+      24 bytes. The base StringObject copy constructor receives r0/r1
+      unchanged, then its returned r0 has +0x00 overwritten
+      unconditionally with the derived vtable identity and is returned
+      verbatim. 25 plain bl call sites, 0 tail b, 0 predicated calls, and
+      zero data-word references, binary-scanned by decoding every B/BL
+      word in osos.dec; this constructor is never virtually dispatched.
+      At 0x080474d4, for example, r1 is the StringObject returned by
+      string_owner_embedded_init, confirming the StringObject source
+      boundary. No NULL guard exists in the veneer or its callers;
+      invalid this/source faults in the base constructor. Deliberate
+      deviations: the port calls the existing base port directly and
+      plants the ROM vtable address as an identity constant rather than a
+      host-callable pointer. It has a distinct link section so LLVM cannot
+      fold this export into byte-identical path_object_copy_construct.
+      Host tests cover null, empty, one-byte, and nonempty source payloads,
+      unchanged source storage, base-result return identity, derived vtable
+      replacement, and the this == source path that preserves the old
+      payload word. match.py (exit 1, diff expected): same non-leaf call /
+      literal load / vtable store / return structure; crate frame and
+      modern LLVM scheduling differ from ADS.
   - address: 0x082792b4
     ghidra: FUN_082792b4
     name: path_object_copy_construct
