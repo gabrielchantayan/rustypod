@@ -47,6 +47,9 @@
 //! - `calloc_tag4` — original: `FUN_0805d1dc` @ 0x0805d1dc (8 bytes;
 //!   23 `bl` call sites). The family's zerofill-alloc entry:
 //!   `mov r1, #4; b 0x0807b254` (tail call `calloc_wrapper`).
+//! - `malloc_tag4` — original: `FUN_0805d1d4` @ 0x0805d1d4 (8 bytes;
+//!   23 `bl` call sites). The family's plain-alloc entry:
+//!   `mov r1, #4; b 0x080eb67c` (tail call `malloc_wrapper`).
 //! - `cxx_vec_delete` — original: `FUN_0803170c` @ 0x0803170c (16 bytes).
 //!   C++ `delete[]` with destructors: cookie-driven `__cpp_finalise` walk
 //!   via the null-guard veneer @ 0x082ab254, then the tag-3 delete.
@@ -464,9 +467,9 @@ pub unsafe extern "C" fn operator_delete_tag3(ptr: *mut u8) {
 /// with the magic 0x4d656d48 ("MemH"), the destructor @ 0x0805d028
 /// validates that magic and releases both with tag 4, and the family's
 /// alloc twins sit immediately below the memset/memcmp block at
-/// 0x0805d1d4 (`mov r1, #4; b malloc_wrapper`, still unported) and
-/// 0x0805d1dc (`mov r1, #4; b calloc_wrapper`, ported as
-/// [`calloc_tag4`] below).
+/// 0x0805d1d4 (`mov r1, #4; b malloc_wrapper`, ported as
+/// [`malloc_tag4`] below) and 0x0805d1dc (`mov r1, #4; b calloc_wrapper`,
+/// ported as [`calloc_tag4`] below).
 ///
 /// Deviations: the original's tail branch is a plain call here (Rust has
 /// no guaranteed tail calls), and `free_wrapper` dispatches through
@@ -496,7 +499,7 @@ pub unsafe extern "C" fn free_tag4(ptr: *mut u8) {
 /// caller tag to 4 and hands `size` straight to `calloc_wrapper`,
 /// returning whatever it returns (NULL included — no out-of-memory
 /// check here, mirroring the original's unconditional tail branch).
-/// Structural twin of the still-unported malloc veneer @ 0x0805d1d4
+/// Structural twin of the malloc veneer [`malloc_tag4`] @ 0x0805d1d4
 /// (`mov r1, #4; b malloc_wrapper`). The 23 call sites cluster in two
 /// regions: five at 0x080585a0..0x080588c0 and seven at
 /// 0x0805df44..0x0805e580 (immediately above the MemH family), the rest
@@ -514,6 +517,45 @@ pub unsafe extern "C" fn free_tag4(ptr: *mut u8) {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn calloc_tag4(size: usize) -> *mut u8 {
     calloc_wrapper(size, TAG_MEM_BUFFER)
+}
+
+/// malloc_tag4 — original: `FUN_0805d1d4` @ 0x0805d1d4 (8 bytes; 23 `bl`
+/// call sites, binary-verified by decoding every B/BL word in osos.dec —
+/// none predicated, no tail `b`, matching Ghidra's count). Ghidra's
+/// 8-byte extent is exactly right: the word below @ 0x0805d1dc is the
+/// `mov r1, #4` starting [`calloc_tag4`]. Whole body:
+///
+/// ```text
+/// 0805d1d4:  mov r1, #4        ; caller tag
+/// 0805d1d8:  b   0x080eb67c    ; tail call malloc_wrapper(size, 4)
+/// ```
+///
+/// The plain-alloc entry of the "MemH" managed-buffer family @
+/// 0x0805d028..0x0805d1e4 (the free half is [`free_tag4`], the zerofill
+/// half [`calloc_tag4`]): pins the caller tag to 4 and hands `size`
+/// straight to `malloc_wrapper`, returning whatever it returns (NULL
+/// included — no out-of-memory check here, mirroring the original's
+/// unconditional tail branch). Unlike `calloc_tag4`'s clustered sites,
+/// the 23 `bl` sites are scattered across the image: 0x0803c148,
+/// 0x08057ce0, 0x0805de68, 0x0805e52c, 0x0805f600, 0x080680d4,
+/// 0x080681f0, 0x0806e4f8, 0x080866fc, 0x0808d0c4, 0x0808d0ec,
+/// 0x0809d9b8, 0x0809ea84, 0x080be6f0, 0x080be874, 0x080ca020,
+/// 0x080ca790, 0x080ce588, 0x080ce5c0, 0x080d1b50, 0x080d8cc0,
+/// 0x080da6b0, 0x080f0758.
+///
+/// Deviations: the original's tail branch is a plain call here (Rust has
+/// no guaranteed tail calls), and `malloc_wrapper` dispatches through
+/// the `HEAP_OPS.alloc` slot instead of branching to 0x080eb67c
+/// directly. `inline(never)`: on device 23 call sites reach this with
+/// `bl`, and an 8-byte body is exactly what LLVM would otherwise inline
+/// away, dragging the whole lazy-heap-init path into every caller.
+/// `malloc_wrapper` is reached through its symbol, not a builtin —
+/// LLVM cannot swap the call for a libc `malloc` here because the
+/// callee carries the tag argument.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn malloc_tag4(size: usize) -> *mut u8 {
+    malloc_wrapper(size, TAG_MEM_BUFFER)
 }
 
 /// cpp_finalise_null_guard — original @ 0x082ab254 (16 bytes:
@@ -1072,6 +1114,42 @@ pub(crate) mod tests {
             // allocation surfaces as NULL, not as a retry.
             set_alloc_ret(core::ptr::null_mut());
             assert!(calloc_tag4(64).is_null());
+        }
+    }
+
+    #[test]
+    fn malloc_tag4_allocates_with_tag_4_and_runs_the_lazy_init() {
+        let _lock = mock_heap();
+        unsafe {
+            assert_eq!(malloc_tag4(0x120), BLOCK_A as *mut u8);
+            assert_eq!(ALLOC_CALLS, 1, "routes to the plain-alloc slot");
+            assert_eq!(CREATE_CALLS, 1, "the veneer runs the lazy heap init");
+            assert_eq!(LAST_ALLOC_HEAP, core::ptr::addr_of_mut!(FAKE_HANDLE));
+            assert_eq!(LAST_ALLOC_SIZE, 0x120, "size passes through verbatim");
+            assert_eq!(LAST_ALLOC_TAG, 4, "tag 4, not the operator-new tags");
+            assert_eq!(ALLOC_ZERO_CALLS, 0, "malloc must never touch the zerofill path");
+            assert_eq!(FREE_CALLS, 0, "alloc must never touch the free path");
+        }
+    }
+
+    #[test]
+    fn malloc_tag4_has_no_size_guard_and_passes_failure_through() {
+        let _lock = mock_heap();
+        unsafe {
+            // `mov r1,#4; b malloc_wrapper` — unconditional, like the
+            // operator_new veneers: size 0 reaches the heap core
+            // untouched.
+            for size in [0usize, 1, 48, 0x628] {
+                let before = ALLOC_CALLS;
+                assert_eq!(malloc_tag4(size), BLOCK_A as *mut u8);
+                assert_eq!(ALLOC_CALLS, before + 1, "no guard on the alloc side");
+                assert_eq!(LAST_ALLOC_SIZE, size);
+                assert_eq!(LAST_ALLOC_TAG, 4);
+            }
+            // The heap's return value flows back untouched — a failed
+            // allocation surfaces as NULL, not as a retry.
+            set_alloc_ret(core::ptr::null_mut());
+            assert!(malloc_tag4(64).is_null());
         }
     }
 
