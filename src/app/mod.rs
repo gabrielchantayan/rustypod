@@ -69,6 +69,7 @@ pub mod stream_context_reset_notify;
 pub mod string_owner_init;
 pub mod triple_scaled_cursor_advance;
 pub mod tick_accumulator;
+pub mod timer_reset;
 pub mod task_registry;
 pub mod template_binding;
 pub mod tracker_record;
