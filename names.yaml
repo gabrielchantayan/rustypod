@@ -42582,3 +42582,53 @@ functions:
       decode, and descending ldr/str [rN, r2, lsl #2] loop with the
       0x4b6143ff literal pool word; differs only by the crate fp frame
       and register allocation, the accepted house profile.
+
+  - address: 0x080e3318
+    ghidra: FUN_080e3318
+    name: wmcodec_update_bits
+    size: 28
+    sig: "void wmcodec_update_bits(uint reg, uint mask, uint value)"
+    module: drivers/wmcodec
+    status: ported
+    renames:
+      param_1/r0: reg
+      param_2/r1: mask
+      param_3/r2: value
+      DAT_080e3334: WMCODEC_SHADOW_ADDRESS (0x08ad9de4, same word as DAT_080da1a4)
+    notes: >-
+      Shadow-cached read-modify-write of one 9-bit register on the I2C
+      device at slave 0x1a - a Wolfson-format audio codec (the callee's
+      2-wire control word "(reg << 1) | (value >> 8) & 1, value & 0xff"
+      is the Wolfson 2-wire interface; distinct from the byte-register
+      codec at slave 0x4a in drivers/codec.rs). Body: ldrh the shadow
+      halfword at 0x08ad9de4 + reg*2 (zero-extended, no bounds check),
+      merged = (old & ~mask) | (value & mask) in 32 bits, then tail
+      branch "b 0x080da15c" - the register write (unported), which
+      brackets the FUN_0836bb84 I2C write to slave 0x1a with the
+      kernel_sem5_wait/rom_sem_signal(5) pair and strh-stores merged
+      back into shadow[reg] itself. The shadow table is 68 u16 entries
+      (count from the dump loop "cmp r0, #0x44" @ 0x080a9834) in osos
+      BSS past the end of osos.dec, zero-filled at boot. Callers are
+      all audio routing/power config (FUN_0808f894 volume latch regs
+      0/1, route regs 0x18/0x19/0x1a; FUN_080b5248 reset writes 0x17 /
+      0x1c = 0 dB). Extent self-verified: 7 instructions = 28 bytes,
+      literal-pool table word at 0x080e3334, next function's
+      "push {r4,r5,r6,lr}" at 0x080e3338; Ghidra's 28 bytes is correct.
+      Call count verified by decoding every ARM B/BL word in osos.dec:
+      exactly 24 direct call sites, all unconditional bl, 0 predicated
+      forms; the address occurs in no data word, so it is not dispatched
+      virtually. Deliberate deviations: the tail branch dispatches
+      through the installable volatile slot WMCODEC_WRITE_REG (house
+      pattern, blx in place of b) whose target default transmutes the
+      retail address 0x080da15c, and the shadow is addressed through a
+      cfg-split accessor (retail BSS on target, module-owned 68-entry
+      replica on host - the table is pure RAM, present in no fixture).
+      Host tests (5): merge formula over 12 old/mask/value cases
+      including the bit-8 boundary, full-word mask passes the merged
+      word to the writer untruncated (writer keeps bit 8 + low byte
+      itself), the shadow is read but never written by this function
+      (the strh is the callee's), only the indexed entry is read, and
+      the register index is forwarded unchanged. match.py structural
+      diff (exit-1 expected): same and/bic/orr merge and ldrh from
+      table + reg*2; differs by the volatile slot load + bx r2 tail
+      dispatch in place of "b 0x080da15c", the documented deviation.
