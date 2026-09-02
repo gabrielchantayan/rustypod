@@ -42829,6 +42829,52 @@ functions:
       focused host tests cover every flag byte, a zero payload, and payload
       suppression when bit 0 is set.
 
+  # --- adaptive tick accumulator step ---
+  - address: 0x081bb3a0
+    ghidra: FUN_081bb3a0
+    name: tick_accumulator_step
+    size: 48
+    sig: "u32 tick_accumulator_step(TickAccumulator *accumulator, u32 input, u32 measured_rate)"
+    module: app/tick_accumulator
+    status: ported
+    renames:
+      param_1/r0: accumulator
+      r1: input
+      r2: measured_rate
+      iVar1/r0: update_result
+      FUN_081bb2a0: tick_accumulator_update
+      FUN_081bb384: tick_millis
+    notes: >-
+      EXTENT: exactly 48 bytes, 12 instructions, 0x081bb3a0..0x081bb3d0;
+      the next separately linked function (FUN_081bb3d0) begins
+      immediately at 0x081bb3d0 and there is no trailing literal pool.
+      CALL COUNT: decoding every ARM B/BL word in work/firmware/osos.dec
+      finds exactly 23 direct call sites, all unconditional plain bl and
+      no predicated BL forms, matching the assignment figure. SIGNATURE:
+      Ghidra reports one parameter, but the bl at 0x081bb3b8 to the
+      update sibling 0x081bb2a0 sets only r0; r1/r2 pass through from
+      this function's own caller, and call sites verifiably load both
+      argument registers first (mov r1,r4 / mov r2,#0 at
+      0x08113dfc..0x08113e04; ldr r1,[r5,#0xc] / mov r2,r6 at
+      0x0811a278..0x0811a284), so the true signature is three-argument.
+      ALGORITHM: if last_tick_ms (+0x00) is nonzero, call the still
+      unported update body 0x081bb2a0 (its sole call site) with all
+      three arguments and take its r0 (the __rt_sdiv output-tick
+      quotient; Ghidra mistypes the sibling void), else result = 0;
+      store result to update_result (+0x20), stamp last_tick_ms from
+      the unported tick_millis helper 0x081bb384, return update_result.
+      A zero last_tick_ms (fresh or externally cleared accumulator)
+      skips the update and zeroes the stored result. No NULL guard on
+      the accumulator, matching the unconditional ldr [r0]. DEVIATION:
+      the two unported callees ride the module's existing operation
+      table (direct retail entry calls on target, fixtures on host),
+      the same seam pattern as tick_accumulator_construct; match.py
+      shows the expected blx-through-constant indirection, with
+      0x081bb2a0 as a literal word and tick_millis derived as +0xe4.
+      Host tests cover the seeded path (argument forwarding, result
+      store and re-stamp), the zero-tick skip (update never runs,
+      update_result zeroed), and zero-result propagation.
+
   # --- adaptive tick accumulator constructor ---
   - address: 0x081bb450
     ghidra: FUN_081bb450
