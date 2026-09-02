@@ -28,6 +28,26 @@ unsafe fn ata_semaphore_id(index: usize) -> u32 {
     }
 }
 
+/// ata_semaphore_wait — original: `FUN_082d7934` @ `0x082d7934` (12 bytes).
+///
+/// Loads the kernel semaphore id from the ATA controller's eight-word BSS
+/// table at `0x08adb66c[index]`, then tail-branches to the ROM semaphore
+/// wait veneer @ `0x08037e08` (`0x22003fd0`), whose result word passes back
+/// through the tail branch. The table access and wait are intentionally
+/// unguarded: callers load `index` from their controller object's halfword
+/// at `+0x78`; all 22 `bl` sites are unconditional, with zero predicated
+/// forms, zero tail `b` sites and no data word in osos referencing this
+/// entry — it is never dispatched virtually.
+///
+/// Device builds read the original BSS table directly. Host builds use the
+/// private table above so tests can exercise the lookup without mapping the
+/// firmware address; both retain the original unchecked word-index access.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_semaphore_wait(index: usize) -> usize {
+    task_lock::rom_sem_wait(ata_semaphore_id(index) as usize)
+}
+
 /// ata_semaphore_signal — original: `FUN_082d7954` @ `0x082d7954` (12 bytes).
 ///
 /// Loads the kernel semaphore id from the ATA controller's eight-word BSS
@@ -60,11 +80,19 @@ mod tests {
     static TABLE_LOCK: Mutex<()> = Mutex::new(());
     static LAST_SIGNAL: AtomicUsize = AtomicUsize::new(usize::MAX);
     static SIGNAL_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static LAST_WAIT: AtomicUsize = AtomicUsize::new(usize::MAX);
+    static WAIT_COUNT: AtomicUsize = AtomicUsize::new(0);
 
     unsafe extern "C" fn record_signal(sem: usize) -> usize {
         LAST_SIGNAL.store(sem, Ordering::SeqCst);
         SIGNAL_COUNT.fetch_add(1, Ordering::SeqCst);
         0xfeed_cafe
+    }
+
+    unsafe extern "C" fn record_wait(sem: usize) -> usize {
+        LAST_WAIT.store(sem, Ordering::SeqCst);
+        WAIT_COUNT.fetch_add(1, Ordering::SeqCst);
+        0x0bad_f00d
     }
 
     fn install() -> (MutexGuard<'static, ()>, MutexGuard<'static, ()>, RomThunkOps, [u32; 8]) {
@@ -75,6 +103,7 @@ mod tests {
             let saved_table = addr_of!(HOST_ATA_SEMAPHORE_IDS).read_volatile();
             let mut patched = saved_rom;
             patched.rom_sem_signal = record_signal;
+            patched.rom_sem_wait = record_wait;
             addr_of_mut!(ROM_KERNEL).write_volatile(patched);
             (table_guard, rom_guard, saved_rom, saved_table)
         }
@@ -103,6 +132,30 @@ mod tests {
             assert_eq!(ata_semaphore_signal(7), 0xfeed_cafe);
             assert_eq!(LAST_SIGNAL.load(Ordering::SeqCst), 0x87);
             assert_eq!(SIGNAL_COUNT.load(Ordering::SeqCst), 2);
+        }
+        restore(state);
+    }
+
+    #[test]
+    fn wait_uses_each_table_word_and_returns_rom_result() {
+        let state = install();
+        unsafe {
+            addr_of_mut!(HOST_ATA_SEMAPHORE_IDS).write_volatile([
+                0x10, 0x21, 0x32, 0x43, 0x54, 0x65, 0x76, 0x87,
+            ]);
+            LAST_WAIT.store(usize::MAX, Ordering::SeqCst);
+            WAIT_COUNT.store(0, Ordering::SeqCst);
+            SIGNAL_COUNT.store(0, Ordering::SeqCst);
+
+            assert_eq!(ata_semaphore_wait(0), 0x0bad_f00d);
+            assert_eq!(LAST_WAIT.load(Ordering::SeqCst), 0x10);
+            assert_eq!(ata_semaphore_wait(6), 0x0bad_f00d);
+            assert_eq!(LAST_WAIT.load(Ordering::SeqCst), 0x76);
+            assert_eq!(ata_semaphore_wait(7), 0x0bad_f00d);
+            assert_eq!(LAST_WAIT.load(Ordering::SeqCst), 0x87);
+            assert_eq!(WAIT_COUNT.load(Ordering::SeqCst), 3);
+            // The wait hook slot must not be confused with the signal slot.
+            assert_eq!(SIGNAL_COUNT.load(Ordering::SeqCst), 0);
         }
         restore(state);
     }
