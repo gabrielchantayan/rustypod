@@ -44,6 +44,9 @@
 //!   58 `bl`-form + 13 tail-branch call sites). The tag-4 deallocation
 //!   entry of the "MemH" managed-buffer family @ 0x0805d028..0x0805d1e4:
 //!   `mov r1, #4; b 0x080e7970`, with no NULL guard of its own.
+//! - `calloc_tag4` — original: `FUN_0805d1dc` @ 0x0805d1dc (8 bytes;
+//!   23 `bl` call sites). The family's zerofill-alloc entry:
+//!   `mov r1, #4; b 0x0807b254` (tail call `calloc_wrapper`).
 //! - `cxx_vec_delete` — original: `FUN_0803170c` @ 0x0803170c (16 bytes).
 //!   C++ `delete[]` with destructors: cookie-driven `__cpp_finalise` walk
 //!   via the null-guard veneer @ 0x082ab254, then the tag-3 delete.
@@ -461,8 +464,9 @@ pub unsafe extern "C" fn operator_delete_tag3(ptr: *mut u8) {
 /// with the magic 0x4d656d48 ("MemH"), the destructor @ 0x0805d028
 /// validates that magic and releases both with tag 4, and the family's
 /// alloc twins sit immediately below the memset/memcmp block at
-/// 0x0805d1d4 (`mov r1, #4; b malloc_wrapper`) and 0x0805d1dc
-/// (`mov r1, #4; b calloc_wrapper`) — both still unported.
+/// 0x0805d1d4 (`mov r1, #4; b malloc_wrapper`, still unported) and
+/// 0x0805d1dc (`mov r1, #4; b calloc_wrapper`, ported as
+/// [`calloc_tag4`] below).
 ///
 /// Deviations: the original's tail branch is a plain call here (Rust has
 /// no guaranteed tail calls), and `free_wrapper` dispatches through
@@ -474,6 +478,42 @@ pub unsafe extern "C" fn operator_delete_tag3(ptr: *mut u8) {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn free_tag4(ptr: *mut u8) {
     free_wrapper(ptr, TAG_MEM_BUFFER);
+}
+
+/// calloc_tag4 — original: `FUN_0805d1dc` @ 0x0805d1dc (8 bytes; 23 `bl`
+/// call sites, binary-verified by decoding every B/BL word in osos.dec —
+/// none predicated, no tail `b`). Ghidra's 8-byte extent is exactly
+/// right: the word below @ 0x0805d1e4 is a `push {r4-r8, lr}` starting
+/// the MemH handle resize/realloc function. Whole body:
+///
+/// ```text
+/// 0805d1dc:  mov r1, #4        ; caller tag
+/// 0805d1e0:  b   0x0807b254    ; tail call calloc_wrapper(size, 4)
+/// ```
+///
+/// The zerofill-alloc entry of the "MemH" managed-buffer family @
+/// 0x0805d028..0x0805d1e4 (the free half is [`free_tag4`]): pins the
+/// caller tag to 4 and hands `size` straight to `calloc_wrapper`,
+/// returning whatever it returns (NULL included — no out-of-memory
+/// check here, mirroring the original's unconditional tail branch).
+/// Structural twin of the still-unported malloc veneer @ 0x0805d1d4
+/// (`mov r1, #4; b malloc_wrapper`). The 23 call sites cluster in two
+/// regions: five at 0x080585a0..0x080588c0 and seven at
+/// 0x0805df44..0x0805e580 (immediately above the MemH family), the rest
+/// scattered (0x08044638, 0x080478d0, 0x08047c10, 0x0805b778,
+/// 0x08063a08, 0x08068a54, 0x08068a6c, 0x0807f350, 0x0807fb04,
+/// 0x0809ea6c, 0x080e35c0).
+///
+/// Deviations: the original's tail branch is a plain call here (Rust has
+/// no guaranteed tail calls), and `calloc_wrapper` dispatches through
+/// the `HEAP_OPS.alloc_zero` slot instead of branching to 0x0807b254
+/// directly. `inline(never)`: on device 23 call sites reach this with
+/// `bl`, and an 8-byte body is exactly what LLVM would otherwise inline
+/// away, dragging the whole lazy-heap-init path into every caller.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn calloc_tag4(size: usize) -> *mut u8 {
+    calloc_wrapper(size, TAG_MEM_BUFFER)
 }
 
 /// cpp_finalise_null_guard — original @ 0x082ab254 (16 bytes:
@@ -996,6 +1036,42 @@ pub(crate) mod tests {
             assert_eq!(FREE_CALLS, 1, "NULL still reaches the heap");
             assert!(LAST_FREE_PTR.is_null());
             assert_eq!(LAST_FREE_TAG, 4);
+        }
+    }
+
+    #[test]
+    fn calloc_tag4_allocates_zerofilled_with_tag_4_and_runs_the_lazy_init() {
+        let _lock = mock_heap();
+        unsafe {
+            assert_eq!(calloc_tag4(0x120), BLOCK_A as *mut u8);
+            assert_eq!(ALLOC_ZERO_CALLS, 1, "routes to the zerofill slot");
+            assert_eq!(CREATE_CALLS, 1, "the veneer runs the lazy heap init");
+            assert_eq!(LAST_ALLOC_ZERO_HEAP, core::ptr::addr_of_mut!(FAKE_HANDLE));
+            assert_eq!(LAST_ALLOC_ZERO_SIZE, 0x120, "size passes through verbatim");
+            assert_eq!(LAST_ALLOC_ZERO_TAG, 4, "tag 4, not the operator-new tags");
+            assert_eq!(ALLOC_CALLS, 0, "calloc must never touch the plain alloc path");
+            assert_eq!(FREE_CALLS, 0, "alloc must never touch the free path");
+        }
+    }
+
+    #[test]
+    fn calloc_tag4_has_no_size_guard_and_passes_failure_through() {
+        let _lock = mock_heap();
+        unsafe {
+            // `mov r1,#4; b calloc_wrapper` — unconditional, like the
+            // operator_new veneers: size 0 reaches the heap core
+            // untouched.
+            for size in [0usize, 1, 48, 0x628] {
+                let before = ALLOC_ZERO_CALLS;
+                assert_eq!(calloc_tag4(size), BLOCK_A as *mut u8);
+                assert_eq!(ALLOC_ZERO_CALLS, before + 1, "no guard on the alloc side");
+                assert_eq!(LAST_ALLOC_ZERO_SIZE, size);
+                assert_eq!(LAST_ALLOC_ZERO_TAG, 4);
+            }
+            // The heap's return value flows back untouched — a failed
+            // allocation surfaces as NULL, not as a retry.
+            set_alloc_ret(core::ptr::null_mut());
+            assert!(calloc_tag4(64).is_null());
         }
     }
 

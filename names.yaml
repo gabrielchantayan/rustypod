@@ -3428,6 +3428,37 @@ functions:
       the same shape already accepted for operator_new_tag3 @ 0x082aad74
       and operator_delete_tag3 @ 0x082aad14.
 
+  - address: 0x0805d1dc
+    ghidra: FUN_0805d1dc
+    name: calloc_tag4
+    size: 8
+    sig: "u8 *calloc_tag4(usize size)"
+    module: heap/veneers
+    vars: {param_1: size}
+    status: ported
+    notes: >-
+      The zerofill-alloc entry of the "MemH" managed-buffer family (free
+      half: free_tag4 @ 0x0805d070). Whole body, verified against the raw
+      image (words e3a01004 ea00781b): `mov r1,#4; b 0x0807b254` — an
+      unconditional tail branch into calloc_wrapper @ 0x0807b254 (already
+      ported) with caller tag 4. Extent confirmed by the neighbour: the
+      word below @ 0x0805d1e4 is `push {r4-r8,lr}` starting the MemH
+      handle resize/realloc function, so the function is exactly 8 bytes
+      (Ghidra's size is right for once). Call sites counted by decoding
+      every ARM B/BL word in osos.dec: exactly 23 `bl`, none predicated,
+      no tail `b` — matching Ghidra's count. They cluster at
+      0x080585a0..0x080588c0 (5) and 0x0805df44..0x0805e580 (7), the rest
+      scattered. Structural twin of the still-unported malloc veneer @
+      0x0805d1d4 (`mov r1,#4; b malloc_wrapper`). No NULL/size guard:
+      size 0 and a failed (NULL) allocation pass through untouched, like
+      the operator_new veneers. Deviations: the tail branch is a plain
+      call, and the alloc dispatch goes through the HEAP_OPS.alloc_zero
+      slot instead of branching to 0x0807b254 directly. #[inline(never)]
+      for the 23 `bl` targets. match.py structural: the port is the
+      inlined lazy heap init plus the ops-slot alloc_zero tail call with
+      `mov r2,#4` carrying the tag — the same shape already accepted for
+      free_tag4 @ 0x0805d070 and operator_new_tag3 @ 0x082aad74.
+
   - address: 0x08030f44
     name: heap_panic
     size: 32
