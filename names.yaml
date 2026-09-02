@@ -38593,6 +38593,66 @@ functions:
       the inlined added-hash probe (`NUM_OBJ` materialized as
       `mov r8,#105; orr r8,r8,#512`) and the inlined halving search.
       #[inline(never)] for the 57 `bl` targets.
+
+  # --- OpenSSL BIO layer: the formatted-write front end ---
+  # The bio_lib.c/b_print.c cluster sits in 0x0803d294-0x0803da74:
+  # BIO_ctrl @ 0x0803d294 (callback code 6 = BIO_CB_CTRL), BIO_push @
+  # 0x0803d69c (links next_bio +0x24 / prev_bio +0x28, notifies with
+  # BIO_ctrl(b, BIO_CTRL_PUSH=6, 0, 0)), BIO_puts' variadic twin @
+  # 0x0803d954, BIO_vprintf @ 0x0803d970 (doapr engine @ 0x080e7a68
+  # into a 2048-byte stack buffer, growing into a traced_free'd
+  # allocation, "doapr()" literal @ 0x0803da1c), BIO_write @
+  # 0x0803da74 (callback code 3 = BIO_CB_WRITE, method bwrite at
+  # vtable+0x08, num_write byte counter at bio+0x34; failures log
+  # through diag_ring_record with facility 32 = ERR_LIB_BIO and
+  # bio_lib.c line numbers 113/120/121).
+  - address: 0x0803d680
+    ghidra: FUN_0803d680
+    name: bio_printf
+    size: 28
+    sig: "int bio_printf(BIO *bio, const char *format, ... /* args: VaList */)"
+    module: crypto/bio_printf
+    status: ported
+    renames:
+      param_1/r0: bio
+      param_2/r1: format
+      "r2/r3 + stack": args (the va_list the spill frame builds)
+    notes: >-
+      OpenSSL's `BIO_printf` from crypto/bio/b_print.c - the variadic
+      front end of the vendored BIO layer's formatted write (identity
+      evidence: "doapr()" literal in the worker, callback codes 3 =
+      BIO_CB_WRITE / 6 = BIO_CB_CTRL and BIO_CTRL_PUSH = 6 across the
+      sibling cluster, ERR_LIB_BIO = 32 diag records with bio_lib.c
+      line numbers, X.509v3 GeneralName callers). Body decoded from the
+      raw image - true extent is 28 bytes (0x0803d680..0x0803d69c), no
+      literal pool; BIO_push starts at 0x0803d69c with its own `push`,
+      so Ghidra's 28 is right. Textbook AAPCS variadic prologue:
+      `push {r0-r3}; push {r4,lr}; ldr r1,[sp,#12]` (the format);
+      `add r2,sp,#16` (&spilled r2 = the va_list); `bl 0x0803d970`;
+      `pop {r4}; ldr pc,[sp],#20` - forwards (bio, format, ap) to
+      BIO_vprintf and returns its result (the BIO_write byte count, or
+      <= 0 on failure) untouched; nothing is validated. Call count
+      binary-verified by decoding every B/BL word in osos.dec: exactly
+      25 sites, ALL unconditional `bl` (no predicated forms, no tail
+      branches) - no caller NULL-guards or flag-gates the call. No DATA
+      word in the image holds the address, so it is never dispatched
+      virtually. Callers are the X.509v3 display code ("email: %s" /
+      "DNS: %s" / "URI: %s" / "DirName: " @ 0x08051098, certificate
+      time "%s %2d %02d:%02d:%02d %d%s" @ 0x08039cac, which treats a
+      result < 1 as failure). Deviations: the `...` becomes an explicit
+      `args: VaList` (*const u32, the house convention - exactly the
+      pointer the spill frame manufactures; a variadic C caller needs
+      the capture trampoline printf/printf_api.rs documents);
+      BIO_vprintf @ 0x0803d970 is unported, so it rides the BIO_VPRINTF
+      seam (target default calls 0x0803d970 in place; host panics until
+      a test installs a mock). Host tests: bio/format/args forwarded
+      untouched with the worker's count returned, a -1 write failure
+      propagated unchanged, NULL bio + NULL format passed straight
+      through, and the slot re-read on every call. match.py structural
+      - the Rust veneer is a volatile slot load plus a tail `bx r3`
+      instead of the spill frame (by design: the explicit VaList IS the
+      spill's product); 7 instructions either way.
+      #[inline(never)] for the 25 `bl` targets.
   # --- display object: the six-layer compositor root ---
   - address: 0x081d9064
     ghidra: FUN_081d9064
