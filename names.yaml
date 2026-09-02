@@ -43811,3 +43811,59 @@ functions:
       (u64 reader), 0x082686cc (+0x18 veneer), 0x08268734 (vector
       apply), 0x08268750 (flag test) are NOT ported - one function per
       commit.
+
+  - address: 0x081066a8
+    ghidra: FUN_081066a8
+    name: surface_new
+    size: 64
+    sig: "u8 *surface_new(u32 format, u32 width, u32 stride, u32 height, u32 flags, u32 plane0, u32 plane1, u32 plane2, u32 plane3)"
+    module: drivers/surface_new
+    status: ported
+    renames:
+      param_1: format (pixel format byte, ctor stores at +0x08; 0 planar YUV 4:2:0, 1 two-plane, 2/3/4 packed)
+      param_2: width (ctor word +0x0c; multiplied with height into +0x1c)
+      param_3: stride (ctor word +0x10; forwarded to the plane allocator as its 5th arg)
+      param_4: height (ctor word +0x14)
+      param_5: flags (ctor byte +0x18; forwarded to the plane allocator)
+      param_6..param_9: plane0..plane3 (caller-supplied external plane bases; all zero => ctor allocates)
+      FUN_082aadd4: operator_new (ported in heap/veneers, called directly)
+      FUN_08106a8c: surface_ctor (unported; SURFACE_CTOR dispatch slot, documented zeroing default)
+    notes: >-
+      Factory for the display surface object (the class whose plane
+      accessor surface_plane_address @ 0x082978bc is already ported in
+      drivers/display_layer.rs - the layout match is the class
+      identification: format byte +0x08, plane words +0x24/+0x28/+0x2c,
+      0x54-byte object with an RTXC mutex @ +0x40 and condvar @ +0x48).
+      Ghidra's 64-byte extent is exact (next function @ 0x081066e8
+      opens with push {r4, lr}) but its C return type void is wrong:
+      the ctor's `this` return survives in r0 through the epilogue and
+      every caller stores the result, so the port returns *mut u8.
+      Algorithm: operator_new(0x54) @ 0x082aadd4 (ported, called
+      directly), then forward the raw block plus all nine arguments to
+      the unported constructor @ 0x08106a8c - 4 in registers, arg4 plus
+      the five stack args re-stored at [sp]..[sp+20] - returning the
+      ctor's result. No NULL check between allocation and ctor (the
+      original faults in the ctor's first store on OOM); the port
+      reproduces that. Call count verified by decoding every BL word
+      in osos.dec: exactly 23 sites, all plain bl (0x0811e77c,
+      0x081201bc, 0x0812021c, 0x08120260, 0x081202a4, 0x081202dc,
+      0x08144bfc, 0x08144ca0, 0x08156570, 0x081565b4, 0x08158ab4,
+      0x08199b48, 0x08199b98, 0x081f5af8, 0x081f5ebc, 0x082057b8,
+      0x08224ca0, 0x08256848, 0x0825687c, 0x08256a44, 0x08256a80,
+      0x08256ab4, 0x0828d4d4), zero predicated forms - no caller
+      NULL-gates or flag-gates the factory. Callers pass the Classic 6G
+      panel geometry, e.g. surface_new(3, 0xf0, 0x140, 0x140, 2, plane,
+      0, 0, 0) from FUN_0815643c. Anomaly documented, not invented: the
+      ctor's vtable word 0x08980b70 does not decode as a table of code
+      pointers in the image (first word 0x80c00010, DRAM past the osos
+      extent) - presumably runtime-initialized; the zeroing default
+      stub installs no vtable, so the port is NOT hook-ready until the
+      ctor is ported. match.py structural diff (exit-1 expected): same
+      shape - mov r0,#0x54, alloc bl, nine-arg forward with arg4 at
+      [sp] and the five stack args at [sp+4..20]; the ctor call is a
+      blx through the SURFACE_CTOR dispatch slot instead of the
+      original's direct bl (the service_manager_get.rs contract), plus
+      the crate fp frame. Host tests (3): allocation size 0x54 with the
+      block plus all nine args forwarded in order and the ctor result
+      returned; distinct values 11..99 prove no argument shuffling;
+      default stub zeroes the whole 0x54-byte block and returns it.
