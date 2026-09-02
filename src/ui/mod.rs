@@ -24,6 +24,7 @@ pub mod resource_release;
 pub mod object_state;
 pub mod object_payload;
 pub mod plst_class_check;
+pub mod plst_slot_item;
 pub mod tdat_class_check;
 pub mod element_reference;
 pub mod element_reference_cookie;

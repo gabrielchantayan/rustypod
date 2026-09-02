@@ -7084,6 +7084,45 @@ functions:
       core cmp r0,#0 / beq / ldr r0,[r0,#4] / ldr r1,[pc] sequence
       matches verbatim.
 
+  - address: 0x08052728
+    ghidra: FUN_08052728
+    name: ui_plst_slot_item_at
+    size: 172
+    sig: "u32 ui_plst_slot_item_at(u8 *element, u32 selector, u32 reverse_flag, u32 index)"
+    module: ui/plst_slot_item
+    status: ported
+    renames:
+      param_1/r0: element
+      param_2/r1: selector
+      param_3/r2: reverse_flag
+      param_4/r3: index
+    notes: >-
+      Indexed per-selector item fetch on a 'plst' UI element. Guards:
+      ui_element_is_plst_class (0x080613e0, already ported) must pass
+      AND selector != 0; both internal, so all 23 call sites are
+      unconditional bl (verified by decoding every B/BL word in
+      osos.dec: 23 uncond, 0 predicated). Item count is the u16 at
+      header(+0x40)+0x2e; index >= count returns 0. The selector word
+      and the LOW BYTE of reverse_flag then pass through the unported
+      stock normalizer 0x080b48dc by pointer (0x34/0x37 -> slot 4,
+      0x33/0x35/0x36 consult element bytes +0x18c/+0x18d and word
+      +0xc8; may force the flag to 0). A nonzero flag byte
+      reverse-indexes: count-index-1. Slot = element word at
+      +0x3ac+selector*4 (49 slots); NULL slots are lazily materialized
+      via unported 0x80df1b8 (return value discarded, like the
+      original), and a still-NULL slot returns 0. Result is the word
+      at slot+0x10+index*4, verbatim (callers such as 0x080aa498 use
+      it as a sub-element pointer). Ghidra's 172-byte extent is exact
+      (sibling prologue at 0x080527d4). Both unported callees sit
+      behind the PLST_SLOT_ITEM_OPS seam (stock addresses on target,
+      identity/never-materialize defaults on host). The port narrows
+      the flag word to its low byte before the normalize call:
+      bit-identical because the original only ever strb/ldrb that
+      slot. match.py structural: LLVM fp frame, ldrd of the ops pair,
+      mvn/add lowering of count-index-1; guard order, slot
+      re-read-after-materialize, and the +0x3ac/+0x10 addressing all
+      match.
+
   - address: 0x080e4348
     ghidra: FUN_080e4348
     name: task_priority_map
