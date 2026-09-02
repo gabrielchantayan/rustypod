@@ -318,6 +318,41 @@ pub unsafe extern "C" fn container_view_construct(
     view
 }
 
+/// container_view_children — original: `FUN_081586e0` @ 0x081586e0
+/// (8 bytes exactly: `add r0, r0, #0xa8; bx lr`, no literal pool;
+/// the previous method ends `pop {r2, r3, r4, pc}` immediately
+/// before and the next method @ 0x081586e8 opens with
+/// `push {r1, r2, r3, r4, r5, lr}` immediately after. **22 `bl`
+/// call sites, 0 predicated, 0 tail `b`**, binary-scanned by
+/// decoding every B/BL word in osos.dec — matching Ghidra's 22 —
+/// and **0 occurrences of 0x081586e0 as a data word**, so the
+/// accessor is never dispatched virtually).
+///
+/// The class's registry accessor: returns a pointer to the 0x28-byte
+/// child-view registry subobject at view+0xa8 — pure pointer
+/// arithmetic, nothing read or written. Every recovered caller feeds
+/// the result straight into a ported collection iterator
+/// (`cursor_init` @ 0x081ee17c / `cursor_advance` @ 0x081ee138, or
+/// `iterator_state_construct` @ 0x08155e80 with mask -2) and walks
+/// the children, or reads the registry's own fields through it
+/// (0x081dd30c & siblings dereference +4).
+///
+/// No NULL guard, and the all-unconditional call split confirms the
+/// callers never gate the call either: `add` is unconditional, so a
+/// NULL `view` returns 0xa8 — the port reproduces that with wrapping
+/// byte arithmetic instead of a field projection.
+///
+/// # Safety
+/// None beyond pointer validity at the eventual use site: the
+/// function itself dereferences nothing. `view` may be NULL.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn container_view_children(view: *mut ContainerView) -> *mut Registry {
+    view.cast::<u8>()
+        .wrapping_add(core::mem::offset_of!(ContainerView, children))
+        .cast::<Registry>()
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -637,5 +672,38 @@ mod tests {
         };
         assert_eq!(view.config, 0);
         assert_eq!(view.content_provider, this as usize as u32);
+    }
+
+    /// The accessor lands exactly on the +0xa8 registry subobject:
+    /// byte-identical to the original's `add r0, r0, #0xa8`, and the
+    /// returned pointer aliases the `children` field the constructor
+    /// hands to `registry_container_construct_default`.
+    #[test]
+    fn children_returns_the_registry_at_0xa8() {
+        let mut view = blank_view();
+        let this = &mut *view as *mut ContainerView;
+        let registry = unsafe { container_view_children(this) };
+        assert_eq!(registry as usize, this as usize + 0xa8);
+        assert_eq!(
+            registry as usize,
+            core::ptr::addr_of!(view.children) as usize,
+            "aliases the children field the ctor initializes"
+        );
+        // A second view at a different address tracks its own base.
+        let mut other = blank_view();
+        let other_this = &mut *other as *mut ContainerView;
+        assert_eq!(
+            unsafe { container_view_children(other_this) } as usize,
+            other_this as usize + 0xa8
+        );
+    }
+
+    /// The original is one unconditional `add` with no guard, and
+    /// every one of the 22 call sites is an unconditional `bl`: a
+    /// NULL view must come back as bare 0xa8, not trap.
+    #[test]
+    fn children_null_view_wraps_to_0xa8() {
+        let registry = unsafe { container_view_children(core::ptr::null_mut()) };
+        assert_eq!(registry as usize, 0xa8);
     }
 }

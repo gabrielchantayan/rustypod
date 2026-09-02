@@ -29929,6 +29929,48 @@ functions:
       LLVM's branch+mov selection for the streq/beq pair, and the
       crate's frame-pointer prologue.
 
+  - address: 0x081586e0
+    ghidra: FUN_081586e0
+    name: container_view_children
+    size: 8
+    sig: "Registry *container_view_children(ContainerView *view)"
+    module: ui/container_view
+    status: ported
+    renames:
+      param_1/r0: view
+      FUN_081ee17c: cursor_init (direct consumer, already ported)
+      FUN_081ee138: cursor_advance (direct consumer, already ported)
+      FUN_08155e80: iterator_state_construct (direct consumer, already ported)
+    notes: >-
+      The container view's child-registry accessor - a one-liner
+      returning this+0xa8, the 0x28-byte child-view registry the
+      class's constructor (container_view_construct @ 0x08158778,
+      ported in the same module) builds there. Extent binary-verified
+      at 8 bytes exactly: add r0,r0,#0xa8 ; bx lr, no literal pool;
+      the previous method ends pop {r2,r3,r4,pc} immediately before
+      and the next method @ 0x081586e8 opens with
+      push {r1,r2,r3,r4,r5,lr} immediately after (it re-derives
+      this+0xa8 in-line as add r1,r0,#0xa8). Verified counts from
+      decoding every B/BL word in osos.dec: 22 bl call sites, 0
+      predicated, 0 tail b - matching Ghidra's 22 - and 0
+      occurrences of 0x081586e0 as a data word in a whole-image
+      scan, so the accessor is never dispatched virtually. The
+      all-unconditional call split is a behavioural fact: the callee
+      has no NULL guard and the callers never gate the call either,
+      so a NULL view returns bare 0xa8. The port reproduces that
+      with wrapping byte arithmetic over
+      offset_of!(ContainerView, children) rather than a field
+      projection. Every recovered caller feeds the result into a
+      ported collection iterator (cursor_init/cursor_advance, or
+      iterator_state_construct with mask -2) to walk the children,
+      or reads the registry's own fields through it (0x081dd30c and
+      siblings dereference +4). Host tests: the returned pointer
+      lands exactly at view+0xa8 and aliases the children field for
+      two distinct fixtures, and NULL wraps to 0xa8 unguarded.
+      match.py structural: the body add r0,r0,#0xa8 is
+      instruction-identical; the diff is only the crate's
+      frame-pointer prologue (push {fp,lr} / pop {fp,pc} for bx lr).
+
   - address: 0x0826d850
     ghidra: FUN_0826d850
     name: view_base_set_geometry
