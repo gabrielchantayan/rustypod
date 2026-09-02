@@ -9701,6 +9701,71 @@ functions:
       SINGLETON_CTORS dispatch table with a zeroing stub default and the
       cache is the crate static MEDIA_PLAYER_INSTANCE.
 
+  - address: 0x0817cab0
+    ghidra: FUN_0817cab0
+    name: media_player_post_kind
+    size: 64
+    sig: "u32 media_player_post_kind(MediaPlayer *this, u32 kind)"
+    module: app/media_player
+    status: ported
+    renames:
+      param_1/r0/r4: this (the TPodMediaPlayer object)
+      param_2/r1/r5: kind
+      FUN_082669e4: message_kind_arena_pool (ported)
+      FUN_0826c0d8: fixed_block_pool_alloc (ported)
+      FUN_08266a48: message_kind_construct (ported)
+      FUN_08110fdc: queued_message_post (ported)
+    notes: >-
+      The TPodMediaPlayer's fire-and-forget kind notification. Exact
+      64-byte extent, 0x0817cab0..0x0817caf0 - Ghidra's 64 is right for
+      once; the next function opens at 0x0817caf0 with `ldrb r0, [r0,
+      #0x93d]`. 23 bl call sites, 0 predicated, 0 tail b, no DATA word
+      references - binary-verified by decoding every B/BL word and
+      scanning for the address in osos.dec. Ghidra's listing shows only
+      22: the 23rd site @ 0x08179db4 is absent from decomp/osos.asm
+      entirely. Never dispatched virtually. Algorithm: pop an 8-byte
+      block off the MessageKind arena (message_kind_arena_pool +
+      fixed_block_pool_alloc(pool, 8); the pool's block_size == 8
+      exact-equality test always matches, so the operator_new fallback
+      only fires on exhaustion), run message_kind_construct(block,
+      kind) over it - no payload, no derived vtable, the base message
+      vtable 0x089a3788 stays final - then queued_message_post(message,
+      [this + 0x9ac], no_wait = 1, reply_queue = 0, flags = 0) with the
+      flags word passed in the pushed r3 stack slot, and collapse the
+      poster's result with `cmp r0, #0; movne r0, #1` (1 for any
+      nonzero, else 0). No NULL guard anywhere: a doubly-exhausted
+      arena hands NULL to the base constructor, which stores through
+      it - reproduced. Every call site sits inside a media-player
+      method of the 0xA6C-byte TPodMediaPlayer singleton
+      (media_player_get @ 0x0817ceb4): the callers use param_1's vtable
+      at +0x14, the interface media_player_interface_get returns, and
+      +0x9ac sits inside the 0xA6C object. All but one site pass a
+      pool-literal kind tag from the contiguous cluster 0x80008,
+      0x8000a..0x8000f (decoded from the literal words); the site in
+      FUN_0817c9a0 forwards a computed value. Paired with the virtual
+      call on the +0x14 interface callers make right after, these are
+      player state-change notifications. Deviations - all four callees
+      are ported and are the wired defaults of MEDIA_PLAYER_POST_OPS;
+      the slots stay replaceable for host-side recording (the
+      queued_message.rs precedent) because a direct call is untestable
+      on host: the arena accessor's host constructor default panics by
+      design and the poster's failure edge dispatches the release
+      through the firmware vtable word 0x089a3788, unreadable on host.
+      The +0x9ac message-target word is modelled as a raw u32 in a
+      repr(C) prefix struct (a host pointer at logical offset 0x9ac
+      would be padded to 0x9b0), read as the target's 4-byte word
+      exactly like the `ldr r1, [r4, #0x9ac]`. Host tests (5) pin the
+      pool -> alloc(8) -> construct(kind) -> post(1, 0, 0) call order
+      and argument routing, the collapse of any nonzero poster result
+      to 1 and of 0 to 0, the exact +0x9ac field read against poisoned
+      neighbours, verbatim forwarding of every observed kind literal
+      (0x80008..0x8000f), and the guardless NULL path into the base
+      constructor and poster. match.py structural: the four-call
+      sequence with the 8-byte size, [r4, #0x9ac] target load, stack
+      flags slot, no_wait = 1 and the cmp/movne collapse all survive;
+      expected differences are the ops table's literal load + blx
+      dispatch and LLVM's fp frame.
+
   - address: 0x08160148
     ghidra: FUN_08160148
     name: lazy_singleton_0x8c

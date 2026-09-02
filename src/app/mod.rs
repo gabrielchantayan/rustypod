@@ -37,6 +37,7 @@ pub mod lock_service;
 pub mod managed_entry;
 pub mod media_command_facade;
 pub mod media_ext;
+pub mod media_player;
 pub mod metadata_record;
 pub mod message_arena;
 pub mod message_kind;
