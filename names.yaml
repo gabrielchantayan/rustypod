@@ -13511,6 +13511,60 @@ functions:
       the 0x0822xxxx-0x0823xxxx UI/menu code. NOT hook-ready - the ctor
       slot is a documented zeroing stub, like its ten siblings.
 
+  - address: 0x081b5440
+    ghidra: FUN_081b5440
+    name: singleton_class_9400
+    size: 48
+    sig: "void *singleton_class_9400(void)"
+    module: app/singletons
+    status: ported
+    vars: {iVar1: globals block 0x089cc168, uVar2: instance,
+      DAT_081b546c: pool word (0x089cc168; the cache is its +8 slot)}
+    notes: >-
+      The nineteenth lazy singleton, and the third slot of the shared
+      three-slot globals block @ 0x089cc168 whose +0x04 slot is
+      lazy_singleton_0x58 @ 0x0812c72c (ported) and whose +0x00 slot (a
+      0x68 object, getter 0x0819bea8, ctor 0x0819c1d4) remains stock.
+      22 bl call sites, 0 predicated and 0 plain b, binary-verified by
+      decoding every B/BL word in work/firmware/osos.dec (Ghidra's count
+      agrees). True extent 48 bytes - 44 of code plus the pool word @
+      0x081b546c (0x089cc168) that Ghidra drops; the next function opens
+      at 0x081b5470 with `push {r4, r5, r6, lr}`. Same idiom - if the
+      +8 slot (0x089cc170) is 0, operator_new(0x22c) then the ctor @
+      0x081b6628, store, then RE-LOAD the cache slot. Class identified
+      by registry id: the ctor (0x081b6628..0x081b6754, followed by the
+      NULL-guarded deleting destructor @ 0x081b6754) publishes `this`
+      under id 0x9400 (`mov r1, #0x9400; bl 0x081d23f8` @ 0x081b6740,
+      the ported registry_register; 0x9400 is one of the ids the
+      registry_register site scan recovered). The ctor runs the same
+      base ctor 0x0819c550 the +0x04 sibling's ctor runs, plants vtable
+      0x0898c1e4 (pool literal @ 0x081b6750) at +0x00, sets +0x3c = 0
+      and +0x40 = 0xffffffff, builds three embedded context-scope
+      records at +0x44/+0x58/+0x6c through the ported app/context_scope
+      triplet (context_scope_init 0x082840e8 on a stack temp, copy ctor
+      0x0828414c into the member, the empty bx-lr drop 0x08284188), runs
+      the ported pair_header_base_construct @ 0x0810ebbc at +0x8c and
+      +0x144, zeroes +0x1fc..+0x214 and bytes +0x218/+0x21d, builds a
+      self-pointing map sentinel at +0x204 via FUN_083c63fc (parked at
+      +0x214), and finishes with the ported construct_condition_variable
+      @ 0x0807f680 at +0x220 - the last field written, which is what
+      makes 0x22c the allocation size. Two call sites (0x081de604,
+      0x081de64c) pick between THIS getter and lazy_singleton_0x58 on a
+      mode flag byte at the caller's +0xe4, then dispatch the winner
+      through vtable slot +0xac - the two shared-block siblings are
+      alternative implementations of one interface; the rest cluster in
+      0x08179xxx..0x0817dxxx and 0x08235xxx. Class NOT named - the ctor
+      reaches no name factory - so the symbol carries the registry id.
+      Deviations - the ctor rides the SINGLETON_CTORS dispatch table
+      (class_9400 slot, documented zeroing default) and the cache is
+      the crate static CLASS_9400_INSTANCE rather than the word @
+      0x089cc170 (the block_mgr.rs RW-page deviation). NOT hook-ready,
+      the family contract. match.py structural: same test / allocate
+      (0x22c immediate) / construct / store / reload shape; LLVM keeps
+      its frame-pointer prologue and reaches the ctor by blx through the
+      dispatch slot, exactly like its eighteen siblings.
+    renames: {}
+
   - address: 0x081a53c8
     ghidra: default
     name: class_8c00_commit_mode
