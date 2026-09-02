@@ -18,5 +18,6 @@
 //! `"STANDARD"` cipher (`s_STANDARD` @ 0x0802e0c4).
 //!
 //! [`obj_dat`] ports the NID lookup.
+pub mod bio_printf;
 pub mod cipher_name;
 pub mod obj_dat;
