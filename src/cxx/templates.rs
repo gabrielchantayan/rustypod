@@ -37,6 +37,10 @@
 //!   [`vector_size_elem32`] —
 //!   `vector<T>::size()`, one instantiation per element size; the five
 //!   power-of-two shifts cover 29 functions and 292 call sites.
+//! - [`vector_size_elem2_clamped`] — the unsigned-clamped
+//!   `vector<u16>::size()` out-of-line body @ 0x0829db9c: empty or
+//!   inverted heads yield 0 instead of the family's signed count. One
+//!   copy, 23 call sites.
 //! - [`vector_size_elem12`] / [`vector_size_elem24`] /
 //!   [`vector_size_elem20`] / [`vector_size_elem28`] /
 //!   [`vector_size_elem40`] — the
@@ -883,6 +887,45 @@ pub unsafe extern "C" fn vector_size_elem4_alias_7a68(vector: *const VectorBound
 #[inline(never)]
 pub unsafe extern "C" fn vector_size_elem2(vector: *const VectorBounds) -> i32 {
     vector_size(vector, 1)
+}
+
+/// vector_size_elem2_clamped — original: `FUN_0829db9c` @ 0x0829db9c
+/// (24 bytes; 23 `bl` call sites, binary-scanned from osos.dec — all
+/// plain, zero predicated; the only copy of this guarded body in the
+/// image, byte-pattern verified).
+///
+/// The unsigned-clamped `std::vector<u16>::size()` out-of-line body:
+/// `ldm r0,{r0,r1}; cmp r1,r0; subhi r0,r1,r0; asrhi r0,r0,#1;
+/// movls r0,#0; bx lr`. Unlike the [`vector_size_elem2`] family's bare
+/// `sub`/`asr`, the compare is UNSIGNED and both the subtract and the
+/// shift are predicated on it: an empty or inverted head
+/// (`end <= begin`) yields 0, never a negative count. The guard makes
+/// the span positive, so the original's `asr #1` and an `lsr #1`
+/// agree; the port keeps the arithmetic shift anyway.
+///
+/// Caller shape: the wide-string verb matcher [`wstr_case_eq`]
+/// (`util/wstr_casecmp`) takes its element count through this body,
+/// and the `FUN_081ba9ac` family parses signed `HH:MM:SS`-style fields
+/// out of `vector<u16>` heads, testing this result for nonzero before
+/// dividing each field.
+///
+/// [`wstr_case_eq`]: crate::util::wstr_casecmp::wstr_case_eq
+///
+/// # Safety
+/// `vector` must point at a readable `{begin, end}` pair.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_size_elem2_clamped(vector: *const VectorBounds) -> i32 {
+    // `read_unaligned`: on target the two words are one `ldm`; on a
+    // 64-bit host a firmware vector head can sit at a 4-aligned address
+    // that is not 8-aligned (the vector_size precedent).
+    let begin = core::ptr::read_unaligned(core::ptr::addr_of!((*vector).begin)) as usize;
+    let end = core::ptr::read_unaligned(core::ptr::addr_of!((*vector).end)) as usize;
+    if end > begin {
+        ((end - begin) as isize >> 1) as i32
+    } else {
+        0
+    }
 }
 
 
@@ -2770,6 +2813,42 @@ mod tests {
             // -15 >> 1 is -8, rather than a truncating -7.
             let reversed = VectorBounds { begin: begin.add(15), end: begin };
             assert_eq!(vector_size_elem2(&reversed), -8);
+        }
+    }
+
+    // ---- vector_size_elem2_clamped ----------------------------------
+
+    #[test]
+    fn vector_size_elem2_clamped_counts_forward_spans_and_clamps_the_rest() {
+        unsafe {
+            let storage = [0u8; 32];
+            let begin = storage.as_ptr() as *mut u8;
+            // 14 bytes = 7 u16 elements.
+            let normal = VectorBounds { begin, end: begin.add(14) };
+            assert_eq!(vector_size_elem2_clamped(&normal), 7);
+            // Odd byte span: the asr #1 drops the half element.
+            let odd = VectorBounds { begin, end: begin.add(13) };
+            assert_eq!(vector_size_elem2_clamped(&odd), 6);
+            // Empty: begin == end takes the movls arm.
+            let empty = VectorBounds { begin, end: begin };
+            assert_eq!(vector_size_elem2_clamped(&empty), 0);
+            // Inverted: where vector_size_elem2 returns -8, the guard
+            // clamps to 0.
+            let reversed = VectorBounds { begin: begin.add(15), end: begin };
+            assert_eq!(vector_size_elem2_clamped(&reversed), 0);
+        }
+    }
+
+    /// The guard is UNSIGNED (`hi`/`ls`): a head whose end word wraps
+    /// below begin is clamped, not halved into a huge positive count.
+    /// Fabricated bounds are never dereferenced — the body only
+    /// compares and subtracts the two head words.
+    #[test]
+    fn vector_size_elem2_clamped_compares_unsigned() {
+        unsafe {
+            let wrapped =
+                VectorBounds { begin: 0xffff_fff0 as *mut u8, end: 0x10 as *mut u8 };
+            assert_eq!(vector_size_elem2_clamped(&wrapped), 0);
         }
     }
 
