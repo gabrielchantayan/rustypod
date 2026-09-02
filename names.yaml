@@ -42219,6 +42219,82 @@ functions:
       twelfth SingletonCtors field), an fp prologue and the inverted
       branch LLVM chose for the cold path.
 
+  - address: 0x08259534
+    ghidra: FUN_08259534
+    name: lazy_singleton_0xbc
+    size: 44
+    sig: "void *lazy_singleton_0xbc(void)"
+    module: app/singletons
+    status: ported
+    renames:
+      DAT_08259560: SINGLETON_0XBC_CACHE_POOL (the trailing pool word @
+        0x08259560 holding 0x089cc960; the cache word itself is the crate
+        static SINGLETON_0XBC, the block_mgr.rs RW-page deviation)
+      FUN_082aadd4: operator_new (direct, ported in heap/veneers)
+      FUN_08258a70: singleton_0xbc_ctor (SINGLETON_CTORS.singleton_0xbc slot)
+    notes: >-
+      The eighteenth member of the app/singletons family, idiomatically
+      identical to the other seventeen - `if (cache == 0) cache =
+      ctor(operator_new(0xbc)); return cache;` over the cache word
+      0x089cc960 (the pool literal points straight at the cache; no +N
+      slot). One of the ten getters the boot-time singleton checker
+      FUN_08258028 calls before heap_panic-ing on any NULL (its site is
+      0x0825807c). EXTENT: functions.csv's 44 bytes is the code only;
+      the function owns one trailing literal-pool word (0x089cc960 @
+      0x08259560, reached by `ldr r4, [pc, #32]`), so the true extent is
+      48 bytes, 0x08259534..0x08259564, where the sibling 0x4c-byte
+      getter opens `push {r4, lr}`. CALL COUNT: 22 unconditional bl call
+      sites, binary-verified by decoding every B/BL word in
+      work/firmware/osos.dec - 0 predicated and 0 plain b. Ghidra's C
+      (decomp/c/025/08259534_FUN_08259534.c) drops the `this` argument
+      to the ctor, the family-wide ADS decomp artifact. OBJECT: an
+      event-listener controller. Its ctor 0x08258a70 first plants the
+      shared interface base 0x089a75c8 at +0 (the same first store
+      settings_ctor makes), zeroes +0x04..+0x1d, builds an embedded map
+      head whose descriptor node at +0x14 is allocated by the unported
+      FUN_083c00dc (self-pointing +8/+12 circular sentinel, the
+      lazy_singleton_0x40 pool shape), constructs a mutex at +0x20 via
+      the ported cxx_mutex_construct 0x08261e28, sets byte +0x3c = 2,
+      then plants the real primary vtable 0x089a7604 at +0 and the
+      secondary vtable 0x089a76e0 (+0xdc off the same literal) at +0x40,
+      builds a second embedded map head at +0x48 whose header node
+      (+0x58) comes from the ported byte_key_tree_allocate_node
+      0x083b7f40, default-constructs two embedded PathObjects at
+      +0x64/+0x6c (ported path_object_default_construct 0x082792cc) and
+      two embedded StringObjects at +0x7c/+0x94 (ported
+      string_default_construct 0x08277440), zeroes bytes +0x74/+0x75/
+      +0x9e, constructs a second mutex at +0xa0, and finally subscribes
+      this+0x40 - the secondary-vtable sub-object - to the process-wide
+      event hub's kind-1 listener list through event_hub_instance_get @
+      0x082579a0 and the subscribe push_back @ 0x08257aec (the
+      app/event_hub.rs pair). The 22 call sites dispatch the object
+      virtually: fourteen inside the registry-class-0x8780 method
+      cluster 0x081a3xxx-0x081a5xxx (slots +0x54/+0x6c observed), four
+      in the command handler FUN_081c9228, which maps command ids
+      0x10001-0x10005 onto vtable slots +0x20/+0x28/+0x30/+0x34, three
+      more at 0x08114ee4/0x08114f60/0x0815fef4, and the boot-checker
+      site. CLASS NOT NAMED: the ctor reaches neither a name factory nor
+      the by-id registry, so - per the lazy_singleton_0x3c /
+      lazy_singleton_0x58 / lazy_singleton_0x40 precedent - the symbol
+      names the size only. Deviations: operator_new called directly; the
+      ctor rides the SINGLETON_CTORS dispatch table with a documented
+      zeroing default (NOT HOOK-READY, the family contract); the cache
+      is the crate static SINGLETON_0XBC rather than the word @
+      0x089cc960. Host tests: exact 0xbc allocation size, constructed
+      once on the raw block, cached and reloaded; the bne fast path
+      (pre-seeded cache never allocates); a NULL-returning ctor caches
+      NULL and re-allocates every call (no failure memory); the store
+      lands AFTER the ctor runs (a cache-poking ctor is overwritten by
+      the store of its own return, the original's `str r0, [r4]` order);
+      the zeroing stub clears exactly 0xbc bytes and is NULL-safe; cache
+      independence from the neighbouring 0x089cc9xx-page statics.
+      match.py --lib <worktree archive>: same skeleton - cache-ptr pool
+      load, ldr/cmp/branch test, `mov r0,#0xbc`, bl to operator_new,
+      ctor call, store, reload, pop; deltas are the seam indirection
+      (`ldr r5,[r0,#0x44]; blx r5` - slot offset 0x44 = the eighteenth
+      SingletonCtors field), an fp prologue and the inverted branch
+      layout LLVM chose for the cold path.
+
   - address: 0x082577bc
     ghidra: FUN_082577bc
     name: f32_to_fixed16_trunc
