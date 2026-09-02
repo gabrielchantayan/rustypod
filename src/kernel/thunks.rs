@@ -644,7 +644,7 @@ pub static ROM_THUNKS: [RomThunk; 158] = [
     RomThunk { thunk_addr: 0x08037df8, rom_target: 0x22000188, name: Some("memcpy") },
     RomThunk { thunk_addr: 0x08037e00, rom_target: 0x220000d4, name: Some("memmove") },
     RomThunk { thunk_addr: 0x08037e08, rom_target: 0x22003fd0, name: Some("sem_wait") },
-    RomThunk { thunk_addr: 0x08037e10, rom_target: 0x220042b4, name: None },
+    RomThunk { thunk_addr: 0x08037e10, rom_target: 0x220042b4, name: Some("sem_signal") },
     RomThunk { thunk_addr: 0x08037e18, rom_target: 0x2200418c, name: None },
     RomThunk { thunk_addr: 0x08037e20, rom_target: 0x22001edc, name: None },
     RomThunk { thunk_addr: 0x08037e28, rom_target: 0x22003b6c, name: None },
@@ -866,7 +866,7 @@ mod tests {
     /// Known-target name mapping (see module header for the evidence).
     #[test]
     fn known_target_names() {
-        let expected: [(u32, &str); 15] = [
+        let expected: [(u32, &str); 16] = [
             (0x22000020, "__rt_memcpy"),
             (0x220000d4, "memmove"),
             (0x22000188, "memcpy"),
@@ -879,6 +879,7 @@ mod tests {
             (0x22003eb0, "size_to_class"),
             (0x22003fd0, "sem_wait"),
             (0x2200408c, "task_unlock"),
+            (0x220042b4, "sem_signal"),
             (0x22005018, "ui_manager_acquire"),
             (0x220060e0, "lazy_singleton_106dc_acquire"),
             (0x22007470, "event_handler_source"),
@@ -939,6 +940,9 @@ mod tests {
         let entry = lookup_by_thunk(0x08037e08).expect("sem_wait thunk");
         assert_eq!(entry.rom_target, 0x22003fd0);
         assert_eq!(entry.name, Some("sem_wait"));
+        let entry = lookup_by_thunk(0x08037e10).expect("sem_signal thunk");
+        assert_eq!(entry.rom_target, 0x220042b4);
+        assert_eq!(entry.name, Some("sem_signal"));
         // Last entry.
         let entry = lookup_by_thunk(THUNK_TABLE_END - THUNK_STRIDE).expect("last thunk");
         assert_eq!(entry.thunk_addr, 0x08038298);
@@ -955,8 +959,8 @@ mod tests {
     #[test]
     fn named_entry_count() {
         let named = ROM_THUNKS.iter().filter(|e| e.name.is_some()).count();
-        // 15 known targets, two of them aliased by two thunks each.
-        assert_eq!(named, 17);
+        // 16 known targets, two of them aliased by two thunks each.
+        assert_eq!(named, 18);
         let _: std::string::String = ROM_THUNKS[0].name.unwrap().to_string();
     }
 
