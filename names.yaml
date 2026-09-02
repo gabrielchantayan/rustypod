@@ -15492,6 +15492,48 @@ functions:
       free_wrapper lazy-init + HEAP_OPS dispatch standing in for the
       original's bl 0x080e7970 (the documented deviation).
 
+  - address: 0x082a4cf8
+    ghidra: FUN_082a4cf8
+    name: array_element_at
+    size: 24
+    sig: "u32 array_element_at(const StridedArray *this, i32 index)"
+    module: cxx/array_element_at
+    status: ported
+    vars: {param_1: this, param_2: index}
+    notes: >-
+      Element-address accessor of the polymorphic strided-array class
+      (vtable+0x18 = virtual element_size getter, +0x04 = signed count,
+      +0x08 = storage base), with a last-element sentinel: 0x7fffffff
+      becomes count - 1 when the signed count is positive (`cmn r1,
+      #-0x7fffffff; bne; ldr r2,[r0,#4]; cmp r2,#0; subgt r1,r2,#1`),
+      then a tail `b 0x082a4b94` into the element-address helper
+      (`storage + index * element_size(this)`, one `mla`; 40 bytes,
+      binary-verified). 23 `bl` call sites, 0 predicated,
+      binary-scanned by decoding every B/BL word in osos.dec. Extent
+      verified against raw bytes: the next function's push starts
+      exactly at 0x082a4d10, so Ghidra's 24 is right. Sentinel
+      semantics confirmed by callers (FUN_081b92e4 fetches the last
+      element as (array, 0x7fffffff)); slot +0x18 confirmed as the
+      element size by sibling FUN_082a4c20 (`if (size != 4) <generic
+      copy> else *out = *element`). Deliberate deviation: the tail
+      target 0x082a4b94 is a distinct, separately-called function and
+      not yet ported, so it rides the STRIDED_ARRAY_ELEMENT_ADDRESS
+      seam (command_dispatch house pattern): target transmutes the ROM
+      address, host default panics, tests install recording mocks.
+      Anomaly recorded, not resolved: the one concrete vtable sampled
+      (observable array 0x089a5d0c) has slot +0x18 = 0x08102f80, not a
+      function entry in Ghidra's listing (falls inside FUN_08102f44,
+      decodes with r4 live-in), so that class is probably not among
+      this wrapper's receivers and no concrete class identity is
+      claimed. match.py structural: the clamp is instruction-identical
+      (cmn/bne/ldr/cmp/subgt); the tail `b 0x082a4b94` becomes an
+      ldr/bx through the seam static and LLVM re-materializes the
+      sentinel with an `mvn r1, #0x80000000` for the subgt fall-through
+      — equivalent. Host tests:
+      src/cxx/array_element_at.rs (sentinel clamps to count-1, passes
+      through on empty/negative counts and for ordinary indices,
+      helper result returned untouched).
+
   - address: 0x082a4f58
     ghidra: FUN_082a4f58
     name: field_10_low_u16
