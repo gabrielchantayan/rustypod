@@ -29791,6 +29791,90 @@ functions:
       ldreq+unconditional-str fold of the streq/strne pair, and the
       crate's frame-pointer prologue.
 
+  # --- Silver UI framework: the container view constructor ---
+
+  - address: 0x08158778
+    ghidra: FUN_08158778
+    name: container_view_construct
+    size: 124
+    sig: "ContainerView *container_view_construct(ContainerView *view, ResourceProvider *resources, void *controller, void *parent, const ViewSpec *spec)"
+    module: ui/container_view
+    status: ported
+    renames:
+      param_1: view
+      param_2: resources
+      param_3: controller
+      param_4: parent
+      param_5/in_stack_00000000: spec
+      FUN_0826f26c: view_base_construct (direct, already ported)
+      FUN_0813533c: registry_container_construct_default (direct, already ported)
+      FUN_08157f18: refresh_clip_rect (CONTAINER_VIEW_OPS seam, unported)
+      DAT_081587f0: CONTAINER_VIEW_VTABLE_ADDRESS
+    notes: >-
+      The container view constructor - the mid-hierarchy Silver UI
+      class between the grand-base view (0x0826f26c) and the concrete
+      widgets, owning the 0x28-byte child-view registry at +0xa8 that
+      every method in its image block (0x081574c0..0x08158744)
+      iterates before dispatching child virtuals: 0x081574c0/
+      0x081584f0 forward slot +0xa4, 0x08157fac unions child bounding
+      boxes and re-fits the scrollbars, the destructor helper @
+      0x08157b18 detaches every child through slot +0x04, and the
+      accessor @ 0x081586e0 is a one-liner returning this+0xa8. The
+      22 bl call sites are all derived-class constructors or their new
+      wrappers chaining into this one; the operator_new(0xe8) wrapper
+      @ 0x0815746c fixes the class size at 232 bytes. Extent is 124
+      bytes: 120 code ending pop {r3,r4,r5,pc} @ 0x081587ec plus the
+      4-byte vtable literal 0x08986f38 @ 0x081587f0 that Ghidra's
+      120-byte extent drops; the deleting destructor @ 0x081587f4
+      starts immediately after. 22 bl call sites, 0 predicated, 0
+      tail b, verified by decoding every B/BL word in osos.dec
+      (matches Ghidra's 22); a whole-image word scan finds 0 data
+      references to 0x08158778 - never dispatched virtually. Body:
+      chain view_base_construct with all five arguments unchanged,
+      plant vtable 0x08986f38, copy spec+0x58 to view+0xa4 (the class
+      config word; read as a flag word by 0x0815826c, and - unlike
+      the grand-base's flag-gated +0x90 copy of the same spec word -
+      unconditional), build the capacity-4/growth-4 registry at +0xa8
+      via the already-ported registry_container_construct_default,
+      clear the clip-rect cache +0xd0..+0xdc (the parent+0xd0 clip
+      rect ui/invalidate.rs documents, refreshed from the frame
+      +0x80..+0x8c by the callee 0x08157f18) and the word +0xe4, then
+      install the content provider at +0xe0: the view itself when the
+      controller is NULL (streq), else the controller's vtable slot
+      +0x5c query result (ldr/ldr/blx). Finish with 0x08157f18(view)
+      and return view. Deviations: the port keeps view in hand
+      instead of the original's sub r4,r0,#0xa8 byte arithmetic
+      (wrong on a 64-bit host, the styled_text_view precedent); the
+      vtable is the u32 ROM address CONTAINER_VIEW_VTABLE_ADDRESS -
+      the image words at 0x08986f38 are stale RW init data (they
+      decode as data-region pointers, not entry points), same finding
+      as styled_text_view; the spec type is reused ViewSpec - this
+      class adds no spec tail of its own; the two already-ported
+      callees are called directly while the unported clip-rect
+      refresh 0x08157f18 (which also intersects the parent's cache
+      through the ported rect_intersect 0x0826c1c8 and propagates
+      dirty flag 0x80 up the +0x34 ancestor chain; its r0:r1 previous
+      -rect return is discarded at this call site) rides the new
+      CONTAINER_VIEW_OPS seam (firmware transmute on target, panic on
+      host); the controller query is modelled through a usize-slot
+      vtable (the app/path_probe.rs idiom) so host tests need no
+      sub-4-GiB fixture; the four clip-rect clears are per-word
+      stores like the original's r1=0 replay (an array write spilled
+      each word through the stack). Host tests: layout against the
+      target offsets; the NULL-controller path (self-install, config
+      verbatim, registry ctor sees view+0xa8 with (4,4), the
+      linkage/initialize/registry/refresh order trace, and the
+      flags==0 differential proving the base's +0x90 copy stays gated
+      while +0xa4 is not); the controller path (slot result stored,
+      controller pointer forwarded unchanged); a zero config word.
+      match.py structural: same offsets and order (+0xa4 from
+      spec+0x58, +0xd0..+0xdc/+0xe4 clears, +0xe0 store), an
+      instruction-identical controller dispatch (ldr r0,[r5]; ldr
+      r1,[r0,#0x5c]; mov r0,r5; blx r1), same vtable literal
+      0x08986f38; the diff is the ops-table blx for the refresh bl,
+      LLVM's branch+mov selection for the streq/beq pair, and the
+      crate's frame-pointer prologue.
+
   - address: 0x0826d850
     ghidra: FUN_0826d850
     name: view_base_set_geometry
