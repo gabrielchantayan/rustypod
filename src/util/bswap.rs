@@ -168,6 +168,40 @@ pub extern "C" fn bswap32_guid_field(value: u32) -> u32 {
     value >> 24 | (value & 0xff_0000) >> 8 | (value & 0xff00) << 8 | value << 24
 }
 
+// ---------------------------------------------------------------------------
+// The mode-controlled word transform @ 0x0802b504.
+// ---------------------------------------------------------------------------
+
+/// transform_word_for_mode — original: `FUN_0802b504` @ 0x0802b504 (52
+/// bytes; 22 `bl` call sites, 0 predicated, verified by decoding every
+/// B/BL word in osos.dec).
+///
+/// Selector-controlled endianness fix-up: exactly mode 1 returns `word`
+/// with all four bytes reversed; every other mode value returns `word`
+/// unchanged. The original compares the full 32-bit mode word against 1
+/// (`cmp r2, #1`), so only the exact value 1 triggers the swap. The swap
+/// itself is assembled in registers with shift/EOR lanes —
+/// `(word << 24) ^ (((word >> 8) & 0xff) << 16) ^ (((word >> 16) & 0xff)
+/// << 8) ^ (word >> 24)` — which is exactly `u32::swap_bytes()`; the XORs
+/// cannot collide because each term occupies a distinct byte lane.
+///
+/// The extent is byte-confirmed: the next function starts at 0x0802b538
+/// and is a byte-identical twin (52 equal bytes), the mode helper that
+/// `checked_word_block.rs` reproduces inline under this same name. This
+/// port is the standalone exported instance; the 22 callers are the
+/// header-parsing family at 0x08028xxx..0x08029xxx (FUN_08028e4c,
+/// FUN_08028f14, FUN_08028ff4, FUN_08029144, FUN_08029630, FUN_0802974c,
+/// FUN_080298e0, ...), which read record fields and convert them only
+/// when the record's mode word is 1.
+///
+/// `#[inline(never)]` keeps it a real `bl` target on device. No
+/// deliberate deviations from the original.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub extern "C" fn transform_word_for_mode(mode: u32, word: u32) -> u32 {
+    if mode == 1 { word.swap_bytes() } else { word }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,6 +364,39 @@ mod tests {
                 let v = a | b << 8;
                 let want = u32::from_le_bytes(v.to_be_bytes());
                 assert_eq!(bswap32_guid_field(v), want, "v={v:#010x}");
+            }
+        }
+    }
+
+    /// Mode 1 (exactly) reverses all four byte lanes; the result equals
+    /// the standalone bswap32 helpers for every tested word.
+    #[test]
+    fn transform_word_for_mode_mode_one_byte_reverses() {
+        for v in [
+            0u32,
+            1,
+            0xffff_ffff,
+            0x0000_00ff,
+            0x0000_ff00,
+            0x00ff_0000,
+            0xff00_0000,
+            0x1234_5678,
+            0xdead_beef,
+            0x8000_0001,
+        ] {
+            assert_eq!(transform_word_for_mode(1, v), v.swap_bytes(), "v={v:#010x}");
+            assert_eq!(transform_word_for_mode(1, v), bswap32(v), "v={v:#010x}");
+        }
+    }
+
+    /// The original compares the full mode word against 1, so every other
+    /// value — 0, 2, and all the way to 0xffffffff — is the identity, with
+    /// the word passed through bit-for-bit.
+    #[test]
+    fn transform_word_for_mode_every_other_mode_is_identity() {
+        for mode in [0u32, 2, 3, 0x100, 0x0001_0000, 0x8000_0000, 0xffff_fffe, 0xffff_ffff] {
+            for v in [0u32, 0x1234_5678, 0xffff_ffff, 0x8000_0001] {
+                assert_eq!(transform_word_for_mode(mode, v), v, "mode={mode:#010x} v={v:#010x}");
             }
         }
     }

@@ -12317,6 +12317,38 @@ functions:
       target ROM address directly and a replaceable host callback seam; its
       focused host test records each forwarded word and return status.
 
+  # --- selector-controlled mode word transform ---
+  - address: 0x0802b504
+    ghidra: FUN_0802b504
+    name: transform_word_for_mode
+    size: 52
+    sig: "u32 transform_word_for_mode(u32 mode, u32 word)"
+    module: util/bswap
+    status: ported
+    renames:
+      param_1/r0: mode
+      param_2/r1: word
+    notes: >-
+      52-byte leaf (0x0802b504..0x0802b538), thirteen ARM instructions,
+      extent byte-confirmed by the distinct sibling starting at 0x0802b538.
+      Call count verified by decoding every B/BL word in osos.dec: 22 plain
+      bl sites, zero predicated forms. Exactly mode 1 returns word with all
+      four bytes reversed (assembled in registers via shift/EOR byte lanes,
+      equivalent to u32::swap_bytes); every other 32-bit mode value returns
+      word unchanged, so callers gate on an exact mode word, not a flag
+      range. The 22 callers are the record-header parsing family at
+      0x08028xxx..0x08029xxx (FUN_08028e4c, FUN_08028f14, FUN_08028ff4,
+      FUN_08029144, FUN_08029630, FUN_0802974c, FUN_080298e0, ...), which
+      convert big-endian record fields only when the record mode is 1.
+      0x0802b538 is a byte-identical twin (52 equal bytes) used by the
+      checked_word_block family, which reproduces the transform inline
+      rather than through a second exported symbol; this entry is the
+      standalone instance. Ported into util/bswap.rs under the same name
+      the sibling inliner uses. No deliberate deviations. match.py
+      reviewed: LLVM emits a branchless predicated rotate form (orreq on
+      the mode==1 comparison) where ADS branched over the swap, but the
+      mode compare, conditional transform, and passthrough structure match.
+
   - address: 0x0802b654
     ghidra: FUN_0802b654
     name: checked_word_block_convert
