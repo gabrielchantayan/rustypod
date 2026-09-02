@@ -3681,6 +3681,67 @@ functions:
       reloads, the inlined stop sequences with the 'stop'/'run ' FourCC
       stores, the mov r0,#4000 delay store, and the indirect arm tail.
 
+  - address: 0x082199bc
+    ghidra: FUN_082199bc
+    name: update_dispatch
+    size: 80
+    sig: "u32 update_dispatch(void)"
+    module: app/update_dispatch
+    status: ported
+    renames:
+      FUN_0811b2c0: singleton_class_6280 (already ported, called directly)
+      FUN_0811c564: flag_2c_is_clear (already ported, called directly)
+      FUN_0811bf0c: class_6280_commit (UPDATE_DISPATCH_OPS slot)
+      FUN_081115e4: root_slot_190_query (UPDATE_DISPATCH_OPS slot)
+      FUN_08112bbc: root_pending_process (UPDATE_DISPATCH_OPS slot)
+      DAT_08219a0c: app-root pool word (0x089ca674; the crate static
+        APP_ROOT_OBJECT, the app/context_scope.rs RW-page deviation)
+    notes: >-
+      EXTENT CORRECTED - Ghidra's 80 bytes is the code only; the
+      function owns one trailing literal-pool word (0x089ca674 @
+      0x08219a0c, reached by `ldr r0, [pc, #36]` @ 0x082199e0), so the
+      true extent is 84 bytes, 0x082199bc..0x08219a10, where the next
+      function opens `push {r0-r9, sl, fp, lr}` (e92d4fff). CALL COUNT:
+      Ghidra's 23 confirmed - binary-verified by decoding every B/BL
+      word in work/firmware/osos.dec: exactly 23 unconditional bl call
+      sites, 0 predicated and 0 plain b, and no DATA word references the
+      address (direct-called only, never virtual). Callers cluster in
+      the Silver UI region (two in the 0x08131380 method, the rest in
+      0x08222xxx..0x0823axxx) and all test the result: 1 = declined
+      (nothing dispatched, caller proceeds with its own handling), 0 =
+      handled. ALGORITHM: fetch the registry-class-0x6280 singleton
+      (unconditionally, BEFORE the branch - it is allocated/cached even
+      on the root path, and neither it nor the root is NULL-checked),
+      test its mode flag byte at +0x2c via flag_2c_is_clear; flag SET ->
+      FUN_0811bf0c(object) (the class-0x6280 object-side handler,
+      broadcasting its own event family 0x6280/0x6282/0x6283/0x6287/
+      0x6288 - pool literals @ 0x0811bff8..0x0811c00c - through the
+      vtable +0x58 poster and storing 2 into +0x2c), return 0; flag
+      CLEAR -> root = *0x089ca674, query vtable slot +0x190 of the
+      root's +0x888 sub-object through the four-instruction tail-call
+      veneer FUN_081115e4 (`ldr r0,[r0,#0x888]; ldr r1,[r0]; ldr
+      r1,[r1,#0x190]; bx r1` - Ghidra's C wrongly types it void and
+      drops the argument; the caller passes the root and tests r0),
+      query == 0 -> return 1, else FUN_08112bbc(root) (re-queries via
+      the same veneer, calls vtable slot +0xf0, then works the
+      singleton_class_8c00 + 0x98 list under mutex_lock/mutex_unlock),
+      return 0. DEVIATIONS: the three handler callees are unported and
+      ride UPDATE_DISPATCH_OPS (the EVENT_HUB_OPS /
+      IAP_THREAD_SLOT_POLL_OPS pattern), read slot-by-slot through
+      read_volatile - target defaults transmute ROM addresses
+      0x0811bf0c / 0x081115e4 / 0x08112bbc (hook-faithful), host
+      defaults are documented inert stubs (commit/process no-ops, query
+      returns 0 -> decline, so the default port is a harmless no-op
+      returning 1). match.py structural review against this worktree
+      archive (--lib): same control flow - leading bl
+      singleton_class_6280 (R_ARM_CALL verified), the +0x2c flag test
+      (LLVM inlines flag_2c_is_clear to ldrb/cmp/beq; the exported
+      symbol still resolves in the archive for its other callers), two
+      blx seam calls with the query's zero test gating the root process,
+      and the mov r0,#1 / mov r0,#0 return pair; deltas are the crate fp
+      prologue and LLVM tail-merging the commit blx with the process
+      blx.
+
   - address: 0x083dd9e4
     ghidra: FUN_083dd9e4
 
