@@ -42269,6 +42269,85 @@ functions:
       identical branch skeleton and predicated ldrh/strh field pairs;
       deltas are the seam blx indirection, a frame pointer for the spilled
       ops slot, and 0xffff built from mov/orr instead of a pool load.
+  # --- pending-event queue insert ---
+  - address: 0x08138fd0
+    ghidra: FUN_08138fd0
+    name: pending_event_insert
+    size: 188
+    sig: "u32 pending_event_insert(u8 *this, u32 key, u16 tag_a, u16 tag_b, u32 payload, u32 delta_ms)"
+    module: app/pending_event_insert
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: key
+      param_3/r2/r8: tag_a
+      param_4/r3/r9: tag_b
+      param_5/sp+0x48/sl: payload
+      param_6/sp+0x4c/fp: delta_ms
+      r4: node (the popped free node)
+      r5: status (0x0c = no free node)
+      r6: mutex_ptr (this + 0x2ac)
+      r7: zero scratch for the node->next store
+      sp+0x0c: clock (the { vtable, u8 kind } kind-1 clock object)
+      sp+0x04: timespec (the { sec, nsec } out pair)
+    notes: >-
+      Schedule-half of the pending-event queue embedded at the start of
+      the playback session object; sibling of pending_event_take @
+      0x08138f14 (ported, same worktree family). True extent
+      0x08138fd0..0x813908c = 188 bytes, pure code, no literal pool:
+      the body ends pop {.., pc} @ 0x08139088 and the next function is
+      the sorted-insert helper 0x081390ec this one calls, so Ghidra's
+      188 is right for once (byte-decoded from osos.dec anyway). Call
+      count binary-verified by decoding every B/BL word in osos.dec:
+      exactly 22 sites, all unconditional bl (0 predicated forms, 0
+      tail b), and 0 occurrences of 0x08138fd0 as a data word - direct
+      calls only, never virtual. Under the PosixMutex at this+0x2ac
+      (veneers 0x08261e20/0x08261e24, resolved to the canonical ported
+      posix_mutex symbols per the names.yaml alias entries): pop a
+      free node (FUN_081391f0, free-list head at +0x18; the returned
+      node's next still holds the old free-link and this function
+      clears it), fill {next=0, key, tag_a, tag_b, payload} in that
+      register-order write sequence, construct the kind-1 clock on the
+      stack (clock_source_construct @ 0x08262958, ported), read it
+      through the vtable +0x0c blx into a { sec, nsec } pair, convert
+      (timespec_to_milliseconds @ 0x082a1c30, ported; only the low 32
+      bits are used), stamp deadline_ms = now_ms + delta_ms with a
+      wrapping add, link the node (sorted insert FUN_081390ec, returns
+      0 or panics), destroy the clock (clock_source_destroy @
+      0x08262908, ported identity), and ALWAYS re-arm the deadline
+      timer (FUN_0813957c, returns 0) - even when the pool was empty
+      or the insert failed - keeping the rearm's status only when the
+      status so far is 0 (cmp r5,#0 / moveq r5,r0). Default status
+      0x0c (mov r5,#12) reports pool exhaustion; the take sibling
+      uses 0x52 for its miss, so these are module-level codes, not
+      errno values. Observable contract on firmware: 0 = scheduled,
+      0x0c = no free node. Deviations: the four unported callees
+      (0x081391f0 pop, 0x081390ec insert, 0x0813957c rearm, and the
+      vtable +0x0c clock read) dispatch through
+      PENDING_EVENT_INSERT_OPS; target defaults transmute the ROM
+      addresses, the clock-read default re-reads the vtable word from
+      the constructed object and calls slot +0x0c - reproducing the
+      original blx verbatim, whose slot value is the documented
+      mid-function anomaly from the clock_source_construct entry -
+      and host defaults are inert (NULL / 0 / zeroed timespec) with
+      recording reference models installed by the tests. LLVM inlines
+      timespec_to_milliseconds (the sec*1000 + nsec/1000000 arithmetic
+      survives, fused with the delta add, wrap preserved) and elides
+      the clock_source_destroy call entirely (the callee is an empty
+      identity and its result is unused); both are semantically
+      invisible. Host tests (6): happy-path field stamps and free-list
+      pop with vtable-pinning call order, empty pool returns 0x0c and
+      still rearms with zero writes to the pool, deadline u32 wrap
+      (0xffffff00 + 0x200 = 0x100, no panic), insert-failure status
+      propagation discarding the rearm status while still rearming,
+      rearm status chaining through success, halfword tag stores
+      staying inside the 20-byte node (guard bytes), and the mutex
+      owner asserted held inside every seam callee and released after
+      every path. match.py --lib structural review (exit-1 diff
+      expected): identical branch skeleton (null check beq to the
+      rearm path), the strh tag pair and the cmp/moveq status select;
+      deltas are the four seam blx indirections, the crate's fp frame,
+      the inlined conversion and the elided identity destroy above.
   - address: 0x08049a84
     ghidra: FUN_08049a84
     name: diag_ring_record
