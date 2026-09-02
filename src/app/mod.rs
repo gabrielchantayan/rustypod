@@ -70,6 +70,7 @@ pub mod slot_table;
 pub mod string_owner;
 pub mod string_resolve;
 pub mod string_table;
+pub mod tag_handler_registry;
 pub mod stream_context_reset_notify;
 pub mod string_owner_init;
 pub mod triple_scaled_cursor_advance;

@@ -44478,3 +44478,54 @@ functions:
       block plus all nine args forwarded in order and the ctor result
       returned; distinct values 11..99 prove no argument shuffling;
       default stub zeroes the whole 0x54-byte block and returns it.
+
+  # --- tag -> handler registry: set-if-unset (src/app/tag_handler_registry.rs) ---
+  - address: 0x081e11a8
+    ghidra: FUN_081e11a8
+    name: tag_handler_register_default
+    size: 52
+    sig: "void tag_handler_register_default(u32 tag, u32 handler)"
+    module: app/tag_handler_registry
+    status: ported
+    renames:
+      param_1/r0: tag
+      param_2/r1: handler
+      DAT_081e11dc: TAG_HANDLER_MAP_ADDRESS (BSS map global 0x08ad7d74)
+      FUN_083dbd9c: TAG_MAP_VALUE_SLOT (unported; dispatch slot, ROM
+        transmute on target, inert shared-word stub on host)
+    notes: >-
+      True extent 56 bytes (Ghidra's 52 drops the trailing literal-pool
+      word @ 0x081e11dc = 0x08ad7d74, past the image end 0x08a1b5e8, so
+      runtime-zeroed BSS); next function (the registrar FUN_081e11e0)
+      opens push {r4, lr} @ 0x081e11e0. Call count verified by decoding
+      every B/BL word in osos.dec: exactly 22 sites, all plain bl, 0
+      predicated, and ALL 22 sit inside FUN_081e11e0 @ 0x081e11e0
+      (itself called once from 0x08143ac8) - the registrar maps eleven
+      big-endian fourcc tags ("albm" "aclk" "bmdg" "calv" "cpct" "capt"
+      "sbtl" "date" "imag" "imgc" "imgg", pool words @
+      0x081e12fc..0x081e1350) to handler entry points. Algorithm:
+      find-or-create the node for `tag` in the global std::map<u32,u32>
+      rooted @ BSS 0x08ad7d74 via FUN_083dbd9c @ 0x083dbd9c (tree walk @
+      0x083ce874, plain u32 less-than comparator @ 0x083d7598 on both
+      dereferenced key words, returns node+0x14 = the mapped-value
+      slot); store `handler` only when the slot reads 0 - set-if-unset,
+      a pre-existing registration wins. The callee is called TWICE on
+      the store path (never reusing the slot across a possible
+      rebalancing insert); the port reproduces both calls. Sibling
+      getter FUN_081e13b4 @ 0x081e13b4 (same map, same callee, one bl
+      site @ 0x081e9b5c) reads the slot and blx's the handler with the
+      tag owner object in r3, so the stored word is a raw entry-point
+      address. Not hooked anywhere yet; on target the seam default
+      transmutes 0x083dbd9c so a hooked build is faithful. match.py
+      structural diff vs worktree --lib archive: same shape - key
+      spilled to a stack slot, two calls with (map, &key), the
+      conditional store; differences are the dispatch-slot blx
+      indirection with the slot loaded through read_volatile (the
+      UPDATE_DISPATCH_OPS house pattern) and the crate fp frame; the
+      pool word 0x08ad7d74 is emitted. Host tests (4): unset tag stores
+      with exactly two lookups and (map, key) args verified; occupied
+      tag keeps the existing handler with a single lookup; a zero
+      handler is still stored (the branch tests the current value, not
+      the new one); distinct tags receive distinct slots. No
+      try_map_u32_slab fixture needed - the test model is a
+      static-array find-or-insert map under a parking_lot lock.
