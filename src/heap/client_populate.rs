@@ -70,8 +70,13 @@
 //!   no block manager on device nothing reaches it, the no-manager
 //!   contract of block_deque.rs's `stub_client_populate`, one boundary
 //!   deeper — so with the wired defaults the loop is unreachable and
-//!   the no-op grow/region stubs never run; the port then reports the
-//!   same refusal 0 the old wholesale stub faked.
+//!   the no-op grow/ctor stubs never run; the port then reports the
+//!   same refusal 0 the old wholesale stub faked. The region dtor
+//!   slot now defaults to the REAL port (heap/block_region.rs's
+//!   `region_elem_destroy` through a `()`-returning adapter — the
+//!   real-ports-become-defaults precedent); under the ctor stubs
+//!   only NULL-region temps can reach it, the case its own wired
+//!   stubs handle exactly.
 //! - **Shipped wiring**: block_deque.rs is off-limits in this shared
 //!   tree (its `stub_client_populate` stays the POOL_BASE_OPS default —
 //!   behavior-identical under the no-manager defaults above), so the
@@ -167,7 +172,7 @@ pub struct ClientPopulateOps {
     pub region_destroy: unsafe extern "C" fn(obj: *mut u8),
 }
 
-/// Default growth/region stubs: with the real 0x0818b0c4 port as the
+/// Default growth/ctor stubs: with the real 0x0818b0c4 port as the
 /// hand-out default (heap/block_mgr.rs, real body fail-closed with no
 /// loop is unreachable, so these never run in the wired configuration.
 unsafe extern "C" fn stub_deque_grow(_deque: *mut BlockDeque) {}
@@ -176,16 +181,24 @@ unsafe extern "C" fn stub_region_default(_dst: *mut u8) {}
 
 unsafe extern "C" fn stub_region_copy(_dst: *mut u8, _src: *const u8) {}
 
-unsafe extern "C" fn stub_region_destroy(_obj: *mut u8) {}
+/// Region dtor slot default: the REAL port (heap/block_region.rs's
+/// `region_elem_destroy`); the slot discards its return, exactly like
+/// the original's call sites here. With the ctor stubs above only
+/// NULL-region temps reach it — the case the port's own wired stubs
+/// handle exactly.
+unsafe extern "C" fn default_region_destroy(obj: *mut u8) {
+    crate::heap::block_region::region_elem_destroy(obj);
+}
 
-/// Wired defaults (documented no-ops plus the real, still fail-closed,
-/// manager hand-out until the remaining machinery is ported).
+/// Wired defaults (documented no-op growth/ctor stubs, the real
+/// region dtor, plus the real, still fail-closed, manager hand-out
+/// until the remaining machinery is ported).
 pub(crate) const DEFAULT_CLIENT_POPULATE_OPS: ClientPopulateOps = ClientPopulateOps {
     manager_take_blocks: crate::heap::block_mgr::manager_take_blocks,
     deque_grow: stub_deque_grow,
     region_default: stub_region_default,
     region_copy: stub_region_copy,
-    region_destroy: stub_region_destroy,
+    region_destroy: default_region_destroy,
 };
 
 /// The active implementation table. Written once at init on target;
