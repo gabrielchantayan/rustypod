@@ -43277,3 +43277,45 @@ functions:
       the stored selector restores a dirtied context to pristine; guard
       words before/after the context and +0x00..+0x40/+0x5c stay
       untouched.
+
+  - address: 0x08297e34
+    ghidra: FUN_08297e34
+    name: heap_string_data
+    size: 8
+    sig: "char *heap_string_data(HeapString *this)"
+    module: cxx/heap_string
+    status: ported
+    vars: {param_1: this}
+    notes: >-
+      Data accessor of retailOS's one-word heap string holder (the object
+      is a single word: the heap char buffer pointer, NULL when empty;
+      freed with caller tag 0x14 by the destructor @ 0x0810b3e4). Whole
+      body, verified against the raw image (osos.dec, load base
+      0x08000000, words e5900000 e12fff1e): `ldr r0,[r0]; bx lr` -
+      returns the payload word unchanged, INCLUDING NULL for an empty
+      holder (no shared-empty substitution; that NULL-replacing behavior
+      belongs to the different two-word StringObject class, whose
+      string_object_c_str @ 0x082a50b0 is ported separately). Extent is
+      exact: the next function (a `mov r0,#1; bx lr`) starts at
+      0x08297e3c. Call count verified by binary scan over every branch
+      word in osos.dec: 23 sites, all unconditional bl, zero predicated
+      forms; the address occurs in no data word, so no virtual dispatch.
+      No NULL guard on `this` - the original faults on NULL, and so does
+      the port; the all-unconditional call sites are consistent with
+      callers holding live stack instances. Sampled call sites:
+      FUN_081502b0 builds stack holders via the printf-assign @
+      0x0810b5cc for "ImageSpecifications" device-info strings and feeds
+      the accessor's result to the XML writer @ 0x0814f924; 0x08113358
+      feeds it to a substring search then dups it via 0x080e7904. The
+      sibling class methods (destructor 0x0810b3e4, assign-from-cstr
+      0x0810b514, assign-from-buffer 0x0810b568, printf-assign
+      0x0810b5cc, suffix-assign 0x08297df8) are NOT ported - one
+      function per commit. Port has its own link_section because the
+      exact `ldr r0,[r0]; bx lr` body occurs 22 times in osos.dec
+      (binary-counted), keeping the hook seam distinct under LLVM
+      identical-code folding. match.py structural diff (exit-1
+      expected): identical load-and-return; the only diff is the crate's
+      fp frame prologue/epilogue, the accepted house deviation. Host
+      tests (3): payload pointer returned verbatim, NULL payload passes
+      through as NULL, arbitrary (even unaligned) word returned verbatim
+      with the holder word never written.
