@@ -12715,6 +12715,32 @@ functions:
       TCNotesDispatcher, 28).
     renames: {}
 
+  - address: 0x0828ae68
+    ghidra: FUN_0828ae68
+    name: instance_of_class_4180
+    size: 28
+    sig: "void *instance_of_class_4180(void)"
+    module: app/registry
+    status: ported
+    notes: >-
+      23 bl call sites (binary-scanned over osos.dec, no tail b, no
+      predicated form, no data-word references). The 28-byte sibling
+      shape of the lookup-then-cast accessor - `push {r4,lr}; ldr
+      r4,=0x4180 (literal @ 0x0828ae84); mov r0,r4; bl 0x081d2184;
+      mov r1,r4; pop {r4,lr}; b 0x08275b9c`: keeps the class id in r4
+      across the registry lookup, then tail-branches to the
+      instance_of_class cast. Ghidra's 28 bytes covers the code
+      exactly; the id sits in a trailing literal-pool word and the
+      next function starts @ 0x0828ae88. Class identified as
+      TCNotesDispatcher: the constructor @ 0x0828bf6c registers its
+      `this` under 0x4180 (literal @ 0x0828c0e8, bl 0x081d23f8 @
+      0x0828c05c) and hands the literal "TCNotesDispatcher" @
+      0x0828c0f4 to the class-name factory @ 0x0820b230 in the same
+      body (@ 0x0828c074, the first of several naming calls); the
+      port names it CLASS_ID_NOTES_DISPATCHER. Last of the thirteen
+      per-class accessors; no siblings remain identified.
+    renames: {}
+
   - address: 0x081d23f8
     ghidra: FUN_081d23f8
     name: registry_register

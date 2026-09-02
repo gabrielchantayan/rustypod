@@ -75,6 +75,7 @@
 //! | 0x0827f218 | [`instance_of_class_5780`] | 28 | 10 `bl` |
 //! | 0x08284e2c | [`instance_of_class_6180`] | 28 | 15 `bl` |
 //! | 0x08289690 | [`instance_of_class_3280`] | 24 | 37 `bl` |
+//! | 0x0828ae68 | [`instance_of_class_4180`] | 28 | 23 `bl` |
 //!
 //! All call-site counts are binary-scanned over osos.dec (every `bl`/`b`
 //! whose computed target is the function), not read off osos.asm — the
@@ -932,6 +933,32 @@ pub unsafe extern "C" fn instance_of_class_3280() -> *mut u8 {
     instance_of_class(CLASS_ID_MEDIA_NOW_PLAYING_CNTLR)
 }
 
+/// The class id of `TCNotesDispatcher` (recovered from the literal
+/// "TCNotesDispatcher" @ 0x0828c0f4, handed to the class-name factory
+/// @ 0x0820b230 by the constructor @ 0x0828bf6c that registers its
+/// `this` under 0x4180 @ 0x0828c05c).
+pub const CLASS_ID_NOTES_DISPATCHER: u32 = 0x4180;
+
+/// instance_of_class_4180 — original: `FUN_0828ae68` @ 0x0828ae68
+/// (28 bytes of code plus a 4-byte literal-pool word holding the class
+/// id; 23 `bl` call sites, binary-scanned over osos.dec, no tail `b`,
+/// no predicated form, no data-word references). Ghidra's 28-byte
+/// extent covers the code exactly; the next function starts @
+/// 0x0828ae88.
+///
+/// `push {r4,lr}; ldr r4,=0x4180; mov r0,r4; bl 0x081d2184; mov r1,r4;
+/// pop {r4,lr}; b 0x08275b9c` — the 28-byte sibling shape: keeps the
+/// class id in r4 across the registry lookup so both calls see the same
+/// literal, then tail-branches to [`object_cast_to_class`]. Resolves
+/// the registered `TCNotesDispatcher` singleton under id 0x4180 through
+/// the global class registry, then lets the object's own vtable confirm
+/// it really is that class (NULL when either step fails).
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn instance_of_class_4180() -> *mut u8 {
+    instance_of_class(CLASS_ID_NOTES_DISPATCHER)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -1498,6 +1525,10 @@ mod tests {
                 instance_of_class_3280().is_null(),
                 "0x3280 was never registered"
             );
+            assert!(
+                instance_of_class_4180().is_null(),
+                "0x4180 was never registered"
+            );
         }
         restore(guard);
     }
@@ -1668,6 +1699,33 @@ mod tests {
             let this = ptr::addr_of_mut!(object) as *mut u8;
             registry_register(this, CLASS_ID_MEDIA_NOW_PLAYING_CNTLR);
             assert_eq!(instance_of_class_3280(), this);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_4180_accessor_looks_up_and_casts_its_own_id() {
+        let guard = mock();
+        unsafe {
+            let mut object = object_accepting(CLASS_ID_NOTES_DISPATCHER);
+            let this = ptr::addr_of_mut!(object) as *mut u8;
+            registry_register(this, CLASS_ID_NOTES_DISPATCHER);
+            assert_eq!(instance_of_class_4180(), this);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_4180_accessor_filters_out_a_registered_wrong_class() {
+        let guard = mock();
+        unsafe {
+            // Registered under 0x4180 but refusing that id: the cast
+            // filters it out, which is the whole point of the veneer.
+            let mut object = object_accepting(0x5678);
+            let this = ptr::addr_of_mut!(object) as *mut u8;
+            registry_register(this, CLASS_ID_NOTES_DISPATCHER);
+            assert_eq!(registry_lookup_by_id(CLASS_ID_NOTES_DISPATCHER), this);
+            assert!(instance_of_class_4180().is_null());
         }
         restore(guard);
     }
