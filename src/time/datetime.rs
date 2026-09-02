@@ -93,13 +93,15 @@
 //!
 //! # Deviations
 //!
-//! - `FUN_08093af8` (comparator) and `FUN_0807ea68` (day number) are not
-//!   ported; they dispatch through [`DATETIME_OPS`], the house pattern
+//! - `FUN_08093af8` (comparator) is not ported; it dispatches through
+//!   [`DATETIME_OPS`], the house pattern
 //!   (see `app/iap_packet.rs`, `heap/alloc_core.rs`).
-//! - The wired default comparator returns 0 — "at or after the floor" —
-//!   so the arithmetic path stays live with no hooks installed and no
-//!   dereference of the unmapped host address in [`DATETIME_FLOOR`]. The
-//!   wired default day-number helper returns 0 and writes no weekday.
+//! - `FUN_0807ea68` (day number) IS ported as
+//!   [`crate::time::day_number::datetime_day_number`] and is the wired
+//!   default; the comparator's wired default returns 0 — "at or after
+//!   the floor" — so the arithmetic path stays live with no hooks
+//!   installed and no dereference of the unmapped host address in
+//!   [`DATETIME_FLOOR`].
 
 /// The packed calendar record the 0x0807exxx / 0x08093xxx helpers take.
 ///
@@ -166,7 +168,8 @@ pub struct DateTimeOps {
     pub compare: unsafe extern "C" fn(left: *const DateTime, right: *const DateTime) -> i32,
     /// `FUN_0807ea68` @ 0x0807ea68 (25 `bl` call sites): the Rata Die day
     /// number of the record's year/month/day, which it also reduces mod 7
-    /// into `dt->weekday`. Default: 0, and no weekday store.
+    /// into `dt->weekday`. Default: the ported
+    /// [`crate::time::day_number::datetime_day_number`].
     pub day_number: unsafe extern "C" fn(dt: *mut DateTime) -> i32,
 }
 
@@ -174,14 +177,11 @@ unsafe extern "C" fn compare_stub(_left: *const DateTime, _right: *const DateTim
     0
 }
 
-unsafe extern "C" fn day_number_stub(_dt: *mut DateTime) -> i32 {
-    0
-}
-
-/// Wired defaults: the documented stubs for the two unported callees.
+/// Wired defaults: the documented comparator stub and the ported
+/// day-number helper.
 pub(crate) const DEFAULT_DATETIME_OPS: DateTimeOps = DateTimeOps {
     compare: compare_stub,
-    day_number: day_number_stub,
+    day_number: super::day_number::datetime_day_number,
 };
 
 /// The active ops. Host tests swap in real implementations and restore.
@@ -449,16 +449,17 @@ mod tests {
 
     /// With no hooks installed the wired defaults must still produce the
     /// documented result rather than dereferencing the target-only floor
-    /// address: compare 0 (not below), day_number 0.
+    /// address: compare 0 (not below), and the now-ported day number
+    /// computes the real Rata Die value and weekday — the epoch record
+    /// lands exactly on `UNIX_EPOCH_DAY_NUMBER`, so only the time-of-day
+    /// terms contribute.
     #[test]
     fn the_wired_defaults_run_the_arithmetic_without_touching_the_floor() {
         let guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut d = dt(1970, 1, 1, 2, 3, 4);
-        let expected = (0i32 - UNIX_EPOCH_DAY_NUMBER)
-            .wrapping_mul(SECONDS_PER_DAY)
-            .wrapping_add(2 * 3600 + 3 * 60 + 4);
+        let expected = 2 * 3600 + 3 * 60 + 4;
         assert_eq!(unsafe { datetime_to_unix_seconds(&mut d) }, expected);
-        assert_eq!(d.weekday, 0xff, "the default day_number writes nothing");
+        assert_eq!(d.weekday, 4, "the ported day_number writes the weekday");
         drop(guard);
     }
 }

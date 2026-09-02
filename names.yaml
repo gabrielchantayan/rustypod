@@ -39001,14 +39001,15 @@ functions:
       original's literal holds, and the comparison goes through the
       DATETIME_OPS dispatch; on target with the stock comparator wired in
       that is byte-for-byte the original whatever the record says.
-      Deviations - datetime_compare @ 0x08093af8 (8 bl sites) and
-      datetime_day_number @ 0x0807ea68 (25 bl sites) are not ported and
-      dispatch through DATETIME_OPS, the house pattern (app/iap_packet.rs,
-      heap/alloc_core.rs). The wired default comparator returns 0, "at or
-      after the floor", so the arithmetic path stays live with no hooks
-      installed and nothing dereferences the unmapped host address in
-      DATETIME_FLOOR; the wired default day-number helper returns 0 and
-      writes no weekday.
+      Deviations - datetime_compare @ 0x08093af8 (8 bl sites) is not
+      ported and dispatches through DATETIME_OPS, the house pattern
+      (app/iap_packet.rs, heap/alloc_core.rs). The wired default comparator
+      returns 0, "at or after the floor", so the arithmetic path stays live
+      with no hooks installed and nothing dereferences the unmapped host
+      address in DATETIME_FLOOR. datetime_day_number @ 0x0807ea68 (25 bl
+      sites) has since been ported in time/day_number.rs and is now the
+      wired DATETIME_OPS day_number default, so the default path computes
+      the real Rata Die value and weekday.
       Host tests (7) - the ten-byte record layout with year halfword-aligned
       at +6, the epoch converting to 0 through the arithmetic path rather
       than the clamp, ten known instants including a leap day, the 2100
@@ -39705,6 +39706,56 @@ functions:
       #0 / subeq / and #0xff; differences are the crate fp frame, the
       indirect blx seam dispatch in place of the direct bl, and LLVM
       applying the byte mask unconditionally (a no-op on byte values).
+
+
+  # --- Packed-record Rata Die day number + weekday (time/day_number) ---
+  - address: 0x0807ea68
+    ghidra: FUN_0807ea68
+    name: datetime_day_number
+    size: 148
+    sig: "i32 datetime_day_number(DateTime *dt)  // also writes dt->weekday"
+    module: time/day_number
+    status: ported
+    vars: {param_1/r0/r4: dt, r7: year, r6: month, r8: day, r5/r9: days,
+      FUN_08036f14: __rt_udiv (ported, runtime/rt_div), FUN_08086e00: leap_month_correction,
+      DAT_0807eaf4: 365, DAT_0807eaf8: 367}
+    notes: >-
+      Proleptic-Gregorian Rata Die day number (0001-01-01 = day 1) of the
+      packed DateTime record's year/month/day, with the day number mod 7
+      stored to dt->weekday (+0x08; 1 = Monday, 0 = Sunday, so 1970-01-01
+      = 719163 lands on weekday 4, Thursday). Raw extent is 148 bytes
+      (0x0807ea68..0x0807eafc): Ghidra's 140 stops at the pop @ 0x0807eaf0
+      and drops the two literal-pool words (365 @ 0x0807eaf4, 367 @
+      0x0807eaf8); the next function's push begins at 0x0807eafc. Formula
+      from the raw words: 365*(y-1) + (y-1)/4 [mla + lsr #2] -
+      (y-1)/100 + (y-1)/400 + (367*m - 256 - 106)/12 [smulbb, split subs]
+      + FUN_08086e00(y, m) + d, with y = year - 1 wrapping as u32. All
+      four divides are UNSIGNED __rt_udiv @ 0x08036f14 (ported): the
+      /100, /400, /12 take the quotient, and the final /7's r1 remainder
+      becomes the weekday store while mov r0, r5 returns the FULL day
+      number, not the quotient. 25 bl call sites, 0 predicated bl, 0 b,
+      verified by decoding every ARM B/BL word in osos.dec. Callee
+      FUN_08086e00 @ 0x08086e00 (28 bytes, unported) is the February
+      correction: cmp r1,#2 / movls r0,#0 for January/February, else
+      is_leap_year @ 0x080aabac (ported) and mvneq r0,#1 (common, -2) /
+      mvnne r0,#0 (leap, -1). It dispatches through the
+      LEAP_MONTH_CORRECTION seam: target default transmutes the verified
+      load address; the host default reproduces the fully decoded body on
+      the ported is_leap_year (month_length precedent). The port is wired
+      as the day_number default of time/datetime.rs's DATETIME_OPS now
+      that it exists. Fields are raw bytes/halfwords with no validation:
+      year=0 wraps y to 0xffffffff through the unsigned divides (host
+      tests pin 0x3e147975 for 0000-01-01 and 0x5369ceab for
+      0/0/0), month=0 feeds 0xfffffe96 to the /12. Host tests (5):
+      full-year sweeps of 14 ordinary/century/leap/epoch years against an
+      independent Hinnant days_from_civil oracle (day number and weekday,
+      plus one correction-seam call per record), Monday/Thursday/Saturday
+      anchors, the day-number-not-quotient return, (year, month) register
+      order at the seam, and the out-of-range wrapping cases. match.py
+      structural: same shape - field loads, four __rt_udiv/udivmod bl
+      boundaries, the blx seam dispatch, strb weekday, r5 returned;
+      differences are the crate fp frame, LLVM fusing 367*m-362 into one
+      smlabb accumulate operand, and reordered accumulation.
 
 
   # --- Proleptic-Gregorian leap-year test (time/leap_year) ---
