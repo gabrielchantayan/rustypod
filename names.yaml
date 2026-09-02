@@ -44838,3 +44838,46 @@ functions:
       the new one); distinct tags receive distinct slots. No
       try_map_u32_slab fixture needed - the test model is a
       static-array find-or-insert map under a parking_lot lock.
+
+  - address: 0x08076920
+    ghidra: FUN_08076920
+    name: state_object_destroy
+    size: 4
+    sig: "void *state_object_destroy(void *this)"
+    module: cxx/state_object_destroy
+    status: ported
+    renames:
+      param_1/r0: this
+      r0 return: this
+    notes: >-
+      A lone `bx lr` (the word 0xe12fff1e) - an empty C++ destructor,
+      not a veneer: no `ldr pc,[pc,#-4]`, no branch target, no trailing
+      literal word. The next separately linked function (the object-init
+      helper @ 0x08076924) starts at +4, so Ghidra's 4-byte extent is
+      exact. This is the destructor of the 0x20-byte state-machine base
+      subobject the init helper builds: link fields at +0x00/+0x04/+0x08
+      zeroed, class-descriptor word at +0x0c, init argument at +0x10,
+      zero at +0x14, state FourCC 'stop' (0x73746f70) at +0x18, zero at
+      +0x1c. The timer class embeds it at offset 0 (its constructor @
+      0x0812c65c calls the init helper with the class descriptor from
+      0x089cb26c, then writes its own state word at +0x20). Binary
+      scan of every B/BL word in osos.dec: exactly 22 bl call sites, 0
+      predicated forms, 0 plain-b tail calls, matching Ghidra's count;
+      the address appears in no image data word, so binding is static,
+      never virtual. Every site is member cleanup inside a base-object
+      destructor: `add r0, r<base>, #offset` (offsets 0x8, 0x14, 0x1c,
+      0x28, 0x48, 0x4c, 0x60, 0x64, 0x98, 0x114, 0x238) then the bl,
+      then either the next member's add or `mov r0, r4/r5` - r0 is dead
+      after the call at all 22 sites and no caller chains into
+      operator_delete (0x082aad24) with it live. The port still returns
+      this, matching both the instruction and the crate's other empty
+      destructor ports. Own link_section .text.state_object_destroy so
+      LLVM MergeFunctions cannot fold it into empty_destructor
+      (0x0826fc64) or trivial_destructor (0x082646ac), which share this
+      body. match.py structural diff vs worktree --lib archive: LLVM
+      emits the crate's usual fp frame (push {fp, lr}; mov fp, sp;
+      pop {fp, pc}) instead of the bare bx lr - the identical shape
+      empty_destructor compiles to, semantically a no-op return with r0
+      preserved. Host tests (2): r0 pass-through across NULL, unaligned
+      and sentinel pointers; a 0x2c-byte fixture byte-compared before
+      and after to prove the body stores nothing.
