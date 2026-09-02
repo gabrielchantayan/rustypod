@@ -22664,6 +22664,38 @@ functions:
       param_1[1] - *param_1 >> 1`. The `asr` is arithmetic, so reversed
       spans retain their negative count.
 
+  - address: 0x0829db9c
+    ghidra: FUN_0829db9c
+    name: vector_size_elem2_clamped
+    size: 24
+    sig: "i32 vector_size_elem2_clamped(const VectorBounds *vector)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector}
+    notes: >-
+      The unsigned-clamped vector<u16>::size() out-of-line body: `ldm
+      r0,{r0,r1}; cmp r1,r0; subhi r0,r1,r0; asrhi r0,r0,#1; movls
+      r0,#0; bx lr`, verified against osos.dec - 24 bytes ending in bx
+      lr, next function at 0x0829dbb4 (the earlier 20-byte size in the
+      wstr_case_eq notes dropped the trailing bx lr). 23 bl call
+      sites, all plain, zero predicated (binary-scanned over osos.dec).
+      The only copy of this guarded body in the image (byte-pattern
+      scan). Unlike the unguarded vector_size_elem2 @ 0x083d7a78
+      (`sub`/`asr #1`, negative counts for reversed spans), the cmp is
+      UNSIGNED and the sub/asr are predicated on it, so empty or
+      inverted heads clamp to 0. Was previously ported in place as the
+      private wide_vec_len helper inside util/wstr_casecmp (see the
+      wstr_case_eq entry); promoted to its own exported cxx/templates
+      member, wide_vec_len now delegates. Caller shape: the
+      FUN_081ba9ac family parses signed HH:MM:SS-style fields out of
+      vector<u16> heads and tests this result for nonzero before
+      dividing each field; wstr_case_eq takes its match length through
+      it. match.py: same guarded clamp structure (LLVM merges cmp/sub
+      into one flags-setting subs and keeps the mov #0/asrhi pair);
+      the ldm comes out as byte loads from the family's read_unaligned
+      host-testing idiom, the accepted deviation of
+      vector_size_elem4.
+
   - address: 0x083d7860
     ghidra: FUN_083d7860
     name: vector_size_elem8
@@ -26831,8 +26863,10 @@ functions:
       family) match vector<u16> buffers against command/name C strings
       from object slots - an identifier/verb matcher. Helpers ported in
       place, private (house precedent): wide_vec_len (FUN_0829db9c @
-      0x0829db9c, 20 bytes - ADS out-of-line vector<u16>::size, UNSIGNED
-      end>begin guard then (end-begin)>>1 asr, inverted -> 0) and
+      0x0829db9c, 24 bytes - ADS out-of-line vector<u16>::size, UNSIGNED
+      end>begin guard then (end-begin)>>1 asr, inverted -> 0; since
+      promoted to the exported vector_size_elem2_clamped in
+      cxx/templates, wide_vec_len delegates) and
       fold_upper (FUN_080f4cbc @ 0x080f4cbc, 16 bytes - -1 -> 0xffffffff
       else TABLE[c]). The fold-table literal @ 0x080f4cd0 in the cold
       image holds 0x083ed0dd - one byte into __dscalb (0x083ed0dc, live

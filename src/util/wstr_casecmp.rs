@@ -13,16 +13,21 @@
 //! `vector<u16>` buffers and match them against command/name C strings
 //! fetched from object slots — an identifier/verb matcher.
 //!
-//! Two callees are ported in place as private helpers (house precedent
-//! for tiny leaves):
+//! The first callee is now an exported `cxx/templates` port; the
+//! second stays a private helper here (house precedent for tiny
+//! leaves):
 //!
-//! - [`wide_vec_len`] — original: `FUN_0829db9c` @ 0x0829db9c (20
+//! - [`wide_vec_len`] — original: `FUN_0829db9c` @ 0x0829db9c (24
 //!   bytes). The ADS out-of-line `std::vector<u16>::size()`:
 //!   `ldmia r0,{r0,r1}; cmp r1,r0; subhi r0,r1,r0; movhi r0,r0,asr#1;
-//!   movls r0,#0` — an UNSIGNED `end > begin` guard, then the span
-//!   halved with an arithmetic shift (positive by the guard, so `asr`
-//!   and `lsr` agree). An inverted vector yields 0 here, not a negative
-//!   count.
+//!   movls r0,#0; bx lr` — an UNSIGNED `end > begin` guard, then the
+//!   span halved with an arithmetic shift (positive by the guard, so
+//!   `asr` and `lsr` agree). An inverted vector yields 0 here, not a
+//!   negative count. Promoted to the exported
+//!   [`vector_size_elem2_clamped`] in `cxx/templates`; the private
+//!   wrapper below delegates.
+//!
+//! [`vector_size_elem2_clamped`]: crate::cxx::templates::vector_size_elem2_clamped
 //! - [`fold_upper`] — original: `FUN_080f4cbc` @ 0x080f4cbc (16 bytes).
 //!   `cmn r0,#1; ldrne r1,[0x080f4cd0]; ldrbne r0,[r1,r0]; mvneq r0,#0`
 //!   — EOF (-1) maps to 0xffffffff, every other code to `TABLE[c]`.
@@ -62,7 +67,7 @@
 //! compare loop keeps its shape under LLVM's loop-idiom pass. The
 //! ported unguarded [`strlen`] @ 0x08392478 is called directly.
 
-use crate::cxx::templates::VectorBounds;
+use crate::cxx::templates::{vector_size_elem2_clamped, VectorBounds};
 use crate::libc::strlen::strlen;
 
 /// The Latin-1 uppercase fold map from the ADS LC_CTYPE locale block @
@@ -111,21 +116,13 @@ unsafe fn fold_upper(c: i32) -> u32 {
     table.add(c as usize).read_volatile() as u32
 }
 
-/// wide_vec_len — original: `FUN_0829db9c` @ 0x0829db9c (20 bytes).
+/// wide_vec_len — original: `FUN_0829db9c` @ 0x0829db9c (24 bytes).
 ///
 /// ADS out-of-line `std::vector<u16>::size()`: `(end - begin) >> 1`
-/// when `end > begin` (unsigned), else 0.
+/// when `end > begin` (unsigned), else 0. Delegates to the exported
+/// [`vector_size_elem2_clamped`] port in `cxx/templates`.
 unsafe fn wide_vec_len(wide: *const VectorBounds) -> i32 {
-    // `read_unaligned`: on target the two words are one `ldmia`; on a
-    // 64-bit host a firmware vector head can sit at a 4-aligned address
-    // that is not 8-aligned (the cxx/templates.rs precedent).
-    let begin = core::ptr::read_unaligned(core::ptr::addr_of!((*wide).begin)) as usize;
-    let end = core::ptr::read_unaligned(core::ptr::addr_of!((*wide).end)) as usize;
-    if begin < end {
-        ((end - begin) as isize >> 1) as i32
-    } else {
-        0
-    }
+    vector_size_elem2_clamped(wide)
 }
 
 /// wstr_case_eq — original: `FUN_08076370` @ 0x08076370 (116 bytes).
