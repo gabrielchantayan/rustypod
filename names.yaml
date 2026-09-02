@@ -5003,6 +5003,51 @@ functions:
       kernel_create_dispatch (e70), tick_elapsed (eb8), irq_fiq_disable
       (ed8), tick_delay (ef0, 23 callers).
 
+  - address: 0x08037e08
+    ghidra: thunk_EXT_FUN_22003fd0
+    name: rom_sem_wait
+    size: 8
+    sig: "usize rom_sem_wait(usize sem)"
+    module: kernel/task_lock
+    status: ported
+    notes: >-
+      Already ported as rom_sem_wait in kernel/task_lock.rs under the
+      rom_gateway_wrappers span entry above; this entry records the
+      per-function verification. ldr pc,[pc,#-4] (0xe51ff004) at
+      0x08037e08 + target word 0x22003fd0 at 0x08037e0c: Ghidra reports
+      4 bytes, the stub is 8 - the sibling veneer to ROM 0x220042b4
+      (rom_sem_signal) starts immediately after. A pure ADS literal
+      veneer onto the RTXC kernel semaphore wait, r0 = kernel semaphore
+      id, the r0 result word passing back untouched, lr never stored.
+      The ROM body is recoverable through the boot-relocator IRAM mirror
+      (0x2200XXXX == osos 0x0800XXXX, relocator @ 0x080046e0): mirror @
+      0x08003fd0 (188 bytes) indexes the same semaphore record table as
+      the signal (0x08a1be28 + id*32) under the kernel lock - a free
+      record (owner word 0) is claimed (acquire count +24 bumped, owner
+      set from the current-task global 0x2200acf4, count halfword +4
+      set to 1) and returns 0; a record already owned by the current
+      task is a recursive acquire (count +24 and halfword +4 both
+      bumped) and returns 10; otherwise the lock is dropped and the
+      task blocks through the gateway (service 14, frame {14, 0, id, 1,
+      0}), the frame's result word returned. Call sites binary-verified
+      by decoding every ARM B/BL word in osos.dec for every condition
+      code: 24 unconditional bl (Ghidra's 24 is correct), zero
+      predicated bl, 8 unconditional tail b - fixed-id shims mov r0,
+      #(18, 5, 1, 0x11) @ 0x0806a498 / 0x0806a4a0 (kernel_sem5_wait) /
+      0x0806a4a8 / 0x0806a4b0 (kernel_sem17_wait), bare pass-through
+      aliases @ 0x08115310 and 0x081e6218, cache_lock_wait @ 0x082d792c
+      and the ata table-indexed wait @ 0x082d793c - and 1 predicated
+      bne @ 0x0805651c, the guarded tail of sem_wait @ 0x08056510 (cmp
+      r0,#0; ldrne r0,[r0]; cmpne r0,#0; bne), the only flag-gated
+      reach: callers holding a semaphore SLOT pointer guard it
+      themselves before tail-branching, the veneer itself has no NULL
+      guard. No data word in osos holds 0x08037e08 - never dispatched
+      virtually. Deviation (module design): dispatches through the
+      ROM_KERNEL hook (volatile slot read) instead of jumping into the
+      mask ROM; match.py structural: an indirect call through the hook
+      slot, not the 8-byte ldr pc veneer - expected, same family
+      pattern as the other 31 wrappers.
+
   - address: 0x08037e10
     ghidra: thunk_EXT_FUN_220042b4
     name: rom_sem_signal
