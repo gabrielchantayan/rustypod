@@ -16,7 +16,8 @@
 //! empty destructor: it is a two-instruction member function that binds
 //! one field offset and tail-branches into a shared copy helper. Its
 //! immediate neighbour `FUN_08263194` @ 0x08263194 is the identical
-//! shape with `#0x15` (22 `bl` call sites) — the background colour. No
+//! shape with `#0x15` (22 `bl` call sites) — the background colour,
+//! ported in this module as [`draw_state_set_background_color`]. No
 //! DATA word in the image holds either address, so neither is dispatched
 //! virtually.
 //!
@@ -72,8 +73,7 @@ pub const DRAW_STATE_FOREGROUND_COLOR_OFFSET: usize = 0x11;
 
 /// Byte offset of the background colour, bound by the sibling setter
 /// `FUN_08263194` @ 0x08263194 (`add r0, r0, #0x15`; 22 `bl` call
-/// sites). Not ported here; named so this module's tests can prove the
-/// foreground setter leaves it alone.
+/// sites), ported below as [`draw_state_set_background_color`].
 pub const DRAW_STATE_BACKGROUND_COLOR_OFFSET: usize = 0x15;
 
 /// Byte offset of the style byte the two colours sit behind (written by
@@ -90,6 +90,58 @@ pub const DRAW_STATE_STYLE_OFFSET: usize = 0x10;
 #[inline(never)]
 pub unsafe extern "C" fn draw_state_set_foreground_color(record: *mut u8, color: *const u8) {
     color_copy(record.add(DRAW_STATE_FOREGROUND_COLOR_OFFSET), color);
+}
+
+/// draw_state_set_background_color — original: `FUN_08263194` @
+/// 0x08263194 (8 bytes; **22 `bl` call sites, 0 `b`**, binary-scanned
+/// by decoding every B/BL word in osos.dec: 20 unconditional plus two
+/// `blne`, at 0x081286ec and 0x082917c4).
+///
+/// The background-colour setter of the 0x44-byte draw-state record —
+/// the byte-identical twin shape of the foreground setter above,
+/// binding the second colour slot instead. Whole function, decoded
+/// from the raw words:
+///
+/// ```text
+/// 08263194:  e2800015   add r0, r0, #0x15   ; &this->background_color
+/// 08263198:  ea003bd2   b   0x082720e8      ; tail call copy_color(dst, src)
+/// ```
+///
+/// Extent: exactly 8 bytes — the very next word @ 0x0826319c is the
+/// foreground setter's own `add r0, r0, #0x11`, so there is no trailing
+/// literal pool and no swallowed sibling (Ghidra's 8 bytes is right).
+/// No DATA word in the image holds 0x08263194, so it is never
+/// dispatched virtually.
+///
+/// # What "background" means, and the predicated calls
+///
+/// The body initializer @ 0x082630f0 defaults this slot to
+/// `{0xff, 0xff, 0xff, 0xff}` — opaque white, the "paper" the
+/// foreground (default opaque black) prints on — and the fill helper
+/// @ 0x08262b88 erases with exactly this colour pointer (`this + 0x15`)
+/// before drawing; sampled site 0x0815c2b0 calls this setter and
+/// immediately fills. Both predicated sites gate on a caller-side flag
+/// bit, not on a NULL check of either pointer: 0x081286ec is
+/// `ldrh r0,[r4,#20]; tst r0,#8; … blne` (set the background only
+/// when style flag 0x8 says there is one, mirroring the foreground's
+/// flag 0x4 at 0x081286d8), and 0x082917c4 is
+/// `tst r1,#0x8000; ldrne r1,[pc,#36]; blne` (a flag-gated default
+/// colour from the literal pool). The setter itself checks nothing,
+/// matching the original.
+///
+/// # Deviations
+///
+/// - The tail-called helper @ 0x082720e8 is ported as
+///   [`crate::cxx::color_copy::color_copy`], and this setter calls it —
+///   the byte moves, their order and their volatility all live there.
+/// - The original returns nothing; `r0` survives the tail call as
+///   `this + 0x15`, but no `bl` site reads it (the two `blne` sites
+///   reload `r0` within two instructions), so the port is `void`.
+/// - No NULL guard on either pointer, matching the original.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn draw_state_set_background_color(record: *mut u8, color: *const u8) {
+    color_copy(record.add(DRAW_STATE_BACKGROUND_COLOR_OFFSET), color);
 }
 
 #[cfg(test)]
@@ -217,5 +269,116 @@ mod tests {
         let start = DRAW_STATE_FOREGROUND_COLOR_OFFSET;
         assert_eq!(&bytes[start..start + 4], &color);
         assert_eq!(&bytes[bg..bg + 4], &[0xff; 4], "background preserved");
+    }
+
+    #[test]
+    fn background_writes_exactly_the_four_bytes_at_offset_0x15() {
+        let mut bytes = record();
+        let expected_untouched = record();
+        let color = [0xba, 0xdc, 0x0d, 0xedu8];
+
+        unsafe { draw_state_set_background_color(bytes.as_mut_ptr(), color.as_ptr()) };
+
+        let start = DRAW_STATE_BACKGROUND_COLOR_OFFSET;
+        let end = start + DRAW_STATE_COLOR_BYTES;
+        assert_eq!(&bytes[start..end], &color, "the colour lands at +0x15..+0x19");
+        assert_eq!(
+            &bytes[..start],
+            &expected_untouched[..start],
+            "everything below +0x15 — style byte at +0x10 and foreground at +0x11 — is untouched"
+        );
+        assert_eq!(
+            &bytes[end..],
+            &expected_untouched[end..],
+            "the record tail past +0x19 is untouched"
+        );
+        assert_eq!(end, 0x19, "the background colour ends at +0x19");
+        assert_eq!(
+            start,
+            DRAW_STATE_FOREGROUND_COLOR_OFFSET + DRAW_STATE_COLOR_BYTES,
+            "the background colour abuts the foreground"
+        );
+    }
+
+    #[test]
+    fn background_copy_is_alignment_agnostic_on_both_sides() {
+        // The destination is unaligned by construction (+0x15); the
+        // source is whatever the caller hands over — the flag-gated
+        // site @ 0x082917c4 passes a word-aligned literal-pool colour,
+        // but the helper assumes nothing.
+        let color = [0x89, 0xab, 0xcd, 0xefu8];
+        for src_align in 0..4usize {
+            for dst_shift in 0..4usize {
+                let mut source = [0x5au8; 4 + 4];
+                source[src_align..src_align + 4].copy_from_slice(&color);
+                let mut bytes = [0u8; DRAW_STATE_SIZE + 0x10];
+
+                unsafe {
+                    draw_state_set_background_color(
+                        bytes.as_mut_ptr().add(dst_shift),
+                        source.as_ptr().add(src_align),
+                    )
+                };
+
+                let start = dst_shift + DRAW_STATE_BACKGROUND_COLOR_OFFSET;
+                assert_eq!(
+                    &bytes[start..start + 4],
+                    &color,
+                    "src_align {src_align}, dst_shift {dst_shift}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn background_accepts_every_byte_value_including_nul_and_0xff() {
+        // {0,0,0,0} is a legal background (transparent black) and the
+        // default is {0xff; 4} — neither is a sentinel.
+        for color in [[0, 0, 0, 0u8], [0xff; 4], [0, 0xff, 0, 0xffu8], [0xff, 0, 0xff, 0]] {
+            let mut bytes = record();
+            unsafe { draw_state_set_background_color(bytes.as_mut_ptr(), color.as_ptr()) };
+            let start = DRAW_STATE_BACKGROUND_COLOR_OFFSET;
+            assert_eq!(&bytes[start..start + 4], &color);
+        }
+    }
+
+    #[test]
+    fn background_overlapping_source_propagates_forward_like_the_original() {
+        // src = dst - 1 replicates src[0] across the field — the four
+        // in-order byte moves, never a buffered copy.
+        let mut bytes = record();
+        let src = DRAW_STATE_BACKGROUND_COLOR_OFFSET - 1;
+        let seed = bytes[src];
+
+        unsafe {
+            let base = bytes.as_mut_ptr();
+            draw_state_set_background_color(base, base.add(src));
+        }
+
+        let start = DRAW_STATE_BACKGROUND_COLOR_OFFSET;
+        assert_eq!(
+            &bytes[start..start + 4],
+            &[seed; 4],
+            "forward byte-at-a-time copy smears the overlapped byte"
+        );
+    }
+
+    #[test]
+    fn setting_the_background_leaves_a_seeded_foreground_intact() {
+        // The default record body has foreground {0,0,0,0xff} and
+        // background {0xff,0xff,0xff,0xff} (body_init @ 0x082630f0);
+        // repainting the paper must not smear into the text colour.
+        let mut bytes = [0u8; DRAW_STATE_SIZE];
+        bytes[DRAW_STATE_STYLE_OFFSET] = 0x21;
+        bytes[DRAW_STATE_FOREGROUND_COLOR_OFFSET + 3] = 0xff;
+
+        let color = [0x80, 0x40, 0x20, 0x10u8];
+        unsafe { draw_state_set_background_color(bytes.as_mut_ptr(), color.as_ptr()) };
+
+        assert_eq!(bytes[DRAW_STATE_STYLE_OFFSET], 0x21, "style byte preserved");
+        let fg = DRAW_STATE_FOREGROUND_COLOR_OFFSET;
+        assert_eq!(&bytes[fg..fg + 4], &[0, 0, 0, 0xff], "foreground preserved");
+        let bg = DRAW_STATE_BACKGROUND_COLOR_OFFSET;
+        assert_eq!(&bytes[bg..bg + 4], &color);
     }
 }
