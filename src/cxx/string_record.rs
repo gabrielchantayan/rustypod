@@ -102,17 +102,16 @@
 //!   UTF-16 range -> UTF-8 StringObject converter, with quote stripping and
 //!   backslash unescaping) are unported and ride [`STRING_RECORD_OPS`]:
 //!   target defaults transmute the retail addresses, host defaults panic.
-//! - `bit_set_test` @ 0x082a4ef8 is unported but fully decoded (three
-//!   instructions, pre-split index; see `cxx/bit_set.rs`), so its host
-//!   default is a faithful model over [`BitSet::words`], not a stub — the
-//!   cardinality recount decision depends on its result.
+//! - `bit_set_test` @ 0x082a4ef8 is ported (`cxx/bit_set.rs`) and is the
+//!   default for its [`StringRecordOps`] slot on both target and host; the
+//!   slot stays seamed only so host tests can intercept the test.
 //! - The global set word @ 0x089d00b4 is read directly on target; host
 //!   builds read the modeled [`ACTIVE_CHARACTER_SET`] static.
 //! - `utf8_codepoint_count_safe`, `string_object_c_str`,
 //!   `utf8_next_codepoint` and `string_object_destroy` are already ported
 //!   and are called directly.
 
-use crate::cxx::bit_set::BitSet;
+use crate::cxx::bit_set::{bit_set_test, BitSet};
 use crate::cxx::string_object::{
     string_object_c_str, string_object_destroy, utf8_codepoint_count_safe, utf8_next_codepoint,
     StringObject,
@@ -149,10 +148,10 @@ unsafe fn active_character_set() -> *mut BitSet {
     }
 }
 
-/// Indirect dispatch for the three unported callees (see the module
-/// header). Target defaults transmute the retail addresses; host tests
-/// install recording models — except `bit_set_test`, whose host default is
-/// the faithful three-instruction model.
+/// Indirect dispatch for the three callees (see the module header). The
+/// two unported ones transmute the retail addresses on target and panic on
+/// host; `bit_set_test` is ported, so its slot defaults to the port itself
+/// and stays seamed only so host tests can intercept it.
 #[derive(Clone, Copy)]
 pub struct StringRecordOps {
     /// `FUN_08147f7c(record, 1)`: lazily decodes the record's string into
@@ -164,7 +163,8 @@ pub struct StringRecordOps {
     /// escapes; the payload ends up as NUL-terminated UTF-8.
     pub string_from_range: unsafe extern "C" fn(this: *mut StringObject, range: *const u8),
     /// `FUN_082a4ef8(set, word, bit)`: tests `set->words[word] & 1 << bit`,
-    /// normalized to 0/1. The index arrives PRE-SPLIT by the caller.
+    /// normalized to 0/1. The index arrives PRE-SPLIT by the caller. Ported
+    /// in `cxx/bit_set`; the slot defaults to that port.
     pub bit_set_test: unsafe extern "C" fn(set: *mut BitSet, word: u32, bit: u32) -> u32,
 }
 
@@ -181,13 +181,6 @@ unsafe extern "C" fn firmware_string_from_range(this: *mut StringObject, range: 
     f(this, range)
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_bit_set_test(set: *mut BitSet, word: u32, bit: u32) -> u32 {
-    let f: unsafe extern "C" fn(*mut BitSet, u32, u32) -> u32 =
-        core::mem::transmute(0x082a_4ef8usize);
-    f(set, word, bit)
-}
-
 /// Host default for the materializer: unported, no faithful host model
 /// (it walks the record's private containers).
 #[cfg(not(target_os = "none"))]
@@ -201,16 +194,6 @@ unsafe extern "C" fn missing_string_from_range(_this: *mut StringObject, _range:
     panic!("string_record_range requires range converter 0x080f020c")
 }
 
-/// Host default for the bit test: the faithful model of the three
-/// instructions @ 0x082a4ef8 — `ldr r0, [r0, #8]; ldr r0, [r0, r1, lsl #2];
-/// ands r0, r0, #1 << r2`, normalized to 0/1. Not a stub: the caller's
-/// cardinality recount decision depends on the result.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn bit_set_test_model(set: *mut BitSet, word: u32, bit: u32) -> u32 {
-    let words = (*set).words as usize as *const u32;
-    (words.add(word as usize).read() >> bit) & 1
-}
-
 /// The active callees of [`string_record_range`]. Host tests replace the
 /// table; see the module header for what each slot stands in for.
 pub static mut STRING_RECORD_OPS: StringRecordOps = StringRecordOps {
@@ -222,10 +205,7 @@ pub static mut STRING_RECORD_OPS: StringRecordOps = StringRecordOps {
     string_from_range: firmware_string_from_range,
     #[cfg(not(target_os = "none"))]
     string_from_range: missing_string_from_range,
-    #[cfg(target_os = "none")]
-    bit_set_test: firmware_bit_set_test,
-    #[cfg(not(target_os = "none"))]
-    bit_set_test: bit_set_test_model,
+    bit_set_test,
 };
 
 #[inline(always)]
@@ -574,7 +554,7 @@ mod tests {
             SECOND_SET_WORDS_HINT = second_set as usize;
 
             unsafe extern "C" fn flipping_test(set: *mut BitSet, word: u32, bit: u32) -> u32 {
-                let result = bit_set_test_model(set, word, bit);
+                let result = bit_set_test(set, word, bit);
                 // After the first codepoint's test, swap the active set.
                 core::ptr::addr_of_mut!(ACTIVE_CHARACTER_SET)
                     .write_volatile(SECOND_SET_WORDS_HINT as *mut BitSet);
