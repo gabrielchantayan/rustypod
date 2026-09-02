@@ -42118,6 +42118,51 @@ functions:
       structural diff reviewed after the ARM release build.
 
   # --- screen layout-name setter ---
+  - address: 0x08174300
+    ghidra: FUN_08174300
+    name: app_screen_set_layout_from_resource
+    size: 76
+    sig: "void app_screen_set_layout_from_resource(void *screen, u32 provider_class_id, u32 string_id)"
+    module: app/screen_layout
+    status: ported
+    renames:
+      param_1/r0: screen
+      param_2/r1: provider_class_id
+      param_3/r2: string_id
+      FUN_081d2184: registry_lookup_by_id
+      FUN_08275b9c: object_cast_to_class
+      FUN_0827239c: resource_chain_find_string
+      FUN_0827735c: string_owner_embedded_init
+      FUN_0817434c: app_screen_set_layout
+      FUN_08277484: string_object_destroy
+    notes: >-
+      Raw extent is exactly 0x08174300..0x0817434c; the next separately
+      linked function is app_screen_set_layout @ 0x0817434c. Decoding every
+      ARM B/BL word in osos.dec finds exactly 25 direct call sites, all
+      unconditional plain BL (zero predicated forms, zero tail branches); no
+      DATA word contains the address, so it is never dispatched virtually.
+      The resource front-end of app_screen_set_layout: resolves the provider
+      registered under provider_class_id, downcasts it to class id 5 (the
+      resource-provider interface id; five other sites - 0x08172b1c,
+      0x081805ac, 0x081851c8, 0x0819ee98, 0x081dd590 - cast to 5 immediately
+      around resource-chain calls), asks it for the "Str " resource
+      string_id, wraps the C string in a temporary two-word StringObject on
+      the stack (the pushed r2/r3), assigns it as the screen's layout name,
+      and destroys the temporary. Callers pass app_screen_get's result with
+      class ids 0x80 (@ 0x082257ac) and 0x7e00 (@ 0x081e106c). No NULL guard
+      anywhere: a missing registration propagates NULL through the
+      NULL-tolerant cast and the NULL-headed chain, clearing the layout via
+      the StringObject NULL-payload path. Deliberate deviation: the return
+      word is dead in stock (r0 = string_object_destroy's `this`, a pointer
+      into the collapsed frame; both sampled callers overwrite r0 on the
+      next instruction), so the port declares void and lets r0 fall out of
+      the last call identically. Host tests drive the full pipeline with a
+      mock registry vtable and a combined provider vtable (slot +0x14 cast,
+      slot +0x64 find) plus heap-mocked StringObject slots +0x8/+0xc.
+      match.py: same six-call sequence; the diff is the crate's fp frame,
+      register allocation, and `mov r1,#5` materialized after the lookup
+      instead of hoisted in r4.
+
   - address: 0x0817434c
     ghidra: FUN_0817434c
     name: app_screen_set_layout

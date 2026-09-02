@@ -180,3 +180,13 @@ pub static TIMER_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(())
 /// `app::screen_layout::SCREEN_LAYOUT_ASSIGN_OPS`. The notification callback
 /// is a shared dispatch seam, so a module-private lock would race teardown.
 pub static SCREEN_LAYOUT_ASSIGN_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serializes every host test that swaps
+/// `cxx::string_object::STRING_OBJECT_ASSIGN_CSTR_OPS`. That seam models the
+/// StringObject vtable slots +0x8/+0xc process-wide: `cxx::string_object`'s
+/// own assignment tests install recorders on it, and ported callers whose
+/// flow passes through `string_object_assign_payload` (e.g.
+/// `app::screen_layout`'s resource-setter tests) install heap-backed slots,
+/// so a module-private lock would race teardown across modules.
+pub static STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK: std::sync::Mutex<()> =
+    std::sync::Mutex::new(());
