@@ -33,3 +33,4 @@ pub mod shown_state;
 
 pub mod mode_state;
 pub mod view_base;
+pub mod set_geometry;

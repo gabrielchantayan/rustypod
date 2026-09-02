@@ -29600,6 +29600,59 @@ functions:
       ops-table blx for bl, LLVM's mvn/tst for the bics mask pair, the
       ldreq+unconditional-str fold of the streq/strne pair, and the
       crate's frame-pointer prologue.
+
+  - address: 0x0826d850
+    ghidra: FUN_0826d850
+    name: view_base_set_geometry
+    size: 44
+    sig: "void view_base_set_geometry(ViewBase *view, const void *geometry, u32 redraw)"
+    module: ui/set_geometry
+    status: ported
+    renames:
+      param_1/r0/r4: view
+      param_2/r1: geometry
+      param_3/r2/r5: redraw
+      thunk_EXT_FUN_22000188: iram_memcpy_veneer (direct, already ported)
+      FUN_0826db38: VIEW_BASE_GEOMETRY_CHANGED seam (unported redraw helper)
+    notes: >-
+      The geometry setter of the grand-base view (the class
+      ui/view_base.rs constructs; +0x50..+0x80 is its 0x30-byte
+      `geometry` block). Extent binary-verified: Ghidra's 44 bytes is
+      exact - push {r4,r5,r6,lr} @ 0x0826d850 through pop {r4,r5,r6,pc}
+      @ 0x0826d878, and the distinct sibling FUN_0826d87c opens with its
+      own push {r0-r6,lr} at 0x0826d87c. Decoding every ARM B/BL word
+      in osos.dec finds exactly 22 unconditional bl call sites, zero
+      predicated forms, zero tail b, and a whole-image word scan finds
+      no data references - never dispatched virtually, no NULL guard,
+      callers always hold a live view (the style-attribute applier @
+      0x08180194 and the screen builders @ 0x08288218.. pass freshly
+      decoded blocks with redraw = 1). Body: iram_memcpy_veneer
+      (view+0x50, geometry, 0x30) - the bl 0x08037df8 ROM veneer,
+      already ported and called directly per the view_base_construct
+      precedent - then, when redraw != 0, a tail call (movne r0,r4;
+      popne {r4,r5,r6,lr}; bne 0x0826db38) into the unported redraw
+      helper FUN_0826db38, which (raw-byte verified) sets flags+0x48 |=
+      0x20, invalidates the view's own bounds (+0x80) through the
+      unported region form @ 0x0826ec14, runs the parent's vtable
+      +0x128 notification when parent +0x34 exists and its byte +0xa0
+      is clear, and marks the vtable +0x5c owner's +0x48 word with
+      0x40. Deviations: the tail branch becomes a call through the new
+      VIEW_BASE_GEOMETRY_CHANGED seam (target builds transmute the
+      retail address 0x0826db38, hook-ready on device; host default
+      inert; tests install a recording model - the ui/invalidate.rs
+      precedent), and the port returns void - the original's exit r0
+      (memcpy's return on the redraw==0 path, the helper's leftover on
+      the other) is dead everywhere: all 9 sampled call sites
+      (0x080966e8/0x0809ef60/0x080a7708/0x080ac0f8/0x081165dc/
+      0x081802fc/0x08182888/0x08288218/0x0828865c) overwrite r0 with
+      the very next instruction. Host tests cover the verbatim 0x30-byte
+      copy with +0x4c/+0x80 canaries, redraw==0 non-dispatch, dispatch
+      for redraw 1/2/0x80000000 with the view pointer, full-overwrite
+      (not merge) semantics, and the inert host default. match.py
+      structural: the add r0,r0,#0x50 / mov r2,#0x30 / bl memcpy /
+      cmp-redraw core survives verbatim; the diff is the crate's
+      frame-pointer prologue and the seam's ldr/bx tail in place of the
+      original's movne/popne/bne predicated fold.
   # --- Silver UI framework: the class-0x6800 controller addon ---
 
   - address: 0x08177e84
