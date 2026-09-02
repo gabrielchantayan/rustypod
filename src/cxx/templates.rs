@@ -278,6 +278,46 @@ pub unsafe extern "C" fn deque_iter_assign(dst: *mut u32, src: *const u32) -> *m
     dst
 }
 
+/// deque_iter_assign_alias_9fd4 — original: `FUN_083d9fd4` @ 0x083d9fd4
+/// (36 bytes; 22 `bl` call sites, all plain, none predicated — verified
+/// by decoding every BL word in osos.dec).
+///
+/// A second instantiation of [`deque_iter_assign`] — all 36 bytes
+/// verified byte-identical against osos.dec: `ldr r2,[r1]; str r2,[r0];
+/// ldr r2,[r1,#4]; str r2,[r0,#4]; ldr r2,[r1,#8]; str r2,[r0,#8];
+/// ldr r1,[r1,#0xc]; str r1,[r0,#0xc]; bx lr`. Same 16-byte deque
+/// iterator copy (`cur`, `seg_base`, `seg_end`, `seg_slot`), dst in r0
+/// returned untouched. The pairing identification holds here too: the
+/// 8 bytes immediately before it (@ 0x083d9fcc) are `mov r0,#0x20;
+/// bx lr`, byte-identical to `deque_seg_capacity` @ 0x083d9ec0.
+///
+/// Callers: 0x081cb434 and 0x081cb470 in `FUN_081cb408`/
+/// `FUN_081cb458` (deque element-at and insert helpers on a
+/// `{header, deque}` object at +4, feeding `FUN_083d6fdc` advance and
+/// `FUN_083de544` insert), 0x083d6fc0/0x083d6fd4 in `FUN_083d6fb0` and
+/// 0x083d6fec/0x083d7000 in `FUN_083d6fdc` (the deque-iterator
+/// retreat/advance pair themselves), and 16 sites in `FUN_083de544`
+/// (the deque insert-around-midpoint splitter, which shuffles
+/// iterators through stack copies between its two subranges).
+///
+/// Ported as its own exported symbol (the
+/// [`vector_size_elem4_alias_76c8`] precedent: identical body under a
+/// distinct `link_section` so LLVM's identical-function folding keeps
+/// both labels hookable).
+///
+/// # Safety
+/// Both pointers must be valid, 4-byte aligned and 16 bytes wide; the
+/// original does not handle overlap (a plain forward word copy).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_iter_assign_alias_9fd4")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_iter_assign_alias_9fd4(dst: *mut u32, src: *const u32) -> *mut u32 {
+    for word in 0..4 {
+        dst.add(word).write(src.add(word).read());
+    }
+    dst
+}
+
 /// less_signed — original: `FUN_083d7580` @ 0x083d7580
 /// (24 bytes, 45 `bl` call sites; the only copy of this body).
 ///
@@ -2215,6 +2255,18 @@ mod tests {
             assert_eq!(ret, dst.as_mut_ptr());
             assert_eq!(&dst[..4], &src);
             assert_eq!(dst[4], 0, "nothing past the 16 bytes");
+        }
+    }
+
+    #[test]
+    fn iter_assign_alias_9fd4_copies_four_words_and_returns_dst() {
+        unsafe {
+            let src: [u32; 4] = [0xdead_beef, 0, 0xffff_ffff, 0x1234_5678];
+            let mut dst: [u32; 5] = [0xaaaa_aaaa; 5];
+            let ret = deque_iter_assign_alias_9fd4(dst.as_mut_ptr(), src.as_ptr());
+            assert_eq!(ret, dst.as_mut_ptr());
+            assert_eq!(&dst[..4], &src, "including zero and all-ones words");
+            assert_eq!(dst[4], 0xaaaa_aaaa, "nothing past the 16 bytes");
         }
     }
 
