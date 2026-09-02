@@ -39673,6 +39673,60 @@ functions:
       into the paper. match.py structural - `add r0, r0, #17` then the tail
       `b` to the helper; the diff is the crate fp frame alone.
 
+  # --- draw-state record: the background colour setter ---
+  - address: 0x08263194
+    ghidra: FUN_08263194
+    name: draw_state_set_background_color
+    size: 8
+    sig: "void draw_state_set_background_color(u8 *record, const u8 *color)"
+    module: cxx/draw_state_color
+    status: ported
+    renames:
+      param_1/r0: record (the 0x44-byte draw-state record, cxx/draw_state)
+      param_2/r1: color (four colour bytes)
+      FUN_082720e8: color_copy (the shared unaligned 4-byte colour copy)
+    notes: >-
+      The background-colour setter of the 0x44-byte draw-state record
+      (cxx/draw_state.rs) - the byte-identical twin shape of the foreground
+      setter @ 0x0826319c, binding the second colour slot. Whole function,
+      decoded from the raw words: `add r0,r0,#0x15` then `b 0x082720e8`.
+      NOT a veneer (no `ldr pc,[pc,#-4]` plus target word) and not an empty
+      destructor. Extent is exactly 8 bytes - the very next word is the
+      foreground setter's own `add r0,r0,#0x11`, so no trailing literal
+      pool and no swallowed sibling; Ghidra's 8 is right. Call sites - 22
+      bl and 0 b, binary-scanned by decoding every B/BL word in osos.dec:
+      20 unconditional plus TWO blne, at 0x081286ec and 0x082917c4. Both
+      predicated sites gate on a caller-side FLAG BIT, not a NULL check:
+      0x081286ec is `ldrh r0,[r4,#20]; tst r0,#8; ... blne` (set the
+      background only when style flag 0x8 says there is one, mirroring the
+      foreground's flag 0x4 at 0x081286d8) and 0x082917c4 is
+      `tst r1,#0x8000; ldrne r1,[pc,#36]; blne` (a flag-gated default
+      colour from the literal pool). The setter itself checks nothing.
+      No DATA word in the image holds 0x08263194, so it is never
+      dispatched virtually.
+      What "background" means - the body initializer @ 0x082630f0 defaults
+      this slot to {0xff,0xff,0xff,0xff} (opaque white, the "paper" the
+      opaque-black foreground prints on; cxx/draw_state_color.rs's
+      three-way evidence), and the fill helper @ 0x08262b88 erases with
+      exactly this colour pointer (this+0x15); sampled site 0x0815c2b0
+      calls this setter and immediately fills - the set-then-erase idiom.
+      Deviations - the tail-called helper @ 0x082720e8 is ported as
+      cxx/color_copy.rs's color_copy, and this setter calls it; the byte
+      moves, their forward overlap-propagating order and their volatility
+      all live there. The original returns nothing - r0 survives the tail
+      call as record+0x15, but no bl site reads it (both blne sites
+      reload r0 within two instructions), so the port is void. No NULL
+      guard on either pointer, matching the original.
+      Host tests (5) - the exact 4-byte write at +0x15 with the whole rest
+      of the record proven untouched (style byte at +0x10 and foreground
+      at +0x11 included), all 16 source/destination alignment
+      combinations, every-byte-value coverage including NUL and 0xff, the
+      forward overlap-propagation the byte-at-a-time order implies, and a
+      seeded default-shaped record where repainting the paper must not
+      smear into the text colour. match.py structural - `add r0, r0, #21`
+      then the tail `b` to the helper; the diff is the crate fp frame
+      alone, identical to the accepted foreground twin's diff.
+
   # --- ARM constant-zero return ---
   - address: 0x080275f8
     ghidra: FUN_080275f8
