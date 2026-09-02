@@ -43,6 +43,7 @@ pub mod settings;
 pub mod scaled_cursor;
 pub mod shared_cell;
 pub mod slot_reset;
+pub mod state_object_destroy;
 pub mod string;
 pub mod string_map;
 pub mod stream_write;
