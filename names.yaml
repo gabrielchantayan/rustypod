@@ -9677,6 +9677,56 @@ functions:
       alignment; identical for every pointer it supported). 8 call
       sites, binary-scanned, callers @ 0x0827a2f4..0x0827b09c.
 
+  - address: 0x080b3d40
+    ghidra: FUN_080b3d40
+    name: mov_atom_node_new
+    size: 28
+    sig: "MovAtomNode *mov_atom_node_new(u32 fourcc)"
+    module: mov/atom_node
+    status: ported
+    vars: {param_1/r0: fourcc, r4: saved_fourcc}
+    notes: >-
+      MOV/MP4 demuxer atom-table node factory: operator_new(0x28) @
+      0x082aadd4 (tag 2, ported in heap/veneers, called directly),
+      then a tail branch (b, not bl) to the node initializer @
+      0x0814d2b0 with (node, fourcc). Ghidra's 28-byte extent is
+      exact (next function opens 0x080b3d5c with push {r4,lr});
+      Ghidra emits NO C file for this function - the port is from
+      raw bytes. 22 bl call sites, 0 predicated, 0 tail branches,
+      verified by decoding every B/BL word in osos.dec; no DATA word
+      references the address (never virtually dispatched). 19 sites
+      load a fourcc literal into r0 immediately before the bl:
+      tkhd/edts/elst/mdia/mdhd/minf/stbl/stsd/stco/co64/stsc/stsz/
+      stts/stss @ 0x081c1d2c..0x081c1dbc and moov/mvhd/trak/hdlr/
+      mdat @ 0x081c7d6c..0x081c7da8, each the file's ASCII bytes as
+      a little-endian u32 ('tkhd' = 0x64686b74); the site @
+      0x080a3f00 is inside the table search FUN_080a3ea0 itself,
+      growing the tree with a placeholder on a populate miss. The
+      tail callee @ 0x0814d2b0 (unported, 48 bytes, 12 instructions,
+      stores only, no callees) is reproduced store-for-store in the
+      original's register order as the private atom_node_init:
+      dup_chain/child_a/child_b = NULL (+0x08/+0x00/+0x04), kind
+      byte +0x21 = 0, offset and size u64s +0x10/+0x18 = -1
+      (placeholder), fourcc at +0x24; it deliberately does NOT write
+      +0x0c or the +0x20 flag byte (born as whatever the heap block
+      held) and returns r0 = node unchanged. No NULL guard between
+      the allocator and the init - on OOM the first store faults, so
+      the factory never returns NULL on the stock build (the one
+      caller that NULL-checks, FUN_080a3ea0, can never observe it).
+      Node layout cross-checked three ways: the init, the getters @
+      0x0814d230/0x0814d1ac/0x0814d270, and FUN_080a3ea0's word
+      reads (puVar2[9] = +0x24 key, puVar2[5]/[4] = -1 placeholder
+      test, puVar2[0..2] = links). Deviations: the tail branch
+      becomes an ordinary call+return (ABI-identical result); the
+      init is not a separate exported symbol. match.py --lib
+      <worktree> --size 28: LLVM inlines the init body with the
+      store order intact (str +8, +0, +4, strb +0x21, mvn, str
+      +0x10/+0x14/+0x18, fourcc +0x24, str +0x1c) - the only deltas
+      are the crate fp prologue and the archive bl relocation. Host
+      tests drive the mock heap: allocation is exactly one tag-2
+      operator_new(0x28), all initialized fields verified, and the
+      +0x0c/+0x20/+0x22 poison bytes provably survive.
+
   - address: 0x081c8034
     ghidra: FUN_081c8034
     name: mov_atom_info
