@@ -29,3 +29,4 @@ pub mod transfer_default_mode;
 pub mod timer;
 pub mod uart;
 pub mod wheel;
+pub mod wmcodec;
