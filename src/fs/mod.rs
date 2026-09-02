@@ -4,5 +4,7 @@ pub mod path_limits;
 pub mod path_node;
 /// Cache-entry reference release @ 0x082e18bc.
 pub mod cache_entry;
+/// Cache lock semaphore release @ 0x082d7944.
+pub mod cache_lock;
 /// Platform C++ file-object read wrapper @ 0x082784b8.
 pub mod file_read;
