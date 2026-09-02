@@ -1,4 +1,4 @@
-//! The seventeen lazily-constructed framework singletons. Every one is the
+//! The eighteen lazily-constructed framework singletons. Every one is the
 //! same four-step idiom over its own cache word, its own allocation
 //! size and its own constructor:
 //!
@@ -26,6 +26,7 @@
 //! | 0x0811b2c0 | [`singleton_class_6280`] | 0xa0 | 0x089cc30c | 0x0811c7fc | **43** |
 //! | 0x081fa3b0 | [`stage_progress_tracker_get`] | 0x2c | 0x089ca5d4 | 0x081fa440 | 30 |
 //! | 0x081303a8 | [`singleton_class_9300`] | 0x14c | 0x089cc2bc | 0x08130424 | 28 |
+//! | 0x08259534 | [`lazy_singleton_0xbc`] | 0xbc | 0x089cc960 | 0x08258a70 | 22 |
 //!
 //! (Call-site counts binary-scanned; the earlier scouting notes said 86
 //! / 38 / 37 / 36 for the bottom four.)
@@ -47,7 +48,7 @@
 //!
 //! `operator new` @ 0x082aadd4 is already ported
 //! (`heap::veneers::operator_new`), so it is called directly. None of
-//! the seventeen constructors is — they are large C++ constructors — so
+//! the eighteen constructors is — they are large C++ constructors — so
 //! they sit behind the [`SINGLETON_CTORS`] dispatch table, the house
 //! pattern.
 //!
@@ -177,9 +178,33 @@
 //!   retried.
 //! - The 0x14C object is registry class **0x9300** — see
 //!   [`singleton_class_9300`] below. Its constructor @ 0x08130424 wires
-//!   an embedded timer at +0x44 armed to 2000 ms, which its method
+//!   wires an embedded timer at +0x44 armed to 2000 ms, which its method
 //!   cluster (0x0812f754..0x08130134, the getter's own neighbours)
 //!   drives. Class NOT named.
+//! - The 0xBC object is the family's **event-listener controller** —
+//!   the only member whose constructor subscribes the object to the
+//!   process-wide event hub: it builds two embedded map heads (a
+//!   descriptor node at +0x14 through the unported FUN_083c00dc and a
+//!   byte-keyed-map header node at +0x58 through the ported
+//!   byte_key_tree_allocate_node @ 0x083b7f40, both self-pointing
+//!   circular sentinels), two mutexes (the ported cxx_mutex_construct
+//!   @ 0x08261e28 at +0x20 and +0xa0), two embedded PathObjects
+//!   (+0x64/+0x6c, the ported path_object_default_construct @
+//!   0x082792cc) and two embedded StringObjects (+0x7c/+0x94, the
+//!   ported string_default_construct @ 0x08277440), sets byte +0x3c =
+//!   2, plants primary vtable **0x089a7604** at +0 over the shared
+//!   interface base 0x089a75c8 (the same first store settings_ctor
+//!   makes) and secondary vtable **0x089a76e0** at +0x40, then hands
+//!   `this + 0x40` to the event hub's kind-1 listener list through
+//!   event_hub_instance_get @ 0x082579a0 and the subscribe push_back
+//!   @ 0x08257aec (see app/event_hub.rs). The 22 call sites dispatch
+//!   the object virtually (slots +0x20..+0x6c): fourteen inside the
+//!   registry-class-0x8780 method cluster 0x081a3xxx-0x081a5xxx, four
+//!   in the command handler FUN_081c9228 (command ids
+//!   0x10001-0x10005 select slots +0x20/+0x28/+0x30/+0x34), one in the
+//!   boot-time singleton checker FUN_08258028 (0x0825807c). Class NOT
+//!   named: the ctor reaches no name factory and no registry id, so
+//!   the symbol carries the size only.
 //!
 //! **None of these symbols is hook-ready.** Until the constructors are
 //! ported, the dispatch defaults hand out a zeroed block — no vtable,
@@ -197,7 +222,7 @@
 //! - The cache slots are the crate statics below rather than words in
 //!   0x089cxxxx / 0x089dxxxx pages (the block_mgr.rs deviation:
 //!   those RW pages are runtime-initialized; the image holds stale UI
-//!   strings there). All seventeen default to NULL, exactly the pre-init
+//!   strings there). All eighteen default to NULL, exactly the pre-init
 //!   state.
 
 use crate::heap::veneers::operator_new;
@@ -267,10 +292,14 @@ pub const STAGE_PROGRESS_TRACKER_SIZE: usize = 0x2c;
 /// (`mov r0, #0x14c`).
 pub const CLASS_9300_SIZE: usize = 0x14c;
 
+/// Allocation size of the unidentified 0xbc event-listener singleton
+/// (`mov r0, #0xbc`).
+pub const SINGLETON_0XBC_SIZE: usize = 0xbc;
+
 /// An ADS C++ constructor: takes the raw block, returns `this`.
 pub type Constructor = unsafe extern "C" fn(this: *mut u8) -> *mut u8;
 
-/// Indirect dispatch table for the seventeen unported constructors (see the
+/// Indirect dispatch table for the eighteen unported constructors (see the
 /// module header for the default-stub contract).
 #[derive(Clone, Copy)]
 pub struct SingletonCtors {
@@ -308,6 +337,8 @@ pub struct SingletonCtors {
     pub stage_progress_tracker: Constructor,
     /// Registry-class-0x9300 ctor @ 0x08130424.
     pub class_9300: Constructor,
+    /// The 0xbc event-listener object's ctor @ 0x08258a70.
+    pub singleton_0xbc: Constructor,
 }
 
 /// Defines one default constructor stub: zeroes the block and returns
@@ -339,6 +370,7 @@ zeroing_ctor!(zeroing_singleton_0x40_ctor, SINGLETON_0X40_SIZE);
 zeroing_ctor!(zeroing_class_6280_ctor, CLASS_6280_SIZE);
 zeroing_ctor!(zeroing_stage_progress_tracker_ctor, STAGE_PROGRESS_TRACKER_SIZE);
 zeroing_ctor!(zeroing_class_9300_ctor, CLASS_9300_SIZE);
+zeroing_ctor!(zeroing_singleton_0xbc_ctor, SINGLETON_0XBC_SIZE);
 
 /// Zeroes `size` bytes and returns the block. Volatile stores: a plain
 /// loop is rewritten by LLVM into a call to `__aeabi_memclr`, a symbol
@@ -371,6 +403,7 @@ pub(crate) const DEFAULT_SINGLETON_CTORS: SingletonCtors = SingletonCtors {
     class_6280: zeroing_class_6280_ctor,
     stage_progress_tracker: zeroing_stage_progress_tracker_ctor,
     class_9300: zeroing_class_9300_ctor,
+    singleton_0xbc: zeroing_singleton_0xbc_ctor,
 };
 
 /// The active constructors. Host tests install recording mocks; the
@@ -458,6 +491,11 @@ pub static mut STAGE_PROGRESS_TRACKER: *mut u8 = core::ptr::null_mut();
 /// 0x089cc2bc, the `+4` slot of the global @ 0x089cc2b8 — the pool
 /// literal @ 0x081303d4).
 pub static mut CLASS_9300_INSTANCE: *mut u8 = core::ptr::null_mut();
+
+/// The unidentified 0xbc event-listener singleton (original: the word
+/// @ 0x089cc960 itself — the pool literal @ 0x08259560 points straight
+/// at the cache, no `+N` slot).
+pub static mut SINGLETON_0XBC: *mut u8 = core::ptr::null_mut();
 
 /// The body all getters share: test the cache, allocate, construct,
 /// store, and re-load the cache (the original's second `ldr r0, [r4, #N]`,
@@ -984,7 +1022,7 @@ pub unsafe extern "C" fn singleton_class_6280() -> *mut u8 {
 /// - **OOM is fatal.** `cmp r5, #0; str r5, [r4, #72]; bleq
 ///   heap_panic`: the NULL is stored into the cache first, then
 ///   `heap_panic` @ 0x08030f44 runs and never returns — unlike the
-///   other fourteen getters, which cache a NULL ctor result and
+///   other seventeen getters, which cache a NULL ctor result and
 ///   re-allocate on the next call. Note the constructor is invoked on
 ///   the NULL block BEFORE the panic (the `bl 0x081fa440` is
 ///   unpredicated); reproduced, though the heap_panic port makes the
@@ -1090,6 +1128,62 @@ pub unsafe extern "C" fn singleton_class_9300() -> *mut u8 {
     lazy_singleton(cache, CLASS_9300_SIZE, || unsafe { ctor!(class_9300) })
 }
 
+/// lazy_singleton_0xbc — original: `FUN_08259534` @ **0x08259534**
+/// (44 bytes of code + one pool word @ 0x08259560 = **48 bytes** of
+/// true extent; **22 `bl` call sites, all unconditional — 0 predicated,
+/// 0 plain `b`** — binary-verified by decoding every B/BL word in
+/// `work/firmware/osos.dec`).
+///
+/// ```text
+/// 08259534  push {r4, lr}
+/// 08259538  ldr  r4, [pc, #32]      @ = 0x089cc960 (pool @ 0x08259560)
+/// 0825953c  ldr  r0, [r4]           @ the cache word itself, no +N slot
+/// 08259540  cmp  r0, #0
+/// 08259544  bne  0x08259558
+/// 08259548  mov  r0, #0xbc
+/// 0825954c  bl   0x082aadd4         @ operator new
+/// 08259550  bl   0x08258a70         @ constructor (Ghidra drops its `this`)
+/// 08259554  str  r0, [r4]
+/// 08259558  ldr  r0, [r4]           @ reload the slot before returning
+/// 0825955c  pop  {r4, pc}
+/// 08259560  .word 0x089cc960
+/// ```
+///
+/// The eighteenth member of this family: test the cache word @
+/// 0x089cc960, and when it is NULL allocate exactly 0xbc bytes with the
+/// ported `operator_new`, run the constructor @ 0x08258a70 over the raw
+/// block, store the ctor's return into the cache, RELOAD the slot and
+/// return it (so a self-caching ctor wins, and a NULL-returning ctor
+/// leaves no failure memory — the next call re-allocates). Ghidra's 44
+/// bytes is the code only; the true extent runs to 0x08259564, where
+/// the sibling 0x4c-byte getter opens `push {r4, lr}` (the boot-time
+/// singleton checker FUN_08258028 calls both).
+///
+/// What the object is: an event-listener controller — its constructor
+/// builds two embedded map heads, two mutexes, two PathObjects and two
+/// StringObjects, plants primary vtable **0x089a7604** at +0 and
+/// secondary vtable **0x089a76e0** at +0x40, and subscribes `this +
+/// 0x40` to the event hub's kind-1 listener list (see the module
+/// header). The 22 call sites dispatch it virtually: fourteen in the
+/// registry-class-0x8780 method cluster 0x081a3xxx-0x081a5xxx, four in
+/// the command handler FUN_081c9228 (ids 0x10001-0x10005), one in the
+/// boot checker. **Class NOT named**: the ctor reaches neither a name
+/// factory nor the by-id registry, so — like [`lazy_singleton_0x3c`] &
+/// co. — the symbol says only the size.
+///
+/// Deviations: the ctor rides the [`SINGLETON_CTORS`] dispatch table
+/// (`singleton_0xbc` slot, documented zeroing default — NOT HOOK-READY,
+/// the family contract) and the cache is the crate static
+/// [`SINGLETON_0XBC`] rather than the word @ 0x089cc960 (the
+/// block_mgr.rs RW-page deviation). Same NOT-HOOK-READY caveat as every
+/// sibling — see the module header.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn lazy_singleton_0xbc() -> *mut u8 {
+    let cache = core::ptr::addr_of_mut!(SINGLETON_0XBC);
+    lazy_singleton(cache, SINGLETON_0XBC_SIZE, || unsafe { ctor!(singleton_0xbc) })
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -1170,6 +1264,7 @@ mod tests {
                 class_6280: recording_ctor,
                 stage_progress_tracker: recording_ctor,
                 class_9300: recording_ctor,
+                singleton_0xbc: recording_ctor,
             };
             CTOR_RESULT = ctor_result;
             (*ptr::addr_of_mut!(ALLOC_SIZES)).clear();
@@ -1210,6 +1305,7 @@ mod tests {
         CLASS_6280_INSTANCE = ptr::null_mut();
         STAGE_PROGRESS_TRACKER = ptr::null_mut();
         CLASS_9300_INSTANCE = ptr::null_mut();
+        SINGLETON_0XBC = ptr::null_mut();
     }
 
     fn arena() -> *mut u8 {
@@ -2205,6 +2301,126 @@ mod tests {
             assert!(ptr::read_volatile(ptr::addr_of!(CLASS_6280_INSTANCE)).is_null(), "untouched");
             assert!(ptr::read_volatile(ptr::addr_of!(STAGE_PROGRESS_TRACKER)).is_null(), "untouched");
             assert_eq!(*ptr::addr_of!(ALLOC_SIZES), std::vec![0x14c]);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_0xbc_singleton_is_allocated_at_exactly_0xbc_and_constructed_once() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(lazy_singleton_0xbc(), constructed());
+            assert_eq!(
+                *ptr::addr_of!(ALLOC_SIZES),
+                std::vec![0xbc],
+                "the `mov r0, #0xbc` immediate"
+            );
+            assert_eq!(*ptr::addr_of!(CTOR_BLOCKS), std::vec![arena()], "constructed on the raw block");
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(SINGLETON_0XBC)),
+                constructed(),
+                "the ctor result is cached in the word @ 0x089cc960"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_0xbc_singleton_second_call_returns_the_cache() {
+        // The `cmp r0, #0; bne` fast path: 21 of the 22 call sites run
+        // after the boot checker's first construction and never touch
+        // the allocator.
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(lazy_singleton_0xbc(), constructed());
+            assert_eq!(lazy_singleton_0xbc(), constructed());
+            assert_eq!(lazy_singleton_0xbc(), constructed());
+            assert_eq!((*ptr::addr_of!(ALLOC_SIZES)).len(), 1, "allocated exactly once");
+            assert_eq!((*ptr::addr_of!(CTOR_BLOCKS)).len(), 1, "constructed exactly once");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn a_pre_seeded_0xbc_cache_never_allocates() {
+        let guard = mock(constructed());
+        unsafe {
+            SINGLETON_0XBC = arena().add(48);
+            assert_eq!(lazy_singleton_0xbc(), arena().add(48));
+            assert!((*ptr::addr_of!(ALLOC_SIZES)).is_empty());
+            assert!((*ptr::addr_of!(CTOR_BLOCKS)).is_empty());
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn a_null_returning_0xbc_ctor_caches_null_and_retries_on_every_call() {
+        let guard = mock(ptr::null_mut());
+        unsafe {
+            assert!(lazy_singleton_0xbc().is_null());
+            assert!(ptr::read_volatile(ptr::addr_of!(SINGLETON_0XBC)).is_null());
+            assert!(lazy_singleton_0xbc().is_null());
+            assert_eq!(
+                *ptr::addr_of!(ALLOC_SIZES),
+                std::vec![SINGLETON_0XBC_SIZE, SINGLETON_0XBC_SIZE],
+                "no failure memory: it re-allocates every call"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_0xbc_store_lands_after_its_ctor_runs() {
+        // Order is alloc -> ctor -> store: a ctor that pokes the cache
+        // slot itself is overwritten by the store of the ctor's return
+        // (the original's `str r0, [r4]` follows the `bl 0x08258a70`),
+        // and the reload then returns that stored value.
+        unsafe extern "C" fn cache_poking_ctor(this: *mut u8) -> *mut u8 {
+            (*ptr::addr_of_mut!(CTOR_BLOCKS)).push(this);
+            SINGLETON_0XBC = this.add(32);
+            this.add(48)
+        }
+        let guard = mock(ptr::null_mut());
+        unsafe {
+            SINGLETON_CTORS.singleton_0xbc = cache_poking_ctor;
+            assert_eq!(lazy_singleton_0xbc(), arena().add(48), "the ctor-return store wins");
+            assert_eq!(ptr::read_volatile(ptr::addr_of!(SINGLETON_0XBC)), arena().add(48));
+            assert_eq!(*ptr::addr_of!(CTOR_BLOCKS), std::vec![arena()], "the ctor still ran, once");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_0xbc_zeroing_stub_clears_exactly_0xbc_bytes() {
+        let guard = SINGLETON_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            let block = ptr::addr_of_mut!(ARENA) as *mut u8;
+            for offset in 0..SINGLETON_0XBC_SIZE + 4 {
+                block.add(offset).write(0xa5);
+            }
+            assert_eq!(zeroing_singleton_0xbc_ctor(block), block);
+            assert!((0..SINGLETON_0XBC_SIZE).all(|offset| block.add(offset).read() == 0));
+            assert_eq!(
+                block.add(SINGLETON_0XBC_SIZE).read(),
+                0xa5,
+                "not one byte past the object"
+            );
+            assert!(zeroing_singleton_0xbc_ctor(ptr::null_mut()).is_null(), "NULL-safe");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_0xbc_cache_is_independent_of_its_globals_page_neighbours() {
+        // The cache word 0x089cc960 sits in the same 0x089cc9xx globals
+        // page as the settings store (0x089cc948) and the 0x40
+        // singleton (0x089cc94c); the crate statics keep them apart.
+        let guard = mock(constructed());
+        unsafe {
+            lazy_singleton_0xbc();
+            assert!(ptr::read_volatile(ptr::addr_of!(SINGLETON_0X40)).is_null(), "untouched");
+            assert!(ptr::read_volatile(ptr::addr_of!(CLASS_9300_INSTANCE)).is_null(), "untouched");
+            assert_eq!(*ptr::addr_of!(ALLOC_SIZES), std::vec![0xbc]);
         }
         restore(guard);
     }
