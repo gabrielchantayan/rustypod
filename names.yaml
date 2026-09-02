@@ -5022,6 +5022,35 @@ functions:
       structural diff (indirect call through hook slot 1,
       `mov r0, #0x11` intact).
 
+  - address: 0x08064604
+    ghidra: FUN_08064604
+    name: kernel_sem17_signal
+    size: 8
+    sig: "usize kernel_sem17_signal()"
+    module: kernel/task_lock
+    status: ported
+    notes: >-
+      Fixed-id semaphore-release shim: `mov r0, #0x11; b 0x08037e10`
+      (rom_sem_signal veneer -> ROM 0x220042b4), the r0 result word
+      passing back through the tail branch. Semaphore 0x11 is
+      PMU_I2C_OUTER_SEM, the OUTER lock of the wait(0x11)/wait(5)
+      bracket around every raw PMU transfer; this shim is its release
+      half, mirror of kernel_sem17_wait @ 0x0806a4b0 (see drivers/i2c).
+      Extent verified: Ghidra's 8 bytes are correct - the next
+      function's `push {r4, lr}` prologue starts at 0x0806460c. No data
+      word in osos references 0x08064604 - the shim is never dispatched
+      virtually. 31 call sites (binary-verified against osos.dec;
+      Ghidra's 25 counts only the bl forms): 25 unconditional bl - 22 in
+      the PMU I2C family 0x082e53f8..0x082e5c14 plus 0x080671bc,
+      0x08068034, 0x0836d438 - and 6 unconditional tail b (error-exit
+      releases inside the same family at 0x082e54b0, 0x082e54fc,
+      0x082e5548, 0x082e57d0, 0x082e5a1c, 0x082e5b60); zero predicated
+      forms, so callers never flag-gate the release. Deviation:
+      dispatches through the ported rom_sem_signal (the ROM_KERNEL hook)
+      instead of branching to the ROM veneer - same family pattern as
+      kernel_sem5_signal, so match.py shows an expected structural diff
+      (indirect call through hook slot 2, `mov r0, #0x11` intact).
+
   - address: 0x0806aa3c
     ghidra: FUN_0806aa3c
     name: ui_element_is_tdat_class

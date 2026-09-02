@@ -454,6 +454,35 @@ pub unsafe extern "C" fn kernel_sem17_wait() -> usize {
     rom_sem_wait(0x11)
 }
 
+/// kernel_sem17_signal — original: `FUN_08064604` @ 0x08064604 (8 bytes):
+/// `mov r0, #0x11; b 0x08037e10` — a fixed-id shim that releases kernel
+/// semaphore 0x11 (17, PMU_I2C_OUTER_SEM) through the rom_sem_signal
+/// veneer (ROM 0x220042b4), the r0 result word passing back through the
+/// tail branch. Extent verified: the next function's `push {r4, lr}`
+/// prologue starts at 0x0806460c (Ghidra's 8-byte extent is correct this
+/// time). No data word in osos references 0x08064604 — the shim is never
+/// dispatched virtually.
+///
+/// 31 call sites (binary-verified against osos.dec — Ghidra's 25 counts
+/// only the `bl` forms): 25 unconditional `bl`, 6 unconditional tail `b`
+/// (error-exit releases inside the PMU I2C family at 0x082e54b0,
+/// 0x082e54fc, 0x082e5548, 0x082e57d0, 0x082e5a1c, 0x082e5b60), zero
+/// predicated forms — callers never flag-gate the release. The `bl`
+/// sites: 22 in the PMU I2C family 0x082e53f8..0x082e5c14, the
+/// outer-lock release of the wait(0x11)/wait(5) bracket around every raw
+/// transfer (mirror of kernel_sem17_wait @ 0x0806a4b0; see drivers/i2c),
+/// plus 0x080671bc, 0x08068034, 0x0836d438.
+///
+/// Deviation: dispatches through the ported rom_sem_signal (the
+/// ROM_KERNEL hook) instead of branching to the 8-byte ROM veneer; the
+/// original tail-branch becomes a call whose r0 result is returned
+/// verbatim.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn kernel_sem17_signal() -> usize {
+    rom_sem_signal(0x11)
+}
+
 /// rom_svc_2200418c — original: thunk @ 0x08037e18 -> ROM gateway stub,
 /// service 4. Args per call sites, e.g. (1, ptr, 5) from the create path
 /// @ 0x08047dd0.
@@ -990,6 +1019,21 @@ pub(crate) mod tests {
             check(1, ret, &[0x11]);
             let ret = kernel_sem17_wait();
             check(1, ret, &[0x11]);
+        }
+    }
+
+    /// kernel_sem17_signal (shim @ 0x08064604): the id is forced to
+    /// semaphore 0x11 before the ROM signal fires — the caller's r0 is
+    /// dead — and the hook's r0 result word comes back. No other slot
+    /// may fire.
+    #[test]
+    fn kernel_sem17_signal_forces_id_17() {
+        let _lock = mock_kernel();
+        unsafe {
+            let ret = kernel_sem17_signal();
+            check(2, ret, &[0x11]);
+            let ret = kernel_sem17_signal();
+            check(2, ret, &[0x11]);
         }
     }
 
