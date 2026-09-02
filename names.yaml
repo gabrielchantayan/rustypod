@@ -37598,8 +37598,65 @@ functions:
       linker-safe literal veneer. Host builds expose the target RAM word and
       controller edge as test seams. Host tests cover ordinary advance,
       the held level, controller result/once-only forwarding, and wrapping
-      from 0xffffffff. match.py diff reviewed; structural shape is
+      0xffffffff. match.py diff reviewed; structural shape is
       literals -> compare -> conditional add -> store -> tail controller.
+
+  # --- stream-buffer transition controller ---
+  - address: 0x080380f0
+    ghidra: thunk_EXT_FUN_220029ac
+    name: stream_buffer_transition_controller
+    size: 8
+    sig: "u32 stream_buffer_transition_controller(void)"
+    module: app/buffer_transition_controller
+    status: ported
+    renames:
+      DAT_080380f4: stream_buffer_transition_controller_body (target RAM @ 0x220029ac, osos body @ 0x080029ac, 172 bytes)
+      DAT_08002d48: stream_buffer_request_controller (target RAM @ 0x2200aebc; +0x00 flags, +0x0c inhibit, +0x10 requested level, +0x14 base level)
+      DAT_08002d4c: stream_transition_inhibit_byte (RAM @ 0x089caf4a)
+      thunk_FUN_080518a0: stream_transition_gate (role-based; true identity unverified)
+      thunk_FUN_0804afb4: stream_transition_dispatch (role-based; true identity unverified)
+      thunk_FUN_081561f8: controller_history_fn (veneer targets the "CntrlHistoryFn" string head; real entry 0x0815620c)
+      FUN_08002948: stream_buffer_level_wait_equal
+      FUN_080044c8: stream_buffer_level_wait_zero
+    notes: >-
+      Ghidra's 4-byte size omits the veneer literal: raw osos.dec has
+      e51ff004 at 0x080380f0 followed by target word 0x220029ac at
+      0x080380f4; the relocator's 0x08000000 to 0x22000000 IRAM mirror
+      resolves that to the osos body at 0x080029ac. The body's true raw
+      extent is 172 bytes (0x080029ac..0x08002a57), ending in the tail
+      branch b 0x08002948; 0x08002a58 opens the distinct
+      iPodPowerProfile.txt function. Ghidra's 348-byte FUN_080029ac lumps
+      the body with that sibling and both wait functions. Raw decoding of
+      every ARM B/BL word found 24 unconditional bl call sites plus 3
+      tail b transfers (0x081a5d9c, 0x081a6794, 0x081a684c); no predicated
+      bl forms, so all policy checks live inside the controller. Behavior:
+      suppress to the drain wait (0x080044c8, spin until level word
+      0x2200ad14 is 0) when (flags & 0x46) | controller+0x0c is nonzero,
+      the 0x089caf4a byte is nonzero, the storage gate 0x080518a0 returns
+      nonzero, or the history check returns nonzero after the dispatch
+      0x0804afb4 runs; otherwise reload flags/base level post-call and
+      compute the target: bit0 clamps to max(min(base, requested),
+      bit7 ? 0 : 1), bit3 overrides to bit4 ? 0 : 1, bit5 (without bit3)
+      forces 0; then tail-enter 0x08002948(level), spinning until the
+      level word equals the target. Both waits fall through to the
+      stream-consumer status block 0x080042b4(22), whose result (or the
+      already-met level on the early-exit path) is the return value.
+      Anomaly: the history callee's veneer at 0x08003548 (sole caller
+      0x080029e4) targets 0x081561f8, the head of the "CntrlHistoryFn"
+      name string, 0x14 bytes before the real entry 0x0815620c; the five
+      intervening words decode as VS/EQ-predicated instructions that no-op
+      only when entering with V=0 and Z=0. The port preserves the
+      0x081561f8 transfer verbatim through a literal veneer. ARM callees
+      are reached via retail_* literal veneers replacing stock PC-relative
+      branches; host builds seam target RAM and all five callees. Host
+      tests cover each inhibit source, gate/dispatch/history short-circuit
+      order, base passthrough, the min/max clamp including the bit7 floor
+      removal, both override values, force-zero precedence, result
+      forwarding, and the post-call flags/base reload. match.py diff
+      reviewed (--lib worktree archive): 44 vs 43 instructions,
+      structurally isomorphic; LLVM selects equivalent idioms (movcc/movls
+      min, bic-computed override, movne force-zero) and tail-branches to
+      the retail wait veneers.
 
   # --- eight-slot byte identity-table initialization ---
   - address: 0x08028460
