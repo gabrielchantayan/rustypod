@@ -7776,6 +7776,52 @@ functions:
       fields are addressed by word index, not literal target byte
       offset, so the +0x4/+0x8 pair does not overlap on 64-bit hosts.
 
+  - address: 0x082804fc
+    ghidra: FUN_082804fc
+    name: region_elem_destroy
+    size: 48
+    sig: "void *region_elem_destroy(void *elem)"
+    module: heap/block_region
+    status: ported
+    vars: {param_1: elem}
+    notes: >-
+      The 0x28-byte block-deque element's C++ destructor (48 bytes +
+      one literal-pool word @ 0x0828052c; next function @ 0x08280530,
+      extent binary-verified). Plants the class vtable (literal
+      0x089a6444) at elem + 0x0, locks the element's region via the
+      ported region_ref_lock (0x082801f8, direct call), releases the
+      region reference @ 0x082803c0, destroys the recursive-mutex
+      member at elem + 0xc through the dtor thunk @ 0x082621dc (->
+      mutex destroy @ 0x082e82a4), and returns this as
+      member_result - 0xc (the closing `sub r0, r0, #12`). 23 bl +
+      1 tail b (0x0814b830) call sites, binary-verified by decoding
+      every B/BL word in osos.dec — no predicated forms; callers
+      include the deleting destructor @ 0x082804e4, client_populate's
+      original (0x081fc354/0x081fc3bc) and the deque teardown
+      (0x083dcd9c). Deviations: the two unported callees dispatch
+      through the new REGION_ELEM_OPS slots (house pattern, blx for
+      bl) — region_release defaults to a documented no-op stub (exact
+      for the NULL-region elements the wired configuration can hold;
+      a live-region element would need the real 0x082803c0 port —
+      refcount decrement, mutex unlock, tag-43 free of region + 0x4,
+      operator_delete of the region, elem + 0x4/+0x8 NULLed),
+      member_destroy to an identity stub mirroring the thunk's own
+      `mov r0, r4` (the mutex member is opaque, pool_client.rs's
+      stub_mutex_init precedent). The vtable words at 0x089a6444
+      (0, 0x082900b8, 0x0828cfa4, 0) do NOT decode as function
+      entries — both pointers land mid-instruction-stream — so the
+      port stores the raw ROM address (ui/view_base.rs precedent) and
+      never dispatches through it; the anomaly is recorded, no slot
+      identities invented. client_populate.rs's region_destroy slot
+      now defaults to this port through a ()-returning adapter (the
+      real-ports-become-defaults precedent). match.py structural:
+      same vtable store, same guarded region lock (inlined
+      region_ref_lock — its read_unaligned mutex-field load shows as
+      ldrb x4, the module's documented host-fixture idiom), blx slots
+      for the two unported callees, same `sub r0, r0, #12` return.
+      LLVM did not fold the body; the symbol resolves in
+      librustypod.a next to region_ref_lock.
+
   # --- byte-order swap cluster (0x0805dc24..0x0805dd88) ---
   - address: 0x0805dc24
     ghidra: FUN_0805dc24

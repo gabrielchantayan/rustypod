@@ -18,10 +18,39 @@
 //!   0x089cb1b8 — see below) when the region or its start is NULL,
 //!   unlocks, and returns the start. This is the POOL_OPS `region_start`
 //!   hook of pool.rs: the address the seeded heap block begins at.
+//! - `region_elem_destroy` — original: `FUN_082804fc` @ 0x082804fc
+//!   (48 bytes + one literal-pool word @ 0x0828052c; 23 `bl` + 1 tail
+//!   `b` call sites, binary-verified by decoding every B/BL word in
+//!   osos.dec): the 0x28-byte element's C++ destructor. Plants the
+//!   class vtable (the literal 0x089a6444 — see below) at elem + 0x0,
+//!   locks the element's region (`region_ref_lock`), releases the
+//!   region reference @ 0x082803c0 (which decrements the region's
+//!   refcount, on zero frees the region's word-1 buffer with tag 43
+//!   and `operator delete`s the region, and in every live path
+//!   unlocks the mutex `region_ref_lock` took and NULLs elem + 0x4 /
+//!   + 0x8), destroys the recursive-mutex member at elem + 0xc
+//!   through the dtor thunk @ 0x082621dc (-> mutex destroy @
+//!   0x082e82a4; returns its argument), and returns `this` as
+//!   `member_result - 0xc` — the deleting destructor @ 0x082804e4
+//!   relies on the NULL check it does itself, every other caller
+//!   discards the return.
 //!
 //! Layouts (element stride 0x28, all fields 32-bit on target):
-//! `elem + 0x4` = region object pointer; `region + 0x4` = region start
-//! address; `region + 0x8` = mutex object pointer.
+//! `elem + 0x0` = vtable (0x089a6444); `elem + 0x4` = region object
+//! pointer; `elem + 0x8` = one more region-ref word (copied by the
+//! copy ctor, NULLed by the release); `elem + 0xc..+0x28` = the C++
+//! recursive-mutex member (ctor 0x082621b0, dtor thunk 0x082621dc).
+//! `region + 0x0` = refcount; `region + 0x4` = region start address
+//! (freed with tag 43 on final release); `region + 0x8` = mutex
+//! object pointer.
+//!
+//! The vtable literal: the four words at 0x089a6444 in osos.dec are
+//! `0, 0x082900b8, 0x0828cfa4, 0` and neither code pointer decodes as
+//! a function entry (both land mid-instruction-stream — 0x082900b8:
+//! `mov r1, #0; mov r0, r9`; 0x0828cfa4: a predicated branch). The
+//! port stores the raw ROM address (the ui/view_base.rs precedent:
+//! it never dispatches through the table, so the address suffices)
+//! and records the anomaly rather than inventing slot identities.
 //!
 //! The fallback: the original returns the *address* 0x089cb1b8 — the
 //! word right after the block-manager global @ 0x089cb1b4 (block_mgr.rs)
@@ -46,6 +75,27 @@
 //!   bytes, so a start-address read would return
 //!   `(mutex << 32) | start`. Reads stay unaligned-safe because the test
 //!   fixtures are plain `u8` arrays with no pointer alignment guarantee.
+//! - The destructor's two unported callees dispatch through
+//!   [`REGION_ELEM_OPS`] (house ops-slot pattern, indirect `blx` in
+//!   place of `bl`; client_populate.rs's `region_destroy` slot now
+//!   defaults to the real port through an adapter):
+//!   - `region_release` @ 0x082803c0 — documented no-op stub. The
+//!     stub matches the original exactly for a NULL region (both do
+//!     nothing — the early `popeq` even skips the field NULLing),
+//!     which is the only element the wired configuration can hold
+//!     (no block manager, and client_populate's ctor slots are
+//!     stubs). For a live region the original decrements the
+//!     refcount, unlocks the mutex `region_ref_lock` took, frees on
+//!     zero and NULLs elem + 0x4/+0x8; the stub leaves all of that
+//!     to the real 0x082803c0 port when it lands — until then a
+//!     hooked destructor on a live-region element would leak the
+//!     region and leave its mutex held.
+//!   - `member_destroy` @ 0x082621dc — identity stub returning its
+//!     argument (the original's own closing `mov r0, r4`; the
+//!     recursive-mutex member is opaque to this cluster, the
+//!     pool_client.rs `stub_mutex_init` precedent), so the
+//!     destructor's `member - 0xc` return is `this` exactly as in
+//!     the original.
 
 use crate::kernel::posix_mutex::{posix_mutex_lock, posix_mutex_unlock};
 
@@ -71,6 +121,73 @@ pub const REGION_MUTEX_INDEX: usize = 2;
 /// separate statics, which is harmless because only this one's address
 /// and only that one's value are ever used.
 pub static mut REGION_START_FALLBACK: u32 = 0;
+
+/// The ROM address of the element class's vtable — the destructor's
+/// literal-pool word @ 0x0828052c, binary-verified (also the literal of
+/// the sibling ctors @ 0x08280464 / 0x082804b8).
+///
+/// Stored as the `u32` the original stores. The words at this address
+/// do not decode as function entries (see the module header), and the
+/// port never dispatches through the table, so the raw address
+/// suffices — the ui/view_base.rs `VIEW_BASE_VTABLE_ADDRESS`
+/// precedent.
+pub const REGION_ELEM_VTABLE_ADDRESS: u32 = 0x089a_6444;
+
+/// Byte offset of the recursive-mutex member inside the element
+/// (original: `add r0, r4, #12`). A BYTE offset, not a word index:
+/// the member is opaque — only ever passed to the `member_destroy`
+/// slot — so it needs no disjoint host layout, and the destructor's
+/// closing `sub r0, r0, #12` mirrors the same constant.
+pub const ELEM_MUTEX_OFFSET: usize = 0xc;
+
+/// Indirect dispatch table for the element destructor's unported
+/// callees (see the module header for each default's contract).
+#[derive(Clone, Copy)]
+pub struct RegionElemOps {
+    /// Region release @ 0x082803c0 `(elem)`: decrements the region's
+    /// refcount under the mutex `region_ref_lock` took; on zero frees
+    /// the region's word-1 buffer (tag 43) and `operator delete`s the
+    /// region; every live path unlocks and NULLs elem + 0x4/+0x8. A
+    /// NULL region does nothing at all (early `popeq`). The default
+    /// is the documented no-op stub.
+    pub region_release: unsafe extern "C" fn(elem: *mut u8),
+    /// Recursive-mutex dtor thunk @ 0x082621dc `(elem + 0xc)`: runs
+    /// the mutex destroy @ 0x082e82a4 on the member and returns its
+    /// argument. The default is the identity stub (the member is
+    /// opaque to this cluster).
+    pub member_destroy: unsafe extern "C" fn(member: *mut u8) -> *mut u8,
+}
+
+/// Default release: no-op (see the module header — exact for the
+/// NULL-region elements the wired configuration can hold; the live
+/// region path awaits the real 0x082803c0 port).
+unsafe extern "C" fn stub_region_release(_elem: *mut u8) {}
+
+/// Default member dtor: identity, mirroring the original thunk's own
+/// `mov r0, r4` return (the pool_client.rs `stub_mutex_init`
+/// precedent).
+unsafe extern "C" fn stub_member_destroy(member: *mut u8) -> *mut u8 {
+    member
+}
+
+/// Wired defaults (documented stubs).
+pub(crate) const DEFAULT_REGION_ELEM_OPS: RegionElemOps = RegionElemOps {
+    region_release: stub_region_release,
+    member_destroy: stub_member_destroy,
+};
+
+/// The active implementation table. Written once at init on target;
+/// host tests swap in recorders and restore the defaults.
+pub static mut REGION_ELEM_OPS: RegionElemOps = DEFAULT_REGION_ELEM_OPS;
+
+/// Reads one element op (volatile — same rationale as every dispatch
+/// table: a build in which nothing swaps it must not constant-fold the
+/// default in).
+macro_rules! elem_op {
+    ($field:ident) => {
+        unsafe { core::ptr::read_volatile(core::ptr::addr_of!(REGION_ELEM_OPS.$field)) }
+    };
+}
 
 /// Indirect dispatch pair for the C++ mutex @ 0x082e8390 / 0x082e83d8
 /// (see the module header; the defaults are the real ports).
@@ -167,6 +284,41 @@ pub unsafe extern "C" fn block_to_region_start(elem: *const u8) -> *mut u8 {
     }
     region_ref_unlock(elem);
     start
+}
+
+/// region_elem_destroy — original: `FUN_082804fc` @ 0x082804fc (48
+/// bytes + one literal-pool word; 23 `bl` + 1 tail `b` call sites,
+/// binary-verified).
+///
+/// The 0x28-byte deque element's C++ destructor (see the module
+/// header): plants the class vtable, releases the region reference
+/// under its mutex, destroys the recursive-mutex member, and returns
+/// `this` (as `member_result - 0xc`, exactly the original's closing
+/// `sub r0, r0, #12`).
+///
+/// Original listing:
+/// ```text
+/// 082804fc  push {r4, lr}
+/// 08280500  mov  r4, r0
+/// 08280504  ldr  r0, [pc, #32]   ; 0x089a6444 (vtable)
+/// 08280508  str  r0, [r4]
+/// 0828050c  mov  r0, r4
+/// 08280510  bl   0x082801f8      ; region_ref_lock
+/// 08280514  mov  r0, r4
+/// 08280518  bl   0x082803c0      ; region release (REGION_ELEM_OPS)
+/// 0828051c  add  r0, r4, #12
+/// 08280520  bl   0x082621dc      ; member mutex dtor (REGION_ELEM_OPS)
+/// 08280524  sub  r0, r0, #12
+/// 08280528  pop  {r4, pc}
+/// ```
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn region_elem_destroy(elem: *mut u8) -> *mut u8 {
+    (elem as *mut usize).write(REGION_ELEM_VTABLE_ADDRESS as usize);
+    region_ref_lock(elem);
+    (elem_op!(region_release))(elem);
+    let member = (elem_op!(member_destroy))(elem.add(ELEM_MUTEX_OFFSET));
+    member.sub(ELEM_MUTEX_OFFSET)
 }
 
 #[cfg(test)]
@@ -359,6 +511,163 @@ mod tests {
                 region_ref_lock(elem.as_ptr()),
                 crate::kernel::posix_mutex::ERR_INVALID_OBJECT
             );
+        }
+    }
+
+    // ---- region_elem_destroy --------------------------------------
+
+    /// Ordered step log across all three seams (mutex lock/unlock,
+    /// region release, member dtor): (step, argument address).
+    static mut STEPS: Vec<(&'static str, usize)> = Vec::new();
+
+    unsafe extern "C" fn step_lock(mutex: *mut u8) -> u32 {
+        (*core::ptr::addr_of_mut!(STEPS)).push(("lock", mutex as usize));
+        0
+    }
+
+    unsafe extern "C" fn step_unlock(mutex: *mut u8) -> u32 {
+        (*core::ptr::addr_of_mut!(STEPS)).push(("unlock", mutex as usize));
+        0
+    }
+
+    unsafe extern "C" fn step_release(elem: *mut u8) {
+        (*core::ptr::addr_of_mut!(STEPS)).push(("release", elem as usize));
+    }
+
+    unsafe extern "C" fn step_member(member: *mut u8) -> *mut u8 {
+        (*core::ptr::addr_of_mut!(STEPS)).push(("member", member as usize));
+        member
+    }
+
+    /// Member recorder with a fabricated return: proves the
+    /// destructor's return is `member_result - 0xc`, not `elem`
+    /// recomputed (the original's `sub r0, r0, #12`).
+    unsafe extern "C" fn step_member_sentinel(member: *mut u8) -> *mut u8 {
+        (*core::ptr::addr_of_mut!(STEPS)).push(("member", member as usize));
+        0x9000 as *mut u8
+    }
+
+    /// Installs step recorders over both ops tables. Returns the
+    /// serialization guard.
+    fn mock_all() -> MutexGuard<'static, ()> {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            REGION_MUTEX_OPS = RegionMutexOps {
+                lock: step_lock,
+                unlock: step_unlock,
+            };
+            REGION_ELEM_OPS = RegionElemOps {
+                region_release: step_release,
+                member_destroy: step_member,
+            };
+            (*core::ptr::addr_of_mut!(STEPS)).clear();
+        }
+        guard
+    }
+
+    fn restore_all() {
+        unsafe {
+            REGION_MUTEX_OPS = DEFAULT_REGION_MUTEX_OPS;
+            REGION_ELEM_OPS = DEFAULT_REGION_ELEM_OPS;
+        }
+    }
+
+    fn steps() -> Vec<(&'static str, usize)> {
+        unsafe { (*core::ptr::addr_of!(STEPS)).clone() }
+    }
+
+    /// NULL region: no mutex traffic (region_ref_lock's early return),
+    /// but the vtable is planted, both slots fire in order, and the
+    /// return is `this`.
+    #[test]
+    fn destroy_null_region_plants_vtable_and_returns_this() {
+        let _guard = mock_all();
+        let mut elem = [0usize; 5];
+        let elem_ptr = elem.as_mut_ptr() as *mut u8;
+        unsafe {
+            write_elem(elem_ptr, core::ptr::null_mut());
+            let back = region_elem_destroy(elem_ptr);
+            assert_eq!(back, elem_ptr, "member stub returns its arg; -0xc lands on this");
+            assert_eq!(
+                elem[0], REGION_ELEM_VTABLE_ADDRESS as usize,
+                "the vtable literal is planted first"
+            );
+        }
+        assert_eq!(
+            steps(),
+            std::vec![
+                ("release", elem_ptr as usize),
+                ("member", elem_ptr.wrapping_add(ELEM_MUTEX_OFFSET) as usize),
+            ],
+            "NULL region: no lock, release then member in order"
+        );
+        restore_all();
+    }
+
+    /// Live region: the region's mutex is locked BEFORE the release
+    /// slot runs (the original brackets the refcount update), then
+    /// the member dtor runs on elem + 0xc.
+    #[test]
+    fn destroy_live_region_locks_before_release() {
+        let _guard = mock_all();
+        let mut elem = [0usize; 5];
+        let mut region = [0usize; 3];
+        let elem_ptr = elem.as_mut_ptr() as *mut u8;
+        let region_ptr = region.as_mut_ptr() as *mut u8;
+        unsafe {
+            write_ptr_field(region_ptr, REGION_MUTEX_INDEX, 0x5000 as *mut u8);
+            write_elem(elem_ptr, region_ptr);
+            let back = region_elem_destroy(elem_ptr);
+            assert_eq!(back, elem_ptr);
+            assert_eq!(elem[0], REGION_ELEM_VTABLE_ADDRESS as usize);
+        }
+        assert_eq!(
+            steps(),
+            std::vec![
+                ("lock", 0x5000),
+                ("release", elem_ptr as usize),
+                ("member", elem_ptr.wrapping_add(ELEM_MUTEX_OFFSET) as usize),
+            ],
+            "lock(region->mutex) -> release(elem) -> member(elem + 0xc)"
+        );
+        restore_all();
+    }
+
+    /// The return value is the member slot's result minus 0xc — the
+    /// original's closing `sub r0, r0, #12` — not `elem` recomputed.
+    #[test]
+    fn destroy_returns_member_result_minus_offset() {
+        let _guard = mock_all();
+        let mut elem = [0usize; 5];
+        let elem_ptr = elem.as_mut_ptr() as *mut u8;
+        unsafe {
+            REGION_ELEM_OPS.member_destroy = step_member_sentinel;
+            write_elem(elem_ptr, core::ptr::null_mut());
+            let back = region_elem_destroy(elem_ptr);
+            assert_eq!(
+                back,
+                (0x9000usize - ELEM_MUTEX_OFFSET) as *mut u8,
+                "r0 = member_result - 0xc"
+            );
+        }
+        restore_all();
+    }
+
+    /// The wired defaults on the only element they can meet — a
+    /// NULL-region one, exactly what client_populate's ctor stubs
+    /// leave behind: vtable planted, no mutex traffic beyond the
+    /// real pair's NULL-region short-circuit (none at all), and the
+    /// identity member stub makes the return `this`.
+    #[test]
+    fn destroy_with_wired_defaults_on_null_region() {
+        let _guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        restore_all();
+        let mut elem = [0usize; 5];
+        let elem_ptr = elem.as_mut_ptr() as *mut u8;
+        unsafe {
+            write_elem(elem_ptr, core::ptr::null_mut());
+            assert_eq!(region_elem_destroy(elem_ptr), elem_ptr);
+            assert_eq!(elem[0], REGION_ELEM_VTABLE_ADDRESS as usize);
         }
     }
 }
