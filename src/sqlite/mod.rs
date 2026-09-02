@@ -106,6 +106,7 @@ pub mod parse_expr;
 pub mod release_mem_array;
 pub mod schema_to_index;
 pub mod select_height;
+pub mod set_string;
 pub mod set_string_formatted;
 pub mod snprintf;
 pub mod str_accum;
