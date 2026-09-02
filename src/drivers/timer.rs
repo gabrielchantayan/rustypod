@@ -366,6 +366,58 @@ pub unsafe extern "C" fn usec_delay(interval: u32) -> u32 {
     0
 }
 
+/// iram_usec_delay_veneer — original: `thunk_EXT_FUN_22001f78` @
+/// 0x08037ef0 (Ghidra reports 4 bytes; the real stub is **8** — the
+/// `ldr pc, [pc, #-4]` word 0xe51ff004 at 0x08037ef0 plus the absolute
+/// target word 0x22001f78 at 0x08037ef4, binary-decoded).
+///
+/// **25 `bl` call sites and 2 tail `b`** (@ 0x080b1b4c and 0x080bb658),
+/// all unconditional — zero predicated forms — counted by decoding every
+/// ARM `B`/`BL` word in `work/firmware/osos.dec` for every condition code
+/// and resolving its target — not a Ghidra xref count. No data word
+/// anywhere in osos.dec holds 0x08037ef0, so the veneer is never
+/// dispatched indirectly.
+///
+/// # The target resolves to the already-ported [`usec_delay`]
+///
+/// 0x22000000 is S5L8702 internal SRAM, populated from the osos image
+/// itself: the relocator @ 0x080046e0 memmoves 0xaed8 bytes from
+/// 0x08000000 to 0x22000000 (see `libc/iram_veneers.rs` for the full
+/// three-fact argument pinning that mirror). So IRAM 0x22001f78 is osos
+/// 0x08001f78, which is `usec_delay` @ 0x08001f78 — the 44-byte Timer E
+/// microsecond busy-wait (`mov ip,r0; ldr r0,[pc,#1100]; push {lr};
+/// ldr r3,[r0,#0xb4];` then a `bl usec_timer_elapsed` poll loop,
+/// `mov r0,#0; pop {pc}`), already ported above. This veneer therefore
+/// forwards to it directly rather than re-stubbing it.
+/// (kernel/task_lock.rs's THUNK_CATALOG labels this target
+/// "tick_delay"/"ticks" — stale, as with its "tick_elapsed" sibling:
+/// the mirror body reads the Timer E microsecond counter at
+/// 0x3c70_00b4, so `interval` is microseconds, not kernel ticks.
+/// codegen/timer_wait.rs's "event_wait (handle)" reading of the same
+/// veneer is likewise stale: the +0xb4 word is the counter itself, not
+/// an event slot in a service struct, and `interval` is a duration, not
+/// a handle. The kernel/thunks.rs ROM_THUNKS name slot is left None per
+/// the 0x08037e20 precedent.)
+///
+/// # What the veneer does
+///
+/// Nothing but transfer control: r0 passes through untouched, no stack
+/// is used, `lr` still points at the caller, so it is exactly a tail
+/// call returning the body's r0 (always 0) in r0. As with the sibling
+/// veneers the callee is loaded through `read_volatile`: written as a
+/// plain call LLVM could inline the poll loop, and its
+/// identical-function folding risks collapsing the veneer onto another
+/// call site of the same shape — destroying the separate 0x08037ef0
+/// hook seam that is this port's entire purpose. The distinct
+/// `link_section` guards the same invariant at link time.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.iram_usec_delay_veneer")]
+#[inline(never)]
+pub unsafe extern "C" fn iram_usec_delay_veneer(interval: u32) -> u32 {
+    let body = core::ptr::read_volatile(&(usec_delay as unsafe extern "C" fn(u32) -> u32));
+    body(interval)
+}
+
 
 
 
@@ -497,6 +549,49 @@ mod usec_timer_tests {
         // and at +10 it succeeds.
         assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 3);
         assert_eq!(HOST_USEC_TIMER_COUNT.load(Ordering::Relaxed), 1_015);
+    }
+
+    /// The IRAM veneer @ 0x08037ef0 must be behaviorally transparent: the
+    /// same busy-wait `usec_delay` @ 0x08001f78 runs — one start capture
+    /// outside the loop, one counter read per poll, zero returned.
+    #[test]
+    fn delay_veneer_busy_polls_and_returns_zero_like_the_body() {
+        let _guard = configure_usec_timer(1_000, 5);
+
+        assert_eq!(unsafe { iram_usec_delay_veneer(10) }, 0);
+        // One initial capture plus two predicate reads, exactly like the
+        // body: at +5 it is false, and at +10 it succeeds.
+        assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 3);
+        assert_eq!(HOST_USEC_TIMER_COUNT.load(Ordering::Relaxed), 1_015);
+    }
+
+    /// interval == 0 succeeds on the first predicate read (elapsed >= 0
+    /// is always true, including at wrap), so the veneer reads the
+    /// counter exactly twice: the start capture and one poll.
+    #[test]
+    fn delay_veneer_zero_interval_polls_exactly_once() {
+        let _guard = configure_usec_timer(u32::MAX, 0);
+
+        assert_eq!(unsafe { iram_usec_delay_veneer(0) }, 0);
+        assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 2);
+    }
+
+    /// The port exists so a hook at 0x08037ef0 lands on a forwarding stub
+    /// distinct from the body at 0x08001f78. Small bodies are exactly
+    /// what LLVM's identical-function folding collapses, so assert the
+    /// two symbols stay apart.
+    #[test]
+    fn delay_veneer_is_a_distinct_call_target_from_its_body() {
+        let (veneer, body) = unsafe {
+            (
+                core::ptr::read_volatile(
+                    &(iram_usec_delay_veneer as unsafe extern "C" fn(u32) -> u32),
+                ),
+                core::ptr::read_volatile(&(usec_delay as unsafe extern "C" fn(u32) -> u32)),
+            )
+        };
+        assert_ne!(veneer as usize, 0);
+        assert_ne!(veneer as usize, body as usize);
     }
 
     /// The IRAM veneer @ 0x08037e20 must be behaviorally transparent: the

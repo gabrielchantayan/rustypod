@@ -39142,6 +39142,47 @@ functions:
       through a literal - the original's indirect-jump-through-a-literal
       shape plus one indirection and the crate's fp frame, r0/r1 passed
       through untouched.
+  # --- IRAM veneer for the microsecond busy-wait delay ---
+  - address: 0x08037ef0
+    ghidra: thunk_EXT_FUN_22001f78
+    name: iram_usec_delay_veneer
+    size: 8
+    sig: "u32 iram_usec_delay_veneer(u32 interval)"
+    module: drivers/timer
+    status: ported
+    notes: >-
+      ldr pc,[pc,#-4] -> 0x22001f78 = the IRAM copy of usec_delay @
+      0x08001f78 (the 44-byte Timer E microsecond busy-wait: capture
+      TECNT once, poll usec_timer_elapsed(start, interval) until true,
+      return 0). Ghidra reports 4 bytes; the stub is 8 (0xe51ff004 at
+      0x08037ef0 + the target word 0x22001f78 at 0x08037ef4). 25 bl call
+      sites, ALL unconditional (zero predicated forms), plus 2 tail b @
+      0x080b1b4c and 0x080bb658 - binary-verified by decoding every B/BL
+      word in osos.dec for every condition code, not from Ghidra xrefs;
+      no data word anywhere holds 0x08037ef0, so the veneer is never
+      dispatched indirectly. The mirror 0x2200XXXX = osos 0x0800XXXX
+      holds because the relocator @ 0x080046e0 memmoves 0xaed8 bytes
+      from 0x08000000 to 0x22000000 (S5L8702 internal SRAM, not mask
+      ROM), so the body is recoverable and is ALREADY PORTED - this is a
+      real forwarding call, not a stub. Corrections: kernel/task_lock.rs's
+      THUNK_CATALOG labels this target "tick_delay" in kernel ticks -
+      stale, as with its "tick_elapsed" sibling; the mirror body reads
+      the Timer E microsecond counter at 0x3c70_00b4, so interval is
+      microseconds (observed bl arguments: 1, 10, 100, 800, 1000).
+      codegen/timer_wait.rs's "event_wait(handle)" reading of the same
+      veneer is likewise stale: +0xb4 is the counter itself, not an
+      event slot, and r0 is a duration, not a handle (the
+      kernel/thunks.rs ROM_THUNKS name slot is left None per the
+      0x08037e20 precedent). r0 passes through untouched, no stack, lr
+      untouched: a pure tail transfer returning the body's r0 (always
+      0). The port loads its callee through read_volatile and carries
+      its own link_section; without either, LLVM inlines the poll loop
+      and its identical-function folding can collapse the veneer,
+      destroying the separate 0x08037ef0 hook seam. match.py structural:
+      ldr pc through a literal vs the port's ldr/bx-indirect tail
+      transfer - the original's indirect-jump-through-a-literal shape
+      plus one indirection and the crate's fp frame, r0 passed through
+      untouched.
 
   # --- StringObject: bounded UTF-16 assignment ---
   - address: 0x082765a8
