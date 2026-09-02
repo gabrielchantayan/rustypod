@@ -42851,3 +42851,58 @@ functions:
       diff (exit-1 expected): same and/bic/orr merge and ldrh from
       table + reg*2; differs by the volatile slot load + bx r2 tail
       dispatch in place of "b 0x080da15c", the documented deviation.
+
+  # --- "crts"-tagged object in-place destructor ---
+  - address: 0x0809e160
+    ghidra: FUN_0809e160
+    name: crts_object_destroy
+    size: 92
+    sig: "int crts_object_destroy(CrtsObject *this)"
+    module: util/crts_object
+    status: ported
+    renames:
+      param_1/r0: this
+      FUN_080a7714: inlined "crts" tag guard
+      FUN_0805d028: MEMH_HANDLE_DESTROY seam
+      FUN_080d86b0: CRTS_TABLE_TEARDOWN seam
+      FUN_0805cfb4: bzero (ported, via CRTS_OBJECT_ZERO slot)
+    notes: >-
+      In-place destructor body for the 0x58-byte "crts"-tagged object
+      family: reject NULL and foreign tags with -50 (mvn r0, #0x31),
+      destroy the three "MemH" managed-buffer handles at +0x08/+0x0c/+0x10
+      in offset order (each guarded blne; the 0x0805d028 callee is itself
+      NULL-safe), run the table teardown 0x080d86b0(this, force=1) with
+      its status discarded, then bzero(this, 0x58) and return 0. Extent
+      self-verified: the next separately entered function starts at
+      0x0809e1bc, so Ghidra's 92 bytes is exact. Call census verified by
+      decoding every ARM B/BL word in osos.dec: exactly 24 direct call
+      sites, all unconditional bl (three in the 0x080490xx array
+      destructor loops, 21 in the 0x080da928 table clear); no predicated
+      forms, no tail branches, and the address occurs in no data word, so
+      it is never dispatched virtually. Caller context: 0x080490b8
+      destroys embedded sub-objects at +0x34, +0x8c and an array of stride
+      0x58 at +0xe4; 0x083b467c sets a vtable, runs this destructor on a
+      heap object, then tag-2 operator_delete - the classic split
+      destructor shape. Deliberate deviations: the verified
+      four-instruction tag guard of 0x080a7714 (returns 1 iff non-NULL
+      and first word is 0x73747263, the in-memory bytes "crts"; semantic
+      identity not established) is inlined per the util/tagged_counter.rs
+      precedent; the two unported non-trivial callees dispatch through
+      the volatile seams MEMH_HANDLE_DESTROY and CRTS_TABLE_TEARDOWN
+      whose target defaults transmute the retail addresses 0x0805d028 and
+      0x080d86b0 (hook-ready on device; host defaults panic); the ported
+      bzero is reached through the volatile CRTS_OBJECT_ZERO slot so LLVM
+      cannot inline the 76-byte fill and erase the stock bl boundary.
+      Handle fields are u32 words, never native pointers - this function
+      only compares and forwards them - keeping 4-byte spacing on target
+      and host without slab mapping. match.py structural diff (exit-1
+      expected): identical shape - inlined guard with hoisted mvn
+      r0, #0x31, three guarded handle loads and calls in order, teardown
+      (this, 1), zero-fill (this, 0x58), return 0; differs only by the
+      crate fp frame and blx-via-slot dispatch in place of the three bl,
+      the documented seams. Host tests (6): layout is exactly 0x58 bytes
+      and 4-aligned; NULL returns -50 with no seam calls; bad tag returns
+      -50 leaving the object byte-identical; valid object destroys handles
+      in offset order, teardowns once with force=1, zeroes all 88 bytes,
+      returns 0; absent handles skip destroy but teardown still runs;
+      teardown status is discarded.
