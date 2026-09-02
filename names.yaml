@@ -38944,10 +38944,13 @@ functions:
       three slots. lingo/command are typed u8/u16 because the initializer
       truncates them with strb/strh - nothing observable is lost.
       Deviations - operator_new @ 0x082aadd4 and operator_delete @
-      0x082aad24 are ported and called directly; the constructor
-      (0x080f745c), initializer (0x080f73a0) and destructor (0x080f74ac)
-      are not ported and dispatch through IAP_PACKET_OPS with documented
-      defaults (identity, return 1, identity). The initializer's ARM return
+      0x082aad24 are ported and called directly. The destructor
+      (0x080f74ac) is now ported too (iap_packet_destruct) and called
+      directly - only its payload-release helper @ 0x080f7420 still
+      dispatches, through IAP_PACKET_OPS.release (default no-op). The
+      constructor (0x080f745c) and initializer (0x080f73a0) remain
+      unported and dispatch through IAP_PACKET_OPS with documented
+      defaults (identity, return 1). The initializer's ARM return
       is a 64-bit pair (r0 = success flag, r1 = the owner argument passing
       back out); the factory reads only r0, so the hook returns just that.
       Host tests (6) - every argument threaded into the initializer in
@@ -39079,6 +39082,69 @@ functions:
       `moveq r0,#0; bxeq lr` and a framed `ldr r0,[r0,#8]; pop` tail)
       instead of the original's single branchless predicated block -
       semantically identical, expected under the crate's fp frame.
+  - address: 0x080f74ac
+    ghidra: FUN_080f74ac
+    name: iap_packet_destruct
+    size: 36
+    sig: "u8 *iap_packet_destruct(u8 *packet)"
+    module: app/iap_packet
+    status: ported
+    renames:
+      param_1/r0: packet
+      r4: packet_saved
+    notes: >-
+      The iAP packet class destructor - release the payload buffers,
+      decrement the live-packet counter, return `this`.
+      EXTENT - 36 bytes, 0x080f74ac..0x080f74d0, 9 instructions, followed
+      by its one literal-pool word 0x089ccc24 @ 0x080f74d0. Ghidra's 36
+      is exact: the next function opens at 0x080f74d4 with
+      `ldr r0,[r0]; b 0x080f74f8`. Whole body, verified word by word
+      against osos.dec: `push {r4,lr}; mov r4,r0; bl 0x080f7420;
+      ldr r0,[pc,#16]; ldr r1,[r0]; sub r1,r1,#1; str r1,[r0];
+      mov r0,r4; pop {r4,pc}`.
+      CALL SITES - 24 `bl` and 0 `b`, ALL unconditional (zero predicated
+      forms), counted by decoding every branch word in osos.dec; the
+      address appears in no data word, so it is never dispatched
+      virtually. The earlier ledger note on the IAP_PACKET_OPS seam
+      claiming 1 call site was WRONG - only the factory's failure path
+      was known then; the other 23 are delete paths in the lingo
+      handlers (0x081055dc, 0x0814e460, 0x08164070, ...), each
+      immediately followed by `bl 0x082aad24` (tag-2 operator_delete),
+      the destroy-then-free idiom. Ghidra's C drops the argument at
+      several of those sites (`FUN_080f74ac()`); the raw bytes keep r0
+      live into the call.
+      Algorithm - r4 = packet; call the payload-release helper @
+      0x080f7420; load the counter word @ 0x089ccc24, subtract 1 (a
+      plain `sub` - wraps through zero with no guard), store it back;
+      return r4. The return-this is what every caller feeds to
+      operator_delete, and what the factory's failure path relies on
+      (the delete takes the destructor's r0, never the saved pointer).
+      No NULL guard here and none at any of the 24 call sites - a NULL
+      packet faults inside the release helper's first field load.
+      The release helper @ 0x080f7420 itself: runs the conditional
+      second-buffer release @ 0x080f6af8 (tag-2 operator_delete of the
+      +0x14 buffer, only when the +0x18 length word holds the 0xffff
+      ownership sentinel), then NULL-guarded tag-3 operator_delete @
+      0x082aad14 of +0x08 and +0x14, zeroing both pointer/length pairs.
+      Deviations - the release helper @ 0x080f7420 is not ported; the
+      call dispatches through IAP_PACKET_OPS.release (default no-op).
+      The counter is the REAL word @ 0x089ccc24 on target (a fixed
+      address, not a crate static) because the stock constructor @
+      0x080f745c increments that word - a hooked destructor decrementing
+      anything else would break the pairing; host builds decrement a
+      stand-in static (the buffer_refill_request.rs pattern).
+      Host tests (3, app::iap_packet::tests) - release runs BEFORE the
+      decrement (the mock observes the un-decremented counter) and the
+      packet passes to it and back out verbatim; the counter wraps
+      0 -> 0xffffffff; a NULL packet passes through unguarded and
+      returns NULL. The factory's failure-path tests now exercise the
+      real destructor: release called once with the packet, counter
+      decremented, tag-2 operator_delete fed the destructor's return.
+      match.py structural - `mov r4,r0`, the release call, the literal
+      load of 0x089ccc24, the ldr/sub/str decrement, `mov r0,r4` and the
+      return all appear in the original's order; the differences are
+      the crate fp frame and the indirect `blx` ops dispatch in place of
+      the direct `bl 0x080f7420`, both documented deviations.
   # --- IRAM veneer for the microsecond timer read ---
   - address: 0x08037e20
     ghidra: thunk_EXT_FUN_08037e20
