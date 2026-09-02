@@ -103,12 +103,16 @@ pub struct IapPacketOps {
         payload: *const u8,
         payload_len: u32,
     ) -> u32,
-    /// `FUN_080f74ac` @ 0x080f74ac (1 `bl` call site, this factory): the
-    /// destructor. Releases both buffers through the payload-release
-    /// helper @ 0x080f7420, decrements the live-packet counter, and
-    /// returns `packet` — which the factory feeds straight to
-    /// `operator_delete`. Default: identity, no writes.
-    pub destruct: unsafe extern "C" fn(packet: *mut u8) -> *mut u8,
+    /// `FUN_080f7420` @ 0x080f7420 (2 `bl` call sites — the initializer
+    /// @ 0x080f73a0 and the destructor [`iap_packet_destruct`], counted
+    /// by decoding every branch word in osos.dec): the payload release
+    /// helper. Runs the conditional second-buffer release @ 0x080f6af8
+    /// (tag-2 `operator_delete` of +0x14, only when the +0x18 length word
+    /// holds the 0xffff ownership sentinel), then releases +0x08 and
+    /// +0x14 through tag-3 `operator_delete` @ 0x082aad14 (each
+    /// NULL-guarded) and zeroes both pointer/length pairs. No NULL guard
+    /// on `packet` itself. Default: no-op, releases nothing.
+    pub release: unsafe extern "C" fn(packet: *mut u8),
 }
 
 unsafe extern "C" fn construct_stub(storage: *mut u8) -> *mut u8 {
@@ -127,15 +131,13 @@ unsafe extern "C" fn init_stub(
     1
 }
 
-unsafe extern "C" fn destruct_stub(packet: *mut u8) -> *mut u8 {
-    packet
-}
+unsafe extern "C" fn release_stub(_packet: *mut u8) {}
 
 /// Wired defaults: the documented stubs for the three unported callees.
 pub(crate) const DEFAULT_IAP_PACKET_OPS: IapPacketOps = IapPacketOps {
     construct: construct_stub,
     init: init_stub,
-    destruct: destruct_stub,
+    release: release_stub,
 };
 
 /// The active ops. Host tests swap in recording mocks and restore.
@@ -146,6 +148,93 @@ pub static mut IAP_PACKET_OPS: IapPacketOps = DEFAULT_IAP_PACKET_OPS;
 #[inline(always)]
 unsafe fn iap_packet_ops() -> IapPacketOps {
     core::ptr::read_volatile(core::ptr::addr_of!(IAP_PACKET_OPS))
+}
+
+/// The live-packet counter (original: the word @ 0x089ccc24, held in the
+/// literal pool of both the constructor @ 0x080f745c — pool word @
+/// 0x080f74a8 — and the destructor @ 0x080f74ac — pool word @
+/// 0x080f74d0).
+///
+/// A fixed address on target, not a crate static: the constructor is
+/// still stock firmware and increments the real word, so the hooked
+/// destructor must decrement that same word or the pairing breaks.
+#[cfg(target_os = "none")]
+const IAP_PACKET_LIVE_COUNT: *mut u32 = 0x089c_cc24 as *mut u32;
+
+/// Host stand-in for the counter word (the buffer_refill_request.rs
+/// pattern).
+#[cfg(not(target_os = "none"))]
+pub static mut IAP_PACKET_LIVE_COUNT: u32 = 0;
+
+#[inline(always)]
+fn iap_packet_live_count_ptr() -> *mut u32 {
+    #[cfg(target_os = "none")]
+    {
+        IAP_PACKET_LIVE_COUNT
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        core::ptr::addr_of_mut!(IAP_PACKET_LIVE_COUNT)
+    }
+}
+
+/// iap_packet_destruct — original: `FUN_080f74ac` @ 0x080f74ac
+/// (**36 bytes, 0x080f74ac..0x080f74d0** — 9 instructions, followed by its
+/// one literal-pool word 0x089ccc24 @ 0x080f74d0. Ghidra's 36 is exact:
+/// the next function opens at 0x080f74d4 with `ldr r0, [r0]; b
+/// 0x080f74f8`. **24 `bl` and 0 `b` call sites, none predicated**, counted
+/// by decoding every branch word in `osos.dec` — the earlier ledger note
+/// on the ops seam claiming a single call site was wrong; 23 of the 24
+/// are delete paths in the lingo handlers, each immediately followed by
+/// `bl 0x082aad24` (tag-2 `operator_delete`). The address appears in no
+/// data word, so it is never dispatched virtually.)
+///
+/// The packet class destructor:
+///
+/// ```text
+/// 080f74ac  e92d4010  push {r4, lr}
+/// 080f74b0  e1a04000  mov  r4, r0            @ r4 = packet
+/// 080f74b4  ebffffd9  bl   0x080f7420        @ release payloads
+/// 080f74b8  e59f0010  ldr  r0, [pc, #16]     @ &live_count (0x089ccc24)
+/// 080f74bc  e5901000  ldr  r1, [r0]
+/// 080f74c0  e2411001  sub  r1, r1, #1
+/// 080f74c4  e5801000  str  r1, [r0]          @ live_count -= 1
+/// 080f74c8  e1a00004  mov  r0, r4            @ return packet
+/// 080f74cc  e8bd8010  pop  {r4, pc}
+/// ```
+///
+/// Releases the packet's payload buffers through the release helper @
+/// 0x080f7420, decrements the live-packet counter @ 0x089ccc24 (a plain
+/// `sub` — it wraps through zero with no guard), and returns `packet`
+/// unchanged. The returned pointer is what every delete-path caller feeds
+/// to `operator_delete`, which is why this function returns `this` at
+/// all.
+///
+/// There is no NULL guard here and none at any of the 24 call sites —
+/// every call is an unconditional `bl`. A NULL packet would fault inside
+/// the release helper's first field load; the port keeps that contract.
+///
+/// # Deviations
+///
+/// - The release helper @ 0x080f7420 is not ported; the call dispatches
+///   through [`IAP_PACKET_OPS`]'s `release` hook.
+/// - On target the counter is the real word @ 0x089ccc24 (the stock
+///   constructor increments it, so the port must decrement that same
+///   word); host builds decrement the stand-in static
+///   [`IAP_PACKET_LIVE_COUNT`].
+///
+/// # Safety
+///
+/// `packet` must point at a live packet object — the original's
+/// precondition, unguarded here and at every call site.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iap_packet_destruct(packet: *mut u8) -> *mut u8 {
+    (iap_packet_ops().release)(packet);
+    let counter = iap_packet_live_count_ptr();
+    counter.write_volatile(counter.read_volatile().wrapping_sub(1));
+    packet
 }
 
 /// iap_packet_create — original: `FUN_080f6da0` @ 0x080f6da0
@@ -185,9 +274,11 @@ unsafe fn iap_packet_ops() -> IapPacketOps {
 ///
 /// - `operator_new` (0x082aadd4) and `operator_delete` (0x082aad24) are
 ///   ported and called directly.
-/// - The packet constructor, initializer and destructor (0x080f745c,
-///   0x080f73a0, 0x080f74ac) are not ported; they dispatch through
-///   [`IAP_PACKET_OPS`].
+/// - The destructor (0x080f74ac) is ported — [`iap_packet_destruct`] —
+///   and called directly; only its payload-release helper @ 0x080f7420
+///   still dispatches, through [`IAP_PACKET_OPS`]'s `release` hook.
+/// - The packet constructor and initializer (0x080f745c, 0x080f73a0) are
+///   not ported; they dispatch through [`IAP_PACKET_OPS`].
 /// - The initializer's ARM return is a 64-bit pair (r0 = the success flag,
 ///   r1 = the owner argument passing straight back out). The factory reads
 ///   only r0, so the hook is typed to return just that.
@@ -217,7 +308,7 @@ pub unsafe extern "C" fn iap_packet_create(
         return packet;
     }
 
-    operator_delete((ops.destruct)(packet));
+    operator_delete(iap_packet_destruct(packet));
     core::ptr::null_mut()
 }
 
@@ -388,9 +479,9 @@ mod tests {
     static mut LAST_PAYLOAD_LEN: u32 = 0;
     static mut INIT_RESULT: u32 = 1;
 
-    static mut DESTRUCT_CALLS: usize = 0;
-    static mut LAST_DESTRUCT_PACKET: *mut u8 = core::ptr::null_mut();
-    static mut DESTRUCT_RESULT: *mut u8 = core::ptr::null_mut();
+    static mut RELEASE_CALLS: usize = 0;
+    static mut LAST_RELEASE_PACKET: *mut u8 = core::ptr::null_mut();
+    static mut COUNT_AT_RELEASE: u32 = 0;
 
     unsafe extern "C" fn recording_construct(storage: *mut u8) -> *mut u8 {
         CONSTRUCT_CALLS += 1;
@@ -419,10 +510,12 @@ mod tests {
         INIT_RESULT
     }
 
-    unsafe extern "C" fn recording_destruct(packet: *mut u8) -> *mut u8 {
-        DESTRUCT_CALLS += 1;
-        LAST_DESTRUCT_PACKET = packet;
-        DESTRUCT_RESULT
+    unsafe extern "C" fn recording_release(packet: *mut u8) {
+        RELEASE_CALLS += 1;
+        LAST_RELEASE_PACKET = packet;
+        // The destructor's `bl 0x080f7420` precedes its counter update, so
+        // the release helper must observe the counter NOT yet decremented.
+        COUNT_AT_RELEASE = IAP_PACKET_LIVE_COUNT;
     }
 
     /// Installs the recording ops and the mock heap. Both guards travel
@@ -434,7 +527,7 @@ mod tests {
             IAP_PACKET_OPS = IapPacketOps {
                 construct: recording_construct,
                 init: recording_init,
-                destruct: recording_destruct,
+                release: recording_release,
             };
             CONSTRUCT_CALLS = 0;
             LAST_STORAGE = core::ptr::null_mut();
@@ -448,9 +541,10 @@ mod tests {
             LAST_PAYLOAD = core::ptr::null();
             LAST_PAYLOAD_LEN = 0;
             INIT_RESULT = 1;
-            DESTRUCT_CALLS = 0;
-            LAST_DESTRUCT_PACKET = core::ptr::null_mut();
-            DESTRUCT_RESULT = core::ptr::null_mut();
+            RELEASE_CALLS = 0;
+            LAST_RELEASE_PACKET = core::ptr::null_mut();
+            COUNT_AT_RELEASE = 0;
+            IAP_PACKET_LIVE_COUNT = 0;
         }
         (ops_guard, heap_guard)
     }
@@ -494,7 +588,7 @@ mod tests {
             assert_eq!(LAST_COMMAND, 0x0018);
             assert_eq!(LAST_PAYLOAD, payload.as_ptr());
             assert_eq!(LAST_PAYLOAD_LEN, payload.len() as u32);
-            assert_eq!(DESTRUCT_CALLS, 0, "no teardown on the success path");
+            assert_eq!(RELEASE_CALLS, 0, "no teardown on the success path");
             assert_eq!(free_log().0, 0);
         }
         restore_mocks(guards);
@@ -561,8 +655,8 @@ mod tests {
         unsafe {
             set_alloc_ret(storage.as_mut_ptr());
             CONSTRUCT_RESULT = packet;
-            DESTRUCT_RESULT = packet;
             INIT_RESULT = 0;
+            IAP_PACKET_LIVE_COUNT = 7;
 
             let result = iap_packet_create(
                 core::ptr::null_mut(),
@@ -574,8 +668,9 @@ mod tests {
             );
 
             assert!(result.is_null(), "a failed init yields NULL, not a half-built packet");
-            assert_eq!(DESTRUCT_CALLS, 1);
-            assert_eq!(LAST_DESTRUCT_PACKET, packet);
+            assert_eq!(RELEASE_CALLS, 1, "the ported destructor runs its release helper");
+            assert_eq!(LAST_RELEASE_PACKET, packet);
+            assert_eq!(IAP_PACKET_LIVE_COUNT, 6, "and decrements the live-packet counter");
             assert_eq!(free_log(), (1, packet, 2), "tag-2 operator_delete of the packet");
         }
         restore_mocks(guards);
@@ -586,15 +681,10 @@ mod tests {
         let guards = install_mocks();
         let mut storage = [0u8; IAP_PACKET_SIZE];
         let packet = 0x0BEE_F000usize as *mut u8;
-        // The real destructor ends in `mov r0, r4`; the factory never
-        // reloads r4, so a destructor returning something else is what the
-        // delete would receive.
-        let relocated = 0x0BEE_F100usize as *mut u8;
 
         unsafe {
             set_alloc_ret(storage.as_mut_ptr());
             CONSTRUCT_RESULT = packet;
-            DESTRUCT_RESULT = relocated;
             INIT_RESULT = 0;
 
             assert!(iap_packet_create(
@@ -606,7 +696,10 @@ mod tests {
                 0
             )
             .is_null());
-            assert_eq!(free_log(), (1, relocated, 2), "r0 out of the destructor is r0 into delete");
+            // The destructor ends in `mov r0, r4` — its return IS the
+            // packet — and the factory never reloads its saved pointer, so
+            // r0 out of the destructor is r0 into delete.
+            assert_eq!(free_log(), (1, packet, 2), "r0 out of the destructor is r0 into delete");
         }
         restore_mocks(guards);
     }
@@ -632,7 +725,7 @@ mod tests {
             assert_eq!(CONSTRUCT_CALLS, 1, "the constructor runs before the NULL test");
             assert!(LAST_STORAGE.is_null(), "on the NULL block verbatim");
             assert_eq!(INIT_CALLS, 0, "and the initializer never runs");
-            assert_eq!(DESTRUCT_CALLS, 0, "nor the destructor");
+            assert_eq!(RELEASE_CALLS, 0, "nor the destructor's release helper");
             assert_eq!(free_log().0, 0, "nor operator_delete");
         }
         restore_mocks(guards);
@@ -661,7 +754,7 @@ mod tests {
             assert_eq!(LAST_PAYLOAD, payload.as_ptr(), "stack argument, bounced verbatim");
             assert_eq!(LAST_PAYLOAD_LEN, 0x0eed, "stack argument, bounced verbatim");
             assert_eq!(CONSTRUCT_CALLS, 0, "the reinit path allocates nothing");
-            assert_eq!(DESTRUCT_CALLS, 0);
+            assert_eq!(RELEASE_CALLS, 0);
             assert_eq!(alloc_log().0, 0);
             assert_eq!(free_log().0, 0);
         }
@@ -681,7 +774,7 @@ mod tests {
 
             assert_eq!(result, 0, "a failed init propagates unchanged");
             assert_eq!(LAST_INIT_PACKET, packet);
-            assert_eq!(DESTRUCT_CALLS, 0, "the wrapper does no teardown of its own");
+            assert_eq!(RELEASE_CALLS, 0, "the wrapper does no teardown of its own");
             assert_eq!(free_log().0, 0);
         }
         restore_mocks(guards);
@@ -708,6 +801,59 @@ mod tests {
             assert_eq!(INIT_CALLS, 1);
             assert!(LAST_INIT_PACKET.is_null(), "no NULL guard, matching the 43 unconditional call sites");
             assert!(LAST_OWNER.is_null());
+        }
+        restore_mocks(guards);
+    }
+
+    #[test]
+    fn destruct_releases_then_decrements_and_returns_the_packet() {
+        let guards = install_mocks();
+        let packet = 0x0BEE_F000usize as *mut u8;
+
+        unsafe {
+            IAP_PACKET_LIVE_COUNT = 41;
+
+            let result = iap_packet_destruct(packet);
+
+            assert_eq!(result, packet, "the destructor ends in `mov r0, r4`");
+            assert_eq!(RELEASE_CALLS, 1, "bl 0x080f7420 runs first");
+            assert_eq!(LAST_RELEASE_PACKET, packet);
+            assert_eq!(COUNT_AT_RELEASE, 41, "the release helper observes the counter NOT yet decremented");
+            assert_eq!(IAP_PACKET_LIVE_COUNT, 40, "then live_count -= 1");
+            assert_eq!(free_log().0, 0, "the destructor itself never frees the packet");
+        }
+        restore_mocks(guards);
+    }
+
+    #[test]
+    fn destruct_wraps_the_counter_through_zero() {
+        let guards = install_mocks();
+        let packet = 0x0BEE_F000usize as *mut u8;
+
+        unsafe {
+            IAP_PACKET_LIVE_COUNT = 0;
+
+            iap_packet_destruct(packet);
+
+            // A plain `sub r1, r1, #1` — no guard, no saturation.
+            assert_eq!(IAP_PACKET_LIVE_COUNT, 0xffff_ffff);
+        }
+        restore_mocks(guards);
+    }
+
+    #[test]
+    fn destruct_passes_a_null_packet_through_unguarded() {
+        let guards = install_mocks();
+
+        unsafe {
+            IAP_PACKET_LIVE_COUNT = 3;
+
+            let result = iap_packet_destruct(core::ptr::null_mut());
+
+            assert!(result.is_null(), "NULL in, NULL out of `mov r0, r4`");
+            assert_eq!(RELEASE_CALLS, 1, "no NULL guard, matching the 24 unconditional call sites");
+            assert!(LAST_RELEASE_PACKET.is_null());
+            assert_eq!(IAP_PACKET_LIVE_COUNT, 2);
         }
         restore_mocks(guards);
     }
