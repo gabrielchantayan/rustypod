@@ -14040,6 +14040,45 @@ functions:
       mutation through the embedded reference on it. The class check
       stays in retailOS behind the TARGET_CLASS_CHECK seam.
 
+  - address: 0x082a66f0
+    ghidra: FUN_082a66f0
+    name: ui_element_reference_target_has_cookie
+    size: 72
+    sig: "u32 ui_element_reference_target_has_cookie(const UiElementReference *reference)"
+    module: ui/element_reference_cookie
+    status: ported
+    vars: {param_1: reference, "reference+0x0": vtable, "vtable+0xc": resolve_slot, "reference+0x4": target, "target+0x218": cookie}
+    notes: >-
+      Resolve-gated cookie predicate over the same vtable-headed UI
+      element reference ui_element_reference_is_current (0x082a6620)
+      takes. 22 bl call sites, all unconditional (verified by decoding
+      every B/BL word in osos.dec; none predicated). Calls the
+      reference's vtable slot 3 (*(*reference + 0xc), blx) with the
+      reference; on 0 returns 0 without touching the target, else
+      dereferences the target at +0x4 with no NULL guard and returns 1
+      only when the 64-bit cookie at target+0x218 is nonzero (ldrd +
+      cmp r1,#0 / cmpeq r0,r2 / movne r0,#1 — either half set).
+      Sibling property readers 0x082a63c0 (target+0x210), 0x082a66c0
+      (target+0x1ac bit 0), 0x082a6738 (target+0x18c bit 6) share the
+      identical slot-3 guard. The cookie is written at 0x0816edc8
+      ({+0x110,+0x114} of the context's current object, flag
+      target+0x18c |= 0x80) or set to -1 at 0x0816edd4; zero is the
+      never-assigned state. Callers use it as a reference-identity
+      component (0x0813cbd4 compares it against a second object's
+      vtable slot +0x54) and as a wait gate (0x080b53b4, iTunes-control
+      path). Unresolved anomaly, documented not invented: vtable
+      0x089a6600 slot +0xc statically holds 0x0826acd8, which decodes
+      as a {0x801e, 0x08ae5474} selector/impl data pair, not a function
+      entry, and is referenced as data by hundreds of tables around
+      0x0898b008 — a boot-time table fixup most plausibly installs the
+      runtime target, so the port reproduces the raw load-and-blx and
+      does not name the callee. Host fixtures read the vtable slot as a
+      native function pointer (4 bytes on target, 8 on host; no other
+      vtable word is read, so the wider read overlaps nothing).
+      match.py: dispatch core ldr/ldr/blx/cmp/beq/ldr matches verbatim;
+      LLVM lowers the cookie test to two ldr + orrs instead of
+      ldrd + cmp/cmpeq and adds its sl/fp frame.
+
   - address: 0x082a2330
     ghidra: FUN_082a2330
     name: rect_height
