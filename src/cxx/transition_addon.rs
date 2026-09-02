@@ -56,8 +56,23 @@
 //! wired in. The raw target uses 32-bit words; raw object slots here use
 //! pointer-sized unaligned reads/writes so the 32-bit offsets remain distinct
 //! and testable on a 64-bit host (the crate's face-word model).
+//!
+//! The class has a second constructor overload @ 0x08278dc4, ported here as
+//! [`silver_controller_transition_addon_construct_from_cstr`]: identical
+//! field sequence to the 0x08278e8c overload, but the embedded string
+//! member is built from a C string through the ported
+//! [`string_object_construct_from_cstr`] @ 0x08277304 (dispatched via the
+//! `STRING_OBJECT_CONSTRUCT_FROM_CSTR` slot, whose wired default is the
+//! port itself) and the constructor
+//! itself plants the derived string vtable 0x089a60d8 (the 0x08278e8c
+//! overload instead delegates both steps to the veneer @ 0x082792b4). This
+//! is the overload the platform file-open path uses: ft/system.rs's
+//! `ft_platform_file_open` @ 0x082d3cb4 calls it with `(raw, path, 1,
+//! volume, 0x10000, 2, 0)` over an 84-byte `operator new` block.
 
-use super::string_object::{string_object_destroy_veneer, StringObject};
+use super::string_object::{
+    construct_from_cstr_op, string_object_destroy_veneer, StringObject,
+};
 use crate::app::facade_for_selector::facade_for_selector;
 use crate::app::path_probe::InterfaceGuard;
 use crate::heap::block_deque::deque_seg_capacity;
@@ -507,6 +522,134 @@ pub unsafe extern "C" fn silver_controller_transition_addon_construct(
         base.add(TRANSITION_ADDON_STRING_OFFSET),
         source,
     );
+    *string.add(8) = flag as u8;
+    let this = string.sub(TRANSITION_ADDON_STRING_OFFSET);
+
+    write_u32_unaligned(this.add(TRANSITION_ADDON_INVALID_WORD_OFFSET), 0xffff_ffff);
+    write_u32_unaligned(this.add(TRANSITION_ADDON_ZEROED_WORD_OFFSET), 0);
+
+    let owner = read_u32_unaligned(this.add(TRANSITION_ADDON_OWNER_OFFSET)) as *mut u8;
+    let capacity = owner_capacity_query_op()(owner);
+    write_u32_unaligned(this.add(TRANSITION_ADDON_CAPACITY_OFFSET), capacity);
+
+    write_u32_unaligned(this.add(TRANSITION_ADDON_CONTEXT_OFFSET), context);
+    let quantum = transfer_quantum_op()(this, quantum_arg);
+    write_u32_unaligned(this.add(TRANSITION_ADDON_QUANTUM_OFFSET), quantum);
+
+    let scale = scale_class_op()(this, scale_arg);
+    write_u32_unaligned(this.add(TRANSITION_ADDON_SCALE_CLASS_OFFSET), scale);
+    write_u32_unaligned(this.add(TRANSITION_ADDON_SECOND_ZEROED_WORD_OFFSET), 0);
+
+    let facade = facade_for_selector(this as *mut InterfaceGuard, 1);
+    *this.add(TRANSITION_ADDON_FACADE_BYTE_OFFSET) = *(facade as *const u8).add(9);
+
+    let alignment = deque_seg_capacity() as u32;
+    write_u32_unaligned(this.add(TRANSITION_ADDON_ALIGNMENT_OFFSET), alignment);
+
+    let vector = vector_member_construct_op()(
+        this.add(TRANSITION_ADDON_VECTOR_OFFSET),
+        this,
+    );
+    let this = vector.sub(TRANSITION_ADDON_VECTOR_OFFSET);
+    register_with_owner_op()(this);
+    this
+}
+
+/// silver_controller_transition_addon_construct_from_cstr — original:
+/// `FUN_08278dc4` @ 0x08278dc4 (200 bytes: 192 code bytes plus the two
+/// 4-byte literal-pool words at 0x08278e84 = 0x089a60bc and 0x08278e88 =
+/// 0x089a60d8, both binary-verified against osos.dec; the next function —
+/// the copy-construct overload [`silver_controller_transition_addon_construct`]
+/// @ 0x08278e8c — starts at 0x08278e8c, so Ghidra's "192 bytes" is the code
+/// span only and drops the literal pool as usual. **23 `bl` call sites**,
+/// binary-scanned by decoding every B/BL word in osos.dec — all plain `bl`,
+/// no predicated forms, no tail `b`, and no data-word references to the
+/// address: 0x0805a690, 0x0808718c, 0x08096320, 0x080b5478, 0x080dc71c,
+/// 0x080e96f8, 0x08149cd8, 0x08161af4, 0x08196444, 0x08196820, 0x081d2e18,
+/// 0x081d42cc, 0x081d4374, 0x081eef94, 0x081f51a4, 0x081f525c, 0x082658c0,
+/// 0x0826769c, 0x0827947c, 0x0828b6d0, 0x082d3cec, 0x082d41d8 and
+/// 0x082d44e4).
+///
+/// The from-C-string constructor overload of this module's
+/// Silver-controller transition-addon class: identical argument list
+/// (four register arguments plus three stack arguments lifted by
+/// `ldm r8,{r6,r7,r8}` after `add r8,sp,#24`), identical vtables and an
+/// identical field sequence to the 0x08278e8c copy-construct overload —
+/// the two share the base constructor @ 0x0818a0c4, the derived object
+/// vtable 0x089a60bc, the derived string-member vtable 0x089a60d8 and
+/// every helper. The only difference is the string-member step: this
+/// overload calls the PORTED [`string_object_construct_from_cstr`] @
+/// 0x08277304 directly and plants the derived string vtable itself:
+///
+/// ```text
+/// base     = base_construct(this, base_hint, flag ^ 1)   // 0x0818a0c4
+/// base[0]  = 0x089a60bc                                  // derived vtable
+/// string   = string_object_construct_from_cstr(base + 0x0c, source)
+/// string[0]          = 0x089a60d8      // derived string vtable, planted
+/// string[8]  as byte = flag            //   by THIS constructor (0x08278dfc/
+/// this'    = string - 0x0c             //   0x08278e00), then container-of
+/// ... fields +0x18 .. +0x3c exactly as the 0x08278e8c overload ...
+/// vector   = vector_member_construct(this' + 0x40, this')// 0x08278104
+/// this''   = vector - 0x40
+/// register_with_owner(this'')                            // 0x08278250
+/// return this''
+/// ```
+///
+/// Every intermediate object address still derives from the previous
+/// callee's RETURN (`sub r4,r0,#12` after the string constructor, `sub
+/// r4,r0,#64` after the vector constructor), never from the entry `this`.
+/// This is the overload the platform file-open path uses: `ft_platform_file_open`
+/// @ 0x082d3cb4 calls it with `(raw, path, 1, volume, 0x10000, 2, 0)` over
+/// an 84-byte `operator new` block (the +0x18 word it initializes to -1 is
+/// the directory-entry-index sentinel [`file_has_directory_entry`] @
+/// 0x082a548c tests).
+///
+/// Deviations: the six unresolved callees cross the SAME
+/// [`TRANSITION_ADDON_CONSTRUCT_OPS`] dispatch slots as the 0x08278e8c
+/// overload (its `string_member_construct` slot is unused here), and the
+/// from-cstr string construction crosses
+/// `STRING_OBJECT_CONSTRUCT_FROM_CSTR` (the string_object.rs
+/// `STRING_OBJECT_COPY_CONSTRUCT` pattern) whose wired default IS the
+/// ported [`string_object_construct_from_cstr`]. That slot exists because
+/// this constructor calls BOTH the string constructor on the +0x0c member
+/// AND [`facade_for_selector`] on the object base, and the two
+/// native-widened host dereferences demand incompatible fixture alignments
+/// on 64-bit hosts: `StringObject` at this+0x0c needs this ≡ 4 mod 8 while
+/// the facade guard read at this+0x00 needs this ≡ 0 mod 8, so no host
+/// fixture can run both real callees in one call; host tests install
+/// recording mocks on the string slot (the real callee's own behavior is
+/// pinned by the string_object.rs tests). [`facade_for_selector`] and
+/// [`deque_seg_capacity`] (the byte-identical 0x081a81bc alignment query)
+/// are called directly. Consequently this constructor is **not hook-ready**
+/// until the five non-faithful boundaries are ported and wired in, and
+/// ft/system.rs's `FT_PLATFORM_FILE_CTOR` slot deliberately keeps its
+/// fail-closed default. All object stores are 32-bit like the original's
+/// `str`s; on a 64-bit host the string member's native payload word
+/// overlaps the +0x14 flag byte (the crate's face-word artifact — no
+/// construct-then-destroy round trip is possible, same as the sibling
+/// overload).
+///
+/// [`file_has_directory_entry`]: crate::codegen::file_directory_entry::file_has_directory_entry
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn silver_controller_transition_addon_construct_from_cstr(
+    this: *mut u8,
+    source: *const u8,
+    flag: u32,
+    base_hint: u32,
+    quantum_arg: u32,
+    scale_arg: u32,
+    context: u32,
+) -> *mut u8 {
+    let base = base_construct_op()(this, base_hint, flag ^ 1);
+    write_u32_unaligned(base, TRANSITION_ADDON_VTABLE_ADDRESS as u32);
+
+    let string = construct_from_cstr_op()(
+        base.add(TRANSITION_ADDON_STRING_OFFSET).cast::<StringObject>(),
+        source,
+    )
+    .cast::<u8>();
+    write_u32_unaligned(string, TRANSITION_ADDON_STRING_MEMBER_VTABLE_ADDRESS);
     *string.add(8) = flag as u8;
     let this = string.sub(TRANSITION_ADDON_STRING_OFFSET);
 
@@ -1003,5 +1146,265 @@ mod tests {
             write_u32_unaligned(this.add(TRANSITION_ADDON_CONTEXT_OFFSET), 0x1111);
             assert_eq!(scale_class_body(this, 7), 1);
         }
+    }
+
+    // --- the from-cstr overload @ 0x08278dc4 -------------------------------
+    //
+    // The from-cstr string construction is dispatched through
+    // STRING_OBJECT_CONSTRUCT_FROM_CSTR (wired default: the real port) so
+    // these tests can run recording mocks: the real converting
+    // constructor's native-word StringObject stores need the member at
+    // this+0x0c 8-aligned (this = 4 mod 8), while the facade accessor's
+    // guard read at this+0x00 needs this = 0 mod 8 - no 64-bit fixture
+    // satisfies both in one call. The real callee's own stores are pinned
+    // by the string_object.rs tests.
+
+    use super::super::string_object::{
+        string_object_construct_from_cstr, STRING_OBJECT_CONSTRUCT_FROM_CSTR,
+        STRING_OBJECT_VTABLE_ADDRESS,
+    };
+
+    /// Serializes the tests that swap `STRING_OBJECT_CONSTRUCT_FROM_CSTR`
+    /// (the string_object.rs `COPY_SLOT_LOCK` precedent; a separate slot,
+    /// a separate lock). Taken after the construct and facade locks
+    /// everywhere, so no lock-order cycle is possible.
+    static CONSTRUCT_FROM_CSTR_SLOT_LOCK: Mutex<()> = Mutex::new(());
+
+    unsafe extern "C" fn recording_construct_from_cstr(
+        member: *mut StringObject,
+        source: *const u8,
+    ) -> *mut StringObject {
+        (*core::ptr::addr_of_mut!(CONSTRUCT_CALLS)).push(ConstructCall::StringMember {
+            member: member as usize,
+            source: source as usize,
+        });
+        (member as *mut u8)
+            .add(core::ptr::read_volatile(core::ptr::addr_of!(STRING_RETURN_SHIFT)))
+            .cast::<StringObject>()
+    }
+
+    /// Stand-in for the wired default in the default-seam test, which
+    /// cannot run the real converting constructor (the alignment conflict
+    /// above): mimics its host-observable prefix - the StringObject vtable
+    /// face word at +0x00 and the NULL payload word at +0x04 - and records
+    /// the dispatch.
+    unsafe extern "C" fn construct_from_cstr_stand_in(
+        member: *mut StringObject,
+        source: *const u8,
+    ) -> *mut StringObject {
+        (*core::ptr::addr_of_mut!(CONSTRUCT_CALLS)).push(ConstructCall::StringMember {
+            member: member as usize,
+            source: source as usize,
+        });
+        let member = member.cast::<u8>();
+        write_u32_unaligned(member, STRING_OBJECT_VTABLE_ADDRESS as u32);
+        write_u32_unaligned(member.add(4), 0);
+        member.cast::<StringObject>()
+    }
+
+    /// Restores the from-cstr slot alongside the construct/facade seams.
+    struct ConstructFromCstrGuard {
+        _inner: ConstructOpsGuard,
+        _slot_lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for ConstructFromCstrGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(STRING_OBJECT_CONSTRUCT_FROM_CSTR)
+                    .write_volatile(string_object_construct_from_cstr);
+            }
+        }
+    }
+
+    fn construct_from_cstr_guard(
+        inner: ConstructOpsGuard,
+        string_ctor: unsafe extern "C" fn(*mut StringObject, *const u8) -> *mut StringObject,
+    ) -> ConstructFromCstrGuard {
+        let slot_lock = CONSTRUCT_FROM_CSTR_SLOT_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        unsafe {
+            core::ptr::addr_of_mut!(STRING_OBJECT_CONSTRUCT_FROM_CSTR)
+                .write_volatile(string_ctor);
+        }
+        ConstructFromCstrGuard {
+            _inner: inner,
+            _slot_lock: slot_lock,
+        }
+    }
+
+    #[test]
+    fn construct_from_cstr_threads_every_object_address_through_callee_returns() {
+        let mut object = Object([0xa5; 0x100]);
+        let this = object.0.as_mut_ptr();
+        let source = 0x5eedusize as *const u8;
+        unsafe {
+            (*core::ptr::addr_of_mut!(FAKE_FACADE))[9] = 0x5a;
+        }
+        // The string and vector mocks return deliberately shifted member
+        // pointers; every later field and the final result must derive from
+        // those returns (`sub r4,r0,#12` / `sub r4,r0,#64`), never from the
+        // entry `this`.
+        let _guard = construct_from_cstr_guard(
+            install_construct_recorders(0x20, 0x10),
+            recording_construct_from_cstr,
+        );
+
+        let returned = unsafe {
+            silver_controller_transition_addon_construct_from_cstr(
+                this,
+                source,
+                1,
+                0xbabe,
+                0xaaaa,
+                7,
+                0xdead_beef,
+            )
+        };
+
+        let derived = unsafe { this.add(0x20) };
+        let final_this = unsafe { this.add(0x30) };
+        assert_eq!(returned, final_this);
+        assert_eq!(
+            construct_calls(),
+            vec![
+                ConstructCall::Base {
+                    this: this as usize,
+                    hint: 0xbabe,
+                    flag: 0, // the constructor inverts the flag for the base
+                    prior_vtable: 0xa5a5_a5a5,
+                },
+                ConstructCall::StringMember {
+                    member: unsafe { this.add(TRANSITION_ADDON_STRING_OFFSET) } as usize,
+                    source: source as usize,
+                },
+                ConstructCall::Capacity { owner: 0xa5a5_a5a5 },
+                ConstructCall::Quantum {
+                    this: derived as usize,
+                    arg: 0xaaaa,
+                    context_at_call: 0xdead_beef,
+                },
+                ConstructCall::Scale {
+                    this: derived as usize,
+                    arg: 7,
+                },
+                ConstructCall::Walk { selector: 1 },
+                ConstructCall::Vector {
+                    member: unsafe { derived.add(TRANSITION_ADDON_VECTOR_OFFSET) } as usize,
+                    owner: derived as usize,
+                },
+                ConstructCall::Register {
+                    this: final_this as usize,
+                },
+            ]
+        );
+        unsafe {
+            // The derived vtable overwrites whatever the base boundary left.
+            assert_eq!(read_u32_unaligned(this), TRANSITION_ADDON_VTABLE_ADDRESS as u32);
+            // THIS constructor plants the derived string vtable at the
+            // shifted member's +0x00 (the 0x082792b4 veneer does it in the
+            // sibling overload).
+            let string_return = this.add(TRANSITION_ADDON_STRING_OFFSET + 0x20);
+            assert_eq!(
+                read_u32_unaligned(string_return),
+                TRANSITION_ADDON_STRING_MEMBER_VTABLE_ADDRESS
+            );
+            // The raw flag byte lands at the string member's +8.
+            assert_eq!(*string_return.add(8), 1);
+            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_INVALID_WORD_OFFSET)), 0xffff_ffff);
+            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_ZEROED_WORD_OFFSET)), 0);
+            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_CAPACITY_OFFSET)), 0x1111);
+            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_CONTEXT_OFFSET)), 0xdead_beef);
+            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_QUANTUM_OFFSET)), 0x2222);
+            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_SCALE_CLASS_OFFSET)), 0x3333);
+            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_SECOND_ZEROED_WORD_OFFSET)), 0);
+            assert_eq!(*derived.add(TRANSITION_ADDON_FACADE_BYTE_OFFSET), 0x5a);
+            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_ALIGNMENT_OFFSET)), 0x20);
+        }
+    }
+
+    #[test]
+    fn construct_from_cstr_defaults_reproduce_every_decoded_store() {
+        let mut object = Object([0xa5; 0x100]);
+        let this = object.0.as_mut_ptr();
+        let source = 0x5eedusize as *const u8;
+        unsafe {
+            (*core::ptr::addr_of_mut!(FAKE_FACADE))[9] = 0x5a;
+        }
+        // Only the facade walk is mocked (with the default base boundary
+        // the +0x04 interface word is zero, which the real host walk would
+        // dereference) and the from-cstr slot carries the stand-in (the
+        // alignment conflict above); every construction slot stays at its
+        // default. flag = 0 covers the other inversion: the base receives
+        // flag ^ 1 = 1 while the member's +8 byte takes the raw 0.
+        let _guard = construct_from_cstr_guard(
+            install_construct_defaults(),
+            construct_from_cstr_stand_in,
+        );
+
+        let returned = unsafe {
+            silver_controller_transition_addon_construct_from_cstr(this, source, 0, 0, 0, 7, 0)
+        };
+
+        assert_eq!(returned, this);
+        assert_eq!(
+            construct_calls(),
+            vec![
+                ConstructCall::StringMember {
+                    member: unsafe { this.add(TRANSITION_ADDON_STRING_OFFSET) } as usize,
+                    source: source as usize,
+                },
+                ConstructCall::Walk { selector: 1 },
+            ]
+        );
+        unsafe {
+            // Base boundary stores, then the derived vtable overwrites +0x00.
+            assert_eq!(read_u32_unaligned(this), TRANSITION_ADDON_VTABLE_ADDRESS as u32);
+            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_OWNER_OFFSET)), 0);
+            assert_eq!(*this.add(8), 0);
+            assert_eq!(*this.add(9), 1, "flag ^ 1 with flag = 0");
+            // String member: the stand-in planted the StringObject vtable
+            // face word and NULL payload, then THIS constructor overwrote
+            // +0x00 with the derived string vtable.
+            assert_eq!(
+                read_u32_unaligned(this.add(TRANSITION_ADDON_STRING_OFFSET)),
+                TRANSITION_ADDON_STRING_MEMBER_VTABLE_ADDRESS
+            );
+            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_STRING_OFFSET + 4)), 0);
+            assert_eq!(*this.add(TRANSITION_ADDON_MODE_FLAG_OFFSET), 0, "the raw flag");
+            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_INVALID_WORD_OFFSET)), 0xffff_ffff);
+            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_ZEROED_WORD_OFFSET)), 0);
+            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_CAPACITY_OFFSET)), 0x200);
+            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_CONTEXT_OFFSET)), 0);
+            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_QUANTUM_OFFSET)), 0);
+            // Faithful scale default: NULL context and 7 - 1 < 16 -> 7.
+            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_SCALE_CLASS_OFFSET)), 7);
+            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_SECOND_ZEROED_WORD_OFFSET)), 0);
+            assert_eq!(*this.add(TRANSITION_ADDON_FACADE_BYTE_OFFSET), 0x5a);
+            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_ALIGNMENT_OFFSET)), 0x20);
+            // Vector member prologue: owner word, then four zeroed words.
+            assert_eq!(
+                read_u32_unaligned(this.add(TRANSITION_ADDON_VECTOR_OFFSET)),
+                this as usize as u32
+            );
+            for offset in [4usize, 8, 12, 16] {
+                assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_VECTOR_OFFSET + offset)), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn construct_from_cstr_slot_is_wired_to_the_real_port() {
+        let _lock = CONSTRUCT_FROM_CSTR_SLOT_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let installed = unsafe {
+            core::ptr::read_volatile(core::ptr::addr_of!(STRING_OBJECT_CONSTRUCT_FROM_CSTR))
+        };
+        assert_eq!(
+            installed as usize, string_object_construct_from_cstr as usize,
+            "the wired default is the ported converting constructor @ 0x08277304"
+        );
     }
 }

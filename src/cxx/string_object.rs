@@ -1726,6 +1726,32 @@ pub(crate) unsafe fn copy_construct_op() -> unsafe extern "C" fn(
     core::ptr::read_volatile(core::ptr::addr_of!(STRING_OBJECT_COPY_CONSTRUCT))
 }
 
+/// Indirect dispatch for the converting constructor @ 0x08277304 (the
+/// [`STRING_OBJECT_COPY_CONSTRUCT`] pattern). Chained to by the
+/// transition-addon from-cstr constructor @ 0x08278dc4
+/// (`cxx::transition_addon::silver_controller_transition_addon_construct_from_cstr`).
+/// The wired default is the ported [`string_object_construct_from_cstr`]
+/// itself; the slot exists because that embedding constructor calls BOTH
+/// this callee on its +0x0c string member AND the facade accessor
+/// 0x0818a0bc on the object base, and the two native-widened host reads
+/// demand incompatible fixture alignments on 64-bit hosts (the member at
+/// this+0x0c needs this ≡ 4 mod 8, the guard read at this+0x00 needs this
+/// ≡ 0 mod 8), so its host tests install recording mocks here.
+pub static mut STRING_OBJECT_CONSTRUCT_FROM_CSTR: unsafe extern "C" fn(
+    this: *mut StringObject,
+    source: *const u8,
+) -> *mut StringObject = string_object_construct_from_cstr;
+
+/// Reads the from-cstr construct slot (volatile — the
+/// [`copy_construct_op`] rationale).
+#[inline(always)]
+pub(crate) unsafe fn construct_from_cstr_op() -> unsafe extern "C" fn(
+    *mut StringObject,
+    *const u8,
+) -> *mut StringObject {
+    core::ptr::read_volatile(core::ptr::addr_of!(STRING_OBJECT_CONSTRUCT_FROM_CSTR))
+}
+
 /// string_id_record_construct_from_string_id — original: `FUN_08258c08`
 /// @ 0x08258c08 (32 bytes: 28 code + the 4-byte literal-pool word @
 /// 0x08258c28 = 0x089a76f0, binary-verified against osos.dec; 7 `bl`
