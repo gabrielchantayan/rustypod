@@ -5645,6 +5645,48 @@ functions:
       the two volatile dispatch slots (house anti-const-fold pattern)
       and the vanished spill frame.
 
+  - address: 0x082dd3d8
+    ghidra: FUN_082dd3d8
+    name: context_activity_enter
+    size: 36
+    sig: "void context_activity_enter(Context *context)"
+    module: cxx/context_activity
+    status: ported
+    vars: {param_1: context}
+    renames:
+      param_1/r0: context
+      "*(int*)(param_1+0xe0)": context->activity, the u32 lease count
+      "*(int*)(param_1+0xdc)": context->marked, the sweep-mark flag
+    notes: >-
+      Enter half of the C++ context activity lease: increments the
+      volatile u32 activity count at context+0xe0, then if the volatile
+      mark flag at context+0xdc is nonzero AND the new count is 1,
+      volatile-stores 1 into +0xe0 a second time. The final streq
+      re-stores a value the first str already wrote - semantically a
+      no-op, yet ADS emitted it, so both fields are volatile int in the
+      source (a volatile store may not be elided); the port keeps the
+      redundant store via read_volatile/write_volatile. Callers
+      decrement +0xe0 inline on exit (e.g. FUN_0837dc38 wraps
+      FUN_082dd05c); release_object @ 0x0837ee98 (cxx/release.rs) takes
+      the same lease and now calls this port on target instead of
+      transmuting the stock address. FUN_0837e920 sets the +0xdc flag on
+      every context in the global registry list (linked at +0xd4) before
+      an idle-context sweep and clears it afterwards. Extent verified
+      from raw words: the next separately linked function starts at
+      0x082dd3fc with push {r4-r10,lr}, so the Ghidra 36 bytes are
+      exact; no trailing literal pool. Call count verified by decoding
+      every B/BL word in osos.dec: exactly 24 sites, all unconditional
+      plain bl, no predicated forms, no tail b; the address occurs in no
+      image data word (never dispatched virtually). match.py: structural
+      parity - LLVM adds a push {fp,lr} frame and folds the entered==1
+      test into cmp-old/moveq against the original's cmp r1,#1; streq;
+      same loads, stores, predicates and order. Host tests (6) cover
+      unmarked increment, marked non-one increments (incl. 0x7fffffff),
+      the marked 0->1 transition, non-boolean flag values, u32 wrap from
+      0xffffffff to 0 skipping the transition path, and the unmarked
+      entered==1 boundary; fixtures assert every word outside +0xe0 is
+      untouched and +0xdc is never written.
+
   # --- Batch 10 scouting: identified only (ADS stdio / locale block) ---
   # The region 0x08030004-0x0803097c is the ADS buffered-stdio + setlocale
   # cluster (FILE struct: flags @ +0xc, buffer @ +0x10, size @ +0x1c,

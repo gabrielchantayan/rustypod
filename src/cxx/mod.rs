@@ -11,6 +11,7 @@ pub mod character_class;
 pub mod clock_source_construct;
 pub mod clock_source_destroy;
 pub mod color_copy;
+pub mod context_activity;
 pub mod decoder_begin_batch;
 pub mod dma_aligned_array_destroy;
 pub mod decoder_end_batch;

@@ -18,9 +18,11 @@
 //! [`release_object`]. Ghidra incorrectly inlines the tail target into this
 //! four-instruction forwarder.
 //!
-//! Deviation: on the firmware target the three still-unported context
-//! helpers are direct calls to their retailOS load addresses (`0x082dd3d8`,
-//! `0x082d7fdc`, and `0x082dd800`). Host builds use private recording
+//! Deviation: on the firmware target the two still-unported context
+//! helpers are direct calls to their retailOS load addresses (`0x082d7fdc`
+//! and `0x082dd800`); the enter helper `0x082dd3d8` is ported as
+//! `context_activity_enter` in `cxx/context_activity.rs` and called
+//! directly. Host builds use private recording
 //! boundaries for those helpers so the release function's transitions and
 //! virtual dispatch can be exercised; this does not replace or bypass
 //! `release_object` itself.
@@ -60,8 +62,8 @@ type ContextDestructor = unsafe extern "C" fn(*mut u8, *mut u8);
 #[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn enter_context(context: *mut u8) {
-    let enter: unsafe extern "C" fn(*mut u8) = core::mem::transmute(0x082d_d3d8usize);
-    enter(context);
+    // Ported: context_activity_enter in cxx/context_activity.rs.
+    unsafe { crate::cxx::context_activity::context_activity_enter(context) }
 }
 
 #[cfg(target_os = "none")]
