@@ -42145,3 +42145,54 @@ functions:
       entry directly; host tests use the injectable SCREEN_LAYOUT_ASSIGN_OPS
       seam because the ROM callback cannot execute natively. The Rust normal
       call represents the stock tail branch and returns the callback result.
+  # --- UI element registry: the two-dispatch add wrapper ---
+  - address: 0x0816e020
+    ghidra: FUN_0816e020
+    name: element_registry_add
+    size: 56
+    sig: "void element_registry_add(ElementRegistry *registry, RegistryElement *element)"
+    module: app/element_registry
+    status: ported
+    renames:
+      param_1/r0: registry (the lazy_singleton_0x3c object)
+      param_2/r1: element
+      param_3/param_4: phantom (r2/r3 dead on entry; Ghidra invented them)
+    notes: >-
+      The add/registration wrapper of the 0x3c-byte UI element registry
+      handed out by lazy_singleton_0x3c @ 0x0816df60 (ported): callers
+      build a view, call this, then name the element by id through
+      FUN_0816e220. Body is exactly two virtual dispatches - first
+      element->vtable[+0x08](element), a pre-insert lifecycle hook
+      (retain/activate in shape; the removal sibling @ 0x0816e058 pairs
+      slot +0x0c with a slot +0x10 teardown on the same object), then
+      registry->vtable[+0x1c](registry, &slot) with slot a stack word
+      holding the element pointer, passed by reference so the callee may
+      replace it. Both returns are dead at every call site, so the ABI
+      is void; no NULL guards anywhere. Extent verified at exactly 56
+      bytes - the next function opens at 0x0816e058 (push {r4-r7,lr};
+      sub sp,#28). Call count verified by decoding every B/BL word in
+      work/firmware/osos.dec: 25 bl, 0 predicated forms, 0 plain b, and
+      0 data-word occurrences of 0x0816e020 - the wrapper itself is
+      never vtable-dispatched. Ghidra's C is wrong about the prototype
+      (four params; r2/r3 are dead on entry) and its "local_10 =
+      param_4" is a phantom - the slot is written exactly once, with the
+      element pointer. UNRESOLVED CALLEES, documented not invented: the
+      registry ctor @ 0x0816e2ac installs vtable 0x089a4c20 whose +0x1c
+      word reads 0x08102f44 - a mid-function address (the containing
+      prologue is at 0x08102f30) with zeroed sibling slots - and the
+      element class (FUN_0817e3b0, vtable 0x08989468) has +0x08 reading
+      0x6c695354 = ASCII "TSil"; both are the known runtime-initialized
+      vtable page mismatch (same as clock_source_construct @ 0x08262958
+      and class_6800), so the port dispatches through whatever vtable
+      the objects carry at runtime. Key ordering fact: the registry
+      vtable is loaded only AFTER the first blx returns, so a hook that
+      swaps registry->vtable redirects the insert dispatch - pinned by a
+      host test. No seams and no deviations beyond the structural usize
+      vtable model (host pointers wider than the 32-bit target words).
+      Host tests (3): dispatch order plus forwarded arguments and the
+      by-reference slot contents, callee replacement of the slot
+      tolerated, and the post-call vtable load order. match.py
+      structural diff (exit-1 expected): identical core - mov r5,r0 /
+      ldr r0,[r1] / mov r4,r1 / ldr r1,[r0,#8] / blx / store slot / ldr
+      r0,[r5] / ldr r2,[r0,#28] / blx - differing only by the crate's
+      fp frame and slot offset, the accepted house profile.
