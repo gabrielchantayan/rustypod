@@ -43465,3 +43465,58 @@ functions:
       tests (3): payload pointer returned verbatim, NULL payload passes
       through as NULL, arbitrary (even unaligned) word returned verbatim
       with the holder word never written.
+  # --- track-metadata fetch framework: serialized-record scalar reader ---
+  - address: 0x0826863c
+    ghidra: FUN_0826863c
+    name: metadata_record_read_u32
+    size: 68
+    sig: "u32 metadata_record_read_u32(MetadataRecordReader *reader, const u8 *record, u32 *cursor)"
+    module: app/metadata_record
+    status: ported
+    vars: {param_1: reader, param_2: record, param_3: cursor}
+    notes: >-
+      Reads the u32 at record + *cursor into a stack local, advances
+      *cursor by 4, calls the reader's vtable slot +0x20 as
+      transform(reader->engine, &value, 4, 1), and returns the
+      POST-transform value. The reader object is {vtable @ +0x00,
+      engine @ +0x04}; slot +0x20 is the framework's in-place
+      element-wise converter (elem_size/count signature: this helper
+      passes 4/1, the 8-byte sibling @ 0x08268680 passes 8/1, and the
+      vector path @ 0x0826850c-0x08268524 passes 8/N) - almost
+      certainly the byte-order/normalization hook of the track-metadata
+      fetch decoders (diagnostic strings "fetch metadata: track id =
+      %llu" and "metadata_size not being set by metadata_for_global_id
+      callback" sit in the same 0x08268xxx block). The concrete engine
+      behind the slot is NOT identified and none is invented; the call
+      is genuine virtual dispatch. Extent verified against osos.dec:
+      68 bytes exactly, the sibling's push prologue opens at
+      0x08268680. Call count verified by decoding every B/BL word in
+      osos.dec: exactly 23 sites, all unconditional bl (0x08268a90,
+      0x08268ab0, 0x08268c58, 0x08268d08, 0x08268d1c, 0x08268d78,
+      0x08269054, 0x08269068, 0x0826907c, 0x08269090, 0x082693e0,
+      0x082693f4, 0x08269408, 0x0826941c, 0x0826953c, 0x08269550,
+      0x08269564, 0x08269578, 0x08269658, 0x0826966c, 0x08269780,
+      0x08269794, 0x082697c8), zero predicated forms, zero tail b
+      references, and the address occurs in no data word - never
+      dispatched virtually, and no caller NULL-gates the reader, so the
+      port keeps the original's no-guard fault-on-NULL behavior. The
+      cursor advances BEFORE the transform runs. The record word load
+      is a plain aligned read (cursors only advance by 4/8 from zero
+      over word-aligned record buffers); read_unaligned would emit four
+      ldrb per word on ARMv5TE. Reader/vtable modeled as repr(C)
+      structs with native pointer fields (vtable slot +0x20 = index 8,
+      slots +0x00..+0x1f reserved), so no u32 fixture slab is needed
+      and host tests drive real native mock vtables. match.py
+      structural diff (exit-1 expected): same shape - cursor load,
+      indexed word load, cursor +4 store, vtable/engine loads, slot
+      +0x20 blx with (buf, 4, 1), post-call reload; only diffs are the
+      crate fp frame prologue/epilogue (accepted house deviation) and
+      LLVM coalescing the original's redundant second ldr of *cursor.
+      Host tests (4): word at cursor returned post-transform with
+      cursor advanced and (engine, 4, 1) args observed; identity
+      transform returns the raw word; successive reads walk the record
+      (8 -> 12 -> 16); an unconditionally overwriting transform proves
+      the return is the post-transform value. Siblings 0x08268680
+      (u64 reader), 0x082686cc (+0x18 veneer), 0x08268734 (vector
+      apply), 0x08268750 (flag test) are NOT ported - one function per
+      commit.
