@@ -44,6 +44,7 @@ pub mod shared_cell;
 pub mod slot_reset;
 pub mod string;
 pub mod string_map;
+pub mod stream_write;
 pub mod stream_write_cstr;
 pub mod string_object;
 pub mod templates;
