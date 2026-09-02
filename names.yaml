@@ -44173,6 +44173,51 @@ functions:
       Deviation: 0x080a7f2c remains a volatile hook (stock target address on
       firmware, NULL on host) because it is not ported.
 
+  # --- tagged word buffer destructor ---
+  - address: 0x0803e5e4
+    ghidra: FUN_0803e5e4
+    name: tagged_word_buffer_destroy
+    size: 92
+    sig: "void tagged_word_buffer_destroy(TaggedWordBuffer *this)"
+    module: heap/tagged_word_buffer
+    status: ported
+    renames:
+      param_1/r0: this
+      FUN_0805f440: heap_poison
+      FUN_08043994: traced_free
+    notes: >-
+      Raw extent is exactly 0x0803e5e4..0x0803e640 (23 instructions, no
+      trailing literal pool): the sibling key comparator FUN_0803e640
+      begins immediately at 0x0803e640. Decoding every B/BL word in
+      osos.dec found 22 direct call sites, matching Ghidra: 14
+      unconditional bl plus 8 blne (all at 0x080623cc..0x08062420, each
+      immediately preceded by cmp r0,#0 - those callers NULL-check even
+      though the destructor has its own movs/popeq guard); no b tail
+      calls. The object is five target words {data +0x00, len +0x04,
+      capacity +0x08, tag +0x0c, flags +0x10}: the first three match
+      WordBuffer (heap/word_buffer.rs), and the comparator @ 0x0803e640
+      pins the layout - it orders by tag (zero tag sorts above nonzero),
+      then signed len, then an unsigned lexicographic walk of the data
+      u32 elements. Algorithm: NULL this returns; if data != NULL, poison
+      FUN_0805f440(data, capacity << 2) then traced_free(data) unless
+      flags bit 1 (buffer borrowed); flags is RELOADED from +0x10 after
+      the buffer release (0x0803e618 - a flag stored by either call is
+      honored, pinned by a host test), bit 0 latched, the object poisoned
+      with a literal 20 (FUN_0805f440(this, 20)), and if the latched bit
+      was set the original tail-branches bne traced_free(this) - the
+      scalar deleting destructor bit. Deviations: FUN_0805f440 is
+      unported, so both calls go through the volatile
+      TAGGED_WORD_BUFFER_POISON hook (stock address 0x0805f440 on
+      firmware, no-op on host - the WORD_BUFFER_GROW pattern; the helper
+      is 0x0805f440..0x0805f4a0 with 19 unconditional bl sites, fills
+      dst[0..len] from a rolling state byte @ 0x08a0ea04 - state =
+      (addr&15)+state+17 per byte - then memchr 0x08031180 for the final
+      state value and +63 on a hit), and the tail branch is an ordinary
+      returning call. match.py: same structure - NULL guard, data-null
+      check, poison blx with capacity<<2, tst #2 conditional free, flags
+      reload, poison blx with #20, tst #1 tail branch to traced_free;
+      LLVM keeps the same tail branch.
+
   # --- service-manager secondary handler access ---
   - address: 0x08193ec0
     ghidra: FUN_08193ec0

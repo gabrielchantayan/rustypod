@@ -103,6 +103,10 @@ pub mod hints {
     // flight take the sequential slots, and a collision skips tests
     // silently on every host.
     pub const PENDING_EVENT_INSERT: usize = 0x4600_0000;
+    // 0x4a00_0000, skipping the sequential 0x4700_0000..0x4900_0000:
+    // sibling ports in flight take the sequential slots, and a
+    // collision skips tests silently on every host.
+    pub const TAGGED_WORD_BUFFER: usize = 0x4a00_0000;
     // `heap/pool.rs` maps its own arena at 0x0800_0000 through a separate
     // path: it needs only bit 31 clear, not full u32 addressability.
 }
