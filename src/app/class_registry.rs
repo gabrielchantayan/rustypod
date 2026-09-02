@@ -7,6 +7,7 @@
 //! | 0x0810e64c | [`class_registry_construct`] | 96 | 9 `bl` + 1 tail `b` |
 //! | 0x08135110 | [`registry_container_initialize`] | 168 | 4 `bl` + 3 virtual calls |
 //! | 0x08135308 | [`registry_container_construct`] | 48 | 6 `bl` |
+//! | 0x0813533c | [`registry_container_construct_default`] | 44 | 23 `bl` |
 //! | 0x082028a4 | [`registry_observer_construct`] | 20 | 3 `bl` |
 //! (Call-site counts are binary-scanned over osos.dec; one of the nine
 //! class-registry `bl`s is the static-init chain @ 0x082afb6c, which runs it
@@ -326,6 +327,50 @@ pub unsafe extern "C" fn registry_container_construct(
     let initialize =
         core::ptr::read_volatile(core::ptr::addr_of!(CLASS_REGISTRY_OPS.container_initialize));
     initialize(registry, capacity, growth);
+    registry
+}
+
+/// registry_container_construct_default — original: `FUN_0813533c` @
+/// 0x0813533c (40 bytes of code plus the 4-byte vtable literal @
+/// 0x08135364 — Ghidra's size of 40 drops the trailing literal-pool
+/// word; the next function starts @ 0x08135368. 23 `bl` call sites,
+/// 0 predicated, binary-scanned by decoding every B/BL word in
+/// osos.dec).
+///
+/// The ADS default constructor of the same registry-container class as
+/// [`registry_container_construct`]: it binds the identical vtable
+/// literal `0x08984770` and differs only in hardcoding capacity and
+/// growth to 4 (`mov r1, #4` / `mov r2, #4` @ 0x08135350/0x08135354)
+/// instead of taking them as arguments. It calls
+/// [`observable_array_construct`] (`FUN_08271cec`) on `this`, overwrites
+/// the vtable at +0x00 of *that returned pointer*, then invokes
+/// [`registry_container_initialize`](`FUN_08135110`) on the same
+/// pointer. The saved base-constructor return (r4), not the
+/// initializer's return, is returned in r0.
+///
+/// Capacity exactly four is the case that selects the lazily cached
+/// `0x08988eb0` default observer inside `registry_container_initialize`,
+/// so every one of the 23 callers builds a capacity-4-observer
+/// container. No NULL guard: an invalid `this` faults in the base
+/// constructor's first store, exactly as stock firmware does.
+///
+/// # Safety
+///
+/// `this` must address a writable registry object; a NULL or invalid
+/// pointer faults during base construction.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn registry_container_construct_default(
+    this: *mut Registry,
+) -> *mut Registry {
+    let registry = observable_array_construct(this.cast::<ObservableArray>()).cast::<Registry>();
+    core::ptr::write_volatile(
+        core::ptr::addr_of_mut!((*registry).vtable),
+        REGISTRY_CONTAINER_VTABLE_ADDRESS as *const _,
+    );
+    let initialize =
+        core::ptr::read_volatile(core::ptr::addr_of!(CLASS_REGISTRY_OPS.container_initialize));
+    initialize(registry, 4, 4);
     registry
 }
 
@@ -922,6 +967,40 @@ mod tests {
                 *ptr::addr_of!(CONTAINER_INITIALIZE_ARGS),
                 std::vec![(this, 0x0c, 5)],
                 "the original restores saved r1/r2 for FUN_08135110"
+            );
+            assert_eq!(
+                *trace(),
+                std::vec!["container_initialize"],
+                "the state initializer is called only after both vtable stores"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn registry_container_default_constructor_hardcodes_capacity_4_and_growth_4() {
+        let guard = mock();
+        unsafe {
+            let mut registry = Registry {
+                vtable: 0xdead_beefusize as *const RegistryVtable,
+                container: [usize::MAX; 7],
+                changed: 0xa5,
+                notify_enabled: 0x5a,
+                reserved: [0xa5; 2],
+                observer: usize::MAX as *mut u8,
+            };
+            let this = ptr::addr_of_mut!(registry);
+
+            assert_eq!(registry_container_construct_default(this), this);
+            assert_eq!(
+                ptr::read_volatile(this.cast::<[u32; 4]>()),
+                [REGISTRY_CONTAINER_VTABLE_ADDRESS as u32, 0, 0, 0],
+                "the base call zeros +0x04..+0x0c before the derived vtable replaces +0x00"
+            );
+            assert_eq!(
+                *ptr::addr_of!(CONTAINER_INITIALIZE_ARGS),
+                std::vec![(this, 4, 4)],
+                "the original's mov r1, #4 / mov r2, #4 @ 0x08135350/0x08135354"
             );
             assert_eq!(
                 *trace(),

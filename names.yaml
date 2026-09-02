@@ -11307,6 +11307,36 @@ functions:
       so the outer wrapper is deliberately not the shipped default until
       that separate function is ported.
 
+  - address: 0x0813533c
+    ghidra: FUN_0813533c
+    name: registry_container_construct_default
+    size: 44
+    sig: "Registry *registry_container_construct_default(Registry *this)"
+    module: app/class_registry
+    status: ported
+    vars: {param_1: this}
+    notes: >-
+      The ADS default constructor of the same registry-container class as
+      registry_container_construct @ 0x08135308: identical body shape and
+      the identical vtable literal 0x08984770, differing only in
+      hardcoding capacity/growth to 4 (mov r1, #4 / mov r2, #4 @
+      0x08135350/0x08135354) instead of taking them in r1/r2. Raw ARM:
+      push {r4,lr}; bl observable_array_construct @ 0x08271cec; str the
+      vtable literal (loaded from 0x08135364) at +0x00 of the base ctor's
+      return; bl registry_container_initialize @ 0x08135110 with (4, 4);
+      return the saved r4. Size is 44: Ghidra's 40 covers the ten code
+      words only and drops the trailing literal-pool word; the next
+      function (a destructor) starts @ 0x08135368. 23 bl call sites, 0
+      predicated, binary-verified by decoding every B/BL word in osos.dec.
+      Capacity exactly four is the case that selects the lazily cached
+      0x08988eb0 default observer inside registry_container_initialize,
+      so all 23 callers build capacity-4-observer containers. Both
+      callees were already ported: observable_array_construct is called
+      directly and the initializer goes through the same
+      CLASS_REGISTRY_OPS.container_initialize seam as the sibling ctor.
+      match.py (--lib worktree build): same call/store/dispatch shape;
+      deltas are the ops-table blx and frame layout, as in the sibling.
+
   - address: 0x082028a4
     ghidra: FUN_082028a4
     name: registry_observer_construct
