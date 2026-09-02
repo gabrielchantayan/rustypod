@@ -22614,6 +22614,40 @@ functions:
       0x083da3b8. 0x0824c734/0x0824c774 are the only copies outside the
       C++ block.
 
+  - address: 0x083d9fd4
+    ghidra: FUN_083d9fd4
+    name: deque_iter_assign_alias_9fd4
+    size: 36
+    sig: "u32 *deque_iter_assign_alias_9fd4(u32 *dst, const u32 *src)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: dst, param_2: src}
+    notes: >-
+      ALIAS - byte-identical second instantiation of deque_iter_assign
+      @ 0x083da458 (all 36 bytes verified against osos.dec: `ldr
+      r2,[r1]; str r2,[r0]; ldr r2,[r1,#4]; str r2,[r0,#4]; ldr
+      r2,[r1,#8]; str r2,[r0,#8]; ldr r1,[r1,#0xc]; str r1,[r0,#0xc];
+      bx lr`), the same 16-byte deque-iterator copy (cur, seg_base,
+      seg_end, seg_slot) returning dst in r0 untouched. The adjacency
+      identification holds: the 8 bytes immediately before it @
+      0x083d9fcc are `mov r0,#0x20; bx lr`, byte-identical to
+      deque_seg_capacity @ 0x083d9ec0. 22 plain `bl` call sites, none
+      predicated - verified by decoding every BL word in osos.dec (the
+      Ghidra count of 22 is exact): 0x081cb434 and 0x081cb470 in
+      FUN_081cb408/FUN_081cb458 (deque element-at and insert helpers on
+      a `{header, deque}` object at +4), 0x083d6fc0/0x083d6fd4 in
+      FUN_083d6fb0 and 0x083d6fec/0x083d7000 in FUN_083d6fdc (the
+      deque-iterator retreat/advance pair), and 16 sites in
+      FUN_083de544 (the deque insert-around-midpoint splitter).
+      Reference C: decomp/c/038/083d9fd4_FUN_083d9fd4.c. Ported as its
+      own exported symbol with an identical body under a distinct
+      link_section (the vector_size_elem4_alias_76c8 precedent), so
+      LLVM identical-function folding cannot merge the labels; both
+      symbols resolve in librustypod.a. match.py: body is
+      instruction-identical to the original; the only diff is LLVM's
+      `push {fp,lr}` / `pop {fp,pc}` frame prologue replacing the bare
+      `bx lr`.
+
   - address: 0x083d7d10
     ghidra: FUN_083d7d10
     name: vector_pair_copy_into
