@@ -48,9 +48,11 @@
 //! is the thin destroy-and-return-this wrapper @ 0x0816cd44, and
 //! [`refcounted_body_release_owned`] is the sibling teardown @ 0x0839d2c0
 //! whose final drop also disposes and tag-2-deletes the implementation
-//! itself. [`refcounted_body_release_dtor`] is the third sibling teardown
+//! [`refcounted_body_release_dtor`] is the third sibling teardown
 //! @ 0x0839cbc0, byte-identical to the canonical release except its final
 //! drop dispatches vtable slot 1 (+4) instead of slot 7 (+0x1c).
+//! [`refcounted_body_release_dtor_variant`] @ 0x0839d3ac is a fourth
+//! copy, byte-identical to the slot-1 sibling modulo `bl` displacements.
 
 #[cfg(not(target_os = "none"))]
 use crate::cxx::string_object::{string_object_destroy, StringObject};
@@ -562,6 +564,110 @@ pub unsafe extern "C" fn refcounted_body_release_dtor(slot: *mut *mut Refcounted
         }
 
         // Unlock helper @ 0x0839cc60 on its own fresh slot load; like
+        // the lock helper it guards only the mutex word.
+        let body = slot.read();
+        let mutex = (*body).mutex;
+        if !mutex.is_null() {
+            mutex_unlock(mutex);
+        }
+
+        let body = slot.read();
+        if !body.is_null() {
+            let mutex = (*body).mutex;
+            if !mutex.is_null() {
+                mutex_delete(mutex);
+                // Reloaded between the delete and the tag-2 free, exactly
+                // as the ARM does, then cleared after that free.
+                let mutex = (*body).mutex;
+                operator_delete(mutex.cast());
+                (*body).mutex = core::ptr::null_mut();
+            }
+            operator_delete(body.cast());
+        }
+    } else {
+        let mutex = (*body).mutex;
+        if !mutex.is_null() {
+            mutex_unlock(mutex);
+        }
+    }
+
+    slot.write(core::ptr::null_mut());
+}
+
+/// refcounted_body_release_dtor_variant — original: `FUN_0839d3ac` @
+/// 0x0839d3ac (144 bytes — Ghidra's 136-byte extent drops the trailing
+/// `str r6,[r4]` / `pop {r4,r5,r6,pc}`; the body runs to 0x0839d43c,
+/// where the separately linked 16-byte mutex-lock helper starts
+/// (0x0839d43c locks, 0x0839d44c unlocks; each loads body+8, NULL-checks
+/// it and tail-branches to mutex_lock 0x0807f5c4 / mutex_unlock
+/// 0x0807f6a0). 23 `bl` call sites, all unconditional — verified by
+/// decoding every ARM B/BL word in osos.dec: no `b` sites, no predicated
+/// forms, and the address appears in no data word, so it is never
+/// virtually dispatched).
+///
+/// A fourth separately linked copy of the slot-1 teardown: the 36 words
+/// are byte-identical to [`refcounted_body_release_dtor`] @ 0x0839cbc0
+/// except the three absolute `bl` displacements to mutex_delete @
+/// 0x0807f650 and operator_delete @ 0x082aad24 (both ported). Same
+/// [`RefcountedBody`] layout (+0 implementation, +4 i32 refcount, +8
+/// Mutex*): NULL body early-out (slot untouched), lock the optional
+/// mutex, wrapping `subs` decrement (zero underflows to -1 and takes the
+/// shared path), non-final drop unlocks and NULLs the slot, final drop
+/// dispatches the implementation's plain virtual destructor at vtable
+/// word 1 (+4) — impl NULL-guarded, block never freed — unlocks through
+/// a fresh slot load, then destroys the mutex, tag-2-deletes the
+/// reloaded mutex word, clears the mutex field, tag-2-deletes the body,
+/// and NULLs the slot on every path that reached the decrement.
+///
+/// Deliberate codegen deviation: like its siblings, LLVM inlines the
+/// ported mutex lock/unlock/delete (ROM_KERNEL dispatch included) where
+/// the original `bl`s the two 16-byte helpers and 0x0807f650; match.py
+/// shows the same guard/destruct/unlock/teardown structure inside a
+/// larger body. A dedicated target section prevents LLVM from folding
+/// this hookable copy into [`refcounted_body_release_dtor`], whose body
+/// is source-identical.
+///
+/// # Safety
+/// `slot` must be a valid aligned pointer slot. A non-NULL body, its
+/// mutex, its implementation, and the implementation's vtable (with a
+/// live virtual destructor at word index 1) must all be valid for the
+/// operations encoded by the original. As in the original, the slot
+/// pointer itself is not NULL-checked, and the lock/unlock helpers guard
+/// only the mutex word — never the body.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_body_release_dtor_variant")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_release_dtor_variant(
+    slot: *mut *mut RefcountedBody,
+) {
+    let body = slot.read();
+    if body.is_null() {
+        return;
+    }
+
+    // Lock helper @ 0x0839d43c, entered with the body's first load.
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_lock(mutex);
+    }
+
+    let remaining = (*body).refcount.wrapping_sub(1);
+    (*body).refcount = remaining;
+    // Fresh slot load; the ARM carries it in r0 across the `bne`.
+    let body = slot.read();
+    if remaining == 0 {
+        let implementation = (*body).opaque0 as *mut u8;
+        if !implementation.is_null() {
+            // `ldrne r1,[r0]; ldrne r1,[r1,#4]; blxne r1` — the plain
+            // virtual destructor at vtable word 1. The implementation
+            // block itself is NOT freed, unlike the owned sibling.
+            let vtable = (implementation as *const usize).read() as *const usize;
+            let destructor: unsafe extern "C" fn(*mut u8) =
+                core::mem::transmute(vtable.add(1).read());
+            destructor(implementation);
+        }
+
+        // Unlock helper @ 0x0839d44c on its own fresh slot load; like
         // the lock helper it guards only the mutex word.
         let body = slot.read();
         let mutex = (*body).mutex;
@@ -1343,6 +1449,114 @@ mod tests {
             let mut slot = &mut body as *mut RefcountedBody;
 
             unsafe { refcounted_body_release_dtor(&mut slot) };
+
+            assert_eq!(body.refcount, -1);
+            assert!(slot.is_null());
+            assert!(events().is_empty());
+        }
+
+        /// The 0x0839d3ac copy's NULL body early-out: the slot is not
+        /// even written.
+        #[test]
+        fn dtor_variant_null_body_returns_without_touching_anything() {
+            let _bench = bench();
+            let mut slot: *mut RefcountedBody = core::ptr::null_mut();
+
+            unsafe { refcounted_body_release_dtor_variant(&mut slot) };
+
+            assert!(slot.is_null());
+            assert!(events().is_empty());
+        }
+
+        /// The 0x0839d3ac copy's non-final drop decrements under the
+        /// mutex, unlocks, and NULLs the slot; the virtual destructor
+        /// never runs.
+        #[test]
+        fn dtor_variant_shared_reference_decrements_unlocks_and_nulls_slot() {
+            let _bench = bench();
+            let mut semaphore = 0x42;
+            let mut mutex = Mutex {
+                sem_cell: &mut semaphore,
+                unused: 0,
+            };
+            let mut vtable = [0usize; 2];
+            vtable[1] = recording_destructor as usize;
+            let mut implementation = [vtable.as_mut_ptr() as usize];
+            let mut body = RefcountedBody {
+                opaque0: implementation.as_mut_ptr() as usize,
+                refcount: 2,
+                mutex: &mut mutex,
+            };
+            let mut slot = &mut body as *mut RefcountedBody;
+
+            unsafe { refcounted_body_release_dtor_variant(&mut slot) };
+
+            assert_eq!(body.refcount, 1);
+            assert!(slot.is_null(), "the non-final path still clears the slot");
+            assert_eq!(events(), std::vec![Event::Wait(0x42), Event::Signal(0x42)]);
+        }
+
+        /// The 0x0839d3ac copy's final drop runs vtable word 1 (and does
+        /// NOT free the implementation block), then unlocks and tears the
+        /// mutex and body down in the sibling's order.
+        #[test]
+        fn dtor_variant_final_reference_destructs_and_cleans_up_in_order() {
+            let _bench = bench();
+            let mut semaphore = 0x42;
+            let mut mutex = Mutex {
+                sem_cell: &mut semaphore,
+                unused: 0,
+            };
+            let mut vtable = [0usize; 2];
+            vtable[1] = recording_destructor as usize;
+            let mut implementation = [vtable.as_mut_ptr() as usize];
+            let mut body = RefcountedBody {
+                opaque0: implementation.as_mut_ptr() as usize,
+                refcount: 1,
+                mutex: &mut mutex,
+            };
+            let body_ptr = &mut body as *mut RefcountedBody;
+            let mutex_ptr = &mut mutex as *mut Mutex;
+            let cell_ptr = &mut semaphore as *mut u32;
+            let implementation_ptr = implementation.as_mut_ptr() as *mut u8;
+            let mut slot = body_ptr;
+
+            unsafe { refcounted_body_release_dtor_variant(&mut slot) };
+
+            assert!(slot.is_null(), "the final store clears the caller slot");
+            assert!(mutex.sem_cell.is_null(), "mutex_delete clears its cell");
+            assert!(body.mutex.is_null(), "the mutex field is cleared after its free");
+            assert_eq!(
+                events(),
+                std::vec![
+                    Event::Wait(0x42),
+                    Event::Destructor(implementation_ptr as usize),
+                    Event::Signal(0x42),
+                    Event::Delete(0x42),
+                    Event::MutexCellFree(cell_ptr as usize),
+                    Event::HeapFree(mutex_ptr as *mut u8 as usize, 2),
+                    Event::HeapFree(body_ptr as *mut u8 as usize, 2),
+                ],
+                "no HeapFree of the implementation: slot 1 never frees it"
+            );
+        }
+
+        /// The 0x0839d3ac copy's `subs` wraps: a zero refcount underflows
+        /// to -1 and takes the shared path — no destructor, no deletes.
+        #[test]
+        fn dtor_variant_zero_refcount_wraps_without_running_cleanup() {
+            let _bench = bench();
+            let mut vtable = [0usize; 2];
+            vtable[1] = recording_destructor as usize;
+            let mut implementation = [vtable.as_mut_ptr() as usize];
+            let mut body = RefcountedBody {
+                opaque0: implementation.as_mut_ptr() as usize,
+                refcount: 0,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot = &mut body as *mut RefcountedBody;
+
+            unsafe { refcounted_body_release_dtor_variant(&mut slot) };
 
             assert_eq!(body.refcount, -1);
             assert!(slot.is_null());
