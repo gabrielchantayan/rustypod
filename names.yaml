@@ -40116,6 +40116,57 @@ functions:
       inflated because LLVM inlined the crate's five-instruction strlen
       instead of emitting the original's `bl 0x8392478`.
 
+  # --- C++ framework: buffered-stream write front end (mode 0) ---
+  - address: 0x0827899c
+    ghidra: FUN_0827899c
+    name: stream_write
+    size: 28
+    sig: "u32 stream_write(void *stream, u32 length, const u8 *data, u32 *written)"
+    module: cxx/stream_write
+    status: ported
+    vars: {param_1: stream, param_2: length, param_3: data, param_4: written}
+    renames:
+      FUN_082789b8: "stream_write_core seam (unported, reached through
+        STREAM_WRITE_CORE_OPS)"
+    notes: >-
+      28 bytes, seven words, no literal pool: mov ip,r3 / push {r3,lr} /
+      mov r3,#0 / str r3,[sp] / mov r3,ip / bl 0x082789b8 / pop {ip,pc}.
+      Ghidra's 28-byte extent is CORRECT here - it did not swallow the
+      sibling: the next word @ 0x082789b8 opens a full push
+      {r4-r11,lr} and is the separately linked shared buffered-stream
+      write core (876 bytes, 0x082789b8..0x08278d24, next function's
+      push {r3,r4,r5,lr} @ 0x08278d24), with its own second caller, the
+      mode-6 wrapper @ 0x08277ef4 (byte-pattern-identical to this
+      function except it stores 6 into the stacked slot). Verified by
+      decoding every B/BL word in osos.dec: 25 branch sites - 21
+      unconditional bl, 2 predicated bleq (@ 0x0827f010, @ 0x0827f068,
+      callers gate the write on a zero test), 2 tail b (@ 0x08161ab0,
+      bgt @ 0x082c7274). The attributed 23 bl count = the 21 bl plus the
+      2 bleq. Algorithm: this is the mode-0 front end - push {r3,lr}
+      reserves the first stack-argument slot (the pushed r3 is dead), 0
+      is stored into it as a FIFTH argument the core reads at [sp,#64],
+      r3 is restored through ip, and the core runs (stream, length,
+      data, written, 0); the core's r0 status (0 ok, 5 short final
+      flush, 0x15 error byte at +0x14 already set) returns verbatim
+      through pop {ip,pc}. The fifth word is forwarded by the core as
+      the third stacked argument of the facade vtable +0x20 write call;
+      its meaning is not established (0 here, 6 in the sibling) so it is
+      named mode and documented, not invented. The two predicated bleq
+      callers check a condition themselves; the wrapper has no guards of
+      its own (length 0 and NULL data reach the core untouched).
+      Deviation: the core @ 0x082789b8 is unported, reached through the
+      new STREAM_WRITE_CORE_OPS table (volatile dispatch, like
+      stream_write_cstr's STREAM_WRITE_OPS); the unwired default mimics
+      the core's own error-byte-set no-progress outcome - stores 0
+      through written (the core's mov r6,#0 / str r6,[r5] before its
+      first branch) and returns 0x15. The original pushes the dead r3
+      and overwrites its slot with 0; the port passes the literal 0.
+      stream_write_cstr keeps its own STREAM_WRITE_OPS seam unchanged.
+      match.py structural: LLVM frame-pointer prologue, then ldr of the
+      ops word, str of the zeroed fifth stack arg, blx through the seam
+      in place of the direct bl 0x082789b8 - same shape, inflated by
+      the volatile dispatch.
+
   - address: 0x08134db4
     ghidra: FUN_08134db4
     name: silver_controller_construct
