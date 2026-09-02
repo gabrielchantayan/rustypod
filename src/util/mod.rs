@@ -13,6 +13,7 @@ pub mod crc32;
 pub mod crts_object;
 pub mod cursor;
 pub mod encoded_word_block;
+pub mod error_latch;
 pub mod drive;
 pub mod fixed;
 pub mod field_access;

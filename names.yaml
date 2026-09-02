@@ -17222,6 +17222,39 @@ functions:
       pair into one barrel-shifter `and r0, r1, r0, lsr #15`, plus its
       usual fp frame.
 
+  - address: 0x0824f388
+    ghidra: FUN_0824f388
+    name: latch_first_error
+    size: 24
+    sig: "void latch_first_error(u32 *slot, u32 code)"
+    module: util/error_latch
+    status: ported
+    renames:
+      param_1/r0: slot
+      param_2/r1: code
+      r2: current
+    notes: >-
+      24-byte sticky first-error latch: `if (code != 0 && *slot == 0)
+      *slot = code;` (cmp r1,#0 / bxeq lr / ldr r2,[r0] / cmp r2,#0 /
+      streq r1,[r0] / bx lr). Zero doubles as "no error", so a zero code
+      is never recorded and an already-latched slot is never overwritten -
+      the earliest nonzero error sticks until the caller clears the slot.
+      Extent self-verified: next function starts @ 0x0824f3a0, matching
+      Ghidra's 24 bytes exactly; Ghidra's C is faithful. Call count
+      binary-verified B/BL scan of osos.dec: 22 sites (20 plain bl + 2
+      blcs @ 0x0824fb40 and 0x0825314c, both gating the call on their own
+      unsigned range check `id - 0x84c0 >= 2` and passing the
+      unknown-property code 0x500 - the callee itself has no flag guard,
+      only the zero-code and first-wins guards). All 22 callers sit in
+      the video-engine cluster 0x0824d224..0x082551e0 (see
+      util/video_engine); 0x500 is that engine's unknown-property /
+      out-of-range error code. No callees, no globals, no literal pool,
+      no deviations. Host tests cover zero-code no-op, first-error-wins,
+      zero-never-clears, boundary codes (1, 0x80000000, 0xffffffff), and
+      a slot x code combination sweep against the recovered C expression.
+      match.py (exit 1, diff expected): same cmp/bxeq/ldr/cmp/streq/bx
+      core; the only diff is LLVM's usual fp/lr frame.
+
   - address: 0x08252bec
     ghidra: FUN_08252bec
     name: video_engine_get
