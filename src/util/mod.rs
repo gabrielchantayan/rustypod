@@ -10,6 +10,7 @@ pub mod bswap;
 pub mod context_field;
 pub mod clock_pair;
 pub mod crc32;
+pub mod crts_object;
 pub mod cursor;
 pub mod encoded_word_block;
 pub mod drive;
