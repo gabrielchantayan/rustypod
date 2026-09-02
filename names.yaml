@@ -30176,8 +30176,8 @@ functions:
       FUN_082a50b0: string_object_c_str (direct, ported)
       FUN_08276214: utf8_next_codepoint (direct, ported)
       FUN_082a4ef8: bit_set_test (STRING_RECORD_OPS slot; the BitSet test
-        with PRE-SPLIT word/bit index - host default is a faithful model,
-        not a stub, because the cardinality recount depends on it)
+        with PRE-SPLIT word/bit index - now ported in cxx/bit_set, and the
+        slot defaults to the port on both target and host)
       FUN_08277484: string_object_destroy (direct, ported)
       FUN_081bb6a4: range copy tail (inlined as two word stores - the
         shared 8-byte copy *out = *src, out[1] = src[1], decoded from its
@@ -32058,7 +32058,8 @@ functions:
       the on-screen keyboards' allowed-character sets.
       CALLEES - utf8_next_codepoint @ 0x08276214 is already ported
       (cxx/string_object) and is called DIRECTLY. 0x082746f4 is unported
-      (its own callee 0x082a4ef8 dereferences the storage word) and rides
+      (its own callee 0x082a4ef8, since ported as bit_set_test, dereferences
+      the storage word) and rides
       the BIT_SET_WRITE seam with a no-op default; nothing in this
       function's control flow depends on the write's effects.
       INHERITED EDGES, both from the decoder - a 0xf0..0xff or invalid
@@ -32080,6 +32081,46 @@ functions:
       before the spill instead of after (LLVM keeps the argument in a
       register), the write being `blx` through the seam static, and the
       loop rotated so the first decode is peeled.
+
+  - address: 0x082a4ef8
+    ghidra: FUN_082a4ef8
+    name: bit_set_test
+    size: 24
+    sig: "u32 bit_set_test(BitSet *set, u32 word_index, u32 bit_index)"
+    module: cxx/bit_set
+    vars: {param_1: set, param_2: word_index, param_3: bit_index}
+    status: ported
+    notes: >-
+      The BitSet test, one bit in, exactly 0 or 1 out.
+      EXTENT - 24 bytes, 0x082a4ef8..0x082a4f10, binary-verified from
+      osos.dec: the next function opens `push {r4, lr}` @ 0x082a4f10 and
+      there is no trailing literal pool, so Ghidra's size is exact.
+      CALL SITES - 22 `bl`, 0 `b`, 0 predicated, binary-scanned by
+      decoding every B/BL word in osos.dec (Ghidra's 22 agrees).
+      BODY - `ldr r0, [r0, #8]` (set->words), `ldr r0, [r0, r1, lsl #2]`
+      (words[word_index]), `ands r0, r0, #1 lsl r2`, `movne r0, #1`,
+      `bx lr`: the raw mask never escapes, the result is normalized.
+      The index arrives PRE-SPLIT - callers compute `word = bit >> 5` /
+      `bit = bit & 31` themselves (the write @ 0x082746f4 does so in two
+      instructions before the `bl`; string_record_range shifts each
+      codepoint down by 5). Nothing masks either index, so the port
+      keeps the contract: bit_index MUST be in 0..=31. Ported as
+      `(words[word_index] >> bit_index) & 1`, the exact ands/movne
+      semantics for every in-contract input.
+      SEAM CUTOVER - string_record.rs's STRING_RECORD_OPS.bit_set_test
+      slot previously transmuted this address on target and ran a
+      faithful model on host; both defaults are now the port itself,
+      the slot staying seamed only so host tests can intercept it.
+      TESTS - 4 host tests over a u32-mapped words slab
+      (testing::hints::BIT_SET_TEST): every bit position of a word
+      holding only bit 17, mask normalization (0x8000_0401 returns
+      exactly 1 for bits 0/10/31, 0 for the gap), pre-split indexing
+      across four words with the bit/word indices proven uncrossed, and
+      an all-zero set reading 0 everywhere.
+      Deviations - none. match.py structural - same chained
+      `ldr [r0, #8]` / `ldr [r0, r1, lsl #2]` then a shift-and
+      normalize; LLVM emits the shift as `lsr` with the amount masked
+      by 31 (in-contract no-op) and adds the crate's fp frame.
 
   # --- C++ layer owner-tracked mutex (0x082e8390 / 0x082e83d8) ---
   #

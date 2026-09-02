@@ -1,7 +1,8 @@
 //! retailOS's **bit set** — a heap-backed vector of bits with a running
-//! cardinality — and the one member ported here, the UTF-8 bulk insert that
-//! turns a string into a set of codepoints. Everything below is decoded from
-//! the raw words of `work/firmware/osos.dec`, not from Ghidra.
+//! cardinality — and the two members ported here: the pre-split bit test
+//! and the UTF-8 bulk insert that turns a string into a set of codepoints.
+//! Everything below is decoded from the raw words of `work/firmware/osos.dec`,
+//! not from Ghidra.
 //!
 //! ## The class
 //!
@@ -32,16 +33,40 @@
 //! - **0x08274874** — the destructor: `if (words && tag != 0x3a)
 //!   free_wrapper(words, 0)`, then returns `this`. The 0x3a sentinel marks
 //!   storage this object does not own.
-//! - **0x082a4ef8** — the test, `(this, word_index, bit_index)`:
-//!   `ldr r0, [r0, #8]; ldr r0, [r0, r1, lsl #2]; ands r0, r0, #1 << r2`,
-//!   normalized to 0/1. Note it takes the index **pre-split** by the caller.
+//! - **0x082a4ef8** — the test behind [`bit_set_test`], `(this, word_index,
+//!   bit_index)`: `ldr r0, [r0, #8]; ldr r0, [r0, r1, lsl #2]; ands r0, r0,
+//!   #1 << r2`, normalized to 0/1. Note it takes the index **pre-split** by
+//!   the caller.
 //! - **0x082746f4** — the write behind [`BIT_SET_WRITE`], `(this, bit,
 //!   value)`: splits `bit` into `bit >> 5` / `bit & 31`, tests the current
 //!   value through 0x082a4ef8, returns untouched if it already matches, and
 //!   otherwise adjusts +0x04 by ±1 and ORs or XORs the mask into the word.
 //!   The cardinality is maintained exactly because of that early-out.
 //!
-//! ## The ported function
+//! ## bit_set_test — the pre-split test @ 0x082a4ef8
+//!
+//! Original: `FUN_082a4ef8` @ 0x082a4ef8 (**24 bytes**, 0x082a4ef8..0x082a4f10;
+//! the next function opens `push {r4, lr}` at 0x082a4f10 and there is no
+//! trailing literal pool, so Ghidra's size is exact. **22 `bl` call sites,
+//! 0 `b`, 0 predicated**, binary-scanned by decoding every B/BL word in
+//! `osos.dec`.)
+//!
+//! ```text
+//! 082a4ef8  ldr   r0, [r0, #8]        @ set->words
+//! 082a4efc  ldr   r0, [r0, r1, lsl #2] @ words[word_index]
+//! 082a4f00  mov   r1, #1
+//! 082a4f04  ands  r0, r0, r1, lsl r2  @ word & (1 << bit_index)
+//! 082a4f08  movne r0, #1              @ normalize to exactly 0/1
+//! 082a4f0c  bx    lr
+//! ```
+//!
+//! The index arrives **pre-split**: callers compute `word = bit >> 5` and
+//! `bit = bit & 31` themselves — the write @ 0x082746f4 does so in two
+//! instructions right before the `bl`, and the marking loop in
+//! `string_record_range` shifts the codepoint down by 5. Nothing in the
+//! body masks either index, so the port keeps the same contract.
+//!
+//! ## bit_set_insert_utf8 — the bulk insert @ 0x0827489c
 //!
 //! `bit_set_insert_utf8` — original: `FUN_0827489c` @ 0x0827489c
 //! (**64 bytes**, 0x0827489c..0x082748d8; Ghidra's size is right here — the
@@ -128,16 +153,48 @@ const _: [u8; 0x08] = [0; core::mem::offset_of!(BitSet, words)];
 const _: [u8; 0x0c] = [0; core::mem::offset_of!(BitSet, heap_tag)];
 const _: [u8; BIT_SET_SIZE] = [0; core::mem::size_of::<BitSet>()];
 
+/// bit_set_test — original: `FUN_082a4ef8` @ 0x082a4ef8
+/// (24 bytes, 0x082a4ef8..0x082a4f10; the next function opens `push {r4, lr}`
+/// at 0x082a4f10 with no trailing literal pool. 22 `bl` call sites, 0 `b`,
+/// 0 predicated, binary-scanned by decoding every B/BL word in osos.dec).
+///
+/// Tests one bit of the set and returns exactly 0 or 1: loads
+/// `set->words`, reads `words[word_index]`, masks with `1 << bit_index`
+/// and normalizes the nonzero result to 1 (the original's `ands` sets the
+/// flags and `movne r0, #1` rewrites the register, so the raw mask value
+/// never escapes).
+///
+/// Both indices arrive **pre-split** by the caller (`word = bit >> 5`,
+/// `bit = bit & 31`); nothing in the original masks them, so `bit_index`
+/// MUST be in 0..=31 and `word_index` MUST be inside the allocated
+/// `((bit_capacity + 31) >> 5)` words. The port keeps the contract and
+/// does no masking of its own.
+///
+/// Deviations: none. `(word >> bit) & 1` is the exact `ands`/`movne`
+/// semantics for every in-contract `bit_index`.
+///
+/// # Safety
+///
+/// `set` must point at a live [`BitSet`] whose `words` storage holds at
+/// least `word_index + 1` words. Read-only: the set is never written.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn bit_set_test(set: *mut BitSet, word_index: u32, bit_index: u32) -> u32 {
+    let words = (*set).words as usize as *const u32;
+    (words.add(word_index as usize).read() >> bit_index) & 1
+}
+
 /// Indirect call to the unported bit write `FUN_082746f4` @ 0x082746f4
 /// (128 bytes; 19 `bl` call sites, binary-scanned), `(set, bit, value)`.
 ///
 /// The target splits `bit` into `bit >> 5` / `bit & 31`, reads the current
-/// value through the test @ 0x082a4ef8, returns without a store when it
-/// already equals `value`, and otherwise steps `set->cardinality` by ±1 and
-/// ORs (set) or XORs (clear) the mask into `set->words[bit >> 5]`. Its own
-/// callee 0x082a4ef8 dereferences `words`, so the wired default is a no-op
-/// — the `ITERATOR_STATE_RELEASE` precedent. Nothing in
-/// [`bit_set_insert_utf8`]'s control flow depends on the write's effects.
+/// value through the ported [`bit_set_test`] @ 0x082a4ef8, returns without a
+/// store when it already equals `value`, and otherwise steps
+/// `set->cardinality` by ±1 and ORs (set) or XORs (clear) the mask into
+/// `set->words[bit >> 5]`. The wired default is a no-op — the
+/// `ITERATOR_STATE_RELEASE` precedent — because porting the write's effects
+/// without its callers is dead weight: nothing in [`bit_set_insert_utf8`]'s
+/// control flow depends on them.
 pub static mut BIT_SET_WRITE: unsafe extern "C" fn(set: *mut BitSet, bit: u32, value: u32) =
     bit_set_write_unported;
 
@@ -314,5 +371,102 @@ mod tests {
         unsafe { bit_set_insert_utf8(set(), b"aaa\0".as_ptr()) };
 
         assert_eq!(writes(), [(0x61, 1), (0x61, 1), (0x61, 1)]);
+    }
+
+    // --- bit_set_test @ 0x082a4ef8 ---
+
+    /// Serializes the words slab: every test below rewrites the same
+    /// mapping (the mapper never unmaps), and `cargo test` runs them on
+    /// parallel threads.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    /// A [`BitSet`] whose `words` point into the u32-addressable slab,
+    /// preloaded with `words`. The set object itself is a plain host
+    /// local — only the storage must fit in 32 bits.
+    fn set_with_words(words: &[u32]) -> Option<BitSet> {
+        let slab = crate::testing::try_map_u32_slab(crate::testing::hints::BIT_SET_TEST, 0x1000)?;
+        unsafe {
+            core::ptr::write_bytes(slab, 0, 0x1000);
+            core::ptr::copy_nonoverlapping(words.as_ptr(), slab as *mut u32, words.len());
+        }
+        Some(BitSet {
+            bit_capacity: (words.len() * 32) as u32,
+            cardinality: 0,
+            words: slab as u32,
+            heap_tag: 0,
+            reserved: [0; 3],
+        })
+    }
+
+    #[test]
+    fn test_reports_the_exact_bit_and_no_other() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(set) = set_with_words(&[1u32 << 17]) else {
+            assert!(crate::testing::note_missing_u32_fixture("cxx/bit_set"));
+            return;
+        };
+        let set = core::ptr::addr_of!(set) as *mut BitSet;
+
+        for bit in 0..32u32 {
+            let expect = u32::from(bit == 17);
+            assert_eq!(
+                unsafe { bit_set_test(set, 0, bit) },
+                expect,
+                "bit {bit} of a word holding only bit 17"
+            );
+        }
+    }
+
+    #[test]
+    fn test_normalizes_the_mask_to_exactly_one() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // Several bits set, including the tested one: the raw mask
+        // (1 << 31 = 0x8000_0000) must come back as 1, the `movne r0, #1`.
+        let Some(set) = set_with_words(&[0x8000_0401]) else {
+            assert!(crate::testing::note_missing_u32_fixture("cxx/bit_set"));
+            return;
+        };
+        let set = core::ptr::addr_of!(set) as *mut BitSet;
+
+        unsafe {
+            assert_eq!(bit_set_test(set, 0, 31), 1, "movne rewrites 0x8000_0000 to 1");
+            assert_eq!(bit_set_test(set, 0, 0), 1);
+            assert_eq!(bit_set_test(set, 0, 10), 1);
+            assert_eq!(bit_set_test(set, 0, 1), 0, "a gap between set bits");
+        }
+    }
+
+    #[test]
+    fn test_indexes_across_words_with_the_pre_split_index() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(set) = set_with_words(&[0, 1u32 << 5, 0, 1u32 << 31]) else {
+            assert!(crate::testing::note_missing_u32_fixture("cxx/bit_set"));
+            return;
+        };
+        let set = core::ptr::addr_of!(set) as *mut BitSet;
+
+        unsafe {
+            assert_eq!(bit_set_test(set, 1, 5), 1, "bit 37 pre-split as (1, 5)");
+            assert_eq!(bit_set_test(set, 3, 31), 1, "bit 127 pre-split as (3, 31)");
+            assert_eq!(bit_set_test(set, 0, 5), 0, "word 0 is empty");
+            assert_eq!(bit_set_test(set, 2, 31), 0, "word 2 is empty");
+            assert_eq!(bit_set_test(set, 1, 31), 0, "the bit index is not crossed with the word");
+        }
+    }
+
+    #[test]
+    fn test_an_empty_set_reports_zero_everywhere() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(set) = set_with_words(&[0; 8]) else {
+            assert!(crate::testing::note_missing_u32_fixture("cxx/bit_set"));
+            return;
+        };
+        let set = core::ptr::addr_of!(set) as *mut BitSet;
+
+        for word in 0..8u32 {
+            for bit in [0u32, 1, 15, 31] {
+                assert_eq!(unsafe { bit_set_test(set, word, bit) }, 0);
+            }
+        }
     }
 }
