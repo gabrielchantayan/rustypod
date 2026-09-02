@@ -3646,6 +3646,41 @@ functions:
       add r0, r0, #0x4c; bx lr — the base subobject's block deque. 1 bl
       call site @ 0x0826f59c (pool_seed_regions), binary-verified.
 
+  - address: 0x08217318
+    ghidra: FUN_08217318
+    name: timer_reset_4000
+    size: 40
+    sig: "void timer_reset_4000(u8 *this)"
+    module: app/timer_reset
+    status: ported
+    renames:
+      param_1: this (unidentified controller class; its timer lives at +0xb8)
+      FUN_0812c6b0: timer_stop (already ported, called directly)
+      FUN_0812c63c: timer_start_after (already ported, called directly)
+      FUN_0812bf4c: timer_restart (already ported; tail branch in stock)
+    notes: >-
+      40 bytes exactly (0x08217318..0x08217340), Ghidra's extent confirmed:
+      the mov r0,#0; bx lr leaf at 0x08217340 is the next function. 24 call
+      sites binary-verified by decoding every ARM B/BL word in osos.dec: 22
+      unconditional bl plus 2 blne - the predicated pair are caller-side
+      mode gates (each caller is an event handler returning 1 that skips
+      the reset when FUN_0817ee04()+0x28 equals its mode constant), not a
+      NULL guard; this routine dereferences this+0xb8 unconditionally and
+      the port keeps that. Algorithm: stop the +0xb8 timer, reload the
+      field, timer_start_after(timer, 4000), reload again, tail-branch to
+      timer_restart - i.e. re-arm the object's timeout to a fresh 4000 ms.
+      All three callees were already ported, so no dispatch seam was added.
+      Rust renders the tail branch as a normal call and preserves the three
+      ldr [this, #0xb8] reloads as volatile reads. Host tests use the unique
+      TIMER_RESET_4000 slab: one proves the 4000 ms period store and the
+      'run ' state after restart, the other swaps +0xb8 mid-stop via the
+      TIMER_OPS trace slot and proves both later helpers observe the
+      replacement. match.py structural review against this worktree archive
+      (--lib): LLVM inlines all three ported helpers plus their ops-table
+      paths (142 instructions), but the stock shape survives - three +0xb8
+      reloads, the inlined stop sequences with the 'stop'/'run ' FourCC
+      stores, the mov r0,#4000 delay store, and the indirect arm tail.
+
   - address: 0x083dd9e4
     ghidra: FUN_083dd9e4
 
