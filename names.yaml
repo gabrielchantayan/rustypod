@@ -42498,3 +42498,52 @@ functions:
       ldr r0,[r1] / mov r4,r1 / ldr r1,[r0,#8] / blx / store slot / ldr
       r0,[r5] / ldr r2,[r0,#28] / blx - differing only by the crate's
       fp frame and slot offset, the accepted house profile.
+  - address: 0x08309be0
+    ghidra: FUN_08309be0
+    name: copy_inline_encoded_word_block
+    size: 84
+    sig: "void copy_inline_encoded_word_block(InlineEncodedWordBlock *destination, const InlineEncodedWordBlock *source)"
+    module: util/encoded_word_block
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: source
+      iVar1/r3: encoded_count then decoded_count
+      DAT_08309c34: INLINE_ENCODED_COUNT_MULTIPLIER (0x4b6143ff)
+    notes: >-
+      Unbounded copy for the INLINE-storage encoded-count word block
+      family: single-word header (encoded count) with the u32 word payload
+      inline at offset +4, NOT behind the out-of-line words pointer of the
+      sibling EncodedWordBlock family (copy_encoded_word_block @
+      0x0835443c, copy_encoded_word_block_from @ 0x08322bcc). Alias check
+      first (subs/movne/cmp/bxeq lr): identical source/destination returns
+      with zero writes and no decode. Otherwise the header word is stored
+      verbatim, the decoded count is the signed wrapping absolute value of
+      encoded_count * 0x4b6143ff mod 2^32 (muls + rsbmi), and words
+      src[1..=count] are copied to dst[1..=count] in descending-index
+      order. No bound check and no return value, unlike the bounded
+      siblings. The header encoding is confirmed by the producer
+      FUN_0833dbd0 @ 0x0833dbd0, which stores count * 0xda8ebbff - the
+      multiplicative inverse of 0x4b6143ff mod 2^32, verified against both
+      literal pools (copy literal @ 0x08309c34, producer literal @
+      0x0833dd0c). Callers (e.g. FUN_083232d4 @ 0x083232d4) shuffle
+      0x10-byte bignums produced by FUN_0833dbd0 between stack slots
+      inside the firmware's modular-arithmetic signature math. Extent
+      self-verified: 21 instructions = 84 bytes, trailing literal-pool
+      multiplier word at 0x08309c34, next function's stmdb sp! prologue at
+      0x08309c38; Ghidra's 84 bytes is the instruction body only. Call
+      count verified by decoding every ARM B/BL word in osos.dec: exactly
+      24 direct call sites, all unconditional bl, 0 predicated forms; the
+      address occurs in no data word, so it is not dispatched virtually.
+      Deliberate deviation: none - i32::MIN retains the ARM
+      wrapping-negation behavior and a distinct destination would attempt
+      a 2^31-word copy. Host tests (5): header plus inline words for
+      decoded counts 0/1/3/5 with trailing sentinels untouched, the rsbmi
+      negative-product path via encoded count for -3, zero count copies
+      the header only, an aliased i32::MIN header is a no-op proving the
+      alias check precedes any decode, and an overlapping block copies in
+      descending-index order. match.py structural diff (exit-1 expected):
+      same predicated alias check, verbatim header store, mul + rsbmi
+      decode, and descending ldr/str [rN, r2, lsl #2] loop with the
+      0x4b6143ff literal pool word; differs only by the crate fp frame
+      and register allocation, the accepted house profile.
