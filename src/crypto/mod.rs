@@ -22,7 +22,12 @@
 //! [`digest_init`] is NOT OpenSSL: it ports the init of Apple's
 //! proprietary MBA-obfuscated digest (custom IVs, 16/20-byte states)
 //! feeding the HMAC machinery in 0x082f0xxx..0x0835xxxx.
+//!
+//! [`bn_num_bits`] ports the `BIGNUM` bit-length query from bn_lib.c
+//! (the 0x0803d800..0x08041000 bignum cluster: `d`/`top`/`dmax`/`neg`/
+//! `flags` layout, RSA-1024 `== 0x400` caller in the X.509 chain walk).
 pub mod bio_printf;
+pub mod bn_num_bits;
 pub mod cipher_name;
 pub mod digest_init;
 pub mod obj_dat;

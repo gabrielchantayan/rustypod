@@ -40197,6 +40197,73 @@ functions:
       instead of the spill frame (by design: the explicit VaList IS the
       spill's product); 7 instructions either way.
       #[inline(never)] for the 25 `bl` targets.
+
+  # --- OpenSSL bignum: the bit-length query ---
+  # The bn_lib.c cluster sits in 0x0803d800..0x08041000 on the
+  # { BN_ULONG *d; int top; int dmax; int neg; int flags } BIGNUM
+  # (the multiplier @ 0x080400b0 EORs the neg words @ +0x0c, tests
+  # flags @ +0x10 against 2 = BN_FLG_STATIC_DATA). BN_num_bits_word
+  # @ 0x080404dc is the limb bit-length helper (most-significant-
+  # nonzero-byte select into a 256-byte bits[] table); BN_num_bytes
+  # @ 0x08063040 is (BN_num_bits + 7) / 8; the X.509 chain walk
+  # FUN_082d48ac @ 0x082d48ac requires BN_num_bits(key) == 0x400,
+  # the RSA-1024 modulus check.
+  - address: 0x080404a8
+    ghidra: FUN_080404a8
+    name: bn_num_bits
+    size: 52
+    sig: "int bn_num_bits(const BigNum *a)"
+    module: crypto/bn_num_bits
+    status: ported
+    renames:
+      param_1/r0: a
+      FUN_080404dc: bn_num_bits_word (the callee; BN_num_bits_word from bn_lib.c)
+    notes: >-
+      OpenSSL's `BN_num_bits` from crypto/bn/bn_lib.c, verbatim minus
+      the compiled-out bn_check_top assert - part of the SSLeay-era
+      libcrypto Apple vendored (identity evidence: the BIGNUM layout
+      the surrounding 0x0803d800..0x08041000 cluster operates on, the
+      BN_num_bits_word byte-table helper @ 0x080404dc, the
+      (bits + 7) / 8 BN_num_bytes caller @ 0x08063040, and the
+      RSA-1024 `== 0x400` check in the X.509 chain walk @ 0x082d48ac).
+      Body decoded from the raw image: 13 words, no literal pool of
+      its own, and the next entry is the callee BN_num_bits_word
+      itself (a separately linked function with 4 other callers), so
+      Ghidra's 52-byte extent is exactly right. Algorithm: top == 0
+      (BN_is_zero) returns 0 via moveq/popeq BEFORE d is loaded;
+      otherwise return (top - 1) * 32 + BN_num_bits_word(d[top - 1]).
+      Call count binary-verified by decoding every B/BL word in
+      osos.dec: exactly 22 sites, ALL unconditional `bl` (no
+      predicated forms, no tail branches) - no caller NULL-guards or
+      flag-gates the query, and none is needed (no NULL check exists).
+      No DATA word in the image holds 0x080404a8, so it is never
+      dispatched virtually. ANOMALY, documented not explained: the
+      helper's bits[] table literal @ 0x08040514 is 0x08906520, which
+      at rest lands mid-string in the Italian UI heap ("tata." inside
+      "...non e' piu' supportata."); no instruction writes a table
+      there and no canonical {0,1,2,2,3,3,3,3,...} byte run exists
+      anywhere in osos.dec, so the runtime content must be installed
+      by a loader pass this port does not model. The port therefore
+      reaches the helper through the BN_NUM_BITS_WORD slot whose
+      target default calls the stock 0x080404dc in place - device
+      behavior is bit-exact whatever lives at 0x08906520. Upstream
+      bits[b] = floor(log2(b)) + 1 with bits[0] = 0, so a zero top
+      limb contributes nothing and a 32-limb value with bit 1023 set
+      measures 31*32 + 32 = 0x400, matching the caller. Deviations:
+      the `bl 0x080404dc` becomes a volatile slot load + `blx` (the
+      documented seam shape, same as crypto/bio_printf.rs); the
+      top-limb index arithmetic is wrapping_* so a bogus top < 0
+      cannot trip host overflow checks (same single sub/lsl on
+      target). Host tests: top == 0 returns 0 without touching the
+      worker or the limb pointer (NULL d), the most significant limb
+      alone reaches the worker, the (top - 1) << 5 scaling, the slot
+      re-read on every call, and end-to-end OpenSSL semantics with the
+      upstream table's behavior installed (RSA-1024 modulus == 0x400,
+      full top limb 0x400, one bit less 0x3ff, value 1 == 1 bit, zero
+      top limb contributes 0). match.py structural - the early-out,
+      limb select, and i*32 add correspond one-to-one; the diff is
+      the seam's indirect call and LLVM's shrink-wrapped frame.
+      #[inline(never)] for the 22 `bl` targets.
   # --- display object: the six-layer compositor root ---
   - address: 0x081d9064
     ghidra: FUN_081d9064
