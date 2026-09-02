@@ -22313,6 +22313,50 @@ functions:
       a private model word so tests exercise the reload-per-call
       behavior without mapping the firmware BSS address.
 
+  - address: 0x082d7934
+    ghidra: FUN_082d7934
+    name: ata_semaphore_wait
+    size: 12
+    sig: "usize ata_semaphore_wait(usize index)"
+    module: drivers/ata_semaphore
+    status: ported
+    renames:
+      param_1/r0: index
+      DAT_082d7940: ata_semaphore_table
+      thunk_EXT_FUN_22003fd0: rom_sem_wait
+    notes: >-
+      Raw extent is three code words at 0x082d7934..0x082d7940; the
+      following word is the BSS table literal 0x08adb66c, not code (the
+      next separately entered function is cache_lock_signal @
+      0x082d7944, so Ghidra's 12-byte extent is exact). Body: `ldr r1,
+      [0x082d7940]` (r1 = 0x08adb66c), `ldr r0, [r1, r0, lsl #2]` (r0 =
+      ata_semaphore_table[index], the unchecked table word), `b
+      0x08037e08` - tail-branches to the rom_sem_wait veneer (ROM
+      0x22003fd0 via the IRAM mirror), whose r0 result word passes back
+      through the tail branch. The wait half of the pair bracketed with
+      ata_semaphore_signal @ 0x082d7954 (same table, rom_sem_signal
+      veneer 0x08037e10 -> ROM 0x220042b4). The table occupies 0x20
+      bytes (eight ids) immediately before the ATA error-record pool at
+      0x08adb68c and has only the wait/signal siblings' two literal
+      references in osos. Call sites binary-verified by decoding every
+      ARM B/BL word in osos.dec for every condition code: 22
+      unconditional bl (Ghidra's 22 is correct), zero predicated forms,
+      zero tail b - callers never flag-gate the acquire (0x082b19ac,
+      0x082b1c48, 0x082c3028, 0x082e0638, 0x082e174c, 0x082e1d04,
+      0x082e1d54, 0x082e22d0, 0x082e23dc, 0x082e310c, 0x082e34b8,
+      0x082e40a8, 0x082e45a0, 0x082e4640, 0x082e46e8, 0x082e47c8,
+      0x082e5e04, 0x082e5eb4, 0x082e6258, 0x082e62c8, 0x082e6380,
+      0x082e662c); most load index via `ldrh r0, [controller, #0x78]`
+      immediately before the call. No data word in osos references
+      0x082d7934 - the thunk is never dispatched virtually. Deviation:
+      dispatches through the ported rom_sem_wait (the ROM_KERNEL hook)
+      instead of branching to the 8-byte ROM veneer - the
+      ata_semaphore family pattern; match.py (exit 1, diff expected)
+      shows the indirect hook-slot call and the crate frame, with the
+      BSS table literal load and indexed deref skeleton intact. Host
+      builds model the table's eight words so tests exercise the
+      lookup without mapping the firmware BSS address.
+
   - address: 0x082d7944
     ghidra: FUN_082d7944
     name: cache_lock_signal
