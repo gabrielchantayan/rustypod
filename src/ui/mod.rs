@@ -26,6 +26,7 @@ pub mod object_payload;
 pub mod plst_class_check;
 pub mod tdat_class_check;
 pub mod element_reference;
+pub mod element_reference_cookie;
 pub mod font_handle;
 pub mod invalidate;
 pub mod draw_state_setup;
