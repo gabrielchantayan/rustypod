@@ -20715,6 +20715,42 @@ functions:
       match.py diff is exactly those deviations: the Rust body has no
       home area to spill, so LLVM tail-calls through the loaded slot.
 
+  - address: 0x08384158
+    ghidra: FUN_08384158
+    name: sqlite3_set_string
+    size: 148
+    sig: "void sqlite3_set_string(char **pz, const char *z_first, ...)"
+    module: sqlite/set_string
+    status: ported
+    vars: {param_1: pz, param_2: "z_first (args[0])", param_3: "variadic word 1 (args[1])", param_4: "variadic word 2 (args[2])"}
+    notes: >-
+      23 bl call sites (binary-scanned: 20 plain bl, one blne @
+      0x08387314, two bleq @ 0x0838a868 / 0x0838b2a8 - the predicated
+      sites gate on a computed condition, not a pointer; the callee has
+      no NULL guard on pz). SQLite's sqlite3SetString: spills r0-r3
+      into a varargs home area, then walks the NULL-terminated string
+      list from the spilled r1 twice. Pass 1 sums 1 + sum(strlen(z))
+      (unguarded strlen @ 0x08392478) into the request size; then
+      sqlite3_free(*pz) (the ported tracked_free @ 0x083906f4, called
+      unconditionally - its own NULL guard covers a fresh pz), then
+      sqlite3_malloc @ 0x08390b14, stored through pz EVEN WHEN NULL (a
+      failed allocation leaves *pz == NULL, never stale). On success
+      dst[0] = 0 up front, pass 2 appends each string with __rt_memcpy
+      (ROM veneer @ 0x08037db0) over exactly strlen(z) bytes - no
+      per-string NUL - and one terminator closes the result. Epilogue
+      returns void and pops the home area (ldr pc, [sp], #20). Ghidra
+      drops the first-pass strlen argument in its C - the bytes show
+      ldr r0,[r4],#4 feeding the bl. Extent self-verified: next
+      function prologue at 0x083841ec, so 148 bytes exact. Deviations:
+      the C varargs spill becomes an explicit args: VaList (=
+      &spilled-r1, house convention), and the malloc goes through the
+      DB_MEM_OPS dispatch whose wired default IS the ported
+      sqlite3_malloc; strlen, tracked_free and __rt_memcpy are called
+      directly through their ported twins. The size accumulator wraps
+      like the 32-bit r6 it was. match.py diff is the expected one:
+      LLVM inlines the strlen and tracked_free bodies and the explicit
+      args pointer removes the home-area spill.
+
   - address: 0x0837dc18
     ghidra: FUN_0837dc18
     name: parse_expr

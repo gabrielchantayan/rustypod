@@ -82,6 +82,10 @@ pub mod hints {
     pub const SERVICE_MANAGER_SECONDARY_HANDLER: usize = 0x3600_0000;
     pub const CHARACTER_CLASS: usize = 0x3700_0000;
     pub const TIMER_RESET_4000: usize = 0x3800_0000;
+    // 0x3900_0000, skipping 0x2e00_0000..0x3500_0000: sibling ports in
+    // flight take the sequential slots, and a collision skips tests
+    // silently on every host.
+    pub const SET_STRING: usize = 0x3900_0000;
     // `heap/pool.rs` maps its own arena at 0x0800_0000 through a separate
     // path: it needs only bit 31 clear, not full u32 addressability.
 }
