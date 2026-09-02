@@ -13087,6 +13087,72 @@ functions:
       the 0x0822xxxx-0x0823xxxx UI/menu code. NOT hook-ready - the ctor
       slot is a documented zeroing stub, like its ten siblings.
 
+  - address: 0x081a53c8
+    ghidra: default
+    name: class_8c00_commit_mode
+    size: 124
+    sig: "u32 class_8c00_commit_mode(u8 *this, u32 refresh, u32 mode)"
+    module: app/class_8c00
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: refresh
+      param_3/r2: mode
+    notes: >-
+      Ghidra's 120 bytes is the code only; the trailing literal-pool word
+      @ 0x081a5440 (the app-root global 0x089ca674, reached by `ldr r0,
+      [pc, #36]` @ 0x081a5414) belongs to it, so the true extent is 124,
+      0x081a53c8..0x081a5444, where the next function opens `push {r4,
+      lr}`. Call count binary-verified by decoding every B/BL word in
+      osos.dec: 27 branch sites - 23 plain bl, 1 predicated blne (@
+      0x081a68cc, gated on the result of a call on the +0xd0 object),
+      and 3 tail b sites from sibling class-0x8c00 methods - i.e. 24 bl
+      counting the predicated form, matching the scouting figure.
+      A method of the registry-class-0x8c00 object (singleton_class_8c00
+      @ 0x081a5500): if this+0xd8 (the mode word its ctor zeroes last)
+      differs from `mode` AND mode is 1 or 2, it broadcasts event code
+      61 (mode 1) or 11 (mode 2) through the service dispatcher
+      0x0836afc0 (global @ 0x089ca458) and commits the new mode only on
+      a zero return (the streq predicate); other mode values neither
+      broadcast nor store. Then, unless refresh == 1, it reads property
+      0x6056 of the class-0x6000 instance (0x081115cc - its root
+      argument is dead, the body tail-calls vtable+0xe0 of
+      instance_of_class_6000() with key 0x6056 and magic 0x55693332),
+      scales it through the piecewise-linear 0..100 -> 6..55 curve
+      0x080e676c (over the constant getters 0x080539cc = 6 and
+      0x08051e30 = 55), and stores the result at +8 of the cxa-guarded
+      settings record 0x081533ec/0x081534b8 (record @ 0x08a12700, init
+      +8 = 100, +12 = 0) with a vtable+0x18 notify on the record's
+      owner. Finally it tail-calls the global-mode commit 0x0815968c
+      with 1 (no refresh) or 4 (refreshed), which stores the mode byte @
+      0x089cc8f0 and notifies the guarded singleton @ 0x089cb208
+      (vtable+0x20, flag = mode == 4), and propagates its return. Call
+      sites pass mode 1 or 2 and refresh 1, 4, or a variable. The class
+      is NOT named and neither the +0xd8 mode nor the byte @ 0x089cc8f0
+      has a surviving name; the symbols name the observable mechanics.
+      All six callees are unported, so they ride the
+      CLASS_8C00_COMMIT_SEAMS dispatch table (the SINGLETON_CTORS house
+      pattern, volatile slot reads). Wired defaults are inert but never
+      invent behavior: broadcast returns 11 (the original's exact
+      service-absent path), the store returns the original's constant 0,
+      and the global-mode commit returns the mode unchanged (the
+      original's exact rejection path for modes outside {1, 4}); the
+      property reader (0), scale (identity) and record getter (NULL) are
+      documented stubs, so the refresh != 1 path is NOT hook-ready until
+      the settings chain is ported. The app-root word is the crate
+      static APP_ROOT_OBJECT (the context_scope.rs RW-page deviation).
+      Host tests prove: unchanged mode skips broadcast and store, modes
+      1/2 broadcast 61/11 and commit only on a zero return, other modes
+      reach neither, refresh == 1 tails with mode 1 while any other
+      refresh value runs the property -> scale -> store chain and tails
+      with mode 4, the tail seam's return propagates, and the wired
+      defaults are inert and safe. match.py structural: same control
+      flow (mode-field compare, {1, 2} gate, 61/11 select, conditional
+      store, refresh select, five-call chain, tail commit); the diff is
+      the crate fp prologue, blx through the seam table standing in for
+      the six stock bls, and LLVM duplicating the register-save block
+      into both branches of the 61/11 select.
+
   - address: 0x081a5500
     ghidra: FUN_081a5500
     name: singleton_class_8c00
