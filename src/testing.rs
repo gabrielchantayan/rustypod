@@ -99,6 +99,10 @@ pub mod hints {
     // flight take the sequential slots, and a collision skips tests
     // silently on every host.
     pub const PLST_SLOT_ITEM: usize = 0x4100_0000;
+    // 0x4600_0000, skipping 0x4200_0000..0x4500_0000: sibling ports in
+    // flight take the sequential slots, and a collision skips tests
+    // silently on every host.
+    pub const PENDING_EVENT_INSERT: usize = 0x4600_0000;
     // `heap/pool.rs` maps its own arena at 0x0800_0000 through a separate
     // path: it needs only bit 31 clear, not full u32 addressability.
 }
