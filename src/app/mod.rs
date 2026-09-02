@@ -3,6 +3,7 @@
 pub mod app_motor;
 pub mod animation;
 pub mod class_6800;
+pub mod class_8c00;
 pub mod buffer_refill_request;
 pub mod byte_flag_at_d_is_one;
 pub mod category_is_below_three;
