@@ -2387,7 +2387,9 @@ pub(crate) mod tests {
     }
 
     /// Serializes the modeled +0x8/+0xc virtual slots and their recorders.
-    static ASSIGN_CSTR_OPS_LOCK: Mutex<()> = Mutex::new(());
+    /// Shared with ported callers whose flow crosses this seam (see
+    /// `crate::testing::STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK`).
+    use crate::testing::STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK as ASSIGN_CSTR_OPS_LOCK;
     static mut ASSIGN_CSTR_ALLOCATE_CALLS: Vec<(usize, usize, u32)> = Vec::new();
     static mut ASSIGN_CSTR_CLEAR_CALLS: Vec<usize> = Vec::new();
     static mut ASSIGN_CSTR_ALLOCATE_RESULT: *mut u8 = core::ptr::null_mut();
