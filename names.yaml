@@ -43035,3 +43035,53 @@ functions:
       in offset order, teardowns once with force=1, zeroes all 88 bytes,
       returns 0; absent handles skip destroy but teardown still runs;
       teardown status is discarded.
+
+  - address: 0x082f0a1c
+    ghidra: FUN_082f0a1c
+    name: digest_init
+    size: 136
+    sig: "u32 digest_init(DigestCtx *ctx, u32 algorithm)"
+    module: crypto/digest_init
+    status: ported
+    renames:
+      param_1/r0: ctx
+      param_2/r1: algorithm
+      DAT_082f0a90: STATE4_IV (0xc658de10, kind-2 5th state word)
+      DAT_082f0a94..DAT_082f0aa0: STATE_IVS (0xfcd4a0ff, 0x7dbc3877, 0x14dd9b02, 0x93f6038a)
+    notes: >-
+      Init half of Apple's proprietary MBA-obfuscated message digest in
+      the 0x082f0xxx..0x0835xxxx FairPlay/DRM cluster (NOT the vendored
+      OpenSSL copy; the sqlite/hash_init @ 0x0837ade8 is unrelated).
+      Siblings: digest_update @ 0x08338384 (data, ctx, len), digest_final
+      @ 0x082fbbfc (out, ctx) which dispatches on (algorithm & 0xff) == 2
+      and separately tests flag bit 0x100 of the stored selector, and the
+      textbook HMAC key schedule @ 0x0835ab54 (64-byte block, 0x36 ipad /
+      0x5c opad hidden behind the MBA identity (x * -0x4b + 0x24) * -99
+      - 0x14, which is x mod 256). Behavior: ctx->algorithm @ +0x64 =
+      algorithm & 0x1ff (8 kind bits plus the 0x100 flag); length counter
+      @ +0x40/+0x44 and state_len @ +0x60 zeroed; kind 1 writes 4 state
+      words @ +0x48..+0x54 and sets state_len 16, kind 2 additionally
+      writes the 5th word 0xc658de10 @ +0x58 and ends with state_len 20;
+      any other kind leaves the state words untouched and returns 0 after
+      only the counter/selector writes. Always returns 0. The IVs match
+      neither MD5/SHA-1 nor any byte swap of them and occur nowhere else
+      in the image - custom, identity unconfirmed. SIZE IS 136 BYTES
+      (0x082f0a1c..0x082f0aa4): Ghidra's 116 drops the five trailing
+      literal-pool words @ 0x082f0a90..0x082f0aa4; the next function
+      starts at 0x082f0aa4. Call count verified by binary scan over every
+      branch word in osos.dec: 23 sites, all unconditional bl, zero
+      predicated forms, zero plain b; address occurs in no data word, so
+      no virtual dispatch. Wrapper @ 0x0834f42c re-inits a used ctx with
+      digest_init(ctx, ctx->algorithm), pinning the +0x64 round-trip.
+      match.py structural diff (exit-1 expected): same field offsets,
+      same kind-1/kind-2/unknown dispatch, same five literals, same
+      return-0; LLVM adds the crate fp frame, folds state_len += 16 into
+      the immediates 16/20, and emits the kind-2 5th word through the
+      same literal pool. Host tests (6): kind 1 writes exactly 4 state
+      words + len 16 leaving state[4] dirtied; kind 2 writes all 5 + len
+      20; kinds 0/3/0xfe/0xff touch only counters and selector; 0x102
+      stores the 0x100 flag yet dispatches kind 2; 0x202/0xffff_fe01 mask
+      to 0x1ff on the store but dispatch on the low byte; re-init with
+      the stored selector restores a dirtied context to pristine; guard
+      words before/after the context and +0x00..+0x40/+0x5c stay
+      untouched.

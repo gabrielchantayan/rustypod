@@ -18,6 +18,11 @@
 //! `"STANDARD"` cipher (`s_STANDARD` @ 0x0802e0c4).
 //!
 //! [`obj_dat`] ports the NID lookup.
+//!
+//! [`digest_init`] is NOT OpenSSL: it ports the init of Apple's
+//! proprietary MBA-obfuscated digest (custom IVs, 16/20-byte states)
+//! feeding the HMAC machinery in 0x082f0xxx..0x0835xxxx.
 pub mod bio_printf;
 pub mod cipher_name;
+pub mod digest_init;
 pub mod obj_dat;
