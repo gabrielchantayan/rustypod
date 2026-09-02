@@ -40084,6 +40084,109 @@ functions:
       `str r7,[sp]` fifth argument to cg_create_inst_binary; the diff is
       LLVM's frame-pointer prologue and that single hoisted load.
 
+  # --- Silver framework: the kind-tagged mid-hierarchy controller ---
+  - address: 0x08260a50
+    ghidra: FUN_08260a50
+    name: kinded_controller_construct
+    size: 132
+    sig: "void *kinded_controller_construct(void *this, RefcountedBody **body_slot, u8 kind, u8 flag, u8 extra_byte, u32 extra_word)"
+    module: app/kinded_controller
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: body_slot (caller's handle slot, only READ - `ldr
+        r1,[r1]`)
+      param_3/r2: kind (per-leaf-class tag byte -> +0xc7)
+      param_4/r3: flag (0/1 byte -> +0xc8)
+      param_5/stack0: extra_byte (byte -> +0xc9)
+      param_6/stack1: extra_word (word -> +0xcc)
+      FUN_0839cd5c: body_acquire (KINDED_CONTROLLER_OPS slot - the
+        60-byte refcounted_body_acquire counterpart of the ported
+        refcounted_body_release @ 0x0839cd98, unported)
+      FUN_0821a180: construct_base (KINDED_CONTROLLER_OPS slot - the
+        direct base constructor, unported)
+      FUN_0839cd98: refcounted_body_release (direct, ported in
+        cxx/handle)
+      FUN_08277440: string_default_construct (direct, ported in
+        cxx/string_object)
+      DAT_08260acc: empty-name literal (a zero word; the base threads it
+        to silver_controller_construct as the name C string)
+      DAT_08260ad0: VTABLE_ADDRESS (0x089a35e4)
+    notes: >-
+      Constructor of the mid-hierarchy Silver-framework controller class
+      that 24 leaf classes in the 0x0822xxxx-0x0823xxxx block derive
+      from, each chaining in with a distinct small-integer kind byte in
+      r2 (0, 1, 3..11, 13..18, 20..23 observed at the 23 sites). TRUE
+      EXTENT 132 BYTES, not Ghidra's 124: the code ends `pop
+      {r3-r9,pc}` @ 0x08260ac8 and the function owns BOTH trailing
+      literal-pool words - 0x00000000 @ 0x08260acc (reached by `add r2,
+      pc, #76` @ 0x08260a78, the empty-name argument) and 0x089a35e4 @
+      0x08260ad0 (reached by `ldr r0, [pc, #56]` @ 0x08260a90, the
+      vtable). The next function @ 0x08260ad4 is the class's
+      NULL-guarded deleting-dtor wrapper (`bl 0x08260aec`; tail `b
+      operator_delete`), and the plain dtor @ 0x08260aec re-plants the
+      SAME vtable literal 0x089a35e4 before destroying the StringObject
+      at +0xbc and tail-branching to the base dtor @ 0x0821a31c - the
+      cross-check that pins the vtable and the member layout to this
+      class. 23 bl call sites, ALL unconditional (0 predicated, 0 tail
+      b, 0 data-word references - never virtually dispatched), verified
+      by decoding every ARM B/BL word in osos.dec; matches Ghidra's 23.
+      Hierarchy: 0x08134db4 silver_controller_construct (ported) <-
+      0x0821a180 (vtable 0x08993c90; refcounted UI-proxy body handle at
+      +0xb4, word +0xb8 = -1, flag bytes +0xb0/+0xb1/+0xb2; chains
+      silver_controller_construct with the THIRD argument as the name)
+      <- THIS CLASS <- 24 leaves that plant their own vtable plus a
+      secondary vtable on the embedded interface sub-object at +0xd0
+      (via the 12-byte helper @ 0x0821599c, literal 0x08993258).
+      Algorithm: body = *body_slot; acquire the body into a stack-local
+      handle (0x0839cd5c); object = construct_base(this, &local,
+      empty_name) (0x0821a180); release the local (0x0839cd98, net
+      refcount-neutral around the base's own acquire into +0xb4); plant
+      vtable 0x089a35e4 at object+0; default-construct the StringObject
+      at +0xbc; store bytes +0xc4 = 0, +0xc5 = 0, +0xc6 = 1, +0xc7 =
+      kind, +0xc8 = flag, +0xc9 = extra_byte and the word +0xcc =
+      extra_word; return object - the BASE CONSTRUCTOR'S RETURN (`mov
+      r4, r0` @ 0x08260a84), not the incoming this, and Ghidra's `void`
+      return is wrong (the epilogue's `sub r0, r0, #188` recovers the
+      object into r0). The stack arguments arrive via `ldrd r8, [sp,
+      #32]` past the eight saved registers; the local handle slot IS
+      the pushed-r3 scratch word, overwritten by the acquire's first
+      store before any read. What kind/flag/extra_* MEAN is unrecovered
+      (nothing in the ctor/dtor reads them; no symbolic name survives).
+      Deviations - the vtable is stored as the u32 ROM address
+      0x089a35e4 and the port claims nothing about its contents: the
+      decrypted osos.dec holds an app/image_format jump table there
+      (first words decode as `b 0x08105da0` & co., code addresses, not
+      function entries), the stale-RW-page caveat app/silver_controller
+      records for 0x08984570; the name is a crate static of four NUL
+      bytes where the original passes its own zero literal word - both
+      are empty C strings, all the base reads; the two unported callees
+      ride the KINDED_CONTROLLER_OPS read_volatile seam (firmware
+      transmutes of 0x0839cd5c / 0x0821a180 on target - hook-ready - a
+      faithful host model of the acquire and a return-this base stub on
+      host); on a 64-bit host the ported string_default_construct
+      writes two host-width pointers at +0xbc, so its payload store
+      covers +0xc4..+0xcc and is overwritten by the flag-byte stores
+      that follow it in BOTH original and port (the ui/string_view
+      precedent) - final state identical on target, deterministic on
+      host. Host tests (5, slab hints::KINDED_CONTROLLER 0x3a000000,
+      object at slab+4 for 8-alignment of the host StringObject):
+      field-by-field state with argument propagation (kind 0x17, flag
+      1, 0xab, 0xdeadbeef), call order acquire-before-base with the
+      body visible in the slot, stores-and-return following a
+      REDIRECTED base return (incoming this untouched), the NULL-body
+      path (acquire/release no-ops, object still initialized), the
+      wired host defaults keeping the refcount exactly neutral, and the
+      zero-argument constant tail (0, 0, 1 not argument-driven).
+      match.py --lib <worktree archive> structural: same sequence -
+      acquire (blx seam), base (blx seam), release (bl), vtable literal
+      0x089a35e4 store, string ctor bl, then the +0xcc word and
+      +0xc9/+0xc6/+0xc8/+0xc7 byte stores; deltas are LLVM's fp frame,
+      the two stack arguments reloaded from fp+8/fp+12 instead of the
+      entry ldrd (same values), the +0xc4/+0xc5 zero pair merged into
+      one strh (both constants zero), and the tail stores issued in a
+      different but observationally equivalent order.
+
   - address: 0x082469b8
     ghidra: FUN_082469b8
     name: cg_emit_load_matrix4x4_word
