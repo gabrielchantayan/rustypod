@@ -31683,6 +31683,73 @@ functions:
       against this symbol; it should differ only in the crate frame and
       the volatile dispatch seam.
 
+  - address: 0x082643c0
+    ghidra: FUN_082643c0
+    name: draw_state_fill_rect_background
+    size: 112
+    sig: "void draw_state_fill_rect_background(u8 *this, const Rect *rect)"
+    module: cxx/draw_state_fill
+    status: ported
+    renames:
+      param_1/r0: this (the 0x44-byte scoped draw-state record)
+      param_2/r1: rect (record-local bounds, QuickDraw top/left/bottom/right)
+      local_14/local_10/local_c/local_8: adjusted (the origin-translated stack rect)
+      FUN_08074898: fill_rect_engine (unported; IRAM-mirror resident)
+    notes: >-
+      Whole 112-byte function binary-verified: 0x082643c0 begins `mov
+      r2,r0; push {lr}` and 0x08264430 begins the distinct sibling's
+      `push {lr}`; no literal pool lies between. 22 unconditional bl
+      call sites, 0 predicated bl and 0 b, verified by decoding every
+      ARM B/BL word in osos.dec; no DATA word in the image holds
+      0x082643c0, so it is never dispatched virtually. The
+      background-fill member of the scoped 0x44-byte draw-state record
+      (cxx/draw_state.rs): copies the caller's four-word rect onto its
+      stack translated by the record's origin (top/bottom += +0x30
+      origin_y, left/right += +0x2c origin_x - the QuickDraw field
+      order of ui/rect.rs is what fixes which origin word is which,
+      matching cxx/draw_state_line.rs and the identical mapping in the
+      sibling @ 0x08264430 and the bitmap draw helper @ 0x08262bdc),
+      then calls the unported rect-fill engine @ 0x08074898 with
+      surface body `*(this+0x1c)+4`, the translated rect, the
+      BACKGROUND colour pointer this+0x15 (opaque white by default -
+      cxx/draw_state_color.rs's three-way evidence), a hard-zero style
+      word (`mov r3,#0` - solid, never the engine's 0x22 alpha-blend
+      path) and the embedded clip rect this+0x34 as the stack-carried
+      fifth argument. It is the erase-before-draw primitive: the +0x15
+      background setter FUN_08263194 has exactly the same 22-site call
+      count and sampled sites (0x0815c2b0, 0x08186730) set the
+      background and immediately fill. The engine @ 0x08074898 lives
+      below 0x0800aed8, so its body is readable through the 0x22000000
+      IRAM mirror: it converts the colour to the surface's pixel
+      format (helper 0x08079c0c keyed on the surface +0x10 halfword),
+      intersects with the clip (0x8075e90) and fills. Return: the
+      epilogue `pop {r0,r1,r2,r3,ip,pc}` leaves r0 = this+0x34 and r1
+      = adjusted.top, but every sampled call site (0x0808da10,
+      0x0816b3cc, 0x082917d0) clobbers or reloads r0 with its next
+      instruction, so the port is void (the string_id_record.rs
+      precedent). Ghidra's `undefined8` return and its
+      CONCAT44(local_14, param_1+0x34) are that dead register pair.
+      Deviations: the engine rides the new DRAW_STATE_FILL_OPS
+      dispatch slot (the draw_state_line.rs seam pattern); the target
+      default transmutes 0x08074898, the host default panics until
+      the engine is independently ported, so this is NOT hook-ready
+      with the host default. The +0x1c surface word is read as a u32,
+      not a host pointer-width field, so a 64-bit host does not spill
+      into the +0x20/+0x24 embedded pair. All record and rect offsets
+      are word-aligned, so the port uses plain aligned loads. Host
+      tests (5) prove the translated rect and all five engine operands
+      (surface word + 4, background pointer this+0x15, style 0, clip
+      pointer this+0x34), the vertical/horizontal origin split with
+      all-distinct edges, wrapping ARM-add translation, a degenerate
+      empty rect forwarded unchecked, and that the record, the caller's
+      rect and guard bytes all survive the call unwritten. match.py
+      structural review (exit 1, diff expected): 28 instructions on
+      both sides with identical dataflow - four ldr/add offset pairs,
+      surface +4, clip pointer pushed as the stack argument, colour
+      this+0x15, style 0 - the diff is the crate fp frame and the
+      blx-through-volatile-slot dispatch standing in for the direct
+      bl.
+
   - address: 0x08264570
     ghidra: FUN_08264570
     name: draw_state_construct_with_surface
