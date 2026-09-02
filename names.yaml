@@ -3459,6 +3459,41 @@ functions:
       `mov r2,#4` carrying the tag — the same shape already accepted for
       free_tag4 @ 0x0805d070 and operator_new_tag3 @ 0x082aad74.
 
+  - address: 0x0805d1d4
+    ghidra: FUN_0805d1d4
+    name: malloc_tag4
+    size: 8
+    sig: "u8 *malloc_tag4(usize size)"
+    module: heap/veneers
+    vars: {param_1: size}
+    status: ported
+    notes: >-
+      The plain-alloc entry of the "MemH" managed-buffer family (free
+      half: free_tag4 @ 0x0805d070; zerofill half: calloc_tag4 @
+      0x0805d1dc). Whole body, verified against the raw image (words
+      e3a01004 ea023927): `mov r1,#4; b 0x080eb67c` — an unconditional
+      tail branch into malloc_wrapper @ 0x080eb67c (already ported) with
+      caller tag 4. Extent confirmed by the neighbour: the word below @
+      0x0805d1dc is the `mov r1,#4` starting calloc_tag4, so the
+      function is exactly 8 bytes (Ghidra's size is right). Call sites
+      counted by decoding every ARM B/BL word in osos.dec: exactly 23
+      `bl`, none predicated, no tail `b` — matching Ghidra's count.
+      Unlike calloc_tag4's clustered sites these are scattered across
+      the image (0x0803c148, 0x08057ce0, 0x0805de68, 0x0805e52c,
+      0x0805f600, 0x080680d4, 0x080681f0, 0x0806e4f8, 0x080866fc,
+      0x0808d0c4, 0x0808d0ec, 0x0809d9b8, 0x0809ea84, 0x080be6f0,
+      0x080be874, 0x080ca020, 0x080ca790, 0x080ce588, 0x080ce5c0,
+      0x080d1b50, 0x080d8cc0, 0x080da6b0, 0x080f0758). No NULL/size
+      guard: size 0 and a failed (NULL) allocation pass through
+      untouched, like the operator_new veneers. Deviations: the tail
+      branch is a plain call, and the alloc dispatch goes through the
+      HEAP_OPS.alloc slot instead of branching to 0x080eb67c directly.
+      #[inline(never)] for the 23 `bl` targets. match.py structural:
+      the port is the inlined lazy heap init plus the ops-slot alloc
+      tail call (`bx r0`) with `mov r2,#4` carrying the tag — the same
+      shape already accepted for calloc_tag4 @ 0x0805d1dc and
+      free_tag4 @ 0x0805d070.
+
   - address: 0x08030f44
     name: heap_panic
     size: 32
