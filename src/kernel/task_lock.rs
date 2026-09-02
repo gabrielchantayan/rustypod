@@ -361,9 +361,43 @@ pub unsafe extern "C" fn rom_memmove(dst: usize, src: usize, len: usize) -> usiz
     (hook!(rom_memmove))(dst, src, len)
 }
 
-/// rom_sem_wait — original: thunk @ 0x08037e08 -> ROM 0x22003fd0, kernel
-/// semaphore wait. `sem` is the kernel semaphore id (`*slot` in RAM terms;
-/// see sync_sem.rs).
+/// rom_sem_wait — original: `thunk_EXT_FUN_22003fd0` @ 0x08037e08
+/// (Ghidra reports 4 bytes; the true extent is 8 — the `ldr pc, [pc, #-4]`
+/// word 0xe51ff004 at 0x08037e08 plus the target word 0x22003fd0 at
+/// 0x08037e0c, the sibling veneer to ROM 0x220042b4 starting immediately
+/// after). A pure ADS literal veneer onto the RTXC kernel semaphore wait
+/// at ROM 0x22003fd0, r0 = kernel semaphore id (`*slot` in RAM terms; see
+/// sync_sem.rs); the r0 result word passes back untouched and lr is never
+/// stored. The ROM body is recoverable through the boot-relocator IRAM
+/// mirror (0x2200XXXX == osos 0x0800XXXX): mirror @ 0x08003fd0 (188
+/// bytes) indexes the same semaphore record table as the signal
+/// (0x08a1be28 + id*32) under the kernel lock — a free record (owner 0)
+/// is claimed (acquire count [+24] bumped, owner set from the
+/// current-task global 0x2200acf4, count halfword [+4] set to 1),
+/// returning 0; a record already owned by the current task is a recursive
+/// acquire (count [+24] and halfword [+4] both bumped), returning 10;
+/// otherwise the lock is dropped and the task blocks through the gateway
+/// (service 14, frame {14, 0, id, 1, 0}), the frame's result word
+/// returned.
+///
+/// Call sites: 24 unconditional `bl`, binary-verified by decoding every
+/// ARM B/BL word in osos.dec for every condition code (Ghidra's 24 is
+/// correct). Zero predicated `bl`. Plus 8 unconditional tail `b` —
+/// fixed-id shims `mov r0, #{18, 5, 1, 0x11}` @ 0x0806a498 / 0x0806a4a0
+/// (kernel_sem5_wait) / 0x0806a4a8 / 0x0806a4b0 (kernel_sem17_wait), bare
+/// pass-through aliases @ 0x08115310 and 0x081e6218, cache_lock_wait @
+/// 0x082d792c and the ata table-indexed wait @ 0x082d793c — and 1
+/// predicated `bne` @ 0x0805651c, the guarded tail of sem_wait @
+/// 0x08056510 (`cmp r0,#0; ldrne r0,[r0]; cmpne r0,#0; bne`), the only
+/// flag-gated reach: callers holding a semaphore SLOT pointer guard it
+/// themselves before tail-branching; the veneer itself has no NULL guard.
+/// No data word in osos holds 0x08037e08 — the veneer is never dispatched
+/// virtually.
+///
+/// Deviation: dispatches through the ROM_KERNEL hook (volatile slot read)
+/// instead of jumping into the mask ROM — see the module header for the
+/// design; match.py shows the expected structural diff (an indirect call,
+/// not the 8-byte `ldr pc` veneer).
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_sem_wait(sem: usize) -> usize {
     (hook!(rom_sem_wait))(sem)
