@@ -32,6 +32,7 @@ pub mod h264_decode_forwarder;
 pub mod iap_incoming_process_thread;
 pub mod iap_packet;
 pub mod image_format;
+pub mod kinded_controller;
 pub mod lock_service;
 pub mod managed_entry;
 pub mod media_command_facade;
