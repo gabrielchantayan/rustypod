@@ -168,7 +168,7 @@ mod tests {
 
     #[test]
     fn null_name_stores_a_zero_handle_without_calling_the_resolver() {
-        let _guard = crate::ft::system::TEST_OPS_LOCK.lock().expect("test lock poisoned");
+        let _guard = crate::ft::system::TEST_OPS_LOCK.lock();
         let _reset = Reset;
         let mut out: u64 = 0xdead_beef_cafe_f00d;
         unsafe {
@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn named_font_is_resolved_and_stored_unconditionally() {
-        let _guard = crate::ft::system::TEST_OPS_LOCK.lock().expect("test lock poisoned");
+        let _guard = crate::ft::system::TEST_OPS_LOCK.lock();
         let _reset = Reset;
         let name = b"Helvetica\0";
         let mut out: u64 = 0;
@@ -199,7 +199,7 @@ mod tests {
 
     #[test]
     fn empty_name_still_reaches_the_resolver() {
-        let _guard = crate::ft::system::TEST_OPS_LOCK.lock().expect("test lock poisoned");
+        let _guard = crate::ft::system::TEST_OPS_LOCK.lock();
         let _reset = Reset;
         let name = b"\0";
         let mut out: u64 = 0;
@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn four_byte_aligned_out_is_stored_without_fault() {
-        let _guard = crate::ft::system::TEST_OPS_LOCK.lock().expect("test lock poisoned");
+        let _guard = crate::ft::system::TEST_OPS_LOCK.lock();
         let _reset = Reset;
         // The original's `stm r4, {r0, r1}` requires only word alignment of
         // `out`; place the handle at offset 4 of a 12-byte, 8-aligned

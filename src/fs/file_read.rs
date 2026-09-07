@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn forwards_every_input_word_and_returns_the_body_status() {
-        let _guard = crate::ft::system::TEST_OPS_LOCK.lock().expect("test lock poisoned");
+        let _guard = crate::ft::system::TEST_OPS_LOCK.lock();
         let _reset = Reset;
         let mut transferred = 0;
         unsafe {
@@ -163,7 +163,7 @@ mod tests {
 
     #[test]
     fn forwards_null_and_zero_without_a_wrapper_guard() {
-        let _guard = crate::ft::system::TEST_OPS_LOCK.lock().expect("test lock poisoned");
+        let _guard = crate::ft::system::TEST_OPS_LOCK.lock();
         let _reset = Reset;
         unsafe {
             RETURN_STATUS = 5;

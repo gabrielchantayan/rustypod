@@ -2860,7 +2860,7 @@ mod tests {
     fn stream_new_pathname_records_the_path_even_when_the_open_fails() {
         let _guards = (
             TEST_MEMORY_LOCK.lock().unwrap(),
-            crate::ft::system::TEST_OPS_LOCK.lock().unwrap(),
+            crate::ft::system::TEST_OPS_LOCK.lock(),
         );
         let path = b"0:/nowhere\0";
         unsafe {

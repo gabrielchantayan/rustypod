@@ -8936,13 +8936,11 @@ functions:
       again if the read reports an error (any non-zero return). Returns
       the transferred count, so a NULL buffer or a zero count is the
       pure seek FT_Stream_Seek probes with. Unlike the close callback,
-      stream is never null-tested. PORT DEVIATION: the seek and read
-      are methods of the same unported C++ file class as the
-      constructor (0x082d3cb4), so they sit behind the
-      FT_PLATFORM_FILE_SEEK / FT_PLATFORM_FILE_READ dispatch slots
-      whose default stubs fail closed (seek no-op, read reports an
-      error); match.py shows the same shape, the only delta being the
-      slot loads plus blx indirection and the frame layout.
+      stream is never null-tested. The 0x082787b8 seek body is now ported
+      directly, so its real state, sentinel, range, and cursor behavior runs
+      even in host tests. The deeper read body at 0x082784d4 remains behind
+      retail_file_read's typed resident-target/host boundary; its default
+      reports an error rather than inventing filesystem I/O.
 
   - address: 0x082d3d40
     ghidra: FUN_082d3d40
@@ -43636,6 +43634,40 @@ functions:
       not recovered or invented. Deliberate deviation: the Rust port calls the
       resident target through a volatile typed boundary so host tests can
       record it; target builds dispatch to its fixed 0x082784d4 address.
+
+  # --- Platform C++ file seek (ft/system) ---
+  - address: 0x082787b8
+    ghidra: FUN_082787b8
+    name: ft_platform_file_seek
+    size: 220
+    sig: "i32 ft_platform_file_seek(void *handle, u32 duplicate_offset, u32 offset_low, u32 offset_high, u32 origin)"
+    module: ft/system
+    status: ported
+    renames:
+      param_1/r0: handle
+      param_2/r1: duplicate_offset
+      param_3/r2: offset_low
+      param_4/r3: offset_high
+      param_5/stack: origin
+      param_1_plus_0x08: state
+      param_1_plus_0x18: directory_entry_index
+      param_1_plus_0x1c: open_status
+      param_1_plus_0x20: cached_entry_length
+      param_1_plus_0x34: cursor
+    notes: >-
+      Raw bytes prove the reported 220-byte extent exactly: 0x08278894 is
+      the next function. Decoding every ARM B/BL word in osos.dec found 21
+      direct callsites, all unconditional bl; there are no predicated direct
+      calls or plain B tail branches. It constructs the counted-lock guard
+      from handle+4+0x44, rejects nonzero state with 2, and returns the
+      open-status word unchanged when the directory-entry sentinel is -1.
+      For an existing entry, origins 0/1/2 select absolute/current/end
+      unsigned 64-bit positions; unsupported origins return 6. Candidates
+      beyond the u32 cached length return 5; otherwise the low word is stored
+      at +0x34 and 0 is returned. r1 is overwritten before use, but remains
+      in the Rust ABI because ft_platform_stream_read passes the offset in
+      both r1 and r2. No deliberate deviations: target field layout is
+      asserted and the host model uses native synchronization-owner pointers.
 
   # --- RTXC message-dispatch veneer (runtime/message_dispatch_veneer) ---
   - address: 0x08003660
