@@ -40,6 +40,7 @@ pub mod startup_relocation_offset;
 pub mod str_fold_upper;
 pub mod strided_cursor_advance;
 pub mod table_find;
+pub mod table_transform_fixed_selector;
 pub mod tagged_counter;
 pub mod three_pointer_select;
 pub mod u16_pair_copy;

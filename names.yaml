@@ -45567,3 +45567,38 @@ functions:
       the same two loads and the same `bx r3` tail branch, with a
       `push {fp, lr}` / `pop {fp, lr}` pair the release profile's frame
       pointers add around them; the dispatch structure is identical.
+  # --- Obfuscated table transform, fixed-selector adapter ---
+  - address: 0x0802b488
+    ghidra: FUN_0802b488
+    name: table_transform_fixed_selector
+    size: 16
+    sig: "u32 table_transform_fixed_selector(u32 context, u32 table, u32 arg)"
+    module: util/table_transform_fixed_selector
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: table
+      param_3/r2: arg
+      FUN_0802af9c: table_transform_body
+    notes: >-
+      Raw extent is exactly sixteen bytes at 0x0802b488..0x0802b498, byte
+      confirmed by the distinct eight-byte sibling at 0x0802b498 (ldr
+      r0,=0x5b7e363c; bx lr) which Ghidra omits from its listing. Four
+      instructions: mov r3,r2; mov r2,r1; ldr r1,[pc,#100] (literal
+      0x988a6f1f at 0x0802b4fc); b 0x0802af9c. A tail branch, so the
+      body's r0 is the return value. A complete ARM B/BL word scan finds
+      21 direct bl callers, 17 unconditional and four predicated; every
+      caller sits in the 0x0800c3dc..0x0800daxx cluster, which is itself
+      mixed-boolean-arithmetic obfuscated. The 1260-byte body at
+      0x0802af9c is not ported. It rewrites the selector as r1 -
+      0xdd04c3a0 = 0xbb85ab7f, the head of the opaque-constant table at
+      0x0802b4a0, indexes the third argument as table[(k<<11)+(j<<10)+
+      (byte<<2)], and fills a 160-byte stack buffer in a loop. No
+      identity is inferred for that body. Deviation: the relocated
+      payload replaces the source-relative b with a volatile seam call to
+      the same load address; host tests inject a recording seam and prove
+      the register shuffle, the bound selector, the single call, full
+      32-bit argument fidelity, result propagation, and the selector's
+      rewrite relation. match.py shows the same register shuffle and
+      literal; the only difference is the source-relative b replaced by
+      the seam's volatile pointer load plus bx, as designed.
