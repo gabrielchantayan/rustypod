@@ -134,6 +134,45 @@ pub unsafe extern "C" fn sequence_id_next() -> u32 {
     core::ptr::write_volatile(state, sequence_id.wrapping_add(1));
     sequence_id
 }
+/// The object-sequence id state (original global @ `0x089c_feb0`).
+#[cfg(target_os = "none")]
+const OBJECT_SEQUENCE_ID_ADDRESS: *mut u32 = 0x089c_feb0 as *mut u32;
+
+/// Host model of the object-sequence id word.
+#[cfg(not(target_os = "none"))]
+pub static mut OBJECT_SEQUENCE_ID: u32 = 0;
+
+#[inline(always)]
+unsafe fn object_sequence_id_state() -> *mut u32 {
+    #[cfg(target_os = "none")]
+    {
+        OBJECT_SEQUENCE_ID_ADDRESS
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        core::ptr::addr_of_mut!(OBJECT_SEQUENCE_ID)
+    }
+}
+
+/// object_sequence_id_assign — original: `FUN_0828a0a4` @ 0x0828a0a4
+/// (24 bytes; 21 direct `bl` call sites, all unconditional).
+///
+/// Loads the object-sequence word, increments it with wrapping 32-bit
+/// arithmetic, stores the incremented value back to the word, and writes the
+/// same value to the caller's object word at +0x0c. The object itself is not
+/// NULL-checked: the final store faults exactly like the original on a null
+/// or otherwise unreadable pointer.
+///
+/// Deviation: the firmware word at 0x089cfeb0 is modeled by
+/// [`OBJECT_SEQUENCE_ID`] on host builds.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn object_sequence_id_assign(object: *mut u8) {
+    let state = object_sequence_id_state();
+    let sequence_id = core::ptr::read_volatile(state).wrapping_add(1);
+    core::ptr::write_volatile(state, sequence_id);
+    object.add(0x0c).cast::<u32>().write_volatile(sequence_id);
+}
 
 /// The three words inspected by [`indexed_object_offset`], followed by the
 /// pointer slot consumed by [`indexed_object_storage_base`].
@@ -1115,6 +1154,7 @@ const PROXY_BACKEND_OFFSET: usize = 0xefc;
 /// unchanged for kind 1 (the backend itself), returns the pointer field
 /// at `object + 0xefc` for kind 2 (a proxy wrapping the backend), and
 /// returns NULL for every other kind. The kind-1 backend is the
+
 /// 0xfa4-byte object constructed by 0x08058590 (installed at the app root
 /// object's `+0x30` by 0x08114c40, kind byte planted through base
 /// constructor 0x080dae7c); the kind-2 proxy is the 0xf00-byte object
@@ -1154,6 +1194,8 @@ mod tests {
     use std::sync::{Mutex, MutexGuard};
 
     static SEQUENCE_ID_LOCK: Mutex<()> = Mutex::new(());
+    static OBJECT_SEQUENCE_ID_LOCK: Mutex<()> = Mutex::new(());
+
     static INDEXED_OBJECT_STORAGE_BASE_LOCK: Mutex<()> = Mutex::new(());
     static SCALED_FIELD_TOTAL_LOCK: Mutex<()> = Mutex::new(());
     static CLOCK_SAMPLE_LOCK: Mutex<()> = Mutex::new(());
@@ -1328,6 +1370,24 @@ mod tests {
     fn sequence_id() -> u32 {
         unsafe { core::ptr::read_volatile(core::ptr::addr_of!(SEQUENCE_ID)) }
     }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct SequenceStampedObject {
+        prefix: [u8; 0x0c],
+        sequence_id: u32,
+        suffix: [u8; 4],
+    }
+
+    fn seed_object_sequence_id(value: u32) {
+        unsafe {
+            core::ptr::write_volatile(core::ptr::addr_of_mut!(OBJECT_SEQUENCE_ID), value);
+        }
+    }
+
+    fn object_sequence_id() -> u32 {
+        unsafe { core::ptr::read_volatile(core::ptr::addr_of!(OBJECT_SEQUENCE_ID)) }
+    }
+
 
     #[test]
     fn returns_the_word_at_offset_e38() {
@@ -1400,6 +1460,51 @@ mod tests {
         assert_eq!(unsafe { sequence_id_next() }, 0);
         assert_eq!(sequence_id(), 1);
     }
+    #[test]
+    fn assigns_then_advances_the_object_sequence_id() {
+        let _guard = OBJECT_SEQUENCE_ID_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        let mut object = SequenceStampedObject {
+            prefix: [0xa5; 0x0c],
+            sequence_id: 0x1122_3344,
+            suffix: [0xc3; 4],
+        };
+
+        seed_object_sequence_id(0);
+        unsafe { object_sequence_id_assign(core::ptr::addr_of_mut!(object).cast()) };
+
+        assert_eq!(object.prefix, [0xa5; 0x0c], "bytes before +0x0c");
+        assert_eq!(object.sequence_id, 1, "the next id lands at +0x0c");
+        assert_eq!(object.suffix, [0xc3; 4], "bytes after +0x0c");
+        assert_eq!(object_sequence_id(), 1, "the global id advances too");
+    }
+
+    #[test]
+    fn wraps_and_preserves_neighbour_bytes() {
+        let _guard = OBJECT_SEQUENCE_ID_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        let mut object = SequenceStampedObject {
+            prefix: [0x11; 0x0c],
+            sequence_id: 0xdead_beef,
+            suffix: [0x22; 4],
+        };
+
+        seed_object_sequence_id(u32::MAX);
+        unsafe { object_sequence_id_assign(core::ptr::addr_of_mut!(object).cast()) };
+        assert_eq!(object.sequence_id, 0, "u32::MAX + 1 wraps to zero");
+        assert_eq!(object.prefix, [0x11; 0x0c]);
+        assert_eq!(object.suffix, [0x22; 4]);
+        assert_eq!(object_sequence_id(), 0);
+
+        unsafe { object_sequence_id_assign(core::ptr::addr_of_mut!(object).cast()) };
+        assert_eq!(object.sequence_id, 1, "the counter keeps advancing");
+        assert_eq!(object_sequence_id(), 1);
+    }
+
 
     #[test]
     fn indexed_storage_base_rejects_a_mismatched_magic_tag() {

@@ -13102,6 +13102,21 @@ functions:
       TCNotesDispatcher, 28).
     renames: {}
 
+  - address: 0x0828a0a4
+    ghidra: FUN_0828a0a4
+    name: object_sequence_id_assign
+    size: 24
+    sig: "void object_sequence_id_assign(void *object)"
+    module: ui/object_state
+    status: ported
+    renames: {}
+    notes: >-
+      21 direct unconditional call sites, counted by decoding every ARM B/BL
+      word in osos.dec. The function increments the object-sequence id word at
+      0x089cfeb0, stores the incremented value back to the global, and stamps
+      the same value into the caller's word at +0x0c. Host builds model the
+      firmware word with OBJECT_SEQUENCE_ID.
+
   - address: 0x0828ae68
     ghidra: FUN_0828ae68
     name: instance_of_class_4180
