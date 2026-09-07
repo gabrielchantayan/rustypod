@@ -27,12 +27,13 @@
 //!
 //! # Deviations
 //!
-//! `stop_view_timer` is the still-unported 16-byte wrapper at 0x0810dfe8, so
-//! it uses the established `VIEW_EVENT_OPS` firmware-default seam. The other
-//! callees (`operator_new`, `timer_schedule_shim`, `timer_start_after`, and
-//! `timer_restart`) are already ported and called directly. Rust represents
-//! the final tail branch as a normal call. There is deliberately no NULL
-//! allocation guard: stock stores the allocator result then reaches the timer
+//! `stop_view_timer` is now ported and wired into the default
+//! `VIEW_EVENT_OPS` slot, so the view-timer helper calls the real Rust
+//! body unless a host test replaces it. The other callees (`operator_new`,
+//! `timer_schedule_shim`, `timer_start_after`, and `timer_restart`) are
+//! already ported and called directly. Rust represents the final tail
+//! branch as a normal call. There is deliberately no NULL allocation
+//! guard: stock stores the allocator result then reaches the timer
 //! helpers unconditionally.
 
 use core::ptr::{addr_of, addr_of_mut};
