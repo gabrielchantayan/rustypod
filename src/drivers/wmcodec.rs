@@ -1,92 +1,76 @@
-//! `wmcodec_update_bits` — original: `FUN_080e3318` @ `0x080e3318`
-//! (28 bytes, 7 instructions, 0x080e3318..0x080e3334, plus the literal
-//! pool word 0x08ad9de4 at 0x080e3334 — Ghidra's 28-byte extent is
-//! CORRECT here: the next function opens at 0x080e3338 with
-//! `push {r4, r5, r6, lr}`; **24 `bl` call sites, 0 predicated, 0 `b`**,
-//! verified by decoding every B/BL word in osos.dec: 9 inside
-//! `FUN_0808f894` @ 0x0808f894 (0x0808f8c0..0x0808f9b8), 5 inside
-//! `FUN_080a7c60` (0x080a7cbc..0x080a7dac), 2 inside `FUN_080ad3d4`
-//! (0x080ad40c, 0x080ad450), 4 inside `FUN_080b5248` (0x080b5278..
-//! 0x080b52c4), 4 inside `FUN_080d35f8` (0x080d3660..0x080d36c0). No
-//! data word in osos references 0x080e3318 — it is never dispatched
-//! virtually.
+//! Wolfson two-wire audio codec register access.
+//!
+//! # Ported functions
+//!
+//! - `wmcodec_write_reg` — original: `FUN_080da15c` @ `0x080da15c` (72
+//!   bytes including the literal pool at `0x080da1a4`; the next function
+//!   starts at `0x080da1a8`). It has **21 direct, unconditional `bl` call
+//!   sites, 0 predicated forms**, verified by decoding every ARM B/BL word
+//!   in osos.dec; its only other branch reach is the `b` tail at
+//!   `0x080e3330` from [`wmcodec_update_bits`]. No data word references its
+//!   address, so it is never virtually dispatched.
+//! - `wmcodec_update_bits` — original: `FUN_080e3318` @ `0x080e3318` (28
+//!   bytes, plus the shadow-table literal at `0x080e3334`), a tail caller
+//!   which merges a mask into one cached value before writing it.
 //!
 //! # Algorithm
 //!
-//! Shadow-cached read-modify-write of one 9-bit register on the I2C
-//! device at slave address 0x1a — a Wolfson-format audio codec (the
-//! 2-wire control word `(reg << 1) | (value >> 8) & 1`, `value & 0xff`
-//! written by the callee is the Wolfson Microelectronics 2-wire
-//! interface, 7-bit register address + 9-bit data; distinct from the
-//! byte-register codec at slave 0x4a in `codec.rs`). Every caller
-//! configures audio routing/power: `FUN_0808f894` latches volume
-//! registers 0/1 (bit 8 = both-channel update) and drives the
-//! route/mute bits of registers 0x18/0x19/0x1a from a mode word;
-//! `FUN_080d35f8` / `FUN_080b5248` do per-route power-up/down
-//! (register 0 reset values 0x17 / 0x1c = 0 dB volume latch).
+//! `wmcodec_write_reg` sends the two-byte Wolfson control word
+//! `{ (reg << 1) | ((value >> 8) & 1), value }` to I2C slave `0x1a`,
+//! bracketed by RTXC semaphore 5. It ignores the raw transfer status,
+//! signals the semaphore unconditionally, then stores the low 16 bits of
+//! the original value in `shadow[reg]`. The wire retains only value bit 8
+//! and bits 0..7; the cache deliberately retains bits 0..15. The unchecked
+//! register index and ordering are both literal ARM behavior.
 //!
-//! The body:
-//!
-//! ```text
-//! 080e3318  ldr  r3, [pc, #0x14]   @ r3 = 0x08ad9de4 (shadow table)
-//! 080e331c  add  r3, r3, r0, lsl #1
-//! 080e3320  ldrh r3, [r3]          @ old = shadow[reg] (zero-extended)
-//! 080e3324  bic  r3, r3, r1        @ old & ~mask
-//! 080e3328  and  r1, r2, r1        @ value & mask
-//! 080e332c  orr  r1, r3, r1        @ merged
-//! 080e3330  b    0x080da15c        @ tail: wmcodec_write_reg(reg, merged)
-//! ```
-//!
-//! `merged = (old & !mask) | (value & mask)` in full 32-bit arithmetic;
-//! `old` is the zero-extended halfword in the shadow. The register index
-//! is not bounds-checked. The merged word reaches the writer untruncated
-//! in r1 — the writer itself keeps only bit 8 (folded into the address
-//! byte) and the low byte. This function does NOT update the shadow
-//! itself; the `strh` back into `shadow[reg]` is the tail callee's last
-//! instruction, so a failed or mocked write leaves the shadow untouched
-//! here exactly as in the original when the callee is interposed.
-//!
-//! The shadow table @ 0x08ad9de4 is 68 `u16` entries (0x88 bytes) in
-//! osos BSS — it lies past the end of osos.dec (the file ends at
-//! 0x08a1b9e8), so it is zero-filled RAM at boot. Entry count verified
-//! from the dump loop at 0x080a9824 (`cmp r0, #0x44` @ 0x080a9834)
-//! which copies all 68 halfwords out to a caller buffer; the only
-//! other references are this function's literal, the writer's literal
-//! (0x080da1a4), and a register-store helper at 0x080a7ddc.
-//!
-//! The tail callee (not ported):
-//!
-//! - `0x080da15c` — codec register write: builds the 2-byte Wolfson
-//!   control word `{ (reg << 1) | ((value >> 8) & 1), value & 0xff }` on
-//!   the stack, brackets the I2C write to slave 0x1a
-//!   (`FUN_0836bb84(slave=0x1a, len=2, buf)`) with the RTXC
-//!   semaphore-5 pair (`kernel_sem5_wait` @ 0x0806a4a0 /
-//!   `rom_sem_signal(5)` @ 0x080645a8), then stores the new value into
-//!   `shadow[reg]` (`strh r4, [table + reg*2]`).
+//! The shared shadow table @ `0x08ad9de4` is 68 `u16` entries (0x88 bytes)
+//! in osos BSS, past the end of osos.dec and thus zero-filled at boot. The
+//! dump loop at `0x080a9824` verifies its `0x44` entry count.
 //!
 //! # Deliberate deviations
 //!
-//! - The tail branch `b 0x080da15c` becomes a call through the
-//!   installable volatile slot [`WMCODEC_WRITE_REG`] (the house
-//!   foreign-service pattern, `blx` in place of `b`): on target the
-//!   default transmutes the retail address 0x080da15c so the port is
-//!   hook-ready and behaviorally identical; host tests install a
-//!   recording mock, and the host default panics like `codec.rs`'s
-//!   `missing_codec_write_reg`.
-//! - The shadow table is addressed through [`shadow_table()`]: the
-//!   retail BSS address on target, a module-owned 68-entry buffer on
-//!   host (the table is pure RAM — it exists in no host fixture).
-//! - Ghidra's C is faithful here; the only liberty is the name
-//!   (`DAT_080e3334`/`DAT_080da1a4` are the same shadow-table literal).
+//! - The raw S5L8702 I2C transfer `FUN_0836bb84` is unported. On target,
+//!   [`i2c_write`] calls its fixed address through a typed function pointer;
+//!   host tests replace it with a recorder. This produces an indirect
+//!   `blx` rather than retail's direct `bl`, while preserving the transfer
+//!   ABI and all observable effects.
+//! - The semaphore wrappers are the existing ports
+//!   [`crate::kernel::task_lock::kernel_sem5_wait`] and
+//!   [`crate::kernel::task_lock::kernel_sem5_signal`], whose documented ROM
+//!   hook deviations are inherited here.
+//! - [`shadow_table()`] uses the retail BSS address on target and a
+//!   module-owned replica on host; the BSS object exists in no host fixture.
 
-/// ABI of the retail codec register write @ `0x080da15c`: writes the
-/// low 9 bits of `value` to register `reg` of I2C slave 0x1a (bit 8
-/// rides in the low bit of the address byte) and caches `value` in the
-/// shadow table.
-pub type WmcodecWriteRegFn = unsafe extern "C" fn(reg: u32, value: u32);
+use crate::kernel::task_lock::{kernel_sem5_signal, kernel_sem5_wait};
 
-/// RetailOS load address of the codec register write.
-pub const WMCODEC_WRITE_REG_ADDRESS: usize = 0x080d_a15c;
+/// ABI of raw S5L8702 I2C transfer `FUN_0836bb84`: write `len` bytes from
+/// `buf` to `slave`, returning its status word.
+type I2cWriteFn = unsafe extern "C" fn(slave: u32, len: u32, buf: *const u8) -> u32;
+
+/// RetailOS load address of the raw S5L8702 I2C write transfer.
+const I2C_WRITE_ADDRESS: usize = 0x0836_bb84;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn i2c_write(slave: u32, len: u32, buf: *const u8) -> u32 {
+    let write: I2cWriteFn = core::mem::transmute(I2C_WRITE_ADDRESS);
+    write(slave, len, buf)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_i2c_write(_slave: u32, _len: u32, _buf: *const u8) -> u32 {
+    panic!("wmcodec_write_reg requires I2C write 0x0836bb84")
+}
+
+/// Active host boundary for the unported raw I2C write transfer.
+#[cfg(not(target_os = "none"))]
+static mut I2C_WRITE: I2cWriteFn = missing_i2c_write;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn i2c_write(slave: u32, len: u32, buf: *const u8) -> u32 {
+    core::ptr::read_volatile(core::ptr::addr_of!(I2C_WRITE))(slave, len, buf)
+}
 
 /// RetailOS load address of the 68-entry `u16` register shadow table
 /// (osos BSS — past the end of osos.dec, zero-filled at boot).
@@ -95,32 +79,6 @@ pub const WMCODEC_SHADOW_ADDRESS: usize = 0x08ad_9de4;
 /// Number of shadowed registers (the dump loop at 0x080a9824 counts
 /// `cmp r0, #0x44`).
 pub const WMCODEC_REG_COUNT: usize = 0x44;
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_wmcodec_write_reg(reg: u32, value: u32) {
-    let write: WmcodecWriteRegFn = core::mem::transmute(WMCODEC_WRITE_REG_ADDRESS);
-    write(reg, value)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_wmcodec_write_reg(_reg: u32, _value: u32) {
-    panic!("wmcodec_update_bits requires codec write 0x080da15c")
-}
-
-/// Active boundary for the unported codec register write (0x080da15c).
-/// On the target it calls directly into retailOS; host tests replace it
-/// with a recording implementation.
-#[cfg(target_os = "none")]
-pub static mut WMCODEC_WRITE_REG: WmcodecWriteRegFn = retail_wmcodec_write_reg;
-
-/// Active host boundary for the unported codec register write.
-#[cfg(not(target_os = "none"))]
-pub static mut WMCODEC_WRITE_REG: WmcodecWriteRegFn = missing_wmcodec_write_reg;
-
-#[inline(always)]
-unsafe fn wmcodec_write_reg() -> WmcodecWriteRegFn {
-    core::ptr::read_volatile(core::ptr::addr_of!(WMCODEC_WRITE_REG))
-}
 
 /// The register shadow table: the retail BSS address on target, a
 /// module-owned replica on host (the table is pure RAM, present in no
@@ -141,29 +99,49 @@ fn shadow_table() -> *mut u16 {
     unsafe { core::ptr::addr_of_mut!(HOST_SHADOW).cast() }
 }
 
+/// wmcodec_write_reg — original: `FUN_080da15c` @ `0x080da15c` (72 bytes,
+/// including its literal-pool word at `0x080da1a4`).
+///
+/// Encodes `reg` and the low 9 bits of `value` as the two-byte Wolfson
+/// control word, waits on semaphore 5, writes it to I2C slave `0x1a`,
+/// signals semaphore 5 regardless of the transfer status, then caches the
+/// low 16 bits of `value` in the unchecked shadow entry `reg`.
+///
+/// # Safety
+///
+/// `reg` must be below [`WMCODEC_REG_COUNT`] on host. On target, any index
+/// writes osos RAM at `0x08ad9de4 + reg * 2`, exactly as the ARM `strh`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn wmcodec_write_reg(reg: u32, value: u32) {
+    let control = [
+        ((reg << 1) | ((value & 0x100) >> 8)) as u8,
+        value as u8,
+    ];
+    kernel_sem5_wait();
+    i2c_write(0x1a, 2, control.as_ptr());
+    kernel_sem5_signal();
+    shadow_table().add(reg as usize).write(value as u16);
+}
+
 /// wmcodec_update_bits — original: `FUN_080e3318` @ `0x080e3318` (28
 /// bytes).
 ///
 /// Reads codec register `reg`'s cached value from the shadow table,
 /// replaces the bits selected by `mask` with the corresponding bits of
-/// `value` — `(old & !mask) | (value & mask)` in 32 bits with `old`
-/// the zero-extended shadow halfword — and hands the merged word,
-/// untruncated, to the register write (which keeps bit 8 and the low
-/// byte and updates the shadow itself). `reg` is not bounds-checked.
+/// `value` — `(old & !mask) | (value & mask)` in 32 bits with `old` the
+/// zero-extended shadow halfword — then tail-calls [`wmcodec_write_reg`].
 ///
 /// # Safety
 ///
-/// `reg` must be below [`WMCODEC_REG_COUNT`] on host; on target any
-/// index reads osos RAM at `0x08ad9de4 + reg * 2` exactly as the
-/// original's unchecked `ldrh` does. With the shipped target default
-/// this performs a real semaphore-bracketed I2C transaction against
-/// slave 0x1a.
+/// `reg` has the same unchecked shadow-table requirement as
+/// [`wmcodec_write_reg`].
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn wmcodec_update_bits(reg: u32, mask: u32, value: u32) {
     let old = shadow_table().add(reg as usize).read() as u32;
     let merged = (old & !mask) | (value & mask);
-    wmcodec_write_reg()(reg, merged);
+    wmcodec_write_reg(reg, merged);
 }
 
 #[cfg(test)]
@@ -171,37 +149,71 @@ mod tests {
     extern crate std;
 
     use super::*;
+    use crate::kernel::task_lock::{self, RomThunkOps};
     use std::sync::Mutex;
     use std::vec::Vec;
 
     static SEAM_LOCK: Mutex<()> = Mutex::new(());
 
-    static mut WRITES: Vec<(u32, u32)> = Vec::new();
-
-    unsafe extern "C" fn recording_write(reg: u32, value: u32) {
-        WRITES.push((reg, value));
+    #[derive(Clone, Debug, PartialEq)]
+    enum Op {
+        Wait(usize),
+        Transfer { slave: u32, bytes: [u8; 2] },
+        Signal(usize),
     }
 
-    struct Reset;
+    static mut OPS: Vec<Op> = Vec::new();
+    static mut TRANSFER_STATUS: u32 = 0;
+
+    unsafe extern "C" fn recording_wait(sem: usize) -> usize {
+        OPS.push(Op::Wait(sem));
+        0
+    }
+
+    unsafe extern "C" fn recording_transfer(slave: u32, len: u32, buf: *const u8) -> u32 {
+        assert_eq!(len, 2, "wmcodec_write_reg always sends two bytes");
+        OPS.push(Op::Transfer {
+            slave,
+            bytes: [buf.read(), buf.add(1).read()],
+        });
+        TRANSFER_STATUS
+    }
+
+    unsafe extern "C" fn recording_signal(sem: usize) -> usize {
+        OPS.push(Op::Signal(sem));
+        0
+    }
+
+    struct Reset {
+        original_kernel: RomThunkOps,
+    }
 
     impl Reset {
         fn install() -> Self {
             unsafe {
-                WMCODEC_WRITE_REG = recording_write;
-                WRITES.clear();
+                let original_kernel = task_lock::ROM_KERNEL;
+                let mut kernel = original_kernel;
+                kernel.rom_sem_wait = recording_wait;
+                kernel.rom_sem_signal = recording_signal;
+                task_lock::ROM_KERNEL = kernel;
+                I2C_WRITE = recording_transfer;
+                OPS.clear();
+                TRANSFER_STATUS = 0;
                 core::ptr::addr_of_mut!(HOST_SHADOW)
                     .cast::<[u16; WMCODEC_REG_COUNT]>()
                     .write([0; WMCODEC_REG_COUNT]);
+                Reset { original_kernel }
             }
-            Reset
         }
     }
 
     impl Drop for Reset {
         fn drop(&mut self) {
             unsafe {
-                WMCODEC_WRITE_REG = missing_wmcodec_write_reg;
-                WRITES.clear();
+                task_lock::ROM_KERNEL = self.original_kernel;
+                I2C_WRITE = missing_i2c_write;
+                OPS.clear();
+                TRANSFER_STATUS = 0;
             }
         }
     }
@@ -214,108 +226,117 @@ mod tests {
         shadow_table().add(reg).read()
     }
 
-    /// One mocked update; returns the (reg, value) pairs the writer saw.
-    fn run(old: u16, reg: u32, mask: u32, value: u32) -> Vec<(u32, u32)> {
+    fn writer_ops(reg: u32, value: u32, transfer_status: u32) -> Vec<Op> {
         unsafe {
-            WRITES.clear();
-            set_shadow(reg as usize, old);
-            wmcodec_update_bits(reg, mask, value);
-            WRITES.clone()
+            OPS.clear();
+            TRANSFER_STATUS = transfer_status;
+            wmcodec_write_reg(reg, value);
+            OPS.clone()
         }
     }
 
     #[test]
-    fn merge_formula_matches_the_arm_bit_ops() {
-        let _lock = SEAM_LOCK
+    fn writer_encodes_wire_word_and_brackets_transfer() {
+        let _kernel_lock = task_lock::tests::OPS_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _seam_lock = SEAM_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _reset = Reset::install();
-        // old, mask, value — covers: mask 0 (keep old), full 9-bit
-        // replace, partial masks, value bits outside the mask dropped,
-        // old bits outside the mask kept, and the bit-8 address-fold
-        // boundary the writer consumes.
-        let cases: [(u16, u32, u32); 12] = [
-            (0x000, 0x000, 0x1ff),
-            (0x1a5, 0x000, 0x1ff),
-            (0x1a5, 0x1ff, 0x05a),
-            (0x1ff, 0x0f, 0x3c),
-            (0x00f, 0x1f0, 0x0a0),
-            (0x1a5, 0x80, 0x80), // the FUN_0808f894(0, 0x80, 0x80) case
-            (0x1a5, 0x80, 0x00),
-            (0x055, 0x1c, 0x14),
-            (0x000, 0x1fc, 0x1e0), // the (0x1a, 0x1fc, uVar3) route write
-            (0x17, 0x100, 0x100),  // volume update bit only
-            (0x1ab, 0x0f, 0x05),   // shadow bits above the mask kept
-            (0x123, 0x18, 0x10),
-        ];
-        for (old, mask, value) in cases {
-            let writes = run(old, 7, mask, value);
-            let expect = ((old as u32) & !mask) | (value & mask);
+        for (reg, value) in [
+            (0u32, 0x000),
+            (0x12, 0x0ab),
+            (0x12, 0x1ab),
+            (0x43, 0x3ff),
+            (3, 0xdead_beef),
+        ] {
+            let control = [
+                ((reg << 1) | ((value & 0x100) >> 8)) as u8,
+                value as u8,
+            ];
             assert_eq!(
-                writes,
-                [(7, expect)],
+                writer_ops(reg, value, 0),
+                [
+                    Op::Wait(5),
+                    Op::Transfer {
+                        slave: 0x1a,
+                        bytes: control,
+                    },
+                    Op::Signal(5),
+                ],
+                "reg={reg:#x} value={value:#x}"
+            );
+            unsafe {
+                assert_eq!(get_shadow(reg as usize), value as u16);
+            }
+        }
+    }
+
+    #[test]
+    fn writer_signals_and_caches_after_transfer_failure() {
+        let _kernel_lock = task_lock::tests::OPS_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _seam_lock = SEAM_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _reset = Reset::install();
+        assert_eq!(
+            writer_ops(0x1a, 0x1e0, 9),
+            [
+                Op::Wait(5),
+                Op::Transfer {
+                    slave: 0x1a,
+                    bytes: [0x35, 0xe0],
+                },
+                Op::Signal(5),
+            ]
+        );
+        unsafe {
+            assert_eq!(get_shadow(0x1a), 0x1e0);
+        }
+    }
+
+    #[test]
+    fn update_bits_merges_before_calling_writer() {
+        let _kernel_lock = task_lock::tests::OPS_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _seam_lock = SEAM_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _reset = Reset::install();
+        for (old, mask, value) in [
+            (0x1a5u16, 0x000, 0x1ff),
+            (0x1a5, 0x1ff, 0x05a),
+            (0x00f, 0x1f0, 0x0a0),
+            (0x000, 0xffff_ffff, 0xdead_beef),
+        ] {
+            let merged = ((old as u32) & !mask) | (value & mask);
+            unsafe {
+                OPS.clear();
+                set_shadow(7, old);
+                wmcodec_update_bits(7, mask, value);
+            }
+            assert_eq!(
+                unsafe { OPS.clone() },
+                [
+                    Op::Wait(5),
+                    Op::Transfer {
+                        slave: 0x1a,
+                        bytes: [
+                            ((7 << 1) | ((merged & 0x100) >> 8)) as u8,
+                            merged as u8,
+                        ],
+                    },
+                    Op::Signal(5),
+                ],
                 "old={old:#x} mask={mask:#x} value={value:#x}"
             );
-        }
-    }
-
-    #[test]
-    fn merged_word_reaches_the_writer_untruncated() {
-        let _lock = SEAM_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _reset = Reset::install();
-        // The original computes in 32 bits and never masks to 9 bits:
-        // with a full-word mask the writer sees every value bit (it
-        // keeps only bit 8 and the low byte itself).
-        let writes = run(0x1ff, 3, 0xffff_ffff, 0xdead_beef);
-        assert_eq!(writes, [(3, 0xdead_beef)]);
-    }
-
-    #[test]
-    fn shadow_is_read_but_not_written_by_this_function() {
-        let _lock = SEAM_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _reset = Reset::install();
-        // The strh back into the shadow is the tail callee's job; an
-        // interposed write leaves the shadow exactly as it was.
-        let writes = run(0x1a5, 0x19, 0x3c, 0x14);
-        assert_eq!(writes, [(0x19, ((0x1a5 & !0x3c) | (0x14 & 0x3c)) as u32)]);
-        unsafe {
-            assert_eq!(get_shadow(0x19), 0x1a5, "shadow untouched here");
-        }
-    }
-
-    #[test]
-    fn only_the_indexed_shadow_entry_is_read() {
-        let _lock = SEAM_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _reset = Reset::install();
-        unsafe {
-            set_shadow(0, 0x080);
-            set_shadow(1, 0x180);
-            set_shadow(0x43, 0x1ff); // last entry of the 68
-        }
-        let writes = run(0x1ff, 0x43, 0x100, 0x100);
-        assert_eq!(writes, [(0x43, 0x1ff)]);
-        unsafe {
-            assert_eq!(get_shadow(0), 0x080);
-            assert_eq!(get_shadow(1), 0x180);
-            assert_eq!(get_shadow(0x43), 0x1ff);
-        }
-    }
-
-    #[test]
-    fn register_index_is_forwarded_unchanged() {
-        let _lock = SEAM_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _reset = Reset::install();
-        for reg in [0u32, 1, 0x1a, 0x43] {
-            let writes = run(0, reg, 0xff, 0xa5);
-            assert_eq!(writes, [(reg, 0xa5)]);
+            unsafe {
+                assert_eq!(get_shadow(7), merged as u16);
+            }
         }
     }
 }
