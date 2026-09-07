@@ -38,12 +38,11 @@
 //! and otherwise returns the open-status word when the directory-entry
 //! index is -1 or writes the cached entry length.
 //!
-//! [`ft_platform_stream_read`] @ 0x082d3d7c is ported too. Its direct
-//! C++ file-method seek branch @ 0x082787b8 remains the exact
-//! [`FT_PLATFORM_FILE_SEEK`] dispatch seam because that subsystem is not yet
-//! ported. Its read branch @ 0x082784b8 now calls
+//! [`ft_platform_stream_read`] @ 0x082d3d7c is ported too. Its C++ file
+//! seek body [`ft_platform_file_seek`] @ 0x082787b8 now directly owns the
+//! synchronization and cursor update; its read branch @ 0x082784b8 calls
 //! [`crate::fs::file_read::retail_file_read`], which supplies the stock zero
-//! control word to the unrecovered 0x082784d4 body; that body remains a
+//! control word to the unrecovered 0x082784d4 body. That body remains a
 //! fail-closed host boundary.
 //!
 //! The opener takes its file-open dependency as an installable
@@ -68,8 +67,8 @@ pub const FT_PLATFORM_NULL_STREAM: i32 = 9;
 pub const FT_PLATFORM_OPEN_FAILED: i32 = 20;
 
 /// The firmware file-opening API [`ft_platform_stream_open`] is built on.
-/// The installed entry is the original 0x082d3cb4 ABI; the seek/read
-/// primitives used by the stream callback have their own exact seams below.
+/// The installed entry is the original 0x082d3cb4 ABI; only its read primitive
+/// remains an exact seam below.
 #[derive(Clone, Copy)]
 pub struct FtPlatformFileOps {
     /// 0x082d3cb4 — open `path` on `volume`, storing the file object in
@@ -100,62 +99,89 @@ pub unsafe fn ft_set_platform_file_ops(
     slot.write_volatile(ops);
     previous
 }
-/// ABI of the file object's seek wrapper @ 0x082787b8.
+/// ft_platform_file_seek — original: `FUN_082787b8` @ `0x082787b8`
+/// (220 bytes; 21 direct `bl` call sites, binary-scanned; no predicated
+/// direct calls).
 ///
-/// The callback passes its `offset` twice: once as `duplicate_offset` in r1
-/// and again as the low word in r2. Raw assembly of the wrapper proves r1 is
-/// overwritten before use; r2/r3 and the stack `origin` form the u64 offset
-/// and seek origin. The duplicate is retained here to preserve the callback's
-/// exact call ABI.
-pub type FtPlatformFileSeekFn = unsafe extern "C" fn(
+/// Acquires the file's counted mutex, rejects a nonzero state byte with `2`,
+/// and returns the open-status word without seeking when its directory-entry
+/// index is `-1`. Otherwise it treats `offset_low`/`offset_high` as an
+/// unsigned 64-bit offset. Origin 0 is absolute, 1 adds the current cursor,
+/// and 2 adds the cached entry length; every other origin returns `6`.
+/// Candidate positions above the cached length return `5`. A valid position
+/// updates only the low cursor word at `file + 0x34`, then every path releases
+/// the same counted mutex.
+///
+/// The raw ARM overwrites and never reads r1. `duplicate_offset` retains that
+/// ABI word because the FreeType callback passes its offset in both r1 and r2.
+/// The target layout assertions below pin every named field; the native host
+/// model deliberately uses native pointers for the synchronization owner.
+///
+/// # Safety
+///
+/// `handle` must point to an initialized [`FtPlatformFile`] whose
+/// synchronization owner is non-null and has an initialized counted mutex.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_platform_file_seek(
     handle: *mut core::ffi::c_void,
-    duplicate_offset: u32,
+    _duplicate_offset: u32,
     offset_low: u32,
     offset_high: u32,
     origin: u32,
-) -> i32;
-
-/// Default seek for the unported C++ file layer. It deliberately has no
-/// observable effect; the retailOS call's return value is ignored.
-unsafe extern "C" fn file_seek_unported(
-    _handle: *mut core::ffi::c_void,
-    _duplicate_offset: u32,
-    _offset_low: u32,
-    _offset_high: u32,
-    _origin: u32,
 ) -> i32 {
-    0
-}
+    let file = handle.cast::<FtPlatformFile>();
+    let lock = core::ptr::addr_of_mut!((*(*file).synchronization_owner).length_query_lock);
+    mutex_lock_counted(lock);
 
-/// Direct 0x082787b8 branch used by [`ft_platform_stream_read`]. Install the
-/// real C++ file seek when that class is ported; host tests install a recorder.
-pub static mut FT_PLATFORM_FILE_SEEK: FtPlatformFileSeekFn = file_seek_unported;
+    let result = if (*file).length_query_state != 0 {
+        2
+    } else if (*file).directory_entry_index == -1 {
+        (*file).open_status
+    } else {
+        let offset = (u64::from(offset_high) << 32) | u64::from(offset_low);
+        let position = match origin {
+            0 => offset,
+            1 => u64::from((*file).cursor).wrapping_add(offset),
+            2 => u64::from((*file).cached_entry_length).wrapping_add(offset),
+            _ => {
+                mutex_unlock_counted(lock);
+                return 6;
+            }
+        };
+
+        if position > u64::from((*file).cached_entry_length) {
+            5
+        } else {
+            (*file).cursor = position as u32;
+            0
+        }
+    };
+
+    mutex_unlock_counted(lock);
+    result
+}
 
 
 /// ft_platform_stream_read — original: `FUN_082d3d7c` @ 0x082d3d7c
 /// (96 bytes; stored as the `FT_Stream_IoFunc` literal by
 /// [`ft_platform_stream_open`] @ 0x082d3ddc).
 ///
-/// Reads `count` bytes from the C++ file object in `stream->descriptor`
-/// (+0x0c) at `offset`. It always first calls file seek @ 0x082787b8 as
-/// `(handle, offset, offset, 0, 0)`, ignoring that call's status. If and only
-/// if both `buffer` and `count` are nonzero, it calls file read @ 0x082784b8
-/// as `(handle, count, buffer, &mut transferred)`. The local transferred
-/// count starts at zero and is reset to zero when any nonzero read status is
-/// returned; it is then returned. Thus null-buffer and zero-count calls are
-/// seek-only probes used by `FT_Stream_Seek`.
+/// [`ft_platform_file_seek`] as `(handle, offset, offset, 0, 0)`, ignoring
+/// that call's status. If and only if both `buffer` and `count` are nonzero,
+/// it calls file read @ 0x082784b8 as `(handle, count, buffer, &mut
+/// transferred)`. The local transferred count starts at zero and is reset to
+/// zero when any nonzero read status is returned; it is then returned. Thus
+/// null-buffer and zero-count calls are seek-only probes used by
+/// `FT_Stream_Seek`.
 ///
-/// The callback never dereferences the file object itself: the sole recovered
-/// layout fact is its opaque pointer at `FtStream + 0x0c`, passed unchanged to
-/// both file methods. The target-only `FtStream` layout assertions pin that
-/// offset. Seek remains an installable ABI seam; the now-ported read wrapper
-/// delegates to its unrecovered 0x082784d4 body, whose host default fails
-/// closed rather than inventing filesystem I/O.
+/// The callback reaches the ported file object directly and the unrecovered
+/// read body through [`crate::fs::file_read::retail_file_read`], whose host
+/// default fails closed rather than inventing filesystem I/O.
 ///
-/// # Safety
-/// `stream` must be a valid `FtStream` with a descriptor valid for the seek
-/// seam and read body. When `buffer` and `count` are nonzero, `buffer` must
-/// name `count` writable bytes.
+/// `stream` must be a valid `FtStream` with a descriptor valid for
+/// [`ft_platform_file_seek`] and the read body. When `buffer` and `count` are
+/// nonzero, `buffer` must name `count` writable bytes.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn ft_platform_stream_read(
@@ -165,8 +191,7 @@ pub unsafe extern "C" fn ft_platform_stream_read(
     count: u32,
 ) -> u32 {
     let handle = (*stream).descriptor;
-    let seek = core::ptr::addr_of!(FT_PLATFORM_FILE_SEEK).read_volatile();
-    seek(handle, offset, offset, 0, 0);
+    ft_platform_file_seek(handle, offset, offset, 0, 0);
 
     let mut transferred = 0;
     if !buffer.is_null() && count != 0 {
@@ -253,7 +278,9 @@ pub struct FtPlatformFile {
     directory_entry_index: i32,
     open_status: i32,
     cached_entry_length: u32,
-    _unknown_24: [u8; 0x30],
+    _unknown_24: [u8; 0x10],
+    cursor: u32,
+    _unknown_38: [u8; 0x1c],
 }
 
 /// The only recovered part of the object reached through
@@ -274,6 +301,8 @@ const _: [u8; 0x18] = [0; core::mem::offset_of!(FtPlatformFile, directory_entry_
 const _: [u8; 0x1c] = [0; core::mem::offset_of!(FtPlatformFile, open_status)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x20] = [0; core::mem::offset_of!(FtPlatformFile, cached_entry_length)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x34] = [0; core::mem::offset_of!(FtPlatformFile, cursor)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; FT_FILE_OBJECT_SIZE] = [0; core::mem::size_of::<FtPlatformFile>()];
 #[cfg(target_pointer_width = "32")]
@@ -500,7 +529,7 @@ extern crate std;
 /// PORTING.md's test-harness rule: one guard per `#[test]`, never
 /// shadowed).
 #[cfg(test)]
-pub(crate) static TEST_OPS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(crate) static TEST_OPS_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
 #[cfg(test)]
 mod tests {
@@ -521,7 +550,9 @@ mod tests {
         directory_entry_index: 0,
         open_status: 0,
         cached_entry_length: 0,
-        _unknown_24: [0; 0x30],
+        _unknown_24: [0; 0x10],
+        cursor: 0,
+        _unknown_38: [0; 0x1c],
     };
     static mut FILE_LOCK_OWNER: FtPlatformFileSynchronizationOwner =
         FtPlatformFileSynchronizationOwner {
@@ -560,13 +591,6 @@ mod tests {
 
     #[derive(Clone, Debug, Eq, PartialEq)]
     enum IoCall {
-        Seek {
-            handle: usize,
-            duplicate_offset: u32,
-            offset_low: u32,
-            offset_high: u32,
-            origin: u32,
-        },
         Read {
             handle: usize,
             count: u32,
@@ -579,22 +603,6 @@ mod tests {
     static mut READ_STATUS: i32 = 0;
     static mut READ_TRANSFERRED: u32 = 0;
 
-    unsafe extern "C" fn recording_seek(
-        handle: *mut core::ffi::c_void,
-        duplicate_offset: u32,
-        offset_low: u32,
-        offset_high: u32,
-        origin: u32,
-    ) -> i32 {
-        (*core::ptr::addr_of_mut!(IO_CALLS)).push(IoCall::Seek {
-            handle: handle as usize,
-            duplicate_offset,
-            offset_low,
-            offset_high,
-            origin,
-        });
-        6
-    }
 
     unsafe extern "C" fn recording_read(
         handle: *mut core::ffi::c_void,
@@ -617,12 +625,10 @@ mod tests {
         *core::ptr::addr_of_mut!(IO_CALLS) = Vec::new();
         *core::ptr::addr_of_mut!(READ_STATUS) = read_status;
         *core::ptr::addr_of_mut!(READ_TRANSFERRED) = read_transferred;
-        core::ptr::addr_of_mut!(FT_PLATFORM_FILE_SEEK).write_volatile(recording_seek);
         core::ptr::addr_of_mut!(RETAIL_FILE_READ_BODY).write_volatile(recording_read);
     }
 
     unsafe fn reset_io() {
-        core::ptr::addr_of_mut!(FT_PLATFORM_FILE_SEEK).write_volatile(file_seek_unported);
         reset_retail_file_read_body();
     }
 
@@ -642,6 +648,7 @@ mod tests {
         (*core::ptr::addr_of_mut!(FILE_OBJECT)).directory_entry_index = 0;
         (*core::ptr::addr_of_mut!(FILE_OBJECT)).open_status = 0;
         (*core::ptr::addr_of_mut!(FILE_OBJECT)).cached_entry_length = 4242;
+        (*core::ptr::addr_of_mut!(FILE_OBJECT)).cursor = 0;
         let ops = FtPlatformFileOps { open: mock_open };
         ft_set_platform_file_ops(Some(ops));
     }
@@ -674,7 +681,7 @@ mod tests {
 
     #[test]
     fn open_splits_the_volume_digit_from_the_path_and_fills_the_record() {
-        let _guard = TEST_OPS_LOCK.lock().unwrap();
+        let _guard = TEST_OPS_LOCK.lock();
         let mut stream = blank_stream();
         let path = b"3:/Fonts/Helvetica.ttf\0";
         unsafe {
@@ -703,7 +710,7 @@ mod tests {
 
     #[test]
     fn open_reads_the_volume_digit_as_a_signed_char() {
-        let _guard = TEST_OPS_LOCK.lock().unwrap();
+        let _guard = TEST_OPS_LOCK.lock();
         // `ldrb` then `- '0'` then sign-extend from 8 bits: the digits
         // give 0..9, and anything below '0' wraps to a negative volume
         // rather than a huge one.
@@ -721,7 +728,7 @@ mod tests {
 
     #[test]
     fn a_null_stream_is_rejected_before_anything_is_opened() {
-        let _guard = TEST_OPS_LOCK.lock().unwrap();
+        let _guard = TEST_OPS_LOCK.lock();
         unsafe {
             install(true);
             assert_eq!(
@@ -735,7 +742,7 @@ mod tests {
 
     #[test]
     fn a_refused_open_leaves_the_record_untouched() {
-        let _guard = TEST_OPS_LOCK.lock().unwrap();
+        let _guard = TEST_OPS_LOCK.lock();
         let mut stream = blank_stream();
         unsafe {
             install(false);
@@ -752,7 +759,7 @@ mod tests {
 
     #[test]
     fn with_no_file_layer_installed_every_open_fails() {
-        let _guard = TEST_OPS_LOCK.lock().unwrap();
+        let _guard = TEST_OPS_LOCK.lock();
         let mut stream = blank_stream();
         unsafe {
             assert!(ft_set_platform_file_ops(None).is_none());
@@ -769,9 +776,9 @@ mod tests {
 
     #[test]
     fn stream_read_seeks_with_the_duplicated_offset_then_returns_read_count() {
-        let _guard = TEST_OPS_LOCK.lock().unwrap();
+        let _guard = TEST_OPS_LOCK.lock();
         let mut stream = blank_stream();
-        let handle = 0x1234_5000usize as *mut core::ffi::c_void;
+        let handle = unsafe { prepare_length_query(0, 0, 0, u32::MAX) };
         let mut buffer = [0u8; 8];
         stream.descriptor = handle;
         unsafe {
@@ -780,23 +787,15 @@ mod tests {
                 ft_platform_stream_read(&mut stream, 0x1020_3040, buffer.as_mut_ptr(), 8),
                 6
             );
+            assert_eq!((*core::ptr::addr_of!(FILE_OBJECT)).cursor, 0x1020_3040);
             assert_eq!(
                 io_calls(),
-                vec![
-                    IoCall::Seek {
-                        handle: handle as usize,
-                        duplicate_offset: 0x1020_3040,
-                        offset_low: 0x1020_3040,
-                        offset_high: 0,
-                        origin: 0,
-                    },
-                    IoCall::Read {
-                        handle: handle as usize,
-                        count: 8,
-                        buffer: buffer.as_mut_ptr() as usize,
-                        control: 0,
-                    },
-                ]
+                vec![IoCall::Read {
+                    handle: handle as usize,
+                    count: 8,
+                    buffer: buffer.as_mut_ptr() as usize,
+                    control: 0,
+                }]
             );
             reset_io();
         }
@@ -804,31 +803,23 @@ mod tests {
 
     #[test]
     fn stream_read_discards_a_partial_count_when_file_read_reports_an_error() {
-        let _guard = TEST_OPS_LOCK.lock().unwrap();
+        let _guard = TEST_OPS_LOCK.lock();
         let mut stream = blank_stream();
-        let handle = 0x1234_5000usize as *mut core::ffi::c_void;
+        let handle = unsafe { prepare_length_query(0, 0, 0, u32::MAX) };
         let mut buffer = [0u8; 4];
         stream.descriptor = handle;
         unsafe {
             install_io(-7, 3);
             assert_eq!(ft_platform_stream_read(&mut stream, 99, buffer.as_mut_ptr(), 4), 0);
+            assert_eq!((*core::ptr::addr_of!(FILE_OBJECT)).cursor, 99);
             assert_eq!(
                 io_calls(),
-                vec![
-                    IoCall::Seek {
-                        handle: handle as usize,
-                        duplicate_offset: 99,
-                        offset_low: 99,
-                        offset_high: 0,
-                        origin: 0,
-                    },
-                    IoCall::Read {
-                        handle: handle as usize,
-                        count: 4,
-                        buffer: buffer.as_mut_ptr() as usize,
-                        control: 0,
-                    },
-                ]
+                vec![IoCall::Read {
+                    handle: handle as usize,
+                    count: 4,
+                    buffer: buffer.as_mut_ptr() as usize,
+                    control: 0,
+                }]
             );
             reset_io();
         }
@@ -836,34 +827,17 @@ mod tests {
 
     #[test]
     fn stream_read_uses_null_buffer_or_zero_count_as_a_seek_only_probe() {
-        let _guard = TEST_OPS_LOCK.lock().unwrap();
+        let _guard = TEST_OPS_LOCK.lock();
         let mut stream = blank_stream();
-        let handle = 0x1234_5000usize as *mut core::ffi::c_void;
+        let handle = unsafe { prepare_length_query(0, 0, 0, u32::MAX) };
         let mut buffer = [0u8; 1];
         stream.descriptor = handle;
         unsafe {
             install_io(0, 1);
             assert_eq!(ft_platform_stream_read(&mut stream, 7, core::ptr::null_mut(), 1), 0);
             assert_eq!(ft_platform_stream_read(&mut stream, 8, buffer.as_mut_ptr(), 0), 0);
-            assert_eq!(
-                io_calls(),
-                vec![
-                    IoCall::Seek {
-                        handle: handle as usize,
-                        duplicate_offset: 7,
-                        offset_low: 7,
-                        offset_high: 0,
-                        origin: 0,
-                    },
-                    IoCall::Seek {
-                        handle: handle as usize,
-                        duplicate_offset: 8,
-                        offset_low: 8,
-                        offset_high: 0,
-                        origin: 0,
-                    },
-                ]
-            );
+            assert_eq!((*core::ptr::addr_of!(FILE_OBJECT)).cursor, 8);
+            assert!(io_calls().is_empty());
             reset_io();
         }
     }
@@ -888,12 +862,13 @@ mod tests {
         (*file).directory_entry_index = directory_entry_index;
         (*file).open_status = open_status;
         (*file).cached_entry_length = cached_entry_length;
+        (*file).cursor = 0;
         file.cast()
     }
 
     #[test]
     fn length_query_writes_the_cached_length_for_every_non_sentinel_entry() {
-        let _guard = TEST_OPS_LOCK.lock().unwrap();
+        let _guard = TEST_OPS_LOCK.lock();
         unsafe {
             for (entry, length) in [(0, 0), (7, 0x1234_5678), (-2, u32::MAX)] {
                 let handle = prepare_length_query(0, entry, -99, length);
@@ -911,7 +886,7 @@ mod tests {
 
     #[test]
     fn length_query_preserves_the_output_on_state_and_missing_entry_errors() {
-        let _guard = TEST_OPS_LOCK.lock().unwrap();
+        let _guard = TEST_OPS_LOCK.lock();
         unsafe {
             let mut size = 0xdead_beef;
             let handle = prepare_length_query(1, 4, -99, 42);
@@ -927,10 +902,65 @@ mod tests {
     }
 
     // ---------------------------------------------------------------
+    // ft_platform_file_seek.
+
+    #[test]
+    fn file_seek_applies_origins_and_preserves_cursor_on_range_errors() {
+        let _guard = TEST_OPS_LOCK.lock();
+        unsafe {
+            let handle = prepare_length_query(0, 0, 0, 100);
+            for (origin, initial_cursor, low, high, result, expected_cursor) in [
+                (0, 37, 5, 0, 0, 5),
+                (1, 37, 5, 0, 0, 42),
+                (2, 37, 0, 0, 0, 100),
+                (1, 37, 64, 0, 5, 37),
+                (0, 37, 0, 1, 5, 37),
+                (3, 37, 0, 0, 6, 37),
+            ] {
+                (*core::ptr::addr_of_mut!(FILE_OBJECT)).cursor = initial_cursor;
+                assert_eq!(
+                    ft_platform_file_seek(handle, 0xfeed_beef, low, high, origin),
+                    result,
+                    "origin {origin}, offset {high:#x}:{low:08x}"
+                );
+                assert_eq!((*core::ptr::addr_of!(FILE_OBJECT)).cursor, expected_cursor);
+                assert_eq!(
+                    (*core::ptr::addr_of!(FILE_LOCK_OWNER)).length_query_lock.hold_count,
+                    0x51,
+                    "the acquire/release pair balances on status {result}"
+                );
+            }
+
+            let handle = prepare_length_query(0, 0, 0, u32::MAX);
+            (*core::ptr::addr_of_mut!(FILE_OBJECT)).cursor = 1;
+            assert_eq!(ft_platform_file_seek(handle, 0, u32::MAX, 0, 1), 5);
+            assert_eq!((*core::ptr::addr_of!(FILE_OBJECT)).cursor, 1);
+        }
+    }
+
+    #[test]
+    fn file_seek_returns_state_and_open_status_without_moving_cursor() {
+        let _guard = TEST_OPS_LOCK.lock();
+        unsafe {
+            let handle = prepare_length_query(1, 4, -99, 100);
+            (*core::ptr::addr_of_mut!(FILE_OBJECT)).cursor = 37;
+            assert_eq!(ft_platform_file_seek(handle, 0, 4, 0, 0), 2);
+            assert_eq!((*core::ptr::addr_of!(FILE_OBJECT)).cursor, 37);
+            assert_eq!((*core::ptr::addr_of!(FILE_LOCK_OWNER)).length_query_lock.hold_count, 0x51);
+
+            let handle = prepare_length_query(0, -1, -37, 100);
+            (*core::ptr::addr_of_mut!(FILE_OBJECT)).cursor = 37;
+            assert_eq!(ft_platform_file_seek(handle, 0, 4, 0, 2), -37);
+            assert_eq!((*core::ptr::addr_of!(FILE_OBJECT)).cursor, 37);
+            assert_eq!((*core::ptr::addr_of!(FILE_LOCK_OWNER)).length_query_lock.hold_count, 0x51);
+        }
+    }
+
+    // ---------------------------------------------------------------
     // ft_platform_file_open.
 
     /// Serializes the tests that swap HEAP_OPS and the ctor slot.
-    static FILE_OPEN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static FILE_OPEN_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
     /// The block the stub allocator hands out (the file object is 84
     /// bytes; the arena is padded so the +0x1c status word is in range).
@@ -990,8 +1020,8 @@ mod tests {
     }
 
     /// Installs the stub allocator plus the recording constructor.
-    fn mock_file_layer(ctor_result: *mut u8) -> std::sync::MutexGuard<'static, ()> {
-        let guard = FILE_OPEN_LOCK.lock().unwrap();
+    fn mock_file_layer(ctor_result: *mut u8) -> parking_lot::MutexGuard<'static, ()> {
+        let guard = FILE_OPEN_LOCK.lock();
         unsafe {
             let mut ops = core::ptr::addr_of!(crate::heap::veneers::HEAP_OPS).read_volatile();
             ops.alloc = stub_alloc;
@@ -1012,7 +1042,7 @@ mod tests {
 
     /// Restores every wired default. Takes the guard by value so it
     /// cannot be re-locked while still held (the singletons.rs rule).
-    fn restore_file_layer(guard: std::sync::MutexGuard<'static, ()>) {
+    fn restore_file_layer(guard: parking_lot::MutexGuard<'static, ()>) {
         unsafe {
             core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS)
                 .write_volatile(crate::heap::veneers::DEFAULT_HEAP_OPS);
@@ -1086,7 +1116,7 @@ mod tests {
 
     #[test]
     fn the_default_ctor_slot_fails_the_open_closed() {
-        let guard = FILE_OPEN_LOCK.lock().unwrap();
+        let guard = FILE_OPEN_LOCK.lock();
         unsafe {
             core::ptr::addr_of_mut!(FT_PLATFORM_FILE_CTOR).write_volatile(file_ctor_unported);
             let block = file_ctor_unported(
@@ -1107,7 +1137,7 @@ mod tests {
     // ft_platform_stream_close.
 
     /// Serializes the close tests, which share the recording statics.
-    static CLOSE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static CLOSE_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
     /// The fake file object and its fake vtable (slot 0 unused, slot 1
     /// the recording destructor).
@@ -1154,8 +1184,8 @@ mod tests {
         }
     }
 
-    fn close_guard() -> std::sync::MutexGuard<'static, ()> {
-        let guard = CLOSE_LOCK.lock().unwrap();
+    fn close_guard() -> parking_lot::MutexGuard<'static, ()> {
+        let guard = CLOSE_LOCK.lock();
         unsafe {
             *core::ptr::addr_of_mut!(CLOSE_VTABLE) = [0, close_recording_destroy as usize];
             *core::ptr::addr_of_mut!(CLOSE_DESTROY_CALLS) = 0;
