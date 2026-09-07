@@ -21691,10 +21691,10 @@ functions:
       no-op stub is retained for host tests (with it installed the
       list teardown is skipped; the strings, operands and node are
       still released exactly as the original releases them). The
-      select destructor 0x08383c88 (a clear helper @ 0x082c36c4 plus
-      the block free - the Select chain) is unported, so it stays the
-      SQLITE_SELECT_DELETE dispatch slot (house pattern) with a
-      documented no-op default.
+      select destructor 0x08383c88 is ported as
+      [`crate::sqlite::select_delete::select_delete`]; the FROM-source
+      list cleanup it uses still routes through the `SQLITE_SRC_LIST_DELETE`
+      seam until 0x083843e8 lands.
       The port is the shipped default of expr_new's SQLITE_EXPR_DELETE
       slot, replacing the documented no-op stub (retained for host
       tests, which still swap the slot for recording mocks) - the
@@ -21710,6 +21710,25 @@ functions:
       accepted mem_release/value_free deviation), blx through the
       loaded slots, and LLVM's fp frame.
 
+  - address: 0x08383c88
+    ghidra: FUN_08383c88
+    name: select_delete
+    size: 32
+    sig: "void select_delete(Select *select)"
+    module: sqlite/select_delete
+    status: ported
+    vars: {param_1: select}
+    notes: >-
+      SQLite 3.5.x's sqlite3SelectDelete, the single-argument build
+      variant (NULL is a no-op). Releases the select's owned
+      substructures in field order: result list, FROM source list,
+      WHERE, GROUP BY, HAVING, ORDER BY, prior select, LIMIT, OFFSET,
+      then frees the Select block itself. The FROM-source list cleanup
+      still routes through the `SQLITE_SRC_LIST_DELETE` seam because
+      the retail helper at 0x083843e8 is not ported yet. match.py:
+      same high-level structure - the NULL guard, the owned-field
+      teardown order, recursive prior deletion, and final free; the
+      diff is the source-list dispatch seam and LLVM's frame.
   - address: 0x08378670
     ghidra: FUN_08378670
     name: expr_list_delete

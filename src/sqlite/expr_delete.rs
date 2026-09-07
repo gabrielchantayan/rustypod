@@ -60,11 +60,10 @@
 //!   documented no-op stub [`missing_expr_list_delete`] is retained for
 //!   host tests (with it installed the list teardown is skipped; the
 //!   node's strings, operands and own block are still released exactly
-//!   as the original releases them). The sub-select destructor
-//!   `sqlite3SelectDelete` @ 0x08383c88 (32 bytes; a clear helper
-//!   @ 0x082c36c4 then the block free) is not ported — it drags in the
-//!   Select chain — so it stays the [`SQLITE_SELECT_DELETE`] dispatch
-//!   boundary with a documented no-op default.
+//!   as the original releases them). The sub-select destructor at
+//!   0x08383c88 now routes through the real
+//!   [`crate::sqlite::select_delete::select_delete`] port; the
+//!   source-list cleanup it uses internally still stays behind a seam.
 //! - `Expr` is a typed `#[repr(C)]` struct rather than raw byte
 //!   offsets, reusing [`expr_new`](super::expr_new)'s `Token`, so the
 //!   pointer fields stay disjoint on a 64-bit test host. The original
@@ -78,7 +77,10 @@
 //! - The port is the shipped default of
 //!   [`expr_new`](super::expr_new)'s `SQLITE_EXPR_DELETE` slot: the
 //!   constructor's OOM path now really releases both operands instead
-//!   of leaking them through the old no-op stub.
+//!   of leaking them through the old no-op stub. The sub-select
+//!   destructor at 0x08383c88 now routes through the real
+//!   [`crate::sqlite::select_delete::select_delete`] port; the
+//!   source-list cleanup it uses internally still stays behind a seam.
 
 use super::expr_new::Token;
 use crate::heap::tracked::tracked_free;
@@ -169,17 +171,18 @@ pub static mut SQLITE_EXPR_LIST_DELETE: ExprListDeleteFn =
     super::expr_list_delete::expr_list_delete;
 
 /// The sub-select destructor: `sqlite3SelectDelete(select)` @
-/// 0x08383c88. Releases a `Select`; NULL is a no-op (the original's
-/// `movs/ldmiaeq` early return).
+/// 0x08383c88. Releases a `Select`; NULL is a no-op. The shipped
+/// default is the real port,
+/// [`crate::sqlite::select_delete::select_delete`].
 pub type SelectDeleteFn = unsafe extern "C" fn(select: *mut u8);
 
-/// Default stub: no select destructor wired, so the sub-select teardown
-/// is skipped (see the module header).
+/// The documented no-op stub retained for host tests.
 pub(crate) unsafe extern "C" fn missing_select_delete(_select: *mut u8) {}
 
 /// The active select destructor. Host tests install recording mocks;
 /// the real port replaces the default when 0x08383c88 lands.
-pub static mut SQLITE_SELECT_DELETE: SelectDeleteFn = missing_select_delete;
+pub static mut SQLITE_SELECT_DELETE: SelectDeleteFn =
+    crate::sqlite::select_delete::select_delete;
 
 /// Reads the list-destructor slot (volatile — the slots are meant to be
 /// swapped at runtime, and a plain read lets LLVM const-fold the
@@ -280,13 +283,16 @@ mod tests {
     }
 
     /// The documented defaults: the real list-destructor port on the
-    /// list slot, the no-op stub on the select slot.
+    /// list slot, the real select-delete port on the select slot.
     unsafe fn restore_slot_defaults() {
         core::ptr::write_volatile(
             core::ptr::addr_of_mut!(SQLITE_EXPR_LIST_DELETE),
             super::super::expr_list_delete::expr_list_delete,
         );
-        core::ptr::write_volatile(core::ptr::addr_of_mut!(SQLITE_SELECT_DELETE), missing_select_delete);
+        core::ptr::write_volatile(
+            core::ptr::addr_of_mut!(SQLITE_SELECT_DELETE),
+            crate::sqlite::select_delete::select_delete,
+        );
     }
 
     /// Serializes against every other heap-ops-swapping test, installs
