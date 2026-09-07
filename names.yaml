@@ -43730,6 +43730,47 @@ functions:
       slot still clears and counts, callback writes overwritten by the
       trailing clear, and u32 counter wrap.
 
+  - address: 0x0806ce40
+    ghidra: FUN_0806ce40
+    name: managed_entry_release_flagged
+    size: 84
+    sig: "i32 managed_entry_release_flagged(ManagedEntryManager *manager, ManagedEntry *entry, u32 unused, u32 flags)"
+    module: app/managed_entry
+    status: ported
+    renames:
+      param_1/r0/r4: manager
+      param_2/r1/r5: entry
+      param_2_deref: entry_record
+      param_3/r2: unused
+      param_4/r3/r0: flags
+      param_1_plus_0x04/r0: release_context
+      param_1_plus_0x40/r3: release_callback
+      param_1_plus_0x54/r0: flagged_release_count
+      iVar1/r0: status
+    notes: >-
+      Verified 84 bytes (21 instructions) ending at 0x0806ce94, where the
+      next function begins; Ghidra's extent and C agree with the raw bytes
+      exactly. 21 call sites verified by decoding every ARM B/BL word in
+      osos.dec: all 21 are unconditional `bl`, with zero predicated forms
+      and zero plain B branches. Algorithm: an empty entry is normalized to
+      two zero words and returns 0 without a callback. For an occupied
+      entry, call the manager's object-carried +0x40 release callback as
+      (manager->+0x04 context, entry, flags | 2). A nonzero callback status
+      returns immediately, preserving both entry words and the +0x54 count.
+      On status 0, increment the +0x54 flagged release count with ARM u32
+      wrapping semantics, clear both entry words, and return 0. The r2
+      parameter is ignored; raw code copies r3 to r0 before ORRing bit 1.
+      The object-carried callback is not a fixed firmware function, so no
+      dispatch seam was needed or added. Deliberate deviation: named fields
+      in the shared #[repr(C)] manager and entry replace raw offsets; every
+      target field here is one 4-byte word. match.py structural (exit 1,
+      diff expected): the same empty guard, callback `blx`, nonzero early
+      return, +0x54 increment, and two-word clear; LLVM adds a frame
+      pointer and emits a second zero move before the second store. Host
+      tests (4) cover empty-slot normalization, successful flags | 2
+      forwarding/count/clear, error preservation without a count, and count
+      wrapping.
+
   # --- UI font handle query wrapper (ui/font_handle) ---
   - address: 0x082756fc
     ghidra: FUN_082756fc

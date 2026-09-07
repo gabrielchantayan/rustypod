@@ -11,10 +11,11 @@
 //! The manager object owns a release callback at `+0x40` and the opaque
 //! context word passed as its first argument at `+0x04`. Two release
 //! counters sit side by side: `+0x50` is bumped by this unconditional
-//! release, `+0x54` by the flagged sibling `FUN_0806ce40`, which passes
-//! `flags | 2` instead of 0, propagates a callback error *without* clearing
-//! the slot, and returns `void`. The bit-1 flag therefore plausibly marks a
-//! dirty/write-back release; this port is the clean/abandon variant.
+//! release, `+0x54` by the flagged sibling
+//! [`managed_entry_release_flagged`], which passes `flags | 2`, preserves
+//! the slot when that callback fails, and returns the callback status. The
+//! bit-1 flag therefore plausibly marks a dirty/write-back release; this
+//! port is the clean/abandon variant.
 //!
 //! Records recovered from callers hold two big-endian u32 ids at `+0x00`
 //! and `+0x04` (via the BE word helpers 0x08031140/0x08031160), a state
@@ -66,6 +67,8 @@ pub struct ManagedEntryManager {
     pub opaque_44: [u32; 3],
     /// `+0x50`: count of unconditional releases performed.
     pub release_count: u32,
+    /// `+0x54`: count of flagged releases whose callbacks succeeded.
+    pub flagged_release_count: u32,
 }
 
 /// managed_entry_release — original: `FUN_080645b8` @ 0x080645b8
@@ -132,6 +135,86 @@ pub unsafe extern "C" fn managed_entry_release(
     status
 }
 
+/// managed_entry_release_flagged — original: `FUN_0806ce40` @ 0x0806ce40
+/// (84 bytes, 21 instructions, ending at 0x0806ce94 where the next function
+/// begins; 21 `bl` call sites verified by decoding every ARM B/BL word in
+/// osos.dec, all unconditional — zero predicated calls and zero plain
+/// branches).
+///
+/// ```text
+/// 0806ce40  push  {r4, r5, r6, lr}
+/// 0806ce44  mov   r5, r1            @ r5 = entry
+/// 0806ce48  ldr   r1, [r1]          @ r1 = entry->record
+/// 0806ce4c  mov   r4, r0            @ r4 = manager
+/// 0806ce50  cmp   r1, #0
+/// 0806ce54  mov   r0, r3            @ status = supplied flags
+/// 0806ce58  beq   0x0806ce84        @ empty slot: clear and return 0
+/// 0806ce5c  ldr   r3, [r4, #0x40]   @ release callback
+/// 0806ce60  orr   r2, r0, #2        @ callback flags = flags | 2
+/// 0806ce64  ldr   r0, [r4, #4]      @ callback context
+/// 0806ce68  mov   r1, r5            @ entry
+/// 0806ce6c  blx   r3
+/// 0806ce70  cmp   r0, #0
+/// 0806ce74  popne {r4, r5, r6, pc}  @ failure: preserve slot
+/// 0806ce78  ldr   r0, [r4, #0x54]
+/// 0806ce7c  add   r0, r0, #1
+/// 0806ce80  str   r0, [r4, #0x54]   @ manager->flagged_release_count++
+/// 0806ce84  mov   r0, #0
+/// 0806ce88  str   r0, [r5]          @ entry->record = NULL
+/// 0806ce8c  str   r0, [r5, #4]      @ entry->auxiliary = 0
+/// 0806ce90  pop   {r4, r5, r6, pc}
+/// ```
+///
+/// An empty slot is normalized to two zero words and returns zero without
+/// calling the manager. Otherwise invokes
+/// `manager->release_callback(manager->release_context, entry, flags | 2)`.
+/// A nonzero callback status returns immediately, preserving the entry and
+/// leaving `flagged_release_count` unchanged. A zero callback status bumps
+/// that counter, then clears both entry words and returns zero.
+///
+/// Deliberate deviations: the manager and entry use this module's
+/// `#[repr(C)]` models instead of raw byte offsets. The target fields are all
+/// one four-byte word, so their target layout is exact. The callback is an
+/// object-carried code word, not a fixed firmware address, so no dispatch
+/// seam is needed or added. The unused r2 argument is explicit to preserve
+/// the retailOS four-register ABI; the routine reads its flags from r3.
+///
+/// # Safety
+///
+/// `manager` must point at a valid manager whose `+0x40` callback and
+/// `+0x04` context words are initialized, and `entry` at a writable
+/// two-word slot. As in retailOS, an occupied slot with a corrupt callback
+/// is not guarded.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn managed_entry_release_flagged(
+    manager: *mut ManagedEntryManager,
+    entry: *mut ManagedEntry,
+    _unused: u32,
+    flags: u32,
+) -> i32 {
+    if (*entry).record.is_null() {
+        (*entry).record = ptr::null_mut();
+        (*entry).auxiliary = 0;
+        return 0;
+    }
+
+    let status = ((*manager).release_callback)(
+        (*manager).release_context,
+        entry,
+        flags | 2,
+    );
+    if status != 0 {
+        return status;
+    }
+
+    (*manager).flagged_release_count =
+        (*manager).flagged_release_count.wrapping_add(1);
+    (*entry).record = ptr::null_mut();
+    (*entry).auxiliary = 0;
+    0
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -176,6 +259,7 @@ mod tests {
             release_callback: recording_release,
             opaque_44: [0xdead_beef; 3],
             release_count: count,
+            flagged_release_count: count,
         });
         (manager, log)
     }
@@ -253,5 +337,65 @@ mod tests {
         let mut entry = ManagedEntry { record: &mut record, auxiliary: 0 };
         unsafe { managed_entry_release(&mut *manager, &mut entry) };
         assert_eq!(manager.release_count, 0, "u32 wrap, no widening");
+    }
+
+    #[test]
+    fn flagged_empty_slot_skips_callback_and_normalizes_entry() {
+        let (mut manager, log) = fixture(41, 0);
+        let mut entry = ManagedEntry { record: ptr::null_mut(), auxiliary: 0x1234_5678 };
+        let status = unsafe {
+            managed_entry_release_flagged(&mut *manager, &mut entry, 0xfeed_face, 0x100)
+        };
+        assert_eq!(status, 0);
+        assert_eq!(log.calls, 0, "empty slots do not call the callback");
+        assert_eq!(manager.flagged_release_count, 41, "counter must not move");
+        assert!(entry.record.is_null());
+        assert_eq!(entry.auxiliary, 0);
+    }
+
+    #[test]
+    fn flagged_success_forwards_orred_flags_counts_and_clears() {
+        let (mut manager, log) = fixture(41, 0);
+        let mut record = 0x5au8;
+        let mut entry = ManagedEntry { record: &mut record, auxiliary: 0xfeed_face };
+        let status = unsafe {
+            managed_entry_release_flagged(&mut *manager, &mut entry, 0, 0x100)
+        };
+        assert_eq!(status, 0);
+        assert_eq!(log.calls, 1);
+        assert_eq!(log.context_seen, &*log as *const _ as usize);
+        assert_eq!(log.entry_seen, &entry as *const _ as usize);
+        assert_eq!(log.flags_seen, 0x102, "callback receives flags | 2");
+        assert_eq!(log.record_during_call, &record as *const _ as usize);
+        assert_eq!(manager.flagged_release_count, 42);
+        assert!(entry.record.is_null());
+        assert_eq!(entry.auxiliary, 0);
+    }
+
+    #[test]
+    fn flagged_callback_error_preserves_entry_and_does_not_count() {
+        let (mut manager, log) = fixture(7, -0x24);
+        let mut record = 0u8;
+        let mut entry = ManagedEntry { record: &mut record, auxiliary: 0xfeed_face };
+        let status = unsafe {
+            managed_entry_release_flagged(&mut *manager, &mut entry, 0, 0)
+        };
+        assert_eq!(status, -0x24, "callback status propagates unchanged");
+        assert_eq!(log.calls, 1);
+        assert_eq!(log.flags_seen, 2);
+        assert_eq!(manager.flagged_release_count, 7, "failure skips counter");
+        assert_eq!(entry.record, &mut record as *mut u8, "failure keeps the slot");
+        assert_eq!(entry.auxiliary, 0xfeed_face, "failure keeps both words");
+    }
+
+    #[test]
+    fn flagged_release_count_wraps_like_the_arm_add() {
+        let (mut manager, _log) = fixture(u32::MAX, 0);
+        let mut record = 0u8;
+        let mut entry = ManagedEntry { record: &mut record, auxiliary: 0 };
+        unsafe { managed_entry_release_flagged(&mut *manager, &mut entry, 0, 0) };
+        assert_eq!(manager.flagged_release_count, 0, "u32 wrap, no widening");
+        assert!(entry.record.is_null());
+        assert_eq!(entry.auxiliary, 0);
     }
 }
