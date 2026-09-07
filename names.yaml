@@ -45602,3 +45602,72 @@ functions:
       rewrite relation. match.py shows the same register shuffle and
       literal; the only difference is the source-relative b replaced by
       the seam's volatile pointer load plus bx, as designed.
+  # ---- HFS B-tree node fetch (src/fs/hfs_btree_get_node.rs) ----
+  - address: 0x08053d6c
+    ghidra: FUN_08053d6c
+    name: hfs_btree_get_node
+    size: 168
+    sig: "i32 hfs_btree_get_node(BTreeControlBlock *btree, u32 node_number, BTreeNodeBlock *block)"
+    module: fs/hfs_btree_get_node
+    status: ported
+    renames:
+      param_1/r0: btree
+      param_2/r1: node_number
+      param_3/r3: block
+      FUN_08044b08: check_node
+      FUN_0806b5b8: trash_node
+      field 0x1c: node_size
+      field 0x20: total_nodes
+      field 0x3c: get_block_proc
+      field 0x48: num_get_nodes
+      block field 0x0c: block_size
+      block field 0x10: block_read_from_disk
+    notes: >-
+      Apple's HFS GetNode from the classic BTreeIO.c, in the three-argument
+      form that predates the flags/kGetNodeHint parameter - the options word
+      handed to the get-block callback is the constant 0 (kGetBlock). The
+      image carries the APPLE_HFS and HFSPLUS volume-format strings, and both
+      callees come from the same source file - 0x08044b08 is CheckNode (it
+      bounds fLink/bLink by totalNodes, kind by the four node kinds, height by
+      the control block's treeDepth at +0x02, numRecords by (nodeSize-14)/8,
+      and walks the descending record-offset table, returning 36 on any
+      inconsistency) and 0x0806b5b8 is TrashNode (release-block callback with
+      kReleaseBlock|kTrashBlock == 4, then bumps the release counter at +0x50
+      and nils the block). Algorithm - reject node_number >= totalNodes with
+      status 36 on an UNSIGNED cmp/bls, publish nodeSize into the caller's
+      BlockDescriptor +0x0c, call the +0x3c callback as (fork, node_number, 0,
+      block), abort on a nonzero status, bump numGetNodes at +0x48, return
+      success immediately when blockReadFromDisk at +0x10 is zero (a cached
+      node was validated on the way in), otherwise CheckNode the buffer; a
+      clean node is kept, a bad one sets bit 0 of the u16 at
+      btree->fork->volume, trashes the block, and returns the validator's own
+      status rather than a re-materialised literal. Every failure exit, and
+      only a failure exit, nils buffer and blockHeader; the damaged path does
+      so twice (once inside TrashNode, once on the way out) exactly as the
+      original does. True extent confirmed from raw bytes as
+      0x08053d6c..0x08053e14, 168 bytes, matching Ghidra; the next function is
+      the separately entered leaf at 0x08053e14. Decoding every ARM B/BL word
+      in osos.dec finds exactly 21 direct callers, ALL unconditional plain bl
+      - no predicated forms and no plain-b tail calls - so no caller guards
+      this entry and every check it needs it performs itself. No aligned image
+      data word equals 0x08053d6c, so binding is static rather than virtual.
+      Deviation - the original reaches its three callees as raw machine
+      addresses (blx through the control block's +0x3c word plus two direct
+      bl), and neither callee body is ported yet, so all three go through one
+      volatile BTREE_NODE_OPS table; target builds resolve it to the resident
+      addresses and perform the same three transfers, while host tests install
+      recorders. Struct offsets are asserted at compile time with offset_of!
+      and all target pointer fields are modelled as u32 so the host layout is
+      the target layout. Nine host tests cover the at-size and past-size
+      rejections on an empty and a full tree, the unsigned compare at
+      0x8000_0000, node-size publication and callback argument forwarding, a
+      failing callback, the cache-hit skip, a validated disk read, and the
+      damaged-volume path including a non-1 blockReadFromDisk byte and
+      verbatim status propagation. The two tests that walk
+      btree->fork->volume need a below-4-GiB fixture (hint
+      HFS_BTREE_GET_NODE = 0x6a00_0000) and therefore skip on arm64 macOS,
+      which reserves the low 4 GiB; they run on Linux. match.py (exit 1, diff
+      expected) shows the same field offsets, the same control flow and the
+      same ldr/ldr/ldrh/orr/strh damaged-volume sequence; the only differences
+      are the ops-table indirection (blx r6/r7/r8 for blx ip and the two bl)
+      and LLVM's larger frame.

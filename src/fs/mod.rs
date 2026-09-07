@@ -1,4 +1,5 @@
-//! Filesystem-layer helpers (path handling, FAT-facing utilities).
+//! Filesystem-layer helpers (path handling, FAT-facing utilities,
+//! HFS B-tree node access).
 pub mod path_limits;
 /// Path-resolution node release @ 0x082e19cc.
 pub mod path_node;
@@ -8,3 +9,5 @@ pub mod cache_entry;
 pub mod cache_lock;
 /// Platform C++ file-object read wrapper @ 0x082784b8.
 pub mod file_read;
+/// HFS B-tree node fetch and validation @ 0x08053d6c.
+pub mod hfs_btree_get_node;
