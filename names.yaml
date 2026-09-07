@@ -25589,6 +25589,95 @@ functions:
       stm and node zeroing; the diff is LLVM's fp frame, register
       scheduling and branch layout (the expected ADS-vs-LLVM noise).
 
+  - address: 0x083c00dc
+    ghidra: FUN_083c00dc
+    name: word_key_set_allocate_node
+    size: 184
+    sig: "WordKeySetNode *word_key_set_allocate_node(WordKeySet *set)"
+    module: cxx/word_key_set
+    status: ported
+    vars: {param_1: set, puVar1: node, piVar3: chunk, iVar4: arena, uVar2: prev_capacity, uVar5: grown, uVar6: capacity}
+    renames:
+      FUN_08266c70: operator_new_checked (ported, heap/new_handler; reached
+        through the inline(never) pool_operator_new front-end)
+    notes: >-
+      libstdc++ pool allocator for the word-keyed set family's 0x14-byte
+      tree nodes - the third twin of the ported byte-keyed allocator @
+      0x083b7f40 (byte_key_tree_allocate_node, 0x20-byte nodes) and the
+      string-keyed one @ 0x083c311c (string_key_tree_allocate_node,
+      0x18-byte nodes). Pop the free list at set+4 (next threaded
+      through node+0xc, the right link), else bump-allocate in the
+      set+8..set+0xc range, else grow - capacity max(prev+0x20,
+      prev+prev/2+prev/8), 0x20 for the first chunk - carving a 0xc-byte
+      chunk header (prev/capacity/arena, pushed at set+0) and a
+      capacity*0x14 arena via two calls to the ported
+      operator_new_checked @ 0x08266c70 (its dead r1=0 argument dropped;
+      reached through an inline(never) pool_operator_new front-end to
+      keep the two bl boundaries). Returned node: color byte 0 (red),
+      parent/left/right nulled, the element word at +0x10 deliberately
+      untouched. Only the stride differs from the twins, so the original
+      multiplies by 0x14 (mov r0,#0x14; mul r0,r6,r0) and forms the
+      arena end with add r1,r6,r6,lsl #2 then lsl #2, where the
+      byte-keyed twin folds 0x20 into lsl #5.
+      EXTENT: 184 bytes, 0x083c00dc..0x083c0194, confirmed from raw
+      bytes - 46 instructions from push {r4,r5,r6,r7,r8,lr} to
+      pop {r4,r5,r6,r7,r8,pc}, no literal pool (the function makes no
+      pc-relative load) and the next function's ldr r2,[r1,#12] starts
+      at 0x083c0194. Ghidra's 184 is right for once.
+      CALL COUNT: 20 call sites, every one an unconditional bl - zero
+      predicated forms and zero plain b tail calls - verified by
+      decoding every B/BL word of work/firmware/osos.dec. Nineteen sit
+      in the app layer (0x0813ea38, 0x08160580, 0x0817d9c0 and sixteen
+      inside the 0x08258ab4-0x0825b800 singleton-constructor cluster,
+      which carve this family's self-pointing header node out of the
+      same pool) and one is the family's own _M_insert @ 0x083c09d8
+      (bl @ 0x083c09f4). The absence of any predicated call is the
+      behavioural fact: no caller guards the container pointer, because
+      every call site holds a live embedded container.
+      FAMILY: the container is shaped exactly like the byte- and
+      string-keyed maps - node pool in the first 0x10 bytes, header node
+      pointer at +0x10, live count at +0x14, multi-insert flag byte at
+      +0x18, comparator at +0x19 - but its element is a single 32-bit
+      word. _M_insert @ 0x083c09d8 copies it whole with
+      "adds r1,r0,#16; ldrne r2,[r8]; strne r2,[r1]", the key accessor @
+      0x083b6a2c is "add r0,r0,#16; bx lr" and the comparator @
+      0x083d74c4 is an unsigned word less
+      ("ldr r0,[r1]; ldr r1,[r2]; cmp r0,r1; movcs r0,#0; movcc r0,#1"),
+      so this is a set of unsigned words - std::set<unsigned> or
+      std::set<T *>; nothing in the family separates the two, and the
+      port types the element u32. The whole-tree recycler @ 0x083c099c
+      pushes nodes back through node+0xc onto set+4, the exact inverse
+      of the pop. Not the event_list family: that tree's allocator is
+      0x083b9f4c with 0x20-byte nodes.
+      Pool/chunk/container state modeled as WordKeySetNodePool /
+      WordKeySetPoolChunk / WordKeySet repr(C) structs (32-bit layout
+      asserted; WordKeySet._opaque sized off the pool struct so host
+      fields stay disjoint); node stride and chunk size go through
+      size_of (0x14/0xc on target). Exported pub with no ops slot - this
+      family's _M_insert @ 0x083c09d8 is unported, so there is no
+      in-crate caller (the string_key_tree_allocate_node precedent).
+      Deviations: Ghidra types the original void
+      (decomp/c/036/083c00dc_FUN_083c00dc.c), but it leaves the node in
+      r0 - only r4-r8/lr are stacked - and _M_insert consumes it
+      (adds r1,r0,#16 / mov r5,r0 @ 0x083c09f8), so the port returns it,
+      like both twins; the dead r1=0 second argument to 0x08266c70 is
+      dropped; the original stacks r8 without ever using it (an
+      eight-word alignment pad), not reproduced; no null check on the
+      checked-new results, like the original (its new-handler path
+      aborts @ 0x08266abc).
+      Host tests (5): fresh-chunk carve (0xc header then a 0x20*0x14
+      arena, chunk pushed with a null prev, bump range set, node red
+      with null links), bump exhaustion across a whole 0x20-node arena
+      growing a second chunk at 0x40 with no traffic in between, the
+      capacity formula on both branches (8 -> 0x28 floor, 0x100 ->
+      0x1a0), free-list pop recycling two nodes with no heap traffic,
+      and the element word at +0x10 surviving a pop untouched.
+      match.py --lib <worktree archive>: 46 vs 46 instructions - same
+      free-list pop, bump test, growth formula, two bl operator-new
+      boundaries, chunk stm and node zeroing; the diff is LLVM's fp
+      frame, its inverted movhi/movls max and the usual register
+      scheduling and branch layout.
+
   - address: 0x083c31d4
     ghidra: FUN_083c31d4
     name: string_key_tree_rotate_left
