@@ -11363,9 +11363,9 @@ functions:
     status: ported
     vars:
       param_1: this (the view/controller)
-      FUN_0810dfe8: stop_view_timer (VIEW_EVENT_OPS slot; the next
-        function - fetches this+0x50 and tail-branches to the ported
-        timer_stop @ 0x0812c6b0 when non-NULL)
+      FUN_0810dfe8: stop_view_timer (ported helper @ 0x0810dfe8;
+        VIEW_EVENT_OPS slot; fetches this+0x50 and tail-branches to the
+        ported timer_stop @ 0x0812c6b0 when non-NULL)
       FUN_0810e170: commit_staged_flags (VIEW_EVENT_OPS slot; cursor
         walk of the +0x60 collection storing item.byte2 into the
         global byte table @ 0x08a77a8f[item.byte0] via 0x0819c9d0)
@@ -11388,16 +11388,34 @@ functions:
       b/bl 0x0810dfc0` - each does its specific work then tails into
       this epilogue. Note the original tests this+0x50 here and the
       wrapper re-tests it; the double test is reproduced. Extent is
-      exact on both sides (0x0810dfc0..0x0810dfe8). Deviations: both
-      callees are unported and ride the VIEW_EVENT_OPS seam
-      (event_list.rs pattern - transmuted firmware defaults on target,
-      panicking defaults on host), so the port is hook-ready on
-      target. Host tests: timer word set - both callees fire in order
-      (stop before commit) with `this` passed through, return 1; timer
-      word clear - only the commit fires, return 1. match.py
-      structural: same load-test/conditional-call/unconditional-call/
-      mov r0,#1 shape; the diff is the ops-table blx indirection and
-      the crate fp frame.
+      exact on both sides (0x0810dfc0..0x0810dfe8). Deviations: the
+      stop helper is ported and wired into VIEW_EVENT_OPS; the staged
+      commit helper still rides the seam (event_list.rs pattern -
+      transmuted firmware defaults on target, panicking defaults on
+      host, recording mocks in tests), so the port is hook-ready on
+      target. Host tests: timer word set - stop then commit fire in
+      order with `this` passed through, return 1; timer word clear -
+      only the commit fires, return 1. match.py structural: same
+      load-test/conditional-call/unconditional-call/mov r0,#1 shape;
+      the diff is the ops-table blx indirection and the crate fp frame.
+
+  - address: 0x0810dfe8
+    ghidra: FUN_0810dfe8
+    name: stop_view_timer
+    size: 12
+    sig: "void stop_view_timer(u8 *this)"
+    module: app/view_event
+    status: ported
+    vars:
+      param_1: this (the view/controller)
+      param_1_plus_0x50: timer
+    notes: >-
+      21 bl call sites, binary-scanned. Raw ARM is `ldr r0, [r0, #0x50];
+      cmp r0, #0; bne 0x0812c6b0; bx lr`: load the optional timer pointer
+      from the view at +0x50 and tail-call the ported timer_stop when one
+      exists, otherwise return immediately. The Rust port keeps the same
+      null guard; the only deliberate deviation is that the tail branch is
+      spelled as a normal call.
 
   - address: 0x0810e02c
     ghidra: FUN_0810e02c
@@ -11419,14 +11437,15 @@ functions:
       operator_new(0x2c) @ 0x082aadd4, stores the target pointer at
       view+0x50, then invokes timer_schedule_shim(view, timer, 0, 0)
       @ 0x0811108c, making the view the timer constructor's config
-      word. It stores delay at view+0x54, calls the unported
-      stop_view_timer wrapper @ 0x0810dfe8, reloads +0x50 for
-      timer_start_after(timer, delay) @ 0x0812c63c, reloads it again
-      for the tail branch to timer_restart @ 0x0812bf4c. The +0x54
-      sibling re-armer @ 0x0810e090 establishes delay's meaning.
-      No allocation-failure guard exists in stock or the port. The
-      unported wrapper uses the existing VIEW_EVENT_OPS firmware-default
-      seam; all other callees are already ported and direct. Rust
+      word. It stores delay at view+0x54, calls the ported
+      stop_view_timer helper @ 0x0810dfe8 through the default
+      VIEW_EVENT_OPS slot, reloads +0x50 for timer_start_after(timer,
+      delay) @ 0x0812c63c, reloads it again for the tail branch to
+      timer_restart @ 0x0812bf4c. The +0x54 sibling re-armer @
+      0x0810e090 establishes delay's meaning. No allocation-failure
+      guard exists in stock or the port. The ported stop helper still
+      uses the existing VIEW_EVENT_OPS seam so host tests can replace
+      it; all other callees are already ported and direct. Rust
       represents the final tail branch as a call. Host tests use one
       unique low-4-GiB slab for the view/timer u32 target pointers:
       allocation constructs/sets/arms the timer, and a wrapper that

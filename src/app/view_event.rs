@@ -45,13 +45,16 @@
 //! sites forward it verbatim (e.g. `mov r6, r0; ...; mov r0, r6` @
 //! 0x0839f6d0, `mov r4, r0; ...; mov r0, r4` @ 0x08125678).
 //!
-//! Both callees are unported and ride the [`VIEW_EVENT_OPS`] seam (the
-//! event_list.rs pattern: transmuted firmware defaults on target,
+//! The stop helper is ported and wired into the default [`VIEW_EVENT_OPS`]
+//! slot; the staged-flag commit helper still rides the seam (the
+//! `event_list.rs` pattern: transmuted firmware defaults on target,
 //! panicking defaults on host, recording mocks in tests), so this port
 //! is hook-ready on target. Note the original tests +0x50 here AND the
 //! wrapper re-tests it — the double test is reproduced, not folded.
 
-use core::ptr::{addr_of, addr_of_mut};
+use core::ptr::addr_of_mut;
+
+use crate::drivers::timer::timer_stop;
 
 /// Byte offset of the view's optional timer pointer (`ldr r0, [r0,
 /// #0x50]`).
@@ -63,28 +66,45 @@ pub const VIEW_STAGED_FLAGS: usize = 0x60;
 /// The framework's "event handled" verdict (`mov r0, #1`).
 pub const EVENT_HANDLED: u32 = 1;
 
-/// Unported firmware helpers below the epilogue (see the module header).
+/// Helper slots below the epilogue (see the module header).
 #[derive(Clone, Copy)]
 pub struct ViewEventOps {
     /// `FUN_0810dfe8` @ 0x0810dfe8: stop the view's +0x50 timer if one
-    /// is installed (tail-branch into the ported `timer_stop`).
+    /// is installed.
     pub stop_view_timer: unsafe extern "C" fn(this: *mut u8),
     /// `FUN_0810e170` @ 0x0810e170: commit the staged flag bytes from
     /// the +0x60 collection into the global byte table.
     pub commit_staged_flags: unsafe extern "C" fn(this: *mut u8),
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_stop_view_timer(this: *mut u8) {
-    let f: unsafe extern "C" fn(*mut u8) = unsafe { core::mem::transmute(0x0810_dfe8usize) };
-    unsafe { f(this) }
+/// `stop_view_timer` — original: `FUN_0810dfe8` @ 0x0810dfe8 (12
+/// bytes; 21 `bl` call sites).
+///
+/// Loads the view's optional timer pointer at +0x50 and, when it is
+/// non-NULL, calls the ported `timer_stop` on that timer. Otherwise it
+/// returns immediately. The original body is just `ldr r0, [r0, #0x50];
+/// cmp r0, #0; bne 0x0812c6b0; bx lr`; the only deliberate deviation is
+/// that Rust spells the tail branch as an indirect call through a
+/// volatile function-pointer load so LLVM keeps the body separate.
+///
+/// # Safety
+///
+/// `this` must point to readable storage through +0x50; the timer
+/// pointer is loaded unchecked, exactly as in the original.
+static STOP_VIEW_TIMER: unsafe extern "C" fn(*mut u8) = timer_stop;
+
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn stop_view_timer(this: *mut u8) {
+    let timer = (this.add(VIEW_TIMER) as *const u32).read_volatile();
+    if timer != 0 {
+        let stop = unsafe { core::ptr::read_volatile(core::ptr::addr_of!(STOP_VIEW_TIMER)) };
+        unsafe { stop(timer as usize as *mut u8) };
+    }
 }
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_stop_view_timer(_this: *mut u8) {
-    panic!("view_event_complete requires view-timer stop 0x0810dfe8")
-}
-
+/// `FUN_0810e170` @ 0x0810e170: commit the staged flag bytes from the
+/// +0x60 collection into the global byte table.
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_commit_staged_flags(this: *mut u8) {
     let f: unsafe extern "C" fn(*mut u8) = unsafe { core::mem::transmute(0x0810_e170usize) };
@@ -96,17 +116,18 @@ unsafe extern "C" fn missing_commit_staged_flags(_this: *mut u8) {
     panic!("view_event_complete requires staged-flag commit 0x0810e170")
 }
 
-/// Active helpers. retailOS defaults invoke the firmware functions
-/// directly; host tests replace the table with recording mocks.
+/// Active helpers. retailOS defaults invoke the ported stop helper and
+/// the firmware commit helper directly; host tests replace the table
+/// with recording mocks.
 #[cfg(target_os = "none")]
 pub static mut VIEW_EVENT_OPS: ViewEventOps = ViewEventOps {
-    stop_view_timer: firmware_stop_view_timer,
+    stop_view_timer,
     commit_staged_flags: firmware_commit_staged_flags,
 };
 
 #[cfg(not(target_os = "none"))]
 pub static mut VIEW_EVENT_OPS: ViewEventOps = ViewEventOps {
-    stop_view_timer: missing_stop_view_timer,
+    stop_view_timer,
     commit_staged_flags: missing_commit_staged_flags,
 };
 
@@ -140,8 +161,13 @@ pub unsafe extern "C" fn view_event_complete(this: *mut u8) -> u32 {
 mod tests {
     extern crate std;
     use super::*;
-    use crate::testing::VIEW_EVENT_OPS_TEST_LOCK as VIEW_LOCK;
-    use std::sync::MutexGuard;
+    use crate::drivers::timer::{TimerOps, TIMER_OPS, TIMER_STATE_RUNNING, TIMER_STATE_STOPPED};
+    use crate::testing::{
+        hints, note_missing_u32_fixture, try_map_u32_slab, TIMER_OPS_TEST_LOCK,
+        VIEW_EVENT_OPS_TEST_LOCK as VIEW_LOCK,
+    };
+    use std::ptr::{addr_of, addr_of_mut};
+    use std::sync::{LazyLock, MutexGuard};
     use std::vec::Vec;
 
     /// Calls into the mock helpers, in order.
@@ -190,7 +216,7 @@ mod tests {
     fn restore(guard: MutexGuard<'static, ()>) {
         unsafe {
             VIEW_EVENT_OPS = ViewEventOps {
-                stop_view_timer: missing_stop_view_timer,
+                stop_view_timer,
                 commit_staged_flags: missing_commit_staged_flags,
             };
         }
@@ -199,6 +225,151 @@ mod tests {
 
     fn view() -> *mut u8 {
         unsafe { addr_of_mut!(VIEW) as *mut u8 }
+    }
+
+    const STOP_SLAB_LEN: usize = 0x1000;
+    const STOP_TIMER_OFFSET: usize = 0x100;
+
+    #[repr(C)]
+    struct StopViewFields {
+        _prefix: [u8; 0x50],
+        timer: u32,
+    }
+
+    #[repr(C)]
+    struct StopTimerObject {
+        _next: u32,
+        period: u32,
+        _deadline: u32,
+        _opaque_0c: [u8; 0x0c],
+        _queued_state: u32,
+        _armed: u32,
+        state: u32,
+        _callback_handle: u32,
+    }
+
+    #[derive(Clone, Copy)]
+    struct StopFixture {
+        base: *mut u8,
+        view: *mut StopViewFields,
+        timer: *mut StopTimerObject,
+    }
+
+    static STOP_SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::VIEW_EVENT_TIMER_STOP, STOP_SLAB_LEN).map(|pointer| pointer as usize)
+    });
+
+    unsafe extern "C" fn recording_trace(timer: *mut u8) {
+        unsafe {
+            (*addr_of_mut!(STOP_CALLS)).push("trace");
+            (*addr_of_mut!(STOP_SEEN)).push(timer as usize);
+        }
+    }
+
+    static mut STOP_CALLS: Vec<&'static str> = Vec::new();
+    static mut STOP_SEEN: Vec<usize> = Vec::new();
+
+    struct TimerOpsRestore {
+        timer_ops: TimerOps,
+    }
+
+    impl Drop for TimerOpsRestore {
+        fn drop(&mut self) {
+            unsafe {
+                addr_of_mut!(TIMER_OPS).write_volatile(self.timer_ops);
+            }
+        }
+    }
+
+    unsafe fn install_timer_trace_mock() -> TimerOpsRestore {
+        let timer_ops = addr_of!(TIMER_OPS).read_volatile();
+        let mut recorded = timer_ops;
+        recorded.trace_assert = recording_trace;
+        addr_of_mut!(TIMER_OPS).write_volatile(recorded);
+        TimerOpsRestore { timer_ops }
+    }
+
+    fn stop_fixture() -> Option<StopFixture> {
+        let base = (*STOP_SLAB)? as *mut u8;
+        Some(unsafe {
+            StopFixture {
+                base,
+                view: base.cast::<StopViewFields>(),
+                timer: base.add(STOP_TIMER_OFFSET).cast::<StopTimerObject>(),
+            }
+        })
+    }
+
+    unsafe fn reset_stop_fixture(fixture: StopFixture, timer_word: u32, timer_state: u32) {
+        fixture.base.write_bytes(0, STOP_SLAB_LEN);
+        (*addr_of_mut!(STOP_CALLS)).clear();
+        (*addr_of_mut!(STOP_SEEN)).clear();
+        addr_of_mut!((*fixture.view).timer).write_volatile(timer_word);
+        addr_of_mut!((*fixture.timer).state).write_volatile(timer_state);
+    }
+
+    #[test]
+    fn stop_view_timer_stops_the_installed_timer() {
+        let _timer_lock = TIMER_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let Some(fixture) = stop_fixture() else {
+            assert!(note_missing_u32_fixture("app::view_event::stop_view_timer"));
+            return;
+        };
+        unsafe {
+            reset_stop_fixture(fixture, fixture.timer as u32, TIMER_STATE_RUNNING);
+            let _restore = install_timer_trace_mock();
+
+            stop_view_timer(fixture.view.cast());
+
+            assert_eq!(
+                *addr_of!(STOP_CALLS),
+                std::vec!["trace"],
+                "timer_stop was reached exactly once"
+            );
+            assert_eq!(
+                *addr_of!(STOP_SEEN),
+                std::vec![fixture.timer as usize],
+                "the view's timer pointer is passed through unchanged"
+            );
+            assert_eq!(
+                addr_of!((*fixture.timer).state).read_volatile(),
+                TIMER_STATE_STOPPED,
+                "timer_stop writes the stopped state"
+            );
+        }
+    }
+
+    #[test]
+    fn stop_view_timer_leaves_a_null_timer_alone() {
+        let _timer_lock = TIMER_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let Some(fixture) = stop_fixture() else {
+            assert!(note_missing_u32_fixture("app::view_event::stop_view_timer"));
+            return;
+        };
+        unsafe {
+            reset_stop_fixture(fixture, 0, TIMER_STATE_RUNNING);
+            let _restore = install_timer_trace_mock();
+
+            stop_view_timer(fixture.view.cast());
+
+            assert!(
+                (*addr_of!(STOP_CALLS)).is_empty(),
+                "null timers do not reach timer_stop"
+            );
+            assert!(
+                (*addr_of!(STOP_SEEN)).is_empty(),
+                "no timer pointer is recorded when the slot is empty"
+            );
+            assert_eq!(
+                addr_of!((*fixture.timer).state).read_volatile(),
+                TIMER_STATE_RUNNING,
+                "the timer object is untouched when the slot is empty"
+            );
+        }
     }
 
     #[test]
