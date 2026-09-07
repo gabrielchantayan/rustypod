@@ -4,6 +4,7 @@ pub mod control_state;
 pub mod csem;
 pub mod diag_ring_record;
 pub mod gateway_request;
+pub mod gateway_signal;
 pub mod gateway_request_blocking;
 pub mod irq;
 pub mod kobj;

@@ -5221,6 +5221,95 @@ functions:
       indirect call through the hook slot, not the 8-byte ldr pc
       veneer - expected, same family pattern as the other 31 wrappers.
 
+  - address: 0x08037e78
+    ghidra: thunk_EXT_FUN_220041cc
+    name: rom_svc_220041cc
+    size: 8
+    sig: "usize rom_svc_220041cc(usize object)"
+    module: kernel/task_lock
+    status: ported
+    notes: >-
+      Already ported as rom_svc_220041cc in kernel/task_lock.rs under the
+      rom_gateway_wrappers span entry above (slot 15 of 32); this entry
+      records the per-function verification. ldr pc,[pc,#-4] (0xe51ff004)
+      at 0x08037e78 + target word 0x220041cc at 0x08037e7c: Ghidra reports
+      4 bytes, the stub is 8 - the sibling veneer to ROM 0x22001cbc opens
+      immediately after at 0x08037e80. A real ADS literal veneer, not an
+      empty bx lr destructor. The ROM body IS recoverable through the boot
+      relocator IRAM mirror (0x2200XXXX == osos 0x0800XXXX, relocator @
+      0x080046e0): mirror @ 0x080041cc, 48 bytes, now ported in full as
+      kernel/gateway_signal.rs (entry below). Call sites binary-verified by
+      decoding every ARM B/BL word in osos.dec for every condition code:
+      21 bl - 19 unconditional (0x08060928, 0x08060970, 0x080860d4,
+      0x080c9c00, 0x080c9c44, 0x080cb718, 0x080cb738, 0x080cc4d0,
+      0x080e43fc, 0x0812f4a0, 0x08165500, 0x08191140, 0x08192c20,
+      0x081f49bc, 0x082d964c, 0x08392f70, 0x0839347c, 0x083934b0,
+      0x0839385c) plus 2 blne (0x0811f808, 0x08393a1c), correcting the
+      stale "16 callers" in the task_lock.rs span survey - and 10 tail
+      branches: 8 fixed-id shims `mov r0, #N; b 0x08037e78` with N = 60
+      (0x0808cd88), 28 (0x080abf70), 26 (0x082b2c38), 23 (0x082b2c40),
+      53/52/51 (0x082dafd0 / 0x082dafd8 / 0x082dafe0) and 8 (0x082e4bcc),
+      the bare alias kobj::waiter_wake @ 0x080567f8, and the conditional
+      beq @ 0x080567c8 in csem_post @ 0x080567a8. Both predicated bl are
+      caller-side sentinel guards, not a property of the stub, which has
+      none: 0x0811f808 is `ldr r0,[r0,#0x14]; cmn r0,#1; blne` (skip the
+      0xffffffff empty-slot sentinel) and 0x08393a1c is `ldr r0,[r1,#0x10];
+      cmp r0,#0; blne` (skip a zero id). No data word in osos holds
+      0x08037e78 - never dispatched virtually; the only 0x220041cc word in
+      the image is the veneer's own literal at 0x08037e7c.
+      kernel/thunks.rs ROM_THUNKS name slot set to Some("signal_object"),
+      lifting the named-entry count test to 19. Deviation (module design):
+      dispatches through the ROM_KERNEL hook (volatile slot read) instead
+      of jumping into IRAM; match.py structural - an indirect call through
+      the hook slot, not the 8-byte ldr pc veneer - same family pattern as
+      the other 31 wrappers.
+
+  - address: 0x080041cc
+    ghidra: null
+    name: gateway_signal_object
+    size: 48
+    sig: "u32 gateway_signal_object(u32 object)"
+    module: kernel/gateway_signal
+    status: ported
+    renames:
+      FUN_08003660: message_dispatch_veneer
+      local_14[0]: gateway_service_selector
+      local_14[1]: status
+      local_14[2]: object
+    notes: >-
+      The body behind thunk 0x08037e78 -> ROM 0x220041cc (entry above).
+      Absent from Ghidra's functions.csv; extent 0x080041cc..0x080041fc
+      taken from the raw words (the next gateway stub, selector 0x12,
+      starts at 0x080041fc). Reachable at both addresses because the boot
+      relocator @ 0x080046e0 copies 0xaed8 bytes of osos to 0x22000000 and
+      the body's only branch is the PC-relative bl 0x08003660, which
+      relocates to bl 0x22003660 - the copied veneer whose absolute
+      literal 0x0802dca8 lands back in osos. Algorithm - push lr, reserve
+      five words (sub sp,#0x14), store r0 at word 2, clear word 1, store
+      the RTXC gateway service selector 2 at word 0, pass r0 = sp to the
+      0x08003660 dispatch veneer, then reload word 1 as the return value.
+      Words 3 and 4 are never written or read; the frame is five words
+      only for 8-byte sp alignment across the bl, and MaybeUninit keeps
+      them uninitialized (the ks_alloc_timer idiom). The status word is a
+      real return value - 20 of the 21 bl sites drop r0, but the 36-byte
+      wrapper @ 0x080860c0 does `bl 0x08037e78; movs r0,r0; movne r0,#0x27`,
+      so 0 is success and any nonzero status becomes its error 39. Record
+      shape confirmed by the family - the service-1 sibling @ 0x08004368
+      (thunk 0x08037ea8) is the same stub with word 3 also zeroed, and the
+      timed variant @ 0x080043c0 (thunk 0x08037ea0, behind kobj::waiter_wait)
+      writes {1, status, id, timeout, sp}. Naming - selector 2 and the
+      record layout are binary facts; the "signal" reading is call-site
+      evidence already recorded in this file, namely csem_post @ 0x080567a8
+      reaching the veneer exactly when a counting semaphore's count rises
+      from -1 to 0 (one sleeper parked) and kobj::waiter_wake @ 0x080567f8
+      being a bare alias of it. The RTXC service table is not in osos, so
+      the kernel primitive behind selector 2 is NOT proven. Deviations -
+      the foreign dispatcher is reached through the ported
+      runtime::message_dispatch_veneer and its installable seam; match.py
+      structural (LLVM keeps a frame pointer and a 24-byte frame, writing
+      the same {2, 0, object} triple at sp+4/8/12 and reloading the status
+      from sp+8 - identical shape, different frame offsets).
+
   - address: 0x0806a4a0
     ghidra: FUN_0806a4a0
     name: kernel_sem5_wait
