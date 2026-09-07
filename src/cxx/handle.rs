@@ -719,6 +719,102 @@ pub unsafe extern "C" fn refcounted_ptr_release(
     slot
 }
 
+/// refcounted_body_release_slot1 — original: `FUN_0839d1d4` @ 0x0839d1d4.
+/// Ghidra reports 136 bytes; the raw extent is 144 (0x0839d1d4..0x0839d264):
+/// the `str r6,[r4]` / `pop {r4,r5,r6,pc}` tail at 0x0839d25c..0x0839d260 is
+/// shared by both exits and Ghidra stops short of it. Two separately linked
+/// 16-byte helpers follow at 0x0839d264 (lock) and 0x0839d274 (unlock), each
+/// loading body+8, NULL-checking it and tail-branching to `mutex_lock`
+/// 0x0807f5c4 / `mutex_unlock` 0x0807f6a0; the next function starts at
+/// 0x0839d284. 20 `bl` call sites, all unconditional — verified by decoding
+/// every ARM B/BL word in osos.dec: no `b` sites, no predicated forms.
+///
+/// Third template instantiation of the refcounted-handle release over the
+/// same [`RefcountedBody`] layout (+0 implementation, +4 i32 refcount, +8
+/// Mutex*). It is instruction-for-instruction the same as
+/// [`refcounted_body_release`] @ 0x0839cd98 except in what the final drop
+/// does with the implementation: this one dispatches VIRTUAL SLOT 1 (+4) of
+/// the implementation's vtable (`ldr r1,[r0]; ldr r1,[r1,#4]; blx r1`) and
+/// never frees the implementation, where the sibling dispatches slot 7 and
+/// [`refcounted_body_release_owned`] disposes and deletes it. No identity is
+/// inferred for slot 1. Everything else matches: NULL body early-out (slot
+/// untouched), refcount decremented under the optional mutex with a plain
+/// wrapping `subs` (zero underflows to -1 and takes the shared path), the
+/// unlock helper entered on a FRESH slot load and guarding only the mutex
+/// word, then — gated on another fresh slot load being non-NULL — the mutex
+/// destroyed (`mutex_delete` 0x0807f650), the reloaded mutex word and the
+/// body tag-2-deleted (`operator_delete` 0x082aad24), and the slot NULLed on
+/// every path that reached the decrement.
+///
+/// Codegen deviation: LLVM inlines the ported mutex lock/unlock/delete where
+/// the original `bl`s the two helpers and 0x0807f650; match.py shows the
+/// same guard/decrement/dispatch/delete structure inside a larger body.
+///
+/// # Safety
+/// `slot` must be a valid aligned pointer slot. A non-NULL body, its mutex,
+/// its implementation and that implementation's vtable must all be live and
+/// valid for the operations encoded by the original. As in the original, the
+/// slot pointer itself is not NULL-checked, and the lock/unlock helpers
+/// guard only the mutex word — never the body.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_release_slot1(slot: *mut *mut RefcountedBody) {
+    let body = slot.read();
+    if body.is_null() {
+        return;
+    }
+
+    // Lock helper @ 0x0839d264, entered with the body's first load.
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_lock(mutex);
+    }
+
+    // `ldr r1,[r4]`: the decrement works on a fresh slot load.
+    let body = slot.read();
+    let remaining = (*body).refcount.wrapping_sub(1);
+    (*body).refcount = remaining;
+    // `ldr r0,[r4]`: and another one is carried across the `bne`.
+    let body = slot.read();
+    if remaining == 0 {
+        let implementation = (*body).opaque0 as *mut u8;
+        if !implementation.is_null() {
+            let vtable = (implementation as *const usize).read() as *const usize;
+            let slot1: unsafe extern "C" fn(*mut u8) = core::mem::transmute(vtable.add(1).read());
+            slot1(implementation);
+        }
+
+        // Unlock helper @ 0x0839d274 on its own fresh slot load.
+        let body = slot.read();
+        let mutex = (*body).mutex;
+        if !mutex.is_null() {
+            mutex_unlock(mutex);
+        }
+
+        let body = slot.read();
+        if !body.is_null() {
+            let mutex = (*body).mutex;
+            if !mutex.is_null() {
+                mutex_delete(mutex);
+                // Reload after mutex_delete, exactly as the ARM does before
+                // the tag-2 delete, then clear the field after that delete.
+                let mutex = (*body).mutex;
+                operator_delete(mutex.cast());
+                (*body).mutex = core::ptr::null_mut();
+            }
+            operator_delete(body.cast());
+        }
+    } else {
+        // Unlock helper on the load carried in r0; guards only the mutex.
+        let mutex = (*body).mutex;
+        if !mutex.is_null() {
+            mutex_unlock(mutex);
+        }
+    }
+
+    slot.write(core::ptr::null_mut());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -897,6 +993,7 @@ mod tests {
             Wait(u32),
             Destructor(usize),
             CallbackRelease(usize),
+            Slot1Release(usize),
             Signal(u32),
             Delete(u32),
             MutexCellFree(usize),
@@ -1559,6 +1656,131 @@ mod tests {
             unsafe { refcounted_body_release_dtor_variant(&mut slot) };
 
             assert_eq!(body.refcount, -1);
+            assert!(slot.is_null());
+            assert!(events().is_empty());
+        }
+
+        // --- refcounted_body_release_slot1 @ 0x0839d1d4 ---------------------
+
+        unsafe extern "C" fn recording_slot1(implementation: *mut u8) {
+            (*core::ptr::addr_of_mut!(EVENTS)).push(Event::Slot1Release(implementation as usize));
+        }
+
+        /// The final reference dispatches vtable[1] — not the sibling's
+        /// vtable[7] — then unlocks, destroys the mutex, and deletes mutex
+        /// and body in the ARM order. The implementation is never freed.
+        #[test]
+        fn slot1_final_reference_dispatches_vtable_slot1_and_tears_down_in_order() {
+            let _bench = bench();
+            let mut semaphore = 0x51;
+            let mut mutex = Mutex {
+                sem_cell: &mut semaphore,
+                unused: 0,
+            };
+            let mut vtable = [0usize; 8];
+            vtable[1] = recording_slot1 as usize;
+            vtable[7] = recording_destructor as usize;
+            let mut implementation = [vtable.as_mut_ptr() as usize];
+            let mut body = RefcountedBody {
+                opaque0: implementation.as_mut_ptr() as usize,
+                refcount: 1,
+                mutex: &mut mutex,
+            };
+            let body_ptr = &mut body as *mut RefcountedBody;
+            let mutex_ptr = &mut mutex as *mut Mutex;
+            let cell_ptr = &mut semaphore as *mut u32;
+            let implementation_ptr = implementation.as_mut_ptr() as *mut u8;
+            let mut slot = body_ptr;
+
+            unsafe { refcounted_body_release_slot1(&mut slot) };
+
+            assert!(slot.is_null(), "the final store clears the caller slot");
+            assert!(mutex.sem_cell.is_null(), "mutex_delete clears its cell");
+            assert_eq!(
+                events(),
+                std::vec![
+                    Event::Wait(0x51),
+                    Event::Slot1Release(implementation_ptr as usize),
+                    Event::Signal(0x51),
+                    Event::Delete(0x51),
+                    Event::MutexCellFree(cell_ptr as usize),
+                    Event::HeapFree(mutex_ptr as *mut u8 as usize, 2),
+                    Event::HeapFree(body_ptr as *mut u8 as usize, 2),
+                ],
+                "vtable[1] runs under the lock; vtable[7] and any implementation free never do"
+            );
+        }
+
+        /// A non-final reference decrements, unlocks, and clears the slot
+        /// without dispatching anything or freeing anything.
+        #[test]
+        fn slot1_shared_reference_decrements_unlocks_and_nulls_slot() {
+            let _bench = bench();
+            let mut semaphore = 0x52;
+            let mut mutex = Mutex {
+                sem_cell: &mut semaphore,
+                unused: 0,
+            };
+            let mut body = RefcountedBody {
+                opaque0: 0xdead_0000,
+                refcount: 3,
+                mutex: &mut mutex,
+            };
+            let mut slot = &mut body as *mut RefcountedBody;
+
+            unsafe { refcounted_body_release_slot1(&mut slot) };
+
+            assert_eq!(body.refcount, 2);
+            assert!(slot.is_null(), "the non-final path still clears the slot");
+            assert_eq!(events(), std::vec![Event::Wait(0x52), Event::Signal(0x52)]);
+        }
+
+        /// With no implementation and no mutex, the final drop is just the
+        /// tag-2 body delete: nothing is dispatched and no mutex call runs.
+        #[test]
+        fn slot1_final_reference_without_implementation_or_mutex_only_deletes_body() {
+            let _bench = bench();
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: 1,
+                mutex: core::ptr::null_mut(),
+            };
+            let body_ptr = &mut body as *mut RefcountedBody;
+            let mut slot = body_ptr;
+
+            unsafe { refcounted_body_release_slot1(&mut slot) };
+
+            assert!(slot.is_null());
+            assert_eq!(events(), std::vec![Event::HeapFree(body_ptr as *mut u8 as usize, 2)]);
+        }
+
+        /// The target's `subs` wraps zero to -1 and takes the shared path.
+        #[test]
+        fn slot1_zero_refcount_wraps_without_running_cleanup() {
+            let _bench = bench();
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: 0,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot = &mut body as *mut RefcountedBody;
+
+            unsafe { refcounted_body_release_slot1(&mut slot) };
+
+            assert_eq!(body.refcount, -1);
+            assert!(slot.is_null());
+            assert!(events().is_empty());
+        }
+
+        /// A NULL body is the early-out: the slot is not even written.
+        #[test]
+        fn slot1_null_body_leaves_slot_untouched() {
+            let _bench = bench();
+            let mut slot: *mut RefcountedBody = core::ptr::null_mut();
+            let slot_ptr = &mut slot as *mut *mut RefcountedBody;
+
+            unsafe { refcounted_body_release_slot1(slot_ptr) };
+
             assert!(slot.is_null());
             assert!(events().is_empty());
         }
