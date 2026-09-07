@@ -326,6 +326,60 @@ functions:
       The Rust port preserves the ABI through the target/host operation seam;
       its ARM default is the same literal veneer target.
 
+  # --- callback-target getter veneer ---
+  - address: 0x08003910
+    ghidra: thunk_FUN_0818c740
+    name: callback_target_getter
+    size: 8
+    sig: "void *callback_target_getter(void)"
+    module: kernel/thunks
+    status: ported
+    renames:
+      thunk_FUN_0818c740: callback_target_getter
+      DAT_08003914: callback_target_getter_target
+    notes: >-
+      Raw bytes are 04 f0 1f e5 40 c7 18 08, i.e. the literal veneer
+      `ldr pc, [pc, #-4]` plus target word 0x0818c740; Ghidra's 4-byte
+      extent drops the literal, and the next veneer starts at 0x08003918.
+      Loading PC preserves every register including LR, so the target
+      returns straight to this veneer's caller and the port is the verbatim
+      instruction and literal on ARM. All 21 B/BL words decoded in osos.dec
+      that reach 0x08003910 are plain unconditional `bl` - zero predicated
+      forms and zero tail `b` - and every one of them immediately executes
+      `ldr r1, [r0]` with no NULL guard, so the getter cannot return NULL.
+      The nine distinct vtable slots those sites dispatch are +0x00, +0x04,
+      +0x08, +0x0c, +0x10, +0x14, +0x1c, +0x20 and +0x30.
+      The veneer sits inside the 0xaed8-byte block the relocator at
+      0x080046e0 mirrors to IRAM, so on device it is entered as 0x22003910
+      just as often as 0x08003910; both name the same 8 bytes.
+      Addressing note that this entry had to establish - the relocator
+      copies 0xaed8 bytes to 0x22000000 and only then moves the retailOS
+      image down to 0x08000000 (memmove to 0x08000000 of 0xa0fc88 bytes from
+      image base plus 0xaed8, then 0xa84 bytes to 0x08a0fc88), so a retailOS
+      runtime address A has its bytes at osos.dec file address A plus 0xaed8.
+      Read at face value the literal 0x0818c740 lands on a mid-function
+      `pop {r3, r4, r5, r6, r7, pc}`, which is why earlier entries described
+      it as an unliftable return edge; at file address 0x08197618 it is a
+      clean function entry. The same plus-0xaed8 correction makes 118 of the
+      188 literal veneers in this block resolve onto function entries, and it
+      makes the vtable at retailOS 0x089a37e0 resolve to 12 of 13 real entry
+      points.
+      That target is a mode-selected singleton accessor over a two-byte
+      record at retailOS 0x089cfd28 - byte 0 a one-shot initialization flag,
+      byte 1 the selected mode. On the first call it sets byte 0, calls the
+      two guarded-static constructors at retailOS 0x081e9784 and 0x081db84c
+      and invokes vtable slot 0 on each returned object, then tail-calls the
+      accessor byte 1 selects (nonzero picks 0x081db84c, zero picks
+      0x081e9784) and returns that object. Sibling veneers in the same table
+      carry the mode - 0x08003908 returns 3 when byte 1 is set and 0
+      otherwise, 0x08003918 sets it to (argument == 3) - and the singletons
+      themselves live at fixed retailOS addresses 0x08ae48e8 and 0x08ae494c.
+      Neither accessor is ported, so the ARM build keeps the retail literal
+      and the host build resolves CALLBACK_TARGET_GETTER_OPS through a
+      read_volatile seam that defaults to NULL. The three already-ported
+      wrappers 0x08007788, 0x080077a8 and 0x08007bd4 keep their own inline
+      copies of this veneer; they are unchanged by this entry.
+
   # --- callback-target virtual dispatch ---
   - address: 0x08007788
     ghidra: FUN_08007788
