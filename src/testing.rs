@@ -112,7 +112,7 @@ pub mod hints {
     // flight take the sequential slots, and a collision skips tests
     // silently on every host.
     pub const ELEMENT_REFERENCE_PERSISTENT_ID: usize = 0x5a00_0000;
-    pub const TIMED_TRANSITION: usize = 0x5b00_0000;
+    pub const TIMED_TRANSITION: usize = 0x5c00_0000;
     // 0x6a00_0000, far clear of the sequential run: sibling ports in
     // flight take the next free slots, and a collision skips tests
     // silently on every host.
