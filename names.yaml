@@ -42146,6 +42146,40 @@ functions:
       modeled global slot and that the wrapper returns the complete raw
       +0x18 word.
 
+# --- timed transition wheel node ---
+  - address: 0x081607b0
+    ghidra: FUN_081607b0
+    name: timed_transition_init
+    size: 120
+    sig: "void timed_transition_init(TimedTransition *transition, u32 target_value, u32 duration_ms, u32 start_value, u32 aux_value, u32 owner_or_self)"
+    module: app/timed_transition
+    status: ported
+    vars:
+      param_1: transition
+      param_2: target_value
+      param_3: duration_ms
+      param_4: start_value
+      param_5: aux_value
+      param_6: owner_or_self
+      param_1_plus_0x08: wheel_rank
+      param_1_plus_0x0c: wheel_prev
+      param_1_plus_0x10: wheel_next
+      param_1_plus_0x18: start_value
+      param_1_plus_0x1c: target_value
+      param_1_plus_0x20: duration_ms
+      param_1_plus_0x24: aux_value
+      param_1_plus_0x28: owner_or_self
+      param_1_plus_0x2c: armed
+      param_1_plus_0x30: inverse_duration_q16
+    notes: >-
+      Wheel node initializer used by the 0x0816082c allocator wrapper and by
+      the geometry/scroll callers recovered around 0x081529d8 and 0x081ea3b8.
+      The raw ARM is a remove/initialize/insert sequence: unlink from the
+      timing-wheel bucket table at 0x089cc7e0, clear +0x2c, force rank 1,
+      store the four raw inputs, compute a Q16.16 reciprocal from
+      `duration_ms * 65`, and store either the explicit owner or `this` at
+      +0x28. 21 `bl` call sites were verified by scanning every B/BL word in
+      osos.dec; all are unconditional `bl`.
   # --- opaque object flag low-nibble accessor ---
   - address: 0x08160cfc
     ghidra: FUN_08160cfc
