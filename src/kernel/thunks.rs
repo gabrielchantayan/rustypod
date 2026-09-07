@@ -617,6 +617,121 @@ event_handler_source:
 "#
 );
 
+/// Osos staging address of the callback-target getter veneer.
+///
+/// The boot relocator at 0x080046e0 copies 0xaed8 bytes from 0x08000000 to
+/// 0x22000000, so this veneer actually executes at 0x22003910 and 0x08003910
+/// is only where its bytes sit before relocation. Both addresses name the
+/// same 8 bytes.
+pub const CALLBACK_TARGET_GETTER_VENEER: u32 = 0x0800_3910;
+pub const CALLBACK_TARGET_GETTER_INSN: u32 = 0xe51f_f004;
+pub const CALLBACK_TARGET_GETTER_TARGET: u32 = 0x0818_c740;
+
+/// The nine distinct vtable slots the 21 recovered call sites dispatch on the
+/// pointer this veneer returns.
+///
+/// Every site is `bl 0x08003910; ldr r1, [r0]; ldr rX, [r1, #slot]; blx rX`,
+/// so the returned object's first word is always a vtable and the largest
+/// recovered slot is +0x30 (entry 12).
+pub const CALLBACK_TARGET_DISPATCH_SLOTS: [u32; 9] =
+    [0x00, 0x04, 0x08, 0x0c, 0x10, 0x14, 0x1c, 0x20, 0x30];
+
+/// ABI of the getter reached by [`callback_target_getter`]: no arguments,
+/// returns the selected callback target.
+pub type CallbackTargetGetterFn = unsafe extern "C" fn() -> *mut u8;
+
+/// Host/target dispatch boundary for the unported retailOS getter target.
+#[derive(Clone, Copy)]
+pub struct CallbackTargetGetterOps {
+    pub get: CallbackTargetGetterFn,
+}
+
+#[cfg(not(target_arch = "arm"))]
+unsafe extern "C" fn missing_callback_target_getter() -> *mut u8 {
+    core::ptr::null_mut()
+}
+
+#[cfg(not(target_arch = "arm"))]
+const DEFAULT_CALLBACK_TARGET_GETTER_OPS: CallbackTargetGetterOps = CallbackTargetGetterOps {
+    get: missing_callback_target_getter,
+};
+
+/// The host dispatch boundary for the unported retailOS getter target.
+#[cfg(not(target_arch = "arm"))]
+pub static mut CALLBACK_TARGET_GETTER_OPS: CallbackTargetGetterOps =
+    DEFAULT_CALLBACK_TARGET_GETTER_OPS;
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(always)]
+fn callback_target_getter_target() -> CallbackTargetGetterFn {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(CALLBACK_TARGET_GETTER_OPS.get)) }
+}
+
+#[cfg(target_arch = "arm")]
+extern "C" {
+    /// callback_target_getter — original: `thunk_FUN_0818c740` @ 0x08003910
+    /// (8 bytes; Ghidra's 4-byte extent drops the trailing literal word, and
+    /// the next veneer starts at 0x08003918).
+    ///
+    /// The raw body is `ldr pc, [pc, #-4]` with literal 0x0818c740: a tail
+    /// dispatch out of the relocated IRAM block into retailOS that preserves
+    /// every register including LR, so the target returns straight to this
+    /// veneer's caller. All 21 decoded call sites are plain unconditional
+    /// `bl` — no predicated forms and no tail `b` — and none of them NULL-
+    /// checks the result before `ldr r1, [r0]`, which is consistent with a
+    /// getter that can only return one of two statically allocated objects.
+    ///
+    /// The literal is a post-relocation address. The relocator copies the
+    /// 0xaed8-byte IRAM block to 0x22000000 and only then moves the retailOS
+    /// image down to 0x08000000, so retailOS runtime address A lives at
+    /// osos.dec offset A - 0x08000000 + 0xaed8; the target's bytes are at
+    /// file address 0x08197618. Read at face value the literal lands on a
+    /// `pop {r3, r4, r5, r6, r7, pc}` mid-function, which is what made
+    /// earlier notes call it an unliftable "return edge".
+    ///
+    /// The target itself is a mode-selected singleton accessor. It keeps a
+    /// two-byte record (retailOS 0x089cfd28): byte 0 is a one-shot
+    /// initialization flag, byte 1 the selected mode. On the first call it
+    /// sets byte 0, then calls each of the two guarded-static constructors
+    /// (retailOS 0x081e9784 and 0x081db84c) and invokes vtable slot 0 on each
+    /// returned object. It then tail-calls the accessor selected by byte 1 —
+    /// nonzero picks 0x081db84c, zero picks 0x081e9784 — and returns that
+    /// object. The two sibling veneers in the same table read and write that
+    /// mode byte: 0x08003908 returns 3 when it is set and 0 otherwise, and
+    /// 0x08003918 sets it to (argument == 3). Neither accessor is ported, so
+    /// the ARM build keeps the retail literal veneer verbatim.
+    ///
+    /// Deviation: none on ARM; this is the original instruction and literal.
+    pub fn callback_target_getter() -> *mut u8;
+}
+
+/// Host implementation of the callback-target getter, with the unported
+/// retailOS target supplied by [`CALLBACK_TARGET_GETTER_OPS`].
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn callback_target_getter() -> *mut u8 {
+    callback_target_getter_target()()
+}
+
+// `ldr pc` preserves LR, so the retailOS target returns directly to this
+// veneer's caller. Keep the fixed target in assembly rather than
+// materializing it as a Rust function pointer on target.
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl callback_target_getter
+    .type callback_target_getter, %function
+callback_target_getter:
+    ldr     pc, [pc, #-4]
+    .word   0x0818c740
+    .size callback_target_getter, . - callback_target_getter
+"#
+);
+
 /// One thunk-table entry: the osos-side stub and its ROM target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RomThunk {
@@ -1242,4 +1357,101 @@ mod tests {
         drop(guard);
     }
 
+
+    /// The veneer at 0x08003910 is `ldr pc, [pc, #-4]` with target word
+    /// 0x0818c740 (raw osos.dec bytes 04 f0 1f e5 40 c7 18 08); Ghidra's
+    /// 4-byte extent drops the literal, and the next veneer begins at
+    /// 0x08003918.
+    #[test]
+    fn callback_target_getter_matches_the_literal_veneer() {
+        assert_eq!(CALLBACK_TARGET_GETTER_INSN, 0xe51f_f004);
+        assert_eq!(CALLBACK_TARGET_GETTER_TARGET, 0x0818_c740);
+        assert_eq!(CALLBACK_TARGET_GETTER_TARGET & 3, 0);
+        assert_eq!(CALLBACK_TARGET_GETTER_VENEER, 0x0800_3910);
+        // The veneer lives inside the 0xaed8-byte block the relocator mirrors
+        // to IRAM, so it is equally reachable as 0x22003910.
+        assert!(CALLBACK_TARGET_GETTER_VENEER - 0x0800_0000 < 0xaed8);
+    }
+
+    /// Each call site dereferences the returned pointer as a vtable and
+    /// dispatches one of nine recovered slots, ascending and word-aligned up
+    /// to +0x30.
+    #[test]
+    fn callback_target_dispatch_slots_are_the_recovered_set() {
+        assert_eq!(
+            CALLBACK_TARGET_DISPATCH_SLOTS,
+            [0x00, 0x04, 0x08, 0x0c, 0x10, 0x14, 0x1c, 0x20, 0x30]
+        );
+        for pair in CALLBACK_TARGET_DISPATCH_SLOTS.windows(2) {
+            assert!(pair[0] < pair[1]);
+        }
+        assert!(CALLBACK_TARGET_DISPATCH_SLOTS.iter().all(|slot| slot % 4 == 0));
+    }
+
+    static mut CALLBACK_TARGET_GETTER_CALLS: u32 = 0;
+    static mut CALLBACK_TARGET_SENTINEL: u8 = 0;
+
+    unsafe extern "C" fn record_callback_target_getter() -> *mut u8 {
+        CALLBACK_TARGET_GETTER_CALLS += 1;
+        core::ptr::addr_of_mut!(CALLBACK_TARGET_SENTINEL)
+    }
+
+    /// The host port forwards to the injected retailOS target exactly once
+    /// and passes its pointer result through unchanged — the veneer's only
+    /// observable contract (no arguments in, callback target out).
+    #[test]
+    fn callback_target_getter_forwards_to_target_and_returns_its_pointer() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            core::ptr::addr_of_mut!(CALLBACK_TARGET_GETTER_CALLS).write(0);
+            core::ptr::addr_of_mut!(CALLBACK_TARGET_GETTER_OPS).write(CallbackTargetGetterOps {
+                get: record_callback_target_getter,
+            });
+            let target = callback_target_getter();
+            assert_eq!(core::ptr::addr_of!(CALLBACK_TARGET_GETTER_CALLS).read(), 1);
+            assert_eq!(
+                target,
+                core::ptr::addr_of!(CALLBACK_TARGET_SENTINEL).cast_mut(),
+            );
+            core::ptr::addr_of_mut!(CALLBACK_TARGET_GETTER_OPS)
+                .write(DEFAULT_CALLBACK_TARGET_GETTER_OPS);
+        }
+        drop(guard);
+    }
+
+    /// The veneer caches nothing: retailOS re-reads the mode byte on every
+    /// entry, which is why three consecutive call sites at 0x080076f0,
+    /// 0x08007700 and 0x08007730 each issue their own `bl`.
+    #[test]
+    fn callback_target_getter_reaches_the_target_on_every_call() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            core::ptr::addr_of_mut!(CALLBACK_TARGET_GETTER_CALLS).write(0);
+            core::ptr::addr_of_mut!(CALLBACK_TARGET_GETTER_OPS).write(CallbackTargetGetterOps {
+                get: record_callback_target_getter,
+            });
+            let first = callback_target_getter();
+            let second = callback_target_getter();
+            let third = callback_target_getter();
+            assert_eq!(core::ptr::addr_of!(CALLBACK_TARGET_GETTER_CALLS).read(), 3);
+            assert_eq!(first, second);
+            assert_eq!(second, third);
+            core::ptr::addr_of_mut!(CALLBACK_TARGET_GETTER_OPS)
+                .write(DEFAULT_CALLBACK_TARGET_GETTER_OPS);
+        }
+        drop(guard);
+    }
+
+    /// With no target installed the host seam yields NULL; on device the
+    /// veneer always tail-dispatches into the mapped retailOS accessor, whose
+    /// two candidate results are statically allocated and never NULL — hence
+    /// the unguarded `ldr r1, [r0]` at all 21 call sites.
+    #[test]
+    fn callback_target_getter_default_seam_returns_null() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            assert!(callback_target_getter().is_null());
+        }
+        drop(guard);
+    }
 }
