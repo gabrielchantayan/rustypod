@@ -28,6 +28,7 @@ pub mod plst_slot_item;
 pub mod tdat_class_check;
 pub mod element_reference;
 pub mod element_reference_cookie;
+pub mod element_reference_persistent_id;
 pub mod font_handle;
 pub mod invalidate;
 pub mod draw_state_setup;

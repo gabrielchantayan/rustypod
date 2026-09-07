@@ -14228,6 +14228,37 @@ functions:
       `add r1, rX, #0x80` survives verbatim, the rest is the seam
       frame (volatile slot load + blx + return of element).
 
+  - address: 0x082a6524
+    ghidra: FUN_082a6524
+    name: ui_element_reference_target_persistent_id
+    size: 48
+    sig: "u64 ui_element_reference_target_persistent_id(const UiElementReference *reference)"
+    module: ui/element_reference_persistent_id
+    status: ported
+    vars: {param_1: reference, "reference+0x0": vtable, "vtable+0xc": resolve_slot, "reference+0x4": target, "target+0x30": persistent_id}
+    notes: >-
+      Raw extent is exactly 48 bytes (0x082a6524..0x082a6554): ARM words
+      decode to push/mov, a vtable slot-3 (+0xc) blx resolve, cmp, conditional
+      target load, conditional ldrd at target+0x30, and pop; the next
+      separately linked function opens push {r4,r5,lr} at 0x082a6554. All 21
+      direct call sites are unconditional plain BL (0x080b558c/0x080b55a8,
+      0x0813cc50..0x0813cd58, 0x081b5558..0x081b64a4, and
+      0x082375f4..0x0823792c); decoding every ARM B/BL word in osos.dec found
+      no predicated or plain-B sites. The resolve result gates the entire
+      target access: zero returns both AAPCS lanes zero, nonzero returns the
+      aligned target +0x30/+0x34 pair as a u64. `playlistPersistentID` is the
+      consuming key at 0x080b558c/0x080b55a8; 0x0813cc50/0x0813cc68 compare
+      the pair with another object's virtual identity, grounding the
+      persistent-ID name. The static vtable's +0xc word (0x0826acd8) is a
+      selector/implementation data pair, not a decodable entry; a boot-time
+      fixup plausibly replaces it, so the port preserves the raw vtable
+      dispatch without inventing a callee. Deliberate host deviation: the
+      slot is a native-width function pointer in fixtures while reference and
+      target pointers remain target u32 words. Host tests prove failed-resolve
+      short-circuiting, arbitrary nonzero resolve truthiness, full distinct
+      AAPCS halves, and a resolved zero identifier. match.py structural review
+      is recorded with this port's commit.
+
   - address: 0x082a6620
     ghidra: FUN_082a6620
     name: ui_element_reference_is_current
