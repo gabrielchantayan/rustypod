@@ -19,6 +19,7 @@ pub mod decoder_end_batch;
 pub mod decoder_cleanup;
 pub mod empty_destructor;
 pub mod empty_destructor_166a3c;
+pub mod tagged_pointer_init;
 pub mod draw_state;
 pub mod draw_state_color;
 pub mod draw_state_fill;

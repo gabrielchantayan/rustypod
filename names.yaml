@@ -45290,3 +45290,31 @@ functions:
       wrapping_neg preserves the ARM result for INT_MIN; host tests
       cover zero, both signs, representative bits, both extrema, and
       double negation restoring the original word.
+
+  # --- tagged-pointer initializer ---
+  - address: 0x08166a2c
+    ghidra: FUN_08166a2c
+    name: tagged_pointer_init
+    size: 12
+    sig: "u8 *tagged_pointer_init(u8 *this, u32 tag)"
+    module: cxx/tagged_pointer_init
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: tag
+      r0 return: this
+    notes: >-
+      Raw ARM is `strb r1,[r0]; mov r1,#0; str r1,[r0,#4]; bx lr`: write
+      tag's low byte at +0, preserve bytes +1..+3, clear the aligned word
+      at +4, and return this unchanged. True code extent is 12 bytes,
+      0x08166a2c..0x08166a38; Ghidra's reported 16 bytes swallows the
+      separately linked 4-byte empty destructor at 0x08166a3c. Decoding
+      every ARM B/BL word in osos.dec finds exactly 21 direct callers, all
+      unconditional plain bl, with no predicated forms or plain-B tail
+      calls. No aligned image data word equals 0x08166a2c, so binding is
+      static rather than virtual. The Rust port uses a u32 tag to accept
+      the complete ARM argument register while intentionally storing only
+      its low byte. Its own target text section prevents accidental
+      identical-code folding; host tests prove r0 pass-through, high-bit
+      tag truncation, the pointer-word clear, and preservation of adjacent
+      sentinel and padding bytes. No deliberate behavioral deviations.
