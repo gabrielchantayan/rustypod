@@ -1,0 +1,194 @@
+//! Element-local content bounds with the retail border inset.
+//!
+//! `ui_element_content_bounds` — original: `FUN_082a2604` @
+//! **0x082a2604**, 84 bytes (`0x082a2604..0x082a2658`; the next function
+//! starts at `0x082a2658`). Raw decoding finds 21 direct `bl` call sites.
+//!
+//! # Algorithm
+//!
+//! Copy the element's local bounds rectangle at +0x80 into the output,
+//! move it to the origin, then shrink it by a 1- or 2-pixel inset chosen
+//! from the flag word at +0x48. The inset selection is the same decision
+//! tree the firmware uses at 0x082a2468: selected flag combinations ask
+//! for a 1-pixel border, others for 2 pixels, and the rest for none.
+//! Over-insetting clears the rectangle through the shared `rect_inset`
+//! validity check.
+//!
+//! # Deliberate deviations
+//!
+//! The flag-to-inset decision is reproduced as a private Rust helper in
+//! this module; the retail 0x082a2468 symbol stays unported rather than
+//! becoming a second exported seam.
+
+use core::mem::{offset_of, size_of};
+use core::ptr;
+
+use crate::ui::rect::{rect_inset, rect_move_to_origin, Rect};
+
+
+#[repr(C)]
+struct ElementFields {
+    _before_flags: [u8; 0x48],
+    flags: u32,
+    _before_bounds: [u8; 0x34],
+    bounds: Rect,
+}
+
+const _: [u8; 0x90] = [0; size_of::<ElementFields>()];
+const _: [u8; 0x48] = [0; offset_of!(ElementFields, flags)];
+const _: [u8; 0x80] = [0; offset_of!(ElementFields, bounds)];
+
+#[inline(never)]
+fn content_inset_for_flags(flags: u32) -> i32 {
+    match flags & 0x00e0_0000 {
+        0x0020_0000 | 0x0040_0000 => 1,
+        0x0060_0000 | 0x0080_0000 | 0x00a0_0000 => 2,
+        _ if (flags & 0x001c_0000) != 0 => 1,
+        _ => 0,
+    }
+}
+
+/// ui_element_content_bounds — original: `FUN_082a2604` @ 0x082a2604
+/// (84 bytes; 21 direct `bl` call sites).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ui_element_content_bounds(element: *mut u8, out: *mut Rect) {
+    let element = element.cast::<ElementFields>();
+    ptr::write(out, ptr::addr_of!((*element).bounds).read());
+    rect_move_to_origin(out);
+
+    let inset = content_inset_for_flags(ptr::addr_of!((*element).flags).read());
+    if inset > 0 {
+        rect_inset(out, inset, inset);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[repr(C)]
+    struct Fixture {
+        _before_flags: [u8; 0x48],
+        flags: u32,
+        _before_bounds: [u8; 0x34],
+        bounds: Rect,
+    }
+
+    const _: [u8; 0x90] = [0; size_of::<Fixture>()];
+    const _: [u8; 0x48] = [0; offset_of!(Fixture, flags)];
+    const _: [u8; 0x80] = [0; offset_of!(Fixture, bounds)];
+
+    fn rect(top: i32, left: i32, bottom: i32, right: i32) -> Rect {
+        Rect {
+            top,
+            left,
+            bottom,
+            right,
+        }
+    }
+
+    fn expected(bounds: Rect, flags: u32) -> Rect {
+        let inset = match flags & 0x00e0_0000 {
+            0x0020_0000 | 0x0040_0000 => 1,
+            0x0060_0000 | 0x0080_0000 | 0x00a0_0000 => 2,
+            _ if (flags & 0x001c_0000) != 0 => 1,
+            _ => 0,
+        };
+
+        let mut out = Rect {
+            top: 0,
+            left: 0,
+            bottom: bounds.bottom.wrapping_sub(bounds.top),
+            right: bounds.right.wrapping_sub(bounds.left),
+        };
+
+        if inset > 0 {
+            out.top = out.top.wrapping_add(inset);
+            out.left = out.left.wrapping_add(inset);
+            out.bottom = out.bottom.wrapping_sub(inset);
+            out.right = out.right.wrapping_sub(inset);
+            if out.left > out.right || out.top > out.bottom {
+                out = Rect::default();
+            }
+        }
+
+        out
+    }
+
+    fn run_case(flags: u32, bounds: Rect, seed: Rect) -> Rect {
+        let mut fixture = Fixture {
+            _before_flags: [0xa5; 0x48],
+            flags,
+            _before_bounds: [0x5a; 0x34],
+            bounds,
+        };
+        let mut out = seed;
+        unsafe {
+            ui_element_content_bounds(
+                (&mut fixture as *mut Fixture).cast::<u8>(),
+                &mut out,
+            );
+        }
+        out
+    }
+
+    #[test]
+    fn matches_reference_for_all_flag_classes_and_edge_rects() {
+        let bounds = [
+            rect(10, 20, 18, 34),   // width/height 14/8
+            rect(-5, 7, 5, 9),      // negative origin, thin width
+            rect(0, 0, 4, 4),       // degenerate after a 2px inset
+            rect(3, -2, 6, 1),      // width/height 3/3
+            rect(100, 200, 101, 201), // 1x1, over-inset clears
+            rect(-20, -30, -10, -15), // entirely negative coordinates
+        ];
+
+        let flags = [
+            0x0000_0000,
+            0x0002_0000,
+            0x0004_0000,
+            0x0006_0000,
+            0x0008_0000,
+            0x000a_0000,
+            0x000c_0000,
+            0x000e_0000,
+            0x001c_0000,
+            0x001e_0000,
+            0x0020_0000,
+            0x0040_0000,
+            0x0060_0000,
+            0x0080_0000,
+            0x00a0_0000,
+            0x00c0_0000,
+            0x00e0_0000,
+            0x00c0_0000 | 0x001c_0000,
+            0x00e0_0000 | 0x001c_0000,
+        ];
+
+        for &flags in &flags {
+            for &bounds in &bounds {
+                let seed = rect(-123, 456, -789, 1011);
+                let got = run_case(flags, bounds, seed);
+                let want = expected(bounds, flags);
+                assert_eq!(got, want, "flags={flags:#010x} bounds={bounds:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn leaves_the_origin_and_copy_intact_when_no_inset_is_required() {
+        let bounds = rect(7, -3, 11, 5);
+        let got = run_case(0, bounds, rect(9, 9, 9, 9));
+        assert_eq!(got, rect(0, 0, 4, 8));
+    }
+
+    #[test]
+    fn preserves_degenerate_rectangles_but_clears_inverted_ones() {
+        let degenerate = run_case(0x0060_0000, rect(0, 0, 4, 4), Rect::default());
+        assert_eq!(degenerate, rect(2, 2, 2, 2));
+
+        let cleared = run_case(0x0020_0000, rect(0, 0, 1, 1), Rect::default());
+        assert_eq!(cleared, Rect::default());
+    }
+}

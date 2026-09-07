@@ -372,6 +372,8 @@ pub unsafe extern "C" fn rect_set(rect: *mut Rect, top: i32, left: i32, bottom: 
 /// horizontal edge and `dy` on each vertical one (negative values grow
 /// it). Over-inserting past the middle inverts the rectangle, and the
 /// closing `rect_is_valid` check clears it instead.
+#[inline(never)]
+
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rect_inset(rect: *mut Rect, dx: i32, dy: i32) {
     let r = &mut *rect;
@@ -408,6 +410,8 @@ pub unsafe extern "C" fn rect_inset_vertical(rect: *mut Rect, dy: i32) {
 /// keeping its size — the far edges become the height and width. Done
 /// by subtraction rather than by calling [`rect_offset`], so it is
 /// exact even for coordinates whose negation would overflow.
+#[inline(never)]
+
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rect_move_to_origin(rect: *mut Rect) {
     let r = &mut *rect;
