@@ -45503,3 +45503,67 @@ functions:
       and return propagation. match.py on the worktree archive reports the
       expected one-instruction b versus the relocation-safe ldr pc plus
       target word veneer; no original instruction prefix remains by design.
+
+  # --- vendored OpenSSL: the EVP digest entry points @ 0x0804a564..0x0804a734 ---
+  # Identity is nailed down by OpenSSL's own assertion string, verbatim at
+  # 0x0804a694: "ctx->digest->md_size <= EVP_MAX_MD_SIZE" (crypto/evp/digest.c).
+  # The cluster is EVP_DigestInit_ex @ 0x0804a6bc (clears flag bit 2, releases
+  # the old md_data, stores the type at ctx+0x00, allocates type->ctx_size
+  # (+0x44) into ctx+0x0c via traced_alloc, tail-calls type->init (+0x10)),
+  # EVP_DigestUpdate @ 0x0804a728 (below), EVP_DigestFinal_ex @ 0x0804a604
+  # (md_size assert, type->final (+0x18), optional size out-parameter,
+  # type->cleanup (+0x20), flag bit 2, iram_memzero of md_data) and the
+  # one-shot wrapper @ 0x0804a564 that runs all four over a 16-byte stack
+  # EVP_MD_CTX. This is the SSLeay-era 0.9.x layout - update hangs off
+  # ctx->digest, not off the context - and is a different animal from the
+  # proprietary MBA-obfuscated digest ported as crypto/digest_init.
+  - address: 0x0804a728
+    ghidra: FUN_0804a728
+    name: evp_digest_update
+    size: 12
+    sig: "int evp_digest_update(EvpMdCtx *ctx, const u8 *data, u32 count)"
+    module: crypto/evp_digest_update
+    status: ported
+    renames:
+      param_1/r0: ctx
+      r1: data
+      r2: count
+      FUN_0804a6bc: evp_digest_init_ex (not ported)
+      FUN_0804a604: evp_digest_final_ex (not ported)
+      FUN_0804ac2c: evp_md_ctx_cleanup (not ported)
+      FUN_0804b214: evp_sha1 (the EVP_MD getter; not ported)
+    notes: >-
+      OpenSSL's `EVP_DigestUpdate` from crypto/evp/digest.c, three words
+      and nothing else - `ldr r3,[r0,#0x0]` / `ldr r3,[r3,#0x14]` /
+      `bx r3` - i.e. `return ctx->digest->update(ctx, data, count)` as a
+      tail call. Extent verified from the raw image rather than trusted:
+      the previous function ends at 0x0804a724 with `bx r1` and the next
+      one (the base64 encoder) starts at 0x0804a734 with
+      `stmdb sp!,{r4,lr}`, so there is no literal pool and Ghidra's 12
+      bytes are exact for once. r0, r1 and r2 pass through untouched;
+      only r3 - the unused fourth argument register - is clobbered, which
+      is why every Ghidra call site shows at most three arguments.
+      Call count binary-verified by decoding every B/BL word in osos.dec
+      exactly 21 sites, 19 unconditional `bl` and 2 `blgt` (0x080ebfdc
+      and 0x080ef6c4), zero tail `b`, and NO data word in the image holds
+      0x0804a728, so it is never dispatched indirectly. The predication
+      is a real behavioural fact - the body contains no `cmp` at all, so
+      there is neither a NULL guard nor a zero-length guard, and both
+      predicated callers test the buffer pointer and the byte count
+      themselves (`cmp r0,#0x0` / `cmpne r5,#0x0` / `movgt` the three
+      arguments / `blgt`) before deciding to call. A zero count that does
+      arrive is still forwarded to the algorithm, and this port keeps
+      that. The EVP_MD slots the port declares are the ones the four
+      sibling entry points actually load - md_size +0x08, init +0x10,
+      update +0x14, final +0x18, cleanup +0x20 - and +0x1c is left as an
+      untyped word because nothing in the cluster reads it, so its ABI is
+      unobserved and is not invented here. Deviation - host only - host
+      pointers are twice the target's 32-bit width, so EvpMd and EvpMdCtx
+      place their slots as `#[repr(C)]` named fields instead of addressing
+      raw bytes; on armv5te-none-eabi the fields land on the original
+      offsets, and the pinned body words plus the decoded `#0x14`
+      immediate are asserted in a host test so the declared slot stays
+      tied to the encoding. match.py against the worktree archive shows
+      the same two loads and the same `bx r3` tail branch, with a
+      `push {fp, lr}` / `pop {fp, lr}` pair the release profile's frame
+      pointers add around them; the dispatch structure is identical.
