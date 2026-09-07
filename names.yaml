@@ -45128,3 +45128,26 @@ functions:
       preserved. Host tests (2): r0 pass-through across NULL, unaligned
       and sentinel pointers; a 0x2c-byte fixture byte-compared before
       and after to prove the body stores nothing.
+
+  - address: 0x082e9b40
+    ghidra: FUN_082e9b40
+    name: negate_i32_in_place
+    size: 20
+    sig: "u32 negate_i32_in_place(i32 *value)"
+    module: app/negate_i32_in_place
+    status: ported
+    renames:
+      param_1: value
+      r0 return: zero_status
+    notes: >-
+      Raw bytes decode as ldr r1,[r0]; rsb r1,r1,#0; str r1,[r0]; mov
+      r0,#0; bx lr: negate the aligned signed word in place using
+      two's-complement wrapping arithmetic, then return zero. The next
+      separately entered function starts at 0x082e9b54, so Ghidra's
+      20-byte extent is exact. Decoding every ARM B/BL word in osos.dec
+      finds exactly 21 callers: all are unconditional bl instructions,
+      with no predicated bl forms and no plain-b tail calls. No NULL or
+      alignment guard exists in the original or port. The Rust
+      wrapping_neg preserves the ARM result for INT_MIN; host tests
+      cover zero, both signs, representative bits, both extrema, and
+      double negation restoring the original word.
