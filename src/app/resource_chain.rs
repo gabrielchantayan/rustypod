@@ -79,8 +79,14 @@
 //! - `resource_chain_find_string` and `resource_chain_find_bitmap` are
 //!   calls here, where the originals @ 0x0827239c and 0x0827238c are
 //!   tail `b`s; the observable behavior is identical.
+//! The selector-aware front-end at 0x0814376c follows the same chain,
+//! but forwards an extra selector argument through slot +0x80 before it
+//! falls back to [`resource_chain_find`].
+
 
 use core::ptr;
+use crate::app::registry::{object_cast_to_class, FrameworkObject};
+
 
 /// A resource type tag: four characters packed big-endian into a word,
 /// the way the image's literal pool stores them (0x53747220 = `"Str "`).
@@ -279,6 +285,89 @@ pub unsafe extern "C" fn resource_chain_write(
         }
     }
 }
+
+/// Vtable slot +0x80: selector-aware resource lookup.
+pub type ResourceSelectorFindFn = unsafe extern "C" fn(
+    provider: *mut ResourceSelectorProvider,
+    kind: ResourceKind,
+    id: u32,
+    selector: u32,
+    found: *mut *mut u8,
+) -> u32;
+
+/// A provider chain node that can answer a selector-aware lookup.
+#[repr(C)]
+pub struct ResourceSelectorProviderVTable {
+    /// Slots +0x00..+0x10, not dispatched here.
+    pub slots_below: [Option<unsafe extern "C" fn()>; 5],
+    /// Slot +0x14.
+    pub cast_to_class: unsafe extern "C" fn(this: *mut FrameworkObject, class_id: u32) -> *mut u8,
+    /// Slots +0x18..+0x60, not dispatched here.
+    pub slots_between: [Option<unsafe extern "C" fn()>; 19],
+    /// Slot +0x64.
+    pub find: ResourceFindFn,
+    /// Slots +0x68..+0x7c, not dispatched here.
+    pub slots_between_find_and_selector: [Option<unsafe extern "C" fn()>; 6],
+    /// Slot +0x80.
+    pub find_with_selector: ResourceSelectorFindFn,
+}
+
+/// A selector-aware provider chain node.
+#[repr(C)]
+pub struct ResourceSelectorProvider {
+    /// +0x00
+    pub vtable: *const ResourceSelectorProviderVTable,
+    /// +0x04..+0x10, not decoded by this port.
+    pub state_below_next: [*mut u8; 4],
+    /// +0x14 — the next provider to try, refcounted by the setter.
+    pub next: *mut ResourceSelectorProvider,
+}
+
+/// resource_chain_find_with_selector — original: `FUN_0814376c` @ 0x0814376c
+/// (184 bytes; **21 `bl` call sites**, binary-scanned from `osos.dec`).
+///
+/// Ask the head provider, then each child provider in the chain, for the
+/// `(kind, id, selector)` resource. The out word is cleared once and passed
+/// through every selector-aware call at slot +0x80; the first provider that
+/// returns non-zero wins and its written pointer is returned. If no provider
+/// answers, the function falls back to the regular [`resource_chain_find`]
+/// lookup on `(head, kind, id)` and returns that raw pointer.
+///
+/// The child chain is walked by `next` at +0x14, but each child is first
+/// downcast to class id 6 through [`object_cast_to_class`]. A child that does
+/// not accept that class id is skipped. The fallback ignores `selector`,
+/// exactly as the original does.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn resource_chain_find_with_selector(
+    head: *mut ResourceSelectorProvider,
+    kind: ResourceKind,
+    id: u32,
+    selector: u32,
+) -> *mut u8 {
+    let mut found: *mut u8 = ptr::null_mut();
+    if ((*(*head).vtable).find_with_selector)(head, kind, id, selector, &mut found) != 0 {
+        return found;
+    }
+
+    let mut node = (*head).next;
+    while !node.is_null() {
+        let provider = object_cast_to_class(node as *mut FrameworkObject, RESOURCE_SELECTOR_CLASS_ID)
+            as *mut ResourceSelectorProvider;
+        if !provider.is_null()
+            && ((*(*provider).vtable).find_with_selector)(provider, kind, id, selector, &mut found)
+                != 0
+        {
+            return found;
+        }
+        node = (*node).next;
+    }
+
+    resource_chain_find(head as *mut ResourceProvider, kind, id)
+}
+
+const RESOURCE_SELECTOR_CLASS_ID: u32 = 6;
+
 
 /// resource_chain_find_bitmap — original: `FUN_0827238c` @ 0x0827238c
 /// (16 bytes: 12 code + the 4-byte `"BMap"` literal @ 0x08272398;
@@ -952,6 +1041,299 @@ mod tests {
         assert!(chain.read_calls().is_empty(), "the read-back went through the other vtable");
     }
 
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    struct SelectorCall {
+        provider: *mut ResourceSelectorProvider,
+        kind: ResourceKind,
+        id: u32,
+        selector: u32,
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    struct FallbackCall {
+        provider: *mut ResourceSelectorProvider,
+        kind: ResourceKind,
+        id: u32,
+    }
+
+    #[derive(Clone, Copy)]
+    struct SelectorScript {
+        writes: Option<*mut u8>,
+        answers: u32,
+    }
+
+    impl SelectorScript {
+        const fn passes() -> SelectorScript {
+            SelectorScript { writes: None, answers: 0 }
+        }
+
+        fn answers(value: usize) -> SelectorScript {
+            SelectorScript { writes: Some(value as *mut u8), answers: 1 }
+        }
+    }
+
+    static mut SELECTOR_CALLS: Vec<SelectorCall> = Vec::new();
+    static mut FALLBACK_CALLS: Vec<FallbackCall> = Vec::new();
+    static mut CAST_CALLS: Vec<(usize, u32)> = Vec::new();
+    static mut SELECTOR_SCRIPTS: Vec<SelectorScript> = Vec::new();
+    static mut FALLBACK_SCRIPTS: Vec<SelectorScript> = Vec::new();
+    static mut CAST_ACCEPTS: Vec<bool> = Vec::new();
+    static mut NODE_ADDRS: Vec<usize> = Vec::new();
+
+    unsafe fn selector_node_index(provider: *mut ResourceSelectorProvider) -> usize {
+        NODE_ADDRS
+            .iter()
+            .position(|&addr| addr == provider as usize)
+            .expect("selector test provider must be in the node list")
+    }
+
+    unsafe extern "C" fn selector_find(
+        provider: *mut ResourceSelectorProvider,
+        kind: ResourceKind,
+        id: u32,
+        selector: u32,
+        found: *mut *mut u8,
+    ) -> u32 {
+        let index = selector_node_index(provider);
+        SELECTOR_CALLS.push(SelectorCall { provider, kind, id, selector });
+        let script = SELECTOR_SCRIPTS[index];
+        if let Some(value) = script.writes {
+            *found = value;
+        }
+        script.answers
+    }
+
+    unsafe extern "C" fn fallback_find(
+        provider: *mut ResourceProvider,
+        kind: ResourceKind,
+        id: u32,
+        found: *mut *mut u8,
+    ) -> u32 {
+        let provider = provider as *mut ResourceSelectorProvider;
+        let index = selector_node_index(provider);
+        FALLBACK_CALLS.push(FallbackCall { provider, kind, id });
+        let script = FALLBACK_SCRIPTS[index];
+        if let Some(value) = script.writes {
+            *found = value;
+        }
+        script.answers
+    }
+
+    unsafe extern "C" fn selector_cast_to_class(
+        this: *mut FrameworkObject,
+        class_id: u32,
+    ) -> *mut u8 {
+        let provider = this as *mut ResourceSelectorProvider;
+        let index = selector_node_index(provider);
+        CAST_CALLS.push((provider as usize, class_id));
+        if class_id == RESOURCE_SELECTOR_CLASS_ID && CAST_ACCEPTS[index] {
+            provider as *mut u8
+        } else {
+            ptr::null_mut()
+        }
+    }
+
+    #[repr(C)]
+    struct SelectorChain {
+        nodes: Vec<std::boxed::Box<ResourceSelectorProvider>>,
+    }
+
+    impl SelectorChain {
+        fn new(
+            selector_scripts: &[SelectorScript],
+            fallback_scripts: &[SelectorScript],
+            cast_accepts: &[bool],
+        ) -> SelectorChain {
+            assert_eq!(selector_scripts.len(), fallback_scripts.len());
+            assert_eq!(selector_scripts.len(), cast_accepts.len());
+            unsafe {
+                SELECTOR_CALLS = Vec::new();
+                FALLBACK_CALLS = Vec::new();
+                CAST_CALLS = Vec::new();
+                SELECTOR_SCRIPTS = selector_scripts.to_vec();
+                FALLBACK_SCRIPTS = fallback_scripts.to_vec();
+                CAST_ACCEPTS = cast_accepts.to_vec();
+            }
+            let mut nodes: Vec<std::boxed::Box<ResourceSelectorProvider>> = (0..selector_scripts.len())
+                .map(|_| {
+                    std::boxed::Box::new(ResourceSelectorProvider {
+                        vtable: &SELECTOR_VTABLE,
+                        state_below_next: [ptr::null_mut(); 4],
+                        next: ptr::null_mut(),
+                    })
+                })
+                .collect();
+            for i in (1..nodes.len()).rev() {
+                let next = &mut *nodes[i] as *mut ResourceSelectorProvider;
+                nodes[i - 1].next = next;
+            }
+            unsafe {
+                NODE_ADDRS = nodes
+                    .iter_mut()
+                    .map(|node| &mut **node as *mut ResourceSelectorProvider as usize)
+                    .collect();
+            }
+            SelectorChain { nodes }
+        }
+
+        fn head(&mut self) -> *mut ResourceSelectorProvider {
+            match self.nodes.first_mut() {
+                Some(node) => &mut **node as *mut ResourceSelectorProvider,
+                None => ptr::null_mut(),
+            }
+        }
+
+        fn node(&mut self, index: usize) -> *mut ResourceSelectorProvider {
+            &mut *self.nodes[index] as *mut ResourceSelectorProvider
+        }
+
+        fn selector_calls(&self) -> Vec<SelectorCall> {
+            unsafe { SELECTOR_CALLS.clone() }
+        }
+
+        fn fallback_calls(&self) -> Vec<FallbackCall> {
+            unsafe { FALLBACK_CALLS.clone() }
+        }
+
+        fn cast_calls(&self) -> Vec<(usize, u32)> {
+            unsafe { CAST_CALLS.clone() }
+        }
+    }
+
+    static SELECTOR_VTABLE: ResourceSelectorProviderVTable = ResourceSelectorProviderVTable {
+        slots_below: [None; 5],
+        cast_to_class: selector_cast_to_class,
+        slots_between: [None; 19],
+        find: fallback_find,
+        slots_between_find_and_selector: [None; 6],
+        find_with_selector: selector_find,
+    };
+
+    #[test]
+    fn selector_head_answer_wins_without_children_or_fallback() {
+        let _lock = TEST_LOCK.lock();
+        let mut chain = SelectorChain::new(
+            &[SelectorScript::answers(0x1111), SelectorScript::answers(0x2222)],
+            &[SelectorScript::answers(0x3333), SelectorScript::answers(0x4444)],
+            &[true, true],
+        );
+        let head = chain.head();
+
+        let found = unsafe { resource_chain_find_with_selector(head, ResourceKind::STRING, 7, 9) };
+
+        assert_eq!(found as usize, 0x1111);
+        assert_eq!(
+            chain.selector_calls(),
+            std::vec![SelectorCall {
+                provider: chain.node(0),
+                kind: ResourceKind::STRING,
+                id: 7,
+                selector: 9,
+            }]
+        );
+        assert!(chain.cast_calls().is_empty());
+        assert!(chain.fallback_calls().is_empty());
+    }
+
+    #[test]
+    fn selector_chain_keeps_trying_until_a_child_answers() {
+        let _lock = TEST_LOCK.lock();
+        let mut chain = SelectorChain::new(
+            &[
+                SelectorScript::passes(),
+                SelectorScript::passes(),
+                SelectorScript::answers(0x2222),
+            ],
+            &[SelectorScript::passes(), SelectorScript::passes(), SelectorScript::passes()],
+            &[true, false, true],
+        );
+        let head = chain.head();
+
+        let found = unsafe { resource_chain_find_with_selector(head, ResourceKind::BITMAP, 3, 0x44) };
+
+        assert_eq!(found as usize, 0x2222);
+        assert_eq!(
+            chain.cast_calls(),
+            std::vec![
+                (chain.node(1) as usize, RESOURCE_SELECTOR_CLASS_ID),
+                (chain.node(2) as usize, RESOURCE_SELECTOR_CLASS_ID),
+            ]
+        );
+        assert_eq!(
+            chain.selector_calls(),
+            std::vec![
+                SelectorCall {
+                    provider: chain.node(0),
+                    kind: ResourceKind::BITMAP,
+                    id: 3,
+                    selector: 0x44,
+                },
+                SelectorCall {
+                    provider: chain.node(2),
+                    kind: ResourceKind::BITMAP,
+                    id: 3,
+                    selector: 0x44,
+                },
+            ]
+        );
+        assert!(chain.fallback_calls().is_empty());
+    }
+
+    #[test]
+    fn selector_fallback_overwrites_declining_writes() {
+        let _lock = TEST_LOCK.lock();
+        let mut chain = SelectorChain::new(
+            &[
+                SelectorScript { writes: Some(0x1111 as *mut u8), answers: 0 },
+                SelectorScript { writes: Some(0x2222 as *mut u8), answers: 0 },
+                SelectorScript::passes(),
+            ],
+            &[
+                SelectorScript { writes: Some(0x3333 as *mut u8), answers: 1 },
+                SelectorScript::passes(),
+                SelectorScript::passes(),
+            ],
+            &[true, true, false],
+        );
+        let head = chain.head();
+
+        let found = unsafe { resource_chain_find_with_selector(head, ResourceKind::STRING, 9, 0x77) };
+
+        assert_eq!(found as usize, 0x3333);
+        assert_eq!(
+            chain.cast_calls(),
+            std::vec![
+                (chain.node(1) as usize, RESOURCE_SELECTOR_CLASS_ID),
+                (chain.node(2) as usize, RESOURCE_SELECTOR_CLASS_ID),
+            ]
+        );
+        assert_eq!(
+            chain.selector_calls(),
+            std::vec![
+                SelectorCall {
+                    provider: chain.node(0),
+                    kind: ResourceKind::STRING,
+                    id: 9,
+                    selector: 0x77,
+                },
+                SelectorCall {
+                    provider: chain.node(1),
+                    kind: ResourceKind::STRING,
+                    id: 9,
+                    selector: 0x77,
+                },
+            ]
+        );
+        assert_eq!(
+            chain.fallback_calls(),
+            std::vec![FallbackCall {
+                provider: chain.node(0),
+                kind: ResourceKind::STRING,
+                id: 9,
+            }]
+        );
+    }
+
     #[test]
     fn vtable_slots_land_on_their_original_offsets() {
         // The decoded offsets are 4-byte-word positions in the original;
@@ -978,5 +1360,26 @@ mod tests {
             "chain link +0x14"
         );
         assert_eq!(core::mem::offset_of!(ResourceProvider, vtable), 0, "vtable +0x00");
+        assert_eq!(
+            core::mem::offset_of!(ResourceSelectorProviderVTable, cast_to_class),
+            0x14 / 4 * word,
+            "selector vtable slot +0x14"
+        );
+        assert_eq!(
+            core::mem::offset_of!(ResourceSelectorProviderVTable, find),
+            0x64 / 4 * word,
+            "selector vtable slot +0x64"
+        );
+        assert_eq!(
+            core::mem::offset_of!(ResourceSelectorProviderVTable, find_with_selector),
+            0x80 / 4 * word,
+            "selector vtable slot +0x80"
+        );
+        assert_eq!(
+            core::mem::offset_of!(ResourceSelectorProvider, next),
+            0x14 / 4 * word,
+            "selector chain link +0x14"
+        );
+        assert_eq!(core::mem::offset_of!(ResourceSelectorProvider, vtable), 0, "selector vtable +0x00");
     }
 }

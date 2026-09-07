@@ -29265,6 +29265,38 @@ functions:
       is the crate's fp prologue/epilogue and LLVM's register allocation
       plus a hoisted head-NULL pre-test.
 
+  - address: 0x0814376c
+    ghidra: FUN_0814376c
+    name: resource_chain_find_with_selector
+    size: 184
+    sig: "void *resource_chain_find_with_selector(ResourceSelectorProvider *head, ResourceKind kind, u32 id, u32 selector)"
+    module: app/resource_chain
+    status: ported
+    renames:
+      param_1: head
+      param_2: kind
+      param_3: id
+      param_4: selector
+      local_1c: found
+      iVar1: child
+      piVar2: child_provider
+      iVar3: child_answer
+      FUN_0827216c: resource_chain_find
+      FUN_08275b9c: object_cast_to_class
+    notes: >-
+      Selector-aware resource lookup front-end. The head provider is
+      asked first through slot +0x80 with `(kind, id, selector, &found)`;
+      if that returns non-zero, the written pointer is returned
+      immediately. Otherwise the linked children at +0x14 are walked in
+      order, each one downcast to class id 6 through
+      object_cast_to_class and, when accepted, asked the same slot +0x80
+      question. If no provider answers, the function falls back to
+      resource_chain_find(head, kind, id) and returns that raw pointer;
+      the fallback ignores selector exactly as stock does. The out word
+      is cleared once before the search and reused across every
+      selector-aware call. Binary scan of osos.dec confirms the 184-byte
+      extent and 21 direct BL callers.
+
   - address: 0x0827239c
     ghidra: FUN_0827239c
     name: resource_chain_find_string
