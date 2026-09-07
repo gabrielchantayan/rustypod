@@ -44584,6 +44584,25 @@ functions:
       LLVM identical-code folding with other empty destructor exports; host
       tests cover pointer preservation and no object writes. match.py
       structural diff reviewed after the ARM release build.
+  - address: 0x08166a3c
+    ghidra: FUN_08166a3c
+    name: empty_destructor_166a3c
+    size: 4
+    sig: "void *empty_destructor_166a3c(void *this)"
+    module: cxx/empty_destructor_166a3c
+    status: ported
+    renames:
+      param_1/r0: this
+      r0 return: this
+    notes: >-
+      Raw ARM is a bare `bx lr`, so this is an empty C++ destructor body with
+      21 unconditional BL callers and no predicated or tail-call forms. The
+      calls pass an object pointer in r0 and discard the result, which matches
+      a destructor that owns nothing. This is the second empty-destructor
+      export in cxx/: it is behaviorally identical to 0x0826fc64
+      `empty_destructor`, but its own text section keeps the symbols distinct.
+      Host tests verify pointer preservation and that the body performs no
+      stores. match.py structural diff reviewed after the ARM release build.
 
   # --- screen layout-name setter ---
   - address: 0x08174300
