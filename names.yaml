@@ -44624,6 +44624,37 @@ functions:
       0x4b6143ff literal pool word; differs only by the crate fp frame
       and register allocation, the accepted house profile.
 
+  - address: 0x082f5364
+    ghidra: FUN_082f5364
+    name: inline_encoded_word_block_compare
+    size: 204
+    sig: "int inline_encoded_word_block_compare(const InlineEncodedWordBlock *left, const InlineEncodedWordBlock *right)"
+    module: util/encoded_word_block
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      iVar1/r0: left_count then remaining_count
+      iVar2/r1: right_count then compare_sign
+      uVar3/r1: right_product
+      uVar4/r2: left_product
+      DAT_082f5430: INLINE_ENCODED_COUNT_MULTIPLIER (0x4b6143ff)
+      DAT_082f5434: INLINE_ENCODED_WORD_COMPARE_MULTIPLIER (0x3399e27f)
+    notes: >-
+      Signed-magnitude comparator for the INLINE-storage encoded-count word
+      block family. The decoded headers are compared first; if they differ,
+      the sign of that signed comparison is returned immediately. When the
+      decoded headers match, the header sign selects the result polarity and
+      payload words 1..count are compared from high to low after multiplying
+      each word by 0x3399e27f. Unsigned ordering on those products decides
+      whether the result is sign, -sign, or zero when every payload word
+      matches. Raw ARM at 0x082f5364..0x082f5434 (Ghidra size 204 bytes,
+      literals at 0x082f5430/0x082f5434; next function starts at 0x082f5438).
+      Call count verified by decoding the osos.asm branch words at this
+      address: 21 direct call sites, all unconditional bl, 0 predicated
+      forms. Host tests cover header precedence, descending payload compare,
+      the negative-sign flip, and zero-count early return.
+
   - address: 0x080e3318
     ghidra: FUN_080e3318
     name: wmcodec_update_bits
