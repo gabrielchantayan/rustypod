@@ -33437,6 +33437,29 @@ functions:
       focused host tests:
       `src/cxx/object_flags.rs::object_flags_fetch_increment`.
 
+  # --- FreeType buffered-stream bounded reader wrapper ---
+  - address: 0x08073e10
+    ghidra: FUN_08073e10
+    name: ft_stream_read_bounded
+    size: 44
+    sig: "i32 ft_stream_read_bounded(void *owner, void *buffer, u32 len, u32 extra)"
+    module: ft/stream_read_bounded
+    status: ported
+    renames:
+      param_1: owner
+      param_1_plus_0x40000: stream_handle
+      param_2: buffer
+      param_3: len
+      param_4: extra
+    notes: >-
+      Length-gated wrapper around the buffered-stream reader at 0x08042fd4.
+      Requests above 0x40000 return !0xcf immediately; otherwise the wrapper
+      loads the stream handle from owner+0x40000, spills the requested byte
+      count into a one-word stack slot, and forwards stream, count-slot,
+      buffer, and the live r3 word unchanged. The callee remains behind a
+      host-mockable seam in src/ft/stream_read_bounded.rs: target builds
+      transmute the retailOS 0x08042fd4 body directly, while host tests
+      install a recorder that proves the guard and forwarding shape.
   # --- FreeType MacBinary resource-fork probe ---
   - address: 0x08076510
     ghidra: FUN_08076510
