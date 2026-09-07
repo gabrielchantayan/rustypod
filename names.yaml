@@ -44361,6 +44361,70 @@ functions:
       overwrite of a preset rc), positive and negative garbage verdicts
       through both the default stub and a recording seam mock.
 
+  - address: 0x083817ec
+    ghidra: FUN_083817ec
+    name: sqlite_read_schema
+    size: 64
+    sig: "int sqlite_read_schema(Parse *parse)"
+    module: sqlite/read_schema
+    status: ported
+    renames:
+      param_1: parse
+      iVar1: rc
+      FUN_0837b394: sqlite3Init (unported, SQLITE_SCHEMA_INIT seam)
+    notes: >-
+      SQLite 3.5.x's sqlite3ReadSchema (src/build.c), matched
+      statement-for-statement against the upstream source: the gate every
+      statement that needs a loaded catalogue passes through. Extent
+      byte-verified - the sixteen instruction words
+      0x083817ec..0x08381828 inclusive, and the next separately entered
+      function (stmdb sp!,{r4,r5,r6,r7,r8,r9,sl,fp,lr}) begins at
+      0x0838182c, so Ghidra's 64 bytes is exact with no trailing literal
+      pool. 20 call sites, verified by decoding every B/BL word in
+      osos.dec - all 20 are plain unconditional bl, zero predicated
+      forms, zero tail b - and the address occurs in no data word, so it
+      is never dispatched through a vtable. Algorithm - db = parse->db
+      (parse +0x00); if db->init.busy (byte at db +0x80) is non-zero
+      return SQLITE_OK without doing anything, because the loader opens
+      with the same test; otherwise call sqlite3Init(db,
+      &parse->zErrMsg) (the add r1,r4,#8 that precedes the bl) and, when
+      it fails, store the code into parse->rc (+0x04) and then bump
+      parse->nErr (+0x40) - in that register order - before returning
+      it. A successful load leaves the parse context completely
+      untouched. Behavioural fact worth pinning - the failure path
+      OVERWRITES an already-latched parse->rc (strne r1,[r4,#4] with no
+      compare of the old value), unlike sqlite_error_msg @ 0x083767a0
+      where the first error wins; every one of the 20 call sites tests
+      the return against zero and bails immediately, so a stale rc is
+      never the interesting one (e.g. 0x0837d264 - bl; cmp r0,#0;
+      movne r0,#0; bne out). Deviations - sqlite3Init @ 0x0837b394 (252
+      bytes) is not ported - it walks db->aDb calling sqlite3InitOne @
+      0x0837b5f0 per attached database, resets the internal schema @
+      0x0838209c on failure, and folds in sqlite3CommitInternalChanges
+      (clearing SQLITE_InternChanges, bit 4 of db->flags at +0x0c, which
+      is what the entry-time bic r7,#1,r1,lsr #4 latches) - so it is the
+      SQLITE_SCHEMA_INIT dispatch seam (house pattern, see
+      sqlite/error_msg.rs); its default stub returns SQLITE_OK, the state
+      the original reaches when every attached database already carries
+      DB_SchemaLoaded, i.e. no work and no diagnostic. The Parse view is
+      the existing sqlite::error_msg::Parse (db +0x00, rc +0x04,
+      z_err_msg +0x08, n_err +0x40 - exactly the four fields this gate
+      touches) and the Db view is the existing sqlite::auth_check::Db
+      (init_busy +0x80); no new struct was needed and both already assert
+      the original offsets on the 32-bit target. match.py (exit 1, diff
+      expected) - identical skeleton and identical field arithmetic
+      (ldrb +0x80 test, add r1,#8, predicated rc store then +0x40
+      increment); the diff is the crate's fp frame, the seam's volatile
+      slot load plus blx in place of the direct bl, and LLVM keeping rc
+      in r4 rather than r1. Host tests (9) - busy skip for busy bytes
+      1/2/0x80/0xff with the loader never entered, the (db,
+      &parse->zErrMsg) argument pair, success leaving rc and nErr alone,
+      failure recording the code and bumping the counter, the
+      unconditional overwrite of a preset rc, the loader's diagnostic
+      landing in z_err_msg, nErr wrapping i32::MAX -> i32::MIN like the
+      plain ARM add, the default stub, and poison checks proving nothing
+      outside rc/nErr/z_err_msg is written.
+
   - address: 0x082739e0
     ghidra: FUN_082739e0
     name: release_refcounted_value
