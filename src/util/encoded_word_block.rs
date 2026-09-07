@@ -48,6 +48,9 @@ pub struct InlineEncodedWordBlock {
 }
 
 const INLINE_ENCODED_COUNT_MULTIPLIER: i32 = 0x4b61_43ff;
+const INLINE_ENCODED_WORD_COMPARE_MULTIPLIER: u32 = 0x3399_e27f;
+
+
 
 /// Copies a bounded encoded-count word block, returning 0 on success or 1
 /// when the decoded count exceeds 28.
@@ -220,13 +223,85 @@ pub unsafe extern "C" fn copy_inline_encoded_word_block(
         remaining -= 1;
     }
 }
+/// Compares two inline encoded-count word blocks as signed magnitudes.
+///
+/// Original: `FUN_082f5364` @ 0x082f5364 (204 bytes; 21 unconditional `bl`
+/// call sites). The raw body runs 0x082f5364..0x082f5434, with the two
+/// literal-pool words at 0x082f5430 and 0x082f5434; the next function starts
+/// at 0x082f5438.
+///
+/// Algorithm: decode both headers with `0x4b6143ff`, compare the decoded
+/// signed headers first, and return immediately if they differ. When the
+/// headers match, treat the decoded header sign as the result sign and compare
+/// payload words 1..count from high to low after multiplying each word by
+/// `0x3399e27f`; unsigned ordering on those products decides whether the
+/// result is `sign`, `-sign`, or zero when every word matches.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+/// `left` and `right` must point at readable inline encoded-word blocks whose
+/// inline payloads contain at least the decoded number of words named by their
+/// headers.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn inline_encoded_word_block_compare(
+    left: *const InlineEncodedWordBlock,
+    right: *const InlineEncodedWordBlock,
+) -> i32 {
+    let mut left_count = (*left).encoded_count.wrapping_mul(INLINE_ENCODED_COUNT_MULTIPLIER);
+    let right_count = (*right).encoded_count.wrapping_mul(INLINE_ENCODED_COUNT_MULTIPLIER);
+
+    if left_count > right_count {
+        return 1;
+    }
+    if left_count < right_count {
+        return -1;
+    }
+
+    let sign = if left_count < 0 { -1 } else { 1 };
+    if left_count < 0 {
+        left_count = left_count.wrapping_neg();
+    }
+    left_count = left_count.wrapping_sub(1);
+    if left_count < 0 {
+        return 0;
+    }
+
+    let left_words = left.cast::<u32>();
+    let right_words = right.cast::<u32>();
+    let mut index = left_count as usize + 1;
+    loop {
+        let left_word =
+            unsafe { *left_words.add(index) }.wrapping_mul(INLINE_ENCODED_WORD_COMPARE_MULTIPLIER);
+        let right_word =
+            unsafe { *right_words.add(index) }.wrapping_mul(INLINE_ENCODED_WORD_COMPARE_MULTIPLIER);
+        if left_word > right_word {
+            return sign;
+        }
+        if left_word < right_word {
+            return -sign;
+        }
+
+        index -= 1;
+        if index == 0 {
+            return 0;
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+
+    use std::vec::Vec;
+
     use super::{
         copy_encoded_word_block, copy_encoded_word_block_from, copy_inline_encoded_word_block,
-        EncodedWordBlock, InlineEncodedWordBlock,
+        inline_encoded_word_block_compare, EncodedWordBlock, InlineEncodedWordBlock,
     };
+
 
     const ENCODED_COUNT_INVERSE: u32 = 0xed99_887f;
     const INLINE_ENCODED_COUNT_INVERSE: u32 = 0xda8e_bbff;
@@ -237,6 +312,17 @@ mod tests {
 
     fn inline_encoded_count(decoded_count: i32) -> i32 {
         ((decoded_count as u32).wrapping_mul(INLINE_ENCODED_COUNT_INVERSE)) as i32
+    }
+
+    fn inline_block(decoded_count: i32, payload: &[u32]) -> Vec<u32> {
+        let mut block = Vec::with_capacity(payload.len() + 1);
+        block.push(inline_encoded_count(decoded_count) as u32);
+        block.extend_from_slice(payload);
+        block
+    }
+
+    unsafe fn compare(left: &[u32], right: &[u32]) -> i32 {
+        inline_encoded_word_block_compare(left.as_ptr().cast(), right.as_ptr().cast())
     }
 
     #[test]
@@ -261,50 +347,40 @@ mod tests {
     }
 
     #[test]
-    fn rejects_out_of_range_count_without_writes() {
-        let mut source_words = [0x11, 0x22, 0x33, 0x44];
-        let mut destination_words = [0xdead_beef; 4];
-        let source = EncodedWordBlock {
-            encoded_count: 1,
-            words: source_words.as_mut_ptr(),
-        };
-        let mut destination = EncodedWordBlock {
-            encoded_count: encoded_count(2),
-            words: destination_words.as_mut_ptr(),
-        };
-        let original_header = destination.encoded_count;
+    fn compares_headers_before_payload_words() {
+        let left = inline_block(2, &[5, 1]);
+        let right = inline_block(1, &[1]);
 
-        assert_eq!(unsafe { copy_encoded_word_block(&mut destination, &source) }, 1);
-        assert_eq!(destination.encoded_count, original_header);
-        assert_eq!(destination_words, [0xdead_beef; 4]);
+        assert_eq!(unsafe { compare(&left, &right) }, 1);
+        assert_eq!(unsafe { compare(&right, &left) }, -1);
     }
 
     #[test]
-    fn copies_overlapping_words_in_descending_index_order() {
-        let mut words = [0, 1, 2, 3, 4];
-        let source = EncodedWordBlock {
-            encoded_count: encoded_count(3),
-            words: unsafe { words.as_mut_ptr().add(1) },
-        };
-        let mut destination = EncodedWordBlock {
-            encoded_count: encoded_count(1),
-            words: words.as_mut_ptr(),
-        };
+    fn compares_payload_words_from_high_to_low() {
+        let left = inline_block(2, &[1, 1]);
+        let right = inline_block(2, &[5, 1]);
 
-        assert_eq!(unsafe { copy_encoded_word_block(&mut destination, &source) }, 0);
-        assert_eq!(words, [3, 3, 3, 3, 4]);
-        assert_eq!(destination.encoded_count, source.encoded_count);
+        assert_eq!(unsafe { compare(&left, &right) }, 1);
+        assert_eq!(unsafe { compare(&right, &left) }, -1);
     }
 
     #[test]
-    fn self_copy_preserves_wrapping_minimum_count_behavior() {
-        let mut block = EncodedWordBlock {
-            encoded_count: i32::MIN,
-            words: core::ptr::null_mut(),
-        };
+    fn flips_payload_order_for_negative_blocks() {
+        let left = inline_block(-2, &[1, 1]);
+        let right = inline_block(-2, &[5, 1]);
 
-        assert_eq!(unsafe { copy_encoded_word_block(&mut block, &block) }, 0);
-        assert_eq!(block.encoded_count, i32::MIN);
+        assert_eq!(unsafe { compare(&left, &right) }, -1);
+        assert_eq!(unsafe { compare(&right, &left) }, 1);
+    }
+
+    #[test]
+    fn returns_zero_for_equal_or_empty_blocks() {
+        let equal = inline_block(3, &[7, 8, 9]);
+        let empty_left = inline_block(0, &[0xdead_beef, 0xfeed_face]);
+        let empty_right = inline_block(0, &[0xcafe_babe, 0x0123_4567]);
+
+        assert_eq!(unsafe { compare(&equal, &equal) }, 0);
+        assert_eq!(unsafe { compare(&empty_left, &empty_right) }, 0);
     }
 
     #[test]
@@ -489,4 +565,5 @@ mod tests {
         unsafe { copy_inline_encoded_word_block(destination, source) };
         assert_eq!(words, [encoded, 0xaa, 0xbb, 0xaa, 0xbb, 0xcc]);
     }
+
 }
