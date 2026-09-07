@@ -11,3 +11,5 @@ pub mod cache_lock;
 pub mod file_read;
 /// HFS B-tree node fetch and validation @ 0x08053d6c.
 pub mod hfs_btree_get_node;
+/// File-path layer failure-status accessor @ 0x0829dcf8.
+pub mod error_status;

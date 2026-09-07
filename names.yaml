@@ -45882,3 +45882,65 @@ functions:
       counted release with references remaining, the last reference, an
       already-zero count, an uncounted pool never touching the refcount
       handle, and re-reading the master pointer at call time.
+
+  - address: 0x0829dcf8
+    ghidra: FUN_0829dcf8
+    name: fs_error_status
+    size: 40
+    sig: "u32 fs_error_status(const FileAccessor *accessor)"
+    module: fs/error_status
+    status: ported
+    vars: {param_1: accessor, iVar1: errno}
+    renames:
+      FUN_082d0aa4: storage_errno
+      FUN_082d0ae8: ata_error_record
+    notes: >-
+      The file-path layer's failure-status accessor. Ghidra's 40 bytes
+      cover only the entry stub at 0x0829dcf8; its out-of-line body is
+      the 324 bytes at 0x0829dbb4..0x0829dcf4 that the stub tail-branches
+      into with `b 0x0829dbb4`. Ghidra lists NO function at 0x0829dbb4 in
+      functions.csv yet inlines that switch into the C for 0x0829dcf8, so
+      the true extent is 0x0829dbb4..0x0829dd1c = 364 bytes; the 0x0829db9c
+      entry (vector_size_elem2_clamped) already recorded 0x0829dbb4 as the
+      next function start. A scan of every ARM B/BL word in osos.dec finds
+      21 references to the entry - 20 plain `bl` plus one `beq 0x0829dcf8`
+      tail-call at 0x081bc9c4 inside the sibling accessor FUN_081bc998,
+      which returns 0 outright when its drive-letter check succeeds and
+      only falls through to the mapping when it fails (a success
+      short-circuit, not a NULL guard). The body at 0x0829dbb4 has exactly
+      one reference in the image - the entry's own tail `b` - and appears
+      in no DATA word, so it is not virtually dispatched. Algorithm - if
+      the accessor's sticky status override at +0x20 is nonzero, return it
+      verbatim (the transfer loops 0x081bdfe0 / 0x081be11c clear that word
+      before each chunk); otherwise read the calling task's storage-layer
+      errno (the code word ata_report_error @ 0x083690a8 stores at +0x04
+      of the per-task record ata_error_record @ 0x082d0ae8 owns, fetched
+      by the reader @ 0x082d0aa4) and translate it - 0..=11 through a
+      pc-relative jump table, the sparse high codes through a signed
+      compare tree - to 0x3f 0x40 0x07 0x42 0x43 0x44 0x45 0x46 0x47 0x32
+      0x49 0x4a for 0..=11, plus 0xd 0x36, 0x11 0x35, 0x16 0x37, 0x18
+      0x34, 0x1c 0x38, 0x1e 0x39, 0x1f 0x3a, 0x20 0x3b, 0x65 0x3c, 0x66
+      0x3d, 0x67 0x3e; everything else, including codes the unsigned
+      `cmp r1,#0xa` / `addls pc` pair reads as negative, yields 0x4b.
+      Deliberate deviations - the original's `mov r0,r4` hands the mapping
+      body a `this` it never reads (the body only tests r1), so the port
+      drops the dead argument; the compare tree becomes a Rust `match`,
+      exact because every non-default arm is an `==` test; the still
+      unported 16-byte reader @ 0x082d0aa4 is open-coded over the already
+      ported ata_error_record behind a FS_ERROR_HOOKS.storage_errno seam
+      (the hook exists so host tests drive the mapping without racing
+      ata_cmd's tests for the shared record pool - its default is the real
+      record read, not a stub). Codegen deviation - LLVM replaces the
+      split table-plus-tree with one dense 0x68-entry jump table covering
+      0..=0x67, default in every hole; 158 instructions against 81, same
+      answer for every input. match.py structural (exit-1 diff expected) -
+      the entry keeps the ldr +0x20 / cmp / early-return / fetch-errno /
+      tail-branch shape, differing only by the dropped dead argument, the
+      crate fp frame and the `blx` through FS_ERROR_HOOKS standing in for
+      `bl 0x082d0aa4`. Host tests (9) cover every mapped code through both
+      the mapping and the entry, the holes and the tail past 0x67, codes
+      the original reads as negative, a parked override of 1/0x4b/0x53/-1,
+      errno 0 mapping to 0x3f rather than reading as success, that no
+      status collides with the callers' 0 success value, that the head
+      words are neither read nor written, and that status_override really
+      sits at byte offset 0x20.
