@@ -14192,6 +14192,29 @@ functions:
       context clipping, hidden-origin preservation, and the parent-clip
       branch.
 
+  - address: 0x082a2604
+    ghidra: FUN_082a2604
+    name: ui_element_content_bounds
+    size: 84
+    sig: "void ui_element_content_bounds(UiElement *element, Rect *out)"
+    module: ui/content_bounds
+    status: ported
+    renames:
+      param_1/r0: element
+      param_2/r1: out
+      "element+0x48": flags
+      "element+0x80": bounds
+    notes: >-
+      Copies the element's local bounds rectangle at +0x80 into out,
+      normalizes it to the origin, and then applies a 1- or 2-pixel inset
+      chosen from the flag word at +0x48. The inset classifier is the
+      same bit test the firmware uses at 0x082a2468: certain flag
+      combinations ask for 1 pixel, others for 2, and the rest for none.
+      If the inset inverts the rectangle, rect_inset clears it. Raw
+      decoding finds 21 direct bl call sites. The flag classifier is
+      reproduced as a private Rust helper in the module; the retail
+      0x082a2468 symbol stays unported rather than becoming a second
+      exported seam.
   - address: 0x0826ec9c
     ghidra: FUN_0826ec9c
     name: ui_element_invalidate
