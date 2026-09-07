@@ -45503,3 +45503,47 @@ functions:
       and return propagation. match.py on the worktree archive reports the
       expected one-instruction b versus the relocation-safe ldr pc plus
       target word veneer; no original instruction prefix remains by design.
+
+  # --- Refcounted handle release, virtual-slot-1 instantiation ---
+  - address: 0x0839d1d4
+    ghidra: FUN_0839d1d4
+    name: refcounted_body_release_slot1
+    size: 144
+    sig: "void refcounted_body_release_slot1(RefcountedBody **slot)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r4: slot
+      FUN_0839d264: lock_if_mutex_helper
+      FUN_0839d274: unlock_if_mutex_helper
+    notes: >-
+      Ghidra reports 136 bytes; the raw extent is 144 at
+      0x0839d1d4..0x0839d264 because the shared str r6,[r4] / pop tail at
+      0x0839d25c..0x0839d260 belongs to both exits. Two separately linked
+      16-byte helpers follow at 0x0839d264 (lock) and 0x0839d274 (unlock),
+      each loading body+8, NULL-checking it and tail-branching to
+      mutex_lock 0x0807f5c4 / mutex_unlock 0x0807f6a0 (both ported); the
+      next function starts at 0x0839d284. A complete ARM B/BL word scan
+      finds 20 direct bl callers, all unconditional, in the 0x08137xxx
+      and 0x08162xxx clusters; no b sites and no predicated forms. Third
+      template instantiation of the refcounted-handle release over the
+      RefcountedBody layout shared with refcounted_body_release
+      (0x0839cd98) and refcounted_body_release_owned (0x0839d2c0); the
+      only difference is the final drop's treatment of the implementation
+      word at body+0: this one dispatches virtual slot 1 (+4) via ldr
+      r1,[r0]; ldr r1,[r1,#4]; blx r1 and never frees the implementation.
+      No identity is inferred for slot 1. Decrement is a plain wrapping
+      subs on a fresh slot load, so zero underflows to -1 and takes the
+      shared path; the unlock helper runs on another fresh slot load and
+      guards only the mutex word; the final drop is gated on a further
+      fresh load being non-NULL, then mutex_delete 0x0807f650, tag-2
+      operator_delete 0x082aad24 of the reloaded mutex word, mutex field
+      cleared, tag-2 delete of the body, and the slot NULLed on every path
+      past the decrement. Five host tests through the module's recording
+      kernel and heap seams prove final-drop event order with vtable[1]
+      dispatched and vtable[7] untouched, the non-final path, a final drop
+      with neither implementation nor mutex, the zero-underflow wrap, and
+      the NULL-body early-out. Deviation: LLVM inlines the ported mutex
+      operations where the original bl's the helpers; match.py shows the
+      same guard, decrement, dispatch and delete structure in a larger
+      body.

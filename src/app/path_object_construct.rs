@@ -258,7 +258,7 @@ pub unsafe extern "C" fn path_object_construct(
 /// to a readable [`StringObject`], unless it is exactly `this`.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
-#[link_section = ".text.path_object_construct_from_string_object"]
+#[cfg_attr(target_os = "none", link_section = ".text.path_object_construct_from_string_object")]
 pub unsafe extern "C" fn path_object_construct_from_string_object(
     this: *mut StringObject,
     source: *const StringObject,
