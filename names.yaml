@@ -45503,3 +45503,83 @@ functions:
       and return propagation. match.py on the worktree archive reports the
       expected one-instruction b versus the relocation-safe ldr pc plus
       target word veneer; no original instruction prefix remains by design.
+
+  # --- "crts" string-pool entry release (util/string_pool) ---
+  - address: 0x080c5efc
+    ghidra: FUN_080c5efc
+    name: string_pool_release
+    size: 176
+    sig: "int string_pool_release(StringPool *pool, int id)"
+    module: util/string_pool
+    status: ported
+    renames:
+      param_1/r0-r4: pool
+      param_2/r1-r5: id
+      FUN_080a7714: inlined "crts" tag guard
+      "*(pool+0x04)": flags (bit 0 FLAG_REFCOUNTED, bit 6 FLAG_IMMUTABLE)
+      "*(pool+0x08)": entries (Handle to PoolEntry[])
+      "*(pool+0x0c)": refcounts (Handle to i32[])
+      "*(pool+0x1c)": entry_count
+      "*(pool+0x30)": lock_depth
+      "*(pool+0x34)": reclaimable_bytes
+      "0x80000001": ENTRY_RECLAIMABLE
+      "0xffffffce": PARAM_ERR (-50)
+    notes: >-
+      Releases one reference to an interned entry of the 0x58-byte
+      "crts"-tagged pool that crts_object_destroy @ 0x0809e160 tears down
+      and whose +0x30 counter the util/tagged_counter pair moves. Extent
+      self-verified from raw bytes: the body runs 0x080c5efc (push
+      r4,r5,r6,lr) through the pop at 0x080c5fa8 and the next separately
+      linked function's push sits at 0x080c5fac, with no trailing literal
+      pool because the function loads no constant from memory - so
+      Ghidra's 176 bytes is exact. r6 is pushed and never used, purely for
+      eight-byte stack alignment. Call census by decoding every ARM B/BL
+      word in osos.dec - exactly 21 direct call sites, 18 plain bl and 3
+      blne (0x08048fa8, 0x08048fb8, 0x08095e3c), plus 2 tail branches, b
+      at 0x080caa24 and bne at 0x080da8a0; the predicated forms are
+      caller-side gates on unrelated conditions, not NULL guards, since
+      this function guards its own pool argument. The address occurs in no
+      data word, so it is never dispatched virtually. Algorithm - reject
+      NULL, a foreign tag, a non-zero lock_depth at +0x30, and flags bit 6
+      with -50 (mvn r0, #0x31); id 0 returns 0 as a documented no-op,
+      which is why 0x080ca934 releases fourteen stored ids back to back
+      without a single zero test and why the interning allocators
+      0x080b4e60 / 0x080be81c open by releasing the caller's old id; a
+      negative id or one past entry_count at +0x1c returns -50 (signed
+      compare). When flags bit 0 is set the parallel i32 refcount reached
+      through the +0x0c handle is decremented unconditionally with
+      wrapping arithmetic and only a zero result proceeds - an
+      already-zero count underflows to -1 and does not free. Freeing adds
+      the entry's length word to reclaimable_bytes at +0x34 and stamps
+      0x80000001 over its blob offset. Both handle fields are
+      Mac-Memory-Manager handles (pointer to a relocatable master
+      pointer), hence the double dereference, and -50 is classic Mac OS
+      paramErr. Bit 31 of a PoolEntry's first word marks a non-live entry;
+      bit 0 separates this reclaimable state, whose stale bytes still
+      occupy the blob, from the allocator's 0x80000000 free-list marker,
+      so a released entry is not returned to the free list here - the
+      compaction pass 0x080a64bc that the allocator runs before its next
+      allocation consumes reclaimable_bytes instead. Deliberate deviations
+      - the four-instruction tag guard at 0x080a7714 is inlined rather
+      than stubbed behind a dispatch seam, following the
+      util/tagged_counter.rs and util/crts_object.rs precedent, and no
+      identity is invented for that callee; the two handle fields are
+      typed as native double pointers rather than the u32 words
+      util/crts_object.rs uses, because that module only compares and
+      forwards them while this one dereferences them - native pointers
+      keep the 4-byte target spacing exactly (asserted at compile time
+      with offset_of under cfg(target_pointer_width = "32")) and let the
+      host tests exercise every path instead of skipping on hosts that
+      cannot map a fixture below 4 GiB. match.py structural review
+      (exit-1 diff expected) - same shape and identical field offsets
+      (+0x30, +0x04 tsteq #0x40, +0x1c, +0x0c, +0x08, +0x34) and the same
+      0x80000001 store; differs only by the inlined tag compare with its
+      literal-pool word, the crate fp frame, and LLVM hoisting id-1 into
+      scaled register indexing in place of the original's pre-indexed
+      ldr r1,[r0,#-4]!. Host tests (16) cover NULL, a foreign tag, a
+      locked pool, an immutable pool, id 0, negative and out-of-range
+      ids, the boundary id equal to entry_count, an empty pool,
+      uncounted release, accumulation, the wrapping add at i32::MAX,
+      counted release with references remaining, the last reference, an
+      already-zero count, an uncounted pool never touching the refcount
+      handle, and re-reading the master pointer at call time.
