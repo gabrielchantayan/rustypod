@@ -44205,6 +44205,36 @@ functions:
       Deviation: 0x080a7f2c remains a volatile hook (stock target address on
       firmware, NULL on host) because it is not ported.
 
+  # --- tagged word buffer pool slot allocator ---
+  - address: 0x0803de0c
+    ghidra: FUN_0803de0c
+    name: tagged_word_buffer_pool_take
+    size: 100
+    sig: "TaggedWordBuffer *tagged_word_buffer_pool_take(TaggedWordBufferPool *pool)"
+    module: heap/tagged_word_buffer_pool
+    status: ported
+    renames:
+      param_1/r0: pool
+      iVar1: slot_index
+      iVar2: nesting_depth
+      piVar3: slot
+      param_1_plus_0x0: slot_count
+      param_1_plus_0x4: slots
+      param_1_plus_0x284: flags
+      param_1_plus_0x288: nesting_depth
+      param_1_plus_0x28c: saved_slot_counts
+      param_1_plus_0x2bc: overflow_reported
+    notes: >-
+      The object is a 0x2c0-byte pool of 32 embedded TaggedWordBuffer slots.
+      When nesting_depth is below 13 the function uses slot_count as the
+      selected slot index; otherwise it uses nesting_depth directly. If the
+      chosen index is below 32, it stores index + 1 back to slot_count and
+      returns the embedded slot. On overflow it records
+      diag_ring_record(3, 0x74, 0x6d, 0, 0) once, latches overflow_reported,
+      and returns NULL. The sibling push/pop helpers `FUN_0803dec8` and
+      `FUN_0803dd84` maintain nesting_depth and saved_slot_counts on the same
+      object; this port keeps the same unchecked raw pointer arithmetic and a
+      direct call to the already-ported diagnostic logger.
   # --- tagged word buffer destructor ---
   - address: 0x0803e5e4
     ghidra: FUN_0803e5e4
