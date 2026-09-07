@@ -45,7 +45,13 @@
 //!   osos body that CAN be disassembled: 0x22005018 == FUN_08005018,
 //!   which identifies thunk 0x08037f88 as ui_manager_acquire, and
 //!   0x220060e0 == FUN_080060e0, which identifies thunk 0x08037f58 as
-//!   lazy_singleton_106dc_acquire.
+//!   lazy_singleton_106dc_acquire. 0x220041cc == osos 0x080041cc names
+//!   thunk 0x08037e78 signal_object: the mirror posts the gateway
+//!   request {2, status, object} and returns the status word (ported in
+//!   kernel/gateway_signal.rs). Selector 2 and the record shape are
+//!   binary facts; the "signal" reading rests on the call sites —
+//!   csem_post @ 0x080567a8 reaches it exactly when one sleeper is
+//!   parked, and kobj::waiter_wake @ 0x080567f8 is a bare alias.
 //!
 //! Caveats / deviations:
 //!
@@ -657,7 +663,7 @@ pub static ROM_THUNKS: [RomThunk; 158] = [
     RomThunk { thunk_addr: 0x08037e60, rom_target: 0x22003eb0, name: Some("size_to_class") },
     RomThunk { thunk_addr: 0x08037e68, rom_target: 0x22003be8, name: None },
     RomThunk { thunk_addr: 0x08037e70, rom_target: 0x22003d70, name: None },
-    RomThunk { thunk_addr: 0x08037e78, rom_target: 0x220041cc, name: None },
+    RomThunk { thunk_addr: 0x08037e78, rom_target: 0x220041cc, name: Some("signal_object") },
     RomThunk { thunk_addr: 0x08037e80, rom_target: 0x22001cbc, name: None },
     RomThunk { thunk_addr: 0x08037e88, rom_target: 0x22003d44, name: None },
     RomThunk { thunk_addr: 0x08037e90, rom_target: 0x220043f4, name: None },
@@ -866,7 +872,7 @@ mod tests {
     /// Known-target name mapping (see module header for the evidence).
     #[test]
     fn known_target_names() {
-        let expected: [(u32, &str); 16] = [
+        let expected: [(u32, &str); 17] = [
             (0x22000020, "__rt_memcpy"),
             (0x220000d4, "memmove"),
             (0x22000188, "memcpy"),
@@ -880,6 +886,7 @@ mod tests {
             (0x22003fd0, "sem_wait"),
             (0x2200408c, "task_unlock"),
             (0x220042b4, "sem_signal"),
+            (0x220041cc, "signal_object"),
             (0x22005018, "ui_manager_acquire"),
             (0x220060e0, "lazy_singleton_106dc_acquire"),
             (0x22007470, "event_handler_source"),
@@ -959,8 +966,8 @@ mod tests {
     #[test]
     fn named_entry_count() {
         let named = ROM_THUNKS.iter().filter(|e| e.name.is_some()).count();
-        // 16 known targets, two of them aliased by two thunks each.
-        assert_eq!(named, 18);
+        // 17 known targets, two of them aliased by two thunks each.
+        assert_eq!(named, 19);
         let _: std::string::String = ROM_THUNKS[0].name.unwrap().to_string();
     }
 

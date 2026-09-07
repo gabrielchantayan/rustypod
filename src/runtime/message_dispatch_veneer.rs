@@ -116,13 +116,16 @@ pub unsafe extern "C" fn message_dispatch_veneer(request: *mut u32) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
 
     use super::*;
     use std::sync::{Mutex, MutexGuard};
 
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
+    /// Serializes every test that swaps MESSAGE_DISPATCH_VENEER_OPS.
+    /// `pub(crate)` so kernel/gateway_signal.rs — whose original calls
+    /// this veneer — locks the same seam rather than racing it.
+    pub(crate) static DISPATCH_OPS_LOCK: Mutex<()> = Mutex::new(());
     static mut CALL_COUNT: u32 = 0;
     static mut OBSERVED_REQUEST: *mut u32 = core::ptr::null_mut();
 
@@ -147,7 +150,7 @@ mod tests {
     }
 
     fn install_recorder() -> TestOps {
-        let lock = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let lock = DISPATCH_OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let saved = unsafe { MESSAGE_DISPATCH_VENEER_OPS };
         unsafe {
             CALL_COUNT = 0;

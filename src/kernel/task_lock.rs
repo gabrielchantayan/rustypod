@@ -71,8 +71,11 @@
 //! - 0x08037e70 -> 0x22003d70 `kernel_create_dispatch` — the object-create
 //!   dispatcher (mirror frame {13, 7, op, slot, 0}); sync_sem's op_create.
 //!   5 callers, r0 = object-class opcode, r1 = slot.
-//! - 0x08037e78 -> 0x220041cc — gateway stub, service 2, r0 arg. 16 callers
-//!   (r0 = small ids like 0x2e, or pointers).
+//! - 0x08037e78 -> 0x220041cc `signal_object` — gateway stub, service 2,
+//!   r0 = kernel object id. Body recovered through the IRAM mirror and
+//!   ported in kernel/gateway_signal.rs. Binary-verified reach: 21 `bl`
+//!   (19 plain, 2 `blne`) plus 10 tail branches — the earlier "16
+//!   callers" was low.
 //! - 0x08037e80 -> 0x22001cbc — a full ROM function (kernel lock, then a
 //!   table walk), NOT a gateway stub. 2 callers: the conditional tail
 //!   `beq` @ 0x080567f0 in csem_post_deferred @ 0x080567d0 (kernel/csem.rs)
@@ -652,8 +655,30 @@ pub unsafe extern "C" fn kernel_create_dispatch(op: usize, slot: usize) -> usize
     (hook!(kernel_create_dispatch))(op, slot)
 }
 
-/// rom_svc_220041cc — original: thunk @ 0x08037e78 -> ROM gateway stub,
-/// service 2. Callers pass small ids (0x2e) or pointers.
+/// rom_svc_220041cc — original: `thunk_EXT_FUN_220041cc` @ 0x08037e78
+/// (Ghidra reports 4 bytes; the true extent is 8 — the `ldr pc, [pc, #-4]`
+/// word 0xe51ff004 at 0x08037e78 plus the target word 0x220041cc at
+/// 0x08037e7c, the sibling veneer to ROM 0x22001cbc starting immediately
+/// after). The ROM body is recoverable through the boot-relocator IRAM
+/// mirror (0x2200XXXX == osos 0x0800XXXX): mirror @ 0x080041cc (48
+/// bytes) builds the five-word gateway request {2, status, object} —
+/// clearing the status word first — posts it through the 0x08003660
+/// dispatch veneer and returns the status word. That body is ported as
+/// `kernel::gateway_signal::gateway_signal_object`, which also carries
+/// the full call-site survey; zero is success (the wrapper @ 0x080860c0
+/// maps any nonzero status to its error 0x27).
+///
+/// Call sites: 21 `bl` — 19 unconditional plus 2 `blne` @ 0x0811f808 and
+/// 0x08393a1c, both caller-side sentinel guards (this stub has none) —
+/// binary-verified by decoding every ARM B/BL word in osos.dec for every
+/// condition code. Plus 10 tail branches: 8 fixed-id shims `mov r0, #{60,
+/// 28, 26, 23, 53, 52, 51, 8}`, the bare alias `kobj::waiter_wake` @
+/// 0x080567f8, and the conditional `beq` @ 0x080567c8 in `csem_post`.
+/// No data word in osos holds 0x08037e78 — never dispatched virtually.
+///
+/// Deviation: dispatches through the ROM_KERNEL hook (volatile slot read)
+/// instead of jumping into the mask ROM — see the module header for the
+/// design; match.py shows the expected structural diff.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_220041cc(a0: usize) -> usize {
     (hook!(rom_svc_220041cc))(a0)
