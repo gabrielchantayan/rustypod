@@ -45403,3 +45403,37 @@ functions:
       identical-code folding; host tests prove r0 pass-through, high-bit
       tag truncation, the pointer-word clear, and preservation of adjacent
       sentinel and padding bytes. No deliberate behavioral deviations.
+
+  # --- UI flag-update tail forwarder (app/ui_flag_update_forwarder) ---
+  - address: 0x082879b0
+    ghidra: thunk_FUN_0819f604
+    name: ui_flag_update_forwarder
+    size: 4
+    sig: "u32 ui_flag_update_forwarder(u8 *object, u32 flag)"
+    module: app/ui_flag_update_forwarder
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: flag
+      FUN_0819f604: ui_flag_update_body
+    notes: >-
+      Raw extent is exactly four bytes at 0x082879b0..0x082879b4: the
+      sole instruction eafc5f13 is an unconditional direct tail b to
+      0x0819f604, whose separately entered body spans
+      0x0819f604..0x0819f734 (304 bytes including its three literal
+      words). Ghidra's size is exact for the thunk, not its target. A
+      complete ARM B/BL word scan finds 21 direct bl callers to this
+      entry: 19 unconditional and two blne at 0x081ecb7c and
+      0x081ecf74. It also has seven tail-b callers: six unconditional
+      and bne 0x08289c10. The predicate gates reside in callers; this
+      thunk has no NULL or flag guard and forwards r0, r1, and its body
+      result unchanged. The target body conditionally copies r1's low
+      byte to a selected UI object's +0x64 field then emits two
+      framework notifications, but no identity is inferred for that
+      body. Deviation: the relocated payload replaces the source-relative
+      branch with an ARM literal veneer to the same load address; host
+      tests inject a volatile seam and prove NULL, a noncanonical
+      all-ones flag word, one dispatch per call, argument preservation,
+      and return propagation. match.py on the worktree archive reports the
+      expected one-instruction b versus the relocation-safe ldr pc plus
+      target word veneer; no original instruction prefix remains by design.
