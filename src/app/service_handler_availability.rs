@@ -9,20 +9,21 @@
 //!
 //! Algorithm: obtain the asserting service-manager singleton, require the
 //! nonzero `+0x30` gate in the otherwise unnamed global @ 0x089ca8d0, and
-//! require `selector < 3`; either failed precondition falls through to
-//! `heap_panic`. It then asks the manager's `+4` handler-slot table for that
-//! selector and asks the unported lifecycle predicate whether the same
-//! selector's state byte is in 4..=6. It re-reads the global gate after both
-//! calls, returning one only when that reloaded gate, the handler word, and
-//! the lifecycle result are all nonzero.
+//! require `selector < 3`; either failed precondition calls `heap_panic`. It
+//! then asks [`service_handler_at`] for the selected handler word and the
+//! unported lifecycle predicate whether that selector's state byte is in
+//! 4..=6. It re-reads the global gate after both calls, returning one only
+//! when that reloaded gate, the handler word, and the lifecycle result are
+//! all nonzero.
 //!
-//! Deliberate deviation: the two unported direct callees
-//! (`FUN_08194080` and `FUN_08138d8c`) use a volatile dispatch table for host
-//! tests. Target defaults call their stock addresses, while the global gate
-//! stays a direct volatile firmware load. The fatal path is not host-tested:
-//! `heap_panic` does not return.
-
+//! Deliberate deviation: the unported lifecycle predicate (`FUN_08138d8c`)
+//! uses a volatile dispatch table for host tests. The handler accessor now
+//! routes to the Rust [`service_handler_at`] port on firmware; the global
+//! gate stays a direct volatile firmware load. The fatal path is not
+//! host-tested: `heap_panic` does not return.
 use crate::app::service_manager::service_manager_instance_veneer;
+#[cfg(target_os = "none")]
+use crate::app::service_manager::service_handler_at;
 use crate::heap::veneers::heap_panic;
 use core::ptr;
 #[cfg(test)]
@@ -78,8 +79,7 @@ struct ServiceHandlerAvailabilityOps {
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_handler_at(table: *mut u8, selector: u32) -> u32 {
-    let handler_at: HandlerAt = core::mem::transmute(0x0819_4080usize);
-    handler_at(table, selector)
+    service_handler_at(table.cast(), selector as i32)
 }
 
 #[cfg(target_os = "none")]

@@ -177,6 +177,65 @@ pub unsafe extern "C" fn service_manager_secondary_handler_get(
         as usize as *mut u8
 }
 
+/// service_handler_at — original: `FUN_08194080` @ 0x08194080 (16 bytes;
+/// 20 direct, unconditional `bl` call sites).
+///
+/// Returns word zero of the selected primary handler record. The verified
+/// four-instruction ARM body is `cmp r1,#3; blge 0x08030f44; ldr
+/// r0,[r0,r1,lsl #5]; bx lr`: records are eight words apart, the comparison
+/// is signed, and the handler word is reloaded on every call. A selector
+/// greater than or equal to three terminates through [`heap_panic`].
+///
+/// Decoding every ARM `B`/`BL` instruction in `osos.dec` found 20 direct
+/// callers, all unconditional plain `BL`; no predicated or tail branches
+/// target this address. The next distinct function begins at 0x08194090
+/// (`mov ip,r0`), confirming the 16-byte extent reported by Ghidra.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `slot_table` must point at the first word of at least three aligned
+/// eight-word records. Negative selectors intentionally retain retailOS's
+/// unchecked before-table addressing behavior and are not valid Rust memory
+/// accesses.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.service_handler_at")]
+pub unsafe extern "C" fn service_handler_at(slot_table: *const u32, selector: i32) -> u32 {
+    if selector >= 3 {
+        heap_panic();
+    }
+    core::ptr::read(slot_table.wrapping_offset(selector.wrapping_shl(3) as isize))
+}
+
+#[cfg(test)]
+mod handler_at_tests {
+    extern crate std;
+    use super::*;
+
+    #[test]
+    fn reads_primary_handler_words_at_each_valid_record_and_reloads() {
+        let mut table = [0u32; 24];
+        table[0] = 0x1111_0000;
+        table[8] = 0;
+        table[16] = 0x3333_0000;
+
+        unsafe {
+            assert_eq!(service_handler_at(table.as_ptr(), 0), 0x1111_0000);
+            assert_eq!(service_handler_at(table.as_ptr(), 1), 0);
+            assert_eq!(service_handler_at(table.as_ptr(), 2), 0x3333_0000);
+
+            table[0] = 0x2222_0000;
+            assert_eq!(
+                service_handler_at(table.as_ptr(), 0),
+                0x2222_0000,
+                "the ARM ldr reads the record word on every call"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod secondary_handler_get_tests {
     extern crate std;
