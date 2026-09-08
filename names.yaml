@@ -14661,6 +14661,32 @@ functions:
       context clipping, hidden-origin preservation, and the parent-clip
       branch.
 
+  - address: 0x082a24f4
+    ghidra: FUN_082a24f4
+    name: ui_element_bounds
+    size: 24
+    sig: "void ui_element_bounds(const UiElement *element, Rect *out)"
+    module: ui/content_bounds
+    status: ported
+    renames:
+      param_1/r0: element
+      param_2/r1: out
+      "element+0x80": bounds
+      FUN_0826c2e8: rect_move_to_origin
+    notes: >-
+      Raw extent is 0x082a24f4..0x082a2508: mov r2,r0; mov r0,r1;
+      add r1,r2,#0x80; ldm r1,{r1,r2,r3,ip}; stm r0,{r1,r2,r3,ip};
+      b 0x0826c2e8. It therefore copies all four bounds words before
+      modifying out, then tail-dispatches to rect_move_to_origin, making
+      top/left zero and preserving the signed wrapping spans in
+      bottom/right. The next distinct function starts at 0x082a250c.
+      Decoding every ARM B/BL word in osos.dec finds exactly 18 direct,
+      unconditional bl call sites; zero predicated bl and zero tail-b
+      references. Scanning every aligned word finds no data-word reference,
+      so it is not a known virtual-dispatch target. Both arguments are
+      dereferenced without NULL guards. Rust uses a normal call for the
+      tail dispatch, preserving the observable output.
+
   - address: 0x082a2604
     ghidra: FUN_082a2604
     name: ui_element_content_bounds
