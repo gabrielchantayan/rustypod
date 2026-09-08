@@ -47156,3 +47156,29 @@ functions:
       initial heap, and safe failed reallocation. match.py structural review
       compares the capacity loop, allocation/copy, realloc, and byte-store
       paths; the seam and null-result guard add control flow.
+
+  # --- Four-word record constructor ---
+  - address: 0x0803a488
+    ghidra: FUN_0803a488
+    name: four_word_record_create
+    size: 80
+    sig: "*mut FourWordRecord four_word_record_create(u32 payload)"
+    module: util/four_word_record
+    status: ported
+    renames:
+      param_1/r0/r4: payload
+      puVar1/r0: record
+      FUN_08043c18: traced_alloc
+      FUN_08049a84: diag_ring_record
+    notes: >-
+      Raw ARM confirms the supplied 80-byte extent exactly:
+      0x0803a488..0x0803a4d8, followed by the separately linked function at
+      0x0803a4d8. Decoding every ARM B/BL word in osos.dec finds 20 direct
+      inbound call sites, every one an unconditional BL; there are no
+      predicated BL forms and no direct tail B. Calls traced_alloc(16, 0, 0);
+      a non-NULL result receives zero, payload, zero, zero in its four
+      ascending 32-bit words. NULL records diagnostic (0x0d, 0x82, 0x41, 0,
+      0) through the directly ported diag_ring_record and returns NULL. No
+      dispatch seam or other deliberate deviation: both callees are already
+      ported. Host tests prove allocator arguments, all four success stores,
+      NULL return, and the exact failure-ring tag/data.

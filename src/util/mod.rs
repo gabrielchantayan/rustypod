@@ -17,6 +17,7 @@ pub mod error_latch;
 pub mod drive;
 pub mod fixed;
 pub mod field_access;
+pub mod four_word_record;
 pub mod first_entry_payload;
 pub mod global_state;
 pub mod highest_set_bit;
