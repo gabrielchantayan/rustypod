@@ -41,6 +41,7 @@ pub mod media_command_facade;
 pub mod media_ext;
 pub mod media_player;
 pub mod metadata_record;
+pub mod indexed_payload_lookup;
 pub mod message_arena;
 pub mod message_kind;
 pub mod message_kind_arena;
