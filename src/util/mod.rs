@@ -45,6 +45,7 @@ pub mod table_transform_fixed_selector;
 pub mod tagged_counter;
 pub mod three_pointer_select;
 pub mod u16_pair_copy;
+pub mod u32_pair_store;
 pub mod u8_pair_copy;
 pub mod utoa;
 pub mod video_engine;

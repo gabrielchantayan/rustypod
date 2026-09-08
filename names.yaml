@@ -46825,3 +46825,28 @@ functions:
       zeroing default and a crate static in place of runtime cache
       0x089cc918, so this getter is not hook-ready until FUN_08266990 is
       ported.
+
+  # --- Two-word record initialization helper ---
+  - address: 0x081b4e24
+    ghidra: FUN_081b4e24
+    name: store_u32_pair
+    size: 8
+    sig: "u32 *store_u32_pair(u32 *dst, u32 first, u32 second)"
+    module: util/u32_pair_store
+    status: ported
+    renames:
+      param_1: dst
+      param_2: first
+      param_3: second
+    notes: >-
+      True extent is 8 instruction bytes at 0x081b4e24..0x081b4e2b; the
+      separately linked next function starts at 0x081b4e2c. Raw ARM is
+      stm r0, {r1,r2}; bx lr: it stores first and second at dst[0] and
+      dst[1] and returns the unchanged dst through r0. Ghidra's void
+      signature is incomplete; callers at 0x081281a8, 0x0816de24,
+      0x081dcf7c, 0x081dd024, and 0x081fadc4 consume that return. Decoding
+      every ARM B/BL word in osos.dec found 20 unconditional bl call sites,
+      no predicated bl forms, and one unconditional B tail branch at
+      0x082ae914. There is no NULL guard. The Rust export has its own
+      link section to retain a distinct hook seam if LLVM folds an identical
+      body.
