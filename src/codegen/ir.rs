@@ -560,6 +560,8 @@ pub const CG_INST_OPCODE_LDI: u32 = 40;
 pub const CG_INST_OPCODE_LDW: u32 = 41;
 /// Integer-add opcode of the binary instruction kind.
 pub const CG_INST_OPCODE_ADD: u32 = 1;
+/// Integer-subtract opcode of the binary instruction kind.
+pub const CG_INST_OPCODE_SUB: u32 = 13;
 
 /// `cg_virtual_reg_type_t` — the general-purpose value class, passed by
 /// 792 of the 835 `cg_virtual_reg_create` call sites (42 pass 1, the
