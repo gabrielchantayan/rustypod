@@ -1,6 +1,7 @@
-//! The MessageKind arena: the singleton fixed-block pool's accessor.
+//! The MessageKind arena: the singleton fixed-block pool's accessor and
+//! the class-specific `operator new` that pops blocks off it.
 //!
-//! Port:
+//! Ports:
 //!
 //! - [`message_kind_arena_pool`] — `FUN_082669e4` @ 0x082669e4
 //!   (100 bytes, 0x082669e4..0x08266a48: 80 of code plus a 5-word
@@ -9,6 +10,10 @@
 //!   0 tail branches**, binary-scanned by decoding every B/BL word in
 //!   osos.dec; no DATA word holds the address, so it is never
 //!   dispatched virtually).
+//! - [`message_kind_arena_alloc`] — `FUN_08266aa4` @ 0x08266aa4
+//!   (20 bytes, 0x08266aa4..0x08266abc; **20 unconditional `bl` call
+//!   sites, 0 predicated, 0 tail branches**, binary-scanned; no DATA
+//!   word holds the address either).
 //!
 //! # A textbook ADS function-local static
 //!
@@ -47,11 +52,9 @@
 //!
 //! A slab of 256 blocks of 8 bytes: exactly the 8-byte object
 //! `message_kind_construct` @ 0x08266a48 (ported, app/message_kind.rs)
-//! builds — a vtable word plus the +0x04 kind tag. The class's own
-//! `operator new` / `operator delete` pair sits immediately after that
-//! ctor: 0x08266aa4 (`bl 0x082669e4; mov r1, r4; b
-//! fixed_block_pool_alloc`) and 0x08266a84 (`bl 0x082669e4; ...; b
-//! 0x0826c074`), neither yet ported.
+//! builds — a vtable word plus the +0x04 kind tag. Its class-specific
+//! `operator new` @ 0x08266aa4 is [`message_kind_arena_alloc`]; the
+//! neighboring `operator delete` @ 0x08266a84 remains unported.
 //!
 //! Who calls it: all 37 sites feed the result straight to
 //! `fixed_block_pool_alloc` @ 0x0826c0d8 (ported) or its free
@@ -83,7 +86,7 @@
 
 use core::ffi::c_void;
 
-use crate::heap::fixed_block_pool::FixedBlockPool;
+use crate::heap::fixed_block_pool::{fixed_block_pool_alloc, FixedBlockPool};
 use crate::kernel::sync_mutex::Mutex;
 use crate::runtime::cxa_guard::{cxa_guard_acquire, cxa_guard_release};
 use crate::runtime::shutdown_chain::cxa_atexit;
@@ -232,11 +235,43 @@ pub unsafe extern "C" fn message_kind_arena_pool() -> *mut FixedBlockPool {
     object
 }
 
+/// message_kind_arena_alloc — original: `FUN_08266aa4` @ 0x08266aa4
+/// (20 bytes, 20 unconditional `bl` call sites, binary-scanned).
+///
+/// The MessageKind class's `operator new`: fetch the singleton
+/// MessageKind arena and pop one block of `size` bytes. This is the
+/// raw instruction sequence `push {r4,lr}; mov r4,r0; bl
+/// message_kind_arena_pool; mov r1,r4; pop {r4,lr}; b
+/// fixed_block_pool_alloc`.
+///
+/// `size` is forwarded verbatim, so a request not equal to the pool's
+/// 8-byte block size uses the global `operator new` fallback inside
+/// [`fixed_block_pool_alloc`]. All 20 stock callers reach this entry
+/// through an unconditional `bl`; its address appears in no data word,
+/// so it is not virtually dispatched.
+///
+/// # Deviations
+///
+/// The tail `b` becomes a direct Rust call because both callees are
+/// ported; LLVM may still select a tail call.
+///
+/// # Safety
+///
+/// The arena accessor constructs the pool on target. The returned
+/// storage is uninitialized and this function intentionally has no
+/// NULL guard, like the original.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn message_kind_arena_alloc(size: usize) -> *mut u8 {
+    unsafe { fixed_block_pool_alloc(message_kind_arena_pool(), size) }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
 
     use super::*;
+    use crate::heap::fixed_block_pool::FreeBlock;
     use crate::runtime::shutdown_chain::{
         lib_shutdown_chain, shutdown_chain_head, ShutdownNode, SHUTDOWN_ALLOC, SHUTDOWN_FREE,
     };
@@ -253,6 +288,10 @@ mod tests {
 
     /// What the recording constructor returns.
     static mut CTOR_RESULT: *mut FixedBlockPool = core::ptr::null_mut();
+
+    /// Owns the slab backing a test pool. Raw pointers handed out by the
+    /// allocator stay valid until the next reset or restore.
+    static mut SLAB: Option<Box<[*mut FreeBlock]>> = None;
 
     unsafe extern "C" fn recording_ctor(
         this: *mut FixedBlockPool,
@@ -301,6 +340,39 @@ mod tests {
             SHUTDOWN_ALLOC = box_alloc;
             SHUTDOWN_FREE = box_free;
             *shutdown_chain_head() = core::ptr::null_mut();
+            *core::ptr::addr_of_mut!(SLAB) = None;
+        }
+        guard
+    }
+
+    /// Publishes a linked pool in the singleton object. The host's
+    /// `FreeBlock.next` is 8 bytes while retailOS words are 4 bytes, so
+    /// the backing stride is rounded up even though `block_size` keeps
+    /// the original comparison value.
+    fn install_pool(block_size: usize, count: usize) -> MutexGuard<'static, ()> {
+        let guard = reset();
+        let stride = block_size.next_multiple_of(core::mem::align_of::<*mut FreeBlock>());
+        let links = count * (stride / core::mem::size_of::<*mut FreeBlock>());
+        let slab = std::vec![core::ptr::null_mut::<FreeBlock>(); links].into_boxed_slice();
+        let base = slab.as_ptr() as *mut u8;
+        unsafe { *core::ptr::addr_of_mut!(SLAB) = Some(slab) };
+        unsafe {
+            for i in 0..count {
+                let block = base.add(i * stride) as *mut FreeBlock;
+                (*block).next = if i + 1 == count {
+                    core::ptr::null_mut()
+                } else {
+                    base.add((i + 1) * stride) as *mut FreeBlock
+                };
+            }
+            let pool = &mut *storage();
+            pool.lock = Mutex { sem_cell: core::ptr::null_mut(), unused: 0 };
+            pool.block_size = block_size;
+            pool.block_count = count;
+            pool.total_bytes = block_size * count;
+            pool.storage = base;
+            pool.free_head = base as *mut FreeBlock;
+            MESSAGE_KIND_ARENA_GUARD = 1;
         }
         guard
     }
@@ -318,6 +390,7 @@ mod tests {
             MESSAGE_KIND_ARENA_CTOR = missing_message_kind_arena_ctor;
             MESSAGE_KIND_ARENA_GUARD = 0;
             (storage() as *mut u8).write_bytes(0, core::mem::size_of::<FixedBlockPool>());
+            *core::ptr::addr_of_mut!(SLAB) = None;
         }
         drop(guard);
     }
@@ -437,6 +510,49 @@ mod tests {
             assert!(shutdown_chain_head().read().is_null(), "the node ran and was freed");
             assert_eq!((*storage()).block_size, 0xa5, "the no-op destructor touched nothing");
         }
+        restore(guard);
+    }
+
+
+    #[test]
+    fn pops_the_arenas_head_block_for_the_stock_eight_byte_request() {
+        let guard = install_pool(MESSAGE_KIND_ARENA_BLOCK_SIZE, MESSAGE_KIND_ARENA_BLOCK_COUNT);
+        let head = unsafe { (*storage()).free_head };
+        let second = unsafe { (*head).next };
+
+        let block = unsafe { message_kind_arena_alloc(MESSAGE_KIND_ARENA_BLOCK_SIZE) };
+
+        assert_eq!(block as *mut FreeBlock, head, "returns the free-list head");
+        assert_eq!(unsafe { (*storage()).free_head }, second, "and relinks the head past it");
+        restore(guard);
+    }
+
+    #[test]
+    fn forwards_the_size_verbatim_rather_than_assuming_eight() {
+        // The stock class is 8 bytes, but `size` is a real parameter:
+        // a differently sized pool still matches only when forwarded.
+        let guard = install_pool(20, 4);
+        let head = unsafe { (*storage()).free_head };
+
+        let block = unsafe { message_kind_arena_alloc(20) };
+
+        assert_eq!(block as *mut FreeBlock, head, "20 reached the pool's size test");
+        restore(guard);
+    }
+
+    #[test]
+    fn successive_allocations_walk_the_singletons_free_list() {
+        let guard = install_pool(MESSAGE_KIND_ARENA_BLOCK_SIZE, 2);
+        let (head, next) = unsafe {
+            let head = (*storage()).free_head;
+            (head, (*head).next)
+        };
+
+        let a = unsafe { message_kind_arena_alloc(MESSAGE_KIND_ARENA_BLOCK_SIZE) };
+        let b = unsafe { message_kind_arena_alloc(MESSAGE_KIND_ARENA_BLOCK_SIZE) };
+
+        assert_eq!(a as *mut FreeBlock, head, "first call takes the head");
+        assert_eq!(b as *mut FreeBlock, next, "second call takes the relinked head");
         restore(guard);
     }
 

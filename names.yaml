@@ -12953,10 +12953,10 @@ functions:
       __dso_handle 0x089ca09c); cxa_guard_release; reload the OBJECT
       literal - never the ctor's return - and return it. 256 blocks of
       8 bytes is exactly the 8-byte object message_kind_construct @
-      0x08266a48 builds (vtable word + the +0x04 kind tag); the
-      class's operator new/delete pair 0x08266aa4 / 0x08266a84 sits
-      immediately after the ctor and calls this accessor (both
-      unported).
+      0x08266a48 builds (vtable word + the +0x04 kind tag). Its
+      class-specific operator new @ 0x08266aa4 is now ported as
+      message_kind_arena_alloc; the neighboring operator delete
+      @ 0x08266a84 remains unported.
       Who calls it: all 37 sites feed the result to
       fixed_block_pool_alloc @ 0x0826c0d8 (ported) or its free
       counterpart. Decoding the r1 immediate at every site: exactly 8
@@ -13039,6 +13039,39 @@ functions:
       structural - identical push/mov/bl/ldr-literal/store/store/pop
       shape with the literal after the body; the diff is the crate's
       fp frame and the stm split.
+
+  - address: 0x08266aa4
+    ghidra: FUN_08266aa4
+    name: message_kind_arena_alloc
+    size: 20
+    sig: "void *message_kind_arena_alloc(size_t size)"
+    module: app/message_kind_arena
+    vars: {param_1: size}
+    status: ported
+    renames:
+      param_1/r0/r4: size
+      FUN_082669e4: message_kind_arena_pool (ported, app/message_kind_arena.rs)
+      FUN_0826c0d8: fixed_block_pool_alloc (ported, heap/fixed_block_pool.rs)
+    notes: >-
+      The MessageKind class's class-specific operator new. Raw ARM
+      extent is exactly 20 bytes, 0x08266aa4..0x08266abc: the preceding
+      message_kind_construct ends with its vtable literal at
+      0x08266aa0, and the next function begins with push {r0-r3} at
+      0x08266abc. The six instructions are push {r4,lr}; mov r4,r0;
+      bl 0x082669e4; mov r1,r4; pop {r4,lr}; b 0x0826c0d8: literally
+      void *operator new(size_t size) { return
+      fixed_block_pool_alloc(message_kind_arena_pool(), size); }.
+      Binary-decoding every ARM B/BL word in osos.dec found 20
+      unconditional bl call sites, zero predicated calls, and zero tail
+      branches. No aligned DATA word equals 0x08266aa4, so it is not
+      virtually dispatched. Both callees are already ported and called
+      directly; the stock tail branch becomes a Rust call, which LLVM
+      may tail-call. Host tests cover the stock 8-byte free-list pop,
+      a 20-byte pool proving size forwards unchanged, and successive
+      allocations walking the singleton free-list. match.py structural
+      review is expected to retain the accessor / saved-size /
+      fixed-block allocation sequence; LLVM frame and tail-call
+      selection may differ.
 
   - address: 0x08103584
     ghidra: FUN_08103584
