@@ -69,7 +69,9 @@
 //! menu handlers, e.g. `FUN_0810c9dc`), reached by vtable — 0x0810c9dc
 //! has no direct reference anywhere in the image.
 
-use core::ptr::{addr_of, addr_of_mut};
+use core::ptr::addr_of_mut;
+#[cfg(test)]
+use core::ptr::addr_of;
 
 /// Byte offset of the captured flag (`ldrb r0, [r0, #8]`).
 pub const SAMPLE_CAPTURED: usize = 0x08;
@@ -222,6 +224,26 @@ pub unsafe extern "C" fn wheel_sample_capture(sample: *mut u8) -> i32 {
     ((elapsed << 16) as i32) >> 16
 }
 
+/// `wheel_sample_get_rate` — original: `FUN_08292adc` @ 0x08292adc
+/// (20 bytes exactly, 0x08292adc..0x08292af0; 19 direct `bl` call sites,
+/// all unconditional, binary-scanned).
+///
+/// Captures `sample` lazily through [`wheel_sample_capture`], then returns
+/// the resulting rate word at +0x14. Raw ARM is `push {r4,lr}; mov r4,r0;
+/// bl 0x08292a88; ldr r0,[r4,#0x14]; pop {r4,pc}`. It has no NULL guard and
+/// preserves the rate's full u32 bit pattern. Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `sample` must point into a writable allocation covering
+/// `sample..sample+0x18`; it is dereferenced unchecked, as in the original.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn wheel_sample_get_rate(sample: *mut u8) -> u32 {
+    unsafe { wheel_sample_capture(sample) };
+    unsafe { (sample.add(SAMPLE_RATE) as *const u32).read_volatile() }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -366,6 +388,32 @@ mod tests {
             assert_eq!(wheel_sample_capture(sample()), 5);
             assert!((*addr_of!(CALLS)).is_empty(), "no helper runs");
             assert_eq!(word(SAMPLE_RATE), 0, "untouched");
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn rate_getter_captures_then_returns_the_new_rate_word() {
+        let guard = mock(0xfeed_cafe, WHEEL_TOUCHED_BIT, 0);
+        unsafe {
+            WHEEL_DELTA_RING[0] = 0x80;
+            assert_eq!(wheel_sample_get_rate(sample()), 8);
+            assert_eq!(*addr_of!(CALLS), std::vec!["capture", "tick_elapsed"]);
+            assert_eq!(word(SAMPLE_ELAPSED), 0xfeed_cafe);
+            assert_eq!(word(SAMPLE_RATE), 8);
+            assert_eq!(sample().add(SAMPLE_CAPTURED).read_volatile(), 1);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn rate_getter_returns_preseeded_full_width_rate_without_helpers() {
+        let guard = mock(0, 0, 0);
+        unsafe {
+            sample().add(SAMPLE_CAPTURED).write_volatile(1);
+            (sample().add(SAMPLE_RATE) as *mut u32).write_volatile(0xffff_fffe);
+            assert_eq!(wheel_sample_get_rate(sample()), 0xffff_fffe);
+            assert!((*addr_of!(CALLS)).is_empty(), "captured sample skips all helpers");
         }
         restore(guard);
     }
