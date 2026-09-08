@@ -46690,6 +46690,36 @@ functions:
       tests (3): payload pointer returned verbatim, NULL payload passes
       through as NULL, arbitrary (even unaligned) word returned verbatim
       with the holder word never written.
+  - address: 0x0810b3e4
+    ghidra: FUN_0810b3e4
+    name: heap_string_destroy
+    size: 40
+    sig: "void heap_string_destroy(HeapString *this)"
+    module: cxx/heap_string
+    status: ported
+    vars: {param_1: this, iVar1: payload}
+    renames:
+      param_1/r0/r4: this
+      iVar1/r0: payload
+      FUN_080e7970: free_wrapper
+    notes: >-
+      Raw osos.dec words at 0x0810b3e4..0x0810b408 are
+      e92d4010 e1a04000 e5900000 e3500000 08bd8010 e3a01014 ebff715b
+      e3a00000 e5840000 e8bd8010. The next sibling begins with cmp r0,#0
+      at 0x0810b40c, so the extent is exactly 40 bytes. It saves this in
+      r4, loads this->data, and returns immediately if that word is NULL;
+      otherwise it calls free_wrapper(payload, 0x14), writes NULL to
+      this->data, and returns void. Whole-image ARM branch decoding found
+      exactly 19 direct calls, all unconditional bl, zero predicated bl;
+      its only other branch references are predicated tail b forms beq at
+      0x0810b530 and ble at 0x0810b584. No word in the image equals
+      0x0810b3e4, so there is no data/virtual dispatch seam. The absence
+      of a this NULL guard is deliberate: the initial ldr faults just as
+      stock does. Rust's if models the predicated early return; the already
+      ported free_wrapper's HEAP_OPS dispatch is the established heap-path
+      deviation. Host tests (2) prove a non-NULL sentinel is forwarded once
+      with tag 0x14 and then cleared, while NULL makes no heap call and
+      remains NULL.
   - address: 0x0810b5cc
     ghidra: FUN_0810b5cc
     name: heap_string_format

@@ -33,6 +33,8 @@
 use core::mem::MaybeUninit;
 
 use crate::cxx::string_object::retail_vsnprintf;
+use crate::heap::veneers::free_wrapper;
+
 use crate::printf::printf_api::VaList;
 
 /// The one-word holder object: `data` is the heap `char` buffer (allocated
@@ -41,6 +43,42 @@ use crate::printf::printf_api::VaList;
 pub struct HeapString {
     pub data: *mut u8,
 }
+
+/// The caller tag `heap_string_destroy` passes to `free_wrapper`
+/// (`mov r1, #0x14` @ 0x0810b3f8).
+const HEAP_STRING_PAYLOAD_FREE_TAG: usize = 0x14;
+
+/// heap_string_destroy — original: `FUN_0810b3e4` @ 0x0810b3e4 (40 bytes,
+/// words `e92d4010 e1a04000 e5900000 e3500000 08bd8010 e3a01014
+/// ebff715b e3a00000 e5840000 e8bd8010`). The sibling at 0x0810b40c opens
+/// with `cmp r0,#0`, confirming the complete extent. **19 plain `bl` call
+/// sites and zero predicated `bl` forms**, verified by decoding every ARM
+/// `B`/`BL` word in `osos.dec`; two predicated tail `b` references (`beq`
+/// @ 0x0810b530 and `ble` @ 0x0810b584) are its only non-`bl` branch
+/// references. No image word equals 0x0810b3e4, so it has no data/virtual
+/// dispatch reference.
+///
+/// Releases the one-word holder's non-NULL payload through
+/// [`free_wrapper`] with caller tag 0x14, then clears the word. A NULL
+/// payload takes the raw `popeq {r4,pc}` early return and makes no heap call.
+/// There is no NULL guard on `this`: the original's first load faults, as
+/// does this port.
+///
+/// Deviation: Rust expresses the conditional return as `if`; the already
+/// ported [`free_wrapper`] dispatches through `HEAP_OPS` rather than the
+/// retail image's direct heap path.
+#[cfg_attr(target_os = "none", link_section = ".text.heap_string_destroy")]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn heap_string_destroy(this: *mut HeapString) {
+    let payload = (*this).data;
+    if payload.is_null() {
+        return;
+    }
+    free_wrapper(payload, HEAP_STRING_PAYLOAD_FREE_TAG);
+    (*this).data = core::ptr::null_mut();
+}
+
 
 /// heap_string_data — original: `FUN_08297e34` @ 0x08297e34 (8 bytes, two
 /// words `e5900000 e12fff1e`: `ldr r0,[r0]; bx lr`; the next function — a
@@ -158,6 +196,8 @@ mod tests {
     use crate::cxx::string_object::{
         RetailVsnprintfEngineFn, RETAIL_VSNPRINTF_ENGINE, RETAIL_VSNPRINTF_SINK_ADDRESS,
     };
+    use crate::heap::veneers::tests::{free_log, mock_heap};
+
     use crate::testing::STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK;
     use std::sync::MutexGuard;
 
@@ -281,6 +321,36 @@ mod tests {
             0
         );
         assert_eq!(unsafe { (*core::ptr::addr_of!(ASSIGNED_BYTES)).clone() }, [0]);
+    }
+
+    /// A live holder releases exactly its payload with tag 0x14, then clears
+    /// its only word. The mock payload is deliberately not dereferenced.
+    #[test]
+    fn destroy_releases_payload_with_tag_then_clears_holder() {
+        let _heap = mock_heap();
+        let payload = 0xdead_beecusize as *mut u8;
+        let mut holder = HeapString { data: payload };
+
+        unsafe { heap_string_destroy(&mut holder) };
+
+        let (calls, freed, tag) = free_log();
+        assert_eq!(calls, 1);
+        assert_eq!(freed, payload);
+        assert_eq!(tag, HEAP_STRING_PAYLOAD_FREE_TAG);
+        assert!(holder.data.is_null());
+    }
+
+    /// A NULL payload takes the raw early return: it neither invokes the
+    /// free path nor changes the already-empty holder.
+    #[test]
+    fn destroy_null_payload_skips_heap_and_preserves_empty_holder() {
+        let _heap = mock_heap();
+        let mut holder = HeapString { data: core::ptr::null_mut() };
+
+        unsafe { heap_string_destroy(&mut holder) };
+
+        assert_eq!(free_log().0, 0);
+        assert!(holder.data.is_null());
     }
 
 
