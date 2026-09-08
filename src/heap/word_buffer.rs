@@ -32,6 +32,22 @@ pub struct WordBuffer {
     pub capacity: u32,
 }
 
+/// Target-layout word buffer with the adjacent marker reset by
+/// [`word_buffer_reset_optional_singleton`]. All fields remain target words
+/// so the layout is 16 bytes on both host and target.
+#[repr(C)]
+pub struct MarkedWordBuffer {
+    pub data: u32,
+    pub len: u32,
+    pub capacity: u32,
+    pub marker: u32,
+}
+
+const _: [u8; 0x04] = [0; core::mem::offset_of!(MarkedWordBuffer, len)];
+const _: [u8; 0x08] = [0; core::mem::offset_of!(MarkedWordBuffer, capacity)];
+const _: [u8; 0x0c] = [0; core::mem::offset_of!(MarkedWordBuffer, marker)];
+const _: [u8; 0x10] = [0; core::mem::size_of::<MarkedWordBuffer>()];
+
 /// The unported `FUN_080a7f2c` allocation/copy helper. It returns the new
 /// data pointer as a target word pointer, or NULL without modifying `buffer`.
 pub type WordBufferGrow = unsafe extern "C" fn(
@@ -99,12 +115,59 @@ pub unsafe extern "C" fn word_buffer_reserve(
     buffer
 }
 
+/// word_buffer_reset_optional_singleton — original: `FUN_0804082c` @
+/// 0x0804082c (88 bytes exactly; 18 unconditional `bl` plus one `blne`
+/// caller).
+///
+/// Resets `buffer` to either an empty buffer (`value == 0`) or a one-word
+/// buffer whose first data word is `value`. If the current capacity is zero,
+/// it reserves two words through [`word_buffer_reserve`]; allocation failure
+/// leaves all four words unchanged and returns zero. On success it clears the
+/// adjacent marker, sets `len` to zero, writes the first data word, then sets
+/// `len` to one only for a nonzero value. The raw body has no NULL guard; the
+/// lone predicated caller at 0x0803e9e8 gates its call with `ne`.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `buffer` must point to four aligned writable target words. Its nonzero
+/// `data` word must be a valid writable `u32` target pointer.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn word_buffer_reset_optional_singleton(
+    buffer: *mut MarkedWordBuffer,
+    value: u32,
+) -> u32 {
+    let capacity = unsafe { core::ptr::addr_of!((*buffer).capacity).read_volatile() };
+    let reserved = if capacity >= 1 {
+        buffer.cast::<WordBuffer>()
+    } else {
+        unsafe { word_buffer_reserve(buffer.cast::<WordBuffer>(), 2) }
+    };
+    if reserved.is_null() {
+        return 0;
+    }
+
+    unsafe {
+        core::ptr::addr_of_mut!((*buffer).marker).write_volatile(0);
+        core::ptr::addr_of_mut!((*buffer).len).write_volatile(0);
+        let data = core::ptr::addr_of!((*buffer).data).read_volatile() as usize as *mut u32;
+        data.write_volatile(value);
+        if value != 0 {
+            core::ptr::addr_of_mut!((*buffer).len).write_volatile(1);
+        }
+    }
+    1
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
 
     use super::*;
     use crate::drivers::ata_cmd::{TracedFreeHooks, TRACED_FREE_HOOKS};
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use std::sync::{Mutex, MutexGuard};
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -192,5 +255,53 @@ mod tests {
         assert_eq!(buffer.data, replacement.as_mut_ptr() as usize as u32);
         assert_eq!((buffer.len, buffer.capacity), (2, 8));
         unsafe { restore(guard, old_grow, old_free) };
+    }
+
+    #[test]
+    fn reset_optional_singleton_preserves_failure_and_replaces_empty_or_present_value() {
+        let (guard, old_grow, old_free) = install();
+        let mut insufficient = MarkedWordBuffer {
+            data: 0x4444_0000,
+            len: 7,
+            capacity: 0,
+            marker: 0xfeed_face,
+        };
+
+        assert_eq!(unsafe { word_buffer_reset_optional_singleton(&mut insufficient, 0x55) }, 0);
+        assert_eq!(
+            unsafe { GROW_ARGS },
+            ((&mut insufficient as *mut MarkedWordBuffer).cast::<WordBuffer>(), 2),
+        );
+        assert_eq!(
+            (insufficient.data, insufficient.len, insufficient.capacity, insufficient.marker),
+            (0x4444_0000, 7, 0, 0xfeed_face),
+        );
+        unsafe { restore(guard, old_grow, old_free) };
+
+        let Some(data) = try_map_u32_slab(hints::WORD_BUFFER_RESET_OPTIONAL_SINGLETON, 0x100) else {
+            assert!(note_missing_u32_fixture("heap::word_buffer::reset_optional_singleton"));
+            return;
+        };
+        let data = data.cast::<u32>();
+        unsafe {
+            data.write(0xaaaa_aaaa);
+            let mut buffer = MarkedWordBuffer {
+                data: data as usize as u32,
+                len: 8,
+                capacity: 1,
+                marker: 0xdead_beef,
+            };
+
+            assert_eq!(word_buffer_reset_optional_singleton(&mut buffer, 0), 1);
+            assert_eq!(data.read(), 0);
+            assert_eq!((buffer.len, buffer.capacity, buffer.marker), (0, 1, 0));
+
+            data.write(0xbbbb_bbbb);
+            buffer.len = 3;
+            buffer.marker = 0xcafe_babe;
+            assert_eq!(word_buffer_reset_optional_singleton(&mut buffer, 0x1234_5678), 1);
+            assert_eq!(data.read(), 0x1234_5678);
+            assert_eq!((buffer.len, buffer.capacity, buffer.marker), (1, 1, 0));
+        }
     }
 }
