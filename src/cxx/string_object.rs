@@ -569,6 +569,57 @@ pub unsafe extern "C" fn string_object_assign_payload(
     strcpy(destination, payload);
 }
 
+/// string_object_assign_utf16_cstr — original: FUN_0827654c @ 0x0827654c
+/// (92 bytes, all code; three BL references). Ghidra's 192-byte extent
+/// includes the separate encoder at 0x082766f8 reached by a tail BNE.
+/// NULL or a leading zero code unit dispatches virtual clear (+0xc).
+/// Otherwise request the inclusive UTF-8 byte size from virtual allocate
+/// (+0x8, flags zero) and encode through the NUL if allocation succeeds.
+/// Unlike the bounded assignment, an empty source does not allocate.
+/// The sizing/encoding helpers are direct Rust calls; virtual methods use
+/// the existing STRING_OBJECT_ASSIGN_CSTR_OPS boundary and remain unported.
+/// Source is caller-owned; replacement of the payload belongs to that
+/// boundary. Nonempty sources must be readable through their terminator.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_assign_utf16_cstr(
+    this: *mut StringObject, source: *const u16,
+) {
+    if source.is_null() || source.read() == 0 {
+        assign_cstr_clear_op()(this);
+        return;
+    }
+    let size = utf16_utf8_byte_len_plus1(source);
+    let destination = assign_cstr_allocate_op()(this, size as usize, 0);
+    if !destination.is_null() {
+        super::string_encoding::utf16_to_utf8(destination, source);
+    }
+}
+
+/// string_object_assign_codepoint — original: FUN_08276620 @ 0x08276620
+/// (108 bytes, all code; two BL references). Zero dispatches virtual clear
+/// (+0xc); otherwise allocate width(codepoint)+1 bytes through slot +0x8
+/// with flags zero, cursor-encode the value, then terminate at the advanced
+/// cursor. Allocation failure returns without writing or clearing.
+/// The unsigned width and encoder accept all u32 values, including values
+/// above Unicode's range, using at most three bytes. Both helpers call their
+/// Rust ports directly. The only deviation is the existing injectable
+/// STRING_OBJECT_ASSIGN_CSTR_OPS boundary for the unported virtual methods.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_assign_codepoint(this: *mut StringObject, codepoint: u32) {
+    if codepoint == 0 {
+        assign_cstr_clear_op()(this);
+        return;
+    }
+    let size = utf8_codepoint_byte_width(codepoint) + 1;
+    let mut cursor = assign_cstr_allocate_op()(this, size as usize, 0);
+    if !cursor.is_null() {
+        super::string_encoding::utf8_write_codepoint(&mut cursor, codepoint);
+        cursor.write(0);
+    }
+}
+
 /// string_object_assign_utf16 — original: `FUN_082765a8` @ 0x082765a8
 /// (120 bytes, all code — no literal-pool word; the next function's
 /// `push {r3, r4, r5, lr}` starts at 0x08276620). **48 `bl` call sites**
@@ -1180,6 +1231,44 @@ pub unsafe extern "C" fn string_object_c_str(this: *const StringObject) -> *cons
         return &STRING_OBJECT_EMPTY_CSTR;
     }
     payload
+}
+
+/// string_object_codepoint_ptr — original: FUN_082a50c4 @ 0x082a50c4
+/// (84 bytes, all code; seven BL references). Negative indices return NULL
+/// before reading this; a NULL payload also returns NULL. Otherwise walk
+/// at most index sequences, stopping at a literal NUL byte, and return the
+/// resulting byte pointer. Past-end indices return the terminator pointer.
+/// Decoder return values are ignored: overlong NUL and unsupported leads
+/// advance the cursor rather than ending the walk. No deviations; callers
+/// must provide a readable object/payload except for the negative-index exit.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_codepoint_ptr(
+    this: *const StringObject, index: i32,
+) -> *const u8 {
+    if index < 0 { return core::ptr::null(); }
+    let mut cursor = (*this).payload as *const u8;
+    if !cursor.is_null() {
+        for _ in 0..index {
+            if cursor.read() == 0 { break; }
+            utf8_next_codepoint(&mut cursor);
+        }
+    }
+    cursor
+}
+
+/// string_object_codepoint_at — original: FUN_082a52c8 @ 0x082a52c8
+/// (32 bytes, all code; 17 BL references). Resolve index with the pointer
+/// accessor, then decode at that position unless the pointer is NULL.
+/// Return zero for a negative index, NULL payload, terminator or unsupported
+/// sequence. Ghidra incorrectly types this as void; callers compare r0
+/// against path separators. No deviations; pointer preconditions are those
+/// of string_object_codepoint_ptr and utf8_next_codepoint.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_codepoint_at(this: *const StringObject, index: i32) -> u32 {
+    let mut cursor = string_object_codepoint_ptr(this, index);
+    if cursor.is_null() { 0 } else { utf8_next_codepoint(&mut cursor) }
 }
 
 /// Keeps the searcher's comparison as an out-of-line call. Without this
@@ -2632,6 +2721,137 @@ pub(crate) mod tests {
     }
 
     // ---- string_object_assign_utf16 ---------------------------------
+
+    #[test]
+    fn assign_utf16_cstr_clears_null_and_empty_sources_without_allocating() {
+        let mut object = utf16_test_object();
+        let _bench = assign_cstr_bench(core::ptr::null_mut());
+        unsafe {
+            string_object_assign_utf16_cstr(&mut object, core::ptr::null());
+            string_object_assign_utf16_cstr(&mut object, [0u16, 0x41].as_ptr());
+            assert!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty());
+            assert_eq!((*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).as_slice(),
+                &[&mut object as *mut _ as usize; 2]);
+        }
+    }
+
+    #[test]
+    fn assign_utf16_cstr_allocates_exactly_the_encoded_size_and_copies_through_nul() {
+        let source = [0x41u16, 0xa9, 0x20ac, 0xd83d, 0xde00, 0, 0x42];
+        let mut out = [0xa5; 16];
+        let mut object = utf16_test_object();
+        let _bench = assign_cstr_bench(out.as_mut_ptr());
+        unsafe { string_object_assign_utf16_cstr(&mut object, source.as_ptr()) };
+        assert_eq!(&out[..13], b"A\xc2\xa9\xe2\x82\xac\xed\xa0\xbd\xed\xb8\x80\0");
+        assert_eq!(&out[13..], &[0xa5; 3]);
+        unsafe {
+            assert_eq!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).as_slice(),
+                &[(&mut object as *mut _ as usize, 13, 0)]);
+            assert!((*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty());
+        }
+        assert_eq!(object.payload, 0x2222_2222 as *mut u8);
+    }
+
+    #[test]
+    fn assign_utf16_cstr_allocation_failure_preserves_the_object() {
+        let mut object = utf16_test_object();
+        let _bench = assign_cstr_bench(core::ptr::null_mut());
+        unsafe {
+            string_object_assign_utf16_cstr(&mut object, [0x41u16, 0].as_ptr());
+            assert_eq!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).as_slice(),
+                &[(&mut object as *mut _ as usize, 2, 0)]);
+            assert!((*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty());
+        }
+        assert_eq!(object.payload, 0x2222_2222 as *mut u8);
+    }
+
+    #[test]
+    fn assign_codepoint_uses_the_unsigned_cursor_encoder_and_appends_nul() {
+        for (codepoint, expected) in [
+            (0x7f, &b"\x7f\0"[..]), (0x80, &b"\xc2\x80\0"[..]),
+            (0x7ff, &b"\xdf\xbf\0"[..]), (0x800, &b"\xe0\xa0\x80\0"[..]),
+            (0xd800, &b"\xed\xa0\x80\0"[..]), (0x10000, &b"\xf0\x80\x80\0"[..]),
+            (0x80000000, &b"\xe0\x80\x80\0"[..]), (u32::MAX, &b"\xff\xbf\xbf\0"[..]),
+        ] {
+            let mut out = [0xa5; 5];
+            let mut object = utf16_test_object();
+            let _bench = assign_cstr_bench(out.as_mut_ptr());
+            unsafe { string_object_assign_codepoint(&mut object, codepoint) };
+            assert_eq!(&out[..expected.len()], expected);
+            assert!(out[expected.len()..].iter().all(|&b| b == 0xa5));
+            unsafe {
+                assert_eq!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).as_slice(),
+                    &[(&mut object as *mut _ as usize, expected.len(), 0)]);
+                assert!((*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty());
+            }
+            assert_eq!(object.payload, 0x2222_2222 as *mut u8);
+        }
+    }
+
+    #[test]
+    fn assign_zero_codepoint_clears_without_allocating() {
+        let mut object = utf16_test_object();
+        let _bench = assign_cstr_bench(core::ptr::null_mut());
+        unsafe {
+            string_object_assign_codepoint(&mut object, 0);
+            assert!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty());
+            assert_eq!((*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).as_slice(),
+                &[&mut object as *mut _ as usize]);
+        }
+    }
+
+    #[test]
+    fn assign_codepoint_allocation_failure_preserves_the_object() {
+        let mut object = utf16_test_object();
+        let _bench = assign_cstr_bench(core::ptr::null_mut());
+        unsafe {
+            string_object_assign_codepoint(&mut object, 0x20ac);
+            assert_eq!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).as_slice(),
+                &[(&mut object as *mut _ as usize, 4, 0)]);
+            assert!((*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty());
+        }
+        assert_eq!(object.payload, 0x2222_2222 as *mut u8);
+    }
+
+    #[test]
+    fn codepoint_access_resolves_multibyte_indices_and_clamps_at_the_terminator() {
+        let mut payload = *b"A\xc2\xa9\xe2\x82\xac\0";
+        let object = StringObject { vtable: core::ptr::null(), payload: payload.as_mut_ptr() };
+        for (index, offset, value) in [(0, 0, 0x41), (1, 1, 0xa9), (2, 3, 0x20ac),
+            (3, 6, 0), (4, 6, 0), (i32::MAX, 6, 0)] {
+            unsafe {
+                assert_eq!(string_object_codepoint_ptr(&object, index), payload.as_ptr().add(offset));
+                assert_eq!(string_object_codepoint_at(&object, index), value);
+            }
+        }
+    }
+
+    #[test]
+    fn codepoint_access_handles_negative_indices_before_reading_the_object() {
+        let object = StringObject { vtable: core::ptr::null(), payload: core::ptr::null_mut() };
+        unsafe {
+            for index in [i32::MIN, -1] {
+                assert!(string_object_codepoint_ptr(core::ptr::null(), index).is_null());
+                assert_eq!(string_object_codepoint_at(core::ptr::null(), index), 0);
+            }
+            for index in [0, 1, i32::MAX] {
+                assert!(string_object_codepoint_ptr(&object, index).is_null());
+                assert_eq!(string_object_codepoint_at(&object, index), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn codepoint_access_skips_zero_decoding_sequences_until_a_literal_nul() {
+        let mut payload = *b"\xc0\x80\xf0\x9f\x98Z\0";
+        let object = StringObject { vtable: core::ptr::null(), payload: payload.as_mut_ptr() };
+        for (index, offset, value) in [(0, 0, 0), (1, 2, 0), (2, 5, 0x5a), (3, 6, 0)] {
+            unsafe {
+                assert_eq!(string_object_codepoint_ptr(&object, index), payload.as_ptr().add(offset));
+                assert_eq!(string_object_codepoint_at(&object, index), value);
+            }
+        }
+    }
 
     /// A fresh object for the UTF-16 assignment tests; the payload word is a
     /// recognizable non-NULL so the tests can assert the port never writes it

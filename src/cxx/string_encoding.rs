@@ -6,6 +6,39 @@
 
 use super::string_object::utf8_next_codepoint;
 
+#[inline(always)]
+unsafe fn write_cursor_byte(cursor: *mut *mut u8, byte: u8) {
+    let out = cursor.read();
+    cursor.write(out.add(1));
+    out.write(byte);
+}
+
+/// utf8_write_codepoint — original: FUN_08275ecc @ 0x08275ecc
+/// (124 bytes, all code; four BL references and one tail B).
+/// Write one unsigned codepoint at *cursor and advance the cursor before
+/// each byte store. Values below 0x80 use one byte, below 0x800 two, and
+/// everything else three; the high byte of the three-byte form truncates
+/// `(codepoint >> 12) | 0xe0` to eight bits. Thus non-BMP values are not
+/// standard UTF-8. Zero writes one zero byte; no extra NUL is appended.
+/// No deviations. The cursor cell must be valid and its output must have
+/// space for up to three bytes. The raw-pointer ABI retains cursor reloads
+/// between stores, as in the original.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn utf8_write_codepoint(cursor: *mut *mut u8, codepoint: u32) {
+    if codepoint < 0x80 {
+        write_cursor_byte(cursor, codepoint as u8);
+        return;
+    }
+    if codepoint < 0x800 {
+        write_cursor_byte(cursor, 0xc0 | (codepoint >> 6) as u8);
+    } else {
+        write_cursor_byte(cursor, 0xe0 | (codepoint >> 12) as u8);
+        write_cursor_byte(cursor, 0x80 | ((codepoint >> 6) & 0x3f) as u8);
+    }
+    write_cursor_byte(cursor, 0x80 | (codepoint & 0x3f) as u8);
+}
+
 /// Emit one UTF-16 code unit without a terminator or surrogate pairing.
 #[inline(always)]
 unsafe fn write_code_unit(mut out: *mut u8, unit: u16) -> *mut u8 {
@@ -146,6 +179,35 @@ mod tests {
         } else {
             std::vec![0xed, 0xa0 + ((unit - 0xd800) / 64) as u8,
                 0x80 + (unit % 64) as u8]
+        }
+    }
+
+    #[test]
+    fn cursor_encoder_matches_every_code_unit_without_appending_a_terminator() {
+        for unit in 0..=u16::MAX {
+            let mut bytes = [0xa5; 5];
+            let mut cursor = unsafe { bytes.as_mut_ptr().add(1) };
+            unsafe { utf8_write_codepoint(&mut cursor, unit as u32) };
+            let expected = encoded(unit);
+            assert_eq!(&bytes[1..1 + expected.len()], expected, "unit={unit:#x}");
+            assert_eq!(cursor, unsafe { bytes.as_mut_ptr().add(1 + expected.len()) });
+            assert_eq!(bytes[0], 0xa5);
+            assert!(bytes[1 + expected.len()..].iter().all(|&b| b == 0xa5));
+        }
+    }
+
+    #[test]
+    fn cursor_encoder_preserves_unsigned_three_byte_truncation() {
+        for (codepoint, expected) in [
+            (0x10000, [0xf0, 0x80, 0x80]), (0x1f600, [0xff, 0x98, 0x80]),
+            (0x10ffff, [0xef, 0xbf, 0xbf]), (0x110000, [0xf0, 0x80, 0x80]),
+            (0x80000000, [0xe0, 0x80, 0x80]), (u32::MAX, [0xff, 0xbf, 0xbf]),
+        ] {
+            let mut bytes = [0xa5; 4];
+            let mut cursor = bytes.as_mut_ptr();
+            unsafe { utf8_write_codepoint(&mut cursor, codepoint) };
+            assert_eq!(bytes, [expected[0], expected[1], expected[2], 0xa5]);
+            assert_eq!(cursor, unsafe { bytes.as_mut_ptr().add(3) });
         }
     }
 

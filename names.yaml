@@ -41195,6 +41195,84 @@ functions:
       untouched.
 
   # --- StringObject: bounded UTF-16 assignment ---
+  - address: 0x08275ecc
+    ghidra: FUN_08275ecc
+    name: utf8_write_codepoint
+    size: 124
+    sig: "void utf8_write_codepoint(unsigned char **cursor, unsigned int codepoint)"
+    module: cxx/string_encoding
+    status: ported
+    vars:
+      param_1: "cursor"
+      param_2: "codepoint"
+      pbVar3: "out"
+      bVar1: "low_byte"
+    notes: >-
+      Four unconditional BL references and one unconditional tail B. Cursor-based encoder uses unsigned 0x80/0x800 thresholds and advances the pointer cell before each byte store. All values >=0x800 emit exactly three bytes, including out-of-range u32 inputs; the first byte truncates (codepoint >> 12) | 0xe0. No trailing NUL beyond an encoded zero itself. Ghidra misreads the final pop pc as an indirect call; raw bytes show a normal return. No deviations.
+      Codegen: 31 original versus 30 Rust instructions. Same unsigned thresholds, cursor-cell stores before byte stores, reloads and three-byte truncation; helper inlined.
+
+  - address: 0x0827654c
+    ghidra: FUN_0827654c
+    name: string_object_assign_utf16_cstr
+    size: 92
+    sig: "void string_object_assign_utf16_cstr(StringObject *this, const unsigned short *source)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      param_1: "this"
+      param_2: "source"
+      uVar3: "requested_size"
+      pbVar4: "destination"
+    notes: >-
+      Three unconditional BL references. True entry body is 92 bytes ending at 0x082765a8; Ghidra reports 192 by including the separately ported 100-byte encoder at 0x082766f8 reached by tail BNE at 0x082765a0. NULL or first-unit zero invokes virtual clear; otherwise inclusive UTF-8 sizing, allocation with flags zero, and direct utf16_to_utf8 conversion on success. Empty strings clear instead of allocating as the bounded sibling does. Unported virtual allocate/clear methods use the existing STRING_OBJECT_ASSIGN_CSTR_OPS boundary; not hook-ready until those methods are wired. No new stub or indirection.
+      Codegen: 23 original versus 27 Rust instructions. Same NULL/first-unit guard, inclusive sizing call, allocation failure exit and tail call to utf16_to_utf8; virtual methods retain the existing ops indirection.
+
+  - address: 0x08276620
+    ghidra: FUN_08276620
+    name: string_object_assign_codepoint
+    size: 108
+    sig: "void string_object_assign_codepoint(StringObject *this, unsigned int codepoint)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      param_1: "this"
+      param_2: "codepoint"
+      puStack_10: "cursor"
+      iVar1: "byte_width"
+    notes: >-
+      Two unconditional BL references: the codepoint constructor at 0x08277414 and a caller at 0x0827ee6c. Ghidra invents extra r2/r3 arguments; raw ARM reads only this and codepoint. Zero invokes virtual clear, otherwise allocate utf8_codepoint_byte_width(value)+1 with flags zero, call utf8_write_codepoint on the spilled cursor, and store NUL at the advanced pointer. All u32 values follow the unsigned one/two/three-byte encoding. Allocation failure performs no write or clear. Reuses the existing unported virtual-method boundary; not hook-ready until the virtual methods are wired.
+      Codegen: 27 original versus 30 Rust instructions. Same zero clear branch, width-plus-one allocation, spilled cursor encoding and trailing NUL store.
+
+  - address: 0x082a50c4
+    ghidra: FUN_082a50c4
+    name: string_object_codepoint_ptr
+    size: 84
+    sig: "const unsigned char *string_object_codepoint_ptr(const StringObject *this, int index)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      param_1: "this"
+      param_2: "index"
+      local_10: "cursor"
+      iVar1: "walked"
+    notes: >-
+      Seven unconditional BL references. Negative index returns NULL before touching this; NULL payload returns NULL. Walk at most index decoder steps, stopping on a literal NUL byte, and return the byte pointer. Past-end indices clamp to the terminator. Decoder results are ignored, so unsupported leads and overlong NUL encodings still advance instead of ending the walk. No deviations; utf8_next_codepoint is a direct Rust call.
+      Codegen: 21 original versus 26 Rust instructions. Negative-index exit precedes object access; payload NULL guard, literal-byte NUL test, decoder call and clamped pointer retained.
+
+  - address: 0x082a52c8
+    ghidra: FUN_082a52c8
+    name: string_object_codepoint_at
+    size: 32
+    sig: "unsigned int string_object_codepoint_at(const StringObject *this, int index)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      local_8: "cursor"
+      r0: "codepoint"
+    notes: >-
+      17 unconditional BL references. Resolve the byte pointer with string_object_codepoint_ptr, returning zero if NULL, otherwise decode that position. Ghidra incorrectly claims void; callers such as 0x0826bd10 and 0x0826bee0 compare r0 with path delimiters. Negative and past-end indices, NULL payloads, overlong NUL and unsupported leads return zero. No deviations; both callees are real Rust ports.
+      Codegen: 8 original versus 11 Rust instructions. Pointer accessor call and NULL-conditioned decoder call preserve the return value, with an LLVM frame.
+
   - address: 0x082766a0
     ghidra: FUN_082766a0
     name: utf8_copy_codepoints
