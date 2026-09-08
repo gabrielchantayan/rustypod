@@ -828,6 +828,29 @@ pub unsafe extern "C" fn string_object_format(
     length
 }
 
+/// A gap exists only after the preserving allocator has succeeded and the
+/// old tail has moved. Its final NUL is written after the caller fills it.
+struct InsertionGap {
+    start: *mut u8,
+    terminator: *mut u8,
+}
+
+#[inline(always)]
+unsafe fn open_insertion_gap(
+    this: *mut StringObject, index: i32, old_len: u32, added_bytes: u32,
+) -> Option<InsertionGap> {
+    let new_len = old_len.wrapping_add(added_bytes);
+    let capacity = new_len.wrapping_add(31) & !31;
+    if assign_cstr_allocate_op()(this, capacity as usize, 1).is_null() { return None; }
+    let insertion = string_object_codepoint_ptr(this, index) as *mut u8;
+    let payload = (*this).payload;
+    let offset = (insertion as usize).wrapping_sub(payload as usize) as u32;
+    crate::libc::memmove::memmove(
+        insertion.add(added_bytes as usize), insertion, old_len.wrapping_sub(offset) as usize,
+    );
+    Some(InsertionGap { start: insertion, terminator: payload.add(new_len.wrapping_sub(1) as usize) })
+}
+
 /// string_object_insert_bytes — original: FUN_08275f48 @ 0x08275f48
 /// (164 bytes, all code). Ignore NULL source, zero byte count and negative
 /// index. Otherwise request (old inclusive length + source_len) rounded up
@@ -850,17 +873,110 @@ pub unsafe extern "C" fn string_object_insert_bytes(
 ) {
     if source.is_null() || source_len == 0 || index < 0 { return; }
     let old_len = strlen_safe_plus1((*this).payload) as u32;
-    let new_len = old_len.wrapping_add(source_len);
-    let capacity = new_len.wrapping_add(31) & !31;
-    if assign_cstr_allocate_op()(this, capacity as usize, 1).is_null() { return; }
-    let insertion = string_object_codepoint_ptr(this, index) as *mut u8;
+    if let Some(gap) = open_insertion_gap(this, index, old_len, source_len) {
+        crate::libc::rt_memcpy::__rt_memcpy(gap.start, source, source_len as usize);
+        gap.terminator.write(0);
+    }
+}
+
+#[inline(always)]
+unsafe fn insert_utf16_units(
+    this: *mut StringObject, index: i32, source: *const u16, count: i32,
+) {
+    let old_len = strlen_safe_plus1((*this).payload) as u32;
+    let added_bytes = (utf16_utf8_byte_len_bounded_plus1(source, count) as u32).wrapping_sub(1);
+    if let Some(gap) = open_insertion_gap(this, index, old_len, added_bytes) {
+        super::string_encoding::utf16_to_utf8_bounded(gap.start, source, count);
+        gap.terminator.write(0);
+    }
+}
+
+/// string_object_insert_utf16 — original: FUN_08276b64 @ 0x08276b64
+/// (184 bytes). NULL source, nonpositive count or negative index returns.
+/// Size up to count UTF-16 units, grow to a 32-byte-rounded capacity with
+/// preserve flag 1, shift the tail at the character index, transcode and
+/// terminate at the new end. An encountered source NUL is written by the
+/// transcoder, overwriting the first shifted tail byte: retained exactly.
+/// The allocation return only indicates success; this.payload is reloaded.
+/// Source must remain readable across allocation. Sizes wrap at 32 bits.
+/// Deviation: the shared existing virtual allocator remains unported.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_insert_utf16(
+    this: *mut StringObject, index: i32, source: *const u16, count: i32,
+) {
+    if source.is_null() || count <= 0 || index < 0 { return; }
+    insert_utf16_units(this, index, source, count);
+}
+
+/// string_object_insert_utf16_cstr — original: FUN_08276aa0 @ 0x08276aa0
+/// (196 bytes). NULL/empty source or negative index returns. Count the
+/// NUL-terminated UTF-16 source before sizing the old payload, then perform
+/// the same grow/shift/transcode operation as the bounded variant. The
+/// count excludes NUL, so transcoding preserves the shifted tail byte.
+/// Source must remain readable across allocation. The shared existing
+/// virtual allocator remains the only unported boundary.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_insert_utf16_cstr(
+    this: *mut StringObject, index: i32, source: *const u16,
+) {
+    if source.is_null() || source.read() == 0 || index < 0 { return; }
+    let count = utf16_code_unit_count_safe(source);
+    insert_utf16_units(this, index, source, count);
+}
+
+/// string_object_erase — original: FUN_08276900 @ 0x08276900 (212 bytes).
+/// Read the payload first, returning for NULL payload, negative index or
+/// nonpositive count. Walk to the start and end by literal-NUL-guarded
+/// decoder steps, move the remaining tail including NUL over the removed
+/// range, then request the exact reduced inclusive size with preserve flag
+/// 1. Even a past-end index requests resizing. The return from allocation
+/// is ignored: failure does not undo the bytes already erased. Unsupported
+/// sequences still advance the cursors. No new deviations; the shared
+/// existing virtual allocator remains unported. This must be readable before
+/// the guards; a processed payload must satisfy the memory helpers' padding
+/// contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_erase(this: *mut StringObject, index: i32, count: i32) {
     let payload = (*this).payload;
-    let offset = (insertion as usize).wrapping_sub(payload as usize) as u32;
-    crate::libc::memmove::memmove(
-        insertion.add(source_len as usize), insertion, old_len.wrapping_sub(offset) as usize,
-    );
-    crate::libc::rt_memcpy::__rt_memcpy(insertion, source, source_len as usize);
-    payload.add(new_len.wrapping_sub(1) as usize).write(0);
+    if payload.is_null() || index < 0 || count <= 0 { return; }
+    let old_len = strlen_safe_plus1(payload) as u32;
+    let start = string_object_codepoint_ptr(this, index) as *mut u8;
+    let mut end = start as *const u8;
+    for _ in 0..count {
+        if end.read() == 0 { break; }
+        utf8_next_codepoint(&mut end);
+    }
+    let end_offset = (end as usize).wrapping_sub(payload as usize) as u32;
+    crate::libc::memmove::memmove(start, end, old_len.wrapping_sub(end_offset) as usize);
+    let removed = (end as usize).wrapping_sub(start as usize) as u32;
+    assign_cstr_allocate_op()(this, old_len.wrapping_sub(removed) as usize, 1);
+}
+
+/// string_object_append_cstr — original: FUN_082768dc @ 0x082768dc
+/// (12 bytes). Tail-call string_object_insert_cstr with INT_MAX as the
+/// character position, preserving its NULL/empty-source and allocation
+/// behavior. No deviations beyond the callee's existing virtual boundary.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_append_cstr(this: *mut StringObject, source: *const u8) {
+    string_object_insert_cstr(this, i32::MAX, source);
+}
+
+/// string_object_append_code_unit — original: FUN_082768e8 @ 0x082768e8
+/// (24 bytes). Spill the u32 argument and pass its low halfword to bounded
+/// UTF-16 insertion with count 1 and index INT_MAX. On little-endian ARM,
+/// the upper halfword is never consumed. Zero still requests a preserving
+/// allocation, unlike append_cstr's empty-source exit. The u16 local makes
+/// the same truncation explicit on every host. Existing allocator boundary
+/// remains unported; no additional deviation.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_append_code_unit(this: *mut StringObject, value: u32) {
+    let unit = value as u16;
+    string_object_insert_utf16(this, i32::MAX, &unit, 1);
 }
 
 /// string_object_insert_cstr — original: `FUN_08276a18` @ 0x08276a18
@@ -2209,6 +2325,24 @@ pub unsafe extern "C" fn utf8_prev_codepoint(cursor: *mut *const u8) -> u32 {
     0
 }
 
+/// utf16_code_unit_count_safe — original: FUN_08277164 @ 0x08277164
+/// (36 bytes). Return zero for NULL, otherwise count nonzero halfwords
+/// through the first NUL. Surrogates count separately. The signed result
+/// wraps at 32 bits, as in ARM. No deviations; non-NULL input must be
+/// readable through its terminator.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn utf16_code_unit_count_safe(mut source: *const u16) -> i32 {
+    let mut count = 0i32;
+    if !source.is_null() {
+        while source.read() != 0 {
+            count = count.wrapping_add(1);
+            source = source.add(1);
+        }
+    }
+    count
+}
+
 /// utf16_utf8_byte_len_plus1 — original: `FUN_082762fc` @ 0x082762fc
 /// (60 bytes, all code; source:
 /// `ipod-decomp/decomp/c/026/082762fc_FUN_082762fc.c`).
@@ -3227,6 +3361,180 @@ pub(crate) mod tests {
                 recording_insert_allocate;
         }
         guard
+    }
+
+    #[test]
+    fn utf16_insertions_preserve_code_units_and_the_bounded_nul_overwrite() {
+        let units = [0x41u16, 0x80, 0x800, 0xd800, 0xdc00, 0];
+        let chunks: [&[u8]; 5] = [b"A", b"\xc2\x80", b"\xe0\xa0\x80", b"\xed\xa0\x80", b"\xed\xb0\x80"];
+        for count in 1..=6 {
+            for (index, at) in [(0, 0), (1, 2), (2, 3), (i32::MAX, 3)] {
+                let mut old = [0u8; 16];
+                old[4..8].copy_from_slice(b"\xc3\xa9Z\0");
+                let mut out = [0xa5; 48];
+                let mut object = StringObject { vtable: core::ptr::null(), payload: unsafe { old.as_mut_ptr().add(4) } };
+                let _bench = insert_bench(out.as_mut_ptr());
+                unsafe { string_object_insert_utf16(&mut object, index, units.as_ptr(), count) };
+                let bytes: Vec<u8> = chunks[..(count as usize).min(5)].iter().flat_map(|c| c.iter().copied()).collect();
+                let mut expected = b"\xc3\xa9Z\0".to_vec();
+                expected.splice(at..at, bytes.iter().copied());
+                if count == 6 { expected[at + bytes.len()] = 0; }
+                assert_eq!(&out[..expected.len()], expected);
+                assert!(out[expected.len()..].iter().all(|&b| b == 0xa5));
+                unsafe {
+                    assert_eq!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).as_slice(),
+                        &[(&mut object as *mut _ as usize, (4 + bytes.len() + 31) & !31, 1)]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn unbounded_utf16_insertion_excludes_source_nul_and_preserves_the_tail() {
+        let units = [0x41u16, 0xd83d, 0xde00, 0, 0x42];
+        let mut old = [0u8; 16];
+        old[4..8].copy_from_slice(b"xyz\0");
+        let mut out = [0xa5; 32];
+        let mut object = StringObject { vtable: core::ptr::null(), payload: unsafe { old.as_mut_ptr().add(4) } };
+        let _bench = insert_bench(out.as_mut_ptr());
+        unsafe { string_object_insert_utf16_cstr(&mut object, 1, units.as_ptr()) };
+        assert_eq!(&out[..11], b"xA\xed\xa0\xbd\xed\xb8\x80yz\0");
+        assert_eq!(out[11], 0xa5);
+    }
+
+    #[test]
+    fn bounded_leading_nul_overwrites_tail_while_unbounded_empty_source_skips_allocation() {
+        let mut old = *b"abc\0\0\0\0\0";
+        let mut out = [0xa5; 32];
+        let mut object = StringObject { vtable: core::ptr::null(), payload: old.as_mut_ptr() };
+        let _bench = insert_bench(out.as_mut_ptr());
+        unsafe { string_object_insert_utf16_cstr(&mut object, 1, [0u16].as_ptr()) };
+        assert!(unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty() });
+        unsafe { string_object_insert_utf16(&mut object, 1, [0u16].as_ptr(), 1) };
+        assert_eq!(&out[..4], b"a\0c\0");
+        assert_eq!(unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).len() }, 1);
+    }
+
+    #[test]
+    fn utf16_insertion_guards_and_allocation_failure_leave_existing_bytes_unchanged() {
+        let mut old = *b"abc\0";
+        let units = [0x20acu16, 0];
+        let mut object = StringObject { vtable: core::ptr::null(), payload: old.as_mut_ptr() };
+        let _bench = insert_bench(core::ptr::null_mut());
+        unsafe {
+            string_object_insert_utf16(core::ptr::null_mut(), 0, core::ptr::null(), 1);
+            for count in [0, -1, i32::MIN] {
+                string_object_insert_utf16(core::ptr::null_mut(), 0, units.as_ptr(), count);
+            }
+            string_object_insert_utf16(core::ptr::null_mut(), -1, units.as_ptr(), 1);
+            string_object_insert_utf16_cstr(core::ptr::null_mut(), 0, core::ptr::null());
+            string_object_insert_utf16_cstr(core::ptr::null_mut(), -1, units.as_ptr());
+            assert!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty());
+            string_object_insert_utf16(&mut object, 1, units.as_ptr(), 1);
+            string_object_insert_utf16_cstr(&mut object, 1, units.as_ptr());
+            assert_eq!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).len(), 2);
+        }
+        assert_eq!(&old, b"abc\0");
+        assert_eq!(object.payload, old.as_mut_ptr());
+    }
+
+    #[test]
+    fn erase_clamps_character_ranges_and_resizes_to_the_exact_shortened_length() {
+        let original = b"a\xc3\xa9\xe2\x82\xacz\0";
+        let offsets = [0, 1, 3, 6, 7];
+        for index in 0..=6 {
+            for count in [1, 2, 4, i32::MAX] {
+                let mut old = [0u8; 24];
+                old[4..12].copy_from_slice(original);
+                let mut out = [0xa5; 24];
+                let mut object = StringObject { vtable: core::ptr::null(), payload: unsafe { old.as_mut_ptr().add(4) } };
+                let _bench = insert_bench(out.as_mut_ptr());
+                unsafe { string_object_erase(&mut object, index, count) };
+                let start = offsets[(index as usize).min(4)];
+                let end = offsets[((index as usize) + count as usize).min(4)];
+                let expected: Vec<u8> = original[..start].iter().chain(&original[end..]).copied().collect();
+                assert_eq!(&out[..expected.len()], expected);
+                assert!(out[expected.len()..].iter().all(|&b| b == 0xa5));
+                unsafe {
+                    assert_eq!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).as_slice(),
+                        &[(&mut object as *mut _ as usize, expected.len(), 1)]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn erase_is_applied_before_a_failed_resize_and_walks_unsupported_sequences() {
+        let mut old = *b"A\xf0\x9f\x98Z\0\0\0";
+        let mut object = StringObject { vtable: core::ptr::null(), payload: old.as_mut_ptr() };
+        let _bench = insert_bench(core::ptr::null_mut());
+        unsafe { string_object_erase(&mut object, 1, 1) };
+        assert_eq!(&old[..3], b"AZ\0");
+        assert_eq!(object.payload, old.as_mut_ptr());
+        unsafe {
+            assert_eq!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).as_slice(),
+                &[(&mut object as *mut _ as usize, 3, 1)]);
+        }
+    }
+
+    #[test]
+    fn erase_guards_skip_resizing_but_past_end_still_resizes() {
+        let mut old = *b"ab\0\0\0\0\0\0";
+        let mut object = StringObject { vtable: core::ptr::null(), payload: old.as_mut_ptr() };
+        let _bench = insert_bench(core::ptr::null_mut());
+        unsafe {
+            for (index, count) in [(-1, 1), (i32::MIN, 1), (0, 0), (0, -1)] {
+                string_object_erase(&mut object, index, count);
+            }
+            let mut empty = StringObject { vtable: core::ptr::null(), payload: core::ptr::null_mut() };
+            string_object_erase(&mut empty, 0, 1);
+            assert!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty());
+            string_object_erase(&mut object, i32::MAX, 1);
+            assert_eq!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).len(), 1);
+        }
+        assert_eq!(&old[..3], b"ab\0");
+    }
+
+    #[test]
+    fn append_code_unit_truncates_the_high_halfword_and_zero_still_allocates() {
+        for (value, suffix) in [(0x12340041u32, &b"A\0"[..]), (0xdead0000, &b"\0"[..]),
+            (0x1000d800, &b"\xed\xa0\x80\0"[..])] {
+            let mut old = *b"x\0\0\0\0\0\0\0";
+            let mut out = [0xa5; 32];
+            let mut object = StringObject { vtable: core::ptr::null(), payload: old.as_mut_ptr() };
+            let _bench = insert_bench(out.as_mut_ptr());
+            unsafe { string_object_append_code_unit(&mut object, value) };
+            assert_eq!(out[0], b'x');
+            assert_eq!(&out[1..1 + suffix.len()], suffix);
+            assert_eq!(out[1 + suffix.len()], 0xa5);
+            assert_eq!(unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).len() }, 1);
+        }
+    }
+
+    #[test]
+    fn append_cstr_forwards_to_real_insertion_and_empty_input_is_a_noop() {
+        let mut old = *b"ab\0\0\0\0\0\0";
+        let source = *b"cd\0\0\0\0\0\0";
+        let mut out = [0xa5; 32];
+        let mut object = StringObject { vtable: core::ptr::null(), payload: old.as_mut_ptr() };
+        let _bench = insert_bench(out.as_mut_ptr());
+        unsafe {
+            string_object_append_cstr(&mut object, core::ptr::null());
+            string_object_append_cstr(&mut object, b"\0".as_ptr());
+            assert!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty());
+            string_object_append_cstr(&mut object, source.as_ptr());
+        }
+        assert_eq!(&out[..5], b"abcd\0");
+    }
+
+    #[test]
+    fn utf16_count_is_null_safe_and_counts_surrogates_independently() {
+        assert_eq!(unsafe { utf16_code_unit_count_safe(core::ptr::null()) }, 0);
+        for len in 0..=64 {
+            let mut units = [0xd800u16; 66];
+            units[len] = 0;
+            assert_eq!(unsafe { utf16_code_unit_count_safe(units.as_ptr()) }, len as i32);
+        }
     }
 
     #[test]

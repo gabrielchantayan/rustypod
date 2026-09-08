@@ -41186,6 +41186,97 @@ functions:
       untouched.
 
   # --- StringObject: bounded UTF-16 assignment ---
+  - address: 0x08277164
+    ghidra: FUN_08277164
+    name: utf16_code_unit_count_safe
+    size: 36
+    sig: "int utf16_code_unit_count_safe(const unsigned short *source)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      param_1: "source"
+      iVar1: "count"
+    notes: >-
+      Four unconditional BL references. NULL returns zero; otherwise count nonzero halfwords until NUL. Surrogates remain separate units; signed count wraps at 32 bits. No deviations. ARM review: 17 LLVM instructions versus 9 ADS; equivalent halfword loop with a peeled first iteration.
+
+  - address: 0x08276aa0
+    ghidra: FUN_08276aa0
+    name: string_object_insert_utf16_cstr
+    size: 196
+    sig: "void string_object_insert_utf16_cstr(StringObject *this, int index, const unsigned short *source)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      param_1: "this"
+      param_2: "index"
+      param_3: "source"
+      uVar2: "count"
+      iVar3: "old_inclusive_len"
+      iVar6: "new_inclusive_len"
+    notes: >-
+      One unconditional BL reference. NULL/first-unit-zero source and negative index return before object access. Count source units first, then measure old inclusive byte length and bounded encoded size. Grow to a 32-byte-rounded capacity with preserve flag 1, resolve the character index against the updated payload, shift its tail, transcode exactly the nonzero unit count and write the new final NUL. Unlike bounded insertion with a count including NUL, this excludes the source terminator and preserves the shifted tail. Shares inlined insertion mechanics with the byte and bounded UTF-16 variants. Only the existing unported virtual allocator remains a boundary. ARM review: 62 versus 49 instructions; inlined length scan and shared gap logic, expected sizing/decoder/transcoder relocations, and LLVM __aeabi_memmove lowering.
+
+  - address: 0x08276b64
+    ghidra: FUN_08276b64
+    name: string_object_insert_utf16
+    size: 184
+    sig: "void string_object_insert_utf16(StringObject *this, int index, const unsigned short *source, int count)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      param_1: "this"
+      param_2: "index"
+      param_3: "source"
+      param_4: "count"
+      iVar1: "old_inclusive_len"
+      iVar4: "new_inclusive_len"
+    notes: >-
+      17 unconditional BL references. NULL source, signed nonpositive unit count and negative index return before object access. Measure old inclusive byte length, compute encoded byte length through bounded sizing, round new capacity to 32 with preserve flag 1, reload payload, shift the tail and transcode count units. An encountered source NUL is actually written and overwrites the first shifted tail byte, even when added byte length is zero; the final NUL is also stored at the sized end. Retains this truncation quirk, 32-bit wrapping and allocation-failure behavior. Shared insertion mechanics are inlined; existing virtual allocator remains unported. ARM review: 59 versus 46 instructions; inlined length scan and shared gap logic, expected helper relocations, and LLVM __aeabi_memmove lowering.
+
+  - address: 0x08276900
+    ghidra: FUN_08276900
+    name: string_object_erase
+    size: 212
+    sig: "void string_object_erase(StringObject *this, int index, int count)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      param_1: "this"
+      param_2: "index"
+      param_3: "count"
+      local_1c: "start"
+      local_20: "end"
+      iVar2: "old_inclusive_len"
+    notes: >-
+      15 unconditional BL references and one conditional BLGT. Read payload before checking index/count; NULL payload, negative index or nonpositive count returns. Walk start/end by decoder steps guarded only by literal NUL, move remaining bytes including NUL over the removed region, then request exact reduced inclusive size with preserve flag 1. Even a past-end index still requests resizing. Allocation return is discarded: failure leaves the already-erased bytes in place. Uses the ported character-pointer helper for the first walk and preserves its malformed-sequence behavior. Existing virtual allocator remains unported; no new boundary. ARM review: 49 versus 53 instructions; LLVM moves guards ahead of the nonvolatile payload load, inlines length, and lowers memmove to __aeabi_memmove. Valid-object behavior and mutation-before-allocation order are preserved.
+
+  - address: 0x082768dc
+    ghidra: FUN_082768dc
+    name: string_object_append_cstr
+    size: 12
+    sig: "void string_object_append_cstr(StringObject *this, const unsigned char *source)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      param_1: "this"
+      param_2: "source"
+    notes: >-
+      Nine unconditional BL and one tail B references. Three-instruction argument shuffle to string_object_insert_cstr with index INT_MAX. NULL/empty input stays a no-op, and the real byte insertion path handles growth. No new deviations beyond the existing virtual allocator. ARM review: 6 versus 3 instructions; LLVM frame setup/teardown surrounds the same argument shuffle and tail branch to insert_cstr.
+
+  - address: 0x082768e8
+    ghidra: FUN_082768e8
+    name: string_object_append_code_unit
+    size: 24
+    sig: "void string_object_append_code_unit(StringObject *this, unsigned int value)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      param_1: "this"
+      param_2: "value"
+      uStack_c: "unit"
+    notes: >-
+      Five unconditional BL and nine conditional BLNE references. Original spills r1 and passes its address to bounded UTF-16 insertion with count 1 and index INT_MAX. On little-endian ARM only the low halfword is read; the Rust u16 local preserves that truncation on all hosts. Zero still requests preserving allocation, unlike empty append_cstr. Existing virtual allocator remains unported; no new seam. ARM review: 10 versus 6 instructions; halfword stack store and call relocation confirm truncation and bounded insertion.
+
   - address: 0x08275f48
     ghidra: FUN_08275f48
     name: string_object_insert_bytes
