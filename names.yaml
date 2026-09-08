@@ -14684,6 +14684,46 @@ functions:
       reproduced as a private Rust helper in the module; the retail
       0x082a2468 symbol stays unported rather than becoming a second
       exported seam.
+  - address: 0x0826ec14
+    ghidra: FUN_0826ec14
+    name: ui_element_invalidate_region
+    size: 132
+    sig: "UiElement *ui_element_invalidate_region(UiElement *element, const Rect *region)"
+    module: ui/invalidate
+    status: ported
+    renames:
+      param_1/r4: element
+      param_2/r6: region
+      r5: parent
+      stack_rect: clipped_region
+      "element+0x48": shown_state_flags
+      "element+0x80": bounds
+      "element+0xa0": invalidate_suppressed
+      "parent+0xd0": parent_clip
+      "0x089cc888": redraw_enabled
+      FUN_0828cb64: render_context_transform_rect
+      FUN_0828d9b4: render_context_invalidate_rect
+    notes: >-
+      Extent is binary-verified: push {r0-r6,lr} starts at 0x0826ec14,
+      pop {r0-r6,pc} ends at 0x0826ec94, the literal-pool word follows
+      at 0x0826ec98, and the distinct whole-bounds thunk starts at
+      0x0826ec9c. Decoding every ARM B/BL word in osos.dec finds 18
+      direct call sites: 17 unconditional bl and one blne (0x0826f228),
+      plus six tail b references; no image word contains the address, so
+      it is never virtually dispatched. The blne caller checks its nullable
+      element first; this body has no NULL guard and immediately reads
+      +0x48 and +0xa0. If shown-state is exactly 0x800, the suppression
+      byte is zero, and redraw_enabled is non-zero, it intersects region
+      with element bounds and, when present, parent+0xd0. It resolves a
+      render context, transforms the local clipped copy via 0x0828cb64,
+      then submits it via 0x0828d9b4. The original restores element in r0;
+      the port returns it. The retail global is read volatile at its fixed
+      address on device and has a host replacement. Existing volatile seams
+      preserve the two still-unported rendering calls; no duplicate seam
+      was added. Tests cover all three gates, both clipping stages,
+      transform-before-invalidate ordering, context selection, and the
+      whole-bounds thunk.
+
   - address: 0x0826ec9c
     ghidra: FUN_0826ec9c
     name: ui_element_invalidate
@@ -14694,29 +14734,19 @@ functions:
     vars: {param_1: element, "r1 (out)": "&element->bounds (element + 0x80)"}
     notes: >-
       An 8-byte thunk, NOT a veneer and NOT an empty destructor:
-      `add r1, r0, #0x80; b 0x0826ec14`. It tail-branches to the
-      unported region form FUN_0826ec14 with the second argument forced
-      to the element's own bounds rectangle at +0x80 - mark the whole
-      element dirty. Extent binary-verified (next function's push opens
-      at 0x0826eca4). 59 branch references, binary-verified by decoding
-      every B/BL word in osos.dec: 32 bl + 3 blne + 17 b + 7 predicated
-      b (Ghidra's "35 bl" is the 32+3 bl/blne split). No data-word
-      references, so never dispatched virtually. The predicated blne
-      sites (0x0812af7c, 0x0812af88, 0x081bac1c) test the element
-      pointer against NULL themselves - the thunk has no guard, and the
-      body dereferences +0x48/+0xa0 immediately. The body's closing
-      `pop {r0-r6,pc}` restores r0 = element (preserved - the port
-      returns element) and r1 = element + 0x80 (dropped - r1 is
-      caller-saved scratch no AAPCS caller can consume; sampled sites
-      0x0812af60/0x081430dc/0x081a0fdc overwrite r0 at once and never
-      read r1). Deviations: the tail branch becomes a call through the
-      UI_ELEMENT_INVALIDATE_REGION seam because FUN_0826ec14 is
-      unported - target builds transmute the retail address 0x0826ec14
-      (hook-ready on device), host default is inert; wrapping_add pins
-      the bare `add` wrap semantics with identical ARMv5TE codegen.
-      match.py - 11 instructions against the original's 2; the core
-      `add r1, rX, #0x80` survives verbatim, the rest is the seam
-      frame (volatile slot load + blx + return of element).
+      `add r1, r0, #0x80; b 0x0826ec14`. It tail-branches to the ported
+      region form with the second argument forced to the element's own
+      bounds rectangle at +0x80, marking the whole element dirty. Extent
+      binary-verified (next function's push opens at 0x0826eca4). 59
+      branch references, binary-verified by decoding every B/BL word in
+      osos.dec: 32 bl + 3 blne + 17 b + 7 predicated b (Ghidra's "35 bl"
+      is the 32+3 bl/blne split). No data-word references, so never
+      dispatched virtually. The predicated blne sites (0x0812af7c,
+      0x0812af88, 0x081bac1c) test the element pointer against NULL
+      themselves; the target body has no guard. Its closing
+      `pop {r0-r6,pc}` restores r0 = element and r1 = element + 0x80;
+      r1 remains caller-saved scratch. The port calls the direct region
+      form rather than tail-branching, preserving the returned element.
 
   - address: 0x082a6524
     ghidra: FUN_082a6524
