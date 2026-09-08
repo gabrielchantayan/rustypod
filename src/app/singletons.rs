@@ -1284,6 +1284,13 @@ pub unsafe extern "C" fn singleton_class_9400() -> *mut u8 {
 }
 
 #[cfg(test)]
+extern crate std;
+
+/// Serializes tests that replace the application-controller cache.
+#[cfg(test)]
+pub(crate) static SINGLETON_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
 mod tests {
     extern crate std;
     use super::*;
@@ -1293,8 +1300,6 @@ mod tests {
     use std::sync::{Mutex, MutexGuard};
     use std::vec::Vec;
 
-    /// Serializes every test that swaps the globals below.
-    static SINGLETON_LOCK: Mutex<()> = Mutex::new(());
 
     /// The block the stub allocator hands out (big enough for the
     /// largest singleton, the 0xa6c media player).
