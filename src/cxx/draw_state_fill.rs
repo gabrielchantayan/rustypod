@@ -106,8 +106,8 @@ struct DrawStateRecord {
     _current_x: i32,
     _current_y: i32,
     _flags: [u32; 2],
-    _style: u8,
-    _foreground: [u8; 4],
+    style: u8,
+    foreground: [u8; 4],
     background: [u8; 4],
     _padding_before_surface: [u8; 3],
     surface: u32,
@@ -222,6 +222,59 @@ pub unsafe extern "C" fn draw_state_fill_rect_background(this: *mut u8, rect: *c
         );
     }
 }
+/// draw_state_fill_rect_foreground — original: `FUN_082644a8` @
+/// 0x082644a8 (112 bytes, 0x082644a8..0x08264518; 18 unconditional
+/// `bl` call sites, 0 predicated forms and 0 tail `b`, binary-scanned
+/// by decoding every ARM B/BL word in osos.dec). The next distinct
+/// sibling begins at 0x08264518 (`push {r0,r1,r2,r3,r4,r5,r6,lr}`); no
+/// literal pool follows this function and no DATA word in the image
+/// holds 0x082644a8, so it is not virtually dispatched.
+///
+/// Fills `rect` (record-local coordinates) with the record's +0x11
+/// foreground color. Like the background sibling at 0x082643c0, it
+/// translates vertical edges by +0x30 origin_y and horizontal edges by
+/// +0x2c origin_x using wrapping ARM `add`, then passes the translated
+/// stack rect, surface word + 4 and embedded +0x34 clip rect to the
+/// fill engine. Unlike that sibling, raw ARM `ldrb r3,[this,#0x10]`
+/// supplies the zero-extended style byte, so style 0x22 can select the
+/// engine's alpha-blend path.
+///
+/// Source: `ipod-decomp/decomp/c/025/082644a8_FUN_082644a8.c`; the
+/// Ghidra field arithmetic agrees with the decoded ARM. Deliberate
+/// deviation: the unported engine 0x08074898 uses the existing
+/// [`DRAW_STATE_FILL_OPS`] volatile dispatch seam; target builds call
+/// it directly and the host default panics. Neither input has a NULL
+/// guard, matching the original.
+///
+/// # Safety
+///
+/// `this` must point to a valid 0x44-byte draw-state record whose
+/// +0x1c surface word, +0x11 foreground color and +0x34 clip rect are
+/// valid for the unported engine; `rect` must point to four readable
+/// `i32` words.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn draw_state_fill_rect_foreground(this: *mut u8, rect: *const Rect) {
+    let engine = draw_state_fill_ops().fill_engine;
+    let state = unsafe { &*(this as *const DrawStateRecord) };
+    let rect = unsafe { &*rect };
+    let adjusted = Rect {
+        top: rect.top.wrapping_add(state.origin_y),
+        left: rect.left.wrapping_add(state.origin_x),
+        bottom: rect.bottom.wrapping_add(state.origin_y),
+        right: rect.right.wrapping_add(state.origin_x),
+    };
+    unsafe {
+        engine(
+            state.surface as usize + 4,
+            &adjusted,
+            state.foreground.as_ptr(),
+            state.style as u32,
+            state.clip_rect.as_ptr(),
+        );
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -275,8 +328,8 @@ mod tests {
                     _current_x: -777,
                     _current_y: 555,
                     _flags: [0; 2],
-                    _style: 0x2b,
-                    _foreground: [0x11, 0x22, 0x33, 0x44],
+                    style: 0x2b,
+                    foreground: [0x11, 0x22, 0x33, 0x44],
                     background: [0xaa, 0xbb, 0xcc, 0xdd],
                     _padding_before_surface: [0; 3],
                     surface: 0x0009_0000,
@@ -463,6 +516,83 @@ mod tests {
                 },
                 "the caller's rect is translated on the stack, not in place",
             );
+        });
+    }
+    #[test]
+    fn foreground_fill_forwards_foreground_style_and_translated_rect() {
+        with_recorder(|| {
+            let mut record = Record::new();
+            record.state.style = 0xff;
+            let base = record.base();
+            let foreground = record.state.foreground.as_ptr() as usize;
+            let clip_rect = record.state.clip_rect.as_ptr() as usize;
+            let rect = Rect {
+                top: 3,
+                left: 7,
+                bottom: 42,
+                right: 900,
+            };
+            unsafe { draw_state_fill_rect_foreground(base, &rect) };
+            assert_eq!(
+                unsafe { SEEN }.expect("engine called"),
+                EngineCall {
+                    surface_body: 0x0009_0004,
+                    rect: Rect {
+                        top: -37,
+                        left: 107,
+                        bottom: 2,
+                        right: 1000
+                    },
+                    color: foreground,
+                    style: 0xff,
+                    clip_rect,
+                },
+                "the foreground path uses +0x11 and zero-extends its +0x10 style byte",
+            );
+        });
+    }
+
+    #[test]
+    fn foreground_fill_wraps_edges_and_forwards_empty_rect() {
+        with_recorder(|| {
+            let mut record = Record::new();
+            record.state.origin_x = i32::MAX;
+            record.state.origin_y = i32::MIN;
+            record.state.style = 0x22;
+            let base = record.base();
+            let rect = Rect {
+                top: -1,
+                left: 1,
+                bottom: 0,
+                right: i32::MAX,
+            };
+            unsafe { draw_state_fill_rect_foreground(base, &rect) };
+            let seen = unsafe { SEEN }.expect("engine called");
+            assert_eq!(
+                seen.rect,
+                Rect {
+                    top: i32::MAX,
+                    left: i32::MIN,
+                    bottom: i32::MIN,
+                    right: -2
+                },
+                "the four coordinate adds wrap like ARM and never reject a rect",
+            );
+            assert_eq!(seen.style, 0x22, "the blend selector is not forced to solid");
+        });
+    }
+
+    #[test]
+    fn foreground_fill_does_not_mutate_record_or_input_rect() {
+        with_recorder(|| {
+            let mut record = Record::new();
+            let before = record.state_bytes().to_vec();
+            let base = record.base();
+            let rect = Rect::default();
+            unsafe { draw_state_fill_rect_foreground(base, &rect) };
+            assert!(record.guards_intact(), "bytes past the record are untouched");
+            assert_eq!(record.state_bytes(), &before[..]);
+            assert_eq!(rect, Rect::default(), "the empty input rect is only copied to stack");
         });
     }
 }

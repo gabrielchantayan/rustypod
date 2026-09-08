@@ -33116,6 +33116,48 @@ functions:
       blx-through-volatile-slot dispatch standing in for the direct
       bl.
 
+  - address: 0x082644a8
+    ghidra: FUN_082644a8
+    name: draw_state_fill_rect_foreground
+    size: 112
+    sig: "void draw_state_fill_rect_foreground(u8 *this, const Rect *rect)"
+    module: cxx/draw_state_fill
+    status: ported
+    renames:
+      param_1/r0: this (the 0x44-byte scoped draw-state record)
+      param_2/r1: rect (record-local bounds, QuickDraw top/left/bottom/right)
+      local_14/local_10/local_c/local_8: adjusted (the origin-translated stack rect)
+      FUN_08074898: fill_rect_engine (unported; IRAM-mirror resident)
+    notes: >-
+      Whole 112-byte function binary-verified: 0x082644a8 begins `mov
+      r2,r0; push {lr}` and 0x08264518 begins the distinct sibling's
+      `push {r0,r1,r2,r3,r4,r5,r6,lr}`; no literal pool lies between.
+      18 unconditional bl call sites, 0 predicated bl and 0 b, verified
+      by decoding every ARM B/BL word in osos.dec; no DATA word in the
+      image holds 0x082644a8, so it is never dispatched virtually. The
+      foreground-fill member of the scoped 0x44-byte draw-state record
+      translates the caller's four-word QuickDraw rect on its stack:
+      top/bottom += origin_y at +0x30 and left/right += origin_x at
+      +0x2c, with the native wrapping add semantics. It calls the
+      unported rect-fill engine @ 0x08074898 with surface body
+      `*(this+0x1c)+4`, adjusted rect, foreground colour pointer
+      this+0x11, zero-extended style byte this+0x10 (`ldrb r3,[r2,#16]`)
+      and embedded clip rect this+0x34 as the fifth stack argument.
+      This differs from the 0x082643c0 background sibling only in
+      colour source and its dynamic style rather than a hard-zero solid
+      style; a 0x22 style can therefore select the engine alpha-blend
+      path. Ghidra's undefined8 return is dead: `pop
+      {r0,r1,r2,r3,ip,pc}` leaves incidental registers, and sampled
+      callers immediately clobber or reload r0, so the Rust port is
+      void. Deviation: it reuses the existing volatile
+      DRAW_STATE_FILL_OPS dispatch seam because the engine is unported;
+      target builds call 0x08074898 and host tests install a recorder.
+      Its fixed 32-bit surface field is read as u32, never host usize,
+      preserving the +0x20 following field. Host tests (3) prove
+      foreground/style operands including 0xff zero extension and 0x22
+      blend selection, all-distinct translated edges and ARM wrapping,
+      and empty-rect plus record/input non-mutation.
+
   - address: 0x08264570
     ghidra: FUN_08264570
     name: draw_state_construct_with_surface
