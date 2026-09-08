@@ -40785,6 +40785,45 @@ functions:
       the seam's indirect call and LLVM's shrink-wrapped frame.
       #[inline(never)] for the 22 `bl` targets.
   # --- display object: the six-layer compositor root ---
+  - address: 0x081d892c
+    ghidra: FUN_081d892c
+    name: display_set_layer_enabled
+    size: 124
+    sig: "void display_set_layer_enabled(Display *display, u32 layer_index, u32 enabled)"
+    module: drivers/display
+    status: ported
+    renames:
+      param_1/r3: display
+      param_2/r1: layer_index
+      param_3/r2: enabled
+    notes: >-
+      Sets one secondary-display layer's requested-enable byte. EXTENT
+      CORRECTED - Ghidra reports 164 bytes but raw disassembly puts this
+      body at 0x081d892c..0x081d89a8 (31 instructions, 124 bytes); the
+      sibling 0x081d89a8 opens with `push {r4,r5,r6,lr}`. Call count was
+      verified by decoding every ARM B/BL word in osos.dec: 20 `bl` callers
+      (19 plain plus one `blne` at 0x0811faac), and no tail `b` callers.
+      That lone predicated site is layer_render's gated notification; this
+      callee has no NULL guard. Algorithm - return unless display+0x94
+      (panel driver) is non-NULL and display+0x90 == 1. Store enabled != 0
+      as 1/0 at display+0x18+layer_index. An enabled request tail-calls
+      0x081d914c iff +0x98 is clear. A disabled request returns while +0x50
+      is non-NULL; otherwise 0x081d8e04 scans all six +0x18 bytes, and when
+      they are all zero it tail-calls 0x081d9270 iff +0x98 is set.
+      New Display fields name +0x50 layer_activity_blocker and +0x98
+      layers_active; repr(C) preserves target offsets while keeping the
+      pointer field native-width on hosts. Deliberate deviations: the
+      44-byte scan helper 0x081d8e04 is inlined, while the two unported
+      activity routines dispatch through narrow volatile DisplayHooks slots;
+      their defaults preserve +0x98 but omit panel-driver and layer work.
+      Host tests cover NULL-driver and non-secondary gates, nonzero enable
+      normalization and idempotent start, last-disable stop only after all
+      six bytes clear, and blocker-deferred teardown. match.py structural
+      review used the raw --size 124 and this worktree archive: the
+      driver/id gates, +0x18 byte store, +0x98 and +0x50 tests, six-byte
+      scan, and tail hook dispatches correspond; LLVM adds its fp frame and
+      the volatile hook loads.
+
   - address: 0x081d9064
     ghidra: FUN_081d9064
     name: display_get_layer
