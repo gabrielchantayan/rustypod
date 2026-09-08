@@ -31,6 +31,7 @@ pub mod heap_string;
 pub mod list_splice;
 pub mod list_item_count;
 pub mod mutex;
+pub mod mutex_destroy;
 pub mod mutex_attr_init;
 pub mod mutex_settype_init;
 pub mod observable_array;
