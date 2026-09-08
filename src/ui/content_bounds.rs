@@ -48,6 +48,28 @@ fn content_inset_for_flags(flags: u32) -> i32 {
     }
 }
 
+/// ui_element_bounds — original: `FUN_082a24f4` @ 0x082a24f4
+/// (24 bytes; `0x082a24f4..0x082a2508`; the next function starts at
+/// 0x082a250c).
+///
+/// Copies the element's local bounds at +0x80 to `out`, then moves that
+/// rectangle to the origin. Raw decoding finds exactly 18 direct, unconditional
+/// `bl` call sites; no predicated `bl`, tail `b`, or data-word references
+/// target this address. The closing `b 0x0826c2e8` tail-dispatches to
+/// [`rect_move_to_origin`].
+///
+/// # Deliberate deviations
+///
+/// None. Rust represents the tail dispatch as an ordinary call; its only
+/// observable result is the same normalized output rectangle.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ui_element_bounds(element: *const u8, out: *mut Rect) {
+    let element = element.cast::<ElementFields>();
+    ptr::write(out, ptr::addr_of!((*element).bounds).read());
+    rect_move_to_origin(out);
+}
+
 /// ui_element_content_bounds — original: `FUN_082a2604` @ 0x082a2604
 /// (84 bytes; 21 direct `bl` call sites).
 #[cfg_attr(target_os = "none", no_mangle)]
@@ -131,6 +153,57 @@ mod tests {
             );
         }
         out
+    }
+
+    #[test]
+    fn element_bounds_copies_then_normalizes_without_validity_filtering() {
+        let bounds_cases = [
+            rect(10, 20, 18, 34),
+            rect(-5, 7, 5, 9),
+            rect(30, 40, 10, 20),
+            rect(i32::MIN, i32::MIN, i32::MAX, i32::MAX),
+        ];
+
+        for bounds in bounds_cases {
+            let mut fixture = Fixture {
+                _before_flags: [0xa5; 0x48],
+                flags: 0xfeed_face,
+                _before_bounds: [0x5a; 0x34],
+                bounds,
+            };
+            let mut out = rect(-123, 456, -789, 1011);
+            unsafe {
+                ui_element_bounds(
+                    (&mut fixture as *mut Fixture).cast::<u8>(),
+                    &mut out,
+                );
+            }
+
+            assert_eq!(out, expected(bounds, 0), "bounds={bounds:?}");
+            assert_eq!(fixture._before_flags, [0xa5; 0x48]);
+            assert_eq!(fixture.flags, 0xfeed_face);
+            assert_eq!(fixture._before_bounds, [0x5a; 0x34]);
+            assert_eq!(fixture.bounds, bounds);
+        }
+    }
+
+    #[test]
+    fn element_bounds_supports_output_aliasing_source_bounds() {
+        let mut fixture = Fixture {
+            _before_flags: [0xa5; 0x48],
+            flags: 0,
+            _before_bounds: [0x5a; 0x34],
+            bounds: rect(-10, 20, 15, 50),
+        };
+
+        unsafe {
+            ui_element_bounds(
+                (&mut fixture as *mut Fixture).cast::<u8>(),
+                core::ptr::addr_of_mut!(fixture.bounds),
+            );
+        }
+
+        assert_eq!(fixture.bounds, rect(0, 0, 25, 30));
     }
 
     #[test]
