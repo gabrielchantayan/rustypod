@@ -47262,3 +47262,35 @@ functions:
       dispatch seam or other deliberate deviation: both callees are already
       ported. Host tests prove allocator arguments, all four success stores,
       NULL return, and the exact failure-ring tag/data.
+
+  # --- Embedded collection item-count virtual forwarder ---
+  - address: 0x082a6888
+    ghidra: FUN_082a6888
+    name: list_item_count
+    size: 16
+    sig: "uintptr_t list_item_count(void *list)"
+    module: cxx/list_item_count
+    status: ported
+    renames:
+      param_1/r0: list
+      "list+0xec": collection (u32 target pointer)
+      r1_after_second_ldr: collection_vtable
+      r1_after_third_ldr: collection_item_count_method
+    notes: >-
+      True raw extent is exactly 16 bytes, 0x082a6888..0x082a6898: `ldr
+      r0,[r0,#0xec]; ldr r1,[r0]; ldr r1,[r1,#0x170]; bx r1`. The next
+      separately linked function starts at 0x082a6898. Decoding every ARM B/BL
+      word in osos.dec finds exactly 19 direct inbound calls, all unconditional
+      BL: 0x081105c8, 0x0816c19c, 0x0816c224, 0x08187ce4, 0x0818847c,
+      0x081884f8, 0x08188668, 0x08286100, 0x08286258, 0x082863e0,
+      0x082864f8, 0x08286af8, 0x08286b1c, 0x08286b58, 0x082872dc,
+      0x08287418, 0x08287b7c, 0x08287cf8, and 0x08288c3c. There are no
+      predicated direct BL forms and no direct tail B callers. It dereferences
+      the collection pointer held at list+0xec, loads that object's vtable slot
+      +0x170, and tail-dispatches it with the collection in r0. Callers use the
+      returned word as a list-item count; the concrete class and target remain
+      unrecovered, so the port uses the object's own vtable rather than
+      inventing a callee identity. Deviation: Rust makes the terminal bx a
+      final call whose result is returned immediately. The list's embedded
+      pointer remains a u32 on host and target; host tests map its fixture
+      below 4 GiB so this target layout remains exact.

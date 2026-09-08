@@ -29,6 +29,7 @@ pub mod draw_state_style;
 pub mod handle;
 pub mod heap_string;
 pub mod list_splice;
+pub mod list_item_count;
 pub mod mutex;
 pub mod mutex_attr_init;
 pub mod mutex_settype_init;
