@@ -45404,7 +45404,32 @@ functions:
       reload, poison blx with #20, tst #1 tail branch to traced_free;
       LLVM keeps the same tail branch.
 
-  # --- service-manager secondary handler access ---
+  # --- service-manager handler access ---
+  - address: 0x08194080
+    ghidra: FUN_08194080
+    name: service_handler_at
+    size: 16
+    sig: "u32 service_handler_at(const u32 *slot_table, i32 selector)"
+    module: app/service_manager
+    renames:
+      param_1/r0: slot_table
+      param_2/r1: selector
+      FUN_08030f44: heap_panic
+    status: ported
+    notes: >-
+      Raw extent is exactly 0x08194080..0x08194090: `cmp r1,#3; blge
+      0x08030f44; ldr r0,[r0,r1,lsl #5]; bx lr`; 0x08194090 (`mov ip,r0`)
+      starts the next separately linked function. It returns word zero from
+      one of three 8-word primary handler records. The signed `blge` admits
+      negative selectors, which address unchecked before the table exactly as
+      retailOS does; selectors >=3 terminate through ported non-returning
+      heap_panic. Decoding every ARM B/BL word in osos.dec found exactly 20
+      direct call sites: all unconditional plain BL, with no predicated forms
+      or tail branches. The concrete handler identities are not established,
+      so the name records only the verified table role. Deliberate deviations:
+      none. Host coverage proves both table edges, NULL-word propagation, and
+      the uncached reload.
+
   - address: 0x08193ec0
     ghidra: FUN_08193ec0
     name: service_manager_secondary_handler_get
