@@ -17664,6 +17664,30 @@ functions:
       asr shape; the capture dependency table and rate's deadline seam stand
       in for their direct firmware calls.
 
+  - address: 0x08292adc
+    ghidra: FUN_08292adc
+    name: wheel_sample_get_rate
+    size: 20
+    sig: "u32 wheel_sample_get_rate(u8 *sample)"
+    module: kernel/wheel_sample
+    status: ported
+    renames:
+      param_1: sample
+      FUN_08292a88: wheel_sample_capture
+    notes: >-
+      Raw ARM verifies 20 bytes exactly, 0x08292adc..0x08292af0, with no
+      literal pool: `push {r4,lr}; mov r4,r0; bl 0x08292a88; ldr
+      r0,[r4,#0x14]; pop {r4,pc}`. Binary scanning every ARM B/BL encoding
+      found 19 direct BL call sites, all unconditional (no predicated BL).
+      Algorithm: lazily capture the wheel sample through
+      wheel_sample_capture(sample), then return the full u32 rate at
+      sample+0x14. The getter has no NULL guard; the underlying capture
+      owns the first-use fill and flag gate at sample+0x08. No data word in
+      the image points at this function, so there is no virtual-dispatch
+      seam. Deliberate deviations: none. Host tests cover first-use capture
+      returning its computed rate and a pre-captured sample preserving an
+      arbitrary full-width (0xfffffffe) rate without invoking either helper.
+
   - address: 0x080bd8f0
     ghidra: FUN_080bd8f0
     name: wheel_sample_rate
