@@ -178,6 +178,80 @@ pub unsafe extern "C" fn shared_cell_release(slot: *mut *mut SharedCell) {
     slot.write(core::ptr::null_mut());
 }
 
+/// shared_cell_release_secondary — original: `FUN_083b52a0` @ `0x083b52a0`
+/// (84 bytes; 19 incoming `bl` call sites, ALL unconditional — zero
+/// predicated forms and zero tail `b`, verified by decoding every ARM B/BL
+/// word in osos.dec). Whole body:
+///
+/// ```text
+/// 083b52a0: push  {r4, lr}
+/// 083b52a4: mov   r4, r0
+/// 083b52a8: ldr   r0, [r0]          @ cell = *slot
+/// 083b52ac: cmp   r0, #0
+/// 083b52b0: popeq {r4, pc}          @ empty slot: no-op, slot untouched
+/// 083b52b4: ldr   r1, [r0, #4]
+/// 083b52b8: subs  r1, r1, #1        @ refcount -= 1 (wraps)
+/// 083b52bc: str   r1, [r0, #4]
+/// 083b52c0: bne   0x083b52e8        @ still shared: skip teardown
+/// 083b52c4: ldr   r0, [r4]
+/// 083b52c8: ldr   r0, [r0]          @ value = cell->value
+/// 083b52cc: cmp   r0, #0
+/// 083b52d0: ldrne r1, [r0]          @ vtable
+/// 083b52d4: ldrne r1, [r1, #4]      @ vtable[1] = deleting destructor
+/// 083b52d8: blxne r1                @ value->~T() (deleting)
+/// 083b52dc: ldr   r0, [r4]          @ reload cell after the virtual call
+/// 083b52e0: cmp   r0, #0
+/// 083b52e4: blne  0x082aad24        @ operator_delete(cell)
+/// 083b52e8: mov   r0, #0
+/// 083b52ec: str   r0, [r4]          @ *slot = NULL (every non-empty path)
+/// 083b52f0: pop   {r4, pc}
+/// ```
+///
+/// Drops the intrusive reference held by `slot`. A non-final drop merely
+/// decrements then clears the slot; the 1 -> 0 transition calls the non-NULL
+/// payload's deleting destructor through vtable word 1 (+4), reloads `slot`,
+/// tag-2 deletes the cell if it remains non-NULL, then clears `slot`.
+/// An empty slot is untouched, and a zero refcount wraps to -1 without
+/// teardown.
+///
+/// Deviation: predicated ARM calls are ordinary guarded Rust calls. The
+/// target payload word is represented as `usize` on hosts; see
+/// [`SharedCell`]. The separate section keeps this byte-identical sibling a
+/// distinct device-callable symbol rather than relying on linker folding.
+///
+/// # Safety
+/// Same preconditions as [`shared_cell_release`]: `slot` must name a valid,
+/// aligned cell-pointer word, and a non-NULL final payload must have a valid
+/// vtable word 1 deleting destructor.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.shared_cell_release_secondary")]
+#[inline(never)]
+pub unsafe extern "C" fn shared_cell_release_secondary(slot: *mut *mut SharedCell) {
+    let cell = slot.read();
+    if cell.is_null() {
+        return;
+    }
+
+    let remaining = (*cell).refcount.wrapping_sub(1);
+    (*cell).refcount = remaining;
+    if remaining == 0 {
+        let value = (*slot.read()).value as *mut u8;
+        if !value.is_null() {
+            let vtable = (value as *const usize).read() as *const usize;
+            let deleting_destructor: unsafe extern "C" fn(*mut u8) =
+                core::mem::transmute(vtable.add(1).read());
+            deleting_destructor(value);
+        }
+
+        let cell = slot.read();
+        if !cell.is_null() {
+            operator_delete(cell.cast());
+        }
+    }
+
+    slot.write(core::ptr::null_mut());
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -319,7 +393,7 @@ mod tests {
         let _bench = bench();
         let mut slot: *mut SharedCell = core::ptr::null_mut();
 
-        unsafe { shared_cell_release(&mut slot) };
+        unsafe { shared_cell_release_secondary(&mut slot) };
 
         assert!(slot.is_null());
         assert!(events().is_empty());
@@ -336,7 +410,7 @@ mod tests {
         };
         let mut slot = core::ptr::addr_of_mut!(cell);
 
-        unsafe { shared_cell_release(&mut slot) };
+        unsafe { shared_cell_release_secondary(&mut slot) };
 
         assert_eq!(cell.refcount, 1);
         assert_eq!(cell.value, 0x1111_2222, "the payload word is not read");
@@ -360,7 +434,7 @@ mod tests {
         let cell_ptr = core::ptr::addr_of_mut!(cell);
         let mut slot = cell_ptr;
 
-        unsafe { shared_cell_release(&mut slot) };
+        unsafe { shared_cell_release_secondary(&mut slot) };
 
         assert_eq!(cell.refcount, 0);
         assert!(slot.is_null());
@@ -386,7 +460,7 @@ mod tests {
         let cell_ptr = core::ptr::addr_of_mut!(cell);
         let mut slot = cell_ptr;
 
-        unsafe { shared_cell_release(&mut slot) };
+        unsafe { shared_cell_release_secondary(&mut slot) };
 
         assert_eq!(cell.refcount, 0);
         assert!(slot.is_null());
@@ -413,7 +487,7 @@ mod tests {
         let mut slot = core::ptr::addr_of_mut!(cell);
         unsafe { (*core::ptr::addr_of_mut!(SLOT_ALIAS)) = &mut slot };
 
-        unsafe { shared_cell_release(&mut slot) };
+        unsafe { shared_cell_release_secondary(&mut slot) };
 
         assert!(slot.is_null());
         assert_eq!(
@@ -434,7 +508,7 @@ mod tests {
         };
         let mut slot = core::ptr::addr_of_mut!(cell);
 
-        unsafe { shared_cell_release(&mut slot) };
+        unsafe { shared_cell_release_secondary(&mut slot) };
 
         assert_eq!(cell.refcount, -1);
         assert!(slot.is_null());

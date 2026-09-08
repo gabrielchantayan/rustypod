@@ -18124,6 +18124,32 @@ functions:
       its early BXEQ return and larger prologue differ from the 21-word ARM
       body.
 
+  # --- shared-cell handle release, secondary call-site cluster ---
+  - address: 0x083b52a0
+    ghidra: FUN_083b52a0
+    name: shared_cell_release_secondary
+    size: 84
+    sig: "void shared_cell_release_secondary(SharedCell **slot)"
+    module: cxx/shared_cell
+    status: ported
+    renames:
+      param_1: slot
+      iVar1: cell
+      iVar2: remaining
+    notes: >-
+      Raw ARM comprises 21 words from 0x083b52a0 through 0x083b52f0,
+      ending immediately before the distinct direct-destructor specialization
+      at 0x083b52f4. It is byte-identical in semantics to the sibling release
+      at 0x083b524c: an empty slot is untouched; a non-empty cell has its
+      signed refcount decremented with wrapping subtraction; every non-empty
+      path clears slot. On the 1 -> 0 transition it conditionally dispatches
+      the non-NULL payload through vtable word 1, reloads slot, and tag-2
+      operator_delete's the reloaded non-NULL cell. A full ARM B/BL decode
+      found exactly 19 incoming BL calls, all unconditional, with zero
+      predicated BL calls and zero direct tail branches. The implementation
+      has its own target text section so linker identical-code folding cannot
+      erase this device-callable sibling symbol.
+
   # --- C++ COW basic_string<char> core (cluster 0x083d8518..0x083d8bac) ---
   # String object = one word, the char data pointer. 12-byte _Rep header
   # sits at data-12: {refcount i32 @0, capacity u32 @4, length u32 @8}
