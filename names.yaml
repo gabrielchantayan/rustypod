@@ -3341,6 +3341,30 @@ functions:
       0x082aad24 (tag 2, NULL-guarded), tag-3 pair 0x082aad74/0x82aad14,
       checked new 0x08266c70 (new-handler code 3).
 
+  - address: 0x082aaddc
+    ghidra: FUN_082aaddc
+    name: placement_new
+    size: 8
+    sig: "void *placement_new(size_t size, void *location)"
+    module: heap/veneers
+    status: ported
+    renames:
+      param_1/r0: size
+      param_2/r1: location
+      r0: returned_location
+    notes: >-
+      Raw ARM is exactly `mov r0,r1; mov pc,lr` at 0x082aaddc..0x082aade0:
+      C++ placement allocation ignores the requested size and returns its
+      caller-supplied location unchanged, including NULL, without reading or
+      writing that storage or touching the heap. Scanning every ARM B/BL word
+      in osos.dec found 18 direct calls: all are unconditional `bl` (zero
+      predicated forms): two from C++ runtime error-path scratch construction
+      @ 0x08266b00/0x08266da8 and sixteen from 0x082a8f00's initialization
+      routine. No dispatch seam is needed because this is a leaf identity.
+      Deviation: Rust models C++ placement new as an explicit function;
+      #[inline(never)] and its own target-only text section preserve a
+      distinct device call target.
+
   - address: 0x082aad24
     ghidra: FUN_082aad24
     name: operator_delete
