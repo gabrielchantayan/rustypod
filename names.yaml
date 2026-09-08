@@ -46919,3 +46919,48 @@ functions:
       match.py structural review against the worktree archive shows the
       vtable store, mode gate, conditional call, and result forwarding;
       extra instructions are the two-function seam dispatch.
+
+  # --- Trace-buffer local-static accessor ---
+  - address: 0x0814a08c
+    ghidra: FUN_0814a08c
+    name: trace_buffer_get
+    size: 144
+    sig: "u8 *trace_buffer_get(void)"
+    module: app/trace_buffer
+    status: ported
+    renames:
+      DAT_0814a10c: trace_static_guard
+      DAT_0814a110: trace_static_words
+      DAT_0814a114: __dso_handle
+      DAT_0814a118: trace_static_destructor_word
+      FUN_0814a2c8: trace_buffer_construct
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab338: cxa_guard_release
+      FUN_0807f680: condvar_init
+      FUN_08094404: mutex_lock_counted
+      FUN_0809449c: mutex_unlock_counted
+      FUN_082aadd4: operator_new
+    notes: >-
+      True raw extent is 144 bytes: 128 instruction bytes at
+      0x0814a08c..0x0814a108 followed by four literal-pool words at
+      0x0814a10c..0x0814a118; the separately linked next function begins
+      at 0x0814a11c. This corrects the supplied/Ghidra 128-byte code-only
+      size. Decoding every ARM B/BL word in osos.dec finds exactly 20 direct
+      callers, all unconditional BL: 0x0807c6d0, 0x0807c6e4, 0x0807c744,
+      0x08084da0, 0x0808697c, 0x080869fc, 0x0808e0f4, 0x08090b78,
+      0x0809b654, 0x080a28b8, 0x080ab060, 0x080ab24c, 0x080b566c,
+      0x080c6818, 0x080c6848, 0x080d3540, 0x080d9024, 0x08149f54,
+      0x0818a080, and 0x08296eec; no predicated BL and no direct tail B.
+      The accessor ignores incoming r0, initializes the three words at
+      0x08a778e8 under the ADS guard/cache page 0x089cb1ec, then locks
+      those words, allocates 0x40 through operator_new only while cache+4 is
+      NULL, calls the 0x0814a2c8 constructor, caches its result including
+      NULL, unlocks, and returns the cache. Constructor 0x0814a2c8 is not
+      ported, so app/trace_buffer uses a documented zeroing dispatch seam.
+      Literal 0x080ed318 is not a function entry: raw ARM places it on
+      `cmp r4,r6` inside the function beginning 0x080ed2f0, so the
+      cxa_atexit registration deliberately uses a no-op callback. Host
+      builds model the three target words directly because CondVar and
+      CountedMutex layouts diverge at 64-bit pointer width; target builds
+      directly invoke the ported condvar and counted-mutex functions.

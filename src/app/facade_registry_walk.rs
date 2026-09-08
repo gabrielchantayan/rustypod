@@ -122,13 +122,14 @@ type TraceStaticAccessor = unsafe extern "C" fn(dead_argument: u32);
 /// ABI boundary for `FUN_0814a030`, which returns the registry default root.
 type DefaultRootAccessor = unsafe extern "C" fn() -> *mut RegistryNode;
 
-/// Target boundary for the trace-static accessor; the host equivalent is a
-/// no-op because the walk cannot observe the accessor's result.
+/// Target boundary for the trace-static accessor. The target calls the
+/// ported accessor directly; the host remains a no-op because this walk
+/// cannot observe the returned buffer.
 unsafe extern "C" fn trace_static_accessor_default(dead_argument: u32) {
     #[cfg(target_os = "none")]
     {
-        let accessor: TraceStaticAccessor = core::mem::transmute(TRACE_STATIC_ACCESSOR_ADDRESS);
-        accessor(dead_argument);
+        let _ = dead_argument;
+        let _ = crate::app::trace_buffer::trace_buffer_get();
     }
 
     #[cfg(not(target_os = "none"))]
