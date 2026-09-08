@@ -1,4 +1,4 @@
-//! The twenty lazily-constructed framework singletons. Every one is the
+//! The twenty-one lazily-constructed framework singletons. Every one is the
 //! same four-step idiom over its own cache word, its own allocation
 //! size and its own constructor:
 //!
@@ -29,6 +29,7 @@
 //! | 0x08259534 | [`lazy_singleton_0xbc`] | 0xbc | 0x089cc960 | 0x08258a70 | 22 |
 //! | 0x081b5440 | [`singleton_class_9400`] | 0x22c | 0x089cc170 | 0x081b6628 | 22 |
 //! | 0x08264740 | [`app_boot_metrics_channel_get`] | 0xac | 0x089cc918 | 0x08266990 | 20 |
+//! | 0x081cbbb0 | [`photo_browse_slideshow_get`] | 0x8fc | 0x08a09e00 | 0x081cd5b8 | 18 |
 
 //!
 //! (Call-site counts binary-scanned; the earlier scouting notes said 86
@@ -51,7 +52,7 @@
 //!
 //! `operator new` @ 0x082aadd4 is already ported
 //! (`heap::veneers::operator_new`), so it is called directly. None of
-//! the twenty constructors is — they are large C++ constructors — so
+//! the twenty-one constructors is — they are large C++ constructors — so
 //! they sit behind the [`SINGLETON_CTORS`] dispatch table, the house
 //! pattern.
 //!
@@ -316,11 +317,20 @@ pub const CLASS_9400_SIZE: usize = 0x22c;
 
 /// Allocation size of the application-boot metrics channel (`mov r0, #0xac`).
 pub const APP_BOOT_METRICS_CHANNEL_SIZE: usize = 0xac;
+/// Allocation size of the PhotoBrowse slideshow controller (`ldr r0,
+/// [pc, #24]`, pool word @ 0x081cbbe4).
+pub const PHOTO_BROWSE_SLIDESHOW_SIZE: usize = 0x8fc;
+
 
 /// An ADS C++ constructor: takes the raw block, returns `this`.
 pub type Constructor = unsafe extern "C" fn(this: *mut u8) -> *mut u8;
+/// The PhotoBrowse slideshow constructor's second argument is an optional
+/// base object; the getter passes NULL.
+pub type PhotoBrowseSlideshowConstructor =
+    unsafe extern "C" fn(this: *mut u8, base: *mut u8) -> *mut u8;
 
-/// Indirect dispatch table for the nineteen unported constructors (see the
+
+/// Indirect dispatch table for the twenty-one unported constructors (see the
 /// module header for the default-stub contract).
 #[derive(Clone, Copy)]
 pub struct SingletonCtors {
@@ -364,6 +374,8 @@ pub struct SingletonCtors {
     pub class_9400: Constructor,
     /// App-boot metrics channel ctor @ 0x08266990.
     pub app_boot_metrics_channel: Constructor,
+    /// PhotoBrowse slideshow controller ctor @ 0x081cd5b8.
+    pub photo_browse_slideshow: PhotoBrowseSlideshowConstructor,
 }
 
 /// Defines one default constructor stub: zeroes the block and returns
@@ -398,6 +410,13 @@ zeroing_ctor!(zeroing_class_9300_ctor, CLASS_9300_SIZE);
 zeroing_ctor!(zeroing_singleton_0xbc_ctor, SINGLETON_0XBC_SIZE);
 zeroing_ctor!(zeroing_class_9400_ctor, CLASS_9400_SIZE);
 zeroing_ctor!(zeroing_app_boot_metrics_channel_ctor, APP_BOOT_METRICS_CHANNEL_SIZE);
+unsafe extern "C" fn zeroing_photo_browse_slideshow_ctor(
+    this: *mut u8,
+    _base: *mut u8,
+) -> *mut u8 {
+    zero_block(this, PHOTO_BROWSE_SLIDESHOW_SIZE)
+}
+
 
 /// Zeroes `size` bytes and returns the block. Volatile stores: a plain
 /// loop is rewritten by LLVM into a call to `__aeabi_memclr`, a symbol
@@ -433,6 +452,7 @@ pub(crate) const DEFAULT_SINGLETON_CTORS: SingletonCtors = SingletonCtors {
     singleton_0xbc: zeroing_singleton_0xbc_ctor,
     class_9400: zeroing_class_9400_ctor,
     app_boot_metrics_channel: zeroing_app_boot_metrics_channel_ctor,
+    photo_browse_slideshow: zeroing_photo_browse_slideshow_ctor,
 };
 
 /// The active constructors. Host tests install recording mocks; the
@@ -533,6 +553,9 @@ pub static mut CLASS_9400_INSTANCE: *mut u8 = core::ptr::null_mut();
 
 /// The application-boot metrics channel (original cache word @ 0x089cc918).
 pub static mut APP_BOOT_METRICS_CHANNEL: *mut u8 = core::ptr::null_mut();
+/// The PhotoBrowse slideshow controller (original cache word @ 0x08a09e00).
+pub static mut PHOTO_BROWSE_SLIDESHOW: *mut u8 = core::ptr::null_mut();
+
 
 /// The body all getters share: test the cache, allocate, construct,
 /// store, and re-load the cache (the original's second `ldr r0, [r4, #N]`,
@@ -582,6 +605,36 @@ pub unsafe extern "C" fn app_boot_metrics_channel_get() -> *mut u8 {
         APP_BOOT_METRICS_CHANNEL_SIZE,
         || ctor!(app_boot_metrics_channel),
     )
+}
+
+/// photo_browse_slideshow_get — original: `FUN_081cbbb0` @ **0x081cbbb0**
+/// (48 code bytes plus pool words @ 0x081cbbe0 and 0x081cbbe4 = **56 bytes**
+/// true extent; **18 direct `bl` call sites, all unconditional — 0
+/// predicated, 0 plain `b`**, verified by decoding every ARM B/BL word in
+/// `osos.dec`).
+///
+/// Loads the cache word @ 0x08a09e00. On NULL, it allocates exactly 0x8fc
+/// bytes through `operator_new`, calls `FUN_081cd5b8(allocation, NULL)`,
+/// caches the constructor result, reloads the cache, and returns it. Raw
+/// bytes place the next function at 0x081cbbe8, after both pool words.
+///
+/// The constructor passes the `"PhotoBrowse_Slideshow"` class-name literal to
+/// its base construction path, identifying the controller without inferring a
+/// fuller C++ class name. Deviation: the unported two-argument constructor
+/// rides the [`SINGLETON_CTORS`] `photo_browse_slideshow` slot with a zeroing
+/// default, and the cache is this crate static rather than the
+/// runtime-initialized word @ 0x08a09e00. It is not hook-ready until
+/// `FUN_081cd5b8` is ported.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn photo_browse_slideshow_get() -> *mut u8 {
+    if core::ptr::read_volatile(core::ptr::addr_of!(PHOTO_BROWSE_SLIDESHOW)).is_null() {
+        let object = (core::ptr::read_volatile(core::ptr::addr_of!(
+            SINGLETON_CTORS.photo_browse_slideshow
+        )))(operator_new(PHOTO_BROWSE_SLIDESHOW_SIZE), core::ptr::null_mut());
+        core::ptr::write_volatile(core::ptr::addr_of_mut!(PHOTO_BROWSE_SLIDESHOW), object);
+    }
+    core::ptr::read_volatile(core::ptr::addr_of!(PHOTO_BROWSE_SLIDESHOW))
 }
 
 /// app_controller_get — original: `FUN_0817ee04` @ 0x0817ee04
@@ -1352,6 +1405,9 @@ mod tests {
     /// Blocks handed to a constructor, in order.
     static mut CTOR_BLOCKS: Vec<*mut u8> = Vec::new();
 
+    /// Second arguments handed to the two-argument slideshow constructor.
+    static mut CTOR_BASES: Vec<*mut u8> = Vec::new();
+
     /// What the recording constructors return (NULL means "fail").
     static mut CTOR_RESULT: *mut u8 = ptr::null_mut();
 
@@ -1374,6 +1430,15 @@ mod tests {
 
     unsafe extern "C" fn recording_ctor(this: *mut u8) -> *mut u8 {
         (*ptr::addr_of_mut!(CTOR_BLOCKS)).push(this);
+        ptr::read_volatile(ptr::addr_of!(CTOR_RESULT))
+    }
+
+    unsafe extern "C" fn recording_photo_browse_slideshow_ctor(
+        this: *mut u8,
+        base: *mut u8,
+    ) -> *mut u8 {
+        (*ptr::addr_of_mut!(CTOR_BLOCKS)).push(this);
+        (*ptr::addr_of_mut!(CTOR_BASES)).push(base);
         ptr::read_volatile(ptr::addr_of!(CTOR_RESULT))
     }
 
@@ -1412,10 +1477,12 @@ mod tests {
                 singleton_0xbc: recording_ctor,
                 class_9400: recording_ctor,
                 app_boot_metrics_channel: recording_ctor,
+                photo_browse_slideshow: recording_photo_browse_slideshow_ctor,
             };
             CTOR_RESULT = ctor_result;
             (*ptr::addr_of_mut!(ALLOC_SIZES)).clear();
             (*ptr::addr_of_mut!(CTOR_BLOCKS)).clear();
+            (*ptr::addr_of_mut!(CTOR_BASES)).clear();
             clear_caches();
         }
         guard
@@ -1455,6 +1522,7 @@ mod tests {
         SINGLETON_0XBC = ptr::null_mut();
         CLASS_9400_INSTANCE = ptr::null_mut();
         APP_BOOT_METRICS_CHANNEL = ptr::null_mut();
+        PHOTO_BROWSE_SLIDESHOW = ptr::null_mut();
     }
 
     fn arena() -> *mut u8 {
@@ -2715,4 +2783,76 @@ mod tests {
         }
         restore(guard);
     }
+    #[test]
+    fn photo_browse_slideshow_allocates_constructs_and_caches() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(photo_browse_slideshow_get(), constructed());
+            assert_eq!(
+                *ptr::addr_of!(ALLOC_SIZES),
+                std::vec![PHOTO_BROWSE_SLIDESHOW_SIZE],
+                "the pool size is passed unchanged to operator_new"
+            );
+            assert_eq!(
+                *ptr::addr_of!(CTOR_BLOCKS),
+                std::vec![arena()],
+                "the constructor receives the raw allocation"
+            );
+            assert_eq!(
+                *ptr::addr_of!(CTOR_BASES),
+                std::vec![ptr::null_mut()],
+                "the getter supplies the stock NULL base argument"
+            );
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(PHOTO_BROWSE_SLIDESHOW)),
+                constructed(),
+                "the constructor result is cached"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn a_null_photo_browse_slideshow_constructor_reallocates() {
+        let guard = mock(ptr::null_mut());
+        unsafe {
+            assert!(photo_browse_slideshow_get().is_null());
+            assert!(photo_browse_slideshow_get().is_null());
+            assert_eq!(
+                (*ptr::addr_of!(ALLOC_SIZES)).len(),
+                2,
+                "a NULL cache re-runs the allocation and constructor"
+            );
+            assert_eq!(
+                *ptr::addr_of!(CTOR_BASES),
+                std::vec![ptr::null_mut(), ptr::null_mut()],
+                "both constructor calls preserve the NULL base argument"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn photo_browse_slideshow_zeroing_default_respects_object_extent() {
+        let guard = SINGLETON_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            let block = ptr::addr_of_mut!(ARENA) as *mut u8;
+            for offset in 0..PHOTO_BROWSE_SLIDESHOW_SIZE + 4 {
+                block.add(offset).write(0xa5);
+            }
+            assert_eq!(zeroing_photo_browse_slideshow_ctor(block, ptr::null_mut()), block);
+            assert!((0..PHOTO_BROWSE_SLIDESHOW_SIZE).all(|offset| block.add(offset).read() == 0));
+            assert_eq!(
+                block.add(PHOTO_BROWSE_SLIDESHOW_SIZE).read(),
+                0xa5,
+                "the default does not clear beyond the 0x8fc-byte allocation"
+            );
+            assert!(
+                zeroing_photo_browse_slideshow_ctor(ptr::null_mut(), ptr::null_mut()).is_null(),
+                "the default is NULL-safe"
+            );
+        }
+        restore(guard);
+    }
+
 }
