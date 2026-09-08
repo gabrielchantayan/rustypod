@@ -33430,6 +33430,39 @@ functions:
       explicit sub sp,#8 and the three blx-through-volatile-slot
       dispatches standing in for the direct bl's.
 
+  - address: 0x08261e54
+    ghidra: FUN_08261e54
+    name: cxx_mutex_destroy
+    size: 20
+    sig: "void *cxx_mutex_destroy(void *this)"
+    module: cxx/mutex_destroy
+    status: ported
+    renames:
+      param_1: this
+      FUN_082e82a4: pthread_mutex_destroy (unported)
+    notes: >-
+      20 bytes of code, no literal pool (0x08261e54..0x08261e68; next
+      function starts at 0x08261e68), decoded from osos.dec as push
+      {r4,lr}; mov r4,r0; bl 0x082e82a4; mov r0,r4; pop {r4,pc}.
+      The C++ mutex-wrapper destructor calls pthread_mutex_destroy on
+      the embedded mutex at this+0, discards its status, and returns
+      this unchanged. Its only direct callee is the real entry
+      0x082e82a4 (raw body validates mutex magic 0x4d555458, rejects
+      NULL or invalid magic with EINVAL 26, rejects a live owner or
+      semaphore with EBUSY 20, otherwise calls the real entry
+      0x080a3cf0 with this+0x14 and clears the magic).
+      Binary-decoding every B/BL word in osos.dec finds 19 unconditional
+      bl sites, zero predicated calls, and 4 tail-b sites
+      (0x08261c44, 0x08261cd8, 0x082628e8, 0x08262a98); no data word
+      equals 0x08261e54, so no virtual dispatch uses this address.
+      Deliberate deviation: unported pthread_mutex_destroy crosses the
+      CXX_MUTEX_DESTROY_OPS volatile dispatch slot, whose default is an
+      inert success-returning stub. Thus this port is not hook-ready
+      until 0x082e82a4 is ported. Host tests prove one-call forwarding,
+      ignored callee status, this passthrough, no direct writes, and
+      NULL forwarding. match.py structural review records the expected
+      blx-through-dispatch difference.
+
   - address: 0x082621a8
     ghidra: (veneer)
     name: posix_mutex_lock_veneer_b
