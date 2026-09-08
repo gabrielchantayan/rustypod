@@ -46137,6 +46137,47 @@ functions:
       tests (3): payload pointer returned verbatim, NULL payload passes
       through as NULL, arbitrary (even unaligned) word returned verbatim
       with the holder word never written.
+  - address: 0x0810b5cc
+    ghidra: FUN_0810b5cc
+    name: heap_string_format
+    size: 68
+    sig: "i32 heap_string_format(HeapString *this, const char *format, VaList args)"
+    module: cxx/heap_string
+    status: ported
+    vars: {param_1: this, param_2: format, in_stack_ffffffe8: args, auStack_200: scratch, uVar1: length}
+    renames:
+      param_1/r0/r5: this
+      param_2/r1: format
+      in_stack_ffffffe8/r3: args
+      auStack_21c: scratch
+      uVar1/r4/r0: length
+      FUN_08074ba0: retail_vsnprintf
+      FUN_0810b514: heap_string_assign_from_cstr (stock; intentionally unported)
+    notes: >-
+      Raw osos.dec at 0x0810b5cc..0x0810b60c is exactly 68 bytes; the
+      next function begins at 0x0810b610 with cmp r0,#0. It spills r0-r3
+      for the ADS variadic ABI, reserves 516 bytes, formats into the
+      aligned 512-byte scratch at sp+4 by calling retail_vsnprintf
+      (0x08074ba0) with size 512 and the pointer to the spilled varargs,
+      then retains that i32 result in r4 while it calls the stock
+      HeapString::assign_from_cstr @ 0x0810b514. The result is returned
+      unchanged after the assignment, including a negative conversion
+      result. Whole-image ARM branch decoding finds exactly 20 direct
+      calls: all are unconditional bl, with zero predicated bl, zero
+      plain b, and no data word equal to 0x0810b5cc. The repeated pairs
+      at 0x081508cc..0x0815103c are device-info XML construction in
+      FUN_081502b0, consistent with its live stack holders and supplied
+      format strings. Rust models the variadic spill as explicit VaList,
+      the crate convention. The assignment sibling is not re-stubbed:
+      target builds invoke its verified stock entry directly, while host
+      tests install a lock-guarded recorder. match.py structural review
+      (exit 1 expected): both bodies reserve a 512-byte scratch, preserve
+      the formatter result across assignment, and return it; LLVM's frame,
+      explicit VaList register shuffle, and literal-loaded blx to the stock
+      callee differ from the retail variadic spill and direct bl. Host tests
+      (5 module tests, 2 new) verify the 511-byte payload bound plus NUL in
+      the 512-byte scratch, verbatim negative result propagation, argument
+      forwarding, one assignment call, and empty output.
   # --- track-metadata fetch framework: serialized-record scalar reader ---
   - address: 0x0826863c
     ghidra: FUN_0826863c
