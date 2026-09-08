@@ -46469,3 +46469,29 @@ functions:
       status collides with the callers' 0 success value, that the head
       words are neither read nor written, and that status_override really
       sits at byte offset 0x20.
+
+  - address: 0x080c4ba8
+    ghidra: FUN_080c4ba8
+    name: ata_pio_write_byte
+    size: 28
+    sig: "i32 ata_pio_write_byte(u8 *destination, u8 value)"
+    module: drivers/ata_pio_write_byte
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: value
+      DAT_080c4bc4: ata_controller_base
+    notes: >-
+      Raw ARM is ldr r3, [pc, #20]; ldr r2, [r3, #0x78]; tst r2, #2;
+      beq back to the ready load; strb r1, [r0]; mov r0, #0; bx lr.
+      The literal pool word at 0x080c4bc4 is 0x38700000, the S5L8702 ATA
+      controller base, so +0x78 is ATA_PIO_READY. It waits for PIO write
+      readiness (bit 1), stores the low byte to the caller-selected ATA
+      task-file register, and returns zero without a NULL guard or timeout.
+      The next function starts at 0x080c4bc8, confirming the 28-byte code
+      extent plus its 4-byte literal. Decoding every ARM B/BL word in
+      osos.dec finds exactly 21 unconditional bl call sites and no
+      predicated form; a raw word scan finds no DATA reference to this
+      entry, so it is not virtually dispatched. Host builds model only the
+      fixed MMIO ready register with an atomic word so the readiness gate can
+      be tested; device builds retain the volatile physical read.
