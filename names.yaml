@@ -32960,6 +32960,42 @@ functions:
       base-alignment agnosticism, and a seeded-record preservation
       check.
 
+  - address: 0x0827196c
+    ghidra: FUN_0827196c
+    name: observable_array_append
+    size: 144
+    sig: "u32 observable_array_append(ObservableArray *this, void *element)"
+    module: cxx/observable_array
+    status: ported
+    renames:
+      param_1/r0: this (the concrete observable array)
+      param_2/r1: element (opaque value representation forwarded to the concrete writer)
+      iVar1/r5: index (the pre-growth element count, returned to the caller)
+      FUN_082a4ca0: observable_array_notify_append (unported observer broadcast)
+    notes: >-
+      Extent is binary-verified: 0x0827196c begins `push {r4,r5,r6,lr}`,
+      0x082719f8 is its `pop {r4,r5,r6,pc}`, and the distinct next
+      function is the `bx lr` at 0x082719fc, so Ghidra's 144 bytes is
+      correct with no literal pool. Decoding every ARM B/BL word in
+      osos.dec finds exactly 19 direct call sites: 17 unconditional `bl`
+      and 2 caller-guarded `bleq` (0x0810aab8 and 0x0810ffe4); no
+      word-aligned DATA occurrence holds 0x0827196c, so it is never a
+      virtual target. This appends one opaque element to a concrete
+      observable array. Slot +0x60 decides whether append is deferred; its
+      nonzero branch tail-dispatches slot +0x20 with r1=0x7fffffff and
+      returns that result. Otherwise it snapshots +0x04 length, calls
+      +0xbc with one, calls +0xa8 with the old index and element, calls
+      0x082a4ca0 to notify every observer of that index, calls +0x88 with
+      zero, and returns the old index. The slot targets are runtime
+      concrete-vtable data, so none is assigned an invented callee
+      identity. The direct helper is separately decoded as a 40-byte
+      observer-list walk calling 0x08155cc8, but is intentionally not
+      ported by this one-function change: the target seam reaches its
+      retailOS address; host tests install a recorder. The host vtable
+      fixture uses native function pointers rather than the target's u32
+      vtable word; it proves both branches, including the deferred
+      0x7fffffff sentinel, `u32::MAX` old-index wrap edge, exact call
+      order, return values, and no wrapper-owned length mutation.
   - address: 0x08271c84
     ghidra: FUN_08271c84
     name: observable_array_clear
