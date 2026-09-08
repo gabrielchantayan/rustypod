@@ -40,6 +40,11 @@
 //!   0x082aad14 (16 bytes, 155 `bl` + 3 `b` call sites). Structurally
 //!   identical pair with tag 3; 0x082aad14 is the neighbour immediately
 //!   below the tag-2 delete @ 0x082aad24, not the same function.
+//! - `placement_new` — original: `FUN_082aaddc` @ 0x082aaddc (8 bytes,
+//!   18 unconditional `bl` call sites). The C++ placement-allocation
+//!   identity (`mov r0, r1; mov pc, lr`): ignores the requested size and returns
+//!   the caller-supplied location unchanged, including NULL.
+
 //! - `free_tag4` — original: `FUN_0805d070` @ 0x0805d070 (8 bytes;
 //!   58 `bl`-form + 13 tail-branch call sites). The tag-4 deallocation
 //!   entry of the "MemH" managed-buffer family @ 0x0805d028..0x0805d1e4:
@@ -366,6 +371,32 @@ pub unsafe extern "C" fn realloc_wrapper(
 pub unsafe extern "C" fn operator_new(size: usize) -> *mut u8 {
     malloc_wrapper(size, TAG_OPERATOR_NEW)
 }
+
+/// placement_new — original: `FUN_082aaddc` @ 0x082aaddc (8 bytes; 18
+/// unconditional `bl` call sites, binary-verified by decoding every ARM
+/// B/BL word in osos.dec). Whole body:
+///
+/// ```text
+/// 082aaddc:  mov r0, r1        ; return caller-supplied storage
+/// 082aade0:  mov pc, lr
+/// ```
+///
+/// C++ placement allocation: `size` is completely dead and `location` is
+/// returned without a NULL guard, dereference, allocation, or heap traffic.
+/// The 18 calls are all plain `bl` (no predicated form): two C++ runtime
+/// scratch-object constructions and sixteen UI object constructions.
+///
+/// Deviation: Rust has no C++ placement-new operator syntax, so this is an
+/// explicit function. Its own target-only text section prevents identical
+/// code folding from merging this real call target with another identity
+/// helper.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.placement_new")]
+pub unsafe extern "C" fn placement_new(_size: usize, location: *mut u8) -> *mut u8 {
+    location
+}
+
 
 /// operator delete (tag 2) — original @ 0x082aad24 (16 bytes, 665 call
 /// sites): NULL-guarded `free_wrapper` with tag 2.
@@ -982,6 +1013,25 @@ pub(crate) mod tests {
             assert_eq!(ALLOC_CALLS, 1);
             assert_eq!(LAST_ALLOC_SIZE, 24);
             assert_eq!(LAST_ALLOC_TAG, 2);
+        }
+    }
+
+    #[test]
+    fn placement_new_ignores_size_and_returns_location_unchanged() {
+        let mut storage = [0xA5u8; 16];
+        let location = storage.as_mut_ptr().wrapping_add(5);
+        unsafe {
+            // `mov r0,r1` makes all size values, including the extreme
+            // values, indistinguishable. The storage is neither read nor
+            // written by this allocation identity.
+            for size in [0usize, 1, 8, usize::MAX] {
+                assert_eq!(placement_new(size, location), location);
+                assert_eq!(storage, [0xA5; 16]);
+            }
+            assert!(
+                placement_new(0, core::ptr::null_mut()).is_null(),
+                "there is no NULL guard or replacement allocation"
+            );
         }
     }
 
