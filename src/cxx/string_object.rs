@@ -86,7 +86,7 @@
 //!   or empty source and a negative index are silent no-ops, otherwise
 //!   the source's byte length is measured through
 //!   `strlen_safe_plus1` @ 0x08275e20 and the call tail-branches to
-//!   the (unported) insert core @ 0x08275f48, which resolves the UTF-8
+//!   the ported insert core @ 0x08275f48, which resolves the UTF-8
 //!   character index to a byte position and splices the source in.
 //! - `utf8_codepoint_count_safe` — original: `FUN_082770e0` @
 //!   0x082770e0 (48 bytes, all code; 102 `bl` call sites,
@@ -336,13 +336,9 @@
 //!   strings through [`utf8_next_codepoint`] and compares decoded
 //!   codepoints. The source side runs through the ported
 //!   [`string_object_c_str`] directly (no deviation).
-//! - `string_object_insert_cstr` tail-branches to the insert core @
-//!   0x08275f48, which is NOT ported, so the branch dispatches through
-//!   the [`STRING_OBJECT_INSERT_CORE`] slot (the
-//!   [`RETAIL_VSNPRINTF_ENGINE`] pattern). The default no-op
-//!   reproduces only the core's own early-return paths — the ones the
-//!   wrapper's guards make unreachable — so the port is NOT
-//!   hook-ready until the core is ported and wired in.
+//! - `string_object_insert_cstr` calls the ported insertion body directly.
+//!   Its allocation virtual method still uses STRING_OBJECT_ASSIGN_CSTR_OPS;
+//!   that boundary must be wired before the insertion path is hook-ready.
 
 use core::mem::MaybeUninit;
 
@@ -832,40 +828,40 @@ pub unsafe extern "C" fn string_object_format(
     length
 }
 
-/// The unported insert core @ 0x08275f48 that
-/// [`string_object_insert_cstr`] tail-branches to. It re-checks the
-/// wrapper's guards (NULL/empty source, negative index — all already
-/// excluded by the wrapper), grows the payload through vtable slot +0x8
-/// to `(old_len + source_len + 1 + 0x1f) & !0x1f` bytes, resolves the
-/// UTF-8 character `index` to a byte pointer (0x082a50c4), shifts the
-/// tail with memmove, copies the source in with memcpy, and writes the
-/// final NUL. `source_len` is the source's byte length WITHOUT its NUL.
-pub type StringObjectInsertCoreFn = unsafe extern "C" fn(
-    this: *mut StringObject,
-    index: i32,
-    source: *const u8,
-    source_len: usize,
-);
-
-/// Placeholder for the unported insert core @ 0x08275f48. A no-op is
-/// exactly the core's own early-return paths — the only ones reachable
-/// past the wrapper's guards (nonempty source, nonnegative index) — and
-/// is intentionally not a substitute for the core's grow/shift/copy
-/// body: this port is NOT hook-ready until 0x08275f48 is ported and
-/// wired in as the default.
-unsafe extern "C" fn missing_insert_core(
-    _this: *mut StringObject,
-    _index: i32,
-    _source: *const u8,
-    _source_len: usize,
+/// string_object_insert_bytes — original: FUN_08275f48 @ 0x08275f48
+/// (164 bytes, all code). Ignore NULL source, zero byte count and negative
+/// index. Otherwise request (old inclusive length + source_len) rounded up
+/// to 32 bytes from virtual slot +0x8 with preserve flag 1. On success,
+/// resolve the character index against the UPDATED payload, move the tail
+/// including its NUL, copy the source bytes into the gap, then write NUL at
+/// the new end. The allocation return is only a success flag; the virtual
+/// method must update this.payload and preserve its previous contents.
+/// Size arithmetic wraps at 32 bits, as in ARM. The source may contain NULs;
+/// its explicit byte count is authoritative. Source must remain readable
+/// across allocation and must not overlap the copy destination; the ADS
+/// memory helpers additionally require word padding for funnel reads.
+/// The only deviation is the existing unported virtual-method boundary
+/// STRING_OBJECT_ASSIGN_CSTR_OPS. All sizing, indexing and memory operations
+/// call their Rust ports. This is not hook-ready until allocation is wired.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_insert_bytes(
+    this: *mut StringObject, index: i32, source: *const u8, source_len: u32,
 ) {
+    if source.is_null() || source_len == 0 || index < 0 { return; }
+    let old_len = strlen_safe_plus1((*this).payload) as u32;
+    let new_len = old_len.wrapping_add(source_len);
+    let capacity = new_len.wrapping_add(31) & !31;
+    if assign_cstr_allocate_op()(this, capacity as usize, 1).is_null() { return; }
+    let insertion = string_object_codepoint_ptr(this, index) as *mut u8;
+    let payload = (*this).payload;
+    let offset = (insertion as usize).wrapping_sub(payload as usize) as u32;
+    crate::libc::memmove::memmove(
+        insertion.add(source_len as usize), insertion, old_len.wrapping_sub(offset) as usize,
+    );
+    crate::libc::rt_memcpy::__rt_memcpy(insertion, source, source_len as usize);
+    payload.add(new_len.wrapping_sub(1) as usize).write(0);
 }
-
-/// Active insert core for [`string_object_insert_cstr`] (the
-/// [`RETAIL_VSNPRINTF_ENGINE`] pattern). Host tests install a recording
-/// mock; a later port of 0x08275f48 replaces the default without
-/// changing this caller.
-pub static mut STRING_OBJECT_INSERT_CORE: StringObjectInsertCoreFn = missing_insert_core;
 
 /// string_object_insert_cstr — original: `FUN_08276a18` @ 0x08276a18
 /// (68 bytes, all code — no literal-pool word; 61 `bl` call sites,
@@ -910,12 +906,8 @@ pub static mut STRING_OBJECT_INSERT_CORE: StringObjectInsertCoreFn = missing_ins
 /// `mvn r1, #0x80000000` (0x7fffffff, INT_MAX) as the append-at-end
 /// idiom (0x08053a34, 0x08074258).
 ///
-/// Deviation: the insert core @ 0x08275f48 is NOT ported, so the tail
-/// branch dispatches through the [`STRING_OBJECT_INSERT_CORE`] slot
-/// (the [`RETAIL_VSNPRINTF_ENGINE`] pattern) whose default is a no-op
-/// reproducing the core's own early-return paths — see
-/// [`missing_insert_core`]. There is no NULL guard on `this`, matching
-/// the original (it only ever reaches the core's vtable dereference).
+/// The insert body calls its Rust port directly. The body's virtual
+/// allocation method remains the existing injectable boundary.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn string_object_insert_cstr(
@@ -935,9 +927,7 @@ pub unsafe extern "C" fn string_object_insert_cstr(
     let len_plus1: unsafe extern "C" fn(*const u8) -> usize =
         core::ptr::read_volatile(&(strlen_safe_plus1 as unsafe extern "C" fn(*const u8) -> usize));
     let source_len = len_plus1(source) - 1;
-    core::ptr::read_volatile(core::ptr::addr_of!(STRING_OBJECT_INSERT_CORE))(
-        this, index, source, source_len,
-    );
+    string_object_insert_bytes(this, index, source, source_len as u32);
 }
 
 /// string_object_assign — original: `FUN_082774a8` @ 0x082774a8
@@ -1035,6 +1025,69 @@ pub unsafe extern "C" fn string_object_construct_from_cstr(
     (*this).payload = core::ptr::null_mut();
     string_object_assign_cstr(this, source);
     this
+}
+
+/// string_object_construct_from_utf16 — original: FUN_082773b4 @
+/// 0x082773b4 (40 code bytes plus vtable literal 0x089a6044 at 0x082773dc).
+/// Initialize raw storage with the class vtable and NULL payload, call the
+/// bounded UTF-16 assignment with the unchanged source/count, then return
+/// this even on allocation failure. Ghidra omits the r1/r2 arguments.
+/// Deviation: use the modeled vtable; assignment retains the existing
+/// virtual-method boundary. This must point to writable object storage.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_construct_from_utf16(
+    this: *mut StringObject, source: *const u16, max_code_units: i32,
+) -> *mut StringObject {
+    (*this).vtable = &STRING_OBJECT_VTABLE;
+    (*this).payload = core::ptr::null_mut();
+    string_object_assign_utf16(this, source, max_code_units);
+    this
+}
+
+/// string_object_construct_from_codepoint — original: FUN_08277414 @
+/// 0x08277414 (40 code bytes plus vtable literal 0x089a6044 at 0x0827743c).
+/// Plant the vtable, clear the uninitialized payload, assign the unsigned
+/// codepoint and return this. Zero takes the assignment's clear path;
+/// allocation failure still leaves initialized empty storage. Ghidra omits
+/// the r1 codepoint argument. Deviation: modeled vtable and the existing
+/// virtual-method boundary. This must point to writable object storage.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_construct_from_codepoint(
+    this: *mut StringObject, codepoint: u32,
+) -> *mut StringObject {
+    (*this).vtable = &STRING_OBJECT_VTABLE;
+    (*this).payload = core::ptr::null_mut();
+    string_object_assign_codepoint(this, codepoint);
+    this
+}
+
+/// string_object_append — original: FUN_082774c8 @ 0x082774c8 (40 bytes).
+/// Resolve the other object's NULL-safe C string, insert it at INT_MAX
+/// (the append-at-end sentinel), and return this regardless of allocation
+/// success. No self-append guard or source snapshot is added. Both objects
+/// must be readable; source storage must remain valid across allocation.
+/// No new deviations; the insert body's virtual allocation remains unported.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_append(
+    this: *mut StringObject, other: *const StringObject,
+) -> *mut StringObject {
+    let source = string_object_c_str(other);
+    string_object_insert_cstr(this, i32::MAX, source);
+    this
+}
+
+/// string_object_codepoint_count — original: FUN_082a5394 @ 0x082a5394
+/// (8 bytes). Load the payload and tail-call utf8_codepoint_count_safe.
+/// NULL payloads return zero; the decoder's zero result terminates counting,
+/// including overlong NUL and unsupported leads. No deviations. This must
+/// be readable; its payload follows the decoder's readable-sequence contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_codepoint_count(this: *const StringObject) -> usize {
+    utf8_codepoint_count_safe((*this).payload)
 }
 
 /// string_object_copy_construct — original: `FUN_082773e0` @ 0x082773e0
@@ -1484,7 +1537,7 @@ unsafe extern "C" fn missing_utf8_strcasecmp_core(_a: *const u8, _b: *const u8) 
 }
 
 /// Active compare core for [`string_object_utf8_strcasecmp_safe`]
-/// (the [`STRING_OBJECT_INSERT_CORE`] pattern). Host tests install a
+/// (the [`RETAIL_VSNPRINTF_ENGINE`] pattern). Host tests install a
 /// recording mock; a later port of 0x0827609c replaces the default
 /// without changing this caller.
 ///
@@ -3151,158 +3204,194 @@ pub(crate) mod tests {
         assert_eq!(&destination[..3], b"ab\0", "only the truncated text is assigned");
     }
 
-    /// Serializes the insert-core seam and its recorder.
-    static INSERT_CORE_LOCK: Mutex<()> = Mutex::new(());
-    /// `(this, index, source, source_len)` received by the insert core
-    /// @ 0x08275f48 through the [`STRING_OBJECT_INSERT_CORE`] slot.
-    static mut INSERT_CORE_CALLS: Vec<(usize, i32, usize, usize)> = Vec::new();
-
-    unsafe extern "C" fn recording_insert_core(
-        this: *mut StringObject,
-        index: i32,
-        source: *const u8,
-        source_len: usize,
-    ) {
-        (*core::ptr::addr_of_mut!(INSERT_CORE_CALLS)).push((
-            this as usize,
-            index,
-            source as usize,
-            source_len,
-        ));
+    // A preserving virtual allocator may relocate the payload. Its result is
+    // deliberately offset: insertion must use the updated object field.
+    unsafe extern "C" fn recording_insert_allocate(
+        this: *mut StringObject, size: usize, flags: u32,
+    ) -> *mut u8 {
+        let out = recording_assign_cstr_allocate(this, size, flags);
+        if !out.is_null() {
+            let old = (*this).payload;
+            if old.is_null() { out.write(0); }
+            else { core::ptr::copy(old, out, strlen_safe_plus1(old)); }
+            (*this).payload = out;
+            return out.add(1);
+        }
+        out
     }
 
-    /// Restores the unported insert-core boundary even when a test panics.
-    struct InsertCoreGuard {
-        _lock: MutexGuard<'static, ()>,
+    fn insert_bench(out: *mut u8) -> AssignCstrOpsGuard {
+        let guard = assign_cstr_bench(out);
+        unsafe {
+            (*core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS)).allocate_payload =
+                recording_insert_allocate;
+        }
+        guard
     }
 
-    impl Drop for InsertCoreGuard {
-        fn drop(&mut self) {
-            unsafe {
-                core::ptr::addr_of_mut!(STRING_OBJECT_INSERT_CORE)
-                    .write_volatile(missing_insert_core);
+    #[test]
+    fn insert_bytes_preserves_tails_across_sizes_alignments_and_relocation() {
+        for old_len in [0usize, 1, 3, 4, 7, 15, 31, 32, 63] {
+            for source_len in [1usize, 2, 3, 4, 7, 16, 31, 32] {
+                for alignment in 0..4 {
+                    for index in [0, (old_len / 2) as i32, i32::MAX] {
+                        let mut old = [0u8; 80];
+                        old[4..4 + old_len].fill(b'a');
+                        let source = [b'X'; 40];
+                        let mut out = [0xa5; 144];
+                        let base = 4 + alignment;
+                        let mut object = StringObject { vtable: core::ptr::null(), payload: unsafe { old.as_mut_ptr().add(4) } };
+                        let _bench = insert_bench(unsafe { out.as_mut_ptr().add(base) });
+                        unsafe { string_object_insert_bytes(&mut object, index, source.as_ptr().add(4), source_len as u32) };
+                        let at = (index as usize).min(old_len);
+                        let mut expected = std::vec![b'a'; old_len];
+                        expected.splice(at..at, core::iter::repeat(b'X').take(source_len));
+                        expected.push(0);
+                        assert_eq!(&out[base..base + expected.len()], expected);
+                        assert!(out[..base].iter().chain(&out[base + expected.len()..]).all(|&b| b == 0xa5));
+                        assert_eq!(&old[4..4 + old_len], std::vec![b'a'; old_len]);
+                        unsafe {
+                            assert_eq!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).as_slice(),
+                                &[(&mut object as *mut _ as usize, (old_len + source_len + 32) & !31, 1)]);
+                        }
+                    }
+                }
             }
         }
     }
 
-    fn insert_core_bench() -> InsertCoreGuard {
-        let lock = INSERT_CORE_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    #[test]
+    fn insert_cstr_resolves_character_positions_and_copies_the_source_byte_length() {
+        let mut old = [0u8; 24];
+        old[4..11].copy_from_slice(b"A\xc2\xa9\xe2\x82\xac\0");
+        let mut source = [0u8; 16];
+        source[4..11].copy_from_slice(b"h\xc3\xa9llo\0");
+        let mut out = [0xa5; 32];
+        let mut object = StringObject { vtable: core::ptr::null(), payload: unsafe { old.as_mut_ptr().add(4) } };
+        let _bench = insert_bench(out.as_mut_ptr());
+        unsafe { string_object_insert_cstr(&mut object, 2, source.as_ptr().add(4)) };
+        assert_eq!(&out[..13], b"A\xc2\xa9h\xc3\xa9llo\xe2\x82\xac\0");
+        assert_eq!(unsafe { string_object_codepoint_count(&object) }, 8);
+    }
+
+    #[test]
+    fn insert_bytes_uses_the_explicit_count_even_for_embedded_nuls() {
+        let mut old = *b"ab\0\0\0\0\0\0";
+        let source = *b"X\0Y\0\0\0\0\0";
+        let mut out = [0xa5; 32];
+        let mut object = StringObject { vtable: core::ptr::null(), payload: old.as_mut_ptr() };
+        let _bench = insert_bench(out.as_mut_ptr());
+        unsafe { string_object_insert_bytes(&mut object, 1, source.as_ptr(), 3) };
+        assert_eq!(&out[..6], b"aX\0Yb\0");
+        assert_eq!(out[6], 0xa5);
+    }
+
+    #[test]
+    fn insert_guards_return_before_reading_the_object_or_allocating() {
+        let _bench = insert_bench(core::ptr::null_mut());
         unsafe {
-            (*core::ptr::addr_of_mut!(INSERT_CORE_CALLS)).clear();
-            core::ptr::addr_of_mut!(STRING_OBJECT_INSERT_CORE)
-                .write_volatile(recording_insert_core);
+            string_object_insert_bytes(core::ptr::null_mut(), 0, core::ptr::null(), 9);
+            string_object_insert_bytes(core::ptr::null_mut(), 0, b"x".as_ptr(), 0);
+            string_object_insert_bytes(core::ptr::null_mut(), -1, b"x".as_ptr(), 1);
+            string_object_insert_cstr(core::ptr::null_mut(), 0, core::ptr::null());
+            string_object_insert_cstr(core::ptr::null_mut(), 0, b"\0".as_ptr());
+            string_object_insert_cstr(core::ptr::null_mut(), -1, b"x\0".as_ptr());
+            assert!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty());
         }
-        InsertCoreGuard { _lock: lock }
     }
 
     #[test]
-    fn insert_cstr_null_and_empty_source_are_silent_no_ops() {
-        let mut object = StringObject {
-            vtable: core::ptr::null(),
-            payload: 0x3333_3333 as *mut u8,
-        };
-        let this = core::ptr::addr_of_mut!(object);
-        let _bench = insert_core_bench();
+    fn insert_allocation_failure_preserves_payload_and_wraps_capacity_at_32_bits() {
+        for (count, capacity) in [(1, 32), (30, 32), (31, 64), (u32::MAX, 32)] {
+            let mut old = *b"a\0";
+            let mut object = StringObject { vtable: core::ptr::null(), payload: old.as_mut_ptr() };
+            let _bench = insert_bench(core::ptr::null_mut());
+            unsafe {
+                string_object_insert_bytes(&mut object, 0, b"x".as_ptr(), count);
+                assert_eq!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).as_slice(),
+                    &[(&mut object as *mut _ as usize, capacity, 1)]);
+                assert!((*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty());
+            }
+            assert_eq!(object.payload, old.as_mut_ptr());
+            assert_eq!(&old, b"a\0");
+        }
+    }
 
+    #[test]
+    fn append_returns_this_and_handles_empty_target_and_null_source_payload() {
+        let mut source = *b"song\0\0\0\0";
+        let other = StringObject { vtable: core::ptr::null(), payload: source.as_mut_ptr() };
+        let mut object = StringObject { vtable: core::ptr::null(), payload: core::ptr::null_mut() };
+        let mut out = [0xa5; 32];
+        let _bench = insert_bench(out.as_mut_ptr());
+        assert_eq!(unsafe { string_object_append(&mut object, &other) }, &mut object as *mut _);
+        assert_eq!(&out[..5], b"song\0");
+        let empty = StringObject { vtable: core::ptr::null(), payload: core::ptr::null_mut() };
+        assert_eq!(unsafe { string_object_append(&mut object, &empty) }, &mut object as *mut _);
+        assert_eq!(&out[..5], b"song\0");
+        assert_eq!(unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).len() }, 1);
+    }
+
+    #[test]
+    fn append_supports_self_append_when_allocation_keeps_source_storage_valid() {
+        let mut out = [0u8; 32];
+        out[..4].copy_from_slice(b"abc\0");
+        let mut object = StringObject { vtable: core::ptr::null(), payload: out.as_mut_ptr() };
+        let this = &mut object as *mut StringObject;
+        let _bench = insert_bench(out.as_mut_ptr());
+        assert_eq!(unsafe { string_object_append(this, this) }, this);
+        assert_eq!(&out[..7], b"abcabc\0");
+    }
+
+    #[test]
+    fn converting_constructors_initialize_storage_and_forward_their_inputs() {
+        let units = [0x41u16, 0xa9, 0x42];
+        let mut object = utf16_test_object();
+        let mut out = [0xa5; 16];
+        let _bench = assign_cstr_bench(out.as_mut_ptr());
+        let this = &mut object as *mut StringObject;
+        assert_eq!(unsafe { string_object_construct_from_utf16(this, units.as_ptr(), 2) }, this);
+        assert_eq!(&out[..4], b"A\xc2\xa9\0");
+        assert_eq!(object.vtable, &STRING_OBJECT_VTABLE as *const _);
+        assert!(object.payload.is_null());
+        object.payload = 0x2222_2222 as *mut u8;
+        assert_eq!(unsafe { string_object_construct_from_codepoint(this, 0x10000) }, this);
+        assert_eq!(&out[..4], b"\xf0\x80\x80\0");
+        assert!(object.payload.is_null());
+        assert_eq!(object.vtable, &STRING_OBJECT_VTABLE as *const _);
+    }
+
+    #[test]
+    fn converting_constructors_keep_initialized_empty_storage_on_clear_and_failure() {
+        let mut object = utf16_test_object();
+        let _bench = assign_cstr_bench(core::ptr::null_mut());
+        let this = &mut object as *mut StringObject;
         unsafe {
-            string_object_insert_cstr(this, 0, core::ptr::null());
-            string_object_insert_cstr(this, 4, b"\0".as_ptr());
+            for count in [0, -1, i32::MIN, 1] {
+                assert_eq!(string_object_construct_from_utf16(this, [0x41u16].as_ptr(), count), this);
+                assert!(object.payload.is_null());
+                assert_eq!(object.vtable, &STRING_OBJECT_VTABLE as *const _);
+            }
+            for value in [0, 0x41] {
+                assert_eq!(string_object_construct_from_codepoint(this, value), this);
+                assert!(object.payload.is_null());
+            }
+            assert_eq!((*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).len(), 4);
+            assert_eq!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).len(), 2);
         }
-
-        assert!(
-            unsafe { (*core::ptr::addr_of!(INSERT_CORE_CALLS)).is_empty() },
-            "a NULL or empty source returns before measuring or dispatching"
-        );
-        assert_eq!(object.payload, 0x3333_3333 as *mut u8);
     }
 
     #[test]
-    fn insert_cstr_negative_index_is_a_silent_no_op() {
-        let source = *b"album\0";
-        let mut object = StringObject {
-            vtable: core::ptr::null(),
-            payload: 0x4444_4444 as *mut u8,
-        };
-        let this = core::ptr::addr_of_mut!(object);
-        let _bench = insert_core_bench();
-
-        unsafe {
-            string_object_insert_cstr(this, -1, source.as_ptr());
-            string_object_insert_cstr(this, i32::MIN, source.as_ptr());
+    fn object_count_uses_decoder_termination_instead_of_byte_length() {
+        for (mut bytes, count) in [
+            (std::vec![0], 0), (b"A\xc2\xa9\xe2\x82\xac\0".to_vec(), 3),
+            (b"A\xc0\x80Z\0".to_vec(), 1), (b"A\xf0\x9f\x98Z\0".to_vec(), 1),
+        ] {
+            let object = StringObject { vtable: core::ptr::null(), payload: bytes.as_mut_ptr() };
+            assert_eq!(unsafe { string_object_codepoint_count(&object) }, count);
         }
-
-        assert!(
-            unsafe { (*core::ptr::addr_of!(INSERT_CORE_CALLS)).is_empty() },
-            "a negative index returns before measuring or dispatching"
-        );
-        assert_eq!(object.payload, 0x4444_4444 as *mut u8);
-    }
-
-    #[test]
-    fn insert_cstr_dispatches_the_core_with_byte_length_and_verbatim_arguments() {
-        // "héllo": six bytes but five codepoints — source_len must be the
-        // BYTE length (strlen_safe_plus1 minus the NUL), which is what the
-        // core's memmove/memcpy splice consumes; the character index is the
-        // core's own codepoint-walk business.
-        let source = *b"h\xc3\xa9llo\0";
-        let mut object = StringObject {
-            vtable: core::ptr::null(),
-            payload: 0x5555_5555 as *mut u8,
-        };
-        let this = core::ptr::addr_of_mut!(object);
-        let _bench = insert_core_bench();
-
-        unsafe { string_object_insert_cstr(this, 7, source.as_ptr()) };
-
-        assert_eq!(
-            unsafe { (*core::ptr::addr_of!(INSERT_CORE_CALLS)).clone() },
-            std::vec![(this as usize, 7, source.as_ptr() as usize, 6)],
-            "(this, index, source, strlen(source)) tail-branch arguments"
-        );
-    }
-
-    #[test]
-    fn insert_cstr_index_zero_and_int_max_reach_the_core() {
-        let source = *b"x\0";
-        let mut object = StringObject {
-            vtable: core::ptr::null(),
-            payload: core::ptr::null_mut(),
-        };
-        let this = core::ptr::addr_of_mut!(object);
-        let _bench = insert_core_bench();
-
-        unsafe {
-            string_object_insert_cstr(this, 0, source.as_ptr());
-            // The sampled call sites' append-at-end idiom (mvn r1,
-            // #0x80000000 = 0x7fffffff): not negative, so it dispatches.
-            string_object_insert_cstr(this, i32::MAX, source.as_ptr());
-        }
-
-        assert_eq!(
-            unsafe { (*core::ptr::addr_of!(INSERT_CORE_CALLS)).clone() },
-            std::vec![
-                (this as usize, 0, source.as_ptr() as usize, 1),
-                (this as usize, i32::MAX, source.as_ptr() as usize, 1),
-            ],
-            "only a NEGATIVE index is rejected"
-        );
-    }
-
-    #[test]
-    fn insert_cstr_default_core_leaves_the_object_untouched() {
-        // No bench: the wired default is missing_insert_core, a no-op
-        // reproducing the unported core's own early-return paths. The
-        // payload assertion holds even if a sibling test's recorder is
-        // installed concurrently — the recorder never writes the object.
-        let mut object = StringObject {
-            vtable: core::ptr::null(),
-            payload: 0x6666_6666 as *mut u8,
-        };
-        let this = core::ptr::addr_of_mut!(object);
-
-        unsafe { string_object_insert_cstr(this, 0, b"x\0".as_ptr()) };
-
-        assert_eq!(object.payload, 0x6666_6666 as *mut u8);
+        let object = StringObject { vtable: core::ptr::null(), payload: core::ptr::null_mut() };
+        assert_eq!(unsafe { string_object_codepoint_count(&object) }, 0);
     }
 
     #[test]

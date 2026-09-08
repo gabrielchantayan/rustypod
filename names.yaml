@@ -16893,7 +16893,7 @@ functions:
       (decomp/c/029/082a50a8_FUN_082a50a8.c) shows the callee's body
       inlined and matches once the tail branch is followed. Port
       dispatches through the STRING_OBJECT_UTF8_STRCASECMP_CORE slot
-      (the STRING_OBJECT_INSERT_CORE pattern) because the core is not
+      (the RETAIL_VSNPRINTF_ENGINE pattern) because the core is not
       ported; the default missing_utf8_strcasecmp_core returns the
       core's fold-equal exit (0) - arbitrary for real inputs, so this
       port is NOT hook-ready until 0x0827609c is wired in. match.py
@@ -31259,24 +31259,15 @@ functions:
       (the callee walks codepoints to resolve it; a past-the-end index
       appends) while the length argument is a plain BYTE count. Sampled
       call sites pass `mvn r1,#0x80000000` (0x7fffffff, INT_MAX) as the
-      append-at-end idiom (0x08053a34, 0x08074258). Deviations (the
-      string_object_format contract): the insert core @ 0x08275f48 is
-      NOT ported, so the tail branch dispatches through the
-      STRING_OBJECT_INSERT_CORE slot whose default no-op reproduces only
-      the core's own early-return paths - NOT HOOK-READY until the core
-      is ported and wired in; the strlen keeps its call shape through a
-      volatile fn-pointer read (the string_object_len_plus1 convention).
-      Host tests: NULL and empty source and negative index dispatch
-      nothing and touch nothing; a nonempty source with index 0/7/
-      INT_MAX reaches the core with (this, index, source, strlen) -
-      proven a byte count with the 6-byte/5-codepoint "h\xc3\xa9llo";
-      the wired default leaves the object untouched. match.py
-      structural: same guard set (NULL, empty-first-byte, negative
-      index), the length call, `sub r3,r0,#1`, the (this, index,
-      source, len) argument shuffle and the tail branch; the diff is
-      the crate's fp frame and the two blx-through-volatile-slot
-      dispatches standing in for the direct bl 0x08275e20 / b
-      0x08275f48.
+      append-at-end idiom (0x08053a34, 0x08074258). The insertion body
+      now calls string_object_insert_bytes directly; its preserving virtual
+      allocator remains the existing STRING_OBJECT_ASSIGN_CSTR_OPS boundary.
+      The byte-length helper retains its volatile function-pointer call.
+      Host tests exercise actual insertion, including multibyte character
+      indices, byte-counted source lengths, allocation failure and guards.
+      Codegen retains the guard set, length call, source length minus one
+      and direct branch to the ported body.
+
 
   - address: 0x082770e0
     ghidra: FUN_082770e0
@@ -41195,6 +41186,83 @@ functions:
       untouched.
 
   # --- StringObject: bounded UTF-16 assignment ---
+  - address: 0x08275f48
+    ghidra: FUN_08275f48
+    name: string_object_insert_bytes
+    size: 164
+    sig: "void string_object_insert_bytes(StringObject *this, int index, const unsigned char *source, unsigned int source_len)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      param_1: "this"
+      param_2: "index"
+      param_3: "source"
+      param_4: "source_len"
+      iVar1: "old_inclusive_len"
+      iVar2: "insertion"
+      iVar3: "payload"
+    notes: >-
+      One unconditional BL and two unconditional tail B references. NULL source, zero length and negative index exit before object access. Add old inclusive byte length and source_len with 32-bit wrapping, round up to 32, and allocate via virtual slot +0x8 with preserve flag 1. On success resolve the character index against the updated payload, memmove the tail including NUL, copy source_len raw bytes with __rt_memcpy and store a final NUL. Allocation return is only a non-NULL flag; the object payload is authoritative. Replaces the no-op STRING_OBJECT_INSERT_CORE seam; only the existing unported virtual allocator remains. Caller must keep source valid across allocation and satisfy the ADS copy padding/nonoverlap contract.
+      Codegen review: 41 original versus 54 Rust instructions. LLVM inlines the inclusive byte-length loop; rounded allocation, payload reload, character-index call, memmove/copy calls and final NUL store remain. LLVM lowers memmove to __aeabi_memmove (compiler_builtins); __rt_memcpy stays a direct ADS-port call. Capacity arithmetic stays 32-bit.
+
+  - address: 0x082773b4
+    ghidra: FUN_082773b4
+    name: string_object_construct_from_utf16
+    size: 44
+    sig: "StringObject *string_object_construct_from_utf16(StringObject *this, const unsigned short *source, int max_code_units)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      param_1: "this"
+      r1: "source"
+      r2: "max_code_units"
+    notes: >-
+      Six unconditional BL references. 40 code bytes plus literal 0x089a6044 at 0x082773dc; Ghidra excludes the literal and loses both forwarded arguments. Initialize the vtable and NULL payload, call the ported bounded UTF-16 assignment and return this on every path. Uses the modeled vtable and the existing virtual allocation/clear boundary inherited from assignment; no new seam.
+      Codegen review: initialization, unchanged source/count forwarding and saved-this return retained; LLVM adds a frame and reorders the two independent initialization stores.
+
+  - address: 0x08277414
+    ghidra: FUN_08277414
+    name: string_object_construct_from_codepoint
+    size: 44
+    sig: "StringObject *string_object_construct_from_codepoint(StringObject *this, unsigned int codepoint)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      param_1: "this"
+      r1: "codepoint"
+    notes: >-
+      Three unconditional BL references. 40 code bytes plus literal 0x089a6044 at 0x0827743c; Ghidra excludes the literal and drops r1. Plant modeled vtable and NULL payload, assign the unsigned codepoint through its Rust port and return this, including on zero/clear and allocation failure. Retains the existing virtual-method boundary; no new seam.
+      Codegen review: initialization, unchanged unsigned argument and saved-this return retained; modeled vtable literal replaces the ROM literal.
+
+  - address: 0x082774c8
+    ghidra: FUN_082774c8
+    name: string_object_append
+    size: 40
+    sig: "StringObject *string_object_append(StringObject *this, const StringObject *other)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      param_1: "this"
+      param_2: "other"
+      uVar1: "source"
+    notes: >-
+      18 unconditional BL references. Resolve other through string_object_c_str, then string_object_insert_cstr with index INT_MAX (append sentinel), and return this regardless of success. No self-append guard or source snapshot. Both callees are direct Rust ports; the insertion allocator remains an unported virtual boundary. Source must remain valid across any allocation.
+      Codegen review: 10 original versus 11 Rust instructions; both direct calls, INT_MAX index and this return preserved.
+
+  - address: 0x082a5394
+    ghidra: FUN_082a5394
+    name: string_object_codepoint_count
+    size: 8
+    sig: "unsigned int string_object_codepoint_count(const StringObject *this)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      param_1: "this"
+      iStack_c: "payload"
+    notes: >-
+      Two unconditional BL references. Load payload at +4 and tail-branch to utf8_codepoint_count_safe; NULL payload is zero and malformed/overlong zero-decoding sequences end the count. Ghidra inlines the entire decoder loop but raw extent is only two instructions. No deviations.
+      Codegen review: payload load and direct count tail call preserved; LLVM adds and immediately restores its frame.
+
   - address: 0x08275ecc
     ghidra: FUN_08275ecc
     name: utf8_write_codepoint
