@@ -12141,6 +12141,35 @@ functions:
       is empty or the index is out of range. Not ported - its size
       helper 0x083d78c4 is outside the 0x08100000-0x081fffff sweep and
       unported, so the whole body would be dispatch-table indirection.
+  - address: 0x08184fd4
+    ghidra: FUN_08184fd4
+    name: load_resource_list
+    size: 76
+    sig: "ResourceList *load_resource_list(ResourceList *list, u32 provider, u32 resource_data, u32 parser, u32 options)"
+    module: util/resource_list
+    status: ported
+    renames:
+      param_1/r0/r4: list
+      param_2/r1/r5: provider
+      param_3/r2/r6: resource_data
+      param_4/r3/r7: parser
+      param_5/stack/r8: options
+      DAT_0818501c: RESOURCE_LIST_VTABLE_ADDRESS (0x08989508)
+      FUN_083e472c: three_word_clear_seventh (already ported, called directly)
+      FUN_08184f50: resource-list initializer (RESOURCE_LIST_OPS seam; not yet ported)
+    notes: >-
+      Size correction: raw extent is 0x08184fd4..0x08185020. Ghidra reports
+      72 instruction bytes but omits the literal-pool vtable word at
+      0x0818501c; the next function begins at 0x08185020. Decoding every ARM
+      B/BL word in osos.dec finds 19 direct call sites: all are unconditional
+      bl, with no predicated forms, tail b branches, or data-word occurrence.
+      It stores vtable 0x08989508 at list+0, calls the already ported
+      three_word_clear_seventh on the three-word vector at list+0x14, then
+      calls unported FUN_08184f50(list, provider, resource_data, parser,
+      options) and returns list. Ghidra invents surplus arguments for the
+      clear helper; raw r0 is only list+0x14. Rust preserves this sequence and
+      uses a direct 0x08184f50 target call on device; RESOURCE_LIST_OPS is the
+      host-test seam for that unported initializer.
 
   - address: 0x08120978
     ghidra: FUN_08120978
