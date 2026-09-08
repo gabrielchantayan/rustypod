@@ -45352,6 +45352,35 @@ functions:
       the exact four-call order. match.py structural diff reviewed after the
       ARM release build.
 
+  # --- opaque tagged record initializer ---
+  - address: 0x0826fc2c
+    ghidra: FUN_0826fc2c
+    name: tagged_record_init
+    size: 20
+    sig: "TaggedRecord *tagged_record_init(TaggedRecord *this, u32 payload, u32 flag)"
+    module: cxx/tagged_record
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: payload
+      param_3/r2: flag
+      DAT_0826fc40: tagged_record_descriptor
+      r0 return: this
+    notes: >-
+      Raw extent is 0x0826fc2c..0x0826fc44: four ARM instruction words and
+      the literal-pool word at 0x0826fc40; the next separately linked function
+      starts at 0x0826fc44. Decoding every ARM B/BL word in osos.dec finds
+      exactly 20 direct call sites, all unconditional plain BL, with no
+      predicated BL forms or plain-B tail callers. The body stores r1 at +0x04,
+      installs literal 0x089a5b04 at +0x00, stores only the low byte of r2 at
+      +0x08, and returns this unchanged in r0. The literal does not decode as
+      a function entry in the static image: 0x089a5b04 is a branch-table case
+      label inside a larger body. Since this function only stores that opaque
+      target-width word and never dispatches through it, the port adds no
+      speculative callee identity or dispatch seam. No deliberate behavioral
+      deviations. Host tests cover descriptor/payload stores, flag truncation,
+      preserved trailing bytes, zero inputs, and pointer return.
+
   # --- statically bound empty C++ destructor ---
   - address: 0x0826fc64
     ghidra: FUN_0826fc64
