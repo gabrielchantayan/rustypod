@@ -92,6 +92,7 @@ pub mod tracker_record;
 pub mod update_dispatch;
 pub mod trace_buffer;
 pub mod ui_flag_update_forwarder;
+pub mod volume_controller_byte_at_90;
 pub mod vtable_set;
 pub mod view_event;
 pub mod view_timer;

@@ -48331,3 +48331,35 @@ functions:
       aligned image data word equals the entry address. The port directly calls
       the already-ported mutex_lock/mutex_unlock rather than inventing a
       dispatch seam; LLVM may inline their ROM-dispatch guards on target.
+
+  # --- volume controller opaque byte +0x90 accessor ---
+  - address: 0x081fa044
+    ghidra: FUN_081fa044
+    name: volume_controller_byte_at_90
+    size: 8
+    sig: "u8 volume_controller_byte_at_90(const u8 *volume_controller)"
+    module: app/volume_controller_byte_at_90
+    status: ported
+    renames:
+      param_1/r0: volume_controller
+      param_1_plus_0x90: byte_at_0x90
+      r0: byte_at_0x90
+    notes: >-
+      Raw ARM establishes the full eight-byte extent
+      0x081fa044..0x081fa04c: `ldrb r0,[r0,#0x90]; bx lr`; the separately
+      linked next function opens with `push {r4,lr}` at 0x081fa04c. It returns
+      the raw unsigned byte at volume_controller+0x90, with no NULL guard or
+      mutation. Decoding every ARM B/BL word in osos.dec finds exactly 18
+      direct inbound calls, all unconditional plain BL at 0x081a19fc,
+      0x081a1ab8, 0x081a2178, 0x081a21ec, 0x081a22a4, 0x081a5a3c,
+      0x081a651c, 0x081a6c80, 0x082170bc, 0x08217410, 0x08217dd8,
+      0x08217e2c, 0x08217f14, 0x0821c50c, 0x0821d0c4, 0x0821def4,
+      0x0821f11c, and 0x0821fb1c; there are no predicated BL forms or direct
+      B tail callers. The volume-controller constructor FUN_081fa070 zeros
+      this byte at 0x081fa0b4, and direct callers distinguish zero, nonzero,
+      and one, but neither proves the field's domain meaning. The
+      offset-based name deliberately preserves that uncertainty. No
+      deviations. Host tests cover every u8 result, neighboring-byte guards,
+      unaligned input, and absence of mutation. Reference C:
+      decomp/c/021/081fa044_FUN_081fa044.c; raw assembly:
+      osos.dec 0x081fa044.
