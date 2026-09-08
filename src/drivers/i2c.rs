@@ -44,14 +44,10 @@
 //! through the [`PMU_READ_REGS`] slot (the house ops-slot pattern,
 //! `blx` in place of `bl`), whose shipped default is the ported
 //! [`pmu_i2c_read_bank`] (the pre-port stub [`pmu_read_regs_stub`] is
-//! retained for host tests). Under it, the raw transfer FUN_0836d3b8
-//! -> FUN_0836bb84/FUN_0836b950 (slave 0x73) is S5L8702 I2C hardware
-//! and dispatches through the [`PMU_I2C_TRANSFER`] slot, whose default
-//! stub fails closed with the driver's own bad-bank code
-//! [`PMU_READ_BAD_BANK`]. The port is the shipped default of
-//! time/rtc.rs's `RTC_READ_REGS` slot, so the wired defaults behave
-//! exactly like the former fail-closed stub (status 9 ->
-//! `rtc_read_time` reports -5 and converts the seeded buffer).
+//! retained for host tests). The raw PMU transfer is now ported as
+//! [`pmu_i2c_read`]; its still-unported S5L8702 I2C primitives
+//! (`FUN_0836bb84` and `FUN_0836b950`) are fixed-address calls on
+//! target and volatile host test seams.
 
 use crate::kernel::sync_mutex::{RomKernelOps, ROM_KERNEL};
 
@@ -67,9 +63,8 @@ pub const PMU_I2C_OUTER_SEM: u32 = 0x11;
 pub const PMU_I2C_INNER_SEM: u32 = 5;
 
 /// FUN_0836d698's own bad-bank code (`movne r0, #9`): what the bank
-/// mux returns for every bank but 0/1, and what the fail-closed
-/// [`PMU_I2C_TRANSFER`] / [`PMU_READ_REGS`] stubs report so the chain
-/// fails closed without the hardware driver.
+/// mux returns for every bank but 0/1, and what the pre-port
+/// [`PMU_READ_REGS`] stub reports.
 pub const PMU_READ_BAD_BANK: i32 = 9;
 
 /// PCF50635 register block selected by bank 0: the RTC time block
@@ -84,29 +79,58 @@ pub const PMU_RTC_ALARM_BLOCK: u32 = 0x60;
 /// Bytes read per register block (original: `mov r1, #0x7`).
 pub const PMU_RTC_BLOCK_LEN: u32 = 7;
 
-/// The FUN_0836d3b8 boundary: write the block base register `reg` to
-/// the PMU (I2C slave 0x73), then read `len` bytes into `buf`;
-/// returns 0 on success, the raw transfer's status otherwise.
-pub type PmuI2cTransferFn = unsafe extern "C" fn(reg: u32, len: u32, buf: *mut u8) -> i32;
+/// PMU I2C slave address, loaded by `mov r0, #0x73` before both raw
+/// S5L8702 transfers in FUN_0836d3b8.
+pub const PMU_I2C_SLAVE: u32 = 0x73;
 
-/// Default transfer slot: fail closed with the bad-bank code. The
-/// raw S5L8702 I2C transfer (FUN_0836d3b8 -> FUN_0836bb84 register-
-/// address write / FUN_0836b950 read loop, slave 0x73) is unported
-/// hardware; under the wired defaults [`pmu_i2c_read_bank`] therefore
-/// reports [`PMU_READ_BAD_BANK`] for every bank, exactly like the
-/// pre-port [`PMU_READ_REGS`] stub.
-pub(crate) unsafe extern "C" fn pmu_i2c_transfer_stub(
-    _reg: u32,
-    _len: u32,
-    _buf: *mut u8,
-) -> i32 {
-    PMU_READ_BAD_BANK
+/// ABI of raw S5L8702 I2C write `FUN_0836bb84`.
+type I2cWriteFn = unsafe extern "C" fn(slave: u32, len: u32, buf: *const u8) -> i32;
+/// ABI of raw S5L8702 I2C read `FUN_0836b950`.
+type I2cReadFn = unsafe extern "C" fn(slave: u32, len: u32, buf: *mut u8) -> i32;
+
+const I2C_WRITE_ADDRESS: usize = 0x0836_bb84;
+const I2C_READ_ADDRESS: usize = 0x0836_b950;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn i2c_write(slave: u32, len: u32, buf: *const u8) -> i32 {
+    let write: I2cWriteFn = core::mem::transmute(I2C_WRITE_ADDRESS);
+    write(slave, len, buf)
 }
 
-/// The active PMU register-block transfer. Host tests install a
-/// recording mock; the real driver replaces the stub when the S5L8702
-/// I2C chain lands.
-pub static mut PMU_I2C_TRANSFER: PmuI2cTransferFn = pmu_i2c_transfer_stub;
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn i2c_read(slave: u32, len: u32, buf: *mut u8) -> i32 {
+    let read: I2cReadFn = core::mem::transmute(I2C_READ_ADDRESS);
+    read(slave, len, buf)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_i2c_write(_slave: u32, _len: u32, _buf: *const u8) -> i32 {
+    panic!("pmu_i2c_read requires I2C write 0x0836bb84")
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_i2c_read(_slave: u32, _len: u32, _buf: *mut u8) -> i32 {
+    panic!("pmu_i2c_read requires I2C read 0x0836b950")
+}
+
+#[cfg(not(target_os = "none"))]
+static mut I2C_WRITE: I2cWriteFn = missing_i2c_write;
+#[cfg(not(target_os = "none"))]
+static mut I2C_READ: I2cReadFn = missing_i2c_read;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn i2c_write(slave: u32, len: u32, buf: *const u8) -> i32 {
+    core::ptr::read_volatile(core::ptr::addr_of!(I2C_WRITE))(slave, len, buf)
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn i2c_read(slave: u32, len: u32, buf: *mut u8) -> i32 {
+    core::ptr::read_volatile(core::ptr::addr_of!(I2C_READ))(slave, len, buf)
+}
 
 /// The FUN_0836d698 boundary: `bank` 0 selects PMU register block
 /// 0x59 (RTC time), bank 1 block 0x60 (alarm); 7 bytes are read into
@@ -114,10 +138,8 @@ pub static mut PMU_I2C_TRANSFER: PmuI2cTransferFn = pmu_i2c_transfer_stub;
 pub type PmuReadRegsFn = unsafe extern "C" fn(bank: u32, buf: *mut u8) -> i32;
 
 /// Pre-port default slot, retained for host tests: fail closed with
-/// the bad-bank code 9 for every bank. The shipped default is now the
-/// ported [`pmu_i2c_read_bank`]; the raw transfer under it
-/// (FUN_0836d3b8 -> FUN_0836bb84/FUN_0836b950, slave 0x73) stays
-/// unported hardware behind [`PMU_I2C_TRANSFER`].
+/// the bad-bank code 9 for every bank. The shipped default is the
+/// ported [`pmu_i2c_read_bank`].
 pub(crate) unsafe extern "C" fn pmu_read_regs_stub(_bank: u32, _buf: *mut u8) -> i32 {
     PMU_READ_BAD_BANK
 }
@@ -156,6 +178,40 @@ pub unsafe extern "C" fn pmu_i2c_read_regs(bank: u32, buf: *mut u8) -> i32 {
     status
 }
 
+/// pmu_i2c_read — original: `FUN_0836d3b8` @ 0x0836d3b8 (84 bytes;
+/// 18 plain `bl` call sites, 0 predicated `bl`, binary-verified by
+/// decoding every B/BL word in osos.dec).
+///
+/// Stores `reg` as a native word, writes its low byte to PCF50635
+/// slave 0x73 through `FUN_0836bb84`, then, only if that succeeds and
+/// `len` is positive, reads exactly `len` bytes through
+/// `FUN_0836b950`. The stock loop advances its completed count by the
+/// entire remainder, therefore its positive-length path makes exactly
+/// one read; zero and negative signed lengths still perform the
+/// register write but skip the read. Both raw status words return
+/// verbatim. The direct branch references at 0x0836d3ac (`bcc`),
+/// 0x0836d690 (`beq`), and 0x0836d6bc (`b`) are not calls.
+///
+/// # Deviation
+///
+/// The two raw S5L8702 I2C primitives remain unported. Target builds
+/// call their verified load addresses directly; host tests use volatile
+/// function-pointer seams. This changes each retail direct `bl` to an
+/// indirect `blx` on target.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_i2c_read(reg: u32, len: i32, buf: *mut u8) -> i32 {
+    let register = reg;
+    let mut status = i2c_write(PMU_I2C_SLAVE, 1, (&register as *const u32).cast());
+    if status != 0 {
+        return status;
+    }
+    if len > 0 {
+        status = i2c_read(PMU_I2C_SLAVE, len as u32, buf);
+    }
+    status
+}
+
 /// pmu_i2c_read_bank — original: `FUN_0836d698` @ 0x0836d698 (40
 /// bytes).
 ///
@@ -164,19 +220,15 @@ pub unsafe extern "C" fn pmu_i2c_read_regs(bank: u32, buf: *mut u8) -> i32 {
 /// #0x59`), bank 1 the alarm block 0x60 (`cmp r0, #1 / mov r0,
 /// #0x60`), any other bank returns the bad-bank code
 /// [`PMU_READ_BAD_BANK`] (`movne r0, #9 / bxne lr`) with the buffer
-/// untouched; a valid bank tail-branches (`b 0x0836d3b8`) into the
-/// raw transfer `FUN_0836d3b8(reg, 7, buf)`, which writes the register
-/// address to I2C slave 0x73 via FUN_0836bb84 and reads the 7 bytes
-/// back via FUN_0836b950, returning its status verbatim.
+/// untouched; a valid bank tail-branches (`b 0x0836d3b8`) into
+/// [`pmu_i2c_read`].
 ///
 /// # Deviation
 ///
-/// FUN_0836d3b8 and the S5L8702 I2C hardware chain under it are not
-/// ported; the tail branch dispatches through the [`PMU_I2C_TRANSFER`]
-/// slot (the house ops-slot pattern, a call in place of `b`), whose
-/// default stub fails closed with [`PMU_READ_BAD_BANK`] so the wired
-/// defaults are indistinguishable from the pre-port stub. This port
-/// is the shipped default of the [`PMU_READ_REGS`] slot.
+/// The Rust call replaces the retail tail branch, so it uses `bl` and
+/// return rather than `b`; the callee's raw I2C calls are indirect
+/// `blx` through its fixed-address boundary.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn pmu_i2c_read_bank(bank: u32, buf: *mut u8) -> i32 {
     let reg = if bank == 0 {
@@ -186,11 +238,7 @@ pub unsafe extern "C" fn pmu_i2c_read_bank(bank: u32, buf: *mut u8) -> i32 {
     } else {
         return PMU_READ_BAD_BANK;
     };
-    // Volatile slot read — same rationale as every dispatch table: a
-    // build in which nothing swaps it must not constant-fold the
-    // default in.
-    let transfer = core::ptr::read_volatile(core::ptr::addr_of!(PMU_I2C_TRANSFER));
-    (transfer)(reg, PMU_RTC_BLOCK_LEN, buf)
+    pmu_i2c_read(reg, PMU_RTC_BLOCK_LEN as i32, buf)
 }
 
 #[cfg(test)]
@@ -206,16 +254,28 @@ pub(crate) mod tests {
     /// kobj.rs HOOKS_LOCK precedent).
     pub(crate) static OPS_LOCK: Mutex<()> = Mutex::new(());
 
+    /// Raw PMU write calls: (slave, len, first byte).
+    static mut RAW_WRITE_LOG: Vec<(u32, u32, u8)> = Vec::new();
+    /// Raw PMU read calls: (slave, len, destination address).
+    static mut RAW_READ_LOG: Vec<(u32, u32, usize)> = Vec::new();
+    static mut RAW_WRITE_STATUS: i32 = 0;
+    static mut RAW_READ_STATUS: i32 = 0;
     /// Logged semaphore ops: (0 = wait, 1 = signal, handle).
     static mut SEM_LOG: Vec<(u8, u32)> = Vec::new();
-    /// Logged reads: (bank, buf address).
+    /// Logged PMU register-block reads: (bank, buf address).
     static mut READ_LOG: Vec<(u32, usize)> = Vec::new();
-    /// Status the mock read hands back.
+    /// Status the register-block read mock hands back.
     static mut READ_STATUS: i32 = 0;
-    /// Logged transfers: (reg, len, buf address).
-    static mut XFER_LOG: Vec<(u32, u32, usize)> = Vec::new();
-    /// Status the mock transfer hands back.
-    static mut XFER_STATUS: i32 = 0;
+
+    unsafe extern "C" fn mock_i2c_write(slave: u32, len: u32, buf: *const u8) -> i32 {
+        (*addr_of_mut!(RAW_WRITE_LOG)).push((slave, len, buf.read()));
+        *addr_of!(RAW_WRITE_STATUS)
+    }
+
+    unsafe extern "C" fn mock_i2c_read(slave: u32, len: u32, buf: *mut u8) -> i32 {
+        (*addr_of_mut!(RAW_READ_LOG)).push((slave, len, buf as usize));
+        *addr_of!(RAW_READ_STATUS)
+    }
 
     unsafe extern "C" fn mock_sema_wait(handle: u32) {
         (*addr_of_mut!(SEM_LOG)).push((0, handle));
@@ -228,11 +288,6 @@ pub(crate) mod tests {
     unsafe extern "C" fn mock_read_regs(bank: u32, buf: *mut u8) -> i32 {
         (*addr_of_mut!(READ_LOG)).push((bank, buf as usize));
         *addr_of!(READ_STATUS)
-    }
-
-    unsafe extern "C" fn mock_transfer(reg: u32, len: u32, buf: *mut u8) -> i32 {
-        (*addr_of_mut!(XFER_LOG)).push((reg, len, buf as usize));
-        *addr_of!(XFER_STATUS)
     }
 
     /// Installs the recording mocks and returns the guard plus the
@@ -257,7 +312,6 @@ pub(crate) mod tests {
         unsafe {
             addr_of_mut!(ROM_KERNEL).write(state.1);
             addr_of_mut!(PMU_READ_REGS).write(pmu_i2c_read_bank);
-            addr_of_mut!(PMU_I2C_TRANSFER).write(pmu_i2c_transfer_stub);
         }
         drop(state.0);
     }
@@ -325,48 +379,112 @@ pub(crate) mod tests {
         drop(guard);
     }
 
-    /// Installs the recording transfer mock and returns the OPS_LOCK
-    /// guard.
-    fn install_transfer(status: i32) -> MutexGuard<'static, ()> {
+    fn install_raw(write_status: i32, read_status: i32) -> MutexGuard<'static, ()> {
         let guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
-            (*addr_of_mut!(XFER_LOG)).clear();
-            *addr_of_mut!(XFER_STATUS) = status;
-            addr_of_mut!(PMU_I2C_TRANSFER).write(mock_transfer);
+            (*addr_of_mut!(RAW_WRITE_LOG)).clear();
+            (*addr_of_mut!(RAW_READ_LOG)).clear();
+            *addr_of_mut!(RAW_WRITE_STATUS) = write_status;
+            *addr_of_mut!(RAW_READ_STATUS) = read_status;
+            addr_of_mut!(I2C_WRITE).write(mock_i2c_write);
+            addr_of_mut!(I2C_READ).write(mock_i2c_read);
         }
         guard
     }
 
-    fn restore_transfer(guard: MutexGuard<'static, ()>) {
+    fn restore_raw(guard: MutexGuard<'static, ()>) {
         unsafe {
-            addr_of_mut!(PMU_I2C_TRANSFER).write(pmu_i2c_transfer_stub);
+            addr_of_mut!(I2C_WRITE).write(missing_i2c_write);
+            addr_of_mut!(I2C_READ).write(missing_i2c_read);
         }
         drop(guard);
     }
 
     #[test]
+    fn raw_write_error_skips_read_and_preserves_buffer() {
+        let guard = install_raw(-5, 0);
+        unsafe {
+            let mut buf = [0xaau8; 7];
+            assert_eq!(pmu_i2c_read(0x1234_56a7, 7, buf.as_mut_ptr()), -5);
+            assert_eq!((*addr_of!(RAW_WRITE_LOG)).clone(), std::vec![(PMU_I2C_SLAVE, 1, 0xa7)]);
+            assert!((*addr_of!(RAW_READ_LOG)).is_empty());
+            assert_eq!(buf, [0xaau8; 7]);
+        }
+        restore_raw(guard);
+    }
+
+    #[test]
+    fn raw_non_positive_lengths_write_register_but_skip_read() {
+        let guard = install_raw(0, 0);
+        unsafe {
+            let mut buf = [0xaau8; 7];
+            for len in [i32::MIN, -1, 0] {
+                assert_eq!(pmu_i2c_read(0x59, len, buf.as_mut_ptr()), 0);
+            }
+            assert_eq!(
+                (*addr_of!(RAW_WRITE_LOG)).clone(),
+                std::vec![
+                    (PMU_I2C_SLAVE, 1, 0x59),
+                    (PMU_I2C_SLAVE, 1, 0x59),
+                    (PMU_I2C_SLAVE, 1, 0x59),
+                ]
+            );
+            assert!((*addr_of!(RAW_READ_LOG)).is_empty());
+            assert_eq!(buf, [0xaau8; 7]);
+        }
+        restore_raw(guard);
+    }
+
+    #[test]
+    fn raw_positive_read_is_once_and_status_is_verbatim() {
+        let guard = install_raw(0, 0x15);
+        unsafe {
+            let mut buf = [0u8; 7];
+            let addr = buf.as_mut_ptr() as usize;
+            assert_eq!(pmu_i2c_read(0x60, 7, buf.as_mut_ptr()), 0x15);
+            *addr_of_mut!(RAW_READ_STATUS) = -5;
+            assert_eq!(pmu_i2c_read(0x60, 1, buf.as_mut_ptr()), -5);
+            assert_eq!(
+                (*addr_of!(RAW_READ_LOG)).clone(),
+                std::vec![
+                    (PMU_I2C_SLAVE, 7, addr),
+                    (PMU_I2C_SLAVE, 1, addr),
+                ],
+                "each positive request performs one full read"
+            );
+        }
+        restore_raw(guard);
+    }
+
+    #[test]
     fn bank_mux_selects_time_then_alarm_block() {
-        let guard = install_transfer(0);
+        let guard = install_raw(0, 0);
         unsafe {
             let mut buf = [0u8; 7];
             let addr = buf.as_mut_ptr() as usize;
             assert_eq!(pmu_i2c_read_bank(0, buf.as_mut_ptr()), 0);
             assert_eq!(pmu_i2c_read_bank(1, buf.as_mut_ptr()), 0);
             assert_eq!(
-                (*addr_of!(XFER_LOG)).clone(),
+                (*addr_of!(RAW_WRITE_LOG)).clone(),
                 std::vec![
-                    (PMU_RTC_TIME_BLOCK, PMU_RTC_BLOCK_LEN, addr),
-                    (PMU_RTC_ALARM_BLOCK, PMU_RTC_BLOCK_LEN, addr),
-                ],
-                "bank 0 -> reg 0x59, bank 1 -> reg 0x60, 7 bytes, buf forwarded"
+                    (PMU_I2C_SLAVE, 1, PMU_RTC_TIME_BLOCK as u8),
+                    (PMU_I2C_SLAVE, 1, PMU_RTC_ALARM_BLOCK as u8),
+                ]
+            );
+            assert_eq!(
+                (*addr_of!(RAW_READ_LOG)).clone(),
+                std::vec![
+                    (PMU_I2C_SLAVE, PMU_RTC_BLOCK_LEN, addr),
+                    (PMU_I2C_SLAVE, PMU_RTC_BLOCK_LEN, addr),
+                ]
             );
         }
-        restore_transfer(guard);
+        restore_raw(guard);
     }
 
     #[test]
     fn bad_bank_fails_closed_without_transfer() {
-        let guard = install_transfer(0);
+        let guard = install_raw(0, 0);
         unsafe {
             let mut buf = [0xaau8; 7];
             for bank in [2u32, 9, 0xffff_ffff] {
@@ -376,48 +494,10 @@ pub(crate) mod tests {
                     "bank {bank:#x} reports the bad-bank code"
                 );
             }
-            assert!(
-                (*addr_of!(XFER_LOG)).is_empty(),
-                "a bad bank never reaches the transfer"
-            );
+            assert!((*addr_of!(RAW_WRITE_LOG)).is_empty());
+            assert!((*addr_of!(RAW_READ_LOG)).is_empty());
             assert_eq!(buf, [0xaau8; 7], "the buffer stays untouched");
         }
-        restore_transfer(guard);
-    }
-
-    #[test]
-    fn transfer_status_passes_through_verbatim() {
-        let guard = install_transfer(0x15);
-        unsafe {
-            let mut buf = [0u8; 7];
-            assert_eq!(pmu_i2c_read_bank(0, buf.as_mut_ptr()), 0x15);
-            *addr_of_mut!(XFER_STATUS) = -5;
-            assert_eq!(pmu_i2c_read_bank(1, buf.as_mut_ptr()), -5);
-            *addr_of_mut!(XFER_STATUS) = 1;
-            assert_eq!(pmu_i2c_read_bank(0, buf.as_mut_ptr()), 1);
-        }
-        restore_transfer(guard);
-    }
-
-    #[test]
-    fn shipped_default_chain_still_fails_closed() {
-        // PMU_READ_REGS at its shipped default (the port), the
-        // transfer slot at its stub: every bank reports the bad-bank
-        // code, exactly like the pre-port stub.
-        let guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe {
-            addr_of_mut!(PMU_READ_REGS).write(pmu_i2c_read_bank);
-            addr_of_mut!(PMU_I2C_TRANSFER).write(pmu_i2c_transfer_stub);
-            let mut buf = [0xaau8; 7];
-            for bank in [0u32, 1, 2] {
-                assert_eq!(
-                    pmu_i2c_read_regs(bank, buf.as_mut_ptr()),
-                    PMU_READ_BAD_BANK,
-                    "bank {bank} fails closed through the wired defaults"
-                );
-            }
-            assert_eq!(buf, [0xaau8; 7], "the stub never touches the buffer");
-        }
-        drop(guard);
+        restore_raw(guard);
     }
 }

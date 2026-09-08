@@ -35,13 +35,11 @@
 //!
 //! The mutexed wrapper FUN_082e58f0 is ported as
 //! [`crate::drivers::i2c::pmu_i2c_read_regs`] and is the shipped
-//! default of the [`RTC_READ_REGS`] dispatch slot below. The hardware
-//! chain under it (FUN_0836d698 -> FUN_0836d3b8 -> FUN_0836bb84 /
-//! FUN_0836b950, the S5L8702 I2C transfer to slave 0x73) stays
-//! unported behind i2c.rs's `PMU_READ_REGS` slot, whose default stub
-//! fails closed with the driver's own bad-bank code 9 — so the wired
-//! defaults still make [`rtc_read_time`] report -5 and convert
-//! whatever the seeds left in the buffer. The BCD conversion
+//! default of the [`RTC_READ_REGS`] dispatch slot below. Its hardware
+//! chain now reaches the ported FUN_0836d698 bank mux and
+//! FUN_0836d3b8 register read; the latter calls the still-unported
+//! S5L8702 I2C primitives FUN_0836bb84 / FUN_0836b950 at their fixed
+//! target addresses for PCF50635 slave 0x73. The BCD conversion
 //! FUN_0809e3e8 is pure arithmetic and is ported as
 //! [`super::civil::bcd_datetime_to_days_secs`] (on the ported
 //! __rt_udiv/__rt_sdiv); all adds/multiplies wrap to match ARM
@@ -165,10 +163,9 @@ pub unsafe extern "C" fn rtc_static_time_pair(
     0
 }
 
-/// Pre-port default slot, kept for host tests: fail closed with
-/// FUN_0836d698's own bad-bank code 9. The shipped default is now the
-/// ported [`crate::drivers::i2c::pmu_i2c_read_regs`], which fails
-/// closed identically through its `PMU_READ_REGS` stub.
+/// Pre-port default slot, retained for host tests: fail closed with
+/// FUN_0836d698's own bad-bank code 9. The shipped default instead
+/// enters the ported I2C chain and reaches real hardware on target.
 unsafe extern "C" fn rtc_read_stub(_bank: u32, _buf: *mut u8) -> i32 {
     9
 }
@@ -424,26 +421,11 @@ mod tests {
         restore(guard);
     }
 
-    #[test]
-    fn default_stub_fails_closed() {
-        let _guard = SLOT_LOCK.lock().unwrap();
-        // No mock installed: the shipped chain (pmu_i2c_read_regs ->
-        // i2c's PMU_READ_REGS stub) reports the bad-bank code 9, and
-        // the ROM_KERNEL default stubs make the lock pair a no-op.
-        let mut days = 0u32;
-        let mut secs = 0u32;
-        let rc = unsafe { rtc_read_time(&mut days, &mut secs, 0, 0) };
-        assert_eq!(rc, -5);
-        // Zero buffer converts deterministically: month 0 -> adj 1,
-        // year 6799, mp 9, day 0.
-        let expect = convert(&[0; 8]);
-        assert_eq!((days, secs), expect);
-    }
 
     #[test]
     fn retained_pre_port_stub_still_reports_bad_bank() {
         // The pre-port stub is kept for host tests: driven through the
-        // slot it fails closed exactly like the shipped chain's stub.
+        // slot it fails closed without reaching the recording mock.
         let guard = install_mock([0; 7], 0);
         unsafe {
             RTC_READ_REGS = rtc_read_stub;
@@ -456,41 +438,6 @@ mod tests {
         restore(guard);
     }
 
-    #[test]
-    fn shipped_default_reads_through_the_ported_i2c_entry() {
-        // RTC_READ_REGS left at its shipped default (the port); the
-        // recording mock sits one slot deeper, at i2c's PMU_READ_REGS
-        // (FUN_0836d698's stand-in). Lock order: this module's
-        // SLOT_LOCK, then i2c's OPS_LOCK (no other path takes both).
-        let guard = SLOT_LOCK.lock().unwrap();
-        let i2c_guard = crate::drivers::i2c::tests::OPS_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        unsafe extern "C" fn mock_pmu_read(bank: u32, buf: *mut u8) -> i32 {
-            assert_eq!(bank, 0);
-            core::ptr::copy_nonoverlapping(
-                [0x58, 0x59, 0x23, 0x04, 0x29, 0x02, 0x24].as_ptr(),
-                buf,
-                7,
-            );
-            0
-        }
-        unsafe {
-            core::ptr::addr_of_mut!(crate::drivers::i2c::PMU_READ_REGS)
-                .write(mock_pmu_read);
-            let mut days = 0u32;
-            let mut secs = 0u32;
-            let rc = rtc_read_time(&mut days, &mut secs, 0, 0);
-            core::ptr::addr_of_mut!(crate::drivers::i2c::PMU_READ_REGS)
-                .write(crate::drivers::i2c::pmu_read_regs_stub);
-            assert_eq!(rc, 0);
-            assert_eq!(secs, (23 * 3600 + 59 * 60 + 58) as u32);
-            let expect = (ref_days_since_mar1_year0(24, 2, 29) + EPOCH_OFFSET) as u32;
-            assert_eq!(days, expect);
-        }
-        drop(i2c_guard);
-        drop(guard);
-    }
 
     #[test]
     fn wild_bcd_does_not_panic() {

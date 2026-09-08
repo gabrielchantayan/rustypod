@@ -7866,14 +7866,12 @@ functions:
       in the 64-bit system-time builder FUN_0806e3dc. The mutexed
       wrapper FUN_082e58f0 is now ported (drivers/i2c::pmu_i2c_read_regs)
       and is the shipped default of the RTC_READ_REGS slot; the bank
-      mux under it (FUN_0836d698) is now ported too
+      mux under it (FUN_0836d698) is ported too
       (drivers/i2c::pmu_i2c_read_bank, the shipped PMU_READ_REGS
-      default), and the raw transfer chain below (FUN_0836d3b8 ->
-      FUN_0836bb84 / FUN_0836b950, S5L8702 I2C to slave 0x73) sits
-      behind i2c.rs's PMU_I2C_TRANSFER slot whose default stub fails
-      closed with the driver's bad-bank code 9, so the wired defaults
-      behave exactly like the former fail-closed stub (kept for host
-      tests). The
+      default), and its raw transfer FUN_0836d3b8 is now
+      drivers/i2c::pmu_i2c_read. That port calls the still-unported
+      S5L8702 I2C write/read primitives FUN_0836bb84 / FUN_0836b950 at
+      fixed target addresses, while host tests install volatile seams.
       pure-arithmetic conversion FUN_0809e3e8 is ported as
       time/civil::bcd_datetime_to_days_secs and called (it was an inline
       reproduction at this entry's porting). match.py: LLVM
@@ -7960,21 +7958,20 @@ functions:
       default stubs); FUN_0836d698 (bank 0 -> reg block 0x59 time,
       bank 1 -> 0x60 alarm, else bad-bank 9) is now ported as
       drivers/i2c::pmu_i2c_read_bank and is the shipped default of the
-      PMU_READ_REGS slot (the pre-port stub is kept for host tests);
-      the raw transfer under it (FUN_0836d3b8(reg, 7, buf) -> register
-      address write to I2C slave 0x73, the PCF50635 PMU, via
-      FUN_0836bb84, then 7 bytes back via FUN_0836b950) is S5L8702
-      hardware and dispatches through the PMU_I2C_TRANSFER slot (house
-      pattern, blx in place of bl) whose default stub fails closed
-      with the bad-bank code 9.
+      PMU_READ_REGS slot (the pre-port stub is kept for host tests).
+      Its raw transfer FUN_0836d3b8 writes the register address to I2C
+      slave 0x73, the PCF50635 PMU, through FUN_0836bb84 and reads
+      seven bytes through FUN_0836b950; it is now ported as
+      drivers/i2c::pmu_i2c_read, whose hardware primitives remain
+      fixed-address target calls and volatile host-test seams.
       The port is the shipped default of time/rtc.rs's RTC_READ_REGS
       slot, replacing rtc_read_stub (kept for host tests). Constants:
-      PMU_I2C_OUTER_SEM = 0x11, PMU_I2C_INNER_SEM = 5,
       PMU_READ_BAD_BANK = 9. Host tests cover the lock order
       (wait outer, wait inner, read, signal inner, signal outer),
       bank/buf forwarding, status pass-through (0/9/0x15/-5), the
-      unconditional unlock on read error, the fail-closed defaults,
-      and the shipped-default end-to-end read from rtc_read_time.
+      unconditional unlock on read error, and the retained PMU_READ_REGS
+      fail-closed stub. The raw transfer's own tests cover its write
+      failure, signed-length, read-status, and no-transfer cases.
       match.py structural: same wait(0x11)/wait(5)/read/signal(5)/
       signal(0x11) sequence with the status kept in r4; the diff is
       blx-through-table for the five calls and LLVM's fp frame (the
@@ -7999,28 +7996,20 @@ functions:
       raw transfer FUN_0836d3b8(reg, 7, buf), which writes the
       register address to I2C slave 0x73 (the PCF50635 PMU) via
       FUN_0836bb84 and reads the 7 BCD bytes back via FUN_0836b950,
-      returning its status verbatim. PORT DEVIATIONS: FUN_0836d3b8 and
-      the S5L8702 I2C hardware chain under it are not ported - the
-      tail branch dispatches through the new PMU_I2C_TRANSFER slot
-      (house ops-slot pattern, a call in place of b) whose default
-      stub fails closed with PMU_READ_BAD_BANK, so the wired defaults
-      are indistinguishable from the pre-port PMU_READ_REGS stub
-      (status 9 for every bank, buffer untouched). The port is the
-      shipped default of i2c.rs's PMU_READ_REGS slot, replacing
-      pmu_read_regs_stub (retained for host tests; rtc.rs's
-      shipped-default tests still pass unchanged). Constants:
+      returning its status verbatim. FUN_0836d3b8 is now ported as
+      drivers/i2c::pmu_i2c_read: the Rust call replaces the retail tail
+      branch, while its two raw S5L8702 primitive calls remain
+      fixed-address target calls and volatile host-test seams. The port
+      is the shipped default of i2c.rs's PMU_READ_REGS slot, replacing
+      pmu_read_regs_stub (retained for host tests). Constants:
       PMU_RTC_TIME_BLOCK = 0x59, PMU_RTC_ALARM_BLOCK = 0x60,
       PMU_RTC_BLOCK_LEN = 7. Host tests cover the bank mux (0 -> 0x59,
       1 -> 0x60, 7 bytes, buf forwarded), the bad-bank fail-closed
-      path (2/9/0xffffffff -> 9, no transfer, buffer untouched),
-      transfer status pass-through (0x15/-5/1), the retained stub, and
-      the wired-default chain (pmu_i2c_read_regs -> pmu_i2c_read_bank
-      -> transfer stub) still failing closed with 9 for every bank.
-      match.py structural: same two-compare bank mux (0x59/0x60/movne
-      #9 + conditional return) and a transfer tail dispatch; the diff
-      is LLVM's fp frame, the slot load (ldr literal + bx r3 in place
-      of b 0x0836d3b8 - LLVM renders it a tail call through the slot,
-      mirroring the original's tail branch), and the reordered
+      path (2/9/0xffffffff -> 9, no transfer, buffer untouched), and
+      raw transfer write/read status behavior. match.py structural:
+      same two-compare bank mux (0x59/0x60/movne #9 + conditional
+      return) and a transfer call; the diff is LLVM's fp frame, the
+      call instead of retail b 0x0836d3b8, and the reordered
       compare/select structure (the accepted deviations).
 
   # --- indexed payload lookup wrapper (app) ---
@@ -48037,3 +48026,42 @@ functions:
       entry, so no callee identity is claimed. Target builds call its fixed
       address; host tests use a volatile typed seam. The host vtable is
       pointer-width widened but retains the target slot's role.
+
+  # --- PCF50635 register read (drivers/i2c) ---
+  - address: 0x0836d3b8
+    ghidra: FUN_0836d3b8
+    name: pmu_i2c_read
+    size: 84
+    sig: "i32 pmu_i2c_read(u32 reg, i32 len, u8 *buf)"
+    module: drivers/i2c
+    status: ported
+    renames:
+      param_1/r0: reg
+      param_2/r1: len
+      param_3/r2: buf
+      local_18: register
+      iVar1/r0: status
+      iVar2/r4: completed
+      FUN_0836bb84: i2c_write
+      FUN_0836b950: i2c_read
+    notes: >-
+      Raw ARM establishes the exact 84-byte extent 0x0836d3b8..0x0836d40c:
+      the following ldr r0,[pc,#44] at 0x0836d40c starts the separately
+      linked sibling, with no literal pool. It saves reg as a stack word,
+      calls FUN_0836bb84(0x73, 1, &reg), and returns that status immediately
+      on failure. A zero write status and signed-positive len call
+      FUN_0836b950(0x73, len, buf) exactly once: the stock loop increases
+      completed by its full remaining count, so it terminates after that read.
+      Zero or negative len still write the register but skip the read; both
+      raw statuses return verbatim. Decoding every ARM B/BL word in osos.dec
+      verifies 18 unconditional BL call sites at 0x082e53f0, 0x082e5450,
+      0x082e55b8, 0x082e55f8, 0x082e574c, 0x082e5b8c, 0x0836d130,
+      0x0836d150, 0x0836d160, 0x0836d184, 0x0836d194, 0x0836d1f8,
+      0x0836d318, 0x0836d33c, 0x0836d498, 0x0836d5bc, 0x0836d600, and
+      0x0836d678; no predicated BL forms. The direct non-call branches are
+      bcc 0x0836d3ac, beq 0x0836d690, and b 0x0836d6bc. PORT DEVIATION:
+      raw S5L8702 primitives remain unported and are reached through typed
+      fixed-address target calls or volatile host-test seams, yielding blx
+      instead of the retail direct bl. Host tests cover write failure,
+      signed non-positive lengths, single positive reads, verbatim read
+      status, bank selection, and invalid-bank no-transfer behavior.
