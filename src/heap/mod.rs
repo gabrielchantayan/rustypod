@@ -15,6 +15,7 @@ pub mod first_event_dispatch;
 pub mod fixed_block_pool;
 pub mod free_path;
 pub mod init;
+pub mod heap_poison;
 pub mod managed_handle;
 pub mod object_destroy_dispatch;
 pub mod mailbox_receive_gateway;

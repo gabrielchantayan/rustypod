@@ -45972,6 +45972,35 @@ functions:
       `FUN_0803dd84` maintain nesting_depth and saved_slot_counts on the same
       object; this port keeps the same unchecked raw pointer arithmetic and a
       direct call to the already-ported diagnostic logger.
+  # --- heap debug-fill helper ---
+  - address: 0x0805f440
+    ghidra: FUN_0805f440
+    name: heap_poison
+    size: 92
+    sig: "void heap_poison(void *dst, u32 len)"
+    module: heap/heap_poison
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: len
+      pcVar2/r2: cursor
+      iVar3/r3: remaining
+      DAT_0805f49c: large_alloc_tag
+      FUN_08031180: memchr
+    notes: >-
+      Raw extent is exactly 0x0805f440..0x0805f49c (92 bytes); the next word
+      at 0x0805f49c is the literal pointer 0x08a0ea04, and the adjacent
+      thunk FUN_080568e8 begins at 0x0805f4a0. A complete ARM B/BL immediate
+      scan of osos.dec found 19 inbound direct calls, all unconditional bl:
+      0x0803b54c, 0x0803e604, 0x0803e628, 0x08044098, 0x08049c4c,
+      0x0804ac90, 0x0806027c, 0x0806219c, 0x0806302c, 0x08063244,
+      0x08064fa4, 0x080b1b8c, 0x080b1ba8, 0x080c6fb4, 0x080c7288,
+      0x080cbaf4, 0x080cbe38, 0x080e8d24, and 0x080ef1fc; no direct b
+      tail calls or predicated direct calls. For each byte, store the current
+      tag then set tag = tag + ((next_dst & 15) + 17), wrapping to u8. It
+      calls ported memchr(dst, tag, len) and adds 63 to the tag on a match.
+      Deviation: retailOS address 0x08a0ea04 is represented by the existing
+      shared LARGE_ALLOC_TAG crate static rather than an absolute host address.
   # --- tagged word buffer destructor ---
   - address: 0x0803e5e4
     ghidra: FUN_0803e5e4
@@ -46004,18 +46033,10 @@ functions:
       honored, pinned by a host test), bit 0 latched, the object poisoned
       with a literal 20 (FUN_0805f440(this, 20)), and if the latched bit
       was set the original tail-branches bne traced_free(this) - the
-      scalar deleting destructor bit. Deviations: FUN_0805f440 is
-      unported, so both calls go through the volatile
-      TAGGED_WORD_BUFFER_POISON hook (stock address 0x0805f440 on
-      firmware, no-op on host - the WORD_BUFFER_GROW pattern; the helper
-      is 0x0805f440..0x0805f4a0 with 19 unconditional bl sites, fills
-      dst[0..len] from a rolling state byte @ 0x08a0ea04 - state =
-      (addr&15)+state+17 per byte - then memchr 0x08031180 for the final
-      state value and +63 on a hit), and the tail branch is an ordinary
-      returning call. match.py: same structure - NULL guard, data-null
-      check, poison blx with capacity<<2, tst #2 conditional free, flags
-      reload, poison blx with #20, tst #1 tail branch to traced_free;
-      LLVM keeps the same tail branch.
+      scalar deleting destructor bit. The now-ported heap_poison is called
+      directly, sharing LARGE_ALLOC_TAG with traced_alloc; its byte-fill and
+      state evolution are covered independently. The tail branch remains an
+      ordinary returning call, as documented by traced_free.
 
   # --- service-manager handler access ---
   - address: 0x08194080
