@@ -34,6 +34,7 @@ pub mod record_body_size;
 pub mod record_fields_configure;
 pub mod raster_profile;
 pub mod service_manager_get;
+pub mod selector_record_address;
 pub mod state_flags;
 pub mod stream_buffer_configuration;
 pub mod stream_read_be32;
