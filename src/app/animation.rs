@@ -309,6 +309,85 @@ pub unsafe extern "C" fn animation_init(
     this
 }
 
+/// animation_set_values — original: `FUN_08166a40` @ 0x08166a40 (172
+/// instruction bytes; the separately linked pool word at 0x08166aec holds
+/// the scheduler-global address). Raw decoding of every ARM B/BL word in
+/// osos.dec verifies 18 direct call sites, all unconditional `bl`; there
+/// are no predicated BL forms. Three additional unconditional `b` tail
+/// callers occur at 0x081675a4, 0x081b836c, and 0x081b8c1c; no raw DATA
+/// word references the address.
+///
+/// Rebinds every retained value slot: unlink `this`, retain
+/// `(current_value, from, to)` in that order, release previous
+/// `(current, from, to)` slots when non-NULL, store the new values at
+/// `+0x18/+0x1c/+0x20`, compute rank as one plus their unsigned maximum
+/// with wrapping addition, and relink it. The three slot writes are
+/// `from/to/current`, not argument order.
+///
+/// Deliberate deviation: the unported wheel callees use the existing
+/// [`ANIMATION_INIT_OPS`] volatile seam; retain and release remain direct
+/// ports. The stock code reloads the scheduler-global word for insertion,
+/// which this function also does.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn animation_set_values(
+    this: *mut Animation,
+    current_value: *mut FixedValue,
+    from: *mut FixedValue,
+    to: *mut FixedValue,
+) {
+    let ops = animation_init_ops();
+
+    // 08166a54..08166a60: unlink before changing endpoint slots or rank.
+    (ops.wheel_remove)(scheduler_table(), this);
+
+    // 08166a64..08166a78: retain current, from, then to.
+    retain_value(current_value.cast());
+    retain_value(from.cast());
+    retain_value(to.cast());
+
+    // 08166a7c..08166a9c: release old current, from, then to if present.
+    let old_current = (*this).current_value;
+    if old_current != 0 {
+        release_refcounted_value(old_current as usize as *mut u8);
+    }
+    let old_from = (*this).from_value;
+    if old_from != 0 {
+        release_refcounted_value(old_from as usize as *mut u8);
+    }
+    let old_to = (*this).to_value;
+    if old_to != 0 {
+        release_refcounted_value(old_to as usize as *mut u8);
+    }
+
+    // 08166aa0..08166aa4: stm r0={r6,r7,r8} — from, to, current.
+    (*this).from_value = from as usize as u32;
+    (*this).to_value = to as usize as u32;
+    (*this).current_value = current_value as usize as u32;
+
+    // 08166aa8..08166ad8: max(from.aux, to.aux, current.aux) + 1.
+    let from_aux = (*from).aux;
+    let to_aux = (*to).aux;
+    let current_aux = (*current_value).aux;
+    let highest = if from_aux <= to_aux {
+        if to_aux <= current_aux {
+            current_aux
+        } else if from_aux <= to_aux {
+            to_aux
+        } else {
+            from_aux
+        }
+    } else if from_aux <= current_aux {
+        current_aux
+    } else {
+        from_aux
+    };
+    (*this).rank = highest.wrapping_add(1);
+
+    // 08166adc..08166ae8: reload the scheduler word and tail-branch to insert.
+    (ops.wheel_insert)(scheduler_table(), this);
+}
+
 /// animation_set_current_value — original: `FUN_08166b2c` @ 0x08166b2c
 /// (88 instruction bytes; the separate literal-pool word at 0x08166b84
 /// holds the scheduler-global address). Binary decoding of every ARM B/BL
@@ -814,6 +893,78 @@ mod tests {
             assert_eq!((*f.current).flags, 0b1010, "the direct retain gains one reference");
         }
     }
+    #[test]
+    fn set_values_rebinds_slots_recomputes_rank_and_relinks() {
+        let _lock = take_lock();
+        let _restore = SeamGuard;
+        let Some(f) = fixture() else {
+            note_missing_u32_fixture("app::animation");
+            return;
+        };
+        unsafe {
+            install_recording_ops();
+            reset_log();
+            dirty_animation(f.animation);
+            counted_scalar(f.current, 0x8000_0000);
+            counted_scalar(f.from, 3);
+            counted_scalar(f.to, u32::MAX);
+            (*f.current).flags = 0b1010;
+            (*f.from).flags = 0b1010;
+            (*f.to).flags = 0b1010;
+            (*f.animation).current_value = f.current as usize as u32;
+            (*f.animation).from_value = f.from as usize as u32;
+            (*f.animation).to_value = f.to as usize as u32;
+
+            animation_set_values(f.animation, f.to, f.current, f.from);
+
+            assert_eq!((*f.animation).from_value, f.current as usize as u32);
+            assert_eq!((*f.animation).to_value, f.from as usize as u32);
+            assert_eq!((*f.animation).current_value, f.to as usize as u32);
+            assert_eq!((*f.animation).rank, 0, "u32::MAX aux wraps after +1");
+            assert_eq!([(*f.current).flags, (*f.from).flags, (*f.to).flags], [0b1010; 3]);
+            let seen = log();
+            assert_eq!(
+                seen.iter().map(|event| event.kind).collect::<std::vec::Vec<_>>(),
+                std::vec![EVENT_WHEEL_REMOVE, EVENT_WHEEL_INSERT],
+            );
+            assert_eq!(seen[0].argument, f.animation as usize);
+            assert_eq!(seen[1].argument, f.animation as usize);
+            assert_eq!(seen[0].extra, f.table as usize);
+            assert_eq!(seen[1].extra, f.table as usize);
+            assert_eq!(seen[1].rank_at_insert, Some(0));
+            assert_eq!((*f.animation).opaque_04, 0x1111_1111);
+            assert_eq!((*f.animation).wheel_prev, 0x2222_2222);
+            assert_eq!((*f.animation).wheel_next, 0x3333_3333);
+        }
+    }
+
+    #[test]
+    fn set_values_skips_empty_slots_after_retaining_arguments() {
+        let _lock = take_lock();
+        let _restore = SeamGuard;
+        let Some(f) = fixture() else {
+            note_missing_u32_fixture("app::animation");
+            return;
+        };
+        unsafe {
+            install_recording_ops();
+            reset_log();
+            dirty_animation(f.animation);
+            counted_scalar(f.current, 1);
+            counted_scalar(f.from, 2);
+            counted_scalar(f.to, 3);
+            (*f.animation).current_value = 0;
+            (*f.animation).from_value = 0;
+            (*f.animation).to_value = 0;
+
+            animation_set_values(f.animation, f.current, f.from, f.to);
+
+            assert_eq!([(*f.current).flags, (*f.from).flags, (*f.to).flags], [0b1010; 3]);
+            assert_eq!((*f.animation).rank, 4);
+            assert_eq!(log().last().unwrap().rank_at_insert, Some(4));
+        }
+    }
+
     #[test]
     fn setter_unlinks_retains_releases_replaces_and_relinks() {
         let _lock = take_lock();
