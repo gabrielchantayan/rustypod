@@ -26358,6 +26358,37 @@ functions:
       sites) is the same function with the value looked up from a table
       @ 0x081239b4 instead of passed in.
 
+  - address: 0x08123834
+    ghidra: FUN_08123834
+    name: formatted_message_emit_string
+    size: 132
+    sig: "void formatted_message_emit_string(MessageStream *stream, const char *key, const char *value, uint32 depth)"
+    module: printf/formatted_message
+    status: ported
+    renames:
+      param_1: stream
+      param_2: key
+      param_3: value
+      param_4: depth
+    notes: >-
+      19 verified BL call sites (17 plain `bl`, 2 `blne` at
+      0x0814fa48/0x08151278). Raw bytes establish the 132-byte extent:
+      code ends at 0x081238b4 and the string format literal starts at
+      0x081238b8. Prepares the stream indent at +0x215, calls the
+      unported FUN_0809fbc8(value, stack[0x200], 0x200), and formats
+      "%s<key>%s</key>\n%s<string>%s</string>\n" into the +0x15
+      512-byte buffer before tail-branching to the unported stream append
+      @ 0x08123c58. When key is NULL it advances the format address by
+      16 bytes, omitting the complete key line and passing only
+      (indent, transformed_value). The FUN_0809fbc8 table pointer is
+      0x089cb224, but osos.dec contains unrelated resource text there;
+      its three trigger/replacement pairs are therefore not recoverable.
+      The Rust STRING_ESCAPE dispatch boundary preserves the call shape;
+      its temporary bounded identity-copy default is a documented
+      deliberate deviation until that callee is ported. Host tests cover
+      both key paths, 0x200 transform capacity, exact variadic areas, and
+      append handoff.
+
   - address: 0x081236f8
     ghidra: FUN_081236f8
     name: formatted_message_open_dict
