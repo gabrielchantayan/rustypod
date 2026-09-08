@@ -425,10 +425,12 @@ pub unsafe extern "C" fn deque_iter_copy(dst: *mut DequeIter, _r1: usize, src: *
     dst.write(src.read());
 }
 
-/// deque_seg_capacity — original: `FUN_083d9ec0` @ 0x083d9ec0
-/// (8 bytes).
+/// deque_seg_capacity — originals: `FUN_083d9ec0` @ 0x083d9ec0 and
+/// `FUN_083d9fcc` @ 0x083d9fcc (8 bytes each).
 ///
-/// Elements per deque segment (0x20).
+/// Both bodies are `mov r0, #0x20; bx lr`: return the 0x20 elements per
+/// deque segment.  The single export deliberately serves these byte-identical
+/// template copies rather than duplicating an indistinguishable Rust body.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn deque_seg_capacity() -> usize {

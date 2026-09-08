@@ -3902,6 +3902,27 @@ functions:
       0x083da2ac, 0x083da3b0, 0x083da424 (116 calls in total).
       0x081a81bc is the only copy outside the C++ block.
 
+  - address: 0x083d9fcc
+    ghidra: FUN_083d9fcc
+    name: deque_seg_capacity
+    size: 8
+    sig: "usize deque_seg_capacity(void)"
+    module: heap/block_deque
+    status: ported
+    renames: {}
+    notes: >-
+      Alias of the existing deque_seg_capacity Rust export: raw ARM is
+      `mov r0, #0x20; bx lr`, returning 0x20 elements per deque segment.
+      This is one of the 17 byte-identical per-template copies, so the
+      canonical port deliberately serves it directly rather than adding an
+      indistinguishable second export. Decoding every ARM B/BL word in
+      osos.dec finds 18 plain bl call sites and no predicated calls:
+      0x083da01c, 0x083da050, 0x083da0a8, 0x083da0bc, 0x083da0c4,
+      0x083da100, 0x083da110, 0x083da150, 0x083de238, 0x083de354,
+      0x083de37c, 0x083de3c4, 0x083de454, 0x083de4b4, 0x083de4d8,
+      0x083de4f0, 0x083de504, and 0x083eada4. Ghidra's 18-call count is
+      exact.
+
   - address: 0x083d9eec
     ghidra: FUN_083d9eec
     name: deque_iter_init
