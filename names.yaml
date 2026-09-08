@@ -47040,3 +47040,49 @@ functions:
       builds model the three target words directly because CondVar and
       CountedMutex layouts diverge at 64-bit pointer width; target builds
       directly invoke the ported condvar and counted-mutex functions.
+
+  # --- Legacy printf growable byte sink ---
+  - address: 0x08077bcc
+    ghidra: FUN_08077bcc
+    name: format_buffer_append_char
+    size: 200
+    sig: "void format_buffer_append_char(u8 **inline_buffer, u8 **heap_buffer, u32 *length, u32 *capacity, u32 value)"
+    module: printf/format_buffer
+    status: ported
+    renames:
+      param_1/r0/r7: inline_buffer
+      param_2/r1/r4: heap_buffer
+      param_3/r2/r6: length
+      param_4/r3/r5: capacity
+      param_5/[sp,#24]/r8: value
+      FUN_08043c18: traced_alloc
+      FUN_08043f3c: traced_realloc
+      thunk_EXT_FUN_22000020: __rt_memcpy
+    notes: >-
+      True raw extent is exactly 200 bytes, 0x08077bcc..0x08077c94; the
+      separately linked formatter function begins at 0x08077c94. Decoding
+      every ARM B/BL word in osos.dec finds 20 direct inbound BL call sites,
+      all unconditional and no predicated BL: 0x080e7b0c, 0x080e7b6c,
+      0x080e7e9c, 0x080e817c, 0x080e819c, 0x080e81c0, 0x080e81e4,
+      0x080e8204, 0x080e8238, 0x080e8258, 0x080e82b4, 0x080e9124,
+      0x080e9148, 0x080e915c, 0x080e9188, 0x080e91a8, 0x080e91c8,
+      0x080e9280, 0x080e92b8, and 0x080e92ec. With a non-NULL
+      heap_buffer slot, loop while length >=u capacity: a NULL heap pointer
+      first allocates capacity bytes through ported traced_alloc
+      (capacity = 0x400 only when it was zero), copies length bytes from
+      inline_buffer via __rt_memcpy through the 0x08037db0 IRAM veneer, then
+      clears inline_buffer; a non-NULL heap pointer first adds 0x400 to
+      capacity and calls the unported traced realloc 0x08043f3c. Once
+      length < capacity, increment length with u32 wrap and store value's
+      low byte at the old offset, choosing inline_buffer when non-NULL and
+      heap_buffer otherwise. Fixed-capacity operation is selected by a NULL
+      heap_buffer slot. Deviation: the raw body proceeds to an invalid copy
+      or byte store after a NULL allocation/reallocation result; the port
+      retains the preceding capacity/heap-slot stores but returns before
+      that invalid access. The unported realloc is an explicit
+      FORMAT_BUFFER_REALLOC seam whose default returns NULL. Host tests
+      cover fixed-capacity emission/full drop, initial allocation at 0x400,
+      inline-byte migration, the mandatory second growth at an exactly full
+      initial heap, and safe failed reallocation. match.py structural review
+      compares the capacity loop, allocation/copy, realloc, and byte-store
+      paths; the seam and null-result guard add control flow.
