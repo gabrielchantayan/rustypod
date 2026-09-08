@@ -74,6 +74,26 @@ pub unsafe extern "C" fn release_refcounted_value(object: *mut u8) {
 
     call_deleting_destructor(object);
 }
+ 
+/// retain_value — retailOS `FUN_08273a14` @ `0x08273a14` (24 bytes; 19
+/// binary-verified plain `bl` call sites).
+///
+/// Reads the low byte of the aligned flags/refcount word at target offset
+/// `+0x14`. Flag bit 1 gates a wrapping addition of four to the complete
+/// word, retaining one reference while preserving both flag bits. The stock
+/// function has no NULL guard; callers must pass a live, 4-byte-aligned
+/// object containing at least 0x18 bytes. There are no deliberate deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn retain_value(object: *mut u8) {
+    let flags_byte = object.add(0x14);
+    if flags_byte.read_volatile() & 2 != 0 {
+        let flags_word = flags_byte.cast::<u32>();
+        let flags = flags_word.read_volatile().wrapping_add(4);
+        flags_word.write_volatile(flags);
+    }
+}
+
 
 #[cfg(test)]
 fn set_host_deleting_destructor(destructor: Option<unsafe extern "C" fn(*mut u8)>) {
@@ -156,5 +176,29 @@ mod tests {
         assert_eq!(object[5], 0xffff_fffe);
         assert_eq!(DELETIONS.load(Ordering::SeqCst), 0);
         set_host_deleting_destructor(None);
+    }
+
+    #[test]
+    fn retain_ignores_values_without_the_refcounted_flag() {
+        for flags in [0, 1, 4, 0xffff_fffd] {
+            let mut object = object_with_flags(flags);
+            let before = object;
+
+            unsafe { retain_value(object.as_mut_ptr().cast()) };
+
+            assert_eq!(object, before, "flags {flags:#x}");
+        }
+    }
+
+    #[test]
+    fn retain_adds_one_unit_with_wrapping_arithmetic() {
+        for flags in [2, 3, 6, 7, 0xffff_fffe, 0xffff_ffff] {
+            let mut object = object_with_flags(flags);
+
+            unsafe { retain_value(object.as_mut_ptr().cast()) };
+
+            assert_eq!(object[5], flags.wrapping_add(4), "flags {flags:#x}");
+            assert_eq!(&object[..5], &[0xdead_beef, 0x1111_1111, 0x2222_2222, 0x3333_3333, 0x4444_4444]);
+        }
     }
 }
