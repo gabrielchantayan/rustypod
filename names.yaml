@@ -48300,3 +48300,34 @@ functions:
       instead of the retail direct bl. Host tests cover write failure,
       signed non-positive lengths, single positive reads, verbatim read
       status, bank selection, and invalid-bank no-transfer behavior.
+
+  # --- Bootstrap-to-current mutex handoff (kernel/mutex_handoff) ---
+  - address: 0x081fca10
+    ghidra: FUN_081fca10
+    name: mutex_handoff_lock
+    size: 48
+    sig: "void mutex_handoff_lock(MutexHandoff *handoff)"
+    module: kernel/mutex_handoff
+    status: ported
+    renames:
+      param_1/r4: handoff
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw ARM establishes the exact 48-byte extent 0x081fca10..0x081fca40:
+      the following ldr r0,[r0,#12] at 0x081fca40 starts the separately
+      entered companion unlock helper. It locks the embedded Mutex at
+      handoff+0x04, reads the selected Mutex pointer at handoff+0x0c, and
+      leaves the embedded mutex held when that pointer is identical. Otherwise
+      it locks the selected mutex before releasing the embedded mutex, handing
+      the caller from bootstrap protection to the selected lock. The companion
+      at 0x081fca40 releases handoff+0x0c directly. Decoding every ARM B/BL
+      word in osos.dec finds exactly 18 direct inbound calls, all
+      unconditional plain BL at 0x081fcb78, 0x08208204, 0x0820823c,
+      0x0820839c, 0x0820845c, 0x08208494, 0x082084f4, 0x08208580,
+      0x082085ac, 0x08214620, 0x08214658, 0x0821499c, 0x08214a2c,
+      0x08214ae4, 0x08214b1c, 0x08214b64, 0x08214dc4, and 0x08214e88.
+      There are no predicated BL forms or direct B tail callers, and no
+      aligned image data word equals the entry address. The port directly calls
+      the already-ported mutex_lock/mutex_unlock rather than inventing a
+      dispatch seam; LLVM may inline their ROM-dispatch guards on target.
