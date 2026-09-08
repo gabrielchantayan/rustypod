@@ -80,8 +80,10 @@
 //!   table walk), NOT a gateway stub. 2 callers: the conditional tail
 //!   `beq` @ 0x080567f0 in csem_post_deferred @ 0x080567d0 (kernel/csem.rs)
 //!   and the bare alias `b` @ 0x080567fc.
-//! - 0x08037e88 -> 0x22003d44 — gateway stub, service 20, (r0, r1).
-//!   15 callers, always r0 = 0, r1 = small count (1, 0x64) — delay-flavoured.
+//! - 0x08037e88 -> 0x22003d44 `rom_task_delay` — the 8-byte literal veneer
+//!   for RTXC gateway service 20. Raw ARM decoding finds 20 `bl` callers
+//!   (18 plain, 2 `blne`) and one `bne` tail branch; the latter is
+//!   `task_sleep`'s nonzero-tick path. The veneer itself has no guard.
 //! - 0x08037e90 -> 0x220043f4 — gateway stub, service 28 sub 13, returns a
 //!   result word. 0 callers.
 //! - 0x08037e98 -> 0x22004260 — gateway stub, service 25, r0 arg (0 at the
@@ -178,7 +180,7 @@ pub static THUNK_CATALOG: [(u32, u32, &str); WRAPPER_COUNT] = [
     (0x08037e70, 0x22003d70, "kernel_create_dispatch"),
     (0x08037e78, 0x220041cc, "rom_svc_220041cc"),
     (0x08037e80, 0x22001cbc, "rom_svc_22001cbc"),
-    (0x08037e88, 0x22003d44, "rom_svc_22003d44"),
+    (0x08037e88, 0x22003d44, "rom_task_delay"),
     (0x08037e90, 0x220043f4, "rom_svc_220043f4"),
     (0x08037e98, 0x22004260, "rom_svc_22004260"),
     (0x08037ea0, 0x220043c0, "rom_svc_220043c0"),
@@ -245,8 +247,8 @@ pub struct RomThunkOps {
     pub rom_svc_220041cc: unsafe extern "C" fn(a0: usize) -> usize,
     /// Full ROM function @ 0x22001cbc (lock + table walk; no osos callers).
     pub rom_svc_22001cbc: unsafe extern "C" fn(a0: usize) -> usize,
-    /// ROM gateway service 20 @ 0x22003d44.
-    pub rom_svc_22003d44: unsafe extern "C" fn(a0: usize, a1: usize) -> usize,
+    /// RTXC timed task-delay gateway service 20 @ 0x22003d44.
+    pub rom_task_delay: unsafe extern "C" fn(task: usize, ticks: usize) -> usize,
     /// ROM gateway service 28 sub 13 @ 0x220043f4.
     pub rom_svc_220043f4: unsafe extern "C" fn() -> usize,
     /// ROM gateway service 25 @ 0x22004260.
@@ -327,7 +329,7 @@ pub static mut ROM_KERNEL: RomThunkOps = RomThunkOps {
     kernel_create_dispatch: missing2,
     rom_svc_220041cc: missing1,
     rom_svc_22001cbc: missing1,
-    rom_svc_22003d44: missing2,
+    rom_task_delay: missing2,
     rom_svc_220043f4: missing0,
     rom_svc_22004260: missing1,
     rom_svc_220043c0: missing2,
@@ -700,12 +702,21 @@ pub unsafe extern "C" fn rom_svc_22001cbc(a0: usize) -> usize {
     (hook!(rom_svc_22001cbc))(a0)
 }
 
-/// rom_svc_22003d44 — original: thunk @ 0x08037e88 -> ROM gateway stub,
-/// service 20. All sampled call sites pass r0 = 0, r1 = a small count
-/// (1, 0x64) — delay-flavoured.
+/// rom_task_delay — original: `thunk_EXT_FUN_22003d44` @ 0x08037e88
+/// (8 bytes: `e51ff004` / literal `22003d44`).
+///
+/// Raw ARM decoding verifies 20 `bl` call sites — 18 unconditional and two
+/// `blne` — plus the `bne` tail branch at 0x080568f4 from `task_sleep`.
+/// This ADS literal veneer loads PC from its adjacent target word, preserving
+/// r0/r1 and LR, so the RTXC task-delay service receives `(task, ticks)` and
+/// its r0 word reaches the original caller unchanged. The IRAM target mirrors
+/// `task_delay` @ 0x08003d44; it builds gateway request selector 20. This
+/// wrapper deliberately uses the existing volatile `ROM_KERNEL` dispatch
+/// seam rather than jumping into the target-only mask-ROM address.
 #[cfg_attr(target_os = "none", no_mangle)]
-pub unsafe extern "C" fn rom_svc_22003d44(a0: usize, a1: usize) -> usize {
-    (hook!(rom_svc_22003d44))(a0, a1)
+#[inline(never)]
+pub unsafe extern "C" fn rom_task_delay(task: usize, ticks: usize) -> usize {
+    (hook!(rom_task_delay))(task, ticks)
 }
 
 /// rom_svc_220043f4 — original: thunk @ 0x08037e90 -> ROM gateway stub,
@@ -914,7 +925,7 @@ pub(crate) mod tests {
     mock2!(m14, 14); // kernel_create_dispatch
     mock1!(m15, 15); // rom_svc_220041cc
     mock1!(m16, 16); // rom_svc_22001cbc
-    mock2!(m17, 17); // rom_svc_22003d44
+    mock2!(m17, 17); // rom_task_delay
     mock0!(m18, 18); // rom_svc_220043f4
     mock1!(m19, 19); // rom_svc_22004260
     mock2!(m20, 20); // rom_svc_220043c0
@@ -948,7 +959,7 @@ pub(crate) mod tests {
         kernel_create_dispatch: m14,
         rom_svc_220041cc: m15,
         rom_svc_22001cbc: m16,
-        rom_svc_22003d44: m17,
+        rom_task_delay: m17,
         rom_svc_220043f4: m18,
         rom_svc_22004260: m19,
         rom_svc_220043c0: m20,
@@ -1139,6 +1150,17 @@ pub(crate) mod tests {
         }
     }
 
+    /// The veneer is argument- and result-transparent for both the current
+    /// task's smallest delay and arbitrary nonzero words.
+    #[test]
+    fn rom_task_delay_forwards_edge_arguments() {
+        let _lock = mock_kernel();
+        unsafe {
+            check(17, rom_task_delay(0, 1), &[0, 1]);
+            check(17, rom_task_delay(usize::MAX, usize::MAX), &[usize::MAX, usize::MAX]);
+        }
+    }
+
     /// Every remaining wrapper: args pass through to its ROM hook and the
     /// hook's r0 result comes back, with no cross-slot wiring.
     #[test]
@@ -1162,7 +1184,7 @@ pub(crate) mod tests {
             check(14, kernel_create_dispatch(1, 0x6000), &[1, 0x6000]);
             check(15, rom_svc_220041cc(0x2e), &[0x2e]);
             check(16, rom_svc_22001cbc(0), &[0]);
-            check(17, rom_svc_22003d44(0, 100), &[0, 100]);
+            check(17, rom_task_delay(0, 100), &[0, 100]);
             check(18, rom_svc_220043f4(), &[]);
             check(19, rom_svc_22004260(0), &[0]);
             check(20, rom_svc_220043c0(0x7000, 1), &[0x7000, 1]);
