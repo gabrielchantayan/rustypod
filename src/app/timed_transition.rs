@@ -28,7 +28,12 @@ use crate::app::animation::{SCHEDULER_SINGLETON_GLOBAL, WHEEL_INSERT_ADDRESS,
     WHEEL_REMOVE_ADDRESS};
 #[cfg(not(target_os = "none"))]
 use crate::app::animation::TIMING_WHEEL_BUCKETS;
+use crate::app::fixed_value::refcounted_base_init;
 use crate::util::fixed::fixed16_recip_unguarded;
+
+/// The derived timed-transition vtable installed by
+/// [`timed_transition_construct`] (original literal @ 0x0816086c).
+pub const TIMED_TRANSITION_VTABLE: u32 = 0x0898_7d60;
 
 /// The 0x34-byte wheel node initialized by `timed_transition_init`.
 #[repr(C)]
@@ -175,6 +180,47 @@ pub unsafe extern "C" fn timed_transition_init(
     };
     (ops.wheel_insert)(table, this);
     this
+}
+
+/// `timed_transition_construct` — original: `FUN_0816082c` @ 0x0816082c
+/// (64 bytes: 60 instruction bytes plus the vtable literal @ 0x0816086c;
+/// 19 unconditional `bl` call sites verified by decoding every B/BL word in
+/// `osos.dec`).
+///
+/// Constructs a refcounted timed-transition object in the caller's 0x34-byte
+/// storage: initialize its shared base, install the derived vtable, then arm
+/// its timing-wheel state with the five supplied transition values. Returns
+/// `this`.
+///
+/// Deliberate deviations: this composes the independently ported
+/// [`refcounted_base_init`] and [`timed_transition_init`]. The timing-wheel
+/// seam and its host behavior therefore remain those documented by
+/// `timed_transition_init`.
+///
+/// # Safety
+///
+/// `this` must identify live, 4-byte-aligned, writable storage for a
+/// [`TimedTransition`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn timed_transition_construct(
+    this: *mut TimedTransition,
+    target_value: u32,
+    duration_ms: u32,
+    start_value: u32,
+    aux_value: u32,
+    owner_or_self: u32,
+) -> *mut TimedTransition {
+    refcounted_base_init(this.cast());
+    (*this).vtable = TIMED_TRANSITION_VTABLE;
+    timed_transition_init(
+        this,
+        target_value,
+        duration_ms,
+        start_value,
+        aux_value,
+        owner_or_self,
+    )
 }
 
 #[cfg(test)]
@@ -380,5 +426,71 @@ mod tests {
         assert_eq!(events().len(), 2);
         assert_eq!(events()[0], Event::Remove { table: scheduler_table() as usize, node: fixture.transition as usize });
         assert_eq!(events()[1], Event::Insert { table: scheduler_table() as usize, node: fixture.transition as usize });
+    }
+
+    #[test]
+    fn construct_initializes_base_vtable_and_transition() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let fixture = match map_or_skip() {
+            Some(fixture) => fixture,
+            None => return,
+        };
+
+        unsafe {
+            core::ptr::write_bytes(
+                fixture.transition.cast::<u8>(),
+                0xff,
+                core::mem::size_of::<TimedTransition>(),
+            );
+        }
+        EVENTS
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clear();
+        let _ops = install_ops(TimedTransitionWheelOps {
+            wheel_remove: recording_wheel_remove,
+            wheel_insert: recording_wheel_insert,
+        });
+
+        let returned = unsafe {
+            timed_transition_construct(
+                fixture.transition,
+                0x1122_3344,
+                1,
+                0x5566_7788,
+                0x99aa_bbcc,
+                0xdead_beef,
+            )
+        };
+
+        assert_eq!(returned, fixture.transition);
+        let transition = unsafe { &*fixture.transition };
+        assert_eq!(transition.vtable, TIMED_TRANSITION_VTABLE);
+        assert_eq!(transition.flags, 0);
+        assert_eq!(transition.opaque_04, u32::MAX);
+        assert_eq!(transition.wheel_rank, 1);
+        assert_eq!(transition.armed, 0);
+        assert_eq!(transition.start_value, 0x5566_7788);
+        assert_eq!(transition.target_value, 0x1122_3344);
+        assert_eq!(transition.duration_ms, 1);
+        assert_eq!(transition.aux_value, 0x99aa_bbcc);
+        assert_eq!(transition.owner_or_self, 0xdead_beef);
+        assert_eq!(
+            transition.inverse_duration_q16,
+            fixed16_recip_unguarded(65) as u32,
+        );
+        assert_eq!(
+            events(),
+            vec![
+                Event::Remove {
+                    table: scheduler_table() as usize,
+                    node: fixture.transition as usize,
+                },
+                Event::Insert {
+                    table: scheduler_table() as usize,
+                    node: fixture.transition as usize,
+                },
+            ]
+        );
     }
 }

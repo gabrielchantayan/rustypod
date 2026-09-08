@@ -43452,6 +43452,36 @@ functions:
       `duration_ms * 65`, and store either the explicit owner or `this` at
       +0x28. 21 `bl` call sites were verified by scanning every B/BL word in
       osos.dec; all are unconditional `bl`.
+
+  # --- refcounted timed-transition constructor ---
+  - address: 0x0816082c
+    ghidra: FUN_0816082c
+    name: timed_transition_construct
+    size: 64
+    sig: "TimedTransition *timed_transition_construct(TimedTransition *this, u32 target_value, u32 duration_ms, u32 start_value, u32 aux_value, u32 owner_or_self)"
+    module: app/timed_transition
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: target_value
+      param_3/r2: duration_ms
+      param_4/r3: start_value
+      stack_arg_1: aux_value
+      stack_arg_2: owner_or_self
+      DAT_0816086c: TIMED_TRANSITION_VTABLE
+      FUN_08138460: refcounted_base_init
+      FUN_081607b0: timed_transition_init
+    notes: >-
+      Caller-allocated 0x34-byte refcounted timed-transition constructor.
+      Raw extent is 64 bytes from 0x0816082c through the separately loaded
+      vtable literal at 0x0816086c; the following cmp at 0x08160870 begins
+      a distinct sibling function. It preserves r1-r3 and both stack
+      arguments, calls refcounted_base_init(this), stores vtable 0x08987d60
+      at +0x00, then calls timed_transition_init(this, target_value,
+      duration_ms, start_value, aux_value, owner_or_self) and returns this.
+      Ghidra omitted the receiver passed in r0. All 19 branch targets were
+      decoded by scanning every B/BL word in osos.dec: every caller uses an
+      unconditional bl, with no predicated or tail-branch call sites.
   # --- opaque object flag low-nibble accessor ---
   - address: 0x08160cfc
     ghidra: FUN_08160cfc
