@@ -1445,6 +1445,11 @@ const CURRENT_DATETIME_QUERY_BUFFER_SIZE: usize = 0x14;
 /// writable cell to install recording mocks.
 #[cfg(not(target_os = "none"))]
 pub static mut CURRENT_DATETIME_QUERY: usize = 0x0805_6524;
+#[cfg(test)]
+extern crate std;
+#[cfg(test)]
+pub(crate) static CURRENT_DATETIME_QUERY_TEST_LOCK: std::sync::Mutex<()> =
+    std::sync::Mutex::new(());
 
 /// Calendar-query seam signature: `(record) -> valid`. A false result is
 /// fatal to the caller, exactly like the source's `cmp r0,#0; bleq
@@ -1453,14 +1458,14 @@ type CurrentDatetimeQueryFn = unsafe extern "C" fn(*mut u8) -> bool;
 
 #[cfg(target_os = "none")]
 #[inline(always)]
-unsafe fn current_datetime_query(record: *mut u8) -> bool {
+pub(crate) unsafe fn current_datetime_query(record: *mut u8) -> bool {
     let query: CurrentDatetimeQueryFn = core::mem::transmute(0x0805_6524usize);
     query(record)
 }
 
 #[cfg(not(target_os = "none"))]
 #[inline(always)]
-unsafe fn current_datetime_query(record: *mut u8) -> bool {
+pub(crate) unsafe fn current_datetime_query(record: *mut u8) -> bool {
     let address = core::ptr::addr_of!(CURRENT_DATETIME_QUERY).read_volatile();
     let query: CurrentDatetimeQueryFn = core::mem::transmute(address);
     query(record)
@@ -4305,7 +4310,6 @@ mod tests {
     // ---- current_datetime_to_record ----
 
     /// Serializes access to the CURRENT_DATETIME_QUERY seam cell.
-    static CURRENT_DATETIME_QUERY_LOCK: Mutex<()> = Mutex::new(());
     static mut CURRENT_DATETIME_QUERY_RECORD: [u8; CURRENT_DATETIME_QUERY_BUFFER_SIZE] =
         [0; CURRENT_DATETIME_QUERY_BUFFER_SIZE];
     static mut CURRENT_DATETIME_QUERY_RESULT: bool = false;
@@ -4337,7 +4341,7 @@ mod tests {
     fn install_current_datetime_query(
         record: [u8; CURRENT_DATETIME_QUERY_BUFFER_SIZE],
     ) -> CurrentDatetimeQueryInstall {
-        let lock = CURRENT_DATETIME_QUERY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let lock = CURRENT_DATETIME_QUERY_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             let previous = core::ptr::addr_of!(CURRENT_DATETIME_QUERY).read_volatile();
             core::ptr::addr_of_mut!(CURRENT_DATETIME_QUERY)

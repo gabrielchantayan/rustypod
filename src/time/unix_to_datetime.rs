@@ -53,9 +53,14 @@ pub static mut DAY_NUMBER_TO_DATETIME: DayNumberToDateTimeFn = firmware_day_numb
 /// missing calendar model rather than inventing one.
 #[cfg(not(target_os = "none"))]
 pub static mut DAY_NUMBER_TO_DATETIME: DayNumberToDateTimeFn = missing_day_number_to_datetime;
+#[cfg(test)]
+extern crate std;
+#[cfg(test)]
+pub(crate) static DAY_NUMBER_TO_DATETIME_TEST_LOCK: std::sync::Mutex<()> =
+    std::sync::Mutex::new(());
 
 #[inline(always)]
-unsafe fn day_number_to_datetime() -> DayNumberToDateTimeFn {
+pub(crate) unsafe fn day_number_to_datetime() -> DayNumberToDateTimeFn {
     core::ptr::read_volatile(core::ptr::addr_of!(DAY_NUMBER_TO_DATETIME))
 }
 
@@ -95,9 +100,8 @@ mod tests {
 
     use super::*;
     use core::ptr;
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::MutexGuard;
 
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
     static mut LAST_DAY_NUMBER: u32 = 0;
     static mut CALL_COUNT: u32 = 0;
 
@@ -120,7 +124,7 @@ mod tests {
     }
 
     unsafe fn install() -> MutexGuard<'static, ()> {
-        let guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = DAY_NUMBER_TO_DATETIME_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         ptr::write_volatile(
             ptr::addr_of_mut!(DAY_NUMBER_TO_DATETIME),
             record_day_number,
