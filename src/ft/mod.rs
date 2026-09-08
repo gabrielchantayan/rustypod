@@ -4,6 +4,7 @@
 //! functions keep FreeType's public names in the crate's snake_case.
 pub mod arith;
 pub mod buffer;
+pub mod buffer_skip;
 pub mod calc;
 pub mod charmap;
 pub mod cff_builder;
