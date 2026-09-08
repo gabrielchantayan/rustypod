@@ -48423,3 +48423,37 @@ functions:
       volatile-load the fixed runtime-RAM word at 0x089d0188; host builds use
       a zero-initialized private backing word because that image location holds
       stale runtime data.
+
+
+  # --- manager-table registration handle ---
+  - address: 0x081d9734
+    ghidra: FUN_081d9734
+    name: registration_handle_destroy
+    size: 40
+    sig: "RegistrationHandle *registration_handle_destroy(RegistrationHandle *registration)"
+    module: app/registration_handle
+    status: ported
+    renames:
+      param_1/r4: registration
+      DAT_081d975c: registration_handle_vtable (0x089a74bc)
+      param_1_plus_4: owner
+      param_1_plus_8/r1: slot_index
+      FUN_081d9918: registration_slot_release
+      r0: registration
+    notes: >-
+      Raw ARM confirms the 40-byte extent 0x081d9734..0x081d975c; its vtable
+      literal is the following word at 0x081d975c, and the separately linked
+      sibling starts at 0x081d9760. It stores vtable 0x089a74bc, then calls
+      FUN_081d9918(owner, slot_index) unless slot_index is exactly -1, and
+      returns registration. Decoding every ARM B/BL word in osos.dec finds 18
+      direct inbound BL callers, all unconditional: 0x081af5e8, 0x081af5f8,
+      0x081af6c8, 0x081af6e4, 0x081c8394, 0x081c83a8, 0x081c851c,
+      0x081c8538, 0x081c85a4, 0x081c85b8, 0x081c8624, 0x081c8638,
+      0x081c8730, 0x081c87d0, 0x081c8830, 0x081c8854, 0x081c8934, and
+      0x081c8948; there are no predicated BL or direct B tail callers. No
+      aligned data word equals this function address, so it is not directly
+      vtable-dispatched. Deliberate deviation: unported FUN_081d9918 is a
+      volatile host seam and a fixed retailOS-address call on firmware. Host
+      tests prove zero invokes it, -1 skips it even with a NULL owner, other
+      negative values retain their u32 bit pattern, the vtable store precedes
+      either path, and this is returned.
