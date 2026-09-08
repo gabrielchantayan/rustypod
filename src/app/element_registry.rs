@@ -75,15 +75,24 @@
 //! vtables use `usize` fillers to keep named slots at their target
 //! byte offsets on device and disjoint on a 64-bit host.
 
-/// A vtable-bearing UI element, as seen by the registry. Only the
-/// vtable word is modeled; the element id at +0x04 and the name word
-/// at +0x08 belong to the naming/removal siblings @ 0x0816e220 /
-/// 0x0816e058 and are not touched here.
+/// A vtable-bearing UI element, as seen by the registry.
+///
+/// The by-id naming wrapper at 0x0816e220 reads and writes the two words
+/// following the vtable; the registration wrapper only needs the vtable.
 #[repr(C)]
 pub struct RegistryElement {
     /// +0x00: the element's vtable.
     pub vtable: *const ElementVtable,
+    /// +0x04: the identifier the naming wrapper compares.
+    pub id: u32,
+    /// +0x08: the name word the naming wrapper replaces.
+    pub name: u32,
 }
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x04] = [0; core::mem::offset_of!(RegistryElement, id)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x08] = [0; core::mem::offset_of!(RegistryElement, name)];
 
 /// The element vtable, modeled down to the slot this wrapper
 /// dispatches.
@@ -159,6 +168,55 @@ pub unsafe extern "C" fn element_registry_add(
     ((*vtable).insert)(registry, core::ptr::addr_of_mut!(slot));
 }
 
+/// element_registry_set_name_for_id — original: `FUN_0816e220` @
+/// 0x0816e220 (96 bytes; 20 `bl` call sites, binary-verified).
+///
+/// Constructs a 20-byte collection iterator over `registry` at the
+/// before-first position (-2), then advances until it finds the first
+/// element whose +0x04 identifier equals `element_id`. It replaces that
+/// element's +0x08 name word with `name`, stops immediately, and always
+/// drops the iterator. No NULL guard exists for `registry`, and the yielded
+/// element is dereferenced without a guard, matching the retail body.
+///
+/// The raw extent is exactly 0x0816e220..0x0816e280: 24 instructions, no
+/// literal pool, followed by the separately linked `FUN_0816e280`. Decoding
+/// every ARM B/BL word in `work/firmware/osos.dec` finds 20 direct call
+/// sites: 20 unconditional `bl`, zero predicated forms, zero plain `b`,
+/// and no data-word occurrence of this address. The iterator calls are the
+/// already ported `iterator_state_construct` @ 0x08155e80,
+/// `iterator_state_next` @ 0x08155d6c, and `iterator_state_cleanup` @
+/// 0x08155ec0; no dispatch seam is introduced. Deliberate deviation: none.
+///
+/// # Safety
+///
+/// `registry` must be valid for the collection iterator, and each yielded
+/// entry must be a valid `RegistryElement`; the retail routine imposes the
+/// same requirements.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn element_registry_set_name_for_id(
+    registry: *mut ElementRegistry,
+    element_id: u32,
+    name: u32,
+) {
+    let mut iterator = [0u32; 5];
+    let state = iterator.as_mut_ptr();
+    crate::app::vtable_set::iterator_state_construct(state, registry.cast(), -2);
+
+    let mut element: *mut RegistryElement = core::ptr::null_mut();
+    while crate::app::vtable_set::iterator_state_next(
+        state,
+        core::ptr::addr_of_mut!(element).cast(),
+    ) != 0 {
+        if (*element).id == element_id {
+            (*element).name = name;
+            break;
+        }
+    }
+
+    crate::app::vtable_set::iterator_state_cleanup(state);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,7 +252,7 @@ mod tests {
     #[test]
     fn pre_insert_runs_before_insert_with_forwarded_args() {
         ORDER.store(0, Ordering::SeqCst);
-        let mut element = RegistryElement { vtable: &ELEMENT_VT };
+        let mut element = RegistryElement { vtable: &ELEMENT_VT, id: 0, name: 0 };
         let mut registry = ElementRegistry { vtable: &REGISTRY_VT };
         let element_ptr = core::ptr::addr_of_mut!(element);
         let registry_ptr = core::ptr::addr_of_mut!(registry);
@@ -232,7 +290,7 @@ mod tests {
 
     #[test]
     fn insert_may_replace_the_slot() {
-        let mut element = RegistryElement { vtable: &NOP_ELEMENT_VT };
+        let mut element = RegistryElement { vtable: &NOP_ELEMENT_VT, id: 0, name: 0 };
         let mut registry = ElementRegistry { vtable: &REPLACING_VT };
 
         unsafe {
@@ -280,7 +338,7 @@ mod tests {
     #[test]
     fn registry_vtable_is_loaded_after_pre_insert() {
         SWAPPED_INSERT_RAN.store(0, Ordering::SeqCst);
-        let mut element = RegistryElement { vtable: &SWAP_ELEMENT_VT };
+        let mut element = RegistryElement { vtable: &SWAP_ELEMENT_VT, id: 0, name: 0 };
         let mut registry = ElementRegistry { vtable: &FIRST_REGISTRY_VT };
         SWAP_TARGET.store(core::ptr::addr_of_mut!(registry) as usize, Ordering::SeqCst);
 
@@ -293,5 +351,109 @@ mod tests {
             1,
             "a vtable swap inside pre_insert redirects the insert dispatch"
         );
+    }
+
+    // Test 4 fixtures: this function calls the ported iterator trio
+    // directly. The fetch seam is scripted only to supply host entries;
+    // it poisons +0x08 with -5 so the real cleanup takes its no-release
+    // sentinel path instead of interpreting the host-truncated owner word.
+    static mut FETCH_ENTRIES: [usize; 3] = [0; 3];
+    static mut FETCH_LEN: usize = 0;
+    static mut FETCH_INDEX: usize = 0;
+    static mut FETCH_CALLS: usize = 0;
+
+    struct IteratorFetchGuard(unsafe extern "C" fn(*mut u32, *mut u8) -> u32);
+    impl Drop for IteratorFetchGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(crate::app::vtable_set::ITERATOR_STATE_FETCH)
+                    .write_volatile(self.0);
+            }
+        }
+    }
+
+    unsafe extern "C" fn scripted_iterator_fetch(state: *mut u32, out: *mut u8) -> u32 {
+        FETCH_CALLS += 1;
+        if FETCH_INDEX == FETCH_LEN {
+            state.add(2).write((-5i32) as u32);
+            return 0;
+        }
+
+        out.cast::<*mut RegistryElement>()
+            .write(FETCH_ENTRIES[FETCH_INDEX] as *mut RegistryElement);
+        FETCH_INDEX += 1;
+        state.add(2).write((-5i32) as u32);
+        1
+    }
+
+    unsafe fn install_scripted_iterator(entries: &[*mut RegistryElement]) -> IteratorFetchGuard {
+        assert!(entries.len() <= FETCH_ENTRIES.len());
+        FETCH_ENTRIES.fill(0);
+        for (index, entry) in entries.iter().enumerate() {
+            FETCH_ENTRIES[index] = *entry as usize;
+        }
+        FETCH_LEN = entries.len();
+        FETCH_INDEX = 0;
+        FETCH_CALLS = 0;
+
+        let slot = core::ptr::addr_of_mut!(crate::app::vtable_set::ITERATOR_STATE_FETCH);
+        let original = core::ptr::read_volatile(slot);
+        slot.write_volatile(scripted_iterator_fetch);
+        IteratorFetchGuard(original)
+    }
+
+    #[test]
+    fn set_name_updates_only_the_first_matching_element_and_stops() {
+        let _lock = crate::app::vtable_set::tests::SLOT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let mut first = RegistryElement { vtable: core::ptr::null(), id: 7, name: 0x1111_1111 };
+        let mut match_one = RegistryElement { vtable: core::ptr::null(), id: 42, name: 0x2222_2222 };
+        let mut match_two = RegistryElement { vtable: core::ptr::null(), id: 42, name: 0x3333_3333 };
+        let mut registry = ElementRegistry { vtable: core::ptr::null() };
+
+        unsafe {
+            let _restore = install_scripted_iterator(&[
+                core::ptr::addr_of_mut!(first),
+                core::ptr::addr_of_mut!(match_one),
+                core::ptr::addr_of_mut!(match_two),
+            ]);
+            element_registry_set_name_for_id(
+                core::ptr::addr_of_mut!(registry),
+                42,
+                0xfeed_cafe,
+            );
+        }
+
+        assert_eq!(first.name, 0x1111_1111, "non-matching entries are untouched");
+        assert_eq!(match_one.name, 0xfeed_cafe, "the first matching entry is replaced");
+        assert_eq!(match_two.name, 0x3333_3333, "the match branch exits without another step");
+        assert_eq!(unsafe { FETCH_CALLS }, 2, "only entries through the first match are fetched");
+    }
+
+    #[test]
+    fn set_name_exhausts_the_iterator_without_writing_when_id_is_absent() {
+        let _lock = crate::app::vtable_set::tests::SLOT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let mut first = RegistryElement { vtable: core::ptr::null(), id: 1, name: 0x1111_1111 };
+        let mut second = RegistryElement { vtable: core::ptr::null(), id: 2, name: 0x2222_2222 };
+        let mut registry = ElementRegistry { vtable: core::ptr::null() };
+
+        unsafe {
+            let _restore = install_scripted_iterator(&[
+                core::ptr::addr_of_mut!(first),
+                core::ptr::addr_of_mut!(second),
+            ]);
+            element_registry_set_name_for_id(
+                core::ptr::addr_of_mut!(registry),
+                3,
+                0xfeed_cafe,
+            );
+        }
+
+        assert_eq!(first.name, 0x1111_1111);
+        assert_eq!(second.name, 0x2222_2222);
+        assert_eq!(unsafe { FETCH_CALLS }, 3, "the terminating empty fetch is observed");
     }
 }
