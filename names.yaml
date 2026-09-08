@@ -12812,6 +12812,42 @@ functions:
       sequence; expected differences are the two seam loads/blx calls
       and LLVM's frame/register allocation.
 
+  - address: 0x081034b0
+    ghidra: FUN_081034b0
+    name: queued_message_construct_word
+    size: 68
+    sig: "QueuedMessage *queued_message_construct_word(QueuedMessage *storage, u32 message_code, u32 payload_word)"
+    module: app/queued_message
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r5: message_code
+      param_3/uStack_10: payload_word
+      puVar1/r4: message
+      DAT_081034f0: QUEUED_MESSAGE_VTABLE
+      FUN_08266a48: message_kind_construct
+      FUN_082aadd4: operator_new
+      FUN_081b9248: queued_message_payload_construct
+    notes: >-
+      True raw extent is 68 bytes: sixteen ARM instructions at
+      0x081034b0..0x081034ef plus the derived queued-message vtable literal
+      0x08980744 at 0x081034f0; the next function begins with cmp r0,#0 at
+      0x081034f4. Ghidra's 64-byte size omits that literal pool word. A
+      binary-wide decode of every ARM B/BL word found 20 incoming calls: all
+      are unconditional bl, with no predicated bl or direct tail b. This
+      sibling of queued_message_construct builds the same 12-byte
+      kind-0x16 envelope in caller-provided arena storage, installs the
+      derived vtable, allocates 16 bytes with operator_new(0x10), and calls
+      the nested payload constructor with {message_code, &payload_word, 4};
+      it stores that constructor's result at +0x08 and returns the base
+      constructor result. message_kind_construct (app/message_kind) and
+      operator_new (heap/veneers) are ported directly; the payload constructor
+      0x081b9248 remains behind the existing QUEUED_MESSAGE_OPS slot, whose
+      target default calls the firmware address and whose host default panics.
+      Host coverage records the full high-bit word, non-NULL four-byte payload
+      pointer, construction order, return adoption, vtable/payload stores, and
+      tag-2 allocation.
+
   - address: 0x08110fdc
     ghidra: FUN_08110fdc
     name: queued_message_post
