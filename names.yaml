@@ -9607,6 +9607,34 @@ functions:
       @ 0x081bc9f8..0x081bded8 (owns the literal
       "iPod_Control/Device/PlayCounts" @ 0x081bc840).
 
+  - address: 0x081bd9b8
+    ghidra: FUN_081bd9b8
+    name: string_object_normalize_volume_path
+    size: 44
+    sig: "void string_object_normalize_volume_path(const u8 *volume_record, StringObject *path)"
+    module: cxx/string_object_normalize_volume_path
+    status: ported
+    renames:
+      param_1: volume_record
+      param_2: path
+      FUN_08279198: string_object_normalize_separators
+      FUN_0827916c: string_object_prepend_volume_prefix
+    notes: >-
+      Raw extent is 44 bytes (0x081bd9b8..0x081bd9e3), not Ghidra's
+      incorrect 88: the next sibling begins with push {r4,lr} at
+      0x081bd9e4. Every ARM B/BL word in osos.dec was decoded: 18 direct
+      call sites, all plain bl; zero predicated forms and zero plain B
+      branches. It calls the unported separator normalizer @ 0x08279198
+      as (path, '/', 0), then ldrb volume_record +0x10 and tail-calls
+      unported @ 0x0827916c. Raw ARM shows that target constructs UTF-16
+      [volume_code, ':', '\\', 0] and inserts it at index 0, so the port
+      normalizes separators before prefixing the volume path. Deliberate
+      deviation: both unported helper boundaries use
+      STRING_OBJECT_PATH_OPS; target defaults transmute their retailOS
+      addresses and host tests record ordering and arguments. Ghidra's
+      shown 0x08276aa0 call is the tail target's callee, not this
+      function's direct branch.
+
   - address: 0x082e19cc
     ghidra: FUN_082e19cc
     name: path_node_release
