@@ -9897,6 +9897,40 @@ functions:
       defaults inert. Ghidra C faithful here (mvneq r0,#0 is
       move-NOT, i.e. -1).
 
+  - address: 0x081c83b4
+    ghidra: FUN_081c83b4
+    name: record_manager_get
+    size: 104
+    sig: "void *record_manager_get(void)"
+    module: app/record_manager
+    status: ported
+    renames:
+      DAT_081c840c: record_manager_state (ready byte at 0x089cfd4c, guard word at +4)
+      DAT_081c8410: record_manager (fixed object at 0x08ad1f70)
+      FUN_081c8954: record_manager_constructor (unported RECORD_MANAGER_CTOR seam)
+      DAT_081c8414: __dso_handle (0x089ca09c)
+      DAT_081c8418: invalid_record_manager_destructor_pointer (0x081bdae8)
+    notes: >-
+      Binary-verified ADS function-local-static accessor. The raw ARM code is
+      88 bytes at 0x081c83b4..0x081c840c, followed by four literal-pool words
+      through 0x081c8418; the next function begins at 0x081c841c, making the
+      true extent 104 bytes rather than Ghidra's code-only 88. It tests guard
+      bit 0, calls cxa_guard_acquire @ 0x082ab31c, calls the unported fixed
+      object constructor @ 0x081c8954, registers its return with cxa_atexit @
+      0x082ab1c8 using __dso_handle 0x089ca09c, calls cxa_guard_release @
+      0x082ab338, sets the adjacent ready byte if clear, then reloads and
+      returns 0x08ad1f70. Decoding every ARM B/BL word in osos.dec found 20
+      direct callers: 20 unconditional bl, 0 predicated bl, and no tail b.
+      The object's constructor reaches its final mutex word at +0xcd4, so the
+      crate-static replacement models the observed 0xcd8-byte fixed extent.
+      The unported constructor is RECORD_MANAGER_CTOR with a documented
+      zeroing default. The pool's handler pointer 0x081bdae8 is an interior
+      tail into a frame teardown at 0x081bda64, not a callable function entry;
+      its Rust cxa_atexit handler is therefore a no-op. retailOS never runs
+      this shutdown chain. Host tests cover first construction/registration,
+      bit-0 fast path, both guard edge states, constructor-result versus
+      reloaded-object return, full default zeroing, and the inert handler.
+
   - address: 0x081c8a84
     ghidra: FUN_081c8a84
     name: list_find_by_id16

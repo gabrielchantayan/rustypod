@@ -58,6 +58,7 @@ pub mod pending_event_take;
 pub mod pending_event_insert;
 pub mod queued_message;
 pub mod registry;
+pub mod record_manager;
 pub mod refcounted_value;
 pub mod resource;
 pub mod resource_chain;
