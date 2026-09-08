@@ -32,6 +32,10 @@
 //!   @ 0x805646c `mutex_delete` uses, then all three words (cell pointer,
 //!   padding, hold counter) are zeroed — the whole object returns to its
 //!   born state, even when there was no cell to destroy.
+//! - `counted_mutex_guard_release` — original: `FUN_08206e9c` @
+//!   0x08206e9c (40 bytes; 20 unconditional `bl` call sites). Releases
+//!   the counted mutex stored in a one-word scope guard, then clears the
+//!   guard so it cannot release again.
 //! - `kernel_running` — original: `FUN_0809444c` @ 0x0809444c (72 bytes;
 //!   20 call sites). If the kernel-started byte @ 0x089ca848 is zero,
 //!   returns 0. Otherwise returns the current task id (thunk @ 0x805665c:
@@ -342,11 +346,35 @@ pub unsafe extern "C" fn mutex_lock_counted(lock: *mut CountedMutex) {
 /// Decrements the hold counter at +8, then signals the mutex. The original
 /// tail-branches into the guard thunk @ 0x8056710 after the store, so the
 /// decrement is observably ordered *before* the release — preserved here.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn mutex_unlock_counted(lock: *mut CountedMutex) {
     let count = core::ptr::addr_of_mut!((*lock).hold_count);
     count.write(count.read().wrapping_sub(1));
     mutex_unlock(core::ptr::addr_of_mut!((*lock).mutex));
+}
+
+/// `counted_mutex_guard_release` — original: `FUN_08206e9c` @ 0x08206e9c
+/// (40 bytes; 20 unconditional `bl` call sites, binary-scanned).
+///
+/// A one-word scope-guard destructor. If `*guard` is non-NULL, it releases
+/// that [`CountedMutex`] through [`mutex_unlock_counted`] and then clears the
+/// word. It always returns `guard`, including when it was already clear. The
+/// original has no NULL guard for `guard` itself; neither does this port.
+///
+/// No deliberate deviations: the NULL check, release-before-clear ordering,
+/// clearing behavior, and returned guard address exactly follow the original.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn counted_mutex_guard_release(
+    guard: *mut *mut CountedMutex,
+) -> *mut *mut CountedMutex {
+    let lock = guard.read();
+    if !lock.is_null() {
+        mutex_unlock_counted(lock);
+        guard.write(core::ptr::null_mut());
+    }
+    guard
 }
 
 /// mutex_delete_counted — original: `FUN_08094424` @ 0x08094424 (40 bytes;
@@ -846,6 +874,37 @@ mod tests {
             assert_eq!(lock.hold_count, 2);
         }
         assert_eq!(calls(), vec![Call::Signal(MOCK_HANDLE)]);
+    }
+
+    // -- the one-word counted-lock scope guard @ 0x08206e9c -------------
+
+    #[test]
+    fn counted_mutex_guard_release_unlocks_clears_and_returns_guard() {
+        let _lock = mock_kernel();
+        let mut cell = MOCK_HANDLE;
+        let mut lock = live_counted_lock(&mut cell, 1);
+        let mut guard = &mut lock as *mut CountedMutex;
+        let guard_address = core::ptr::addr_of_mut!(guard);
+
+        let returned = unsafe { counted_mutex_guard_release(guard_address) };
+
+        assert_eq!(returned, guard_address, "returns the guard address");
+        assert!(guard.is_null(), "clears after releasing");
+        assert_eq!(lock.hold_count, 0, "releases the counted lock");
+        assert_eq!(calls(), vec![Call::Signal(MOCK_HANDLE)]);
+    }
+
+    #[test]
+    fn counted_mutex_guard_release_leaves_a_clear_guard_untouched() {
+        let _lock = mock_kernel();
+        let mut guard: *mut CountedMutex = core::ptr::null_mut();
+        let guard_address = core::ptr::addr_of_mut!(guard);
+
+        let returned = unsafe { counted_mutex_guard_release(guard_address) };
+
+        assert_eq!(returned, guard_address, "returns a clear guard too");
+        assert!(guard.is_null());
+        assert_eq!(calls(), vec![], "no unlock on an empty guard");
     }
 
     // -- the counted-lock teardown @ 0x08094424 -------------------------
