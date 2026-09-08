@@ -45212,11 +45212,12 @@ functions:
       stored with strh), merged = (old & ~mask) | (value & mask) in full
       32-bit arithmetic over the zero-extended ldrh result, write merged
       back via FUN_080b2894 (two-byte {reg, value} push to slave 0x4a;
-      keeps only the low byte of r1 itself). Both callees bracket the
-      transaction with an RTXC semaphore pair (0x0806a4a0/0x080645a8) and
-      are unported; the port dispatches them through the CODEC_READ_REG /
-      CODEC_WRITE_REG ops slots whose target defaults transmute the
-      retail addresses 0x080aa060 / 0x080b2894 (bl becomes blx). Verified
+      keeps only the low byte of r1 itself). The reader remains unported
+      behind the CODEC_READ_REG volatile slot (retail address 0x080aa060);
+      codec_write_reg @ 0x080b2894 is now called directly. Both I2C
+      transactions retain the RTXC semaphore pair
+      (0x0806a4a0/0x080645a8); the raw hardware transfer 0x0836bb84 remains
+      behind each writer module's typed target/host-test boundary. Verified
       call count: 36 plain bl, 0 predicated, by decoding every B/BL word
       in osos.dec (6 in FUN_0809393c, 28 in FUN_080aa0a0, 2 in
       FUN_080d51a8). Ghidra's 56-byte extent is correct: the next
@@ -45226,11 +45227,39 @@ functions:
       with r2 live); the ARM always reads r2. Deliberate deviations: the
       dead str r1,[sp] before the write call is dropped (the writer
       takes the value in r1 and never reads the slot); the port
-      zero-initializes the reader's stack slot (inert). match.py
-      structural: same op sequence (read call -> ldrh -> and/bic/orr ->
-      write call); LLVM adds an fp frame and routes both calls as blx
-      through the slot literals. Reference C:
+      zero-initializes the reader's stack slot (inert). match.py structural:
+      same op sequence (read seam call -> ldrh -> and/bic/orr -> direct
+      writer call); LLVM adds an fp frame. Reference C:
       decomp/c/007/080d5170_FUN_080d5170.c.
+  - address: 0x080b2894
+    ghidra: FUN_080b2894
+    name: codec_write_reg
+    size: 40
+    sig: "usize codec_write_reg(u32 reg, u32 value)"
+    module: drivers/codec
+    status: ported
+    renames:
+      param_1/r0: reg
+      param_2/r1: value
+      local_8/sp: bytes
+      FUN_0806a4a0: kernel_sem5_wait
+      FUN_0836bb84: i2c_write
+      FUN_080645a8: kernel_sem5_signal
+    notes: >-
+      Audio-codec two-byte I2C write. Raw ARM extent is
+      0x080b2894..0x080b28bc: push {r3,lr}; strb r0,[sp];
+      strb r1,[sp,#1]; kernel_sem5_wait(); i2c_write(0x4a,2,sp);
+      kernel_sem5_signal(); pop {ip,pc}. The caller-visible return is the
+      semaphore-release r0 word; raw I2C status is ignored. The two input
+      words are independently truncated to their low bytes, so the wire
+      bytes are {reg as u8, value as u8}. Decoding every ARM B/BL word in
+      osos.dec finds 19 direct call sites, all plain unconditional bl and
+      zero predicated forms: one in FUN_0809393c, 16 in FUN_080aa0a0, one at
+      raw address 0x080b2820, and one in FUN_080d5170. The next function
+      begins at 0x080b28bc, confirming Ghidra's 40-byte extent. No deliberate
+      semantic deviation: kernel semaphore shims are existing ports and
+      unported raw I2C write 0x0836bb84 uses a typed fixed-address target
+      call / volatile host seam (an indirect blx instead of retail's bl).
 
   - address: 0x0833dd48
     ghidra: FUN_0833dd48
