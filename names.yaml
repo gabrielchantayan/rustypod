@@ -45278,6 +45278,33 @@ functions:
       tests cover enabled and disabled bounds, exact field layout and
       observer registration, including ARM-wrapping tick-deadline addition.
 
+  # --- global observer unregister ---
+  - address: 0x081bb510
+    ghidra: FUN_081bb510
+    name: global_observer_unregister
+    size: 39
+    sig: "u8 *global_observer_unregister(u8 *object)"
+    module: app/global_observer_unregister
+    status: ported
+    renames:
+      param_1/r0: object
+      FUN_080b43e8: global_observer_getter
+      vtable[0x28]: unregister
+    notes: >-
+      EXTENT: raw ARM establishes 40 code bytes from 0x081bb510 through
+      0x081bb538, despite Ghidra's 39-byte size; the next separately linked
+      function begins at 0x081bb538. CALL COUNT: decoding every ARM B/BL word
+      in work/firmware/osos.dec finds exactly 20 direct call sites, all
+      unconditional plain bl and no predicated BL forms. The function saves
+      object, passes the address of a stack-local object word to vtable slot
+      +0x28 of the singleton supplied by the unported 0x080b43e8 getter, and
+      returns the saved original object pointer even if the callback changes
+      the local word. ROLE: the +0x28 role is inferred as unregister because
+      the adjacent 0x081bb450 constructor registers the same indirect pointer
+      form through the same observer's +0x1c slot; the observer's concrete
+      identity remains unknown. DEVIATION: target calls the retail getter at
+      its fixed address while host tests use a getter seam.
+
   # --- growable target-word buffer ---
   - address: 0x082b8174
     ghidra: FUN_082b8174
