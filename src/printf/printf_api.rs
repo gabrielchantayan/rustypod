@@ -184,6 +184,7 @@ pub unsafe extern "C" fn vsprintf(dest: *mut u8, fmt: *const u8, ap: VaList) -> 
 /// Register usage: r0 = buf, r1 = fmt, r2/r3/stack = varargs (original
 /// builds `ap` = &spilled-r2; here `args` IS that pointer).
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn sprintf(buf: *mut u8, fmt: *const u8, args: VaList) -> i32 {
     let mut cursor = buf;
     let engine = PRINTF_ENGINE;

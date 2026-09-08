@@ -29406,6 +29406,40 @@ functions:
       and unknown-tag output preservation. match.py structural report differs
       as expected (exit 1).
 
+  - address: 0x08101d4c
+    ghidra: FUN_08101d4c
+    name: string_table_set_decimal
+    size: 80
+    sig: "void string_table_set_decimal(u8 *table, char **key, const i32 *decimal)"
+    module: app/string_table
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: key
+      param_3/r2: decimal
+      FUN_0802f724: sprintf
+      FUN_083d8b5c: cxx_string_from_cstr
+      FUN_08101da0: string_table_assign
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Formats *decimal as signed decimal through sprintf("%d") into a
+      512-byte stack buffer, makes a temporary COW string from that buffer,
+      assigns it to key in the current localization table through
+      FUN_08101da0, then releases the temporary. Raw extent is
+      0x08101d4c..0x08101d9c: the following word is the distinct
+      FUN_08101da0 entry at 0x08101da0, so Ghidra's 80-byte size is exact.
+      Decoding every ARM B/BL word in osos.dec finds 19 bl call sites, all
+      unconditional; no predicated forms. sprintf, cxx_string_from_cstr,
+      and cxx_string_release are ported. The unported assignment helper
+      remains a volatile seam whose device default transmutates
+      0x08101da0; its body selects the current 0x1c-byte table and assigns
+      into the key's mapped COW-string slot. The Rust sprintf veneer takes
+      an explicit va-list pointer, so the port passes &decimal_value rather
+      than the original variadic r2 word. Host test uses a faithful %d
+      engine and a heap-backed COW string fixture to cover zero, positive,
+      negative, and i32::MIN values; it also proves table and key
+      propagation into the assignment seam. match.py structural report
+      differs as expected (exit 1).
   - address: 0x08101edc
     ghidra: FUN_08101edc
     name: string_table_has_string
