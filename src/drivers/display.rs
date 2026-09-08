@@ -17,6 +17,10 @@
 //!   (16 bytes; **28 `bl` call sites**). Arms the panel clear: the color
 //!   word at +0x20 plus the pending byte at +0x1e, consumed by the flush
 //!   loop @ 0x081d8b3c through the panel driver's vtable slot +0x10.
+//! - [`display_set_layer_enabled`] — original: `FUN_081d892c` @ 0x081d892c
+//!   (124 bytes; **20 `bl` call sites, 19 plain + 1 `blne`**). Sets one
+//!   secondary-display layer's requested enable state and starts or stops the
+//!   display's layer activity when the six requests agree.
 //!
 //! # Why this lives under `drivers/`
 //!
@@ -120,6 +124,9 @@
 //! +0x98  u8[16]  the constructor's byte block (+0x98..+0xa5: mostly
 //!                zeroes, 1 at +0x9a and 3 at +0xa3), padded to the
 //!                0xa8 object stride
+//! +0x50  ptr     layer-activity blocker; a non-NULL blocker defers stopping
+//! +0x98  u8      layer activity active; set by 0x081d914c, cleared by
+//!                0x081d9270
 //! ```
 //!
 //! The layer constructor's fifth argument, `display_id == 1`, is what the
@@ -182,17 +189,24 @@ pub struct Display {
     pub reserved_24: [u8; 4],
     /// +0x28: the display's mutex, created by `FUN_081d92a4`.
     pub mutex: Mutex,
-    /// +0x30..+0x8f: geometry and state this port does not touch.
-    pub reserved_30: [u8; 0x60],
+    /// +0x30..+0x4f: geometry and state this port does not touch.
+    pub reserved_30_4f: [u8; 0x20],
+    /// +0x50: a non-NULL activity blocker prevents
+    /// [`display_set_layer_enabled`] from stopping the layer activity.
+    pub layer_activity_blocker: *mut c_void,
+    /// +0x54..+0x8f: geometry and state this port does not touch.
+    pub reserved_54_8f: [u8; 0x3c],
     /// +0x90: display id — 0 internal LCD, 1 secondary output.
     pub display_id: u8,
     /// +0x91..+0x93: padding ahead of the driver word.
     pub reserved_91: [u8; 3],
     /// +0x94: the panel driver object every layer is bound to.
     pub driver: *mut u8,
-    /// +0x98..+0xa7: the constructor's trailing byte block plus the pad
-    /// that rounds the object up to [`DISPLAY_OBJECT_SIZE`].
-    pub reserved_98: [u8; 0x10],
+    /// +0x98: set by the layer-activity start path @ 0x081d914c and cleared
+    /// by its stop counterpart @ 0x081d9270.
+    pub layers_active: u8,
+    /// +0x99..+0xa7: start/stop arguments and padding the constructor fills.
+    pub reserved_99: [u8; 0x0f],
 }
 
 // The header's offsets are only claims about the 32-bit target layout, so
@@ -247,6 +261,16 @@ pub struct DisplayHooks {
     /// display with no mutex, no panel driver and a zero id.
     pub display_construct:
         unsafe extern "C" fn(storage: *mut Display, display_id: u32) -> *mut Display,
+    /// `FUN_081d914c` @ 0x081d914c: starts layer activity after the first
+    /// enable request. The stock routine drives the panel driver, sets
+    /// `layers_active`, and drains four pending operation flags.
+    pub layer_activity_start: unsafe extern "C" fn(display: *mut Display),
+
+    /// `FUN_081d9270` @ 0x081d9270: stops layer activity after the final
+    /// disable request. The stock routine clears `layers_active`, releases
+    /// the panel driver, and visits every constructed layer.
+    pub layer_activity_stop: unsafe extern "C" fn(display: *mut Display),
+
 }
 
 unsafe extern "C" fn layer_construct_stub(
@@ -257,6 +281,19 @@ unsafe extern "C" fn layer_construct_stub(
     _on_secondary_display: u8,
 ) -> *mut u8 {
     storage
+}
+
+/// Default for the unported layer-activity start @ 0x081d914c. It preserves
+/// this caller's observable active latch while omitting the driver's pending
+/// operations, which need their own ports.
+unsafe extern "C" fn layer_activity_start_stub(display: *mut Display) {
+    core::ptr::addr_of_mut!((*display).layers_active).write_volatile(1);
+}
+
+/// Default for the unported layer-activity stop @ 0x081d9270. It preserves
+/// this caller's observable active latch while omitting driver/layer teardown.
+unsafe extern "C" fn layer_activity_stop_stub(display: *mut Display) {
+    core::ptr::addr_of_mut!((*display).layers_active).write_volatile(0);
 }
 
 /// The default for the unported display constructor `FUN_081d92a4`:
@@ -283,6 +320,8 @@ unsafe extern "C" fn display_construct_stub(
 pub(crate) const DEFAULT_DISPLAY_HOOKS: DisplayHooks = DisplayHooks {
     layer_construct: layer_construct_stub,
     display_construct: display_construct_stub,
+    layer_activity_start: layer_activity_start_stub,
+    layer_activity_stop: layer_activity_stop_stub,
 };
 
 /// The active hooks. Host tests swap in a recording mock and restore.
@@ -294,6 +333,22 @@ pub static mut DISPLAY_HOOKS: DisplayHooks = DEFAULT_DISPLAY_HOOKS;
 unsafe fn display_hooks() -> DisplayHooks {
     core::ptr::read_volatile(core::ptr::addr_of!(DISPLAY_HOOKS))
 }
+
+/// Loads just the start slot so the activity port does not copy the complete
+/// four-entry hook table through its stack frame.
+#[inline(always)]
+unsafe fn layer_activity_start_hook() -> unsafe extern "C" fn(*mut Display) {
+    core::ptr::addr_of!((*core::ptr::addr_of_mut!(DISPLAY_HOOKS)).layer_activity_start)
+        .read_volatile()
+}
+
+/// Loads just the stop slot; see [`layer_activity_start_hook`].
+#[inline(always)]
+unsafe fn layer_activity_stop_hook() -> unsafe extern "C" fn(*mut Display) {
+    core::ptr::addr_of!((*core::ptr::addr_of_mut!(DISPLAY_HOOKS)).layer_activity_stop)
+        .read_volatile()
+}
+
 
 /// `__dso_handle` — the pool word @ 0x081d891c (0x089ca09c), the key every
 /// ADS static's `cxa_atexit` registration carries.
@@ -310,11 +365,14 @@ const ZEROED_DISPLAY: Display = Display {
     clear_color: 0,
     reserved_24: [0; 4],
     mutex: Mutex { sem_cell: core::ptr::null_mut(), unused: 0 },
-    reserved_30: [0; 0x60],
+    reserved_30_4f: [0; 0x20],
+    layer_activity_blocker: core::ptr::null_mut(),
+    reserved_54_8f: [0; 0x3c],
     display_id: 0,
     reserved_91: [0; 3],
     driver: core::ptr::null_mut(),
-    reserved_98: [0; 0x10],
+    layers_active: 0,
+    reserved_99: [0; 0x0f],
 };
 
 /// The internal LCD (original: the fixed object @ 0x08a1b624, pool word
@@ -409,6 +467,75 @@ pub unsafe extern "C" fn display_get(display_id: u32) -> *mut Display {
             display_id,
         ),
         _ => core::ptr::null_mut(),
+    }
+}
+
+/// display_set_layer_enabled — original: `FUN_081d892c` @ 0x081d892c
+/// (124 bytes, 0x081d892c..0x081d89a8; Ghidra's 164-byte extent swallows the
+/// sibling `FUN_081d89a8` whose `push {r4,r5,r6,lr}` opens at 0x081d89a8).
+/// **20 `bl` call sites: 19 plain `bl` and one `blne` @ 0x0811faac**, as
+/// verified by decoding every ARM B/BL word in `osos.dec`; there are no tail
+/// `b` callers. The predicated caller checks its own render condition before
+/// invoking this function; this function has no NULL guard.
+///
+/// On a display with a panel driver and `display_id == 1`, writes 1 or 0 to
+/// the requested layer byte at +0x18. An enable starts layer activity through
+/// 0x081d914c only while +0x98 is clear. A disable does nothing while +0x50
+/// is non-NULL; otherwise it scans all six bytes and stops activity through
+/// 0x081d9270 only when every byte is clear and +0x98 is set.
+///
+/// Deliberate deviation: the six-byte scan inlines the unported 44-byte
+/// `FUN_081d8e04`, and the two unported activity routines use
+/// [`DisplayHooks`] defaults that preserve the +0x98 latch but omit their
+/// panel-driver and per-layer work.
+///
+/// # Safety
+///
+/// `display` must be live and `layer_index` must be 0..[`LAYER_SLOT_COUNT`],
+/// exactly as the unchecked ARM byte address requires.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn display_set_layer_enabled(
+    display: *mut Display,
+    layer_index: u32,
+    enabled: u32,
+) {
+    if core::ptr::addr_of!((*display).driver).read_volatile().is_null()
+        || core::ptr::addr_of!((*display).display_id).read_volatile() != SECONDARY_DISPLAY_ID
+    {
+        return;
+    }
+
+    core::ptr::addr_of_mut!((*display).per_layer_bytes)
+        .cast::<u8>()
+        .add(layer_index as usize)
+        .write_volatile((enabled != 0) as u8);
+
+    if enabled != 0 {
+        if core::ptr::addr_of!((*display).layers_active).read_volatile() == 0 {
+            layer_activity_start_hook()(display);
+        }
+        return;
+    }
+
+    if !core::ptr::addr_of!((*display).layer_activity_blocker)
+        .read_volatile()
+        .is_null()
+    {
+        return;
+    }
+
+    let bytes = core::ptr::addr_of!((*display).per_layer_bytes).cast::<u8>();
+    let mut index = 0;
+    while index < LAYER_SLOT_COUNT {
+        if bytes.add(index).read_volatile() != 0 {
+            return;
+        }
+        index += 1;
+    }
+
+    if core::ptr::addr_of!((*display).layers_active).read_volatile() != 0 {
+        layer_activity_stop_hook()(display);
     }
 }
 
@@ -605,12 +732,109 @@ mod tests {
             clear_color: 0,
             reserved_24: [0; 4],
             mutex: Mutex { sem_cell: core::ptr::null_mut(), unused: 0 },
-            reserved_30: [0; 0x60],
+            reserved_30_4f: [0; 0x20],
+            layer_activity_blocker: core::ptr::null_mut(),
+            reserved_54_8f: [0; 0x3c],
             display_id,
             reserved_91: [0; 3],
             driver,
-            reserved_98: [0; 0x10],
+            layers_active: 0,
+            reserved_99: [0; 0x0f],
         }
+    }
+
+    static mut ACTIVITY_START_CALLS: usize = 0;
+    static mut ACTIVITY_STOP_CALLS: usize = 0;
+
+    unsafe extern "C" fn recording_layer_activity_start(display: *mut Display) {
+        ACTIVITY_START_CALLS += 1;
+        core::ptr::addr_of_mut!((*display).layers_active).write_volatile(1);
+    }
+
+    unsafe extern "C" fn recording_layer_activity_stop(display: *mut Display) {
+        ACTIVITY_STOP_CALLS += 1;
+        core::ptr::addr_of_mut!((*display).layers_active).write_volatile(0);
+    }
+
+    fn install_activity_mocks() -> MutexGuard<'static, ()> {
+        let guard = HOOKS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            DISPLAY_HOOKS = DisplayHooks {
+                layer_activity_start: recording_layer_activity_start,
+                layer_activity_stop: recording_layer_activity_stop,
+                ..DEFAULT_DISPLAY_HOOKS
+            };
+            ACTIVITY_START_CALLS = 0;
+            ACTIVITY_STOP_CALLS = 0;
+        }
+        guard
+    }
+
+    fn restore_activity_mocks(guard: MutexGuard<'static, ()>) {
+        unsafe { DISPLAY_HOOKS = DEFAULT_DISPLAY_HOOKS };
+        drop(guard);
+    }
+
+    #[test]
+    fn layer_enable_state_ignores_displays_without_secondary_panel_activity() {
+        let guard = install_activity_mocks();
+        let mut missing_driver = display(SECONDARY_DISPLAY_ID, core::ptr::null_mut());
+        let mut internal = display(0, 0x0814_ece0usize as *mut u8);
+
+        unsafe {
+            display_set_layer_enabled(&mut missing_driver, 2, 1);
+            display_set_layer_enabled(&mut internal, 4, u32::MAX);
+
+            assert_eq!(missing_driver.per_layer_bytes, [0; 6], "NULL driver exits first");
+            assert_eq!(internal.per_layer_bytes, [0; 6], "only display id 1 reaches the store");
+            assert_eq!(ACTIVITY_START_CALLS, 0);
+            assert_eq!(ACTIVITY_STOP_CALLS, 0);
+        }
+        restore_activity_mocks(guard);
+    }
+
+    #[test]
+    fn layer_enable_state_starts_once_and_stops_after_last_disable() {
+        let guard = install_activity_mocks();
+        let mut d = display(SECONDARY_DISPLAY_ID, 0x0816_9018usize as *mut u8);
+
+        unsafe {
+            display_set_layer_enabled(&mut d, 4, u32::MAX);
+            assert_eq!(d.per_layer_bytes, [0, 0, 0, 0, 1, 0], "nonzero enables as one");
+            assert_eq!(ACTIVITY_START_CALLS, 1, "inactive display starts on first enable");
+            assert_eq!(d.layers_active, 1);
+
+            display_set_layer_enabled(&mut d, 4, 1);
+            assert_eq!(ACTIVITY_START_CALLS, 1, "active display does not restart");
+
+            display_set_layer_enabled(&mut d, 1, 1);
+            display_set_layer_enabled(&mut d, 4, 0);
+            assert_eq!(d.per_layer_bytes, [0, 1, 0, 0, 0, 0]);
+            assert_eq!(ACTIVITY_STOP_CALLS, 0, "one enabled layer prevents the stop");
+
+            display_set_layer_enabled(&mut d, 1, 0);
+            assert_eq!(d.per_layer_bytes, [0; 6]);
+            assert_eq!(ACTIVITY_STOP_CALLS, 1, "the last disable stops active activity");
+            assert_eq!(d.layers_active, 0);
+        }
+        restore_activity_mocks(guard);
+    }
+
+    #[test]
+    fn layer_enable_state_defers_last_disable_while_blocked() {
+        let guard = install_activity_mocks();
+        let mut d = display(SECONDARY_DISPLAY_ID, 0x0816_9018usize as *mut u8);
+        d.layers_active = 1;
+        d.per_layer_bytes[0] = 1;
+        d.layer_activity_blocker = 0x1234usize as *mut c_void;
+
+        unsafe {
+            display_set_layer_enabled(&mut d, 0, 0);
+            assert_eq!(d.per_layer_bytes, [0; 6], "the request still clears its byte");
+            assert_eq!(ACTIVITY_STOP_CALLS, 0, "the non-NULL blocker suppresses stop");
+            assert_eq!(d.layers_active, 1, "the activity latch remains set");
+        }
+        restore_activity_mocks(guard);
     }
 
     #[test]
