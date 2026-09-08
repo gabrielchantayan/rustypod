@@ -47510,3 +47510,45 @@ functions:
       final call whose result is returned immediately. The list's embedded
       pointer remains a u32 on host and target; host tests map its fixture
       below 4 GiB so this target layout remains exact.
+
+  # --- StreamCache mass-storage manager singleton accessor ---
+  - address: 0x08228068
+    ghidra: FUN_08228068
+    name: stream_cache_mass_storage_manager_get
+    size: 88
+    sig: "*mut u8 stream_cache_mass_storage_manager_get()"
+    module: app/stream_cache_mass_storage_manager
+    status: ported
+    renames:
+      DAT_082280b0: STREAM_CACHE_MASS_STORAGE_MANAGER_GUARD
+      DAT_082280b4: STREAM_CACHE_MASS_STORAGE_MANAGER
+      DAT_082280b8: dso_handle
+      DAT_082280bc: mass_storage_manager_destructor
+      FUN_08228270: STREAM_CACHE_MASS_STORAGE_MANAGER_CTOR
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      True raw extent is 88 bytes: 72 bytes of code at
+      0x08228068..0x082280b0 and the four-word literal pool at
+      0x082280b0..0x082280c0; the next separately linked function begins
+      at 0x082280c0. Decoding every ARM B/BL word in osos.dec finds exactly
+      19 direct inbound call sites, all unconditional BL:
+      0x081af590, 0x081af718, 0x081c8748, 0x081c875c, 0x08201740,
+      0x08201a48, 0x08201a54, 0x08206324, 0x082063ec, 0x08206464,
+      0x082064c0, 0x082064cc, 0x0820668c, 0x082066e0, 0x082068e4,
+      0x08206a30, 0x08206a90, 0x08206ae8, and 0x0822813c. No predicated
+      BL forms or direct tail B enter it. It is the ADS function-local-static
+      sequence: fast-path test guard bit 0; cxa_guard_acquire; construct
+      the fixed manager 0x08ae4b4c through unported FUN_08228270; register
+      the constructor return with cxa_atexit(dtor 0x0821d440,
+      __dso_handle 0x089ca09c); cxa_guard_release; then reload and return
+      the fixed manager literal, never the constructor result. The embedded
+      constructor at 0x08228270 initializes through manager+0x2c and the
+      sibling worker at 0x082280c0 reads manager+0x30, establishing the
+      port's 0x34-byte target-layout storage extent. Deliberate deviations:
+      the device seam calls retained retailOS constructor 0x08228270, while
+      the host default is inert until tests install a constructor. The
+      registered handler word 0x0821d440 enters after the actual prologue at
+      0x0821d43c and cannot safely execute standalone, so its typed Rust
+      shutdown handler is a no-op rather than inventing a callee identity.
