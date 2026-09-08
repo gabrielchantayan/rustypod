@@ -19,8 +19,12 @@
 //! - [`path_object_default_construct`] — original: `FUN_082792cc` @
 //!   0x082792cc (20 bytes: five ARM instructions plus the 4-byte vtable
 //!   literal @ 0x082792e0, so 24 bytes of true extent; **42 `bl`, 0 `b`,
-//!   0 predicated call sites**, binary-scanned by decoding every B/BL
-//!   word in `work/firmware/osos.dec`).
+//!   0 predicated**, binary-scanned by decoding every B/BL word in
+//!   `work/firmware/osos.dec`).
+//! - [`path_object_assign_from_string_object`] — original:
+//!   `FUN_08279314` @ 0x08279314 (36 bytes, all code; **19 plain `bl`,
+//!   0 predicated**, binary-scanned by decoding every ARM B/BL word in
+//!   `work/firmware/osos.dec`).
 //!
 //! ## What it is
 //!
@@ -191,6 +195,7 @@
 //! `this`.
 
 use crate::cxx::string_object::{
+    string_object_assign_payload, string_object_c_str,
     string_object_construct_from_cstr, string_object_copy_construct,
     StringObject, StringObjectVtable,
 };
@@ -343,11 +348,58 @@ pub unsafe extern "C" fn path_object_default_construct(
     this
 }
 
+/// path_object_assign_from_string_object — original: `FUN_08279314` @
+/// 0x08279314 (36 bytes, all code; the next separately linked function
+/// starts at 0x08279338; **19 plain `bl` call sites, 0 predicated**,
+/// binary-scanned by decoding every ARM B/BL word in `osos.dec`).
+///
+/// Assigns a StringObject-derived path object's payload from `source` without
+/// altering the path vtable. Raw ARM saves `this`, obtains `source`'s
+/// NULL-safe C string through [`string_object_c_str`] @ 0x082a50b0, passes
+/// that pointer to [`string_object_assign_payload`] @ 0x08276474, then
+/// returns its saved `this`. Unlike [`crate::cxx::string_object::string_object_assign`],
+/// it has no self-assignment guard: `this == source` still runs the complete
+/// assignment path. A NULL source payload first becomes the shared empty C
+/// string, which the assignment helper clears through its +0xc virtual slot.
+///
+/// All 19 callers are unconditional; e.g. 0x08074224 assigns a
+/// stack-constructed path to the caller's output path before appending `/`,
+/// and 0x0807a5b8 assigns a temporary PathObject constructed from a
+/// StringObject. Neither object pointer is guarded—the original faults while
+/// loading `source.payload` or inside the assignment helper, and so does the
+/// port.
+///
+/// Deliberate deviations: none. Both original callees are ported and called
+/// directly. A distinct target link section prevents LLVM from folding this
+/// exported body into an identical future path-assignment overload.
+///
+/// # Safety
+///
+/// `this` must be writable StringObject-derived storage and `source` must be
+/// a readable [`StringObject`]. The source payload must remain readable across
+/// the assignment helper's allocation protocol.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.path_object_assign_from_string_object")]
+pub unsafe extern "C" fn path_object_assign_from_string_object(
+    this: *mut StringObject,
+    source: *const StringObject,
+) -> *mut StringObject {
+    let source_cstr = string_object_c_str(source);
+    string_object_assign_payload(this, source_cstr);
+    this
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
     use super::*;
-    use crate::cxx::string_object::STRING_OBJECT_VTABLE;
+    use crate::cxx::string_object::{
+        DEFAULT_STRING_OBJECT_ASSIGN_CSTR_OPS, STRING_OBJECT_ASSIGN_CSTR_OPS,
+        STRING_OBJECT_VTABLE, StringObjectAssignCstrOps,
+    };
+    use crate::testing::STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK;
+    use std::sync::MutexGuard;
     use std::vec::Vec;
 
     static PATH: &[u8] = b"iPod_Control/Device/radio_test\0";
@@ -358,6 +410,61 @@ mod tests {
     const GARBAGE_VTABLE: *const StringObjectVtable =
         0xdead_beefusize as *const StringObjectVtable;
     const GARBAGE_PAYLOAD: *mut u8 = 0x5a5a_5a5ausize as *mut u8;
+
+    static mut PATH_ASSIGN_ALLOCATION: Option<(usize, usize, u32)> = None;
+    static mut PATH_ASSIGN_CLEAR: Option<usize> = None;
+    static mut PATH_ASSIGN_ALLOCATION_RESULT: *mut u8 = core::ptr::null_mut();
+
+    unsafe extern "C" fn record_path_assignment_allocation(
+        this: *mut StringObject,
+        requested_size: usize,
+        flags: u32,
+    ) -> *mut u8 {
+        core::ptr::addr_of_mut!(PATH_ASSIGN_ALLOCATION).write(Some((
+            this as usize,
+            requested_size,
+            flags,
+        )));
+        core::ptr::read_volatile(core::ptr::addr_of!(PATH_ASSIGN_ALLOCATION_RESULT))
+    }
+
+    unsafe extern "C" fn record_path_assignment_clear(this: *mut StringObject) {
+        core::ptr::addr_of_mut!(PATH_ASSIGN_CLEAR).write(Some(this as usize));
+    }
+
+    /// Restores the shared virtual-assignment boundary after this module's
+    /// path-assignment tests. The crate-wide lock also serializes tests in
+    /// cxx/string_object.rs that replace this global.
+    struct PathAssignOpsGuard {
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for PathAssignOpsGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS)
+                    .write_volatile(DEFAULT_STRING_OBJECT_ASSIGN_CSTR_OPS);
+            }
+        }
+    }
+
+    fn path_assign_bench(allocation_result: *mut u8) -> PathAssignOpsGuard {
+        let lock = STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        unsafe {
+            core::ptr::addr_of_mut!(PATH_ASSIGN_ALLOCATION).write(None);
+            core::ptr::addr_of_mut!(PATH_ASSIGN_CLEAR).write(None);
+            core::ptr::addr_of_mut!(PATH_ASSIGN_ALLOCATION_RESULT).write(allocation_result);
+            core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS).write_volatile(
+                StringObjectAssignCstrOps {
+                    allocate_payload: record_path_assignment_allocation,
+                    clear_payload: record_path_assignment_clear,
+                },
+            );
+        }
+        PathAssignOpsGuard { _lock: lock }
+    }
 
     fn garbage_storage() -> StringObject {
         StringObject {
@@ -813,5 +920,92 @@ mod tests {
                 );
             }
         }
+    }
+
+    // --- path_object_assign_from_string_object @ 0x08279314 ---
+
+    #[test]
+    fn path_assignment_copies_the_source_cstr_and_returns_this() {
+        let mut output = [0xa5u8; 16];
+        let mut source_bytes = *b"Music/F00\0";
+        let source = StringObject {
+            vtable: core::ptr::null(),
+            payload: source_bytes.as_mut_ptr(),
+        };
+        let mut target = StringObject {
+            vtable: PATH_OBJECT_VTABLE_ADDRESS as *const StringObjectVtable,
+            payload: GARBAGE_PAYLOAD,
+        };
+        let this = core::ptr::addr_of_mut!(target);
+        let _bench = path_assign_bench(output.as_mut_ptr());
+
+        assert_eq!(
+            unsafe { path_object_assign_from_string_object(this, &source) },
+            this,
+            "the saved r4, not either callee's result, is returned"
+        );
+        assert_eq!(
+            unsafe { core::ptr::read_volatile(core::ptr::addr_of!(PATH_ASSIGN_ALLOCATION)) },
+            Some((this as usize, source_bytes.len(), 0)),
+            "source flows through 0x082a50b0 then the assignment +0x8 slot"
+        );
+        assert_eq!(
+            unsafe { core::ptr::read_volatile(core::ptr::addr_of!(PATH_ASSIGN_CLEAR)) },
+            None,
+            "a nonempty source never reaches the +0xc clear slot"
+        );
+        assert_eq!(&output[..source_bytes.len()], &source_bytes);
+        assert_eq!(source.payload, source_bytes.as_mut_ptr(), "source remains caller-owned");
+        assert_eq!(target.payload, GARBAGE_PAYLOAD, "only the virtual allocator owns payload replacement");
+        assert_eq!(
+            target.vtable as usize, PATH_OBJECT_VTABLE_ADDRESS,
+            "this wrapper never overwrites the derived path vtable"
+        );
+    }
+
+    #[test]
+    fn path_assignment_from_null_payload_uses_the_canonical_empty_cstr() {
+        let source = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        let mut target = garbage_storage();
+        let this = core::ptr::addr_of_mut!(target);
+        let _bench = path_assign_bench(0x5555_5555 as *mut u8);
+
+        assert_eq!(
+            unsafe { path_object_assign_from_string_object(this, &source) },
+            this
+        );
+        assert_eq!(
+            unsafe { core::ptr::read_volatile(core::ptr::addr_of!(PATH_ASSIGN_ALLOCATION)) },
+            None,
+            "the accessor substitutes an empty C string, so assignment skips +0x8"
+        );
+        assert_eq!(
+            unsafe { core::ptr::read_volatile(core::ptr::addr_of!(PATH_ASSIGN_CLEAR)) },
+            Some(this as usize),
+            "the empty canonical C string reaches the assignment +0xc slot"
+        );
+    }
+
+    #[test]
+    fn path_assignment_from_self_still_runs_the_assignment_path() {
+        let mut payload = *b"iPod_Control\0";
+        let mut object = StringObject {
+            vtable: PATH_OBJECT_VTABLE_ADDRESS as *const StringObjectVtable,
+            payload: payload.as_mut_ptr(),
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let mut output = [0xa5u8; 16];
+        let _bench = path_assign_bench(output.as_mut_ptr());
+
+        assert_eq!(unsafe { path_object_assign_from_string_object(this, this) }, this);
+        assert_eq!(
+            unsafe { core::ptr::read_volatile(core::ptr::addr_of!(PATH_ASSIGN_ALLOCATION)) },
+            Some((this as usize, payload.len(), 0)),
+            "unlike StringObject::operator=, this body has no this == source guard"
+        );
+        assert_eq!(&output[..payload.len()], &payload);
     }
 }
