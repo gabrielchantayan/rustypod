@@ -12,8 +12,9 @@
 //!   is a no-op.
 //! - assign-from-cstr @ 0x0810b514 / assign-from-buffer @ 0x0810b568:
 //!   destroy the old payload, allocate `len + 1`, copy, NUL-terminate.
-//! - printf-assign @ 0x0810b5cc: vsnprintf into a 512-byte stack buffer,
-//!   then assign-from-cstr.
+//! - printf-assign @ 0x0810b5cc — ported here as
+//!   [`heap_string_format`]: vsnprintf into a 512-byte stack buffer, then
+//!   passes the completed C string to the stock assign-from-cstr method.
 //! - suffix-assign @ 0x08297df8: clears the word, walks the source holder's
 //!   payload to its NUL, clamps the skip count to the length, tail-branches
 //!   to assign-from-buffer.
@@ -28,6 +29,11 @@
 //! Unlike `StringObject::c_str`, the accessor returns the raw word —
 //! including NULL for an empty holder. Callers that need a non-NULL string
 //! check themselves.
+
+use core::mem::MaybeUninit;
+
+use crate::cxx::string_object::retail_vsnprintf;
+use crate::printf::printf_api::VaList;
 
 /// The one-word holder object: `data` is the heap `char` buffer (allocated
 /// with caller tag 0x14) or NULL.
@@ -62,9 +68,221 @@ pub unsafe extern "C" fn heap_string_data(this: *const HeapString) -> *mut u8 {
     (*this).data
 }
 
+/// The raw `mov r1,#512` bound in `heap_string_format`.
+const HEAP_STRING_FORMAT_BUFFER_LEN: usize = 512;
+
+/// Stock `HeapString::assign_from_cstr` entry point. It remains stock code:
+/// this port is solely the caller at 0x0810b5cc.
+#[cfg(target_os = "none")]
+const HEAP_STRING_ASSIGN_FROM_CSTR_ADDRESS: usize = 0x0810b514;
+
+type HeapStringAssignFromCstrFn = unsafe extern "C" fn(*mut HeapString, *const u8);
+
+/// Enters the unported assignment method on the device.
+///
+/// The retail image remains mapped at its load address after the Rust payload
+/// is linked, so device code loads this absolute entry and reaches it by `blx`.
+#[cfg(target_os = "none")]
+unsafe fn heap_string_assign_from_cstr(this: *mut HeapString, source: *const u8) {
+    let assign: HeapStringAssignFromCstrFn =
+        core::mem::transmute(HEAP_STRING_ASSIGN_FROM_CSTR_ADDRESS);
+    assign(this, source);
+}
+
+/// Host unit tests replace the still-stock callee with a recorder. A host
+/// binary cannot safely execute a load address in the iPod image.
+#[cfg(not(target_os = "none"))]
+unsafe fn heap_string_assign_from_cstr(this: *mut HeapString, source: *const u8) {
+    #[cfg(test)]
+    {
+        core::ptr::read_volatile(core::ptr::addr_of!(HEAP_STRING_ASSIGN_FROM_CSTR_TEST))(this, source);
+    }
+    #[cfg(not(test))]
+    {
+        let _ = (this, source);
+        panic!("heap_string_assign_from_cstr is available only in retailOS");
+    }
+}
+
+#[cfg(test)]
+unsafe extern "C" fn heap_string_assign_from_cstr_test_unavailable(
+    _this: *mut HeapString,
+    _source: *const u8,
+) {
+    panic!("heap_string_format test recorder was not installed");
+}
+
+#[cfg(test)]
+static mut HEAP_STRING_ASSIGN_FROM_CSTR_TEST: HeapStringAssignFromCstrFn =
+    heap_string_assign_from_cstr_test_unavailable;
+
+/// heap_string_format — original: `FUN_0810b5cc` @ 0x0810b5cc (68 bytes,
+/// all code; **20 plain `bl` call sites, zero predicated forms, zero plain
+/// `b`, and zero data-word references**, verified by decoding every ARM
+/// `B`/`BL` word and every word equal to the address in `osos.dec`).
+///
+/// The one-word holder's printf-style assignment. Raw ARM spills its incoming
+/// registers for the variadic ABI, reserves a 512-byte scratch region at
+/// `sp + 4`, then invokes `retail_vsnprintf(scratch, 512, format, args)`.
+/// It preserves that formatter result across the stock
+/// `assign_from_cstr(this, scratch)` call and returns the result unchanged.
+/// The stock assignment owns replacement allocation and copying; the scratch
+/// remains caller-owned stack storage. There is no NULL guard on `this` or
+/// `format`: the formatter/assignment paths retain retailOS's faulting
+/// behavior for invalid inputs. All direct callers are unconditional, which
+/// is consistent with live stack holders and supplied format strings.
+///
+/// Deviation: stable Rust receives the variadic spill as explicit [`VaList`],
+/// the crate convention for printf-style retail methods. The assign-from-cstr
+/// sibling @ 0x0810b514 is intentionally not re-stubbed: device builds call
+/// that verified stock entry directly; host tests install a test-only recorder.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn heap_string_format(
+    this: *mut HeapString,
+    format: *const u8,
+    args: VaList,
+) -> i32 {
+    let mut scratch = MaybeUninit::<[u8; HEAP_STRING_FORMAT_BUFFER_LEN]>::uninit();
+    let scratch = scratch.as_mut_ptr() as *mut u8;
+    let length = retail_vsnprintf(scratch, HEAP_STRING_FORMAT_BUFFER_LEN, format, args);
+    heap_string_assign_from_cstr(this, scratch);
+    length
+}
+
 #[cfg(test)]
 mod tests {
+    extern crate std;
+    use std::vec::Vec;
     use super::*;
+    use crate::cxx::string_object::{
+        RetailVsnprintfEngineFn, RETAIL_VSNPRINTF_ENGINE, RETAIL_VSNPRINTF_SINK_ADDRESS,
+    };
+    use crate::testing::STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK;
+    use std::sync::MutexGuard;
+
+    static mut FORMAT_ENGINE_BYTE: u8 = 0;
+    static mut FORMAT_ENGINE_LEN: usize = 0;
+    static mut FORMAT_ENGINE_RESULT: i32 = 0;
+    static mut FORMAT_ENGINE_CALL: Option<(usize, usize, usize, usize, usize)> = None;
+    static mut ASSIGN_THIS: *mut HeapString = core::ptr::null_mut();
+    static mut ASSIGNED_BYTES: Vec<u8> = Vec::new();
+
+    unsafe extern "C" fn recording_format_engine(
+        sink: usize,
+        cursor: *mut *mut u8,
+        maximum: usize,
+        format: *const u8,
+        args: VaList,
+    ) -> i32 {
+        let scratch = *cursor;
+        let output_len = core::ptr::read_volatile(core::ptr::addr_of!(FORMAT_ENGINE_LEN));
+        let written = core::cmp::min(output_len, maximum);
+        core::ptr::write_bytes(
+            scratch,
+            core::ptr::read_volatile(core::ptr::addr_of!(FORMAT_ENGINE_BYTE)),
+            written,
+        );
+        *cursor = scratch.add(written);
+        core::ptr::addr_of_mut!(FORMAT_ENGINE_CALL).write(Some((
+            sink,
+            scratch as usize,
+            maximum,
+            format as usize,
+            args as usize,
+        )));
+        core::ptr::read_volatile(core::ptr::addr_of!(FORMAT_ENGINE_RESULT))
+    }
+
+    unsafe extern "C" fn recording_assign_from_cstr(this: *mut HeapString, source: *const u8) {
+        let mut len = 0;
+        while source.add(len).read() != 0 {
+            len += 1;
+        }
+        core::ptr::addr_of_mut!(ASSIGN_THIS).write(this);
+        core::ptr::addr_of_mut!(ASSIGNED_BYTES)
+            .write(core::slice::from_raw_parts(source, len + 1).to_vec());
+    }
+
+    /// Restores both process-wide seams even when a test assertion panics.
+    struct FormatBench {
+        _lock: MutexGuard<'static, ()>,
+        previous_engine: RetailVsnprintfEngineFn,
+        previous_assign: HeapStringAssignFromCstrFn,
+    }
+
+    impl Drop for FormatBench {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(RETAIL_VSNPRINTF_ENGINE)
+                    .write_volatile(self.previous_engine);
+                core::ptr::addr_of_mut!(HEAP_STRING_ASSIGN_FROM_CSTR_TEST)
+                    .write_volatile(self.previous_assign);
+            }
+        }
+    }
+
+    fn format_bench(byte: u8, len: usize, result: i32) -> FormatBench {
+        let lock = STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        unsafe {
+            let previous_engine =
+                core::ptr::read_volatile(core::ptr::addr_of!(RETAIL_VSNPRINTF_ENGINE));
+            let previous_assign =
+                core::ptr::read_volatile(core::ptr::addr_of!(HEAP_STRING_ASSIGN_FROM_CSTR_TEST));
+            core::ptr::addr_of_mut!(FORMAT_ENGINE_BYTE).write(byte);
+            core::ptr::addr_of_mut!(FORMAT_ENGINE_LEN).write(len);
+            core::ptr::addr_of_mut!(FORMAT_ENGINE_RESULT).write(result);
+            core::ptr::addr_of_mut!(FORMAT_ENGINE_CALL).write(None);
+            core::ptr::addr_of_mut!(ASSIGN_THIS).write(core::ptr::null_mut());
+            core::ptr::addr_of_mut!(ASSIGNED_BYTES).write(Vec::new());
+            core::ptr::addr_of_mut!(RETAIL_VSNPRINTF_ENGINE).write_volatile(recording_format_engine);
+            core::ptr::addr_of_mut!(HEAP_STRING_ASSIGN_FROM_CSTR_TEST)
+                .write_volatile(recording_assign_from_cstr);
+            FormatBench { _lock: lock, previous_engine, previous_assign }
+        }
+    }
+
+    #[test]
+    fn format_bounds_the_512_byte_scratch_assigns_it_and_returns_count() {
+        let mut holder = HeapString { data: 0xdead_beefusize as *mut u8 };
+        let format = b"%s\0";
+        let args = 0x5555_5555usize as VaList;
+        let _bench = format_bench(b'X', 600, -31);
+
+        let result = unsafe { heap_string_format(&mut holder, format.as_ptr(), args) };
+
+        assert_eq!(result, -31, "the conversion result survives assignment");
+        let (sink, scratch, maximum, seen_format, seen_args) =
+            unsafe { (*core::ptr::addr_of!(FORMAT_ENGINE_CALL)).unwrap() };
+        assert_eq!(sink, RETAIL_VSNPRINTF_SINK_ADDRESS);
+        assert_eq!(maximum, HEAP_STRING_FORMAT_BUFFER_LEN - 1);
+        assert_eq!(seen_format, format.as_ptr() as usize);
+        assert_eq!(seen_args, args as usize);
+        assert_ne!(scratch, &mut holder as *mut HeapString as usize, "scratch is not the holder");
+        assert_eq!(
+            unsafe { *core::ptr::addr_of!(ASSIGN_THIS) },
+            &mut holder as *mut HeapString
+        );
+        let assigned = unsafe { (*core::ptr::addr_of!(ASSIGNED_BYTES)).clone() };
+        assert_eq!(assigned.len(), HEAP_STRING_FORMAT_BUFFER_LEN);
+        assert!(assigned[..HEAP_STRING_FORMAT_BUFFER_LEN - 1].iter().all(|&byte| byte == b'X'));
+        assert_eq!(assigned[HEAP_STRING_FORMAT_BUFFER_LEN - 1], 0);
+    }
+
+    #[test]
+    fn format_assigns_the_empty_string_and_returns_zero() {
+        let mut holder = HeapString { data: core::ptr::null_mut() };
+        let _bench = format_bench(b'X', 0, 0);
+
+        assert_eq!(
+            unsafe { heap_string_format(&mut holder, b"\0".as_ptr(), core::ptr::null()) },
+            0
+        );
+        assert_eq!(unsafe { (*core::ptr::addr_of!(ASSIGNED_BYTES)).clone() }, [0]);
+    }
+
 
     /// Returns the payload pointer unchanged for a live holder.
     #[test]
