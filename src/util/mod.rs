@@ -27,6 +27,7 @@ pub mod is_tagged_c0;
 pub mod le_read;
 pub mod list_find;
 pub mod ptr_vector;
+pub mod resource_list;
 pub mod pascal_string;
 pub mod q15_mul;
 pub mod operation_dispatch;
