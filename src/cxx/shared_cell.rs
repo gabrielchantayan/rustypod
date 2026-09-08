@@ -92,6 +92,61 @@ pub unsafe extern "C" fn shared_cell_construct(
     }
     slot
 }
+/// shared_cell_assign — original: `FUN_083b50e4` @ `0x083b50e4`
+/// (60 bytes; 19 incoming `bl` call sites, ALL unconditional — zero
+/// predicated forms and zero tail `b`, verified by decoding every ARM B/BL
+/// word in osos.dec). Whole body:
+///
+/// ```text
+/// 083b50e4: push  {r4, r5, r6, lr}
+/// 083b50e8: cmp   r0, r1
+/// 083b50ec: mov   r5, r1
+/// 083b50f0: mov   r4, r0
+/// 083b50f4: beq   0x083b5118
+/// 083b50f8: mov   r0, r4
+/// 083b50fc: bl    0x083b524c        @ shared_cell_release(dst)
+/// 083b5100: ldr   r0, [r5]          @ cell = *src
+/// 083b5104: cmp   r0, #0
+/// 083b5108: str   r0, [r4]          @ *dst = cell
+/// 083b510c: ldrne r1, [r0, #4]
+/// 083b5110: addne r1, r1, #1
+/// 083b5114: strne r1, [r0, #4]
+/// 083b5118: mov   r0, r4
+/// 083b511c: pop   {r4, r5, r6, pc}
+/// ```
+///
+/// Assigns the intrusive shared cell in `src` to `dst`. Distinct slots first
+/// release `dst`, then load and install `src`'s cell and increment its signed
+/// reference count with 32-bit wrapping arithmetic. Assigning a slot to
+/// itself does nothing and returns it. The source is intentionally read only
+/// after `dst` is released, preserving the raw ARM ordering.
+///
+/// Deviation: [`SharedCell::value`] is `usize` on hosts to hold host
+/// pointers; the source-slot and reference-count operations still map to the
+/// target's two 32-bit words.
+///
+/// # Safety
+/// `dst` and `src` must be valid, aligned shared-cell slots. Their pointed-to
+/// non-NULL cells must be writable for both target words; `dst` must satisfy
+/// [`shared_cell_release`]'s preconditions when it differs from `src`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.shared_cell_assign")]
+#[inline(never)]
+pub unsafe extern "C" fn shared_cell_assign(
+    dst: *mut *mut SharedCell,
+    src: *mut *mut SharedCell,
+) -> *mut *mut SharedCell {
+    if dst != src {
+        shared_cell_release(dst);
+        let cell = src.read();
+        dst.write(cell);
+        if !cell.is_null() {
+            (*cell).refcount = (*cell).refcount.wrapping_add(1);
+        }
+    }
+    dst
+}
+
 
 /// shared_cell_release — original: `FUN_083b524c` @ `0x083b524c`
 /// (84 bytes; 38 `bl` call sites, ALL unconditional — zero predicated
@@ -512,6 +567,100 @@ mod tests {
 
         assert_eq!(cell.refcount, -1);
         assert!(slot.is_null());
+        assert!(events().is_empty());
+    }
+
+    /// Assigning a slot to itself takes the raw ARM `beq` path: no release,
+    /// no retain, and the slot itself is returned.
+    #[test]
+    fn self_assignment_does_not_change_the_reference() {
+        let _bench = bench();
+        let mut cell = SharedCell {
+            value: 0x1234_5678,
+            refcount: 7,
+        };
+        let mut slot = core::ptr::addr_of_mut!(cell);
+        let slot_ptr = core::ptr::addr_of_mut!(slot);
+
+        let result = unsafe { shared_cell_assign(slot_ptr, slot_ptr) };
+
+        assert_eq!(result, slot_ptr);
+        assert_eq!(slot, core::ptr::addr_of_mut!(cell));
+        assert_eq!(cell.refcount, 7);
+        assert!(events().is_empty());
+    }
+
+    /// A normal assignment releases the old destination before installing and
+    /// retaining the source cell.
+    #[test]
+    fn assignment_releases_destination_then_retains_source() {
+        let _bench = bench();
+        let mut old_cell = SharedCell {
+            value: 0,
+            refcount: 1,
+        };
+        let old_cell_ptr = core::ptr::addr_of_mut!(old_cell);
+        let mut source_cell = SharedCell {
+            value: 0x1234_5678,
+            refcount: 7,
+        };
+        let source_cell_ptr = core::ptr::addr_of_mut!(source_cell);
+        let mut dst = old_cell_ptr;
+        let mut src = source_cell_ptr;
+
+        let result = unsafe { shared_cell_assign(&mut dst, &mut src) };
+
+        assert_eq!(result, core::ptr::addr_of_mut!(dst));
+        assert_eq!(dst, source_cell_ptr);
+        assert_eq!(src, source_cell_ptr, "the source slot is only read");
+        assert_eq!(source_cell.refcount, 8);
+        assert_eq!(
+            events(),
+            std::vec![Event::HeapFree(old_cell_ptr as *mut u8 as usize, 2)]
+        );
+    }
+
+    /// A NULL source still releases and clears a distinct destination; no
+    /// retain operation follows its unpredicated store.
+    #[test]
+    fn null_source_clears_a_distinct_destination() {
+        let _bench = bench();
+        let mut old_cell = SharedCell {
+            value: 0,
+            refcount: 1,
+        };
+        let old_cell_ptr = core::ptr::addr_of_mut!(old_cell);
+        let mut dst = old_cell_ptr;
+        let mut src: *mut SharedCell = core::ptr::null_mut();
+
+        let result = unsafe { shared_cell_assign(&mut dst, &mut src) };
+
+        assert_eq!(result, core::ptr::addr_of_mut!(dst));
+        assert!(dst.is_null());
+        assert!(src.is_null());
+        assert_eq!(
+            events(),
+            std::vec![Event::HeapFree(old_cell_ptr as *mut u8 as usize, 2)]
+        );
+    }
+
+    /// The ARM `addne` is a 32-bit wrapping increment, not checked signed
+    /// arithmetic.
+    #[test]
+    fn assignment_wraps_the_signed_reference_count() {
+        let _bench = bench();
+        let mut source_cell = SharedCell {
+            value: 0,
+            refcount: i32::MAX,
+        };
+        let source_cell_ptr = core::ptr::addr_of_mut!(source_cell);
+        let mut dst: *mut SharedCell = core::ptr::null_mut();
+        let mut src = source_cell_ptr;
+
+        unsafe { shared_cell_assign(&mut dst, &mut src) };
+
+        assert_eq!(dst, source_cell_ptr);
+        assert_eq!(source_cell.refcount, i32::MIN);
         assert!(events().is_empty());
     }
 }
