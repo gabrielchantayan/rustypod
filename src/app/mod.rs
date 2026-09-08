@@ -15,6 +15,7 @@ pub mod callback_target_slot_20_dispatch;
 pub mod command_dispatch;
 pub mod class_registry;
 pub mod descriptor_layout;
+pub mod callback_dispatch_release;
 pub mod context;
 pub mod controller_layout_dispatch;
 pub mod controller_history_select;

@@ -47710,3 +47710,35 @@ functions:
       host deviation: slot pointers remain u32 words and subsequent fields use
       raw offsets because the host's embedded Mutex is wider than its 8-byte
       ARM layout.
+
+  # --- Callback helper forwarding and release ---
+  - address: 0x08124c60
+    ghidra: FUN_08124c60
+    name: callback_dispatch_release
+    size: 56
+    sig: "u32 callback_dispatch_release(void *context, DispatchValue *value, u32 extra)"
+    module: app/callback_dispatch_release
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: callback
+      param_3/r2: extra
+      r4: callback
+      r5: helper_result
+      FUN_08124ff4: unported_helper
+    notes: >-
+      Raw extent is exactly 56 bytes, 0x08124c60..0x08124c98: the following
+      `push {r4,r5,r6,lr}` at 0x08124c98 begins a separately linked sibling,
+      with no literal pool. Decoding every ARM B/BL word in osos.dec finds 19
+      direct inbound BL call sites, all unconditional: 0x081014b0, 0x08101938,
+      0x08142cc0, 0x0814713c, 0x0817edd8, 0x0817ffac, 0x0817ffd0, 0x081812e4,
+      0x081814f0, 0x08181554, 0x08181648, 0x0818166c, 0x08184050, 0x081b2e34,
+      0x081b354c, 0x081f9080, 0x081f9df8, 0x081f9f24, and 0x08288aec. There
+      are no predicated inbound BL forms; 0x08124ccc is a tail B from the
+      sibling, not a branch-and-link call. The wrapper preserves r2 as stack
+      argument five while calling unported FUN_08124ff4 with fixed r2/r3 flags
+      1/0, then conditionally invokes its non-NULL callback's vtable +0x04
+      entry and returns the saved helper result. FUN_08124ff4 has no ledger
+      entry, so no callee identity is claimed. Target builds call its fixed
+      address; host tests use a volatile typed seam. The host vtable is
+      pointer-width widened but retains the target slot's role.
