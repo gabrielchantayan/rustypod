@@ -10,7 +10,8 @@
 use super::ir::{
     cg_create_inst_binary, cg_create_inst_load, cg_create_inst_load_immed,
     cg_virtual_reg_create, CgBlock, CgProc, CgVirtualReg, CG_BLOCK_PROC,
-    CG_INST_OPCODE_ADD, CG_INST_OPCODE_LDI, CG_INST_OPCODE_LDW, CG_REG_TYPE_GENERAL,
+    CG_INST_OPCODE_ADD, CG_INST_OPCODE_LDI, CG_INST_OPCODE_LDW, CG_INST_OPCODE_SUB,
+    CG_REG_TYPE_GENERAL,
 };
 
 /// The procedure owning `block` (`cg_block_t + 0x04`).
@@ -130,6 +131,39 @@ pub unsafe extern "C" fn cg_emit_load_matrix4x4_word(
     value_reg
 }
 
+/// cg_emit_subtract — original: `FUN_0824035c` @ 0x0824035c
+/// (60 bytes: 15 instruction words, 0x0824035c-0x082403598; raw bytes
+/// verified — Ghidra's reported 64-byte extent includes four bytes past
+/// the function, and the next function starts at 0x0824039c).
+///
+/// 20 call sites, all unconditional `bl` (no predicated forms and no tail
+/// `b`), verified by decoding every branch word in osos.dec. The sites all
+/// occur in the fragment-pipeline generator at 0x0823dac4-0x0823f634.
+///
+/// Creates one general-purpose destination virtual register from
+/// `block->proc`, then appends the binary instruction `dest = lhs - rhs`
+/// (IR opcode 13) to `block`, returning `dest`. Opcode 13 is subtraction:
+/// the JIT emitter's opcode dispatch at 0x082c6430 maps it to ARM data
+/// processing opcode 2 (`sub`).
+///
+/// # Deviations
+///
+/// The leading context argument is dead on arrival in the original (r0 is
+/// overwritten by `ldr r0,[r1,#4]` before any use). The port preserves that
+/// ABI parameter and intentionally never reads it.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_emit_subtract(
+    _ctx: *mut u8,
+    block: *mut CgBlock,
+    lhs: *mut CgVirtualReg,
+    rhs: *mut CgVirtualReg,
+) -> *mut CgVirtualReg {
+    let dest = cg_virtual_reg_create(block_proc(block), CG_REG_TYPE_GENERAL);
+    cg_create_inst_binary(block, CG_INST_OPCODE_SUB, dest, lhs, rhs);
+    dest
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -221,6 +255,45 @@ mod tests {
         assert!(inst.is_null(), "the block holds exactly three instructions");
         out
     }
+    #[test]
+    fn emits_subtract_with_opaque_context_and_operands() {
+        let mut f = Fixture::new();
+        let block = f.block_ptr();
+        let dest = unsafe {
+            cg_emit_subtract(
+                usize::MAX as *mut u8,
+                block,
+                core::ptr::null_mut(),
+                1 as *mut CgVirtualReg,
+            )
+        };
+
+        unsafe {
+            let inst = f.block[CG_BLOCK_INSTS] as *mut u8;
+            assert!(!inst.is_null(), "the binary instruction was appended");
+            assert!(field(inst, CG_INST_NEXT) == 0, "the block holds one instruction");
+            assert_eq!(inst_kind(inst), CG_INST_KIND_BINARY as u8);
+            assert_eq!(inst_opcode(inst), CG_INST_OPCODE_SUB as u8);
+            assert_eq!(field(inst, CG_INST_BINARY_DEST), dest as usize);
+            assert_eq!(
+                field(inst, CG_INST_BINARY_SOURCE0),
+                0,
+                "a NULL lhs passes through unexamined"
+            );
+            assert_eq!(
+                field(inst, CG_INST_BINARY_SOURCE1),
+                1,
+                "the rhs is recorded without dereferencing it"
+            );
+            assert_eq!(field(dest as *mut u8, CG_VREG_NO), 0);
+            assert_eq!(
+                (dest as *mut u8).add(CG_VREG_TYPE * WORD).read(),
+                CG_REG_TYPE_GENERAL as u8
+            );
+        }
+        assert_eq!(f.proc[CG_PROC_NUM_REGISTERS], 1);
+    }
+
 
     #[test]
     fn emits_ldi_add_ldw_wired_through_fresh_registers() {

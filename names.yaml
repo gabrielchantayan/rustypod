@@ -41772,6 +41772,42 @@ functions:
       `str r7,[sp]` fifth argument to cg_create_inst_binary; the diff is
       LLVM's frame-pointer prologue and that single hoisted load.
 
+  - address: 0x0824035c
+    ghidra: FUN_0824035c
+    name: cg_emit_subtract
+    size: 60
+    sig: "cg_virtual_reg_t *cg_emit_subtract(void *ctx, cg_block_t *block, cg_virtual_reg_t *lhs, cg_virtual_reg_t *rhs)"
+    module: codegen/pipeline_emit
+    status: ported
+    renames:
+      param_1/r0: ctx (dead)
+      param_2/r1/r4: block
+      param_3/r2/r7: lhs
+      param_4/r3/r6: rhs
+      uVar1/r5: dest
+      FUN_082c23dc: cg_virtual_reg_create
+      FUN_082c17f4: cg_create_inst_binary
+    notes: >-
+      Raw ARM confirms 15 instruction words from 0x0824035c through
+      0x082403598. Ghidra's 64-byte extent is wrong: 0x0824039c starts
+      the next function with its own push. Decoding every B/BL word in
+      osos.dec found 20 callers, all unconditional BL (zero predicated,
+      zero tail B): 0x0823de74, 0x0823dee0, 0x0823df50, 0x0823df6c,
+      0x0823df88, 0x0823e04c, 0x0823e1d8, 0x0823e1ec, 0x0823e204,
+      0x0823f064, 0x0823f090, 0x0823f0bc, 0x0823f0e8, 0x0823f208,
+      0x0823f294, 0x0823f404, 0x0823f430, 0x0823f45c, 0x0823f488 and
+      0x0823f634. Algorithm: create a general virtual register through
+      cg_virtual_reg_create(block->proc, 0), then append a binary
+      instruction with opcode 13, destination dest, source0 lhs and
+      source1 rhs, returning dest. The JIT's opcode dispatch at
+      0x082c6430 maps IR opcode 13 to ARM data-processing opcode 2
+      (`sub`), so this is a subtraction emitter. Incoming r0 is dead:
+      `ldr r0,[r1,#4]` overwrites it before any read; the port retains
+      its ctx parameter for ABI parity but never dereferences it. Host
+      coverage proves a garbage ctx, NULL lhs and opaque rhs pass through
+      safely, stamps a general register numbered zero and appends exactly
+      one opcode-13 binary instruction with the returned destination.
+
   # --- Silver framework: the kind-tagged mid-hierarchy controller ---
   - address: 0x08260a50
     ghidra: FUN_08260a50
