@@ -5229,6 +5229,33 @@ functions:
       slot, not the 8-byte ldr pc veneer - expected, same family
       pattern as the other 31 wrappers.
 
+  - address: 0x08037e88
+    ghidra: thunk_EXT_FUN_22003d44
+    name: rom_task_delay
+    size: 8
+    sig: "usize rom_task_delay(usize task, usize ticks)"
+    module: kernel/task_lock
+    status: ported
+    renames:
+      thunk_EXT_FUN_22003d44: rom_task_delay
+      DAT_08037e8c: rom_task_delay_target
+    notes: >-
+      Raw words are e51ff004 (`ldr pc,[pc,#-4]`) at 0x08037e88 and target
+      0x22003d44 at 0x08037e8c; Ghidra's 4-byte extent omits the literal,
+      and 0x08037e90 begins the next veneer. This is an ADS literal
+      tail-dispatch veneer, not an empty destructor: it forwards task (r0),
+      ticks (r1), LR, and the target's r0 return word unchanged to/from the
+      RTXC timed task-delay gateway service 20. The relocator at 0x080046e0
+      mirrors the target to 0x08003d44, whose 44-byte body is separately
+      ported as kernel/task_delay.rs task_delay. Decoding every ARM B/BL
+      word in osos.dec finds 20 bl call sites (18 unconditional plus two
+      blne at 0x0836b988/0x0836bbbc) and one bne tail at 0x080568f4:
+      task_sleep's checked nonzero-tick path; no DATA word holds the thunk
+      address. The wrapper uses the established volatile ROM_KERNEL hook
+      seam rather than issuing the target-only ldr pc ROM transfer. Host
+      tests prove transparent forwarding for (0,1) and (usize::MAX,
+      usize::MAX), including the hook result.
+
   - address: 0x08037e10
     ghidra: thunk_EXT_FUN_220042b4
     name: rom_sem_signal
@@ -38945,8 +38972,9 @@ functions:
       scratch_pointer = sp+4} — and hands &request to the foreign gateway
       dispatcher 0x08003660, returning void (nothing read back). osos
       mirror of mask ROM 0x22003d44, aliased by thunk 0x08037e88
-      (kernel/task_lock.rs rom_svc_22003d44: 15 osos callers, always
-      r0 = 0 = current task, r1 = small tick count 1/0x64) and standing
+      (kernel/task_lock.rs rom_task_delay: 20 osos bl callers — 18 plain
+      and two blne — plus task_sleep's bne tail; observed r0 = 0 = current
+      task and r1 = small tick count 1/0x64) and standing
       behind kernel/task.rs task_sleep's nonzero-ticks path. The mirror's
       only direct bl caller is the ROM tick-housekeeping path @ 0x08002dc4
       (delays the current task 100 ticks). Reference C:

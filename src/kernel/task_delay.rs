@@ -1,8 +1,9 @@
 //! Port of the RTXC task-delay gateway stub @ 0x08003d44 (44 bytes) — the
-//! osos link-order mirror of mask ROM 0x22003d44 (aliased by thunk
-//! 0x08037e88, whose 15 osos callers pass r0 = 0 — the current task — and
-//! r1 = a small tick count like 1 or 0x64; see kernel/task_lock.rs). This is
-//! gateway service 0x14 (20), the timed task delay behind
+//! osos link-order mirror of mask ROM 0x22003d44 (aliased by
+//! `rom_task_delay`, thunk @ 0x08037e88). Raw ARM decoding finds 20 `bl`
+//! callers (18 plain, 2 `blne`) plus `task_sleep`'s `bne` tail branch; the
+//! gateway body receives r0 = 0 — the current task — and small r1 counts.
+//! It is gateway service 0x14 (20), the timed task delay behind
 //! kernel/task.rs `task_sleep`'s nonzero-ticks path and behind the
 //! `task_delay(0, 1)` polls in the i2c0 wait routines
 //! (runtime/i2c0_idle.rs, runtime/i2c0_transfer.rs — currently reached
