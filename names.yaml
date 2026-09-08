@@ -46649,3 +46649,33 @@ functions:
       data on the stale 0x0898xxxx page, so no callee identity is claimed.
       Host tests use structural 64-bit vtables; target-width offset assertions
       preserve the firmware's +0x80 and +0x11c fields.
+
+  # --- Application boot metrics channel singleton ---
+  - address: 0x08264740
+    ghidra: FUN_08264740
+    name: app_boot_metrics_channel_get
+    size: 48
+    sig: "u8 *app_boot_metrics_channel_get(void)"
+    module: app/singletons
+    status: ported
+    renames:
+      DAT_0826476c: app_boot_metrics_channel_cache
+      FUN_082aadd4: operator_new
+      FUN_08266990: app_boot_metrics_channel_construct
+    notes: >-
+      True extent is 48 bytes: 44 bytes of instructions
+      (0x08264740..0x08264768) followed by the 0x089cc918 literal-pool
+      word at 0x0826476c; the next function starts at 0x08264770. Raw ARM:
+      push {r4,lr}; load cache; if non-NULL skip; otherwise
+      operator_new(0xac), call FUN_08266990 with that raw result, cache the
+      constructor return; reload and return the cache. Decoding every ARM
+      B/BL word in osos.dec finds exactly 20 unconditional bl call sites,
+      no predicated bl form, and no plain-b tail sites. The object's
+      "Channel AppBoot" dump label and caller startup-duration records
+      submitted through FUN_082664b4 establish the application-boot metrics
+      channel role; the fuller class identity is not recovered. The
+      constructor remains unported and is deliberately behind the existing
+      singleton constructor-table seam; host builds use its documented
+      zeroing default and a crate static in place of runtime cache
+      0x089cc918, so this getter is not hook-ready until FUN_08266990 is
+      ported.
