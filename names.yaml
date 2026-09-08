@@ -18987,6 +18987,36 @@ functions:
       opflags +2 (NEVER written), p5 +3 (u8), p1 +4, p2 +8, p3 +12
       (`stmib`), p4 +16 (zeroed). Also clears p->expired at +0xff.
 
+  - address: 0x0839cf4c
+    ghidra: FUN_0839cf4c
+    name: refcounted_body_release_owned_variant
+    size: 144
+    sig: "void refcounted_body_release_owned_variant(RefcountedBody **slot)"
+    module: cxx/handle
+    status: ported
+    vars: {param_1: slot}
+    notes: >-
+      19 direct bl call sites, all unconditional (verified by decoding every
+      ARM B/BL word in osos.dec): no predicated forms, no tail b sites, and
+      no data-word references - never virtually dispatched. Ghidra's 136-byte
+      extent is short: raw ARM runs from 0x0839cf4c through 0x0839cfd8
+      (144 bytes); the separately linked mutex-lock helper begins at
+      0x0839cfdc and the mutex-unlock helper at 0x0839cfec. Owning template
+      sibling of refcounted_body_release_owned @ 0x0839d2c0 over the same
+      RefcountedBody layout (+0 implementation, +4 i32 refcount, +8 Mutex*).
+      NULL body returns untouched. Otherwise it locks the optional mutex,
+      subtracts one with plain wrapping subs, unlocks and NULLs the slot on a
+      non-final result, and on exactly zero disposes the NULL-guarded
+      implementation then tag-2 deletes its returned pointer, unlocks,
+      mutex-deletes plus tag-2 deletes the mutex, clears body+8, tag-2 deletes
+      the body, and NULLs the slot. The direct implementation disposer
+      0x0816f5c0 is unported: raw ARM confirms its separate 124-byte body
+      returns its input after teardown, but no class identity is invented.
+      Target builds transmute-call that address; host tests use an identity
+      seam solely to record the direct call. Codegen deviation: LLVM inlines
+      the ported mutex and heap helpers, retaining the same
+      guard/decrement/dispose/unlock/teardown order.
+
   - address: 0x0839cbc0
     ghidra: FUN_0839cbc0
     name: refcounted_body_release_dtor
