@@ -27565,6 +27565,42 @@ functions:
       mov/orr pair instead of a literal-pool load (the 0x55693332 kind
       stays a pooled literal on both sides).
 
+  - address: 0x0825c790
+    ghidra: FUN_0825c790
+    name: plist_node_destroy
+    size: 144
+    sig: "PlistNode *plist_node_destroy(PlistNode *node)"
+    module: fp/fp_misc
+    status: ported
+    vars:
+      param_1: node
+      iVar2: companion
+      local_18: attributes
+      local_24: children
+    renames:
+      FUN_083e3284: plist_node_child_range_destroy
+      FUN_083e35a4: cxx_record_range_destroy_8
+      FUN_083d8b04: cxx_string_release
+      FUN_08266f2c: cxx_array_dealloc
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw ARM extent is 144 bytes: 36 instructions at 0x0825c790..0x0825c820,
+      ending immediately before the distinct sibling FUN_0825c824, with no
+      literal pool; Ghidra's 148-byte size is four bytes too large. A full
+      osos.dec ARM B/BL-word decode finds 19 incoming bl sites, all
+      unconditional (including recursive bl at 0x0825c7a4), plus one
+      unconditional tail b at 0x081c8334 and no predicated calls. The
+      non-deleting plist/XML-node destructor first recursively destroys and
+      operator_delete's the owned +0x20 processing-instruction companion,
+      tears down the +0x14 child vector as 40-byte nodes through unported
+      FUN_083e3284 then cxx_array_dealloc's its storage, releases the +0x10
+      COW value string, tears down/frees the +0x04 8-byte attribute-pair
+      vector, releases the +0x00 tag string, and returns node. The sole
+      unported direct callee is explicit PLIST_NODE_DESTROY_OPS: target calls
+      the verified address 0x083e3284; host tests replace it with a recorder.
+      The cxx_array_dealloc count arguments are faithfully computed from the
+      capacity-minus-begin spans but dead at its already-ported tail veneer.
+
   - address: 0x082a1bc4
     ghidra: FUN_082a1bc4
     name: plist_node_child_count
