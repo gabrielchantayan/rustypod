@@ -2,6 +2,7 @@
 //! context and the small helpers its view classes lean on.
 pub mod app_motor;
 pub mod animation;
+pub mod artwork_slot_available;
 pub mod class_6800;
 pub mod class_8c00;
 pub mod buffer_refill_request;

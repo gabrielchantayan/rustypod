@@ -238,6 +238,7 @@ pub unsafe extern "C" fn mutex_lock(mutex: *mut Mutex) {
 /// mutex_unlock — original: `FUN_0807f6a0` @ 0x0807f6a0 (8 bytes), with
 /// the guard thunk @ 0x8056710 inlined. The mutexes are non-recursive
 /// counting semaphores: unlocking an unlocked mutex just signals.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn mutex_unlock(mutex: *mut Mutex) {
     let cell = (*mutex).sem_cell;

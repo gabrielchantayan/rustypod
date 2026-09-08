@@ -47647,3 +47647,37 @@ functions:
       base + selector * 12 - 0x60144; every other u32 returns zero. The ARM
       subtract-and-cmp range test and additions use 32-bit wrapping, retained
       explicitly in Rust. No deliberate deviation.
+
+  # --- Four-slot artwork cache availability query ---
+  - address: 0x081b6d88
+    ghidra: FUN_081b6d88
+    name: artwork_slot_available
+    size: 80
+    sig: "void *artwork_slot_available(void *cache, u32 slot_index)"
+    module: app/artwork_slot_available
+    status: ported
+    renames:
+      param_1/r0: cache
+      param_2/r1: slot_index
+      r4: embedded_mutex
+      r5: cache
+      r6: slot_index
+      uVar1/r0: artwork
+    notes: >-
+      Raw extent is exactly 80 bytes, 0x081b6d88..0x081b6dd8: the following
+      `push {r4,r5,r6,lr}` at 0x081b6dd8 begins the separately linked
+      selection/update function, with no literal pool. Decoding every ARM
+      B/BL word in osos.dec finds exactly 19 direct inbound call sites, all
+      unconditional BL (no predicated BL forms): 0x0822e19c, 0x0822e364,
+      0x0822e434, 0x0822e504, 0x0822e5d4, 0x0822e69c, 0x0822e878,
+      0x0822e9e0, 0x0822eca8, 0x0822ed78, 0x0822ee98, 0x0822f544,
+      0x0822f618, 0x0822f7b4, 0x0822fce0, 0x0822fdb4, 0x0822fecc,
+      0x08230238, and 0x08230990. Locks the embedded mutex at cache+0x18,
+      then for indexes 0..3 returns the pointer word at cache+index*24+0x24
+      only when the byte at cache+index*24+0x38 is zero; otherwise it returns
+      NULL and always unlocks. Callers use a non-NULL result to select
+      MediaContent resources over NoArt resources, so these are artwork slots.
+      The class-0x7f80 cache has no recovered concrete class name. Deliberate
+      host deviation: slot pointers remain u32 words and subsequent fields use
+      raw offsets because the host's embedded Mutex is wider than its 8-byte
+      ARM layout.
