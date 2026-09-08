@@ -48393,3 +48393,33 @@ functions:
       unaligned input, and absence of mutation. Reference C:
       decomp/c/021/081fa044_FUN_081fa044.c; raw assembly:
       osos.dec 0x081fa044.
+
+  # --- Global application resource-provider getter ---
+  - address: 0x0819fe10
+    ghidra: FUN_0819fe10
+    name: application_resource_provider
+    size: 20
+    sig: "void *application_resource_provider(void)"
+    module: app/application_resource_provider
+    status: ported
+    renames:
+      DAT_0819fe20: application_resource_provider_global (0x089d0188)
+      r0: application_resource_provider
+    notes: >-
+      Raw ARM establishes a 20-byte extent: `ldr r0,[pc,#8] ;
+      ldr r0,[r0] ; cmp r0,#0 ; bx lr` at 0x0819fe10..0x0819fe20 plus
+      its 0x089d0188 literal pool word at 0x0819fe20; the separately linked
+      next function opens with `push {r2,r3,r4,r5,r6,lr}` at 0x0819fe24.
+      The cmp only updates flags, so this leaf volatile-loads and returns the
+      global application resource-provider pointer verbatim, including NULL
+      before initialization. Its resource-list lookup callers and the sibling
+      that walks returned+0x20 establish the provider role. Decoding every
+      ARM B/BL word in osos.dec finds exactly 18 inbound calls, all
+      unconditional BL at 0x081472bc, 0x08182824, 0x08184b2c, 0x08184f24,
+      0x081852fc, 0x0818564c, 0x08185674, 0x0819f340, 0x0819f430,
+      0x0819fdb4, 0x081b9b48, 0x081d0c04, 0x081d2300, 0x081e05a8,
+      0x081e0704, 0x081e96c8, 0x081e9ae8, and 0x0829a3f8. There are no
+      predicated BL forms or direct B tail callers. Firmware builds
+      volatile-load the fixed runtime-RAM word at 0x089d0188; host builds use
+      a zero-initialized private backing word because that image location holds
+      stale runtime data.
