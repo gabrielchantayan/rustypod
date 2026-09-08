@@ -47585,3 +47585,29 @@ functions:
       registered handler word 0x0821d440 enters after the actual prologue at
       0x0821d43c and cannot safely execute standalone, so its typed Rust
       shutdown handler is a no-op rather than inventing a callee identity.
+
+  # --- Fixed selector table-record address mapper ---
+  - address: 0x08218aec
+    ghidra: FUN_08218aec
+    name: selector_record_address
+    size: 36
+    sig: "u32 selector_record_address(u32 base, u32 selector)"
+    module: util/selector_record_address
+    status: ported
+    renames:
+      param_1/r0: base
+      param_2/r1: selector
+      r2: range_index
+    notes: >-
+      Raw extent is exactly 36 bytes, 0x08218aec..0x08218b10: the following
+      `push {r4,lr}` begins the separately linked function at 0x08218b10.
+      Decoding every ARM B/BL word in osos.dec finds exactly 19 direct inbound
+      call sites, all unconditional BL: 0x08218430, 0x08218768, 0x082189e8,
+      0x082347ec, 0x08234c08, 0x08234c60, 0x08237c80, 0x08237cd8,
+      0x0825d8b0, 0x0825dc44, 0x0825dc9c, 0x08260cd4, 0x08260d2c,
+      0x082611c8, 0x08261220, 0x0826a810, 0x0826a868, 0x0826ad2c, and
+      0x0826ad84. There are no predicated BL forms or direct tail B callers.
+      For selectors 0x801c through 0x8029 inclusive, the leaf returns
+      base + selector * 12 - 0x60144; every other u32 returns zero. The ARM
+      subtract-and-cmp range test and additions use 32-bit wrapping, retained
+      explicitly in Rust. No deliberate deviation.
