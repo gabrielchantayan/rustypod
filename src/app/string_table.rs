@@ -224,6 +224,257 @@ pub unsafe extern "C" fn string_table_has_string(table: *mut u8, key: *const u32
         as u32
 }
 
+/// The unported string-table assignment helper used by
+/// [`string_table_set_decimal`](crate::app::string_table::string_table_set_decimal).
+/// `FUN_08101da0` selects the current 0x1c-byte table from `table + 0x54`,
+/// obtains the mapped COW-string slot for `key`, then assigns `value` into it.
+#[derive(Clone, Copy)]
+pub struct StringTableAssignOps {
+    /// `FUN_08101da0` @ 0x08101da0 — assigns the COW string object at
+    /// `value` to the current table's mapped-value slot for `key`.
+    pub assign: unsafe extern "C" fn(
+        table: *mut u8,
+        key: *mut *mut u8,
+        value: *mut *mut u8,
+    ),
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_string_table_assign(
+    table: *mut u8,
+    key: *mut *mut u8,
+    value: *mut *mut u8,
+) {
+    let assign: unsafe extern "C" fn(*mut u8, *mut *mut u8, *mut *mut u8) =
+        unsafe { core::mem::transmute(0x0810_1da0usize) };
+    unsafe { assign(table, key, value) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_string_table_assign(
+    _table: *mut u8,
+    _key: *mut *mut u8,
+    _value: *mut *mut u8,
+) {
+    panic!("string_table_set_decimal requires string-table assignment 0x08101da0")
+}
+
+/// Active model of `FUN_08101da0`. The target default reaches the retail
+/// helper; host tests install a recorder until that helper is ported.
+#[cfg(target_os = "none")]
+pub static mut STRING_TABLE_ASSIGN_OPS: StringTableAssignOps = StringTableAssignOps {
+    assign: firmware_string_table_assign,
+};
+
+/// Active model of `FUN_08101da0`. The host default reports an accidental
+/// unmocked traversal into the still-unported helper.
+#[cfg(not(target_os = "none"))]
+pub static mut STRING_TABLE_ASSIGN_OPS: StringTableAssignOps = StringTableAssignOps {
+    assign: missing_string_table_assign,
+};
+
+#[inline(always)]
+unsafe fn string_table_assign_ops() -> StringTableAssignOps {
+    core::ptr::read_volatile(core::ptr::addr_of!(STRING_TABLE_ASSIGN_OPS))
+}
+
+/// `string_table_set_decimal` — original: `FUN_08101d4c` @ 0x08101d4c
+/// (80 bytes, 0x08101d4c..0x08101d9c; the next function opens at
+/// 0x08101da0; **19 unconditional `bl` call sites**, decoded from every
+/// ARM B/BL word in osos.dec).
+///
+/// Dereferences `decimal`, renders the signed 32-bit value through `"%d"`
+/// into the original's 512-byte stack buffer, constructs a temporary COW
+/// string, assigns it to `key` in the string table, and releases the
+/// temporary. There is no NULL guard on any argument.
+///
+/// The formatter port takes an explicit va-list pointer rather than C
+/// varargs, so `&number` replaces the original r2 value at the `sprintf`
+/// boundary. `FUN_08101da0` is not ported and remains a volatile dispatch
+/// seam; its target default is the verified retail load address.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn string_table_set_decimal(
+    table: *mut u8,
+    key: *mut *mut u8,
+    decimal: *const i32,
+) {
+    let number = unsafe { decimal.read() };
+    let mut buffer = core::mem::MaybeUninit::<[u8; 512]>::uninit();
+    let buffer = buffer.as_mut_ptr().cast::<u8>();
+    let arguments = &number as *const i32 as *const u32;
+    unsafe {
+        crate::printf::printf_api::sprintf(buffer, b"%d\0".as_ptr(), arguments);
+    }
+
+    let mut value = core::mem::MaybeUninit::<*mut u8>::uninit();
+    let value = unsafe {
+        crate::cxx::string::cxx_string_from_cstr(value.as_mut_ptr(), buffer)
+    };
+    unsafe {
+        (string_table_assign_ops().assign)(table, key, value);
+        crate::cxx::string::cxx_string_release(value);
+    }
+}
+
+#[cfg(test)]
+mod set_decimal_tests {
+    extern crate std;
+
+    use super::*;
+    use crate::printf::printf_api::{PrintfEngineFn, PRINTF_ENGINE};
+    use crate::heap::types::{HeapDescriptor, HeapDescriptorDescriptor};
+    use crate::heap::veneers::{HeapVeneerOps, HEAP_OPS};
+    use core::ffi::c_void;
+    use core::ptr;
+    use std::ffi::CStr;
+    use std::sync::{Mutex, MutexGuard};
+    use std::vec::Vec;
+
+    static OPS_LOCK: Mutex<()> = Mutex::new(());
+    static mut ASSIGNMENT: Option<(usize, Vec<u8>, Vec<u8>)> = None;
+
+    const ARENA_SIZE: usize = 1024;
+
+    #[repr(C, align(8))]
+    struct Arena([u8; ARENA_SIZE]);
+
+    static mut ARENA: Arena = Arena([0; ARENA_SIZE]);
+    static mut ARENA_USED: usize = 0;
+
+    struct OpsGuard {
+        assign: StringTableAssignOps,
+        engine: PrintfEngineFn,
+    }
+
+    impl Drop for OpsGuard {
+        fn drop(&mut self) {
+            unsafe {
+                ptr::write_volatile(ptr::addr_of_mut!(STRING_TABLE_ASSIGN_OPS), self.assign);
+                ptr::write_volatile(ptr::addr_of_mut!(PRINTF_ENGINE), self.engine);
+            }
+        }
+    }
+
+    struct ArenaGuard {
+        ops: HeapVeneerOps,
+    }
+
+    impl Drop for ArenaGuard {
+        fn drop(&mut self) {
+            unsafe {
+                ptr::write_volatile(ptr::addr_of_mut!(HEAP_OPS), self.ops);
+            }
+        }
+    }
+
+    unsafe extern "C" fn decimal_engine(
+        fmt: *const u8,
+        putc: unsafe extern "C" fn(u8, *mut c_void),
+        context: *mut c_void,
+        arguments: *const u32,
+    ) -> i32 {
+        assert_eq!(unsafe { CStr::from_ptr(fmt.cast()).to_bytes() }, b"%d");
+        let text = std::format!("{}", unsafe { arguments.cast::<i32>().read() });
+        for byte in text.bytes() {
+            unsafe { putc(byte, context) };
+        }
+        text.len() as i32
+    }
+
+    unsafe extern "C" fn record_assign(
+        table: *mut u8,
+        key: *mut *mut u8,
+        value: *mut *mut u8,
+    ) {
+        let key = unsafe { CStr::from_ptr((*key).cast()).to_bytes().to_vec() };
+        let value = unsafe { CStr::from_ptr((*value).cast()).to_bytes().to_vec() };
+        unsafe { ASSIGNMENT = Some((table as usize, key, value)) };
+    }
+
+    unsafe extern "C" fn arena_alloc(
+        _heap: *mut HeapDescriptorDescriptor,
+        size: usize,
+        _tag: usize,
+    ) -> *mut u8 {
+        let used = unsafe { ARENA_USED };
+        let aligned = (size + 7) & !7;
+        if used + aligned > ARENA_SIZE {
+            return ptr::null_mut();
+        }
+        unsafe {
+            ARENA_USED = used + aligned;
+            ptr::addr_of_mut!(ARENA.0).cast::<u8>().add(used)
+        }
+    }
+
+    unsafe extern "C" fn arena_free(
+        _heap: *mut HeapDescriptorDescriptor,
+        _ptr: *mut u8,
+        _tag: usize,
+    ) {
+    }
+
+    unsafe extern "C" fn arena_create(
+        descriptor: *mut HeapDescriptor,
+        _start: *mut u8,
+        _size: usize,
+    ) -> *mut HeapDescriptorDescriptor {
+        descriptor.cast()
+    }
+
+
+    fn install() -> (MutexGuard<'static, ()>, OpsGuard) {
+        let lock = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            let guard = OpsGuard {
+                assign: ptr::read_volatile(ptr::addr_of!(STRING_TABLE_ASSIGN_OPS)),
+                engine: ptr::read_volatile(ptr::addr_of!(PRINTF_ENGINE)),
+            };
+            ptr::write_volatile(
+                ptr::addr_of_mut!(STRING_TABLE_ASSIGN_OPS),
+                StringTableAssignOps { assign: record_assign },
+            );
+            ptr::write_volatile(ptr::addr_of_mut!(PRINTF_ENGINE), decimal_engine);
+            ASSIGNMENT = None;
+            (lock, guard)
+        }
+    }
+
+    #[test]
+    fn formats_signed_decimal_and_preserves_key_for_assignment() {
+        let (_lock, _restore) = install();
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _arena = unsafe {
+            ARENA_USED = 0;
+            let previous = ptr::read_volatile(ptr::addr_of!(HEAP_OPS));
+            let mut active = previous;
+            active.alloc = arena_alloc;
+            active.free = arena_free;
+            active.create = arena_create;
+            ptr::write_volatile(ptr::addr_of_mut!(HEAP_OPS), active);
+            ArenaGuard { ops: previous }
+        };
+        let mut key_data = *b"NowPlayingStartTime\0";
+        let mut key = key_data.as_mut_ptr();
+
+        for number in [0, 42, -17, i32::MIN] {
+            unsafe {
+                string_table_set_decimal(0x1234usize as *mut u8, &mut key, &number);
+                assert_eq!(
+                    ASSIGNMENT,
+                    Some((
+                        0x1234,
+                        b"NowPlayingStartTime".to_vec(),
+                        std::format!("{number}").into_bytes(),
+                    )),
+                );
+            }
+        }
+
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;

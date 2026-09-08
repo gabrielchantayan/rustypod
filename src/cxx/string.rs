@@ -419,6 +419,7 @@ pub unsafe extern "C" fn cxx_string_pair_range_destroy(
 /// one-word string object. An empty source skips the allocation and
 /// points at the shared empty rep. Returns `string`.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn cxx_string_from_cstr(
     string: *mut *mut u8,
     source: *const u8,
