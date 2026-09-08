@@ -1,4 +1,4 @@
-//! The nineteen lazily-constructed framework singletons. Every one is the
+//! The twenty lazily-constructed framework singletons. Every one is the
 //! same four-step idiom over its own cache word, its own allocation
 //! size and its own constructor:
 //!
@@ -28,6 +28,8 @@
 //! | 0x081303a8 | [`singleton_class_9300`] | 0x14c | 0x089cc2bc | 0x08130424 | 28 |
 //! | 0x08259534 | [`lazy_singleton_0xbc`] | 0xbc | 0x089cc960 | 0x08258a70 | 22 |
 //! | 0x081b5440 | [`singleton_class_9400`] | 0x22c | 0x089cc170 | 0x081b6628 | 22 |
+//! | 0x08264740 | [`app_boot_metrics_channel_get`] | 0xac | 0x089cc918 | 0x08266990 | 20 |
+
 //!
 //! (Call-site counts binary-scanned; the earlier scouting notes said 86
 //! / 38 / 37 / 36 for the bottom four.)
@@ -49,7 +51,7 @@
 //!
 //! `operator new` @ 0x082aadd4 is already ported
 //! (`heap::veneers::operator_new`), so it is called directly. None of
-//! the nineteen constructors is — they are large C++ constructors — so
+//! the twenty constructors is — they are large C++ constructors — so
 //! they sit behind the [`SINGLETON_CTORS`] dispatch table, the house
 //! pattern.
 //!
@@ -312,6 +314,9 @@ pub const SINGLETON_0XBC_SIZE: usize = 0xbc;
 /// (`mov r0, #0x22c`).
 pub const CLASS_9400_SIZE: usize = 0x22c;
 
+/// Allocation size of the application-boot metrics channel (`mov r0, #0xac`).
+pub const APP_BOOT_METRICS_CHANNEL_SIZE: usize = 0xac;
+
 /// An ADS C++ constructor: takes the raw block, returns `this`.
 pub type Constructor = unsafe extern "C" fn(this: *mut u8) -> *mut u8;
 
@@ -357,6 +362,8 @@ pub struct SingletonCtors {
     pub singleton_0xbc: Constructor,
     /// Registry-class-0x9400 ctor @ 0x081b6628.
     pub class_9400: Constructor,
+    /// App-boot metrics channel ctor @ 0x08266990.
+    pub app_boot_metrics_channel: Constructor,
 }
 
 /// Defines one default constructor stub: zeroes the block and returns
@@ -390,6 +397,7 @@ zeroing_ctor!(zeroing_stage_progress_tracker_ctor, STAGE_PROGRESS_TRACKER_SIZE);
 zeroing_ctor!(zeroing_class_9300_ctor, CLASS_9300_SIZE);
 zeroing_ctor!(zeroing_singleton_0xbc_ctor, SINGLETON_0XBC_SIZE);
 zeroing_ctor!(zeroing_class_9400_ctor, CLASS_9400_SIZE);
+zeroing_ctor!(zeroing_app_boot_metrics_channel_ctor, APP_BOOT_METRICS_CHANNEL_SIZE);
 
 /// Zeroes `size` bytes and returns the block. Volatile stores: a plain
 /// loop is rewritten by LLVM into a call to `__aeabi_memclr`, a symbol
@@ -424,6 +432,7 @@ pub(crate) const DEFAULT_SINGLETON_CTORS: SingletonCtors = SingletonCtors {
     class_9300: zeroing_class_9300_ctor,
     singleton_0xbc: zeroing_singleton_0xbc_ctor,
     class_9400: zeroing_class_9400_ctor,
+    app_boot_metrics_channel: zeroing_app_boot_metrics_channel_ctor,
 };
 
 /// The active constructors. Host tests install recording mocks; the
@@ -522,6 +531,9 @@ pub static mut SINGLETON_0XBC: *mut u8 = core::ptr::null_mut();
 /// — the pool literal @ 0x081b546c).
 pub static mut CLASS_9400_INSTANCE: *mut u8 = core::ptr::null_mut();
 
+/// The application-boot metrics channel (original cache word @ 0x089cc918).
+pub static mut APP_BOOT_METRICS_CHANNEL: *mut u8 = core::ptr::null_mut();
+
 /// The body all getters share: test the cache, allocate, construct,
 /// store, and re-load the cache (the original's second `ldr r0, [r4, #N]`,
 /// which is observable when another context changes the cache during the
@@ -541,6 +553,35 @@ unsafe fn lazy_singleton(
         core::ptr::write_volatile(cache, object);
     }
     core::ptr::read_volatile(cache)
+}
+
+/// app_boot_metrics_channel_get — original: `FUN_08264740` @ **0x08264740**
+/// (44 code bytes plus its pool word @ 0x0826476c = **48 bytes** true
+/// extent; **20 `bl` call sites, all unconditional — 0 predicated, 0 plain
+/// `b`**, verified by decoding every ARM B/BL word in `osos.dec`).
+///
+/// The app-boot metrics channel's lazy getter: load the cache word @
+/// 0x089cc918; on NULL, allocate exactly 0xac bytes through `operator_new`,
+/// construct it with `FUN_08266990`, store that return, reload the cache, and
+/// return it. Raw bytes put the next function at 0x08264770, after the
+/// literal-pool word Ghidra omits.
+///
+/// The `"Channel AppBoot"` string selected by the object's dump method and
+/// the startup-duration records that its callers submit through
+/// `FUN_082664b4` identify this as the application-boot metrics channel; no
+/// fuller class name survives. Deviation: its unported constructor rides the
+/// `app_boot_metrics_channel` [`SINGLETON_CTORS`] slot with the family's
+/// zeroing default, and the cache is this crate static rather than the
+/// runtime-initialized word @ 0x089cc918. It is not hook-ready until
+/// `FUN_08266990` is ported.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn app_boot_metrics_channel_get() -> *mut u8 {
+    lazy_singleton(
+        core::ptr::addr_of_mut!(APP_BOOT_METRICS_CHANNEL),
+        APP_BOOT_METRICS_CHANNEL_SIZE,
+        || ctor!(app_boot_metrics_channel),
+    )
 }
 
 /// app_controller_get — original: `FUN_0817ee04` @ 0x0817ee04
@@ -1370,6 +1411,7 @@ mod tests {
                 class_9300: recording_ctor,
                 singleton_0xbc: recording_ctor,
                 class_9400: recording_ctor,
+                app_boot_metrics_channel: recording_ctor,
             };
             CTOR_RESULT = ctor_result;
             (*ptr::addr_of_mut!(ALLOC_SIZES)).clear();
@@ -1412,6 +1454,7 @@ mod tests {
         CLASS_9300_INSTANCE = ptr::null_mut();
         SINGLETON_0XBC = ptr::null_mut();
         CLASS_9400_INSTANCE = ptr::null_mut();
+        APP_BOOT_METRICS_CHANNEL = ptr::null_mut();
     }
 
     fn arena() -> *mut u8 {
@@ -1421,6 +1464,50 @@ mod tests {
     /// A distinct address the recording ctors can return.
     fn constructed() -> *mut u8 {
         unsafe { arena().add(16) }
+    }
+
+    #[test]
+    fn the_app_boot_metrics_channel_allocates_constructs_and_caches() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(app_boot_metrics_channel_get(), constructed());
+            assert_eq!(app_boot_metrics_channel_get(), constructed());
+            assert_eq!(
+                *ptr::addr_of!(ALLOC_SIZES),
+                std::vec![APP_BOOT_METRICS_CHANNEL_SIZE],
+                "the raw `mov r0, #0xac` allocation occurs only on the cache miss"
+            );
+            assert_eq!(
+                *ptr::addr_of!(CTOR_BLOCKS),
+                std::vec![arena()],
+                "the constructor receives the raw operator-new result"
+            );
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(APP_BOOT_METRICS_CHANNEL)),
+                constructed(),
+                "the constructor return, rather than the raw allocation, is cached"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn a_null_app_boot_metrics_constructor_retries_on_each_call() {
+        let guard = mock(ptr::null_mut());
+        unsafe {
+            assert!(app_boot_metrics_channel_get().is_null());
+            assert!(app_boot_metrics_channel_get().is_null());
+            assert!(
+                ptr::read_volatile(ptr::addr_of!(APP_BOOT_METRICS_CHANNEL)).is_null(),
+                "the original caches the NULL constructor result"
+            );
+            assert_eq!(
+                (*ptr::addr_of!(ALLOC_SIZES)).len(),
+                2,
+                "a NULL cache remains a miss, so every call retries allocation and construction"
+            );
+        }
+        restore(guard);
     }
 
     #[test]
