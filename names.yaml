@@ -18076,6 +18076,30 @@ functions:
       word so host pointer fixtures remain representable; the allocation
       request remains the target's 8-byte cell size.
 
+
+  # --- shared-cell handle copy assignment ---
+  - address: 0x083b50e4
+    ghidra: FUN_083b50e4
+    name: shared_cell_assign
+    size: 60
+    sig: "SharedCell **shared_cell_assign(SharedCell **dst, SharedCell **src)"
+    module: cxx/shared_cell
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: src
+      iVar1: cell
+    notes: >-
+      Raw ARM extent is 60 bytes ending immediately before sibling
+      0x083b5120. The identity path returns dst without a release or retain.
+      Distinct slots first BL the already-ported shared_cell_release at
+      0x083b524c, then load src, store it in dst, and increment the
+      non-NULL cell's signed refcount with wrapping ADD. The source read is
+      deliberately after the destination release. A full binary scan found
+      exactly 19 incoming BL calls; every one is unconditional, with no
+      predicated BL forms or direct tail branches. Host SharedCell uses usize
+      for the payload word so host pointer fixtures remain representable;
+      source slots and refcounts preserve target-word semantics.
   # --- shared-cell handle slot comparison ---
   - address: 0x083b5120
     ghidra: FUN_083b5120
