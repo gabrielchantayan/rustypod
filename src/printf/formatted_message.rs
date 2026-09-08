@@ -4,6 +4,9 @@
 //!
 //! - `formatted_message_emit` — original: `FUN_08123600` @ 0x08123600
 //!   (80 bytes; 83 `bl` call sites, binary-scanned).
+//! - `formatted_message_emit_string` — original: `FUN_08123834` @
+//!   0x08123834 (132 bytes; 19 `bl` call sites, binary-scanned: 17 plain
+//!   `bl`, 2 `blne`).
 //! - `formatted_message_open_dict` — original: `FUN_081236f8` @
 //!   0x081236f8 (68 bytes; 28 `bl` call sites, binary-scanned, all plain
 //!   `bl`).
@@ -126,6 +129,12 @@ const PLIST_BOOLEAN_FORMAT: &[u8] = b"%s<key>%s</key>\n%s<%s/>\n\0";
 /// original with `add r2, pc, #24`, right after the 52-byte body).
 /// Consumes one argument word: indent.
 const PLIST_DICT_CLOSE_FORMAT: &[u8] = b"%s</dict>\n\0";
+
+/// The string-property sibling's format literal @ 0x081238b8 (right after
+/// its 132-byte body). A non-null key uses all four argument words; a null
+/// key advances this literal by 16 bytes, omitting the complete `<key>` line
+/// and consuming only `(indent, escaped_value)`.
+const PLIST_STRING_FORMAT: &[u8] = b"%s<key>%s</key>\n%s<string>%s</string>\n\0";
 
 /// Capacity of the inline format buffer at +0x15 (original: `mov r1,
 /// #0x200`).
@@ -261,6 +270,45 @@ pub(crate) fn stream_append_op() -> StreamAppendFn {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(STREAM_APPEND)) }
 }
 
+/// `FUN_0809fbc8` turns a source string into a bounded string suitable for
+/// the plist writer. The original selects three replacement strings through
+/// the runtime table at 0x089cb224; that address contains unrelated resource
+/// text in osos.dec, so the table's trigger/replacement pairs cannot be
+/// recovered statically. This boundary keeps that direct `bl` swappable.
+pub type StringEscapeFn =
+    unsafe extern "C" fn(source: *const u8, destination: *mut u8, capacity: usize) -> *mut u8;
+
+/// Temporary default until `FUN_0809fbc8` is ported: a bounded C-string copy.
+/// It deliberately does not invent entity substitutions from the unavailable
+/// runtime table. The target always passes a nonzero 0x200-byte destination.
+unsafe extern "C" fn copy_string_bounded(
+    source: *const u8,
+    destination: *mut u8,
+    capacity: usize,
+) -> *mut u8 {
+    let mut src = source;
+    let mut dst = destination;
+    let end = destination.add(capacity - 1);
+    while dst < end && *src != 0 {
+        dst.write(*src);
+        dst = dst.add(1);
+        src = src.add(1);
+    }
+    dst.write(0);
+    destination
+}
+
+/// Active `FUN_0809fbc8` operation. The shipping default preserves strings
+/// verbatim because the dynamic entity table is unavailable in the image.
+pub static mut STRING_ESCAPE: StringEscapeFn = copy_string_bounded;
+
+/// Reads the string-transform slot without allowing LLVM to const-fold its
+/// default away.
+#[inline(always)]
+pub(crate) fn string_escape_op() -> StringEscapeFn {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(STRING_ESCAPE)) }
+}
+
 /// A static table of C-string pointers; the strings are immutable
 /// literals, so sharing the table across (test) threads is sound.
 struct BooleanTags([*const u8; 2]);
@@ -319,6 +367,69 @@ pub unsafe extern "C" fn formatted_message_emit(
         PLIST_INTEGER_FORMAT.as_ptr(),
         args.as_ptr(),
     );
+    let text = stream.buf.as_ptr();
+    (stream_append_op())(stream, text);
+}
+
+/// formatted_message_emit_string — original: `FUN_08123834` @ 0x08123834
+/// (132 bytes; verified 19 `bl` call sites: 17 plain `bl`, 2 `blne`).
+///
+/// Emit an indented plist string property. The function prepares `indent`,
+/// calls `FUN_0809fbc8(value, stack_buffer, 0x200)`, then formats the
+/// transformed value into `stream.buf`. A non-null `key` emits the key line;
+/// a null key selects the literal at +0x10 and emits only the string line.
+/// The two predicated callers therefore gate this keyless path themselves.
+///
+/// Deliberate deviations: `FUN_0809fbc8` is not ported and its entity table
+/// at 0x089cb224 is not recoverable from osos.dec, so [`STRING_ESCAPE`] is a
+/// swappable boundary whose default is a bounded identity copy. Rust calls
+/// [`STREAM_APPEND`] and returns rather than the original's tail branch.
+///
+/// Register usage: r0 = stream, r1 = nullable key, r2 = value, r3 = depth.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn formatted_message_emit_string(
+    stream: *mut MessageStream,
+    key: *const u8,
+    value: *const u8,
+    depth: u32,
+) {
+    let stream = &mut *stream;
+    (indent_prepare_op())(stream, depth);
+    // The original reserves an uninitialized 0x200-byte stack buffer; the
+    // transform fully determines the returned C string.
+    let mut escaped = core::mem::MaybeUninit::<[u8; BUFFER_CAPACITY]>::uninit();
+    let escaped_value = (string_escape_op())(
+        value,
+        escaped.as_mut_ptr().cast(),
+        BUFFER_CAPACITY,
+    );
+    let indent = stream.indent.as_ptr();
+    if key.is_null() {
+        // Original: r3 = indent, stack = {escaped_value}; `adr` reaches the
+        // format literal at 0x081238b8 + 0x10.
+        let args: [u32; 2] = [indent as u32, escaped_value as u32];
+        snprintf(
+            stream.buf.as_mut_ptr(),
+            stream.buf.len(),
+            PLIST_STRING_FORMAT.as_ptr().add(16),
+            args.as_ptr(),
+        );
+    } else {
+        // Original: r3 = indent, stack = {key, indent, escaped_value}.
+        let args: [u32; 4] = [
+            indent as u32,
+            key as u32,
+            indent as u32,
+            escaped_value as u32,
+        ];
+        snprintf(
+            stream.buf.as_mut_ptr(),
+            stream.buf.len(),
+            PLIST_STRING_FORMAT.as_ptr(),
+            args.as_ptr(),
+        );
+    }
     let text = stream.buf.as_ptr();
     (stream_append_op())(stream, text);
 }
@@ -443,7 +554,7 @@ mod tests {
     use std::sync::{Mutex, MutexGuard};
     use std::vec::Vec;
 
-    /// Serializes tests that swap the three dispatch slots (and the
+    /// Serializes tests that swap the four dispatch slots (and the
     /// default-slot test, which must not observe a swapped slot).
     static SLOT_LOCK: Mutex<()> = Mutex::new(());
 
@@ -521,6 +632,26 @@ mod tests {
         0
     }
 
+    /// Snapshot for the string emitter's keyless branch. Its original
+    /// variadic area has exactly two words; reading four would step beyond
+    /// the local array.
+    static mut KEYLESS_STRING_FORMAT_LEG: Option<(*const u8, usize, usize, [u32; 2])> = None;
+
+    unsafe extern "C" fn snapshot_keyless_string_engine(
+        fmt: *const u8,
+        _putc: crate::printf_helpers::PutcFn,
+        ctx: *mut core::ffi::c_void,
+        ap: VaList,
+    ) -> i32 {
+        let w = ctx as *const usize; // BoundedCursor { cursor, end }
+        let mut words = [0u32; 2];
+        for (i, slot) in words.iter_mut().enumerate() {
+            *slot = *ap.add(i);
+        }
+        KEYLESS_STRING_FORMAT_LEG = Some((fmt, *w, *w.add(1), words));
+        0
+    }
+
     /// (stream, depth) of the last indent-prepare invocation, and a
     /// scratch indent the mock installs (two tabs) so the buffer content
     /// the emitter formats is observably the preparer's product.
@@ -545,6 +676,20 @@ mod tests {
         APPEND_LEG = Some((stream, text, copied));
     }
 
+    /// Captures the string-transform leg. The replacement is deliberately
+    /// unlike the source, proving the formatter uses its returned pointer.
+    static mut ESCAPE_LEG: Option<(*const u8, *mut u8, usize)> = None;
+
+    unsafe extern "C" fn recording_string_escape(
+        source: *const u8,
+        destination: *mut u8,
+        capacity: usize,
+    ) -> *mut u8 {
+        ESCAPE_LEG = Some((source, destination, capacity));
+        destination.copy_from_nonoverlapping(b"escaped\0".as_ptr(), 8);
+        destination
+    }
+
     /// Swaps in the three recording mocks for `body`, then restores the
     /// previous slots so a failed assertion cannot leak the mocks into
     /// the next test.
@@ -559,6 +704,85 @@ mod tests {
         core::ptr::write_volatile(core::ptr::addr_of_mut!(INDENT_PREPARE), saved_prepare);
         core::ptr::write_volatile(core::ptr::addr_of_mut!(STREAM_APPEND), saved_append);
         core::ptr::write_volatile(core::ptr::addr_of_mut!(PRINTF_ENGINE), saved_engine);
+    }
+
+    /// Swaps in the recording `FUN_0809fbc8` boundary for `body`.
+    unsafe fn with_string_escape(body: impl FnOnce()) {
+        let saved = string_escape_op();
+        core::ptr::write_volatile(
+            core::ptr::addr_of_mut!(STRING_ESCAPE),
+            recording_string_escape,
+        );
+        body();
+        core::ptr::write_volatile(core::ptr::addr_of_mut!(STRING_ESCAPE), saved);
+    }
+
+    #[test]
+    fn string_with_key_transforms_then_formats_and_appends() {
+        let _guard = slot_lock();
+        let mut mem = backing();
+        let stream = stream_of(&mut mem);
+        let key = b"Name\0";
+        let value = b"A<&B\0";
+        unsafe {
+            with_mocks(snapshot_engine, || {
+                with_string_escape(|| {
+                    formatted_message_emit_string(stream, key.as_ptr(), value.as_ptr(), 4);
+                });
+            });
+            assert_eq!(PREPARE_LEG.expect("indent prepared"), (stream, 4));
+            let (source, escaped, capacity) =
+                (*core::ptr::addr_of_mut!(ESCAPE_LEG)).take().expect("value transformed");
+            assert_eq!(source, value.as_ptr());
+            assert_eq!(capacity, BUFFER_CAPACITY);
+
+            let (fmt, cursor, end, words) = FORMAT_LEG.expect("formatter ran");
+            let buf = (*stream).buf.as_mut_ptr();
+            let indent = (*stream).indent.as_ptr();
+            assert_eq!(fmt, PLIST_STRING_FORMAT.as_ptr());
+            assert_eq!(cursor, buf as usize);
+            assert_eq!(end, buf.add(BUFFER_CAPACITY - 1) as usize);
+            assert_eq!(
+                words,
+                [indent as u32, key.as_ptr() as u32, indent as u32, escaped as u32],
+                "r3 + stack are (indent, key, indent, transformed value)"
+            );
+            let (append_stream, append_text, _) =
+                (*core::ptr::addr_of_mut!(APPEND_LEG)).take().expect("appended");
+            assert_eq!(append_stream, stream);
+            assert_eq!(append_text, buf);
+        }
+    }
+
+    #[test]
+    fn string_without_key_uses_the_literal_suffix_and_two_word_area() {
+        let _guard = slot_lock();
+        let mut mem = backing();
+        let stream = stream_of(&mut mem);
+        let value = b"unlabelled\0";
+        unsafe {
+            with_mocks(snapshot_keyless_string_engine, || {
+                with_string_escape(|| {
+                    formatted_message_emit_string(stream, core::ptr::null(), value.as_ptr(), 1);
+                });
+            });
+            let (_, escaped, capacity) =
+                (*core::ptr::addr_of_mut!(ESCAPE_LEG)).take().expect("value transformed");
+            assert_eq!(capacity, BUFFER_CAPACITY);
+
+            let (fmt, cursor, end, words) =
+                KEYLESS_STRING_FORMAT_LEG.expect("keyless formatter ran");
+            let buf = (*stream).buf.as_mut_ptr();
+            let indent = (*stream).indent.as_ptr();
+            assert_eq!(fmt, PLIST_STRING_FORMAT.as_ptr().add(16));
+            assert_eq!(cursor, buf as usize);
+            assert_eq!(end, buf.add(BUFFER_CAPACITY - 1) as usize);
+            assert_eq!(
+                words,
+                [indent as u32, escaped as u32],
+                "keyless path omits the `<key>` arguments"
+            );
+        }
     }
 
     #[test]
