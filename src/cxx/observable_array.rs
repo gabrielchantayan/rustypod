@@ -156,6 +156,39 @@ pub struct ObservableArray {
     pub observers: u32,
 }
 
+/// Host model of the virtual slot that concrete observable-array classes
+/// supply at target vtable offset `+0xbc`.
+///
+/// Firmware vtable pointers are `u32` words, while host function pointers
+/// are wider. This separate host-only representation keeps the production
+/// [`ObservableArray`] layout target-exact and lets tests dispatch the same
+/// virtual operation structurally.
+#[cfg(not(target_arch = "arm"))]
+#[repr(C)]
+pub struct ObservableArrayClearHost {
+    /// Host pointer standing in for the target's first-word vtable address.
+    pub vtable: *const ObservableArrayClearVtable,
+    /// The target's array length at `this + 0x04`.
+    pub len: u32,
+}
+
+/// Recovered portion of the concrete observable-array vtable.
+///
+/// On 32-bit ARM, [`Self::remove_tail`] is exactly offset `+0xbc`. `usize`
+/// filler words preserve that target offset and keep the host fields
+/// separately addressable.
+#[cfg(not(target_arch = "arm"))]
+#[repr(C)]
+pub struct ObservableArrayClearVtable {
+    /// Slots `+0x00..+0xb8`, not dispatched by this wrapper.
+    pub unresolved_00_b8: [usize; 47],
+    /// `+0xbc`: removes a signed number of elements from the tail.
+    pub remove_tail: unsafe extern "C" fn(*mut ObservableArray, i32),
+}
+
+#[cfg(all(not(target_arch = "arm"), target_pointer_width = "32"))]
+const _: [u8; 0xbc] = [0; core::mem::offset_of!(ObservableArrayClearVtable, remove_tail)];
+
 /// Target byte size of [`ObservableArray`], i.e. the span the constructor
 /// initializes.
 pub const OBSERVABLE_ARRAY_SIZE: usize = 0x10;
@@ -215,6 +248,59 @@ pub unsafe extern "C" fn observable_array_construct(
     core::ptr::addr_of_mut!((*array).observers).write_volatile(0);
     array
 }
+
+/// observable_array_clear — original: `FUN_08271c84` @ `0x08271c84`
+/// (20 bytes; **19 `bl` and 57 tail `b` call sites**, all unconditional,
+/// binary-scanned by decoding every B/BL word in `osos.dec`).
+///
+/// Loads `this->len`, negates it with ARM's wrapping `rsb r1, r1, #0`, then
+/// tail-dispatches the concrete array's vtable slot `+0xbc`. That slot is the
+/// array's signed tail-removal operation, so the negative current length
+/// clears the array. The wrapper has no NULL guard for `this`, its vtable, or
+/// the slot. Its true extent is exactly 20 instruction bytes
+/// (`0x08271c84..0x08271c94`): the next independent function starts at
+/// `0x08271c98`; no literal pool follows.
+///
+/// Deliberate host deviation: [`ObservableArray`] retains its target-exact
+/// `u32` vtable word, so host tests use [`ObservableArrayClearHost`] to model
+/// the wider vtable pointer structurally. The ARM implementation below is the
+/// raw five-instruction tail dispatch, preserving the virtual method's return
+/// register and avoiding a local return edge.
+///
+/// # Safety
+///
+/// On ARM, `this` must be a readable concrete observable array with a valid
+/// vtable slot `+0xbc` accepting `(this, -this->len)`. On host, it must point
+/// to a valid [`ObservableArrayClearHost`] model.
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn observable_array_clear(this: *mut ObservableArray) {
+    let array = this.cast::<ObservableArrayClearHost>();
+    let vtable = core::ptr::read_volatile(core::ptr::addr_of!((*array).vtable));
+    let len = core::ptr::read_volatile(core::ptr::addr_of!((*array).len));
+    ((*vtable).remove_tail)(this, len.wrapping_neg() as i32);
+}
+
+// The retail wrapper ends in `bx r2`, not `blx r2; bx lr`: retain the exact
+// tail dispatch and its return register for hooked target builds.
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl observable_array_clear
+    .type observable_array_clear, %function
+observable_array_clear:
+    ldr     r2, [r0]
+    ldr     r1, [r0, #4]
+    ldr     r2, [r2, #0xbc]
+    rsb     r1, r1, #0
+    bx      r2
+    .size observable_array_clear, . - observable_array_clear
+"#
+);
 
 /// Word index of an observer node's next link (`node + 0x10`), the link
 /// the broadcast @ 0x082a4ccc walks and the detach @ 0x08271724 splices.
@@ -360,6 +446,28 @@ mod tests {
     use std::sync::Mutex;
     use std::vec::Vec;
 
+    static CLEAR_LOCK: Mutex<()> = Mutex::new(());
+    static mut CLEAR_CALLS: u32 = 0;
+    static mut CLEAR_RECEIVER: *mut ObservableArray = core::ptr::null_mut();
+    static mut CLEAR_DELTA: i32 = 0;
+
+    unsafe extern "C" fn record_remove_tail(this: *mut ObservableArray, delta: i32) {
+        core::ptr::addr_of_mut!(CLEAR_CALLS).write(CLEAR_CALLS + 1);
+        core::ptr::addr_of_mut!(CLEAR_RECEIVER).write(this);
+        core::ptr::addr_of_mut!(CLEAR_DELTA).write(delta);
+    }
+
+    static CLEAR_VTABLE: ObservableArrayClearVtable = ObservableArrayClearVtable {
+        unresolved_00_b8: [0; 47],
+        remove_tail: record_remove_tail,
+    };
+
+    unsafe fn reset_clear_recording() {
+        core::ptr::addr_of_mut!(CLEAR_CALLS).write(0);
+        core::ptr::addr_of_mut!(CLEAR_RECEIVER).write(core::ptr::null_mut());
+        core::ptr::addr_of_mut!(CLEAR_DELTA).write(0);
+    }
+
     /// The object plus a guard word on each side, so a store that runs off
     /// either end of the 16-byte object is visible.
     #[repr(C, align(4))]
@@ -420,6 +528,31 @@ mod tests {
             assert_eq!((*object).len, 0);
             assert_eq!((*object).storage, 0, "the previous buffer is dropped, not freed");
             assert_eq!((*object).observers, 0, "attached observers are orphaned, not detached");
+        }
+    }
+
+    #[test]
+    fn clear_dispatches_the_wrapping_negative_of_each_length() {
+        let _lock = CLEAR_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        for (len, expected_delta) in [
+            (0, 0),
+            (1, -1),
+            (0x7fff_ffff, -0x7fff_ffff),
+            (0x8000_0000, i32::MIN),
+            (0xffff_ffff, 1),
+        ] {
+            let mut array = ObservableArrayClearHost { vtable: &CLEAR_VTABLE, len };
+            let object = core::ptr::addr_of_mut!(array).cast::<ObservableArray>();
+
+            unsafe {
+                reset_clear_recording();
+                observable_array_clear(object);
+
+                assert_eq!(core::ptr::addr_of!(CLEAR_CALLS).read(), 1, "one virtual call for len {len:#010x}");
+                assert_eq!(core::ptr::addr_of!(CLEAR_RECEIVER).read(), object);
+                assert_eq!(core::ptr::addr_of!(CLEAR_DELTA).read(), expected_delta);
+            }
         }
     }
 

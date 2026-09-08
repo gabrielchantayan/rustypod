@@ -32960,6 +32960,39 @@ functions:
       base-alignment agnosticism, and a seeded-record preservation
       check.
 
+  - address: 0x08271c84
+    ghidra: FUN_08271c84
+    name: observable_array_clear
+    size: 20
+    sig: "void observable_array_clear(ObservableArray *this)"
+    module: cxx/observable_array
+    vars: {param_1: this}
+    status: ported
+    notes: >-
+      Clears a concrete observable array by tail-dispatching its signed
+      element-removal vtable slot with the wrapping negative of its current
+      length. EXTENT - raw osos.dec words decode as `ldr r2,[r0]` /
+      `ldr r1,[r0,#4]` / `ldr r2,[r2,#0xbc]` / `rsb r1,r1,#0` / `bx r2`;
+      the next independent function starts at 0x08271c98, so the true extent
+      is exactly 20 bytes (0x08271c84..0x08271c94) with no literal pool.
+      Ghidra's 20-byte extent is right, though its C loses the tail-call
+      property. CALL SITES - 19 `bl` plus 57 direct `b`, 76 total, all
+      unconditional, binary-verified by decoding every ARM B/BL word in
+      osos.dec; there are no word-aligned DATA occurrences of 0x08271c84.
+      The 19 `bl` matches Ghidra's reported direct-call count. The wrapper
+      has no NULL guard: callers must supply a readable object, vtable, and
+      `+0xbc` slot. The default observable-array vtable 0x089a5d0c has a
+      zero word at +0xbc in the static decrypted image, consistently with
+      the abstract base documented by cxx/observable_array; the actual
+      dispatch target is runtime concrete-vtable data and is intentionally
+      not assigned an invented identity. `match.py` against the worktree ARM
+      archive is an instruction-for-instruction exact match. Host tests
+      model the wider host vtable pointer structurally and prove one call
+      with `(this, -len)` for zero, one, INT_MAX, INT_MIN, and UINT_MAX
+      lengths; INT_MIN uses ARM's wrapping negation. Deviations: host-only
+      structural vtable model, required because firmware vtable words are
+      32-bit while host function pointers are wider.
+
   - address: 0x08271cec
     ghidra: FUN_08271cec
     name: observable_array_construct
