@@ -188,6 +188,59 @@ pub struct ObservableArrayClearVtable {
 
 #[cfg(all(not(target_arch = "arm"), target_pointer_width = "32"))]
 const _: [u8; 0xbc] = [0; core::mem::offset_of!(ObservableArrayClearVtable, remove_tail)];
+/// Firmware ABI of the append path's vtable slots. The names describe the
+/// observed call role, not an invented identity for a runtime target.
+pub type ObservableArrayAppendDeferred =
+    unsafe extern "C" fn(*mut ObservableArray, i32, *mut u8) -> u32;
+pub type ObservableArrayAppendIsDeferred = unsafe extern "C" fn(*mut ObservableArray) -> u32;
+pub type ObservableArrayAppendResize = unsafe extern "C" fn(*mut ObservableArray, i32);
+pub type ObservableArrayAppendWrite =
+    unsafe extern "C" fn(*mut ObservableArray, u32, *mut u8);
+pub type ObservableArrayAppendFinish = unsafe extern "C" fn(*mut ObservableArray, u32);
+
+/// Host model of the observable-array prefix used by
+/// [`observable_array_append`].
+///
+/// The real vtable word is target-width; this native-pointer replacement is
+/// only for host tests of the recovered virtual call sequence.
+#[cfg(not(target_arch = "arm"))]
+#[repr(C)]
+pub struct ObservableArrayAppendHost {
+    pub vtable: *const ObservableArrayAppendVtable,
+    pub len: u32,
+}
+
+/// Recovered virtual slots used by [`observable_array_append`].
+///
+/// On a 32-bit target the named fields occupy their retailOS offsets
+/// `+0x20`, `+0x60`, `+0x88`, `+0xa8`, and `+0xbc`; unobserved slots are
+/// retained as word-sized fillers. On a 64-bit host the wider native
+/// callbacks intentionally make this a structural test model instead.
+#[cfg(not(target_arch = "arm"))]
+#[repr(C)]
+pub struct ObservableArrayAppendVtable {
+    pub unresolved_00_1c: [usize; 8],
+    pub append_deferred: ObservableArrayAppendDeferred,
+    pub unresolved_24_5c: [usize; 15],
+    pub append_is_deferred: ObservableArrayAppendIsDeferred,
+    pub unresolved_64_84: [usize; 9],
+    pub append_finish: ObservableArrayAppendFinish,
+    pub unresolved_8c_a4: [usize; 7],
+    pub append_write: ObservableArrayAppendWrite,
+    pub unresolved_ac_b8: [usize; 4],
+    pub append_resize: ObservableArrayAppendResize,
+}
+
+#[cfg(all(not(target_arch = "arm"), target_pointer_width = "32"))]
+const _: [u8; 0x20] = [0; core::mem::offset_of!(ObservableArrayAppendVtable, append_deferred)];
+#[cfg(all(not(target_arch = "arm"), target_pointer_width = "32"))]
+const _: [u8; 0x60] = [0; core::mem::offset_of!(ObservableArrayAppendVtable, append_is_deferred)];
+#[cfg(all(not(target_arch = "arm"), target_pointer_width = "32"))]
+const _: [u8; 0x88] = [0; core::mem::offset_of!(ObservableArrayAppendVtable, append_finish)];
+#[cfg(all(not(target_arch = "arm"), target_pointer_width = "32"))]
+const _: [u8; 0xa8] = [0; core::mem::offset_of!(ObservableArrayAppendVtable, append_write)];
+#[cfg(all(not(target_arch = "arm"), target_pointer_width = "32"))]
+const _: [u8; 0xbc] = [0; core::mem::offset_of!(ObservableArrayAppendVtable, append_resize)];
 
 /// Target byte size of [`ObservableArray`], i.e. the span the constructor
 /// initializes.
@@ -301,6 +354,131 @@ observable_array_clear:
     .size observable_array_clear, . - observable_array_clear
 "#
 );
+
+/// Load address of the unported append observer broadcast
+/// `FUN_082a4ca0`. It walks `this->observers` and calls 0x08155cc8 for each
+/// node with the appended index.
+pub const OBSERVABLE_ARRAY_NOTIFY_APPEND_ADDRESS: usize = 0x082a_4ca0;
+
+/// Target default for [`OBSERVABLE_ARRAY_NOTIFY_APPEND`]: the retailOS
+/// observer broadcast remains mapped at its load address.
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_observable_array_notify_append(
+    this: *mut ObservableArray,
+    index: u32,
+) {
+    let notify: unsafe extern "C" fn(*mut ObservableArray, u32) =
+        core::mem::transmute(OBSERVABLE_ARRAY_NOTIFY_APPEND_ADDRESS);
+    notify(this, index);
+}
+
+/// Host default for [`OBSERVABLE_ARRAY_NOTIFY_APPEND`]: host callers must
+/// install their own observer model because the retailOS callback remains
+/// unported.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_observable_array_notify_append(
+    _this: *mut ObservableArray,
+    _index: u32,
+) {
+    panic!("observable_array_append requires observer broadcast 0x082a4ca0")
+}
+
+/// Direct-call boundary for the unported observer broadcast 0x082a4ca0.
+///
+/// Target builds dispatch to the still-mapped retailOS function; host tests
+/// install a recorder. A later port can replace this seam without changing
+/// the append wrapper.
+#[cfg(target_os = "none")]
+pub static mut OBSERVABLE_ARRAY_NOTIFY_APPEND: unsafe extern "C" fn(
+    this: *mut ObservableArray,
+    index: u32,
+) = firmware_observable_array_notify_append;
+
+#[cfg(not(target_os = "none"))]
+pub static mut OBSERVABLE_ARRAY_NOTIFY_APPEND: unsafe extern "C" fn(
+    this: *mut ObservableArray,
+    index: u32,
+) = missing_observable_array_notify_append;
+
+/// observable_array_append — original: `FUN_0827196c` @ `0x0827196c`
+/// (**144 bytes**, 0x0827196c..0x082719f8; the next independent function is
+/// the `bx lr` at 0x082719fc; **17 unconditional `bl` and 2 `bleq` call
+/// sites**, binary-scanned by decoding every ARM B/BL word in `osos.dec`).
+///
+/// Appends the opaque value at `element` to a concrete observable array. If
+/// vtable slot `+0x60` says append is deferred, tail-dispatch slot `+0x20`
+/// with the `0x7fff_ffff` append sentinel and returns its result. Otherwise
+/// it snapshots `len`, asks slot `+0xbc` to grow by one, writes the value at
+/// that old index through `+0xa8`, broadcasts the index through 0x082a4ca0,
+/// finishes through `+0x88` with zero, and returns the old index. The two
+/// predicated sites are `bleq` callers: they guard this NULL-free wrapper;
+/// the wrapper itself dereferences its receiver and all five vtable slots.
+///
+/// Deliberate host deviation: [`ObservableArrayAppendHost`] carries a native
+/// vtable pointer, while target code reads 32-bit vtable words. The direct
+/// observer broadcast is not ported, so target builds call its verified
+/// retailOS entry and host builds require a test seam. No word-aligned DATA
+/// occurrence of 0x0827196c exists in the image, so this wrapper is never
+/// itself reached through a vtable.
+///
+/// # Safety
+///
+/// `this` must be a readable concrete observable array whose vtable exposes
+/// valid callbacks at `+0x20`, `+0x60`, `+0x88`, `+0xa8`, and `+0xbc`.
+/// `element` has the callback-defined element representation; neither branch
+/// NULL-checks it.
+#[cfg(not(target_arch = "arm"))]
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn observable_array_append(
+    this: *mut ObservableArray,
+    element: *mut u8,
+) -> u32 {
+    let array = this.cast::<ObservableArrayAppendHost>();
+    let vtable = core::ptr::read_volatile(core::ptr::addr_of!((*array).vtable));
+    if (vtable.as_ref().unwrap().append_is_deferred)(this) != 0 {
+        return (vtable.as_ref().unwrap().append_deferred)(this, 0x7fff_ffff, element);
+    }
+
+    let index = core::ptr::read_volatile(core::ptr::addr_of!((*array).len));
+    (vtable.as_ref().unwrap().append_resize)(this, 1);
+    (vtable.as_ref().unwrap().append_write)(this, index, element);
+    let notify = core::ptr::read_volatile(core::ptr::addr_of!(OBSERVABLE_ARRAY_NOTIFY_APPEND));
+    notify(this, index);
+    (vtable.as_ref().unwrap().append_finish)(this, 0);
+    index
+}
+
+#[cfg(target_arch = "arm")]
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn observable_array_append(
+    this: *mut ObservableArray,
+    element: *mut u8,
+) -> u32 {
+    let vtable = core::ptr::read_volatile(core::ptr::addr_of!((*this).base.vtable)) as *const u32;
+    let append_is_deferred: ObservableArrayAppendIsDeferred =
+        core::mem::transmute(core::ptr::read_volatile(vtable.add(0x60 / 4)));
+    if append_is_deferred(this) != 0 {
+        let append_deferred: ObservableArrayAppendDeferred =
+            core::mem::transmute(core::ptr::read_volatile(vtable.add(0x20 / 4)));
+        return append_deferred(this, 0x7fff_ffff, element);
+    }
+
+    let index = core::ptr::read_volatile(core::ptr::addr_of!((*this).len));
+    let append_resize: ObservableArrayAppendResize =
+        core::mem::transmute(core::ptr::read_volatile(vtable.add(0xbc / 4)));
+    append_resize(this, 1);
+    let append_write: ObservableArrayAppendWrite =
+        core::mem::transmute(core::ptr::read_volatile(vtable.add(0xa8 / 4)));
+    append_write(this, index, element);
+    let notify = core::ptr::read_volatile(core::ptr::addr_of!(OBSERVABLE_ARRAY_NOTIFY_APPEND));
+    notify(this, index);
+    let append_finish: ObservableArrayAppendFinish =
+        core::mem::transmute(core::ptr::read_volatile(vtable.add(0x88 / 4)));
+    append_finish(this, 0);
+    index
+}
 
 /// Word index of an observer node's next link (`node + 0x10`), the link
 /// the broadcast @ 0x082a4ccc walks and the detach @ 0x08271724 splices.
@@ -788,5 +966,160 @@ mod tests {
 
             assert_eq!((*object).observers, 0);
         }
+    }
+
+    // --- append @ 0x0827196c --------------------------------------------
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum AppendStep {
+        IsDeferred,
+        Deferred { sentinel: i32, element: usize },
+        Resize { delta: i32 },
+        Write { index: u32, element: usize },
+        Notify { index: u32 },
+        Finish { reason: u32 },
+    }
+
+    static APPEND_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+    static APPEND_TRACE: parking_lot::Mutex<Vec<AppendStep>> = parking_lot::Mutex::new(Vec::new());
+    static mut APPEND_DEFERRED: u32 = 0;
+    static mut APPEND_DEFERRED_RETURN: u32 = 0;
+
+    unsafe extern "C" fn record_append_is_deferred(_this: *mut ObservableArray) -> u32 {
+        APPEND_TRACE.lock().push(AppendStep::IsDeferred);
+        core::ptr::addr_of!(APPEND_DEFERRED).read()
+    }
+
+    unsafe extern "C" fn record_append_deferred(
+        _this: *mut ObservableArray,
+        sentinel: i32,
+        element: *mut u8,
+    ) -> u32 {
+        APPEND_TRACE.lock().push(AppendStep::Deferred {
+            sentinel,
+            element: element as usize,
+        });
+        core::ptr::addr_of!(APPEND_DEFERRED_RETURN).read()
+    }
+
+    unsafe extern "C" fn record_append_resize(_this: *mut ObservableArray, delta: i32) {
+        APPEND_TRACE.lock().push(AppendStep::Resize { delta });
+    }
+
+    unsafe extern "C" fn record_append_write(
+        _this: *mut ObservableArray,
+        index: u32,
+        element: *mut u8,
+    ) {
+        APPEND_TRACE.lock().push(AppendStep::Write {
+            index,
+            element: element as usize,
+        });
+    }
+
+    unsafe extern "C" fn record_append_finish(_this: *mut ObservableArray, reason: u32) {
+        APPEND_TRACE.lock().push(AppendStep::Finish { reason });
+    }
+
+    unsafe extern "C" fn record_append_notify(_this: *mut ObservableArray, index: u32) {
+        APPEND_TRACE.lock().push(AppendStep::Notify { index });
+    }
+
+    static APPEND_VTABLE: ObservableArrayAppendVtable = ObservableArrayAppendVtable {
+        unresolved_00_1c: [0; 8],
+        append_deferred: record_append_deferred,
+        unresolved_24_5c: [0; 15],
+        append_is_deferred: record_append_is_deferred,
+        unresolved_64_84: [0; 9],
+        append_finish: record_append_finish,
+        unresolved_8c_a4: [0; 7],
+        append_write: record_append_write,
+        unresolved_ac_b8: [0; 4],
+        append_resize: record_append_resize,
+    };
+
+    struct AppendSeamGuard;
+    impl Drop for AppendSeamGuard {
+        fn drop(&mut self) {
+            unsafe {
+                #[cfg(target_os = "none")]
+                core::ptr::addr_of_mut!(OBSERVABLE_ARRAY_NOTIFY_APPEND)
+                    .write_volatile(firmware_observable_array_notify_append);
+                #[cfg(not(target_os = "none"))]
+                core::ptr::addr_of_mut!(OBSERVABLE_ARRAY_NOTIFY_APPEND)
+                    .write_volatile(missing_observable_array_notify_append);
+            }
+        }
+    }
+
+    fn install_append_recorder(deferred: u32, deferred_return: u32) -> AppendSeamGuard {
+        unsafe {
+            core::ptr::addr_of_mut!(APPEND_DEFERRED).write(deferred);
+            core::ptr::addr_of_mut!(APPEND_DEFERRED_RETURN).write(deferred_return);
+            core::ptr::addr_of_mut!(OBSERVABLE_ARRAY_NOTIFY_APPEND)
+                .write_volatile(record_append_notify);
+        }
+        APPEND_TRACE.lock().clear();
+        AppendSeamGuard
+    }
+
+    fn append_trace() -> Vec<AppendStep> {
+        core::mem::take(&mut *APPEND_TRACE.lock())
+    }
+
+    #[test]
+    fn append_grows_writes_notifies_and_finishes_at_the_old_index() {
+        let _lock = APPEND_LOCK.lock();
+        let _seam = install_append_recorder(0, 0);
+        let mut array = ObservableArrayAppendHost {
+            vtable: &APPEND_VTABLE,
+            len: 0xffff_ffff,
+        };
+        let mut element = 0xdead_beefu32;
+        let object = core::ptr::addr_of_mut!(array).cast::<ObservableArray>();
+
+        let returned = unsafe { observable_array_append(object, core::ptr::addr_of_mut!(element).cast()) };
+
+        assert_eq!(returned, 0xffff_ffff, "r0 is the length sampled before growth");
+        assert_eq!(array.len, 0xffff_ffff, "only the virtual resize operation can change len");
+        assert_eq!(
+            append_trace(),
+            [
+                AppendStep::IsDeferred,
+                AppendStep::Resize { delta: 1 },
+                AppendStep::Write { index: 0xffff_ffff, element: core::ptr::addr_of_mut!(element) as usize },
+                AppendStep::Notify { index: 0xffff_ffff },
+                AppendStep::Finish { reason: 0 },
+            ],
+            "the raw blx/bl/blx order is probe, resize, write, notify, finish"
+        );
+    }
+
+    #[test]
+    fn a_deferred_append_uses_the_sentinel_and_skips_the_immediate_path() {
+        let _lock = APPEND_LOCK.lock();
+        let _seam = install_append_recorder(1, 0x1234_5678);
+        let mut array = ObservableArrayAppendHost {
+            vtable: &APPEND_VTABLE,
+            len: 0,
+        };
+        let mut element = 0;
+        let object = core::ptr::addr_of_mut!(array).cast::<ObservableArray>();
+
+        let returned = unsafe { observable_array_append(object, core::ptr::addr_of_mut!(element).cast()) };
+
+        assert_eq!(returned, 0x1234_5678, "the deferred vtable result propagates unchanged");
+        assert_eq!(array.len, 0, "the wrapper does not resize before a deferred append");
+        assert_eq!(
+            append_trace(),
+            [
+                AppendStep::IsDeferred,
+                AppendStep::Deferred {
+                    sentinel: 0x7fff_ffff,
+                    element: core::ptr::addr_of_mut!(element) as usize,
+                },
+            ],
+            "the `bxne r3` path bypasses resize, write, observer broadcast, and finish"
+        );
     }
 }
