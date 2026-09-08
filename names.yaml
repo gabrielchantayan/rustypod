@@ -41195,6 +41195,87 @@ functions:
       untouched.
 
   # --- StringObject: bounded UTF-16 assignment ---
+  - address: 0x082766a0
+    ghidra: FUN_082766a0
+    name: utf8_copy_codepoints
+    size: 88
+    sig: "int utf8_copy_codepoints(unsigned char *out, const unsigned char *source, int max_codepoints)"
+    module: cxx/string_encoding
+    status: ported
+    vars:
+      param_1: "out"
+      param_2: "source"
+      param_3: "max_codepoints"
+      local_18: "cursor"
+      iVar2: "count"
+    notes: >-
+      One unconditional BL at 0x08046e20. Decode each sequence using the existing utf8_next_codepoint port, copy its original bytes forward, and then stop on decoded zero. Returns nonzero characters, not bytes. Signed nonpositive bounds touch nothing; exhausting the bound adds no terminator. Overlong encodings remain verbatim; unsupported leads copy three bytes and stop without adding a NUL. Forward overlap preserves the original sequential byte writes.
+      Codegen review: 22 original versus 30 Rust instructions; decoder call, sequential forward byte loop, zero exit and signed limit retained. LLVM uses an increasing count rather than a decreasing remaining bound.
+
+  - address: 0x082766f8
+    name: utf16_to_utf8
+    size: 100
+    sig: "void utf16_to_utf8(unsigned char *out, const unsigned short *source)"
+    module: cxx/string_encoding
+    status: ported
+    vars:
+      r0: "destination / code_unit"
+      r1: "source"
+      r2: "out"
+    notes: >-
+      Recovered from raw osos.dec: 25 instructions, no literal pool, ending immediately before 0x0827675c. Ghidra omits this function entry and inlines the body into FUN_0827654c. Its only direct branch reference is the bne tail call at 0x082765a0. Encode NUL-terminated 16-bit units with thresholds 0x80 and 0x800, then store one zero byte. Surrogates are encoded independently. No deviations. Use match.py --size 100 because functions.csv has no entry.
+      Codegen review: 25 original versus 31 Rust instructions; the encoder remains a leaf with identical 0x80/0x800 thresholds, byte masks and NUL stop. LLVM adds a frame and reorders stores within a decoded unit.
+
+  - address: 0x0827675c
+    ghidra: FUN_0827675c
+    name: utf16_to_utf8_bounded
+    size: 124
+    sig: "int utf16_to_utf8_bounded(unsigned char *out, const unsigned short *source, int max_code_units)"
+    module: cxx/string_encoding
+    status: ported
+    vars:
+      param_1: "out"
+      param_2: "source"
+      param_3: "max_code_units"
+      iVar2: "count"
+      uVar1: "unit"
+    notes: >-
+      Five unconditional BL references. Encode up to the signed unit bound with 0x80/0x800 thresholds; do not combine surrogate pairs. Write an encountered source NUL but exclude it from the returned unit count. Exhausting the bound appends no NUL; nonpositive bounds access neither pointer. Called directly by string_object_assign_utf16, replacing its previous no-op transcoder seam. No deviations.
+      Codegen review: 31 original versus 40 Rust instructions; signed nonpositive early exit, encoding branches, NUL store before return and unit count preserved. The shared unit writer is inlined.
+
+  - address: 0x082767d8
+    ghidra: FUN_082767d8
+    name: utf8_to_utf16
+    size: 36
+    sig: "void utf8_to_utf16(unsigned short *out, const unsigned char *source)"
+    module: cxx/string_encoding
+    status: ported
+    vars:
+      param_1: "out"
+      param_2: "source"
+      local_c: "cursor"
+      iVar1: "codepoint"
+    notes: >-
+      Five unconditional BL references. Repeatedly call the ported utf8_next_codepoint and store each result as a halfword, including decoded zero. Permissive decoder semantics are retained: malformed continuation payload bits are masked, overlong forms accepted, and unsupported leads terminate conversion. No deviations.
+      Codegen review: 9 original versus 13 Rust instructions; direct utf8_next_codepoint relocation, halfword store and nonzero loop retained with an LLVM frame.
+
+  - address: 0x082767fc
+    ghidra: FUN_082767fc
+    name: utf8_to_utf16_bounded
+    size: 68
+    sig: "int utf8_to_utf16_bounded(unsigned short *out, const unsigned char *source, int max_codepoints)"
+    module: cxx/string_encoding
+    status: ported
+    vars:
+      param_1: "out"
+      param_2: "source"
+      param_3: "max_codepoints"
+      local_14: "cursor"
+      iVar2: "count"
+    notes: >-
+      Six unconditional BL references. Decode and store up to the signed codepoint bound using utf8_next_codepoint. A decoded zero is written but not counted; exhausting the bound appends no terminator. Nonpositive bounds access neither pointer. No deviations.
+      Codegen review: 17 original versus 25 Rust instructions; signed bound, direct decoder relocation, halfword store before zero exit and nonzero count retained.
+
   - address: 0x082765a8
     ghidra: FUN_082765a8
     name: string_object_assign_utf16
@@ -41225,15 +41306,15 @@ functions:
       not the first code unit as the C-string siblings test source[0]: a
       range whose first code unit is a UTF-16 NUL still allocates one byte.
       Deviations: vtable slots +0x8/+0xc stay modeled by
-      STRING_OBJECT_ASSIGN_CSTR_OPS and the unported transcoder @ 0x0827675c
-      by the new STRING_OBJECT_UTF16_TRANSCODE slot, because
+      STRING_OBJECT_ASSIGN_CSTR_OPS, because
       STRING_OBJECT_VTABLE holds ROM identities rather than host-callable
-      pointers; the byte length stays i32 and the terminator is addressed
+      pointers; the transcoder @ 0x0827675c calls utf16_to_utf8_bounded
+      directly. The byte length stays i32 and the terminator is addressed
       with a signed offset, preserving the counter's documented 32-bit
       wrapping. match.py structural: same order and same shape - guard,
-      sizing bl, allocating blx, NULL test, transcode blx,
-      `add r0,r7,r6; strb r8,[r0,#-1]` - with the two ops-table
-      indirections and LLVM hoisting the guard ahead of the frame push.
+      sizing bl, allocating blx, NULL test, direct transcode call, and
+      terminator store. Only the virtual allocation/clear boundary remains
+      indirect through an ops table.
 
   # --- time: the packed calendar record ---
   - address: 0x08093c38
