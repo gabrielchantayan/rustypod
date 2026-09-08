@@ -11715,6 +11715,30 @@ functions:
       timer_start_after, and timer_restart plus their ops-table paths,
       but retains the stock lazy load/test/allocation/store ordering.
 
+  - address: 0x0810de48
+    ghidra: FUN_0810de48
+    name: view_event_apply_mapped_staged_flags
+    size: 16
+    sig: "u32 view_event_apply_mapped_staged_flags(u8 *this)"
+    module: app/view_event
+    status: ported
+    renames:
+      param_1/r0: this
+      FUN_0810e1c4: apply mapped staged flags
+    notes: >-
+      Exact 16-byte extent verified from raw osos.dec instructions
+      0x0810de48 through 0x0810de54 with the next function beginning at
+      0x0810de58. Decoding every ARM B/BL word finds 94 direct branch
+      sites: 19 plain unconditional bl calls and 75 plain tail b calls,
+      with no predicated calls. The body preserves r0 and r1 across its
+      prologue, calls 0x0810e1c4, then returns 1 as the handled verdict.
+      The callee walks this+0x60, maps item byte 0 through 0x0819c7a4
+      into byte 2, and writes item byte 1 to the global flag-byte table
+      at the original byte-0 index. r1 is dead because the callee saves
+      without reading it. The unported callee is an explicit
+      VIEW_EVENT_OPS seam: target builds dispatch to firmware
+      0x0810e1c4 and host tests record a replacement invocation.
+
   - address: 0x0810dddc
     ghidra: FUN_0810dddc
     name: registry_observer_base_construct
