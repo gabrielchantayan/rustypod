@@ -126,6 +126,9 @@ pub mod hints {
     // 0x7f00_0000: dedicated to cxx/bit_set's write-transition fixture;
     // fixture mappings never unmap, so no other user may share this hint.
     pub const BIT_SET_WRITE: usize = 0x7f00_0000;
+    // 0x6e00_0000: dedicated to heap/word_buffer's raw-u32 singleton-reset
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const WORD_BUFFER_RESET_OPTIONAL_SINGLETON: usize = 0x6e00_0000;
     // 0x7e00_0000: dedicated to class-0x7f80 artwork-slot fixtures;
     // fixture mappings never unmap, so no other user may share this hint.
     pub const ARTWORK_SLOT_AVAILABILITY: usize = 0x7e00_0000;

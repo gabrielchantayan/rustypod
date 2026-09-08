@@ -45998,6 +45998,27 @@ functions:
       Deviation: 0x080a7f2c remains a volatile hook (stock target address on
       firmware, NULL on host) because it is not ported.
 
+  - address: 0x0804082c
+    ghidra: FUN_0804082c
+    name: word_buffer_reset_optional_singleton
+    size: 88
+    sig: "u32 word_buffer_reset_optional_singleton(MarkedWordBuffer *buffer, u32 value)"
+    module: heap/word_buffer
+    status: ported
+    renames:
+      param_1/r0: buffer
+      param_2/r1: value
+      puVar1/r0: reserved_buffer
+    notes: >-
+      Raw extent is 0x0804082c..0x08040884; the following independent
+      function starts at 0x08040884. Decoding every ARM B/BL word in
+      osos.dec found 19 direct callers: 18 unconditional BL and one BLNE at
+      0x0803e9e8. The BLNE is gated by its caller's NE condition; this
+      function has no NULL guard. It reserves two words only when capacity
+      (+0x08) is zero, returns zero on failed reserve without mutation, and
+      otherwise clears marker (+0x0c), resets length (+0x04), writes value
+      through data (+0x00), and sets length to one iff value is nonzero.
+
   # --- tagged word buffer pool slot allocator ---
   - address: 0x0803de0c
     ghidra: FUN_0803de0c
