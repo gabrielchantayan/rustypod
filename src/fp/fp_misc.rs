@@ -659,7 +659,8 @@ pub unsafe extern "C" fn message_code_word(message: *const u32) -> u32 {
 
 use crate::app::registry::instance_of_class_6000;
 use crate::app::resource_chain::{resource_chain_find, ResourceKind, ResourceProvider};
-use crate::cxx::string::{cxx_string_default_ctor, cxx_string_rep_create, empty_rep, rep_data};
+use crate::cxx::string::{cxx_string_default_ctor, cxx_string_release, cxx_string_rep_create, empty_rep, rep_data};
+use crate::cxx::templates::{cxx_record_range_destroy_8, CxxStringPair};
 use crate::cxx::string_object::{
     string_object_c_str, string_object_release_payload, StringObject, STRING_OBJECT_VTABLE,
 };
@@ -1789,6 +1790,158 @@ pub unsafe extern "C" fn plist_node_processing_instruction(node: *const u8) -> *
     // `read_unaligned`: same 4-but-not-8-aligned firmware head hazard
     // as plist_node_child_count just above.
     core::ptr::read_unaligned(node.add(0x20) as *const u32) as *mut u8
+}
+
+/// A plist node's three-word attribute vector at target offsets +0x04..+0x0c.
+#[repr(C)]
+pub struct PlistNodeAttributeVector {
+    pub begin: *mut CxxStringPair,
+    pub end: *mut CxxStringPair,
+    pub capacity: *mut CxxStringPair,
+}
+
+/// A plist node's three-word child vector at target offsets +0x14..+0x1c.
+#[repr(C)]
+pub struct PlistNodeChildVector {
+    pub begin: *mut PlistNode,
+    pub end: *mut PlistNode,
+    pub capacity: *mut PlistNode,
+}
+
+/// The 0x28-byte XML/plist tree node built by `FUN_0815a7d8`.
+///
+/// The two COW-string words frame vectors of 8-byte attribute pairs and
+/// 40-byte child nodes. The optional companion is an owned node built only
+/// while parsing a processing instruction.
+#[repr(C)]
+pub struct PlistNode {
+    pub tag: *mut u8,
+    pub attributes: PlistNodeAttributeVector,
+    pub value: *mut u8,
+    pub children: PlistNodeChildVector,
+    pub companion: *mut PlistNode,
+    pub kind: u8,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x04] = [0; core::mem::offset_of!(PlistNode, attributes)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x10] = [0; core::mem::offset_of!(PlistNode, value)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x14] = [0; core::mem::offset_of!(PlistNode, children)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x20] = [0; core::mem::offset_of!(PlistNode, companion)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x24] = [0; core::mem::offset_of!(PlistNode, kind)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x28] = [0; core::mem::size_of::<PlistNode>()];
+
+/// The unported recursive child-range destructor `FUN_083e3284`.
+pub type PlistNodeChildRangeDestroyFn =
+    unsafe extern "C" fn(*mut u8, *mut PlistNode, *mut PlistNode);
+
+/// Device entry for the child-range destructor. Raw ARM confirms it walks
+/// 40-byte child nodes and invokes `FUN_0825c790` on every element.
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_plist_node_child_range_destroy(
+    vector: *mut u8,
+    first: *mut PlistNode,
+    last: *mut PlistNode,
+) {
+    let destroy: PlistNodeChildRangeDestroyFn = unsafe { core::mem::transmute(0x083e_3284usize) };
+    unsafe { destroy(vector, first, last) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_plist_node_child_range_destroy(
+    _vector: *mut u8,
+    _first: *mut PlistNode,
+    _last: *mut PlistNode,
+) {
+    panic!("plist_node_destroy requires child-range destructor 0x083e3284")
+}
+
+/// Host-replaceable body of the sole unported direct callee.
+#[cfg(target_os = "none")]
+pub static mut PLIST_NODE_DESTROY_OPS: PlistNodeDestroyOps = PlistNodeDestroyOps {
+    destroy_child_range: firmware_plist_node_child_range_destroy,
+};
+
+/// Host-replaceable body of the sole unported direct callee.
+#[cfg(not(target_os = "none"))]
+pub static mut PLIST_NODE_DESTROY_OPS: PlistNodeDestroyOps = PlistNodeDestroyOps {
+    destroy_child_range: missing_plist_node_child_range_destroy,
+};
+
+/// Operations supplied by the only unported direct callee of
+/// [`plist_node_destroy`].
+#[derive(Clone, Copy)]
+pub struct PlistNodeDestroyOps {
+    pub destroy_child_range: PlistNodeChildRangeDestroyFn,
+}
+
+#[inline(always)]
+unsafe fn plist_node_destroy_ops() -> PlistNodeDestroyOps {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(PLIST_NODE_DESTROY_OPS)) }
+}
+
+/// plist_node_destroy — original: `FUN_0825c790` @ 0x0825c790 (144 bytes).
+///
+/// Raw-byte extent: 36 instructions from 0x0825c790 through 0x0825c820;
+/// the distinct sibling `FUN_0825c824` starts immediately afterward, with
+/// no literal pool. A complete ARM B/BL decode finds 19 incoming `bl` call
+/// sites, all unconditional (including its recursive `bl` at 0x0825c7a4),
+/// and one unconditional tail `b` at 0x081c8334. No caller uses a
+/// predicated call form.
+///
+/// Destroys a plist/XML node in reverse construction order: recursively
+/// destroys and tag-2-deletes its owned processing-instruction companion;
+/// tears down and frees the 40-byte child vector; releases the value string;
+/// tears down and frees the 8-byte attribute-pair vector; then releases the
+/// tag string. It returns `this`, preserving the ARM destructor convention.
+///
+/// Deliberate deviation: child-range destruction remains the unported
+/// `FUN_083e3284`; target builds call that exact address through
+/// [`PLIST_NODE_DESTROY_OPS`], while host tests install a recorder. All other
+/// direct callees are established ports.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn plist_node_destroy(node: *mut PlistNode) -> *mut PlistNode {
+    let companion = unsafe { (*node).companion };
+    if !companion.is_null() {
+        unsafe { plist_node_destroy(companion) };
+        crate::heap::veneers::operator_delete(companion.cast());
+    }
+
+    let children = unsafe { &mut (*node).children };
+    unsafe {
+        (plist_node_destroy_ops().destroy_child_range)(
+            children as *mut PlistNodeChildVector as *mut u8,
+            children.begin,
+            children.end,
+        );
+    }
+    let child_count = (children.capacity as usize)
+        .wrapping_sub(children.begin as usize) as i32 / 40;
+    crate::heap::veneers::cxx_array_dealloc(children.begin.cast(), child_count as usize, 0);
+
+    unsafe { cxx_string_release(core::ptr::addr_of_mut!((*node).value)) };
+
+    let attributes = unsafe { &mut (*node).attributes };
+    unsafe {
+        cxx_record_range_destroy_8(
+            attributes as *mut PlistNodeAttributeVector as *mut u8,
+            attributes.begin,
+            attributes.end,
+        );
+    }
+    let attribute_count = ((attributes.capacity as usize)
+        .wrapping_sub(attributes.begin as usize) as i32
+        >> 3) as usize;
+    crate::heap::veneers::cxx_array_dealloc(attributes.begin.cast(), attribute_count, 0);
+
+    unsafe { cxx_string_release(core::ptr::addr_of_mut!((*node).tag)) };
+    node
 }
 
 /// nibble_stream_current — original: `FUN_082a1be0` @ 0x082a1be0
@@ -4948,6 +5101,117 @@ mod tests {
             unsafe { plist_node_processing_instruction(node.as_ptr()) },
             sentinel as *mut u8
         );
+    }
+
+    // ---- plist_node_destroy ----
+
+    static PLIST_NODE_DESTROY_TEST_LOCK: Mutex<()> = Mutex::new(());
+    static mut PLIST_NODE_CHILD_RANGES: Vec<(*mut u8, *mut PlistNode, *mut PlistNode)> = Vec::new();
+
+    unsafe extern "C" fn record_plist_node_child_range(
+        vector: *mut u8,
+        first: *mut PlistNode,
+        last: *mut PlistNode,
+    ) {
+        (*core::ptr::addr_of_mut!(PLIST_NODE_CHILD_RANGES)).push((vector, first, last));
+    }
+
+    struct PlistNodeDestroyMock {
+        previous: PlistNodeDestroyOps,
+        _seam_lock: MutexGuard<'static, ()>,
+        _heap_lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for PlistNodeDestroyMock {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(PLIST_NODE_DESTROY_OPS).write_volatile(self.previous);
+            }
+        }
+    }
+
+    fn install_plist_node_destroy_mock() -> PlistNodeDestroyMock {
+        let seam_lock = PLIST_NODE_DESTROY_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let heap_lock = crate::heap::veneers::tests::mock_heap();
+        unsafe {
+            (*core::ptr::addr_of_mut!(PLIST_NODE_CHILD_RANGES)).clear();
+            let previous = core::ptr::addr_of!(PLIST_NODE_DESTROY_OPS).read_volatile();
+            core::ptr::addr_of_mut!(PLIST_NODE_DESTROY_OPS)
+                .write_volatile(PlistNodeDestroyOps {
+                    destroy_child_range: record_plist_node_child_range,
+                });
+            PlistNodeDestroyMock { previous, _seam_lock: seam_lock, _heap_lock: heap_lock }
+        }
+    }
+
+    #[test]
+    fn plist_node_destroy_recurses_before_freeing_owned_vectors() {
+        let _mocks = install_plist_node_destroy_mock();
+        let empty = crate::cxx::string::empty_rep_data();
+        let mut attributes = [CxxStringPair { first: empty, second: empty }];
+        let attribute_begin = attributes.as_mut_ptr();
+        let mut companion = PlistNode {
+            tag: empty,
+            attributes: PlistNodeAttributeVector {
+                begin: core::ptr::null_mut(),
+                end: core::ptr::null_mut(),
+                capacity: core::ptr::null_mut(),
+            },
+            value: empty,
+            children: PlistNodeChildVector {
+                begin: core::ptr::null_mut(),
+                end: core::ptr::null_mut(),
+                capacity: core::ptr::null_mut(),
+            },
+            companion: core::ptr::null_mut(),
+            kind: 0,
+        };
+        let mut node = PlistNode {
+            tag: empty,
+            attributes: PlistNodeAttributeVector {
+                begin: attribute_begin,
+                end: unsafe { attribute_begin.add(1) },
+                capacity: unsafe { attribute_begin.add(1) },
+            },
+            value: empty,
+            children: PlistNodeChildVector {
+                begin: core::ptr::null_mut(),
+                end: core::ptr::null_mut(),
+                capacity: core::ptr::null_mut(),
+            },
+            companion: &mut companion,
+            kind: 2,
+        };
+
+        assert!(core::ptr::eq(unsafe { plist_node_destroy(&mut node) }, &mut node));
+        unsafe {
+            assert_eq!(
+                (*core::ptr::addr_of!(PLIST_NODE_CHILD_RANGES)).as_slice(),
+                [
+                    (
+                        core::ptr::addr_of_mut!(companion.children).cast(),
+                        core::ptr::null_mut(),
+                        core::ptr::null_mut(),
+                    ),
+                    (
+                        core::ptr::addr_of_mut!(node.children).cast(),
+                        core::ptr::null_mut(),
+                        core::ptr::null_mut(),
+                    ),
+                ],
+                "recursive companion range precedes the owner's range"
+            );
+        }
+        assert_eq!(
+            crate::heap::veneers::tests::free_log(),
+            (2, attribute_begin.cast(), 2),
+            "companion delete precedes attribute-vector deallocation"
+        );
+        assert!(
+            core::ptr::eq(node.companion, &mut companion),
+            "destructor leaves fields intact"
+        );
+        assert_eq!(node.attributes.begin, attribute_begin);
     }
 
     // ---- nibble_stream_current ----
