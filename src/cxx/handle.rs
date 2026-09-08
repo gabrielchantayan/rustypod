@@ -53,6 +53,8 @@
 //! drop dispatches vtable slot 1 (+4) instead of slot 7 (+0x1c).
 //! [`refcounted_body_release_dtor_variant`] @ 0x0839d3ac is a fourth
 //! copy, byte-identical to the slot-1 sibling modulo `bl` displacements.
+//! [`refcounted_body_release_owned_variant`] @ 0x0839cf4c is an owning
+//! sibling whose implementation disposer remains an unported direct call.
 
 #[cfg(not(target_os = "none"))]
 use crate::cxx::string_object::{string_object_destroy, StringObject};
@@ -474,6 +476,115 @@ pub unsafe extern "C" fn refcounted_body_release_owned(slot: *mut *mut Refcounte
                 mutex_delete(mutex);
                 // Reloaded between the delete and the tag-2 free, exactly
                 // as the ARM does, then cleared after that free.
+                let mutex = (*body).mutex;
+                operator_delete(mutex.cast());
+                (*body).mutex = core::ptr::null_mut();
+            }
+            operator_delete(body.cast());
+        }
+    } else {
+        let mutex = (*body).mutex;
+        if !mutex.is_null() {
+            mutex_unlock(mutex);
+        }
+    }
+
+    slot.write(core::ptr::null_mut());
+}
+
+/// ABI of the direct implementation disposer at 0x0816f5c0.
+type RefcountedImplementationDisposer = unsafe extern "C" fn(*mut u8) -> *mut u8;
+
+/// Calls the still-unported implementation disposer directly on device.
+///
+/// The complete 124-byte body at 0x0816f5c0 frees several implementation
+/// fields and returns its input. It is deliberately not assigned a class
+/// identity here.
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn firmware_refcounted_implementation_dispose(implementation: *mut u8) -> *mut u8 {
+    let disposer: RefcountedImplementationDisposer = core::mem::transmute(0x0816_f5c0usize);
+    disposer(implementation)
+}
+
+/// Host default for the unported 0x0816f5c0 implementation disposer.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_refcounted_implementation_dispose(implementation: *mut u8) -> *mut u8 {
+    implementation
+}
+
+/// Host-only test injection for the raw 0x0816f5c0 direct call.
+#[cfg(not(target_os = "none"))]
+static mut REFCOUNTED_IMPLEMENTATION_DISPOSE: RefcountedImplementationDisposer =
+    missing_refcounted_implementation_dispose;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn firmware_refcounted_implementation_dispose(implementation: *mut u8) -> *mut u8 {
+    let disposer = core::ptr::read_volatile(core::ptr::addr_of!(REFCOUNTED_IMPLEMENTATION_DISPOSE));
+    disposer(implementation)
+}
+
+/// refcounted_body_release_owned_variant — original: `FUN_0839cf4c` @
+/// 0x0839cf4c (144 bytes — Ghidra's 136-byte extent omits the trailing
+/// `str r6,[r4]` / `pop {r4,r5,r6,pc}`; the next separately linked
+/// mutex-lock helper begins at 0x0839cfdc). Decoding every ARM B/BL word in
+/// osos.dec finds 19 direct `bl` callers, all unconditional: no predicated
+/// calls, no tail `b` sites, and no data-word references.
+///
+/// Owning sibling of [`refcounted_body_release_owned`]: it drops the signed
+/// refcount under the optional mutex, NULLs the slot after every non-NULL
+/// body path, and destroys the mutex and body on the final transition only.
+/// Unlike the sibling, its NULL-guarded implementation word is passed to the
+/// unported direct callee at 0x0816f5c0, whose return feeds tag-2
+/// [`operator_delete`] directly. Raw bytes establish that the callee returns
+/// its input after teardown; no class identity is inferred for it.
+///
+/// Deliberate host deviation: 0x0816f5c0 remains unported, so host builds use
+/// an identity test seam for that call; target builds dispatch to its firmware
+/// address directly.
+///
+/// # Safety
+/// `slot` must be a valid aligned pointer slot. Its non-NULL body, mutex, and
+/// implementation must be live for every operation the firmware performs.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_body_release_owned_variant")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_release_owned_variant(
+    slot: *mut *mut RefcountedBody,
+) {
+    let body = slot.read();
+    if body.is_null() {
+        return;
+    }
+
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_lock(mutex);
+    }
+
+    let body = slot.read();
+    let remaining = (*body).refcount.wrapping_sub(1);
+    (*body).refcount = remaining;
+    let body = slot.read();
+    if remaining == 0 {
+        let implementation = (*body).opaque0 as *mut u8;
+        if !implementation.is_null() {
+            let implementation = firmware_refcounted_implementation_dispose(implementation);
+            operator_delete(implementation);
+        }
+
+        let body = slot.read();
+        let mutex = (*body).mutex;
+        if !mutex.is_null() {
+            mutex_unlock(mutex);
+        }
+
+        let body = slot.read();
+        if !body.is_null() {
+            let mutex = (*body).mutex;
+            if !mutex.is_null() {
+                mutex_delete(mutex);
                 let mutex = (*body).mutex;
                 operator_delete(mutex.cast());
                 (*body).mutex = core::ptr::null_mut();
@@ -994,6 +1105,7 @@ mod tests {
             Destructor(usize),
             CallbackRelease(usize),
             Slot1Release(usize),
+            OwnedVariantDispose(usize),
             Signal(u32),
             Delete(u32),
             MutexCellFree(usize),
@@ -1035,9 +1147,15 @@ mod tests {
             (*core::ptr::addr_of_mut!(EVENTS)).push(Event::CallbackRelease(callback as usize));
         }
 
+        unsafe extern "C" fn recording_owned_variant_dispose(implementation: *mut u8) -> *mut u8 {
+            (*core::ptr::addr_of_mut!(EVENTS)).push(Event::OwnedVariantDispose(implementation as usize));
+            implementation
+        }
+
         struct Bench {
             old_kernel: RomKernelOps,
             old_heap: HeapVeneerOps,
+            old_owned_variant_dispose: RefcountedImplementationDisposer,
         }
 
         fn bench() -> Bench {
@@ -1051,6 +1169,9 @@ mod tests {
                 (*core::ptr::addr_of_mut!(EVENTS)).clear();
                 let old_kernel = core::ptr::read_volatile(core::ptr::addr_of!(ROM_KERNEL));
                 let old_heap = core::ptr::read_volatile(core::ptr::addr_of!(HEAP_OPS));
+                let old_owned_variant_dispose = core::ptr::read_volatile(
+                    core::ptr::addr_of!(REFCOUNTED_IMPLEMENTATION_DISPOSE),
+                );
                 core::ptr::write_volatile(
                     core::ptr::addr_of_mut!(ROM_KERNEL),
                     RomKernelOps {
@@ -1068,9 +1189,14 @@ mod tests {
                         ..old_heap
                     },
                 );
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(REFCOUNTED_IMPLEMENTATION_DISPOSE),
+                    recording_owned_variant_dispose,
+                );
                 Bench {
                     old_kernel,
                     old_heap,
+                    old_owned_variant_dispose,
                 }
             }
         }
@@ -1080,6 +1206,10 @@ mod tests {
                 unsafe {
                     core::ptr::write_volatile(core::ptr::addr_of_mut!(ROM_KERNEL), self.old_kernel);
                     core::ptr::write_volatile(core::ptr::addr_of_mut!(HEAP_OPS), self.old_heap);
+                    core::ptr::write_volatile(
+                        core::ptr::addr_of_mut!(REFCOUNTED_IMPLEMENTATION_DISPOSE),
+                        self.old_owned_variant_dispose,
+                    );
                 }
                 OPS_LOCK.store(false, Ordering::Release);
             }
@@ -1375,6 +1505,69 @@ mod tests {
             assert_eq!(body.refcount, -1);
             assert!(slot.is_null());
             assert_eq!(implementation[1], 0, "the implementation is untouched");
+            assert!(events().is_empty());
+        }
+
+        /// The final transition calls the unported 0x0816f5c0 disposer,
+        /// tag-2-deletes its returned implementation, then tears down the
+        /// mutex and body in the raw ARM order.
+        #[test]
+        fn owned_variant_final_reference_disposes_then_cleans_up_in_order() {
+            let _bench = bench();
+            let mut semaphore = 0x42;
+            let mut mutex = Mutex {
+                sem_cell: &mut semaphore,
+                unused: 0,
+            };
+            let mut implementation = 0x5a_u8;
+            let mut body = RefcountedBody {
+                opaque0: &mut implementation as *mut u8 as usize,
+                refcount: 1,
+                mutex: &mut mutex,
+            };
+            let implementation_ptr = &mut implementation as *mut u8;
+            let body_ptr = &mut body as *mut RefcountedBody;
+            let mutex_ptr = &mut mutex as *mut Mutex;
+            let cell_ptr = &mut semaphore as *mut u32;
+            let mut slot = body_ptr;
+
+            unsafe { refcounted_body_release_owned_variant(&mut slot) };
+
+            assert!(slot.is_null());
+            assert!(body.mutex.is_null());
+            assert_eq!(
+                events(),
+                std::vec![
+                    Event::Wait(0x42),
+                    Event::OwnedVariantDispose(implementation_ptr as usize),
+                    Event::HeapFree(implementation_ptr as usize, 2),
+                    Event::Signal(0x42),
+                    Event::Delete(0x42),
+                    Event::MutexCellFree(cell_ptr as usize),
+                    Event::HeapFree(mutex_ptr as *mut u8 as usize, 2),
+                    Event::HeapFree(body_ptr as *mut u8 as usize, 2),
+                ]
+            );
+        }
+
+        /// The target's plain `subs` underflows zero to -1, leaving the
+        /// implementation and teardown paths untouched while still NULLing
+        /// the caller slot.
+        #[test]
+        fn owned_variant_zero_refcount_wraps_without_disposal() {
+            let _bench = bench();
+            let mut implementation = 0x5a_u8;
+            let mut body = RefcountedBody {
+                opaque0: &mut implementation as *mut u8 as usize,
+                refcount: 0,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot = &mut body as *mut RefcountedBody;
+
+            unsafe { refcounted_body_release_owned_variant(&mut slot) };
+
+            assert_eq!(body.refcount, -1);
+            assert!(slot.is_null());
             assert!(events().is_empty());
         }
 
