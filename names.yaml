@@ -44922,6 +44922,42 @@ functions:
       and is NULL-safe, cache independence from the neighbouring
       singletons.
 
+  # --- UI animation three-value rebinder ---
+  - address: 0x08166a40
+    ghidra: FUN_08166a40
+    name: animation_set_values
+    size: 172
+    sig: "void animation_set_values(Animation *this, FixedValue *current_value, FixedValue *from, FixedValue *to)"
+    module: app/animation
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: current_value
+      param_3/r2: from
+      param_4/r3: to
+      DAT_08166aec: SCHEDULER_SINGLETON_GLOBAL (pool word 0x089cc7e0)
+      FUN_082738e0: wheel_remove (unported, existing ANIMATION_INIT_OPS seam)
+      FUN_08273a14: retain_value (ported in app/refcounted_value)
+      FUN_082739e0: release_refcounted_value (ported in app/refcounted_value)
+      FUN_08273898: wheel_insert (unported, existing ANIMATION_INIT_OPS seam)
+    notes: >-
+      The true code extent is the 43 instruction words
+      0x08166a40..0x08166ae8 (172 bytes); its separately linked pool word
+      at 0x08166aec holds 0x089cc7e0, and the next real function begins at
+      0x08166af0. Decoding every ARM B/BL word in osos.dec finds exactly 18
+      direct call sites, all plain unconditional bl: no predicated BL forms
+      or raw DATA-word references. Three additional unconditional tail B
+      callers target it at 0x081675a4, 0x081b836c, and 0x081b8c1c. This
+      rebinder removes this from the timing wheel, retains current/from/to,
+      conditionally releases the old +0x20/+0x18/+0x1c values in that
+      order, stores from/to/current with stm at +0x18, sets rank +0x08 to
+      max(from->aux, to->aux, current->aux) + 1 with unsigned comparisons
+      and wrapping addition, then reloads the scheduler global and
+      tail-branches to wheel_insert. FixedValue arguments have no NULL
+      guard: each +0x08 load is unconditional. The unported wheel functions
+      use the pre-existing volatile ANIMATION_INIT_OPS seam; retain and
+      release are direct ports, and both scheduler-global loads are kept.
+
   # --- UI animation current-value setter ---
   - address: 0x08166b2c
     ghidra: FUN_08166b2c
