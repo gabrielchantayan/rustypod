@@ -72,8 +72,10 @@ pub struct ExprList {
     /// +0x00: number of entries in the item array (signed — the loop
     /// guard is `bgt`).
     pub n_expr: i32,
-    /// +0x04..+0x0c: allocation bookkeeping — unmodeled.
-    pub _gap_04: [u8; 0x0c - 0x04],
+    /// +0x04: allocated item capacity.
+    pub n_alloc: i32,
+    /// +0x08..+0x0c: allocation bookkeeping — unmodeled.
+    pub _gap_08: [u8; 0x0c - 0x08],
     /// +0x0c: the item array, `n_expr` entries of 12 bytes each.
     pub items: *mut ExprListItem,
 }
@@ -87,10 +89,9 @@ pub struct ExprListItem {
     /// +0x04: the item's alias name (heap-owned, freed unconditionally —
     /// the free NULL-guards internally).
     pub p_name: *mut u8,
-    /// +0x08..+0x0c: sort-order/aggregate flags — unmodeled (32-bit
-    /// target layout).
-    #[cfg(target_pointer_width = "32")]
-    pub _gap_08: [u8; 0x0c - 0x08],
+    /// +0x08: packed sort-order, completion, and aggregate state. The
+    /// append constructor clears the whole target word with `stmia`.
+    pub sort_agg_state: u32,
 }
 
 // The original's byte offsets and item stride, asserted on the 32-bit
@@ -98,6 +99,8 @@ pub struct ExprListItem {
 // harmless, because all access goes through the typed structs.
 #[cfg(target_pointer_width = "32")]
 const _EXPR_LIST_N_EXPR_OFFSET: [u8; 0x00] = [0; core::mem::offset_of!(ExprList, n_expr)];
+#[cfg(target_pointer_width = "32")]
+const _EXPR_LIST_N_ALLOC_OFFSET: [u8; 0x04] = [0; core::mem::offset_of!(ExprList, n_alloc)];
 #[cfg(target_pointer_width = "32")]
 const _EXPR_LIST_ITEMS_OFFSET: [u8; 0x0c] = [0; core::mem::offset_of!(ExprList, items)];
 #[cfg(target_pointer_width = "32")]
@@ -192,7 +195,12 @@ mod tests {
     /// Writes a list header over `items` into the block's payload.
     unsafe fn list_in(block: &mut TrackedBlock, n_expr: i32, items: *mut ExprListItem) -> *mut u8 {
         let payload = block.payload() as *mut ExprList;
-        core::ptr::write(payload, ExprList { n_expr, _gap_04: [0xa5; 0x0c - 0x04], items });
+        core::ptr::write(payload, ExprList {
+            n_expr,
+            n_alloc: n_expr,
+            _gap_08: [0xa5; 0x0c - 0x08],
+            items,
+        });
         payload as *mut u8
     }
 
@@ -205,8 +213,7 @@ mod tests {
                 ExprListItem {
                     p_expr,
                     p_name,
-                    #[cfg(target_pointer_width = "32")]
-                    _gap_08: [0xa5; 0x0c - 0x08],
+                    sort_agg_state: 0xa5a5_a5a5,
                 },
             );
         }

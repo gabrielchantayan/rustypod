@@ -497,14 +497,18 @@ mod tests {
                 super::super::expr_list_delete::ExprListItem {
                     p_expr: item_node.payload(),
                     p_name: item_name.payload(),
-                    #[cfg(target_pointer_width = "32")]
-                    _gap_08: [0; 0x0c - 0x08],
+                    sort_agg_state: 0,
                 },
             );
             let list = list_block.payload() as *mut super::super::expr_list_delete::ExprList;
             core::ptr::write(
                 list,
-                super::super::expr_list_delete::ExprList { n_expr: 1, _gap_04: [0; 0x0c - 0x04], items: array },
+                super::super::expr_list_delete::ExprList {
+                    n_expr: 1,
+                    n_alloc: 1,
+                    _gap_08: [0; 0x0c - 0x08],
+                    items: array,
+                },
             );
             let node = node_block.node();
             (*node).p_list = list as *mut u8;

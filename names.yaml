@@ -22322,6 +22322,38 @@ functions:
       accepted mem_release/value_free deviation), blx through the
       loaded slots, and LLVM's fp frame.
 
+  - address: 0x0837857c
+    ghidra: FUN_0837857c
+    name: expr_list_append
+    size: 208
+    sig: "ExprList *expr_list_append(Parse *parse, ExprList *list, Expr *expr, const Token *name)"
+    module: sqlite/expr_list_append
+    status: ported
+    vars: {param_1/r0: parse, r8: db, param_2/r4: list, param_3/r6: expr, param_4/r7: name, iVar2/r5: n_alloc, piVar3/r5: item}
+    notes: >-
+      SQLite 3.5.x's sqlite3ExprListAppend. Raw bytes confirm the
+      208-byte extent 0x0837857c..0x0837864b; 0x0837864c starts the
+      separately linked FUN_0837864c. A whole-image ARM B/BL scan found
+      exactly 18 direct BL callers: 17 unconditional and one BLNE at
+      0x0839ab20, with no tail B callers.
+      The first instruction loads db from parse +0x00 before every
+      allocator/name call; parse itself is dereferenced without a NULL
+      guard. NULL list allocates a zeroed
+      0x10-byte header through db_malloc_zero @ 0x08374998. When
+      n_alloc <= n_expr it grows capacity to n_alloc*2+4 and reallocates
+      the 0x0c-stride items through db_realloc @ 0x083749bc. A failed
+      allocation first releases expr through expr_delete @ 0x08377e00,
+      then list through expr_list_delete @ 0x08378670, and returns NULL.
+      Otherwise non-NULL expr or name appends one all-zero item, obtains
+      p_name through name_from_token @ 0x0837d7ac, then stores p_expr;
+      both NULL leave the list unchanged. All five direct callees were
+      already ported, so no dispatch seam was added. The Rust port shares
+      typed repr(C) list/item layouts with the destructor; pointer fields
+      widen on the host but 32-bit assertions retain the original
+      0x10/0x0c target layouts. Host tests cover create/grow, token
+      duplication and dequoting, full-list resize, two-NULL no-op,
+      new-list OOM latching, and resize-OOM teardown.
+
   - address: 0x08383c88
     ghidra: FUN_08383c88
     name: select_delete

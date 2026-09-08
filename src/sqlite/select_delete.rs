@@ -197,7 +197,8 @@ mod tests {
                 list,
                 super::super::expr_list_delete::ExprList {
                     n_expr: 0,
-                    _gap_04: [0xa5; 0x0c - 0x04],
+                    n_alloc: 0,
+                    _gap_08: [0xa5; 0x0c - 0x08],
                     items: core::ptr::null_mut(),
                 },
             );
