@@ -48485,3 +48485,45 @@ functions:
       tests prove zero invokes it, -1 skips it even with a NULL owner, other
       negative values retain their u32 bit pattern, the vtable store precedes
       either path, and this is returned.
+
+  # --- service-handler slot bit update ---
+  - address: 0x08193f50
+    ghidra: FUN_08193f50
+    name: service_handler_slot_bit_update
+    size: 76
+    sig: "void service_handler_slot_bit_update(u32 *slot_table, i32 slot, u32 bit, u32 enabled)"
+    module: app/service_handler_slot_bit_update
+    status: ported
+    renames:
+      param_1/r0: slot_table
+      param_2/r1: slot
+      param_3/r2: bit
+      param_4/r3: enabled
+      param_1_plus_slot_times_0x20: slot_record
+      slot_record_plus_0x0c: active_status
+      slot_record_plus_0x18: bitset
+      FUN_08030f44: heap_panic
+      FUN_08193fec: unidentified_service_handler_slot_bit_update_tail
+    notes: >-
+      Raw ARM establishes the exact 76-byte extent
+      0x08193f50..0x08193f9c: `push {r4,lr}` through `pop {r4,lr}; b
+      0x08193fec`; the separately linked next function starts at 0x08193f9c
+      (`cmp r1,#3`). Ghidra incorrectly folds the tail target at 0x08193fec
+      into this entry. The function asserts only slot >= 3, selects an
+      eight-word record at slot_table + slot*0x20, clears active_status bit
+      zero, and conditionally updates bitset's bit. The ARM register shift
+      takes bit & 0xff, producing a zero mask for counts 32 through 255;
+      bitset nonzero restores active_status bit zero, while every other
+      active_status bit is preserved. It then tail-branches to the unported
+      0x08193fec routine; that routine's identity is deliberately not
+      invented. Decoding every ARM B/BL word in osos.dec finds exactly 18
+      inbound branches: 18 unconditional plain BL at 0x0818e364, 0x0818ea4c,
+      0x0818f424, 0x0818fce4, 0x081908d8, 0x08192870, 0x08192b40,
+      0x08194528, 0x08194834, 0x08194aec, 0x081d7758, 0x081d7810,
+      0x082010e8, 0x082011b8, 0x08208ff8, 0x082091a8, 0x08209238, and
+      0x08209368; no predicated BL forms or direct B tail callers. Deliberate
+      deviation: firmware makes an ordinary call to the verified unported
+      tail address rather than emitting the stock tail B; host tests route it
+      through a volatile seam. Tests cover set, clear-to-empty while
+      preserving status bits, the ARM shift counts 31, 32, and 0x100, and
+      tail invocation after the writes.
