@@ -34417,6 +34417,28 @@ functions:
       host-mockable seam in src/ft/stream_read_bounded.rs: target builds
       transmute the retailOS 0x08042fd4 body directly, while host tests
       install a recorder that proves the guard and forwarding shape.
+  # --- FreeType stream-skip owner wrapper ---
+  - address: 0x08073e3c
+    ghidra: FUN_08073e3c
+    name: ft_stream_skip_from_owner
+    size: 12
+    sig: "i32 ft_stream_skip_from_owner(void *owner, i32 distance)"
+    module: ft/stream_skip
+    status: ported
+    renames:
+      param_1: owner
+      param_1_plus_0x40000: stream
+      param_2: distance
+    notes: >-
+      Raw ARM decoding confirms a 12-byte wrapper: add r0, r0, #0x40000;
+      ldr r0, [r0]; b 0x0809d81c. It loads the owner's aligned stream word,
+      preserves signed distance in r1, and tail-enters the shared FreeType
+      stream-skip helper. Decoding every ARM B/BL word in osos.dec found 19
+      direct call sites, all unconditional bl: there are no predicated or
+      plain-b callers. The helper at 0x0809d81c is not ported; target builds
+      use a literal veneer because the payload cannot retain the stock
+      PC-relative branch, while host tests install a volatile callback seam
+      that proves zero, positive, and i32::MIN distances pass unchanged.
   # --- FreeType MacBinary resource-fork probe ---
   - address: 0x08076510
     ghidra: FUN_08076510
