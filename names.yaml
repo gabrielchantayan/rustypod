@@ -45801,6 +45801,40 @@ functions:
       ldr r0,[r1] / mov r4,r1 / ldr r1,[r0,#8] / blx / store slot / ldr
       r0,[r5] / ldr r2,[r0,#28] / blx - differing only by the crate's
       fp frame and slot offset, the accepted house profile.
+  - address: 0x0816e220
+    ghidra: FUN_0816e220
+    name: element_registry_set_name_for_id
+    size: 96
+    sig: "void element_registry_set_name_for_id(ElementRegistry *registry, u32 element_id, u32 name)"
+    module: app/element_registry
+    status: ported
+    renames:
+      param_1/r0: registry
+      param_2/r1: element_id
+      param_3/r2: name
+      local_24/sp+4: yielded RegistryElement pointer
+      auStack_20/sp+8: 20-byte collection iterator state
+      FUN_08155e80: iterator_state_construct (ported)
+      FUN_08155d6c: iterator_state_next (ported)
+      FUN_08155ec0: iterator_state_cleanup (ported)
+    notes: >-
+      Exact raw extent is 0x0816e220..0x0816e280: 24 instructions, no
+      literal pool, with the next separately linked function starting at
+      0x0816e280. It constructs the 20-byte iterator as
+      iterator_state_construct(state, registry, -2), repeatedly invokes
+      iterator_state_next(state, &element), compares element+0x04 with
+      element_id, and on the first equality stores name at element+0x08
+      before branching to cleanup. The cleanup runs both after a match and
+      after exhaustion. No NULL guard protects registry or a yielded
+      element. Raw decoding of every ARM B/BL word in osos.dec found exactly
+      20 direct call sites: 20 unconditional BL, zero predicated forms,
+      zero plain B, and zero data-word occurrences of 0x0816e220. The three
+      direct callees are already ported, so the Rust port calls them directly
+      and adds no dispatch seam. Deliberate deviation: none. Host tests
+      script the existing iterator fetch seam only to provide native
+      traversal fixtures; they prove a non-match is untouched, the first
+      matching element alone receives the name, iteration stops immediately
+      after that match, and an absent id exhausts without a write.
   - address: 0x08309be0
     ghidra: FUN_08309be0
     name: copy_inline_encoded_word_block

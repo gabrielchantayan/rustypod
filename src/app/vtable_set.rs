@@ -4577,7 +4577,7 @@ pub unsafe extern "C" fn vtable_file_record_insert(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
     use super::*;
     use std::sync::Mutex;
@@ -4593,7 +4593,7 @@ mod tests {
     /// Serializes the tests that swap `VTABLE_SET_50_KIND4_OPS` /
     /// `VTABLE_SLOT_50_DISPATCH` (the vtable_query.rs `SLOT_TEST_LOCK`
     /// precedent).
-    static SLOT_TEST_LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) static SLOT_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     /// Restores both seams on drop, even when a test panics.
     struct SlotGuard;
