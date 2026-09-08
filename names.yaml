@@ -38658,6 +38658,46 @@ functions:
       one stm r0,{r1,r2} (value-identical: vtable at +0x00, NULL at
       +0x04) and adds the crate fp frame.
 
+  - address: 0x08279314
+    ghidra: FUN_08279314
+    name: path_object_assign_from_string_object
+    size: 36
+    sig: "StringObject *path_object_assign_from_string_object(StringObject *this, const StringObject *source)"
+    module: app/path_object_construct
+    status: ported
+    renames:
+      param_1/r0: this (PathObject's two-word StringObject base; saved in r4 and returned)
+      param_2/r1: source (readable StringObject supplying the NULL-safe C string)
+      r4: this (preserved across both direct callees)
+      FUN_082a50b0: string_object_c_str (ported direct callee)
+      FUN_08276474: string_object_assign_payload (ported direct callee)
+    notes: >-
+      PathObject assignment from a StringObject source. Raw ARM at
+      0x08279314..0x08279334 is push {r4,lr}; mov r4,r0; mov r0,r1; bl
+      string_object_c_str @ 0x082a50b0; mov r1,r0; mov r0,r4; bl
+      string_object_assign_payload @ 0x08276474; mov r0,r4; pop {r4,pc}.
+      The next separately linked function starts at 0x08279338, making
+      the true extent 36 bytes, all code. The NULL-safe accessor turns a
+      NULL source payload into its shared empty string, so the assignment
+      helper's existing empty-source path dispatches vtable slot +0xc;
+      nonempty sources use its +0x8 allocation/copy path. Unlike the base
+      StringObject assignment operator @ 0x082774a8, this body has no
+      this == source guard and always invokes both callees. Full-image ARM
+      B/BL decode found exactly 19 direct BL callers, all unconditional
+      (0 predicated): 0x0805aa5c, 0x08074224, 0x0807a5b8, 0x08100a04,
+      0x08103ecc, 0x081045bc, 0x081bcfb8, 0x081bd51c, 0x081bf2dc,
+      0x081bf37c, 0x081ef6b4, 0x081ef748, 0x081ef7bc, 0x081ef7e0,
+      0x081ef854, 0x0820216c, 0x082582b8, 0x0828fabc, 0x08298964.
+      At 0x08074224 it assigns the caller's output PathObject from a
+      stack StringObject before appending '/'. No pointer guard exists;
+      invalid this/source faults while loading source.payload or in the
+      assignment helper. No deliberate deviations: both callees are
+      ported and called directly. Host tests cover nonempty copy and
+      return identity, the NULL-payload canonical-empty clear path,
+      vtable preservation, and the intentionally unguarded self-assignment
+      allocation. match.py (exit 1, diff expected) retains the two-call
+      save-this / return-this structure; the crate frame differs from ADS.
+
   - address: 0x081655e0
     ghidra: FUN_081655e0
     name: service_manager_get
