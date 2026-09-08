@@ -40213,6 +40213,38 @@ functions:
       blx/bx-through-volatile-slot dispatches standing in for the direct
       bl / tail b.
 
+  # --- the second 4-byte colour value copy ---
+  - address: 0x082720ac
+    ghidra: FUN_082720ac
+    name: color_copy_unaligned
+    size: 36
+    sig: "void color_copy_unaligned(u8 *dst, const u8 *src)"
+    module: cxx/color_copy
+    status: ported
+    renames:
+      param_1/r0: dst (the destination colour)
+      param_2/r1: src (the source colour)
+    notes: >-
+      The second ADS-emitted copy helper for the 4-byte RGBA colour value:
+      four forward ldrb/strb pairs then bx lr, decoded directly from raw
+      words (ldrb r2,[r1] / strb r2,[r0]; +1; +2; then ldrb r1,[r1,#3] /
+      strb r1,[r0,#3]). The advertised 36-byte extent is exact: the prior
+      word at 0x082720a8 is bx lr ending the RGB565 packer, and the next
+      word at 0x082720d0 starts the four-component setter. There is no
+      literal pool. Binary-scanning every aligned ARM B/BL word in osos.dec
+      finds 20 unconditional bl and 2 unconditional b sites, no predicated
+      calls. The b sites are the tail calls at 0x082a1d68 and 0x082a1d70.
+      No aligned DATA word in the image equals 0x082720ac, so this helper
+      is not virtually dispatched. It is byte-identical to color_copy at
+      0x082720e8, but is separately ported because hooks target addresses,
+      not source equivalence. The volatile ascending byte copies preserve
+      the original's unaligned access and forward overlap propagation; no
+      NULL or alignment guard was added. Its private ARM link section keeps
+      LLVM MergeFunctions from folding this distinct hook target into
+      color_copy. Host tests exercise opaque NUL/0xff bytes at all 16
+      source/destination alignments with an end guard, and every overlapping
+      pair against an independent forward-copy model.
+
   # --- the 4-byte colour value's copy ---
   - address: 0x082720e8
     ghidra: FUN_082720e8
@@ -40243,8 +40275,8 @@ functions:
       packer @ 0x08272018 masking its four components with 0xf8/0xfc/
       0xf0 for RGB565, RGBA4444 and RGB555, the bare RGB565 case @
       0x08272090 ((R & 0xf8) << 8 | (G & 0xfc) << 3 | (B & 0xf8) >> 3),
-      a byte-identical twin of this function @ 0x082720ac (20 bl + 2 b
-      sites of its own, NOT ported), a four-component setter @
+      a byte-identical twin at 0x082720ac (20 bl + 2 b sites), now ported
+      as color_copy_unaligned, a four-component setter @
       0x082720d0 (strb r1,[r0]; strb r2,[r0,#1]; strb r3,[r0,#2];
       strb [sp],[r0,#3]) and this copy. So the record is four bytes
       wide, laid out {R,G,B,A}. Two call-site readings confirm alpha is
@@ -40268,9 +40300,9 @@ functions:
       two, and the two that pop {..., pc} straight after the call
       (0x081ea170, 0x081ea2ec) are void functions whose own callers
       ignore the value. No NULL or alignment guard on either pointer.
-      The byte-identical twin @ 0x082720ac is left unported - were it
-      ported, LLVM's MergeFunctions would fold the two bodies onto one
-      symbol, the parse_result_init_alias_3134 situation.
+      The byte-identical twin @ 0x082720ac is separately ported as
+      color_copy_unaligned in the same module; its private ARM text section
+      prevents LLVM MergeFunctions from folding its distinct hook target.
       Host tests (5) - a plain four-byte copy with a guard byte past the
       end, every-byte-value coverage including NUL and 0xff, all 16
       source/destination alignment combinations, every overlap of two

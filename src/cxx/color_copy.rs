@@ -34,7 +34,7 @@
 //!             0xfc / 0xf0 — RGB565, RGBA4444, RGB555
 //! 0x08272090  the RGB565 case on its own: (R & 0xf8) << 8
 //!             | (G & 0xfc) << 3 | (B & 0xf8) >> 3
-//! 0x082720ac  a byte-identical twin of THIS function (20 `bl` + 2 `b`)
+//! 0x082720ac  a byte-identical twin of `color_copy_unaligned`, 20 `bl`
 //! 0x082720d0  set from four register/stack components:
 //!             strb r1,[r0]; strb r2,[r0,#1]; strb r3,[r0,#2];
 //!             strb [sp],[r0,#3]
@@ -76,11 +76,9 @@
 //!   caller ignores the value.
 //! - No NULL or alignment guard on either pointer, matching the
 //!   original.
-//! - The byte-identical twin @ 0x082720ac (20 `bl` + 2 `b` sites of its
-//!   own) is a second copy ADS emitted in the same translation unit; it
-//!   is not ported here. Were it ported, LLVM's MergeFunctions would
-//!   fold the two bodies onto one symbol, the
-//!   `parse_result_init_alias_3134` situation.
+//! - `color_copy_unaligned` below ports the byte-identical twin at
+//!   0x082720ac. Its private ARM text section prevents LLVM from folding
+//!   its hook target into `color_copy`.
 
 /// Bytes in a colour value: `{R, G, B, A}`, one `ldrb`/`strb` pair each.
 pub const COLOR_BYTES: usize = 4;
@@ -95,6 +93,28 @@ pub const COLOR_BYTES: usize = 4;
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn color_copy(dst: *mut u8, src: *const u8) {
+    for i in 0..COLOR_BYTES {
+        dst.add(i).write_volatile(src.add(i).read_volatile());
+    }
+}
+
+/// color_copy_unaligned — original: `FUN_082720ac` @ 0x082720ac (36 bytes;
+/// **20 unconditional `bl` + 2 unconditional `b` call sites**,
+/// binary-scanned by decoding every B/BL word in osos.dec).
+///
+/// Copies four bytes in ascending address order with one volatile byte load
+/// and store per byte. This is a second ADS-emitted copy helper for the
+/// same unaligned RGBA colour value represented by [`color_copy`]. The
+/// function has no NULL or alignment guard and overlap propagates forward,
+/// exactly as its four `ldrb`/`strb` pairs do.
+///
+/// Deliberate deviation: its own ARM text section prevents LLVM's
+/// MergeFunctions pass from folding this independently hooked target into
+/// the byte-identical `color_copy` body.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.color_copy_082720ac")]
+#[inline(never)]
+pub unsafe extern "C" fn color_copy_unaligned(dst: *mut u8, src: *const u8) {
     for i in 0..COLOR_BYTES {
         dst.add(i).write_volatile(src.add(i).read_volatile());
     }
@@ -184,5 +204,42 @@ mod tests {
         let expected = bytes;
         unsafe { color_copy(bytes.as_mut_ptr(), bytes.as_ptr()) };
         assert_eq!(bytes, expected);
+    }
+
+    #[test]
+    fn unaligned_twin_copies_opaque_bytes_at_every_alignment() {
+        let source = [0, 0xff, 0x56, 0x78u8];
+        for src_shift in 0..4usize {
+            for dst_shift in 0..4usize {
+                let mut source_buffer = [0u8; COLOR_BYTES + 4];
+                source_buffer[src_shift..src_shift + COLOR_BYTES].copy_from_slice(&source);
+                let mut destination = [0xa5u8; COLOR_BYTES + 5];
+
+                unsafe {
+                    color_copy_unaligned(
+                        destination.as_mut_ptr().add(dst_shift),
+                        source_buffer.as_ptr().add(src_shift),
+                    )
+                };
+
+                assert_eq!(&destination[dst_shift..dst_shift + COLOR_BYTES], &source);
+                assert_eq!(destination[dst_shift + COLOR_BYTES], 0xa5);
+            }
+        }
+    }
+
+    #[test]
+    fn unaligned_twin_overlap_follows_each_forward_instruction_pair() {
+        for dst in 0..5usize {
+            for src in 0..5usize {
+                let mut bytes = [0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17u8];
+                let mut expected = bytes;
+                reference_forward_copy(&mut expected, dst, src);
+
+                unsafe { color_copy_unaligned(bytes.as_mut_ptr().add(dst), bytes.as_ptr().add(src)) };
+
+                assert_eq!(bytes, expected, "dst {dst}, src {src}");
+            }
+        }
     }
 }
