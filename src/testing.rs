@@ -123,6 +123,9 @@ pub mod hints {
     // 0x7a00_0000: dedicated to cxx/list_item_count's raw-u32 embedded
     // collection-pointer fixtures; mappings never unmap.
     pub const LIST_ITEM_COUNT: usize = 0x7a00_0000;
+    // 0x7f00_0000: dedicated to cxx/bit_set's write-transition fixture;
+    // fixture mappings never unmap, so no other user may share this hint.
+    pub const BIT_SET_WRITE: usize = 0x7f00_0000;
     // `heap/pool.rs` maps its own arena at 0x0800_0000 through a separate
     // path: it needs only bit 31 clear, not full u32 addressability.
 }
