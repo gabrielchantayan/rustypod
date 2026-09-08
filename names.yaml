@@ -33093,13 +33093,54 @@ functions:
   # Indexing it by codepoint is what makes it a character set: the ported
   # 0x0827489c below is the keyboards' allowed-character-set builder.
 
+  - address: 0x082746f4
+    ghidra: FUN_082746f4
+    name: bit_set_write
+    size: 128
+    sig: "void bit_set_write(BitSet *set, u32 bit, u32 value)"
+    module: cxx/bit_set
+    status: ported
+    renames:
+      param_1/r0: set
+      param_2/r1: bit
+      param_3/r2: value
+      uVar1/r5: word_index
+      uVar3/r6: bit_mask
+      FUN_082a4ef8: bit_set_test
+    notes: >-
+      Writes one BitSet bit and preserves the object-wide cardinality:
+      `word_index = bit >> 5`, `mask = 1 << (bit & 31)`, then
+      bit_set_test(set, word_index, bit & 31). `movs r0,r2; beq` makes
+      every nonzero value a SET request. A matching current state returns
+      with no store; a transition to set increments set+4 and ORs mask,
+      while a transition to clear decrements set+4 and XORs the known-set
+      mask. The clear XOR is safe precisely because the preceding test
+      establishes that bit is set.
+      EXTENT - 128 bytes, 0x082746f4..0x08274770, binary-verified from
+      osos.dec: `pop {r4, r5, r6, pc}` is the final word at 0x08274770;
+      the next function starts with `push {r4, r5, r6, lr}` at
+      0x08274774, and no literal pool intervenes. Ghidra's 128-byte extent
+      is exact here.
+      CALL SITES - 19 plain `bl`, 0 predicated `bl`, and 0 `b`,
+      binary-scanned by decoding every B/BL word in osos.dec. Every direct
+      caller therefore invokes it unconditionally; the function itself
+      owns the state-match early-outs.
+      CALLEE - bit_set_test @ 0x082a4ef8 is already ported in cxx/bit_set
+      and is called directly; no dispatch seam remains.
+      TESTS - host tests cover clear and set no-ops, bit positions
+      0/31/32/63, cardinality transitions, and a non-1 nonzero set value.
+      The separate UTF-8 insert tests now exercise this function directly.
+      Deviations - none. match.py structural review is expected to retain
+      the split index/mask, test call, two early returns, wrapping
+      cardinality update, and OR/XOR mutation, while differing in register
+      allocation and LLVM's frame.
   - address: 0x0827489c
     ghidra: FUN_0827489c
     name: bit_set_insert_utf8
     size: 64
     sig: "BitSet *bit_set_insert_utf8(BitSet *set, const char *text)"
     module: cxx/bit_set
-    vars: {param_1: set, param_2: text, local_c: cursor, iVar1: codepoint, FUN_08276214: utf8_next_codepoint, FUN_082746f4: BIT_SET_WRITE}
+    vars: {param_1: set, param_2: text, local_c: cursor, iVar1: codepoint, FUN_08276214: utf8_next_codepoint, FUN_082746f4: bit_set_write}
     status: ported
     notes: >-
       Walks `text` as UTF-8 and sets the bit named by each codepoint,
@@ -33126,31 +33167,22 @@ functions:
       0x08299b1c from 0x08299840, both text-input UI), and 0x081f99e8
       feeds it the result of string_object_c_str @ 0x082a50b0. These are
       the on-screen keyboards' allowed-character sets.
-      CALLEES - utf8_next_codepoint @ 0x08276214 is already ported
-      (cxx/string_object) and is called DIRECTLY. 0x082746f4 is unported
-      (its own callee 0x082a4ef8, since ported as bit_set_test, dereferences
-      the storage word) and rides
-      the BIT_SET_WRITE seam with a no-op default; nothing in this
-      function's control flow depends on the write's effects.
+      CALLEES - utf8_next_codepoint @ 0x08276214 and bit_set_write @
+      0x082746f4 are both ported in cxx/ and called DIRECTLY.
       INHERITED EDGES, both from the decoder - a 0xf0..0xff or invalid
       lead byte makes utf8_next_codepoint consume three bytes and return
       0, which this loop cannot distinguish from the terminator, so an
       astral-plane character truncates the insert; and codepoint 0 can
       never be inserted.
-      TESTS - 6 host tests over a recording seam - NULL text (the entry
-      guard keeps the decoder from ever seeing NULL), empty string,
-      the "0123456789" literal from the real call sites (one write per
-      character, value 1, `set` passed through unchanged), mixed
+      TESTS - 6 host tests directly exercise the real BitSet: NULL text,
+      empty string, the "0123456789" literal from the real call sites, mixed
       1/2/3-byte sequences decoded as single codepoints, a 4-byte lead
-      truncating the walk, and a repeated character written every time
-      (the dedupe lives in 0x082746f4's early-out, not here).
+      truncating the walk, and repeated-character cardinality deduplication.
       Deviations - none. match.py structural - same `mov r4, r0`, NULL
       guard, `add r0, sp, #4` cursor, decoder call, `cmp r0, #0`, the
-      `mov r1, r0; mov r0, r4; mov r2, #1` write and the `mov r0, r4`
-      return; differing by the crate's fp frame, the guard testing r1
-      before the spill instead of after (LLVM keeps the argument in a
-      register), the write being `blx` through the seam static, and the
-      loop rotated so the first decode is peeled.
+      `mov r1, r0; mov r0, r4; mov r2, #1` direct write, and the `mov r0,
+      r4` return; differing by the crate's fp frame and the loop rotated so
+      the first decode is peeled.
 
   - address: 0x082a4ef8
     ghidra: FUN_082a4ef8
