@@ -23028,6 +23028,46 @@ functions:
       context helpers at their fixed retailOS addresses; host-only mocks
       exercise the direct function's transitions and virtual dispatch.
 
+  - address: 0x08371418
+    ghidra: FUN_08371418
+    name: context_child_handle_acquire
+    size: 96
+    sig: "u32 context_child_handle_acquire(u8 *owner, u32 child_id, u8 **out_handle, u32 prepare_mode)"
+    module: cxx/context_child_handle
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: child_id
+      param_3/r2: out_handle
+      param_4/r3: prepare_mode
+      local_18: record
+      iVar1: status_or_handle
+    notes: >-
+      Extent verified from raw osos.dec: push {r3-r7,lr} starts at
+      0x08371418 and its pop {r3-r7,pc} ends at 0x08371474; the next
+      separately linked function begins at 0x08371478. Every ARM B/BL
+      word in the decrypted image was decoded: exactly 18 direct call
+      sites, all unconditional plain bl, with no predicated form; no
+      image data word equals this address, so it is a static entry point.
+      The owner word +0x00 supplies the Context for the unported lease
+      wrapper FUN_0837dc38. That wrapper preserves r3 while acquiring
+      and releasing the context activity lease around FUN_082dd05c, so
+      prepare_mode is forwarded exactly as the fourth argument. On
+      success the record's non-NULL +0x00 selects record +0x38 as the
+      handle, then the function stores owner at +0x40, payload
+      (record +0x34) at +0x44, record at +0x48, child_id at +0x4c, and
+      byte +0x08 as 100 only when child_id is 1. A nonzero resolver
+      status returns unchanged and does not map or initialize the handle.
+      Ghidra invented a stack-derived fourth parameter and marks
+      FUN_0837dc38 void, but raw r3 preservation and the cmp r0,#0 after
+      bl prove the forwarded argument and returned status. Deliberate
+      deviation: target builds call the still-unported 0x0837dc38
+      directly; host tests install a recording boundary only for that
+      external wrapper. Host tests cover primary and non-primary
+      initialization, r3 forwarding, and the failure path leaving output
+      untouched. match.py is structural only; its expected diff includes
+      host-boundary code and LLVM's different frame layout.
+
   - address: 0x0806f1a0
     ghidra: switchD_0807a000::caseD_7
     name: ata_handle_field4_is_positive
