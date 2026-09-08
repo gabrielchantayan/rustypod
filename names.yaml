@@ -42787,6 +42787,40 @@ functions:
       differences are the crate fp frame, LLVM fusing 367*m-362 into one
       smlabb accumulate operand, and reordered accumulation.
 
+  # --- Current calendar query -> normalized packed record (time/current_datetime) ---
+  - address: 0x0808e9e0
+    ghidra: FUN_0808e9e0
+    name: current_datetime_to_normalized_record
+    size: 108
+    sig: "u32 current_datetime_to_normalized_record(DateTime *out)"
+    module: time/current_datetime
+    status: ported
+    renames:
+      param_1/r0/r4: out
+      auStack_1c: calendar (20-byte current-calendar query record)
+      FUN_08056524: current_datetime_query (unported, shared fp/fp_misc seam)
+      FUN_0807ea68: datetime_day_number (ported, time/day_number)
+      FUN_0807eafc: day_number_to_datetime (unported, shared time/unix_to_datetime seam)
+    notes: >-
+      Raw extent is exactly 108 bytes, 0x0808e9e0..0x0808ea4c: the next
+      separately linked function opens at 0x0808ea4c with push {r3,lr}.
+      Decoding every ARM B/BL word in osos.dec (load base 0x08000000) finds
+      20 unconditional bl callers and no predicated bl or b tail caller,
+      matching the requested count. The raw body clears its 20-byte stack
+      calendar record through the ported IRAM memzero veneer 0x08037db8,
+      calls current_datetime_query @ 0x08056524, and deliberately ignores
+      that query's 0/1 return. It transfers calendar bytes +2..+6 into
+      out.second/minute/hour/day/month and the aligned little-endian
+      halfword +8 into out.year. datetime_day_number then returns the Rata
+      Die day number while storing out.weekday; day_number_to_datetime
+      receives that day number and out, normalizing the date fields. It
+      returns 1 unconditionally. The port calls the two pre-existing
+      volatile seams rather than adding duplicate dispatch state; on the
+      target each reaches its verified firmware address, and host mocks
+      verify one query and one conversion, the ignored false query status,
+      exact calendar extraction, preserved unassigned padding, weekday 4
+      for 1970-01-01, Rata Die 719163, and the converter's final write.
+
 
   # --- Proleptic-Gregorian leap-year test (time/leap_year) ---
   - address: 0x080aabac

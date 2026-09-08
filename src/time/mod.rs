@@ -1,5 +1,6 @@
 //! Time library (mktime/localtime/gmtime).
 pub mod civil;
+pub mod current_datetime;
 pub mod datetime;
 pub mod day_number;
 pub mod leap_year;
