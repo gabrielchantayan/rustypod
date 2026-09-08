@@ -71,6 +71,7 @@ pub mod resource_chain;
 pub mod scoped_context;
 pub mod service_manager;
 pub mod service_handler_availability;
+pub mod service_handler_slot_bit_update;
 pub mod silver_controller;
 pub mod silver_list_table;
 pub mod singletons;
