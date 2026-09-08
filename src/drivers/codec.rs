@@ -1,84 +1,52 @@
-//! `codec_update_bits` — original: `FUN_080d5170` @ `0x080d5170`
-//! (56 bytes, 14 instructions, 0x080d5170..0x080d51a8 — Ghidra's 56-byte
-//! extent is CORRECT here: the next function opens at 0x080d51a8 with
-//! `push {r4,r5,r6,lr}`; **36 `bl` call sites, 0 predicated**, verified by
-//! decoding every B/BL word in osos.dec: 6 inside `FUN_0809393c` @
-//! 0x0809393c (0x08093a1c..0x08093a78), 28 inside `FUN_080aa0a0` @
-//! 0x080aa0a0, and 2 inside the sibling dispatcher `FUN_080d51a8` @
-//! 0x080d51a8 immediately below).
+//! Audio-codec register access.
 //!
-//! # Algorithm
+//! # Ported functions
 //!
-//! Read-modify-write of one byte-wide register on the I2C device at slave
-//! address 0x4a — the 6G audio codec: every caller configures audio
-//! (`FUN_080aa0a0` is a codec init/power-mode sequencer — register 0 reset
-//! strobed 0x99 -> 0, a 0x2e..0x3f register dump, 75 ms delay, four output
-//! channels powered via the bit-7 power-down of regs 0x1a..0x1d;
-//! `FUN_0809393c` is a route/mute flag decoder — mute bits at regs
-//! 0x10/0x11 bit 7). The body:
+//! - `codec_write_reg` — original: `FUN_080b2894` @ `0x080b2894` (40 bytes,
+//!   10 instructions). Raw bytes put its final `pop {ip,pc}` at
+//!   `0x080b28b8`; the distinct sibling function begins with
+//!   `push {r4,r5,r6,r7,r8,lr}` at `0x080b28bc`, confirming Ghidra's extent.
+//!   Decoding every ARM B/BL word in osos.dec finds **19 plain,
+//!   unconditional `bl` callers and zero predicated forms**: one in
+//!   `FUN_0809393c`, 16 in the codec-init sequence `FUN_080aa0a0`, one at
+//!   raw caller address `0x080b2820`, and one in `codec_update_bits`.
+//! - `codec_update_bits` — original: `FUN_080d5170` @ `0x080d5170` (56
+//!   bytes, 14 instructions, `0x080d5170..0x080d51a8`; Ghidra's extent is
+//!   correct). It has 36 plain `bl` call sites and no predicated forms.
 //!
-//! ```text
-//! 080d5170  push {r3, r4, r5, r6, r7, lr}   @ one 4-byte stack slot
-//! 080d5174  mov  r4, r1                     @ r4 = mask
-//! 080d5178  mov  r1, sp                     @ reader out-pointer
-//! 080d517c  mov  r6, r0                     @ r6 = reg
-//! 080d5180  mov  r5, r2                     @ r5 = value
-//! 080d5184  bl   0x080aa060                 @ codec_read_reg(reg, &slot)
-//! 080d5188  ldrh r0, [sp]                   @ old = slot (zero-extended)
-//! 080d518c  and  r1, r5, r4                 @ value & mask
-//! 080d5190  bic  r0, r0, r4                 @ old & ~mask
-//! 080d5194  orr  r1, r0, r1                 @ merged
-//! 080d5198  mov  r0, r6                     @ reg
-//! 080d519c  str  r1, [sp]                   @ dead store (see notes)
-//! 080d51a0  bl   0x080b2894                 @ codec_write_reg(reg, merged)
-//! 080d51a4  pop  {r3, r4, r5, r6, r7, pc}
-//! ```
+//! # Algorithms
 //!
-//! `merged = (old & !mask) | (value & mask)` in full 32-bit arithmetic;
-//! `old` is the halfword the reader stored (`ldrh`, zero-extended). The
-//! writer receives the merged word untruncated in r1 and itself keeps only
-//! the low byte (`strb r1, [sp, #1]` in its body).
-//!
-//! The callees (neither ported):
-//!
-//! - `0x080aa060` — codec register read: writes the register index to I2C
-//!   slave 0x4a (`FUN_0836bb84`, 1 byte), reads one byte back
-//!   (`FUN_0836b950`), stores it to `*out` with `strh` (high byte 0). An
-//!   RTXC semaphore pair (`0x0806a4a0` wait / `0x080645a8` signal)
-//!   brackets the transaction.
-//! - `0x080b2894` — codec register write: pushes {reg, value} as two bytes
-//!   to slave 0x4a (`FUN_0836bb84`, 2 bytes), same semaphore bracket.
+//! `codec_write_reg` puts the low bytes of `(reg, value)` into a two-byte
+//! stack buffer, acquires RTXC semaphore 5, writes the buffer to I2C slave
+//! `0x4a`, then releases semaphore 5. It ignores the transfer status and
+//! returns the release's r0 word. `codec_update_bits` reads one byte-wide
+//! register then writes `(old & !mask) | (value & mask)` in full 32-bit
+//! arithmetic. The writer truncates that merged word to its low byte.
 //!
 //! # Deliberate deviations
 //!
-//! - The `str r1, [sp]` before the write call is dead: the writer takes
-//!   the value in r1 and never reads the slot. The port drops it (the slot
-//!   itself is kept as the reader's out-parameter, matching the `strh`/
-//!   `ldrh` halfword protocol).
-//! - Both callees dispatch through installable volatile slots
-//!   ([`CODEC_READ_REG`] / [`CODEC_WRITE_REG`], the house foreign-service
-//!   pattern): the target defaults transmute the retail addresses
-//!   0x080aa060 / 0x080b2894, so the port is hook-ready on device; host
-//!   tests install recording mocks. `bl` becomes `blx` through the slot.
-//! - Ghidra's C drops the third argument at several call sites
-//!   (`FUN_080d5170(3,0xff)` in `FUN_080aa0a0` is really
-//!   `codec_update_bits(3, 0xff, r2)` with r2 live from the caller's
-//!   frame); the signature here follows the ARM, which always reads r2.
+//! - Raw S5L8702 I2C write `FUN_0836bb84` remains unported. This module
+//!   reaches it through a typed fixed-address call on target and a volatile
+//!   recording seam on host; that turns the original direct `bl` into `blx`.
+//! - The semaphore wrappers are the existing
+//!   [`crate::kernel::task_lock::kernel_sem5_wait`] and
+//!   [`crate::kernel::task_lock::kernel_sem5_signal`] ports, inheriting their
+//!   documented ROM-hook deviation.
+//! - Codec register read `FUN_080aa060` remains behind its existing
+//!   [`CODEC_READ_REG`] seam. The newly ported writer is called directly;
+//!   its former `CODEC_WRITE_REG` seam is removed.
+//! - `codec_update_bits` drops the ARM's dead `str r1, [sp]` before its
+//!   writer call. Ghidra also drops r2 at several call sites; ARM reads it.
+
+use crate::kernel::task_lock::{kernel_sem5_signal, kernel_sem5_wait};
 
 /// ABI of the retail codec register read @ `0x080aa060`: fetches register
 /// `reg` of I2C slave 0x4a and stores the byte to `*out` as a u16
 /// (`strh`, high byte zero).
 pub type CodecReadRegFn = unsafe extern "C" fn(reg: u32, out: *mut u16);
 
-/// ABI of the retail codec register write @ `0x080b2894`: writes the low
-/// byte of `value` to register `reg` of I2C slave 0x4a.
-pub type CodecWriteRegFn = unsafe extern "C" fn(reg: u32, value: u32);
-
 /// RetailOS load address of the codec register read.
 pub const CODEC_READ_REG_ADDRESS: usize = 0x080a_a060;
-
-/// RetailOS load address of the codec register write.
-pub const CODEC_WRITE_REG_ADDRESS: usize = 0x080b_2894;
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn retail_codec_read_reg(reg: u32, out: *mut u16) {
@@ -86,25 +54,13 @@ unsafe extern "C" fn retail_codec_read_reg(reg: u32, out: *mut u16) {
     read(reg, out)
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_codec_write_reg(reg: u32, value: u32) {
-    let write: CodecWriteRegFn = core::mem::transmute(CODEC_WRITE_REG_ADDRESS);
-    write(reg, value)
-}
-
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_codec_read_reg(_reg: u32, _out: *mut u16) {
     panic!("codec_update_bits requires codec read 0x080aa060")
 }
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_codec_write_reg(_reg: u32, _value: u32) {
-    panic!("codec_update_bits requires codec write 0x080b2894")
-}
-
 /// Active boundary for the unported codec register read (0x080aa060). On
-/// the target it calls directly into retailOS; host tests replace it with
-/// a recording implementation.
+/// target it calls retailOS; host tests replace it with a recorder.
 #[cfg(target_os = "none")]
 pub static mut CODEC_READ_REG: CodecReadRegFn = retail_codec_read_reg;
 
@@ -112,24 +68,58 @@ pub static mut CODEC_READ_REG: CodecReadRegFn = retail_codec_read_reg;
 #[cfg(not(target_os = "none"))]
 pub static mut CODEC_READ_REG: CodecReadRegFn = missing_codec_read_reg;
 
-/// Active boundary for the unported codec register write (0x080b2894). On
-/// the target it calls directly into retailOS; host tests replace it with
-/// a recording implementation.
-#[cfg(target_os = "none")]
-pub static mut CODEC_WRITE_REG: CodecWriteRegFn = retail_codec_write_reg;
+/// ABI of raw S5L8702 I2C transfer `FUN_0836bb84`: write `len` bytes from
+/// `buf` to `slave`, returning its status word.
+type I2cWriteFn = unsafe extern "C" fn(slave: u32, len: u32, buf: *const u8) -> u32;
 
-/// Active host boundary for the unported codec register write.
+/// RetailOS load address of the raw S5L8702 I2C write transfer.
+const I2C_WRITE_ADDRESS: usize = 0x0836_bb84;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn i2c_write(slave: u32, len: u32, buf: *const u8) -> u32 {
+    let write: I2cWriteFn = core::mem::transmute(I2C_WRITE_ADDRESS);
+    write(slave, len, buf)
+}
+
 #[cfg(not(target_os = "none"))]
-pub static mut CODEC_WRITE_REG: CodecWriteRegFn = missing_codec_write_reg;
+unsafe extern "C" fn missing_i2c_write(_slave: u32, _len: u32, _buf: *const u8) -> u32 {
+    panic!("codec_write_reg requires I2C write 0x0836bb84")
+}
+
+/// Active host boundary for the unported raw I2C write transfer.
+#[cfg(not(target_os = "none"))]
+static mut I2C_WRITE: I2cWriteFn = missing_i2c_write;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn i2c_write(slave: u32, len: u32, buf: *const u8) -> u32 {
+    core::ptr::read_volatile(core::ptr::addr_of!(I2C_WRITE))(slave, len, buf)
+}
 
 #[inline(always)]
 unsafe fn codec_read_reg() -> CodecReadRegFn {
     core::ptr::read_volatile(core::ptr::addr_of!(CODEC_READ_REG))
 }
 
-#[inline(always)]
-unsafe fn codec_write_reg() -> CodecWriteRegFn {
-    core::ptr::read_volatile(core::ptr::addr_of!(CODEC_WRITE_REG))
+/// codec_write_reg — original: `FUN_080b2894` @ `0x080b2894` (40 bytes).
+///
+/// Stores the low byte of `reg` and `value` in order, acquires semaphore 5,
+/// sends those two bytes to I2C slave 0x4a, then releases semaphore 5. The
+/// raw transfer result is deliberately discarded; the semaphore release's r0
+/// word returns to the caller, exactly as the final `pop {ip,pc}` preserves it.
+///
+/// # Safety
+///
+/// On target this performs a synchronous write to the audio codec. The raw
+/// hardware transfer is not ported and must be callable at `0x0836bb84`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn codec_write_reg(reg: u32, value: u32) -> usize {
+    let bytes = [reg as u8, value as u8];
+    kernel_sem5_wait();
+    i2c_write(0x4a, 2, bytes.as_ptr());
+    kernel_sem5_signal()
 }
 
 /// codec_update_bits — original: `FUN_080d5170` @ `0x080d5170` (56 bytes).
@@ -151,7 +141,7 @@ pub unsafe extern "C" fn codec_update_bits(reg: u32, mask: u32, value: u32) {
     let mut old: u16 = 0;
     codec_read_reg()(reg, &mut old);
     let merged = ((old as u32) & !mask) | (value & mask);
-    codec_write_reg()(reg, merged);
+    codec_write_reg(reg, merged);
 }
 
 #[cfg(test)]
@@ -159,7 +149,9 @@ mod tests {
     extern crate std;
 
     use super::*;
+    use crate::kernel::task_lock::{self, RomThunkOps};
     use std::sync::Mutex;
+    use std::vec;
     use std::vec::Vec;
 
     static SEAM_LOCK: Mutex<()> = Mutex::new(());
@@ -167,47 +159,88 @@ mod tests {
     #[derive(Clone, Copy, PartialEq, Debug)]
     enum Op {
         Read { reg: u32 },
-        Write { reg: u32, value: u32 },
+        Wait(usize),
+        Transfer { slave: u32, bytes: [u8; 2] },
+        Signal(usize),
     }
 
     static mut OPS: Vec<Op> = Vec::new();
     static mut READ_RESULT: u16 = 0;
+    static mut I2C_STATUS: u32 = 0;
+    static mut SIGNAL_RESULT: usize = 0;
 
     unsafe extern "C" fn recording_read(reg: u32, out: *mut u16) {
         OPS.push(Op::Read { reg });
         *out = READ_RESULT;
     }
 
-    unsafe extern "C" fn recording_write(reg: u32, value: u32) {
-        OPS.push(Op::Write { reg, value });
+    unsafe extern "C" fn recording_wait(sem: usize) -> usize {
+        OPS.push(Op::Wait(sem));
+        0
     }
 
-    struct Reset;
+    unsafe extern "C" fn recording_transfer(slave: u32, len: u32, buf: *const u8) -> u32 {
+        assert_eq!(len, 2, "codec_write_reg always sends two bytes");
+        OPS.push(Op::Transfer {
+            slave,
+            bytes: [buf.read(), buf.add(1).read()],
+        });
+        I2C_STATUS
+    }
+
+    unsafe extern "C" fn recording_signal(sem: usize) -> usize {
+        OPS.push(Op::Signal(sem));
+        SIGNAL_RESULT
+    }
+
+    struct Reset {
+        original_kernel: RomThunkOps,
+    }
 
     impl Reset {
         fn install() -> Self {
             unsafe {
+                let original_kernel = task_lock::ROM_KERNEL;
+                let mut kernel = original_kernel;
+                kernel.rom_sem_wait = recording_wait;
+                kernel.rom_sem_signal = recording_signal;
+                task_lock::ROM_KERNEL = kernel;
                 CODEC_READ_REG = recording_read;
-                CODEC_WRITE_REG = recording_write;
+                I2C_WRITE = recording_transfer;
                 OPS.clear();
+                READ_RESULT = 0;
+                I2C_STATUS = 0;
+                SIGNAL_RESULT = 0;
+                Reset { original_kernel }
             }
-            Reset
         }
     }
 
     impl Drop for Reset {
         fn drop(&mut self) {
             unsafe {
+                task_lock::ROM_KERNEL = self.original_kernel;
                 CODEC_READ_REG = missing_codec_read_reg;
-                CODEC_WRITE_REG = missing_codec_write_reg;
+                I2C_WRITE = missing_i2c_write;
                 OPS.clear();
                 READ_RESULT = 0;
+                I2C_STATUS = 0;
+                SIGNAL_RESULT = 0;
             }
         }
     }
 
-    /// One mocked transaction; returns the word the writer saw.
-    fn run(old: u16, reg: u32, mask: u32, value: u32) -> Vec<Op> {
+    fn writer_ops(reg: u32, value: u32, i2c_status: u32, signal_result: usize) -> (usize, Vec<Op>) {
+        unsafe {
+            OPS.clear();
+            I2C_STATUS = i2c_status;
+            SIGNAL_RESULT = signal_result;
+            let result = codec_write_reg(reg, value);
+            (result, OPS.clone())
+        }
+    }
+
+    fn update_ops(old: u16, reg: u32, mask: u32, value: u32) -> Vec<Op> {
         unsafe {
             OPS.clear();
             READ_RESULT = old;
@@ -217,34 +250,68 @@ mod tests {
     }
 
     #[test]
-    fn read_precedes_write_and_reg_is_forwarded_to_both() {
-        let _lock = SEAM_LOCK
+    fn writer_truncates_inputs_and_brackets_two_byte_transfer() {
+        let _kernel_lock = task_lock::tests::OPS_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _seam_lock = SEAM_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _reset = Reset::install();
-        let ops = run(0xa5, 0x1b, 0x80, 0x80);
+        for (reg, value) in [(0, 0), (0x123, 0x1ff), (0xffff_ffff, 0xdead_beef)] {
+            assert_eq!(
+                writer_ops(reg, value, 0, 0),
+                (
+                    0,
+                    vec![
+                        Op::Wait(5),
+                        Op::Transfer {
+                            slave: 0x4a,
+                            bytes: [reg as u8, value as u8],
+                        },
+                        Op::Signal(5),
+                    ],
+                ),
+                "reg={reg:#x} value={value:#x}"
+            );
+        }
+    }
+
+    #[test]
+    fn writer_ignores_transfer_status_but_returns_release_word() {
+        let _kernel_lock = task_lock::tests::OPS_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _seam_lock = SEAM_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _reset = Reset::install();
         assert_eq!(
-            ops,
-            [
-                Op::Read { reg: 0x1b },
-                Op::Write {
-                    reg: 0x1b,
-                    value: 0xa5
-                }
-            ],
-            "one read then one write, register unchanged on both edges"
+            writer_ops(0x1a, 0x1e0, 9, 0xfeed),
+            (
+                0xfeed,
+                vec![
+                    Op::Wait(5),
+                    Op::Transfer {
+                        slave: 0x4a,
+                        bytes: [0x1a, 0xe0],
+                    },
+                    Op::Signal(5),
+                ],
+            ),
+            "release remains unconditional after I2C failure and its r0 survives"
         );
     }
 
     #[test]
-    fn merge_formula_matches_the_arm_bit_ops() {
-        let _lock = SEAM_LOCK
+    fn update_reads_then_writes_merged_low_byte() {
+        let _kernel_lock = task_lock::tests::OPS_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _seam_lock = SEAM_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let _reset = Reset::install();
-        // old, mask, value — covers: mask 0 (keep old), mask 0xff (replace),
-        // partial masks, value bits outside the mask dropped, old bits
-        // outside the mask kept, and a mask wider than a byte.
         let cases: [(u16, u32, u32); 12] = [
             (0x00, 0x00, 0xff),
             (0xa5, 0x00, 0xff),
@@ -254,43 +321,26 @@ mod tests {
             (0xa5, 0x80, 0x80),
             (0xa5, 0x80, 0x00),
             (0x55, 0x1c, 0x14),
-            (0xff, 0x1ff, 0x1ff), // mask wider than a byte: merged keeps bit 8
+            (0xff, 0x1ff, 0x1ff),
             (0x00, 0xffff_ffff, 0xdead_beef),
             (0x7f, 0xaa, 0x55),
-            (0x1ab, 0x0f, 0x05), // reader halfword above 0xff: ldrh sees it all
+            (0x1ab, 0x0f, 0x05),
         ];
         for (old, mask, value) in cases {
-            let ops = run(old, 7, mask, value);
-            let expected = ((old as u32) & !mask) | (value & mask);
-            match ops[1] {
-                Op::Write { reg, value: written } => {
-                    assert_eq!(reg, 7);
-                    assert_eq!(
-                        written, expected,
-                        "old={old:#06x} mask={mask:#010x} value={value:#010x}"
-                    );
-                }
-                other => panic!("expected a write, saw {other:?}"),
-            }
+            let merged = ((old as u32) & !mask) | (value & mask);
+            assert_eq!(
+                update_ops(old, 7, mask, value),
+                vec![
+                    Op::Read { reg: 7 },
+                    Op::Wait(5),
+                    Op::Transfer {
+                        slave: 0x4a,
+                        bytes: [7, merged as u8],
+                    },
+                    Op::Signal(5),
+                ],
+                "old={old:#06x} mask={mask:#010x} value={value:#010x}"
+            );
         }
-    }
-
-    #[test]
-    fn writer_receives_the_merged_word_untruncated() {
-        let _lock = SEAM_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _reset = Reset::install();
-        // mask 0x100 selects a bit above the byte the codec owns; the
-        // original still hands the full merged word to the writer in r1
-        // (the writer's own strb keeps only the low byte).
-        let ops = run(0x12, 2, 0x1f0, 0x1a0);
-        assert_eq!(
-            ops[1],
-            Op::Write {
-                reg: 2,
-                value: 0x1a2
-            }
-        );
     }
 }
