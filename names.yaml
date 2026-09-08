@@ -32586,6 +32586,43 @@ functions:
       invalid path; the diff is the crate fp frame and LLVM branching
       (beq) where ADS predicated (ldrne/moveq).
 
+  # --- Tagged value construction (cxx/tagged_value) ---
+  - address: 0x0828407c
+    ghidra: FUN_0828407c
+    name: tagged_value_from_optional_word4
+    size: 108
+    sig: "TaggedValue *tagged_value_from_optional_word4(TaggedValue *this, const u32 *source_words)"
+    module: cxx/tagged_value
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      param_2/r1: source_words (class identity unrecovered; word +0x04 only)
+      DAT_082840dc: tagged_value_guard_base (0x089ca608)
+      DAT_082840e0: default_tagged_value_guard (0x089ca620)
+      DAT_082840e4: default_tagged_value (0x08a126ac)
+      FUN_08258d00: tagged_value_copy
+      FUN_08258d28: tagged_value_construct_kind1
+      FUN_08258d48: tagged_value_default_construct
+      FUN_082ab31c: cxa_guard_acquire (ported, runtime/cxa_guard.rs)
+      FUN_082ab338: cxa_guard_release (ported, runtime/cxa_guard.rs)
+    notes: >-
+      EXTENT CORRECTED: Ghidra's 96 bytes are the code at
+      0x0828407c..0x082840d8; three literal-pool words at
+      0x082840dc..0x082840e4 make the true extent 108 bytes, and
+      0x082840e8 is the next function. Decoding every ARM B/BL word in
+      osos.dec found 18 direct call sites: 18 unconditional bl, zero
+      predicated bl, zero tail b. The opaque source contributes only its
+      aligned word at +0x04: nonzero tail-constructs the 16-byte result
+      as {vtable 0x089a76fc, kind byte 1, source word, 0}; zero lazily
+      initializes the BSS default at 0x08a126ac with the ADS guard at
+      0x089ca620, then copies its vtable, kind byte, and +0x08/+0x0c
+      words. The source class and the target of the vtable literal are
+      not recovered, so no identity or dispatch seam is invented.
+      Deliberate deviation: fixed firmware RAM addresses become host
+      statics; the vtable remains an opaque u32 identity. Host tests
+      cover nonzero construction, zero/default initialization, padding
+      preservation, and the already-initialized path.
+
   # --- Application context scope (app/context_scope) ---
   - address: 0x082840e8
     ghidra: FUN_082840e8
