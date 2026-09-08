@@ -48563,3 +48563,41 @@ functions:
       through a volatile seam. Tests cover set, clear-to-empty while
       preserving status bits, the ARM shift counts 31, 32, and 0x100, and
       tail invocation after the writes.
+
+  # --- buffered stream discard skip ---
+  - address: 0x080bbb00
+    ghidra: FUN_080bbb00
+    name: buffered_stream_skip
+    size: 124
+    sig: "i32 buffered_stream_skip(void *owner, i32 distance)"
+    module: ft/buffer_skip
+    status: ported
+    renames:
+      param_1: owner
+      param_1_plus_0x0: stream
+      param_1_plus_0x14: discard_buffer
+      param_2: distance
+      local_18: position
+      local_14: chunk
+      FUN_08042e70: buffered_stream_tell
+      FUN_08043124: buffered_stream_seek
+      FUN_08042fd4: buffered_stream_read
+    notes: >-
+      Raw ARM confirms the exact 124-byte extent 0x080bbb00..0x080bbb7c:
+      the next separately linked function starts with `push {r3,r4,r5,r6,r7,lr}`
+      at 0x080bbb7c. Negative distance obtains the 64-bit current position
+      through 0x08042e70, adds the sign-extended i32 with carry, then calls
+      0x08043124 with the result in the aligned r2/r3 pair. Nonnegative
+      distance repeatedly subtracts min(distance, 0x8000) before calling
+      0x08042fd4 to read into owner+0x14; a callee-modified count slot cannot
+      alter later chunk requests. Zero returns 0 without a call, and every
+      callee error propagates unchanged. Decoding every ARM B/BL word in
+      osos.dec found exactly 18 inbound branches, all unconditional BL at
+      0x0806403c, 0x08064098, 0x080640e4, 0x0807f938, 0x0807f990,
+      0x0807fa5c, 0x0807fac8, 0x0807fae0, 0x0807fb6c, 0x0807fc50,
+      0x0807fd54, 0x0809641c, 0x08096448, 0x08096480, 0x0809ed40,
+      0x0809ee34, 0x0809ee88, and 0x0809eea0; no predicated BL or plain B
+      callers. The three unported buffered-stream callees use volatile,
+      host-replaceable seams; target builds transmute their verified retailOS
+      entry addresses directly. Tests cover zero, 32 KiB chunking, read
+      failure, negative wraparound, and tell failure.
