@@ -69,14 +69,13 @@
 //!
 //! # Deviations
 //!
-//! - **Three callees remain unported** and dispatch through
+//! - **Two callees remain unported** and dispatch through
 //!   [`ANIMATION_INIT_OPS`] (the `app/pending_event_take.rs` pattern):
-//!   target builds transmute the ROM addresses 0x08273a14 (retain:
-//!   `flags & 2 ? word(+0x14) += 4 : noop`) and
-//!   0x082738e0/0x08273898; host defaults are inert stubs and every test
-//!   installs recording reference models. Release 0x082739e0 is now the
-//!   direct [`crate::app::refcounted_value::release_refcounted_value`] port.
-//!   The shared base constructor
+//!   target builds transmute the ROM addresses 0x082738e0/0x08273898; host
+//!   defaults are inert stubs and every test installs recording wheel models.
+//!   Retain 0x08273a14 and release 0x082739e0 are direct
+//!   [`crate::app::refcounted_value`] ports.
+//! - The shared base constructor
 //!   [`crate::app::fixed_value::refcounted_base_init`] is ported and called
 //!   directly, like the original's direct `bl`.
 //! - The scheduler pointer is loaded through the live global word
@@ -91,7 +90,7 @@
 //!   select, which changes nothing observable.
 
 use crate::app::fixed_value::{refcounted_base_init, FixedValue};
-use crate::app::refcounted_value::release_refcounted_value;
+use crate::app::refcounted_value::{release_refcounted_value, retain_value};
 
 /// Firmware load address of the animation vtable literal (pool word at
 /// 0x08166c54). Address constant only — see the module header's caveat.
@@ -102,9 +101,8 @@ pub const ANIMATION_VTABLE: u32 = 0x0898_7f00;
 /// both wheel calls).
 pub const SCHEDULER_SINGLETON_GLOBAL: usize = 0x089c_c7e0;
 
-/// Firmware load addresses of the three unported callees, kept beside the
-/// transmutes below.
-pub const RETAIN_ADDRESS: usize = 0x0827_3a14;
+/// Firmware load addresses of the two unported wheel callees, kept beside
+/// the transmutes below.
 pub const WHEEL_REMOVE_ADDRESS: usize = 0x0827_38e0;
 pub const WHEEL_INSERT_ADDRESS: usize = 0x0827_3898;
 
@@ -151,14 +149,11 @@ const _: () = assert!(core::mem::offset_of!(Animation, from_value) == 0x18);
 const _: () = assert!(core::mem::offset_of!(Animation, to_value) == 0x1c);
 const _: () = assert!(core::mem::offset_of!(Animation, current_value) == 0x20);
 
-/// Indirect dispatch for the three unported callees (see the module header).
-/// Host tests install recording models; a later port of each replaces its
-/// default without touching this caller.
+/// Indirect dispatch for the two unported wheel callees (see the module
+/// header). Host tests install recording models; a later port of either
+/// replaces its default without touching this caller.
 #[derive(Clone, Copy)]
 pub struct AnimationInitOps {
-    /// Retain 0x08273a14 `(value)`: when flag bit 1 is set, add 4 to the
-    /// flags/refcount word at +0x14. No return value.
-    pub retain_value: unsafe extern "C" fn(value: *mut FixedValue),
     /// Timing-wheel remove 0x082738e0 `(table, node)`: unlink `node`
     /// from bucket `node->rank - 1` iff the linked flag is set.
     pub wheel_remove: unsafe extern "C" fn(table: *mut u8, node: *mut Animation),
@@ -167,11 +162,6 @@ pub struct AnimationInitOps {
     pub wheel_insert: unsafe extern "C" fn(table: *mut u8, node: *mut Animation),
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_retain(value: *mut FixedValue) {
-    let f: unsafe extern "C" fn(*mut FixedValue) = core::mem::transmute(RETAIN_ADDRESS);
-    f(value)
-}
 
 
 #[cfg(target_os = "none")]
@@ -188,10 +178,6 @@ unsafe extern "C" fn firmware_wheel_insert(table: *mut u8, node: *mut Animation)
     f(table, node)
 }
 
-/// Host defaults: inert — every test installs its own model.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_retain(_value: *mut FixedValue) {}
-
 
 /// Host default: inert.
 #[cfg(not(target_os = "none"))]
@@ -201,10 +187,9 @@ unsafe extern "C" fn firmware_wheel_remove(_table: *mut u8, _node: *mut Animatio
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn firmware_wheel_insert(_table: *mut u8, _node: *mut Animation) {}
 
-/// Wired defaults: ROM addresses on target, documented inert stubs on
-/// host.
+/// Wired defaults: ROM wheel addresses on target and documented inert wheel
+/// stubs on host.
 pub const DEFAULT_ANIMATION_INIT_OPS: AnimationInitOps = AnimationInitOps {
-    retain_value: firmware_retain,
     wheel_remove: firmware_wheel_remove,
     wheel_insert: firmware_wheel_insert,
 };
@@ -272,9 +257,9 @@ pub unsafe extern "C" fn animation_init(
     (ops.wheel_remove)(table, this);
 
     // 08166bcc..08166bdc: retain(current), retain(from), retain(to).
-    (ops.retain_value)(current_value);
-    (ops.retain_value)(from);
-    (ops.retain_value)(to);
+    retain_value(current_value.cast());
+    retain_value(from.cast());
+    retain_value(to.cast());
 
     // 08166be0..08166c00: memberwise-assign release of each OLD slot,
     // checked current (+0x20) first, then from (+0x18), then to (+0x1c).
@@ -337,10 +322,11 @@ pub unsafe extern "C" fn animation_init(
 /// addition, then reinserts the node. `value` has no NULL guard because
 /// the stock body dereferences `value + 8` unconditionally.
 ///
-/// Deliberate deviation: the three unported direct callees use the existing
-/// [`ANIMATION_INIT_OPS`] volatile seam. Release is now called through the
-/// direct [`release_refcounted_value`] port. The scheduler-global word is read
-/// separately for remove and insert, as in the two stock `ldr [r5]` sites.
+/// Deliberate deviation: the two unported wheel callees use the existing
+/// [`ANIMATION_INIT_OPS`] volatile seam. Retain and release are called through
+/// their direct [`crate::app::refcounted_value`] ports. The scheduler-global
+/// word is read separately for remove and insert, as in the two stock `ldr [r5]`
+/// sites.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn animation_set_current_value(
@@ -352,7 +338,7 @@ pub unsafe extern "C" fn animation_set_current_value(
     // 08166b40..08166b44: unlink before changing rank or the slot.
     (ops.wheel_remove)(scheduler_table(), this);
     // 08166b48..08166b4c: retain the incoming value before releasing old.
-    (ops.retain_value)(value);
+    retain_value(value.cast());
 
     // 08166b50..08166b5c: memberwise-assign's conditional old-value
     // release, then the +0x20 replacement.
@@ -397,7 +383,6 @@ mod tests {
         }
     }
 
-    const EVENT_RETAIN: u32 = 1;
     const EVENT_WHEEL_REMOVE: u32 = 3;
     const EVENT_WHEEL_INSERT: u32 = 4;
 
@@ -437,18 +422,6 @@ mod tests {
         }
     }
 
-    unsafe extern "C" fn recording_retain(value: *mut FixedValue) {
-        // The firmware arithmetic: flag bit 1 gates the += 4.
-        if (*value).flags as u8 & 2 != 0 {
-            (*value).flags = (*value).flags.wrapping_add(4);
-        }
-        record(Event {
-            kind: EVENT_RETAIN,
-            argument: value as usize,
-            extra: 0,
-            rank_at_insert: None,
-        });
-    }
 
 
     unsafe extern "C" fn recording_wheel_remove(table: *mut u8, node: *mut Animation) {
@@ -478,7 +451,6 @@ mod tests {
 
     unsafe fn install_recording_ops() {
         core::ptr::addr_of_mut!(ANIMATION_INIT_OPS).write_volatile(AnimationInitOps {
-            retain_value: recording_retain,
             wheel_remove: recording_wheel_remove,
             wheel_insert: recording_wheel_insert,
         });
@@ -682,7 +654,7 @@ mod tests {
     }
 
     #[test]
-    fn the_call_protocol_is_remove_retain_x3_assign_insert() {
+    fn direct_retain_calls_are_bracketed_by_wheel_calls() {
         let _lock = take_lock();
         let _restore = SeamGuard;
         let Some(f) = fixture() else {
@@ -700,28 +672,23 @@ mod tests {
             animation_init(f.animation, f.current, f.from, f.to);
 
             let seen = log();
-            let kinds: std::vec::Vec<u32> = seen.iter().map(|e| e.kind).collect();
             assert_eq!(
-                kinds,
-                std::vec![
-                    EVENT_WHEEL_REMOVE,
-                    EVENT_RETAIN,
-                    EVENT_RETAIN,
-                    EVENT_RETAIN,
-                    EVENT_WHEEL_INSERT,
-                ],
-                "unlink first, three retains, then the insert"
+                seen.iter().map(|event| event.kind).collect::<std::vec::Vec<_>>(),
+                std::vec![EVENT_WHEEL_REMOVE, EVENT_WHEEL_INSERT],
+                "the two unported wheel calls bracket direct retains"
             );
             assert_eq!(seen[0].argument, f.animation as usize, "remove targets this");
-            assert_eq!(seen[1].argument, f.current as usize, "retain order: current");
-            assert_eq!(seen[2].argument, f.from as usize, "then from");
-            assert_eq!(seen[3].argument, f.to as usize, "then to");
-            assert_eq!(seen[4].argument, f.animation as usize, "insert targets this");
+            assert_eq!(seen[1].argument, f.animation as usize, "insert targets this");
             assert_eq!(
-                seen[0].extra, f.table as usize,
+                [(*f.current).flags, (*f.from).flags, (*f.to).flags],
+                [0b1010; 3],
+                "the direct retain port receives current, from, then to"
+            );
+            assert_eq!(
+                [seen[0].extra, seen[1].extra],
+                [f.table as usize; 2],
                 "both wheel calls receive the scheduler-table word"
             );
-            assert_eq!(seen[4].extra, f.table as usize);
         }
     }
 
@@ -824,9 +791,7 @@ mod tests {
     }
 
     #[test]
-    fn default_host_seams_are_inert_but_safe_to_call() {
-        // Without installed models nothing records and nothing writes:
-        // the defaults exist so a forgotten install cannot corrupt state.
+    fn default_host_wheel_seams_are_inert_while_retain_is_direct() {
         let _lock = take_lock();
         let Some(f) = fixture() else {
             note_missing_u32_fixture("app::animation");
@@ -843,10 +808,10 @@ mod tests {
 
             animation_init(f.animation, f.current, f.from, f.to);
 
-            assert!(log().is_empty(), "no events without a recording model");
+            assert!(log().is_empty(), "no wheel events without a recording model");
             assert_eq!((*f.animation).vtable, ANIMATION_VTABLE);
             assert_eq!((*f.animation).rank, 1, "plain scalars carry aux 0");
-            assert_eq!((*f.current).flags, 0b110, "the inert retain wrote nothing");
+            assert_eq!((*f.current).flags, 0b1010, "the direct retain gains one reference");
         }
     }
     #[test]
@@ -872,15 +837,14 @@ mod tests {
             let seen = log();
             assert_eq!(
                 seen.iter().map(|event| event.kind).collect::<std::vec::Vec<_>>(),
-                std::vec![EVENT_WHEEL_REMOVE, EVENT_RETAIN, EVENT_WHEEL_INSERT],
-                "stock order is remove, retain incoming, direct release old, tail insert"
+                std::vec![EVENT_WHEEL_REMOVE, EVENT_WHEEL_INSERT],
+                "the unported wheel calls bracket direct retain and release"
             );
             assert_eq!(seen[0].argument, f.animation as usize);
-            assert_eq!(seen[1].argument, f.from as usize);
-            assert_eq!(seen[2].argument, f.animation as usize);
+            assert_eq!(seen[1].argument, f.animation as usize);
             assert_eq!(seen[0].extra, f.table as usize);
-            assert_eq!(seen[2].extra, f.table as usize);
-            assert_eq!(seen[2].rank_at_insert, Some(10));
+            assert_eq!(seen[1].extra, f.table as usize);
+            assert_eq!(seen[1].rank_at_insert, Some(10));
             assert_eq!((*f.animation).current_value, f.from as usize as u32);
             assert_eq!((*f.animation).rank, 10);
             assert_eq!((*f.current).flags, 0b110, "old value loses one reference");
@@ -944,8 +908,8 @@ mod tests {
 
             assert_eq!(
                 log().iter().map(|event| event.kind).collect::<std::vec::Vec<_>>(),
-                std::vec![EVENT_WHEEL_REMOVE, EVENT_RETAIN, EVENT_WHEEL_INSERT],
-                "the only predicated callee inside the body is release(old)"
+                std::vec![EVENT_WHEEL_REMOVE, EVENT_WHEEL_INSERT],
+                "the unported wheel calls bracket the direct retain"
             );
             assert_eq!((*f.animation).current_value, f.from as usize as u32);
             assert_eq!((*f.animation).rank, 1);

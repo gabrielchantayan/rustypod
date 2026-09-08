@@ -254,7 +254,7 @@ mod tests {
     /// Serializes tests that swap the ops table and fixed-address host backing.
     static SAMPLE_LOCK: Mutex<()> = Mutex::new(());
     static mut CALLS: Vec<&'static str> = Vec::new();
-    static mut SAMPLE: [u8; 0x1c] = [0xa5; 0x1c];
+    static mut SAMPLE: [u32; 7] = [0xa5a5_a5a5; 7];
     static mut MOCK_ELAPSED: u32 = 0;
     static mut MOCK_STATE: u32 = 0;
     static mut MOCK_TICK_ELAPSED: usize = 0;

@@ -45488,8 +45488,31 @@ functions:
       test callback observes draining destructor dispatch because an ARM
       32-bit code address cannot be stored in a host function pointer
       word; target builds have no callback or seam. Existing animation
-      callers now use this port directly; only retain and the timing-wheel
-      functions remain in their animation seam.
+      callers now use both direct ports; only the timing-wheel functions
+      remain in their animation seam.
+
+  - address: 0x08273a14
+    ghidra: FUN_08273a14
+    name: retain_value
+    size: 24
+    sig: "void retain_value(void *object)"
+    module: app/refcounted_value
+    status: ported
+    renames:
+      param_1/r0: object
+      iVar1/r1: flags_refcount
+    notes: >-
+      Raw ARM is exactly the six instruction words 0x08273a14..0x08273a28;
+      the next separately linked function begins at 0x08273a2c. Ghidra's
+      reported 24-byte extent is exact. Decoding every ARM B/BL word in
+      osos.dec finds 19 direct call sites, all plain unconditional bl; there
+      are no predicated BL forms, tail branches, or DATA-word references.
+      The callee deliberately has no NULL guard. It reads the low byte of
+      object +0x14 and, only when flag bit 1 is set, adds four with ARM
+      wrapping arithmetic to the aligned flags/refcount word. The port keeps
+      that volatile byte predicate and aligned volatile word update exactly;
+      there are no deliberate deviations. Existing animation callers now use
+      this direct port rather than a retain dispatch seam.
 
   # --- guarded opaque counter increment ---
   - address: 0x0808e16c
