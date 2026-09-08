@@ -242,6 +242,7 @@ mod tests {
             addr_of_mut!(VIEW_EVENT_OPS).write_volatile(ViewEventOps {
                 stop_view_timer: recording_stop,
                 commit_staged_flags: view_ops.commit_staged_flags,
+                apply_mapped_staged_flags: view_ops.apply_mapped_staged_flags,
             })
         };
         OpsRestore { timer_ops, view_ops }

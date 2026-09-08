@@ -75,6 +75,9 @@ pub struct ViewEventOps {
     /// `FUN_0810e170` @ 0x0810e170: commit the staged flag bytes from
     /// the +0x60 collection into the global byte table.
     pub commit_staged_flags: unsafe extern "C" fn(this: *mut u8),
+    /// `FUN_0810e1c4` @ 0x0810e1c4: map each staged flag's selector into
+    /// byte 2, then commit its byte 1 value to the global flag table.
+    pub apply_mapped_staged_flags: unsafe extern "C" fn(this: *mut u8),
 }
 
 /// `stop_view_timer` — original: `FUN_0810dfe8` @ 0x0810dfe8 (12
@@ -116,19 +119,34 @@ unsafe extern "C" fn missing_commit_staged_flags(_this: *mut u8) {
     panic!("view_event_complete requires staged-flag commit 0x0810e170")
 }
 
-/// Active helpers. retailOS defaults invoke the ported stop helper and
-/// the firmware commit helper directly; host tests replace the table
+/// `FUN_0810e1c4` @ 0x0810e1c4: map staged flag selectors, then commit
+/// their byte 1 values to the global flag table.
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_apply_mapped_staged_flags(this: *mut u8) {
+    let f: unsafe extern "C" fn(*mut u8) = unsafe { core::mem::transmute(0x0810_e1c4usize) };
+    unsafe { f(this) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_apply_mapped_staged_flags(_this: *mut u8) {
+    panic!("view_event_apply_mapped_staged_flags requires flag apply 0x0810e1c4")
+}
+
+/// Active helpers. retailOS defaults invoke the ported stop helper and the
+/// two unported staged-flag helpers directly; host tests replace the table
 /// with recording mocks.
 #[cfg(target_os = "none")]
 pub static mut VIEW_EVENT_OPS: ViewEventOps = ViewEventOps {
     stop_view_timer,
     commit_staged_flags: firmware_commit_staged_flags,
+    apply_mapped_staged_flags: firmware_apply_mapped_staged_flags,
 };
 
 #[cfg(not(target_os = "none"))]
 pub static mut VIEW_EVENT_OPS: ViewEventOps = ViewEventOps {
     stop_view_timer,
     commit_staged_flags: missing_commit_staged_flags,
+    apply_mapped_staged_flags: missing_apply_mapped_staged_flags,
 };
 
 /// view_event_complete — original: `FUN_0810dfc0` @ 0x0810dfc0
@@ -154,6 +172,37 @@ pub unsafe extern "C" fn view_event_complete(this: *mut u8) -> u32 {
     }
     let commit = unsafe { addr_of_mut!(VIEW_EVENT_OPS.commit_staged_flags).read_volatile() };
     unsafe { commit(this) };
+    EVENT_HANDLED
+}
+
+/// view_event_apply_mapped_staged_flags — original: `FUN_0810de48` @
+/// 0x0810de48 (16 bytes exactly; 19 plain `bl` and 75 plain tail `b`
+/// call sites, binary-scanned by decoding every ARM B/BL word in
+/// `osos.dec`).
+///
+/// Calls `FUN_0810e1c4(this)`, which walks the staged flag collection at
+/// `this+0x60`: it maps each item byte 0 through the table accessor at
+/// 0x0819c7a4 into byte 2, then stores byte 1 in the global flag-byte
+/// table at the original byte-0 index. Returns 1, the framework's handled
+/// verdict. The 19 `bl` call sites are all unconditional; caller-side
+/// predicates do not gate this handler. `r1` passes through the 16-byte
+/// wrapper but the callee saves without reading it, so the recovered ABI
+/// takes only `this`.
+///
+/// Deliberate deviation: the not-yet-ported 0x0810e1c4 body remains an
+/// explicit ops-table seam. Target builds dispatch to its firmware address;
+/// host tests install a recording replacement.
+///
+/// # Safety
+
+///
+/// `this` must be valid for the callee's staged-flag collection accesses,
+/// exactly as in retailOS.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn view_event_apply_mapped_staged_flags(this: *mut u8) -> u32 {
+    let apply = unsafe { addr_of_mut!(VIEW_EVENT_OPS.apply_mapped_staged_flags).read_volatile() };
+    unsafe { apply(this) };
     EVENT_HANDLED
 }
 
@@ -195,6 +244,13 @@ mod tests {
         }
     }
 
+    unsafe extern "C" fn recording_mapped_apply(this: *mut u8) {
+        unsafe {
+            (*addr_of_mut!(CALLS)).push("mapped apply");
+            (*addr_of_mut!(SEEN)).push(this);
+        }
+    }
+
     /// Installs the recording mocks and sets the view's timer word.
     fn mock(timer: u32) -> MutexGuard<'static, ()> {
         let guard = VIEW_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -202,6 +258,7 @@ mod tests {
             VIEW_EVENT_OPS = ViewEventOps {
                 stop_view_timer: recording_stop,
                 commit_staged_flags: recording_commit,
+                apply_mapped_staged_flags: recording_mapped_apply,
             };
             (*addr_of_mut!(CALLS)).clear();
             (*addr_of_mut!(SEEN)).clear();
@@ -218,6 +275,7 @@ mod tests {
             VIEW_EVENT_OPS = ViewEventOps {
                 stop_view_timer,
                 commit_staged_flags: missing_commit_staged_flags,
+                apply_mapped_staged_flags: missing_apply_mapped_staged_flags,
             };
         }
         drop(guard);
@@ -402,6 +460,29 @@ mod tests {
                 "no timer, no stop — the commit is unconditional"
             );
             assert_eq!(*addr_of!(SEEN), std::vec![view()]);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn mapped_flag_handler_delegates_then_reports_handled() {
+        let guard = mock(0);
+        unsafe {
+            assert_eq!(
+                view_event_apply_mapped_staged_flags(view()),
+                EVENT_HANDLED,
+                "the wrapper reports handled after applying flags"
+            );
+            assert_eq!(
+                *addr_of!(CALLS),
+                std::vec!["mapped apply"],
+                "the mapped-flag helper runs exactly once"
+            );
+            assert_eq!(
+                *addr_of!(SEEN),
+                std::vec![view()],
+                "the original view pointer reaches the helper"
+            );
         }
         restore(guard);
     }
