@@ -678,6 +678,56 @@ const QUERY_OBJECT_SIZE: usize = 0x48;
 /// select, so a name of 0x20 characters or fewer gets capacity 0x20.
 const QUERY_NAME_CAPACITY_FLOOR: u32 = 0x20;
 
+/// Word offset of the query object's backend pointer.
+const QUERY_OBJECT_INNER: usize = 0x40;
+/// Byte offset of the mode that gates backend destruction.
+const QUERY_OBJECT_MODE: usize = 0x45;
+/// Derived query-object vtable installed before the conditional cleanup.
+const QUERY_OBJECT_DERIVED_VTABLE: u32 = 0x0898_4e18;
+
+/// Firmware calls that complete [`query_object_destroy_port`].
+///
+/// Neither target has a port yet. On device these preserve the retail
+/// calls; host tests replace both to observe their arguments and order.
+#[derive(Clone, Copy)]
+struct QueryObjectDestroyOps {
+    destroy_inner: unsafe extern "C" fn(*mut u8),
+    destroy_tail: unsafe extern "C" fn(*mut u8) -> *mut u8,
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_query_inner_destroy(inner: *mut u8) {
+    let destroy: unsafe extern "C" fn(*mut u8) = core::mem::transmute(0x0804_4d58usize);
+    destroy(inner);
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_query_inner_destroy(_inner: *mut u8) {}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_query_destroy_tail(query: *mut u8) -> *mut u8 {
+    let destroy: unsafe extern "C" fn(*mut u8) -> *mut u8 =
+        core::mem::transmute(0x0825_9860usize);
+    destroy(query)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_query_destroy_tail(query: *mut u8) -> *mut u8 {
+    query
+}
+
+#[cfg(target_os = "none")]
+static mut QUERY_OBJECT_DESTROY_OPS: QueryObjectDestroyOps = QueryObjectDestroyOps {
+    destroy_inner: firmware_query_inner_destroy,
+    destroy_tail: firmware_query_destroy_tail,
+};
+
+#[cfg(not(target_os = "none"))]
+static mut QUERY_OBJECT_DESTROY_OPS: QueryObjectDestroyOps = QueryObjectDestroyOps {
+    destroy_inner: missing_query_inner_destroy,
+    destroy_tail: missing_query_destroy_tail,
+};
+
 /// Host-swappable entry point for the query-object constructor
 /// `FUN_0813e474` @ 0x0813e474 (252 bytes, unported): builds the
 /// 72-byte stack-local query object util/inner_state.rs documents (its
@@ -700,11 +750,9 @@ pub static mut QUERY_OBJECT_CONSTRUCT: usize = 0x0813_e474;
 pub static mut QUERY_OBJECT_NAME: usize = 0x0813_c2ec;
 
 /// Host-swappable entry point for the query-object destructor
-/// `FUN_0813e5c4` @ 0x0813e5c4 (192 bytes, unported): tears down the
-/// object `FUN_0813e474` built. Its r0:r1 return is discarded by the
-/// original's caller, so the seam models it as void. The target build
-/// calls the fixed firmware address directly; host tests swap this
-/// writable cell.
+/// `FUN_0813e5c4` @ 0x0813e5c4. Target builds call the local
+/// [`query_object_destroy_port`]; host tests that exercise the higher-level
+/// string builder retain this seam to observe the lifecycle call.
 #[cfg(not(target_os = "none"))]
 pub static mut QUERY_OBJECT_DESTROY: usize = 0x0813_e5c4;
 
@@ -748,8 +796,7 @@ unsafe fn query_object_name(out: *mut StringObject, query: *const u8) {
 #[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn query_object_destroy(query: *mut u8) {
-    let destroy: QueryDestroyFn = core::mem::transmute(0x0813_e5c4usize);
-    destroy(query);
+    let _ = query_object_destroy_port(query);
 }
 
 #[cfg(not(target_os = "none"))]
@@ -758,6 +805,37 @@ unsafe fn query_object_destroy(query: *mut u8) {
     let address = core::ptr::addr_of!(QUERY_OBJECT_DESTROY).read_volatile();
     let destroy: QueryDestroyFn = core::mem::transmute(address);
     destroy(query);
+}
+
+/// query_object_destroy_port — original: `FUN_0813e5c4` @ 0x0813e5c4
+/// (48 bytes: 44 bytes of code plus its 4-byte literal pool; 20 verified
+/// direct `bl` call sites, all unconditional).
+///
+/// Installs the derived query-object vtable, then destroys the backend at
+/// `this + 0x40` only when the mode byte at `this + 0x45` equals 2. It
+/// unconditionally transfers to the distinct target at `0x08259860`, whose
+/// class identity is not yet recovered; that target finishes destruction and
+/// returns `this`. The inner destroy target is likewise unported
+/// `FUN_08044d58` @ `0x08044d58`; there is deliberately no NULL guard when
+/// mode is 2, matching the `ldreq`/`bleq` sequence. The binary has no data
+/// words pointing at `0x0813e5c4`, so it is not currently evidenced as a
+/// virtual dispatch target.
+///
+/// Deviation: source-level code invokes the retail tail target through an
+/// explicit seam rather than an ARM tail branch. This preserves its `r0`
+/// result and keeps the unported target executable on device; host defaults
+/// model its identity return and inert inner release.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn query_object_destroy_port(query: *mut u8) -> *mut u8 {
+    query.cast::<u32>().write(QUERY_OBJECT_DERIVED_VTABLE);
+
+    let ops = core::ptr::addr_of!(QUERY_OBJECT_DESTROY_OPS).read_volatile();
+    if query.add(QUERY_OBJECT_MODE).read() == 2 {
+        let inner = (query.add(QUERY_OBJECT_INNER).cast::<u32>()).read() as usize as *mut u8;
+        (ops.destroy_inner)(inner);
+    }
+    (ops.destroy_tail)(query)
 }
 
 /// query_name_to_cxx_string — original: `FUN_082a1918` @ 0x082a1918
@@ -1991,6 +2069,50 @@ mod tests {
     const INF: u64 = 0x7ff0_0000_0000_0000;
     const MIN_NORMAL: u64 = 0x0010_0000_0000_0000;
     const MAX_DENORM: u64 = 0x000f_ffff_ffff_ffff;
+
+    static QUERY_DESTROY_TEST_LOCK: Mutex<()> = Mutex::new(());
+    static mut QUERY_DESTROY_EVENTS: Vec<&'static str> = Vec::new();
+    static mut QUERY_DESTROY_INNER: *mut u8 = core::ptr::null_mut();
+    static mut QUERY_DESTROY_VTABLE: u32 = 0;
+
+    unsafe extern "C" fn recording_query_inner_destroy(inner: *mut u8) {
+        (*core::ptr::addr_of_mut!(QUERY_DESTROY_EVENTS)).push("inner");
+        QUERY_DESTROY_INNER = inner;
+    }
+
+    unsafe extern "C" fn recording_query_destroy_tail(query: *mut u8) -> *mut u8 {
+        (*core::ptr::addr_of_mut!(QUERY_DESTROY_EVENTS)).push("tail");
+        QUERY_DESTROY_VTABLE = query.cast::<u32>().read();
+        query.add(7)
+    }
+
+    struct QueryDestroyOpsRestore {
+        prior: QueryObjectDestroyOps,
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for QueryDestroyOpsRestore {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(QUERY_OBJECT_DESTROY_OPS).write(self.prior);
+            }
+        }
+    }
+
+    fn install_query_destroy_ops() -> QueryDestroyOpsRestore {
+        let lock = QUERY_DESTROY_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            (*core::ptr::addr_of_mut!(QUERY_DESTROY_EVENTS)).clear();
+            QUERY_DESTROY_INNER = core::ptr::null_mut();
+            QUERY_DESTROY_VTABLE = 0;
+            let prior = core::ptr::addr_of!(QUERY_OBJECT_DESTROY_OPS).read_volatile();
+            core::ptr::addr_of_mut!(QUERY_OBJECT_DESTROY_OPS).write(QueryObjectDestroyOps {
+                destroy_inner: recording_query_inner_destroy,
+                destroy_tail: recording_query_destroy_tail,
+            });
+            QueryDestroyOpsRestore { prior, _lock: lock }
+        }
+    }
 
     fn sqrt(x: u64) -> u64 {
         unsafe { _dsqrt(x) }
@@ -5080,5 +5202,64 @@ mod tests {
         assert!(nonzero(1, -1), "not a sum test: 1 + -1 == 0 is still nonzero");
         assert!(nonzero(i32::MIN, i32::MIN));
         assert!(nonzero(42, i32::MIN));
+    }
+
+    // ---- query_object_destroy_port ----
+
+    #[test]
+    fn query_destroy_skips_inner_release_outside_mode_two() {
+        let _ops = install_query_destroy_ops();
+        let mut object = [0xa5a5_a5a5u32; QUERY_OBJECT_SIZE / 4];
+        let query = object.as_mut_ptr().cast::<u8>();
+
+        unsafe {
+            query.add(QUERY_OBJECT_MODE).write(1);
+            (query.add(QUERY_OBJECT_INNER).cast::<u32>()).write(0x1234_5678);
+
+            assert_eq!(query_object_destroy_port(query), query.add(7));
+            assert_eq!(*core::ptr::addr_of!(QUERY_DESTROY_EVENTS), Vec::from(["tail"]));
+            assert_eq!(QUERY_DESTROY_VTABLE, QUERY_OBJECT_DERIVED_VTABLE);
+            assert!(QUERY_DESTROY_INNER.is_null());
+        }
+    }
+
+    #[test]
+    fn query_destroy_releases_inner_before_tail_in_mode_two() {
+        let _ops = install_query_destroy_ops();
+        let Some(inner) = crate::testing::try_map_u32_slab(
+            crate::testing::hints::QUERY_OBJECT_DESTROY,
+            0x1000,
+        ) else {
+            assert!(crate::testing::note_missing_u32_fixture("fp_misc query destroy"));
+            return;
+        };
+        let mut object = [0; QUERY_OBJECT_SIZE / 4];
+        let query = object.as_mut_ptr().cast::<u8>();
+
+        unsafe {
+            query.add(QUERY_OBJECT_MODE).write(2);
+            (query.add(QUERY_OBJECT_INNER).cast::<u32>()).write(inner as usize as u32);
+
+            assert_eq!(query_object_destroy_port(query), query.add(7));
+            assert_eq!(*core::ptr::addr_of!(QUERY_DESTROY_EVENTS), Vec::from(["inner", "tail"]));
+            assert_eq!(QUERY_DESTROY_INNER, inner);
+            assert_eq!(QUERY_DESTROY_VTABLE, QUERY_OBJECT_DERIVED_VTABLE);
+        }
+    }
+
+    #[test]
+    fn query_destroy_passes_null_inner_through_mode_two() {
+        let _ops = install_query_destroy_ops();
+        let mut object = [0; QUERY_OBJECT_SIZE / 4];
+        let query = object.as_mut_ptr().cast::<u8>();
+
+        unsafe {
+            query.add(QUERY_OBJECT_MODE).write(2);
+            (query.add(QUERY_OBJECT_INNER).cast::<u32>()).write(0);
+
+            query_object_destroy_port(query);
+            assert_eq!(*core::ptr::addr_of!(QUERY_DESTROY_EVENTS), Vec::from(["inner", "tail"]));
+            assert!(QUERY_DESTROY_INNER.is_null(), "mode two does not add a NULL guard");
+        }
     }
 }

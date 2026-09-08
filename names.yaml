@@ -46884,3 +46884,38 @@ functions:
       0x082ae914. There is no NULL guard. The Rust export has its own
       link section to retain a distinct hook seam if LLVM folds an identical
       body.
+
+  # --- Query object destructor ---
+  - address: 0x0813e5c4
+    ghidra: FUN_0813e5c4
+    name: query_object_destroy_port
+    size: 48
+    sig: "u8 *query_object_destroy_port(u8 *query)"
+    module: fp/fp_misc
+    status: ported
+    renames:
+      param_1/r0/r4: query
+      DAT_0813e5f0: query_object_derived_vtable
+      FUN_08044d58: query_inner_destroy
+      FUN_08259860: query_destroy_tail
+    notes: >-
+      True extent is 48 bytes: 44 instruction bytes at
+      0x0813e5c4..0x0813e5ec and the 0x08984e18 literal-pool word at
+      0x0813e5f0; the separately linked next function begins at
+      0x0813e5f4. Ghidra's claimed 192-byte body incorrectly absorbs that
+      sibling and the tail target. Decoding every ARM B/BL word in osos.dec
+      finds exactly 20 direct BL call sites, every one unconditional
+      (no predicated BL); a word scan finds no data-word occurrence of
+      0x0813e5c4, so current evidence is direct, non-virtual dispatch.
+      Algorithm: write vtable 0x08984e18 to query+0, read the byte at
+      query+0x45, and only for mode 2 invoke 0x08044d58 with the u32
+      backend pointer at query+0x40, including NULL. It then tail-branches
+      to 0x08259860, a distinct destructor target whose class identity is
+      not recovered; its result returns in r0. The Rust port preserves both
+      unported retail calls through target defaults and host-swappable
+      seams, but uses a call/return instead of the final ARM tail branch.
+      Host tests prove the non-mode-2 skip, mode-2 release-before-tail
+      ordering, NULL forwarding, vtable-before-release, and r0 forwarding.
+      match.py structural review against the worktree archive shows the
+      vtable store, mode gate, conditional call, and result forwarding;
+      extra instructions are the two-function seam dispatch.
