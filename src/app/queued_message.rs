@@ -5,6 +5,9 @@
 //! - [`queued_message_construct`] — original: `FUN_08103464` @
 //!   0x08103464 (72 bytes exactly, 0x08103464..0x081034ac; 56 `bl` call
 //!   sites, no tail branches).
+//! - [`queued_message_construct_word`] — original: `FUN_081034b0` @
+//!   0x081034b0 (64 bytes of code + a 4-byte vtable literal; 20 `bl` call
+//!   sites, all unconditional).
 //! - [`queued_message_post`] — original: `FUN_08110fdc` @ 0x08110fdc
 //!   (164 bytes of true extent, 0x08110fdc..0x0811107f; 45 call sites —
 //!   44 `bl` plus one `blne`). The consumer this module's header already
@@ -82,7 +85,7 @@ const _: [u8; 0x08] = [0; core::mem::offset_of!(QueuedMessage, payload)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x0c] = [0; core::mem::size_of::<QueuedMessage>()];
 
-/// The two unported constructors the factory invokes.
+/// Construction operations shared by both queued-message factories.
 #[derive(Clone, Copy)]
 pub struct QueuedMessageOps {
     /// `FUN_08266a48(storage, 0x16)`: runs the message-kind base
@@ -174,6 +177,60 @@ pub unsafe extern "C" fn queued_message_construct(
     let construct_payload =
         unsafe { addr_of_mut!(QUEUED_MESSAGE_OPS).read_volatile().construct_payload };
     let payload = unsafe { construct_payload(payload_block, message_code, bytes, byte_count) };
+    unsafe { core::ptr::write_volatile(core::ptr::addr_of_mut!((*message).payload), payload) };
+
+    message
+}
+
+/// queued_message_construct_word — original: `FUN_081034b0` @ **0x081034b0**
+/// (64 bytes of code, 0x081034b0..0x081034ef, plus the 4-byte vtable literal
+/// 0x08980744 @ 0x081034f0 = **68 bytes of true extent**; **20 call sites —
+/// all unconditional `bl`, no predicated `bl` or tail `b`**), verified by
+/// decoding every ARM B/BL word in `work/firmware/osos.dec`. The next function
+/// opens at 0x081034f4.
+///
+/// Builds the normal kind-0x16 queued-message envelope in caller-provided
+/// storage, with a four-byte payload formed from `payload_word`. It delegates
+/// the base setup and nested payload construction exactly as
+/// [`queued_message_construct`], but supplies `&payload_word` and the fixed
+/// byte count 4 to the payload constructor.
+///
+/// # Deliberate deviations
+///
+/// The payload constructor @ 0x081b9248 remains behind the existing
+/// [`QUEUED_MESSAGE_OPS`] dispatch slot: its target default calls the firmware
+/// address and its host default panics until a test installs an operation.
+/// The base constructor and tag-2 `operator_new(0x10)` are already ported and
+/// used through the same paths as the sibling constructor.
+///
+/// # Safety
+///
+/// `storage` must name writable arena storage for a 12-byte target envelope.
+/// The constructed payload must consume its four input bytes before returning,
+/// as the firmware payload constructor does by making an owned copy.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn queued_message_construct_word(
+    storage: *mut QueuedMessage,
+    message_code: u32,
+    payload_word: u32,
+) -> *mut QueuedMessage {
+    let construct_base = unsafe { addr_of_mut!(QUEUED_MESSAGE_OPS).read_volatile().construct_base };
+    let message = unsafe { construct_base(storage, QUEUED_MESSAGE_KIND) };
+
+    unsafe { core::ptr::write_volatile(core::ptr::addr_of_mut!((*message).vtable), QUEUED_MESSAGE_VTABLE) };
+
+    let payload_block = unsafe { crate::heap::veneers::operator_new(QUEUED_MESSAGE_PAYLOAD_SIZE) };
+    let construct_payload =
+        unsafe { addr_of_mut!(QUEUED_MESSAGE_OPS).read_volatile().construct_payload };
+    let payload = unsafe {
+        construct_payload(
+            payload_block,
+            message_code,
+            core::ptr::addr_of!(payload_word).cast(),
+            core::mem::size_of::<u32>() as u32,
+        )
+    };
     unsafe { core::ptr::write_volatile(core::ptr::addr_of_mut!((*message).payload), payload) };
 
     message
@@ -416,6 +473,7 @@ mod tests {
     static mut PAYLOAD_BYTES: *const u8 = core::ptr::null();
     static mut PAYLOAD_BYTE_COUNT: u32 = 0;
     static mut PAYLOAD_RESULT: *mut u8 = core::ptr::null_mut();
+    static mut PAYLOAD_WORD: u32 = 0;
 
     unsafe extern "C" fn recording_construct_base(
         storage: *mut QueuedMessage,
@@ -443,6 +501,22 @@ mod tests {
         }
     }
 
+    unsafe extern "C" fn recording_construct_word_payload(
+        block: *mut u8,
+        code: u32,
+        bytes: *const u8,
+        byte_count: u32,
+    ) -> *mut u8 {
+        unsafe {
+            PAYLOAD_BLOCK = block;
+            PAYLOAD_CODE = code;
+            PAYLOAD_BYTES = bytes;
+            PAYLOAD_BYTE_COUNT = byte_count;
+            PAYLOAD_WORD = bytes.cast::<u32>().read();
+            PAYLOAD_RESULT
+        }
+    }
+
     fn install_mocks() -> (MutexGuard<'static, ()>, MutexGuard<'static, ()>) {
         let ops_guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let heap_guard = mock_heap();
@@ -459,6 +533,7 @@ mod tests {
             PAYLOAD_BYTES = core::ptr::null();
             PAYLOAD_BYTE_COUNT = 0;
             PAYLOAD_RESULT = core::ptr::null_mut();
+            PAYLOAD_WORD = 0;
         }
         (ops_guard, heap_guard)
     }
@@ -529,6 +604,44 @@ mod tests {
             assert!(PAYLOAD_BYTES.is_null(), "the nullable bytes argument is unmodified");
             assert_eq!(PAYLOAD_BYTE_COUNT, 0, "zero is forwarded, not special-cased by the factory");
             assert_eq!(envelope.payload, PAYLOAD_RESULT);
+        }
+        restore_mocks(guards);
+    }
+
+    #[test]
+    fn constructs_four_byte_word_payload_in_base_result() {
+        let guards = install_mocks();
+        let mut storage = QueuedMessage {
+            vtable: 0,
+            kind: 0,
+            payload: core::ptr::null_mut(),
+        };
+        let mut envelope = QueuedMessage {
+            vtable: 0,
+            kind: 0,
+            payload: core::ptr::null_mut(),
+        };
+        let mut payload_storage = [0u8; QUEUED_MESSAGE_PAYLOAD_SIZE];
+        let payload_result = 0xA110_00c0usize as *mut u8;
+        unsafe {
+            QUEUED_MESSAGE_OPS.construct_payload = recording_construct_word_payload;
+            set_alloc_ret(payload_storage.as_mut_ptr());
+            BASE_RESULT = &mut envelope;
+            PAYLOAD_RESULT = payload_result;
+
+            let result = queued_message_construct_word(&mut storage, 0x7901, 0x80ff_0000);
+
+            assert_eq!(result, &mut envelope as *mut QueuedMessage, "returns the base constructor result");
+            assert_eq!(BASE_STORAGE, &mut storage as *mut QueuedMessage, "base constructor receives caller storage");
+            assert_eq!(BASE_KIND, QUEUED_MESSAGE_KIND, "base constructor receives kind 0x16");
+            assert_eq!(envelope.vtable, QUEUED_MESSAGE_VTABLE, "derived vtable replaces the base vtable");
+            assert_eq!(envelope.payload, payload_result, "nested constructor result is stored at +8");
+            assert_eq!(PAYLOAD_BLOCK, payload_storage.as_mut_ptr(), "operator_new(0x10) supplies nested storage");
+            assert_eq!(PAYLOAD_CODE, 0x7901, "message code is nested r1");
+            assert!(!PAYLOAD_BYTES.is_null(), "a word payload always supplies four readable bytes");
+            assert_eq!(PAYLOAD_BYTE_COUNT, 4, "word payload size is fixed at four bytes");
+            assert_eq!(PAYLOAD_WORD, 0x80ff_0000, "payload bytes preserve the full little-endian word");
+            assert_eq!(alloc_log(), (1, QUEUED_MESSAGE_PAYLOAD_SIZE, 2), "one tag-2 operator_new(0x10)");
         }
         restore_mocks(guards);
     }
