@@ -32503,6 +32503,42 @@ functions:
       0x8062 mask, same 0/1 result; the diff is the crate fp frame and
       the three deviations above.
 
+  - address: 0x082a4574
+    ghidra: FUN_082a4574
+    name: scoped_context_owner_byte_8f_bit_0
+    size: 48
+    sig: "u32 scoped_context_owner_byte_8f_bit_0(const ScopedContext *this)"
+    module: app/scoped_context
+    status: ported
+    vars: {param_1: this, bVar1: owner_byte}
+    notes: >-
+      18 bl call sites, all unconditional with zero predicated forms,
+      binary-scanned by decoding every B/BL word in osos.dec; the only
+      additional direct caller is an unconditional tail b at
+      0x0811343c. Ghidra's 48-byte extent is exact: the twelve
+      instructions end at 0x082a45a0 and the next function begins with
+      push {r4,lr} at 0x082a45a4. Validity-gated predicate over the
+      ScopedContext token (app/scoped_context.rs): dispatches the
+      vtable slot +0x08, then when it returns nonzero loads owner
+      (+0x08) byte +0x8f and returns its bit 0 as 0 or 1. A zero slot
+      result answers 0 without reading owner, so a NULL owner is safe
+      only on that path. The field's semantic name does not survive;
+      byte_8f_bit_0 records only what raw code establishes. The function
+      itself is not virtual-dispatched: no data word in the image holds
+      0x082a4574. It is one of the scoped-context capability-predicate
+      family with 0x082a3fc4, 0x082a40c8, and 0x082a45a4; the menu
+      builder at 0x08222eec ANDs their results. Deviation: repr(C)
+      ScopedContext and ScopedContextVtable models replace original
+      field offsets, while the owner byte remains an aligned-base u8
+      load at +0x8f. Host tests prove slot-zero short-circuit with a
+      NULL owner and each relevant byte pattern: values 0x00, 0x02,
+      0x80 answer 0; 0x01, 0x81, 0xff answer 1. match.py structural:
+      same vtable load, slot +0x08 blx, validity cmp, gated owner +0x08
+      and byte +0x8f loads, bit-0 mask, and 0/1 result. LLVM places
+      moveq r0,#0 before the predicated nonzero path and adds the crate
+      fp frame; both preserve the original's result and dereference
+      gate.
+
   - address: 0x082a368c
     ghidra: FUN_082a368c
     name: scoped_context_owner_u64_110
