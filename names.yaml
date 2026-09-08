@@ -7975,6 +7975,41 @@ functions:
       mirroring the original's tail branch), and the reordered
       compare/select structure (the accepted deviations).
 
+  # --- indexed payload lookup wrapper (app) ---
+  - address: 0x0809e3d0
+    ghidra: FUN_0809e3d0
+    name: indexed_payload_lookup
+    size: 24
+    sig: "u32 indexed_payload_lookup(void *index, u32 entry, void **payload_out, u32 *encoded_length_out)"
+    module: app/indexed_payload_lookup
+    status: ported
+    renames:
+      param_1/r0: index
+      param_2/r1: entry
+      param_3/r2: payload_out
+      param_4/r3: encoded_length_out
+      r2_at_callee: zero_mode
+      FUN_080d6d94: indexed_payload_lookup_backend (unported; concrete identity unknown)
+    notes: >-
+      Raw ARM establishes the exact 24-byte extent
+      0x0809e3d0..0x0809e3e8: push {r3,lr}; str r3,[sp]; mov r3,r2;
+      mov r2,#0; bl 0x080d6d94; pop {ip,pc}. The following push
+      {r4-r8,lr} at 0x0809e3e8 starts bcd_datetime_to_days_secs, so
+      there is no literal pool. It is a wrapper, not a veneer: forwards
+      index and entry, shifts its third/fourth ABI arguments into the
+      backend's fourth/fifth positions, forces the backend mode argument
+      to zero, and returns the backend status unchanged. The backend's
+      concrete identity is not established; its observed role is an
+      indexed-payload lookup with optional payload/encoded-length outputs.
+      Decoding every ARM B/BL word in osos.dec finds exactly 20 direct
+      unconditional bl call sites and one unconditional tail b
+      (0x08055afc), with zero predicated calls and no aligned or unaligned
+      data-word reference to 0x0809e3d0. Host tests cover a nonzero
+      backend error, u32::MAX entry, output mutation, exact mode-zero
+      forcing, and both NULL optional outputs. On target the still-unported
+      backend is invoked directly at 0x080d6d94; host builds substitute
+      INDEXED_PAYLOAD_LOOKUP_BACKEND. match.py structural review requested.
+
   # --- BCD datetime -> (days, seconds-of-day) converter (time/civil) ---
   - address: 0x0809e3e8
     ghidra: FUN_0809e3e8
