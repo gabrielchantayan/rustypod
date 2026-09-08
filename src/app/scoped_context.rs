@@ -1,6 +1,6 @@
 //! The framework's **scoped context token** — a 0x18-byte polymorphic
 //! object that call sites build on the stack, hand to a service, and
-//! throw away. Three of its members are ported here, all from the
+//! throw away. Five of its members are ported here, all from the
 //! 0x0826/0x0827 framework cluster that also holds the string/buffer class
 //! (`cxx/string_object.rs`) and the resource-lookup chain
 //! (`app/resource_chain.rs`):
@@ -10,6 +10,8 @@
 //! - [`scoped_context_destroy`] — `FUN_08270414` @ 0x08270414.
 //! - [`scoped_context_owner_flags_any_8062`] — `FUN_082a40c8` @ 0x082a40c8,
 //!   a validity-gated predicate over the token owner's flags word.
+//! - [`scoped_context_owner_byte_8f_bit_0`] — `FUN_082a4574` @ 0x082a4574,
+//!   a validity-gated predicate over bit 0 of the token owner's byte +0x8f.
 //! - [`scoped_context_owner_u64_110`] — `FUN_082a368c` @ 0x082a368c, a
 //!   validity-gated getter returning the token owner's 64-bit word pair at
 //!   +0x110/+0x114.
@@ -394,6 +396,57 @@ pub unsafe extern "C" fn scoped_context_owner_flags_any_8062(
     let flags = ((*this).owner as *const u32).add(OWNER_FLAGS_SLOT).read();
     (flags & OWNER_FLAGS_MASK_8062 != 0) as u32
 }
+/// Byte offset of the one-bit capability field (the original's
+/// `ldrbne r0, [r0, #0x8f]`). It is deliberately named only for its
+/// observed location: the field's semantic name does not survive.
+const OWNER_BYTE_8F_OFFSET: usize = 0x8f;
+
+/// scoped_context_owner_byte_8f_bit_0 — original: `FUN_082a4574` @
+/// 0x082a4574 (48 bytes, exact: the next function starts at 0x082a45a4;
+/// **18 `bl` call sites**, all unconditional and binary-scanned by
+/// decoding every B/BL word in osos.dec; one additional unconditional
+/// tail-`b` at 0x0811343c).
+///
+/// ```text
+/// 082a4574  push  {r4, lr}
+/// 082a4578  mov   r4, r0
+/// 082a457c  ldr   r0, [r0]         @ token vtable
+/// 082a4580  ldr   r1, [r0, #8]     @ slot +0x08 validity method
+/// 082a4584  mov   r0, r4
+/// 082a4588  blx   r1
+/// 082a458c  cmp   r0, #0
+/// 082a4590  ldrne r0, [r4, #8]     @ owner
+/// 082a4594  ldrbne r0, [r0, #0x8f]
+/// 082a4598  andne r0, r0, #1
+/// 082a459c  moveq r0, #0
+/// 082a45a0  pop   {r4, pc}
+/// ```
+///
+/// Validity-gated predicate over the scoped-context token. It dispatches
+/// the token's vtable slot +0x08 and, only when that returns nonzero, reads
+/// owner byte +0x8f and returns its bit 0 as 0 or 1. A failing slot never
+/// dereferences the owner, so a NULL-owner token answers 0 instead of
+/// faulting. It is one of the same capability-predicate family as
+/// [`scoped_context_owner_flags_any_8062`]; the menu builder at 0x08222eec
+/// ANDs these answers to decide whether to suppress an item.
+///
+/// Deviation: [`ScopedContext`] and [`ScopedContextVtable`] are the
+/// module's `#[repr(C)]` models, so vtable and owner accesses use fields
+/// rather than original byte offsets. The owner byte access itself remains
+/// an aligned-base `u8` load at the original +0x8f location.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn scoped_context_owner_byte_8f_bit_0(
+    this: *const ScopedContext,
+) -> u32 {
+    let validity: ScopedContextValidity =
+        core::mem::transmute((*(*this).vtable).slots[VALIDITY_SLOT]);
+    if validity(this) == 0 {
+        return 0;
+    }
+    (((*this).owner as *const u8).add(OWNER_BYTE_8F_OFFSET).read() & 1) as u32
+}
+
 
 /// Word index of the owner's 64-bit pair's low word (the original's
 /// `ldrne r0, [r1, #0x110]`); the high word follows at the next index
@@ -749,6 +802,49 @@ mod tests {
             VALIDITY_CALLS = 0;
             VALIDITY_TOKEN = ptr::null();
             VALIDITY_RESULT = result;
+        }
+    }
+
+    fn set_owner_byte_8f(fixture: &mut PredicateFixture, value: u8) {
+        unsafe {
+            (fixture.owner.as_mut_ptr() as *mut u8)
+                .add(OWNER_BYTE_8F_OFFSET)
+                .write(value);
+        }
+    }
+
+    #[test]
+    fn byte_8f_predicate_short_circuits_when_the_token_is_not_valid() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        reset_validity_recording(0);
+        // A NULL owner proves the failing slot prevents the byte load.
+        let mut fixture = predicate_fixture(0);
+        link_fixture(&mut fixture, true);
+
+        let result = unsafe { scoped_context_owner_byte_8f_bit_0(&fixture.token) };
+
+        assert_eq!(result, 0);
+        unsafe {
+            assert_eq!(VALIDITY_CALLS, 1);
+            assert_eq!(VALIDITY_TOKEN as usize, &fixture.token as *const _ as usize);
+        }
+    }
+
+    #[test]
+    fn byte_8f_predicate_returns_only_its_low_bit() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        for (byte, want) in [(0u8, 0), (0x02, 0), (0x80, 0), (1, 1), (0x81, 1), (0xff, 1)] {
+            reset_validity_recording(0xffff_ffff);
+            let mut fixture = predicate_fixture(0);
+            set_owner_byte_8f(&mut fixture, byte);
+            link_fixture(&mut fixture, false);
+
+            let result = unsafe { scoped_context_owner_byte_8f_bit_0(&fixture.token) };
+
+            assert_eq!(result, want, "owner byte {byte:#x}");
+            unsafe {
+                assert_eq!(VALIDITY_CALLS, 1);
+            }
         }
     }
 
