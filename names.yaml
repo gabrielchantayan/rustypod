@@ -10861,6 +10861,27 @@ functions:
       unconditional - a NULL cell or zero handle skips the ROM op but
       still decrements, and unlocking a free lock wraps to 0xffffffff.
 
+  - address: 0x08206e9c
+    ghidra: FUN_08206e9c
+    name: counted_mutex_guard_release
+    size: 40
+    sig: "CountedMutex **counted_mutex_guard_release(CountedMutex **guard)"
+    module: kernel/sync_mutex
+    status: ported
+    vars: {param_1: guard, iVar1: lock}
+    renames:
+      FUN_0809449c: mutex_unlock_counted
+    notes: >-
+      Binary decoding establishes the 40-byte extent through 0x08206ec4,
+      where the next function begins, correcting no Ghidra extent in this
+      case. Exactly 20 direct BL words target this address in osos.dec
+      (all unconditional; no predicated BL forms). This is the destructor
+      for a one-word counted-mutex scope guard: load *guard, skip the
+      release when it is NULL, otherwise call mutex_unlock_counted and
+      write NULL back; return guard in either case. The existing callee at
+      0x0809449c is ported, so no dispatch seam was added. No deliberate
+      deviations.
+
   - address: 0x08094424
     ghidra: FUN_08094424
     name: mutex_delete_counted
