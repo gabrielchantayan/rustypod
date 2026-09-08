@@ -46625,3 +46625,27 @@ functions:
       entry, so it is not virtually dispatched. Host builds model only the
       fixed MMIO ready register with an atomic word so the readiness gate can
       be tested; device builds retain the volatile physical read.
+
+  - address: 0x0821754c
+    ghidra: FUN_0821754c
+    name: app_controller_dispatch_layout
+    size: 48
+    sig: "void app_controller_dispatch_layout(AppController *controller, void *layout)"
+    module: app/controller_layout_dispatch
+    status: ported
+    renames:
+      param_1/r0: controller
+      param_2/r1: layout
+      iVar1: global_controller
+    notes: >-
+      The verified extent is 0x0821754c..0x08217578; 0x0821757c is the
+      next bx-lr entry. It calls app_controller_get @ 0x0817ee04, stores
+      halfword 5 at that returned object's +0x80 mode field, then tail
+      dispatches the supplied controller's vtable +0x11c slot with
+      (controller, layout). The input controller is retained across the
+      getter in r4 and is not interchangeable with the singleton. Decoding
+      every ARM B/BL word in osos.dec finds 20 unconditional bl call sites,
+      no plain-b entries, and no predicated forms. The vtable slot is runtime
+      data on the stale 0x0898xxxx page, so no callee identity is claimed.
+      Host tests use structural 64-bit vtables; target-width offset assertions
+      preserve the firmware's +0x80 and +0x11c fields.
