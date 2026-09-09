@@ -3881,6 +3881,28 @@ functions:
       to real ports, incl. the base-subobject ctor/dtor/fill and the seed
       walk's deque accessor + iterator copies (heap/block_deque).
 
+  - address: 0x0826f758
+    ghidra: FUN_0826f758
+    name: pool_free
+    size: 40
+    sig: "void pool_free(PoolControl *pool, void *ptr)"
+    module: heap/pool
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_2/r1: ptr
+    notes: >-
+      Binary extent is exactly 40 bytes, 0x0826f758..0x0826f780: ready
+      flag (+0x414) and NULL guards, unmark ptr's bit-31 uncached alias,
+      reload the alignment delta from ptr-4, subtract it to recover the
+      raw heap allocation, then tail-branch to heap_free 0x0819d4dc with
+      tag 2. Call count verified by decoding every ARM B/BL word in
+      osos.dec: exactly 14 plain unconditional bl sites, no predicated bl
+      sites. A separate bne tail wrapper at 0x082aad44 is not a call site.
+      Host behavior deliberately reads the delta through the unmarked alias
+      and routes the tail dispatch through the pre-existing POOL_OPS
+      heap_free seam; both preserve target-visible behavior.
+
   - address: 0x082141bc
     ghidra: FUN_082141bc
     name: pool_base_construct

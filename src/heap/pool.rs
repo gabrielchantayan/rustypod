@@ -518,9 +518,16 @@ pub unsafe extern "C" fn pool_alloc_v1(
 
 /// pool_free — original: `FUN_0826f758` @ 0x0826f758 (40 bytes).
 ///
-/// Recovers the heap block from the delta word at `ptr - 4` and frees it
-/// with tag 2. No-op when the pool is not ready or `ptr` is NULL.
+/// Verified call count: 14 plain unconditional `bl` sites and no predicated
+/// `bl` sites; the `bne` at 0x082aad44 is a separate tail wrapper, not a
+/// call. When `pool.ready` and `ptr` are nonzero, clears the uncached-alias
+/// bit, recovers the raw heap allocation from its aligned payload's
+/// `ptr - 4` delta word, then tail-dispatches `heap_free` with tag 2.
+/// Deliberate host deviation: read the delta through the unmarked alias
+/// (the target aliases the same DRAM cell), and route the tail dispatch
+/// through the existing swappable `POOL_OPS.heap_free` seam.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn pool_free(pool: *mut PoolControl, ptr: *mut u8) {
     if ready_flag(pool).read() == 0 || ptr.is_null() {
         return;
