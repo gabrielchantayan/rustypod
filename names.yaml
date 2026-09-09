@@ -53948,3 +53948,43 @@ functions:
       chain, deltas are the crate fp frame, the intra-crate bl to the
       ported predicate, and LLVM's unpredicated reload of +0x14 vs ADS
       ldreq/cmpeq/popne predication.
+
+  # --- Filesystem mapped allocation-bitmap block completion ---
+  - address: 0x0806448c
+    ghidra: FUN_0806448c
+    name: mapped_block_window_finish
+    size: 84
+    sig: "i32 mapped_block_window_finish(void)"
+    module: fs/block_window
+    status: ported
+    renames:
+      DAT_080644e0/r4: mapped_block_window (fixed object at 0x08adc510)
+      DAT_080644e0_plus_0x200: block_number
+      DAT_080644e0_plus_0x204: owner
+      DAT_080644e0_plus_0x208: dirty
+      DAT_080644e0_plus_0x209: mapped
+      FUN_08149e10: mapped_block_finish_vtable_slot3_thunk
+      iVar1/r1/r0: callback_status
+    notes: >-
+      Raw decoding gives exactly 21 instructions (84 bytes) from
+      0x0806448c through 0x080644dc; the following word at 0x080644e0 is
+      the 0x08adc510 global literal and 0x080644e4 starts the next function.
+      It follows owner+0x15c, then +0x08, then +0x04; thunk 0x08149e10
+      follows one more +0x04 handle word and calls vtable slot 3 with
+      (block_number, 1, window, 0). The callback result is truncated to i16
+      and sign-extended after all bookkeeping is cleared: block number and
+      owner words, then dirty and mapped bytes. The begin sibling
+      0x08051578 records the same owner/block pair, and 0x0805cdd0 sets the
+      dirty byte, supporting the mapped-block-window name without inventing
+      the concrete owner type. Decoding every ARM B/BL word in osos.dec finds
+      14 direct callers: 10 unconditional bl and 4 blne (0x08042648,
+      0x080429c4, 0x08042b3c, 0x08042cac); no internal NULL guard exists, so
+      those predicated callers materially protect their own teardown paths.
+      Target code performs the recovered dynamic vtable load directly rather
+      than branching through unported thunk 0x08149e10; host tests substitute
+      only that dynamic call because target-width u32 vtable entries cannot
+      hold native host function pointers. match.py --lib <worktree archive>:
+      28 vs 21 instructions; the full owner/link/vtable-slot-3 chain and four
+      clears remain, while the expected differences are the direct thunk
+      expansion, LLVM frame, literal placement, and sign extension scheduled
+      before the clears.

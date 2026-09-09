@@ -17,3 +17,5 @@ pub mod resource_reader_read_exact;
 pub mod hfs_btree_get_node;
 /// File-path layer failure-status accessor @ 0x0829dcf8.
 pub mod error_status;
+/// Mapped allocation-bitmap block completion @ 0x0806448c.
+pub mod block_window;
