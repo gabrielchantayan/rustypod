@@ -56228,3 +56228,38 @@ functions:
       until that constructor is ported. Host tests prove the exact 0xa0
       allocation, raw-block constructor argument, cache fast path, and
       NULL-return retry behavior.
+
+  # --- Four-component pixel average (util/four_component_pixel_average) ---
+  - address: 0x0824bd98
+    ghidra: FUN_0824bd98
+    name: average_four_component_pixel
+    size: 84
+    sig: "void average_four_component_pixel(u8 *dst, const u8 *first, const u8 *second)"
+    module: util/four_component_pixel_average
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: first
+      param_3/r2: second
+      FUN_0824bf5c: store_four_components (unported trivial store helper)
+    notes: >-
+      Raw ARM establishes the true 84-byte extent 0x0824bd98..0x0824bdec:
+      Ghidra's 88-byte report absorbs the first instruction of the separately
+      linked four-input sibling at 0x0824bdf0. The function loads all four
+      bytes from first and second before its `bl 0x0824bf5c`, computes each
+      `(first[i] + second[i]) >> 1` in u32 registers, then the helper stores
+      the four components in ascending index order. This proves both floor
+      rounding and that dst may alias either source; there is no NULL or
+      alignment guard. Full-image decoding of every ARM B/BL immediate finds
+      exactly 12 direct calls, all unconditional `bl`, at 0x08250e9c,
+      0x08250f30, 0x08250fb8, 0x0825104c, 0x082510dc, 0x0825116c,
+      0x082512a8, 0x08251334, 0x082513b4, 0x08251440, 0x082514c8, and
+      0x08251550; there are zero predicated calls and zero direct plain-B
+      tails. Deliberate deviation: the port retains every source byte, then
+      stores the equivalent four results directly rather than adding a
+      dispatch seam for the unported 24-byte helper FUN_0824bf5c. Host tests
+      cover floor rounding at byte extremes, every 8-bit input pair, and dst
+      aliasing each source. match.py against this worktree archive (exit 1,
+      structural diff expected) finds the same source-load/floor-average/store
+      structure; LLVM emits the independent stores in descending component
+      order after all loads.
