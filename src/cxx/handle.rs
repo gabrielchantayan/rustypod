@@ -55,6 +55,11 @@
 //! copy, byte-identical to the slot-1 sibling modulo `bl` displacements.
 //! [`refcounted_body_release_owned_variant`] @ 0x0839cf4c is an owning
 //! sibling whose implementation disposer remains an unported direct call.
+//! [`refcounted_body_attach`] @ 0x0839d370 is the store-and-bump half of
+//! the copy-assignment operators (the assign minus its `*src` load), and
+//! [`refcounted_ptr_copy_assign`] @ 0x0839f28c is the C++
+//! copy-assignment operator itself: slot-pointer-guarded release (the
+//! slot-1 teardown) followed by attach, returning `dst`.
 
 #[cfg(not(target_os = "none"))]
 use crate::cxx::string_object::{string_object_destroy, StringObject};
@@ -274,6 +279,127 @@ pub unsafe extern "C" fn refcounted_ptr_assign(
         if !mutex.is_null() {
             mutex_unlock(mutex);
         }
+    }
+    dst
+}
+
+/// refcounted_body_attach — original: `FUN_0839d370` @ 0x0839d370
+/// (60 bytes; 6 `bl` call sites — 3 unconditional (0x081f0dbc,
+/// 0x081fcc30, and 0x0839f2b0 inside [`refcounted_ptr_copy_assign`])
+/// plus 3 `blne` (0x083e8a60, 0x083e8c28, 0x083e9538) whose callers
+/// predicate on the DESTINATION SLOT pointer (`movs r0, r5; ldrne
+/// r1, [r4]; blne`), NULL-checking the slot themselves. Verified by
+/// decoding every ARM B/BL word in osos.dec: no `b` sites and no
+/// data-word references, so it is never virtually dispatched. Ghidra's
+/// 60-byte extent is exact: [`refcounted_body_release_dtor_variant`]
+/// starts immediately after at 0x0839d3ac.
+///
+/// The shared-body attach half of the copy-assignment operators:
+/// `*dst = body`, unconditionally (`str r1, [r0]` precedes the
+/// conditional `popeq`), then when `body` is non-NULL its refcount (+4)
+/// is bumped by one under the optional mutex at +8 (mutex_lock @
+/// 0x0807f5c4 / mutex_unlock @ 0x0807f6a0, both ported in
+/// kernel/sync_mutex.rs). The mutex field is loaded twice — once for
+/// the lock and again for the unlock — each load NULL-checked
+/// separately, so a NULL mutex means an unguarded bump. This is exactly
+/// [`refcounted_ptr_assign`] with the `obj = *src` load hoisted out:
+/// that load is this function's second argument.
+///
+/// The original's return value is unreliable and unused: r0 survives as
+/// `dst` only on the NULL-body `popeq`; the bump path tail-branches
+/// into mutex_unlock (returning ITS value) or pops with r0 = mutex.
+/// This port therefore returns nothing.
+///
+/// Codegen deviation: LLVM inlines the ported lock/unlock (guards and
+/// ROM_KERNEL dispatch included) instead of emitting the original's
+/// `blne`/tail-`bne` pair, so the ARM body is larger but keeps the
+/// store/guard/bump/guard structure — match.py structural confirms.
+///
+/// # Safety
+/// `dst` must be a valid, aligned pointer slot; when `body` is non-NULL
+/// it must point at a readable/writable [`RefcountedBody`]. As in the
+/// original, the slot pointer itself is not NULL-checked (predicated
+/// callers do that), and the store happens even for a NULL body.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_attach(
+    dst: *mut *mut RefcountedBody,
+    body: *mut RefcountedBody,
+) {
+    // `str r1, [r0]` executes before the `movs`-flagged conditional
+    // pop: the store is unconditional, the bump is not.
+    dst.write(body);
+    if body.is_null() {
+        return;
+    }
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_lock(mutex);
+    }
+    // Original: `add r0, r0, #1` — a plain wrapping increment.
+    (*body).refcount = (*body).refcount.wrapping_add(1);
+    // Re-loaded, as in the original: a racing release could in
+    // principle have torn the object down under us.
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_unlock(mutex);
+    }
+}
+
+/// refcounted_ptr_copy_assign — original: `FUN_0839f28c` @ 0x0839f28c
+/// (48 bytes; 14 `bl` call sites, all unconditional — verified by
+/// decoding every ARM B/BL word in osos.dec: no `b` sites, no
+/// predicated forms, and the address appears in no data word, so it is
+/// never virtually dispatched. Ghidra's 48-byte extent is exact: a
+/// separately linked sibling begins immediately after at 0x0839f2bc).
+///
+/// The C++ copy-assignment operator of a refcounted handle slot:
+///
+/// ```text
+/// if (dst != src) {
+///     refcounted_body_release_dtor_variant(dst);   // drop old body
+///     refcounted_body_attach(dst, *src);           // share new body
+/// }
+/// return dst;
+/// ```
+///
+/// The guard compares the SLOT POINTERS, not the bodies — two distinct
+/// slots holding the same body with refcount 1 will destroy the body in
+/// the release and then attach the dangling pointer, bumping the freed
+/// body's refcount back to 1. That aliasing hazard is reproduced
+/// faithfully (a host test pins it). `*src` is loaded AFTER the
+/// release, exactly as the ARM does (`ldr r1, [r4]` follows the
+/// release `bl`), so a `src` slot aliasing storage the release
+/// invalidates behaves identically to the original. Returns `dst`
+/// unconditionally, including on the self-assign early-out.
+///
+/// Both callees are ported: the slot-1 teardown
+/// [`refcounted_body_release_dtor_variant`] @ 0x0839d3ac, and
+/// [`refcounted_body_attach`] @ 0x0839d370 ported alongside this
+/// function. A byte-similar sibling copy-assign @ 0x0839f324 (6 `bl`
+/// sites) pairs two different helpers (release 0x0839d498, attach
+/// 0x0839d45c, both unported) and remains unported.
+///
+/// Codegen deviation: LLVM emits the two calls as `bl`s to the ported
+/// symbols (both are `#[inline(never)]` exports), matching the
+/// original's structure exactly; inside them the ported mutex helpers
+/// inline, as documented on each callee.
+///
+/// # Safety
+/// `dst` and `src` must be valid, aligned pointer slots; their non-NULL
+/// bodies (and those bodies' mutexes, implementations, and vtables with
+/// a live virtual destructor at word index 1) must be valid for the
+/// release and attach operations encoded by the original. As in the
+/// original, the slot pointers themselves are not NULL-checked.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_ptr_copy_assign(
+    dst: *mut *mut RefcountedBody,
+    src: *const *mut RefcountedBody,
+) -> *mut *mut RefcountedBody {
+    if dst != src.cast_mut() {
+        refcounted_body_release_dtor_variant(dst);
+        refcounted_body_attach(dst, src.read());
     }
     dst
 }
@@ -1082,6 +1208,132 @@ mod tests {
         }
     }
 
+    /// attach with a NULL body: the store is unconditional, so the slot
+    /// is overwritten with NULL and nothing else is touched.
+    #[test]
+    fn attach_null_body_stores_null() {
+        unsafe {
+            let mut slot: *mut RefcountedBody = 0xdead_beefusize as *mut RefcountedBody;
+            refcounted_body_attach(&mut slot, core::ptr::null_mut());
+            assert!(slot.is_null());
+        }
+    }
+
+    /// Unguarded body (mutex NULL): the count is bumped and the slot
+    /// repointed, with no kernel interaction.
+    #[test]
+    fn attach_bumps_refcount_when_mutex_is_null() {
+        unsafe {
+            let mut body = RefcountedBody {
+                opaque0: 0x1111_2222,
+                refcount: 3,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot: *mut RefcountedBody = core::ptr::null_mut();
+            refcounted_body_attach(&mut slot, &mut body);
+            assert_eq!(slot, &mut body as *mut RefcountedBody);
+            assert_eq!(body.refcount, 4);
+            assert_eq!(body.opaque0, 0x1111_2222);
+        }
+    }
+
+    /// Guarded body whose mutex cell is absent: lock/unlock take the
+    /// NULL-cell early-out inside `mutex_lock`/`mutex_unlock`, so the
+    /// bump still happens with no ROM_KERNEL table installed.
+    #[test]
+    fn attach_bumps_refcount_with_empty_mutex_cell() {
+        unsafe {
+            let mut mutex = Mutex {
+                sem_cell: core::ptr::null_mut(),
+                unused: 0,
+            };
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: 0,
+                mutex: &mut mutex,
+            };
+            let mut slot: *mut RefcountedBody = core::ptr::null_mut();
+            refcounted_body_attach(&mut slot, &mut body);
+            assert_eq!(slot, &mut body as *mut RefcountedBody);
+            assert_eq!(body.refcount, 1);
+        }
+    }
+
+    /// The attach increment is the same plain ARM `add` — it wraps.
+    #[test]
+    fn attach_refcount_increment_wraps() {
+        unsafe {
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: i32::MAX,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot: *mut RefcountedBody = core::ptr::null_mut();
+            refcounted_body_attach(&mut slot, &mut body);
+            assert_eq!(body.refcount, i32::MIN);
+        }
+    }
+
+    /// Self-assign through the SAME slot: the guard compares slot
+    /// pointers, so nothing runs — no release, no bump — and `dst`
+    /// comes back.
+    #[test]
+    fn copy_assign_same_slot_is_a_no_op() {
+        unsafe {
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: 7,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot: *mut RefcountedBody = &mut body;
+            let ret = refcounted_ptr_copy_assign(&mut slot, &slot);
+            assert_eq!(ret, &mut slot as *mut *mut RefcountedBody);
+            assert_eq!(slot, &mut body as *mut RefcountedBody);
+            assert_eq!(body.refcount, 7);
+        }
+    }
+
+    /// Both slots NULL: the release early-outs, the attach stores NULL,
+    /// and `dst` comes back.
+    #[test]
+    fn copy_assign_both_null_stays_null() {
+        unsafe {
+            let mut dst: *mut RefcountedBody = core::ptr::null_mut();
+            let src: *mut RefcountedBody = core::ptr::null_mut();
+            let ret = refcounted_ptr_copy_assign(&mut dst, &src);
+            assert_eq!(ret, &mut dst as *mut *mut RefcountedBody);
+            assert!(dst.is_null());
+        }
+    }
+
+    /// Ordinary transfer between shared bodies: the old body's drop is
+    /// non-final (refcount 2 -> 1, no destructor, no frees), the slot
+    /// is repointed, and the new body is bumped. NULL mutexes mean no
+    /// kernel interaction, so this needs no recording bench.
+    #[test]
+    fn copy_assign_shared_transfer() {
+        unsafe {
+            let mut old = RefcountedBody {
+                opaque0: 0x1111_2222,
+                refcount: 2,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut new = RefcountedBody {
+                opaque0: 0x3333_4444,
+                refcount: 1,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut dst: *mut RefcountedBody = &mut old;
+            let src: *mut RefcountedBody = core::ptr::addr_of!(new).cast_mut();
+            let ret = refcounted_ptr_copy_assign(&mut dst, &src);
+            assert_eq!(ret, &mut dst as *mut *mut RefcountedBody);
+            assert_eq!(dst, &mut new as *mut RefcountedBody);
+            assert_eq!(old.refcount, 1, "non-final drop, body survives");
+            assert_eq!(old.opaque0, 0x1111_2222);
+            assert_eq!(new.refcount, 2);
+        }
+    }
+
     /// Direct tests of the body release use the ported mutex and heap
     /// surfaces with recording kernel/heap hooks. The crate's test
     /// configuration serializes hook-swapping tests; this atomic also keeps
@@ -1851,6 +2103,95 @@ mod tests {
             assert_eq!(body.refcount, -1);
             assert!(slot.is_null());
             assert!(events().is_empty());
+        }
+
+        // --- refcounted_ptr_copy_assign @ 0x0839f28c ----------------------
+
+        /// The final-drop transfer: the old body is destructed (vtable
+        /// word 1), unlocked, and torn down in the slot-1 sibling's
+        /// order; only then is the new body attached and bumped. The
+        /// attach adds no events — the new body is unguarded.
+        #[test]
+        fn copy_assign_final_drop_destructs_then_attaches() {
+            let _bench = bench();
+            let mut semaphore = 0x42;
+            let mut mutex = Mutex {
+                sem_cell: &mut semaphore,
+                unused: 0,
+            };
+            let mut vtable = [0usize; 2];
+            vtable[1] = recording_destructor as usize;
+            let mut implementation = [vtable.as_mut_ptr() as usize];
+            let mut old = RefcountedBody {
+                opaque0: implementation.as_mut_ptr() as usize,
+                refcount: 1,
+                mutex: &mut mutex,
+            };
+            let mut new = RefcountedBody {
+                opaque0: 0x3333_4444,
+                refcount: 1,
+                mutex: core::ptr::null_mut(),
+            };
+            let old_ptr = &mut old as *mut RefcountedBody;
+            let mutex_ptr = &mut mutex as *mut Mutex;
+            let cell_ptr = &mut semaphore as *mut u32;
+            let implementation_ptr = implementation.as_mut_ptr() as *mut u8;
+            let mut dst = old_ptr;
+            let src: *mut RefcountedBody = core::ptr::addr_of!(new).cast_mut();
+
+            let ret = unsafe { refcounted_ptr_copy_assign(&mut dst, &src) };
+
+            assert_eq!(ret, &mut dst as *mut *mut RefcountedBody);
+            assert_eq!(dst, &mut new as *mut RefcountedBody);
+            assert_eq!(new.refcount, 2);
+            assert!(mutex.sem_cell.is_null(), "mutex_delete clears its cell");
+            assert!(old.mutex.is_null(), "the mutex field is cleared after its free");
+            assert_eq!(
+                events(),
+                std::vec![
+                    Event::Wait(0x42),
+                    Event::Destructor(implementation_ptr as usize),
+                    Event::Signal(0x42),
+                    Event::Delete(0x42),
+                    Event::MutexCellFree(cell_ptr as usize),
+                    Event::HeapFree(mutex_ptr as *mut u8 as usize, 2),
+                    Event::HeapFree(old_ptr as *mut u8 as usize, 2),
+                ],
+                "the full slot-1 teardown runs BEFORE the attach"
+            );
+        }
+
+        /// The aliasing hazard, pinned: the guard compares slot pointers,
+        /// not bodies. Two DISTINCT slots holding the same body with
+        /// refcount 1 destroy the body in the release, then attach the
+        /// dangling pointer and bump the FREED body's refcount back to
+        /// 1. The recording heap free does not actually reclaim, so the
+        /// host can observe the exact sequence the target executes.
+        #[test]
+        fn copy_assign_aliased_slots_destroy_then_reattach_the_freed_body() {
+            let _bench = bench();
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: 1,
+                mutex: core::ptr::null_mut(),
+            };
+            let body_ptr = &mut body as *mut RefcountedBody;
+            let mut dst = body_ptr;
+            let mut src = body_ptr;
+
+            let ret = unsafe { refcounted_ptr_copy_assign(&mut dst, &src) };
+
+            assert_eq!(ret, &mut dst as *mut *mut RefcountedBody);
+            assert_eq!(dst, body_ptr, "the freed body is re-attached");
+            assert_eq!(src, body_ptr, "the source slot was never written");
+            assert_eq!(
+                body.refcount, 1,
+                "release took it 1 -> 0 and freed it; attach bumped the freed word 0 -> 1"
+            );
+            assert_eq!(
+                events(),
+                std::vec![Event::HeapFree(body_ptr as *mut u8 as usize, 2)]
+            );
         }
 
         // --- refcounted_body_release_slot1 @ 0x0839d1d4 ---------------------

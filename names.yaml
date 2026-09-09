@@ -20295,6 +20295,39 @@ functions:
       literal-pool blx included), so match.py shows a larger body with
       the same guard/decrement/dispose/unlock/teardown structure.
 
+  - address: 0x0839d370
+    ghidra: FUN_0839d370
+    name: refcounted_body_attach
+    size: 60
+    sig: "void refcounted_body_attach(RefcountedBody **dst, RefcountedBody *body)"
+    module: cxx/handle
+    status: ported
+    vars: {param_1: dst, param_2: body}
+    notes: >-
+      6 bl call sites (verified by decoding every ARM B/BL word in
+      osos.dec): 3 unconditional (0x081f0dbc, 0x081fcc30, 0x0839f2b0
+      inside refcounted_ptr_copy_assign) plus 3 blne (0x083e8a60,
+      0x083e8c28, 0x083e9538) whose callers predicate on the destination
+      SLOT pointer (movs r0, r5; ldrne r1, [r4]; blne) - they NULL-check
+      the slot themselves; this helper's only guard is on the body,
+      after the store. No b sites, no data-word references: never
+      virtually dispatched. Ghidra's 60-byte extent is exact:
+      refcounted_body_release_dtor_variant starts at 0x0839d3ac. The
+      shared-body attach half of the copy-assignment operators:
+      refcounted_ptr_assign @ 0x0839eda0 with the obj = *src load
+      hoisted into the second argument. *dst = body unconditionally
+      (str r1, [r0] precedes the movs-flagged popeq), then a non-NULL
+      body's refcount (+4) is bumped by one (wrapping add, tested at
+      i32::MAX) under the optional mutex at +8 - the mutex word is
+      loaded twice and NULL-checked separately around the bump. The
+      original's return value is unreliable (r0 = dst only on the
+      NULL-body popeq; the bump path tail-branches into mutex_unlock or
+      pops r0 = mutex) and unused by callers, so the port returns
+      nothing. Codegen deviation: LLVM inlines the ported lock/unlock
+      and tail-duplicates the bump block, so match.py shows a larger
+      body with the same store/guard/bump/guard structure; the symbol
+      resolves in librustypod.a (no folding).
+
   - address: 0x0839d3ac
     ghidra: FUN_0839d3ac
     name: refcounted_body_release_dtor_variant
@@ -20467,6 +20500,39 @@ functions:
       match.py structural confirms. Host tests back the 12/8-byte
       allocations with oversized arenas, since the host structs are
       wider than the 32-bit target layout.
+
+  - address: 0x0839f28c
+    ghidra: FUN_0839f28c
+    name: refcounted_ptr_copy_assign
+    size: 48
+    sig: "RefcountedBody **refcounted_ptr_copy_assign(RefcountedBody **dst, RefcountedBody **src)"
+    module: cxx/handle
+    status: ported
+    vars: {param_1: dst, param_2: src}
+    notes: >-
+      14 bl call sites, all unconditional (verified by decoding every
+      ARM B/BL word in osos.dec): no b sites, no predicated forms, and
+      the address appears in no data word - never virtually dispatched.
+      Ghidra's 48-byte extent is exact: a separately linked function
+      begins at 0x0839f2bc. The C++ copy-assignment operator of a
+      refcounted handle slot: if dst != src, release the old body
+      through refcounted_body_release_dtor_variant, then attach *src
+      through refcounted_body_attach; return dst. Both callees are
+      ported (the slot-1 teardown @ 0x0839d3ac predates this port; the
+      attach helper @ 0x0839d370 was ported alongside). The guard
+      compares SLOT POINTERS, not bodies: two distinct slots holding
+      the same body with refcount 1 destroy the body in the release and
+      then re-attach the dangling pointer, bumping the freed body's
+      refcount back to 1 - the aliasing hazard is reproduced faithfully
+      and pinned by a host test. *src is loaded AFTER the release
+      (ldr r1, [r4] follows the release bl), matching the original's
+      ordering. Returns dst unconditionally, self-assign included. A
+      byte-similar sibling copy-assign @ 0x0839f324 (6 bl sites) pairs
+      two different helpers (release 0x0839d498, attach 0x0839d45c,
+      both unported) and remains unported. Codegen: both calls remain
+      real bls to the inline(never) exports; match.py shows the same
+      guard/release/ldr/attach/return-dst structure (plus an LLVM
+      frame-pointer prologue). The symbol resolves in librustypod.a.
 
   - address: 0x0816cd44
     ghidra: FUN_0816cd44
