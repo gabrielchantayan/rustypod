@@ -14251,7 +14251,7 @@ functions:
     renames:
       param_1/r0: this
       FUN_08275bc8: framework_object_destruct (root dtor, a bare bx lr;
-        identified from framework_object_construct's side, not ported)
+        ported in cxx/observable_array)
     notes: >-
       One instruction, b 0x08275bc8 - a true 4-byte tail-branch veneer
       (Ghidra's size is right), NOT a mis-sized body and NOT an ldr
@@ -36749,6 +36749,29 @@ functions:
       three instructions would be pure ceremony. Deviations - none.
       match.py structural - same ldr-literal/str body plus the crate's fp
       frame, with the literal after the body.
+
+  - address: 0x08275bc8
+    ghidra: FUN_08275bc8
+    name: framework_object_destruct
+    size: 4
+    sig: "FrameworkObject *framework_object_destruct(FrameworkObject *this)"
+    module: cxx/observable_array
+    status: ported
+    renames:
+      param_1/r0: this
+    notes: >-
+      A single `bx lr` at 0x08275bc8. The next function begins immediately
+      at 0x08275bcc, proving the 4-byte extent Ghidra reported. Decoding
+      every ARM B/BL word in osos.dec found 12 direct bl callers
+      (0x081433d0, 0x0816cca0, 0x081862c0, 0x081b12c4, 0x081b96ec,
+      0x081b9734, 0x081cd818, 0x08212a30, 0x08266a70, 0x08275b80,
+      0x08289074, 0x0829206c), all unconditional; there are no predicated
+      BL forms. Ten unconditional tail branches also target it. A scan
+      found no word-aligned DATA reference to 0x08275bc8, so it is not a
+      vtable-dispatched entry. It reads and writes no memory and passes r0
+      through unchanged. That return is load-bearing: 0x08275b80 runs bl
+      then tail-branches into its operator-delete path with r0 untouched.
+      The port returns this rather than Ghidra's void; no other deviation.
 
   # --- C++ layer bit set / character set (0x082746f4..0x082748d8) ---
   #
