@@ -74,6 +74,7 @@ pub mod three_word_clear_tenth;
 pub mod tokenizer;
 pub mod trivial_destructor;
 pub mod trivial_vector8_destruct;
+pub mod trivial_vector12_destruct;
 pub mod wheel_event;
 pub mod word_key_set;
 pub mod transition_addon;
