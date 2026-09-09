@@ -17193,6 +17193,31 @@ functions:
       operator_new, and the blx-through-volatile-slot dispatch standing
       in for the direct bl 0x08259eac (the documented deviation).
 
+  - address: 0x0825c1a0
+    ghidra: FUN_0825c1a0
+    name: plist_node_child_vector_push_back
+    size: 48
+    sig: "PlistNode *plist_node_child_vector_push_back(PlistNode *owner, const PlistNode *source)"
+    module: fp/fp_misc
+    status: ported
+    vars: {param_1/r0: owner, param_2/r1: source, piVar1/r0: children, uVar9/r3: end, uVar6/r2: capacity, uStack_20/r2: next_end}
+    notes: >-
+      Raw ARM is exactly 12 instructions at 0x0825c1a0-0x0825c1cc;
+      FUN_0825c1d0 starts immediately after it. It is the
+      vector<PlistNode>::push_back fast path: owner+0x14 is the
+      {begin,end,capacity} child vector, each element is 0x28 bytes, and
+      the spare-capacity path stores end+0x28 before tail-branching to
+      FUN_0825c61c(destination, source). If end is NULL it stores 0x28
+      then returns NULL without construction. When end == capacity it
+      rearranges r0/r1/r2 to
+      FUN_083e32ac(&owner->children, end, source), an unported
+      growth/insert helper, and tail-branches there. A complete raw ARM
+      B/BL decode finds 14 incoming plain bl sites (0x08272ca0,
+      0x08272d30, 0x08272e78/84, 0x08272f08/78/88, 0x08273178,
+      0x082731e4, 0x082732bc, 0x08273330/a4/b0/bc), with no predicated
+      bl or incoming tail branch. Both direct callees remain unported:
+      device builds reach their exact retailOS addresses through a
+      volatile operation table and host tests install recorders.
   - address: 0x0825c2c0
     ghidra: FUN_0825c2c0
     name: cxx_vector_find_equal
