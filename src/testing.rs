@@ -161,6 +161,10 @@ pub mod hints {
     // reference/target/collection fixtures; mappings never unmap, so no other
     // user may share this hint.
     pub const ELEMENT_REFERENCE_ITEM_COUNT: usize = 0x7900_0000;
+    // 0xa800_0000: dedicated to ui/element_reference_target_field_210's
+    // raw-u32 reference/target fixture; mappings never unmap, so no other
+    // user may share this hint.
+    pub const ELEMENT_REFERENCE_TARGET_FIELD_210: usize = 0xa800_0000;
     // `heap/pool.rs` maps its own arena at 0x0800_0000 through a separate
     // path: it needs only bit 31 clear, not full u32 addressability.
     // 0x8100_0000: dedicated to cxx/draw_state_surface's surface-descriptor

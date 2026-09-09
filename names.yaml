@@ -15334,6 +15334,32 @@ functions:
       handling, exact zero-extended halfword extraction, arbitrary nonzero
       resolve truthiness, and slot selection.
 
+  - address: 0x082a63c0
+    ghidra: FUN_082a63c0
+    name: ui_element_reference_target_field_210
+    size: 44
+    sig: "u32 ui_element_reference_target_field_210(const UiElementReference *reference)"
+    module: ui/element_reference_target_field_210
+    status: ported
+    vars: {param_1: reference, "reference+0x0": vtable, "vtable+0xc": resolve_slot, "reference+0x4": target, "target+0x210": field_210}
+    notes: >-
+      Raw extent is exactly 44 bytes, 0x082a63c0 through 0x082a63e8:
+      push/mov, vtable slot-3 (+0xc) blx resolve, cmp, conditional target
+      load and target+0x210 word load, then conditional zero return. The next
+      separately linked function opens push {r4,lr} at 0x082a63ec. Decoding
+      every ARM B/BL word in osos.dec finds 15 direct call sites, all plain
+      unconditional BL with no predicated forms. Resolve result zero returns
+      zero without reading target; any nonzero result returns target+0x210
+      with no target NULL guard. The field's semantic identity is not
+      established, so the port names its verified storage location rather
+      than inventing a meaning. The descriptor 0x089a6600 slot +0xc is the
+      unresolved 0x0826acd8 selector/implementation data pair rather than a
+      decodable function entry; the port preserves raw vtable dispatch and
+      does not invent a callee. Deliberate host deviation: fixtures hold the
+      slot as a native-width function pointer while reference and target links
+      remain target u32 words. Host tests prove failed-resolve short
+      circuiting, arbitrary nonzero resolve truthiness, exact word extraction,
+      resolved zero preservation, and slot selection.
   - address: 0x082a6524
     ghidra: FUN_082a6524
     name: ui_element_reference_target_persistent_id
