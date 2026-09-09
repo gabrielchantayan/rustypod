@@ -43262,6 +43262,37 @@ functions:
       `str r7,[sp]` fifth argument to cg_create_inst_binary; the diff is
       LLVM's frame-pointer prologue and that single hoisted load.
 
+  - address: 0x0826077c
+    ghidra: FUN_0826077c
+    name: cg_emit_load_word_at_offset (second emission)
+    size: 136
+    status: duplicate
+    notes: >-
+      BYTE-IDENTICAL duplicate emission of cg_emit_load_word_at_offset @
+      0x082605f0 (ported, module codegen/pipeline_emit): a word-by-word
+      compare of both 136-byte bodies found exactly six differing words,
+      all `bl` encodings to the SAME six targets
+      (cg_virtual_reg_create x3, cg_create_inst_load_immed,
+      cg_create_inst_binary, cg_create_inst_load) differing only in the
+      displacement field. Same signature
+      (block, base, offset) -> value_reg, same LDI/ADD/LDW idiom, same
+      up-front creation of three general virtual registers. Ghidra's
+      136-byte extent is exact here: the next function starts at
+      0x08260804 with `ldr r0,[r0,#4]; mov r1,r2; cmp r0,#0; ldrne
+      r2,[r0]; ldrne r2,[r2,#0x98]; bxne r2; bx lr` (a virtual-call
+      trampoline on vtable slot 0x98). 17 call sites, ALL unconditional
+      bl (0 predicated, 0 tail b), verified by decoding every branch
+      word in osos.dec - matches Ghidra's count of 17. The callers sit
+      in one run inside a second set of pipeline generators,
+      0x08248790-0x08249254, passing the same word-strided field offsets
+      as the primary's callers (0x1c, 0x20, 0x24, 0x2c, n*4+0x6c,
+      0x70/0x74/0x78). The compiler emitted the helper twice for two
+      generator groups (primary's callers: 0x08243a28-0x08245cc8).
+      Following the rect_set / FUN_0826c5c0 precedent, no separate Rust
+      symbol exists: a hook at 0x0826077c can target
+      cg_emit_load_word_at_offset directly - the bodies are
+      instruction-identical.
+
   - address: 0x0824035c
     ghidra: FUN_0824035c
     name: cg_emit_subtract
