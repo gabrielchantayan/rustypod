@@ -19827,6 +19827,41 @@ functions:
       stand-in data word rather than mapped GPIO MMIO; ARM reads the exact
       volatile register address.
 
+  # --- GPIO output pin drive ---
+  - address: 0x0836b744
+    ghidra: FUN_0836b744
+    name: gpio_pin_write
+    size: 52
+    sig: "u32 gpio_pin_write(u32 pin_id, i32 level)"
+    module: drivers/gpio_pin_write
+    status: ported
+    renames:
+      param_1/r0: pin_id
+      param_2/r1: level
+      DAT_0836b778: gpio_controller_base_literal (0x3cf00000)
+    notes: >-
+      Write sibling of gpio_pin_read @ 0x0836b6cc with the identical
+      address geometry: read-modify-write of the port data word at
+      0x3cf00000 + (pin_id >> 3) * 0x20 + 4, bit (pin_id & 7).
+      Verified raw extent is 52 bytes at 0x0836b744..0x0836b774 (48 code
+      + the 0x3cf00000 literal at 0x0836b778); the next function begins
+      at 0x0836b77c. level == 0 clears the bit (biceq), any nonzero
+      level sets it (orrne); returns 0 unconditionally. Every ARM B/BL
+      word in osos.dec was decoded: exactly 12 unconditional bl call
+      sites plus 2 unconditional tail-b sites (0x08078c68, 0x082e5958);
+      zero predicated forms. Two of the bl sites (0x080dbec4,
+      0x080dbed8) are missing from Ghidra's asm listing. Observed uses:
+      a 3x3 key-matrix scan (inferred from the two
+      3-entry threshold tables in 0x080d3ce0) and pins
+      0x5e-0x61 driven from 0x082e5aac / 0x082bc9ec (pin roles not
+      identified). Port reuses gpio_data_address
+      from gpio_pin_read and splits the bit edit into the pure
+      gpio_pin_drive (exhaustively host-tested); the volatile RMW is
+      mocked off-target like its sibling. Codegen deviation - LLVM
+      computes the port address as (pin_id << 2) & ~0x1f added to a
+      folded 0x3cf00004 literal, and emits both orr and bic selecting on
+      the cmp flags; same address, same bits, plus a frame push/pop.
+
   # --- shared-cell handle constructor ---
   - address: 0x083b5090
     ghidra: FUN_083b5090
