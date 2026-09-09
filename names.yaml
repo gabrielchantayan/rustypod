@@ -53759,3 +53759,51 @@ functions:
       game_storage_dir_name_model is this exact behavior. A future
       porter only needs to lift the model into an exported function and
       rewire the seam default.
+
+  - address: 0x08087554
+    ghidra: FUN_08087554
+    name: piezo_note_post
+    size: 64
+    sig: "void piezo_note_post(u32 period_ticks, u32 duration_ticks)"
+    module: drivers/piezo
+    status: ported
+    renames:
+      param_1: period_ticks
+      param_2: duration_ticks
+    notes: >-
+      Extent verified from raw bytes: 64 bytes, 0x08087554..0x08087594;
+      the sibling at 0x08087594 opens its own push prologue. Piezo
+      (clicker) note post helper: malloc(24) @ 0x0802edac (ported,
+      runtime/malloc_rt), zero-fill through IRAM veneer 0x08037db8 ->
+      0x2200027c = memzero_aligned @ 0x0800027c (ported, libc/memzero;
+      the port calls memzero_aligned directly through a read_volatile
+      fn-pointer load so LLVM does not inline it and re-lower the fixed
+      24-byte fill to __aeabi_memclr4), stores period_ticks at +0x10 and
+      duration_ticks at +0x14, then tail-branches through veneer
+      0x08037f30 -> IRAM 0x22004154 to mailbox_send_gateway @ 0x08004154
+      (ported, heap/mailbox_send_gateway): KS_send(mailbox 2, block,
+      priority 5, semaphore 0). Call sites binary-verified by decoding
+      every B/BL word in osos.dec: 19 total (13 bl, 4 tail b, 1 tail
+      bne @ 0x0805bc14, 1 blne @ 0x081b1178); Ghidra's "14 bl" misses
+      the tail branches and double-counts the thunk 0x08061054 (a lone
+      b 0x08087554). The predicated sites are callers gating the post on
+      their own state; the callee itself is unconditional. Semantics
+      pinned by the mailbox-2 receiver task @ 0x083938f4: it reads
+      +0x10/+0x14 as tick counts for two S5L8702 timer channels
+      (0x3c700020 + channel * 0x20) - +0x10 arms the tone channel via
+      timer_channel_arm @ 0x0836dc14 only when nonzero (0 = rest, e.g.
+      the (0, 10) post @ 0x080495a4), +0x14 arms the note-length channel
+      (0x0836dbb0: prescaler 749, control 0x240) whose expiry callback
+      0x080dea34 ends the note. Caller pairs are (period, duration)
+      notes: boot chime (540,200),(676,400) @ 0x08392f10/0x08044ec4;
+      click (223,50),(250,50) @ 0x0804958c. freemyipod RetailOS names
+      the mailbox set M_PIEZOMGR/PIEZOMGRSEND. Deviation: the original
+      has no malloc-failure check (a NULL block would be zero-filled at
+      address 0 and posted); the port returns early without posting, the
+      documented stdio-slot-append precedent. Host tests mock HEAP_OPS
+      and ROM_GATEWAY_OPS to prove the 24-byte zero-fill, payload
+      stores, the (2, block, 5, 0) send, and the failure path. match.py
+      --lib <worktree archive>: 26 vs 16 instructions; same
+      alloc/zero/store/tail-post structure, deltas are the HEAP_OPS and
+      volatile-fn blx indirection, the fp frame, and the null-check
+      branch (the documented deviation).
