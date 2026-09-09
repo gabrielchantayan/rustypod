@@ -49658,3 +49658,76 @@ functions:
       the bit, 0x80000000 is not the sentinel, 0x7fffffff stored
       unchanged, and sequential pushes including an interleaved
       sentinel fill slots in order with per-slot tags.
+
+  - address: 0x081d66b8
+    ghidra: FUN_081d66b8
+    name: iap_incoming_process_thread_slot_wait
+    size: 68
+    sig: "u32 iap_incoming_process_thread_slot_wait(u8 *this, u32 index)"
+    module: app/iap_incoming_process_thread
+    status: ported
+    renames:
+      param_1: this (the 0x240-byte iAP incoming-process context, NOT
+        the 0x44-byte CIapIncomingProcessThread wrapper - see the
+        module header's correction)
+      param_2: index (registration slot, 0..28)
+      FUN_08030f44: heap_panic (direct, ported in heap/veneers)
+      FUN_08257cbc: slot_object_condvar_timed_wait (unported; timed
+        condition wait on the slot object's condvar at +0x10 with the
+        {sec,nsec} deadline stored at its +0x1c, behind the
+        IAP_THREAD_SLOT_WAIT_OPS seam)
+    notes: >-
+      68 bytes, 0x081d66b8..0x081d66fc, all code, no literal pool;
+      Ghidra's 68 is exact (the next function opens at 0x081d66fc with
+      `push {r4,r5,r6,r7,r8,lr}` - a same-shape sibling that calls the
+      zero-timeout poll veneer 0x08257cb4). Byte-decoded from osos.dec.
+      Call count binary-verified by decoding every B/BL word in
+      osos.dec: 17 unconditional `bl`, zero predicated forms, and no
+      DATA word anywhere references the address - only ever
+      direct-called, never virtual. Sites: 0x081395e0, 0x081642a4,
+      0x081649f8, 0x08190404, 0x08190b4c, 0x081962dc, 0x081a9664,
+      0x081a96c8, 0x081aeccc, 0x081f1e24, 0x081f2340, 0x081f25b8,
+      0x081f3058, 0x081f3524, 0x081fd6e8, 0x081fdef8, 0x08200fa4.
+      The TIMED-WAIT sibling of iap_incoming_process_thread_slot_poll
+      @ 0x081d7270 on the same 0x240-byte context: identical register
+      frame, same `add r4,r0,#0x114` registry mutex (veneers
+      0x08261e20/0x08261e24, resolved to the canonical ported
+      posix_mutex_lock/unlock), same `cmp r6,#29; bcs heap_panic`
+      bound, same `add r0,r5,r6,lsl #3; ldr r0,[r0,#0x154]` slot
+      resolution with NULL fatal via heap_panic WITH THE MUTEX HELD
+      (0x08030f44, non-returning), same `mov r0,r4; pop; b unlock`
+      tail so the return IS the unlock status. The ONLY difference is
+      the callee: 0x08257cbc is a 4-instruction veneer
+      (`add r1,r0,#0x1c; add r0,r0,#0x10; b 0x8261f28`) running a
+      TIMED condition wait on the slot object's condvar at +0x10 with
+      the {sec,nsec} deadline stored at the object's +0x1c..+0x23
+      (zeroed by its ctor @ 0x08257cc8: str at +0x1c and +0x20);
+      0x8261f28 stacks that pair and chains 0x8261f94 -> the posix
+      timed-wait body @ 0x0826269c (fp/fp_misc cond_wait_attr_clock
+      notes). The wait status is discarded. Callers pair it with the
+      poll: @ 0x081f1e18 the session runs instance-veneer ->
+      `ldr r1,[r5,#0x2c]` -> slot_poll, then repeats getter+index and
+      calls this function - drain a pending signal, then block until
+      the slot's deadline.
+      Deviations - 0x08257cbc is unported and rides the
+      IAP_THREAD_SLOT_WAIT_OPS seam: target default transmutes the ROM
+      address (hook-ready), host default is inert and tests install a
+      recording model; the fatal paths are not host-tested
+      (heap_panic is `-> !`, the pending_event_take precedent).
+      Host tests (5, app::iap_incoming_process_thread::slot_wait_tests,
+      low-slab fixture at hints::IAP_THREAD_SLOT_WAIT): the wait runs
+      under the held mutex with the slot's +0 pointer verbatim and the
+      unlock status 0 returned; edge indices 0 and 28 both resolve;
+      the index strides by 8 and the slot's +4 context word is never
+      read (poison-pinned); the unlock status is forwarded as the
+      return value (mock drops the owner word, the function's own
+      unlock then reports 0x05 non-owner, surfaced verbatim); and the
+      symbol is address-distinct from the poll sibling (LLVM must not
+      fold the near-identical bodies).
+      match.py structural (exit 1, diff expected): same lock /
+      bounds-check / lsl-#3 + 0x154 slot load / NULL-check / wait /
+      mov r0,r4 / tail-unlock skeleton as the original; deltas are the
+      crate fp frame, `cmp #28/bhi` for `cmp #29/bcs`, a predicated
+      `bleq` heap_panic, and the seam's literal-load + blx for the
+      unported wait callee - the same four deltas the ported poll
+      sibling records.
