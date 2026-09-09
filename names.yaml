@@ -20134,6 +20134,36 @@ functions:
       separate port exists; hook this address to the single
       handle_deref_or_null symbol.
 
+  - address: 0x083d60dc
+    ghidra: FUN_083d60dc
+    name: handle_elem_ptr
+    size: 20
+    sig: "u32 *handle_elem_ptr(u32 *const *const *slot, u32 index)"
+    module: cxx/handle
+    status: ported
+    vars: {param_1: slot, param_2: index}
+    notes: >-
+      The indexed member of the handle_deref_or_null family:
+      `cell = *slot; base = cell ? *cell : NULL; return base + index`
+      with 4-byte elements - five words: `ldr r0,[r0]; cmp r0,#0;
+      ldrne r0,[r0]; add r0,r0,r1,lsl #2; bx lr`. The element add is
+      UNCONDITIONAL: a NULL cell yields index*4 as a bare address, not
+      NULL, and the NULL test is on the inner pointer (a NULL slot
+      faults). Binary-scanned: exactly 2 byte-identical copies
+      (0x083d60dc, 0x083d60f0), 3 unconditional bl sites each, and all
+      six sites sit inside the two sibling cursor inits
+      (plane_cursor_init @ 0x0839bae0 and its byte-similar sibling @
+      0x0839bb58) - no other callers, no b sites, no data-word
+      references. Ported alongside plane_cursor_init so that port's
+      three bls keep the original's structure; hook both addresses to
+      the one symbol. match.py - LLVM splits the predicated ldrne into
+      a framed moveq/addeq/bxeq branch, the same deviation as
+      handle_deref_or_null; behavior identical.
+
+  - {address: 0x083d60f0, ghidra: FUN_083d60f0, name: handle_elem_ptr_alias_60f0,
+     size: 20, module: cxx/handle, status: ported,
+     notes: "ALIAS - byte-identical to handle_elem_ptr @ 0x083d60dc (same 20 bytes in osos.dec); 3 bl sites, all inside the sibling cursor init @ 0x0839bb58. No separate port exists; hook this address to the single handle_elem_ptr symbol (the load_be32 alias precedent)."}
+
   - address: 0x08386840
     ghidra: FUN_08386840
     name: vdbe_add_op3
@@ -26706,6 +26736,41 @@ functions:
       060090e8020051e1000092351eff2f31...). Served by the existing
       util/three_pointer_select port - hook both addresses to the one
       symbol. 8 bl call sites.
+
+  - address: 0x0839bae0
+    ghidra: FUN_0839bae0
+    name: plane_cursor_init
+    size: 120
+    sig: "PlaneCursor *plane_cursor_init(PlaneCursor *out, const PlaneDescriptor *plane, u32 mode, u32 index)"
+    module: util/plane_cursor
+    status: ported
+    vars: {param_1: out, param_2: plane, param_3: mode, param_4: index}
+    notes: >-
+      Initializes a 16-byte sampling cursor over a u32-element plane
+      held behind a C++ handle: begin (+4) = element 0, end (+8) =
+      element count-1 (count at plane+4; wraps to base-4 for count 0),
+      cur (+0) = element index phase-adjusted by mode (0 = even phase
+      2*index, 1 = odd phase 2*index+1, anything else = direct index)
+      and step (+12) = 2 for the phases, 1 for direct; returns out.
+      Store order begin/end/step/cur is the original's. The cursor's
+      first three words are the ThreePointers layout consumed by the
+      ported clamp-fetch three_pointer_select @ 0x083d5eb4
+      (cur/begin/end = first/second/third). 14 bl call sites, all
+      unconditional, all in the fixed-point YCbCr converter
+      FUN_080c79e8 (an unrolled run @ 0x080c7a2c..0x080c7b30, every
+      one mode=2) - verified by decoding every B/BL word in osos.dec;
+      no b sites, no predicated forms, no data-word references. A
+      byte-similar sibling @ 0x0839bb58 (identical except its 3 bls
+      target the other accessor copy 0x083d60f0) starts immediately
+      after, confirming the 120-byte extent; it has 8 bl sites of its
+      own in the sibling converter @ 0x080c7eb8, also all mode=2, so
+      the phase modes are dead in osos but ported faithfully. Ghidra's
+      C was accurate here. The three accessor calls go to the ported
+      handle_elem_ptr @ 0x083d60dc (both stock copies hook that
+      symbol). match.py - same structure (three call/store pairs,
+      three-way mode split, return-this); LLVM adds its usual fp
+      frame, hoists the slot address into a register, reorders the
+      mode compares, and emits orr for 2*index+1.
 
   # --- scouted 0x08110000-0x0812ffff, not ported (display-layer sweep) ---
 
