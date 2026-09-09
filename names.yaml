@@ -54972,3 +54972,33 @@ functions:
       dispatches the unported constructor to its verified address; host tests
       substitute a recording constructor. This makes the accessor hook-ready
       on target without inventing either callee.
+
+  # --- Media-player interface slot +0x11c dispatcher ---
+  - address: 0x081f9d78
+    ghidra: FUN_081f9d78
+    name: media_player_interface_slot_11c
+    size: 24
+    sig: "u32 media_player_interface_slot_11c(void)"
+    module: app/media_player_interface_slot_11c
+    status: ported
+    renames:
+      FUN_08259594: media_player_interface_get
+      "vtable+0x11c": media_player_state_query_unidentified
+      r0: media_player_interface_then_slot_result
+      r1: media_player_interface_vtable_then_slot
+    notes: >-
+      Raw ARM proves the 24-byte extent: push {r4,lr}, BL
+      media_player_interface_get, load the returned interface's vtable word,
+      load vtable +0x11c, restore r4/lr, then BX the loaded slot. The next
+      separately linked function begins at 0x081f9d90 with
+      strb r1,[r0,#0x90]; bx lr. Decoding every ARM B/BL word in osos.dec
+      finds exactly 13 incoming direct calls, all unconditional BL (cond=AL),
+      with zero predicated forms and zero plain-B tail sites. Every recovered
+      caller uses the tail result as a state predicate, establishing an
+      observable u32 result despite Ghidra's void signature. The incoming r0
+      is discarded before the getter call; the slot receives only the global
+      media-player interface. The +0x11c target is dynamic vtable data with
+      no recoverable static identity, so no callee identity is invented.
+      Target Rust preserves the direct getter BL and tail BX in assembly;
+      host tests use a native-width structural vtable fixture because firmware
+      vtable words are 32-bit pointers.
