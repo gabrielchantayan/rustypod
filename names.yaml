@@ -51742,3 +51742,36 @@ functions:
       NULL are forwarded. Deliberate host-only representation deviation: the
       dynamic vtable is structural so it can retain a native-width callback,
       while the target field's +0x34 layout is asserted on 32-bit builds.
+
+  - address: 0x0811e2e4
+    ghidra: FUN_0811e2e4
+    name: ui_current_window
+    size: 20
+    sig: "void *ui_current_window(void)"
+    module: ui/current_window
+    status: ported
+    renames:
+      iVar1/r0: session (active-session accessor result)
+      uVar2/r0: current_window (return value)
+    notes: >-
+      Returns the WindowManager active session's current-window word at
+      +0x1c, or NULL when no session is active: bl 0x08148b98 (active
+      session), cmp r0,#0, ldrne r0,[r0,#28], pop {r4,pc}. Extent
+      binary-verified: the sibling flag setter 0x0811e2f8 opens push
+      {r4, lr} immediately after the pop {r4, pc}. Exactly 15 direct bl
+      call sites, all unconditional, none predicated, no data-word
+      references (verified by decoding every B/BL word and scanning every
+      word of osos.dec) - never dispatched virtually. The callee
+      0x08148b98 stays in retailOS behind a one-pointer seam: it takes
+      the scheduler lock (0x08148cc8), loads the WindowManager singleton's
+      (0x089cb2ec; "WindowManager" string at 0x08148b30) active-session
+      word at +0x10, and unlocks (0x08148dd4); teardown 0x08148e20 clears
+      that field to NULL. Caller evidence that the result is the current
+      window object: 0x0828d9b4 tests its title byte at +0x101, 0x081ec31c
+      virtual-calls vtable +0xd8, and 0x08180ce0/0x08182ce0/0x081843d4/
+      0x0817f7a4/0x0828e3d4 pass its +0xe8 handle to the window-list
+      lookup 0x082775f4. match.py diff is the expected seam shape
+      (ldr/blx through the ACTIVE_SESSION static plus LLVM's fp frame);
+      the core cmp/ldrne at +28 matches. Host fixtures use the dedicated
+      CURRENT_WINDOW hint (0x43000000); the +0x1c field is read as a u32
+      target word and widened.
