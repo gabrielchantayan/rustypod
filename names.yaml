@@ -30645,6 +30645,60 @@ functions:
       instruction-for-instruction; the only diff is the crate-standard
       fp prologue.
 
+  - address: 0x08272360
+    ghidra: FUN_08272360
+    name: resource_chain_find_on_current_task
+    size: 44
+    sig: "void *resource_chain_find_on_current_task(ResourceKind kind, u32 id)"
+    module: app/resource_chain
+    status: ported
+    renames:
+      param_1: kind
+      param_2: id
+      FUN_080cb828: current_task_ctx_block
+      FUN_0827216c: resource_chain_find
+    notes: >-
+      17 bl call sites, binary-scanned by decoding every B/BL word in
+      osos.dec - all unconditional, no predicated form and no tail b; no
+      DATA word in the image holds 0x08272360, so it is never dispatched
+      virtually. Ghidra's 44-byte extent is exact (0x08272360..0x0827238c;
+      the BMap thunk follows). The task-local front-end of
+      resource_chain_find: `push {r4,r5,r6,lr}; mov r5,r1; mov r4,r0;
+      bl 0x080cb828; ldr r0,[r0,#0x30]; cmp r0,#0; movne r2,r5; movne
+      r1,r4; popne {r4,r5,r6,lr}; bne 0x0827216c; pop {r4,r5,r6,pc}` -
+      i.e. head = field +0x30 of the current task's context block; if
+      non-NULL, tail-call resource_chain_find(head, kind, id); else
+      return NULL (r0 already 0). This establishes what field +0x30 of
+      the task context block IS: the head of the task-local
+      resource-provider chain (util/context_field.rs ported the getter
+      under the field-offset name because its writers were undecoded -
+      this wrapper is the decoder). Two NULL-handling details kept: the
+      context-block pointer is NOT checked (no current task = data abort
+      on the +0x30 load, exactly like the inlined getter; the wrapper
+      calls 0x080cb828 directly, not task_ctx_field_0x30 @ 0x0827233c),
+      and the chain head IS checked, so a task with no provider chain
+      gets NULL without the walk. Signature note: callers pass
+      (kind, id) - the call site @ 0x08140cdc shows r1 arriving already
+      loaded with the id, which Ghidra's C drops (e.g.
+      FUN_08272360(DAT_0826de68) with one visible argument). Deviations:
+      the getter sits behind the CURRENT_TASK_CTX_BLOCK dispatch slot
+      (same documented deviation as util/context_field.rs; the default
+      stub models the callee's known prefix exactly), and the predicated
+      tail b is a call in the port (observationally identical). Host
+      tests (4 in app/resource_chain.rs): chain walk from the ctx head
+      with kind/id forwarded verbatim and exactly one getter call, NULL
+      head returns NULL with the walk skipped entirely, NULL when no
+      provider answers, and the ctx block read-only byte-compare; the
+      chain fixture lives in a below-4-GiB slab (hints::
+      RESOURCE_CHAIN_ON_CURRENT_TASK) because the ctx block carries the
+      head as a raw u32 word, and slot swaps serialize on testing::
+      TASK_CTX_BLOCK_TEST_LOCK, now shared with context_field's tests.
+      match.py structural: ldr +0x30 / cmp #0 / forward-and-tail-b shape
+      intact; the diff is the crate fp frame, the dispatch-slot ldr/blx
+      standing in for bl 0x080cb828, and LLVM materializing an explicit
+      mov r0,#0 on the NULL path where the original reused the zeroed
+      r0.
+
   - address: 0x08272230
     ghidra: FUN_08272230
     name: resource_chain_write
