@@ -218,6 +218,46 @@ pub unsafe extern "C" fn mov_atom_node_clear_links(node: *mut MovAtomNode) -> *m
     }
     node
 }
+/// MOV atom node conditional child-B setter — original: `FUN_0814d21c` @
+/// 0x0814d21c (20 bytes, 0x0814d21c..0x0814d230, 5 instructions, no
+/// literal pool). The next separately linked function starts at 0x0814d230.
+/// All 13 direct call sites are unconditional `bl` instructions (none
+/// predicated), verified by decoding every ARM B/BL word in osos.dec; no
+/// aligned data word references this address.
+///
+/// Returns 1 without dereferencing `node` when `child_b` is NULL. Otherwise,
+/// stores the child pointer word at `node + 0x04` and returns 0. This is the
+/// tree's child-B link (child-A is at +0x00); it has no node NULL guard on
+/// the non-NULL path, matching the stock `strne`.
+///
+/// # Deviations
+///
+/// None.
+///
+/// # Safety
+///
+/// When `child_b` is non-NULL, `node` must point to one writable
+/// [`MovAtomNode`]. `child_b` is stored but never dereferenced.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.mov_atom_node_set_child_b_if_present")]
+pub unsafe extern "C" fn mov_atom_node_set_child_b_if_present(
+    node: *mut MovAtomNode,
+    child_b: *mut MovAtomNode,
+) -> u32 {
+    if child_b.is_null() {
+        1
+    } else {
+        unsafe {
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!((*node).child_b),
+                child_b as usize as u32,
+            );
+        }
+        0
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -318,5 +358,65 @@ mod tests {
         assert_eq!((node.offset_lo, node.offset_hi), (0x5555_5555, 0x6666_6666));
         assert_eq!((node.size_lo, node.size_hi), (0x7777_7777, 0x8888_8888));
         assert_eq!((node.flag, node.kind, node.pad_22, node.fourcc), (0x99, 0xaa, [0xbb, 0xcc], 0xdddd_dddd));
+    }
+
+    #[test]
+    fn sets_child_b_only_when_present() {
+        let mut node = MovAtomNode {
+            child_a: 0x1111_1111,
+            child_b: 0x2222_2222,
+            dup_chain: 0x3333_3333,
+            unused_0c: 0x4444_4444,
+            offset_lo: 0x5555_5555,
+            offset_hi: 0x6666_6666,
+            size_lo: 0x7777_7777,
+            size_hi: 0x8888_8888,
+            flag: 0x99,
+            kind: 0xaa,
+            pad_22: [0xbb, 0xcc],
+            fourcc: 0xdddd_dddd,
+        };
+        let mut child = MovAtomNode {
+            child_a: 0,
+            child_b: 0,
+            dup_chain: 0,
+            unused_0c: 0,
+            offset_lo: 0,
+            offset_hi: 0,
+            size_lo: 0,
+            size_hi: 0,
+            flag: 0,
+            kind: 0,
+            pad_22: [0; 2],
+            fourcc: 0,
+        };
+        let node_ptr = core::ptr::addr_of_mut!(node);
+        let child_ptr = core::ptr::addr_of_mut!(child);
+
+        assert_eq!(unsafe { mov_atom_node_set_child_b_if_present(node_ptr, child_ptr) }, 0);
+        assert_eq!(node.child_b, child_ptr as usize as u32);
+        assert_eq!(node.child_a, 0x1111_1111);
+        assert_eq!(node.dup_chain, 0x3333_3333);
+        assert_eq!(node.unused_0c, 0x4444_4444);
+        assert_eq!((node.offset_lo, node.offset_hi), (0x5555_5555, 0x6666_6666));
+        assert_eq!((node.size_lo, node.size_hi), (0x7777_7777, 0x8888_8888));
+        assert_eq!((node.flag, node.kind, node.pad_22, node.fourcc), (0x99, 0xaa, [0xbb, 0xcc], 0xdddd_dddd));
+
+        let saved_child_b = node.child_b;
+        assert_eq!(
+            unsafe { mov_atom_node_set_child_b_if_present(node_ptr, core::ptr::null_mut()) },
+            1
+        );
+        assert_eq!(node.child_b, saved_child_b, "NULL child leaves node untouched");
+        assert_eq!(
+            unsafe {
+                mov_atom_node_set_child_b_if_present(
+                    core::ptr::null_mut(),
+                    core::ptr::null_mut(),
+                )
+            },
+            1,
+            "NULL child path never dereferences node",
+        );
     }
 }

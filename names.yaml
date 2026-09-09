@@ -53367,6 +53367,36 @@ functions:
       resolve, both timers, empty-string clear, derived array ABI, returned
       this, copied words, the underflow clamp, and untouched padding.
 
+  - address: 0x0814d21c
+    ghidra: FUN_0814d21c
+    name: mov_atom_node_set_child_b_if_present
+    size: 20
+    sig: "u32 mov_atom_node_set_child_b_if_present(MovAtomNode *node, MovAtomNode *child_b)"
+    module: mov/atom_node
+    status: ported
+    renames:
+      param_1/r0: node
+      param_2/r1: child_b
+      param_1_plus_0x04: child_b_link
+    notes: >-
+      Raw ARM establishes the exact 20-byte extent
+      0x0814d21c..0x0814d230: cmp r1,#0; strne r1,[r0,#4];
+      moveq r0,#1; movne r0,#0; bx lr. The separately linked next
+      function begins at 0x0814d230. Decoding every ARM B/BL word in
+      osos.dec finds 13 direct call sites, all unconditional plain bl:
+      0x081c1dd8, 0x081c1de4, 0x081c1df8, 0x081c1e04, 0x081c1e6c,
+      0x081c7db8, 0x081c7ddc, 0x081c7de8, 0x081e5fd8, and
+      0x0820c6c0..0x0820c6e4; there are zero predicated BL forms and
+      no tail branches. No aligned data word in osos.dec holds
+      0x0814d21c. The leaf stores the supplied non-NULL node pointer
+      in child-B (+0x04) and returns 0; a NULL child returns 1 without
+      dereferencing node, so even a NULL node is harmless on that path.
+      This is the companion of unported child-A setter 0x0814d28c.
+      No deliberate deviations: the Rust export preserves the target-width
+      pointer word, conditional store, and u32 return. Host tests prove
+      the non-NULL store, exact preservation of every other field, and the
+      no-dereference NULL-child path.
+
   - address: 0x0814d2e0
     ghidra: FUN_0814d2e0
     name: mov_atom_node_clear_links
