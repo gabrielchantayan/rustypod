@@ -15486,6 +15486,40 @@ functions:
       `FUN_08122220`, `FUN_081225f0`, `FUN_08087554`, `FUN_081b111c`) plus the
       indirect callback slot at `DAT_08037f34`. Verified call count: 21 `bl`
       sites.
+  - address: 0x081de158
+    ghidra: FUN_081de158
+    name: keyed_event_binding_construct
+    size: 76
+    sig: "KeyedEventBinding *keyed_event_binding_construct(KeyedEventBinding *this, u32 key, u32 context, u32 kind)"
+    module: app/keyed_event_binding
+    status: ported
+    renames:
+      param_1: this
+      param_2: key
+      param_3: context
+      param_4: kind
+      FUN_0826c5a8: rect_clear (direct, ported in ui/rect)
+      FUN_0816df60: lazy_singleton_0x3c (direct, ported in app/singletons)
+      FUN_083db8f4: element_registry_slot_for_key (direct firmware boundary)
+    notes: >-
+      Exact 76-byte extent 0x081de158..0x081de1a4: the sibling constructor
+      begins with `push {r3, r4, r5, lr}` at 0x081de1a4; no literal pool is
+      present. Decoding every B/BL word in osos.dec finds 12 call sites, all
+      unconditional bl: 0x0817f094, 0x0817f180, 0x08180b68, 0x08182074,
+      0x081821bc, 0x081833e4, 0x081835bc, 0x08183ab4, 0x08183c10,
+      0x08183ebc, 0x0818422c, and 0x08184610. No predicated or tail-branch
+      sites. The constructor stores the key, low kind byte, and context word;
+      clears +0x0c, the embedded Rect at +0x10, and +0x20; then registers
+      this in the 0x3c element registry's map (+0x20) under a stack key copy.
+      The raw `strb` leaves +0x05..+0x07 untouched, which the Rust layout and
+      host test preserve. rect_clear and lazy_singleton_0x3c are direct
+      ported calls. FUN_083db8f4 is still stock; device builds call its
+      verified entry directly, while a host-only volatile function pointer
+      records its observed map-slot ABI without inventing its identity. The
+      host test proves truncating kind 0x1ab to 0xab, every initialized and
+      untouched field, registry +0x20, stack-copy key value, slot write, and
+      return-this result. match.py structural review: expected frame and
+      call-shape differences around the direct 0x083db8f4 boundary.
   - address: 0x081de270
     ghidra: FUN_081de270
     name: event_code_queue_post
