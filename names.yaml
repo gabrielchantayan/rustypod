@@ -47938,6 +47938,55 @@ functions:
       crate-wide fp frame. Reference C:
       decomp/c/004/0805e79c_FUN_0805e79c.c.
 
+  - address: 0x083864c0
+    ghidra: FUN_083864c0
+    name: sqlite_value_bytes
+    size: 68
+    sig: "i32 sqlite_value_bytes(sqlite3_value *value, u8 enc)"
+    module: sqlite/value_bytes
+    status: ported
+    renames:
+      param_1/r0/r4: value
+      param_2/r1: enc
+      r2: flags
+    notes: >-
+      Internal sqlite3ValueBytes extractor. Raw extent is exactly
+      0x083864c0..0x08386504: push {r4,lr}; ldrh flags,[r0,#0x1c];
+      tst flags,#0x10; conditionally bl sqlite3ValueText @ 0x08386718;
+      reload flags; return n at +0x18 or (i64 at +0x00)+n's low word
+      when MEM_Zero (#0x800) is set; next function begins at
+      0x08386504 with push {r4,lr}. Two unconditional tail B entries
+      (0x08391754 and 0x0839176c), no direct BL callers, binary-scanned.
+      RetailOS deliberately gates conversion on MEM_Blob (#0x10) clear,
+      unlike upstream SQLite 3.5.9's MEM_Str test: blobs return their n
+      directly, while zero-blobs add the i64 zero-tail counter at +0x00.
+      The post-call flags reload preserves a conversion's MEM_Zero change.
+      sqlite_value_text is already ported and called directly. Host tests
+      prove blob/no-z no-coercion, MEM_Zero signed-add wrapping and the
+      non-blob NULL-text zero result. No implementation deviation.
+
+  - address: 0x08391750
+    ghidra: FUN_08391750
+    name: sqlite3_value_bytes
+    size: 8
+    sig: "i32 sqlite3_value_bytes(sqlite3_value *value)"
+    module: sqlite/value_bytes
+    status: ported
+    renames:
+      param_1/r0: value
+      r1: SQLITE_UTF8
+    notes: >-
+      SQLite public API wrapper. Raw words e3a01001 eaffd359 are
+      mov r1,#1 then b 0x083864c0, forcing SQLITE_UTF8 and tail-branching
+      into sqlite_value_bytes with r0 untouched. Exact 8-byte extent:
+      sqlite3_value_bytes16 begins at 0x08391758. Decoding every ARM B/BL
+      word in osos.dec finds exactly 14 direct call sites, all plain
+      unconditional BL and zero predicated forms or tail B references.
+      Therefore no caller-side NULL guard exists; the target's opening
+      flags dereference is retained. Host tests prove forwarding on a blob
+      and the non-blob NULL-text result. No deliberate deviation: LLVM adds
+      its normal frame around the forced UTF-8 forwarding call.
+
   - address: 0x0839179c
     ghidra: FUN_0839179c
     name: sqlite3_value_text
