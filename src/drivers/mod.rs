@@ -17,6 +17,7 @@ pub mod event_loop_callback;
 pub mod gpio;
 pub mod gpio_cmd;
 pub mod gpio_pin_read;
+pub mod gpio_pin_write;
 pub mod gpioic;
 pub mod i2c;
 pub mod interrupts;
