@@ -36102,6 +36102,47 @@ functions:
       structural vtable model, required because firmware vtable words are
       32-bit while host function pointers are wider.
 
+  - address: 0x08271c98
+    ghidra: FUN_08271c98
+    name: observable_array_copy_construct
+    size: 84
+    sig: "ObservableArray *observable_array_copy_construct(ObservableArray *destination, const ObservableArray *source)"
+    module: cxx/observable_array
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: source
+      puVar1/r4: constructed_destination
+      iVar2/r1: source_element_count
+      DAT_08271ce8: OBSERVABLE_ARRAY_VTABLE
+      FUN_082718a4: observable_array_grow (unported direct target)
+      thunk_EXT_FUN_220000d4: rom_memmove
+    notes: >-
+      True extent is 84 bytes, not Ghidra's 80: 80 instruction bytes from
+      0x08271c98 through the `pop {r4,r5,r6,pc}` at 0x08271ce4, then the
+      shared 4-byte observable-array vtable literal 0x089a5d0c at
+      0x08271ce8; the separate sibling constructor begins at 0x08271cec.
+      Decoding every word in osos.dec as ARM B/BL finds 15 direct inbound
+      branches: 13 unconditional `bl` (0x080fe8e4, 0x0810b398, 0x0813ef58,
+      0x08156014, 0x081d5efc, 0x081d5f08, 0x081fa664, 0x081fa758,
+      0x081fa834, 0x081faa00, 0x081fab6c, 0x0820bd18, 0x0827dff8) and two
+      unconditional tail `b` (0x0819e460, 0x0820bd28); no calls are
+      predicated. It default-constructs the destination directly through
+      framework_object_construct, grows it by source +0x04 using the
+      unported direct helper 0x082718a4, reloads source +0x04 into
+      destination +0x04, then copies `count << 2` bytes from source +0x08
+      to destination +0x08 through the 0x08037e00 ROM memmove veneer. Ghidra
+      incorrectly drops the destination parameter: raw r0 reaches the base
+      constructor and every destination store. The seam for 0x082718a4 is
+      wired to its verified target address on device and a host allocation
+      model in tests; its observed virtual-growth role is documented without
+      inventing a callee identity. Host tests prove zero, one, and five
+      element copies, exact storage byte span, source preservation, guard
+      integrity, result r0, and the unconditional growth call. match.py
+      structural review of the worktree archive found the same constructor /
+      grow / reload-count / memmove control flow; LLVM adds an fp frame and
+      indirect seam load, and resolves memmove through __aeabi_memmove.
+
   - address: 0x08271cec
     ghidra: FUN_08271cec
     name: observable_array_construct

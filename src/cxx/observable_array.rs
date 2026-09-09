@@ -23,6 +23,21 @@
 //!   08271d10  .word 0x089a5d0c
 //!   ```
 //!
+//! - `observable_array_copy_construct` — original: `FUN_08271c98` @
+//!   0x08271c98 (**84 bytes**, not Ghidra's 80: 80 instruction bytes plus
+//!   the 4-byte shared vtable literal 0x089a5d0c @ 0x08271ce8; **13 `bl`
+//!   and 2 tail `b` call sites**, all unconditional, binary-scanned by
+//!   decoding every B/BL word in the image). It first performs the same
+//!   base/vtable/zero initialization as the default constructor, grows its
+//!   owned storage by the source element count through unported
+//!   `FUN_082718a4`, then copies exactly `count * 4` bytes from the source
+//!   storage through the ported ROM-memmove target. The count is reloaded
+//!   after growth before both the destination count store and the byte
+//!   count, exactly as the raw instructions do. The unported grow helper is
+//!   a direct target seam; target builds call its verified load address and
+//!   host tests install a real allocating model. No callee identity beyond
+//!   its observed growth behaviour is claimed.
+//!
 //! - `observable_array_destruct` — original: `FUN_08271d2c` @ 0x08271d2c
 //!   (**92 bytes**, not Ghidra's 88: 88 bytes of code, 0x08271d2c..0x08271d80,
 //!   plus the 4-byte vtable literal 0x089a5d0c @ 0x08271d84, with the next
@@ -299,6 +314,96 @@ pub unsafe extern "C" fn observable_array_construct(
     core::ptr::addr_of_mut!((*array).len).write_volatile(0);
     core::ptr::addr_of_mut!((*array).storage).write_volatile(0);
     core::ptr::addr_of_mut!((*array).observers).write_volatile(0);
+    array
+}
+
+/// Firmware load address of the unported observable-array growth helper
+/// `FUN_082718a4`, which the copy constructor calls after default setup.
+pub const OBSERVABLE_ARRAY_GROW_ADDRESS: usize = 0x0827_18a4;
+
+/// Target default for [`OBSERVABLE_ARRAY_GROW`]: the stock growth helper.
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_observable_array_grow(this: *mut ObservableArray, additional: i32) {
+    let grow: unsafe extern "C" fn(*mut ObservableArray, i32) =
+        core::mem::transmute(OBSERVABLE_ARRAY_GROW_ADDRESS);
+    grow(this, additional);
+}
+
+/// Host default for [`OBSERVABLE_ARRAY_GROW`]: the helper remains unported.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_observable_array_grow(
+    _this: *mut ObservableArray,
+    _additional: i32,
+) {
+    panic!("observable_array_copy_construct requires growth helper 0x082718a4")
+}
+
+/// Direct-call boundary for the unported growth helper `FUN_082718a4`.
+///
+/// Its true behaviour is verified from raw ARM: it queries virtual slots
+/// `+0x70`, `+0xa0`, and `+0xc0` to resize storage, then updates `len`.
+/// This copy constructor immediately overwrites `len` with its fresh source
+/// value, but still requires the helper's storage allocation. A later port
+/// replaces this seam with the helper without changing this caller.
+#[cfg(target_os = "none")]
+pub static mut OBSERVABLE_ARRAY_GROW: unsafe extern "C" fn(
+    this: *mut ObservableArray,
+    additional: i32,
+) = firmware_observable_array_grow;
+
+#[cfg(not(target_os = "none"))]
+pub static mut OBSERVABLE_ARRAY_GROW: unsafe extern "C" fn(
+    this: *mut ObservableArray,
+    additional: i32,
+) = missing_observable_array_grow;
+
+/// observable_array_copy_construct — original: `FUN_08271c98` @ 0x08271c98
+/// (84 bytes: 80 bytes of code, 0x08271c98..0x08271ce4, plus the shared
+/// 4-byte vtable literal @ 0x08271ce8; 13 unconditional `bl` and 2
+/// unconditional tail `b` call sites, binary-scanned).
+///
+/// Default-constructs `destination`, asks `FUN_082718a4` to grow it by
+/// `source->len`, reloads that count, and copies exactly `count * 4` bytes
+/// from `source->storage` into the newly allocated destination storage. The
+/// source's vtable and observer list are deliberately not copied. The
+/// count's byte conversion is ARM `lsl #2`, hence wraps modulo $2^{32}$.
+///
+/// Deliberate deviation: the unported direct callee is represented by
+/// [`OBSERVABLE_ARRAY_GROW`], wired to its verified firmware address on
+/// target and a test model on host. It has no inferred semantic identity
+/// beyond its binary-observed array-growth role.
+///
+/// # Safety
+///
+/// `destination` must point to [`OBSERVABLE_ARRAY_SIZE`] writable,
+/// word-aligned bytes. `source` must point to a readable array prefix; its
+/// storage word must name at least `source->len * 4` readable bytes, and the
+/// growth helper must establish that many writable bytes in `destination`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn observable_array_copy_construct(
+    destination: *mut ObservableArray,
+    source: *const ObservableArray,
+) -> *mut ObservableArray {
+    let array = framework_object_construct(core::ptr::addr_of_mut!((*destination).base))
+        .cast::<ObservableArray>();
+
+    core::ptr::addr_of_mut!((*array).base.vtable).write_volatile(OBSERVABLE_ARRAY_VTABLE);
+    core::ptr::addr_of_mut!((*array).len).write_volatile(0);
+    core::ptr::addr_of_mut!((*array).storage).write_volatile(0);
+    core::ptr::addr_of_mut!((*array).observers).write_volatile(0);
+
+    let initial_count = core::ptr::addr_of!((*source).len).read_volatile();
+    let grow = core::ptr::addr_of!(OBSERVABLE_ARRAY_GROW).read_volatile();
+    grow(array, initial_count as i32);
+
+    let count = core::ptr::addr_of!((*source).len).read_volatile();
+    core::ptr::addr_of_mut!((*array).len).write_volatile(count);
+    let byte_count = count.wrapping_shl(2) as usize;
+    let source_storage = core::ptr::addr_of!((*source).storage).read_volatile() as usize as *const u8;
+    let destination_storage =
+        core::ptr::addr_of!((*array).storage).read_volatile() as usize as *mut u8;
+    crate::libc::memmove::memmove(destination_storage, source_storage, byte_count);
     array
 }
 
@@ -660,6 +765,107 @@ mod tests {
 
         fn object(&mut self) -> *mut ObservableArray {
             unsafe { self.words.as_mut_ptr().add(1).cast() }
+        }
+    }
+
+    static COPY_LOCK: Mutex<()> = Mutex::new(());
+    static mut COPY_GROW_CALLS: u32 = 0;
+    static mut COPY_GROW_RECEIVER: *mut ObservableArray = core::ptr::null_mut();
+    static mut COPY_GROW_ADDITIONAL: i32 = 0;
+    static mut COPY_DESTINATION_STORAGE: u32 = 0;
+
+    unsafe extern "C" fn record_copy_grow(this: *mut ObservableArray, additional: i32) {
+        core::ptr::addr_of_mut!(COPY_GROW_CALLS).write(COPY_GROW_CALLS + 1);
+        core::ptr::addr_of_mut!(COPY_GROW_RECEIVER).write(this);
+        core::ptr::addr_of_mut!(COPY_GROW_ADDITIONAL).write(additional);
+        core::ptr::addr_of_mut!((*this).storage).write_volatile(COPY_DESTINATION_STORAGE);
+    }
+
+    struct CopyGrowGuard;
+    impl Drop for CopyGrowGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(OBSERVABLE_ARRAY_GROW)
+                    .write_volatile(missing_observable_array_grow);
+            }
+        }
+    }
+
+    unsafe fn install_copy_grow(destination_storage: u32) -> CopyGrowGuard {
+        core::ptr::addr_of_mut!(COPY_GROW_CALLS).write(0);
+        core::ptr::addr_of_mut!(COPY_GROW_RECEIVER).write(core::ptr::null_mut());
+        core::ptr::addr_of_mut!(COPY_GROW_ADDITIONAL).write(0);
+        core::ptr::addr_of_mut!(COPY_DESTINATION_STORAGE).write(destination_storage);
+        core::ptr::addr_of_mut!(OBSERVABLE_ARRAY_GROW).write_volatile(record_copy_grow);
+        CopyGrowGuard
+    }
+
+    #[test]
+    fn copy_construction_grows_then_copies_zero_one_and_many_elements() {
+        const WORDS_PER_BUFFER: usize = 16;
+        let _lock = COPY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let slab = match crate::testing::try_map_u32_slab(
+            crate::testing::hints::OBSERVABLE_ARRAY_COPY_CONSTRUCT,
+            WORDS_PER_BUFFER * 2 * core::mem::size_of::<u32>(),
+        ) {
+            Some(slab) => slab,
+            None => {
+                crate::testing::note_missing_u32_fixture("cxx::observable_array");
+                return;
+            }
+        };
+        let source_words = slab.cast::<u32>();
+        let destination_words = unsafe { source_words.add(WORDS_PER_BUFFER) };
+        let source_storage = source_words as usize as u32;
+        let destination_storage = destination_words as usize as u32;
+
+        for count in [0u32, 1, 5] {
+            let mut destination = GuardedStorage::poisoned();
+            let destination_object = destination.object();
+            unsafe {
+                for index in 0..WORDS_PER_BUFFER {
+                    source_words.add(index).write_volatile(0x1000_0000 + index as u32);
+                    destination_words.add(index).write_volatile(0x5a5a_5a5a);
+                }
+            }
+            let source = ObservableArray {
+                base: FrameworkObject { vtable: 0xfeed_face },
+                len: count,
+                storage: source_storage,
+                observers: 0xc001_c0de,
+            };
+            let _grow = unsafe { install_copy_grow(destination_storage) };
+
+            let returned = unsafe { observable_array_copy_construct(destination_object, &source) };
+
+            assert_eq!(returned, destination_object, "the copy constructor returns destination in r0");
+            assert_eq!(unsafe { COPY_GROW_CALLS }, 1, "every count, including zero, reaches growth");
+            assert_eq!(unsafe { COPY_GROW_RECEIVER }, destination_object);
+            assert_eq!(unsafe { COPY_GROW_ADDITIONAL }, count as i32);
+            assert_eq!(
+                destination.words,
+                [0xa5a5_a5a5, OBSERVABLE_ARRAY_VTABLE, count, destination_storage, 0, 0xa5a5_a5a5],
+                "only the target fields are initialized; source observers never transfer"
+            );
+            unsafe {
+                for index in 0..WORDS_PER_BUFFER {
+                    assert_eq!(
+                        source_words.add(index).read_volatile(),
+                        0x1000_0000 + index as u32,
+                        "copying leaves source storage intact"
+                    );
+                    let expected = if index < count as usize {
+                        0x1000_0000 + index as u32
+                    } else {
+                        0x5a5a_5a5a
+                    };
+                    assert_eq!(
+                        destination_words.add(index).read_volatile(),
+                        expected,
+                        "the byte count is exactly source count times four"
+                    );
+                }
+            }
         }
     }
 
