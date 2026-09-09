@@ -46724,6 +46724,44 @@ functions:
       slot; deltas are the fp prologue and the seam indirection, the
       accepted animation.rs deviation classes. 24 instructions vs 16.
 
+  # --- handler-list constructor ---
+  - address: 0x0816cbfc
+    ghidra: FUN_0816cbfc
+    name: handler_list_construct
+    size: 32
+    sig: "HandlerList *handler_list_construct(HandlerList *list, u32 mode)"
+    module: cxx/handler_list_construct
+    status: ported
+    renames:
+      param_1/r0: list
+      param_2/r1: mode
+      param_1_plus_0x00: handlers.begin
+      param_1_plus_0x04: handlers.end
+      param_1_plus_0x08: handlers.end_of_storage
+      param_1_plus_0x0c: mode
+      param_1_plus_0x10: state
+      param_1_plus_0x14: state_flag
+      FUN_083e143c: three_word_clear_third
+    notes: >-
+      Raw ARM extent is exactly 32 bytes: push {r3,r4,r5,lr} at 0x0816cbfc
+      through pop {r3,r4,r5,pc} at 0x0816cc1c; the independent vector
+      destructor begins at 0x0816cc20, so Ghidra's reported 36-byte extent
+      consumes its first word. Decoding every ARM B/BL immediate in osos.dec
+      finds exactly 15 direct callers, all unconditional plain bl and zero
+      predicated forms or plain-B tail calls. The function calls the already
+      ported three_word_clear_third at 0x083e143c to clear the vector head
+      (+0/+4/+8), stores the low mode byte at +12, and clears the state word
+      and flag at +16/+20. The helper preserves r0 and the constructor returns
+      list unchanged despite Ghidra's void declaration; caller 0x081e8f14
+      consumes that r0 result. Its other callers build command-handler records
+      with vector_push_back_elem12 before handing the list to 0x08134720.
+      No NULL guard or device-code deviations; host builds clear the three
+      typed vector pointers separately because they are 8-byte pointers there.
+      Source: decomp/c/015/0816cbfc_FUN_0816cbfc.c; raw disassembly: osos.dec
+      0x0816cbfc; match.py --size 32 --lib <worktree archive> structural
+      review: the helper call and all field writes remain in order; LLVM adds
+      its frame/r5 preservation and passes the helper its actual one argument.
+
   # --- trivial twelve-byte vector destructor ---
   - address: 0x0816cc20
     ghidra: FUN_0816cc20
