@@ -16,6 +16,9 @@
 //!   bytes; 41 `bl`). SQLite's `sqlite3_malloc`, the tag-57 tracked
 //!   allocator's entry — the raw allocate the `db_*` wrappers and the
 //!   realloc NULL-branch dispatch to.
+//! - `sqlite3_malloc_zero` — original: `FUN_0837d38c` @ 0x0837d38c (36
+//!   bytes; 14 `bl`). SQLite's `sqlite3MallocZero` — the raw malloc
+//!   plus a zero-fill of the whole request, skipped on failure.
 //! - `alloc_deny_check` — original: `FUN_08378a44` @ 0x08378a44 (132
 //!   bytes; 2 `bl`, one from each of the entries above, both slot 0).
 //!   SQLite's fault-injection allocation-deny schedule (the upstream
@@ -311,6 +314,38 @@ pub unsafe extern "C" fn sqlite3_malloc(n: i32) -> *mut u8 {
         return tracked_alloc_tail(n);
     }
     payload
+}
+
+/// sqlite3_malloc_zero — original: `FUN_0837d38c` @ 0x0837d38c (36
+/// bytes, verified against osos.dec: the body is 9 instructions ending
+/// @ 0x0837d3ac, the next function starts @ 0x0837d3b0; 14 `bl` call
+/// sites, all plain — no predicated forms, binary-scanned).
+///
+/// SQLite's `sqlite3MallocZero`: the raw [`sqlite3_malloc`] @ 0x08390b14
+/// followed by a zero-fill of the whole request through the IRAM thunk
+/// @ 0x08037dc8 (`blne` — so nothing is zeroed, and the thunk is never
+/// entered, when the allocation fails). Returns the block either way.
+/// `n <= 0` never reaches the fill: the malloc entry itself returns
+/// NULL for those, so the guard trips.
+///
+/// Deviations:
+/// - The malloc dispatches through the [`DB_MEM_OPS`]`.malloc` slot
+///   (house ops-slot pattern, same as [`db_malloc_raw`] and
+///   [`sqlite3_realloc`]'s NULL branch); the wired default IS the
+///   ported [`sqlite3_malloc`] the original `bl`s.
+/// - The zero-fill is the ported [`memzero`] @ 0x080002d4 called
+///   directly, per the porting rules, in place of the original's IRAM
+///   thunk; LLVM inlines it (and recognizes parts back into
+///   `__aeabi_memclr`), like [`db_malloc_zero`] — same bytes written,
+///   different shape in the match.py diff.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn sqlite3_malloc_zero(n: i32) -> *mut u8 {
+    let block = (db_malloc_op())(n);
+    if !block.is_null() {
+        memzero(block, n as usize);
+    }
+    block
 }
 
 /// sqlite3_realloc — original: `FUN_08390eec` @ 0x08390eec (284 bytes;
@@ -660,6 +695,42 @@ pub(crate) mod tests {
 
         assert!(unsafe { db_malloc_zero(db.ptr(), 12) }.is_null());
         assert_eq!(db.failed_flag(), 1);
+    }
+
+    // ---- sqlite3_malloc_zero (0x0837d38c) ---------------------------
+
+    #[test]
+    fn raw_malloc_zero_clears_exactly_the_request() {
+        let mut arena = [0xa5u8; 32];
+        let _guard = install_recorder(arena.as_mut_ptr());
+
+        let block = unsafe { sqlite3_malloc_zero(12) };
+        assert_eq!(block, arena.as_mut_ptr());
+        assert_eq!(realloc_log(), std::vec![(0, 12)]);
+        assert_eq!(&arena[..12], &[0u8; 12]);
+        assert_eq!(&arena[12..], &[0xa5u8; 20], "nothing past the request");
+    }
+
+    #[test]
+    fn raw_malloc_zero_does_not_write_when_the_allocation_fails() {
+        // The original's fill is `blne` — a failed allocation must not
+        // touch memory at all (it would zero from address 0).
+        let _guard = install_recorder(core::ptr::null_mut());
+
+        assert!(unsafe { sqlite3_malloc_zero(12) }.is_null());
+        assert_eq!(realloc_log(), std::vec![(0, 12)]);
+    }
+
+    #[test]
+    fn raw_malloc_zero_passes_the_size_straight_to_the_allocator() {
+        // n <= 0 is the malloc entry's own gate (it returns NULL before
+        // touching the heap); this wrapper forwards n unchanged, so the
+        // fill guard always trips on the NULL the entry hands back.
+        let _guard = install_recorder(core::ptr::null_mut());
+
+        assert!(unsafe { sqlite3_malloc_zero(0) }.is_null());
+        assert!(unsafe { sqlite3_malloc_zero(-16) }.is_null());
+        assert_eq!(realloc_log(), std::vec![(0, 0), (0, -16)]);
     }
 
     #[test]
