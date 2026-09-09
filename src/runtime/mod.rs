@@ -24,6 +24,7 @@ pub mod message_0x17;
 pub mod message_0x10;
 pub mod message_dispatch_veneer;
 pub mod qsort;
+pub mod parameter_descriptor_value;
 pub mod raise;
 pub mod return_zero;
 pub mod random;

@@ -54031,3 +54031,39 @@ functions:
       clears remain, while the expected differences are the direct thunk
       expansion, LLVM frame, literal placement, and sign extension scheduled
       before the clears.
+
+  # --- Generic descriptor value wrapper ---
+  - address: 0x0803b468
+    ghidra: FUN_0803b468
+    name: parameter_descriptor_value
+    size: 44
+    sig: "u32 parameter_descriptor_value(const u8 *descriptor) [r1/r2 ignored; incoming r3 forwarded]"
+    module: runtime/parameter_descriptor_value
+    status: ported
+    renames:
+      param_1/r0: descriptor
+      local_8: value
+      iVar1/r0: resolver_status
+      r3: opaque_context
+      FUN_080d3a78: parameter_descriptor_resolve
+    notes: >-
+      Raw decoding gives exactly 44 bytes from 0x0803b468 through
+      0x0803b490; the next sibling starts at 0x0803b494 with
+      push {r4-r9,lr}. The wrapper clears its stack output word, invokes
+      the unported generic descriptor resolver with that word, descriptor,
+      and NULL r2 callback, then returns the output only when the resolver
+      status is signed-positive; zero and every negative status return zero,
+      even after an output store. r3 is deliberately not written before the
+      call, so the incoming live r3 is forwarded as the resolver's fourth
+      argument. Decoding every ARM B/BL word in osos.dec finds exactly 14
+      call sites, all unconditional plain bl and none predicated:
+      0x08065a5c, 0x08065aa4, 0x0806f0bc, 0x08078800, 0x0808a170,
+      0x0808a18c, 0x0808a210, 0x0808a288, 0x0808a89c, 0x0808a928,
+      0x080c5960, 0x080d7dc4, 0x080f0108, and 0x080f013c. The target
+      resolver at 0x080d3a78 is not ported, so release builds make its
+      direct firmware call; the test-only callback seam is the deliberate
+      deviation used to prove status gating and argument forwarding.
+      match.py --lib <worktree archive>: 17 versus 11 instructions; both
+      preserve r1=descriptor, r2=NULL, the untouched r3 fourth argument,
+      signed status gate, and zero fallback. LLVM adds a frame, literal-load
+      plus blx direct-target call, and an unconditional output reload.
