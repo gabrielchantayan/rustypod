@@ -244,6 +244,10 @@ pub mod hints {
     // 0xd000_0000: dedicated to app/animation's destructor fixture;
     // mappings never unmap, so no other user may share this hint.
     pub const ANIMATION_DESTROY: usize = 0xd000_0000;
+    // 0x2f00_0000: dedicated to ui/plst_next's raw-u32 element and
+    // chain-node fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const PLST_NEXT: usize = 0x2f00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

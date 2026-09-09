@@ -53906,3 +53906,45 @@ functions:
       ldrh header loads, stack-passed flags and 0/1 result mapping,
       deltas are the seam blx indirection, the fp frame, and clz/lsr
       instead of rsbs/movcc for the equality map.
+
+  - address: 0x08053bd0
+    ghidra: FUN_08053bd0
+    name: ui_plst_next
+    size: 80
+    sig: "u32 ui_plst_next(const u8 *element)"
+    module: ui/plst_next
+    status: ported
+    renames:
+      param_1/r0: element
+      param_1_plus_0x24: successor
+      param_1_plus_0x14: linked
+      param_1_plus_0x10: chain_node
+      FUN_080613e0: ui_element_is_plst_class
+    notes: >-
+      Successor selector for the linked 'plst' sequence hanging off a
+      'tdat' UI element (first link: ui_tdat_first_plst 0x080522d4 at
+      element+0x34). Validates the element with the already-ported
+      'plst' class predicate, then picks in strict order: the word at
+      +0x24, else the word at +0x14, else the first nonzero +0x14 word
+      along the auxiliary chain of link nodes starting at +0x10 (each
+      node: candidate at +0x14, next node at +0x10); returns 0 when the
+      class check fails or no successor exists. This is the iteration
+      step of the sequence walk in callers 0x08050ae0, 0x08066854,
+      0x08054724 and 0x080561b4, and of the plst teardown in 0x0806a994
+      (saves the successor before destroying each element). Extent
+      verified from raw bytes: exactly 80 bytes; the sibling function's
+      push {r4-r8,lr} prologue starts at 0x08053c20. Call count
+      verified by decoding every B/BL word in osos.dec: 14
+      unconditional bl (0x08050b24, 0x08054750, 0x080561e0, 0x0806126c,
+      0x08066890, 0x08066b2c, 0x080689e8, 0x0806a9d0, 0x0806aa28,
+      0x0806c1e4, 0x0806c2fc, 0x0806c348, 0x080ca77c, 0x080ce5f4), zero
+      predicated - the internal class guard is what every caller relies
+      on. No data word in osos references 0x08053bd0 (never dispatched
+      virtually). Ghidra's decompiled C wrongly declares a void return
+      and drops the result; every caller depends on r0. Deviation: the
+      port calls ui_element_is_plst_class directly instead of branching
+      to stock 0x080613e0. match.py --lib <worktree archive>: 17 vs 20
+      instructions; same guard order and +0x24/+0x14/+0x10 selection
+      chain, deltas are the crate fp frame, the intra-crate bl to the
+      ported predicate, and LLVM's unpredicated reload of +0x14 vs ADS
+      ldreq/cmpeq/popne predication.
