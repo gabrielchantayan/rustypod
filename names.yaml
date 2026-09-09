@@ -24287,6 +24287,56 @@ functions:
       context helpers at their fixed retailOS addresses; host-only mocks
       exercise the direct function's transitions and virtual dispatch.
 
+  - address: 0x0837dc38
+    ghidra: FUN_0837dc38
+    name: context_record_resolve_leased
+    size: 52
+    sig: "u32 context_record_resolve_leased(Context *context, u32 record_id, u32 **out_record, u32 flags)"
+    module: cxx/context_record_resolve
+    status: ported
+    vars: {param_1: context, param_2: record_id, param_3: out_record}
+    renames:
+      param_1/r0: context
+      param_2/r1: record_id
+      param_3/r2: out_record
+      r3 (dropped by Ghidra): flags
+      "*(int*)(param_1+0xe0)": context->activity, the u32 lease count
+    notes: >-
+      Leased wrapper around the still-unported context record resolver
+      FUN_082dd05c @ 0x082dd05c. Extent verified from raw words: the next
+      separately linked function starts at 0x0837dc6c with push
+      {r4,r5,r6,lr}, so the Ghidra 52 bytes are exact; no trailing literal
+      pool. Call count verified by decoding every B/BL word in osos.dec:
+      exactly 14 sites, all unconditional plain bl, no predicated forms,
+      no tail b; the address occurs in no image data word (never
+      dispatched virtually). Body: save r0-r2 in r4-r6, bl
+      context_activity_enter (ported, 0x082dd3d8), restore r0-r2, bl
+      0x082dd05c, then inline release: ldr/sub/str on the u32 at
+      context+0xe0 and return the resolver status (r0 survives the
+      decrement, which uses r1 only). Ghidra's C is wrong twice: it marks
+      the wrapper void and drops the fourth argument - the wrapper never
+      touches r3 and the 36-byte enter helper uses r0-r2 only, so the
+      caller's r3 (flags, usually 0) reaches the resolver intact, and
+      callers such as FUN_0837de5c test the returned status with cmp
+      r0,#0. The release half is NOT a function call: a bare decrement
+      with no sweep-mark re-check and no NULL guard. Deliberate
+      deviations: the enter half calls the ported context_activity_enter
+      on both targets (same as cxx/release.rs); the resolver remains
+      retailOS-owned, so target builds transmute-call 0x082dd05c (LLVM
+      emits blx via a literal-pool word, the expected absolute-address
+      pattern) while host builds route only that boundary through a
+      recording ops table; the inline decrement uses volatile accesses
+      because the lease field is shared volatile state. Host tests (5):
+      four-argument forwarding incl. the r3 flags word, exact lease
+      acquire/release pairing (initial count restored, no leak or double
+      release), nonzero status passthrough with the lease still released,
+      marked-context net-zero with the +0xdc flag never written, and
+      u32::MAX wraparound of the release decrement; fixtures assert every
+      word outside +0xe0 is untouched. match.py: structural parity -
+      same prologue/save/enter/restore/resolve/decrement/epilogue shape;
+      expected diffs are LLVM's wider {r4-r7,fp,lr} frame and the blx +
+      literal for the absolute resolver address.
+
   - address: 0x08371418
     ghidra: FUN_08371418
     name: context_child_handle_acquire

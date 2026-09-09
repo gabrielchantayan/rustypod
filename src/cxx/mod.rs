@@ -14,6 +14,7 @@ pub mod clock_source_destroy;
 pub mod color_copy;
 pub mod context_activity;
 pub mod context_child_handle;
+pub mod context_record_resolve;
 pub mod decoder_begin_batch;
 pub mod dma_aligned_array_destroy;
 pub mod decoder_end_batch;
