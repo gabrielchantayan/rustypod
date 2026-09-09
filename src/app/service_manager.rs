@@ -7,6 +7,7 @@
 //! | 0x08165520 | [`service_manager_instance`] | 24 | 17 direct |
 //! | 0x081391ec | [`service_manager_instance_veneer`] | 4 | **213** |
 //! | 0x08193e84 | [`service_manager_secondary_handler_code_get`] | 20 | 17 direct |
+//! | 0x08193ee8 | [`service_manager_slot_handler_get`] | 20 | 14 direct |
 //! | 0x0819420c | [`service_manager_slot_flags_or`] | 28 | 16 direct |
 //!
 //! The instance and veneer counts are binary-scanned out of
@@ -60,10 +61,10 @@
 //! `slot_table + 0x60`: thirteen 8-byte slot records whose word 0 is a
 //! flags bitmask (read by the getter @ 0x081941f8, accumulated into by
 //! [`service_manager_slot_flags_or`]) and whose word 1 is the slot's
-//! handler object pointer (stored by the setter @ 0x08193ed4, read back
-//! @ 0x08193ee8). The constructor @ 0x08194228 zeroes the whole
-//! 0x00..0xc8 span, records and bank alike, and clears the byte counter
-//! at +0xc8.
+//! handler object pointer (stored by the setter @ 0x08193ed4, read back by
+//! [`service_manager_slot_handler_get`] @ 0x08193ee8). The constructor @
+//! 0x08194228 zeroes the whole 0x00..0xc8 span, records and bank alike, and
+//! clears the byte counter at +0xc8.
 //!
 //! **The class name does not survive in the image** — the constructor
 //! hands no literal to the class-name factory and no name string sits
@@ -228,6 +229,46 @@ pub unsafe extern "C" fn service_manager_secondary_handler_get(
         heap_panic();
     }
     core::ptr::read(slot_table.wrapping_offset(slot.wrapping_shl(3) as isize).add(2))
+        as usize as *mut u8
+}
+/// service_manager_slot_handler_get — original: `FUN_08193ee8` @
+/// 0x08193ee8 (20 bytes; 14 direct, unconditional `bl` call sites).
+///
+/// Returns the handler-object pointer from one of the service manager's
+/// thirteen 8-byte slot records. Raw ARM is `cmp r1,#13; blge 0x08030f44;
+/// add r0,r0,r1,lsl #3; ldr r0,[r0,#100]; bx lr`: the bank starts at
+/// `slot_table + 0x60`, each record is two words, and the handler is word
+/// one. The signed check intentionally admits negative slots, which address
+/// before the bank exactly as retailOS does; slots 13 and above terminate
+/// through [`heap_panic`].
+///
+/// Decoding every ARM `B`/`BL` word in `osos.dec` found exactly 14 direct
+/// callers — 0x08163b7c, 0x08164938, 0x0816494c, 0x081652bc, 0x081653b4,
+/// 0x0818e170, 0x0818f844, 0x0818fa8c, 0x08190ccc, 0x08191088,
+/// 0x08192bdc, 0x081d6bec, 0x081d6cd8, and 0x081d6d70 — all unconditional
+/// plain `BL`; no predicated direct calls or tail branches target this
+/// address. The next distinct function begins at 0x08193efc (`cmp r1,#3`),
+/// confirming Ghidra's five-instruction extent.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `slot_table` must point to the service-manager slot-table base (`this + 4`
+/// in the original) backed by at least 0xc8 bytes of aligned storage.
+/// Negative slots intentionally retain the firmware's unchecked before-bank
+/// addressing behavior and are not valid Rust memory accesses.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.service_manager_slot_handler_get")]
+pub unsafe extern "C" fn service_manager_slot_handler_get(
+    slot_table: *const u32,
+    slot: i32,
+) -> *mut u8 {
+    if slot >= 13 {
+        heap_panic();
+    }
+    core::ptr::read(slot_table.wrapping_offset(slot.wrapping_shl(1) as isize).add(25))
         as usize as *mut u8
 }
 
@@ -442,6 +483,54 @@ mod secondary_handler_get_tests {
                 service_manager_secondary_handler_get(table, 0),
                 replacement,
                 "the ARM ldr reloads the handler word on every call"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod slot_handler_get_tests {
+    extern crate std;
+    use super::*;
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+
+    #[test]
+    fn reads_each_slot_handler_word_without_caching() {
+        let Some(slab) = try_map_u32_slab(hints::SERVICE_MANAGER_SLOT_HANDLER, 4096) else {
+            note_missing_u32_fixture("service_manager_slot_handler_get");
+            return;
+        };
+        let table = slab.cast::<u32>();
+        let first = unsafe { slab.add(0x100) };
+        let replacement = unsafe { slab.add(0x180) };
+        let middle = unsafe { slab.add(0x200) };
+        let last = unsafe { slab.add(0x280) };
+
+        unsafe {
+            assert_eq!(
+                service_manager_slot_handler_get(table, 3),
+                core::ptr::null_mut(),
+                "a zero handler word propagates as NULL"
+            );
+            table.add(25).write(first as usize as u32);
+            table.add(37).write(middle as usize as u32);
+            table.add(49).write(last as usize as u32);
+
+            assert_eq!(service_manager_slot_handler_get(table, 0), first);
+            assert_eq!(service_manager_slot_handler_get(table, 6), middle);
+            assert_eq!(service_manager_slot_handler_get(table, 12), last);
+
+            table.add(25).write(replacement as usize as u32);
+            assert_eq!(
+                service_manager_slot_handler_get(table, 0),
+                replacement,
+                "the ARM ldr reloads the handler word on every call"
+            );
+
+            assert_eq!(
+                service_manager_slot_handler_get(table.add(2), -1),
+                replacement,
+                "the signed comparison leaves negative slots unchecked"
             );
         }
     }
