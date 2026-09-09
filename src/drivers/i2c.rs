@@ -212,6 +212,45 @@ pub unsafe extern "C" fn pmu_i2c_read(reg: u32, len: i32, buf: *mut u8) -> i32 {
     status
 }
 
+/// pmu_i2c_write — original: `FUN_0836d524` @ 0x0836d524 (60
+/// bytes; 17 plain `bl` call sites, 0 predicated `bl`,
+/// binary-verified by decoding every B/BL word in osos.dec).
+///
+/// The write twin of [`pmu_i2c_read`]: builds a packet on its
+/// 16-byte stack frame (`push {r2,r3,r4,lr}`) with the low byte of
+/// `reg` first (`strb r0, [sp]`), copies `len` payload bytes after
+/// it with a signed byte loop (`cmp r0, r1` / `ldrblt` / `strblt` —
+/// non-positive signed lengths copy nothing), then hands
+/// `FUN_0836bb84` the PCF50635 slave 0x73, a wrapping count of
+/// `len + 1` (`add r1, r1, #1`), and the packet, returning the raw
+/// status verbatim. Retail copies into a 16-byte frame, so a
+/// payload above 15 bytes would overrun the caller's frame; every
+/// caller passes small lengths. The conditional direct branches at
+/// 0x0836d474 (`bne`), 0x0836d518 (`bcc`), 0x0836d710 and
+/// 0x0836d824 (`beq`) are tail-branch references, not calls.
+///
+/// # Deviation
+///
+/// The raw S5L8702 I2C write primitive `FUN_0836bb84` remains
+/// unported: target builds call its verified load address directly,
+/// host tests use the volatile function-pointer seam (an indirect
+/// `blx` in place of retail's `bl`). The payload copy uses volatile
+/// byte accesses so LLVM cannot fold the loop into a `memcpy` call
+/// that retail never made.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_i2c_write(reg: u32, len: i32, data: *const u8) -> i32 {
+    let mut packet = [0u8; 16];
+    packet[0] = reg as u8;
+    let mut copied: i32 = 0;
+    while copied < len {
+        let byte = core::ptr::read_volatile(data.offset(copied as isize));
+        core::ptr::write_volatile(packet.as_mut_ptr().offset(1 + copied as isize), byte);
+        copied += 1;
+    }
+    i2c_write(PMU_I2C_SLAVE, (len as u32).wrapping_add(1), packet.as_ptr())
+}
+
 /// pmu_i2c_read_bank — original: `FUN_0836d698` @ 0x0836d698 (40
 /// bytes).
 ///
@@ -256,6 +295,8 @@ pub(crate) mod tests {
 
     /// Raw PMU write calls: (slave, len, first byte).
     static mut RAW_WRITE_LOG: Vec<(u32, u32, u8)> = Vec::new();
+    /// Full packet bytes handed to each raw PMU write.
+    static mut RAW_WRITE_PACKETS: Vec<Vec<u8>> = Vec::new();
     /// Raw PMU read calls: (slave, len, destination address).
     static mut RAW_READ_LOG: Vec<(u32, u32, usize)> = Vec::new();
     static mut RAW_WRITE_STATUS: i32 = 0;
@@ -269,6 +310,11 @@ pub(crate) mod tests {
 
     unsafe extern "C" fn mock_i2c_write(slave: u32, len: u32, buf: *const u8) -> i32 {
         (*addr_of_mut!(RAW_WRITE_LOG)).push((slave, len, buf.read()));
+        let mut packet = Vec::new();
+        for i in 0..len as usize {
+            packet.push(buf.add(i).read());
+        }
+        (*addr_of_mut!(RAW_WRITE_PACKETS)).push(packet);
         *addr_of!(RAW_WRITE_STATUS)
     }
 
@@ -383,6 +429,7 @@ pub(crate) mod tests {
         let guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             (*addr_of_mut!(RAW_WRITE_LOG)).clear();
+            (*addr_of_mut!(RAW_WRITE_PACKETS)).clear();
             (*addr_of_mut!(RAW_READ_LOG)).clear();
             *addr_of_mut!(RAW_WRITE_STATUS) = write_status;
             *addr_of_mut!(RAW_READ_STATUS) = read_status;
@@ -477,6 +524,82 @@ pub(crate) mod tests {
                     (PMU_I2C_SLAVE, PMU_RTC_BLOCK_LEN, addr),
                     (PMU_I2C_SLAVE, PMU_RTC_BLOCK_LEN, addr),
                 ]
+            );
+        }
+        restore_raw(guard);
+    }
+
+    #[test]
+    fn write_builds_reg_then_payload_packet() {
+        let guard = install_raw(0, 0);
+        unsafe {
+            let data = [0xde, 0xad, 0xbe, 0xef];
+            assert_eq!(pmu_i2c_write(0x59, 4, data.as_ptr()), 0);
+            assert_eq!(
+                (*addr_of!(RAW_WRITE_LOG)).clone(),
+                std::vec![(PMU_I2C_SLAVE, 5, 0x59)],
+                "slave 0x73, count len + 1, reg byte first"
+            );
+            assert_eq!(
+                (*addr_of!(RAW_WRITE_PACKETS)).clone(),
+                std::vec![std::vec![0x59u8, 0xde, 0xad, 0xbe, 0xef]],
+                "packet is the reg byte followed by the payload"
+            );
+        }
+        restore_raw(guard);
+    }
+
+    #[test]
+    fn write_stores_only_the_low_reg_byte_and_passes_status_through() {
+        let guard = install_raw(0x15, 0);
+        unsafe {
+            let data = [7u8];
+            assert_eq!(pmu_i2c_write(0x1234_56a7, 1, data.as_ptr()), 0x15);
+            assert_eq!(
+                (*addr_of!(RAW_WRITE_PACKETS)).clone(),
+                std::vec![std::vec![0xa7u8, 7]],
+                "strb keeps only the low byte of the reg argument"
+            );
+            *addr_of_mut!(RAW_WRITE_STATUS) = -5;
+            assert_eq!(pmu_i2c_write(0x60, 1, data.as_ptr()), -5);
+        }
+        restore_raw(guard);
+    }
+
+    #[test]
+    fn write_non_positive_lengths_copy_no_payload() {
+        let guard = install_raw(0, 0);
+        unsafe {
+            let data = [0xaau8; 4];
+            assert_eq!(pmu_i2c_write(0x2b, 0, data.as_ptr()), 0);
+            assert_eq!(pmu_i2c_write(0x2b, -1, data.as_ptr()), 0);
+            assert_eq!(
+                (*addr_of!(RAW_WRITE_LOG)).clone(),
+                std::vec![(PMU_I2C_SLAVE, 1, 0x2b), (PMU_I2C_SLAVE, 0, 0x2b)],
+                "len 0 still sends the lone reg byte; len -1 wraps the count to 0"
+            );
+            assert_eq!(
+                (*addr_of!(RAW_WRITE_PACKETS)).clone(),
+                std::vec![std::vec![0x2bu8], std::vec![]],
+                "the signed copy loop never runs for non-positive lengths"
+            );
+        }
+        restore_raw(guard);
+    }
+
+    #[test]
+    fn write_max_frame_payload_fits() {
+        let guard = install_raw(0, 0);
+        unsafe {
+            let data: [u8; 15] = core::array::from_fn(|i| i as u8);
+            assert_eq!(pmu_i2c_write(0x87, 15, data.as_ptr()), 0);
+            let mut expect = std::vec![0x87u8];
+            expect.extend_from_slice(&data);
+            assert_eq!((*addr_of!(RAW_WRITE_PACKETS)).clone(), std::vec![expect]);
+            assert_eq!(
+                (*addr_of!(RAW_WRITE_LOG)).clone(),
+                std::vec![(PMU_I2C_SLAVE, 16, 0x87)],
+                "15 payload bytes fill the retail 16-byte frame exactly"
             );
         }
         restore_raw(guard);
