@@ -46830,6 +46830,27 @@ functions:
       bytes is exact. 29 call sites, verified by decoding every B/BL word
       in osos.dec: all 29 are plain bl, with no predicated forms.
 
+  - address: 0x082e1378
+    ghidra: FUN_082e1378
+    name: fat_dirent_start_cluster
+    size: 24
+    sig: "u32 fat_dirent_start_cluster(const FatVolume *volume, const FatDirEntry *entry)"
+    module: fs/fat_dirent
+    status: ported
+    renames:
+      param_1/r0: volume
+      param_2/r1: entry
+      uVar1/r0: start_cluster
+    notes: >-
+      FAT short-directory-entry start-cluster reader. It returns the low
+      first-cluster word at entry +0x1a for every format except exactly 8;
+      format 8 combines entry +0x14 as the upper word with the low word,
+      unmasked, into the FAT32 cluster number. Raw extent is byte-verified:
+      this six-instruction body ends at 0x082e138c and the separate next
+      entry starts at 0x082e1390. Every B/BL word in osos.dec was decoded:
+      all 16 call sites are plain bl, with no predicated calls or tail
+      branches. No NULL guards or deliberate deviations.
+
   - address: 0x0836f91c
     ghidra: FUN_0836f91c
     name: sqlite_auth_check
