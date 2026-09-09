@@ -230,6 +230,9 @@ pub mod hints {
     // 0xa000_0000: dedicated to util/resource_list's raw-u32 vector and
     // element fixture; mappings never unmap, so no other user may share it.
     pub const RESOURCE_LIST_DESTROY: usize = 0xa000_0000;
+    // 0xdb00_0000: dedicated to app/root_context_f9c_bound's raw-u32
+    // root/context fixture; mappings never unmap, so no other user may share it.
+    pub const ROOT_CONTEXT_F9C_BOUND: usize = 0xdb00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

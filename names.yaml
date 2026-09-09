@@ -53299,3 +53299,35 @@ functions:
       Device builds retain the fixed data pointer and target; host tests use
       aligned private storage and an inert handler because retail code cannot
       execute on the host.
+
+  - address: 0x08168a8c
+    ghidra: FUN_08168a8c
+    name: root_context_f9c_bound_construct
+    size: 56
+    sig: "RootContextF9cBound *root_context_f9c_bound_construct(RootContextF9cBound *this, u8 mode)"
+    module: app/root_context_f9c_bound
+    status: ported
+    renames:
+      param_1/r0: this (writable 0x48-byte base-derived object)
+      param_2/r1: mode (stored as a byte at this +0x44)
+      FUN_0813e9ec: root_context_f9c_bound_base_construct
+      DAT_08168ac4: root_context_f9c_bound_vtable (0x089880f0)
+      DAT_08168ac8: app_root_object_global (0x089ca674)
+    notes: >-
+      Raw ARM establishes exactly 56 bytes: code 0x08168a8c..0x08168ac4
+      plus the two literal-pool words at 0x08168ac4/0x08168ac8; the distinct
+      next function begins at 0x08168acc with cmp r0,#0. It calls the
+      unported base constructor 0x0813e9ec(this, 0, 0), uses that return as
+      the derived object, stores vtable 0x089880f0 at +0x00, copies
+      *(*0x089ca674 + 0x30 + 0xf9c) to +0x40, and stores r1's low byte at
+      +0x44. The literal vtable address reads C++ name-blob text in osos.dec,
+      not a valid static table, so no class or virtual-callee identity is
+      invented. A complete ARM B/BL immediate scan finds 14 direct inbound
+      bl sites, all unconditional (0x0812f954, 0x08142568, 0x0814a9b4,
+      0x081b57bc, 0x081b5c4c, 0x081f89fc, 0x081f8ae4, 0x081f8e60,
+      0x081f8f04, 0x08208c38, 0x0820ba60, 0x08210ac8, 0x08211510, and
+      0x082c76b0), zero predicated bl, plus the unconditional tail b at
+      0x0825a024. Device builds preserve the original base-constructor
+      boundary; host tests install a recording seam and use a dedicated
+      below-4-GiB raw-u32 root/context fixture. The runtime root global uses
+      app/context_scope.rs's existing APP_ROOT_OBJECT model of 0x089ca674.
