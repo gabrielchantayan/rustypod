@@ -47515,6 +47515,64 @@ functions:
       insertion seam call. match.py --lib <worktree>: identical skeleton,
       63 instructions vs 51.
 
+  # --- UI animation non-deleting destructor ---
+  - address: 0x08166c9c
+    ghidra: FUN_08166c9c
+    name: animation_destroy
+    size: 68
+    sig: "Animation *animation_destroy(Animation *this)"
+    module: app/animation
+    status: ported
+    renames:
+      param_1/r0: this
+      DAT_08166cdc: ANIMATION_VTABLE (pool word 0x08987f00)
+      FUN_082739e0: release_refcounted_value (direct, ported in app/refcounted_value)
+      FUN_081384a0: refcounted_base_destroy (tail branch, ported in app/fixed_value)
+    notes: >-
+      The non-deleting destructor of the UI animation object, the exact
+      inverse of animation_init @ 0x08166b88. EXTENT: Ghidra's 64 bytes
+      are the sixteen instruction words 0x08166c9c..0x08166cdb; the
+      separately linked literal pool holds ONE word (the animation vtable
+      0x08987f00 @ 0x08166cdc), true extent 68 bytes. The next function
+      opens bx lr at 0x08166ce0 (a lone-instruction empty body, probably
+      a trivial destructor), then a new function at 0x08166ce4. GHIDRA
+      ERRORS: the osos.asm listing shows stale bytes for this address
+      (a phantom stmdb/cmp body that matches nothing in osos.dec - raw
+      bytes verified instead), and its C decompile runs THROUGH the tail
+      branch into refcounted_base_destroy, mislabeling that callee
+      FUN_082738e0 and inventing a *DAT_081384cc first argument; the
+      real epilogue is mov r0, r4 ; pop {r4, lr} ; b 0x081384a0.
+      CALL COUNT: binary-verified by decoding every B/BL word in
+      osos.dec - exactly 14 call sites, all plain unconditional bl, no
+      predicated forms, no b tail callers, no DATA-word references (the
+      class vtable instead points at the deleting destructor @
+      0x08166c84, which NULL-guards this, calls this body, then
+      operator-deletes @ 0x082aad24; it shares the vtable literal @
+      0x08166c80). Ten of the 14 sit in two array-destructor walks with
+      sub r0, r0, #0x24 between calls (0x08153260..0x08153288, six
+      calls; 0x0816760c..0x08167624, four calls) - 0x24 is
+      sizeof(Animation); the callers at 0x081a17e0 and 0x081eb018 feed
+      the returned this pointer onward as their walk cursor, so the
+      return value is load bearing (the port returns this, never void).
+      ALGORITHM: reinstall the derived vtable 0x08987f00 at +0x00 (the
+      classic two-phase C++ teardown store), release the three retained
+      endpoint values in slot order current (+0x20), from (+0x18), to
+      (+0x1c) - each behind its own NULL check, the ADS blne idiom
+      matching release_refcounted_value's guard-less callee - then
+      tail-branch into the ported refcounted_base_destroy, which
+      installs the base vtable 0x08984ca0, unlinks the node from the
+      timing wheel, and returns this. The slots keep their (now
+      released) pointer values; the body never clears them. Both
+      callees are direct ports, no seam. Deviations: the intermediate
+      derived-vtable store is dead (the base destructor overwrites it
+      and nothing can observe the word in between), so like
+      animation_init's statically dead releases the compiler stays free
+      to keep or drop it. match.py --lib <worktree> --size 64:
+      identical skeleton, 16 original instructions vs 20 Rust - LLVM
+      adds the fp prologue and emits inverted beq+bl for the first two
+      guarded releases; the 0x08987f00 pool word is emitted and the
+      symbol resolves standalone in the archive (no folding).
+
   # --- UI two-value wheel-node constructor (driver + step scalar) ---
   - address: 0x08167a6c
     ghidra: FUN_08167a6c
