@@ -8,6 +8,7 @@
 //! - [`capture_context_fields`] — `FUN_0826fda0` @ 0x0826fda0.
 //! - [`scoped_context_construct`] — `FUN_08270394` @ 0x08270394.
 //! - [`scoped_context_destroy`] — `FUN_08270414` @ 0x08270414.
+//! - [`scoped_context_copy_fields`] — `FUN_08270418` @ 0x08270418.
 //! - [`scoped_context_owner_flags_bit_3`] — `FUN_082a3fc4` @ 0x082a3fc4,
 //!   a validity-gated predicate over bit 3 of the token owner's flags word.
 //! - [`scoped_context_owner_flags_any_8062`] — `FUN_082a40c8` @ 0x082a40c8,
@@ -317,6 +318,35 @@ pub unsafe extern "C" fn scoped_context_construct(
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub extern "C" fn scoped_context_destroy(_this: *mut ScopedContext) {}
+
+/// scoped_context_copy_fields — original: `FUN_08270418` @ 0x08270418
+/// (44 bytes, exact: the next function starts at 0x08270444; **15 `bl`
+/// call sites, all unconditional**, binary-scanned by decoding every B/BL
+/// word in osos.dec — no predicated or tail-`b` sites).
+///
+/// Copies the token payload in ARM order: owner-valid word, owner pointer,
+/// service-context pointer, registry-token pointer, then mode byte. It
+/// deliberately leaves the destination vtable untouched, preserving the
+/// dynamic type installed by its caller. The source vtable is not read.
+///
+/// Deviation: [`ScopedContext`] uses real pointer fields in a `#[repr(C)]`
+/// model, so these field copies address the original 4-byte-spaced fields
+/// on target and remain self-consistent on the 64-bit host rather than
+/// using literal byte offsets. The recovered void signature is retained:
+/// ARM incidentally leaves the input destination in r0 on return, but it
+/// is not modeled as a typed Rust return.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn scoped_context_copy_fields(
+    destination: *mut ScopedContext,
+    source: *const ScopedContext,
+) {
+    (*destination).owner_valid = (*source).owner_valid;
+    (*destination).owner = (*source).owner;
+    (*destination).service_context = (*source).service_context;
+    (*destination).registry_token = (*source).registry_token;
+    (*destination).mode = (*source).mode;
+}
 
 /// Vtable-slot index of the token validity query (the original's
 /// `ldr r1, [r0, #8]`): word 2 of the class vtable.
@@ -870,6 +900,73 @@ mod tests {
     fn destroy_accepts_a_null_token() {
         // The original never dereferences `this`; neither may the port.
         scoped_context_destroy(ptr::null_mut());
+    }
+
+    #[test]
+    fn copy_fields_preserves_the_destination_vtable_and_copies_every_payload_field() {
+        let source_vtable = 0x1111_2222usize as *const ScopedContextVtable;
+        let destination_vtable = 0x3333_4444usize as *const ScopedContextVtable;
+        let source = ScopedContext {
+            vtable: source_vtable,
+            owner_valid: 0xdead_beef,
+            owner: 0x0102_0304usize as *mut u8,
+            service_context: ptr::null_mut(),
+            registry_token: 0xa0b0_c0d0usize as *mut u8,
+            mode: 0xff,
+        };
+        let mut destination = ScopedContext {
+            vtable: destination_vtable,
+            owner_valid: 0,
+            owner: ptr::null_mut(),
+            service_context: 0x5566_7788usize as *mut u8,
+            registry_token: ptr::null_mut(),
+            mode: 0,
+        };
+
+        unsafe { scoped_context_copy_fields(&mut destination, &source) };
+
+        assert_eq!(destination.vtable, destination_vtable);
+        assert_eq!(source.vtable, source_vtable, "the source vtable is not read or changed");
+        assert_eq!(destination.owner_valid, source.owner_valid);
+        assert_eq!(destination.owner, source.owner);
+        assert_eq!(destination.service_context, source.service_context);
+        assert_eq!(destination.registry_token, source.registry_token);
+        assert_eq!(destination.mode, source.mode);
+    }
+
+    #[test]
+    fn copy_fields_accepts_the_same_token_for_source_and_destination() {
+        let mut token = ScopedContext {
+            vtable: 0x1234_5678usize as *const ScopedContextVtable,
+            owner_valid: 0x8765_4321,
+            owner: 0x1020_3040usize as *mut u8,
+            service_context: 0x5060_7080usize as *mut u8,
+            registry_token: 0x90a0_b0c0usize as *mut u8,
+            mode: 0x80,
+        };
+        let before = (
+            token.vtable,
+            token.owner_valid,
+            token.owner,
+            token.service_context,
+            token.registry_token,
+            token.mode,
+        );
+
+        let token_ptr = ptr::addr_of_mut!(token);
+        unsafe { scoped_context_copy_fields(token_ptr, token_ptr) };
+
+        assert_eq!(
+            (
+                token.vtable,
+                token.owner_valid,
+                token.owner,
+                token.service_context,
+                token.registry_token,
+                token.mode,
+            ),
+            before
+        );
     }
 
     #[test]

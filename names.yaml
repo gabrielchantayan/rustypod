@@ -33664,6 +33664,36 @@ functions:
       {fp,lr}; mov fp,sp; pop {fp,pc}` - the crate frame around the
       original's bare `bx lr`, identical to ui_noop_f7f4.
 
+  - address: 0x08270418
+    ghidra: FUN_08270418
+    name: scoped_context_copy_fields
+    size: 44
+    sig: "void scoped_context_copy_fields(ScopedContext *destination, const ScopedContext *source)"
+    module: app/scoped_context
+    renames:
+      param_1/r0: destination
+      param_2/r1: source
+    status: ported
+    notes: >-
+      Raw ARM spans exactly 0x08270418..0x08270443: five ordered loads
+      from source then stores to destination copy +0x04 owner_valid,
+      +0x08 owner, +0x0c service_context, +0x10 registry_token, and
+      +0x14 mode; it never reads or writes either vtable at +0x00.
+      The next word, 0x08270444, starts a separate six-halfword
+      initializer, so Ghidra's 44-byte extent is exact. Binary decoding
+      of every ARM B/BL word in osos.dec finds 15 direct BL callers
+      (0x08113c10, 0x0811515c, 0x0812f740, 0x0812fce0, 0x08130388,
+      0x0813b8f4, 0x0813cfe4, 0x0813e468, 0x08179390, 0x08179c38,
+      0x08218f00, 0x0821980c, 0x08219afc, 0x082a5f70, 0x082a5ff8);
+      all are unconditional, with no predicated BL or direct tail-B
+      sites. The Rust port copies named #[repr(C)] fields, retaining
+      32-bit target offsets and host consistency rather than literal byte
+      offsets. Its recovered void signature intentionally does not
+      surface the raw function's incidental r0 pass-through. Host tests
+      prove that each payload field, including a NULL pointer and mode
+      0xff, copies while the destination vtable remains unchanged, and
+      that source == destination is safe.
+
   - address: 0x082a3fc4
     ghidra: FUN_082a3fc4
     name: scoped_context_owner_flags_bit_3
