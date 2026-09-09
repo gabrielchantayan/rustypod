@@ -50,6 +50,9 @@
 //! target and volatile host test seams.
 
 use crate::kernel::sync_mutex::{RomKernelOps, ROM_KERNEL};
+use crate::kernel::task_lock::{kernel_sem5_signal, kernel_sem5_wait};
+#[cfg(test)]
+use crate::kernel::task_lock::{RomThunkOps, ROM_KERNEL as TASK_LOCK_ROM_KERNEL};
 
 /// Outer transaction lock: fixed RTXC kernel-semaphore handle 0x11
 /// (17), waited first and released last around every PMU I2C
@@ -82,6 +85,12 @@ pub const PMU_RTC_BLOCK_LEN: u32 = 7;
 /// PMU I2C slave address, loaded by `mov r0, #0x73` before both raw
 /// S5L8702 transfers in FUN_0836d3b8.
 pub const PMU_I2C_SLAVE: u32 = 0x73;
+
+/// I2C slave used by the peripheral register interface at address 0x39.
+///
+/// The attached device's identity is not established from the retail image;
+/// this name deliberately records only the verified wire address.
+pub const I2C_0X39_SLAVE: u32 = 0x39;
 
 /// ABI of raw S5L8702 I2C write `FUN_0836bb84`.
 type I2cWriteFn = unsafe extern "C" fn(slave: u32, len: u32, buf: *const u8) -> i32;
@@ -212,6 +221,37 @@ pub unsafe extern "C" fn pmu_i2c_read(reg: u32, len: i32, buf: *mut u8) -> i32 {
     status
 }
 
+/// i2c_0x39_read_register — original: `FUN_0836e36c` @ 0x0836e36c
+/// (92 bytes; 15 plain `bl` call sites, 0 predicated `bl`,
+/// binary-verified by decoding every B/BL word in osos.dec).
+///
+/// Acquires semaphore 5, sends the low byte of `reg` to I2C slave 0x39,
+/// and, only when that write succeeds, reads one byte into `out` from the
+/// same slave. It signals semaphore 5 unconditionally and returns the raw
+/// write or read status verbatim. The distinct next function begins at
+/// 0x0836e3c8, confirming the 92-byte extent.
+///
+/// # Deviation
+///
+/// The raw S5L8702 I2C primitives remain unported. Target builds call their
+/// verified load addresses directly; host tests use their existing volatile
+/// function-pointer seams. This turns the two retail direct `bl` calls into
+/// indirect `blx` calls. The semaphore operations use the existing ported
+/// `kernel_sem5_wait` / `kernel_sem5_signal` wrappers, preserving their
+/// order while replacing each retail direct `bl` with an ordinary Rust call.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn i2c_0x39_read_register(reg: u32, out: *mut u8) -> i32 {
+    let register = reg;
+    kernel_sem5_wait();
+    let mut status = i2c_write(I2C_0X39_SLAVE, 1, (&register as *const u32).cast());
+    if status == 0 {
+        status = i2c_read(I2C_0X39_SLAVE, 1, out);
+    }
+    kernel_sem5_signal();
+    status
+}
+
 /// pmu_i2c_write — original: `FUN_0836d524` @ 0x0836d524 (60
 /// bytes; 17 plain `bl` call sites, 0 predicated `bl`,
 /// binary-verified by decoding every B/BL word in osos.dec).
@@ -302,6 +342,7 @@ pub(crate) mod tests {
     static mut RAW_WRITE_STATUS: i32 = 0;
     static mut RAW_READ_STATUS: i32 = 0;
     /// Logged semaphore ops: (0 = wait, 1 = signal, handle).
+    static mut RAW_READ_VALUE: u8 = 0;
     static mut SEM_LOG: Vec<(u8, u32)> = Vec::new();
     /// Logged PMU register-block reads: (bank, buf address).
     static mut READ_LOG: Vec<(u32, usize)> = Vec::new();
@@ -320,6 +361,7 @@ pub(crate) mod tests {
 
     unsafe extern "C" fn mock_i2c_read(slave: u32, len: u32, buf: *mut u8) -> i32 {
         (*addr_of_mut!(RAW_READ_LOG)).push((slave, len, buf as usize));
+        buf.write(*addr_of!(RAW_READ_VALUE));
         *addr_of!(RAW_READ_STATUS)
     }
 
@@ -329,6 +371,16 @@ pub(crate) mod tests {
 
     unsafe extern "C" fn mock_sema_signal(handle: u32) {
         (*addr_of_mut!(SEM_LOG)).push((1, handle));
+    }
+
+    unsafe extern "C" fn mock_task_sem_wait(handle: usize) -> usize {
+        (*addr_of_mut!(SEM_LOG)).push((0, handle as u32));
+        0
+    }
+
+    unsafe extern "C" fn mock_task_sem_signal(handle: usize) -> usize {
+        (*addr_of_mut!(SEM_LOG)).push((1, handle as u32));
+        0
     }
 
     unsafe extern "C" fn mock_read_regs(bank: u32, buf: *mut u8) -> i32 {
@@ -433,6 +485,7 @@ pub(crate) mod tests {
             (*addr_of_mut!(RAW_READ_LOG)).clear();
             *addr_of_mut!(RAW_WRITE_STATUS) = write_status;
             *addr_of_mut!(RAW_READ_STATUS) = read_status;
+            *addr_of_mut!(RAW_READ_VALUE) = 0;
             addr_of_mut!(I2C_WRITE).write(mock_i2c_write);
             addr_of_mut!(I2C_READ).write(mock_i2c_read);
         }
@@ -445,6 +498,36 @@ pub(crate) mod tests {
             addr_of_mut!(I2C_READ).write(missing_i2c_read);
         }
         drop(guard);
+    }
+
+    fn install_0x39_read(write_status: i32, read_status: i32) -> (MutexGuard<'static, ()>, RomThunkOps) {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            (*addr_of_mut!(RAW_WRITE_LOG)).clear();
+            (*addr_of_mut!(RAW_WRITE_PACKETS)).clear();
+            (*addr_of_mut!(RAW_READ_LOG)).clear();
+            (*addr_of_mut!(SEM_LOG)).clear();
+            *addr_of_mut!(RAW_WRITE_STATUS) = write_status;
+            *addr_of_mut!(RAW_READ_STATUS) = read_status;
+            *addr_of_mut!(RAW_READ_VALUE) = 0;
+            addr_of_mut!(I2C_WRITE).write(mock_i2c_write);
+            addr_of_mut!(I2C_READ).write(mock_i2c_read);
+            let saved = addr_of!(TASK_LOCK_ROM_KERNEL).read_volatile();
+            let mut patched = saved;
+            patched.rom_sem_wait = mock_task_sem_wait;
+            patched.rom_sem_signal = mock_task_sem_signal;
+            addr_of_mut!(TASK_LOCK_ROM_KERNEL).write(patched);
+            (guard, saved)
+        }
+    }
+
+    fn restore_0x39_read(state: (MutexGuard<'static, ()>, RomThunkOps)) {
+        unsafe {
+            addr_of_mut!(I2C_WRITE).write(missing_i2c_write);
+            addr_of_mut!(I2C_READ).write(missing_i2c_read);
+            addr_of_mut!(TASK_LOCK_ROM_KERNEL).write(state.1);
+        }
+        drop(state.0);
     }
 
     #[test]
@@ -501,6 +584,44 @@ pub(crate) mod tests {
             );
         }
         restore_raw(guard);
+    }
+
+    #[test]
+    fn peripheral_0x39_read_serializes_low_register_byte_and_data() {
+        let state = install_0x39_read(0, 0);
+        unsafe {
+            *addr_of_mut!(RAW_READ_VALUE) = 0xa5;
+            let mut value = 0;
+            let addr = addr_of_mut!(value) as usize;
+            assert_eq!(i2c_0x39_read_register(0x1234_56a7, addr_of_mut!(value)), 0);
+            assert_eq!((*addr_of!(RAW_WRITE_LOG)).clone(), std::vec![(I2C_0X39_SLAVE, 1, 0xa7)]);
+            assert_eq!((*addr_of!(RAW_READ_LOG)).clone(), std::vec![(I2C_0X39_SLAVE, 1, addr)]);
+            assert_eq!(value, 0xa5, "the one-byte raw read owns the output");
+            assert_eq!(
+                (*addr_of!(SEM_LOG)).clone(),
+                std::vec![(0, PMU_I2C_INNER_SEM), (1, PMU_I2C_INNER_SEM)],
+                "semaphore 5 brackets the complete transfer"
+            );
+        }
+        restore_0x39_read(state);
+    }
+
+    #[test]
+    fn peripheral_0x39_write_error_skips_read_but_still_releases_lock() {
+        let state = install_0x39_read(-5, 0);
+        unsafe {
+            let mut value = 0xaa;
+            assert_eq!(i2c_0x39_read_register(7, addr_of_mut!(value)), -5);
+            assert_eq!((*addr_of!(RAW_WRITE_LOG)).clone(), std::vec![(I2C_0X39_SLAVE, 1, 7)]);
+            assert!((*addr_of!(RAW_READ_LOG)).is_empty());
+            assert_eq!(value, 0xaa, "write failure leaves the caller output untouched");
+            assert_eq!(
+                (*addr_of!(SEM_LOG)).clone(),
+                std::vec![(0, PMU_I2C_INNER_SEM), (1, PMU_I2C_INNER_SEM)],
+                "the retail signal runs even after a failed write"
+            );
+        }
+        restore_0x39_read(state);
     }
 
     #[test]

@@ -51258,3 +51258,37 @@ functions:
       and order are unchanged. Host tests prove NULL owner makes no allocator
       call, NULL data releases only owner, and non-NULL data releases data
       before owner.
+
+  # --- I2C slave 0x39 one-byte register read ---
+  - address: 0x0836e36c
+    ghidra: FUN_0836e36c
+    name: i2c_0x39_read_register
+    size: 92
+    sig: "i32 i2c_0x39_read_register(u32 reg, u8 *out)"
+    module: drivers/i2c
+    status: ported
+    renames:
+      param_1/r0: reg
+      param_2/r1/r5: out
+      local_1c/sp+4: register
+      local_20/sp: value
+      FUN_0806a4a0: kernel_sem5_wait
+      FUN_0836bb84: i2c_write
+      FUN_0836b950: i2c_read
+      FUN_080645a8: kernel_sem5_signal
+    notes: >-
+      Raw ARM extent is exactly 92 bytes, 0x0836e36c..0x0836e3c8: push
+      {r2-r8,lr}; kernel_sem5_wait(); i2c_write(0x39,1,&reg); on zero status
+      i2c_read(0x39,1,out); kernel_sem5_signal(); return status. The next
+      independently linked function begins at 0x0836e3c8, with no literal
+      pool. The one-byte write transfers only the low byte of reg. The I2C
+      device at slave address 0x39 has no verified identity in the retail
+      image, so the name deliberately describes the wire-visible operation.
+      Decoding every ARM B/BL immediate in osos.dec finds 15 direct calls,
+      all unconditional bl and zero predicated forms: 0x08084564, 0x08084570,
+      0x080845e4, 0x080846ac, 0x080846d8, 0x08084b94, 0x08084ba0,
+      0x080f4bf0, 0x080f4bfc, 0x080f4c10, 0x0836e1fc, 0x0836e21c,
+      0x0836e248, 0x0836e358, and 0x08393610. No deliberate semantic
+      deviation: the existing kernel semaphore ports preserve the unconditional
+      lock-release order; the already-established raw I2C target/host seam
+      uses indirect blx calls in place of retail direct bl calls.
