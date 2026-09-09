@@ -37658,6 +37658,45 @@ functions:
       use a literal veneer because the payload cannot retain the stock
       PC-relative branch, while host tests install a volatile callback seam
       that proves zero, positive, and i32::MIN distances pass unchanged.
+  # --- FreeType size-capped stream read wrapper ---
+  - address: 0x080764e4
+    ghidra: FUN_080764e4
+    name: ft_stream_read_capped
+    size: 44
+    sig: "i32 ft_stream_read_capped(void *owner, void *buffer, u32 len)"
+    module: ft/stream_read_capped
+    status: ported
+    renames:
+      param_1: owner
+      param_1_plus_0x0: stream
+      param_1_plus_0x8: limit
+      param_2: buffer
+      param_3: len
+      FUN_08042fd4: buffered_stream_read
+    notes: >-
+      Size-gated wrapper around the buffered-stream reader at 0x08042fd4.
+      The owner object carries the stream handle in its word at +0x00 and a
+      size limit in its word at +0x08. A request longer than the limit
+      (unsigned compare) returns !0xcf (-208) without touching the stream;
+      otherwise the wrapper loads the stream handle from +0x00, seeds a
+      one-word count slot with the requested length, and forwards stream,
+      count slot, buffer, and the limit word itself as the live r3 fourth
+      argument. Raw ARM confirms the exact 44-byte extent: the next
+      separately linked function (resource_fork_probe) starts at 0x08076510.
+      Decoding every ARM B/BL word in osos.dec found exactly 13 inbound
+      branches, all unconditional bl at 0x08063f74, 0x0806405c, 0x0807f900,
+      0x0807f958, 0x0807fa24, 0x0807fb2c, 0x0807fc0c, 0x0807fcd0,
+      0x080963e0, 0x0809ed08, 0x0809edf4, 0x080be5f0, and 0x080be618; no
+      predicated BL, no plain B callers, and no data-word references (not
+      virtually dispatched). Ghidra's C drops the return value; the pop
+      {r2,r3,ip,pc} epilogue returns the callee's r0 unchanged. Deviation:
+      the 0x08042fd4 reader rides a host-mockable seam (same house pattern
+      as the sibling ft_stream_read_bounded @ 0x08073e10); target builds
+      transmute the retailOS entry. match.py structural review: same
+      guard-load/compare/mvncc shape and same forwarding sequence; the diff
+      is LLVM's push {fp,lr} frame and the indirect blx through the seam
+      versus the ADS direct bl. Rust implementation and host tests:
+      `src/ft/stream_read_capped.rs::ft_stream_read_capped`.
   # --- FreeType MacBinary resource-fork probe ---
   - address: 0x08076510
     ghidra: FUN_08076510

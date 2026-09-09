@@ -19,6 +19,7 @@ pub mod service;
 pub mod service_metadata;
 pub mod stream;
 pub mod stream_read_bounded;
+pub mod stream_read_capped;
 pub mod stream_skip;
 pub mod system;
 pub mod selection;
