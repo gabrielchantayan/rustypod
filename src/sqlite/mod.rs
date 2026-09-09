@@ -101,6 +101,7 @@ pub mod mem_extern_release;
 pub mod mem_finalize;
 pub mod mem_release;
 pub mod name_from_token;
+pub mod nested_parse;
 pub mod parse;
 pub mod parse_cell;
 pub mod parse_expr;

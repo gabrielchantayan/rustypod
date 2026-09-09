@@ -23156,6 +23156,34 @@ functions:
       64-bit host keeps the pointer and packed words disjoint. match.py:
       same structure (NULL guard, ldr/ldr/lsr, both callee bls).
 
+  - address: 0x0837d7dc
+    ghidra: FUN_0837d7dc
+    name: sqlite_nested_parse
+    size: 168
+    sig: "void sqlite_nested_parse(NestedParse *parse, const char *format, VaList args)"
+    module: sqlite/nested_parse
+    status: ported
+    vars: {param_1/r4: parse, param_2: format, param_3: args, iVar1/r5: sql}
+    notes: >-
+      Raw extent is exactly 0x0837d7dc..0x0837d884 (the next function starts
+      at 0x0837d884). SQLite 3.5.9's sqlite3NestedParse: if Parse.nested
+      (+0x13) is nonzero, return without touching any other state. Otherwise
+      call the ported sqlite_vm_printf @ 0x08386454 with Parse.db (+0x00);
+      a NULL result writes 1 to db->mallocFailed (+0x1e). On a result,
+      increment nested, copy Parse+0x14c..+0x1a7 (0x5c bytes) to the stack
+      through the ported IRAM memcpy veneer, call sqlite3RunParser @
+      0x08382580 with NULL pzErrMsg, free the SQL through ported
+      tracked_free @ 0x083906f4, restore the 0x5c-byte region, then decrement
+      nested. Decoding every ARM B/BL word finds 17 direct BL call sites:
+      14 unconditional (0x082c6028, 0x082dc158, 0x082dc180, 0x0836eda4,
+      0x0836f0e4, 0x0836f118, 0x0836f144, 0x083745b4, 0x083755f8,
+      0x0837595c, 0x083760ac, 0x08379434, 0x0838d5c4), and 3 blne
+      (0x08375628, 0x08375938, 0x08375988); no tail B. The predicated sites
+      gate nested SQL on caller state. Deliberate deviation: unported
+      sqlite3RunParser (764 bytes) is SQLITE_RUN_PARSER, a volatile dispatch
+      seam whose default is its successful no-state-change outcome. Host tests
+      prove the recursion no-op, formatter-failure OOM latch, parser depth and
+      NULL error pointer, parser-state restore, and direct tracked free.
   - address: 0x0836761c
     ghidra: FUN_0836761c
     name: release_via_field_0x48

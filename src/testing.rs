@@ -135,6 +135,9 @@ pub mod hints {
     // 0x7300_0000: dedicated to crypto/bio_ctrl's raw-u32 BIO/method
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const BIO_CTRL: usize = 0x7300_0000;
+    // 0x7400_0000: dedicated to sqlite/nested_parse's raw-u32 Parse/db
+    // fixture; mappings never unmap.
+    pub const SQLITE_NESTED_PARSE: usize = 0x7400_0000;
     // `heap/pool.rs` maps its own arena at 0x0800_0000 through a separate
     // path: it needs only bit 31 clear, not full u32 addressability.
 }
