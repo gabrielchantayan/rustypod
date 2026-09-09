@@ -19,6 +19,7 @@ pub mod encoded_word_block_shift;
 pub mod error_latch;
 pub mod drive;
 pub mod fixed;
+pub mod fixed_matrix_identity;
 pub mod field_access;
 pub mod four_word_record;
 pub mod first_entry_payload;

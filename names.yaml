@@ -52987,3 +52987,30 @@ functions:
       performs that decoded vtable dispatch directly rather than inventing a
       callee identity or adding a redundant seam. Host coverage checks index
       0, a later entry, and index 0xffffffff's modulo-32-bit header result.
+
+  - address: 0x082570ec
+    ghidra: FUN_082570ec
+    name: fixed_matrix_identity_init
+    size: 84
+    sig: "void fixed_matrix_identity_init(FixedMatrix4x4 *matrix)"
+    module: util/fixed_matrix_identity
+    status: ported
+    renames:
+      param_1/r0: matrix (aligned writable 0x44-byte Q16.16 4x4 matrix)
+      r1: zero (shared by the twelve zero element stores)
+      r2: q16_one (0x00010000, shared by the four diagonal stores)
+      r3: identity_marker (one-byte value stored at matrix +0x40)
+    notes: >-
+      Raw ARM extent is exactly 84 bytes, 0x082570ec..0x08257140: the next
+      separately linked function begins at 0x08257140. It initializes all
+      sixteen signed Q16.16 matrix elements to the 4x4 identity, storing
+      0x00010000 at word indices 15, 10, 5, and 0 and zero at every other
+      index in that decoded order, then stores byte one at +0x40. Decoding
+      every ARM B/BL immediate in osos.dec found exactly 14 direct inbound bl
+      sites and one unconditional tail b at 0x08242ec0; there are zero
+      predicated forms. The tail-b caller and the matrix multiplication caller
+      at 0x08242da4 establish the +0x40 byte as the known-identity marker:
+      products propagate it only when both input matrices carry one. The
+      original is an unguarded leaf with no callees. No deliberate Rust
+      deviations: the port keeps the exact element store order with volatile
+      aligned accesses and leaves the three trailing ABI-padding bytes alone.
