@@ -44213,6 +44213,37 @@ functions:
   # "ssl3-sha1"/"RSA-SHA1" @ 0x0805f574 and "signature has problems,
   # re-make with post SSLeay045" @ 0x08063268; Apple's own arc is
   # "1.3.6.1.4.1.63.42" / "iPod Serial Number" @ 0x080782bc.
+  - address: 0x082d7e0c
+    ghidra: FUN_082d7e0c
+    name: lh_retrieve
+    size: 72
+    sig: "void *lh_retrieve(LHASH *table, const void *key)"
+    module: crypto/obj_dat
+    status: ported
+    renames:
+      param_1/r0/r4: table
+      param_2/r1: key
+      uStack_10/sp: hash
+      piVar1/r0: bucket
+      "*piVar1": node
+    notes: >-
+      OpenSSL lhash.c lh_retrieve. Raw ARM extent is exactly 72 bytes
+      (0x082d7e0c-0x082d7e54); the separately linked successor begins at
+      0x082d7e54. Clears table->error (+0x5c), calls getrn @ 0x080e82cc
+      with a stack hash output, reads the resulting bucket's node, returns
+      node->data and increments num_retrieve (+0x50), or returns NULL and
+      increments num_retrieve_miss (+0x54) when the node is NULL. Every
+      ARM B/BL word in osos.dec was decoded: 13 unconditional BL callers,
+      zero predicated forms and zero tail branches. getrn has no existing
+      ledger entry, so the port reaches that verified unported target through
+      the volatile LHASH_GETRN seam; the target default calls it in place and
+      host tests install bucket resolvers. Tests cover error clearing, hit,
+      miss, a non-NULL node with NULL data (still a hit), counter updates and
+      the existing object-database callers' key/result integration. match.py
+      review: both implementations clear error, call the resolver, load its
+      bucket, branch on node presence, then increment/return by outcome;
+      LLVM adds its volatile seam load and frame, producing 27 instructions
+      versus the original 18.
   - address: 0x0805ef18
     ghidra: FUN_0805ef18
     name: obj_nid2obj

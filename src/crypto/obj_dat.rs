@@ -109,20 +109,20 @@
 //! on `ldr r0,[r0,#8]`, so both really do return `->nid` of an
 //! `ASN1_OBJECT`, one dereference apart.
 //!
-//! # Deviations
+//! # Dependencies and deviations
 //!
 //! - `added` and `obj_objs` live at their firmware addresses on device
 //!   and in host test storage otherwise (`cxx/object_flags.rs`
 //!   precedent). The host table starts empty, so an uninstalled fixture
 //!   misses instead of dereferencing a null base — no guard needed.
-//! - `lh_retrieve` @ 0x082d7e0c is not ported; it rides the
-//!   [`OBJ_ADDED_RETRIEVE`] seam (house pattern). It is unreachable
-//!   until something sets `added`, which only `OBJ_create` does.
+//! - `getrn` @ 0x080e82cc is unported. [`lh_retrieve`] reaches its
+//!   target default through the volatile [`LHASH_GETRN`] seam; host tests
+//!   install a precise bucket resolver.
 //! - `OBJ_bsearch` @ 0x0805eb04 and its comparator are inlined into
 //!   [`obj_bsearch`] / [`obj_cmp`] rather than called out: the generic
 //!   bsearch is shared with `OBJ_sn2nid`/`OBJ_ln2nid` and belongs with
 //!   them, and the key indirection (`&a` plus the comparator's
-//!   `*(ASN1_OBJECT * const *)`) folds away to passing `a` directly.
+//!   `*(ASN1_OBJECT * const *)`) folds away to passing the object directly.
 //! - **Unresolved anomaly, recorded rather than guessed at**: the
 //!   comparator pointer in the literal pool is 0x080e1168, and that
 //!   address does *not* decode as a function entry in our image — it
@@ -133,9 +133,8 @@
 //!   a scan of the whole image finds no cluster of comparator-shaped
 //!   leaf functions anywhere near them. Since the address cannot be
 //!   read, [`obj_cmp`] implements upstream's body — length first, then
-//!   `memcmp` over `data` — which the `length` @ +0x0c / `data` @ +0x10
-//!   layout recovered from `OBJ_obj2txt` @ 0x0805f110 corroborates.
-
+//!   `memcmp` over `data` — which the `length` @ +0x0c/+0x10 layout
+//!   recovered from `OBJ_obj2txt` @ 0x0805f110 corroborates.
 use core::ffi::c_void;
 
 /// OpenSSL's `NID_undef`.
@@ -179,37 +178,155 @@ pub struct AddedObj {
     pub obj: *mut Asn1Object,
 }
 
+/// OpenSSL's `LHASH`, retaining every 32-bit field through `error` at +0x5c.
+#[repr(C)]
+pub struct Lhash {
+    pub buckets: *mut *mut LhashNode,
+    pub hash: u32,
+    pub compare: u32,
+    pub num_nodes: u32,
+    pub num_alloc_nodes: u32,
+    pub p: u32,
+    pub pmax: u32,
+    pub up_load: u32,
+    pub down_load: u32,
+    pub num_items: u32,
+    pub num_expands: u32,
+    pub num_expand_reallocs: u32,
+    pub num_contracts: u32,
+    pub num_contract_reallocs: u32,
+    pub num_hash_calls: u32,
+    pub num_comp_calls: u32,
+    pub num_insert: u32,
+    pub num_replace: u32,
+    pub num_delete: u32,
+    pub num_no_delete: u32,
+    pub num_retrieve: u32,
+    pub num_retrieve_miss: u32,
+    pub num_hash_comps: u32,
+    pub error: i32,
+}
+
+impl Lhash {
+    pub const fn empty() -> Self {
+        Self {
+            buckets: core::ptr::null_mut(),
+            hash: 0,
+            compare: 0,
+            num_nodes: 0,
+            num_alloc_nodes: 0,
+            p: 0,
+            pmax: 0,
+            up_load: 0,
+            down_load: 0,
+            num_items: 0,
+            num_expands: 0,
+            num_expand_reallocs: 0,
+            num_contracts: 0,
+            num_contract_reallocs: 0,
+            num_hash_calls: 0,
+            num_comp_calls: 0,
+            num_insert: 0,
+            num_replace: 0,
+            num_delete: 0,
+            num_no_delete: 0,
+            num_retrieve: 0,
+            num_retrieve_miss: 0,
+            num_hash_comps: 0,
+            error: 0,
+        }
+    }
+}
+
+/// A link in an `LHASH` collision chain.
+#[repr(C)]
+pub struct LhashNode {
+    pub data: *mut c_void,
+    pub next: *mut LhashNode,
+}
+
 // Target-exact layouts (the byte offsets the original's `ldr` immediates
 // assume).
 #[cfg(target_pointer_width = "32")]
 mod object_layout {
-    use super::{AddedObj, Asn1Object};
+    use super::{AddedObj, Asn1Object, Lhash, LhashNode};
     const _: [u8; 0x08] = [0; core::mem::offset_of!(Asn1Object, nid)];
     const _: [u8; 0x0c] = [0; core::mem::offset_of!(Asn1Object, length)];
     const _: [u8; 0x10] = [0; core::mem::offset_of!(Asn1Object, data)];
     const _: [u8; 0x04] = [0; core::mem::offset_of!(AddedObj, obj)];
     const _: [u8; 0x08] = [0; core::mem::size_of::<AddedObj>()];
+    const _: [u8; 0x50] = [0; core::mem::offset_of!(Lhash, num_retrieve)];
+    const _: [u8; 0x54] = [0; core::mem::offset_of!(Lhash, num_retrieve_miss)];
+    const _: [u8; 0x5c] = [0; core::mem::offset_of!(Lhash, error)];
+    const _: [u8; 0x08] = [0; core::mem::size_of::<LhashNode>()];
 }
 
-/// `lh_retrieve` @ 0x082d7e0c: looks `key` up in `table`, returning the
-/// stored `ADDED_OBJ` or NULL.
-pub type LhRetrieve =
-    unsafe extern "C" fn(table: *mut c_void, key: *const AddedObj) -> *mut AddedObj;
+/// `getrn` @ 0x080e82cc: resolve a hash value and return its bucket word.
+pub type LhashGetrn = unsafe extern "C" fn(
+    table: *mut Lhash,
+    key: *const c_void,
+    hash: *mut u32,
+) -> *mut *mut LhashNode;
 
-/// Stand-in installed until target integration supplies the real
-/// `lh_retrieve`. Spins rather than inventing a result — it is only
-/// reachable once `added` is non-NULL, which needs `OBJ_create`.
-unsafe extern "C" fn missing_lh_retrieve(
-    _table: *mut c_void,
-    _key: *const AddedObj,
-) -> *mut AddedObj {
-    loop {
-        core::hint::spin_loop();
+/// Target default for the unported `getrn` worker.
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_lhash_getrn(
+    table: *mut Lhash,
+    key: *const c_void,
+    hash: *mut u32,
+) -> *mut *mut LhashNode {
+    let getrn: LhashGetrn = unsafe { core::mem::transmute(0x080e_82ccusize) };
+    unsafe { getrn(table, key, hash) }
+}
+
+/// Host calls must install a resolver rather than make a missing lookup succeed.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_lhash_getrn(
+    _table: *mut Lhash,
+    _key: *const c_void,
+    _hash: *mut u32,
+) -> *mut *mut LhashNode {
+    panic!("lh_retrieve requires the getrn worker 0x080e82cc")
+}
+
+/// Active `getrn` worker. The volatile load preserves the target dispatch.
+#[cfg(target_os = "none")]
+pub static mut LHASH_GETRN: LhashGetrn = firmware_lhash_getrn;
+
+/// See the target definition.
+#[cfg(not(target_os = "none"))]
+pub static mut LHASH_GETRN: LhashGetrn = missing_lhash_getrn;
+
+#[inline(always)]
+unsafe fn lhash_getrn() -> LhashGetrn {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(LHASH_GETRN)) }
+}
+
+/// lh_retrieve — original: `FUN_082d7e0c` @ 0x082d7e0c (72 bytes).
+///
+/// The raw ARM body clears `table->error`, asks `getrn` for the bucket word,
+/// returns that node's `data` or NULL, and increments `num_retrieve` on a
+/// non-NULL node or `num_retrieve_miss` otherwise. The next separately-linked
+/// function begins at 0x082d7e54. Decoding every ARM B/BL word in
+/// `osos.dec` finds 13 unconditional `bl` callers, with zero predicated
+/// forms and zero tail branches. Deliberate deviation: the unported `getrn`
+/// is a volatile target seam at 0x080e82cc; all other observable behavior,
+/// including a NULL `node->data` counting as a retrieval, is retained.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn lh_retrieve(table: *mut Lhash, key: *const c_void) -> *mut c_void {
+    (*table).error = 0;
+    let mut hash = 0;
+    let bucket = lhash_getrn()(table, key, core::ptr::addr_of_mut!(hash));
+    let node = bucket.read();
+    if node.is_null() {
+        (*table).num_retrieve_miss = (*table).num_retrieve_miss.wrapping_add(1);
+        core::ptr::null_mut()
+    } else {
+        (*table).num_retrieve = (*table).num_retrieve.wrapping_add(1);
+        (*node).data
     }
 }
-
-/// RetailOS dependency of [`obj_obj2nid`]: `lh_retrieve` @ 0x082d7e0c.
-pub static mut OBJ_ADDED_RETRIEVE: LhRetrieve = missing_lh_retrieve;
 
 /// The `obj_objs` table: a DER-sorted array of `ASN1_OBJECT *`.
 pub struct ObjTable {
@@ -228,17 +345,17 @@ pub static mut OBJ_OBJS: ObjTable =
 #[cfg(not(target_os = "none"))]
 pub static mut OBJ_OBJS: ObjTable = ObjTable { base: core::ptr::null(), len: 0 };
 
-/// The `added` hash pointer — the word @ 0x08a0c334 + 4 on device.
+/// The `added` `LHASH *` word @ 0x08a0c334 + 4 on device.
 #[cfg(target_os = "none")]
-const ADDED_SLOT: *mut *mut c_void = 0x08a0_c338 as *mut *mut c_void;
+const ADDED_SLOT: *mut *mut Lhash = 0x08a0_c338 as *mut *mut Lhash;
 
 /// Host stand-in for that word.
 #[cfg(not(target_os = "none"))]
-static mut HOST_ADDED_SLOT: *mut c_void = core::ptr::null_mut();
+static mut HOST_ADDED_SLOT: *mut Lhash = core::ptr::null_mut();
 
 /// Reads `added`.
 #[inline(always)]
-unsafe fn added_table() -> *mut c_void {
+unsafe fn added_table() -> *mut Lhash {
     #[cfg(target_os = "none")]
     {
         ADDED_SLOT.read_volatile()
@@ -328,8 +445,7 @@ pub unsafe extern "C" fn obj_obj2nid(object: *const Asn1Object) -> i32 {
     let added = added_table();
     if !added.is_null() {
         let key = AddedObj { kind: ADDED_DATA, obj: object as *mut Asn1Object };
-        let retrieve = core::ptr::read_volatile(core::ptr::addr_of!(OBJ_ADDED_RETRIEVE));
-        let found = retrieve(added, &key);
+        let found = lh_retrieve(added, core::ptr::addr_of!(key).cast()).cast::<AddedObj>();
         if !found.is_null() {
             return (*(*found).obj).nid;
         }
@@ -357,9 +473,9 @@ pub unsafe extern "C" fn obj_obj2nid(object: *const Asn1Object) -> i32 {
 /// an unresolved in-range table entry goes directly to the error path.
 ///
 /// Device table storage is the original absolute address; host tests install
-/// an inline fixture. `lh_retrieve` remains the existing
-/// [`OBJ_ADDED_RETRIEVE`] boundary, while the diagnostic call reaches the
-/// already-ported [`crate::kernel::diag_ring_record::diag_ring_record`].
+/// an inline fixture. `lh_retrieve` now reaches its unported `getrn` worker
+/// through [`LHASH_GETRN`], while the diagnostic call reaches the already-
+/// ported [`crate::kernel::diag_ring_record::diag_ring_record`].
 ///
 /// Deliberate deviation: raw ARM stores `nid` at `sp+0xc` but gives
 /// `lh_retrieve` an `ADDED_NID` object's pointer field of `sp+4`, an
@@ -382,8 +498,7 @@ pub unsafe extern "C" fn obj_nid2obj(nid: i32) -> *mut Asn1Object {
                 kind: ADDED_NID,
                 obj: core::ptr::addr_of!(key_nid).cast_mut().cast::<Asn1Object>(),
             };
-            let retrieve = core::ptr::read_volatile(core::ptr::addr_of!(OBJ_ADDED_RETRIEVE));
-            let found = retrieve(added, &key);
+            let found = lh_retrieve(added, core::ptr::addr_of!(key).cast()).cast::<AddedObj>();
             if !found.is_null() {
                 return (*found).obj;
             }
@@ -434,7 +549,7 @@ mod tests {
             OBJ_OBJS.base = core::ptr::null();
             OBJ_OBJS.len = 0;
             HOST_ADDED_SLOT = core::ptr::null_mut();
-            OBJ_ADDED_RETRIEVE = missing_lh_retrieve;
+            LHASH_GETRN = missing_lhash_getrn;
             HOST_NID_OBJS = core::ptr::null_mut();
         }
 
@@ -482,6 +597,61 @@ mod tests {
             objects.push(object(NID_UNDEF, &[]));
         }
         objects
+    }
+
+    #[test]
+    fn retrieval_clears_errors_counts_outcomes_and_returns_node_data() {
+        static mut NODE: LhashNode = LhashNode {
+            data: core::ptr::null_mut(),
+            next: core::ptr::null_mut(),
+        };
+        static mut BUCKET: *mut LhashNode = core::ptr::null_mut();
+
+        unsafe extern "C" fn resolve(
+            _table: *mut Lhash,
+            _key: *const c_void,
+            hash: *mut u32,
+        ) -> *mut *mut LhashNode {
+            *hash = 0x1357_9bdf;
+            core::ptr::addr_of_mut!(BUCKET)
+        }
+
+        let guard = OBJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut table = Lhash::empty();
+        let data = 1usize as *mut c_void;
+        unsafe {
+            LHASH_GETRN = resolve;
+            NODE.data = data;
+            BUCKET = core::ptr::addr_of_mut!(NODE);
+            table.error = -7;
+        }
+        assert_eq!(unsafe { lh_retrieve(&mut table, core::ptr::null()) }, data);
+        assert_eq!(table.error, 0);
+        assert_eq!(table.num_retrieve, 1);
+        assert_eq!(table.num_retrieve_miss, 0);
+
+        unsafe {
+            NODE.data = core::ptr::null_mut();
+            table.error = -3;
+        }
+        assert!(unsafe { lh_retrieve(&mut table, core::ptr::null()) }.is_null());
+        assert_eq!(table.error, 0);
+        assert_eq!(table.num_retrieve, 2, "a node hit counts even when its data is NULL");
+        assert_eq!(table.num_retrieve_miss, 0);
+
+        unsafe {
+            NODE.data = data;
+        }
+
+        unsafe {
+            BUCKET = core::ptr::null_mut();
+            table.error = 22;
+        }
+        assert!(unsafe { lh_retrieve(&mut table, core::ptr::null()) }.is_null());
+        assert_eq!(table.error, 0);
+        assert_eq!(table.num_retrieve, 2);
+        assert_eq!(table.num_retrieve_miss, 1);
+        clear(guard);
     }
 
 
@@ -596,46 +766,68 @@ mod tests {
             flags: 0,
         };
         static mut RECORD: AddedObj = AddedObj { kind: ADDED_DATA, obj: core::ptr::null_mut() };
+        static mut NODE: LhashNode = LhashNode {
+            data: core::ptr::null_mut(),
+            next: core::ptr::null_mut(),
+        };
+        static mut BUCKET: *mut LhashNode = core::ptr::null_mut();
         static mut SEEN_KIND: i32 = -1;
 
-        unsafe extern "C" fn retrieve(_table: *mut c_void, key: *const AddedObj) -> *mut AddedObj {
+        unsafe extern "C" fn retrieve(
+            _table: *mut Lhash,
+            key: *const c_void,
+            _hash: *mut u32,
+        ) -> *mut *mut LhashNode {
+            let key = key.cast::<AddedObj>();
             SEEN_KIND = (*key).kind;
             RECORD.obj = core::ptr::addr_of_mut!(OVERRIDE);
-            core::ptr::addr_of_mut!(RECORD)
+            NODE.data = core::ptr::addr_of_mut!(RECORD).cast();
+            BUCKET = core::ptr::addr_of_mut!(NODE);
+            core::ptr::addr_of_mut!(BUCKET)
         }
 
         let (_entries, mut slots) = fixture();
         let guard = with_table(&mut slots);
+        let mut table = Lhash::empty();
         unsafe {
-            HOST_ADDED_SLOT = 1 as *mut c_void;
-            OBJ_ADDED_RETRIEVE = retrieve;
+            HOST_ADDED_SLOT = core::ptr::addr_of_mut!(table);
+            LHASH_GETRN = retrieve;
         }
         assert_eq!(lookup(OID_A), 999, "the hash hit shadows nid 101");
         assert_eq!(unsafe { SEEN_KIND }, ADDED_DATA, "the key is tagged ADDED_DATA");
+        assert_eq!(table.num_retrieve, 1);
         clear(guard);
     }
 
     #[test]
     fn an_added_hash_miss_falls_through_to_the_static_table() {
-        unsafe extern "C" fn miss(_table: *mut c_void, _key: *const AddedObj) -> *mut AddedObj {
-            core::ptr::null_mut()
+        static mut BUCKET: *mut LhashNode = core::ptr::null_mut();
+        unsafe extern "C" fn miss(
+            _table: *mut Lhash,
+            _key: *const c_void,
+            _hash: *mut u32,
+        ) -> *mut *mut LhashNode {
+            core::ptr::addr_of_mut!(BUCKET)
         }
 
         let (_entries, mut slots) = fixture();
         let guard = with_table(&mut slots);
+        let mut table = Lhash::empty();
         unsafe {
-            HOST_ADDED_SLOT = 1 as *mut c_void;
-            OBJ_ADDED_RETRIEVE = miss;
+            BUCKET = core::ptr::null_mut();
+            HOST_ADDED_SLOT = core::ptr::addr_of_mut!(table);
+            LHASH_GETRN = miss;
         }
         assert_eq!(lookup(OID_C), 103);
         assert_eq!(lookup(&[0x2c]), NID_UNDEF);
+        assert_eq!(table.num_retrieve_miss, 2);
         clear(guard);
     }
 
     #[test]
     fn the_added_hash_is_skipped_entirely_while_it_is_null() {
-        // `missing_lh_retrieve` spins, so reaching it would hang: this
-        // test passing *is* the proof that `added == NULL` short-circuits.
+        // Reaching the missing worker would panic, so this proves that a
+        // NULL `added` pointer short-circuits before `lh_retrieve`.
         let (_entries, mut slots) = fixture();
         let guard = with_table(&mut slots);
         unsafe { HOST_ADDED_SLOT = core::ptr::null_mut() };
@@ -688,20 +880,25 @@ mod tests {
 
     #[test]
     fn an_unresolved_in_range_nid_skips_the_added_hash() {
-        static mut RETRIEVE_CALLS: u32 = 0;
-        unsafe extern "C" fn retrieve(_table: *mut c_void, _key: *const AddedObj) -> *mut AddedObj {
-            RETRIEVE_CALLS += 1;
+        static mut GETRN_CALLS: u32 = 0;
+        unsafe extern "C" fn getrn(
+            _table: *mut Lhash,
+            _key: *const c_void,
+            _hash: *mut u32,
+        ) -> *mut *mut LhashNode {
+            GETRN_CALLS += 1;
             core::ptr::null_mut()
         }
 
         let mut objects = nid_fixture();
         let guard = with_nid_objects(&mut objects);
+        let mut table = Lhash::empty();
         unsafe {
-            HOST_ADDED_SLOT = 1 as *mut c_void;
-            OBJ_ADDED_RETRIEVE = retrieve;
+            HOST_ADDED_SLOT = core::ptr::addr_of_mut!(table);
+            LHASH_GETRN = getrn;
         }
         assert!(unsafe { obj_nid2obj(1) }.is_null());
-        assert_eq!(unsafe { RETRIEVE_CALLS }, 0);
+        assert_eq!(unsafe { GETRN_CALLS }, 0);
         clear(guard);
     }
 
@@ -716,20 +913,33 @@ mod tests {
             flags: 0,
         };
         static mut RECORD: AddedObj = AddedObj { kind: ADDED_NID, obj: core::ptr::null_mut() };
+        static mut NODE: LhashNode = LhashNode {
+            data: core::ptr::null_mut(),
+            next: core::ptr::null_mut(),
+        };
+        static mut BUCKET: *mut LhashNode = core::ptr::null_mut();
         static mut SEEN_KIND: i32 = -1;
         static mut SEEN_NID: i32 = 0;
 
-        unsafe extern "C" fn retrieve(_table: *mut c_void, key: *const AddedObj) -> *mut AddedObj {
+        unsafe extern "C" fn retrieve(
+            _table: *mut Lhash,
+            key: *const c_void,
+            _hash: *mut u32,
+        ) -> *mut *mut LhashNode {
+            let key = key.cast::<AddedObj>();
             SEEN_KIND = (*key).kind;
             SEEN_NID = *((*key).obj as *const i32);
             RECORD.obj = core::ptr::addr_of_mut!(OVERRIDE);
-            core::ptr::addr_of_mut!(RECORD)
+            NODE.data = core::ptr::addr_of_mut!(RECORD).cast();
+            BUCKET = core::ptr::addr_of_mut!(NODE);
+            core::ptr::addr_of_mut!(BUCKET)
         }
 
         let guard = OBJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut table = Lhash::empty();
         unsafe {
-            HOST_ADDED_SLOT = 1 as *mut c_void;
-            OBJ_ADDED_RETRIEVE = retrieve;
+            HOST_ADDED_SLOT = core::ptr::addr_of_mut!(table);
+            LHASH_GETRN = retrieve;
         }
         assert_eq!(unsafe { obj_nid2obj(NUM_NID as i32) }, core::ptr::addr_of_mut!(OVERRIDE));
         assert_eq!(unsafe { SEEN_KIND }, ADDED_NID);
@@ -737,6 +947,7 @@ mod tests {
         assert_eq!(unsafe { obj_nid2obj(-1) }, core::ptr::addr_of_mut!(OVERRIDE));
         assert_eq!(unsafe { SEEN_KIND }, ADDED_NID);
         assert_eq!(unsafe { SEEN_NID }, -1);
+        assert_eq!(table.num_retrieve, 2);
         clear(guard);
     }
 }
