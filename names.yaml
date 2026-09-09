@@ -47610,6 +47610,41 @@ functions:
       blx through a literal slot. Reference C:
       decomp/c/004/08057874_FUN_08057874.c.
 
+  - address: 0x08057c2c
+    ghidra: FUN_08057c2c
+    name: image_library_is_liti_class
+    size: 40
+    sig: "u32 image_library_is_liti_class(const u8 *target)"
+    module: app/liti_class_check
+    status: ported
+    renames:
+      param_1/r0: target
+      DAT_08057c50: LITI_CLASS_TAG
+    notes: >-
+      NULL-guarded 'liti' ImageLibrary-database class-tag predicate:
+      returns 1 iff target is non-NULL and the word at target+0x0 equals
+      the tag 0x6974696c (in-memory bytes "liti"), held in the literal
+      pool at 0x08057c50. Ghidra's 36-byte extent drops that literal
+      word; the true extent is 40 (the next function's push {r3,lr}
+      prologue starts at 0x08057c54). Call count verified by decoding
+      every B/BL word in osos.dec: 15 unconditional bl, zero predicated
+      - the internal NULL guard is what all callers rely on. The only
+      stamper is the ImageLibrary database constructor at 0x0805e148
+      (allocates 0x9e0 bytes via calloc_tag4 0x0805d1dc, stores the tag
+      at object+0x0); its grandcaller 0x08058230 builds the object over
+      the "iPod_Control/Artwork" and "ArtworkDB" paths, so a
+      'liti'-tagged object is the ImageLibrary (artwork) database.
+      Callers pass the object directly (0x08063e9c opens the database
+      after the check) or a pointer pulled from another object's field
+      (wrapper 0x08057bb4 checks *(obj+4), 0x08057bdc checks *(obj+8),
+      0x081070a0 checks *(*ref+4)). Same predicate shape as the 'plst'
+      check ui_element_is_plst_class (0x080613e0), but reads the tag at
+      +0x0 instead of +0x4; own link_section keeps the hook seam
+      unfolded. match.py: crate fp frame plus LLVM clz equality lowering
+      vs ADS cmp/moveq; the core cmp r0,#0 / beq / ldr r0,[r0] / ldr
+      r1,[pc] sequence matches verbatim. Reference C:
+      decomp/c/004/08057c2c_FUN_08057c2c.c.
+
   - address: 0x0805e79c
     ghidra: FUN_0805e79c
     name: stream_seek
