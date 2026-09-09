@@ -50705,3 +50705,61 @@ functions:
       the diff is LLVM rotating the NULL path into a mvneq/bxeq early-out
       plus the crate fp frame — the accepted ADS-vs-LLVM noise. The symbol
       resolves standalone in librustypod.a (no LLVM body fold observed).
+
+  # --- notifier-class notification dispatch (own +0x14 target) ---
+  - address: 0x08167028
+    ghidra: FUN_08167028
+    name: own_target_notification_post
+    size: 36
+    sig: "void own_target_notification_post(OwnTargetNotifier *this, u32 message_code, const u8 *bytes, u32 byte_count, usize reply_queue)"
+    module: app/own_target_notification_post
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: message_code
+      param_3/r2: bytes
+      param_4/r3: byte_count
+      param_5/[sp]: reply_queue
+      FUN_08166d3c: arena_message_post (unported, ARENA_MESSAGE_POST seam)
+    notes: >-
+      The notification dispatch of the notifier class constructed @
+      0x081671f4 (vtable literal 0x08987f18, the class immediately after
+      the UI animation class): all fifteen sibling methods @
+      0x08166d14..0x081671e4 raise their 0x638000xx codes through this one
+      forwarder. EXTENT: exactly 36 bytes, 0x08167028..0x0816704b - nine
+      instruction words, no literal pool; the next function opens its own
+      push {r2,r3,r4,lr} @ 0x0816704c, so Ghidra's 36 is right for once.
+      CALL COUNT: binary-verified by decoding every B/BL word in osos.dec
+      - exactly 16 sites, all plain unconditional bl, no predicated forms,
+      no tail b, no DATA-word references. Ghidra's listing shows only 15:
+      the site @ 0x08166ea0 is absent from decomp/osos.asm. ALGORITHM:
+      pure ABI adapter into the shared arena-message poster FUN_08166d3c
+      @ 0x08166d3c (unported, 76 bytes, fully decoded): push {r2,r3,r4,lr};
+      ip=r2(bytes); r2=r3(byte_count); r3=[sp,#16](reply_queue);
+      strd r2,[sp] (callee stack args byte_count/reply_queue);
+      r2=[r0,#20] (this->target +0x14); r3=ip; bl; pop. The callee never
+      reads its r0 - this passes through only because it occupies the
+      register; it arena-allocates a 12-byte envelope (message_arena_pool
+      + fixed_block_pool_alloc(..,0xc), both ported), builds it with
+      queued_message_construct (ported), and posts fire-and-forget
+      (no_wait=1, flags=0) through queued_message_post (ported). BEHAVIOR:
+      no NULL guards anywhere - this is dereferenced unconditionally and a
+      NULL target word is forwarded as-is to a chain that dereferences it
+      before any test; the zero predicated-bl count matches (callers never
+      guard). The stock pop returns with r0 holding queued_message_post's
+      status even though the C type is void; callers ignore it, the port
+      is typed void and leaves r0 as the seam call left it. DEVIATIONS:
+      the unported callee rides the ARENA_MESSAGE_POST seam (transmuted
+      firmware address on target, documenting panic on host), keeping the
+      six-argument ABI including the unread this in r0; the notifier
+      struct models the +0x14 target as a u32 wire word (PostedTaskMessage
+      precedent) so the offset is exact on both pointer widths. Host tests
+      (5): full six-word forwarding with the own-target inserted third,
+      NULL target/bytes/reply forwarded unguarded, u32::MAX/usize::MAX
+      extremes pass through, per-call re-read of the target word, and the
+      +0x14 layout assertion. match.py structural: same argument shuffle
+      (mov ip,r2 / ldr r2,[r0,#20] / two stack-arg stores / mov r3,ip /
+      call); the diffs are the seam blx-indirection, stm-vs-strd stack
+      stores, and the crate fp frame - accepted ADS-vs-LLVM noise. Symbol
+      resolves standalone in librustypod.a under its own link_section (no
+      LLVM body fold observed).
