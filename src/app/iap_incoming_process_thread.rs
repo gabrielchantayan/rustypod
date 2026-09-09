@@ -6,6 +6,7 @@
 //! |---|---|---|---|
 //! | 0x081d71c0 | [`iap_incoming_process_thread_instance`] | 24 | 8 direct |
 //! | 0x08139210 | [`iap_incoming_process_thread_instance_veneer`] | 4 | **65** |
+//! | 0x081d66b8 | [`iap_incoming_process_thread_slot_wait`] | 68 | **17** |
 //! | 0x081d7270 | [`iap_incoming_process_thread_slot_poll`] | 68 | **36** + 1 tail `b` |
 //!
 //! Both counts are binary-scanned out of `work/firmware/osos.dec` by
@@ -341,6 +342,144 @@ pub unsafe extern "C" fn iap_incoming_process_thread_slot_poll(
     posix_mutex_unlock(mutex)
 }
 
+/// Indirect dispatch for the one unported callee (see the function's
+/// deviation note). Host tests install a recording model; a later port
+/// of 0x08257cbc replaces the default without touching this caller.
+#[derive(Clone, Copy)]
+pub struct IapThreadSlotWaitOps {
+    /// Callee 0x08257cbc `(slot_object)`: a 4-instruction veneer
+    /// (`add r1, r0, #28; add r0, r0, #16; b 0x8261f28`) that runs a
+    /// **timed** condition wait on the registration object's condvar
+    /// at +0x10 whose deadline is the `{sec, nsec}` pair stored in the
+    /// object at +0x1c..+0x23 (zeroed by its ctor @ 0x08257cc8):
+    /// 0x8261f28 loads that pair onto the stack and chains 0x8261f94
+    /// -> the posix timed-wait body @ 0x0826269c (see `fp/fp_misc`'s
+    /// `cond_wait_attr_clock` notes). Contrast the poll sibling
+    /// 0x08257cb4, which stacks a ZEROED timespec instead. The wait
+    /// status is discarded by the original.
+    pub wait_slot_object: unsafe extern "C" fn(slot_object: *mut u8),
+}
+
+/// Target default: the ROM timed-wait veneer.
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_wait_slot_object(slot_object: *mut u8) {
+    let f: unsafe extern "C" fn(*mut u8) = core::mem::transmute(0x0825_7cbcusize);
+    f(slot_object)
+}
+
+/// Host default: inert — the tests install their own model.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn firmware_wait_slot_object(_slot_object: *mut u8) {}
+
+/// Wired default: the ROM address on target, a documented inert stub
+/// on host.
+pub const DEFAULT_IAP_THREAD_SLOT_WAIT_OPS: IapThreadSlotWaitOps =
+    IapThreadSlotWaitOps {
+        wait_slot_object: firmware_wait_slot_object,
+    };
+
+/// The active callee set, read through `read_volatile` so LLVM cannot
+/// fold the indirect call to the default.
+pub static mut IAP_THREAD_SLOT_WAIT_OPS: IapThreadSlotWaitOps =
+    DEFAULT_IAP_THREAD_SLOT_WAIT_OPS;
+
+#[inline(always)]
+fn iap_thread_slot_wait_ops() -> IapThreadSlotWaitOps {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(IAP_THREAD_SLOT_WAIT_OPS)) }
+}
+
+/// iap_incoming_process_thread_slot_wait — original: `FUN_081d66b8` @
+/// 0x081d66b8 (**68 bytes**, 0x081d66b8..0x081d66fc, all code, no
+/// literal pool; Ghidra's 68 is exact — the next function opens at
+/// 0x081d66fc with `push {r4, r5, r6, r7, r8, lr}`, a same-shape
+/// sibling that calls the poll veneer 0x08257cb4. Byte-decoded from
+/// osos.dec). **17 `bl` call sites, zero predicated forms
+/// (`blne`/`bleq`)**, binary-verified by decoding every B/BL word in
+/// osos.dec, and no DATA word anywhere references the address — only
+/// ever direct-called, never dispatched virtually.
+///
+/// A method of the 0x240-byte iAP incoming-process context the
+/// accessor above hands out — the timed-wait sibling of
+/// [`iap_incoming_process_thread_slot_poll`], identical except for the
+/// callee. Under the registry mutex at `this + 0x114`: resolve
+/// registration slot `index` and run a **timed** condition wait on the
+/// registered object's condvar, the deadline being the `{sec, nsec}`
+/// pair stored at the slot object's +0x1c. An out-of-range index or an
+/// empty slot is FATAL — the original falls into [`heap_panic`]
+/// **with the mutex still held** (it never returns, so there is no
+/// unlock on that path). The wait status is discarded; the function
+/// returns the unlock status, the original tail-branching into the
+/// unlock veneer:
+///
+/// ```text
+/// 081d66b8  push {r4, r5, r6, lr}
+/// 081d66bc  mov  r5, r0              @ this
+/// 081d66c0  add  r4, r0, #0x114      @ &this->registry_mutex
+/// 081d66c4  mov  r0, r4
+/// 081d66c8  mov  r6, r1              @ index
+/// 081d66cc  bl   0x08261e20          @ posix_mutex_lock (alias veneer)
+/// 081d66d0  cmp  r6, #29
+/// 081d66d4  bcs  0x081d66e8          @ index >= 29 -> fatal
+/// 081d66d8  add  r0, r5, r6, lsl #3
+/// 081d66dc  ldr  r0, [r0, #0x154]    @ object = table[index].object
+/// 081d66e0  cmp  r0, #0
+/// 081d66e4  bne  0x081d66ec          @ slot live -> wait on it
+/// 081d66e8  bl   0x08030f44          @ heap_panic (non-returning)
+/// 081d66ec  bl   0x08257cbc          @ timed cond wait, deadline at +0x1c
+/// 081d66f0  mov  r0, r4
+/// 081d66f4  pop  {r4, r5, r6, lr}
+/// 081d66f8  b    0x08261e24          @ posix_mutex_unlock; status in r0
+/// ```
+///
+/// Callers are the same sessions that poll: e.g. @ 0x081f1e18 they run
+/// `bl 0x08139210` (the instance veneer), `ldr r1, [r5, #0x2c]`,
+/// `bl 0x081d7270` (poll), then repeat the getter/index load and
+/// `bl 0x081d66b8` (wait) — drain any pending signal, then block on
+/// the slot's deadline.
+///
+/// # Deviations
+///
+/// - The timed-wait callee 0x08257cbc is unported and dispatches
+///   through [`IAP_THREAD_SLOT_WAIT_OPS`] (the
+///   `app/pending_event_take` pattern): target builds transmute the
+///   ROM address, the host default is inert and every test installs a
+///   recording model.
+/// - Lock/unlock call the canonical ported
+///   [`posix_mutex_lock`]/[`posix_mutex_unlock`] directly — the
+///   original calls the 4-byte alias veneers 0x08261e20/0x08261e24,
+///   which names.yaml resolves to those symbols (no separate Rust
+///   symbol exists for a bare `b` alias).
+/// - The fatal paths call the ported [`heap_panic`] exactly like the
+///   original's `bl 0x08030f44`. They are not exercised on host:
+///   `heap_panic` runs the raise/exit/terminate chain whose default
+///   terminate spins (the `app/pending_event_take` precedent).
+///
+/// # Safety
+///
+/// `this` must point at a live 0x240-byte context object (at least
+/// [`SLOT_TABLE_OFFSET`] + [`SLOT_COUNT`] * [`SLOT_STRIDE`] bytes with
+/// an initialised [`PosixMutex`] at [`REGISTRY_MUTEX_OFFSET`]). The
+/// registered slot object is handed to the firmware wait callee.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iap_incoming_process_thread_slot_wait(
+    this: *mut u8,
+    index: u32,
+) -> u32 {
+    let mutex = this.wrapping_add(REGISTRY_MUTEX_OFFSET) as *mut PosixMutex;
+    posix_mutex_lock(mutex);
+    if index >= SLOT_COUNT {
+        heap_panic();
+    }
+    let slot = this.wrapping_add(SLOT_TABLE_OFFSET + index as usize * SLOT_STRIDE);
+    let slot_object = *(slot as *const u32) as *mut u8;
+    if slot_object.is_null() {
+        heap_panic();
+    }
+    (iap_thread_slot_wait_ops().wait_slot_object)(slot_object);
+    posix_mutex_unlock(mutex)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -663,5 +802,227 @@ mod slot_poll_tests {
             );
             assert_eq!(POLLED.len(), 1, "the poll still ran");
         }
+    }
+}
+
+#[cfg(test)]
+mod slot_wait_tests {
+    extern crate std;
+
+    use super::*;
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+    use std::sync::{Mutex, MutexGuard};
+    use std::vec::Vec;
+
+    /// Serializes every test here: they share one fixture slab (the
+    /// mapper never unmaps, so a second mapping would land above 4 GiB
+    /// and skip silently) and swap the global ops table.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    /// The fixture is one whole 0x240-byte context object, rounded up:
+    /// mutex at +0x114, 29 eight-byte slots at +0x154..+0x23c.
+    const SLAB_LEN: usize = 0x300;
+
+    /// Slot-object pointers the wait mock has received, in order.
+    static mut WAITED: Vec<usize> = Vec::new();
+
+    /// When set, the mock drops the mutex's owner word before
+    /// returning — the function's own unlock then reports non-owner.
+    static mut MOCK_CLEARS_OWNER: bool = false;
+
+    struct Bench {
+        _lock: MutexGuard<'static, ()>,
+        previous_ops: IapThreadSlotWaitOps,
+        available: bool,
+    }
+
+    unsafe fn slab() -> *mut u8 {
+        // Mapped once per process at the unique hint; every later call
+        // gets the same block back because the region stays occupied.
+        static mut SLAB: *mut u8 = core::ptr::null_mut();
+        if SLAB.is_null() {
+            match try_map_u32_slab(hints::IAP_THREAD_SLOT_WAIT, SLAB_LEN) {
+                Some(p) => SLAB = p,
+                None => {
+                    note_missing_u32_fixture("app::iap_incoming_process_thread::slot_wait");
+                }
+            }
+        }
+        SLAB
+    }
+
+    unsafe fn set_word(offset: usize, value: u32) {
+        (slab().wrapping_add(offset) as *mut u32).write_volatile(value);
+    }
+
+    unsafe fn registry_mutex() -> *mut PosixMutex {
+        slab().wrapping_add(REGISTRY_MUTEX_OFFSET) as *mut PosixMutex
+    }
+
+    /// Distinct sentinel for the slot-object pointer of slot `n`: an
+    /// address inside the slab, so it is a believable object pointer,
+    /// but never dereferenced by anything (the wait callee is mocked).
+    unsafe fn fake_slot_object(n: usize) -> u32 {
+        slab().wrapping_add(0x240 + n * 4) as usize as u32
+    }
+
+    fn bench() -> Bench {
+        let lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let available = unsafe { !slab().is_null() };
+        let previous_ops = unsafe {
+            core::ptr::read_volatile(core::ptr::addr_of!(IAP_THREAD_SLOT_WAIT_OPS))
+        };
+        if available {
+            unsafe {
+                core::ptr::write_bytes(slab(), 0, SLAB_LEN);
+                WAITED.clear();
+                MOCK_CLEARS_OWNER = false;
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(IAP_THREAD_SLOT_WAIT_OPS),
+                    IapThreadSlotWaitOps {
+                        wait_slot_object: mock_wait_slot_object,
+                    },
+                );
+            }
+        }
+        Bench {
+            _lock: lock,
+            previous_ops,
+            available,
+        }
+    }
+
+    impl Drop for Bench {
+        fn drop(&mut self) {
+            if self.available {
+                unsafe {
+                    core::ptr::write_volatile(
+                        core::ptr::addr_of_mut!(IAP_THREAD_SLOT_WAIT_OPS),
+                        self.previous_ops,
+                    );
+                }
+            }
+        }
+    }
+
+    unsafe extern "C" fn mock_wait_slot_object(slot_object: *mut u8) {
+        WAITED.push(slot_object as usize);
+        // The registry mutex must be held while the wait runs (owner =
+        // us): the original locks before the slot resolution and
+        // tail-unlocks after the callee returns.
+        assert_eq!(
+            (*registry_mutex()).owner,
+            crate::kernel::posix_mutex::PRE_KERNEL_THREAD,
+            "the registry mutex is held during the wait"
+        );
+        if MOCK_CLEARS_OWNER {
+            (*registry_mutex()).owner = 0;
+            (*registry_mutex()).recursion = 0;
+        }
+    }
+
+    #[test]
+    fn the_registered_slot_object_is_waited_on_under_the_mutex() {
+        let bench = bench();
+        if !bench.available {
+            return;
+        }
+        unsafe {
+            set_word(SLOT_TABLE_OFFSET + 3 * SLOT_STRIDE, fake_slot_object(3));
+            let status = iap_incoming_process_thread_slot_wait(slab(), 3);
+            assert_eq!(WAITED.len(), 1, "exactly one wait call");
+            assert_eq!(
+                WAITED[0],
+                fake_slot_object(3) as usize,
+                "the wait receives the slot's +0 object pointer verbatim"
+            );
+            assert_eq!(
+                (*registry_mutex()).owner,
+                0,
+                "the mutex is released before the function returns"
+            );
+            assert_eq!(status, 0, "a clean unlock reports 0");
+        }
+    }
+
+    #[test]
+    fn the_first_and_last_valid_slots_are_in_range() {
+        let bench = bench();
+        if !bench.available {
+            return;
+        }
+        unsafe {
+            // 0 and 28 are the bounds of the `cmp r6, #29` window; 29
+            // and a NULL slot are fatal and not host-testable
+            // (heap_panic never returns).
+            set_word(SLOT_TABLE_OFFSET, fake_slot_object(0));
+            set_word(SLOT_TABLE_OFFSET + 28 * SLOT_STRIDE, fake_slot_object(28));
+            assert_eq!(iap_incoming_process_thread_slot_wait(slab(), 0), 0);
+            assert_eq!(iap_incoming_process_thread_slot_wait(slab(), 28), 0);
+            assert_eq!(
+                WAITED.as_slice(),
+                &[fake_slot_object(0) as usize, fake_slot_object(28) as usize],
+                "both edge indices resolve their own slot, in call order"
+            );
+        }
+    }
+
+    #[test]
+    fn the_slot_index_scales_by_eight_and_the_context_word_is_unread() {
+        let bench = bench();
+        if !bench.available {
+            return;
+        }
+        unsafe {
+            // Two adjacent slots: index 7's object lives at
+            // +0x154 + 7*8; its +4 context word is poisoned to prove
+            // the wait never consumes it (the original reads only the
+            // slot's first word).
+            set_word(SLOT_TABLE_OFFSET + 6 * SLOT_STRIDE, fake_slot_object(6));
+            set_word(SLOT_TABLE_OFFSET + 6 * SLOT_STRIDE + 4, 0xdead_beef);
+            set_word(SLOT_TABLE_OFFSET + 7 * SLOT_STRIDE, fake_slot_object(7));
+            set_word(SLOT_TABLE_OFFSET + 7 * SLOT_STRIDE + 4, 0xa5a5_5a5a);
+            assert_eq!(iap_incoming_process_thread_slot_wait(slab(), 7), 0);
+            assert_eq!(
+                WAITED.as_slice(),
+                &[fake_slot_object(7) as usize],
+                "the index strides by 8 and the +4 context word is ignored"
+            );
+        }
+    }
+
+    #[test]
+    fn the_unlock_status_is_forwarded_as_the_return_value() {
+        let bench = bench();
+        if !bench.available {
+            return;
+        }
+        unsafe {
+            set_word(SLOT_TABLE_OFFSET + SLOT_STRIDE, fake_slot_object(1));
+            // The original tail-branches into posix_mutex_unlock, so
+            // the function's r0 IS the unlock's status. The mock
+            // dropping the owner word makes the function's own unlock
+            // report the non-owner status 0x05 (posix_mutex_unlock's
+            // contract, returned before the semaphore is touched) -
+            // proof the return is the unlock's, not a hardwired 0.
+            MOCK_CLEARS_OWNER = true;
+            let status = iap_incoming_process_thread_slot_wait(slab(), 1);
+            assert_eq!(
+                status, 0x05,
+                "the unlock's non-owner status is forwarded verbatim"
+            );
+            assert_eq!(WAITED.len(), 1, "the wait still ran");
+        }
+    }
+
+    #[test]
+    fn the_wait_is_a_distinct_symbol_from_the_poll_sibling() {
+        // Same skeleton, different callee: LLVM must not fold the two
+        // bodies onto one symbol or a hook at 0x081d66b8 would be
+        // meaningless.
+        assert_ne!(
+            iap_incoming_process_thread_slot_wait as *const () as usize,
+            iap_incoming_process_thread_slot_poll as *const () as usize
+        );
     }
 }
