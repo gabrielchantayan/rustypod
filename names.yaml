@@ -47716,6 +47716,50 @@ functions:
       deviations: none. Host coverage proves all three valid slot offsets,
       NULL propagation, and the uncached reload.
 
+  - address: 0x0819420c
+    ghidra: FUN_0819420c
+    name: service_manager_slot_flags_or
+    size: 28
+    sig: "void service_manager_slot_flags_or(u32 *slot_table, i32 slot, u32 flags)"
+    module: app/service_manager
+    renames:
+      param_1/r0: slot_table
+      param_2/r1: slot
+      param_3/r2: flags
+      param_1_plus_slot_times_8_plus_0x60: slot_flags
+      FUN_08030f44: heap_panic
+    status: ported
+    notes: >-
+      Raw extent is exactly 0x0819420c..0x08194228, matching Ghidra's 28
+      bytes: `cmp r1,#13; blge 0x08030f44; add r0,r0,r1,lsl #3; ldr
+      r1,[r0,#96]; orr r1,r1,r2; str r1,[r0,#96]; bx lr`; the next
+      function starts at 0x08194228 (`push {r4,lr}`, the slot-table
+      constructor). It OR-accumulates a bitmask into word 0 of one of
+      thirteen 8-byte slot records at slot_table+0x60; word 1 is the
+      slot's handler object pointer (stored by the setter @ 0x08193ed4,
+      read back @ 0x08193ee8) and the whole 0x00..0xc8 span is zeroed by
+      the constructor @ 0x08194228. The signed `blge` admits negative
+      slots, which address unchecked before the bank exactly as retailOS
+      does; slots >= 13 terminate through ported non-returning heap_panic.
+      Observed callers accumulate multi-bit masks (0x2c into slot 7 from
+      0x0819535c's caller, 0x2d into slot 0xc), so this is always an
+      accumulate, never a replace; the flags word's concrete bit semantics
+      are not established, and the name records only the verified
+      mechanism. Decoding every ARM B/BL word in osos.dec found exactly 16
+      direct call sites, all unconditional plain BL (0x0813a308,
+      0x08165120, 0x08193d00, 0x0819535c, 0x081953c0, 0x08196f68,
+      0x081af32c, 0x081d7c7c, 0x081e3100, 0x081f26b4, 0x081f2720,
+      0x081f394c, 0x08200e88, 0x08201254, 0x0820956c, 0x082095cc); no
+      predicated forms, no tail branches, and no aligned data word holds
+      the address, so it is not vtable-dispatched. Deliberate deviations:
+      none. LLVM if-converts the guard (cmp #12 + predicated add/ldr/orr/
+      str/bxle falling through to a relocated bl heap_panic); the port
+      carries its own link_section .text.service_manager_slot_flags_or and
+      the symbol resolves in librustypod.a. Host coverage proves the OR
+      accumulate at table edges (slots 0 and 12), preservation of existing
+      flags, the untouched handler-pointer neighbor word, a zero-mask
+      no-op, and the signed negative-slot path.
+
 
   # --- AppMotor fixed singleton accessor ---
   - address: 0x08295be0
