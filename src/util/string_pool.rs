@@ -96,7 +96,8 @@
 //! - The refcount decrement and the `reclaimable_bytes` accumulation use
 //!   wrapping arithmetic, as the original's `subs`/`add` do.
 
-use core::mem::offset_of;
+use core::mem::{offset_of, MaybeUninit};
+use core::ptr;
 
 /// First word required of a pool, checked by the inlined 0x080a7714 guard.
 /// The ARM literal is the character constant `'strc'`; in memory its bytes
@@ -228,6 +229,227 @@ pub unsafe extern "C" fn string_pool_release(pool: *mut StringPool, id: i32) -> 
     (*pool).reclaimable_bytes = (*pool).reclaimable_bytes.wrapping_add((*entry).length);
     (*entry).blob_offset = ENTRY_RECLAIMABLE;
     0
+}
+
+/// Failure status of a failed scratch-buffer allocation in
+/// [`string_pool_copy_entry`] (`mvneq r0, #107` in the original — the ARM
+/// immediate is the bitwise inverse, so the value is !107). This is
+/// classic Mac OS `memFullErr`, matching the pool family's lineage.
+pub const MEM_FULL_ERR: i32 = -108;
+
+/// Payloads up to this many bytes are staged through the 512-byte stack
+/// buffer of [`string_pool_copy_entry`]; anything larger is staged
+/// through a tag-4 heap allocation. The original's compare is unsigned
+/// (`cmp r0, #0x200; addls` / `bls`), so exactly 512 bytes stays on the
+/// stack.
+pub const STACK_BLOB_CAPACITY: usize = 512;
+
+/// `max_len` of the size-query read [`string_pool_copy_entry`] opens
+/// with: the original passes 0x7fffffff, i.e. "report the true payload
+/// length, there is no buffer to clip to".
+pub const QUERY_MAX_LEN: u32 = 0x7fff_ffff;
+
+/// RetailOS load address of the unported pool blob reader (204 bytes).
+pub const STRING_POOL_READ_ADDRESS: usize = 0x080b_4318;
+
+/// RetailOS load address of the unported pool interning writer
+/// (824 bytes).
+pub const STRING_POOL_INTERN_ADDRESS: usize = 0x080c_5a94;
+
+/// ABI of the pool blob reader @ 0x080b4318, decoded from raw bytes.
+/// With `dst` NULL it reports the payload length of entry `id` through
+/// `len_out` without copying; otherwise it copies
+/// `min(entry_len, max_len)` bytes (signed compare) into `dst`, re-locks
+/// the pool's +0x30 counter around the read, and stores the copied length
+/// to `len_out`. Returns 0 on success (id 0 is an immediate success
+/// no-op), [`PARAM_ERR`] (-50) for a NULL or foreign-tagged pool, a
+/// negative or out-of-range id, or a non-live entry. A NULL `len_out`
+/// is tolerated.
+pub type StringPoolRead = unsafe extern "C" fn(
+    pool: *mut StringPool,
+    id: i32,
+    dst: *mut u8,
+    len_out: *mut u32,
+    max_len: u32,
+) -> i32;
+
+/// ABI of the pool interning writer @ 0x080c5a94. Stores `len` bytes
+/// from `data` as a pool entry — first searching live entries for an
+/// identical payload to share (bumping its refcount) — and writes the
+/// 1-based entry id to `id_out`. `id_out` may be NULL and is zeroed on
+/// entry otherwise; a zero `len` is a no-op returning 0. Returns
+/// [`PARAM_ERR`] for a NULL, foreign-tagged, locked or immutable pool.
+pub type StringPoolIntern = unsafe extern "C" fn(
+    pool: *mut StringPool,
+    data: *const u8,
+    len: u32,
+    id_out: *mut i32,
+) -> i32;
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn retail_string_pool_read(
+    pool: *mut StringPool,
+    id: i32,
+    dst: *mut u8,
+    len_out: *mut u32,
+    max_len: u32,
+) -> i32 {
+    let body: StringPoolRead = core::mem::transmute(STRING_POOL_READ_ADDRESS);
+    body(pool, id, dst, len_out, max_len)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_string_pool_read(
+    _pool: *mut StringPool,
+    _id: i32,
+    _dst: *mut u8,
+    _len_out: *mut u32,
+    _max_len: u32,
+) -> i32 {
+    panic!("string_pool_copy_entry requires pool reader 0x080b4318")
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn retail_string_pool_intern(
+    pool: *mut StringPool,
+    data: *const u8,
+    len: u32,
+    id_out: *mut i32,
+) -> i32 {
+    let body: StringPoolIntern = core::mem::transmute(STRING_POOL_INTERN_ADDRESS);
+    body(pool, data, len, id_out)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_string_pool_intern(
+    _pool: *mut StringPool,
+    _data: *const u8,
+    _len: u32,
+    _id_out: *mut i32,
+) -> i32 {
+    panic!("string_pool_copy_entry requires pool intern 0x080c5a94")
+}
+
+/// Active boundary for the unported pool blob reader. On the target it
+/// calls directly into retailOS @ 0x080b4318; host tests replace it with
+/// a recording implementation.
+#[cfg(target_os = "none")]
+pub static mut STRING_POOL_READ: StringPoolRead = retail_string_pool_read;
+
+/// Active host boundary for the unported pool blob reader.
+#[cfg(not(target_os = "none"))]
+pub static mut STRING_POOL_READ: StringPoolRead = missing_string_pool_read;
+
+/// Active boundary for the unported pool interning writer, same policy
+/// as [`STRING_POOL_READ`]; retail target 0x080c5a94.
+#[cfg(target_os = "none")]
+pub static mut STRING_POOL_INTERN: StringPoolIntern = retail_string_pool_intern;
+
+/// Active host boundary for the unported pool interning writer.
+#[cfg(not(target_os = "none"))]
+pub static mut STRING_POOL_INTERN: StringPoolIntern = missing_string_pool_intern;
+
+#[inline(always)]
+unsafe fn string_pool_read_seam() -> StringPoolRead {
+    ptr::read_volatile(ptr::addr_of!(STRING_POOL_READ))
+}
+
+#[inline(always)]
+unsafe fn string_pool_intern_seam() -> StringPoolIntern {
+    ptr::read_volatile(ptr::addr_of!(STRING_POOL_INTERN))
+}
+
+/// string_pool_copy_entry — original: `FUN_080be830` @ 0x080be830
+/// (176 bytes; **15 direct `bl` call sites, all unconditional, plus one
+/// tail `b`** at 0x0806b03c — binary-verified by decoding every B/BL
+/// word in osos.dec).
+///
+/// Copies one entry between two `"crts"` pools: reads the payload of
+/// entry `src_id` from `src` and interns it into `dst`, whose new 1-based
+/// id lands in `dst_id_out`. The payload is staged through a scratch
+/// buffer because the reader and writer are separate halves of the pool
+/// API:
+///
+/// ```text
+/// status = pool_read(src, src_id, NULL, &len, 0x7fffffff)   // size query
+/// if status != 0:                    return status
+/// blob = len <= 512 ? stack_blob : malloc_tag4(len)          // unsigned cmp
+/// if blob == NULL:                   return -108             // memFullErr
+/// status = pool_read(src, src_id, blob, &len, len)           // real copy
+/// if status == 0:
+///     status = pool_intern(dst, blob, len, dst_id_out)
+/// if blob != stack_blob: free_tag4(blob)
+/// return status
+/// ```
+///
+/// # Extent and call census
+///
+/// Decoded from raw `osos.dec` bytes: the body runs 0x080be830
+/// (`push {r4-r8,lr}`) through the `pop {r4-r8,pc}` at 0x080be8dc, and
+/// the next separately linked function's `push {r4,r5,lr}` (an in-place
+/// word byte-swap loop) sits at 0x080be8e0. There is no trailing literal
+/// pool — 0x80000000 and 0x7fffffff are `mvn` immediates — so Ghidra's
+/// 176 bytes is exact. Fourteen of the `bl` sites sit back to back in
+/// the slot-copy chain of 0x0806ad74 (whose final slot at +0x8a8
+/// open-codes this exact sequence inline, confirming the semantics) and
+/// one in 0x080d189c; the address occurs in no data word, so the
+/// function is never dispatched virtually.
+///
+/// # Deliberate deviations
+///
+/// - The two unported pool callees dispatch through the volatile seams
+///   [`STRING_POOL_READ`] and [`STRING_POOL_INTERN`]; their target
+///   defaults transmute the retail addresses 0x080b4318 / 0x080c5a94, so
+///   the port is hook-ready on device, while host tests install
+///   recording mocks (the `util/crts_object.rs` precedent). No identity
+///   beyond the verified behaviour documented on the ABI types is
+///   invented for either.
+/// - `malloc_tag4` / `free_tag4` are already ported
+///   (`crate::heap::veneers`); they are called directly, matching
+///   `util/inner_state.rs`.
+/// - The original's scratch buffer is 512 uninitialised stack bytes at
+///   sp+4 (its sp+0x204 slot holds `len`); the port uses
+///   [`MaybeUninit`] so no memset call appears where the original has
+///   none. The free condition `blob != stack_blob` is computed from the
+///   allocation choice, which is equivalent: a heap block can never
+///   alias the stack frame.
+///
+/// # Safety
+///
+/// `src` and `dst` must be valid `"crts"` pools and `dst_id_out` a
+/// writable id slot or NULL — every check is the callees', exactly as in
+/// the original, which dereferences nothing itself.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn string_pool_copy_entry(
+    src: *mut StringPool,
+    src_id: i32,
+    dst: *mut StringPool,
+    dst_id_out: *mut i32,
+) -> i32 {
+    let mut len: u32 = 0;
+    let status = string_pool_read_seam()(src, src_id, ptr::null_mut(), &mut len, QUERY_MAX_LEN);
+    if status != 0 {
+        return status;
+    }
+    let mut stack_blob = MaybeUninit::<[u8; STACK_BLOB_CAPACITY]>::uninit();
+    let heap_backed = len as usize > STACK_BLOB_CAPACITY;
+    let blob = if heap_backed {
+        crate::heap::veneers::malloc_tag4(len as usize)
+    } else {
+        stack_blob.as_mut_ptr() as *mut u8
+    };
+    if blob.is_null() {
+        return MEM_FULL_ERR;
+    }
+    let mut status = string_pool_read_seam()(src, src_id, blob, &mut len, len);
+    if status == 0 {
+        status = string_pool_intern_seam()(dst, blob, len, dst_id_out);
+    }
+    if heap_backed {
+        crate::heap::veneers::free_tag4(blob);
+    }
+    status
 }
 
 #[cfg(test)]
@@ -458,5 +680,299 @@ mod tests {
         }
         assert_eq!(relocated[0].blob_offset, ENTRY_RECLAIMABLE);
         assert_eq!(f.entries[0].blob_offset, 0, "the old block is not touched");
+    }
+
+    // --- string_pool_copy_entry seam-mock scaffolding ---
+
+    use crate::heap::veneers::tests::{alloc_log, free_log, mock_heap, set_alloc_ret};
+    use std::sync::{Mutex, MutexGuard};
+
+    /// Serializes the tests that swap the pool reader/intern seams and the
+    /// heap ops table (the crts_object.rs `DESTROY_LOCK` precedent).
+    static COPY_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Sentinel pool pointers; the copy function never dereferences them
+    /// and the recording mocks only compare them.
+    const SRC_POOL: usize = 0x5000_0000;
+    const DST_POOL: usize = 0x5000_0100;
+
+    /// One observed reader call. `dst == 0` marks the size query.
+    #[derive(Clone, PartialEq, Debug)]
+    struct ReadCall {
+        pool: usize,
+        id: i32,
+        dst: usize,
+        max_len: u32,
+    }
+
+    /// One observed intern call, with the payload bytes captured at call
+    /// time (the scratch buffer is dead by assert time).
+    #[derive(Clone, PartialEq, Debug)]
+    struct InternCall {
+        pool: usize,
+        bytes: Vec<u8>,
+        id_out: usize,
+    }
+
+    static mut READ_CALLS: Vec<ReadCall> = Vec::new();
+    static mut READ_QUERY_STATUS: i32 = 0;
+    static mut READ_COPY_STATUS: i32 = 0;
+    /// Payload the mock reader reports and copies.
+    static mut PAYLOAD: Vec<u8> = Vec::new();
+
+    static mut INTERN_CALLS: Vec<InternCall> = Vec::new();
+    static mut INTERN_STATUS: i32 = 0;
+    /// Id the mock intern writes through `id_out`.
+    static mut INTERN_NEW_ID: i32 = 0;
+
+    unsafe extern "C" fn recording_pool_read(
+        pool: *mut StringPool,
+        id: i32,
+        dst: *mut u8,
+        len_out: *mut u32,
+        max_len: u32,
+    ) -> i32 {
+        READ_CALLS.push(ReadCall { pool: pool as usize, id, dst: dst as usize, max_len });
+        if dst.is_null() {
+            if READ_QUERY_STATUS == 0 && !len_out.is_null() {
+                *len_out = PAYLOAD.len() as u32;
+            }
+            READ_QUERY_STATUS
+        } else {
+            if READ_COPY_STATUS != 0 {
+                return READ_COPY_STATUS;
+            }
+            let n = core::cmp::min(PAYLOAD.len(), max_len as usize);
+            ptr::copy_nonoverlapping(PAYLOAD.as_ptr(), dst, n);
+            if !len_out.is_null() {
+                *len_out = n as u32;
+            }
+            0
+        }
+    }
+
+    unsafe extern "C" fn recording_pool_intern(
+        pool: *mut StringPool,
+        data: *const u8,
+        len: u32,
+        id_out: *mut i32,
+    ) -> i32 {
+        let bytes = std::slice::from_raw_parts(data, len as usize).to_vec();
+        INTERN_CALLS.push(InternCall { pool: pool as usize, bytes, id_out: id_out as usize });
+        if !id_out.is_null() {
+            *id_out = INTERN_NEW_ID;
+        }
+        INTERN_STATUS
+    }
+
+    struct Reset;
+
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            unsafe {
+                STRING_POOL_READ = missing_string_pool_read;
+                STRING_POOL_INTERN = missing_string_pool_intern;
+                core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS)
+                    .write(crate::heap::veneers::DEFAULT_HEAP_OPS);
+                READ_CALLS = Vec::new();
+                READ_QUERY_STATUS = 0;
+                READ_COPY_STATUS = 0;
+                PAYLOAD = Vec::new();
+                INTERN_CALLS = Vec::new();
+                INTERN_STATUS = 0;
+                INTERN_NEW_ID = 0;
+            }
+        }
+    }
+
+    /// Installs the recording seams and the mock heap; returns the locks
+    /// (copy lock first, heap lock second — the inner_state.rs order) and
+    /// the reset guard.
+    fn mock() -> (MutexGuard<'static, ()>, MutexGuard<'static, ()>, Reset) {
+        let copy_guard = COPY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let heap_guard = mock_heap();
+        unsafe {
+            STRING_POOL_READ = recording_pool_read;
+            STRING_POOL_INTERN = recording_pool_intern;
+        }
+        (copy_guard, heap_guard, Reset)
+    }
+
+    #[test]
+    fn query_failure_returns_status_and_calls_nothing_else() {
+        let (_copy_guard, _heap_guard, _reset) = mock();
+        unsafe {
+            READ_QUERY_STATUS = PARAM_ERR;
+            let mut out_id = -1i32;
+            let status = string_pool_copy_entry(
+                SRC_POOL as *mut StringPool,
+                3,
+                DST_POOL as *mut StringPool,
+                &mut out_id,
+            );
+            assert_eq!(status, PARAM_ERR);
+            assert_eq!(out_id, -1, "the intern never ran");
+            assert_eq!(
+                READ_CALLS,
+                std::vec![ReadCall { pool: SRC_POOL, id: 3, dst: 0, max_len: QUERY_MAX_LEN }],
+                "one size query with a NULL buffer"
+            );
+            assert!(INTERN_CALLS.is_empty());
+        }
+        assert_eq!(alloc_log().0, 0, "no scratch allocation on query failure");
+        assert_eq!(free_log().0, 0);
+    }
+
+    #[test]
+    fn small_blob_copies_through_the_stack_buffer() {
+        let (_copy_guard, _heap_guard, _reset) = mock();
+        unsafe {
+            PAYLOAD = b"hello".to_vec();
+            INTERN_NEW_ID = 7;
+            let mut out_id = -1i32;
+            let status = string_pool_copy_entry(
+                SRC_POOL as *mut StringPool,
+                3,
+                DST_POOL as *mut StringPool,
+                &mut out_id,
+            );
+            assert_eq!(status, 0);
+            assert_eq!(out_id, 7);
+            assert_eq!(READ_CALLS.len(), 2, "query then copy");
+            assert_eq!(READ_CALLS[0].dst, 0);
+            assert_eq!(READ_CALLS[0].max_len, QUERY_MAX_LEN);
+            assert_ne!(READ_CALLS[1].dst, 0, "the copy read gets a real buffer");
+            assert_eq!(READ_CALLS[1].max_len, 5, "clipped to the queried length");
+            assert_eq!(
+                INTERN_CALLS,
+                std::vec![InternCall {
+                    pool: DST_POOL,
+                    bytes: b"hello".to_vec(),
+                    id_out: &mut out_id as *mut i32 as usize,
+                }]
+            );
+        }
+        assert_eq!(alloc_log().0, 0, "512 bytes and under stay on the stack");
+        assert_eq!(free_log().0, 0);
+    }
+
+    #[test]
+    fn exactly_512_bytes_stays_on_the_stack() {
+        let (_copy_guard, _heap_guard, _reset) = mock();
+        unsafe {
+            PAYLOAD = std::vec![0xab; STACK_BLOB_CAPACITY];
+            let status = string_pool_copy_entry(
+                SRC_POOL as *mut StringPool,
+                1,
+                DST_POOL as *mut StringPool,
+                ptr::null_mut(),
+            );
+            assert_eq!(status, 0);
+            assert_eq!(INTERN_CALLS.len(), 1);
+            assert_eq!(INTERN_CALLS[0].bytes.len(), STACK_BLOB_CAPACITY);
+            assert_eq!(INTERN_CALLS[0].id_out, 0, "a NULL id_out passes through");
+        }
+        assert_eq!(alloc_log().0, 0, "the original's compare is unsigned ls");
+    }
+
+    #[test]
+    fn larger_blob_round_trips_through_the_tag4_heap() {
+        let (_copy_guard, _heap_guard, _reset) = mock();
+        let mut backing = std::vec![0u8; STACK_BLOB_CAPACITY + 1];
+        unsafe {
+            PAYLOAD = (0..=STACK_BLOB_CAPACITY).map(|i| (i & 0xff) as u8).collect();
+            set_alloc_ret(backing.as_mut_ptr());
+            let mut out_id = 0i32;
+            let status = string_pool_copy_entry(
+                SRC_POOL as *mut StringPool,
+                2,
+                DST_POOL as *mut StringPool,
+                &mut out_id,
+            );
+            assert_eq!(status, 0);
+            assert_eq!(INTERN_CALLS.len(), 1);
+            assert_eq!(INTERN_CALLS[0].bytes, PAYLOAD);
+        }
+        assert_eq!(alloc_log(), (1, (STACK_BLOB_CAPACITY + 1) as usize, 4));
+        assert_eq!(free_log(), (1, backing.as_mut_ptr(), 4), "scratch freed");
+    }
+
+    #[test]
+    fn allocation_failure_is_mem_full_err() {
+        let (_copy_guard, _heap_guard, _reset) = mock();
+        unsafe {
+            PAYLOAD = std::vec![0xcd; STACK_BLOB_CAPACITY + 88];
+            set_alloc_ret(ptr::null_mut());
+            let status = string_pool_copy_entry(
+                SRC_POOL as *mut StringPool,
+                2,
+                DST_POOL as *mut StringPool,
+                ptr::null_mut(),
+            );
+            assert_eq!(status, MEM_FULL_ERR);
+            assert_eq!(READ_CALLS.len(), 1, "no copy read without a buffer");
+            assert!(INTERN_CALLS.is_empty());
+        }
+        assert_eq!(alloc_log().0, 1);
+        assert_eq!(free_log().0, 0, "nothing to free");
+    }
+
+    #[test]
+    fn copy_read_failure_propagates_and_frees_the_heap_buffer() {
+        let (_copy_guard, _heap_guard, _reset) = mock();
+        let mut backing = std::vec![0u8; STACK_BLOB_CAPACITY + 88];
+        unsafe {
+            PAYLOAD = std::vec![0xcd; STACK_BLOB_CAPACITY + 88];
+            READ_COPY_STATUS = PARAM_ERR;
+            set_alloc_ret(backing.as_mut_ptr());
+            let status = string_pool_copy_entry(
+                SRC_POOL as *mut StringPool,
+                2,
+                DST_POOL as *mut StringPool,
+                ptr::null_mut(),
+            );
+            assert_eq!(status, PARAM_ERR);
+            assert_eq!(READ_CALLS.len(), 2);
+            assert!(INTERN_CALLS.is_empty(), "no intern after a failed read");
+        }
+        assert_eq!(free_log(), (1, backing.as_mut_ptr(), 4), "freed on the way out");
+    }
+
+    #[test]
+    fn intern_failure_propagates_and_still_frees() {
+        let (_copy_guard, _heap_guard, _reset) = mock();
+        let mut backing = std::vec![0u8; STACK_BLOB_CAPACITY + 88];
+        unsafe {
+            PAYLOAD = std::vec![0xcd; STACK_BLOB_CAPACITY + 88];
+            INTERN_STATUS = PARAM_ERR;
+            set_alloc_ret(backing.as_mut_ptr());
+            let status = string_pool_copy_entry(
+                SRC_POOL as *mut StringPool,
+                2,
+                DST_POOL as *mut StringPool,
+                ptr::null_mut(),
+            );
+            assert_eq!(status, PARAM_ERR);
+            assert_eq!(INTERN_CALLS.len(), 1);
+        }
+        assert_eq!(free_log(), (1, backing.as_mut_ptr(), 4));
+    }
+
+    #[test]
+    fn zero_length_blob_interns_zero_bytes_from_the_stack() {
+        let (_copy_guard, _heap_guard, _reset) = mock();
+        unsafe {
+            PAYLOAD = Vec::new();
+            let status = string_pool_copy_entry(
+                SRC_POOL as *mut StringPool,
+                9,
+                DST_POOL as *mut StringPool,
+                ptr::null_mut(),
+            );
+            assert_eq!(status, 0);
+            assert_eq!(INTERN_CALLS.len(), 1);
+            assert!(INTERN_CALLS[0].bytes.is_empty());
+        }
+        assert_eq!(alloc_log().0, 0);
     }
 }
