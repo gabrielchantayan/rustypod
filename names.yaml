@@ -21310,6 +21310,48 @@ functions:
       pre-decrement to INT_MAX, so that one value still compares instead
       of returning 0.
 
+  # ---- Begin-write-operation marker (src/sqlite/begin_write_operation.rs) ----
+  - address: 0x0837021c
+    ghidra: FUN_0837021c
+    name: begin_write_operation
+    size: 124
+    sig: "void begin_write_operation(Parse *parse, int set_statement, int i_db)"
+    module: sqlite/begin_write_operation
+    status: ported
+    vars: {param_1: parse, param_2: set_statement, param_3: i_db}
+    notes: >-
+      SQLite's sqlite3BeginWriteOperation, the 3.5.x-era shape (works
+      on pParse directly - no sqlite3ParseToplevel walk, no isWrite
+      store). 17 bl call sites, zero predicated, verified by decoding
+      every B/BL word in osos.dec. Extent verified from raw bytes: the
+      next function starts at 0x08370298, so exactly 124 bytes as
+      Ghidra reports. Per database i_db: fetch the Vdbe and bail when
+      NULL, emit the schema-cookie verification, set bit i_db in
+      Parse.writeMask (+0x100), then append OP_Statement i_db (opcode
+      0x2a, this build's numbering) when set_statement is requested and
+      Parse.nested (byte at +0x13) is zero. When i_db != 1 and the temp
+      database is attached (db->aDb at +0x08, Db stride 0x18, pBt at
+      +0x04 - the word at aDb+0x1c; the stride is corroborated by
+      codeVerifySchema's iDb*24 indexing), the sequence repeats once
+      for i_db = 1: upstream's tail recursion, folded into a loop by
+      the firmware's compiler (movne r5,#1; bne). Callees:
+      sqlite3VdbeAddOp1 @ 0x08386810 is ported and called directly;
+      sqlite3CodeVerifySchema @ 0x083734bc is UNPORTED and rides the
+      BEGIN_WRITE_OPS seam with a documented no-op default;
+      sqlite3GetVdbe @ 0x0837acf4 also rides the seam because its
+      ledger entry claims ported in sqlite/vdbe but the symbol exists
+      on no branch - the entry was added as identified in dda6c20 and a
+      later merge flipped the status without the code ever landing
+      (flagged anomaly; the shipped stand-in returns Parse.pVdbe at
+      +0x0c verbatim, exact whenever a statement is already under
+      construction and matching the OOM end state otherwise, since the
+      unported constructor's own default fails). The writeMask update
+      uses checked_shl(i_db & 0xff) to match the ARM register-shift
+      semantics (amounts 32..=255 yield 0) instead of Rust's
+      overflowing shl. match.py shows the expected deviations: blx
+      through the two seam slots instead of direct bl's, LLVM frame
+      setup, and loop peeling of the temp-database second pass.
+
   # ---- B-tree lock counter (src/sqlite/btree_lock.rs) ----
   - address: 0x0837118c
     ghidra: FUN_0837118c

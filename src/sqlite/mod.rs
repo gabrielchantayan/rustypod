@@ -67,6 +67,7 @@
 
 pub mod aux_sweep;
 pub mod auth_check;
+pub mod begin_write_operation;
 pub mod blob_to_hex;
 pub mod btree_lock;
 pub mod cell_size;
