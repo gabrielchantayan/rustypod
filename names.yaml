@@ -50661,6 +50661,47 @@ functions:
       ldr/blx seam calls standing in for bl 0x0812468c / bl 0x082722a0,
       plus the inlined CURRENT_TASK_CTX_BLOCK slot for bl 0x0827233c -
       all documented deviations.
+  - address: 0x08143990
+    ghidra: FUN_08143990
+    name: screen_base_parent_construct_with_next
+    size: 20
+    sig: "ScreenBase *screen_base_parent_construct_with_next(ScreenBase *storage, void *next_provider, u32 initial_target, u32 create_link)"
+    module: app/screen_base
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r1: next_provider
+      param_3/r2: initial_target
+      param_4/r3: create_link
+      FUN_08272438: ScreenBaseParentConstructWithNext (seam, unported base constructor)
+      DAT_081439a4: SCREEN_BASE_PARENT_VTABLE_ADDRESS (0x08985da8)
+    notes: >-
+      Extent verified from raw ARM: exactly 20 bytes
+      (0x08143990..0x081439a4), with four instruction words followed by
+      literal vtable word 0x08985da8 at 0x081439a4; the sibling constructor
+      begins at 0x081439a8. A complete osos.dec B/BL decode finds 16 direct
+      inbound calls at 0x0811c818, 0x08133e30, 0x08159560, 0x0816f664,
+      0x08177a94, 0x0819c56c, 0x0819e07c, 0x0819f930, 0x081a4f70,
+      0x081cae40, 0x081cd5fc, 0x081e8f04, 0x081ee0dc, 0x081fa08c,
+      0x08204188, and 0x0822c824; all are unconditional plain bl, with no
+      predicated calls, tail branches, or DATA-word references. The
+      four-argument intermediate parent constructor delegates to
+      FUN_08272438(storage, next_provider, initial_target, create_link),
+      accepts its r0 return as this, installs vtable 0x08985da8 at +0x00,
+      then returns this. The delegated constructor passes r2/r3 to the
+      framework base, clears the provider-chain +0x14 link, and installs r1
+      through the refcounted next-link setter 0x082722a0. Its concrete class
+      identity is not recoverable; the screen-base parent role is established
+      by the 0x0812468c chain calling sibling overload 0x08143978 and
+      overwriting its vtable with 0x08983020. Deliberate deviations: the
+      unported direct callee is a fixed-address call on device and a volatile
+      host seam; the host vtable is an opaque aligned marker because no slot
+      identity is decoded. Host coverage verifies all four arguments, a
+      relocating callee result, the vtable replacement, and preservation of
+      every other modeled field. match.py structural review shows the same
+      delegated call then literal vtable store; LLVM differs only by its fp
+      frame and literal-loaded blx seam.
+
 
   # --- Block-backed list cursor current-index reader ---
   - address: 0x081f0354
