@@ -5,15 +5,18 @@
 //! finds 17 plain unconditional `bl` call sites, zero predicated `bl` forms,
 //! and zero direct `B` entries.
 //! `checked_byte_block_reader` — `FUN_0802b6a8` @ 0x0802b6a8 (132 bytes).
-//! It copies a signed byte block, accumulates its wrapping byte sum, and
-//! compares that sum with the following mode-transformed u32 checksum. A match
-//! advances both input aliases past the checksum and both output aliases past
-//! the copied bytes; a mismatch returns 4 without advancing aliases, after the
-//! copy. The flat core reads its initial cursors from `input_cursor` and
-//! `output_cursor`; the two-dimensional reader uses its mirror slots.
-//!
+//! It copies a signed two-dimensional byte block, accumulates its wrapping
+//! byte sum, and compares that sum with the following mode-transformed u32
+//! checksum. A match advances both input aliases past the checksum and both
+//! output aliases past the copied bytes; a mismatch returns 4 without advancing
+//! aliases, after the copy. The flat core reads its initial cursors from
+//! `input_cursor` and `output_cursor`; the two-dimensional reader uses its
+//! mirror slots.
+//! `checked_byte_block_reader_3d` — `FUN_0802b7c4` @ 0x0802b7c4 (164 bytes).
+//! This distinct three-dimensional reader starts from the primary cursor slots.
 //! Deliberate deviation: the mode transform is inlined. Exactly mode 1
 //! byte-reverses the checksum; all other modes preserve it.
+
 
 /// The checksum-mismatch status returned by the retail reader.
 pub const BYTE_BLOCK_CHECKSUM_MISMATCH: u32 = 4;
@@ -148,6 +151,81 @@ pub unsafe extern "C" fn checked_byte_block_reader(
     }
     0
 }
+/// checked_byte_block_reader_3d — original: `FUN_0802b7c4` @ 0x0802b7c4
+/// (164 bytes, 0x0802b7c4..0x0802b868; 14 plain unconditional `bl` call
+/// sites, zero predicated `bl` forms, verified by decoding every ARM B/BL
+/// word in `osos.dec`).
+///
+/// Copies `dim0 * dim1 * dim2` bytes from the cursor in `input_cursor` to
+/// `output_cursor` through three signed `blt`-equivalent loops. It accumulates
+/// the unsigned wrapping byte sum, transforms the aligned u32 immediately
+/// afterward for exact mode 1, then compares it with the sum. A matching
+/// checksum advances input cursor, input mirror, output cursor, then output
+/// mirror; mismatch returns [`BYTE_BLOCK_CHECKSUM_MISMATCH`] without updating
+/// aliases, after the output bytes were written.
+///
+/// Zero or negative dimensions skip the appropriate loop and therefore require
+/// a transformed zero checksum. The 14 stock callers are all unconditional;
+/// none guards this reader with a conditional `bl`.
+///
+/// Deliberate deviation: the byte-identical `FUN_0802b538` mode transform is
+/// inlined, as it is in the neighboring byte-block readers.
+///
+/// # Safety
+///
+/// Cursor slots must be readable/writable. `input_cursor` must initially cover
+/// the signed-positive product of dimensions plus an aligned readable checksum
+/// word, and `output_cursor` must cover the copied bytes. On success all four
+/// cursor slots are updated.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn checked_byte_block_reader_3d(
+    mode: u32,
+    input_cursor: *mut *mut u8,
+    input_cursor_mirror: *mut *mut u8,
+    output_cursor: *mut *mut u8,
+    output_cursor_mirror: *mut *mut u8,
+    dim0: i32,
+    dim1: i32,
+    dim2: i32,
+) -> u32 {
+    let mut source = unsafe { core::ptr::read_volatile(input_cursor) };
+    let mut target = unsafe { core::ptr::read_volatile(output_cursor) };
+    let mut sum = 0u32;
+    let mut i = 0;
+    while i < dim0 {
+        let mut j = 0;
+        while j < dim1 {
+            let mut k = 0;
+            while k < dim2 {
+                let byte = unsafe { core::ptr::read_volatile(source) };
+                sum = sum.wrapping_add(byte as u32);
+                unsafe { core::ptr::write_volatile(target, byte) };
+                source = unsafe { source.add(1) };
+                target = unsafe { target.add(1) };
+                k = k.wrapping_add(1);
+            }
+            j = j.wrapping_add(1);
+        }
+        i = i.wrapping_add(1);
+    }
+
+    let checksum = transform_checksum_for_mode(mode, unsafe {
+        core::ptr::read_volatile(source.cast::<u32>())
+    });
+    if checksum != sum {
+        return BYTE_BLOCK_CHECKSUM_MISMATCH;
+    }
+
+    let advanced_source = unsafe { source.add(core::mem::size_of::<u32>()) };
+    unsafe {
+        core::ptr::write_volatile(input_cursor, advanced_source);
+        core::ptr::write_volatile(input_cursor_mirror, advanced_source);
+        core::ptr::write_volatile(output_cursor, target);
+        core::ptr::write_volatile(output_cursor_mirror, target);
+    }
+    0
+}
 
 #[cfg(test)]
 mod tests {
@@ -190,6 +268,21 @@ mod tests {
                     &mut self.output_mirror,
                     row_count,
                     bytes_per_row,
+                )
+            }
+        }
+
+        fn run_3d(&mut self, mode: u32, dim0: i32, dim1: i32, dim2: i32) -> u32 {
+            unsafe {
+                checked_byte_block_reader_3d(
+                    mode,
+                    &mut self.input,
+                    &mut self.input_mirror,
+                    &mut self.output,
+                    &mut self.output_mirror,
+                    dim0,
+                    dim1,
+                    dim2,
                 )
             }
         }
@@ -357,5 +450,76 @@ mod tests {
         assert_eq!(block.input_offset(block.input), 4);
         assert_eq!(block.output_offset(block.output), 0);
         assert_eq!(block.target, [0xad; 4]);
+    }
+
+    #[test]
+    fn three_dimensional_reader_copies_sums_and_advances_aliases() {
+        let mut block = Block::new(&[0x0403_0201, 10, 0xcccc_cccc], 12);
+
+        assert_eq!(block.run_3d(0, 1, 2, 2), 0);
+        assert_eq!(&block.target[..4], &[1, 2, 3, 4]);
+        assert_eq!(block.input_offset(block.input), 8);
+        assert_eq!(block.input_offset(block.input_mirror), 8);
+        assert_eq!(block.output_offset(block.output), 4);
+        assert_eq!(block.output_offset(block.output_mirror), 4);
+    }
+
+    #[test]
+    fn three_dimensional_reader_reverses_only_mode_one_checksum() {
+        let mut block = Block::new(&[0x4030_2010, 0xa000_0000], 8);
+
+        assert_eq!(block.run_3d(1, 1, 1, 4), 0);
+        assert_eq!(&block.target[..4], &[0x10, 0x20, 0x30, 0x40]);
+    }
+
+    #[test]
+    fn three_dimensional_reader_mismatch_writes_without_advancing_aliases() {
+        let mut block = Block::new(&[0x0403_0201, 9], 8);
+
+        assert_eq!(block.run_3d(0, 2, 1, 2), BYTE_BLOCK_CHECKSUM_MISMATCH);
+        assert_eq!(&block.target[..4], &[1, 2, 3, 4]);
+        assert_eq!(block.input_offset(block.input), 0);
+        assert_eq!(block.input_offset(block.input_mirror), 0);
+        assert_eq!(block.output_offset(block.output), 0);
+        assert_eq!(block.output_offset(block.output_mirror), 0);
+    }
+
+    #[test]
+    fn three_dimensional_reader_uses_primary_cursors_and_empty_negative_dimension() {
+        let mut source = [0x0403_0201u32, 10, 0xcccc_cccc];
+        let mut source_mirror = [0xfeed_faceu32; 3];
+        let mut target = [0xad_u8; 12];
+        let mut target_mirror = [0xbc_u8; 12];
+        let mut input = source.as_mut_ptr().cast::<u8>();
+        let mut input_mirror = source_mirror.as_mut_ptr().cast::<u8>();
+        let mut output = target.as_mut_ptr();
+        let mut output_mirror = target_mirror.as_mut_ptr();
+
+        let status = unsafe {
+            checked_byte_block_reader_3d(
+                0,
+                &mut input,
+                &mut input_mirror,
+                &mut output,
+                &mut output_mirror,
+                1,
+                1,
+                4,
+            )
+        };
+
+        assert_eq!(status, 0);
+        assert_eq!(&target[..4], &[1, 2, 3, 4]);
+        assert_eq!(target_mirror, [0xbc; 12]);
+        assert_eq!(input, unsafe { source.as_mut_ptr().cast::<u8>().add(8) });
+        assert_eq!(input_mirror, input);
+        assert_eq!(output, unsafe { target.as_mut_ptr().add(4) });
+        assert_eq!(output_mirror, output);
+
+        let mut empty = Block::new(&[0, 0xaaaa_aaaa], 4);
+        assert_eq!(empty.run_3d(0, 1, -1, 4), 0);
+        assert_eq!(empty.input_offset(empty.input), 4);
+        assert_eq!(empty.output_offset(empty.output), 0);
+        assert_eq!(empty.target, [0xad; 4]);
     }
 }
