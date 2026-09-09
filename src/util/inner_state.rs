@@ -97,6 +97,13 @@ const STATE_4: u32 = 4;
 /// (written by the lazy materializer @ 0x08086694, read back by the
 /// tail target @ 0x080542a0).
 const RESULT_COUNT: usize = 0xef4;
+/// Byte offset of the materialized result-array pointer. The object layout is
+/// 32-bit even in host tests, so cache pointer fields are always read as u32.
+const CACHED_RESULTS: usize = 0xeec;
+
+/// Byte offset of the auxiliary allocation paired with [`CACHED_RESULTS`].
+const CACHED_AUXILIARY: usize = 0xef0;
+
 
 /// query_object_create — original: `FUN_082597a0` @ 0x082597a0 (32 bytes;
 /// 25 verified `bl` call sites, all unconditional).
@@ -135,6 +142,38 @@ pub unsafe extern "C" fn inner_set_state_4(object: *mut u8) {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn inner_set_state(inner: *mut u8, state: u32) {
     (inner.add(STATE) as *mut u32).write(state);
+}
+
+/// inner_clear_cached_results — original: `FUN_08059a98` @ 0x08059a98
+/// (60 bytes; 17 verified `bl` call sites, all unconditional).
+///
+/// Releases the cached result array at `inner + 0xeec` with the existing
+/// tag-4 MemH free veneer. Only when that primary pointer was nonzero, it
+/// clears it, releases the auxiliary allocation at `inner + 0xef0` if
+/// nonzero, and clears that field. It always clears the cached result count at
+/// `inner + 0xef4`. In particular, a zero primary pointer leaves a nonzero
+/// auxiliary pointer untouched; that asymmetric invariant is encoded by the
+/// original's branch around both the primary free and the auxiliary check.
+///
+/// Fields are explicitly 32-bit words rather than host-width pointers: this
+/// preserves the target's adjacent +0xeec/+0xef0 layout on 64-bit hosts.
+/// There are no other deviations: [`crate::heap::veneers::free_tag4`] is the
+/// already-ported direct callee at 0x0805d070.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn inner_clear_cached_results(inner: *mut u8) {
+    let results = (inner.add(CACHED_RESULTS) as *const u32).read();
+    if results != 0 {
+        crate::heap::veneers::free_tag4(results as usize as *mut u8);
+        (inner.add(CACHED_RESULTS) as *mut u32).write(0);
+
+        let auxiliary = (inner.add(CACHED_AUXILIARY) as *const u32).read();
+        if auxiliary != 0 {
+            crate::heap::veneers::free_tag4(auxiliary as usize as *mut u8);
+            (inner.add(CACHED_AUXILIARY) as *mut u32).write(0);
+        }
+    }
+    (inner.add(RESULT_COUNT) as *mut u32).write(0);
 }
 
 /// Default [`INNER_MATERIALIZE_COUNT`] stub: the no-op path of the
@@ -176,7 +215,9 @@ mod tests {
     use super::*;
     use parking_lot::Mutex;
     use crate::fp::fp_misc::QUERY_OBJECT_CONSTRUCT;
-    use crate::heap::veneers::tests::{alloc_log, mock_block, mock_heap, set_alloc_ret};
+    use crate::heap::veneers::tests::{
+        alloc_log, free_log, mock_block, mock_heap, set_alloc_ret,
+    };
 
     const QUERY_CONSTRUCT_RESULT: usize = 0xa110_0048;
     static QUERY_FACTORY_TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -369,6 +410,81 @@ mod tests {
             };
             assert_eq!(fixture.inner[offset], expect, "inner +{offset:#x}");
         }
+    }
+
+    // ---- inner_clear_cached_results ------------------------------------
+
+    /// A target-layout cache tail: fields remain u32 words even though the
+    /// backing allocation is a normal 64-bit host object.
+    #[repr(align(4))]
+    struct CacheFixture {
+        bytes: [u8; INNER_LEN],
+    }
+
+    impl CacheFixture {
+        fn new() -> Self {
+            CacheFixture { bytes: [SENTINEL; INNER_LEN] }
+        }
+
+        fn word(&self, offset: usize) -> u32 {
+            u32::from_le_bytes(self.bytes[offset..offset + 4].try_into().unwrap())
+        }
+
+        fn set_word(&mut self, offset: usize, value: u32) {
+            self.bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        }
+
+        fn clear(&mut self) {
+            unsafe { inner_clear_cached_results(self.bytes.as_mut_ptr()) };
+        }
+    }
+
+    #[test]
+    fn cache_clear_releases_the_primary_result_and_zeros_all_cache_words() {
+        let _heap_guard = mock_heap();
+        let mut fixture = CacheFixture::new();
+        fixture.set_word(CACHED_RESULTS, 0x1111_2222);
+        fixture.set_word(CACHED_AUXILIARY, 0);
+        fixture.set_word(RESULT_COUNT, u32::MAX);
+
+        fixture.clear();
+
+        assert_eq!(free_log(), (1, 0x1111_2222usize as *mut u8, 4));
+        assert_eq!(fixture.word(CACHED_RESULTS), 0);
+        assert_eq!(fixture.word(CACHED_AUXILIARY), 0);
+        assert_eq!(fixture.word(RESULT_COUNT), 0);
+    }
+
+    #[test]
+    fn cache_clear_releases_the_auxiliary_only_after_the_primary() {
+        let _heap_guard = mock_heap();
+        let mut fixture = CacheFixture::new();
+        fixture.set_word(CACHED_RESULTS, 0x3333_4444);
+        fixture.set_word(CACHED_AUXILIARY, 0x5555_6666);
+        fixture.set_word(RESULT_COUNT, 7);
+
+        fixture.clear();
+
+        assert_eq!(free_log(), (2, 0x5555_6666usize as *mut u8, 4));
+        assert_eq!(fixture.word(CACHED_RESULTS), 0);
+        assert_eq!(fixture.word(CACHED_AUXILIARY), 0);
+        assert_eq!(fixture.word(RESULT_COUNT), 0);
+    }
+
+    #[test]
+    fn cache_clear_preserves_auxiliary_when_primary_is_absent() {
+        let _heap_guard = mock_heap();
+        let mut fixture = CacheFixture::new();
+        fixture.set_word(CACHED_RESULTS, 0);
+        fixture.set_word(CACHED_AUXILIARY, 0x7777_8888);
+        fixture.set_word(RESULT_COUNT, 0xabcd_ef01);
+
+        fixture.clear();
+
+        assert_eq!(free_log().0, 0, "the auxiliary check is primary-gated");
+        assert_eq!(fixture.word(CACHED_RESULTS), 0);
+        assert_eq!(fixture.word(CACHED_AUXILIARY), 0x7777_8888);
+        assert_eq!(fixture.word(RESULT_COUNT), 0);
     }
 
     // ---- inner_result_count -------------------------------------------

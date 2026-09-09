@@ -29175,6 +29175,32 @@ functions:
       `str r1,[r0,#0xe38]`; the only diff is the crate-standard
       push-fp-lr/pop-fp-pc frame.
 
+  - address: 0x08059a98
+    ghidra: FUN_08059a98
+    name: inner_clear_cached_results
+    size: 60
+    sig: "void inner_clear_cached_results(u8 *inner)"
+    module: util/inner_state
+    status: ported
+    vars: {param_1: inner, FUN_0805d070: free_tag4}
+    notes: >-
+      Verified against osos.dec (load base 0x08000000): the 15 instruction
+      body starts `push {r4-r6,lr}`, loads the primary cached-result pointer
+      at inner+0xeec, and ends at 0x08059ad0; 0x08059ad4 starts the distinct
+      next function. A nonzero primary is passed in r0 to free_tag4
+      (FUN_0805d070), then cleared. Only in that branch does the function
+      inspect, free when nonzero, and clear the auxiliary pointer at +0xef0.
+      The result count at +0xef4 is cleared unconditionally. Thus a NULL
+      primary deliberately leaves any auxiliary value untouched. Decoding
+      every ARM B/BL word in osos.dec finds exactly 17 direct call sites, all
+      unconditional `bl` (no predicated calls and no tail `b`). The existing
+      free_tag4 port is called directly; its tag-4 heap dispatch is its
+      documented existing deviation. The port reads/writes cache fields as
+      aligned u32 words, preserving the target's 4-byte pointer slots on
+      64-bit hosts rather than using host-width pointer fields. Host tests
+      prove primary-only release, ordered primary-plus-auxiliary release, and
+      the NULL-primary asymmetric case.
+
   - address: 0x0813b7c4
     ghidra: FUN_0813b7c4
     name: inner_set_state_4
