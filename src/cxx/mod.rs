@@ -61,6 +61,7 @@ pub mod state_object_destroy;
 pub mod string;
 pub mod string_map;
 pub mod stream_write;
+pub mod stream_write_exact;
 pub mod stream_write_cstr;
 pub mod string_object;
 pub mod string_object_normalize_volume_path;
