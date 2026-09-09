@@ -56295,3 +56295,32 @@ functions:
       non-NULL release; every verified caller ignores it, so the Rust ABI is
       void. Host tests prove both the exact nonzero word forwarding and that
       zero suppresses the release call.
+
+  # --- Default navigation request (ui/default_navigation_request) ---
+  - address: 0x08219ed4
+    ghidra: FUN_08219ed4
+    name: ui_request_default_navigation
+    size: 16
+    sig: "void ui_request_default_navigation(void *controller)"
+    module: ui/default_navigation_request
+    status: ported
+    renames:
+      param_1/r0: controller
+      r1: default_selection
+      r2: default_flags
+      r3: default_item
+      FUN_08218e0c: navigation_dispatcher (unported stock callee)
+    notes: >-
+      Raw osos.dec extent is exactly 16 bytes: mvn r3,#0; mov r2,#0;
+      mvn r1,#0; b 0x08218e0c. The next separately linked function begins at
+      0x08219ee4. Full-image decoding of every ARM B/BL immediate finds
+      exactly 12 direct call sites, all predicated blne (zero unconditional
+      bl and zero direct plain-B tails), at 0x08131474, 0x08225a18,
+      0x0822719c, 0x082296dc, 0x0822a2dc, 0x0822a8c4, 0x082311bc,
+      0x082321ec, 0x08232c68, 0x0823305c, 0x082370b0, and 0x082393c4.
+      No aligned osos.dec word equals 0x08219ed4, so it is not directly
+      dispatched as data. The wrapper passes its controller unguarded to the
+      unported navigation dispatcher with selector tuple (-1, 0, -1).
+      Deliberate deviation: Rust makes an ordinary indirect call through a
+      volatile seam instead of the retail tail branch; firmware reaches
+      0x08218e0c while host tests record the exact forwarded tuple.
