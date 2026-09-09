@@ -99,6 +99,72 @@ pub unsafe extern "C" fn message_kind_construct(
     this
 }
 
+/// message_kind_destruct — original: `thunk_FUN_08275bc8` @ 0x08266a80
+/// (4 bytes; **17 `bl` call sites plus one tail `b` @ 0x0811ef8c**,
+/// binary-scanned over every ARM B/BL word in `osos.dec` — Ghidra's 17 is
+/// the plain-`bl` count only).
+///
+/// The NON-DELETING destructor of this same message-kind base — the exact
+/// counterpart of [`message_kind_construct`], closing the cluster that
+/// opens with it:
+///
+/// ```text
+/// 08266a64  cmp r0, #0             @ the deleting destructor: NULL-guarded
+/// 08266a68  push {r4, lr}
+/// 08266a6c  popeq {r4, pc}
+/// 08266a70  bl   0x08275bc8        @ root destructor
+/// 08266a74  pop  {r4, lr}
+/// 08266a78  mov  r1, #8            @ sizeof(MessageKind)
+/// 08266a7c  b    0x08266a84        @ operator-delete path
+/// 08266a80  b    0x08275bc8        @ <- the whole function: tail-branch
+/// 08266a84  push {r4, r5, r6, lr}  @ the operator-delete veneer follows
+/// ```
+///
+/// The branch target 0x08275bc8 is binary-verified as the framework root
+/// destructor, a bare `bx lr` (documented from
+/// `framework_object_construct`'s side in `cxx/observable_array.rs`), so
+/// the net effect of the thunk is: nothing is read or written and r0
+/// passes through unchanged. Ghidra's own 4-byte extent is right — it is
+/// a genuine `b <target>` veneer, not a mis-sized body.
+///
+/// # Call sites and the load-bearing r0
+///
+/// 0x08266a80 occurs in **no data word** anywhere in the image, so it is
+/// never dispatched virtually — every caller binds it statically. The 17
+/// `bl` sites come in two shapes:
+///
+/// - 8 sites are the NULL-guarded heap destroy
+///   `push {r4, lr}; popeq {r4, pc}; bl 0x08266a80; mov r4, r0` — the
+///   captured r0 is handed to the operator-delete path (e.g. 0x0816f194:
+///   `mov r4, r0; bl 0x082669e4; mov r1, r4`), so the pass-through is a
+///   real contract, not a cosmetic detail.
+/// - 5 sites are end-of-scope teardown of a stack message
+///   (`add r0, sp, #N` / `mov r0, sp` immediately before the `bl`) — the
+///   RAII scope teardown `node_list_enqueue` records as
+///   `thunk_FUN_08275bc8` in its seam list.
+///
+/// The remaining sites are the same two shapes with the object pointer
+/// materialized a few instructions earlier, and the one tail `b` at
+/// 0x0811ef8c is a derived destructor chaining into its base.
+///
+/// Deviations: none structural — the port is the identity on `this`,
+/// exactly what `b 0x08275bc8; bx lr` computes, modeled with no call the
+/// same way the observable-array destructors model the same root dtor.
+/// Its own `link_section` keeps LLVM's identical-code folding from merging
+/// it into the other empty-destructor exports (`cxx/trivial_destructor.rs`,
+/// `cxx/empty_destructor.rs`).
+///
+/// # Safety
+///
+/// The original dereferences nothing, so `this` may be NULL, unaligned, or
+/// dangling.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.message_kind_destruct")]
+pub unsafe extern "C" fn message_kind_destruct(this: *mut MessageKind) -> *mut MessageKind {
+    this
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -147,5 +213,26 @@ mod tests {
             assert_eq!(unsafe { (*object).base.vtable }, MESSAGE_KIND_VTABLE);
             assert_eq!(unsafe { (*object).kind }, kind, "kind is stored, never interpreted");
         }
+    }
+
+    #[test]
+    fn destruct_returns_this_for_the_chained_operator_delete() {
+        for address in [0usize, 1, 0x0800_0001, 0x089a_3788, usize::MAX] {
+            let this = address as *mut MessageKind;
+            assert_eq!(unsafe { message_kind_destruct(this) }, this, "{address:#x}");
+        }
+    }
+
+    #[test]
+    fn destruct_touches_no_byte_of_the_message() {
+        let mut storage = GuardedStorage::poisoned();
+        let object = storage.object();
+        unsafe { message_kind_construct(object, 0x16) };
+        let before = storage.words;
+
+        let returned = unsafe { message_kind_destruct(object) };
+
+        assert_eq!(returned, object, "r0 passes through");
+        assert_eq!(storage.words, before, "the empty body performs no stores");
     }
 }
