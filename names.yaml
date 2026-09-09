@@ -51017,3 +51017,37 @@ functions:
       words and the tail return edge exactly. Host tests install a recording
       seam and prove both NULL (no accidental guard) and non-NULL allocation
       forwarding with the exact descriptor. match.py reviewed.
+
+  # --- opaque object packed two-bit field accessor ---
+  - address: 0x08054468
+    ghidra: FUN_08054468
+    name: object_packed_field
+    size: 24
+    sig: "u32 object_packed_field(const void *object, const void *selector)"
+    module: ui/object_packed_field
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: selector
+      object_plus_0x1c/r0: packed_fields
+      selector_plus_0x01/r1: packed_field_index
+      uVar1/r0: packed_field
+    notes: >-
+      EXTENT: raw osos.dec is exactly 24 bytes at 0x08054468..0x0805447c;
+      the next separately linked function begins at 0x08054480. CALL COUNT:
+      decoding every ARM B/BL word in osos.dec finds 16 direct call sites:
+      0x080616ac, 0x080616cc, 0x080e28dc, 0x080e2954, 0x080e29bc,
+      0x080e2a18, 0x080e2a74, 0x080e2ad0, 0x080e2b00, 0x080e2b2c,
+      0x080e2b80, 0x080e2be8, 0x080e2c2c, 0x080e2c6c, 0x080e2cc8, and
+      0x080e2d08. Every call is a plain unconditional bl; there are no
+      predicated calls or tail b branches. No aligned DATA word in osos.dec
+      contains this address. ALGORITHM: load the byte at object+0x1c, shift it
+      right by ((selector[1] & 0x7f) << 1), and mask the low two bits. The
+      four low selector values choose the byte's four packed fields; larger
+      masked values shift at least eight positions and return zero. The
+      selector high bit is ignored by ARM's register-shift count after lsl #1.
+      The object and selector identities are unidentified, so names describe
+      only verified roles. The ARM leaf has no NULL or alignment guard.
+      Exhaustive host tests cover every packed byte and every selector byte,
+      including high-bit aliasing and out-of-range zero results. Deliberate
+      deviations: none.
