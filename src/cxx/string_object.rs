@@ -57,6 +57,20 @@
 //!   the payload word so the shared assignment path sees no prior
 //!   payload to release, then chains to `string_object_assign_cstr` @
 //!   0x0827639c with the caller's C string; returns `this`.
+//! - `string_object_construct_game_path` — original: `FUN_080a1d7c` @
+//!   0x080a1d7c (212 code bytes + an 80-byte literal pool @
+//!   0x080a1e50..0x080a1ea0; 14 `bl` call sites, binary-scanned). The
+//!   game-storage path constructor `StringObject(mode, id_string,
+//!   games_base, path)`: plants the vtable, NULLs the payload, strips
+//!   one leading '/' from the stacked `path` argument, then assigns a
+//!   printf-composed storage path through `string_object_format` @
+//!   0x082769d4 — `"<base>/games_RO/<id>/<path>"` for mode 0 (with
+//!   `games_base` selecting `iPod_Control` vs `Resources/Games`),
+//!   `"iPod_Control/gamedata_ShareRW/<path>"` for mode 3, and
+//!   `"iPod_Control/<dir_name(mode)>/<id>/<path>"` otherwise. The
+//!   directory selector @ 0x08097e00 is reached through the
+//!   [`GAME_STORAGE_DIR_NAME`] seam; the constructor returns the
+//!   formatter's character count, not `this`.
 //! - `string_object_copy_construct` — original: `FUN_082773e0` @
 //!   0x082773e0 (52 bytes: 48 code + the 4-byte vtable literal @
 //!   0x08277410; 212 `bl` call sites, binary-scanned). The copy
@@ -1188,6 +1202,188 @@ pub unsafe extern "C" fn string_object_construct_from_codepoint(
     (*this).payload = core::ptr::null_mut();
     string_object_assign_codepoint(this, codepoint);
     this
+}
+
+/// Original load address of the game-storage directory selector
+/// [`string_object_construct_game_path`] calls (`bl 0x08097e00`).
+pub const GAME_STORAGE_DIR_NAME_ADDRESS: usize = 0x08097e00;
+
+/// The unported game-storage directory-name selector @ 0x08097e00.
+///
+/// Decoded from raw bytes (0x08097e00..0x08097e84: a 5-way `addls pc, pc,
+/// r0, lsl #2` jump table, five serialized strings at 0x08097e48..0x08097e84,
+/// then the next function's `push`): mode 0 or 4 yields `"games_RO"`, 1
+/// yields `"gamedata_RW"`, 2 yields `"gamestats_WO"`, 3 yields
+/// `"gamedata_ShareRW"`, and any other mode yields the empty string. The
+/// original ignores its r1 argument entirely (callers variously pass the id
+/// payload or a path byte; the body never reads it), so the seam drops it.
+pub type GameStorageDirNameFn = unsafe extern "C" fn(mode: u32) -> *const u8;
+
+/// Behavioral model standing in for the 0x8097e00 port. The selector is a
+/// pure jump table over five serialized strings, so the model is exact —
+/// it returns the same text the ROM body does. The real port replaces this
+/// default when 0x8097e00 lands; see [`GAME_STORAGE_DIR_NAME_ADDRESS`].
+unsafe extern "C" fn game_storage_dir_name_model(mode: u32) -> *const u8 {
+    match mode {
+        0 | 4 => b"games_RO\0".as_ptr(),
+        1 => b"gamedata_RW\0".as_ptr(),
+        2 => b"gamestats_WO\0".as_ptr(),
+        3 => b"gamedata_ShareRW\0".as_ptr(),
+        _ => b"\0".as_ptr(),
+    }
+}
+
+/// The active game-storage directory selector. Host tests replace this
+/// seam to prove the constructor resolves directory names indirectly.
+pub static mut GAME_STORAGE_DIR_NAME: GameStorageDirNameFn = game_storage_dir_name_model;
+
+/// Reads the directory-name slot (volatile — the slot is meant to be
+/// swapped at runtime, and a plain read lets LLVM const-fold the default
+/// away).
+#[inline(always)]
+unsafe fn game_storage_dir_name_op() -> GameStorageDirNameFn {
+    core::ptr::read_volatile(core::ptr::addr_of!(GAME_STORAGE_DIR_NAME))
+}
+
+/// The `"iPod_Control"` volume root (ROM string @ 0x080a1e5c), modeled
+/// as a static — the same simplification [`STRING_OBJECT_EMPTY_CSTR`]
+/// makes for the class's shared empty C string.
+static GAME_PATH_IPOD_CONTROL: [u8; 13] = *b"iPod_Control\0";
+
+/// The `"Resources/Games"` alternate base (ROM string @ 0x080a1e6c).
+static GAME_PATH_RESOURCES_GAMES: [u8; 16] = *b"Resources/Games\0";
+
+/// The `"iPod_Control/%s%s%s"` mode-3 format (ROM string @ 0x080a1e7c).
+static GAME_PATH_SHARE_FORMAT: [u8; 20] = *b"iPod_Control/%s%s%s\0";
+
+/// The `"%s/%s/%s%s%s"` five-component format (ROM string @ 0x080a1e90).
+static GAME_PATH_FORMAT: [u8; 13] = *b"%s/%s/%s%s%s\0";
+
+/// The `"/"` separator (ROM string @ 0x080a1e54) substituted between the
+/// id payload and the stripped path.
+static GAME_PATH_SEPARATOR: [u8; 2] = *b"/\0";
+
+/// The empty separator (ROM string @ 0x080a1e58) selected for a NULL
+/// post-strip path pointer.
+static GAME_PATH_EMPTY_SEPARATOR: [u8; 1] = [0];
+
+/// string_object_construct_game_path — original: `FUN_080a1d7c` @
+/// 0x080a1d7c (212 code bytes plus an 80-byte literal pool @
+/// 0x080a1e50..0x080a1ea0: the vtable word and seven path strings; the
+/// next function starts at 0x080a1ea0. 14 `bl` call sites, all
+/// unconditional, binary-scanned by decoding every ARM B/BL word in
+/// osos.dec; Ghidra's C drops the r3 and stack arguments entirely).
+///
+/// The `StringObject` constructor that builds a game-storage path,
+/// `StringObject(mode, id_string, games_base, path)` with `path` arriving
+/// as the fifth (stack) argument. Decoded from the raw ARM:
+///
+/// ```text
+/// push {r1, r2, r3, r4, r5, r6, r7, lr}
+/// mov  r5, r1              ; r5 = mode
+/// ldr  r1, [0x080a1e50]    ; 0x089a6044, the class vtable
+/// ldr  r4, [sp, #32]       ; r4 = path, the incoming stack argument
+/// mov  r6, r0              ; r6 = this
+/// str  r1, [r6]            ; plant the vtable
+/// mov  r1, #0
+/// str  r1, [r6, #4]        ; payload = NULL
+/// ldrb r1, [r4]            ; UNCONDITIONAL first-byte read:
+///                          ;   a NULL path faults here
+/// mov  r0, r2              ; r0 = id_string (for raw_payload)
+/// mov  r7, r3              ; r7 = games_base flag
+/// cmp  r1, #0x2f           ; strip ONE leading '/'
+/// addeq r4, r4, #1
+/// ```
+///
+/// then, on `mode`:
+///
+/// - **mode 0**: `payload = string_object_raw_payload(id_string)`,
+///   `directory = dir_name(0)` — `"games_RO"` — and
+///   `format("%s/%s/%s%s%s", base, directory, payload, sep, path)` where
+///   `base` is `"iPod_Control"` when `games_base == 0` and
+///   `"Resources/Games"` otherwise (the only branch that reads the flag).
+/// - **mode 3**: `format("iPod_Control/%s%s%s", dir_name(3), sep, path)`
+///   — `"gamedata_ShareRW"`. `id_string` is never touched.
+/// - **any other mode**: `payload = string_object_raw_payload(id_string)`,
+///   then `format("%s/%s/%s%s%s", "iPod_Control", dir_name(mode),
+///   payload, sep, path)` — the base is ALWAYS `"iPod_Control"` here;
+///   `games_base` is ignored (a stock quirk, preserved).
+///
+/// In every branch `sep` is `"/"` when the (post-strip) `path` pointer is
+/// non-NULL and `""` when it is NULL — a check the entry read already
+/// makes unreachable for a true NULL, but the original emits it, so the
+/// port keeps it. The composed path is e.g.
+/// `"iPod_Control/games_RO/<id>/<path>"`. The original leaves
+/// [`string_object_format`]'s return — the formatter's character count,
+/// not `this` — in r0 (`mov r0, r6; bl 0x082769d4; pop {.., pc}`), and
+/// every caller discards it; the port returns that count unchanged.
+///
+/// Deviations:
+/// - The vtable is the modeled static [`STRING_OBJECT_VTABLE`] rather
+///   than the ROM address (see the module header).
+/// - The variadic register/stack arguments are restacked as a `[u32]`
+///   word array passed as [`VaList`] (house convention; AAPCS variadic
+///   arguments are consecutive 32-bit words).
+/// - The directory selector @ 0x08097e00 is not yet ported; it is reached
+///   through the [`GAME_STORAGE_DIR_NAME`] seam, whose default
+///   [`game_storage_dir_name_model`] is an exact behavioral model of the
+///   ROM jump table.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_construct_game_path(
+    this: *mut StringObject,
+    mode: u32,
+    id_string: *const StringObject,
+    games_base: i32,
+    path: *const u8,
+) -> i32 {
+    (*this).vtable = &STRING_OBJECT_VTABLE;
+    (*this).payload = core::ptr::null_mut();
+
+    let mut path = path;
+    // The original's `ldrb r1, [r4]` has no NULL guard: a NULL path
+    // faults on this read before any of the later checks run.
+    if path.read() == b'/' {
+        path = path.add(1);
+    }
+    let separator: *const u8 = if path.is_null() {
+        GAME_PATH_EMPTY_SEPARATOR.as_ptr()
+    } else {
+        GAME_PATH_SEPARATOR.as_ptr()
+    };
+
+    if mode == 0 {
+        let id_payload = string_object_raw_payload(id_string) as *const u8;
+        let directory = game_storage_dir_name_op()(0);
+        let base: *const u8 = if games_base == 0 {
+            GAME_PATH_IPOD_CONTROL.as_ptr()
+        } else {
+            GAME_PATH_RESOURCES_GAMES.as_ptr()
+        };
+        let args: [u32; 5] = [
+            base as u32,
+            directory as u32,
+            id_payload as u32,
+            separator as u32,
+            path as u32,
+        ];
+        string_object_format(this, GAME_PATH_FORMAT.as_ptr(), args.as_ptr())
+    } else if mode == 3 {
+        let directory = game_storage_dir_name_op()(3);
+        let args: [u32; 3] = [directory as u32, separator as u32, path as u32];
+        string_object_format(this, GAME_PATH_SHARE_FORMAT.as_ptr(), args.as_ptr())
+    } else {
+        let id_payload = string_object_raw_payload(id_string) as *const u8;
+        let directory = game_storage_dir_name_op()(mode);
+        let args: [u32; 5] = [
+            GAME_PATH_IPOD_CONTROL.as_ptr() as u32,
+            directory as u32,
+            id_payload as u32,
+            separator as u32,
+            path as u32,
+        ];
+        string_object_format(this, GAME_PATH_FORMAT.as_ptr(), args.as_ptr())
+    }
 }
 
 /// string_object_append — original: FUN_082774c8 @ 0x082774c8 (40 bytes).
@@ -3602,6 +3798,279 @@ pub(crate) mod tests {
             900
         );
         assert_eq!(&destination[..3], b"ab\0", "only the truncated text is assigned");
+    }
+
+    // ---- string_object_construct_game_path --------------------------
+
+    /// `(format, first six va_list words)` received by the conversion
+    /// core through `retail_vsnprintf`. Unlike FORMAT_ENGINE_CALLS this
+    /// snapshots the argument words at call time: the port's va_list is a
+    /// stack array whose contents are only valid during the call.
+    static mut GAME_PATH_ENGINE_CALLS: Vec<(usize, Vec<u32>)> = Vec::new();
+
+    unsafe extern "C" fn snapshot_format_engine(
+        _sink: usize,
+        cursor: *mut *mut u8,
+        maximum: usize,
+        format: *const u8,
+        args: VaList,
+    ) -> i32 {
+        let words: Vec<u32> = (0..6).map(|i| args.offset(i).read()).collect();
+        (*core::ptr::addr_of_mut!(GAME_PATH_ENGINE_CALLS))
+            .push((format as usize, words));
+        // Mirror recording_format_engine's bounded write protocol so the
+        // assign path still sees canned output.
+        let output = core::ptr::read_volatile(core::ptr::addr_of!(FORMAT_ENGINE_OUTPUT));
+        let text_len = output.len() - 1;
+        let written = if text_len < maximum { text_len } else { maximum };
+        let initial_cursor = *cursor;
+        core::ptr::copy_nonoverlapping(output.as_ptr(), initial_cursor, written);
+        *cursor = initial_cursor.add(written);
+        core::ptr::read_volatile(core::ptr::addr_of!(FORMAT_ENGINE_RESULT))
+    }
+
+    /// Modes the directory-name seam was invoked with, and its canned
+    /// result. Only valid while a GamePathBench is alive.
+    static mut DIR_NAME_CALLS: Vec<u32> = Vec::new();
+    static mut DIR_NAME_RESULT: *const u8 = core::ptr::null();
+
+    unsafe extern "C" fn recording_dir_name(mode: u32) -> *const u8 {
+        (*core::ptr::addr_of_mut!(DIR_NAME_CALLS)).push(mode);
+        core::ptr::read_volatile(core::ptr::addr_of!(DIR_NAME_RESULT))
+    }
+
+    /// assign bench + the snapshotting engine; restores the directory
+    /// seam's faithful default model even when a test panics.
+    struct GamePathBench {
+        _ops: AssignCstrOpsGuard,
+    }
+
+    impl Drop for GamePathBench {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(GAME_STORAGE_DIR_NAME)
+                    .write_volatile(game_storage_dir_name_model as GameStorageDirNameFn);
+            }
+        }
+    }
+
+    fn game_path_bench(allocation_result: *mut u8) -> GamePathBench {
+        let ops = assign_cstr_bench(allocation_result);
+        unsafe {
+            (*core::ptr::addr_of_mut!(GAME_PATH_ENGINE_CALLS)).clear();
+            (*core::ptr::addr_of_mut!(DIR_NAME_CALLS)).clear();
+            core::ptr::addr_of_mut!(RETAIL_VSNPRINTF_ENGINE)
+                .write_volatile(snapshot_format_engine);
+        }
+        GamePathBench { _ops: ops }
+    }
+
+    /// The va_list word a pointer is restacked as (AAPCS variadic words
+    /// are 32-bit; on-device this is exact).
+    fn arg_word(ptr: *const u8) -> u32 {
+        ptr as usize as u32
+    }
+
+    fn cstr_bytes(ptr: usize) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut p = ptr as *const u8;
+        unsafe {
+            while p.read() != 0 {
+                out.push(p.read());
+                p = p.add(1);
+            }
+        }
+        out
+    }
+
+    fn game_path_engine_calls() -> Vec<(usize, Vec<u32>)> {
+        unsafe { (*core::ptr::addr_of!(GAME_PATH_ENGINE_CALLS)).clone() }
+    }
+
+    #[test]
+    fn game_path_mode0_composes_ipod_control_games_ro_id_path() {
+        let mut destination = [0xa5u8; 32];
+        let id_storage = *b"track-42\0";
+        let id = StringObject {
+            vtable: core::ptr::null(),
+            payload: id_storage.as_ptr() as *mut u8,
+        };
+        let path_storage = *b"/sub/dir\0";
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: 0x2222_2222 as *mut u8,
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = game_path_bench(destination.as_mut_ptr());
+        arm_format_output(b"ignored-canned\0", 77);
+
+        let count = unsafe {
+            string_object_construct_game_path(this, 0, &id, 0, path_storage.as_ptr())
+        };
+
+        assert_eq!(count, 77, "the formatter's count is returned, not `this`");
+        assert_eq!(object.vtable, &STRING_OBJECT_VTABLE as *const _);
+        assert!(object.payload.is_null(), "the payload word starts NULL");
+
+        let calls = game_path_engine_calls();
+        assert_eq!(calls.len(), 1);
+        let (format, words) = &calls[0];
+        assert_eq!(cstr_bytes(*format), b"%s/%s/%s%s%s".to_vec());
+        assert_eq!(words[0], arg_word(GAME_PATH_IPOD_CONTROL.as_ptr()));
+        assert_eq!(
+            words[1],
+            unsafe { arg_word(game_storage_dir_name_model(0)) },
+            "mode 0 resolves \"games_RO\" through the directory seam"
+        );
+        assert_eq!(words[2], arg_word(id_storage.as_ptr()), "the id object's raw payload");
+        assert_eq!(words[3], arg_word(GAME_PATH_SEPARATOR.as_ptr()));
+        assert_eq!(
+            words[4],
+            unsafe { arg_word(path_storage.as_ptr().add(1)) },
+            "exactly one leading '/' is stripped"
+        );
+        assert_eq!(&destination[..15], b"ignored-canned\0");
+    }
+
+    #[test]
+    fn game_path_mode0_resources_games_base_when_flag_nonzero() {
+        let mut destination = [0xa5u8; 16];
+        let id = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        let path_storage = *b"saves\0";
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = game_path_bench(destination.as_mut_ptr());
+
+        unsafe { string_object_construct_game_path(this, 0, &id, 1, path_storage.as_ptr()) };
+
+        let calls = game_path_engine_calls();
+        let (format, words) = &calls[0];
+        assert_eq!(cstr_bytes(*format), b"%s/%s/%s%s%s".to_vec());
+        assert_eq!(words[0], arg_word(GAME_PATH_RESOURCES_GAMES.as_ptr()));
+        assert_eq!(words[2], 0, "a NULL id payload passes through raw_payload");
+        assert_eq!(
+            words[4],
+            arg_word(path_storage.as_ptr()),
+            "no leading slash — the path pointer passes unstripped"
+        );
+    }
+
+    #[test]
+    fn game_path_mode3_uses_share_format_and_never_reads_the_id_object() {
+        let mut destination = [0xa5u8; 16];
+        let path_storage = *b"shared/save\0";
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = game_path_bench(destination.as_mut_ptr());
+
+        // The original leaves r2 unread on the mode-3 path: an invalid
+        // id_string must not be dereferenced.
+        unsafe {
+            string_object_construct_game_path(
+                this,
+                3,
+                1 as *const StringObject,
+                0,
+                path_storage.as_ptr(),
+            )
+        };
+
+        let calls = game_path_engine_calls();
+        assert_eq!(calls.len(), 1);
+        let (format, words) = &calls[0];
+        assert_eq!(cstr_bytes(*format), b"iPod_Control/%s%s%s".to_vec());
+        assert_eq!(
+            words[0],
+            unsafe { arg_word(game_storage_dir_name_model(3)) },
+            "mode 3 resolves \"gamedata_ShareRW\""
+        );
+        assert_eq!(words[1], arg_word(GAME_PATH_SEPARATOR.as_ptr()));
+        assert_eq!(words[2], arg_word(path_storage.as_ptr()));
+    }
+
+    #[test]
+    fn game_path_other_modes_always_root_at_ipod_control() {
+        let mut destination = [0xa5u8; 16];
+        let id_storage = *b"stats\0";
+        let id = StringObject {
+            vtable: core::ptr::null(),
+            payload: id_storage.as_ptr() as *mut u8,
+        };
+        let path_storage = *b"/w\0";
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = game_path_bench(destination.as_mut_ptr());
+
+        // Stock quirk, preserved: the games_base flag only applies to
+        // mode 0; every other nonzero mode roots at "iPod_Control".
+        unsafe { string_object_construct_game_path(this, 2, &id, 1, path_storage.as_ptr()) };
+
+        let calls = game_path_engine_calls();
+        let (format, words) = &calls[0];
+        assert_eq!(cstr_bytes(*format), b"%s/%s/%s%s%s".to_vec());
+        assert_eq!(
+            words[0],
+            arg_word(GAME_PATH_IPOD_CONTROL.as_ptr()),
+            "games_base is ignored outside mode 0"
+        );
+        assert_eq!(
+            words[1],
+            unsafe { arg_word(game_storage_dir_name_model(2)) },
+            "mode 2 resolves \"gamestats_WO\""
+        );
+        assert_eq!(words[2], arg_word(id_storage.as_ptr()));
+        assert_eq!(words[4], unsafe { arg_word(path_storage.as_ptr().add(1)) });
+    }
+
+    #[test]
+    fn game_path_directory_name_runs_through_the_seam() {
+        let mut destination = [0xa5u8; 16];
+        let seam_dir = *b"seam_dir\0";
+        let id = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        let path_storage = *b"p\0";
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = game_path_bench(destination.as_mut_ptr());
+        unsafe {
+            core::ptr::addr_of_mut!(DIR_NAME_RESULT).write(seam_dir.as_ptr());
+            core::ptr::addr_of_mut!(GAME_STORAGE_DIR_NAME)
+                .write_volatile(recording_dir_name as GameStorageDirNameFn);
+
+            string_object_construct_game_path(this, 0, &id, 0, path_storage.as_ptr());
+            string_object_construct_game_path(this, 7, &id, 0, path_storage.as_ptr());
+        }
+
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(DIR_NAME_CALLS)).clone() },
+            std::vec![0, 7],
+            "the mode argument reaches the selector verbatim"
+        );
+        let calls = game_path_engine_calls();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(
+            calls[0].1[1],
+            arg_word(seam_dir.as_ptr()),
+            "the seam's result is what gets formatted, not a hardcoded string"
+        );
+        assert_eq!(calls[1].1[1], arg_word(seam_dir.as_ptr()));
     }
 
     // A preserving virtual allocator may relocate the payload. Its result is
