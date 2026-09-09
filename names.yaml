@@ -54534,3 +54534,40 @@ functions:
       The raw body does not inspect Expr::p_select. match.py is structural:
       LLVM's recursive call and list-helper slot call need not reproduce ADS
       instruction selection exactly.
+
+
+  # --- Filesystem cache-backed block acquisition ---
+  - address: 0x082e3f98
+    ghidra: FUN_082e3f98
+    name: cache_block_acquire
+    size: 128
+    sig: "u8 *cache_block_acquire(CacheContext *context, u32 block_index, u32 ignored, u32 cache_key)"
+    module: fs/cache_block
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: block_index
+      param_3/r2: ignored
+      param_4/r3: cache_key
+      local_14: entry
+      iVar2: cache_hit_or_read_result
+      FUN_082dfdf0: cache_entry_allocate
+      FUN_082c6244: disk_block_read
+      FUN_082e18bc: cache_entry_release
+    notes: >-
+      Raw ARM confirms the 128-byte extent from 0x082e3f98 through
+      0x082e4014; the separately entered next function begins at 0x082e4018.
+      A NULL context or block_index greater than or equal to the context's
+      +0x1d8 exclusive limit returns NULL without allocation. The incoming r2
+      is overwritten before the allocator call, while r3 is retained in the
+      pushed stack slot and forwarded as the cache key. A cache hit returns
+      its retained descriptor; a miss reads one block from the context's
+      +0x78 device into descriptor +0x18. A zero read result detaches and
+      releases the descriptor, then returns NULL. The allocator and disk-read
+      targets are not ported, so target code calls their verified retailOS
+      addresses and host tests install recording seams. The already ported
+      cache_entry_release replaces its retailOS address deliberately. Exactly
+      13 direct B/BL words target this entry, all unconditional bl: no
+      predicated forms and no tail branches. Host tests cover NULL and
+      exclusive-limit rejection, cache-hit bypass, miss read arguments, and
+      failed-miss detach/release.
