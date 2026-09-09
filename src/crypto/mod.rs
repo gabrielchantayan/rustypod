@@ -26,6 +26,10 @@
 //! [`evp_digest_update`] IS OpenSSL: the three-word `EVP_DigestUpdate`
 //! @ 0x0804a728, one of four EVP entry points sharing the assertion
 //! string `"ctx->digest->md_size <= EVP_MAX_MD_SIZE"` @ 0x0804a694.
+//! [`evp_pkey`] ports `EVP_PKEY_free` @ 0x0804ae6c, the reference-
+//! counted destructor of the p_lib.c `EVP_PKEY` wrapper (its
+//! constructor/type-normalizer/size siblings sit at 0x0804aeb4 /
+//! 0x0804af30 / 0x0804af10).
 //!
 //! [`bn_num_bits`] ports the `BIGNUM` bit-length query from bn_lib.c
 //! (the 0x0803d800..0x08041000 bignum cluster: `d`/`top`/`dmax`/`neg`/
@@ -37,5 +41,6 @@ pub mod bn_num_bits;
 pub mod cipher_name;
 pub mod digest_init;
 pub mod evp_digest_update;
+pub mod evp_pkey;
 pub mod obj_dat;
 pub mod xor_f6_in_place;
