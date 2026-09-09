@@ -3913,6 +3913,39 @@ functions:
       reloads, the inlined stop sequences with the 'stop'/'run ' FourCC
       stores, the mov r0,#4000 delay store, and the indirect arm tail.
 
+  - address: 0x08216d70
+    ghidra: FUN_08216d70
+    name: stop_progress_layout_transition
+    size: 52
+    sig: "void stop_progress_layout_transition(u8 *this)"
+    module: app/progress_layout_transition
+    status: ported
+    renames:
+      param_1/r0: this (progress-layout controller)
+      param_1_plus_0xb0: activity
+      param_1_plus_0xc1: active transition flag
+      param_1_plus_0xc4: transition timer
+      FUN_0812c6b0: timer_stop (already ported, called directly)
+      FUN_081f9248: unported activity cleanup callee
+    notes: >-
+      True extent is 52 bytes: push {r4,lr} starts at 0x08216d70 after the
+      preceding string's terminating NUL, and the sibling push {r4,r5,r6,lr}
+      starts at 0x08216da4. Every ARM B/BL immediate in osos.dec was decoded:
+      15 direct calls, 3 plain bl and 12 blne, no tail b. The predicated
+      callers gate on this+0xc1; they are not NULL guards, and the body repeats
+      the same byte-zero early return. Active path loads +0xc4 and calls
+      ported timer_stop, loads +0xb0 and calls 0x081f9248(activity, 1), then
+      clears +0xc1. Neither pointer is NULL-checked. The timer callee is
+      direct; unported 0x081f9248 stays behind a volatile
+      PROGRESS_LAYOUT_TRANSITION_OPS seam whose target default reaches the
+      firmware address and whose host default panics. Its wider identity is not
+      inferred. Host tests use the unique PROGRESS_LAYOUT_TRANSITION u32 slab
+      to prove inactive calls touch neither pointer and active calls stop the
+      timer before the literal-one activity call, then clear the flag.
+      Structural match.py review against this worktree archive (--size 52,
+      --lib) preserves the +0xc1 gate, +0xc4 timer path, +0xb0 literal-one
+      activity call and final byte clear; LLVM inlines ported timer_stop.
+
   - address: 0x082199bc
     ghidra: FUN_082199bc
     name: update_dispatch
