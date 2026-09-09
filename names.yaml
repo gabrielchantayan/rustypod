@@ -13611,6 +13611,49 @@ functions:
       pointer, construction order, return adoption, vtable/payload stores, and
       tag-2 allocation.
 
+  - address: 0x0811050c
+    ghidra: FUN_0811050c
+    name: vtable_two_pair_base_construct
+    size: 40
+    sig: "void *vtable_two_pair_base_construct(void *this, const void *src_pair_at_4, const void *src_pair_at_12)"
+    module: cxx/vtable_two_pair_base_construct
+    status: ported
+    renames:
+      param_1/r0: this (aligned writable 20-byte base object, returned)
+      param_2/r1: src_pair_at_4 (8-byte pair source copied to this +0x04)
+      param_3/r2: src_pair_at_12 (8-byte pair source copied to this +0x0c)
+      FUN_081bb6a4: pair_copy (shared two-word copy leaf, inlined)
+    notes: >-
+      Raw extent is exactly 40 bytes, 0x0811050c..0x08110534, plus the
+      literal-pool vtable word 0x08981718 at 0x08110534; the next separately
+      linked function starts at 0x08110538. Ghidra's 40-byte size matches.
+      Decoding every ARM B/BL word in osos.dec found exactly 14 inbound
+      calls, all unconditional bl (0x08103e14, 0x0812bdd8, 0x0812e8ec,
+      0x0812ea1c, 0x081558f0, 0x0815f1d0, 0x0815fbdc, 0x0816de28,
+      0x081baaec, 0x081d0d9c, 0x081e8794, 0x081fadcc, 0x08203274,
+      0x0820443c), with zero predicated bl, zero tail b, and zero aligned
+      data-word references. The unguarded leaf installs vtable 0x08981718 at
+      this+0, then runs the shared two-word copy at 0x081bb6a4 twice:
+      (this+4, r1) and (this+12, r2), returning this in r0. All 14 callers
+      are derived-class constructors (push {r4,lr}; bl; ldr derived_vtable;
+      str [r0]) that never set r1/r2, so the pair sources are stale
+      grandcaller registers and the pair fields transiently hold
+      leftover-pointer data until later initialization. Ghidra's C drops all
+      three arguments (FUN_0811050c()). Anomaly documented, not resolved:
+      the vtable region 0x08981718 decodes as neither ARM/Thumb code nor a
+      code-pointer table in osos.dec, yet consumer 0x08103dc8 dispatches
+      through [vtable+8], so the region is presumably rewritten at runtime.
+      Deliberate deviation: the 0x081bb6a4 pair copy is inlined with
+      volatile ordered loads/stores per project precedent, preserving the
+      vtable-store-before-first-pair-load ordering (a self/overlapping
+      source observes the vtable store). Host tests (3): field layout and
+      this return with neighbour preservation, overlapping first-pair source
+      observing the vtable store, second-pair source aliasing the first
+      pair's destination. match.py --lib worktree archive (exit 1, diff
+      expected): same vtable store and four ordered load/store pairs at
+      +0x04/+0x08/+0x0c/+0x10; deltas are the crate fp frame and the inlined
+      pair copies replacing the two bl 0x081bb6a4.
+
   - address: 0x08110fdc
     ghidra: FUN_08110fdc
     name: queued_message_post
