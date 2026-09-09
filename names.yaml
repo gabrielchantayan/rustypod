@@ -48945,6 +48945,69 @@ functions:
       subtract-and-cmp range test and additions use 32-bit wrapping, retained
       explicitly in Rust. No deliberate deviation.
 
+  # --- Selector-item base-class constructor (PairHeaderBase embedder) ---
+  - address: 0x08218b10
+    ghidra: FUN_08218b10
+    name: selector_item_base_construct
+    size: 124
+    sig: "void *selector_item_base_construct(void *this, u8 item_id, u32 descriptor, u8 item_kind, u32 context, u8 enable_flag)"
+    module: cxx/selector_item_base
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: item_id
+      param_3/r2: descriptor
+      param_4/r3: item_kind
+      param_5/[sp,#8]: context
+      param_6/[sp,#12]: enable_flag
+      r4: object
+    notes: >-
+      Raw extent is exactly 124 bytes of code, 0x08218b10..0x08218b8c, plus a
+      three-word literal pool at 0x08218b8c..0x08218b98 (vtable 0x08993c60,
+      selector 0x801c, impl thunk 0x08ae5444); the next function's
+      push {r4, r5, r6, r7, r8, lr} begins at 0x08218b98. Ghidra's 124-byte
+      size is the code extent only. Decoding every ARM B/BL word in osos.dec
+      finds exactly 17 direct inbound call sites, all unconditional BL:
+      0x08218da0, 0x082224d8, 0x08228e48, 0x08234b30, 0x08234f54,
+      0x08237a80, 0x08237bf0, 0x08237fec, 0x0823ad74, 0x0823af28,
+      0x0825db80, 0x0825dfd0, 0x08260c54, 0x08261094, 0x08261570,
+      0x0826ac34, and 0x0826b084. No predicated BL forms, no direct tail B,
+      and no data references (the address appears in no vtable). Every call
+      site is a derived-class constructor with the same shape (push {r2, r3,
+      r4, lr}; plant both stack arguments; bl; then overwrite the vtable
+      word at +0x00 with its own and store derived fields at
+      +0x18/+0x1c/+0x20), which is what marks this as a base class; the
+      class itself is unidentified and the name is structural. The
+      constructor builds a 0x180-byte object: vtable at +0x00, flags byte
+      at +0x04 updated as (old & ~1 | enable_flag) & ~2 (bit0 from the
+      whole low flag byte, bit1 always cleared, upper bits preserved),
+      context word +0x08, caller bytes/word at +0xb4/+0xb8/+0xbc, the
+      0xb8-byte PairHeaderBase subobject at +0xc0 built by the ported
+      pair_header_base_construct @ 0x0810ebbc (this recovered from its
+      result minus 0xc0, exactly as the ARM does), trailing words
+      +0x178/+0x17c cleared, +0x0c..+0xb3 zero-filled through the IRAM
+      veneer 0x08037db8 (the port calls the ported memzero_aligned
+      directly, the established idiom), then the default 12-byte selector
+      record {selector 0x801c, byte 8, impl 0x08ae5444} planted at
+      +0x0c/+0x10/+0x14. The record ties the class into the fixed selector
+      table that selector_record_address @ 0x08218aec maps
+      (0x801c..=0x8029, 12-byte records). Documented anomaly, not
+      resolved: the {selector, impl} pair table at 0x0826acd0 lists the
+      same impl thunk 0x08ae5444 under selector 0x801d, while this
+      constructor plants it next to 0x801c; 0x08ae5444 is a mid-function
+      entry (mov r2, sp; mov r1, #1; mov r0, #25; ...; pop {ip, pc})
+      whose owning function is unidentified. No dispatch seams: both
+      callees are ported. Host tests prove the full store layout, the
+      read-modify-write flags formula (including a bit-1-bearing flag
+      never setting bit1), and the original's ordering (vtable and caller
+      fields before the embedded base chain; trailing clears, zero-fill
+      and selector record after it). match.py structural: LLVM
+      reassociates the flags RMW to (old & 0xfc) | (flag & 0xfd)
+      (algebraically identical), lowers the fixed-size zero fill to the
+      archive-provided weak __aeabi_memclr4 over +0x10..+0xb4 with the
+      record stores folded around it, and elides the sub r4, r0, #0xc0
+      recovery after proving the ported base ctor returns its argument.
+
   # --- Four-slot artwork cache availability query ---
   - address: 0x081b6d88
     ghidra: FUN_081b6d88
