@@ -53563,3 +53563,68 @@ functions:
       the poll; fixtures map one slab at the dedicated
       hints::IAP_INCOMING_CLIENT_BASE (0xca000000) with the client object at
       +0x000 and two 0x240-byte thread contexts at +0x400/+0x800.
+
+  # --- handler-list activation facade ---
+  - address: 0x08134720
+    ghidra: FUN_08134720
+    name: handler_list_activate
+    size: 124
+    sig: "void handler_list_activate(HandlerListOwner *owner, HandlerList *handlers)"
+    module: app/handler_list_activate
+    status: ported
+    renames:
+      param_1/r0: owner (this - the screen/handler object whose vtable
+        slot +0xd0 receives the dispatch result)
+      param_2/r1: handlers (the caller's 24-byte stack HandlerList)
+      DAT_08134798: HANDLER_LIST_RESOURCE (0x0dad0195, the pool word)
+      FUN_081e8ca0: handler_context_get (HANDLER_LIST_ACTIVATE_OPS seam;
+        unported lazy singleton - 0x34-byte context object, cache word
+        0x089cfe38, ctor 0x081e8ee8)
+      FUN_081e8da0: handler_context_install_list (seam; unported)
+      FUN_081e8cd0: handler_context_active_state (seam; unported)
+      FUN_0817ee04: app_controller_get (direct, ported in app/singletons)
+      FUN_08181110: app_controller_begin_command (seam; unported - 48
+        bytes, fills a 16-byte record from FUN_08182c78 and mirrors it at
+        controller +0x88)
+      FUN_081dfa20: command_dispatcher_get (direct, ported)
+      FUN_081dfab0: command_dispatch_by_resource (direct, ported)
+    notes: >-
+      EXTENT: Ghidra's 120 bytes is the code only; the function owns one
+      trailing literal-pool word (0x0dad0195 @ 0x08134798, reached by ldr
+      r4, [pc, #56]), so the true extent is 124 bytes, 0x08134720..
+      0x0813479c, where the next function opens push {r4-r10, lr}. CALL
+      COUNT verified by decoding every B/BL word in osos.dec: exactly 14
+      bl sites, 11 unconditional plus 3 predicated blne @ 0x08223084,
+      0x08226d04, 0x08239650, each immediately after cmn r0, #1 - the
+      CALLER skips activation when its preceding virtual query answered
+      -1; this function carries no such guard. No plain-b tail-call
+      sites. ALGORITHM: the consumer half of the handler-list protocol
+      (callers stack-build a HandlerList with handler_list_construct
+      0x0816cbfc and vector_push_back_elem12 pushes like
+      {"HandleAddToOTG" + 1, 1}): install the list into the
+      handler-context singleton, read the context's active-state word,
+      post command 0x0dad0195 (private 0x0dad0000 namespace) with that
+      state to the app controller's pending-command record, dispatch
+      command 0x0dad0196 (resource = command - 1, aux = 0) through the
+      command dispatcher, and tail-dispatch the owner's vtable slot
+      +0xd0 with the dispatch result (bx r2). The context getter is
+      genuinely called twice, bracketing the install. Ghidra's C is
+      accurate this time (its jumptable warning is just the tail bx).
+      Deviations: the four unported callees ride the
+      HANDLER_LIST_ACTIVATE_OPS read_volatile seam (command_dispatch.rs
+      pattern) - target defaults transmute 0x081e8ca0 / 0x081e8da0 /
+      0x081e8cd0 / 0x08181110 so the port is hook-ready on device, host
+      defaults panic; the owner vtable keeps a structural pointer
+      representation with a target-width +0xd0 offset assertion (the
+      controller_layout_dispatch.rs pattern). Host tests (serial, own
+      OPS_LOCK then SINGLETON_LOCK then the heap mock lock): the full
+      dependency order (context-get, install, context-get, state,
+      begin-command, ctor alloc/registry/resolve, dispatch, dtor,
+      owner-slot) with every argument asserted, plus a zero-state run
+      proving the state word and dispatch result forward verbatim.
+      match.py --lib <worktree archive>: same skeleton - install pair,
+      state read, controller post with (0x0dad0195, 0, 0, state, 0),
+      dispatch with (resource, resource + 1, 0), vtable +0xd0 tail bx;
+      deltas are the fp prologue, the seam blx indirection, and
+      relocation placeholders for the three ported bl targets, the
+      accepted deviation classes. 37 instructions vs 30.
