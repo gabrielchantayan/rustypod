@@ -52624,3 +52624,30 @@ functions:
       the core cmp/ldrne at +28 matches. Host fixtures use the dedicated
       CURRENT_WINDOW hint (0x43000000); the +0x1c field is read as a u32
       target word and widened.
+
+  - address: 0x082ab3ec
+    ghidra: FUN_082ab3ec
+    name: cpp_finalise_dtor_guard
+    size: 20
+    sig: "void *cpp_finalise_dtor_guard(void *array, u32 count, u32 elem_size, void (*dtor)(void *))"
+    module: heap/veneers
+    status: ported
+    renames:
+      param_1/r0: array
+      param_2/r1: count
+      param_3/r2: elem_size
+      param_4/r3: dtor
+      ip/r12: saved_count
+    notes: >-
+      Raw ARM extent is exactly 20 bytes: 0x082ab3ec..0x082ab3fc, followed
+      immediately by the separately linked 0x082ab400. It saves count in ip,
+      tests dtor with movs, and either returns array unchanged when dtor is
+      NULL or moves count to r3 and tail-branches to __cpp_finalise
+      (0x080336d8) with (array, dtor, elem_size, count); that walker returns
+      array-8. Ghidra's loop body is not present in the raw bytes. Decoding
+      every ARM B/BL immediate in osos.dec finds 17 inbound direct branches:
+      14 unconditional bl and three unconditional tail b
+      (0x08038e24/0x08038e90/0x08038eb0), with no predicated branches.
+      Scanning aligned osos.dec words finds no 0x082ab3ec data reference, so
+      this is not dispatched virtually. The Rust call cannot guarantee the
+      ARM tail-call shape but preserves both observable return paths.
