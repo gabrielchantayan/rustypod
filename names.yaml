@@ -53807,3 +53807,45 @@ functions:
       alloc/zero/store/tail-post structure, deltas are the HEAP_OPS and
       volatile-fn blx indirection, the fp frame, and the null-check
       branch (the documented deviation).
+
+  # --- Counted wide-string equality under collation flags ---
+  - address: 0x08059b60
+    ghidra: FUN_08059b60
+    name: counted_wstr_eq
+    size: 40
+    sig: "u32 counted_wstr_eq(const u16 *a, const u16 *b, u32 flags)"
+    module: util/counted_wstr_eq
+    status: ported
+    vars:
+      param_1/r0: a
+      param_2/r1: b
+      param_3/r2: flags
+    notes: >-
+      Extent verified from raw bytes: exactly 40 bytes (10
+      instructions), the next word at 0x08059b88 begins an unrelated
+      body (ldr r3,[r0,#0x5c] counter bump). Both operands are counted
+      UTF-16 strings: a u16 element count followed by that many
+      elements. The wrapper reads both counts, then calls the counted
+      wide-string compare FUN_0804529c @ 0x0804529c (396 bytes, not
+      ported) as compare(a+1, a[0], b+1, b[0], flags) with flags as the
+      fifth AAPCS stack argument (the original's str r2,[sp] over the
+      pushed r3 slot; the callee reads it at [sp,#0x40] after its
+      9-reg push and 28-byte frame). rsbs r0,r0,#1 + movcc r0,#0 maps
+      the tri-state to strict equality: 1 iff compare returned exactly
+      0, else 0 (negatives are huge unsigned, so they map to 0 too).
+      Call count verified by decoding every ARM B/BL word in osos.dec:
+      14 direct calls, all unconditional bl, zero predicated forms.
+      Callee semantics from its raw bytes: flags bit 0 skips leading
+      elements <= 0x20 on both sides and folds a..z to uppercase, bit 2
+      routes straight to the generic collate engine at 0x08045c24, bit
+      3 is forwarded to it, bit 4 bails to it when both current
+      elements are ASCII digits, and any element > 0x7a or with a zero
+      weight-table entry also bails; all observed callers pass flags =
+      0. Deliberate deviation: 0x0804529c is not ported, so its call is
+      an explicit COUNTED_WSTR_COMPARE dispatch seam (debug_printf
+      precedent) - target builds transmute 0x0804529c, host default is
+      a placeholder returning 1 and tests substitute a recorder.
+      match.py --lib <worktree archive>: 16 vs 10 instructions; same
+      ldrh header loads, stack-passed flags and 0/1 result mapping,
+      deltas are the seam blx indirection, the fp frame, and clz/lsr
+      instead of rsbs/movcc for the equality map.
