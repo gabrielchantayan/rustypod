@@ -50290,3 +50290,84 @@ functions:
       structural review (exit 1 expected) finds the same signed
       non-positive early return and bytewise XOR-F6 loop; LLVM differs only
       by counting down len and post-incrementing the pointer.
+
+  - address: 0x082045ac
+    ghidra: FUN_082045ac
+    name: screen_base_construct
+    size: 128
+    sig: "ScreenBase *screen_base_construct(ScreenBase *storage, u32 initial_target, u32 create_link, u32 resource_id)"
+    module: app/screen_base
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r1: initial_target
+      param_3/r2: create_link
+      param_4/r3: resource_id
+      FUN_0812468c: ScreenBaseOps::construct_base (seam, unported base-ctor chain)
+      FUN_0827233c: task_ctx_field_0x30 (direct, ported)
+      FUN_082722a0: ScreenBaseOps::set_next_link (seam, unported refcounted link setter)
+      FUN_081d2204: framework_root_instance (direct, ported)
+      DAT_08204624: SCREEN_BASE_VTABLE_ADDRESS (0x089917d4)
+      DAT_08204628: ROOT_RESOURCE_ID (0x0dad0167)
+    notes: >-
+      16 bl + 0 predicated bl + 0 b call sites, binary-scanned by decoding
+      every B/BL word in osos.dec (matches Ghidra's 16). True extent is
+      128 bytes: Ghidra's 120 bytes of code plus the two literal-pool
+      words @ 0x08204624 (vtable 0x089917d4) and 0x08204628 (id
+      0x0dad0167); the next separately linked function - the class's
+      deleting destructor - begins at 0x0820462c, confirmed from raw
+      bytes. The shared base constructor of the Silver screen classes:
+      every caller does `mov r2,#1; bl 0x082045ac` then re-plants its own
+      vtable over +0x00/+0x1c (the derived-ctor idiom); caller
+      0x081d25ac builds the framework root object itself (it ends by
+      storing the object into the framework_root_instance holder @
+      0x089cc858) and passes r3 = 0x0dad0167, and caller 0x0815e934
+      registers the TCSportTimer* screen classes. Algorithm: this =
+      <base chain @ 0x0812468c>(storage, initial_target, create_link) -
+      the chain bottoms out in the ported framework_base_construct @
+      0x081110d0 and registers the object at task-ctx +0x34; this is the
+      base ctor's RETURN (mov r4,r0), not the incoming storage. Plant
+      vtable 0x089917d4 at +0x00 and primary+0xdc at +0x1c (the
+      secondary virtual-base vtable 0x089918b0: 17 words of
+      pure-virtual thunks 0x082a0464). Store resource_id at +0x20, clear
+      the owned sub-object at +0x24 (the dtor releases it through its
+      vtable slot +0x04). Link into the current task's
+      resource-provider chain: head = task_ctx_field_0x30() (task-ctx
+      +0x30, cf. app/resource_chain.rs), installed at +0x14 through the
+      refcounted setter @ 0x082722a0 (release old @ 0x08124dbc, retain
+      new @ 0x08124af4). Then, only when initial_target == 0 AND the
+      +0x20 value re-read from the object (ldr r0,[r4,#32], not the
+      saved r6) is not 0x0dad0167, adopt the framework root instance as
+      the target via vtable slot +0x2c (the "adopt this target" slot,
+      same as framework_base_initialize's). 0x0dad0167 sits in
+      retailOS's private 0x0dad0000..0x0dad0fff resource-id namespace
+      (cf. app/registry.rs STOCK_KEY) and is passed only by the root's
+      own constructor - the root cannot adopt itself, and its holder
+      slot is stored only at the very end of that constructor. No NULL
+      guards anywhere: NULL base-ctor return faults at the vtable store,
+      no current task faults inside task_ctx_field_0x30, a pre-init NULL
+      root is dispatched to slot +0x2c verbatim. Deviations: the vtable
+      address is static image data, so firmware builds plant the
+      original 0x089917d4 (the application_resource_provider precedent)
+      and host builds plant a modeled static with a swappable slot +0x2c;
+      the secondary store computes primary + size_of::<ScreenBaseVtable>
+      which 32-bit layout asserts pin to exactly 0xdc (the original's
+      add r0,r0,#220). The two unported direct callees sit behind
+      SCREEN_BASE_OPS seams (the app/class_6800.rs precedent):
+      construct_base's default stub returns storage verbatim (only the
+      return-value contract is modeled), set_next_link's default stub
+      models the store (`if old != new { next = new }`) and omits the
+      retain/release calls. +0x20 is named resource_id from the single
+      observed nonzero writer; its readers live in the class's unported
+      methods. Host tests (8 in the module): explicit target skips
+      adoption; zero target adopts the holder's root instance; a NULL
+      root is still dispatched; the root id suppresses adoption;
+      id+-1 and an out-of-namespace id still adopt; a relocating base
+      ctor's return is honored (storage untouched); both default stubs'
+      modeled behavior. match.py structural: identical store sequence
+      (vtable, add #220 secondary, +0x20, +0x24), same cmp r5,#0 /
+      re-read [r4,#32] / literal 0x0dad0167 gate, same vtable +0x2c
+      re-load and blx; the diffs are the crate fp prologue and the two
+      ldr/blx seam calls standing in for bl 0x0812468c / bl 0x082722a0,
+      plus the inlined CURRENT_TASK_CTX_BLOCK slot for bl 0x0827233c -
+      all documented deviations.
