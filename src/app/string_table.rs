@@ -317,6 +317,107 @@ pub unsafe extern "C" fn string_table_set_decimal(
     }
 }
 
+/// The unported fallback-table value-slot lookup used by
+/// [`string_table_set_hex`]. `FUN_083db69c` copy-constructs a (key,
+/// empty-string) node pair from `key`, runs the string map's
+/// find-or-insert @ 0x083c4884 against the 0x1c-byte map at `map`,
+/// destroys the pair temporaries, and returns the address of the found
+/// node's mapped-value COW-string word (node + 0x14).
+#[derive(Clone, Copy)]
+pub struct StringTableSlotOps {
+    /// `FUN_083db69c` @ 0x083db69c — resolves the mapped-value string
+    /// word for `key` in the map at `map`, inserting an empty value when
+    /// the key is absent.
+    pub value_slot: unsafe extern "C" fn(map: *mut u8, key: *mut *mut u8) -> *mut *mut u8,
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_string_table_value_slot(
+    map: *mut u8,
+    key: *mut *mut u8,
+) -> *mut *mut u8 {
+    let slot: unsafe extern "C" fn(*mut u8, *mut *mut u8) -> *mut *mut u8 =
+        unsafe { core::mem::transmute(0x083d_b69cusize) };
+    unsafe { slot(map, key) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_string_table_value_slot(
+    _map: *mut u8,
+    _key: *mut *mut u8,
+) -> *mut *mut u8 {
+    panic!("string_table_set_hex requires fallback-table value-slot lookup 0x083db69c")
+}
+
+/// Active model of `FUN_083db69c`. The target default reaches the retail
+/// helper; host tests install a recorder until that helper is ported.
+#[cfg(target_os = "none")]
+pub static mut STRING_TABLE_SLOT_OPS: StringTableSlotOps = StringTableSlotOps {
+    value_slot: firmware_string_table_value_slot,
+};
+
+/// Active model of `FUN_083db69c`. The host default reports an accidental
+/// unmocked traversal into the still-unported helper.
+#[cfg(not(target_os = "none"))]
+pub static mut STRING_TABLE_SLOT_OPS: StringTableSlotOps = StringTableSlotOps {
+    value_slot: missing_string_table_value_slot,
+};
+
+#[inline(always)]
+unsafe fn string_table_slot_ops() -> StringTableSlotOps {
+    core::ptr::read_volatile(core::ptr::addr_of!(STRING_TABLE_SLOT_OPS))
+}
+
+/// string_table_set_hex — original: `FUN_08101f94` @ 0x08101f94 (84 bytes,
+/// 0x08101f94..0x08101fe8: code through `pop {r4,r5,r6,pc}` @ 0x08101fe4
+/// plus the trailing "%lx" literal word @ 0x08101fe8; the next function's
+/// `push {r4,r5,r6,lr}` sits at 0x08101fec; **13 unconditional `bl` call
+/// sites, zero predicated forms, zero `b` references, zero data-word
+/// references**, verified by decoding every ARM B/BL word and every word
+/// equal to the address in osos.dec).
+///
+/// Renders `value` through `sprintf(buffer, "%lx", value)` into the
+/// original's 512-byte stack buffer, builds a temporary COW string from
+/// the text with `cxx_string_from_cstr` @ 0x083d8b5c, resolves the
+/// mapped-value slot for `key` in the FALLBACK table at `table + 0x38`
+/// via the unported lookup @ 0x083db69c, assigns the temporary into that
+/// slot with `cxx_string_assign` @ 0x083d8d1c, and releases the temporary
+/// with `cxx_string_release` @ 0x083d8b04. There is no NULL guard on any
+/// argument.
+///
+/// Unlike its sibling [`string_table_set_decimal`] — which routes through
+/// the current-table assign helper @ 0x08101da0 and takes its number by
+/// pointer — this function takes `value` BY VALUE in r2 and stores into
+/// the fallback (default-language) table; sampled callers pass UI-state
+/// keys ("SelectAlbum", "SelectArtist") with selection-handle values.
+/// Ghidra's C for the original DROPS the third parameter entirely, and
+/// its three-argument rendering of the two-argument `cxx_string_from_cstr`
+/// call is register residue, not a real argument.
+///
+/// Deviations: the formatter port takes an explicit va-list pointer, so
+/// `&value` replaces the original r2 at the `sprintf` boundary; the
+/// 0x083db69c lookup rides the [`STRING_TABLE_SLOT_OPS`] volatile
+/// dispatch seam (the verified retail load address on target, a
+/// panicking default on host).
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn string_table_set_hex(table: *mut u8, key: *mut *mut u8, value: u32) {
+    let mut buffer = core::mem::MaybeUninit::<[u8; 512]>::uninit();
+    let buffer = buffer.as_mut_ptr().cast::<u8>();
+    let arguments = &value as *const u32;
+    unsafe {
+        crate::printf::printf_api::sprintf(buffer, b"%lx\0".as_ptr(), arguments);
+    }
+
+    let mut text = core::mem::MaybeUninit::<*mut u8>::uninit();
+    let text = unsafe { crate::cxx::string::cxx_string_from_cstr(text.as_mut_ptr(), buffer) };
+    unsafe {
+        let slot = (string_table_slot_ops().value_slot)(table.add(FALLBACK_TABLE_OFFSET), key);
+        crate::cxx::string::cxx_string_assign(slot, text);
+        crate::cxx::string::cxx_string_release(text);
+    }
+}
+
 #[cfg(test)]
 mod set_decimal_tests {
     extern crate std;
@@ -472,6 +573,169 @@ mod set_decimal_tests {
             }
         }
 
+    }
+}
+
+#[cfg(test)]
+mod set_hex_tests {
+    extern crate std;
+
+    use super::*;
+    use crate::printf::printf_api::{PrintfEngineFn, PRINTF_ENGINE};
+    use crate::heap::types::{HeapDescriptor, HeapDescriptorDescriptor};
+    use crate::heap::veneers::{HeapVeneerOps, HEAP_OPS};
+    use core::ffi::c_void;
+    use core::ptr;
+    use std::ffi::CStr;
+    use std::sync::{Mutex, MutexGuard};
+    use std::vec::Vec;
+
+    static OPS_LOCK: Mutex<()> = Mutex::new(());
+    static mut LOOKUP: Option<(usize, Vec<u8>)> = None;
+    /// The one-word mapped-value string object the lookup seam returns.
+    static mut SLOT: *mut u8 = ptr::null_mut();
+
+    const ARENA_SIZE: usize = 1024;
+
+    #[repr(C, align(8))]
+    struct Arena([u8; ARENA_SIZE]);
+
+    static mut ARENA: Arena = Arena([0; ARENA_SIZE]);
+    static mut ARENA_USED: usize = 0;
+
+    struct OpsGuard {
+        slot: StringTableSlotOps,
+        engine: PrintfEngineFn,
+    }
+
+    impl Drop for OpsGuard {
+        fn drop(&mut self) {
+            unsafe {
+                ptr::write_volatile(ptr::addr_of_mut!(STRING_TABLE_SLOT_OPS), self.slot);
+                ptr::write_volatile(ptr::addr_of_mut!(PRINTF_ENGINE), self.engine);
+            }
+        }
+    }
+
+    struct ArenaGuard {
+        ops: HeapVeneerOps,
+    }
+
+    impl Drop for ArenaGuard {
+        fn drop(&mut self) {
+            unsafe {
+                ptr::write_volatile(ptr::addr_of_mut!(HEAP_OPS), self.ops);
+            }
+        }
+    }
+
+    unsafe extern "C" fn hex_engine(
+        fmt: *const u8,
+        putc: unsafe extern "C" fn(u8, *mut c_void),
+        context: *mut c_void,
+        arguments: *const u32,
+    ) -> i32 {
+        assert_eq!(unsafe { CStr::from_ptr(fmt.cast()).to_bytes() }, b"%lx");
+        let text = std::format!("{:x}", unsafe { arguments.read() });
+        for byte in text.bytes() {
+            unsafe { putc(byte, context) };
+        }
+        text.len() as i32
+    }
+
+    unsafe extern "C" fn record_value_slot(map: *mut u8, key: *mut *mut u8) -> *mut *mut u8 {
+        let key = unsafe { CStr::from_ptr((*key).cast()).to_bytes().to_vec() };
+        unsafe { LOOKUP = Some((map as usize, key)) };
+        unsafe { ptr::addr_of_mut!(SLOT) }
+    }
+
+    unsafe extern "C" fn arena_alloc(
+        _heap: *mut HeapDescriptorDescriptor,
+        size: usize,
+        _tag: usize,
+    ) -> *mut u8 {
+        let used = unsafe { ARENA_USED };
+        let aligned = (size + 7) & !7;
+        if used + aligned > ARENA_SIZE {
+            return ptr::null_mut();
+        }
+        unsafe {
+            ARENA_USED = used + aligned;
+            ptr::addr_of_mut!(ARENA.0).cast::<u8>().add(used)
+        }
+    }
+
+    unsafe extern "C" fn arena_free(
+        _heap: *mut HeapDescriptorDescriptor,
+        _ptr: *mut u8,
+        _tag: usize,
+    ) {
+    }
+
+    unsafe extern "C" fn arena_create(
+        descriptor: *mut HeapDescriptor,
+        _start: *mut u8,
+        _size: usize,
+    ) -> *mut HeapDescriptorDescriptor {
+        descriptor.cast()
+    }
+
+    fn install() -> (MutexGuard<'static, ()>, OpsGuard) {
+        let lock = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            let guard = OpsGuard {
+                slot: ptr::read_volatile(ptr::addr_of!(STRING_TABLE_SLOT_OPS)),
+                engine: ptr::read_volatile(ptr::addr_of!(PRINTF_ENGINE)),
+            };
+            ptr::write_volatile(
+                ptr::addr_of_mut!(STRING_TABLE_SLOT_OPS),
+                StringTableSlotOps { value_slot: record_value_slot },
+            );
+            ptr::write_volatile(ptr::addr_of_mut!(PRINTF_ENGINE), hex_engine);
+            LOOKUP = None;
+            (lock, guard)
+        }
+    }
+
+    #[test]
+    fn formats_unsigned_hex_and_assigns_into_fallback_table_slot() {
+        let (_lock, _restore) = install();
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _arena = unsafe {
+            ARENA_USED = 0;
+            let previous = ptr::read_volatile(ptr::addr_of!(HEAP_OPS));
+            let mut active = previous;
+            active.alloc = arena_alloc;
+            active.free = arena_free;
+            active.create = arena_create;
+            ptr::write_volatile(ptr::addr_of_mut!(HEAP_OPS), active);
+            ArenaGuard { ops: previous }
+        };
+        let mut key_data = *b"SelectAlbum\0";
+        let mut key = key_data.as_mut_ptr();
+        // The recorder never dereferences the map pointer, so a fixed
+        // stand-in address proves the `table + 0x38` fallback arithmetic.
+        let table = 0x2000usize as *mut u8;
+
+        for value in [0u32, 0x2a, 0xdead_beef, 0xffff_ffff] {
+            unsafe {
+                // A fresh empty mapped value for the lookup to return.
+                crate::cxx::string::cxx_string_from_cstr(ptr::addr_of_mut!(SLOT), b"\0".as_ptr());
+                string_table_set_hex(table, &mut key, value);
+                assert_eq!(
+                    LOOKUP,
+                    Some((
+                        table as usize + FALLBACK_TABLE_OFFSET,
+                        b"SelectAlbum".to_vec(),
+                    )),
+                );
+                assert_eq!(
+                    CStr::from_ptr(SLOT.cast()).to_bytes(),
+                    std::format!("{value:x}").as_bytes(),
+                );
+                crate::cxx::string::cxx_string_release(ptr::addr_of_mut!(SLOT));
+            }
+        }
     }
 }
 

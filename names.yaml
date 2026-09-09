@@ -32036,6 +32036,58 @@ functions:
       negative, and i32::MIN values; it also proves table and key
       propagation into the assignment seam. match.py structural report
       differs as expected (exit 1).
+
+  - address: 0x08101f94
+    ghidra: FUN_08101f94
+    name: string_table_set_hex
+    size: 84
+    sig: "void string_table_set_hex(u8 *table, char **key, u32 value)"
+    module: app/string_table
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: key
+      r2: value
+      FUN_0802f724: sprintf
+      FUN_083d8b5c: cxx_string_from_cstr
+      FUN_083db69c: string_table_fallback_value_slot
+      FUN_083d8d1c: cxx_string_assign
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Formats value through sprintf("%lx") into a 512-byte stack buffer,
+      builds a temporary COW string with cxx_string_from_cstr, resolves
+      the mapped-value slot for key in the FALLBACK (default-language)
+      table at table+0x38 through FUN_083db69c, assigns the temporary
+      into that slot with cxx_string_assign, and releases it. value is
+      taken BY VALUE in r2 - Ghidra's C drops the third parameter
+      entirely, and its three-argument rendering of the two-argument
+      cxx_string_from_cstr call is register residue. Extent confirmed
+      from raw bytes: code ends with pop {r4,r5,r6,pc} @ 0x08101fe4 plus
+      the trailing "%lx" literal word @ 0x08101fe8 (84 bytes total), and
+      the next function's push sits at 0x08101fec, so Ghidra's 84 is
+      exact. Call census by decoding every ARM B/BL word and every word
+      equal to the address in osos.dec: 13 bl call sites, all
+      unconditional, zero predicated forms, zero b references, zero
+      data-word references. sprintf, cxx_string_from_cstr,
+      cxx_string_assign, and cxx_string_release are ported. FUN_083db69c
+      is NOT ported: raw decode shows it copy-constructing a (key,
+      empty-string) node pair, running the string map's find-or-insert @
+      0x083c4884 against the map at table+0x38, destroying the pair
+      (0x082a8580, cxx_string_release), and returning node+0x14, the
+      mapped-value string word. It rides the STRING_TABLE_SLOT_OPS
+      volatile seam whose device default transmutes 0x083db69c. Sibling
+      of string_table_set_decimal @ 0x08101d4c, which takes its number
+      by pointer and routes through the current-table assign helper @
+      0x08101da0 instead. Sampled callers (0x08238320, 0x08225ea4) store
+      UI selection handles under "SelectAlbum"/"SelectArtist" keys. The
+      sprintf port takes an explicit va-list pointer, so the port passes
+      &value rather than the original variadic r2 word. Host test uses a
+      faithful %lx engine and a heap-backed COW string fixture covering
+      0, 0x2a, 0xdeadbeef, and 0xffffffff; it also proves the table+0x38
+      fallback arithmetic and key pass-through into the lookup seam.
+      match.py structural report differs as expected (exit 1); the call
+      sequence sprintf/from_cstr/lookup/assign/release is preserved.
+
   - address: 0x08101edc
     ghidra: FUN_08101edc
     name: string_table_has_string
