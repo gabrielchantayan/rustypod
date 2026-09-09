@@ -168,6 +168,89 @@ pub unsafe extern "C" fn element_registry_add(
     ((*vtable).insert)(registry, core::ptr::addr_of_mut!(slot));
 }
 
+/// The secondary collection subobject of the element family built at
+/// `0x0817e3b0`.
+///
+/// The sibling constructor initializes an observable-array-derived object at
+/// `element + 0x34`; this wrapper needs only its dynamic dispatch prefix.
+#[repr(C)]
+pub struct RegistryElementSecondaryCollection {
+    /// +0x00 relative to the subobject: runtime vtable pointer.
+    pub vtable: *const RegistryElementSecondaryCollectionVtable,
+}
+
+/// Recovered part of the secondary collection's runtime vtable.
+///
+/// The target stored at +0x1c cannot be identified from the static image, so
+/// this is deliberately a structural dispatch model rather than a seam.
+#[repr(C)]
+pub struct RegistryElementSecondaryCollectionVtable {
+    /// Slots +0x00..+0x18: not used by this wrapper.
+    pub unresolved_00_18: [usize; 7],
+    /// +0x1c: receives the secondary collection and a pointer to a stack word
+    /// holding the caller's value.
+    pub dispatch_value: unsafe extern "C" fn(
+        this: *mut RegistryElementSecondaryCollection,
+        slot: *mut *mut u8,
+    ),
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x1c] = [0; core::mem::offset_of!(
+    RegistryElementSecondaryCollectionVtable,
+    dispatch_value
+)];
+
+/// The element prefix through its secondary collection at +0x34.
+#[repr(C)]
+pub struct RegistryElementSecondaryDispatch {
+    /// +0x00..+0x33: base object and the first embedded collection.
+    pub unresolved_00_33: [u32; 13],
+    /// +0x34: the embedded collection whose vtable slot is dispatched.
+    pub secondary_collection: RegistryElementSecondaryCollection,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x34] = [0; core::mem::offset_of!(
+    RegistryElementSecondaryDispatch,
+    secondary_collection
+)];
+
+/// registry_element_secondary_dispatch — original: `FUN_0817e2e0` @
+/// `0x0817e2e0` (28 bytes; 15 unconditional `bl` call sites, binary-verified).
+///
+/// Stores `value` in a stack word, obtains the element's embedded secondary
+/// collection at +0x34, then invokes that collection's vtable slot +0x1c with
+/// `(collection, &slot)`. The slot target is runtime vtable data; its identity
+/// is not recoverable from the static image, so the port dispatches through
+/// the supplied object rather than inventing a callee or introducing a seam.
+/// The raw body has no NULL guard.
+///
+/// Raw bytes confirm the exact extent `0x0817e2e0..0x0817e2fc`; the next
+/// separately linked function opens at `0x0817e2fc`. Decoding every ARM B/BL
+/// immediate in `osos.dec` finds 15 direct inbound calls: all unconditional
+/// `bl`, with zero predicated `bl`, zero direct tail `b`, and no aligned
+/// data-word occurrence of this address. Deliberate deviation: host vtable
+/// pointers are wider than firmware words, so the vtable is modeled
+/// structurally while the element's +0x34 field remains explicit.
+///
+/// # Safety
+///
+/// `element` must be a valid instance with a readable secondary-collection
+/// vtable whose +0x1c entry accepts this ABI. `value` is forwarded unchanged,
+/// including NULL; malformed pointers fault as in retailOS.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn registry_element_secondary_dispatch(
+    element: *mut RegistryElementSecondaryDispatch,
+    value: *mut u8,
+) {
+    let collection = core::ptr::addr_of_mut!((*element).secondary_collection);
+    let vtable = core::ptr::read_volatile(core::ptr::addr_of!((*collection).vtable));
+    let mut slot = value;
+    ((*vtable).dispatch_value)(collection, core::ptr::addr_of_mut!(slot));
+}
+
 /// element_registry_set_name_for_id — original: `FUN_0816e220` @
 /// 0x0816e220 (96 bytes; 20 `bl` call sites, binary-verified).
 ///
@@ -455,5 +538,63 @@ mod tests {
         assert_eq!(first.name, 0x1111_1111);
         assert_eq!(second.name, 0x2222_2222);
         assert_eq!(unsafe { FETCH_CALLS }, 3, "the terminating empty fetch is observed");
+    }
+
+    static SECONDARY_COLLECTION: AtomicUsize = AtomicUsize::new(0);
+    static SECONDARY_VALUE: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "C" fn record_secondary_dispatch(
+        collection: *mut RegistryElementSecondaryCollection,
+        slot: *mut *mut u8,
+    ) {
+        SECONDARY_COLLECTION.store(collection as usize, Ordering::SeqCst);
+        SECONDARY_VALUE.store(slot.read() as usize, Ordering::SeqCst);
+    }
+
+    static SECONDARY_DISPATCH_VT: RegistryElementSecondaryCollectionVtable =
+        RegistryElementSecondaryCollectionVtable {
+            unresolved_00_18: [0; 7],
+            dispatch_value: record_secondary_dispatch,
+        };
+
+    #[test]
+    fn secondary_dispatch_forwards_value_and_null_to_the_embedded_collection() {
+        let mut element = RegistryElementSecondaryDispatch {
+            unresolved_00_33: [0; 13],
+            secondary_collection: RegistryElementSecondaryCollection {
+                vtable: &SECONDARY_DISPATCH_VT,
+            },
+        };
+        let mut value = 0u8;
+        let collection = core::ptr::addr_of_mut!(element.secondary_collection);
+
+        unsafe {
+            registry_element_secondary_dispatch(
+                core::ptr::addr_of_mut!(element),
+                core::ptr::addr_of_mut!(value),
+            );
+        }
+        assert_eq!(
+            SECONDARY_COLLECTION.load(Ordering::SeqCst),
+            collection as usize,
+            "r0 is the embedded collection at element +0x34"
+        );
+        assert_eq!(
+            SECONDARY_VALUE.load(Ordering::SeqCst),
+            core::ptr::addr_of_mut!(value) as usize,
+            "the first stack slot preserves the incoming value"
+        );
+
+        unsafe {
+            registry_element_secondary_dispatch(
+                core::ptr::addr_of_mut!(element),
+                core::ptr::null_mut(),
+            );
+        }
+        assert_eq!(
+            SECONDARY_VALUE.load(Ordering::SeqCst),
+            0,
+            "NULL is dispatched rather than filtered by a wrapper guard"
+        );
     }
 }
