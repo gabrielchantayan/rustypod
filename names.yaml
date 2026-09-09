@@ -28827,6 +28827,35 @@ functions:
       mov/orr pair instead of a literal-pool load (the 0x55693332 kind
       stays a pooled literal on both sides).
 
+  - address: 0x0825c750
+    ghidra: FUN_0825c750
+    name: plist_node_ctor
+    size: 64
+    sig: "PlistNode *plist_node_ctor(PlistNode *node, const char *const *tag)"
+    module: fp/fp_misc
+    status: ported
+    renames:
+      param_1/r0: node
+      param_2/r1: tag
+      FUN_083d8c30: cxx_string_copy_ctor
+      FUN_083d8c20: cxx_string_default_ctor
+    notes: >-
+      Raw ARM is exactly 16 instructions from 0x0825c750 through 0x0825c78c;
+      the sibling plist_node_destroy starts at 0x0825c790 with no literal
+      pool. Full osos.dec ARM B/BL-word decoding finds 15 incoming bl sites,
+      all unconditional: no predicated calls and no tail branches. The
+      constructor COW-copies tag into +0x00, clears the +0x04 three-word
+      attribute vector, default-constructs the +0x10 value string, clears the
+      +0x14 three-word child vector, and zeros the +0x20 companion and +0x24
+      kind. The COW copy crosses a private noinline front-end so LLVM retains
+      the source bl boundary to the established cxx_string_copy_ctor port; the
+      default-string callee is also ported. Its return is adjusted back 16
+      bytes, so this returns node.
+      Host tests verify a non-empty tag COW refcount acquisition, return
+      identity, and every poisoned target field; the empty-tag case verifies
+      singleton preservation and all zeroed fields. match.py review is
+      structural; exact instruction identity is not expected.
+
   - address: 0x0825c790
     ghidra: FUN_0825c790
     name: plist_node_destroy
