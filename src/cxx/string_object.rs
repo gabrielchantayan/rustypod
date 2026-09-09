@@ -339,6 +339,17 @@
 //! - `string_object_insert_cstr` calls the ported insertion body directly.
 //!   Its allocation virtual method still uses STRING_OBJECT_ASSIGN_CSTR_OPS;
 //!   that boundary must be wired before the insertion path is hook-ready.
+//! - `string_object_substring` tail-branches to the capped UTF-8
+//!   assignment @ 0x082764d8, which is NOT ported (its vtable-slot
+//!   +0x8/+0xc dispatches are ROM identities and its length helper @
+//!   0x08275e44 is unported), so the chain goes through the
+//!   [`STRING_OBJECT_ASSIGN_UTF8_CAPPED`] dispatch slot (the
+//!   [`STRING_OBJECT_COPY_CONSTRUCT`] pattern). The default stub does
+//!   nothing at all — unlike `string_object_assign_stub` there is no
+//!   argument-only prefix worth reproducing, since even the original's
+//!   NULL/`max <= 0` guard path dispatches the unportable +0xc virtual
+//!   clear. The real port of 0x082764d8 replaces the stub when it
+//!   lands.
 
 use core::mem::MaybeUninit;
 
@@ -1438,6 +1449,98 @@ pub unsafe extern "C" fn string_object_codepoint_ptr(
 pub unsafe extern "C" fn string_object_codepoint_at(this: *const StringObject, index: i32) -> u32 {
     let mut cursor = string_object_codepoint_ptr(this, index);
     if cursor.is_null() { 0 } else { utf8_next_codepoint(&mut cursor) }
+}
+
+/// Default [`STRING_OBJECT_ASSIGN_UTF8_CAPPED`] stub for the unported
+/// capped-assignment tail @ 0x082764d8. The original NULL-/`max <= 0`-guards
+/// into vtable slot +0xc (clear) and otherwise counts bytes with the capped
+/// UTF-8 length helper @ 0x08275e44, allocates through vtable slot +0x8,
+/// `memcpy`s @ 0x08037db0 and NUL-terminates. The vtable is a ROM identity
+/// on host (see [`STRING_OBJECT_VTABLE`]) and the length helper is
+/// unported, so the stub does nothing at all; the real port of 0x082764d8
+/// replaces it when it lands (the [`string_object_assign_stub`] precedent).
+unsafe extern "C" fn string_object_assign_utf8_capped_stub(
+    _this: *mut StringObject,
+    _text: *const u8,
+    _max_codepoints: i32,
+) {
+}
+
+/// Indirect dispatch for the unported capped-assignment tail @ 0x082764d8
+/// (the [`STRING_OBJECT_COPY_CONSTRUCT`] pattern). Chained to by
+/// [`string_object_substring`]. Host tests install a recording mock; the
+/// real port of 0x082764d8 replaces the default stub when it lands.
+pub static mut STRING_OBJECT_ASSIGN_UTF8_CAPPED: unsafe extern "C" fn(
+    this: *mut StringObject,
+    text: *const u8,
+    max_codepoints: i32,
+) = string_object_assign_utf8_capped_stub;
+
+/// Reads the capped-assign slot (volatile — the slot is meant to be
+/// swapped at runtime, and a plain read lets LLVM const-fold the default
+/// away; the [`release_payload_op`] rationale).
+#[inline(always)]
+pub(crate) unsafe fn assign_utf8_capped_op() -> unsafe extern "C" fn(
+    *mut StringObject,
+    *const u8,
+    i32,
+) {
+    core::ptr::read_volatile(core::ptr::addr_of!(STRING_OBJECT_ASSIGN_UTF8_CAPPED))
+}
+
+/// string_object_substring — original: `FUN_082a5118` @ 0x082a5118
+/// (88 bytes, all code — no literal-pool word; the next function,
+/// `string_object_find_utf8_prefix` @ 0x082a5170, begins immediately
+/// after; **17 plain `bl` call sites and zero predicated**, verified by
+/// decoding every ARM `B`/`BL` word in `osos.dec`).
+///
+/// Bounded substring extraction of the two-word string class:
+/// default-constructs `out` FIRST (`bl string_default_construct @
+/// 0x08277440`), then, in order: returns early when `source`'s payload
+/// word at +4 is NULL (`popeq`), when `start_index` is negative
+/// (`poplt`), and when the payload's codepoint count
+/// ([`utf8_codepoint_count_safe`] @ 0x082770e0) is unsigned
+/// lower-or-same than `start_index` (`pople`) — the index must address
+/// an existing codepoint, not the terminator. Otherwise it resolves the
+/// codepoint's byte pointer ([`string_object_codepoint_ptr`] @
+/// 0x082a50c4 — never NULL here, the count guard precedes it) and
+/// tail-branches (`pop` + `b`) to the capped UTF-8 assignment @
+/// 0x082764d8 with `(out, start, max_codepoints)`, which stores up to
+/// `max_codepoints` codepoints from `start` into `out` and clears `out`
+/// for `max_codepoints <= 0` (its own guard, not reproduced here).
+///
+/// The early returns fire AFTER construction: `out` always leaves with
+/// the class vtable planted and a NULL payload, matching the original's
+/// `bl` ahead of every guard. No NULL guard on `out` or `source` — the
+/// original faults on either, and so does the port.
+///
+/// Deviation (see the module header): the tail @ 0x082764d8 is NOT
+/// ported (its vtable-slot +0x8/+0xc dispatches are ROM identities and
+/// its length helper @ 0x08275e44 is unported), so it runs through the
+/// [`STRING_OBJECT_ASSIGN_UTF8_CAPPED`] dispatch slot whose default
+/// stub does nothing (the [`string_object_assign_stub`] precedent); the
+/// real port of 0x082764d8 replaces the stub when it lands.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_substring(
+    out: *mut StringObject,
+    source: *const StringObject,
+    start_index: i32,
+    max_codepoints: i32,
+) {
+    let out = string_default_construct(out);
+    let payload = (*source).payload as *const u8;
+    if payload.is_null() {
+        return;
+    }
+    if start_index < 0 {
+        return;
+    }
+    if utf8_codepoint_count_safe(payload) <= start_index as usize {
+        return;
+    }
+    let start = string_object_codepoint_ptr(source, start_index);
+    assign_utf8_capped_op()(out, start, max_codepoints);
 }
 
 /// Keeps the searcher's comparison as an out-of-line call. Without this
@@ -3038,6 +3141,169 @@ pub(crate) mod tests {
                 assert_eq!(string_object_codepoint_at(&object, index), value);
             }
         }
+    }
+
+    // ---- string_object_substring ------------------------------------
+
+    /// Serializes the tests that swap `STRING_OBJECT_ASSIGN_UTF8_CAPPED`
+    /// (the `COPY_SLOT_LOCK` precedent; a separate slot, a separate lock).
+    static SUBSTRING_SLOT_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Capped-assign dispatches observed by the recording mock:
+    /// (out, text, max_codepoints), in call order.
+    static mut SUBSTRING_CALLS: Vec<(usize, usize, i32)> = Vec::new();
+
+    unsafe extern "C" fn recording_assign_utf8_capped(
+        this: *mut StringObject,
+        text: *const u8,
+        max_codepoints: i32,
+    ) {
+        (*core::ptr::addr_of_mut!(SUBSTRING_CALLS))
+            .push((this as usize, text as usize, max_codepoints));
+    }
+
+    /// Restores the wired default stub on drop, even when a test panics.
+    struct SubstringSlotGuard;
+    impl Drop for SubstringSlotGuard {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_UTF8_CAPPED)
+                    .write_volatile(string_object_assign_utf8_capped_stub);
+            }
+        }
+    }
+
+    /// Installs the recording mock; restores the wired default on drop.
+    fn substring_bench() -> (MutexGuard<'static, ()>, SubstringSlotGuard) {
+        let lock = SUBSTRING_SLOT_LOCK.lock().unwrap();
+        unsafe {
+            (*core::ptr::addr_of_mut!(SUBSTRING_CALLS)).clear();
+            core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_UTF8_CAPPED)
+                .write_volatile(recording_assign_utf8_capped);
+        }
+        (lock, SubstringSlotGuard)
+    }
+
+    fn substring_calls() -> Vec<(usize, usize, i32)> {
+        unsafe { (*core::ptr::addr_of!(SUBSTRING_CALLS)).clone() }
+    }
+
+    /// A garbage-filled destination; every path must replant the vtable
+    /// and NULL the payload, because the original constructs `out`
+    /// before its first guard.
+    fn substring_garbage_out() -> StringObject {
+        StringObject {
+            vtable: 0xdead_beef as *const StringObjectVtable,
+            payload: 0xcafe_f00d as *mut u8,
+        }
+    }
+
+    #[test]
+    fn substring_constructs_out_then_returns_on_a_null_source_payload() {
+        let _bench = substring_bench();
+        let mut out = substring_garbage_out();
+        let source = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        let out_ptr: *mut StringObject = &mut out;
+        unsafe {
+            string_object_substring(out_ptr, &source, 0, 8);
+        }
+        assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
+        assert!(out.payload.is_null());
+        assert!(substring_calls().is_empty());
+    }
+
+    #[test]
+    fn substring_constructs_out_then_returns_on_a_negative_start_index() {
+        let _bench = substring_bench();
+        let mut payload = *b"A\0";
+        let source = StringObject {
+            vtable: core::ptr::null(),
+            payload: payload.as_mut_ptr(),
+        };
+        for index in [i32::MIN, -1] {
+            let mut out = substring_garbage_out();
+            unsafe {
+                string_object_substring(&mut out, &source, index, 8);
+            }
+            assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
+            assert!(out.payload.is_null());
+        }
+        assert!(substring_calls().is_empty());
+    }
+
+    #[test]
+    fn substring_constructs_out_then_returns_when_start_passes_the_last_codepoint() {
+        let _bench = substring_bench();
+        // Three codepoints: 'A', U+00A9, U+20AC. Index 3 addresses the
+        // terminator — the original's unsigned `count <= index` pop
+        // rejects it along with every larger index.
+        let mut payload = *b"A\xc2\xa9\xe2\x82\xac\0";
+        let source = StringObject {
+            vtable: core::ptr::null(),
+            payload: payload.as_mut_ptr(),
+        };
+        for index in [3, 4, i32::MAX] {
+            let mut out = substring_garbage_out();
+            unsafe {
+                string_object_substring(&mut out, &source, index, 8);
+            }
+            assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
+            assert!(out.payload.is_null());
+        }
+        assert!(substring_calls().is_empty());
+    }
+
+    #[test]
+    fn substring_dispatches_the_tail_with_the_resolved_codepoint_pointer() {
+        let _bench = substring_bench();
+        let mut payload = *b"A\xc2\xa9\xe2\x82\xac\0";
+        let source = StringObject {
+            vtable: core::ptr::null(),
+            payload: payload.as_mut_ptr(),
+        };
+        // Index 2 resolves to byte offset 3 (U+20AC). The max_codepoints
+        // guard lives inside the unported tail, so zero and negative
+        // caps still dispatch.
+        let mut expected = Vec::new();
+        for (index, offset) in [(0, 0), (1, 1), (2, 3)] {
+            for max_codepoints in [-5, 0, 1, i32::MAX] {
+                let mut out = substring_garbage_out();
+                let out_ptr: *mut StringObject = &mut out;
+                unsafe {
+                    string_object_substring(out_ptr, &source, index, max_codepoints);
+                }
+                assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
+                assert!(out.payload.is_null());
+                expected.push((
+                    out_ptr as usize,
+                    unsafe { payload.as_ptr().add(offset) } as usize,
+                    max_codepoints,
+                ));
+            }
+        }
+        assert_eq!(substring_calls(), expected);
+    }
+
+    #[test]
+    fn substring_default_stub_leaves_the_fresh_object_untouched() {
+        // No mock: the wired default is the no-op stub, so a reachable
+        // tail constructs `out` and nothing more. Takes the lock so no
+        // sibling's swapped slot leaks in.
+        let _lock = SUBSTRING_SLOT_LOCK.lock().unwrap();
+        let mut payload = *b"A\xc2\xa9\0";
+        let source = StringObject {
+            vtable: core::ptr::null(),
+            payload: payload.as_mut_ptr(),
+        };
+        let mut out = substring_garbage_out();
+        unsafe {
+            string_object_substring(&mut out, &source, 1, 4);
+        }
+        assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
+        assert!(out.payload.is_null());
     }
 
     /// A fresh object for the UTF-16 assignment tests; the payload word is a

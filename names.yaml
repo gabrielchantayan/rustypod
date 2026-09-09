@@ -17253,6 +17253,63 @@ functions:
       return; the diff is LLVM's fp frame and a movne standing in for
       the original's ldreq literal load (the documented deviation).
 
+  - address: 0x082a5118
+    ghidra: FUN_082a5118
+    name: string_object_substring
+    size: 88
+    sig: "void string_object_substring(StringObject *out, const StringObject *source, int start_index, int max_codepoints)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: out, param_2: source, param_3: start_index, UNRECOVERED_JUMPTABLE: max_codepoints}
+    notes: >-
+      Decoded from raw osos.dec at 0x082a5118..0x082a516f: 88 bytes, all
+      code (Ghidra's 88-byte extent is exact for once); the next
+      function, string_object_find_utf8_prefix @ 0x082a5170, begins
+      immediately after. 17 bl call sites, all plain and zero
+      predicated, verified by decoding every ARM B/BL word in osos.dec.
+      Bounded substring extraction of the two-word string class:
+      default-constructs out FIRST (bl string_default_construct @
+      0x08277440), then returns early when source's payload word at +4
+      is NULL (popeq), when start_index is negative (poplt), and when
+      the payload's codepoint count (utf8_codepoint_count_safe @
+      0x082770e0) is unsigned lower-or-same than start_index (pople) -
+      the index must address an existing codepoint, not the terminator.
+      Otherwise it resolves the codepoint's byte pointer
+      (string_object_codepoint_ptr @ 0x082a50c4 - never NULL here, the
+      count guard precedes it) and tail-branches (pop + b) to the
+      capped UTF-8 assignment @ 0x082764d8 with (out, start,
+      max_codepoints). That tail (FUN_082764d8, 116 bytes, NOT ported):
+      NULL/max<=0-guards into vtable slot +0xc clear, else counts bytes
+      with the capped UTF-8 length helper @ 0x08275e44 (first
+      max_codepoints codepoints + 1 for the NUL), allocates through
+      vtable slot +0x8, memcpys @ 0x08037db0 and NUL-terminates - i.e.
+      out receives at most max_codepoints codepoints starting at
+      start_index, and max_codepoints <= 0 clears out. The early
+      returns fire AFTER construction: out always leaves with the class
+      vtable planted and a NULL payload. Ghidra's C for this function
+      is garbage (an UNRECOVERED_JUMPTABLE parameter and phantom
+      virtual dispatch from the unrelated jumptable at 0x082764fc
+      inside the tail callee); the raw ARM is unambiguous. Deviation:
+      the tail runs through the STRING_OBJECT_ASSIGN_UTF8_CAPPED
+      dispatch slot (the STRING_OBJECT_COPY_CONSTRUCT pattern) whose
+      default stub is a no-op - unlike string_object_assign_stub there
+      is no argument-only prefix worth reproducing, since even the
+      original's guard path dispatches the unportable +0xc virtual
+      clear; the real port of 0x082764d8 replaces the stub when it
+      lands. Minor codegen note: LLVM hoists the negative-index check
+      above the payload-NULL check (both are early pops on disjoint
+      conditions; the original reads [source+4] first, so a faulting
+      source with a negative index faults in the original and returns
+      quietly in the port). match.py structural: 22 original vs 27 Rust
+      instructions; same ctor-first guard set, unsigned count compare
+      and tail dispatch, the `b 0x082764d8` becoming a `bx` through the
+      ops slot. Host tests: construction precedes every guard exit
+      (NULL payload, negative index, index >= count incl. i32::MAX),
+      the happy path dispatches (out, payload+byte_offset,
+      max_codepoints) for each codepoint of a multibyte payload with
+      max_codepoints pass-through at -5/0/1/i32::MAX, and the wired
+      default stub leaves the fresh object untouched.
+
   - address: 0x082a5170
     ghidra: FUN_082a5170
     name: string_object_find_utf8_prefix
