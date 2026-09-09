@@ -117,6 +117,23 @@ pub unsafe extern "C" fn memzero_aligned(dst: *mut u8, len: usize) -> *mut u8 {
     dst
 }
 
+/// Clear exactly 20 aligned bytes.
+///
+/// RetailOS `FUN_0803f350` at load address `0x0803f350`, exactly 8 bytes
+/// (`mov r1, #20; b 0x08037db8`), where the branch reaches the IRAM mirror of
+/// `memzero_aligned` at `0x2200027c`. Binary decoding finds 18 direct `bl`
+/// callers, all unconditional; the next distinct function starts at
+/// `0x0803f358`. The wrapper fixes the byte count at 20, clears five aligned
+/// words, and tail-returns the underlying routine's end pointer (`dst + 20`).
+/// No deliberate deviations.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.memzero_20_aligned")]
+pub unsafe extern "C" fn memzero_20_aligned(dst: *mut u8) -> *mut u8 {
+    fill_blocks(dst, 0, 20);
+    dst.add(20)
+}
+
 /// Fill `len` bytes at `dst` with `value as u8`. Returns `dst`.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn memset(dst: *mut u8, value: i32, len: usize) -> *mut u8 {
@@ -191,6 +208,22 @@ mod tests {
             );
             assert_eq!(ret, dst, "return value: len={len}");
         }
+    }
+
+    #[test]
+    fn memzero_20_aligned_clears_only_five_words_and_returns_end() {
+        #[repr(align(4))]
+        struct Aligned([u8; 24]);
+
+        let mut original = Aligned([0xA5; 24]);
+        let dst = original.0.as_mut_ptr();
+        assert_eq!(dst as usize & 3, 0);
+
+        let returned = unsafe { memzero_20_aligned(dst) };
+
+        assert_eq!(&original.0[..20], &[0; 20]);
+        assert_eq!(&original.0[20..], &[0xA5; 4]);
+        assert_eq!(returned, unsafe { dst.add(20) });
     }
 
     #[test]
