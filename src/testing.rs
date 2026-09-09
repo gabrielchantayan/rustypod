@@ -224,6 +224,9 @@ pub mod hints {
     // counted-mutex constructor fixture; mappings never unmap, so no other
     // user may share this hint.
     pub const PATH_PROBE_GUARD_CONSTRUCT: usize = 0xe800_0000;
+    // 0xa000_0000: dedicated to util/resource_list's raw-u32 vector and
+    // element fixture; mappings never unmap, so no other user may share it.
+    pub const RESOURCE_LIST_DESTROY: usize = 0xa000_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

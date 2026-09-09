@@ -12824,6 +12824,39 @@ functions:
       uses a direct 0x08184f50 target call on device; RESOURCE_LIST_OPS is the
       host-test seam for that unported initializer.
 
+  - address: 0x08185038
+    ghidra: FUN_08185038
+    name: resource_list_destroy
+    size: 184
+    sig: "ResourceList *resource_list_destroy(ResourceList *list)"
+    module: util/resource_list
+    status: ported
+    renames:
+      param_1/r0/r4: list
+      iVar2/r5: element_index
+      iVar3/r6: vector_entry
+      DAT_081850ec: RESOURCE_LIST_VTABLE_ADDRESS (0x08989508)
+      FUN_08184d08: resource-list finalizer (unported)
+      FUN_080e7970: free_wrapper (direct, tag 0x33)
+      FUN_08144000: dynamic-state destructor (unported)
+      FUN_082aad24: operator_delete (direct)
+      FUN_083d78c4: vector_size_elem4_alias_78c4 (direct on target)
+      FUN_08266f2c: cxx_array_dealloc (direct)
+    notes: >-
+      Verified raw extent is 0x08185038..0x081850f0: 180 instruction bytes
+      plus the literal vtable word at 0x081850ec. Ghidra's 176-byte extent
+      is short. Every ARM B/BL in osos.dec yields 14 direct BL call sites,
+      all unconditional, plus one tail B at 0x081d0d40. The function replants
+      the resource-list vtable; it calls unported 0x08184d08 only when both
+      byte flags +0x21 and +0x22 are nonzero; then walks vector entries from
+      +0x14, frees each +0x08 payload through tag-0x33 free_wrapper when
+      +0x22 is set, and operator-deletes every entry. It destroys a non-NULL
+      +0x10 state through 0x08144000 then operator_delete, and array-deallocs
+      vector begin without clearing any descriptor word. The two unported
+      direct calls use volatile host seams; target builds call them at their
+      verified addresses. Host vector fixtures use target-width arithmetic;
+      device builds directly call vector_size_elem4_alias_78c4.
+
   - address: 0x08120978
     ghidra: FUN_08120978
     name: layer_apply_config
