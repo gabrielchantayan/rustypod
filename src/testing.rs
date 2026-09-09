@@ -204,6 +204,10 @@ pub mod hints {
     // target-width vararg string-list fixture; mappings never unmap, so no
     // other user may share this hint.
     pub const SQLITE_INTEGRITY_CHECK_APPEND_MSG: usize = 0xc700_0000;
+    // 0xc800_0000: dedicated to app/context_scope's subject/current-context
+    // predicate fixture; it carries raw-u32 scope and context links, and
+    // fixture mappings never unmap, so no other user may share this hint.
+    pub const CONTEXT_SCOPE_SUBJECT_MATCHES_CONTEXT_FIELD_F40: usize = 0xc800_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

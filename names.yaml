@@ -15589,6 +15589,36 @@ functions:
       AAPCS halves, and a resolved zero identifier. match.py structural review
       is recorded with this port's commit.
 
+  - address: 0x082a65e4
+    ghidra: FUN_082a65e4
+    name: context_scope_subject_matches_context_field_f40
+    size: 60
+    sig: "u32 context_scope_subject_matches_context_field_f40(const ContextScope *scope)"
+    module: app/context_scope
+    status: ported
+    vars: {param_1: scope, "scope+0x0": vtable, "vtable+0xc": resolve_slot, "scope+0x4": subject, "scope+0x8": context, "context+0xf40": field_f40}
+    notes: >-
+      Raw extent is exactly 60 bytes, 0x082a65e4 through 0x082a661c: the
+      next separately linked function opens `push {r4,lr}` at 0x082a6620.
+      Raw ARM calls vtable slot +0xc with scope; a zero resolve result returns
+      zero without reading scope+0x4 or scope+0x8. Any nonzero result loads
+      those two words with `ldmib`, loads context+0xf40 with no NULL guard,
+      and returns their exact 0/1 equality. Decoding every ARM B/BL word in
+      osos.dec found 14 direct call sites, all plain unconditional bl
+      (0x0813ce7c, 0x081769a4, 0x0821945c, 0x08232854, 0x082328b4,
+      0x08232a94, 0x08232ccc, 0x082378b4, 0x08238e24, 0x08239108,
+      0x082391c0, 0x08239264, 0x0823952c, 0x082395fc), with no predicated
+      BL or direct B references. The record is the 20-byte context scope
+      built by 0x082840e8; descriptor 0x089a6600's +0xc word is unresolved
+      0x0826acd8 selector/implementation data, not a decodable function
+      entry, so the port preserves raw dispatch and does not invent a callee.
+      Context+0xf40's semantic identity is unestablished; the name deliberately
+      retains its verified storage location. Deliberate host deviation:
+      fixtures hold the resolve slot as a native-width function pointer while
+      scope/context links remain firmware u32 words. Host tests prove failed
+      resolve short-circuiting, arbitrary nonzero resolve truthiness, slot
+      selection, mismatch, and zero-word equality.
+
   - address: 0x082a6620
     ghidra: FUN_082a6620
     name: ui_element_reference_is_current
