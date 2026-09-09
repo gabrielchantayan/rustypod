@@ -24,7 +24,7 @@
 //! dynamically created resources (slot +0x04, a refcounted vector), which
 //! are resolved to an object first and handled by slot +0x18.
 //!
-//! Neighbours over the same descriptor, all still unported:
+//! Neighbours over the same descriptor, both still unported:
 //!
 //! - 0x08043a6c — registry acquire: maps `resource` to the vector index
 //!   `~resource`, bumps the object's refcount and returns it (itself
@@ -33,12 +33,15 @@
 //! - 0x080438b0 — registry release: drops the refcount, and on the last
 //!   reference erases the vector slot, runs the destroy hook (slot +0x1c)
 //!   and hands the object to `traced_free` @ 0x08043994.
-//! - 0x08044174 — current-context id: tail-calls slot +0x10, or returns 1
-//!   when that slot is empty.
+//!
+//! `current_context_id` @ 0x08044174, the third neighbour over the
+//! descriptor, is ported below: it tail-calls slot +0x10, or returns 1
+//! when that slot is empty.
 
 /// Function-pointer services this dispatcher reads out of the descriptor
 /// @ 0x08043b94's literal pool points at (0x08a0e93c, the word @
-/// 0x08043c14). Only two of the descriptor's slots are consulted here;
+/// 0x08043c14). Only two of the descriptor's slots are consulted by the
+/// dispatcher itself, plus slot +0x10 by `current_context_id`;
 /// the port keeps them — plus the two registry entry points the negative
 /// path branches to — in one hook table, the
 /// [`crate::drivers::ata_cmd::TRACED_ALLOC_HOOKS`] pattern.
@@ -49,6 +52,11 @@ pub struct ResourceOpHooks {
     /// arg1)`. `None` = the stock image's NULL slot, which makes the
     /// whole call a no-op.
     pub static_op: Option<unsafe extern "C" fn(op: u32, resource: i32, arg0: u32, arg1: u32)>,
+    /// Descriptor slot +0x10: the current-context-id hook, tail-called
+    /// with no arguments by `current_context_id` @ 0x08044174. `None` =
+    /// the stock image's NULL slot, which makes `current_context_id`
+    /// return 1.
+    pub context_id: Option<unsafe extern "C" fn() -> u32>,
     /// Descriptor slot +0x18: the handler for registered resources
     /// (`resource < 0`), called as `object_op(op, object, arg0, arg1)`
     /// with the *resolved object* in place of the id. `None` = the stock
@@ -83,6 +91,7 @@ pub unsafe extern "C" fn missing_registry_release(_resource: i32) {}
 /// `core::ptr::addr_of_mut!`.
 pub static mut RESOURCE_OP_HOOKS: ResourceOpHooks = ResourceOpHooks {
     static_op: None,
+    context_id: None,
     object_op: None,
     acquire: missing_registry_acquire,
     release: missing_registry_release,
@@ -154,6 +163,53 @@ pub unsafe extern "C" fn resource_op_dispatch(op: u32, resource: i32, arg0: u32,
         object_op(op, object, arg0, arg1);
     }
     (hooks().release)(resource);
+}
+
+/// current_context_id — original: `FUN_08044174` @ 0x08044174
+/// (28 bytes: 24 bytes of code plus the descriptor-pointer literal
+/// 0x08a0e93c @ 0x0804418c, which Ghidra's 24-byte extent drops; the
+/// next function, `FUN_08044190`, starts at 0x08044190). 13 `bl` call
+/// sites, all plain unconditional form (no predicated variants),
+/// binary-verified by decoding every B/BL word in osos.dec.
+///
+/// Returns the id of the context that currently owns the resources
+/// guarded by this dispatcher's lock/unlock pairs. Callers compare it
+/// against a stored owner to decide whether they already hold the lock
+/// (e.g. `owned = current_context_id() == descriptor[5]` @ 0x0809253c,
+/// and the refcounted lock @ 0x08043cc8, which re-reads it when the
+/// stored owner does not match). The whole body:
+///
+/// ```text
+/// 08044174:  ldr   r0, [pc, #16]   ; r0 = descriptor @ 0x08a0e93c
+/// 08044178:  ldr   r0, [r0, #16]   ; r0 = descriptor slot +0x10
+/// 0804417c:  cmp   r0, #0
+/// 08044180:  bxne  r0              ; installed: tail-call the hook
+/// 08044184:  moveq r0, #1
+/// 08044188:  bx    lr              ; empty slot: the answer is 1
+/// ```
+///
+/// Loads slot +0x10 of the services descriptor; when the slot is
+/// installed, tail-calls it with no arguments and returns its result;
+/// when the slot is empty (the stock image), returns 1. All 13 callers
+/// are plain `bl`, so the NULL check lives here, in the callee — the
+/// stock all-NULL descriptor therefore makes every caller see context
+/// id 1, and two contexts both comparing against a stored 1 would
+/// consider the lock theirs (harmless when the lock ops themselves are
+/// no-ops, as they are with the stock NULL slots).
+///
+/// Deviations: the slot lives in [`RESOURCE_OP_HOOKS`] (the
+/// [`crate::drivers::ata_cmd::TRACED_ALLOC_HOOKS`] pattern), and the
+/// original's `bxne r0` tail call is a plain call — Rust has no
+/// guaranteed tail calls, and the hook takes no arguments so nothing
+/// rides through in the registers.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn current_context_id() -> u32 {
+    if let Some(context_id) = hooks().context_id {
+        context_id()
+    } else {
+        1
+    }
 }
 
 #[cfg(test)]
@@ -235,6 +291,14 @@ mod tests {
         record(b'R');
     }
 
+    static mut CONTEXT_ID_CALLS: usize = 0;
+    static mut CONTEXT_ID_RET: u32 = 0;
+
+    unsafe extern "C" fn mock_context_id() -> u32 {
+        CONTEXT_ID_CALLS += 1;
+        CONTEXT_ID_RET
+    }
+
     /// Resets the log, installs a fully mocked table and returns the
     /// lock guard.
     fn mock_hooks(
@@ -258,6 +322,7 @@ mod tests {
             TRACE_LEN = 0;
             core::ptr::addr_of_mut!(RESOURCE_OP_HOOKS).write(ResourceOpHooks {
                 static_op,
+                context_id: None,
                 object_op,
                 acquire,
                 release: mock_release,
@@ -268,6 +333,53 @@ mod tests {
 
     unsafe fn trace() -> &'static [u8] {
         core::slice::from_raw_parts(core::ptr::addr_of!(TRACE).cast::<u8>(), TRACE_LEN)
+    }
+
+    /// Installs `context_id` on top of whatever table is live.
+    unsafe fn install_context_id(hook: Option<unsafe extern "C" fn() -> u32>) {
+        core::ptr::addr_of_mut!(RESOURCE_OP_HOOKS).write(ResourceOpHooks {
+            context_id: hook,
+            ..hooks()
+        });
+    }
+
+    #[test]
+    fn empty_context_id_slot_returns_one() {
+        // The stock all-NULL descriptor: every caller of 0x08044174 sees
+        // context id 1.
+        let _lock = mock_hooks(Some(mock_static_op), Some(mock_object_op), mock_acquire);
+        unsafe {
+            assert_eq!(current_context_id(), 1);
+            assert_eq!(trace(), b"", "no slot is consulted");
+        }
+    }
+
+    #[test]
+    fn installed_context_id_hook_runs_and_its_result_passes_through() {
+        let _lock = mock_hooks(None, None, mock_acquire);
+        unsafe {
+            install_context_id(Some(mock_context_id));
+            for expected in [0u32, 1, 2, 0x1d, u32::MAX] {
+                CONTEXT_ID_RET = expected;
+                let before = CONTEXT_ID_CALLS;
+                assert_eq!(current_context_id(), expected);
+                assert_eq!(CONTEXT_ID_CALLS, before + 1, "each call reaches the hook once");
+            }
+        }
+    }
+
+    #[test]
+    fn context_id_slot_can_be_cleared_back_to_the_default() {
+        // Descriptor slot +0x10 is RAM; a later NULL must restore the
+        // literal-1 answer, matching the original's per-call slot load.
+        let _lock = mock_hooks(None, None, mock_acquire);
+        unsafe {
+            install_context_id(Some(mock_context_id));
+            CONTEXT_ID_RET = 7;
+            assert_eq!(current_context_id(), 7);
+            install_context_id(None);
+            assert_eq!(current_context_id(), 1);
+        }
     }
 
     #[test]
@@ -380,6 +492,7 @@ mod tests {
             let saved = hooks();
             core::ptr::addr_of_mut!(RESOURCE_OP_HOOKS).write(ResourceOpHooks {
                 static_op: None,
+                context_id: None,
                 object_op: None,
                 acquire: missing_registry_acquire,
                 release: missing_registry_release,

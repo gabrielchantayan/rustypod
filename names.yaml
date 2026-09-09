@@ -25884,6 +25884,40 @@ functions:
       re-read after the acquire returns, blx handler, tail release; LLVM's
       wider frame and its ldrd hook-table loads aside.
 
+  - address: 0x08044174
+    ghidra: FUN_08044174
+    name: current_context_id
+    size: 28
+    sig: "u32 current_context_id(void)"
+    module: kernel/resource_op
+    status: ported
+    notes: >-
+      SIZE CORRECTION - Ghidra says 24, dropping the trailing literal-pool
+      word 0x08a0e93c @ 0x0804418c (the services-descriptor pointer, the
+      same descriptor resource_op_dispatch @ 0x08043b94 reads). The next
+      function, FUN_08044190, starts at 0x08044190, so the true extent is
+      28 bytes: 24 of code plus that word. 13 `bl` call sites and ZERO
+      predicated forms, counted by decoding every B/BL word in osos.dec -
+      the NULL check lives entirely in the callee (contrast traced_free,
+      where 44 of the callers guard with blne), so with the stock all-NULL
+      descriptor every caller unconditionally sees context id 1. The whole
+      body: load descriptor slot +0x10; if installed, tail-call it
+      (`bxne r0`) with no arguments and return its result; if empty,
+      return 1 (`moveq r0, #1`). Callers compare the id against a stored
+      owner to decide whether they already hold a lock - 0x08092504
+      computes `owned = current_context_id() == descriptor[5]` between op
+      5/op 6 probes, and the refcounted lock @ 0x08043cc8 re-reads the id
+      when the stored owner does not match. Deviations: the slot lives in
+      RESOURCE_OP_HOOKS (the TRACED_ALLOC_HOOKS pattern) as the new
+      `context_id` member, `None` reproducing the stock NULL slot; and the
+      original's `bxne r0` tail call is a plain call (Rust has no
+      guaranteed tail calls; the hook takes no arguments, so nothing rides
+      through in registers). match.py structural - same shape: table load,
+      slot NULL test, indirect `bx` to the hook on one arm, `mov r0, #1`
+      on the other; LLVM's push/pop frame and the forced full-table ldrd
+      volatile loads aside. The exported symbol resolves in librustypod.a
+      (no fold).
+
   # --- Per-instantiation template members of the C++ block (cxx/templates) ---
   # This block is full of families the compiler emitted once per template
   # instantiation instead of sharing. Each family needs ONE port; every
