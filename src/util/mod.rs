@@ -31,6 +31,7 @@ pub mod resource_list;
 pub mod pascal_string;
 pub mod q15_mul;
 pub mod operation_dispatch;
+pub mod query_object_release;
 pub mod record_body_size;
 pub mod record_fields_configure;
 pub mod raster_profile;

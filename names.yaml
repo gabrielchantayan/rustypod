@@ -48799,3 +48799,34 @@ functions:
       are identical. match.py structural review: same initialize -> call ->
       unconditional store -> return shape; LLVM adds a frame pointer and
       stack adjustment.
+
+  # --- query object virtual release wrapper ---
+  - address: 0x083e75d0
+    ghidra: FUN_083e75d0
+    name: query_object_release_slot
+    size: 36
+    sig: "void **query_object_release_slot(void **slot)"
+    module: util/query_object_release
+    status: ported
+    renames:
+      param_1/r0: slot
+      param_1_deref: query_object
+      query_object_plus_0x0: vtable
+      vtable_plus_0x1c: unresolved_release_method
+    notes: >-
+      Raw ARM confirms the 36-byte extent 0x083e75d0..0x083e75f0; the
+      separately linked sibling FUN_083e75f4 begins at 0x083e75f4. The wrapper
+      reads query_object from the caller-owned slot, skips the dispatch only
+      when that object is NULL, then loads its vtable and calls entry +0x1c
+      with query_object itself in r0. After the indirect call it returns slot,
+      not the method's return register. Decoding every ARM B/BL word in osos.dec finds
+      exactly 17 inbound direct calls, all unconditional plain BL (zero
+      predicated BL forms and zero plain B tails); every call site supplies a
+      stack-local query object created by query_object_create (0x082597a0) and
+      releases it on scope exit. The vtable target cannot be decoded to a real
+      function entry from the static image, so its identity is deliberately not
+      invented; the port performs the same vtable dispatch directly, with no
+      added seam. Deliberate deviation: Rust returns after the indirect method
+      rather than emitting `blx; mov r0,r4`; both discard its return value and
+      return the original slot. Host tests cover the NULL guard and verify slot
+      +0x1c, object forwarding, unchanged slot contents, and returned address.
