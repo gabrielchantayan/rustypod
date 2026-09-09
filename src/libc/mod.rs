@@ -1,5 +1,6 @@
 //! Core C library memory/string functions (mem/str family).
 pub mod bcopy;
+pub mod bcopy_guarded;
 pub mod byte_copy;
 pub mod byte_copy_signed;
 pub mod counted_copy;
