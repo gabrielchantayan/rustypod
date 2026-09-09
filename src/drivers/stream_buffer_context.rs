@@ -12,22 +12,20 @@
 
 /// Calls outside this one-function port.
 ///
-/// `initialize_stream_buffer` is `FUN_08006e88`; it lazily constructs the
-/// retailOS stream buffer. `current_page_context` is `FUN_0800722c`; it
-/// selects the current per-page or fallback context. They remain ROM seams so
-/// this wrapper retains their ordering and ABI without claiming to port them.
+/// [`crate::kernel::stream_buffer_initializer::initialize_stream_buffer`] now
+/// supplies the lazy retailOS initialization at `0x08006e88`. The current-page
+/// lookup at `0x0800722c` remains a ROM seam, while this table still provides
+/// a deterministic host recorder for the wrapper's ABI ordering.
 #[derive(Clone, Copy)]
 pub struct StreamBufferContextOps {
     pub initialize_stream_buffer: unsafe extern "C" fn(),
     pub current_page_context: unsafe extern "C" fn() -> u32,
 }
 
-unsafe extern "C" fn firmware_initialize_stream_buffer() {
+unsafe extern "C" fn ported_initialize_stream_buffer() {
     #[cfg(target_os = "none")]
     {
-        let initialize_stream_buffer: unsafe extern "C" fn() =
-            core::mem::transmute(0x0800_6e88usize);
-        initialize_stream_buffer();
+        crate::kernel::stream_buffer_initializer::initialize_stream_buffer();
     }
 }
 
@@ -47,7 +45,7 @@ unsafe extern "C" fn firmware_current_page_context() -> u32 {
 
 /// Unwired target/host ROM-dispatch boundary.
 pub const DEFAULT_STREAM_BUFFER_CONTEXT_OPS: StreamBufferContextOps = StreamBufferContextOps {
-    initialize_stream_buffer: firmware_initialize_stream_buffer,
+    initialize_stream_buffer: ported_initialize_stream_buffer,
     current_page_context: firmware_current_page_context,
 };
 
@@ -68,12 +66,9 @@ fn stream_buffer_context_ops() -> StreamBufferContextOps {
 /// it to `page_context_out`, and returns zero. The first two ABI words are
 /// deliberately unused, exactly as r0 and r1 are in the ARM wrapper.
 ///
-/// # Deviations
-///
-/// The initialization and context-selection implementations remain in retailOS.
-/// [`STREAM_BUFFER_CONTEXT_OPS`] calls their original load addresses on target
-/// and supplies a deterministic host seam; it does not alter the wrapper's
-/// two calls, output store, or fixed zero return.
+/// The initializer is the local port; the context selector remains in
+/// retailOS through [`STREAM_BUFFER_CONTEXT_OPS`]. Host tests replace both
+/// operations to retain deterministic sequencing checks.
 ///
 /// # Safety
 ///

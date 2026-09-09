@@ -59,6 +59,7 @@
 /// Returns 1 (and marks the guard initialized) when the caller should
 /// run the initializer, 0 when someone already has.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn cxa_guard_acquire(guard: *mut u32) -> u32 {
     if *guard != 0 {
         return 0;
