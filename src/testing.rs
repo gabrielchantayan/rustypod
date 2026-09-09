@@ -200,6 +200,10 @@ pub mod hints {
     // window fixture; mappings never unmap, so no other user may share
     // this hint.
     pub const CURRENT_WINDOW: usize = 0x4300_0000;
+    // 0xc700_0000: dedicated to sqlite/integrity_check_append_msg's
+    // target-width vararg string-list fixture; mappings never unmap, so no
+    // other user may share this hint.
+    pub const SQLITE_INTEGRITY_CHECK_APPEND_MSG: usize = 0xc700_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
