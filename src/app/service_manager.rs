@@ -7,6 +7,7 @@
 //! | 0x08165520 | [`service_manager_instance`] | 24 | 17 direct |
 //! | 0x081391ec | [`service_manager_instance_veneer`] | 4 | **213** |
 //! | 0x08193e84 | [`service_manager_secondary_handler_code_get`] | 20 | 17 direct |
+//! | 0x0819420c | [`service_manager_slot_flags_or`] | 28 | 16 direct |
 //!
 //! The instance and veneer counts are binary-scanned out of
 //! `work/firmware/osos.dec` by decoding every ARM `B`/`BL` word in the image
@@ -54,6 +55,15 @@
 //! `FUN_08193e84`/`FUN_08194080(instance + 4, slot)` and then dispatch
 //! through its vtable +0x14 with a (code, arg) pair; the sweep at
 //! 0x08165364 walks `slot` 0..12 exactly.
+//!
+//! Behind the three 0x20-byte primary records sits a second bank at
+//! `slot_table + 0x60`: thirteen 8-byte slot records whose word 0 is a
+//! flags bitmask (read by the getter @ 0x081941f8, accumulated into by
+//! [`service_manager_slot_flags_or`]) and whose word 1 is the slot's
+//! handler object pointer (stored by the setter @ 0x08193ed4, read back
+//! @ 0x08193ee8). The constructor @ 0x08194228 zeroes the whole
+//! 0x00..0xc8 span, records and bank alike, and clears the byte counter
+//! at +0xc8.
 //!
 //! **The class name does not survive in the image** — the constructor
 //! hands no literal to the class-name factory and no name string sits
@@ -253,6 +263,58 @@ pub unsafe extern "C" fn service_handler_at(slot_table: *const u32, selector: i3
     core::ptr::read(slot_table.wrapping_offset(selector.wrapping_shl(3) as isize))
 }
 
+/// service_manager_slot_flags_or — original: `FUN_0819420c` @ 0x0819420c
+/// (28 bytes; 16 direct, unconditional `bl` call sites).
+///
+/// Accumulates bits into the flags word of one of the service manager's
+/// thirteen 8-byte slot records. The bank sits at `slot_table + 0x60`,
+/// two words per record: word 0 is the flags word this function updates,
+/// word 1 is the slot's handler object pointer (see the module header's
+/// bank layout). Raw ARM is `cmp r1,#13; blge 0x08030f44; add r0,r0,r1,
+/// lsl #3; ldr r1,[r0,#96]; orr r1,r1,r2; str r1,[r0,#96]; bx lr`: the
+/// bounds check is signed, so negative slots pass it and address before
+/// the bank exactly as the firmware does; slots 13 and above terminate
+/// through [`heap_panic`]. Observed callers accumulate multi-bit masks
+/// (0x2c into slot 7, 0x2d into slot 0xc), so this is always an
+/// accumulate, never a replace.
+///
+/// Decoding every ARM `B`/`BL` instruction in `osos.dec` found exactly 16
+/// direct callers, all unconditional plain `BL` at 0x0813a308, 0x08165120,
+/// 0x08193d00, 0x0819535c, 0x081953c0, 0x08196f68, 0x081af32c,
+/// 0x081d7c7c, 0x081e3100, 0x081f26b4, 0x081f2720, 0x081f394c,
+/// 0x08200e88, 0x08201254, 0x0820956c, and 0x082095cc; no predicated
+/// direct calls or tail branches target this address, and no aligned data
+/// word in the image holds it, so it is not vtable-dispatched. The next
+/// distinct function begins at 0x08194228 (`push {r4,lr}`), confirming
+/// Ghidra's 28-byte extent exactly.
+///
+/// Deliberate deviations: none. The fatal path is not host-tested:
+/// [`heap_panic`] is `-> !` (the module header records why).
+///
+/// # Safety
+///
+/// `slot_table` must point to the slot-table base (`this + 4` in the
+/// original) backed by at least 0xc8 bytes of aligned, writable storage.
+/// Negative slots intentionally retain the firmware's unchecked
+/// before-bank addressing behavior and are not valid Rust memory
+/// accesses.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.service_manager_slot_flags_or")]
+pub unsafe extern "C" fn service_manager_slot_flags_or(
+    slot_table: *mut u32,
+    slot: i32,
+    flags: u32,
+) {
+    if slot >= 13 {
+        heap_panic();
+    }
+    let flags_word = slot_table
+        .wrapping_offset(slot.wrapping_shl(1) as isize)
+        .add(0x18);
+    core::ptr::write(flags_word, core::ptr::read(flags_word) | flags);
+}
+
 #[cfg(test)]
 mod handler_at_tests {
     extern crate std;
@@ -276,6 +338,75 @@ mod handler_at_tests {
                 0x2222_0000,
                 "the ARM ldr reads the record word on every call"
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod slot_flags_or_tests {
+    use super::*;
+
+    /// Word index of slot N's flags word from the table base:
+    /// 0x60 bytes of primary records, then two words per slot record.
+    const fn flags_index(slot: usize) -> usize {
+        0x18 + slot * 2
+    }
+
+    #[test]
+    fn accumulates_into_each_slot_flags_word_without_touching_neighbors() {
+        let mut table = [0u32; 0x18 + 13 * 2];
+        table[flags_index(3)] = 0x0000_00f0;
+        table[flags_index(3) + 1] = 0xdead_beef; // handler pointer word
+        table[flags_index(4)] = 0x5555_5555;
+
+        unsafe {
+            let base = table.as_mut_ptr();
+            service_manager_slot_flags_or(base, 0, 0x0000_0001);
+            service_manager_slot_flags_or(base, 3, 0x0000_000f);
+            service_manager_slot_flags_or(base, 12, 0x8000_0000);
+        }
+
+        assert_eq!(table[flags_index(0)], 0x0000_0001);
+        assert_eq!(
+            table[flags_index(3)],
+            0x0000_00ff,
+            "existing bits survive: the ARM is ldr/orr/str, not a store"
+        );
+        assert_eq!(
+            table[flags_index(3) + 1],
+            0xdead_beef,
+            "the handler pointer word of the same record is untouched"
+        );
+        assert_eq!(table[flags_index(4)], 0x5555_5555, "the next slot is untouched");
+        assert_eq!(table[flags_index(12)], 0x8000_0000);
+        assert!(table[..0x18].iter().all(|&w| w == 0), "primary records are untouched");
+    }
+
+    #[test]
+    fn repeated_calls_accumulate_and_a_zero_mask_is_a_noop() {
+        let mut table = [0u32; 0x18 + 13 * 2];
+
+        unsafe {
+            let base = table.as_mut_ptr();
+            // The firmware callers' observed shapes: multi-bit masks.
+            service_manager_slot_flags_or(base, 7, 0x2c);
+            service_manager_slot_flags_or(base, 7, 0x51);
+            service_manager_slot_flags_or(base, 7, 0);
+        }
+
+        assert_eq!(table[flags_index(7)], 0x7d);
+    }
+
+    #[test]
+    fn signed_negative_slot_remains_unchecked() {
+        // `blge` is a signed compare: slot -1 passes and addresses two
+        // words before slot 0's record, exactly like the firmware.
+        let mut table = [0u32; 0x18 + 13 * 2];
+
+        unsafe {
+            let base = table.as_mut_ptr().add(8);
+            service_manager_slot_flags_or(base, -1, 0xffff_0000);
+            assert_eq!(table[8 + flags_index(0) - 2], 0xffff_0000);
         }
     }
 }
