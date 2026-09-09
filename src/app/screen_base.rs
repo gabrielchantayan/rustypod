@@ -128,6 +128,73 @@ pub const SCREEN_BASE_PARENT_CONSTRUCT_ADDRESS: u32 = 0x0812_468c;
 /// Address of the refcounted `next`-link setter (`bl 0x082722a0`).
 /// Unported; modeled by [`ScreenBaseOps::set_next_link`].
 pub const SCREEN_BASE_NEXT_LINK_SETTER_ADDRESS: u32 = 0x0827_22a0;
+/// Address of the four-argument intermediate parent constructor delegated to
+/// by [`screen_base_parent_construct_with_next`] (`bl 0x08272438`).
+pub const SCREEN_BASE_PARENT_CONSTRUCT_WITH_NEXT_ADDRESS: usize = 0x0827_2438;
+
+/// The intermediate parent vtable literal installed at 0x0814399c (pool word
+/// @ 0x081439a4). Its slot layout is not recovered by this constructor.
+pub const SCREEN_BASE_PARENT_VTABLE_ADDRESS: u32 = 0x0898_5da8;
+
+/// ABI of the unported four-argument intermediate parent constructor
+/// `FUN_08272438`.
+pub type ScreenBaseParentConstructWithNext = unsafe extern "C" fn(
+    storage: *mut ScreenBase,
+    next_provider: *mut u8,
+    initial_target: u32,
+    create_link: u32,
+) -> *mut ScreenBase;
+
+#[cfg(target_os = "none")]
+unsafe fn retail_screen_base_parent_construct_with_next(
+    storage: *mut ScreenBase,
+    next_provider: *mut u8,
+    initial_target: u32,
+    create_link: u32,
+) -> *mut ScreenBase {
+    let construct: ScreenBaseParentConstructWithNext =
+        core::mem::transmute(SCREEN_BASE_PARENT_CONSTRUCT_WITH_NEXT_ADDRESS);
+    construct(storage, next_provider, initial_target, create_link)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_screen_base_parent_construct_with_next(
+    _storage: *mut ScreenBase,
+    _next_provider: *mut u8,
+    _initial_target: u32,
+    _create_link: u32,
+) -> *mut ScreenBase {
+    panic!("install screen-base parent constructor host operation before calling it")
+}
+
+/// Host seam for the unported direct callee @ 0x08272438. Device builds
+/// always call its fixed retailOS address.
+#[cfg(not(target_os = "none"))]
+pub static mut SCREEN_BASE_PARENT_CONSTRUCT_WITH_NEXT: ScreenBaseParentConstructWithNext =
+    missing_screen_base_parent_construct_with_next;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn host_screen_base_parent_construct_with_next(
+    storage: *mut ScreenBase,
+    next_provider: *mut u8,
+    initial_target: u32,
+    create_link: u32,
+) -> *mut ScreenBase {
+    let construct =
+        ptr::read_volatile(ptr::addr_of!(SCREEN_BASE_PARENT_CONSTRUCT_WITH_NEXT));
+    construct(storage, next_provider, initial_target, create_link)
+}
+
+/// Opaque host stand-in for the intermediate vtable address. The constructor
+/// only plants this pointer; concrete callers replace it before dispatching.
+#[cfg(not(target_os = "none"))]
+#[repr(C, align(4))]
+struct ScreenBaseParentVtableMarker([u8; 4]);
+
+#[cfg(not(target_os = "none"))]
+static SCREEN_BASE_PARENT_VTABLE_MARKER: ScreenBaseParentVtableMarker =
+    ScreenBaseParentVtableMarker([0; 4]);
 
 /// The framework root's own resource id (literal-pool word @
 /// 0x08204628), in retailOS's private 0x0dad0000..0x0dad0fff id space.
@@ -283,6 +350,74 @@ fn class_vtable() -> *const ScreenBaseVtable {
     }
 }
 
+/// The vtable pointer the four-argument intermediate parent constructor
+/// plants: the original literal on device, an opaque aligned marker on host.
+#[inline(always)]
+fn screen_base_parent_vtable() -> *const ScreenBaseVtable {
+    #[cfg(target_os = "none")]
+    {
+        SCREEN_BASE_PARENT_VTABLE_ADDRESS as usize as *const ScreenBaseVtable
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        ptr::addr_of!(SCREEN_BASE_PARENT_VTABLE_MARKER).cast()
+    }
+}
+
+/// `screen_base_parent_construct_with_next` — original: `FUN_08143990` @
+/// **0x08143990** (20 bytes: 16 bytes of instructions plus the literal-pool
+/// word @ 0x081439a4; the sibling constructor starts at 0x081439a8).
+///
+/// A complete `osos.dec` ARM B/BL decode finds **16 direct plain `bl` call
+/// sites**, all unconditional; no predicated `bl`, tail `b`, or data-word
+/// references target this address. Every recovered caller obtains r1 from
+/// `task_ctx_field_0x30`, commonly passes `(r2, r3) = (0, 1)`, then replaces
+/// this intermediate class's vtable with its own concrete one.
+///
+/// The four-argument intermediate parent constructor: delegate to
+/// `FUN_08272438(storage, next_provider, initial_target, create_link)`, use
+/// its return as `this`, then install vtable 0x08985da8 at +0x00 and return
+/// `this`. The delegated body passes `initial_target` and `create_link` to
+/// the framework base, clears +0x14, and links `next_provider` through the
+/// refcounted setter @ 0x082722a0. This wrapper has no NULL guard: a NULL
+/// delegated return faults at the vtable store in retailOS.
+///
+/// Deliberate deviation: `FUN_08272438` is unported. Device builds call its
+/// fixed address; host tests install a volatile seam. The target vtable is
+/// static image data; host builds use only an opaque aligned marker because
+/// no slot identity is recovered and concrete callers replace it before any
+/// dispatch.
+///
+/// # Safety
+///
+/// `storage` and `next_provider` must satisfy the delegated constructor's
+/// ABI. Its result must be non-NULL writable storage with a first vtable word.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn screen_base_parent_construct_with_next(
+    storage: *mut ScreenBase,
+    next_provider: *mut u8,
+    initial_target: u32,
+    create_link: u32,
+) -> *mut ScreenBase {
+    #[cfg(target_os = "none")]
+    let this = retail_screen_base_parent_construct_with_next(
+        storage,
+        next_provider,
+        initial_target,
+        create_link,
+    );
+    #[cfg(not(target_os = "none"))]
+    let this = host_screen_base_parent_construct_with_next(
+        storage,
+        next_provider,
+        initial_target,
+        create_link,
+    );
+    (*this).vtable = screen_base_parent_vtable();
+    this
+}
+
 /// screen_base_construct — original: `FUN_082045ac` @ 0x082045ac
 /// (128 bytes including the two literal-pool words; **16 `bl` call
 /// sites**, binary-scanned).
@@ -331,7 +466,7 @@ mod tests {
     use crate::app::class_6800::FRAMEWORK_ROOT_HOLDER;
     use crate::testing::{CLASS_REGISTRY_TEST_LOCK, TASK_CTX_BLOCK_TEST_LOCK};
     use crate::util::context_field::CURRENT_TASK_CTX_BLOCK;
-    use std::sync::MutexGuard;
+    use std::sync::{Mutex, MutexGuard};
 
     const CHAIN_HEAD_FIELD: usize = 0x30;
 
@@ -507,6 +642,102 @@ mod tests {
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         (ctx, registry)
+    }
+
+    static PARENT_CONSTRUCT_LOCK: Mutex<()> = Mutex::new(());
+    static mut PARENT_CONSTRUCT_CALL: Option<(*mut ScreenBase, *mut u8, u32, u32)> = None;
+    static mut PARENT_CONSTRUCT_RESULT: *mut ScreenBase = ptr::null_mut();
+
+    unsafe extern "C" fn recording_parent_construct(
+        storage: *mut ScreenBase,
+        next_provider: *mut u8,
+        initial_target: u32,
+        create_link: u32,
+    ) -> *mut ScreenBase {
+        PARENT_CONSTRUCT_CALL = Some((storage, next_provider, initial_target, create_link));
+        if PARENT_CONSTRUCT_RESULT.is_null() {
+            storage
+        } else {
+            PARENT_CONSTRUCT_RESULT
+        }
+    }
+
+    struct ParentConstructGuard {
+        prior: ScreenBaseParentConstructWithNext,
+    }
+
+    impl ParentConstructGuard {
+        fn install(result: *mut ScreenBase) -> ParentConstructGuard {
+            unsafe {
+                PARENT_CONSTRUCT_CALL = None;
+                PARENT_CONSTRUCT_RESULT = result;
+                let slot = ptr::addr_of_mut!(SCREEN_BASE_PARENT_CONSTRUCT_WITH_NEXT);
+                let prior = ptr::read_volatile(slot);
+                ptr::write_volatile(slot, recording_parent_construct);
+                ParentConstructGuard { prior }
+            }
+        }
+    }
+
+    impl Drop for ParentConstructGuard {
+        fn drop(&mut self) {
+            unsafe {
+                ptr::write_volatile(
+                    ptr::addr_of_mut!(SCREEN_BASE_PARENT_CONSTRUCT_WITH_NEXT),
+                    self.prior,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn parent_construct_forwards_args_and_replaces_returned_vtable_only() {
+        let _lock = PARENT_CONSTRUCT_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut passed_in = poisoned_object();
+        let mut relocated = poisoned_object();
+        let storage = ptr::addr_of_mut!(passed_in);
+        let returned = ptr::addr_of_mut!(relocated);
+        let next_provider = 0x2468_ace0usize as *mut u8;
+        let base_state = relocated.base_state;
+        let next = relocated.next;
+        let field_18 = relocated.field_18;
+        let secondary_vtable = relocated.secondary_vtable;
+        let resource_id = relocated.resource_id;
+        let owned_object = relocated.owned_object;
+        let _slot = ParentConstructGuard::install(returned);
+
+        unsafe {
+            let result = screen_base_parent_construct_with_next(
+                storage,
+                next_provider,
+                0xfeed_face,
+                1,
+            );
+            assert_eq!(result, returned, "returns the delegated constructor result");
+            assert_eq!(
+                PARENT_CONSTRUCT_CALL,
+                Some((storage, next_provider, 0xfeed_face, 1)),
+                "every argument reaches 0x08272438 verbatim"
+            );
+            assert_eq!(
+                relocated.vtable,
+                screen_base_parent_vtable(),
+                "the vtable store lands on the delegated return, not storage"
+            );
+            assert!(passed_in.vtable.is_null(), "incoming storage remains untouched after return");
+            assert_eq!(relocated.base_state, base_state, "does not rewrite +0x04..+0x13");
+            assert_eq!(relocated.next, next, "does not rewrite +0x14");
+            assert_eq!(relocated.field_18, field_18, "does not rewrite +0x18");
+            assert_eq!(
+                relocated.secondary_vtable,
+                secondary_vtable,
+                "does not rewrite +0x1c"
+            );
+            assert_eq!(relocated.resource_id, resource_id, "does not rewrite +0x20");
+            assert_eq!(relocated.owned_object, owned_object, "does not rewrite +0x24");
+        }
     }
 
     /// A chain-head word that is not a dereferenceable host pointer on
