@@ -33194,6 +33194,46 @@ functions:
       {fp,lr}; mov fp,sp; pop {fp,pc}` - the crate frame around the
       original's bare `bx lr`, identical to ui_noop_f7f4.
 
+  - address: 0x082a3fc4
+    ghidra: FUN_082a3fc4
+    name: scoped_context_owner_flags_bit_3
+    size: 52
+    sig: "u32 scoped_context_owner_flags_bit_3(const ScopedContext *this)"
+    module: app/scoped_context
+    status: ported
+    vars: {param_1: this}
+    notes: >-
+      16 bl call sites, all unconditional with zero predicated forms and
+      zero tail b sites, binary-scanned by decoding every B/BL word in
+      osos.dec - no caller NULL-guards the token. Ghidra's 52-byte
+      extent is exact: the thirteen instructions end at 0x082a3ff4 and
+      the next function begins with its own push {r4,lr} at 0x082a3ff8,
+      so there is no trailing literal pool. Validity-gated owner-flags
+      predicate over the ScopedContext token (app/scoped_context.rs):
+      dispatches the token's vtable slot +0x08 and, only when it returns
+      nonzero, reads the owner's flags word at +0xbc and returns bit 3
+      as 0 or 1 via and #8 / lsr #3. A failing slot answers 0 without
+      dereferencing owner, so a NULL owner is safe only on that path.
+      This belongs to the capability-predicate family with
+      0x082a40c8 (mask 0x8062), 0x082a4574 (owner byte +0x8f bit 0),
+      and 0x082a45a4 (bit 21); the context-menu builder at 0x08222eec
+      ANDs their answers to decide whether to suppress an item. What
+      bit 3 means does not survive in the image, so the numeric name
+      records only the observed bit. The function itself is not
+      virtual-dispatched: no data word in the image holds 0x082a3fc4.
+      Deviations: repr(C) ScopedContext and ScopedContextVtable models
+      replace literal offsets, and the serialized vtable slot word is
+      transmuted to its call ABI at the dispatch point. LLVM may branch
+      where ADS predicates its owner loads and extraction; the
+      validity-gated dereference and 0/1 result remain the same. Host
+      tests prove slot-zero short-circuit with a NULL owner and isolate
+      bit 3 against immediate neighbours, sibling masks, bit 3 with
+      strays, and all bits set; all nonzero slot results reach the
+      owner read. match.py structural: same vtable load, slot +0x08 blx
+      dispatch, validity cmp, gated owner +0x08 and flags +0xbc loads,
+      bit-3 mask/extraction, and 0/1 result; the diff is the crate fp
+      frame and predicate-versus-branch code generation.
+
   - address: 0x082a40c8
     ghidra: FUN_082a40c8
     name: scoped_context_owner_flags_any_8062

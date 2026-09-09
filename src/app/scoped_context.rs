@@ -1,6 +1,6 @@
 //! The framework's **scoped context token** — a 0x18-byte polymorphic
 //! object that call sites build on the stack, hand to a service, and
-//! throw away. Seven of its members are ported here, all from the
+//! throw away. Eight of its members are ported here, all from the
 //! 0x0826/0x0827 framework cluster that also holds the string/buffer class
 //! (`cxx/string_object.rs`) and the resource-lookup chain
 //! (`app/resource_chain.rs`):
@@ -8,6 +8,8 @@
 //! - [`capture_context_fields`] — `FUN_0826fda0` @ 0x0826fda0.
 //! - [`scoped_context_construct`] — `FUN_08270394` @ 0x08270394.
 //! - [`scoped_context_destroy`] — `FUN_08270414` @ 0x08270414.
+//! - [`scoped_context_owner_flags_bit_3`] — `FUN_082a3fc4` @ 0x082a3fc4,
+//!   a validity-gated predicate over bit 3 of the token owner's flags word.
 //! - [`scoped_context_owner_flags_any_8062`] — `FUN_082a40c8` @ 0x082a40c8,
 //!   a validity-gated predicate over the token owner's flags word.
 //! - [`scoped_context_owner_byte_8f_bit_0`] — `FUN_082a4574` @ 0x082a4574,
@@ -325,6 +327,64 @@ const VALIDITY_SLOT: usize = 0x08 / 4;
 /// the same slot on target and host, the ROOT_SERVICE_CONTEXT_SLOT
 /// pattern above.
 const OWNER_FLAGS_SLOT: usize = 0xbc / 4;
+
+/// The bit-3 mask tested against the owner's +0xbc flags word. Its
+/// semantic name does not survive in the image, so the numeric bit is
+/// retained, following the sibling `OWNER_FLAGS_MASK_8062` convention.
+const OWNER_FLAGS_MASK_8: u32 = 0x0000_0008;
+
+/// scoped_context_owner_flags_bit_3 — original: `FUN_082a3fc4` @
+/// 0x082a3fc4 (52 bytes, exact: the thirteen instructions end at
+/// 0x082a3ff4 and the next function begins with its own `push {r4, lr}`
+/// at 0x082a3ff8; **16 `bl` call sites, 0 predicated forms and 0 tail
+/// `b` sites**, binary-scanned by decoding every B/BL word in osos.dec).
+///
+/// ```text
+/// 082a3fc4  push  {r4, lr}
+/// 082a3fc8  mov   r4, r0
+/// 082a3fcc  ldr   r0, [r0]         @ token vtable
+/// 082a3fd0  ldr   r1, [r0, #8]     @ slot +0x08 validity method
+/// 082a3fd4  mov   r0, r4
+/// 082a3fd8  blx   r1
+/// 082a3fdc  cmp   r0, #0
+/// 082a3fe0  ldrne r0, [r4, #8]     @ owner
+/// 082a3fe4  ldrne r0, [r0, #0xbc]  @ owner flags word
+/// 082a3fe8  andne r0, r0, #8
+/// 082a3fec  lsrne r0, r0, #3
+/// 082a3ff0  moveq r0, #0
+/// 082a3ff4  pop   {r4, pc}
+/// ```
+///
+/// Validity-gated predicate over a scoped-context token. It dispatches the
+/// token's vtable slot +0x08 and, only when that returns nonzero, reads the
+/// owner's +0xbc flags word and returns bit 3 as 0 or 1. A failing slot
+/// answers 0 without touching the owner, so a NULL owner is safe only on
+/// that path. This is one of the capability-predicate family that the
+/// context-menu builder at 0x08222eec ANDs with
+/// [`scoped_context_owner_flags_any_8062`],
+/// [`scoped_context_owner_byte_8f_bit_0`], and
+/// [`scoped_context_owner_flags_bit_21`] to decide whether to suppress an
+/// item.
+///
+/// Deviations: [`ScopedContext`] and [`ScopedContextVtable`] are this
+/// module's `#[repr(C)]` models, so vtable and owner accesses use fields
+/// rather than literal byte offsets. The slot word is transmuted to the
+/// call ABI at the dispatch point. LLVM may branch where ADS predicates
+/// its owner loads and bit extraction; both retain the validity gate.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn scoped_context_owner_flags_bit_3(
+    this: *const ScopedContext,
+) -> u32 {
+    let validity: ScopedContextValidity =
+        core::mem::transmute((*(*this).vtable).slots[VALIDITY_SLOT]);
+    if validity(this) == 0 {
+        return 0;
+    }
+    let flags = ((*this).owner as *const u32).add(OWNER_FLAGS_SLOT).read();
+    (flags & OWNER_FLAGS_MASK_8) >> 3
+}
+
 
 /// The mask tested against the owner's +0xbc flags word, serialized as
 /// the original's only literal-pool word @ 0x082a4100: bits 1, 5, 6 and
@@ -913,6 +973,51 @@ mod tests {
             let result = unsafe { scoped_context_owner_byte_8f_bit_0(&fixture.token) };
 
             assert_eq!(result, want, "owner byte {byte:#x}");
+            unsafe {
+                assert_eq!(VALIDITY_CALLS, 1);
+            }
+        }
+    }
+
+    #[test]
+    fn bit_3_predicate_short_circuits_when_the_token_is_not_valid() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        reset_validity_recording(0);
+        // A NULL owner proves the failing slot prevents the flags load.
+        let mut fixture = predicate_fixture(0xffff_ffff);
+        link_fixture(&mut fixture, true);
+
+        let result = unsafe { scoped_context_owner_flags_bit_3(&fixture.token) };
+
+        assert_eq!(result, 0);
+        unsafe {
+            assert_eq!(VALIDITY_CALLS, 1);
+            assert_eq!(VALIDITY_TOKEN as usize, &fixture.token as *const _ as usize);
+        }
+    }
+
+    #[test]
+    fn bit_3_predicate_isolates_bit_3() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        for (flags, want) in [
+            (0u32, 0),
+            (0x0000_0004, 0),
+            (0x0000_0010, 0),
+            (OWNER_FLAGS_MASK_8062, 0),
+            (OWNER_FLAGS_MASK_200000, 0),
+            (OWNER_FLAGS_MASK_8, 1),
+            (OWNER_FLAGS_MASK_8 | 0xffff_fff0, 1),
+            (0xffff_ffff, 1),
+        ] {
+            // The original gates with `cmp r0, #0`: every nonzero result
+            // reaches the owner flags read.
+            reset_validity_recording(0xffff_ffff);
+            let mut fixture = predicate_fixture(flags);
+            link_fixture(&mut fixture, false);
+
+            let result = unsafe { scoped_context_owner_flags_bit_3(&fixture.token) };
+
+            assert_eq!(result, want, "flags {flags:#x}");
             unsafe {
                 assert_eq!(VALIDITY_CALLS, 1);
             }
