@@ -40922,6 +40922,49 @@ functions:
       the crate fp frame and the seam's ldr/blx static dispatch in
       place of the direct bl 0x082e84a4.
 
+  - address: 0x082621b0
+    ghidra: FUN_082621b0
+    name: cxx_recursive_mutex_construct
+    size: 44
+    sig: "u8 *cxx_recursive_mutex_construct(u8 *this, usize param_2, usize scope_word0, usize scope_word1)"
+    module: cxx/recursive_mutex
+    status: ported
+    renames:
+      param_1/r0: this (saved in r4 and returned)
+      param_2/r1: (unread - overwritten by the attr pointer before the second bl)
+      param_3/r2: scope_word0 (pushed as the scope's first word)
+      param_4/r3: scope_word1 (pushed as the scope's second word)
+      uStack_10/uStack_c: scope (the two-word stack pthread_mutexattr)
+      FUN_08261d1c: cxx_mutexattr_init (ported)
+      FUN_08262170: recursive settype-and-mutex-init helper (unported)
+      FUN_08261d30: cxx_mutexattr_destroy (unported)
+    notes: >-
+      44 bytes, all code and no literal pool (0x082621b0..0x082621dc;
+      the C++ mutex destructor thunk starts at 0x082621dc), verified
+      from osos.dec rather than Ghidra. Decoding every ARM B/BL word in
+      osos.dec found exactly 14 direct call sites, all unconditional bl
+      and zero predicated calls: 0x0817da48, 0x0818b3ac, 0x081a8b9c,
+      0x081f0068, 0x081fc908, 0x08280474, 0x082804d4, 0x0828df14,
+      0x0828e0a4, 0x0828e2a4, 0x0828e4b8, 0x082acc6c, 0x082adf94,
+      and 0x082af5e0. No tail b reaches this address. The raw body is a
+      C++ recursive-mutex-wrapper constructor: push r2/r3 as its
+      two-word mutexattr stack scope; call cxx_mutexattr_init @
+      0x08261d1c; call 0x08262170, which passes kind 2 (RECURSIVE) to
+      pthread_mutexattr_settype @ 0x082e84dc, stores that status at
+      this+0x18, and only on success initializes the mutex through
+      0x082e82f8 before replacing the status; then call
+      cxx_mutexattr_destroy @ 0x08261d30 and return the saved this
+      pointer. The scope's incoming contents are the uninitialized
+      caller r2/r3 values, overwritten by attr init before use.
+      Deliberate deviations: 0x08262170 and 0x08261d30 remain unported,
+      so volatile dispatch slots call their retailOS entries on target;
+      host defaults model their decoded stores, including type bits
+      4..5 = 2, initialized mutex fields, and valid-attr magic clear.
+      Host tests prove attr-init -> recursive-init -> teardown order,
+      mutable scope identity, this return, ignored r1, and host-default
+      recursive mutex layout. match.py structural review is expected to
+      differ at the dispatch blx calls.
+
   - address: 0x08279284
     ghidra: FUN_08279284
     name: path_object_construct
