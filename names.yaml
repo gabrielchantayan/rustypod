@@ -13376,6 +13376,53 @@ functions:
       shape with the literal after the body; the diff is the crate's
       fp frame and the stm split.
 
+  - address: 0x08266a80
+    ghidra: thunk_FUN_08275bc8
+    name: message_kind_destruct
+    size: 4
+    sig: "MessageKind *message_kind_destruct(MessageKind *this)"
+    module: app/message_kind
+    status: ported
+    renames:
+      param_1/r0: this
+      FUN_08275bc8: framework_object_destruct (root dtor, a bare bx lr;
+        identified from framework_object_construct's side, not ported)
+    notes: >-
+      One instruction, b 0x08275bc8 - a true 4-byte tail-branch veneer
+      (Ghidra's size is right), NOT a mis-sized body and NOT an ldr
+      pc,[pc,#-4] veneer. It closes the message-kind cluster: ctor
+      0x08266a48 (ported), NULL-guarded deleting dtor 0x08266a64
+      (bl 0x08275bc8, then operator delete of 8 bytes via 0x08266a84),
+      this non-deleting dtor, then the operator-delete veneer at
+      0x08266a84. The target 0x08275bc8 is binary-verified a bare bx
+      lr - the framework root destructor - so the net effect is the
+      identity on r0 with no memory touched. Binary scan of every
+      B/BL word in osos.dec: 17 plain bl sites, 0 predicated bl, 1
+      tail b @ 0x0811ef8c (a derived dtor chaining into its base);
+      Ghidra's 17 is the bl count only. 0x08266a80 appears in NO
+      data word, so it is never vtable-dispatched - every caller
+      binds it statically (its class vtable 0x089a3788's live slots
+      point elsewhere, binary-verified). Two bl shapes: 8 sites are
+      the NULL-guarded heap destroy push {r4,lr}; popeq {r4,pc}; bl;
+      mov r4,r0 whose captured r0 feeds the operator-delete path
+      (e.g. 0x0816f194: mov r4,r0; bl 0x082669e4; mov r1,r4) - the
+      r0 pass-through is a real contract, so the port returns this
+      despite Ghidra's void prototype; 5 sites are end-of-scope
+      teardown of a stack message (add r0,sp,#N / mov r0,sp), the
+      RAII scope teardown node_list_enqueue records as its
+      thunk_FUN_08275bc8 seam. Port models the b+ bx lr pair as the
+      plain return-this identity with no call, the same way the
+      observable-array destructors model the same root dtor, and
+      carries its own link_section against LLVM identical-code
+      folding with the other empty-dtor exports (symbol verified
+      present in the release archive). Host tests pin the r0
+      pass-through (NULL/unaligned/extreme pointers) and the
+      no-store behaviour over a poison-guarded 8-byte object.
+      match.py structural - the original is the single b; the port
+      is push {fp,lr}/mov fp,sp/pop {fp,pc}, LLVM's frame on the
+      leaf identity: same net effect (r0 unchanged, no memory
+      touched), expected non-match for a modeled-away veneer.
+
   - address: 0x08266aa4
     ghidra: FUN_08266aa4
     name: message_kind_arena_alloc
