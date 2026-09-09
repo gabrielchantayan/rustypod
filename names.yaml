@@ -8346,6 +8346,41 @@ functions:
       Unlock twin of region_ref_lock; tail-branches to the C++ mutex
       unlock @ 0x082e83d8 (thunk @ 0x082621ac). 10 bl + 1 tail b sites.
 
+  - address: 0x08280464
+    ghidra: FUN_08280464
+    name: region_elem_copy_construct
+    size: 80
+    sig: "void *region_elem_copy_construct(void *dst, const void *src)"
+    module: heap/block_region
+    status: ported
+    renames:
+      param_1: dst
+      param_2: src
+      DAT_082804b4: region_elem_vtable
+    notes: >-
+      80 bytes: 76 bytes of instructions (0x08280464..0x082804b0) plus
+      vtable literal 0x089a6444 at 0x082804b4; the sibling constructor
+      0x082804b8 follows immediately, binary-verified against osos.dec.
+      A full ARM B/BL decode finds 15 bl call sites and no tail b sites:
+      11 unconditional, four blne (0x0814b988, 0x081a85a8, 0x081fc39c,
+      0x083e9f14). The predicated callers provide the NULL guard; the
+      callee dereferences both dst and src unconditionally. It plants the
+      element vtable, constructs the embedded recursive mutex via
+      0x082621b0, locks src's region, copies src +0x4 and +0x8 to dst,
+      increments a non-NULL region's u32 refcount, unlocks src, and returns
+      dst. The Rust port calls the unported 0x082621b0 body directly on
+      device; its host model composes cxx_mutexattr_init with the decoded
+      kind-2 settype and PosixMutex initializer, then clears the transient
+      attribute magic as pthread_mutexattr_destroy does. Element members use
+      word indices so host pointer fields and the mutex do not overlap.
+      Host tests cover live-region copy with u32 refcount wrap, recursive
+      mutex state, lock/copy/retain/unlock order, and NULL-region copy with
+      no mutex traffic. match.py structural review (exit 1, diff expected):
+      same vtable plant, mutex ctor, source lock -> two-word copy -> guarded
+      refcount increment -> source unlock sequence; LLVM uses its frame
+      pointer, `blx` for the original mutex-ctor address, and distinct Rust
+      lock/unlock calls in place of the retail direct bl instructions.
+
   - address: 0x08280430
     ghidra: FUN_08280430
     name: block_to_region_start
