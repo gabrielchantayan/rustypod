@@ -43617,7 +43617,43 @@ functions:
       `str r7,[sp]` fifth argument to cg_create_inst_binary; the diff is
       LLVM's frame-pointer prologue and that single hoisted load.
 
+  - address: 0x08260678
+    ghidra: FUN_08260678
+    name: cg_emit_store_word_at_offset
+    size: 124
+    sig: "cg_inst_t *cg_emit_store_word_at_offset(cg_block_t *block, cg_virtual_reg_t *base, U32 offset, cg_virtual_reg_t *value)"
+    module: codegen/pipeline_emit
+    status: ported
+    vars: {param_1: block, param_2: base, param_3: offset, param_4: value}
+    notes: >-
+      124 bytes, 31 instruction words 0x08260678-0x082606f0, no literal
+      pool - the last word is a tail `b` to cg_create_inst_store @
+      0x082c196c and the next function's own `stmdb
+      sp!,{r3,r4,r5,r6,r7,r8,r9,lr}` starts at 0x082606f4, so Ghidra's
+      124-byte extent is exact. 17 call sites, binary-scanned by
+      decoding every branch word in osos.dec: 16 unconditional bl plus
+      one tail b at 0x08246fa8, zero predicated forms. They sit in one
+      run inside the pipeline generators 0x08246f2c-0x08248538 - the
+      same generator group that calls cg_emit_load_matrix4x4_word. The
+      store twin of cg_emit_load_word_at_offset @ 0x082605f0: create
+      two general-purpose virtual registers up front through
+      cg_virtual_reg_create(block->proc, 0), then emit LDI offset_reg,
+      offset / ADD address_reg, base, offset_reg / STW [address_reg],
+      value and return the store instruction (the tail call hands the
+      factory's return value straight to the caller). Only TWO registers
+      are created - the value arrives as the fourth argument rather
+      than being loaded, so there is no value_reg. Opcode 44 = stw by
+      the alphabetical memory-opcode run census (see the 0x082605f0
+      entry); CG_INST_OPCODE_STW added to codegen/ir next to LDI/LDW.
+      Deviation: the original reloads block->proc from block+4 before
+      each register creation; the port reads it once (the field is not
+      written in between). match.py structural: identical call order,
+      identical opcodes (40/1/44) and the same `str r6,[sp]` fifth
+      argument to cg_create_inst_binary; the diff is LLVM's
+      frame-pointer prologue and that single hoisted load.
+
   - address: 0x0826077c
+    ghidra: FUN_0826077c
     ghidra: FUN_0826077c
     name: cg_emit_load_word_at_offset (second emission)
     size: 136
