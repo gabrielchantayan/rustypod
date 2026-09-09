@@ -51453,3 +51453,32 @@ functions:
       0x80000000. Deliberate deviation: none on target; release codegen
       restores its frame and tail-branches through the selected fixed entry.
       Host builds replace the address with a volatile callback seam.
+
+  - address: 0x0826d834
+    ghidra: FUN_0826d834
+    name: view_base_set_word_44
+    size: 24
+    sig: "void view_base_set_word_44(ViewBase *view, u32 word_44)"
+    module: ui/view_base
+    status: ported
+    renames:
+      param_1/r0: view
+      param_2/r1: word_44
+      DAT_vtable_plus_d4/r1: view vtable slot +0xd4 dynamic callback
+    notes: >-
+      Raw bytes correct Ghidra's reported 28-byte extent: ldr r2,[r0,#0x44]
+      at 0x0826d834 through bx lr at 0x0826d84c are 24 bytes, and the
+      separately linked sibling FUN_0826d850 begins at 0x0826d850 with
+      push {r4,r5,r6,lr}. The setter returns without a store or call when
+      view+0x44 already equals word_44. Otherwise it stores word_44 first,
+      reloads the view vtable, and tail-dispatches its +0xd4 slot with view
+      as r0. Decoding every ARM B/BL immediate in osos.dec finds exactly 15
+      direct inbound calls: all unconditional bl, zero predicated and zero
+      direct tail-b forms. The dynamic slot target is runtime vtable data,
+      not a separately identified firmware entry, so the port does not
+      invent a callee identity. Target builds retain that direct vtable
+      dispatch; host builds use the same ABI through a volatile slot seam
+      because the target u32 vtable word cannot hold a host-width function
+      pointer. Host tests cover equal values, zero-to-u32::MAX and
+      u32::MAX-to-zero changes, store-before-callback order, and the
+      untouched neighboring +0x4c field.
