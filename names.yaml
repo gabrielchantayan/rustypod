@@ -48687,3 +48687,34 @@ functions:
       host-replaceable seams; target builds transmute their verified retailOS
       entry addresses directly. Tests cover zero, 32 KiB chunking, read
       failure, negative wraparound, and tell failure.
+
+  # --- zeroing big-endian stream word reader ---
+  - address: 0x080575cc
+    ghidra: FUN_080575cc
+    name: stream_read_be32_or_zero
+    size: 36
+    sig: "i32 stream_read_be32_or_zero(u32 ctx, u32 *out)"
+    module: util/stream_read_be32_or_zero
+    status: ported
+    renames:
+      param_1/r0: ctx
+      param_2/r1: out
+      local_10: value
+      FUN_08057874: stream_read_be32
+    notes: >-
+      Raw ARM confirms Ghidra's 36-byte extent: this function runs from
+      0x080575cc through 0x080575ec, and its u16-reading sibling begins at
+      0x080575f0. It initializes a stack-local u32 to zero, calls the already
+      ported stream_read_be32 @ 0x08057874 with that local, unconditionally
+      stores the local through out, and returns the callee's 0/1 status
+      unchanged. Consequently, unlike stream_read_be32, failure writes zero
+      to out. Decoding every ARM B/BL word in osos.dec finds exactly 18
+      inbound calls, all plain unconditional BL with no predicated BL forms.
+      The function has no NULL guard. Host tests cover a successful big-endian
+      read and failure's zeroing store; tests sharing the mutable
+      stream-read-core seam use one crate-global lock. Deliberate deviations:
+      Rust uses a local u32 in its ABI-selected stack frame rather than the
+      retail stack slot; initialized value, call ABI, output store, and status
+      are identical. match.py structural review: same initialize -> call ->
+      unconditional store -> return shape; LLVM adds a frame pointer and
+      stack adjustment.

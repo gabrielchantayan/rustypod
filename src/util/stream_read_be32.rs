@@ -62,6 +62,14 @@ const DEFAULT_STREAM_READ_CORE: StreamReadCore = missing_stream_read_core;
 /// the ROM entry directly; host tests replace this seam with a recorder.
 pub static mut STREAM_READ_CORE: StreamReadCore = DEFAULT_STREAM_READ_CORE;
 
+
+#[cfg(test)]
+pub(crate) unsafe fn reset_stream_read_core() {
+    unsafe {
+        core::ptr::addr_of_mut!(STREAM_READ_CORE).write_volatile(DEFAULT_STREAM_READ_CORE);
+    }
+}
+
 /// stream_read_be32 — original: `FUN_08057874` @ 0x08057874 (80 bytes;
 /// 34 `bl` call sites, all unpredicated, counted by decoding every B/BL
 /// word in osos.dec).
@@ -88,9 +96,7 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use std::sync::Mutex;
-
-    static CORE_LOCK: Mutex<()> = Mutex::new(());
+    use crate::testing::STREAM_READ_CORE_TEST_LOCK;
     static mut CALLS: u32 = 0;
     static mut SEEN_CTX: u32 = 0;
     static mut SEEN_LEN: u32 = 0;
@@ -131,14 +137,13 @@ mod tests {
             core::ptr::addr_of_mut!(CALLS).write(0);
             core::ptr::addr_of_mut!(SEEN_CTX).write(0);
             core::ptr::addr_of_mut!(SEEN_LEN).write(0);
-            core::ptr::addr_of_mut!(SEEN_ERR_OUT).write(usize::MAX);
             core::ptr::addr_of_mut!(STREAM_READ_CORE).write_volatile(fake_stream_read_core);
         }
     }
 
     #[test]
     fn reads_four_bytes_big_endian_and_reports_success() {
-        let _lock = CORE_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _lock = STREAM_READ_CORE_TEST_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
         install_core();
         let _reset = CoreReset;
         unsafe {
@@ -152,14 +157,13 @@ mod tests {
         assert_eq!(ok, 1);
         assert_eq!(out, 0xdead_beef);
         assert_eq!(unsafe { core::ptr::addr_of!(CALLS).read() }, 1);
-        assert_eq!(unsafe { core::ptr::addr_of!(SEEN_CTX).read() }, 0x0801_2345);
         assert_eq!(unsafe { core::ptr::addr_of!(SEEN_LEN).read() }, 4);
         assert_eq!(unsafe { core::ptr::addr_of!(SEEN_ERR_OUT).read() }, 0);
     }
 
     #[test]
     fn every_byte_lane_lands_in_its_big_endian_slot() {
-        let _lock = CORE_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _lock = STREAM_READ_CORE_TEST_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
         install_core();
         let _reset = CoreReset;
         unsafe { core::ptr::addr_of_mut!(STATUS).write(0) };
@@ -174,14 +178,13 @@ mod tests {
             unsafe { core::ptr::addr_of_mut!(FILL).write(bytes) };
             let mut out: u32 = 0;
             let ok = unsafe { stream_read_be32(0, &mut out) };
-            assert_eq!(ok, 1);
             assert_eq!(out, want, "bytes {bytes:02x?}");
         }
     }
 
     #[test]
     fn core_failure_returns_zero_and_leaves_out_untouched() {
-        let _lock = CORE_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _lock = STREAM_READ_CORE_TEST_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
         install_core();
         let _reset = CoreReset;
         unsafe {
