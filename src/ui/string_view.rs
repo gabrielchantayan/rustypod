@@ -401,10 +401,11 @@ mod tests {
     use crate::cxx::string_object::STRING_OBJECT_VTABLE;
     use crate::drivers::timer::{TimerOps, TIMER_OPS};
     use crate::testing::{
-        hints, note_missing_u32_fixture, try_map_u32_slab, TIMER_OPS_TEST_LOCK,
+        hints, note_missing_u32_fixture, try_map_u32_slab, STRING_VIEW_OPS_TEST_LOCK,
+        TIMER_OPS_TEST_LOCK,
     };
     use core::ptr;
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::Mutex;
     use std::vec::Vec;
 
     /// PairHeaderBase's vtable literal (the private
@@ -424,11 +425,6 @@ mod tests {
     const CONTROLLER_OFFSET: usize = 0x680;
     const PARENT_OFFSET: usize = 0x700;
 
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
-
-    fn ops_lock() -> MutexGuard<'static, ()> {
-        OPS_LOCK.lock().unwrap_or_else(|poison| poison.into_inner())
-    }
 
     struct Fixture {
         view: *mut StringView,
@@ -558,7 +554,9 @@ mod tests {
 
     #[test]
     fn constructs_members_in_address_order_and_returns_view() {
-        let _string_view_lock = ops_lock();
+        let _string_view_lock = STRING_VIEW_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         let _timer_lock = TIMER_OPS_TEST_LOCK
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
