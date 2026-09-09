@@ -11158,6 +11158,56 @@ functions:
       0x0809449c is ported, so no dispatch seam was added. No deliberate
       deviations.
 
+  - address: 0x0818a144
+    ghidra: FUN_0818a144
+    name: counted_mutex_guard_acquire
+    size: 32
+    sig: "CountedMutex **counted_mutex_guard_acquire(CountedMutex **guard, u8 *const *owner)"
+    module: kernel/sync_mutex
+    status: ported
+    renames:
+      param_1/r0: guard (the one-word scope guard; receives the lock
+        address and is returned verbatim)
+      param_2/r1: owner (object whose word at +4 is the interface
+        pointer; the interface embeds the CountedMutex at +0x44)
+      FUN_08094404: mutex_lock_counted (ported, called directly)
+    notes: >-
+      32 bytes, extent binary-verified: the next function (the unported
+      unlock twin 0x0818a164, ldr r0,[r0]; bl 0x0809449c) starts at
+      +0x20. 16 bl call sites, binary-scanned by decoding every B/BL word
+      in osos.dec - 0x081ef5f4, 0x081ef77c, 0x081ef9f0, 0x08206e5c,
+      0x08277a04, 0x08277ac0, 0x08277c08, 0x08278264, 0x082784f8,
+      0x082787d4, 0x082788a4, 0x08278948, 0x082789dc, 0x08278d38,
+      0x082a53b0 and 0x082a542c - all plain bl (cond 0xe), no predicated
+      forms, no tail b, and the address appears in no DATA word, so it is
+      never dispatched virtually. Acquire half of the one-word
+      counted-lock scope guard used across the Silver-controller/facade
+      code (the release halves are counted_mutex_guard_release @
+      0x08206e9c and the unported 0x0818a164 twin; several call sites,
+      e.g. 0x082779ec, skip both and hand the guard word straight to
+      mutex_unlock_counted). Body: interface = owner->word_at_+4;
+      *guard = interface + 0x44 (the embedded CountedMutex);
+      mutex_lock_counted(*guard); return guard. The store to the guard
+      lands BEFORE the lock call (str r0,[r4] then bl), so the guard
+      word is already valid while the wait runs - preserved and tested
+      with a probing sema_wait mock. No NULL guards anywhere: a NULL
+      interface word yields lock address 0x44, which the original would
+      dereference; callers always pass a live owner. The interface word
+      is read with typed pointer indexing (owner.add(1)), not a byte
+      offset, so the field stays at word index 1 on a 64-bit test host;
+      on the 32-bit target it is exactly ldr r0,[r1,#4]. Deviation:
+      LLVM inlines the ported mutex_lock_counted body here (its own port
+      documents the same for mutex_lock), so the ARM build shows the
+      wait bl followed by the inlined hold-count increment at [lock+8]
+      in place of the original's bl 0x08094404. Host tests:
+      src/kernel/sync_mutex.rs::tests::guard_acquire_stores_locks_and_returns_the_guard
+      / guard_acquire_stores_the_guard_word_before_waiting /
+      guard_acquire_null_cell_still_stores_and_counts /
+      guard_acquire_word_feeds_mutex_unlock_counted_directly. match.py
+      (exit 1, diff expected): same ldr [r1,#4] / add #0x44 / str [r4]
+      / wait-call / return-guard structure; the diff is the crate fp
+      frame and the inlined counted-lock body.
+
   - address: 0x08094424
     ghidra: FUN_08094424
     name: mutex_delete_counted
