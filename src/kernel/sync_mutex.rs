@@ -355,6 +355,53 @@ pub unsafe extern "C" fn mutex_unlock_counted(lock: *mut CountedMutex) {
     mutex_unlock(core::ptr::addr_of_mut!((*lock).mutex));
 }
 
+/// Byte offset of the [`CountedMutex`] embedded in the interface object
+/// the guard acquire below locks (`add r0, r0, #0x44` in the original).
+const INTERFACE_LOCK_OFFSET: usize = 0x44;
+
+/// counted_mutex_guard_acquire — original: `FUN_0818a144` @ 0x0818a144
+/// (32 bytes; 16 `bl` call sites, binary-scanned by decoding every B/BL
+/// word in osos.dec: 0x081ef5f4, 0x081ef77c, 0x081ef9f0, 0x08206e5c,
+/// 0x08277a04, 0x08277ac0, 0x08277c08, 0x08278264, 0x082784f8,
+/// 0x082787d4, 0x082788a4, 0x08278948, 0x082789dc, 0x08278d38,
+/// 0x082a53b0 and 0x082a542c — all plain `bl`, no predicated forms, no
+/// tail `b`, and the address appears in no DATA word, so the function is
+/// never dispatched virtually).
+///
+/// Acquire half of the one-word counted-lock scope guard used throughout
+/// the Silver-controller/facade code: reads the interface pointer in the
+/// owner's word at +4, stores the address of the [`CountedMutex`] embedded
+/// at +0x44 in that interface object into the guard word, locks it through
+/// [`mutex_lock_counted`], and returns the guard address. The matching
+/// unlock veneer @ 0x0818a164 (`ldr r0,[r0]`; `bl mutex_unlock_counted`)
+/// is unported; several call sites skip it entirely and hand the guard
+/// word straight to [`mutex_unlock_counted`] (e.g. 0x082779ec).
+///
+/// The store to the guard lands BEFORE the lock call (`str r0,[r4]` then
+/// `bl 0x08094404`), so the guard word is already valid while the wait
+/// runs — preserved and tested. There are no NULL guards anywhere: a NULL
+/// interface word yields lock address 0x44, which the original would
+/// dereference; callers always pass a live owner. The interface pointer
+/// is read with typed pointer indexing (`owner.add(1)`) rather than a
+/// byte offset so the field stays at word index 1 on a 64-bit test host;
+/// on the 32-bit target it is exactly `ldr r0,[r1,#4]`.
+///
+/// Deviation: the original calls `mutex_lock_counted` with a `bl`; LLVM
+/// may inline the ported callee's small body here, exactly as its own
+/// port notes for `mutex_lock`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn counted_mutex_guard_acquire(
+    guard: *mut *mut CountedMutex,
+    owner: *const *mut u8,
+) -> *mut *mut CountedMutex {
+    let interface = owner.add(1).read();
+    let lock = interface.add(INTERFACE_LOCK_OFFSET) as *mut CountedMutex;
+    guard.write(lock);
+    mutex_lock_counted(lock);
+    guard
+}
+
 /// `counted_mutex_guard_release` — original: `FUN_08206e9c` @ 0x08206e9c
 /// (40 bytes; 20 unconditional `bl` call sites, binary-scanned).
 ///
@@ -875,6 +922,159 @@ mod tests {
             assert_eq!(lock.hold_count, 2);
         }
         assert_eq!(calls(), vec![Call::Signal(MOCK_HANDLE)]);
+    }
+
+    // -- the counted-lock guard acquire @ 0x0818a144 ----------------
+
+    /// Owner/interface fixture: `words[1]` is the interface pointer the
+    /// original loads with `ldr r0,[r1,#4]`; the interface carries a live
+    /// [`CountedMutex`] at byte offset +0x44. `words[0]` is garbage on
+    /// purpose — the acquire must never read it. The interface storage is
+    /// a u64 array with the interface base shifted 4 bytes in, so the
+    /// +0x44 lock lands 8-aligned: on this host `CountedMutex` holds a
+    /// native 8-byte pointer field (24 bytes, not the target's 12), while
+    /// the 32-bit target only needs the 4-alignment the firmware object
+    /// has. The array is sized for the HOST struct so the write stays
+    /// inside the fixture.
+    const INTERFACE_STORAGE_WORDS: usize =
+        (4 + INTERFACE_LOCK_OFFSET + core::mem::size_of::<CountedMutex>() + 7) / 8;
+
+    struct AcquireFixture {
+        words: [*mut u8; 2],
+        interface: [u64; INTERFACE_STORAGE_WORDS],
+    }
+
+    impl AcquireFixture {
+        fn new() -> Self {
+            AcquireFixture {
+                words: [0xdead_beef as *mut u8, core::ptr::null_mut()],
+                interface: [0; INTERFACE_STORAGE_WORDS],
+            }
+        }
+
+        /// Self-referential: must run only once the fixture is at its
+        /// final address (a `new()` that wired these pointers would
+        /// capture its own frame and dangle after the move).
+        fn init(&mut self, cell: *mut u32, hold_count: u32) {
+            self.words[1] = self.interface_base();
+            unsafe {
+                self.lock().write(live_counted_lock(cell, hold_count));
+            }
+        }
+
+        /// Start of the interface object: 4 bytes into the 8-aligned
+        /// storage, so interface+0x44 is 8-aligned on a 64-bit host.
+        fn interface_base(&mut self) -> *mut u8 {
+            unsafe { (self.interface.as_mut_ptr() as *mut u8).add(4) }
+        }
+
+        /// Address of the embedded CountedMutex at interface+0x44.
+        fn lock(&mut self) -> *mut CountedMutex {
+            unsafe { self.interface_base().add(INTERFACE_LOCK_OFFSET) as *mut CountedMutex }
+        }
+
+        fn owner(&mut self) -> *const *mut u8 {
+            self.words.as_ptr()
+        }
+    }
+
+    /// The guard word receives interface+0x44 verbatim, the embedded lock
+    /// is waited on and counted, and the guard address is returned.
+    #[test]
+    fn guard_acquire_stores_locks_and_returns_the_guard() {
+        let _lock = mock_kernel();
+        let mut cell = MOCK_HANDLE;
+        let mut fixture = AcquireFixture::new();
+        fixture.init(&mut cell, 0);
+        let lock = fixture.lock();
+        let mut guard: *mut CountedMutex = core::ptr::null_mut();
+        let guard_address = core::ptr::addr_of_mut!(guard);
+
+        let returned = unsafe { counted_mutex_guard_acquire(guard_address, fixture.owner()) };
+
+        assert_eq!(returned, guard_address, "returns the guard address");
+        assert_eq!(guard, lock, "guard word is interface+0x44 verbatim");
+        assert_eq!(unsafe { (*lock).hold_count }, 1, "lock is held");
+        assert_eq!(calls(), vec![Call::Wait(MOCK_HANDLE)]);
+    }
+
+    /// Ordering: the original stores the guard word (`str r0,[r4]`)
+    /// BEFORE the lock call, so the guard is already valid while the
+    /// semaphore wait runs.
+    #[test]
+    fn guard_acquire_stores_the_guard_word_before_waiting() {
+        let _lock = mock_kernel();
+        static mut PROBED_GUARD: *const *mut CountedMutex = core::ptr::null();
+        static mut EXPECTED_LOCK: *mut CountedMutex = core::ptr::null_mut();
+        static mut GUARD_WORD_AT_WAIT: usize = usize::MAX;
+        unsafe extern "C" fn probing_wait(handle: u32) {
+            record(Call::Wait(handle));
+            unsafe {
+                GUARD_WORD_AT_WAIT = (*PROBED_GUARD) as usize;
+            }
+        }
+        let mut cell = MOCK_HANDLE;
+        let mut fixture = AcquireFixture::new();
+        fixture.init(&mut cell, 0);
+        let lock = fixture.lock();
+        let mut guard: *mut CountedMutex = core::ptr::null_mut();
+        let guard_address = core::ptr::addr_of_mut!(guard);
+        unsafe {
+            PROBED_GUARD = guard_address;
+            EXPECTED_LOCK = lock;
+            GUARD_WORD_AT_WAIT = usize::MAX;
+            let mut ops = MOCK_KERNEL;
+            ops.sema_wait = probing_wait;
+            *core::ptr::addr_of_mut!(ROM_KERNEL) = ops;
+            counted_mutex_guard_acquire(guard_address, fixture.owner());
+            assert_eq!(
+                GUARD_WORD_AT_WAIT, EXPECTED_LOCK as usize,
+                "guard word already stored while the wait runs"
+            );
+        }
+        assert_eq!(calls(), vec![Call::Wait(MOCK_HANDLE)]);
+    }
+
+    /// The inherited NULL-cell guard: no ROM wait, but the counter still
+    /// moves and the guard word is still stored — exactly the
+    /// `mutex_lock_counted` behavior.
+    #[test]
+    fn guard_acquire_null_cell_still_stores_and_counts() {
+        let _lock = mock_kernel();
+        let mut fixture = AcquireFixture::new();
+        fixture.init(core::ptr::null_mut(), 0);
+        let lock = fixture.lock();
+        let mut guard: *mut CountedMutex = core::ptr::null_mut();
+        let guard_address = core::ptr::addr_of_mut!(guard);
+
+        let returned = unsafe { counted_mutex_guard_acquire(guard_address, fixture.owner()) };
+
+        assert_eq!(returned, guard_address);
+        assert_eq!(guard, lock);
+        assert_eq!(unsafe { (*lock).hold_count }, 1, "increment is unconditional");
+        assert_eq!(calls(), vec![], "no ROM op behind the NULL-cell guard");
+    }
+
+    /// The pattern the 0x082779ec-family call sites use: the stored guard
+    /// word is later handed straight to `mutex_unlock_counted`, ending the
+    /// scope with the counter back where it started.
+    #[test]
+    fn guard_acquire_word_feeds_mutex_unlock_counted_directly() {
+        let _lock = mock_kernel();
+        let mut cell = MOCK_HANDLE;
+        let mut fixture = AcquireFixture::new();
+        fixture.init(&mut cell, 0);
+        let lock = fixture.lock();
+        let mut guard: *mut CountedMutex = core::ptr::null_mut();
+        unsafe {
+            counted_mutex_guard_acquire(core::ptr::addr_of_mut!(guard), fixture.owner());
+            mutex_unlock_counted(guard);
+        }
+        assert_eq!(unsafe { (*lock).hold_count }, 0, "scope ends released");
+        assert_eq!(
+            calls(),
+            vec![Call::Wait(MOCK_HANDLE), Call::Signal(MOCK_HANDLE)]
+        );
     }
 
     // -- the one-word counted-lock scope guard @ 0x08206e9c -------------
