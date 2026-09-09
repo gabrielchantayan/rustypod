@@ -54432,3 +54432,35 @@ functions:
       same kind branch, signed direct-base computation, resolver status
       return, and begin call remain. The additions are the target-address
       loads and blx seam calls plus LLVM's larger frame and split cleanup.
+
+
+  # --- SQLite expression visitor ---
+  - address: 0x0839866c
+    ghidra: FUN_0839866c
+    name: sqlite_expr_walk
+    size: 140
+    sig: "i32 sqlite_expr_walk(Expr *expr, ExprVisit visit, void *context)"
+    module: sqlite/walk_expr
+    status: ported
+    renames:
+      param_1/r0: expr
+      param_2/r1: visit
+      param_3/r2: context
+      FUN_08398614: sqlite_expr_list_walk
+    notes: >-
+      Raw ARM confirms a 140-byte extent from 0x0839866c through
+      0x083986f4; the separately linked next walker starts at 0x083986f8.
+      This SQLite expression visitor invokes visit(context, expr) before
+      descending through p_left (+0x08), p_right (+0x0c), then p_list
+      (+0x10). A visitor status of zero descends; any nonzero signed status
+      at most one prunes its descendants and returns success, while a status
+      greater than one aborts with one. Any descendant abort propagates as
+      one. A NULL expr returns zero without calling visit. Exactly 13 direct
+      B/BL words target this entry: 12 unconditional bl and one blne at
+      0x08383394, whose call is gated by the caller's condition. The
+      distinct list helper FUN_08398614 is unported, so the target default
+      calls its verified stock address while host tests install a recording
+      volatile seam; names.yaml contains no ported entry for that helper.
+      The raw body does not inspect Expr::p_select. match.py is structural:
+      LLVM's recursive call and list-helper slot call need not reproduce ADS
+      instruction selection exactly.
