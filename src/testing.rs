@@ -171,6 +171,10 @@ pub mod hints {
     // list/cursor fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const LIST_CURSOR_INDEX: usize = 0x8200_0000;
+    // 0x9e00_0000: dedicated to util/attr_record's raw-u32
+    // named-attribute table fixture; mappings never unmap, so no other user
+    // may share this hint.
+    pub const NAMED_ATTRIBUTE_LOOKUP: usize = 0x9e00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
@@ -215,6 +219,11 @@ pub fn note_missing_u32_fixture(module: &str) -> bool {
 /// this lock for the duration of a test rather than each keeping a
 /// private one.
 pub static TRACED_ALLOC_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serializes every host test that replaces
+/// `util::global_state::GLOBAL_STATE_SLOT_FIND`. The global-state wrapper and
+/// attribute-record lookup both install test slot finders into this one seam.
+pub static GLOBAL_STATE_SLOT_FIND_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Serializes every host test that installs a container vtable into
 /// `app::registry::CLASS_REGISTRY`. That registry is one shared mutable
