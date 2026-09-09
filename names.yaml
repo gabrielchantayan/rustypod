@@ -51610,3 +51610,33 @@ functions:
       pointer. Host tests cover equal values, zero-to-u32::MAX and
       u32::MAX-to-zero changes, store-before-callback order, and the
       untouched neighboring +0x4c field.
+
+  - address: 0x0817e2e0
+    ghidra: FUN_0817e2e0
+    name: registry_element_secondary_dispatch
+    size: 28
+    sig: "void registry_element_secondary_dispatch(RegistryElementSecondaryDispatch *element, void *value)"
+    module: app/element_registry
+    status: ported
+    renames:
+      param_1/r0: element
+      param_2/r1: value
+      iVar1/r1: secondary_collection (element + 0x34)
+      iVar2/r2: secondary_collection vtable slot +0x1c
+      local_8/sp: value_slot
+    notes: >-
+      Raw ARM is exactly 28 bytes, from 0x0817e2e0 through the pop {ip,pc} at
+      0x0817e2f8; the separately linked next function starts at 0x0817e2fc.
+      It stores value in a stack word, derives the embedded secondary collection
+      at element +0x34, and blx-dispatches that object's runtime vtable slot
+      +0x1c with (collection, &value_slot). The slot target is runtime data, not
+      a statically identifiable function entry, so the port performs the
+      supplied vtable dispatch and does not invent a callee identity or seam.
+      Decoding every ARM B/BL immediate in osos.dec finds 15 inbound direct
+      calls: all unconditional bl, zero predicated bl, zero direct tail b, and
+      no aligned data-word occurrence of 0x0817e2e0. The sibling constructor
+      FUN_0817e3b0 initializes an observable-array-derived subobject at +0x34.
+      The raw body has no NULL guard; host tests prove both a real pointer and
+      NULL are forwarded. Deliberate host-only representation deviation: the
+      dynamic vtable is structural so it can retain a native-width callback,
+      while the target field's +0x34 layout is asserted on 32-bit builds.
