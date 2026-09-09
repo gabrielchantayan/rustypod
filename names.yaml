@@ -54598,3 +54598,29 @@ functions:
       predicated forms and no tail branches. Host tests cover NULL and
       exclusive-limit rejection, cache-hit bypass, miss read arguments, and
       failed-miss detach/release.
+
+  # --- Path-resolution utility byte fill ---
+  - address: 0x082e2ef0
+    ghidra: FUN_082e2ef0
+    name: byte_fill
+    size: 20
+    sig: "u8 *byte_fill(u8 *dst, u32 len, u8 value)"
+    module: libc/byte_fill
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: len
+      param_3/r2: value
+    notes: >-
+      Raw ARM establishes the 20-byte extent: the loop runs from
+      0x082e2ef0 through its bx lr at 0x082e2f00, and the next distinct
+      function begins at 0x082e2f04. Decoding every ARM B/BL word in
+      osos.dec finds 13 direct callers, all plain unconditional bl; no
+      predicated bl forms target this entry. The bne at 0x082e2efc is the
+      function's own loop back-edge, not a call. It pre-decrements the
+      32-bit length, byte-stores r2 through post-incremented r0 until the
+      counter reaches -1, and therefore leaves dst + len in r0; zero length
+      dereferences nothing. Ghidra's void signature misses that observable
+      r0 result. No deliberate deviations: volatile stores only prevent LLVM
+      from lowering the freestanding byte loop to an unavailable memset
+      libcall.

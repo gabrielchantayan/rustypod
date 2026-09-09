@@ -3,6 +3,7 @@ pub mod bcopy;
 pub mod bcopy_guarded;
 pub mod byte_copy;
 pub mod byte_copy_signed;
+pub mod byte_fill;
 pub mod counted_copy;
 pub mod bounded_copy;
 pub mod bzero;
