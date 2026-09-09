@@ -49,6 +49,7 @@ pub mod scanf;
 pub mod sqlite;
 pub mod stdio;
 pub mod strto;
+pub mod sysinfo;
 pub mod time;
 pub mod ui;
 pub mod util;

@@ -410,6 +410,28 @@ static mut HOST_SHARED_CONTEXT_SLOT: *mut u8 = core::ptr::null_mut();
 #[cfg(not(target_os = "none"))]
 static mut HOST_DEFAULT_SHARED_CONTEXT: *mut u8 = core::ptr::null_mut();
 
+/// Serializes host tests across modules that swap the shared-context
+/// backing storage above: this module's own tests hold it through
+/// `install_shared_context`, and [`crate::sysinfo`]'s `board_version`
+/// tests hold it while a fixture context is installed (the house pattern
+/// of `fp_misc::CURRENT_DATETIME_QUERY_TEST_LOCK`).
+#[cfg(test)]
+extern crate std;
+#[cfg(test)]
+pub(crate) static SHARED_CONTEXT_TEST_LOCK: std::sync::Mutex<()> =
+    std::sync::Mutex::new(());
+
+/// Host-test hook for cross-module consumers of [`shared_context`]:
+/// publishes `context` as the slot content and clears the default, so the
+/// getter returns it verbatim with no publication path in the way. The
+/// caller MUST hold [`SHARED_CONTEXT_TEST_LOCK`] and restore with a NULL
+/// `context` when done.
+#[cfg(test)]
+pub(crate) unsafe fn host_install_shared_context(context: *mut u8) {
+    core::ptr::addr_of_mut!(HOST_SHARED_CONTEXT_SLOT).write(context);
+    core::ptr::addr_of_mut!(HOST_DEFAULT_SHARED_CONTEXT).write(core::ptr::null_mut());
+}
+
 #[inline(always)]
 unsafe fn shared_context_slot() -> *mut *mut u8 {
     #[cfg(target_os = "none")]
@@ -2116,22 +2138,27 @@ mod tests {
     fn install_shared_context(
         default_context: *mut u8,
         initial_context: *mut u8,
-    ) -> MutexGuard<'static, ()> {
-        let guard = VERSION_TEXT_LOCK
+    ) -> (MutexGuard<'static, ()>, MutexGuard<'static, ()>) {
+        let version_text_guard = VERSION_TEXT_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // Also serialized against cross-module consumers of the host
+        // shared-context storage (crate::sysinfo's board_version tests).
+        let context_guard = SHARED_CONTEXT_TEST_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         unsafe {
             core::ptr::addr_of_mut!(HOST_SHARED_CONTEXT_SLOT).write(initial_context);
             core::ptr::addr_of_mut!(HOST_DEFAULT_SHARED_CONTEXT).write(default_context);
         }
-        guard
+        (version_text_guard, context_guard)
     }
 
     fn install_version_text_mocks(
         context: *mut u8,
         payload: &[u8],
-    ) -> MutexGuard<'static, ()> {
-        let guard = install_shared_context(context, core::ptr::null_mut());
+    ) -> (MutexGuard<'static, ()>, MutexGuard<'static, ()>) {
+        let guards = install_shared_context(context, core::ptr::null_mut());
         unsafe {
             FORMAT_CALLS = 0;
             FORMAT_WORD = 0;
@@ -2146,7 +2173,7 @@ mod tests {
             core::ptr::addr_of_mut!(OBJECT_COUNTED_TEXT)
                 .write(recording_object_counted_text);
         }
-        guard
+        guards
     }
 
     #[test]
@@ -2261,7 +2288,7 @@ mod tests {
     ///
     /// Shares `VERSION_TEXT_LOCK` with the version-text tests because both
     /// suites overwrite the host shared-context backing storage.
-    fn install_mode_flag_mock(context: *mut u8) -> MutexGuard<'static, ()> {
+    fn install_mode_flag_mock(context: *mut u8) -> (MutexGuard<'static, ()>, MutexGuard<'static, ()>) {
         install_shared_context(context, core::ptr::null_mut())
     }
 
