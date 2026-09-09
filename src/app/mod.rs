@@ -63,6 +63,7 @@ pub mod path_probe;
 pub mod pending_event_take;
 pub mod pending_event_insert;
 pub mod queued_message;
+pub mod query_param_list;
 pub mod registry;
 pub mod registration_handle;
 pub mod record_manager;
