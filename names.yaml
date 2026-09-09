@@ -14098,6 +14098,64 @@ functions:
       caveat as the other four getters - the ctor is a dispatch slot
       with a zeroing stub.
 
+  - address: 0x081ec268
+    ghidra: FUN_081ec268
+    name: class_8900_cached_property_6031
+    size: 40
+    sig: "u32 class_8900_cached_property_6031(Class8900 *this)"
+    module: app/class_8900
+    status: ported
+    renames:
+      param_1/r0: this
+    notes: >-
+      17 bl call sites, binary-verified by decoding every B/BL word in
+      osos.dec - all plain bl, no predicated forms, no tail b sites,
+      matching the scouting figure. Ghidra's 40-byte extent is exact:
+      the next function opens `push {r4, lr}` @ 0x081ec290. A method of
+      the registry-class-0x8900 object (the singleton from
+      app/singletons.rs; every call site hands it the class-0x8c00
+      object's +0xd0 cache of that object). The class-0x8900 ctor @
+      0x081ee0c0 zeroes +0x30 and stores instance_of_class_6000() at
+      +0x378 (the last word of the 0x380-sized object), so +0x30 is a
+      cached property value and +0x378 is the class-0x6000 store the
+      cache fronts. Algorithm: `ldr r1, [r0, #0x30]; cmp r1, #0` -
+      nonzero returns the cached word verbatim (`movne r0, r1; bx lr`);
+      zero tail-dispatches the store's vtable slot +0xdc (`ldreq r0,
+      [r0, #0x378]; moveq r2, #0x6000; ldreq r1, [r0]; ldreq r3, [r1,
+      #0xdc]; addeq r1, r2, #0x31; bxeq r3`) as read(store, 0x6031,
+      0x6000) - r2 = 0x6000 is live into the tail call, so it is a real
+      third argument, matching the class-0x6000 read convention of the
+      sibling dispatcher @ 0x08171fdc (slot +0xe0, (store, key, 0x6000,
+      kind) with kind "Ui32" = 0x55693332). The cold path does NOT write
+      the answer back into +0x30 - the cache is filled elsewhere.
+      Ghidra's C drops both tail-call arguments ("Could not recover
+      jumptable ... treating indirect jump as call"); the listing is
+      ground truth. Property 0x6031 is not named in the image, but the
+      class-0x8c00 state-machine callers @ 0x081a5530..0x081a70d4 pin
+      its domain: they compare the result against the enum constants
+      0x6032 / 0x6033 / 0x6038 / 0x603b, so 0x6031 is a mode/state word
+      of the class-0x6000 0x60xx family whose value is itself a 0x60xx
+      constant. Deviations: receiver and store modeled as #[repr(C)]
+      structs with native pointers (the app/resource_chain.rs
+      precedent), so +0x30 / +0x378 and vtable slot +0xdc land on their
+      original offsets on the 32-bit target and stay self-consistent on
+      the 64-bit host; the original's loads are unguarded (a NULL store
+      faults) and so are the port's; the concrete class-0x6000 vtable
+      stays stock firmware - the port performs the slot +0xdc dispatch
+      itself, like resource_chain_find's inline blx through slot +0x64,
+      so no dispatch seam. Host tests (5): warm cache returns verbatim
+      (incl. 1, the enum constants, u32::MAX) without touching the
+      store (NULL store must not fault); cold cache dispatches slot
+      +0xdc once with (store, 0x6031, 0x6000) and propagates the
+      answer, including a 0 answer; and the cold read does not fill the
+      cache, so a second call dispatches again. match.py structural
+      (exit-1 diff expected): same loads at the same offsets (+0x30,
+      +0x378, vtable, +0xdc), same constants, same conditional
+      early-return plus tail-dispatch shape; the diff is the crate
+      {fp,lr} frame and LLVM's branchy form plus mov/orr synthesis of
+      0x6031 standing in for the original's fully predicated eq
+      sequence and addeq key formation.
+
   - address: 0x0810a7b8
     ghidra: FUN_0810a7b8
     name: singleton_class_6200
