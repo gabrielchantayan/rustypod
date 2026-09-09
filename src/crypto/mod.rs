@@ -31,6 +31,7 @@
 //! (the 0x0803d800..0x08041000 bignum cluster: `d`/`top`/`dmax`/`neg`/
 //! `flags` layout, RSA-1024 `== 0x400` caller in the X.509 chain walk).
 pub mod bio_printf;
+pub mod bio_ctrl;
 pub mod bn_num_bits;
 pub mod cipher_name;
 pub mod digest_init;

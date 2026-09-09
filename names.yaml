@@ -41699,6 +41699,36 @@ functions:
   # vtable+0x08, num_write byte counter at bio+0x34; failures log
   # through diag_ring_record with facility 32 = ERR_LIB_BIO and
   # bio_lib.c line numbers 113/120/121).
+  - address: 0x0803d294
+    ghidra: FUN_0803d294
+    name: bio_ctrl
+    size: 196
+    sig: "int bio_ctrl(BIO *bio, int cmd, long larg, void *parg)"
+    module: crypto/bio_ctrl
+    status: ported
+    renames:
+      param_1/r0/r5: bio
+      param_2/r1/r6: cmd
+      param_3/r2/r7: larg
+      param_4/r3/r8: parg
+      r4: callback
+      "*(bio->method + 0x18)": method_ctrl
+    notes: >-
+      OpenSSL BIO_ctrl: method control dispatch with BIO callback wrapping
+      (BIO_CB_CTRL = 6, BIO_CB_RETURN = 0x80). Raw ARM confirms the
+      196-byte extent exactly (0x0803d294..0x0803d358): its successor is
+      the separately linked 8-byte veneer at 0x0803d358, not a trailing
+      literal pool. Binary decoding every B/BL word in osos.dec finds
+      exactly 18 direct call sites, all unconditional bl, no predicated
+      calls, no tail branches, and no raw image data word holding the
+      address. Null bio returns 0; missing bio->method or method->ctrl logs
+      diag_ring_record(32, 0x67, 0x79, 0, 0) and returns -2. A callback
+      preflight receives (bio, 6, parg, cmd, larg, 1) and non-positive
+      results bypass method->ctrl; otherwise the callback's postflight
+      (bio, 0x86, parg, cmd, larg, ctrl_result) replaces the ctrl result.
+      Host tests use a typed host dispatch model because the retail layout
+      deliberately keeps the callback and ctrl entries as 32-bit words;
+      target builds transmute and invoke those original words directly.
   - address: 0x0803d680
     ghidra: FUN_0803d680
     name: bio_printf
