@@ -49399,6 +49399,36 @@ functions:
       deviations: none. Host coverage proves all valid record offsets,
       halfword truncation, uncached reload, and the signed negative-slot
       path using an allocation that makes the retail address valid.
+  - address: 0x08193ee8
+    ghidra: FUN_08193ee8
+    name: service_manager_slot_handler_get
+    size: 20
+    sig: "void *service_manager_slot_handler_get(const u32 *slot_table, i32 slot)"
+    module: app/service_manager
+    status: ported
+    renames:
+      param_1/r0: slot_table
+      param_2/r1: slot
+      param_1_plus_slot_times_8_plus_0x64: handler
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw extent is exactly 0x08193ee8..0x08193efc: `cmp r1,#13; blge
+      0x08030f44; add r0,r0,r1,lsl #3; ldr r0,[r0,#100]; bx lr`; the next
+      `cmp r1,#3` at 0x08193efc begins a separately linked function. It
+      returns word one from one of thirteen 8-byte slot records starting at
+      slot_table+0x60; word zero is the flags bitmask. The signed `blge`
+      admits negative slots, which then address unchecked before the bank
+      exactly as retailOS does; slots >=13 terminate through ported
+      non-returning heap_panic. Decoding every ARM B/BL word in osos.dec
+      found exactly 14 inbound direct call sites — 0x08163b7c, 0x08164938,
+      0x0816494c, 0x081652bc, 0x081653b4, 0x0818e170, 0x0818f844,
+      0x0818fa8c, 0x08190ccc, 0x08191088, 0x08192bdc, 0x081d6bec,
+      0x081d6cd8, 0x081d6d70 — all unconditional plain BL; no predicated
+      forms or tail branches. The pointer's concrete handler identity is not
+      established, so the name records only its verified slot-table role.
+      Deliberate deviations: none. Host coverage proves all bank edges, NULL
+      propagation, an uncached reload, and the signed negative-slot path
+      using a low u32-addressable fixture.
   - address: 0x08193ec0
     ghidra: FUN_08193ec0
     name: service_manager_secondary_handler_get
