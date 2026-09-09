@@ -49436,6 +49436,40 @@ functions:
       flags, the untouched handler-pointer neighbor word, a zero-mask
       no-op, and the signed negative-slot path.
 
+  - address: 0x081946ec
+    ghidra: FUN_081946ec
+    name: active_service_handler_is_ready
+    size: 76
+    sig: "u32 active_service_handler_is_ready(void)"
+    module: app/active_service_handler_readiness
+    renames:
+      DAT_08194734: active_service_handler_context_slot (0x089ccb5c)
+      FUN_081391ec: service_manager_instance_veneer
+      FUN_08138d8c: service_handler_state_is_ready
+    status: ported
+    notes: >-
+      EXTENT CORRECTED: Ghidra's reported 72 bytes covers the eighteen ARM
+      instructions at 0x081946ec..0x08194734, but the `ldr r5,[pc,#60]`
+      consumes the following literal 0x089ccb5c at 0x08194734. The next
+      separately linked function starts at 0x08194738 (`push {r4-r7,r8,lr}`),
+      so the raw extent is 76 bytes. Decoding every ARM B/BL word in
+      osos.dec finds exactly 14 direct callers, all unconditional plain BL
+      (0x08194274, 0x0819434c, 0x081948f4, 0x0819496c, 0x081949e8,
+      0x08194a84, 0x08194b74, 0x08194bfc, 0x08194e88, 0x08194f04,
+      0x08194f80, 0x08195010, 0x081950a8, 0x08195124); no predicated BL
+      forms or tail branches target it. It reads the active context pointer
+      from 0x089ccb5c and returns zero unless its handler word +0x2d0 is
+      nonzero and its selector word +0x2d4 compares below three as signed.
+      The passing path obtains the service-manager singleton through the
+      already ported veneer, then calls the unported 0x08138d8c lifecycle
+      predicate and booleanizes the result. The context type and handler
+      identity are unrecovered, so the names state only this verified role.
+      Deliberate deviation: the runtime-initialized global slot is a host
+      fixture; 0x08138d8c shares the established volatile dispatch seam in
+      app/service_handler_availability rather than acquiring a second stub.
+      A selector word with the sign bit set passes the signed ARM `bge`
+      guard and is deliberately forwarded unchanged, as host coverage proves.
+
 
   # --- AppMotor fixed singleton accessor ---
   - address: 0x08295be0

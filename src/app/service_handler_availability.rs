@@ -21,6 +21,13 @@
 //! routes to the Rust [`service_handler_at`] port on firmware; the global
 //! gate stays a direct volatile firmware load. The fatal path is not
 //! host-tested: `heap_panic` does not return.
+#[cfg(test)]
+extern crate std;
+
+#[cfg(test)]
+pub(crate) static SERVICE_HANDLER_AVAILABILITY_OPS_LOCK: std::sync::Mutex<()> =
+    std::sync::Mutex::new(());
+
 use crate::app::service_manager::service_manager_instance_veneer;
 #[cfg(target_os = "none")]
 use crate::app::service_manager::service_handler_at;
@@ -68,7 +75,7 @@ unsafe fn handler_availability_gate() -> u32 {
 }
 
 type HandlerAt = unsafe extern "C" fn(*mut u8, u32) -> u32;
-type HandlerStateIsReady = unsafe extern "C" fn(*mut u8, u32) -> u32;
+pub(crate) type HandlerStateIsReady = unsafe extern "C" fn(*mut u8, u32) -> u32;
 
 #[derive(Clone, Copy)]
 struct ServiceHandlerAvailabilityOps {
@@ -117,6 +124,25 @@ unsafe fn availability_ops() -> ServiceHandlerAvailabilityOps {
     ptr::read_volatile(ptr::addr_of!(SERVICE_HANDLER_AVAILABILITY_OPS))
 }
 
+/// Calls the unported state predicate through this module's single dispatch
+/// seam. Ports which need the predicate must use this helper rather than
+/// introduce another host-only replacement for 0x08138d8c.
+#[inline(always)]
+pub(crate) unsafe fn service_handler_state_is_ready(manager: *mut u8, selector: u32) -> u32 {
+    (availability_ops().handler_state_is_ready)(manager, selector)
+}
+
+#[cfg(test)]
+pub(crate) unsafe fn replace_handler_state_is_ready(
+    handler_state_is_ready: HandlerStateIsReady,
+) -> HandlerStateIsReady {
+    let mut ops = availability_ops();
+    let previous = ops.handler_state_is_ready;
+    ops.handler_state_is_ready = handler_state_is_ready;
+    SERVICE_HANDLER_AVAILABILITY_OPS = ops;
+    previous
+}
+
 /// service_handler_is_available — original: `FUN_0818e624` @ 0x0818e624
 /// (100 bytes including literal; 32 direct unconditional `bl` call sites).
 ///
@@ -142,7 +168,7 @@ pub unsafe extern "C" fn service_handler_is_available(selector: u32) -> u32 {
     }
 
     let handler = (ops.handler_at)(manager.add(HANDLER_TABLE_OFFSET), selector);
-    let state_is_ready = (ops.handler_state_is_ready)(manager, selector);
+    let state_is_ready = service_handler_state_is_ready(manager, selector);
 
     (handler_availability_gate() != 0 && handler != 0 && state_is_ready != 0) as u32
 }
@@ -155,7 +181,6 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
     static mut MOCK_MANAGER: *mut u8 = ptr::null_mut();
     static mut MOCK_SELECTOR: u32 = 0;
     static mut MOCK_HANDLER: u32 = 0;
@@ -221,7 +246,7 @@ mod tests {
 
     #[test]
     fn accepts_both_edge_selectors_when_handler_and_state_are_nonzero() {
-        let _guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = SERVICE_HANDLER_AVAILABILITY_OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut manager = [0u32; 16];
 
         for selector in [0, HANDLER_SELECTOR_COUNT - 1] {
@@ -237,7 +262,7 @@ mod tests {
 
     #[test]
     fn calls_both_predicates_when_the_handler_is_absent() {
-        let _guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = SERVICE_HANDLER_AVAILABILITY_OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut manager = [0u32; 16];
         let previous = unsafe { install(manager.as_mut_ptr().cast(), 1, 0, 1, 1) };
 
@@ -251,7 +276,7 @@ mod tests {
 
     #[test]
     fn reloads_the_global_gate_after_the_callees() {
-        let _guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = SERVICE_HANDLER_AVAILABILITY_OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut manager = [0u32; 16];
         let previous = unsafe { install(manager.as_mut_ptr().cast(), 1, 0x1000, 1, 0) };
 
