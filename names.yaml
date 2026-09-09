@@ -54866,3 +54866,43 @@ functions:
       there is no dispatch seam or deliberate deviation. Host tests prove
       the left-plus-right result, preserving-allocation shape, source
       immutability, output construction, and exactly one temporary destroy.
+
+  # --- Application boot metrics submission ---
+  - address: 0x082664b4
+    ghidra: FUN_082664b4
+    name: app_boot_metrics_submit
+    size: 116
+    sig: "void app_boot_metrics_submit(void *channel, u32 event_id, u32 value)"
+    module: app/app_boot_metrics_submit
+    status: ported
+    renames:
+      param_1/r0: channel
+      param_2/r1: event_id
+      param_3/r2: value
+      local_10: record
+      "channel+0x18": accepting_gate
+      "channel+0x19": enabled_gate
+      "record+0x08": initializer_result
+      FUN_0815a554: record_initializer_unidentified
+      FUN_082aadd4: operator_new
+      FUN_082aad24: operator_delete
+      vtable_plus_0x1c: record_slot_dispatch_unidentified
+    notes: >-
+      Raw ARM establishes the exact 116-byte extent
+      0x082664b4..0x08266524; the next separately linked function starts at
+      0x08266528. An independent scan of every ARM B/BL word in osos.dec
+      finds exactly 13 incoming BL calls, all unconditional (cond=AL), and
+      zero predicated BL forms. The function gates first on channel+0x19,
+      then channel+0x18; it then allocates a 12-byte record with the ported
+      operator_new, calls unported FUN_0815a554, and accepts when record+8 is
+      nonzero OR event_id is inclusively 0x16..0x21. Acceptance stores
+      event_id/value at +0/+4, places the record pointer in a stack slot, and
+      BLX-dispatches channel's vtable slot +0x1c as (channel, &record).
+      Otherwise it restores its frame and conditional-tail-branches to the
+      ported operator_delete. FUN_0815a554 is only known to zero +0/+4, call
+      FUN_0815a50c, store its answer at +8, and return its record; neither it
+      nor the virtual target is assigned an invented identity. Target Rust
+      calls 0x0815a554 directly and reads the physical 32-bit vtable slot;
+      host tests use its deterministic zeroing seam and a pointer-width
+      fixture to avoid 64-bit offset/pointer truncation. Rust uses a normal
+      call rather than the final conditional tail branch to operator_delete.
