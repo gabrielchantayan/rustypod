@@ -28,6 +28,7 @@ pub mod draw_state_color;
 pub mod draw_state_fill;
 pub mod draw_state_line;
 pub mod draw_state_style;
+pub mod draw_state_surface;
 pub mod handle;
 pub mod heap_string;
 pub mod list_splice;
