@@ -56190,3 +56190,41 @@ functions:
       field stores and its target-only text section keeps this tiny hook
       boundary distinct. Host tests cover signed/high-bit coordinate words,
       overwrite behavior, and untouched neighboring words.
+
+  # --- 0xa0 lazy singleton getter (app/singletons) ---
+  - address: 0x08259740
+    ghidra: FUN_08259740
+    name: lazy_singleton_0xa0
+    size: 48
+    sig: "void *lazy_singleton_0xa0(void)"
+    module: app/singletons
+    status: ported
+    renames:
+      DAT_0825976c: singleton_0xa0_globals (pool literal holding 0x089cc954)
+      "singleton_0xa0_globals+0x4": singleton_0xa0_cache (runtime cache word 0x089cc958)
+      FUN_082aadd4: operator_new (ported direct callee)
+      FUN_08259278: singleton_0xa0_ctor (unported; SINGLETON_CTORS.singleton_0xa0 slot)
+    notes: >-
+      Raw ARM establishes a 48-byte true extent: 44 bytes of instructions
+      from 0x08259740 through 0x08259768 plus pool word 0x089cc954 at
+      0x0825976c; the separately linked sibling begins at 0x08259770.
+      `push {r4,lr}; ldr r4,[pc,#32]; ldr r0,[r4,#4]; cmp r0,#0; bne;
+      mov r0,#0xa0; bl operator_new; bl FUN_08259278; str r0,[r4,#4];
+      ldr r0,[r4,#4]; pop {r4,pc}` returns the cached 0xa0-byte object,
+      allocating and constructing it only when the cache is NULL. The
+      post-construction reload is intentional: the constructor's return is
+      stored unconditionally, and a NULL return retries on the next call.
+      Full-image decode of every ARM B/BL word found exactly 12 direct call
+      sites, all unconditional `bl` (zero predicated calls and zero direct
+      plain-B tails): 0x081174b0, 0x0811755c, 0x081356fc, 0x0813ec34,
+      0x08172190, 0x081737bc, 0x081c8f94, 0x081c9354, 0x081c939c,
+      0x08258040, 0x08289874, and 0x082aa4cc. Callers use vtable slots but
+      the constructor exposes no class-name literal or registry id, so the
+      name remains allocation-extent based. Deliberate deviations: the
+      runtime-initialized 0x089cc958 cache is represented by
+      app/singletons.rs static SINGLETON_0XA0, and unported constructor
+      FUN_08259278 is dispatched through SINGLETON_CTORS.singleton_0xa0
+      with the established zeroing default. The getter is not hook-ready
+      until that constructor is ported. Host tests prove the exact 0xa0
+      allocation, raw-block constructor argument, cache fast path, and
+      NULL-return retry behavior.

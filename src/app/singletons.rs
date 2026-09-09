@@ -1,4 +1,4 @@
-//! The twenty-two lazily-constructed framework singletons. Every one is the
+//! The twenty-three lazily-constructed framework singletons. Every one is the
 //! same four-step idiom over its own cache word, its own allocation
 //! size and its own constructor:
 //!
@@ -31,6 +31,7 @@
 //! | 0x08264740 | [`app_boot_metrics_channel_get`] | 0xac | 0x089cc918 | 0x08266990 | 20 |
 //! | 0x081cbbb0 | [`photo_browse_slideshow_get`] | 0x8fc | 0x08a09e00 | 0x081cd5b8 | 18 |
 //! | 0x0825a6e8 | [`lazy_singleton_0x44`] | 0x44 | 0x08a09f64 | 0x0825aa58 | 14 |
+//! | 0x08259740 | [`lazy_singleton_0xa0`] | 0xa0 | 0x089cc958 | 0x08259278 | 12 |
 
 //!
 //! (Call-site counts binary-scanned; the earlier scouting notes said 86
@@ -53,7 +54,7 @@
 //!
 //! `operator new` @ 0x082aadd4 is already ported
 //! (`heap::veneers::operator_new`), so it is called directly. None of
-//! the twenty-two constructors is — they are large C++ constructors — so
+//! the twenty-three constructors is — they are large C++ constructors — so
 //! they sit behind the [`SINGLETON_CTORS`] dispatch table, the house
 //! pattern.
 //!
@@ -315,6 +316,9 @@ pub const CLASS_9300_SIZE: usize = 0x14c;
 /// (`mov r0, #0xbc`).
 pub const SINGLETON_0XBC_SIZE: usize = 0xbc;
 
+/// Allocation size of the unidentified 0xa0 singleton (`mov r0, #0xa0`).
+pub const SINGLETON_0XA0_SIZE: usize = 0xa0;
+
 /// Allocation size of the registry-class-0x9400 singleton
 /// (`mov r0, #0x22c`).
 pub const CLASS_9400_SIZE: usize = 0x22c;
@@ -334,7 +338,7 @@ pub type PhotoBrowseSlideshowConstructor =
     unsafe extern "C" fn(this: *mut u8, base: *mut u8) -> *mut u8;
 
 
-/// Indirect dispatch table for the twenty-two unported constructors (see the
+/// Indirect dispatch table for the twenty-three unported constructors (see the
 /// module header for the default-stub contract).
 #[derive(Clone, Copy)]
 pub struct SingletonCtors {
@@ -382,6 +386,8 @@ pub struct SingletonCtors {
     pub app_boot_metrics_channel: Constructor,
     /// PhotoBrowse slideshow controller ctor @ 0x081cd5b8.
     pub photo_browse_slideshow: PhotoBrowseSlideshowConstructor,
+    /// The 0xa0 object's ctor @ 0x08259278.
+    pub singleton_0xa0: Constructor,
 }
 
 /// Defines one default constructor stub: zeroes the block and returns
@@ -417,6 +423,7 @@ zeroing_ctor!(zeroing_class_9300_ctor, CLASS_9300_SIZE);
 zeroing_ctor!(zeroing_singleton_0xbc_ctor, SINGLETON_0XBC_SIZE);
 zeroing_ctor!(zeroing_class_9400_ctor, CLASS_9400_SIZE);
 zeroing_ctor!(zeroing_app_boot_metrics_channel_ctor, APP_BOOT_METRICS_CHANNEL_SIZE);
+zeroing_ctor!(zeroing_singleton_0xa0_ctor, SINGLETON_0XA0_SIZE);
 unsafe extern "C" fn zeroing_photo_browse_slideshow_ctor(
     this: *mut u8,
     _base: *mut u8,
@@ -461,6 +468,7 @@ pub(crate) const DEFAULT_SINGLETON_CTORS: SingletonCtors = SingletonCtors {
     class_9400: zeroing_class_9400_ctor,
     app_boot_metrics_channel: zeroing_app_boot_metrics_channel_ctor,
     photo_browse_slideshow: zeroing_photo_browse_slideshow_ctor,
+    singleton_0xa0: zeroing_singleton_0xa0_ctor,
 };
 
 /// The active constructors. Host tests install recording mocks; the
@@ -567,6 +575,10 @@ pub static mut CLASS_9400_INSTANCE: *mut u8 = core::ptr::null_mut();
 pub static mut APP_BOOT_METRICS_CHANNEL: *mut u8 = core::ptr::null_mut();
 /// The PhotoBrowse slideshow controller (original cache word @ 0x08a09e00).
 pub static mut PHOTO_BROWSE_SLIDESHOW: *mut u8 = core::ptr::null_mut();
+
+/// The unidentified 0xa0 singleton (original: the `+4` cache slot of the
+/// global @ 0x089cc954, addressed through the pool word @ 0x0825976c).
+pub static mut SINGLETON_0XA0: *mut u8 = core::ptr::null_mut();
 
 
 /// The body all getters share: test the cache, allocate, construct,
@@ -1343,6 +1355,52 @@ pub unsafe extern "C" fn lazy_singleton_0xbc() -> *mut u8 {
     lazy_singleton(cache, SINGLETON_0XBC_SIZE, || unsafe { ctor!(singleton_0xbc) })
 }
 
+/// lazy_singleton_0xa0 — original: `FUN_08259740` @ **0x08259740**
+/// (44 code bytes plus its pool word @ 0x0825976c = **48 bytes** true
+/// extent; **12 direct `bl` call sites, all unconditional — 0 predicated,
+/// 0 plain `b`**, verified by decoding every ARM B/BL word in
+/// `work/firmware/osos.dec`).
+///
+/// ```text
+/// 08259740  push {r4, lr}
+/// 08259744  ldr  r4, [pc, #32]      @ = 0x089cc954 (pool @ 0x0825976c)
+/// 08259748  ldr  r0, [r4, #4]       @ cache word 0x089cc958
+/// 0825974c  cmp  r0, #0
+/// 08259750  bne  0x08259764
+/// 08259754  mov  r0, #0xa0
+/// 08259758  bl   0x082aadd4         @ operator new
+/// 0825975c  bl   0x08259278         @ constructor (Ghidra drops `this`)
+/// 08259760  str  r0, [r4, #4]
+/// 08259764  ldr  r0, [r4, #4]       @ reload the cache before returning
+/// 08259768  pop  {r4, pc}
+/// 0825976c  .word 0x089cc954
+/// ```
+///
+/// Loads the `+4` cache word of the 0x089cc954 globals block. On NULL,
+/// allocates exactly 0xa0 bytes with `operator_new`, passes the raw block to
+/// `FUN_08259278`, stores that return, reloads the cache, and returns it.
+/// The next separately linked function begins at 0x08259770, after the pool
+/// word Ghidra omits. A NULL constructor result remains cached as NULL, so
+/// the next call allocates and constructs again.
+///
+/// The twelve callers only establish a vtable interface; the unported
+/// constructor plants vtables and initializes map/mutex state but exposes no
+/// class-name literal or registry id. The symbol therefore identifies the
+/// verified singleton only by its allocation extent rather than inventing an
+/// identity.
+///
+/// Deviation: `FUN_08259278` is unported and rides the
+/// [`SINGLETON_CTORS`] `singleton_0xa0` slot with the documented zeroing
+/// default. The cache is crate static [`SINGLETON_0XA0`] rather than the
+/// runtime-initialized word at 0x089cc958; this getter is not hook-ready
+/// until its constructor is ported.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn lazy_singleton_0xa0() -> *mut u8 {
+    let cache = core::ptr::addr_of_mut!(SINGLETON_0XA0);
+    lazy_singleton(cache, SINGLETON_0XA0_SIZE, || unsafe { ctor!(singleton_0xa0) })
+}
+
 /// lazy_singleton_0x44 — original: `FUN_0825a6e8` @ **0x0825a6e8**
 /// (44 code bytes plus its pool word @ 0x0825a714 = **48 bytes** true
 /// extent; **14 direct `bl` call sites, all unconditional — 0 predicated,
@@ -1564,6 +1622,7 @@ mod tests {
                 class_9400: recording_ctor,
                 app_boot_metrics_channel: recording_ctor,
                 photo_browse_slideshow: recording_photo_browse_slideshow_ctor,
+                singleton_0xa0: recording_ctor,
             };
             CTOR_RESULT = ctor_result;
             (*ptr::addr_of_mut!(ALLOC_SIZES)).clear();
@@ -1610,6 +1669,7 @@ mod tests {
         CLASS_9400_INSTANCE = ptr::null_mut();
         APP_BOOT_METRICS_CHANNEL = ptr::null_mut();
         PHOTO_BROWSE_SLIDESHOW = ptr::null_mut();
+        SINGLETON_0XA0 = ptr::null_mut();
     }
 
     fn arena() -> *mut u8 {
@@ -2800,6 +2860,43 @@ mod tests {
             assert!(ptr::read_volatile(ptr::addr_of!(SINGLETON_0X40)).is_null(), "untouched");
             assert!(ptr::read_volatile(ptr::addr_of!(CLASS_9300_INSTANCE)).is_null(), "untouched");
             assert_eq!(*ptr::addr_of!(ALLOC_SIZES), std::vec![0xbc]);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_0xa0_singleton_allocates_constructs_and_caches_exactly_once() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(lazy_singleton_0xa0(), constructed());
+            assert_eq!(lazy_singleton_0xa0(), constructed());
+            assert_eq!(
+                *ptr::addr_of!(ALLOC_SIZES),
+                std::vec![SINGLETON_0XA0_SIZE],
+                "the `mov r0, #0xa0` allocation occurs only on the NULL path"
+            );
+            assert_eq!(*ptr::addr_of!(CTOR_BLOCKS), std::vec![arena()]);
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(SINGLETON_0XA0)),
+                constructed(),
+                "the constructor result occupies the original +4 cache slot"
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn a_null_returning_0xa0_ctor_is_retried() {
+        let guard = mock(ptr::null_mut());
+        unsafe {
+            assert!(lazy_singleton_0xa0().is_null());
+            assert!(lazy_singleton_0xa0().is_null());
+            assert_eq!(
+                *ptr::addr_of!(ALLOC_SIZES),
+                std::vec![SINGLETON_0XA0_SIZE, SINGLETON_0XA0_SIZE],
+                "the NULL cache leaves no failure memory"
+            );
+            assert_eq!((*ptr::addr_of!(CTOR_BLOCKS)).len(), 2);
         }
         restore(guard);
     }
