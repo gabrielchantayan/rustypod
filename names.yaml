@@ -54067,3 +54067,42 @@ functions:
       preserve r1=descriptor, r2=NULL, the untouched r3 fourth argument,
       signed status gate, and zero fallback. LLVM adds a frame, literal-load
       plus blx direct-target call, and an unconditional output reload.
+
+  # --- Allocation-bitmap mapped block acquisition ---
+  - address: 0x08063918
+    ghidra: FUN_08063918
+    name: allocation_bitmap_block_map
+    size: 128
+    sig: "i32 allocation_bitmap_block_map(MappedBlockWindowOwner *owner, u32 bit_index, MappedBlockWindow **out_window)"
+    module: fs/block_window
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: bit_index
+      param_3/r2: out_window
+      param_1_plus_0x2: owner_kind
+      param_1_plus_0x10: direct_block_base
+      param_1_plus_0x15c: dispatch_context
+      local_10: block_number
+      FUN_0805cb18: allocation_bitmap_block_index_resolve
+      FUN_08051578: mapped_block_window_begin
+    notes: >-
+      Raw decoding gives exactly 128 bytes (32 ARM instructions) from
+      0x08063918 through 0x08063994; 0x08063998 begins the distinct next
+      function with push {r0-r12,lr}. The 0x4244 owner kind reads the signed
+      i16 direct block base at +0x10 and adds bit_index >> 12. Other kinds
+      call 0x0805cb18 with owner, the word at *(owner+0x15c), request kind 1,
+      two stack scratch pointers, byte index bit_index >> 3, and zero; a
+      nonzero resolver status returns immediately. On success both paths call
+      0x08051578 as (0, block_number, out_window, 0, owner), which begins the
+      shared mapped-block window. Decoding every ARM B/BL word in osos.dec
+      finds exactly 14 direct callers, all unconditional bl and none
+      predicated: 0x080424b4, 0x0804253c, 0x080425dc, 0x080426d8,
+      0x0804279c, 0x08042810, 0x080428d8, 0x08042990, 0x080429f4,
+      0x08042a90, 0x08042b04, 0x08042b6c, 0x08042c04, and 0x08042c74.
+      Neither direct callee is ported, so target code calls their stock
+      addresses while host tests use explicit resolver and begin dispatch
+      seams. match.py --lib <worktree archive>: 41 vs 32 instructions; the
+      same kind branch, signed direct-base computation, resolver status
+      return, and begin call remain. The additions are the target-address
+      loads and blx seam calls plus LLVM's larger frame and split cleanup.

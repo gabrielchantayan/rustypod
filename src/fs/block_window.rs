@@ -1,4 +1,21 @@
-//! Filesystem mapped-block window completion.
+//! Filesystem mapped-block window helpers.
+//!
+//! `allocation_bitmap_block_map` — original: `FUN_08063918` @ **0x08063918**
+//! (128 raw bytes: 32 ARM instructions; 0x08063998 begins the distinct next
+//! function). A complete decode of every ARM B/BL word in `osos.dec` finds 14
+//! direct call sites, all unconditional `bl`; callers uniformly inspect the
+//! returned status themselves.
+//!
+//! It selects a mapped allocation-bitmap block for a bit index. Owners tagged
+//! 0x4244 provide a signed direct block base at +0x10; every other owner calls
+//! the unported range resolver @ 0x0805cb18 with the byte index, then passes
+//! the resulting block number to the mapped-window begin helper @ 0x08051578.
+//! The latter installs the shared window in the caller's output pointer.
+//!
+//! Deliberate deviation: both unported direct callees are explicit dispatch
+//! seams. Target builds invoke their stock addresses; host tests install
+//! recorders. Their pointer-valued target ABI fields remain u32 on 64-bit
+//! hosts, avoiding a target-layout drift.
 //!
 //! `mapped_block_window_finish` — original: `FUN_0806448c` @ **0x0806448c**
 //! (84 raw bytes: 21 ARM instructions, ending at the literal word
@@ -21,7 +38,7 @@
 //! reside in the firmware's target-width u32 vtable word. The firmware global
 //! remains the fixed 0x08adc510 address on target; host tests install a fixture.
 
-use core::ptr;
+use core::{mem::MaybeUninit, ptr};
 
 /// Firmware-owned block window, physically located at 0x08adc510.
 ///
@@ -37,11 +54,18 @@ pub struct MappedBlockWindow {
     pub mapped: u8,
 }
 
-/// Owner fields traversed to reach the block-window virtual interface.
+/// Owner layout shared by the allocation-bitmap mapper and window completion.
+///
+/// The direct-base fields are only read for owners tagged 0x4244. The
+/// completion path observes only `dispatch_context`.
 #[repr(C)]
 pub struct MappedBlockWindowOwner {
-    _before_dispatch_context: [u32; 0x15c / 4],
-    dispatch_context: u32,
+    _before_kind: [u8; 2],
+    pub kind: u16,
+    _before_direct_block_base: [u8; 0xc],
+    pub direct_block_base: i16,
+    _before_dispatch_context: [u8; 0x14a],
+    pub dispatch_context: u32,
 }
 
 /// First link after the owner (`owner+0x15c`, then `+0x08`).
@@ -80,8 +104,31 @@ pub type MappedBlockFinishFn = unsafe extern "C" fn(
     trailing: u32,
 ) -> i32;
 
+/// ABI of the unported block-index resolver @ 0x0805cb18.
+pub type AllocationBitmapBlockIndexResolveFn = unsafe extern "C" fn(
+    owner: *mut MappedBlockWindowOwner,
+    device_context: u32,
+    request_kind: u32,
+    scratch: *mut u32,
+    byte_index: u32,
+    zero: u32,
+    block_number: *mut u32,
+    scratch_tail: *mut u32,
+) -> i32;
+
+/// ABI of the mapped-window begin helper @ 0x08051578.
+pub type MappedBlockWindowBeginFn = unsafe extern "C" fn(
+    ignored: u32,
+    block_number: u32,
+    out_window: *mut *mut MappedBlockWindow,
+    trailing: u32,
+    owner: *mut MappedBlockWindowOwner,
+) -> i32;
+
 #[cfg(target_os = "none")]
 const MAPPED_BLOCK_WINDOW: *mut MappedBlockWindow = 0x08ad_c510 as *mut MappedBlockWindow;
+const ALLOCATION_BITMAP_BLOCK_INDEX_RESOLVE: usize = 0x0805_cb18;
+const MAPPED_BLOCK_WINDOW_BEGIN: usize = 0x0805_1578;
 
 #[cfg(not(target_os = "none"))]
 static mut HOST_MAPPED_BLOCK_WINDOW: *mut MappedBlockWindow = ptr::null_mut();
@@ -89,6 +136,11 @@ static mut HOST_MAPPED_BLOCK_WINDOW: *mut MappedBlockWindow = ptr::null_mut();
 /// Host-only replacement for the dynamic target-width vtable slot.
 #[cfg(not(target_os = "none"))]
 static mut HOST_MAPPED_BLOCK_FINISH: Option<MappedBlockFinishFn> = None;
+#[cfg(not(target_os = "none"))]
+static mut HOST_ALLOCATION_BITMAP_BLOCK_INDEX_RESOLVE: Option<AllocationBitmapBlockIndexResolveFn> = None;
+
+#[cfg(not(target_os = "none"))]
+static mut HOST_MAPPED_BLOCK_WINDOW_BEGIN: Option<MappedBlockWindowBeginFn> = None;
 
 #[inline(always)]
 unsafe fn mapped_block_window() -> *mut MappedBlockWindow {
@@ -101,6 +153,59 @@ unsafe fn mapped_block_window() -> *mut MappedBlockWindow {
     {
         ptr::read_volatile(ptr::addr_of!(HOST_MAPPED_BLOCK_WINDOW))
     }
+}
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn resolve_allocation_bitmap_block_index(
+    owner: *mut MappedBlockWindowOwner,
+    device_context: u32,
+    scratch: *mut u32,
+    byte_index: u32,
+    block_number: *mut u32,
+    scratch_tail: *mut u32,
+) -> i32 {
+    let resolve: AllocationBitmapBlockIndexResolveFn =
+        core::mem::transmute(ALLOCATION_BITMAP_BLOCK_INDEX_RESOLVE);
+    resolve(owner, device_context, 1, scratch, byte_index, 0, block_number, scratch_tail)
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn resolve_allocation_bitmap_block_index(
+    owner: *mut MappedBlockWindowOwner,
+    device_context: u32,
+    scratch: *mut u32,
+    byte_index: u32,
+    block_number: *mut u32,
+    scratch_tail: *mut u32,
+) -> i32 {
+    let resolve = ptr::read_volatile(ptr::addr_of!(HOST_ALLOCATION_BITMAP_BLOCK_INDEX_RESOLVE))
+        .expect("allocation bitmap mapping needs a host resolver fixture");
+    resolve(owner, device_context, 1, scratch, byte_index, 0, block_number, scratch_tail)
+}
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn begin_mapped_block_window(
+    block_number: u32,
+    out_window: *mut *mut MappedBlockWindow,
+    owner: *mut MappedBlockWindowOwner,
+) -> i32 {
+    let begin: MappedBlockWindowBeginFn = core::mem::transmute(MAPPED_BLOCK_WINDOW_BEGIN);
+    begin(0, block_number, out_window, 0, owner)
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn begin_mapped_block_window(
+    block_number: u32,
+    out_window: *mut *mut MappedBlockWindow,
+    owner: *mut MappedBlockWindowOwner,
+) -> i32 {
+    let begin = ptr::read_volatile(ptr::addr_of!(HOST_MAPPED_BLOCK_WINDOW_BEGIN))
+        .expect("allocation bitmap mapping needs a host begin fixture");
+    begin(0, block_number, out_window, 0, owner)
 }
 
 #[cfg(target_os = "none")]
@@ -167,6 +272,52 @@ pub unsafe extern "C" fn mapped_block_window_finish() -> i32 {
     (status as i16) as i32
 }
 
+/// Maps the allocation-bitmap block containing `bit_index` — original:
+/// `FUN_08063918` @ 0x08063918 (128 bytes; 14 direct unconditional `bl`
+/// call sites).
+///
+/// Owners with kind 0x4244 derive their block number by adding
+/// `bit_index >> 12` to the signed base at +0x10. Other owners resolve the
+/// byte index (`bit_index >> 3`) before beginning the shared mapped window.
+/// Resolver failure returns immediately without invoking the begin helper.
+///
+/// # Safety
+///
+/// `owner` and its dispatch-context pointer must be valid. `out_window` must
+/// be writable because the stock begin helper stores the shared window there.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn allocation_bitmap_block_map(
+    owner: *mut MappedBlockWindowOwner,
+    bit_index: u32,
+    out_window: *mut *mut MappedBlockWindow,
+) -> i32 {
+    let block_number = if ptr::read_volatile(ptr::addr_of!((*owner).kind)) == 0x4244 {
+        (ptr::read_volatile(ptr::addr_of!((*owner).direct_block_base)) as i32 as u32)
+            .wrapping_add(bit_index >> 12)
+    } else {
+        let device_context_pointer =
+            ptr::read_volatile(ptr::addr_of!((*owner).dispatch_context)) as usize as *const u32;
+        let device_context = ptr::read_volatile(device_context_pointer);
+        let mut scratch = MaybeUninit::<u32>::uninit();
+        let mut resolved_block_number = MaybeUninit::<u32>::uninit();
+        let status = resolve_allocation_bitmap_block_index(
+            owner,
+            device_context,
+            scratch.as_mut_ptr(),
+            bit_index >> 3,
+            resolved_block_number.as_mut_ptr(),
+            scratch.as_mut_ptr(),
+        );
+        if status != 0 {
+            return status;
+        }
+        resolved_block_number.assume_init()
+    };
+
+    begin_mapped_block_window(block_number, out_window, owner)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -222,7 +373,11 @@ mod tests {
         let object = slab.add(0x560) as *mut MappedBlockVirtualObject;
 
         ptr::write(owner, MappedBlockWindowOwner {
-            _before_dispatch_context: [0; 0x15c / 4],
+            _before_kind: [0; 2],
+            kind: 0,
+            _before_direct_block_base: [0; 0xc],
+            direct_block_base: 0,
+            _before_dispatch_context: [0; 0x14a],
             dispatch_context: context as usize as u32,
         });
         ptr::write(context, MappedBlockDispatchContext {
@@ -295,4 +450,153 @@ mod tests {
         assert_eq!(unsafe { (*window).mapped }, 0);
         unsafe { reset_host_fixture() };
     }
+    static MAP_FIXTURE_SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::ALLOCATION_BITMAP_BLOCK_MAP, 0x1000).map(|p| p as usize)
+    });
+    static mut RESOLVER_STATUS: i32 = 0;
+    static mut RESOLVED_BLOCK_NUMBER: u32 = 0;
+    static mut RESOLVER_CALL: Option<(usize, u32, u32, usize, u32, u32, usize, usize)> = None;
+    static mut BEGIN_STATUS: i32 = 0;
+    static mut BEGIN_OUTPUT: *mut MappedBlockWindow = ptr::null_mut();
+    static mut BEGIN_CALL: Option<(u32, u32, usize, u32, usize)> = None;
+
+    unsafe extern "C" fn record_resolver(
+        owner: *mut MappedBlockWindowOwner,
+        device_context: u32,
+        request_kind: u32,
+        scratch: *mut u32,
+        byte_index: u32,
+        zero: u32,
+        block_number: *mut u32,
+        scratch_tail: *mut u32,
+    ) -> i32 {
+        RESOLVER_CALL = Some((
+            owner as usize, device_context, request_kind, scratch as usize, byte_index, zero,
+            block_number as usize, scratch_tail as usize,
+        ));
+        if RESOLVER_STATUS == 0 {
+            ptr::write(block_number, RESOLVED_BLOCK_NUMBER);
+        }
+        RESOLVER_STATUS
+    }
+
+    unsafe extern "C" fn record_begin(
+        ignored: u32,
+        block_number: u32,
+        out_window: *mut *mut MappedBlockWindow,
+        trailing: u32,
+        owner: *mut MappedBlockWindowOwner,
+    ) -> i32 {
+        BEGIN_CALL = Some((ignored, block_number, out_window as usize, trailing, owner as usize));
+        ptr::write(out_window, BEGIN_OUTPUT);
+        BEGIN_STATUS
+    }
+
+    unsafe fn install_map_fixture(
+        kind: u16,
+        direct_block_base: i16,
+        device_context: u32,
+    ) -> Option<*mut MappedBlockWindowOwner> {
+        let slab = (*MAP_FIXTURE_SLAB)? as *mut u8;
+        ptr::write_bytes(slab, 0, 0x1000);
+        let owner = slab as *mut MappedBlockWindowOwner;
+        let device_context_pointer = slab.add(0x200) as *mut u32;
+        ptr::write(device_context_pointer, device_context);
+        ptr::write(owner, MappedBlockWindowOwner {
+            _before_kind: [0; 2],
+            kind,
+            _before_direct_block_base: [0; 0xc],
+            direct_block_base,
+            _before_dispatch_context: [0; 0x14a],
+            dispatch_context: device_context_pointer as usize as u32,
+        });
+        HOST_ALLOCATION_BITMAP_BLOCK_INDEX_RESOLVE = Some(record_resolver);
+        HOST_MAPPED_BLOCK_WINDOW_BEGIN = Some(record_begin);
+        Some(owner)
+    }
+
+    unsafe fn reset_map_fixture() {
+        HOST_ALLOCATION_BITMAP_BLOCK_INDEX_RESOLVE = None;
+        HOST_MAPPED_BLOCK_WINDOW_BEGIN = None;
+        RESOLVER_CALL = None;
+        BEGIN_CALL = None;
+    }
+
+    #[test]
+    fn map_uses_signed_direct_base_without_resolving() {
+        let _lock = TEST_LOCK.lock();
+        let Some(owner) = (unsafe { install_map_fixture(0x4244, -2, 0xfeed_beef) }) else {
+            assert!(note_missing_u32_fixture("fs::block_window"));
+            return;
+        };
+        unsafe {
+            BEGIN_STATUS = -9;
+            BEGIN_OUTPUT = 0x1234_5000usize as *mut MappedBlockWindow;
+        }
+        let mut out_window = ptr::null_mut();
+
+        let result = unsafe { allocation_bitmap_block_map(owner, 0x3fff, &mut out_window) };
+
+        assert_eq!(result, -9);
+        assert_eq!(unsafe { RESOLVER_CALL }, None);
+        assert_eq!(unsafe { BEGIN_CALL }, Some((0, 1, &mut out_window as *mut _ as usize, 0, owner as usize)));
+        assert_eq!(out_window, unsafe { BEGIN_OUTPUT });
+        unsafe { reset_map_fixture() };
+    }
+
+    #[test]
+    fn map_resolves_byte_index_then_begins_window() {
+        let _lock = TEST_LOCK.lock();
+        let Some(owner) = (unsafe { install_map_fixture(0x1111, 0, 0xa5a5_5a5a) }) else {
+            assert!(note_missing_u32_fixture("fs::block_window"));
+            return;
+        };
+        unsafe {
+            RESOLVER_STATUS = 0;
+            RESOLVED_BLOCK_NUMBER = 0x8765_4321;
+            BEGIN_STATUS = 0;
+            BEGIN_OUTPUT = 0x3456_7000usize as *mut MappedBlockWindow;
+        }
+        let mut out_window = ptr::null_mut();
+
+        let result = unsafe { allocation_bitmap_block_map(owner, 0x12345, &mut out_window) };
+
+        assert_eq!(result, 0);
+        let resolver_call = unsafe { RESOLVER_CALL }.expect("resolver was called");
+        assert_eq!(resolver_call.0, owner as usize);
+        assert_eq!(resolver_call.1, 0xa5a5_5a5a);
+        assert_eq!(resolver_call.2, 1);
+        assert_ne!(resolver_call.3, 0);
+        assert_eq!(resolver_call.4, 0x2468);
+        assert_eq!(resolver_call.5, 0);
+        assert_ne!(resolver_call.6, 0);
+        assert_eq!(resolver_call.7, resolver_call.3);
+        assert_eq!(unsafe { BEGIN_CALL }, Some((0, 0x8765_4321, &mut out_window as *mut _ as usize, 0, owner as usize)));
+        assert_eq!(out_window, unsafe { BEGIN_OUTPUT });
+        unsafe { reset_map_fixture() };
+    }
+
+    #[test]
+    fn map_returns_resolver_error_without_beginning_window() {
+        let _lock = TEST_LOCK.lock();
+        let Some(owner) = (unsafe { install_map_fixture(0x1111, 0, 0) }) else {
+            assert!(note_missing_u32_fixture("fs::block_window"));
+            return;
+        };
+        unsafe {
+            RESOLVER_STATUS = -0x34;
+            BEGIN_CALL = None;
+        }
+        let original = 0x7654_3000usize as *mut MappedBlockWindow;
+        let mut out_window = original;
+
+        let result = unsafe { allocation_bitmap_block_map(owner, 7, &mut out_window) };
+
+        assert_eq!(result, -0x34);
+        assert_eq!(unsafe { RESOLVER_CALL }.map(|call| call.4), Some(0));
+        assert_eq!(unsafe { BEGIN_CALL }, None);
+        assert_eq!(out_window, original);
+        unsafe { reset_map_fixture() };
+    }
 }
+

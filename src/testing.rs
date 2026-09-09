@@ -251,6 +251,9 @@ pub mod hints {
     // 0xea00_0000: dedicated to fs/block_window's raw-u32 owner/interface
     // chain fixture; mappings never unmap, so no other user may share it.
     pub const MAPPED_BLOCK_WINDOW_FINISH: usize = 0xea00_0000;
+    // 0xeb00_0000: dedicated to fs/block_window's allocation-bitmap mapper
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const ALLOCATION_BITMAP_BLOCK_MAP: usize = 0xeb00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
