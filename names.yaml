@@ -51118,3 +51118,35 @@ functions:
       deviation: dispatches through TDAT_PAYLOAD_OPS to the still-unported
       0x0805de1c pool allocator, while directly calling the already-ported
       class predicate; target default calls the original allocator.
+
+  # --- Four-word owned buffer destructor ---
+  - address: 0x0803a2ec
+    ghidra: FUN_0803a2ec
+    name: owned_buffer_destroy
+    size: 36
+    sig: "void owned_buffer_destroy(OwnedBuffer *owner)"
+    module: heap/owned_buffer
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      owner_plus_0x08/r0: data
+      FUN_08043994: traced_free
+    notes: >-
+      Raw ARM extent is exactly 36 bytes, 0x0803a2ec..0x0803a310: the next
+      independently linked function starts with push {r4-r9,lr} at
+      0x0803a310, with no literal pool. Decoding every ARM B/BL immediate in
+      osos.dec finds exactly 16 direct BL-form inbound calls: 15 unconditional
+      bl at 0x0803a2e4, 0x0803b6ac, 0x0805f72c, 0x0805fbf0, 0x08075170,
+      0x0807898c, 0x080889d8, 0x080a96bc, 0x080b22d0, 0x080b2560,
+      0x080b2568, 0x082b4f7c, 0x082be134, 0x082be218, and 0x083684f0; plus
+      blne at 0x08040ca0. The separate tail b at 0x08091334 is not a call.
+      The predicated caller proves callers sometimes gate destruction
+      themselves; the callee still NULL-guards owner. For non-NULL owner,
+      ldr r0,[owner,#8] conditionally frees the data allocation through the
+      already ported traced_free, then moves owner into r0 and tail-branches
+      to traced_free. Ghidra's C misses that final owner release. Deliberate
+      deviation: Rust returns after an ordinary second traced_free call rather
+      than tail-branching; traced_free returns normally, so observable calls
+      and order are unchanged. Host tests prove NULL owner makes no allocator
+      call, NULL data releases only owner, and non-NULL data releases data
+      before owner.

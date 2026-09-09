@@ -801,6 +801,10 @@ pub static mut TRACED_FREE_HOOKS: TracedFreeHooks = TracedFreeHooks {
 fn free_hooks() -> TracedFreeHooks {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(TRACED_FREE_HOOKS)) }
 }
+/// Serializes host tests that install the process-global traced-free hooks.
+#[cfg(test)]
+pub(crate) static TRACED_FREE_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 
 /// traced_free — original: `FUN_08043994` @ 0x08043994 (72 bytes; 80
 /// `bl` + 44 `blne` + 2 `bleq` call sites in osos.asm — among them the
@@ -2011,7 +2015,6 @@ mod tests {
 
     // ---- the traced free --------------------------------------------
 
-    static FREE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     /// One observable call into the descriptor, in order.
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2091,7 +2094,7 @@ mod tests {
 
     #[test]
     fn brackets_the_free_with_the_two_trace_phases() {
-        let _guard = FREE_TEST_LOCK.lock().unwrap();
+        let _guard = TRACED_FREE_TEST_LOCK.lock();
         let _reset = FreeHookReset;
         let block = unsafe { core::ptr::addr_of_mut!(FREE_BUFFER) as *mut u8 };
         for with_trace in [false, true] {
@@ -2105,7 +2108,7 @@ mod tests {
         // No NULL guard anywhere in the original — the 44 `blne` call
         // sites do the guarding, and a NULL that does arrive reaches
         // both the pre-trace and the free untouched.
-        let _guard = FREE_TEST_LOCK.lock().unwrap();
+        let _guard = TRACED_FREE_TEST_LOCK.lock();
         let _reset = FreeHookReset;
         let got = run_free(core::ptr::null_mut(), mock_free, Some(mock_free_trace));
         assert_eq!(got, reference_free(true, true));
@@ -2113,7 +2116,7 @@ mod tests {
 
     #[test]
     fn rereads_the_trace_slot_after_the_free() {
-        let _guard = FREE_TEST_LOCK.lock().unwrap();
+        let _guard = TRACED_FREE_TEST_LOCK.lock();
         let _reset = FreeHookReset;
         let block = unsafe { core::ptr::addr_of_mut!(FREE_BUFFER) as *mut u8 };
         // Installed before, gone after: only the pre-trace fires.
@@ -2126,7 +2129,7 @@ mod tests {
 
     #[test]
     fn the_default_free_stub_is_a_noop() {
-        let _guard = FREE_TEST_LOCK.lock().unwrap();
+        let _guard = TRACED_FREE_TEST_LOCK.lock();
         let _reset = FreeHookReset;
         FREE_EVENTS.lock().unwrap().clear();
         let block = unsafe { core::ptr::addr_of_mut!(FREE_BUFFER) as *mut u8 };
