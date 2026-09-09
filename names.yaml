@@ -56452,3 +56452,48 @@ functions:
       Deliberate deviation: Rust makes an ordinary indirect call through a
       volatile seam instead of the retail tail branch; firmware reaches
       0x08218e0c while host tests record the exact forwarded tuple.
+
+
+  # --- Timed iAP packet completion (app/iap_packet_completion) ---
+  - address: 0x081ac4fc
+    ghidra: FUN_081ac4fc
+    name: complete_iap_packet_with_timestamp
+    size: 100
+    sig: "u32 complete_iap_packet_with_timestamp(void *unused_context, IapPacket *packet, u32 completion_state, u32 unused)"
+    module: app/iap_packet_completion
+    status: ported
+    renames:
+      param_1/r0: unused_context
+      param_2/r1: packet
+      param_3/r2: completion_state
+      param_4/r3: unused
+      DAT_081ac560: iap_packet_completion_state (0x089ccb68)
+      DAT_081ac560_plus_0x02: completion_active
+      DAT_081ac560_plus_0x18: completion_timestamp_ms
+      FUN_08262958: clock_source_construct (ported)
+      FUN_082a1c30: timespec_to_milliseconds (ported)
+      FUN_081d7f14: packet_completion_submit (unported)
+      FUN_08262908: clock_source_destroy (ported)
+    notes: >-
+      Raw extent is 100 bytes, not merely Ghidra's code: 24 ARM
+      instructions run from 0x081ac4fc through pop {r4,r5,r6,pc} at
+      0x081ac55c, followed by the function-owned literal 0x089ccb68 at
+      0x081ac560. The next separately linked function starts at 0x081ac564.
+      Decoding every ARM B/BL immediate in osos.dec finds exactly 12 inbound
+      calls, all unconditional plain bl at 0x081a9340, 0x081a9e2c,
+      0x081a9e9c, 0x081a9fc8, 0x081aa048, 0x081aa0a0, 0x081acd7c,
+      0x081acf14, 0x081ad0f0, 0x081ad3fc, 0x081ade50, and 0x081ae624;
+      there are no predicated BL forms, direct B tail callers, or aligned
+      data-word references. The raw prologue stacks four ABI words, then
+      overwrites the saved r2 slot with an 8-byte kind-1 clock. It reads that
+      clock through vtable +0x0c into the saved r0/r1 pair, converts the
+      timespec to wrapping milliseconds, writes global +0x18 then byte +0x02
+      = 1, calls unported 0x081d7f14(packet, completion_state), destroys the
+      clock, and returns that status. r0 and r3 are never read. The global's
+      concrete type is unrecovered, so its name records only this observed
+      packet-completion role. Deliberate deviations: 0x081d7f14 uses the
+      existing volatile IAP_PACKET_EVENT_SCHEDULE_OPS completion seam, and
+      the clock vtable read uses the existing PENDING_EVENT_INSERT_OPS model;
+      target defaults still re-resolve vtable +0x0c. The global has a host
+      fixture. Host tests prove timestamp/active stores occur before both a
+      successful and failing completion, including sub-millisecond truncation.

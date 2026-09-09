@@ -436,6 +436,12 @@ pub static ACTIVE_SERVICE_HANDLER_CONTEXT_TEST_LOCK: std::sync::Mutex<()> =
 pub static PENDING_EVENT_INSERT_OPS_TEST_LOCK: std::sync::Mutex<()> =
     std::sync::Mutex::new(());
 
+/// Serializes every host test that replaces the shared unported
+/// `FUN_081d7f14` completion-dispatch table. The packet-event scheduler and
+/// packet-completion port install models into this one mutable global.
+pub static IAP_PACKET_EVENT_SCHEDULE_OPS_TEST_LOCK: std::sync::Mutex<()> =
+    std::sync::Mutex::new(());
+
 /// Serializes host tests that mutate the shared timing-wheel bucket array
 /// behind `app::animation::scheduler_table`. The animation and refcounted
 /// base-destruction ports both unlink nodes through this one host model.

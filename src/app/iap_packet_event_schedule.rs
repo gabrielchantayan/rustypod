@@ -159,7 +159,8 @@ mod tests {
     use crate::app::pending_event_take::PendingEventNode;
     use crate::testing::{
         hints, note_missing_u32_fixture, try_map_u32_slab,
-        ACTIVE_SERVICE_HANDLER_CONTEXT_TEST_LOCK, PENDING_EVENT_INSERT_OPS_TEST_LOCK,
+        ACTIVE_SERVICE_HANDLER_CONTEXT_TEST_LOCK, IAP_PACKET_EVENT_SCHEDULE_OPS_TEST_LOCK,
+        PENDING_EVENT_INSERT_OPS_TEST_LOCK,
     };
     use std::sync::{Mutex, MutexGuard};
 
@@ -186,6 +187,7 @@ mod tests {
     struct Bench {
         _test_lock: MutexGuard<'static, ()>,
         _context_lock: MutexGuard<'static, ()>,
+        _completion_ops_lock: MutexGuard<'static, ()>,
         _pending_ops_lock: MutexGuard<'static, ()>,
         previous_completion_ops: IapPacketEventScheduleOps,
         previous_pending_ops: PendingEventInsertOps,
@@ -260,6 +262,9 @@ mod tests {
 
 
     fn bench() -> Option<Bench> {
+        let completion_ops_lock = IAP_PACKET_EVENT_SCHEDULE_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let test_lock = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let context_lock = ACTIVE_SERVICE_HANDLER_CONTEXT_TEST_LOCK
             .lock()
@@ -302,6 +307,7 @@ mod tests {
             );
             let previous_context = replace_active_service_handler_context(slab);
             Some(Bench {
+                _completion_ops_lock: completion_ops_lock,
                 _test_lock: test_lock,
                 _context_lock: context_lock,
                 _pending_ops_lock: pending_ops_lock,
