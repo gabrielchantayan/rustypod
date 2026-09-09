@@ -56081,3 +56081,36 @@ functions:
       match.py structural (exit 1, diff expected): the common ldr r0,[r0,#8]
       remains, with the crate-wide frame-pointer push/mov/pop replacing bx
       lr.
+
+  # --- Four-word sentinel record initialization (util/four_word_sentinel_init) ---
+  - address: 0x08287278
+    ghidra: FUN_08287278
+    name: four_word_sentinel_init
+    size: 28
+    sig: "void *four_word_sentinel_init(void *target)"
+    module: util/four_word_sentinel_init
+    status: ported
+    renames:
+      param_1/r0: target
+      "target+0x0": first
+      "target+0x4": second
+      "target+0x8": third
+      "target+0xc": invalid_sentinel
+    notes: >-
+      Raw ARM confirms the 28-byte extent exactly: four word stores plus bx lr
+      from 0x08287278 through 0x08287290, with the separately linked next
+      function opening at 0x08287294. It writes zero at target+0x0, +0x4, and
+      +0x8, then 0xffffffff at target+0xc. The incoming target in r0 is never
+      overwritten and returns to callers unchanged; the allocation call site
+      at 0x08182cb8 proves this otherwise absent Ghidra return value. Decoding
+      every ARM B/BL word in osos.dec finds exactly 12 direct calls, all plain
+      unconditional bl: 0x08182cb8, 0x08184928, 0x08225464, 0x082290c0,
+      0x082307f0, 0x0823199c, 0x08231a70, 0x08231b44, 0x08231c04,
+      0x08232390, 0x08286b3c, and 0x08288d50; none are predicated and there
+      are no direct tail branches. No NULL guard or reads. No deliberate
+      deviations; the target-only unique text section prevents LLVM from
+      folding this small body with a byte-identical port. Host tests prove all
+      four stores, unchanged receiver return, and no neighboring-word writes.
+      match.py structural (exit 1, diff expected): LLVM uses its standard
+      frame-pointer prologue/epilogue, allocates r2 for the zero literal, and
+      otherwise preserves the retail store order and receiver return.
