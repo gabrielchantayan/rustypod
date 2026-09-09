@@ -63,6 +63,7 @@ pub mod indexed_payload_lookup;
 pub mod message_arena;
 pub mod message_kind;
 pub mod message_kind_arena;
+pub mod member_release;
 pub mod negate_i32_in_place;
 pub mod node_list;
 pub mod no_content_layout_default;

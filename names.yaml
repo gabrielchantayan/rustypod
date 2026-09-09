@@ -56263,3 +56263,35 @@ functions:
       structural diff expected) finds the same source-load/floor-average/store
       structure; LLVM emits the independent stores in descending component
       order after all loads.
+
+  # --- Conditional member release (app/member_release) ---
+  - address: 0x082201f4
+    ghidra: thunk_FUN_08214348
+    name: member_release_if_present
+    size: 4
+    sig: "void member_release_if_present(MemberReleaseOwner *owner)"
+    module: app/member_release
+    status: ported
+    renames:
+      param_1/r0: owner
+      "owner+0x14": member
+      FUN_08214348: conditional_member_release_tail_target
+      FUN_081f0530: member_release (unported stock callee)
+    notes: >-
+      Raw osos.dec bytes are one ARM `b 0x0822aa34`; that trampoline in turn
+      tail-branches to FUN_08214348 at 0x08214348. Its 32-byte body reads
+      owner+0x14, calls FUN_081f0530 only for a nonzero word, and otherwise
+      returns without a call. The next separately linked function after this
+      4-byte veneer begins at 0x082201f8. Full-image decoding of every ARM
+      B/BL immediate finds exactly 12 direct callers, all unconditional bl
+      (zero predicated forms): 0x081426c0, 0x081792d0, 0x081798cc,
+      0x08179a08, 0x0817a308, 0x0817a850, 0x0817bc94, 0x0817c71c,
+      0x0817d110, 0x0817d3fc, 0x0817d600, and 0x082a9c80. No image word
+      equals 0x082201f4, so it is not directly dispatched as data. Deliberate
+      deviations: the two stock tail branches are flattened into one Rust
+      body; the unported member-release callee is a volatile seam that calls
+      its fixed retailOS address on target and a test recorder on host. The
+      retail tail target leaves an otherwise unspecified r4 in r0 after a
+      non-NULL release; every verified caller ignores it, so the Rust ABI is
+      void. Host tests prove both the exact nonzero word forwarding and that
+      zero suppresses the release call.
