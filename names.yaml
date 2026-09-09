@@ -5573,6 +5573,31 @@ functions:
       cmp/moveq; the core cmp r0,#0 / beq / ldr r0,[r0,#4] / ldr r1,[pc]
       sequence matches verbatim.
 
+  - address: 0x080522d4
+    ghidra: FUN_080522d4
+    name: ui_tdat_first_plst
+    size: 24
+    sig: "u32 ui_tdat_first_plst(const u8 *element)"
+    module: ui/tdat_first_plst
+    status: ported
+    renames:
+      param_1/r0: element
+      param_1_plus_0x34: first_plst
+      FUN_0806aa3c: ui_element_is_tdat_class
+    notes: >-
+      Raw ARM is mov r2, r0; push {lr}; bl 0x0806aa3c; movs r0, r0;
+      ldrne r0, [r2, #0x34]; pop {pc}. The 24-byte Ghidra extent is exact:
+      the adjacent function begins with cmp r0, #0 at 0x080522ec. Returns
+      the word at element+0x34 only when the already-ported 'tdat' class
+      predicate succeeds; otherwise returns zero. Caller 0x08050ae0 starts
+      its linked 'plst' sequence from this word and passes every result to
+      the 'plst' successor selector 0x08053bd0; callers 0x0805473c and
+      0x080561cc read the selected object's flag byte at +0x1ac. Call count
+      verified by decoding every B/BL word in osos.dec: 17 unconditional bl,
+      zero predicated. The Rust port directly calls ui_element_is_tdat_class
+      rather than branching to stock 0x0806aa3c; aligned word load and
+      zero-on-rejected-class behavior are unchanged.
+
   - address: 0x080645a8
     ghidra: FUN_080645a8
     name: kernel_sem5_signal

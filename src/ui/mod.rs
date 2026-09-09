@@ -28,6 +28,7 @@ pub mod object_payload;
 pub mod plst_class_check;
 pub mod plst_slot_item;
 pub mod tdat_class_check;
+pub mod tdat_first_plst;
 pub mod element_reference;
 pub mod element_reference_cookie;
 pub mod element_reference_persistent_id;
