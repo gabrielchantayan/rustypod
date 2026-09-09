@@ -250,10 +250,13 @@ pub unsafe extern "C" fn list_pop_front(list: *mut ListHead) -> *mut ListNode {
     node
 }
 
-/// list_push_back — original: `FUN_080f1158` @ 0x080f1158 (36 bytes).
+/// list_push_back — original: `FUN_080f1158` @ 0x080f1158 (36 bytes;
+/// 15 bl call sites, all unconditional, binary-verified).
 ///
 /// Appends `node` at the tail (or makes it the head of an empty list) and
-/// zeroes its `next`.
+/// zeroes its `next`. The original ends `mov r0,#0; str r0,[r1]; bx lr` —
+/// r0 is a zero SCRATCH for the node->next store, not a return value
+/// (every caller discards r0), so the port returns void.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn list_push_back(list: *mut ListHead, node: *mut ListNode) {
     if (*list).head.is_null() {

@@ -51446,6 +51446,43 @@ functions:
       + next zeroed + anchors cleared), list_single_element_clears_
       both_anchors.
 
+  - address: 0x080f1158
+    ghidra: FUN_080f1158
+    name: list_push_back
+    size: 36
+    sig: "void list_push_back(ListHead *list, ListNode *node)"
+    module: kernel/condvar
+    status: ported
+    renames:
+      r0: list
+      r1: node
+      r2: list->head, then list->tail
+    notes: >-
+      Intrusive singly-linked list push-back over a {head, tail} anchor
+      pair: load list->head; when NULL (streq path) node becomes the head,
+      else the store goes to list->tail->next (ldrne/strne pair); then
+      list->tail = node unconditionally and node->next = 0. The trailing
+      `mov r0,#0; str r0,[r1]; bx lr` uses r0 purely as a zero SCRATCH
+      for the node->next store - NOT a return value; every one of the 15
+      callers discards r0, so the port is void (deliberate deviation
+      documented in the doc header). 15 bl call sites, binary-verified
+      (every B/BL word in osos.dec decoded): 0x0807f6d4, 0x0809eb24,
+      0x0809ec54, 0x0809ec74, 0x080ed99c, 0x080ed9f8, 0x08100210,
+      0x0812be8c, 0x0812c1cc, 0x0816624c, 0x0819c014, 0x0839e528,
+      0x0839e628, 0x0839e74c, 0x0839e7ac - ALL plain unconditional bl,
+      zero predicated forms. Ghidra's 36-byte extent is CORRECT: the next
+      function starts with push {r2-r4,lr} at 0x080f117c. Already ported
+      as the exported `list_push_back` in kernel/condvar.rs by the
+      condvar-layer region port (0x0807f5cc entry) and re-used by
+      kernel/mqueue.rs; this record adds the per-address mapping, like
+      the list_pop_front entry above (0x080f10b8). Doc header updated
+      with the verified call count and the r0-scratch note. Host
+      coverage already in kernel::condvar::tests:
+      list_push_pop_fifo_order (empty-list head push, tail append across
+      a 4-node chain, next zeroed on every node, head/tail anchors).
+      match.py structural: same compare/branch/store sequence modulo the
+      crate fp frame - accepted ADS-vs-LLVM noise.
+
   # --- Named attribute-record lookup (util/attr_record) ---
   - address: 0x080bfb8c
     ghidra: FUN_080bfb8c
