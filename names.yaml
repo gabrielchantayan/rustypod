@@ -46570,6 +46570,45 @@ functions:
       argument to cg_create_inst_binary; the diff is LLVM's
       frame-pointer prologue and that single hoisted load.
 
+  - address: 0x082606f4
+    ghidra: FUN_082606f4
+    name: cg_emit_load_word_at_offset
+    size: 136
+    sig: "cg_virtual_reg_t *cg_emit_load_word_at_offset(cg_block_t *block, cg_virtual_reg_t *base, U32 offset)"
+    module: codegen/pipeline_emit
+    status: ported
+    renames:
+      param_1/r0/r4: block
+      param_2/r1/r5: base
+      param_3/r2/r6: offset
+      uVar1/r7: offset_reg
+      uVar2/r8: address_reg
+      uVar3/r9/r0: value_reg
+      FUN_082c23dc: cg_virtual_reg_create
+      FUN_082c18ec: cg_create_inst_load_immed
+      FUN_082c17f4: cg_create_inst_binary
+      FUN_082c18c4: cg_create_inst_load
+    notes: >-
+      136 bytes, 34 instruction words, no literal pool: 0x082606f4 through
+      0x08260778. The next function begins with its own `stmdb
+      sp!,{r3,r4,r5,r6,r7,r8,r9,lr}` at 0x0826077c, so the Ghidra extent is
+      exact. Binary-scanning every ARM B/BL word in osos.dec finds 12 call
+      sites, all unconditional bl (no predicated forms and no tail b):
+      0x08246624, 0x08246638, 0x08246688, 0x082466e8, 0x08246734,
+      0x08246748, 0x08246798, 0x082467fc, 0x08246810, 0x082468c4,
+      0x082468dc, and 0x08246944, all in FUN_082465bc. Algorithm: create
+      three general virtual registers from block->proc, then append LDI
+      offset_reg, offset / ADD address_reg, base, offset_reg / LDW
+      value_reg, [address_reg], returning value_reg. A word-by-word raw
+      comparison with cg_emit_load_word_at_offset @ 0x082605f0 finds six
+      differing words, exclusively the relative encodings of those same six
+      calls; the two bodies are otherwise identical. Deliberate deviation:
+      no duplicate Rust body or export exists. The established
+      cg_emit_load_word_at_offset seam is behaviorally identical and serves
+      a hook at this address; its host tests cover zero and usize::MAX
+      offsets, NULL bases, instruction wiring, append order, and virtual
+      register creation order.
+
   - address: 0x0826077c
     ghidra: FUN_0826077c
     ghidra: FUN_0826077c

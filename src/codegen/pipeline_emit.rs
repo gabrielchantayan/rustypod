@@ -51,6 +51,15 @@ unsafe fn block_proc(block: *mut CgBlock) -> *mut CgProc {
 /// The original reloads `block->proc` from `block + 4` before each of the
 /// three register creations; the port reads it once. The field is not
 /// written in between, so the observable call sequence is identical.
+///
+/// `FUN_082606f4` @ 0x082606f4 is a separately linked, behaviorally
+/// identical emission of this helper. Its exact 136-byte (34-word) extent
+/// ends at the next prologue at 0x0826077c; six `bl` encodings differ from
+/// this body only by their relative displacement and reach the same six
+/// callees in the same order. Raw decoding finds 12 call sites, all
+/// unconditional `bl` (no predicated calls or tail branches), all within
+/// `FUN_082465bc` at 0x08246624-0x08246944. The one exported implementation
+/// deliberately serves both hook seams: duplicate code would add no behavior.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn cg_emit_load_word_at_offset(
