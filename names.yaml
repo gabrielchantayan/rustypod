@@ -20619,6 +20619,38 @@ functions:
       the ported mutex and heap helpers, retaining the same
       guard/decrement/dispose/unlock/teardown order.
 
+  - address: 0x0839d038
+    ghidra: FUN_0839d038
+    name: refcounted_body_release_slot1_copy
+    size: 144
+    sig: "void refcounted_body_release_slot1_copy(RefcountedBody **slot)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r4: slot
+      param_1_plus_0x0: body
+      body_plus_0x0: implementation
+      body_plus_0x4: refcount
+      body_plus_0x8: mutex
+      vtable_plus_0x4: virtual_destructor_slot_1
+    notes: >-
+      Raw ARM spans 0x0839d038..0x0839d0c8 (144 bytes); Ghidra's
+      136-byte extent omits the trailing slot NULL store and return. The
+      separately linked 16-byte mutex-lock and mutex-unlock helpers begin at
+      0x0839d0c8 and 0x0839d0d8. Decoding every ARM B/BL word in osos.dec
+      finds 13 direct bl callers, all unconditional: no predicated forms, no
+      tail b sites, and no data-word references, so it is never virtually
+      dispatched. Separately linked copy of the slot-1 RefcountedBody release:
+      NULL body leaves the slot untouched; otherwise it locks the optional
+      mutex, wrapping-decrements body+4, unlocks and NULLs the slot for
+      non-final counts. On exactly zero it NULL-guardedly dispatches the
+      implementation's vtable word 1, never frees that implementation block,
+      unlocks, mutex-deletes and tag-2-deletes the mutex, clears body+8,
+      tag-2-deletes the body, then NULLs the slot. Rust directly calls the
+      already ported mutex and heap helpers rather than the local helpers;
+      LLVM may inline them, retaining the same operation order. Host tests
+      cover NULL, non-final, and final slot-1 teardown paths.
+
   - address: 0x0839cbc0
     ghidra: FUN_0839cbc0
     name: refcounted_body_release_dtor
