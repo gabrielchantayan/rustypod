@@ -42766,6 +42766,46 @@ functions:
       spill's product); 7 instructions either way.
       #[inline(never)] for the 25 `bl` targets.
 
+  - address: 0x0803d954
+    ghidra: FUN_0803d954
+    name: bio_snprintf
+    size: 28
+    sig: "int bio_snprintf(char *buf, size_t size, const char *format, ... /* args: VaList */)"
+    module: crypto/bio_snprintf
+    status: ported
+    renames:
+      param_1/r0: buf
+      param_2/r1: size
+      param_3/r2: format
+      "r3 + stack": args (the va_list the spill frame builds)
+      FUN_0803da24: bio_vsnprintf
+    notes: >-
+      OpenSSL's BIO_snprintf from crypto/bio/b_print.c, the bounded,
+      caller-buffer variadic front end of the BIO formatter (identity
+      evidence: it is the four-argument sibling of BIO_printf at
+      0x0803d680 and calls the b_print.c BIO_vsnprintf worker at
+      0x0803da24, whose next sibling is BIO_write). Raw ARM confirms
+      Ghidra's 28-byte extent: 0x0803d954..0x0803d970 is seven
+      instructions with no literal pool, followed by separately linked
+      BIO_vprintf. `push {r0-r3}; push {r4,lr}; ldr r2,[sp,#16]`
+      reloads format; `add r3,sp,#20` forms the va_list from spilled r3;
+      `bl 0x0803da24` forwards (buf, size, format, args); `pop {r4};
+      ldr pc,[sp],#20` returns that result untouched. Ghidra incorrectly
+      declares it void. Call count binary-verified by decoding every ARM
+      B/BL word in osos.dec: exactly 16 direct BL calls, 14 unconditional
+      bl and two bleq at 0x08049750 / 0x08049768, no tail branches. Those
+      BLEQ sites synthesize fallback text only if their preceding helper
+      returned NULL; the veneer itself validates nothing. No image DATA
+      word equals 0x0803d954, so it is not virtually dispatched.
+      Deviation: Rust receives explicit `args: VaList` (*const u32), the
+      exact product of the retail spill frame; a real variadic caller needs
+      the printf_api capture trampoline. The unported BIO_vsnprintf worker
+      rides a volatile BIO_VSNPRINTF seam: target default calls 0x0803da24
+      in place; host default panics until a test installs it. Host tests
+      prove forwarding without buffer access, return-value propagation,
+      NULL plus zero-size forwarding, and volatile slot reload across calls.
+      #[inline(never)] retains a concrete target for all 16 BL call sites.
+
   # --- OpenSSL bignum: the bit-length query ---
   # The bn_lib.c cluster sits in 0x0803d800..0x08041000 on the
   # { BN_ULONG *d; int top; int dmax; int neg; int flags } BIGNUM
