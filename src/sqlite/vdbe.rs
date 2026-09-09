@@ -10,6 +10,10 @@
 //! decoding `bl`/`b` words in osos.dec, not from osos.asm, which drops
 //! lines):
 //!
+//! - `vdbe_add_op0` — `FUN_083867f8` @ 0x083867f8 (24 bytes;
+//!   **13 `bl` call sites: 8 unconditional, 3 `blne`, 1 `bleq`, 1
+//!   `blhi`**). `sqlite3VdbeAddOp0`: append an opcode with all operands
+//!   zero.
 //! - `vdbe_add_op3` — `FUN_08386840` @ 0x08386840 (132 bytes;
 //!   **282 `bl` call sites**). `sqlite3VdbeAddOp3`: append one opcode with
 //!   three operands, return its address (the index it landed at).
@@ -293,6 +297,18 @@ pub unsafe extern "C" fn vdbe_resize_op_array(p: *mut Vdbe, n_op: i32) {
         (*p).n_op_alloc = n_op;
         (*p).a_op = new as *mut VdbeOp;
     }
+}
+/// vdbe_add_op0 — original: `FUN_083867f8` @ 0x083867f8 (24 bytes;
+/// 13 `bl` call sites: 8 unconditional, 3 `blne`, 1 `bleq`, 1 `blhi`,
+/// verified by decoding every ARM B/BL word in osos.dec).
+///
+/// `sqlite3VdbeAddOp0`: a thin front-end for [`vdbe_add_op3`] that appends
+/// `opcode` with `p1`, `p2`, and `p3` all zero. The original has no NULL
+/// guard; its predicated callers gate the call themselves. No deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vdbe_add_op0(p: *mut Vdbe, opcode: i32) -> i32 {
+    vdbe_add_op3(p, opcode, 0, 0, 0)
 }
 
 /// vdbe_add_op3 — original: `FUN_08386840` @ 0x08386840 (132 bytes;
@@ -705,11 +721,13 @@ mod tests {
         let mut slab = op_slab(4);
         let mut stmt = preallocated(&mut slab, Connection::healthy());
 
-        assert_eq!(unsafe { vdbe_add_op1(stmt.ptr(), 0x20, 7) }, 0);
-        assert_eq!(unsafe { vdbe_add_op2(stmt.ptr(), 0x62, 8, 9) }, 1);
+        assert_eq!(unsafe { vdbe_add_op0(stmt.ptr(), 0x5b) }, 0);
+        assert_eq!(unsafe { vdbe_add_op1(stmt.ptr(), 0x20, 7) }, 1);
+        assert_eq!(unsafe { vdbe_add_op2(stmt.ptr(), 0x62, 8, 9) }, 2);
 
-        assert_eq!((slab[0].p1, slab[0].p2, slab[0].p3), (7, 0, 0));
-        assert_eq!((slab[1].p1, slab[1].p2, slab[1].p3), (8, 9, 0));
+        assert_eq!((slab[0].p1, slab[0].p2, slab[0].p3), (0, 0, 0));
+        assert_eq!((slab[1].p1, slab[1].p2, slab[1].p3), (7, 0, 0));
+        assert_eq!((slab[2].p1, slab[2].p2, slab[2].p3), (8, 9, 0));
     }
 
     /// The op stride the resize helper bills for: 20 on the ARM target
