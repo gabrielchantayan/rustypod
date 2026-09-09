@@ -333,6 +333,46 @@ pub unsafe extern "C" fn region_ref_unlock(elem: *const u8) -> u32 {
     (mutex_op!(unlock))(ptr_field(region, REGION_MUTEX_INDEX))
 }
 
+/// region_elem_default_construct — original: `FUN_082804b8` @
+/// 0x082804b8 (40 bytes: 36 bytes of code plus its vtable literal at
+/// 0x082804e0; the next sibling begins at 0x082804e4).
+///
+/// Full ARM B/BL decoding finds 13 unconditional `bl` call sites, with no
+/// predicated calls or tail `b` sites. Each caller supplies a valid
+/// destination; this constructor has no NULL guard. It plants the element
+/// vtable, clears both region-reference words, constructs the embedded
+/// recursive mutex, and returns `dst`.
+///
+/// Deliberate host-only deviation: the target calls the unported recursive
+/// mutex constructor @ 0x082621b0 directly. The shared
+/// [`construct_recursive_mutex`] host model composes its ported dependencies
+/// so the resulting recursive mutex state remains observable in host tests.
+///
+/// Original listing:
+/// ```text
+/// 082804b8  ldr  r1,[pc,#32]       ; 0x089a6444
+/// 082804bc  push {r4,lr}
+/// 082804c0  str  r1,[r0]
+/// 082804c4  mov  r1,#0
+/// 082804c8  str  r1,[r0,#4]
+/// 082804cc  str  r1,[r0,#8]!
+/// 082804d0  add  r0,r0,#4
+/// 082804d4  bl   0x082621b0        ; recursive mutex ctor
+/// 082804d8  sub  r0,r0,#12
+/// ```
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn region_elem_default_construct(dst: *mut u8) -> *mut u8 {
+    (dst as *mut usize).write(REGION_ELEM_VTABLE_ADDRESS as usize);
+    #[cfg(target_os = "none")]
+    dst.add(ELEM_REGION_INDEX * WORD).cast::<*mut u8>().write(core::ptr::null_mut());
+    #[cfg(not(target_os = "none"))]
+    (dst.add(ELEM_REGION_INDEX * WORD) as *mut *mut u8).write_unaligned(core::ptr::null_mut());
+    u32_field(dst, 2).write(0);
+    construct_recursive_mutex(dst.add(ELEM_MUTEX_OFFSET));
+    dst
+}
+
 /// region_elem_copy_construct — original: `FUN_08280464` @ 0x08280464
 /// (80 bytes: 76 bytes of code and its vtable literal at 0x082804b4).
 ///
@@ -575,6 +615,40 @@ mod tests {
         restore_mutex();
     }
 
+
+    // ---- region_elem_default_construct ----------------------------
+
+    /// The default constructor replaces stale references with NULL/zero,
+    /// installs the class vtable, and initializes its recursive mutex.
+    #[test]
+    fn default_construct_clears_stale_references_and_initializes_mutex() {
+        use crate::kernel::posix_mutex::PosixMutex;
+
+        let mut dst = [usize::MAX; 8];
+        let dst_ptr = dst.as_mut_ptr().cast::<u8>();
+        unsafe {
+            assert_eq!(region_elem_default_construct(dst_ptr), dst_ptr);
+            assert_eq!(dst[0], REGION_ELEM_VTABLE_ADDRESS as usize);
+            assert!(ptr_field(dst_ptr, ELEM_REGION_INDEX).is_null());
+            assert_eq!(u32_field(dst_ptr, 2).read(), 0);
+
+            let mutex = &*dst_ptr.add(ELEM_MUTEX_OFFSET).cast::<PosixMutex>();
+            assert_eq!(mutex.magic, crate::cxx::mutex_settype_init::MUTEX_LIVE_MAGIC);
+            assert_eq!(
+                mutex.attr_flags & 0x0030_0000,
+                0x0020_0000,
+                "kind 2 (recursive) occupies attr bits 4..5"
+            );
+            assert_eq!(
+                dst_ptr
+                    .add(ELEM_MUTEX_OFFSET + crate::cxx::mutex::CXX_MUTEX_STATUS_OFFSET)
+                    .cast::<u32>()
+                    .read(),
+                0,
+                "the initializer status replaces the successful settype status"
+            );
+        }
+    }
 
     // ---- region_elem_copy_construct -------------------------------
 
