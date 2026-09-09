@@ -29,6 +29,7 @@ pub mod object_packed_field;
 pub mod plst_class_check;
 pub mod plst_slot_item;
 pub mod tdat_class_check;
+pub mod tdat_payload;
 pub mod tdat_first_plst;
 pub mod element_reference;
 pub mod element_reference_item_count;
