@@ -32965,6 +32965,56 @@ functions:
       fp frame; both preserve the original's result and dereference
       gate.
 
+  - address: 0x082a45a4
+    ghidra: FUN_082a45a4
+    name: scoped_context_owner_flags_bit_21
+    size: 52
+    sig: "u32 scoped_context_owner_flags_bit_21(const ScopedContext *this)"
+    module: app/scoped_context
+    status: ported
+    vars: {param_1: this}
+    notes: >-
+      17 bl call sites, all unconditional with zero predicated forms
+      and zero tail b sites, binary-scanned by decoding every B/BL
+      word in osos.dec - no caller NULL-guards the token. Ghidra's
+      52-byte extent is exact: the thirteen instructions end at
+      0x082a45d4 and the next function begins with its own push
+      {r4,lr} at 0x082a45d8 (a same-shaped sibling that reads owner
+      word +0x90 instead), so there is no trailing literal pool - the
+      0x200000 mask is a rotated immediate inside the andne, unlike
+      the 0x8062 sibling's literal-pool word. Validity-gated
+      owner-flags predicate over the ScopedContext token
+      (app/scoped_context.rs): dispatches the token's vtable slot
+      +0x08 (the same virtual the whole 0x082a4 family gates on) and,
+      only when it returns nonzero, reads the owner's flags word at
+      +0xbc and returns its bit 21 as 0 or 1 via and 0x200000 / lsr
+      #21. A failing slot answers 0 without dereferencing owner, so a
+      NULL-owner token is safe. One of the capability-predicate
+      family with 0x082a3fc4 (bit 3), 0x082a40c8 (mask 0x8062,
+      ported), and 0x082a4574 (byte +0x8f bit 0, ported); the
+      context-menu builder 0x08222eec ANDs their answers to decide
+      whether to suppress an item. What bit 21 means does not survive
+      in the image, so the mask keeps its numeric name, the
+      OWNER_FLAGS_MASK_8062 precedent. The function itself is not
+      virtual-dispatched: no data word in the image holds 0x082a45a4
+      (binary-scanned). Deviations: repr(C) ScopedContext and
+      ScopedContextVtable models stand in for literal offsets, and
+      the slot word is transmuted to the call ABI at the dispatch
+      point - the module's standing deviations. Host tests: slot-0
+      short-circuit with a NULL owner (proves no dereference), bit-21
+      isolation across 8 flag patterns (0, mask alone, all-ones,
+      complement, the 0x8062 sibling's bits, both immediate
+      neighbours, mask-plus-strays), and any-nonzero-slot truthiness.
+      match.py structural: same vtable load, same slot +0x08 blx
+      dispatch, same validity cmp, same gated owner +0x08 and flags
+      +0xbc loads, same bit-21 extraction and 0/1 result; the diff is
+      the crate fp frame (push {r4,sl,fp,lr} / add fp,sp,#8) and LLVM
+      synthesizing movne r1,#1 / andne r0,r1,r0,lsr #21 where ADS
+      used andne/lsrne/moveq - identical results on both exits. NOTE:
+      in this worktree match.py needs --lib pointing at the
+      worktree's librustypod.a; the default path resolves the main
+      checkout's archive.
+
   - address: 0x082a368c
     ghidra: FUN_082a368c
     name: scoped_context_owner_u64_110

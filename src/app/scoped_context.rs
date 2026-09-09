@@ -1,6 +1,6 @@
 //! The framework's **scoped context token** — a 0x18-byte polymorphic
 //! object that call sites build on the stack, hand to a service, and
-//! throw away. Five of its members are ported here, all from the
+//! throw away. Seven of its members are ported here, all from the
 //! 0x0826/0x0827 framework cluster that also holds the string/buffer class
 //! (`cxx/string_object.rs`) and the resource-lookup chain
 //! (`app/resource_chain.rs`):
@@ -12,6 +12,8 @@
 //!   a validity-gated predicate over the token owner's flags word.
 //! - [`scoped_context_owner_byte_8f_bit_0`] — `FUN_082a4574` @ 0x082a4574,
 //!   a validity-gated predicate over bit 0 of the token owner's byte +0x8f.
+//! - [`scoped_context_owner_flags_bit_21`] — `FUN_082a45a4` @ 0x082a45a4,
+//!   a validity-gated predicate over bit 21 of the token owner's flags word.
 //! - [`scoped_context_owner_u64_110`] — `FUN_082a368c` @ 0x082a368c, a
 //!   validity-gated getter returning the token owner's 64-bit word pair at
 //!   +0x110/+0x114.
@@ -447,6 +449,75 @@ pub unsafe extern "C" fn scoped_context_owner_byte_8f_bit_0(
     (((*this).owner as *const u8).add(OWNER_BYTE_8F_OFFSET).read() & 1) as u32
 }
 
+
+/// The bit-21 mask tested against the owner's +0xbc flags word. The
+/// original encodes it as a rotated immediate in the `andne` (0x200000
+/// = 0x02 ror 10), so unlike the 0x8062 sibling there is no literal-pool
+/// word. What bit 21 means does not survive in the image, so the mask
+/// keeps its numeric name, the OWNER_FLAGS_MASK_8062 precedent.
+const OWNER_FLAGS_MASK_200000: u32 = 0x0020_0000;
+
+/// scoped_context_owner_flags_bit_21 — original: `FUN_082a45a4` @
+/// 0x082a45a4 (52 bytes, exact: the thirteen instructions end at
+/// 0x082a45d4 and the next function starts with its own `push {r4, lr}`
+/// at 0x082a45d8, so there is no trailing literal pool for Ghidra's
+/// 52-byte extent to drop; **17 `bl` call sites, 0 predicated forms**,
+/// binary-scanned by decoding every B/BL word in osos.dec — no caller
+/// NULL-guards the token).
+///
+/// ```text
+/// 082a45a4  push  {r4, lr}
+/// 082a45a8  mov   r4, r0
+/// 082a45ac  ldr   r0, [r0]         @ token vtable
+/// 082a45b0  ldr   r1, [r0, #8]     @ slot +0x08 validity method
+/// 082a45b4  mov   r0, r4
+/// 082a45b8  blx   r1
+/// 082a45bc  cmp   r0, #0
+/// 082a45c0  ldrne r0, [r4, #8]     @ owner
+/// 082a45c4  ldrne r0, [r0, #0xbc]  @ owner flags word
+/// 082a45c8  andne r0, r0, #0x200000
+/// 082a45cc  lsrne r0, r0, #21      @ isolate bit 21
+/// 082a45d0  moveq r0, #0
+/// 082a45d4  pop   {r4, pc}
+/// ```
+///
+/// Validity-gated predicate over the scoped-context token. It dispatches
+/// the token's vtable slot +0x08 and, only when that returns nonzero,
+/// reads the owner's flags word at +0xbc and returns its bit 21 as 0 or
+/// 1 (the original's `and`/`lsr #21`, not a boolean `tst`/`movne` — the
+/// results agree, since only bit 21 survives the mask). A failing slot
+/// never dereferences the owner, so a NULL-owner token answers 0 instead
+/// of faulting. One of the same capability-predicate family as
+/// [`scoped_context_owner_flags_any_8062`] and
+/// [`scoped_context_owner_byte_8f_bit_0`]; the context-menu builder at
+/// 0x08222eec ANDs their answers to decide whether to suppress an item.
+/// The function itself is not virtual-dispatched: no data word in the
+/// image holds 0x082a45a4 (binary-scanned).
+///
+/// Deviations: the token and its vtable are this module's `#[repr(C)]`
+/// models, so the vtable load and slot index are struct field accesses
+/// rather than literal byte offsets (the module's standing deviation);
+/// the slot word is transmuted to the call ABI at the dispatch point,
+/// the ui/element_reference.rs idiom. The owner flags read is an
+/// aligned word read — the owner is a 4-aligned framework object and
+/// +0xbc is word-aligned. Unlike the 0x8062 sibling (whose mask fits
+/// in the low halfword, so LLVM narrows its read to an `ldrh`), bit 21
+/// sits in the upper halfword and the full `ldr` survives; LLVM also
+/// branches where ADS predicated (`ldrne`/`andne`/`lsrne`/`moveq`),
+/// the family's standing codegen deviation.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn scoped_context_owner_flags_bit_21(
+    this: *const ScopedContext,
+) -> u32 {
+    let validity: ScopedContextValidity =
+        core::mem::transmute((*(*this).vtable).slots[VALIDITY_SLOT]);
+    if validity(this) == 0 {
+        return 0;
+    }
+    let flags = ((*this).owner as *const u32).add(OWNER_FLAGS_SLOT).read();
+    (flags & OWNER_FLAGS_MASK_200000) >> 21
+}
 
 /// Word index of the owner's 64-bit pair's low word (the original's
 /// `ldrne r0, [r1, #0x110]`); the high word follows at the next index
@@ -909,6 +980,59 @@ mod tests {
         let mut fixture = predicate_fixture(0x8000);
         link_fixture(&mut fixture, false);
         let result = unsafe { scoped_context_owner_flags_any_8062(&fixture.token) };
+        assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn bit_21_predicate_short_circuits_when_the_token_is_not_valid() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        reset_validity_recording(0);
+        // A NULL owner proves the short-circuit: any read of it faults.
+        let mut fixture = predicate_fixture(0xffff_ffff);
+        link_fixture(&mut fixture, true);
+        let result = unsafe { scoped_context_owner_flags_bit_21(&fixture.token) };
+        assert_eq!(result, 0);
+        unsafe {
+            assert_eq!(VALIDITY_CALLS, 1);
+            assert_eq!(VALIDITY_TOKEN as usize, &fixture.token as *const _ as usize);
+        }
+    }
+
+    #[test]
+    fn bit_21_predicate_isolates_bit_21() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        for (flags, want) in [
+            (0u32, 0),
+            (OWNER_FLAGS_MASK_200000, 1),
+            (0xffff_ffff, 1),
+            (!OWNER_FLAGS_MASK_200000, 0),
+            // Every other bit set, including the 0x8062 sibling's bits.
+            (0xffdf_ffff, 0),
+            // The immediate neighbours of bit 21 must not leak in.
+            (0x0010_0000, 0),
+            (0x0040_0000, 0),
+            // Bit 21 among strays still answers 1.
+            (OWNER_FLAGS_MASK_200000 | 0x8062, 1),
+        ] {
+            reset_validity_recording(1);
+            let mut fixture = predicate_fixture(flags);
+            link_fixture(&mut fixture, false);
+            let result = unsafe { scoped_context_owner_flags_bit_21(&fixture.token) };
+            assert_eq!(result, want, "flags {flags:#x}");
+            unsafe {
+                assert_eq!(VALIDITY_CALLS, 1);
+            }
+        }
+    }
+
+    #[test]
+    fn bit_21_predicate_treats_any_nonzero_validity_as_true() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        // The original gates on `cmp r0, #0`, not on a specific value.
+        reset_validity_recording(0xffff_ffff);
+        let mut fixture = predicate_fixture(OWNER_FLAGS_MASK_200000);
+        link_fixture(&mut fixture, false);
+        let result = unsafe { scoped_context_owner_flags_bit_21(&fixture.token) };
         assert_eq!(result, 1);
     }
 
