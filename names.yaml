@@ -33009,6 +33009,32 @@ functions:
       (ldr pc,[pc,#-4]); only diff line is the literal word shown as
       .word vs data-decoded-andcs.
 
+  - address: 0x08037fd8
+    ghidra: thunk_EXT_FUN_22006e88
+    name: iram_stream_buffer_initializer_veneer
+    size: 8
+    sig: "void *iram_stream_buffer_initializer_veneer(void)"
+    module: kernel/stream_buffer_initializer
+    status: ported
+    renames: {thunk_EXT_FUN_22006e88: iram_stream_buffer_initializer_veneer}
+    notes: >-
+      Raw bytes are `ldr pc,[pc,#-4]` (0xe51ff004) plus target literal
+      0x22006e88; Ghidra's 4-byte extent omits that literal and the next
+      independent veneer begins at 0x08037fe0, so the true extent is 8 bytes.
+      The relocator at 0x080046e0 mirrors osos 0x08000000..0x0800aed8 into
+      IRAM 0x22000000..0x2200aed8, making the target byte-identical to
+      FUN_08006e88 @ 0x08006e88, already ported as initialize_stream_buffer.
+      Decoding every ARM B/BL word in osos.dec verified 16 direct bl callers,
+      all unconditional, zero predicated; zero tail b and no DATA word stores
+      the veneer address, so it is not a virtual dispatch target. The veneer
+      transfers the no-argument lazy initializer's fixed stream-buffer result
+      directly to its caller. The Rust port volatile-loads and invokes the
+      existing initializer instead of duplicating it; this deliberately uses
+      a normal call/return rather than the literal tail jump, but the body
+      consumes no arguments and exposes only the returned pointer. Host test
+      proves the cold veneer call performs both construction and independent
+      page initialization through the existing port. match.py structural
+      review is expected to differ by the Rust indirect-call frame.
   - address: 0x08037f88
     ghidra: thunk_EXT_FUN_22005018
     name: ui_manager_acquire

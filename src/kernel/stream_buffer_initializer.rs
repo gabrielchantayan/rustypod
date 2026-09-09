@@ -187,6 +187,30 @@ pub unsafe extern "C" fn initialize_stream_buffer() -> *mut u8 {
     stream_buffer
 }
 
+/// iram_stream_buffer_initializer_veneer — original:
+/// `thunk_EXT_FUN_22006e88` @ `0x08037fd8` (8 bytes: `ldr pc,[pc,#-4]` and
+/// its target literal; Ghidra's 4-byte extent excludes the literal word).
+/// Binary decoding of every ARM B/BL word in `osos.dec` found 16 direct
+/// `bl` callers, all unconditional, with no predicated forms or tail `b`.
+///
+/// The retailOS veneer tail-dispatches to IRAM `0x22006e88`, the relocator
+/// mirror of the already ported [`initialize_stream_buffer`] body at
+/// `0x08006e88`; it returns that fixed stream-buffer pointer to every caller.
+///
+/// Deliberate deviation: Rust makes a volatile indirect call and returns,
+/// rather than loading PC from the literal. The initialized body has no
+/// arguments and defines only the returned pointer, so this preserves the
+/// observable ABI while keeping all calls on the ported path.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.iram_stream_buffer_initializer_veneer")]
+#[inline(never)]
+pub unsafe extern "C" fn iram_stream_buffer_initializer_veneer() -> *mut u8 {
+    let body = core::ptr::read_volatile(
+        &(initialize_stream_buffer as unsafe extern "C" fn() -> *mut u8),
+    );
+    body()
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -326,6 +350,17 @@ mod tests {
             assert_eq!((*node).handler as usize, stream_buffer_destructor() as usize);
             assert_eq!((*node).key, DSO_HANDLE);
         }
+    }
+
+    #[test]
+    fn iram_veneer_forwards_cold_start_to_ported_initializer() {
+        let _fixture = fixture(0, 0, 0x2468_ace0);
+
+        assert_eq!(unsafe { iram_stream_buffer_initializer_veneer() }, stream_buffer());
+
+        let mock = MOCK.lock().unwrap_or_else(|error| error.into_inner());
+        assert_eq!(mock.ctor_calls, 1, "veneer reaches the lazy constructor");
+        assert_eq!(mock.page_initialize_calls, 1, "veneer reaches independent page setup");
     }
 
     #[test]
