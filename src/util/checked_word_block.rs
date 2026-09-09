@@ -1,28 +1,18 @@
-//! `checked_word_block_convert` — initial-word decoder in the checked binary
-//! word-block reader, plus `checked_word_block_convert_3d`, the family's
-//! three-dimensional block core.
+//! Checked binary word-block reader family.
 //!
-//! Original: `FUN_0802b654` @ 0x0802b654 (84 bytes,
+//! `checked_byte_block_convert` — `FUN_0802b654` @ 0x0802b654 (84 bytes,
 //! 0x0802b654..0x0802b6a8; 54 `bl` call sites, no tail branches).
-//! `FUN_0802b868` @ 0x0802b868 (188 bytes, 0x0802b868..0x0802b924;
-//! 31 `bl` call sites, all unconditional, binary-scanned).
+//! `checked_word_block_convert_3d` — `FUN_0802b868` @ 0x0802b868 (188
+//! bytes, 0x0802b868..0x0802b924; 31 `bl` call sites, all unconditional,
+//! binary-scanned).
 //!
-//! It reads `**input_cursor_mirror`, applies `FUN_0802b538`'s mode-controlled
-//! transform (only mode 1 reverses the four bytes), stores that decoded leading
-//! word, and calls `FUN_0802b5d4` with its six original arguments unchanged.
-//! The unported core converts `word_count` words, verifies that the following
-//! transformed source word equals their wrapping sum, advances its input/output
-//! cursor aliases on success, and returns 0; it returns 4 without advancing on
-//! a mismatch. Callers use the stored leading word as a binary-record field and
-//! the status to continue/reject parsing. The higher-level record format is not
-//! identified, so the name remains structural.
-//!
-//! Deliberate deviation: the unported core uses [`CHECKED_WORD_BLOCK_OPS`]
-//! (firmware address on target, panicking default on host); the tiny local
-//! `FUN_0802b538` transform is reproduced directly rather than exposed as a
-//! second port.
+//! The byte wrapper decodes one leading mode-transformed word through
+//! `input_cursor_mirror`, then invokes the flat byte-block checksum core at
+//! 0x0802b56c. The word core below is the distinct three-dimensional variant.
+//! The mode transform is intentionally inlined: only exact mode 1 reverses
+//! four-byte words, while every other u32 mode is identity.
 
-use core::ptr::addr_of_mut;
+
 
 /// The core's checksum-mismatch result.
 pub const CHECKSUM_MISMATCH: u32 = 4;
@@ -32,79 +22,44 @@ const fn transform_word_for_mode(mode: u32, word: u32) -> u32 {
     if mode == 1 { word.swap_bytes() } else { word }
 }
 
-/// Exact ABI of the unported `FUN_0802b5d4` block conversion/checksum core.
-pub type CheckedWordBlockCore = unsafe extern "C" fn(
-    mode: u32,
-    input_cursor: *mut *mut u32,
-    input_cursor_mirror: *mut *mut u32,
-    output_cursor: *mut *mut u32,
-    output_cursor_mirror: *mut *mut u32,
-    word_count: u32,
-) -> u32;
 
-#[derive(Clone, Copy)]
-pub struct CheckedWordBlockOps {
-    pub convert_core: CheckedWordBlockCore,
-}
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_convert_core(
-    mode: u32,
-    input_cursor: *mut *mut u32,
-    input_cursor_mirror: *mut *mut u32,
-    output_cursor: *mut *mut u32,
-    output_cursor_mirror: *mut *mut u32,
-    word_count: u32,
-) -> u32 {
-    let f: CheckedWordBlockCore = unsafe { core::mem::transmute(0x0802_b5d4usize) };
-    unsafe { f(mode, input_cursor, input_cursor_mirror, output_cursor, output_cursor_mirror, word_count) }
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_convert_core(
-    _mode: u32,
-    _input_cursor: *mut *mut u32,
-    _input_cursor_mirror: *mut *mut u32,
-    _output_cursor: *mut *mut u32,
-    _output_cursor_mirror: *mut *mut u32,
-    _word_count: u32,
-) -> u32 {
-    panic!("checked_word_block_convert requires core 0x0802b5d4")
-}
-
-#[cfg(target_os = "none")]
-const DEFAULT_CHECKED_WORD_BLOCK_OPS: CheckedWordBlockOps = CheckedWordBlockOps { convert_core: firmware_convert_core };
-#[cfg(not(target_os = "none"))]
-const DEFAULT_CHECKED_WORD_BLOCK_OPS: CheckedWordBlockOps = CheckedWordBlockOps { convert_core: missing_convert_core };
-
-/// Target defaults call the firmware core; host tests replace this slot.
-pub static mut CHECKED_WORD_BLOCK_OPS: CheckedWordBlockOps = DEFAULT_CHECKED_WORD_BLOCK_OPS;
-
-/// checked_word_block_convert — original: `FUN_0802b654` @ 0x0802b654
+/// checked_byte_block_convert — original: `FUN_0802b654` @ 0x0802b654
 /// (84 bytes; 54 `bl` call sites).
 ///
-/// Decodes and stores the current leading input word, then forwards all core
-/// arguments unchanged and returns the core's status.
+/// Decodes and stores the current leading input word, then passes all cursor
+/// slots and the signed byte count to [`crate::util::checked_byte_block::
+/// checked_byte_block_convert_core`].
 ///
 /// # Safety
-/// `input_cursor_mirror` and its current word must be readable,
-/// `out_leading_word` writable, and all cursor aliases valid for the core.
+/// `input_cursor_mirror` and its current aligned word must be readable,
+/// `out_leading_word` writable, and all cursor aliases valid for the byte core.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
-pub unsafe extern "C" fn checked_word_block_convert(
+pub unsafe extern "C" fn checked_byte_block_convert(
     mode: u32,
-    input_cursor: *mut *mut u32,
-    input_cursor_mirror: *mut *mut u32,
-    output_cursor: *mut *mut u32,
-    output_cursor_mirror: *mut *mut u32,
-    word_count: u32,
+    input_cursor: *mut *mut u8,
+    input_cursor_mirror: *mut *mut u8,
+    output_cursor: *mut *mut u8,
+    output_cursor_mirror: *mut *mut u8,
+    byte_count: i32,
     out_leading_word: *mut u32,
 ) -> u32 {
     let source = unsafe { core::ptr::read_volatile(input_cursor_mirror) };
-    let leading = transform_word_for_mode(mode, unsafe { core::ptr::read_volatile(source) });
+    let leading = transform_word_for_mode(mode, unsafe {
+        core::ptr::read_volatile(source.cast::<u32>())
+    });
     unsafe { core::ptr::write_volatile(out_leading_word, leading) };
-    let core = unsafe { addr_of_mut!(CHECKED_WORD_BLOCK_OPS).read_volatile().convert_core };
-    unsafe { core(mode, input_cursor, input_cursor_mirror, output_cursor, output_cursor_mirror, word_count) }
+    unsafe {
+        crate::util::checked_byte_block::checked_byte_block_convert_core(
+            mode,
+            input_cursor,
+            input_cursor_mirror,
+            output_cursor,
+            output_cursor_mirror,
+            byte_count,
+        )
+    }
 }
 
 /// checked_word_block_convert_3d — original: `FUN_0802b868` @ 0x0802b868
@@ -112,10 +67,8 @@ pub unsafe extern "C" fn checked_word_block_convert(
 /// plain unconditional `bl`, verified by decoding every B/BL word in
 /// osos.dec).
 ///
-/// Three-dimensional variant of the family's flat conversion core
-/// (`FUN_0802b5d4`, still unported, riding [`CHECKED_WORD_BLOCK_OPS`]
-/// above): converts `dim0 * dim1 * dim2` consecutive input words with the
-/// mode-controlled transform, stores them through the output cursor in
+/// Three-dimensional word-block decoder: converts `dim0 * dim1 * dim2` words
+/// with the mode-controlled transform, stores them through the output cursor in
 /// row-major order while accumulating their wrapping 32-bit sum, then
 /// transforms the next input word and compares it against that sum. On a
 /// match it advances BOTH input aliases to one word past the checksum word
@@ -134,7 +87,7 @@ pub unsafe extern "C" fn checked_word_block_convert(
 /// (typically 8/2/256), so the degenerate paths are binary-verified but
 /// not exercised by stock firmware.
 ///
-/// Deliberate deviation: as in `checked_word_block_convert`, the tiny
+/// Deliberate deviation: as in `checked_byte_block_convert`, the tiny
 /// `FUN_0802b538` transform is reproduced inline rather than ported as a
 /// second export; the three `bl 0x0802b538` sites of the original (one in
 /// the inner loop, one for the checksum word) become inlined arithmetic.
@@ -193,68 +146,7 @@ pub unsafe extern "C" fn checked_word_block_convert_3d(
 mod tests {
     extern crate std;
     use super::*;
-    use std::sync::Mutex;
 
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
-    static mut SEEN: [usize; 6] = [0; 6];
-    static mut STATUS: u32 = 0;
-
-    unsafe extern "C" fn recorder(
-        mode: u32,
-        input: *mut *mut u32,
-        input_mirror: *mut *mut u32,
-        output: *mut *mut u32,
-        output_mirror: *mut *mut u32,
-        count: u32,
-    ) -> u32 {
-        unsafe {
-            SEEN = [mode as usize, input as usize, input_mirror as usize, output as usize, output_mirror as usize, count as usize];
-            STATUS
-        }
-    }
-
-    fn invoke(mode: u32, status: u32) -> (u32, u32, [usize; 6], [usize; 6]) {
-        let _lock = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let mut source = [0x1020_3040u32, 0];
-        let mut target = [0u32; 2];
-        let mut input = source.as_mut_ptr();
-        let mut input_mirror = source.as_mut_ptr();
-        let mut output = target.as_mut_ptr();
-        let mut output_mirror = target.as_mut_ptr();
-        let mut leading = 0;
-        let expected = [
-            mode as usize,
-            (&mut input as *mut *mut u32) as usize,
-            (&mut input_mirror as *mut *mut u32) as usize,
-            (&mut output as *mut *mut u32) as usize,
-            (&mut output_mirror as *mut *mut u32) as usize,
-            0x17,
-        ];
-        unsafe {
-            CHECKED_WORD_BLOCK_OPS = CheckedWordBlockOps { convert_core: recorder };
-            STATUS = status;
-            let result = checked_word_block_convert(mode, &mut input, &mut input_mirror, &mut output, &mut output_mirror, 0x17, &mut leading);
-            let seen = SEEN;
-            CHECKED_WORD_BLOCK_OPS = DEFAULT_CHECKED_WORD_BLOCK_OPS;
-            (result, leading, seen, expected)
-        }
-    }
-
-    #[test]
-    fn mode_zero_preserves_the_leading_word_and_forwards_all_arguments() {
-        let (status, leading, seen, expected) = invoke(0, CHECKSUM_MISMATCH);
-        assert_eq!(status, CHECKSUM_MISMATCH, "core status returns unchanged");
-        assert_eq!(leading, 0x1020_3040, "mode 0 is identity");
-        assert_eq!(seen, expected, "all six core arguments forward verbatim and in order");
-    }
-
-    #[test]
-    fn mode_one_swaps_the_leading_word_before_the_core_runs() {
-        let (status, leading, seen, expected) = invoke(1, 0);
-        assert_eq!(status, 0);
-        assert_eq!(leading, 0x4030_2010, "mode 1 reverses all four bytes");
-        assert_eq!(seen, expected, "mode 1 preserves all core arguments");
-    }
 
     struct Block {
         source: std::vec::Vec<u32>,
@@ -291,6 +183,7 @@ mod tests {
                 )
             }
         }
+
 
         fn source_offset(&self, cursor: *mut u32) -> usize {
             (cursor as usize - self.source.as_ptr() as usize) / core::mem::size_of::<u32>()

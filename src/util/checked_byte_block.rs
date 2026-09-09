@@ -1,16 +1,19 @@
-//! Checked byte-block reader — `FUN_0802b6a8` @ 0x0802b6a8 (132 bytes).
+//! Checked byte-block reader family.
 //!
-//! Raw ARM spans 0x0802b6a8..0x0802b72c; decoding every ARM B/BL word in
-//! `osos.dec` finds 30 plain unconditional `bl` call sites, with no predicated
-//! `bl` or direct `B` entries. It copies a signed `row_count * bytes_per_row`
-//! byte block, accumulates its wrapping byte sum, and compares that sum with
-//! the following mode-transformed u32 checksum. A match advances both input
-//! cursor aliases past the checksum and both output aliases past the copied
-//! bytes; a mismatch returns 4 without advancing aliases, after the copy.
+//! `checked_byte_block_convert_core` — `FUN_0802b56c` @ 0x0802b56c (104
+//! bytes, 0x0802b56c..0x0802b5d4). Decoding every ARM B/BL word in `osos.dec`
+//! finds 17 plain unconditional `bl` call sites, zero predicated `bl` forms,
+//! and zero direct `B` entries.
+//! `checked_byte_block_reader` — `FUN_0802b6a8` @ 0x0802b6a8 (132 bytes).
+//! It copies a signed byte block, accumulates its wrapping byte sum, and
+//! compares that sum with the following mode-transformed u32 checksum. A match
+//! advances both input aliases past the checksum and both output aliases past
+//! the copied bytes; a mismatch returns 4 without advancing aliases, after the
+//! copy. The flat core reads its initial cursors from `input_cursor` and
+//! `output_cursor`; the two-dimensional reader uses its mirror slots.
 //!
-//! Deliberate deviation: the sole `bl 0x0802b538` mode transform is inlined;
-//! exactly mode 1 byte-reverses the checksum word and all other modes preserve
-//! it. This matches the sibling checked-word block ports.
+//! Deliberate deviation: the mode transform is inlined. Exactly mode 1
+//! byte-reverses the checksum; all other modes preserve it.
 
 /// The checksum-mismatch status returned by the retail reader.
 pub const BYTE_BLOCK_CHECKSUM_MISMATCH: u32 = 4;
@@ -18,6 +21,66 @@ pub const BYTE_BLOCK_CHECKSUM_MISMATCH: u32 = 4;
 #[inline(always)]
 const fn transform_checksum_for_mode(mode: u32, checksum: u32) -> u32 {
     if mode == 1 { checksum.swap_bytes() } else { checksum }
+}
+
+/// checked_byte_block_convert_core — original: `FUN_0802b56c` @ 0x0802b56c
+/// (104 bytes; 17 plain unconditional `bl` call sites, zero predicated forms).
+///
+/// Copies `byte_count` bytes from the cursor held by `input_cursor` to the
+/// cursor held by `output_cursor`, accumulating their unsigned wrapping sum.
+/// The aligned u32 immediately following the source bytes is mode-transformed
+/// and compared with that sum. On a match it stores the advanced input cursor,
+/// input mirror, output cursor, then output mirror; on mismatch it returns
+/// [`BYTE_BLOCK_CHECKSUM_MISMATCH`] without changing aliases, after copying.
+///
+/// The raw `blt` loop treats `byte_count` as signed: a zero or negative value
+/// skips copying and accepts only a transformed zero checksum.
+///
+/// # Safety
+///
+/// Cursor slots must be readable/writable. `input_cursor` must initially cover
+/// the signed-positive byte count plus an aligned readable checksum word, and
+/// `output_cursor` must cover the copied bytes. On success all cursor slots are
+/// written.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn checked_byte_block_convert_core(
+    mode: u32,
+    input_cursor: *mut *mut u8,
+    input_cursor_mirror: *mut *mut u8,
+    output_cursor: *mut *mut u8,
+    output_cursor_mirror: *mut *mut u8,
+    byte_count: i32,
+) -> u32 {
+    let mut source = unsafe { core::ptr::read_volatile(input_cursor) };
+    let mut target = unsafe { core::ptr::read_volatile(output_cursor) };
+    let mut sum = 0u32;
+    let mut index = 0i32;
+
+    while index < byte_count {
+        let byte = unsafe { core::ptr::read_volatile(source) };
+        sum = sum.wrapping_add(byte as u32);
+        unsafe { core::ptr::write_volatile(target, byte) };
+        source = unsafe { source.add(1) };
+        target = unsafe { target.add(1) };
+        index = index.wrapping_add(1);
+    }
+
+    let checksum = transform_checksum_for_mode(mode, unsafe {
+        core::ptr::read_volatile(source.cast::<u32>())
+    });
+    if checksum != sum {
+        return BYTE_BLOCK_CHECKSUM_MISMATCH;
+    }
+
+    let advanced_source = unsafe { source.add(core::mem::size_of::<u32>()) };
+    unsafe {
+        core::ptr::write_volatile(input_cursor, advanced_source);
+        core::ptr::write_volatile(input_cursor_mirror, advanced_source);
+        core::ptr::write_volatile(output_cursor, target);
+        core::ptr::write_volatile(output_cursor_mirror, target);
+    }
+    0
 }
 
 /// checked_byte_block_reader — original: `FUN_0802b6a8` @ 0x0802b6a8
@@ -131,6 +194,19 @@ mod tests {
             }
         }
 
+        fn run_flat(&mut self, mode: u32, byte_count: i32) -> u32 {
+            unsafe {
+                checked_byte_block_convert_core(
+                    mode,
+                    &mut self.input,
+                    &mut self.input_mirror,
+                    &mut self.output,
+                    &mut self.output_mirror,
+                    byte_count,
+                )
+            }
+        }
+
         fn input_offset(&self, cursor: *mut u8) -> usize {
             cursor as usize - self.source.as_ptr() as usize
         }
@@ -138,6 +214,102 @@ mod tests {
         fn output_offset(&self, cursor: *mut u8) -> usize {
             cursor as usize - self.target.as_ptr() as usize
         }
+    }
+
+    #[test]
+    fn flat_core_copies_bytes_sums_and_advances_all_aliases() {
+        let mut block = Block::new(&[0x0403_0201, 10, 0xcccc_cccc], 12);
+
+        assert_eq!(block.run_flat(0, 4), 0, "matching byte sum succeeds");
+        assert_eq!(&block.target[..4], &[1, 2, 3, 4]);
+        assert_eq!(block.input_offset(block.input), 8, "input advances past checksum");
+        assert_eq!(block.input_offset(block.input_mirror), 8, "input mirror is updated");
+        assert_eq!(block.output_offset(block.output), 4, "output advances past copied bytes");
+        assert_eq!(block.output_offset(block.output_mirror), 4, "output mirror is updated");
+    }
+
+    #[test]
+    fn flat_core_mode_one_transforms_only_the_checksum() {
+        let mut block = Block::new(&[0x4030_2010, 0xa000_0000], 8);
+
+        assert_eq!(block.run_flat(1, 4), 0);
+        assert_eq!(&block.target[..4], &[0x10, 0x20, 0x30, 0x40], "data bytes are copied verbatim");
+        assert_eq!(block.input_offset(block.input), 8);
+    }
+
+    #[test]
+    fn flat_core_mismatch_keeps_aliases_after_writing_output() {
+        let mut block = Block::new(&[0x0403_0201, 9], 8);
+
+        assert_eq!(block.run_flat(0, 4), BYTE_BLOCK_CHECKSUM_MISMATCH);
+        assert_eq!(block.input_offset(block.input), 0);
+        assert_eq!(block.input_offset(block.input_mirror), 0);
+        assert_eq!(block.output_offset(block.output), 0);
+        assert_eq!(block.output_offset(block.output_mirror), 0);
+        assert_eq!(&block.target[..4], &[1, 2, 3, 4], "copy precedes comparison");
+    }
+
+    #[test]
+    fn flat_core_negative_count_checks_zero_without_copying() {
+        let mut block = Block::new(&[0u32, 0xaaaa_aaaa], 4);
+
+        assert_eq!(block.run_flat(0, -1), 0, "signed blt leaves a negative count empty");
+        assert_eq!(block.input_offset(block.input), 4);
+        assert_eq!(block.output_offset(block.output), 0);
+        assert_eq!(block.target, [0xad; 4]);
+    }
+
+    #[test]
+    fn flat_core_reads_primary_cursors_then_updates_mirrors() {
+        let mut source = [0x0403_0201u32, 10, 0xcccc_cccc];
+        let mut source_mirror = [0xfeed_faceu32; 3];
+        let mut target = [0xad_u8; 12];
+        let mut target_mirror = [0xbc_u8; 12];
+        let mut input = source.as_mut_ptr().cast::<u8>();
+        let mut input_mirror = source_mirror.as_mut_ptr().cast::<u8>();
+        let mut output = target.as_mut_ptr();
+        let mut output_mirror = target_mirror.as_mut_ptr();
+
+        let status = unsafe {
+            checked_byte_block_convert_core(0, &mut input, &mut input_mirror, &mut output, &mut output_mirror, 4)
+        };
+
+        assert_eq!(status, 0);
+        assert_eq!(&target[..4], &[1, 2, 3, 4], "source comes from input_cursor");
+        assert_eq!(target_mirror, [0xbc; 12], "target comes from output_cursor");
+        assert_eq!(input, unsafe { source.as_mut_ptr().cast::<u8>().add(8) });
+        assert_eq!(input_mirror, input);
+        assert_eq!(output, unsafe { target.as_mut_ptr().add(4) });
+        assert_eq!(output_mirror, output);
+    }
+
+    #[test]
+    fn byte_wrapper_decodes_leading_word_then_uses_flat_core() {
+        let mut source = [0x1020_3040u32, 2, 0xa200_0000, 0xcccc_cccc];
+        let mut target = [0xad_u8; 16];
+        let mut input = source.as_mut_ptr().cast::<u8>();
+        let mut input_mirror = source.as_mut_ptr().cast::<u8>();
+        let mut output = target.as_mut_ptr();
+        let mut output_mirror = target.as_mut_ptr();
+        let mut leading = 0;
+
+        let status = unsafe {
+            crate::util::checked_word_block::checked_byte_block_convert(
+                1,
+                &mut input,
+                &mut input_mirror,
+                &mut output,
+                &mut output_mirror,
+                8,
+                &mut leading,
+            )
+        };
+
+        assert_eq!(status, 0);
+        assert_eq!(leading, 0x4030_2010, "leading word is mode-transformed");
+        assert_eq!(&target[..8], &[0x40, 0x30, 0x20, 0x10, 2, 0, 0, 0]);
+        assert_eq!(input, unsafe { source.as_mut_ptr().cast::<u8>().add(12) });
+        assert_eq!(output, unsafe { target.as_mut_ptr().add(8) });
     }
 
     #[test]
