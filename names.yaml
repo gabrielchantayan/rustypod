@@ -47220,6 +47220,36 @@ functions:
       calls ported memchr(dst, tag, len) and adds 63 to the tag on a match.
       Deviation: retailOS address 0x08a0ea04 is represented by the existing
       shared LARGE_ALLOC_TAG crate static rather than an absolute host address.
+  # --- releasable buffer destructor ---
+  - address: 0x0803eee4
+    ghidra: FUN_0803eee4
+    name: releasable_buffer_release
+    size: 68
+    sig: "void releasable_buffer_release(ReleasableBuffer *this)"
+    module: heap/releasable_buffer
+    status: ported
+    renames:
+      param_1/r0: this
+      param_1_plus_0x0: data
+      param_1_plus_0x10: flags
+      FUN_08043994: traced_free
+    notes: >-
+      Raw extent is exactly 0x0803eee4..0x0803ef28 (17 ARM instructions);
+      FUN_0803ef28 starts the next independently linked function, with no
+      trailing literal pool. Decoding every ARM B/BL immediate in osos.dec
+      finds exactly 17 direct call sites, matching Ghidra's count: 10
+      unconditional BL, three BLNE (0x0803dbbc, 0x0803dbc8, 0x0803e5c8),
+      and four BLEQ (0x0803e940, 0x0803eed8, 0x0803f344, 0x0803ff68).
+      The predicated call sites are caller-side NULL/flag gates; the body
+      still returns on NULL. It reads data (+0x00) and flags (+0x10), frees
+      non-NULL data through ported traced_free when flags bit 1 is clear,
+      reloads flags after that free, sets bit 15, and if reloaded bit 0 was
+      set releases this through traced_free. Data is deliberately left
+      dangling, so repeated release of an owned buffer double-frees just as
+      retailOS does. Deliberate deviation: the final retail tail branch to
+      traced_free is an ordinary returning Rust call; traced_free returns, so
+      behavior is unchanged.
+
   # --- tagged word buffer destructor ---
   - address: 0x0803e5e4
     ghidra: FUN_0803e5e4
