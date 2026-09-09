@@ -33962,6 +33962,50 @@ functions:
       blend selection, all-distinct translated edges and ARM wrapping,
       and empty-rect plus record/input non-mutation.
 
+  - address: 0x08264518
+    ghidra: FUN_08264518
+    name: surface_attach
+    size: 56
+    sig: "void surface_attach(u8 *record, const u8 *surface)"
+    module: cxx/draw_state_surface
+    status: ported
+    renames:
+      param_1/r0: record (the 0x44-byte scoped draw-state record)
+      param_2/r1: surface (the draw-target surface descriptor)
+      FUN_0826c2e8: rect_move_to_origin (already ported in ui/rect)
+    notes: >-
+      Whole 56-byte function binary-verified: 0x08264518 begins `push
+      {r0,r1,r2,r3,r4,r5,r6,lr}` and 0x08264550 begins the distinct
+      sibling setter's `str r1,[r0,#28]!`; no literal pool lies
+      between. 16 unconditional bl call sites, 0 predicated bl and 2
+      tail b (0x081b82ec, 0x081b83ac), verified by decoding every ARM
+      B/BL word in osos.dec; no DATA word in the image holds
+      0x08264518, so it is never dispatched virtually. The
+      surface-attaching member of the 0x44-byte draw-state record:
+      copies the surface descriptor's +0x98 bounds rect (ldm of four
+      words) onto a 16-byte stack scratch formed by the push's
+      argument spill, origin-moves THAT COPY with the already-ported
+      rect_move_to_origin @ 0x0826c2e8 (bl; the extra r1=surface
+      argument is dead - the callee reads only r0), stores the surface
+      identity as one raw 32-bit word at +0x1c, then stores the
+      origin-moved copy into the record's clip rect at +0x34..+0x40.
+      The surface's own +0x98 bounds are never mutated (the sibling
+      setter 0x08264550, by contrast, stores a caller-computed rect
+      verbatim with no origin move). No NULL guard on either argument,
+      matching the all-unconditional call sites. Ghidra's undefined8
+      return is dead: `pop {r0,r1,r2,r3,...,pc}` restores the argument
+      spill, so r0 only incidentally holds `record`; sampled callers
+      reload or clobber it - the port is void. Deviations: void
+      return; aligned Rect loads/stores (+0x98 and +0x34 are
+      word-aligned offsets), not read_unaligned. Host tests (4) prove
+      the +0x1c identity store and origin-moved +0x34 clip with
+      all-distinct edges, source-bounds non-mutation, ARM wrapping
+      subtraction on inverted bounds, and verbatim copy of an
+      already-origin rect. match.py structural: identical dataflow -
+      four-word copy from surface+0x98 to stack, bl
+      rect_move_to_origin, str at +0x1c, stm at +0x34; the diff is the
+      crate fp frame and per-word ldr in place of the original's ldm.
+
   - address: 0x08264570
     ghidra: FUN_08264570
     name: draw_state_construct_with_surface
