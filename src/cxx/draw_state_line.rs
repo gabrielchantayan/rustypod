@@ -5,9 +5,10 @@
 //! The line-drawing member of retailOS's scoped 0x44-byte draw-state
 //! record (cxx/draw_state.rs): draws a one-pixel-wide foreground line
 //! between two record-local points and makes the second point the
-//! record's current point. The sibling @ 0x082641a4 (112 bytes,
-//! unported) is the same shape with the CURRENT point as the start —
-//! a `line_to`; this function takes both endpoints explicitly.
+//! record's current point. Its adjacent helpers are `draw_state_line_to`
+//! @ 0x082641a4 (112 bytes, unported), which draws from that current
+//! point, and `draw_state_move_to` @ 0x08264214 (8 bytes), which changes
+//! the current point without drawing.
 //!
 //! Decoded from the raw ARM at 0x0826412c:
 //!
@@ -198,6 +199,33 @@ pub static mut DRAW_STATE_LINE_OPS: DrawStateLineOps = DEFAULT_DRAW_STATE_LINE_O
 fn draw_state_line_ops() -> DrawStateLineOps {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(DRAW_STATE_LINE_OPS)) }
 }
+
+/// draw_state_move_to — original: `FUN_08264214` @ 0x08264214 (8 bytes,
+/// 0x08264214..0x0826421c; 12 unconditional `bl` call sites, zero
+/// predicated forms, and no tail `b` calls), verified by decoding every
+/// ARM B/BL word in `osos.dec`.
+///
+/// Raw ARM is `stm r0, {r1, r2}; bx lr`: replace the draw-state record's
+/// consecutive current-point words with the local `(x, y)` position. The
+/// function does not draw, translate, or validate either coordinate; its
+/// sole effect is the two aligned stores. The next function begins at
+/// 0x0826421c, so Ghidra's 8-byte extent is complete.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `draw_state` must be writable and word-aligned for a complete
+/// [`DrawStateRecord`].
+#[cfg_attr(target_os = "none", link_section = ".text.draw_state_move_to")]
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn draw_state_move_to(draw_state: *mut u8, x: i32, y: i32) {
+    let state = unsafe { &mut *(draw_state as *mut DrawStateRecord) };
+    state.current_x = x;
+    state.current_y = y;
+}
+
 
 /// draw_state_line — original: `FUN_0826412c` @ 0x0826412c (120 bytes;
 /// 39 `bl` call sites, binary-scanned).
@@ -451,5 +479,36 @@ mod tests {
             assert_eq!(record.state.foreground, [0x11, 0x22, 0x33, 0x44]);
             assert_eq!(record.state.style, 0x2b);
         });
+    }
+
+    #[test]
+    fn move_to_stores_signed_extremes_without_touching_the_record_tail() {
+        let mut record = Record::new();
+        let before = record.state_bytes().to_vec();
+
+        unsafe { draw_state_move_to(record.base(), i32::MIN, i32::MAX) };
+
+        assert_eq!((record.state.current_x, record.state.current_y), (i32::MIN, i32::MAX));
+        assert_eq!(
+            &record.state_bytes()[8..],
+            &before[8..],
+            "move_to writes only the two current-point words"
+        );
+        assert!(record.guards_intact(), "bytes beyond the record are untouched");
+    }
+
+    #[test]
+    fn move_to_replaces_both_current_coordinates_on_each_call() {
+        let mut record = Record::new();
+        let base = record.base();
+
+        unsafe { draw_state_move_to(base, 0, -1) };
+        assert_eq!((record.state.current_x, record.state.current_y), (0, -1));
+
+        unsafe { draw_state_move_to(base, 0x1234_5678, -0x1234_5678) };
+        assert_eq!(
+            (record.state.current_x, record.state.current_y),
+            (0x1234_5678, -0x1234_5678)
+        );
     }
 }
