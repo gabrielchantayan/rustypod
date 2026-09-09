@@ -797,6 +797,34 @@ pub unsafe extern "C" fn lazy_singleton_0x8c() -> *mut u8 {
     let cache = core::ptr::addr_of_mut!(SINGLETON_0X8C);
     lazy_singleton(cache, SINGLETON_0X8C_SIZE, || unsafe { ctor!(singleton_0x8c) })
 }
+/// lazy_singleton_0x8c_interface_get — original: `FUN_0825a0c0` @
+/// **0x0825a0c0** (**20 bytes**; **14 `bl` call sites, all unconditional —
+/// 0 predicated forms**, verified by decoding every ARM B/BL word in
+/// `osos.dec`).
+///
+/// Algorithm: `push {r4,lr}; bl lazy_singleton_0x8c; cmp r0,#0; addne
+/// r0,r0,#0x14; pop {r4,pc}` — returns the unidentified 0x8c singleton's
+/// vtable-bearing interface sub-object at +0x14, or NULL unchanged when the
+/// singleton is absent. Raw bytes place the following function at
+/// 0x0825a0d4, so Ghidra's 20-byte extent is exact.
+///
+/// The 0x8c constructor installs the shared media-player interface vtable
+/// 0x089a75c8 at +0x00, but no class name or registry id survives; the name
+/// therefore records only the verified singleton and interface shape.
+/// Deviation: inherits [`lazy_singleton_0x8c`]'s crate cache and constructor
+/// dispatch seam, rather than the runtime-initialized cache word @
+/// 0x089ca7f0. It is not hook-ready until `FUN_08160534` is ported.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn lazy_singleton_0x8c_interface_get() -> *mut u8 {
+    let singleton = lazy_singleton_0x8c();
+    if singleton.is_null() {
+        singleton
+    } else {
+        singleton.add(0x14)
+    }
+}
+
 
 /// lazy_singleton_0x28 — original: `FUN_081ded14` @ **0x081ded14**
 /// (44 bytes of code + one pool word @ 0x081ded40 = **48 bytes** true
@@ -1716,6 +1744,37 @@ mod tests {
         }
         restore(guard);
     }
+
+    #[test]
+    fn the_0x8c_interface_getter_offsets_its_constructed_singleton() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(lazy_singleton_0x8c_interface_get(), constructed().add(0x14));
+            assert_eq!(
+                *ptr::addr_of!(ALLOC_SIZES),
+                std::vec![SINGLETON_0X8C_SIZE],
+                "the +0x14 sub-object comes from the 0x8c singleton"
+            );
+            assert_eq!(*ptr::addr_of!(CTOR_BLOCKS), std::vec![arena()]);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn the_0x8c_interface_getter_leaves_null_unchanged() {
+        let guard = mock(ptr::null_mut());
+        unsafe {
+            assert!(lazy_singleton_0x8c_interface_get().is_null());
+            assert!(lazy_singleton_0x8c_interface_get().is_null());
+            assert_eq!(
+                (*ptr::addr_of!(ALLOC_SIZES)).len(),
+                2,
+                "a NULL construction result is retried, not offset"
+            );
+        }
+        restore(guard);
+    }
+
 
     #[test]
     fn the_media_player_cache_is_independent_of_the_others() {
