@@ -3661,6 +3661,39 @@ functions:
       the same shape already accepted for operator_new_tag3 @ 0x082aad74
       and operator_delete_tag3 @ 0x082aad14.
 
+  - address: 0x0805d0f4
+    ghidra: FUN_0805d0f4
+    name: bcopy_guarded
+    size: 24
+    sig: "void bcopy_guarded(const void *src, void *dst, i32 len)"
+    module: libc/bcopy_guarded
+    vars: {param_1: src, param_2: dst, param_3: len}
+    status: ported
+    notes: >-
+      BSD-argument-order memmove adapter with a signed-length guard.
+      Whole body, verified against the raw image (words e1a03000
+      e3520000 e1a00001 a1a01003 aaff6b3d e12fff1e): `mov r3,r0; cmp
+      r2,#0; mov r0,r1; movge r1,r3; bge 0x08037e00; bx lr` — swaps
+      src/dst and tail-branches the rom_memmove veneer @ 0x08037e00
+      (`ldr pc,[pc,#-4]` onto ROM memmove @ 0x220000d4, IRAM mirror of
+      the ported osos memmove @ 0x080000d4) when len >= 0 signed;
+      negative len is a no-op. Extent confirmed by the neighbour:
+      0x0805d10c starts a new function (`push {r4,r5,r6,lr}`, the
+      "MemH" managed-buffer constructor), so the function is exactly 24
+      bytes — Ghidra's size is right. Call sites counted by decoding
+      every ARM B/BL word in osos.dec: exactly 15 `bl`-form (14 plain
+      `bl` + 1 `blne` @ 0x0808d3ac — one caller additionally gates on a
+      NE condition; the length guard itself is unconditional inside the
+      callee), no tail `b`, matching Ghidra's count. Sibling of bcopy @
+      0x08042cbc (same swap, no guard). Deviation (house precedent, see
+      rom_memmove_keep_dst and bcopy): the port calls the Rust memmove
+      directly instead of dispatching through the ROM veneer.
+      #[inline(never)] for the 15 `bl` targets. match.py structural:
+      same guard-first shape (`cmp r2,#0; bxmi lr` vs the original's
+      predicated movge/bge — LLVM branches out early instead), then the
+      same r0/r1 swap into __aeabi_memmove; LLVM uses a framed non-tail
+      `bl __aeabi_memmove` where the original tail-branches the veneer.
+
   - address: 0x0805d1dc
     ghidra: FUN_0805d1dc
     name: calloc_tag4
