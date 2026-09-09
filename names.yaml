@@ -46406,7 +46406,7 @@ functions:
       param_3/r2: from
       param_4/r3: to
       DAT_08166aec: SCHEDULER_SINGLETON_GLOBAL (pool word 0x089cc7e0)
-      FUN_082738e0: wheel_remove (unported, existing ANIMATION_INIT_OPS seam)
+      FUN_082738e0: timing_wheel_remove (ported in app/animation)
       FUN_08273a14: retain_value (ported in app/refcounted_value)
       FUN_082739e0: release_refcounted_value (ported in app/refcounted_value)
       FUN_08273898: wheel_insert (unported, existing ANIMATION_INIT_OPS seam)
@@ -46424,9 +46424,9 @@ functions:
       max(from->aux, to->aux, current->aux) + 1 with unsigned comparisons
       and wrapping addition, then reloads the scheduler global and
       tail-branches to wheel_insert. FixedValue arguments have no NULL
-      guard: each +0x08 load is unconditional. The unported wheel functions
-      use the pre-existing volatile ANIMATION_INIT_OPS seam; retain and
-      release are direct ports, and both scheduler-global loads are kept.
+      guard: each +0x08 load is unconditional. timing_wheel_remove is now a
+      direct port; wheel_insert remains the volatile ANIMATION_INIT_OPS seam,
+      and retain and release are direct ports.
 
   # --- UI animation current-value setter ---
   - address: 0x08166b2c
@@ -46440,8 +46440,8 @@ functions:
       param_1/r0: this
       param_2/r1: value
       DAT_08166b84: SCHEDULER_SINGLETON_GLOBAL (pool word 0x089cc7e0)
-      FUN_082738e0: wheel_remove (unported, ANIMATION_INIT_OPS seam)
-      FUN_08273a14: retain_value (unported, ANIMATION_INIT_OPS seam)
+      FUN_082738e0: timing_wheel_remove (ported in app/animation)
+      FUN_08273a14: retain_value (ported in app/refcounted_value)
       FUN_082739e0: release_refcounted_value (ported in app/refcounted_value)
       FUN_08273898: wheel_insert (unported, ANIMATION_INIT_OPS seam)
     notes: >-
@@ -46456,9 +46456,9 @@ functions:
       updates +0x08 only if its unsigned rank is below value->aux + 1
       (the ARM add wraps), then reloads the scheduler global and
       tail-branches to wheel_insert. value has no NULL guard: the stock
-      ldr [value, #8] is unconditional. The four direct firmware callees
-      remain unported and use the existing volatile ANIMATION_INIT_OPS
-      seam; remove and insert each reload the scheduler-global word,
+      ldr [value, #8] is unconditional. timing_wheel_remove, retain, and
+      release are direct ports; wheel_insert remains the ANIMATION_INIT_OPS
+      seam. Remove and insert each reload the scheduler-global word,
       matching the two original ldr instructions.
 
   # --- UI animation constructor over three refcounted scalars ---
@@ -46477,9 +46477,9 @@ functions:
       DAT_08166c54: ANIMATION_VTABLE (pool word 0x08987f00)
       DAT_08166c58: SCHEDULER_SINGLETON_GLOBAL (word 0x089cc7e0)
       FUN_08138460: refcounted_base_init (direct, ported in app/fixed_value)
-      FUN_08273a14: retain_value (unported, ops-seam default)
+      FUN_08273a14: retain_value (ported in app/refcounted_value)
       FUN_082739e0: release_refcounted_value (ported in app/refcounted_value)
-      FUN_082738e0: wheel_remove (unported, ops-seam default)
+      FUN_082738e0: timing_wheel_remove (ported in app/animation)
       FUN_08273898: wheel_insert (unported, ops-seam default)
     notes: >-
       Full constructor of the UI animation object that binds three
@@ -46517,19 +46517,19 @@ functions:
       set (hence the defensive no-op here); both take the table word
       stored at global 0x089cc7e0, which the lazy allocator 0x082739a0
       fills with operator_new(0x34) whose first 48 bytes are 12 bucket
-      retain 0x08273a14 is flags-bit-1-gated += 4; release
-      0x082739e0 is ported directly as release_refcounted_value and is
-      flags-bit-1-gated -= 4 on the +0x14 word, dispatching the deleting
-      destructor through vtable +0x04 when the count drains. The three
-      remaining direct callees use the ANIMATION_INIT_OPS read_volatile
-      seam (pending_event_take pattern): target defaults transmute the ROM
-      addresses; host defaults are inert;
-      the scheduler word is loaded once instead of twice (nothing between
-      the two stock loads can change it); the stale 0x0898xxxx page
-      caveat applies to the vtable (address constant only); LLVM emits an
-      fp prologue, inverted beq+blx forms for the three dead releases and
-      register-indirect calls for the seams. match.py --lib <worktree>:
-      identical skeleton, 63 instructions vs 51.
+      heads. retain 0x08273a14 is flags-bit-1-gated += 4; release
+      0x082739e0 is flags-bit-1-gated -= 4 on the +0x14 word, dispatching
+      the deleting destructor through vtable +0x04 when the count drains.
+      timing_wheel_remove is now a direct port. The remaining wheel_insert
+      callee uses the ANIMATION_INIT_OPS read_volatile seam
+      (pending_event_take pattern): target default transmutes the ROM
+      address; host default is inert; the scheduler word is loaded once
+      instead of twice (nothing between the two stock loads can change it).
+      The stale 0x0898xxxx page caveat applies to the vtable (address
+      constant only); LLVM emits an fp prologue, direct call for removal,
+      inverted beq+blx forms for the three dead releases and an indirect
+      insertion seam call. match.py --lib <worktree>: identical skeleton,
+      63 instructions vs 51.
 
   - address: 0x0826d64c
     ghidra: FUN_0826d64c
@@ -47663,6 +47663,38 @@ functions:
       landing in z_err_msg, nErr wrapping i32::MAX -> i32::MIN like the
       plain ARM add, the default stub, and poison checks proving nothing
       outside rc/nErr/z_err_msg is written.
+
+  - address: 0x082738e0
+    ghidra: FUN_082738e0
+    name: timing_wheel_remove
+    size: 96
+    sig: "void timing_wheel_remove(u32 *table, u32 *node)"
+    module: app/animation
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: node
+      uVar2/r2: bucket_index_or_link_word
+      puVar3/r3: bucket_head
+    notes: >-
+      Raw ARM is exactly the 24 instruction words
+      0x082738e0..0x0827393c (96 bytes); the next separately linked function
+      begins at 0x08273940. Ghidra's reported size is exact. Decoding every
+      ARM B/BL word in osos.dec finds 15 direct call sites, all plain
+      unconditional bl; there are no predicated BL forms. One unconditional
+      B tail caller at 0x08273a38 loads the scheduler singleton then branches
+      here, and no DATA word references this address. The function has no
+      NULL guard or rank bounds check: only when node->flags bit 0 is set, it
+      selects table[node->rank - 1], replaces a matching bucket head with
+      node->next (including zero), otherwise patches node->prev->next when
+      present, patches node->next->prev when present, then clears just bit 0
+      while retaining every other flags/refcount bit and both node link words.
+      The port uses word indexes for the shared 32-bit wheel prefix
+      (+0x08/+0x0c/+0x10/+0x14), so Animation and TimedTransition callers
+      now direct-call it; wheel insertion remains their existing volatile
+      seam. Host tests cover the unlinked no-op, a head with successor, a
+      terminal head that must clear its bucket word, and an interior splice.
+      There are no deliberate deviations.
 
   - address: 0x082739e0
     ghidra: FUN_082739e0
