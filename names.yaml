@@ -47515,6 +47515,73 @@ functions:
       insertion seam call. match.py --lib <worktree>: identical skeleton,
       63 instructions vs 51.
 
+  # --- UI two-value wheel-node constructor (driver + step scalar) ---
+  - address: 0x08167a6c
+    ghidra: FUN_08167a6c
+    name: timer_step_value_init
+    size: 152
+    sig: "TimerStepValue *timer_step_value_init(TimerStepValue *this, FixedValue *driver, FixedValue *step)"
+    module: app/timer_step_value
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: driver
+      param_3/r2: step
+      DAT_08167afc: TIMER_STEP_VALUE_VTABLE (pool word 0x0898806c)
+      DAT_08167b00: SCHEDULER_SINGLETON_GLOBAL (word 0x089cc7e0)
+      FUN_08138460: refcounted_base_init (direct, ported in app/fixed_value)
+      FUN_08273a14: retain_value (ported in app/refcounted_value)
+      FUN_082739e0: release_refcounted_value (ported in app/refcounted_value)
+      FUN_08273a40: value_aux_max (direct, ported in app/fixed_value)
+      FUN_082738e0: timing_wheel_remove (direct, ported in app/animation)
+      FUN_08273898: wheel_insert (unported, TIMER_STEP_VALUE_OPS seam)
+    notes: >-
+      Constructor of the two-value timing-wheel node that couples a
+      retained driver value with a retained step scalar and is then used
+      as the animated current value of a subsequent animation_init.
+      Every observed caller builds it as
+      timer_step_value_init(operator_new(0x20) @ 0x082aadd4, driver,
+      step); the driver argument is timer-like in all 14 callers (the
+      view's TimedTransition at +0x11c - the same pointer handed to
+      timed_transition_init - or the 0x34-byte periodic timer built at
+      0x08224a9c), the step a fresh fixed_value_init(x << 16) scalar
+      (usually 1.0). EXTENT: Ghidra's 144 bytes cover only the
+      instruction words 0x08167a6c..0x08167afc (pop {r4-r8,pc}); the
+      trailing pool holds TWO words (class vtable 0x0898806c @
+      0x08167afc, scheduler pointer word 0x089cc7e0 @ 0x08167b00), true
+      extent 152 bytes; the next real function opens cmp r0,#0 at
+      0x08167b04 (the class's deleting destructor, sharing the vtable
+      literal; its non-deleting sibling 0x08167b1c releases +0x1c then
+      +0x18 and tail-branches to refcounted_base_destroy). CALL COUNT:
+      binary-verified by decoding every B/BL word in osos.dec - exactly
+      14 call sites (0x08156b68, 0x08156c44, 0x08156d48, 0x08156df8,
+      0x08199da8, 0x08199e04, 0x08199efc, 0x08199fa4, 0x0819a0fc,
+      0x0819a168, 0x0819a26c, 0x0819a330, 0x08224b08, 0x08224b38), all
+      plain unconditional bl, no predicated forms, no B tail branches,
+      no DATA references. ALGORITHM: refcounted_base_init(this),
+      override vtable with 0x0898806c, clear slots +0x18/+0x1c,
+      defensive timing_wheel_remove([0x089cc7e0], this), retain(driver)
+      then retain(step), the ADS memberwise-assign releases of the old
+      slot values checked +0x1c then +0x18 - both statically dead
+      because the slots were just cleared, reproduced for structure
+      parity and pinned by a test - store driver -> +0x1c and step ->
+      +0x18, rank = value_aux_max(step, driver) + 1 (unsigned max of the
+      two +0x08 aux words, wrapping add) at +0x08, wheel_insert(table,
+      this), return this. FAMILY: byte-identical sibling constructors
+      differ only in the vtable literal - 0x081977c4 (vtable
+      0x08989b48) is word-for-word the same body; 0x081679d8 /
+      0x8181060 / 0x8197744 share the aux-max leaf. The vtable lives on
+      the stale 0x0898xxxx page (app/registry.rs caveat; its bytes there
+      are RTTI strings), so it is an address constant only. Deviations:
+      wheel insert dispatches through the TIMER_STEP_VALUE_OPS
+      read_volatile seam (target transmutes 0x08273898, host default
+      inert); the scheduler word is loaded once instead of twice
+      (nothing between the two stock loads can change it). match.py
+      --lib (worktree archive): identical skeleton, 45 instructions vs
+      36 - LLVM adds the crate fp prologue, loads the ops slot
+      volatiles early, inverts the first dead release into beq+bl, and
+      calls the insert seam with blx.
+
   - address: 0x0826d64c
     ghidra: FUN_0826d64c
     name: task_registry_register
@@ -48936,6 +49003,37 @@ functions:
       that volatile byte predicate and aligned volatile word update exactly;
       there are no deliberate deviations. Existing animation callers now use
       this direct port rather than a retain dispatch seam.
+
+  - address: 0x08273a40
+    ghidra: FUN_08273a40
+    name: value_aux_max
+    size: 20
+    sig: "u32 value_aux_max(FixedValue *a, FixedValue *b)"
+    module: app/fixed_value
+    status: ported
+    renames:
+      param_1/r0: a
+      param_2/r1: b
+    notes: >-
+      The two-value constructors' rank-key leaf: returns the larger of
+      the two arguments' +0x08 aux words under unsigned comparison. Raw
+      ARM is exactly the five instruction words 0x08273a40..0x08273a50
+      (ldr r0,[r0,#8]; ldr r1,[r1,#8]; cmp; movls r0,r1; bx lr); the
+      next separately linked function begins at 0x08273a54, so Ghidra's
+      extent is exact and there is no literal pool. Decoding every ARM
+      B/BL word in osos.dec finds 5 direct call sites (0x081679d8,
+      0x08167adc, 0x8181060, 0x8197744, 0x8197834), all plain
+      unconditional bl; no predicated forms, tail branches, or DATA-word
+      references. Every caller is one of the byte-identical two-value
+      wheel-node constructors (timer_step_value_init @ 0x08167a6c and
+      its vtable siblings), which feed the result + 1 into the node's
+      wheel rank; a plain scalar carries aux 0, so such nodes land at
+      rank 1. No NULL guard, matching its callers. The port reads the
+      aligned aux words directly; there are no deliberate deviations.
+      match.py --lib (worktree archive): 8 instructions vs 5 - the
+      crate fp prologue plus LLVM selecting movhi+mov where the original
+      uses movls; the two +0x08 loads and the unsigned compare/select
+      are identical.
 
   # --- guarded opaque counter increment ---
   - address: 0x0808e16c
