@@ -55048,3 +55048,50 @@ functions:
       Target Rust preserves the direct getter BL and tail BX in assembly;
       host tests use a native-width structural vtable fixture because firmware
       vtable words are 32-bit pointers.
+
+  # --- Context-scope assignment from selector ---
+  - address: 0x08173878
+    ghidra: FUN_08173878
+    name: context_scope_assign_selector
+    size: 208
+    sig: "void context_scope_assign_selector(void *scope, void *source, i32 selector)"
+    module: app/context_scope_selector
+    status: ported
+    renames:
+      param_1: scope
+      param_2: source
+      param_3: selector
+      FUN_08177604: selector_map_refresh_unported
+      FUN_08284118: context_scope_init_from_handle
+      FUN_0828414c: context_scope_assign
+      FUN_08284188: context_scope_drop
+      FUN_083d604c: handle_deref_or_null
+      FUN_083d7a48: vector_size_elem4_alias_7a48
+      "vtable+0x1bc": current_selector_unidentified
+      "vtable+0x1c0": make_context_handle_unidentified
+    notes: >-
+      Raw ARM establishes the 208-byte extent exactly:
+      0x08173878..0x08173944 are instructions and the next separately
+      entered function begins at 0x08173948 with push {r4-r11,lr}; there
+      is no literal pool. Decoding every ARM B/BL word in osos.dec finds
+      exactly 13 direct incoming calls, all unconditional plain BL
+      (cond=AL), with zero predicated forms and zero plain-B tail callers:
+      0x0817697c, 0x08176ab4, 0x08176e1c, 0x08232738, 0x08232844,
+      0x08232a8c, 0x08232c20, 0x08232cc4, 0x082375ec, 0x082376e0,
+      0x08237744, 0x0823787c, and 0x08239b4c. Selector -1 tail-calls
+      context_scope_init(scope, NULL, 0). Otherwise source+0x18 is
+      unwrapped; when byte source+0x84c is set, virtual slot +0x1bc is
+      compared with vector_size(source+0x840), a mismatch calls the
+      unported map refresher 0x08177604, the handle is reloaded, and
+      vector[selector] becomes the argument to virtual slot +0x1c0.
+      The 16-byte slot result initializes a stack context scope that is
+      assigned into scope, then receives its empty destructor. The slots
+      have no recoverable concrete identity, so the port names only their
+      verified roles. On host, their 32-bit target vtable words become a
+      native-width structural fixture and only 0x08177604 is a volatile
+      direct-call seam; target builds invoke that verified address. The
+      ordinary selector path leaves scope+0x00 and the upper three bytes of +0x10
+      unchanged, as context_scope_assign writes only its payload fields
+      and flag byte. Its ARM r0 is the dead stack temporary after drop,
+      while the -1 tail path returns scope; every caller discards it, so
+      Rust deliberately exports void rather than a dangling result.

@@ -266,6 +266,10 @@ pub mod hints {
     // active-context, packet, owner and pending-node fixture; mappings never
     // unmap, so no other user may share this hint.
     pub const IAP_PACKET_EVENT_SCHEDULE: usize = 0xf100_0000;
+    // 0xf200_0000: dedicated to app/context_scope_selector's raw-u32
+    // subject/context fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const CONTEXT_SCOPE_SELECTOR: usize = 0xf200_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
