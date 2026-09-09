@@ -48830,3 +48830,35 @@ functions:
       rather than emitting `blx; mov r0,r4`; both discard its return value and
       return the original slot. Host tests cover the NULL guard and verify slot
       +0x1c, object forwarding, unchanged slot contents, and returned address.
+
+  - address: 0x083863d4
+    ghidra: FUN_083863d4
+    name: sqlite_utf8_read
+    size: 120
+    sig: "u32 sqlite_utf8_read(const u8 *text, const u8 *terminator, const u8 **next)"
+    module: sqlite/utf8_read
+    status: ported
+    renames:
+      param_1/r0: text
+      param_2/r1: terminator
+      param_3/r2: next
+      uVar1/r0: codepoint
+      uVar2/r12: continuation_or_table_base
+      DAT_0838644c: sqlite_utf8_trans1_runtime_address
+      DAT_08386450: SQLITE_REPLACEMENT_CHARACTER
+    notes: >-
+      SQLite 3.5.9's sqlite3Utf8Read (utf.c), recovered from the raw 120-byte
+      ARM body 0x083863d4..0x0838644c. The following two words are its literal
+      pool (0x0838644c..0x08386454); sqlite_vm_printf opens at 0x08386454, so
+      they are not another function. Decoding every ARM B/BL word in osos.dec
+      finds exactly 17 direct call sites: all 17 are unconditional BL and
+      there are no predicated or tail-B references (15 lexer/parser calls in
+      0x082d7f4c..0x082dfd8c, plus 0x0838c4f4 and 0x0838c55c).
+      Consumes one byte unconditionally; a byte below 0xc0 returns itself.
+      Otherwise SQLite's 64-byte sqlite3UtfTrans1 seed table is folded through
+      consecutive continuation bytes until terminator, a non-continuation, or
+      the end. Overlong ASCII, U+D800..U+DFFF, U+FFFE, and U+FFFF become
+      U+FFFD, while all other historical overlong and 4-to-6-byte encodings
+      remain accepted. The raw literal says 0x088faa4b, whose table is at
+      image 0x08905923 under the SQLite +0xaed8 image/runtime skew documented
+      in sqlite/mod.rs; its 64 recovered bytes exactly match upstream.
