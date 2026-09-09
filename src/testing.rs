@@ -220,6 +220,10 @@ pub mod hints {
     // guard-destructor fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const PATH_PROBE_GUARD_DESTROY: usize = 0xe700_0000;
+    // 0xe800_0000: dedicated to app/path_probe's raw-u32 interface and
+    // counted-mutex constructor fixture; mappings never unmap, so no other
+    // user may share this hint.
+    pub const PATH_PROBE_GUARD_CONSTRUCT: usize = 0xe800_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
