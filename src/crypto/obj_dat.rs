@@ -146,6 +146,12 @@ pub const NUM_OBJ: usize = 617;
 
 /// `ADDED_OBJ.type` for a lookup keyed by the encoded OID.
 pub const ADDED_DATA: i32 = 0;
+/// `ADDED_OBJ.type` for a lookup keyed by a numeric NID.
+pub const ADDED_NID: i32 = 3;
+
+/// Entries in the inline `nid_objs` array @ 0x08906668.
+pub const NUM_NID: usize = 650;
+
 
 /// OpenSSL's `ASN1_OBJECT`, at the offsets the firmware uses.
 #[repr(C)]
@@ -243,6 +249,29 @@ unsafe fn added_table() -> *mut c_void {
     }
 }
 
+/// The inline `nid_objs` array. Unlike [`OBJ_OBJS`], this is an array of
+/// objects, not pointers to them.
+#[cfg(target_os = "none")]
+const NID_OBJS: *mut Asn1Object = 0x0890_6668 as *mut Asn1Object;
+
+/// Host stand-in for the `nid_objs` base.
+#[cfg(not(target_os = "none"))]
+static mut HOST_NID_OBJS: *mut Asn1Object = core::ptr::null_mut();
+
+/// Reads the base of the inline NID-indexed object table.
+#[inline(always)]
+unsafe fn nid_objects() -> *mut Asn1Object {
+    #[cfg(target_os = "none")]
+    {
+        NID_OBJS
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        core::ptr::read_volatile(core::ptr::addr_of!(HOST_NID_OBJS))
+    }
+}
+
+
 /// `obj_cmp` — the comparator `OBJ_bsearch` calls through (see the
 /// module header's anomaly note on 0x080e1168). Orders objects by
 /// encoded length first, then by the encoded bytes.
@@ -314,6 +343,58 @@ pub unsafe extern "C" fn obj_obj2nid(object: *const Asn1Object) -> i32 {
     (*slot.read()).nid
 }
 
+/// obj_nid2obj — original: `FUN_0805ef18` @ 0x0805ef18 (172 bytes: 164
+/// bytes of code plus literal-pool words @ 0x0805efbc and @ 0x0805efc0;
+/// Ghidra reports 164 and drops the pool; next function starts at
+/// 0x0805efc4). 18 unconditional `bl` call sites, no predicated forms or
+/// plain `b`, binary-verified over every ARM branch word in `osos.dec`.
+///
+/// OpenSSL's `OBJ_nid2obj`: return the inline `nid_objs[nid]` while
+/// `nid < NUM_NID` when `nid` is zero or its entry is resolved; otherwise,
+/// ask the runtime-added hash for an `ADDED_NID` key carrying the numeric
+/// NID, record error `(8, 0x67, 0x65, 0, 0)`, and return NULL. The hash is
+/// deliberately only consulted for out-of-range (including negative) NIDs:
+/// an unresolved in-range table entry goes directly to the error path.
+///
+/// Device table storage is the original absolute address; host tests install
+/// an inline fixture. `lh_retrieve` remains the existing
+/// [`OBJ_ADDED_RETRIEVE`] boundary, while the diagnostic call reaches the
+/// already-ported [`crate::kernel::diag_ring_record::diag_ring_record`].
+///
+/// Deliberate deviation: raw ARM stores `nid` at `sp+0xc` but gives
+/// `lh_retrieve` an `ADDED_NID` object's pointer field of `sp+4`, an
+/// uninitialized stack word; `FUN_0805ee68` has the same sequence. Rust
+/// passes `&nid` as OpenSSL's source specifies rather than reproduce an
+/// undefined stack read.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn obj_nid2obj(nid: i32) -> *mut Asn1Object {
+    if (nid as u32) < NUM_NID as u32 {
+        let object = nid_objects().add(nid as usize);
+        if nid == NID_UNDEF || (*object).nid != NID_UNDEF {
+            return object;
+        }
+    } else {
+        let added = added_table();
+        if !added.is_null() {
+            let key_nid = nid;
+            let key = AddedObj {
+                kind: ADDED_NID,
+                obj: core::ptr::addr_of!(key_nid).cast_mut().cast::<Asn1Object>(),
+            };
+            let retrieve = core::ptr::read_volatile(core::ptr::addr_of!(OBJ_ADDED_RETRIEVE));
+            let found = retrieve(added, &key);
+            if !found.is_null() {
+                return (*found).obj;
+            }
+        }
+    }
+
+    crate::kernel::diag_ring_record::diag_ring_record(8, 0x67, 0x65, 0, 0);
+    core::ptr::null_mut()
+}
+
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -354,9 +435,19 @@ mod tests {
             OBJ_OBJS.len = 0;
             HOST_ADDED_SLOT = core::ptr::null_mut();
             OBJ_ADDED_RETRIEVE = missing_lh_retrieve;
+            HOST_NID_OBJS = core::ptr::null_mut();
         }
+
         drop(guard);
     }
+
+    /// Installs an inline `nid_objs` fixture and hands back the guard.
+    fn with_nid_objects(objects: &mut [Asn1Object]) -> MutexGuard<'static, ()> {
+        let guard = OBJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe { HOST_NID_OBJS = objects.as_mut_ptr() };
+        guard
+    }
+
 
     /// Encoded OIDs in the order `obj_cmp` sorts them: length first,
     /// then bytes.
@@ -384,6 +475,15 @@ mod tests {
         let probe = object(NID_UNDEF, encoded);
         unsafe { obj_obj2nid(&probe) }
     }
+
+    fn nid_fixture() -> Vec<Asn1Object> {
+        let mut objects = Vec::with_capacity(NUM_NID);
+        for _ in 0..NUM_NID {
+            objects.push(object(NID_UNDEF, &[]));
+        }
+        objects
+    }
+
 
     #[test]
     fn a_null_object_is_nid_undef() {
@@ -567,6 +667,76 @@ mod tests {
         let guard = with_table(&mut slots);
         assert_eq!(lookup(OID_D), 77);
         assert_eq!(lookup(OID_A), NID_UNDEF);
+        clear(guard);
+    }
+
+    #[test]
+    fn nid_zero_and_resolved_boundary_entries_return_inline_objects() {
+        let mut objects = nid_fixture();
+        objects[1].nid = 1;
+        objects[NUM_NID - 1].nid = (NUM_NID - 1) as i32;
+        let guard = with_nid_objects(&mut objects);
+
+        assert_eq!(unsafe { obj_nid2obj(NID_UNDEF) }, objects.as_mut_ptr());
+        assert_eq!(unsafe { obj_nid2obj(1) }, unsafe { objects.as_mut_ptr().add(1) });
+        assert_eq!(
+            unsafe { obj_nid2obj((NUM_NID - 1) as i32) },
+            unsafe { objects.as_mut_ptr().add(NUM_NID - 1) },
+        );
+        clear(guard);
+    }
+
+    #[test]
+    fn an_unresolved_in_range_nid_skips_the_added_hash() {
+        static mut RETRIEVE_CALLS: u32 = 0;
+        unsafe extern "C" fn retrieve(_table: *mut c_void, _key: *const AddedObj) -> *mut AddedObj {
+            RETRIEVE_CALLS += 1;
+            core::ptr::null_mut()
+        }
+
+        let mut objects = nid_fixture();
+        let guard = with_nid_objects(&mut objects);
+        unsafe {
+            HOST_ADDED_SLOT = 1 as *mut c_void;
+            OBJ_ADDED_RETRIEVE = retrieve;
+        }
+        assert!(unsafe { obj_nid2obj(1) }.is_null());
+        assert_eq!(unsafe { RETRIEVE_CALLS }, 0);
+        clear(guard);
+    }
+
+    #[test]
+    fn out_of_range_and_negative_nids_use_the_added_hash_key() {
+        static mut OVERRIDE: Asn1Object = Asn1Object {
+            sn: core::ptr::null(),
+            ln: core::ptr::null(),
+            nid: 999,
+            length: 0,
+            data: core::ptr::null(),
+            flags: 0,
+        };
+        static mut RECORD: AddedObj = AddedObj { kind: ADDED_NID, obj: core::ptr::null_mut() };
+        static mut SEEN_KIND: i32 = -1;
+        static mut SEEN_NID: i32 = 0;
+
+        unsafe extern "C" fn retrieve(_table: *mut c_void, key: *const AddedObj) -> *mut AddedObj {
+            SEEN_KIND = (*key).kind;
+            SEEN_NID = *((*key).obj as *const i32);
+            RECORD.obj = core::ptr::addr_of_mut!(OVERRIDE);
+            core::ptr::addr_of_mut!(RECORD)
+        }
+
+        let guard = OBJ_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            HOST_ADDED_SLOT = 1 as *mut c_void;
+            OBJ_ADDED_RETRIEVE = retrieve;
+        }
+        assert_eq!(unsafe { obj_nid2obj(NUM_NID as i32) }, core::ptr::addr_of_mut!(OVERRIDE));
+        assert_eq!(unsafe { SEEN_KIND }, ADDED_NID);
+        assert_eq!(unsafe { SEEN_NID }, NUM_NID as i32);
+        assert_eq!(unsafe { obj_nid2obj(-1) }, core::ptr::addr_of_mut!(OVERRIDE));
+        assert_eq!(unsafe { SEEN_KIND }, ADDED_NID);
+        assert_eq!(unsafe { SEEN_NID }, -1);
         clear(guard);
     }
 }
