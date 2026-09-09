@@ -77,5 +77,6 @@ pub mod trivial_vector8_destruct;
 pub mod wheel_event;
 pub mod word_key_set;
 pub mod transition_addon;
+pub mod typed_allocation_release;
 pub mod value_compare;
 pub mod vtable;

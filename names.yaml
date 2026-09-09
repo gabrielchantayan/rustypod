@@ -50884,3 +50884,36 @@ functions:
       +0x50), global_state_get call, state-record +0x4 load, and lsl #4
       address calculation; its extra frame and register moves are
       ADS-versus-LLVM codegen differences. Deliberate deviations: none.
+
+  # --- Opaque typed-allocation release ---
+  - address: 0x08060460
+    ghidra: FUN_08060460
+    name: release_typed_allocation
+    size: 12
+    sig: "void release_typed_allocation(void *allocation)"
+    module: cxx/typed_allocation_release
+    status: ported
+    renames:
+      param_1/r0: allocation
+      DAT_08060468/r1: opaque_allocation_descriptor_0x0890b608
+      FUN_0803b3a4: typed_allocation_release_helper
+      FUN_080c85bc: type_erased_release_engine
+    notes: >-
+      EXTENT: raw osos.dec is 12 bytes, not Ghidra's reported 8:
+      ldr r1,[pc]; b 0x0803b3a4; literal 0x0890b608. The next separate
+      function begins at 0x0806046c (ldr r0,[r0,#12]), proving the
+      trailing literal belongs here. CALL COUNT: decoding every ARM B/BL
+      word in osos.dec found 16 direct call sites: 6 unconditional bl and
+      10 blne, with no direct b sites. The predominance of caller-predicated
+      calls is intentional: this wrapper has no NULL guard and forwards even
+      NULL into 0x0803b3a4. ALGORITHM: load the fixed opaque descriptor in
+      r1 and tail-branch to 0x0803b3a4; that helper makes a temporary
+      {allocation, descriptor} frame and calls the unported type-erased
+      release engine 0x080c85bc with r2=0. The sibling allocator wrapper
+      0x080604ac supplies the same descriptor to 0x0803b468, but the
+      descriptor's concrete type is not recoverable, so no identity was
+      invented. No aligned data word in osos.dec equals 0x08060460, ruling
+      out virtual dispatch. ARM global assembly preserves the three raw
+      words and the tail return edge exactly. Host tests install a recording
+      seam and prove both NULL (no accidental guard) and non-NULL allocation
+      forwarding with the exact descriptor. match.py reviewed.
