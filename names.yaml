@@ -19528,6 +19528,57 @@ functions:
       two-load leaf plus the usual LLVM fp frame; exit-1 diff is the
       frame only.
 
+  - address: 0x082d2314
+    ghidra: FUN_082d2314
+    name: video_engine_set_property
+    size: 48
+    sig: "void video_engine_set_property(u32 command, u32 key, u32 value)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: command
+      param_2/r1: key
+      param_3/r2: value
+    notes: >-
+      48-byte public C wrapper for the video engine's property-set
+      command: `engine = video_engine_get(); if (engine)
+      dispatch_0x08250498(engine, command, key, value)` — push r4-r6/lr,
+      spill the three args, bl the getter, and on non-NULL restore and
+      TAIL-branch (bne) to the dispatcher with the instance prepended;
+      a NULL instance is a silent no-op (no error latch). Extent
+      self-verified: next function @ 0x082d2344 is the sibling wrapper
+      (identical prologue, tail target 0x08250628), so Ghidra's 48
+      bytes are exact. Call count binary-verified B/BL scan of osos.dec:
+      12 sites, ALL plain bl, zero predicated forms — the wrapper itself
+      owns the NULL check, so callers never gate the call. All 12 sites
+      pass command 0xde1: six in the engine setup @ 0x0825bd98 (as
+      0x201 + 0xbe0; keys 0x2800/0x2801/0x2802/0x2803, the latter two
+      computed as `0x2801 ^| (0xde1 >> 10)`, values 0x2600/0x2601/0x812f)
+      and six in the 0x08281030 cluster (literal 0xde1). The tail target
+      0x08250498 (unported) is the property dispatcher: any command other
+      than 0xde1 latches the unknown-property error 0x500 via
+      latch_first_error (0x0824f388); command 0xde1 resolves the current
+      frame slot (0x08252bfc: table @ instance+0xa8c indexed by
+      instance+0x24c) and writes one parameter byte per key — 0x2800 to
+      slot+0x105 (1 for value 0x2600, 2 for 0x2601), 0x2801 to slot+0x104
+      plus slot+0x106 (mapping values 0x2600/0x2601/0x2700/0x2701/0x2702),
+      0x2802/0x2803 to slot+0x107/+0x108 via resolver 0x08260448, 0x8191
+      to the instance bool @ +0x90a; unknown key/value pairs also latch
+      0x500. Ghidra's C for FUN_082d2314 inlines the whole tail target
+      into the wrapper body (its WARNING about an unreachable block at
+      0x0824f38c is that inlining artifact) — the listing above is from
+      the raw bytes. Deviation: the dispatcher is unported, so on target
+      the port calls the original firmware body at 0x08250498 through the
+      transmute seam (app/command_dispatch.rs precedent); host tests
+      install a recording mock via set_mock_dispatch and the NULL path
+      never touches the seam. Host tests cover NULL-instance silent
+      no-op, instance-prepended verbatim argument pass-through (incl. 0
+      and 0xffffffff), per-call instance re-read across swap and
+      teardown. match.py (exit 1, diff expected): same structure — LLVM
+      inlines the getter (two loads off literal 0x089ca8a8) and emits
+      the tail dispatch as `bx ip` to literal 0x08250498 instead of
+      `b`; frame is the usual fp/lr.
+
   # --- Region survey: 0x08300000-0x083fffff (agent hi6) ---
   # 3481 Ghidra functions, ~3439 unclaimed at survey time. Sub-blocks:
   #   0x08300000-0x0835ffff  sparse (~200 fns) - misc app/service code.
