@@ -30,6 +30,7 @@ pub mod timer_free_gateway;
 pub mod new_handler;
 pub mod pool;
 pub mod releasable_buffer;
+pub mod owned_buffer;
 pub mod pool_client;
 pub mod queue_wait;
 pub mod stats;
