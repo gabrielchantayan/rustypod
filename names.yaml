@@ -47365,6 +47365,49 @@ functions:
       identity remains unknown. DEVIATION: target calls the retail getter at
       its fixed address while host tests use a getter seam.
 
+  # --- field-query result block scope-exit cleanup ---
+  - address: 0x081bfb50
+    ghidra: FUN_081bfb50
+    name: field_query_result_release
+    size: 60
+    sig: "FieldQueryResult *field_query_result_release(FieldQueryResult *result)"
+    module: util/field_query_result_release
+    status: ported
+    renames:
+      param_1/r0/r4: result
+      r5: result + 0x200 (flags halfword base)
+      FUN_08049398: heap_free (retailOS boundary, unported)
+    notes: >-
+      EXTENT: raw ARM confirms exactly 60 bytes 0x081bfb50..0x081bfb8c; the
+      separately linked sibling FUN_081bfb8c begins immediately afterward
+      (push {r0-r8, lr}), so Ghidra's 60-byte size is right for once. CALL
+      COUNT: decoding every ARM B/BL word in work/firmware/osos.dec finds
+      exactly 16 direct call sites, all unconditional plain bl (zero
+      predicated forms, zero B tails), clustered at 0x081be7f0..0x081bf7bc
+      immediately before the function itself. BEHAVIOUR: scope-exit cleanup
+      for the 0x238-byte record field-query result block (the same layout
+      object_install_field_text @ 0x08056048 builds on its stack): if bit 0
+      of the flags halfword at +0x208 is set, the text pointer at +0x210 is
+      a heap allocation — it is released through the retailOS heap free
+      0x08049398, the flag bit is cleared (every other flag preserved), and
+      the pointer nulled. The block pointer is returned in r0
+      (destructor-style this passthrough); every caller runs it on a
+      stack-local block right after a query through 0x08051a48 and
+      immediately overwrites r0, so the return is never consumed. The
+      original re-reads the flags halfword after the free (second ldrh),
+      which the port reproduces via an in-place &= ~1. DEVIATIONS: heap
+      free stays in retailOS behind a HEAP_FREE static boundary (fixed
+      address 0x08049398 on target, recording stub on host), so the call is
+      a blx through the static rather than a direct bl; LLVM also emits the
+      pointer-nulling store before the flags-clearing strh (the original
+      clears flags first) — both stores are inside the same conditional to
+      disjoint fields and are unobservable. match.py: structural diff only
+      (seam blx, register allocation), exit 1 as expected. Host tests prove
+      flag-clear no-op (no free call, block untouched, returns block), free
+      path (one free with the text pointer, bit cleared, pointer nulled,
+      returns block), and preservation of all other flag bits (0xffff ->
+      0xfffe).
+
   # --- growable target-word buffer ---
   - address: 0x082b8174
     ghidra: FUN_082b8174
