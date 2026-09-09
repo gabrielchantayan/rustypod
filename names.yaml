@@ -24756,6 +24756,41 @@ functions:
       testing::TRACED_ALLOC_TEST_LOCK (the ata_cmd allocator tests now
       take the same lock instead of a private one).
 
+  - address: 0x083787a8
+    ghidra: FUN_083787a8
+    name: sqlite_resolve_expr_names
+    size: 196
+    sig: "i32 sqlite_resolve_expr_names(NameContext *context, Expr *expr)"
+    module: sqlite/resolve_expr
+    status: identified
+    renames:
+      param_1/r0: context
+      param_2/r1: expr
+      DAT_0837889c: expression_visitor
+    notes: >-
+      Raw ARM confirms the 196-byte executable extent
+      0x083787a8..0x0837886c, followed by its error string literal pool
+      through 0x0837889c; the separately linked next function begins at
+      0x083788a0. The code returns 0 for a NULL expr, rejects an expression
+      when context->parse->expression_height + expr->n_height exceeds
+      context->parse->db's limit at +0x5c, otherwise increments that height,
+      invokes sqlite_expr_walk @ 0x0839866c with the literal visitor pointer
+      0x082cf9f0, then decrements the height and updates the context and Expr
+      flags. This matches the role of SQLite's expression-name resolver, but
+      the visitor identity is deliberately not asserted. That literal points
+      12 bytes into FUN_082cf9e4, not a callable function entry: raw bytes at
+      0x082cf9f0 immediately use r4 inherited from sqlite_expr_walk and on
+      its normal condition execute popeq {r4,r5,r6,pc}, consuming the walker
+      frame rather than returning to its blx callback call site. A Rust call
+      to the already-ported sqlite_expr_walk cannot preserve this stock-stack
+      nonlocal exit. No dispatch seam is added because names.yaml has no
+      ported callable identity for 0x082cf9f0. Exactly 13 direct BL words
+      target this entry, all unconditional (none predicated): 0x082d9270,
+      0x08367fe8, 0x083730c4, 0x08374d78, 0x08375f18, 0x0837be8c,
+      0x08383f38, 0x08383f4c, 0x08383f8c, 0x08383fec, 0x08384000,
+      0x08385564, and 0x08385974. This port is deferred until the
+      stack-dependent visitor/continuation can be recovered faithfully.
+
   - address: 0x083788fc
     ghidra: FUN_083788fc
     name: expr_set_height
