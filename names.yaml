@@ -40524,6 +40524,37 @@ functions:
       multiply/add overflow, and valid output aliases; match.py reviewed after
       the ARM release build.
 
+  # --- byte-block checksum continuation literal veneer ---
+  - address: 0x08003510
+    ghidra: thunk_FUN_0802c03c
+    name: tail_dispatch_byte_block_checksum_continuation
+    size: 8
+    sig: "void tail_dispatch_byte_block_checksum_continuation(void) __attribute__((noreturn))"
+    module: runtime/byte_block_checksum_veneer
+    status: ported
+    renames:
+      DAT_08003514: byte_block_checksum_continuation_target
+      FUN_0802c03c: byte_block_checksum_reader_continuation
+    notes: >-
+      Raw ARM is the eight-byte literal veneer `ldr pc, [pc, #-4]` /
+      `.word 0x0802c03c`; Ghidra reports only the first four-byte instruction.
+      The next veneer begins at 0x08003518. Decoding every ARM B/BL word in
+      osos.dec found exactly 18 incoming direct calls, all unconditional `bl`
+      (0x0800214c, 0x080021f8, 0x08002270, 0x080022e0, 0x08002404,
+      0x08002414, 0x08002498, 0x08002b30, 0x08002b4c, 0x08002b60,
+      0x08002b74, 0x08002ba0, 0x080062c4, 0x0800641c, 0x08007cdc,
+      0x08007ce4, 0x08007d0c, 0x08007d1c); no predicated `bl` or direct `b`
+      reaches it. `ldr pc` preserves every register and LR, so execution
+      enters the stack-sensitive 0x0802c03c continuation directly. That
+      continuation uses r7 plus its surrounding parser frame, removes 0x34
+      bytes of stack, then pops `{r4-r7, pc}`; it does not have a normal C
+      return edge. ARM builds reproduce the original words in global assembly
+      rather than calling the separately ported continuation as a Rust
+      function. Deliberate host deviation: the target/frame are unavailable,
+      therefore the host stand-in terminates rather than fabricating a return;
+      its focused host test proves that contract. match.py reviewed after the
+      ARM release build.
+
   # --- byte-block checksum continuation forwarder ---
   - address: 0x0802c03c
     ghidra: FUN_0802c03c

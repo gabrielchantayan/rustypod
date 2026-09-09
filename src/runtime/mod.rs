@@ -4,6 +4,7 @@ pub mod aeabi_64shift;
 pub mod atexit;
 pub mod byteswap;
 pub mod byte_block_checksum_forwarder;
+pub mod byte_block_checksum_veneer;
 pub mod buffer_state;
 pub mod chval;
 pub mod cpp_array_construct;
