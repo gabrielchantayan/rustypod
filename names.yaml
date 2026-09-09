@@ -24341,6 +24341,47 @@ functions:
       target-width string-list fixture below 4 GiB so u32 vararg pointers
       cannot silently truncate.
 
+  # ---- SQLite OS close wrapper, sqlite3OsClose (src/sqlite/os_close.rs) ----
+  - address: 0x0837dae8
+    ghidra: FUN_0837dae8
+    name: sqlite_os_close
+    size: 48
+    sig: "i32 sqlite_os_close(sqlite3_file *file)"
+    module: sqlite/os_close
+    status: ported
+    renames:
+      param_1/r0/r4: file
+      r1: "file->pMethods, then xClose"
+      "*(code**)(*param_1 + 4)": sqlite3_io_methods::xClose
+    notes: >-
+      SQLite's sqlite3OsClose from os.c: rc = SQLITE_OK; if
+      file->pMethods != NULL, rc = pMethods->xClose(file) (io_methods slot
+      +0x04) and then pMethods is nulled, marking the file closed so a
+      repeated call is a no-op returning 0. Raw ARM extent verified: 12
+      words at 0x0837dae8..0x0837db14, the next separately linked function
+      starts with push {r4,r5,r6,lr} at 0x0837db18 - Ghidra's 48 bytes are
+      exact, no trailing literal pool. Call count verified by decoding
+      every ARM B/BL word in osos.dec: exactly 12 direct sites, 10
+      unconditional bl plus 2 blne (0x0837de14, 0x0837de2c, both gated on
+      a flag byte of the owning object, not on file - this wrapper never
+      NULL-checks file itself); the address occurs in no image data word
+      (never dispatched virtually). Identity established by the adjacent
+      0x0837db44..0x0837dc18 sqlite3_io_methods forwarding family
+      (including the ported sqlite_os_write @ 0x0837dbf8); callers free
+      the file object afterwards through sqlite3_free @ 0x083906f4 (the
+      ported tracked_free) - the immediate sibling @ 0x0837db18 is exactly
+      sqlite_os_close + sqlite3_free. The concrete xClose is runtime
+      method-table data, so the port dispatches the supplied table rather
+      than inventing a callee; the struct is shared with os_write, whose
+      +0x04 slot this port resolved to xClose. match.py: structural parity
+      - same load chain (file -> pMethods -> +0x04), same NULL-guard early
+      return of 0, same blx dispatch and post-call NULL store; LLVM splits
+      the exit into moveq/bxeq before the frame instead of ADS's popeq and
+      spills r4/sl/fp instead of just r4. Host tests: NULL methods return
+      0 without dispatch, xClose receives the exact file pointer with
+      pMethods still set during the call and NULLed after (original
+      ordering), and a second close on the same file is a no-op.
+
   # ---- SQLite OS write forwarding wrapper (src/sqlite/os_write.rs) ----
   - address: 0x0837dbf8
     ghidra: FUN_0837dbf8
