@@ -19547,6 +19547,30 @@ functions:
       field as `(pin_id << 13) & 0xffff0000` instead of
       `(pin_id >> 3) << 16`; same bits.
 
+  - address: 0x0836b6cc
+    ghidra: FUN_0836b6cc
+    name: gpio_pin_read
+    size: 44
+    sig: "u32 gpio_pin_read(u32 pin_id, u32 *out)"
+    module: drivers/gpio_pin_read
+    status: ported
+    renames:
+      param_1/r0: pin_id
+      param_2/r1: out
+      DAT_0836b6f8: gpio_controller_base_literal (0x3cf00000)
+      r2: gpio_data_word
+      r0_after_ands: pin_level_mask
+    notes: >-
+      Verified raw extent is 44 bytes at 0x0836b6cc..0x0836b6f4; the following
+      word at 0x0836b6f8 is the 0x3cf00000 GPIO base literal, and the next
+      function begins at 0x0836b6fc. Reads the port data word at
+      0x3cf00000 + (pin_id >> 3) * 0x20 + 4, normalizes bit
+      (pin_id & 7) to 0 or 1, stores it through out, and returns 0. Every
+      ARM B/BL word in osos.dec was decoded: 13 direct bl call sites, all
+      unconditional; no predicated bl forms. Host tests use one volatile
+      stand-in data word rather than mapped GPIO MMIO; ARM reads the exact
+      volatile register address.
+
   # --- shared-cell handle constructor ---
   - address: 0x083b5090
     ghidra: FUN_083b5090
