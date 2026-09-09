@@ -50465,6 +50465,42 @@ functions:
       stale runtime data.
 
 
+  # --- registration-handle wrapper destructor ---
+  - address: 0x081c87c4
+    ghidra: FUN_081c87c4
+    name: registration_handle_wrapper_destroy
+    size: 24
+    sig: "RegistrationHandleWrapper *registration_handle_wrapper_destroy(RegistrationHandleWrapper *wrapper)"
+    module: app/registration_handle_wrapper
+    status: ported
+    renames:
+      param_1/r0: wrapper
+      DAT_081c87dc: registration_handle_wrapper_vtable (0x089a74ac)
+      param_1_plus_4/r0: registration
+      FUN_081d9734: registration_handle_destroy
+      iVar1/r0: registration
+      r0: wrapper
+    notes: >-
+      Raw ARM confirms the 24-byte code extent 0x081c87c4..0x081c87dc; its
+      0x089a74ac vtable literal is the following word at 0x081c87dc, and the
+      separately linked sibling starts at 0x081c87e0. It stores that wrapper
+      vtable at +0, calls the ported registration_handle_destroy on its
+      registration-handle base at +4, subtracts four from the returned base
+      address, and returns the wrapper. Decoding every ARM B/BL word in
+      osos.dec finds exactly 15 direct inbound calls, all unconditional plain
+      BL at 0x0820cff4, 0x0820d04c, 0x0820d05c, 0x0820d338, 0x0820d350,
+      0x0820d360, 0x0820d3b8, 0x0820d3cc, 0x0820d42c, 0x0820d47c,
+      0x0820d4e0, 0x0820d58c, 0x0820d5dc, 0x0820d620, and 0x0820d66c;
+      there are no predicated BL forms or direct B tail callers, and no
+      aligned image data word equals this entry. The class identity does not
+      survive the zero-filled vtable words at 0x089a74ac..0x089a74b4, so the
+      port names it only for the observed registration-handle wrapper role.
+      PORT DEVIATION: the wrapper models the embedded base as a named
+      #[repr(C)] field rather than applying a literal byte offset; this is
+      +4 on target while keeping host pointer widening self-consistent. Host
+      tests prove the -1 sentinel path restores both vtables without needing
+      a host slot-release seam and returns the outer wrapper.
+
   # --- manager-table registration handle ---
   - address: 0x081d9734
     ghidra: FUN_081d9734
