@@ -89,7 +89,7 @@
 //!   exactly like the original (0x08166c30); LLVM folds the duplicate
 //!   select, which changes nothing observable.
 
-use crate::app::fixed_value::{refcounted_base_init, FixedValue};
+use crate::app::fixed_value::{refcounted_base_destroy, refcounted_base_init, FixedValue};
 use crate::app::refcounted_value::{release_refcounted_value, retain_value};
 
 /// Firmware load address of the animation vtable literal (pool word at
@@ -467,6 +467,66 @@ pub unsafe extern "C" fn animation_set_current_value(
     (ops.wheel_insert)(scheduler_table(), this);
 }
 
+/// animation_destroy — original: `FUN_08166c9c` @ 0x08166c9c (64
+/// instruction bytes, sixteen words 0x08166c9c..0x08166cdb, plus the
+/// separately linked literal-pool word 0x08987f00 at 0x08166cdc; true
+/// extent 68 bytes. The next function opens `bx lr` at 0x08166ce0).
+///
+/// Binary decoding of every ARM B/BL word in osos.dec verifies exactly
+/// **14 call sites**, all plain unconditional `bl`: no predicated forms,
+/// no `b` tail callers, and no DATA-word references (the class vtable
+/// instead points at the deleting destructor @ 0x08166c84, which
+/// NULL-guards `this`, calls this body, then operator-deletes @
+/// 0x082aad24). Ten of the 14 sit in two array-destructor walks with
+/// `sub r0, r0, #0x24` between calls (0x08153260..0x08153288, six calls;
+/// 0x0816760c..0x08167624, four calls) — 0x24 is sizeof(Animation); the
+/// callers at 0x081a17e0/0x081eb018 feed the returned `this` pointer
+/// onward as their walk cursor, so the return value is load bearing.
+///
+/// The non-deleting destructor of the animation object — the exact
+/// inverse of [`animation_init`]. It reinstalls the derived vtable
+/// 0x08987f00 (the classic two-phase C++ teardown store), releases the
+/// three retained endpoint values in slot order current (+0x20), from
+/// (+0x18), to (+0x1c) — each behind its own NULL check, the ADS
+/// `blne` idiom, matching [`release_refcounted_value`]'s guard-less
+/// callee — then tail-branches into the ported
+/// [`refcounted_base_destroy`], which installs the base vtable, unlinks
+/// the node from the timing wheel, and returns `this`. The slots keep
+/// their (now released) pointer values; the body never clears them.
+///
+/// Deliberate deviation: the intermediate derived-vtable store is dead —
+/// the base destructor overwrites it and nothing can observe the word in
+/// between — so, like animation_init's statically dead releases, the
+/// compiler stays free to keep or drop it.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn animation_destroy(this: *mut Animation) -> *mut Animation {
+    // 08166ca4..08166ca8: ldr r0, =0x08987f00 ; str r0, [r4] — reinstall
+    // the derived vtable (two-phase teardown); the base dtor overwrites it.
+    (*this).vtable = ANIMATION_VTABLE;
+
+    // 08166cac..08166ccc: ldr/cmp/blne 0x082739e0 — release current
+    // (+0x20), from (+0x18), then to (+0x1c), each NULL-guarded.
+    let old_current = (*this).current_value;
+    if old_current != 0 {
+        release_refcounted_value(old_current as usize as *mut u8);
+    }
+    let old_from = (*this).from_value;
+    if old_from != 0 {
+        release_refcounted_value(old_from as usize as *mut u8);
+    }
+    let old_to = (*this).to_value;
+    if old_to != 0 {
+        release_refcounted_value(old_to as usize as *mut u8);
+    }
+
+    // 08166cd0..08166cd8: mov r0, r4 ; pop {r4, lr} ; b 0x081384a0 — the
+    // ported base destructor installs the base vtable, unlinks the wheel
+    // node through the scheduler singleton, and returns this.
+    refcounted_base_destroy(this.cast::<FixedValue>());
+    this
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -575,6 +635,28 @@ mod tests {
             try_map_u32_slab(crate::testing::hints::ANIMATION_INIT, 0x1000)
                 .map(|p| p as usize)
         });
+        let base = base? as *mut u8;
+        Some(unsafe {
+            Fixture {
+                animation: base.cast::<Animation>(),
+                current: base.add(0x28).cast::<FixedValue>(),
+                from: base.add(0x40).cast::<FixedValue>(),
+                to: base.add(0x58).cast::<FixedValue>(),
+                table: scheduler_table(),
+            }
+        })
+    }
+
+    /// Destructor fixture: identical layout to the constructor's, but a
+    /// dedicated mapping — fixture hints are never unmapped, so no two
+    /// fixtures may share one.
+    static DESTROY_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(crate::testing::hints::ANIMATION_DESTROY, 0x1000)
+            .map(|p| p as usize)
+    });
+
+    fn destroy_fixture() -> Option<Fixture> {
+        let base = *DESTROY_FIXTURE;
         let base = base? as *mut u8;
         Some(unsafe {
             Fixture {
@@ -1185,6 +1267,117 @@ mod tests {
             );
             assert_eq!((*f.animation).current_value, f.from as usize as u32);
             assert_eq!((*f.animation).rank, 1);
+        }
+    }
+
+    #[test]
+    fn destroy_releases_three_slots_returns_this_and_leaves_the_base_image() {
+        let _lock = take_lock();
+        let Some(f) = destroy_fixture() else {
+            note_missing_u32_fixture("app::animation_destroy");
+            return;
+        };
+        unsafe {
+            dirty_animation(f.animation); // flags 0xffff_fffe: linked bit clear
+            counted_scalar(f.current, 0xaaaa_0001);
+            counted_scalar(f.from, 0xbbbb_0002);
+            counted_scalar(f.to, 0xcccc_0003);
+            (*f.current).flags = 0b1010; // count 2: a live reference survives
+            (*f.from).flags = 0b1010;
+            (*f.to).flags = 0b1010;
+            (*f.animation).current_value = f.current as usize as u32;
+            (*f.animation).from_value = f.from as usize as u32;
+            (*f.animation).to_value = f.to as usize as u32;
+
+            let returned = animation_destroy(f.animation);
+
+            assert_eq!(returned, f.animation, "the base dtor's this passthrough");
+            let words = core::slice::from_raw_parts(f.animation.cast::<u32>(), 9);
+            assert_eq!(
+                words,
+                &[
+                    crate::app::fixed_value::REFCOUNTED_BASE_VTABLE, // +0x00: base dtor wins
+                    0x1111_1111,  // +0x04: untouched
+                    0xcafe_babe,  // +0x08: rank untouched
+                    0x2222_2222,  // +0x0c: untouched (wheel never linked)
+                    0x3333_3333,  // +0x10: untouched
+                    0xffff_fffe,  // +0x14: flags untouched, linked bit stayed clear
+                    f.from as usize as u32,    // +0x18: released but never cleared
+                    f.to as usize as u32,      // +0x1c
+                    f.current as usize as u32, // +0x20
+                ],
+                "the destructor releases the values, not the slots"
+            );
+            assert_eq!(
+                [(*f.current).flags, (*f.from).flags, (*f.to).flags],
+                [0b110; 3],
+                "each retained value loses exactly one reference"
+            );
+        }
+    }
+
+    #[test]
+    fn destroy_skips_null_slots_and_drains_a_last_reference() {
+        let _lock = take_lock();
+        let Some(f) = destroy_fixture() else {
+            note_missing_u32_fixture("app::animation_destroy");
+            return;
+        };
+        unsafe {
+            dirty_animation(f.animation);
+            counted_scalar(f.current, 0); // count 1: this release drains it
+            counted_scalar(f.from, 0xdead);
+            counted_scalar(f.to, 0);
+            (*f.to).flags = 0b1010; // count 2
+            (*f.animation).current_value = f.current as usize as u32;
+            (*f.animation).from_value = 0; // the blne guard skips the call
+            (*f.animation).to_value = f.to as usize as u32;
+
+            let returned = animation_destroy(f.animation);
+
+            assert_eq!(returned, f.animation);
+            assert_eq!(
+                (*f.current).flags,
+                0b010,
+                "count drained to zero; the host deleting-dtor dispatch defaults to a no-op"
+            );
+            assert_eq!((*f.from).flags, 0b110, "NULL slot: the value is never touched");
+            assert_eq!((*f.to).flags, 0b110, "one reference released");
+            assert_eq!(
+                (*f.animation).vtable,
+                crate::app::fixed_value::REFCOUNTED_BASE_VTABLE
+            );
+        }
+    }
+
+    #[test]
+    fn destroy_unlinks_a_wheel_node_through_the_base_destructor() {
+        let _lock = take_lock();
+        let Some(f) = destroy_fixture() else {
+            note_missing_u32_fixture("app::animation_destroy");
+            return;
+        };
+        unsafe {
+            dirty_animation(f.animation);
+            (*f.animation).current_value = 0;
+            (*f.animation).from_value = 0;
+            (*f.animation).to_value = 0;
+            (*f.animation).rank = 1;
+            (*f.animation).wheel_prev = 0;
+            (*f.animation).wheel_next = 0;
+            (*f.animation).flags = 0b111; // linked + refcounted + count 1
+            let table = f.table.cast::<u32>();
+            *table = f.animation as usize as u32; // bucket 0 head is the node
+
+            let returned = animation_destroy(f.animation);
+
+            assert_eq!(returned, f.animation);
+            assert_eq!(*table, 0, "the base dtor clears the singleton bucket head");
+            assert_eq!((*f.animation).flags, 0b110, "only the linked bit clears");
+            assert_eq!(
+                (*f.animation).vtable,
+                crate::app::fixed_value::REFCOUNTED_BASE_VTABLE
+            );
         }
     }
 
