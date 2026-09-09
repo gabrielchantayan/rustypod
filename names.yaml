@@ -46814,6 +46814,52 @@ functions:
       twelfth SingletonCtors field), an fp prologue and the inverted
       branch LLVM chose for the cold path.
 
+  - address: 0x0825a6e8
+    ghidra: FUN_0825a6e8
+    name: lazy_singleton_0x44
+    size: 44
+    sig: "void *lazy_singleton_0x44(void)"
+    module: app/singletons
+    status: ported
+    renames:
+      DAT_0825a714: SINGLETON_0X44_CACHE_POOL (the trailing pool word @
+        0x0825a714 holding 0x08a09f64; the cache word itself is the crate
+        static SINGLETON_0X44, the block_mgr.rs RW-page deviation)
+      FUN_082aadd4: operator_new (direct, ported in heap/veneers)
+      FUN_0825aa58: singleton_0x44_ctor (SINGLETON_CTORS.singleton_0x44 slot)
+    notes: >-
+      A lazy singleton getter: `if (cache == 0) cache =
+      ctor(operator_new(0x44)); return cache;` over cache word 0x08a09f64.
+      EXTENT: functions.csv's 44 bytes covers code only. The trailing pool
+      word 0x08a09f64 at 0x0825a714 is loaded by `ldr r4,[pc,#32]`, so the
+      true extent is 48 bytes, 0x0825a6e8..0x0825a718. Raw bytes show the
+      next separately linked entry at 0x0825a718; Ghidra omits that entry
+      and this function's pool word. CALL COUNT: exactly 14 direct,
+      unconditional bl sites (0x08139f6c, 0x08139f7c, 0x08139fb4,
+      0x08139fc4, 0x08139ff4, 0x0813a008, 0x0813a03c, 0x0813a054,
+      0x0813a078, 0x0813a150, 0x0813a174, 0x0813a1a4, 0x0813a1b4,
+      0x0813a1cc), binary-verified by decoding every ARM B/BL word in
+      work/firmware/osos.dec - 0 predicated and 0 plain b. They all belong
+      to the 0x08139fxx command-processing cluster and call virtual slots
+      +0x20..+0x40 of the returned object. OBJECT: ctor 0x0825aa58 first
+      calls 0x08037db8(this, 0x3d), plants the shared interface vtable
+      0x089a75c8 at +0, initializes an embedded map header at +4 (descriptor
+      allocated by unported FUN_083c00dc, self-linked at +8/+12), constructs
+      a mutex at +0x20 via cxx_mutex_construct, sets byte +0x3c = 2, plants
+      primary vtable 0x089a7d30 at +0 and secondary vtable 0x089a7d80 at
+      +0x40, then subscribes that secondary interface to event hub kind 11
+      through event_hub_instance_get / event_hub_subscribe. No class name,
+      registry id, or other identity survives, so the Rust name states only
+      the recovered lazy-singleton role and allocation extent. Deviations:
+      operator_new is direct; unported ctor dispatches through the
+      SINGLETON_CTORS singleton_0x44 slot (zeroing default); cache is crate
+      static SINGLETON_0X44 rather than runtime word 0x08a09f64. NOT
+      HOOK-READY until 0x0825aa58 is ported. Host tests cover allocation
+      extent, raw allocation handoff, constructor-return caching, cached
+      second call, NULL-return retry, and zeroing default bounds. match.py
+      structural review confirms the cache-test / allocate / construct /
+      store / reload skeleton; expected differences are the crate frame and
+      dispatch-table indirect constructor call.
   - address: 0x08259534
     ghidra: FUN_08259534
     name: lazy_singleton_0xbc
