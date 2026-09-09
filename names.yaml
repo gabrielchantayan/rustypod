@@ -53628,3 +53628,91 @@ functions:
       deltas are the fp prologue, the seam blx indirection, and
       relocation placeholders for the three ported bl targets, the
       accepted deviation classes. 37 instructions vs 30.
+
+  - address: 0x080a1d7c
+    ghidra: FUN_080a1d7c
+    name: string_object_construct_game_path
+    size: 292
+    sig: "i32 string_object_construct_game_path(StringObject *this, u32 mode, const StringObject *id_string, i32 games_base, const char *path)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0: this (the StringObject under construction)
+      param_2/r1: mode (0 = games_RO, 3 = gamedata_ShareRW, else dir_name(mode))
+      param_3/r2: id_string (StringObject whose raw payload becomes the
+        third path component; unread in mode 3)
+      param_4/r3: games_base (mode-0 only - 0 -> "iPod_Control", nonzero
+        -> "Resources/Games"; ignored by every other branch, a stock quirk)
+      in_stack_00000000: path (the fifth, stacked argument; one leading
+        '/' stripped)
+      DAT_080a1e50: STRING_OBJECT_VTABLE_ADDRESS (0x089a6044)
+      FUN_082a538c: string_object_raw_payload (direct, ported)
+      FUN_08097e00: game_storage_dir_name (GAME_STORAGE_DIR_NAME seam)
+      FUN_082769d4: string_object_format (direct, ported)
+    notes: >-
+      EXTENT: Ghidra's 212 bytes is the code only; the function owns an
+      80-byte literal pool @ 0x080a1e50..0x080a1ea0 (vtable word plus the
+      seven path strings "/", "", "iPod_Control", "Resources/Games",
+      "iPod_Control/%s%s%s", "%s/%s/%s%s%s"), so the true extent is 292
+      bytes, 0x080a1d7c..0x080a1ea0, where the next function starts (no
+      prologue; a helper tail-branching to 0x0809a798). CALL COUNT
+      verified by decoding every B/BL word in osos.dec: exactly 14 bl
+      sites, all unconditional, no predicated forms, no tail branches.
+      Ghidra's C drops param_4 and the stacked path argument and every
+      format argument - the asm is authoritative. ALGORITHM: the
+      StringObject game-storage path constructor. Plants the vtable and
+      a NULL payload, reads the first path byte UNGUARDED (a NULL path
+      faults there, before the later NULL checks can matter), strips one
+      leading '/', then composes and assigns a printf path through
+      string_object_format @ 0x082769d4: mode 0 -> "%s/%s/%s%s%s" with
+      base = (games_base == 0 ? "iPod_Control" : "Resources/Games"),
+      dir_name(0) = "games_RO", the id payload, "/" (or "" when the
+      post-strip path pointer is NULL), and the stripped path; mode 3 ->
+      "iPod_Control/%s%s%s" with dir_name(3) = "gamedata_ShareRW", the
+      separator and the path (id_string never touched); any other mode
+      -> "%s/%s/%s%s%s" with base ALWAYS "iPod_Control" (games_base
+      ignored), dir_name(mode), id payload, separator, path. The
+      original leaves the formatter's character count in r0 (not this);
+      all 14 callers discard it. Deviations: modeled static vtable and
+      path strings (STRING_OBJECT_EMPTY_CSTR pattern); the variadic
+      arguments are restacked as a [u32] word array passed as VaList
+      (house convention - stable Rust cannot define C-variadic
+      functions, and the original's r2/r3/stack argument words ARE a
+      va_list); the directory selector @ 0x08097e00 rides the
+      read_volatile GAME_STORAGE_DIR_NAME seam whose default
+      game_storage_dir_name_model is an exact behavioral copy of the ROM
+      jump table (pure string selection, safe on device and host).
+      Host tests (assign/format bench + word-snapshotting engine):
+      mode-0 composition with both bases, slash stripping (exactly one
+      leading '/'), NULL id payload passthrough, mode-3 never
+      dereferencing id_string (passed as 0x1), games_base ignored
+      outside mode 0, seam indirection receiving the mode verbatim, and
+      the formatter count returned. match.py --lib <worktree archive>:
+      65 instructions vs 53; same three-way dispatch, guarded strip,
+      vtable/payload init and per-branch vararg stacking; deltas are the
+      fp frame, the seam blx indirection, and the VaList marshaling -
+      the accepted deviation classes.
+
+  - address: 0x08097e00
+    ghidra: FUN_08097e00
+    name: game_storage_dir_name
+    size: 132
+    sig: "const char * game_storage_dir_name(u32 mode)"
+    module: cxx/string_object
+    status: identified
+    notes: >-
+      EXTENT: Ghidra's 72 bytes is the code only; five serialized
+      strings at 0x08097e48..0x08097e84 bring the true extent to 132
+      bytes, ending where the next function opens push {r0-r12, lr}.
+      Decoded from raw bytes: a 5-way addls pc, pc, r0, lsl #2 jump
+      table returning "games_RO" (mode 0 or 4), "gamedata_RW" (1),
+      "gamestats_WO" (2), "gamedata_ShareRW" (3), and the empty string
+      for any other mode. The r1 argument is never read (callers pass
+      the id payload or a path byte; the body preserves r1, which
+      0x080a1d7c silently relies on across the call). Not yet ported as
+      an exported symbol: its sole known caller
+      string_object_construct_game_path @ 0x080a1d7c reaches it through
+      the GAME_STORAGE_DIR_NAME seam, whose default
+      game_storage_dir_name_model is this exact behavior. A future
+      porter only needs to lift the model into an exported function and
+      rewire the seam default.
