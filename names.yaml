@@ -46011,7 +46011,7 @@ functions:
       FUN_081bb6a4: range copy tail (inlined as two word stores - the
         shared 8-byte copy *out = *src, out[1] = src[1], decoded from its
         own bytes)
-      FUN_08161464: tokenizer_init (constructor, unported, 17 bl sites)
+      FUN_08161464: tokenizer_init (constructor, ported, 17 bl sites)
       FUN_08161494: tokenizer_init_empty (constructor, unported, 1 bl site)
     notes: >-
       41 bl + 0 b + 0 predicated call sites, binary-verified by decoding
@@ -46022,8 +46022,8 @@ functions:
       no trailing literal pool. The next-token step of retailOS's UTF-16
       string tokenizer over a 21-byte cursor object (begin/end u16 range
       at +0x00/+0x04, delimiter u16 at +0x08, cursor at +0x0c, signed
-      countdown at +0x10, allow_quotes byte at +0x14) built by the two
-      unported constructors @ 0x08161464/0x08161494. Algorithm: cursor ==
+      countdown at +0x10, allow_quotes byte at +0x14) built by constructors
+      @ 0x08161464 (ported tokenizer_init) / 0x08161494 (unported empty).
       NULL or cursor >= end (unsigned) writes the empty pair {0, 0} and
       leaves the object untouched; otherwise, when remaining < 1 (signed
       movlt/blt against 1) the token is {cursor, end} with NO scan and NO
@@ -46061,6 +46061,43 @@ functions:
       delimiter exhaustion, and the returned out pointer; fixtures in
       testing::hints::TOKENIZER (new), one process-wide slab shared via
       LazyLock because the mapper never unmaps.
+
+  # --- UTF-16 tokenizer constructor (cxx/tokenizer) ---
+  - address: 0x08161464
+    ghidra: FUN_08161464
+    name: tokenizer_init
+    size: 48
+    sig: "Tokenizer *tokenizer_init(Tokenizer *state, const u32 *range, u16 delimiter, i32 remaining, u8 allow_quotes)"
+    module: cxx/tokenizer
+    status: ported
+    renames:
+      param_1/r0/r0_return: state
+      param_2/r1: range
+      param_3/r2: delimiter
+      param_4/r3: remaining
+      param_5/[sp]: allow_quotes
+      FUN_081bb6a4: pair_copy (inlined)
+    notes: >-
+      Raw ARM decoding confirms a 48-byte extent,
+      0x08161464..0x08161494: push {r4,r5,r6,r7,r8,lr} opens the body and
+      pop {r4,r5,r6,r7,r8,pc} ends at 0x08161490; the separately linked
+      empty-range constructor starts at 0x08161494. 17 call sites verified
+      by decoding every B/BL word in osos.dec: all are unconditional bl,
+      with zero plain b or predicated forms. Algorithm: invoke the shared
+      two-word copy at 0x081bb6a4 with (state, range), write the delimiter
+      halfword at +0x08, seed cursor +0x0c from range.begin, then write the
+      signed remaining count (+0x10) and quote flag byte (+0x14). Ghidra
+      incorrectly gives a void signature: pair_copy leaves r0 as state and
+      the pop epilogue returns that pointer. Deliberate deviation: the
+      pair_copy leaf is inlined with volatile ordered loads/stores, pinning
+      its destination-alias behavior without a seam for an already inlined
+      helper. Host tests verify copied fields, returned state pointer,
+      delimiter/tail padding, and the second source load after an aliased
+      first destination store.
+      match.py --lib worktree archive (exit 1, diff expected): same ordered
+      pair copy, halfword delimiter, cursor reload, remaining word, and
+      flag-byte stores; LLVM substitutes an fp frame and inlines the pair
+      helper (13 instructions versus 12).
 
   # --- Managed two-word entry release (app/managed_entry) ---
   - address: 0x080645b8

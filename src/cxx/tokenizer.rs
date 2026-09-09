@@ -18,16 +18,16 @@
 //!
 //! ## The cursor object (21 bytes written by the constructors)
 //!
-//! Two constructors build it, both unported:
+//! Two constructors build it:
 //!
-//! - **0x08161464** (17 `bl` sites) — `(this, &range, delim, remaining,
-//!   allow_quotes)`: copies the caller's `{begin, end}` pair into +0x00/
-//!   +0x04 (`bl 0x081bb6a4`), stores `delim` at +0x08, seeds the cursor
-//!   +0x0c with `range.begin` (`ldr r1, [r4]; str r1, [r0, #12]`), the
-//!   countdown +0x10 and the quote flag byte +0x14.
-//! - **0x08161494** (1 `bl` site) — the same but zeroes +0x00/+0x04 and
-//!   the cursor (`bl 0x081bb6b8`), i.e. an already-exhausted tokenizer
-//!   over an empty range.
+//! - [`tokenizer_init`] @ **0x08161464** (17 `bl` sites) — `(this, &range,
+//!   delim, remaining, allow_quotes)`: copies the caller's `{begin, end}`
+//!   pair into +0x00/+0x04 (`bl 0x081bb6a4`), stores `delim` at +0x08,
+//!   seeds the cursor +0x0c with `range.begin` (`ldr r1, [r4]; str r1,
+//!   [r0, #12]`), the countdown +0x10 and the quote flag byte +0x14.
+//! - **0x08161494** (1 `bl` site, unported) — the same but zeroes +0x00/
+//!   +0x04 and the cursor (`bl 0x081bb6b8`), i.e. an already-exhausted
+//!   tokenizer over an empty range.
 //!
 //! ```text
 //! +0x00  u32  begin         — start of the whole UTF-16 input range
@@ -157,6 +157,44 @@ const _: [u8; 0x0c] = [0; core::mem::offset_of!(Tokenizer, cursor)];
 const _: [u8; 0x10] = [0; core::mem::offset_of!(Tokenizer, remaining)];
 const _: [u8; 0x14] = [0; core::mem::offset_of!(Tokenizer, allow_quotes)];
 const _: [u8; TOKENIZER_SIZE] = [0; core::mem::size_of::<Tokenizer>()];
+
+/// tokenizer_init — original: `FUN_08161464` @ 0x08161464 (48 bytes;
+/// 17 `bl` call sites, 0 `b`, 0 predicated, binary-verified).
+///
+/// Copies `range`'s `{begin, end}` into the tokenizer, installs the
+/// delimiter/countdown/quote flag, and starts the cursor at `begin`.
+/// Raw words confirm the body spans 0x08161464..0x08161494: its `pop`
+/// ends at 0x08161490 and the independently linked empty-range constructor
+/// opens at 0x08161494. Although Ghidra declares this `void`, the pair-copy
+/// helper preserves `r0`, so the epilogue returns `this`; this port returns
+/// `state` as well.
+///
+/// The shared pair copy @ 0x081bb6a4 is deliberately inlined with volatile
+/// word accesses. They pin the original's load/store order when `range`
+/// aliases the destination and avoid an unnecessary dispatch seam.
+///
+/// # Safety
+///
+/// `state` must be a writable [`Tokenizer`] and `range` must point to two
+/// readable, word-aligned `u32` values.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn tokenizer_init(
+    state: *mut Tokenizer,
+    range: *const u32,
+    delimiter: u16,
+    remaining: i32,
+    allow_quotes: u8,
+) -> *mut Tokenizer {
+    let begin = core::ptr::addr_of_mut!((*state).begin);
+    begin.write_volatile(range.read_volatile());
+    core::ptr::addr_of_mut!((*state).end).write_volatile(range.add(1).read_volatile());
+    core::ptr::addr_of_mut!((*state).delimiter).write_volatile(delimiter);
+    core::ptr::addr_of_mut!((*state).cursor).write_volatile(begin.read_volatile());
+    core::ptr::addr_of_mut!((*state).remaining).write_volatile(remaining);
+    core::ptr::addr_of_mut!((*state).allow_quotes).write_volatile(allow_quotes);
+    state
+}
 
 /// The code units with syntactic meaning to the scan.
 const DOUBLE_QUOTE: u16 = 0x22; // '"'
@@ -529,4 +567,57 @@ mod tests {
             return;
         };
     }
+    #[test]
+    fn initializer_copies_range_preserves_padding_and_returns_state() {
+        let range = [0x0123_4567u32, 0x89ab_cdef];
+        let mut storage = core::mem::MaybeUninit::<Tokenizer>::uninit();
+        let state = storage.as_mut_ptr();
+        unsafe {
+            core::ptr::write_bytes(state.cast::<u8>(), 0xa5, TOKENIZER_SIZE);
+            let ret = tokenizer_init(state, range.as_ptr(), 0x3b, -1, 1);
+            assert_eq!(ret, state, "the pair-copy helper preserves r0");
+            assert_eq!((*state).begin, range[0]);
+            assert_eq!((*state).end, range[1]);
+            assert_eq!((*state).delimiter, 0x3b);
+            assert_eq!((*state).cursor, range[0]);
+            assert_eq!((*state).remaining, -1);
+            assert_eq!((*state).allow_quotes, 1);
+
+            let bytes = std::slice::from_raw_parts(state.cast::<u8>(), TOKENIZER_SIZE);
+            assert_eq!(&bytes[0x0a..0x0c], &[0xa5, 0xa5], "delimiter is a halfword");
+            assert_eq!(&bytes[0x15..], &[0xa5, 0xa5, 0xa5], "tail padding is untouched");
+        }
+    }
+
+    #[test]
+    fn initializer_preserves_pair_copy_alias_order() {
+        #[repr(C)]
+        struct PrefixAndTokenizer {
+            prefix: u32,
+            state: Tokenizer,
+        }
+
+        let mut storage = core::mem::MaybeUninit::<PrefixAndTokenizer>::uninit();
+        let object = storage.as_mut_ptr();
+        unsafe {
+            core::ptr::write_bytes(
+                object.cast::<u8>(),
+                0xa5,
+                core::mem::size_of::<PrefixAndTokenizer>(),
+            );
+            (*object).prefix = 0x0123_4567;
+            (*object).state.begin = 0x89ab_cdef;
+            let state = core::ptr::addr_of_mut!((*object).state);
+            let range = object.cast::<u32>();
+
+            tokenizer_init(state, range, 0x3b, 7, 0);
+
+            assert_eq!((*state).begin, 0x0123_4567);
+            assert_eq!(
+                (*state).end, 0x0123_4567,
+                "the second source load follows the first destination store"
+            );
+        }
+    }
+
 }
