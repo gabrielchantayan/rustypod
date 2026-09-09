@@ -27030,6 +27030,56 @@ functions:
       sites. No separate port; hook this address to the
       not_equal_deref symbol.
 
+  - address: 0x083cf968
+    ghidra: FUN_083cf968
+    name: equal_deref
+    size: 24
+    sig: "u32 equal_deref(const u32 *a, const u32 *b)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: a, param_2: b}
+    notes: >-
+      `*a == *b` as 0/1 over word-sized operands taken by reference:
+      ldr r0,[r0]; ldr r1,[r1]; cmp r0,r1; movne r0,#0; moveq r0,#1 -
+      the EQUALITY twin of not_equal_deref (@ 0x083d6f78, above)
+      without that family's redundant final eor. 12 bl call sites at
+      this address, all unpredicated, binary-verified: 0x081f04b8,
+      0x081f09b4, 0x081f0ae4, 0x081f0c08, 0x081f0f98, 0x081f11d0,
+      0x083ccdbc, 0x083cd22c, 0x083cd248, 0x083cd2cc, 0x083cd390,
+      0x083dbbbc. Callers are container-iteration loops that
+      stack-materialize a cursor iterator and the container's end
+      iterator and compare their FIRST words (the current-node
+      pointer) - the ADS checked-iterator operator==. Ghidra size 24
+      confirmed against the raw bytes (the next copy starts
+      immediately at 0x083cf980). This body is one of 41
+      BYTE-IDENTICAL copies, one per container instantiation: a
+      contiguous 39-copy run 0x083cf650-0x083cf9c8 (every 0x18 bytes)
+      plus strays 0x082a1834, 0x082a7884 and 0x083d5e70; 241 direct bl
+      plus 2 predicated sites across the family (blne @ 0x083d5d90 ->
+      0x083d5e70, blhi @ 0x088a976c -> 0x083cf9c8). Per-copy bl counts
+      - 0x083cf848 11, 0x083cf980 9, 0x083cf7b8/0x083cf8a8/0x083cf8f0/
+      0x083cf908/0x083cf950 8 each, 0x083cf650/0x083cf7a0/0x083cf8d8/
+      0x083cf920 7 each, 0x083cf680/0x083cf698/0x083cf6c8/0x083cf728/
+      0x083cf740/0x083cf758/0x083cf788/0x083cf8c0/0x083cf938/
+      0x083cf9b0 6 each, 0x083cf668/0x083cf6b0/0x083cf710/0x083cf770/
+      0x083cf7d0/0x083cf7e8/0x083cf830/0x083cf860/0x083cf878/
+      0x083cf890/0x083cf998/0x083cf9c8 5 each, 0x082a1834 4,
+      0x083cf6e0/0x083cf800 4 each, 0x083cf6f8/0x083d5e70 3 each,
+      0x082a7884 2, 0x083cf818 1. Two copies are already spoken for
+      under other names: 0x082a1834 is ported as fixed16_eq_indirect
+      (fp/fp_misc - a Q16.16 comparator that merely shares the
+      load-cmp-select shape) and 0x083d5e70 is inlined privately in
+      cxx/list_splice as iter_equal; hook every OTHER copy to this
+      equal_deref symbol. The export carries a distinct link_section
+      (.text.equal_deref) so LLVM's identical-function folding cannot
+      merge it onto fixed16_eq_indirect - both labels verified present
+      in librustypod.a. match.py structural: same two pointer loads;
+      LLVM computes the equality branchlessly as sub r0,r0,r1 / clz
+      r0,r0 / lsr r0,r0,#5 (32>>5 = 1 only when the words are equal -
+      identical semantics) instead of the movne/moveq pair, and adds
+      the usual push {fp,lr}/pop {fp,pc} frame - the same accepted
+      deviation as fixed16_eq_indirect.
+
   - address: 0x083d76f8
     ghidra: FUN_083d76f8
     name: vector_size_elem12
