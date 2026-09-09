@@ -50,6 +50,7 @@ mod object_state;
 pub mod parse_result_code;
 pub mod pair_header;
 pub mod release;
+pub mod resource_handle_release;
 pub mod return_forwarder;
 pub mod settings;
 pub mod scaled_cursor;
