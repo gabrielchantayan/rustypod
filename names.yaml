@@ -42859,6 +42859,31 @@ functions:
       byte is NUL), return packing, and a reference-model sweep;
       match.py structural diff reviewed after the ARM release build.
 
+  # --- proprietary STANDARD cipher: sixth byte lookup table ---
+  - address: 0x0802deb4
+    ghidra: FUN_0802deb4
+    name: standard_cipher_table_six_lookup
+    size: 12
+    sig: "u8 standard_cipher_table_six_lookup(u32 index)"
+    module: crypto/standard_cipher_table_six
+    status: ported
+    renames:
+      param_1/r0: index
+      DAT_0802e0e4: STANDARD_CIPHER_TABLE_SIX
+      DAT_0891f54c: STANDARD_CIPHER_TABLE_SIX
+    notes: >-
+      Raw ARM is exactly ldr r1,[pc,#0x228]; ldrb r0,[r1,r0]; bx lr, loading
+      the 256-byte table at 0x0891f54c and returning its byte at the raw r0
+      offset with no bounds check. The next function begins at 0x0802dec0,
+      confirming the 12-byte extent. A full decoded scan of osos.dec finds
+      14 calls, all unconditional bl (zero predicated calls): 0x08027e00,
+      0x08027e40, 0x08027e84, 0x08027ec4, 0x08027ef4, 0x08028040,
+      0x08028080, 0x080280c4, 0x08028104, 0x08028134, 0x0802ae3c,
+      0x0802ae7c, 0x0802aec0, and 0x0802af00. All pass byte-range inputs
+      while constructing or applying the proprietary STANDARD cipher's
+      table-driven transforms. No deviations: the Rust port retains the
+      original unguarded valid-byte caller contract with unchecked indexing.
+
   # --- unsigned zero predicate ---
   - address: 0x08027afc
     ghidra: FUN_08027afc
