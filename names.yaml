@@ -18261,6 +18261,64 @@ functions:
       (multiply/range guard, alias check, descending copy loop); its
       exit-1 mnemonic diff is expected.
 
+  - address: 0x083555f8
+    ghidra: FUN_083555f8
+    name: encoded_word_block_set_int
+    size: 116
+    sig: "u32 encoded_word_block_set_int(i32 value, EncodedWordBlock *destination)"
+    module: util/encoded_word_block
+    status: ported
+    renames:
+      param_1/r0: value
+      param_2/r1: destination
+      DAT_0835566c: ENCODED_WORD_MULTIPLIER (0xd561a67f)
+      DAT_08355670: ENCODED_COUNT_INVERSE (0xed99887f)
+      iVar1/sl: ENCODED_WORD_MULTIPLIER (0xd561a67f)
+      iVar2/r0: limb (wrapping absolute value, then shifted-out high part)
+      iVar3/r4: count (limb count, negated when value < 0)
+      iVar4/r5: high (arithmetic limb >> 31, then 0)
+    notes: >-
+      Producer half of the EncodedWordBlock family: initializes a block
+      from a plain signed 32-bit integer, always returning 0. Raw ARM
+      confirms the 116-byte instruction body 0x083555f8..0x0835566c with
+      trailing literal-pool words 0xd561a67f at 0x0835566c and
+      0xed99887f at 0x08355670; the next function's stmdb sp! prologue
+      starts at 0x08355674, so the full extent is 124 bytes and
+      Ghidra's 116 is the instruction body only. Ghidra mislabels both
+      pool words as the globals DAT_0835566c/DAT_08355670; they are
+      constants referenced from nowhere else. Call count verified by
+      decoding every ARM B/BL word in osos.dec: exactly 17 direct call
+      sites, all unconditional bl, 0 predicated forms; the address
+      occurs in no data word, so it is not dispatched virtually.
+      Algorithm: take the wrapping absolute value of value (subs/rsblt),
+      then emit it as base-2^32 limbs low-to-high; each stored word is
+      limb * 0xd561a67f mod 2^32 written to destination->words[count],
+      and the header is signed_count * 0xed99887f written to
+      destination->encoded_count LAST, after all word stores.
+      0xed99887f is the multiplicative inverse mod 2^32 of the family
+      reader key 0x0a7e377f (ENCODED_COUNT_MULTIPLIER), and 0x76b4197f
+      (seen in reader literal pools, e.g. at 0x082eafa0 in FUN_082eaca4)
+      inverts 0xd561a67f, so a block written here decodes back to value
+      through the family's readers. The loop is while (high != 0 || limb
+      != 0) { store; limb = high; high = 0; } with high = limb >> 31
+      arithmetic, so every value strictly between -2^31 and 2^31 emits
+      exactly one limb (zero emits none), but i32::MIN - whose wrapping
+      absolute value stays 0x80000000 - shifts out a -1 high part and
+      emits TWO limbs, [0x80000000 * key, 0xffffffff * key] with count
+      -2. That is a faithful quirk of the original, not a general
+      multi-limb conversion. Deliberate deviation: none. Host tests (4):
+      zero writes header only with word sentinels untouched; positive,
+      negative, and i32::MAX values store magnitude * 0xd561a67f as the
+      single limb with decoded header count +/-1 and inverse-key
+      round-trip; i32::MIN emits the two-limb quirk with decoded count
+      -2; a produced block round-trips through copy_encoded_word_block
+      (count accepted, header and limb preserved). match.py structural
+      diff (exit-1 expected): same literal keys 0xd561a67f/0xed99887f,
+      same rsbmi wrapping negation and stores through [r1, #4] and [r1];
+      LLVM unrolls the at-most-two-iteration loop and precomputes
+      0xffffffff * 0xd561a67f as the literal 0x2a9e5981 for the
+      i32::MIN second limb.
+
   - address: 0x08391e44
     ghidra: FUN_08391e44
     name: strcmp
