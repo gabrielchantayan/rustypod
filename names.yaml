@@ -53166,3 +53166,39 @@ functions:
       bl sites, all unconditional, with zero predicated bl and zero tail b.
       An aligned whole-image word scan found no data reference, so callers
       statically bind this base constructor. No deliberate Rust deviations.
+
+  - address: 0x081b1068
+    ghidra: FUN_081b1068
+    name: viewer_no_content_layout_default_resource_name
+    size: 100
+    sig: "char *viewer_no_content_layout_default_resource_name(void)"
+    module: app/no_content_layout_default
+    status: ported
+    renames:
+      DAT_081b10bc: no_content_layout_default_storage (0x089ca630 resource-data prefix)
+      DAT_081b10c0: __dso_handle (0x089ca09c)
+      DAT_081b10c4: no_content_layout_default_destructor (0x081a631c)
+      DAT_081b10c8: viewer_no_content_layout_default_resource_name (0x089ca631)
+    notes: >-
+      Raw ARM code runs from 0x081b1068 through 0x081b10bc; the four
+      literal-pool words at 0x081b10bc..0x081b10c8 extend the true function
+      extent to 100 bytes, and the next separately linked function begins at
+      0x081b10cc. It is an ADS function-local-static accessor over the
+      resource-data prefix 0x089ca630 = "ssViewer_No_Content_Layout_Default".
+      The actual return is base + 1, the resource name
+      "sViewer_No_Content_Layout_Default". Retail's aligned guard word at
+      base + 4 is 0x72657765 ("ewer"), so bit 0 is set and normal execution
+      skips initialization. A clear guard calls cxa_guard_acquire
+      (0x082ab31c), registers base + 1 with the real function entry
+      0x081a631c through cxa_atexit (0x082ab1c8) and __dso_handle, releases
+      the guard (0x082ab338), then writes one to base only if it was zero.
+      Decoding every ARM B/BL word in osos.dec found exactly 14 direct
+      callers: all 14 are unconditional bl (0x0803c300, 0x0805bb6c,
+      0x08076b60, 0x081896b8, 0x08189ddc, 0x08206f84, 0x0820709c,
+      0x082c6d54, 0x082c9a6c, 0x082c9e68, 0x082c9eac, 0x082c9ef8,
+      0x082ca394, 0x082ca3d8); no predicated bl or tail b reaches it.
+      The destructor is not assigned an invented identity: raw ARM at its
+      real entry calls 0x081de270(object, 11) then stores one at object+0xd6.
+      Device builds retain the fixed data pointer and target; host tests use
+      aligned private storage and an inert handler because retail code cannot
+      execute on the host.
