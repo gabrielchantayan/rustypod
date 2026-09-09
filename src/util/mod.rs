@@ -52,6 +52,7 @@ pub mod three_pointer_select;
 pub mod u16_pair_copy;
 pub mod u32_pair_store;
 pub mod u8_pair_copy;
+pub mod utf8_next_codepoint_permissive;
 pub mod utoa;
 pub mod video_engine;
 pub mod validator;
